@@ -4,46 +4,44 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/dvoyni/cog/slots/gfx"
-	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
 func TestPreparedParameterPlanReusesShapeAndReadsCurrentValues(t *testing.T) {
 	translator := newTranslator()
-	layout := gfx.ShaderLayout{
+	layout := ShaderLayout{
 		UniformSize: 16,
-		Uniforms:    []gfx.UniformMember{{Name: "value", Offset: 0}},
-		Resources:   []gfx.ShaderResource{{Name: "texture", Group: 1, Binding: 0}},
+		Uniforms:    []UniformMember{{Name: "value", Offset: 0}},
+		Resources:   []ShaderResource{{Name: "texture", Group: 1, Binding: 0}},
 	}
-	material := []gfx.ParameterDescr{gfx.TextureParam("texture", types.BakedTexture(1, 0, 0))}
-	draw := []gfx.ParameterDescr{gfx.FloatParam("value", 1)}
+	material := []ParameterDescr{TextureParam("texture", BakedTexture(1, 0, 0))}
+	draw := []ParameterDescr{FloatParam("value", 1)}
 	first := translator.prepareParameterPlan(1, "test", layout, material, draw)
 
-	material = []gfx.ParameterDescr{gfx.TextureParam("texture", types.BakedTexture(2, 0, 0))}
-	draw = []gfx.ParameterDescr{gfx.FloatParam("value", 9)}
+	material = []ParameterDescr{TextureParam("texture", BakedTexture(2, 0, 0))}
+	draw = []ParameterDescr{FloatParam("value", 9)}
 	second := translator.prepareParameterPlan(1, "test", layout, material, draw)
 	if second != first {
 		t.Fatal("identical parameter shape did not reuse its prepared plan")
 	}
-	if got := types.ParameterNum(second.uniforms[0].param.value(material, draw)); got != 9 {
+	if got := ParameterNum(second.uniforms[0].param.value(material, draw)); got != 9 {
 		t.Fatalf("prepared uniform value = %v, want current value 9", got)
 	}
-	if got := types.ParameterTexture(second.resources[0].param.value(material, draw)).ID(); got != 2 {
+	if got := ParameterTexture(second.resources[0].param.value(material, draw)).ID(); got != 2 {
 		t.Fatalf("prepared texture = %v, want current texture 2", got)
 	}
 }
 
 func TestPreparedParameterPlanKeysOrderAndPreservesFirstDrawMatch(t *testing.T) {
 	translator := newTranslator()
-	layout := gfx.ShaderLayout{UniformSize: 4, Uniforms: []gfx.UniformMember{{Name: "value", Offset: 0}}}
-	material := []gfx.ParameterDescr{gfx.FloatParam("value", 1)}
-	draw := []gfx.ParameterDescr{gfx.FloatParam("value", 2), gfx.FloatParam("value", 3), gfx.FloatParam("other", 4)}
+	layout := ShaderLayout{UniformSize: 4, Uniforms: []UniformMember{{Name: "value", Offset: 0}}}
+	material := []ParameterDescr{FloatParam("value", 1)}
+	draw := []ParameterDescr{FloatParam("value", 2), FloatParam("value", 3), FloatParam("other", 4)}
 	plan := translator.prepareParameterPlan(1, "test", layout, material, draw)
-	if got := types.ParameterNum(plan.uniforms[0].param.value(material, draw)); got != 2 {
+	if got := ParameterNum(plan.uniforms[0].param.value(material, draw)); got != 2 {
 		t.Fatalf("prepared duplicate draw value = %v, want first value 2", got)
 	}
 
-	reordered := []gfx.ParameterDescr{draw[2], draw[0], draw[1]}
+	reordered := []ParameterDescr{draw[2], draw[0], draw[1]}
 	if got := translator.prepareParameterPlan(1, "test", layout, material, reordered); got == plan {
 		t.Fatal("reordered parameter names reused the wrong plan")
 	}
@@ -54,13 +52,13 @@ func TestPreparedParameterPlanKeysOrderAndPreservesFirstDrawMatch(t *testing.T) 
 // uniform slot and the draw renders garbage with nothing reported.
 func TestPreparedParameterPlanRejectsAKindMismatch(t *testing.T) {
 	translator := newTranslator()
-	layout := gfx.ShaderLayout{
+	layout := ShaderLayout{
 		UniformSize: 4,
-		Uniforms:    []gfx.UniformMember{{Name: "wobble", Offset: 0}},
+		Uniforms:    []UniformMember{{Name: "wobble", Offset: 0}},
 	}
-	draw := []gfx.ParameterDescr{gfx.BufferParam("wobble", types.BakedBuffer(1, 0))}
+	draw := []ParameterDescr{BufferParam("wobble", BakedBuffer(1, 0))}
 	plan := translator.prepareParameterPlan(1, "wobbly.wgsl", layout, nil, draw)
-	mismatch, ok := plan.mismatch.(gfx.ErrParameterKindMismatch)
+	mismatch, ok := plan.mismatch.(ErrParameterKindMismatch)
 	if !ok {
 		t.Fatalf("plan mismatch = %v, want ErrParameterKindMismatch", plan.mismatch)
 	}
@@ -71,23 +69,23 @@ func TestPreparedParameterPlanRejectsAKindMismatch(t *testing.T) {
 
 func TestPreparedParameterPlanAcceptsEveryKindThatFillsItsBinding(t *testing.T) {
 	translator := newTranslator()
-	layout := gfx.ShaderLayout{
+	layout := ShaderLayout{
 		UniformSize: 64,
-		Uniforms: []gfx.UniformMember{
+		Uniforms: []UniformMember{
 			{Name: "scalar", Offset: 0}, {Name: "vector", Offset: 16},
 			{Name: "tint", Offset: 32}, {Name: "record", Offset: 48},
 		},
-		Resources: []gfx.ShaderResource{
+		Resources: []ShaderResource{
 			{Name: "sampler", Sampler: true, Group: 1, Binding: 0},
 			{Name: "texture", Group: 1, Binding: 1},
 			{Name: "instances", StorageBuffer: true, Group: 2, Binding: 0},
 		},
 	}
-	draw := []gfx.ParameterDescr{
-		gfx.FloatParam("scalar", 1), gfx.VecParam("vector", m.Vec4{X: 1}),
-		gfx.ColorParam("tint", m.Color{R: 1}), gfx.RawParameter("record", m.Vec4{Y: 1}),
-		gfx.SamplerParam("sampler", gfx.SamplerDesc{}), gfx.TextureParam("texture", types.BakedTexture(1, 0, 0)),
-		gfx.BufferParam("instances", types.BakedBuffer(1, 0)),
+	draw := []ParameterDescr{
+		FloatParam("scalar", 1), VecParam("vector", m.Vec4{X: 1}),
+		ColorParam("tint", m.Color{R: 1}), RawParameter("record", m.Vec4{Y: 1}),
+		SamplerParam("sampler", SamplerDesc{}), TextureParam("texture", BakedTexture(1, 0, 0)),
+		BufferParam("instances", BakedBuffer(1, 0)),
 	}
 	if plan := translator.prepareParameterPlan(1, "fine.wgsl", layout, nil, draw); plan.mismatch != nil {
 		t.Fatalf("plan mismatch = %v, want none", plan.mismatch)
@@ -98,8 +96,8 @@ func TestPreparedParameterPlanAcceptsEveryKindThatFillsItsBinding(t *testing.T) 
 // one for a sibling shader is ordinary, and the built-in canvas materials do it.
 func TestPreparedParameterPlanIgnoresAnUnmatchedName(t *testing.T) {
 	translator := newTranslator()
-	layout := gfx.ShaderLayout{UniformSize: 4, Uniforms: []gfx.UniformMember{{Name: "value", Offset: 0}}}
-	draw := []gfx.ParameterDescr{gfx.FloatParam("value", 1), gfx.BufferParam("unknown", types.BakedBuffer(1, 0))}
+	layout := ShaderLayout{UniformSize: 4, Uniforms: []UniformMember{{Name: "value", Offset: 0}}}
+	draw := []ParameterDescr{FloatParam("value", 1), BufferParam("unknown", BakedBuffer(1, 0))}
 	if plan := translator.prepareParameterPlan(1, "fine.wgsl", layout, nil, draw); plan.mismatch != nil {
 		t.Fatalf("plan mismatch = %v, want none", plan.mismatch)
 	}

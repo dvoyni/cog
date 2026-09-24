@@ -5,8 +5,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -16,10 +15,10 @@ import (
 // finds its entry and draws the mesh.
 func TestMutatingAMeshMaterialTagAfterRecordingChangesNothingDrawn(t *testing.T) {
 	var ref model.MeshRef
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		material := opaqueMaterial(1)
-		q.Mesh(0, ref, scene.MeshDraw{Material: material, NeverCull: true})
+		q.Mesh(0, ref, MeshDraw{Material: material, NeverCull: true})
 		material[0].Tag = "shadow"
 	})
 	ref = h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
@@ -37,20 +36,20 @@ func TestMutatingAMeshMaterialTagAfterRecordingChangesNothingDrawn(t *testing.T)
 // value and a material id of its own, and the two draws would not merge.
 func TestMutatingAMeshMaterialParameterAfterRecordingChangesNothingDrawn(t *testing.T) {
 	var ref model.MeshRef
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		params := pbrTestParams(1)
 		// The copy shares the texture descriptors, whose inline pixels a
 		// material's content key names by address.
 		original := slices.Clone(params)
-		material := func(params []gfx.ParameterDescr) scene.Material {
-			return scene.Material{{Descr: gfx.MaterialWithState(
+		material := func(params []gfx.ParameterDescr) Material {
+			return Material{{Descr: gfx.MaterialWithState(
 				gfx.ShaderWithResource(model.SceneShaderPath), gfx.StateOpaque3D(), params...,
 			)}}
 		}
-		q.Mesh(0, ref, scene.MeshDraw{Material: material(params), NeverCull: true})
+		q.Mesh(0, ref, MeshDraw{Material: material(params), NeverCull: true})
 		params[0] = gfx.FloatParam("key", 9)
-		q.Mesh(0, ref, scene.MeshDraw{Material: material(original), NeverCull: true})
+		q.Mesh(0, ref, MeshDraw{Material: material(original), NeverCull: true})
 	})
 	ref = h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
 	h.frame()
@@ -74,15 +73,15 @@ func TestMutatingAMeshMaterialParameterAfterRecordingChangesNothingDrawn(t *test
 // material.
 func TestMutatingASharedMeshMaterialBetweenDrawsChangesOnlyTheLaterDraw(t *testing.T) {
 	var ref model.MeshRef
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		params := pbrTestParams(1)
 		original := slices.Clone(params)
 		shared := materialOver(params)
-		q.Mesh(0, ref, scene.MeshDraw{Material: shared, NeverCull: true, Transforms: instances(1)})
+		q.Mesh(0, ref, MeshDraw{Material: shared, NeverCull: true, Transforms: instances(1)})
 		params[0] = gfx.FloatParam("key", 9)
-		q.Mesh(0, ref, scene.MeshDraw{Material: shared, NeverCull: true, Transforms: instances(2)})
-		q.Mesh(0, ref, scene.MeshDraw{Material: materialOver(original), NeverCull: true, Transforms: instances(3)})
+		q.Mesh(0, ref, MeshDraw{Material: shared, NeverCull: true, Transforms: instances(2)})
+		q.Mesh(0, ref, MeshDraw{Material: materialOver(original), NeverCull: true, Transforms: instances(3)})
 	})
 	ref = h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
 	h.frame()
@@ -97,15 +96,15 @@ func TestMutatingASharedMeshMaterialBetweenDrawsChangesOnlyTheLaterDraw(t *testi
 // Every primitive of one draw binds the replacement, so each instance count
 // names one material across both primitives.
 func TestMutatingASharedModelMaterialBetweenDrawsChangesOnlyTheLaterDraw(t *testing.T) {
-	h := newHarnessWithFiles(t, modelFiles(glb(t, twoMaterialModel(t))), func(q *scene.OpQueue) {
+	h := newHarnessWithFiles(t, modelFiles(glb(t, twoMaterialModel(t))), func(q *OpQueue) {
 		q.Camera(cameraMain, modelCamera())
 		params := pbrTestParams(1)
 		original := slices.Clone(params)
 		shared := materialOver(params)
-		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{Material: shared, Transforms: instances(1)})
+		q.Model(LayersAll, modelPath, ModelDraw{Material: shared, Transforms: instances(1)})
 		params[0] = gfx.FloatParam("key", 9)
-		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{Material: shared, Transforms: instances(2)})
-		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{Material: materialOver(original), Transforms: instances(3)})
+		q.Model(LayersAll, modelPath, ModelDraw{Material: shared, Transforms: instances(2)})
+		q.Model(LayersAll, modelPath, ModelDraw{Material: materialOver(original), Transforms: instances(3)})
 	})
 	h.frameUntil(t, "the three model draws to pack", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 2*(1+2+3)
@@ -125,11 +124,11 @@ func TestASharedMeshMaterialIsCopiedAfreshEachFrame(t *testing.T) {
 	var ref model.MeshRef
 	shared := opaqueMaterial(1)
 	frame := 0
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		frame++
-		q.Mesh(0, ref, scene.MeshDraw{Material: opaqueMaterial(float32(100 + frame)), NeverCull: true, Transforms: instances(1)})
-		q.Mesh(0, ref, scene.MeshDraw{Material: shared, NeverCull: true, Transforms: instances(2)})
+		q.Mesh(0, ref, MeshDraw{Material: opaqueMaterial(float32(100 + frame)), NeverCull: true, Transforms: instances(1)})
+		q.Mesh(0, ref, MeshDraw{Material: shared, NeverCull: true, Transforms: instances(2)})
 	})
 	ref = h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
 
@@ -138,13 +137,13 @@ func TestASharedMeshMaterialIsCopiedAfreshEachFrame(t *testing.T) {
 		if errs := h.errors(); len(errs) != 0 {
 			t.Fatalf("frame %d reported %v", frame, errs)
 		}
-		var sharedCopy scene.Material
+		var sharedCopy Material
 		for _, op := range h.ops() {
-			if op.Kind == scene.OpMesh && len(op.Draw.Transforms) == 2 {
+			if op.Kind == OpMesh && len(op.Draw.Transforms) == 2 {
 				sharedCopy = op.Draw.Material
 			}
 		}
-		if types.MaterialKeyOf(sharedCopy) != types.MaterialKeyOf(shared) {
+		if MaterialKeyOf(sharedCopy) != MaterialKeyOf(shared) {
 			t.Fatalf("frame %d's shared draw binds a material other than the shared one", frame)
 		}
 	}
@@ -152,8 +151,8 @@ func TestASharedMeshMaterialIsCopiedAfreshEachFrame(t *testing.T) {
 
 // materialOver builds a one-entry opaque material over params, aliasing them, so
 // a caller that rewrites params rewrites the material.
-func materialOver(params []gfx.ParameterDescr) scene.Material {
-	return scene.Material{{Descr: gfx.MaterialWithState(
+func materialOver(params []gfx.ParameterDescr) Material {
+	return Material{{Descr: gfx.MaterialWithState(
 		gfx.ShaderWithResource(model.SceneShaderPath), gfx.StateOpaque3D(), params...,
 	)}}
 }
@@ -171,7 +170,7 @@ func instances(n int) []m.Transform {
 // materialIDsByInstanceCount reads each batch's material id by its instance
 // count, requiring every count to agree on one id and every count named to be
 // present and no other.
-func materialIDsByInstanceCount(t *testing.T, batches []scene.BatchView, counts ...int) map[int]uint32 {
+func materialIDsByInstanceCount(t *testing.T, batches []BatchView, counts ...int) map[int]uint32 {
 	t.Helper()
 	ids := map[int]uint32{}
 	for _, batch := range batches {
@@ -193,10 +192,10 @@ func materialIDsByInstanceCount(t *testing.T, batches []scene.BatchView, counts 
 
 // A Model call copies its replacement Material the same way.
 func TestMutatingAModelMaterialAfterRecordingChangesNothingDrawn(t *testing.T) {
-	h := newHarnessWithFiles(t, modelFiles(glb(t, twoMaterialModel(t))), func(q *scene.OpQueue) {
+	h := newHarnessWithFiles(t, modelFiles(glb(t, twoMaterialModel(t))), func(q *OpQueue) {
 		q.Camera(cameraMain, modelCamera())
 		material := opaqueMaterial(1)
-		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{Material: material})
+		q.Model(LayersAll, modelPath, ModelDraw{Material: material})
 		material[0].Tag = "shadow"
 	})
 	h.frameUntil(t, "the model to draw under the forward tag it was recorded with", func() bool {
@@ -210,9 +209,9 @@ func TestMutatingAModelMaterialAfterRecordingChangesNothingDrawn(t *testing.T) {
 // serves the forward pass and draws the mesh.
 func TestAnEmptyMaterialStillServesNoPassAfterTheCopy(t *testing.T) {
 	var ref model.MeshRef
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
-		q.Mesh(0, ref, scene.MeshDraw{Material: scene.Material{}, NeverCull: true})
+		q.Mesh(0, ref, MeshDraw{Material: Material{}, NeverCull: true})
 	})
 	ref = h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
 	h.frame()

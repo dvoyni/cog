@@ -9,7 +9,6 @@ import (
 	"sync"
 	"syscall/js"
 
-	"github.com/dvoyni/cog/extensions/jssound"
 	"github.com/dvoyni/cog/libs/assets"
 )
 
@@ -570,7 +569,7 @@ func (s *codecsSource) received(data js.Value) {
 func (s *codecsSource) fail(message string) {
 	s.mu.Lock()
 	if s.failed == nil {
-		s.failed = jssound.ErrDecodeRefused{Message: message}
+		s.failed = ErrDecodeRefused{Message: message}
 	}
 	s.mu.Unlock()
 	s.signal()

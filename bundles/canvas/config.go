@@ -1,6 +1,6 @@
 package canvas
 
-import "github.com/dvoyni/cog/bundles/canvas/internal/types"
+import "github.com/dvoyni/cog/bundles/canvas/internal"
 
 // Config sizes canvas's sprite and glyph atlases: AtlasSize is one page's width
 // and height in texels, LayersPerArray how many pages one texture array holds
@@ -11,6 +11,5 @@ import "github.com/dvoyni/cog/bundles/canvas/internal/types"
 //
 //	kernel.New(map[kernel.PluginName]any{canvas.Name: canvas.Config{AtlasSize: 2048}})
 //
-// It is declared in internal/types, because the atlases hold it, and aliased
-// here.
-type Config = types.Config
+// It is declared in internal, because the atlases hold it, and aliased here.
+type Config = internal.Config

@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"github.com/dvoyni/cog/bundles/ecs/internal/types"
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 )
@@ -136,8 +135,8 @@ const updateDescription = "Changes one Entity's Components, given in any form `e
 func (provider) Capabilities() []mcp.Capability {
 	return []mcp.Capability{
 		mcp.Func(censusName, censusDescription, readCensus, mcp.ReadOnly()),
-		mcp.Func(entityName, entityDescription, readEntity, mcp.ReadOnly()),
-		mcp.Func(queryName, queryDescription, readQuery, mcp.ReadOnly()),
+		mcp.Func(entityName, entityDescription, readEntityTool, mcp.ReadOnly()),
+		mcp.Func(queryName, queryDescription, readQueryTool, mcp.ReadOnly()),
 		mcp.Func(spawnName, spawnDescription, writeSpawn),
 		mcp.Func(despawnName, despawnDescription, writeDespawn),
 		mcp.Func(updateName, updateDescription, writeUpdate),
@@ -153,28 +152,28 @@ func (provider) Capabilities() []mcp.Capability {
 // There is no branch for a zero response. A scheduler that has stopped answers
 // with one, and the kernel has already reported the dispatch it could not
 // perform; that answer is accepted as it is.
-func readCensus(k kernel.Executioner, request types.CensusRequest) (types.CensusResponse, error) {
-	return answer(k.ExecuteCommand[censusCmd](request), func(r types.CensusResponse) string { return r.Refusal })
+func readCensus(k kernel.Executioner, request CensusRequest) (CensusResponse, error) {
+	return answer(k.ExecuteCommand[censusCmd](request), func(r CensusResponse) string { return r.Refusal })
 }
 
-func readEntity(k kernel.Executioner, request types.EntityRequest) (types.EntityResponse, error) {
-	return answer(k.ExecuteCommand[entityCmd](request), func(r types.EntityResponse) string { return r.Refusal })
+func readEntityTool(k kernel.Executioner, request EntityRequest) (EntityResponse, error) {
+	return answer(k.ExecuteCommand[entityCmd](request), func(r EntityResponse) string { return r.Refusal })
 }
 
-func readQuery(k kernel.Executioner, request types.QueryRequest) (types.QueryResponse, error) {
-	return answer(k.ExecuteCommand[queryCmd](request), func(r types.QueryResponse) string { return r.Refusal })
+func readQueryTool(k kernel.Executioner, request QueryRequest) (QueryResponse, error) {
+	return answer(k.ExecuteCommand[queryCmd](request), func(r QueryResponse) string { return r.Refusal })
 }
 
-func writeSpawn(k kernel.Executioner, request types.SpawnRequest) (types.SpawnResponse, error) {
-	return answer(k.ExecuteCommand[spawnCmd](request), func(r types.SpawnResponse) string { return r.Refusal })
+func writeSpawn(k kernel.Executioner, request SpawnRequest) (SpawnResponse, error) {
+	return answer(k.ExecuteCommand[spawnCmd](request), func(r SpawnResponse) string { return r.Refusal })
 }
 
-func writeDespawn(k kernel.Executioner, request types.DespawnRequest) (types.DespawnResponse, error) {
-	return answer(k.ExecuteCommand[despawnCmd](request), func(r types.DespawnResponse) string { return r.Refusal })
+func writeDespawn(k kernel.Executioner, request DespawnRequest) (DespawnResponse, error) {
+	return answer(k.ExecuteCommand[despawnCmd](request), func(r DespawnResponse) string { return r.Refusal })
 }
 
-func writeUpdate(k kernel.Executioner, request types.UpdateRequest) (types.UpdateResponse, error) {
-	return answer(k.ExecuteCommand[updateCmd](request), func(r types.UpdateResponse) string { return r.Refusal })
+func writeUpdate(k kernel.Executioner, request UpdateRequest) (UpdateResponse, error) {
+	return answer(k.ExecuteCommand[updateCmd](request), func(r UpdateResponse) string { return r.Refusal })
 }
 
 // answer is a response, or mcp.Unavailable carrying its refusal when it has

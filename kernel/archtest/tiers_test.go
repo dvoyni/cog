@@ -59,9 +59,26 @@ const (
 // which never imports it. The migration moves plugins here one at a time; when
 // every plugin is here, the ADR 0002 rules and this list go.
 var aliasIndexRoots = map[string]bool{
-	"bundles/ecsaudio":     true,
-	"bundles/ecsscene":     true,
-	"bundles/ecsphysics2d": true,
+	"slots/app":              true,
+	"slots/gfx":              true,
+	"slots/sound":            true,
+	"slots/storage":          true,
+	"bundles/anim":           true,
+	"bundles/canvas":         true,
+	"bundles/ecs":            true,
+	"bundles/ecsaudio":       true,
+	"bundles/ecsphysics2d":   true,
+	"bundles/ecsscene":       true,
+	"bundles/input":          true,
+	"bundles/model":          true,
+	"bundles/scene":          true,
+	"bundles/ui":             true,
+	"extensions/diskstorage": true,
+	"extensions/gogpu":       true,
+	"extensions/jssound":     true,
+	"extensions/jsstorage":   true,
+	"extensions/nosound":     true,
+	"extensions/otosound":    true,
 }
 
 type kind int
@@ -334,13 +351,20 @@ func importViolations(dir string, from place, m module) ([]violation, error) {
 			return nil, fmt.Errorf("parsing %s: %w", file, err)
 		}
 		testFile := strings.HasSuffix(file, "_test.go")
+		// An external test package is a package of its own, which may import
+		// the root its package under test is aliased by.
+		external := testFile && strings.HasSuffix(syntax.Name.Name, "_test")
 		for _, spec := range syntax.Imports {
 			importPath := strings.Trim(spec.Path.Value, "`\"")
 			rel, ok := m.relative(importPath)
 			if !ok {
 				continue // std and third-party are not checked
 			}
-			if ok, rule := allowed(from, m.classify(rel), testFile); !ok {
+			to := m.classify(rel)
+			if external && to.tier == tierRoot && to.plugin == from.plugin {
+				continue
+			}
+			if ok, rule := allowed(from, to, testFile); !ok {
 				violations = append(violations, violation{
 					file: m.within(file),
 					line: fset.Position(spec.Pos()).Line,

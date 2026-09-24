@@ -5,7 +5,6 @@ import (
 	"unsafe"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/qmuntal/gltf"
 )
@@ -81,7 +80,7 @@ func firstInstance(t *testing.T, h *harness) model.Instance {
 // existed only because a declared binding must be bound, and there is no longer
 // a declaration to satisfy.
 func TestAnUnskinnedDrawBindsNoGroupTwo(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(cameraMain, testCameraDescr())
 		q.Box(0, m.At(0, 0, 0), testBoxColor)
 	})
@@ -113,7 +112,7 @@ func TestAnUnskinnedDrawBindsNoGroupTwo(t *testing.T) {
 // sharing one identity pose: they resolve to one bundled variant, so they take
 // one material id, sort side by side and merge into one batch.
 func TestEveryUnskinnedDrawTakesTheSameVariant(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(cameraMain, testCameraDescr())
 		for i := range 4 {
 			q.Box(0, m.At(float32(i), 0, 0), testBoxColor)
@@ -138,7 +137,7 @@ func TestEveryUnskinnedDrawTakesTheSameVariant(t *testing.T) {
 // pose path.
 func TestASkinnedModelBindsItsOwnPosesAndSkins(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, skinnedModel(t))),
-		drawModel(modelPath, scene.ModelDraw{Plays: []model.ClipPlay{{Clip: "spin", Time: 0.5, Weight: 1}}}))
+		drawModel(modelPath, ModelDraw{Plays: []model.ClipPlay{{Clip: "spin", Time: 0.5, Weight: 1}}}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
 	})
@@ -181,7 +180,7 @@ func mixedModel(t testing.TB) *gltf.Document {
 // SCENE_NOSKIN by construction: a plain-bound placement is a skinned draw.
 func TestAPlainBoundPlacementCarriesItsJointOnTheInstance(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, mixedModel(t))),
-		drawModel(modelPath, scene.ModelDraw{Plays: []model.ClipPlay{{Clip: "spin", Time: 0.5, Weight: 1}}}))
+		drawModel(modelPath, ModelDraw{Plays: []model.ClipPlay{{Clip: "spin", Time: 0.5, Weight: 1}}}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 2
 	})
@@ -226,7 +225,7 @@ func TestAPlainBoundPlacementCarriesItsJointOnTheInstance(t *testing.T) {
 // one shared mesh take two variants, which is two material ids.
 func TestTheVariantFollowsThePrimitiveNotTheModel(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, mixedModel(t))),
-		drawModel(modelPath, scene.ModelDraw{Plays: []model.ClipPlay{{Clip: "spin", Time: 0.5, Weight: 1}}}))
+		drawModel(modelPath, ModelDraw{Plays: []model.ClipPlay{{Clip: "spin", Time: 0.5, Weight: 1}}}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 2
 	})
@@ -249,14 +248,14 @@ func TestTheVariantFollowsThePrimitiveNotTheModel(t *testing.T) {
 // mesh that disappears with nothing reported - so the exemption follows the
 // placement that is plain-bound, and only that one.
 func TestOnlyThePlainBoundPlacementOfASharedMeshIsExempt(t *testing.T) {
-	h := newHarnessWithFiles(t, modelFiles(glb(t, mixedModel(t))), func(q *scene.OpQueue) {
+	h := newHarnessWithFiles(t, modelFiles(glb(t, mixedModel(t))), func(q *OpQueue) {
 		// A camera pointed the other way: whatever survives survives because it
 		// is exempt, not because it is in frustum.
-		q.Camera(cameraMain, scene.CameraDescr{
+		q.Camera(cameraMain, CameraDescr{
 			Transform: m.LookAt(m.Vec3{Z: 500}, m.Vec3{Z: 1000}, m.Vec3{Y: 1}),
 			FovY:      1.0472, Near: 0.1, Far: 200,
 		})
-		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{})
+		q.Model(LayersAll, modelPath, ModelDraw{})
 	})
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Recorded == 2
@@ -274,7 +273,7 @@ func TestOnlyThePlainBoundPlacementOfASharedMeshIsExempt(t *testing.T) {
 // the origin, because a degenerate node's transform lives in the pose buffer.
 func TestAModelDrawWithNoPlaysCarriesNoAnimBlock(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, skinnedModel(t))),
-		drawModel(modelPath, scene.ModelDraw{}))
+		drawModel(modelPath, ModelDraw{}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
 	})
@@ -294,14 +293,14 @@ func TestAModelDrawWithNoPlaysCarriesNoAnimBlock(t *testing.T) {
 // replaying the blend on the CPU - which is the per-frame hierarchy walk the
 // whole design exists to remove.
 func TestASkinnedDrawIsNeverCulled(t *testing.T) {
-	h := newHarnessWithFiles(t, modelFiles(glb(t, skinnedModel(t))), func(q *scene.OpQueue) {
+	h := newHarnessWithFiles(t, modelFiles(glb(t, skinnedModel(t))), func(q *OpQueue) {
 		// A camera pointed the other way: the draw survives only because it is
 		// exempt, not because it is in frustum.
-		q.Camera(cameraMain, scene.CameraDescr{
+		q.Camera(cameraMain, CameraDescr{
 			Transform: m.LookAt(m.Vec3{Z: 500}, m.Vec3{Z: 1000}, m.Vec3{Y: 1}),
 			FovY:      1.0472, Near: 0.1, Far: 200,
 		})
-		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{})
+		q.Model(LayersAll, modelPath, ModelDraw{})
 	})
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Recorded == 1
@@ -314,7 +313,7 @@ func TestASkinnedDrawIsNeverCulled(t *testing.T) {
 // The clip table and joint names are what a caller reads to drive an animation
 // at all, and both trigger the load the way every other query does.
 func TestTheLookupReportsClipsJointsAndPoseBytes(t *testing.T) {
-	h := newHarnessWithFiles(t, modelFiles(glb(t, skinnedModel(t))), func(*scene.OpQueue) {})
+	h := newHarnessWithFiles(t, modelFiles(glb(t, skinnedModel(t))), func(*OpQueue) {})
 	var clips []model.ClipInfo
 	var joints []string
 	var bytes int
@@ -351,7 +350,7 @@ func TestTheLookupReportsClipsJointsAndPoseBytes(t *testing.T) {
 // declares none and off the per-vertex pose path entirely.
 func TestAStaticModelBakesNoPosesAndBindsNone(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, onePrimitiveModel(t))),
-		drawModel(modelPath, scene.ModelDraw{}))
+		drawModel(modelPath, ModelDraw{}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
 	})
@@ -373,7 +372,7 @@ func TestAStaticModelBakesNoPosesAndBindsNone(t *testing.T) {
 // forever.
 func TestAnUnknownClipReportsOnce(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, skinnedModel(t))),
-		drawModel(modelPath, scene.ModelDraw{Plays: []model.ClipPlay{{Clip: "gallop", Weight: 1}}}))
+		drawModel(modelPath, ModelDraw{Plays: []model.ClipPlay{{Clip: "gallop", Weight: 1}}}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
 	})

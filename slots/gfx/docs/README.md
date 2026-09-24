@@ -19,11 +19,12 @@ exists; nothing else in this README describes it.
 
 ## Packages
 
-gfx has the declaration-root shape of
-[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md):
+gfx has the alias-index root of
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md)
+and [ADR 0003](../../../docs/adr/0003-roots-are-alias-indexes.md):
 
-- **`slots/gfx`** is the root, and holds declarations only. It is both the
-  recording API and the GPU contract, so each type has one name, `gfx.X`:
+- **`slots/gfx`** is the root, and declares nothing: it aliases what
+  `internal/` declares. It is both the recording API and the GPU contract, so each type has one name, `gfx.X`:
   `OpQueue`, `ResourceQueue`, the descriptors, commands (`PresentCmd` and the
   rest), the `Viewport` resource, the view types, `Name` and the ordering
   identities `PresentOnUpdate` and `RenderOnRender` — and beside them the
@@ -33,20 +34,18 @@ gfx has the declaration-root shape of
   Recorders (canvas, scene, ui, ecsscene and games) import it to draw, and an
   Adapter's backend (gogpu's `gfx*.go` files, cog-examples' headless `Backend`)
   imports it and nothing else of gfx.
-- **`slots/gfx/internal/types`** declares the concrete types the root aliases:
-  the recording types whose unexported state the translator reads, their
-  recording methods and the consume side of the queues, the GPU vocabulary they
-  carry, the view types, and the shader preprocessor. It never imports the
-  root.
-- **`slots/gfx/internal`** is the plugin: `New`, its handlers, the translator,
-  the capture and frame-snapshot slots, and the mcp Provider with its two
-  capabilities.
+- **`slots/gfx/internal`** is the plugin, and declares everything the root
+  aliases: the recording types whose unexported state the translator reads,
+  their recording methods and the consume side of the queues, the GPU
+  vocabulary they carry, the view types, and the shader preprocessor, beside
+  `New`, its handlers, the translator, the capture and frame-snapshot slots, and
+  the mcp Provider with its two capabilities. It never imports the root.
 - **`slots/gfx/gfxplugin`** exports only `New`. Only composition roots and
   tests import it.
 
 A recording type whose insides the plugin reads (`OpQueue`, `ResourceQueue`,
-the descriptors) is declared in `internal/types` with its fields unexported,
-and aliased in the root (`type OpQueue = types.OpQueue`), each constructor
+the descriptors) is declared in `internal/` with its fields unexported,
+and aliased in the root (`type OpQueue = internal.OpQueue`), each constructor
 behind a forwarder in `utils.go`. It stays a concrete type, and its exported
 methods are public API through the alias. The GPU vocabulary is aliased the
 same way, and the exported variables it used to have are functions:
@@ -56,7 +55,7 @@ same way, and the exported variables it used to have are functions:
 The root's one piece of code outside its forwarders is `inlineAnchor` in
 `types.go`, an unexported function nothing calls. Go inlines a method of a
 package the caller does not import only when a package it does import
-references that method, and nothing outside gfx can import `internal/types`, so
+references that method, and nothing outside gfx can import `internal/`, so
 the anchor references the accessors importers call per instance —
 `ParameterDescr.Name` and its value accessors, `TextureDescr.ID` and `Size`,
 `MaterialDescr.State`, `TextureFormat.Resolve` — and canvas, scene and gogpu
@@ -307,7 +306,7 @@ field's.
 ### The shared view types
 
 gfx also declares the vocabulary every cog snapshot shares, in
-[`internal/types/views.go`](../internal/types/views.go), aliased in `types.go`: `ParameterView`, `TextureView`, `MaterialView`, and
+[`internal/views.go`](../internal/views.go), aliased in `types.go`: `ParameterView`, `TextureView`, `MaterialView`, and
 `SnapshotView` — the three coordinate sizes, the tick the snapshot describes,
 and the step fields, all of which every snapshot response carries. `canvas` and `ui` embed them, so one value reaches an agent in
 one shape whichever tool showed it.
@@ -327,7 +326,7 @@ through `Name()` methods (`gfx.FilterMode.Name()`, which `canvas` also
 reads for every sprite transform, so one filter reaches an agent in one
 spelling whichever tool showed it). They are `Name` rather than `String`, so
 formatting an enum with `%v` still prints its number. The tables for gfx's own
-recording enums stay in `internal/types` as functions, because naming them for a debug document
+recording enums stay in `internal/` as functions, because naming them for a debug document
 is not a commitment to render them for every cog app.
 
 The full contract is in [specs/capture.md](specs/capture.md) and
@@ -362,7 +361,7 @@ not subscribe to this event itself.
 
 ### Subscribed
 
-The two identities other packages order against are declared in the root's
+The two identities other packages order against are aliased in the root's
 `id.go`: `gfx.PresentOnUpdate` and `gfx.RenderOnRender`. Canvas and scene order
 their flush `Before[gfx.PresentOnUpdate]()`. The two `First()` identities are
 unexported in `internal`, because nothing outside orders against them.
@@ -393,8 +392,8 @@ unexported in `internal`, because nothing outside orders against them.
 ## Viewport
 
 `Viewport`, `SetViewportCmd` and `SetDesiredViewportCmd` are gfx's: gfx owns
-the `*Viewport` resource and handles both commands, so they are declared in its
-root rather than in `app`, which declares no Resources.
+the `*Viewport` resource and handles both commands, so they are offered by its
+root rather than by `app`, which declares no Resources.
 
 `Viewport` exposes logical `Width`/`Height`, DIP `WindowWidth`/`WindowHeight`,
 and physical `FramebufferWidth`/`FramebufferHeight`.
@@ -833,5 +832,5 @@ burst branches on them. Four are reported by a backend as well as by gfx:
 `gfx.ErrCaptureAbandoned{}` a capture the engine stopped before its readback
 resolved; `gfx.ErrCaptureUnsupported{Format}` depth or anything else that is
 not 8-bit RGBA; and `gfx.ErrCaptureNoTarget{}` a target the frame never
-rendered into. The root declares `ErrCaptureAmount{Amount, Max}`,
+rendered into. The root also offers `ErrCaptureAmount{Amount, Max}`,
 `ErrCaptureSpan{Ticks, Max}` and `ErrCaptureBurstPaused{}`, the three ways a burst is asked for and refused.

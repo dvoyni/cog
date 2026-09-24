@@ -12,19 +12,21 @@ decision in
 
 ## Packages
 
-storage has the declaration-root shape of
-[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
+storage has the alias-index root of
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md)
+and [ADR 0003](../../../docs/adr/0003-roots-are-alias-indexes.md).
 
-- **`slots/storage`** is the root, and holds declarations only: the commands,
-  `Config`, `FileSystem`, `Values`, `WriteFS`, `ReadMount`, `PermanentFS` and
-  `PermanentFSPort`, `ReadMountPort`, the errors and `Name`. Its functions, the value-request
-  builders, `WriteAccess` and `NewFileSystem`, are forwarders in `utils.go`. It
-  is what every other package imports.
-- **`slots/storage/internal/types`** declares `FileSystem`, `WriteFS`, `Values`,
-  the value requests and what they refer to, whose unexported state the
-  handlers read, and the root aliases them.
-- **`slots/storage/internal`** is the plugin: its `New`, configuration
-  resolution and the command handlers.
+- **`slots/storage`** is the root, and declares nothing: it aliases what
+  `internal/` declares — the commands, `Config`, `FileSystem`, `Values`,
+  `WriteFS`, `ReadMount`, `PermanentFS` and `PermanentFSPort`, `ReadMountPort`,
+  the errors and `Name`. Its functions, the value-request builders,
+  `WriteAccess` and `NewFileSystem`, are forwarders in `utils.go`. It is what
+  every other package imports.
+- **`slots/storage/internal`** is the plugin: everything the root aliases,
+  among them `FileSystem`, `WriteFS`, `Values`, the value requests and what
+  they refer to, whose unexported state the handlers read, beside its `New`,
+  configuration resolution and the command handlers. It never imports the
+  root.
 - **`slots/storage/storageplugin`** exports only `New() kernel.Plugin`. Only
   composition roots and tests import it.
 
@@ -98,7 +100,7 @@ Read mounts are not configured: plugins contribute them through
 `storage.ReadMountPort`, a collected Port built on `ReadMount` itself. A
 composition root has no `Register` to provide from, so the mounts a game needs
 come from the game's own plugin, which is handed the filesystem by `main`, the
-one place that knows the platform. A plugin declares an Adapter for the Port in
+one place that knows the platform. A plugin offers an Adapter for the Port in
 its root's `adapters.go` and provides one `ReadMount` per mount during its
 `Register`:
 
@@ -146,10 +148,10 @@ registrar.ProvideAdapter[StoragePermanentFS](permanent)
 
 The two cog ships are each built only for their platform.
 
-- **diskstorage** is an Extension in the declaration-root shape. Its root,
-  `extensions/diskstorage`, declares only `Name`, `Config`, the
-  `StoragePermanentFS` Adapter and its errors; the plugin is in its `internal/`,
-  and `diskstorageplugin.New()` constructs it. Its `diskstorage.Config` is
+- **diskstorage** is an Extension with an alias-index root. Its root,
+  `extensions/diskstorage`, offers only `Name`, `Config`, the
+  `StoragePermanentFS` Adapter and its errors, aliased from its `internal/`,
+  where the plugin is too; `diskstorageplugin.New()` constructs it. Its `diskstorage.Config` is
   supplied under `diskstorage.Name`, and its zero value is the default. The
   plugin opens `<data dir>/<AppId>`, creating it if needed: `%LOCALAPPDATA%` on
   Windows, `$XDG_DATA_HOME` (or `~/.local/share`) on Linux, the user config
@@ -159,9 +161,9 @@ The two cog ships are each built only for their platform.
   `diskstorage.Config` with `diskstorage.ErrInvalidConfig`. Every operation is
   confined to the directory through `os.Root`.
 - **jsstorage** is an Extension in the same shape. Its root,
-  `extensions/jsstorage`, declares only `Name`, `Config`, the
-  `StoragePermanentFS` Adapter and its errors; the plugin is in its
-  `internal/`, and `jsstorageplugin.New()` constructs it. Its
+  `extensions/jsstorage`, offers only `Name`, `Config`, the
+  `StoragePermanentFS` Adapter and its errors, aliased from its `internal/`,
+  where the plugin is too; `jsstorageplugin.New()` constructs it. Its
   `jsstorage.Config` is supplied under `jsstorage.Name`. The plugin keeps the
   whole filesystem as one JSON document under `localStorage` key
   `cog.storage.<AppId>`. A browser has no executable to name the app after, so

@@ -14,8 +14,6 @@ import (
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
-	"github.com/dvoyni/cog/slots/gfx"
-	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
 // captureName is the capability rendered as the tool gfx_capture, and
@@ -154,8 +152,8 @@ func captureScreen(k kernel.Executioner, request captureScreenRequest) (captureS
 			"the directory for %s could not be created: %v", request.Path, err)}
 	}
 
-	armed := k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
-		Target: gfx.CaptureDesc{Screen: true}, Amount: amount, Interval: interval, Paused: paused,
+	armed := k.ExecuteCommand[ArmCaptureCmd](ArmCaptureRequest{
+		Target: CaptureDesc{Screen: true}, Amount: amount, Interval: interval, Paused: paused,
 	})
 	if armed.Err != nil {
 		return captureScreenResponse{}, captureRefusal(armed.Err, amount, interval)
@@ -167,7 +165,7 @@ func captureScreen(k kernel.Executioner, request captureScreenRequest) (captureS
 // reached disk. Expiry truncates rather than failing: zero frames is an error,
 // one or more is a short success, and shutdown mid-burst behaves the same way.
 func collectCapture(
-	k kernel.Executioner, armed gfx.ArmCaptureResponse,
+	k kernel.Executioner, armed ArmCaptureResponse,
 	template string, numbered bool, amount, interval int,
 ) (captureScreenResponse, error) {
 	deadline := time.NewTimer(captureFloorDeadline + time.Duration(amount*interval)*captureTick)
@@ -212,10 +210,10 @@ func collectCapture(
 // writeCapturePNG un-strides one readback and puts it on disk. An existing
 // file is overwritten without complaint: re-writing the same name is the
 // iterate-and-look loop.
-func writeCapturePNG(path string, capture gfx.Capture) error {
+func writeCapturePNG(path string, capture Capture) error {
 	picture := capture.Image()
 	if picture == nil {
-		return gfx.ErrCaptureUnsupported{Format: capture.Format}
+		return ErrCaptureUnsupported{Format: capture.Format}
 	}
 	file, err := os.Create(path)
 	if err != nil {
@@ -238,17 +236,17 @@ func captureRefusal(reason error, amount, interval int) error {
 		return mcp.Unavailable{Reason: fmt.Sprintf(
 			"no frame was rendered within %s — the game may be paused, minimised, or not rendering",
 			captureFloorDeadline+time.Duration(amount*interval)*captureTick)}
-	case errors.Is(reason, gfx.ErrCaptureBusy{}):
+	case errors.Is(reason, ErrCaptureBusy{}):
 		return mcp.Unavailable{Reason: "a capture is already in flight; ask again"}
-	case errors.Is(reason, gfx.ErrCaptureAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
+	case errors.Is(reason, ErrCaptureAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
 		errors.Is(reason, context.Canceled):
 		// A game exiting is the normal case, not a fault: an engine that
 		// terminated while shutting down normally would be the worse answer.
 		return mcp.Unavailable{Reason: "the game is shutting down"}
-	case errors.Is(reason, gfx.ErrCaptureNoTarget{}):
+	case errors.Is(reason, ErrCaptureNoTarget{}):
 		return mcp.Unavailable{Reason: "the game drew nothing to the screen in that frame"}
 	}
-	var unsupported gfx.ErrCaptureUnsupported
+	var unsupported ErrCaptureUnsupported
 	if errors.As(reason, &unsupported) {
 		return mcp.Unavailable{Reason: unsupported.Error()}
 	}
@@ -368,8 +366,8 @@ type frameSnapshotResponse struct {
 	// counts and the viewport but not the two arrays, so the reply says what
 	// the frame was without repeating it.
 	Path string `json:"path,omitempty"`
-	gfx.FrameView
-	gfx.SnapshotView
+	FrameView
+	SnapshotView
 }
 
 // frameSnapshot is the gfx_frame body: validate, arm, step if the engine is
@@ -396,11 +394,11 @@ func frameSnapshot(k kernel.Executioner, request frameSnapshotRequest) (frameSna
 	}
 	paused := status.Paused
 
-	armed := k.ExecuteCommand[gfx.ArmFrameCmd](gfx.ArmFrameRequest{Pass: request.Pass})
+	armed := k.ExecuteCommand[ArmFrameCmd](ArmFrameRequest{Pass: request.Pass})
 	if armed.Err != nil {
 		return frameSnapshotResponse{}, frameRefusal(armed.Err)
 	}
-	response := frameSnapshotResponse{SnapshotView: gfx.SnapshotViewOf(armed.Viewport)}
+	response := frameSnapshotResponse{SnapshotView: SnapshotViewOf(armed.Viewport)}
 	// The arm is placed first so that the tick the step produces is one that
 	// began after it. Joining a step another arm already raised is what makes
 	// three snapshots armed together describe one tick instead of three.
@@ -507,11 +505,11 @@ func frameRefusal(reason error) error {
 		return mcp.Unavailable{Reason: fmt.Sprintf(
 			"no tick was recorded within %s — the game may be paused with nothing stepping it, "+
 				"minimised, or not updating", frameDeadline)}
-	case errors.Is(reason, gfx.ErrFrameBusy{}):
+	case errors.Is(reason, ErrFrameBusy{}):
 		return mcp.Unavailable{Reason: "a frame snapshot is already in flight; ask again. A " +
 			"capture and the other snapshots may run alongside it, and arming them together is " +
 			"how they describe one tick."}
-	case errors.Is(reason, gfx.ErrFrameAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
+	case errors.Is(reason, ErrFrameAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
 		errors.Is(reason, context.Canceled):
 		// A game exiting is the normal case, not a fault.
 		return mcp.Unavailable{Reason: "the game is shutting down"}
@@ -522,14 +520,14 @@ func frameRefusal(reason error) error {
 // validateCaptureSpan checks the burst caps. interval is what buys a long
 // window, never amount.
 func validateCaptureSpan(amount, interval int) error {
-	if amount > types.MaxCaptureAmount {
+	if amount > MaxCaptureAmount {
 		return mcp.Unavailable{Reason: fmt.Sprintf(
-			"amount is %d; ask for up to %d stills and space them with interval", amount, types.MaxCaptureAmount)}
+			"amount is %d; ask for up to %d stills and space them with interval", amount, MaxCaptureAmount)}
 	}
-	if amount*interval > types.MaxCaptureSpan {
+	if amount*interval > MaxCaptureSpan {
 		return mcp.Unavailable{Reason: fmt.Sprintf(
 			"amount x interval is %d ticks; one burst may span up to %d — about ten seconds at 60 Hz",
-			amount*interval, types.MaxCaptureSpan)}
+			amount*interval, MaxCaptureSpan)}
 	}
 	return nil
 }

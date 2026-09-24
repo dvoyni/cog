@@ -155,8 +155,8 @@ func newHulledShape(hull []m.Vec2d, radius float64) (Shape, Polygon, error) {
 // at all for the two kinds that are not polygons.
 //
 // It exists because m.List hands out no slice, deliberately, and a query
-// primitive cannot take a Component of the ECS's without the types package
-// naming one in a signature the root forwards. The idiom is
+// primitive cannot take a Component of the ECS's without this package naming
+// one in a signature the root forwards. The idiom is
 // dst = PolygonVerts(dst[:0], shape, polygon), which settles to no allocation
 // once the buffer is big enough.
 func PolygonVerts(dst []m.Vec2d, shape Shape, polygon Polygon) []m.Vec2d {

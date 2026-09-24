@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/dvoyni/cog/slots/sound"
 )
 
 // sound keeps a Clip's Loop Region for two reasons of its own, and these are
@@ -25,7 +24,7 @@ func loopingClip() fakeClip {
 		duration: 1,
 		channels: 2,
 		rate:     48000,
-		region:   m.Some(sound.LoopRegion{Start: 0.5, End: 0.75}),
+		region:   m.Some(LoopRegion{Start: 0.5, End: 0.75}),
 	}
 }
 
@@ -34,9 +33,9 @@ func loopingClip() fakeClip {
 // Adapter stopped playing a bar ago, and the view would be describing a
 // different sound from the one in the room.
 func TestALoopingPlayheadWrapsAtTheLoopEndAndNotAtTheDuration(t *testing.T) {
-	h := newHarness(t, newFakeBackend(loopingClip()), sound.Config{}, clipBytes)
+	h := newHarness(t, newFakeBackend(loopingClip()), Config{}, clipBytes)
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{Loop: m.Some(true)})
+	voice := h.play(ClipWithResource(bell), 0, Params{Loop: m.Some(true)})
 
 	// 0.75 s at a sixty-fourth of a second a tick is 48 ticks, so tick 48 is
 	// the first one to reach the loop end, and it lands back on the loop start.
@@ -77,12 +76,12 @@ func TestALoopingPlayheadWrapsAtTheLoopEndAndNotAtTheDuration(t *testing.T) {
 // What crosses the seam for it is an ordinary VoiceStart carrying an Offset in
 // seconds. No signature in sound names a sample.
 func TestASeekPastTheEndOfALoopingVoiceLandsOnTheLoopStart(t *testing.T) {
-	h := newHarness(t, newFakeBackend(loopingClip()), sound.Config{}, clipBytes)
+	h := newHarness(t, newFakeBackend(loopingClip()), Config{}, clipBytes)
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{Loop: m.Some(true)})
+	voice := h.play(ClipWithResource(bell), 0, Params{Loop: m.Some(true)})
 	h.tick()
 
-	h.record(func(queue *sound.Queue) { queue.Seek(voice, 9) })
+	h.record(func(queue *Queue) { queue.Seek(voice, 9) })
 	h.tick()
 
 	got := h.probe(voice)
@@ -111,9 +110,9 @@ func TestASeekPastTheEndOfALoopingVoiceLandsOnTheLoopStart(t *testing.T) {
 // absent region means and what every Clip said before the tags existed.
 func TestAClipWithNoRegionStillLoopsWhole(t *testing.T) {
 	h := newHarness(t, newFakeBackend(fakeClip{duration: 1, channels: 2, rate: 48000}),
-		sound.Config{}, clipBytes)
+		Config{}, clipBytes)
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{Loop: m.Some(true)})
+	voice := h.play(ClipWithResource(bell), 0, Params{Loop: m.Some(true)})
 	for range 64 {
 		h.tick()
 	}
@@ -121,7 +120,7 @@ func TestAClipWithNoRegionStillLoopsWhole(t *testing.T) {
 	if got := h.probe(voice).Info.Playhead; got != 0 {
 		t.Fatalf("an untagged Clip wrapped to %v after a whole pass, want 0", got)
 	}
-	h.record(func(queue *sound.Queue) { queue.Seek(voice, 9) })
+	h.record(func(queue *Queue) { queue.Seek(voice, 9) })
 	h.tick()
 	if got := h.probe(voice).Info.Playhead; got != float32(step) {
 		t.Fatalf("a seek past the end of an untagged looping Clip landed at %v, want a tick past 0", got)
@@ -135,10 +134,10 @@ func TestAClipWithNoRegionStillLoopsWhole(t *testing.T) {
 func TestARegionOutsideTheClipLoopsTheWholeClipInstead(t *testing.T) {
 	h := newHarness(t, newFakeBackend(fakeClip{
 		duration: 1, channels: 2, rate: 48000,
-		region: m.Some(sound.LoopRegion{Start: 0.5, End: 4}),
-	}), sound.Config{}, clipBytes)
+		region: m.Some(LoopRegion{Start: 0.5, End: 4}),
+	}), Config{}, clipBytes)
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{Loop: m.Some(true)})
+	voice := h.play(ClipWithResource(bell), 0, Params{Loop: m.Some(true)})
 	for range 64 {
 		h.tick()
 	}

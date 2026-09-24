@@ -1,8 +1,6 @@
 package internal
 
 import (
-	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecs/internal/types"
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
@@ -36,7 +34,7 @@ type plugin struct{}
 func New() kernel.Plugin { return plugin{} }
 
 // Name reports the plugin name.
-func (plugin) Name() kernel.PluginName { return ecs.Name }
+func (plugin) Name() kernel.PluginName { return Name }
 
 // Dependencies reports the plugins ecs requires; it has none.
 func (plugin) Dependencies() []kernel.PluginName { return nil }
@@ -58,25 +56,25 @@ func (plugin) Register(registrar *kernel.Registrar, value any) error {
 	if err != nil {
 		return err
 	}
-	registrar.InitResource(types.NewEntities(config.PrewarmEntities))
-	registrar.HandleCommand[ecs.ShrinkCmd](types.ShrinkCommand)
-	registrar.HandleCommand[censusCmd](types.CensusCommand)
-	registrar.HandleCommand[entityCmd](types.EntityCommand)
-	registrar.HandleCommand[queryCmd](types.QueryCommand)
-	registrar.HandleCommand[spawnCmd](types.SpawnCommand)
-	registrar.HandleCommand[despawnCmd](types.DespawnCommand)
-	registrar.HandleCommand[updateCmd](types.UpdateCommand)
+	registrar.InitResource(NewEntities(config.PrewarmEntities))
+	registrar.HandleCommand[ShrinkCmd](ShrinkCommand)
+	registrar.HandleCommand[censusCmd](CensusCommand)
+	registrar.HandleCommand[entityCmd](EntityCommand)
+	registrar.HandleCommand[queryCmd](QueryCommand)
+	registrar.HandleCommand[spawnCmd](SpawnCommand)
+	registrar.HandleCommand[despawnCmd](DespawnCommand)
+	registrar.HandleCommand[updateCmd](UpdateCommand)
 	// The six by-name Commands offered to an Agent. The Provider holds nothing
 	// and subscribes nothing, and an app that composes no broker binds it to
 	// nothing, so a game nobody debugs pays nothing for it.
-	registrar.ProvideAdapter[ecs.McpProvider](mcp.Provider(provider{}))
+	registrar.ProvideAdapter[McpProvider](mcp.Provider(provider{}))
 	// Where an Entity stands is one Store every binding reads - scene draws at
 	// it and sound is heard from it - so it belongs to neither. Two Components
 	// describing one position would be two lock units the scheduler cannot
 	// relate, and two Systems writing "the" position would run concurrently on
 	// separate copies. It is registered unconditionally, because a game that
 	// places nothing pays one empty Store.
-	types.RegisterComponent[m.Transform](registrar, config.PrewarmEntities)
+	RegisterComponent[m.Transform](registrar, config.PrewarmEntities)
 	// The general drainer, and the ECS's first dependency on the app slot. It is
 	// subscribed unconditionally, with no flag to turn it off, because a queue
 	// that is never drained is not a configuration: every deferring handle's
@@ -84,7 +82,7 @@ func (plugin) Register(registrar *kernel.Registrar, value any) error {
 	// own drain System. Last, so gameplay has run before it applies. The plugin
 	// stays zero-dependency: it names app.UpdateEvent, which is an event type
 	// and not a resource, so nothing here waits on the app plugin.
-	registrar.Subscribe[ecs.DrainOnUpdate](
-		types.ToHandler[app.UpdateEvent](registrar, drainSystem)).Last()
+	registrar.Subscribe[DrainOnUpdate](
+		ToHandler[app.UpdateEvent](registrar, drainSystem)).Last()
 	return nil
 }

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dvoyni/cog/bundles/input"
 	"github.com/dvoyni/cog/bundles/mcp"
 )
 
@@ -34,7 +33,7 @@ func TestCapabilities_OneActsAndOneLooks(t *testing.T) {
 	if send.ReadOnly() {
 		t.Error("pressing a key changes the game, so send is not read-only")
 	}
-	if send.RequestType() != reflect.TypeFor[input.SynthesizeRequest]() || send.ResponseType() != reflect.TypeFor[input.StateResponse]() {
+	if send.RequestType() != reflect.TypeFor[SynthesizeRequest]() || send.ResponseType() != reflect.TypeFor[StateResponse]() {
 		t.Errorf("send is %v -> %v", send.RequestType(), send.ResponseType())
 	}
 
@@ -45,7 +44,7 @@ func TestCapabilities_OneActsAndOneLooks(t *testing.T) {
 	if !state.ReadOnly() {
 		t.Error("asking what is held changes nothing, so state is read-only")
 	}
-	if state.RequestType() != reflect.TypeFor[input.StateRequest]() || state.ResponseType() != reflect.TypeFor[input.StateResponse]() {
+	if state.RequestType() != reflect.TypeFor[StateRequest]() || state.ResponseType() != reflect.TypeFor[StateResponse]() {
 		t.Errorf("state is %v -> %v", state.RequestType(), state.ResponseType())
 	}
 }
@@ -83,19 +82,19 @@ func TestSend_ARefusedSequenceLeavesTheDownSetUnchanged(t *testing.T) {
 	capabilities := (provider{}).Capabilities()
 	send, state := capabilities[0], capabilities[1]
 
-	pressed, err := send.Invoke(harness.k, &input.SynthesizeRequest{Actions: []input.Action{
-		{Do: input.ActionMove, X: 12, Y: 34},
-		{Do: input.ActionKeyDown, Key: input.KeyLeftShift},
+	pressed, err := send.Invoke(harness.k, &SynthesizeRequest{Actions: []Action{
+		{Do: ActionMove, X: 12, Y: 34},
+		{Do: ActionKeyDown, Key: KeyLeftShift},
 	}})
 	if err != nil {
 		t.Fatalf("send: %v", err)
 	}
-	before := pressed.(input.StateResponse)
+	before := pressed.(StateResponse)
 
-	_, err = send.Invoke(harness.k, &input.SynthesizeRequest{Actions: []input.Action{
-		{Do: input.ActionKeyDown, Key: input.KeyW},
-		{Do: input.ActionDelay, Ms: 20000},
-		{Do: input.ActionKeyUp, Key: input.KeyW},
+	_, err = send.Invoke(harness.k, &SynthesizeRequest{Actions: []Action{
+		{Do: ActionKeyDown, Key: KeyW},
+		{Do: ActionDelay, Ms: 20000},
+		{Do: ActionKeyUp, Key: KeyW},
 	}})
 	var reason mcp.Unavailable
 	if !errors.As(err, &reason) {
@@ -105,16 +104,16 @@ func TestSend_ARefusedSequenceLeavesTheDownSetUnchanged(t *testing.T) {
 		t.Errorf("reason %q does not name the cap", reason.Reason)
 	}
 
-	looked, err := state.Invoke(harness.k, &input.StateRequest{})
+	looked, err := state.Invoke(harness.k, &StateRequest{})
 	if err != nil {
 		t.Fatalf("state: %v", err)
 	}
-	after := looked.(input.StateResponse)
+	after := looked.(StateResponse)
 	if !slices.Equal(after.Down, before.Down) || after.Pointer != before.Pointer {
 		t.Errorf("the seam is %+v, want the %+v the refused sequence was supposed to leave",
 			after, before)
 	}
-	if !slices.Equal(after.Down, []input.Key{input.KeyLeftShift}) {
+	if !slices.Equal(after.Down, []Key{KeyLeftShift}) {
 		t.Errorf("the seam holds %v, want only what the accepted sequence pressed", after.Down)
 	}
 }
@@ -126,26 +125,26 @@ func TestState_AnswersTheSameQuestionWithoutPressingAnything(t *testing.T) {
 	capabilities := (provider{}).Capabilities()
 	send, state := capabilities[0], capabilities[1]
 
-	pressed, err := send.Invoke(harness.k, &input.SynthesizeRequest{Actions: []input.Action{
-		{Do: input.ActionMove, X: 5, Y: 6},
-		{Do: input.ActionKeyDown, Key: input.KeyMouseLeft},
+	pressed, err := send.Invoke(harness.k, &SynthesizeRequest{Actions: []Action{
+		{Do: ActionMove, X: 5, Y: 6},
+		{Do: ActionKeyDown, Key: KeyMouseLeft},
 	}})
 	if err != nil {
 		t.Fatalf("send: %v", err)
 	}
-	looked, err := state.Invoke(harness.k, &input.StateRequest{})
+	looked, err := state.Invoke(harness.k, &StateRequest{})
 	if err != nil {
 		t.Fatalf("state: %v", err)
 	}
-	if looked.(input.StateResponse).Pointer != pressed.(input.StateResponse).Pointer ||
-		!slices.Equal(looked.(input.StateResponse).Down, pressed.(input.StateResponse).Down) {
+	if looked.(StateResponse).Pointer != pressed.(StateResponse).Pointer ||
+		!slices.Equal(looked.(StateResponse).Down, pressed.(StateResponse).Down) {
 		t.Errorf("state answered %+v where send answered %+v", looked, pressed)
 	}
-	again, err := state.Invoke(harness.k, &input.StateRequest{})
+	again, err := state.Invoke(harness.k, &StateRequest{})
 	if err != nil {
 		t.Fatalf("state: %v", err)
 	}
-	if !slices.Equal(again.(input.StateResponse).Down, []input.Key{input.KeyMouseLeft}) {
+	if !slices.Equal(again.(StateResponse).Down, []Key{KeyMouseLeft}) {
 		t.Errorf("looking changed the seam to %+v", again)
 	}
 }

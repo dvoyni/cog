@@ -1,0 +1,442 @@
+package internal
+
+import (
+	"errors"
+	"reflect"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/app"
+)
+
+type body struct{ X, Y float32 }
+
+type typesVelocity struct{ X, Y float32 }
+
+type collider struct{ Radius float32 }
+
+// moveQuery is the two-Component Query of the tracer bullet: a pointer field
+// writes and yields the stored value, a value field reads and yields a copy.
+type typesMoveQuery struct {
+	Body     *body
+	Velocity typesVelocity
+}
+
+type typesMoveSystem kernel.Subscription[app.UpdateEvent]
+
+// componentsPlugin owns the Component types, which is the rule: a Component is
+// registered by the plugin that defines its Go type, and that is what keeps the
+// coupling check working on Component data.
+type componentsPlugin struct {
+	// world is the authority the ecs plugin published, kept so a test can
+	// allocate Entities and fill Stores directly around the engine.
+	world      *Entities
+	ids        uint32
+	bodies     *Store[body]
+	velocities *Store[typesVelocity]
+	colliders  *Store[collider]
+	disableds  *Store[disabled]
+	solids     *Store[solid]
+	homings    *Store[homing]
+}
+
+func (p *componentsPlugin) Name() kernel.PluginName { return "components" }
+
+func (p *componentsPlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{typesName} }
+
+func (p *componentsPlugin) Register(registrar *kernel.Registrar, _ any) error {
+	world, err := registrar.Dependency[*Entities]()
+	if err != nil {
+		return err
+	}
+	p.world = world
+	p.bodies = RegisterComponent[body](registrar, p.ids)
+	p.velocities = RegisterComponent[typesVelocity](registrar, p.ids)
+	p.colliders = RegisterComponent[collider](registrar, p.ids)
+	p.disableds = RegisterComponent[disabled](registrar, p.ids)
+	p.solids = RegisterComponent[solid](registrar, p.ids)
+	p.homings = RegisterComponent[homing](registrar, p.ids)
+	return nil
+}
+
+// systemsPlugin subscribes Systems, and declares the components plugin because
+// it locks the Stores that plugin owns. deps is overridable because a System
+// that names another plugin's resource locks that plugin's cell too, and the
+// coupling check is exactly what that is supposed to trip.
+type systemsPlugin struct {
+	deps      []kernel.PluginName
+	subscribe func(registrar *kernel.Registrar)
+}
+
+func (p *systemsPlugin) Name() kernel.PluginName { return "systems" }
+
+func (p *systemsPlugin) Dependencies() []kernel.PluginName {
+	if p.deps != nil {
+		return p.deps
+	}
+	return []kernel.PluginName{typesName, "components"}
+}
+
+func (p *systemsPlugin) Register(registrar *kernel.Registrar, _ any) error {
+	p.subscribe(registrar)
+	return nil
+}
+
+func move(q *Query[typesMoveQuery]) {
+	for _, it := range q.All() {
+		it.Body.X += it.Velocity.X
+		it.Body.Y += it.Velocity.Y
+	}
+}
+
+func subscribeMove(registrar *kernel.Registrar) {
+	registrar.Subscribe[typesMoveSystem](ToHandler[app.UpdateEvent](registrar, move))
+}
+
+// world composes a real engine and runs it until the test ends, so every claim
+// below is made against the kernel rather than against a stand-in for it.
+func newWorld(t testing.TB, ids uint32, subscribe func(*kernel.Registrar)) (
+	*Entities, *componentsPlugin, *kernel.Engine,
+) {
+	t.Helper()
+	return newWorldWith(t, ids, subscribe, nil)
+}
+
+// newWorldWith is newWorld with a bound plugin beside it: the third plugin a
+// binding necessarily is, publishing the frame-local resource a System reaches
+// through its signature. deps is the systems plugin's dependency list, which has
+// to name the bound plugin for the same reason it names the components one.
+func newWorldWith(t testing.TB, ids uint32, subscribe func(*kernel.Registrar),
+	deps []kernel.PluginName, bound ...kernel.Plugin,
+) (*Entities, *componentsPlugin, *kernel.Engine) {
+	t.Helper()
+	return newWorldHandling(t, ids, subscribe, deps,
+		func(err error) error { t.Errorf("unexpected kernel error: %v", err); return err }, bound...)
+}
+
+// newWorldHandling is newWorldWith with the error handler chosen by the caller,
+// for the tests whose subject is an error: a handler body reports rather than
+// returning now, so a test that asserts on a failure has to be the thing that
+// catches it.
+func newWorldHandling(t testing.TB, ids uint32, subscribe func(*kernel.Registrar),
+	deps []kernel.PluginName, handler kernel.ErrorHandler, bound ...kernel.Plugin,
+) (*Entities, *componentsPlugin, *kernel.Engine) {
+	t.Helper()
+	components := &componentsPlugin{ids: ids}
+	plugins := []kernel.Plugin{authority{ids: ids}, components}
+	plugins = append(plugins, bound...)
+	plugins = append(plugins, &systemsPlugin{deps: deps, subscribe: subscribe})
+	engine := kernel.New(nil).Handler(handler).WithPlugins(plugins...)
+	// The cleanup waits for Run to return rather than only cancelling it. A
+	// dying engine allocates while it winds down, and several tests here count
+	// allocations with MemStats, which counts every goroutine's — so an engine
+	// still shutting down inside a later test's measurement window is a flake in
+	// a number this package's whole verification strategy rests on.
+	stopped := make(chan struct{})
+	t.Cleanup(func() {
+		engine.Quit()
+		<-stopped
+	})
+	go func() {
+		defer close(stopped)
+		engine.Run()
+	}()
+	<-engine.Ready()
+	return components.world, components, engine
+}
+
+// TestAComponentMoves is the tracer bullet: one System with a two-Component
+// Query, on a real engine, driven by a real app.UpdateEvent. A write through a
+// pointer field lands, and a read yields a copy.
+func TestAComponentMoves(t *testing.T) {
+	entities, components, engine := newWorld(t, 128, subscribeMove)
+
+	moved := make([]Entity, 4)
+	for i := range moved {
+		e := entities.alloc()
+		moved[i] = e
+		components.bodies.Set(e, body{X: float32(i)})
+		components.velocities.Set(e, typesVelocity{X: 1, Y: 2})
+	}
+
+	engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait()
+
+	for i, e := range moved {
+		value, ok := components.bodies.Get(e)
+		if !ok {
+			t.Fatalf("entity %v lost its body", e)
+		}
+		if value.X != float32(i)+1 || value.Y != 2 {
+			t.Fatalf("body of %v = %v after one tick, want {%v 2}", e, value, float32(i)+1)
+		}
+	}
+}
+
+// TestASystemMayNameTheEventItIsDrivenBy covers the one parameter besides a
+// Query that this build accepts. It is legal and it is not the ordinary shape:
+// a System that names an event can only ever be subscribed to that event, where
+// the same gameplay should be drivable by a fixed-step tick or by a test
+// harness publishing its own frames.
+func TestASystemMayNameTheEventItIsDrivenBy(t *testing.T) {
+	type tickSystem kernel.Subscription[app.UpdateEvent]
+
+	entities, components, engine := newWorld(t, 64, func(registrar *kernel.Registrar) {
+		registrar.Subscribe[tickSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[typesMoveQuery], tick app.UpdateEvent) {
+			dt := float32(tick.Dt)
+			for _, it := range q.All() {
+				it.Body.X += it.Velocity.X * dt
+			}
+		}))
+	})
+	e := entities.alloc()
+	components.bodies.Set(e, body{})
+	components.velocities.Set(e, typesVelocity{X: 10})
+
+	frame(t, engine, 0.5)
+	frame(t, engine, 0.25)
+
+	if value, _ := components.bodies.Get(e); value.X != 7.5 {
+		t.Fatalf("body is %v after ticks of 0.5 and 0.25 at velocity 10, want {7.5 0}", value)
+	}
+}
+
+// TestAQueryOnlyVisitsEntitiesHavingEveryComponent is the whole of what a Query
+// selects on: presence, and nothing else.
+func TestAQueryOnlyVisitsEntitiesHavingEveryComponent(t *testing.T) {
+	entities, components, engine := newWorld(t, 128, subscribeMove)
+
+	both, bodyOnly, velocityOnly := entities.alloc(), entities.alloc(), entities.alloc()
+	components.bodies.Set(both, body{})
+	components.velocities.Set(both, typesVelocity{X: 1})
+	components.bodies.Set(bodyOnly, body{})
+	components.velocities.Set(velocityOnly, typesVelocity{X: 1})
+
+	engine.Executioner().PublishEvent(app.UpdateEvent{Dt: 1}).Wait()
+
+	if value, _ := components.bodies.Get(both); value.X != 1 {
+		t.Fatalf("the entity with both Components was not visited: %v", value)
+	}
+	if value, _ := components.bodies.Get(bodyOnly); value.X != 0 {
+		t.Fatalf("an entity with no velocity was visited: %v", value)
+	}
+}
+
+// TestEveryHandlerTouchingAStoreReadsEntities holds the invariant the despawn
+// traversal rests on: a Despawn reaches every Store through Go pointers the
+// kernel does not police, and that is sound only because every handler that
+// touches any Store declares read{*Entities}.
+func TestEveryHandlerTouchingAStoreReadsEntities(t *testing.T) {
+	_, _, engine := newWorld(t, 8, subscribeMove)
+
+	description := engine.Describe()
+	found := false
+	for _, sub := range description.Subscriptions {
+		if sub.Type != reflect.TypeFor[typesMoveSystem]() {
+			continue
+		}
+		found = true
+		if !slices.Contains(sub.Reads, entitiesType) {
+			t.Fatalf("the move System reads %v, which does not include *Entities", sub.Reads)
+		}
+		if !namesType(sub.Reads, "typesVelocity]") {
+			t.Fatalf("the move System reads %v, which does not include the velocity Store", sub.Reads)
+		}
+		if !namesType(sub.Writes, "body]") {
+			t.Fatalf("the move System writes %v, which does not include the body Store", sub.Writes)
+		}
+		if namesType(sub.Writes, "typesVelocity]") {
+			t.Fatalf("the move System write-locks the velocity Store, which it only reads")
+		}
+	}
+	if !found {
+		t.Fatalf("no moveSystem subscription in the description")
+	}
+}
+
+// TestAQueryOverAnUnregisteredComponentFailsComposition names the Component and
+// the Query, rather than the store type the user never wrote.
+func TestAQueryOverAnUnregisteredComponentFailsComposition(t *testing.T) {
+	var failure error
+	kernel.New(nil).
+		Handler(func(err error) error { failure = err; return err }).
+		WithPlugins(
+			authority{ids: 8},
+			&componentsPlugin{ids: 8},
+			&systemsPlugin{subscribe: func(registrar *kernel.Registrar) {
+				registrar.Subscribe[guardSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[guardedQuery]) {}))
+			}},
+		)
+
+	if failure == nil {
+		t.Fatalf("composing a Query over an unregistered Component succeeded")
+	}
+	message := failure.Error()
+	for _, want := range []string{"systems", "guardedQuery", "guarded"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("composition failure %q does not name %q", message, want)
+		}
+	}
+}
+
+// orphanPlugin registers a Component without declaring ecs, which is the one
+// mistake the world arriving through Registrar.Dependency adds.
+type orphanPlugin struct{}
+
+func (orphanPlugin) Name() kernel.PluginName { return "orphan" }
+
+func (orphanPlugin) Dependencies() []kernel.PluginName { return nil }
+
+func (orphanPlugin) Register(registrar *kernel.Registrar, _ any) error {
+	RegisterComponent[guarded](registrar, 8)
+	return nil
+}
+
+// TestAComponentRegisteredWithoutDependingOnEcsFailsComposition names the plugin
+// and the authority it could not reach, so the fix — declare ecs — is in the
+// sentence rather than behind a nil dereference.
+func TestAComponentRegisteredWithoutDependingOnEcsFailsComposition(t *testing.T) {
+	var failure error
+	kernel.New(nil).
+		Handler(func(err error) error { failure = err; return err }).
+		WithPlugins(authority{ids: 8}, orphanPlugin{})
+
+	if failure == nil {
+		t.Fatalf("registering a Component without depending on ecs succeeded")
+	}
+	message := failure.Error()
+	for _, want := range []string{"orphan", "*ecs.Entities", `"ecs"`} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("composition failure %q does not name %q", message, want)
+		}
+	}
+}
+
+type guarded struct{ Amount int32 }
+
+type guardedQuery struct {
+	Body    *body
+	Guarded guarded
+}
+
+type guardSystem kernel.Subscription[app.UpdateEvent]
+
+// TestASystemReturningAValueIsRejectedAtRegistration is a hard rule and not a
+// style preference: reflect.Value.Call allocates for a callee that returns one.
+func TestASystemReturningAValueIsRejectedAtRegistration(t *testing.T) {
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			t.Fatalf("a System returning a value was accepted at registration")
+		}
+		if message, _ := recovered.(string); !strings.Contains(message, "returns") {
+			t.Fatalf("panic %v does not say the System returns something", recovered)
+		}
+	}()
+	ToHandler[app.UpdateEvent](nil, func(q *Query[typesMoveQuery]) error { return nil })
+}
+
+// TestASystemTakingAnUnknownParameterIsRejected is the mistake every new user
+// makes once, so the diagnostic matters more than the mechanism.
+func TestASystemTakingAnUnknownParameterIsRejected(t *testing.T) {
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			t.Fatalf("a System taking an unknown parameter was accepted at registration")
+		}
+		message, _ := recovered.(string)
+		if !strings.Contains(message, "*ecs.Store[") {
+			t.Fatalf("panic %v does not name the offending parameter type", recovered)
+		}
+	}()
+	ToHandler[app.UpdateEvent](nil, func(s *Store[body]) {})
+}
+
+// TestABadSignatureFailsCompositionAsAPluginPanic pins what a user actually sees
+// when a signature is outside the contract: composition fails with
+// kernel.ErrPluginPanic naming the plugin and the Register boundary, and its
+// sentence names the System's func type and the offending parameter with no
+// stack in it. The direct-call tests above pin each refusal's wording; this one
+// pins the route.
+func TestABadSignatureFailsCompositionAsAPluginPanic(t *testing.T) {
+	for _, probe := range []struct {
+		name   string
+		system any
+		wanted []string
+	}{
+		{"an unknown parameter", func(s *Store[body]) {},
+			[]string{"ecs: System func(", "*ecs.Store[", "not something a System may take"}},
+		{"a returned value", func(q *Query[typesMoveQuery]) error { return nil },
+			[]string{"ecs: System func(", "returns"}},
+		{"an In no Feed supplies", func(dt *In[float64]) {},
+			[]string{"ecs: System func(", "*ecs.In[float64]", "which no Feed supplies"}},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			var failure error
+			kernel.New(nil).
+				Handler(func(err error) error { failure = err; return err }).
+				WithPlugins(
+					authority{ids: 8},
+					&componentsPlugin{ids: 8},
+					&systemsPlugin{subscribe: func(registrar *kernel.Registrar) {
+						registrar.Subscribe[guardSystem](ToHandler[app.UpdateEvent](registrar, probe.system))
+					}},
+				)
+
+			if failure == nil {
+				t.Fatalf("composing a System with %s succeeded", probe.name)
+			}
+			var panicked kernel.ErrPluginPanic
+			if !errors.As(failure, &panicked) {
+				t.Fatalf("composition failure %T (%v) is not a kernel.ErrPluginPanic", failure, failure)
+			}
+			if panicked.Plugin != "systems" || panicked.Boundary != "Register" {
+				t.Fatalf("composition failure names plugin %q at %q, want \"systems\" at \"Register\"",
+					panicked.Plugin, panicked.Boundary)
+			}
+			message := failure.Error()
+			for _, want := range probe.wanted {
+				if !strings.Contains(message, want) {
+					t.Fatalf("composition failure %q does not name %q", message, want)
+				}
+			}
+			if strings.Contains(message, "goroutine ") {
+				t.Fatalf("composition failure %q renders a stack", message)
+			}
+		})
+	}
+}
+
+// TestASystemNamingTheEventTwiceIsRejected holds the "at most once" half of the
+// classification. Two parameters would read one cell, so the second is never a
+// second value — it is always a mistake, and saying so is cheaper than letting
+// it look like it works.
+func TestASystemNamingTheEventTwiceIsRejected(t *testing.T) {
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			t.Fatalf("a System naming the event twice was accepted")
+		}
+		message, _ := recovered.(string)
+		for _, want := range []string{"event value", "app.UpdateEvent", "more than once"} {
+			if !strings.Contains(message, want) {
+				t.Fatalf("panic %v does not name %q", recovered, want)
+			}
+		}
+	}()
+	ToHandler[app.UpdateEvent](nil, func(a app.UpdateEvent, b app.UpdateEvent) {})
+}
+
+// entitiesType is the authority's resource type. Declarations are compared
+// against it rather than against its spelling, which is the internal package's.
+var entitiesType = reflect.TypeFor[*Entities]()
+
+func namesType(types []reflect.Type, want string) bool {
+	for _, t := range types {
+		if strings.Contains(kernel.TypeName(t), want) {
+			return true
+		}
+	}
+	return false
+}

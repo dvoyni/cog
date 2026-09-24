@@ -6,7 +6,6 @@ import (
 	"testing/fstest"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -23,7 +22,7 @@ func (h *harness) read(fn func(model.LookupReadAccess)) {
 // leaves the model absent for the next reader too.
 func TestTheReadFacadeReportsAnUnloadedModelAbsentAndStartsNoLoad(t *testing.T) {
 	files := counting(modelFiles(glb(t, skinnedModel(t))))
-	h := newHarnessWithFS(t, files, func(*scene.OpQueue) {})
+	h := newHarnessWithFS(t, files, func(*OpQueue) {})
 	ref := model.ModelRef{Path: modelPath}
 	for range 2 {
 		h.read(func(ra model.LookupReadAccess) {
@@ -48,7 +47,7 @@ func TestTheReadFacadeReportsAnUnloadedModelAbsentAndStartsNoLoad(t *testing.T) 
 // the same primitives, the same materials and the same animation, not copies.
 func TestAModelRefResolvesToAHandleOnceAndReadsByHandleReturnTheSameView(t *testing.T) {
 	files := counting(modelFiles(glb(t, skinnedModel(t))))
-	h := newHarnessWithFS(t, files, func(*scene.OpQueue) {})
+	h := newHarnessWithFS(t, files, func(*OpQueue) {})
 	ref := model.ModelRef{Path: modelPath}
 	var handle model.ModelHandle
 	var loaded model.ModelView
@@ -98,7 +97,7 @@ func TestAModelRefResolvesToAHandleOnceAndReadsByHandleReturnTheSameView(t *test
 // Unloading gives the handle's slot back. The handle then reads as absent, and
 // the model's path does too, until the load facade loads it again.
 func TestAnUnloadedModelsHandleReadsAbsent(t *testing.T) {
-	h := newHarnessWithFiles(t, modelFiles(glb(t, onePrimitiveModel(t))), func(*scene.OpQueue) {})
+	h := newHarnessWithFiles(t, modelFiles(glb(t, onePrimitiveModel(t))), func(*OpQueue) {})
 	ref := model.ModelRef{Path: modelPath}
 	var handle model.ModelHandle
 	h.device(func(la model.LookupDeviceAccess) { handle, _ = la.Resolve(ref) })
@@ -116,7 +115,7 @@ func TestAnUnloadedModelsHandleReadsAbsent(t *testing.T) {
 // A path that fails to load is cached as failed, and is not resident: the read
 // facade has no handle for it and the load facade resolves none.
 func TestAFailedModelHasNoHandle(t *testing.T) {
-	h := newHarnessWithFiles(t, fstest.MapFS{modelPath: {Data: []byte("not a model")}}, func(*scene.OpQueue) {})
+	h := newHarnessWithFiles(t, fstest.MapFS{modelPath: {Data: []byte("not a model")}}, func(*OpQueue) {})
 	ref := model.ModelRef{Path: modelPath}
 	h.device(func(la model.LookupDeviceAccess) {
 		if handle, ok := la.Resolve(ref); ok {

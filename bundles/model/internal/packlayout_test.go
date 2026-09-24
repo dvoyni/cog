@@ -4,14 +4,13 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/dvoyni/cog/bundles/model"
 	"github.com/gogpu/naga"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/wgsl"
 )
 
 // Every record the shader reads is declared twice - once as a Go struct in
-// internal/types, once as a WGSL struct in builtin/scene - and nothing but a
+// this package, once as a WGSL struct in builtin/scene - and nothing but a
 // comment saying "must match" held the two together. A mismatch is silent in
 // the worst way: the shader reads one field out of the bytes another one landed
 // in and renders something plausible. Adding a member to the frame block is
@@ -33,10 +32,10 @@ type shaderMember struct {
 }
 
 func TestEveryUploadedRecordMatchesItsShaderStruct(t *testing.T) {
-	var frame model.FrameBlock
-	var light model.Light
-	var instance model.Instance
-	var mesh model.SceneMesh
+	var frame FrameBlock
+	var light Light
+	var instance Instance
+	var mesh SceneMesh
 	records := []shaderRecord{
 		{"SceneFrame", unsafe.Sizeof(frame), []shaderMember{
 			{"view", unsafe.Offsetof(frame.View)},

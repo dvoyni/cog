@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/qmuntal/gltf"
 )
@@ -81,7 +80,7 @@ func decodeAnimBlock(t *testing.T, arena []byte, offset uint32) animBlock {
 
 // residentMorphModel loads one morphed file and returns the harness once it
 // draws.
-func residentMorphModel(t *testing.T, doc *gltf.Document, draw scene.ModelDraw) *harness {
+func residentMorphModel(t *testing.T, doc *gltf.Document, draw ModelDraw) *harness {
 	t.Helper()
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, draw))
 	h.frameUntil(t, "the model to become resident", func() bool {
@@ -94,13 +93,13 @@ func residentMorphModel(t *testing.T, doc *gltf.Document, draw scene.ModelDraw) 
 // none: sceneMorphDeltas is declared only in the variants that read it, so
 // there is no zero record for a debug box to carry.
 func TestAMorphedModelBindsItsOwnDeltasAndABoxBindsNone(t *testing.T) {
-	h := residentMorphModel(t, morphModel(t), scene.ModelDraw{})
+	h := residentMorphModel(t, morphModel(t), ModelDraw{})
 	// One position range, two target headers and one record each: the two
 	// shapes move one vertex apiece out of three.
 	if got, want := len(boundBytes(t, h, "sceneMorphDeltas")), morphModelWords*model.MorphWordSize; got != want {
 		t.Errorf("the bound delta buffer is %d bytes, want the model's %d", got, want)
 	}
-	box := newHarness(t, func(q *scene.OpQueue) {
+	box := newHarness(t, func(q *OpQueue) {
 		q.Camera(cameraMain, testCameraDescr())
 		q.Box(0, m.At(0, 0, 0), testBoxColor)
 	})
@@ -115,7 +114,7 @@ func TestAMorphedModelBindsItsOwnDeltasAndABoxBindsNone(t *testing.T) {
 // separately, and clearing the offset because there are no poses would silently
 // unmorph the model.
 func TestAMorphOnlyModelKeepsItsAnimBlock(t *testing.T) {
-	h := residentMorphModel(t, morphModel(t), scene.ModelDraw{})
+	h := residentMorphModel(t, morphModel(t), ModelDraw{})
 	instance := firstInstance(t, h)
 	if instance.Flags&model.SceneNoSkin == 0 {
 		t.Error("a model with no joints carries SCENE_NOSKIN, morphed or not")
@@ -150,7 +149,7 @@ func TestAMorphOnlyModelKeepsItsAnimBlock(t *testing.T) {
 // over the model's flattened target list rather than named: naming lives on the
 // lookup facade so that this path is a memcpy.
 func TestMorphWeightsOverrideReachesThePackedList(t *testing.T) {
-	h := residentMorphModel(t, morphModel(t), scene.ModelDraw{MorphWeights: []float32{0.25}})
+	h := residentMorphModel(t, morphModel(t), ModelDraw{MorphWeights: []float32{0.25}})
 	instance := firstInstance(t, h)
 	block := decodeAnimBlock(t, boundBytes(t, h, "sceneAnim"), instance.AnimOffset)
 	// The override wins whole: target 1's authored 0.5 is gone, not merged.
@@ -167,7 +166,7 @@ func TestMorphWeightsOverrideReachesThePackedList(t *testing.T) {
 // rather than an absence - and every weight at zero leaves nothing to blend, so
 // the draw carries no block at all.
 func TestAnEmptyMorphWeightsIsAnOverrideRatherThanAnAbsence(t *testing.T) {
-	h := residentMorphModel(t, morphModel(t), scene.ModelDraw{MorphWeights: []float32{}})
+	h := residentMorphModel(t, morphModel(t), ModelDraw{MorphWeights: []float32{}})
 	if got := firstInstance(t, h).AnimOffset; got != model.SceneNoAnim {
 		t.Errorf("AnimOffset = %d, want sceneNoAnim: every target was asked for at zero", got)
 	}
@@ -177,7 +176,7 @@ func TestAnEmptyMorphWeightsIsAnOverrideRatherThanAnAbsence(t *testing.T) {
 // makes morph targets cost a static prop and a plain rig nothing.
 func TestAModelWithNoShapesPacksNoMorphList(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, onePrimitiveModel(t))),
-		drawModel(modelPath, scene.ModelDraw{}))
+		drawModel(modelPath, ModelDraw{}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
 	})
@@ -198,7 +197,7 @@ func TestAModelWithNoShapesPacksNoMorphList(t *testing.T) {
 // MorphWeights is positional over, and the byte counts are what makes delta
 // memory a measured number rather than a guess.
 func TestTheLookupReportsMorphTargetsAndBytes(t *testing.T) {
-	h := newHarnessWithFiles(t, modelFiles(glb(t, morphModel(t))), func(*scene.OpQueue) {})
+	h := newHarnessWithFiles(t, modelFiles(glb(t, morphModel(t))), func(*OpQueue) {})
 	var names []string
 	var bytes int
 	h.frameUntil(t, "the model to become resident", func() bool {
@@ -236,7 +235,7 @@ func TestASkinnedAndMorphedModelBindsBothOfItsOwnBuffers(t *testing.T) {
 	// A rotation on the node makes it a degenerate single-joint skin, which is
 	// how glTF authors a moving part - so the file is rigged and shaped at once.
 	rotationClip(doc, "spin", 0, []float32{0, 1}, [][4]float32{{0, 0, 0, 1}, {0, 0, 1, 0}})
-	h := residentMorphModel(t, doc, scene.ModelDraw{
+	h := residentMorphModel(t, doc, ModelDraw{
 		Plays: []model.ClipPlay{{Clip: "spin", Time: 0.5, Weight: 1}},
 	})
 	instance := firstInstance(t, h)

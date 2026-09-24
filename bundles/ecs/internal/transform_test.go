@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -21,21 +20,21 @@ type readPlaceSystem kernel.Subscription[app.UpdateEvent]
 // no Component of its own, spawns an Entity with an m.Transform, and reads the
 // Transform back through a Query.
 type placerPlugin struct {
-	spawned ecs.Entity
+	spawned Entity
 	read    []m.Transform
 }
 
 func (*placerPlugin) Name() kernel.PluginName { return "placer" }
 
-func (*placerPlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{ecs.Name} }
+func (*placerPlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{Name} }
 
 func (p *placerPlugin) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.Subscribe[placeSystem](ecs.ToHandler[app.UpdateEvent](registrar, func(sp *ecs.Spawn[placed]) {
-		if p.spawned == ecs.NoEntity {
+	registrar.Subscribe[placeSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[placed]) {
+		if p.spawned == NoEntity {
 			p.spawned = sp.New(placed{Place: m.At(1, 2, 3)})
 		}
 	})).First()
-	registrar.Subscribe[readPlaceSystem](ecs.ToHandler[app.UpdateEvent](registrar, func(q *ecs.Query[placed]) {
+	registrar.Subscribe[readPlaceSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[placed]) {
 		p.read = p.read[:0]
 		for _, it := range q.All() {
 			p.read = append(p.read, it.Place)
@@ -50,10 +49,10 @@ type rivalPlugin struct{}
 
 func (rivalPlugin) Name() kernel.PluginName { return "rival" }
 
-func (rivalPlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{ecs.Name} }
+func (rivalPlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{Name} }
 
 func (rivalPlugin) Register(registrar *kernel.Registrar, _ any) error {
-	ecs.RegisterComponent[m.Transform](registrar, 8)
+	RegisterComponent[m.Transform](registrar, 8)
 	return nil
 }
 
@@ -79,18 +78,18 @@ func runEngine(t *testing.T, plugins ...kernel.Plugin) *kernel.Engine {
 // fast path: a Transform is plain values, so its Store moves by size and its
 // spans are noscan, which recording thousands of placed Entities relies on.
 func TestTheEcsPluginAloneOwnsTheTransformStore(t *testing.T) {
-	if err := ecs.PointerFree(reflect.TypeFor[m.Transform]()); err != nil {
+	if err := PointerFree(reflect.TypeFor[m.Transform]()); err != nil {
 		t.Fatalf("m.Transform is not pointer-free: %v", err)
 	}
 	engine := runEngine(t, New())
 	var owner kernel.PluginName
 	for _, resource := range engine.Describe().Resources {
-		if resource.Type == reflect.TypeFor[*ecs.Store[m.Transform]]() {
+		if resource.Type == reflect.TypeFor[*Store[m.Transform]]() {
 			owner = resource.Owner
 		}
 	}
-	if owner != ecs.Name {
-		t.Fatalf("*ecs.Store[m.Transform] is owned by %q, want %q", owner, ecs.Name)
+	if owner != Name {
+		t.Fatalf("*ecs.Store[m.Transform] is owned by %q, want %q", owner, Name)
 	}
 }
 
@@ -117,8 +116,8 @@ func TestASecondTransformStoreFailsComposition(t *testing.T) {
 	if !errors.As(failure, &duplicate) {
 		t.Fatalf("a second m.Transform Store composed with %v", failure)
 	}
-	if duplicate.Owner != "rival" || duplicate.Existing != ecs.Name ||
-		duplicate.Type != reflect.TypeFor[*ecs.Store[m.Transform]]() {
-		t.Errorf("the refusal is %+v, want rival's *ecs.Store[m.Transform] refused as already %q's", duplicate, ecs.Name)
+	if duplicate.Owner != "rival" || duplicate.Existing != Name ||
+		duplicate.Type != reflect.TypeFor[*Store[m.Transform]]() {
+		t.Errorf("the refusal is %+v, want rival's *ecs.Store[m.Transform] refused as already %q's", duplicate, Name)
 	}
 }

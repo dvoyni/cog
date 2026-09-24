@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/dvoyni/cog/slots/sound"
 )
 
 // The Device is absent, not ready yet, or lost, and a game sees one thing in
@@ -25,7 +24,7 @@ func notReady(t *testing.T, clip fakeClip) *harness {
 	t.Helper()
 	backend := newFakeBackend(clip)
 	backend.setReady(false)
-	return newHarness(t, backend, sound.Config{}, clipBytes)
+	return newHarness(t, backend, Config{}, clipBytes)
 }
 
 // A Voice's playhead advances whether or not anyone can hear it. This is that
@@ -40,7 +39,7 @@ func notReady(t *testing.T, clip fakeClip) *harness {
 func TestAVoiceAdvancesWhileTheDeviceIsNotReadyAndIsMidClipWhenItArrives(t *testing.T) {
 	h := notReady(t, fakeClip{duration: 1, channels: 2, rate: 48000})
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	voice := h.play(ClipWithResource(bell), 0, Params{})
 	for range 32 {
 		h.tick()
 	}
@@ -76,14 +75,14 @@ func TestAVoiceAdvancesWhileTheDeviceIsNotReadyAndIsMidClipWhenItArrives(t *test
 func TestAVoiceThatOutlivesNoDeviceEndsOnSchedule(t *testing.T) {
 	h := notReady(t, fakeClip{duration: 0.5, channels: 2, rate: 48000})
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	voice := h.play(ClipWithResource(bell), 0, Params{})
 	for range 31 {
 		h.tick()
 	}
 	h.noEnding()
 
 	h.tick()
-	if ended := h.waitEnded(); ended.Voice != voice || ended.Reason != sound.ReasonFinished {
+	if ended := h.waitEnded(); ended.Voice != voice || ended.Reason != ReasonFinished {
 		t.Fatalf("ended as %v/%v, want %v/finished", ended.Voice, ended.Reason, voice)
 	}
 	if got := h.probe(voice); got.Found || got.Live != 0 {
@@ -104,7 +103,7 @@ func TestSoundNeverReportsANotReadyDevice(t *testing.T) {
 	reported := make(chan error, 8)
 	h := newHarnessReporting(t, backend, clipBytes, func(err error) { reported <- err })
 
-	h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	h.play(ClipWithResource(bell), 0, Params{})
 	for range 16 {
 		h.tick()
 	}
@@ -127,9 +126,9 @@ func TestSoundNeverReportsANotReadyDevice(t *testing.T) {
 // other Voice in the mix are thirty-four ticks in.
 func TestARecoveryRepinsEveryLiveVoiceToWhereTheWorldIsNow(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	voice := h.play(ClipWithResource(bell), 0, Params{})
 	for range 4 {
 		h.tick()
 	}
@@ -175,14 +174,14 @@ func TestARecoveryRepinsEveryLiveVoiceToWhereTheWorldIsNow(t *testing.T) {
 // so nothing a pause does reaches the Device at all, and in particular a paused
 // engine is not a not-ready one.
 func TestAPausedVoiceDoesNotChangeTheDevice(t *testing.T) {
-	h := newHarness(t, newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000}), sound.Config{}, clipBytes)
+	h := newHarness(t, newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000}), Config{}, clipBytes)
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	voice := h.play(ClipWithResource(bell), 0, Params{})
 	h.tick()
 	before := h.probe(voice).Device
 
-	h.record(func(queue *sound.Queue) {
-		queue.SetVoice(voice, sound.Params{Paused: m.Some(true)})
+	h.record(func(queue *Queue) {
+		queue.SetVoice(voice, Params{Paused: m.Some(true)})
 	})
 	for range 10 {
 		h.tick()
@@ -200,14 +199,14 @@ func TestAPausedVoiceDoesNotChangeTheDevice(t *testing.T) {
 // rather than one that runs away the moment it is addressable again.
 func TestARecoveryRepinsAPausedVoiceAtTheSampleItSuspendedOn(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	voice := h.play(ClipWithResource(bell), 0, Params{})
 	for range 4 {
 		h.tick()
 	}
-	h.record(func(queue *sound.Queue) {
-		queue.SetVoice(voice, sound.Params{Paused: m.Some(true)})
+	h.record(func(queue *Queue) {
+		queue.SetVoice(voice, Params{Paused: m.Some(true)})
 	})
 	h.tick()
 

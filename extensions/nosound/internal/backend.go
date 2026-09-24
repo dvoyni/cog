@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"sync"
 
-	"github.com/dvoyni/cog/extensions/nosound"
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/sound"
@@ -62,7 +61,7 @@ type backend struct {
 func newBackend(sampleRate int) *backend {
 	return &backend{device: sound.Device{
 		Ready:      true,
-		Name:       string(nosound.Name),
+		Name:       string(Name),
 		SampleRate: sampleRate,
 		Channels:   2,
 	}}
@@ -96,15 +95,15 @@ func (b *backend) Device() sound.Device { return b.device }
 func (b *backend) Prepare(_ any, encoded assets.Blob) (sound.PreparedClip, bool, error) {
 	reader, err := oggvorbis.NewReader(bytes.NewReader(encoded.Data()))
 	if err != nil {
-		return nil, false, nosound.ErrNotOggVorbis{Err: err}
+		return nil, false, ErrNotOggVorbis{Err: err}
 	}
 	rate, channels := reader.SampleRate(), reader.Channels()
 	if rate <= 0 || channels <= 0 {
-		return nil, false, nosound.ErrNoStreamFormat{SampleRate: rate, Channels: channels}
+		return nil, false, ErrNoStreamFormat{SampleRate: rate, Channels: channels}
 	}
 	frames := reader.Length()
 	if frames <= 0 {
-		return nil, false, nosound.ErrNoStreamLength{}
+		return nil, false, ErrNoStreamLength{}
 	}
 	frames, region, dropped := clipBounds(encoded, rate, frames, frames)
 	if dropped != nil {

@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -32,23 +31,23 @@ type moveSystem kernel.Subscription[app.UpdateEvent]
 // subscribes its Systems through ecs's root, and declares a dependency
 // on ecs.Name, which is what registers the authority first.
 type gamePlugin struct {
-	positions *ecs.Store[position]
-	spawned   ecs.Entity
+	positions *Store[position]
+	spawned   Entity
 }
 
 func (*gamePlugin) Name() kernel.PluginName { return "game" }
 
-func (*gamePlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{ecs.Name} }
+func (*gamePlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{Name} }
 
 func (p *gamePlugin) Register(registrar *kernel.Registrar, _ any) error {
-	p.positions = ecs.RegisterComponent[position](registrar, 8)
-	ecs.RegisterComponent[velocity](registrar, 8)
-	registrar.Subscribe[spawnSystem](ecs.ToHandler[app.UpdateEvent](registrar, func(sp *ecs.Spawn[projectile]) {
-		if p.spawned == ecs.NoEntity {
+	p.positions = RegisterComponent[position](registrar, 8)
+	RegisterComponent[velocity](registrar, 8)
+	registrar.Subscribe[spawnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[projectile]) {
+		if p.spawned == NoEntity {
 			p.spawned = sp.New(projectile{Velocity: velocity{X: 2}})
 		}
 	})).First()
-	registrar.Subscribe[moveSystem](ecs.ToHandler[app.UpdateEvent](registrar, func(q *ecs.Query[moveQuery]) {
+	registrar.Subscribe[moveSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery]) {
 		for _, it := range q.All() {
 			it.Position.X += it.Velocity.X
 		}
@@ -61,7 +60,7 @@ func (p *gamePlugin) Register(registrar *kernel.Registrar, _ any) error {
 // allocates through it, and a Query walks what the spawn wrote.
 func TestNewPublishesTheAuthority(t *testing.T) {
 	game := &gamePlugin{}
-	engine := kernel.New(map[kernel.PluginName]any{ecs.Name: ecs.Config{PrewarmEntities: 16}}).
+	engine := kernel.New(map[kernel.PluginName]any{Name: Config{PrewarmEntities: 16}}).
 		Handler(func(err error) error { t.Errorf("unexpected kernel error: %v", err); return err }).
 		WithPlugins(New(), game)
 	stopped := make(chan struct{})
@@ -87,12 +86,12 @@ func TestNewPublishesTheAuthority(t *testing.T) {
 	}
 	var registered bool
 	for _, resource := range engine.Describe().Resources {
-		if resource.Type == reflect.TypeFor[*ecs.Entities]() && resource.Owner == ecs.Name {
+		if resource.Type == reflect.TypeFor[*Entities]() && resource.Owner == Name {
 			registered = true
 		}
 	}
 	if !registered {
-		t.Fatalf("the architecture has no *ecs.Entities owned by %q", ecs.Name)
+		t.Fatalf("the architecture has no *ecs.Entities owned by %q", Name)
 	}
 }
 

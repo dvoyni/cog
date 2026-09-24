@@ -4,8 +4,7 @@ import (
 	"strconv"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
+
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -20,7 +19,7 @@ import (
 type plugin struct {
 	// defaultPasses is the reused one-element slice a camera that declared no
 	// passes of its own is flushed through.
-	defaultPasses [1]scene.Pass
+	defaultPasses [1]Pass
 	labels        map[passLabel]string
 	// build is the frame under construction. It lives on the plugin so its
 	// arenas keep their backing across frames.
@@ -33,7 +32,7 @@ type plugin struct {
 	// material a draw names: model's materials name no pass, so the flush
 	// wraps each as a scene material here. It keeps its backing across frames,
 	// so a steady frame wraps without allocating.
-	forward []scene.MaterialTag
+	forward []MaterialTag
 	// prepared is the frame's per-draw resolution, parallel to the flushed
 	// draws, and culler the per-camera cull. Both keep their backing across
 	// frames.
@@ -59,7 +58,7 @@ type plugin struct {
 	// draw's play records are folded in. All three keep their backing across
 	// frames.
 	modelViews []model.ModelView
-	modelAnims []types.AnimBinding
+	modelAnims []AnimBinding
 	modelPlays []model.ScenePlayRecord
 	// The morph half of the same resolution. modelWeightFrames is parallel to
 	// modelPlays, modelWeights the draw's blended vector over the model's
@@ -81,8 +80,8 @@ type plugin struct {
 // cached because the camera set is stable frame to frame, so building them
 // costs nothing after the first frame that used them.
 type passLabel struct {
-	camera scene.CameraID
-	tag    scene.PassTag
+	camera CameraID
+	tag    PassTag
 }
 
 // New returns the scene plugin. It declares scene.OpQueue, and requires gfx,
@@ -94,7 +93,7 @@ func New() kernel.Plugin {
 	return &plugin{labels: map[passLabel]string{}, meshReported: map[uint32]struct{}{}}
 }
 
-func (p *plugin) Name() kernel.PluginName { return scene.Name }
+func (p *plugin) Name() kernel.PluginName { return Name }
 
 // Dependencies reports the plugins scene requires: gfx, which it emits passes
 // and draws into, storage, whose filesystem a model draw loads from, and model,
@@ -108,8 +107,8 @@ func (p *plugin) Dependencies() []kernel.PluginName {
 // is the pose sample rate that sizes it, so a value handed to scene under its
 // own name is ignored.
 func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.InitResource(&scene.OpQueue{})
-	registrar.Subscribe[scene.FlushOnUpdate](p.flush).
+	registrar.InitResource(&OpQueue{})
+	registrar.Subscribe[FlushOnUpdate](p.flush).
 		Last().Before[gfx.PresentOnUpdate]()
 	return nil
 }
@@ -127,14 +126,14 @@ func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
 // only by storage's own three mount commands, and canvas's flush, ui's update
 // and gfx's render already hold it as a read.
 func (p *plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	var writeQueue kernel.Write[*scene.OpQueue]
+	var writeQueue kernel.Write[*OpQueue]
 	var lookupResource kernel.Write[*model.Lookup]
 	var gfxQueue kernel.Write[*gfx.OpQueue]
 	var gfxResourceQueue kernel.Write[*gfx.ResourceQueue]
 	var viewport kernel.Read[*gfx.Viewport]
 	var filesystem kernel.Read[storage.FileSystem]
 	return func(access kernel.ResourceAccess) {
-			writeQueue = access.GetWrite[*scene.OpQueue]()
+			writeQueue = access.GetWrite[*OpQueue]()
 			lookupResource = access.GetWrite[*model.Lookup]()
 			gfxQueue = access.GetWrite[*gfx.OpQueue]()
 			gfxResourceQueue = access.GetWrite[*gfx.ResourceQueue]()
@@ -147,14 +146,14 @@ func (p *plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 }
 
 func (p *plugin) flushFrame(
-	k kernel.Kernel, write *scene.OpQueue, lookup *model.Lookup,
+	k kernel.Kernel, write *OpQueue, lookup *model.Lookup,
 	gfxWrite *gfx.OpQueue, gfxResources *gfx.ResourceQueue, view *gfx.Viewport,
 	filesystem storage.FileSystem,
 ) {
-	cameras := types.OpQueueBeginFlush(write)
-	defer types.OpQueueEndFlush(write)
-	for _, id := range types.OpQueueDuplicates(write) {
-		k.ReportError(scene.ErrCameraAlreadyRecorded{Camera: id})
+	cameras := OpQueueBeginFlush(write)
+	defer OpQueueEndFlush(write)
+	for _, id := range OpQueueDuplicates(write) {
+		k.ReportError(ErrCameraAlreadyRecorded{Camera: id})
 	}
 	// A frame before the MainLoop has reported a window, or while one is
 	// minimised, is skipped whole rather than reported: every screen-targeted
@@ -193,7 +192,7 @@ func (p *plugin) flushFrame(
 	clear(p.forward)
 	p.forward = p.forward[:0]
 	bundled := lookup.EnsureBundled(bakeTexture)
-	var wrapped [model.VariantCount]scene.Material
+	var wrapped [model.VariantCount]Material
 	for variant := range bundled {
 		wrapped[variant] = p.forwardMaterial(bundled[variant])
 	}
@@ -203,8 +202,8 @@ func (p *plugin) flushFrame(
 	// Anything a draw names and the cache does not hold is read, parsed and
 	// uploaded right here, which is the hitch Preload exists to move.
 	p.expandModels(k, lookup, write, filesystem, gfxResources)
-	p.prepareDraws(report, lookup, write, bake, types.OpQueueFlushDraws(write))
-	p.preparedLights = prepareLights(report, p.preparedLights, types.OpQueueFlushLights(write))
+	p.prepareDraws(report, lookup, write, bake, OpQueueFlushDraws(write))
+	p.preparedLights = prepareLights(report, p.preparedLights, OpQueueFlushLights(write))
 	for i := range cameras {
 		p.flushCamera(k, write, lookup, view, cameras[i])
 	}
@@ -216,15 +215,15 @@ func (p *plugin) flushFrame(
 // interned index, its world matrix and its world-space bounding sphere. A draw's
 // per-camera cost is then one sphere test, and its per-pass cost one array read.
 func (p *plugin) prepareDraws(
-	report func(error), lookup *model.Lookup, write *scene.OpQueue,
-	bake model.BakeFunc, draws []types.DrawRecord,
+	report func(error), lookup *model.Lookup, write *OpQueue,
+	bake model.BakeFunc, draws []DrawRecord,
 ) {
 	p.prepared = grow(p.prepared, len(draws))
 	clear(p.meshReported)
 	for i := range draws {
 		record := &draws[i]
 		ref := record.Mesh
-		if record.Shape != types.ShapeNone {
+		if record.Shape != ShapeNone {
 			ref = lookup.EnsureUnit(record.Shape.UnitMesh(), bake)
 		}
 		mesh, ok := p.resolveMesh(lookup, write, ref)
@@ -239,7 +238,7 @@ func (p *plugin) prepareDraws(
 			}
 			ref = model.MeshRef{}
 		case !mesh.Standard && record.Material == nil:
-			p.reportMeshOnce(report, ref, scene.ErrMeshCustomLayoutNeedsMaterial{Mesh: ref.ID()})
+			p.reportMeshOnce(report, ref, ErrMeshCustomLayoutNeedsMaterial{Mesh: ref.ID()})
 			ref, mesh = model.MeshRef{}, model.MeshRecord{}
 		}
 		p.prepared[i] = prepareDraw(*record, mesh)
@@ -269,11 +268,11 @@ func (p *plugin) prepareDraws(
 // checked against the frame it was minted in, which is what stops a ref kept
 // across a frame boundary from drawing whatever now holds its slot.
 func (p *plugin) resolveMesh(
-	lookup *model.Lookup, write *scene.OpQueue, ref model.MeshRef,
+	lookup *model.Lookup, write *OpQueue, ref model.MeshRef,
 ) (model.MeshRecord, bool) {
-	if ref.Source() == types.MeshTemporary {
+	if ref.Source() == MeshTemporary {
 		id := ref.Index()
-		if ref.Generation() != types.OpQueuePublishedFrame(write) || id == 0 || int(id) > len(p.temporaries) {
+		if ref.Generation() != OpQueuePublishedFrame(write) || id == 0 || int(id) > len(p.temporaries) {
 			return model.MeshRecord{}, false
 		}
 		return p.temporaries[id-1], true
@@ -284,8 +283,8 @@ func (p *plugin) resolveMesh(
 // buildTemporaries materialises the frame's temporary meshes and reports the
 // mints that were rejected, which the recording could not report itself: the
 // queue holds no kernel.
-func (p *plugin) buildTemporaries(report func(error), write *scene.OpQueue) {
-	recording := types.OpQueueFlushMeshes(write)
+func (p *plugin) buildTemporaries(report func(error), write *OpQueue) {
+	recording := OpQueueFlushMeshes(write)
 	for _, err := range recording.Reports {
 		report(err)
 	}
@@ -316,24 +315,24 @@ func (p *plugin) reportMeshOnce(report func(error), ref model.MeshRef, err error
 // skipped whole: the projection it would get instead is degenerate, and every
 // pass built from it would cull against a volume nobody asked for.
 func (p *plugin) flushCamera(
-	k kernel.Kernel, write *scene.OpQueue, lookup *model.Lookup, view *gfx.Viewport, camera types.CameraRecord,
+	k kernel.Kernel, write *OpQueue, lookup *model.Lookup, view *gfx.Viewport, camera CameraRecord,
 ) {
 	if camera.Descr.Near == 0 || camera.Descr.Far == 0 {
-		k.ReportError(scene.ErrCameraClipPlanesMissing{
+		k.ReportError(ErrCameraClipPlanesMissing{
 			Camera: camera.ID, Near: camera.Descr.Near, Far: camera.Descr.Far,
 		})
 		return
 	}
-	viewMatrix, ok := types.CameraView(camera.Descr.Transform)
+	viewMatrix, ok := CameraView(camera.Descr.Transform)
 	if !ok {
-		k.ReportError(scene.ErrCameraProjectionDegenerate{
+		k.ReportError(ErrCameraProjectionDegenerate{
 			Camera: camera.ID, Reason: "the transform has no inverse",
 		})
 		return
 	}
 	passes := camera.Descr.Passes
 	if len(passes) == 0 {
-		p.defaultPasses[0] = types.DefaultPass()
+		p.defaultPasses[0] = DefaultPass()
 		passes = p.defaultPasses[:]
 	}
 	p.culler.beginCamera()
@@ -346,22 +345,22 @@ func (p *plugin) flushCamera(
 // in what order, and packs them. Within a pass, recording order is not
 // preserved - that is the trade the sort makes, and Passes documents it.
 func (p *plugin) flushPass(
-	k kernel.Kernel, write *scene.OpQueue, lookup *model.Lookup, view *gfx.Viewport,
-	camera types.CameraRecord, viewMatrix m.Mat4, pass scene.Pass,
+	k kernel.Kernel, write *OpQueue, lookup *model.Lookup, view *gfx.Viewport,
+	camera CameraRecord, viewMatrix m.Mat4, pass Pass,
 ) {
 	aspect, err := passAspect(camera.ID, pass, view)
 	if err != nil {
 		k.ReportError(err)
 		return
 	}
-	projectionMatrix, err := types.Projection(camera.ID, camera.Descr, aspect)
+	projectionMatrix, err := Projection(camera.ID, camera.Descr, aspect)
 	if err != nil {
 		k.ReportError(err)
 		return
 	}
 	order := gfx.Order(camera.ID) + pass.Order
 	viewProjection := projectionMatrix.Mul(viewMatrix)
-	draws := types.OpQueueFlushDraws(write)
+	draws := OpQueueFlushDraws(write)
 	// One cull per distinct frustum: a second pass at the same aspect reuses
 	// the first's survivors and filters them by its own tag.
 	cull := p.culler.results[p.culler.cull(
@@ -378,20 +377,20 @@ func (p *plugin) flushPass(
 		Projection:     projectionMatrix,
 		ViewProjection: viewProjection,
 		CameraPosition: eye,
-		ViewDirection:  types.ViewDirection(camera.Descr),
+		ViewDirection:  ViewDirection(camera.Descr),
 	}, frameLighting(camera.Descr), &p.lights)
 	pending := p.build.beginPass(p.passDescr(camera.ID, pass, order), block)
-	result := scene.PassView{
+	result := PassView{
 		CameraID: camera.ID,
 		Order:    order,
-		Tag:      types.PassTagOf(pass),
+		Tag:      PassTagOf(pass),
 		Frustum:  cull.frustum,
 		Recorded: cull.recorded,
 		Culled:   cull.culled,
 		Lights:   p.lights.Count(),
 	}
 	// The tag interns once per pass, so no draw in it ever compares a string.
-	tag := p.materials.internTag(types.PassTagOf(pass))
+	tag := p.materials.internTag(PassTagOf(pass))
 	p.build.opaque, p.build.blend = p.build.opaque[:0], p.build.blend[:0]
 	for i := range survivors {
 		prepared := &p.prepared[survivors[i].draw]
@@ -439,8 +438,8 @@ func (p *plugin) flushPass(
 		}
 	}
 	p.build.endPass(pending)
-	types.OpQueuePublishPass(write, result)
-	types.OpQueuePublishBatches(write, p.build.batches)
+	OpQueuePublishPass(write, result)
+	OpQueuePublishBatches(write, p.build.batches)
 }
 
 // sortClass is one of the two classes a pass emits, with whether its entries
@@ -465,7 +464,7 @@ type sortClass struct {
 // group's survivors are contiguous for the same reason: the instances of one
 // call share a key, and every other draw was recorded wholly before or wholly
 // after the call.
-func groupRun(entries []sortEntry, survivors []survivor, draws []types.DrawRecord, prepared []preparedDraw) int {
+func groupRun(entries []sortEntry, survivors []survivor, draws []DrawRecord, prepared []preparedDraw) int {
 	index := survivors[entries[0].draw].draw
 	head := runHead{draw: &draws[index], anim: &prepared[index].anim}
 	run := 1
@@ -485,8 +484,8 @@ func groupRun(entries []sortEntry, survivors []survivor, draws []types.DrawRecor
 // computed once for the run rather than once per draw: its parameters'
 // fingerprint.
 type runHead struct {
-	draw *types.DrawRecord
-	anim *types.AnimBinding
+	draw *DrawRecord
+	anim *AnimBinding
 
 	fingerprint uint64
 	hashed      bool
@@ -500,7 +499,7 @@ type runHead struct {
 // one arena range - are equal without a hash. Anything else compares gfx's own
 // fingerprint, the one ecsscene keys its batches on, which is the only
 // comparison that cannot silently forget a kind.
-func (h *runHead) matches(draw *types.DrawRecord, anim *types.AnimBinding) bool {
+func (h *runHead) matches(draw *DrawRecord, anim *AnimBinding) bool {
 	// A shape's colour becomes params at the draw, so two shapes of one
 	// colour are equal here and two of different colours are not.
 	if draw.Color != h.draw.Color || draw.SelfLit != h.draw.SelfLit || !sameAnim(h.anim, anim) {
@@ -525,7 +524,7 @@ func (h *runHead) matches(draw *types.DrawRecord, anim *types.AnimBinding) bool 
 // batch packs one binding for all of its instances, so separately animated
 // draws must stay separate batches: each animated call packs its own sceneAnim
 // block, and so carries its own offset.
-func sameAnim(a, b *types.AnimBinding) bool {
+func sameAnim(a, b *AnimBinding) bool {
 	if a.InstanceAnim != b.InstanceAnim || a.Skin.Bound != b.Skin.Bound || a.Skin.Morphed != b.Skin.Morphed {
 		return false
 	}
@@ -556,13 +555,13 @@ func cameraPosition(transform m.Transform) m.Vec4 {
 // an explicit depth texture — you allocated it, you mean to sample it — and
 // discarded otherwise, so every forward pass gets the tiled-GPU depth-discard
 // win for free and there is no knob to set wrong. Colour is always kept.
-func (p *plugin) passDescr(id scene.CameraID, pass scene.Pass, order gfx.Order) gfx.PassDescr {
+func (p *plugin) passDescr(id CameraID, pass Pass, order gfx.Order) gfx.PassDescr {
 	desc := gfx.PassDescr{
 		Order:      order,
 		Target:     pass.Target,
 		Depth:      pass.Depth,
 		DepthStore: gfx.StoreDiscard,
-		Label:      p.label(id, types.PassTagOf(pass)),
+		Label:      p.label(id, PassTagOf(pass)),
 	}
 	if pass.Depth.IsTexture() {
 		desc.DepthStore = gfx.StoreKeep
@@ -576,7 +575,7 @@ func (p *plugin) passDescr(id scene.CameraID, pass scene.Pass, order gfx.Order) 
 	return desc
 }
 
-func (p *plugin) label(id scene.CameraID, tag scene.PassTag) string {
+func (p *plugin) label(id CameraID, tag PassTag) string {
 	key := passLabel{camera: id, tag: tag}
 	label, ok := p.labels[key]
 	if !ok {
@@ -589,8 +588,8 @@ func (p *plugin) label(id scene.CameraID, tag scene.PassTag) string {
 // forwardMaterial wraps one of model's forward gfx materials as a scene
 // material serving only the forward pass, in the frame's own arena. The result
 // is a one-entry window of the arena, so a later append can never grow into it.
-func (p *plugin) forwardMaterial(descr gfx.MaterialDescr) scene.Material {
+func (p *plugin) forwardMaterial(descr gfx.MaterialDescr) Material {
 	start := len(p.forward)
-	p.forward = append(p.forward, scene.MaterialTag{Tag: scene.TagForward, Descr: descr})
+	p.forward = append(p.forward, MaterialTag{Tag: TagForward, Descr: descr})
 	return p.forward[start : start+1 : start+1]
 }

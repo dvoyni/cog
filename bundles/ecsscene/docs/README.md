@@ -318,7 +318,7 @@ resource, so every System that writes it serialises against every other,
 whatever Components they read. It is the lock scene's flush held, and in an
 ecsscene app scene's flush is not composed.
 
-`ecsscene.RecordOnUpdate` is its subscription identity, declared in the root's
+`ecsscene.RecordOnUpdate` is its subscription identity, aliased in the root's
 `id.go` and named verb plus event as gfx's `PresentOnUpdate` is. **It declares
 no ordering beyond the load System's `Before`.** gfx subscribes
 `gfx.PresentOnUpdate` `Last`, so anything that does not ask to be last already

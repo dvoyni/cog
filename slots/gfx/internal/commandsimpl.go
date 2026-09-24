@@ -4,52 +4,50 @@ import (
 	"math"
 
 	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/slots/gfx"
-	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
 // presentCmdImpl swaps the recorded OpQueue into the ready slot (latest-wins).
-func (p *plugin) presentCmdImpl() (kernel.Lock, kernel.Execute[gfx.PresentRequest, gfx.PresentResponse]) {
-	var write kernel.Write[*gfx.OpQueue]
+func (p *plugin) presentCmdImpl() (kernel.Lock, kernel.Execute[PresentRequest, PresentResponse]) {
+	var write kernel.Write[*OpQueue]
 	var ready kernel.Write[*readyList]
 	return func(access kernel.ResourceAccess) {
-			write = access.GetWrite[*gfx.OpQueue]()
+			write = access.GetWrite[*OpQueue]()
 			ready = access.GetWrite[*readyList]()
-		}, func(kernel.Kernel, gfx.PresentRequest) gfx.PresentResponse {
+		}, func(kernel.Kernel, PresentRequest) PresentResponse {
 			present(write, ready)
-			return gfx.PresentResponse{}
+			return PresentResponse{}
 		}
 }
 
 // acquireCmdImpl advances the internal read queue, reporting whether it moved.
-func (p *plugin) acquireCmdImpl() (kernel.Lock, kernel.Execute[gfx.AcquireRequest, gfx.AcquireResponse]) {
+func (p *plugin) acquireCmdImpl() (kernel.Lock, kernel.Execute[AcquireRequest, AcquireResponse]) {
 	var read kernel.Write[*readList]
 	var ready kernel.Write[*readyList]
 	return func(access kernel.ResourceAccess) {
 			read = access.GetWrite[*readList]()
 			ready = access.GetWrite[*readyList]()
-		}, func(kernel.Kernel, gfx.AcquireRequest) gfx.AcquireResponse {
-			return gfx.AcquireResponse{Advanced: acquire(read, ready)}
+		}, func(kernel.Kernel, AcquireRequest) AcquireResponse {
+			return AcquireResponse{Advanced: acquire(read, ready)}
 		}
 }
 
-func (p *plugin) releaseCachedResourceCmdImpl() (kernel.Lock, kernel.Execute[gfx.ReleaseCachedResourceRequest, gfx.ReleaseCachedResourceResponse]) {
-	var resources kernel.Write[*gfx.ResourceQueue]
+func (p *plugin) releaseCachedResourceCmdImpl() (kernel.Lock, kernel.Execute[ReleaseCachedResourceRequest, ReleaseCachedResourceResponse]) {
+	var resources kernel.Write[*ResourceQueue]
 	return func(access kernel.ResourceAccess) {
-			resources = access.GetWrite[*gfx.ResourceQueue]()
-		}, func(_ kernel.Kernel, request gfx.ReleaseCachedResourceRequest) gfx.ReleaseCachedResourceResponse {
-			types.ResourceQueueReleaseCachedResource(resources.Get(), request.Path)
-			return gfx.ReleaseCachedResourceResponse{}
+			resources = access.GetWrite[*ResourceQueue]()
+		}, func(_ kernel.Kernel, request ReleaseCachedResourceRequest) ReleaseCachedResourceResponse {
+			ResourceQueueReleaseCachedResource(resources.Get(), request.Path)
+			return ReleaseCachedResourceResponse{}
 		}
 }
 
-func (p *plugin) freeCachedResourcesCmdImpl() (kernel.Lock, kernel.Execute[gfx.FreeCachedResourcesRequest, gfx.FreeCachedResourcesResponse]) {
-	var resources kernel.Write[*gfx.ResourceQueue]
+func (p *plugin) freeCachedResourcesCmdImpl() (kernel.Lock, kernel.Execute[FreeCachedResourcesRequest, FreeCachedResourcesResponse]) {
+	var resources kernel.Write[*ResourceQueue]
 	return func(access kernel.ResourceAccess) {
-			resources = access.GetWrite[*gfx.ResourceQueue]()
-		}, func(kernel.Kernel, gfx.FreeCachedResourcesRequest) gfx.FreeCachedResourcesResponse {
-			types.ResourceQueueFreeCachedResources(resources.Get())
-			return gfx.FreeCachedResourcesResponse{}
+			resources = access.GetWrite[*ResourceQueue]()
+		}, func(kernel.Kernel, FreeCachedResourcesRequest) FreeCachedResourcesResponse {
+			ResourceQueueFreeCachedResources(resources.Get())
+			return FreeCachedResourcesResponse{}
 		}
 }
 
@@ -57,16 +55,16 @@ func (p *plugin) freeCachedResourcesCmdImpl() (kernel.Lock, kernel.Execute[gfx.F
 // the channel its stills arrive on, plus the window size the caller cannot
 // read for itself. The Viewport read is the only lock it needs: the capture
 // slot is plugin-owned and carries its own.
-func (p *plugin) armCaptureCmdImpl() (kernel.Lock, kernel.Execute[gfx.ArmCaptureRequest, gfx.ArmCaptureResponse]) {
-	var viewport kernel.Read[*gfx.Viewport]
+func (p *plugin) armCaptureCmdImpl() (kernel.Lock, kernel.Execute[ArmCaptureRequest, ArmCaptureResponse]) {
+	var viewport kernel.Read[*Viewport]
 	return func(access kernel.ResourceAccess) {
-			viewport = access.GetRead[*gfx.Viewport]()
-		}, func(_ kernel.Kernel, request gfx.ArmCaptureRequest) gfx.ArmCaptureResponse {
+			viewport = access.GetRead[*Viewport]()
+		}, func(_ kernel.Kernel, request ArmCaptureRequest) ArmCaptureResponse {
 			live, err := p.captures.arm(request)
 			if err != nil {
-				return gfx.ArmCaptureResponse{Err: err}
+				return ArmCaptureResponse{Err: err}
 			}
-			return gfx.ArmCaptureResponse{Done: live.done, Viewport: *viewport.Get()}
+			return ArmCaptureResponse{Done: live.done, Viewport: *viewport.Get()}
 		}
 }
 
@@ -74,47 +72,47 @@ func (p *plugin) armCaptureCmdImpl() (kernel.Lock, kernel.Execute[gfx.ArmCapture
 // the channel the result arrives on, plus the viewport the caller cannot read
 // for itself. The Viewport read is the only lock it needs: the snapshot slot
 // is plugin-owned and carries its own.
-func (p *plugin) armFrameCmdImpl() (kernel.Lock, kernel.Execute[gfx.ArmFrameRequest, gfx.ArmFrameResponse]) {
-	var viewport kernel.Read[*gfx.Viewport]
+func (p *plugin) armFrameCmdImpl() (kernel.Lock, kernel.Execute[ArmFrameRequest, ArmFrameResponse]) {
+	var viewport kernel.Read[*Viewport]
 	return func(access kernel.ResourceAccess) {
-			viewport = access.GetRead[*gfx.Viewport]()
-		}, func(_ kernel.Kernel, request gfx.ArmFrameRequest) gfx.ArmFrameResponse {
+			viewport = access.GetRead[*Viewport]()
+		}, func(_ kernel.Kernel, request ArmFrameRequest) ArmFrameResponse {
 			live, err := p.snapshots.arm(request)
 			if err != nil {
-				return gfx.ArmFrameResponse{Err: err}
+				return ArmFrameResponse{Err: err}
 			}
-			return gfx.ArmFrameResponse{Done: live.done, Viewport: *viewport.Get()}
+			return ArmFrameResponse{Done: live.done, Viewport: *viewport.Get()}
 		}
 }
 
-func setViewportCmdImpl() (kernel.Lock, kernel.Execute[gfx.SetViewportRequest, gfx.SetViewportResponse]) {
+func setViewportCmdImpl() (kernel.Lock, kernel.Execute[SetViewportRequest, SetViewportResponse]) {
 	var preference kernel.Read[*desiredViewport]
-	var current kernel.Write[*gfx.Viewport]
+	var current kernel.Write[*Viewport]
 	return func(access kernel.ResourceAccess) {
 			preference = access.GetRead[*desiredViewport]()
-			current = access.GetWrite[*gfx.Viewport]()
-		}, func(_ kernel.Kernel, request gfx.SetViewportRequest) gfx.SetViewportResponse {
+			current = access.GetWrite[*Viewport]()
+		}, func(_ kernel.Kernel, request SetViewportRequest) SetViewportResponse {
 			viewport := resolveViewport(request.Width, request.Height, *preference.Get())
 			viewport.FramebufferWidth = request.FramebufferWidth
 			viewport.FramebufferHeight = request.FramebufferHeight
 			current.Set(&viewport)
-			return gfx.SetViewportResponse{Viewport: viewport}
+			return SetViewportResponse{Viewport: viewport}
 		}
 }
 
-func setDesiredViewportCmdImpl() (kernel.Lock, kernel.Execute[gfx.SetDesiredViewportRequest, gfx.SetDesiredViewportResponse]) {
+func setDesiredViewportCmdImpl() (kernel.Lock, kernel.Execute[SetDesiredViewportRequest, SetDesiredViewportResponse]) {
 	var stored kernel.Write[*desiredViewport]
-	var current kernel.Write[*gfx.Viewport]
+	var current kernel.Write[*Viewport]
 	return func(access kernel.ResourceAccess) {
 			stored = access.GetWrite[*desiredViewport]()
-			current = access.GetWrite[*gfx.Viewport]()
-		}, func(_ kernel.Kernel, request gfx.SetDesiredViewportRequest) gfx.SetDesiredViewportResponse {
+			current = access.GetWrite[*Viewport]()
+		}, func(_ kernel.Kernel, request SetDesiredViewportRequest) SetDesiredViewportResponse {
 			preference := desiredViewport{
 				mode: request.Mode, width: request.Width, height: request.Height, size: request.Size,
 			}
-			valid := request.Mode == gfx.ViewportWindow ||
-				((request.Mode == gfx.ViewportFixedWidth || request.Mode == gfx.ViewportFixedHeight) && request.Size > 0) ||
-				((request.Mode == gfx.ViewportFit || request.Mode == gfx.ViewportCover) && request.Width > 0 && request.Height > 0)
+			valid := request.Mode == ViewportWindow ||
+				((request.Mode == ViewportFixedWidth || request.Mode == ViewportFixedHeight) && request.Size > 0) ||
+				((request.Mode == ViewportFit || request.Mode == ViewportCover) && request.Width > 0 && request.Height > 0)
 			if !valid {
 				preference = desiredViewport{}
 			}
@@ -123,12 +121,12 @@ func setDesiredViewportCmdImpl() (kernel.Lock, kernel.Execute[gfx.SetDesiredView
 			viewport.FramebufferWidth = current.Get().FramebufferWidth
 			viewport.FramebufferHeight = current.Get().FramebufferHeight
 			current.Set(&viewport)
-			return gfx.SetDesiredViewportResponse{Viewport: viewport}
+			return SetDesiredViewportResponse{Viewport: viewport}
 		}
 }
 
-func resolveViewport(windowWidth, windowHeight float32, preference desiredViewport) gfx.Viewport {
-	viewport := gfx.Viewport{
+func resolveViewport(windowWidth, windowHeight float32, preference desiredViewport) Viewport {
+	viewport := Viewport{
 		Width: windowWidth, Height: windowHeight,
 		WindowWidth: windowWidth, WindowHeight: windowHeight,
 	}
@@ -137,13 +135,13 @@ func resolveViewport(windowWidth, windowHeight float32, preference desiredViewpo
 		return viewport
 	}
 	switch preference.mode {
-	case gfx.ViewportFixedWidth:
+	case ViewportFixedWidth:
 		viewport.Width = preference.size
 		viewport.Height = float32(math.Round(float64(preference.size * windowHeight / windowWidth)))
-	case gfx.ViewportFixedHeight:
+	case ViewportFixedHeight:
 		viewport.Height = preference.size
 		viewport.Width = float32(math.Round(float64(preference.size * windowWidth / windowHeight)))
-	case gfx.ViewportFit:
+	case ViewportFit:
 		if windowWidth/windowHeight >= preference.width/preference.height {
 			viewport.Height = preference.height
 			viewport.Width = float32(math.Round(float64(preference.height * windowWidth / windowHeight)))
@@ -151,7 +149,7 @@ func resolveViewport(windowWidth, windowHeight float32, preference desiredViewpo
 			viewport.Width = preference.width
 			viewport.Height = float32(math.Round(float64(preference.width * windowHeight / windowWidth)))
 		}
-	case gfx.ViewportCover:
+	case ViewportCover:
 		if windowWidth/windowHeight >= preference.width/preference.height {
 			viewport.Width = preference.width
 			viewport.Height = float32(math.Round(float64(preference.width * windowHeight / windowWidth)))

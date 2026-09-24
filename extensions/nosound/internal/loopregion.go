@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dvoyni/cog/extensions/nosound"
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/sound"
@@ -59,13 +58,13 @@ func clipBounds(encoded assets.Blob, sourceRate int, granule, decoded int64) (in
 	if err != nil {
 		// The identification header parsed and this one did not, so the file is
 		// damaged in a way that costs it only its tags. The Clip still plays.
-		return frames, none, nosound.ErrLoopRegionIgnored{Frames: frames, Err: err}
+		return frames, none, ErrLoopRegionIgnored{Frames: frames, Err: err}
 	}
 	start, hasStart, startErr := loopTag(header.Comments, loopStartTag)
 	length, hasLength, lengthErr := loopTag(header.Comments, loopLengthTag)
 	stop, hasEnd, endErr := loopTag(header.Comments, loopEndTag)
 	if err := cmp.Or(startErr, lengthErr, endErr); err != nil {
-		return frames, none, nosound.ErrLoopRegionIgnored{Frames: frames, Err: err}
+		return frames, none, ErrLoopRegionIgnored{Frames: frames, Err: err}
 	}
 	if !hasStart && !hasLength && !hasEnd {
 		return frames, none, nil
@@ -83,7 +82,7 @@ func clipBounds(encoded assets.Blob, sourceRate int, granule, decoded int64) (in
 		stop = frames
 	}
 	if start < 0 || stop <= start || stop > frames {
-		return frames, none, nosound.ErrLoopRegionIgnored{Start: start, End: stop, Frames: frames}
+		return frames, none, ErrLoopRegionIgnored{Start: start, End: stop, Frames: frames}
 	}
 	return frames, m.Some(sound.LoopRegion{
 		Start: float32(float64(start) / float64(sourceRate)),

@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"github.com/dvoyni/cog/bundles/input"
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 )
@@ -18,7 +17,7 @@ type provider struct{}
 // mistyped key into a client-side rejection rather than a refusal from the
 // engine, and it is the only thing in this feature that exists for an agent's
 // sake.
-var _ mcp.TextValued = (*input.Key)(nil)
+var _ mcp.TextValued = (*Key)(nil)
 
 // The two capabilities, rendered as the tools input_send and input_state. They
 // are two rather than one because looking and pressing differ in exactly the
@@ -65,7 +64,7 @@ const stateDescription = "What the input seam holds right now: every key and mou
 func (provider) Capabilities() []mcp.Capability {
 	return []mcp.Capability{
 		mcp.Func(sendName, sendDescription, send),
-		mcp.Command[input.StateCmd, input.StateRequest, input.StateResponse](stateName, stateDescription, mcp.ReadOnly()),
+		mcp.Command[StateCmd, StateRequest, StateResponse](stateName, stateDescription, mcp.ReadOnly()),
 	}
 }
 
@@ -78,6 +77,6 @@ func (provider) Capabilities() []mcp.Capability {
 // It is a package function rather than a method to keep the capability-body
 // rule visible at the call site: the plugin is one pointer away and the body
 // still reaches input only by dispatch.
-func send(k kernel.Executioner, request input.SynthesizeRequest) (input.StateResponse, error) {
-	return input.Play(k, request.Actions)
+func send(k kernel.Executioner, request SynthesizeRequest) (StateResponse, error) {
+	return Play(k, request.Actions)
 }

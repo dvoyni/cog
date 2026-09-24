@@ -4,8 +4,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/qmuntal/gltf"
@@ -34,7 +33,7 @@ func indexWidthOf(t testing.TB, h *harness, ref model.MeshRef) (gfx.IndexWidth, 
 // A mesh that fits in uint16 stores half its index bytes, and nobody asked for
 // it: the width follows from the vertex count.
 func TestADurableMeshNarrowsItsIndices(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) { q.Camera(testCamera, testCameraDescr()) })
+	h := newHarness(t, func(q *OpQueue) { q.Camera(testCamera, testCameraDescr()) })
 	ref := h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
 	h.frame()
 
@@ -56,12 +55,12 @@ func TestADurableMeshNarrowsItsIndices(t *testing.T) {
 func TestATemporaryMeshKeepsUint32Indices(t *testing.T) {
 	var width gfx.IndexWidth
 	var size int
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		ref := q.TemporaryMesh(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
-		q.Mesh(0, ref, scene.MeshDraw{NeverCull: true})
-		mesh := types.OpQueueRecordedMeshes(q).Temporaries[len(types.OpQueueRecordedMeshes(q).Temporaries)-1]
-		record := mesh.InlineRecord(types.OpQueueRecordedMeshes(q).Arena)
+		q.Mesh(0, ref, MeshDraw{NeverCull: true})
+		mesh := OpQueueRecordedMeshes(q).Temporaries[len(OpQueueRecordedMeshes(q).Temporaries)-1]
+		record := mesh.InlineRecord(OpQueueRecordedMeshes(q).Arena)
 		width, size = record.IndexWidth, record.Indices.Size()
 	})
 	h.frame()
@@ -78,7 +77,7 @@ func TestATemporaryMeshKeepsUint32Indices(t *testing.T) {
 // with a material. Width is not: for a triangle list it never reaches the
 // pipeline at all, so a mesh updated past the threshold simply widens.
 func TestUpdateMeshRederivesTheIndexWidth(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) { q.Camera(testCamera, testCameraDescr()) })
+	h := newHarness(t, func(q *OpQueue) { q.Camera(testCamera, testCameraDescr()) })
 	ref := h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
 	h.frame()
 	if width, _ := indexWidthOf(t, h, ref); width != gfx.IndexUint16 {
@@ -132,7 +131,7 @@ func indexedTriangleModel(t testing.TB) *gltf.Document {
 // mesh.
 func TestAModelPrimitiveNarrowsItsIndices(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, indexedTriangleModel(t))),
-		drawModel(modelPath, scene.ModelDraw{}))
+		drawModel(modelPath, ModelDraw{}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		passes := h.passes()
 		return len(passes) == 1 && passes[0].Instances == 1
@@ -160,7 +159,7 @@ func TestAModelPrimitiveNarrowsItsIndices(t *testing.T) {
 // BakeMesh, so they derive the width on a path of their own. The unit box is 24
 // vertices and 36 indices: 72 bytes where it used to be 144.
 func TestAUnitMeshNarrowsItsIndices(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Box(0, m.At(0, 0, 0), testBoxColor)
 	})
@@ -189,9 +188,9 @@ func TestAUnitMeshNarrowsItsIndices(t *testing.T) {
 // at, all the way through gfx.
 func TestTheNarrowedWidthReachesTheRenderPass(t *testing.T) {
 	var ref model.MeshRef
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
-		q.Mesh(0, ref, scene.MeshDraw{})
+		q.Mesh(0, ref, MeshDraw{})
 	})
 	ref = h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
 	h.frame()

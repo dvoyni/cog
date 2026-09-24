@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/slots/app"
 )
 
 func almostEqual(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
@@ -39,8 +38,8 @@ func TestApp_RequiresAMainLoop(t *testing.T) {
 // The plugin registers under the root's name, so a caller declaring app.Name
 // as its dependency is declaring this plugin.
 func TestApp_RegistersUnderTheRootsName(t *testing.T) {
-	if name := New().Name(); name != app.Name {
-		t.Errorf("app registers as %q, want %q", name, app.Name)
+	if name := New().Name(); name != Name {
+		t.Errorf("app registers as %q, want %q", name, Name)
 	}
 }
 
@@ -67,7 +66,7 @@ func TestApp_StartAttachesTheLoopBeforeTheEngineIsReady(t *testing.T) {
 func TestApp_QuitCmdQuitsTheMainLoop(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig())
 
-	harness.k.ExecuteCommand[app.QuitCmd](app.QuitRequest{})
+	harness.k.ExecuteCommand[QuitCmd](QuitRequest{})
 	if quits := harness.mainLoop.quits.Load(); quits != 1 {
 		t.Errorf("the MainLoop was asked to quit %d times, want 1", quits)
 	}
@@ -107,7 +106,7 @@ func TestLoop_WindowSizePublishesTheSize(t *testing.T) {
 
 	harness.observer.mu.Lock()
 	defer harness.observer.mu.Unlock()
-	want := []app.WindowSizeChangeEvent{{Width: 800, Height: 600}}
+	want := []WindowSizeChangeEvent{{Width: 800, Height: 600}}
 	if !slices.Equal(harness.observer.sizes, want) {
 		t.Errorf("subscribers saw %v, want %v", harness.observer.sizes, want)
 	}
@@ -203,17 +202,17 @@ func TestLoop_FramePublishesThePauseItStartsAndTheOneItEnds(t *testing.T) {
 		t.Fatalf("a running engine published %v", got)
 	}
 
-	harness.control(app.TimeRequest{Action: app.TimePause})
+	harness.control(TimeRequest{Action: TimePause})
 	harness.frame(0.020)
 	harness.frame(0.020)
 	if got := harness.paused(); len(got) != 1 || !got[0].Paused {
 		t.Fatalf("two paused frames published %v, want one pause", got)
 	}
 
-	harness.control(app.TimeRequest{Action: app.TimeResume})
+	harness.control(TimeRequest{Action: TimeResume})
 	harness.frame(0.020)
 	harness.frame(0.020)
-	want := []app.PauseChangeEvent{{Paused: true}, {Paused: false}}
+	want := []PauseChangeEvent{{Paused: true}, {Paused: false}}
 	if got := harness.paused(); !slices.Equal(got, want) {
 		t.Fatalf("a pause and a resume published %v, want %v", got, want)
 	}
@@ -221,8 +220,8 @@ func TestLoop_FramePublishesThePauseItStartsAndTheOneItEnds(t *testing.T) {
 
 // The zero Config takes the documented defaults.
 func TestConfig_TheZeroConfigTakesTheDefaults(t *testing.T) {
-	got := withDefaults(app.Config{})
-	want := app.Config{Step: time.Second / 60, MaxFrame: 250 * time.Millisecond, MaxPending: 4}
+	got := withDefaults(Config{})
+	want := Config{Step: time.Second / 60, MaxFrame: 250 * time.Millisecond, MaxPending: 4}
 	if got != want {
 		t.Errorf("withDefaults(Config{}) = %+v, want %+v", got, want)
 	}
@@ -231,7 +230,7 @@ func TestConfig_TheZeroConfigTakesTheDefaults(t *testing.T) {
 // The configuration is read under app.Name, and a field left zero takes its
 // default: here MaxFrame's 250ms and MaxPending's 4 bound a one-second stall.
 func TestConfig_AZeroFieldTakesItsDefault(t *testing.T) {
-	harness := newTickHarness(t, app.Config{Step: 10 * time.Millisecond})
+	harness := newTickHarness(t, Config{Step: 10 * time.Millisecond})
 
 	harness.frame(1.0)
 
@@ -246,23 +245,23 @@ func TestConfig_AZeroFieldTakesItsDefault(t *testing.T) {
 
 // The With* builders override only their field and return a modified copy.
 func TestConfig_BuildersSetOnlyTheirField(t *testing.T) {
-	base := app.Config{}
+	base := Config{}
 	got := base.WithStep(10 * time.Millisecond).WithMaxFrame(time.Second).WithMaxPending(2)
 
-	want := app.Config{Step: 10 * time.Millisecond, MaxFrame: time.Second, MaxPending: 2}
+	want := Config{Step: 10 * time.Millisecond, MaxFrame: time.Second, MaxPending: 2}
 	if got != want {
 		t.Errorf("builders produced %+v, want %+v", got, want)
 	}
-	if base != (app.Config{}) {
+	if base != (Config{}) {
 		t.Errorf("the receiver changed to %+v", base)
 	}
 }
 
 // A configuration value of the wrong type fails registration by name.
 func TestConfig_AWrongTypeFailsRegistration(t *testing.T) {
-	err := compose(map[kernel.PluginName]any{app.Name: 123}, New(), mainLoopAdapter{&fakeMainLoop{}})
+	err := compose(map[kernel.PluginName]any{Name: 123}, New(), mainLoopAdapter{&fakeMainLoop{}})
 
-	var invalid app.ErrInvalidConfig
+	var invalid ErrInvalidConfig
 	if !errors.As(err, &invalid) {
 		t.Fatalf("a config of type int reported %v, want ErrInvalidConfig", err)
 	}

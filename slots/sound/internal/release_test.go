@@ -5,8 +5,8 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/dvoyni/cog/slots/sound"
 )
 
 // drum is a second Clip, so a test can release one and keep the other.
@@ -34,18 +34,18 @@ var twoClips = fstest.MapFS{
 // order, and the Mixer never applies a destroy for a Clip it is still mixing.
 func TestAfterTheFlushThatRecordsAReleaseNoVoiceIsPlayingThatClip(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 30, channels: 2, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, twoClips)
+	h := newHarness(t, backend, Config{}, twoClips)
 
-	ambience := h.play(sound.ClipWithResource(bell), 0, sound.Params{Loop: m.Some(true)})
-	second := h.play(sound.ClipWithResource(bell), 0, sound.Params{Loop: m.Some(true)})
-	kept := h.play(sound.ClipWithResource(drum), 0, sound.Params{Loop: m.Some(true)})
+	ambience := h.play(ClipWithResource(bell), 0, Params{Loop: m.Some(true)})
+	second := h.play(ClipWithResource(bell), 0, Params{Loop: m.Some(true)})
+	kept := h.play(ClipWithResource(drum), 0, Params{Loop: m.Some(true)})
 	h.tick()
 	if got := h.probe(ambience); !got.Found || got.Live != 3 {
 		t.Fatalf("the three Voices did not start: found=%v live=%d", got.Found, got.Live)
 	}
 	before := len(h.backend.emitted())
 
-	h.record(func(queue *sound.Queue) { queue.Release(sound.ClipWithResource(bell)) })
+	h.record(func(queue *Queue) { queue.Release(ClipWithResource(bell)) })
 	h.tick()
 
 	if got := h.probe(ambience); got.Found {
@@ -58,7 +58,7 @@ func TestAfterTheFlushThatRecordsAReleaseNoVoiceIsPlayingThatClip(t *testing.T) 
 		t.Fatal("releasing one Clip stopped a Voice playing another")
 	}
 	for range 2 {
-		if ended := h.waitEnded(); ended.Reason != sound.ReasonReleased {
+		if ended := h.waitEnded(); ended.Reason != ReasonReleased {
 			t.Fatalf("%v ended as %v, want released", ended.Voice, ended.Reason)
 		}
 	}
@@ -83,18 +83,18 @@ func TestAfterTheFlushThatRecordsAReleaseNoVoiceIsPlayingThatClip(t *testing.T) 
 func TestAPendingVoiceIsCutByAReleaseAndEndsReleasedRatherThanFailed(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 30, channels: 2, rate: 48000})
 	backend.deferring = true
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	voice := h.play(ClipWithResource(bell), 0, Params{})
 	h.tick()
 	if got := h.probe(voice); !got.Found || got.Info.Duration != 0 {
 		t.Fatalf("the Voice is not pending: found=%v duration=%v", got.Found, got.Info.Duration)
 	}
 
-	h.record(func(queue *sound.Queue) { queue.Release(sound.ClipWithResource(bell)) })
+	h.record(func(queue *Queue) { queue.Release(ClipWithResource(bell)) })
 	h.tick()
 
-	if ended := h.waitEnded(); ended.Voice != voice || ended.Reason != sound.ReasonReleased {
+	if ended := h.waitEnded(); ended.Voice != voice || ended.Reason != ReasonReleased {
 		t.Fatalf("ended as %v/%v, want %v/released", ended.Voice, ended.Reason, voice)
 	}
 
@@ -120,21 +120,21 @@ func TestAPendingVoiceIsCutByAReleaseAndEndsReleasedRatherThanFailed(t *testing.
 func TestPreloadMakesAClipResidentWithoutPlayingIt(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 30, channels: 2, rate: 44100})
 	backend.deferring = true
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
-	h.record(func(queue *sound.Queue) { queue.Preload(sound.ClipWithResource(bell)) })
+	h.record(func(queue *Queue) { queue.Preload(ClipWithResource(bell)) })
 	h.tick()
-	if _, state := h.askClip(sound.ClipWithResource(bell)); state != sound.ClipLoading {
+	if _, state := h.askClip(ClipWithResource(bell)); state != ClipLoading {
 		t.Fatalf("a Clip whose prepare is in flight reports %v, want loading", state)
 	}
 
 	backend.finishPrepares()
 	h.tick()
-	info, state := h.askClip(sound.ClipWithResource(bell))
-	if state != sound.ClipReady {
+	info, state := h.askClip(ClipWithResource(bell))
+	if state != ClipReady {
 		t.Fatalf("a preloaded Clip reports %v, want ready", state)
 	}
-	if info != (sound.ClipInfo{Duration: 30, Channels: 2, SampleRate: 44100}) {
+	if info != (ClipInfo{Duration: 30, Channels: 2, SampleRate: 44100}) {
 		t.Fatalf("ClipInfoOf answered %+v, want the Clip's own three facts", info)
 	}
 	for _, batch := range h.backend.emitted() {
@@ -143,7 +143,7 @@ func TestPreloadMakesAClipResidentWithoutPlayingIt(t *testing.T) {
 		}
 	}
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	voice := h.play(ClipWithResource(bell), 0, Params{})
 	h.tick()
 	if got := h.probe(voice); !got.Found || got.Info.Duration != 30 {
 		t.Fatalf("a Play on a preloaded Clip did not bind in its own flush: %+v", got.Info)
@@ -161,11 +161,11 @@ func TestPreloadMakesAClipResidentWithoutPlayingIt(t *testing.T) {
 // "never", and that is the lie this is here not to repeat.
 func TestAskingAboutAClipNeverStartsALoad(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 30, channels: 2, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
 	for range 3 {
-		info, state := h.askClip(sound.ClipWithResource(bell))
-		if state != sound.ClipLoading || info != (sound.ClipInfo{}) {
+		info, state := h.askClip(ClipWithResource(bell))
+		if state != ClipLoading || info != (ClipInfo{}) {
 			t.Fatalf("asking about an unnamed Clip answered %+v/%v, want zero facts and loading", info, state)
 		}
 		h.tick()
@@ -186,24 +186,24 @@ func TestOnlyAReleaseClearsAClipThatFailed(t *testing.T) {
 	var reported []error
 	h := newHarnessReporting(t, backend, clipBytes, func(err error) { reported = append(reported, err) })
 
-	h.record(func(queue *sound.Queue) { queue.Preload(sound.ClipWithResource(bell)) })
+	h.record(func(queue *Queue) { queue.Preload(ClipWithResource(bell)) })
 	h.tick()
-	h.record(func(queue *sound.Queue) { queue.Preload(sound.ClipWithResource(bell)) })
+	h.record(func(queue *Queue) { queue.Preload(ClipWithResource(bell)) })
 	h.tick()
-	if _, state := h.askClip(sound.ClipWithResource(bell)); state != sound.ClipFailed {
+	if _, state := h.askClip(ClipWithResource(bell)); state != ClipFailed {
 		t.Fatalf("a Clip that could not be prepared reports %v, want failed", state)
 	}
 	if len(reported) != 1 {
 		t.Fatalf("a terminal failure was reported %d times, want once", len(reported))
 	}
 
-	h.record(func(queue *sound.Queue) { queue.Release(sound.ClipWithResource(bell)) })
+	h.record(func(queue *Queue) { queue.Release(ClipWithResource(bell)) })
 	h.tick()
-	if _, state := h.askClip(sound.ClipWithResource(bell)); state != sound.ClipLoading {
+	if _, state := h.askClip(ClipWithResource(bell)); state != ClipLoading {
 		t.Fatalf("a released Clip still reports %v, and a release is what clears a failure", state)
 	}
 
-	h.record(func(queue *sound.Queue) { queue.Preload(sound.ClipWithResource(bell)) })
+	h.record(func(queue *Queue) { queue.Preload(ClipWithResource(bell)) })
 	h.tick()
 	if len(reported) != 2 {
 		t.Fatalf("the failure was reported %d times over two loads, want once each", len(reported))
@@ -220,14 +220,14 @@ func TestOnlyAReleaseClearsAClipThatFailed(t *testing.T) {
 // is on the Adapter's side of Emit.
 func TestReleaseAllCutsEveryVoiceAndDestroysEveryClip(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 30, channels: 2, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, twoClips)
+	h := newHarness(t, backend, Config{}, twoClips)
 
-	first := h.play(sound.ClipWithResource(bell), 0, sound.Params{Loop: m.Some(true)})
-	second := h.play(sound.ClipWithResource(drum), 0, sound.Params{Loop: m.Some(true)})
+	first := h.play(ClipWithResource(bell), 0, Params{Loop: m.Some(true)})
+	second := h.play(ClipWithResource(drum), 0, Params{Loop: m.Some(true)})
 	h.tick()
 	before := len(h.backend.emitted())
 
-	h.record(func(queue *sound.Queue) { queue.ReleaseAll() })
+	h.record(func(queue *Queue) { queue.ReleaseAll() })
 	h.tick()
 
 	if got := h.probe(first); got.Found || got.Live != 0 {
@@ -237,7 +237,7 @@ func TestReleaseAllCutsEveryVoiceAndDestroysEveryClip(t *testing.T) {
 		t.Fatal("a Voice survived ReleaseAll")
 	}
 	for range 2 {
-		if ended := h.waitEnded(); ended.Reason != sound.ReasonReleased {
+		if ended := h.waitEnded(); ended.Reason != ReasonReleased {
 			t.Fatalf("%v ended as %v, want released", ended.Voice, ended.Reason)
 		}
 	}
@@ -247,7 +247,7 @@ func TestReleaseAllCutsEveryVoiceAndDestroysEveryClip(t *testing.T) {
 			len(batch.Stops), len(batch.Destroys))
 	}
 	for _, clip := range []string{bell, drum} {
-		if _, state := h.askClip(sound.ClipWithResource(clip)); state != sound.ClipLoading {
+		if _, state := h.askClip(ClipWithResource(clip)); state != ClipLoading {
 			t.Fatalf("%s still reports %v after a teardown", clip, state)
 		}
 	}
@@ -263,19 +263,19 @@ func TestReleaseAllCutsEveryVoiceAndDestroysEveryClip(t *testing.T) {
 // same Clip reloads it, and a Play before one is cut by it.
 func TestAReleasedClipIsReadAgainWhenItIsNamedAgain(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 30, channels: 2, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
-	h.play(sound.ClipWithResource(bell), 0, sound.Params{Loop: m.Some(true)})
+	h.play(ClipWithResource(bell), 0, Params{Loop: m.Some(true)})
 	h.tick()
 	if prepares, installs := backend.counts(); prepares != 1 || installs != 1 {
 		t.Fatalf("the first play cost %d prepares and %d installs, want one each", prepares, installs)
 	}
 
-	var cut, reloaded sound.Voice
-	h.record(func(queue *sound.Queue) {
-		cut = queue.Play(sound.ClipWithResource(bell), 0, sound.Params{Loop: m.Some(true)})
-		queue.Release(sound.ClipWithResource(bell))
-		reloaded = queue.Play(sound.ClipWithResource(bell), 0, sound.Params{Loop: m.Some(true)})
+	var cut, reloaded Voice
+	h.record(func(queue *Queue) {
+		cut = queue.Play(ClipWithResource(bell), 0, Params{Loop: m.Some(true)})
+		queue.Release(ClipWithResource(bell))
+		reloaded = queue.Play(ClipWithResource(bell), 0, Params{Loop: m.Some(true)})
 	})
 	h.tick()
 
@@ -295,16 +295,16 @@ func TestAReleasedClipIsReadAgainWhenItIsNamedAgain(t *testing.T) {
 // an engine that holds nothing are all no-ops with nothing to check.
 func TestTheClipSurfaceIsTotal(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 30, channels: 2, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
-	h.record(func(queue *sound.Queue) {
-		queue.Release(sound.ClipWithResource("never-named.ogg"))
+	h.record(func(queue *Queue) {
+		queue.Release(ClipWithResource("never-named.ogg"))
 		queue.ReleaseAll()
 	})
 	h.tick()
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{Loop: m.Some(true)})
-	h.record(func(queue *sound.Queue) { queue.Preload(sound.ClipWithResource(bell)) })
+	voice := h.play(ClipWithResource(bell), 0, Params{Loop: m.Some(true)})
+	h.record(func(queue *Queue) { queue.Preload(ClipWithResource(bell)) })
 	h.tick()
 	if got := h.probe(voice); !got.Found {
 		t.Fatal("a Preload of a Clip already playing disturbed its Voice")
@@ -313,17 +313,53 @@ func TestTheClipSurfaceIsTotal(t *testing.T) {
 		t.Fatalf("a Play and a Preload of one Clip cost %d prepares, want the one entry", prepares)
 	}
 
-	h.record(func(queue *sound.Queue) {
-		queue.Release(sound.ClipWithResource(bell))
-		queue.Release(sound.ClipWithResource(bell))
+	h.record(func(queue *Queue) {
+		queue.Release(ClipWithResource(bell))
+		queue.Release(ClipWithResource(bell))
 	})
 	h.tick()
-	if ended := h.waitEnded(); ended.Reason != sound.ReasonReleased {
+	if ended := h.waitEnded(); ended.Reason != ReasonReleased {
 		t.Fatalf("ended as %v, want released", ended.Reason)
 	}
 	h.noEnding()
 	batch := h.backend.emitted()
 	if got := len(batch[len(batch)-1].Destroys); got != 1 {
 		t.Fatalf("releasing one Clip twice in one tick emitted %d destroys, want one", got)
+	}
+}
+
+// A release keys on Clip identity and not on field identity. A ref with a path
+// is named by that path alone, whatever bytes it carries beside it, which is
+// the Library's own key rule and the rule sound's own clip table is spelled
+// with - so the two must not disagree about which Voice a release cuts.
+//
+// This is the one case that separates the two, and it is not constructible from
+// the root's surface: ClipWithResource sets a name and ClipWithBytes sets a
+// blob, so only here can a ref carry both. A stopClip written with == would
+// leave this Voice playing a Clip that has been destroyed.
+func TestAReleaseCutsOnClipIdentityRatherThanFieldIdentity(t *testing.T) {
+	bytes := assets.NewBlobFromString("ogg bytes the play carried beside its path")
+	carrying := ClipRef{name: "bell.ogg", blob: bytes}
+	named := ClipWithResource("bell.ogg")
+
+	if carrying == named {
+		t.Fatal("the two refs compare equal as fields, so this test proves nothing")
+	}
+
+	voices := NewVoices(2)
+	var endings []Ending
+	voices.start(Operation{Kind: OpPlay, Voice: newVoice(0, 1), Clip: carrying}, clipFacts{}, &endings)
+	voices.start(Operation{Kind: OpPlay, Voice: newVoice(1, 1), Clip: ClipWithResource("drum.ogg")}, clipFacts{}, &endings)
+
+	voices.stopClip(named, &endings)
+
+	if len(endings) != 1 {
+		t.Fatalf("a release of bell.ogg ended %d Voices, want the one playing it", len(endings))
+	}
+	if endings[0].Reason != ReasonReleased {
+		t.Fatalf("the released Voice ended as %v, want released", endings[0].Reason)
+	}
+	if voices.Len() != 1 {
+		t.Fatalf("%d Voices are live, want the one on the Clip nothing released", voices.Len())
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/libs/m"
 	"golang.org/x/image/font/gofont/goregular"
 )
@@ -16,9 +15,9 @@ import (
 func BenchmarkCanvasFlushText(b *testing.B) {
 	const path = "fonts/text.ttf"
 	filesystem := fstest.MapFS{path: &fstest.MapFile{Data: goregular.TTF}}
-	k, _, backend := testKernel(b, filesystem, canvas.Config{}, func(write *canvas.OpQueue) {
+	k, _, backend := testKernel(b, filesystem, Config{}, func(write *OpQueue) {
 		for i := range 40 {
-			write.Text(canvas.Layer(i%4), path, "the quick brown fox", canvas.TextDraw{
+			write.Text(Layer(i%4), path, "the quick brown fox", TextDraw{
 				Position: m.Vec2{X: 4, Y: float32(i)}, Size: float32(8 + i%3),
 				Color: m.Color{R: 1, G: 1, B: 1, A: 1},
 			})

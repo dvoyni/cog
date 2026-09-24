@@ -6,22 +6,21 @@ import (
 
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
-	"github.com/dvoyni/cog/slots/gfx"
 )
 
 func TestDefaultLimitsAreTheBrowserFloor(t *testing.T) {
 	// These are the WebGPU spec floor, not any device's numbers: a desktop
 	// adapter reports hardware limits, and checking against those passes a build
 	// that cannot run in a browser.
-	want := gfx.Limits{
+	want := Limits{
 		MaxBindGroups:                   4,
 		MaxStorageBuffersPerShaderStage: 8,
 		MaxStorageBufferBindingSize:     128 << 20,
 		MaxUniformBufferBindingSize:     64 << 10,
 		MaxBufferSize:                   256 << 20,
 	}
-	if gfx.DefaultLimits() != want {
-		t.Errorf("DefaultLimits = %+v, want the web floor %+v", gfx.DefaultLimits(), want)
+	if DefaultLimits() != want {
+		t.Errorf("DefaultLimits = %+v, want the web floor %+v", DefaultLimits(), want)
 	}
 }
 
@@ -29,12 +28,12 @@ func TestShaderOverTheWebFloorIsReportedOnceAndStillRenders(t *testing.T) {
 	p := newPlugin()
 	var reported []error
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
-	layout := gfx.ShaderLayout{
+	layout := ShaderLayout{
 		UniformSize: 64, UniformGroup: 0, UniformBinding: 0,
-		Uniforms: []gfx.UniformMember{{Name: "mvp", Offset: 0}},
+		Uniforms: []UniformMember{{Name: "mvp", Offset: 0}},
 	}
 	for i := range 9 {
-		layout.Resources = append(layout.Resources, gfx.ShaderResource{
+		layout.Resources = append(layout.Resources, ShaderResource{
 			Name: "records", StorageBuffer: true, Group: 1, Binding: i,
 		})
 	}
@@ -44,11 +43,11 @@ func TestShaderOverTheWebFloorIsReportedOnceAndStillRenders(t *testing.T) {
 	// The nine bindings share one name, so one parameter fills them all. They
 	// have to be filled: an unsupplied storage binding is fatal to the draw,
 	// and this test is about a draw that renders despite the diagnostic.
-	records := gfx.BufferParam("records", gfx.BufferWithBytes([]byte{1, 2, 3, 4}, true))
+	records := BufferParam("records", BufferWithBytes([]byte{1, 2, 3, 4}, true))
 	for range 2 {
 		w := recordList(t, k)
-		w.Draw(triangle(), testMaterial(records), gfx.MatParam("mvp", m.NewMat4()))
-		k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+		w.Draw(triangle(), testMaterial(records), MatParam("mvp", m.NewMat4()))
+		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 	}
 
@@ -57,7 +56,7 @@ func TestShaderOverTheWebFloorIsReportedOnceAndStillRenders(t *testing.T) {
 	if backend.passDraws[0] != 1 {
 		t.Errorf("draws = %d, want the draw rendered anyway", backend.passDraws[0])
 	}
-	var exceeded gfx.ErrShaderExceedsWebLimits
+	var exceeded ErrShaderExceedsWebLimits
 	found := 0
 	for _, err := range reported {
 		if errors.As(err, &exceeded) {
@@ -68,8 +67,8 @@ func TestShaderOverTheWebFloorIsReportedOnceAndStillRenders(t *testing.T) {
 	if found != 1 {
 		t.Fatalf("reports = %d over two frames, want exactly 1: %v", found, reported)
 	}
-	if exceeded.Declared != 9 || exceeded.Floor != gfx.DefaultLimits().MaxStorageBuffersPerShaderStage {
-		t.Errorf("report = %+v, want 9 declared against the floor of %d", exceeded, gfx.DefaultLimits().MaxStorageBuffersPerShaderStage)
+	if exceeded.Declared != 9 || exceeded.Floor != DefaultLimits().MaxStorageBuffersPerShaderStage {
+		t.Errorf("report = %+v, want 9 declared against the floor of %d", exceeded, DefaultLimits().MaxStorageBuffersPerShaderStage)
 	}
 	if exceeded.Device != backend.Limits().MaxStorageBuffersPerShaderStage {
 		t.Errorf("report device limit = %d, want the backend's %d", exceeded.Device, backend.Limits().MaxStorageBuffersPerShaderStage)
@@ -79,18 +78,18 @@ func TestShaderOverTheWebFloorIsReportedOnceAndStillRenders(t *testing.T) {
 func TestCheckWebLimitsMeasuresAgainstTheFloorNotTheDevice(t *testing.T) {
 	// A desktop adapter reports far more than the web floor, so a check against
 	// the device would pass a shader no browser can run.
-	device := gfx.Limits{MaxStorageBuffersPerShaderStage: 200, MaxBindGroups: 8, MaxUniformBufferBindingSize: 1 << 20}
-	within := gfx.ShaderLayout{UniformSize: 256, Resources: []gfx.ShaderResource{{StorageBuffer: true, Group: 1}}}
+	device := Limits{MaxStorageBuffersPerShaderStage: 200, MaxBindGroups: 8, MaxUniformBufferBindingSize: 1 << 20}
+	within := ShaderLayout{UniformSize: 256, Resources: []ShaderResource{{StorageBuffer: true, Group: 1}}}
 	if err := checkWebLimits("canvas.sprite", within, device); err != nil {
 		t.Errorf("a shader within the floor was rejected: %v", err)
 	}
 
-	groups := gfx.ShaderLayout{Resources: []gfx.ShaderResource{{Group: 7}}}
+	groups := ShaderLayout{Resources: []ShaderResource{{Group: 7}}}
 	if err := checkWebLimits("scene.pbr", groups, device); err == nil {
 		t.Error("eight bind groups were accepted, want an error")
 	}
 
-	uniform := gfx.ShaderLayout{UniformSize: gfx.DefaultLimits().MaxUniformBufferBindingSize + 1}
+	uniform := ShaderLayout{UniformSize: DefaultLimits().MaxUniformBufferBindingSize + 1}
 	if err := checkWebLimits("scene.pbr", uniform, device); err == nil {
 		t.Error("an oversized uniform block was accepted, want an error")
 	}
@@ -99,25 +98,25 @@ func TestCheckWebLimitsMeasuresAgainstTheFloorNotTheDevice(t *testing.T) {
 func TestBufferRangeParamBindsItsOwnSlice(t *testing.T) {
 	p := newPlugin()
 	k := newTestKernel(t, p)
-	backend := &fakeBackend{layout: &gfx.ShaderLayout{
+	backend := &fakeBackend{layout: &ShaderLayout{
 		UniformSize: 64, UniformGroup: 0, UniformBinding: 0,
-		Uniforms:  []gfx.UniformMember{{Name: "mvp", Offset: 0}},
-		Resources: []gfx.ShaderResource{{Name: "records", StorageBuffer: true, Group: 1, Binding: 0}},
+		Uniforms:  []UniformMember{{Name: "mvp", Offset: 0}},
+		Resources: []ShaderResource{{Name: "records", StorageBuffer: true, Group: 1, Binding: 0}},
 	}}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	var records gfx.BufferDescr
-	withResourceQueue(t, k, func(resources *gfx.ResourceQueue) {
+	var records BufferDescr
+	withResourceQueue(t, k, func(resources *ResourceQueue) {
 		records = resources.BakeBuffer(make([]byte, 1024), true)
 	})
 	w := recordList(t, k)
-	w.Draw(triangle(), testMaterial(gfx.BufferRangeParam("records", records, 256, 512)), gfx.MatParam("mvp", m.NewMat4()))
-	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+	w.Draw(triangle(), testMaterial(BufferRangeParam("records", records, 256, 512)), MatParam("mvp", m.NewMat4()))
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	found := false
 	for _, op := range backend.lastOps {
-		if op.kind != opSetBuffer {
+		if op.kind != testOpSetBuffer {
 			continue
 		}
 		found = true
@@ -139,8 +138,8 @@ func TestFirstInstanceReachesTheDraw(t *testing.T) {
 	w := recordList(t, k)
 	// A batch reads its own slice of the shared instance arena: WebGPU's
 	// instance_index starts at firstInstance, so no offset plumbing is needed.
-	w.DrawInstancedFrom(triangle(), testMaterial(), 7, 3, gfx.MatParam("mvp", m.NewMat4()))
-	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+	w.DrawInstancedFrom(triangle(), testMaterial(), 7, 3, MatParam("mvp", m.NewMat4()))
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	if len(backend.draws) != 1 {
@@ -155,17 +154,17 @@ func TestUniformBlockOverTheSlotIsReportedOnceAndDropped(t *testing.T) {
 	p := newPlugin()
 	var reported []error
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
-	layout := gfx.ShaderLayout{
+	layout := ShaderLayout{
 		UniformSize: uniformMax + 1, UniformGroup: 0, UniformBinding: 0,
-		Uniforms: []gfx.UniformMember{{Name: "mvp", Offset: 0}},
+		Uniforms: []UniformMember{{Name: "mvp", Offset: 0}},
 	}
 	backend := &fakeBackend{layout: &layout}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	for range 2 {
 		w := recordList(t, k)
-		w.Draw(triangle(), testMaterial(), gfx.MatParam("mvp", m.NewMat4()))
-		k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+		w.Draw(triangle(), testMaterial(), MatParam("mvp", m.NewMat4()))
+		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 	}
 
@@ -177,7 +176,7 @@ func TestUniformBlockOverTheSlotIsReportedOnceAndDropped(t *testing.T) {
 	if len(backend.freedShaders) != 1 {
 		t.Errorf("freed shaders = %d, want the refused module freed", len(backend.freedShaders))
 	}
-	var tooLarge gfx.ErrUniformBlockTooLarge
+	var tooLarge ErrUniformBlockTooLarge
 	found := 0
 	for _, err := range reported {
 		if errors.As(err, &tooLarge) {
@@ -196,21 +195,21 @@ func TestUniformBlockThatFillsTheSlotRenders(t *testing.T) {
 	p := newPlugin()
 	var reported []error
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
-	backend := &fakeBackend{layout: &gfx.ShaderLayout{
+	backend := &fakeBackend{layout: &ShaderLayout{
 		UniformSize: uniformMax, UniformGroup: 0, UniformBinding: 0,
-		Uniforms: []gfx.UniformMember{{Name: "mvp", Offset: 0}},
+		Uniforms: []UniformMember{{Name: "mvp", Offset: 0}},
 	}}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w := recordList(t, k)
-	w.Draw(triangle(), testMaterial(), gfx.MatParam("mvp", m.NewMat4()))
-	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+	w.Draw(triangle(), testMaterial(), MatParam("mvp", m.NewMat4()))
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	if backend.passDraws[0] != 1 {
 		t.Errorf("draws = %d, want a 256-byte block rendered", backend.passDraws[0])
 	}
-	var tooLarge gfx.ErrUniformBlockTooLarge
+	var tooLarge ErrUniformBlockTooLarge
 	for _, err := range reported {
 		if errors.As(err, &tooLarge) {
 			t.Errorf("a 256-byte block was reported: %v", err)

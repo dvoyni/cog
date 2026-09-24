@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -15,11 +14,11 @@ import (
 // would have made, instance for instance.
 func TestSeparatelyRecordedEqualDrawsPackAsOneBatch(t *testing.T) {
 	var ref model.MeshRef
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, forwardCamera())
-		q.Mesh(0, ref, scene.MeshDraw{Transforms: []m.Transform{m.At(0, 0, -5), m.At(1, 0, -5)}})
-		q.Mesh(0, ref, scene.MeshDraw{Transform: m.At(2, 0, -5)})
-		q.Mesh(0, ref, scene.MeshDraw{Transform: m.At(3, 0, -5)})
+		q.Mesh(0, ref, MeshDraw{Transforms: []m.Transform{m.At(0, 0, -5), m.At(1, 0, -5)}})
+		q.Mesh(0, ref, MeshDraw{Transform: m.At(2, 0, -5)})
+		q.Mesh(0, ref, MeshDraw{Transform: m.At(3, 0, -5)})
 	})
 	ref = h.bake(triangle(), nil, gfx.TopologyTriangleList)
 	h.frame()
@@ -40,11 +39,11 @@ func TestSeparatelyRecordedEqualDrawsPackAsOneBatch(t *testing.T) {
 // unless they share a mesh and a material.
 func TestDrawsOfDifferentMeshesStaySeparate(t *testing.T) {
 	var a, b model.MeshRef
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, forwardCamera())
-		q.Mesh(0, a, scene.MeshDraw{Transform: m.At(0, 0, -5)})
-		q.Mesh(0, b, scene.MeshDraw{Transform: m.At(1, 0, -5)})
-		q.Mesh(0, a, scene.MeshDraw{Material: opaqueMaterial(1), Transform: m.At(2, 0, -5)})
+		q.Mesh(0, a, MeshDraw{Transform: m.At(0, 0, -5)})
+		q.Mesh(0, b, MeshDraw{Transform: m.At(1, 0, -5)})
+		q.Mesh(0, a, MeshDraw{Material: opaqueMaterial(1), Transform: m.At(2, 0, -5)})
 	})
 	a = h.bake(triangle(), nil, gfx.TopologyTriangleList)
 	b = h.bake(triangle(), nil, gfx.TopologyTriangleList)
@@ -60,14 +59,14 @@ func TestDrawsOfDifferentMeshesStaySeparate(t *testing.T) {
 // in different backings still merge: what is compared is the values.
 func TestDrawsWithDifferentParamsStaySeparate(t *testing.T) {
 	var ref model.MeshRef
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		material := opaqueMaterial(1)
-		q.Mesh(0, ref, scene.MeshDraw{Material: material, Transform: m.At(0, 0, -5),
+		q.Mesh(0, ref, MeshDraw{Material: material, Transform: m.At(0, 0, -5),
 			Params: []gfx.ParameterDescr{gfx.FloatParam("key", 2)}})
-		q.Mesh(0, ref, scene.MeshDraw{Material: material, Transform: m.At(1, 0, -5),
+		q.Mesh(0, ref, MeshDraw{Material: material, Transform: m.At(1, 0, -5),
 			Params: []gfx.ParameterDescr{gfx.FloatParam("key", 2)}})
-		q.Mesh(0, ref, scene.MeshDraw{Material: material, Transform: m.At(2, 0, -5),
+		q.Mesh(0, ref, MeshDraw{Material: material, Transform: m.At(2, 0, -5),
 			Params: []gfx.ParameterDescr{gfx.FloatParam("key", 3)}})
 	})
 	ref = h.bake(triangle(), nil, gfx.TopologyTriangleList)
@@ -87,7 +86,7 @@ func TestDrawsWithDifferentParamsStaySeparate(t *testing.T) {
 // one paint. Two debug boxes of different colours are the plainest case, since
 // the colour is their paint and nothing else about them differs.
 func TestDrawsWithDifferentPaintStaySeparate(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		q.Box(0, m.At(0, 0, -5), testBoxColor)
 		q.Box(0, m.At(1, 0, -5), testBoxColor)
@@ -107,13 +106,13 @@ func TestDrawsWithDifferentPaintStaySeparate(t *testing.T) {
 // Two model calls with equal overrides merge and a third with its own stays
 // apart: the overrides are the draws' gfx parameters, and a batch binds one set.
 func TestModelDrawsWithDifferentOverridesStaySeparate(t *testing.T) {
-	h := newHarnessWithFiles(t, modelFiles(glb(t, skinnedModel(t))), func(q *scene.OpQueue) {
+	h := newHarnessWithFiles(t, modelFiles(glb(t, skinnedModel(t))), func(q *OpQueue) {
 		q.Camera(cameraMain, modelCamera())
 		red := []gfx.ParameterDescr{gfx.ColorParam("baseColorFactor", m.NewColorLinear(1, 0, 0, 1))}
-		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{Transform: m.At(0, 0, 0), OverrideParams: red})
-		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{Transform: m.At(1, 0, 0),
+		q.Model(LayersAll, modelPath, ModelDraw{Transform: m.At(0, 0, 0), OverrideParams: red})
+		q.Model(LayersAll, modelPath, ModelDraw{Transform: m.At(1, 0, 0),
 			OverrideParams: []gfx.ParameterDescr{gfx.ColorParam("baseColorFactor", m.NewColorLinear(1, 0, 0, 1))}})
-		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{Transform: m.At(2, 0, 0),
+		q.Model(LayersAll, modelPath, ModelDraw{Transform: m.At(2, 0, 0),
 			OverrideParams: []gfx.ParameterDescr{gfx.ColorParam("baseColorFactor", m.NewColorLinear(0, 1, 0, 1))}})
 	})
 	h.frameUntil(t, "the model to become resident", func() bool {
@@ -130,10 +129,10 @@ func TestModelDrawsWithDifferentOverridesStaySeparate(t *testing.T) {
 // crate stack. Two animated calls do not, even at the same clip time: each
 // call packs its own sceneAnim block and a batch carries one animation.
 func TestSeparatelyAnimatedDrawsStaySeparate(t *testing.T) {
-	still := newHarnessWithFiles(t, modelFiles(glb(t, skinnedModel(t))), func(q *scene.OpQueue) {
+	still := newHarnessWithFiles(t, modelFiles(glb(t, skinnedModel(t))), func(q *OpQueue) {
 		q.Camera(cameraMain, modelCamera())
-		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{Transform: m.At(0, 0, 0)})
-		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{Transform: m.At(1, 0, 0)})
+		q.Model(LayersAll, modelPath, ModelDraw{Transform: m.At(0, 0, 0)})
+		q.Model(LayersAll, modelPath, ModelDraw{Transform: m.At(1, 0, 0)})
 	})
 	still.frameUntil(t, "the model to become resident", func() bool {
 		return len(still.passes()) == 1 && still.passes()[0].Instances == 2
@@ -143,10 +142,10 @@ func TestSeparatelyAnimatedDrawsStaySeparate(t *testing.T) {
 	}
 
 	play := []model.ClipPlay{{Clip: "spin", Time: 0.5, Weight: 1}}
-	moving := newHarnessWithFiles(t, modelFiles(glb(t, skinnedModel(t))), func(q *scene.OpQueue) {
+	moving := newHarnessWithFiles(t, modelFiles(glb(t, skinnedModel(t))), func(q *OpQueue) {
 		q.Camera(cameraMain, modelCamera())
-		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{Transform: m.At(0, 0, 0), Plays: play})
-		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{Transform: m.At(1, 0, 0), Plays: play})
+		q.Model(LayersAll, modelPath, ModelDraw{Transform: m.At(0, 0, 0), Plays: play})
+		q.Model(LayersAll, modelPath, ModelDraw{Transform: m.At(1, 0, 0), Plays: play})
 	})
 	moving.frameUntil(t, "the model to become resident", func() bool {
 		return len(moving.passes()) == 1 && moving.passes()[0].Instances == 2
@@ -165,11 +164,11 @@ func TestSeparatelyAnimatedDrawsStaySeparate(t *testing.T) {
 // is its own batch so that each lands at its own depth.
 func TestEqualAdjacentBlendedDrawsStayOneBatchEach(t *testing.T) {
 	var ref model.MeshRef
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		material := blendMaterial(1)
-		q.Mesh(0, ref, scene.MeshDraw{Material: material, Transform: m.At(0, 0, -5)})
-		q.Mesh(0, ref, scene.MeshDraw{Material: material, Transform: m.At(0, 0, -6)})
+		q.Mesh(0, ref, MeshDraw{Material: material, Transform: m.At(0, 0, -5)})
+		q.Mesh(0, ref, MeshDraw{Material: material, Transform: m.At(0, 0, -6)})
 	})
 	ref = h.bake(triangle(), nil, gfx.TopologyTriangleList)
 	h.frame()

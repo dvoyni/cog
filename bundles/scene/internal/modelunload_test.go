@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
 )
 
 // residentSkinnedModel loads the skinned fixture. Its baked poses are what
@@ -13,7 +12,7 @@ import (
 // racing a reload.
 func residentSkinnedModel(t testing.TB) *harness {
 	t.Helper()
-	h := newHarnessWithFiles(t, modelFiles(glb(t, skinnedModel(t))), func(*scene.OpQueue) {})
+	h := newHarnessWithFiles(t, modelFiles(glb(t, skinnedModel(t))), func(*OpQueue) {})
 	h.device(func(la model.LookupDeviceAccess) {
 		la.Preload(modelPath)
 		if err := la.State(modelPath); err != nil {
@@ -63,7 +62,7 @@ func TestAnUnloadedPathReloadsOnTheNextQuery(t *testing.T) {
 // A failed load clears only on unload. Without that there is no way back from a
 // typo at all, because a failed path is cached as failed and never loads again.
 func TestUnloadClearsAFailedPathSoItLoadsAgain(t *testing.T) {
-	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*scene.OpQueue) {})
+	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*OpQueue) {})
 	const missing = "models/absent.glb"
 	h.device(func(la model.LookupDeviceAccess) { la.Preload(missing) })
 	if len(h.errors()) != 1 {
@@ -85,7 +84,7 @@ func TestUnloadClearsAFailedPathSoItLoadsAgain(t *testing.T) {
 // typo once the string is fixed. The path itself never enters the cache, so a
 // typo stays a typo however many times it is asked.
 func TestUnloadClearsAnInvalidPath(t *testing.T) {
-	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*scene.OpQueue) {})
+	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*OpQueue) {})
 	const bad = "../escape.glb"
 	h.device(func(la model.LookupDeviceAccess) { la.State(bad) })
 	h.lookup(func(la model.LookupAccess) { la.UnloadModel(bad) })

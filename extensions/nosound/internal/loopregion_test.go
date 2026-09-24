@@ -6,7 +6,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/dvoyni/cog/extensions/nosound"
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/jfreymuth/oggvorbis"
 )
@@ -185,7 +184,7 @@ func TestNosoundDropsAMalformedRegionWholeAndReportsItOncePerClip(t *testing.T) 
 	if len(dropped) != 1 {
 		t.Fatalf("the Adapter queued %d notices for one bad Clip, want 1", len(dropped))
 	}
-	var ignored nosound.ErrLoopRegionIgnored
+	var ignored ErrLoopRegionIgnored
 	if !errors.As(dropped[0], &ignored) || ignored.End != 48705 || ignored.Frames != clipFrames {
 		t.Fatalf("the notice is %v, want an ErrLoopRegionIgnored naming [%d, %d) against %d frames",
 			dropped[0], 11025, 48705, clipFrames)

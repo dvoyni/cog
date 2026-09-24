@@ -1,10 +1,5 @@
 package internal
 
-import (
-	"github.com/dvoyni/cog/slots/gfx"
-	"github.com/dvoyni/cog/slots/gfx/internal/types"
-)
-
 type parameterSource uint8
 
 const (
@@ -18,7 +13,7 @@ type parameterRef struct {
 	index  int
 }
 
-func (r parameterRef) value(material, draw []gfx.ParameterDescr) *gfx.ParameterDescr {
+func (r parameterRef) value(material, draw []ParameterDescr) *ParameterDescr {
 	switch r.source {
 	case parameterMaterial:
 		return &material[r.index]
@@ -54,7 +49,7 @@ type plannedResource struct {
 	// the dimension check and a pure function of the shader, so it is cached
 	// here with the rest of the plan; the layer count it is compared against is
 	// a per-draw value and cannot be. Meaningless for a buffer binding.
-	view gfx.TextureViewDimension
+	view TextureViewDimension
 }
 
 // plannedSampler is one reflected sampler binding and the parameter that fills
@@ -89,14 +84,14 @@ func (d declaredKind) String() string {
 	return "a uniform member"
 }
 
-func (d declaredKind) accepts(kind types.ParamKind) bool {
+func (d declaredKind) accepts(kind ParamKind) bool {
 	switch d {
 	case declaredTexture:
-		return kind == types.ParamTexture
+		return kind == ParamTexture
 	case declaredSampler:
-		return kind == types.ParamSampler
+		return kind == ParamSampler
 	case declaredBuffer:
-		return kind == types.ParamBuffer
+		return kind == ParamBuffer
 	}
 	return kind.ValueKind()
 }
@@ -113,7 +108,7 @@ type parameterPlan struct {
 }
 
 type parameterPlanBucketKey struct {
-	shader gfx.ShaderID
+	shader ShaderID
 	hash   uint64
 }
 
@@ -131,20 +126,20 @@ type cachedParameterPlan struct {
 //
 // A name that matched nothing is not a mismatch: leaving a shader value at its
 // zero is ordinary, and gfx drops a parameter no shader declared.
-func (plan *parameterPlan) checkKind(label, name string, ref parameterRef, material, draw []gfx.ParameterDescr, declared declaredKind) {
+func (plan *parameterPlan) checkKind(label, name string, ref parameterRef, material, draw []ParameterDescr, declared declaredKind) {
 	if plan.mismatch != nil {
 		return
 	}
 	param := ref.value(material, draw)
-	if param == nil || declared.accepts(types.ParameterKind(param)) {
+	if param == nil || declared.accepts(ParameterKind(param)) {
 		return
 	}
-	plan.mismatch = gfx.ErrParameterKindMismatch{
-		Shader: label, Parameter: name, Supplied: types.ParameterKind(param).String(), Declared: declared.String(),
+	plan.mismatch = ErrParameterKindMismatch{
+		Shader: label, Parameter: name, Supplied: ParameterKind(param).String(), Declared: declared.String(),
 	}
 }
 
-func parameterRefFor(name string, material, draw []gfx.ParameterDescr) parameterRef {
+func parameterRefFor(name string, material, draw []ParameterDescr) parameterRef {
 	for i := range draw {
 		if draw[i].Name() == name {
 			return parameterRef{source: parameterDraw, index: i}
@@ -158,7 +153,7 @@ func parameterRefFor(name string, material, draw []gfx.ParameterDescr) parameter
 	return parameterRef{}
 }
 
-func parameterNames(params []gfx.ParameterDescr) []string {
+func parameterNames(params []ParameterDescr) []string {
 	names := make([]string, len(params))
 	for i := range params {
 		names[i] = params[i].Name()
@@ -166,7 +161,7 @@ func parameterNames(params []gfx.ParameterDescr) []string {
 	return names
 }
 
-func parameterShapeEqual(cached *cachedParameterPlan, material, draw []gfx.ParameterDescr) bool {
+func parameterShapeEqual(cached *cachedParameterPlan, material, draw []ParameterDescr) bool {
 	if len(cached.materialNames) != len(material) || len(cached.drawNames) != len(draw) {
 		return false
 	}
@@ -185,7 +180,7 @@ func parameterShapeEqual(cached *cachedParameterPlan, material, draw []gfx.Param
 
 // parameterShapeHash hashes a draw's parameter shape: its material's names,
 // then its own. The material half is split out so a material OpQueue recorded
-// for the frame brings it already taken; see types.ParameterShapeState.
-func parameterShapeHash(material, draw []gfx.ParameterDescr) uint64 {
-	return types.ContinueParameterShape(types.ParameterShapeState(material), draw)
+// for the frame brings it already taken; see ParameterShapeState.
+func parameterShapeHash(material, draw []ParameterDescr) uint64 {
+	return ContinueParameterShape(ParameterShapeState(material), draw)
 }

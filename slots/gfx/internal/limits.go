@@ -1,16 +1,12 @@
 package internal
 
-import (
-	"github.com/dvoyni/cog/slots/gfx"
-)
-
 // checkUniformBlock measures a reflected shader's uniform block against the
 // per-draw slot of the uniform arena. It is not a web-floor check: the floor is
 // 64 KiB, the slot is uniformMax, and a block past the slot renders truncated on
 // every device. The caller treats a failure as fatal to the shader.
-func checkUniformBlock(shader string, layout gfx.ShaderLayout) error {
+func checkUniformBlock(shader string, layout ShaderLayout) error {
 	if layout.UniformSize > uniformMax {
-		return gfx.ErrUniformBlockTooLarge{Shader: shader, Declared: layout.UniformSize, Max: uniformMax}
+		return ErrUniformBlockTooLarge{Shader: shader, Declared: layout.UniformSize, Max: uniformMax}
 	}
 	return nil
 }
@@ -23,8 +19,8 @@ func checkUniformBlock(shader string, layout gfx.ShaderLayout) error {
 //
 // Every reflected binding is emitted for both shader stages, so the per-stage
 // storage limit is counted once over the whole shader.
-func checkWebLimits(shader string, layout gfx.ShaderLayout, device gfx.Limits) error {
-	floor := gfx.DefaultLimits()
+func checkWebLimits(shader string, layout ShaderLayout, device Limits) error {
+	floor := DefaultLimits()
 	storage, groups := 0, 0
 	for _, resource := range layout.Resources {
 		if resource.StorageBuffer {
@@ -37,18 +33,18 @@ func checkWebLimits(shader string, layout gfx.ShaderLayout, device gfx.Limits) e
 	}
 	switch {
 	case storage > floor.MaxStorageBuffersPerShaderStage:
-		return gfx.ErrShaderExceedsWebLimits{
+		return ErrShaderExceedsWebLimits{
 			Shader: shader, Limit: "storage buffers per shader stage",
 			Declared: storage, Floor: floor.MaxStorageBuffersPerShaderStage,
 			Device: device.MaxStorageBuffersPerShaderStage,
 		}
 	case groups > floor.MaxBindGroups:
-		return gfx.ErrShaderExceedsWebLimits{
+		return ErrShaderExceedsWebLimits{
 			Shader: shader, Limit: "bind groups",
 			Declared: groups, Floor: floor.MaxBindGroups, Device: device.MaxBindGroups,
 		}
 	case layout.UniformSize > floor.MaxUniformBufferBindingSize:
-		return gfx.ErrShaderExceedsWebLimits{
+		return ErrShaderExceedsWebLimits{
 			Shader: shader, Limit: "uniform block bytes",
 			Declared: layout.UniformSize, Floor: floor.MaxUniformBufferBindingSize,
 			Device: device.MaxUniformBufferBindingSize,

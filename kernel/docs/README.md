@@ -482,7 +482,7 @@ enclosing package, the segment before the last `internal`:
 
 | type | `String()` | `TypeName` |
 | --- | --- | --- |
-| `*OpQueue` declared in `bundles/canvas/internal/types` | `*types.OpQueue` | `*canvas.OpQueue` |
+| `*OpQueue` declared in `bundles/canvas/internal` | `*internal.OpQueue` | `*canvas.OpQueue` |
 | `installModelCmd` declared in `bundles/scene/internal` | `internal.installModelCmd` | `scene.installModelCmd` |
 | `RenderOnRender` declared in `slots/gfx` | `gfx.RenderOnRender` | `gfx.RenderOnRender` |
 
@@ -497,7 +497,7 @@ Go's reflection cannot see aliases, which is why the rule is needed at all:
 - It applies to any module's `internal` packages, a game's included.
 - Predeclared types, unnamed structs and interfaces, and types named outside
   an `internal` package render as `reflect` renders them.
-- A type the plugin declares in `internal/` itself, which no root aliases,
+- A type the plugin declares in `internal/` that its root does not alias
   renders under the plugin too: scene's unexported `installModelCmd` reads
   `scene.installModelCmd` in `Dump`.
 

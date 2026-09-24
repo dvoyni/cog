@@ -5,8 +5,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
+
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
@@ -43,14 +42,14 @@ func twoMaterialModel(t testing.TB) *gltf.Document {
 
 // residentModelDraw runs frames until the model at modelPath draws, then hands
 // back the draw records the flush expanded it into.
-func residentModelDraw(t testing.TB, doc *gltf.Document, draw scene.ModelDraw) (*harness, []types.DrawRecord) {
+func residentModelDraw(t testing.TB, doc *gltf.Document, draw ModelDraw) (*harness, []DrawRecord) {
 	t.Helper()
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, draw))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances > 0
 	})
-	var records []types.DrawRecord
-	h.inspect(func(q *scene.OpQueue) { records = append(records, types.OpQueueFlushDraws(q)...) })
+	var records []DrawRecord
+	h.inspect(func(q *OpQueue) { records = append(records, OpQueueFlushDraws(q)...) })
 	return h, records
 }
 
@@ -61,7 +60,7 @@ func residentModelDraw(t testing.TB, doc *gltf.Document, draw scene.ModelDraw) (
 // the entry's own, so there is no per-draw copy, which is what makes the common
 // path cost what the same geometry recorded by hand would.
 func TestAPlainModelDrawBindsTheFilesMaterialWithNoCopy(t *testing.T) {
-	h, records := residentModelDraw(t, twoMaterialModel(t), scene.ModelDraw{})
+	h, records := residentModelDraw(t, twoMaterialModel(t), ModelDraw{})
 	if len(records) != 2 {
 		t.Fatalf("expanded to %d draws, want one per primitive", len(records))
 	}
@@ -86,10 +85,10 @@ func TestAPlainModelDrawBindsTheFilesMaterialWithNoCopy(t *testing.T) {
 // would have taken, so the draws still batch exactly as before.
 func TestAFrameDrawingOneModelManyTimesFingerprintsNoFileMaterial(t *testing.T) {
 	const draws = 32
-	h := newHarnessWithFiles(t, modelFiles(glb(t, twoMaterialModel(t))), func(q *scene.OpQueue) {
+	h := newHarnessWithFiles(t, modelFiles(glb(t, twoMaterialModel(t))), func(q *OpQueue) {
 		q.Camera(cameraMain, modelCamera())
 		for i := range draws {
-			q.Model(scene.LayersAll, modelPath, scene.ModelDraw{
+			q.Model(LayersAll, modelPath, ModelDraw{
 				Transform: m.At(float32(i), 0, 0),
 			})
 		}
@@ -97,8 +96,8 @@ func TestAFrameDrawingOneModelManyTimesFingerprintsNoFileMaterial(t *testing.T) 
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances > 0
 	})
-	var records []types.DrawRecord
-	h.inspect(func(q *scene.OpQueue) { records = append(records, types.OpQueueFlushDraws(q)...) })
+	var records []DrawRecord
+	h.inspect(func(q *OpQueue) { records = append(records, OpQueueFlushDraws(q)...) })
 	if len(records) != 2*draws {
 		t.Fatalf("expanded to %d draws, want %d", len(records), 2*draws)
 	}
@@ -112,10 +111,10 @@ func TestAFrameDrawingOneModelManyTimesFingerprintsNoFileMaterial(t *testing.T) 
 			if records[i].MaterialKey == 0 {
 				t.Fatalf("draw %d carries no key, so the flush fingerprints its material", i)
 			}
-			if want := types.ForwardMaterialKey(owned.Key[model.VariantStatic]); records[i].MaterialKey != want {
+			if want := ForwardMaterialKey(owned.Key[model.VariantStatic]); records[i].MaterialKey != want {
 				t.Errorf("draw %d key = %x, want the one derived from the load's %x", i, records[i].MaterialKey, want)
 			}
-			if want := types.MaterialKeyOf(records[i].Material); records[i].MaterialKey != want {
+			if want := MaterialKeyOf(records[i].Material); records[i].MaterialKey != want {
 				t.Errorf("draw %d key = %x, want its material's content key %x", i, records[i].MaterialKey, want)
 			}
 		}
@@ -129,7 +128,7 @@ func TestAFrameDrawingOneModelManyTimesFingerprintsNoFileMaterial(t *testing.T) 
 // name survive, because gfx lays the draw's params over the file's material.
 func TestOverrideParamsBroadcastToEveryMaterialTheDrawBinds(t *testing.T) {
 	tint := m.Color{R: 0.5, G: 0.5, B: 0.5, A: 0.5}
-	h, records := residentModelDraw(t, twoMaterialModel(t), scene.ModelDraw{
+	h, records := residentModelDraw(t, twoMaterialModel(t), ModelDraw{
 		OverrideParams: []gfx.ParameterDescr{gfx.ColorParam("baseColorFactor", tint)},
 	})
 	defer h.frame()
@@ -164,7 +163,7 @@ func TestOverrideParamsKeepTheFilesTexturesAndReachTheDrawsParameters(t *testing
 		gfx.ColorParam("baseColorFactor", m.Color{R: 1, A: 1}),
 		gfx.TextureParam("baseColorTexture", gfx.TextureDescr{}),
 	}
-	h, records := residentModelDraw(t, twoMaterialModel(t), scene.ModelDraw{OverrideParams: overrides})
+	h, records := residentModelDraw(t, twoMaterialModel(t), ModelDraw{OverrideParams: overrides})
 	defer h.frame()
 	for i := range records {
 		if len(records[i].Params) != len(overrides) {
@@ -193,7 +192,7 @@ func TestOverrideParamsKeepTheFilesTexturesAndReachTheDrawsParameters(t *testing
 // Plays and MorphWeights follow.
 func TestOverrideParamsAreCopiedIntoTheFramesArena(t *testing.T) {
 	overrides := []gfx.ParameterDescr{gfx.ColorParam("baseColorFactor", m.Color{R: 1, A: 1})}
-	h, records := residentModelDraw(t, twoMaterialModel(t), scene.ModelDraw{OverrideParams: overrides})
+	h, records := residentModelDraw(t, twoMaterialModel(t), ModelDraw{OverrideParams: overrides})
 	defer h.frame()
 	for i := range records {
 		if &records[i].Params[0] == &overrides[0] {
@@ -208,10 +207,10 @@ func TestOverrideParamsAreCopiedIntoTheFramesArena(t *testing.T) {
 // under a shader that never heard of it is the wrong picture with nothing in
 // the frame to explain it.
 func TestAModelDrawWithAMaterialReplacesTheFilesWholesale(t *testing.T) {
-	replacement := scene.Material{{Descr: gfx.MaterialWithState(
+	replacement := Material{{Descr: gfx.MaterialWithState(
 		gfx.ShaderWithResource(model.SceneShaderPath), model.PbrState(model.AlphaOpaque, false))}}
 	h, records := residentModelDraw(t, twoMaterialModel(t),
-		scene.ModelDraw{Material: replacement})
+		ModelDraw{Material: replacement})
 	defer h.frame()
 	if len(records) != 2 {
 		t.Fatalf("expanded to %d draws, want one per primitive", len(records))
@@ -219,7 +218,7 @@ func TestAModelDrawWithAMaterialReplacesTheFilesWholesale(t *testing.T) {
 	for i := range records {
 		// The draw binds the recording's copy of the caller's material, so the
 		// two are one material by content rather than by address.
-		if len(records[i].Material) != 1 || types.MaterialKeyOf(records[i].Material) != types.MaterialKeyOf(replacement) {
+		if len(records[i].Material) != 1 || MaterialKeyOf(records[i].Material) != MaterialKeyOf(replacement) {
 			t.Errorf("draw %d binds a material other than the caller's", i)
 		}
 		for _, name := range []string{"baseColorFactor", "roughnessFactor"} {
@@ -235,9 +234,9 @@ func TestAModelDrawWithAMaterialReplacesTheFilesWholesale(t *testing.T) {
 // not survive is the file's numbers, which is the whole of "replaces
 // wholesale".
 func TestOverrideParamsReachAReplacementMaterial(t *testing.T) {
-	replacement := scene.Material{{Descr: gfx.MaterialWithState(
+	replacement := Material{{Descr: gfx.MaterialWithState(
 		gfx.ShaderWithResource(model.SceneShaderPath), model.PbrState(model.AlphaOpaque, false))}}
-	h, records := residentModelDraw(t, twoMaterialModel(t), scene.ModelDraw{
+	h, records := residentModelDraw(t, twoMaterialModel(t), ModelDraw{
 		Material:       replacement,
 		OverrideParams: []gfx.ParameterDescr{gfx.FloatParam("roughnessFactor", 0.5)},
 	})

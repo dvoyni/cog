@@ -5,8 +5,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
+
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -41,7 +40,7 @@ func TestBoundsResolveNeverCullThenExplicitThenBakedThenNever(t *testing.T) {
 // A draw's world sphere scales by the largest axis of its matrix: exact under
 // a uniform Scale, conservative under a non-uniform one.
 func TestWorldRadiusIsTheLocalRadiusTimesTheLargestAxisScale(t *testing.T) {
-	scaled := prepareDraw(types.DrawRecord{Transform: m.At(1, 2, 3).WithScale(2)}, boxSphere)
+	scaled := prepareDraw(DrawRecord{Transform: m.At(1, 2, 3).WithScale(2)}, boxSphere)
 	if !scaled.cullable {
 		t.Fatal("a box with a baked sphere is not cullable")
 	}
@@ -52,7 +51,7 @@ func TestWorldRadiusIsTheLocalRadiusTimesTheLargestAxisScale(t *testing.T) {
 		t.Fatalf("scale 2 gave radius %v, want %v", scaled.sphere.Radius, want)
 	}
 
-	stretchedDraw := prepareDraw(types.DrawRecord{Transform: m.Transform{Scale: m.Vec3{X: 1, Y: 5, Z: 2}}}, boxSphere)
+	stretchedDraw := prepareDraw(DrawRecord{Transform: m.Transform{Scale: m.Vec3{X: 1, Y: 5, Z: 2}}}, boxSphere)
 	if want := 5 * boxSphere.Bounds.Radius; !near(stretchedDraw.sphere.Radius, want) {
 		t.Fatalf("a (1,5,2) scale gave radius %v, want the largest axis' %v", stretchedDraw.sphere.Radius, want)
 	}
@@ -61,7 +60,7 @@ func TestWorldRadiusIsTheLocalRadiusTimesTheLargestAxisScale(t *testing.T) {
 // One cull per distinct frustum: two passes of one camera at the same aspect
 // share a result, and a pass at another aspect gets its own.
 func TestACameraCullsOncePerDistinctAspect(t *testing.T) {
-	draws := []types.DrawRecord{{}, {}}
+	draws := []DrawRecord{{}, {}}
 	prepared := []preparedDraw{
 		{sphere: m.Sphere{Center: m.Vec3{Z: -5}, Radius: 1}, cullable: true},
 		{sphere: m.Sphere{Center: m.Vec3{Z: 5}, Radius: 1}, cullable: true},
@@ -96,7 +95,7 @@ func TestACameraCullsOncePerDistinctAspect(t *testing.T) {
 // Culling is what a draw with no bounds is exempt from, and the exemption is
 // the documented default rather than an error, so nothing reports it.
 func TestANeverCullDrawSurvivesBehindTheCamera(t *testing.T) {
-	draws := []types.DrawRecord{{}}
+	draws := []DrawRecord{{}}
 	prepared := []preparedDraw{{sphere: m.Sphere{Center: m.Vec3{Z: 50}}, cullable: false}}
 	var c culler
 	c.beginCamera()
@@ -109,14 +108,14 @@ func TestANeverCullDrawSurvivesBehindTheCamera(t *testing.T) {
 // The layer mask decides what a camera records at all, before the frustum
 // decides what it keeps.
 func TestACullCountsOnlyTheLayersTheCameraSees(t *testing.T) {
-	draws := []types.DrawRecord{{Layers: scene.Layer(1)}, {Layers: scene.Layer(2)}}
+	draws := []DrawRecord{{Layers: Layer(1)}, {Layers: Layer(2)}}
 	prepared := []preparedDraw{
 		{sphere: m.Sphere{Center: m.Vec3{Z: -5}, Radius: 1}, cullable: true},
 		{sphere: m.Sphere{Center: m.Vec3{Z: -5}, Radius: 1}, cullable: true},
 	}
 	var c culler
 	c.beginCamera()
-	result := c.results[c.cull(1, m.Perspective4(1, 1, 0.1, 100), m.NewMat4(), scene.Layer(2), draws, prepared)]
+	result := c.results[c.cull(1, m.Perspective4(1, 1, 0.1, 100), m.NewMat4(), Layer(2), draws, prepared)]
 	if result.recorded != 1 || result.count != 1 || c.survivors[result.first].draw != 1 {
 		t.Fatalf("a camera on layer 2 recorded %d and kept %d, want the one draw on its layer", result.recorded, result.count)
 	}
@@ -126,7 +125,7 @@ func TestASteadyCullAllocatesNothing(t *testing.T) {
 	if raceEnabled {
 		t.Skip("allocation counts are not meaningful under -race")
 	}
-	draws := make([]types.DrawRecord, 64)
+	draws := make([]DrawRecord, 64)
 	prepared := make([]preparedDraw, 64)
 	for i := range prepared {
 		prepared[i] = preparedDraw{sphere: m.Sphere{Center: m.Vec3{X: float32(i), Z: -5}, Radius: 1}, cullable: true}

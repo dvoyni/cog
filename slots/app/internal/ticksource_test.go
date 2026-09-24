@@ -4,8 +4,6 @@ import (
 	"errors"
 	"testing"
 	"time"
-
-	"github.com/dvoyni/cog/slots/app"
 )
 
 // These are app's time-control tests. They drive the plugin the way a MainLoop
@@ -22,7 +20,7 @@ func TestTickSource_PauseStopsTicksAndNothingElse(t *testing.T) {
 		t.Fatalf("running frame published %d ticks, want 1", got)
 	}
 
-	if response := harness.control(app.TimeRequest{Action: app.TimePause}); !response.Paused {
+	if response := harness.control(TimeRequest{Action: TimePause}); !response.Paused {
 		t.Fatal("pause did not report a paused tick source")
 	}
 
@@ -43,7 +41,7 @@ func TestTickSource_PauseStopsTicksAndNothingElse(t *testing.T) {
 // catch-up burst.
 func TestTickSource_ResumeBanksNothing(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig())
-	harness.control(app.TimeRequest{Action: app.TimePause})
+	harness.control(TimeRequest{Action: TimePause})
 
 	for range 100 {
 		harness.frame(0.100) // ten steps' worth of frame time each
@@ -52,7 +50,7 @@ func TestTickSource_ResumeBanksNothing(t *testing.T) {
 		t.Fatalf("paused frames published %d ticks, want 0", got)
 	}
 
-	response := harness.control(app.TimeRequest{Action: app.TimeResume})
+	response := harness.control(TimeRequest{Action: TimeResume})
 	if response.Paused || !response.Changed {
 		t.Fatalf("resume reported %+v, want a change to running", response)
 	}
@@ -69,9 +67,9 @@ func TestTickSource_ResumeBanksNothing(t *testing.T) {
 func TestTickSource_StepPublishesOneLastUpdate(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig())
 
-	done := make(chan app.TimeResponse, 1)
+	done := make(chan TimeResponse, 1)
 	go func() {
-		done <- harness.control(app.TimeRequest{Action: app.TimeStep})
+		done <- harness.control(TimeRequest{Action: TimeStep})
 	}()
 	harness.waitPending(1)
 
@@ -102,9 +100,9 @@ func TestTickSource_StepPublishesOneLastUpdate(t *testing.T) {
 func TestTickSource_MultiStepPublishesEveryStep(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig().WithMaxPending(2))
 
-	done := make(chan app.TimeResponse, 1)
+	done := make(chan TimeResponse, 1)
 	go func() {
-		done <- harness.control(app.TimeRequest{Action: app.TimeStep, Steps: 5})
+		done <- harness.control(TimeRequest{Action: TimeStep, Steps: 5})
 	}()
 	harness.waitPending(5)
 
@@ -130,15 +128,15 @@ func TestTickSource_MultiStepPublishesEveryStep(t *testing.T) {
 func TestTickSource_PausingAnAlreadyPausedEngineIsAnOrdinaryAnswer(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig())
 
-	first := harness.control(app.TimeRequest{Action: app.TimePause})
+	first := harness.control(TimeRequest{Action: TimePause})
 	if !first.Paused || !first.Changed {
 		t.Fatalf("first pause reported %+v, want a change to paused", first)
 	}
-	second := harness.control(app.TimeRequest{Action: app.TimePause})
+	second := harness.control(TimeRequest{Action: TimePause})
 	if !second.Paused || second.Changed {
 		t.Fatalf("second pause reported %+v, want paused with nothing changed", second)
 	}
-	status := harness.control(app.TimeRequest{Action: app.TimeStatus})
+	status := harness.control(TimeRequest{Action: TimeStatus})
 	if !status.Paused || status.Changed {
 		t.Fatalf("status reported %+v, want paused with nothing changed", status)
 	}
@@ -169,14 +167,14 @@ func TestTickSource_ArmJoinsAPendingStep(t *testing.T) {
 // publish one tick between them, and all three callers read back that tick.
 func TestTickSource_ArmsSharingAStepDescribeOneTick(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig())
-	harness.control(app.TimeRequest{Action: app.TimePause})
+	harness.control(TimeRequest{Action: TimePause})
 
-	responses := make(chan app.TimeResponse, 3)
-	go func() { responses <- harness.control(app.TimeRequest{Action: app.TimeStep}) }()
+	responses := make(chan TimeResponse, 3)
+	go func() { responses <- harness.control(TimeRequest{Action: TimeStep}) }()
 	harness.waitPending(1)
 	for range 2 {
 		go func() {
-			responses <- harness.control(app.TimeRequest{Action: app.TimeStep, Join: true})
+			responses <- harness.control(TimeRequest{Action: TimeStep, Join: true})
 		}()
 	}
 	harness.waitSharing(3)
@@ -223,11 +221,11 @@ func TestTickSource_ReadsWithoutADispatch(t *testing.T) {
 func TestTickSource_ResumeReleasesAPendingStep(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig())
 
-	done := make(chan app.TimeResponse, 1)
-	go func() { done <- harness.control(app.TimeRequest{Action: app.TimeStep, Steps: 3}) }()
+	done := make(chan TimeResponse, 1)
+	go func() { done <- harness.control(TimeRequest{Action: TimeStep, Steps: 3}) }()
 	harness.waitPending(3)
 
-	harness.control(app.TimeRequest{Action: app.TimeResume})
+	harness.control(TimeRequest{Action: TimeResume})
 	response := <-done
 	if response.Stepped != 0 {
 		t.Errorf("a step abandoned by a resume reported %d ticks, want 0", response.Stepped)
@@ -247,15 +245,15 @@ func TestTickSource_ResumeReleasesAPendingStep(t *testing.T) {
 func TestTickSource_HoldKeepsTheStepWindowOpenAcrossFrames(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig())
 
-	held := harness.control(app.TimeRequest{Action: app.TimeHold, Hold: 5 * time.Second})
+	held := harness.control(TimeRequest{Action: TimeHold, Hold: 5 * time.Second})
 	if !held.Paused || !held.Changed || !held.Held {
 		t.Fatalf("hold reported %+v, want a paused engine holding the step window", held)
 	}
 
-	responses := make(chan app.TimeResponse, 3)
+	responses := make(chan TimeResponse, 3)
 	for range 3 {
 		go func() {
-			responses <- harness.control(app.TimeRequest{Action: app.TimeStep, Join: true})
+			responses <- harness.control(TimeRequest{Action: TimeStep, Join: true})
 		}()
 	}
 	harness.waitSharing(3)
@@ -267,7 +265,7 @@ func TestTickSource_HoldKeepsTheStepWindowOpenAcrossFrames(t *testing.T) {
 		t.Fatalf("a held step published %d ticks, want none until the hold ends", got)
 	}
 
-	released := harness.control(app.TimeRequest{Action: app.TimeRelease})
+	released := harness.control(TimeRequest{Action: TimeRelease})
 	if !released.Changed || released.Held {
 		t.Fatalf("release reported %+v, want the hold gone", released)
 	}
@@ -296,10 +294,10 @@ func TestTickSource_HoldKeepsTheStepWindowOpenAcrossFrames(t *testing.T) {
 // be inferred from a split.
 func TestTickSource_HoldExpiresByItself(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig())
-	harness.control(app.TimeRequest{Action: app.TimeHold, Hold: 50 * time.Millisecond})
+	harness.control(TimeRequest{Action: TimeHold, Hold: 50 * time.Millisecond})
 
-	done := make(chan app.TimeResponse, 1)
-	go func() { done <- harness.control(app.TimeRequest{Action: app.TimeStep, Join: true}) }()
+	done := make(chan TimeResponse, 1)
+	go func() { done <- harness.control(TimeRequest{Action: TimeStep, Join: true}) }()
 	harness.waitPending(1)
 
 	deadline := time.Now().Add(5 * time.Second)
@@ -314,7 +312,7 @@ func TestTickSource_HoldExpiresByItself(t *testing.T) {
 	if response := <-done; response.Stepped != 1 {
 		t.Errorf("a step held until the hold expired reported %d ticks, want 1", response.Stepped)
 	}
-	status := harness.control(app.TimeRequest{Action: app.TimeStatus})
+	status := harness.control(TimeRequest{Action: TimeStatus})
 	if status.Held || !status.HoldExpired {
 		t.Errorf("status reported %+v, want no hold standing and the expiry named", status)
 	}
@@ -324,13 +322,13 @@ func TestTickSource_HoldExpiresByItself(t *testing.T) {
 // was keeping open, so an engine left held is one call from running again.
 func TestTickSource_ResumeDropsAHold(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig())
-	harness.control(app.TimeRequest{Action: app.TimeHold, Hold: 5 * time.Second})
+	harness.control(TimeRequest{Action: TimeHold, Hold: 5 * time.Second})
 
-	done := make(chan app.TimeResponse, 1)
-	go func() { done <- harness.control(app.TimeRequest{Action: app.TimeStep, Join: true}) }()
+	done := make(chan TimeResponse, 1)
+	go func() { done <- harness.control(TimeRequest{Action: TimeStep, Join: true}) }()
 	harness.waitPending(1)
 
-	resumed := harness.control(app.TimeRequest{Action: app.TimeResume})
+	resumed := harness.control(TimeRequest{Action: TimeResume})
 	if resumed.Paused || resumed.Held {
 		t.Fatalf("resume reported %+v, want a running engine with no hold", resumed)
 	}
@@ -351,14 +349,14 @@ func TestTickSource_HoldLongerThanTheCapIsRefused(t *testing.T) {
 	var ticks tickSource
 
 	changed, err := ticks.hold(time.Now(), maxHoldDuration+time.Second)
-	var tooLong app.ErrHoldTooLong
+	var tooLong ErrHoldTooLong
 	if !errors.As(err, &tooLong) {
 		t.Fatalf("an over-long hold reported %v, want ErrHoldTooLong", err)
 	}
 	if changed {
 		t.Error("a refused hold reported that it changed something")
 	}
-	if state := ticks.state(app.TimeResponse{}); state.Held {
+	if state := ticks.state(TimeResponse{}); state.Held {
 		t.Error("a refused hold began anyway")
 	}
 }
@@ -369,15 +367,15 @@ func TestTickSource_HoldLongerThanTheCapIsRefused(t *testing.T) {
 func TestTickSource_HoldAndReleaseReportWhatTheyChanged(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig())
 
-	if response := harness.control(app.TimeRequest{Action: app.TimeRelease}); response.Changed {
+	if response := harness.control(TimeRequest{Action: TimeRelease}); response.Changed {
 		t.Errorf("releasing with no hold reported %+v, want nothing changed", response)
 	}
-	harness.control(app.TimeRequest{Action: app.TimeHold, Hold: 5 * time.Second})
-	second := harness.control(app.TimeRequest{Action: app.TimeHold, Hold: 5 * time.Second})
+	harness.control(TimeRequest{Action: TimeHold, Hold: 5 * time.Second})
+	second := harness.control(TimeRequest{Action: TimeHold, Hold: 5 * time.Second})
 	if second.Changed || !second.Held {
 		t.Errorf("a second hold reported %+v, want the standing hold and nothing changed", second)
 	}
-	if released := harness.control(app.TimeRequest{Action: app.TimeRelease}); !released.Changed {
+	if released := harness.control(TimeRequest{Action: TimeRelease}); !released.Changed {
 		t.Errorf("release reported %+v, want the hold ended", released)
 	}
 }
@@ -388,9 +386,9 @@ func TestTickSource_NumbersEveryTick(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig())
 
 	harness.frame(0.010)
-	harness.control(app.TimeRequest{Action: app.TimePause})
-	done := make(chan app.TimeResponse, 1)
-	go func() { done <- harness.control(app.TimeRequest{Action: app.TimeStep, Steps: 3}) }()
+	harness.control(TimeRequest{Action: TimePause})
+	done := make(chan TimeResponse, 1)
+	go func() { done <- harness.control(TimeRequest{Action: TimeStep, Steps: 3}) }()
 	harness.waitPending(3)
 	harness.frame(0.010)
 	<-done
@@ -404,7 +402,7 @@ func TestTickSource_NumbersEveryTick(t *testing.T) {
 			t.Errorf("tick %d is numbered %d, want %d", i, update.Tick, i+1)
 		}
 	}
-	if status := harness.control(app.TimeRequest{Action: app.TimeStatus}); status.Tick != 4 {
+	if status := harness.control(TimeRequest{Action: TimeStatus}); status.Tick != 4 {
 		t.Errorf("status reported tick %d, want the last published 4", status.Tick)
 	}
 }
@@ -417,7 +415,7 @@ func TestTickSource_ArmsUnderAHoldShareOneTickAgainstARunningFrameLoop(t *testin
 	harness := newTickHarness(t, tickTestConfig())
 	// Paused before the loop starts, so every tick counted below is one
 	// somebody asked for rather than one the frame clock produced.
-	harness.control(app.TimeRequest{Action: app.TimePause})
+	harness.control(TimeRequest{Action: TimePause})
 	stop := harness.runFrames()
 	defer stop()
 
@@ -425,15 +423,15 @@ func TestTickSource_ArmsUnderAHoldShareOneTickAgainstARunningFrameLoop(t *testin
 	published := 0
 	for round := range rounds {
 		for _, arms := range []int{3, 4} {
-			harness.control(app.TimeRequest{Action: app.TimeHold, Hold: 5 * time.Second})
-			responses := make(chan app.TimeResponse, arms)
+			harness.control(TimeRequest{Action: TimeHold, Hold: 5 * time.Second})
+			responses := make(chan TimeResponse, arms)
 			for range arms {
 				go func() {
-					responses <- harness.control(app.TimeRequest{Action: app.TimeStep, Join: true})
+					responses <- harness.control(TimeRequest{Action: TimeStep, Join: true})
 				}()
 			}
 			harness.waitSharing(int64(arms))
-			harness.control(app.TimeRequest{Action: app.TimeRelease})
+			harness.control(TimeRequest{Action: TimeRelease})
 
 			joined := 0
 			for range arms {

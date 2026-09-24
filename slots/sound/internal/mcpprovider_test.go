@@ -9,8 +9,6 @@ import (
 
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
-	"github.com/dvoyni/cog/slots/sound"
-	"github.com/dvoyni/cog/slots/sound/internal/types"
 )
 
 // tickAt publishes one fixed step numbered the way app numbers its own, which
@@ -92,7 +90,7 @@ func TestTheDescriptionCarriesWhatAReaderGetsWrong(t *testing.T) {
 // all.
 func TestNothingIsPlayingAndThereIsNoDeviceAreDifferentAnswers(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 10, channels: 1, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
 	h.tickAt(1)
 	silent := listing(t, h)
@@ -102,11 +100,11 @@ func TestNothingIsPlayingAndThereIsNoDeviceAreDifferentAnswers(t *testing.T) {
 	if !silent.Device.Ready || silent.Device.Name != "fake" {
 		t.Fatalf("the device reads %+v, and the fixture opened one", silent.Device)
 	}
-	if silent.MaxVoices != sound.DefaultMaxVoices || silent.VoicesInUse != 0 {
+	if silent.MaxVoices != DefaultMaxVoices || silent.VoicesInUse != 0 {
 		t.Fatalf("the cap reads %d of %d", silent.VoicesInUse, silent.MaxVoices)
 	}
 
-	h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	h.play(ClipWithResource(bell), 0, Params{})
 	backend.setReady(false)
 	h.tickAt(2)
 	playing := listing(t, h)
@@ -142,10 +140,10 @@ func TestNothingIsPlayingAndThereIsNoDeviceAreDifferentAnswers(t *testing.T) {
 // sound in front of them.
 func TestTheListingReportsTheDerivedGainAndNeverThePan(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 600, channels: 1, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
 	const radius = 5
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{
+	voice := h.play(ClipWithResource(bell), 0, Params{
 		Volume:   m.Some[float32](1),
 		Position: m.Some(m.Vec3{Z: -radius}),
 	})
@@ -164,8 +162,8 @@ func TestTheListingReportsTheDerivedGainAndNeverThePan(t *testing.T) {
 			X: float32(math.Sin(radians) * radius),
 			Z: float32(-math.Cos(radians) * radius),
 		}
-		h.record(func(queue *sound.Queue) {
-			queue.SetVoice(voice, sound.Params{Position: m.Some(position)})
+		h.record(func(queue *Queue) {
+			queue.SetVoice(voice, Params{Position: m.Some(position)})
 		})
 		h.tickAt(int64(degrees) + 1)
 
@@ -205,11 +203,11 @@ func TestTheListingReportsTheDerivedGainAndNeverThePan(t *testing.T) {
 // W3C's projection to find it.
 func TestAnUnrotatedListenerShowsAsTheSameBearingOnEveryVoice(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 600, channels: 1, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
 	// Three sprites a 2D game would place all over its screen.
 	for _, at := range []m.Vec3{{X: 1}, {X: 3, Y: -50}, {X: 0.5, Y: 200}} {
-		h.play(sound.ClipWithResource(bell), 0, sound.Params{Position: m.Some(at)})
+		h.play(ClipWithResource(bell), 0, Params{Position: m.Some(at)})
 	}
 	h.tickAt(1)
 
@@ -237,10 +235,10 @@ func TestAnUnrotatedListenerShowsAsTheSameBearingOnEveryVoice(t *testing.T) {
 // positional Voice that really is dead ahead still reports its zero.
 func TestABearingIsAbsentOnANonPositionalVoiceAndPresentAtZero(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 600, channels: 1, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
-	h.play(sound.ClipWithResource(bell), 0, sound.Params{Volume: m.Some[float32](0.5)})
-	h.play(sound.ClipWithResource(bell), 0, sound.Params{Position: m.Some(m.Vec3{Z: -1})})
+	h.play(ClipWithResource(bell), 0, Params{Volume: m.Some[float32](0.5)})
+	h.play(ClipWithResource(bell), 0, Params{Position: m.Some(m.Vec3{Z: -1})})
 	h.tickAt(1)
 
 	response := listing(t, h)
@@ -282,9 +280,9 @@ func TestABearingIsAbsentOnANonPositionalVoiceAndPresentAtZero(t *testing.T) {
 // different things by it.
 func TestAOneShotThatEndedBetweenTwoLooksIsStillInTheRing(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 4 * step, channels: 1, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
-	h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	h.play(ClipWithResource(bell), 0, Params{})
 	for tick := int64(1); tick <= 4; tick++ {
 		h.tickAt(tick)
 	}
@@ -309,15 +307,15 @@ func TestAOneShotThatEndedBetweenTwoLooksIsStillInTheRing(t *testing.T) {
 // stolen, and without the count it cannot be told from sounds never played.
 func TestTheRingAndTheCapTellAStolenSoundFromAFinishedOne(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 600, channels: 1, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}.WithMaxVoices(1), clipBytes)
+	h := newHarness(t, backend, Config{}.WithMaxVoices(1), clipBytes)
 
-	h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	h.play(ClipWithResource(bell), 0, Params{})
 	h.tickAt(1)
 	if at := listing(t, h); at.VoicesInUse != 1 || at.MaxVoices != 1 {
 		t.Fatalf("one Voice on a cap of one reads %d of %d", at.VoicesInUse, at.MaxVoices)
 	}
 
-	h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	h.play(ClipWithResource(bell), 0, Params{})
 	h.tickAt(2)
 	h.waitEnded()
 
@@ -339,13 +337,13 @@ func TestTheRingAndTheCapTellAStolenSoundFromAFinishedOne(t *testing.T) {
 // they happened, so a reader reads a sequence rather than a set.
 func TestTheRingHoldsTheLastThirtyTwoEndingsAndLosesTheOldest(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 600, channels: 1, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
 	const played = 40
-	var all []sound.Voice
-	h.record(func(queue *sound.Queue) {
+	var all []Voice
+	h.record(func(queue *Queue) {
 		for range played {
-			all = append(all, queue.Play(sound.ClipWithResource(bell), 0, sound.Params{}))
+			all = append(all, queue.Play(ClipWithResource(bell), 0, Params{}))
 		}
 	})
 	h.tickAt(1)
@@ -353,7 +351,7 @@ func TestTheRingHoldsTheLastThirtyTwoEndingsAndLosesTheOldest(t *testing.T) {
 	// One ending per tick, so the tick a stop is stamped with is what
 	// identifies it: ending i ends on tick i+1.
 	for i, voice := range all {
-		h.record(func(queue *sound.Queue) { queue.Stop(voice) })
+		h.record(func(queue *Queue) { queue.Stop(voice) })
 		h.tickAt(int64(i) + 2)
 		h.waitEnded()
 	}
@@ -379,9 +377,9 @@ func TestTheRingHoldsTheLastThirtyTwoEndingsAndLosesTheOldest(t *testing.T) {
 // allocates nothing at all.
 func TestTheRingAllocatesNothing(t *testing.T) {
 	record := &lastFlush{}
-	ended := sound.ClipWithResource(bell)
+	ended := ClipWithResource(bell)
 	allocations := testing.AllocsPerRun(1000, func() {
-		record.record(types.Ending{Reason: sound.ReasonFinished, Clip: ended}, 7)
+		record.record(Ending{Reason: ReasonFinished, Clip: ended}, 7)
 	})
 	if allocations != 0 && !raceEnabled {
 		t.Fatalf("recording an ending allocated %v times, want 0", allocations)
@@ -392,7 +390,7 @@ func TestTheRingAllocatesNothing(t *testing.T) {
 	var visited int
 	record.each(func(e ending) {
 		visited++
-		if e.tick != 7 || e.reason != sound.ReasonFinished {
+		if e.tick != 7 || e.reason != ReasonFinished {
 			t.Fatalf("the ring holds %+v", e)
 		}
 	})
@@ -407,9 +405,9 @@ func TestTheRingAllocatesNothing(t *testing.T) {
 // Adapter nothing.
 func TestTheListingCostsNoTick(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 600, channels: 1, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
-	h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	h.play(ClipWithResource(bell), 0, Params{})
 	h.tickAt(9)
 	before := listing(t, h)
 	batches := len(backend.emitted())

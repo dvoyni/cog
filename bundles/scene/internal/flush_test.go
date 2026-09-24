@@ -5,23 +5,22 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // forwardCamera looks down -Z from the origin, so "in front" is negative Z and
 // "behind" is positive Z.
-func forwardCamera() scene.CameraDescr {
-	return scene.CameraDescr{FovY: math.Pi / 2, Near: 0.1, Far: 100}
+func forwardCamera() CameraDescr {
+	return CameraDescr{FovY: math.Pi / 2, Near: 0.1, Far: 100}
 }
 
 // A draw behind the camera is culled, and the frustum the pass publishes is the
 // one that rejected it: the whole point of publishing it is that a test can
 // say which sphere a specific frustum rejected, rather than only count.
 func TestADrawBehindTheCameraIsCulledByThePublishedFrustum(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		q.Box(0, m.At(0, 0, -5), testBoxColor)
 		q.Box(0, m.At(0, 0, 5), testBoxColor)
@@ -51,7 +50,7 @@ func TestADrawBehindTheCameraIsCulledByThePublishedFrustum(t *testing.T) {
 // The sphere is tested against all six planes. A draw past Far is culled just
 // like one to the side, which is why Far is required.
 func TestADrawPastFarIsCulled(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		q.Box(0, m.At(0, 0, -200), testBoxColor)
 	})
@@ -65,7 +64,7 @@ func TestADrawPastFarIsCulled(t *testing.T) {
 // The world sphere scales with the draw. A box scaled by 20 reaches back past
 // the camera and stays visible where a unit box at the same place is culled.
 func TestCullingUsesTheScaledWorldSphere(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		q.Box(0, m.At(0, 0, 5), testBoxColor)
 		q.Box(0, m.At(0, 0, 5).WithScale(20), testBoxColor)
@@ -81,15 +80,15 @@ func TestCullingUsesTheScaledWorldSphere(t *testing.T) {
 // never-cull draw is never reported - it is the documented default.
 func TestNeverCullAndExplicitBoundsOverrideTheBakedSphere(t *testing.T) {
 	var reported []error
-	h := newHarnessWithErrors(t, func(q *scene.OpQueue) {
+	h := newHarnessWithErrors(t, func(q *OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		// Behind the camera, but exempt.
-		types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: m.At(0, 0, 5), Color: testBoxColor, NeverCull: true})
+		OpQueueDraw(q, DrawRecord{Shape: ShapeBox, Transform: m.At(0, 0, 5), Color: testBoxColor, NeverCull: true})
 		// Behind the camera by its mesh, but its explicit sphere reaches the
 		// camera.
-		types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: m.At(0, 0, 5), Color: testBoxColor, Bounds: m.Sphere{Radius: 10}})
+		OpQueueDraw(q, DrawRecord{Shape: ShapeBox, Transform: m.At(0, 0, 5), Color: testBoxColor, Bounds: m.Sphere{Radius: 10}})
 		// Behind the camera by its mesh, and its explicit sphere says so too.
-		types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: m.At(0, 0, 5), Color: testBoxColor, Bounds: m.Sphere{Radius: 1}})
+		OpQueueDraw(q, DrawRecord{Shape: ShapeBox, Transform: m.At(0, 0, 5), Color: testBoxColor, Bounds: m.Sphere{Radius: 1}})
 	}, &reported)
 	h.frame()
 
@@ -103,14 +102,14 @@ func TestNeverCullAndExplicitBoundsOverrideTheBakedSphere(t *testing.T) {
 
 // opaqueMaterial is a caller material in the opaque class whose identity is
 // its one parameter, so two of them are two material ids.
-func opaqueMaterial(key float32) scene.Material {
-	return scene.Material{{Descr: gfx.MaterialWithState(
+func opaqueMaterial(key float32) Material {
+	return Material{{Descr: gfx.MaterialWithState(
 		gfx.ShaderWithResource(model.SceneShaderPath), gfx.StateOpaque3D(), pbrTestParams(key)...,
 	)}}
 }
 
-func blendMaterial(key float32) scene.Material {
-	return scene.Material{{Descr: gfx.MaterialWithState(
+func blendMaterial(key float32) Material {
+	return Material{{Descr: gfx.MaterialWithState(
 		gfx.ShaderWithResource(model.SceneShaderPath), gfx.StateTransparent3D(), pbrTestParams(key)...,
 	)}}
 }
@@ -135,11 +134,11 @@ func pbrTestParams(key float32) []gfx.ParameterDescr {
 // preserved: the five interleaved boxes come out as two runs, and each run of
 // equal boxes packs as one batch.
 func TestOpaqueDrawsGroupByMaterialNotRecordingOrder(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		a, b := opaqueMaterial(1), opaqueMaterial(2)
-		for i, material := range []scene.Material{b, a, b, a, b} {
-			types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: m.At(float32(i), 0, -5), Color: testBoxColor, Material: material})
+		for i, material := range []Material{b, a, b, a, b} {
+			OpQueueDraw(q, DrawRecord{Shape: ShapeBox, Transform: m.At(float32(i), 0, -5), Color: testBoxColor, Material: material})
 		}
 	})
 	h.frame()
@@ -164,13 +163,13 @@ func TestOpaqueDrawsGroupByMaterialNotRecordingOrder(t *testing.T) {
 // recording order, so near < far < opaque, and the expected emission order
 // opaque, far, near is strictly decreasing.
 func TestBlendDrawsFollowOpaqueAndSortBackToFront(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		// Recorded near first, and with the lower material id, so a sort by
 		// either recording order or material would put it first.
-		types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: m.At(0, 0, -2), Color: testBoxColor, Material: blendMaterial(1)})
-		types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: m.At(0, 0, -20), Color: testBoxColor, Material: blendMaterial(2)})
-		types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: m.At(0, 0, -50), Color: testBoxColor, Material: opaqueMaterial(3)})
+		OpQueueDraw(q, DrawRecord{Shape: ShapeBox, Transform: m.At(0, 0, -2), Color: testBoxColor, Material: blendMaterial(1)})
+		OpQueueDraw(q, DrawRecord{Shape: ShapeBox, Transform: m.At(0, 0, -20), Color: testBoxColor, Material: blendMaterial(2)})
+		OpQueueDraw(q, DrawRecord{Shape: ShapeBox, Transform: m.At(0, 0, -50), Color: testBoxColor, Material: opaqueMaterial(3)})
 	})
 	h.frame()
 
@@ -191,11 +190,11 @@ func TestBlendDrawsFollowOpaqueAndSortBackToFront(t *testing.T) {
 // the survivors by its own tag: the shadow pass sees the same recorded and
 // culled counts but packs nothing, because the bundled PBR serves only forward.
 func TestEachPassFiltersTheSharedSurvivorsByTag(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		descr := forwardCamera()
-		descr.Passes = []scene.Pass{
+		descr.Passes = []Pass{
 			{Tag: "shadow", Order: -1000, Target: gfx.NoTarget(), Depth: gfx.DepthTarget(sizedTexture(800, 600))},
-			{Tag: scene.TagForward},
+			{Tag: TagForward},
 		}
 		q.Camera(testCamera, descr)
 		q.Box(0, m.At(0, 0, -5), testBoxColor)
@@ -225,7 +224,7 @@ func TestEachPassFiltersTheSharedSurvivorsByTag(t *testing.T) {
 // passes have different aspects can see different light sets. The count each
 // pass packed is published beside its draw counts.
 func TestLightsAreCulledPerPassAtFlush(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		q.Box(0, m.At(0, 0, -5), testBoxColor)
 		q.PointLight(0, model.LightDescr{Position: m.Vec3{Z: -5}, Range: 2})
@@ -243,14 +242,14 @@ func TestLightsAreCulledPerPassAtFlush(t *testing.T) {
 // objects it lights: a layer-1 light reaches only a camera that sees layer 1,
 // and lights everything that camera draws.
 func TestALightLayerMaskIsFilteredAgainstTheCameraCullMaskOnly(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		descr := forwardCamera()
-		descr.CullMask = scene.Layer(1)
+		descr.CullMask = Layer(1)
 		q.Camera(testCamera, descr)
-		descr.CullMask = scene.Layer(2)
+		descr.CullMask = Layer(2)
 		q.Camera(testCamera+1, descr)
-		q.Box(scene.Layer(1), m.At(0, 0, -5), testBoxColor)
-		q.PointLight(scene.Layer(1), model.LightDescr{Position: m.Vec3{Z: -5}})
+		q.Box(Layer(1), m.At(0, 0, -5), testBoxColor)
+		q.PointLight(Layer(1), model.LightDescr{Position: m.Vec3{Z: -5}})
 	})
 	h.frame()
 
@@ -267,7 +266,7 @@ func TestALightLayerMaskIsFilteredAgainstTheCameraCullMaskOnly(t *testing.T) {
 // cap.
 func TestASeventeenthLightIsDroppedWithoutAReport(t *testing.T) {
 	var reported []error
-	h := newHarnessWithErrors(t, func(q *scene.OpQueue) {
+	h := newHarnessWithErrors(t, func(q *OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		for i := 0; i < 20; i++ {
 			q.PointLight(0, model.LightDescr{Position: m.Vec3{X: float32(i), Z: -5}})
@@ -287,9 +286,9 @@ func TestASeventeenthLightIsDroppedWithoutAReport(t *testing.T) {
 // the frame's lights are unaffected.
 func TestADegenerateSpotLightIsReportedOncePerFrame(t *testing.T) {
 	var reported []error
-	h := newHarnessWithErrors(t, func(q *scene.OpQueue) {
+	h := newHarnessWithErrors(t, func(q *OpQueue) {
 		descr := forwardCamera()
-		descr.Passes = []scene.Pass{{Tag: scene.TagForward}, {Tag: "shadow", Order: -1000, Target: gfx.NoTarget(), Depth: gfx.DepthTarget(sizedTexture(800, 600))}}
+		descr.Passes = []Pass{{Tag: TagForward}, {Tag: "shadow", Order: -1000, Target: gfx.NoTarget(), Depth: gfx.DepthTarget(sizedTexture(800, 600))}}
 		q.Camera(testCamera, descr)
 		q.SpotLight(0, model.LightDescr{Position: m.Vec3{Z: -5}, Direction: m.Vec3{Z: -1}, InnerCone: 1, OuterCone: 0.5})
 		q.PointLight(0, model.LightDescr{Position: m.Vec3{Z: -5}})
@@ -314,15 +313,15 @@ func TestADegenerateSpotLightIsReportedOncePerFrame(t *testing.T) {
 // appears in the forward pass alone. This is the shape shadows arrive in: a
 // second entry on a material, no call-site change.
 func TestAMultiTagMaterialDrawsInEveryPassItServes(t *testing.T) {
-	both := testMaterial(scene.TagForward, "shadow")
-	h := newHarness(t, func(q *scene.OpQueue) {
+	both := testMaterial(TagForward, "shadow")
+	h := newHarness(t, func(q *OpQueue) {
 		descr := forwardCamera()
-		descr.Passes = []scene.Pass{
+		descr.Passes = []Pass{
 			{Tag: "shadow", Order: -1000, Target: gfx.NoTarget(), Depth: gfx.DepthTarget(sizedTexture(800, 600))},
-			{Tag: scene.TagForward},
+			{Tag: TagForward},
 		}
 		q.Camera(testCamera, descr)
-		types.OpQueueDraw(q, types.DrawRecord{Shape: types.ShapeBox, Transform: m.At(0, 0, -5), Color: testBoxColor, Material: both})
+		OpQueueDraw(q, DrawRecord{Shape: ShapeBox, Transform: m.At(0, 0, -5), Color: testBoxColor, Material: both})
 		q.Box(0, m.At(1, 0, -5), testBoxColor)
 	})
 	h.frame()

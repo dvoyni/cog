@@ -1,8 +1,6 @@
 package internal
 
 import (
-	"github.com/dvoyni/cog/bundles/canvas"
-	"github.com/dvoyni/cog/bundles/canvas/internal/types"
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
@@ -16,10 +14,10 @@ import (
 // buffer has no per-instance form - there is one bind group per draw - so it is
 // per batch. The scope's parameters follow the draw's, so the draw wins under
 // first-wins.
-func (p *plugin) shadeSprite(materials *types.ScopeMaterials, material *gfx.MaterialDescr, fingerprint uint64, params []gfx.ParameterDescr) spriteShading {
+func (p *plugin) shadeSprite(materials *ScopeMaterials, material *gfx.MaterialDescr, fingerprint uint64, params []gfx.ParameterDescr) spriteShading {
 	shading := spriteShading{}
 	var scope []gfx.ParameterDescr
-	shading.material, shading.fingerprint, scope = materials.Resolve(types.FamilySprite, material, fingerprint)
+	shading.material, shading.fingerprint, scope = materials.Resolve(FamilySprite, material, fingerprint)
 	p.arrays, p.shared = p.arrays[:0], p.shared[:0]
 	for i := range params {
 		switch {
@@ -48,7 +46,7 @@ func (p *plugin) shadeSprite(materials *types.ScopeMaterials, material *gfx.Mate
 // The cost is that a quad never merges with an app's own DrawTriangles call
 // even where that call used canvas.Vertex and the identical shading. That case
 // would need the built-in layout to have one identity across both sources -
-// types.TrianglesOp.BuiltinLayout already reports it - and it is a merge that
+// TrianglesOp.BuiltinLayout already reports it - and it is a merge that
 // has never existed rather than one this loses.
 const builtinQuadLayoutID = -1
 
@@ -72,8 +70,8 @@ func (p *plugin) shadeQuad(
 	params, scope []gfx.ParameterDescr,
 ) trianglesShading {
 	p.quadParams = append(p.quadParams[:0],
-		gfx.TextureParam(canvas.TextureSlot, texture),
-		gfx.SamplerParam(canvas.SamplerSlot, sampler),
+		gfx.TextureParam(TextureSlot, texture),
+		gfx.SamplerParam(SamplerSlot, sampler),
 	)
 	p.quadParams = append(p.quadParams, params...)
 	p.quadParams = append(p.quadParams, scope...)
@@ -88,10 +86,10 @@ func (p *plugin) shadeQuad(
 // is per material and two values are two draws. That is a rule, not a
 // shortcoming of the key - removing it would need somewhere per-vertex to put
 // the value, which this geometry does not have.
-func (p *plugin) shadeTriangles(materials *types.ScopeMaterials, op *types.TrianglesOp) trianglesShading {
-	f := types.FamilyTriangles
+func (p *plugin) shadeTriangles(materials *ScopeMaterials, op *TrianglesOp) trianglesShading {
+	f := FamilyTriangles
 	if op.Unkeyed {
-		f = types.FamilyTexture
+		f = FamilyTexture
 	}
 	shading := trianglesShading{}
 	var scope []gfx.ParameterDescr

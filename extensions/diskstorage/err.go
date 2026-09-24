@@ -1,17 +1,9 @@
 package diskstorage
 
-import "fmt"
+import "github.com/dvoyni/cog/extensions/diskstorage/internal"
 
 // ErrInvalidConfig reports a plugin configuration value that is not a Config.
-type ErrInvalidConfig struct{ Got any }
-
-func (e ErrInvalidConfig) Error() string {
-	return fmt.Sprintf("diskstorage: invalid config: want %T, got %T", Config{}, e.Got)
-}
+type ErrInvalidConfig = internal.ErrInvalidConfig
 
 // ErrInvalidAppId reports an application id that is not a single directory name.
-type ErrInvalidAppId struct{ AppId string }
-
-func (e ErrInvalidAppId) Error() string {
-	return fmt.Sprintf("diskstorage: invalid app id %q", e.AppId)
-}
+type ErrInvalidAppId = internal.ErrInvalidAppId

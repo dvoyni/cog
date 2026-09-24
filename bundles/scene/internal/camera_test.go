@@ -5,16 +5,14 @@ import (
 	"math"
 	"testing"
 
-	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
-const cameraMain scene.CameraID = 0
+const cameraMain CameraID = 0
 
-func simpleCamera() scene.CameraDescr {
-	return scene.CameraDescr{
+func simpleCamera() CameraDescr {
+	return CameraDescr{
 		Transform: m.LookAt(m.Vec3{X: 3, Y: 2, Z: 4}, m.Vec3{}, m.Vec3{Y: 1}),
 		FovY:      1.0472,
 		Near:      0.1, Far: 100,
@@ -24,7 +22,7 @@ func simpleCamera() scene.CameraDescr {
 func TestARecordedCameraEmitsOneDefaultPass(t *testing.T) {
 	// The floor of the API: one camera and nothing else. It emits exactly one
 	// forward pass into the screen, at the camera's own order.
-	h := newHarness(t, func(q *scene.OpQueue) { q.Camera(cameraMain, simpleCamera()) })
+	h := newHarness(t, func(q *OpQueue) { q.Camera(cameraMain, simpleCamera()) })
 	h.frame()
 
 	passes := h.passes()
@@ -35,8 +33,8 @@ func TestARecordedCameraEmitsOneDefaultPass(t *testing.T) {
 	if pass.CameraID != cameraMain || pass.Order != gfx.Order(cameraMain) {
 		t.Errorf("pass camera/order = %d/%d, want %d/%d", pass.CameraID, pass.Order, cameraMain, cameraMain)
 	}
-	if pass.Tag != scene.TagForward {
-		t.Errorf("pass tag = %q, want %q", pass.Tag, scene.TagForward)
+	if pass.Tag != TagForward {
+		t.Errorf("pass tag = %q, want %q", pass.Tag, TagForward)
 	}
 	// The frustum is published so a culling assertion can name the volume that
 	// rejected a sphere, rather than only counting what survived.
@@ -57,7 +55,7 @@ func TestTheDefaultPassPreservesColourAndClearsDepthToFar(t *testing.T) {
 	// texture with every same-size pass in the frame and inherits garbage
 	// unless it clears. Under conventional depth that clear is 1.0 - the naive
 	// zero clears to the near plane and hides the whole scene.
-	h := newHarness(t, func(q *scene.OpQueue) { q.Camera(cameraMain, simpleCamera()) })
+	h := newHarness(t, func(q *OpQueue) { q.Camera(cameraMain, simpleCamera()) })
 	h.frame()
 
 	if len(h.backend.passes) != 1 {
@@ -80,15 +78,15 @@ func TestTheDefaultPassPreservesColourAndClearsDepthToFar(t *testing.T) {
 
 func TestCamerasEmitInIdOrder(t *testing.T) {
 	// Never map order: a Go map range would make frame output nondeterministic.
-	h := newHarness(t, func(q *scene.OpQueue) {
-		for _, id := range []scene.CameraID{2000, -1000, 5, 1500} {
+	h := newHarness(t, func(q *OpQueue) {
+		for _, id := range []CameraID{2000, -1000, 5, 1500} {
 			q.Camera(id, simpleCamera())
 		}
 	})
 	h.frame()
 
 	passes := h.passes()
-	want := []scene.CameraID{-1000, 5, 1500, 2000}
+	want := []CameraID{-1000, 5, 1500, 2000}
 	if len(passes) != len(want) {
 		t.Fatalf("passes = %d, want %d", len(passes), len(want))
 	}
@@ -103,7 +101,7 @@ func TestARepeatedCameraIsReportedAndTheFirstRecordWins(t *testing.T) {
 	// Camera is a registration, not a free parameter, so a repeat means two
 	// systems each believe they own it.
 	var reported []error
-	h := newHarnessWithErrors(t, func(q *scene.OpQueue) {
+	h := newHarnessWithErrors(t, func(q *OpQueue) {
 		q.Camera(cameraMain, simpleCamera())
 		second := simpleCamera()
 		second.FovY = 0.1
@@ -118,7 +116,7 @@ func TestARepeatedCameraIsReportedAndTheFirstRecordWins(t *testing.T) {
 	if len(ops) != 1 || ops[0].Descr.FovY != 1.0472 {
 		t.Fatalf("recorded camera = %+v, want the first record", ops)
 	}
-	var duplicate scene.ErrCameraAlreadyRecorded
+	var duplicate ErrCameraAlreadyRecorded
 	if !anyErrorAs(reported, &duplicate) || duplicate.Camera != cameraMain {
 		t.Fatalf("reported = %v, want a duplicate report for camera %d", reported, cameraMain)
 	}
@@ -137,13 +135,13 @@ func TestAMissingClipPlaneIsReportedAndTheCameraSkipped(t *testing.T) {
 			var reported []error
 			descr := simpleCamera()
 			descr.Near, descr.Far = test.near, test.far
-			h := newHarnessWithErrors(t, func(q *scene.OpQueue) { q.Camera(cameraMain, descr) }, &reported)
+			h := newHarnessWithErrors(t, func(q *OpQueue) { q.Camera(cameraMain, descr) }, &reported)
 			h.frame()
 
 			if passes := h.passes(); len(passes) != 0 {
 				t.Fatalf("passes = %d, want none: the camera should have been skipped", len(passes))
 			}
-			var missing scene.ErrCameraClipPlanesMissing
+			var missing ErrCameraClipPlanesMissing
 			if !anyErrorAs(reported, &missing) {
 				t.Fatalf("reported = %v, want a missing-clip-plane report", reported)
 			}
@@ -154,10 +152,10 @@ func TestAMissingClipPlaneIsReportedAndTheCameraSkipped(t *testing.T) {
 func TestPassOrderIsAnOffsetFromTheCameraId(t *testing.T) {
 	// An absolute int has no working zero value, because 0 is a legitimate
 	// order; the offset's zero correctly means "at the camera".
-	const id scene.CameraID = 1500
-	h := newHarness(t, func(q *scene.OpQueue) {
+	const id CameraID = 1500
+	h := newHarness(t, func(q *OpQueue) {
 		descr := simpleCamera()
-		descr.Passes = []scene.Pass{
+		descr.Passes = []Pass{
 			{Tag: "shadow", Order: -1000, Target: gfx.NoTarget(), Depth: gfx.DepthTarget(sizedTexture(1024, 1024))},
 			{},
 		}
@@ -172,19 +170,19 @@ func TestPassOrderIsAnOffsetFromTheCameraId(t *testing.T) {
 	if passes[0].Tag != "shadow" || passes[0].Order != 500 {
 		t.Errorf("shadow pass = %q at %d, want the shadow tag at 500", passes[0].Tag, passes[0].Order)
 	}
-	if passes[1].Tag != scene.TagForward || passes[1].Order != 1500 {
-		t.Errorf("forward pass = %q at %d, want %q at 1500", passes[1].Tag, passes[1].Order, scene.TagForward)
+	if passes[1].Tag != TagForward || passes[1].Order != 1500 {
+		t.Errorf("forward pass = %q at %d, want %q at 1500", passes[1].Tag, passes[1].Order, TagForward)
 	}
 }
 
 func TestAPassNamingItsOwnDepthTextureKeepsIt(t *testing.T) {
 	// You allocated it, you mean to sample it. Everything else discards, which
 	// is the tiled-GPU win a forward pass gets for free.
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		descr := simpleCamera()
-		descr.Passes = []scene.Pass{{
+		descr.Passes = []Pass{{
 			Tag: "shadow", Target: gfx.NoTarget(),
-			Depth: gfx.DepthTarget(sizedTexture(1024, 1024)), ClearDepth: m.Some(types.DepthClearFar),
+			Depth: gfx.DepthTarget(sizedTexture(1024, 1024)), ClearDepth: m.Some(DepthClearFar),
 		}}
 		q.Camera(cameraMain, descr)
 	})
@@ -201,9 +199,9 @@ func TestAPassNamingItsOwnDepthTextureKeepsIt(t *testing.T) {
 func TestProjectionIsResolvedPerPassFromItsOwnTarget(t *testing.T) {
 	// One camera, two targets of different shape: there is no single camera
 	// aspect, so the two frustums differ in exactly the horizontal extent.
-	h := newHarness(t, func(q *scene.OpQueue) {
-		descr := scene.CameraDescr{FovY: math.Pi / 2, Near: 1, Far: 10}
-		descr.Passes = []scene.Pass{
+	h := newHarness(t, func(q *OpQueue) {
+		descr := CameraDescr{FovY: math.Pi / 2, Near: 1, Far: 10}
+		descr.Passes = []Pass{
 			{Tag: "wide", Target: gfx.TextureTarget(sizedTexture(2000, 1000), 0, 0)},
 			{Tag: "square", Target: gfx.TextureTarget(sizedTexture(1000, 1000), 0, 0)},
 		}
@@ -227,8 +225,8 @@ func TestProjectionIsResolvedPerPassFromItsOwnTarget(t *testing.T) {
 }
 
 func TestAScreenPassFollowsTheWindowAspect(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
-		q.Camera(cameraMain, scene.CameraDescr{FovY: math.Pi / 2, Near: 1, Far: 10})
+	h := newHarness(t, func(q *OpQueue) {
+		q.Camera(cameraMain, CameraDescr{FovY: math.Pi / 2, Near: 1, Far: 10})
 	})
 	h.frame()
 
@@ -249,7 +247,7 @@ func TestAScreenPassFollowsTheWindowAspect(t *testing.T) {
 func TestAPassWithNoSurvivingDrawsIsStillEmitted(t *testing.T) {
 	// Skipping it would drop its clears, making a camera's clear depend on
 	// whether anything was visible - a bug that only shows when you turn away.
-	h := newHarness(t, func(q *scene.OpQueue) { q.Camera(cameraMain, simpleCamera()) })
+	h := newHarness(t, func(q *OpQueue) { q.Camera(cameraMain, simpleCamera()) })
 	h.frame()
 
 	if len(h.backend.passes) != 1 {
@@ -259,9 +257,9 @@ func TestAPassWithNoSurvivingDrawsIsStillEmitted(t *testing.T) {
 
 func TestInspectionSurvivesTheFlushThatProducedIt(t *testing.T) {
 	frames := 0
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		frames++
-		q.Camera(scene.CameraID(frames), simpleCamera())
+		q.Camera(CameraID(frames), simpleCamera())
 	})
 	h.frame()
 	if ops := h.ops(); len(ops) != 1 || ops[0].Camera != 1 {
@@ -279,13 +277,13 @@ func TestInspectionSurvivesTheFlushThatProducedIt(t *testing.T) {
 func TestDescriptorSlicesAreBorrowedForTheCall(t *testing.T) {
 	// A hot-loop caller reuses one backing array, so scene copies into its own
 	// frame arena before returning.
-	shared := make([]scene.Pass, 1)
-	h := newHarness(t, func(q *scene.OpQueue) {
-		shared[0] = scene.Pass{Tag: "first"}
+	shared := make([]Pass, 1)
+	h := newHarness(t, func(q *OpQueue) {
+		shared[0] = Pass{Tag: "first"}
 		descr := simpleCamera()
 		descr.Passes = shared
 		q.Camera(cameraMain, descr)
-		shared[0] = scene.Pass{Tag: "overwritten"}
+		shared[0] = Pass{Tag: "overwritten"}
 	})
 	h.frame()
 
@@ -309,7 +307,7 @@ func TestAFrameBeforeTheWindowIsKnownIsSkippedSilently(t *testing.T) {
 	// Every screen-targeted pass would resolve an aspect of zero, and saying so
 	// once per camera per frame tells a caller nothing they can act on.
 	var reported []error
-	h := newHarnessWithErrors(t, func(q *scene.OpQueue) { q.Camera(cameraMain, simpleCamera()) }, &reported)
+	h := newHarnessWithErrors(t, func(q *OpQueue) { q.Camera(cameraMain, simpleCamera()) }, &reported)
 	h.kernel.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{})
 	h.frame()
 
@@ -327,11 +325,11 @@ func TestColourIsAlwaysKeptAndAutomaticDepthDiscarded(t *testing.T) {
 	// tiled-GPU discard for free, and colour is what the pass is for.
 	// Both passes clear depth so that gfx executes them: an empty pass with no
 	// clear has no effect, and gfx drops it rather than scene.
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		descr := simpleCamera()
-		descr.Passes = []scene.Pass{
-			{Tag: "offscreen", Target: gfx.TextureTarget(sizedTexture(256, 256), 0, 0), ClearDepth: m.Some(types.DepthClearFar)},
-			{ClearDepth: m.Some(types.DepthClearFar)},
+		descr.Passes = []Pass{
+			{Tag: "offscreen", Target: gfx.TextureTarget(sizedTexture(256, 256), 0, 0), ClearDepth: m.Some(DepthClearFar)},
+			{ClearDepth: m.Some(DepthClearFar)},
 		}
 		q.Camera(cameraMain, descr)
 	})
@@ -354,11 +352,11 @@ func TestATemporaryTargetPassTakesItsAspectFromItsSize(t *testing.T) {
 	// The target is gfx's handle passed through untouched, so a frame-local one
 	// carries its size the way a durable texture does, and the frustum follows
 	// it rather than the window.
-	h := newHarnessWithGfx(t, func(q *scene.OpQueue, g *gfx.OpQueue) {
-		descr := scene.CameraDescr{FovY: math.Pi / 2, Near: 1, Far: 10}
+	h := newHarnessWithGfx(t, func(q *OpQueue, g *gfx.OpQueue) {
+		descr := CameraDescr{FovY: math.Pi / 2, Near: 1, Far: 10}
 		black := m.Color{A: 1}
 		target, _ := g.TemporaryTarget(400, 100, gfx.FormatRGBA8Srgb)
-		descr.Passes = []scene.Pass{{Target: target, ClearColor: m.Some(black)}}
+		descr.Passes = []Pass{{Target: target, ClearColor: m.Some(black)}}
 		q.Camera(cameraMain, descr)
 	})
 	h.frame()
@@ -383,12 +381,12 @@ func TestATemporaryTargetPassTakesItsAspectFromItsSize(t *testing.T) {
 func TestPassLabelsNameTheCameraAndTag(t *testing.T) {
 	// The label is synthesised for the debugger and never published: PassView
 	// carries the id and tag it is built from instead.
-	const id scene.CameraID = -7
-	h := newHarness(t, func(q *scene.OpQueue) {
+	const id CameraID = -7
+	h := newHarness(t, func(q *OpQueue) {
 		descr := simpleCamera()
-		descr.Passes = []scene.Pass{
-			{Tag: "shadow", Order: -1000, Target: gfx.NoTarget(), Depth: gfx.DepthTarget(sizedTexture(1024, 1024)), ClearDepth: m.Some(types.DepthClearFar)},
-			{ClearDepth: m.Some(types.DepthClearFar)},
+		descr.Passes = []Pass{
+			{Tag: "shadow", Order: -1000, Target: gfx.NoTarget(), Depth: gfx.DepthTarget(sizedTexture(1024, 1024)), ClearDepth: m.Some(DepthClearFar)},
+			{ClearDepth: m.Some(DepthClearFar)},
 		}
 		q.Camera(id, descr)
 	})

@@ -1,6 +1,6 @@
 package diskstorage
 
-import "github.com/dvoyni/cog/kernel"
+import "github.com/dvoyni/cog/extensions/diskstorage/internal"
 
 // Name is the diskstorage plugin name and configuration key.
-const Name kernel.PluginName = "diskstorage"
+const Name = internal.Name

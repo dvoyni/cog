@@ -7,14 +7,13 @@ import (
 
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
-	"github.com/dvoyni/cog/slots/gfx"
 )
 
 func TestFormatScreenResolvesToTheFrameBufferFormat(t *testing.T) {
-	if got := gfx.FormatScreen.Resolve(); got != gfx.FrameBufferFormat {
-		t.Errorf("FormatScreen.Resolve() = %v, want the frame buffer's %v", got, gfx.FrameBufferFormat)
+	if got := FormatScreen.Resolve(); got != FrameBufferFormat {
+		t.Errorf("FormatScreen.Resolve() = %v, want the frame buffer's %v", got, FrameBufferFormat)
 	}
-	for _, format := range []gfx.TextureFormat{gfx.FormatRGBA8, gfx.FormatRGBA8Srgb, gfx.FormatDepth32F} {
+	for _, format := range []TextureFormat{FormatRGBA8, FormatRGBA8Srgb, FormatDepth32F} {
 		if got := format.Resolve(); got != format {
 			t.Errorf("%v.Resolve() = %v, want itself", format, got)
 		}
@@ -23,10 +22,10 @@ func TestFormatScreenResolvesToTheFrameBufferFormat(t *testing.T) {
 
 // bakedTextureFormats reports the format of every texture bake the backend saw,
 // in recording order.
-func bakedTextureFormats(backend *fakeBackend) []gfx.TextureFormat {
-	var formats []gfx.TextureFormat
+func bakedTextureFormats(backend *fakeBackend) []TextureFormat {
+	var formats []TextureFormat
 	for _, op := range backend.lastOps {
-		if op.kind == opBakeTexture {
+		if op.kind == testOpBakeTexture {
 			formats = append(formats, op.format)
 		}
 	}
@@ -41,12 +40,12 @@ func TestResourceTextureAlwaysBakesSrgb(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w := recordList(t, k)
-	w.Draw(triangle(), testMaterial(gfx.TextureParam("MainTexture", gfx.TextureWithResource("normal.png"))), gfx.MatParam("mvp", m.NewMat4()))
-	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+	w.Draw(triangle(), testMaterial(TextureParam("MainTexture", TextureWithResource("normal.png"))), MatParam("mvp", m.NewMat4()))
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	got := bakedTextureFormats(backend)
-	if len(got) != 1 || got[0] != gfx.FormatRGBA8Srgb {
+	if len(got) != 1 || got[0] != FormatRGBA8Srgb {
 		t.Fatalf("baked formats = %v, want one FormatRGBA8Srgb: a decoded image is sRGB whatever it is named", got)
 	}
 }
@@ -61,13 +60,13 @@ func TestSameResourcePathBakesOnce(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w := recordList(t, k)
-	w.Draw(triangle(), testMaterial(gfx.TextureParam("MainTexture", gfx.TextureWithResource("hero.png"))), gfx.MatParam("mvp", m.NewMat4()))
-	w.Draw(triangle(), testMaterial(gfx.TextureParam("MainTexture", gfx.TextureWithResource("hero.png"))), gfx.MatParam("mvp", m.NewMat4()))
-	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+	w.Draw(triangle(), testMaterial(TextureParam("MainTexture", TextureWithResource("hero.png"))), MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), testMaterial(TextureParam("MainTexture", TextureWithResource("hero.png"))), MatParam("mvp", m.NewMat4()))
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	got := bakedTextureFormats(backend)
-	if len(got) != 1 || got[0] != gfx.FormatRGBA8Srgb {
+	if len(got) != 1 || got[0] != FormatRGBA8Srgb {
 		t.Fatalf("baked formats = %v, want one FormatRGBA8Srgb: a path has one colour space, so it bakes once", got)
 	}
 	if filesystem.opens != 1 {
@@ -87,15 +86,15 @@ func TestOnlyAllocateRenderTargetAsksForARenderableTexture(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	withResourceQueue(t, k, func(resources *gfx.ResourceQueue) {
-		resources.AllocateTexture(64, 64, 1, gfx.FormatRGBA8Srgb)
-		resources.AllocateRenderTarget(64, 64, 1, gfx.FormatRGBA8Srgb)
+	withResourceQueue(t, k, func(resources *ResourceQueue) {
+		resources.AllocateTexture(64, 64, 1, FormatRGBA8Srgb)
+		resources.AllocateRenderTarget(64, 64, 1, FormatRGBA8Srgb)
 	})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	var renderable []bool
 	for _, op := range backend.lastOps {
-		if op.kind == opAllocateTexture {
+		if op.kind == testOpAllocateTexture {
 			renderable = append(renderable, op.renderable)
 		}
 	}
@@ -121,14 +120,14 @@ func TestARenderTargetIsRenderedIntoAndSampledOnALaterFrame(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	var texture gfx.TextureDescr
-	withResourceQueue(t, k, func(resources *gfx.ResourceQueue) {
-		texture = resources.AllocateRenderTarget(64, 64, 1, gfx.FormatRGBA8Srgb)
+	var texture TextureDescr
+	withResourceQueue(t, k, func(resources *ResourceQueue) {
+		texture = resources.AllocateRenderTarget(64, 64, 1, FormatRGBA8Srgb)
 	})
 	q := recordRaw(t, k)
-	q.Pass(gfx.PassDescr{Target: gfx.TextureTarget(texture, 0, 0), Depth: gfx.DepthNone(), Load: gfx.LoadClear, Label: "bake"})
+	q.Pass(PassDescr{Target: TextureTarget(texture, 0, 0), Depth: DepthNone(), Load: LoadClear, Label: "bake"})
 	drawInto(q)
-	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	if len(backend.transitions) != 0 {
@@ -136,9 +135,9 @@ func TestARenderTargetIsRenderedIntoAndSampledOnALaterFrame(t *testing.T) {
 	}
 
 	q = recordRaw(t, k)
-	q.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthNone(), Load: gfx.LoadClear, Label: "use"})
-	q.Draw(triangle(), testMaterial(gfx.TextureParam("MainTexture", texture)), gfx.MatParam("mvp", m.NewMat4()))
-	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+	q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthNone(), Load: LoadClear, Label: "use"})
+	q.Draw(triangle(), testMaterial(TextureParam("MainTexture", texture)), MatParam("mvp", m.NewMat4()))
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	if len(backend.boundTextures) == 0 || !slices.Contains(backend.boundTextures, texture.ID()) {

@@ -5,8 +5,6 @@ import (
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/assets"
-	"github.com/dvoyni/cog/slots/gfx"
-	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
 // texture is the texture cache's value: what one load produced, and never the
@@ -21,9 +19,9 @@ import (
 // threw both away. Nothing reads them yet: emitResources wants an id and
 // SetTexture takes one.
 type texture struct {
-	id            gfx.TextureID
+	id            TextureID
 	width, height int
-	format        gfx.TextureFormat
+	format        TextureFormat
 }
 
 // textureUserData is what the texture loader needs that only the render handler
@@ -31,8 +29,8 @@ type texture struct {
 // and the release into. It is U, the cache's opaque pass-through, so it travels
 // per call and the loader stores none of it.
 type textureUserData struct {
-	backend gfx.Backend
-	ops     *gfx.Queue
+	backend Backend
+	ops     *Queue
 }
 
 // textureLoader decodes an image into a baked texture. It is stateless and is
@@ -45,13 +43,13 @@ type textureLoader struct{}
 // value: the decode is attempted one time per path rather than once a frame,
 // and the draw is dropped on the zero id exactly as it was before.
 func (textureLoader) Load(
-	_ kernel.Kernel, data assets.Blob, params types.TextureDescrParams, _ fs.FS, userData textureUserData,
+	_ kernel.Kernel, data assets.Blob, params TextureDescrParams, _ fs.FS, userData textureUserData,
 ) texture {
-	width, height, pixels, ok := types.DecodeTexture(data)
+	width, height, pixels, ok := DecodeTexture(data)
 	if !ok {
 		return texture{}
 	}
-	format := types.TextureParamsFormat(params)
+	format := TextureParamsFormat(params)
 	id := userData.backend.NewTexture()
 	userData.ops.BakeTexture(id, width, height, format, pixels, false)
 	return texture{id: id, width: width, height: height, format: format}
@@ -62,7 +60,7 @@ func (textureLoader) Load(
 // substitution chosen here. What makes that sound now is that choosing id 0 no
 // longer means choosing silence: the Library has already reported the missing
 // file under this descriptor.
-func (textureLoader) Default(_ assets.Descr[types.TextureDescrParams], _ textureUserData) texture {
+func (textureLoader) Default(_ assets.Descr[TextureDescrParams], _ textureUserData) texture {
 	return texture{}
 }
 

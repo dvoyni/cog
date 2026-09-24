@@ -11,31 +11,31 @@ vocabulary is in [`CONTEXT.md`](../../../CONTEXT.md) and the decision in
 
 ## Packages
 
-anim has the declaration-root shape of
-[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
+anim has the alias-index root of
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md)
+and [ADR 0003](../../../docs/adr/0003-roots-are-alias-indexes.md).
 
-- **`bundles/anim`** is the root, and holds declarations only: the `Timelines`
-  resource, `Timeline`, `Params`, `State`, `Easing`, `Sequence`, `Lerp`,
-  `Flipbook`, `Name` and the ordering identity `AdvanceOnUpdate`. Its
-  functions, `Over`, the easings and the `Lerp*` constructors, are forwarders
-  in `utils.go`. It declares no plugin, and it is what every other package
-  imports.
-- **`bundles/anim/internal/types`** declares `Timelines` and `Timeline`, whose
+- **`bundles/anim`** is the root, and declares nothing: it aliases what
+  `internal/` declares — the `Timelines` resource, `Timeline`, `Params`,
+  `State`, `Easing`, `Sequence`, `Lerp`, `Flipbook`, `Name` and the ordering
+  identity `AdvanceOnUpdate`. Its functions, `Over`, the easings and the
+  `Lerp*` constructors, are forwarders in `utils.go`. It holds no plugin, and
+  it is what every other package imports.
+- **`bundles/anim/internal`** is the plugin: `Timelines` and `Timeline`, whose
   unexported state the plugin advances, and what they refer to or a track is
   built from (`Params`, `State`, `Easing`, `Sequence`, `Lerp` and `Flipbook`),
   with the functions the root forwards to and the consume side of the
-  resource — advancing every timeline by a tick. The root aliases every one of
-  them.
-- **`bundles/anim/internal`** is the plugin: its `New` and the handler behind
-  `AdvanceOnUpdate`.
+  resource — advancing every timeline by a tick — beside its `New` and the
+  handler behind `AdvanceOnUpdate`. The root aliases everything it offers from
+  here.
 - **`bundles/anim/animplugin`** exports only `New() kernel.Plugin`. Only
   composition roots and tests import it.
 
 The aliased types stay concrete types, and their exported methods
 (`Timelines.Get`, `Timeline.Add`, `Params.WithLoop`, …) are public API through
-the alias (`type Timelines = types.Timelines`). What the plugin needs beyond
-that goes through a plain function `internal/types` exports, which nothing
-outside `bundles/anim` can call. `internal/types` never imports the root.
+the alias (`type Timelines = internal.Timelines`). What the plugin needs beyond
+that goes through a friend function in `internal/friends.go`, which nothing
+outside `bundles/anim` can call. `internal/` never imports the root.
 
 ## Plugin
 

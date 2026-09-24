@@ -8,7 +8,6 @@ import (
 	"testing/fstest"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/qmuntal/gltf"
 	"github.com/qmuntal/gltf/modeler"
@@ -72,10 +71,10 @@ func TestTwoModelsSharingAnExternalImageReadItOnce(t *testing.T) {
 		second:    {Data: glb(t, externalImageModel(t, "colour.png"))},
 		image:     {Data: onePixelPNG(t)},
 	})
-	h := newHarnessWithFS(t, files, func(q *scene.OpQueue) {
+	h := newHarnessWithFS(t, files, func(q *OpQueue) {
 		q.Camera(cameraMain, modelCamera())
-		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{})
-		q.Model(scene.LayersAll, second, scene.ModelDraw{})
+		q.Model(LayersAll, modelPath, ModelDraw{})
+		q.Model(LayersAll, second, ModelDraw{})
 	})
 	h.frameUntil(t, "both models to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 2
@@ -103,7 +102,7 @@ func TestAMissingPictureBindsMagentaAndLeavesTheDataSlotsAlone(t *testing.T) {
 		NormalTexture: &gltf.NormalTexture{Index: gltf.Index(0)},
 	}}
 	doc.Meshes[0].Primitives[0].Material = gltf.Index(0)
-	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, scene.ModelDraw{}))
+	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, ModelDraw{}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
 	})
@@ -164,7 +163,7 @@ func TestABrokenImageIsOneReportAcrossItsColourSpaces(t *testing.T) {
 		NormalTexture: &gltf.NormalTexture{Index: gltf.Index(0)},
 	}}
 	doc.Meshes[0].Primitives[0].Material = gltf.Index(0)
-	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, scene.ModelDraw{}))
+	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, ModelDraw{}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
 	})
@@ -195,7 +194,7 @@ func TestUnloadTextureFreesEveryVariantAndUnmutesThePath(t *testing.T) {
 		NormalTexture: &gltf.NormalTexture{Index: gltf.Index(0)},
 	}}
 	doc.Meshes[0].Primitives[0].Material = gltf.Index(0)
-	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), func(*scene.OpQueue) {})
+	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), func(*OpQueue) {})
 	h.device(func(la model.LookupDeviceAccess) { la.Preload(modelPath) })
 	if len(h.errors()) != 1 {
 		t.Fatalf("reports = %v, want the broken image reported once", h.errors())
@@ -234,7 +233,7 @@ func TestUnloadTextureFreesEveryColourSpaceOnePathBaked(t *testing.T) {
 		NormalTexture: &gltf.NormalTexture{Index: gltf.Index(0)},
 	}}
 	doc.Meshes[0].Primitives[0].Material = gltf.Index(0)
-	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), func(*scene.OpQueue) {})
+	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), func(*OpQueue) {})
 	h.device(func(la model.LookupDeviceAccess) { la.Preload(modelPath) })
 	h.frame()
 	baked := h.backend.filePictures()
@@ -279,7 +278,7 @@ func TestOneORMImageIsOneGPUTexture(t *testing.T) {
 		OcclusionTexture: &gltf.OcclusionTexture{Index: gltf.Index(0)},
 	}}
 	doc.Meshes[0].Primitives[0].Material = gltf.Index(0)
-	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, scene.ModelDraw{}))
+	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, ModelDraw{}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
 	})
@@ -315,10 +314,10 @@ func TestTwoModelsNamingOneBrokenImageReportItOnce(t *testing.T) {
 		second:              {Data: glb(t, normal)},
 		"models/colour.png": {Data: []byte("this is not a png")},
 	}
-	h := newHarnessWithFiles(t, files, func(q *scene.OpQueue) {
+	h := newHarnessWithFiles(t, files, func(q *OpQueue) {
 		q.Camera(cameraMain, modelCamera())
-		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{})
-		q.Model(scene.LayersAll, second, scene.ModelDraw{})
+		q.Model(LayersAll, modelPath, ModelDraw{})
+		q.Model(LayersAll, second, ModelDraw{})
 	})
 	h.frameUntil(t, "both models to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 2

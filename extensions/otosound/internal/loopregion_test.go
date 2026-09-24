@@ -8,7 +8,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/dvoyni/cog/extensions/otosound"
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/sound"
@@ -286,7 +285,7 @@ func TestAMalformedLoopRegionIsDroppedWholeAndNeverClamped(t *testing.T) {
 			if clip.Duration() != clipDuration {
 				t.Fatalf("the Clip still reports %v, want the file's %v", clip.Duration(), clipDuration)
 			}
-			var ignored otosound.ErrLoopRegionIgnored
+			var ignored ErrLoopRegionIgnored
 			if !errors.As(clip.ignored, &ignored) {
 				t.Fatalf("the dropped region was reported as %v, want an ErrLoopRegionIgnored", clip.ignored)
 			}
@@ -309,7 +308,7 @@ func TestADroppedLoopRegionIsReportedOncePerClip(t *testing.T) {
 	if len(dropped) != 1 {
 		t.Fatalf("the Adapter queued %d notices for one bad Clip, want 1", len(dropped))
 	}
-	var ignored otosound.ErrLoopRegionIgnored
+	var ignored ErrLoopRegionIgnored
 	if !errors.As(dropped[0], &ignored) || ignored.Frames != clipFrames {
 		t.Fatalf("the notice is %v, want an ErrLoopRegionIgnored naming the Clip's %d frames",
 			dropped[0], clipFrames)

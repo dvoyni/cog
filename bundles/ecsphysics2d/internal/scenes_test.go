@@ -147,10 +147,11 @@ func TestASweptSensorFindsAPolygonOnItsWayThroughAndNotOnlyWhereItLanded(t *test
 //
 //	No input produces a NaN or an infinity in a Component the plugin writes.
 //
-// The pure functions have their own sweep in the types package. This is the same
-// claim one level up, over the seven degenerate inputs the specification names,
-// run through a real engine for long enough that the solver's accumulators, the
-// warm start and the Joint pass all have somewhere to put a NaN if one is made.
+// The pure functions have their own sweep elsewhere in this package. This is
+// the same claim one level up, over the seven degenerate inputs the
+// specification names, run through a real engine for long enough that the
+// solver's accumulators, the warm start and the Joint pass all have somewhere
+// to put a NaN if one is made.
 //
 // It matters that it is a scene and not a pair test: a NaN entering a Velocity on
 // tick one is still a NaN on tick two hundred, and nothing downstream ever

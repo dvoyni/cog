@@ -1,29 +1,29 @@
 package input
 
 import (
-	"github.com/dvoyni/cog/bundles/input/internal/types"
+	"github.com/dvoyni/cog/bundles/input/internal"
 	"github.com/dvoyni/cog/kernel"
 )
 
 // KeyChange builds a key/button up-or-down change.
-func KeyChange(k Key, mods Mods, down bool) Change { return types.KeyChange(k, mods, down) }
+func KeyChange(k Key, mods Mods, down bool) Change { return internal.KeyChange(k, mods, down) }
 
 // PointerChange builds a pointer-move change.
-func PointerChange(p Pos) Change { return types.PointerChange(p) }
+func PointerChange(p Pos) Change { return internal.PointerChange(p) }
 
 // ScrollChange builds a scroll-delta change.
-func ScrollChange(dx, dy float64) Change { return types.ScrollChange(dx, dy) }
+func ScrollChange(dx, dy float64) Change { return internal.ScrollChange(dx, dy) }
 
 // TextChange builds a text-input change for one rune.
-func TextChange(r rune) Change { return types.TextChange(r) }
+func TextChange(r rune) Change { return internal.TextChange(r) }
 
 // ClipboardPasteChange builds a change for text pasted from the clipboard.
-func ClipboardPasteChange(text string) Change { return types.ClipboardPasteChange(text) }
+func ClipboardPasteChange(text string) Change { return internal.ClipboardPasteChange(text) }
 
 // ParseKey resolves a key name, or the "#<n>" printed form of an unnamed key.
 // It is exported because a name for a key is something config files and debug
 // tools want as much as an agent does.
-func ParseKey(s string) (Key, error) { return types.ParseKey(s) }
+func ParseKey(s string) (Key, error) { return internal.ParseKey(s) }
 
 // Play validates, splits and dispatches a synthetic input sequence, waiting
 // between batches. It holds no locks; each batch is one SynthesizeCmd.
@@ -46,5 +46,5 @@ func ParseKey(s string) (Key, error) { return types.ParseKey(s) }
 // The wait selects on k's context, so a caller that hangs up stops the sequence
 // at the next delay.
 func Play(k kernel.Executioner, actions []Action) (StateResponse, error) {
-	return types.Play(k, actions)
+	return internal.Play(k, actions)
 }

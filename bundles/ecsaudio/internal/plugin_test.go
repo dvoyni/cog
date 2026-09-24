@@ -73,9 +73,10 @@ func compose(mover *moverPlugin) error {
 }
 
 // TestTheCouplingCheckStillHoldsOnTheBindingsComponents is the coupling rule
-// across the split. The Components are declared in the root and registered by
-// the internal plugin under ecsaudio.Name, so a game System that locks one of
-// their Stores must still declare ecsaudio, and composes once it does.
+// across the split. The Components are declared in internal, aliased by the
+// root, and registered by the internal plugin under ecsaudio.Name, so a game
+// System that locks one of their Stores must still declare ecsaudio, and
+// composes once it does.
 func TestTheCouplingCheckStillHoldsOnTheBindingsComponents(t *testing.T) {
 	err := compose(&moverPlugin{deps: []kernel.PluginName{ecs.Name}})
 	var undeclared kernel.ErrUndeclaredDependency

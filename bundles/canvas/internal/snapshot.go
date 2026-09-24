@@ -5,8 +5,6 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/dvoyni/cog/bundles/canvas"
-	"github.com/dvoyni/cog/bundles/canvas/internal/types"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -31,12 +29,12 @@ type armDrawsOnUpdate kernel.Subscription[app.UpdateEvent]
 type drawsOnUpdate kernel.Subscription[app.UpdateEvent]
 
 // keeps reports whether one op survives the kind filter.
-func keeps(r canvas.ArmDrawsRequest, kind canvas.OpKind) bool {
+func keeps(r ArmDrawsRequest, kind OpKind) bool {
 	return len(r.Kinds) == 0 || slices.Contains(r.Kinds, kind)
 }
 
 // keepsLayer reports whether one layer survives the layer range.
-func keepsLayer(r canvas.ArmDrawsRequest, layerID canvas.Layer) bool {
+func keepsLayer(r ArmDrawsRequest, layerID Layer) bool {
 	if from, ok := r.FromLayer.Get(); ok && int(layerID) < from {
 		return false
 	}
@@ -47,8 +45,8 @@ func keepsLayer(r canvas.ArmDrawsRequest, layerID canvas.Layer) bool {
 // snapshotRequest is one live draw snapshot: the filter it was armed with, and
 // where its result goes.
 type snapshotRequest struct {
-	filter canvas.ArmDrawsRequest
-	done   chan canvas.DrawsSnapshot
+	filter ArmDrawsRequest
+	done   chan DrawsSnapshot
 }
 
 // snapshotState is canvas's one draw-snapshot slot. A request moves through
@@ -76,13 +74,13 @@ type snapshotState struct {
 // snapshot is refused; a capture and the other packages' snapshots are
 // separate slots and may be in flight alongside it, which is what makes arming
 // them together describe one tick.
-func (s *snapshotState) arm(request canvas.ArmDrawsRequest) (*snapshotRequest, error) {
+func (s *snapshotState) arm(request ArmDrawsRequest) (*snapshotRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.request != nil {
-		return nil, canvas.ErrDrawsBusy{}
+		return nil, ErrDrawsBusy{}
 	}
-	live := &snapshotRequest{filter: request, done: make(chan canvas.DrawsSnapshot, 1)}
+	live := &snapshotRequest{filter: request, done: make(chan DrawsSnapshot, 1)}
 	s.request, s.pending, s.armed = live, true, false
 	return live, nil
 }
@@ -107,7 +105,7 @@ func (s *snapshotState) beginTick() {
 // The build happens under the slot's own lock. It is bounded by the filter and
 // does no I/O; the marshalling and the disk write happen on the caller's
 // goroutine, never here.
-func (s *snapshotState) record(queue *canvas.OpQueue, tick int64) {
+func (s *snapshotState) record(queue *OpQueue, tick int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.request == nil || !s.armed {
@@ -118,7 +116,7 @@ func (s *snapshotState) record(queue *canvas.OpQueue, tick int64) {
 	// The channel is buffered to one and holds this slot's only send, so a full
 	// one means the waiter has gone and the value is simply collected.
 	select {
-	case request.done <- canvas.DrawsSnapshot{Draws: drawsViewOf(queue, request.filter), Tick: tick}:
+	case request.done <- DrawsSnapshot{Draws: drawsViewOf(queue, request.filter), Tick: tick}:
 	default:
 	}
 }
@@ -136,7 +134,7 @@ func (s *snapshotState) abandon() {
 	request := s.request
 	s.clear()
 	select {
-	case request.done <- canvas.DrawsSnapshot{Err: canvas.ErrDrawsAbandoned{}}:
+	case request.done <- DrawsSnapshot{Err: ErrDrawsAbandoned{}}:
 	default:
 	}
 }
@@ -153,14 +151,14 @@ func (s *snapshotState) clear() {
 // back alias the queue's storage until the next reset, so a snapshot built on
 // them would have to prove nothing escaped. Here each op is inspected only if
 // it is kept, and rendered into owned values before the next one is looked at.
-func drawsViewOf(queue *canvas.OpQueue, request canvas.ArmDrawsRequest) canvas.DrawsView {
-	view := canvas.DrawsView{FromLayer: request.FromLayer, ToLayer: request.ToLayer}
+func drawsViewOf(queue *OpQueue, request ArmDrawsRequest) DrawsView {
+	view := DrawsView{FromLayer: request.FromLayer, ToLayer: request.ToLayer}
 	for _, kind := range request.Kinds {
 		view.Kinds = append(view.Kinds, opKindName(kind))
 	}
 
-	ops := types.OpQueueLayers(queue)
-	layers := make([]canvas.Layer, 0, len(ops))
+	ops := OpQueueLayers(queue)
+	layers := make([]Layer, 0, len(ops))
 	for layerID, value := range ops {
 		if speaks(value) {
 			layers = append(layers, layerID)
@@ -185,11 +183,11 @@ func drawsViewOf(queue *canvas.OpQueue, request canvas.ArmDrawsRequest) canvas.D
 			at := index
 			index++
 			view.OpCount++
-			if !keep || !keeps(request, types.OpKindOf(value.Ops[i].Kind)) {
+			if !keep || !keeps(request, OpKindOf(value.Ops[i].Kind)) {
 				view.OmittedOps++
 				continue
 			}
-			op := types.OpQueueInspect(queue, layerID, &value.Ops[i])
+			op := OpQueueInspect(queue, layerID, &value.Ops[i])
 			view.Ops = append(view.Ops, opViewOf(at, op, slices.Contains(request.Vertices, at)))
 		}
 	}
@@ -200,14 +198,14 @@ func drawsViewOf(queue *canvas.OpQueue, request canvas.ArmDrawsRequest) canvas.D
 // map keeps its keys across a reset, so a layer that drew once and never again
 // is still in it with everything zeroed, and reporting those would fill every
 // response with layers the frame never touched.
-func speaks(value types.LayerOps) bool {
+func speaks(value LayerOps) bool {
 	return len(value.Ops) > 0 || value.HasColor ||
 		value.Window != (m.Rect{}) || value.Target != (gfx.TargetDescr{})
 }
 
 // layerViewOf renders one layer's coordinate frame and attachment.
-func layerViewOf(layerID canvas.Layer, value types.LayerOps) canvas.LayerView {
-	view := canvas.LayerView{Layer: int(layerID), Target: "screen", Ops: len(value.Ops)}
+func layerViewOf(layerID Layer, value LayerOps) LayerView {
+	view := LayerView{Layer: int(layerID), Target: "screen", Ops: len(value.Ops)}
 	if value.Window != (m.Rect{}) {
 		view.Window, view.Aspect = m.Some(rectViewOf(value.Window)), aspectModeName(value.Aspect)
 	}
@@ -226,8 +224,8 @@ func layerViewOf(layerID canvas.Layer, value types.LayerOps) canvas.LayerView {
 
 // opViewOf renders one operation at its record index, expanding its vertices
 // only where the request named it.
-func opViewOf(index int, op canvas.Op, expand bool) canvas.OpView {
-	view := canvas.OpView{
+func opViewOf(index int, op Op, expand bool) OpView {
+	view := OpView{
 		Index: index, Kind: opKindName(op.Kind), Layer: int(op.Layer),
 		Params: gfx.ParameterViewsOf(op.Params),
 	}
@@ -243,15 +241,15 @@ func opViewOf(index int, op canvas.Op, expand bool) canvas.OpView {
 		view.Texture = &texture
 	}
 	switch op.Kind {
-	case canvas.OpSprite:
+	case OpSprite:
 		view.Path = op.Path
 		transform := spriteTransformViewOf(op.Transform)
 		view.Transform = &transform
-	case canvas.OpText:
+	case OpText:
 		view.FontPath, view.Text = op.FontPath, op.Text
 		draw := textDrawViewOf(op.Draw)
 		view.Draw = &draw
-	case canvas.OpTriangles:
+	case OpTriangles:
 		view.VertexCount, view.VertexBytes = len(op.Vertices), op.VertexBytes
 		if bounds, ok := vertexBounds(op.Vertices); ok {
 			view.Bounds = m.Some(bounds)
@@ -264,8 +262,8 @@ func opViewOf(index int, op canvas.Op, expand bool) canvas.OpView {
 }
 
 // spriteTransformViewOf renders one sprite placement.
-func spriteTransformViewOf(transform canvas.SpriteTransform) canvas.SpriteTransformView {
-	view := canvas.SpriteTransformView{
+func spriteTransformViewOf(transform SpriteTransform) SpriteTransformView {
+	view := SpriteTransformView{
 		Position: vec2Components(transform.Position),
 		Scale:    transform.Scale, Rotation: transform.Rotation,
 		NineSliceScale: transform.NineSliceScale, NineSliceNoCenter: transform.NineSliceNoCenter,
@@ -279,26 +277,26 @@ func spriteTransformViewOf(transform canvas.SpriteTransform) canvas.SpriteTransf
 	if transform.Origin != (m.Vec2{}) {
 		view.Origin = vec2Components(transform.Origin)
 	}
-	if transform.Frame != (canvas.SpriteFrame{}) {
+	if transform.Frame != (SpriteFrame{}) {
 		frame := spriteFrameViewOf(transform.Frame)
 		view.Frame = &frame
 	}
-	if transform.NineSlice != (canvas.SpriteFrame{}) {
+	if transform.NineSlice != (SpriteFrame{}) {
 		nineSlice := spriteFrameViewOf(transform.NineSlice)
 		view.NineSlice = &nineSlice
 	}
 	return view
 }
 
-func spriteFrameViewOf(frame canvas.SpriteFrame) canvas.SpriteFrameView {
-	return canvas.SpriteFrameView{
+func spriteFrameViewOf(frame SpriteFrame) SpriteFrameView {
+	return SpriteFrameView{
 		Left: frame.Left, Top: frame.Top, Right: frame.Right, Bottom: frame.Bottom,
 	}
 }
 
 // textDrawViewOf renders one text op's layout.
-func textDrawViewOf(draw canvas.TextDraw) canvas.TextDrawView {
-	return canvas.TextDrawView{
+func textDrawViewOf(draw TextDraw) TextDrawView {
+	return TextDrawView{
 		Position: vec2Components(draw.Position), Size: draw.Size,
 		Color: colorComponents(draw.Color), Align: textAlignName(draw.Align),
 		WordWrapping: draw.WordWrapping, WrapWidth: draw.WrapWidth,
@@ -308,13 +306,13 @@ func textDrawViewOf(draw canvas.TextDraw) canvas.TextDrawView {
 // vertexViewsOf renders a triangle list in full. It is reached only for an op
 // the request named by index, which is what keeps a frame of tens of thousands
 // of vertices from arriving whole.
-func vertexViewsOf(vertices []canvas.Vertex) []canvas.VertexView {
+func vertexViewsOf(vertices []Vertex) []VertexView {
 	if len(vertices) == 0 {
 		return nil
 	}
-	views := make([]canvas.VertexView, len(vertices))
+	views := make([]VertexView, len(vertices))
 	for i, vertex := range vertices {
-		views[i] = canvas.VertexView{
+		views[i] = VertexView{
 			Position: vec2Components(vertex.Position),
 			Color:    colorComponents(vertex.Color),
 			UV:       vec2Components(vertex.UV),
@@ -326,9 +324,9 @@ func vertexViewsOf(vertices []canvas.Vertex) []canvas.VertexView {
 // vertexBounds is the axis-aligned box a triangle list's positions fall in,
 // which is the part of a vertex list that answers "is it off screen" without
 // being the list.
-func vertexBounds(vertices []canvas.Vertex) (canvas.RectView, bool) {
+func vertexBounds(vertices []Vertex) (RectView, bool) {
 	if len(vertices) == 0 {
-		return canvas.RectView{}, false
+		return RectView{}, false
 	}
 	left, top := vertices[0].Position.X, vertices[0].Position.Y
 	right, bottom := left, top
@@ -336,11 +334,11 @@ func vertexBounds(vertices []canvas.Vertex) (canvas.RectView, bool) {
 		left, right = min(left, vertex.Position.X), max(right, vertex.Position.X)
 		top, bottom = min(top, vertex.Position.Y), max(bottom, vertex.Position.Y)
 	}
-	return canvas.RectView{X: left, Y: top, Width: right - left, Height: bottom - top}, true
+	return RectView{X: left, Y: top, Width: right - left, Height: bottom - top}, true
 }
 
-func rectViewOf(rect m.Rect) canvas.RectView {
-	return canvas.RectView{X: rect.X, Y: rect.Y, Width: rect.Width, Height: rect.Height}
+func rectViewOf(rect m.Rect) RectView {
+	return RectView{X: rect.X, Y: rect.Y, Width: rect.Width, Height: rect.Height}
 }
 
 func vec2Components(value m.Vec2) []float32 { return []float32{value.X, value.Y} }
@@ -355,13 +353,13 @@ func colorComponents(value m.Color) []float32 {
 // to a legal-looking name, so a member added without touching this file is
 // visible instead of mislabelled.
 
-func opKindName(kind canvas.OpKind) string {
+func opKindName(kind OpKind) string {
 	switch kind {
-	case canvas.OpSprite:
+	case OpSprite:
 		return "sprite"
-	case canvas.OpText:
+	case OpText:
 		return "text"
-	case canvas.OpTriangles:
+	case OpTriangles:
 		return "triangles"
 	}
 	return unknownName(int(kind))
@@ -369,37 +367,37 @@ func opKindName(kind canvas.OpKind) string {
 
 // opKindFor is the reverse of opKindName, for a request naming its filter in
 // the same words the response answers in.
-func opKindFor(name string) (canvas.OpKind, bool) {
+func opKindFor(name string) (OpKind, bool) {
 	switch name {
 	case "sprite":
-		return canvas.OpSprite, true
+		return OpSprite, true
 	case "text":
-		return canvas.OpText, true
+		return OpText, true
 	case "triangles":
-		return canvas.OpTriangles, true
+		return OpTriangles, true
 	}
 	return 0, false
 }
 
-func aspectModeName(aspect canvas.AspectMode) string {
+func aspectModeName(aspect AspectMode) string {
 	switch aspect {
-	case canvas.AspectInscribe:
+	case AspectInscribe:
 		return "inscribe"
-	case canvas.AspectOverlap:
+	case AspectOverlap:
 		return "overlap"
-	case canvas.AspectStretch:
+	case AspectStretch:
 		return "stretch"
 	}
 	return unknownName(int(aspect))
 }
 
-func textAlignName(align canvas.TextAlign) string {
+func textAlignName(align TextAlign) string {
 	switch align {
-	case canvas.AlignLeft:
+	case AlignLeft:
 		return "left"
-	case canvas.AlignCenter:
+	case AlignCenter:
 		return "center"
-	case canvas.AlignRight:
+	case AlignRight:
 		return "right"
 	}
 	return unknownName(int(align))

@@ -2,8 +2,7 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -66,7 +65,7 @@ type frameBuild struct {
 	draws  []pendingDraw
 	// batches is the scratch one pass fills before publishing it, reused by
 	// every pass in the frame.
-	batches []scene.BatchView
+	batches []BatchView
 	// opaque and blend are the two sort classes of the pass being built, reused
 	// by every pass in the frame so the sort allocates nothing.
 	opaque, blend []sortEntry
@@ -164,7 +163,7 @@ func (b *frameBuild) beginPass(descr gfx.PassDescr, block model.FrameBlock) *pen
 // effect declares.
 func (b *frameBuild) addDraw(
 	pass *pendingPass, mesh model.MeshRecord, id uint32, entry materialEntry,
-	worlds []m.Mat4, draw *types.DrawRecord, anim types.AnimBinding,
+	worlds []m.Mat4, draw *DrawRecord, anim AnimBinding,
 ) {
 	first := (len(b.instances.bytes()) - pass.instanceOffset) / model.InstanceSize
 	// One mesh record per batch, no dedupe: two batches of one mesh write two
@@ -186,7 +185,7 @@ func (b *frameBuild) addDraw(
 		params:        draw.Params,
 		paint:         b.paints[start:len(b.paints):len(b.paints)],
 	})
-	b.batches = append(b.batches, scene.BatchView{
+	b.batches = append(b.batches, BatchView{
 		MeshID: id, MaterialID: entry.materialID,
 		FirstInstance: first, InstanceCount: len(worlds),
 	})

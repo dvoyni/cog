@@ -6,7 +6,6 @@ import (
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
-	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // A pipeline declares the format of the attachment it renders into, and gfx
@@ -24,24 +23,24 @@ import (
 
 // allocatedTarget allocates a render target and renders the frame that bakes
 // it, so the backend can answer for it while the next frame is translated.
-func allocatedTarget(t *testing.T, k kernel.Executioner, format gfx.TextureFormat) gfx.TextureDescr {
+func allocatedTarget(t *testing.T, k kernel.Executioner, format TextureFormat) TextureDescr {
 	t.Helper()
-	var target gfx.TextureDescr
-	withResourceQueue(t, k, func(resources *gfx.ResourceQueue) {
+	var target TextureDescr
+	withResourceQueue(t, k, func(resources *ResourceQueue) {
 		target = resources.AllocateRenderTarget(64, 64, 1, format)
 	})
-	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 	return target
 }
 
 // renderInto renders one frame of one pass into target, with one draw in it.
-func renderInto(t *testing.T, k kernel.Executioner, target gfx.TargetDescr, label string) {
+func renderInto(t *testing.T, k kernel.Executioner, target TargetDescr, label string) {
 	t.Helper()
 	q := recordRaw(t, k)
-	q.Pass(gfx.PassDescr{Target: target, Depth: gfx.DepthNone(), Load: gfx.LoadClear, Label: label})
+	q.Pass(PassDescr{Target: target, Depth: DepthNone(), Load: LoadClear, Label: label})
 	drawInto(q)
-	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 }
 
@@ -51,15 +50,15 @@ func TestAPassIntoALinearTargetBuildsALinearPipeline(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	target := allocatedTarget(t, k, gfx.FormatRGBA8)
-	renderInto(t, k, gfx.TextureTarget(target, 0, 0), "linear")
+	target := allocatedTarget(t, k, FormatRGBA8)
+	renderInto(t, k, TextureTarget(target, 0, 0), "linear")
 
 	if len(backend.lastPipelines) != 1 {
 		t.Fatalf("pipelines = %d, want the one the linear pass needed", len(backend.lastPipelines))
 	}
-	if got := backend.lastPipelines[0].ColorFormat; got != gfx.FormatRGBA8 {
+	if got := backend.lastPipelines[0].ColorFormat; got != FormatRGBA8 {
 		t.Errorf("colour format = %v, want %v: the pass renders into a linear target",
-			got.Name(), gfx.FormatRGBA8.Name())
+			got.Name(), FormatRGBA8.Name())
 	}
 }
 
@@ -72,30 +71,30 @@ func TestTwoTargetFormatsSharingAShaderBuildTwoPipelines(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	srgb := allocatedTarget(t, k, gfx.FormatRGBA8Srgb)
-	linear := allocatedTarget(t, k, gfx.FormatRGBA8)
+	srgb := allocatedTarget(t, k, FormatRGBA8Srgb)
+	linear := allocatedTarget(t, k, FormatRGBA8)
 
 	q := recordRaw(t, k)
-	q.Pass(gfx.PassDescr{
-		Target: gfx.TextureTarget(srgb, 0, 0), Depth: gfx.DepthNone(),
-		Load: gfx.LoadClear, Order: 0, Label: "srgb",
+	q.Pass(PassDescr{
+		Target: TextureTarget(srgb, 0, 0), Depth: DepthNone(),
+		Load: LoadClear, Order: 0, Label: "srgb",
 	})
 	drawInto(q)
-	q.Pass(gfx.PassDescr{
-		Target: gfx.TextureTarget(linear, 0, 0), Depth: gfx.DepthNone(),
-		Load: gfx.LoadClear, Order: 1, Label: "linear",
+	q.Pass(PassDescr{
+		Target: TextureTarget(linear, 0, 0), Depth: DepthNone(),
+		Load: LoadClear, Order: 1, Label: "linear",
 	})
 	drawInto(q)
-	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	if len(backend.lastPipelines) != 2 {
 		t.Fatalf("pipelines = %d, want one per target format", len(backend.lastPipelines))
 	}
 	first, second := backend.lastPipelines[0].ColorFormat, backend.lastPipelines[1].ColorFormat
-	if first != gfx.FormatRGBA8Srgb || second != gfx.FormatRGBA8 {
+	if first != FormatRGBA8Srgb || second != FormatRGBA8 {
 		t.Errorf("colour formats = (%v, %v), want (%v, %v)",
-			first.Name(), second.Name(), gfx.FormatRGBA8Srgb.Name(), gfx.FormatRGBA8.Name())
+			first.Name(), second.Name(), FormatRGBA8Srgb.Name(), FormatRGBA8.Name())
 	}
 }
 
@@ -107,20 +106,20 @@ func TestAScreenPassAndATargetInTheFrameBufferFormatShareOnePipeline(t *testing.
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	target := allocatedTarget(t, k, gfx.FrameBufferFormat)
+	target := allocatedTarget(t, k, FrameBufferFormat)
 
 	q := recordRaw(t, k)
-	q.Pass(gfx.PassDescr{
-		Target: gfx.TextureTarget(target, 0, 0), Depth: gfx.DepthNone(),
-		Load: gfx.LoadClear, Order: 0, Label: "offscreen",
+	q.Pass(PassDescr{
+		Target: TextureTarget(target, 0, 0), Depth: DepthNone(),
+		Load: LoadClear, Order: 0, Label: "offscreen",
 	})
 	drawInto(q)
-	q.Pass(gfx.PassDescr{
-		Target: gfx.ScreenTarget(), Depth: gfx.DepthNone(),
-		Load: gfx.LoadClear, Order: 1, Label: "screen",
+	q.Pass(PassDescr{
+		Target: ScreenTarget(), Depth: DepthNone(),
+		Load: LoadClear, Order: 1, Label: "screen",
 	})
 	drawInto(q)
-	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	if len(backend.lastPipelines) != 1 {
@@ -141,48 +140,48 @@ func TestATargetsFirstFrameKeysTheFrameBufferAndItsNextFrameKeysItsOwn(t *testin
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	var target gfx.TextureDescr
-	withResourceQueue(t, k, func(resources *gfx.ResourceQueue) {
-		target = resources.AllocateRenderTarget(64, 64, 1, gfx.FormatRGBA8)
+	var target TextureDescr
+	withResourceQueue(t, k, func(resources *ResourceQueue) {
+		target = resources.AllocateRenderTarget(64, 64, 1, FormatRGBA8)
 	})
-	renderInto(t, k, gfx.TextureTarget(target, 0, 0), "first")
+	renderInto(t, k, TextureTarget(target, 0, 0), "first")
 
 	if len(backend.lastPipelines) != 1 {
 		t.Fatalf("pipelines after the allocating frame = %d, want one", len(backend.lastPipelines))
 	}
-	if got := backend.lastPipelines[0].ColorFormat; got != gfx.FrameBufferFormat {
+	if got := backend.lastPipelines[0].ColorFormat; got != FrameBufferFormat {
 		t.Errorf("colour format = %v, want the frame buffer's: the target is not baked yet", got.Name())
 	}
 
-	renderInto(t, k, gfx.TextureTarget(target, 0, 0), "second")
+	renderInto(t, k, TextureTarget(target, 0, 0), "second")
 
 	if len(backend.lastPipelines) != 2 {
 		t.Fatalf("pipelines after the drawing frame = %d, want a second for the real format",
 			len(backend.lastPipelines))
 	}
-	if got := backend.lastPipelines[1].ColorFormat; got != gfx.FormatRGBA8 {
-		t.Errorf("colour format = %v, want %v once the target is baked", got.Name(), gfx.FormatRGBA8.Name())
+	if got := backend.lastPipelines[1].ColorFormat; got != FormatRGBA8 {
+		t.Errorf("colour format = %v, want %v once the target is baked", got.Name(), FormatRGBA8.Name())
 	}
 }
 
 func TestAColourlessPassTakesNoFormatFromItsTarget(t *testing.T) {
 	// A depth-only pass has no colour attachment to take a format from and is
 	// keyed by noColor instead; depthpass_test.go pins what that flag does.
-	var shadow gfx.TextureDescr
+	var shadow TextureDescr
 	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
-	withResourceQueue(t, k, func(resources *gfx.ResourceQueue) {
-		shadow = resources.AllocateTexture(64, 64, 1, gfx.FormatDepth32F)
+	withResourceQueue(t, k, func(resources *ResourceQueue) {
+		shadow = resources.AllocateTexture(64, 64, 1, FormatDepth32F)
 	})
 	q := recordRaw(t, k)
-	q.Pass(gfx.PassDescr{
-		Target: gfx.NoTarget(), Depth: gfx.DepthTarget(shadow),
-		DepthLoad: gfx.LoadClear, Label: "shadow",
+	q.Pass(PassDescr{
+		Target: NoTarget(), Depth: DepthTarget(shadow),
+		DepthLoad: LoadClear, Label: "shadow",
 	})
-	q.Draw(triangle(), testMaterial(), gfx.MatParam("mvp", m.NewMat4()))
-	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+	q.Draw(triangle(), testMaterial(), MatParam("mvp", m.NewMat4()))
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	if len(backend.lastPipelines) != 1 {
@@ -191,7 +190,7 @@ func TestAColourlessPassTakesNoFormatFromItsTarget(t *testing.T) {
 	if !backend.lastPipelines[0].NoColorTarget {
 		t.Error("a colourless pass built a pipeline with a colour target")
 	}
-	if backend.lastPipelines[0].DepthFormat != gfx.FormatDepth32F {
+	if backend.lastPipelines[0].DepthFormat != FormatDepth32F {
 		t.Errorf("depth format = %v, want the engine's one depth format",
 			backend.lastPipelines[0].DepthFormat.Name())
 	}

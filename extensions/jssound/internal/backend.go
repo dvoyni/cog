@@ -7,7 +7,6 @@ import (
 	"sync"
 	"syscall/js"
 
-	"github.com/dvoyni/cog/extensions/jssound"
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/slots/sound"
 )
@@ -117,10 +116,10 @@ type waiting struct {
 // question this Adapter asks it. It never fails: registration succeeds whether
 // or not a Device exists, which is gfx's shape one Slot over, and a page with no
 // Web Audio records a failure to report once and plays nothing.
-func newBackend(cfg jssound.Config) *backend {
+func newBackend(cfg Config) *backend {
 	b := &backend{
 		clips:         make(map[sound.ClipID]*clipData),
-		device:        sound.Device{Name: string(jssound.Name)},
+		device:        sound.Device{Name: string(Name)},
 		gestureTarget: gestureTarget(),
 		timeConstant:  minTimeConstant,
 		limit:         cfg.DecodedClipLimit,
@@ -163,12 +162,12 @@ func gestureTarget() js.Value {
 // gesture that resumes the context.
 func (b *backend) stateChanged() {
 	if b.audio == nil || !b.audio.running() {
-		b.device = sound.Device{Name: string(jssound.Name)}
+		b.device = sound.Device{Name: string(Name)}
 		return
 	}
 	b.device = sound.Device{
 		Ready:      true,
-		Name:       string(jssound.Name),
+		Name:       string(Name),
 		SampleRate: b.audio.sampleRate(),
 		Channels:   outChannels,
 		Latency:    b.audio.latency(),
@@ -425,7 +424,7 @@ func (b *backend) decodeInBrowser(held waiting) {
 		held.clip.buffer = buffer
 		b.complete(sound.Prepared{Token: held.token, Clip: held.clip}, held.clip)
 	}, func(message string) {
-		b.complete(sound.Prepared{Token: held.token, Err: jssound.ErrDecodeRefused{Message: message}}, nil)
+		b.complete(sound.Prepared{Token: held.token, Err: ErrDecodeRefused{Message: message}}, nil)
 	})
 }
 
@@ -568,5 +567,5 @@ func (b *backend) stop() {
 	}
 	b.audio.close(b.gestureTarget)
 	b.audio = nil
-	b.device = sound.Device{Name: string(jssound.Name)}
+	b.device = sound.Device{Name: string(Name)}
 }

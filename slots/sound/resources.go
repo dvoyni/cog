@@ -1,6 +1,6 @@
 package sound
 
-import "github.com/dvoyni/cog/slots/sound/internal/types"
+import "github.com/dvoyni/cog/slots/sound/internal"
 
 // Queue is where every operation is recorded, under a write lock, and it is
 // flushed once per tick, atomically. It is deliberately not gfx's latest-wins
@@ -9,7 +9,7 @@ import "github.com/dvoyni/cog/slots/sound/internal/types"
 //
 // Access it only while a handler holds its declared resource lock; do not
 // retain it after the handler returns.
-type Queue = types.Queue
+type Queue = internal.Queue
 
 // Clips is sound's own clip table, sitting in front of the Library that holds
 // the encoded bytes. It is read-only to a caller: loading and releasing live
@@ -21,7 +21,7 @@ type Queue = types.Queue
 // Loading and releasing are Queue verbs: Preload, Release and ReleaseAll.
 //
 // Access it only while a handler holds its declared resource lock.
-type Clips = types.Clips
+type Clips = internal.Clips
 
 // Voices is the live Voice view: handle, Clip, Bus, playhead, duration, Params
 // and paused, for every Voice that exists now. It exposes no mutators at all,
@@ -32,7 +32,7 @@ type Clips = types.Clips
 // exactly once - it is in this view now, or its VoiceEndedEvent has fired.
 //
 // Access it only while a handler holds its declared resource lock.
-type Voices = types.Voices
+type Voices = internal.Voices
 
 // Buses is every Bus's volume as of the last flush, read the way the Voices
 // are. A settings screen reads it to draw its slider where the player left it,
@@ -44,7 +44,7 @@ type Voices = types.Voices
 // nothing about a Bus reaches an Adapter at all.
 //
 // Access it only while a handler holds its declared resource lock.
-type Buses = types.Buses
+type Buses = internal.Buses
 
 // Listener is where the game is heard from as of the last flush, read the way
 // the Buses are. There is one per Engine, at the origin and unrotated before
@@ -56,7 +56,7 @@ type Buses = types.Buses
 // ecsaudio, copies a camera's Transform across.
 //
 // Access it only while a handler holds its declared resource lock.
-type Listener = types.Listener
+type Listener = internal.Listener
 
 // Device reports the sound device as it is now: whether anything is audible,
 // which Adapter got it, and the rate, channels and real latency it runs at. It
@@ -68,4 +68,4 @@ type Listener = types.Listener
 // a game does with it is draw the "click to enable sound" prompt.
 //
 // Access it only while a handler holds its declared resource lock.
-type Device = types.Device
+type Device = internal.Device

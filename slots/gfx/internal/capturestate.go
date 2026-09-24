@@ -2,15 +2,12 @@ package internal
 
 import (
 	"sync"
-
-	"github.com/dvoyni/cog/slots/gfx"
-	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
 // captureRequest is one live capture or burst: where its stills go, and how far
 // through them the engine has got.
 type captureRequest struct {
-	target   gfx.CaptureDesc
+	target   CaptureDesc
 	amount   int
 	interval int
 	// bounds counts the stills bound to a tick so far, and delivered the ones
@@ -20,7 +17,7 @@ type captureRequest struct {
 	delivered int
 	// ticks is how many more ticks must begin before the next still binds.
 	ticks int
-	done  chan gfx.Capture
+	done  chan Capture
 }
 
 // captureState is gfx's one capture slot. A still moves through it in four
@@ -51,25 +48,25 @@ type captureState struct {
 // synchronously, is the first of the two refusal sites: the backend refuses a
 // second in-flight map as well, because capture is a public gfx feature and a
 // game's own code may arm one.
-func (s *captureState) arm(request gfx.ArmCaptureRequest) (*captureRequest, error) {
+func (s *captureState) arm(request ArmCaptureRequest) (*captureRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.request != nil {
-		return nil, gfx.ErrCaptureBusy{}
+		return nil, ErrCaptureBusy{}
 	}
 	amount := max(request.Amount, 1)
 	interval := max(request.Interval, 1)
 	switch {
-	case amount > types.MaxCaptureAmount:
-		return nil, gfx.ErrCaptureAmount{Amount: amount, Max: types.MaxCaptureAmount}
-	case amount*interval > types.MaxCaptureSpan:
-		return nil, gfx.ErrCaptureSpan{Ticks: amount * interval, Max: types.MaxCaptureSpan}
+	case amount > MaxCaptureAmount:
+		return nil, ErrCaptureAmount{Amount: amount, Max: MaxCaptureAmount}
+	case amount*interval > MaxCaptureSpan:
+		return nil, ErrCaptureSpan{Ticks: amount * interval, Max: MaxCaptureSpan}
 	case amount > 1 && request.Paused:
-		return nil, gfx.ErrCaptureBurstPaused{}
+		return nil, ErrCaptureBurstPaused{}
 	}
 	live := &captureRequest{
 		target: request.Target, amount: amount, interval: interval,
-		done: make(chan gfx.Capture, amount),
+		done: make(chan Capture, amount),
 	}
 	s.request = live
 	// A paused engine will complete no further tick, so the last one already is
@@ -117,11 +114,11 @@ func (s *captureState) endTick() {
 }
 
 // target reports what the frame about to be rendered should read back.
-func (s *captureState) target() (gfx.CaptureDesc, bool) {
+func (s *captureState) target() (CaptureDesc, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.request == nil || !s.bound {
-		return gfx.CaptureDesc{}, false
+		return CaptureDesc{}, false
 	}
 	return s.request.target, true
 }
@@ -144,7 +141,7 @@ func (s *captureState) encoded() {
 //
 // A failure ends the request wherever it lands. A burst truncates rather than
 // failing, and the ordinals already delivered are the short success.
-func (s *captureState) deliver(capture gfx.Capture) {
+func (s *captureState) deliver(capture Capture) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.request == nil || !s.inflight {
@@ -172,7 +169,7 @@ func (s *captureState) abandon() {
 		return
 	}
 	select {
-	case s.request.done <- gfx.Capture{Err: gfx.ErrCaptureAbandoned{}}:
+	case s.request.done <- Capture{Err: ErrCaptureAbandoned{}}:
 	default:
 	}
 	s.clear()

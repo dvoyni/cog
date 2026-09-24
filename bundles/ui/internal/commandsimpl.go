@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"github.com/dvoyni/cog/bundles/ui"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -10,22 +9,22 @@ import (
 // which is ordinary ui API that the agent-facing capability happens to be the
 // first caller of.
 func (p *plugin) registerCommands(registrar *kernel.Registrar) {
-	registrar.HandleCommand[ui.ArmLayoutCmd](p.armLayoutCmdImpl)
+	registrar.HandleCommand[ArmLayoutCmd](p.armLayoutCmdImpl)
 }
 
 // armLayoutCmdImpl installs the tick's one snapshot request and hands back the
 // channel the result arrives on, plus the viewport the caller cannot read for
 // itself. The Viewport read is the only lock it needs: the snapshot slot is
 // plugin-owned and carries its own.
-func (p *plugin) armLayoutCmdImpl() (kernel.Lock, kernel.Execute[ui.ArmLayoutRequest, ui.ArmLayoutResponse]) {
+func (p *plugin) armLayoutCmdImpl() (kernel.Lock, kernel.Execute[ArmLayoutRequest, ArmLayoutResponse]) {
 	var viewport kernel.Read[*gfx.Viewport]
 	return func(access kernel.ResourceAccess) {
 			viewport = access.GetRead[*gfx.Viewport]()
-		}, func(_ kernel.Kernel, request ui.ArmLayoutRequest) ui.ArmLayoutResponse {
+		}, func(_ kernel.Kernel, request ArmLayoutRequest) ArmLayoutResponse {
 			live, err := p.snapshots.arm(request)
 			if err != nil {
-				return ui.ArmLayoutResponse{Err: err}
+				return ArmLayoutResponse{Err: err}
 			}
-			return ui.ArmLayoutResponse{Done: live.done, Viewport: *viewport.Get()}
+			return ArmLayoutResponse{Done: live.done, Viewport: *viewport.Get()}
 		}
 }

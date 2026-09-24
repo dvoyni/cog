@@ -2,8 +2,7 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
+
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -23,7 +22,7 @@ type preparedDraw struct {
 	interned int32
 	// anim is the draw's animation binding, carried through so the packer
 	// reads one array rather than reaching back into the record.
-	anim types.AnimBinding
+	anim AnimBinding
 }
 
 // resolveBounds picks the local-space sphere a draw is culled by, in a fixed
@@ -53,7 +52,7 @@ func resolveBounds(neverCull bool, explicit m.Sphere, mesh model.MeshRecord) (m.
 // exact under a uniform scale, conservative under a non-uniform one - a per-axis
 // Scale, a shape's stretch, or a model primitive's flattened node world - since
 // a sphere under non-uniform scale is not a sphere.
-func prepareDraw(record types.DrawRecord, mesh model.MeshRecord) preparedDraw {
+func prepareDraw(record DrawRecord, mesh model.MeshRecord) preparedDraw {
 	world := record.World()
 	prepared := preparedDraw{world: world, anim: record.Anim}
 	if local, cull := resolveBounds(record.NeverCull, record.Bounds, mesh); cull {
@@ -108,8 +107,8 @@ func (c *culler) beginCamera() {
 // sphere was tested against all six planes of the frustum, far included, which
 // is why a camera's Far is required.
 func (c *culler) cull(
-	aspect float32, viewProjection, view m.Mat4, cullMask scene.LayerMask,
-	draws []types.DrawRecord, prepared []preparedDraw,
+	aspect float32, viewProjection, view m.Mat4, cullMask LayerMask,
+	draws []DrawRecord, prepared []preparedDraw,
 ) int {
 	for i := range c.results {
 		if c.results[i].aspect == aspect {
@@ -122,7 +121,7 @@ func (c *culler) cull(
 		first:   len(c.survivors),
 	}
 	for i := range draws {
-		if !types.LayerMaskDrawnBy(draws[i].Layers, cullMask) {
+		if !LayerMaskDrawnBy(draws[i].Layers, cullMask) {
 			continue
 		}
 		result.recorded++

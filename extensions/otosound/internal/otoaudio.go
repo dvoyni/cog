@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dvoyni/cog/extensions/otosound"
 	"github.com/ebitengine/oto/v3"
 )
 
@@ -131,7 +130,7 @@ func (a *otoAudio) open(rate int, buffer time.Duration) (facts, error) {
 		ChannelCount:    outChannels,
 		Format:          oto.FormatFloat32LE,
 		BufferSize:      buffer,
-		ApplicationName: string(otosound.Name),
+		ApplicationName: string(Name),
 	})
 	if err != nil {
 		return facts{}, err

@@ -2,8 +2,6 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -21,14 +19,14 @@ func lightBounds(descr model.LightDescr) (m.Sphere, bool) {
 // pays one sphere test and one contribution per light.
 type preparedLight struct {
 	record   model.Light
-	layers   scene.LayerMask
+	layers   LayerMask
 	sphere   m.Sphere
 	cullable bool
 }
 
 // prepareLights packs the frame's lights once. A degenerate light is reported
 // here, once per frame rather than once per pass, and left out.
-func prepareLights(report func(error), dst []preparedLight, lights []types.LightRecord) []preparedLight {
+func prepareLights(report func(error), dst []preparedLight, lights []LightRecord) []preparedLight {
 	dst = dst[:0]
 	for i := range lights {
 		record, err := model.PackLight(lights[i].Descr)
@@ -51,12 +49,12 @@ func prepareLights(report func(error), dst []preparedLight, lights []types.Light
 // correct rather than surprising.
 func selectLights(
 	selection *model.LightSelection,
-	frustum m.Frustum, eye m.Vec3, cullMask scene.LayerMask, lights []preparedLight,
+	frustum m.Frustum, eye m.Vec3, cullMask LayerMask, lights []preparedLight,
 ) {
 	selection.Reset()
 	for i := range lights {
 		light := &lights[i]
-		if !types.LayerMaskDrawnBy(light.layers, cullMask) {
+		if !LayerMaskDrawnBy(light.layers, cullMask) {
 			continue
 		}
 		if light.cullable && !frustum.ContainsSphere(light.sphere.Center, light.sphere.Radius) {
@@ -68,7 +66,7 @@ func selectLights(
 
 // frameLighting copies a camera's sun and ambient into the shape model's frame
 // packer takes, field for field under the same names.
-func frameLighting(descr scene.CameraDescr) model.FrameLighting {
+func frameLighting(descr CameraDescr) model.FrameLighting {
 	return model.FrameLighting{
 		SunDirection:     descr.SunDirection,
 		SunColor:         descr.SunColor,
@@ -78,3 +76,37 @@ func frameLighting(descr scene.CameraDescr) model.FrameLighting {
 		AmbientIntensity: descr.AmbientIntensity,
 	}
 }
+
+// LightRecord is one recorded light: what the flush consumes.
+type LightRecord struct {
+	Layers LayerMask
+	Descr  model.LightDescr
+}
+
+// PointLight records a point light for this frame. Kind is set here, over the
+// caller's struct, so a hand-written LightDescr needs no Kind of its own.
+//
+// Layers decide which cameras' light buffers the light lands in - a light on
+// layer 1 reaches every camera whose CullMask includes layer 1 - and nothing
+// else. In particular they do not decide which objects the light illuminates:
+// within a pass, every light in the buffer lights every draw. That would need a
+// per-draw light list, which contradicts the frame block being bound once for
+// the whole pass.
+func (q *OpQueue) PointLight(layers LayerMask, light model.LightDescr) {
+	light.Kind = model.LightPoint
+	q.calls = append(q.calls, Op{Kind: OpPointLight, Layers: layers, Light: light})
+	q.lights = append(q.lights, LightRecord{Layers: layers, Descr: light})
+}
+
+// SpotLight records a spot light for this frame: a point light with a cone
+// about Direction, fully on inside InnerCone and off beyond OuterCone, with
+// KHR_lights_punctual's smoothing between them, linear in cosine. Layers work
+// as for PointLight.
+func (q *OpQueue) SpotLight(layers LayerMask, light model.LightDescr) {
+	light.Kind = model.LightSpot
+	q.calls = append(q.calls, Op{Kind: OpSpotLight, Layers: layers, Light: light})
+	q.lights = append(q.lights, LightRecord{Layers: layers, Descr: light})
+}
+
+// flushLights lists the lights the flush is consuming, in recording order.
+func (q *OpQueue) flushLights() []LightRecord { return q.publishedLights }

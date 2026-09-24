@@ -5,7 +5,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"golang.org/x/image/font/gofont/goregular"
@@ -21,7 +20,7 @@ import (
 // levelConfig is a budget for exactly one texture array of two 16-texel pages.
 // The white texel and two sprites padded to 14x14 fill both pages, so a third
 // sprite needs an array the budget cannot pay for.
-var levelConfig = canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+var levelConfig = Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
 
 // levelRig draws two level-one sprites, until levelOne is cleared, and a
 // level-two sprite in every frame. It is the streaming shape: what the game
@@ -36,8 +35,8 @@ func levelRig(t *testing.T) (k kernel.Executioner, levelOne *atomic.Bool, filesy
 	}}
 	levelOne = &atomic.Bool{}
 	levelOne.Store(true)
-	transform := canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}
-	k, errs, backend = testKernelCapturing(t, filesystem, levelConfig, func(write *canvas.OpQueue) {
+	transform := SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}
+	k, errs, backend = testKernelCapturing(t, filesystem, levelConfig, func(write *OpQueue) {
 		if levelOne.Load() {
 			write.Sprite(0, "level1a.png", transform, nil)
 			write.Sprite(0, "level1b.png", transform, nil)
@@ -71,29 +70,29 @@ func TestUnloadAllFreesEveryCache(t *testing.T) {
 		"tile.png":   &fstest.MapFile{Data: pngBytes(t, 6, 4)},
 		testFontPath: &fstest.MapFile{Data: goregular.TTF},
 	}}
-	k, _, _ := testKernel(t, filesystem, canvas.Config{}, func(write *canvas.OpQueue) {
-		write.Sprite(0, "sprite.png", canvas.SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
-		write.Sprite(0, "tile.png", canvas.SpriteTransform{Size: m.Vec2{X: 8, Y: 8}, TileX: true}, nil)
-		write.Text(0, testFontPath, "Ag", canvas.TextDraw{
+	k, _, _ := testKernel(t, filesystem, Config{}, func(write *OpQueue) {
+		write.Sprite(0, "sprite.png", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
+		write.Sprite(0, "tile.png", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}, TileX: true}, nil)
+		write.Text(0, testFontPath, "Ag", TextDraw{
 			Position: m.Vec2{X: 4, Y: 20}, Size: 16, Color: m.Color{R: 1, G: 1, B: 1, A: 1},
 		})
 	})
 	runFrame(k)
-	probeLookup(k, func(la canvas.LookupAccess) { _ = la.SpriteSize("sprite.png") })
+	probeLookup(k, func(la LookupAccess) { _ = la.SpriteSize("sprite.png") })
 	if filesystem.opens != 5 {
 		t.Fatalf("opens filling the caches = %d, want the sprite, the tiled sprite's header and decode, the font and the header",
 			filesystem.opens)
 	}
 	runFrame(k)
-	probeLookup(k, func(la canvas.LookupAccess) { _ = la.SpriteSize("sprite.png") })
+	probeLookup(k, func(la LookupAccess) { _ = la.SpriteSize("sprite.png") })
 	if filesystem.opens != 5 {
 		t.Fatalf("opens on a second frame = %d, want every tier to answer from its table", filesystem.opens)
 	}
 
-	probeLookupDevice(k, func(la canvas.LookupDeviceAccess) { la.UnloadAll() })
+	probeLookupDevice(k, func(la LookupDeviceAccess) { la.UnloadAll() })
 
 	runFrame(k)
-	probeLookup(k, func(la canvas.LookupAccess) { _ = la.SpriteSize("sprite.png") })
+	probeLookup(k, func(la LookupAccess) { _ = la.SpriteSize("sprite.png") })
 	if filesystem.opens != 10 {
 		t.Fatalf("opens after UnloadAll = %d, want all five caches emptied and every file read again",
 			filesystem.opens)
@@ -112,8 +111,8 @@ func TestUnloadAllFreesEveryCache(t *testing.T) {
 // because freeing it without the reservation would be every fill, line and
 // stroke silently vanishing.
 func TestUnloadAllFreesTheGeneratedTexelAndTheNextFrameReservesIt(t *testing.T) {
-	k, _, backend := testKernel(t, fstest.MapFS{}, levelConfig, func(write *canvas.OpQueue) {
-		write.FillRect(0, m.Rect{Width: 4, Height: 4}, canvas.ShapeDraw{Color: m.Color{R: 1, A: 1}})
+	k, _, backend := testKernel(t, fstest.MapFS{}, levelConfig, func(write *OpQueue) {
+		write.FillRect(0, m.Rect{Width: 4, Height: 4}, ShapeDraw{Color: m.Color{R: 1, A: 1}})
 	})
 	runFrame(k)
 	if len(backend.updates) != 1 || len(backend.releasedTextures) != 0 {
@@ -121,7 +120,7 @@ func TestUnloadAllFreesTheGeneratedTexelAndTheNextFrameReservesIt(t *testing.T) 
 			len(backend.updates), len(backend.releasedTextures))
 	}
 
-	probeLookupDevice(k, func(la canvas.LookupDeviceAccess) { la.UnloadAll() })
+	probeLookupDevice(k, func(la LookupDeviceAccess) { la.UnloadAll() })
 	runFrame(k)
 
 	if len(backend.releasedTextures) != 1 {
@@ -171,7 +170,7 @@ func TestUnloadAllLetsARefusedSpritePackAtTheNextLevel(t *testing.T) {
 	}
 
 	levelOne.Store(false)
-	probeLookupDevice(k, func(la canvas.LookupDeviceAccess) { la.UnloadAll() })
+	probeLookupDevice(k, func(la LookupDeviceAccess) { la.UnloadAll() })
 	runFrame(k)
 
 	if len(backend.updates) != 5 {
@@ -205,7 +204,7 @@ func TestUnloadingPerPathKeepsTheCachedFailure(t *testing.T) {
 	}
 
 	levelOne.Store(false)
-	probeLookupDevice(k, func(la canvas.LookupDeviceAccess) {
+	probeLookupDevice(k, func(la LookupDeviceAccess) {
 		la.UnloadSprite("level1a.png")
 		la.UnloadSprite("level1b.png")
 	})

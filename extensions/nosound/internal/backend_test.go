@@ -7,7 +7,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/dvoyni/cog/extensions/nosound"
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/slots/sound"
 )
@@ -74,7 +73,7 @@ func TestPrepareRefusesAStreamWithNoLength(t *testing.T) {
 
 	_, _, err := backend.Prepare(nil, assets.NewBlob(withoutGranule(t, fixture(t).Data())))
 
-	var refused nosound.ErrNoStreamLength
+	var refused ErrNoStreamLength
 	if !errors.As(err, &refused) {
 		t.Fatalf("a stream reporting no length was prepared: err = %v", err)
 	}
@@ -88,7 +87,7 @@ func TestPrepareRefusesBytesThatAreNotOggVorbis(t *testing.T) {
 
 	_, _, err := backend.Prepare(nil, assets.NewBlobFromString("this is not an ogg file"))
 
-	var refused nosound.ErrNotOggVorbis
+	var refused ErrNotOggVorbis
 	if !errors.As(err, &refused) {
 		t.Fatalf("bytes that are not Ogg Vorbis were prepared: err = %v", err)
 	}
@@ -107,8 +106,8 @@ func TestTheDeviceIsReadyAndSilent(t *testing.T) {
 	if !device.Ready {
 		t.Fatal("nosound's Device is not Ready")
 	}
-	if device.Name != string(nosound.Name) {
-		t.Fatalf("the Device names %q, want %q", device.Name, nosound.Name)
+	if device.Name != string(Name) {
+		t.Fatalf("the Device names %q, want %q", device.Name, Name)
 	}
 	if device.SampleRate != 44100 {
 		t.Fatalf("the Device reports %d Hz, want the configured 44100", device.SampleRate)

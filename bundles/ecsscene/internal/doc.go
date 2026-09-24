@@ -1,5 +1,5 @@
 // Package internal is the ecsscene plugin: New, the registration of every
-// Component ecsscene's root declares, and its Systems with their scratches.
+// Component ecsscene's root aliases, and its Systems with their scratches.
 // The load System, subscribed as ecsscene.LoadOnUpdate, keys changed Entities
 // into Batches and is the only one that loads. The recording System,
 // subscribed as ecsscene.RecordOnUpdate, buckets every drawable Entity into

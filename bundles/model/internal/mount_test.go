@@ -4,7 +4,6 @@ import (
 	"io/fs"
 	"testing"
 
-	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/storage"
 	"github.com/dvoyni/cog/slots/storage/storageplugin"
@@ -24,7 +23,7 @@ func TestTheBundledShaderIsMountedByModel(t *testing.T) {
 		t.Fatalf("glob the embedded sources: %v, %v", names, err)
 	}
 	engine.Executioner().ExecuteCommand[mountProbeCmd](mountProbeRequest{read: func(files storage.FileSystem) {
-		for _, name := range append(names, model.SceneShaderPath, model.VertexDecodePath, model.FramePath, model.PbrPath) {
+		for _, name := range append(names, SceneShaderPath, VertexDecodePath, FramePath, PbrPath) {
 			embedded, err := shaderFS.ReadFile(name)
 			if err != nil {
 				t.Errorf("read the embedded %s: %v", name, err)
@@ -54,7 +53,7 @@ type (
 
 func (mountProbe) Name() kernel.PluginName { return "model-test-mount-probe" }
 func (mountProbe) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{storage.Name, model.Name}
+	return []kernel.PluginName{storage.Name, Name}
 }
 
 func (mountProbe) Register(registrar *kernel.Registrar, _ any) error {

@@ -4,7 +4,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
@@ -26,9 +25,9 @@ const testFontPath = "fonts/text.ttf"
 func fontRig(t *testing.T, sizes ...float32) (k kernel.Executioner, filesystem *testFS, backend *testBackend) {
 	t.Helper()
 	filesystem = &testFS{FS: fstest.MapFS{testFontPath: &fstest.MapFile{Data: goregular.TTF}}}
-	k, _, backend = testKernel(t, filesystem, canvas.Config{}, func(write *canvas.OpQueue) {
+	k, _, backend = testKernel(t, filesystem, Config{}, func(write *OpQueue) {
 		for i, size := range sizes {
-			write.Text(0, testFontPath, "Ag", canvas.TextDraw{
+			write.Text(0, testFontPath, "Ag", TextDraw{
 				Position: m.Vec2{X: 10, Y: 20 * float32(i+1)}, Size: size,
 				Color: m.Color{R: 1, G: 1, B: 1, A: 1},
 			})
@@ -90,7 +89,7 @@ func TestUnloadingAFontFreesEveryFaceBakedFromIt(t *testing.T) {
 			len(backend.updates), filesystem.opens)
 	}
 
-	probeLookupDevice(k, func(la canvas.LookupDeviceAccess) { la.UnloadFont(testFontPath) })
+	probeLookupDevice(k, func(la LookupDeviceAccess) { la.UnloadFont(testFontPath) })
 	runFrame(k)
 
 	if len(backend.updates) != 9 {
@@ -109,14 +108,14 @@ func TestUnloadingAFontFreesEveryFaceBakedFromIt(t *testing.T) {
 // asks - and freeing it is what lets it speak again.
 func TestAMissingFontIsOneReportPerEpisodeAcrossSizes(t *testing.T) {
 	const absent = "fonts/absent.ttf"
-	k, errs, _ := testKernelCapturing(t, fstest.MapFS{}, canvas.Config{}, func(write *canvas.OpQueue) {
+	k, errs, _ := testKernelCapturing(t, fstest.MapFS{}, Config{}, func(write *OpQueue) {
 		for _, size := range []float32{16, 24, 32} {
-			write.Text(0, absent, "Ag", canvas.TextDraw{Size: size})
+			write.Text(0, absent, "Ag", TextDraw{Size: size})
 		}
 	})
 	runFrame(k)
 	runFrame(k)
-	probeLookup(k, func(lookup canvas.LookupAccess) {
+	probeLookup(k, func(lookup LookupAccess) {
 		lookup.MeasureTextSize(absent, 16, "Ag")
 		lookup.MeasureWrappedTextSize(absent, 40, "Ag", 100)
 		lookup.FontMetrics(absent, 12)
@@ -125,7 +124,7 @@ func TestAMissingFontIsOneReportPerEpisodeAcrossSizes(t *testing.T) {
 		t.Fatalf("reports for one missing font = %d (%v), want the one read failure the source tier is", len(*errs), *errs)
 	}
 
-	probeLookupDevice(k, func(la canvas.LookupDeviceAccess) { la.UnloadFont(absent) })
+	probeLookupDevice(k, func(la LookupDeviceAccess) { la.UnloadFont(absent) })
 	runFrame(k)
 	if len(*errs) != 2 {
 		t.Fatalf("reports after the unload = %d, want the freed entry to have forgotten what it said", len(*errs))

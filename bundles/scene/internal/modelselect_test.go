@@ -5,8 +5,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/qmuntal/gltf"
 )
@@ -33,7 +32,7 @@ func propsFile(t testing.TB) *gltf.Document {
 
 // residentDraw runs frames until the model is resident and the pass packed the
 // instances the test expects, then hands back the harness.
-func residentDraw(t *testing.T, doc *gltf.Document, draw scene.ModelDraw, instances int) *harness {
+func residentDraw(t *testing.T, doc *gltf.Document, draw ModelDraw, instances int) *harness {
 	t.Helper()
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, draw))
 	h.frameUntil(t, "the model to become resident", func() bool {
@@ -46,7 +45,7 @@ func residentDraw(t *testing.T, doc *gltf.Document, draw scene.ModelDraw, instan
 // A Node draw takes that node's contiguous slice of the flattened list and
 // nothing else, which is what lets one file hold many independent props.
 func TestANodeDrawTakesOnlyThatSubtree(t *testing.T) {
-	h := residentDraw(t, propsFile(t), scene.ModelDraw{Node: "crate"}, 1)
+	h := residentDraw(t, propsFile(t), ModelDraw{Node: "crate"}, 1)
 	if batches := h.passes()[0].Batches; len(batches) != 1 {
 		t.Fatalf("batches = %v, want the crate alone out of the file's two props", batches)
 	}
@@ -55,7 +54,7 @@ func TestANodeDrawTakesOnlyThatSubtree(t *testing.T) {
 // A subtree comes out whole: the named node's own primitives and every
 // descendant's, because depth-first order made it a slice.
 func TestANodeDrawTakesTheWholeSubtree(t *testing.T) {
-	h := residentDraw(t, propsFile(t), scene.ModelDraw{Node: "layout"}, 2)
+	h := residentDraw(t, propsFile(t), ModelDraw{Node: "layout"}, 2)
 	if batches := h.passes()[0].Batches; len(batches) != 2 {
 		t.Fatalf("batches = %v, want both props under the layout node", batches)
 	}
@@ -65,11 +64,11 @@ func TestANodeDrawTakesTheWholeSubtree(t *testing.T) {
 // Transform replaces it, so a prop drawn by name lands where the draw put it
 // however the artist laid the file out.
 func TestANodeDrawReRootsToTheDrawTransform(t *testing.T) {
-	h := residentDraw(t, propsFile(t), scene.ModelDraw{Node: "crate", Transform: m.At(10, 0, 0)}, 1)
+	h := residentDraw(t, propsFile(t), ModelDraw{Node: "crate", Transform: m.At(10, 0, 0)}, 1)
 	// The triangle's declared box is (0,0,0)..(1,1,0), so its sphere sits at
 	// (0.5, 0.5, 0) in the crate's own space. The file's 4 on X and 3 on Y are
 	// what re-rooting throws away.
-	if got := drawnSphere(t, h).Center; abs32(got.X-10.5) > 1e-4 || abs32(got.Y-0.5) > 1e-4 {
+	if got := drawnSphere(t, h).Center; typesAbs32(got.X-10.5) > 1e-4 || typesAbs32(got.Y-0.5) > 1e-4 {
 		t.Errorf("the re-rooted crate sits at %v, want {10.5 0.5 0}", got)
 	}
 }
@@ -89,12 +88,12 @@ func TestANodeDrawReRootsThroughARotatedChain(t *testing.T) {
 	}
 	sceneOf(doc, 0)
 	doc.Scene = gltf.Index(0)
-	h := residentDraw(t, doc, scene.ModelDraw{Node: "Wheels", Transform: m.At(10, 0, 0)}, 1)
+	h := residentDraw(t, doc, ModelDraw{Node: "Wheels", Transform: m.At(10, 0, 0)}, 1)
 	// The wheel's mesh hangs off the named node itself, so re-rooting leaves
 	// the draw's own transform and nothing else: the triangle's sphere sits
 	// where it does in its own space, moved by the call.
-	if got := drawnSphere(t, h).Center; abs32(got.X-10.5) > 1e-4 ||
-		abs32(got.Y-0.5) > 1e-4 || abs32(got.Z) > 1e-4 {
+	if got := drawnSphere(t, h).Center; typesAbs32(got.X-10.5) > 1e-4 ||
+		typesAbs32(got.Y-0.5) > 1e-4 || typesAbs32(got.Z) > 1e-4 {
 		t.Errorf("the re-rooted wheel sits at %v, want {10.5 0.5 0}", got)
 	}
 }
@@ -102,8 +101,8 @@ func TestANodeDrawReRootsThroughARotatedChain(t *testing.T) {
 // An empty Node keeps the scene's root transforms, because a scene is authored
 // as one unit: the same draw of the same file lands where the artist put it.
 func TestAWholeSceneDrawKeepsTheAuthoredTransforms(t *testing.T) {
-	h := residentDraw(t, propsFile(t), scene.ModelDraw{Transform: m.At(10, 0, 0)}, 2)
-	if got := drawnSphere(t, h).Center; abs32(got.X-14.5) > 1e-4 || abs32(got.Y-3.5) > 1e-4 {
+	h := residentDraw(t, propsFile(t), ModelDraw{Transform: m.At(10, 0, 0)}, 2)
+	if got := drawnSphere(t, h).Center; typesAbs32(got.X-14.5) > 1e-4 || typesAbs32(got.Y-3.5) > 1e-4 {
 		t.Errorf("the whole scene's crate sits at %v, want the authored {14.5 3.5 0}", got)
 	}
 }
@@ -122,7 +121,7 @@ func TestASceneSelectorDrawsThatScene(t *testing.T) {
 	namedSceneOf(doc, "solo", 0)
 	namedSceneOf(doc, "pair", 1, 2)
 	doc.Scene = gltf.Index(0)
-	h := residentDraw(t, doc, scene.ModelDraw{Scene: "pair"}, 2)
+	h := residentDraw(t, doc, ModelDraw{Scene: "pair"}, 2)
 	if batches := h.passes()[0].Batches; len(batches) != 2 {
 		t.Fatalf("batches = %v, want the named scene's two nodes", batches)
 	}
@@ -141,7 +140,7 @@ func TestANodeIsResolvedWithinTheSelectedScene(t *testing.T) {
 	namedSceneOf(doc, "second", 1)
 	doc.Scene = gltf.Index(0)
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)),
-		drawModel(modelPath, scene.ModelDraw{Scene: "second", Node: "crate"}))
+		drawModel(modelPath, ModelDraw{Scene: "second", Node: "crate"}))
 	h.frameUntil(t, "the unmatched node to be reported", func() bool {
 		var missing model.ErrModelNodeMissing
 		return anyErrorAs(h.errors(), &missing)
@@ -155,7 +154,7 @@ func TestANodeIsResolvedWithinTheSelectedScene(t *testing.T) {
 // typo'd name rendering an entire building at the origin is the worse failure.
 func TestAnUnmatchedNodeSkipsTheDrawAndReportsOnce(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, propsFile(t))),
-		drawModel(modelPath, scene.ModelDraw{Node: "crat"}))
+		drawModel(modelPath, ModelDraw{Node: "crat"}))
 	h.frameUntil(t, "the unmatched node to be reported", func() bool {
 		var missing model.ErrModelNodeMissing
 		return anyErrorAs(h.errors(), &missing)
@@ -175,7 +174,7 @@ func TestAnUnmatchedNodeSkipsTheDrawAndReportsOnce(t *testing.T) {
 // than the node's, so a bad scene and a bad node are two reports.
 func TestAnUnmatchedSceneSkipsTheDrawAndReportsOnce(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, propsFile(t))),
-		drawModel(modelPath, scene.ModelDraw{Scene: "outdoors"}))
+		drawModel(modelPath, ModelDraw{Scene: "outdoors"}))
 	h.frameUntil(t, "the unmatched scene to be reported", func() bool {
 		var missing model.ErrModelSceneMissing
 		return anyErrorAs(h.errors(), &missing)
@@ -194,10 +193,10 @@ func TestAnUnmatchedSceneSkipsTheDrawAndReportsOnce(t *testing.T) {
 // The report key carries the node, so two typos in one file are two reports
 // rather than one silence.
 func TestTwoUnmatchedNodesOfOneFileBothReport(t *testing.T) {
-	h := newHarnessWithFiles(t, modelFiles(glb(t, propsFile(t))), func(q *scene.OpQueue) {
+	h := newHarnessWithFiles(t, modelFiles(glb(t, propsFile(t))), func(q *OpQueue) {
 		q.Camera(cameraMain, modelCamera())
-		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{Node: "crat"})
-		q.Model(scene.LayersAll, modelPath, scene.ModelDraw{Node: "barrl"})
+		q.Model(LayersAll, modelPath, ModelDraw{Node: "crat"})
+		q.Model(LayersAll, modelPath, ModelDraw{Node: "barrl"})
 	})
 	h.frameUntil(t, "both unmatched nodes to be reported", func() bool {
 		return countAs[model.ErrModelNodeMissing](h.errors()) == 2
@@ -216,7 +215,7 @@ func TestTwoUnmatchedNodesOfOneFileBothReport(t *testing.T) {
 // would have nothing to say the second time it was wrong.
 func TestUnloadingAModelClearsItsSelectorReports(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, propsFile(t))),
-		drawModel(modelPath, scene.ModelDraw{Node: "crat"}))
+		drawModel(modelPath, ModelDraw{Node: "crat"}))
 	h.frameUntil(t, "the unmatched node to be reported", func() bool {
 		return countAs[model.ErrModelNodeMissing](h.errors()) == 1
 	})
@@ -249,7 +248,7 @@ func TestADrawOfACollapsedNodeSkipsAndReports(t *testing.T) {
 	sceneOf(doc, 0)
 	doc.Scene = gltf.Index(0)
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)),
-		drawModel(modelPath, scene.ModelDraw{Node: "flat"}))
+		drawModel(modelPath, ModelDraw{Node: "flat"}))
 	h.frameUntil(t, "the collapsed node to be reported", func() bool {
 		var degenerate model.ErrModelNodeDegenerate
 		return anyErrorAs(h.errors(), &degenerate)
@@ -263,10 +262,10 @@ func TestADrawOfACollapsedNodeSkipsAndReports(t *testing.T) {
 // reports what the recorder said.
 func TestAModelCallCarriesItsSelectorsToInspection(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, propsFile(t))),
-		drawModel(modelPath, scene.ModelDraw{Scene: "scene", Node: "crate"}))
+		drawModel(modelPath, ModelDraw{Scene: "scene", Node: "crate"}))
 	h.frame()
 	ops := h.ops()
-	if len(ops) != 2 || ops[1].Kind != scene.OpModel {
+	if len(ops) != 2 || ops[1].Kind != OpModel {
 		t.Fatalf("ops = %d, want the camera and the model", len(ops))
 	}
 	if ops[1].Model.Scene != "scene" || ops[1].Model.Node != "crate" {
@@ -278,7 +277,7 @@ func TestAModelCallCarriesItsSelectorsToInspection(t *testing.T) {
 // A Node draw instances like any other: the subtree is one batch per primitive
 // however many transforms the call carries.
 func TestANodeDrawInstances(t *testing.T) {
-	h := residentDraw(t, propsFile(t), scene.ModelDraw{
+	h := residentDraw(t, propsFile(t), ModelDraw{
 		Node:       "layout",
 		Transforms: []m.Transform{m.At(0, 0, 0), m.At(2, 0, 0), m.At(4, 0, 0)},
 	}, 6)
@@ -299,8 +298,8 @@ func TestANodeDrawInstances(t *testing.T) {
 func drawnSphere(t *testing.T, h *harness) m.Sphere {
 	t.Helper()
 	var sphere m.Sphere
-	h.inspect(func(q *scene.OpQueue) {
-		draws := types.OpQueueFlushDraws(q)
+	h.inspect(func(q *OpQueue) {
+		draws := OpQueueFlushDraws(q)
 		if len(draws) == 0 {
 			t.Fatal("no draws were expanded")
 		}

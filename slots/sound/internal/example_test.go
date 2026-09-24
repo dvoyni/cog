@@ -6,7 +6,6 @@ import (
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
-	"github.com/dvoyni/cog/slots/sound"
 	"github.com/dvoyni/cog/slots/storage"
 	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
@@ -29,10 +28,10 @@ import (
 // The Example lives beside sound's plugin rather than in the root because it
 // composes a whole engine, and the root may not import its own constructor.
 func Example_playAStolenVoiceAgain() {
-	ended := make(chan sound.VoiceEndedEvent, 8)
-	game := &retryingGame{kept: map[sound.Voice]sound.VoiceInfo{}}
+	ended := make(chan VoiceEndedEvent, 8)
+	game := &retryingGame{kept: map[Voice]VoiceInfo{}}
 	engine := kernel.New(map[kernel.PluginName]any{
-		sound.Name: sound.Config{}.WithMaxVoices(1),
+		Name: Config{}.WithMaxVoices(1),
 	}).WithPlugins(
 		storageplugin.New(), permanentAdapter{}, readMountAdapter{storage.ReadMount{Id: "game", Priority: 10, FS: clipBytes}},
 		New(), soundBackendAdapter{newFakeBackend(longClip())},
@@ -43,26 +42,26 @@ func Example_playAStolenVoiceAgain() {
 	<-engine.Ready()
 	k := engine.Executioner()
 
-	clip := sound.ClipWithResource(bell)
-	ambience := sound.Params{Loop: m.Some(true)}
-	footstep := sound.Params{}
+	clip := ClipWithResource(bell)
+	ambience := Params{Loop: m.Some(true)}
+	footstep := Params{}
 
 	// update is one tick: the game's own System, then sound's flush.
-	update := func(record func(*sound.Queue)) {
+	update := func(record func(*Queue)) {
 		k.ExecuteCommand[gameUpdateCmd](gameUpdateRequest{Record: record})
 		k.PublishEvent(app.UpdateEvent{Dt: step, Last: true}).Wait()
 	}
 
-	var first sound.Voice
-	update(func(q *sound.Queue) { first = q.Play(clip, 0, ambience) })
+	var first Voice
+	update(func(q *Queue) { first = q.Play(clip, 0, ambience) })
 	for range 31 {
 		update(nil)
 	}
 	fmt.Printf("ambience at %.3fs\n", game.kept[first].Playhead)
 
-	update(func(q *sound.Queue) { q.Play(clip, 0, footstep) })
+	update(func(q *Queue) { q.Play(clip, 0, footstep) })
 	event := <-ended
-	fmt.Println("ambience stolen:", event.Voice == first && event.Reason == sound.ReasonStolen)
+	fmt.Println("ambience stolen:", event.Voice == first && event.Reason == ReasonStolen)
 
 	game.stolen = append(game.stolen, event.Voice)
 	update(nil)
@@ -93,11 +92,11 @@ func Example_playAStolenVoiceAgain() {
 // view. So the elapsed time is that one tick, and the new Voice lands exactly
 // where the stolen one would have been.
 type retryingGame struct {
-	kept   map[sound.Voice]sound.VoiceInfo
-	stolen []sound.Voice
+	kept   map[Voice]VoiceInfo
+	stolen []Voice
 }
 
-func (g *retryingGame) update(queue *sound.Queue, voices *sound.Voices, dt float32) {
+func (g *retryingGame) update(queue *Queue, voices *Voices, dt float32) {
 	for _, voice := range g.stolen {
 		was, ok := g.kept[voice]
 		if !ok || !was.Params.Loop.Or(false) {
@@ -118,37 +117,37 @@ func (g *retryingGame) update(queue *sound.Queue, voices *sound.Voices, dt float
 // flush does.
 type gameUpdateCmd kernel.Command[gameUpdateRequest, gameUpdateResponse]
 
-type gameUpdateRequest struct{ Record func(*sound.Queue) }
+type gameUpdateRequest struct{ Record func(*Queue) }
 
 type gameUpdateResponse struct{}
 
-type retryingEndedHandler kernel.Subscription[sound.VoiceEndedEvent]
+type retryingEndedHandler kernel.Subscription[VoiceEndedEvent]
 
 type retryingGamePlugin struct {
 	game  *retryingGame
-	ended chan sound.VoiceEndedEvent
+	ended chan VoiceEndedEvent
 }
 
 func (*retryingGamePlugin) Name() kernel.PluginName { return "retrying-game" }
 
 func (*retryingGamePlugin) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{sound.Name}
+	return []kernel.PluginName{Name}
 }
 
 func (p *retryingGamePlugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.HandleCommand[gameUpdateCmd](p.update)
-	registrar.Subscribe[retryingEndedHandler](func() (kernel.Lock, kernel.Observe[sound.VoiceEndedEvent]) {
-		return nil, func(_ kernel.Kernel, event sound.VoiceEndedEvent) { p.ended <- event }
+	registrar.Subscribe[retryingEndedHandler](func() (kernel.Lock, kernel.Observe[VoiceEndedEvent]) {
+		return nil, func(_ kernel.Kernel, event VoiceEndedEvent) { p.ended <- event }
 	})
 	return nil
 }
 
 func (p *retryingGamePlugin) update() (kernel.Lock, kernel.Execute[gameUpdateRequest, gameUpdateResponse]) {
-	var queue kernel.Write[*sound.Queue]
-	var voices kernel.Read[*sound.Voices]
+	var queue kernel.Write[*Queue]
+	var voices kernel.Read[*Voices]
 	return func(access kernel.ResourceAccess) {
-			queue = access.GetWrite[*sound.Queue]()
-			voices = access.GetRead[*sound.Voices]()
+			queue = access.GetWrite[*Queue]()
+			voices = access.GetRead[*Voices]()
 		}, func(_ kernel.Kernel, request gameUpdateRequest) gameUpdateResponse {
 			p.game.update(queue.Get(), voices.Get(), step)
 			if request.Record != nil {

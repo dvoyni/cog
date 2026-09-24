@@ -5,16 +5,14 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/dvoyni/cog/bundles/canvas"
-	"github.com/dvoyni/cog/bundles/canvas/internal/types"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // targetTestConfig is the smallest atlas the harness will accept. None of these
 // tests put anything in it: a render target is not an atlas entry.
-func targetTestConfig() canvas.Config {
-	return canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+func targetTestConfig() Config {
+	return Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
 }
 
 // quadVertices finds the six-vertex upload one texture draw produced and
@@ -45,11 +43,11 @@ func quadVertices(t *testing.T, backend *testBackend) (positions, uvs []m.Vec2) 
 // exactly as a scene camera does, because minting a texture takes the gfx queue
 // and a canvas recorder does not hold it.
 func TestALayerWithATargetRendersIntoItsTextureRatherThanTheScreen(t *testing.T) {
-	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *canvas.OpQueue, gfxWrite *gfx.OpQueue) {
+	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
 		target, _ := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.SetLayerTarget(1, target)
-		write.FillRect(1, m.Rect{Width: 10, Height: 10}, canvas.ShapeDraw{Color: m.Color{R: 1, A: 1}})
-		write.FillRect(2, m.Rect{Width: 10, Height: 10}, canvas.ShapeDraw{Color: m.Color{G: 1, A: 1}})
+		write.FillRect(1, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{R: 1, A: 1}})
+		write.FillRect(2, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{G: 1, A: 1}})
 	})
 	runFrame(k)
 
@@ -70,12 +68,12 @@ func TestALayerWithATargetRendersIntoItsTextureRatherThanTheScreen(t *testing.T)
 // the other target left behind. The clear and the discard therefore bracket
 // every run, not just the frame's first and last layer.
 func TestEveryTargetRunClearsAndDiscardsItsOwnDepth(t *testing.T) {
-	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *canvas.OpQueue, gfxWrite *gfx.OpQueue) {
+	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
 		target, _ := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
-		write.FillRect(0, m.Rect{Width: 10, Height: 10}, canvas.ShapeDraw{Color: m.Color{A: 1}})
+		write.FillRect(0, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{A: 1}})
 		write.SetLayerTarget(1, target)
-		write.FillRect(1, m.Rect{Width: 10, Height: 10}, canvas.ShapeDraw{Color: m.Color{R: 1, A: 1}})
-		write.FillRect(2, m.Rect{Width: 10, Height: 10}, canvas.ShapeDraw{Color: m.Color{G: 1, A: 1}})
+		write.FillRect(1, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{R: 1, A: 1}})
+		write.FillRect(2, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{G: 1, A: 1}})
 	})
 	runFrame(k)
 
@@ -95,12 +93,12 @@ func TestEveryTargetRunClearsAndDiscardsItsOwnDepth(t *testing.T) {
 // A contiguous run of same-target layers still collapses: giving a layer a
 // target does not cost the frame a pass per layer.
 func TestLayersSharingATargetStillCollapseToOnePass(t *testing.T) {
-	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *canvas.OpQueue, gfxWrite *gfx.OpQueue) {
+	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
 		target, _ := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.SetLayerTarget(1, target)
 		write.SetLayerTarget(2, target)
-		write.FillRect(1, m.Rect{Width: 10, Height: 10}, canvas.ShapeDraw{Color: m.Color{R: 1, A: 1}})
-		write.FillRect(2, m.Rect{Width: 10, Height: 10}, canvas.ShapeDraw{Color: m.Color{G: 1, A: 1}})
+		write.FillRect(1, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{R: 1, A: 1}})
+		write.FillRect(2, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{G: 1, A: 1}})
 	})
 	runFrame(k)
 
@@ -115,13 +113,13 @@ func TestLayersSharingATargetStillCollapseToOnePass(t *testing.T) {
 func TestEveryLayerClearsItsOwnTarget(t *testing.T) {
 	offscreenClear := m.Color{R: 1, A: 1}
 	screenClear := m.Color{B: 1, A: 1}
-	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *canvas.OpQueue, gfxWrite *gfx.OpQueue) {
+	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
 		target, _ := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.SetLayerTarget(0, target)
 		write.Clear(0, offscreenClear)
-		write.FillRect(0, m.Rect{Width: 10, Height: 10}, canvas.ShapeDraw{Color: m.Color{G: 1, A: 1}})
+		write.FillRect(0, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{G: 1, A: 1}})
 		write.Clear(1, screenClear)
-		write.FillRect(1, m.Rect{Width: 10, Height: 10}, canvas.ShapeDraw{Color: m.Color{G: 1, A: 1}})
+		write.FillRect(1, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{G: 1, A: 1}})
 	})
 	runFrame(k)
 
@@ -142,11 +140,11 @@ func TestEveryLayerClearsItsOwnTarget(t *testing.T) {
 // layer is not on the viewport. Scene's precedent decides it: the target's size
 // when it has one, the viewport otherwise.
 func TestATextureTargetedLayerMeasuresAgainstItsTextureNotTheViewport(t *testing.T) {
-	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *canvas.OpQueue, gfxWrite *gfx.OpQueue) {
+	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
 		target, _ := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.SetLayerTarget(0, target)
-		write.FillRect(0, m.Rect{Width: 10, Height: 10}, canvas.ShapeDraw{Color: m.Color{A: 1}})
-		write.FillRect(1, m.Rect{Width: 10, Height: 10}, canvas.ShapeDraw{Color: m.Color{A: 1}})
+		write.FillRect(0, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{A: 1}})
+		write.FillRect(1, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{A: 1}})
 	})
 	runFrame(k)
 
@@ -168,9 +166,9 @@ func TestATextureTargetedLayerMeasuresAgainstItsTextureNotTheViewport(t *testing
 // arbitrary texture is a texture_2d - so it gets its own path, and its natural
 // size is the texture's own.
 func TestSpriteTextureSizesItselfFromTheTexture(t *testing.T) {
-	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *canvas.OpQueue, gfxWrite *gfx.OpQueue) {
+	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
 		_, texture := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
-		write.SpriteTexture(0, texture, canvas.SpriteTransform{Position: m.Vec2{X: 5, Y: 7}}, nil)
+		write.SpriteTexture(0, texture, SpriteTransform{Position: m.Vec2{X: 5, Y: 7}}, nil)
 	})
 	runFrame(k)
 
@@ -189,9 +187,9 @@ func TestSpriteTextureSizesItselfFromTheTexture(t *testing.T) {
 // low-green pixel to grey, with no key colour that switches it off. A texture
 // drawn as itself needs a material that samples and returns.
 func TestATextureDrawDoesNotGoThroughTheKeyColourRamp(t *testing.T) {
-	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *canvas.OpQueue, gfxWrite *gfx.OpQueue) {
+	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
 		_, texture := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
-		write.SpriteTexture(0, texture, canvas.SpriteTransform{}, nil)
+		write.SpriteTexture(0, texture, SpriteTransform{}, nil)
 	})
 	runFrame(k)
 
@@ -216,9 +214,9 @@ func TestATextureDrawDoesNotGoThroughTheKeyColourRamp(t *testing.T) {
 // without the ramp.
 func TestDrawTextureBindsTheTextureToACustomShape(t *testing.T) {
 	white := m.Color{R: 1, G: 1, B: 1, A: 1}
-	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *canvas.OpQueue, gfxWrite *gfx.OpQueue) {
+	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
 		_, texture := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
-		write.DrawTexture(0, texture, []canvas.Vertex{
+		write.DrawTexture(0, texture, []Vertex{
 			{Position: m.Vec2{}, Color: white},
 			{Position: m.Vec2{X: 40}, Color: white, UV: m.Vec2{X: 1}},
 			{Position: m.Vec2{Y: 20}, Color: white, UV: m.Vec2{Y: 1}},
@@ -239,12 +237,12 @@ func TestDrawTextureBindsTheTextureToACustomShape(t *testing.T) {
 // a later canvas layer samples. A scene material takes it through
 // gfx.TextureParam the same way.
 func TestATextureACanvasLayerRenderedIsSampledByALaterLayer(t *testing.T) {
-	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *canvas.OpQueue, gfxWrite *gfx.OpQueue) {
+	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
 		target, texture := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.SetLayerTarget(0, target)
 		write.Clear(0, m.Color{R: 1, A: 1})
-		write.FillRect(0, m.Rect{Width: 10, Height: 10}, canvas.ShapeDraw{Color: m.Color{G: 1, A: 1}})
-		write.SpriteTexture(1, texture, canvas.SpriteTransform{Size: m.Vec2{X: 50, Y: 50}}, nil)
+		write.FillRect(0, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{G: 1, A: 1}})
+		write.SpriteTexture(1, texture, SpriteTransform{Size: m.Vec2{X: 50, Y: 50}}, nil)
 	})
 	runFrame(k)
 
@@ -267,8 +265,8 @@ func TestATextureACanvasLayerRenderedIsSampledByALaterLayer(t *testing.T) {
 // path that has not baked - has no natural size to draw at, and guessing one
 // would put a wrongly-sized rectangle on screen rather than nothing.
 func TestASpriteTextureOfUnknownSizeDrawsNothing(t *testing.T) {
-	k, _, backend := testKernel(t, fstest.MapFS{}, targetTestConfig(), func(write *canvas.OpQueue) {
-		write.SpriteTexture(0, gfx.TextureWithResource("unbaked.png"), canvas.SpriteTransform{}, nil)
+	k, _, backend := testKernel(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue) {
+		write.SpriteTexture(0, gfx.TextureWithResource("unbaked.png"), SpriteTransform{}, nil)
 	})
 	runFrame(k)
 
@@ -278,7 +276,7 @@ func TestASpriteTextureOfUnknownSizeDrawsNothing(t *testing.T) {
 }
 
 func TestTextureShaderParses(t *testing.T) {
-	assertBuiltinShaderLowers(t, types.TextureShaderPath)
+	assertBuiltinShaderLowers(t, TextureShaderPath)
 }
 
 // Recording order is the contract, and a texture sprite emits its own draw
@@ -287,14 +285,14 @@ func TestTextureShaderParses(t *testing.T) {
 // top of what the caller recorded underneath.
 func TestATextureSpriteDrawsAfterTheTrianglesRecordedBeforeIt(t *testing.T) {
 	white := m.Color{R: 1, G: 1, B: 1, A: 1}
-	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *canvas.OpQueue, gfxWrite *gfx.OpQueue) {
+	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
 		_, texture := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
-		write.DrawTriangles(0, []canvas.Vertex{
+		write.DrawTriangles(0, []Vertex{
 			{Position: m.Vec2{}, Color: white},
 			{Position: m.Vec2{X: 4}, Color: white},
 			{Position: m.Vec2{Y: 4}, Color: white},
 		}, nil)
-		write.SpriteTexture(0, texture, canvas.SpriteTransform{Size: m.Vec2{X: 20, Y: 10}}, nil)
+		write.SpriteTexture(0, texture, SpriteTransform{Size: m.Vec2{X: 20, Y: 10}}, nil)
 	})
 	runFrame(k)
 

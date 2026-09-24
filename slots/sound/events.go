@@ -1,23 +1,23 @@
 package sound
 
-import "github.com/dvoyni/cog/slots/sound/internal/types"
+import "github.com/dvoyni/cog/slots/sound/internal"
 
 // Reason says why a Voice ended.
-type Reason = types.Reason
+type Reason = internal.Reason
 
 const (
 	// ReasonFinished is the Clip reaching its end while not looping.
-	ReasonFinished Reason = types.ReasonFinished
+	ReasonFinished = internal.ReasonFinished
 	// ReasonStopped is Stop, or a StopBus covering it.
-	ReasonStopped Reason = types.ReasonStopped
+	ReasonStopped = internal.ReasonStopped
 	// ReasonStolen is the cap, whether the Voice played for a second or never
 	// sounded.
-	ReasonStolen Reason = types.ReasonStolen
+	ReasonStolen = internal.ReasonStolen
 	// ReasonFailed is a Clip that could not be read or prepared. It arrives one
 	// or more ticks after the Play, never in the same tick.
-	ReasonFailed Reason = types.ReasonFailed
+	ReasonFailed = internal.ReasonFailed
 	// ReasonReleased is the Clip the Voice was playing being released.
-	ReasonReleased Reason = types.ReasonReleased
+	ReasonReleased = internal.ReasonReleased
 )
 
 // VoiceEndedEvent is published for every ending, so a subscriber never has to
@@ -35,7 +35,4 @@ const (
 //
 // Shutdown publishes nothing: an event nobody can receive is not an ending
 // worth modelling.
-type VoiceEndedEvent struct {
-	Voice  Voice
-	Reason Reason
-}
+type VoiceEndedEvent = internal.VoiceEndedEvent

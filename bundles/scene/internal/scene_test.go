@@ -10,8 +10,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/bundles/model/modelplugin"
-	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
+
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -342,14 +341,14 @@ func (b *testBackend) ReleaseTexture(id gfx.TextureID) {
 // queue as well, ordered ahead of scene's flush, so a recorder that allocates a
 // temporary target allocates it in the frame the pass using it is emitted into.
 type recordPlugin struct {
-	record func(*scene.OpQueue, *gfx.OpQueue)
+	record func(*OpQueue, *gfx.OpQueue)
 }
 type recordHandler kernel.Subscription[app.UpdateEvent]
 
 // inspectCmd runs a callback inside a handler holding scene's OpQueue, so a
 // test reads Ops and Passes the way a real caller would.
 type inspectCmd kernel.Command[inspectRequest, inspectResponse]
-type inspectRequest struct{ run func(*scene.OpQueue) }
+type inspectRequest struct{ run func(*OpQueue) }
 type inspectResponse struct{}
 
 // lookupProbeCmd runs a callback with a valid scoped facade, either half.
@@ -378,29 +377,29 @@ type lookupProbeResponse struct{}
 
 func (p recordPlugin) Name() kernel.PluginName { return "scene-test-recorder" }
 func (p recordPlugin) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{scene.Name, storage.Name}
+	return []kernel.PluginName{Name, storage.Name}
 }
 
 func (p recordPlugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.Subscribe[recordHandler](func() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-		var queue kernel.Write[*scene.OpQueue]
+		var queue kernel.Write[*OpQueue]
 		var gfxQueue kernel.Write[*gfx.OpQueue]
 		return func(access kernel.ResourceAccess) {
-				queue = access.GetWrite[*scene.OpQueue]()
+				queue = access.GetWrite[*OpQueue]()
 				gfxQueue = access.GetWrite[*gfx.OpQueue]()
 			}, func(kernel.Kernel, app.UpdateEvent) {
 				p.record(queue.Get(), gfxQueue.Get())
 			}
-	}).Before[scene.FlushOnUpdate]()
+	}).Before[FlushOnUpdate]()
 	registrar.HandleCommand[inspectCmd](inspectCmdImpl)
 	registrar.HandleCommand[lookupProbeCmd](lookupProbeCmdImpl)
 	return nil
 }
 
 func inspectCmdImpl() (kernel.Lock, kernel.Execute[inspectRequest, inspectResponse]) {
-	var queue kernel.Write[*scene.OpQueue]
+	var queue kernel.Write[*OpQueue]
 	return func(access kernel.ResourceAccess) {
-			queue = access.GetWrite[*scene.OpQueue]()
+			queue = access.GetWrite[*OpQueue]()
 		}, func(_ kernel.Kernel, req inspectRequest) inspectResponse {
 			req.run(queue.Get())
 			return inspectResponse{}
@@ -468,7 +467,7 @@ type harness struct {
 // load goroutine may still be running.
 func (h *harness) errors() []error { return h.sink.snapshot() }
 
-func newHarness(t testing.TB, record func(*scene.OpQueue)) *harness {
+func newHarness(t testing.TB, record func(*OpQueue)) *harness {
 	t.Helper()
 	var reported []error
 	return newHarnessWithErrors(t, record, &reported)
@@ -476,40 +475,40 @@ func newHarness(t testing.TB, record func(*scene.OpQueue)) *harness {
 
 // newHarnessWithGfx is newHarness for a recorder that also allocates from the
 // gfx queue, the way an app rendering a camera into a temporary target does.
-func newHarnessWithGfx(t testing.TB, record func(*scene.OpQueue, *gfx.OpQueue)) *harness {
+func newHarnessWithGfx(t testing.TB, record func(*OpQueue, *gfx.OpQueue)) *harness {
 	t.Helper()
 	var reported []error
 	return newHarnessRecording(t, record, &reported)
 }
 
-func newHarnessWithErrors(t testing.TB, record func(*scene.OpQueue), reported *[]error) *harness {
+func newHarnessWithErrors(t testing.TB, record func(*OpQueue), reported *[]error) *harness {
 	t.Helper()
-	return newHarnessRecording(t, func(q *scene.OpQueue, _ *gfx.OpQueue) { record(q) }, reported)
+	return newHarnessRecording(t, func(q *OpQueue, _ *gfx.OpQueue) { record(q) }, reported)
 }
 
 // newHarnessWithFiles is newHarness over a filesystem holding the given
 // files, which is how a model test hands scene a glTF file to load without
 // this package growing a testdata directory.
-func newHarnessWithFiles(t testing.TB, files fstest.MapFS, record func(*scene.OpQueue)) *harness {
+func newHarnessWithFiles(t testing.TB, files fstest.MapFS, record func(*OpQueue)) *harness {
 	t.Helper()
 	return newHarnessWithFS(t, files, record)
 }
 
 // newHarnessWithFS is newHarnessWithFiles over any filesystem, so a test that
 // wants to watch the reads themselves can wrap the map in one of its own.
-func newHarnessWithFS(t testing.TB, files fs.FS, record func(*scene.OpQueue)) *harness {
+func newHarnessWithFS(t testing.TB, files fs.FS, record func(*OpQueue)) *harness {
 	t.Helper()
 	var reported []error
-	return newHarnessOver(t, files, func(q *scene.OpQueue, _ *gfx.OpQueue) { record(q) }, &reported)
+	return newHarnessOver(t, files, func(q *OpQueue, _ *gfx.OpQueue) { record(q) }, &reported)
 }
 
-func newHarnessRecording(t testing.TB, record func(*scene.OpQueue, *gfx.OpQueue), reported *[]error) *harness {
+func newHarnessRecording(t testing.TB, record func(*OpQueue, *gfx.OpQueue), reported *[]error) *harness {
 	return newHarnessOver(t, fstest.MapFS{}, record, reported)
 }
 
 func newHarnessOver(
 	t testing.TB, files fs.FS,
-	record func(*scene.OpQueue, *gfx.OpQueue), reported *[]error,
+	record func(*OpQueue, *gfx.OpQueue), reported *[]error,
 ) *harness {
 	t.Helper()
 	backend := &testBackend{}
@@ -556,20 +555,20 @@ func (h *harness) frameUntil(t testing.TB, what string, ready func() bool) {
 }
 
 // inspect runs fn inside a handler holding scene's OpQueue write lock.
-func (h *harness) inspect(fn func(*scene.OpQueue)) {
+func (h *harness) inspect(fn func(*OpQueue)) {
 	h.kernel.ExecuteCommand[inspectCmd](inspectRequest{run: fn})
 }
 
 // passes reads the flush result back out of scene's queue.
-func (h *harness) passes() []scene.PassView {
-	var out []scene.PassView
-	h.inspect(func(q *scene.OpQueue) { out = q.Passes(nil) })
+func (h *harness) passes() []PassView {
+	var out []PassView
+	h.inspect(func(q *OpQueue) { out = q.Passes(nil) })
 	return out
 }
 
-func (h *harness) ops() []scene.Op {
-	var out []scene.Op
-	h.inspect(func(q *scene.OpQueue) { out = q.Ops(nil) })
+func (h *harness) ops() []Op {
+	var out []Op
+	h.inspect(func(q *OpQueue) { out = q.Ops(nil) })
 	return out
 }
 
@@ -590,10 +589,10 @@ func (h *harness) readFile(t testing.TB, path string) []byte {
 
 // bundledMaterials wraps the bundled PBR's four forward materials as the scene
 // materials the flush interns them as.
-func bundledMaterials(defaults model.PbrDefaults) [model.VariantCount]scene.Material {
-	var wrapped [model.VariantCount]scene.Material
+func bundledMaterials(defaults model.PbrDefaults) [model.VariantCount]Material {
+	var wrapped [model.VariantCount]Material
 	for variant, descr := range model.BundledPbr(defaults) {
-		wrapped[variant] = scene.Material{{Tag: scene.TagForward, Descr: descr}}
+		wrapped[variant] = Material{{Tag: TagForward, Descr: descr}}
 	}
 	return wrapped
 }
@@ -640,7 +639,7 @@ func durableMeshes(lookup *model.Lookup) []model.MeshRecord {
 // it for a draw: the draw's own params first, then its paint, then its
 // material's forward params. ok is false when nothing names it, which gfx packs
 // as zero.
-func numberOf(draw types.DrawRecord, name string) (m.Vec4, bool) {
+func numberOf(draw DrawRecord, name string) (m.Vec4, bool) {
 	value := func(p gfx.ParameterDescr) m.Vec4 {
 		if c, ok := p.ColorValue(); ok {
 			return m.Vec4{X: c.R, Y: c.G, Z: c.B, W: c.A}
@@ -659,7 +658,7 @@ func numberOf(draw types.DrawRecord, name string) (m.Vec4, bool) {
 		}
 	}
 	for _, tag := range draw.Material {
-		if tag.Tag != scene.TagForward {
+		if tag.Tag != TagForward {
 			continue
 		}
 		for _, p := range tag.Descr.Params() {
@@ -671,8 +670,8 @@ func numberOf(draw types.DrawRecord, name string) (m.Vec4, bool) {
 	return m.Vec4{}, false
 }
 
-func wrapsForward(material scene.Material, forward gfx.MaterialDescr) bool {
-	if len(material) != 1 || material[0].Tag != scene.TagForward {
+func wrapsForward(material Material, forward gfx.MaterialDescr) bool {
+	if len(material) != 1 || material[0].Tag != TagForward {
 		return false
 	}
 	got, want := material[0].Descr.Params(), forward.Params()

@@ -7,8 +7,8 @@ import (
 )
 
 // The glTF document builders the model tests share. They are copies of the
-// ones internal/types' loader tests build with, because Go shares no test file
-// between two packages.
+// ones model's loader tests build with, because Go shares no test file between
+// two packages.
 
 // testDoc is an empty document with the one buffer the modeler writers append
 // into. Tests build documents rather than reading files, because the vendored

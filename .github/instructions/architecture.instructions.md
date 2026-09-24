@@ -31,11 +31,11 @@ plugins: an Extension and a Bundle.
 
 A plugin `X` is four places, and nothing else under `X` may hold Go code.
 
-**Two root shapes coexist while ADR 0003's migration runs.** A plugin listed in
-`kernel/archtest`'s `aliasIndexRoots` — ecsaudio, ecsscene, ecsphysics2d so far
-— has an **alias-index root**; every other plugin still has ADR 0002's
-declaration root, described after it. Every new plugin, and every plugin a
-change moves, takes the alias-index shape.
+**Every plugin has an alias-index root (ADR 0003) but mcp**, which still has
+ADR 0002's declaration root, described after it, until its capability builders
+find a home that keeps the MCP SDK out of the plugins that declare tools.
+`kernel/archtest`'s `aliasIndexRoots` lists the moved plugins. Every new
+plugin takes the alias-index shape.
 
 **The alias-index shape (ADR 0003):**
 
@@ -56,12 +56,16 @@ change moves, takes the alias-index shape.
   with exported fields, enums, consts and errors — no function, and no method
   but `Error` and `String`. Keep one when a plugin has plenty of such data
   another package of its own needs apart from the logic; otherwise there is
-  none, as in ecsphysics2d and ecsscene. Logic, and any type with methods, is
+  none, as in every moved plugin today. Logic, and any type with methods, is
   declared in `internal/`. It never imports its own root either.
+- **A test that composes plugins depending on this one** cannot be a test of
+  `internal/` itself: their roots import this root, which imports `internal/`.
+  It is an external test, `package internal_test`, beside the others, reaching
+  what it needs through an `export_test.go` (app's `pairing_test.go`).
 - An alias exposes every exported method of the type it names, so a method on
   a type the root aliases is public API.
 
-**The declaration shape (ADR 0002), for plugins not yet moved:**
+**The declaration shape (ADR 0002), mcp's alone:**
 
 - **The root, `X/`**, holds declarations only: what the plugin offers others.
 - **`X/internal/types/`** holds the concrete types the root aliases, their

@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/dvoyni/cog/slots/sound"
 )
 
 // A long Clip, so nothing in these tests ends by running out: the only thing
@@ -13,20 +12,20 @@ func longClip() fakeClip { return fakeClip{duration: 60, channels: 2, rate: 4800
 
 // footstep and music are the two things every stealing rule is stated about.
 // Priority is the band, and the numbers below it are what the band beats.
-func footstep(volume float32) sound.Params {
-	return sound.Params{Volume: m.Some(volume), Priority: m.Some(0)}
+func footstep(volume float32) Params {
+	return Params{Volume: m.Some(volume), Priority: m.Some(0)}
 }
 
-func track(volume float32) sound.Params {
-	return sound.Params{Volume: m.Some(volume), Priority: m.Some(1)}
+func track(volume float32) Params {
+	return Params{Volume: m.Some(volume), Priority: m.Some(1)}
 }
 
 // drainEndings takes exactly n endings, or fails. Every ending a flush collects
 // is published after the batch has been handed over, so a test that expects
 // several waits for all of them before it asserts about any.
-func (h *harness) drainEndings(n int) map[sound.Voice]sound.Reason {
+func (h *harness) drainEndings(n int) map[Voice]Reason {
 	h.t.Helper()
-	drained := make(map[sound.Voice]sound.Reason, n)
+	drained := make(map[Voice]Reason, n)
 	for range n {
 		event := h.waitEnded()
 		drained[event.Voice] = event.Reason
@@ -44,14 +43,14 @@ func (h *harness) drainEndings(n int) map[sound.Voice]sound.Reason {
 // and the seven plays after them find only the music left, which they cannot
 // take. Every one of the ten is answered in the flush that recorded it.
 func TestACrowdOfFootstepsCostsTheCapAndTheMusicSurvives(t *testing.T) {
-	h := newHarness(t, newFakeBackend(longClip()), sound.Config{}.WithMaxVoices(4), clipBytes)
+	h := newHarness(t, newFakeBackend(longClip()), Config{}.WithMaxVoices(4), clipBytes)
 
-	var music sound.Voice
-	var old [3]sound.Voice
-	h.record(func(queue *sound.Queue) {
-		music = queue.Play(sound.ClipWithResource(bell), 0, track(0.5))
+	var music Voice
+	var old [3]Voice
+	h.record(func(queue *Queue) {
+		music = queue.Play(ClipWithResource(bell), 0, track(0.5))
 		for i := range old {
-			old[i] = queue.Play(sound.ClipWithResource(bell), 0, footstep(1))
+			old[i] = queue.Play(ClipWithResource(bell), 0, footstep(1))
 		}
 	})
 	h.tick()
@@ -59,10 +58,10 @@ func TestACrowdOfFootstepsCostsTheCapAndTheMusicSurvives(t *testing.T) {
 		t.Fatalf("the table holds %d voices before the crowd, want the four it was given", got.Live)
 	}
 
-	crowd := make([]sound.Voice, 10)
-	h.record(func(queue *sound.Queue) {
+	crowd := make([]Voice, 10)
+	h.record(func(queue *Queue) {
 		for i := range crowd {
-			crowd[i] = queue.Play(sound.ClipWithResource(bell), 0, footstep(1))
+			crowd[i] = queue.Play(ClipWithResource(bell), 0, footstep(1))
 		}
 	})
 	h.tick()
@@ -74,7 +73,7 @@ func TestACrowdOfFootstepsCostsTheCapAndTheMusicSurvives(t *testing.T) {
 		t.Fatalf("the table holds %d voices after the crowd, want the cap of four", got.Live)
 	}
 	for _, voice := range old {
-		if ended[voice] != sound.ReasonStolen {
+		if ended[voice] != ReasonStolen {
 			t.Fatalf("the footstep %v ended as %v, want stolen", voice, ended[voice])
 		}
 	}
@@ -82,7 +81,7 @@ func TestACrowdOfFootstepsCostsTheCapAndTheMusicSurvives(t *testing.T) {
 	for _, voice := range crowd {
 		switch reason, found := ended[voice]; {
 		case !found:
-		case reason != sound.ReasonStolen:
+		case reason != ReasonStolen:
 			t.Fatalf("the incoming play %v ended as %v, want stolen", voice, reason)
 		default:
 			lost++
@@ -99,18 +98,18 @@ func TestACrowdOfFootstepsCostsTheCapAndTheMusicSurvives(t *testing.T) {
 // whatever order the table happened to be walked in, this is the test that goes
 // flaky on a schedule nobody controls.
 func TestATieOnBothTermsBreaksByAgeOldestFirst(t *testing.T) {
-	h := newHarness(t, newFakeBackend(longClip()), sound.Config{}.WithMaxVoices(3), clipBytes)
+	h := newHarness(t, newFakeBackend(longClip()), Config{}.WithMaxVoices(3), clipBytes)
 
 	// One position, one Clip, one set of Params: the two footsteps differ in
 	// nothing a rank can read except when they started.
 	same := footstep(1)
 	same.Position = m.Some(m.Vec3{X: 3})
 
-	var music, older, younger sound.Voice
-	h.record(func(queue *sound.Queue) {
-		music = queue.Play(sound.ClipWithResource(bell), 0, track(1))
-		older = queue.Play(sound.ClipWithResource(bell), 0, same)
-		younger = queue.Play(sound.ClipWithResource(bell), 0, same)
+	var music, older, younger Voice
+	h.record(func(queue *Queue) {
+		music = queue.Play(ClipWithResource(bell), 0, track(1))
+		older = queue.Play(ClipWithResource(bell), 0, same)
+		younger = queue.Play(ClipWithResource(bell), 0, same)
 	})
 	h.tick()
 
@@ -123,11 +122,11 @@ func TestATieOnBothTermsBreaksByAgeOldestFirst(t *testing.T) {
 			first.Info.Audibility, second.Info.Audibility)
 	}
 
-	h.record(func(queue *sound.Queue) { queue.Play(sound.ClipWithResource(bell), 0, same) })
+	h.record(func(queue *Queue) { queue.Play(ClipWithResource(bell), 0, same) })
 	h.tick()
 
 	ended := h.waitEnded()
-	if ended.Voice != older || ended.Reason != sound.ReasonStolen {
+	if ended.Voice != older || ended.Reason != ReasonStolen {
 		t.Fatalf("the tie ended %v/%v, want the older footstep %v stolen", ended.Voice, ended.Reason, older)
 	}
 	if got := h.probe(younger); !got.Found {
@@ -142,19 +141,19 @@ func TestATieOnBothTermsBreaksByAgeOldestFirst(t *testing.T) {
 // the table by two orders of magnitude and is still not the Voice that loses:
 // the loud footstep beside it is, because it is a band below.
 func TestPriorityIsABandAndNotAWeight(t *testing.T) {
-	h := newHarness(t, newFakeBackend(longClip()), sound.Config{}.WithMaxVoices(2), clipBytes)
+	h := newHarness(t, newFakeBackend(longClip()), Config{}.WithMaxVoices(2), clipBytes)
 
-	var music, loud sound.Voice
-	h.record(func(queue *sound.Queue) {
-		music = queue.Play(sound.ClipWithResource(bell), 0, track(0.01))
-		loud = queue.Play(sound.ClipWithResource(bell), 0, footstep(1))
+	var music, loud Voice
+	h.record(func(queue *Queue) {
+		music = queue.Play(ClipWithResource(bell), 0, track(0.01))
+		loud = queue.Play(ClipWithResource(bell), 0, footstep(1))
 	})
 	h.tick()
 
-	h.record(func(queue *sound.Queue) { queue.Play(sound.ClipWithResource(bell), 0, footstep(1)) })
+	h.record(func(queue *Queue) { queue.Play(ClipWithResource(bell), 0, footstep(1)) })
 	h.tick()
 
-	if ended := h.waitEnded(); ended.Voice != loud || ended.Reason != sound.ReasonStolen {
+	if ended := h.waitEnded(); ended.Voice != loud || ended.Reason != ReasonStolen {
 		t.Fatalf("ended %v/%v, want the loud footstep %v stolen", ended.Voice, ended.Reason, loud)
 	}
 	got := h.probe(music)
@@ -171,27 +170,27 @@ func TestPriorityIsABandAndNotAWeight(t *testing.T) {
 // Ranking it at zero would make "pause the music for a cutscene" a reliable way
 // to lose the music; ranking it first would make pausing a shield.
 func TestAPausedVoiceRanksAtTheAudibilityItWouldHave(t *testing.T) {
-	h := newHarness(t, newFakeBackend(longClip()), sound.Config{}.WithMaxVoices(2), clipBytes)
+	h := newHarness(t, newFakeBackend(longClip()), Config{}.WithMaxVoices(2), clipBytes)
 
-	var loud, quiet sound.Voice
-	h.record(func(queue *sound.Queue) {
-		loud = queue.Play(sound.ClipWithResource(bell), 0, footstep(1))
-		quiet = queue.Play(sound.ClipWithResource(bell), 0, footstep(0.2))
+	var loud, quiet Voice
+	h.record(func(queue *Queue) {
+		loud = queue.Play(ClipWithResource(bell), 0, footstep(1))
+		quiet = queue.Play(ClipWithResource(bell), 0, footstep(0.2))
 	})
 	h.tick()
 
-	h.record(func(queue *sound.Queue) {
-		queue.SetVoice(loud, sound.Params{Paused: m.Some(true)})
+	h.record(func(queue *Queue) {
+		queue.SetVoice(loud, Params{Paused: m.Some(true)})
 	})
 	h.tick()
 	if got := h.probe(loud); !got.Info.Paused {
 		t.Fatal("the Voice the test paused is not paused")
 	}
 
-	h.record(func(queue *sound.Queue) { queue.Play(sound.ClipWithResource(bell), 0, footstep(0.5)) })
+	h.record(func(queue *Queue) { queue.Play(ClipWithResource(bell), 0, footstep(0.5)) })
 	h.tick()
 
-	if ended := h.waitEnded(); ended.Voice != quiet || ended.Reason != sound.ReasonStolen {
+	if ended := h.waitEnded(); ended.Voice != quiet || ended.Reason != ReasonStolen {
 		t.Fatalf("ended %v/%v, want the quiet Voice %v stolen rather than the paused one",
 			ended.Voice, ended.Reason, quiet)
 	}
@@ -206,18 +205,18 @@ func TestAPausedVoiceRanksAtTheAudibilityItWouldHave(t *testing.T) {
 func TestAVoiceWaitingOnItsClipOccupiesASlot(t *testing.T) {
 	backend := newFakeBackend(longClip())
 	backend.deferring = true
-	h := newHarness(t, backend, sound.Config{}.WithMaxVoices(1), clipBytes)
+	h := newHarness(t, backend, Config{}.WithMaxVoices(1), clipBytes)
 
-	waiting := h.play(sound.ClipWithResource(bell), 0, track(1))
+	waiting := h.play(ClipWithResource(bell), 0, track(1))
 	h.tick()
 	if got := h.probe(waiting); !got.Found || got.Live != 1 || got.Info.Duration != 0 {
 		t.Fatalf("a Voice waiting on its Clip reads %+v, want one live Voice with no duration yet", got.Info)
 	}
 
-	late := h.play(sound.ClipWithResource(bell), 0, footstep(1))
+	late := h.play(ClipWithResource(bell), 0, footstep(1))
 	h.tick()
 
-	if ended := h.waitEnded(); ended.Voice != late || ended.Reason != sound.ReasonStolen {
+	if ended := h.waitEnded(); ended.Voice != late || ended.Reason != ReasonStolen {
 		t.Fatalf("ended %v/%v, want the incoming play %v stolen", ended.Voice, ended.Reason, late)
 	}
 	if got := h.probe(waiting); !got.Found || got.Live != 1 {
@@ -230,27 +229,27 @@ func TestAVoiceWaitingOnItsClipOccupiesASlot(t *testing.T) {
 // becomes important after it started, and the band it moves into is the band it
 // is ranked in from the next tick on.
 func TestPriorityIsRestatedByTheSameOrderedListEveryOtherParamIs(t *testing.T) {
-	h := newHarness(t, newFakeBackend(longClip()), sound.Config{}.WithMaxVoices(2), clipBytes)
+	h := newHarness(t, newFakeBackend(longClip()), Config{}.WithMaxVoices(2), clipBytes)
 
-	var promoted, ordinary sound.Voice
-	h.record(func(queue *sound.Queue) {
-		promoted = queue.Play(sound.ClipWithResource(bell), 0, footstep(1))
-		ordinary = queue.Play(sound.ClipWithResource(bell), 0, footstep(1))
+	var promoted, ordinary Voice
+	h.record(func(queue *Queue) {
+		promoted = queue.Play(ClipWithResource(bell), 0, footstep(1))
+		ordinary = queue.Play(ClipWithResource(bell), 0, footstep(1))
 	})
 	h.tick()
 
-	h.record(func(queue *sound.Queue) {
-		queue.SetVoice(promoted, sound.Params{Priority: m.Some(1)})
+	h.record(func(queue *Queue) {
+		queue.SetVoice(promoted, Params{Priority: m.Some(1)})
 	})
 	h.tick()
 	if got, _ := h.probe(promoted).Info.Params.Priority.Get(); got != 1 {
 		t.Fatalf("the view reports priority %d after the SetVoice, want 1", got)
 	}
 
-	h.record(func(queue *sound.Queue) { queue.Play(sound.ClipWithResource(bell), 0, footstep(1)) })
+	h.record(func(queue *Queue) { queue.Play(ClipWithResource(bell), 0, footstep(1)) })
 	h.tick()
 
-	if ended := h.waitEnded(); ended.Voice != ordinary || ended.Reason != sound.ReasonStolen {
+	if ended := h.waitEnded(); ended.Voice != ordinary || ended.Reason != ReasonStolen {
 		t.Fatalf("ended %v/%v, want the Voice still in the lower band %v stolen",
 			ended.Voice, ended.Reason, ordinary)
 	}
@@ -264,18 +263,18 @@ func TestPriorityIsRestatedByTheSameOrderedListEveryOtherParamIs(t *testing.T) {
 // crosses the seam at all - VoiceParams is a gain matrix, a rate and a paused
 // flag, and there is nowhere for a band to be written down.
 func TestAStolenVoiceReachesTheAdapterAsAnOrdinaryStop(t *testing.T) {
-	h := newHarness(t, newFakeBackend(longClip()), sound.Config{}.WithMaxVoices(1), clipBytes)
+	h := newHarness(t, newFakeBackend(longClip()), Config{}.WithMaxVoices(1), clipBytes)
 
-	stolen := h.play(sound.ClipWithResource(bell), 0, footstep(1))
+	stolen := h.play(ClipWithResource(bell), 0, footstep(1))
 	h.tick()
 	if got := h.backend.emitted()[0]; len(got.Starts) != 1 || got.Starts[0].Slot != 0 {
 		t.Fatalf("the first tick emitted %+v, want one start on slot 0", got.Starts)
 	}
 
-	thief := h.play(sound.ClipWithResource(bell), 0, track(1))
+	thief := h.play(ClipWithResource(bell), 0, track(1))
 	h.tick()
 
-	if ended := h.waitEnded(); ended.Voice != stolen || ended.Reason != sound.ReasonStolen {
+	if ended := h.waitEnded(); ended.Voice != stolen || ended.Reason != ReasonStolen {
 		t.Fatalf("ended %v/%v, want %v stolen", ended.Voice, ended.Reason, stolen)
 	}
 	batch := h.backend.emitted()[1]

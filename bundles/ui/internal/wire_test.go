@@ -8,8 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/dvoyni/cog/bundles/ui"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files from what the code produces")
@@ -22,30 +20,30 @@ var update = flag.Bool("update", false, "rewrite the golden files from what the 
 
 // aDeclaringTree is a grid whose children declare every length, weight, layer
 // and count a DeclaredView can carry, pixel and relative both.
-func aDeclaringTree(frame *ui.Frame) {
-	frame.Add(10, ui.NewElement().
+func aDeclaringTree(frame *Frame) {
+	frame.Add(10, NewElement().
 		ID("grid").
 		Width(300).Height(200).
 		MinWidth(10).MaxHeightRel(0.9).
 		Padding(4, 6).
-		Layout(ui.LayoutGrid).Columns(2).Rows(2).GapRel(0.1).
+		Layout(LayoutGrid).Columns(2).Rows(2).GapRel(0.1).
 		Children(
-			ui.NewElement().
+			NewElement().
 				ID("pinned").
 				Left(5).RightRel(0.1).Top(3).BottomRel(0.2).
 				PivotLeft(1).PivotTopRel(0.5).
 				Stretch(2).Shrink(0).
-				Layer(2).Align(ui.AlignEnd).
+				Layer(2).Align(AlignEnd).
 				Visual(&snapshotTestVisual{}, nil),
-			ui.NewElement().
+			NewElement().
 				ID("flex").
-				Layout(ui.LayoutHorizontal).Wrap().Gap(2).
-				ChildrenArrangement(ui.ArrangeSpaceBetween).
+				Layout(LayoutHorizontal).Wrap().Gap(2).
+				ChildrenArrangement(ArrangeSpaceBetween).
 				Children(
-					ui.NewElement().Width(0).Shrink(1),
-					ui.NewElement().HeightRel(0.5),
+					NewElement().Width(0).Shrink(1),
+					NewElement().HeightRel(0.5),
 				),
-			ui.NewElement().IgnoreLayout().Height(0),
+			NewElement().IgnoreLayout().Height(0),
 		))
 }
 

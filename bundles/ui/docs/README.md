@@ -10,10 +10,12 @@ publishes interaction results, and consumes the declaration.
 ui is a **Bundle**: it requires no Adapter and contributes one `McpProvider`.
 The vocabulary is in [`CONTEXT.md`](../../../CONTEXT.md) and the decision in
 [ADR 0002](../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
-ui has the declaration-root shape of
-[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
+ui has the alias-index root of
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md)
+and [ADR 0003](../../../docs/adr/0003-roots-are-alias-indexes.md).
 
-- **`bundles/ui`** is the root, and holds declarations only: the `*Frame` and
+- **`bundles/ui`** is the root, and declares nothing: it aliases what
+  `internal/` declares — the `*Frame` and
   `*Interactions` resources, `Interaction` and its kinds, the whole Element and
   Modifier vocabulary (`Element`, `State`, `VisualState`, `Visual`,
   `ParamVisual`, `Layout`, `Alignment`, `Arrangement`, `ID`), the built-in
@@ -23,24 +25,24 @@ ui has the declaration-root shape of
   the containers (`Horizontal`, `Vertical`, `Grid`, `Overlay`, `WithFloating`,
   `Spacer`), `Button` and the built-in visuals (`Image`, `Label`, `ColorPanel`,
   the nine-slices and the interactive variants) — are forwarders in `utils.go`.
-  It declares no plugin, and it is what every other package imports.
-- **`bundles/ui/internal/types`** declares the Element vocabulary with every
-  Modifier, the containers and built-in visuals, `Frame` and its consume side,
-  `Interactions`, `HoverTracker`, the layout engine that both `Measure` and the
-  plugin run, and the rendering of a resolved tree into the snapshot views. The
-  root aliases what it exposes.
-- **`bundles/ui/internal`** is the plugin: its `New`, the processing behind
-  `ProcessOnUpdate`, the private layout resource it keeps across ticks, the
-  layout-snapshot slot behind `ArmLayoutCmd` and its two subscriptions, and the
-  mcp Provider. ui has no configuration, so there is no `Config`.
+  It holds no plugin, and it is what every other package imports.
+- **`bundles/ui/internal`** is the plugin, and declares everything the root
+  aliases: the Element vocabulary with every Modifier, the containers and
+  built-in visuals, `Frame` and its consume side, `Interactions`,
+  `HoverTracker`, the layout engine that both `Measure` and the plugin run, and
+  the rendering of a resolved tree into the snapshot views. Beside them are its
+  `New`, the processing behind `ProcessOnUpdate`, the private layout resource
+  it keeps across ticks, the layout-snapshot slot behind `ArmLayoutCmd` and its
+  two subscriptions, and the mcp Provider. It never imports the root. ui has no
+  configuration, so there is no `Config`.
 - **`bundles/ui/uiplugin`** exports only `New() kernel.Plugin`. Only
   composition roots and tests import it.
 
-The aliased types stay concrete types (`type Element = types.Element`), and
+The aliased types stay concrete types (`type Element = internal.Element`), and
 their exported methods (`Element.Width`, `Frame.Add`, `Interactions.Has`, …)
 are public API through the alias. What the plugin needs beyond that goes
-through plain functions `internal/types` exports, which nothing outside
-`bundles/ui` can call. `internal/types` never imports the root.
+through the friend functions in `internal/friends.go`, which nothing outside
+`bundles/ui` can call.
 
 ## Package Model
 

@@ -1,6 +1,6 @@
 package ecs
 
-import "github.com/dvoyni/cog/bundles/ecs/internal/types"
+import "github.com/dvoyni/cog/bundles/ecs/internal"
 
 // Entities is the id authority: it allocates indices, tracks their generations,
 // answers whether a handle is alive, and holds a reference to every Store so a
@@ -13,7 +13,7 @@ import "github.com/dvoyni/cog/bundles/ecs/internal/types"
 // reach: the authority to change which entities exist arrives through the
 // write-locked promotions of this value — Spawn and WriteableEntities — and
 // nowhere else. Alive is the one question it answers a reader.
-type Entities = types.Entities
+type Entities = internal.Entities
 
 // Store is the holding of every value of one Component type, one per registered
 // type, and the unit a lock is taken on. RegisterComponent creates it and hands
@@ -25,4 +25,4 @@ type Entities = types.Entities
 // makes a kernel write handle's Get return a copy, so mutations through it are
 // silently discarded. A System reaches a Store through a Query or an accessor,
 // never through Read or Write.
-type Store[T any] = types.Store[T]
+type Store[T any] = internal.Store[T]

@@ -52,17 +52,18 @@ vocabulary is in [`CONTEXT.md`](../../../CONTEXT.md) and the decision in
 
 ## Packages
 
-scene has the declaration-root shape of
-[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
+scene has the alias-index root of
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md)
+and [ADR 0003](../../../docs/adr/0003-roots-are-alias-indexes.md).
 
-- **`bundles/scene`** is the root, and holds the renderer's declarations only:
-  the `*OpQueue` resource, the recording vocabulary (`CameraID`, `CameraDescr`,
+- **`bundles/scene`** is the root, and declares nothing: it aliases what
+  `internal/` declares for the renderer — the `*OpQueue` resource, the recording vocabulary (`CameraID`, `CameraDescr`,
   `ProjectionKind`, `Pass`, `PassTag`, `LayerMask`, `Material`, `MaterialTag`,
   `MeshDraw`, `ModelDraw`, …), the inspection views (`Op`, `PassView`,
   `BatchView`), the renderer's `Err*` types, `Name` and the ordering identity
   `FlushOnUpdate`. Its functions — `Layer` and the coordinate helpers
   (`ViewProjection`, `WorldToScreen`, `ScreenToWorld`, `ScreenToRay`) — are
-  forwarders in `utils.go`. It declares no plugin, and it is what every other
+  forwarders in `utils.go`. It holds no plugin, and it is what every other
   package imports.
 - **`bundles/model`** is not scene's, but a recorder imports it beside scene.
   Everything a model file can contain is named from there and aliased nowhere:
@@ -71,30 +72,28 @@ scene has the declaration-root shape of
   `model.LightDescr`, the query types (`model.ModelRef`, `model.ModelLight`,
   `model.ClipInfo`), `model.VertexDecodePath`, `model.Config`, and the
   `ErrModel…`, `ErrMesh…` and spot-light reports.
-- **`bundles/scene/internal/types`** declares `OpQueue` with its recording
-  methods and the consume side the flush reads, the recording vocabulary, the
-  frame-local temporary mesh, and the camera maths the flush and the coordinate
-  helpers share. The Lookup with its two scoped facades, the model cache and the
-  unloads, the mesh table and its deferred bakes, the glTF conversion and the
-  animation and morph bakes behind them, the vertex packing, `Config` and the
-  bundled PBR material are model's, in `bundles/model`, and are named here
-  from model's root. The parse command the Lookup enqueues, `LoadModelCmd`, is
-  declared here too; the plugin handles it. The root aliases what it exposes.
-- **`bundles/scene/internal`** is the plugin: its `New`, the flush that expands model draws, selects lights, culls,
-  sorts, interns materials and packs instances into gfx passes and draws, the
+- **`bundles/scene/internal`** is the plugin, and declares everything the root
+  aliases: `OpQueue` with its recording methods and the consume side the flush
+  reads, the recording vocabulary, the frame-local temporary mesh, and the
+  camera maths the flush and the coordinate helpers share. Beside them are its
+  `New`, the flush that expands model draws, selects lights, culls, sorts,
+  interns materials and packs instances into gfx passes and draws, the
   frame-build state all of that keeps across frames, and the handlers of the
-  two-hop model load. The bundled shader's sources are model's, embedded under
+  two-hop model load. It never imports the root. The Lookup with its two scoped
+  facades, the model cache and the unloads, the mesh table and its deferred
+  bakes, the glTF conversion and the animation and morph bakes behind them, the
+  vertex packing, `Config` and the bundled PBR material are model's, in
+  `bundles/model`, and are named here from model's root. The bundled shader's sources are model's, embedded under
   `bundles/model/internal/builtin/scene/` and mounted by the model plugin.
 - **`bundles/scene/sceneplugin`** exports only `New() kernel.Plugin`. Only
   composition roots and tests import it.
 
-The aliased types stay concrete types (`type OpQueue = types.OpQueue`):
+The aliased types stay concrete types (`type OpQueue = internal.OpQueue`):
 recording a draw is a direct method call, with no interface anywhere on the
 per-instance path, and their exported methods (`OpQueue.Model`,
 `OpQueue.Passes`, …) are public API through the alias. What the plugin
-needs beyond that goes through plain functions `internal/types` exports, which
-nothing outside `bundles/scene` can call. `internal/types` never imports the
-root.
+needs beyond that goes through the friend functions in `internal/friends.go`,
+which nothing outside `bundles/scene` can call.
 
 ## Plugin
 
@@ -793,7 +792,7 @@ latter because a model draw loads the file it names — and writes `gfx.OpQueue`
 and `gfx.ResourceQueue`. It is ordered `Last()` but explicitly before
 `gfx.PresentOnUpdate`, exactly as canvas is: gameplay records first, canvas
 and scene emit graphics draws second, gfx presents last. The identity is
-declared in the root so a recorder can order itself
+aliased in the root so a recorder can order itself
 `Before[scene.FlushOnUpdate]()` importing the root and nothing else.
 
 **Everything scene decides happens in that flush, on the update thread** —

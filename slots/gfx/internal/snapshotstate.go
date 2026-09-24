@@ -7,8 +7,6 @@ import (
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
-	"github.com/dvoyni/cog/slots/gfx"
-	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
 // frameOnUpdate is the subscription type of the plugin's
@@ -27,7 +25,7 @@ type frameOnUpdate kernel.Subscription[app.UpdateEvent]
 // and where its result goes.
 type snapshotRequest struct {
 	pass string
-	done chan gfx.FrameSnapshot
+	done chan FrameSnapshot
 }
 
 // snapshotState is gfx's one frame-snapshot slot. A request moves through two
@@ -55,13 +53,13 @@ type snapshotState struct {
 // snapshot of this kind is refused; a capture and the other packages'
 // snapshots are separate slots and may be in flight alongside it, which is
 // what makes arming them together describe one tick.
-func (s *snapshotState) arm(request gfx.ArmFrameRequest) (*snapshotRequest, error) {
+func (s *snapshotState) arm(request ArmFrameRequest) (*snapshotRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.request != nil {
-		return nil, gfx.ErrFrameBusy{}
+		return nil, ErrFrameBusy{}
 	}
-	live := &snapshotRequest{pass: request.Pass, done: make(chan gfx.FrameSnapshot, 1)}
+	live := &snapshotRequest{pass: request.Pass, done: make(chan FrameSnapshot, 1)}
 	s.request, s.pending, s.armed = live, true, false
 	return live, nil
 }
@@ -86,7 +84,7 @@ func (s *snapshotState) beginTick() {
 // The build happens under the slot's own lock. It is bounded by the filter and
 // does no I/O; the marshalling and the disk write happen on the caller's
 // goroutine, never here.
-func (s *snapshotState) record(queue *gfx.OpQueue, resources *gfx.ResourceQueue, tick int64) {
+func (s *snapshotState) record(queue *OpQueue, resources *ResourceQueue, tick int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.request == nil || !s.armed {
@@ -97,7 +95,7 @@ func (s *snapshotState) record(queue *gfx.OpQueue, resources *gfx.ResourceQueue,
 	// The channel is buffered to one and holds this slot's only send, so a
 	// full one means the waiter has gone and the value is simply collected.
 	select {
-	case request.done <- gfx.FrameSnapshot{
+	case request.done <- FrameSnapshot{
 		Frame: frameViewOf(queue, resources, request.pass), Tick: tick,
 	}:
 	default:
@@ -117,7 +115,7 @@ func (s *snapshotState) abandon() {
 	request := s.request
 	s.clear()
 	select {
-	case request.done <- gfx.FrameSnapshot{Err: gfx.ErrFrameAbandoned{}}:
+	case request.done <- FrameSnapshot{Err: ErrFrameAbandoned{}}:
 	default:
 	}
 }
@@ -130,20 +128,20 @@ func (s *snapshotState) clear() {
 // frameViewOf renders one tick's queues. The pass order it walks is the
 // translator's own - Order first, declaration sequence breaking ties - so what
 // an agent reads as run order is the order the GPU sees.
-func frameViewOf(queue *gfx.OpQueue, resources *gfx.ResourceQueue, filter string) gfx.FrameView {
-	view := gfx.FrameView{Filter: filter, PassCount: len(types.OpQueuePasses(queue))}
+func frameViewOf(queue *OpQueue, resources *ResourceQueue, filter string) FrameView {
+	view := FrameView{Filter: filter, PassCount: len(OpQueuePasses(queue))}
 
-	draws := make([]int, len(types.OpQueuePasses(queue)))
-	instances := make([]int, len(types.OpQueuePasses(queue)))
-	for i := range types.OpQueueOps(queue) {
-		op := &types.OpQueueOps(queue)[i]
-		if op.Kind != types.OpDraw {
+	draws := make([]int, len(OpQueuePasses(queue)))
+	instances := make([]int, len(OpQueuePasses(queue)))
+	for i := range OpQueueOps(queue) {
+		op := &OpQueueOps(queue)[i]
+		if op.Kind != OpDraw {
 			continue
 		}
 		view.DrawCount++
 		view.InstanceCount += op.Instances
 		pass := int(op.Pass)
-		if pass < 0 || pass >= len(types.OpQueuePasses(queue)) {
+		if pass < 0 || pass >= len(OpQueuePasses(queue)) {
 			view.StrayDraws++
 			continue
 		}
@@ -151,15 +149,15 @@ func frameViewOf(queue *gfx.OpQueue, resources *gfx.ResourceQueue, filter string
 		instances[pass] += op.Instances
 	}
 
-	order := make([]int, len(types.OpQueuePasses(queue)))
+	order := make([]int, len(OpQueuePasses(queue)))
 	for i := range order {
 		order[i] = i
 	}
 	slices.SortStableFunc(order, func(a, b int) int {
-		return cmp.Compare(types.OpQueuePasses(queue)[a].Desc.Order, types.OpQueuePasses(queue)[b].Desc.Order)
+		return cmp.Compare(OpQueuePasses(queue)[a].Desc.Order, OpQueuePasses(queue)[b].Desc.Order)
 	})
 	for run, index := range order {
-		desc := types.OpQueuePasses(queue)[index].Desc
+		desc := OpQueuePasses(queue)[index].Desc
 		if filter != "" && desc.Label != filter {
 			view.OmittedPasses++
 			continue
@@ -167,35 +165,35 @@ func frameViewOf(queue *gfx.OpQueue, resources *gfx.ResourceQueue, filter string
 		view.Passes = append(view.Passes, passViewOf(index, run, desc, draws[index], instances[index]))
 	}
 
-	view.ResourceOps = appendResourceOpViews(view.ResourceOps, "durable", types.ResourceQueueOps(resources))
-	view.ResourceOps = appendResourceOpViews(view.ResourceOps, "frame", types.OpQueueOps(queue))
+	view.ResourceOps = appendResourceOpViews(view.ResourceOps, "durable", ResourceQueueOps(resources))
+	view.ResourceOps = appendResourceOpViews(view.ResourceOps, "frame", OpQueueOps(queue))
 	return view
 }
 
 // passViewOf renders one declared pass, at its declaration index and its
 // position in run order.
-func passViewOf(index, run int, desc gfx.PassDescr, draws, instances int) gfx.PassView {
-	view := gfx.PassView{
+func passViewOf(index, run int, desc PassDescr, draws, instances int) PassView {
+	view := PassView{
 		Index: index, Run: run, Label: desc.Label, Order: int(desc.Order),
-		Target:     targetKindName(types.TargetKindOf(&desc.Target)),
-		Depth:      depthKindName(types.DepthKindOf(&desc.Depth)),
+		Target:     targetKindName(TargetKindOf(&desc.Target)),
+		Depth:      depthKindName(DepthKindOf(&desc.Depth)),
 		Load:       desc.Load.Name(),
 		Store:      desc.Store.Name(),
 		DepthLoad:  desc.DepthLoad.Name(),
 		DepthClear: desc.DepthClear,
 		DepthStore: desc.DepthStore.Name(),
 		Draws:      draws, Instances: instances,
-		Runs: types.PassHasEffect(&desc, draws),
+		Runs: PassHasEffect(&desc, draws),
 	}
-	if types.TargetKindOf(&desc.Target) == types.TargetTexture {
-		view.TargetTexture = types.TargetTextureOf(&desc.Target)
+	if TargetKindOf(&desc.Target) == TargetTexture {
+		view.TargetTexture = TargetTextureOf(&desc.Target)
 		view.TargetWidth, view.TargetHeight, _ = desc.Target.Size()
-		view.TargetMip, view.TargetLayer = types.TargetMip(&desc.Target), types.TargetLayer(&desc.Target)
+		view.TargetMip, view.TargetLayer = TargetMip(&desc.Target), TargetLayer(&desc.Target)
 	}
 	if desc.Depth.IsTexture() {
-		view.DepthTexture = types.DepthTexture(&desc.Depth)
+		view.DepthTexture = DepthTexture(&desc.Depth)
 	}
-	if desc.Load == gfx.LoadClear {
+	if desc.Load == LoadClear {
 		view.Clear = []float32{desc.Clear.R, desc.Clear.G, desc.Clear.B, desc.Clear.A}
 	}
 	return view
@@ -204,9 +202,9 @@ func passViewOf(index, run int, desc gfx.PassDescr, draws, instances int) gfx.Pa
 // appendResourceOpViews renders one queue's resource operations, skipping its
 // draws. The index carried is the position in that queue, which is what an op
 // is addressed by.
-func appendResourceOpViews(dst []gfx.ResourceOpView, queue string, ops []types.Op) []gfx.ResourceOpView {
+func appendResourceOpViews(dst []ResourceOpView, queue string, ops []Op) []ResourceOpView {
 	for i := range ops {
-		if ops[i].Kind == types.OpDraw {
+		if ops[i].Kind == OpDraw {
 			continue
 		}
 		dst = append(dst, resourceOpViewOf(queue, i, &ops[i]))
@@ -218,75 +216,75 @@ func appendResourceOpViews(dst []gfx.ResourceOpView, queue string, ops []types.O
 // its kind gives meaning to. The op struct is one flat union shared by every
 // kind, so emitting all of it would put eight irrelevant zeroes beside each
 // answer.
-func resourceOpViewOf(queue string, index int, o *types.Op) gfx.ResourceOpView {
-	view := gfx.ResourceOpView{Queue: queue, Index: index, Kind: opKindName(o.Kind)}
+func resourceOpViewOf(queue string, index int, o *Op) ResourceOpView {
+	view := ResourceOpView{Queue: queue, Index: index, Kind: opKindName(o.Kind)}
 	switch o.Kind {
-	case types.OpBakeBuffer:
+	case OpBakeBuffer:
 		view.Buffer, view.BufferKind = o.BufferID, o.BufferKind.Name()
 		view.Size, view.Bytes = o.BufferSize, len(o.Bytes)
-	case types.OpReleaseBuffer:
+	case OpReleaseBuffer:
 		view.Buffer = o.BufferID
-	case types.OpBakeTexture:
+	case OpBakeTexture:
 		view.Texture, view.Width, view.Height = o.TextureID, o.TexW, o.TexH
 		view.Format, view.Mipmaps, view.Bytes = o.Format.Name(), o.Mipmaps, len(o.Bytes)
-	case types.OpReleaseTexture:
+	case OpReleaseTexture:
 		view.Texture = o.TextureID
-	case types.OpAllocateTexture:
+	case OpAllocateTexture:
 		view.Texture, view.Width, view.Height = o.TextureID, o.TexW, o.TexH
 		view.Layers, view.Format, view.Renderable = o.TexLayers, o.Format.Name(), o.Renderable
-	case types.OpUpdateTexture:
+	case OpUpdateTexture:
 		region := o.Region
 		view.Texture, view.Layer, view.Region, view.Bytes = o.TextureID, o.TexLayer, &region, len(o.Bytes)
-	case types.OpReleaseCachedResource:
+	case OpReleaseCachedResource:
 		view.Path = o.Path
 	}
 	return view
 }
 
-func opKindName(kind types.OpKind) string {
+func opKindName(kind OpKind) string {
 	switch kind {
-	case types.OpDraw:
+	case OpDraw:
 		return "draw"
-	case types.OpBakeBuffer:
+	case OpBakeBuffer:
 		return "bakeBuffer"
-	case types.OpReleaseBuffer:
+	case OpReleaseBuffer:
 		return "releaseBuffer"
-	case types.OpBakeTexture:
+	case OpBakeTexture:
 		return "bakeTexture"
-	case types.OpReleaseTexture:
+	case OpReleaseTexture:
 		return "releaseTexture"
-	case types.OpReleaseCachedResource:
+	case OpReleaseCachedResource:
 		return "releaseCachedResource"
-	case types.OpFreeCachedResources:
+	case OpFreeCachedResources:
 		return "freeCachedResources"
-	case types.OpAllocateTexture:
+	case OpAllocateTexture:
 		return "allocateTexture"
-	case types.OpUpdateTexture:
+	case OpUpdateTexture:
 		return "updateTexture"
 	}
-	return types.UnknownName(int(kind))
+	return UnknownName(int(kind))
 }
 
-func targetKindName(kind types.TargetKind) string {
+func targetKindName(kind TargetKind) string {
 	switch kind {
-	case types.TargetScreen:
+	case TargetScreen:
 		return "screen"
-	case types.TargetNone:
+	case TargetNone:
 		return "none"
-	case types.TargetTexture:
+	case TargetTexture:
 		return "texture"
 	}
-	return types.UnknownName(int(kind))
+	return UnknownName(int(kind))
 }
 
-func depthKindName(kind types.DepthKind) string {
+func depthKindName(kind DepthKind) string {
 	switch kind {
-	case types.DepthKindAuto:
+	case DepthKindAuto:
 		return "auto"
-	case types.DepthKindNone:
+	case DepthKindNone:
 		return "none"
-	case types.DepthKindTexture:
+	case DepthKindTexture:
 		return "texture"
 	}
-	return types.UnknownName(int(kind))
+	return UnknownName(int(kind))
 }

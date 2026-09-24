@@ -3,7 +3,6 @@
 package internal
 
 import (
-	"github.com/dvoyni/cog/extensions/jssound"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 	"github.com/dvoyni/cog/slots/sound"
@@ -29,7 +28,7 @@ type plugin struct{ backend *backend }
 func New() kernel.Plugin { return &plugin{} }
 
 // Name reports the plugin name.
-func (p *plugin) Name() kernel.PluginName { return jssound.Name }
+func (p *plugin) Name() kernel.PluginName { return Name }
 
 // Dependencies reports the plugins jssound requires; it has none. The Port it
 // fills binds at composition and adds no dependency in either direction, and
@@ -42,22 +41,22 @@ func (p *plugin) Dependencies() []kernel.PluginName { return nil }
 // the browser has not let resume yet is not a failure at all - it is the
 // ordinary first state of every web game.
 func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
-	cfg := jssound.Config{}
+	cfg := Config{}
 	if config != nil {
 		var ok bool
-		cfg, ok = config.(jssound.Config)
+		cfg, ok = config.(Config)
 		if !ok {
-			return jssound.ErrInvalidConfig{Got: config}
+			return ErrInvalidConfig{Got: config}
 		}
 	}
 	if cfg.LatencyHint < 0 {
-		return jssound.ErrInvalidLatencyHint{LatencyHint: cfg.LatencyHint}
+		return ErrInvalidLatencyHint{LatencyHint: cfg.LatencyHint}
 	}
 	if cfg.DecodedClipLimit < alwaysStream {
-		return jssound.ErrInvalidDecodedClipLimit{DecodedClipLimit: cfg.DecodedClipLimit}
+		return ErrInvalidDecodedClipLimit{DecodedClipLimit: cfg.DecodedClipLimit}
 	}
 	p.backend = newBackend(cfg)
-	registrar.ProvideAdapter[jssound.SoundBackend](sound.Backend(p.backend))
+	registrar.ProvideAdapter[SoundBackend](sound.Backend(p.backend))
 	registrar.Subscribe[reportOnUpdate](p.reportOnUpdate)
 	return nil
 }
@@ -87,7 +86,7 @@ func (p *plugin) Stop(kernel.Executioner) error {
 func (p *plugin) reportOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	return func(kernel.ResourceAccess) {}, func(k kernel.Kernel, _ app.UpdateEvent) {
 		if p.backend.failure != nil {
-			k.ReportErrorOnce(deviceUnavailableKey{}, jssound.ErrDeviceUnavailable{Err: p.backend.failure})
+			k.ReportErrorOnce(deviceUnavailableKey{}, ErrDeviceUnavailable{Err: p.backend.failure})
 		}
 		// Reported rather than reported-once: the queue is the dedupe, because
 		// a dropped region names a Clip and the Adapter has no name for one.

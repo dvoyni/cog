@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/gogpu/naga/ir"
 )
@@ -24,7 +23,7 @@ func TestEveryMemberOfTheMaterialBlockIsAParam(t *testing.T) {
 		t.Fatalf("parsed %d members of ScenePbrMaterial: %v", len(members), members)
 	}
 	white := gfx.TextureWithBytes(1, 1, gfx.FormatRGBA8, []byte{0xff, 0xff, 0xff, 0xff}, true, false)
-	ingredients := model.BundledIngredients(model.PbrDefaults{White: white, FlatNormal: white})
+	ingredients := BundledIngredients(PbrDefaults{White: white, FlatNormal: white})
 	numbers := map[string]string{}
 	for _, param := range ingredients.Params {
 		view := gfx.ParameterViewOf(param)

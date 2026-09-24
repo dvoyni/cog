@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -43,7 +42,7 @@ func readFloat32(at []byte) float32 { return math.Float32frombits(binary.NativeE
 // a buffer id and a size, so the probe drains the Lookup itself and keeps the
 // first bytes it is handed, which are the vertices.
 func TestBakeMeshStagesThePackedVertices(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) { q.Camera(testCamera, testCameraDescr()) })
+	h := newHarness(t, func(q *OpQueue) { q.Camera(testCamera, testCameraDescr()) })
 	vertices := everyAttribute()
 	ref := h.bake(vertices, nil, gfx.TopologyLineList)
 	if ref.ID() == 0 {

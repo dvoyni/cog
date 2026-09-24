@@ -3,7 +3,6 @@ package internal
 import (
 	"strings"
 
-	cgogpu "github.com/dvoyni/cog/extensions/gogpu"
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
@@ -140,7 +139,7 @@ func (b *gfxBackend) noteRefusedBindGroup(shader *gfxbShader, group int) error {
 		return nil
 	}
 	b.refusedBindGroups[key] = struct{}{}
-	return cgogpu.ErrBindGroupRefused{Shader: shader.label, Group: group}
+	return ErrBindGroupRefused{Shader: shader.label, Group: group}
 }
 
 // forgetRefusedBindGroups drops a freed shader's latched sites, so the map does

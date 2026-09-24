@@ -12,11 +12,12 @@ import (
 //
 // A named type declared in a package whose import path has an internal segment
 // renders under its enclosing package, the path segment before the last
-// internal. The package name alone would be internal for every Bundle and Port
-// that splits its declarations, so bundles/canvas/internal/types.OpQueue renders
-// as canvas.OpQueue, the name of the alias a caller writes and greps for. A type
-// declared in a plugin's internal/ itself renders the same way: scene's
-// bundles/scene/internal.installModelCmd reads scene.installModelCmd.
+// internal. The package name alone would be internal for every plugin, since
+// each declares what its root aliases in its internal/, so
+// bundles/canvas/internal.OpQueue renders as canvas.OpQueue, the name of the
+// alias a caller writes and greps for. A type the root does not alias renders
+// the same way: scene's bundles/scene/internal.installModelCmd reads
+// scene.installModelCmd.
 //
 // The rule applies inside pointers, slices, arrays, maps, channels, functions
 // and generic type arguments. reflect spells a type argument by its full import
@@ -103,11 +104,12 @@ func funcName(t reflect.Type) string {
 
 // enclosingPackage reports the path segment before the last internal segment of
 // an import path, and false when the path has none, or none with a segment
-// before it.
+// before it. An internal package's external test, whose path ends in
+// internal_test, is internal too.
 func enclosingPackage(path string) (string, bool) {
 	segments := strings.Split(path, "/")
 	for i := len(segments) - 1; i > 0; i-- {
-		if segments[i] == "internal" {
+		if segments[i] == "internal" || segments[i] == "internal_test" {
 			return segments[i-1], true
 		}
 	}
@@ -126,7 +128,7 @@ func packagePart(path string) string {
 
 // shortenQualified rewrites every import-path-qualified name in a type's name,
 // which reflect produces only inside an instantiated generic's brackets:
-// Maybe[*github.com/dvoyni/cog/bundles/canvas/internal/types.Font] becomes
+// Maybe[*github.com/dvoyni/cog/bundles/canvas/internal.Font] becomes
 // Maybe[*canvas.Font]. A quoted struct tag is copied untouched.
 func shortenQualified(name string) string {
 	if !strings.Contains(name, "[") {

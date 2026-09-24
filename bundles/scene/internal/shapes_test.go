@@ -5,8 +5,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
+
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -15,9 +14,9 @@ var testLineColor = m.NewColorSrgb(1, 0.8, 0.2, 1)
 // Every debug call is one Op reporting the call as made, whatever it flushes
 // to, and Ops keeps the recording order behind the cameras.
 func TestEveryDebugCallIsOneOpReportingItsArguments(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
-		q.Sphere(scene.Layer(1), m.Vec3{X: 1, Y: 2, Z: 3}, 0.5, testBoxColor)
+		q.Sphere(Layer(1), m.Vec3{X: 1, Y: 2, Z: 3}, 0.5, testBoxColor)
 		q.Plane(0, m.Vec3{Y: -1}, m.Vec2{X: 4, Y: 6}, testBoxColor)
 		q.Line3D(0, m.Vec3{}, m.Vec3{X: 2}, 0.1, testLineColor)
 		q.WireBox(0, m.Vec3{Z: 1}, m.Vec3{X: 1, Y: 2, Z: 3}, 0.05, testLineColor)
@@ -30,22 +29,22 @@ func TestEveryDebugCallIsOneOpReportingItsArguments(t *testing.T) {
 		t.Fatalf("recorded %d ops, want a camera and five calls", len(ops))
 	}
 	sphere, plane, line, wire, box := ops[1], ops[2], ops[3], ops[4], ops[5]
-	if sphere.Kind != scene.OpSphere || sphere.Layers != scene.Layer(1) || sphere.Center != (m.Vec3{X: 1, Y: 2, Z: 3}) || sphere.Radius != 0.5 {
+	if sphere.Kind != OpSphere || sphere.Layers != Layer(1) || sphere.Center != (m.Vec3{X: 1, Y: 2, Z: 3}) || sphere.Radius != 0.5 {
 		t.Fatalf("the sphere op is %+v", sphere)
 	}
-	if plane.Kind != scene.OpPlane || plane.Center != (m.Vec3{Y: -1}) || plane.Size != (m.Vec3{X: 4, Z: 6}) {
+	if plane.Kind != OpPlane || plane.Center != (m.Vec3{Y: -1}) || plane.Size != (m.Vec3{X: 4, Z: 6}) {
 		t.Fatalf("the plane op is %+v", plane)
 	}
-	if line.Kind != scene.OpLine3D || line.End != (m.Vec3{X: 2}) || line.Thickness != 0.1 || line.Color != testLineColor {
+	if line.Kind != OpLine3D || line.End != (m.Vec3{X: 2}) || line.Thickness != 0.1 || line.Color != testLineColor {
 		t.Fatalf("the line op is %+v", line)
 	}
-	if wire.Kind != scene.OpWireBox || wire.Center != (m.Vec3{Z: 1}) || wire.Size != (m.Vec3{X: 1, Y: 2, Z: 3}) || wire.Thickness != 0.05 {
+	if wire.Kind != OpWireBox || wire.Center != (m.Vec3{Z: 1}) || wire.Size != (m.Vec3{X: 1, Y: 2, Z: 3}) || wire.Thickness != 0.05 {
 		t.Fatalf("the wire box op is %+v", wire)
 	}
-	if box.Kind != scene.OpBox || box.Transform.Position != (m.Vec3{X: 7}) {
+	if box.Kind != OpBox || box.Transform.Position != (m.Vec3{X: 7}) {
 		t.Fatalf("the box op is %+v", box)
 	}
-	h.inspect(func(q *scene.OpQueue) {
+	h.inspect(func(q *OpQueue) {
 		if q.OpCount() != 0 {
 			t.Fatalf("OpCount reads %d after the flush, want the recording in progress, which is empty", q.OpCount())
 		}
@@ -55,7 +54,7 @@ func TestEveryDebugCallIsOneOpReportingItsArguments(t *testing.T) {
 // A wire box is one call and twelve draws: each edge is its own instance,
 // culled on its own, and the twelve pack into one gfx draw.
 func TestAWireBoxFlushesToTwelveEdges(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.WireBox(0, m.Vec3{}, m.Vec3{X: 1, Y: 1, Z: 1}, 0.05, testLineColor)
 	})
@@ -73,7 +72,7 @@ func TestAWireBoxFlushesToTwelveEdges(t *testing.T) {
 // A shape of no size records its call and draws nothing, rather than packing
 // a collapsed instance whose basis the shader would try to invert.
 func TestAShapeOfNoSizeDrawsNothing(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Sphere(0, m.Vec3{}, 0, testBoxColor)
 		q.Plane(0, m.Vec3{}, m.Vec2{X: 1}, testBoxColor)
@@ -95,7 +94,7 @@ func TestAShapeOfNoSizeDrawsNothing(t *testing.T) {
 // them, and a frame that draws only boxes never bakes them at all.
 func TestTheUnitSphereAndPlaneBakeLazilyAndOnce(t *testing.T) {
 	shapes := 0
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Box(0, m.At(0, 0, 0), testBoxColor)
 		for range shapes {
@@ -148,12 +147,12 @@ func TestALineIsAStretchedBoxFromStartToEnd(t *testing.T) {
 		{name: "diagonal", start: m.Vec3{X: 1, Y: 2, Z: 3}, end: m.Vec3{X: -2, Y: 0.5, Z: 7}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			var q scene.OpQueue
+			var q OpQueue
 			q.Line3D(0, test.start, test.end, 0.2, testLineColor)
-			if len(types.OpQueueRecordedDraws(&q)) != 1 {
-				t.Fatalf("recorded %d draws, want 1", len(types.OpQueueRecordedDraws(&q)))
+			if len(OpQueueRecordedDraws(&q)) != 1 {
+				t.Fatalf("recorded %d draws, want 1", len(OpQueueRecordedDraws(&q)))
 			}
-			record := types.OpQueueRecordedDraws(&q)[0]
+			record := OpQueueRecordedDraws(&q)[0]
 			if record.Matrix != nil {
 				t.Fatal("the line went through a whole-matrix override; scene builds its stretch from the transform")
 			}
@@ -181,7 +180,7 @@ func TestALineIsAStretchedBoxFromStartToEnd(t *testing.T) {
 // Box, Sphere and Plane are lit paint; Line3D and WireBox are black paint that
 // glows the given colour, so they show in a frame with no lights.
 func TestLinesAreSelfLitAndSolidsAreLit(t *testing.T) {
-	var q scene.OpQueue
+	var q OpQueue
 	q.Box(0, m.At(0, 0, 0), testBoxColor)
 	q.Sphere(0, m.Vec3{}, 1, testBoxColor)
 	q.Plane(0, m.Vec3{}, m.Vec2{X: 1, Y: 1}, testBoxColor)
@@ -190,7 +189,7 @@ func TestLinesAreSelfLitAndSolidsAreLit(t *testing.T) {
 
 	paint := m.Vec4{X: testBoxColor.R, Y: testBoxColor.G, Z: testBoxColor.B, W: testBoxColor.A}
 	glow := m.Vec4{X: testLineColor.R, Y: testLineColor.G, Z: testLineColor.B}
-	for i, record := range types.OpQueueRecordedDraws(&q) {
+	for i, record := range OpQueueRecordedDraws(&q) {
 		base, _ := numberOf(record, "baseColorFactor")
 		emissive, _ := numberOf(record, "emissiveFactor")
 		if i < 3 {
@@ -208,7 +207,7 @@ func TestLinesAreSelfLitAndSolidsAreLit(t *testing.T) {
 // A sphere's world sphere is its radius exactly, not the circumsphere of its
 // box, and a plane's is the circumsphere of its rectangle.
 func TestSpheresAndPlanesCullByTheirOwnBounds(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		// Behind the camera by 5; a sphere of radius 4.9 stays behind it and a
 		// sphere of radius 5.1 reaches it. The unit box's circumsphere would
@@ -229,10 +228,10 @@ func TestSpheresAndPlanesCullByTheirOwnBounds(t *testing.T) {
 // A sphere scales uniformly, so it rides the plain normal path; a plane is
 // stretched and takes the inverse-transpose path like a line.
 func TestOnlyStretchedShapesFlagNonUniform(t *testing.T) {
-	var q scene.OpQueue
+	var q OpQueue
 	q.Sphere(0, m.Vec3{X: 1}, 3, testBoxColor)
 	q.Plane(0, m.Vec3{}, m.Vec2{X: 4, Y: 2}, testBoxColor)
-	sphere, plane := types.OpQueueRecordedDraws(&q)[0], types.OpQueueRecordedDraws(&q)[1]
+	sphere, plane := OpQueueRecordedDraws(&q)[0], OpQueueRecordedDraws(&q)[1]
 
 	if flags := model.PackInstance(sphere.World(), model.InstanceAnim{Offset: model.SceneNoAnim}, 0).Flags; flags&model.SceneNonUniform != 0 {
 		t.Fatalf("a sphere's instance carries SCENE_NONUNIFORM (%#b)", flags)
@@ -251,14 +250,14 @@ func TestOnlyStretchedShapesFlagNonUniform(t *testing.T) {
 // The twelve edges together span the box grown by half a thickness on every
 // side, which is what closes the corners.
 func TestWireBoxEdgesCloseAtTheCorners(t *testing.T) {
-	var q scene.OpQueue
+	var q OpQueue
 	center, size, thickness := m.Vec3{X: 1, Y: 2, Z: 3}, m.Vec3{X: 2, Y: 4, Z: 6}, float32(0.2)
 	q.WireBox(0, center, size, thickness, testLineColor)
-	if len(types.OpQueueRecordedDraws(&q)) != 12 {
-		t.Fatalf("recorded %d draws, want 12", len(types.OpQueueRecordedDraws(&q)))
+	if len(OpQueueRecordedDraws(&q)) != 12 {
+		t.Fatalf("recorded %d draws, want 12", len(OpQueueRecordedDraws(&q)))
 	}
 	extent := m.Box3{Min: center, Max: center}
-	for _, record := range types.OpQueueRecordedDraws(&q) {
+	for _, record := range OpQueueRecordedDraws(&q) {
 		world := record.World()
 		for _, corner := range []m.Vec3{{X: -0.5, Y: -0.5, Z: -0.5}, {X: 0.5, Y: 0.5, Z: 0.5}} {
 			point := world.TransformPoint(corner)
@@ -277,7 +276,7 @@ func TestWireBoxEdgesCloseAtTheCorners(t *testing.T) {
 // Every debug shape binds the bundled material with the five PBR slots, the
 // same as a box: one shader, one topology, everything batching together.
 func TestEveryDebugShapeBindsTheBundledMaterial(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Sphere(0, m.Vec3{}, 1, testBoxColor)
 		q.Plane(0, m.Vec3{}, m.Vec2{X: 1, Y: 1}, testBoxColor)
@@ -311,7 +310,7 @@ func nearVec3(a, b m.Vec3) bool {
 // design, recorded one at a time with no group between them, so this is the
 // flush merging equal draws rather than packing one instanced call.
 func TestAWireBoxPacksAsOneBatch(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, forwardCamera())
 		q.WireBox(0, m.Vec3{Z: -5}, m.Vec3{X: 1, Y: 1, Z: 1}, 0.05, testLineColor)
 	})

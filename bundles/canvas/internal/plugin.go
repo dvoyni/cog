@@ -6,8 +6,6 @@ import (
 	"math"
 	"slices"
 
-	"github.com/dvoyni/cog/bundles/canvas"
-	"github.com/dvoyni/cog/bundles/canvas/internal/types"
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
@@ -21,12 +19,12 @@ import (
 // fields are the flush's scratch, kept across frames so a steady-state frame
 // allocates nothing, and the snapshot slot.
 type plugin struct {
-	config       canvas.Config
+	config       Config
 	quad         gfx.MeshDescr
 	quadVertices gfx.BufferDescr
 	quadIndices  gfx.BufferDescr
 	quadReady    bool
-	layers       []canvas.Layer
+	layers       []Layer
 	// quadParams is the shading scratch for the two draws that build their own
 	// quad rather than replaying vertices an app recorded: the tiled sprite and
 	// the texture sprite. Both join the triangles batcher, which copies what it
@@ -71,7 +69,7 @@ type frame struct {
 	k         kernel.Kernel
 	fsys      fs.FS
 	resources *gfx.ResourceQueue
-	lookup    *canvas.Lookup
+	lookup    *Lookup
 }
 
 // sprite resolves one recorded sprite to its atlas entry. A path canvas will not
@@ -79,31 +77,31 @@ type frame struct {
 // never reaches a cache; a zero entry, however it arose, draws nothing.
 // tileX and tileY say which axes the draw will wrap its uv on, which picks the
 // gutter fill of the entry it gets.
-func (fr *frame) sprite(op *types.SpriteOp, tileX, tileY bool) types.AtlasEntry {
+func (fr *frame) sprite(op *SpriteOp, tileX, tileY bool) AtlasEntry {
 	if op.InvalidPath {
-		types.ReportInvalidSpritePath(fr.k, op.Path)
-		return types.AtlasEntry{}
+		ReportInvalidSpritePath(fr.k, op.Path)
+		return AtlasEntry{}
 	}
-	return types.LookupResolveSprite(fr.lookup, fr.k, op.Path, fr.fsys, fr.resources, tileX, tileY)
+	return LookupResolveSprite(fr.lookup, fr.k, op.Path, fr.fsys, fr.resources, tileX, tileY)
 }
 
 // icon resolves an inline icon's atlas entry. An icon path enters canvas inside
 // the text it is written in rather than at a Sprite call, so this is where it is
 // validated.
-func (fr *frame) icon(path string) types.AtlasEntry {
-	recorded, invalid := types.SpritePath(path)
+func (fr *frame) icon(path string) AtlasEntry {
+	recorded, invalid := SpritePath(path)
 	if invalid {
-		types.ReportInvalidSpritePath(fr.k, recorded)
-		return types.AtlasEntry{}
+		ReportInvalidSpritePath(fr.k, recorded)
+		return AtlasEntry{}
 	}
-	return types.LookupResolveSprite(fr.lookup, fr.k, recorded, fr.fsys, fr.resources, false, false)
+	return LookupResolveSprite(fr.lookup, fr.k, recorded, fr.fsys, fr.resources, false, false)
 }
 
 // face bakes (or reuses) one font face at a rasterization size. The path is the
 // one the queue recorded, and Text resolved the empty path to the built-in
 // default when it recorded it, so nothing arrives here unnamed.
-func (fr *frame) face(path string, px int) *types.Font {
-	return types.LookupFace(fr.lookup, fr.k, path, px, fr.fsys)
+func (fr *frame) face(path string, px int) *Font {
+	return LookupFace(fr.lookup, fr.k, path, px, fr.fsys)
 }
 
 // New creates the canvas plugin. Configure it with a canvas.Config under
@@ -111,7 +109,7 @@ func (fr *frame) face(path string, px int) *types.Font {
 func New() kernel.Plugin { return &plugin{} }
 
 // Name reports the plugin name.
-func (p *plugin) Name() kernel.PluginName { return canvas.Name }
+func (p *plugin) Name() kernel.PluginName { return Name }
 
 // Dependencies reports the plugins canvas requires: gfx (for the draw
 // pipeline), storage (which hosts its shader filesystem mount) and app, whose
@@ -126,20 +124,20 @@ func (p *plugin) Register(registrar *kernel.Registrar, value any) error {
 		return err
 	}
 	p.config = config
-	registrar.InitResource(&types.OpQueue{})
-	registrar.InitResource(types.NewSizedLookup(config))
-	registrar.HandleCommand[canvas.ArmDrawsCmd](p.armDrawsCmdImpl)
+	registrar.InitResource(&OpQueue{})
+	registrar.InitResource(NewSizedLookup(config))
+	registrar.HandleCommand[ArmDrawsCmd](p.armDrawsCmdImpl)
 	registrar.Subscribe[armDrawsOnUpdate](p.armSnapshotOnUpdate).First()
 	registrar.Subscribe[drawsOnUpdate](p.snapshotOnUpdate).
-		Last().Before[canvas.FlushOnUpdate]()
-	registrar.Subscribe[canvas.FlushOnUpdate](p.flush).
+		Last().Before[FlushOnUpdate]()
+	registrar.Subscribe[FlushOnUpdate](p.flush).
 		Last().Before[gfx.PresentOnUpdate]()
-	registrar.ProvideAdapter[canvas.McpProvider](mcp.Provider(provider{}))
+	registrar.ProvideAdapter[McpProvider](mcp.Provider(provider{}))
 	// The built-in shaders and default font sit above every other mount, so a
 	// game's own files never shadow them. storage installs the mount at its
 	// Start, ahead of every plugin that depends on it, so both are in place for
 	// the first frame.
-	registrar.ProvideAdapter[canvas.StorageReadMount](storage.ReadMount{
+	registrar.ProvideAdapter[StorageReadMount](storage.ReadMount{
 		Id: builtinMountID, Priority: math.MaxInt, FS: builtinFS,
 	})
 	return nil
@@ -183,28 +181,28 @@ func (p *plugin) armSnapshotOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEv
 // has the better half of it - recording from Last is not how a game records,
 // where ui, scene and gameplay all run in the earlier phase.
 func (p *plugin) snapshotOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	var queue kernel.Read[*canvas.OpQueue]
+	var queue kernel.Read[*OpQueue]
 	return func(access kernel.ResourceAccess) {
-			queue = access.GetRead[*canvas.OpQueue]()
+			queue = access.GetRead[*OpQueue]()
 		}, func(_ kernel.Kernel, event app.UpdateEvent) {
 			p.snapshots.record(queue.Get(), event.Tick)
 		}
 }
 
 func (p *plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	var writeQueue kernel.Write[*canvas.OpQueue]
+	var writeQueue kernel.Write[*OpQueue]
 	var gfxQueue kernel.Write[*gfx.OpQueue]
 	var gfxResourceQueue kernel.Write[*gfx.ResourceQueue]
 	var viewport kernel.Read[*gfx.Viewport]
 	var filesystem kernel.Read[storage.FileSystem]
-	var lookupResource kernel.Write[*canvas.Lookup]
+	var lookupResource kernel.Write[*Lookup]
 	return func(access kernel.ResourceAccess) {
-			writeQueue = access.GetWrite[*canvas.OpQueue]()
+			writeQueue = access.GetWrite[*OpQueue]()
 			gfxQueue = access.GetWrite[*gfx.OpQueue]()
 			gfxResourceQueue = access.GetWrite[*gfx.ResourceQueue]()
 			viewport = access.GetRead[*gfx.Viewport]()
 			filesystem = access.GetRead[storage.FileSystem]()
-			lookupResource = access.GetWrite[*canvas.Lookup]()
+			lookupResource = access.GetWrite[*Lookup]()
 		}, func(k kernel.Kernel, _ app.UpdateEvent) {
 			p.flushFrame(k, writeQueue.Get(), gfxQueue.Get(), gfxResourceQueue.Get(),
 				viewport.Get(), filesystem.Get(), lookupResource.Get())
@@ -212,14 +210,14 @@ func (p *plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 }
 
 func (p *plugin) flushFrame(
-	k kernel.Kernel, write *canvas.OpQueue, gfxWrite *gfx.OpQueue, gfxResources *gfx.ResourceQueue,
-	view *gfx.Viewport, filesystem storage.FileSystem, lookup *canvas.Lookup,
+	k kernel.Kernel, write *OpQueue, gfxWrite *gfx.OpQueue, gfxResources *gfx.ResourceQueue,
+	view *gfx.Viewport, filesystem storage.FileSystem, lookup *Lookup,
 ) error {
-	defer types.OpQueueReset(write)
+	defer OpQueueReset(write)
 	if !gfxResources.Ready() || view.Width <= 0 || view.Height <= 0 {
 		return nil
 	}
-	types.LookupInvalidateFontsOnResize(lookup, k, gfxResources, view)
+	LookupInvalidateFontsOnResize(lookup, k, gfxResources, view)
 	if !p.ensureQuad(gfxResources) {
 		return nil
 	}
@@ -243,11 +241,11 @@ func (p *plugin) flushFrame(
 	// is half a frame: every fill, line and stroke vanishing while the sprites
 	// beside them still draw, which hides the misconfiguration instead of showing
 	// it.
-	if white := types.LookupResolveSprite(fr.lookup, fr.k, "", fr.fsys, fr.resources, false, false); white.Width <= 0 {
+	if white := LookupResolveSprite(fr.lookup, fr.k, "", fr.fsys, fr.resources, false, false); white.Width <= 0 {
 		return nil
 	}
 	p.layers = p.layers[:0]
-	ops := types.OpQueueLayers(write)
+	ops := OpQueueLayers(write)
 	for layerID, value := range ops {
 		// A layer that only clears still gets a pass: clearing a target and
 		// drawing nothing into it is a legitimate frame, and a clear that
@@ -274,20 +272,20 @@ func (p *plugin) flushFrame(
 		// are taken once per frame rather than once per layer.
 		materials := &value.Materials
 		if !value.Materials.Has() {
-			materials = types.OpQueueDefaults(write)
+			materials = OpQueueDefaults(write)
 		}
 
 		for i := range value.Ops {
 			switch value.Ops[i].Kind {
-			case types.DrawSpriteKind:
+			case DrawSpriteKind:
 				p.drawSprite(gfxWrite, fr, surf, transform, value.Ops[i].Clip, value.Ops[i].HasClip, materials, &value.Ops[i].Sprite)
-			case types.DrawTextKind:
+			case DrawTextKind:
 				p.tris.flush(gfxWrite)
 				p.drawText(gfxWrite, fr, surf, transform, value.Ops[i].Clip, value.Ops[i].HasClip, materials, &value.Ops[i].Text)
-			case types.DrawTrianglesKind:
+			case DrawTrianglesKind:
 				p.batch.flush(gfxWrite, p.quad)
 				op := &value.Ops[i].Triangles
-				p.drawTriangles(gfxWrite, surf, transform, value.Ops[i].Clip, value.Ops[i].HasClip, types.OpQueueLayout(write, op.LayoutID), materials, op)
+				p.drawTriangles(gfxWrite, surf, transform, value.Ops[i].Clip, value.Ops[i].HasClip, OpQueueLayout(write, op.LayoutID), materials, op)
 			}
 		}
 		p.batch.flush(gfxWrite, p.quad)
@@ -308,7 +306,7 @@ func (p *plugin) flushFrame(
 // across a target change would z-test against whatever the other target left
 // behind. The zero TargetDescr is the screen, which is what a layer nobody gave
 // a target means by saying nothing.
-func canvasPass(layerID canvas.Layer, value types.LayerOps, first, last bool) gfx.PassDescr {
+func canvasPass(layerID Layer, value LayerOps, first, last bool) gfx.PassDescr {
 	desc := gfx.PassDescr{
 		Order:  layerID,
 		Target: value.Target,
@@ -333,7 +331,7 @@ func canvasPass(layerID canvas.Layer, value types.LayerOps, first, last bool) gf
 // longer a reason to leave it: the material joins the key by fingerprint and the
 // parameters join it by value, so two draws that agree on both are one draw and
 // an unrecognised parameter name is a key field rather than a bail-out.
-func (p *plugin) drawTriangles(gfxWrite *gfx.OpQueue, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, layout []gfx.VertexAttr, materials *types.ScopeMaterials, op *types.TrianglesOp) {
+func (p *plugin) drawTriangles(gfxWrite *gfx.OpQueue, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, layout []gfx.VertexAttr, materials *ScopeMaterials, op *TrianglesOp) {
 	if hasClip && (clip.Width <= 0 || clip.Height <= 0) {
 		return
 	}
@@ -371,8 +369,8 @@ func layerSurface(target gfx.TargetDescr, view *gfx.Viewport) surface {
 	return surface{size: m.Vec2{X: view.Width, Y: view.Height}, scale: scale}
 }
 
-func resolveLayerTransform(value types.LayerOps, surf surface) m.Mat4 {
-	scale, offset := canvas.LayerTransform(value.Window, value.Aspect, surf.size)
+func resolveLayerTransform(value LayerOps, surf surface) m.Mat4 {
+	scale, offset := LayerTransform(value.Window, value.Aspect, surf.size)
 	return m.Translation4(offset.X, offset.Y, 0).Mul(m.Scaling4(scale.X, scale.Y, 1))
 }
 
@@ -393,7 +391,7 @@ func (p *plugin) ensureQuad(resources *gfx.ResourceQueue) bool {
 	return true
 }
 
-func (p *plugin) drawSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *types.ScopeMaterials, op *types.SpriteOp) {
+func (p *plugin) drawSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *ScopeMaterials, op *SpriteOp) {
 	// Recording order is the contract, so a sprite closes every batch whose
 	// pending draw would otherwise land after it - but only the batches it
 	// cannot itself join. A texture-sourced or tiled sprite is a quad in the
@@ -428,7 +426,7 @@ func (p *plugin) drawSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface, laye
 		switch {
 		case op.Path == "":
 			t.TileX, t.TileY = false, false
-		case !op.InvalidPath && !types.LookupSpriteFitsAtlas(fr.lookup, fr.k, op.Path, fr.fsys):
+		case !op.InvalidPath && !LookupSpriteFitsAtlas(fr.lookup, fr.k, op.Path, fr.fsys):
 			p.batch.flush(gfxWrite, p.quad)
 			p.drawTiledSprite(gfxWrite, fr, surf, t, layerTransform, clip, hasClip, materials, op)
 			return
@@ -448,7 +446,7 @@ func (p *plugin) drawSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface, laye
 	// from a number that means nothing, and reporting it too would raise a
 	// second error that vanishes when the first is fixed.
 	if !frameFits(entry.Width, entry.Height, t.Frame) {
-		types.ReportInvalidSpriteFrame(fr.k, op.Path, entry.Width, entry.Height, t.Frame)
+		ReportInvalidSpriteFrame(fr.k, op.Path, entry.Width, entry.Height, t.Frame)
 		return
 	}
 	// The sprite is going to the atlas batch, which no triangle draw can join,
@@ -461,15 +459,15 @@ func (p *plugin) drawSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface, laye
 	// fingerprint, so a sprite that names one merges with every sprite that names
 	// the same one, and a lone sprite is the one-instance case.
 	shading := p.shadeSprite(materials, op.NamedMaterial(), op.Fingerprint, op.Params)
-	tint := paramColorOr(op.Params, canvas.TintSlot, m.Color{R: 1, G: 1, B: 1, A: 1})
-	keyColor := paramColorOr(op.Params, canvas.KeyColorSlot, types.DefaultKeyColor())
-	if t.NineSlice != (canvas.SpriteFrame{}) {
+	tint := paramColorOr(op.Params, TintSlot, m.Color{R: 1, G: 1, B: 1, A: 1})
+	keyColor := paramColorOr(op.Params, KeyColorSlot, DefaultKeyColor())
+	if t.NineSlice != (SpriteFrame{}) {
 		frameWidth, frameHeight := framedSource(entry.Width, entry.Height, t.Frame)
 		if !insetsFit(frameWidth, frameHeight, t.NineSlice) {
-			types.ReportInvalidSpriteNineSlice(fr.k, op.Path, frameWidth, frameHeight, t.Frame, t.NineSlice)
+			ReportInvalidSpriteNineSlice(fr.k, op.Path, frameWidth, frameHeight, t.Frame, t.NineSlice)
 			return
 		}
-		nineSliceParts(t, entry.Width, entry.Height, func(part canvas.SpriteTransform) {
+		nineSliceParts(t, entry.Width, entry.Height, func(part SpriteTransform) {
 			p.batchEntry(gfxWrite, surf, entry, part, layerTransform, clip, hasClip, &shading, tint, keyColor)
 		})
 		return
@@ -494,7 +492,7 @@ func (p *plugin) drawSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface, laye
 // authoring mistake, so it is refused - but at drawSprite and
 // drawTextureSprite, which can name the sheet in the report, rather than by
 // returning quietly from here.
-func nineSliceParts(transform canvas.SpriteTransform, width, height int, emit func(canvas.SpriteTransform)) {
+func nineSliceParts(transform SpriteTransform, width, height int, emit func(SpriteTransform)) {
 	frame := transform.Frame
 	frameWidth, frameHeight := framedSource(width, height, frame)
 	insets := transform.NineSlice
@@ -528,11 +526,11 @@ func nineSliceParts(transform canvas.SpriteTransform, width, height int, emit fu
 			part.Size = m.Vec2{X: partWidth, Y: partHeight}
 			part.Origin = m.Vec2{}
 			part.Rotation = 0
-			part.Frame = canvas.SpriteFrame{
+			part.Frame = SpriteFrame{
 				Left: frame.Left + sourceX[column], Top: frame.Top + sourceY[row],
 				Right: width - (frame.Left + sourceX[column+1]), Bottom: height - (frame.Top + sourceY[row+1]),
 			}
-			part.NineSlice = canvas.SpriteFrame{}
+			part.NineSlice = SpriteFrame{}
 			emit(part)
 		}
 	}
@@ -547,12 +545,12 @@ func splitNineSliceAxis(length, leading, trailing float32) [4]float32 {
 // drawTiledSprite renders a sprite that repeats on one or both axes. It samples a
 // standalone repeat texture through the textured-triangle path, so it ignores the
 // sprite material and Frame; Scale controls logical tile size and tint becomes vertex color.
-func (p *plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface, t canvas.SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *types.ScopeMaterials, op *types.SpriteOp) {
+func (p *plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface, t SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *ScopeMaterials, op *SpriteOp) {
 	if op.InvalidPath {
-		types.ReportInvalidSpritePath(fr.k, op.Path)
+		ReportInvalidSpritePath(fr.k, op.Path)
 		return
 	}
-	entry := types.LookupResolveStandalone(fr.lookup, fr.k, op.Path, fr.fsys, fr.resources)
+	entry := LookupResolveStandalone(fr.lookup, fr.k, op.Path, fr.fsys, fr.resources)
 	if entry.Width <= 0 || entry.Height <= 0 {
 		return
 	}
@@ -601,9 +599,9 @@ func (p *plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface,
 	}
 	// A tiled sprite keeps FamilyTriangles: it is artwork, and artwork wants the
 	// key-colour ramp. Only the texture sprite below is exempt.
-	material, fingerprint, scope := materials.Resolve(types.FamilyTriangles, nil, 0)
+	material, fingerprint, scope := materials.Resolve(FamilyTriangles, nil, 0)
 	shading := p.shadeQuad(material, fingerprint, entry.Texture, tileSampler(t), op.Params, scope)
-	p.tris.add(gfxWrite, surf.size, builtinQuadLayoutID, canvas.Vertex{}.VertexLayout(),
+	p.tris.add(gfxWrite, surf.size, builtinQuadLayoutID, Vertex{}.VertexLayout(),
 		layerTransform, clip, hasClip, &shading, p.tileVertices)
 }
 
@@ -620,7 +618,7 @@ func (p *plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface,
 // one draw rather than nine - because what keeps it off the sprite path is the
 // binding type, not anything about the geometry. Two quads over one texture and
 // one sampler are one draw; a second texture splits them.
-func (p *plugin) drawTextureSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *types.ScopeMaterials, op *types.SpriteOp) {
+func (p *plugin) drawTextureSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *ScopeMaterials, op *SpriteOp) {
 	width, height := op.Texture.Size()
 	if width <= 0 || height <= 0 {
 		// Skip, never substitute. A texture that does not know its size yet - a
@@ -632,16 +630,16 @@ func (p *plugin) drawTextureSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surfac
 	// reason: a frame is checked once, before a size is resolved, while there is
 	// still something to name in the report.
 	if !frameFits(width, height, op.Transform.Frame) {
-		types.ReportInvalidTextureFrame(fr.k, op.Texture, width, height, op.Transform.Frame)
+		ReportInvalidTextureFrame(fr.k, op.Texture, width, height, op.Transform.Frame)
 		return
 	}
-	if op.Transform.NineSlice != (canvas.SpriteFrame{}) {
+	if op.Transform.NineSlice != (SpriteFrame{}) {
 		frameWidth, frameHeight := framedSource(width, height, op.Transform.Frame)
 		if !insetsFit(frameWidth, frameHeight, op.Transform.NineSlice) {
-			types.ReportInvalidTextureNineSlice(fr.k, op.Texture, frameWidth, frameHeight, op.Transform.Frame, op.Transform.NineSlice)
+			ReportInvalidTextureNineSlice(fr.k, op.Texture, frameWidth, frameHeight, op.Transform.Frame, op.Transform.NineSlice)
 			return
 		}
-		nineSliceParts(op.Transform, width, height, func(part canvas.SpriteTransform) {
+		nineSliceParts(op.Transform, width, height, func(part SpriteTransform) {
 			p.emitTextureQuad(gfxWrite, surf, layerTransform, clip, hasClip, width, height, part, materials, op)
 		})
 		return
@@ -653,7 +651,7 @@ func (p *plugin) drawTextureSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surfac
 // batcher: two triangles in the built-in vertex layout, with the tint as vertex
 // colour so it needs no parameter the texture material would have to declare -
 // and so that two quads differing only in tint still merge.
-func (p *plugin) emitTextureQuad(gfxWrite *gfx.OpQueue, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, width, height int, t canvas.SpriteTransform, materials *types.ScopeMaterials, op *types.SpriteOp) {
+func (p *plugin) emitTextureQuad(gfxWrite *gfx.OpQueue, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, width, height int, t SpriteTransform, materials *ScopeMaterials, op *SpriteOp) {
 	size := spriteSize(width, height, t)
 	if size.X == 0 || size.Y == 0 {
 		return
@@ -665,7 +663,7 @@ func (p *plugin) emitTextureQuad(gfxWrite *gfx.OpQueue, surf surface, layerTrans
 	if !ok {
 		return
 	}
-	tint := paramColorOr(op.Params, canvas.TintSlot, m.Color{R: 1, G: 1, B: 1, A: 1})
+	tint := paramColorOr(op.Params, TintSlot, m.Color{R: 1, G: 1, B: 1, A: 1})
 	sine, cosine := sincos(t.Rotation)
 	corners := [4]m.Vec2{{X: 0, Y: 0}, {X: 1, Y: 0}, {X: 1, Y: 1}, {X: 0, Y: 1}}
 	uvs := [4]m.Vec2{{X: uv.X, Y: uv.Y}, {X: uv.Z, Y: uv.Y}, {X: uv.Z, Y: uv.W}, {X: uv.X, Y: uv.W}}
@@ -682,9 +680,9 @@ func (p *plugin) emitTextureQuad(gfxWrite *gfx.OpQueue, surf surface, layerTrans
 	for _, i := range [6]int{0, 1, 2, 0, 2, 3} {
 		p.tileVertices = appendTileVertex(p.tileVertices, positions[i], tint, uvs[i])
 	}
-	material, fingerprint, scope := materials.Resolve(types.FamilyTexture, op.NamedMaterial(), op.Fingerprint)
+	material, fingerprint, scope := materials.Resolve(FamilyTexture, op.NamedMaterial(), op.Fingerprint)
 	shading := p.shadeQuad(material, fingerprint, op.Texture, tileSampler(t), op.Params, scope)
-	p.tris.add(gfxWrite, surf.size, builtinQuadLayoutID, canvas.Vertex{}.VertexLayout(),
+	p.tris.add(gfxWrite, surf.size, builtinQuadLayoutID, Vertex{}.VertexLayout(),
 		layerTransform, clip, hasClip, &shading, p.tileVertices)
 }
 
@@ -695,7 +693,7 @@ func (p *plugin) emitTextureQuad(gfxWrite *gfx.OpQueue, surf surface, layerTrans
 // A tiled axis runs the uv past 1 by the number of repeats, which is what the
 // repeat sampler wraps. Tiling therefore ignores Frame and the flips, exactly as
 // the atlas tiling path does: what repeats is the texture, not a window onto it.
-func textureUV(width, height int, t canvas.SpriteTransform, size m.Vec2) (m.Vec4, bool) {
+func textureUV(width, height int, t SpriteTransform, size m.Vec2) (m.Vec4, bool) {
 	if t.TileX || t.TileY {
 		scale := t.Scale
 		if scale == 0 {
@@ -712,7 +710,7 @@ func textureUV(width, height int, t canvas.SpriteTransform, size m.Vec2) (m.Vec4
 	}
 	uv := m.Vec4{Z: 1, W: 1}
 	frame := t.Frame
-	if frame != (canvas.SpriteFrame{}) {
+	if frame != (SpriteFrame{}) {
 		if frame.Left < 0 || frame.Top < 0 || frame.Right < 0 || frame.Bottom < 0 ||
 			frame.Left+frame.Right >= width || frame.Top+frame.Bottom >= height {
 			return m.Vec4{}, false
@@ -733,7 +731,7 @@ func textureUV(width, height int, t canvas.SpriteTransform, size m.Vec2) (m.Vec4
 
 // tileSampler repeats only the axes the transform tiles, so the non-tiled axis
 // clamps at its edges instead of wrapping.
-func tileSampler(t canvas.SpriteTransform) gfx.SamplerDesc {
+func tileSampler(t SpriteTransform) gfx.SamplerDesc {
 	address := func(tile bool) gfx.AddressMode {
 		if tile {
 			return gfx.AddressRepeat
@@ -768,7 +766,7 @@ func appendTileVertex(dst []byte, position m.Vec2, color m.Color, uv m.Vec2) []b
 }
 
 // entrySize resolves the on-screen size of an atlas entry.
-func entrySize(entry types.AtlasEntry, transform canvas.SpriteTransform) m.Vec2 {
+func entrySize(entry AtlasEntry, transform SpriteTransform) m.Vec2 {
 	if transform.TileX || transform.TileY {
 		return tiledSize(entry, transform)
 	}
@@ -786,7 +784,7 @@ func entrySize(entry types.AtlasEntry, transform canvas.SpriteTransform) m.Vec2 
 // A non-tiled axis defaults to one tile, which is the framed tile: a Frame says
 // which texels the sprite draws, so after it says how many, and it is the tile
 // that repeats rather than the sheet it was cut from.
-func tiledSize(entry types.AtlasEntry, transform canvas.SpriteTransform) m.Vec2 {
+func tiledSize(entry AtlasEntry, transform SpriteTransform) m.Vec2 {
 	tileWidth, tileHeight := framedSource(entry.Width, entry.Height, transform.Frame)
 	scale := transform.Scale
 	if scale == 0 {
@@ -809,7 +807,7 @@ func tiledSize(entry types.AtlasEntry, transform canvas.SpriteTransform) m.Vec2 
 // coordinate by this before taking its fractional part, so a zero here would
 // collapse the sampled rectangle to its top-left corner and paint every sprite,
 // glyph and fill in one texel's colour.
-func tiledRepeat(entry types.AtlasEntry, transform canvas.SpriteTransform, size m.Vec2) m.Vec2 {
+func tiledRepeat(entry AtlasEntry, transform SpriteTransform, size m.Vec2) m.Vec2 {
 	repeat := m.Vec2{X: 1, Y: 1}
 	if !transform.TileX && !transform.TileY {
 		return repeat
@@ -839,7 +837,7 @@ func tiledRepeat(entry types.AtlasEntry, transform canvas.SpriteTransform, size 
 // is the one thing a transform whose uv is already inset can never want. The
 // frame is assumed to fit - drawSprite and drawTextureSprite refuse and report
 // one that does not before any size is resolved.
-func spriteSize(width, height int, transform canvas.SpriteTransform) m.Vec2 {
+func spriteSize(width, height int, transform SpriteTransform) m.Vec2 {
 	width, height = framedSource(width, height, transform.Frame)
 	size := transform.Size
 	switch {
@@ -861,10 +859,10 @@ func spriteSize(width, height int, transform canvas.SpriteTransform) m.Vec2 {
 // entryUV resolves the sampled uv rect for an atlas entry, applying an optional
 // source frame inset and horizontal/vertical flips. It returns false when the
 // frame inset is out of bounds.
-func entryUV(entry types.AtlasEntry, transform canvas.SpriteTransform) (m.Vec4, bool) {
+func entryUV(entry AtlasEntry, transform SpriteTransform) (m.Vec4, bool) {
 	uv := entry.UV
 	frame := transform.Frame
-	if frame != (canvas.SpriteFrame{}) {
+	if frame != (SpriteFrame{}) {
 		if frame.Left < 0 || frame.Top < 0 || frame.Right < 0 || frame.Bottom < 0 ||
 			frame.Left+frame.Right >= entry.Width || frame.Top+frame.Bottom >= entry.Height {
 			return m.Vec4{}, false
@@ -899,7 +897,7 @@ func paramColorOr(params []gfx.ParameterDescr, name string, def m.Color) m.Color
 	return def
 }
 
-func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, shading *spriteShading, op *types.TextOp) {
+func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, shading *spriteShading, op *TextOp) {
 	if op.Draw.Size <= 0 || op.Text == "" || op.FontPath == "" {
 		return
 	}
@@ -918,18 +916,18 @@ func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, fr *frame, surf surface, la
 			end++
 		}
 		line := op.Text[start:end]
-		width := types.GlyphLineWidth(fr.lookup, face, line, fr.resources) * toLogical
+		width := GlyphLineWidth(fr.lookup, face, line, fr.resources) * toLogical
 		x := op.Draw.Position.X
 		switch op.Draw.Align {
-		case canvas.AlignCenter:
+		case AlignCenter:
 			x -= width / 2
-		case canvas.AlignRight:
+		case AlignRight:
 			x -= width
 		}
 		var previous rune
 		first := true
 		for _, character := range line {
-			glyph, ok := types.LoadGlyph(fr.lookup, character, face, fr.resources)
+			glyph, ok := LoadGlyph(fr.lookup, character, face, fr.resources)
 			if !ok {
 				continue
 			}
@@ -937,11 +935,11 @@ func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, fr *frame, surf surface, la
 				x += float32(face.Face.Kern(previous, character)) / 64 * toLogical
 			}
 			if glyph.Visible {
-				transform := canvas.SpriteTransform{
+				transform := SpriteTransform{
 					Position: m.Vec2{X: x + glyph.Offset.X*toLogical, Y: y + glyph.Offset.Y*toLogical},
 					Size:     m.Vec2{X: float32(glyph.Entry.Width) * toLogical, Y: float32(glyph.Entry.Height) * toLogical},
 				}
-				p.batchEntry(gfxWrite, surf, glyph.Entry, transform, layerTransform, clip, hasClip, shading, op.Draw.Color, types.DefaultKeyColor())
+				p.batchEntry(gfxWrite, surf, glyph.Entry, transform, layerTransform, clip, hasClip, shading, op.Draw.Color, DefaultKeyColor())
 			}
 			x += glyph.Advance * toLogical
 			previous = character
@@ -956,7 +954,7 @@ func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, fr *frame, surf surface, la
 }
 
 // drawText expands inline icons and wraps lines before drawing glyph runs.
-func (p *plugin) drawText(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *types.ScopeMaterials, op *types.TextOp) {
+func (p *plugin) drawText(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *ScopeMaterials, op *TextOp) {
 	if op.Draw.Size <= 0 || op.Text == "" || op.FontPath == "" {
 		return
 	}
@@ -974,30 +972,30 @@ func (p *plugin) drawText(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerT
 	ascent := float32(metrics.Ascent) / 64 * toLogical
 	capHeight := float32(metrics.CapHeight) / 64 * toLogical
 	lineHeight := face.LineHeight * toLogical
-	measure := func(line []types.InlineSegment) float32 {
+	measure := func(line []InlineSegment) float32 {
 		var width float32
 		for _, segment := range line {
 			if segment.Icon {
 				width += p.iconWidth(fr, segment.Text, capHeight)
 				continue
 			}
-			width += types.GlyphLineWidth(fr.lookup, face, segment.Text, fr.resources) * toLogical
+			width += GlyphLineWidth(fr.lookup, face, segment.Text, fr.resources) * toLogical
 		}
 		return width
 	}
-	lines := types.ParseInlineText(op.Text)
-	if op.Draw.WordWrapping && types.ValidWrapWidth(op.Draw.WrapWidth) {
+	lines := ParseInlineText(op.Text)
+	if op.Draw.WordWrapping && ValidWrapWidth(op.Draw.WrapWidth) {
 		wrap := p.wrapMeasure(fr, op.FontPath, op.Draw.Size, measure)
-		lines = types.WrapInlineText(lines, op.Draw.WrapWidth, wrap)
+		lines = WrapInlineText(lines, op.Draw.WrapWidth, wrap)
 	}
 	y := op.Draw.Position.Y
 	for _, line := range lines {
 		total := measure(line)
 		x := op.Draw.Position.X
 		switch op.Draw.Align {
-		case canvas.AlignCenter:
+		case AlignCenter:
 			x -= total / 2
-		case canvas.AlignRight:
+		case AlignRight:
 			x -= total
 		}
 		for _, segment := range line {
@@ -1007,7 +1005,7 @@ func (p *plugin) drawText(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerT
 					continue
 				}
 				width := capHeight * float32(entry.Width) / float32(entry.Height)
-				transform := canvas.SpriteTransform{
+				transform := SpriteTransform{
 					Position: m.Vec2{X: x, Y: y + ascent - capHeight},
 					Size:     m.Vec2{X: width, Y: capHeight},
 				}
@@ -1016,16 +1014,16 @@ func (p *plugin) drawText(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerT
 				// with coverage in alpha, and an icon does not because its
 				// texel is already the artwork. Alpha is how present the run
 				// is, which is true of anything drawn.
-				p.batchEntry(gfxWrite, surf, entry, transform, layerTransform, clip, hasClip, &shading, m.Color{R: 1, G: 1, B: 1, A: op.Draw.Color.A}, types.DefaultKeyColor())
+				p.batchEntry(gfxWrite, surf, entry, transform, layerTransform, clip, hasClip, &shading, m.Color{R: 1, G: 1, B: 1, A: op.Draw.Color.A}, DefaultKeyColor())
 				x += width
 				continue
 			}
-			run := types.TextOp{FontPath: op.FontPath, Text: segment.Text, Draw: canvas.TextDraw{
-				Position: m.Vec2{X: x, Y: y}, Size: op.Draw.Size, Color: op.Draw.Color, Align: canvas.AlignLeft,
+			run := TextOp{FontPath: op.FontPath, Text: segment.Text, Draw: TextDraw{
+				Position: m.Vec2{X: x, Y: y}, Size: op.Draw.Size, Color: op.Draw.Color, Align: AlignLeft,
 			}}
 			p.drawGlyphRun(gfxWrite, fr, surf, layerTransform, clip, hasClip, &shading, &run)
 
-			x += types.GlyphLineWidth(fr.lookup, face, segment.Text, fr.resources) * toLogical
+			x += GlyphLineWidth(fr.lookup, face, segment.Text, fr.resources) * toLogical
 		}
 		y += lineHeight
 	}
@@ -1039,7 +1037,7 @@ func (p *plugin) drawText(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerT
 // spill its last word onto a line the element has no room for. Wrapping with the
 // logical face keeps the drawn breaks identical to the measured ones; when that
 // face is unavailable the rasterized measurement stands in.
-func (p *plugin) wrapMeasure(fr *frame, fontPath string, size float32, fallback func([]types.InlineSegment) float32) func([]types.InlineSegment) float32 {
+func (p *plugin) wrapMeasure(fr *frame, fontPath string, size float32, fallback func([]InlineSegment) float32) func([]InlineSegment) float32 {
 	px := max(1, int(math.Round(float64(size))))
 	face := fr.face(fontPath, px)
 	if face == nil {
@@ -1047,14 +1045,14 @@ func (p *plugin) wrapMeasure(fr *frame, fontPath string, size float32, fallback 
 	}
 	scale := size / float32(px)
 	capHeight := float32(face.Face.Metrics().CapHeight) / 64 * scale
-	return func(line []types.InlineSegment) float32 {
+	return func(line []InlineSegment) float32 {
 		var width float32
 		for _, segment := range line {
 			if segment.Icon {
 				width += p.iconWidth(fr, segment.Text, capHeight)
 				continue
 			}
-			width += types.MeasureLine(face, segment.Text) * scale
+			width += MeasureLine(face, segment.Text) * scale
 		}
 		return width
 	}
@@ -1090,8 +1088,8 @@ func textRasterScale(layerTransform m.Mat4, surf surface) float32 {
 // framedSource narrows a source's pixel dimensions to the sub-rect a Frame
 // selects. A zero Frame selects the whole source, which is why the common case
 // costs a comparison and nothing else.
-func framedSource(width, height int, frame canvas.SpriteFrame) (int, int) {
-	if frame == (canvas.SpriteFrame{}) {
+func framedSource(width, height int, frame SpriteFrame) (int, int) {
+	if frame == (SpriteFrame{}) {
 		return width, height
 	}
 	return width - frame.Left - frame.Right, height - frame.Top - frame.Bottom
@@ -1100,8 +1098,8 @@ func framedSource(width, height int, frame canvas.SpriteFrame) (int, int) {
 // frameFits reports whether a Frame selects a non-empty sub-rect of a source of
 // the given dimensions. It is the condition entryUV and textureUV already
 // applied silently, lifted out so the draw can refuse and say why.
-func frameFits(width, height int, frame canvas.SpriteFrame) bool {
-	if frame == (canvas.SpriteFrame{}) {
+func frameFits(width, height int, frame SpriteFrame) bool {
+	if frame == (SpriteFrame{}) {
 		return true
 	}
 	return frame.Left >= 0 && frame.Top >= 0 && frame.Right >= 0 && frame.Bottom >= 0 &&
@@ -1111,7 +1109,7 @@ func frameFits(width, height int, frame canvas.SpriteFrame) bool {
 // insetsFit reports whether nine-slice insets leave a non-empty middle in a
 // source of the given dimensions. The dimensions are the frame's, not the
 // sheet's: a nine-slice over a framed sprite slices the frame.
-func insetsFit(width, height int, insets canvas.SpriteFrame) bool {
+func insetsFit(width, height int, insets SpriteFrame) bool {
 	return insets.Left >= 0 && insets.Right >= 0 && insets.Top >= 0 && insets.Bottom >= 0 &&
 		insets.Left+insets.Right < width && insets.Top+insets.Bottom < height
 }

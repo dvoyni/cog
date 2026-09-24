@@ -5,18 +5,17 @@ import (
 	"unsafe"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
-const testCamera scene.CameraID = -100
+const testCamera CameraID = -100
 
 var testBoxColor = m.NewColorSrgb(0.42, 0.71, 0.94, 1)
 
 // testCameraDescr is the floor of the API: a camera looking at the origin.
-func testCameraDescr() scene.CameraDescr {
-	return scene.CameraDescr{
+func testCameraDescr() CameraDescr {
+	return CameraDescr{
 		Transform: m.LookAt(m.Vec3{X: 3, Y: 2, Z: 4}, m.Vec3{}, m.Vec3{Y: 1}),
 		FovY:      1.0472,
 		Near:      0.1,
@@ -25,7 +24,7 @@ func testCameraDescr() scene.CameraDescr {
 }
 
 func TestBoxRecordsOneOp(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Box(0, m.At(1, 2, 3), testBoxColor)
 	})
@@ -36,7 +35,7 @@ func TestBoxRecordsOneOp(t *testing.T) {
 		t.Fatalf("recorded %d ops, want a camera and a box", len(ops))
 	}
 	box := ops[1]
-	if box.Kind != scene.OpBox {
+	if box.Kind != OpBox {
 		t.Fatalf("the second op is kind %d, want OpBox", box.Kind)
 	}
 	if box.Transform.Position != (m.Vec3{X: 1, Y: 2, Z: 3}) {
@@ -48,7 +47,7 @@ func TestBoxRecordsOneOp(t *testing.T) {
 }
 
 func TestABoxIsOneInstancedDrawInItsCamerasPass(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Box(0, m.At(0, 0, 0), testBoxColor)
 	})
@@ -75,14 +74,14 @@ func TestABoxIsOneInstancedDrawInItsCamerasPass(t *testing.T) {
 }
 
 func TestACameraDrawsOnlyTheLayersItsMaskSelects(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
-		q.Camera(testCamera, func() scene.CameraDescr {
+	h := newHarness(t, func(q *OpQueue) {
+		q.Camera(testCamera, func() CameraDescr {
 			descr := testCameraDescr()
-			descr.CullMask = scene.Layer(1)
+			descr.CullMask = Layer(1)
 			return descr
 		}())
-		q.Box(scene.Layer(1), m.At(0, 0, 0), testBoxColor)
-		q.Box(scene.Layer(2), m.At(2, 0, 0), testBoxColor)
+		q.Box(Layer(1), m.At(0, 0, 0), testBoxColor)
+		q.Box(Layer(2), m.At(2, 0, 0), testBoxColor)
 	})
 	h.frame()
 
@@ -100,8 +99,8 @@ func TestACameraDrawsOnlyTheLayersItsMaskSelects(t *testing.T) {
 // plumbing, and the slice is per pass, so the second camera's first draw must
 // start at instance 0 of its own bound range - not at 1.
 func TestEveryPassBindsItsOwnInstanceSliceAndCountsFromZero(t *testing.T) {
-	const second scene.CameraID = -50
-	h := newHarness(t, func(q *scene.OpQueue) {
+	const second CameraID = -50
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Camera(second, testCameraDescr())
 		// Two colours, so the boxes are two batches: equal boxes would merge
@@ -148,7 +147,7 @@ func TestEveryPassBindsItsOwnInstanceSliceAndCountsFromZero(t *testing.T) {
 // pass. It binds no material storage: a material's numbers are its params,
 // which gfx packs into whatever the shader in effect declares.
 func TestEveryDrawBindsItsPasssFrame(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Box(0, m.At(0, 0, 0), testBoxColor)
 		q.Box(0, m.At(2, 0, 0), m.NewColorSrgb(1, 0, 0, 1))
@@ -171,7 +170,7 @@ func TestEveryDrawBindsItsPasssFrame(t *testing.T) {
 
 // One arena per binding, one upload each, whatever the frame draws.
 func TestTheFrameUploadsOneBufferPerArena(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		for i := range 8 {
 			q.Box(0, m.At(float32(i), 0, 0), testBoxColor)
@@ -194,7 +193,7 @@ func TestTheFrameUploadsOneBufferPerArena(t *testing.T) {
 }
 
 func TestAFrameWithNoBoxesStillEmitsItsPass(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 	})
 	h.frame()
@@ -211,7 +210,7 @@ func TestAFrameWithNoBoxesStillEmitsItsPass(t *testing.T) {
 // composition that registers model ahead of scene has it in place before the
 // first frame. model's own tests hold the mount to the embedded bytes.
 func TestTheBundledShaderIsMountedForTheFirstFrame(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {})
+	h := newHarness(t, func(q *OpQueue) {})
 	if len(h.readFile(t, model.SceneShaderPath)) == 0 {
 		t.Fatal("the bundled shader is mounted empty")
 	}
@@ -223,7 +222,7 @@ func TestTheBundledShaderIsMountedForTheFirstFrame(t *testing.T) {
 // the frame - CreateBindGroup fails, its error is swallowed, and the whole
 // frame's command buffer vanishes with no error anywhere.
 func TestEveryDrawBindsAllFivePbrSlots(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Box(0, m.At(0, 0, 0), testBoxColor)
 	})
@@ -263,7 +262,7 @@ func TestEveryDrawBindsAllFivePbrSlots(t *testing.T) {
 // The defaults are baked once, not once per frame: they are durable textures
 // like any other, and rebaking them every frame would upload two texels forever.
 func TestTheDefaultTexturesAreBakedOnce(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		q.Box(0, m.At(0, 0, 0), testBoxColor)
 	})
@@ -287,7 +286,7 @@ func TestACamerasSunAndAmbientReachItsFrameBlock(t *testing.T) {
 	descr.SunDirection = m.Vec3{Y: -1}
 	descr.SunColor = m.NewColorLinear(1, 1, 1, 1)
 	descr.AmbientSky = m.NewColorLinear(0.2, 0.3, 0.4, 1)
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, descr)
 		q.Box(0, m.At(0, 0, 0), testBoxColor)
 	})

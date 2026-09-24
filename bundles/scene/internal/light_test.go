@@ -5,8 +5,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
+
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -32,7 +31,7 @@ func preparedPointLights(n int) []preparedLight {
 	return lights
 }
 
-func preparePointLight(position m.Vec3, rng float32, layers scene.LayerMask) preparedLight {
+func preparePointLight(position m.Vec3, rng float32, layers LayerMask) preparedLight {
 	descr := model.LightDescr{Position: position, Range: rng, Color: m.NewColorLinear(1, 1, 1, 1), Kind: model.LightPoint}
 	record, _ := model.PackLight(descr)
 	sphere, cullable := lightBounds(descr)
@@ -69,12 +68,12 @@ func TestLightsAreCulledAgainstTheFrustumBeforeTheCap(t *testing.T) {
 // decides whose buffer the light lands in, and nothing else.
 func TestALightLayerMaskSelectsCameras(t *testing.T) {
 	lights := []preparedLight{
-		preparePointLight(m.Vec3{Z: -5}, 0, scene.Layer(1)),
-		preparePointLight(m.Vec3{Z: -5}, 0, scene.Layer(2)),
+		preparePointLight(m.Vec3{Z: -5}, 0, Layer(1)),
+		preparePointLight(m.Vec3{Z: -5}, 0, Layer(2)),
 		preparePointLight(m.Vec3{Z: -5}, 0, 0), // every layer
 	}
 	var selection model.LightSelection
-	selectLights(&selection, forwardFrustum(), m.Vec3{}, scene.Layer(2), lights)
+	selectLights(&selection, forwardFrustum(), m.Vec3{}, Layer(2), lights)
 	if selection.Count() != 2 {
 		t.Fatalf("a camera on layer 2 packed %d lights, want the layer-2 light and the unmasked one", selection.Count())
 	}
@@ -99,21 +98,21 @@ func TestASteadySelectionAllocatesNothing(t *testing.T) {
 // PointLight and SpotLight set Kind themselves over the one struct, and each
 // is one Op.
 func TestPointLightAndSpotLightRecordTheirKind(t *testing.T) {
-	var q scene.OpQueue
-	q.PointLight(scene.Layer(3), model.LightDescr{Position: m.Vec3{X: 1}, Kind: model.LightSpot})
+	var q OpQueue
+	q.PointLight(Layer(3), model.LightDescr{Position: m.Vec3{X: 1}, Kind: model.LightSpot})
 	q.SpotLight(0, model.LightDescr{Direction: m.Vec3{Z: -1}})
-	types.OpQueueBeginFlush(&q)
+	OpQueueBeginFlush(&q)
 	ops := q.Ops(nil)
-	if len(ops) != 2 || ops[0].Kind != scene.OpPointLight || ops[1].Kind != scene.OpSpotLight {
+	if len(ops) != 2 || ops[0].Kind != OpPointLight || ops[1].Kind != OpSpotLight {
 		t.Fatalf("recorded %+v, want a point light op then a spot light op", ops)
 	}
-	if ops[0].Light.Kind != model.LightPoint || ops[0].Layers != scene.Layer(3) || ops[0].Light.Position != (m.Vec3{X: 1}) {
+	if ops[0].Light.Kind != model.LightPoint || ops[0].Layers != Layer(3) || ops[0].Light.Position != (m.Vec3{X: 1}) {
 		t.Errorf("the point light op is %+v; PointLight should set Kind over the caller's struct", ops[0])
 	}
 	if ops[1].Light.Kind != model.LightSpot {
 		t.Errorf("the spot light op is %+v; SpotLight should set Kind", ops[1])
 	}
-	lights := types.OpQueueFlushLights(&q)
+	lights := OpQueueFlushLights(&q)
 	if len(lights) != 2 || lights[0].Descr.Kind != model.LightPoint || lights[1].Descr.Kind != model.LightSpot {
 		t.Errorf("the flush sees %+v", lights)
 	}

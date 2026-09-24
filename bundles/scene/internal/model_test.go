@@ -12,8 +12,7 @@ import (
 	"testing/fstest"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
-	"github.com/dvoyni/cog/bundles/scene/internal/types"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/qmuntal/gltf"
 	"github.com/qmuntal/gltf/modeler"
@@ -51,8 +50,8 @@ func modelFiles(data []byte) fstest.MapFS {
 
 // modelCamera stands well back from the origin, so that a model test asserts
 // what the packer did rather than where the shared test camera happens to point.
-func modelCamera() scene.CameraDescr {
-	return scene.CameraDescr{
+func modelCamera() CameraDescr {
+	return CameraDescr{
 		Transform: m.LookAt(m.Vec3{Z: 30}, m.Vec3{}, m.Vec3{Y: 1}),
 		FovY:      1.0472,
 		Near:      0.1, Far: 200,
@@ -61,10 +60,10 @@ func modelCamera() scene.CameraDescr {
 
 // drawModel is the recorder every model test uses: one camera looking at the
 // origin and one model draw.
-func drawModel(path string, draw scene.ModelDraw) func(*scene.OpQueue) {
-	return func(q *scene.OpQueue) {
+func drawModel(path string, draw ModelDraw) func(*OpQueue) {
+	return func(q *OpQueue) {
 		q.Camera(cameraMain, modelCamera())
-		q.Model(scene.LayersAll, path, draw)
+		q.Model(LayersAll, path, draw)
 	}
 }
 
@@ -74,7 +73,7 @@ func drawModel(path string, draw scene.ModelDraw) func(*scene.OpQueue) {
 // this design takes and which Preload is the lever for.
 func TestAModelDrawsInTheFrameThatNamedIt(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, onePrimitiveModel(t))),
-		drawModel(modelPath, scene.ModelDraw{}))
+		drawModel(modelPath, ModelDraw{}))
 	h.frame()
 	passes := h.passes()
 	if len(passes) != 1 || passes[0].Instances != 1 {
@@ -92,7 +91,7 @@ func TestAModelDrawsInTheFrameThatNamedIt(t *testing.T) {
 // default is nil and a nil model expands into no primitives, so the frame has a
 // hole in it and nothing was stood in for the file.
 func TestAModelThatFailedToLoadDrawsNothing(t *testing.T) {
-	h := newHarnessWithFiles(t, fstest.MapFS{}, drawModel("models/absent.glb", scene.ModelDraw{}))
+	h := newHarnessWithFiles(t, fstest.MapFS{}, drawModel("models/absent.glb", ModelDraw{}))
 	h.frame()
 	if passes := h.passes(); len(passes) != 1 || passes[0].Instances != 0 {
 		t.Fatalf("packed %v, want nothing at all: skip, never substitute", passes)
@@ -108,7 +107,7 @@ func TestAModelCallIsOneOp(t *testing.T) {
 	sceneOf(doc, 0, 1)
 	doc.Scene = gltf.Index(0)
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)),
-		drawModel(modelPath, scene.ModelDraw{Transform: m.At(1, 2, 3)}))
+		drawModel(modelPath, ModelDraw{Transform: m.At(1, 2, 3)}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		passes := h.passes()
 		return len(passes) == 1 && passes[0].Instances == 2
@@ -116,7 +115,7 @@ func TestAModelCallIsOneOp(t *testing.T) {
 	ops := h.ops()
 	models := 0
 	for _, op := range ops {
-		if op.Kind == scene.OpModel {
+		if op.Kind == OpModel {
 			models++
 			if op.Path != modelPath {
 				t.Errorf("op path = %q, want %q", op.Path, modelPath)
@@ -142,7 +141,7 @@ func TestAResidentModelDrawsOneBatchPerPrimitive(t *testing.T) {
 	}
 	sceneOf(doc, 0, 1, 2)
 	doc.Scene = gltf.Index(0)
-	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, scene.ModelDraw{}))
+	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, ModelDraw{}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 3
 	})
@@ -170,7 +169,7 @@ func TestModelInstancingPacksEachPrimitiveAsOneBatch(t *testing.T) {
 	}
 	sceneOf(doc, 0, 1)
 	doc.Scene = gltf.Index(0)
-	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, scene.ModelDraw{
+	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, ModelDraw{
 		Transforms: []m.Transform{m.At(0, 0, 0), m.At(2, 0, 0), m.At(4, 0, 0)},
 	}))
 	h.frameUntil(t, "the model to become resident", func() bool {
@@ -196,7 +195,7 @@ func TestAModelDrawFoldsTheDrawTransformOverTheFlattenedMatrix(t *testing.T) {
 	sceneOf(doc, 0)
 	doc.Scene = gltf.Index(0)
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)),
-		drawModel(modelPath, scene.ModelDraw{Transform: m.At(10, 0, 0)}))
+		drawModel(modelPath, ModelDraw{Transform: m.At(10, 0, 0)}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
 	})
@@ -204,8 +203,8 @@ func TestAModelDrawFoldsTheDrawTransformOverTheFlattenedMatrix(t *testing.T) {
 	// sphere has to sit where the two matrices put it, which is what the cull
 	// tests it against.
 	var world m.Sphere
-	h.inspect(func(q *scene.OpQueue) {
-		draws := types.OpQueueFlushDraws(q)
+	h.inspect(func(q *OpQueue) {
+		draws := OpQueueFlushDraws(q)
 		if len(draws) != 1 {
 			t.Fatalf("draws = %d, want the one expanded primitive", len(draws))
 		}
@@ -213,7 +212,7 @@ func TestAModelDrawFoldsTheDrawTransformOverTheFlattenedMatrix(t *testing.T) {
 	})
 	// The triangle's declared box is (0,0,0)..(1,1,0), so its sphere sits at
 	// (0.5, 0.5, 0) before the node's 3 on Y and the draw's 10 on X.
-	if got := world.Center; abs32(got.X-10.5) > 1e-4 || abs32(got.Y-3.5) > 1e-4 {
+	if got := world.Center; typesAbs32(got.X-10.5) > 1e-4 || typesAbs32(got.Y-3.5) > 1e-4 {
 		t.Errorf("the primitive sits at %v, want {10.5 3.5 0}", got)
 	}
 }
@@ -225,7 +224,7 @@ func TestAModelDrawFoldsTheDrawTransformOverTheFlattenedMatrix(t *testing.T) {
 // under the descriptor that named it - and what the cache keeps is the loader's
 // nil default, which is the entry that makes the second frame read nothing.
 func TestAMissingModelReportsOnceAndNeverRetries(t *testing.T) {
-	h := newHarnessWithFiles(t, fstest.MapFS{}, drawModel("models/absent.glb", scene.ModelDraw{}))
+	h := newHarnessWithFiles(t, fstest.MapFS{}, drawModel("models/absent.glb", ModelDraw{}))
 	for i := 0; i < 20; i++ {
 		h.frame()
 	}
@@ -246,7 +245,7 @@ func TestAMissingModelReportsOnceAndNeverRetries(t *testing.T) {
 func TestARequiredExtensionFailsTheModelWholesale(t *testing.T) {
 	doc := onePrimitiveModel(t)
 	doc.ExtensionsRequired = []string{"KHR_draco_mesh_compression"}
-	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, scene.ModelDraw{}))
+	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, ModelDraw{}))
 	h.frameUntil(t, "the failure to be reported", func() bool {
 		var unavailable model.ErrModelUnavailable
 		return anyErrorAs(h.errors(), &unavailable)
@@ -272,7 +271,7 @@ func TestAModelBindsItsEmbeddedTexture(t *testing.T) {
 		BaseColorTexture: &gltf.TextureInfo{Index: 0},
 	}}}
 	doc.Meshes[0].Primitives[0].Material = gltf.Index(0)
-	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, scene.ModelDraw{}))
+	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, ModelDraw{}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
 	})
@@ -296,7 +295,7 @@ func TestModelLightsLoadTheFileAndReturnItsLights(t *testing.T) {
 		"lights": []map[string]any{{"type": "point", "name": "bulb", "intensity": 2.0}},
 	}}
 	doc.Nodes[0].Extensions = gltf.Extensions{"KHR_lights_punctual": map[string]any{"light": 0}}
-	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), func(*scene.OpQueue) {})
+	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), func(*OpQueue) {})
 
 	var lights []model.ModelLight
 	var ok bool
@@ -335,7 +334,7 @@ func TestNodesSharingAMeshShareOneMeshID(t *testing.T) {
 	}
 	sceneOf(doc, 0, 1)
 	doc.Scene = gltf.Index(0)
-	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, scene.ModelDraw{}))
+	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, ModelDraw{}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 2
 	})
@@ -350,7 +349,7 @@ func TestNodesSharingAMeshShareOneMeshID(t *testing.T) {
 // claim fresh mesh slots, so a stable mesh id over many frames is what pins it.
 func TestAModelDrawnEveryFrameLoadsOnce(t *testing.T) {
 	h := newHarnessWithFiles(t, modelFiles(glb(t, onePrimitiveModel(t))),
-		drawModel(modelPath, scene.ModelDraw{}))
+		drawModel(modelPath, ModelDraw{}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
 	})
@@ -382,7 +381,7 @@ func TestAnUnboundedModelIsNeverCulled(t *testing.T) {
 	doc.Scene = gltf.Index(0)
 	// Far behind the camera, where a bounded model would certainly be culled.
 	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)),
-		drawModel(modelPath, scene.ModelDraw{Transform: m.At(0, 0, 400)}))
+		drawModel(modelPath, ModelDraw{Transform: m.At(0, 0, 400)}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 1
 	})
@@ -418,7 +417,7 @@ func TestAModelBindsItsOwnMaterialNumbers(t *testing.T) {
 	doc.Nodes = []*gltf.Node{{Mesh: gltf.Index(0)}}
 	sceneOf(doc, 0)
 	doc.Scene = gltf.Index(0)
-	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, scene.ModelDraw{}))
+	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), drawModel(modelPath, ModelDraw{}))
 	h.frameUntil(t, "the model to become resident", func() bool {
 		return len(h.passes()) == 1 && h.passes()[0].Instances == 2
 	})
@@ -431,8 +430,8 @@ func TestAModelBindsItsOwnMaterialNumbers(t *testing.T) {
 		t.Errorf("both primitives report mesh %d, want two", batches[0].MeshID)
 	}
 	var records []m.Vec4
-	h.inspect(func(q *scene.OpQueue) {
-		for _, draw := range types.OpQueueFlushDraws(q) {
+	h.inspect(func(q *OpQueue) {
+		for _, draw := range OpQueueFlushDraws(q) {
 			base, _ := numberOf(draw, "baseColorFactor")
 			records = append(records, base)
 		}
@@ -449,7 +448,7 @@ func TestAModelBindsItsOwnMaterialNumbers(t *testing.T) {
 	}
 }
 
-func abs32(value float32) float32 {
+func typesAbs32(value float32) float32 {
 	if value < 0 {
 		return -value
 	}

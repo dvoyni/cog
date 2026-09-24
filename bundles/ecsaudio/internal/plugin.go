@@ -39,10 +39,11 @@ const (
 )
 
 // Register declares the two Components, the plugin-owned correspondence and
-// the one System. The m.Transform they are placed by is the ecs plugin's. A Component is registered by the plugin that defines its Go
-// type, which is what keeps cog's coupling check working on Component data: the
-// types are declared in ecsaudio's root, and this plugin, shipped in the same
-// Bundle, registers them under ecsaudio.Name.
+// the one System. The m.Transform they are placed by is the ecs plugin's. A
+// Component is registered by the plugin that defines its Go type, which is what
+// keeps cog's coupling check working on Component data: the types are declared
+// in this package, aliased by ecsaudio's root, and registered here under
+// ecsaudio.Name.
 func (plugin) Register(registrar *kernel.Registrar, _ any) error {
 	ecs.RegisterComponent[Emitter](registrar, emitterReserve)
 	ecs.RegisterComponent[Listener](registrar, listenerReserve)

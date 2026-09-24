@@ -1,8 +1,7 @@
 package ecs
 
 import (
-	"github.com/dvoyni/cog/bundles/ecs/internal/types"
-	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/bundles/ecs/internal"
 )
 
 // ShrinkCmd gives memory back after a spike, and it is the only thing in the
@@ -24,7 +23,7 @@ import (
 // Every handler that touches a Store holds read{*Entities}, so that one lock
 // excludes every ECS System while it runs and costs nothing in a frame that
 // does not execute it.
-type ShrinkCmd kernel.Command[ShrinkRequest, ShrinkResponse]
+type ShrinkCmd = internal.ShrinkCmd
 
 // ShrinkRequest names the areas a ShrinkCmd leaves alone. The zero value
 // shrinks everything:
@@ -37,8 +36,8 @@ type ShrinkCmd kernel.Command[ShrinkRequest, ShrinkResponse]
 //     a dropped index never matches the Entity that index is later allocated to;
 //   - KeepScratch keeps per-System buffers: a Query's walk, and a writer's row
 //     copies for Changed.
-type ShrinkRequest = types.ShrinkRequest
+type ShrinkRequest = internal.ShrinkRequest
 
 // ShrinkResponse is the bytes a ShrinkCmd released, per area. An area kept
 // reports 0.
-type ShrinkResponse = types.ShrinkResponse
+type ShrinkResponse = internal.ShrinkResponse

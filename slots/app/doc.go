@@ -1,12 +1,12 @@
 // Package app declares the app Slot: the platform-agnostic application loop. It
-// declares the events every loop publishes (InitEvent, UpdateEvent,
+// offers the events every loop publishes (InitEvent, UpdateEvent,
 // RenderEvent, WindowSizeChangeEvent, QuitEvent), the QuitCmd and TimeCmd
 // commands, and the MainLoop the Slot requires.
 //
 // The plugin, built by appplugin.New, owns everything about the loop that does
 // not vary by platform: the fixed-step accumulator and render interpolation,
 // the tick source behind TimeCmd with its pause, step and hold, tick numbering,
-// and the publication of every event declared here. It offers the tick source
+// and the publication of every event offered here. It offers the tick source
 // to an agent as the tool app_time.
 //
 // app is a Slot: it requires exactly one Adapter for MainLoopPort, the platform

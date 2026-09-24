@@ -7,7 +7,6 @@ import (
 
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/slots/app"
 )
 
 // provider is what app contributes to the mcp Port: its one capability. app is
@@ -60,15 +59,15 @@ const timeDescription = "Stop, start or single-step the game's update loop. `pau
 	"you disconnect — it stays paused until something resumes it, and a hold you walk away from " +
 	"expires by itself."
 
-// TimeRequest asks the engine to pause, resume, step, hold, release or report.
-type TimeRequest struct {
+// timeToolRequest asks the engine to pause, resume, step, hold, release or report.
+type timeToolRequest struct {
 	Action string `json:"action" jsonschema:"one of pause, resume, step, hold, release or status"`
 	Steps  int    `json:"steps,omitempty" jsonschema:"how many ticks step advances; default 1, maximum 600"`
 	Ms     int    `json:"ms,omitempty" jsonschema:"hold: how long the hold may stand before expiring, in milliseconds; default 1000, maximum 10000"`
 }
 
-// TimeResponse reports the tick source as the call left it, on every action.
-type TimeResponse struct {
+// timeToolResponse reports the tick source as the call left it, on every action.
+type timeToolResponse struct {
 	// Paused reports whether update ticks are stopped.
 	Paused bool `json:"paused"`
 	// Stepped is how many ticks this call advanced the game by.
@@ -105,27 +104,27 @@ func (provider) Capabilities() []mcp.Capability {
 // It is a package function rather than a method to keep the capability-body
 // rule visible at the call site — the plugin is one pointer away and the body
 // still reaches it only by dispatch.
-func timeControl(k kernel.Executioner, request TimeRequest) (TimeResponse, error) {
+func timeControl(k kernel.Executioner, request timeToolRequest) (timeToolResponse, error) {
 	action, known := timeActions[request.Action]
 	if !known {
-		return TimeResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
+		return timeToolResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
 			"%q is not an action — use pause, resume, step, hold, release or status", request.Action)}
 	}
-	if action != app.TimeStep && request.Steps != 0 {
-		return TimeResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
+	if action != TimeStep && request.Steps != 0 {
+		return timeToolResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
 			"steps applies to step, not to %s", request.Action)}
 	}
 	if request.Steps < 0 || request.Steps > maxTimeSteps {
-		return TimeResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
+		return timeToolResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
 			"steps is %d; ask for between 1 and %d — ten seconds of simulation — and call step "+
 				"again for more", request.Steps, maxTimeSteps)}
 	}
-	if action != app.TimeHold && request.Ms != 0 {
-		return TimeResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
+	if action != TimeHold && request.Ms != 0 {
+		return timeToolResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
 			"ms applies to hold, not to %s", request.Action)}
 	}
 	if request.Ms < 0 || time.Duration(request.Ms)*time.Millisecond > maxHoldDuration {
-		return TimeResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
+		return timeToolResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
 			"ms is %d; hold for between 1 and %d — a window an agent that walks away cannot "+
 				"leave open — and hold again for another", request.Ms,
 			maxHoldDuration.Milliseconds())}
@@ -135,25 +134,25 @@ func timeControl(k kernel.Executioner, request TimeRequest) (TimeResponse, error
 	// to postpone one, so the wait that names a stalled engine is extended by
 	// however long the window may stay open. Nothing else here waits at all.
 	var wait time.Duration
-	if action == app.TimeStep {
-		status := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{Action: app.TimeStatus})
+	if action == TimeStep {
+		status := k.ExecuteCommand[TimeCmd](TimeRequest{Action: TimeStatus})
 		if status.Err != nil {
-			return TimeResponse{}, timeFailure(status.Err)
+			return timeToolResponse{}, timeFailure(status.Err)
 		}
 		wait = stepDeadline + status.HoldFor
 	}
-	answer := k.ExecuteCommand[app.TimeCmd](app.TimeRequest{
+	answer := k.ExecuteCommand[TimeCmd](TimeRequest{
 		Action: action, Steps: request.Steps,
 		Hold: time.Duration(request.Ms) * time.Millisecond,
 		Wait: wait,
 	})
 	if answer.Err != nil {
-		return TimeResponse{}, timeFailure(answer.Err)
+		return timeToolResponse{}, timeFailure(answer.Err)
 	}
 	if refusal, refused := timeRefusal(action, answer); refused {
-		return TimeResponse{}, refusal
+		return timeToolResponse{}, refusal
 	}
-	return TimeResponse{
+	return timeToolResponse{
 		Paused:      answer.Paused,
 		Stepped:     answer.Stepped,
 		Advanced:    answer.Advanced,
@@ -168,14 +167,14 @@ func timeControl(k kernel.Executioner, request TimeRequest) (TimeResponse, error
 // The domain refusals the tick source raises are expected outcomes rather
 // than faults, so they read as prose here; anything else travels as it is.
 func timeFailure(err error) error {
-	var notPublished app.ErrStepNotPublished
+	var notPublished ErrStepNotPublished
 	if errors.As(err, &notPublished) {
 		return mcp.Unavailable{Reason: fmt.Sprintf(
 			"no tick was published within %s — the window may be minimised, the game may have "+
 				"stopped rendering, or a hold may still be open; the steps will run when it "+
 				"draws again", stepDeadline)}
 	}
-	var tooLong app.ErrHoldTooLong
+	var tooLong ErrHoldTooLong
 	if errors.As(err, &tooLong) {
 		return mcp.Unavailable{Reason: fmt.Sprintf(
 			"a hold may stand for at most %d ms, and %d was asked for",
@@ -187,35 +186,35 @@ func timeFailure(err error) error {
 // timeActions maps the wire's action onto the contract's. The mapping lives
 // here rather than on app.TimeAction because an engine contract owes nothing
 // to a wire format.
-var timeActions = map[string]app.TimeAction{
-	"status":  app.TimeStatus,
-	"pause":   app.TimePause,
-	"resume":  app.TimeResume,
-	"step":    app.TimeStep,
-	"hold":    app.TimeHold,
-	"release": app.TimeRelease,
+var timeActions = map[string]TimeAction{
+	"status":  TimeStatus,
+	"pause":   TimePause,
+	"resume":  TimeResume,
+	"step":    TimeStep,
+	"hold":    TimeHold,
+	"release": TimeRelease,
 }
 
 // timeRefusal turns a request that asked for a state the engine is already in
 // into an expected outcome the agent reads and moves past, rather than an
 // error. The reason carries the state, because an Unavailable is words rather
 // than the response struct every other call answers with.
-func timeRefusal(action app.TimeAction, answer app.TimeResponse) (mcp.Unavailable, bool) {
+func timeRefusal(action TimeAction, answer TimeResponse) (mcp.Unavailable, bool) {
 	if answer.Changed {
 		return mcp.Unavailable{}, false
 	}
 	switch action {
-	case app.TimePause:
+	case TimePause:
 		return mcp.Unavailable{Reason: fmt.Sprintf(
 			"the engine is already paused, %d ticks in — step to advance it, or resume to let "+
 				"it run", answer.Advanced)}, true
-	case app.TimeResume:
+	case TimeResume:
 		return mcp.Unavailable{Reason: "the engine is not paused — it is already running in real time"}, true
-	case app.TimeHold:
+	case TimeHold:
 		return mcp.Unavailable{Reason: fmt.Sprintf(
 			"a hold is already open, for another %d ms — arm what you want paired, then release "+
 				"it", answer.HoldFor.Milliseconds())}, true
-	case app.TimeRelease:
+	case TimeRelease:
 		if answer.HoldExpired {
 			return mcp.Unavailable{Reason: "the hold ran out before you released it, so anything " +
 				"armed after it ran out is on a later tick — compare the tick each snapshot " +

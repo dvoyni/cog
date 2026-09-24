@@ -67,8 +67,8 @@ func (plugin) Dependencies() []kernel.PluginName {
 // through registerDebug the debug shapes' ten.
 // A Component is registered by the plugin that defines its Go type, which is
 // what keeps cog's coupling check working on Component data: the types are
-// declared in ecsscene's root, and this plugin, shipped in the same
-// Bundle, registers them under ecsscene.Name. The m.Transform an Entity is
+// declared in this package, aliased by ecsscene's root, and registered here
+// under ecsscene.Name. The m.Transform an Entity is
 // drawn at is not among them: it is the ecs plugin's, and every binding reads
 // the same Store.
 func (plugin) Register(registrar *kernel.Registrar, _ any) error {

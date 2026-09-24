@@ -5,7 +5,6 @@ import (
 
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
-	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // The depth half of depthpass_test.go. A DepthNone() pass has no depth
@@ -16,8 +15,8 @@ import (
 // that keeps the two in step.
 
 func TestADrawInADepthNonePassBuildsAPipelineWithNoDepthTarget(t *testing.T) {
-	backend, _ := passFrame(t, func(q *gfx.OpQueue) {
-		q.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthNone(), Load: gfx.LoadClear, Label: "flat"})
+	backend, _ := passFrame(t, func(q *OpQueue) {
+		q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthNone(), Load: LoadClear, Label: "flat"})
 		drawInto(q)
 	})
 	if len(backend.lastPipelines) != 1 {
@@ -31,10 +30,10 @@ func TestADrawInADepthNonePassBuildsAPipelineWithNoDepthTarget(t *testing.T) {
 func TestOneShaderInADepthPassAndADepthNonePassBuildsTwoPipelines(t *testing.T) {
 	// As with noColor, the flag has to be in the cache key: a key that ignored
 	// it would hand the second pass whichever pipeline the first one built.
-	backend, _ := passFrame(t, func(q *gfx.OpQueue) {
-		q.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Load: gfx.LoadClear, Order: 0, Label: "lit"})
+	backend, _ := passFrame(t, func(q *OpQueue) {
+		q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: LoadClear, Order: 0, Label: "lit"})
 		drawInto(q)
-		q.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthNone(), Order: 1, Label: "flat"})
+		q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthNone(), Order: 1, Label: "flat"})
 		drawInto(q)
 	})
 	if len(backend.lastPipelines) != 2 {
@@ -54,9 +53,9 @@ func TestOneShaderInADepthPassAndADepthNonePassBuildsTwoPipelines(t *testing.T) 
 }
 
 func TestADrawInADepthAutoPassKeepsItsDepthTarget(t *testing.T) {
-	backend, _ := passFrame(t, func(q *gfx.OpQueue) {
-		q.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Load: gfx.LoadClear, Label: "lit"})
-		q.Draw(triangle(), testMaterial(), gfx.MatParam("mvp", m.NewMat4()))
+	backend, _ := passFrame(t, func(q *OpQueue) {
+		q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: LoadClear, Label: "lit"})
+		q.Draw(triangle(), testMaterial(), MatParam("mvp", m.NewMat4()))
 	})
 	if len(backend.lastPipelines) != 1 {
 		t.Fatalf("pipelines = %d, want one", len(backend.lastPipelines))
@@ -65,24 +64,24 @@ func TestADrawInADepthAutoPassKeepsItsDepthTarget(t *testing.T) {
 	if desc.NoDepthTarget {
 		t.Error("a DepthAuto pass built a pipeline with no depth target")
 	}
-	if desc.DepthFormat != gfx.FormatDepth32F {
+	if desc.DepthFormat != FormatDepth32F {
 		t.Errorf("depth format = %v, want the engine's one depth format", desc.DepthFormat.Name())
 	}
 }
 
 func TestADrawInADepthTargetPassKeepsItsDepthTarget(t *testing.T) {
-	var shadow gfx.TextureDescr
+	var shadow TextureDescr
 	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
-	withResourceQueue(t, k, func(resources *gfx.ResourceQueue) {
-		shadow = resources.AllocateTexture(64, 64, 1, gfx.FormatDepth32F)
+	withResourceQueue(t, k, func(resources *ResourceQueue) {
+		shadow = resources.AllocateTexture(64, 64, 1, FormatDepth32F)
 	})
 	q := recordRaw(t, k)
-	q.Pass(gfx.PassDescr{Target: gfx.NoTarget(), Depth: gfx.DepthTarget(shadow), DepthLoad: gfx.LoadClear, Label: "shadow"})
+	q.Pass(PassDescr{Target: NoTarget(), Depth: DepthTarget(shadow), DepthLoad: LoadClear, Label: "shadow"})
 	drawInto(q)
-	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	if len(backend.lastPipelines) != 1 {
@@ -92,7 +91,7 @@ func TestADrawInADepthTargetPassKeepsItsDepthTarget(t *testing.T) {
 	if desc.NoDepthTarget {
 		t.Error("a DepthTarget pass built a pipeline with no depth target")
 	}
-	if desc.DepthFormat != gfx.FormatDepth32F {
+	if desc.DepthFormat != FormatDepth32F {
 		t.Errorf("depth format = %v, want the engine's one depth format", desc.DepthFormat.Name())
 	}
 }

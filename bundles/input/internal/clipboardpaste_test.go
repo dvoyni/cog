@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dvoyni/cog/bundles/input"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -17,27 +16,27 @@ type pasteProbeResponse struct {
 }
 
 type pastePlugin struct {
-	pastec chan<- input.ClipboardPasteEvent
+	pastec chan<- ClipboardPasteEvent
 }
 
-type testClipboardPasteEventHandler kernel.Subscription[input.ClipboardPasteEvent]
+type testClipboardPasteEventHandler kernel.Subscription[ClipboardPasteEvent]
 
 func (pastePlugin) Name() kernel.PluginName { return "test" }
 
-func (pastePlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{input.Name} }
+func (pastePlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{Name} }
 
 func (p pastePlugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.HandleCommand[pasteProbeCmd](func() (kernel.Lock, kernel.Execute[pasteProbeRequest, pasteProbeResponse]) {
-		var state kernel.Read[*input.State]
+		var state kernel.Read[*State]
 		return func(access kernel.ResourceAccess) {
-				state = access.GetRead[*input.State]()
+				state = access.GetRead[*State]()
 			}, func(kernel.Kernel, pasteProbeRequest) pasteProbeResponse {
 				text, pasted := state.Get().ClipboardPaste()
 				return pasteProbeResponse{Text: text, Pasted: pasted}
 			}
 	})
-	registrar.Subscribe[testClipboardPasteEventHandler](func() (kernel.Lock, kernel.Observe[input.ClipboardPasteEvent]) {
-		return nil, func(_ kernel.Kernel, event input.ClipboardPasteEvent) {
+	registrar.Subscribe[testClipboardPasteEventHandler](func() (kernel.Lock, kernel.Observe[ClipboardPasteEvent]) {
+		return nil, func(_ kernel.Kernel, event ClipboardPasteEvent) {
 			p.pastec <- event
 		}
 	})
@@ -47,7 +46,7 @@ func (p pastePlugin) Register(registrar *kernel.Registrar, _ any) error {
 // A paste is published as it arrives and read, like a key's edge, on the tick
 // after it: that tick and no other.
 func TestClipboardPasteIsPublishedAndLastsOneTick(t *testing.T) {
-	pastec := make(chan input.ClipboardPasteEvent, 1)
+	pastec := make(chan ClipboardPasteEvent, 1)
 	engine := kernel.New(nil).Handler(func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
 		return err
@@ -57,7 +56,7 @@ func TestClipboardPasteIsPublishedAndLastsOneTick(t *testing.T) {
 	<-engine.Ready()
 	k := engine.Executioner()
 
-	k.ExecuteCommand[input.ApplyCmd](input.ApplyRequest{Changes: []input.Change{input.ClipboardPasteChange(`{"units":{}}`)}})
+	k.ExecuteCommand[ApplyCmd](ApplyRequest{Changes: []Change{ClipboardPasteChange(`{"units":{}}`)}})
 
 	select {
 	case event := <-pastec:

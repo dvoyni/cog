@@ -1,8 +1,7 @@
 package storage
 
 import (
-	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/slots/storage/internal/types"
+	"github.com/dvoyni/cog/slots/storage/internal"
 )
 
 // PermanentFS is the interface storage's Adapter implements: the filesystem
@@ -12,7 +11,7 @@ import (
 // WriteAccess exposes the mutating half to write-lock holders. Operation names
 // use fs.ValidPath form.
 //
-// It is declared in internal/types, beside the FileSystem that holds it, and
+// It is declared in internal, beside the FileSystem that holds it, and
 // aliased here:
 //
 //	interface {
@@ -22,12 +21,12 @@ import (
 //		Remove(name string) error
 //		Rename(oldName, newName string) error
 //	}
-type PermanentFS = types.PermanentFS
+type PermanentFS = internal.PermanentFS
 
 // PermanentFSPort is the Port storage requires exactly one Adapter for: the
 // permanent filesystem an Extension such as diskstorage or jsstorage provides.
 // A composition without one fails with kernel.ErrMissingAdapter.
-type PermanentFSPort kernel.RequiredPort[PermanentFS]
+type PermanentFSPort = internal.PermanentFSPort
 
 // ReadMountPort is the Port storage collects every read mount through, zero
 // included. It is built on ReadMount itself, since a mount is plain data: any
@@ -44,4 +43,4 @@ type PermanentFSPort kernel.RequiredPort[PermanentFS]
 // plugin that depends on storage starts. A mount with an empty id or a nil FS
 // fails that Start with ErrInvalidMount, PermanentMount with ErrReservedMount,
 // and an id contributed twice with ErrDuplicateMount.
-type ReadMountPort kernel.CollectedPort[ReadMount]
+type ReadMountPort = internal.ReadMountPort

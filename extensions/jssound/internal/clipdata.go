@@ -8,7 +8,6 @@ import (
 	"math"
 	"syscall/js"
 
-	"github.com/dvoyni/cog/extensions/jssound"
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/sound"
@@ -237,10 +236,10 @@ func (c *clipData) sourceFrame(seconds float64) int64 {
 func readHeaders(encoded assets.Blob) (*clipData, error) {
 	length, format, err := oggvorbis.GetLength(bytes.NewReader(encoded.Data()))
 	if err != nil {
-		return nil, jssound.ErrNotOggVorbis{Err: err}
+		return nil, ErrNotOggVorbis{Err: err}
 	}
 	if format.SampleRate <= 0 || format.Channels <= 0 || format.Channels > outChannels {
-		return nil, jssound.ErrNoStreamFormat{SampleRate: format.SampleRate, Channels: format.Channels}
+		return nil, ErrNoStreamFormat{SampleRate: format.SampleRate, Channels: format.Channels}
 	}
 	clip := &clipData{
 		buffer:     js.Undefined(),
@@ -281,7 +280,7 @@ func readHeaders(encoded assets.Blob) (*clipData, error) {
 func (c *clipData) resolve(length int64) error {
 	frames, region, ignored := clipBounds(c.encoded, c.sourceRate, length, length)
 	if frames <= 0 {
-		return jssound.ErrNoStreamLength{}
+		return ErrNoStreamLength{}
 	}
 	c.frames, c.region, c.ignored = frames, region, ignored
 	c.duration = float32(frames) / float32(c.sourceRate)
@@ -298,7 +297,7 @@ func (c *clipData) resolve(length int64) error {
 func (c *clipData) measure() error {
 	decoder, err := c.open(c.encoded)
 	if err != nil {
-		return jssound.ErrNotOggVorbis{Err: err}
+		return ErrNotOggVorbis{Err: err}
 	}
 	defer decoder.close()
 	scratch := make([]float32, decodeChunk*c.channels)
@@ -308,13 +307,13 @@ func (c *clipData) measure() error {
 		frames += int64(read / c.channels)
 		if err != nil || read == 0 {
 			if err != nil && err != io.EOF {
-				return jssound.ErrNotOggVorbis{Err: err}
+				return ErrNotOggVorbis{Err: err}
 			}
 			break
 		}
 	}
 	if frames <= 0 {
-		return jssound.ErrNoStreamLength{}
+		return ErrNoStreamLength{}
 	}
 	c.unmeasured = false
 	return c.resolve(frames)
@@ -336,10 +335,10 @@ func (c *clipData) measure() error {
 func decodeInWasm(audio *webAudio, encoded assets.Blob, clip *clipData) (js.Value, error) {
 	samples, format, err := oggvorbis.ReadAll(bytes.NewReader(encoded.Data()))
 	if err != nil {
-		return js.Undefined(), jssound.ErrNotOggVorbis{Err: err}
+		return js.Undefined(), ErrNotOggVorbis{Err: err}
 	}
 	if format.SampleRate != clip.sourceRate || format.Channels != clip.channels {
-		return js.Undefined(), jssound.ErrNoStreamFormat{SampleRate: format.SampleRate, Channels: format.Channels}
+		return js.Undefined(), ErrNoStreamFormat{SampleRate: format.SampleRate, Channels: format.Channels}
 	}
 	// Trimmed to the granule end rather than believed: the last packet may carry
 	// padding past the stream's true end, and the buffer this fills is what
@@ -349,13 +348,13 @@ func decodeInWasm(audio *webAudio, encoded assets.Blob, clip *clipData) (js.Valu
 		frames = decoded
 	}
 	if frames <= 0 {
-		return js.Undefined(), jssound.ErrNoStreamLength{}
+		return js.Undefined(), ErrNoStreamLength{}
 	}
 	samples = samples[:frames*format.Channels]
 
 	buffer, err := audio.newBuffer(format.Channels, frames, format.SampleRate)
 	if err != nil {
-		return js.Undefined(), jssound.ErrDecodeRefused{Message: err.Error()}
+		return js.Undefined(), ErrDecodeRefused{Message: err.Error()}
 	}
 	for channel := range format.Channels {
 		copyToChannel(buffer, channel, format.Channels, samples)

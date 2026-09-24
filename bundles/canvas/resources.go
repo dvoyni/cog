@@ -1,12 +1,12 @@
 package canvas
 
-import "github.com/dvoyni/cog/bundles/canvas/internal/types"
+import "github.com/dvoyni/cog/bundles/canvas/internal"
 
 // OpQueue is the frame-local writable resource used to record layered Canvas
 // operations. The Canvas plugin consumes and resets it at the end of each tick,
 // in FlushOnUpdate. It is a concrete type, and consuming it is the plugin's
 // alone.
-type OpQueue = types.OpQueue
+type OpQueue = internal.OpQueue
 
 // Lookup is the single Canvas-owned resource that holds canvas's five asset
 // caches - the sprite atlas, the standalone textures tiled sprites sample, the
@@ -17,4 +17,4 @@ type OpQueue = types.OpQueue
 // LookupDeviceAccess for the unloading ones; the resource itself never retains
 // filesystem or GPU handles. An unload frees at the call, and a later draw
 // reloads what it freed.
-type Lookup = types.Lookup
+type Lookup = internal.Lookup

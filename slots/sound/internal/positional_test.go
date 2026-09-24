@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/dvoyni/cog/slots/sound"
 )
 
 // gainTolerance is what "run-to-run determinism on one build, and explicitly
@@ -42,9 +41,9 @@ func closeEnough(got, want float32) bool {
 // unity in both - equal power, not a doubling.
 func TestANonPositionalVoiceIsHeardCentredAtEqualPower(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 10, channels: 1, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{Volume: m.Some[float32](1)})
+	voice := h.play(ClipWithResource(bell), 0, Params{Volume: m.Some[float32](1)})
 	h.tick()
 
 	info := h.probe(voice).Info
@@ -67,21 +66,21 @@ func TestANonPositionalVoiceIsHeardCentredAtEqualPower(t *testing.T) {
 // positional is a new Play.
 func TestTheFirstPositionMakesAVoicePositionalForTheRestOfItsLife(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 10, channels: 1, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
 	// A Falloff given to a Voice with no position is kept and takes effect
 	// when it gets one - which is the whole of what "kept" has to mean.
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{
+	voice := h.play(ClipWithResource(bell), 0, Params{
 		Volume:  m.Some[float32](1),
-		Falloff: m.Some(sound.DefaultFalloff()),
+		Falloff: m.Some(DefaultFalloff()),
 	})
 	h.tick()
 	if got := h.probe(voice).Info.Audibility; !closeEnough(got, 1) {
 		t.Fatalf("a Voice carrying a Falloff and no position is audible at %v, want 1", got)
 	}
 
-	h.record(func(queue *sound.Queue) {
-		queue.SetVoice(voice, sound.Params{Position: m.Some(m.Vec3{X: 4})})
+	h.record(func(queue *Queue) {
+		queue.SetVoice(voice, Params{Position: m.Some(m.Vec3{X: 4})})
 	})
 	h.tick()
 
@@ -112,10 +111,10 @@ func TestTheFirstPositionMakesAVoicePositionalForTheRestOfItsLife(t *testing.T) 
 // one ticket downstream.
 func TestAudibilityDoesNotMoveOverAConstantRadiusOrbit(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 600, channels: 1, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
 	const radius = 5
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{
+	voice := h.play(ClipWithResource(bell), 0, Params{
 		Volume:   m.Some[float32](1),
 		Position: m.Some(m.Vec3{Z: -radius}),
 	})
@@ -133,8 +132,8 @@ func TestAudibilityDoesNotMoveOverAConstantRadiusOrbit(t *testing.T) {
 			X: float32(math.Sin(radians) * radius),
 			Z: float32(-math.Cos(radians) * radius),
 		}
-		h.record(func(queue *sound.Queue) {
-			queue.SetVoice(voice, sound.Params{Position: m.Some(position)})
+		h.record(func(queue *Queue) {
+			queue.SetVoice(voice, Params{Position: m.Some(position)})
 		})
 		h.tick()
 
@@ -163,14 +162,14 @@ func TestAudibilityDoesNotMoveOverAConstantRadiusOrbit(t *testing.T) {
 // it here would make every coneless source directional.
 func TestAPositionalVoiceWithNoOrientationIsEquallyLoudInEveryDirection(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 600, channels: 1, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
 	// A cone that is silent outside 90 degrees. Were W3C's (1,0,0) default
 	// inherited, this Voice would be inaudible everywhere but on the +X axis.
-	narrow := sound.Cone{Inner: 60, Outer: 90, OuterGain: 0}
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{
+	narrow := Cone{Inner: 60, Outer: 90, OuterGain: 0}
+	voice := h.play(ClipWithResource(bell), 0, Params{
 		Volume:   m.Some[float32](1),
-		Falloff:  m.Some(sound.Falloff{Model: sound.DistanceInverse, Ref: 100, Max: 10000, Rolloff: 1}),
+		Falloff:  m.Some(Falloff{Model: DistanceInverse, Ref: 100, Max: 10000, Rolloff: 1}),
 		Cone:     m.Some(narrow),
 		Position: m.Some(m.Vec3{Z: -4}),
 	})
@@ -182,8 +181,8 @@ func TestAPositionalVoiceWithNoOrientationIsEquallyLoudInEveryDirection(t *testi
 	}
 
 	for _, at := range []m.Vec3{{X: 4}, {X: -4}, {Z: 4}, {Y: 4}} {
-		h.record(func(queue *sound.Queue) {
-			queue.SetVoice(voice, sound.Params{Position: m.Some(at)})
+		h.record(func(queue *Queue) {
+			queue.SetVoice(voice, Params{Position: m.Some(at)})
 		})
 		h.tick()
 		if got := h.probe(voice).Info.Audibility; !closeEnough(got, ahead) {
@@ -193,8 +192,8 @@ func TestAPositionalVoiceWithNoOrientationIsEquallyLoudInEveryDirection(t *testi
 
 	// Give it a facing and the same Cone bites: pointed along -Z with the
 	// Listener at the origin behind it, the Listener is outside the outer cone.
-	h.record(func(queue *sound.Queue) {
-		queue.SetVoice(voice, sound.Params{
+	h.record(func(queue *Queue) {
+		queue.SetVoice(voice, Params{
 			Position:    m.Some(m.Vec3{Z: -4}),
 			Orientation: m.Some(m.Quat{W: 1}),
 		})
@@ -210,32 +209,32 @@ func TestAPositionalVoiceWithNoOrientationIsEquallyLoudInEveryDirection(t *testi
 // lets a 2D game set its rotation once at startup and only ever move afterwards.
 func TestTheListenerIsReadableAndCoalescedFieldByField(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 10, channels: 1, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
 	// It reads back as the identity quaternion rather than the zero one,
 	// because the zero Quat is (0,0,0,0) and is not a rotation at all.
 	h.tick()
-	if got := h.probe(sound.NoVoice); got.ListenerAt != (m.Vec3{}) || got.ListenerFacing != (m.Quat{W: 1}) {
+	if got := h.probe(NoVoice); got.ListenerAt != (m.Vec3{}) || got.ListenerFacing != (m.Quat{W: 1}) {
 		t.Fatalf("before any call the Listener is at %v facing %v, want the origin, unrotated",
 			got.ListenerAt, got.ListenerFacing)
 	}
 
 	// The 2D recipe, set once and never restated.
 	flat := m.QuatRotationX(-math.Pi / 2)
-	h.record(func(queue *sound.Queue) {
-		queue.SetListener(sound.ListenerParams{Orientation: m.Some(flat)})
+	h.record(func(queue *Queue) {
+		queue.SetListener(ListenerParams{Orientation: m.Some(flat)})
 	})
 	h.tick()
 
 	// Two Systems in one tick, each saying half of it: the last word on each
 	// field wins, and neither overwrites the other's.
-	h.record(func(queue *sound.Queue) {
-		queue.SetListener(sound.ListenerParams{Position: m.Some(m.Vec3{X: 1})})
-		queue.SetListener(sound.ListenerParams{Position: m.Some(m.Vec3{X: 90, Y: 12})})
+	h.record(func(queue *Queue) {
+		queue.SetListener(ListenerParams{Position: m.Some(m.Vec3{X: 1})})
+		queue.SetListener(ListenerParams{Position: m.Some(m.Vec3{X: 90, Y: 12})})
 	})
 	h.tick()
 
-	got := h.probe(sound.NoVoice)
+	got := h.probe(NoVoice)
 	if got.ListenerAt != (m.Vec3{X: 90, Y: 12}) {
 		t.Fatalf("the Listener stands at %v, want the tick's last word on its position", got.ListenerAt)
 	}
@@ -250,10 +249,10 @@ func TestTheListenerIsReadableAndCoalescedFieldByField(t *testing.T) {
 // is the Buses' "a fold that did not move is not a change" met a second time.
 func TestMovingTheListenerReEmitsTheVoicesItMovedRelativeTo(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 600, channels: 1, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
-	positional := h.play(sound.ClipWithResource(bell), 0, sound.Params{Position: m.Some(m.Vec3{X: 4})})
-	h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	positional := h.play(ClipWithResource(bell), 0, Params{Position: m.Some(m.Vec3{X: 4})})
+	h.play(ClipWithResource(bell), 0, Params{})
 	h.tick()
 
 	// A tick in which nothing at all was said.
@@ -262,8 +261,8 @@ func TestMovingTheListenerReEmitsTheVoicesItMovedRelativeTo(t *testing.T) {
 		t.Fatalf("a silent tick produced %d updates, want none", len(updates))
 	}
 
-	h.record(func(queue *sound.Queue) {
-		queue.SetListener(sound.ListenerParams{Position: m.Some(m.Vec3{X: 4})})
+	h.record(func(queue *Queue) {
+		queue.SetListener(ListenerParams{Position: m.Some(m.Vec3{X: 4})})
 	})
 	h.tick()
 

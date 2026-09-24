@@ -7,8 +7,6 @@ import (
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/assets"
-	"github.com/dvoyni/cog/slots/gfx"
-	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
 // frame is the three values one dispatch of translate carries all the way down
@@ -22,7 +20,7 @@ import (
 type frame struct {
 	k       kernel.Kernel
 	fsys    fs.FS
-	backend gfx.Backend
+	backend Backend
 }
 
 // uniformMax caps a per-draw shader-parameter block.
@@ -33,11 +31,11 @@ const uniformMax = 256
 // whole so that adding a state field cannot silently return a pipeline built
 // for the old one.
 type pipelineKey struct {
-	shader      gfx.ShaderID
-	topology    gfx.PrimitiveTopology
-	state       gfx.MaterialState
-	colorFormat gfx.TextureFormat
-	depthFormat gfx.TextureFormat
+	shader      ShaderID
+	topology    PrimitiveTopology
+	state       MaterialState
+	colorFormat TextureFormat
+	depthFormat TextureFormat
 	// noColor separates the pipeline a shader needs in a depth-only pass from
 	// the one it needs in a colour pass. Without it in the key, a shader drawn
 	// in both gets whichever pass reached it first, which is a validation
@@ -46,7 +44,7 @@ type pipelineKey struct {
 	// noDepth does the same for a DepthNone pass, which has no depth
 	// attachment for a pipeline's depth state to match.
 	noDepth bool
-	layout  types.VertexLayoutKey
+	layout  VertexLayoutKey
 	// stripIndex is the index width a strip topology's pipeline has to declare,
 	// and nothing at all for every other topology. It is the strip format
 	// rather than the mesh's width because keying on the width unconditionally
@@ -65,11 +63,11 @@ const (
 	stripIndexUint32
 )
 
-func stripIndexKeyOf(topology gfx.PrimitiveTopology, width gfx.IndexWidth) stripIndexKey {
-	if topology != gfx.TopologyTriangleStrip {
+func stripIndexKeyOf(topology PrimitiveTopology, width IndexWidth) stripIndexKey {
+	if topology != TopologyTriangleStrip {
 		return stripIndexNone
 	}
-	if width == gfx.IndexUint16 {
+	if width == IndexUint16 {
 		return stripIndexUint16
 	}
 	return stripIndexUint32
@@ -79,13 +77,13 @@ func stripIndexKeyOf(topology gfx.PrimitiveTopology, width gfx.IndexWidth) strip
 // did not divide, and the width it was declared at.
 type indexLengthKey struct {
 	length int
-	width  gfx.IndexWidth
+	width  IndexWidth
 }
 
 // unsuppliedBufferKey is one storage binding a shader never got filled. The
 // parameter name is in it because one shader may declare several.
 type unsuppliedBufferKey struct {
-	shader    gfx.ShaderID
+	shader    ShaderID
 	parameter string
 }
 
@@ -94,7 +92,7 @@ type unsuppliedBufferKey struct {
 // and for the same reason: one shader may declare several texture bindings, and
 // each is its own fault.
 type textureViewKey struct {
-	shader    gfx.ShaderID
+	shader    ShaderID
 	parameter string
 }
 
@@ -108,17 +106,17 @@ type translator struct {
 	// stood in for one. It is a translator field like every other cache here,
 	// reached only on the render thread, so what protects it is the confinement
 	// rather than a lock of its own.
-	shaders   *assets.Cache[types.ShaderDescrParams, shaderUserData, *shader]
-	pipelines map[pipelineKey]gfx.PipelineID
-	samplers  map[gfx.SamplerDesc]gfx.SamplerID
+	shaders   *assets.Cache[ShaderDescrParams, shaderUserData, *shader]
+	pipelines map[pipelineKey]PipelineID
+	samplers  map[SamplerDesc]SamplerID
 	uarena    []byte
-	layouts   map[gfx.ShaderID]gfx.ShaderLayout
+	layouts   map[ShaderID]ShaderLayout
 	// textures is the path-texture cache. It is a translator field like every
 	// other cache here, reached only on the render thread, so what protects it
 	// is the confinement rather than a lock of its own.
-	textures       *assets.Cache[types.TextureDescrParams, textureUserData, texture]
+	textures       *assets.Cache[TextureDescrParams, textureUserData, texture]
 	parameterPlans map[parameterPlanBucketKey][]cachedParameterPlan
-	ops            gfx.Queue
+	ops            Queue
 	// Pass bookkeeping, reused each frame: the run order of the frame's passes
 	// and its draws bucketed behind the pass that recorded them.
 	passOrder  []int
@@ -131,10 +129,10 @@ type translator struct {
 	// the frame so far. A transition has to name the usage the texture is
 	// actually in, so this is tracked rather than assumed; a texture absent
 	// from the map has never been an attachment and needs no barrier.
-	textureUsage map[gfx.TextureID]gfx.TextureUsage
+	textureUsage map[TextureID]TextureUsage
 	// runSampled is the scratch set of textures one merged run samples, reused
 	// across runs so a frame allocates nothing per pass.
-	runSampled []gfx.TextureID
+	runSampled []TextureID
 	// diagnostic holds a report that does not stop the frame - a shader over the
 	// web floor still renders here - until translate surfaces it.
 	diagnostic error
@@ -163,13 +161,13 @@ type translator struct {
 
 func newTranslator() *translator {
 	return &translator{
-		shaders:           assets.New[types.ShaderDescrParams, shaderUserData, *shader](shaderLoader{}),
-		pipelines:         map[pipelineKey]gfx.PipelineID{},
-		samplers:          map[gfx.SamplerDesc]gfx.SamplerID{},
-		layouts:           map[gfx.ShaderID]gfx.ShaderLayout{},
-		textures:          assets.New[types.TextureDescrParams, textureUserData, texture](textureLoader{}),
+		shaders:           assets.New[ShaderDescrParams, shaderUserData, *shader](shaderLoader{}),
+		pipelines:         map[pipelineKey]PipelineID{},
+		samplers:          map[SamplerDesc]SamplerID{},
+		layouts:           map[ShaderID]ShaderLayout{},
+		textures:          assets.New[TextureDescrParams, textureUserData, texture](textureLoader{}),
 		parameterPlans:    map[parameterPlanBucketKey][]cachedParameterPlan{},
-		textureUsage:      map[gfx.TextureID]gfx.TextureUsage{},
+		textureUsage:      map[TextureID]TextureUsage{},
 		badIndexLengths:   map[indexLengthKey]struct{}{},
 		unsuppliedBuffers: map[unsuppliedBufferKey]struct{}{},
 
@@ -182,9 +180,9 @@ func newTranslator() *translator {
 // the next translate call. It returns the first error encountered; valid draws
 // are still translated.
 func (t *translator) translate(
-	k kernel.Kernel, queue *gfx.OpQueue, persistent []types.Op, backend gfx.Backend, files func() fs.FS,
-	capture gfx.CaptureDesc, capturing bool,
-) (*gfx.Queue, error) {
+	k kernel.Kernel, queue *OpQueue, persistent []Op, backend Backend, files func() fs.FS,
+	capture CaptureDesc, capturing bool,
+) (*Queue, error) {
 	t.ops.Reset()
 
 	// files() is called once, here, rather than once per cache miss. Handing
@@ -194,7 +192,7 @@ func (t *translator) translate(
 	// nothing; paid per hit it is once a texture parameter and once a draw.
 	f := &frame{k: k, fsys: files(), backend: backend}
 
-	need := len(types.OpQueueOps(queue)) * uniformMax
+	need := len(OpQueueOps(queue)) * uniformMax
 	if cap(t.uarena) < need {
 		t.uarena = make([]byte, need)
 	}
@@ -204,52 +202,52 @@ func (t *translator) translate(
 	uoff := 0
 	// Resource ops belong to no pass: every bake is hoisted ahead of all of
 	// them, so a pass can read anything the frame uploaded.
-	translateResources := func(list []types.Op) {
+	translateResources := func(list []Op) {
 		for i := range list {
 			op := &list[i]
-			if op.Kind == types.OpBakeBuffer {
+			if op.Kind == OpBakeBuffer {
 				if len(op.Bytes) > 0 {
 					t.ops.BakeBuffer(op.BufferID, op.BufferKind, op.BufferSize, op.Bytes)
 				}
 				continue
 			}
-			if op.Kind == types.OpReleaseBuffer {
+			if op.Kind == OpReleaseBuffer {
 				t.ops.ReleaseBuffer(op.BufferID)
 				continue
 			}
-			if op.Kind == types.OpBakeTexture {
+			if op.Kind == OpBakeTexture {
 				if len(op.Bytes) > 0 {
 					t.ops.BakeTexture(op.TextureID, op.TexW, op.TexH, op.Format, op.Bytes, op.Mipmaps)
 				}
 				continue
 			}
-			if op.Kind == types.OpReleaseTexture {
+			if op.Kind == OpReleaseTexture {
 				t.ops.ReleaseTexture(op.TextureID)
 				continue
 			}
-			if op.Kind == types.OpReleaseCachedResource {
+			if op.Kind == OpReleaseCachedResource {
 				t.releaseCachedResource(f, op.Path)
 				continue
 			}
-			if op.Kind == types.OpFreeCachedResources {
+			if op.Kind == OpFreeCachedResources {
 				t.freeCachedResources(f)
 				continue
 			}
-			if op.Kind == types.OpAllocateTexture {
-				t.ops.AllocateTexture(op.TextureID, gfx.TextureDesc{
+			if op.Kind == OpAllocateTexture {
+				t.ops.AllocateTexture(op.TextureID, TextureDesc{
 					Width: op.TexW, Height: op.TexH, Layers: op.TexLayers, Format: op.Format,
 					Renderable: op.Renderable,
 				})
 				continue
 			}
-			if op.Kind == types.OpUpdateTexture {
+			if op.Kind == OpUpdateTexture {
 				t.ops.UpdateTexture(op.TextureID, op.TexLayer, op.Region, op.Bytes)
 				continue
 			}
 		}
 	}
 	translateResources(persistent)
-	translateResources(types.OpQueueOps(queue))
+	translateResources(OpQueueOps(queue))
 
 	t.translatePasses(f, queue, &uoff, &firstErr, capture, capturing)
 
@@ -266,13 +264,13 @@ func (t *translator) translate(
 // translatePasses runs the frame's passes in Order, merging the runs that are
 // indistinguishable from one longer pass, and emits each one's draws.
 func (t *translator) translatePasses(
-	f *frame, queue *gfx.OpQueue, uoff *int, firstErr *error,
-	capture gfx.CaptureDesc, capturing bool,
+	f *frame, queue *OpQueue, uoff *int, firstErr *error,
+	capture CaptureDesc, capturing bool,
 ) {
-	passes, ops := types.OpQueuePasses(queue), types.OpQueueOps(queue)
+	passes, ops := OpQueuePasses(queue), OpQueueOps(queue)
 	t.planPasses(queue)
 	if t.strayDraws > 0 && *firstErr == nil {
-		*firstErr = gfx.ErrDrawWithoutPass{Count: t.strayDraws}
+		*firstErr = ErrDrawWithoutPass{Count: t.strayDraws}
 	}
 	// Attachment roles are per frame: the pool hands the same texture id to a
 	// different purpose next frame, and every frame's barriers are encoded from
@@ -285,13 +283,13 @@ func (t *translator) translatePasses(
 		last := i
 		for j := i + 1; j < len(t.passOrder); j++ {
 			next := passes[t.passOrder[j]].Desc
-			if !types.MergesInto(next, tail) {
+			if !MergesInto(next, tail) {
 				break
 			}
 			tail, last = next, j
 			draws += t.passDrawCount(t.passOrder[j])
 		}
-		if !types.PassHasEffect(&head, draws) {
+		if !PassHasEffect(&head, draws) {
 			i = last + 1
 			continue
 		}
@@ -325,7 +323,7 @@ func (t *translator) translatePasses(
 		// capture declares none: the frame buffer is the one attachment gfx
 		// never names, and the backend places that transition itself.
 		if !capture.Screen {
-			t.transitionTo(capture.Texture, gfx.TextureUsageCopySrc)
+			t.transitionTo(capture.Texture, TextureUsageCopySrc)
 		}
 		t.ops.Capture(capture)
 	}
@@ -341,8 +339,8 @@ func (t *translator) translatePasses(
 // (write then read), and a post-processing chain ping-pongs two targets (read
 // then write). A texture nothing has used as an attachment this frame is not
 // gfx's to order.
-func (t *translator) transitionRun(queue *gfx.OpQueue, head gfx.PassDescr, first, last int) {
-	ops := types.OpQueueOps(queue)
+func (t *translator) transitionRun(queue *OpQueue, head PassDescr, first, last int) {
+	ops := OpQueueOps(queue)
 	// Reads first: a texture this run samples has to have finished being written.
 	t.runSampled = t.runSampled[:0]
 	for j := first; j <= last; j++ {
@@ -353,15 +351,15 @@ func (t *translator) transitionRun(queue *gfx.OpQueue, head gfx.PassDescr, first
 		}
 	}
 	for _, texture := range t.runSampled {
-		t.transitionTo(texture, gfx.TextureUsageTextureBinding)
+		t.transitionTo(texture, TextureUsageTextureBinding)
 	}
 	// Then writes: this run's own attachments. A texture that was sampled
 	// earlier in the frame is transitioned back before it is written again.
-	if types.TargetKindOf(&head.Target) == types.TargetTexture {
-		t.transitionTo(types.TargetTextureOf(&head.Target), gfx.TextureUsageRenderAttachment)
+	if TargetKindOf(&head.Target) == TargetTexture {
+		t.transitionTo(TargetTextureOf(&head.Target), TextureUsageRenderAttachment)
 	}
-	if types.DepthKindOf(&head.Depth) == types.DepthKindTexture {
-		t.transitionTo(types.DepthTexture(&head.Depth), gfx.TextureUsageRenderAttachment)
+	if DepthKindOf(&head.Depth) == DepthKindTexture {
+		t.transitionTo(DepthTexture(&head.Depth), TextureUsageRenderAttachment)
 	}
 }
 
@@ -373,15 +371,15 @@ func (t *translator) transitionRun(queue *gfx.OpQueue, head gfx.PassDescr, first
 // run before the pass opens. That over-approximates by the textures a shader
 // does not actually declare, which costs a barrier nothing reads and is the
 // safe direction to be wrong in.
-func (t *translator) collectSampled(params []gfx.ParameterDescr) {
+func (t *translator) collectSampled(params []ParameterDescr) {
 	for i := range params {
 		p := &params[i]
-		if types.ParameterKind(p) != types.ParamTexture {
+		if ParameterKind(p) != ParamTexture {
 			continue
 		}
 		// Only a baked texture carries an id, so the id is the whole test: a
 		// path or an inline run has nothing an attachment could collide with.
-		texture := types.ParameterTextureRef(p)
+		texture := ParameterTextureRef(p)
 		if texture.ID() == 0 {
 			continue
 		}
@@ -395,7 +393,7 @@ func (t *translator) collectSampled(params []gfx.ParameterDescr) {
 // that is a change from a role the frame has already put it in. A texture that
 // has never been an attachment this frame has no writes to order against, and
 // one already in the usage is a no-op the backend should not pay for.
-func (t *translator) transitionTo(texture gfx.TextureID, to gfx.TextureUsage) {
+func (t *translator) transitionTo(texture TextureID, to TextureUsage) {
 	if texture == 0 {
 		return
 	}
@@ -410,44 +408,44 @@ func (t *translator) transitionTo(texture gfx.TextureID, to gfx.TextureUsage) {
 	if from == to {
 		return
 	}
-	t.ops.TransitionTexture(gfx.TextureTransition{Texture: texture, From: from, To: to})
+	t.ops.TransitionTexture(TextureTransition{Texture: texture, From: from, To: to})
 	t.textureUsage[texture] = to
 }
 
 // gpuPassDesc resolves a merged run's attachments: it loads like the pass that
 // opened the run and stores like the one that closed it.
-func (t *translator) gpuPassDesc(backend gfx.Backend, head, tail gfx.PassDescr) gfx.PassDesc {
-	desc := gfx.PassDesc{
+func (t *translator) gpuPassDesc(backend Backend, head, tail PassDescr) PassDesc {
+	desc := PassDesc{
 		Load: head.Load, Clear: head.Clear, Store: tail.Store,
 		DepthLoad: head.DepthLoad, DepthClear: head.DepthClear, DepthStore: tail.DepthStore,
 		Label: head.Label,
 	}
-	switch types.TargetKindOf(&head.Target) {
-	case types.TargetScreen:
+	switch TargetKindOf(&head.Target) {
+	case TargetScreen:
 		desc.Screen = true
-	case types.TargetNone:
+	case TargetNone:
 		desc.NoColor = true
-	case types.TargetTexture:
+	case TargetTexture:
 		// This can resolve to zero: a temporary target is allocated by the same
 		// frame's bakes, which the backend replays after these descriptors were
 		// built, so a target used for the first time has no view yet. NoColor
 		// stays false, which is what keeps that case distinguishable from a
 		// pass that declares no colour attachment at all.
-		desc.Target = backend.TextureView(types.TargetTextureOf(&head.Target), types.TargetMip(&head.Target), types.TargetLayer(&head.Target))
+		desc.Target = backend.TextureView(TargetTextureOf(&head.Target), TargetMip(&head.Target), TargetLayer(&head.Target))
 	}
-	switch types.DepthKindOf(&head.Depth) {
-	case types.DepthKindAuto:
+	switch DepthKindOf(&head.Depth) {
+	case DepthKindAuto:
 		desc.DepthAuto = true
-	case types.DepthKindTexture:
-		desc.Depth = backend.TextureView(types.DepthTexture(&head.Depth), 0, 0)
+	case DepthKindTexture:
+		desc.Depth = backend.TextureView(DepthTexture(&head.Depth), 0, 0)
 	}
 	return desc
 }
 
 // planPasses puts the frame's passes in run order - Order first, declaration
 // sequence breaking ties - and buckets each pass's draws behind it.
-func (t *translator) planPasses(queue *gfx.OpQueue) {
-	passes, ops := types.OpQueuePasses(queue), types.OpQueueOps(queue)
+func (t *translator) planPasses(queue *OpQueue) {
+	passes, ops := OpQueuePasses(queue), OpQueueOps(queue)
 	count := len(passes)
 	t.passOrder = t.passOrder[:0]
 	for i := range count {
@@ -461,7 +459,7 @@ func (t *translator) planPasses(queue *gfx.OpQueue) {
 	clear(t.passStart)
 	t.strayDraws = 0
 	for i := range ops {
-		if ops[i].Kind != types.OpDraw {
+		if ops[i].Kind != OpDraw {
 			continue
 		}
 		if pass := int(ops[i].Pass); pass >= 0 && pass < count {
@@ -476,7 +474,7 @@ func (t *translator) planPasses(queue *gfx.OpQueue) {
 	t.passDraws = slices.Grow(t.passDraws[:0], t.passStart[count])[:t.passStart[count]]
 	cursor := append(t.passCursor[:0], t.passStart[:count]...)
 	for i := range ops {
-		if pass := int(ops[i].Pass); ops[i].Kind == types.OpDraw && pass >= 0 && pass < count {
+		if pass := int(ops[i].Pass); ops[i].Kind == OpDraw && pass >= 0 && pass < count {
 			t.passDraws[cursor[pass]] = i
 			cursor[pass]++
 		}

@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/qmuntal/gltf"
 )
@@ -40,7 +39,7 @@ func residentBoundsModel(t testing.TB) *harness {
 // which is what makes it the lever a loading screen pulls.
 func residentModel(t testing.TB, doc *gltf.Document) *harness {
 	t.Helper()
-	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), func(*scene.OpQueue) {})
+	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), func(*OpQueue) {})
 	h.device(func(la model.LookupDeviceAccess) {
 		la.Preload(modelPath)
 		if err := la.State(modelPath); err != nil {
@@ -58,7 +57,7 @@ func residentModel(t testing.TB, doc *gltf.Document) *harness {
 // in-flight state to name: by the time State returns, the read, the parse and
 // every upload have happened.
 func TestStateLoadsTheFileAndAnswersNil(t *testing.T) {
-	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*scene.OpQueue) {})
+	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*OpQueue) {})
 	var first error
 	h.device(func(la model.LookupDeviceAccess) { first = la.State(modelPath) })
 	if first != nil {
@@ -70,7 +69,7 @@ func TestStateLoadsTheFileAndAnswersNil(t *testing.T) {
 // the read and reports it once; State turns the entry it cached into the reason
 // a HUD prints.
 func TestStateNamesTheReasonAModelIsNotThere(t *testing.T) {
-	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*scene.OpQueue) {})
+	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*OpQueue) {})
 	const missing = "models/absent.glb"
 	var err error
 	h.device(func(la model.LookupDeviceAccess) { err = la.State(missing) })
@@ -92,7 +91,7 @@ func TestStateNamesTheReasonAModelIsNotThere(t *testing.T) {
 // is standing, with no entry and no tombstone behind it, so a typo is
 // permanently a typo.
 func TestAnInvalidPathIsRefusedBeforeTheCache(t *testing.T) {
-	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*scene.OpQueue) {})
+	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*OpQueue) {})
 	var err error
 	h.device(func(la model.LookupDeviceAccess) { err = la.State("../escape.glb") })
 	if _, ok := err.(model.ErrModelPathInvalid); !ok {
@@ -219,7 +218,7 @@ func TestBoundsIsFalseWhenThePrimitiveDeclaredNone(t *testing.T) {
 	doc := boundsModel(t)
 	position := doc.Meshes[0].Primitives[0].Attributes[gltf.POSITION]
 	doc.Accessors[position].Min, doc.Accessors[position].Max = nil, nil
-	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), func(*scene.OpQueue) {})
+	h := newHarnessWithFiles(t, modelFiles(glb(t, doc)), func(*OpQueue) {})
 	h.device(func(la model.LookupDeviceAccess) {
 		la.Preload(modelPath)
 		if _, ok := la.Bounds(model.ModelRef{Path: modelPath}); ok {
@@ -276,7 +275,7 @@ func TestAnUnmatchedSceneIsFalse(t *testing.T) {
 // Every query loads, so a caller who never calls Preload still gets an answer -
 // in the call that asked, rather than after polling an empty list for frames.
 func TestAQueryOnAnUnloadedPathLoadsIt(t *testing.T) {
-	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*scene.OpQueue) {})
+	h := newHarnessWithFiles(t, modelFiles(glb(t, boundsModel(t))), func(*OpQueue) {})
 	var names []string
 	var ok bool
 	h.device(func(la model.LookupDeviceAccess) { names, ok = la.Nodes(model.ModelRef{Path: modelPath}, nil) })

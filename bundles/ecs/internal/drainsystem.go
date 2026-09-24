@@ -1,7 +1,5 @@
 package internal
 
-import "github.com/dvoyni/cog/bundles/ecs"
-
 // drainSystem is the general drainer: it applies everything the deferring
 // handles queued in this Engine, whatever System and whatever event queued it.
 // It is the ECS's own System, and the only one it has.
@@ -13,4 +11,4 @@ import "github.com/dvoyni/cog/bundles/ecs"
 //
 // It is subscribed as ecs.DrainOnUpdate, Last, unconditionally. See
 // bundles/ecs/docs/specs/deferred.md § The drain.
-func drainSystem(entities *ecs.WriteableEntities) { entities.Drain() }
+func drainSystem(entities *WriteableEntities) { entities.Drain() }

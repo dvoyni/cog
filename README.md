@@ -101,30 +101,35 @@ Every plugin is one kind, and its directory says which:
 
 Every plugin `X` has one shape:
 
-- **The root, `X/`, holds declarations only**: commands, events, resources,
-    Ports, Adapters, types, config, errors and `Name`, each in its own fixed
-    file. An Extension's root holds only `Name`, config, its Adapters and
-    errors.
+- **The root, `X/`, declares nothing: it is an index of aliases.** Its
+    commands, events, resources, Ports, Adapters, types, config, errors and
+    `Name`, each in its own fixed file, are type aliases and re-exported
+    constants and variables of what `X/internal/` declares. An Extension's
+    root offers only `Name`, config, its Adapters and errors.
 - **Its functions are forwarders.** They live in `utils.go`, and each one is a
-    single call into `X/internal/types` passing its parameters through. A
-    Slot's forwarders name no other plugin's types.
-- **`X/internal/types`** holds the concrete types the root aliases, for
-    performance or because code there names them, and **`X/internal/`** holds
-    the implementation.
+    single call into `X/internal/` passing its parameters through. A Slot's
+    forwarders name no other plugin's types.
+- **`X/internal/`** declares everything the root offers, in files of the same
+    names, beside the implementation, and never imports its own root. An
+    optional **`X/internal/types`** holds plain data only, when another package
+    of the plugin needs it apart from the logic.
 - **The constructor package, `X/Xplugin`,** exports only `New()`.
 
 | package | may import |
 | --- | --- |
-| root | libs, kernel, other plugins' roots, its own `internal/types` |
+| root | libs, kernel, other plugins' roots, its own `internal/` and `internal/types` |
 | `internal/types` | libs, kernel, other plugins' roots |
-| `internal/` | libs, kernel, any root, its own `internal/` and `internal/types` |
+| `internal/` | libs, kernel, other plugins' roots, its own `internal/` and `internal/types` |
 | constructor | kernel, its own `internal/` |
 
 Nothing in cog imports a constructor package or another plugin's internals,
 except tests. Games and examples are composition roots and import freely.
 
-This shape supersedes the one
-[ADR 0001](docs/adr/0001-bundles-slots-ports-and-adapters.md) decided. The kinds, the
+This shape is [ADR 0003](docs/adr/0003-roots-are-alias-indexes.md)'s, which
+turned round the root-to-internal edge of
+[ADR 0002](docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md);
+mcp still has ADR 0002's declaration root until it moves. Both supersede the
+one [ADR 0001](docs/adr/0001-bundles-slots-ports-and-adapters.md) decided. The kinds, the
 file allowlists, where new code goes and the full import table are in
 [`.github/instructions/architecture.instructions.md`](.github/instructions/architecture.instructions.md),
 and `go test ./kernel/archtest` enforces them.

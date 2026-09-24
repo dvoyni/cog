@@ -8,7 +8,6 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/dvoyni/cog/extensions/nosound"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 	"github.com/dvoyni/cog/slots/sound"
@@ -113,7 +112,7 @@ func TestTheSlotReportsNosoundsDevice(t *testing.T) {
 	h.tick()
 
 	device := h.probe(sound.NoVoice).Device
-	if !device.Ready || device.Name != string(nosound.Name) {
+	if !device.Ready || device.Name != string(Name) {
 		t.Fatalf("sound reports %+v, want a ready nosound", device)
 	}
 	if device.Latency != 0 {

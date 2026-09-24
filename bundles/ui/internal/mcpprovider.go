@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/dvoyni/cog/bundles/mcp"
-	"github.com/dvoyni/cog/bundles/ui"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -92,7 +91,7 @@ type layoutResponse struct {
 	// is the viewport block, which is in every response already, and there is
 	// no second small array to keep - the tree is the payload.
 	Path string `json:"path,omitempty"`
-	ui.LayoutView
+	LayoutView
 	gfx.SnapshotView
 }
 
@@ -139,7 +138,7 @@ func layoutSnapshot(k kernel.Executioner, request layoutRequest) (layoutResponse
 	}
 	paused := status.Paused
 
-	armed := k.ExecuteCommand[ui.ArmLayoutCmd](armRequest)
+	armed := k.ExecuteCommand[ArmLayoutCmd](armRequest)
 	if armed.Err != nil {
 		return layoutResponse{}, layoutRefusal(armed.Err)
 	}
@@ -224,21 +223,21 @@ func writeSnapshotJSON(path string, response layoutResponse) error {
 }
 
 // validateLayoutRequest checks what the agent named and turns it into the arm.
-func validateLayoutRequest(request layoutRequest) (ui.ArmLayoutRequest, error) {
+func validateLayoutRequest(request layoutRequest) (ArmLayoutRequest, error) {
 	if err := validateSnapshotPath(request.Path); err != nil {
-		return ui.ArmLayoutRequest{}, err
+		return ArmLayoutRequest{}, err
 	}
 	if subtree, ok := request.Subtree.Get(); ok && subtree < 0 {
-		return ui.ArmLayoutRequest{}, mcp.Unavailable{Reason: fmt.Sprintf(
+		return ArmLayoutRequest{}, mcp.Unavailable{Reason: fmt.Sprintf(
 			"subtree %d is negative; an element index is its position in the tree, counted from 0",
 			subtree)}
 	}
 	if depth, ok := request.MaxDepth.Get(); ok && depth < 0 {
-		return ui.ArmLayoutRequest{}, mcp.Unavailable{Reason: fmt.Sprintf(
+		return ArmLayoutRequest{}, mcp.Unavailable{Reason: fmt.Sprintf(
 			"maxDepth %d is negative, which keeps no element at all; 0 keeps the root alone",
 			depth)}
 	}
-	return ui.ArmLayoutRequest{Subtree: request.Subtree, MaxDepth: request.MaxDepth}, nil
+	return ArmLayoutRequest{Subtree: request.Subtree, MaxDepth: request.MaxDepth}, nil
 }
 
 // validateSnapshotPath checks what the agent named. The path is optional,
@@ -264,13 +263,13 @@ func validateSnapshotPath(path string) error {
 // a paused engine nothing steps, or a window that has stopped updating,
 // produces no tick at all and reports nothing about it.
 func layoutRefusal(reason error) error {
-	var missing ui.ErrLayoutNoSuchElement
+	var missing ErrLayoutNoSuchElement
 	switch {
 	case reason == nil:
 		return mcp.Unavailable{Reason: fmt.Sprintf(
 			"no tick was processed within %s — the game may be paused with nothing stepping it, "+
 				"minimised, or not updating", layoutDeadline)}
-	case errors.Is(reason, ui.ErrLayoutBusy{}):
+	case errors.Is(reason, ErrLayoutBusy{}):
 		return mcp.Unavailable{Reason: "a layout snapshot is already in flight; ask again. A " +
 			"capture and the other snapshots may run alongside it, and arming them together is " +
 			"how they describe one tick."}
@@ -278,7 +277,7 @@ func layoutRefusal(reason error) error {
 		return mcp.Unavailable{Reason: missing.Error() +
 			". The tree is declared afresh every tick, so an index from an older snapshot may " +
 			"name nothing; take one without a subtree filter to see what is there."}
-	case errors.Is(reason, ui.ErrLayoutAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
+	case errors.Is(reason, ErrLayoutAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
 		errors.Is(reason, context.Canceled):
 		// A game exiting is the normal case, not a fault.
 		return mcp.Unavailable{Reason: "the game is shutting down"}

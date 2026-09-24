@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -35,35 +34,35 @@ const frameBenchDraws = 5000
 // Whole-frame numbers swing by about ten percent with run order, so a
 // comparison is two test binaries built first and run interleaved.
 func BenchmarkFrame(b *testing.B) {
-	var shared scene.Material
+	var shared Material
 	var override []gfx.ParameterDescr
 	cases := []struct {
 		name string
-		draw func(transform m.Transform) scene.MeshDraw
+		draw func(transform m.Transform) MeshDraw
 	}{
-		{"none", func(transform m.Transform) scene.MeshDraw {
-			return scene.MeshDraw{Transform: transform}
+		{"none", func(transform m.Transform) MeshDraw {
+			return MeshDraw{Transform: transform}
 		}},
-		{"shared", func(transform m.Transform) scene.MeshDraw {
-			return scene.MeshDraw{Transform: transform, Material: shared}
+		{"shared", func(transform m.Transform) MeshDraw {
+			return MeshDraw{Transform: transform, Material: shared}
 		}},
-		{"override", func(transform m.Transform) scene.MeshDraw {
-			return scene.MeshDraw{Transform: transform, Material: shared, Params: override}
+		{"override", func(transform m.Transform) MeshDraw {
+			return MeshDraw{Transform: transform, Material: shared, Params: override}
 		}},
 	}
 	for _, c := range cases {
 		b.Run(c.name, func(b *testing.B) {
 			var ref model.MeshRef
 			recordMaterials := false
-			h := newHarness(b, func(q *scene.OpQueue) {
-				q.Camera(testCamera, scene.CameraDescr{
+			h := newHarness(b, func(q *OpQueue) {
+				q.Camera(testCamera, CameraDescr{
 					Transform: m.LookAt(m.Vec3{Z: 80}, m.Vec3{}, m.Vec3{Y: 1}),
 					FovY:      1.0472, Near: 0.1, Far: 200,
 				})
 				for i := range frameBenchDraws {
 					x := float32(i%100)*0.5 - 25
 					y := float32(i/100)*0.5 - 12.5
-					draw := scene.MeshDraw{Transform: m.At(x, y, 0)}
+					draw := MeshDraw{Transform: m.At(x, y, 0)}
 					if recordMaterials {
 						draw = c.draw(m.At(x, y, 0))
 					}
@@ -107,7 +106,7 @@ func BenchmarkFrame(b *testing.B) {
 
 // frameBenchMaterial builds the benchmark's shared material over scene's baked
 // defaults, and the one-float override that varies it.
-func frameBenchMaterial(defaults model.PbrDefaults) (scene.Material, []gfx.ParameterDescr) {
+func frameBenchMaterial(defaults model.PbrDefaults) (Material, []gfx.ParameterDescr) {
 	if defaults.White.ID() == 0 || defaults.FlatNormal.ID() == 0 {
 		panic("scene's default textures were not baked by the first frame")
 	}
@@ -122,7 +121,7 @@ func frameBenchMaterial(defaults model.PbrDefaults) (scene.Material, []gfx.Param
 			gfx.SamplerParam(slot.Sampler, model.PbrSampler),
 		)
 	}
-	material := scene.Material{{Descr: gfx.MaterialWithState(
+	material := Material{{Descr: gfx.MaterialWithState(
 		gfx.ShaderWithResource(model.SceneShaderPath), gfx.StateOpaque3D(), params...,
 	)}}
 	return material, []gfx.ParameterDescr{gfx.FloatParam("key", 0.25)}

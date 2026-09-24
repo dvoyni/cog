@@ -6,7 +6,6 @@ import (
 
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -15,7 +14,7 @@ import (
 // types rather than a mirror of them: a clear is an m.Maybe rather than a
 // pointer, and a transform has no matrix pointer to override it.
 func TestPassAndTransformAreStorable(t *testing.T) {
-	for _, tp := range []reflect.Type{reflect.TypeFor[scene.Pass](), reflect.TypeFor[m.Transform]()} {
+	for _, tp := range []reflect.Type{reflect.TypeFor[Pass](), reflect.TypeFor[m.Transform]()} {
 		if err := ecs.Storable(tp); err != nil {
 			t.Errorf("ecs.Storable(%s) = %v, want nil", tp, err)
 		}
@@ -25,9 +24,9 @@ func TestPassAndTransformAreStorable(t *testing.T) {
 // A zero Pass preserves colour and depth, exactly as the nil clears it replaced
 // did: a declared pass that clears nothing draws over whatever is there.
 func TestAZeroPassPreservesColourAndDepth(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		descr := simpleCamera()
-		descr.Passes = []scene.Pass{{}}
+		descr.Passes = []Pass{{}}
 		q.Camera(cameraMain, descr)
 		// Something to draw: gfx drops a pass that neither clears nor draws.
 		q.Box(0, m.At(0, 0, 0), testBoxColor)
@@ -46,9 +45,9 @@ func TestAZeroPassPreservesColourAndDepth(t *testing.T) {
 // A present clear is taken at its value, zero included: a colour clear to
 // transparent black is a clear, not an absent field.
 func TestAPresentClearClearsAtItsValue(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		descr := simpleCamera()
-		descr.Passes = []scene.Pass{{ClearColor: m.Some(m.Color{}), ClearDepth: m.Some[float32](1)}}
+		descr.Passes = []Pass{{ClearColor: m.Some(m.Color{}), ClearDepth: m.Some[float32](1)}}
 		q.Camera(cameraMain, descr)
 	})
 	h.frame()
@@ -67,9 +66,9 @@ func TestAPresentClearClearsAtItsValue(t *testing.T) {
 // inverse-transpose; a uniformly scaled draw does not pay for it.
 func TestANonUniformlyScaledDrawTakesTheInverseTransposeNormalPath(t *testing.T) {
 	var ref model.MeshRef
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
-		q.Mesh(0, ref, scene.MeshDraw{
+		q.Mesh(0, ref, MeshDraw{
 			Transform: m.Transform{Position: m.Vec3{X: 1, Y: 2, Z: 3}, Scale: m.Vec3{X: 2, Y: 1, Z: 1}},
 			NeverCull: true,
 		})
@@ -89,9 +88,9 @@ func TestANonUniformlyScaledDrawTakesTheInverseTransposeNormalPath(t *testing.T)
 
 func TestAUniformlyScaledDrawKeepsThePlainNormalPath(t *testing.T) {
 	var ref model.MeshRef
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
-		q.Mesh(0, ref, scene.MeshDraw{Transform: m.At(0, 0, 0).WithScale(3), NeverCull: true})
+		q.Mesh(0, ref, MeshDraw{Transform: m.At(0, 0, 0).WithScale(3), NeverCull: true})
 	})
 	ref = h.bake(triangle(), []uint32{0, 1, 2}, gfx.TopologyTriangleList)
 	h.frame()

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"syscall/js"
 
-	"github.com/dvoyni/cog/extensions/jsstorage"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/storage"
 )
@@ -22,27 +21,27 @@ func New() kernel.Plugin { return &plugin{} }
 
 type plugin struct{}
 
-func (p *plugin) Name() kernel.PluginName { return jsstorage.Name }
+func (p *plugin) Name() kernel.PluginName { return Name }
 
 func (p *plugin) Dependencies() []kernel.PluginName { return nil }
 
 func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
-	var cfg jsstorage.Config
+	var cfg Config
 	if config != nil {
 		var ok bool
-		cfg, ok = config.(jsstorage.Config)
+		cfg, ok = config.(Config)
 		if !ok {
-			return jsstorage.ErrInvalidConfig{Got: config}
+			return ErrInvalidConfig{Got: config}
 		}
 	}
 	appId := cfg.AppId
 	if appId == "" || appId == "." || appId == ".." || strings.ContainsAny(appId, `/\`) {
-		return jsstorage.ErrInvalidAppId{AppId: appId}
+		return ErrInvalidAppId{AppId: appId}
 	}
 	localStorage := js.Global().Get("localStorage")
 	if localStorage.IsUndefined() || localStorage.IsNull() {
 		return errors.New("jsstorage: browser localStorage is unavailable")
 	}
-	registrar.ProvideAdapter[jsstorage.StoragePermanentFS](storage.PermanentFS(&webFS{key: keyPrefix + appId, storage: localStorage}))
+	registrar.ProvideAdapter[StoragePermanentFS](storage.PermanentFS(&webFS{key: keyPrefix + appId, storage: localStorage}))
 	return nil
 }

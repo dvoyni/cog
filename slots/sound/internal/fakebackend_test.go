@@ -5,7 +5,6 @@ import (
 
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/dvoyni/cog/slots/sound"
 )
 
 // fakeClip is a prepared Clip that carries the facts and no samples, which is
@@ -17,13 +16,13 @@ type fakeClip struct {
 	// region is the Clip's Loop Region, absent unless a test gives it one. An
 	// Adapter parses it out of the file's Vorbis comments; what sound sees is
 	// two numbers in seconds, which is exactly what this hands it.
-	region m.Maybe[sound.LoopRegion]
+	region m.Maybe[LoopRegion]
 }
 
-func (c fakeClip) Duration() float32                     { return c.duration }
-func (c fakeClip) Channels() int                         { return c.channels }
-func (c fakeClip) SampleRate() int                       { return c.rate }
-func (c fakeClip) LoopRegion() m.Maybe[sound.LoopRegion] { return c.region }
+func (c fakeClip) Duration() float32               { return c.duration }
+func (c fakeClip) Channels() int                   { return c.channels }
+func (c fakeClip) SampleRate() int                 { return c.rate }
+func (c fakeClip) LoopRegion() m.Maybe[LoopRegion] { return c.region }
 
 // fakeBackend is the Adapter these tests compose: it records what sound handed
 // it and answers what sound polls, so a test asserts about the Slot's own
@@ -39,7 +38,7 @@ type fakeBackend struct {
 	slots          int
 	countingVoices int
 
-	device sound.Device
+	device Device
 
 	// clip is what a successful Prepare reports.
 	clip fakeClip
@@ -52,7 +51,7 @@ type fakeBackend struct {
 	// finishes them.
 	deferred []any
 	// completed is what the next TakePrepared drains.
-	completed []sound.Prepared
+	completed []Prepared
 	// installs counts the ids handed out; zero is none, so it starts at one.
 	installs uint32
 	// prepares counts the Prepares asked for, which is what "asking never
@@ -61,13 +60,13 @@ type fakeBackend struct {
 
 	// batches is every batch Emit was handed, copied out of the memory sound
 	// owns and lends for the call.
-	batches []sound.Batch
+	batches []Batch
 }
 
 func newFakeBackend(clip fakeClip) *fakeBackend {
 	return &fakeBackend{
 		clip:   clip,
-		device: sound.Device{Ready: true, Name: "fake", SampleRate: 48000, Channels: 2},
+		device: Device{Ready: true, Name: "fake", SampleRate: 48000, Channels: 2},
 	}
 }
 
@@ -78,18 +77,18 @@ func (b *fakeBackend) Voices(n int) {
 	b.countingVoices++
 }
 
-func (b *fakeBackend) Emit(batch *sound.Batch) {
+func (b *fakeBackend) Emit(batch *Batch) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.batches = append(b.batches, sound.Batch{
-		Starts:   append([]sound.VoiceStart(nil), batch.Starts...),
-		Updates:  append([]sound.VoiceUpdate(nil), batch.Updates...),
-		Stops:    append([]sound.VoiceSlot(nil), batch.Stops...),
-		Destroys: append([]sound.ClipID(nil), batch.Destroys...),
+	b.batches = append(b.batches, Batch{
+		Starts:   append([]VoiceStart(nil), batch.Starts...),
+		Updates:  append([]VoiceUpdate(nil), batch.Updates...),
+		Stops:    append([]VoiceSlot(nil), batch.Stops...),
+		Destroys: append([]ClipID(nil), batch.Destroys...),
 	})
 }
 
-func (b *fakeBackend) Device() sound.Device {
+func (b *fakeBackend) Device() Device {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.device
@@ -104,7 +103,7 @@ func (b *fakeBackend) setReady(ready bool) {
 	b.device.Ready = ready
 }
 
-func (b *fakeBackend) Prepare(token any, _ assets.Blob) (sound.PreparedClip, bool, error) {
+func (b *fakeBackend) Prepare(token any, _ assets.Blob) (PreparedClip, bool, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.prepares++
@@ -118,7 +117,7 @@ func (b *fakeBackend) Prepare(token any, _ assets.Blob) (sound.PreparedClip, boo
 	return b.clip, true, nil
 }
 
-func (b *fakeBackend) TakePrepared() []sound.Prepared {
+func (b *fakeBackend) TakePrepared() []Prepared {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	taken := b.completed
@@ -126,11 +125,11 @@ func (b *fakeBackend) TakePrepared() []sound.Prepared {
 	return taken
 }
 
-func (b *fakeBackend) Install(sound.PreparedClip) (sound.ClipID, error) {
+func (b *fakeBackend) Install(PreparedClip) (ClipID, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.installs++
-	return sound.ClipID(b.installs), nil
+	return ClipID(b.installs), nil
 }
 
 // finishPrepares moves every deferred prepare into what the next TakePrepared
@@ -140,16 +139,16 @@ func (b *fakeBackend) finishPrepares() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for _, token := range b.deferred {
-		b.completed = append(b.completed, sound.Prepared{Token: token, Clip: b.clip})
+		b.completed = append(b.completed, Prepared{Token: token, Clip: b.clip})
 	}
 	b.deferred = nil
 }
 
 // emitted is the batches so far, copied so a test reads them without the lock.
-func (b *fakeBackend) emitted() []sound.Batch {
+func (b *fakeBackend) emitted() []Batch {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return append([]sound.Batch(nil), b.batches...)
+	return append([]Batch(nil), b.batches...)
 }
 
 // counts is how many Prepares were asked for and how many ids were handed out.

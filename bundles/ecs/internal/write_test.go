@@ -10,8 +10,6 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecs/internal/types"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
@@ -26,7 +24,7 @@ type secret struct {
 // secretCarrier gives an Entity a secret, hidden field and all, and a sprite
 // when it carries bytes: only Go can set what the JSON never shows.
 type secretCarrier struct {
-	Entity ecs.Entity
+	Entity Entity
 	Secret secret
 	Sprite sprite
 }
@@ -35,7 +33,7 @@ type (
 	stashCmd kernel.Command[secretCarrier, struct{}]
 	// peekCmd answers the bytes of an Entity's route, secret, sprite, label,
 	// spot and follows, as their Stores hold them.
-	peekCmd kernel.Command[ecs.Entity, []string]
+	peekCmd kernel.Command[Entity, []string]
 )
 
 type watchEvent struct{}
@@ -55,18 +53,18 @@ func (*watchFixture) Name() kernel.PluginName { return "watches" }
 func (*watchFixture) Dependencies() []kernel.PluginName { return []kernel.PluginName{"reads"} }
 
 func (f *watchFixture) Register(registrar *kernel.Registrar, _ any) error {
-	ecs.RegisterComponent[secret](registrar, 8)
-	registrar.HandleCommand[stashCmd](ecs.ToExecute[secretCarrier, struct{}](registrar, func(
-		carrier secretCarrier, secrets *ecs.Set[secret], sprites *ecs.Set[sprite],
+	RegisterComponent[secret](registrar, 8)
+	registrar.HandleCommand[stashCmd](ToExecute[secretCarrier, struct{}](registrar, func(
+		carrier secretCarrier, secrets *Set[secret], sprites *Set[sprite],
 	) {
 		secrets.UpdateFor(carrier.Entity, carrier.Secret)
 		if carrier.Sprite.Pixels.Len() > 0 {
 			sprites.UpdateFor(carrier.Entity, carrier.Sprite)
 		}
 	}))
-	registrar.HandleCommand[peekCmd](ecs.ToExecute[ecs.Entity, []string](registrar, func(
-		e ecs.Entity, routes *ecs.Get[route], secrets *ecs.Get[secret], sprites *ecs.Get[sprite],
-		labels *ecs.Get[label], spots *ecs.Get[spot], follow *ecs.Get[follows], answer *ecs.Resp[[]string],
+	registrar.HandleCommand[peekCmd](ToExecute[Entity, []string](registrar, func(
+		e Entity, routes *Get[route], secrets *Get[secret], sprites *Get[sprite],
+		labels *Get[label], spots *Get[spot], follow *Get[follows], answer *Resp[[]string],
 	) {
 		r, _ := routes.Of(e)
 		s, _ := secrets.Of(e)
@@ -76,9 +74,9 @@ func (f *watchFixture) Register(registrar *kernel.Registrar, _ any) error {
 		f, _ := follow.Of(e)
 		answer.Set([]string{rowBytes(r), rowBytes(s), rowBytes(p), rowBytes(l), rowBytes(o), rowBytes(f)})
 	}))
-	registrar.Subscribe[watchSystem](ecs.ToHandler[watchEvent](registrar, func(
-		spots *ecs.Hooks[spot, ecs.HookAll], routes *ecs.Hooks[route, ecs.HookAll], secrets *ecs.Hooks[secret, ecs.HookAll],
-		removals *ecs.Hooks[spot, ecs.HookRemoved],
+	registrar.Subscribe[watchSystem](ToHandler[watchEvent](registrar, func(
+		spots *Hooks[spot, HookAll], routes *Hooks[route, HookAll], secrets *Hooks[secret, HookAll],
+		removals *Hooks[spot, HookRemoved],
 	) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -108,7 +106,7 @@ func (f *watchFixture) records(executioner kernel.Executioner) []string {
 	return seen
 }
 
-func kinds[T any](hook *ecs.Hook[T]) string {
+func kinds[T any](hook *Hook[T]) string {
 	var named []string
 	for _, kind := range []struct {
 		name string
@@ -153,9 +151,9 @@ func request[T any](t *testing.T, document string) T {
 	return decoded
 }
 
-func entityOf(t *testing.T, executioner kernel.Executioner, e string) types.EntityResponse {
+func entityOf(t *testing.T, executioner kernel.Executioner, e string) EntityResponse {
 	t.Helper()
-	answer := executioner.ExecuteCommand[entityCmd](types.EntityRequest{Entity: e})
+	answer := executioner.ExecuteCommand[entityCmd](EntityRequest{Entity: e})
 	if answer.Refusal != "" {
 		t.Fatalf("reading %s was refused: %s", e, answer.Refusal)
 	}
@@ -170,7 +168,7 @@ func given(t *testing.T, got []string, want ...string) {
 	}
 }
 
-func encodedValue(t *testing.T, value types.ComponentValue) string {
+func encodedValue(t *testing.T, value ComponentValue) string {
 	t.Helper()
 	encoded, err := json.Marshal(value.Value)
 	if err != nil {
@@ -183,7 +181,7 @@ func TestASpawnByNameIsASpawnToEveryHookReader(t *testing.T) {
 	engine, watch := startWrites(t)
 	executioner := engine.Executioner()
 
-	spawned := executioner.ExecuteCommand[spawnCmd](request[types.SpawnRequest](t, fmt.Sprintf(
+	spawned := executioner.ExecuteCommand[spawnCmd](request[SpawnRequest](t, fmt.Sprintf(
 		`{"components": {%q: {"X": 1.5, "Y": -2}, %q: {"Stops": [{"X": 1, "Y": 2}]}, %q: {}}}`,
 		name[spot](), name[route](), name[marked]())))
 	if spawned.Refusal != "" {
@@ -214,7 +212,7 @@ func TestADespawnByNameIsADespawnToEveryHookReader(t *testing.T) {
 	e := spawn(executioner, labelledSet{Spot: spot{X: 3, Y: 4}, Label: label{Text: "doomed"}})[0]
 	watch.records(executioner)
 
-	answer := executioner.ExecuteCommand[despawnCmd](types.DespawnRequest{Entity: e.String()})
+	answer := executioner.ExecuteCommand[despawnCmd](DespawnRequest{Entity: e.String()})
 	if answer.Refusal != "" || !answer.WasAlive || answer.Entity != e.String() {
 		t.Fatalf("the despawn answered %+v", answer)
 	}
@@ -224,7 +222,7 @@ func TestADespawnByNameIsADespawnToEveryHookReader(t *testing.T) {
 	}
 	given(t, watch.records(executioner), want...)
 
-	again := executioner.ExecuteCommand[despawnCmd](types.DespawnRequest{Entity: e.String()})
+	again := executioner.ExecuteCommand[despawnCmd](DespawnRequest{Entity: e.String()})
 	if again.Refusal != "" || again.WasAlive {
 		t.Errorf("despawning it again answered %+v; want wasAlive false and no refusal", again)
 	}
@@ -233,12 +231,12 @@ func TestADespawnByNameIsADespawnToEveryHookReader(t *testing.T) {
 	}
 }
 
-func update(t *testing.T, executioner kernel.Executioner, document string) types.UpdateResponse {
+func update(t *testing.T, executioner kernel.Executioner, document string) UpdateResponse {
 	t.Helper()
-	return executioner.ExecuteCommand[updateCmd](request[types.UpdateRequest](t, document))
+	return executioner.ExecuteCommand[updateCmd](request[UpdateRequest](t, document))
 }
 
-func outcomes(answer types.UpdateResponse) []string {
+func outcomes(answer UpdateResponse) []string {
 	got := make([]string, len(answer.Components))
 	for i, c := range answer.Components {
 		got[i] = c.Name + " " + c.Outcome
@@ -348,7 +346,7 @@ func TestAnUpdateKeepsWhatTheJSONCannotShow(t *testing.T) {
 	}
 	given(t, watch.records(executioner), e.String()+" secret changed {2 7}")
 
-	spawned := executioner.ExecuteCommand[spawnCmd](request[types.SpawnRequest](t, fmt.Sprintf(
+	spawned := executioner.ExecuteCommand[spawnCmd](request[SpawnRequest](t, fmt.Sprintf(
 		`{"components": {%q: {"Pixels": {"len": 6}}, %q: {"Shown": 3}}}`, name[sprite](), name[secret]())))
 	if spawned.Refusal != "" {
 		t.Fatalf("the spawn was refused: %s", spawned.Refusal)
@@ -365,26 +363,26 @@ func TestAWriteIsAllOrNothingAndARefusalSaysWhatWouldHaveWorked(t *testing.T) {
 	executioner := engine.Executioner()
 	e := spawn(executioner, plainSet{Spot: spot{X: 1, Y: 2}})[0]
 	gone := spawn(executioner, plainSet{})[0]
-	executioner.ExecuteCommand[despawnAllCmd]([]ecs.Entity{gone})
+	executioner.ExecuteCommand[despawnAllCmd]([]Entity{gone})
 	reused := spawn(executioner, plainSet{})[0]
 	watch.records(executioner)
-	census := executioner.ExecuteCommand[censusCmd](types.CensusRequest{})
+	census := executioner.ExecuteCommand[censusCmd](CensusRequest{})
 
 	cases := []struct {
 		name     string
 		refusal  string
 		contains []string
 	}{
-		{"an unknown name", executioner.ExecuteCommand[spawnCmd](request[types.SpawnRequest](t,
+		{"an unknown name", executioner.ExecuteCommand[spawnCmd](request[SpawnRequest](t,
 			fmt.Sprintf(`{"components": {%q: {}, "internal.nothing": {}}}`, name[spot]()))).Refusal,
 			[]string{`"internal.nothing"`, "registered: ", name[route]()}},
-		{"a value of the wrong shape", executioner.ExecuteCommand[spawnCmd](request[types.SpawnRequest](t,
+		{"a value of the wrong shape", executioner.ExecuteCommand[spawnCmd](request[SpawnRequest](t,
 			fmt.Sprintf(`{"components": {%q: {"X": "far"}}}`, name[spot]()))).Refusal,
 			[]string{name[spot](), "ecs_entity"}},
-		{"a field the Component lacks", executioner.ExecuteCommand[spawnCmd](request[types.SpawnRequest](t,
+		{"a field the Component lacks", executioner.ExecuteCommand[spawnCmd](request[SpawnRequest](t,
 			fmt.Sprintf(`{"components": {%q: {"X": 1, "Z": 2}}}`, name[spot]()))).Refusal,
 			[]string{name[spot](), "no field Z", `{"X":1,"Y":0}`}},
-		{"one Component named twice", executioner.ExecuteCommand[spawnCmd](request[types.SpawnRequest](t,
+		{"one Component named twice", executioner.ExecuteCommand[spawnCmd](request[SpawnRequest](t,
 			fmt.Sprintf(`{"components": {%q: {}, %q: {}}}`, name[spot](), qualified[spot]()))).Refusal,
 			[]string{"name it once"}},
 		{"a malformed Entity", update(t, executioner, fmt.Sprintf(`{"entity": "seven", "remove": [%q]}`, name[spot]())).Refusal,
@@ -400,7 +398,7 @@ func TestAWriteIsAllOrNothingAndARefusalSaysWhatWouldHaveWorked(t *testing.T) {
 			`{"entity": %q, "set": {%q: {"X": 50}, %q: {"Stops": 3}}, "remove": ["internal.nothing"]}`,
 			e.String(), name[spot](), name[route]())).Refusal,
 			[]string{"nothing was applied", name[route](), `"internal.nothing"`}},
-		{"a malformed Entity to despawn", executioner.ExecuteCommand[despawnCmd](types.DespawnRequest{Entity: "Entity(x)"}).Refusal,
+		{"a malformed Entity to despawn", executioner.ExecuteCommand[despawnCmd](DespawnRequest{Entity: "Entity(x)"}).Refusal,
 			[]string{"7v2"}},
 	}
 	for _, c := range cases {
@@ -418,7 +416,7 @@ func TestAWriteIsAllOrNothingAndARefusalSaysWhatWouldHaveWorked(t *testing.T) {
 	if got := encodedValue(t, valueOf(t, entityOf(t, executioner, e.String()).Components, name[spot]())); got != `{"X":1,"Y":2}` {
 		t.Errorf("a refused update applied its good entry: spot is %s", got)
 	}
-	after := executioner.ExecuteCommand[censusCmd](types.CensusRequest{})
+	after := executioner.ExecuteCommand[censusCmd](CensusRequest{})
 	if after.Entities != census.Entities || after.AgentWrites != census.AgentWrites {
 		t.Errorf("refused writes changed the world: %d Entities and %d writes, were %d and %d",
 			after.Entities, after.AgentWrites, census.Entities, census.AgentWrites)
@@ -430,20 +428,20 @@ func TestAWriteIsAllOrNothingAndARefusalSaysWhatWouldHaveWorked(t *testing.T) {
 func TestTheCensusCountsTheWritesThatChangedTheWorld(t *testing.T) {
 	engine, _ := startWrites(t)
 	executioner := engine.Executioner()
-	count := func() uint64 { return executioner.ExecuteCommand[censusCmd](types.CensusRequest{}).AgentWrites }
+	count := func() uint64 { return executioner.ExecuteCommand[censusCmd](CensusRequest{}).AgentWrites }
 	if got := count(); got != 0 {
 		t.Fatalf("a game nobody wrote to counts %d writes", got)
 	}
-	spawned := executioner.ExecuteCommand[spawnCmd](request[types.SpawnRequest](t, fmt.Sprintf(`{"components": {%q: {"X": 1}}}`, name[spot]())))
+	spawned := executioner.ExecuteCommand[spawnCmd](request[SpawnRequest](t, fmt.Sprintf(`{"components": {%q: {"X": 1}}}`, name[spot]())))
 	update(t, executioner, fmt.Sprintf(`{"entity": %q, "set": {%q: {"X": 1}}}`, spawned.Entity, name[spot]()))
 	update(t, executioner, fmt.Sprintf(`{"entity": %q, "remove": [%q]}`, spawned.Entity, name[label]()))
 	update(t, executioner, fmt.Sprintf(`{"entity": %q, "set": {%q: {"X": 2}}}`, spawned.Entity, name[spot]()))
-	executioner.ExecuteCommand[despawnCmd](types.DespawnRequest{Entity: spawned.Entity})
-	executioner.ExecuteCommand[despawnCmd](types.DespawnRequest{Entity: spawned.Entity})
+	executioner.ExecuteCommand[despawnCmd](DespawnRequest{Entity: spawned.Entity})
+	executioner.ExecuteCommand[despawnCmd](DespawnRequest{Entity: spawned.Entity})
 	if got := count(); got != 3 {
 		t.Errorf("a spawn, a change and a despawn, beside an unchanged update, an absent removal and a second despawn, counted %d writes; want 3", got)
 	}
-	bare := executioner.ExecuteCommand[spawnCmd](request[types.SpawnRequest](t, `{"components": {}}`))
+	bare := executioner.ExecuteCommand[spawnCmd](request[SpawnRequest](t, `{"components": {}}`))
 	if bare.Refusal != "" || len(entityOf(t, executioner, bare.Entity).Components) != 0 {
 		t.Errorf("a spawn of nothing answered %+v; want a bare Entity", bare)
 	}
@@ -462,7 +460,7 @@ func TestAWriteCarriesAnEntityReferenceExactly(t *testing.T) {
 	engine, _ := startWrites(t)
 	executioner := engine.Executioner()
 	const handle = "9007199254740993" // 2^53 + 1, which a float64 cannot hold
-	spawned := executioner.ExecuteCommand[spawnCmd](request[types.SpawnRequest](t,
+	spawned := executioner.ExecuteCommand[spawnCmd](request[SpawnRequest](t,
 		fmt.Sprintf(`{"components": {%q: {"Target": %s}}}`, name[follows](), handle)))
 	if spawned.Refusal != "" {
 		t.Fatalf("the spawn was refused: %s", spawned.Refusal)

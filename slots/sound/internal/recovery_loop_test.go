@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/dvoyni/cog/slots/sound"
 )
 
 // A recovery restarts every live Voice, and a restart is the only sentence the
@@ -19,9 +18,9 @@ import (
 // carried a field that did not exist yet.
 func TestARecoveryKeepsALoopingVoiceLooping(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
-	h.play(sound.ClipWithResource(bell), 0, sound.Params{Loop: m.Some(true)})
+	h.play(ClipWithResource(bell), 0, Params{Loop: m.Some(true)})
 	h.tick()
 
 	first := h.backend.emitted()

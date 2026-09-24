@@ -179,13 +179,14 @@ func isInlineAnchor(function *ast.FuncDecl, info *types.Info, target func(string
 }
 
 // slotMayName reports whether a Slot's forwarder may name a type declared in a
-// package: the Slot's root or internal/types, the standard library, a Library
-// or the kernel.
+// package: the Slot's root, internal/ or internal/types, the standard library,
+// a Library or the kernel.
 func slotMayName(rootPath, typesPath string, m module) func(*types.Package) bool {
 	return func(declaring *types.Package) bool {
 		path := declaring.Path()
 		first, _, _ := strings.Cut(path, "/")
 		return path == rootPath || path == typesPath || strings.HasPrefix(path, typesPath+"/") ||
+			path == strings.TrimSuffix(typesPath, "/types") ||
 			path == m.path+"/kernel" || strings.HasPrefix(path, m.path+"/libs/") ||
 			!strings.Contains(first, ".")
 	}
@@ -598,10 +599,11 @@ func aliasViolations(pkg *packages.Package, root place, m module) []violation {
 			for _, spec := range general.Specs {
 				switch spec := spec.(type) {
 				case *ast.TypeSpec:
+					// The alias is judged by its target as written, one step:
+					// internal/ may itself alias a Library's type, as ui's
+					// Rect is libs/m's.
 					object := pkg.TypesInfo.Defs[spec.Name]
-					target, ok := types.Unalias(object.Type()).(*types.Named)
-					if !spec.Assign.IsValid() || spec.TypeParams != nil || !ok || target.Obj().Pkg() == nil ||
-						!own(target.Obj().Pkg().Path()) || target.Obj().Name() != spec.Name.Name {
+					if !spec.Assign.IsValid() || !aliasesOwn(spec, pkg.TypesInfo, own) {
 						violations = append(violations, declared(pkg, object, m,
 							root.path+" declares "+spec.Name.Name+", which is not an alias of its own internal type "+spec.Name.Name,
 							ruleAliasDeclarations))
@@ -625,8 +627,44 @@ func aliasViolations(pkg *packages.Package, root place, m module) []violation {
 	return violations
 }
 
-// reexports reports whether value is a qualified reference to a const or var
-// named name in a package own accepts.
+// aliasesOwn reports whether a type alias names a type of a package own
+// accepts under its own name - or, for an unexported alias, the exported form
+// of it, which is how a root keeps a type out of its API while still spelling
+// it in a forwarder's signature - instantiated, when the alias is generic, with
+// exactly its own type parameters in order.
+func aliasesOwn(spec *ast.TypeSpec, info *types.Info, own func(string) bool) bool {
+	target := spec.Type
+	var arguments []ast.Expr
+	switch instance := target.(type) {
+	case *ast.IndexExpr:
+		target, arguments = instance.X, []ast.Expr{instance.Index}
+	case *ast.IndexListExpr:
+		target, arguments = instance.X, instance.Indices
+	}
+	var parameters []*ast.Ident
+	if spec.TypeParams != nil {
+		for _, field := range spec.TypeParams.List {
+			parameters = append(parameters, field.Names...)
+		}
+	}
+	if len(arguments) != len(parameters) {
+		return false
+	}
+	for i, argument := range arguments {
+		ident, ok := argument.(*ast.Ident)
+		if !ok || info.Uses[ident] != info.Defs[parameters[i]] {
+			return false
+		}
+	}
+	name := spec.Name.Name
+	if !ast.IsExported(name) {
+		name = strings.ToUpper(name[:1]) + name[1:]
+	}
+	return reexports(target, name, info, own)
+}
+
+// reexports reports whether value is a qualified reference to a const, var or
+// type named name in a package own accepts.
 func reexports(value ast.Expr, name string, info *types.Info, own func(string) bool) bool {
 	selector, ok := value.(*ast.SelectorExpr)
 	if !ok || selector.Sel.Name != name {
@@ -641,7 +679,7 @@ func reexports(value ast.Expr, name string, info *types.Info, own func(string) b
 		return false
 	}
 	switch info.Uses[selector.Sel].(type) {
-	case *types.Const, *types.Var:
+	case *types.Const, *types.Var, *types.TypeName:
 		return true
 	}
 	return false

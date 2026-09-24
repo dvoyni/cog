@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/gogpu/naga"
 	"github.com/gogpu/naga/ir"
@@ -52,12 +51,12 @@ fn fs_main(in: PreludeVaryings) -> @location(0) vec4<f32> {
 // reflected is the one gfx handed the backend, so the includes were resolved
 // through model's mount exactly as a real app's are.
 func TestACustomMaterialIncludingThePreludeDrawsUnderScene(t *testing.T) {
-	material := scene.Material{{Descr: gfx.MaterialWithState(
+	material := Material{{Descr: gfx.MaterialWithState(
 		gfx.ShaderWithText(preludeMaterialSource), gfx.StateOpaque3D())}}
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		ref := q.TemporaryMesh(triangle(), nil, gfx.TopologyTriangleList)
-		q.Mesh(0, ref, scene.MeshDraw{Material: material, NeverCull: true})
+		q.Mesh(0, ref, MeshDraw{Material: material, NeverCull: true})
 	})
 	h.frame()
 

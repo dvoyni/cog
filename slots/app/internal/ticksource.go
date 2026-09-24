@@ -4,8 +4,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/dvoyni/cog/slots/app"
 )
 
 // defaultHoldDuration and maxHoldDuration bound how long a hold may keep the
@@ -129,26 +127,26 @@ func (t *tickSource) published(steps int, batch *stepBatch) {
 // until the request's Wait expires; steps already requested when it expires are
 // still published, which is why the agent-facing surface caps how many may be
 // asked for.
-func (t *tickSource) control(request app.TimeRequest) app.TimeResponse {
+func (t *tickSource) control(request TimeRequest) TimeResponse {
 	switch request.Action {
-	case app.TimeStatus:
-		return t.state(app.TimeResponse{})
-	case app.TimePause:
-		return t.state(app.TimeResponse{Changed: t.pause()})
-	case app.TimeResume:
-		return t.state(app.TimeResponse{Changed: t.resume()})
-	case app.TimeStep:
+	case TimeStatus:
+		return t.state(TimeResponse{})
+	case TimePause:
+		return t.state(TimeResponse{Changed: t.pause()})
+	case TimeResume:
+		return t.state(TimeResponse{Changed: t.resume()})
+	case TimeStep:
 		return t.step(request)
-	case app.TimeHold:
+	case TimeHold:
 		changed, err := t.hold(time.Now(), request.Hold)
 		if err != nil {
-			return app.TimeResponse{Err: err}
+			return TimeResponse{Err: err}
 		}
-		return t.state(app.TimeResponse{Changed: changed})
-	case app.TimeRelease:
-		return t.state(app.TimeResponse{Changed: t.release(time.Now())})
+		return t.state(TimeResponse{Changed: changed})
+	case TimeRelease:
+		return t.state(TimeResponse{Changed: t.release(time.Now())})
 	default:
-		return app.TimeResponse{Err: app.ErrUnknownTimeAction{Action: request.Action}}
+		return TimeResponse{Err: ErrUnknownTimeAction{Action: request.Action}}
 	}
 }
 
@@ -200,7 +198,7 @@ func (t *tickSource) hold(now time.Time, span time.Duration) (changed bool, err 
 		span = defaultHoldDuration
 	}
 	if span > maxHoldDuration {
-		return false, app.ErrHoldTooLong{For: span, Max: maxHoldDuration}
+		return false, ErrHoldTooLong{For: span, Max: maxHoldDuration}
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -246,13 +244,13 @@ func (t *tickSource) holding(now time.Time) bool {
 // step raises the requested ticks and waits for them. Stepping implies
 // pausing: stepping a running engine is meaningless, so the request pauses
 // rather than being refused.
-func (t *tickSource) step(request app.TimeRequest) app.TimeResponse {
+func (t *tickSource) step(request TimeRequest) TimeResponse {
 	steps := request.Steps
 	if steps < 1 {
 		steps = 1
 	}
 	batch, joined, changed := t.request(steps, request.Join)
-	answer := app.TimeResponse{Changed: changed, Joined: joined}
+	answer := TimeResponse{Changed: changed, Joined: joined}
 	if request.Wait <= 0 {
 		<-batch.done
 	} else {
@@ -261,7 +259,7 @@ func (t *tickSource) step(request app.TimeRequest) app.TimeResponse {
 		case <-batch.done:
 			expiry.Stop()
 		case <-expiry.C:
-			answer.Err = app.ErrStepNotPublished{After: request.Wait}
+			answer.Err = ErrStepNotPublished{After: request.Wait}
 			return t.state(answer)
 		}
 	}
@@ -300,7 +298,7 @@ func (t *tickSource) request(steps int, join bool) (batch *stepBatch, joined, ch
 }
 
 // state fills in what every answer carries, whatever the action was.
-func (t *tickSource) state(response app.TimeResponse) app.TimeResponse {
+func (t *tickSource) state(response TimeResponse) TimeResponse {
 	response.Paused = t.paused.Load()
 	response.Advanced = int(t.advanced.Load())
 	response.Tick = t.tick.Load()

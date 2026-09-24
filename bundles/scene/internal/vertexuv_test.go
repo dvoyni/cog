@@ -6,7 +6,6 @@ import (
 	"unsafe"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -55,10 +54,10 @@ func readInstanceMesh(data []byte, index int) uint32 {
 // The per-mesh buffer is bound on every draw, slot 0 holds the identity, and a
 // mesh with a range of its own gets a slot after it which its instance names.
 func TestAMeshWithAUVRangeNamesItsOwnSlotAfterTheIdentity(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		ref := q.TemporaryMesh(uvTriangle(), nil, gfx.TopologyTriangleList)
-		q.Mesh(0, ref, scene.MeshDraw{NeverCull: true})
+		q.Mesh(0, ref, MeshDraw{NeverCull: true})
 	})
 	h.frame()
 
@@ -84,10 +83,10 @@ func TestAMeshWithAUVRangeNamesItsOwnSlotAfterTheIdentity(t *testing.T) {
 // one record long.
 func TestACustomLayoutMeshNamesTheIdentitySlot(t *testing.T) {
 	custom := []customVertex{{Position: m.Vec3{X: -1, Y: -1}}, {Position: m.Vec3{X: 1, Y: -1}}, {}}
-	h := newHarness(t, func(q *scene.OpQueue) {
+	h := newHarness(t, func(q *OpQueue) {
 		q.Camera(testCamera, testCameraDescr())
 		ref := q.TemporaryMesh(custom, nil, gfx.TopologyTriangleList)
-		q.Mesh(0, ref, scene.MeshDraw{Material: opaqueMaterial(7), NeverCull: true})
+		q.Mesh(0, ref, MeshDraw{Material: opaqueMaterial(7), NeverCull: true})
 	})
 	h.frame()
 

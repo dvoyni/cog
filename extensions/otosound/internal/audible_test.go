@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dvoyni/cog/extensions/otosound"
 	"github.com/dvoyni/cog/slots/sound"
 )
 
@@ -30,7 +29,7 @@ func TestTheFixtureClipIsAudible(t *testing.T) {
 		t.Skip("pass -audible to play the fixture clip through the real audio device")
 	}
 
-	b := newBackend(otosound.Config{}, &otoAudio{})
+	b := newBackend(Config{}, &otoAudio{})
 	t.Cleanup(b.stop)
 	b.Voices(8)
 

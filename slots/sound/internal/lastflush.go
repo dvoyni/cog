@@ -1,10 +1,5 @@
 package internal
 
-import (
-	"github.com/dvoyni/cog/slots/sound"
-	"github.com/dvoyni/cog/slots/sound/internal/types"
-)
-
 // endingsHeld is how many endings the ring remembers. Thirty-two is a constant
 // and not a knob: it is two ticks' worth of endings at the default Voice cap,
 // which is more than a reader polling at any rate it can actually achieve will
@@ -18,8 +13,8 @@ const endingsHeld = 32
 // reader that holds a handle has VoiceEndedEvent, which is ordered and
 // lossless; a reader that cannot subscribe to anything has this.
 type ending struct {
-	clip   sound.ClipRef
-	reason sound.Reason
+	clip   ClipRef
+	reason Reason
 	tick   int64
 }
 
@@ -63,7 +58,7 @@ type lastFlush struct {
 // record stamps one ending with the tick it happened on and writes it over the
 // oldest entry. It is called once per ending, beside the VoiceEndedEvent the
 // same ending publishes, so the two never disagree about what ended.
-func (l *lastFlush) record(e types.Ending, tick int64) {
+func (l *lastFlush) record(e Ending, tick int64) {
 	l.endings[l.next] = ending{clip: e.Clip, reason: e.Reason, tick: tick}
 	l.next = (l.next + 1) % endingsHeld
 	if l.held < endingsHeld {
