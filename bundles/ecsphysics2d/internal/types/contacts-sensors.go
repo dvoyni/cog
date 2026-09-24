@@ -57,7 +57,9 @@ func (c *Contacts) sweepSensors(bodies *BodyIndex, statics *StaticIndex) {
 	moving := &bodies.index
 	for slot := range moving.entries {
 		sensor := &moving.entries[slot]
-		if !sensor.swept {
+		// The path bit marks a fast solid Body too, which this pass does not
+		// test yet.
+		if !sensor.path || !sensor.shape.Sensor {
 			continue
 		}
 		world := moving.world(sensor)
@@ -149,7 +151,7 @@ func (c *Contacts) sensorHit(
 	// sides reach opposite conclusions and exactly one entry is written. The
 	// lower Entity settles a tie, which is the same tie-break the pair table
 	// orders by.
-	if other.swept {
+	if other.path && other.shape.Sensor {
 		theirs, ok := probeWorld(
 			other.previousCentre, otherWorld[0], other.shape.Radius,
 			sensor.shape, sensorWorld,

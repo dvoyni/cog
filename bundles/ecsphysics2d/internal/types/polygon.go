@@ -125,6 +125,7 @@ func NewBoxShapeFor(box BB, radius float64) Shape {
 	shape.verts[1] = m.Vec2d{X: box.R, Y: box.T}
 	shape.verts[2] = m.Vec2d{X: box.L, Y: box.T}
 	shape.verts[3] = m.Vec2d{X: box.L, Y: box.B}
+	shape.faceDistance = faceDistanceOf(shape.verts[:])
 	return shape
 }
 
@@ -143,9 +144,11 @@ func newHulledShape(hull []m.Vec2d, radius float64) (Shape, Polygon, error) {
 		shape.Kind = ShapeQuad
 	default:
 		shape.Kind = ShapePoly
+		shape.faceDistance = faceDistanceOf(hull)
 		return shape, Polygon{Verts: m.ListOf(hull)}, nil
 	}
 	copy(shape.verts[:], hull)
+	shape.faceDistance = faceDistanceOf(hull)
 	return shape, Polygon{}, nil
 }
 

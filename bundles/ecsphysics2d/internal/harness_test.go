@@ -200,7 +200,7 @@ func spawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execu
 	})
 }
 
-// readCmd reads one Body's three Components back, which is how a test sees what
+// readCmd reads one Body's Components back, which is how a test sees what
 // a tick did without holding a lock of its own across one.
 type readCmd kernel.Command[readRequest, readResponse]
 
@@ -211,6 +211,8 @@ type readResponse struct {
 	Velocity ecsphysics2d.Velocity
 	Force    ecsphysics2d.Force
 	HasForce bool
+	Shape    ecsphysics2d.Shape
+	Polygon  ecsphysics2d.Polygon
 }
 
 func readCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execute[readRequest, readResponse]) {
@@ -219,12 +221,16 @@ func readCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execut
 		places *ecs.Get[ecsphysics2d.Position],
 		velocities *ecs.Get[ecsphysics2d.Velocity],
 		forces *ecs.Get[ecsphysics2d.Force],
+		shapes *ecs.Get[ecsphysics2d.Shape],
+		polygons *ecs.Get[ecsphysics2d.Polygon],
 		answer *ecs.Resp[readResponse],
 	) {
 		var reply readResponse
 		reply.Place, _ = places.Of(request.Entity)
 		reply.Velocity, _ = velocities.Of(request.Entity)
 		reply.Force, reply.HasForce = forces.Of(request.Entity)
+		reply.Shape, _ = shapes.Of(request.Entity)
+		reply.Polygon, _ = polygons.Of(request.Entity)
 		answer.Set(reply)
 	})
 }

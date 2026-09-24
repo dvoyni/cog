@@ -112,14 +112,19 @@ type entry struct {
 	left, bottom              int32
 	right, top                int32
 	live                      bool
-	// swept says this entry is a moving circle Sensor, which Detect Probes
-	// along its path instead of testing where the tick left it. Deciding it
-	// once at insert is what keeps the detection walk's own test a field read.
-	swept bool
-	// previousCentre is where a swept Sensor's circle stood when the tick
-	// began, which is the start of the Probe Detect sweeps it along; the end is
-	// the world cache's own centre. InsertMoving writes it, and it means
-	// nothing unless swept is set.
+	// path is the one path bit: Detect tests this entry along its path
+	// through the tick instead of only where the tick left it. InsertMoving
+	// sets it on a moving circle Sensor, and on a solid Body whose movement
+	// passes continuous collision's gate. Only the Sensor's is read yet, so
+	// every reader asks the Sensor flag beside it. Deciding it once at insert
+	// is what keeps the detection walk's own test a field read.
+	path bool
+	// previousCentre is where the path starts; the end is where the tick left
+	// the entry. For a circle it is the centre, and for any other Shape the
+	// Position. A Sensor's circle starts at its centre at the previous pose; a
+	// solid Body's path is held at its end angle, so it starts at its end pose
+	// translated by Previous − Current. InsertMoving writes it, and it means
+	// nothing unless path is set.
 	previousCentre m.Vec2d
 }
 
@@ -272,9 +277,9 @@ func (idx *index) place(slot int32, entity ecs.Entity, shape Shape, at m.Vec2d, 
 	e.shape = shape
 	e.transform = NewTransformRigid(at, angle)
 	// A Shape inserted without a path did not move: InsertMoving is the one
-	// thing that sweeps one, and a recycled slot must not inherit the last
+	// thing that marks one, and a recycled slot must not inherit the last
 	// Shape's answer.
-	e.live, e.swept = true, false
+	e.live, e.path = true, false
 
 	used, box := cacheWorldAt(shape, e.transform, verts, idx.slab[e.world:e.world+e.worldCap])
 	e.worldLen = int32(used)

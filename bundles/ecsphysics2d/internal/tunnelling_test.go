@@ -5,9 +5,11 @@ import (
 	"math"
 	"sync/atomic"
 	"testing"
+	"unsafe"
 
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecsphysics2d"
+	"github.com/dvoyni/cog/bundles/ecsphysics2d/internal/types"
 	"github.com/dvoyni/cog/kernel"
 
 	"github.com/dvoyni/cog/libs/m"
@@ -133,6 +135,97 @@ func minimumExtent(shape ecsphysics2d.Shape, verts []m.Vec2d) float64 {
 		inner = min(inner, math.Abs(edge.Cross(a))/edge.Length())
 	}
 	return inner + shape.Radius
+}
+
+// TestEveryPolygonConstructorWritesTheFaceDistance is where the gate's measure
+// is kept: a Polygon kind carries the distance from its Position to its nearest
+// face's line in the Shape's padding, written by the constructor that built it,
+// and it rides through the step in the Shape Component the app spawned. Each
+// constructor's Shape is spawned as a Body, recentred as an app spawns one, and
+// read back after a tick; what Index would read as its minimum extent has to be
+// the reference scene's own reading of the definition, and the Shape has to
+// still be 104 bytes.
+func TestEveryPolygonConstructorWritesTheFaceDistance(t *testing.T) {
+	if got, want := unsafe.Sizeof(ecsphysics2d.Shape{}), uintptr(104); got != want {
+		t.Fatalf("Shape is %d bytes, want %d", got, want)
+	}
+
+	polygon := func(verts []m.Vec2d, radius float64) (ecsphysics2d.Shape, ecsphysics2d.Polygon) {
+		shape, outline, err := ecsphysics2d.NewPolygonShape(verts, radius)
+		if err != nil {
+			t.Fatalf("NewPolygonShape: %v", err)
+		}
+		return shape, outline
+	}
+	type built struct {
+		name    string
+		shape   ecsphysics2d.Shape
+		polygon ecsphysics2d.Polygon
+	}
+	var cases []built
+	add := func(name string, shape ecsphysics2d.Shape, outline ecsphysics2d.Polygon) {
+		cases = append(cases, built{name, shape, outline})
+	}
+	add("a box", ecsphysics2d.NewBoxShape(0.4, 0.4, 0), ecsphysics2d.Polygon{})
+	add("the plank", ecsphysics2d.NewBoxShape(0.2, 4, 0), ecsphysics2d.Polygon{})
+	add("a rounded box", ecsphysics2d.NewBoxShape(1, 3, 0.25), ecsphysics2d.Polygon{})
+	add("an off-centre box", ecsphysics2d.NewBoxShapeFor(ecsphysics2d.NewBB(0.5, -1, 2.5, 0.2), 0), ecsphysics2d.Polygon{})
+	shape, outline := polygon([]m.Vec2d{{X: 0, Y: 0}, {X: 3, Y: 0}, {X: 0, Y: 1}}, 0)
+	add("a triangle", shape, outline)
+	shape, outline = polygon([]m.Vec2d{{X: -1, Y: -0.5}, {X: 2, Y: -0.3}, {X: 1.5, Y: 1}, {X: -0.8, Y: 0.7}}, 0.1)
+	add("a quad", shape, outline)
+	hexagon := make([]m.Vec2d, 6)
+	for i := range hexagon {
+		angle := float64(i) * math.Pi / 3
+		hexagon[i] = m.Vec2d{X: 1.5 * math.Cos(angle), Y: 0.75 * math.Sin(angle)}
+	}
+	shape, outline = polygon(hexagon, 0.05)
+	add("a Polygon of six", shape, outline)
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// As built, before anything recentres it: the constructor's own
+			// write, about the Position the vertices were given around.
+			if got, want := types.MinimumExtent(c.shape), minimumExtent(c.shape, verticesOf(c.shape, c.polygon)); !closeToFloat32(got, want) {
+				t.Errorf("as built, minimum extent %v, want %v", got, want)
+			}
+
+			body, shape, outline, _, err := ecsphysics2d.NewDynamicForShape(c.shape, c.polygon, 1, 0, 0)
+			if err != nil {
+				t.Fatalf("NewDynamicForShape: %v", err)
+			}
+			h := newHarness(t)
+			e := h.spawn(t, spawnRequest{
+				Kind:    kindPolygonBody,
+				Place:   ecsphysics2d.Position{Current: m.Vec2d{X: 3, Y: -2}},
+				Body:    body,
+				Shape:   shape,
+				Polygon: outline,
+			})
+			h.frames(t, 2)
+			stepped := h.read(t, e)
+			want := minimumExtent(stepped.Shape, verticesOf(stepped.Shape, stepped.Polygon))
+			if got := types.MinimumExtent(stepped.Shape); !closeToFloat32(got, want) {
+				t.Errorf("after the step, minimum extent %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// verticesOf is the local vertex run minimumExtent takes for a ShapePoly: the
+// Polygon Component's. Every other kind reads its own slots.
+func verticesOf(shape ecsphysics2d.Shape, polygon ecsphysics2d.Polygon) []m.Vec2d {
+	if shape.Kind != ecsphysics2d.ShapePoly {
+		return nil
+	}
+	return ecsphysics2d.PolygonVerts(nil, shape, polygon)
+}
+
+// closeToFloat32 is equality to within the float32 the face distance is kept
+// in, and never above the true value: the kept distance is rounded towards
+// zero, so the gate engages no later than 1×.
+func closeToFloat32(got, want float64) bool {
+	return got <= want && want-got <= 1e-6*max(1, want)
 }
 
 // TestASolidBodyDoesNotTunnel is the nine cases: each mover thrown at each

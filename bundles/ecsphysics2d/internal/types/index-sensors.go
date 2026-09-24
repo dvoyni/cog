@@ -5,25 +5,27 @@ import (
 	"github.com/dvoyni/cog/libs/m"
 )
 
-// The index's half of the swept Sensor: the Insert that records where a Shape
-// was when the tick began, and the entry lookups the sweep reads it back
-// through. Why the sweep exists, and what it deliberately does not cover, is
-// in contacts-sensors.go.
+// The index's half of the path: the Insert that records where a Shape was when
+// the tick began, and the entry lookups Detect reads it back through. It marks
+// two things with the one path bit: a moving circle Sensor, whose sweep is in
+// contacts-sensors.go, and a solid Body past continuous collision's gate
+// (continuous-collision.md § The gate), which nothing reads yet.
 
 // InsertMoving is Insert for a Shape that may have moved during the tick,
 // recording where it stood when the tick began. It is what the Body index is
 // filled through.
 //
-// Only a moving circle Sensor keeps anything. Every other Shape is inserted
-// exactly as Insert inserts it, so the path costs the rebuild one predictable
-// branch a Body and nothing else.
+// Only a moving circle Sensor, or a solid Body that moved at least its own
+// minimum extent, keeps anything. Every other Shape is inserted exactly as
+// Insert inserts it, so the path costs the rebuild one compare a Body and
+// nothing else.
 func (idx *BodyIndex) InsertMoving(
 	entity ecs.Entity, shape Shape,
 	at, previous m.Vec2d, angle, previousAngle float64,
 	verts []m.Vec2d,
 ) {
 	slot := idx.insert(entity, shape, at, angle, verts)
-	idx.sweepFrom(slot, shape, previous, previousAngle)
+	idx.markPath(slot, shape, at, previous, previousAngle)
 }
 
 // InsertMoving is the Body index's own, which the static index never needs: a
@@ -35,13 +37,49 @@ func (idx *StaticIndex) InsertMoving(
 	verts []m.Vec2d,
 ) {
 	slot := idx.insert(entity, shape, at, angle, verts)
-	idx.sweepFrom(slot, shape, previous, previousAngle)
+	idx.markPath(slot, shape, at, previous, previousAngle)
+}
+
+// markPath sets the path bit on the entry an Insert just filled, when the
+// Shape is a moving circle Sensor or a solid Body past the gate, and records
+// where its path starts.
+func (idx *index) markPath(slot int32, shape Shape, at, previous m.Vec2d, previousAngle float64) {
+	if slot < 0 {
+		return
+	}
+	if shape.Sensor {
+		idx.sweepFrom(slot, shape, previous, previousAngle)
+		return
+	}
+
+	// The gate: |Current − Previous| ≥ the minimum extent, compared squared.
+	// The step is fixed, so the displacement is the whole test. An extent of
+	// 0, a point or a bare segment, engages on any motion, which is the swept
+	// Sensor's own rule; the second clause is what keeps it from engaging at
+	// rest. Written as a negation, so a NaN movement is not marked.
+	moved := at.Sub(previous)
+	distance, extent := moved.Dot(moved), MinimumExtent(shape)
+	if !(distance >= extent*extent && distance > 0) {
+		return
+	}
+	e := &idx.entries[slot]
+	if e.worldLen == 0 {
+		return
+	}
+	// The path is held at the end angle, so it starts at the end pose
+	// translated by Previous − Current: a circle's centre now, moved back
+	// along the Position's chord, and any other Shape's Position, Previous.
+	from := previous
+	if shape.Kind == ShapeCircle {
+		from = idx.slab[e.world].Sub(moved)
+	}
+	e.previousCentre, e.path = from, true
 }
 
 // sweepFrom marks the entry an Insert just filled as a moving circle Sensor,
 // when it is one, and records the centre its path starts at.
 func (idx *index) sweepFrom(slot int32, shape Shape, previous m.Vec2d, previousAngle float64) {
-	if slot < 0 || !shape.Sensor || shape.Kind != ShapeCircle {
+	if shape.Kind != ShapeCircle {
 		return
 	}
 	e := &idx.entries[slot]
@@ -64,7 +102,7 @@ func (idx *index) sweepFrom(slot int32, shape Shape, previous m.Vec2d, previousA
 		// Previous = Current.
 		return
 	}
-	e.previousCentre, e.swept = from, true
+	e.previousCentre, e.path = from, true
 }
 
 // lookup is the static index's own entry for an Entity it holds, with the

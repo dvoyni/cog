@@ -1,6 +1,10 @@
 package types
 
-import "github.com/dvoyni/cog/libs/m"
+import (
+	"math"
+
+	"github.com/dvoyni/cog/libs/m"
+)
 
 // magicEpsilon is cp's MAGIC_EPSILON, the distance below which a direction
 // derived by dividing by that distance is taken to be unreliable and a fallback
@@ -83,7 +87,49 @@ type Shape struct {
 	CollisionBits, CollidesWith uint32
 	Kind                        ShapeKind
 	Sensor                      bool
-	_                           [6]byte
+	// The two bytes after Sensor are spare, and the first is reserved for
+	// continuous collision's fall-back flag should it ever be taken.
+	_ [2]byte
+	// faceDistance is a Polygon kind's distance from its Position to the line
+	// of its nearest face, which with the rounding radius is its minimum
+	// extent. It sits in what was padding, so the Shape stays 104 bytes.
+	//
+	// It is written by the constructors that write vertices, which are the
+	// only writers of vertices there are, and is 0 on every other kind. A
+	// Polygon Shape written as a bare literal has 0 too, so continuous
+	// collision's gate engages it on any motion: tested more often, never
+	// tunnelling, the same class of hazard as a bare literal's collision bits.
+	faceDistance float32
+}
+
+// MinimumExtent is how thin a Shape is along its thinnest direction, from the
+// Body's Position, which is what continuous collision's gate compares a Body's
+// movement in the tick against: a circle's radius, a segment's rounding radius,
+// and a Polygon kind's distance to its nearest face's line plus its rounding
+// radius. The face distance is 0 on every kind that is not a polygon, so the
+// sum needs no branch on the kind.
+func MinimumExtent(shape Shape) float64 {
+	return shape.Radius + float64(shape.faceDistance)
+}
+
+// faceDistanceOf is the distance from the local origin, which is the Body's
+// Position, to the nearest line through a face of that outline, kept as a
+// float32 rounded towards zero so the gate it feeds never engages later than
+// the true extent says.
+func faceDistanceOf(verts []m.Vec2d) float32 {
+	nearest := math.Inf(1)
+	for i, a := range verts {
+		edge := verts[(i+1)%len(verts)].Sub(a)
+		nearest = min(nearest, math.Abs(edge.Cross(a))/edge.Length())
+	}
+	if math.IsInf(nearest, 1) || math.IsNaN(nearest) {
+		return 0
+	}
+	kept := float32(nearest)
+	if float64(kept) > nearest {
+		kept = math.Nextafter32(kept, 0)
+	}
+	return kept
 }
 
 // NewCircleShape is a circle of that radius about an offset from the Body's

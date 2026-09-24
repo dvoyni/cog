@@ -218,12 +218,16 @@ func NewDynamicForShape(shape Shape, polygon Polygon, density, damping, angularD
 		for i := range polyCount(shape, nil) {
 			recentred.verts[i] = shape.verts[i].Sub(centroid)
 		}
+		// Moving the vertices moves the Position's nearest face, so the face
+		// distance is written again beside them.
+		recentred.faceDistance = faceDistanceOf(recentred.verts[:polyCount(shape, nil)])
 	case ShapePoly:
 		// verts is this call's own copy, so shifting it writes nothing the
 		// caller holds, and ListOf copies it once more into the new List.
 		for i := range verts {
 			verts[i] = verts[i].Sub(centroid)
 		}
+		recentred.faceDistance = faceDistanceOf(verts)
 		return body, recentred, Polygon{Verts: m.ListOf(verts)}, centroid, nil
 	}
 	return body, recentred, Polygon{}, centroid, nil
