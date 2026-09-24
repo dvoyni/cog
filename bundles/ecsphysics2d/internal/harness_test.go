@@ -58,6 +58,13 @@ type (
 		Body     ecsphysics2d.Dynamic
 		Shape    ecsphysics2d.Shape
 	}
+	// shapedKinematic is a Kinematic body with a Shape: a Velocity and no
+	// Dynamic, so nothing pushes it, and a Shape, so it sits in BodyIndex.
+	shapedKinematic struct {
+		Place    ecsphysics2d.Position
+		Velocity ecsphysics2d.Velocity
+		Shape    ecsphysics2d.Shape
+	}
 	// shapedStatic is static geometry as an app spawns it: the Shape, the
 	// Position and the Tag in one Spawn, so the Shape hook and the Position
 	// reach Index together.
@@ -108,6 +115,7 @@ const (
 	kindStatic
 	kindShapedBody
 	kindShapedStatic
+	kindShapedKinematic
 	kindPlacelessStatic
 	kindPolygonBody
 	kindPolygonStatic
@@ -140,6 +148,7 @@ func spawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execu
 		statics *ecs.Spawn[staticBody],
 		shaped *ecs.Spawn[shapedBody],
 		shapedStatics *ecs.Spawn[shapedStatic],
+		shapedKinematics *ecs.Spawn[shapedKinematic],
 		placeless *ecs.Spawn[placelessStatic],
 		polygons *ecs.Spawn[polygonBody],
 		polygonStatics *ecs.Spawn[polygonStatic],
@@ -165,6 +174,10 @@ func spawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execu
 				})
 			case kindShapedStatic:
 				e = shapedStatics.New(shapedStatic{Place: request.Place, Shape: request.Shape})
+			case kindShapedKinematic:
+				e = shapedKinematics.New(shapedKinematic{
+					Place: request.Place, Velocity: request.Velocity, Shape: request.Shape,
+				})
 			case kindPlacelessStatic:
 				e = placeless.New(placelessStatic{Shape: request.Shape})
 			case kindPolygonBody:
