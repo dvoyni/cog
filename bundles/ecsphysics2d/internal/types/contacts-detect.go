@@ -148,8 +148,9 @@ func (c *Contacts) pair(
 	// also what the pair table forbids: it is inserted at most once a tick and
 	// has no replacement path. Only a Body index entry is ever swept, so a
 	// Static party answers false without the caller saying which index it came
-	// from.
-	if first.swept || second.swept {
+	// from. The path bit is set on a fast solid Body too, which nothing reads
+	// yet, so it is the Sensor's alone that is asked here.
+	if (first.path && first.shape.Sensor) || (second.path && second.shape.Sensor) {
 		return
 	}
 

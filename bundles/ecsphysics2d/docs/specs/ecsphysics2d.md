@@ -474,7 +474,8 @@ From [Convex polygons](https://github.com/dvoyni/cog/issues/323),
 | `CollisionBits`, `CollidesWith` | `uint32` each | 8 | the groups it is in, and the groups it collides with |
 | `Kind` | `uint8` | 1 | Circle, Segment, Tri, Quad, Poly |
 | `Sensor` | `bool` | 1 | |
-| padding | | 6 | |
+| padding | | 2 | spare; the first byte is reserved for continuous collision's fall-back flag, `StopsAtBodies`, should it ever be taken |
+| `faceDistance` | `float32` | 4 | unexported: a Polygon kind's distance from `Position` to its nearest face's line, 0 on every other kind |
 
 **The kind carries the vertex count.** `Circle` uses `verts[0]` as its centre
 offset; `Segment` uses `verts[0..1]` and, when it has neighbours, `verts[2..3]`
@@ -490,6 +491,25 @@ reference scene that is 88 KB / 152 KB / 280 KB for 1 024 Bodies and 363 KB /
 627 KB / 1 155 KB for 4 224 statics. For comparison, `cp.Shape` is 168 B with
 five pointers and a circle is three allocations; **C**'s `cpPolyShape` is 600 B,
 because it inlines twelve planes whether a box needs them or not.
+
+**The face distance is kept, not derived.** It is continuous collision's
+[minimum extent](continuous-collision.md#the-gate) for a Polygon kind, with the
+rounding radius added: the thinnest the Shape is from its `Position`, which
+Index compares a Body's movement in the tick against. A circle's and a
+segment's extent is their `Radius`, which Index reads live. A Polygon's changes
+only when its vertices do, and the constructors are the only writers of
+vertices, so they write it beside them: `NewPolygonShape`, `NewBoxShape`,
+`NewBoxShapeFor`, and `NewDynamicForShape`, which recentres the vertices. It
+sits in what was padding, as a `float32` rounded towards zero, so the Shape
+stays 104 B and the gate never engages later than the true extent says.
+Computing it in Index instead would be one cross product and one length per
+face, per Body, per tick, against a bar of one compare.
+
+**A Polygon Shape written as a bare literal has a face distance of 0**, so the
+gate engages it on any motion. That is safe: it is tested more often and never
+tunnels. It is the same class of hazard as a bare literal's collision bits, which
+the package already accepts, and the way to avoid it is the same: build the
+Shape with a constructor.
 
 **Local normals are not stored.** They are derived when the world cache is built,
 one `Normalize` per edge — and a static Polygon is cached once, at insert, so the
