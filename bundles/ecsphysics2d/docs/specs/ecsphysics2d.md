@@ -1734,6 +1734,7 @@ takes an extra `verts []m.Vec2d`, nil for every kind but `Poly`:
 | Primitive | Returns |
 | --- | --- |
 | `ProbeShape(from, to m.Vec2d, radius float64, shape Shape, at m.Vec2d, angle float64, verts []m.Vec2d)` | `(Hit, bool)`, `Hit.Entity` zero |
+| `ProbeShapeWith(mover Shape, from, to m.Vec2d, angle float64, moverVerts []m.Vec2d, target Shape, at m.Vec2d, targetAngle float64, targetVerts []m.Vec2d)` | `(Hit, bool)`, `Hit.Entity` zero |
 | `Penetration(a Shape, atA m.Vec2d, angleA float64, vertsA []m.Vec2d, b Shape, atB …)` | `(normal m.Vec2d, depth float64, ok bool)` |
 | `ClosestPoint(p m.Vec2d, shape Shape, at m.Vec2d, angle float64, verts []m.Vec2d)` | `m.Vec2d` |
 
@@ -1742,14 +1743,17 @@ the index methods on purpose, so a free function never reads as a world query.
 
 **World queries** — methods on two index Resources, reached through
 `ecs.Read[*StaticIndex]` / `ecs.Read[*BodyIndex]`. **Nine queries are three
-methods**, each taking one `exclude ecs.Entity` plus the groups it is in and the
-groups it looks for:
+methods**, and each Probe has a `…With` form beside it that moves a Shape rather
+than a circle. Every one takes one `exclude ecs.Entity` plus the groups it is in
+and the groups it looks for:
 
 | Method | Covers |
 | --- | --- |
 | `Probe(from, to, radius, bits, collidesWith, exclude) (Hit, bool)` — the first Hit | first-hit; **line of sight is its bool**; a swept hop |
 | `ProbeAll(dst []Hit, from, to, radius, bits, collidesWith, exclude) []Hit` — every Hit, **ordered by T**, appended | all hits; looking *past* a Hit |
 | `Overlap(dst []ecs.Entity, shape Shape, at, angle, verts, bits, collidesWith, exclude) []ecs.Entity` — appended, **unordered** | what a Shape touches; a point query is a circle of radius 0 |
+| `ProbeWith(shape Shape, from, to, angle, verts, bits, collidesWith, exclude) (Hit, bool)` — the first Hit | `Probe` for a Shape moved without turning; whether a crate fits through a gap is its bool |
+| `ProbeAllWith(dst []Hit, shape Shape, from, to, angle, verts, bits, collidesWith, exclude) []Hit` — every Hit, **ordered by T**, appended | `ProbeAll` for a Shape moved without turning |
 
 - **Nearest is not a function**: `Overlap`, then a loop in the app keeping its own
   predicate and the minimum `ClosestPoint` distance. A predicate parameter is a
@@ -1766,11 +1770,25 @@ groups it looks for:
   high-volume boolean. Measured, and it does not earn a place.
 - **An iterator was rejected**: ordering by T needs scratch, and a Resource shared
   by concurrent readers cannot hold scratch. The caller's slice is the scratch.
+- **The `…With` forms sit beside the circle forms, which stay as they are.** A
+  circle is the common case and a point is the case the package exists for.
+  Widening `Probe` itself to take a Shape was rejected: it changes every existing
+  call site, and the circle case would pay for a parameter it never uses. They
+  take a Shape the way `Overlap` does, and a circle Shape is `Probe` of its own
+  radius about its placed centre. See
+  [continuous collision § Probing a Shape](continuous-collision.md#probing-a-shape).
 
 ### `Hit`, and what a Probe means
 
 `Hit{Entity ecs.Entity; T float64; Point, Normal m.Vec2d}`. `Overlap` returns
 Entities only, having no first contact to describe.
+
+A Probe is **moving a Shape, without turning it**, in a straight line and finding
+what it touches. The Shape is most often a circle, possibly of radius 0, which is
+what `Probe` and `ProbeAll` move; `ProbeWith`, `ProbeAllWith` and
+`ProbeShapeWith` move any Shape, at the angle they are given for the whole path,
+and their `from` and `to` are the Shape's Position at each end. A `Hit` means the
+same from every form.
 
 - **T is a fraction** of `from → to`, in [0, 1], carrying no unit. Snap-back is
   `from + (to − from)·T`.
@@ -1792,6 +1810,17 @@ Entities only, having no first contact to describe.
   summed radius, confines the Hit to that face by a cross-product span test, then
   sweeps a circle against each vertex when the radius is non-zero. **Exact, and
   nothing allocates.**
+- **A moving Shape that is not a circle is advanced on GJK's distance.** The
+  distance between two convex Shapes, one moving without turning, is convex along
+  the path, so stepping the mover by the separation over its closing speed is
+  Newton's method on it, started before the touch. A touch on a flat face is
+  met in one step, exactly; a rounded feature is closed on to within a nanometre
+  of its surface, from before the touch and never through it. A circle keeps the
+  closed forms above. **Nothing allocates** here either, below the same Polygon
+  size as every other query.
+- **Turning is not Probed.** A Shape turning along its path is Probed at the one
+  angle it is given, so a thin Shape spinning fast can slip through what its
+  Probe says it meets.
 - **A point never Hits a point.** A radius-0 Probe against a radius-0 circle, or
   along a segment, has zero area. Projectiles do not Hit each other unless the app
   gives one a radius. Nothing tries to fix this.

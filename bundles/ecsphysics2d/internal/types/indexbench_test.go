@@ -155,6 +155,31 @@ func BenchmarkProbeShapeAgainstOneSegment(b *testing.B) {
 	}
 }
 
+// The two shape Probes the path test is built on, a box moved face on into a
+// box and into a segment: GJK's distance and the advance it drives, where the
+// two above are closed forms.
+func BenchmarkProbeShapeWithABoxAgainstABox(b *testing.B) {
+	from, to, at := origin, m.Vec2d{X: 10}, m.Vec2d{X: 5}
+	mover, target := NewBoxShape(1, 1, 0), NewBoxShape(2, 2, 0)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		hitSink, boolSink = ProbeShapeWith(mover, from, to, 0, nil, target, at, 0, nil)
+	}
+}
+
+func BenchmarkProbeShapeWithABoxAgainstASegment(b *testing.B) {
+	from, to, at := origin, m.Vec2d{X: 10}, m.Vec2d{X: 5}
+	mover := NewBoxShape(1, 1, 0)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		hitSink, boolSink = ProbeShapeWith(mover, from, to, 0, nil, upright, at, 0, nil)
+	}
+}
+
 func BenchmarkPenetration(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()

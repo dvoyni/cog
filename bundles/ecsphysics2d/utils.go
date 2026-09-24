@@ -234,6 +234,21 @@ func ProbeShape(
 	return types.ProbeShape(from, to, radius, shape, at, angle, verts)
 }
 
+// ProbeShapeWith moves one Shape at a fixed angle from one Position to another
+// against a second Shape placed at a position and an angle, and reports the
+// first Hit. The mover does not turn. It is the pair primitive behind an
+// index's ProbeWith, and a circle mover answers as ProbeShape does for its
+// placed centre; its Hit names no Entity.
+//
+// moverVerts and targetVerts are the Polygon Components' vertices and are nil
+// for every kind but ShapePoly.
+func ProbeShapeWith(
+	mover Shape, from, to m.Vec2d, angle float64, moverVerts []m.Vec2d,
+	target Shape, at m.Vec2d, targetAngle float64, targetVerts []m.Vec2d,
+) (Hit, bool) {
+	return types.ProbeShapeWith(mover, from, to, angle, moverVerts, target, at, targetAngle, targetVerts)
+}
+
 // Penetration is how deeply two placed Shapes overlap and which way apart, or
 // false when they do not. There is no Overlaps boolean beside it: this ok is
 // it. The normal points from a towards b, and on coincident centres it is zero
