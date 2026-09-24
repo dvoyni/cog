@@ -42,11 +42,13 @@
 // rejects a stale handle: liveness is not an extra structure, it is the probe.
 //
 // ecs is a Bundle. Its plugin, built by ecsplugin.New and configured by Config,
-// publishes the authority, *Entities, registers ShrinkCmd and three unexported
-// read Commands, registers the Store of m.Transform, where an Entity stands,
+// publishes the authority, *Entities, registers ShrinkCmd and six unexported
+// Commands that read and write the world by Component name, registers the
+// Store of m.Transform, where an Entity stands,
 // and subscribes the one System it owns: the general drainer, DrainOnUpdate,
 // which applies what the deferring handles queued, Last on app.UpdateEvent and
 // unconditionally. It registers nothing else. It requires no Adapter, and contributes
-// one to mcp's collected Port, as McpProvider, offering the read Commands to an
-// Agent as the tools ecs_world, ecs_entity and ecs_query.
+// one to mcp's collected Port, as McpProvider, offering those Commands to an
+// Agent as the tools ecs_world, ecs_entity, ecs_query, ecs_spawn, ecs_despawn
+// and ecs_update.
 package ecs

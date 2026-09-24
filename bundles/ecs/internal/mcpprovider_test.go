@@ -20,30 +20,35 @@ import (
 	"github.com/dvoyni/cog/libs/m"
 )
 
-// Three capabilities, every one a look: an Agent may call them freely, and a
-// client may auto-approve them, because none changes the game.
-func TestCapabilities_ThreeLooksAndNoAct(t *testing.T) {
+// Six capabilities: three looks an Agent may call freely and a client may
+// auto-approve, and three acts that change the game, which a client asks
+// about.
+func TestCapabilities_ThreeLooksAndThreeActs(t *testing.T) {
 	capabilities := (provider{}).Capabilities()
-	if len(capabilities) != 3 {
-		t.Fatalf("ecs offers %d capabilities, want 3", len(capabilities))
+	if len(capabilities) != 6 {
+		t.Fatalf("ecs offers %d capabilities, want 6", len(capabilities))
 	}
 	want := map[string][2]reflect.Type{
-		censusName: {reflect.TypeFor[types.CensusRequest](), reflect.TypeFor[types.CensusResponse]()},
-		entityName: {reflect.TypeFor[types.EntityRequest](), reflect.TypeFor[types.EntityResponse]()},
-		queryName:  {reflect.TypeFor[types.QueryRequest](), reflect.TypeFor[types.QueryResponse]()},
+		censusName:  {reflect.TypeFor[types.CensusRequest](), reflect.TypeFor[types.CensusResponse]()},
+		entityName:  {reflect.TypeFor[types.EntityRequest](), reflect.TypeFor[types.EntityResponse]()},
+		queryName:   {reflect.TypeFor[types.QueryRequest](), reflect.TypeFor[types.QueryResponse]()},
+		spawnName:   {reflect.TypeFor[types.SpawnRequest](), reflect.TypeFor[types.SpawnResponse]()},
+		despawnName: {reflect.TypeFor[types.DespawnRequest](), reflect.TypeFor[types.DespawnResponse]()},
+		updateName:  {reflect.TypeFor[types.UpdateRequest](), reflect.TypeFor[types.UpdateResponse]()},
 	}
+	looks := []string{censusName, entityName, queryName}
 	for _, one := range capabilities {
 		if err := one.Err(); err != nil {
 			t.Errorf("capability %q did not construct: %v", one.Name(), err)
 		}
 		shape, ok := want[one.Name()]
 		if !ok {
-			t.Errorf("ecs offers %q, which is none of world, entity and query", one.Name())
+			t.Errorf("ecs offers %q, which is none of world, entity, query, spawn, despawn and update", one.Name())
 			continue
 		}
 		delete(want, one.Name())
-		if !one.ReadOnly() {
-			t.Errorf("%q changes nothing, so it is read-only", one.Name())
+		if look := slices.Contains(looks, one.Name()); one.ReadOnly() != look {
+			t.Errorf("%q is read-only %v; only the three looks are", one.Name(), one.ReadOnly())
 		}
 		if one.RequestType() != shape[0] || one.ResponseType() != shape[1] {
 			t.Errorf("%q is %v -> %v, want %v -> %v", one.Name(), one.RequestType(), one.ResponseType(), shape[0], shape[1])
@@ -52,9 +57,10 @@ func TestCapabilities_ThreeLooksAndNoAct(t *testing.T) {
 	for missing := range want {
 		t.Errorf("ecs offers no %q", missing)
 	}
-	if censusName != "world" || entityName != "entity" || queryName != "query" {
-		t.Errorf("the capabilities are named %q, %q, %q; want world, entity, query, which render as ecs_world, ecs_entity, ecs_query",
-			censusName, entityName, queryName)
+	if censusName != "world" || entityName != "entity" || queryName != "query" ||
+		spawnName != "spawn" || despawnName != "despawn" || updateName != "update" {
+		t.Errorf("the capabilities are named %q, %q, %q, %q, %q, %q; want world, entity, query, spawn, despawn, update, which render as ecs_world and so on",
+			censusName, entityName, queryName, spawnName, despawnName, updateName)
 	}
 }
 
@@ -80,11 +86,17 @@ func TestCapabilities_TheDescriptionsCarryWhatAnAgentGetsWrong(t *testing.T) {
 		}
 	}
 	pins := map[string][]string{
-		censusName: {"ecs_entity", "ecs_query", "changes nothing", "paused", "no tick"},
+		censusName: {"ecs_entity", "ecs_query", "changes nothing", "paused", "no tick", "agentWrites"},
 		entityName: {"7v2", "Entity(7v2)", "decimal handle", "sorted by name", "not alive", "now holds",
-			"array", `{"len":`, "null", "unexported", "{}", "`error`"},
+			"array", `{"len":`, "null", "unexported", "{}", "`error`", "`components`", "ecs_update"},
 		queryName: {"every", "ecs_entity", "ascending index order", "50", "500", "total", "truncated",
 			"holds up", "keep `limit` small", "paused", "no tick"},
+		spawnName: {"`components`", "ecs_world", "ecs_entity", "zero", "bare Entity", "array", "empty",
+			"unexported", "All or nothing", "nothing is applied", "Hook", "changes the game", "paused", "agentWrites"},
+		despawnName: {"ecs_entity", "`wasAlive`", "not an error", "Hook", "last value", "changes the game", "agentWrites"},
+		updateName: {"`set`", "`remove`", "keeps every other", "`added`", "`changed`", "`unchanged`", "`removed`",
+			"`absent`", "sent back unedited", "whole list", "keeps its bytes", "unexported", "both `set` and `remove`",
+			"All or nothing", "Hook", "changes the game", "agentWrites"},
 	}
 	for capability, phrases := range pins {
 		description := capabilityNamed(t, capability).Description()
@@ -102,8 +114,11 @@ func TestCapabilities_TheDescriptionsCarryWhatAnAgentGetsWrong(t *testing.T) {
 		kernel.TypeName(reflect.TypeFor[censusCmd]()),
 		kernel.TypeName(reflect.TypeFor[entityCmd]()),
 		kernel.TypeName(reflect.TypeFor[queryCmd]()),
+		kernel.TypeName(reflect.TypeFor[spawnCmd]()),
+		kernel.TypeName(reflect.TypeFor[despawnCmd]()),
+		kernel.TypeName(reflect.TypeFor[updateCmd]()),
 	}
-	for _, capability := range []string{censusName, queryName} {
+	for _, capability := range []string{censusName, queryName, spawnName, despawnName, updateName} {
 		description := capabilityNamed(t, capability).Description()
 		for _, phrase := range append([]string{"*ecs.Entities", "mcpserver_architecture", "ecs.ShrinkCmd"}, commands...) {
 			if !strings.Contains(description, phrase) {
@@ -145,7 +160,7 @@ func startAgentRig(t *testing.T) (*kernel.Engine, map[string]mcp.Capability) {
 			tools[string(one.Plugin)+"_"+capability.Name()] = capability
 		}
 	}
-	for _, tool := range []string{"ecs_world", "ecs_entity", "ecs_query"} {
+	for _, tool := range []string{"ecs_world", "ecs_entity", "ecs_query", "ecs_spawn", "ecs_despawn", "ecs_update"} {
 		if _, offered := tools[tool]; !offered {
 			t.Fatalf("no Provider contributed %s; collected %v", tool, slices.Collect(maps.Keys(tools)))
 		}
@@ -228,7 +243,7 @@ func TestTheToolsRefuseAsUnavailable(t *testing.T) {
 	engine, tools := startAgentRig(t)
 	executioner := engine.Executioner()
 	gone := spawn(executioner, make([]plainSet, 3)...)[2]
-	executioner.ExecuteCommand[despawnCmd]([]ecs.Entity{gone})
+	executioner.ExecuteCommand[despawnAllCmd]([]ecs.Entity{gone})
 
 	_, err := invoke[types.QueryResponse](t, engine, tools["ecs_query"], &types.QueryRequest{Components: []string{"ecs.spott"}})
 	var unavailable mcp.Unavailable
@@ -251,6 +266,30 @@ func TestTheToolsRefuseAsUnavailable(t *testing.T) {
 	}
 	if !strings.Contains(unavailable.Reason, "not alive") {
 		t.Errorf("the refusal %q does not say the Entity is not alive", unavailable.Reason)
+	}
+
+	// The writes refuse the same way, and a refused write applies nothing.
+	_, err = invoke[types.SpawnResponse](t, engine, tools["ecs_spawn"], &types.SpawnRequest{Components: map[string]any{"ecs.spott": map[string]any{}}})
+	if !errors.As(err, &unavailable) || !strings.Contains(unavailable.Reason, name[spot]()) {
+		t.Errorf("a spawn of a misspelt Component answered %v, want mcp.Unavailable listing %s", err, name[spot]())
+	}
+	_, err = invoke[types.UpdateResponse](t, engine, tools["ecs_update"], &types.UpdateRequest{Entity: gone.String(), Remove: []string{name[spot]()}})
+	if !errors.As(err, &unavailable) || !strings.Contains(unavailable.Reason, "not alive") {
+		t.Errorf("an update of a despawned Entity answered %v, want mcp.Unavailable saying it is not alive", err)
+	}
+	_, err = invoke[types.DespawnResponse](t, engine, tools["ecs_despawn"], &types.DespawnRequest{Entity: "hero"})
+	if !errors.As(err, &unavailable) || !strings.Contains(unavailable.Reason, "7v2") {
+		t.Errorf("a despawn of a malformed Entity answered %v, want mcp.Unavailable naming the forms", err)
+	}
+	after, _ := invoke[types.CensusResponse](t, engine, tools["ecs_world"], &types.CensusRequest{})
+	if after.Entities != census.Entities || after.AgentWrites != 0 {
+		t.Errorf("refused writes changed the world: %d Entities and %d writes, want %d and 0", after.Entities, after.AgentWrites, census.Entities)
+	}
+
+	// A despawn of an Entity already gone is an answer, not a refusal.
+	despawned, err := invoke[types.DespawnResponse](t, engine, tools["ecs_despawn"], &types.DespawnRequest{Entity: gone.String()})
+	if err != nil || despawned.WasAlive {
+		t.Errorf("despawning a dead Entity answered %+v, %v; want wasAlive false and no error", despawned, err)
 	}
 }
 
@@ -302,8 +341,12 @@ func TestTheSpecReproducesThePromptTextWordForWord(t *testing.T) {
 		}
 	}
 	for _, payload := range []reflect.Type{
+		reflect.TypeFor[types.CensusResponse](),
 		reflect.TypeFor[types.EntityRequest](), reflect.TypeFor[types.QueryRequest](),
 		reflect.TypeFor[types.QueryResponse](), reflect.TypeFor[types.ComponentValue](),
+		reflect.TypeFor[types.SpawnRequest](), reflect.TypeFor[types.DespawnRequest](),
+		reflect.TypeFor[types.DespawnResponse](), reflect.TypeFor[types.UpdateRequest](),
+		reflect.TypeFor[types.ComponentOutcome](),
 	} {
 		for field := range payload.Fields() {
 			if prose := field.Tag.Get("jsonschema"); prose != "" && !strings.Contains(spec, fold(prose)) {

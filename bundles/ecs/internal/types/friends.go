@@ -28,6 +28,24 @@ func EntityCommand() (kernel.Lock, kernel.Execute[EntityRequest, EntityResponse]
 	return entityCommand()
 }
 
+// SpawnCommand is the factory the ecs plugin registers the spawn by name
+// with. See spawnCommand.
+func SpawnCommand() (kernel.Lock, kernel.Execute[SpawnRequest, SpawnResponse]) {
+	return spawnCommand()
+}
+
+// DespawnCommand is the factory the ecs plugin registers the despawn by
+// handle with. See despawnCommand.
+func DespawnCommand() (kernel.Lock, kernel.Execute[DespawnRequest, DespawnResponse]) {
+	return despawnCommand()
+}
+
+// UpdateCommand is the factory the ecs plugin registers the update by name
+// with. See updateCommand.
+func UpdateCommand() (kernel.Lock, kernel.Execute[UpdateRequest, UpdateResponse]) {
+	return updateCommand()
+}
+
 // QueryCommand is the factory the ecs plugin registers the read by Component
 // names with. See queryCommand.
 func QueryCommand() (kernel.Lock, kernel.Execute[QueryRequest, QueryResponse]) {

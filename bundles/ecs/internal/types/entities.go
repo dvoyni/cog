@@ -7,7 +7,9 @@ import (
 )
 
 // shrinkable is everything ShrinkCmd reaches besides the authority's own
-// arrays, and nothing else reads it.
+// arrays, and the one count the write Commands keep. Nothing on a frame's path
+// reads it, which is why the count sits here, behind the pointer, rather than
+// widening Entities: see floor.
 type shrinkable struct {
 	// stores is every enrolled Store's shrink. It is kept apart from
 	// Entities.stores because a despawn must never pay for it.
@@ -18,6 +20,10 @@ type shrinkable struct {
 	// hooks is every Hook log's shrink, enrolled when the log is created, and
 	// every reader's release, enrolled when the reader is prepared.
 	hooks []func() uintptr
+	// agentWrites is how many write Commands changed the world, which the
+	// census reports: a run an Agent has written to is not the run the game
+	// alone would have made. See writebyname.go.
+	agentWrites uint64
 }
 
 // Entities is the id authority: it allocates indices, tracks their generations,
@@ -99,7 +105,7 @@ type Entities struct {
 	// instantiated from one, so the generic call is made where C is a
 	// compile-time type and kept here.
 	//
-	// While the engine runs, the one thing that reads it is the read Commands,
+	// While the engine runs, the one thing that reads it is the by-name Commands,
 	// which scan it for a Component named by string (classNamed) and hold
 	// write{*Entities} while they do, so nothing else is running. It is the
 	// name-to-Component mapping; there is no other.
@@ -200,7 +206,7 @@ func (en *Entities) classOf(componentType reflect.Type) *componentClass {
 // an ambiguous name, and the caller's refusal path walks classes again to say
 // which.
 //
-// It is a scan, and it is called only by the read Commands, under
+// It is a scan, and it is called only by the by-name Commands, under
 // write{*Entities}: nothing on a frame's path ever names a Component by string.
 func (en *Entities) classNamed(name string) *componentClass {
 	var found *componentClass
@@ -493,7 +499,8 @@ func (en *Entities) enrolHooks(release func() uintptr) {
 }
 
 // shrinkables is what ShrinkCmd reaches, created on first use. Only
-// registration enrols, so only registration creates it.
+// registration enrols, so registration creates it, except in a world that
+// enrols nothing, where the first write Command's count does.
 func (en *Entities) shrinkables() *shrinkable {
 	if en.shrinkable == nil {
 		en.shrinkable = &shrinkable{}

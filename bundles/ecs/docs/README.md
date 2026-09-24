@@ -42,17 +42,17 @@ ecs has the declaration-root shape of
   registration, the Query with its driver and fillers, the filters, structural
   change, the accessors, `List` and its write check, the resource and event
   handles, both handler builders with the parameter classification they
-  share, and the factories of the three [read
-  Commands](#reading-the-world-by-name) with their request and response types.
-  The root aliases every type and forwards every function to it, except those
-  read Commands' types, which nothing outside `bundles/ecs` names.
+  share, and the factories of the [read](#reading-the-world-by-name) and
+  [write](#writing-the-world-by-name) Commands by name with their request and
+  response types. The root aliases every type and forwards every function to
+  it, except those Commands' types, which nothing outside `bundles/ecs` names.
 - **`bundles/ecs/internal`** is the plugin: its `New`, the resolution of
   `ecs.Config`, and a `Register` that publishes the authority, registers
-  `ShrinkCmd` and the three unexported [read
-  Commands](#reading-the-world-by-name), and registers the Store of
-  `m.Transform`, where an Entity stands: the one Component the ECS registers
-  itself. It also contributes the `mcp.Provider` that offers the read Commands
-  to an Agent, as `ecs.McpProvider` ([Offered To An
+  `ShrinkCmd` and the six unexported Commands that
+  [read](#reading-the-world-by-name) and [write](#writing-the-world-by-name)
+  the world by name, and registers the Store of `m.Transform`, where an Entity
+  stands: the one Component the ECS registers itself. It also contributes the
+  `mcp.Provider` that offers those Commands to an Agent, as `ecs.McpProvider` ([Offered To An
   Agent](#offered-to-an-agent)).
 - **`bundles/ecs/ecsplugin`** exports only `New() kernel.Plugin`. Only
   composition roots and tests import it.
@@ -357,6 +357,7 @@ func (l List[T]) At(i int) T
 func (l List[T]) All() iter.Seq2[int, T]
 func (l *List[T]) Set(i int, value T)  // write lock only; checked under -tags ecs_validate
 func (l List[T]) MarshalJSON() ([]byte, error)
+func (l *List[T]) UnmarshalJSON(data []byte) error // a fresh array; null leaves it as it was
 ```
 
 **A `[]T` in a Component is refused; a `List[T]` is what it holds instead.** The
@@ -1150,8 +1151,8 @@ registers three unexported read-only Commands that take that string:
 
 | Command | request | answers |
 | --- | --- | --- |
-| `censusCmd` | nothing | `entities`, `freeIndices`, `indexSpace`, and `components`: every registered name with its Store's `population`, sorted by name |
-| `entityCmd` | `entity`: `"7v2"`, `"Entity(7v2)"` or the decimal handle | `entity`, and `components`: every Component it carries, sorted by name, each `{name, value, error}` |
+| `censusCmd` | nothing | `entities`, `freeIndices`, `indexSpace`, `agentWrites` (the write calls that changed the world), and `components`: every registered name with its Store's `population`, sorted by name |
+| `entityCmd` | `entity`: `"7v2"`, `"Entity(7v2)"` or the decimal handle; optionally `components`, to answer only those | `entity`, and `components`: every Component it carries, or the named ones it carries, sorted by name, each `{name, value, error}` |
 | `queryCmd` | `components` (at least one name), `limit` (0 is 50, at most 500) | `total`, `truncated`, and `entities` in ascending index order, each with only the named Components |
 
 Nothing outside ecs dispatches them, so the root declares none of them; the mcp
@@ -1179,26 +1180,67 @@ index now, where one does. A handle to a free index, including the one that
 index will carry next, is refused as not alive. The design record is the spec's
 [Reading the world by name](specs/ecs.md#reading-the-world-by-name).
 
+## Writing the world by name
+
+Three more unexported Commands change the world by the same names, for an Agent
+setting up the situation it tests: breaking one wall cell, placing a creature,
+zeroing a mana bar.
+
+| Command | request | answers |
+| --- | --- | --- |
+| `spawnCmd` | `components`: name to value | the new `entity` |
+| `despawnCmd` | `entity` | `wasAlive`: false when it had already gone, which is not a refusal |
+| `updateCmd` | `entity`; `set`: name to value; `remove`: names | per named Component, `added`, `changed`, `unchanged`, `removed` or `absent` |
+
+**They hold what the reads hold, `write{*ecs.Entities}` and nothing else**, so a
+write lands between Systems and never inside one's run, and no frame's lock set
+widens. **They declare no Store**, which skips the ownership a `Spawn[S]`
+declares; that exception is ecs's own, a debugging authority an app has only by
+composing the broker.
+
+**Every write is recorded as the same act from a System would be**: a Spawn, a
+Despawn, an addition, a change (naming no System, so every reader is given it),
+a removal with its last value. An index or a cache built on Hooks stays true
+across a write.
+
+**A value merges.** It is decoded over the Entity's current value, so a field
+left out keeps its value and an unexported field always does; a Component the
+Entity lacks is decoded over zero. An `m.List` decodes into a fresh array, and an
+`assets.Blob` is never written: kept on an update, empty on a spawn. A field the
+Component lacks is refused. A value that encodes as the one the Entity has is
+`unchanged` and not written, so an unedited round trip is byte-identical and
+records nothing.
+
+**A request is all or nothing**: every name, the Entity and every value are
+checked first, and any refusal applies nothing and names every entry that
+failed. The census's `agentWrites` counts the calls that changed the world. The
+design record is the spec's
+[Writing the world by name](specs/ecs.md#writing-the-world-by-name).
+
 ## Offered To An Agent
 
 The plugin contributes an `mcp.Provider` from `Register`, as `ecs.McpProvider`,
-and offers the three read Commands as capabilities, rendered as three tools. The
-Provider and the capability bodies live in `bundles/ecs/internal`. All three are
-`mcp.ReadOnly()`, so a client may auto-approve them.
+and offers the six by-name Commands as capabilities, rendered as six tools. The
+Provider and the capability bodies live in `bundles/ecs/internal`. The three
+looks are `mcp.ReadOnly()`, so a client may auto-approve them; the three acts
+are not.
 
 - **`ecs_world`**: every registered Component name with its population, live
   Entities, free indices and the index space. The one to call first.
 - **`ecs_entity`**: one Entity, given as `7v2`, `Entity(7v2)` or its decimal
-  handle, with every Component it carries and its value.
+  handle, with every Component it carries and its value, or only the named
+  ones. There is no separate get.
 - **`ecs_query`**: the Entities carrying every named Component, with those
   values, up to a limit (50 by default, at most 500), with `total` and
   `truncated`.
+- **`ecs_spawn`**, **`ecs_despawn`**, **`ecs_update`**: the three writes above,
+  taking values in the shape `ecs_entity` answers with.
 
 Each is an `mcp.Func` that dispatches its Command and answers a refusal as
 `mcp.Unavailable`, the ordinary tool error an Agent reads and acts on. The
 Provider holds nothing, subscribes nothing and adds no resource, so a game
 nobody is debugging pays nothing for it, and an app that composes no broker
-binds it to nothing. Every call carries the price above, and the three Commands
+binds it to nothing. Every call carries the price above, and the six Commands
 appear in `mcpserver_architecture`'s contention report as writers of
 `*ecs.Entities`; the prompt text tells an Agent those pairs are the tools'. The
 description prose the Agent reads is reproduced in full in

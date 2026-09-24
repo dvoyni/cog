@@ -2190,8 +2190,9 @@ emits that read — but it is written into the spec as an invariant, not left
 implicit, because an implementation that added a second route would break it
 silently. [`ShrinkCmd`](#giving-memory-back) is the second thing that relies on
 it: it rewrites every Store's arrays holding `write{*Entities}` alone. The
-three read Commands are a further route beside it: they [read every Store by
-Component name](#reading-the-world-by-name) through closures registration baked
+by-name Commands are a further route beside it: they [read every Store by
+Component name](#reading-the-world-by-name), and
+[write it](#writing-the-world-by-name), through closures registration baked
 into `Entities.classes`, not through a generated handle. They are sound for the
 same reason `ShrinkCmd` is: their only callers hold `write{*Entities}`, which
 supersedes the `read{*Entities}` the invariant requires, so no handler touching
@@ -2397,6 +2398,72 @@ return, and `Executioner.ExecuteCommand` answers with the response alone.
 Store enumeration, and a `Query[Q]` cannot be built from strings. A Command
 holding the authority for write is the one shape that reaches every Store by
 name without widening anything a frame runs.
+
+### Writing the world by name
+
+The reads are joined by three write Commands, for an Agent that sets up a
+situation in a running game: breaks one wall cell, places a creature, zeroes a
+mana bar
+([#567](https://github.com/dvoyni/cog/issues/567)):
+
+| Command | request | answers |
+| --- | --- | --- |
+| spawn | `components`: Component name to value | the new Entity |
+| despawn | `entity` | `wasAlive`: false when it had already gone |
+| update | `entity`; `set`: name to value; `remove`: names | each named Component's outcome: `added`, `changed`, `unchanged`, `removed` or `absent` |
+
+They are unexported beside the reads (`spawnCmd`, `despawnCmd`, `updateCmd`),
+with their request and response types in `internal/types`, and the entity read
+gains an optional `components` filter, which is why there is no separate
+single-Component get. What an Agent sees is in
+[mcp.md § Writing](mcp.md#writing).
+
+**They hold what the reads hold, and nothing else.** `write{*ecs.Entities}`
+excludes every System, so a write lands between Systems and never inside one's
+run, and a frame nobody writes to runs exactly the lock sets it ran before.
+`Describe().Contention` lists them beside the reads.
+
+**They declare no Store, and that is an acknowledged exception.** A `Spawn[S]`
+declares `write{*Store[C]}` for each `C` it carries, redundantly for locking, so
+that [the coupling check](#registration-and-ownership) catches a plugin fabricating
+another plugin's Components with no declared dependency. A write by name holds
+the Component only as a string, and could declare every Store or none. It
+declares none: the writes are ecs's own, the authority over every Store acting
+as a debugger, and an app has them only by composing the broker. The
+alternative, a second gate such as a config flag or a build tag, was rejected as
+one more switch to forget on the day the game is opened to debug.
+
+**Every act is recorded as the same act from a System.** A spawn goes through
+the Store's recorded setter, a despawn through `Entities.despawn` and its
+captures, an addition and a removal as `Set.UpdateFor` and `Remove.From` record
+them. A change is recorded as `Changed` naming writer 0, which names no System,
+so every reader is given it; it is recorded only when the value differs, and a
+value that encodes as the one the Entity has is `unchanged` and not written at
+all. That is what keeps an unedited round trip byte-identical in the Store: a
+decoded `m.List` is a new array, so a byte compare would call it a change. None
+of it is a System's run, so none of it counts toward a reader's pace.
+
+**A value merges.** It is decoded with `encoding/json` over the Entity's current
+value, so a field the JSON leaves out keeps its value, and an unexported field,
+which the JSON can never name, always does. A Component the Entity lacks is
+decoded over the zero value. An `m.List` decodes through its own
+`UnmarshalJSON` into a fresh array. An `assets.Blob` is never written: its bytes
+never cross, so its `{"len":N}` decodes into nothing, keeping it on an update
+and leaving it empty on a spawn. A key the Component does not have is refused,
+checked against the decoded value encoded again, because `encoding/json` would
+ignore it and leave the Agent believing it wrote.
+
+**A request is all or nothing.** Every name is resolved, the Entity checked and
+every value decoded before anything is applied, and any refusal answers the
+whole request naming every entry that failed. Removing a Component the Entity
+does not carry is `absent`, not a refusal; naming one Component in both `set`
+and `remove` is. A request decodes its numbers with `UseNumber`, as the reads
+encode them, so an Entity Reference past 2^53 arrives exact.
+
+**The census counts them.** `agentWrites` is how many write calls changed the
+world since the Engine started; a refused call, or one whose every entry was
+`unchanged` or `absent`, does not count. It lives behind the pointer
+`ShrinkCmd`'s enrolments already sit behind, so `Entities` gains no field.
 
 ---
 

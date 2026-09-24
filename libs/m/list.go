@@ -1,6 +1,7 @@
 package m
 
 import (
+	"bytes"
 	"encoding/json"
 	"iter"
 	"unsafe"
@@ -105,12 +106,36 @@ func (l List[T]) All() iter.Seq2[int, T] {
 // MarshalJSON writes the elements as a JSON array, [] when the List is empty
 // and never null, so a Component holding a List reads as its data rather than
 // as the {} its unexported fields would otherwise give. A List of Lists nests
-// through this same method. There is no UnmarshalJSON: nothing decodes a List.
+// through this same method. UnmarshalJSON reads it back.
 func (l List[T]) MarshalJSON() ([]byte, error) {
 	if len(l.data) == 0 {
 		return []byte("[]"), nil
 	}
 	return json.Marshal(l.data)
+}
+
+// UnmarshalJSON reads a JSON array into an array of the List's own, and
+// replaces what the List held rather than writing through it: a List decoded
+// over a copy of a stored one leaves the stored array as it was, which is what
+// keeps a decode from being the write through a copy that Set forbids. [] is
+// the zero List, and null leaves the List as it was, which is how encoding/json
+// treats null for every value that is not a pointer, map, slice or interface.
+func (l *List[T]) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(data, []byte("null")) {
+		return nil
+	}
+	var values []T
+	if err := json.Unmarshal(data, &values); err != nil {
+		return err
+	}
+	// values is this decode's own array, so it is adopted where ListOf would
+	// copy it: nothing else can reach it.
+	if len(values) == 0 {
+		*l = List[T]{}
+		return nil
+	}
+	*l = List[T]{data: values}
+	return nil
 }
 
 // Set writes element i and adds one to the List's generation, so the change

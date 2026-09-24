@@ -50,11 +50,11 @@ type (
 	}
 )
 
-// spawnCmd spawns one Entity per element of its request and answers their
+// spawnSetCmd spawns one Entity per element of its request and answers their
 // handles, in order.
-type spawnCmd[S any] kernel.Command[[]S, []ecs.Entity]
+type spawnSetCmd[S any] kernel.Command[[]S, []ecs.Entity]
 
-type despawnCmd kernel.Command[[]ecs.Entity, struct{}]
+type despawnAllCmd kernel.Command[[]ecs.Entity, struct{}]
 
 // stripCmd takes a spot away from an Entity, which leaves a plainSet Entity
 // alive with no Components.
@@ -98,7 +98,7 @@ func (f *readFixture) Register(registrar *kernel.Registrar, _ any) error {
 	registerSpawn[labelledSet](registrar)
 	registerSpawn[fullSet](registrar)
 	registerSpawn[brokenSet](registrar)
-	registrar.HandleCommand[despawnCmd](ecs.ToExecute[[]ecs.Entity, struct{}](registrar, func(doomed []ecs.Entity, we *ecs.WriteableEntities) {
+	registrar.HandleCommand[despawnAllCmd](ecs.ToExecute[[]ecs.Entity, struct{}](registrar, func(doomed []ecs.Entity, we *ecs.WriteableEntities) {
 		for _, e := range doomed {
 			we.Despawn(e)
 		}
@@ -121,7 +121,7 @@ func (f *readFixture) Register(registrar *kernel.Registrar, _ any) error {
 }
 
 func registerSpawn[S any](registrar *kernel.Registrar) {
-	registrar.HandleCommand[spawnCmd[S]](ecs.ToExecute[[]S, []ecs.Entity](registrar, func(sets []S, sp *ecs.Spawn[S], answer *ecs.Resp[[]ecs.Entity]) {
+	registrar.HandleCommand[spawnSetCmd[S]](ecs.ToExecute[[]S, []ecs.Entity](registrar, func(sets []S, sp *ecs.Spawn[S], answer *ecs.Resp[[]ecs.Entity]) {
 		spawned := make([]ecs.Entity, len(sets))
 		for i, set := range sets {
 			spawned[i] = sp.New(set)
@@ -131,7 +131,7 @@ func registerSpawn[S any](registrar *kernel.Registrar) {
 }
 
 func spawn[S any](executioner kernel.Executioner, sets ...S) []ecs.Entity {
-	return executioner.ExecuteCommand[spawnCmd[S]](sets)
+	return executioner.ExecuteCommand[spawnSetCmd[S]](sets)
 }
 
 func startReads(t *testing.T) (*kernel.Engine, *readFixture) {
@@ -214,7 +214,7 @@ func TestTheCensusNamesEveryComponentWithItsPopulation(t *testing.T) {
 		t.Errorf("the names are not kernel.TypeName's: %v", names)
 	}
 
-	executioner.ExecuteCommand[despawnCmd](plain[:7])
+	executioner.ExecuteCommand[despawnAllCmd](plain[:7])
 	census = executioner.ExecuteCommand[censusCmd](types.CensusRequest{})
 	if census.Entities != 293 || census.FreeIndices != 7 || census.IndexSpace != 300 {
 		t.Fatalf("after 7 despawns the census reports %d alive, %d free, %d indices; want 293, 7, 300", census.Entities, census.FreeIndices, census.IndexSpace)
@@ -332,7 +332,7 @@ func TestTheEntityReadRefusesWhatIsNotAlive(t *testing.T) {
 	executioner := engine.Executioner()
 	spawned := spawn(executioner, make([]plainSet, 8)...)
 	gone := spawned[7]
-	executioner.ExecuteCommand[despawnCmd]([]ecs.Entity{gone})
+	executioner.ExecuteCommand[despawnAllCmd]([]ecs.Entity{gone})
 	index, generation := entityHalves(t, gone)
 	nextGeneration, _ := strconv.Atoi(generation)
 	next := index + "v" + strconv.Itoa(nextGeneration+1)
@@ -386,6 +386,30 @@ func TestTheEntityReadRefusesWhatIsNotAlive(t *testing.T) {
 	}
 }
 
+// Naming Components narrows the answer to those the Entity carries, which is
+// what an Agent reads back before an ecs_update; a name no Component has is
+// refused as a query refuses it.
+func TestTheEntityReadNarrowsToTheNamedComponents(t *testing.T) {
+	engine, _ := startReads(t)
+	executioner := engine.Executioner()
+	e := spawn(executioner, labelledSet{Spot: spot{X: 1}, Label: label{Text: "x"}})[0]
+
+	answer := executioner.ExecuteCommand[entityCmd](types.EntityRequest{
+		Entity: e.String(), Components: []string{name[spot](), name[route]()},
+	})
+	if answer.Refusal != "" {
+		t.Fatalf("the narrowed read was refused: %s", answer.Refusal)
+	}
+	if got, want := componentNames(answer.Components), []string{name[spot]()}; !slices.Equal(got, want) {
+		t.Errorf("the narrowed read answered %v, want %v: only what is named and carried", got, want)
+	}
+
+	refused := executioner.ExecuteCommand[entityCmd](types.EntityRequest{Entity: e.String(), Components: []string{"internal.nothing"}})
+	if !strings.Contains(refused.Refusal, "registered: ") || len(refused.Components) != 0 {
+		t.Errorf("an unknown name answered %+v; want a refusal listing every registered name", refused)
+	}
+}
+
 func TestAnEntityWithNoComponentsAnswersAnEmptyList(t *testing.T) {
 	engine, _ := startReads(t)
 	executioner := engine.Executioner()
@@ -411,7 +435,7 @@ func TestTheQueryReadWalksTheNamedComponents(t *testing.T) {
 	withLabels := spawn(executioner, labelled...)
 	// Despawn some from the middle and respawn, so ascending index order is not
 	// the drivers' dense order.
-	executioner.ExecuteCommand[despawnCmd](withLabels[10:20])
+	executioner.ExecuteCommand[despawnAllCmd](withLabels[10:20])
 	spawn(executioner, make([]labelledSet, 10)...)
 
 	query := executioner.ExecuteCommand[queryCmd](types.QueryRequest{Components: []string{name[spot](), name[label]()}})
@@ -518,14 +542,19 @@ func TestAnAnswerIsDetachedFromTheStore(t *testing.T) {
 
 // TestTheReadsHoldTheAuthorityAloneAndWidenNoSystem reads the lock sets off the
 // engine's description.
+// The writes hold exactly what the reads hold: none declares a Store, which is
+// the ownership exception ecs takes as a debugger.
 func TestTheReadsHoldTheAuthorityAloneAndWidenNoSystem(t *testing.T) {
 	engine, _ := startReads(t)
 	description := engine.Describe()
 	entities := reflect.TypeFor[*ecs.Entities]()
 	reads := map[reflect.Type]bool{
-		reflect.TypeFor[censusCmd](): false,
-		reflect.TypeFor[entityCmd](): false,
-		reflect.TypeFor[queryCmd]():  false,
+		reflect.TypeFor[censusCmd]():  false,
+		reflect.TypeFor[entityCmd]():  false,
+		reflect.TypeFor[queryCmd]():   false,
+		reflect.TypeFor[spawnCmd]():   false,
+		reflect.TypeFor[despawnCmd](): false,
+		reflect.TypeFor[updateCmd]():  false,
 	}
 	for _, command := range description.Commands {
 		if _, ok := reads[command.Type]; !ok {

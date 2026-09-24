@@ -31,3 +31,19 @@ type (
 	// Components' values, up to a limit.
 	queryCmd kernel.Command[types.QueryRequest, types.QueryResponse]
 )
+
+// The three write Commands, which change the world by Component name for an
+// Agent setting up a situation in a running game: bundles/ecs/docs/specs/mcp.md
+// § Writing. They hold what the reads hold, write{*ecs.Entities} and nothing
+// else, so a write lands between Systems and never inside one's run, and they
+// declare no Store: the ownership a Spawn[S] declares is the one thing they
+// skip, as ecs's own debugging authority. Every act is recorded in the Hook
+// logs as the same act from a System would be.
+type (
+	// spawnCmd spawns one Entity carrying the named Components.
+	spawnCmd kernel.Command[types.SpawnRequest, types.SpawnResponse]
+	// despawnCmd despawns one Entity, and answers whether it was alive.
+	despawnCmd kernel.Command[types.DespawnRequest, types.DespawnResponse]
+	// updateCmd sets and removes Components of one Entity, all or none.
+	updateCmd kernel.Command[types.UpdateRequest, types.UpdateResponse]
+)

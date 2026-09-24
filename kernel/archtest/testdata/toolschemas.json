@@ -950,10 +950,52 @@
       "type": "object"
     }
   },
+  "ecs_despawn": {
+    "input": {
+      "additionalProperties": false,
+      "properties": {
+        "entity": {
+          "description": "the Entity as 7v2 or Entity(7v2) or its decimal handle: any form a log or an earlier answer gave",
+          "type": "string"
+        }
+      },
+      "required": [
+        "entity"
+      ],
+      "type": "object"
+    },
+    "output": {
+      "additionalProperties": false,
+      "properties": {
+        "entity": {
+          "type": "string"
+        },
+        "wasAlive": {
+          "description": "false when the Entity was already gone, so nothing was despawned",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "entity",
+        "wasAlive"
+      ],
+      "type": "object"
+    }
+  },
   "ecs_entity": {
     "input": {
       "additionalProperties": false,
       "properties": {
+        "components": {
+          "description": "only these Components, named as ecs_world lists them; a named Component the Entity does not carry is left out. Omit for every Component it carries",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
         "entity": {
           "description": "the Entity as 7v2 or Entity(7v2) or its decimal handle: any form a log or an earlier answer gave",
           "type": "string"
@@ -1093,6 +1135,100 @@
       "type": "object"
     }
   },
+  "ecs_spawn": {
+    "input": {
+      "additionalProperties": false,
+      "properties": {
+        "components": {
+          "additionalProperties": true,
+          "description": "Component name, as ecs_world lists it, to its value as ecs_entity shows one; give none for a bare Entity",
+          "type": "object"
+        }
+      },
+      "required": [
+        "components"
+      ],
+      "type": "object"
+    },
+    "output": {
+      "additionalProperties": false,
+      "properties": {
+        "entity": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "entity"
+      ],
+      "type": "object"
+    }
+  },
+  "ecs_update": {
+    "input": {
+      "additionalProperties": false,
+      "properties": {
+        "entity": {
+          "description": "the Entity as 7v2 or Entity(7v2) or its decimal handle: any form a log or an earlier answer gave",
+          "type": "string"
+        },
+        "remove": {
+          "description": "Component names to take away from the Entity",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "set": {
+          "additionalProperties": true,
+          "description": "Component name to value: a Component the Entity carries takes the fields given and keeps the rest, and one it lacks is added with the fields given and the rest zero",
+          "type": "object"
+        }
+      },
+      "required": [
+        "entity"
+      ],
+      "type": "object"
+    },
+    "output": {
+      "additionalProperties": false,
+      "properties": {
+        "components": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "outcome": {
+                "description": "added, changed, unchanged (the value given is the value it had, so nothing was written), removed, or absent (removed, but the Entity did not carry it)",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "outcome"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "entity": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "entity",
+        "components"
+      ],
+      "type": "object"
+    }
+  },
   "ecs_world": {
     "input": {
       "additionalProperties": false,
@@ -1101,6 +1237,11 @@
     "output": {
       "additionalProperties": false,
       "properties": {
+        "agentWrites": {
+          "description": "how many ecs_spawn, ecs_despawn and ecs_update calls have changed the world since the game started; not zero means this run is not the one the game alone would have made",
+          "minimum": 0,
+          "type": "integer"
+        },
         "components": {
           "items": {
             "additionalProperties": false,
@@ -1137,6 +1278,7 @@
         "entities",
         "freeIndices",
         "indexSpace",
+        "agentWrites",
         "components"
       ],
       "type": "object"

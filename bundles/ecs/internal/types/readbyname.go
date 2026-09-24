@@ -59,6 +59,10 @@ type CensusResponse struct {
 	FreeIndices int `json:"freeIndices"`
 	// IndexSpace is how many indices have been allocated, alive or free.
 	IndexSpace int `json:"indexSpace"`
+	// AgentWrites is how many write Commands changed the world since the
+	// Engine started: a run it is not zero for is not the run the game alone
+	// would have made.
+	AgentWrites uint64 `json:"agentWrites" jsonschema:"how many ecs_spawn, ecs_despawn and ecs_update calls have changed the world since the game started; not zero means this run is not the one the game alone would have made"`
 	// Components is every registered Component, by name and then by its
 	// type's package path.
 	Components []ComponentPopulation `json:"components"`
@@ -74,9 +78,10 @@ type ComponentPopulation struct {
 }
 
 // EntityRequest names one Entity, as "7v2", "Entity(7v2)" or its decimal
-// handle.
+// handle, and optionally the Components to answer of it.
 type EntityRequest struct {
-	Entity string `json:"entity" jsonschema:"the Entity as 7v2 or Entity(7v2) or its decimal handle: any form a log or an earlier answer gave"`
+	Entity     string   `json:"entity" jsonschema:"the Entity as 7v2 or Entity(7v2) or its decimal handle: any form a log or an earlier answer gave"`
+	Components []string `json:"components,omitempty" jsonschema:"only these Components, named as ecs_world lists them; a named Component the Entity does not carry is left out. Omit for every Component it carries"`
 }
 
 // EntityResponse is one Entity and every Component it carries, by name.
@@ -130,11 +135,11 @@ type EntityComponents struct {
 	Components []ComponentValue `json:"components"`
 }
 
-// readCommand is what one read Command's two closures share: the handle its
-// Lock binds and its Execute reads through. It is allocated once, when the
-// plugin registers the Command, and it is a value the factory allocates rather
-// than a local both closures capture, so the package's one registration-time
-// move to the heap stays ShrinkCmd's.
+// readCommand is what one by-name Command's two closures share, a read's or a
+// write's (writebyname.go): the handle its Lock binds and its Execute reads
+// through. It is allocated once, when the plugin registers the Command, and it
+// is a value the factory allocates rather than a local both closures capture,
+// so the package's one registration-time move to the heap stays ShrinkCmd's.
 type readCommand struct{ entities kernel.Write[*Entities] }
 
 func (c *readCommand) lock(access kernel.ResourceAccess) {
@@ -200,6 +205,7 @@ func (en *Entities) readCensus() CensusResponse {
 		Entities:    len(en.gens) - len(en.free),
 		FreeIndices: len(en.free),
 		IndexSpace:  len(en.gens),
+		AgentWrites: en.agentWrites(),
 		Components:  components,
 	}
 }
@@ -210,15 +216,21 @@ func readEntity(en *Entities, request EntityRequest) EntityResponse {
 		return EntityResponse{Refusal: err.Error()}
 	}
 	if !readable(en, e) {
-		refusal := e.String() + " is not alive"
-		if now, ok := holder(en, e.idx()); ok {
-			refusal += fmt.Sprintf("; index %d now holds %s", e.idx(), now)
+		return EntityResponse{Refusal: notAlive(en, e)}
+	}
+	var named []*componentClass
+	for _, name := range request.Components {
+		class := en.classNamed(name)
+		if class == nil {
+			return EntityResponse{Refusal: unresolved(en, name)}
 		}
-		return EntityResponse{Refusal: refusal}
+		named = append(named, class)
 	}
 	return EntityResponse{
-		Entity:     e.String(),
-		Components: values(e, sortedClasses(en, func(class *componentClass) bool { return class.has(e) })),
+		Entity: e.String(),
+		Components: values(e, sortedClasses(en, func(class *componentClass) bool {
+			return class.has(e) && (named == nil || slices.Contains(named, class))
+		})),
 	}
 }
 
@@ -341,6 +353,16 @@ func qualifiedName(t reflect.Type) string {
 // past the index space — Alive answers on its own.
 func readable(en *Entities, e Entity) bool {
 	return e.gen()&freeGeneration == 0 && en.Alive(e)
+}
+
+// notAlive is the refusal for a handle that is not alive, naming the Entity
+// that holds its index now where one does.
+func notAlive(en *Entities, e Entity) string {
+	refusal := e.String() + " is not alive"
+	if now, ok := holder(en, e.idx()); ok {
+		refusal += fmt.Sprintf("; index %d now holds %s", e.idx(), now)
+	}
+	return refusal
 }
 
 // holder is the Entity that holds index now, if any does: an index beyond the

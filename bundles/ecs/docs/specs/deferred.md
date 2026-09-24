@@ -293,8 +293,8 @@ ordinary rule and is no safer than an immediate Despawn there.
 ### Nothing reports what is queued
 
 No `IsPending`, no drain report, no count, and nothing on the handles. The MCP
-read Commands hold `write{*Entities}` and therefore see drained state like any
-Query; they report nothing about queues either
+by-name Commands hold `write{*Entities}` and therefore see drained state like
+any Query; they report nothing about queues either
 ([`mcp.md`](mcp.md)).
 
 **A game that must mark an Entity doomed before the drain adds a Tag** through
@@ -420,7 +420,7 @@ deferring System writing its buffer. The kernel is the exclusion.
 **One `Drain()` drains everything queued in the Engine**, whatever System and
 whatever event queued it — a Despawn queued by an `ecs.Feed` System is applied
 by the next `Drain()` on any event. Nothing else drains: not `ShrinkCmd`, not
-the MCP read Commands, though both hold `write{*Entities}`. One straight-line
+the MCP by-name Commands, reads or writes, though all hold `write{*Entities}`. One straight-line
 drainer, no per-event bookkeeping.
 
 That is affordable because [`write{*Entities}` is one entry, not

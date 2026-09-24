@@ -47,7 +47,7 @@ type componentClass struct {
 	lists []listSite
 	// owner is the Component type's name, kernel.TypeName of it. It is kept for
 	// a diagnostic, where reaching back for a reflect.Type would mean keeping
-	// one on the hot struct, and it is the name the read Commands resolve when
+	// one on the hot struct, and it is the name the by-name Commands resolve when
 	// a caller outside Go names a Component by string: see classNamed.
 	owner string
 	// copyValue is the typed copy a read field's fill takes when the Component
@@ -120,6 +120,13 @@ type componentClass struct {
 	has        func(e Entity) bool
 	owners     func() []Entity
 	encode     func(e Entity) ([]byte, bool, error)
+	// stage and drop are what the write Commands ask of a Store they reach by
+	// name: a value decoded and checked, waiting to be applied, and a removal
+	// recorded as Remove.From records one. They are baked by writesFor, for the
+	// reason encode is, and reach the Store directly under write{*Entities}.
+	// See writebyname.go.
+	stage func(e Entity, fresh bool, given any) (stagedWrite, error)
+	drop  func(e Entity) bool
 }
 
 // RegisterComponent declares that C is a Component of this world, and is the
@@ -229,6 +236,7 @@ func RegisterComponent[C any](registrar *kernel.Registrar, ids uint32) *Store[C]
 		encoded, err := json.Marshal(value)
 		return encoded, true, err
 	}
+	writesFor(store, class)
 	if !trivial {
 		class.copyValue = func(dst, src unsafe.Pointer) { *(*C)(dst) = *(*C)(src) }
 	}

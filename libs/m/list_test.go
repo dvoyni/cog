@@ -2,6 +2,8 @@ package m
 
 import (
 	"encoding/json"
+	"iter"
+	"slices"
 	"testing"
 	"unsafe"
 )
@@ -81,6 +83,64 @@ func TestAListEncodesAsTheArrayOfItsElements(t *testing.T) {
 		}
 		if got := string(encoded); got != c.want {
 			t.Errorf("%s encoded as %s, want %s", c.name, got, c.want)
+		}
+	}
+}
+
+// A List decodes from the array it encodes as, into an array of its own: what
+// was there before is replaced rather than written through, so a List decoded
+// over a copy of a stored one leaves the Store's array untouched. [] is the
+// zero List, and null leaves the List as it was, as encoding/json leaves every
+// other value it meets null for.
+func TestAListDecodesFromAnArrayIntoAnArrayOfItsOwn(t *testing.T) {
+	type holder struct{ Items List[int] }
+	stored := NewList(7, 8, 9)
+	decoded := holder{Items: stored}
+	if err := json.Unmarshal([]byte(`{"Items":[1,2]}`), &decoded); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got := slices.Collect(listValues(decoded.Items)); !slices.Equal(got, []int{1, 2}) {
+		t.Errorf("decoded %v, want [1 2]", got)
+	}
+	if got := slices.Collect(listValues(stored)); !slices.Equal(got, []int{7, 8, 9}) {
+		t.Errorf("the List decoded over became %v; it must keep [7 8 9]", got)
+	}
+
+	nested := List[List[int]]{}
+	if err := json.Unmarshal([]byte(`[[1],[],[2,3]]`), &nested); err != nil {
+		t.Fatalf("decode nested: %v", err)
+	}
+	if encoded, _ := json.Marshal(nested); string(encoded) != `[[1],[],[2,3]]` {
+		t.Errorf("nested Lists round-tripped as %s", encoded)
+	}
+
+	cleared := NewList(1)
+	if err := json.Unmarshal([]byte(`[]`), &cleared); err != nil {
+		t.Fatalf("decode []: %v", err)
+	}
+	if cleared.Len() != 0 || cleared.data != nil {
+		t.Errorf("[] decoded to a List of %d with an array; want the zero List", cleared.Len())
+	}
+	kept := NewList(1)
+	if err := json.Unmarshal([]byte(`null`), &kept); err != nil {
+		t.Fatalf("decode null: %v", err)
+	}
+	if kept.Len() != 1 {
+		t.Errorf("null left a List of %d; want the List it was", kept.Len())
+	}
+
+	var refused List[int]
+	if err := json.Unmarshal([]byte(`{"len":3}`), &refused); err == nil {
+		t.Error("an object decoded into a List; want an error")
+	}
+}
+
+func listValues[T any](l List[T]) iter.Seq[T] {
+	return func(yield func(T) bool) {
+		for _, v := range l.All() {
+			if !yield(v) {
+				return
+			}
 		}
 	}
 }
