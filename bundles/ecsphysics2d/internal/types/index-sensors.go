@@ -9,7 +9,8 @@ import (
 // the tick began, and the entry lookups Detect reads it back through. It marks
 // two things with the one path bit: a moving circle Sensor, whose sweep is in
 // contacts-sensors.go, and a solid Body past continuous collision's gate
-// (continuous-collision.md § The gate), which nothing reads yet.
+// (continuous-collision.md § The gate), whose path test and stop are in
+// contacts-paths.go.
 
 // InsertMoving is Insert for a Shape that may have moved during the tick,
 // recording where it stood when the tick began. It is what the Body index is

@@ -1,6 +1,10 @@
 package types
 
-import "unsafe"
+import (
+	"unsafe"
+
+	"github.com/dvoyni/cog/libs/m"
+)
 
 // The Contact list's half of ShrinkCmd: the cached entries dropped, both entry
 // buffers and both pair tables cut to what is used, and the solver and Probe
@@ -94,11 +98,18 @@ func (c *Contacts) bytes() uintptr {
 // throws away. The slot table is the one that matters — it is sized to the
 // largest BodyIndex slot detection ever saw, and nothing else ever cuts it.
 //
+// The path pass's scratch goes with it: the stopped Bodies' copies' world
+// caches and the run a fast Body's Shape is Probed in, which only detection
+// reads. The run of stops is the one piece clipped rather than released,
+// because Solve reads it after Detect within the same tick.
+//
 // The previous tick's step stays, because it is not scratch: the warm start
 // scales the cached Impulses by it, and dropping it would change the next
 // tick's solution.
 func (c *Contacts) releaseScratch() {
 	c.probes, c.probeSlots = nil, nil
+	c.stopWorld, c.mover = nil, nil
+	c.stops = clip(c.stops)
 	s := &c.solver
 	s.solved, s.slotDense, s.rows = nil, nil, nil
 	s.joints.rows = nil
@@ -112,6 +123,8 @@ func (c *Contacts) scratchBytes() uintptr {
 	s := &c.solver
 	return uintptr(cap(c.probes))*unsafe.Sizeof(Hit{}) +
 		uintptr(cap(c.probeSlots))*unsafe.Sizeof(int32(0)) +
+		uintptr(cap(c.stops))*unsafe.Sizeof(stop{}) +
+		uintptr(cap(c.stopWorld)+cap(c.mover))*unsafe.Sizeof(m.Vec2d{}) +
 		uintptr(cap(s.solved)+cap(s.slotDense))*unsafe.Sizeof(int32(0)) +
 		uintptr(cap(s.rows))*unsafe.Sizeof(solverBody{}) +
 		uintptr(cap(s.joints.rows))*unsafe.Sizeof(jointRow{}) +

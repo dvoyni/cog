@@ -35,10 +35,12 @@ func Collide(
 	contacts.maxSlot = awake + int32(len(sleeping.entries))
 	contacts.islands.markGoneSupports(statics)
 
-	// The swept Sensors first, so that one Sensor's entries sit together and in
+	// The path pass first, so that one Sensor's entries sit together and in
 	// order of T at the front of the list, ahead of every solid pair — which is
-	// the whole of the ordering the specification asks of the current run.
-	contacts.sweepSensors(bodies, statics)
+	// the whole of the ordering the specification asks of the current run —
+	// and so that every fast solid Body is stopped before its other pairs are
+	// tested where it stopped.
+	contacts.pathPass(bodies, statics, jointed)
 
 	for slot := range moving.entries {
 		first := &moving.entries[slot]
@@ -148,10 +150,19 @@ func (c *Contacts) pair(
 	// also what the pair table forbids: it is inserted at most once a tick and
 	// has no replacement path. Only a Body index entry is ever swept, so a
 	// Static party answers false without the caller saying which index it came
-	// from. The path bit is set on a fast solid Body too, which nothing reads
-	// yet, so it is the Sensor's alone that is asked here.
-	if (first.path && first.shape.Sensor) || (second.path && second.shape.Sensor) {
-		return
+	// from.
+	//
+	// A fast solid Body the path pass stopped is tested where it stopped, and
+	// the pair reports that T; its stopping pair is already written. One
+	// branch on the path bit is all an unmarked pair pays.
+	if first.path || second.path {
+		if (first.path && first.shape.Sensor) || (second.path && second.shape.Sensor) {
+			return
+		}
+		if len(c.stops) > 0 && c.pairStopped(
+			first, worldFirst, firstSlot, second, worldSecond, secondSlot, jointed) {
+			return
+		}
 	}
 
 	// cp's QueryReject, less the one clause the layout answers: a Shape never

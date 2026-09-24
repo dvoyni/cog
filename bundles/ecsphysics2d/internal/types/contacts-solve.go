@@ -46,6 +46,9 @@ func Solve(
 	gravity m.Vec2d,
 	h float64, iterations int, slop, bias float64,
 ) {
+	// A fast solid Body the path pass stopped goes back to where it stopped
+	// before anything reads its Position (contacts-paths.go).
+	contacts.backToStops(dynamics, places)
 	contacts.beginSolve()
 	// Step 2 and its half of step 3: a jointed Body may touch nothing at all,
 	// so the gather set is the Bodies in solved Contacts together with the

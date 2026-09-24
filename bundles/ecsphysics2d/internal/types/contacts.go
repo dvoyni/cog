@@ -11,8 +11,9 @@ import (
 // contact.go; the map from a pair to its slot is pairtable.go.
 //
 // The list is too large for one file and each pass over it has its own
-// subject: contacts-detect.go finds the tick's pairs, contacts-sensors.go
-// sweeps the moving Sensors ahead of them, contacts-solve.go and
+// subject: contacts-detect.go finds the tick's pairs, contacts-paths.go tests
+// the marked Bodies' paths ahead of them, stopping the fast solid ones,
+// contacts-sensors.go sweeps the moving Sensors among them, contacts-solve.go and
 // contacts-joints.go are the two halves of the impulse solver, and
 // contacts-shrink.go gives the buffers back.
 
@@ -78,6 +79,16 @@ type Contacts struct {
 	// probes, in the same order: the Body index keeps no Entity to slot table
 	// to ask afterwards, so its Probe hands the slots back itself.
 	probeSlots []int32
+
+	// stops is the tick's stopped Bodies, one for each fast solid Body the
+	// path pass stopped, in the order of their Body index slots, each with its
+	// copy placed where it stopped. stopWorld is the copies' world caches, and
+	// mover the run a fast Body's Shape is Probed in when it is not a circle.
+	// All three are scratch Detect refills, and Solve reads stops before
+	// anything else (contacts-paths.go).
+	stops     []stop
+	stopWorld []m.Vec2d
+	mover     []m.Vec2d
 
 	// awakeSlots is where the Body index's sleepers' grid starts in the
 	// solver's slot numbering, as Detect saw it: a party at or past it is a
@@ -158,6 +169,7 @@ func (c *Contacts) beginTick() {
 	c.lookup.clear()
 	c.current, c.visible = 0, 0
 	c.maxSlot = 0
+	c.stops, c.stopWorld = c.stops[:0], c.stopWorld[:0]
 	c.nudged = c.nudgeNormal()
 }
 
