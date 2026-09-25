@@ -1214,13 +1214,13 @@ Sensor Probe buffer with the Body slot beside each Hit. Continuous collision's
 scratch joins it: the copy of each stopped Body placed where it stopped, with its
 world cache, the run a fast Body's or a Sensor's Shape is Probed in, the
 earliest stops, meetings, partners and crossed Sensors the path pass finds
-before it writes them, the Hits it holds past each stop, and what Solve writes
-the carried ones with
+before it writes them, the Hits and the crossed Sensors it holds past each
+stop, and what Solve writes the carried ones with
 ([continuous-collision.md](continuous-collision.md#a-stopped-bodys-other-pairs-are-tested-where-it-stopped)).
 None of it is read across a tick, so the command releases it
-whole and changes no answer; the exceptions are the run of stops and the run of
-held Hits, which Solve reads after Detect in the same tick, so they are cut to
-what they hold rather than released; the slot table is sized to the largest Body slot
+whole and changes no answer; the exceptions are the run of stops and the runs of
+held Hits and held crossings, which Solve reads after Detect in the same tick, so
+they are cut to what they hold rather than released; the slot table is sized to the largest Body slot
 detection ever saw, which after a 100 000 Body spike is 400 KB, and up to twice
 that with the slack it grows by, that nothing else would ever give back. The
 sleeping Islands' records, members and quiet Contacts are Contact-list buffers and
@@ -1257,9 +1257,11 @@ app takes the first and stops at a wall.
   both start poses, with one `T`. Two moving Sensors crossing within a tick are
   one entry, written by the lower Entity's walk, which is A; a moving Sensor
   meeting a fast solid Body is written by the Sensor's walk.
-- **A fast solid Body reports the Sensors that did not move which it crosses**,
-  up to where it stopped: the Sensor is A, with the Hit's `T` and `Depth` 0, and
-  the Body is not stopped
+- **A fast solid Body reports the Sensors that did not move which it crosses**:
+  a Dynamic one up to where it stopped, and a Kinematic one, never stopped,
+  every Sensor on its path, the ones past its first Hit written by Solve, which
+  no filter sees. The Sensor is A, with the Hit's `T` and `Depth` 0, and the
+  Body is not stopped
   ([continuous-collision.md](continuous-collision.md#a-fast-body-reports-the-sensors-it-crosses)).
 - A Static Sensor is never Probed.
 - An app that teleports a Sensor sets `Previous = Current`, as render

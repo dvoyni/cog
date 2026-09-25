@@ -182,10 +182,10 @@ From 577 and 579.
 | --- | --- | --- |
 | **Integrate** | nothing | none |
 | **Index** | the gate: sets the path bit on the entry, records where the path starts, and lists the entry by its path box | none; it already reads `Shape` and `Position` |
-| **Detect** | one path pass, before the discrete walk, for Sensors and fast Bodies together; writes the stopping Contacts, holds every later Hit on a Body in `Contacts`' scratch, and tests a stopped Body's other pairs where it stopped | none; it already reads both indices and writes `Contacts` |
-| *(the app's filter Systems)* | see the stopping Contact while the Body is still at its end pose; may drop it. They see no held Hit | none |
+| **Detect** | one path pass, before the discrete walk, for Sensors and fast Bodies together; writes the stopping Contacts, holds every later Hit on a Body and every Sensor crossed past the stop in `Contacts`' scratch, and tests a stopped Body's other pairs where it stopped | none; it already reads both indices and writes `Contacts` |
+| *(the app's filter Systems)* | see the stopping Contact while the Body is still at its end pose; may drop it. They see no held Hit and no held crossing | none |
 | **Sleep** | keeps awake a Body that a Kinematic mover's held Hit will carry, and wakes it if it sleeps | none; it already reads `Dynamic` and writes `Contacts` and `Sleeping` |
-| **Solve** | moves each stopped Dynamic body back to its stopping point, carrying it by a Kinematic side's remaining movement; carries every Dynamic body a Kinematic mover's held Hits name and writes their Contacts; then solves as usual | none; it already reads `Dynamic` and writes `Position` and `Contacts` |
+| **Solve** | moves each stopped Dynamic body back to its stopping point, carrying it by a Kinematic side's remaining movement; carries every Dynamic body a Kinematic mover's held Hits name and writes their Contacts, and writes the Sensors a Kinematic mover crossed past its stop; then solves as usual | none; it already reads `Dynamic` and writes `Position` and `Contacts` |
 
 - **Integrate cannot hold the gate.** It never reads `Shape`, so it has no extent
   to compare against. Giving it one widens its lock set, or adds 8 B to `Position`
@@ -259,7 +259,9 @@ indices, and **the `Sensor` flag picks the keep rule**:
   Body is held for Solve, which alone can tell whether the mover is stopped
   ([below](#the-hits-past-the-stop)). It also keeps every Hit on a Sensor that
   did not move, which stops nothing
-  ([below](#a-fast-body-reports-the-sensors-it-crosses)).
+  ([below](#a-fast-body-reports-the-sensors-it-crosses)): those up to the stop
+  are written, and every one past it is held for Solve as the Hits on a Body
+  are, so a fast Kinematic body reports every Sensor on its path.
 
 Two passes were rejected: two loops over the entries, two copies of the path box
 and relative-motion code, and the same pair possibly tested twice where a Sensor
@@ -427,6 +429,11 @@ goal-line trigger unseen, which is the tunnelling this spec exists to stop.
   the pair is written once.
 - **Rejected: naming it as a limit.** A trigger a fast ball can skip is the
   failure this map was drawn to close.
+- **A Dynamic body reports only the Sensors up to where it stopped**, so a goal
+  line behind a wall does not fire. **A Kinematic body reports every Sensor on
+  its path**, since it never stops (from 590). Detect cannot tell the two, so it
+  writes the Sensors up to the stop and holds the rest for Solve
+  ([The Hits past the stop](#the-hits-past-the-stop)).
 
 ### The Hits past the stop
 
@@ -486,9 +493,40 @@ carry past the first, and cannot drop it**; a reacting System sees it as an
 ordinary Contact. The first Hit is still written by Detect, and a filter may
 drop it. That is named [below](#named-limits).
 
+**The Sensors past the stop are held the same way** (from [physics: a fast Kinematic body reports every resting Sensor on its path, not only those before its first Hit](https://github.com/dvoyni/cog/issues/590)).
+Cut at the first Hit, a Kinematic body's crossed Sensors lose everything behind
+it:
+
+- a Kinematic paddle goes 10 → 0, meets a ball at 7 and carries it;
+- it then sweeps across a resting Sensor at 3;
+- the Sensor lies past the paddle's first Hit, so it was never reported.
+
+So:
+
+- **Detect holds every Sensor an engaged solid Body crosses past its stop**, the
+  entry it would be, in the scratch the crossed Sensors are already sorted in,
+  and writes only those up to the stop. Like the held Hits, they are held for
+  every mover.
+- **Solve drops a Dynamic mover's**, which keeps the rule that a Dynamic body
+  reports only the Sensors before its stop. **For a Kinematic mover it writes
+  each one** as Detect writes the rest: the Sensor as A, the Hit's `T`,
+  `Depth 0`. A pair already in the current run is left as it is. The sleep
+  System does not read them: a Sensor entry neither joins nor wakes.
+- **Ordering is kept.** Each is written among its Sensor's entries in the
+  current run, in order of `T`, the lower Body first at a tie, so a Sensor's
+  entries, where it is A, still sit together, ordered by `T`. A Sensor with no
+  entry yet has its entry at the end of the current run. A crossed pair with an
+  Ended or a cached entry continues from it, as a carried pair does, and the
+  pair table is rebuilt, in the same rewrite as the carries.
+- **A filter never sees them**, as it never sees a carry past the first. That is
+  the same named limit, widened ([below](#named-limits)).
+
 **Where it costs.** Nothing on the nothing-fast path. An engaged solid Body runs
 the skips and the seam rule on every Hit on the Body index, not only up to the
-first. Solve and the sleep System each test for an empty run once a tick.
+first. Solve and the sleep System each test for an empty run once a tick, and
+Solve tests the held crossings for an empty run too. Writing a Kinematic
+mover's crossing finds its Sensor's place with one walk of the current run,
+only on a tick with such a crossing.
 
 ### Which target is tested where
 
@@ -636,7 +674,9 @@ Examples:
 Hit of its own path past the first on a Dynamic body is carried as the first
 is, from the body's end pose by `(1 − T)·d_K`, and Solve writes its Contact
 ([The Hits past the stop](#the-hits-past-the-stop)). A body two Kinematic
-bodies meet in the one tick is carried by both, the two carries added.
+bodies meet in the one tick is carried by both, the two carries added. Solve
+also writes each Sensor a Kinematic body crossed past its first Hit (from 590),
+and drops a Dynamic body's.
 
 **Each Body stops at its own earliest `T`**, which is "first Hit only" applied
 one Body at a time. If B's first Hit is C at `T = 0.2` and the A–B pair meets at
@@ -740,7 +780,7 @@ or is out of scope.
 | **A zero-thickness target** | a bare segment: tunnelling starts just past 1×, where the gate has only just engaged a mover that can still pass it at an angle | **pinned** |
 | **A Kinematic target closing on the Body** | each gate sees its own Body's motion, not the pair's, so a Body and a Kinematic target each under its own gate, closing on each other faster than the gates allow together, are caught only by the discrete walk | **pinned** |
 | **The target behind a dropped stop** | a one-way platform: a Dynamic body passes anything behind a dropped target in the same tick. A Kinematic body still carries the Dynamic bodies behind it | **pinned** |
-| **A carry past the first, to a filter** | the Contact of a Dynamic body a Kinematic body carries past its first Hit is written by Solve, so a filter never sees it and cannot drop it; a reacting System does | written down |
+| **A carry past the first, to a filter** | the Contact of a Dynamic body a Kinematic body carries past its first Hit, and the entry of a Sensor a Kinematic body crosses past it, are written by Solve, so a filter never sees them and cannot drop them; a reacting System does | written down |
 | **A graze** | a target the Body closes on, along the Hit's normal, by less than its extent, or that reaches into its band no deeper than the Slop past the depth it already rests at, is a seam to the path pass: a fast ball passes a post that reaches 3 mm into its path, and a Body sunk deep in something at `Previous` passes anything that reaches no deeper | **pinned** |
 | **A seam met while landing** | a Body touching nothing at `Previous` has only the Slop to beat, so one coming down onto a tiled floor more than the Slop deeper in the tick it crosses a seam is stopped by the next tile's face, and loses the rest of that tick's travel | written down |
 | **Rotational tunnelling** | the path is a chord at the end angle, so a thin Shape spinning fast can slip through | out of scope |

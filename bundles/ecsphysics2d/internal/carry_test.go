@@ -205,8 +205,12 @@ type carriedBall struct {
 // checkCarriedAll runs the scene from eight starting points, each Shape, and
 // both orders of spawning: extra spawns whatever else the scene holds, the
 // paddle goes x 10 → 0, and every ball is one stopping Contact with it at its
-// own T and stands where the paddle carried it.
-func checkCarriedAll(t *testing.T, balls []carriedBall, extra func(*harness, m.Vec2d)) {
+// own T and stands where the paddle carried it. check, when there is one,
+// asserts whatever else the tick's list must hold.
+func checkCarriedAll(
+	t *testing.T, balls []carriedBall, extra func(*harness, m.Vec2d),
+	check func(t *testing.T, phase int, list []ecsphysics2d.Contact, k ecs.Entity, tolerance float64),
+) {
 	t.Helper()
 	for _, shape := range carryShapes {
 		for _, paddleFirst := range []bool{false, true} {
@@ -258,6 +262,9 @@ func checkCarriedAll(t *testing.T, balls []carriedBall, extra func(*harness, m.V
 					if at, want := h.read(t, k).Place.Current, shift; at.Distance(want) > shape.tolerance {
 						t.Errorf("phase %d: the paddle stands at %v, want %v", phase, at, want)
 					}
+					if check != nil {
+						check(t, phase, list, k, shape.tolerance)
+					}
 				}
 			})
 		}
@@ -273,7 +280,7 @@ func TestAFastKinematicPaddleCarriesEveryBallOnItsPath(t *testing.T) {
 	checkCarriedAll(t, []carriedBall{
 		{from: m.Vec2d{X: 7}, t: 0.1, at: m.Vec2d{X: -2}},
 		{from: m.Vec2d{X: 3}, t: 0.5, at: m.Vec2d{X: -2}},
-	}, nil)
+	}, nil, nil)
 }
 
 // A Static wall at x = 7 is the paddle's first Hit, which moves neither side,
@@ -288,7 +295,7 @@ func TestAFastKinematicPaddleCarriesABallBehindAWall(t *testing.T) {
 			Place: ecsphysics2d.Position{Current: m.Vec2d{X: 7}.Add(shift)},
 			Shape: wallShape(),
 		})
-	})
+	}, nil)
 }
 
 // A meeting that comes sooner than the paddle's first Hit on its own path
@@ -300,7 +307,7 @@ func TestAFastKinematicPaddleCarriesABallBehindOneItMet(t *testing.T) {
 	checkCarriedAll(t, []carriedBall{
 		{from: m.Vec2d{X: 4}, vel: m.Vec2d{X: meetSpeed}, t: 0.2, at: m.Vec2d{X: -2}},
 		{from: m.Vec2d{X: 1.5}, t: 0.65, at: m.Vec2d{X: -2}},
-	}, nil)
+	}, nil, nil)
 }
 
 // A Dynamic mover is unchanged: a fast Dynamic ball going 10 → 0 with balls
@@ -455,17 +462,18 @@ func (r *resetter) Register(registrar *kernel.Registrar, _ any) error {
 // TestTheCarriesSitOnTheEnginesAllocationLine is the step's allocation claim
 // over a scene where fast Kinematic paddles carry balls past their first Hit
 // every tick: lanes of a paddle going 10 → 0 over balls resting at 7, 3 and
-// −1, all set back before each tick. Each pair touched the tick before, so
-// every carried Contact also takes an Ended entry's place. It measures the
-// held Hits, the sleep System's reading of them, and Solve's carry and
-// writing, none of which the other scenes on the line reach.
+// −1 and a Sensor resting at 5, all set back before each tick. Each pair
+// touched the tick before, so every carried Contact and every Sensor crossed
+// past the first Hit also takes an Ended entry's place. It measures the held
+// Hits and crossings, the sleep System's reading of them, and Solve's carry
+// and writing, none of which the other scenes on the line reach.
 func TestTheCarriesSitOnTheEnginesAllocationLine(t *testing.T) {
 	if raceEnabled {
 		t.Skip("allocation counts are not meaningful under -race")
 	}
 	const ticks = 4_000
 
-	measure := func(n int) (float64, int) {
+	measure := func(n int) (float64, int, int) {
 		r := &resetter{}
 		h := newHarnessWithPlugins(t, nil, uint32(8*max(n, 1)), r)
 		ball := ecsphysics2d.NewCircleShape(1, m.Vec2d{})
@@ -478,6 +486,11 @@ func TestTheCarriesSitOnTheEnginesAllocationLine(t *testing.T) {
 				at := m.Vec2d{X: x, Y: y}
 				r.resets = append(r.resets, reset{e: thrown(t, h, ball, at, m.Vec2d{}), at: at})
 			}
+			h.spawn(t, spawnRequest{
+				Kind:  kindShapedStatic,
+				Place: ecsphysics2d.Position{Current: m.Vec2d{X: 5, Y: y}},
+				Shape: sensorCircle(0.5),
+			})
 		}
 		h.frames(t, 100)
 		mallocs := allocationsDuring(func() {
@@ -485,20 +498,26 @@ func TestTheCarriesSitOnTheEnginesAllocationLine(t *testing.T) {
 				h.frame(t)
 			}
 		})
-		carried := 0
+		carried, crossed := 0, 0
 		for _, entry := range h.contacts(t) {
-			if entry.T < 1 && !entry.Sensor && entry.Phase == ecsphysics2d.PhaseContinuing {
-				carried++
+			if entry.T < 1 && entry.Phase == ecsphysics2d.PhaseContinuing {
+				if entry.Sensor {
+					crossed++
+				} else {
+					carried++
+				}
 			}
 		}
-		return float64(mallocs) / ticks, carried
+		return float64(mallocs) / ticks, carried, crossed
 	}
 
-	empty, _ := measure(0)
-	full, carried := measure(64)
-	t.Logf("objects a step: %.3f with no Bodies, %.3f at N=64 with %d carried Contacts a tick", empty, full, carried)
-	if carried != 3*64 {
-		t.Fatalf("the measured scene carried %d balls a tick, want %d", carried, 3*64)
+	empty, _, _ := measure(0)
+	full, carried, crossed := measure(64)
+	t.Logf("objects a step: %.3f with no Bodies, %.3f at N=64 with %d carried Contacts and %d crossed Sensors a tick",
+		empty, full, carried, crossed)
+	if carried != 3*64 || crossed != 64 {
+		t.Fatalf("the measured scene carried %d balls and crossed %d Sensors a tick, want %d and %d",
+			carried, crossed, 3*64, 64)
 	}
 	if full-empty > 0.05 {
 		t.Errorf("carrying past the first Hit costs %.3f objects a tick, want none", full-empty)

@@ -316,10 +316,15 @@ func (c *Contacts) crossSensors(bodies *BodyIndex, statics *StaticIndex, path *b
 }
 
 // writeCrossings writes the Sensors the fast solid Bodies crossed, once every
-// Body's stop is settled: a Body stopped at T crossed only the Sensors up to
-// T, and one beyond it, behind the wall the Body stopped at, was never
+// Body's stop is settled: a Dynamic body stopped at T crossed only the Sensors
+// up to T, and one beyond it, behind the wall the Body stopped at, was never
 // reached. They are written each Sensor's together and in order of T, which
 // is the list's one ordering promise, the lower Body first at a tie.
+//
+// A crossing past a Body's stop is held, as a Hit on a Body past it is
+// (hold): a Kinematic body is never stopped, so it does cross that Sensor,
+// and Detect cannot tell kinds. The crossings keep only the held ones, in the
+// same order, for Solve to write a Kinematic mover's (carryHeld).
 func (c *Contacts) writeCrossings() {
 	slices.SortFunc(c.crossings, func(x, y crossing) int {
 		if byA := cmp.Compare(x.made.A, y.made.A); byA != 0 {
@@ -330,13 +335,17 @@ func (c *Contacts) writeCrossings() {
 		}
 		return cmp.Compare(x.made.B, y.made.B)
 	})
+	held := 0
 	for i := range c.crossings {
 		crossed := &c.crossings[i]
 		if first := c.firstOf(crossed.slot); first != nil && crossed.made.T > first.t {
+			c.crossings[held] = *crossed
+			held++
 			continue
 		}
 		at, wasTouching := c.prevLookup.find(crossed.made.A, crossed.made.B)
 		c.carry(&crossed.made, at, wasTouching)
 		c.append(crossed.made, crossed.aux)
 	}
+	c.crossings = c.crossings[:held]
 }

@@ -139,7 +139,8 @@
 // Shape that is not a circle is held at its end angle. Two moving Sensors meet
 // along their relative motion, as one entry with one T, and a Static Sensor is
 // never Probed; a fast solid Body reports every Sensor that did not move which
-// its path crosses, up to where it stopped. T and Depth mean one thing on every
+// its path crosses, a Dynamic one up to where it stopped and a Kinematic one,
+// never stopped, all along its path. T and Depth mean one thing on every
 // entry: a Probed Sensor carries the Probe's T and a Depth of 0, except one
 // that started inside something, which reports T = 0 with the overlap at the
 // start, and everything else reports T = 1 with the overlap where the tick
@@ -162,9 +163,10 @@
 // every Dynamic body it meets on its path, not just the first, is carried
 // along with it by the movement it has left after T, so a fast paddle hits
 // each ball instead of passing through it. The Contact of a carry past the
-// first is written by Solve, the only System that can tell a Kinematic mover
-// from a Dynamic one, so a filter never sees it and cannot drop it; a reacting
-// System does (continuous-collision.md).
+// first, and the entry of a Sensor crossed past it, are written by Solve, the
+// only System that can tell a Kinematic mover from a Dynamic one, so a filter
+// never sees them and cannot drop them; a reacting System does
+// (continuous-collision.md).
 //
 // One hole is accepted rather than fixed. A Sensor's path is a chord and not
 // the polyline it flew, so a sharply curving one can clip a corner, as a solid

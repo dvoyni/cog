@@ -49,7 +49,7 @@ func Solve(
 	// A fast solid Body the path pass stopped goes back to where it stopped
 	// before anything reads its Position (contacts-paths.go).
 	contacts.backToStops(dynamics, places)
-	if len(contacts.held) > 0 {
+	if len(contacts.held) > 0 || len(contacts.crossings) > 0 {
 		contacts.carryHeld(dynamics, places)
 	}
 	contacts.beginSolve()
