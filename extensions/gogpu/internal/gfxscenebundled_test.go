@@ -54,8 +54,8 @@ func TestBundledSceneShaderDeclaresItsGroupZeroAndOneBindings(t *testing.T) {
 	if len(blocks) != 1 {
 		t.Fatalf("the scene shader's uniform blocks are %+v, want the material's alone", blocks)
 	}
-	if block := blocks[0]; block.Name != "scenePbrMaterial" || block.Size == 0 || block.Size > 256 || block.Group != 1 || block.Binding != 0 {
-		t.Fatalf("the scene shader's uniform block is %+v, want the material's, at most 256 bytes, at 1/0", block)
+	if block := blocks[0]; block.Name != "scenePbrMaterial" || block.Size == 0 || block.Group != 1 || block.Binding != 0 {
+		t.Fatalf("the scene shader's uniform block is %+v, want the material's at 1/0", block)
 	}
 	resources := map[string]cgfx.ShaderResource{}
 	for _, resource := range layout.Resources {

@@ -5,25 +5,6 @@ import (
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
-// uniformMax caps each uniform block a shader may declare. The arena packs
-// blocks of any size, so the cap is a policy rather than a stride; raising it
-// toward the 64 KiB web floor is #100.
-const uniformMax = 256
-
-// checkUniformBlocks measures each of a reflected shader's uniform blocks
-// against uniformMax and reports the first that exceeds it. It is not a
-// web-floor check: the floor is 64 KiB. The caller treats a failure as fatal to
-// the shader.
-func checkUniformBlocks(label string, layout shader.ShaderLayout) error {
-	for i := range layout.Resources {
-		block := &layout.Resources[i]
-		if block.Kind.Base() == shader.ResourceUniformBuffer && block.Size > uniformMax {
-			return shader.ErrUniformBlockTooLarge{Shader: label, Block: block.Name, Declared: block.Size, Max: uniformMax}
-		}
-	}
-	return nil
-}
-
 // checkWebLimits measures a reflected shader against the browser spec floor,
 // never against the device it happens to be running on: a desktop adapter
 // reports its hardware limits, where 200 storage buffers is ordinary, so a

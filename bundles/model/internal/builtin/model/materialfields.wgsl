@@ -17,9 +17,8 @@
 // model.MaterialFieldsPath. A shader adding numbers of its own writes a fields
 // source that includes this one first and lists its members after it, each
 // named with a prefix of its own. A shader extending that one includes that
-// source the same way, so extensions stack. The block is capped at 256 bytes
-// (gfx.ErrUniformBlockTooLarge) and these take 160 of them; every extension on
-// top shares the rest.
+// source the same way, so extensions stack. These take 160 bytes of the block;
+// every extension on top adds its own, up to the 64 KiB web floor.
 //
 // Its numbers are glTF's, by verbatim name, because they are user-facing: the
 // glTF specification is their documentation. The per-slot metadata is flat

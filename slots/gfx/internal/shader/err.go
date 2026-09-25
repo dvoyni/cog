@@ -115,22 +115,3 @@ func (e ErrShaderExceedsWebLimits) Error() string {
 	return fmt.Sprintf("gfx: shader %q declares %d %s; the web floor is %d (this device allows %d)",
 		e.Shader, e.Declared, e.Limit, e.Floor, e.Device)
 }
-
-// ErrUniformBlockTooLarge reports a shader with a uniform block larger than the
-// slot gfx binds for it on every draw. Block names the first such block. Unlike a web-floor report it is fatal
-// to the shader: the module is freed and every draw through it is dropped,
-// because what would otherwise render is the block cut to the slot, read partly
-// from outside its binding, with nothing saying why.
-//
-// It is reported once, when the shader is reflected, not once a draw.
-type ErrUniformBlockTooLarge struct {
-	Shader   string
-	Block    string
-	Declared int
-	Max      int
-}
-
-func (e ErrUniformBlockTooLarge) Error() string {
-	return fmt.Sprintf("gfx: shader %q declares %d-byte uniform block %q; gfx binds %d bytes per block",
-		e.Shader, e.Declared, e.Block, e.Max)
-}

@@ -13,15 +13,6 @@ import (
 // somewhere else.
 type ErrShaderExceedsWebLimits = shader.ErrShaderExceedsWebLimits
 
-// ErrUniformBlockTooLarge reports a shader with a uniform block larger than the
-// slot gfx binds for it on every draw. Block names the first such block. Unlike a web-floor report it is fatal
-// to the shader: the module is freed and every draw through it is dropped,
-// because what would otherwise render is the block cut to the slot, read partly
-// from outside its binding, with nothing saying why.
-//
-// It is reported once, when the shader is reflected, not once a draw.
-type ErrUniformBlockTooLarge = shader.ErrUniformBlockTooLarge
-
 // ErrDrawWithoutPass is reported when a frame records draws before declaring a
 // pass. There is no implicit pass to absorb them, so they are dropped: a draw
 // with no pass has no target, no depth attachment and no place in the frame's

@@ -159,7 +159,7 @@ const (
 	// emissiveTransform, baseColorRotation, metallicRoughnessRotation,
 	// normalRotation, occlusionRotation, emissiveRotation, metallicFactor,
 	// roughnessFactor, normalScale, occlusionStrength, alphaCutoff and uvSets,
-	// 160 bytes of the 256 gfx allows a block. It is not WGSL on its own; an
+	// 160 bytes of the block. It is not WGSL on its own; an
 	// extension's fields source includes it first and names its own members
 	// with a prefix of its own after it. Do not declare those names again.
 	MaterialFieldsPath = "builtin/model/materialfields.wgsl"

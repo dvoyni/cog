@@ -52,8 +52,9 @@ func TestEveryMemberOfTheMaterialBlockIsAParam(t *testing.T) {
 	}
 }
 
-// The block is a uniform, which gfx caps at 256 bytes and refuses past it.
-func TestTheMaterialBlockIsAUniformWithinGfxsCap(t *testing.T) {
+// The material's numbers are a uniform block, which gfx packs per draw by
+// member name, rather than storage a renderer would have to pack itself.
+func TestTheMaterialBlockIsAUniform(t *testing.T) {
 	module := lowerForTest(t, flattenedSceneShader(t))
 	for _, global := range module.GlobalVariables {
 		if global.Name != "scenePbrMaterial" {
@@ -61,9 +62,6 @@ func TestTheMaterialBlockIsAUniformWithinGfxsCap(t *testing.T) {
 		}
 		if global.Space != ir.SpaceUniform {
 			t.Fatalf("scenePbrMaterial is in space %v, want uniform", global.Space)
-		}
-		if span := module.Types[global.Type].Inner.(ir.StructType).Span; span > 256 {
-			t.Fatalf("scenePbrMaterial spans %d bytes, past gfx's 256-byte cap", span)
 		}
 		return
 	}

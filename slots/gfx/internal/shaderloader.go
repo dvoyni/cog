@@ -135,15 +135,6 @@ func (shaderLoader) Load(
 	// a caller-supplied material is what actually gets bound at draw time. The
 	// shader is cached, so this reports once rather than once a frame.
 	layout := userData.t.shaderLayout(userData.backend, id)
-	if err := checkUniformBlocks(label, layout); err != nil {
-		// Fatal, unlike the web-floor report below: the module is freed and the
-		// entry keeps the zero id, so every draw through it is dropped rather
-		// than rendered with its block cut to the slot.
-		delete(userData.t.layouts, id)
-		userData.backend.FreeShader(id)
-		value.err = err
-		return value
-	}
 	value.id = id
 	limits := userData.backend.Limits()
 	if diagnostic := checkWebLimits(label, layout, limits); diagnostic != nil && userData.t.diagnostic == nil {

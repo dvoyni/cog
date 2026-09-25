@@ -330,8 +330,7 @@ const (
 	// emissiveTransform, baseColorRotation, metallicRoughnessRotation,
 	// normalRotation, occlusionRotation, emissiveRotation, metallicFactor,
 	// roughnessFactor, normalScale, occlusionStrength, alphaCutoff and uvSets,
-	// 160 of the 256 bytes gfx allows a block. Do not declare those names
-	// again.
+	// 160 bytes of the block. Do not declare those names again.
 	MaterialFieldsPath = internal.MaterialFieldsPath
 	// MaterialEpiloguePath is the storage path of the close of the material's
 	// uniform block, which declares its binding, scenePbrMaterial, at
