@@ -1,5 +1,7 @@
 package internal
 
+import "github.com/dvoyni/cog/slots/gfx/internal/shader"
+
 // CheckVertexInterface reports the first way a vertex layout fails the shader
 // about to be drawn with it, and nil when the pair is legal. Three things can
 // be wrong: an @location the layout does not supply at all, one it supplies at
@@ -27,7 +29,7 @@ package internal
 // backend, and a package that owns both halves of a pair - scene holds its
 // layout and its shader - can ask the same question gfx will ask at draw time,
 // through the same call.
-func CheckVertexInterface(shader string, layout ShaderLayout, attrs []VertexAttr) error {
+func CheckVertexInterface(label string, layout shader.ShaderLayout, attrs []VertexAttr) error {
 	stride := 0
 	for i := range attrs {
 		if end := VertexAttrOffset(&(attrs[i])) + VertexAttrTyp(&(attrs[i])).Size(); end > stride {
@@ -40,21 +42,21 @@ func CheckVertexInterface(shader string, layout ShaderLayout, attrs []VertexAttr
 	// named scene layouts satisfy it by construction, so what this guards is the
 	// custom-layout path.
 	if stride%4 != 0 {
-		return ErrVertexStrideAlignment{Shader: shader, Stride: stride}
+		return ErrVertexStrideAlignment{Shader: label, Stride: stride}
 	}
 	for _, input := range layout.VertexInputs {
 		// An attribute's @location is its index in the layout, which is the same
 		// mapping the pipeline descriptor is built with.
 		if input.Location < 0 || input.Location >= len(attrs) {
-			return ErrVertexInputUnsupplied{
-				Shader: shader, Input: input.Name, Location: input.Location,
+			return shader.ErrVertexInputUnsupplied{
+				Shader: label, Input: input.Name, Location: input.Location,
 				Declared: input.Kind.WGSL(input.Count),
 			}
 		}
 		kind, count := VertexAttrTyp(&(attrs[input.Location])).Decode()
 		if kind != input.Kind || count != input.Count {
-			return ErrVertexInputMismatch{
-				Shader: shader, Input: input.Name, Location: input.Location,
+			return shader.ErrVertexInputMismatch{
+				Shader: label, Input: input.Name, Location: input.Location,
 				Declared: input.Kind.WGSL(input.Count), Supplied: kind.WGSL(count),
 			}
 		}

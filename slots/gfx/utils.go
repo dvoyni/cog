@@ -3,23 +3,24 @@ package gfx
 import (
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx/internal"
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 )
 
 // ShaderWithText describes a shader from inline source bytes (e.g. WGSL).
 func ShaderWithText(text string, opts ...ShaderOption) ShaderDescr {
-	return internal.ShaderWithText(text, opts...)
+	return shader.ShaderWithText(text, opts...)
 }
 
 // ShaderWithResource describes a shader loaded from storage.FileSystem.
 func ShaderWithResource(path string, opts ...ShaderOption) ShaderDescr {
-	return internal.ShaderWithResource(path, opts...)
+	return shader.ShaderWithResource(path, opts...)
 }
 
 // ShaderDefine supplies a valueless flag, readable by the source's #if
 // conditionals and never reaching WGSL. Supplying a define a source does not
 // mention is harmless; nothing can unset one.
 func ShaderDefine(name string) ShaderOption {
-	return internal.ShaderDefine(name)
+	return shader.ShaderDefine(name)
 }
 
 // ShaderConst supplies a value for a #const the source declares, overriding
@@ -28,7 +29,7 @@ func ShaderDefine(name string) ShaderOption {
 // name no source declares is silently ignored, which keeps one const map usable
 // across a family of shaders.
 func ShaderConst(name, value string) ShaderOption {
-	return internal.ShaderConst(name, value)
+	return shader.ShaderConst(name, value)
 }
 
 // TextureWithResource describes a texture loaded from storage.FileSystem. It is

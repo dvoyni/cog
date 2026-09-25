@@ -3,6 +3,8 @@ package internal
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+
 	"github.com/dvoyni/cog/kernel"
 )
 
@@ -19,7 +21,7 @@ func TestSuppliedShaderDrawAllocatesNothing(t *testing.T) {
 		TopologyTriangleList,
 		Attr(0, Float32x3), Attr(12, Float32x4),
 	)
-	material := Material(ShaderWithText("//test", ShaderDefine("HQ"), ShaderConst("N", "4")))
+	material := Material(shader.ShaderWithText("//test", shader.ShaderDefine("HQ"), shader.ShaderConst("N", "4")))
 	const draws = 100
 	for range draws {
 		queue.Draw(mesh, material)

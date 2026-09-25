@@ -1,5 +1,7 @@
 package internal
 
+import "github.com/dvoyni/cog/slots/gfx/internal/shader"
+
 type parameterSource uint8
 
 const (
@@ -49,7 +51,7 @@ type plannedResource struct {
 	// the dimension check and a pure function of the shader, so it is cached
 	// here with the rest of the plan; the layer count it is compared against is
 	// a per-draw value and cannot be. Meaningless for a buffer binding.
-	view TextureViewDimension
+	view shader.TextureViewDimension
 }
 
 // plannedSampler is one reflected sampler binding and the parameter that fills

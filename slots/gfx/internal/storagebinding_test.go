@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -11,13 +13,13 @@ import (
 // storageLayout declares one sampler, one texture and one storage buffer, which
 // is the shape that tells the three behaviours apart: the first two fall back
 // and the third is fatal.
-func storageLayout() ShaderLayout {
-	return ShaderLayout{
-		Resources: []ShaderResource{
-			{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: 80, Members: []StorageMember{{Name: "mvp", Offset: 0}}},
-			{Name: "MainSampler", Kind: ResourceSampler, Group: 1, Binding: 0},
+func storageLayout() shader.ShaderLayout {
+	return shader.ShaderLayout{
+		Resources: []shader.ShaderResource{
+			{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 80, Members: []shader.StorageMember{{Name: "mvp", Offset: 0}}},
+			{Name: "MainSampler", Kind: shader.ResourceSampler, Group: 1, Binding: 0},
 			{Name: "MainTexture", Group: 1, Binding: 1},
-			{Name: "Data", Kind: ResourceStorageBuffer, Group: 1, Binding: 2},
+			{Name: "Data", Kind: shader.ResourceStorageBuffer, Group: 1, Binding: 2},
 		},
 	}
 }

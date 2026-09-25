@@ -2,6 +2,7 @@ package gfx
 
 import (
 	"github.com/dvoyni/cog/slots/gfx/internal"
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 )
 
 // ErrShaderExceedsWebLimits reports a shader that fits the device it is running
@@ -9,7 +10,7 @@ import (
 // report, not a failure: the shader is kept and the frame renders, because
 // dropping a draw that works here would be the wrong trade for a warning about
 // somewhere else.
-type ErrShaderExceedsWebLimits = internal.ErrShaderExceedsWebLimits
+type ErrShaderExceedsWebLimits = shader.ErrShaderExceedsWebLimits
 
 // ErrUniformBlockTooLarge reports a shader whose uniform block is larger than
 // the slot gfx binds for it on every draw. Unlike a web-floor report it is fatal
@@ -18,7 +19,7 @@ type ErrShaderExceedsWebLimits = internal.ErrShaderExceedsWebLimits
 // from outside its binding, with nothing saying why.
 //
 // It is reported once, when the shader is reflected, not once a draw.
-type ErrUniformBlockTooLarge = internal.ErrUniformBlockTooLarge
+type ErrUniformBlockTooLarge = shader.ErrUniformBlockTooLarge
 
 // ErrDrawWithoutPass is reported when a frame records draws before declaring a
 // pass. There is no implicit pass to absorb them, so they are dropped: a draw
@@ -82,7 +83,7 @@ type ErrTextureViewDimensionMismatch = internal.ErrTextureViewDimensionMismatch
 // It goes to the fatal error path rather than the web-limits diagnostic path.
 // A diagnostic says "this renders here but would not on the web"; a vertex
 // interface mismatch renders wrongly, everywhere.
-type ErrVertexInputUnsupplied = internal.ErrVertexInputUnsupplied
+type ErrVertexInputUnsupplied = shader.ErrVertexInputUnsupplied
 
 // ErrVertexInputMismatch reports a shader input the bound layout supplies at a
 // different type. The draw is dropped, for the reason an unsupplied one is: the
@@ -92,7 +93,7 @@ type ErrVertexInputUnsupplied = internal.ErrVertexInputUnsupplied
 // rule is over what a format decodes to, not over how its bytes are stored -
 // Unorm8x4 and Float32x4 both supply vec4<f32> and both are legal under a
 // vec4<f32> declaration.
-type ErrVertexInputMismatch = internal.ErrVertexInputMismatch
+type ErrVertexInputMismatch = shader.ErrVertexInputMismatch
 
 // ErrVertexStrideAlignment reports a vertex stride that is not a multiple of 4.
 // WebGPU requires that unconditionally, and the platforms disagree about it:
@@ -189,4 +190,4 @@ type ErrFrameAbandoned = internal.ErrFrameAbandoned
 // convention earns its keep when a caller might branch on the failure, and
 // nothing can recover from a shader that will not compile - so nothing ever
 // will branch, and a type per directive plus a Kind enum would be pure surface.
-type ErrShaderSource = internal.ErrShaderSource
+type ErrShaderSource = shader.ErrShaderSource

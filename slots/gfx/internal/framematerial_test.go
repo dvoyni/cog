@@ -1,6 +1,10 @@
 package internal
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+)
 
 // frameMaterialQueue is a queue whose draws need no id: every param below is a
 // value, so nothing is baked into a temporary.
@@ -20,7 +24,7 @@ func frameMaterialParams() []ParameterDescr {
 // own params alone.
 func TestAFrameMaterialIsCopiedOnceForEveryDrawOfIt(t *testing.T) {
 	q := frameMaterialQueue()
-	material := Material(ShaderWithText("s"), frameMaterialParams()...)
+	material := Material(shader.ShaderWithText("s"), frameMaterialParams()...)
 	recorded := q.FrameMaterial(material)
 	afterRecord := len(q.parameterArena)
 	if afterRecord != len(material.Params()) {
@@ -44,7 +48,7 @@ func TestAFrameMaterialIsCopiedOnceForEveryDrawOfIt(t *testing.T) {
 func TestAFrameMaterialOwesNothingToTheCallersSlice(t *testing.T) {
 	q := frameMaterialQueue()
 	params := frameMaterialParams()
-	recorded := q.FrameMaterial(Material(ShaderWithText("s"), params...))
+	recorded := q.FrameMaterial(Material(shader.ShaderWithText("s"), params...))
 	params[0] = FloatParam("z", 9)
 	q.Draw(MeshDescr{}, recorded)
 	if name := q.ops[0].Material.params[0].Name(); name != "a" {
@@ -58,7 +62,7 @@ func TestAFrameMaterialOwesNothingToTheCallersSlice(t *testing.T) {
 func TestAStaleOrForeignFrameMaterialDrawsAsItsOriginal(t *testing.T) {
 	q := frameMaterialQueue()
 	params := frameMaterialParams()
-	recorded := q.FrameMaterial(Material(ShaderWithText("s"), params...))
+	recorded := q.FrameMaterial(Material(shader.ShaderWithText("s"), params...))
 
 	other := frameMaterialQueue()
 	other.Draw(MeshDescr{}, recorded)
@@ -70,7 +74,7 @@ func TestAStaleOrForeignFrameMaterialDrawsAsItsOriginal(t *testing.T) {
 	q.Pass(PassDescr{})
 	// The arena's backing is reused by the new frame, so the recorded window
 	// now holds this frame's params, not the material's.
-	q.Draw(MeshDescr{}, Material(ShaderWithText("t"), FloatParam("x", 7), FloatParam("y", 8), FloatParam("w", 9)))
+	q.Draw(MeshDescr{}, Material(shader.ShaderWithText("t"), FloatParam("x", 7), FloatParam("y", 8), FloatParam("w", 9)))
 	q.Draw(MeshDescr{}, recorded)
 	got := q.ops[1].Material.params
 	if len(got) != 3 || got[0].Name() != "a" || got[2].Name() != "c" {
@@ -85,7 +89,7 @@ func TestAStaleOrForeignFrameMaterialDrawsAsItsOriginal(t *testing.T) {
 // not the queue's.
 func TestACloneOfAFrameMaterialIsNotRecorded(t *testing.T) {
 	q := frameMaterialQueue()
-	recorded := q.FrameMaterial(Material(ShaderWithText("s"), frameMaterialParams()...))
+	recorded := q.FrameMaterial(Material(shader.ShaderWithText("s"), frameMaterialParams()...))
 	for name, clone := range map[string]MaterialDescr{
 		"Clone":   recorded.Clone(),
 		"CloneTo": func() MaterialDescr { c, _ := recorded.CloneTo(nil); return c }(),
@@ -100,7 +104,7 @@ func TestACloneOfAFrameMaterialIsNotRecorded(t *testing.T) {
 // so a plan cached through one is found through the other.
 func TestAFrameMaterialsShapeStateIsItsParamsNames(t *testing.T) {
 	q := frameMaterialQueue()
-	material := Material(ShaderWithText("s"), frameMaterialParams()...)
+	material := Material(shader.ShaderWithText("s"), frameMaterialParams()...)
 	recorded := q.FrameMaterial(material)
 	state, ok := MaterialShapeState(&recorded)
 	if !ok {

@@ -14,6 +14,8 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -25,7 +27,7 @@ import (
 
 // testMaterial builds a material with an inline (fake-compiled) shader.
 func testMaterial(params ...ParameterDescr) MaterialDescr {
-	return Material(ShaderWithText("//test"), params...)
+	return Material(shader.ShaderWithText("//test"), params...)
 }
 
 // fakeBackend records the calls the translator makes and captures the last
@@ -67,7 +69,7 @@ type fakeBackend struct {
 	// carries a count, not a format.
 	indexBinds    []indexBind
 	execCount     int
-	layout        *ShaderLayout
+	layout        *shader.ShaderLayout
 	presents      int
 	presentAfter  int
 	boundTextures []TextureID
@@ -162,7 +164,7 @@ func (b *fakeBackend) NewSampler(SamplerDesc) (SamplerID, error) {
 	return SamplerID(b.id()), nil
 }
 func (b *fakeBackend) FreeSampler(id SamplerID) { b.freedSamplers = append(b.freedSamplers, id) }
-func (b *fakeBackend) NewShader(desc ShaderDesc) (ShaderID, error) {
+func (b *fakeBackend) NewShader(desc shader.ShaderDesc) (ShaderID, error) {
 	if b.shaderErr != nil {
 		return 0, b.shaderErr
 	}
@@ -175,14 +177,14 @@ func (b *fakeBackend) FreeShader(id ShaderID) { b.freedShaders = append(b.freedS
 
 // ShaderLayout reports a fixed layout matching the built-in shader: mvp at 0,
 // a "tint" color at 64 (80-byte block), plus a texture+sampler in group 1.
-func (b *fakeBackend) ShaderLayout(ShaderID) ShaderLayout {
+func (b *fakeBackend) ShaderLayout(ShaderID) shader.ShaderLayout {
 	if b.layout != nil {
 		return *b.layout
 	}
-	return ShaderLayout{
-		Resources: []ShaderResource{
-			{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: 80, Members: []StorageMember{{Name: "mvp", Offset: 0}, {Name: "tint", Offset: 64}}},
-			{Name: "MainSampler", Kind: ResourceSampler, Group: 1, Binding: 0},
+	return shader.ShaderLayout{
+		Resources: []shader.ShaderResource{
+			{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 80, Members: []shader.StorageMember{{Name: "mvp", Offset: 0}, {Name: "tint", Offset: 64}}},
+			{Name: "MainSampler", Kind: shader.ResourceSampler, Group: 1, Binding: 0},
 			{Name: "MainTexture", Group: 1, Binding: 1},
 		},
 	}
@@ -545,17 +547,17 @@ func BenchmarkOpQueueDrawSteadyState(b *testing.B) {
 }
 
 func BenchmarkTranslateSteadyState(b *testing.B) {
-	layout := ShaderLayout{
-		Resources: []ShaderResource{
-			{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: 96, Members: []StorageMember{
+	layout := shader.ShaderLayout{
+		Resources: []shader.ShaderResource{
+			{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 96, Members: []shader.StorageMember{
 				{Name: "mvp", Offset: 0},
 				{Name: "tint", Offset: 64},
 				{Name: "time", Offset: 80},
 				{Name: "scale", Offset: 84},
 			}},
-			{Name: "MainSampler", Kind: ResourceSampler, Group: 1, Binding: 0},
+			{Name: "MainSampler", Kind: shader.ResourceSampler, Group: 1, Binding: 0},
 			{Name: "MainTexture", Group: 1, Binding: 1},
-			{Name: "Data", Kind: ResourceStorageBuffer, Group: 1, Binding: 2},
+			{Name: "Data", Kind: shader.ResourceStorageBuffer, Group: 1, Binding: 2},
 		},
 	}
 	backend := &fakeBackend{layout: &layout}
@@ -940,7 +942,7 @@ func TestOpQueueArenasPreserveCallerDataIsolation(t *testing.T) {
 
 	queue.Draw(
 		Mesh(BufferWithBytes(vertices, true), TopologyTriangleList, layout...),
-		Material(ShaderWithText("//test"), materialParams...),
+		Material(shader.ShaderWithText("//test"), materialParams...),
 		drawParams...,
 	)
 	vertices[0] = 9
@@ -1079,12 +1081,12 @@ func TestOpQueueTemporaryTexturePool(t *testing.T) {
 
 func TestBakedResourcesTranslateToBakedBindings(t *testing.T) {
 	p := newPlugin()
-	layout := ShaderLayout{
-		Resources: []ShaderResource{
-			{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: 80, Members: []StorageMember{{Name: "mvp", Offset: 0}}},
-			{Name: "MainSampler", Kind: ResourceSampler, Group: 1, Binding: 0},
+	layout := shader.ShaderLayout{
+		Resources: []shader.ShaderResource{
+			{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 80, Members: []shader.StorageMember{{Name: "mvp", Offset: 0}}},
+			{Name: "MainSampler", Kind: shader.ResourceSampler, Group: 1, Binding: 0},
 			{Name: "MainTexture", Group: 1, Binding: 1},
-			{Name: "Data", Kind: ResourceStorageBuffer, Group: 1, Binding: 2},
+			{Name: "Data", Kind: shader.ResourceStorageBuffer, Group: 1, Binding: 2},
 		},
 	}
 	backend := &fakeBackend{layout: &layout}
@@ -1332,8 +1334,8 @@ func TestVertexLayoutKeyRejectsUnsupportedLayouts(t *testing.T) {
 func TestDrawParamsPackByNameAndOverrideMaterial(t *testing.T) {
 	p := newPlugin()
 	k := newTestKernel(t, p)
-	layout := ShaderLayout{
-		Resources: []ShaderResource{{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: 80, Members: []StorageMember{{Name: "camera", Offset: 0}, {Name: "tint", Offset: 64}}}},
+	layout := shader.ShaderLayout{
+		Resources: []shader.ShaderResource{{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 80, Members: []shader.StorageMember{{Name: "camera", Offset: 0}, {Name: "tint", Offset: 64}}}},
 	}
 	backend := &fakeBackend{layout: &layout}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -1414,7 +1416,7 @@ func TestStorageResolvesShaderResource(t *testing.T) {
 
 	for range 2 {
 		w := recordList(t, k)
-		w.Draw(triangle(), Material(ShaderWithResource("shader.wgsl")), MatParam("mvp", m.NewMat4()))
+		w.Draw(triangle(), Material(shader.ShaderWithResource("shader.wgsl")), MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 	}
@@ -1439,7 +1441,7 @@ func TestReleaseCachedResourceReleasesPathAndAllowsReload(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	material := Material(
-		ShaderWithResource("shader.wgsl"),
+		shader.ShaderWithResource("shader.wgsl"),
 		TextureParam("MainTexture", TextureWithResource("hero.png")),
 	)
 
@@ -1608,7 +1610,7 @@ func TestFailedShaderIsCachedAsFailedAndEvictedByItsPath(t *testing.T) {
 	k := engine.Executioner()
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
-	material := Material(ShaderWithResource("later.wgsl"))
+	material := Material(shader.ShaderWithResource("later.wgsl"))
 	draw := func() {
 		w := recordList(t, k)
 		w.Draw(triangle(), material)
@@ -1657,9 +1659,9 @@ func TestEvictionScansTheForwardIncludeSet(t *testing.T) {
 	// Two variants rooted at one path, plus a text shader that includes the same
 	// shared source: three modules, none of them found by that probe.
 	materials := []MaterialDescr{
-		Material(ShaderWithResource("root.wgsl")),
-		Material(ShaderWithResource("root.wgsl", ShaderDefine("HQ"))),
-		Material(ShaderWithText("#include shared.wgsl\nconst inline = 1;")),
+		Material(shader.ShaderWithResource("root.wgsl")),
+		Material(shader.ShaderWithResource("root.wgsl", shader.ShaderDefine("HQ"))),
+		Material(shader.ShaderWithText("#include shared.wgsl\nconst inline = 1;")),
 	}
 	w := recordList(t, k)
 	for _, material := range materials {
@@ -1700,8 +1702,8 @@ func TestAnInlineShaderWithNoIncludeIsReachedOnlyByTheGlobalFree(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w := recordList(t, k)
-	w.Draw(triangle(), Material(ShaderWithResource("root.wgsl")))
-	w.Draw(triangle(), Material(ShaderWithText("const inline = 1;")))
+	w.Draw(triangle(), Material(shader.ShaderWithResource("root.wgsl")))
+	w.Draw(triangle(), Material(shader.ShaderWithText("const inline = 1;")))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 	if backend.shaders != 2 {
@@ -1756,10 +1758,10 @@ func TestTextureWithBytesReuploadsEveryFrame(t *testing.T) {
 
 func TestBufferWithBytesReuploadsEveryFrame(t *testing.T) {
 	p := newPlugin()
-	layout := ShaderLayout{
-		Resources: []ShaderResource{
-			{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: 80, Members: []StorageMember{{Name: "mvp", Offset: 0}}},
-			{Name: "Data", Kind: ResourceStorageBuffer, Group: 1, Binding: 0},
+	layout := shader.ShaderLayout{
+		Resources: []shader.ShaderResource{
+			{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 80, Members: []shader.StorageMember{{Name: "mvp", Offset: 0}}},
+			{Name: "Data", Kind: shader.ResourceStorageBuffer, Group: 1, Binding: 0},
 		},
 	}
 	k := newTestKernel(t, p)
@@ -1866,8 +1868,8 @@ func TestTemporaryBufferUploadsOnceForEveryDrawThatBindsIt(t *testing.T) {
 func TestAShaderWithoutAUniformBlockGetsNoUniformBinding(t *testing.T) {
 	p := newPlugin()
 	k := newTestKernel(t, p)
-	backend := &fakeBackend{layout: &ShaderLayout{Resources: []ShaderResource{
-		{Name: "records", Kind: ResourceStorageBuffer, Group: 0, Binding: 0},
+	backend := &fakeBackend{layout: &shader.ShaderLayout{Resources: []shader.ShaderResource{
+		{Name: "records", Kind: shader.ResourceStorageBuffer, Group: 0, Binding: 0},
 	}}}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
@@ -1902,13 +1904,13 @@ func TestEachVariantIsItsOwnModuleUnderItsOwnLabel(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w := recordList(t, k)
-	for _, opts := range [][]ShaderOption{
+	for _, opts := range [][]shader.ShaderOption{
 		nil,
-		{ShaderDefine("SKIN")},
-		{ShaderDefine("MORPH")},
-		{ShaderDefine("SKIN"), ShaderDefine("MORPH")},
+		{shader.ShaderDefine("SKIN")},
+		{shader.ShaderDefine("MORPH")},
+		{shader.ShaderDefine("SKIN"), shader.ShaderDefine("MORPH")},
 	} {
-		w.Draw(triangle(), Material(ShaderWithResource("scene.wgsl", opts...)))
+		w.Draw(triangle(), Material(shader.ShaderWithResource("scene.wgsl", opts...)))
 	}
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -1953,14 +1955,14 @@ func TestABackendCompileFailureCarriesTheSegmentTable(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w := recordList(t, k)
-	w.Draw(triangle(), Material(ShaderWithResource("root.wgsl", ShaderDefine("HQ"))))
+	w.Draw(triangle(), Material(shader.ShaderWithResource("root.wgsl", shader.ShaderDefine("HQ"))))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	if len(reported) != 1 {
 		t.Fatalf("the frame reported %d errors, want 1: %v", len(reported), reported)
 	}
-	var refused ErrShaderSource
+	var refused shader.ErrShaderSource
 	if !errors.As(reported[0], &refused) {
 		t.Fatalf("reported %v, want an ErrShaderSource", reported[0])
 	}

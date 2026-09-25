@@ -1,5 +1,7 @@
 package internal
 
+import "github.com/dvoyni/cog/slots/gfx/internal/shader"
+
 // The view types are the vocabulary cog's snapshots share. gfx declares them
 // because gfx owns the descriptors they render - a texture, a parameter, a
 // material - and because canvas and ui already depend on gfx, so one value
@@ -295,9 +297,9 @@ type ShaderView struct {
 }
 
 // ShaderViewOf renders one shader descriptor.
-func ShaderViewOf(shader ShaderDescr) ShaderView {
-	path := shader.Path()
-	return ShaderView{Path: path, Inline: path == "", Supply: shader.Supply()}
+func ShaderViewOf(shaderDescr shader.ShaderDescr) ShaderView {
+	path := shaderDescr.Path()
+	return ShaderView{Path: path, Inline: path == "", Supply: shaderDescr.Supply()}
 }
 
 // MaterialStateView is fixed pipeline state with its enums named. Depth

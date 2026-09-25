@@ -58,6 +58,12 @@ plugin takes the alias-index shape.
   another package of its own needs apart from the logic; otherwise there is
   none, as in every moved plugin today. Logic, and any type with methods, is
   declared in `internal/`. It never imports its own root either.
+- **`X/internal/<part>/`** sub-packages hold the separable parts of a crowded
+  `internal/` — a part few other files reach into, such as gfx's shader
+  vocabulary and preprocessor in `internal/shader`. They are implementation,
+  so methods and logic are welcome; `internal/` imports them, they never import
+  `internal/` or the root, and the root aliases and forwards into them exactly
+  as into `internal/`, keeping each target's name.
 - **A test that composes plugins depending on this one** cannot be a test of
   `internal/` itself: their roots import this root, which imports `internal/`.
   It is an external test, `package internal_test`, beside the others, reaching
@@ -198,7 +204,7 @@ performance or because `internal/types` code names it, goes in
 | --- | --- |
 | `kernel` | nothing else in cog |
 | `libs/*` | `libs`, `kernel` |
-| root `X` | `libs`, `kernel`, other plugins' roots, its own `internal/types`; an alias-index root also its own `internal/` |
+| root `X` | `libs`, `kernel`, other plugins' roots, its own `internal/types`; an alias-index root also its own `internal/` and the packages under it |
 | `X/internal/types/…` | `libs`, `kernel`, other plugins' roots |
 | `X/internal/…` | `libs`, `kernel`, any root — **but its own, in an alias-index plugin** — its own `internal/…` and `internal/types` |
 | constructor `X/Xplugin` | `kernel`, its own `internal/` |

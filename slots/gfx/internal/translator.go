@@ -5,6 +5,8 @@ import (
 	"io/fs"
 	"slices"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/assets"
 )
@@ -103,10 +105,10 @@ type translator struct {
 	// stood in for one. It is a translator field like every other cache here,
 	// reached only on the render thread, so what protects it is the confinement
 	// rather than a lock of its own.
-	shaders   *assets.Cache[ShaderDescrParams, shaderUserData, *shader]
+	shaders   *assets.Cache[shader.ShaderDescrParams, shaderUserData, *loadedShader]
 	pipelines map[pipelineKey]PipelineID
 	samplers  map[SamplerDesc]SamplerID
-	layouts   map[ShaderID]ShaderLayout
+	layouts   map[ShaderID]shader.ShaderLayout
 	// textures is the path-texture cache. It is a translator field like every
 	// other cache here, reached only on the render thread, so what protects it
 	// is the confinement rather than a lock of its own.
@@ -157,10 +159,10 @@ type translator struct {
 
 func newTranslator() *translator {
 	return &translator{
-		shaders:           assets.New[ShaderDescrParams, shaderUserData, *shader](shaderLoader{}),
+		shaders:           assets.New[shader.ShaderDescrParams, shaderUserData, *loadedShader](shaderLoader{}),
 		pipelines:         map[pipelineKey]PipelineID{},
 		samplers:          map[SamplerDesc]SamplerID{},
-		layouts:           map[ShaderID]ShaderLayout{},
+		layouts:           map[ShaderID]shader.ShaderLayout{},
 		textures:          assets.New[TextureDescrParams, textureUserData, texture](textureLoader{}),
 		parameterPlans:    map[parameterPlanBucketKey][]cachedParameterPlan{},
 		textureUsage:      map[TextureID]TextureUsage{},

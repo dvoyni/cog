@@ -3,6 +3,8 @@ package internal
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -42,12 +44,12 @@ func TestEveryReflectedSamplerBindsIndependentlyByName(t *testing.T) {
 	k := newTestKernel(t, p)
 	// A material with a tiling texture beside a clamped one: two samplers, two
 	// textures, all in one bind group.
-	backend := &fakeBackend{layout: &ShaderLayout{
-		Resources: []ShaderResource{
-			{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64, Members: []StorageMember{{Name: "mvp", Offset: 0}}},
-			{Name: "groundSampler", Kind: ResourceSampler, Group: 1, Binding: 0},
+	backend := &fakeBackend{layout: &shader.ShaderLayout{
+		Resources: []shader.ShaderResource{
+			{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64, Members: []shader.StorageMember{{Name: "mvp", Offset: 0}}},
+			{Name: "groundSampler", Kind: shader.ResourceSampler, Group: 1, Binding: 0},
 			{Name: "groundTexture", Group: 1, Binding: 1},
-			{Name: "decalSampler", Kind: ResourceSampler, Group: 1, Binding: 2},
+			{Name: "decalSampler", Kind: shader.ResourceSampler, Group: 1, Binding: 2},
 			{Name: "decalTexture", Group: 1, Binding: 3},
 		},
 	}}

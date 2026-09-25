@@ -1,6 +1,10 @@
 package internal
 
-import "hash/maphash"
+import (
+	"hash/maphash"
+
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+)
 
 // fingerprintSeed is fixed for the process, so a fingerprint compares only
 // against others taken in the same process - which is all a per-frame intern
@@ -11,7 +15,7 @@ var fingerprintSeed = maphash.MakeSeed()
 // Build it with Material and the *Param constructors. OpQueue.Draw remaps its
 // texture and buffer parameters to baked resource IDs before recording the draw.
 type MaterialDescr struct {
-	shader ShaderDescr
+	shader shader.ShaderDescr
 	params []ParameterDescr
 	state  MaterialState
 	// recorded is set by OpQueue.FrameMaterial and zero otherwise; see there.
@@ -36,13 +40,13 @@ type frameRecording struct {
 // Material describes a material from a shader and its named parameters. It
 // depth-tests and writes, which is what an opaque draw wants; a draw that wants
 // anything else names its state through MaterialWithState.
-func Material(shader ShaderDescr, params ...ParameterDescr) MaterialDescr {
-	return MaterialWithState(shader, MaterialState{Blend: BlendAlpha, DepthCompare: CompareLess, DepthWrite: true}, params...)
+func Material(shaderDescr shader.ShaderDescr, params ...ParameterDescr) MaterialDescr {
+	return MaterialWithState(shaderDescr, MaterialState{Blend: BlendAlpha, DepthCompare: CompareLess, DepthWrite: true}, params...)
 }
 
 // MaterialWithState describes a material with explicit fixed pipeline state.
-func MaterialWithState(shader ShaderDescr, state MaterialState, params ...ParameterDescr) MaterialDescr {
-	return MaterialDescr{shader: shader, params: params, state: state}
+func MaterialWithState(shaderDescr shader.ShaderDescr, state MaterialState, params ...ParameterDescr) MaterialDescr {
+	return MaterialDescr{shader: shaderDescr, params: params, state: state}
 }
 
 // Clone snapshots the material parameter descriptors while preserving shader
@@ -70,7 +74,7 @@ func (m MaterialDescr) State() MaterialState { return m.state }
 // Shader reports the shader the material shades with, supply included: one
 // path under two supplies is two shaders, so the descriptor answers rather
 // than the path alone.
-func (m MaterialDescr) Shader() ShaderDescr { return m.shader }
+func (m MaterialDescr) Shader() shader.ShaderDescr { return m.shader }
 
 // Params reports the material's own parameters, which a draw's same-named
 // parameters override. The slice aliases the material's storage and must not

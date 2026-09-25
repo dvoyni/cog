@@ -1,4 +1,6 @@
-package internal
+package shader
+
+import "strconv"
 
 // ShaderDesc describes a shader module to create from opaque, backend-specific
 // source bytes (WGSL for the gogpu backend). gfx flattens a shader's sources
@@ -110,4 +112,45 @@ type ShaderResource struct {
 	// top-level members. A storage struct's is how a recorder that declares no
 	// uniform block at all - scene - packs its records.
 	Members []StorageMember
+}
+
+// TextureViewDimension selects the texture view expected by a shader binding.
+type TextureViewDimension uint8
+
+const (
+	TextureView2D TextureViewDimension = iota
+	TextureView2DArray
+)
+
+// VertexScalar is the scalar type an attribute presents to the shader once the
+// hardware has decoded it, which is not the same thing as the type its bytes
+// are stored in: every normalized format arrives as float however many bits it
+// occupies, and only the integer formats arrive as integers.
+type VertexScalar uint8
+
+const (
+	// VertexScalarNone is the zero value: a type that decodes to nothing a
+	// shader can read. No legal vertex format has it.
+	VertexScalarNone VertexScalar = iota
+	VertexScalarFloat
+	VertexScalarUint
+	VertexScalarSint
+)
+
+// WGSL renders the type a shader would declare for this kind at this many
+// components, which is the spelling an author has to change to fix a mismatch.
+func (s VertexScalar) WGSL(count int) string {
+	scalar := "?"
+	switch s {
+	case VertexScalarFloat:
+		scalar = "f32"
+	case VertexScalarUint:
+		scalar = "u32"
+	case VertexScalarSint:
+		scalar = "i32"
+	}
+	if count <= 1 {
+		return scalar
+	}
+	return "vec" + strconv.Itoa(count) + "<" + scalar + ">"
 }

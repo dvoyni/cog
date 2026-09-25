@@ -8,6 +8,8 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 	"github.com/dvoyni/cog/slots/app/appplugin"
@@ -69,15 +71,15 @@ func (a *testAdapter) NewSampler(desc SamplerDesc) (SamplerID, error) {
 	return a.get().NewSampler(desc)
 }
 func (a *testAdapter) FreeSampler(id SamplerID) { a.get().FreeSampler(id) }
-func (a *testAdapter) NewShader(desc ShaderDesc) (ShaderID, error) {
+func (a *testAdapter) NewShader(desc shader.ShaderDesc) (ShaderID, error) {
 	return a.get().NewShader(desc)
 }
-func (a *testAdapter) FreeShader(id ShaderID)                { a.get().FreeShader(id) }
-func (a *testAdapter) ShaderLayout(id ShaderID) ShaderLayout { return a.get().ShaderLayout(id) }
-func (a *testAdapter) FreePipeline(id PipelineID)            { a.get().FreePipeline(id) }
-func (a *testAdapter) Limits() Limits                        { return a.get().Limits() }
-func (a *testAdapter) Execute(queue *Queue)                  { a.get().Execute(queue) }
-func (a *testAdapter) TakeCapture() (Capture, bool)          { return a.get().TakeCapture() }
+func (a *testAdapter) FreeShader(id ShaderID)                       { a.get().FreeShader(id) }
+func (a *testAdapter) ShaderLayout(id ShaderID) shader.ShaderLayout { return a.get().ShaderLayout(id) }
+func (a *testAdapter) FreePipeline(id PipelineID)                   { a.get().FreePipeline(id) }
+func (a *testAdapter) Limits() Limits                               { return a.get().Limits() }
+func (a *testAdapter) Execute(queue *Queue)                         { a.get().Execute(queue) }
+func (a *testAdapter) TakeCapture() (Capture, bool)                 { return a.get().TakeCapture() }
 func (a *testAdapter) ScreenFramebuffer() (TextureViewID, int, int) {
 	return a.get().ScreenFramebuffer()
 }

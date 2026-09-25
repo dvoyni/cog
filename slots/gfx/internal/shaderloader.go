@@ -3,13 +3,16 @@ package internal
 import (
 	"io/fs"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/assets"
 )
 
-// shader is the shader cache's value: one module, as a load left it. It is the
-// former cachedShader under a shorter name, because the table it lives in is no
-// longer a translator field and "cached" was describing where it lived.
+// loadedShader is the shader cache's value: one module, as a load left it. It
+// was cachedShader while the table lived in a translator field, and "cached"
+// described where it lived; it is not plain shader because that is the name of
+// the package the shader vocabulary lives in.
 //
 // It holds the backend id when the module compiled, the error when it did not,
 // the sources it was built from, which is what eviction reads, and the label
@@ -23,7 +26,7 @@ import (
 // inconsistency and is worth recording so the next reader does not "fix" it:
 // nothing mutates a texture after its load, while report() sets reported on
 // every hit, and a value stored in a map cannot be mutated in place.
-type shader struct {
+type loadedShader struct {
 	id      ShaderID
 	err     error
 	sources []string
@@ -57,7 +60,7 @@ type shader struct {
 // badIndexLengths and unsuppliedBuffers - are the same mechanism for the same
 // reason: firstErr carries one error per frame, so a condition that re-reported
 // every frame would mask every later error in every later frame.
-func (s *shader) report() error {
+func (s *loadedShader) report() error {
 	if s.err == nil || s.reported {
 		return nil
 	}
@@ -99,31 +102,31 @@ type shaderLoader struct{}
 // The kernel is unused: every failure here is gfx's own and is returned through
 // the entry rather than reported, which is the decision report() records.
 func (shaderLoader) Load(
-	_ kernel.Kernel, data assets.Blob, params ShaderDescrParams, fsys fs.FS, userData shaderUserData,
-) *shader {
-	descr := ShaderDescr{Name: userData.root, Blob: data, Params: params}
-	label := ShaderLabel(descr)
+	_ kernel.Kernel, data assets.Blob, params shader.ShaderDescrParams, fsys fs.FS, userData shaderUserData,
+) *loadedShader {
+	descr := shader.ShaderDescr{Name: userData.root, Blob: data, Params: params}
+	label := shader.ShaderLabel(descr)
 	// Flatten happens here, on the render thread, on a cache miss only - the
 	// first draw of a given (root, supply). The cost changes from one file read
 	// to N, which is the same shape as today's hitch rather than a new class of
 	// problem: if it ever bites, it bites the first frame a material appears,
 	// which is already true.
-	flattened, err := FlattenShader(fsys, descr)
+	flattened, err := shader.FlattenShader(fsys, descr)
 	// The include set is recorded on failure as well as on success, because a
 	// failed entry must evict like any other: without it a release naming one of
 	// the sources would clear every module that compiled and leave the one that
 	// did not behind.
-	value := &shader{sources: flattened.Sources, label: label}
+	value := &loadedShader{sources: flattened.Sources, label: label}
 	if err != nil {
 		value.err = err
 		return value
 	}
-	id, err := userData.backend.NewShader(ShaderDesc{Code: []byte(flattened.Text), Label: label})
+	id, err := userData.backend.NewShader(shader.ShaderDesc{Code: []byte(flattened.Text), Label: label})
 	if err != nil {
 		// Nothing the backend said is rewritten and no line number is parsed out
 		// of its message: gfx appends the rendered segment table and lets the
 		// reader subtract.
-		value.err = CompileError(label, err, flattened.SourceMap)
+		value.err = shader.CompileError(label, err, flattened.SourceMap)
 		return value
 	}
 	// Every shader gfx reflects is measured, not only an engine's bundled ones:
@@ -153,8 +156,8 @@ func (shaderLoader) Load(
 //
 // The root path is still recorded as the entry's one source, so a failed module
 // evicts by path exactly as a compiled one does.
-func (shaderLoader) Default(d assets.Descr[ShaderDescrParams], _ shaderUserData) *shader {
-	return &shader{sources: []string{d.Name}, label: ShaderLabel(ShaderDescr(d))}
+func (shaderLoader) Default(d assets.Descr[shader.ShaderDescrParams], _ shaderUserData) *loadedShader {
+	return &loadedShader{sources: []string{d.Name}, label: shader.ShaderLabel(shader.ShaderDescr(d))}
 }
 
 // Free releases the module and everything the translator derived from it. This
@@ -164,7 +167,7 @@ func (shaderLoader) Default(d assets.Descr[ShaderDescrParams], _ shaderUserData)
 //
 // It is also why freeCachedResources clears pipelines and plans before it frees
 // the entries: run per entry over full maps, this is O(shaders x pipelines).
-func (shaderLoader) Free(value *shader, userData shaderUserData) {
+func (shaderLoader) Free(value *loadedShader, userData shaderUserData) {
 	if value.id == 0 {
 		return
 	}

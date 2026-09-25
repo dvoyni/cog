@@ -1,7 +1,8 @@
-package internal
+package shader
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"path"
 	"slices"
@@ -547,4 +548,17 @@ func isName(s string) bool {
 // own error, unrewritten, with the rendered segment table to read it against.
 func CompileError(shader string, err error, sourceMap ShaderSourceMap) ErrShaderSource {
 	return ErrShaderSource{Shader: shader, Message: "failed to compile", Err: err, flattened: sourceMap.render()}
+}
+
+// loadShaderResource reads one source through the filesystem an include
+// resolves against, reporting false when it cannot be opened or read.
+func loadShaderResource(filesystem fs.FS, name string) (code []byte, ok bool) {
+	file, err := filesystem.Open(name)
+	if err != nil {
+		return nil, false
+	}
+	defer file.Close()
+
+	code, err = io.ReadAll(file)
+	return code, err == nil
 }

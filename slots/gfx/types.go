@@ -1,6 +1,9 @@
 package gfx
 
-import "github.com/dvoyni/cog/slots/gfx/internal"
+import (
+	"github.com/dvoyni/cog/slots/gfx/internal"
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+)
 
 // ShaderDescr describes a shader by inline source text (ShaderWithText) or a
 // resource path (ShaderWithResource), resolved to bytes by the renderer. The
@@ -11,15 +14,15 @@ import "github.com/dvoyni/cog/slots/gfx/internal"
 // preprocessor resolves the source against. A root source plus one supply is
 // one variant, and two supplies over one path are two shaders, so the supply is
 // part of the descriptor's identity everywhere identity is decided.
-type ShaderDescr = internal.ShaderDescr
+type ShaderDescr = shader.ShaderDescr
 
 // ShaderOption is one entry of a shader's supply: a define or a const. Build it
 // with ShaderDefine or ShaderConst.
-type ShaderOption = internal.ShaderOption
+type ShaderOption = shader.ShaderOption
 
 // ShaderLocation names one line of one shader source. Line is 1-based; a zero
 // value means the supply, which has no source line to point at.
-type ShaderLocation = internal.ShaderLocation
+type ShaderLocation = shader.ShaderLocation
 
 // ShaderSourceMap says where every line of a flattened shader module came from.
 //
@@ -30,13 +33,13 @@ type ShaderLocation = internal.ShaderLocation
 // concatenation of contiguous segments with 1:1 line correspondence inside each,
 // which a table describes as precisely as an array would at roughly one entry
 // per source. That property is the thing to preserve, not the data structure.
-type ShaderSourceMap = internal.ShaderSourceMap
+type ShaderSourceMap = shader.ShaderSourceMap
 
 // ShaderSegment is one run of flattened output lines coming from one source.
 //
 // The hoisted WGSL §4 prologue is the one segment with no source
 // correspondence: its Source is empty and its lines map to nothing.
-type ShaderSegment = internal.ShaderSegment
+type ShaderSegment = shader.ShaderSegment
 
 // TextureDescr describes a texture by resource path (TextureWithResource),
 // inline pixel bytes (TextureWithBytes), or a texture returned by
@@ -248,15 +251,15 @@ const (
 // hardware has decoded it, which is not the same thing as the type its bytes
 // are stored in: every normalized format arrives as float however many bits it
 // occupies, and only the integer formats arrive as integers.
-type VertexScalar = internal.VertexScalar
+type VertexScalar = shader.VertexScalar
 
 const (
 	// VertexScalarNone is the zero value: a type that decodes to nothing a
 	// shader can read. No legal vertex format has it.
-	VertexScalarNone  = internal.VertexScalarNone
-	VertexScalarFloat = internal.VertexScalarFloat
-	VertexScalarUint  = internal.VertexScalarUint
-	VertexScalarSint  = internal.VertexScalarSint
+	VertexScalarNone  = shader.VertexScalarNone
+	VertexScalarFloat = shader.VertexScalarFloat
+	VertexScalarUint  = shader.VertexScalarUint
+	VertexScalarSint  = shader.VertexScalarSint
 )
 
 // VertexAttribute is one attribute of the interleaved vertex buffer supplied to a
@@ -391,11 +394,11 @@ type Region = internal.Region
 type TextureDesc = internal.TextureDesc
 
 // TextureViewDimension selects the texture view expected by a shader binding.
-type TextureViewDimension = internal.TextureViewDimension
+type TextureViewDimension = shader.TextureViewDimension
 
 const (
-	TextureView2D      = internal.TextureView2D
-	TextureView2DArray = internal.TextureView2DArray
+	TextureView2D      = shader.TextureView2D
+	TextureView2DArray = shader.TextureView2DArray
 )
 
 // TextureUsage names the role a texture is in as far as the GPU's memory
@@ -436,13 +439,13 @@ type TextureTransition = internal.TextureTransition
 // ShaderDesc describes a shader module to create from opaque, backend-specific
 // source bytes (WGSL for the gogpu backend). gfx flattens a shader's sources
 // before it hands Code over, so a backend never sees a preprocessor directive.
-type ShaderDesc = internal.ShaderDesc
+type ShaderDesc = shader.ShaderDesc
 
 // ShaderLayout describes a shader's reflected bindings: uniform blocks, storage
 // buffers, textures and samplers, each one a ShaderResource. The translator packs
 // params into a uniform block at its members' offsets and binds every other
 // resource by matching its name to a material parameter.
-type ShaderLayout = internal.ShaderLayout
+type ShaderLayout = shader.ShaderLayout
 
 // ShaderVertexInput is one @location input of a shader's vertex stage: where it
 // binds and what it declares, reduced to the pair a vertex format can be
@@ -452,31 +455,31 @@ type ShaderLayout = internal.ShaderLayout
 // because that is what the comparison is over: a format decodes to a scalar
 // kind and a component count, and nothing in a spelling like "vec3<f32>"
 // survives into the hardware beyond those two numbers.
-type ShaderVertexInput = internal.ShaderVertexInput
+type ShaderVertexInput = shader.ShaderVertexInput
 
 // StorageMember is one top-level member of a reflected uniform block or storage
 // struct. Stride and Count are set for an array member - `lights:
 // array<SceneLight, 16>` - and zero otherwise.
-type StorageMember = internal.StorageMember
+type StorageMember = shader.StorageMember
 
 // ResourceKind is what a reflected binding is - a texture, sampler, uniform
 // buffer or storage buffer, read by Base - plus the flags that refine it within
 // its kind: ResourceDepth, ResourceComparison, ResourceWritable.
-type ResourceKind = internal.ResourceKind
+type ResourceKind = shader.ResourceKind
 
 const (
-	ResourceTexture       = internal.ResourceTexture
-	ResourceSampler       = internal.ResourceSampler
-	ResourceUniformBuffer = internal.ResourceUniformBuffer
-	ResourceStorageBuffer = internal.ResourceStorageBuffer
-	ResourceDepth         = internal.ResourceDepth
-	ResourceComparison    = internal.ResourceComparison
-	ResourceWritable      = internal.ResourceWritable
+	ResourceTexture       = shader.ResourceTexture
+	ResourceSampler       = shader.ResourceSampler
+	ResourceUniformBuffer = shader.ResourceUniformBuffer
+	ResourceStorageBuffer = shader.ResourceStorageBuffer
+	ResourceDepth         = shader.ResourceDepth
+	ResourceComparison    = shader.ResourceComparison
+	ResourceWritable      = shader.ResourceWritable
 )
 
 // ShaderResource is a reflected uniform-block, storage-buffer, texture, or
 // sampler binding. A uniform block carries its byte Size and its Members.
-type ShaderResource = internal.ShaderResource
+type ShaderResource = shader.ShaderResource
 
 // PipelineDesc describes a render pipeline to create. Bind group layouts are
 // derived by the backend from the shader's reflection; the vertex layout is

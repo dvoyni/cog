@@ -3,6 +3,8 @@ package internal
 import (
 	"encoding/binary"
 	"math"
+
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 )
 
 // translateDraw emits one draw into the currently open pass.
@@ -99,13 +101,13 @@ func (t *translator) translateDraw(f *frame, op *Op, pass PassDescr, firstErr *e
 // dropped either way: the caller returns before emitting anything, so
 // report-once-drop-always holds here the way it does for a failed pipeline.
 // The shader's label is spelled only for a report, never on the frames after it.
-func (t *translator) reportIndexLength(m *MeshDescr, shader ShaderDescr) error {
+func (t *translator) reportIndexLength(m *MeshDescr, shaderDescr shader.ShaderDescr) error {
 	key := indexLengthKey{length: MeshIndices(m).Size(), width: m.IndexWidth()}
 	if _, seen := t.badIndexLengths[key]; seen {
 		return nil
 	}
 	t.badIndexLengths[key] = struct{}{}
-	return ErrIndexBufferLength{Shader: ShaderLabel(shader), Length: key.length, Width: key.width.Bytes()}
+	return ErrIndexBufferLength{Shader: shader.ShaderLabel(shaderDescr), Length: key.length, Width: key.width.Bytes()}
 }
 
 // unsuppliedBuffer returns the first declared storage binding the draw does not
@@ -138,8 +140,8 @@ func unsuppliedBuffer(plan *parameterPlan, drawParams, materialParams []Paramete
 // binding misses it until someone fixes the material, and firstErr carries only
 // the frame's first error, so re-reporting would mask every later error in
 // every later frame.
-func (t *translator) reportUnsuppliedBuffer(shader ShaderID, label string, resource *plannedResource, unbaked bool) error {
-	key := unsuppliedBufferKey{shader: shader, parameter: resource.name}
+func (t *translator) reportUnsuppliedBuffer(shaderID ShaderID, label string, resource *plannedResource, unbaked bool) error {
+	key := unsuppliedBufferKey{shader: shaderID, parameter: resource.name}
 	if _, seen := t.unsuppliedBuffers[key]; seen {
 		return nil
 	}
@@ -178,7 +180,7 @@ func mismatchedTextureView(
 		if layers == 0 {
 			continue
 		}
-		if (layers > 1) != (resource.view == TextureView2DArray) {
+		if (layers > 1) != (resource.view == shader.TextureView2DArray) {
 			return resource, layers, true
 		}
 	}
@@ -190,9 +192,9 @@ func mismatchedTextureView(
 // frames after it. The draw is dropped either way, on reportUnsuppliedBuffer's
 // terms.
 func (t *translator) reportTextureView(
-	shader ShaderID, label string, resource *plannedResource, layers int,
+	shaderID ShaderID, label string, resource *plannedResource, layers int,
 ) error {
-	key := textureViewKey{shader: shader, parameter: resource.name}
+	key := textureViewKey{shader: shaderID, parameter: resource.name}
 	if _, seen := t.textureViewMismatches[key]; seen {
 		return nil
 	}
@@ -206,8 +208,8 @@ func (t *translator) reportTextureView(
 
 // textureViewName renders a declared dimension the way the shader spells it, so
 // the report can be matched against the source it names.
-func textureViewName(view TextureViewDimension) string {
-	if view == TextureView2DArray {
+func textureViewName(view shader.TextureViewDimension) string {
+	if view == shader.TextureView2DArray {
 		return "texture_2d_array"
 	}
 	return "texture_2d"
@@ -287,25 +289,25 @@ func (t *translator) emitResources(f *frame, drawParams, materialParams []Parame
 // material half of the shape hash from a material recorded for the frame
 // rather than hashing its names again.
 func (t *translator) preparePlanFor(
-	shader ShaderID, label string, layout ShaderLayout, material *MaterialDescr, draw []ParameterDescr,
+	shaderID ShaderID, label string, layout shader.ShaderLayout, material *MaterialDescr, draw []ParameterDescr,
 ) *parameterPlan {
 	state, recorded := MaterialShapeState(material)
 	if !recorded {
 		state = ParameterShapeState(material.Params())
 	}
-	return t.planForShape(shader, label, layout, material.Params(), draw, ContinueParameterShape(state, draw))
+	return t.planForShape(shaderID, label, layout, material.Params(), draw, ContinueParameterShape(state, draw))
 }
 
-func (t *translator) prepareParameterPlan(shader ShaderID, label string, layout ShaderLayout, material, draw []ParameterDescr) *parameterPlan {
-	return t.planForShape(shader, label, layout, material, draw, parameterShapeHash(material, draw))
+func (t *translator) prepareParameterPlan(shaderID ShaderID, label string, layout shader.ShaderLayout, material, draw []ParameterDescr) *parameterPlan {
+	return t.planForShape(shaderID, label, layout, material, draw, parameterShapeHash(material, draw))
 }
 
 // planForShape finds or builds the plan for one parameter shape, given its
 // hash.
 func (t *translator) planForShape(
-	shader ShaderID, label string, layout ShaderLayout, material, draw []ParameterDescr, hash uint64,
+	shaderID ShaderID, label string, layout shader.ShaderLayout, material, draw []ParameterDescr, hash uint64,
 ) *parameterPlan {
-	key := parameterPlanBucketKey{shader: shader, hash: hash}
+	key := parameterPlanBucketKey{shader: shaderID, hash: hash}
 	bucket := t.parameterPlans[key]
 	for i := range bucket {
 		if parameterShapeEqual(&bucket[i], material, draw) {
@@ -332,17 +334,17 @@ func (t *translator) planForShape(
 		resource := &layout.Resources[i]
 		kind, declared := plannedTexture, declaredTexture
 		switch resource.Kind.Base() {
-		case ResourceUniformBuffer:
+		case shader.ResourceUniformBuffer:
 			// The uniform block is packed above rather than bound by name.
 			continue
-		case ResourceSampler:
+		case shader.ResourceSampler:
 			ref := parameterRefFor(resource.Name, material, draw)
 			entry.plan.checkKind(label, resource.Name, ref, material, draw, declaredSampler)
 			entry.plan.samplers = append(entry.plan.samplers, plannedSampler{
 				group: resource.Group, binding: resource.Binding, param: ref,
 			})
 			continue
-		case ResourceStorageBuffer:
+		case shader.ResourceStorageBuffer:
 			kind, declared = plannedBuffer, declaredBuffer
 		}
 		ref := parameterRefFor(resource.Name, material, draw)

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -28,12 +30,12 @@ func TestShaderOverTheWebFloorIsReportedOnceAndStillRenders(t *testing.T) {
 	p := newPlugin()
 	var reported []error
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
-	layout := ShaderLayout{
-		Resources: []ShaderResource{{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64, Members: []StorageMember{{Name: "mvp", Offset: 0}}}},
+	layout := shader.ShaderLayout{
+		Resources: []shader.ShaderResource{{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64, Members: []shader.StorageMember{{Name: "mvp", Offset: 0}}}},
 	}
 	for i := range 9 {
-		layout.Resources = append(layout.Resources, ShaderResource{
-			Name: "records", Kind: ResourceStorageBuffer, Group: 1, Binding: i,
+		layout.Resources = append(layout.Resources, shader.ShaderResource{
+			Name: "records", Kind: shader.ResourceStorageBuffer, Group: 1, Binding: i,
 		})
 	}
 	backend := &fakeBackend{layout: &layout}
@@ -55,7 +57,7 @@ func TestShaderOverTheWebFloorIsReportedOnceAndStillRenders(t *testing.T) {
 	if backend.passDraws[0] != 1 {
 		t.Errorf("draws = %d, want the draw rendered anyway", backend.passDraws[0])
 	}
-	var exceeded ErrShaderExceedsWebLimits
+	var exceeded shader.ErrShaderExceedsWebLimits
 	found := 0
 	for _, err := range reported {
 		if errors.As(err, &exceeded) {
@@ -78,23 +80,23 @@ func TestCheckWebLimitsMeasuresAgainstTheFloorNotTheDevice(t *testing.T) {
 	// A desktop adapter reports far more than the web floor, so a check against
 	// the device would pass a shader no browser can run.
 	device := Limits{MaxStorageBuffersPerShaderStage: 200, MaxBindGroups: 8, MaxUniformBufferBindingSize: 1 << 20}
-	within := ShaderLayout{
-		Resources: []ShaderResource{
-			{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: 256},
-			{Kind: ResourceStorageBuffer, Group: 1},
+	within := shader.ShaderLayout{
+		Resources: []shader.ShaderResource{
+			{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 256},
+			{Kind: shader.ResourceStorageBuffer, Group: 1},
 		},
 	}
 	if err := checkWebLimits("canvas.sprite", within, device); err != nil {
 		t.Errorf("a shader within the floor was rejected: %v", err)
 	}
 
-	groups := ShaderLayout{Resources: []ShaderResource{{Group: 7}}}
+	groups := shader.ShaderLayout{Resources: []shader.ShaderResource{{Group: 7}}}
 	if err := checkWebLimits("scene.pbr", groups, device); err == nil {
 		t.Error("eight bind groups were accepted, want an error")
 	}
 
-	uniform := ShaderLayout{
-		Resources: []ShaderResource{{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: DefaultLimits().MaxUniformBufferBindingSize + 1}},
+	uniform := shader.ShaderLayout{
+		Resources: []shader.ShaderResource{{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: DefaultLimits().MaxUniformBufferBindingSize + 1}},
 	}
 	if err := checkWebLimits("scene.pbr", uniform, device); err == nil {
 		t.Error("an oversized uniform block was accepted, want an error")
@@ -104,10 +106,10 @@ func TestCheckWebLimitsMeasuresAgainstTheFloorNotTheDevice(t *testing.T) {
 func TestBufferRangeParamBindsItsOwnSlice(t *testing.T) {
 	p := newPlugin()
 	k := newTestKernel(t, p)
-	backend := &fakeBackend{layout: &ShaderLayout{
-		Resources: []ShaderResource{
-			{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64, Members: []StorageMember{{Name: "mvp", Offset: 0}}},
-			{Name: "records", Kind: ResourceStorageBuffer, Group: 1, Binding: 0},
+	backend := &fakeBackend{layout: &shader.ShaderLayout{
+		Resources: []shader.ShaderResource{
+			{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64, Members: []shader.StorageMember{{Name: "mvp", Offset: 0}}},
+			{Name: "records", Kind: shader.ResourceStorageBuffer, Group: 1, Binding: 0},
 		},
 	}}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -161,8 +163,8 @@ func TestUniformBlockOverTheSlotIsReportedOnceAndDropped(t *testing.T) {
 	p := newPlugin()
 	var reported []error
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
-	layout := ShaderLayout{
-		Resources: []ShaderResource{{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: uniformMax + 1, Members: []StorageMember{{Name: "mvp", Offset: 0}}}},
+	layout := shader.ShaderLayout{
+		Resources: []shader.ShaderResource{{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: uniformMax + 1, Members: []shader.StorageMember{{Name: "mvp", Offset: 0}}}},
 	}
 	backend := &fakeBackend{layout: &layout}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -182,7 +184,7 @@ func TestUniformBlockOverTheSlotIsReportedOnceAndDropped(t *testing.T) {
 	if len(backend.freedShaders) != 1 {
 		t.Errorf("freed shaders = %d, want the refused module freed", len(backend.freedShaders))
 	}
-	var tooLarge ErrUniformBlockTooLarge
+	var tooLarge shader.ErrUniformBlockTooLarge
 	found := 0
 	for _, err := range reported {
 		if errors.As(err, &tooLarge) {
@@ -201,8 +203,8 @@ func TestUniformBlockThatFillsTheSlotRenders(t *testing.T) {
 	p := newPlugin()
 	var reported []error
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
-	backend := &fakeBackend{layout: &ShaderLayout{
-		Resources: []ShaderResource{{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: uniformMax, Members: []StorageMember{{Name: "mvp", Offset: 0}}}},
+	backend := &fakeBackend{layout: &shader.ShaderLayout{
+		Resources: []shader.ShaderResource{{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: uniformMax, Members: []shader.StorageMember{{Name: "mvp", Offset: 0}}}},
 	}}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
@@ -214,7 +216,7 @@ func TestUniformBlockThatFillsTheSlotRenders(t *testing.T) {
 	if backend.passDraws[0] != 1 {
 		t.Errorf("draws = %d, want a 256-byte block rendered", backend.passDraws[0])
 	}
-	var tooLarge ErrUniformBlockTooLarge
+	var tooLarge shader.ErrUniformBlockTooLarge
 	for _, err := range reported {
 		if errors.As(err, &tooLarge) {
 			t.Errorf("a 256-byte block was reported: %v", err)

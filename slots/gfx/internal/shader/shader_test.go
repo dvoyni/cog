@@ -1,4 +1,4 @@
-package internal
+package shader
 
 import (
 	"strings"
@@ -136,28 +136,6 @@ func TestShaderLabelCarriesTheSupply(t *testing.T) {
 		if got := ShaderLabel(test.descr); got != test.want {
 			t.Errorf("%s: shaderLabel = %q, want %q", name, got, test.want)
 		}
-	}
-}
-
-// Two materials differing only in their defines must not merge into one batch,
-// because one of them would then draw the other's module.
-func TestFingerprintDistinguishesTheSupply(t *testing.T) {
-	base := Material(ShaderWithResource("s.wgsl"), FloatParam("roughness", 0.5))
-	variants := map[string]MaterialDescr{
-		"a define":      Material(ShaderWithResource("s.wgsl", ShaderDefine("SKIN")), FloatParam("roughness", 0.5)),
-		"a const":       Material(ShaderWithResource("s.wgsl", ShaderConst("N", "16")), FloatParam("roughness", 0.5)),
-		"a const value": Material(ShaderWithResource("s.wgsl", ShaderConst("N", "4")), FloatParam("roughness", 0.5)),
-		"a second define": Material(ShaderWithResource("s.wgsl", ShaderDefine("SKIN"), ShaderDefine("MORPH")),
-			FloatParam("roughness", 0.5)),
-	}
-	seen := map[uint64]string{base.Fingerprint(): "no supply"}
-	for name, variant := range variants {
-		fingerprint := variant.Fingerprint()
-		if other, ok := seen[fingerprint]; ok {
-			t.Errorf("%s fingerprints the same as %s", name, other)
-			continue
-		}
-		seen[fingerprint] = name
 	}
 }
 

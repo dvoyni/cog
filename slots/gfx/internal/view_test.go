@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -153,7 +155,7 @@ func TestABufferParameterCarriesTheRangeItBinds(t *testing.T) {
 
 func TestAMaterialViewNamesItsShaderVariantAndState(t *testing.T) {
 	material := MaterialWithState(
-		ShaderWithResource("shaders/pbr.wgsl", ShaderDefine("SKINNED"), ShaderConst("LIGHTS", "4")),
+		shader.ShaderWithResource("shaders/pbr.wgsl", shader.ShaderDefine("SKINNED"), shader.ShaderConst("LIGHTS", "4")),
 		StateOpaque3D(),
 		ColorParam("tint", m.White),
 	)
@@ -172,7 +174,7 @@ func TestAMaterialViewNamesItsShaderVariantAndState(t *testing.T) {
 	if len(view.Parameters) != 1 || view.Parameters[0].Name != "tint" {
 		t.Errorf("parameters = %+v, want the material's own", view.Parameters)
 	}
-	inline := MaterialViewOf(Material(ShaderWithText("// wgsl")))
+	inline := MaterialViewOf(Material(shader.ShaderWithText("// wgsl")))
 	if !inline.Shader.Inline || inline.Shader.Path != "" {
 		t.Errorf("inline shader = %+v, want no path and the inline flag", inline.Shader)
 	}

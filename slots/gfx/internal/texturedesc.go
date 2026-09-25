@@ -22,14 +22,6 @@ type TextureDesc struct {
 	Label         string
 }
 
-// TextureViewDimension selects the texture view expected by a shader binding.
-type TextureViewDimension uint8
-
-const (
-	TextureView2D TextureViewDimension = iota
-	TextureView2DArray
-)
-
 // TextureUsage names the role a texture is in as far as the GPU's memory
 // pipeline is concerned. It is deliberately just the roles gfx can put a
 // texture in, not a mirror of the backend's usage flags.

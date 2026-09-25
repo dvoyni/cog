@@ -88,12 +88,14 @@ func forwarderViolations(pkg *packages.Package, root place, m module) []violatio
 
 // forwardTarget reports whether a package is one a root's forwarders and
 // inline anchors may reach into: its own internal/types, and for an
-// alias-index root its own internal/ as well.
+// alias-index root its own internal/ and every package under it as well - the
+// same set its aliases may name.
 func forwardTarget(root place, m module) func(path string) bool {
 	typesPath := m.path + "/" + root.plugin + "/internal/types"
 	internalPath := m.path + "/" + root.plugin + "/internal"
 	return func(path string) bool {
-		return path == typesPath || aliasIndexRoots[root.plugin] && path == internalPath
+		return path == typesPath || aliasIndexRoots[root.plugin] &&
+			(path == internalPath || strings.HasPrefix(path, internalPath+"/"))
 	}
 }
 
@@ -185,8 +187,8 @@ func slotMayName(rootPath, typesPath string, m module) func(*types.Package) bool
 	return func(declaring *types.Package) bool {
 		path := declaring.Path()
 		first, _, _ := strings.Cut(path, "/")
-		return path == rootPath || path == typesPath || strings.HasPrefix(path, typesPath+"/") ||
-			path == strings.TrimSuffix(typesPath, "/types") ||
+		internalPath := strings.TrimSuffix(typesPath, "/types")
+		return path == rootPath || path == internalPath || strings.HasPrefix(path, internalPath+"/") ||
 			path == m.path+"/kernel" || strings.HasPrefix(path, m.path+"/libs/") ||
 			!strings.Contains(first, ".")
 	}

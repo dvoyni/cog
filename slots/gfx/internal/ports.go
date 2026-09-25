@@ -1,6 +1,9 @@
 package internal
 
-import "github.com/dvoyni/cog/kernel"
+import (
+	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+)
 
 // Backend is the low-level realization interface: a vendor-neutral,
 // "wgpu-shaped" API that a driver (e.g. gogpu) implements. The gfx plugin holds
@@ -16,10 +19,10 @@ type Backend interface {
 	NewSampler(SamplerDesc) (SamplerID, error)
 	FreeSampler(id SamplerID)
 
-	NewShader(ShaderDesc) (ShaderID, error)
+	NewShader(shader.ShaderDesc) (ShaderID, error)
 	FreeShader(id ShaderID)
 	// ShaderLayout returns the reflected uniform parameter layout of a shader.
-	ShaderLayout(id ShaderID) ShaderLayout
+	ShaderLayout(id ShaderID) shader.ShaderLayout
 
 	NewPipeline(PipelineDesc) (PipelineID, error)
 	FreePipeline(id PipelineID)

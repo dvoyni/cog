@@ -199,6 +199,46 @@ func TestTiers_AnAliasIndexForwarderIntoItsInternalPasses(t *testing.T) {
 	}
 }
 
+// A separable part of internal/ may be its own package under it, and the root
+// aliases and forwards into it exactly as it does into internal/.
+func TestTiers_AnAliasIndexRootReachingAnInternalSubPackagePasses(t *testing.T) {
+	violations := aliasViolationsWith(t, map[string]string{
+		"bundles/a/internal/shape/shape.go": `package shape
+
+type Circle struct{ Radius float64 }
+
+func NewCircle(radius float64) Circle { return Circle{Radius: radius} }
+`,
+		"bundles/a/types.go": `package a
+
+import (
+	"fixture.test/cog/bundles/a/internal/shape"
+	"fixture.test/cog/bundles/a/internal/types"
+)
+
+type Layer = types.Layer
+
+const LayersAll = types.LayersAll
+
+type Circle = shape.Circle
+`,
+		"bundles/a/utils.go": `package a
+
+import (
+	"fixture.test/cog/bundles/a/internal"
+	"fixture.test/cog/bundles/a/internal/shape"
+)
+
+func NewBody(mass float64) Body { return internal.NewBody(mass) }
+
+func NewCircle(radius float64) Circle { return shape.NewCircle(radius) }
+`,
+	})
+	if len(violations) != 0 {
+		t.Fatalf("violations:\n%s", joinViolations(violations))
+	}
+}
+
 // internal/types is for plain data: a layer mask and its constant pass, an
 // error's Error method passes, and a function fails.
 func TestTiers_AnAliasIndexTypesPackageHoldingLogicFails(t *testing.T) {

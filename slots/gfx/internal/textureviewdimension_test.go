@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -11,12 +13,12 @@ import (
 // arrayTextureLayout declares the shape canvas' sprite path declares: a sampler
 // and a texture binding at texture_2d_array. It is the only non-2D texture
 // binding shape the engine has.
-func arrayTextureLayout() ShaderLayout {
-	return ShaderLayout{
-		Resources: []ShaderResource{
-			{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: 80, Members: []StorageMember{{Name: "mvp", Offset: 0}}},
-			{Name: "canvasSampler", Kind: ResourceSampler, Group: 1, Binding: 0},
-			{Name: "canvasTexture", TextureView: TextureView2DArray, Group: 1, Binding: 1},
+func arrayTextureLayout() shader.ShaderLayout {
+	return shader.ShaderLayout{
+		Resources: []shader.ShaderResource{
+			{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 80, Members: []shader.StorageMember{{Name: "mvp", Offset: 0}}},
+			{Name: "canvasSampler", Kind: shader.ResourceSampler, Group: 1, Binding: 0},
+			{Name: "canvasTexture", TextureView: shader.TextureView2DArray, Group: 1, Binding: 1},
 		},
 	}
 }

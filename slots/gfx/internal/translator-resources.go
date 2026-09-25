@@ -3,6 +3,8 @@ package internal
 import (
 	"slices"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+
 	"github.com/dvoyni/cog/libs/assets"
 )
 
@@ -33,9 +35,9 @@ func (t *translator) textureUserData(f *frame) textureUserData {
 // ensureShader resolves one material's shader to the module id its draw is
 // encoded against, to the label its reports name it by, and to the error that
 // module has to say for itself.
-func (t *translator) ensureShader(f *frame, descr ShaderDescr) (ShaderID, string, error) {
+func (t *translator) ensureShader(f *frame, descr shader.ShaderDescr) (ShaderID, string, error) {
 	cached := t.shaders.Get(
-		f.k, assets.Descr[ShaderDescrParams](descr), f.fsys, t.shaderUserData(f, descr.Path()),
+		f.k, assets.Descr[shader.ShaderDescrParams](descr), f.fsys, t.shaderUserData(f, descr.Path()),
 	)
 	return cached.id, cached.label, cached.report()
 }
@@ -49,7 +51,7 @@ func (t *translator) shaderUserData(f *frame, root string) shaderUserData {
 }
 
 // shaderLayout returns the backend's reflected layout for a shader, cached by id.
-func (t *translator) shaderLayout(backend Backend, id ShaderID) ShaderLayout {
+func (t *translator) shaderLayout(backend Backend, id ShaderID) shader.ShaderLayout {
 	if l, ok := t.layouts[id]; ok {
 		return l
 	}
@@ -67,7 +69,7 @@ func (t *translator) shaderLayout(backend Backend, id ShaderID) ShaderLayout {
 // returns zero and no error, and the caller drops the draw on the zero id
 // exactly as it did before.
 func (t *translator) ensurePipeline(
-	backend Backend, shader ShaderID, label string, m *MeshDescr, state MaterialState, pass PassDescr,
+	backend Backend, shaderID ShaderID, label string, m *MeshDescr, state MaterialState, pass PassDescr,
 ) (PipelineID, error) {
 	stride := MeshStride(m)
 	layout, ok := VertexLayoutKeyOf(MeshLayout(m))
@@ -87,7 +89,7 @@ func (t *translator) ensurePipeline(
 	noDepth := pass.Depth.IsNone()
 	const depthFormat = FormatDepth32F
 	k := pipelineKey{
-		shader: shader, topology: m.Topology(), state: state,
+		shader: shaderID, topology: m.Topology(), state: state,
 		colorFormat: colorFormat, depthFormat: depthFormat, noColor: noColor, noDepth: noDepth, layout: layout,
 		stripIndex: stripIndexKeyOf(m.Topology(), m.IndexWidth()),
 	}
@@ -99,7 +101,7 @@ func (t *translator) ensurePipeline(
 	// validation of any kind, the software rasterizer keeps an unsupplied
 	// input's zero value, and WebGPU itself fills the components a format does
 	// not supply with (0, 0, 0, 1).
-	if err := CheckVertexInterface(label, t.shaderLayout(backend, shader), MeshLayout(m)); err != nil {
+	if err := CheckVertexInterface(label, t.shaderLayout(backend, shaderID), MeshLayout(m)); err != nil {
 		t.pipelines[k] = 0
 		return 0, err
 	}
@@ -108,7 +110,7 @@ func (t *translator) ensurePipeline(
 		attrs[i] = VertexAttribute{Offset: VertexAttrOffset(&(MeshLayout(m)[i])), Type: VertexAttrTyp(&(MeshLayout(m)[i])), Location: i}
 	}
 	id, err := backend.NewPipeline(PipelineDesc{
-		Shader:        shader,
+		Shader:        shaderID,
 		Topology:      m.Topology(),
 		State:         state,
 		ColorFormat:   colorFormat,
@@ -191,7 +193,7 @@ func (t *translator) releaseCachedResource(f *frame, path string) {
 	// names. The decision is over the value, and the value already holds the
 	// answer - which is what FreeWhere is, and why gfx builds no reverse
 	// path-to-modules index to hold what the include set holds already.
-	t.shaders.FreeWhere(f.k, t.shaderUserData(f, ""), func(_ assets.Descr[ShaderDescrParams], value *shader) bool {
+	t.shaders.FreeWhere(f.k, t.shaderUserData(f, ""), func(_ assets.Descr[shader.ShaderDescrParams], value *loadedShader) bool {
 		return slices.Contains(value.sources, path)
 	})
 }

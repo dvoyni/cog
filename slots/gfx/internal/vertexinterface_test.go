@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -40,21 +42,21 @@ var (
 
 // sceneVertexIn is what SceneVertexIn declares under SCENE_SKIN; the no-skin
 // variant is its first six.
-var sceneVertexIn = []ShaderVertexInput{
-	{Name: "position", Location: 0, Kind: VertexScalarFloat, Count: 3},
-	{Name: "normal", Location: 1, Kind: VertexScalarFloat, Count: 2},
-	{Name: "tangent", Location: 2, Kind: VertexScalarUint, Count: 1},
-	{Name: "uv0", Location: 3, Kind: VertexScalarFloat, Count: 2},
-	{Name: "uv1", Location: 4, Kind: VertexScalarFloat, Count: 2},
-	{Name: "color", Location: 5, Kind: VertexScalarFloat, Count: 4},
-	{Name: "joints", Location: 6, Kind: VertexScalarUint, Count: 4},
-	{Name: "weights", Location: 7, Kind: VertexScalarFloat, Count: 4},
+var sceneVertexIn = []shader.ShaderVertexInput{
+	{Name: "position", Location: 0, Kind: shader.VertexScalarFloat, Count: 3},
+	{Name: "normal", Location: 1, Kind: shader.VertexScalarFloat, Count: 2},
+	{Name: "tangent", Location: 2, Kind: shader.VertexScalarUint, Count: 1},
+	{Name: "uv0", Location: 3, Kind: shader.VertexScalarFloat, Count: 2},
+	{Name: "uv1", Location: 4, Kind: shader.VertexScalarFloat, Count: 2},
+	{Name: "color", Location: 5, Kind: shader.VertexScalarFloat, Count: 4},
+	{Name: "joints", Location: 6, Kind: shader.VertexScalarUint, Count: 4},
+	{Name: "weights", Location: 7, Kind: shader.VertexScalarFloat, Count: 4},
 }
 
 func TestVertexInterfaceAcceptsEveryBundledShaderAndLayoutPair(t *testing.T) {
 	for _, pair := range []struct {
 		name   string
-		inputs []ShaderVertexInput
+		inputs []shader.ShaderVertexInput
 		attrs  []VertexAttr
 	}{
 		{"scene skinned", sceneVertexIn, sceneSkinnedLayout},
@@ -64,17 +66,17 @@ func TestVertexInterfaceAcceptsEveryBundledShaderAndLayoutPair(t *testing.T) {
 		// against eight attributes supplied, which is the direction that has to
 		// stay legal.
 		{"scene standard variant over a skinned mesh", sceneVertexIn[:6], sceneSkinnedLayout},
-		{"canvas triangles", []ShaderVertexInput{
-			{Name: "position", Location: 0, Kind: VertexScalarFloat, Count: 2},
-			{Name: "color", Location: 1, Kind: VertexScalarFloat, Count: 4},
-			{Name: "uv", Location: 2, Kind: VertexScalarFloat, Count: 2},
+		{"canvas triangles", []shader.ShaderVertexInput{
+			{Name: "position", Location: 0, Kind: shader.VertexScalarFloat, Count: 2},
+			{Name: "color", Location: 1, Kind: shader.VertexScalarFloat, Count: 4},
+			{Name: "uv", Location: 2, Kind: shader.VertexScalarFloat, Count: 2},
 		}, canvasTriangleLayout},
-		{"canvas quad", []ShaderVertexInput{
-			{Name: "quad", Location: 0, Kind: VertexScalarFloat, Count: 2},
+		{"canvas quad", []shader.ShaderVertexInput{
+			{Name: "quad", Location: 0, Kind: shader.VertexScalarFloat, Count: 2},
 		}, canvasQuadLayout},
 	} {
 		t.Run(pair.name, func(t *testing.T) {
-			if err := CheckVertexInterface("bundled", ShaderLayout{VertexInputs: pair.inputs}, pair.attrs); err != nil {
+			if err := CheckVertexInterface("bundled", shader.ShaderLayout{VertexInputs: pair.inputs}, pair.attrs); err != nil {
 				t.Fatalf("the bundled pair is refused: %v", err)
 			}
 		})
@@ -82,12 +84,12 @@ func TestVertexInterfaceAcceptsEveryBundledShaderAndLayoutPair(t *testing.T) {
 }
 
 func TestVertexInterfaceReportsAnInputNoAttributeSupplies(t *testing.T) {
-	layout := ShaderLayout{VertexInputs: []ShaderVertexInput{
-		{Name: "position", Location: 0, Kind: VertexScalarFloat, Count: 3},
-		{Name: "uv0", Location: 3, Kind: VertexScalarFloat, Count: 2},
+	layout := shader.ShaderLayout{VertexInputs: []shader.ShaderVertexInput{
+		{Name: "position", Location: 0, Kind: shader.VertexScalarFloat, Count: 3},
+		{Name: "uv0", Location: 3, Kind: shader.VertexScalarFloat, Count: 2},
 	}}
 	err := CheckVertexInterface("mesh.wgsl", layout, []VertexAttr{Attr(0, Float32x3)})
-	var unsupplied ErrVertexInputUnsupplied
+	var unsupplied shader.ErrVertexInputUnsupplied
 	if !errors.As(err, &unsupplied) {
 		t.Fatalf("err = %v, want ErrVertexInputUnsupplied", err)
 	}
@@ -100,11 +102,11 @@ func TestVertexInterfaceReportsAnInputNoAttributeSupplies(t *testing.T) {
 // read over a two-component unorm, which WebGPU fills out with (x, y, 0) and
 // shades as a plausible direction lying in the XY plane.
 func TestVertexInterfaceReportsAVec3OverATwoComponentUnorm(t *testing.T) {
-	layout := ShaderLayout{VertexInputs: []ShaderVertexInput{
-		{Name: "normal", Location: 1, Kind: VertexScalarFloat, Count: 3},
+	layout := shader.ShaderLayout{VertexInputs: []shader.ShaderVertexInput{
+		{Name: "normal", Location: 1, Kind: shader.VertexScalarFloat, Count: 3},
 	}}
 	err := CheckVertexInterface("mesh.wgsl", layout, []VertexAttr{Attr(0, Float32x3), Attr(12, Unorm16x2)})
-	var mismatch ErrVertexInputMismatch
+	var mismatch shader.ErrVertexInputMismatch
 	if !errors.As(err, &mismatch) {
 		t.Fatalf("err = %v, want ErrVertexInputMismatch", err)
 	}
@@ -119,18 +121,18 @@ func TestVertexInterfaceReportsAVec3OverATwoComponentUnorm(t *testing.T) {
 func TestVertexInterfaceRefusesTheWideningWebGpuAllows(t *testing.T) {
 	for _, c := range []struct {
 		name     string
-		declared ShaderVertexInput
+		declared shader.ShaderVertexInput
 		supplied VertexAttr
 	}{
-		{"narrower shader", ShaderVertexInput{Location: 0, Kind: VertexScalarFloat, Count: 2}, Attr(0, Float32x4)},
-		{"wider shader", ShaderVertexInput{Location: 0, Kind: VertexScalarFloat, Count: 4}, Attr(0, Float32x2)},
-		{"unsigned over signed", ShaderVertexInput{Location: 0, Kind: VertexScalarUint, Count: 4}, Attr(0, Sint16x4)},
-		{"float over integer", ShaderVertexInput{Location: 0, Kind: VertexScalarFloat, Count: 4}, Attr(0, Uint8x4)},
+		{"narrower shader", shader.ShaderVertexInput{Location: 0, Kind: shader.VertexScalarFloat, Count: 2}, Attr(0, Float32x4)},
+		{"wider shader", shader.ShaderVertexInput{Location: 0, Kind: shader.VertexScalarFloat, Count: 4}, Attr(0, Float32x2)},
+		{"unsigned over signed", shader.ShaderVertexInput{Location: 0, Kind: shader.VertexScalarUint, Count: 4}, Attr(0, Sint16x4)},
+		{"float over integer", shader.ShaderVertexInput{Location: 0, Kind: shader.VertexScalarFloat, Count: 4}, Attr(0, Uint8x4)},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			layout := ShaderLayout{VertexInputs: []ShaderVertexInput{c.declared}}
+			layout := shader.ShaderLayout{VertexInputs: []shader.ShaderVertexInput{c.declared}}
 			err := CheckVertexInterface("mesh.wgsl", layout, []VertexAttr{c.supplied, Attr(16, Float32x4)})
-			var mismatch ErrVertexInputMismatch
+			var mismatch shader.ErrVertexInputMismatch
 			if !errors.As(err, &mismatch) {
 				t.Fatalf("err = %v, want ErrVertexInputMismatch", err)
 			}
@@ -142,8 +144,8 @@ func TestVertexInterfaceRefusesTheWideningWebGpuAllows(t *testing.T) {
 // naming the stored bytes is not what the rule compares.
 func TestVertexInterfaceAcceptsAnyFormatThatDecodesToTheDeclaredType(t *testing.T) {
 	for _, typ := range []VertexType{Float32x4, Float16x4, Unorm8x4, Snorm16x4, Unorm1010102} {
-		layout := ShaderLayout{VertexInputs: []ShaderVertexInput{
-			{Name: "color", Location: 0, Kind: VertexScalarFloat, Count: 4},
+		layout := shader.ShaderLayout{VertexInputs: []shader.ShaderVertexInput{
+			{Name: "color", Location: 0, Kind: shader.VertexScalarFloat, Count: 4},
 		}}
 		if err := CheckVertexInterface("mesh.wgsl", layout, []VertexAttr{Attr(0, typ)}); err != nil {
 			t.Fatalf("%v over vec4<f32> is refused: %v", typ, err)
@@ -155,7 +157,7 @@ func TestVertexInterfaceReportsAStrideThatIsNotAMultipleOfFour(t *testing.T) {
 	// 30 bytes: legal on Vulkan, Apple-silicon Metal and D3D12, refused by
 	// WebGPU, GLES and older Apple GPUs.
 	attrs := []VertexAttr{Attr(0, Float32x3), Attr(12, Unorm16x2), Attr(16, Uint8x2), Attr(28, Uint8x2)}
-	err := CheckVertexInterface("mesh.wgsl", ShaderLayout{}, attrs)
+	err := CheckVertexInterface("mesh.wgsl", shader.ShaderLayout{}, attrs)
 	var stride ErrVertexStrideAlignment
 	if !errors.As(err, &stride) {
 		t.Fatalf("err = %v, want ErrVertexStrideAlignment", err)
@@ -168,7 +170,7 @@ func TestVertexInterfaceReportsAStrideThatIsNotAMultipleOfFour(t *testing.T) {
 // A layout with no attributes has nothing to be misaligned about; the draw is
 // already dropped upstream on a zero stride.
 func TestVertexInterfaceAcceptsAnEmptyLayout(t *testing.T) {
-	if err := CheckVertexInterface("mesh.wgsl", ShaderLayout{}, nil); err != nil {
+	if err := CheckVertexInterface("mesh.wgsl", shader.ShaderLayout{}, nil); err != nil {
 		t.Fatalf("an empty layout is refused: %v", err)
 	}
 }
@@ -195,14 +197,14 @@ func pipelineErrFrames(t *testing.T, backend *fakeBackend, mesh MeshDescr, frame
 // oneInputBackend reflects a single vertex input over the fake backend's
 // standard uniform layout, so a mesh can be paired against a shader that
 // declares exactly one thing.
-func oneInputBackend(input ShaderVertexInput) *fakeBackend {
+func oneInputBackend(input shader.ShaderVertexInput) *fakeBackend {
 	layout := (&fakeBackend{}).ShaderLayout(0)
-	layout.VertexInputs = []ShaderVertexInput{input}
+	layout.VertexInputs = []shader.ShaderVertexInput{input}
 	return &fakeBackend{layout: &layout}
 }
 
 func TestADrawWhoseLayoutMissesAShaderInputIsDroppedAndReportedOnce(t *testing.T) {
-	backend := oneInputBackend(ShaderVertexInput{Name: "uv", Location: 2, Kind: VertexScalarFloat, Count: 2})
+	backend := oneInputBackend(shader.ShaderVertexInput{Name: "uv", Location: 2, Kind: shader.VertexScalarFloat, Count: 2})
 	mesh := Mesh(BufferWithBytes(make([]byte, 3*28), true), TopologyTriangleList,
 		Attr(0, Float32x3), Attr(12, Float32x4))
 
@@ -211,7 +213,7 @@ func TestADrawWhoseLayoutMissesAShaderInputIsDroppedAndReportedOnce(t *testing.T
 	if len(reported) != 1 {
 		t.Fatalf("three frames reported %d errors, want 1: %v", len(reported), reported)
 	}
-	var unsupplied ErrVertexInputUnsupplied
+	var unsupplied shader.ErrVertexInputUnsupplied
 	if !errors.As(reported[0], &unsupplied) {
 		t.Fatalf("reported %v, want ErrVertexInputUnsupplied", reported[0])
 	}
@@ -227,7 +229,7 @@ func TestADrawWhoseLayoutMissesAShaderInputIsDroppedAndReportedOnce(t *testing.T
 // two-component unorm. WebGPU would fill the third component with zero and
 // shade it.
 func TestADrawWhoseLayoutSuppliesTheWrongTypeIsDroppedAndReported(t *testing.T) {
-	backend := oneInputBackend(ShaderVertexInput{Name: "normal", Location: 1, Kind: VertexScalarFloat, Count: 3})
+	backend := oneInputBackend(shader.ShaderVertexInput{Name: "normal", Location: 1, Kind: shader.VertexScalarFloat, Count: 3})
 	mesh := Mesh(BufferWithBytes(make([]byte, 3*16), true), TopologyTriangleList,
 		Attr(0, Float32x3), Attr(12, Unorm16x2))
 
@@ -236,7 +238,7 @@ func TestADrawWhoseLayoutSuppliesTheWrongTypeIsDroppedAndReported(t *testing.T) 
 	if len(reported) != 1 {
 		t.Fatalf("two frames reported %d errors, want 1: %v", len(reported), reported)
 	}
-	var mismatch ErrVertexInputMismatch
+	var mismatch shader.ErrVertexInputMismatch
 	if !errors.As(reported[0], &mismatch) {
 		t.Fatalf("reported %v, want ErrVertexInputMismatch", reported[0])
 	}
@@ -252,7 +254,7 @@ func TestADrawWhoseLayoutSuppliesTheWrongTypeIsDroppedAndReported(t *testing.T) 
 // no-skin variant declares six of the eight attributes its mesh carries - and
 // it draws.
 func TestADrawWhoseLayoutSuppliesMoreThanTheShaderReadsStillDraws(t *testing.T) {
-	backend := oneInputBackend(ShaderVertexInput{Name: "position", Location: 0, Kind: VertexScalarFloat, Count: 3})
+	backend := oneInputBackend(shader.ShaderVertexInput{Name: "position", Location: 0, Kind: shader.VertexScalarFloat, Count: 3})
 	mesh := Mesh(BufferWithBytes(make([]byte, 3*28), true), TopologyTriangleList,
 		Attr(0, Float32x3), Attr(12, Float32x4))
 
@@ -267,7 +269,7 @@ func TestADrawWhoseLayoutSuppliesMoreThanTheShaderReadsStillDraws(t *testing.T) 
 }
 
 func TestADrawWhoseStrideIsNotAMultipleOfFourIsDroppedAndReported(t *testing.T) {
-	backend := oneInputBackend(ShaderVertexInput{Name: "position", Location: 0, Kind: VertexScalarFloat, Count: 3})
+	backend := oneInputBackend(shader.ShaderVertexInput{Name: "position", Location: 0, Kind: shader.VertexScalarFloat, Count: 3})
 	// 12 + 12 + 4 + 2 = 30 bytes.
 	mesh := Mesh(BufferWithBytes(make([]byte, 3*30), true), TopologyTriangleList,
 		Attr(0, Float32x3), Attr(12, Float32x3), Attr(24, Unorm16x2), Attr(28, Uint8x2))

@@ -6,8 +6,6 @@ import (
 	"image/draw"
 	_ "image/jpeg"
 	_ "image/png"
-	"io"
-	"io/fs"
 
 	"github.com/dvoyni/cog/libs/assets"
 )
@@ -25,15 +23,4 @@ func DecodeTexture(data assets.Blob) (width, height int, pixels []byte, ok bool)
 	rgba := image.NewNRGBA(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
 	draw.Draw(rgba, rgba.Bounds(), decoded, bounds.Min, draw.Src)
 	return rgba.Bounds().Dx(), rgba.Bounds().Dy(), rgba.Pix, true
-}
-
-func loadShaderResource(filesystem fs.FS, name string) (code []byte, ok bool) {
-	file, err := filesystem.Open(name)
-	if err != nil {
-		return nil, false
-	}
-	defer file.Close()
-
-	code, err = io.ReadAll(file)
-	return code, err == nil
 }

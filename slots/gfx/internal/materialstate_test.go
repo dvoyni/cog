@@ -3,6 +3,8 @@ package internal
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -49,7 +51,7 @@ func TestPipelineDescCarriesStateAndTargetFormats(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w := recordList(t, k)
-	w.Draw(triangle(), MaterialWithState(ShaderWithText("//test"), StateOpaque3D()), MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), MaterialWithState(shader.ShaderWithText("//test"), StateOpaque3D()), MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -74,10 +76,10 @@ func TestPipelineCacheDistinguishesDepthState(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	shader := ShaderWithText("//test")
-	writing := MaterialWithState(shader, MaterialState{DepthCompare: CompareLess, DepthWrite: true})
+	shaderDescr := shader.ShaderWithText("//test")
+	writing := MaterialWithState(shaderDescr, MaterialState{DepthCompare: CompareLess, DepthWrite: true})
 	// Same compare, no write: the transparent pass, and a different pipeline.
-	reading := MaterialWithState(shader, MaterialState{DepthCompare: CompareLess})
+	reading := MaterialWithState(shaderDescr, MaterialState{DepthCompare: CompareLess})
 
 	w := recordList(t, k)
 	w.Draw(triangle(), writing, MatParam("mvp", m.NewMat4()))
