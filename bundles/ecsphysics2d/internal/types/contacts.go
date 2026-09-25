@@ -89,6 +89,13 @@ type Contacts struct {
 	stops     []stop
 	stopWorld []m.Vec2d
 	mover     []m.Vec2d
+	// firsts, meetings and partners are the path pass's own scratch while it
+	// finds the stops: each fast solid Body's earliest, the pairs of marked
+	// Bodies that meet along their relative motion, and the marked Bodies one
+	// Body's path box meets.
+	firsts   []firstStop
+	meetings []meeting
+	partners []partner
 
 	// awakeSlots is where the Body index's sleepers' grid starts in the
 	// solver's slot numbering, as Detect saw it: a party at or past it is a

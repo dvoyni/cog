@@ -99,8 +99,8 @@ func (c *Contacts) bytes() uintptr {
 // largest BodyIndex slot detection ever saw, and nothing else ever cuts it.
 //
 // The path pass's scratch goes with it: the stopped Bodies' copies' world
-// caches and the run a fast Body's Shape is Probed in, which only detection
-// reads. The run of stops is the one piece clipped rather than released,
+// caches, the run a fast Body's Shape is Probed in, and the earliest stops,
+// meetings and partners it finds, which only detection reads. The run of stops is the one piece clipped rather than released,
 // because Solve reads it after Detect within the same tick.
 //
 // The previous tick's step stays, because it is not scratch: the warm start
@@ -109,6 +109,7 @@ func (c *Contacts) bytes() uintptr {
 func (c *Contacts) releaseScratch() {
 	c.probes, c.probeSlots = nil, nil
 	c.stopWorld, c.mover = nil, nil
+	c.firsts, c.meetings, c.partners = nil, nil, nil
 	c.stops = clip(c.stops)
 	s := &c.solver
 	s.solved, s.slotDense, s.rows = nil, nil, nil
@@ -125,6 +126,9 @@ func (c *Contacts) scratchBytes() uintptr {
 		uintptr(cap(c.probeSlots))*unsafe.Sizeof(int32(0)) +
 		uintptr(cap(c.stops))*unsafe.Sizeof(stop{}) +
 		uintptr(cap(c.stopWorld)+cap(c.mover))*unsafe.Sizeof(m.Vec2d{}) +
+		uintptr(cap(c.firsts))*unsafe.Sizeof(firstStop{}) +
+		uintptr(cap(c.meetings))*unsafe.Sizeof(meeting{}) +
+		uintptr(cap(c.partners))*unsafe.Sizeof(partner{}) +
 		uintptr(cap(s.solved)+cap(s.slotDense))*unsafe.Sizeof(int32(0)) +
 		uintptr(cap(s.rows))*unsafe.Sizeof(solverBody{}) +
 		uintptr(cap(s.joints.rows))*unsafe.Sizeof(jointRow{}) +
