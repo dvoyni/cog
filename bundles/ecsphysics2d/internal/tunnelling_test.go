@@ -8,8 +8,6 @@ import (
 	"unsafe"
 
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d/internal/types"
 	"github.com/dvoyni/cog/kernel"
 
 	"github.com/dvoyni/cog/libs/m"
@@ -44,7 +42,7 @@ const targetX = 1.0
 // tunnelMover is one of the three solid Shapes thrown.
 type tunnelMover struct {
 	name  string
-	shape ecsphysics2d.Shape
+	shape Shape
 }
 
 // tunnelTarget is one of the three things they are thrown at.
@@ -65,16 +63,16 @@ type tunnelTarget struct {
 // face first, 0.2 m thick along its path.
 func tunnelMovers() []tunnelMover {
 	return []tunnelMover{
-		{"a solid circle 0.4 m across", ecsphysics2d.NewCircleShape(0.2, m.Vec2d{})},
-		{"a solid box 0.4 m square", ecsphysics2d.NewBoxShape(0.4, 0.4, 0)},
-		{"a 4 m × 0.2 m plank", ecsphysics2d.NewBoxShape(0.2, 4, 0)},
+		{"a solid circle 0.4 m across", NewCircleShape(0.2, m.Vec2d{})},
+		{"a solid box 0.4 m square", NewBoxShape(0.4, 0.4, 0)},
+		{"a 4 m × 0.2 m plank", NewBoxShape(0.2, 4, 0)},
 	}
 }
 
 // wallShape is the swept Sensor test's wall: a segment 4 m tall of radius 0.2,
 // 0.4 m thick, standing at the target's place.
-func wallShape() ecsphysics2d.Shape {
-	return ecsphysics2d.NewSegmentShape(m.Vec2d{Y: -2}, m.Vec2d{Y: 2}, 0.2)
+func wallShape() Shape {
+	return NewSegmentShape(m.Vec2d{Y: -2}, m.Vec2d{Y: 2}, 0.2)
 }
 
 func tunnelTargets() []tunnelTarget {
@@ -82,14 +80,14 @@ func tunnelTargets() []tunnelTarget {
 		{"a 0.4 m Static wall", 0.2, false, func(t testing.TB, h *harness) ecs.Entity {
 			return h.spawn(t, spawnRequest{
 				Kind:  kindShapedStatic,
-				Place: ecsphysics2d.Position{Current: m.Vec2d{X: targetX}},
+				Place: Position{Current: m.Vec2d{X: targetX}},
 				Shape: wallShape(),
 			})
 		}},
 		{"a 0.4 m Kinematic body", 0.2, true, func(t testing.TB, h *harness) ecs.Entity {
 			return h.spawn(t, spawnRequest{
 				Kind:  kindShapedKinematic,
-				Place: ecsphysics2d.Position{Current: m.Vec2d{X: targetX}},
+				Place: Position{Current: m.Vec2d{X: targetX}},
 				Shape: wallShape(),
 			})
 		}},
@@ -97,10 +95,10 @@ func tunnelTargets() []tunnelTarget {
 		// movers: light enough to be knocked aside, which is the case a fast
 		// Body's test of the whole Body index is for.
 		{"a thin Dynamic body", 0.05, true, func(t testing.TB, h *harness) ecs.Entity {
-			body, shape, _ := solidFor(t, ecsphysics2d.NewBoxShape(0.1, 4, 0))
+			body, shape, _ := solidFor(t, NewBoxShape(0.1, 4, 0))
 			return h.spawn(t, spawnRequest{
 				Kind:  kindShapedBody,
-				Place: ecsphysics2d.Position{Current: m.Vec2d{X: targetX}},
+				Place: Position{Current: m.Vec2d{X: targetX}},
 				Body:  body,
 				Shape: shape,
 			})
@@ -110,9 +108,9 @@ func tunnelTargets() []tunnelTarget {
 
 // solidFor is the Dynamic an app builds for a solid Shape of unit density,
 // recentred, and the Shape's minimum extent.
-func solidFor(t testing.TB, shape ecsphysics2d.Shape) (ecsphysics2d.Dynamic, ecsphysics2d.Shape, float64) {
+func solidFor(t testing.TB, shape Shape) (Dynamic, Shape, float64) {
 	t.Helper()
-	body, shape, _, _, err := ecsphysics2d.NewDynamicForShape(shape, ecsphysics2d.Polygon{}, 1, 0, 0)
+	body, shape, _, _, err := NewDynamicForShape(shape, Polygon{}, 1, 0, 0)
 	if err != nil {
 		t.Fatalf("NewDynamicForShape: %v", err)
 	}
@@ -125,13 +123,13 @@ func solidFor(t testing.TB, shape ecsphysics2d.Shape) (ecsphysics2d.Dynamic, ecs
 // a polygon's inner radius — the nearest face to the centre — plus its
 // rounding. It is the test's own reading of that definition, not the
 // mechanism's.
-func minimumExtent(shape ecsphysics2d.Shape, verts []m.Vec2d) float64 {
+func minimumExtent(shape Shape, verts []m.Vec2d) float64 {
 	switch shape.Kind {
-	case ecsphysics2d.ShapeCircle, ecsphysics2d.ShapeSegment:
+	case ShapeCircle, ShapeSegment:
 		return shape.Radius
 	}
-	if shape.Kind != ecsphysics2d.ShapePoly {
-		verts = ecsphysics2d.PolygonVerts(nil, shape, ecsphysics2d.Polygon{})
+	if shape.Kind != ShapePoly {
+		verts = PolygonVerts(nil, shape, Polygon{})
 	}
 	inner := math.Inf(1)
 	for i, a := range verts {
@@ -152,12 +150,12 @@ func minimumExtent(shape ecsphysics2d.Shape, verts []m.Vec2d) float64 {
 // the reference scene's own reading of the definition, and the Shape has to
 // still be 104 bytes.
 func TestEveryPolygonConstructorWritesTheFaceDistance(t *testing.T) {
-	if got, want := unsafe.Sizeof(ecsphysics2d.Shape{}), uintptr(104); got != want {
+	if got, want := unsafe.Sizeof(Shape{}), uintptr(104); got != want {
 		t.Fatalf("Shape is %d bytes, want %d", got, want)
 	}
 
-	polygon := func(verts []m.Vec2d, radius float64) (ecsphysics2d.Shape, ecsphysics2d.Polygon) {
-		shape, outline, err := ecsphysics2d.NewPolygonShape(verts, radius)
+	polygon := func(verts []m.Vec2d, radius float64) (Shape, Polygon) {
+		shape, outline, err := NewPolygonShape(verts, radius)
 		if err != nil {
 			t.Fatalf("NewPolygonShape: %v", err)
 		}
@@ -165,17 +163,17 @@ func TestEveryPolygonConstructorWritesTheFaceDistance(t *testing.T) {
 	}
 	type built struct {
 		name    string
-		shape   ecsphysics2d.Shape
-		polygon ecsphysics2d.Polygon
+		shape   Shape
+		polygon Polygon
 	}
 	var cases []built
-	add := func(name string, shape ecsphysics2d.Shape, outline ecsphysics2d.Polygon) {
+	add := func(name string, shape Shape, outline Polygon) {
 		cases = append(cases, built{name, shape, outline})
 	}
-	add("a box", ecsphysics2d.NewBoxShape(0.4, 0.4, 0), ecsphysics2d.Polygon{})
-	add("the plank", ecsphysics2d.NewBoxShape(0.2, 4, 0), ecsphysics2d.Polygon{})
-	add("a rounded box", ecsphysics2d.NewBoxShape(1, 3, 0.25), ecsphysics2d.Polygon{})
-	add("an off-centre box", ecsphysics2d.NewBoxShapeFor(ecsphysics2d.NewBB(0.5, -1, 2.5, 0.2), 0), ecsphysics2d.Polygon{})
+	add("a box", NewBoxShape(0.4, 0.4, 0), Polygon{})
+	add("the plank", NewBoxShape(0.2, 4, 0), Polygon{})
+	add("a rounded box", NewBoxShape(1, 3, 0.25), Polygon{})
+	add("an off-centre box", NewBoxShapeFor(NewBB(0.5, -1, 2.5, 0.2), 0), Polygon{})
 	shape, outline := polygon([]m.Vec2d{{X: 0, Y: 0}, {X: 3, Y: 0}, {X: 0, Y: 1}}, 0)
 	add("a triangle", shape, outline)
 	shape, outline = polygon([]m.Vec2d{{X: -1, Y: -0.5}, {X: 2, Y: -0.3}, {X: 1.5, Y: 1}, {X: -0.8, Y: 0.7}}, 0.1)
@@ -192,18 +190,18 @@ func TestEveryPolygonConstructorWritesTheFaceDistance(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			// As built, before anything recentres it: the constructor's own
 			// write, about the Position the vertices were given around.
-			if got, want := types.MinimumExtent(c.shape), minimumExtent(c.shape, verticesOf(c.shape, c.polygon)); !closeToFloat32(got, want) {
+			if got, want := MinimumExtent(c.shape), minimumExtent(c.shape, verticesOf(c.shape, c.polygon)); !closeToFloat32(got, want) {
 				t.Errorf("as built, minimum extent %v, want %v", got, want)
 			}
 
-			body, shape, outline, _, err := ecsphysics2d.NewDynamicForShape(c.shape, c.polygon, 1, 0, 0)
+			body, shape, outline, _, err := NewDynamicForShape(c.shape, c.polygon, 1, 0, 0)
 			if err != nil {
 				t.Fatalf("NewDynamicForShape: %v", err)
 			}
 			h := newHarness(t)
 			e := h.spawn(t, spawnRequest{
 				Kind:    kindPolygonBody,
-				Place:   ecsphysics2d.Position{Current: m.Vec2d{X: 3, Y: -2}},
+				Place:   Position{Current: m.Vec2d{X: 3, Y: -2}},
 				Body:    body,
 				Shape:   shape,
 				Polygon: outline,
@@ -211,7 +209,7 @@ func TestEveryPolygonConstructorWritesTheFaceDistance(t *testing.T) {
 			h.frames(t, 2)
 			stepped := h.read(t, e)
 			want := minimumExtent(stepped.Shape, verticesOf(stepped.Shape, stepped.Polygon))
-			if got := types.MinimumExtent(stepped.Shape); !closeToFloat32(got, want) {
+			if got := MinimumExtent(stepped.Shape); !closeToFloat32(got, want) {
 				t.Errorf("after the step, minimum extent %v, want %v", got, want)
 			}
 		})
@@ -220,11 +218,11 @@ func TestEveryPolygonConstructorWritesTheFaceDistance(t *testing.T) {
 
 // verticesOf is the local vertex run minimumExtent takes for a ShapePoly: the
 // Polygon Component's. Every other kind reads its own slots.
-func verticesOf(shape ecsphysics2d.Shape, polygon ecsphysics2d.Polygon) []m.Vec2d {
-	if shape.Kind != ecsphysics2d.ShapePoly {
+func verticesOf(shape Shape, polygon Polygon) []m.Vec2d {
+	if shape.Kind != ShapePoly {
 		return nil
 	}
-	return ecsphysics2d.PolygonVerts(nil, shape, polygon)
+	return PolygonVerts(nil, shape, polygon)
 }
 
 // closeToFloat32 is equality to within the float32 the face distance is kept
@@ -319,10 +317,10 @@ func TestAFastBodyWithoutStopsAtBodiesPassesThroughBodies(t *testing.T) {
 // surface, and the circle's Probe is exact.
 const nearSide = 1e-6
 
-// meeting is what the tick the mover first met the target showed: whether it
+// firstMeeting is what the tick the mover first met the target showed: whether it
 // ever did, whether the Contact was a stopping one, and how far the mover's
 // leading face then stood short of the target's near face.
-type meeting struct {
+type firstMeeting struct {
 	seen, stopping bool
 	gap            float64
 	contact        string
@@ -335,8 +333,8 @@ type meeting struct {
 // whether that is the far side, whether the pair ever reported a Contact, and
 // what the first tick they met showed.
 func throwAt(
-	t *testing.T, shape ecsphysics2d.Shape, target tunnelTarget, stopsAtBodies bool, speed float64, phase, ticks int,
-) (string, bool, bool, meeting) {
+	t *testing.T, shape Shape, target tunnelTarget, stopsAtBodies bool, speed float64, phase, ticks int,
+) (string, bool, bool, firstMeeting) {
 	t.Helper()
 	h := newHarness(t)
 	wall := target.spawn(t, h)
@@ -346,21 +344,21 @@ func throwAt(
 	start := targetX - 2 - step*float64(phase)/phases
 	mover := h.spawn(t, spawnRequest{
 		Kind:     kindShapedBody,
-		Place:    ecsphysics2d.Position{Current: m.Vec2d{X: start}},
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: speed}},
+		Place:    Position{Current: m.Vec2d{X: start}},
+		Velocity: Velocity{Linear: m.Vec2d{X: speed}},
 		Body:     body,
 		Shape:    shape,
 	})
 
 	touched := false
-	var met meeting
+	var met firstMeeting
 	for range ticks {
 		h.frame(t)
 		for _, entry := range h.contacts(t) {
 			if (entry.A == mover && entry.B == wall) || (entry.A == wall && entry.B == mover) {
 				if !touched {
 					at, there := h.read(t, mover).Place.Current, h.read(t, wall).Place.Current
-					met = meeting{
+					met = firstMeeting{
 						seen: true,
 						stopping: entry.T < 1 && !entry.Sensor && entry.Count == 1 &&
 							entry.Points[0].Depth == 0,
@@ -398,7 +396,7 @@ func joinLines(lines []string) string {
 func TestTheGateCensus(t *testing.T) {
 	type row struct {
 		name  string
-		shape ecsphysics2d.Shape
+		shape Shape
 		speed float64
 	}
 	rows := []row{}
@@ -406,12 +404,12 @@ func TestTheGateCensus(t *testing.T) {
 		rows = append(rows, row{mover.name + ", thrown", mover.shape, projectileSpeed})
 	}
 	rows = append(rows,
-		row{"the thin Dynamic body, at rest", ecsphysics2d.NewBoxShape(0.1, 4, 0), 0},
+		row{"the thin Dynamic body, at rest", NewBoxShape(0.1, 4, 0), 0},
 		row{"the 0.4 m wall as a Kinematic body, at rest", wallShape(), 0},
 		row{"the whole-step bench's circle, at rest", measured(0.4), 0},
 		row{"a point Sensor (the swept Sensor's projectile)", sensorCircle(0), projectileSpeed},
-		row{"a point, at rest", ecsphysics2d.NewCircleShape(0, m.Vec2d{}), 0},
-		row{"a bare segment, at rest", ecsphysics2d.NewSegmentShape(m.Vec2d{X: -1}, m.Vec2d{X: 1}, 0), 0},
+		row{"a point, at rest", NewCircleShape(0, m.Vec2d{}), 0},
+		row{"a bare segment, at rest", NewSegmentShape(m.Vec2d{X: -1}, m.Vec2d{X: 1}, 0), 0},
 	)
 	t.Logf("%-50s %8s %10s %10s %8s %8s", "Shape", "extent", "≥1× from", ">½× from", "≥1×", ">½×")
 	for _, r := range rows {
@@ -437,30 +435,30 @@ type gateCounter struct {
 }
 
 type gateCounterQuery struct {
-	Place ecsphysics2d.Position
-	Shape ecsphysics2d.Shape
-	_     ecs.Without[ecsphysics2d.Static]
+	Place Position
+	Shape Shape
+	_     ecs.Without[Static]
 }
 
 type gateCounterOnUpdate kernel.Subscription[app.UpdateEvent]
 
 func (*gateCounter) Name() kernel.PluginName { return "physicstestgatecounter" }
 func (*gateCounter) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{ecs.Name, ecsphysics2d.Name}
+	return []kernel.PluginName{ecs.Name, Name}
 }
 
 func (g *gateCounter) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.Subscribe[gateCounterOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, func(
 		q *ecs.Query[gateCounterQuery],
-		polygons *ecs.Get[ecsphysics2d.Polygon],
+		polygons *ecs.Get[Polygon],
 	) {
 		g.ticks.Add(1)
 		for entity, it := range q.All() {
 			g.bodies.Add(1)
 			var verts []m.Vec2d
-			if it.Shape.Kind == ecsphysics2d.ShapePoly {
+			if it.Shape.Kind == ShapePoly {
 				polygon, _ := polygons.Of(entity)
-				g.polygons = ecsphysics2d.PolygonVerts(g.polygons[:0], it.Shape, polygon)
+				g.polygons = PolygonVerts(g.polygons[:0], it.Shape, polygon)
 				verts = g.polygons
 			}
 			extent := minimumExtent(it.Shape, verts)
@@ -481,7 +479,7 @@ func (g *gateCounter) Register(registrar *kernel.Registrar, _ any) error {
 				}
 			}
 		}
-	})).After[ecsphysics2d.IntegrateOnUpdate]().Before[ecsphysics2d.IndexOnUpdate]()
+	})).After[IntegrateOnUpdate]().Before[IndexOnUpdate]()
 	return nil
 }
 

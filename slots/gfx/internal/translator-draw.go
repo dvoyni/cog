@@ -4,15 +4,18 @@ import (
 	"encoding/binary"
 	"math"
 
-	"github.com/dvoyni/cog/slots/gfx"
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 )
 
 // translateDraw emits one draw into the currently open pass.
-func (t *translator) translateDraw(f *frame, op *types.Op, pass gfx.PassDescr, uoff *int, firstErr *error) {
+func (t *translator) translateDraw(f *frame, op *Op, pass descriptors.PassDescr, firstErr *error) {
 	m := &op.Mesh
-	stride := types.MeshStride(m)
-	vertices, indices := types.MeshVertices(m), types.MeshIndices(m)
+	stride := descriptors.MeshStride(m)
+	vertices, indices := descriptors.MeshVertices(m), descriptors.MeshIndices(m)
 	if vertices.ID() == 0 || m.VertexCount() <= 0 || stride <= 0 {
 		return
 	}
@@ -58,7 +61,7 @@ func (t *translator) translateDraw(f *frame, op *types.Op, pass gfx.PassDescr, u
 	}
 	if name, ok := sampledAttachment(plan, op.Params, op.Material.Params(), pass); ok {
 		if *firstErr == nil {
-			*firstErr = gfx.ErrDrawSamplesAttachment{Pass: pass.Label, Parameter: name}
+			*firstErr = types.ErrDrawSamplesAttachment{Pass: pass.Label, Parameter: name}
 		}
 		return
 	}
@@ -75,14 +78,14 @@ func (t *translator) translateDraw(f *frame, op *types.Op, pass gfx.PassDescr, u
 		return
 	}
 	t.ops.SetPipeline(pipeline)
-	// A shader that declares no uniform block gets no uniform binding and no
-	// slot in the backend's arena. Emitting one anyway puts an entry in a group
-	// the pipeline layout does not have, and CreateBindGroup fails the
-	// entry-count rule with the whole frame's command buffer as the casualty.
-	if plan.uniformSize > 0 {
-		u := t.packParams(t.uarena[*uoff:*uoff+uniformMax], op.Params, op.Material.Params(), plan)
-		*uoff += uniformMax
-		t.ops.SetParams(u)
+	// Each uniform block the shader declares gets its own slot in the frame's
+	// uniform arena, and a shader that declares none gets no uniform binding at
+	// all. Emitting one anyway puts an entry in a group the pipeline layout does
+	// not have, and CreateBindGroup fails the entry-count rule with the whole
+	// frame's command buffer as the casualty.
+	for i := range plan.blocks {
+		block := &plan.blocks[i]
+		packParams(t.ops.SetUniformBlock(block.group, block.binding, block.size), op.Params, op.Material.Params(), block)
 	}
 	t.emitResources(f, op.Params, op.Material.Params(), plan)
 	t.ops.SetVertexBuffer(vertices.ID(), 0)
@@ -104,13 +107,13 @@ func (t *translator) translateDraw(f *frame, op *types.Op, pass gfx.PassDescr, u
 // dropped either way: the caller returns before emitting anything, so
 // report-once-drop-always holds here the way it does for a failed pipeline.
 // The shader's label is spelled only for a report, never on the frames after it.
-func (t *translator) reportIndexLength(m *gfx.MeshDescr, shader gfx.ShaderDescr) error {
-	key := indexLengthKey{length: types.MeshIndices(m).Size(), width: m.IndexWidth()}
+func (t *translator) reportIndexLength(m *descriptors.MeshDescr, shaderDescr shader.ShaderDescr) error {
+	key := indexLengthKey{length: descriptors.MeshIndices(m).Size(), width: m.IndexWidth()}
 	if _, seen := t.badIndexLengths[key]; seen {
 		return nil
 	}
 	t.badIndexLengths[key] = struct{}{}
-	return gfx.ErrIndexBufferLength{Shader: types.ShaderLabel(shader), Length: key.length, Width: key.width.Bytes()}
+	return types.ErrIndexBufferLength{Shader: shader.ShaderLabel(shaderDescr), Length: key.length, Width: key.width.Bytes()}
 }
 
 // unsuppliedBuffer returns the first declared storage binding the draw does not
@@ -118,7 +121,7 @@ func (t *translator) reportIndexLength(m *gfx.MeshDescr, shader gfx.ShaderDescr)
 // sampledAttachment does, for the same reason: the plan is cached per parameter
 // shape, so it knows which names are declared but not which buffers this draw
 // carries, and an unbaked buffer is a per-draw value.
-func unsuppliedBuffer(plan *parameterPlan, drawParams, materialParams []gfx.ParameterDescr) (*plannedResource, bool, bool) {
+func unsuppliedBuffer(plan *parameterPlan, drawParams, materialParams []descriptors.ParameterDescr) (*plannedResource, bool, bool) {
 	for i := range plan.resources {
 		resource := &plan.resources[i]
 		if resource.kind != plannedBuffer {
@@ -130,7 +133,7 @@ func unsuppliedBuffer(plan *parameterPlan, drawParams, materialParams []gfx.Para
 		}
 		// The kind is already settled in plan.mismatch, so a parameter that is
 		// here at all is a buffer; only its id is still in question.
-		if types.ParameterBuffer(p).ID() == 0 {
+		if descriptors.ParameterBuffer(p).ID() == 0 {
 			return resource, true, true
 		}
 	}
@@ -143,13 +146,13 @@ func unsuppliedBuffer(plan *parameterPlan, drawParams, materialParams []gfx.Para
 // binding misses it until someone fixes the material, and firstErr carries only
 // the frame's first error, so re-reporting would mask every later error in
 // every later frame.
-func (t *translator) reportUnsuppliedBuffer(shader gfx.ShaderID, label string, resource *plannedResource, unbaked bool) error {
-	key := unsuppliedBufferKey{shader: shader, parameter: resource.name}
+func (t *translator) reportUnsuppliedBuffer(shaderID types.ShaderID, label string, resource *plannedResource, unbaked bool) error {
+	key := unsuppliedBufferKey{shader: shaderID, parameter: resource.name}
 	if _, seen := t.unsuppliedBuffers[key]; seen {
 		return nil
 	}
 	t.unsuppliedBuffers[key] = struct{}{}
-	return gfx.ErrStorageBufferUnsupplied{
+	return types.ErrStorageBufferUnsupplied{
 		Shader: label, Parameter: resource.name,
 		Group: resource.group, Binding: resource.binding, Unbaked: unbaked,
 	}
@@ -166,7 +169,7 @@ func (t *translator) reportUnsuppliedBuffer(shader gfx.ShaderID, label string, r
 // cannot say, and refusing a draw over a descriptor's silence would be a false
 // fatal.
 func mismatchedTextureView(
-	plan *parameterPlan, drawParams, materialParams []gfx.ParameterDescr,
+	plan *parameterPlan, drawParams, materialParams []descriptors.ParameterDescr,
 ) (*plannedResource, int, bool) {
 	for i := range plan.resources {
 		resource := &plan.resources[i]
@@ -179,11 +182,11 @@ func mismatchedTextureView(
 		}
 		// The kind is already settled in plan.mismatch, so a parameter that is
 		// here at all is a texture; only its shape is still in question.
-		layers := types.ParameterTexture(p).Layers()
+		layers := descriptors.ParameterTexture(p).Layers()
 		if layers == 0 {
 			continue
 		}
-		if (layers > 1) != (resource.view == gfx.TextureView2DArray) {
+		if (layers > 1) != (resource.view == shader.TextureView2DArray) {
 			return resource, layers, true
 		}
 	}
@@ -195,14 +198,14 @@ func mismatchedTextureView(
 // frames after it. The draw is dropped either way, on reportUnsuppliedBuffer's
 // terms.
 func (t *translator) reportTextureView(
-	shader gfx.ShaderID, label string, resource *plannedResource, layers int,
+	shaderID types.ShaderID, label string, resource *plannedResource, layers int,
 ) error {
-	key := textureViewKey{shader: shader, parameter: resource.name}
+	key := textureViewKey{shader: shaderID, parameter: resource.name}
 	if _, seen := t.textureViewMismatches[key]; seen {
 		return nil
 	}
 	t.textureViewMismatches[key] = struct{}{}
-	return gfx.ErrTextureViewDimensionMismatch{
+	return types.ErrTextureViewDimensionMismatch{
 		Shader: label, Parameter: resource.name,
 		Group: resource.group, Binding: resource.binding,
 		Declared: textureViewName(resource.view), Supplied: textureViewNameOfLayers(layers),
@@ -211,8 +214,8 @@ func (t *translator) reportTextureView(
 
 // textureViewName renders a declared dimension the way the shader spells it, so
 // the report can be matched against the source it names.
-func textureViewName(view gfx.TextureViewDimension) string {
-	if view == gfx.TextureView2DArray {
+func textureViewName(view shader.TextureViewDimension) string {
+	if view == shader.TextureView2DArray {
 		return "texture_2d_array"
 	}
 	return "texture_2d"
@@ -231,13 +234,13 @@ func textureViewNameOfLayers(layers int) string {
 // sampledAttachment names the first texture parameter a draw samples that its
 // own pass renders into. Only a baked texture can be an attachment, so this
 // resolves nothing and costs a comparison per binding.
-func sampledAttachment(plan *parameterPlan, drawParams, materialParams []gfx.ParameterDescr, pass gfx.PassDescr) (string, bool) {
-	attachment := func(id gfx.TextureID) bool {
+func sampledAttachment(plan *parameterPlan, drawParams, materialParams []descriptors.ParameterDescr, pass descriptors.PassDescr) (string, bool) {
+	attachment := func(id types.TextureID) bool {
 		if id == 0 {
 			return false
 		}
-		return (types.TargetKindOf(&pass.Target) == types.TargetTexture && types.TargetTextureOf(&pass.Target) == id) ||
-			(types.DepthKindOf(&pass.Depth) == types.DepthKindTexture && types.DepthTexture(&pass.Depth) == id)
+		return (descriptors.TargetKindOf(&pass.Target) == descriptors.TargetTexture && descriptors.TargetTextureOf(&pass.Target) == id) ||
+			(descriptors.DepthKindOf(&pass.Depth) == descriptors.DepthKindTexture && descriptors.DepthTexture(&pass.Depth) == id)
 	}
 	for i := range plan.resources {
 		resource := &plan.resources[i]
@@ -245,10 +248,10 @@ func sampledAttachment(plan *parameterPlan, drawParams, materialParams []gfx.Par
 			continue
 		}
 		p := resource.param.value(materialParams, drawParams)
-		if p == nil || types.ParameterKind(p) != types.ParamTexture {
+		if p == nil || descriptors.ParameterKind(p) != descriptors.ParamTexture {
 			continue
 		}
-		if texture := types.ParameterTextureRef(p); attachment(texture.ID()) {
+		if texture := descriptors.ParameterTextureRef(p); attachment(texture.ID()) {
 			return p.Name(), true
 		}
 	}
@@ -258,14 +261,14 @@ func sampledAttachment(plan *parameterPlan, drawParams, materialParams []gfx.Par
 // emitResources binds each reflected texture/sampler resource, matching its name
 // to a material parameter (defaulting to the white texture / a clamp+linear
 // sampler when unset), so every binding the shader declares is provided.
-func (t *translator) emitResources(f *frame, drawParams, materialParams []gfx.ParameterDescr, plan *parameterPlan) {
+func (t *translator) emitResources(f *frame, drawParams, materialParams []descriptors.ParameterDescr, plan *parameterPlan) {
 	// Each reflected sampler is filled by the parameter of its own name, and
 	// falls back to the zero descriptor - clamp and linear - when unset.
 	for i := range plan.samplers {
 		sampler := &plan.samplers[i]
-		var desc gfx.SamplerDesc
-		if p := sampler.param.value(materialParams, drawParams); p != nil && types.ParameterKind(p) == types.ParamSampler {
-			desc = types.ParameterSampler(p)
+		var desc types.SamplerDesc
+		if p := sampler.param.value(materialParams, drawParams); p != nil && descriptors.ParameterKind(p) == descriptors.ParamSampler {
+			desc = descriptors.ParameterSampler(p)
 		}
 		t.ops.SetSampler(t.ensureSampler(f.backend, desc), sampler.group, sampler.binding)
 	}
@@ -273,16 +276,16 @@ func (t *translator) emitResources(f *frame, drawParams, materialParams []gfx.Pa
 		resource := &plan.resources[i]
 		p := resource.param.value(materialParams, drawParams)
 		if resource.kind == plannedBuffer {
-			if p != nil && types.ParameterKind(p) == types.ParamBuffer {
-				if types.ParameterBuffer(p).ID() != 0 {
-					t.ops.SetBuffer(resource.group, resource.binding, types.ParameterBuffer(p).ID(), types.ParameterBufferOffset(p), types.ParameterBufferSize(p))
+			if p != nil && descriptors.ParameterKind(p) == descriptors.ParamBuffer {
+				if descriptors.ParameterBuffer(p).ID() != 0 {
+					t.ops.SetBuffer(resource.group, resource.binding, descriptors.ParameterBuffer(p).ID(), descriptors.ParameterBufferOffset(p), descriptors.ParameterBufferSize(p))
 				}
 			}
 			continue
 		}
-		textureID := gfx.TextureID(0)
-		if p != nil && types.ParameterKind(p) == types.ParamTexture {
-			textureID = t.ensureTexture(f, types.ParameterTexture(p))
+		textureID := types.TextureID(0)
+		if p != nil && descriptors.ParameterKind(p) == descriptors.ParamTexture {
+			textureID = t.ensureTexture(f, descriptors.ParameterTexture(p))
 		}
 		t.ops.SetTexture(textureID, resource.group, resource.binding)
 	}
@@ -292,25 +295,25 @@ func (t *translator) emitResources(f *frame, drawParams, materialParams []gfx.Pa
 // material half of the shape hash from a material recorded for the frame
 // rather than hashing its names again.
 func (t *translator) preparePlanFor(
-	shader gfx.ShaderID, label string, layout gfx.ShaderLayout, material *gfx.MaterialDescr, draw []gfx.ParameterDescr,
+	shaderID types.ShaderID, label string, layout shader.ShaderLayout, material *descriptors.MaterialDescr, draw []descriptors.ParameterDescr,
 ) *parameterPlan {
-	state, recorded := types.MaterialShapeState(material)
+	state, recorded := descriptors.MaterialShapeState(material)
 	if !recorded {
-		state = types.ParameterShapeState(material.Params())
+		state = descriptors.ParameterShapeState(material.Params())
 	}
-	return t.planForShape(shader, label, layout, material.Params(), draw, types.ContinueParameterShape(state, draw))
+	return t.planForShape(shaderID, label, layout, material.Params(), draw, descriptors.ContinueParameterShape(state, draw))
 }
 
-func (t *translator) prepareParameterPlan(shader gfx.ShaderID, label string, layout gfx.ShaderLayout, material, draw []gfx.ParameterDescr) *parameterPlan {
-	return t.planForShape(shader, label, layout, material, draw, parameterShapeHash(material, draw))
+func (t *translator) prepareParameterPlan(shaderID types.ShaderID, label string, layout shader.ShaderLayout, material, draw []descriptors.ParameterDescr) *parameterPlan {
+	return t.planForShape(shaderID, label, layout, material, draw, parameterShapeHash(material, draw))
 }
 
 // planForShape finds or builds the plan for one parameter shape, given its
 // hash.
 func (t *translator) planForShape(
-	shader gfx.ShaderID, label string, layout gfx.ShaderLayout, material, draw []gfx.ParameterDescr, hash uint64,
+	shaderID types.ShaderID, label string, layout shader.ShaderLayout, material, draw []descriptors.ParameterDescr, hash uint64,
 ) *parameterPlan {
-	key := parameterPlanBucketKey{shader: shader, hash: hash}
+	key := parameterPlanBucketKey{shader: shaderID, hash: hash}
 	bucket := t.parameterPlans[key]
 	for i := range bucket {
 		if parameterShapeEqual(&bucket[i], material, draw) {
@@ -321,30 +324,38 @@ func (t *translator) planForShape(
 	entry := cachedParameterPlan{
 		materialNames: parameterNames(material),
 		drawNames:     parameterNames(draw),
-		plan:          parameterPlan{uniformSize: layout.UniformSize},
-	}
-	entry.plan.uniforms = make([]plannedUniform, len(layout.Uniforms))
-	for i := range layout.Uniforms {
-		member := &layout.Uniforms[i]
-		ref := parameterRefFor(member.Name, material, draw)
-		entry.plan.checkKind(label, member.Name, ref, material, draw, declaredValue)
-		entry.plan.uniforms[i] = plannedUniform{offset: member.Offset, param: ref}
 	}
 	entry.plan.resources = make([]plannedResource, 0, len(layout.Resources))
 	for i := range layout.Resources {
 		resource := &layout.Resources[i]
-		ref := parameterRefFor(resource.Name, material, draw)
-		if resource.Sampler {
+		kind, declared := plannedTexture, declaredTexture
+		switch resource.Kind.Base() {
+		case shader.ResourceUniformBuffer:
+			// A uniform block is packed member by member rather than bound by
+			// name.
+			block := plannedBlock{
+				group: resource.Group, binding: resource.Binding, size: resource.Size,
+				members: make([]plannedUniform, len(resource.Members)),
+			}
+			for j := range resource.Members {
+				member := &resource.Members[j]
+				ref := parameterRefFor(member.Name, material, draw)
+				entry.plan.checkKind(label, member.Name, ref, material, draw, declaredValue)
+				block.members[j] = plannedUniform{offset: member.Offset, param: ref}
+			}
+			entry.plan.blocks = append(entry.plan.blocks, block)
+			continue
+		case shader.ResourceSampler:
+			ref := parameterRefFor(resource.Name, material, draw)
 			entry.plan.checkKind(label, resource.Name, ref, material, draw, declaredSampler)
 			entry.plan.samplers = append(entry.plan.samplers, plannedSampler{
 				group: resource.Group, binding: resource.Binding, param: ref,
 			})
 			continue
-		}
-		kind, declared := plannedTexture, declaredTexture
-		if resource.StorageBuffer {
+		case shader.ResourceStorageBuffer:
 			kind, declared = plannedBuffer, declaredBuffer
 		}
+		ref := parameterRefFor(resource.Name, material, draw)
 		entry.plan.checkKind(label, resource.Name, ref, material, draw, declared)
 		entry.plan.resources = append(entry.plan.resources, plannedResource{
 			kind: kind, group: resource.Group, binding: resource.Binding, param: ref, name: resource.Name,
@@ -357,22 +368,17 @@ func (t *translator) planForShape(
 	return &bucket[len(bucket)-1].plan
 }
 
-// packParams writes reflected shader constants into dst. Per-draw parameters
-// override same-named material parameters; unmatched members remain zero.
-func (t *translator) packParams(dst []byte, drawParams, materialParams []gfx.ParameterDescr, plan *parameterPlan) []byte {
-	size := plan.uniformSize
+// packParams writes reflected shader constants into buf, which arrives zeroed
+// and sized to the planned block. Per-draw parameters override same-named
+// material parameters; unmatched members remain zero.
+func packParams(buf []byte, drawParams, materialParams []descriptors.ParameterDescr, block *plannedBlock) {
+	size := min(block.size, len(buf))
 	if size <= 0 {
-		return dst[:0]
+		return
 	}
-	// A guard only: checkUniformBlock refuses any shader whose block exceeds
-	// uniformMax when it is loaded, so no plan reaching here is larger than dst.
-	if size > len(dst) {
-		size = len(dst)
-	}
-	buf := dst[:size]
-	clear(buf)
-	for i := range plan.uniforms {
-		uniform := &plan.uniforms[i]
+	buf = buf[:size]
+	for i := range block.members {
+		uniform := &block.members[i]
 		off := uniform.offset
 		if off < 0 || off >= size {
 			continue
@@ -381,30 +387,29 @@ func (t *translator) packParams(dst []byte, drawParams, materialParams []gfx.Par
 			writeParamAt(buf, off, p)
 		}
 	}
-	return buf
 }
 
 // writeParamAt writes a scalar/vec/color param at byte offset off (bounds-checked).
-func writeParamAt(buf []byte, off int, p *gfx.ParameterDescr) {
-	switch types.ParameterKind(p) {
-	case types.ParamColor:
+func writeParamAt(buf []byte, off int, p *descriptors.ParameterDescr) {
+	switch descriptors.ParameterKind(p) {
+	case descriptors.ParamColor:
 		if off+16 <= len(buf) {
-			types.WriteColor(buf[off:off+16], types.ParameterColor(p))
+			descriptors.WriteColor(buf[off:off+16], descriptors.ParameterColor(p))
 		}
-	case types.ParamVec4:
+	case descriptors.ParamVec4:
 		if off+16 <= len(buf) {
-			types.WriteVec4(buf[off:off+16], types.ParameterVec(p))
+			descriptors.WriteVec4(buf[off:off+16], descriptors.ParameterVec(p))
 		}
-	case types.ParamMat4:
+	case descriptors.ParamMat4:
 		if off+64 <= len(buf) {
-			types.WriteMat4(buf[off:off+64], types.ParameterMat(p))
+			descriptors.WriteMat4(buf[off:off+64], descriptors.ParameterMat(p))
 		}
-	case types.ParamFloat:
+	case descriptors.ParamFloat:
 		if off+4 <= len(buf) {
-			binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(types.ParameterNum(p)))
+			binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(descriptors.ParameterNum(p)))
 		}
-	case types.ParamRaw:
-		raw := types.ParameterRaw(p)
+	case descriptors.ParamRaw:
+		raw := descriptors.ParameterRaw(p)
 		if off+raw.Len() <= len(buf) {
 			copy(buf[off:], raw.Data())
 		}

@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
@@ -38,16 +37,16 @@ func (p *facadePlugin) Name() kernel.PluginName { return "model-facade-test" }
 // Dependencies names model: the kernel refuses a lock on a resource whose
 // owner is not a direct dependency.
 func (p *facadePlugin) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{model.Name}
+	return []kernel.PluginName{Name}
 }
 
 func (p *facadePlugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.Subscribe[readerA](p.reader(p.startedA, p.startedB))
 	registrar.Subscribe[readerB](p.reader(p.startedB, p.startedA))
 	registrar.Subscribe[loader](func() (kernel.Lock, kernel.Observe[frameEvent]) {
-		var lookup kernel.Write[*model.Lookup]
+		var lookup kernel.Write[*Lookup]
 		return func(access kernel.ResourceAccess) {
-			lookup = access.GetWrite[*model.Lookup]()
+			lookup = access.GetWrite[*Lookup]()
 		}, func(kernel.Kernel, frameEvent) { _ = lookup.Get() }
 	}).Before[readerA]().Before[readerB]()
 	return nil
@@ -57,12 +56,12 @@ func (p *facadePlugin) reader(
 	mine, other chan struct{},
 ) func() (kernel.Lock, kernel.Observe[frameEvent]) {
 	return func() (kernel.Lock, kernel.Observe[frameEvent]) {
-		var lookup kernel.Read[*model.Lookup]
+		var lookup kernel.Read[*Lookup]
 		return func(access kernel.ResourceAccess) {
-				lookup = access.GetRead[*model.Lookup]()
+				lookup = access.GetRead[*Lookup]()
 			}, func(kernel.Kernel, frameEvent) {
-				read := model.NewLookupReadAccess(lookup.Get())
-				if _, ok := read.Handle(model.ModelRef{Path: "models/absent.glb"}); ok {
+				read := NewLookupReadAccess(lookup.Get())
+				if _, ok := read.Handle(ModelRef{Path: "models/absent.glb"}); ok {
 					p.failed <- "the read facade reported a model nothing loaded"
 				}
 				if !p.overlap {
@@ -95,7 +94,7 @@ func composeFacade(t *testing.T, p *facadePlugin) *kernel.Engine {
 // of them does conflict with the one System that takes Write.
 func TestTwoReadFacadeSystemsAreScheduledInParallel(t *testing.T) {
 	engine := composeFacade(t, &facadePlugin{})
-	lookup := reflect.TypeFor[*model.Lookup]()
+	lookup := reflect.TypeFor[*Lookup]()
 	a, b, w := reflect.TypeFor[readerA](), reflect.TypeFor[readerB](), reflect.TypeFor[loader]()
 	description := engine.Describe()
 	for _, sub := range description.Subscriptions {

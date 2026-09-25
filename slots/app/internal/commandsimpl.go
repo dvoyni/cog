@@ -2,22 +2,21 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/slots/app"
 )
 
 // quitCmdImpl asks the MainLoop to stop the platform loop, which unwinds the Host's
 // Run and shuts the engine down.
-func (p *plugin) quitCmdImpl() (kernel.Lock, kernel.Execute[app.QuitRequest, app.QuitResponse]) {
-	return nil, func(kernel.Kernel, app.QuitRequest) app.QuitResponse {
+func (p *plugin) quitCmdImpl() (kernel.Lock, kernel.Execute[QuitRequest, QuitResponse]) {
+	return nil, func(kernel.Kernel, QuitRequest) QuitResponse {
 		p.mainLoop.Get().Quit()
-		return app.QuitResponse{}
+		return QuitResponse{}
 	}
 }
 
 // clipboardWriteCmdImpl hands the text to the MainLoop's clipboard.
-func (p *plugin) clipboardWriteCmdImpl() (kernel.Lock, kernel.Execute[app.ClipboardWriteRequest, app.ClipboardWriteResponse]) {
-	return nil, func(_ kernel.Kernel, request app.ClipboardWriteRequest) app.ClipboardWriteResponse {
-		return app.ClipboardWriteResponse{Err: p.mainLoop.Get().ClipboardWrite(request.Text)}
+func (p *plugin) clipboardWriteCmdImpl() (kernel.Lock, kernel.Execute[ClipboardWriteRequest, ClipboardWriteResponse]) {
+	return nil, func(_ kernel.Kernel, request ClipboardWriteRequest) ClipboardWriteResponse {
+		return ClipboardWriteResponse{Err: p.mainLoop.Get().ClipboardWrite(request.Text)}
 	}
 }
 
@@ -28,8 +27,8 @@ func (p *plugin) clipboardWriteCmdImpl() (kernel.Lock, kernel.Execute[app.Clipbo
 // on here: the handler blocks until the MainLoop's main thread has published its
 // ticks, and it holds nothing that the tick, or the frame carrying it, could
 // need.
-func (p *plugin) timeCmdImpl() (kernel.Lock, kernel.Execute[app.TimeRequest, app.TimeResponse]) {
-	return nil, func(k kernel.Kernel, request app.TimeRequest) app.TimeResponse {
+func (p *plugin) timeCmdImpl() (kernel.Lock, kernel.Execute[TimeRequest, TimeResponse]) {
+	return nil, func(k kernel.Kernel, request TimeRequest) TimeResponse {
 		return p.loop.ticks.control(request)
 	}
 }

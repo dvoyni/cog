@@ -10,8 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dvoyni/cog/bundles/canvas"
-
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
@@ -88,7 +86,7 @@ type drawsResponse struct {
 	// they are one entry per layer, and they are the coordinate frame the file
 	// is to be read in.
 	Path string `json:"path,omitempty"`
-	canvas.DrawsView
+	DrawsView
 	gfx.SnapshotView
 }
 
@@ -133,7 +131,7 @@ func drawsSnapshot(k kernel.Executioner, request drawsRequest) (drawsResponse, e
 	}
 	paused := status.Paused
 
-	armed := k.ExecuteCommand[canvas.ArmDrawsCmd](armRequest)
+	armed := k.ExecuteCommand[ArmDrawsCmd](armRequest)
 	if armed.Err != nil {
 		return drawsResponse{}, drawsRefusal(armed.Err)
 	}
@@ -220,23 +218,23 @@ func writeSnapshotJSON(path string, response drawsResponse) error {
 // The kinds are resolved to their enum here rather than in the tick, so a typo
 // is words the agent can act on instead of an empty array, and the in-tick
 // filter compares integers.
-func validateDrawsRequest(request drawsRequest) (canvas.ArmDrawsRequest, error) {
+func validateDrawsRequest(request drawsRequest) (ArmDrawsRequest, error) {
 	if err := validateSnapshotPath(request.Path); err != nil {
-		return canvas.ArmDrawsRequest{}, err
+		return ArmDrawsRequest{}, err
 	}
 	from, bounded := request.FromLayer.Get()
 	to, capped := request.ToLayer.Get()
 	if bounded && capped && from > to {
-		return canvas.ArmDrawsRequest{}, mcp.Unavailable{Reason: fmt.Sprintf(
+		return ArmDrawsRequest{}, mcp.Unavailable{Reason: fmt.Sprintf(
 			"fromLayer %d is above toLayer %d, which keeps no layer at all", from, to)}
 	}
-	arm := canvas.ArmDrawsRequest{
+	arm := ArmDrawsRequest{
 		FromLayer: request.FromLayer, ToLayer: request.ToLayer, Vertices: request.Vertices,
 	}
 	for _, name := range request.Kinds {
 		kind, ok := opKindFor(name)
 		if !ok {
-			return canvas.ArmDrawsRequest{}, mcp.Unavailable{Reason: canvas.ErrDrawsUnknownKind{Kind: name}.Error()}
+			return ArmDrawsRequest{}, mcp.Unavailable{Reason: ErrDrawsUnknownKind{Kind: name}.Error()}
 		}
 		arm.Kinds = append(arm.Kinds, kind)
 	}
@@ -271,11 +269,11 @@ func drawsRefusal(reason error) error {
 		return mcp.Unavailable{Reason: fmt.Sprintf(
 			"no tick was recorded within %s — the game may be paused with nothing stepping it, "+
 				"minimised, or not updating", drawsDeadline)}
-	case errors.Is(reason, canvas.ErrDrawsBusy{}):
+	case errors.Is(reason, ErrDrawsBusy{}):
 		return mcp.Unavailable{Reason: "a draw snapshot is already in flight; ask again. A " +
 			"capture and the other snapshots may run alongside it, and arming them together is " +
 			"how they describe one tick."}
-	case errors.Is(reason, canvas.ErrDrawsAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
+	case errors.Is(reason, ErrDrawsAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
 		errors.Is(reason, context.Canceled):
 		// A game exiting is the normal case, not a fault.
 		return mcp.Unavailable{Reason: "the game is shutting down"}

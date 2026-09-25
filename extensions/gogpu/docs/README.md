@@ -10,14 +10,14 @@ it as app's `app.MainLoop` Adapter, provides gfx's `gfx.Backend` Adapter, and fe
 ## Plugin
 
 - Name: `gogpu.Name` (`"gogpu"`)
-- Kind: an Extension. The root declares only `Name`, `Config`, the Adapters
-  `AppMainLoop` and `GfxBackend`, and the errors; everything else is in
-  `internal/`.
+- Kind: an Extension. The root declares nothing and offers only `Name`,
+  `Config`, the Adapters `AppMainLoop` and `GfxBackend`, and the errors, each an
+  alias of what `internal/` declares; everything else is in `internal/` too.
 - Constructor: `gogpuplugin.New() kernel.Plugin`
 - Plugin dependencies: `gfx`, `input`
 - Go package dependencies: `app`, `gfx`, `input`, `kernel`, the gogpu library,
-  WebGPU implementation packages. The root imports only `kernel`, `app` and
-  `gfx`; the gogpu library is imported by `internal/` alone.
+  WebGPU implementation packages. The root imports only its own `internal/`;
+  the gogpu library is imported by `internal/` alone.
 - Contributes: one `app.MainLoop` Adapter and one `gfx.Backend` Adapter
 - Implements: `kernel.PluginHost`, `kernel.PluginStopper`
 - Subscribed kernel events: none
@@ -64,7 +64,7 @@ clamp and its catch-up cap (`Step`, `MaxFrame`, `MaxPending`) are app's
 
 ## Errors
 
-The root's `err.go` declares the errors the plugin reports that a caller may
+The root's `err.go` aliases the errors the plugin reports that a caller may
 match: `ErrInvalidConfig`; `ErrDepthOnlyPassUnsupported`, reported once
 per run for a depth-only pass the selected backend declines to encode; and
 `ErrBindGroupRefused{Shader, Group}`, reported once per shader and group for a

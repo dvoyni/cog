@@ -6,7 +6,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -29,15 +28,15 @@ type orderedFixture struct {
 
 func (*orderedFixture) Name() kernel.PluginName { return "ordered" }
 
-func (*orderedFixture) Dependencies() []kernel.PluginName { return []kernel.PluginName{ecs.Name} }
+func (*orderedFixture) Dependencies() []kernel.PluginName { return []kernel.PluginName{Name} }
 
 func (f *orderedFixture) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.Subscribe[afterDrainSystem](ecs.ToHandler[app.UpdateEvent](registrar, func() {
+	registrar.Subscribe[afterDrainSystem](ToHandler[app.UpdateEvent](registrar, func() {
 		f.after.Store(f.ticket.Add(1))
-	})).Last().After[ecs.DrainOnUpdate]()
-	registrar.Subscribe[beforeDrainSystem](ecs.ToHandler[app.UpdateEvent](registrar, func() {
+	})).Last().After[DrainOnUpdate]()
+	registrar.Subscribe[beforeDrainSystem](ToHandler[app.UpdateEvent](registrar, func() {
 		f.before.Store(f.ticket.Add(1))
-	})).Last().Before[ecs.DrainOnUpdate]()
+	})).Last().Before[DrainOnUpdate]()
 	return nil
 }
 
@@ -45,7 +44,7 @@ func (f *orderedFixture) Register(registrar *kernel.Registrar, _ any) error {
 func drainerOf(t *testing.T, engine *kernel.Engine) kernel.SubscriptionDescription {
 	t.Helper()
 	for _, subscription := range engine.Describe().Subscriptions {
-		if subscription.Type == reflect.TypeFor[ecs.DrainOnUpdate]() {
+		if subscription.Type == reflect.TypeFor[DrainOnUpdate]() {
 			return subscription
 		}
 	}
@@ -67,8 +66,8 @@ func TestTheEcsPluginSubscribesTheDrainerLastOnUpdate(t *testing.T) {
 	engine := runEngine(t, New())
 
 	drainer := drainerOf(t, engine)
-	if drainer.Owner != ecs.Name {
-		t.Errorf("ecs.DrainOnUpdate is owned by %q, want %q", drainer.Owner, ecs.Name)
+	if drainer.Owner != Name {
+		t.Errorf("ecs.DrainOnUpdate is owned by %q, want %q", drainer.Owner, Name)
 	}
 	if drainer.Event != reflect.TypeFor[app.UpdateEvent]() {
 		t.Errorf("ecs.DrainOnUpdate is subscribed to %s, want app.UpdateEvent", kernel.TypeName(drainer.Event))
@@ -76,7 +75,7 @@ func TestTheEcsPluginSubscribesTheDrainerLastOnUpdate(t *testing.T) {
 	if drainer.Phase != "last" {
 		t.Errorf("ecs.DrainOnUpdate runs in the %s phase, want last", drainer.Phase)
 	}
-	entities := reflect.TypeFor[*ecs.Entities]()
+	entities := reflect.TypeFor[*Entities]()
 	if !slices.Equal(drainer.Writes, []reflect.Type{entities}) ||
 		len(drainer.Reads) != 0 || len(drainer.Uses) != 0 {
 		t.Errorf("ecs.DrainOnUpdate writes %v, reads %v and uses %v; want write{*ecs.Entities} alone",
@@ -118,7 +117,7 @@ func TestALastSubscriberOrdersItselfAfterTheDrain(t *testing.T) {
 		if subscription.Type != reflect.TypeFor[afterDrainSystem]() {
 			continue
 		}
-		if !slices.Contains(subscription.DependsOn, reflect.TypeFor[ecs.DrainOnUpdate]()) {
+		if !slices.Contains(subscription.DependsOn, reflect.TypeFor[DrainOnUpdate]()) {
 			t.Fatalf("afterDrainSystem depends on %v, want ecs.DrainOnUpdate among them",
 				subscription.DependsOn)
 		}

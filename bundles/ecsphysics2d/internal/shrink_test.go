@@ -7,7 +7,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecs/ecsplugin"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
+
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -24,16 +24,16 @@ func TestThePluginRegistersShrinkOverItsOwnResourcesAlone(t *testing.T) {
 		WithPlugins(appplugin.New(), mainLoopAdapter{}, ecsplugin.New(), New())
 
 	want := map[reflect.Type]bool{
-		reflect.TypeFor[*ecsphysics2d.Contacts]():    true,
-		reflect.TypeFor[*ecsphysics2d.StaticIndex](): true,
-		reflect.TypeFor[*ecsphysics2d.BodyIndex]():   true,
+		reflect.TypeFor[*Contacts]():    true,
+		reflect.TypeFor[*StaticIndex](): true,
+		reflect.TypeFor[*BodyIndex]():   true,
 	}
 	for _, command := range engine.Describe().Commands {
-		if command.Type != reflect.TypeFor[ecsphysics2d.ShrinkCmd]() {
+		if command.Type != reflect.TypeFor[ShrinkCmd]() {
 			continue
 		}
-		if command.Owner != ecsphysics2d.Name {
-			t.Fatalf("ShrinkCmd is owned by %q, want %q", command.Owner, ecsphysics2d.Name)
+		if command.Owner != Name {
+			t.Fatalf("ShrinkCmd is owned by %q, want %q", command.Owner, Name)
 		}
 		if len(command.Writes) != len(want) {
 			t.Fatalf("ShrinkCmd writes %v, want the three physics Resources", command.Writes)
@@ -77,7 +77,7 @@ func TestAShrunkPhysicsWorldReturnsToItsSteadyState(t *testing.T) {
 		world.run(t, 2)
 
 		if shrink {
-			released := world.kernel.ExecuteCommand[ecsphysics2d.ShrinkCmd](ecsphysics2d.ShrinkRequest{})
+			released := world.kernel.ExecuteCommand[ShrinkCmd](ShrinkRequest{})
 			t.Logf("the zero request after a %d Body spike released %+v", spikeBodies, released)
 			if released.Contacts == 0 || released.Indices == 0 || released.WorldCache == 0 || released.Scratch == 0 {
 				t.Fatalf("the zero request after a spike released %+v, want Contacts, Indices, WorldCache and Scratch above 0",
@@ -125,7 +125,7 @@ func TestAShrunkPhysicsWorldReturnsToItsSteadyState(t *testing.T) {
 // control moved it.
 func TestAShrunkPhysicsWorldGivesTheSolverScratchBack(t *testing.T) {
 	const ticks = 2_000
-	scratchOnly := ecsphysics2d.ShrinkRequest{
+	scratchOnly := ShrinkRequest{
 		KeepContacts: true, KeepCached: true, KeepIndices: true, KeepWorldCache: true,
 	}
 
@@ -146,7 +146,7 @@ func TestAShrunkPhysicsWorldGivesTheSolverScratchBack(t *testing.T) {
 		world.run(t, 2)
 
 		if shrink {
-			released := world.kernel.ExecuteCommand[ecsphysics2d.ShrinkCmd](scratchOnly)
+			released := world.kernel.ExecuteCommand[ShrinkCmd](scratchOnly)
 			t.Logf("the scratch alone after a %d Body spike released %+v", spikeBodies, released)
 			if released.Scratch == 0 {
 				t.Fatalf("the scratch alone after a spike released %+v, want Scratch above 0", released)
@@ -172,7 +172,7 @@ func TestAShrunkPhysicsWorldGivesTheSolverScratchBack(t *testing.T) {
 		runtime.ReadMemStats(&after)
 		result.objects = float64(after.Mallocs-before.Mallocs) / ticks
 		result.places = world.places(t)
-		result.held = world.kernel.ExecuteCommand[ecsphysics2d.ShrinkCmd](scratchOnly).Scratch
+		result.held = world.kernel.ExecuteCommand[ShrinkCmd](scratchOnly).Scratch
 		return result
 	}
 
@@ -306,14 +306,14 @@ type shrinkPushOnUpdate kernel.Subscription[app.UpdateEvent]
 // a pair at a time, so that growing and cutting the population is a matter of
 // how many pairs are held.
 type shrinkGame struct {
-	body ecsphysics2d.Dynamic
+	body Dynamic
 	held []ecs.Entity
 }
 
 func (*shrinkGame) Name() kernel.PluginName { return "physicsshrinkgame" }
 
 func (*shrinkGame) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{ecs.Name, ecsphysics2d.Name}
+	return []kernel.PluginName{ecs.Name, Name}
 }
 
 func (g *shrinkGame) Register(registrar *kernel.Registrar, _ any) error {
@@ -326,12 +326,12 @@ func (g *shrinkGame) Register(registrar *kernel.Registrar, _ any) error {
 			at := gridAt(len(g.held) / 2)
 			g.held = append(g.held,
 				bodies.New(shapedBody{
-					Place: ecsphysics2d.Position{Current: at},
+					Place: Position{Current: at},
 					Body:  g.body,
 					Shape: measured(0.4),
 				}),
 				statics.New(shapedStatic{
-					Place: ecsphysics2d.Position{Current: at.Add(m.Vec2d{X: 0.75})},
+					Place: Position{Current: at.Add(m.Vec2d{X: 0.75})},
 					Shape: measured(0.4),
 				}))
 		}
@@ -346,14 +346,14 @@ func (g *shrinkGame) Register(registrar *kernel.Registrar, _ any) error {
 	}))
 	registrar.HandleCommand[shrinkCountCmd](ecs.ToExecute[struct{}, int](registrar, func(
 		_ struct{},
-		contacts *ecs.Read[*ecsphysics2d.Contacts],
+		contacts *ecs.Read[*Contacts],
 		answer *ecs.Resp[int],
 	) {
 		answer.Set(contacts.Get().Len())
 	}))
 	registrar.HandleCommand[shrinkPlacesCmd](ecs.ToExecute[struct{}, []m.Vec2d](registrar, func(
 		_ struct{},
-		places *ecs.Get[ecsphysics2d.Position],
+		places *ecs.Get[Position],
 		answer *ecs.Resp[[]m.Vec2d],
 	) {
 		out := make([]m.Vec2d, 0, len(g.held))
@@ -369,6 +369,6 @@ func (g *shrinkGame) Register(registrar *kernel.Registrar, _ any) error {
 		for _, it := range q.All() {
 			it.Force.Force = it.Force.Force.Add(m.Vec2d{X: 10})
 		}
-	})).Before[ecsphysics2d.IntegrateOnUpdate]()
+	})).Before[IntegrateOnUpdate]()
 	return nil
 }

@@ -8,7 +8,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dvoyni/cog/extensions/otosound"
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/slots/sound"
 )
@@ -113,7 +112,7 @@ type backend struct {
 	// failure and ignored are the two things the Adapter has to say out loud,
 	// left here for the tick handler that holds a Kernel to report once.
 	failure atomic.Pointer[deviceFailure]
-	ignored atomic.Pointer[otosound.ErrDeviceConfigIgnored]
+	ignored atomic.Pointer[ErrDeviceConfigIgnored]
 
 	// everReady is whether a Device has ever been audible in this Engine. It is
 	// what separates the one condition the Adapter reports - no Device could be
@@ -133,7 +132,7 @@ type backend struct {
 	wg sync.WaitGroup
 }
 
-func newBackend(cfg otosound.Config, hardware audio) *backend {
+func newBackend(cfg Config, hardware audio) *backend {
 	rate := cfg.SampleRate
 	if rate == 0 {
 		rate = defaultSampleRate
@@ -152,7 +151,7 @@ func newBackend(cfg otosound.Config, hardware audio) *backend {
 		cadence:     retryEvery,
 		done:        make(chan struct{}),
 	}
-	b.device.Store(&sound.Device{Name: string(otosound.Name)})
+	b.device.Store(&sound.Device{Name: string(Name)})
 	return b
 }
 

@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -37,23 +36,23 @@ const engagedSpeed = 40.4
 // convex one. Both have a minimum extent of 0.2 m.
 var engagedMovers = []struct {
 	name  string
-	shape ecsphysics2d.Shape
+	shape Shape
 }{
-	{"circle", ecsphysics2d.NewCircleShape(0.2, m.Vec2d{})},
-	{"box", ecsphysics2d.NewBoxShape(0.4, 0.4, 0)},
+	{"circle", NewCircleShape(0.2, m.Vec2d{})},
+	{"box", NewBoxShape(0.4, 0.4, 0)},
 }
 
 // engagedSensors are the moving Sensors priced against the same bar: a box, and
 // a segment standing across its path. Neither has a gate.
 var engagedSensors = []struct {
 	name  string
-	shape ecsphysics2d.Shape
+	shape Shape
 }{
-	{"box", asSensor(ecsphysics2d.NewBoxShape(0.4, 0.4, 0))},
-	{"segment", asSensor(ecsphysics2d.NewSegmentShape(m.Vec2d{Y: -0.2}, m.Vec2d{Y: 0.2}, 0))},
+	{"box", asSensor(NewBoxShape(0.4, 0.4, 0))},
+	{"segment", asSensor(NewSegmentShape(m.Vec2d{Y: -0.2}, m.Vec2d{Y: 0.2}, 0))},
 }
 
-func asSensor(shape ecsphysics2d.Shape) ecsphysics2d.Shape {
+func asSensor(shape Shape) Shape {
 	shape.Sensor = true
 	return shape
 }
@@ -68,7 +67,7 @@ func laneAt(i int) m.Vec2d {
 // populateEngaged is BenchmarkTheStep's world at n, and n fast Bodies of that
 // Shape over it, set back before every tick. A board across each lane when hit
 // is set. It returns the fast Bodies.
-func populateEngaged(t testing.TB, h *harness, r *resetter, n int, shape ecsphysics2d.Shape, hit bool) []ecs.Entity {
+func populateEngaged(t testing.TB, h *harness, r *resetter, n int, shape Shape, hit bool) []ecs.Entity {
 	t.Helper()
 	populate(t, h, n)
 	velocity := m.Vec2d{X: engagedSpeed}
@@ -77,8 +76,8 @@ func populateEngaged(t testing.TB, h *harness, r *resetter, n int, shape ecsphys
 		at := laneAt(i)
 		fast[i] = h.spawn(t, spawnRequest{
 			Kind:     kindShapedBody,
-			Place:    ecsphysics2d.Position{Current: at},
-			Velocity: ecsphysics2d.Velocity{Linear: velocity},
+			Place:    Position{Current: at},
+			Velocity: Velocity{Linear: velocity},
 			Body:     dynamic(t, 1, 1, 0, 0),
 			Shape:    shape,
 		})
@@ -86,8 +85,8 @@ func populateEngaged(t testing.TB, h *harness, r *resetter, n int, shape ecsphys
 		if hit {
 			h.spawn(t, spawnRequest{
 				Kind:  kindShapedStatic,
-				Place: ecsphysics2d.Position{Current: at.Add(m.Vec2d{X: 0.375})},
-				Shape: ecsphysics2d.NewBoxShapeFor(ecsphysics2d.NewBB(-0.025, -0.25, 0.025, 0.25), 0),
+				Place: Position{Current: at.Add(m.Vec2d{X: 0.375})},
+				Shape: NewBoxShapeFor(NewBB(-0.025, -0.25, 0.025, 0.25), 0),
 			})
 		}
 	}
@@ -210,7 +209,7 @@ func BenchmarkTheMovingSensor(b *testing.B) {
 	}
 }
 
-func benchmarkEngaged(b *testing.B, n int, shape ecsphysics2d.Shape, hit bool) {
+func benchmarkEngaged(b *testing.B, n int, shape Shape, hit bool) {
 	r := &resetter{}
 	h := newHarnessWithPlugins(b, nil, uint32(4*n), r)
 	fast := populateEngaged(b, h, r, n, shape, hit)

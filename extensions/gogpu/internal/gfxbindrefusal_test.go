@@ -3,10 +3,9 @@ package internal
 import (
 	"errors"
 
-	"github.com/gogpu/wgpu"
 	"testing"
 
-	cgogpu "github.com/dvoyni/cog/extensions/gogpu"
+	"github.com/gogpu/wgpu"
 )
 
 // Every way a bind group can come up short converges on one refused group, and
@@ -20,7 +19,7 @@ func TestARefusedBindGroupIsNamedOncePerShaderAndGroup(t *testing.T) {
 	other := &gfxbShader{label: "canvas.wgsl"}
 
 	err := b.noteRefusedBindGroup(shader, 2)
-	refused, ok := err.(cgogpu.ErrBindGroupRefused)
+	refused, ok := err.(ErrBindGroupRefused)
 	if !ok {
 		t.Fatalf("first refusal = %v, want ErrBindGroupRefused", err)
 	}

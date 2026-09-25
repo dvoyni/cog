@@ -2,9 +2,10 @@
 // provides storage.PermanentFS as a directory confined under the user's data
 // directory, named by the application id.
 //
-// diskstorage is an Extension. Its root declares only Name, Config, its one
-// Adapter, StoragePermanentFS, and its errors; the plugin, built by
-// diskstorageplugin.New, is in its internal/. The plugin is built only for
+// diskstorage is an Extension. Its root offers only Name, Config, its one
+// Adapter, StoragePermanentFS, and its errors, each an alias of what its
+// internal/ declares; the plugin, built by diskstorageplugin.New, is in its
+// internal/ too. The plugin is built only for
 // desktop platforms (!js); a browser composes jsstorage instead. Its Config is
 // supplied under Name.
 //

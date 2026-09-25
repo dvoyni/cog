@@ -23,7 +23,7 @@ var rootFiles = map[kind][]string{
 
 var declarationFiles = []string{
 	"doc.go", "id.go", "commands.go", "events.go", "resources.go", "ports.go",
-	"adapters.go", "types.go", "config.go", "err.go", "utils.go",
+	"adapters.go", "components.go", "types.go", "config.go", "err.go", "utils.go",
 }
 
 // fileViolations finds every non-test Go file in a root that its kind's
@@ -54,6 +54,7 @@ func fileViolations(dir string, root place, m module) ([]violation, error) {
 // files the go tool loaded, so tests are not checked.
 func forwarderViolations(pkg *packages.Package, root place, m module) []violation {
 	typesPath := m.path + "/" + root.plugin + "/internal/types"
+	target := forwardTarget(root, m)
 	var violations []violation
 	for _, file := range pkg.Syntax {
 		inUtils := filepath.Base(pkg.Fset.File(file.Pos()).Name()) == "utils.go"
@@ -67,10 +68,10 @@ func forwarderViolations(pkg *packages.Package, root place, m module) []violatio
 			case !inUtils && function.Recv == nil && function.Name.IsExported():
 				violations = append(violations, declared(pkg, object, m,
 					root.path+" declares "+function.Name.Name+" outside utils.go", ruleForwarder))
-			case !inUtils && function.Recv == nil && !isInlineAnchor(function, pkg.TypesInfo, typesPath):
+			case !inUtils && function.Recv == nil && !isInlineAnchor(function, pkg.TypesInfo, target):
 				violations = append(violations, declared(pkg, object, m,
 					root.path+" declares "+function.Name.Name+", which is not an inline anchor", ruleInlineAnchor))
-			case inUtils && (function.Recv != nil || !isForwarder(function, pkg.TypesInfo, typesPath)):
+			case inUtils && (function.Recv != nil || !isForwarder(function, pkg.TypesInfo, target)):
 				violations = append(violations, declared(pkg, object, m,
 					root.path+" declares "+function.Name.Name+" in utils.go, which is not a pure forwarder", ruleForwarder))
 			case inUtils && root.kind == kindSlot:
@@ -85,6 +86,19 @@ func forwarderViolations(pkg *packages.Package, root place, m module) []violatio
 	return violations
 }
 
+// forwardTarget reports whether a package is one a root's forwarders and
+// inline anchors may reach into: its own internal/types, and for an
+// alias-index root its own internal/ and every package under it as well - the
+// same set its aliases may name.
+func forwardTarget(root place, m module) func(path string) bool {
+	typesPath := m.path + "/" + root.plugin + "/internal/types"
+	internalPath := m.path + "/" + root.plugin + "/internal"
+	return func(path string) bool {
+		return path == typesPath || aliasIndexRoots[root.plugin] &&
+			(path == internalPath || strings.HasPrefix(path, internalPath+"/"))
+	}
+}
+
 // isInlineAnchor reports whether function is an inline anchor, the one piece
 // of code a root may hold outside utils.go and Config's builders: unexported,
 // never referenced, generic in nothing and returning nothing, with a body in
@@ -96,7 +110,7 @@ func forwarderViolations(pkg *packages.Package, root place, m module) []violatio
 // package the caller does not import only when a package it does import
 // references that method, and a root of aliases and forwarders references none,
 // so a root anchors the accessors its importers call per instance.
-func isInlineAnchor(function *ast.FuncDecl, info *types.Info, typesPath string) bool {
+func isInlineAnchor(function *ast.FuncDecl, info *types.Info, target func(string) bool) bool {
 	object, ok := info.Defs[function.Name].(*types.Func)
 	if !ok || function.Name.IsExported() || function.Body == nil || len(function.Body.List) == 0 {
 		return false
@@ -121,7 +135,7 @@ func isInlineAnchor(function *ast.FuncDecl, info *types.Info, typesPath string) 
 			return false
 		}
 		named, ok := types.Unalias(alias.Type()).(*types.Named)
-		if !ok || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != typesPath {
+		if !ok || named.Obj().Pkg() == nil || !target(named.Obj().Pkg().Path()) {
 			return false
 		}
 		for _, parameter := range field.Names {
@@ -167,13 +181,14 @@ func isInlineAnchor(function *ast.FuncDecl, info *types.Info, typesPath string) 
 }
 
 // slotMayName reports whether a Slot's forwarder may name a type declared in a
-// package: the Slot's root or internal/types, the standard library, a Library
-// or the kernel.
+// package: the Slot's root, internal/ or internal/types, the standard library,
+// a Library or the kernel.
 func slotMayName(rootPath, typesPath string, m module) func(*types.Package) bool {
 	return func(declaring *types.Package) bool {
 		path := declaring.Path()
 		first, _, _ := strings.Cut(path, "/")
-		return path == rootPath || path == typesPath || strings.HasPrefix(path, typesPath+"/") ||
+		internalPath := strings.TrimSuffix(typesPath, "/types")
+		return path == rootPath || path == internalPath || strings.HasPrefix(path, internalPath+"/") ||
 			path == m.path+"/kernel" || strings.HasPrefix(path, m.path+"/libs/") ||
 			!strings.Contains(first, ".")
 	}
@@ -242,10 +257,11 @@ func foreignType(t types.Type, may func(*types.Package) bool) *types.TypeName {
 }
 
 // isForwarder reports whether function is exported and its body is a single
-// call of a function in typesPath, returned when function has results, whose
+// call of a function in a package target accepts, returned when function has
+// results, whose
 // type arguments, if spelled, are function's type parameters and whose
 // arguments are function's parameters, in order, spread when it is variadic.
-func isForwarder(function *ast.FuncDecl, info *types.Info, typesPath string) bool {
+func isForwarder(function *ast.FuncDecl, info *types.Info, target func(string) bool) bool {
 	object, ok := info.Defs[function.Name].(*types.Func)
 	if !ok || !function.Name.IsExported() || function.Body == nil || len(function.Body.List) != 1 {
 		return false
@@ -280,7 +296,7 @@ func isForwarder(function *ast.FuncDecl, info *types.Info, typesPath string) boo
 	if !ok {
 		return false
 	}
-	if name, ok := info.Uses[qualifier].(*types.PkgName); !ok || name.Imported().Path() != typesPath {
+	if name, ok := info.Uses[qualifier].(*types.PkgName); !ok || !target(name.Imported().Path()) {
 		return false
 	}
 	if _, ok := info.Uses[selector.Sel].(*types.Func); !ok {
@@ -457,7 +473,9 @@ func collectAdapters(dir string, at place, m module, use *adapterUse) error {
 					name = adapter.Sel.Name
 				}
 			case *ast.Ident:
-				if at.tier == tierRoot {
+				// An alias-index plugin provides from its internal/, which
+				// declares the Adapter under the name its root aliases.
+				if at.tier == tierRoot || at.tier == tierInternal && aliasIndexRoots[at.plugin] {
 					name = adapter.Name
 				}
 			}
@@ -562,6 +580,131 @@ func constructorExportViolations(pkg *packages.Package, rel string, m module) []
 			continue
 		}
 		violations = append(violations, declared(pkg, object, m, rel+" exports "+name, ruleConstructorExports))
+	}
+	return violations
+}
+
+// aliasViolations holds an alias-index root to aliases: every type it declares
+// is an alias of a type in its own internal/ or internal/types with the same
+// name, and every const and var re-exports one of its own internal/'s, or its
+// internal/types', of the same name. Functions are the forwarder rule's.
+func aliasViolations(pkg *packages.Package, root place, m module) []violation {
+	internalPath := m.path + "/" + root.plugin + "/internal"
+	own := func(path string) bool { return path == internalPath || strings.HasPrefix(path, internalPath+"/") }
+	var violations []violation
+	for _, file := range pkg.Syntax {
+		for _, decl := range file.Decls {
+			general, ok := decl.(*ast.GenDecl)
+			if !ok || general.Tok == token.IMPORT {
+				continue
+			}
+			for _, spec := range general.Specs {
+				switch spec := spec.(type) {
+				case *ast.TypeSpec:
+					// The alias is judged by its target as written, one step:
+					// internal/ may itself alias a Library's type, as ui's
+					// Rect is libs/m's.
+					object := pkg.TypesInfo.Defs[spec.Name]
+					if !spec.Assign.IsValid() || !aliasesOwn(spec, pkg.TypesInfo, own) {
+						violations = append(violations, declared(pkg, object, m,
+							root.path+" declares "+spec.Name.Name+", which is not an alias of its own internal type "+spec.Name.Name,
+							ruleAliasDeclarations))
+					}
+				case *ast.ValueSpec:
+					for i, name := range spec.Names {
+						object := pkg.TypesInfo.Defs[name]
+						if name.Name == "_" {
+							continue
+						}
+						if spec.Type != nil || len(spec.Values) != len(spec.Names) || !reexports(spec.Values[i], name.Name, pkg.TypesInfo, own) {
+							violations = append(violations, declared(pkg, object, m,
+								root.path+" declares "+name.Name+", which does not re-export its own internal "+name.Name,
+								ruleAliasDeclarations))
+						}
+					}
+				}
+			}
+		}
+	}
+	return violations
+}
+
+// aliasesOwn reports whether a type alias names a type of a package own
+// accepts under its own name - or, for an unexported alias, the exported form
+// of it, which is how a root keeps a type out of its API while still spelling
+// it in a forwarder's signature - instantiated, when the alias is generic, with
+// exactly its own type parameters in order.
+func aliasesOwn(spec *ast.TypeSpec, info *types.Info, own func(string) bool) bool {
+	target := spec.Type
+	var arguments []ast.Expr
+	switch instance := target.(type) {
+	case *ast.IndexExpr:
+		target, arguments = instance.X, []ast.Expr{instance.Index}
+	case *ast.IndexListExpr:
+		target, arguments = instance.X, instance.Indices
+	}
+	var parameters []*ast.Ident
+	if spec.TypeParams != nil {
+		for _, field := range spec.TypeParams.List {
+			parameters = append(parameters, field.Names...)
+		}
+	}
+	if len(arguments) != len(parameters) {
+		return false
+	}
+	for i, argument := range arguments {
+		ident, ok := argument.(*ast.Ident)
+		if !ok || info.Uses[ident] != info.Defs[parameters[i]] {
+			return false
+		}
+	}
+	name := spec.Name.Name
+	if !ast.IsExported(name) {
+		name = strings.ToUpper(name[:1]) + name[1:]
+	}
+	return reexports(target, name, info, own)
+}
+
+// reexports reports whether value is a qualified reference to a const, var or
+// type named name in a package own accepts.
+func reexports(value ast.Expr, name string, info *types.Info, own func(string) bool) bool {
+	selector, ok := value.(*ast.SelectorExpr)
+	if !ok || selector.Sel.Name != name {
+		return false
+	}
+	qualifier, ok := selector.X.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	pkgName, ok := info.Uses[qualifier].(*types.PkgName)
+	if !ok || !own(pkgName.Imported().Path()) {
+		return false
+	}
+	switch info.Uses[selector.Sel].(type) {
+	case *types.Const, *types.Var, *types.TypeName:
+		return true
+	}
+	return false
+}
+
+// logicViolations finds every function, and every method but Error and
+// String, that an alias-index plugin's internal/types declares: it is where
+// plain data goes, and the logic that works on it lives in internal/ with the
+// Systems that drive it.
+func logicViolations(pkg *packages.Package, rel string, m module) []violation {
+	var violations []violation
+	for _, file := range pkg.Syntax {
+		for _, decl := range file.Decls {
+			function, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			if function.Recv != nil && (function.Name.Name == "Error" || function.Name.Name == "String") {
+				continue
+			}
+			violations = append(violations, declared(pkg, pkg.TypesInfo.Defs[function.Name], m,
+				rel+" declares "+function.Name.Name+", which is logic", ruleTypesData))
+		}
 	}
 	return violations
 }

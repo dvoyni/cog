@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dvoyni/cog/extensions/jssound"
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/slots/sound"
 )
@@ -43,13 +42,13 @@ func fixture(t *testing.T) assets.Blob {
 // and a prepare waits for the probe.
 func started(t *testing.T, f *audioFake, nativeOgg bool) *backend {
 	t.Helper()
-	return startedWith(t, f, nativeOgg, jssound.Config{})
+	return startedWith(t, f, nativeOgg, Config{})
 }
 
 // startedWith is the same, under a Config a test wants to name - which today is
 // only ever DecodedClipLimit, because that is the one field that changes what
 // the Adapter does with a Clip rather than what it asks the context for.
-func startedWith(t *testing.T, f *audioFake, nativeOgg bool, cfg jssound.Config) *backend {
+func startedWith(t *testing.T, f *audioFake, nativeOgg bool, cfg Config) *backend {
 	t.Helper()
 	b := newBackend(cfg)
 	b.Voices(4)
@@ -141,7 +140,7 @@ func TestAPreparedClipReportsTheFilesFactsAndNotTheContexts(t *testing.T) {
 // decoder, with the samples reaching an AudioBuffer by copyToChannel.
 func TestOggSupportIsProbedOnceAndTheWasmDecoderIsTheFallback(t *testing.T) {
 	f := fakeAudio(t)
-	b := newBackend(jssound.Config{})
+	b := newBackend(Config{})
 	if b.support != oggUnknown {
 		t.Fatal("the Adapter decided whether the browser decodes Ogg before it had asked")
 	}
@@ -181,7 +180,7 @@ func TestOggSupportIsProbedOnceAndTheWasmDecoderIsTheFallback(t *testing.T) {
 // Clip sent down the wrong route would be the probe doing nothing.
 func TestAPrepareBeforeTheProbeAnswersWaitsForIt(t *testing.T) {
 	f := fakeAudio(t)
-	b := newBackend(jssound.Config{})
+	b := newBackend(Config{})
 	b.Voices(1)
 
 	if _, _, err := b.Prepare("early", fixture(t)); err != nil {
@@ -223,7 +222,7 @@ func TestAClipTheBrowserRefusesFailsTerminally(t *testing.T) {
 	if len(taken) != 1 {
 		t.Fatalf("TakePrepared drained %d, want the one failure", len(taken))
 	}
-	var refused jssound.ErrDecodeRefused
+	var refused ErrDecodeRefused
 	if !errors.As(taken[0].Err, &refused) {
 		t.Fatalf("the completion carries %v, want ErrDecodeRefused", taken[0].Err)
 	}
@@ -240,7 +239,7 @@ func TestBytesThatAreNotOggFailBeforeTheBrowserIsAsked(t *testing.T) {
 	b := started(t, f, true)
 
 	_, _, err := b.Prepare("token", assets.NewBlobFromString("this is not an ogg file at all"))
-	var notOgg jssound.ErrNotOggVorbis
+	var notOgg ErrNotOggVorbis
 	if !errors.As(err, &notOgg) {
 		t.Fatalf("Prepare = %v, want ErrNotOggVorbis", err)
 	}
@@ -560,14 +559,14 @@ func TestADestroyDropsTheClipBehindTheStopsThatPrecedeIt(t *testing.T) {
 // Port has no verb for it and a game is given Ready and nothing else.
 func TestTheDeviceIsNotReadyUntilAGestureResumesTheContext(t *testing.T) {
 	f := fakeAudio(t)
-	b := newBackend(jssound.Config{})
+	b := newBackend(Config{})
 	b.Voices(1)
 
 	if b.Device().Ready {
 		t.Fatal("the Device is ready before any gesture, and a browser suspends a fresh context")
 	}
-	if name := b.Device().Name; name != string(jssound.Name) {
-		t.Fatalf("the Device names %q, want %q", name, jssound.Name)
+	if name := b.Device().Name; name != string(Name) {
+		t.Fatalf("the Device names %q, want %q", name, Name)
 	}
 
 	f.gesture("pointerdown")
@@ -615,8 +614,8 @@ func TestOneEngineOpensExactlyOneContext(t *testing.T) {
 func TestTheLatencyHintReachesTheContext(t *testing.T) {
 	f := fakeAudio(t)
 
-	newBackend(jssound.Config{})
-	newBackend(jssound.Config{}.WithLatencyHint(40 * time.Millisecond))
+	newBackend(Config{})
+	newBackend(Config{}.WithLatencyHint(40 * time.Millisecond))
 
 	contexts := each(f.value.Get("contexts"))
 	if len(contexts) != 2 {
@@ -635,7 +634,7 @@ func TestTheLatencyHintReachesTheContext(t *testing.T) {
 // advances and ends on schedule, and is simply never heard.
 func TestWithNoWebAudioTheAdapterBehavesAsNosoundDoes(t *testing.T) {
 	noWebAudio(t)
-	b := newBackend(jssound.Config{})
+	b := newBackend(Config{})
 	b.Voices(2)
 
 	if b.failure == nil {
@@ -673,7 +672,7 @@ func TestWithNoWebAudioTheAdapterBehavesAsNosoundDoes(t *testing.T) {
 // minting an id for something no start could ever resolve.
 func TestInstallRefusesAClipThisAdapterDidNotMake(t *testing.T) {
 	fakeAudio(t)
-	b := newBackend(jssound.Config{})
+	b := newBackend(Config{})
 	if _, err := b.Install(nil); !errors.Is(err, errNotOurClip) {
 		t.Fatalf("Install = %v, want errNotOurClip", err)
 	}

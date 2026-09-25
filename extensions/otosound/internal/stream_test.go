@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dvoyni/cog/extensions/otosound"
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/slots/sound"
 )
@@ -185,7 +184,7 @@ func TestAClipUnderTheLimitIsResidentAndOneOverItStreams(t *testing.T) {
 	resident.Prepare(nil, encoded)
 	held := waitPrepared(t, resident)
 
-	streamed := newBackend(otosound.Config{DecodedClipLimit: 64 << 10}, &fakeAudio{})
+	streamed := newBackend(Config{DecodedClipLimit: 64 << 10}, &fakeAudio{})
 	t.Cleanup(streamed.stop)
 	streamed.Voices(8)
 	streamed.Prepare(nil, encoded)

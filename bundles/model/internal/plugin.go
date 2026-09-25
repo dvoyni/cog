@@ -3,8 +3,6 @@ package internal
 import (
 	"math"
 
-	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/model/internal/types"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/storage"
 )
@@ -21,7 +19,7 @@ type plugin struct{}
 // Register it before any renderer that draws from it.
 func New() kernel.Plugin { return &plugin{} }
 
-func (p *plugin) Name() kernel.PluginName { return model.Name }
+func (p *plugin) Name() kernel.PluginName { return Name }
 
 // Dependencies is storage alone, which hosts the bundled shader's mount. The
 // Lookup holds no handle of its own: the filesystem and resource queue a load
@@ -33,11 +31,11 @@ func (p *plugin) Register(registrar *kernel.Registrar, value any) error {
 	if err != nil {
 		return err
 	}
-	registrar.InitResource(types.NewSizedLookup(config))
+	registrar.InitResource(NewSizedLookup(config))
 	// storage installs the bundled shader mount at its Start, ahead of every
 	// plugin that depends on it, so the shader is in place for the first frame
 	// of any renderer drawing with it.
-	registrar.ProvideAdapter[model.StorageReadMount](storage.ReadMount{
+	registrar.ProvideAdapter[StorageReadMount](storage.ReadMount{
 		Id: shaderMountID, Priority: math.MaxInt, FS: shaderFS,
 	})
 	return nil

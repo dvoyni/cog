@@ -1,0 +1,369 @@
+package internal
+
+import (
+	"reflect"
+	"unsafe"
+
+	"github.com/dvoyni/cog/kernel"
+)
+
+// absentSlot is the sparse slot of an entity a Store holds nothing for. Its
+// generation half is all-ones, which no live generation reaches, so membership
+// is one load and one compare with no tombstone branch to predict.
+const absentSlot = uint64(absentGeneration) << 32
+
+// storeCore is the type-erased half of a Store, and it carries exactly one
+// method on purpose. A despawn has to empty every Store while naming no
+// Component type, and that is the whole of what type erasure is for here: the
+// 9% an indirect call costs is paid once per Store per despawn, never per
+// entity. Everything a Query needs — the population, the owners, the rows —
+// it reaches through the typed *Store[T] instead.
+//
+// NewStore enrols that one method with the authority bound to its Store; the
+// interface itself is what guardHandle recognises a Store by.
+type storeCore interface {
+	remove(e Entity) bool
+}
+
+// storeHeader is what every *Store[T] looks like once T is forgotten, and it is
+// how a Query reaches a Store whose Component type it knows only as a
+// reflect.Type. The first two arrays are typed the same for every T; the rows
+// become an address and a stride, the stride taken from reflect at registration.
+//
+// This is the sanctioned unsafe in the package and it rests on one property:
+// the layout of Store[T] is three headers in this order, whatever T is.
+// TestTheErasedStoreMatchesTheTypedOne asserts that rather than assuming it.
+type storeHeader struct {
+	sparse  []uint64
+	owners  []Entity
+	dense   denseRows
+	trivial bool
+	lists   []listSite
+	owner   string
+	watch   hookKind
+	// hooks is the log's T-free half, which a *hookLog[T] begins with.
+	hooks *hookRecords
+}
+
+// probe is Store.probe on the erased view: the dense row e's value is in.
+func (h *storeHeader) probe(e Entity) (uint32, bool) {
+	index := e.idx()
+	if int(index) >= len(h.sparse) {
+		return 0, false
+	}
+	slot := h.sparse[index]
+	return uint32(slot), uint32(slot>>32) == e.gen()
+}
+
+// denseRows is the header of dense []T with the element type erased. A row is
+// data + row*size, and size comes from the registered Component type.
+type denseRows struct {
+	data unsafe.Pointer
+	len  int
+	cap  int
+}
+
+// Store is the holding of every value of one Component type, one per registered
+// type, and the unit a lock is taken on. It is three arrays:
+//
+//	sparse []uint64   // entity index -> generation<<32 | dense index
+//	owners []Entity   // dense index  -> the full entity id
+//	dense  []T        // packed component data
+//
+// len(owners) is the population. There is no separate count, because removal is
+// swap-remove and the packed arrays therefore never contain holes.
+//
+// A Store must be reached as *Store[T]. A value store makes a kernel write
+// handle's Get return a copy, so mutations through it are silently discarded.
+type Store[T any] struct {
+	sparse []uint64
+	owners []Entity
+	dense  []T
+	// trivial is the pointer-free answer for T, and the only thing it decides
+	// is whether a vacated row is zeroed. It sits after the three arrays so the
+	// erased header can mirror it and the two layouts stay identical.
+	trivial bool
+	// lists and owner are what validation mode needs and what a release build
+	// never reads: the Lists in a row and the Lists within their elements, and the
+	// Component's name for the diagnostic.
+	lists []listSite
+	owner string
+	// watch is the union of the kind sets of this Store's Hooks readers, fixed
+	// when registration closes, and hooks is the log they read, nil while
+	// nobody reads. A writer handle reads watch when its System's run starts;
+	// neither is touched by add or remove, which stay leaf functions. See
+	// hooks.go.
+	watch hookKind
+	hooks *hookLog[T]
+}
+
+// erase views a typed Store as the header a Query fills from. It is a cast and
+// nothing else: the Store keeps its identity, its lock and its owner.
+func (s *Store[T]) erase() *storeHeader { return (*storeHeader)(unsafe.Pointer(s)) }
+
+// NewStore creates a Store and enrols it with the authority, which is what lets
+// a despawn empty it; a Store the authority cannot reach would keep rows for
+// entities that no longer exist. ids is the peak population the app expects,
+// reserving the three arrays so the fill costs no further allocation — it is a
+// hint and not a cap, and nothing here shrinks on its own: the capacity goes
+// back only when the app executes ShrinkCmd.
+//
+// Component registration is the sanctioned caller. It is what checks the
+// pointer-free rule and hands the Store to the kernel as a resource.
+func NewStore[T any](en *Entities, ids uint32) *Store[T] {
+	if en == nil {
+		panic("ecs: NewStore needs the Entities the Store belongs to, so a despawn can empty it")
+	}
+	rowType := reflect.TypeFor[T]()
+	s := &Store[T]{
+		sparse:  make([]uint64, ids),
+		owners:  make([]Entity, 0, ids),
+		dense:   make([]T, 0, ids),
+		trivial: PointerFree(rowType) == nil,
+		lists:   listSites(rowType),
+		owner:   kernel.TypeName(rowType),
+	}
+	for i := range s.sparse {
+		s.sparse[i] = absentSlot
+	}
+	en.enrol(s.remove, s.shrink)
+	return s
+}
+
+// Len is the population: how many entities this Store holds a value for. It is
+// what a Query consults to choose its driver, and it is exact because removal
+// leaves no dead row behind.
+func (s *Store[T]) Len() int { return len(s.owners) }
+
+// Has reports whether e has this Component. It is the probe and nothing else:
+// one load of the sparse slot, one compare of the generation half. A stale
+// handle fails it for the same reason an absent one does.
+func (s *Store[T]) Has(e Entity) bool {
+	_, ok := s.probe(e)
+	return ok
+}
+
+// Get returns a copy of e's value. A read yields a copy because a read yielding
+// a pointer would be a data race against concurrent readers, and Go has no
+// pointer-to-const.
+func (s *Store[T]) Get(e Entity) (T, bool) {
+	row, ok := s.probe(e)
+	if !ok {
+		var zero T
+		return zero, false
+	}
+	return s.dense[row], true
+}
+
+// stampFor is validation mode's hook for the accessors, which reach a row
+// without a Query and so without a run. It stamps with a nil run, so the mode
+// is checked and retention is not: a value a Get or a Set.Of handed out is
+// illegal to write whenever it happens, and one a Set.Ref handed out is legal
+// the same way, so neither answer depends on the window it is asked in.
+func (s *Store[T]) stampFor(e Entity, mode listMode) {
+	if len(s.lists) == 0 {
+		return
+	}
+	row, ok := s.probe(e)
+	if !ok {
+		return
+	}
+	stampRun(unsafe.Pointer(&s.dense[row]), s.lists, s.owner, nil, mode)
+}
+
+// Ref returns a pointer to e's stored value, for a caller holding the write
+// lock. The pointer is valid only until this Store next changes structurally:
+// swap-remove relocates rows, so a retained pointer addresses whatever took the
+// slot.
+func (s *Store[T]) Ref(e Entity) (*T, bool) {
+	row, ok := s.probe(e)
+	if !ok {
+		return nil, false
+	}
+	return &s.dense[row], true
+}
+
+// Set gives e this Component, replacing the value if it already has one. A new
+// row is appended, so nothing already in the Store moves.
+//
+// It does not ask whether e exists, because it cannot: a Store is enrolled with
+// the authority and never holds a reference back to it. Its callers are the ones
+// that know — a spawn supplies an id it has just allocated, and the accessor
+// that inserts for an arbitrary handle checks liveness first.
+func (s *Store[T]) Set(e Entity, value T) {
+	if s.update(e, value) {
+		return
+	}
+	s.add(e, value)
+}
+
+// update replaces e's stored value and reports whether e had one. It is the half
+// of Set that changes no structure, split out so a caller that must do something
+// between finding the absence and filling it can.
+func (s *Store[T]) update(e Entity, value T) bool {
+	row, ok := s.probe(e)
+	if !ok {
+		return false
+	}
+	s.dense[row] = value
+	if validate {
+		stampStored(unsafe.Pointer(&s.dense[row]), s.lists, s.owner)
+	}
+	return true
+}
+
+// add appends a row for an entity the caller has already established has none.
+// It is the structural half of Set: it grows the sparse index if the entity's
+// index has never been seen, appends the row, and points the slot at it.
+func (s *Store[T]) add(e Entity, value T) {
+	index := int(e.idx())
+	for len(s.sparse) <= index {
+		s.sparse = append(s.sparse, absentSlot)
+	}
+	row := len(s.owners)
+	s.owners = append(s.owners, e)
+	s.dense = append(s.dense, value)
+	s.sparse[index] = uint64(e.gen())<<32 | uint64(row)
+	if validate {
+		stampStored(unsafe.Pointer(&s.dense[row]), s.lists, s.owner)
+	}
+}
+
+// Remove takes this Component away from e and reports whether it had one.
+func (s *Store[T]) Remove(e Entity) bool { return s.remove(e) }
+
+// logFor is the Store's log, created by the first reader that registers, which
+// also enrols the Store's Despawn capture: a Despawn is recorded whichever kind
+// is watched. A Store nobody reads has neither.
+func (s *Store[T]) logFor(en *Entities) *hookLog[T] {
+	if s.hooks == nil {
+		s.hooks = &hookLog[T]{trivial: s.trivial}
+		en.captures = append(en.captures, s.captureDespawn)
+		en.enrolHooks(s.hooks.shrink)
+	}
+	return s.hooks
+}
+
+// removeRecorded is Remove.From on a Store watched for removals: T's last value
+// is copied into the log before remove vacates the row. It is a separate
+// function so the call sits beside remove and never inside it.
+func (s *Store[T]) removeRecorded(e Entity) bool {
+	row, ok := s.probe(e)
+	if !ok {
+		return false
+	}
+	s.hooks.removed(e, &s.dense[row], kindRemoved)
+	return s.remove(e)
+}
+
+// setRecorded is Set inside a Spawn, on a Store watched for Spawns: the addition
+// is recorded once add returns, beside it and never inside it. A value the same
+// Spawn already gave e is replaced, which is not an addition.
+func (s *Store[T]) setRecorded(e Entity, value T) {
+	if s.update(e, value) {
+		return
+	}
+	s.add(e, value)
+	s.hooks.added(e, kindSpawned|kindAdded|kindChanged)
+}
+
+// captureDespawn is this Store's capture, which a Despawn calls before it
+// empties the Stores: if e holds T, the removal is recorded with T's value as it
+// stood. It reads only its own Store, under the Despawn's write{*Entities}.
+func (s *Store[T]) captureDespawn(e Entity) {
+	row, ok := s.probe(e)
+	if !ok {
+		return
+	}
+	s.hooks.removed(e, &s.dense[row], kindDespawned|kindRemoved)
+}
+
+// probe reports the dense row e's value is in. The compare that finds the row
+// is the compare that rejects a stale handle, so liveness is not an extra cost;
+// it is the probe. owners is not touched at all — a probed Store reads two
+// arrays, not three.
+func (s *Store[T]) probe(e Entity) (uint32, bool) {
+	index := e.idx()
+	if int(index) >= len(s.sparse) {
+		return 0, false
+	}
+	slot := s.sparse[index]
+	return uint32(slot), uint32(slot>>32) == e.gen()
+}
+
+// remove is swap-remove: the last row moves into the hole. That is what keeps
+// the packed arrays dense and len(owners) exact, and it is why no dense index
+// may be held across a mutation and why iteration order is unspecified.
+func (s *Store[T]) remove(e Entity) bool {
+	row, ok := s.probe(e)
+	if !ok {
+		return false
+	}
+	last := uint32(len(s.owners) - 1)
+	if row != last {
+		moved := s.owners[last]
+		s.owners[row] = moved
+		s.dense[row] = s.dense[last]
+		s.sparse[moved.idx()] = uint64(moved.gen())<<32 | uint64(row)
+	}
+	// The arrays are re-sliced, never handed back: a later Set reuses the row.
+	// A pointer-free row is left where it lies, because nothing it holds keeps
+	// anything alive and clearing it would be work for no one. A row holding a
+	// string or a List is zeroed, and that is not tidiness: the vacated slot
+	// would otherwise keep that entity's bytes reachable until something else
+	// happened to take the row, so a despawned Entity's data would outlive it
+	// by an unbounded time. This is the same fix arche made for its own storage
+	// and ark after it; it is a typed assignment, so the collector sees it.
+	if !s.trivial {
+		var zero T
+		s.dense[last] = zero
+	}
+	s.owners = s.owners[:last]
+	s.dense = s.dense[:last]
+	s.sparse[e.idx()] = absentSlot
+	return true
+}
+
+// shrink cuts the rows to the population and the sparse array to the highest
+// index held, leaving capacity equal to length in all three, and reports the
+// bytes let go. An array already at its length is left as it is, so a second
+// shrink allocates nothing and releases nothing.
+//
+// Only ShrinkCmd calls it, holding write{*Entities}, which excludes every
+// handler that could hold this Store.
+func (s *Store[T]) shrink() uintptr {
+	held := 0
+	for _, e := range s.owners {
+		held = max(held, int(e.idx())+1)
+	}
+	before := s.bytes()
+	// Every slot at or above the highest index held is absent, so dropping them
+	// changes no answer the probe gives: an index beyond the array is absence.
+	s.sparse = clip(s.sparse[:held])
+	s.owners = clip(s.owners)
+	s.dense = clip(s.dense)
+	return before - s.bytes()
+}
+
+// bytes is what the three arrays hold, by capacity.
+func (s *Store[T]) bytes() uintptr {
+	return uintptr(cap(s.sparse))*unsafe.Sizeof(uint64(0)) +
+		uintptr(cap(s.owners))*unsafe.Sizeof(Entity(0)) +
+		uintptr(cap(s.dense))*unsafe.Sizeof(*new(T))
+}
+
+// clip returns s at capacity equal to its length, copying into a new array when
+// there is slack and returning s itself when there is none. An empty s becomes
+// nil rather than a zero-capacity slice of the old array, which would keep that
+// array reachable.
+func clip[T any](s []T) []T {
+	if len(s) == cap(s) {
+		return s
+	}
+	if len(s) == 0 {
+		return nil
+	}
+	clipped := make([]T, len(s))
+	copy(clipped, s)
+	return clipped
+}

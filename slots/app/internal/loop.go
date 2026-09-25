@@ -5,7 +5,6 @@ import (
 	"sync/atomic"
 
 	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/slots/app"
 )
 
 // loop is app's half of the application loop, and the app.Loop a MainLoop
@@ -18,7 +17,7 @@ import (
 // by Frame; alpha crosses to Render as atomic float64 bits; the tick source's
 // own state is atomics that a command handler on any goroutine writes.
 type loop struct {
-	config app.Config
+	config Config
 
 	// accum is the unspent frame time in seconds. Main-thread-only.
 	accum float64
@@ -34,26 +33,26 @@ type loop struct {
 	ticks tickSource
 }
 
-var _ app.Loop = (*loop)(nil)
+var _ Loop = (*loop)(nil)
 
-func newLoop(config app.Config) *loop { return &loop{config: config} }
+func newLoop(config Config) *loop { return &loop{config: config} }
 
 // Init publishes app.InitEvent and waits for its subscribers. A subscriber that
 // failed reported it; Init answers nil so that startup carries on, and the
 // handler decides what the failure meant.
 func (l *loop) Init(k kernel.Executioner) error {
-	k.PublishEvent(app.InitEvent{}).Wait()
+	k.PublishEvent(InitEvent{}).Wait()
 	return nil
 }
 
 // Quit publishes app.QuitEvent and waits for its subscribers.
 func (l *loop) Quit(k kernel.Executioner) {
-	k.PublishEvent(app.QuitEvent{}).Wait()
+	k.PublishEvent(QuitEvent{}).Wait()
 }
 
 // WindowSize publishes app.WindowSizeChangeEvent and waits for its subscribers.
 func (l *loop) WindowSize(k kernel.Executioner, width, height float32) {
-	k.PublishEvent(app.WindowSizeChangeEvent{Width: width, Height: height}).Wait()
+	k.PublishEvent(WindowSizeChangeEvent{Width: width, Height: height}).Wait()
 }
 
 // Frame publishes one fixed app.UpdateEvent per whole Step accumulated, each
@@ -75,12 +74,12 @@ func (l *loop) Frame(k kernel.Executioner, dt float64) {
 	steps, paused, batch := l.ticks.take()
 	if paused != l.announced {
 		l.announced = paused
-		k.PublishEvent(app.PauseChangeEvent{Paused: paused}).Wait()
+		k.PublishEvent(PauseChangeEvent{Paused: paused}).Wait()
 	}
 	if !paused {
 		steps = l.accumulate(dt)
 	}
-	e := app.UpdateEvent{Dt: l.config.Step.Seconds()}
+	e := UpdateEvent{Dt: l.config.Step.Seconds()}
 	for n := steps; n > 0; n-- {
 		// Every step is the last of its frame, so once-per-frame subscribers
 		// do their work and each step produces a complete frame; rendering
@@ -99,7 +98,7 @@ func (l *loop) Frame(k kernel.Executioner, dt float64) {
 // Render publishes app.RenderEvent carrying the interpolation factor the last
 // Frame left, and waits for its subscribers.
 func (l *loop) Render(k kernel.Executioner) {
-	k.PublishEvent(app.RenderEvent{Alpha: l.loadAlpha()}).Wait()
+	k.PublishEvent(RenderEvent{Alpha: l.loadAlpha()}).Wait()
 }
 
 // accumulate folds dt (clamped to MaxFrame) into the fixed-step accumulator and

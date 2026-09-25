@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/slots/app"
 )
 
 // fakeMainLoop is the MainLoop these tests compose app with: it keeps the Loop app
@@ -15,17 +14,17 @@ import (
 // for. A test stands where the platform loop stands and calls that Loop
 // on the goroutine it chooses.
 type fakeMainLoop struct {
-	loop  atomic.Pointer[app.Loop]
+	loop  atomic.Pointer[Loop]
 	quits atomic.Int32
 }
 
-func (d *fakeMainLoop) Attach(loop app.Loop) { d.loop.Store(&loop) }
-func (d *fakeMainLoop) Quit()                { d.quits.Add(1) }
+func (d *fakeMainLoop) Attach(loop Loop) { d.loop.Store(&loop) }
+func (d *fakeMainLoop) Quit()            { d.quits.Add(1) }
 
 func (d *fakeMainLoop) ClipboardWrite(string) error { return nil }
 
 // attached is the Loop app handed over, or nil when it handed none.
-func (d *fakeMainLoop) attached() app.Loop {
+func (d *fakeMainLoop) attached() Loop {
 	if loop := d.loop.Load(); loop != nil {
 		return *loop
 	}
@@ -37,79 +36,79 @@ func (d *fakeMainLoop) attached() app.Loop {
 type mainLoopAdapter struct{ mainLoop *fakeMainLoop }
 
 // testAppMainLoop is the Adapter this fixture fills app's MainLoop Port as.
-type testAppMainLoop kernel.Adapter[app.MainLoopPort]
+type testAppMainLoop kernel.Adapter[MainLoopPort]
 
 func (mainLoopAdapter) Name() kernel.PluginName           { return "apptestmainloop" }
 func (mainLoopAdapter) Dependencies() []kernel.PluginName { return nil }
 
 func (a mainLoopAdapter) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.ProvideAdapter[testAppMainLoop](app.MainLoop(a.mainLoop))
+	registrar.ProvideAdapter[testAppMainLoop](MainLoop(a.mainLoop))
 	return nil
 }
 
 // The subscriptions through which the observer sees every event app publishes.
 type (
-	observeUpdate     kernel.Subscription[app.UpdateEvent]
-	observeRender     kernel.Subscription[app.RenderEvent]
-	observeInit       kernel.Subscription[app.InitEvent]
-	observeQuit       kernel.Subscription[app.QuitEvent]
-	observeWindowSize kernel.Subscription[app.WindowSizeChangeEvent]
-	observePause      kernel.Subscription[app.PauseChangeEvent]
+	observeUpdate     kernel.Subscription[UpdateEvent]
+	observeRender     kernel.Subscription[RenderEvent]
+	observeInit       kernel.Subscription[InitEvent]
+	observeQuit       kernel.Subscription[QuitEvent]
+	observeWindowSize kernel.Subscription[WindowSizeChangeEvent]
+	observePause      kernel.Subscription[PauseChangeEvent]
 )
 
 // observer records, in order, every app event it is delivered, so a test reads
 // what subscribers saw rather than what app meant to publish.
 type observer struct {
 	mu      sync.Mutex
-	updates []app.UpdateEvent
-	renders []app.RenderEvent
-	sizes   []app.WindowSizeChangeEvent
-	pauses  []app.PauseChangeEvent
+	updates []UpdateEvent
+	renders []RenderEvent
+	sizes   []WindowSizeChangeEvent
+	pauses  []PauseChangeEvent
 	// lifecycle is the order InitEvent and QuitEvent arrived in.
 	lifecycle []string
 }
 
 func (*observer) Name() kernel.PluginName           { return "apptestobserver" }
-func (*observer) Dependencies() []kernel.PluginName { return []kernel.PluginName{app.Name} }
+func (*observer) Dependencies() []kernel.PluginName { return []kernel.PluginName{Name} }
 
 func (o *observer) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.Subscribe[observeUpdate](func() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-		return nil, func(_ kernel.Kernel, event app.UpdateEvent) {
+	registrar.Subscribe[observeUpdate](func() (kernel.Lock, kernel.Observe[UpdateEvent]) {
+		return nil, func(_ kernel.Kernel, event UpdateEvent) {
 			o.mu.Lock()
 			defer o.mu.Unlock()
 			o.updates = append(o.updates, event)
 		}
 	})
-	registrar.Subscribe[observeRender](func() (kernel.Lock, kernel.Observe[app.RenderEvent]) {
-		return nil, func(_ kernel.Kernel, event app.RenderEvent) {
+	registrar.Subscribe[observeRender](func() (kernel.Lock, kernel.Observe[RenderEvent]) {
+		return nil, func(_ kernel.Kernel, event RenderEvent) {
 			o.mu.Lock()
 			defer o.mu.Unlock()
 			o.renders = append(o.renders, event)
 		}
 	})
-	registrar.Subscribe[observeInit](func() (kernel.Lock, kernel.Observe[app.InitEvent]) {
-		return nil, func(kernel.Kernel, app.InitEvent) {
+	registrar.Subscribe[observeInit](func() (kernel.Lock, kernel.Observe[InitEvent]) {
+		return nil, func(kernel.Kernel, InitEvent) {
 			o.mu.Lock()
 			defer o.mu.Unlock()
 			o.lifecycle = append(o.lifecycle, "init")
 		}
 	})
-	registrar.Subscribe[observeQuit](func() (kernel.Lock, kernel.Observe[app.QuitEvent]) {
-		return nil, func(kernel.Kernel, app.QuitEvent) {
+	registrar.Subscribe[observeQuit](func() (kernel.Lock, kernel.Observe[QuitEvent]) {
+		return nil, func(kernel.Kernel, QuitEvent) {
 			o.mu.Lock()
 			defer o.mu.Unlock()
 			o.lifecycle = append(o.lifecycle, "quit")
 		}
 	})
-	registrar.Subscribe[observeWindowSize](func() (kernel.Lock, kernel.Observe[app.WindowSizeChangeEvent]) {
-		return nil, func(_ kernel.Kernel, event app.WindowSizeChangeEvent) {
+	registrar.Subscribe[observeWindowSize](func() (kernel.Lock, kernel.Observe[WindowSizeChangeEvent]) {
+		return nil, func(_ kernel.Kernel, event WindowSizeChangeEvent) {
 			o.mu.Lock()
 			defer o.mu.Unlock()
 			o.sizes = append(o.sizes, event)
 		}
 	})
-	registrar.Subscribe[observePause](func() (kernel.Lock, kernel.Observe[app.PauseChangeEvent]) {
-		return nil, func(_ kernel.Kernel, event app.PauseChangeEvent) {
+	registrar.Subscribe[observePause](func() (kernel.Lock, kernel.Observe[PauseChangeEvent]) {
+		return nil, func(_ kernel.Kernel, event PauseChangeEvent) {
 			o.mu.Lock()
 			defer o.mu.Unlock()
 			o.pauses = append(o.pauses, event)
@@ -128,10 +127,10 @@ type tickHarness struct {
 	k        kernel.Executioner
 }
 
-func newTickHarness(t *testing.T, config app.Config) *tickHarness {
+func newTickHarness(t *testing.T, config Config) *tickHarness {
 	t.Helper()
 	harness := &tickHarness{t: t, plugin: New().(*plugin), mainLoop: &fakeMainLoop{}, observer: &observer{}}
-	engine := kernel.New(map[kernel.PluginName]any{app.Name: config}).
+	engine := kernel.New(map[kernel.PluginName]any{Name: config}).
 		Handler(func(err error) error { t.Errorf("unexpected kernel error: %v", err); return err }).
 		WithPlugins(harness.plugin, mainLoopAdapter{harness.mainLoop}, harness.observer)
 	stopped := make(chan struct{})
@@ -156,7 +155,7 @@ func newTickHarness(t *testing.T, config app.Config) *tickHarness {
 }
 
 // loop is the Loop app attached to the MainLoop.
-func (h *tickHarness) loop() app.Loop { return h.mainLoop.attached() }
+func (h *tickHarness) loop() Loop { return h.mainLoop.attached() }
 
 // frame runs one frame of dt real seconds on this goroutine, the way a
 // platform loop does.
@@ -186,27 +185,27 @@ func (h *tickHarness) runFrames() (stop func()) {
 	}
 }
 
-func (h *tickHarness) recorded() []app.UpdateEvent {
+func (h *tickHarness) recorded() []UpdateEvent {
 	h.observer.mu.Lock()
 	defer h.observer.mu.Unlock()
-	return append([]app.UpdateEvent(nil), h.observer.updates...)
+	return append([]UpdateEvent(nil), h.observer.updates...)
 }
 
-func (h *tickHarness) paused() []app.PauseChangeEvent {
+func (h *tickHarness) paused() []PauseChangeEvent {
 	h.observer.mu.Lock()
 	defer h.observer.mu.Unlock()
-	return append([]app.PauseChangeEvent(nil), h.observer.pauses...)
+	return append([]PauseChangeEvent(nil), h.observer.pauses...)
 }
 
-func (h *tickHarness) rendered() []app.RenderEvent {
+func (h *tickHarness) rendered() []RenderEvent {
 	h.observer.mu.Lock()
 	defer h.observer.mu.Unlock()
-	return append([]app.RenderEvent(nil), h.observer.renders...)
+	return append([]RenderEvent(nil), h.observer.renders...)
 }
 
-func (h *tickHarness) control(request app.TimeRequest) app.TimeResponse {
+func (h *tickHarness) control(request TimeRequest) TimeResponse {
 	h.t.Helper()
-	response := h.k.ExecuteCommand[app.TimeCmd](request)
+	response := h.k.ExecuteCommand[TimeCmd](request)
 	if response.Err != nil {
 		h.t.Fatalf("%v: %v", request.Action, response.Err)
 	}
@@ -254,8 +253,8 @@ func waitSharing(t *testing.T, ticks *tickSource, callers int64, within time.Dur
 	}
 }
 
-func tickTestConfig() app.Config {
-	return app.Config{}.
+func tickTestConfig() Config {
+	return Config{}.
 		WithStep(10 * time.Millisecond).
 		WithMaxFrame(time.Second).
 		WithMaxPending(4)

@@ -10,26 +10,6 @@ type Region struct {
 	Height int `json:"height"`
 }
 
-// TextureDesc describes a texture to create. Layers <= 1 creates a regular 2D
-// texture; larger values create a 2D-array texture. Renderable asks for a
-// texture a render pass can draw into as well as sample.
-type TextureDesc struct {
-	Width, Height int
-	Layers        int
-	Format        TextureFormat
-	Mipmaps       bool
-	Renderable    bool
-	Label         string
-}
-
-// TextureViewDimension selects the texture view expected by a shader binding.
-type TextureViewDimension uint8
-
-const (
-	TextureView2D TextureViewDimension = iota
-	TextureView2DArray
-)
-
 // TextureUsage names the role a texture is in as far as the GPU's memory
 // pipeline is concerned. It is deliberately just the roles gfx can put a
 // texture in, not a mirror of the backend's usage flags.

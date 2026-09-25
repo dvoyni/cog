@@ -99,10 +99,10 @@ func TestTheDynamicForwarderPassesItsArgumentsThrough(t *testing.T) {
 	if got, want := body.Moment(), 8.0; got != want {
 		t.Errorf("Moment = %v, want %v", got, want)
 	}
-	if got, want := body.Damping(), 15.0; got != want {
+	if got, want := body.Damping, 15.0; got != want {
 		t.Errorf("Damping = %v, want %v", got, want)
 	}
-	if got, want := body.AngularDamping(), 0.3; got != want {
+	if got, want := body.AngularDamping, 0.3; got != want {
 		t.Errorf("AngularDamping = %v, want %v", got, want)
 	}
 

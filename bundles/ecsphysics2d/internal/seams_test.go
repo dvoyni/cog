@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -22,18 +21,18 @@ import (
 // 0.2 m thick, their top faces at y = 0.
 type seamFloor struct {
 	name string
-	tile func(width float64) ecsphysics2d.Shape
+	tile func(width float64) Shape
 }
 
 func seamFloors() []seamFloor {
 	return []seamFloor{
-		{"box tiles", func(width float64) ecsphysics2d.Shape {
-			return ecsphysics2d.NewBoxShape(width, 0.2, 0)
+		{"box tiles", func(width float64) Shape {
+			return NewBoxShape(width, 0.2, 0)
 		}},
 		// A chain: each segment ends where the next begins, rounded to the
 		// same 0.2 m thickness.
-		{"a segment chain", func(width float64) ecsphysics2d.Shape {
-			return ecsphysics2d.NewSegmentShape(m.Vec2d{X: -width / 2}, m.Vec2d{X: width / 2}, 0.1)
+		{"a segment chain", func(width float64) Shape {
+			return NewSegmentShape(m.Vec2d{X: -width / 2}, m.Vec2d{X: width / 2}, 0.1)
 		}},
 	}
 }
@@ -41,8 +40,8 @@ func seamFloors() []seamFloor {
 // seamMovers are the ball and the box, each 0.4 m across, with no friction so
 // that nothing but a stop can slow them.
 func seamMovers() []tunnelMover {
-	ball := ecsphysics2d.NewCircleShape(0.2, m.Vec2d{})
-	box := ecsphysics2d.NewBoxShape(0.4, 0.4, 0)
+	ball := NewCircleShape(0.2, m.Vec2d{})
+	box := NewBoxShape(0.4, 0.4, 0)
 	ball.Friction, box.Friction = 0, 0
 	return []tunnelMover{{"the ball", ball}, {"the box", box}}
 }
@@ -76,7 +75,7 @@ func TestAFastBodySlidesOverTheSeamsOfATiledFloor(t *testing.T) {
 
 // slideOverSeams runs one phase of the seam scene in an engine of its own.
 func slideOverSeams(
-	t *testing.T, floor seamFloor, width float64, shape ecsphysics2d.Shape,
+	t *testing.T, floor seamFloor, width float64, shape Shape,
 	factor float64, phase, starts, ticks int,
 ) {
 	t.Helper()
@@ -91,14 +90,14 @@ func slideOverSeams(
 	for x := -1.0; x < start+step*float64(ticks+2)+2; x += width {
 		tiles[h.spawn(t, spawnRequest{
 			Kind:  kindShapedStatic,
-			Place: ecsphysics2d.Position{Current: m.Vec2d{X: x + width/2, Y: -0.1}},
+			Place: Position{Current: m.Vec2d{X: x + width/2, Y: -0.1}},
 			Shape: floor.tile(width),
 		})] = true
 	}
 	mover := h.spawn(t, spawnRequest{
 		Kind:     kindShapedBody,
-		Place:    ecsphysics2d.Position{Current: m.Vec2d{X: start, Y: extent - seamSlop}},
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: speed}},
+		Place:    Position{Current: m.Vec2d{X: start, Y: extent - seamSlop}},
+		Velocity: Velocity{Linear: m.Vec2d{X: speed}},
 		Body:     body,
 		Shape:    shape,
 	})
@@ -108,7 +107,7 @@ func slideOverSeams(
 		h.frame(t)
 		after := h.read(t, mover).Place.Current
 		stopped, failed := false, false
-		var stop ecsphysics2d.Contact
+		var stop Contact
 		for _, entry := range h.contacts(t) {
 			other := entry.B
 			if entry.B == mover {
@@ -159,9 +158,9 @@ func TestAFastBodyIsStoppedByAPostItsCentrePassesBeside(t *testing.T) {
 			// How far the mover reaches below its centre, and so how high the
 			// post stands: its top at half that reach.
 			below := shape.Radius
-			if shape.Kind != ecsphysics2d.ShapeCircle {
+			if shape.Kind != ShapeCircle {
 				below = 0
-				for _, v := range ecsphysics2d.PolygonVerts(nil, shape, ecsphysics2d.Polygon{}) {
+				for _, v := range PolygonVerts(nil, shape, Polygon{}) {
 					below = max(below, -v.Y)
 				}
 			}
@@ -170,15 +169,15 @@ func TestAFastBodyIsStoppedByAPostItsCentrePassesBeside(t *testing.T) {
 				h := newHarness(t)
 				post := h.spawn(t, spawnRequest{
 					Kind:  kindShapedStatic,
-					Place: ecsphysics2d.Position{Current: m.Vec2d{X: targetX, Y: top - 1}},
-					Shape: ecsphysics2d.NewBoxShape(0.05, 2, 0),
+					Place: Position{Current: m.Vec2d{X: targetX, Y: top - 1}},
+					Shape: NewBoxShape(0.05, 2, 0),
 				})
 				step := projectileSpeed * tick
 				start := targetX - 2 - step*float64(phase)/phases
 				thrown := h.spawn(t, spawnRequest{
 					Kind:     kindShapedBody,
-					Place:    ecsphysics2d.Position{Current: m.Vec2d{X: start}},
-					Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: projectileSpeed}},
+					Place:    Position{Current: m.Vec2d{X: start}},
+					Velocity: Velocity{Linear: m.Vec2d{X: projectileSpeed}},
 					Body:     body,
 					Shape:    shape,
 				})
@@ -214,21 +213,21 @@ func TestAFastBodyIsStoppedByAPostItsCentrePassesBeside(t *testing.T) {
 // every phase. This is the behaviour the seam rule chose, held so that a
 // change to it is seen.
 func TestPinnedAGrazeIsLeftToTheDiscreteWalk(t *testing.T) {
-	body, shape, _ := solidFor(t, ecsphysics2d.NewCircleShape(0.2, m.Vec2d{}))
+	body, shape, _ := solidFor(t, NewCircleShape(0.2, m.Vec2d{}))
 	const reach = 0.003
 	for phase := range phases {
 		h := newHarness(t)
 		post := h.spawn(t, spawnRequest{
 			Kind:  kindShapedStatic,
-			Place: ecsphysics2d.Position{Current: m.Vec2d{X: targetX, Y: -0.2 + reach - 1}},
-			Shape: ecsphysics2d.NewBoxShape(0.05, 2, 0),
+			Place: Position{Current: m.Vec2d{X: targetX, Y: -0.2 + reach - 1}},
+			Shape: NewBoxShape(0.05, 2, 0),
 		})
 		step := projectileSpeed * tick
 		start := targetX - 2 - step*float64(phase)/phases
 		ball := h.spawn(t, spawnRequest{
 			Kind:     kindShapedBody,
-			Place:    ecsphysics2d.Position{Current: m.Vec2d{X: start}},
-			Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: projectileSpeed}},
+			Place:    Position{Current: m.Vec2d{X: start}},
+			Velocity: Velocity{Linear: m.Vec2d{X: projectileSpeed}},
 			Body:     body,
 			Shape:    shape,
 		})

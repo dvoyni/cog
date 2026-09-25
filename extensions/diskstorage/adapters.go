@@ -1,10 +1,7 @@
 package diskstorage
 
-import (
-	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/slots/storage"
-)
+import "github.com/dvoyni/cog/extensions/diskstorage/internal"
 
 // StoragePermanentFS is the Adapter through which diskstorage fills storage's
 // permanent filesystem Port.
-type StoragePermanentFS kernel.Adapter[storage.PermanentFSPort]
+type StoragePermanentFS = internal.StoragePermanentFS

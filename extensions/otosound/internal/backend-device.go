@@ -5,7 +5,6 @@ package internal
 import (
 	"time"
 
-	"github.com/dvoyni/cog/extensions/otosound"
 	"github.com/dvoyni/cog/slots/sound"
 )
 
@@ -48,7 +47,7 @@ func (b *backend) open() {
 	}
 	b.rate = settled.sampleRate
 	if settled.ignored {
-		b.ignored.Store(&otosound.ErrDeviceConfigIgnored{
+		b.ignored.Store(&ErrDeviceConfigIgnored{
 			AskedSampleRate: b.askedRate, SampleRate: settled.sampleRate,
 			AskedBufferSize: b.askedBuffer, BufferSize: settled.bufferSize,
 		})
@@ -78,7 +77,7 @@ func (b *backend) attach(settled facts) {
 		}
 		b.device.Store(&sound.Device{
 			Ready:      true,
-			Name:       string(otosound.Name),
+			Name:       string(Name),
 			SampleRate: settled.sampleRate,
 			Channels:   outChannels,
 			Latency:    latency,
@@ -107,7 +106,7 @@ func (b *backend) attach(settled facts) {
 		// and every release after it is held for as long as the Device stays
 		// gone: a leak rather than a crash, bounded by what the game releases,
 		// but unbounded in time.
-		b.device.Store(&sound.Device{Name: string(otosound.Name)})
+		b.device.Store(&sound.Device{Name: string(Name)})
 		b.audio.close()
 		b.ring.detach()
 		if !b.sleep() {

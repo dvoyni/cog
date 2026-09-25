@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -20,8 +19,8 @@ func floorAt(t testing.TB, h *harness) ecs.Entity {
 	t.Helper()
 	return h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{Y: -0.05}},
-		Shape: ecsphysics2d.NewSegmentShape(m.Vec2d{X: -20}, m.Vec2d{X: 200}, 0.05),
+		Place: Position{Current: m.Vec2d{Y: -0.05}},
+		Shape: NewSegmentShape(m.Vec2d{X: -20}, m.Vec2d{X: 200}, 0.05),
 	})
 }
 
@@ -29,24 +28,24 @@ func floorAt(t testing.TB, h *harness) ecs.Entity {
 // hair into it as a resting Body is, and thrown along it at projectile speed.
 func rollingBall(t testing.TB, h *harness) ecs.Entity {
 	t.Helper()
-	body, shape, _ := solidFor(t, ecsphysics2d.NewCircleShape(0.2, m.Vec2d{}))
+	body, shape, _ := solidFor(t, NewCircleShape(0.2, m.Vec2d{}))
 	return h.spawn(t, spawnRequest{
 		Kind:     kindShapedBody,
-		Place:    ecsphysics2d.Position{Current: m.Vec2d{Y: 0.2 - 0.005}},
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: projectileSpeed}},
+		Place:    Position{Current: m.Vec2d{Y: 0.2 - 0.005}},
+		Velocity: Velocity{Linear: m.Vec2d{X: projectileSpeed}},
 		Body:     body,
 		Shape:    shape,
 	})
 }
 
 // between is the tick's Contact for the unordered pair, if there is one.
-func between(list []ecsphysics2d.Contact, a, b ecs.Entity) (ecsphysics2d.Contact, bool) {
+func between(list []Contact, a, b ecs.Entity) (Contact, bool) {
 	for _, entry := range list {
 		if (entry.A == a && entry.B == b) || (entry.A == b && entry.B == a) {
 			return entry, true
 		}
 	}
-	return ecsphysics2d.Contact{}, false
+	return Contact{}, false
 }
 
 // A fast ball rolling along the floor touches it where every tick begins, and
@@ -88,8 +87,8 @@ func TestAStoppedBodysOtherPairsAreTestedWhereItStopped(t *testing.T) {
 	ball := rollingBall(t, h)
 	wall := h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 3}},
-		Shape: ecsphysics2d.NewSegmentShape(m.Vec2d{Y: 0.5}, m.Vec2d{Y: 4}, 0.4),
+		Place: Position{Current: m.Vec2d{X: 3}},
+		Shape: NewSegmentShape(m.Vec2d{Y: 0.5}, m.Vec2d{Y: 4}, 0.4),
 	})
 
 	for i := range 10 {
@@ -127,14 +126,14 @@ func TestAStoppedBodysOtherPairsAreTestedWhereItStopped(t *testing.T) {
 
 // pinnedThrow throws a mover along +X at a target and reports where it ended.
 func pinnedThrow(
-	t *testing.T, h *harness, shape ecsphysics2d.Shape, from, speed float64, ticks int,
+	t *testing.T, h *harness, shape Shape, from, speed float64, ticks int,
 ) (ecs.Entity, float64) {
 	t.Helper()
 	body, shape, _ := solidFor(t, shape)
 	mover := h.spawn(t, spawnRequest{
 		Kind:     kindShapedBody,
-		Place:    ecsphysics2d.Position{Current: m.Vec2d{X: from}},
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: speed}},
+		Place:    Position{Current: m.Vec2d{X: from}},
+		Velocity: Velocity{Linear: m.Vec2d{X: speed}},
 		Body:     body,
 		Shape:    shape,
 	})
@@ -158,8 +157,8 @@ func TestPinnedAZeroThicknessTargetJustUnderTheGate(t *testing.T) {
 				h := newHarness(t)
 				h.spawn(t, spawnRequest{
 					Kind:  kindShapedStatic,
-					Place: ecsphysics2d.Position{Current: m.Vec2d{X: targetX}},
-					Shape: ecsphysics2d.NewSegmentShape(m.Vec2d{Y: -2}, m.Vec2d{Y: 2}, 0),
+					Place: Position{Current: m.Vec2d{X: targetX}},
+					Shape: NewSegmentShape(m.Vec2d{Y: -2}, m.Vec2d{Y: 2}, 0),
 				})
 				start := targetX - 1 - speed*tick*float64(phase)/phases
 				_, end := pinnedThrow(t, h, mover.shape, start, speed, int(math.Ceil(2/(speed*tick))))
@@ -182,25 +181,25 @@ func TestPinnedAZeroThicknessTargetJustUnderTheGate(t *testing.T) {
 func TestPinnedADroppedStopHidesTheTargetBehindIt(t *testing.T) {
 	for _, mark := range []struct {
 		name  string
-		apply func(*ecsphysics2d.Contact)
+		apply func(*Contact)
 	}{
-		{"dropped", func(entry *ecsphysics2d.Contact) { entry.Drop() }},
-		{"ignored", func(entry *ecsphysics2d.Contact) { entry.Ignore() }},
+		{"dropped", func(entry *Contact) { entry.Drop() }},
+		{"ignored", func(entry *Contact) { entry.Ignore() }},
 	} {
 		t.Run(mark.name, func(t *testing.T) {
 			h := newHarness(t)
 			platform := h.spawn(t, spawnRequest{
 				Kind:  kindShapedStatic,
-				Place: ecsphysics2d.Position{Current: m.Vec2d{X: 1}},
-				Shape: ecsphysics2d.NewSegmentShape(m.Vec2d{Y: -2}, m.Vec2d{Y: 2}, 0.05),
+				Place: Position{Current: m.Vec2d{X: 1}},
+				Shape: NewSegmentShape(m.Vec2d{Y: -2}, m.Vec2d{Y: 2}, 0.05),
 			})
 			behind := h.spawn(t, spawnRequest{
 				Kind:  kindShapedStatic,
-				Place: ecsphysics2d.Position{Current: m.Vec2d{X: 2}},
-				Shape: ecsphysics2d.NewSegmentShape(m.Vec2d{Y: -2}, m.Vec2d{Y: 2}, 0.05),
+				Place: Position{Current: m.Vec2d{X: 2}},
+				Shape: NewSegmentShape(m.Vec2d{Y: -2}, m.Vec2d{Y: 2}, 0.05),
 			})
 			stops := 0
-			h.game.filter = func(entry *ecsphysics2d.Contact) {
+			h.game.filter = func(entry *Contact) {
 				if entry.A == platform || entry.B == platform {
 					if entry.T < 1 {
 						stops++
@@ -212,10 +211,10 @@ func TestPinnedADroppedStopHidesTheTargetBehindIt(t *testing.T) {
 			// Three metres a tick, from x = 0: the one tick's path crosses the
 			// platform and the wall behind it and ends clear of both.
 			speed := 3 / tick
-			body, shape, _ := solidFor(t, ecsphysics2d.NewCircleShape(0.2, m.Vec2d{}))
+			body, shape, _ := solidFor(t, NewCircleShape(0.2, m.Vec2d{}))
 			ball := h.spawn(t, spawnRequest{
 				Kind:     kindShapedBody,
-				Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: speed}},
+				Velocity: Velocity{Linear: m.Vec2d{X: speed}},
 				Body:     body,
 				Shape:    shape,
 			})
@@ -281,27 +280,27 @@ func TestTheStopsSitOnTheEnginesAllocationLine(t *testing.T) {
 // projectile speed with a Restitution of 1.
 func populateStops(t testing.TB, h *harness, n int) {
 	t.Helper()
-	wall := ecsphysics2d.NewSegmentShape(m.Vec2d{Y: -0.4}, m.Vec2d{Y: 0.4}, 0.1)
+	wall := NewSegmentShape(m.Vec2d{Y: -0.4}, m.Vec2d{Y: 0.4}, 0.1)
 	wall.Restitution = 1
 	for i := range n {
 		y := 2 * float64(i)
 		for _, x := range []float64{-2, 2} {
 			h.spawn(t, spawnRequest{
 				Kind:  kindShapedStatic,
-				Place: ecsphysics2d.Position{Current: m.Vec2d{X: x, Y: y}},
+				Place: Position{Current: m.Vec2d{X: x, Y: y}},
 				Shape: wall,
 			})
 		}
-		shape := ecsphysics2d.NewCircleShape(0.2, m.Vec2d{})
+		shape := NewCircleShape(0.2, m.Vec2d{})
 		if i%2 == 1 {
-			shape = ecsphysics2d.NewBoxShape(0.4, 0.4, 0)
+			shape = NewBoxShape(0.4, 0.4, 0)
 		}
 		shape.Restitution = 1
 		body, shape, _ := solidFor(t, shape)
 		h.spawn(t, spawnRequest{
 			Kind:     kindShapedBody,
-			Place:    ecsphysics2d.Position{Current: m.Vec2d{Y: y}},
-			Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: projectileSpeed}},
+			Place:    Position{Current: m.Vec2d{Y: y}},
+			Velocity: Velocity{Linear: m.Vec2d{X: projectileSpeed}},
 			Body:     body,
 			Shape:    shape,
 		})

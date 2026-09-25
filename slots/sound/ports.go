@@ -1,8 +1,7 @@
 package sound
 
 import (
-	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/slots/sound/internal/types"
+	"github.com/dvoyni/cog/slots/sound/internal"
 )
 
 // Backend is the interface sound's Adapter implements: a dumb, allocation-free
@@ -11,7 +10,7 @@ import (
 // is asked two questions. It knows nothing of handles, Buses, priorities,
 // positions, the cap or the equations.
 //
-// It is declared in internal/types, beside the Batch it is handed, and aliased
+// It is declared in internal, beside the Batch it is handed, and aliased
 // here:
 //
 //	interface {
@@ -35,9 +34,9 @@ import (
 // declicked, a looping Voice is gapless, a prepared value is
 // garbage-collectable, and a Device that could never be opened is reported once
 // while a lost one is reported never.
-type Backend = types.Backend
+type Backend = internal.Backend
 
 // BackendPort is the Port sound requires exactly one Adapter for: the mixer an
 // Extension such as otosound, jssound or nosound provides. A composition
 // without one fails with kernel.ErrMissingAdapter.
-type BackendPort kernel.RequiredPort[Backend]
+type BackendPort = internal.BackendPort

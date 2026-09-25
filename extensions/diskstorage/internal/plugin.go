@@ -9,7 +9,6 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/dvoyni/cog/extensions/diskstorage"
 	"github.com/dvoyni/cog/kernel"
 )
 
@@ -20,17 +19,17 @@ func New() kernel.Plugin { return &plugin{} }
 
 type plugin struct{}
 
-func (p *plugin) Name() kernel.PluginName { return diskstorage.Name }
+func (p *plugin) Name() kernel.PluginName { return Name }
 
 func (p *plugin) Dependencies() []kernel.PluginName { return nil }
 
 func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
-	var cfg diskstorage.Config
+	var cfg Config
 	if config != nil {
 		var ok bool
-		cfg, ok = config.(diskstorage.Config)
+		cfg, ok = config.(Config)
 		if !ok {
-			return diskstorage.ErrInvalidConfig{Got: config}
+			return ErrInvalidConfig{Got: config}
 		}
 	}
 	appId, err := resolveAppId(cfg.AppId)
@@ -45,7 +44,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	if err != nil {
 		return err
 	}
-	registrar.ProvideAdapter[diskstorage.StoragePermanentFS](permanent)
+	registrar.ProvideAdapter[StoragePermanentFS](permanent)
 	return nil
 }
 
@@ -61,7 +60,7 @@ func resolveAppId(appId string) (string, error) {
 		appId = strings.TrimSuffix(filepath.Base(executable), filepath.Ext(executable))
 	}
 	if appId == "." || appId == ".." || filepath.Base(appId) != appId || filepath.VolumeName(appId) != "" {
-		return "", diskstorage.ErrInvalidAppId{AppId: appId}
+		return "", ErrInvalidAppId{AppId: appId}
 	}
 	return appId, nil
 }

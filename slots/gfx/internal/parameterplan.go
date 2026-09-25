@@ -1,7 +1,8 @@
 package internal
 
 import (
-	"github.com/dvoyni/cog/slots/gfx"
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
@@ -18,7 +19,7 @@ type parameterRef struct {
 	index  int
 }
 
-func (r parameterRef) value(material, draw []gfx.ParameterDescr) *gfx.ParameterDescr {
+func (r parameterRef) value(material, draw []descriptors.ParameterDescr) *descriptors.ParameterDescr {
 	switch r.source {
 	case parameterMaterial:
 		return &material[r.index]
@@ -32,6 +33,14 @@ func (r parameterRef) value(material, draw []gfx.ParameterDescr) *gfx.ParameterD
 type plannedUniform struct {
 	offset int
 	param  parameterRef
+}
+
+// plannedBlock is one uniform block the shader declares: where it binds, its
+// byte size, and the parameter each of its members is packed from.
+type plannedBlock struct {
+	group, binding int
+	size           int
+	members        []plannedUniform
 }
 
 type plannedResourceKind uint8
@@ -54,7 +63,7 @@ type plannedResource struct {
 	// the dimension check and a pure function of the shader, so it is cached
 	// here with the rest of the plan; the layer count it is compared against is
 	// a per-draw value and cannot be. Meaningless for a buffer binding.
-	view gfx.TextureViewDimension
+	view shader.TextureViewDimension
 }
 
 // plannedSampler is one reflected sampler binding and the parameter that fills
@@ -89,23 +98,22 @@ func (d declaredKind) String() string {
 	return "a uniform member"
 }
 
-func (d declaredKind) accepts(kind types.ParamKind) bool {
+func (d declaredKind) accepts(kind descriptors.ParamKind) bool {
 	switch d {
 	case declaredTexture:
-		return kind == types.ParamTexture
+		return kind == descriptors.ParamTexture
 	case declaredSampler:
-		return kind == types.ParamSampler
+		return kind == descriptors.ParamSampler
 	case declaredBuffer:
-		return kind == types.ParamBuffer
+		return kind == descriptors.ParamBuffer
 	}
 	return kind.ValueKind()
 }
 
 type parameterPlan struct {
-	uniformSize int
-	uniforms    []plannedUniform
-	samplers    []plannedSampler
-	resources   []plannedResource
+	blocks    []plannedBlock
+	samplers  []plannedSampler
+	resources []plannedResource
 	// mismatch is the first parameter whose kind cannot fill the binding its
 	// name matched. It is resolved during construction, which is cached per
 	// (shader, parameter shape), so detecting it costs nothing per draw.
@@ -113,7 +121,7 @@ type parameterPlan struct {
 }
 
 type parameterPlanBucketKey struct {
-	shader gfx.ShaderID
+	shader types.ShaderID
 	hash   uint64
 }
 
@@ -131,20 +139,20 @@ type cachedParameterPlan struct {
 //
 // A name that matched nothing is not a mismatch: leaving a shader value at its
 // zero is ordinary, and gfx drops a parameter no shader declared.
-func (plan *parameterPlan) checkKind(label, name string, ref parameterRef, material, draw []gfx.ParameterDescr, declared declaredKind) {
+func (plan *parameterPlan) checkKind(label, name string, ref parameterRef, material, draw []descriptors.ParameterDescr, declared declaredKind) {
 	if plan.mismatch != nil {
 		return
 	}
 	param := ref.value(material, draw)
-	if param == nil || declared.accepts(types.ParameterKind(param)) {
+	if param == nil || declared.accepts(descriptors.ParameterKind(param)) {
 		return
 	}
-	plan.mismatch = gfx.ErrParameterKindMismatch{
-		Shader: label, Parameter: name, Supplied: types.ParameterKind(param).String(), Declared: declared.String(),
+	plan.mismatch = types.ErrParameterKindMismatch{
+		Shader: label, Parameter: name, Supplied: descriptors.ParameterKind(param).String(), Declared: declared.String(),
 	}
 }
 
-func parameterRefFor(name string, material, draw []gfx.ParameterDescr) parameterRef {
+func parameterRefFor(name string, material, draw []descriptors.ParameterDescr) parameterRef {
 	for i := range draw {
 		if draw[i].Name() == name {
 			return parameterRef{source: parameterDraw, index: i}
@@ -158,7 +166,7 @@ func parameterRefFor(name string, material, draw []gfx.ParameterDescr) parameter
 	return parameterRef{}
 }
 
-func parameterNames(params []gfx.ParameterDescr) []string {
+func parameterNames(params []descriptors.ParameterDescr) []string {
 	names := make([]string, len(params))
 	for i := range params {
 		names[i] = params[i].Name()
@@ -166,7 +174,7 @@ func parameterNames(params []gfx.ParameterDescr) []string {
 	return names
 }
 
-func parameterShapeEqual(cached *cachedParameterPlan, material, draw []gfx.ParameterDescr) bool {
+func parameterShapeEqual(cached *cachedParameterPlan, material, draw []descriptors.ParameterDescr) bool {
 	if len(cached.materialNames) != len(material) || len(cached.drawNames) != len(draw) {
 		return false
 	}
@@ -185,7 +193,7 @@ func parameterShapeEqual(cached *cachedParameterPlan, material, draw []gfx.Param
 
 // parameterShapeHash hashes a draw's parameter shape: its material's names,
 // then its own. The material half is split out so a material OpQueue recorded
-// for the frame brings it already taken; see types.ParameterShapeState.
-func parameterShapeHash(material, draw []gfx.ParameterDescr) uint64 {
-	return types.ContinueParameterShape(types.ParameterShapeState(material), draw)
+// for the frame brings it already taken; see ParameterShapeState.
+func parameterShapeHash(material, draw []descriptors.ParameterDescr) uint64 {
+	return descriptors.ContinueParameterShape(descriptors.ParameterShapeState(material), draw)
 }

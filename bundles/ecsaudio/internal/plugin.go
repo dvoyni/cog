@@ -2,7 +2,6 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsaudio"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 	"github.com/dvoyni/cog/slots/sound"
@@ -23,7 +22,7 @@ type plugin struct{}
 func New() kernel.Plugin { return plugin{} }
 
 // Name reports the plugin name.
-func (plugin) Name() kernel.PluginName { return ecsaudio.Name }
+func (plugin) Name() kernel.PluginName { return Name }
 
 // Dependencies reports both halves of the binding: the System reads the ECS's
 // Stores and writes sound's queue.
@@ -40,14 +39,15 @@ const (
 )
 
 // Register declares the two Components, the plugin-owned correspondence and
-// the one System. The m.Transform they are placed by is the ecs plugin's. A Component is registered by the plugin that defines its Go
-// type, which is what keeps cog's coupling check working on Component data: the
-// types are declared in ecsaudio's root, and this plugin, shipped in the same
-// Bundle, registers them under ecsaudio.Name.
+// the one System. The m.Transform they are placed by is the ecs plugin's. A
+// Component is registered by the plugin that defines its Go type, which is what
+// keeps cog's coupling check working on Component data: the types are declared
+// in this package, aliased by ecsaudio's root, and registered here under
+// ecsaudio.Name.
 func (plugin) Register(registrar *kernel.Registrar, _ any) error {
-	ecs.RegisterComponent[ecsaudio.Emitter](registrar, emitterReserve)
-	ecs.RegisterComponent[ecsaudio.Listener](registrar, listenerReserve)
+	ecs.RegisterComponent[Emitter](registrar, emitterReserve)
+	ecs.RegisterComponent[Listener](registrar, listenerReserve)
 	registrar.InitResource(newTable())
-	registrar.Subscribe[ecsaudio.RecordOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, recordSystem))
+	registrar.Subscribe[RecordOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, recordSystem))
 	return nil
 }

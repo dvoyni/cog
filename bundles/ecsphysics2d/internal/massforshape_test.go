@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
+
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -27,18 +27,18 @@ func TestAnOffCentrePolygonTurnsAboutItsCentroidOnlyWhenBuiltThroughTheConstruct
 		{X: 3, Y: 1}, {X: 2.5, Y: 1.866}, {X: 1.5, Y: 1.866},
 		{X: 1, Y: 1}, {X: 1.5, Y: 0.134}, {X: 2.5, Y: 0.134},
 	}
-	drawn, drawnPolygon, err := ecsphysics2d.NewPolygonShape(hexagon, 0)
+	drawn, drawnPolygon, err := NewPolygonShape(hexagon, 0)
 	if err != nil {
 		t.Fatalf("NewPolygonShape: %v", err)
 	}
-	centroid, _ := ecsphysics2d.CentroidForPoly(hexagon)
+	centroid, _ := CentroidForPoly(hexagon)
 
 	// The hand-built Body: the right mass and the right Moment about the
 	// centroid, and the Shape left where it was drawn.
-	mass := density * ecsphysics2d.AreaForPoly(hexagon, 0)
-	handBuilt := dynamic(t, mass, ecsphysics2d.MomentForPoly(mass, hexagon, centroid.Negate(), 0), 0, 0)
+	mass := density * AreaForPoly(hexagon, 0)
+	handBuilt := dynamic(t, mass, MomentForPoly(mass, hexagon, centroid.Negate(), 0), 0, 0)
 
-	built, shape, polygon, returned, err := ecsphysics2d.NewDynamicForShape(drawn, drawnPolygon, density, 0, 0)
+	built, shape, polygon, returned, err := NewDynamicForShape(drawn, drawnPolygon, density, 0, 0)
 	if err != nil {
 		t.Fatalf("NewDynamicForShape: %v", err)
 	}
@@ -59,19 +59,19 @@ func TestAnOffCentrePolygonTurnsAboutItsCentroidOnlyWhenBuiltThroughTheConstruct
 
 	h := newHarness(t)
 	hand := h.spawn(t, spawnRequest{
-		Kind: kindPolygonBody, Place: ecsphysics2d.Position{Current: handOrigin, Previous: handOrigin},
+		Kind: kindPolygonBody, Place: Position{Current: handOrigin, Previous: handOrigin},
 		Body: handBuilt, Shape: drawn, Polygon: drawnPolygon,
 	})
 	byConstructor := h.spawn(t, spawnRequest{
-		Kind: kindPolygonBody, Place: ecsphysics2d.Position{Current: builtAt, Previous: builtAt},
+		Kind: kindPolygonBody, Place: Position{Current: builtAt, Previous: builtAt},
 		Body: built, Shape: shape, Polygon: polygon,
 	})
 	h.game.torque = torque
 
 	// Where each Body's centroid is in the world: its Position plus its own
 	// local centroid turned by its Angle.
-	handLocal, _ := ecsphysics2d.CentroidForPoly(ecsphysics2d.PolygonVerts(nil, drawn, drawnPolygon))
-	builtLocal, _ := ecsphysics2d.CentroidForPoly(ecsphysics2d.PolygonVerts(nil, shape, polygon))
+	handLocal, _ := CentroidForPoly(PolygonVerts(nil, drawn, drawnPolygon))
+	builtLocal, _ := CentroidForPoly(PolygonVerts(nil, shape, polygon))
 	worldCentroid := func(e ecs.Entity, local m.Vec2d) (m.Vec2d, float64) {
 		place := h.read(t, e).Place
 		return place.Current.Add(local.Rotate(m.ForAngle(place.Angle))), place.Angle

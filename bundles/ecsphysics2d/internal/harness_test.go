@@ -7,7 +7,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecs/ecsplugin"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
+
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -29,79 +29,79 @@ const tick = 1.0 / 60
 // Static and carries no Velocity at all.
 type (
 	dynamicBody struct {
-		Place    ecsphysics2d.Position
-		Velocity ecsphysics2d.Velocity
-		Force    ecsphysics2d.Force
-		Body     ecsphysics2d.Dynamic
+		Place    Position
+		Velocity Velocity
+		Force    Force
+		Body     Dynamic
 	}
 	// forcelessBody is the one trap in the Component set: a Dynamic body with
 	// no Force falls out of the velocity integrator's Query and never moves.
 	forcelessBody struct {
-		Place    ecsphysics2d.Position
-		Velocity ecsphysics2d.Velocity
-		Body     ecsphysics2d.Dynamic
+		Place    Position
+		Velocity Velocity
+		Body     Dynamic
 	}
 	kinematicBody struct {
-		Place    ecsphysics2d.Position
-		Velocity ecsphysics2d.Velocity
+		Place    Position
+		Velocity Velocity
 	}
 	staticBody struct {
-		Place  ecsphysics2d.Position
-		Marker ecsphysics2d.Static
+		Place  Position
+		Marker Static
 	}
 	// shapedBody is a Dynamic Body carrying a Shape, which is the whole of what
 	// puts it in BodyIndex: Index rebuilds that index from these every tick.
 	shapedBody struct {
-		Place    ecsphysics2d.Position
-		Velocity ecsphysics2d.Velocity
-		Force    ecsphysics2d.Force
-		Body     ecsphysics2d.Dynamic
-		Shape    ecsphysics2d.Shape
+		Place    Position
+		Velocity Velocity
+		Force    Force
+		Body     Dynamic
+		Shape    Shape
 	}
 	// shapedKinematic is a Kinematic body with a Shape: a Velocity and no
 	// Dynamic, so nothing pushes it, and a Shape, so it sits in BodyIndex.
 	shapedKinematic struct {
-		Place    ecsphysics2d.Position
-		Velocity ecsphysics2d.Velocity
-		Shape    ecsphysics2d.Shape
+		Place    Position
+		Velocity Velocity
+		Shape    Shape
 	}
 	// shapedStatic is static geometry as an app spawns it: the Shape, the
 	// Position and the Tag in one Spawn, so the Shape hook and the Position
 	// reach Index together.
 	shapedStatic struct {
-		Place  ecsphysics2d.Position
-		Marker ecsphysics2d.Static
-		Shape  ecsphysics2d.Shape
+		Place  Position
+		Marker Static
+		Shape  Shape
 	}
 	// placelessStatic is the trap the drain states rather than checks: a Static
 	// with a Shape and no Position at all. Its hook is drained once, finds no
 	// Position, and the Entity never enters the index.
 	placelessStatic struct {
-		Marker ecsphysics2d.Static
-		Shape  ecsphysics2d.Shape
+		Marker Static
+		Shape  Shape
 	}
 	// polygonBody and polygonStatic are the two sets a Shape of kind ShapePoly
 	// is spawned from: the Polygon Component rides on the same Entity, which is
 	// where Index reads the vertices from. An inline kind may be spawned from
 	// them too, carrying the zero Polygon, which is harmless.
 	polygonBody struct {
-		Place    ecsphysics2d.Position
-		Velocity ecsphysics2d.Velocity
-		Force    ecsphysics2d.Force
-		Body     ecsphysics2d.Dynamic
-		Shape    ecsphysics2d.Shape
-		Polygon  ecsphysics2d.Polygon
+		Place    Position
+		Velocity Velocity
+		Force    Force
+		Body     Dynamic
+		Shape    Shape
+		Polygon  Polygon
 	}
 	polygonStatic struct {
-		Place   ecsphysics2d.Position
-		Marker  ecsphysics2d.Static
-		Shape   ecsphysics2d.Shape
-		Polygon ecsphysics2d.Polygon
+		Place   Position
+		Marker  Static
+		Shape   Shape
+		Polygon Polygon
 	}
 	// jointEntity is a Joint as an app spawns one: an Entity of its own
 	// carrying nothing but the Joint, which holds its two Bodies by Reference.
 	jointEntity struct {
-		Joint ecsphysics2d.Joint
+		Joint Joint
 	}
 )
 
@@ -129,12 +129,12 @@ type spawnCmd kernel.Command[spawnRequest, spawnResponse]
 type spawnRequest struct {
 	Kind     bodyKind
 	Count    int
-	Place    ecsphysics2d.Position
-	Velocity ecsphysics2d.Velocity
-	Body     ecsphysics2d.Dynamic
-	Shape    ecsphysics2d.Shape
-	Polygon  ecsphysics2d.Polygon
-	Joint    ecsphysics2d.Joint
+	Place    Position
+	Velocity Velocity
+	Body     Dynamic
+	Shape    Shape
+	Polygon  Polygon
+	Joint    Joint
 }
 
 type spawnResponse struct{ First ecs.Entity }
@@ -207,22 +207,22 @@ type readCmd kernel.Command[readRequest, readResponse]
 type readRequest struct{ Entity ecs.Entity }
 
 type readResponse struct {
-	Place    ecsphysics2d.Position
-	Velocity ecsphysics2d.Velocity
-	Force    ecsphysics2d.Force
+	Place    Position
+	Velocity Velocity
+	Force    Force
 	HasForce bool
-	Shape    ecsphysics2d.Shape
-	Polygon  ecsphysics2d.Polygon
+	Shape    Shape
+	Polygon  Polygon
 }
 
 func readCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execute[readRequest, readResponse]) {
 	return ecs.ToExecute[readRequest, readResponse](registrar, func(
 		request readRequest,
-		places *ecs.Get[ecsphysics2d.Position],
-		velocities *ecs.Get[ecsphysics2d.Velocity],
-		forces *ecs.Get[ecsphysics2d.Force],
-		shapes *ecs.Get[ecsphysics2d.Shape],
-		polygons *ecs.Get[ecsphysics2d.Polygon],
+		places *ecs.Get[Position],
+		velocities *ecs.Get[Velocity],
+		forces *ecs.Get[Force],
+		shapes *ecs.Get[Shape],
+		polygons *ecs.Get[Polygon],
 		answer *ecs.Resp[readResponse],
 	) {
 		var reply readResponse
@@ -242,7 +242,7 @@ type shapeCmd kernel.Command[shapeRequest, shapeResponse]
 
 type shapeRequest struct {
 	Entity ecs.Entity
-	Shape  ecsphysics2d.Shape
+	Shape  Shape
 	// Drop takes the Shape away instead of writing one.
 	Drop bool
 }
@@ -252,8 +252,8 @@ type shapeResponse struct{ Dropped bool }
 func shapeCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execute[shapeRequest, shapeResponse]) {
 	return ecs.ToExecute[shapeRequest, shapeResponse](registrar, func(
 		request shapeRequest,
-		shapes *ecs.Set[ecsphysics2d.Shape],
-		drop *ecs.Remove[ecsphysics2d.Shape],
+		shapes *ecs.Set[Shape],
+		drop *ecs.Remove[Shape],
 		answer *ecs.Resp[shapeResponse],
 	) {
 		if request.Drop {
@@ -272,7 +272,7 @@ type placeCmd kernel.Command[placeRequest, placeResponse]
 
 type placeRequest struct {
 	Entity ecs.Entity
-	Place  ecsphysics2d.Position
+	Place  Position
 }
 
 type placeResponse struct{}
@@ -280,7 +280,7 @@ type placeResponse struct{}
 func placeCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execute[placeRequest, placeResponse]) {
 	return ecs.ToExecute[placeRequest, placeResponse](registrar, func(
 		request placeRequest,
-		places *ecs.Set[ecsphysics2d.Position],
+		places *ecs.Set[Position],
 		answer *ecs.Resp[placeResponse],
 	) {
 		places.UpdateFor(request.Entity, request.Place)
@@ -307,13 +307,13 @@ type indexResponse struct {
 func indexCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execute[indexRequest, indexResponse]) {
 	return ecs.ToExecute[indexRequest, indexResponse](registrar, func(
 		request indexRequest,
-		statics *ecs.Read[*ecsphysics2d.StaticIndex],
-		bodies *ecs.Read[*ecsphysics2d.BodyIndex],
+		statics *ecs.Read[*StaticIndex],
+		bodies *ecs.Read[*BodyIndex],
 		answer *ecs.Resp[indexResponse],
 	) {
 		static, body := statics.Get(), bodies.Get()
-		probe := ecsphysics2d.NewCircleShape(request.Radius, m.Vec2d{})
-		all := ecsphysics2d.CollisionBitsAll
+		probe := NewCircleShape(request.Radius, m.Vec2d{})
+		all := CollisionBitsAll
 		answer.Set(indexResponse{
 			StaticLen: static.Len(),
 			BodyLen:   body.Len(),
@@ -332,17 +332,17 @@ type contactsCmd kernel.Command[contactsRequest, contactsResponse]
 type contactsRequest struct{}
 
 type contactsResponse struct {
-	Contacts []ecsphysics2d.Contact
+	Contacts []Contact
 }
 
 func contactsCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execute[contactsRequest, contactsResponse]) {
 	return ecs.ToExecute[contactsRequest, contactsResponse](registrar, func(
 		_ contactsRequest,
-		contacts *ecs.Read[*ecsphysics2d.Contacts],
+		contacts *ecs.Read[*Contacts],
 		answer *ecs.Resp[contactsResponse],
 	) {
 		answer.Set(contactsResponse{
-			Contacts: append([]ecsphysics2d.Contact(nil), contacts.Get().All()...),
+			Contacts: append([]Contact(nil), contacts.Get().All()...),
 		})
 	})
 }
@@ -373,20 +373,20 @@ type jointCmd kernel.Command[jointRequest, jointResponse]
 
 type jointRequest struct {
 	Entity ecs.Entity
-	Joint  ecsphysics2d.Joint
+	Joint  Joint
 	// Replace writes Joint over whatever the Entity holds.
 	Replace bool
 }
 
 type jointResponse struct {
-	Joint ecsphysics2d.Joint
+	Joint Joint
 	Found bool
 }
 
 func jointCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execute[jointRequest, jointResponse]) {
 	return ecs.ToExecute[jointRequest, jointResponse](registrar, func(
 		request jointRequest,
-		joints *ecs.Set[ecsphysics2d.Joint],
+		joints *ecs.Set[Joint],
 		answer *ecs.Resp[jointResponse],
 	) {
 		if request.Replace {
@@ -411,7 +411,7 @@ type jointedResponse struct {
 func jointedCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execute[jointedRequest, jointedResponse]) {
 	return ecs.ToExecute[jointedRequest, jointedResponse](registrar, func(
 		request jointedRequest,
-		pairs *ecs.Read[*ecsphysics2d.JointedPairs],
+		pairs *ecs.Read[*JointedPairs],
 		answer *ecs.Resp[jointedResponse],
 	) {
 		set := pairs.Get()
@@ -432,7 +432,7 @@ type filterOnUpdate kernel.Subscription[app.UpdateEvent]
 // ordered Before[IntegrateOnUpdate], adding this tick's Force to every Body
 // that can take one.
 type pushQuery struct {
-	Force *ecsphysics2d.Force
+	Force *Force
 }
 
 // pushOnUpdate is the game's own ordering identity for that System.
@@ -463,7 +463,7 @@ type game struct {
 
 	// filter is the app's filter System's body, written between ticks like push
 	// and run over every entry the tick found. A nil one marks nothing.
-	filter func(entry *ecsphysics2d.Contact)
+	filter func(entry *Contact)
 
 	mu    sync.Mutex
 	order []string
@@ -472,7 +472,7 @@ type game struct {
 func (g *game) Name() kernel.PluginName { return "physicstestgame" }
 
 func (g *game) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{ecs.Name, ecsphysics2d.Name}
+	return []kernel.PluginName{ecs.Name, Name}
 }
 
 func (g *game) Register(registrar *kernel.Registrar, _ any) error {
@@ -490,10 +490,10 @@ func (g *game) Register(registrar *kernel.Registrar, _ any) error {
 			it.Force.Force = it.Force.Force.Add(g.push)
 			it.Force.Torque += g.torque
 		}
-	})).Before[ecsphysics2d.IntegrateOnUpdate]()
+	})).Before[IntegrateOnUpdate]()
 
 	registrar.Subscribe[filterOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, func(
-		contacts *ecs.Write[*ecsphysics2d.Contacts],
+		contacts *ecs.Write[*Contacts],
 	) {
 		if g.filter == nil {
 			return
@@ -502,7 +502,7 @@ func (g *game) Register(registrar *kernel.Registrar, _ any) error {
 		for i := range list {
 			g.filter(&list[i])
 		}
-	})).After[ecsphysics2d.DetectOnUpdate]().Before[ecsphysics2d.SleepOnUpdate]()
+	})).After[DetectOnUpdate]().Before[SleepOnUpdate]()
 
 	g.probe(registrar)
 	return nil
@@ -520,13 +520,13 @@ func (g *game) probe(registrar *kernel.Registrar) {
 		}
 	}
 	registrar.Subscribe[afterIntegrateOnUpdate](record("integrate")).
-		After[ecsphysics2d.IntegrateOnUpdate]().Before[ecsphysics2d.IndexOnUpdate]()
+		After[IntegrateOnUpdate]().Before[IndexOnUpdate]()
 	registrar.Subscribe[afterIndexOnUpdate](record("index")).
-		After[ecsphysics2d.IndexOnUpdate]().Before[ecsphysics2d.DetectOnUpdate]()
+		After[IndexOnUpdate]().Before[DetectOnUpdate]()
 	registrar.Subscribe[afterDetectOnUpdate](record("detect")).
-		After[ecsphysics2d.DetectOnUpdate]().Before[ecsphysics2d.SolveOnUpdate]()
+		After[DetectOnUpdate]().Before[SolveOnUpdate]()
 	registrar.Subscribe[afterSolveOnUpdate](record("solve")).
-		After[ecsphysics2d.SolveOnUpdate]()
+		After[SolveOnUpdate]()
 }
 
 // ran is the order the recorders saw, as a fresh copy.
@@ -561,7 +561,7 @@ func newHarnessWithPlugins(t testing.TB, config any, ids uint32, extra ...kernel
 	t.Helper()
 	configs := map[kernel.PluginName]any{ecs.Name: ecs.Config{PrewarmEntities: ids}}
 	if config != nil {
-		configs[ecsphysics2d.Name] = config
+		configs[Name] = config
 	}
 	physics, world := New().(*plugin), &game{}
 	var failure error
@@ -614,7 +614,7 @@ func (h *harness) read(t testing.TB, e ecs.Entity) readResponse {
 
 // setShape writes an Entity's Shape from outside a tick, and dropShape takes it
 // away. Each is one act the drain sees as a Hook record on its next run.
-func (h *harness) setShape(t testing.TB, e ecs.Entity, shape ecsphysics2d.Shape) {
+func (h *harness) setShape(t testing.TB, e ecs.Entity, shape Shape) {
 	t.Helper()
 	h.kernel.ExecuteCommand[shapeCmd](shapeRequest{Entity: e, Shape: shape})
 }
@@ -631,7 +631,7 @@ func (h *harness) dropShape(t testing.TB, e ecs.Entity) {
 func (h *harness) place(t testing.TB, e ecs.Entity, at m.Vec2d) {
 	t.Helper()
 	h.kernel.ExecuteCommand[placeCmd](placeRequest{
-		Entity: e, Place: ecsphysics2d.Position{Current: at},
+		Entity: e, Place: Position{Current: at},
 	})
 }
 
@@ -644,7 +644,7 @@ func (h *harness) indexed(t testing.TB, at m.Vec2d, radius float64) indexRespons
 }
 
 // contacts is the tick's Contact list as the app sees it.
-func (h *harness) contacts(t testing.TB) []ecsphysics2d.Contact {
+func (h *harness) contacts(t testing.TB) []Contact {
 	t.Helper()
 	response := h.kernel.ExecuteCommand[contactsCmd](contactsRequest{})
 	return response.Contacts
@@ -664,7 +664,7 @@ func (h *harness) joint(t testing.TB, e ecs.Entity) jointResponse {
 }
 
 // setJoint replaces one Joint from outside a tick.
-func (h *harness) setJoint(t testing.TB, e ecs.Entity, joint ecsphysics2d.Joint) {
+func (h *harness) setJoint(t testing.TB, e ecs.Entity, joint Joint) {
 	t.Helper()
 	h.kernel.ExecuteCommand[jointCmd](jointRequest{
 		Entity: e, Joint: joint, Replace: true,
@@ -680,15 +680,15 @@ func (h *harness) jointedPairs(t testing.TB, a, b ecs.Entity) jointedResponse {
 
 // circle is the Shape every index test spawns with: the smallest thing that
 // carries a place and a radius, since Polygons are a later ticket.
-func circle(radius float64) ecsphysics2d.Shape {
-	return ecsphysics2d.NewCircleShape(radius, m.Vec2d{})
+func circle(radius float64) Shape {
+	return NewCircleShape(radius, m.Vec2d{})
 }
 
 // dynamic is the Dynamic a test spawns with, built through the constructor so
 // that every test runs against a Body an app could have built.
-func dynamic(t testing.TB, mass, moment, damping, angularDamping float64) ecsphysics2d.Dynamic {
+func dynamic(t testing.TB, mass, moment, damping, angularDamping float64) Dynamic {
 	t.Helper()
-	body, err := ecsphysics2d.NewDynamic(mass, moment, damping, angularDamping)
+	body, err := NewDynamic(mass, moment, damping, angularDamping)
 	if err != nil {
 		t.Fatalf("NewDynamic(%v, %v, %v, %v): %v", mass, moment, damping, angularDamping, err)
 	}
@@ -699,7 +699,7 @@ func dynamic(t testing.TB, mass, moment, damping, angularDamping float64) ecsphy
 // app does to place or teleport one. Locking that Store is what makes the
 // coupling check bite.
 type moverQuery struct {
-	Place *ecsphysics2d.Position
+	Place *Position
 }
 
 type moverOnUpdate kernel.Subscription[app.UpdateEvent]
@@ -716,7 +716,7 @@ func (*mover) Register(registrar *kernel.Registrar, _ any) error {
 		for _, it := range q.All() {
 			it.Place.Current = it.Place.Current.Add(m.Vec2d{X: 1})
 		}
-	})).Before[ecsphysics2d.IntegrateOnUpdate]()
+	})).Before[IntegrateOnUpdate]()
 	return nil
 }
 

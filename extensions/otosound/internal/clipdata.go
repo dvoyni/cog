@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dvoyni/cog/extensions/otosound"
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/sound"
@@ -231,13 +230,13 @@ func clipBounds(encoded assets.Blob, sourceRate int, granule, decoded int64) (in
 	if err != nil {
 		// The identification header parsed and this one did not, so the file is
 		// damaged in a way that costs it only its tags. The Clip still plays.
-		return frames, none, otosound.ErrLoopRegionIgnored{Frames: frames, Err: err}
+		return frames, none, ErrLoopRegionIgnored{Frames: frames, Err: err}
 	}
 	start, hasStart, startErr := loopTag(header.Comments, loopStartTag)
 	length, hasLength, lengthErr := loopTag(header.Comments, loopLengthTag)
 	stop, hasEnd, endErr := loopTag(header.Comments, loopEndTag)
 	if err := cmp.Or(startErr, lengthErr, endErr); err != nil {
-		return frames, none, otosound.ErrLoopRegionIgnored{Frames: frames, Err: err}
+		return frames, none, ErrLoopRegionIgnored{Frames: frames, Err: err}
 	}
 	if !hasStart && !hasLength && !hasEnd {
 		return frames, none, nil
@@ -255,7 +254,7 @@ func clipBounds(encoded assets.Blob, sourceRate int, granule, decoded int64) (in
 		stop = frames
 	}
 	if start < 0 || stop <= start || stop > frames {
-		return frames, none, otosound.ErrLoopRegionIgnored{Start: start, End: stop, Frames: frames}
+		return frames, none, ErrLoopRegionIgnored{Start: start, End: stop, Frames: frames}
 	}
 	return frames, m.Some(sound.LoopRegion{
 		Start: float32(float64(start) / float64(sourceRate)),
@@ -302,10 +301,10 @@ func loopTag(comments []string, name string) (int64, bool, error) {
 func prepare(encoded assets.Blob, deviceRate, limit int) (*clipData, error) {
 	length, format, err := oggvorbis.GetLength(bytes.NewReader(encoded.Data()))
 	if err != nil {
-		return nil, otosound.ErrNotOggVorbis{Err: err}
+		return nil, ErrNotOggVorbis{Err: err}
 	}
 	if format.SampleRate <= 0 || format.Channels <= 0 || format.Channels > 2 {
-		return nil, otosound.ErrNoStreamFormat{SampleRate: format.SampleRate, Channels: format.Channels}
+		return nil, ErrNoStreamFormat{SampleRate: format.SampleRate, Channels: format.Channels}
 	}
 	// A length of zero is a stream whose granule positions say nothing - a
 	// truncated file - and has no computable decoded size, so it streams
@@ -344,15 +343,15 @@ func overLimit(limit int, decoded int64) bool {
 func decode(encoded assets.Blob, deviceRate int, granule int64) (*clipData, error) {
 	samples, format, err := oggvorbis.ReadAll(bytes.NewReader(encoded.Data()))
 	if err != nil {
-		return nil, otosound.ErrNotOggVorbis{Err: err}
+		return nil, ErrNotOggVorbis{Err: err}
 	}
 	if format.SampleRate <= 0 || format.Channels <= 0 || format.Channels > 2 {
-		return nil, otosound.ErrNoStreamFormat{SampleRate: format.SampleRate, Channels: format.Channels}
+		return nil, ErrNoStreamFormat{SampleRate: format.SampleRate, Channels: format.Channels}
 	}
 	bounded, region, ignored := clipBounds(encoded, format.SampleRate, granule, int64(len(samples)/format.Channels))
 	frames := int(bounded)
 	if frames <= 0 {
-		return nil, otosound.ErrNoStreamLength{}
+		return nil, ErrNoStreamLength{}
 	}
 	samples = samples[:frames*format.Channels]
 
@@ -371,7 +370,7 @@ func decode(encoded assets.Blob, deviceRate int, granule int64) (*clipData, erro
 	}
 	clip.samples, clip.frames = convertRate(samples, format.Channels, frames, format.SampleRate, deviceRate)
 	if clip.frames <= 0 {
-		return nil, otosound.ErrNoStreamLength{}
+		return nil, ErrNoStreamLength{}
 	}
 	return clip, nil
 }
@@ -389,10 +388,10 @@ func retain(encoded assets.Blob, deviceRate, sourceRate, channels int, length in
 	if length <= 0 {
 		counted, err := scanLength(encoded, channels)
 		if err != nil {
-			return nil, otosound.ErrNotOggVorbis{Err: err}
+			return nil, ErrNotOggVorbis{Err: err}
 		}
 		if counted <= 0 {
-			return nil, otosound.ErrNoStreamLength{}
+			return nil, ErrNoStreamLength{}
 		}
 		length = counted
 	}
@@ -415,7 +414,7 @@ func retain(encoded assets.Blob, deviceRate, sourceRate, channels int, length in
 		clip.frames = int(float64(length) * clip.filter.ratio)
 	}
 	if clip.frames <= 0 {
-		return nil, otosound.ErrNoStreamLength{}
+		return nil, ErrNoStreamLength{}
 	}
 	return clip, nil
 }

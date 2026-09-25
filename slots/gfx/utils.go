@@ -2,24 +2,26 @@ package gfx
 
 import (
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/dvoyni/cog/slots/gfx/internal/types"
+	"github.com/dvoyni/cog/slots/gfx/internal"
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 )
 
 // ShaderWithText describes a shader from inline source bytes (e.g. WGSL).
 func ShaderWithText(text string, opts ...ShaderOption) ShaderDescr {
-	return types.ShaderWithText(text, opts...)
+	return shader.ShaderWithText(text, opts...)
 }
 
 // ShaderWithResource describes a shader loaded from storage.FileSystem.
 func ShaderWithResource(path string, opts ...ShaderOption) ShaderDescr {
-	return types.ShaderWithResource(path, opts...)
+	return shader.ShaderWithResource(path, opts...)
 }
 
 // ShaderDefine supplies a valueless flag, readable by the source's #if
 // conditionals and never reaching WGSL. Supplying a define a source does not
 // mention is harmless; nothing can unset one.
 func ShaderDefine(name string) ShaderOption {
-	return types.ShaderDefine(name)
+	return shader.ShaderDefine(name)
 }
 
 // ShaderConst supplies a value for a #const the source declares, overriding
@@ -28,7 +30,7 @@ func ShaderDefine(name string) ShaderOption {
 // name no source declares is silently ignored, which keeps one const map usable
 // across a family of shaders.
 func ShaderConst(name, value string) ShaderOption {
-	return types.ShaderConst(name, value)
+	return shader.ShaderConst(name, value)
 }
 
 // TextureWithResource describes a texture loaded from storage.FileSystem. It is
@@ -38,7 +40,7 @@ func ShaderConst(name, value string) ShaderOption {
 // metallic-roughness, occlusion - is not a picture and does not come through
 // here; it comes through TextureWithBytes, which does take a format.
 func TextureWithResource(path string) TextureDescr {
-	return types.TextureWithResource(path)
+	return descriptors.TextureWithResource(path)
 }
 
 // TextureWithBytes describes a texture from inline pixel bytes. copyData
@@ -46,51 +48,51 @@ func TextureWithResource(path string) TextureDescr {
 // until the recorded frame is consumed or dropped. mipmaps generates a full mip
 // chain at bake time for smoother minification.
 func TextureWithBytes(width, height int, format TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
-	return types.TextureWithBytes(width, height, format, pixels, copyData, mipmaps)
+	return descriptors.TextureWithBytes(width, height, format, pixels, copyData, mipmaps)
 }
 
 // BufferWithBytes describes a buffer from inline bytes. copyData snapshots the
 // bytes when recorded if true; when false, the caller must keep them unchanged
 // until the recorded frame is consumed or dropped.
 func BufferWithBytes(data []byte, copyData bool) BufferDescr {
-	return types.BufferWithBytes(data, copyData)
+	return descriptors.BufferWithBytes(data, copyData)
 }
 
 // FloatParam creates a scalar parameter.
 func FloatParam(name string, v float32) ParameterDescr {
-	return types.FloatParam(name, v)
+	return descriptors.FloatParam(name, v)
 }
 
 // VecParam creates a vec4 parameter.
 func VecParam(name string, v m.Vec4) ParameterDescr {
-	return types.VecParam(name, v)
+	return descriptors.VecParam(name, v)
 }
 
 // MatParam creates a 4x4 matrix parameter.
 func MatParam(name string, m m.Mat4) ParameterDescr {
-	return types.MatParam(name, m)
+	return descriptors.MatParam(name, m)
 }
 
 // ColorParam creates a color parameter.
 func ColorParam(name string, c m.Color) ParameterDescr {
-	return types.ColorParam(name, c)
+	return descriptors.ColorParam(name, c)
 }
 
 // TextureParam creates a texture parameter from a texture descriptor.
 func TextureParam(name string, tex TextureDescr) ParameterDescr {
-	return types.TextureParam(name, tex)
+	return descriptors.TextureParam(name, tex)
 }
 
 // SamplerParam creates a sampler parameter. The zero SamplerDesc clamps and
 // filters linearly.
 func SamplerParam(name string, desc SamplerDesc) ParameterDescr {
-	return types.SamplerParam(name, desc)
+	return descriptors.SamplerParam(name, desc)
 }
 
 // BufferParam creates a buffer parameter from a buffer descriptor, binding the
 // whole buffer.
 func BufferParam(name string, buf BufferDescr) ParameterDescr {
-	return types.BufferParam(name, buf)
+	return descriptors.BufferParam(name, buf)
 }
 
 // BufferRangeParam binds one slice of a buffer, which is how a draw addresses
@@ -98,7 +100,7 @@ func BufferParam(name string, buf BufferDescr) ParameterDescr {
 // has to be agreed on across the record/translate thread boundary. offset must
 // be a multiple of StorageAlignment.
 func BufferRangeParam(name string, buf BufferDescr, offset, size int) ParameterDescr {
-	return types.BufferRangeParam(name, buf, offset, size)
+	return descriptors.BufferRangeParam(name, buf, offset, size)
 }
 
 // RawParameter creates a parameter carrying an arbitrary plain-data struct by
@@ -120,19 +122,19 @@ func BufferRangeParam(name string, buf BufferDescr, offset, size int) ParameterD
 // m.Vec4, m.Color, m.Quat, m.Mat4, arrays of those, and structs of those. Any
 // other member type panics, which is what keeps a pointer out of a byte copy.
 func RawParameter[T any](name string, value T) ParameterDescr {
-	return types.RawParameter[T](name, value)
+	return descriptors.RawParameter[T](name, value)
 }
 
 // Material describes a material from a shader and its named parameters. It
 // depth-tests and writes, which is what an opaque draw wants; a draw that wants
 // anything else names its state through MaterialWithState.
 func Material(shader ShaderDescr, params ...ParameterDescr) MaterialDescr {
-	return types.Material(shader, params...)
+	return descriptors.Material(shader, params...)
 }
 
 // MaterialWithState describes a material with explicit fixed pipeline state.
 func MaterialWithState(shader ShaderDescr, state MaterialState, params ...ParameterDescr) MaterialDescr {
-	return types.MaterialWithState(shader, state, params...)
+	return descriptors.MaterialWithState(shader, state, params...)
 }
 
 // FingerprintParams hashes a parameter slice in order by name, kind and value,
@@ -146,18 +148,18 @@ func MaterialWithState(shader ShaderDescr, state MaterialState, params ...Parame
 // mis-key every kind it forgot - and mis-keying merges two draws that differ,
 // which draws the wrong picture rather than costing a batch.
 func FingerprintParams(params []ParameterDescr) uint64 {
-	return types.FingerprintParams(params)
+	return descriptors.FingerprintParams(params)
 }
 
 // Attr describes a vertex attribute at byte offset with element type typ.
 func Attr(offset int, typ VertexType) VertexAttr {
-	return types.Attr(offset, typ)
+	return descriptors.Attr(offset, typ)
 }
 
 // Mesh builds non-indexed geometry from an interleaved vertex buffer, a topology,
 // and the vertex layout.
 func Mesh(vertices BufferDescr, topology PrimitiveTopology, layout ...VertexAttr) MeshDescr {
-	return types.Mesh(vertices, topology, layout...)
+	return descriptors.Mesh(vertices, topology, layout...)
 }
 
 // MeshIndexed builds indexed geometry from vertex and index buffers, the width
@@ -173,26 +175,26 @@ func MeshIndexed(
 	vertices, indices BufferDescr, width IndexWidth,
 	topology PrimitiveTopology, layout ...VertexAttr,
 ) MeshDescr {
-	return types.MeshIndexed(vertices, indices, width, topology, layout...)
+	return descriptors.MeshIndexed(vertices, indices, width, topology, layout...)
 }
 
 // ScreenTarget is the frame's screen attachment. It stays a sentinel the
 // recorder cannot resolve: the swapchain view is per-frame and known only on
 // the render thread.
 func ScreenTarget() TargetDescr {
-	return types.ScreenTarget()
+	return descriptors.ScreenTarget()
 }
 
 // TextureTarget renders into one mip level of one layer of a texture, which
 // must have been allocated Renderable.
 func TextureTarget(texture TextureDescr, mip, layer int) TargetDescr {
-	return types.TextureTarget(texture, mip, layer)
+	return descriptors.TextureTarget(texture, mip, layer)
 }
 
 // NoTarget declares a pass with no colour attachment, such as a depth-only
 // prepass.
 func NoTarget() TargetDescr {
-	return types.NoTarget()
+	return descriptors.NoTarget()
 }
 
 // DepthAuto uses the backend's own depth texture for the target's size. Every
@@ -200,37 +202,37 @@ func NoTarget() TargetDescr {
 // start from a clean depth buffer must clear depth or it inherits whatever the
 // previous pass at that size left behind.
 func DepthAuto() DepthDescr {
-	return types.DepthAuto()
+	return descriptors.DepthAuto()
 }
 
 // DepthNone declares a pass with no depth attachment.
 func DepthNone() DepthDescr {
-	return types.DepthNone()
+	return descriptors.DepthNone()
 }
 
 // DepthTarget renders depth into a texture, which must be FormatDepth32F and
 // Renderable.
 func DepthTarget(texture TextureDescr) DepthDescr {
-	return types.DepthTarget(texture)
+	return descriptors.DepthTarget(texture)
 }
 
 // StateOpaque3D returns the state of opaque geometry, the first of the three
 // states the engine's passes are made of: opaque geometry, then transparent
 // geometry over it, then 2D on top of everything.
 func StateOpaque3D() MaterialState {
-	return types.StateOpaque3D()
+	return internal.StateOpaque3D()
 }
 
 // StateTransparent3D returns the state of transparent geometry drawn over
 // opaque geometry; see StateOpaque3D.
 func StateTransparent3D() MaterialState {
-	return types.StateTransparent3D()
+	return internal.StateTransparent3D()
 }
 
 // StateOverlay2D returns the state of 2D drawn on top of everything; see
 // StateOpaque3D.
 func StateOverlay2D() MaterialState {
-	return types.StateOverlay2D()
+	return internal.StateOverlay2D()
 }
 
 // DefaultLimits returns the WebGPU spec floor every browser guarantees. It is
@@ -238,7 +240,7 @@ func StateOverlay2D() MaterialState {
 // limits, where 200 storage buffers is ordinary, so checking a shader against
 // the device it happens to run on passes builds that cannot run in a browser.
 func DefaultLimits() Limits {
-	return types.DefaultLimits()
+	return internal.DefaultLimits()
 }
 
 // CheckVertexInterface reports the first way a vertex layout fails the shader
@@ -269,7 +271,7 @@ func DefaultLimits() Limits {
 // layout and its shader - can ask the same question gfx will ask at draw time,
 // through the same call.
 func CheckVertexInterface(shader string, layout ShaderLayout, attrs []VertexAttr) error {
-	return types.CheckVertexInterface(shader, layout, attrs)
+	return internal.CheckVertexInterface(shader, layout, attrs)
 }
 
 // SnapshotViewOf fills in the three coordinate sizes from a viewport. The
@@ -277,50 +279,50 @@ func CheckVertexInterface(shader string, layout ShaderLayout, attrs []VertexAttr
 // knows whether one was performed, and Tick to the snapshot, which is the
 // only thing produced inside the tick it names.
 func SnapshotViewOf(viewport Viewport) SnapshotView {
-	return types.SnapshotViewOf(viewport)
+	return internal.SnapshotViewOf(viewport)
 }
 
 // ParameterViewOf renders one parameter. It reads through the accessors rather
 // than the fields, so a new arm on the union that forgets to answer here
 // serializes as its kind and no value, instead of as somebody else's value.
 func ParameterViewOf(parameter ParameterDescr) ParameterView {
-	return types.ParameterViewOf(parameter)
+	return internal.ParameterViewOf(parameter)
 }
 
 // ParameterViewsOf renders a parameter list in order. It is the form both
 // callers actually want, and it keeps the empty case one nil rather than one
 // empty array in every response.
 func ParameterViewsOf(parameters []ParameterDescr) []ParameterView {
-	return types.ParameterViewsOf(parameters)
+	return internal.ParameterViewsOf(parameters)
 }
 
 // TextureViewOf renders one texture descriptor.
 func TextureViewOf(texture TextureDescr) TextureView {
-	return types.TextureViewOf(texture)
+	return internal.TextureViewOf(texture)
 }
 
 // BufferViewOf renders one buffer descriptor. The bound range is not part of a
 // buffer and is filled in by whatever bound it.
 func BufferViewOf(buffer BufferDescr) BufferView {
-	return types.BufferViewOf(buffer)
+	return internal.BufferViewOf(buffer)
 }
 
 // SamplerViewOf renders one sampler descriptor.
 func SamplerViewOf(sampler SamplerDesc) SamplerView {
-	return types.SamplerViewOf(sampler)
+	return internal.SamplerViewOf(sampler)
 }
 
 // MaterialViewOf renders one material descriptor.
 func MaterialViewOf(material MaterialDescr) MaterialView {
-	return types.MaterialViewOf(material)
+	return internal.MaterialViewOf(material)
 }
 
 // ShaderViewOf renders one shader descriptor.
 func ShaderViewOf(shader ShaderDescr) ShaderView {
-	return types.ShaderViewOf(shader)
+	return internal.ShaderViewOf(shader)
 }
 
 // MaterialStateViewOf renders one pipeline state.
 func MaterialStateViewOf(state MaterialState) MaterialStateView {
-	return types.MaterialStateViewOf(state)
+	return internal.MaterialStateViewOf(state)
 }

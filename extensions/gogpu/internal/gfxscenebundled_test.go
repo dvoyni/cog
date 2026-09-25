@@ -16,7 +16,7 @@ import (
 // includee's own default, which is what an unsupplied #const means.
 func bundledSceneShader(t *testing.T, opts ...cgfx.ShaderOption) string {
 	t.Helper()
-	text, err := flattenShader(t, "scene", os.DirFS("../../../bundles/model/internal"), cgfx.ShaderWithResource("builtin/scene/scene.wgsl", opts...))
+	text, err := flattenShader(t, "scene", os.DirFS("../../../bundles/model/internal"), cgfx.ShaderWithResource("builtin/model/scene.wgsl", opts...))
 	if err != nil {
 		t.Fatalf("flatten the bundled scene shader: %v", err)
 	}
@@ -50,9 +50,12 @@ func TestBundledSceneShaderDeclaresItsGroupZeroAndOneBindings(t *testing.T) {
 	// group: gfx packs it per draw from the draw's params by name, so no
 	// renderer knows its layout. Everything the renderer binds itself is
 	// storage.
-	if layout.UniformSize == 0 || layout.UniformSize > 256 || layout.UniformGroup != 1 || layout.UniformBinding != 0 {
-		t.Fatalf("the scene shader's uniform block is %d bytes at %d/%d, want the material's, at most 256 bytes, at 1/0",
-			layout.UniformSize, layout.UniformGroup, layout.UniformBinding)
+	blocks := uniformBlocks(layout)
+	if len(blocks) != 1 {
+		t.Fatalf("the scene shader's uniform blocks are %+v, want the material's alone", blocks)
+	}
+	if block := blocks[0]; block.Name != "scenePbrMaterial" || block.Size == 0 || block.Group != 1 || block.Binding != 0 {
+		t.Fatalf("the scene shader's uniform block is %+v, want the material's at 1/0", block)
 	}
 	resources := map[string]cgfx.ShaderResource{}
 	for _, resource := range layout.Resources {
@@ -81,7 +84,7 @@ func TestBundledSceneShaderDeclaresItsGroupZeroAndOneBindings(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s is not reflected; an unreflected binding is an unbound one", want.name)
 		}
-		if !got.StorageBuffer || got.WritableBuffer {
+		if got.Kind != cgfx.ResourceStorageBuffer {
 			t.Errorf("%s is %+v, want a read-only storage buffer", want.name, got)
 		}
 		if got.Group != want.group || got.Binding != want.binding {
@@ -99,19 +102,19 @@ func TestBundledSceneShaderDeclaresItsGroupZeroAndOneBindings(t *testing.T) {
 		if !ok {
 			t.Fatalf("%sTexture is not reflected; an unreflected binding is an unbound one", slot)
 		}
-		if texture.Sampler || texture.StorageBuffer || texture.Group != 1 {
+		if texture.Kind.Base() != cgfx.ResourceTexture || texture.Group != 1 {
 			t.Errorf("%sTexture is %+v, want a group 1 texture", slot, texture)
 		}
 		sampler, ok := resources[slot+"Sampler"]
 		if !ok {
 			t.Fatalf("%sSampler is not reflected; five slots means five samplers", slot)
 		}
-		if !sampler.Sampler || sampler.Comparison || sampler.Group != 1 {
+		if sampler.Kind != cgfx.ResourceSampler || sampler.Group != 1 {
 			t.Errorf("%sSampler is %+v, want a group 1 filtering sampler", slot, sampler)
 		}
 	}
-	if len(layout.Resources) != 17 {
-		t.Fatalf("the scene shader declares %d bindings, want the 17 asserted above: %+v",
+	if len(layout.Resources) != 18 {
+		t.Fatalf("the scene shader declares %d bindings, want the 18 asserted above: %+v",
 			len(layout.Resources), layout.Resources)
 	}
 }
@@ -135,12 +138,8 @@ func TestBundledSceneShaderRecordsMatchTheirPackedOffsets(t *testing.T) {
 		}
 		offsets[resource.Name] = members
 	}
-	// The material block is the uniform, whose members gfx packs by name.
-	uniform := map[string]int{}
-	for _, member := range layout.Uniforms {
-		uniform[member.Name] = member.Offset
-	}
-	offsets["scenePbrMaterial"] = uniform
+	// The material block, scenePbrMaterial, is the uniform among them: gfx
+	// packs its members by name.
 	for binding, want := range map[string]map[string]int{
 		"sceneFrame": {
 			"view": 0, "projection": 64, "viewProjection": 128,
@@ -231,7 +230,7 @@ func TestBundledSceneShaderFitsTheWebStorageBudget(t *testing.T) {
 	}
 	storage := 0
 	for _, resource := range layout.Resources {
-		if resource.StorageBuffer {
+		if resource.Kind.Base() == cgfx.ResourceStorageBuffer {
 			storage++
 		}
 	}
@@ -253,10 +252,10 @@ func TestBundledSceneShaderVariantsDeclareOnlyWhatTheyRead(t *testing.T) {
 		bindings int
 		storage  int
 	}{
-		{name: "debug line or static prop", defines: nil, bindings: 13, storage: 3},
-		{name: "morph only, a face", defines: []string{"SCENE_MORPH"}, bindings: 15, storage: 5},
-		{name: "skinned, no morph", defines: []string{"SCENE_SKIN"}, bindings: 16, storage: 6},
-		{name: "everything", defines: []string{"SCENE_SKIN", "SCENE_MORPH"}, bindings: 17, storage: 7},
+		{name: "debug line or static prop", defines: nil, bindings: 14, storage: 3},
+		{name: "morph only, a face", defines: []string{"SCENE_MORPH"}, bindings: 16, storage: 5},
+		{name: "skinned, no morph", defines: []string{"SCENE_SKIN"}, bindings: 17, storage: 6},
+		{name: "everything", defines: []string{"SCENE_SKIN", "SCENE_MORPH"}, bindings: 18, storage: 7},
 	} {
 		layout, err := reflectShaderLayout(bundledSceneShader(t, sceneVariant(want.defines...)...))
 		if err != nil {
@@ -264,7 +263,7 @@ func TestBundledSceneShaderVariantsDeclareOnlyWhatTheyRead(t *testing.T) {
 		}
 		storage := 0
 		for _, resource := range layout.Resources {
-			if resource.StorageBuffer {
+			if resource.Kind.Base() == cgfx.ResourceStorageBuffer {
 				storage++
 			}
 		}

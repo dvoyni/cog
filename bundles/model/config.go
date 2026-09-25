@@ -1,6 +1,6 @@
 package model
 
-import "github.com/dvoyni/cog/bundles/model/internal/types"
+import "github.com/dvoyni/cog/bundles/model/internal"
 
 // Config is model's configuration. PoseSampleRate, the global animation bake
 // rate in Hz, is the only configurable number: every clip of every model is
@@ -10,6 +10,6 @@ import "github.com/dvoyni/cog/bundles/model/internal/types"
 //
 //	kernel.New(map[kernel.PluginName]any{model.Name: model.Config{PoseSampleRate: 30}})
 //
-// It is declared in internal/types, because the Lookup resource holds it, and
-// aliased here.
-type Config = types.Config
+// It is declared in internal, because the Lookup resource holds it, and aliased
+// here.
+type Config = internal.Config

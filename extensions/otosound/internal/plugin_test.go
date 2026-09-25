@@ -11,7 +11,6 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/dvoyni/cog/extensions/otosound"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 	"github.com/dvoyni/cog/slots/sound"
@@ -28,19 +27,19 @@ func TestRegisterRefusesAConfigThatIsNotOne(t *testing.T) {
 	p := &plugin{hardware: &fakeAudio{}}
 	err := p.Register(&kernel.Registrar{}, "48000")
 
-	var refused otosound.ErrInvalidConfig
+	var refused ErrInvalidConfig
 	if !errors.As(err, &refused) {
 		t.Fatalf("Register accepted a %T: err = %v", "48000", err)
 	}
 }
 
 func TestRegisterRefusesANegativeRateOrBuffer(t *testing.T) {
-	var rate otosound.ErrInvalidSampleRate
-	if err := (&plugin{}).Register(&kernel.Registrar{}, otosound.Config{SampleRate: -1}); !errors.As(err, &rate) {
+	var rate ErrInvalidSampleRate
+	if err := (&plugin{}).Register(&kernel.Registrar{}, Config{SampleRate: -1}); !errors.As(err, &rate) {
 		t.Fatalf("Register accepted a negative SampleRate: err = %v", err)
 	}
-	var buffer otosound.ErrInvalidBufferSize
-	if err := (&plugin{}).Register(&kernel.Registrar{}, otosound.Config{BufferSize: -1}); !errors.As(err, &buffer) {
+	var buffer ErrInvalidBufferSize
+	if err := (&plugin{}).Register(&kernel.Registrar{}, Config{BufferSize: -1}); !errors.As(err, &buffer) {
 		t.Fatalf("Register accepted a negative BufferSize: err = %v", err)
 	}
 }
@@ -106,7 +105,7 @@ func TestADeviceThatCanNotBeOpenedIsReportedOnceAndTheGameRunsOn(t *testing.T) {
 	if len(reported) != 1 {
 		t.Fatalf("a Device that could never be opened was reported %d times", len(reported))
 	}
-	var unavailable otosound.ErrDeviceUnavailable
+	var unavailable ErrDeviceUnavailable
 	if err := <-reported; !errors.As(err, &unavailable) {
 		t.Fatalf("what was reported is %v", err)
 	}
@@ -144,7 +143,7 @@ func TestAMachineWithNoOutputDeviceIsReportedOnceAndTheGameRunsOn(t *testing.T) 
 	if len(reported) != 1 {
 		t.Fatalf("a machine with no output device was reported %d times", len(reported))
 	}
-	var unavailable otosound.ErrDeviceUnavailable
+	var unavailable ErrDeviceUnavailable
 	if err := <-reported; !errors.As(err, &unavailable) {
 		t.Fatalf("what was reported is %v", err)
 	}

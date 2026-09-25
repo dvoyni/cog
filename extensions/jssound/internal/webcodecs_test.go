@@ -7,7 +7,6 @@ import (
 	"syscall/js"
 	"testing"
 
-	"github.com/dvoyni/cog/extensions/jssound"
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/sound"
@@ -145,7 +144,7 @@ func TestTheProbeDecidesTheStreamedRouteAndTheGoDecoderStaysTheFallback(t *testi
 		t.Run(one.name, func(t *testing.T) {
 			f := fakeAudio(t)
 			c := fakeCodecs(t, one.supported)
-			b := startedWith(t, f, true, jssound.Config{DecodedClipLimit: alwaysStream})
+			b := startedWith(t, f, true, Config{DecodedClipLimit: alwaysStream})
 
 			if b.codecs != one.want {
 				t.Fatalf("the probe settled at %v, want %v", b.codecs, one.want)
@@ -178,7 +177,7 @@ func TestTheProbeDecidesTheStreamedRouteAndTheGoDecoderStaysTheFallback(t *testi
 // cost nothing: no probe, no wait, and the Go decoder as it always was.
 func TestAPageWithNoAudioDecoderSettlesAtOnceAndKeepsTheGoDecoder(t *testing.T) {
 	f := fakeAudio(t)
-	b := startedWith(t, f, true, jssound.Config{DecodedClipLimit: alwaysStream})
+	b := startedWith(t, f, true, Config{DecodedClipLimit: alwaysStream})
 
 	if b.codecs != codecsAbsent {
 		t.Fatalf("a page with no AudioDecoder settled at %v, want codecsAbsent", b.codecs)
@@ -208,7 +207,7 @@ func TestAStreamedClipDecodesThroughWebCodecsAndKeepsItsFrames(t *testing.T) {
 	)
 	f := fakeAudio(t)
 	c := fakeCodecs(t, true)
-	b := startedWith(t, f, true, jssound.Config{DecodedClipLimit: alwaysStream})
+	b := startedWith(t, f, true, Config{DecodedClipLimit: alwaysStream})
 
 	clip := playCodecs(t, f, b, c, packets, perPacket, m.Maybe[sound.LoopRegion]{}, sound.VoiceStart{
 		Slot: 0, Params: sound.VoiceParams{Gains: identity, Rate: 1},
@@ -284,7 +283,7 @@ func TestAReleaseClosesEveryAudioDataAndGivesTheDecoderBack(t *testing.T) {
 	const packets = 64
 	f := fakeAudio(t)
 	c := fakeCodecs(t, true)
-	b := startedWith(t, f, true, jssound.Config{DecodedClipLimit: alwaysStream})
+	b := startedWith(t, f, true, Config{DecodedClipLimit: alwaysStream})
 
 	playCodecs(t, f, b, c, packets, 1024, m.Maybe[sound.LoopRegion]{}, sound.VoiceStart{
 		Slot: 0, Params: sound.VoiceParams{Gains: identity, Rate: 1},
@@ -323,7 +322,7 @@ func TestALoopingStreamedVoiceIsGaplessOnTheWebCodecsRoute(t *testing.T) {
 	)
 	f := fakeAudio(t)
 	c := fakeCodecs(t, true)
-	b := startedWith(t, f, true, jssound.Config{DecodedClipLimit: alwaysStream})
+	b := startedWith(t, f, true, Config{DecodedClipLimit: alwaysStream})
 
 	playCodecs(t, f, b, c, packets, perPacket, m.Some(sound.LoopRegion{
 		Start: float32(loopStart) / streamRate,
@@ -356,7 +355,7 @@ func TestADecoderThatFailsPartWayThroughEndsTheVoice(t *testing.T) {
 	const packets = 64
 	f := fakeAudio(t)
 	c := fakeCodecs(t, true)
-	b := startedWith(t, f, true, jssound.Config{DecodedClipLimit: alwaysStream})
+	b := startedWith(t, f, true, Config{DecodedClipLimit: alwaysStream})
 	c.failAfter(6)
 
 	playCodecs(t, f, b, c, packets, 1024, m.Maybe[sound.LoopRegion]{}, sound.VoiceStart{

@@ -3,11 +3,12 @@ package internal
 import (
 	"io/fs"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
-	"github.com/dvoyni/cog/slots/gfx"
-	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/slots/storage"
 )
 
@@ -22,12 +23,12 @@ type captureOnUpdate kernel.Subscription[app.UpdateEvent]
 
 // readList is the read side of the triple buffer: the queue the render
 // handler translates.
-type readList struct{ *gfx.OpQueue }
+type readList struct{ *OpQueue }
 
 // readyList is the internal third buffer of the triple buffer: it parks the
 // latest completed OpQueue between Present and Acquire/Consume.
 type readyList struct {
-	queue   *gfx.OpQueue
+	queue   *OpQueue
 	pending bool
 }
 
@@ -45,7 +46,7 @@ type backendNotReadyKey struct{}
 type plugin struct {
 	translator *translator
 	// backend is the bound Backend adapter, valid from Start onwards.
-	backend kernel.RequiredAdapter[gfx.Backend]
+	backend kernel.RequiredAdapter[Backend]
 	// captures is gfx's one capture slot, plugin-owned and self-synchronizing.
 	// See captureState for why it is not a kernel resource.
 	captures captureState
@@ -64,7 +65,7 @@ func New() kernel.Plugin { return newPlugin() }
 func newPlugin() *plugin { return &plugin{translator: newTranslator()} }
 
 // Name reports the plugin name.
-func (p *plugin) Name() kernel.PluginName { return gfx.Name }
+func (p *plugin) Name() kernel.PluginName { return Name }
 
 // Dependencies reports the plugins gfx requires: storage, from which it loads
 // shader and texture resources, and app, whose TimeCmd the gfx_capture and
@@ -77,27 +78,27 @@ func (p *plugin) Dependencies() []kernel.PluginName {
 // buffers, the Present/Acquire/Consume commands, and the end-of-tick present
 // subscription on app.UpdateEvent.
 func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
-	p.backend = registrar.RequireAdapter[gfx.BackendPort]()
-	ids := func() types.IDMinter { return p.backend.Get() }
-	registrar.InitResource(types.NewOpQueue(ids))
-	registrar.InitResource(&readList{OpQueue: types.NewOpQueue(ids)})
-	registrar.InitResource(&readyList{queue: types.NewOpQueue(ids)})
-	registrar.InitResource(types.NewResourceQueue(ids))
-	registrar.InitResource(&gfx.Viewport{})
+	p.backend = registrar.RequireAdapter[BackendPort]()
+	ids := func() IDMinter { return p.backend.Get() }
+	registrar.InitResource(NewOpQueue(ids))
+	registrar.InitResource(&readList{OpQueue: NewOpQueue(ids)})
+	registrar.InitResource(&readyList{queue: NewOpQueue(ids)})
+	registrar.InitResource(NewResourceQueue(ids))
+	registrar.InitResource(&types.Viewport{})
 	registrar.InitResource(&desiredViewport{})
-	registrar.HandleCommand[gfx.PresentCmd](p.presentCmdImpl)
-	registrar.HandleCommand[gfx.AcquireCmd](p.acquireCmdImpl)
-	registrar.HandleCommand[gfx.ReleaseCachedResourceCmd](p.releaseCachedResourceCmdImpl)
-	registrar.HandleCommand[gfx.FreeCachedResourcesCmd](p.freeCachedResourcesCmdImpl)
-	registrar.HandleCommand[gfx.SetViewportCmd](setViewportCmdImpl)
-	registrar.HandleCommand[gfx.SetDesiredViewportCmd](setDesiredViewportCmdImpl)
-	registrar.HandleCommand[gfx.ArmCaptureCmd](p.armCaptureCmdImpl)
-	registrar.HandleCommand[gfx.ArmFrameCmd](p.armFrameCmdImpl)
+	registrar.HandleCommand[PresentCmd](p.presentCmdImpl)
+	registrar.HandleCommand[AcquireCmd](p.acquireCmdImpl)
+	registrar.HandleCommand[ReleaseCachedResourceCmd](p.releaseCachedResourceCmdImpl)
+	registrar.HandleCommand[FreeCachedResourcesCmd](p.freeCachedResourcesCmdImpl)
+	registrar.HandleCommand[SetViewportCmd](setViewportCmdImpl)
+	registrar.HandleCommand[SetDesiredViewportCmd](setDesiredViewportCmdImpl)
+	registrar.HandleCommand[ArmCaptureCmd](p.armCaptureCmdImpl)
+	registrar.HandleCommand[ArmFrameCmd](p.armFrameCmdImpl)
 	registrar.Subscribe[captureOnUpdate](p.admitCapture).First()
 	registrar.Subscribe[frameOnUpdate](p.admitFrame).First()
-	registrar.Subscribe[gfx.PresentOnUpdate](p.presentOnUpdate).Last()
-	registrar.Subscribe[gfx.RenderOnRender](p.renderOnRender)
-	registrar.ProvideAdapter[gfx.McpProvider](mcp.Provider(provider{}))
+	registrar.Subscribe[PresentOnUpdate](p.presentOnUpdate).Last()
+	registrar.Subscribe[RenderOnRender](p.renderOnRender)
+	registrar.ProvideAdapter[McpProvider](mcp.Provider(provider{}))
 	return nil
 }
 
@@ -150,13 +151,13 @@ func (p *plugin) admitFrame() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 // reaches the frame queue. Read conflicts only with a writer, and every writer
 // of it in a tick already orders itself before present.
 func (p *plugin) presentOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	var write kernel.Write[*gfx.OpQueue]
+	var write kernel.Write[*OpQueue]
 	var ready kernel.Write[*readyList]
-	var resources kernel.Read[*gfx.ResourceQueue]
+	var resources kernel.Read[*ResourceQueue]
 	return func(access kernel.ResourceAccess) {
-			write = access.GetWrite[*gfx.OpQueue]()
+			write = access.GetWrite[*OpQueue]()
 			ready = access.GetWrite[*readyList]()
-			resources = access.GetRead[*gfx.ResourceQueue]()
+			resources = access.GetRead[*ResourceQueue]()
 		}, func(_ kernel.Kernel, event app.UpdateEvent) {
 			p.snapshots.record(write.Get(), resources.Get(), event.Tick)
 			present(write, ready)
@@ -173,25 +174,25 @@ func (p *plugin) presentOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]
 func (p *plugin) renderOnRender() (kernel.Lock, kernel.Observe[app.RenderEvent]) {
 	var read kernel.Write[*readList]
 	var ready kernel.Write[*readyList]
-	var resources kernel.Write[*gfx.ResourceQueue]
+	var resources kernel.Write[*ResourceQueue]
 	var files func() fs.FS
 	return func(access kernel.ResourceAccess) {
 			read = access.GetWrite[*readList]()
 			ready = access.GetWrite[*readyList]()
-			resources = access.GetWrite[*gfx.ResourceQueue]()
+			resources = access.GetWrite[*ResourceQueue]()
 			files = readFiles(access)
 		}, func(k kernel.Kernel, _ app.RenderEvent) {
 			acquire(read, ready)
 			list := read.Get()
 			backend := p.backend.Get()
 			if !backend.Ready() {
-				k.ReportErrorOnce(backendNotReadyKey{}, gfx.ErrBackendNotReady{})
+				k.ReportErrorOnce(backendNotReadyKey{}, types.ErrBackendNotReady{})
 				return
 			}
 			queue := resources.Get()
 			capture, capturing := p.captures.target()
 			ops, err := p.translator.translate(
-				k, list.OpQueue, types.ResourceQueueOps(queue), backend, files, capture, capturing)
+				k, list.OpQueue, ResourceQueueOps(queue), backend, files, capture, capturing)
 			if err != nil {
 				k.ReportError(err)
 			}
@@ -205,13 +206,13 @@ func (p *plugin) renderOnRender() (kernel.Lock, kernel.Observe[app.RenderEvent])
 			if capturing {
 				p.captures.encoded()
 			}
-			types.ResourceQueueReset(queue)
+			ResourceQueueReset(queue)
 		}
 }
 
 // present swaps the recorded OpQueue into the ready slot and installs the queue
 // previously parked there as the reset writable resource (latest-wins).
-func present(write kernel.Write[*gfx.OpQueue], ready kernel.Write[*readyList]) {
+func present(write kernel.Write[*OpQueue], ready kernel.Write[*readyList]) {
 	rd := ready.Get()
 	recycled := rd.queue
 	recycled.Reset()

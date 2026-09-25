@@ -12,12 +12,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 	"github.com/dvoyni/cog/slots/app/appplugin"
-	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/dvoyni/cog/slots/storage"
 	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
@@ -63,7 +66,7 @@ func newCaptureRig(t *testing.T) *captureRig {
 		backend: &fakeBackend{}, clock: clock, gate: gate, flush: flush,
 	}
 	rig.k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: rig.backend})
-	rig.k.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{
+	rig.k.ExecuteCommand[SetViewportCmd](SetViewportRequest{
 		Width: 800, Height: 600, FramebufferWidth: 1600, FramebufferHeight: 1200,
 	})
 	return rig
@@ -74,7 +77,7 @@ func newCaptureRig(t *testing.T) *captureRig {
 func (r *captureRig) record(label string) {
 	r.t.Helper()
 	q := recordRaw(r.t, r.k)
-	q.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Load: gfx.LoadClear, Label: label})
+	q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: label})
 	drawInto(q)
 }
 
@@ -223,7 +226,7 @@ func TestACaptureIsWrittenAsAPNGWithNoShear(t *testing.T) {
 		return color.NRGBA{R: uint8(10 + x*20), G: uint8(200 - y*50), B: uint8(x + y), A: 255}
 	}
 	rig := newCaptureRig(t)
-	rig.backend.captureResult = func(gfx.CaptureDesc) gfx.Capture {
+	rig.backend.captureResult = func(types.CaptureDesc) Capture {
 		return paddedCapture(width, height, want)
 	}
 	path := filepath.Join(t.TempDir(), "shot.png")
@@ -262,7 +265,7 @@ func TestACaptureIsWrittenAsAPNGWithNoShear(t *testing.T) {
 
 func TestACaptureReportsThePixelSizeAndTheWindowSize(t *testing.T) {
 	rig := newCaptureRig(t)
-	rig.backend.captureResult = func(gfx.CaptureDesc) gfx.Capture {
+	rig.backend.captureResult = func(types.CaptureDesc) Capture {
 		return paddedCapture(64, 48, func(int, int) color.NRGBA { return color.NRGBA{A: 255} })
 	}
 
@@ -294,8 +297,8 @@ func TestACaptureBindsToATickThatBeganAfterTheRequest(t *testing.T) {
 		close(ticked)
 	}()
 	<-rig.gate.entered
-	armed := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
-		Target: gfx.CaptureDesc{Screen: true},
+	armed := rig.k.ExecuteCommand[ArmCaptureCmd](ArmCaptureRequest{
+		Target: types.CaptureDesc{Screen: true},
 	})
 	if armed.Err != nil {
 		t.Fatalf("arm: %v", armed.Err)
@@ -349,15 +352,15 @@ func TestNoCaptureCostsTheRenderNothing(t *testing.T) {
 
 func TestASecondCaptureWhileOneIsInFlightIsRefused(t *testing.T) {
 	rig := newCaptureRig(t)
-	if answer := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
-		Target: gfx.CaptureDesc{Screen: true},
+	if answer := rig.k.ExecuteCommand[ArmCaptureCmd](ArmCaptureRequest{
+		Target: types.CaptureDesc{Screen: true},
 	}); answer.Err != nil {
 		t.Fatalf("first arm: %v", answer.Err)
 	}
-	second := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
-		Target: gfx.CaptureDesc{Screen: true},
+	second := rig.k.ExecuteCommand[ArmCaptureCmd](ArmCaptureRequest{
+		Target: types.CaptureDesc{Screen: true},
 	})
-	if !errors.Is(second.Err, gfx.ErrCaptureBusy{}) {
+	if !errors.Is(second.Err, types.ErrCaptureBusy{}) {
 		t.Fatalf("second arm = %v, want it refused as busy rather than queued", second.Err)
 	}
 }
@@ -374,8 +377,8 @@ func TestACaptureAbandonedByShutdownArrivesOnItsChannel(t *testing.T) {
 	go func() { engine.Run(); close(stopped) }()
 	<-engine.Ready()
 
-	armed := engine.Executioner().ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
-		Target: gfx.CaptureDesc{Screen: true},
+	armed := engine.Executioner().ExecuteCommand[ArmCaptureCmd](ArmCaptureRequest{
+		Target: types.CaptureDesc{Screen: true},
 	})
 	if armed.Err != nil {
 		t.Fatalf("arm: %v", armed.Err)
@@ -385,7 +388,7 @@ func TestACaptureAbandonedByShutdownArrivesOnItsChannel(t *testing.T) {
 
 	select {
 	case capture := <-armed.Done:
-		if !errors.Is(capture.Err, gfx.ErrCaptureAbandoned{}) {
+		if !errors.Is(capture.Err, types.ErrCaptureAbandoned{}) {
 			t.Fatalf("abandoned capture = %v, want it reported as abandoned", capture.Err)
 		}
 	default:
@@ -420,9 +423,9 @@ func TestABurstWritesNumberedStillsAndReportsTheOrdinals(t *testing.T) {
 func TestABurstTruncatesRatherThanFailing(t *testing.T) {
 	rig := newCaptureRig(t)
 	var taken atomic.Int64
-	rig.backend.captureResult = func(gfx.CaptureDesc) gfx.Capture {
+	rig.backend.captureResult = func(types.CaptureDesc) Capture {
 		if taken.Add(1) > 2 {
-			return gfx.Capture{Err: gfx.ErrCaptureNoTarget{}}
+			return Capture{Err: types.ErrCaptureNoTarget{}}
 		}
 		return paddedCapture(4, 2, func(int, int) color.NRGBA { return color.NRGBA{A: 255} })
 	}
@@ -441,8 +444,8 @@ func TestABurstTruncatesRatherThanFailing(t *testing.T) {
 
 func TestACaptureThatWritesNothingIsAnError(t *testing.T) {
 	rig := newCaptureRig(t)
-	rig.backend.captureResult = func(gfx.CaptureDesc) gfx.Capture {
-		return gfx.Capture{Err: gfx.ErrCaptureNoTarget{}}
+	rig.backend.captureResult = func(types.CaptureDesc) Capture {
+		return Capture{Err: types.ErrCaptureNoTarget{}}
 	}
 
 	_, err := rig.runCapture(captureScreenRequest{Path: filepath.Join(t.TempDir(), "none.png")})
@@ -492,7 +495,7 @@ func TestASingleCaptureUnderPauseCostsNoTick(t *testing.T) {
 	rig.tick()
 	rig.clock.paused.Store(true)
 
-	pixels := func(gfx.CaptureDesc) gfx.Capture {
+	pixels := func(types.CaptureDesc) Capture {
 		return paddedCapture(3, 2, func(x, y int) color.NRGBA {
 			return color.NRGBA{R: uint8(x * 30), G: uint8(y * 30), A: 255}
 		})
@@ -565,38 +568,38 @@ func TestABurstUnderPauseIsRefusedInWords(t *testing.T) {
 	}
 
 	// gfx refuses it on its own terms too, for the callers that are not an agent.
-	arm := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
-		Target: gfx.CaptureDesc{Screen: true}, Amount: 4, Paused: true,
+	arm := rig.k.ExecuteCommand[ArmCaptureCmd](ArmCaptureRequest{
+		Target: types.CaptureDesc{Screen: true}, Amount: 4, Paused: true,
 	})
-	if !errors.Is(arm.Err, gfx.ErrCaptureBurstPaused{}) {
+	if !errors.Is(arm.Err, types.ErrCaptureBurstPaused{}) {
 		t.Fatalf("paused burst arm = %v, want it refused", arm.Err)
 	}
 }
 
 func TestATextureCaptureDeclaresItsTransition(t *testing.T) {
-	var target gfx.TextureDescr
+	var target descriptors.TextureDescr
 	rig := newCaptureRig(t)
-	withResourceQueue(t, rig.k, func(resources *gfx.ResourceQueue) {
-		target = resources.AllocateTexture(64, 64, 1, gfx.FormatRGBA8)
+	withResourceQueue(t, rig.k, func(resources *ResourceQueue) {
+		target = resources.AllocateTexture(64, 64, 1, descriptors.FormatRGBA8)
 	})
-	if answer := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
-		Target: gfx.CaptureDesc{Texture: target.ID()},
+	if answer := rig.k.ExecuteCommand[ArmCaptureCmd](ArmCaptureRequest{
+		Target: types.CaptureDesc{Texture: target.ID()},
 	}); answer.Err != nil {
 		t.Fatalf("arm: %v", answer.Err)
 	}
 	q := recordRaw(t, rig.k)
-	q.Pass(gfx.PassDescr{
-		Target: gfx.TextureTarget(target, 0, 0), Depth: gfx.DepthNone(), Load: gfx.LoadClear, Label: "offscreen",
+	q.Pass(descriptors.PassDescr{
+		Target: descriptors.TextureTarget(target, 0, 0), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "offscreen",
 	})
-	q.Draw(triangle(), testMaterial(), gfx.MatParam("mvp", m.NewMat4()))
+	q.Draw(triangle(), testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
 	rig.tick()
 	rig.render()
 
 	if len(rig.backend.captureDescs) != 1 {
 		t.Fatalf("capture ops = %d, want the texture readback", len(rig.backend.captureDescs))
 	}
-	want := gfx.TextureTransition{
-		Texture: target.ID(), From: gfx.TextureUsageRenderAttachment, To: gfx.TextureUsageCopySrc,
+	want := types.TextureTransition{
+		Texture: target.ID(), From: types.TextureUsageRenderAttachment, To: types.TextureUsageCopySrc,
 	}
 	if _, placed := rig.backend.transitionBefore(want); !placed {
 		t.Fatalf("transitions = %v, want the texture moved into CopySrc before the copy",

@@ -12,17 +12,15 @@ import (
 	"io/fs"
 
 	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/slots/storage"
-	"github.com/dvoyni/cog/slots/storage/internal/types"
 )
 
 // plugin registers the FileSystem and Values resources and storage commands.
 type plugin struct {
 	// permanent is the bound PermanentFS Adapter. The resources read it through
 	// its Get, which is valid from Start onwards.
-	permanent kernel.RequiredAdapter[storage.PermanentFS]
+	permanent kernel.RequiredAdapter[PermanentFS]
 	// mounts are the contributed read mounts, installed by Start.
-	mounts kernel.CollectedAdapters[storage.ReadMount]
+	mounts kernel.CollectedAdapters[ReadMount]
 }
 
 // New creates a storage plugin. Its storage.Config arrives through kernel.New's
@@ -30,7 +28,7 @@ type plugin struct {
 func New() kernel.Plugin { return &plugin{} }
 
 // Name reports the plugin name.
-func (p *plugin) Name() kernel.PluginName { return storage.Name }
+func (p *plugin) Name() kernel.PluginName { return Name }
 
 // Dependencies reports the plugins storage requires; it has none. The Adapter
 // it requires is bound at composition and adds no dependency.
@@ -39,14 +37,14 @@ func (p *plugin) Dependencies() []kernel.PluginName { return nil }
 // Register requires the PermanentFS Adapter, collects the read mounts, resolves
 // the configuration and registers the storage resources and commands.
 func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
-	p.permanent = registrar.RequireAdapter[storage.PermanentFSPort]()
-	p.mounts = registrar.CollectAdapters[storage.ReadMountPort]()
-	var cfg storage.Config
+	p.permanent = registrar.RequireAdapter[PermanentFSPort]()
+	p.mounts = registrar.CollectAdapters[ReadMountPort]()
+	var cfg Config
 	if config != nil {
 		var ok bool
-		cfg, ok = config.(storage.Config)
+		cfg, ok = config.(Config)
 		if !ok {
-			return storage.ErrInvalidConfig{Got: config}
+			return ErrInvalidConfig{Got: config}
 		}
 	}
 
@@ -67,31 +65,31 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 // then goes through SetMountCmd, which refuses an invalid or reserved one.
 func (p *plugin) Start(k kernel.Executioner) error {
 	contributed := p.mounts.Get()
-	contributors := make(map[storage.MountId][]kernel.PluginName, len(contributed))
+	contributors := make(map[MountId][]kernel.PluginName, len(contributed))
 	for _, contribution := range contributed {
 		contributors[contribution.Adapter.Id] = append(contributors[contribution.Adapter.Id], contribution.Plugin)
 	}
 	for _, contribution := range contributed {
 		if plugins := contributors[contribution.Adapter.Id]; len(plugins) > 1 {
-			return storage.ErrDuplicateMount{Id: contribution.Adapter.Id, Plugins: plugins}
+			return ErrDuplicateMount{Id: contribution.Adapter.Id, Plugins: plugins}
 		}
 	}
 	for _, contribution := range contributed {
-		if err := k.ExecuteCommand[storage.SetMountCmd](storage.SetMountRequest{Mount: contribution.Adapter}).Err; err != nil {
+		if err := k.ExecuteCommand[SetMountCmd](SetMountRequest{Mount: contribution.Adapter}).Err; err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func resolveConfig(config storage.Config, permanent func() storage.PermanentFS) (storage.FileSystem, storage.Values, error) {
+func resolveConfig(config Config, permanent func() PermanentFS) (FileSystem, Values, error) {
 	valuesPath := config.ValuesPath
 	if valuesPath == "" {
-		valuesPath = storage.DefaultValuesPath
+		valuesPath = DefaultValuesPath
 	}
 	if !fs.ValidPath(valuesPath) || valuesPath == "." {
-		return storage.FileSystem{}, storage.Values{}, storage.ErrInvalidValuesPath{Path: valuesPath}
+		return FileSystem{}, Values{}, ErrInvalidValuesPath{Path: valuesPath}
 	}
 
-	return types.NewFileSystem(nil, permanent), types.NewValues(valuesPath), nil
+	return NewFileSystem(nil, permanent), NewValues(valuesPath), nil
 }

@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dvoyni/cog/extensions/diskstorage"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/storage"
 	"github.com/dvoyni/cog/slots/storage/storageplugin"
@@ -31,7 +30,7 @@ func isolateDataDir(t *testing.T) string {
 // data directory, and an engine started afterwards reads them back.
 func TestValuesRoundTripAndSurviveARestart(t *testing.T) {
 	dataDir := isolateDataDir(t)
-	config := diskstorage.Config{AppId: "cog-diskstorage-test"}
+	config := Config{AppId: "cog-diskstorage-test"}
 
 	first := start(t, config)
 	if answer := first.kernel.ExecuteCommand[storage.AccessValuesCmd](storage.SetValue("volume", 0.25)); answer.Err != nil {
@@ -64,12 +63,12 @@ func TestAnInvalidAppIdIsRejected(t *testing.T) {
 	for _, appId := range []string{".", "..", "a/b", filepath.Join("a", "b"), filepath.Join(t.TempDir(), "abs")} {
 		t.Run(appId, func(t *testing.T) {
 			var reported []error
-			kernel.New(map[kernel.PluginName]any{diskstorage.Name: diskstorage.Config{AppId: appId}}).Handler(func(err error) error {
+			kernel.New(map[kernel.PluginName]any{Name: Config{AppId: appId}}).Handler(func(err error) error {
 				reported = append(reported, err)
 				return err
 			}).WithPlugins(storageplugin.New(), New())
 
-			var invalid diskstorage.ErrInvalidAppId
+			var invalid ErrInvalidAppId
 			if !errors.As(errors.Join(reported...), &invalid) || invalid.AppId != appId {
 				t.Fatalf("composition reported %v, want ErrInvalidAppId for %q", reported, appId)
 			}
@@ -82,12 +81,12 @@ func TestAnInvalidAppIdIsRejected(t *testing.T) {
 func TestAConfigThatIsNotAConfigIsRejected(t *testing.T) {
 	isolateDataDir(t)
 	var reported []error
-	kernel.New(map[kernel.PluginName]any{diskstorage.Name: "feuds"}).Handler(func(err error) error {
+	kernel.New(map[kernel.PluginName]any{Name: "feuds"}).Handler(func(err error) error {
 		reported = append(reported, err)
 		return err
 	}).WithPlugins(storageplugin.New(), New())
 
-	var invalid diskstorage.ErrInvalidConfig
+	var invalid ErrInvalidConfig
 	if !errors.As(errors.Join(reported...), &invalid) || invalid.Got != "feuds" {
 		t.Fatalf("composition reported %v, want ErrInvalidConfig for %q", reported, "feuds")
 	}
@@ -153,9 +152,9 @@ type running struct {
 
 // start runs an engine of storage and diskstorage until stop, which waits for
 // it to shut down, as a process exit would.
-func start(t *testing.T, config diskstorage.Config) running {
+func start(t *testing.T, config Config) running {
 	t.Helper()
-	engine := kernel.New(map[kernel.PluginName]any{diskstorage.Name: config}).
+	engine := kernel.New(map[kernel.PluginName]any{Name: config}).
 		Handler(func(err error) error {
 			t.Errorf("unexpected kernel error: %v", err)
 			return err

@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 )
@@ -29,7 +28,7 @@ type gatherer struct{}
 func (*gatherer) Name() kernel.PluginName { return "physicstestgatherer" }
 
 func (*gatherer) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{ecs.Name, ecsphysics2d.Name}
+	return []kernel.PluginName{ecs.Name, Name}
 }
 
 type gatheredCmd kernel.Command[gatheredRequest, gatheredResponse]
@@ -41,7 +40,7 @@ type gatheredResponse struct{ Rows []ecs.Entity }
 func (*gatherer) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.HandleCommand[gatheredCmd](ecs.ToExecute[gatheredRequest, gatheredResponse](registrar, func(
 		_ gatheredRequest,
-		contacts *ecs.Read[*ecsphysics2d.Contacts],
+		contacts *ecs.Read[*Contacts],
 		answer *ecs.Resp[gatheredResponse],
 	) {
 		rows := reflect.ValueOf(contacts.Get()).Elem().FieldByName("solver").FieldByName("rows")
@@ -82,16 +81,16 @@ type wakeScene struct {
 
 // wokenPaddle is the paddle's Shape: the crate's size, so that it meets the
 // crate face to face, and lifted clear of the floor.
-func wokenPaddle() ecsphysics2d.Shape { return ecsphysics2d.NewBoxShape(0.5, 0.5, 0) }
+func wokenPaddle() Shape { return NewBoxShape(0.5, 0.5, 0) }
 
 // run builds the scene with sleeping on or off, lets it stand for ticks, or
 // until every crate sleeps when ticks is 0, and answers how many ticks it
 // stood, then brings the paddle in.
 func (s wakeScene) run(t *testing.T, sleep bool, ticks int) (h *harness, crates []ecs.Entity, k ecs.Entity, stood int) {
 	t.Helper()
-	config := ecsphysics2d.Sleep{}
+	config := Sleep{}
 	if sleep {
-		config = ecsphysics2d.Sleep{Time: napTime}
+		config = Sleep{Time: napTime}
 	}
 	h = newHarnessWithPlugins(t, nil, 1024, &weigher{gravity: napGravity}, &napper{}, &gatherer{})
 	h.setSleep(t, config)
@@ -102,7 +101,7 @@ func (s wakeScene) run(t *testing.T, sleep bool, ticks int) (h *harness, crates 
 	for i := 1; s.pinned && i < len(crates); i++ {
 		h.spawn(t, spawnRequest{
 			Kind:  kindJoint,
-			Joint: ecsphysics2d.NewPinJoint(crates[i-1], crates[i], m.Vec2d{}, m.Vec2d{}, s.crates[i-1]-s.crates[i]),
+			Joint: NewPinJoint(crates[i-1], crates[i], m.Vec2d{}, m.Vec2d{}, s.crates[i-1]-s.crates[i]),
 		})
 	}
 	if ticks == 0 {

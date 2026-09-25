@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/dvoyni/cog/slots/sound"
 )
 
 // The ring names the Clip of every ending, and a release is the one ending
@@ -19,19 +18,19 @@ import (
 // the ring and 487 could not make ReasonReleased fire.
 func TestTheRingNamesTheClipOfAReleasedVoice(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 30, channels: 2, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, twoClips)
+	h := newHarness(t, backend, Config{}, twoClips)
 
-	h.play(sound.ClipWithResource(bell), 0, sound.Params{Loop: m.Some(true)})
-	h.play(sound.ClipWithResource(drum), 0, sound.Params{Loop: m.Some(true)})
+	h.play(ClipWithResource(bell), 0, Params{Loop: m.Some(true)})
+	h.play(ClipWithResource(drum), 0, Params{Loop: m.Some(true)})
 	h.tick()
 
-	h.record(func(queue *sound.Queue) { queue.Release(sound.ClipWithResource(bell)) })
+	h.record(func(queue *Queue) { queue.Release(ClipWithResource(bell)) })
 	h.tick()
 
 	got := listing(t, h)
 	var released []endingView
 	for _, ending := range got.Endings {
-		if ending.Reason == sound.ReasonReleased.String() {
+		if ending.Reason == ReasonReleased.String() {
 			released = append(released, ending)
 		}
 	}

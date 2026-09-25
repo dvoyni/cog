@@ -7,7 +7,7 @@ import (
 	"github.com/dvoyni/cog/bundles/ecs"
 )
 
-// A ClipMachine is an ecsscene Component in waiting, so the ECS's own rule has
+// A ClipMachine is a Component in waiting, so the ECS's own rule has
 // to accept it: no funcs, no pointers, no bare slices.
 func TestAClipMachineIsStorable(t *testing.T) {
 	if err := ecs.Storable(reflect.TypeFor[ClipMachine]()); err != nil {

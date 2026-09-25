@@ -297,7 +297,7 @@ From [The Component vocabulary](https://github.com/dvoyni/cog/issues/287),
 | `Position` | `Current, Previous m.Vec2d`; `Angle, PreviousAngle float64` | Integrate, Solve (the bias correction), gameplay | Index, Detect, gameplay, the app's render copy |
 | `Velocity` | `Linear m.Vec2d`; `Angular float64` | Integrate, Solve, gameplay | Integrate, Solve, gameplay |
 | `Force` | `Force m.Vec2d`; `Torque float64` | gameplay adds; Solve clears | Solve |
-| `Dynamic` | unexported `invMass, invInertia, damping, angularDamping` | constructors and setters | Solve |
+| `Dynamic` | `InvMass, InvInertia, Damping, AngularDamping`, exported for serialisation and written only by the constructors and setters | constructors and setters | Solve |
 | `Shape` | see [The Shape](#the-shape) | the app | Index, Detect, queries |
 | `Polygon` | `Verts m.List[m.Vec2d]` | the app | Index |
 | `Joint` | see [Joints](#joints) | the app; Solve writes the Impulse and ratchet's `Angle` | Index, Solve |
@@ -942,7 +942,7 @@ assert on this path at all — its `"Unsolvable constraint"` assert is in
 ### The app orders everything else
 
 The plugin chains its own five Systems and exports their identity types; it names
-neither `input` nor `ecsscene` and adds no ordering against them, sitting in the
+neither `input` nor `scene` and adds no ordering against them, sitting in the
 ordinary group, already after input's `First`.
 
 - Gameplay that adds `Force` or moves Bodies: `Before[Integrate]`.
@@ -953,7 +953,7 @@ ordinary group, already after input's `First`.
 - Reaction Systems: after the filters. They may run alongside Solve and each
   other, except those reading this tick's Impulses, which must be after Solve.
 - The render copy from `Position` into the app's own Transform: after physics and
-  `Before[ecsscene.RecordOnUpdate]`.
+  `Before[scene.RecordOnUpdate]`.
 
 Ordering needs **no new vocabulary**: `Registrar.Subscribe`'s
 `Before`/`After`/`First`/`Last` carry over, and "physics after input, before
@@ -2003,8 +2003,9 @@ replaced costs 17–24 ns.
 that.** The kernel scheduler keeps a `readers` count beside `writers` and rejects
 only a write request or a resource already held for write, so any number of `Read`
 holders run together. Queries are reads. The earlier finding that *"one
-frame-local Resource is one write lock"* overgeneralised from `scene`'s
-`*scene.OpQueue`, which serialises because it is declared `Write`.
+frame-local Resource is one write lock"* overgeneralised from the ECS scene
+binding's write on the `*scene.OpQueue` of the recording renderer #573 removed,
+which serialises because it is declared `Write`.
 
 ### Filtering, two-sided
 

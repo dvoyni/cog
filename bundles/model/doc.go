@@ -6,7 +6,7 @@
 // storage as the StorageReadMount Adapter. Register it after storage and before
 // any renderer.
 //
-// Every record the bundled shader reads is declared here with its packer and
+// Every record the bundled shader reads is offered here with its packer and
 // its size, and each binding name is a constant, so that any renderer drawing
 // through the shader writes the same bytes. A renderer keeps its own arenas,
 // culling, sorting and emission, and appends what the packers return.

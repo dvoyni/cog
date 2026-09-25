@@ -12,7 +12,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/dvoyni/cog/bundles/model"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/gogpu/naga"
 	"github.com/gogpu/naga/ir"
@@ -24,15 +23,15 @@ import (
 // they declare can change with the bundled shader and nothing outside model
 // may name it.
 var published = map[string]string{
-	"VertexDecodePath":  model.VertexDecodePath,
-	"FramePath":         model.FramePath,
-	"PbrPath":           model.PbrPath,
-	"VertexStagePath":   model.VertexStagePath,
-	"FragmentStagePath": model.FragmentStagePath,
+	"VertexDecodePath":  VertexDecodePath,
+	"FramePath":         FramePath,
+	"PbrPath":           PbrPath,
+	"VertexStagePath":   VertexStagePath,
+	"FragmentStagePath": FragmentStagePath,
 
-	"MaterialProloguePath": model.MaterialProloguePath,
-	"MaterialFieldsPath":   model.MaterialFieldsPath,
-	"MaterialEpiloguePath": model.MaterialEpiloguePath,
+	"MaterialProloguePath": MaterialProloguePath,
+	"MaterialFieldsPath":   MaterialFieldsPath,
+	"MaterialEpiloguePath": MaterialEpiloguePath,
 }
 
 // fieldDeclaration matches a member of the material's uniform block in its
@@ -55,7 +54,7 @@ func declaredBy(t *testing.T, name string) []string {
 		t.Fatalf("read %s: %v", name, err)
 	}
 	pattern := topLevelDeclaration
-	if name == model.MaterialFieldsPath {
+	if name == MaterialFieldsPath {
 		// The members are the names an extension must not declare again.
 		pattern = fieldDeclaration
 	}
@@ -122,7 +121,7 @@ func mentions(text, identifier string) bool {
 // added to the source and to neither is a collision waiting in someone's
 // material.
 func TestEveryPublishedSourceNamesWhatItDeclares(t *testing.T) {
-	for _, file := range []string{"../types.go", "types/shader.go"} {
+	for _, file := range []string{"../types.go", "shader.go"} {
 		docs := publishedDocs(t, file)
 		for constant, name := range published {
 			doc, ok := docs[constant]
@@ -167,7 +166,7 @@ func TestEveryPublishedSourceNamesWhatItDeclares(t *testing.T) {
 func TestAnIncluderOfThePreludeGetsOneBindingAndMaxLights(t *testing.T) {
 	// The second list names FramePath as well, ahead of PbrPath's own include
 	// of it, which is include-once doing its job: one sceneFrame, not two.
-	for _, includes := range [][]string{{model.PbrPath}, {model.FramePath, model.PbrPath}} {
+	for _, includes := range [][]string{{PbrPath}, {FramePath, PbrPath}} {
 		var directives strings.Builder
 		for _, include := range includes {
 			directives.WriteString("//#include " + include + "\n")
@@ -206,9 +205,9 @@ func TestAnIncluderOfThePreludeGetsOneBindingAndMaxLights(t *testing.T) {
 		if len(bindings) != 1 || bindings[0] != "sceneFrame" {
 			t.Errorf("an includer of %v declares %v, want sceneFrame alone", includes, bindings)
 		}
-		if lights != model.MaxLights {
+		if lights != MaxLights {
 			t.Errorf("an includer's sceneFrame carries %d lights, want model.MaxLights = %d",
-				lights, model.MaxLights)
+				lights, MaxLights)
 		}
 	}
 }
@@ -220,14 +219,14 @@ func TestAnIncluderOfThePreludeGetsOneBindingAndMaxLights(t *testing.T) {
 // not write, and it declares exactly the bundled module's bindings plus its
 // own - nothing copied, nothing extra.
 func TestAnAppShaderOverTheTwoStagesBuildsUnderEveryVariant(t *testing.T) {
-	for variant := range model.VariantCount {
-		shader := model.VariantShader(gfx.ShaderWithText(stageIncluder), model.ShaderVariant(variant))
+	for variant := range VariantCount {
+		shader := VariantShader(gfx.ShaderWithText(stageIncluder), ShaderVariant(variant))
 		text, err := flattenShader(t, shaderMountID, shaderFS, shader)
 		if err != nil {
 			t.Fatalf("variant %d: flatten the app shader: %v", variant, err)
 		}
 		bundled, err := flattenShader(t, shaderMountID, shaderFS,
-			model.VariantShader(gfx.ShaderDescr{}, model.ShaderVariant(variant)))
+			VariantShader(gfx.ShaderDescr{}, ShaderVariant(variant)))
 		if err != nil {
 			t.Fatalf("variant %d: flatten the bundled shader: %v", variant, err)
 		}
@@ -240,8 +239,8 @@ func TestAnAppShaderOverTheTwoStagesBuildsUnderEveryVariant(t *testing.T) {
 }
 
 // stageIncluder is the consuming game's fade, written as the ticket spells it.
-const stageIncluder = `//#include builtin/scene/vertexstage.wgsl
-//#include builtin/scene/fragmentstage.wgsl
+const stageIncluder = `//#include builtin/model/vertexstage.wgsl
+//#include builtin/model/fragmentstage.wgsl
 @group(3) @binding(0) var sightDepths: texture_2d<f32>;
 
 @fragment
@@ -314,18 +313,18 @@ func TestAShaderExtendsTheMaterialBlockWithNumbersOfItsOwn(t *testing.T) {
 			"game/fadefields.wgsl": fadeFields, "game/tintfields.wgsl": tintFields,
 		}, tintShader, []string{"fadeRun", "fadeBias", "tintColor"}},
 	} {
-		for variant := range model.VariantCount {
+		for variant := range VariantCount {
 			files := fstest.MapFS{}
 			for name, text := range c.files {
 				files[name] = &fstest.MapFile{Data: []byte(text)}
 			}
 			text, err := flattenShader(t, shaderMountID, overlayFS{shaderFS, files},
-				model.VariantShader(gfx.ShaderWithText(c.root), model.ShaderVariant(variant)))
+				VariantShader(gfx.ShaderWithText(c.root), ShaderVariant(variant)))
 			if err != nil {
 				t.Fatalf("%s, variant %d: flatten: %v", c.name, variant, err)
 			}
 			bundled, err := flattenShader(t, shaderMountID, shaderFS,
-				model.VariantShader(gfx.ShaderDescr{}, model.ShaderVariant(variant)))
+				VariantShader(gfx.ShaderDescr{}, ShaderVariant(variant)))
 			if err != nil {
 				t.Fatalf("%s, variant %d: flatten the bundled shader: %v", c.name, variant, err)
 			}
@@ -405,7 +404,7 @@ func (o overlayFS) Open(name string) (fs.File, error) {
 	return o.base.Open(name)
 }
 
-const fadeFields = `//#include builtin/scene/materialfields.wgsl
+const fadeFields = `//#include builtin/model/materialfields.wgsl
     fadeRun: vec4<f32>,
     fadeBias: f32,
 `
@@ -414,11 +413,11 @@ const tintFields = `//#include game/fadefields.wgsl
     tintColor: vec4<f32>,
 `
 
-const fadeShader = `//#include builtin/scene/materialprologue.wgsl
+const fadeShader = `//#include builtin/model/materialprologue.wgsl
 //#include game/fadefields.wgsl
-//#include builtin/scene/materialepilogue.wgsl
-//#include builtin/scene/vertexstage.wgsl
-//#include builtin/scene/fragmentstage.wgsl
+//#include builtin/model/materialepilogue.wgsl
+//#include builtin/model/vertexstage.wgsl
+//#include builtin/model/fragmentstage.wgsl
 
 @fragment
 fn fs_main(in: SceneVertexOut, @builtin(front_facing) ff: bool) -> @location(0) vec4<f32> {
@@ -427,11 +426,11 @@ fn fs_main(in: SceneVertexOut, @builtin(front_facing) ff: bool) -> @location(0) 
 }
 `
 
-const tintShader = `//#include builtin/scene/materialprologue.wgsl
+const tintShader = `//#include builtin/model/materialprologue.wgsl
 //#include game/tintfields.wgsl
-//#include builtin/scene/materialepilogue.wgsl
-//#include builtin/scene/vertexstage.wgsl
-//#include builtin/scene/fragmentstage.wgsl
+//#include builtin/model/materialepilogue.wgsl
+//#include builtin/model/vertexstage.wgsl
+//#include builtin/model/fragmentstage.wgsl
 
 @fragment
 fn fs_main(in: SceneVertexOut, @builtin(front_facing) ff: bool) -> @location(0) vec4<f32> {
@@ -440,11 +439,11 @@ fn fs_main(in: SceneVertexOut, @builtin(front_facing) ff: bool) -> @location(0) 
 }
 `
 
-const lateFadeShader = `//#include builtin/scene/vertexstage.wgsl
-//#include builtin/scene/fragmentstage.wgsl
-//#include builtin/scene/materialprologue.wgsl
+const lateFadeShader = `//#include builtin/model/vertexstage.wgsl
+//#include builtin/model/fragmentstage.wgsl
+//#include builtin/model/materialprologue.wgsl
 //#include game/fadefields.wgsl
-//#include builtin/scene/materialepilogue.wgsl
+//#include builtin/model/materialepilogue.wgsl
 
 @fragment
 fn fs_main(in: SceneVertexOut, @builtin(front_facing) ff: bool) -> @location(0) vec4<f32> {

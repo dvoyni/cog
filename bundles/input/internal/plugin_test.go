@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dvoyni/cog/bundles/input"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -13,18 +12,18 @@ type probeCmd kernel.Command[probeRequest, probeResponse]
 type probeRequest struct{}
 type probeResponse struct{ Pressed, Just bool }
 
-type probePlugin struct{ keyc chan<- input.KeyEvent }
+type probePlugin struct{ keyc chan<- KeyEvent }
 
-type testKeyEventHandler kernel.Subscription[input.KeyEvent]
+type testKeyEventHandler kernel.Subscription[KeyEvent]
 
 func (probePlugin) Name() kernel.PluginName { return "test" }
 
 // Name is the input plugin's, not this fixture's: the probe locks input.State.
-func (probePlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{input.Name} }
+func (probePlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{Name} }
 func (p probePlugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.HandleCommand[probeCmd](probeCmdImpl)
-	registrar.Subscribe[testKeyEventHandler](func() (kernel.Lock, kernel.Observe[input.KeyEvent]) {
-		return nil, func(_ kernel.Kernel, event input.KeyEvent) {
+	registrar.Subscribe[testKeyEventHandler](func() (kernel.Lock, kernel.Observe[KeyEvent]) {
+		return nil, func(_ kernel.Kernel, event KeyEvent) {
 			p.keyc <- event
 		}
 	})
@@ -32,12 +31,12 @@ func (p probePlugin) Register(registrar *kernel.Registrar, _ any) error {
 }
 
 func probeCmdImpl() (kernel.Lock, kernel.Execute[probeRequest, probeResponse]) {
-	var state kernel.Read[*input.State]
+	var state kernel.Read[*State]
 	return func(access kernel.ResourceAccess) {
-			state = access.GetRead[*input.State]()
+			state = access.GetRead[*State]()
 		}, func(kernel.Kernel, probeRequest) probeResponse {
 			s := state.Get()
-			return probeResponse{Pressed: s.Pressed(input.KeyA), Just: s.JustPressed(input.KeyA)}
+			return probeResponse{Pressed: s.Pressed(KeyA), Just: s.JustPressed(KeyA)}
 		}
 }
 
@@ -45,7 +44,7 @@ func probeCmdImpl() (kernel.Lock, kernel.Execute[probeRequest, probeResponse]) {
 // app.UpdateEvent rolls the edge so JustPressed shows up when polled.
 func TestInputPluginApplyPollAndEvent(t *testing.T) {
 
-	keyc := make(chan input.KeyEvent, 8)
+	keyc := make(chan KeyEvent, 8)
 	engine := kernel.New(nil).Handler(func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
 		return err
@@ -55,12 +54,12 @@ func TestInputPluginApplyPollAndEvent(t *testing.T) {
 	<-engine.Ready()
 	k := engine.Executioner()
 	// Apply a key-down batch.
-	k.ExecuteCommand[input.ApplyCmd](input.ApplyRequest{Changes: []input.Change{input.KeyChange(input.KeyA, input.ModShift, true)}})
+	k.ExecuteCommand[ApplyCmd](ApplyRequest{Changes: []Change{KeyChange(KeyA, ModShift, true)}})
 
 	// The discrete KeyEvent should have been published.
 	select {
 	case p := <-keyc:
-		if p.Key != input.KeyA || !p.Down || !p.Mods.Has(input.ModShift) {
+		if p.Key != KeyA || !p.Down || !p.Mods.Has(ModShift) {
 			t.Fatalf("KeyEvent = %+v", p)
 		}
 	case <-time.After(time.Second):

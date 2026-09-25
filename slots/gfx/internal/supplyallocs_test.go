@@ -3,9 +3,13 @@ package internal
 import (
 	"testing"
 
-	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/slots/gfx"
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+
+	"github.com/dvoyni/cog/kernel"
 )
 
 // A shader with a supply is named by its root and its supply together, and
@@ -15,26 +19,26 @@ func TestSuppliedShaderDrawAllocatesNothing(t *testing.T) {
 	backend := &fakeBackend{}
 	translator := newTranslator()
 	queue := testOpQueue(backend)
-	queue.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto()})
-	mesh := gfx.Mesh(
-		types.BakedBuffer(1, 3*28),
-		gfx.TopologyTriangleList,
-		gfx.Attr(0, gfx.Float32x3), gfx.Attr(12, gfx.Float32x4),
+	queue.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto()})
+	mesh := descriptors.Mesh(
+		descriptors.BakedBuffer(1, 3*28),
+		types.TopologyTriangleList,
+		descriptors.Attr(0, descriptors.Float32x3), descriptors.Attr(12, descriptors.Float32x4),
 	)
-	material := gfx.Material(gfx.ShaderWithText("//test", gfx.ShaderDefine("HQ"), gfx.ShaderConst("N", "4")))
+	material := descriptors.Material(shader.ShaderWithText("//test", shader.ShaderDefine("HQ"), shader.ShaderConst("N", "4")))
 	const draws = 100
 	for range draws {
 		queue.Draw(mesh, material)
 	}
 	translate := func() {
-		if _, err := translator.translate(kernel.Kernel{}, &queue, nil, backend, noFiles, gfx.CaptureDesc{}, false); err != nil {
+		if _, err := translator.translate(kernel.Kernel{}, &queue, nil, backend, noFiles, types.CaptureDesc{}, false); err != nil {
 			t.Fatalf("translate: %v", err)
 		}
 	}
 	translate()
-	out, _ := translator.translate(kernel.Kernel{}, &queue, nil, backend, noFiles, gfx.CaptureDesc{}, false)
+	out, _ := translator.translate(kernel.Kernel{}, &queue, nil, backend, noFiles, types.CaptureDesc{}, false)
 	backend.Execute(out)
-	if got := countOps(backend.lastOps, opDraw); got != draws {
+	if got := countOps(backend.lastOps, testOpDraw); got != draws {
 		t.Fatalf("draw ops = %d, want %d: the frame must reach the draws it measures", got, draws)
 	}
 

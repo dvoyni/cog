@@ -11,33 +11,34 @@ decision in
 
 ## Packages
 
-input has the declaration-root shape of
-[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
+input has the alias-index root of
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md)
+and [ADR 0003](../../../docs/adr/0003-roots-are-alias-indexes.md).
 
-- **`bundles/input`** is the root, and holds declarations only: `ApplyCmd`,
+- **`bundles/input`** is the root, and declares nothing: it aliases what
+  `internal/` declares — `ApplyCmd`,
   `SynthesizeCmd` and `StateCmd` with their requests and responses, the four
   events, the `State` resource, `Key`, `Mods`, `Pos`, `Change`, `Action`, the
   `McpProvider` Adapter, `ErrUnknownKey`, `Name` and the ordering identity
   `AdvanceOnUpdate`. Its functions, the `Change` constructors, `ParseKey` and
-  `Play`, are forwarders in `utils.go`. It declares no plugin, and it is what
+  `Play`, are forwarders in `utils.go`. It holds no plugin, and it is what
   every other package imports.
-- **`bundles/input/internal/types`** declares `Key` (with its name table),
-  `Mods`, `Pos`, `Change` and `State`, whose unexported state the plugin reads
-  or writes, and the consume side of `State` — folding a change in and
-  advancing the per-tick edges. It also holds `Play` and what `Play` dispatches
-  and carries: `SynthesizeCmd`, `SynthesizeRequest`, `StateResponse` and
-  `Action`. The root aliases every one of them.
-- **`bundles/input/internal`** is the plugin: its `New`, the handlers behind the
-  three commands and `AdvanceOnUpdate`, and the mcp Provider with its two
-  capabilities.
+- **`bundles/input/internal`** is the plugin, and declares everything the root
+  aliases: `Key` (with its name table), `Mods`, `Pos`, `Change` and `State`,
+  whose unexported state the plugin reads or writes, and the consume side of
+  `State` — folding a change in and advancing the per-tick edges — and `Play`
+  with what `Play` dispatches and carries: `SynthesizeCmd`,
+  `SynthesizeRequest`, `StateResponse` and `Action`. Beside them are its `New`,
+  the handlers behind the three commands and `AdvanceOnUpdate`, and the mcp
+  Provider with its two capabilities. It never imports the root.
 - **`bundles/input/inputplugin`** exports only `New() kernel.Plugin`. Only
   composition roots and tests import it.
 
 The aliased types stay concrete types, and their exported methods
 (`State.Pressed`, `Key.String`, …) are public API through the alias
-(`type State = types.State`). What the plugin needs beyond that goes through
-plain functions `internal/types` exports, which nothing outside `bundles/input`
-can call. `internal/types` never imports the root.
+(`type State = internal.State`). What the plugin needs beyond that goes through
+the friend functions in `internal/friends.go`, which nothing outside
+`bundles/input` can call.
 
 ## Plugin
 
@@ -157,7 +158,7 @@ What to expect at the edges:
 - `TextEvent{Rune}` for each text-input rune.
 - `ClipboardPasteEvent{Text}` for each clipboard paste.
 
-The root declares all five event types and the plugin publishes them.
+The root aliases all five event types and the plugin publishes them.
 Neither subscribes to them.
 
 ## Event Subscribed
@@ -171,7 +172,7 @@ that reads those edges and wants the ordering stated orders
 
 ## State Resource
 
-`State` is a concrete type, declared in `internal/types` and aliased in the
+`State` is a concrete type, declared in `internal/` and aliased in the
 root; only the plugin folds changes into it and advances it. Subscribers should bind
 `access.GetRead[*input.State]()` and query:
 

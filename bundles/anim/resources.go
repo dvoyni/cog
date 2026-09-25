@@ -1,6 +1,6 @@
 package anim
 
-import "github.com/dvoyni/cog/bundles/anim/internal/types"
+import "github.com/dvoyni/cog/bundles/anim/internal"
 
 // Timelines is the plugin's resource: every timeline in the engine, keyed by
 // an arbitrary comparable value and all advanced by AdvanceOnUpdate each tick.
@@ -8,4 +8,4 @@ import "github.com/dvoyni/cog/bundles/anim/internal/types"
 // kernel.Read[*anim.Timelines] to query alone (use Lookup, which does not
 // create). A *Timeline taken from it is valid only for the handler pass that
 // took it. It is a concrete type, and advancing it is the plugin's alone.
-type Timelines = types.Timelines
+type Timelines = internal.Timelines

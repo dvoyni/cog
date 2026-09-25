@@ -1,8 +1,6 @@
 package internal
 
 import (
-	"fmt"
-
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/gogpu/naga"
 	"github.com/gogpu/naga/ir"
@@ -32,12 +30,11 @@ func reflectShaderLayout(source string) (gfx.ShaderLayout, error) {
 	return shaderLayoutFrom(mod)
 }
 
-// shaderLayoutFrom extracts the uniform block's member layout, every storage
-// struct's member layout, and every texture and sampler binding from a lowered
+// shaderLayoutFrom extracts every uniform block and storage struct, each
+// with its member layout, and every texture and sampler binding from a lowered
 // module.
 func shaderLayoutFrom(mod *ir.Module) (gfx.ShaderLayout, error) {
 	var layout gfx.ShaderLayout
-	uniform := ""
 	for _, gv := range mod.GlobalVariables {
 		if gv.Binding == nil {
 			continue
@@ -46,8 +43,12 @@ func shaderLayoutFrom(mod *ir.Module) (gfx.ShaderLayout, error) {
 		switch inner := mod.Types[gv.Type].Inner.(type) {
 		case ir.StructType:
 			if gv.Space == ir.SpaceStorage {
+				kind := gfx.ResourceStorageBuffer
+				if gv.Access == ir.StorageReadWrite {
+					kind |= gfx.ResourceWritable
+				}
 				layout.Resources = append(layout.Resources, gfx.ShaderResource{
-					Name: gv.Name, StorageBuffer: true, WritableBuffer: gv.Access == ir.StorageReadWrite,
+					Name: gv.Name, Kind: kind,
 					Group: group, Binding: binding, Members: storageMembers(mod, inner),
 				})
 				continue
@@ -55,31 +56,30 @@ func shaderLayoutFrom(mod *ir.Module) (gfx.ShaderLayout, error) {
 			if gv.Space != ir.SpaceUniform {
 				continue
 			}
-			// A second uniform block used to overwrite the first, which moves
-			// every parameter to the wrong offset with nothing to point at.
-			if uniform != "" {
-				return gfx.ShaderLayout{}, fmt.Errorf(
-					"gogpu: shader declares two uniform blocks, %q and %q; gfx supports one", uniform, gv.Name)
-			}
-			uniform = gv.Name
-			layout.UniformSize = int(inner.Span)
-			layout.UniformGroup = group
-			layout.UniformBinding = binding
-			for _, mem := range inner.Members {
-				layout.Uniforms = append(layout.Uniforms, gfx.UniformMember{Name: mem.Name, Offset: int(mem.Offset)})
-			}
+			layout.Resources = append(layout.Resources, gfx.ShaderResource{
+				Name: gv.Name, Kind: gfx.ResourceUniformBuffer, Group: group, Binding: binding,
+				Size: int(inner.Span), Members: storageMembers(mod, inner),
+			})
 		case ir.ImageType:
 			view := gfx.TextureView2D
 			if inner.Dim == ir.Dim2D && inner.Arrayed {
 				view = gfx.TextureView2DArray
 			}
+			kind := gfx.ResourceTexture
+			if inner.Class == ir.ImageClassDepth {
+				kind |= gfx.ResourceDepth
+			}
 			layout.Resources = append(layout.Resources, gfx.ShaderResource{
-				Name: gv.Name, TextureView: view, Depth: inner.Class == ir.ImageClassDepth,
+				Name: gv.Name, Kind: kind, TextureView: view,
 				Group: group, Binding: binding,
 			})
 		case ir.SamplerType:
+			kind := gfx.ResourceSampler
+			if inner.Comparison {
+				kind |= gfx.ResourceComparison
+			}
 			layout.Resources = append(layout.Resources, gfx.ShaderResource{
-				Name: gv.Name, Sampler: true, Comparison: inner.Comparison,
+				Name: gv.Name, Kind: kind,
 				Group: group, Binding: binding,
 			})
 		}

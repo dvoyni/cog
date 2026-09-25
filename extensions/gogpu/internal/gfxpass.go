@@ -1,7 +1,6 @@
 package internal
 
 import (
-	cgogpu "github.com/dvoyni/cog/extensions/gogpu"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
@@ -82,7 +81,7 @@ func (b *gfxBackend) BeginPass(desc gfx.PassDesc) gfx.RenderPass {
 		// for what the backend cannot encode and why.
 		if !b.refusedDepthOnly {
 			b.refusedDepthOnly = true
-			b.refusal = cgogpu.ErrDepthOnlyPassUnsupported{Pass: desc.Label, Backend: b.backendName}
+			b.refusal = ErrDepthOnlyPassUnsupported{Pass: desc.Label, Backend: b.backendName}
 		}
 		return nil
 	}

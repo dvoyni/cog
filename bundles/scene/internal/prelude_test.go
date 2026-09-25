@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/gogpu/naga"
 	"github.com/gogpu/naga/ir"
@@ -46,40 +46,31 @@ fn fs_main(in: PreludeVaryings) -> @location(0) vec4<f32> {
 }
 `
 
-// A custom material that includes PbrPath draws under scene, and what it
-// declares is sceneFrame and nothing else: one storage binding, the one scene
-// binds on every draw, carrying the light array at model.MaxLights. The module
-// reflected is the one gfx handed the backend, so the includes were resolved
-// through model's mount exactly as a real app's are.
+// A custom material that includes PbrPath draws under scene: the includes
+// resolve through the mount model contributes,
+// the draw reaches the backend with the pass's sceneFrame bound, and what the
+// module declares is sceneFrame alone, carrying the light array at
+// model.MaxLights.
 func TestACustomMaterialIncludingThePreludeDrawsUnderScene(t *testing.T) {
-	material := scene.Material{{Descr: gfx.MaterialWithState(
-		gfx.ShaderWithText(preludeMaterialSource), gfx.StateOpaque3D())}}
-	h := newHarness(t, func(q *scene.OpQueue) {
-		q.Camera(testCamera, testCameraDescr())
-		ref := q.TemporaryMesh(triangle(), nil, gfx.TopologyTriangleList)
-		q.Mesh(0, ref, scene.MeshDraw{Material: material, NeverCull: true})
-	})
-	h.frame()
+	h := newDrawingHarness(t, 256)
+	ref := h.bake(t)
+	material := &Material{Tags: m.NewList(MaterialTag{
+		Shader: gfx.ShaderWithText(preludeMaterialSource), State: gfx.StateOpaque3D(),
+	})}
+	h.spawn(t, spawnRequest{Mesh: &Mesh{Ref: ref}, Material: material})
 
-	if errs := h.errors(); len(errs) > 0 {
-		t.Fatalf("the frame reported %v", errs)
+	isPrelude := func(d drawnInstance) bool { return strings.Contains(d.shader, "fn preludeMaterialAlbedo") }
+	h.frameUntil(t, "the custom material to draw", func() bool { return len(where(h.drawn(), isPrelude)) > 0 })
+	h.noErrors(t)
+
+	drawn := where(h.drawn(), isPrelude)
+	if len(drawn) != 1 {
+		t.Fatalf("the custom material drew %d instances, want 1", len(drawn))
 	}
-	if len(h.backend.draws) != 1 {
-		t.Fatalf("the backend received %d draws, want the one custom-material triangle", len(h.backend.draws))
-	}
-	if len(h.backend.buffersBoundTo("sceneFrame")) == 0 {
+	if len(drawn[0].frame) == 0 {
 		t.Error("the custom-material draw bound no sceneFrame")
 	}
-	var module string
-	for _, source := range h.backend.sources {
-		if strings.Contains(source, "fn preludeMaterialAlbedo") {
-			module = source
-		}
-	}
-	if module == "" {
-		t.Fatal("the backend never compiled the custom material's module")
-	}
-	bindings, lights := preludeReflection(t, module)
+	bindings, lights := preludeReflection(t, drawn[0].shader)
 	if len(bindings) != 1 || bindings[0] != "sceneFrame storage 0/0" {
 		t.Errorf("the custom material declares %v, want sceneFrame storage 0/0 alone", bindings)
 	}

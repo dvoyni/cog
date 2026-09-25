@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -24,14 +23,14 @@ const meetSpeed = 10 / tick
 // velocity. Its Shape StopsAtBodies, since what these scenes throw a Body at,
 // or leave in a fast one's way, is Bodies, which a fast Body meets only with
 // the flag set.
-func thrown(t testing.TB, h *harness, shape ecsphysics2d.Shape, at, velocity m.Vec2d) ecs.Entity {
+func thrown(t testing.TB, h *harness, shape Shape, at, velocity m.Vec2d) ecs.Entity {
 	t.Helper()
 	body, shape, _ := solidFor(t, shape)
 	shape.StopsAtBodies = true
 	return h.spawn(t, spawnRequest{
 		Kind:     kindShapedBody,
-		Place:    ecsphysics2d.Position{Current: at},
-		Velocity: ecsphysics2d.Velocity{Linear: velocity},
+		Place:    Position{Current: at},
+		Velocity: Velocity{Linear: velocity},
 		Body:     body,
 		Shape:    shape,
 	})
@@ -39,8 +38,8 @@ func thrown(t testing.TB, h *harness, shape ecsphysics2d.Shape, at, velocity m.V
 
 // meetingOf is the one tick's entries for the unordered pair, however many
 // there are.
-func meetingOf(list []ecsphysics2d.Contact, a, b ecs.Entity) []ecsphysics2d.Contact {
-	var found []ecsphysics2d.Contact
+func meetingOf(list []Contact, a, b ecs.Entity) []Contact {
+	var found []Contact
 	for _, entry := range list {
 		if (entry.A == a && entry.B == b) || (entry.A == b && entry.B == a) {
 			found = append(found, entry)
@@ -53,7 +52,7 @@ func meetingOf(list []ecsphysics2d.Contact, a, b ecs.Entity) []ecsphysics2d.Cont
 // meet, relative to the scene's starting point.
 type meetCase struct {
 	name         string
-	shape        ecsphysics2d.Shape
+	shape        Shape
 	fromA, fromB m.Vec2d
 	velA, velB   m.Vec2d
 	t            float64
@@ -115,7 +114,7 @@ func checkMeet(t *testing.T, c meetCase) {
 func TestTwoFastBallsMeetHeadOn(t *testing.T) {
 	checkMeet(t, meetCase{
 		name:  "balls",
-		shape: ecsphysics2d.NewCircleShape(1, m.Vec2d{}),
+		shape: NewCircleShape(1, m.Vec2d{}),
 		fromA: m.Vec2d{}, fromB: m.Vec2d{X: 10},
 		velA: m.Vec2d{X: meetSpeed}, velB: m.Vec2d{X: -meetSpeed},
 		t:   0.4,
@@ -133,7 +132,7 @@ func TestTwoFastBallsMeetWhenOnlyOneStopsAtBodies(t *testing.T) {
 		t.Run(fmt.Sprintf("only %c", 'A'+alone-1), func(t *testing.T) {
 			checkMeet(t, meetCase{
 				name:  "balls",
-				shape: ecsphysics2d.NewCircleShape(1, m.Vec2d{}),
+				shape: NewCircleShape(1, m.Vec2d{}),
 				fromA: m.Vec2d{}, fromB: m.Vec2d{X: 10},
 				velA: m.Vec2d{X: meetSpeed}, velB: m.Vec2d{X: -meetSpeed},
 				t:   0.4,
@@ -150,7 +149,7 @@ func TestTwoFastBallsMeetWhenOnlyOneStopsAtBodies(t *testing.T) {
 func TestTwoFastBoxesMeetHeadOn(t *testing.T) {
 	checkMeet(t, meetCase{
 		name:  "boxes",
-		shape: ecsphysics2d.NewBoxShape(2, 2, 0),
+		shape: NewBoxShape(2, 2, 0),
 		fromA: m.Vec2d{}, fromB: m.Vec2d{X: 10},
 		velA: m.Vec2d{X: meetSpeed}, velB: m.Vec2d{X: -meetSpeed},
 		t:   0.4,
@@ -170,7 +169,7 @@ func TestTwoFastBallsCrossingAtRightAnglesMeet(t *testing.T) {
 	first := (10 - math.Sqrt2) / 20
 	checkMeet(t, meetCase{
 		name:  "balls",
-		shape: ecsphysics2d.NewCircleShape(1, m.Vec2d{}),
+		shape: NewCircleShape(1, m.Vec2d{}),
 		fromA: m.Vec2d{X: -10}, fromB: m.Vec2d{Y: -10},
 		velA: m.Vec2d{X: 2 * meetSpeed}, velB: m.Vec2d{Y: 2 * meetSpeed},
 		t:   first,
@@ -186,7 +185,7 @@ func TestTwoFastBallsCrossingAtRightAnglesMeet(t *testing.T) {
 func TestAFastBallCatchesASlowerMovingOne(t *testing.T) {
 	checkMeet(t, meetCase{
 		name:  "balls",
-		shape: ecsphysics2d.NewCircleShape(1, m.Vec2d{}),
+		shape: NewCircleShape(1, m.Vec2d{}),
 		fromA: m.Vec2d{}, fromB: m.Vec2d{X: 3},
 		velA: m.Vec2d{X: meetSpeed}, velB: m.Vec2d{X: 0.3 * meetSpeed},
 		t:   1.0 / 7,
@@ -206,7 +205,7 @@ func TestTwoFastBodiesClosingByLessThanTheirExtentAreLeftToTheDiscreteWalk(t *te
 	for phase := range phases {
 		h := newHarness(t)
 		shift := m.Vec2d{X: 10 * float64(phase) / phases}
-		ball := ecsphysics2d.NewCircleShape(1, m.Vec2d{})
+		ball := NewCircleShape(1, m.Vec2d{})
 		a := thrown(t, h, ball, shift, m.Vec2d{X: meetSpeed})
 		b := thrown(t, h, ball, m.Vec2d{X: 2.3}.Add(shift), m.Vec2d{X: 0.95 * meetSpeed})
 		h.frame(t)
@@ -234,15 +233,15 @@ func TestAStoppedBodysPairWithAnAwakeBodyIsTestedWhereItStopped(t *testing.T) {
 		shift := m.Vec2d{Y: 0.25 * float64(phase)}
 		wall := h.spawn(t, spawnRequest{
 			Kind:  kindShapedStatic,
-			Place: ecsphysics2d.Position{Current: m.Vec2d{X: 1}.Add(shift)},
-			Shape: ecsphysics2d.NewSegmentShape(m.Vec2d{Y: -2}, m.Vec2d{Y: 2}, 0.05),
+			Place: Position{Current: m.Vec2d{X: 1}.Add(shift)},
+			Shape: NewSegmentShape(m.Vec2d{Y: -2}, m.Vec2d{Y: 2}, 0.05),
 		})
 		block := h.spawn(t, spawnRequest{
 			Kind:  kindShapedKinematic,
-			Place: ecsphysics2d.Position{Current: m.Vec2d{X: 0.7, Y: -0.3 + graze}.Add(shift)},
-			Shape: ecsphysics2d.NewBoxShape(0.2, 0.2, 0),
+			Place: Position{Current: m.Vec2d{X: 0.7, Y: -0.3 + graze}.Add(shift)},
+			Shape: NewBoxShape(0.2, 0.2, 0),
 		})
-		ball := thrown(t, h, ecsphysics2d.NewCircleShape(0.2, m.Vec2d{}), shift, m.Vec2d{X: 3 / tick})
+		ball := thrown(t, h, NewCircleShape(0.2, m.Vec2d{}), shift, m.Vec2d{X: 3 / tick})
 		h.frame(t)
 
 		list := h.contacts(t)
@@ -288,7 +287,7 @@ func TestTheMeetingsSitOnTheEnginesAllocationLine(t *testing.T) {
 		for range 30 {
 			h.frame(t)
 			for _, entry := range h.contacts(t) {
-				if entry.T < 1 && !entry.Sensor && entry.Phase != ecsphysics2d.PhaseEnded && movers[entry.A] && movers[entry.B] {
+				if entry.T < 1 && !entry.Sensor && entry.Phase != PhaseEnded && movers[entry.A] && movers[entry.B] {
 					met++
 				}
 			}
@@ -315,26 +314,26 @@ func TestTheMeetingsSitOnTheEnginesAllocationLine(t *testing.T) {
 func populateMeetings(t testing.TB, h *harness, n int) map[ecs.Entity]bool {
 	t.Helper()
 	movers := map[ecs.Entity]bool{}
-	wall := ecsphysics2d.NewSegmentShape(m.Vec2d{Y: -0.9}, m.Vec2d{Y: 0.9}, 0.1)
+	wall := NewSegmentShape(m.Vec2d{Y: -0.9}, m.Vec2d{Y: 0.9}, 0.1)
 	wall.Restitution = 1
-	divider := ecsphysics2d.NewSegmentShape(m.Vec2d{X: -3}, m.Vec2d{X: 3}, 0.1)
+	divider := NewSegmentShape(m.Vec2d{X: -3}, m.Vec2d{X: 3}, 0.1)
 	for i := range n {
 		y := 2 * float64(i)
 		h.spawn(t, spawnRequest{
 			Kind:  kindShapedStatic,
-			Place: ecsphysics2d.Position{Current: m.Vec2d{Y: y + 1}},
+			Place: Position{Current: m.Vec2d{Y: y + 1}},
 			Shape: divider,
 		})
 		for _, x := range []float64{-3, 3} {
 			h.spawn(t, spawnRequest{
 				Kind:  kindShapedStatic,
-				Place: ecsphysics2d.Position{Current: m.Vec2d{X: x, Y: y}},
+				Place: Position{Current: m.Vec2d{X: x, Y: y}},
 				Shape: wall,
 			})
 		}
-		shape := ecsphysics2d.NewCircleShape(0.2, m.Vec2d{})
+		shape := NewCircleShape(0.2, m.Vec2d{})
 		if i%2 == 1 {
-			shape = ecsphysics2d.NewBoxShape(0.4, 0.4, 0)
+			shape = NewBoxShape(0.4, 0.4, 0)
 		}
 		shape.Restitution = 1
 		for _, side := range []float64{-1, 1} {

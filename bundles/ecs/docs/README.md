@@ -20,23 +20,24 @@ vocabulary is in [`CONTEXT.md`](../../../CONTEXT.md) and the decision in
 
 ## Packages
 
-ecs has the declaration-root shape of
-[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
+ecs has the alias-index root of
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md)
+and [ADR 0003](../../../docs/adr/0003-roots-are-alias-indexes.md).
 
-- **`bundles/ecs`** is the root, and holds declarations only, which are the
-  whole library a System author uses: `Entity`, `NoEntity`, the `Entities` and
+- **`bundles/ecs`** is the root, and declares nothing: it aliases what
+  `internal/` declares, which is the whole library a System author uses: `Entity`, `NoEntity`, the `Entities` and
   `Store` resources, `Query`, `With` and `Without`, `Spawn` and
   `WriteableEntities`, the `Get`, `Set` and `Remove` accessors, `Read`
   and `Write`, `In` and `Feeder`, `Resp`, `ShrinkCmd` with `ShrinkRequest` and
   `ShrinkResponse`, `Config` and `Name`, and, in `adapters.go`, the Adapter
   identity `McpProvider`, a `kernel.Adapter[mcp.ProviderPort]`. Its functions,
   `RegisterComponent`, `NewStore`, `Storable`, `PointerFree`, `ToHandler`,
-  `ToExecute` and `Feed`, are forwarders in `utils.go`. It declares no plugin,
+  `ToExecute` and `Feed`, are forwarders in `utils.go`. It holds no plugin,
   and it is what every other package imports. The List a Component holds is
   `m.List`, in `libs/m`, so a plugin can make a type storable without importing
   this package.
-- **`bundles/ecs/internal/types`** declares every one of those types and holds
-  the machinery behind them: the authority's allocation, despawn, Store
+- **`bundles/ecs/internal`** is the plugin. It declares every one of those
+  types and holds the machinery behind them: the authority's allocation, despawn, Store
   enrolment and Component registry, which also answers a Component by the name
   `kernel.TypeName` renders for it, the Store and its type-erased header,
   registration, the Query with its driver and fillers, the filters, structural
@@ -46,25 +47,24 @@ ecs has the declaration-root shape of
   [write](#writing-the-world-by-name) Commands by name with their request and
   response types. The root aliases every type and forwards every function to
   it, except those Commands' types, which nothing outside `bundles/ecs` names.
-- **`bundles/ecs/internal`** is the plugin: its `New`, the resolution of
-  `ecs.Config`, and a `Register` that publishes the authority, registers
+  Beside them are its `New`, the resolution of `ecs.Config`, and a `Register`
+  that publishes the authority, registers
   `ShrinkCmd` and the six unexported Commands that
   [read](#reading-the-world-by-name) and [write](#writing-the-world-by-name)
   the world by name, and registers the Store of `m.Transform`, where an Entity
   stands: the one Component the ECS registers itself. It also contributes the
   `mcp.Provider` that offers those Commands to an Agent, as `ecs.McpProvider` ([Offered To An
-  Agent](#offered-to-an-agent)).
+  Agent](#offered-to-an-agent)). It never imports the root.
 - **`bundles/ecs/ecsplugin`** exports only `New() kernel.Plugin`. Only
   composition roots and tests import it.
 
-The aliased types stay concrete types (`type Entities = types.Entities`,
-`type Query[Q any] = types.Query[Q]`): no probe, fill or spawn goes through an
+The aliased types stay concrete types (`type Entities = internal.Entities`,
+`type Query[Q any] = internal.Query[Q]`): no probe, fill or spawn goes through an
 interface, and a despawn pays the one indirect call per Store it always paid.
 Their exported methods (`Entities.Alive`, `Query.All`, `Store.Get`, …) are
-public API through the alias. What the plugin needs beyond that is the five
-functions `internal/types` exports in `friends.go`, which nothing outside
-`bundles/ecs` can call. `internal/types` never imports the root. The types are
-declared there, but the kernel's architecture output and every ecs diagnostic
+public API through the alias. What the plugin needs beyond that is the friend
+functions in `internal/friends.go`, which nothing outside `bundles/ecs` can
+call. The types are declared in `internal/`, but the kernel's architecture output and every ecs diagnostic
 still name them `ecs.X` — the resource is `*ecs.Entities`, a Store
 `*ecs.Store[game.Health]` — because `kernel.TypeName` renders a type declared in
 an `internal` package under its enclosing package.
@@ -111,8 +111,8 @@ recovered value.
 ## Entity
 
 ```go
-type Entity = types.Entity   // a uint64
-const NoEntity = types.NoEntity
+type Entity = internal.Entity   // a uint64
+const NoEntity = internal.NoEntity
 ```
 
 An `Entity` is an opaque handle to one thing. It is comparable, copyable and
@@ -147,7 +147,7 @@ the word `World`**, and a test enforces it.
 
 The ecs plugin, built by `ecsplugin.New`, creates it, reserving room for
 `Config.PrewarmEntities` indices, and nothing else can: the constructor is in
-`internal/types`, which nothing outside `bundles/ecs` can import, and that is
+`internal/`, which nothing outside `bundles/ecs` can import, and that is
 what keeps it one per Engine.
 The number is the peak concurrent entity count the app expects, **not a cap**:
 exceeding it costs a growth, not an error.
@@ -443,7 +443,7 @@ assigned index is not, so it survives a save file or a wire; and producing one
 needs nothing, so a System renames what an Entity points at holding only the
 lock it already had. Neither needs the *ECS* to own it.
 
-`ecsscene` was built on `ModelHash`, `ClipHash`, `ecs.Names` and `ecs.NoHash`,
+`scene` was built on `ModelHash`, `ClipHash`, `ecs.Names` and `ecs.NoHash`,
 and was rebuilt without them: its `Model` Component holds the glTF path as a
 string.
 
@@ -1155,7 +1155,7 @@ registers three unexported read-only Commands that take that string:
 | `entityCmd` | `entity`: `"7v2"`, `"Entity(7v2)"` or the decimal handle; optionally `components`, to answer only those | `entity`, and `components`: every Component it carries, or the named ones it carries, sorted by name, each `{name, value, error}` |
 | `queryCmd` | `components` (at least one name), `limit` (0 is 50, at most 500) | `total`, `truncated`, and `entities` in ascending index order, each with only the named Components |
 
-Nothing outside ecs dispatches them, so the root declares none of them; the mcp
+Nothing outside ecs dispatches them, so the root aliases none of them; the mcp
 provider that offers them to an Agent is ecs's own ([Offered To An
 Agent](#offered-to-an-agent)). A name is resolved over the
 `classes` map registration already fills, and two types rendering one name are
@@ -1248,7 +1248,7 @@ description prose the Agent reads is reproduced in full in
 
 ## Binding: how another plugin attaches
 
-ecsscene's recording System:
+scene's recording System:
 
 ```go
 func record(
@@ -1257,9 +1257,9 @@ func record(
     meshes  *ecs.Query[meshQuery],
     lights  *ecs.Query[lightQuery],
     cameras *ecs.Query[cameraQuery],
-    animations *ecs.Get[ecsscene.Animation],   // optional Components, probed
-    params     *ecs.Get[ecsscene.Params],
-    materials  *ecs.Get[ecsscene.Material],
+    animations *ecs.Get[scene.Animation],   // optional Components, probed
+    params     *ecs.Get[scene.Params],
+    materials  *ecs.Get[scene.Material],
     keys     *ecs.Read[*keyScratch],           // the load System's keys
     lookup   *ecs.Read[*model.Lookup],         // model's residency, read only
     viewport *ecs.Read[*gfx.Viewport],
@@ -1283,15 +1283,15 @@ of the ECS's own.
 a plugin like `model` or `gfx` imports nothing of `ecs`, so neither can know about the
 other. That is what "no binding mechanism" means in practice — and a project not
 using the ECS simply does not register that plugin and schedules no Systems.
-cog ships the drawing one as [`ecsscene`](../../ecsscene/docs/README.md), the ECS's
+cog ships the drawing one as [`scene`](../../scene/docs/README.md), the ECS's
 renderer over `model`, which records to `gfx` itself and carries the prohibitions
 a second binding has to keep true.
 
 **Where an Entity stands is `m.Transform`, and nothing else.** Two Components
 describing one position are unrelated to the scheduler, so two Systems writing
 them run concurrently and nothing reports that they disagree; copy one way, in
-one System. See ecsscene's [What a binding may not
-do](../../ecsscene/docs/README.md#what-a-binding-may-not-do).
+one System. See scene's [What a binding may not
+do](../../scene/docs/README.md#what-a-binding-may-not-do).
 
 **Neither handle is a place to keep anything.** `Get` returns the value resolved
 from the cell the lock covers at the start of the invocation — never one taken at
@@ -1378,7 +1378,7 @@ done:
 
 What each additional field in a Query costs an Entity, on the shipped fillers
 ([#280](https://github.com/dvoyni/cog/issues/280)). The benchmark is
-`BenchmarkQueryWidth` in `internal/types/widthbench_test.go`, kept in the tree
+`BenchmarkQueryWidth` in `internal/widthbench_test.go`, kept in the tree
 so every number here can be re-run.
 
 **The setup.** A dedicated plugin registers eight Components `w0`…`w7`, all the
@@ -1417,7 +1417,7 @@ reports 0 allocs/op.
   width-1 ratios read high.
 
 **How it was run.** One binary, `go test -c -o width.test
-./bundles/ecs/internal/types`, ten rounds, and in each round every case as its
+./bundles/ecs/internal`, ten rounds, and in each round every case as its
 own invocation (`width.test -test.run '^$' -test.bench
 '^BenchmarkQueryWidth$/^components-3$/^n=10000$' -test.count 1`), the case
 order rotated by five each round, with the seven `BenchmarkFrame*` arms of the

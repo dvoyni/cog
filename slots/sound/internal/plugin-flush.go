@@ -5,8 +5,7 @@ import (
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
-	"github.com/dvoyni/cog/slots/sound"
-	"github.com/dvoyni/cog/slots/sound/internal/types"
+
 	"github.com/dvoyni/cog/slots/storage"
 )
 
@@ -19,8 +18,8 @@ import (
 // a resource is what Describe, the contention report and an agent reading the
 // architecture can see.
 type flushScratch struct {
-	batch   sound.Batch
-	endings []types.Ending
+	batch   Batch
+	endings []Ending
 }
 
 // flushOnUpdate is the whole of sound's tick. It runs once per app.UpdateEvent,
@@ -47,39 +46,39 @@ type flushScratch struct {
 // them; neither is a resource any System declares, so neither widens what a
 // game contends on.
 func (p *plugin) flushOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	var queue kernel.Write[*sound.Queue]
-	var voices kernel.Write[*sound.Voices]
-	var clips kernel.Write[*sound.Clips]
-	var buses kernel.Write[*sound.Buses]
-	var listener kernel.Write[*sound.Listener]
-	var device kernel.Write[*sound.Device]
+	var queue kernel.Write[*Queue]
+	var voices kernel.Write[*Voices]
+	var clips kernel.Write[*Clips]
+	var buses kernel.Write[*Buses]
+	var listener kernel.Write[*Listener]
+	var device kernel.Write[*Device]
 	var scratch kernel.Write[*flushScratch]
 	var last kernel.Write[*lastFlush]
 	var filesystem kernel.Read[storage.FileSystem]
 	return func(access kernel.ResourceAccess) {
-			queue = access.GetWrite[*sound.Queue]()
-			voices = access.GetWrite[*sound.Voices]()
-			clips = access.GetWrite[*sound.Clips]()
-			buses = access.GetWrite[*sound.Buses]()
-			listener = access.GetWrite[*sound.Listener]()
-			device = access.GetWrite[*sound.Device]()
+			queue = access.GetWrite[*Queue]()
+			voices = access.GetWrite[*Voices]()
+			clips = access.GetWrite[*Clips]()
+			buses = access.GetWrite[*Buses]()
+			listener = access.GetWrite[*Listener]()
+			device = access.GetWrite[*Device]()
 			scratch = access.GetWrite[*flushScratch]()
 			last = access.GetWrite[*lastFlush]()
 			filesystem = access.GetRead[storage.FileSystem]()
 		}, func(k kernel.Kernel, event app.UpdateEvent) {
 			backend := p.backend.Get()
 			work := scratch.Get()
-			types.BatchReset(&work.batch)
+			BatchReset(&work.batch)
 			work.endings = work.endings[:0]
 
 			recorded, live, table, groups := queue.Get(), voices.Get(), clips.Get(), buses.Get()
 			heardFrom := listener.Get()
-			types.ClipsDrain(table, k, backend)
+			ClipsDrain(table, k, backend)
 			apply(k, backend, filesystem, recorded, live, table, groups, heardFrom, &work.endings)
-			types.VoicesResolve(live, table, &work.endings)
-			types.VoicesAdvance(live, event.Dt, &work.endings)
-			types.VoicesFoldBuses(live, groups)
-			types.VoicesSpatialize(live, heardFrom)
+			VoicesResolve(live, table, &work.endings)
+			VoicesAdvance(live, event.Dt, &work.endings)
+			VoicesFoldBuses(live, groups)
+			VoicesSpatialize(live, heardFrom)
 
 			// Polled once per flush, and it is a field read rather than a
 			// query. The resource is written through its pointer because
@@ -94,13 +93,13 @@ func (p *plugin) flushOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) 
 			*device.Get() = backend.Device()
 			arrived := device.Get().Ready && !was
 
-			types.VoicesCollect(live, &work.batch, arrived)
+			VoicesCollect(live, &work.batch, arrived)
 			// After the Voices, so every stop this tick's releases caused is
 			// already in the batch, ahead of the destroys that follow them.
-			types.ClipsCollect(table, &work.batch)
+			ClipsCollect(table, &work.batch)
 			backend.Emit(&work.batch)
 
-			types.VoicesEndTick(live)
+			VoicesEndTick(live)
 
 			// The slots come back only now, after the batch carrying their
 			// stops has been handed over, which is what "a slot is stopped
@@ -109,7 +108,7 @@ func (p *plugin) flushOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) 
 			// decided when a play is recorded and a recorder holds nothing but
 			// the Queue - the table, the Buses and the Listener are all read
 			// here, at the one moment every one of them is settled.
-			types.QueueRank(recorded, live, groups, heardFrom)
+			QueueRank(recorded, live, groups, heardFrom)
 
 			// The ring is written beside the event and in the same pass, so
 			// the two never disagree about what ended: the event is what a
@@ -121,7 +120,7 @@ func (p *plugin) flushOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) 
 			record.tick = event.Tick
 			for _, ending := range work.endings {
 				record.record(ending, event.Tick)
-				k.PublishEvent(sound.VoiceEndedEvent{Voice: ending.Voice, Reason: ending.Reason})
+				k.PublishEvent(VoiceEndedEvent{Voice: ending.Voice, Reason: ending.Reason})
 			}
 		}
 }
@@ -135,47 +134,47 @@ func (p *plugin) flushOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) 
 // names no new Clip should not pay it.
 func apply(
 	k kernel.Kernel,
-	backend sound.Backend,
+	backend Backend,
 	filesystem kernel.Read[storage.FileSystem],
-	recorded *sound.Queue,
-	live *sound.Voices,
-	table *sound.Clips,
-	groups *sound.Buses,
-	heardFrom *sound.Listener,
-	endings *[]types.Ending,
+	recorded *Queue,
+	live *Voices,
+	table *Clips,
+	groups *Buses,
+	heardFrom *Listener,
+	endings *[]Ending,
 ) {
 	var files fs.FS
-	for _, op := range types.QueueOperations(recorded) {
+	for _, op := range QueueOperations(recorded) {
 		switch op.Kind {
-		case types.OpPlay:
+		case OpPlay:
 			if files == nil {
 				files = filesystem.Get()
 			}
-			types.VoicesStart(live, op, types.ClipsResolve(table, k, files, backend, op.Clip), endings)
-		case types.OpStop:
-			types.VoicesStop(live, op.Voice, endings)
-		case types.OpSetVoice:
-			types.VoicesSet(live, op.Voice, op.Params)
-		case types.OpStopBus:
-			types.VoicesStopBus(live, op.Bus, endings)
-		case types.OpSeek:
-			types.VoicesSeek(live, op.Voice, op.Offset, endings)
-		case types.OpPreload:
+			VoicesStart(live, op, ClipsResolve(table, k, files, backend, op.Clip), endings)
+		case OpStop:
+			VoicesStop(live, op.Voice, endings)
+		case OpSetVoice:
+			VoicesSet(live, op.Voice, op.Params)
+		case OpStopBus:
+			VoicesStopBus(live, op.Bus, endings)
+		case OpSeek:
+			VoicesSeek(live, op.Voice, op.Offset, endings)
+		case OpPreload:
 			if files == nil {
 				files = filesystem.Get()
 			}
-			types.ClipsPreload(table, k, files, backend, op.Clip)
-		case types.OpRelease:
+			ClipsPreload(table, k, files, backend, op.Clip)
+		case OpRelease:
 			// The Voices go first, and that order is the whole of "a release
 			// is atomic within its tick": their stops are collected into the
 			// same batch as the destroy this queues, ahead of it, so the Mixer
 			// never applies a destroy for a Clip it is still mixing - and a
 			// streamed Voice's read-ahead is halted by its own stop.
-			types.VoicesStopClip(live, op.Clip, endings)
-			types.ClipsRelease(table, k, op.Clip)
-		case types.OpReleaseAll:
-			types.VoicesStopAll(live, endings)
-			types.ClipsReleaseAll(table, k)
+			VoicesStopClip(live, op.Clip, endings)
+			ClipsRelease(table, k, op.Clip)
+		case OpReleaseAll:
+			VoicesStopAll(live, endings)
+			ClipsReleaseAll(table, k)
 		}
 	}
 
@@ -184,7 +183,7 @@ func apply(
 	// last word on a Bus is the only one every Voice on it could be folded
 	// with, exactly as its last word on the Listener is the only one every
 	// Positional Voice could be spatialized against.
-	types.BusesApply(groups, recorded)
-	types.ListenerApply(heardFrom, recorded)
-	types.QueueReset(recorded)
+	BusesApply(groups, recorded)
+	ListenerApply(heardFrom, recorded)
+	QueueReset(recorded)
 }

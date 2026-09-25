@@ -20,7 +20,7 @@
 // quantum.
 //
 // There is deliberately no PannerNode. The arithmetic is sound's - the W3C
-// equations transcribed once, above the seam, in slots/sound/internal/types -
+// equations transcribed once, above the seam, in slots/sound/internal -
 // and a Voice spatialized by the browser on web and by our Mixer on desktop
 // would be two implementations of one equation that can disagree about the same
 // Clip. What crosses the seam is a gain matrix, and this Adapter multiplies.
@@ -97,10 +97,11 @@
 // WebCodecs only if that route ever needed a Blob, which it does not: an
 // EncodedAudioChunk is bytes and a timestamp.
 //
-// jssound is an Extension. Its root declares only Name, Config, its one Adapter,
-// SoundBackend, and its errors, and is untagged so the declarations build
-// everywhere; the plugin, built by jssoundplugin.New, is in its internal/, and
-// that is what carries the js tag. Composing jssound off the web therefore fails
+// jssound is an Extension. Its root offers only Name, Config, its one Adapter,
+// SoundBackend, and its errors, each an alias of what its internal/ declares in
+// untagged files, so the root builds everywhere; the plugin, built by
+// jssoundplugin.New, is in its internal/ too, and its files are what carry the
+// js tag. Composing jssound off the web therefore fails
 // to compile on jssoundplugin.New rather than at run time. Its Config is
 // supplied under Name.
 //

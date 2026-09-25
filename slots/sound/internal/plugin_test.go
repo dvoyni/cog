@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/dvoyni/cog/slots/sound"
 )
 
 // clipBytes is what a Clip's bytes are to the Slot: something the Library reads
@@ -27,9 +26,9 @@ const bell = "bell.ogg"
 // that tick's flush, and the playhead advances in the same flush that created
 // it.
 func TestAOneShotEndsOnTheTickItsDurationSaysItShould(t *testing.T) {
-	h := newHarness(t, newFakeBackend(fakeClip{duration: 0.5, channels: 2, rate: 48000}), sound.Config{}, clipBytes)
+	h := newHarness(t, newFakeBackend(fakeClip{duration: 0.5, channels: 2, rate: 48000}), Config{}, clipBytes)
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	voice := h.play(ClipWithResource(bell), 0, Params{})
 
 	for tick := 1; tick < 32; tick++ {
 		h.tick()
@@ -43,7 +42,7 @@ func TestAOneShotEndsOnTheTickItsDurationSaysItShould(t *testing.T) {
 	if got := h.probe(voice); got.Found || got.Live != 0 {
 		t.Fatalf("after tick 32 the view still holds %v (%d live)", voice, got.Live)
 	}
-	if ended := h.waitEnded(); ended.Voice != voice || ended.Reason != sound.ReasonFinished {
+	if ended := h.waitEnded(); ended.Voice != voice || ended.Reason != ReasonFinished {
 		t.Fatalf("ended as %v/%v, want %v/finished", ended.Voice, ended.Reason, voice)
 	}
 }
@@ -58,14 +57,14 @@ func TestAOneShotEndsOnTheTickItsDurationSaysItShould(t *testing.T) {
 // no stop to pair with one.
 func TestAHandleIsUsableInTheTickThatRecordedIt(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 10, channels: 2, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
-	var voice sound.Voice
-	h.record(func(queue *sound.Queue) {
-		voice = queue.Play(sound.ClipWithResource(bell), 0, sound.Params{})
+	var voice Voice
+	h.record(func(queue *Queue) {
+		voice = queue.Play(ClipWithResource(bell), 0, Params{})
 		queue.Stop(voice)
 	})
-	if voice == sound.NoVoice {
+	if voice == NoVoice {
 		t.Fatal("Play handed back NoVoice")
 	}
 	h.tick()
@@ -73,7 +72,7 @@ func TestAHandleIsUsableInTheTickThatRecordedIt(t *testing.T) {
 	if got := h.probe(voice); got.Found || got.Live != 0 {
 		t.Fatalf("the view holds %v (%d live) after a play and a stop in one tick", voice, got.Live)
 	}
-	if ended := h.waitEnded(); ended.Voice != voice || ended.Reason != sound.ReasonStopped {
+	if ended := h.waitEnded(); ended.Voice != voice || ended.Reason != ReasonStopped {
 		t.Fatalf("ended as %v/%v, want %v/stopped", ended.Voice, ended.Reason, voice)
 	}
 	batch := h.backend.emitted()[0]
@@ -87,20 +86,20 @@ func TestAHandleIsUsableInTheTickThatRecordedIt(t *testing.T) {
 // with no error and no response field to check, which is what a Stop racing a
 // Clip that finished a tick ago needs.
 func TestEveryOperationIsANoOpOnAVoiceThatIsGone(t *testing.T) {
-	h := newHarness(t, newFakeBackend(fakeClip{duration: 0.5, channels: 2, rate: 48000}), sound.Config{}, clipBytes)
+	h := newHarness(t, newFakeBackend(fakeClip{duration: 0.5, channels: 2, rate: 48000}), Config{}, clipBytes)
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{})
-	h.record(func(queue *sound.Queue) { queue.Stop(voice) })
+	voice := h.play(ClipWithResource(bell), 0, Params{})
+	h.record(func(queue *Queue) { queue.Stop(voice) })
 	h.tick()
-	if ended := h.waitEnded(); ended.Reason != sound.ReasonStopped {
+	if ended := h.waitEnded(); ended.Reason != ReasonStopped {
 		t.Fatalf("ended as %v, want stopped", ended.Reason)
 	}
 
-	h.record(func(queue *sound.Queue) {
+	h.record(func(queue *Queue) {
 		queue.Stop(voice)
-		queue.Stop(sound.NoVoice)
-		queue.SetVoice(voice, sound.Params{Volume: m.Some[float32](0.5)})
-		queue.SetVoice(sound.NoVoice, sound.Params{Volume: m.Some[float32](0.5)})
+		queue.Stop(NoVoice)
+		queue.SetVoice(voice, Params{Volume: m.Some[float32](0.5)})
+		queue.SetVoice(NoVoice, Params{Volume: m.Some[float32](0.5)})
 	})
 	h.tick()
 
@@ -126,7 +125,7 @@ func TestAFailedClipEndsItsVoicesLaterAndNeverInTheSameTick(t *testing.T) {
 		reported = append(reported, err)
 	})
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	voice := h.play(ClipWithResource(bell), 0, Params{})
 	h.tick()
 	if got := h.probe(voice); !got.Found {
 		t.Fatal("the Voice was gone in the tick that recorded its play")
@@ -137,13 +136,13 @@ func TestAFailedClipEndsItsVoicesLaterAndNeverInTheSameTick(t *testing.T) {
 	if got := h.probe(voice); got.Found {
 		t.Fatal("the Voice outlived the tick after its Clip failed")
 	}
-	if ended := h.waitEnded(); ended.Voice != voice || ended.Reason != sound.ReasonFailed {
+	if ended := h.waitEnded(); ended.Voice != voice || ended.Reason != ReasonFailed {
 		t.Fatalf("ended as %v/%v, want %v/failed", ended.Voice, ended.Reason, voice)
 	}
 
 	// A second play of the same Clip finds a terminal entry: no second read, no
 	// second prepare, and no second report.
-	h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	h.play(ClipWithResource(bell), 0, Params{})
 	h.tick()
 	h.tick()
 	h.waitEnded()
@@ -153,7 +152,7 @@ func TestAFailedClipEndsItsVoicesLaterAndNeverInTheSameTick(t *testing.T) {
 	if len(reported) != 1 {
 		t.Fatalf("the failure was reported %d times, want once: %v", len(reported), reported)
 	}
-	var failed sound.ErrClipFailed
+	var failed ErrClipFailed
 	if !errors.As(reported[0], &failed) || failed.Clip != bell {
 		t.Fatalf("the report does not name the clip: %v", reported[0])
 	}
@@ -166,10 +165,10 @@ func TestAFailedClipEndsItsVoicesLaterAndNeverInTheSameTick(t *testing.T) {
 func TestAPlayBeforeItsClipIsReadyStartsFromItsOffsetWithNoCatchUp(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 4, channels: 1, rate: 48000})
 	backend.deferring = true
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
 	const offset = 0.25
-	voice := h.play(sound.ClipWithResource(bell), offset, sound.Params{})
+	voice := h.play(ClipWithResource(bell), offset, Params{})
 
 	// Three ticks of waiting. The Voice exists, holds its slot and is silent.
 	for range 3 {
@@ -209,13 +208,13 @@ func TestAPlayBeforeItsClipIsReadyStartsFromItsOffsetWithNoCatchUp(t *testing.T)
 // slots exist once, before any of them.
 func TestTheFlushEmitsOneBatchPerTick(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 0.5, channels: 2, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}.WithMaxVoices(16), clipBytes)
+	h := newHarness(t, backend, Config{}.WithMaxVoices(16), clipBytes)
 
 	if slots, calls := backend.slotCount(); slots != 16 || calls != 1 {
 		t.Fatalf("the Adapter was told %d slots %d times, want 16 once", slots, calls)
 	}
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	voice := h.play(ClipWithResource(bell), 0, Params{})
 	for range 32 {
 		h.tick()
 	}
@@ -244,10 +243,10 @@ func TestTheFlushEmitsOneBatchPerTick(t *testing.T) {
 // The view carries what the game commanded and what the engine derived from it,
 // which is what a game's test asserts on.
 func TestTheViewCarriesWhatTheGameCommandedAndWhatTheEngineDerived(t *testing.T) {
-	h := newHarness(t, newFakeBackend(fakeClip{duration: 2, channels: 2, rate: 48000}), sound.Config{}, clipBytes)
+	h := newHarness(t, newFakeBackend(fakeClip{duration: 2, channels: 2, rate: 48000}), Config{}, clipBytes)
 
-	clip := sound.ClipWithResource(bell)
-	voice := h.play(clip, 0, sound.Params{Bus: m.Some[sound.Bus](3), Volume: m.Some[float32](0.4)})
+	clip := ClipWithResource(bell)
+	voice := h.play(clip, 0, Params{Bus: m.Some[Bus](3), Volume: m.Some[float32](0.4)})
 	h.tick()
 
 	got := h.probe(voice)
@@ -284,12 +283,12 @@ func TestTheViewCarriesWhatTheGameCommandedAndWhatTheEngineDerived(t *testing.T)
 // same sample. A paused game that comes back to its music thirty seconds in is
 // a bug in every game that has ever paused.
 func TestAPausedVoiceSuspendsAndResumesWhereItStopped(t *testing.T) {
-	h := newHarness(t, newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000}), sound.Config{}, clipBytes)
+	h := newHarness(t, newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000}), Config{}, clipBytes)
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	voice := h.play(ClipWithResource(bell), 0, Params{})
 	h.tick()
 
-	h.record(func(queue *sound.Queue) { queue.SetVoice(voice, sound.Params{Paused: m.Some(true)}) })
+	h.record(func(queue *Queue) { queue.SetVoice(voice, Params{Paused: m.Some(true)}) })
 	h.tick()
 	h.tick()
 
@@ -301,7 +300,7 @@ func TestAPausedVoiceSuspendsAndResumesWhereItStopped(t *testing.T) {
 		t.Fatalf("a paused playhead moved to %v from %v", paused.Info.Playhead, step)
 	}
 
-	h.record(func(queue *sound.Queue) { queue.SetVoice(voice, sound.Params{Paused: m.Some(false)}) })
+	h.record(func(queue *Queue) { queue.SetVoice(voice, Params{Paused: m.Some(false)}) })
 	h.tick()
 
 	if got := h.probe(voice); got.Info.Playhead != 2*step {
@@ -314,11 +313,11 @@ func TestAPausedVoiceSuspendsAndResumesWhereItStopped(t *testing.T) {
 // were recorded, and what crosses the seam is where they left the Voice.
 func TestAPlayAndASetVoiceInOneTickReachTheSeamAsOne(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
-	h.record(func(queue *sound.Queue) {
-		voice := queue.Play(sound.ClipWithResource(bell), 0, sound.Params{Volume: m.Some[float32](1)})
-		queue.SetVoice(voice, sound.Params{Volume: m.Some[float32](0.25)})
+	h.record(func(queue *Queue) {
+		voice := queue.Play(ClipWithResource(bell), 0, Params{Volume: m.Some[float32](1)})
+		queue.SetVoice(voice, Params{Volume: m.Some[float32](0.25)})
 	})
 	h.tick()
 
@@ -340,14 +339,14 @@ func TestAPlayAndASetVoiceInOneTickReachTheSeamAsOne(t *testing.T) {
 // the music, which is the failure the cap exists to prevent.
 func TestAPlayThatFindsNoSlotEndsInTheFlushThatRecordedIt(t *testing.T) {
 	h := newHarness(t, newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000}),
-		sound.Config{}.WithMaxVoices(1), clipBytes)
+		Config{}.WithMaxVoices(1), clipBytes)
 
-	var held, overflow sound.Voice
-	h.record(func(queue *sound.Queue) {
-		held = queue.Play(sound.ClipWithResource(bell), 0, sound.Params{})
-		overflow = queue.Play(sound.ClipWithResource(bell), 0, sound.Params{})
+	var held, overflow Voice
+	h.record(func(queue *Queue) {
+		held = queue.Play(ClipWithResource(bell), 0, Params{})
+		overflow = queue.Play(ClipWithResource(bell), 0, Params{})
 	})
-	if overflow == sound.NoVoice {
+	if overflow == NoVoice {
 		t.Fatal("the play that lost got no handle at all")
 	}
 	h.tick()
@@ -359,7 +358,7 @@ func TestAPlayThatFindsNoSlotEndsInTheFlushThatRecordedIt(t *testing.T) {
 	if got.Live != 1 || got.All[0].Voice != held {
 		t.Fatalf("the view holds %d voices, want the one that kept its slot", got.Live)
 	}
-	if ended := h.waitEnded(); ended.Voice != overflow || ended.Reason != sound.ReasonStolen {
+	if ended := h.waitEnded(); ended.Voice != overflow || ended.Reason != ReasonStolen {
 		t.Fatalf("ended as %v/%v, want %v/stolen", ended.Voice, ended.Reason, overflow)
 	}
 }
@@ -368,14 +367,14 @@ func TestAPlayThatFindsNoSlotEndsInTheFlushThatRecordedIt(t *testing.T) {
 // tick there is nothing to have read, and afterwards it is whatever the Adapter
 // says now.
 func TestTheDeviceIsPolledEveryFlush(t *testing.T) {
-	h := newHarness(t, newFakeBackend(fakeClip{duration: 1, channels: 2, rate: 48000}), sound.Config{}, clipBytes)
+	h := newHarness(t, newFakeBackend(fakeClip{duration: 1, channels: 2, rate: 48000}), Config{}, clipBytes)
 
-	if got := h.probe(sound.NoVoice).Device; got.Ready || got.Name != "" {
+	if got := h.probe(NoVoice).Device; got.Ready || got.Name != "" {
 		t.Fatalf("the Device reads %+v before the first flush", got)
 	}
 
 	h.tick()
-	got := h.probe(sound.NoVoice).Device
+	got := h.probe(NoVoice).Device
 	if !got.Ready || got.Name != "fake" || got.SampleRate != 48000 || got.Channels != 2 {
 		t.Fatalf("the Device reads %+v after a flush", got)
 	}
@@ -387,12 +386,12 @@ func TestTheDeviceIsPolledEveryFlush(t *testing.T) {
 // exactly that - a VoiceStart carrying an Offset - and the offset a game says
 // in float32 seconds is a time.Duration by the time an Adapter sees it.
 func TestASeekMovesThePlayheadAndCrossesTheSeamAsAStart(t *testing.T) {
-	h := newHarness(t, newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000}), sound.Config{}, clipBytes)
+	h := newHarness(t, newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000}), Config{}, clipBytes)
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	voice := h.play(ClipWithResource(bell), 0, Params{})
 	h.tick()
 
-	h.record(func(queue *sound.Queue) { queue.Seek(voice, 2.5) })
+	h.record(func(queue *Queue) { queue.Seek(voice, 2.5) })
 	h.tick()
 
 	// Within a tick of where it was asked for, and never nearer than that: the
@@ -419,23 +418,23 @@ func TestASeekMovesThePlayheadAndCrossesTheSeamAsAStart(t *testing.T) {
 // reaching its end, which is what it is called when a playhead gets there by
 // itself.
 func TestASeekClampsBelowZeroAndEndsAOneShotPastTheEnd(t *testing.T) {
-	h := newHarness(t, newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000}), sound.Config{}, clipBytes)
+	h := newHarness(t, newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000}), Config{}, clipBytes)
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	voice := h.play(ClipWithResource(bell), 0, Params{})
 	h.tick()
 
-	h.record(func(queue *sound.Queue) { queue.Seek(voice, -3) })
+	h.record(func(queue *Queue) { queue.Seek(voice, -3) })
 	h.tick()
 	if got := h.probe(voice); got.Info.Playhead != step {
 		t.Fatalf("a seek to -3 left the playhead at %v, want a clamp to zero and one step", got.Info.Playhead)
 	}
 
-	h.record(func(queue *sound.Queue) { queue.Seek(voice, 9) })
+	h.record(func(queue *Queue) { queue.Seek(voice, 9) })
 	h.tick()
 	if got := h.probe(voice); got.Found {
 		t.Fatalf("%v survived a seek past the end of a four-second Clip", voice)
 	}
-	if ended := h.waitEnded(); ended.Voice != voice || ended.Reason != sound.ReasonFinished {
+	if ended := h.waitEnded(); ended.Voice != voice || ended.Reason != ReasonFinished {
 		t.Fatalf("ended as %v/%v, want %v/finished", ended.Voice, ended.Reason, voice)
 	}
 }
@@ -446,9 +445,9 @@ func TestASeekClampsBelowZeroAndEndsAOneShotPastTheEnd(t *testing.T) {
 // which is the same place until a Clip's Loop Region reaches sound, and is
 // written as the loop start so that it stops being the same place by itself.
 func TestALoopingVoiceWrapsAndNeverEndsByItself(t *testing.T) {
-	h := newHarness(t, newFakeBackend(fakeClip{duration: 0.5, channels: 2, rate: 48000}), sound.Config{}, clipBytes)
+	h := newHarness(t, newFakeBackend(fakeClip{duration: 0.5, channels: 2, rate: 48000}), Config{}, clipBytes)
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{Loop: m.Some(true)})
+	voice := h.play(ClipWithResource(bell), 0, Params{Loop: m.Some(true)})
 
 	// A hundred ticks is three whole passes of a half-second Clip and four
 	// ticks into the fourth.
@@ -468,7 +467,7 @@ func TestALoopingVoiceWrapsAndNeverEndsByItself(t *testing.T) {
 		t.Fatal("the start that crossed the seam does not loop")
 	}
 
-	h.record(func(queue *sound.Queue) { queue.Seek(voice, 9) })
+	h.record(func(queue *Queue) { queue.Seek(voice, 9) })
 	h.tick()
 	if got := h.probe(voice); !got.Found || got.Info.Playhead != step {
 		t.Fatalf("a seek past the end of a looping Voice left it at %v (found %v), want the loop start",
@@ -481,14 +480,14 @@ func TestALoopingVoiceWrapsAndNeverEndsByItself(t *testing.T) {
 // stands. The alternative is sound's playhead wrapping while the Adapter's does
 // not: a Voice that goes silent while the view insists it is playing.
 func TestChangingLoopRestartsTheVoiceWhereItStands(t *testing.T) {
-	h := newHarness(t, newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000}), sound.Config{}, clipBytes)
+	h := newHarness(t, newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000}), Config{}, clipBytes)
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	voice := h.play(ClipWithResource(bell), 0, Params{})
 	for range 4 {
 		h.tick()
 	}
 
-	h.record(func(queue *sound.Queue) { queue.SetVoice(voice, sound.Params{Loop: m.Some(true)}) })
+	h.record(func(queue *Queue) { queue.SetVoice(voice, Params{Loop: m.Some(true)}) })
 	h.tick()
 
 	batch := h.backend.emitted()[4]
@@ -511,9 +510,9 @@ func TestChangingLoopRestartsTheVoiceWhereItStands(t *testing.T) {
 // twice its rate whose playhead crawled at one would run out in the Mixer half
 // a Clip before sound said so, and be cut there rather than stopped here.
 func TestPitchCrossesTheSeamAsRateAndScalesThePlayhead(t *testing.T) {
-	h := newHarness(t, newFakeBackend(fakeClip{duration: 1, channels: 2, rate: 48000}), sound.Config{}, clipBytes)
+	h := newHarness(t, newFakeBackend(fakeClip{duration: 1, channels: 2, rate: 48000}), Config{}, clipBytes)
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{Pitch: m.Some[float32](2)})
+	voice := h.play(ClipWithResource(bell), 0, Params{Pitch: m.Some[float32](2)})
 
 	for tick := 1; tick < 32; tick++ {
 		h.tick()
@@ -529,7 +528,7 @@ func TestPitchCrossesTheSeamAsRateAndScalesThePlayhead(t *testing.T) {
 	}
 
 	h.tick()
-	if ended := h.waitEnded(); ended.Voice != voice || ended.Reason != sound.ReasonFinished {
+	if ended := h.waitEnded(); ended.Voice != voice || ended.Reason != ReasonFinished {
 		t.Fatalf("ended as %v/%v, want %v/finished", ended.Voice, ended.Reason, voice)
 	}
 }
@@ -542,9 +541,9 @@ func TestPitchCrossesTheSeamAsRateAndScalesThePlayhead(t *testing.T) {
 // nothing advances anyway - a stepped tick that moved a suspended playhead
 // would resume the music somewhere the Adapter is not.
 func TestAnEnginePauseSuspendsEveryVoiceAndResumesItOnTheSameSample(t *testing.T) {
-	h := newHarness(t, newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000}), sound.Config{}, clipBytes)
+	h := newHarness(t, newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000}), Config{}, clipBytes)
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	voice := h.play(ClipWithResource(bell), 0, Params{})
 	h.tick()
 
 	h.pause(true)
@@ -589,16 +588,16 @@ func TestAnEnginePauseSuspendsEveryVoiceAndResumesItOnTheSameSample(t *testing.T
 // Params.Paused is what the game itself said, and it survives an engine Pause
 // untouched: resuming the engine must not unpause the Voice a game paused.
 func TestAnEnginePauseIsAnUpdatePerLiveVoiceAndLeavesWhatTheGameSaid(t *testing.T) {
-	h := newHarness(t, newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000}), sound.Config{}, clipBytes)
+	h := newHarness(t, newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000}), Config{}, clipBytes)
 
-	var voices []sound.Voice
-	h.record(func(queue *sound.Queue) {
+	var voices []Voice
+	h.record(func(queue *Queue) {
 		for range 3 {
-			voices = append(voices, queue.Play(sound.ClipWithResource(bell), 0, sound.Params{}))
+			voices = append(voices, queue.Play(ClipWithResource(bell), 0, Params{}))
 		}
 	})
 	h.tick()
-	h.record(func(queue *sound.Queue) { queue.SetVoice(voices[0], sound.Params{Paused: m.Some(true)}) })
+	h.record(func(queue *Queue) { queue.SetVoice(voices[0], Params{Paused: m.Some(true)}) })
 	h.tick()
 
 	h.pause(true)
@@ -606,7 +605,7 @@ func TestAnEnginePauseIsAnUpdatePerLiveVoiceAndLeavesWhatTheGameSaid(t *testing.
 	if len(batch.Updates) != len(voices) {
 		t.Fatalf("the pause emitted %d updates for %d live Voices", len(batch.Updates), len(voices))
 	}
-	if len(batch.Updates) > sound.DefaultMaxVoices {
+	if len(batch.Updates) > DefaultMaxVoices {
 		t.Fatalf("the pause emitted %d updates, more than the cap", len(batch.Updates))
 	}
 
@@ -628,10 +627,10 @@ func TestAnEnginePauseIsAnUpdatePerLiveVoiceAndLeavesWhatTheGameSaid(t *testing.
 // a playhead advances whether or not anyone can hear it does not hold.
 func TestAnEnginePauseBeatsADeviceThatIsNotReady(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 4, channels: 2, rate: 48000})
-	backend.device = sound.Device{Name: "fake"}
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	backend.device = Device{Name: "fake"}
+	h := newHarness(t, backend, Config{}, clipBytes)
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{})
+	voice := h.play(ClipWithResource(bell), 0, Params{})
 	h.tick()
 	h.pause(true)
 	for range 4 {
@@ -648,7 +647,7 @@ func TestAnEnginePauseBeatsADeviceThatIsNotReady(t *testing.T) {
 }
 
 // countStarts is how many voice starts crossed the seam in total.
-func countStarts(batches []sound.Batch) int {
+func countStarts(batches []Batch) int {
 	total := 0
 	for _, batch := range batches {
 		total += len(batch.Starts)

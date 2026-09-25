@@ -16,8 +16,8 @@
 // kernel.Registrar.ProvideAdapter, and a composition without one fails with
 // kernel.ErrMissingAdapter.
 //
-// This package holds declarations only. The recording types and the GPU
-// vocabulary are declared in gfx/internal/types and aliased here, so that they
-// stay concrete while their unexported state stays readable to the plugin; see
-// that package.
+// This package declares nothing: it is an index of aliases. The recording
+// types and the GPU vocabulary are declared in gfx/internal, beside the plugin
+// that reads their unexported state, and aliased here, so that they stay
+// concrete types.
 package gfx

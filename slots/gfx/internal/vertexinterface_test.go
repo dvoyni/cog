@@ -4,59 +4,64 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
-	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // sceneSkinnedLayout and the three beside it are the layout halves of the
 // shader/layout pairs the engine ships, restated here rather than imported:
 // scene and canvas both sit above gfx, so gfx cannot see their Go types, and a
 // check gfx performs has to be exercised against the pairs gfx is actually
-// handed. They mirror bundles/scene/internal/types/vertexpack.go and bundles/canvas/internal/types/shader.go; the shader
-// halves mirror bundles/model/internal/builtin/scene/vertex.wgsl and bundles/canvas/internal/builtin/canvas.
+// handed. They mirror bundles/model/internal/vertexpack.go and bundles/canvas/internal/shader.go; the shader
+// halves mirror bundles/model/internal/builtin/model/vertex.wgsl and bundles/canvas/internal/builtin/canvas.
 //
 // Scene ships two named layouts, and the standard one is the skinned one's
 // first six rows - the same reslice scene itself makes, so the pair below
 // cannot disagree about the six they share.
 var (
-	sceneSkinnedLayout = []gfx.VertexAttr{
-		gfx.Attr(0, gfx.Float32x3),  // position
-		gfx.Attr(12, gfx.Unorm16x2), // normal  - oct32
-		gfx.Attr(16, gfx.Uint32),    // tangent - oct 15/15 + handedness
-		gfx.Attr(20, gfx.Unorm16x2), // uv0     - against the mesh record
-		gfx.Attr(24, gfx.Unorm16x2), // uv1     - against the mesh record
-		gfx.Attr(28, gfx.Unorm8x4),  // color
-		gfx.Attr(32, gfx.Uint8x4),   // joints
-		gfx.Attr(36, gfx.Unorm8x4),  // weights
+	sceneSkinnedLayout = []descriptors.VertexAttr{
+		descriptors.Attr(0, descriptors.Float32x3),  // position
+		descriptors.Attr(12, descriptors.Unorm16x2), // normal  - oct32
+		descriptors.Attr(16, descriptors.Uint32),    // tangent - oct 15/15 + handedness
+		descriptors.Attr(20, descriptors.Unorm16x2), // uv0     - against the mesh record
+		descriptors.Attr(24, descriptors.Unorm16x2), // uv1     - against the mesh record
+		descriptors.Attr(28, descriptors.Unorm8x4),  // color
+		descriptors.Attr(32, descriptors.Uint8x4),   // joints
+		descriptors.Attr(36, descriptors.Unorm8x4),  // weights
 	}
 	sceneStandardLayout  = sceneSkinnedLayout[:6]
-	canvasTriangleLayout = []gfx.VertexAttr{
-		gfx.Attr(0, gfx.Float32x2),  // position
-		gfx.Attr(8, gfx.Float32x4),  // color
-		gfx.Attr(24, gfx.Float32x2), // uv
+	canvasTriangleLayout = []descriptors.VertexAttr{
+		descriptors.Attr(0, descriptors.Float32x2),  // position
+		descriptors.Attr(8, descriptors.Float32x4),  // color
+		descriptors.Attr(24, descriptors.Float32x2), // uv
 	}
-	canvasQuadLayout = []gfx.VertexAttr{gfx.Attr(0, gfx.Float32x2)}
+	canvasQuadLayout = []descriptors.VertexAttr{descriptors.Attr(0, descriptors.Float32x2)}
 )
 
 // sceneVertexIn is what SceneVertexIn declares under SCENE_SKIN; the no-skin
 // variant is its first six.
-var sceneVertexIn = []gfx.ShaderVertexInput{
-	{Name: "position", Location: 0, Kind: gfx.VertexScalarFloat, Count: 3},
-	{Name: "normal", Location: 1, Kind: gfx.VertexScalarFloat, Count: 2},
-	{Name: "tangent", Location: 2, Kind: gfx.VertexScalarUint, Count: 1},
-	{Name: "uv0", Location: 3, Kind: gfx.VertexScalarFloat, Count: 2},
-	{Name: "uv1", Location: 4, Kind: gfx.VertexScalarFloat, Count: 2},
-	{Name: "color", Location: 5, Kind: gfx.VertexScalarFloat, Count: 4},
-	{Name: "joints", Location: 6, Kind: gfx.VertexScalarUint, Count: 4},
-	{Name: "weights", Location: 7, Kind: gfx.VertexScalarFloat, Count: 4},
+var sceneVertexIn = []shader.ShaderVertexInput{
+	{Name: "position", Location: 0, Kind: shader.VertexScalarFloat, Count: 3},
+	{Name: "normal", Location: 1, Kind: shader.VertexScalarFloat, Count: 2},
+	{Name: "tangent", Location: 2, Kind: shader.VertexScalarUint, Count: 1},
+	{Name: "uv0", Location: 3, Kind: shader.VertexScalarFloat, Count: 2},
+	{Name: "uv1", Location: 4, Kind: shader.VertexScalarFloat, Count: 2},
+	{Name: "color", Location: 5, Kind: shader.VertexScalarFloat, Count: 4},
+	{Name: "joints", Location: 6, Kind: shader.VertexScalarUint, Count: 4},
+	{Name: "weights", Location: 7, Kind: shader.VertexScalarFloat, Count: 4},
 }
 
 func TestVertexInterfaceAcceptsEveryBundledShaderAndLayoutPair(t *testing.T) {
 	for _, pair := range []struct {
 		name   string
-		inputs []gfx.ShaderVertexInput
-		attrs  []gfx.VertexAttr
+		inputs []shader.ShaderVertexInput
+		attrs  []descriptors.VertexAttr
 	}{
 		{"scene skinned", sceneVertexIn, sceneSkinnedLayout},
 		{"scene standard", sceneVertexIn[:6], sceneStandardLayout},
@@ -65,17 +70,17 @@ func TestVertexInterfaceAcceptsEveryBundledShaderAndLayoutPair(t *testing.T) {
 		// against eight attributes supplied, which is the direction that has to
 		// stay legal.
 		{"scene standard variant over a skinned mesh", sceneVertexIn[:6], sceneSkinnedLayout},
-		{"canvas triangles", []gfx.ShaderVertexInput{
-			{Name: "position", Location: 0, Kind: gfx.VertexScalarFloat, Count: 2},
-			{Name: "color", Location: 1, Kind: gfx.VertexScalarFloat, Count: 4},
-			{Name: "uv", Location: 2, Kind: gfx.VertexScalarFloat, Count: 2},
+		{"canvas triangles", []shader.ShaderVertexInput{
+			{Name: "position", Location: 0, Kind: shader.VertexScalarFloat, Count: 2},
+			{Name: "color", Location: 1, Kind: shader.VertexScalarFloat, Count: 4},
+			{Name: "uv", Location: 2, Kind: shader.VertexScalarFloat, Count: 2},
 		}, canvasTriangleLayout},
-		{"canvas quad", []gfx.ShaderVertexInput{
-			{Name: "quad", Location: 0, Kind: gfx.VertexScalarFloat, Count: 2},
+		{"canvas quad", []shader.ShaderVertexInput{
+			{Name: "quad", Location: 0, Kind: shader.VertexScalarFloat, Count: 2},
 		}, canvasQuadLayout},
 	} {
 		t.Run(pair.name, func(t *testing.T) {
-			if err := gfx.CheckVertexInterface("bundled", gfx.ShaderLayout{VertexInputs: pair.inputs}, pair.attrs); err != nil {
+			if err := CheckVertexInterface("bundled", shader.ShaderLayout{VertexInputs: pair.inputs}, pair.attrs); err != nil {
 				t.Fatalf("the bundled pair is refused: %v", err)
 			}
 		})
@@ -83,12 +88,12 @@ func TestVertexInterfaceAcceptsEveryBundledShaderAndLayoutPair(t *testing.T) {
 }
 
 func TestVertexInterfaceReportsAnInputNoAttributeSupplies(t *testing.T) {
-	layout := gfx.ShaderLayout{VertexInputs: []gfx.ShaderVertexInput{
-		{Name: "position", Location: 0, Kind: gfx.VertexScalarFloat, Count: 3},
-		{Name: "uv0", Location: 3, Kind: gfx.VertexScalarFloat, Count: 2},
+	layout := shader.ShaderLayout{VertexInputs: []shader.ShaderVertexInput{
+		{Name: "position", Location: 0, Kind: shader.VertexScalarFloat, Count: 3},
+		{Name: "uv0", Location: 3, Kind: shader.VertexScalarFloat, Count: 2},
 	}}
-	err := gfx.CheckVertexInterface("mesh.wgsl", layout, []gfx.VertexAttr{gfx.Attr(0, gfx.Float32x3)})
-	var unsupplied gfx.ErrVertexInputUnsupplied
+	err := CheckVertexInterface("mesh.wgsl", layout, []descriptors.VertexAttr{descriptors.Attr(0, descriptors.Float32x3)})
+	var unsupplied shader.ErrVertexInputUnsupplied
 	if !errors.As(err, &unsupplied) {
 		t.Fatalf("err = %v, want ErrVertexInputUnsupplied", err)
 	}
@@ -101,11 +106,11 @@ func TestVertexInterfaceReportsAnInputNoAttributeSupplies(t *testing.T) {
 // read over a two-component unorm, which WebGPU fills out with (x, y, 0) and
 // shades as a plausible direction lying in the XY plane.
 func TestVertexInterfaceReportsAVec3OverATwoComponentUnorm(t *testing.T) {
-	layout := gfx.ShaderLayout{VertexInputs: []gfx.ShaderVertexInput{
-		{Name: "normal", Location: 1, Kind: gfx.VertexScalarFloat, Count: 3},
+	layout := shader.ShaderLayout{VertexInputs: []shader.ShaderVertexInput{
+		{Name: "normal", Location: 1, Kind: shader.VertexScalarFloat, Count: 3},
 	}}
-	err := gfx.CheckVertexInterface("mesh.wgsl", layout, []gfx.VertexAttr{gfx.Attr(0, gfx.Float32x3), gfx.Attr(12, gfx.Unorm16x2)})
-	var mismatch gfx.ErrVertexInputMismatch
+	err := CheckVertexInterface("mesh.wgsl", layout, []descriptors.VertexAttr{descriptors.Attr(0, descriptors.Float32x3), descriptors.Attr(12, descriptors.Unorm16x2)})
+	var mismatch shader.ErrVertexInputMismatch
 	if !errors.As(err, &mismatch) {
 		t.Fatalf("err = %v, want ErrVertexInputMismatch", err)
 	}
@@ -120,18 +125,18 @@ func TestVertexInterfaceReportsAVec3OverATwoComponentUnorm(t *testing.T) {
 func TestVertexInterfaceRefusesTheWideningWebGpuAllows(t *testing.T) {
 	for _, c := range []struct {
 		name     string
-		declared gfx.ShaderVertexInput
-		supplied gfx.VertexAttr
+		declared shader.ShaderVertexInput
+		supplied descriptors.VertexAttr
 	}{
-		{"narrower shader", gfx.ShaderVertexInput{Location: 0, Kind: gfx.VertexScalarFloat, Count: 2}, gfx.Attr(0, gfx.Float32x4)},
-		{"wider shader", gfx.ShaderVertexInput{Location: 0, Kind: gfx.VertexScalarFloat, Count: 4}, gfx.Attr(0, gfx.Float32x2)},
-		{"unsigned over signed", gfx.ShaderVertexInput{Location: 0, Kind: gfx.VertexScalarUint, Count: 4}, gfx.Attr(0, gfx.Sint16x4)},
-		{"float over integer", gfx.ShaderVertexInput{Location: 0, Kind: gfx.VertexScalarFloat, Count: 4}, gfx.Attr(0, gfx.Uint8x4)},
+		{"narrower shader", shader.ShaderVertexInput{Location: 0, Kind: shader.VertexScalarFloat, Count: 2}, descriptors.Attr(0, descriptors.Float32x4)},
+		{"wider shader", shader.ShaderVertexInput{Location: 0, Kind: shader.VertexScalarFloat, Count: 4}, descriptors.Attr(0, descriptors.Float32x2)},
+		{"unsigned over signed", shader.ShaderVertexInput{Location: 0, Kind: shader.VertexScalarUint, Count: 4}, descriptors.Attr(0, descriptors.Sint16x4)},
+		{"float over integer", shader.ShaderVertexInput{Location: 0, Kind: shader.VertexScalarFloat, Count: 4}, descriptors.Attr(0, descriptors.Uint8x4)},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			layout := gfx.ShaderLayout{VertexInputs: []gfx.ShaderVertexInput{c.declared}}
-			err := gfx.CheckVertexInterface("mesh.wgsl", layout, []gfx.VertexAttr{c.supplied, gfx.Attr(16, gfx.Float32x4)})
-			var mismatch gfx.ErrVertexInputMismatch
+			layout := shader.ShaderLayout{VertexInputs: []shader.ShaderVertexInput{c.declared}}
+			err := CheckVertexInterface("mesh.wgsl", layout, []descriptors.VertexAttr{c.supplied, descriptors.Attr(16, descriptors.Float32x4)})
+			var mismatch shader.ErrVertexInputMismatch
 			if !errors.As(err, &mismatch) {
 				t.Fatalf("err = %v, want ErrVertexInputMismatch", err)
 			}
@@ -142,11 +147,11 @@ func TestVertexInterfaceRefusesTheWideningWebGpuAllows(t *testing.T) {
 // A normalized format decodes to float and an integer format does not, so
 // naming the stored bytes is not what the rule compares.
 func TestVertexInterfaceAcceptsAnyFormatThatDecodesToTheDeclaredType(t *testing.T) {
-	for _, typ := range []gfx.VertexType{gfx.Float32x4, gfx.Float16x4, gfx.Unorm8x4, gfx.Snorm16x4, gfx.Unorm1010102} {
-		layout := gfx.ShaderLayout{VertexInputs: []gfx.ShaderVertexInput{
-			{Name: "color", Location: 0, Kind: gfx.VertexScalarFloat, Count: 4},
+	for _, typ := range []descriptors.VertexType{descriptors.Float32x4, descriptors.Float16x4, descriptors.Unorm8x4, descriptors.Snorm16x4, descriptors.Unorm1010102} {
+		layout := shader.ShaderLayout{VertexInputs: []shader.ShaderVertexInput{
+			{Name: "color", Location: 0, Kind: shader.VertexScalarFloat, Count: 4},
 		}}
-		if err := gfx.CheckVertexInterface("mesh.wgsl", layout, []gfx.VertexAttr{gfx.Attr(0, typ)}); err != nil {
+		if err := CheckVertexInterface("mesh.wgsl", layout, []descriptors.VertexAttr{descriptors.Attr(0, typ)}); err != nil {
 			t.Fatalf("%v over vec4<f32> is refused: %v", typ, err)
 		}
 	}
@@ -155,9 +160,9 @@ func TestVertexInterfaceAcceptsAnyFormatThatDecodesToTheDeclaredType(t *testing.
 func TestVertexInterfaceReportsAStrideThatIsNotAMultipleOfFour(t *testing.T) {
 	// 30 bytes: legal on Vulkan, Apple-silicon Metal and D3D12, refused by
 	// WebGPU, GLES and older Apple GPUs.
-	attrs := []gfx.VertexAttr{gfx.Attr(0, gfx.Float32x3), gfx.Attr(12, gfx.Unorm16x2), gfx.Attr(16, gfx.Uint8x2), gfx.Attr(28, gfx.Uint8x2)}
-	err := gfx.CheckVertexInterface("mesh.wgsl", gfx.ShaderLayout{}, attrs)
-	var stride gfx.ErrVertexStrideAlignment
+	attrs := []descriptors.VertexAttr{descriptors.Attr(0, descriptors.Float32x3), descriptors.Attr(12, descriptors.Unorm16x2), descriptors.Attr(16, descriptors.Uint8x2), descriptors.Attr(28, descriptors.Uint8x2)}
+	err := CheckVertexInterface("mesh.wgsl", shader.ShaderLayout{}, attrs)
+	var stride types.ErrVertexStrideAlignment
 	if !errors.As(err, &stride) {
 		t.Fatalf("err = %v, want ErrVertexStrideAlignment", err)
 	}
@@ -169,7 +174,7 @@ func TestVertexInterfaceReportsAStrideThatIsNotAMultipleOfFour(t *testing.T) {
 // A layout with no attributes has nothing to be misaligned about; the draw is
 // already dropped upstream on a zero stride.
 func TestVertexInterfaceAcceptsAnEmptyLayout(t *testing.T) {
-	if err := gfx.CheckVertexInterface("mesh.wgsl", gfx.ShaderLayout{}, nil); err != nil {
+	if err := CheckVertexInterface("mesh.wgsl", shader.ShaderLayout{}, nil); err != nil {
 		t.Fatalf("an empty layout is refused: %v", err)
 	}
 }
@@ -178,7 +183,7 @@ func TestVertexInterfaceAcceptsAnEmptyLayout(t *testing.T) {
 // given layout, drawing mesh each frame, and returns everything the kernel was
 // told. It is the whole-plugin path rather than a translator call because what
 // is under test is which error path a mismatch takes and how often it is taken.
-func pipelineErrFrames(t *testing.T, backend *fakeBackend, mesh gfx.MeshDescr, frames int) []error {
+func pipelineErrFrames(t *testing.T, backend *fakeBackend, mesh descriptors.MeshDescr, frames int) []error {
 	t.Helper()
 	p := newPlugin()
 	var reported []error
@@ -186,8 +191,8 @@ func pipelineErrFrames(t *testing.T, backend *fakeBackend, mesh gfx.MeshDescr, f
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	for range frames {
 		w := recordList(t, k)
-		w.Draw(mesh, testMaterial(), gfx.MatParam("mvp", m.NewMat4()))
-		k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+		w.Draw(mesh, testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
+		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 	}
 	return reported
@@ -196,23 +201,23 @@ func pipelineErrFrames(t *testing.T, backend *fakeBackend, mesh gfx.MeshDescr, f
 // oneInputBackend reflects a single vertex input over the fake backend's
 // standard uniform layout, so a mesh can be paired against a shader that
 // declares exactly one thing.
-func oneInputBackend(input gfx.ShaderVertexInput) *fakeBackend {
+func oneInputBackend(input shader.ShaderVertexInput) *fakeBackend {
 	layout := (&fakeBackend{}).ShaderLayout(0)
-	layout.VertexInputs = []gfx.ShaderVertexInput{input}
+	layout.VertexInputs = []shader.ShaderVertexInput{input}
 	return &fakeBackend{layout: &layout}
 }
 
 func TestADrawWhoseLayoutMissesAShaderInputIsDroppedAndReportedOnce(t *testing.T) {
-	backend := oneInputBackend(gfx.ShaderVertexInput{Name: "uv", Location: 2, Kind: gfx.VertexScalarFloat, Count: 2})
-	mesh := gfx.Mesh(gfx.BufferWithBytes(make([]byte, 3*28), true), gfx.TopologyTriangleList,
-		gfx.Attr(0, gfx.Float32x3), gfx.Attr(12, gfx.Float32x4))
+	backend := oneInputBackend(shader.ShaderVertexInput{Name: "uv", Location: 2, Kind: shader.VertexScalarFloat, Count: 2})
+	mesh := descriptors.Mesh(descriptors.BufferWithBytes(make([]byte, 3*28), true), types.TopologyTriangleList,
+		descriptors.Attr(0, descriptors.Float32x3), descriptors.Attr(12, descriptors.Float32x4))
 
 	reported := pipelineErrFrames(t, backend, mesh, 3)
 
 	if len(reported) != 1 {
 		t.Fatalf("three frames reported %d errors, want 1: %v", len(reported), reported)
 	}
-	var unsupplied gfx.ErrVertexInputUnsupplied
+	var unsupplied shader.ErrVertexInputUnsupplied
 	if !errors.As(reported[0], &unsupplied) {
 		t.Fatalf("reported %v, want ErrVertexInputUnsupplied", reported[0])
 	}
@@ -228,16 +233,16 @@ func TestADrawWhoseLayoutMissesAShaderInputIsDroppedAndReportedOnce(t *testing.T
 // two-component unorm. WebGPU would fill the third component with zero and
 // shade it.
 func TestADrawWhoseLayoutSuppliesTheWrongTypeIsDroppedAndReported(t *testing.T) {
-	backend := oneInputBackend(gfx.ShaderVertexInput{Name: "normal", Location: 1, Kind: gfx.VertexScalarFloat, Count: 3})
-	mesh := gfx.Mesh(gfx.BufferWithBytes(make([]byte, 3*16), true), gfx.TopologyTriangleList,
-		gfx.Attr(0, gfx.Float32x3), gfx.Attr(12, gfx.Unorm16x2))
+	backend := oneInputBackend(shader.ShaderVertexInput{Name: "normal", Location: 1, Kind: shader.VertexScalarFloat, Count: 3})
+	mesh := descriptors.Mesh(descriptors.BufferWithBytes(make([]byte, 3*16), true), types.TopologyTriangleList,
+		descriptors.Attr(0, descriptors.Float32x3), descriptors.Attr(12, descriptors.Unorm16x2))
 
 	reported := pipelineErrFrames(t, backend, mesh, 2)
 
 	if len(reported) != 1 {
 		t.Fatalf("two frames reported %d errors, want 1: %v", len(reported), reported)
 	}
-	var mismatch gfx.ErrVertexInputMismatch
+	var mismatch shader.ErrVertexInputMismatch
 	if !errors.As(reported[0], &mismatch) {
 		t.Fatalf("reported %v, want ErrVertexInputMismatch", reported[0])
 	}
@@ -253,9 +258,9 @@ func TestADrawWhoseLayoutSuppliesTheWrongTypeIsDroppedAndReported(t *testing.T) 
 // no-skin variant declares six of the eight attributes its mesh carries - and
 // it draws.
 func TestADrawWhoseLayoutSuppliesMoreThanTheShaderReadsStillDraws(t *testing.T) {
-	backend := oneInputBackend(gfx.ShaderVertexInput{Name: "position", Location: 0, Kind: gfx.VertexScalarFloat, Count: 3})
-	mesh := gfx.Mesh(gfx.BufferWithBytes(make([]byte, 3*28), true), gfx.TopologyTriangleList,
-		gfx.Attr(0, gfx.Float32x3), gfx.Attr(12, gfx.Float32x4))
+	backend := oneInputBackend(shader.ShaderVertexInput{Name: "position", Location: 0, Kind: shader.VertexScalarFloat, Count: 3})
+	mesh := descriptors.Mesh(descriptors.BufferWithBytes(make([]byte, 3*28), true), types.TopologyTriangleList,
+		descriptors.Attr(0, descriptors.Float32x3), descriptors.Attr(12, descriptors.Float32x4))
 
 	reported := pipelineErrFrames(t, backend, mesh, 1)
 
@@ -268,17 +273,17 @@ func TestADrawWhoseLayoutSuppliesMoreThanTheShaderReadsStillDraws(t *testing.T) 
 }
 
 func TestADrawWhoseStrideIsNotAMultipleOfFourIsDroppedAndReported(t *testing.T) {
-	backend := oneInputBackend(gfx.ShaderVertexInput{Name: "position", Location: 0, Kind: gfx.VertexScalarFloat, Count: 3})
+	backend := oneInputBackend(shader.ShaderVertexInput{Name: "position", Location: 0, Kind: shader.VertexScalarFloat, Count: 3})
 	// 12 + 12 + 4 + 2 = 30 bytes.
-	mesh := gfx.Mesh(gfx.BufferWithBytes(make([]byte, 3*30), true), gfx.TopologyTriangleList,
-		gfx.Attr(0, gfx.Float32x3), gfx.Attr(12, gfx.Float32x3), gfx.Attr(24, gfx.Unorm16x2), gfx.Attr(28, gfx.Uint8x2))
+	mesh := descriptors.Mesh(descriptors.BufferWithBytes(make([]byte, 3*30), true), types.TopologyTriangleList,
+		descriptors.Attr(0, descriptors.Float32x3), descriptors.Attr(12, descriptors.Float32x3), descriptors.Attr(24, descriptors.Unorm16x2), descriptors.Attr(28, descriptors.Uint8x2))
 
 	reported := pipelineErrFrames(t, backend, mesh, 2)
 
 	if len(reported) != 1 {
 		t.Fatalf("two frames reported %d errors, want 1: %v", len(reported), reported)
 	}
-	var stride gfx.ErrVertexStrideAlignment
+	var stride types.ErrVertexStrideAlignment
 	if !errors.As(reported[0], &stride) {
 		t.Fatalf("reported %v, want ErrVertexStrideAlignment", reported[0])
 	}
@@ -302,7 +307,7 @@ func TestABackendPipelineFailureReachesTheCallerOnce(t *testing.T) {
 	if len(reported) != 1 {
 		t.Fatalf("three frames reported %d errors, want 1: %v", len(reported), reported)
 	}
-	var failed gfx.ErrPipelineFailed
+	var failed ErrPipelineFailed
 	if !errors.As(reported[0], &failed) {
 		t.Fatalf("reported %v, want ErrPipelineFailed", reported[0])
 	}

@@ -15,19 +15,23 @@ app declares no Resources: the viewport, its resource and its commands belong to
 
 ## Packages
 
-app has the declaration-root shape of
-[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
+app has the alias-index root of
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md)
+and [ADR 0003](../../../docs/adr/0003-roots-are-alias-indexes.md).
 
-- **`slots/app`** is the root, and holds declarations only: the events, the
-  commands, `MainLoop` and `MainLoopPort`, `Loop` and `TimeAction`, `Config`, the
-  errors, the `McpProvider` Adapter and `Name`. It has no functions. It is what
-  every other package imports.
-- **`slots/app/internal`** is the plugin: its `New`, the `Loop` it hands the
-  MainLoop, the tick source, the command handlers and the mcp provider.
+- **`slots/app`** is the root, and declares nothing: it aliases what
+  `internal/` declares — the events, the commands, `MainLoop` and
+  `MainLoopPort`, `Loop` and `TimeAction`, `Config`, the errors, the
+  `McpProvider` Adapter and `Name`. It has no functions. It is what every other
+  package imports.
+- **`slots/app/internal`** is the plugin: everything the root aliases, its
+  `New`, the `Loop` it hands the MainLoop, the tick source, the command handlers
+  and the mcp provider. It never imports the root.
 - **`slots/app/appplugin`** exports only `New() kernel.Plugin`. Only composition
   roots and tests import it.
 
-There is no `internal/types`: nothing app declares is aliased.
+There is no `internal/types`: nothing app declares is plain data another
+package of its own needs apart from the logic.
 
 ## Plugin
 
@@ -126,7 +130,8 @@ builders `WithStep`, `WithMaxFrame` and `WithMaxPending`.
 
 ## Errors
 
-The root's `err.go` declares the errors a caller may match:
+The root's `err.go` aliases the errors a caller may match, which
+`internal/err.go` declares:
 
 - `ErrInvalidConfig{Got}`: the configuration value is not an `app.Config`.
 - `ErrUnknownTimeAction{Action}`: a `TimeCmd` action the tick source does not

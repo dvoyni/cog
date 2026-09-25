@@ -1,20 +1,18 @@
 package input
 
+import "github.com/dvoyni/cog/bundles/input/internal"
+
 // KeyEvent is published for each applied key change.
-type KeyEvent struct {
-	Key  Key
-	Mods Mods
-	Down bool
-}
+type KeyEvent = internal.KeyEvent
 
 // PointerEvent is published for each applied pointer change.
-type PointerEvent struct{ Pos Pos }
+type PointerEvent = internal.PointerEvent
 
 // ScrollEvent is published for each applied scroll change.
-type ScrollEvent struct{ Dx, Dy float64 }
+type ScrollEvent = internal.ScrollEvent
 
 // TextEvent is published for each applied text change.
-type TextEvent struct{ Rune rune }
+type TextEvent = internal.TextEvent
 
 // ClipboardPasteEvent is published for each applied clipboard paste.
-type ClipboardPasteEvent struct{ Text string }
+type ClipboardPasteEvent = internal.ClipboardPasteEvent

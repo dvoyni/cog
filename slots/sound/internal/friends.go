@@ -1,0 +1,161 @@
+package internal
+
+import (
+	"io/fs"
+	"iter"
+
+	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/m"
+)
+
+// The friend functions: what sound's internal/ reads and drives on a public
+// type's unexported state. Only packages under slots/sound can import this
+// package, so these are not public API - which is the whole point, because the
+// root aliases Queue, Voices and Clips and a game holding a read lock on the
+// view must find no mutator on it at all.
+
+// QueueOperations reads Queue.ops for sound's internal/.
+func QueueOperations(q *Queue) []Operation { return q.operations() }
+
+// QueueReset calls Queue.reset for sound's internal/.
+func QueueReset(q *Queue) { q.reset() }
+
+// QueueRank restates Queue's free list, its steal order and the context an
+// incoming play is ranked against, from the table as this flush leaves it, for
+// sound's internal/.
+//
+// It is called after the batch has been handed over, so a slot cannot be
+// re-minted before the stop that vacated it has been emitted, and it is what a
+// recorder reads when the next tick asks who loses the cap.
+func QueueRank(q *Queue, v *Voices, b *Buses, l *Listener) { q.slots.rebuild(v, b, l) }
+
+// ClipsResolve reads and prepares a Clip the table has no entry for, and
+// answers what sound knows about it either way, for sound's internal/.
+func ClipsResolve(c *Clips, k kernel.Kernel, fsys fs.FS, backend Backend, ref ClipRef) clipFacts {
+	return c.resolve(k, fsys, backend, ref)
+}
+
+// ClipsPreload reads and prepares a Clip nothing is playing yet, for sound's
+// internal/.
+func ClipsPreload(c *Clips, k kernel.Kernel, fsys fs.FS, backend Backend, ref ClipRef) {
+	c.preload(k, fsys, backend, ref)
+}
+
+// ClipsRelease drops one Clip and queues its destroy, for sound's internal/.
+// The flush stops the Voices on that Clip before calling it, so the stops and
+// the destroy land in one batch in that order.
+func ClipsRelease(c *Clips, k kernel.Kernel, ref ClipRef) { c.release(k, ref) }
+
+// ClipsReleaseAll drops every Clip and queues every destroy, for sound's
+// internal/.
+func ClipsReleaseAll(c *Clips, k kernel.Kernel) { c.releaseAll(k) }
+
+// ClipsCollect moves this tick's destroys into the batch, for sound's
+// internal/. It is called after the Voices have been collected, so every stop a
+// release caused is already in the batch ahead of the destroy that follows it.
+func ClipsCollect(c *Clips, batch *Batch) { c.collect(batch) }
+
+// ClipsInfo answers what sound already knows about a Clip and starts nothing,
+// for sound's root - which is where the question is exported from, as
+// ClipInfoOf.
+//
+// It takes the read handle rather than the table, which is what keeps the root
+// function a pure forwarder: storage.WriteAccess is the same shape, and the
+// handle is resolved on this side of the boundary.
+func ClipsInfo(handle kernel.Read[*Clips], ref ClipRef) (ClipInfo, State) {
+	return handle.Get().info(ref)
+}
+
+// VoicesStart applies one recorded play for sound's internal/.
+func VoicesStart(v *Voices, op Operation, clip clipFacts, endings *[]Ending) {
+	v.start(op, clip, endings)
+}
+
+// VoicesStop applies one recorded stop for sound's internal/.
+func VoicesStop(v *Voices, voice Voice, endings *[]Ending) { v.stop(voice, endings) }
+
+// VoicesSet applies one recorded SetVoice for sound's internal/.
+func VoicesSet(v *Voices, voice Voice, params Params) { v.set(voice, params) }
+
+// VoicesStopBus applies one recorded StopBus for sound's internal/.
+func VoicesStopBus(v *Voices, bus Bus, endings *[]Ending) { v.stopBus(bus, endings) }
+
+// VoicesStopClip ends every Voice playing one Clip with ReasonReleased, for
+// sound's internal/. It runs before the Clip leaves the table, so the stops
+// precede the destroy in the batch they share.
+func VoicesStopClip(v *Voices, clip ClipRef, endings *[]Ending) { v.stopClip(clip, endings) }
+
+// VoicesStopAll ends every live Voice with ReasonReleased, for sound's
+// internal/. It is what ReleaseAll cuts.
+func VoicesStopAll(v *Voices, endings *[]Ending) { v.stopAll(endings) }
+
+// VoicesFoldBuses folds each Bus's volume into each Voice's gain, for sound's
+// internal/.
+func VoicesFoldBuses(v *Voices, buses *Buses) { v.foldBuses(buses) }
+
+// VoicesSpatialize runs the W3C equations over every live Voice against the
+// Listener, for sound's internal/.
+func VoicesSpatialize(v *Voices, listener *Listener) { v.spatializeAll(listener) }
+
+// ListenerApply installs the tick's coalesced Listener for sound's internal/.
+// It is called where the ordered operations end, beside the Bus volumes, for
+// the same reason: the tick's last word on the Listener is the only one every
+// Positional Voice could be spatialized against.
+func ListenerApply(l *Listener, q *Queue) { l.apply(q.listenerSet()) }
+
+// BusesApply installs the tick's coalesced Bus volumes for sound's internal/.
+// It is called where the ordered operations end, so that the tick's last word
+// on a Bus is the one every Voice on it is folded with.
+func BusesApply(b *Buses, q *Queue) { b.apply(q.busVolumeSets()) }
+
+// VoicesSeek applies one recorded Seek for sound's internal/.
+func VoicesSeek(v *Voices, voice Voice, offset float32, endings *[]Ending) {
+	v.seek(voice, offset, endings)
+}
+
+// VoicesSetEnginePaused records an engine Pause over the whole table and
+// reports whether it changed anything, for sound's internal/.
+func VoicesSetEnginePaused(v *Voices, paused bool) bool { return v.setEnginePaused(paused) }
+
+// VoicesResolve binds the Voices whose Clips became resident and ends the ones
+// whose Clips failed, for sound's internal/.
+func VoicesResolve(v *Voices, clips *Clips, endings *[]Ending) { v.resolve(clips.lookup, endings) }
+
+// VoicesAdvance moves every playhead by one tick for sound's internal/.
+func VoicesAdvance(v *Voices, dt float64, endings *[]Ending) { v.advance(dt, endings) }
+
+// VoicesCollect fills one tick's batch from the table for sound's internal/.
+// resync restates every live Voice as a start at its current playhead, which is
+// what a Device that has just become ready is owed.
+func VoicesCollect(v *Voices, batch *Batch, resync bool) { v.collect(batch, resync) }
+
+// VoicesEndTick clears what only the finished flush meant, for sound's
+// internal/.
+func VoicesEndTick(v *Voices) { v.endTick() }
+
+// BatchReset empties a Batch for the next tick, for sound's internal/.
+func BatchReset(b *Batch) { b.reset() }
+
+// ClipsDrain installs every prepare that finished, for sound's internal/.
+func ClipsDrain(c *Clips, k kernel.Kernel, backend Backend) { c.drain(k, backend) }
+
+// VoicesDetails yields every live Voice with its bearing, for sound's
+// internal/. It is a friend rather than a method on Voices because the bearing
+// is not the game's to read: the root aliases Voices, and a method would put
+// the pan on the view that exists for a game's own test to assert against.
+func VoicesDetails(v *Voices) iter.Seq[VoiceDetail] { return v.details() }
+
+// ClipRefParts reports what a ClipRef names - a storage path, or the length of
+// the encoded bytes it carries - for sound's internal/. Exactly one of them is
+// meaningful, and a path wins, which is ClipRef's own identity rule.
+//
+// It is a friend rather than a String for the reason describe is unexported: a
+// ClipRef is opaque to a game, and an exported renderer would be a second way
+// to read the path back out of a request.
+func ClipRefParts(r ClipRef) (path string, bytes int) { return r.name, r.blob.Len() }
+
+// ListenerAxes reports the Listener's orientation resolved to its forward and
+// up vectors, for sound's internal/. They are what the W3C equations are
+// handed, and they are the form in which "this 2D game never rotated its
+// Listener" is one glance rather than a quaternion to decompose.
+func ListenerAxes(l *Listener) (front, up m.Vec3) { return l.front, l.up }

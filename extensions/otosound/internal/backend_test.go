@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dvoyni/cog/extensions/otosound"
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/slots/sound"
 )
@@ -40,7 +39,7 @@ func fixture(t *testing.T) assets.Blob {
 // takes it down again afterwards so that nothing is left running.
 func newTestBackend(t *testing.T, hardware *fakeAudio) *backend {
 	t.Helper()
-	b := newBackend(otosound.Config{}, hardware)
+	b := newBackend(Config{}, hardware)
 	t.Cleanup(b.stop)
 	b.Voices(8)
 	return b
@@ -138,7 +137,7 @@ func TestPrepareRefusesBytesThatAreNotOggVorbis(t *testing.T) {
 	b.Prepare(nil, assets.NewBlob([]byte("this is not an ogg stream")))
 	completed := waitPrepared(t, b)
 
-	var refused otosound.ErrNotOggVorbis
+	var refused ErrNotOggVorbis
 	if !errors.As(completed.Err, &refused) {
 		t.Fatalf("bytes that are not Ogg Vorbis were prepared: err = %v", completed.Err)
 	}
@@ -258,10 +257,10 @@ func TestAPlayAllocatesNothingInTheAdapter(t *testing.T) {
 // than handling it.
 func TestDeviceIsNotReadyUntilOneOpens(t *testing.T) {
 	hardware := &fakeAudio{buffer: defaultBufferSize}
-	b := newBackend(otosound.Config{}, hardware)
+	b := newBackend(Config{}, hardware)
 	t.Cleanup(b.stop)
 
-	if device := b.Device(); device.Ready || device.Name != string(otosound.Name) {
+	if device := b.Device(); device.Ready || device.Name != string(Name) {
 		t.Fatalf("before Voices the Device is %+v, want a named, not-ready one", device)
 	}
 

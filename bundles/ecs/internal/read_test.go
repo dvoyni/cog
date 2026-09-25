@@ -10,8 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecs/internal/types"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
@@ -23,7 +21,7 @@ type (
 	label    struct{ Text string }
 	waypoint struct{ X, Y int32 }
 	route    struct{ Stops m.List[waypoint] }
-	follows  struct{ Target ecs.Entity }
+	follows  struct{ Target Entity }
 	sprite   struct{ Pixels assets.Blob }
 	marked   struct{}
 	reading  struct{ V float64 }
@@ -52,13 +50,13 @@ type (
 
 // spawnSetCmd spawns one Entity per element of its request and answers their
 // handles, in order.
-type spawnSetCmd[S any] kernel.Command[[]S, []ecs.Entity]
+type spawnSetCmd[S any] kernel.Command[[]S, []Entity]
 
-type despawnAllCmd kernel.Command[[]ecs.Entity, struct{}]
+type despawnAllCmd kernel.Command[[]Entity, struct{}]
 
 // stripCmd takes a spot away from an Entity, which leaves a plainSet Entity
 // alive with no Components.
-type stripCmd kernel.Command[ecs.Entity, struct{}]
+type stripCmd kernel.Command[Entity, struct{}]
 
 type (
 	rerouteEvent struct{}
@@ -84,36 +82,36 @@ func newReadFixture() *readFixture {
 
 func (*readFixture) Name() kernel.PluginName { return "reads" }
 
-func (*readFixture) Dependencies() []kernel.PluginName { return []kernel.PluginName{ecs.Name} }
+func (*readFixture) Dependencies() []kernel.PluginName { return []kernel.PluginName{Name} }
 
 func (f *readFixture) Register(registrar *kernel.Registrar, _ any) error {
-	ecs.RegisterComponent[spot](registrar, 8)
-	ecs.RegisterComponent[label](registrar, 8)
-	ecs.RegisterComponent[route](registrar, 8)
-	ecs.RegisterComponent[follows](registrar, 8)
-	ecs.RegisterComponent[sprite](registrar, 8)
-	ecs.RegisterComponent[marked](registrar, 8)
-	ecs.RegisterComponent[reading](registrar, 8)
+	RegisterComponent[spot](registrar, 8)
+	RegisterComponent[label](registrar, 8)
+	RegisterComponent[route](registrar, 8)
+	RegisterComponent[follows](registrar, 8)
+	RegisterComponent[sprite](registrar, 8)
+	RegisterComponent[marked](registrar, 8)
+	RegisterComponent[reading](registrar, 8)
 	registerSpawn[plainSet](registrar)
 	registerSpawn[labelledSet](registrar)
 	registerSpawn[fullSet](registrar)
 	registerSpawn[brokenSet](registrar)
-	registrar.HandleCommand[despawnAllCmd](ecs.ToExecute[[]ecs.Entity, struct{}](registrar, func(doomed []ecs.Entity, we *ecs.WriteableEntities) {
+	registrar.HandleCommand[despawnAllCmd](ToExecute[[]Entity, struct{}](registrar, func(doomed []Entity, we *WriteableEntities) {
 		for _, e := range doomed {
 			we.Despawn(e)
 		}
 	}))
-	registrar.HandleCommand[stripCmd](ecs.ToExecute[ecs.Entity, struct{}](registrar, func(e ecs.Entity, remove *ecs.Remove[spot]) {
+	registrar.HandleCommand[stripCmd](ToExecute[Entity, struct{}](registrar, func(e Entity, remove *Remove[spot]) {
 		remove.From(e)
 	}))
-	registrar.Subscribe[rerouteSystem](ecs.ToHandler[rerouteEvent](registrar, func(q *ecs.Query[struct{ Route *route }]) {
+	registrar.Subscribe[rerouteSystem](ToHandler[rerouteEvent](registrar, func(q *Query[struct{ Route *route }]) {
 		for _, it := range q.All() {
 			if it.Route.Stops.Len() > 0 {
 				it.Route.Stops.Set(0, waypoint{X: 99, Y: 99})
 			}
 		}
 	}))
-	registrar.Subscribe[stallSystem](ecs.ToHandler[stallEvent](registrar, func(q *ecs.Query[struct{ Spot spot }]) {
+	registrar.Subscribe[stallSystem](ToHandler[stallEvent](registrar, func(q *Query[struct{ Spot spot }]) {
 		f.entered <- struct{}{}
 		<-f.release
 	}))
@@ -121,8 +119,8 @@ func (f *readFixture) Register(registrar *kernel.Registrar, _ any) error {
 }
 
 func registerSpawn[S any](registrar *kernel.Registrar) {
-	registrar.HandleCommand[spawnSetCmd[S]](ecs.ToExecute[[]S, []ecs.Entity](registrar, func(sets []S, sp *ecs.Spawn[S], answer *ecs.Resp[[]ecs.Entity]) {
-		spawned := make([]ecs.Entity, len(sets))
+	registrar.HandleCommand[spawnSetCmd[S]](ToExecute[[]S, []Entity](registrar, func(sets []S, sp *Spawn[S], answer *Resp[[]Entity]) {
+		spawned := make([]Entity, len(sets))
 		for i, set := range sets {
 			spawned[i] = sp.New(set)
 		}
@@ -130,7 +128,7 @@ func registerSpawn[S any](registrar *kernel.Registrar) {
 	}))
 }
 
-func spawn[S any](executioner kernel.Executioner, sets ...S) []ecs.Entity {
+func spawn[S any](executioner kernel.Executioner, sets ...S) []Entity {
 	return executioner.ExecuteCommand[spawnSetCmd[S]](sets)
 }
 
@@ -157,7 +155,7 @@ func decoded(t *testing.T, response any) map[string]any {
 
 func name[T any]() string { return kernel.TypeName(reflect.TypeFor[T]()) }
 
-func componentNames(values []types.ComponentValue) []string {
+func componentNames(values []ComponentValue) []string {
 	names := make([]string, len(values))
 	for i, value := range values {
 		names[i] = value.Name
@@ -165,7 +163,7 @@ func componentNames(values []types.ComponentValue) []string {
 	return names
 }
 
-func valueOf(t *testing.T, values []types.ComponentValue, component string) types.ComponentValue {
+func valueOf(t *testing.T, values []ComponentValue, component string) ComponentValue {
 	t.Helper()
 	for _, value := range values {
 		if value.Name == component {
@@ -173,7 +171,7 @@ func valueOf(t *testing.T, values []types.ComponentValue, component string) type
 		}
 	}
 	t.Fatalf("no %s among %v", component, componentNames(values))
-	return types.ComponentValue{}
+	return ComponentValue{}
 }
 
 func TestTheCensusNamesEveryComponentWithItsPopulation(t *testing.T) {
@@ -182,7 +180,7 @@ func TestTheCensusNamesEveryComponentWithItsPopulation(t *testing.T) {
 	plain := spawn(executioner, make([]plainSet, 200)...)
 	spawn(executioner, make([]labelledSet, 100)...)
 
-	census := executioner.ExecuteCommand[censusCmd](types.CensusRequest{})
+	census := executioner.ExecuteCommand[censusCmd](CensusRequest{})
 	if census.Refusal != "" {
 		t.Fatalf("the census was refused: %s", census.Refusal)
 	}
@@ -215,7 +213,7 @@ func TestTheCensusNamesEveryComponentWithItsPopulation(t *testing.T) {
 	}
 
 	executioner.ExecuteCommand[despawnAllCmd](plain[:7])
-	census = executioner.ExecuteCommand[censusCmd](types.CensusRequest{})
+	census = executioner.ExecuteCommand[censusCmd](CensusRequest{})
 	if census.Entities != 293 || census.FreeIndices != 7 || census.IndexSpace != 300 {
 		t.Fatalf("after 7 despawns the census reports %d alive, %d free, %d indices; want 293, 7, 300", census.Entities, census.FreeIndices, census.IndexSpace)
 	}
@@ -245,9 +243,9 @@ func TestTheEntityReadAnswersEveryComponentAsJSON(t *testing.T) {
 		"Entity(" + index + "v" + generation + ")",
 		strconv.FormatUint(uint64(e), 10),
 	}
-	var first types.EntityResponse
+	var first EntityResponse
 	for i, form := range forms {
-		answer := executioner.ExecuteCommand[entityCmd](types.EntityRequest{Entity: form})
+		answer := executioner.ExecuteCommand[entityCmd](EntityRequest{Entity: form})
 		if answer.Refusal != "" {
 			t.Fatalf("%q was refused: %s", form, answer.Refusal)
 		}
@@ -297,7 +295,7 @@ func TestTheEntityReadAnswersEveryComponentAsJSON(t *testing.T) {
 	if !ok || number.String() != strconv.FormatUint(uint64(target), 10) {
 		t.Fatalf("the Reference arrived as %#v, want the json.Number %d", reference, uint64(target))
 	}
-	back := executioner.ExecuteCommand[entityCmd](types.EntityRequest{Entity: number.String()})
+	back := executioner.ExecuteCommand[entityCmd](EntityRequest{Entity: number.String()})
 	if back.Refusal != "" || back.Entity != target.String() {
 		t.Fatalf("the Reference fed back answered %+v, want %s", back, target)
 	}
@@ -310,7 +308,7 @@ func TestAnUnencodableValueFailsOnlyItsComponent(t *testing.T) {
 	engine, _ := startReads(t)
 	executioner := engine.Executioner()
 	e := spawn(executioner, brokenSet{Spot: spot{X: 1}, Reading: reading{V: math.NaN()}})[0]
-	answer := executioner.ExecuteCommand[entityCmd](types.EntityRequest{Entity: e.String()})
+	answer := executioner.ExecuteCommand[entityCmd](EntityRequest{Entity: e.String()})
 	if answer.Refusal != "" {
 		t.Fatalf("the Entity was refused: %s", answer.Refusal)
 	}
@@ -332,7 +330,7 @@ func TestTheEntityReadRefusesWhatIsNotAlive(t *testing.T) {
 	executioner := engine.Executioner()
 	spawned := spawn(executioner, make([]plainSet, 8)...)
 	gone := spawned[7]
-	executioner.ExecuteCommand[despawnAllCmd]([]ecs.Entity{gone})
+	executioner.ExecuteCommand[despawnAllCmd]([]Entity{gone})
 	index, generation := entityHalves(t, gone)
 	nextGeneration, _ := strconv.Atoi(generation)
 	next := index + "v" + strconv.Itoa(nextGeneration+1)
@@ -340,14 +338,14 @@ func TestTheEntityReadRefusesWhatIsNotAlive(t *testing.T) {
 	// Before the index is reused, nothing holds it: the despawned handle names
 	// no holder, and the handle the index will carry next is not alive either,
 	// which since the free generation bit is what Alive says on its own.
-	answer := executioner.ExecuteCommand[entityCmd](types.EntityRequest{Entity: gone.String()})
+	answer := executioner.ExecuteCommand[entityCmd](EntityRequest{Entity: gone.String()})
 	if answer.Refusal != gone.String()+" is not alive" {
 		t.Errorf("the despawned Entity answered %+v, want it refused as not alive and no holder named", answer)
 	}
 	if answer.Entity != "" || answer.Components != nil {
 		t.Errorf("a refusal carries %+v besides the refusal", answer)
 	}
-	answer = executioner.ExecuteCommand[entityCmd](types.EntityRequest{Entity: next})
+	answer = executioner.ExecuteCommand[entityCmd](EntityRequest{Entity: next})
 	if answer.Refusal == "" || strings.Contains(answer.Refusal, "holds") {
 		t.Errorf("the fabricated next handle %s answered %+v, want it refused as not alive and no holder named", next, answer)
 	}
@@ -356,7 +354,7 @@ func TestTheEntityReadRefusesWhatIsNotAlive(t *testing.T) {
 	// its next generation with the free bit on. No Entity carries it, and this
 	// path is where that is checked, so it is refused like any dead handle.
 	freeBit := index + "v" + strconv.FormatUint(uint64(nextGeneration+1)+1<<31, 10)
-	answer = executioner.ExecuteCommand[entityCmd](types.EntityRequest{Entity: freeBit})
+	answer = executioner.ExecuteCommand[entityCmd](EntityRequest{Entity: freeBit})
 	if answer.Refusal == "" || strings.Contains(answer.Refusal, "holds") {
 		t.Errorf("the handle %s, naming the free index's own stored generation, answered %+v, want it refused as not alive", freeBit, answer)
 	}
@@ -365,22 +363,22 @@ func TestTheEntityReadRefusesWhatIsNotAlive(t *testing.T) {
 	if reused.String() != "Entity("+next+")" {
 		t.Fatalf("the respawn got %s, want the freed index at its next generation, Entity(%s)", reused, next)
 	}
-	answer = executioner.ExecuteCommand[entityCmd](types.EntityRequest{Entity: gone.String()})
+	answer = executioner.ExecuteCommand[entityCmd](EntityRequest{Entity: gone.String()})
 	if want := gone.String() + " is not alive; index " + index + " now holds " + reused.String(); answer.Refusal != want {
 		t.Errorf("the despawned Entity answered %q, want %q", answer.Refusal, want)
 	}
-	answer = executioner.ExecuteCommand[entityCmd](types.EntityRequest{Entity: next})
+	answer = executioner.ExecuteCommand[entityCmd](EntityRequest{Entity: next})
 	if answer.Refusal != "" || answer.Entity != reused.String() {
 		t.Errorf("the reused handle answered %+v, want it", answer)
 	}
 
 	for _, malformed := range []string{"", "seven", "7v", "v2", "Entity(7v2", "7v2v3", "-1", "NoEntity", "0", "0v0", "99999999999v1"} {
-		answer := executioner.ExecuteCommand[entityCmd](types.EntityRequest{Entity: malformed})
+		answer := executioner.ExecuteCommand[entityCmd](EntityRequest{Entity: malformed})
 		if answer.Refusal == "" {
 			t.Errorf("%q answered %+v, want it refused", malformed, answer)
 		}
 	}
-	answer = executioner.ExecuteCommand[entityCmd](types.EntityRequest{Entity: "12345v1"})
+	answer = executioner.ExecuteCommand[entityCmd](EntityRequest{Entity: "12345v1"})
 	if answer.Refusal != "Entity(12345v1) is not alive" {
 		t.Errorf("an index beyond the index space answered %+v, want it refused as not alive", answer)
 	}
@@ -394,7 +392,7 @@ func TestTheEntityReadNarrowsToTheNamedComponents(t *testing.T) {
 	executioner := engine.Executioner()
 	e := spawn(executioner, labelledSet{Spot: spot{X: 1}, Label: label{Text: "x"}})[0]
 
-	answer := executioner.ExecuteCommand[entityCmd](types.EntityRequest{
+	answer := executioner.ExecuteCommand[entityCmd](EntityRequest{
 		Entity: e.String(), Components: []string{name[spot](), name[route]()},
 	})
 	if answer.Refusal != "" {
@@ -404,7 +402,7 @@ func TestTheEntityReadNarrowsToTheNamedComponents(t *testing.T) {
 		t.Errorf("the narrowed read answered %v, want %v: only what is named and carried", got, want)
 	}
 
-	refused := executioner.ExecuteCommand[entityCmd](types.EntityRequest{Entity: e.String(), Components: []string{"internal.nothing"}})
+	refused := executioner.ExecuteCommand[entityCmd](EntityRequest{Entity: e.String(), Components: []string{"internal.nothing"}})
 	if !strings.Contains(refused.Refusal, "registered: ") || len(refused.Components) != 0 {
 		t.Errorf("an unknown name answered %+v; want a refusal listing every registered name", refused)
 	}
@@ -415,7 +413,7 @@ func TestAnEntityWithNoComponentsAnswersAnEmptyList(t *testing.T) {
 	executioner := engine.Executioner()
 	e := spawn(executioner, plainSet{})[0]
 	executioner.ExecuteCommand[stripCmd](e)
-	answer := executioner.ExecuteCommand[entityCmd](types.EntityRequest{Entity: e.String()})
+	answer := executioner.ExecuteCommand[entityCmd](EntityRequest{Entity: e.String()})
 	if answer.Refusal != "" || answer.Components == nil || len(answer.Components) != 0 {
 		t.Fatalf("an alive Entity with no Components answered %+v, want an empty list", answer)
 	}
@@ -438,14 +436,14 @@ func TestTheQueryReadWalksTheNamedComponents(t *testing.T) {
 	executioner.ExecuteCommand[despawnAllCmd](withLabels[10:20])
 	spawn(executioner, make([]labelledSet, 10)...)
 
-	query := executioner.ExecuteCommand[queryCmd](types.QueryRequest{Components: []string{name[spot](), name[label]()}})
+	query := executioner.ExecuteCommand[queryCmd](QueryRequest{Components: []string{name[spot](), name[label]()}})
 	if query.Refusal != "" {
 		t.Fatalf("the query was refused: %s", query.Refusal)
 	}
 	if query.Total != 150 || !query.Truncated || len(query.Entities) != 50 {
 		t.Fatalf("the query answered total %d, truncated %v, %d Entities; want 150, true, 50 by default", query.Total, query.Truncated, len(query.Entities))
 	}
-	all := executioner.ExecuteCommand[queryCmd](types.QueryRequest{Components: []string{name[label](), name[spot]()}, Limit: 500})
+	all := executioner.ExecuteCommand[queryCmd](QueryRequest{Components: []string{name[label](), name[spot]()}, Limit: 500})
 	if all.Total != 150 || all.Truncated || len(all.Entities) != 150 {
 		t.Fatalf("limit 500 answered total %d, truncated %v, %d Entities; want 150, false, 150", all.Total, all.Truncated, len(all.Entities))
 	}
@@ -467,11 +465,11 @@ func TestTheQueryReadWalksTheNamedComponents(t *testing.T) {
 		t.Errorf("the default page is not the first 50 of the whole answer")
 	}
 
-	limited := executioner.ExecuteCommand[queryCmd](types.QueryRequest{Components: []string{name[spot]()}, Limit: 7})
+	limited := executioner.ExecuteCommand[queryCmd](QueryRequest{Components: []string{name[spot]()}, Limit: 7})
 	if limited.Total != 300 || !limited.Truncated || len(limited.Entities) != 7 {
 		t.Errorf("limit 7 answered total %d, truncated %v, %d Entities; want 300, true, 7", limited.Total, limited.Truncated, len(limited.Entities))
 	}
-	none := executioner.ExecuteCommand[queryCmd](types.QueryRequest{Components: []string{name[route]()}})
+	none := executioner.ExecuteCommand[queryCmd](QueryRequest{Components: []string{name[route]()}})
 	if none.Refusal != "" || none.Total != 0 || none.Truncated || len(none.Entities) != 0 {
 		t.Errorf("a query nothing matches answered %+v, want an empty answer", none)
 	}
@@ -488,16 +486,16 @@ func TestTheQueryReadRefusesWhatItCannotAnswer(t *testing.T) {
 	executioner := engine.Executioner()
 	spawn(executioner, make([]plainSet, 3)...)
 
-	over := executioner.ExecuteCommand[queryCmd](types.QueryRequest{Components: []string{name[spot]()}, Limit: 501})
+	over := executioner.ExecuteCommand[queryCmd](QueryRequest{Components: []string{name[spot]()}, Limit: 501})
 	if !strings.Contains(over.Refusal, "500") || over.Total != 0 || over.Entities != nil {
 		t.Errorf("limit 501 answered %+v, want a refusal naming 500 and nothing else", over)
 	}
-	negative := executioner.ExecuteCommand[queryCmd](types.QueryRequest{Components: []string{name[spot]()}, Limit: -1})
+	negative := executioner.ExecuteCommand[queryCmd](QueryRequest{Components: []string{name[spot]()}, Limit: -1})
 	if negative.Refusal == "" {
 		t.Errorf("limit -1 answered %+v, want it refused", negative)
 	}
-	census := executioner.ExecuteCommand[censusCmd](types.CensusRequest{})
-	for _, request := range []types.QueryRequest{
+	census := executioner.ExecuteCommand[censusCmd](CensusRequest{})
+	for _, request := range []QueryRequest{
 		{Components: []string{name[spot](), "ecs.spott"}},
 		{},
 	} {
@@ -512,7 +510,7 @@ func TestTheQueryReadRefusesWhatItCannotAnswer(t *testing.T) {
 			}
 		}
 	}
-	entity := executioner.ExecuteCommand[entityCmd](types.EntityRequest{Entity: "ecs.spot"})
+	entity := executioner.ExecuteCommand[entityCmd](EntityRequest{Entity: "ecs.spot"})
 	if entity.Refusal == "" {
 		t.Errorf("a Component name read as an Entity answered %+v", entity)
 	}
@@ -525,13 +523,13 @@ func TestAnAnswerIsDetachedFromTheStore(t *testing.T) {
 	engine, _ := startReads(t)
 	executioner := engine.Executioner()
 	spawn(executioner, fullSet{Route: route{Stops: m.NewList(waypoint{1, 2})}})
-	before := executioner.ExecuteCommand[queryCmd](types.QueryRequest{Components: []string{name[route]()}})
+	before := executioner.ExecuteCommand[queryCmd](QueryRequest{Components: []string{name[route]()}})
 	snapshot, err := json.Marshal(before)
 	if err != nil {
 		t.Fatalf("the answer does not encode: %v", err)
 	}
 	executioner.PublishEvent(rerouteEvent{}).Wait()
-	after := executioner.ExecuteCommand[queryCmd](types.QueryRequest{Components: []string{name[route]()}})
+	after := executioner.ExecuteCommand[queryCmd](QueryRequest{Components: []string{name[route]()}})
 	if again, _ := json.Marshal(before); string(again) != string(snapshot) {
 		t.Errorf("the earlier answer changed after the List was written: %s, was %s", again, snapshot)
 	}
@@ -547,7 +545,7 @@ func TestAnAnswerIsDetachedFromTheStore(t *testing.T) {
 func TestTheReadsHoldTheAuthorityAloneAndWidenNoSystem(t *testing.T) {
 	engine, _ := startReads(t)
 	description := engine.Describe()
-	entities := reflect.TypeFor[*ecs.Entities]()
+	entities := reflect.TypeFor[*Entities]()
 	reads := map[reflect.Type]bool{
 		reflect.TypeFor[censusCmd]():  false,
 		reflect.TypeFor[entityCmd]():  false,
@@ -561,8 +559,8 @@ func TestTheReadsHoldTheAuthorityAloneAndWidenNoSystem(t *testing.T) {
 			continue
 		}
 		reads[command.Type] = true
-		if command.Owner != ecs.Name {
-			t.Errorf("%s is owned by %q, want %q", kernel.TypeName(command.Type), command.Owner, ecs.Name)
+		if command.Owner != Name {
+			t.Errorf("%s is owned by %q, want %q", kernel.TypeName(command.Type), command.Owner, Name)
 		}
 		if !slices.Equal(command.Writes, []reflect.Type{entities}) || len(command.Reads) != 0 || len(command.Uses) != 0 {
 			t.Errorf("%s writes %v, reads %v and uses %v; want write{*ecs.Entities} alone",
@@ -579,12 +577,12 @@ func TestTheReadsHoldTheAuthorityAloneAndWidenNoSystem(t *testing.T) {
 	// app's takes write{*ecs.Entities}, which none spawns, and the drainer is
 	// the one subscription the ecs plugin owns.
 	want := map[reflect.Type][2][]reflect.Type{
-		reflect.TypeFor[rerouteSystem]():     {{entities}, {reflect.TypeFor[*ecs.Store[route]]()}},
-		reflect.TypeFor[stallSystem]():       {sortedTypes(entities, reflect.TypeFor[*ecs.Store[spot]]()), {}},
-		reflect.TypeFor[ecs.DrainOnUpdate](): {{}, {entities}},
+		reflect.TypeFor[rerouteSystem](): {{entities}, {reflect.TypeFor[*Store[route]]()}},
+		reflect.TypeFor[stallSystem]():   {sortedTypes(entities, reflect.TypeFor[*Store[spot]]()), {}},
+		reflect.TypeFor[DrainOnUpdate](): {{}, {entities}},
 	}
 	for _, subscription := range description.Subscriptions {
-		if subscription.Owner == ecs.Name && subscription.Type != reflect.TypeFor[ecs.DrainOnUpdate]() {
+		if subscription.Owner == Name && subscription.Type != reflect.TypeFor[DrainOnUpdate]() {
 			t.Errorf("the ecs plugin subscribes %s", kernel.TypeName(subscription.Type))
 		}
 		expected, ok := want[subscription.Type]
@@ -632,8 +630,8 @@ func TestAReadWaitsForARunningSystem(t *testing.T) {
 	}()
 	<-fixture.entered
 
-	returned := make(chan types.CensusResponse, 1)
-	go func() { returned <- executioner.ExecuteCommand[censusCmd](types.CensusRequest{}) }()
+	returned := make(chan CensusResponse, 1)
+	go func() { returned <- executioner.ExecuteCommand[censusCmd](CensusRequest{}) }()
 	select {
 	case <-returned:
 		t.Fatalf("the census returned while a System held read{*ecs.Entities}")
@@ -656,7 +654,7 @@ func sortedTypes(types ...reflect.Type) []reflect.Type {
 	return types
 }
 
-func entityHalves(t *testing.T, e ecs.Entity) (index, generation string) {
+func entityHalves(t *testing.T, e Entity) (index, generation string) {
 	t.Helper()
 	inner := strings.TrimSuffix(strings.TrimPrefix(e.String(), "Entity("), ")")
 	index, generation, ok := strings.Cut(inner, "v")

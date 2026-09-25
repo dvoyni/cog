@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -26,8 +25,8 @@ const (
 
 // reportsSensor is the check a paddle's tick makes of the Sensor behind its
 // first Hit: one entry, the Sensor as A, at the paddle's T with Depth 0.
-func reportsSensor(sensor *ecs.Entity) func(*testing.T, int, []ecsphysics2d.Contact, ecs.Entity, float64) {
-	return func(t *testing.T, phase int, list []ecsphysics2d.Contact, k ecs.Entity, tolerance float64) {
+func reportsSensor(sensor *ecs.Entity) func(*testing.T, int, []Contact, ecs.Entity, float64) {
+	return func(t *testing.T, phase int, list []Contact, k ecs.Entity, tolerance float64) {
 		t.Helper()
 		entries := meetingOf(list, *sensor, k)
 		if len(entries) != 1 {
@@ -54,7 +53,7 @@ func TestAFastKinematicPaddleReportsTheSensorBehindTheBallItCarries(t *testing.T
 	}, func(h *harness, shift m.Vec2d) {
 		sensor = h.spawn(t, spawnRequest{
 			Kind:  kindShapedStatic,
-			Place: ecsphysics2d.Position{Current: m.Vec2d{X: sensorX}.Add(shift)},
+			Place: Position{Current: m.Vec2d{X: sensorX}.Add(shift)},
 			Shape: board(true),
 		})
 	}, reportsSensor(&sensor))
@@ -67,12 +66,12 @@ func TestAFastKinematicPaddleReportsTheSensorBehindAWall(t *testing.T) {
 	checkCarriedAll(t, nil, func(h *harness, shift m.Vec2d) {
 		h.spawn(t, spawnRequest{
 			Kind:  kindShapedStatic,
-			Place: ecsphysics2d.Position{Current: m.Vec2d{X: 7}.Add(shift)},
+			Place: Position{Current: m.Vec2d{X: 7}.Add(shift)},
 			Shape: wallShape(),
 		})
 		sensor = h.spawn(t, spawnRequest{
 			Kind:  kindShapedBody,
-			Place: ecsphysics2d.Position{Current: m.Vec2d{X: sensorX}.Add(shift)},
+			Place: Position{Current: m.Vec2d{X: sensorX}.Add(shift)},
 			Body:  dynamic(t, 1, 1, 0, 0),
 			Shape: board(true),
 		})
@@ -91,17 +90,17 @@ func TestAFastDynamicBallStoppedByAWallReportsNoSensorBehindIt(t *testing.T) {
 				shift := m.Vec2d{X: 10 * float64(phase) / phases, Y: 3.7 * float64(phase) / phases}
 				wall := h.spawn(t, spawnRequest{
 					Kind:  kindShapedStatic,
-					Place: ecsphysics2d.Position{Current: m.Vec2d{X: 7}.Add(shift)},
+					Place: Position{Current: m.Vec2d{X: 7}.Add(shift)},
 					Shape: wallShape(),
 				})
 				sensor := h.spawn(t, spawnRequest{
 					Kind:  kindShapedStatic,
-					Place: ecsphysics2d.Position{Current: m.Vec2d{X: sensorX}.Add(shift)},
+					Place: Position{Current: m.Vec2d{X: sensorX}.Add(shift)},
 					Shape: board(true),
 				})
 				ball := thrown(t, h, shape.shape, m.Vec2d{X: 10}.Add(shift), m.Vec2d{X: -meetSpeed})
 				filtered := false
-				h.game.filter = func(entry *ecsphysics2d.Contact) {
+				h.game.filter = func(entry *Contact) {
 					if entry.Other(sensor) == ball {
 						filtered = true
 					}
@@ -129,7 +128,7 @@ func TestAFastDynamicBallStoppedByAWallReportsNoSensorBehindIt(t *testing.T) {
 // theirs: one from 8, at T = 0.395, and one from 12, going 10.5 m in the
 // tick, at T = 0.757. The paddle's entry goes between the two.
 func TestAKinematicMoversSensorEntrySitsWithTheSensorsOthersInOrderOfT(t *testing.T) {
-	tall := ecsphysics2d.NewBoxShape(0.1, 20, 0)
+	tall := NewBoxShape(0.1, 20, 0)
 	tall.Sensor = true
 	for _, shape := range carryShapes {
 		t.Run(shape.name, func(t *testing.T) {
@@ -138,7 +137,7 @@ func TestAKinematicMoversSensorEntrySitsWithTheSensorsOthersInOrderOfT(t *testin
 				shift := m.Vec2d{X: 10 * float64(phase) / phases, Y: 3.7 * float64(phase) / phases}
 				sensor := h.spawn(t, spawnRequest{
 					Kind:  kindShapedStatic,
-					Place: ecsphysics2d.Position{Current: m.Vec2d{X: sensorX}.Add(shift)},
+					Place: Position{Current: m.Vec2d{X: sensorX}.Add(shift)},
 					Shape: tall,
 				})
 				early := thrown(t, h, shape.shape, m.Vec2d{X: 8, Y: 4}.Add(shift), m.Vec2d{X: -meetSpeed})
@@ -151,7 +150,7 @@ func TestAKinematicMoversSensorEntrySitsWithTheSensorsOthersInOrderOfT(t *testin
 					b ecs.Entity
 					t float64
 				}{{early, (8 - 1 - 3.05) / 10}, {k, sensorT}, {late, (12 - 1 - 3.05) / 10.5}}
-				var run []ecsphysics2d.Contact
+				var run []Contact
 				start := -1
 				for i, entry := range h.contacts(t) {
 					if entry.A != sensor {

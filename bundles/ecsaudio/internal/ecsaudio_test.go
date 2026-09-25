@@ -9,7 +9,6 @@ import (
 
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecs/ecsplugin"
-	"github.com/dvoyni/cog/bundles/ecsaudio"
 	"github.com/dvoyni/cog/extensions/nosound/nosoundplugin"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/assets"
@@ -58,7 +57,7 @@ type marked struct{ Marker marker }
 type spawnCmd kernel.Command[spawnRequest, spawnResponse]
 
 type spawnRequest struct {
-	Emitter  *ecsaudio.Emitter
+	Emitter  *Emitter
 	Place    *m.Transform
 	Listener bool
 }
@@ -69,9 +68,9 @@ func spawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execu
 	return ecs.ToExecute[spawnRequest, spawnResponse](registrar, func(
 		request spawnRequest,
 		spawn *ecs.Spawn[marked],
-		emitters *ecs.Set[ecsaudio.Emitter],
+		emitters *ecs.Set[Emitter],
 		places *ecs.Set[m.Transform],
-		listeners *ecs.Set[ecsaudio.Listener],
+		listeners *ecs.Set[Listener],
 		answer *ecs.Resp[spawnResponse],
 	) {
 		e := spawn.New(marked{})
@@ -82,7 +81,7 @@ func spawnCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execu
 			places.UpdateFor(e, *request.Place)
 		}
 		if request.Listener {
-			listeners.UpdateFor(e, ecsaudio.Listener{})
+			listeners.UpdateFor(e, Listener{})
 		}
 		answer.Set(spawnResponse{Entity: e})
 	})
@@ -95,7 +94,7 @@ type changeCmd kernel.Command[changeRequest, changeResponse]
 type changeRequest struct {
 	Entity ecs.Entity
 
-	Emitter       *ecsaudio.Emitter
+	Emitter       *Emitter
 	RemoveEmitter bool
 	Place         *m.Transform
 	RemovePlace   bool
@@ -106,8 +105,8 @@ type changeResponse struct{}
 func changeCmdImpl(registrar *kernel.Registrar) func() (kernel.Lock, kernel.Execute[changeRequest, changeResponse]) {
 	return ecs.ToExecute[changeRequest, changeResponse](registrar, func(
 		request changeRequest,
-		emitters *ecs.Set[ecsaudio.Emitter],
-		dropEmitters *ecs.Remove[ecsaudio.Emitter],
+		emitters *ecs.Set[Emitter],
+		dropEmitters *ecs.Remove[Emitter],
 		places *ecs.Set[m.Transform],
 		dropPlaces *ecs.Remove[m.Transform],
 	) {
@@ -202,7 +201,7 @@ type gamePlugin struct{ ended chan sound.VoiceEndedEvent }
 func (*gamePlugin) Name() kernel.PluginName { return "game" }
 
 func (*gamePlugin) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{ecs.Name, sound.Name, ecsaudio.Name}
+	return []kernel.PluginName{ecs.Name, sound.Name, Name}
 }
 
 func (p *gamePlugin) Register(registrar *kernel.Registrar, _ any) error {
@@ -323,7 +322,7 @@ func (h *harness) spawn(request spawnRequest) ecs.Entity {
 // commonest Emitter there is.
 func (h *harness) emit(ref sound.ClipRef, params sound.Params) ecs.Entity {
 	h.t.Helper()
-	return h.spawn(spawnRequest{Emitter: &ecsaudio.Emitter{Clip: ref, Params: params}})
+	return h.spawn(spawnRequest{Emitter: &Emitter{Clip: ref, Params: params}})
 }
 
 func (h *harness) change(request changeRequest) {

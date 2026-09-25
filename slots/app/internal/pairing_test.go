@@ -1,4 +1,4 @@
-package internal
+package internal_test
 
 import (
 	"fmt"
@@ -18,6 +18,7 @@ import (
 	"github.com/dvoyni/cog/bundles/ui/uiplugin"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/app/internal"
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/dvoyni/cog/slots/gfx/gfxplugin"
 	"github.com/dvoyni/cog/slots/storage"
@@ -66,8 +67,8 @@ func (p *pairingPlugin) Register(registrar *kernel.Registrar, _ any) error {
 // Frame on one goroutine, its Render behind it.
 type pairingRig struct {
 	t        *testing.T
-	app      *plugin
-	mainLoop *fakeMainLoop
+	app      kernel.Plugin
+	mainLoop *internal.FakeMainLoop
 	k        kernel.Executioner
 	caps     map[string]mcp.Capability
 	backend  *pairingBackend
@@ -81,17 +82,17 @@ type pairingRig struct {
 func newPairingRig(t *testing.T) *pairingRig {
 	t.Helper()
 	rig := &pairingRig{
-		t: t, app: New().(*plugin), mainLoop: &fakeMainLoop{},
+		t: t, app: internal.New(), mainLoop: &internal.FakeMainLoop{},
 		caps: map[string]mcp.Capability{}, backend: newPairingBackend(),
 	}
 	engine := kernel.New(map[kernel.PluginName]any{
 		storage.Name: storage.Config{},
-		app.Name:     tickTestConfig(),
+		app.Name:     internal.TickTestConfig(),
 	}).Handler(func(err error) error {
 		t.Errorf("unexpected kernel error: %v", err)
 		return err
 	}).WithPlugins(
-		storageplugin.New(), permanentAdapter{}, rig.app, mainLoopAdapter{rig.mainLoop},
+		storageplugin.New(), internal.PermanentAdapter{}, rig.app, internal.NewMainLoopAdapter(rig.mainLoop),
 		inputplugin.New(), gfxplugin.New(), canvasplugin.New(), uiplugin.New(),
 		&pairingPlugin{rig: rig},
 	)
@@ -148,7 +149,7 @@ func (r *pairingRig) run() {
 				return
 			default:
 			}
-			loop := r.mainLoop.attached()
+			loop := r.mainLoop.Attached()
 			loop.Frame(r.k, 0)
 			loop.Render(r.k)
 			time.Sleep(time.Millisecond)
@@ -169,13 +170,13 @@ func (r *pairingRig) stop() {
 
 // time calls app_time the way an agent does, through the capability rather
 // than the command, so the agent-facing refusals are exercised too.
-func (r *pairingRig) time(request TimeRequest) TimeResponse {
+func (r *pairingRig) time(request internal.TimeToolRequest) internal.TimeToolResponse {
 	r.t.Helper()
 	answer, err := r.caps["app_time"].Invoke(r.k, &request)
 	if err != nil {
 		r.t.Fatalf("app_time %s: %v", request.Action, err)
 	}
-	return answer.(TimeResponse)
+	return answer.(internal.TimeToolResponse)
 }
 
 // request is a pointer to a zero request for one capability, built from its
@@ -255,7 +256,7 @@ func (r *pairingRig) collect(arms []<-chan pairingAnswer) []gfx.SnapshotView {
 // be asserting its own timing rather than the mechanism.
 func (r *pairingRig) waitSharing(callers int64) {
 	r.t.Helper()
-	waitSharing(r.t, &r.app.loop.ticks, callers, 10*time.Second)
+	internal.WaitSharing(r.t, r.app, callers, 10*time.Second)
 }
 
 // Three snapshots armed under one hold describe one tick, and say so: every
@@ -267,13 +268,13 @@ func TestPairing_ThreeSnapshotsUnderAHoldDescribeOneTick(t *testing.T) {
 	rig.run()
 	defer rig.stop()
 
-	rig.time(TimeRequest{Action: "pause"})
+	rig.time(internal.TimeToolRequest{Action: "pause"})
 	seen := map[int64]bool{}
 	for round := range pairingRounds {
-		rig.time(TimeRequest{Action: "hold", Ms: 5000})
+		rig.time(internal.TimeToolRequest{Action: "hold", Ms: 5000})
 		arms := rig.snapshotArms()
 		rig.waitSharing(3)
-		rig.time(TimeRequest{Action: "release"})
+		rig.time(internal.TimeToolRequest{Action: "release"})
 
 		views := rig.collect(arms)
 		tick, stepped := views[0].Tick, 0
@@ -311,12 +312,12 @@ func TestPairing_OneArmRaisesTheStepAndTheRestJoinIt(t *testing.T) {
 	rig.run()
 	defer rig.stop()
 
-	rig.time(TimeRequest{Action: "pause"})
+	rig.time(internal.TimeToolRequest{Action: "pause"})
 	for round := range pairingRounds {
-		rig.time(TimeRequest{Action: "hold", Ms: 5000})
+		rig.time(internal.TimeToolRequest{Action: "hold", Ms: 5000})
 		arms := rig.snapshotArms()
 		rig.waitSharing(3)
-		rig.time(TimeRequest{Action: "release"})
+		rig.time(internal.TimeToolRequest{Action: "release"})
 
 		joined := 0
 		for _, view := range rig.collect(arms) {
@@ -341,12 +342,12 @@ func TestPairing_TheWholeRecipeDescribesOneTick(t *testing.T) {
 	defer rig.stop()
 
 	directory := t.TempDir()
-	rig.time(TimeRequest{Action: "pause"})
+	rig.time(internal.TimeToolRequest{Action: "pause"})
 	for round := range pairingRounds {
-		rig.time(TimeRequest{Action: "hold", Ms: 5000})
+		rig.time(internal.TimeToolRequest{Action: "hold", Ms: 5000})
 		arms := rig.snapshotArms()
 		rig.waitSharing(3)
-		rig.time(TimeRequest{Action: "release"})
+		rig.time(internal.TimeToolRequest{Action: "release"})
 
 		views := rig.collect(arms)
 		tick := views[0].Tick
@@ -357,7 +358,7 @@ func TestPairing_TheWholeRecipeDescribesOneTick(t *testing.T) {
 			}
 		}
 
-		before := rig.time(TimeRequest{Action: "status"})
+		before := rig.time(internal.TimeToolRequest{Action: "status"})
 		if before.Tick != tick {
 			t.Fatalf("round %d: the engine is at tick %d and the snapshots describe %d",
 				round, before.Tick, tick)
@@ -369,7 +370,7 @@ func TestPairing_TheWholeRecipeDescribesOneTick(t *testing.T) {
 		if answer.err != nil {
 			t.Fatalf("round %d: gfx_capture: %v", round, answer.err)
 		}
-		after := rig.time(TimeRequest{Action: "status"})
+		after := rig.time(internal.TimeToolRequest{Action: "status"})
 		if after.Tick != tick {
 			t.Fatalf("round %d: the capture advanced the engine from tick %d to %d, so it "+
 				"photographed a different moment", round, tick, after.Tick)
@@ -391,7 +392,7 @@ func TestPairing_ASplitIsVisibleInTheResponses(t *testing.T) {
 	rig.run()
 	defer rig.stop()
 
-	rig.time(TimeRequest{Action: "pause"})
+	rig.time(internal.TimeToolRequest{Action: "pause"})
 	arms := rig.snapshotArms()
 	views := rig.collect(arms)
 
@@ -413,8 +414,8 @@ func TestPairing_AnExpiredHoldReleasesTheArmsAndIsReported(t *testing.T) {
 	rig.run()
 	defer rig.stop()
 
-	rig.time(TimeRequest{Action: "pause"})
-	rig.time(TimeRequest{Action: "hold", Ms: 100})
+	rig.time(internal.TimeToolRequest{Action: "pause"})
+	rig.time(internal.TimeToolRequest{Action: "hold", Ms: 100})
 	arms := rig.snapshotArms()
 
 	views := rig.collect(arms)
@@ -424,7 +425,7 @@ func TestPairing_AnExpiredHoldReleasesTheArmsAndIsReported(t *testing.T) {
 			t.Errorf("an expired hold split the arms across ticks %d and %d", tick, view.Tick)
 		}
 	}
-	status := rig.time(TimeRequest{Action: "status"})
+	status := rig.time(internal.TimeToolRequest{Action: "status"})
 	if status.Held {
 		t.Error("the hold is still standing after its deadline")
 	}
@@ -441,13 +442,13 @@ func TestPairing_AHoldIsNotChargedAgainstASnapshotDeadline(t *testing.T) {
 	rig.run()
 	defer rig.stop()
 
-	rig.time(TimeRequest{Action: "pause"})
-	rig.time(TimeRequest{Action: "hold", Ms: 3000})
+	rig.time(internal.TimeToolRequest{Action: "pause"})
+	rig.time(internal.TimeToolRequest{Action: "hold", Ms: 3000})
 	arms := rig.snapshotArms()
 	rig.waitSharing(3)
 
 	time.Sleep(2500 * time.Millisecond)
-	rig.time(TimeRequest{Action: "release"})
+	rig.time(internal.TimeToolRequest{Action: "release"})
 
 	views := rig.collect(arms)
 	for _, view := range views {

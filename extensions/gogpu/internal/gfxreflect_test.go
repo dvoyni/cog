@@ -38,11 +38,16 @@ func TestReflectShaderLayout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reflect: %v", err)
 	}
-	if layout.UniformSize != 80 {
-		t.Errorf("uniform size = %d, want 80", layout.UniformSize)
+	blocks := uniformBlocks(layout)
+	if len(blocks) != 1 {
+		t.Fatalf("uniform blocks = %+v, want the one", blocks)
+	}
+	block := blocks[0]
+	if block.Size != 80 {
+		t.Errorf("uniform size = %d, want 80", block.Size)
 	}
 	got := map[string]int{}
-	for _, m := range layout.Uniforms {
+	for _, m := range block.Members {
 		got[m.Name] = m.Offset
 	}
 	for name, want := range map[string]int{"mvp": 0, "tint": 64} {
@@ -50,6 +55,18 @@ func TestReflectShaderLayout(t *testing.T) {
 			t.Errorf("member %q offset = %d, want %d", name, got[name], want)
 		}
 	}
+}
+
+// uniformBlocks is every uniform block a layout reflected, in declaration
+// order.
+func uniformBlocks(layout gfx.ShaderLayout) []gfx.ShaderResource {
+	var blocks []gfx.ShaderResource
+	for _, resource := range layout.Resources {
+		if resource.Kind.Base() == gfx.ResourceUniformBuffer {
+			blocks = append(blocks, resource)
+		}
+	}
+	return blocks
 }
 
 func TestReflectShaderStorageBuffers(t *testing.T) {
@@ -76,10 +93,10 @@ fn fs_main() -> @location(0) vec4<f32> {
 	for _, resource := range layout.Resources {
 		resources[resource.Name] = resource
 	}
-	if source := resources["source"]; !source.StorageBuffer || source.WritableBuffer || source.Group != 2 || source.Binding != 3 {
+	if source := resources["source"]; source.Kind != gfx.ResourceStorageBuffer || source.Group != 2 || source.Binding != 3 {
 		t.Errorf("source = %+v, want read-only storage buffer at 2:3", source)
 	}
-	if target := resources["target"]; !target.StorageBuffer || !target.WritableBuffer || target.Group != 2 || target.Binding != 4 {
+	if target := resources["target"]; target.Kind != gfx.ResourceStorageBuffer|gfx.ResourceWritable || target.Group != 2 || target.Binding != 4 {
 		t.Errorf("target = %+v, want writable storage buffer at 2:4", target)
 	}
 }

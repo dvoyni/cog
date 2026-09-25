@@ -9,7 +9,8 @@ it.
 **It is a binding and nothing else.** No commands, no state a game addresses, no
 arithmetic. Two Components and one recording System, reading the Entity's
 `m.Transform`, which is exactly what the
-`ecs` prefix means in this repo — `ecsscene`, `ecsphysics2d`.
+`ecs` prefix means in this repo — `ecsphysics2d` is another, and `scene`,
+cog's renderer, is one without the prefix.
 
 The design is bound by three requirements, in this order:
 
@@ -89,7 +90,7 @@ plugin's. ecsaudio declares no Transform of its own, and `Scale` is ignored.
 
 ### Why `Emitter` and `m.Transform` are separate Components
 
-Not tidiness. `bundles/ecsphysics2d/types.go:44-49` gives the reason in its own
+Not tidiness. `bundles/ecsphysics2d/components.go:25-30` gives the reason in its own
 words — `Force` is its own Component *"so that a System adding Force does not
 block the render copy reading Position"*. Here it is a System copying transforms
 every tick against a System that changes a Clip once an hour. One Component would
@@ -98,7 +99,7 @@ serialise them.
 ### Where an Entity is heard from is `m.Transform`
 
 ecsaudio registers no Transform. It reads the ecs plugin's `Store[m.Transform]`,
-the same Store ecsscene draws from, so there is one placement in the engine
+the same Store scene draws from, so there is one placement in the engine
 rather than one per consumer
 ([#468](https://github.com/dvoyni/cog/issues/468)). The cost of that shared
 Store is the one stated in the ecs README's
@@ -171,10 +172,10 @@ The binding writes `SetListener` from the `Transform` of the Entity carrying the
 
 ## Direction of truth
 
-`ecsscene` can duck this question — *"scene keeps no per-entity state, so there
+`scene` can duck this question — *"scene keeps no per-entity state, so there
 is no scene-side object for an Entity to be a copy of, and the Components are the
 source of truth because there is no other candidate"*
-(`bundles/ecsscene/doc.go:15-18`). **`sound` retains Voices**, so there is a
+(`bundles/scene/doc.go:15-18`). **`sound` retains Voices**, so there is a
 second candidate and the question is real, which is why
 [The binding shape](https://github.com/dvoyni/cog/issues/246) handed it to the
 bound plugin.
@@ -251,7 +252,7 @@ flag.
 
 ## The System and its lock set
 
-**One System**, ordered as `RecordOnUpdate`, matching `ecsscene`'s single
+**One System**, ordered as `RecordOnUpdate`, matching `scene`'s single
 recording System.
 
 **Its lock set** is `Write[*sound.Queue]`, plus a read query over `Emitter`,
@@ -402,11 +403,11 @@ Nothing below exists.
 2. **`bundles/ecsaudio/internal`** — the Component registrations, the
    plugin-owned `Entity → Voice` table, and the one recording System. The
    Components are plain data with no methods, so there is **no
-   `internal/types`**, following `ecsscene`.
+   `internal/types`**, following `scene`.
 3. **`ecsaudioplugin`** exporting only `New()`, with zero type parameters and
    zero parameters.
 4. **`ecsaudio` joins `archtest`'s whole-cog composition**
-   (`kernel/archtest/composition_test.go:38-42`) beside `ecsscene`, which also
+   (`kernel/archtest/composition_test.go:38-42`) beside `scene`, which also
    requires `sound` and an Adapter in that composition.
 
 **Blocked on `sound`**, and specifically on two things it owes:

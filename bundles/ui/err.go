@@ -1,6 +1,6 @@
 package ui
 
-import "github.com/dvoyni/cog/bundles/ui/internal/types"
+import "github.com/dvoyni/cog/bundles/ui/internal"
 
 // ErrLayoutBusy reports a layout-snapshot arm made while one is already live.
 // It is refused rather than queued, for the reason a second draw or frame
@@ -10,20 +10,14 @@ import "github.com/dvoyni/cog/bundles/ui/internal/types"
 // separate slots and may be in flight together - refusing across kinds would
 // destroy the one thing arming them together is for, which is describing a
 // single tick.
-type ErrLayoutBusy struct{}
-
-func (ErrLayoutBusy) Error() string { return "ui: a layout snapshot is already in flight" }
+type ErrLayoutBusy = internal.ErrLayoutBusy
 
 // ErrLayoutAbandoned reports a layout snapshot the engine stopped before a
 // tick processed anything. It travels the channel a result would have used, so
 // that a waiter learns the answer rather than sitting until its own deadline.
-type ErrLayoutAbandoned struct{}
-
-func (ErrLayoutAbandoned) Error() string {
-	return "ui: the engine stopped before a tick was processed"
-}
+type ErrLayoutAbandoned = internal.ErrLayoutAbandoned
 
 // ErrLayoutNoSuchElement reports a subtree filter naming an index the tick's
 // tree does not have. It is raised inside the tick, where the tree is, and
 // travels the snapshot's delivery channel.
-type ErrLayoutNoSuchElement = types.ErrLayoutNoSuchElement
+type ErrLayoutNoSuchElement = internal.ErrLayoutNoSuchElement

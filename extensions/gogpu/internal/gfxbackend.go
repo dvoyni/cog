@@ -13,13 +13,6 @@ import (
 	"github.com/gogpu/wgpu"
 )
 
-// gfxbUniformSize is one draw's shader-parameter block - mat4 MVP plus material
-// params - and so the stride the arena hands out slots at. 256 is both the cap
-// on a block and minUniformBufferOffsetAlignment, which is what lets every
-// block in a frame share one buffer: a uniform binding's offset must be a
-// multiple of that alignment, and every slot's is.
-const gfxbUniformSize = 256
-
 // gfxBackend implements gfx.Backend over gogpu/wgpu. TextureID and BufferID key
 // native textures and buffers directly; backend-minted IDs remain only for
 // shaders, pipelines, and samplers. All methods run on the render thread,
@@ -67,8 +60,9 @@ type gfxBackend struct {
 	whiteArray     *wgpu.TextureView
 	defaultSampler *wgpu.Sampler
 
-	// uniforms is the frame's shader-parameter blocks: one buffer at 256-strided
-	// offsets, staged CPU-side and written once. It is nil until a device is
+	// uniforms is the frame's shader-parameter blocks: one buffer holding every
+	// block at its 256-aligned offset, written once a frame from the queue's
+	// arena. It is nil until a device is
 	// attached, and a frame with no uniform-carrying draw never gives it one.
 	uniforms *gfxbUniformArena
 
@@ -175,29 +169,27 @@ func (s *gfxRenderPass) SetPipeline(id gfx.PipelineID) {
 	s.backend.resetAcc()
 }
 
-func (s *gfxRenderPass) SetParams(params []byte) {
+func (s *gfxRenderPass) SetUniformBlock(group, binding, offset, size int) {
 	if s.shader == nil || s.backend.uniforms == nil {
 		return
 	}
-	// The block is staged rather than written: every draw in the frame shares
-	// one buffer, so the whole of it goes in one write before the single submit.
-	// A slot the arena cannot hand out emits no binding, which leaves the
-	// uniform's group unfilled - and flushBinds refuses that and drops the draw,
-	// rather than rendering it with whatever another draw put in the slot.
-	offset, ok := s.backend.uniforms.claim(params)
-	if !ok {
+	// The block is already in the buffer: BakeUniforms wrote the frame's whole
+	// arena before the encoder opened. A block that did not make it emits no
+	// binding, which leaves the uniform's group unfilled - and flushBinds
+	// refuses that and drops the draw, rather than rendering it with whatever
+	// an earlier frame left there.
+	if !s.backend.uniforms.bound(offset, size) {
 		return
 	}
-	binding := uint32(s.shader.layout.UniformBinding)
-	s.backend.addEntry(s.shader.layout.UniformGroup, gfxbBindEntry{
+	s.backend.addEntry(group, gfxbBindEntry{
 		key: gfxbBindingKey{
 			kind: gfxbBindUniform, binding: uint16(binding),
 			id: gfxbUniformArenaID, generation: s.backend.uniforms.generation,
-			offset: uint32(offset), size: gfxbUniformSize,
+			offset: uint32(offset), size: uint32(size),
 		},
 		native: wgpu.BindGroupEntry{
-			Binding: binding, Buffer: s.backend.uniforms.buffer,
-			Offset: uint64(offset), Size: gfxbUniformSize,
+			Binding: uint32(binding), Buffer: s.backend.uniforms.buffer,
+			Offset: uint64(offset), Size: uint64(size),
 		},
 	})
 }
@@ -527,7 +519,7 @@ func (b *gfxBackend) NewShader(desc gfx.ShaderDesc) (gfx.ShaderID, error) {
 }
 
 // buildShaderLayouts creates the GPU bind-group layouts (indexed by group) and the
-// pipeline layout from a shader's reflected uniform + resource bindings.
+// pipeline layout from a shader's reflected resource bindings.
 func (b *gfxBackend) buildShaderLayouts(sh *gfxbShader) error {
 	l := sh.layout
 	groups := map[int][]gputypes.BindGroupLayoutEntry{}
@@ -537,35 +529,30 @@ func (b *gfxBackend) buildShaderLayouts(sh *gfxbShader) error {
 			maxGroup = g
 		}
 	}
-	if l.UniformSize > 0 {
-		groups[l.UniformGroup] = append(groups[l.UniformGroup], gputypes.BindGroupLayoutEntry{
-			Binding:    uint32(l.UniformBinding),
-			Visibility: gputypes.ShaderStageVertex | gputypes.ShaderStageFragment,
-			Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform},
-		})
-		note(l.UniformGroup)
-	}
 	for _, r := range l.Resources {
 		e := gputypes.BindGroupLayoutEntry{Binding: uint32(r.Binding), Visibility: gputypes.ShaderStageVertex | gputypes.ShaderStageFragment}
-		if r.Sampler {
+		switch r.Kind.Base() {
+		case gfx.ResourceUniformBuffer:
+			e.Buffer = &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform}
+		case gfx.ResourceSampler:
 			samplerType := gputypes.SamplerBindingTypeFiltering
-			if r.Comparison {
+			if r.Kind.Has(gfx.ResourceComparison) {
 				samplerType = gputypes.SamplerBindingTypeComparison
 			}
 			e.Sampler = &gputypes.SamplerBindingLayout{Type: samplerType}
-		} else if r.StorageBuffer {
+		case gfx.ResourceStorageBuffer:
 			bindingType := gputypes.BufferBindingTypeReadOnlyStorage
-			if r.WritableBuffer {
+			if r.Kind.Has(gfx.ResourceWritable) {
 				bindingType = gputypes.BufferBindingTypeStorage
 			}
 			e.Buffer = &gputypes.BufferBindingLayout{Type: bindingType}
-		} else {
+		case gfx.ResourceTexture:
 			view := gputypes.TextureViewDimension2D
 			if r.TextureView == gfx.TextureView2DArray {
 				view = gputypes.TextureViewDimension2DArray
 			}
 			sampleType := gputypes.TextureSampleTypeFloat
-			if r.Depth {
+			if r.Kind.Has(gfx.ResourceDepth) {
 				sampleType = gputypes.TextureSampleTypeDepth
 			}
 			e.Texture = &gputypes.TextureBindingLayout{SampleType: sampleType, ViewDimension: view}
@@ -809,14 +796,11 @@ func (b *gfxBackend) resolveTarget(target gfx.TextureViewID) (*wgpu.TextureView,
 func (b *gfxBackend) Execute(queue *gfx.Queue) {
 	b.replacedBuffers = b.replacedBuffers[:0]
 	b.replacedTextures = b.replacedTextures[:0]
+	// Ahead of the encoder, and the uniform arena first within it, because a
+	// resize replaces the uniform buffer and drops every bind group naming it:
+	// doing that once the encoder is open would be invalidating groups already
+	// recorded into it.
 	queue.ReplayBakes(b)
-
-	// Ahead of the encoder, because a resize replaces the uniform buffer and
-	// drops every bind group naming it: doing that once the encoder is open
-	// would be invalidating groups already recorded into it. The queue's own
-	// count is what makes the size knowable this early.
-	b.uniforms.reset()
-	b.uniforms.reserve(queue.ParamCount())
 
 	encoder, err := b.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{Label: "gfx"})
 	if err != nil {
@@ -825,9 +809,6 @@ func (b *gfxBackend) Execute(queue *gfx.Queue) {
 	b.encoder = encoder
 	queue.ReplayPasses(b)
 	b.encoder = nil
-	// After the passes and before the submit: a queue write is ordered against
-	// the submit that follows it, so one write here covers every draw's block.
-	b.uniforms.flush()
 
 	cmd, err := encoder.Finish()
 	if err != nil {
@@ -843,6 +824,13 @@ func (b *gfxBackend) Execute(queue *gfx.Queue) {
 	b.armCapture()
 	b.releaseReplacedBaked()
 	queue.ReplayReleases(b)
+}
+
+// BakeUniforms writes the frame's uniform arena into the uniform buffer.
+func (b *gfxBackend) BakeUniforms(arena []byte) {
+	if b.uniforms != nil {
+		b.uniforms.upload(arena)
+	}
 }
 
 func (b *gfxBackend) BakeBuffer(id gfx.BufferID, kind gfx.BufferKind, size int, data []byte) {

@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
+
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -17,8 +17,8 @@ const stackGravity = -9.8
 
 // ground is the static floor every scene here rests on: a 10 m by 1 m box whose
 // top face is exactly y = 0.
-func ground() ecsphysics2d.Shape {
-	return ecsphysics2d.NewBoxShapeFor(ecsphysics2d.NewBB(-5, -1, 5, 0), 0)
+func ground() Shape {
+	return NewBoxShapeFor(NewBB(-5, -1, 5, 0), 0)
 }
 
 func TestBoxesStackAndSettle(t *testing.T) {
@@ -27,20 +27,20 @@ func TestBoxesStackAndSettle(t *testing.T) {
 
 	h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
-		Place: ecsphysics2d.Position{},
+		Place: Position{},
 		Shape: ground(),
 	})
 
 	// Three boxes dropped a little above where they belong, each 1 m square.
 	// The moment is a real box's, so a box landing off-centre turns rather than
 	// sliding rigidly.
-	box := ecsphysics2d.NewBoxShape(1, 1, 0)
-	moment := ecsphysics2d.MomentForBox(1, 1, 1)
+	box := NewBoxShape(1, 1, 0)
+	moment := MomentForBox(1, 1, 1)
 	var boxes []ecs.Entity
 	for i := range 3 {
 		boxes = append(boxes, h.spawn(t, spawnRequest{
 			Kind:  kindShapedBody,
-			Place: ecsphysics2d.Position{Current: m.Vec2d{Y: 0.6 + 1.05*float64(i)}},
+			Place: Position{Current: m.Vec2d{Y: 0.6 + 1.05*float64(i)}},
 			Body:  dynamic(t, 1, moment, 0, 0),
 			Shape: box,
 		}))
@@ -83,7 +83,7 @@ func TestBoxesStackAndSettle(t *testing.T) {
 			len(contacts))
 	}
 	for _, entry := range contacts {
-		if entry.Phase != ecsphysics2d.PhaseContinuing {
+		if entry.Phase != PhaseContinuing {
 			t.Errorf("a settled Contact is in phase %v, want Continuing", entry.Phase)
 		}
 		if entry.Count != 2 {
@@ -102,19 +102,19 @@ func TestAPolygonComponentReachesTheIndexAndCollides(t *testing.T) {
 	for i := range 6 {
 		corners = append(corners, m.ForAngle(-2*math.Pi*float64(i)/6).MulS(0.5))
 	}
-	shape, polygon, err := ecsphysics2d.NewPolygonShape(corners, 0)
+	shape, polygon, err := NewPolygonShape(corners, 0)
 	if err != nil {
 		t.Fatalf("hulling a hexagon: %v", err)
 	}
-	if shape.Kind != ecsphysics2d.ShapePoly {
+	if shape.Kind != ShapePoly {
 		t.Fatalf("a hexagon is kind %v, want ShapePoly", shape.Kind)
 	}
 
 	h.spawn(t, spawnRequest{Kind: kindShapedStatic, Shape: ground()})
 	hexagon := h.spawn(t, spawnRequest{
 		Kind:    kindPolygonBody,
-		Place:   ecsphysics2d.Position{Current: m.Vec2d{Y: 1.5}},
-		Body:    dynamic(t, 1, ecsphysics2d.MomentForPoly(1, corners, m.Vec2d{}, 0), 0, 0),
+		Place:   Position{Current: m.Vec2d{Y: 1.5}},
+		Body:    dynamic(t, 1, MomentForPoly(1, corners, m.Vec2d{}, 0), 0, 0),
 		Shape:   shape,
 		Polygon: polygon,
 	})
@@ -155,7 +155,7 @@ func TestAShapePolyWithNoPolygonBesideItIsInNoCell(t *testing.T) {
 	for i := range 5 {
 		corners = append(corners, m.ForAngle(-2*math.Pi*float64(i)/5))
 	}
-	shape, _, err := ecsphysics2d.NewPolygonShape(corners, 0)
+	shape, _, err := NewPolygonShape(corners, 0)
 	if err != nil {
 		t.Fatalf("hulling a pentagon: %v", err)
 	}
@@ -198,16 +198,16 @@ func TestACircleRollingAcrossAChainJointIsNotTurnedBack(t *testing.T) {
 	} {
 		h.spawn(t, spawnRequest{
 			Kind:  kindShapedStatic,
-			Shape: ecsphysics2d.NewSegmentShapeWithNeighbours(wall[0], wall[1], wall[2], wall[3], 0),
+			Shape: NewSegmentShapeWithNeighbours(wall[0], wall[1], wall[2], wall[3], 0),
 		})
 	}
 
 	ball := h.spawn(t, spawnRequest{
 		Kind:     kindShapedBody,
-		Place:    ecsphysics2d.Position{Current: m.Vec2d{X: -1, Y: 0.25}},
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 2}},
-		Body:     dynamic(t, 1, ecsphysics2d.MomentForCircle(1, 0, 0.25, m.Vec2d{}), 0, 0),
-		Shape:    ecsphysics2d.NewCircleShape(0.25, m.Vec2d{}),
+		Place:    Position{Current: m.Vec2d{X: -1, Y: 0.25}},
+		Velocity: Velocity{Linear: m.Vec2d{X: 2}},
+		Body:     dynamic(t, 1, MomentForCircle(1, 0, 0.25, m.Vec2d{}), 0, 0),
+		Shape:    NewCircleShape(0.25, m.Vec2d{}),
 	})
 	h.game.push = m.Vec2d{Y: stackGravity}
 

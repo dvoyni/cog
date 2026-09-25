@@ -3,9 +3,12 @@ package internal
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
-	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // A depth-only pass is the one place in the engine where a pipeline's colour
@@ -17,18 +20,18 @@ import (
 // in step.
 
 func TestADrawInADepthOnlyPassBuildsAPipelineWithNoColourTarget(t *testing.T) {
-	var shadow gfx.TextureDescr
+	var shadow descriptors.TextureDescr
 	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
-	withResourceQueue(t, k, func(resources *gfx.ResourceQueue) {
-		shadow = resources.AllocateTexture(64, 64, 1, gfx.FormatDepth32F)
+	withResourceQueue(t, k, func(resources *ResourceQueue) {
+		shadow = resources.AllocateTexture(64, 64, 1, descriptors.FormatDepth32F)
 	})
 	q := recordRaw(t, k)
-	q.Pass(gfx.PassDescr{Target: gfx.NoTarget(), Depth: gfx.DepthTarget(shadow), DepthLoad: gfx.LoadClear, Label: "shadow"})
+	q.Pass(descriptors.PassDescr{Target: descriptors.NoTarget(), Depth: descriptors.DepthTarget(shadow), DepthLoad: types.LoadClear, Label: "shadow"})
 	drawInto(q)
-	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	if len(backend.lastPipelines) != 1 {
@@ -44,20 +47,20 @@ func TestOneShaderInAColourPassAndADepthPassBuildsTwoPipelines(t *testing.T) {
 	// descriptor. A shader drawn in both kinds of pass needs two pipelines, and
 	// a key that ignored the difference would hand the second pass whichever
 	// one the first pass happened to build.
-	var shadow gfx.TextureDescr
+	var shadow descriptors.TextureDescr
 	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
-	withResourceQueue(t, k, func(resources *gfx.ResourceQueue) {
-		shadow = resources.AllocateTexture(64, 64, 1, gfx.FormatDepth32F)
+	withResourceQueue(t, k, func(resources *ResourceQueue) {
+		shadow = resources.AllocateTexture(64, 64, 1, descriptors.FormatDepth32F)
 	})
 	q := recordRaw(t, k)
-	q.Pass(gfx.PassDescr{Target: gfx.NoTarget(), Depth: gfx.DepthTarget(shadow), DepthLoad: gfx.LoadClear, Order: 0, Label: "shadow"})
+	q.Pass(descriptors.PassDescr{Target: descriptors.NoTarget(), Depth: descriptors.DepthTarget(shadow), DepthLoad: types.LoadClear, Order: 0, Label: "shadow"})
 	drawInto(q)
-	q.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Load: gfx.LoadClear, Order: 1, Label: "lit"})
+	q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Order: 1, Label: "lit"})
 	drawInto(q)
-	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	if len(backend.lastPipelines) != 2 {
@@ -79,9 +82,9 @@ func TestOneShaderInAColourPassAndADepthPassBuildsTwoPipelines(t *testing.T) {
 func TestAScreenDrawStillDeclaresTheFrameBufferAsItsColourTarget(t *testing.T) {
 	// The flag is additive: an ordinary pass has to be untouched by it, and its
 	// pipeline has to keep naming the frame buffer's format.
-	backend, _ := passFrame(t, func(q *gfx.OpQueue) {
-		q.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Load: gfx.LoadClear, Label: "screen"})
-		q.Draw(triangle(), testMaterial(), gfx.MatParam("mvp", m.NewMat4()))
+	backend, _ := passFrame(t, func(q *OpQueue) {
+		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "screen"})
+		q.Draw(triangle(), testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
 	})
 	if len(backend.lastPipelines) != 1 {
 		t.Fatalf("pipelines = %d, want one", len(backend.lastPipelines))
@@ -92,7 +95,7 @@ func TestAScreenDrawStillDeclaresTheFrameBufferAsItsColourTarget(t *testing.T) {
 	}
 	// The sentinel is resolved where the key is built, so a screen pass and a
 	// pass into a texture of the frame buffer's own format share one pipeline.
-	if desc.ColorFormat != gfx.FrameBufferFormat {
-		t.Errorf("colour format = %v, want the frame buffer's", desc.ColorFormat.Name())
+	if desc.ColorFormat != descriptors.FrameBufferFormat {
+		t.Errorf("colour format = %v, want the frame buffer's", desc.ColorFormat.String())
 	}
 }

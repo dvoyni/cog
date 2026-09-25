@@ -1,5 +1,7 @@
 package types
 
+import "strconv"
+
 // BlendMode selects color blending against the render target.
 type BlendMode uint8
 
@@ -15,7 +17,7 @@ const (
 )
 
 // Name spells the blend mode for a debug document.
-func (mode BlendMode) Name() string {
+func (mode BlendMode) String() string {
 	switch mode {
 	case BlendAlpha:
 		return "alpha"
@@ -26,7 +28,7 @@ func (mode BlendMode) Name() string {
 	case BlendMultiply:
 		return "multiply"
 	}
-	return UnknownName(int(mode))
+	return "unknown(" + strconv.Itoa(int(mode)) + ")"
 }
 
 // CompareFunc is a depth or sampler comparison. The zero value passes
@@ -47,7 +49,7 @@ const (
 )
 
 // Name spells the comparison for a debug document.
-func (compare CompareFunc) Name() string {
+func (compare CompareFunc) String() string {
 	switch compare {
 	case CompareAlways:
 		return "always"
@@ -66,7 +68,7 @@ func (compare CompareFunc) Name() string {
 	case CompareNotEqual:
 		return "notEqual"
 	}
-	return UnknownName(int(compare))
+	return "unknown(" + strconv.Itoa(int(compare)) + ")"
 }
 
 // CullMode selects which faces a pipeline discards.
@@ -79,7 +81,7 @@ const (
 )
 
 // Name spells the cull mode for a debug document.
-func (mode CullMode) Name() string {
+func (mode CullMode) String() string {
 	switch mode {
 	case CullNone:
 		return "none"
@@ -88,7 +90,7 @@ func (mode CullMode) Name() string {
 	case CullBack:
 		return "back"
 	}
-	return UnknownName(int(mode))
+	return "unknown(" + strconv.Itoa(int(mode)) + ")"
 }
 
 // FrontFace selects the winding that counts as the front face. glTF requires
@@ -101,14 +103,14 @@ const (
 )
 
 // Name spells the winding for a debug document.
-func (face FrontFace) Name() string {
+func (face FrontFace) String() string {
 	switch face {
 	case FrontCCW:
 		return "ccw"
 	case FrontCW:
 		return "cw"
 	}
-	return UnknownName(int(face))
+	return "unknown(" + strconv.Itoa(int(face)) + ")"
 }
 
 // MaterialState controls fixed render-pipeline state. Depth compare and depth
@@ -123,22 +125,3 @@ type MaterialState struct {
 	Cull         CullMode
 	FrontFace    FrontFace
 }
-
-// StateOpaque3D returns the state of opaque geometry, the first of the three
-// states the engine's passes are made of: opaque geometry, then transparent
-// geometry over it, then 2D on top of everything.
-func StateOpaque3D() MaterialState { return stateOpaque3D }
-
-// StateTransparent3D returns the state of transparent geometry drawn over
-// opaque geometry; see StateOpaque3D.
-func StateTransparent3D() MaterialState { return stateTransparent3D }
-
-// StateOverlay2D returns the state of 2D drawn on top of everything; see
-// StateOpaque3D.
-func StateOverlay2D() MaterialState { return stateOverlay2D }
-
-var (
-	stateOpaque3D      = MaterialState{Blend: BlendOpaque, DepthCompare: CompareLess, DepthWrite: true, Cull: CullBack}
-	stateTransparent3D = MaterialState{Blend: BlendAlpha, DepthCompare: CompareLess}
-	stateOverlay2D     = MaterialState{}
-)

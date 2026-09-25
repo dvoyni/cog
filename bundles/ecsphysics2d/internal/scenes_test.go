@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
+
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -31,7 +31,7 @@ func TestASweptSensorFindsAPolygonOnItsWayThroughAndNotOnlyWhereItLanded(t *test
 	// slots — the kind that had no world cache at all when the swept Sensor was
 	// built. Its left face is vertical and spans y = 0, so a Probe along y = 0
 	// enters it squarely at x = 0.6 rather than at a vertex where two faces meet.
-	pentagon, pentagonVerts, err := ecsphysics2d.NewPolygonShape([]m.Vec2d{
+	pentagon, pentagonVerts, err := NewPolygonShape([]m.Vec2d{
 		{X: -0.4, Y: -0.3}, {X: -0.4, Y: 0.3}, {Y: 0.5}, {X: 0.4}, {Y: -0.5},
 	}, 0)
 	if err != nil {
@@ -41,7 +41,7 @@ func TestASweptSensorFindsAPolygonOnItsWayThroughAndNotOnlyWhereItLanded(t *test
 	h := newHarness(t)
 	wall := h.spawn(t, spawnRequest{
 		Kind:    kindPolygonStatic,
-		Place:   ecsphysics2d.Position{Current: m.Vec2d{X: 1}},
+		Place:   Position{Current: m.Vec2d{X: 1}},
 		Shape:   pentagon,
 		Polygon: pentagonVerts,
 	})
@@ -49,13 +49,13 @@ func TestASweptSensorFindsAPolygonOnItsWayThroughAndNotOnlyWhereItLanded(t *test
 	// both polygon kinds and the Sensor's ordering by T has two entries to order.
 	box := h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 2}},
-		Shape: ecsphysics2d.NewBoxShape(0.4, 2, 0),
+		Place: Position{Current: m.Vec2d{X: 2}},
+		Shape: NewBoxShape(0.4, 2, 0),
 	})
 	arrow := h.spawn(t, spawnRequest{
 		Kind:     kindShapedBody,
-		Place:    ecsphysics2d.Position{Current: m.Vec2d{X: -2.6}},
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 150}},
+		Place:    Position{Current: m.Vec2d{X: -2.6}},
+		Velocity: Velocity{Linear: m.Vec2d{X: 150}},
 		Body:     dynamic(t, 1, 1, 0, 0),
 		Shape:    sensorCircle(0),
 	})
@@ -88,7 +88,7 @@ func TestASweptSensorFindsAPolygonOnItsWayThroughAndNotOnlyWhereItLanded(t *test
 		if entry.A != arrow || entry.B != want {
 			t.Fatalf("entry %d names %v and %v, want the Sensor and %v", i, entry.A, entry.B, want)
 		}
-		if !entry.Sensor || entry.Phase != ecsphysics2d.PhaseBegan {
+		if !entry.Sensor || entry.Phase != PhaseBegan {
 			t.Errorf("entry %d is Sensor %v and %v, want a Sensor's that Began",
 				i, entry.Sensor, entry.Phase)
 		}
@@ -120,18 +120,18 @@ func TestASweptSensorFindsAPolygonOnItsWayThroughAndNotOnlyWhereItLanded(t *test
 	discrete := newHarness(t)
 	discrete.spawn(t, spawnRequest{
 		Kind:    kindPolygonStatic,
-		Place:   ecsphysics2d.Position{Current: m.Vec2d{X: 1}},
+		Place:   Position{Current: m.Vec2d{X: 1}},
 		Shape:   pentagon,
 		Polygon: pentagonVerts,
 	})
 	discrete.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 2}},
-		Shape: ecsphysics2d.NewBoxShape(0.4, 2, 0),
+		Place: Position{Current: m.Vec2d{X: 2}},
+		Shape: NewBoxShape(0.4, 2, 0),
 	})
 	discrete.spawn(t, spawnRequest{
 		Kind:  kindShapedBody,
-		Place: ecsphysics2d.Position{Current: after},
+		Place: Position{Current: after},
 		Body:  dynamic(t, 1, 1, 0, 0),
 		Shape: sensorCircle(0),
 	})
@@ -147,10 +147,11 @@ func TestASweptSensorFindsAPolygonOnItsWayThroughAndNotOnlyWhereItLanded(t *test
 //
 //	No input produces a NaN or an infinity in a Component the plugin writes.
 //
-// The pure functions have their own sweep in the types package. This is the same
-// claim one level up, over the seven degenerate inputs the specification names,
-// run through a real engine for long enough that the solver's accumulators, the
-// warm start and the Joint pass all have somewhere to put a NaN if one is made.
+// The pure functions have their own sweep elsewhere in this package. This is
+// the same claim one level up, over the seven degenerate inputs the
+// specification names, run through a real engine for long enough that the
+// solver's accumulators, the warm start and the Joint pass all have somewhere
+// to put a NaN if one is made.
 //
 // It matters that it is a scene and not a pair test: a NaN entering a Velocity on
 // tick one is still a NaN on tick two hundred, and nothing downstream ever
@@ -239,7 +240,7 @@ func degenerateScenes() []degenerateScene {
 			// Exactly the same Position, so the seeded nudge is the only thing
 			// that parts them and every number it derives is a division by a
 			// distance of zero away from a NaN.
-			at := ecsphysics2d.Position{Current: m.Vec2d{X: 2, Y: 2}}
+			at := Position{Current: m.Vec2d{X: 2, Y: 2}}
 			a := h.spawn(t, spawnRequest{
 				Kind: kindShapedBody, Place: at,
 				Body: dynamic(t, 1, 1, 0, 0), Shape: circle(0.3),
@@ -260,12 +261,12 @@ func degenerateScenes() []degenerateScene {
 			point := m.Vec2d{X: 1, Y: 1}
 			h.spawn(t, spawnRequest{
 				Kind:  kindShapedStatic,
-				Place: ecsphysics2d.Position{},
-				Shape: ecsphysics2d.NewSegmentShape(point, point, 0.2),
+				Place: Position{},
+				Shape: NewSegmentShape(point, point, 0.2),
 			})
 			body := h.spawn(t, spawnRequest{
 				Kind:  kindShapedBody,
-				Place: ecsphysics2d.Position{Current: m.Vec2d{X: 1, Y: 1.4}},
+				Place: Position{Current: m.Vec2d{X: 1, Y: 1.4}},
 				Body:  dynamic(t, 1, 1, 0, 0), Shape: circle(0.3),
 			})
 			return []ecs.Entity{body}, nil
@@ -279,13 +280,13 @@ func degenerateScenes() []degenerateScene {
 			at := m.Vec2d{X: 4, Y: 0}
 			h.spawn(t, spawnRequest{
 				Kind:  kindShapedStatic,
-				Place: ecsphysics2d.Position{Current: at},
+				Place: Position{Current: at},
 				Shape: circle(0.5),
 			})
 			sensor := h.spawn(t, spawnRequest{
 				Kind:     kindShapedBody,
-				Place:    ecsphysics2d.Position{Current: at},
-				Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 0.01}},
+				Place:    Position{Current: at},
+				Velocity: Velocity{Linear: m.Vec2d{X: 0.01}},
 				Body:     dynamic(t, 1, 1, 0, 0), Shape: sensorCircle(0.2),
 			})
 			return []ecs.Entity{sensor}, nil
@@ -302,12 +303,12 @@ func degenerateScenes() []degenerateScene {
 			// it.
 			a := h.spawn(t, spawnRequest{
 				Kind:  kindShapedBody,
-				Place: ecsphysics2d.Position{Current: m.Vec2d{X: 6}},
+				Place: Position{Current: m.Vec2d{X: 6}},
 				Shape: circle(0.4),
 			})
 			b := h.spawn(t, spawnRequest{
 				Kind:  kindShapedBody,
-				Place: ecsphysics2d.Position{Current: m.Vec2d{X: 6.5}},
+				Place: Position{Current: m.Vec2d{X: 6.5}},
 				Shape: circle(0.4),
 			})
 			return []ecs.Entity{a, b}, nil
@@ -321,17 +322,17 @@ func degenerateScenes() []degenerateScene {
 			// unguarded Inf * 0 written straight into angular velocity.
 			a := h.spawn(t, spawnRequest{
 				Kind:  kindDynamic,
-				Place: ecsphysics2d.Position{Current: m.Vec2d{X: 8}},
+				Place: Position{Current: m.Vec2d{X: 8}},
 				Body:  dynamic(t, 1, math.Inf(1), 0, 0),
 			})
 			b := h.spawn(t, spawnRequest{
 				Kind:  kindDynamic,
-				Place: ecsphysics2d.Position{Current: m.Vec2d{X: 8.5}},
+				Place: Position{Current: m.Vec2d{X: 8.5}},
 				Body:  dynamic(t, 1, math.Inf(1), 0, 0),
 			})
 			joint := h.spawn(t, spawnRequest{
 				Kind:  kindJoint,
-				Joint: ecsphysics2d.NewRotarySpringJoint(a, b, 0.5, 40, 0.3),
+				Joint: NewRotarySpringJoint(a, b, 0.5, 40, 0.3),
 			})
 			return []ecs.Entity{a, b}, []ecs.Entity{joint}
 		},
@@ -345,8 +346,8 @@ func degenerateScenes() []degenerateScene {
 			// query answers with the same vertex, and closestTo reads a normal
 			// Normalize guarded to zero. The answer is useless, and the claim
 			// asserted here is only that it is finite.
-			at := ecsphysics2d.Position{Current: m.Vec2d{X: 10, Y: 2}}
-			box := ecsphysics2d.NewBoxShape(0.6, 0.6, 0)
+			at := Position{Current: m.Vec2d{X: 10, Y: 2}}
+			box := NewBoxShape(0.6, 0.6, 0)
 			a := h.spawn(t, spawnRequest{
 				Kind: kindPolygonBody, Place: at,
 				Body: dynamic(t, 1, 0.1, 0, 0), Shape: box,
@@ -359,8 +360,8 @@ func degenerateScenes() []degenerateScene {
 			// producing Contacts rather than falling for ever.
 			h.spawn(t, spawnRequest{
 				Kind:  kindShapedStatic,
-				Place: ecsphysics2d.Position{Current: m.Vec2d{X: 10}},
-				Shape: ecsphysics2d.NewBoxShapeFor(ecsphysics2d.NewBB(-2, -0.5, 2, 0.5), 0),
+				Place: Position{Current: m.Vec2d{X: 10}},
+				Shape: NewBoxShapeFor(NewBB(-2, -0.5, 2, 0.5), 0),
 			})
 			return []ecs.Entity{a, b}, nil
 		},
@@ -374,21 +375,21 @@ func degenerateScenes() []degenerateScene {
 			// the angular part of k is exactly zero.
 			a := h.spawn(t, spawnRequest{
 				Kind:  kindDynamic,
-				Place: ecsphysics2d.Position{Current: m.Vec2d{X: 12}},
+				Place: Position{Current: m.Vec2d{X: 12}},
 				Body:  dynamic(t, 1, 1, 0, 0),
 			})
 			b := h.spawn(t, spawnRequest{
 				Kind:  kindDynamic,
-				Place: ecsphysics2d.Position{Current: m.Vec2d{X: 12, Y: -0.5}},
+				Place: Position{Current: m.Vec2d{X: 12, Y: -0.5}},
 				Body:  dynamic(t, 4, 1, 0, 0),
 			})
 			pivot := h.spawn(t, spawnRequest{
 				Kind:  kindJoint,
-				Joint: ecsphysics2d.NewPivotJoint(a, b, m.Vec2d{}, m.Vec2d{}),
+				Joint: NewPivotJoint(a, b, m.Vec2d{}, m.Vec2d{}),
 			})
 			pin := h.spawn(t, spawnRequest{
 				Kind:  kindJoint,
-				Joint: ecsphysics2d.NewPinJoint(a, b, m.Vec2d{}, m.Vec2d{}, 0.5),
+				Joint: NewPinJoint(a, b, m.Vec2d{}, m.Vec2d{}, 0.5),
 			})
 			return []ecs.Entity{a, b}, []ecs.Entity{pivot, pin}
 		},

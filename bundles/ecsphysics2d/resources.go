@@ -1,8 +1,7 @@
 package ecsphysics2d
 
 import (
-	"github.com/dvoyni/cog/bundles/ecsphysics2d/internal/types"
-	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/bundles/ecsphysics2d/internal"
 )
 
 // StaticIndex is the index over the Entities carrying the Static Tag: geometry
@@ -16,7 +15,7 @@ import (
 //
 // It is a Resource of its own type, apart from BodyIndex, so that the locks
 // stay apart: rebuilding the Bodies write-locks only the Bodies.
-type StaticIndex = types.StaticIndex
+type StaticIndex = internal.StaticIndex
 
 // BodyIndex is the index over every other Entity with a Shape, Kinematic and
 // Dynamic alike, rebuilt from their positions each tick. Shapeless Bodies are
@@ -25,7 +24,7 @@ type StaticIndex = types.StaticIndex
 // It carries the same queries StaticIndex does. Which index a query asks is the
 // caller's choice: line of sight against static geometry is a Probe on
 // StaticIndex, and "versus Bodies" is a Probe on this one.
-type BodyIndex = types.BodyIndex
+type BodyIndex = internal.BodyIndex
 
 // Contacts is the tick's Contact list, one entry per touching pair, written
 // once a tick by Detect and always on. A filter System reaches it through
@@ -41,7 +40,7 @@ type BodyIndex = types.BodyIndex
 // reported Ended and are carried unreported as Impulse carriers until the
 // persistence window closes, so a pair that flickers apart and back keeps its
 // Impulses. It is rebuilt each tick reusing its buffers and allocates nothing.
-type Contacts = types.Contacts
+type Contacts = internal.Contacts
 
 // JointedPairs is the set of Entity pairs whose Joint says the two Bodies do
 // not collide, rebuilt by Index from the Joint Query and read by Detect after
@@ -52,7 +51,7 @@ type Contacts = types.Contacts
 // the rebuild, and Detect's check is gated on Len, so a scene with no such
 // Joint pays one branch. An app reads it through ecs.Read[*JointedPairs]; Len,
 // Has, Add and Clear are the whole of it.
-type JointedPairs = types.JointedPairs
+type JointedPairs = internal.JointedPairs
 
 // Constants are the physics values that hold for the whole world rather than
 // for one Body, which physics reads every tick and a game may change. Gravity
@@ -71,15 +70,7 @@ type JointedPairs = types.JointedPairs
 //
 // They are not Config, which is fixed when physics starts and is a property of
 // the solver or of an index; these are properties of the scene.
-type Constants struct {
-	// Gravity is the acceleration every Dynamic body receives, in m/s², which
-	// is cp's Space gravity term in its velocity integrator. Kinematic and
-	// Static bodies never receive it. The default is zero.
-	//
-	// It is added before the Body's own Force·invMass and scaled by the step
-	// with it, so writing m·g into Force instead is the same fall.
-	Gravity m.Vec2d
-}
+type Constants = internal.Constants
 
 // Sleep is whether physics puts Bodies to sleep, and when: cp's
 // IdleSpeedThreshold and SleepTimeThreshold. The plugin registers it itself,
@@ -93,20 +84,4 @@ type Constants struct {
 // An app turns it on by writing it from a System of its own through
 // ecs.Write[*Sleep] — once from app.InitEvent is the usual way — and the sleep
 // System reads it every tick. Turning it off again wakes every Island.
-type Sleep struct {
-	// IdleSpeed is how slowly a Dynamic body must be moving to count as idle,
-	// in m/s: it is idle on a tick when v·v·m + w²·i, cp's kinetic energy with
-	// no ½, is at most m·IdleSpeed².
-	//
-	// Zero falls back to cp's estimate from gravity, |g|·h, one tick of the
-	// Constants' Gravity — so in a world with no gravity an IdleSpeed of 0 never
-	// idles anything, and a game that writes its gravity into Force instead
-	// names an IdleSpeed itself.
-	IdleSpeed float64
-
-	// Time is how long every Body of an Island must stay idle before the Island
-	// falls asleep, in seconds. Zero means off, which is the zero-value
-	// spelling of cp's infinite SleepTimeThreshold and the default; an infinite
-	// Time is off too, as in cp.
-	Time float64
-}
+type Sleep = internal.Sleep

@@ -5,7 +5,6 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -20,13 +19,13 @@ func TestThePluginRegistersShrinkUnderTheAuthorityAlone(t *testing.T) {
 		WithPlugins(New(), &gamePlugin{})
 
 	for _, command := range engine.Describe().Commands {
-		if command.Type != reflect.TypeFor[ecs.ShrinkCmd]() {
+		if command.Type != reflect.TypeFor[ShrinkCmd]() {
 			continue
 		}
-		if command.Owner != ecs.Name {
-			t.Fatalf("ShrinkCmd is owned by %q, want %q", command.Owner, ecs.Name)
+		if command.Owner != Name {
+			t.Fatalf("ShrinkCmd is owned by %q, want %q", command.Owner, Name)
 		}
-		if len(command.Writes) != 1 || command.Writes[0] != reflect.TypeFor[*ecs.Entities]() {
+		if len(command.Writes) != 1 || command.Writes[0] != reflect.TypeFor[*Entities]() {
 			t.Fatalf("ShrinkCmd writes %v, want write{*ecs.Entities} alone", command.Writes)
 		}
 		if len(command.Reads) != 0 || len(command.Uses) != 0 {
@@ -67,20 +66,20 @@ const churnPerTick = 16
 // after a shrink.
 type steadyGame struct {
 	hooks     bool
-	churned   []ecs.Entity
-	held      []ecs.Entity
+	churned   []Entity
+	held      []Entity
 	delivered int
 }
 
 func (*steadyGame) Name() kernel.PluginName { return "steady" }
 
-func (*steadyGame) Dependencies() []kernel.PluginName { return []kernel.PluginName{ecs.Name} }
+func (*steadyGame) Dependencies() []kernel.PluginName { return []kernel.PluginName{Name} }
 
 func (g *steadyGame) Register(registrar *kernel.Registrar, _ any) error {
-	ecs.RegisterComponent[position](registrar, 64)
-	ecs.RegisterComponent[velocity](registrar, 64)
-	g.churned = make([]ecs.Entity, 0, churnPerTick)
-	registrar.Subscribe[churnSystem](ecs.ToHandler[app.UpdateEvent](registrar, func(sp *ecs.Spawn[projectile], we *ecs.WriteableEntities) {
+	RegisterComponent[position](registrar, 64)
+	RegisterComponent[velocity](registrar, 64)
+	g.churned = make([]Entity, 0, churnPerTick)
+	registrar.Subscribe[churnSystem](ToHandler[app.UpdateEvent](registrar, func(sp *Spawn[projectile], we *WriteableEntities) {
 		for _, e := range g.churned {
 			we.Despawn(e)
 		}
@@ -89,29 +88,29 @@ func (g *steadyGame) Register(registrar *kernel.Registrar, _ any) error {
 			g.churned = append(g.churned, sp.New(projectile{Velocity: velocity{X: 1}}))
 		}
 	})).First()
-	registrar.Subscribe[steadyMoveSystem](ecs.ToHandler[app.UpdateEvent](registrar, func(q *ecs.Query[moveQuery]) {
+	registrar.Subscribe[steadyMoveSystem](ToHandler[app.UpdateEvent](registrar, func(q *Query[moveQuery]) {
 		for _, it := range q.All() {
 			it.Position.X += it.Velocity.X
 		}
 	})).Last()
 	if g.hooks {
-		registrar.Subscribe[steadyLifetimeSystem](ecs.ToHandler[app.UpdateEvent](registrar, func(h *ecs.Hooks[velocity, ecs.HookSpawnedDespawned]) {
+		registrar.Subscribe[steadyLifetimeSystem](ToHandler[app.UpdateEvent](registrar, func(h *Hooks[velocity, HookSpawnedDespawned]) {
 			for range h.All() {
 				g.delivered++
 			}
 		}))
-		registrar.Subscribe[steadyMirrorSystem](ecs.ToHandler[app.UpdateEvent](registrar, func(h *ecs.Hooks[position, ecs.HookAll]) {
+		registrar.Subscribe[steadyMirrorSystem](ToHandler[app.UpdateEvent](registrar, func(h *Hooks[position, HookAll]) {
 			for range h.All() {
 				g.delivered++
 			}
 		}))
 	}
-	registrar.HandleCommand[growCmd](ecs.ToExecute[int, struct{}](registrar, func(n int, sp *ecs.Spawn[projectile]) {
+	registrar.HandleCommand[growCmd](ToExecute[int, struct{}](registrar, func(n int, sp *Spawn[projectile]) {
 		for range n {
 			g.held = append(g.held, sp.New(projectile{Velocity: velocity{X: 1}}))
 		}
 	}))
-	registrar.HandleCommand[cutCmd](ecs.ToExecute[int, struct{}](registrar, func(keep int, we *ecs.WriteableEntities) {
+	registrar.HandleCommand[cutCmd](ToExecute[int, struct{}](registrar, func(keep int, we *WriteableEntities) {
 		for _, e := range g.held[keep:] {
 			we.Despawn(e)
 		}
@@ -131,7 +130,7 @@ func TestAShrunkWorldReturnsToItsSteadyState(t *testing.T) {
 	const frames = 10_000
 	measure := func(hooks, shrink bool) float64 {
 		game := &steadyGame{hooks: hooks}
-		engine := kernel.New(map[kernel.PluginName]any{ecs.Name: ecs.Config{PrewarmEntities: 64}}).
+		engine := kernel.New(map[kernel.PluginName]any{Name: Config{PrewarmEntities: 64}}).
 			Handler(func(err error) error { t.Errorf("unexpected kernel error: %v", err); return err }).
 			WithPlugins(New(), game)
 		stopped := make(chan struct{})
@@ -158,7 +157,7 @@ func TestAShrunkWorldReturnsToItsSteadyState(t *testing.T) {
 		executioner.ExecuteCommand[cutCmd](1_000)
 		run(1)
 		if shrink {
-			released := executioner.ExecuteCommand[ecs.ShrinkCmd](ecs.ShrinkRequest{})
+			released := executioner.ExecuteCommand[ShrinkCmd](ShrinkRequest{})
 			if released.Stores == 0 || released.Entities == 0 || released.Scratch == 0 {
 				t.Fatalf("the zero request after a spike released %+v, want Stores, Entities and Scratch above 0", released)
 			}

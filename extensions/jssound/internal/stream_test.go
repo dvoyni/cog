@@ -12,7 +12,6 @@ import (
 
 	"github.com/dvoyni/cog/kernel"
 
-	"github.com/dvoyni/cog/extensions/jssound"
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/sound"
@@ -463,7 +462,7 @@ func TestARateChangeRePlacesTheScheduleAndKeepsTheDecoderWhereItWas(t *testing.T
 // context time at all.
 func TestNoMediaElementIsEverMadeForAClip(t *testing.T) {
 	f := fakeAudio(t)
-	b := startedWith(t, f, true, jssound.Config{DecodedClipLimit: alwaysStream})
+	b := startedWith(t, f, true, Config{DecodedClipLimit: alwaysStream})
 	id, _ := streamed(t, f, b, fixture(t))
 
 	b.Emit(&sound.Batch{Starts: []sound.VoiceStart{{
@@ -519,13 +518,13 @@ func TestBothTiersReportOneClipIdentically(t *testing.T) {
 
 	whole := func() sound.PreparedClip {
 		f := fakeAudio(t)
-		b := startedWith(t, f, true, jssound.Config{DecodedClipLimit: neverStream})
+		b := startedWith(t, f, true, Config{DecodedClipLimit: neverStream})
 		_, clip := resident(t, f, b, encoded)
 		return clip
 	}()
 	streaming := func() sound.PreparedClip {
 		f := fakeAudio(t)
-		b := startedWith(t, f, true, jssound.Config{DecodedClipLimit: alwaysStream})
+		b := startedWith(t, f, true, Config{DecodedClipLimit: alwaysStream})
 		_, clip := streamed(t, f, b, encoded)
 		return clip
 	}()
@@ -575,7 +574,7 @@ func TestDecodedClipLimitDrawsTheLineWhereItSays(t *testing.T) {
 	// And the real Clip lands on the side the arithmetic says. The fixture is
 	// 48704 frames of stereo, which is 389632 bytes decoded - under the default.
 	f := fakeAudio(t)
-	b := startedWith(t, f, true, jssound.Config{})
+	b := startedWith(t, f, true, Config{})
 	_, clip := resident(t, f, b, fixture(t))
 	if clip.(*clipData).streams() {
 		t.Fatalf("a %d byte Clip streamed under the %d byte default",
@@ -583,7 +582,7 @@ func TestDecodedClipLimitDrawsTheLineWhereItSays(t *testing.T) {
 	}
 
 	g := fakeAudio(t)
-	c := startedWith(t, g, true, jssound.Config{DecodedClipLimit: 1 << 10})
+	c := startedWith(t, g, true, Config{DecodedClipLimit: 1 << 10})
 	_, long := streamed(t, g, c, fixture(t))
 	if !long.(*clipData).streams() {
 		t.Fatalf("a %d byte Clip did not stream under a 1 KiB limit", long.(*clipData).decodedBytes())
@@ -595,7 +594,7 @@ func TestDecodedClipLimitDrawsTheLineWhereItSays(t *testing.T) {
 // allocated, and the browser is never asked to decode anything.
 func TestAStreamedClipDecodesNothingAtLoad(t *testing.T) {
 	f := fakeAudio(t)
-	b := startedWith(t, f, true, jssound.Config{DecodedClipLimit: alwaysStream})
+	b := startedWith(t, f, true, Config{DecodedClipLimit: alwaysStream})
 	buffers := len(f.buffers())
 
 	streamed(t, f, b, fixture(t))
@@ -633,7 +632,7 @@ func TestAClipWithNoGranuleLengthStreamsAndIsCountedRatherThanRefused(t *testing
 	// A stream that truly holds no frames is still the terminal failure it was.
 	empty, _ := rampClip(0, m.Maybe[sound.LoopRegion]{})
 	empty.frames, empty.unmeasured = 0, true
-	var want jssound.ErrNoStreamLength
+	var want ErrNoStreamLength
 	if err := empty.measure(); err != want {
 		t.Fatalf("measuring an empty stream gave %v, want %v", err, want)
 	}
@@ -644,7 +643,7 @@ func TestAClipWithNoGranuleLengthStreamsAndIsCountedRatherThanRefused(t *testing
 // anything that has a size to compare.
 func TestAnUnmeasuredClipStreamsEvenWhereNothingElseWould(t *testing.T) {
 	f := fakeAudio(t)
-	b := startedWith(t, f, true, jssound.Config{DecodedClipLimit: neverStream})
+	b := startedWith(t, f, true, Config{DecodedClipLimit: neverStream})
 	clip, _ := rampClip(5000, m.Maybe[sound.LoopRegion]{})
 	clip.frames, clip.duration, clip.unmeasured = 0, 0, true
 
@@ -670,8 +669,8 @@ func TestAnUnmeasuredClipStreamsEvenWhereNothingElseWould(t *testing.T) {
 // does, because a limit below -2 is neither a size nor a sentinel.
 func TestRegisterRefusesADecodedClipLimitBelowTheSentinels(t *testing.T) {
 	fakeAudio(t)
-	var refused jssound.ErrInvalidDecodedClipLimit
-	err := (&plugin{}).Register(&kernel.Registrar{}, jssound.Config{DecodedClipLimit: -3})
+	var refused ErrInvalidDecodedClipLimit
+	err := (&plugin{}).Register(&kernel.Registrar{}, Config{DecodedClipLimit: -3})
 	if !errors.As(err, &refused) {
 		t.Fatalf("Register accepted a DecodedClipLimit of -3: err = %v", err)
 	}
@@ -730,7 +729,7 @@ func TestConvertingInChunksIsWhatConvertingWholeWouldHaveBeen(t *testing.T) {
 // arithmetic is what the shipped decoder is wired to.
 func TestARealClipStreamsThroughTheDecoderAndTheResampler(t *testing.T) {
 	f := fakeAudio(t)
-	b := startedWith(t, f, true, jssound.Config{DecodedClipLimit: alwaysStream})
+	b := startedWith(t, f, true, Config{DecodedClipLimit: alwaysStream})
 	id, clip := streamed(t, f, b, fixture(t))
 	if clip.(*clipData).filter == nil {
 		t.Fatal("a 44.1 kHz Clip against a 48 kHz context kept no resampler")

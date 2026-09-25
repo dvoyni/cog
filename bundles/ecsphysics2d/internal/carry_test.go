@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -20,13 +19,13 @@ import (
 // paddle spawns a Kinematic body of that Shape at a place, moving at a
 // velocity. Its Shape StopsAtBodies, since what a paddle is thrown at here is
 // Bodies, which a fast Body meets only with the flag set.
-func paddle(t testing.TB, h *harness, shape ecsphysics2d.Shape, at, velocity m.Vec2d) ecs.Entity {
+func paddle(t testing.TB, h *harness, shape Shape, at, velocity m.Vec2d) ecs.Entity {
 	t.Helper()
 	shape.StopsAtBodies = true
 	return h.spawn(t, spawnRequest{
 		Kind:     kindShapedKinematic,
-		Place:    ecsphysics2d.Position{Current: at},
-		Velocity: ecsphysics2d.Velocity{Linear: velocity},
+		Place:    Position{Current: at},
+		Velocity: Velocity{Linear: velocity},
 		Shape:    shape,
 	})
 }
@@ -36,11 +35,11 @@ func paddle(t testing.TB, h *harness, shape ecsphysics2d.Shape, at, velocity m.V
 // by the swept convex test.
 var carryShapes = []struct {
 	name      string
-	shape     ecsphysics2d.Shape
+	shape     Shape
 	tolerance float64
 }{
-	{"balls", ecsphysics2d.NewCircleShape(1, m.Vec2d{}), 1e-9},
-	{"boxes", ecsphysics2d.NewBoxShape(2, 2, 0), 1e-6},
+	{"balls", NewCircleShape(1, m.Vec2d{}), 1e-9},
+	{"boxes", NewBoxShape(2, 2, 0), 1e-6},
 }
 
 // carryCase is a Dynamic ball D and a Kinematic paddle K, and where each must
@@ -137,10 +136,10 @@ func TestAFastKinematicBodyAgainstAStaticOneMovesNeither(t *testing.T) {
 		shift := m.Vec2d{X: 10 * float64(phase) / phases, Y: 3.7 * float64(phase) / phases}
 		wall := h.spawn(t, spawnRequest{
 			Kind:  kindShapedStatic,
-			Place: ecsphysics2d.Position{Current: m.Vec2d{X: 5}.Add(shift)},
+			Place: Position{Current: m.Vec2d{X: 5}.Add(shift)},
 			Shape: wallShape(),
 		})
-		k := paddle(t, h, ecsphysics2d.NewCircleShape(1, m.Vec2d{}), shift, m.Vec2d{X: meetSpeed})
+		k := paddle(t, h, NewCircleShape(1, m.Vec2d{}), shift, m.Vec2d{X: meetSpeed})
 		h.frame(t)
 
 		stop, found := between(h.contacts(t), k, wall)
@@ -165,8 +164,8 @@ func TestAFastKinematicBodyAgainstAStaticOneMovesNeither(t *testing.T) {
 // it there, and the box pushes it along. This is today's behaviour, held so
 // that a change to the gate or to the walk that loses it is seen.
 func TestPinnedAKinematicTargetClosingOnTheBody(t *testing.T) {
-	ball := ecsphysics2d.NewCircleShape(0.2, m.Vec2d{})
-	box := ecsphysics2d.NewBoxShape(0.4, 0.4, 0)
+	ball := NewCircleShape(0.2, m.Vec2d{})
+	box := NewBoxShape(0.4, 0.4, 0)
 	speed := 0.99 * 0.2 / tick
 	for phase := range phases {
 		h := newHarness(t)
@@ -211,7 +210,7 @@ type carriedBall struct {
 // asserts whatever else the tick's list must hold.
 func checkCarriedAll(
 	t *testing.T, balls []carriedBall, extra func(*harness, m.Vec2d),
-	check func(t *testing.T, phase int, list []ecsphysics2d.Contact, k ecs.Entity, tolerance float64),
+	check func(t *testing.T, phase int, list []Contact, k ecs.Entity, tolerance float64),
 ) {
 	t.Helper()
 	for _, shape := range carryShapes {
@@ -294,7 +293,7 @@ func TestAFastKinematicPaddleCarriesABallBehindAWall(t *testing.T) {
 	}, func(h *harness, shift m.Vec2d) {
 		h.spawn(t, spawnRequest{
 			Kind:  kindShapedStatic,
-			Place: ecsphysics2d.Position{Current: m.Vec2d{X: 7}.Add(shift)},
+			Place: Position{Current: m.Vec2d{X: 7}.Add(shift)},
 			Shape: wallShape(),
 		})
 	}, nil)
@@ -327,7 +326,7 @@ func TestAFastDynamicBallStopsAtTheFirstOfTwoTargets(t *testing.T) {
 				first := thrown(t, h, shape.shape, m.Vec2d{X: 7}.Add(shift), m.Vec2d{})
 				second := thrown(t, h, shape.shape, m.Vec2d{X: 3}.Add(shift), m.Vec2d{})
 				filtered := false
-				h.game.filter = func(entry *ecsphysics2d.Contact) {
+				h.game.filter = func(entry *Contact) {
 					if entry.Other(second) == mover {
 						filtered = true
 					}
@@ -363,8 +362,8 @@ func TestAFastDynamicBallStopsAtTheFirstOfTwoTargets(t *testing.T) {
 // also pushes them apart, and one may lean a little into the paddle: in front
 // of it is its centre short of the paddle's front face.
 func TestAFastKinematicPaddleCarriesAndWakesSleepingBalls(t *testing.T) {
-	h, _ := newSleepHarness(t, m.Vec2d{}, ecsphysics2d.Sleep{IdleSpeed: 0.1, Time: napTime})
-	ball := ecsphysics2d.NewCircleShape(1, m.Vec2d{})
+	h, _ := newSleepHarness(t, m.Vec2d{}, Sleep{IdleSpeed: 0.1, Time: napTime})
+	ball := NewCircleShape(1, m.Vec2d{})
 	balls := []ecs.Entity{
 		thrown(t, h, ball, m.Vec2d{X: 7}, m.Vec2d{}),
 		thrown(t, h, ball, m.Vec2d{X: 3}, m.Vec2d{}),
@@ -397,8 +396,8 @@ func TestAFastKinematicPaddleCarriesAndWakesSleepingBalls(t *testing.T) {
 // down at rest on its path again, at x = −3 and −7, and the paddle, going
 // 0 → −10, meets them at T = 0.1 and 0.5.
 func TestACarriedPairThatTouchedTheTickBeforeContinues(t *testing.T) {
-	h, _ := newSleepHarness(t, m.Vec2d{}, ecsphysics2d.Sleep{})
-	ball := ecsphysics2d.NewCircleShape(1, m.Vec2d{})
+	h, _ := newSleepHarness(t, m.Vec2d{}, Sleep{})
+	ball := NewCircleShape(1, m.Vec2d{})
 	k := paddle(t, h, ball, m.Vec2d{X: 10}, m.Vec2d{X: -meetSpeed})
 	balls := []ecs.Entity{
 		thrown(t, h, ball, m.Vec2d{X: 7}, m.Vec2d{}),
@@ -406,9 +405,9 @@ func TestACarriedPairThatTouchedTheTickBeforeContinues(t *testing.T) {
 	}
 	h.frame(t)
 	for i, x := range []float64{-3, -7} {
-		h.setVelocity(t, balls[i], ecsphysics2d.Velocity{})
+		h.setVelocity(t, balls[i], Velocity{})
 		at := m.Vec2d{X: x}
-		h.kernel.ExecuteCommand[placeCmd](placeRequest{Entity: balls[i], Place: ecsphysics2d.Position{Current: at, Previous: at}})
+		h.kernel.ExecuteCommand[placeCmd](placeRequest{Entity: balls[i], Place: Position{Current: at, Previous: at}})
 	}
 	h.frame(t)
 
@@ -418,7 +417,7 @@ func TestACarriedPairThatTouchedTheTickBeforeContinues(t *testing.T) {
 		if len(entries) != 1 {
 			t.Fatalf("ball %d is %d entries with the paddle, want one", i, len(entries))
 		}
-		if entry := entries[0]; entry.Phase != ecsphysics2d.PhaseContinuing || math.Abs(entry.T-want) > 1e-9 {
+		if entry := entries[0]; entry.Phase != PhaseContinuing || math.Abs(entry.T-want) > 1e-9 {
 			t.Errorf("ball %d's entry is phase %v at T %.9f, want Continuing at T %.3f", i, entry.Phase, entry.T, want)
 		}
 		if at := h.read(t, balls[i]).Place.Current; at.Distance(m.Vec2d{X: -12}) > 1e-9 {
@@ -442,22 +441,22 @@ type resetOnUpdate kernel.Subscription[app.UpdateEvent]
 func (*resetter) Name() kernel.PluginName { return "physicstestresetter" }
 
 func (*resetter) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{ecs.Name, ecsphysics2d.Name}
+	return []kernel.PluginName{ecs.Name, Name}
 }
 
 func (r *resetter) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.Subscribe[resetOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, func(
-		places *ecs.Set[ecsphysics2d.Position], velocities *ecs.Set[ecsphysics2d.Velocity],
+		places *ecs.Set[Position], velocities *ecs.Set[Velocity],
 	) {
 		for _, each := range r.resets {
 			if place, ok := places.Ref(each.e); ok {
-				*place = ecsphysics2d.Position{Current: each.at, Previous: each.at}
+				*place = Position{Current: each.at, Previous: each.at}
 			}
 			if velocity, ok := velocities.Ref(each.e); ok {
-				*velocity = ecsphysics2d.Velocity{Linear: each.velocity}
+				*velocity = Velocity{Linear: each.velocity}
 			}
 		}
-	})).Before[ecsphysics2d.IntegrateOnUpdate]()
+	})).Before[IntegrateOnUpdate]()
 	return nil
 }
 
@@ -478,7 +477,7 @@ func TestTheCarriesSitOnTheEnginesAllocationLine(t *testing.T) {
 	measure := func(n int) (float64, int, int) {
 		r := &resetter{}
 		h := newHarnessWithPlugins(t, nil, uint32(8*max(n, 1)), r)
-		ball := ecsphysics2d.NewCircleShape(1, m.Vec2d{})
+		ball := NewCircleShape(1, m.Vec2d{})
 		for i := range n {
 			y := 4 * float64(i)
 			start := m.Vec2d{X: 10, Y: y}
@@ -490,7 +489,7 @@ func TestTheCarriesSitOnTheEnginesAllocationLine(t *testing.T) {
 			}
 			h.spawn(t, spawnRequest{
 				Kind:  kindShapedStatic,
-				Place: ecsphysics2d.Position{Current: m.Vec2d{X: 5, Y: y}},
+				Place: Position{Current: m.Vec2d{X: 5, Y: y}},
 				Shape: sensorCircle(0.5),
 			})
 		}
@@ -502,7 +501,7 @@ func TestTheCarriesSitOnTheEnginesAllocationLine(t *testing.T) {
 		})
 		carried, crossed := 0, 0
 		for _, entry := range h.contacts(t) {
-			if entry.T < 1 && entry.Phase == ecsphysics2d.PhaseContinuing {
+			if entry.T < 1 && entry.Phase == PhaseContinuing {
 				if entry.Sensor {
 					crossed++
 				} else {

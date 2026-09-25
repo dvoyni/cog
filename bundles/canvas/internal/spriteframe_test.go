@@ -7,7 +7,6 @@ import (
 
 	"github.com/dvoyni/cog/kernel"
 
-	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -28,12 +27,12 @@ import (
 // where the frames are not uniform it draws all of them at the sheet's size,
 // which is no authoring intent at all.
 func TestAFramedSpriteTakesItsNaturalSizeFromTheFrame(t *testing.T) {
-	config := canvas.Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
 	files := fstest.MapFS{"sheet.png": &fstest.MapFile{Data: pngBytes(t, 16, 16)}}
-	k, _, backend := testKernel(t, files, config, func(write *canvas.OpQueue) {
-		write.Sprite(0, "sheet.png", canvas.SpriteTransform{
+	k, _, backend := testKernel(t, files, config, func(write *OpQueue) {
+		write.Sprite(0, "sheet.png", SpriteTransform{
 			Scale: 1,
-			Frame: canvas.SpriteFrame{Right: 12, Bottom: 12},
+			Frame: SpriteFrame{Right: 12, Bottom: 12},
 		}, nil)
 	})
 	runFrame(k)
@@ -51,12 +50,12 @@ func TestAFramedSpriteTakesItsNaturalSizeFromTheFrame(t *testing.T) {
 // Size names the destination outright, so a frame never overrides it. Sizing
 // from the frame changes what an unset size means and nothing else.
 func TestAnExplicitSizeStillWinsOverAFrame(t *testing.T) {
-	config := canvas.Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
 	files := fstest.MapFS{"sheet.png": &fstest.MapFile{Data: pngBytes(t, 16, 16)}}
-	k, _, backend := testKernel(t, files, config, func(write *canvas.OpQueue) {
-		write.Sprite(0, "sheet.png", canvas.SpriteTransform{
+	k, _, backend := testKernel(t, files, config, func(write *OpQueue) {
+		write.Sprite(0, "sheet.png", SpriteTransform{
 			Size:  m.Vec2{X: 20, Y: 10},
-			Frame: canvas.SpriteFrame{Right: 12, Bottom: 12},
+			Frame: SpriteFrame{Right: 12, Bottom: 12},
 		}, nil)
 	})
 	runFrame(k)
@@ -75,12 +74,12 @@ func TestAnExplicitSizeStillWinsOverAFrame(t *testing.T) {
 // frame selects is the frame. A 12x4 window of a square sheet is 3:1, so a
 // height of 2 is a width of 6 - where the whole sheet's 1:1 would have said 2.
 func TestASingleAxisSizeDerivesTheOtherFromTheFramesAspect(t *testing.T) {
-	config := canvas.Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
 	files := fstest.MapFS{"sheet.png": &fstest.MapFile{Data: pngBytes(t, 16, 16)}}
-	k, _, backend := testKernel(t, files, config, func(write *canvas.OpQueue) {
-		write.Sprite(0, "sheet.png", canvas.SpriteTransform{
+	k, _, backend := testKernel(t, files, config, func(write *OpQueue) {
+		write.Sprite(0, "sheet.png", SpriteTransform{
 			Size:  m.Vec2{Y: 2},
-			Frame: canvas.SpriteFrame{Right: 4, Bottom: 12},
+			Frame: SpriteFrame{Right: 4, Bottom: 12},
 		}, nil)
 	})
 	runFrame(k)
@@ -100,10 +99,10 @@ func TestASingleAxisSizeDerivesTheOtherFromTheFramesAspect(t *testing.T) {
 // fault was never only entrySize. textureUV insets by Frame exactly as entryUV
 // does, so a framed texture sprite stretched its sub-rect the same way.
 func TestAFramedTextureSpriteTakesItsNaturalSizeFromTheFrame(t *testing.T) {
-	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *canvas.OpQueue, gfxWrite *gfx.OpQueue) {
+	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
 		_, texture := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
-		write.SpriteTexture(0, texture, canvas.SpriteTransform{
-			Frame: canvas.SpriteFrame{Right: 48, Bottom: 24},
+		write.SpriteTexture(0, texture, SpriteTransform{
+			Frame: SpriteFrame{Right: 48, Bottom: 24},
 		}, nil)
 	})
 	runFrame(k)
@@ -127,13 +126,13 @@ func TestAFramedTextureSpriteTakesItsNaturalSizeFromTheFrame(t *testing.T) {
 // no report. A nine-sliced panel packed into a UI sheet, which is the normal
 // authoring case, was undrawable and said nothing about why.
 func TestANineSliceOverAFrameSlicesTheFrame(t *testing.T) {
-	config := canvas.Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
 	files := fstest.MapFS{"sheet.png": &fstest.MapFile{Data: pngBytes(t, 16, 16)}}
-	k, _, backend := testKernel(t, files, config, func(write *canvas.OpQueue) {
-		write.Sprite(0, "sheet.png", canvas.SpriteTransform{
+	k, _, backend := testKernel(t, files, config, func(write *OpQueue) {
+		write.Sprite(0, "sheet.png", SpriteTransform{
 			Scale:     1,
-			Frame:     canvas.SpriteFrame{Left: 4, Top: 4, Right: 4, Bottom: 4},
-			NineSlice: canvas.SpriteFrame{Left: 2, Top: 2, Right: 2, Bottom: 2},
+			Frame:     SpriteFrame{Left: 4, Top: 4, Right: 4, Bottom: 4},
+			NineSlice: SpriteFrame{Left: 2, Top: 2, Right: 2, Bottom: 2},
 		}, nil)
 	})
 	runFrame(k)
@@ -176,12 +175,12 @@ func TestANineSliceOverAFrameSlicesTheFrame(t *testing.T) {
 // as the sprite is recorded; the key is the path and the frame together, which
 // is canvas's own type and so shares a namespace with nothing.
 func TestAFrameThatDoesNotFitItsSourceDrawsNothingAndIsReportedOnce(t *testing.T) {
-	config := canvas.Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
 	files := fstest.MapFS{"sheet.png": &fstest.MapFile{Data: pngBytes(t, 16, 16)}}
-	k, errs, backend := testKernelCapturing(t, files, config, func(write *canvas.OpQueue) {
-		write.Sprite(0, "sheet.png", canvas.SpriteTransform{
+	k, errs, backend := testKernelCapturing(t, files, config, func(write *OpQueue) {
+		write.Sprite(0, "sheet.png", SpriteTransform{
 			Scale: 1,
-			Frame: canvas.SpriteFrame{Left: 10, Right: 10},
+			Frame: SpriteFrame{Left: 10, Right: 10},
 		}, nil)
 	})
 	runFrame(k)
@@ -202,7 +201,7 @@ func TestAFrameThatDoesNotFitItsSourceDrawsNothingAndIsReportedOnce(t *testing.T
 // testKernelGfxCapturing is testKernelGfx with testKernelCapturing's error
 // handler: a texture-sourced sprite needs gfx's queue to mint its texture, and
 // a report test needs the errors collected rather than failing the test.
-func testKernelGfxCapturing(t testing.TB, config canvas.Config, record func(*canvas.OpQueue, *gfx.OpQueue)) (kernel.Executioner, *[]error, *testBackend) {
+func testKernelGfxCapturing(t testing.TB, config Config, record func(*OpQueue, *gfx.OpQueue)) (kernel.Executioner, *[]error, *testBackend) {
 	t.Helper()
 	var errs []error
 	k, _, backend := testKernelRecorder(t, fstest.MapFS{}, config, recordCanvasPlugin{recordGfx: record}, func(err error) error {
@@ -221,12 +220,12 @@ func testKernelGfxCapturing(t testing.TB, config canvas.Config, record func(*can
 // the key can honestly promise. Three draws of one texture is the case a UI
 // actually produces.
 func TestAFrameThatDoesNotFitATextureIsReportedOnce(t *testing.T) {
-	k, errs, backend := testKernelGfxCapturing(t, targetTestConfig(), func(write *canvas.OpQueue, gfxWrite *gfx.OpQueue) {
+	k, errs, backend := testKernelGfxCapturing(t, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
 		_, texture := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		for i := 0; i < 3; i++ {
-			write.SpriteTexture(0, texture, canvas.SpriteTransform{
+			write.SpriteTexture(0, texture, SpriteTransform{
 				Position: m.Vec2{X: float32(i) * 8},
-				Frame:    canvas.SpriteFrame{Top: 20, Bottom: 20},
+				Frame:    SpriteFrame{Top: 20, Bottom: 20},
 			}, nil)
 		}
 	})
@@ -249,13 +248,13 @@ func TestAFrameThatDoesNotFitATextureIsReportedOnce(t *testing.T) {
 // texels of border on each side of a 4x4 window leave no middle, even though
 // they would sit comfortably inside the 16x16 sheet the window is cut from.
 func TestNineSliceInsetsThatFitTheSheetButNotTheFrameAreReported(t *testing.T) {
-	config := canvas.Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
 	files := fstest.MapFS{"sheet.png": &fstest.MapFile{Data: pngBytes(t, 16, 16)}}
-	k, errs, backend := testKernelCapturing(t, files, config, func(write *canvas.OpQueue) {
-		write.Sprite(0, "sheet.png", canvas.SpriteTransform{
+	k, errs, backend := testKernelCapturing(t, files, config, func(write *OpQueue) {
+		write.Sprite(0, "sheet.png", SpriteTransform{
 			Scale:     1,
-			Frame:     canvas.SpriteFrame{Left: 6, Top: 6, Right: 6, Bottom: 6},
-			NineSlice: canvas.SpriteFrame{Left: 3, Top: 3, Right: 3, Bottom: 3},
+			Frame:     SpriteFrame{Left: 6, Top: 6, Right: 6, Bottom: 6},
+			NineSlice: SpriteFrame{Left: 3, Top: 3, Right: 3, Bottom: 3},
 		}, nil)
 	})
 	runFrame(k)
@@ -277,13 +276,13 @@ func TestNineSliceInsetsThatFitTheSheetButNotTheFrameAreReported(t *testing.T) {
 // does not fit their verdict is derived from a number that means nothing: a
 // second report would name an error that disappears when the first is fixed.
 func TestABadFrameUnderANineSliceReportsOnlyTheFrame(t *testing.T) {
-	config := canvas.Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
 	files := fstest.MapFS{"sheet.png": &fstest.MapFile{Data: pngBytes(t, 16, 16)}}
-	k, errs, _ := testKernelCapturing(t, files, config, func(write *canvas.OpQueue) {
-		write.Sprite(0, "sheet.png", canvas.SpriteTransform{
+	k, errs, _ := testKernelCapturing(t, files, config, func(write *OpQueue) {
+		write.Sprite(0, "sheet.png", SpriteTransform{
 			Scale:     1,
-			Frame:     canvas.SpriteFrame{Left: 10, Right: 10},
-			NineSlice: canvas.SpriteFrame{Left: 3, Top: 3, Right: 3, Bottom: 3},
+			Frame:     SpriteFrame{Left: 10, Right: 10},
+			NineSlice: SpriteFrame{Left: 3, Top: 3, Right: 3, Bottom: 3},
 		}, nil)
 	})
 	runFrame(k)
@@ -304,14 +303,14 @@ func TestABadFrameUnderANineSliceReportsOnlyTheFrame(t *testing.T) {
 // The non-tiled axis therefore falls back to the framed height, 4 rather than
 // the sheet's 16, and the repeat count divides by the framed width.
 func TestATiledSpriteRepeatsItsFramedTile(t *testing.T) {
-	config := canvas.Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
 	files := fstest.MapFS{"sheet.png": &fstest.MapFile{Data: pngBytes(t, 16, 16)}}
-	k, errs, backend := testKernelCapturing(t, files, config, func(write *canvas.OpQueue) {
-		write.Sprite(0, "sheet.png", canvas.SpriteTransform{
+	k, errs, backend := testKernelCapturing(t, files, config, func(write *OpQueue) {
+		write.Sprite(0, "sheet.png", SpriteTransform{
 			Scale: 1,
 			Size:  m.Vec2{X: 32},
 			TileX: true,
-			Frame: canvas.SpriteFrame{Right: 12, Bottom: 12},
+			Frame: SpriteFrame{Right: 12, Bottom: 12},
 		}, nil)
 	})
 	runFrame(k)
@@ -332,13 +331,13 @@ func TestATiledSpriteRepeatsItsFramedTile(t *testing.T) {
 // path used to drop it in silence - the same report an untiled sprite has always
 // raised, from the same guard, because a tiled sprite reaches it now.
 func TestATiledSpriteReportsAFrameThatDoesNotFit(t *testing.T) {
-	config := canvas.Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
 	files := fstest.MapFS{"sheet.png": &fstest.MapFile{Data: pngBytes(t, 16, 16)}}
-	k, errs, _ := testKernelCapturing(t, files, config, func(write *canvas.OpQueue) {
-		write.Sprite(0, "sheet.png", canvas.SpriteTransform{
+	k, errs, _ := testKernelCapturing(t, files, config, func(write *OpQueue) {
+		write.Sprite(0, "sheet.png", SpriteTransform{
 			Size:  m.Vec2{X: 32},
 			TileX: true,
-			Frame: canvas.SpriteFrame{Left: 8, Right: 12},
+			Frame: SpriteFrame{Left: 8, Right: 12},
 		}, nil)
 	})
 	runFrame(k)

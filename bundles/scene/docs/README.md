@@ -1,881 +1,551 @@
 # scene
 
-`github.com/dvoyni/cog/bundles/scene` records declarative 3D — cameras, glTF models,
-buffer-built meshes, punctual lights and a debug shape vocabulary — and
-translates it into `gfx` passes and draws at the end of each simulation update.
+`github.com/dvoyni/cog/bundles/scene` draws Entities. A game spawns an
+Entity with an `m.Transform` and a `Model` naming a glTF path, and it is drawn —
+nothing registered in advance, no manifest, no hash.
 
-It is canvas's sibling: the same frame-local `OpQueue` that gameplay writes and
-the plugin resets every tick, and a single persistent `Lookup` behind a
-handler-scoped access facade - model's `*model.Lookup`, which scene loads through
-and draws from. What differs is that scene *decides* things —
-which draws a camera sees, in what order, packed into which batches — and
-publishes those decisions back as `Passes`.
+**It is a binding, and a binding is necessarily a third plugin.** `ecs` imports
+nothing of `model` and `model` imports nothing of `ecs`, so what attaches them
+is an ordinary plugin that imports both. A project not using the ECS does not
+register it and schedules no ECS Systems.
 
-This README is the API. `bundles/scene/docs/specs/scene.md` is the design record — what each rule is
-for and what was rejected to get there — for the renderer, and
-[`model.md`](../../model/docs/specs/model.md) is the design record for everything a model
-file can contain, which scene draws from; and
-[`.github/instructions/scene.instructions.md`](../../../.github/instructions/scene.instructions.md)
-is the traps a caller hits that neither the compiler nor a plausible-looking zero
-value warns about.
+**It is cog's one 3D renderer.** Its Components wrap `model`'s values — a
+`model.ModelRef`, a `model.MeshRef`, `model.ClipPlay`s, a `model.LightDescr` —
+beside `gfx.ParameterDescr`s and its own camera, layer and pass vocabulary. Its
+load System keys each changed Entity into a Batch, and its recording System
+draws the frame into `gfx` itself, over its own arena, culling, sorting and
+emission, through `model`'s packers and binding names. It replaced the
+frame-local recording renderer that bore the name `scene` before
+[#573](https://github.com/dvoyni/cog/issues/573).
 
-[`mesh.md`](../../model/docs/specs/mesh.md), which moved to model with mesh residency, specifies **what a mesh stores** — the
-vertex layout and the precision of each attribute, which attributes a mesh may
-omit, how wide its indices are, how morph deltas are packed, and what the bundled
-PBR requires of a mesh handed to it. Its **Index width** section is implemented:
-a durable mesh of 65535 vertices or fewer stores `uint16` indices, derived from
-the vertex count with no pass over the indices, and a temporary mesh keeps
-`uint32`. Its **authoring API** section is implemented: scene *packs* the
-standard vertex at bake rather than reinterpreting the caller's slice, in the
-same traversal that bounds it, so what a mesh stores is scene's to change one
-attribute at a time. Six attributes have moved: the **normal** stores as
-`oct32` in a `Unorm16x2`, the **tangent** as one `Uint32` of 15/15 octahedral
-plus handedness plus a reserved bit, **both UV sets** as a `Unorm16x2`
-against a scale and bias derived per mesh, the four **joints** as a `Uint8x4`
-and the four **weights** as a `Unorm8x4` — four bytes each against twelve,
-sixteen, eight, eight, eight and sixteen. Its **per-mesh
-record** section is implemented with it: a 32-byte record per mesh in a storage
-buffer at `@group(0) @binding(3)`, named by the instance record's last spare
-word. Its **attribute presence** section is implemented too, and it is the one
-presence trim the axis earns: there are **two named layouts**, the standard 32
-bytes at six locations and the skinned 40 at eight, and a static primitive no
-longer carries joints and weights it never reads. Its **morph delta storage**
-section is implemented last: a delta record is **8 bytes for position and 4 for
-each of normal and tangent** against a per-primitive, per-axis range, and a
-target stores records **only for the span of vertices it moves** — 18.8 KiB of
-deltas over the vendored corpus against 385.8 KiB, because 92% of the float
-store was exactly zero.
+[`specs/scene.md`](specs/scene.md) is the design record: why each part is
+shaped the way it is, what it is tested against, and the shapes that were
+rejected. [`../../ecs/docs/specs/ecs.md`](../../ecs/docs/specs/ecs.md) §Binding
+is the shape every binding of the ECS takes. **[What a binding may not
+do](#what-a-binding-may-not-do) is the part to read before writing a second
+one.**
 
-scene is a **Bundle**: it requires no Adapter and contributes none. The
+scene is a **Bundle**: it requires no Adapter, and contributes one,
+`StorageReadMount`, which mounts its own shader - the debug shapes' - in
+storage, the way model mounts the bundled PBR. The
 vocabulary is in [`CONTEXT.md`](../../../CONTEXT.md) and the decision in
 [ADR 0002](../../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md).
 
 ## Packages
 
-scene has the declaration-root shape of
-[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
+scene has the alias-index root of
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md)
+and [ADR 0003](../../../docs/adr/0003-roots-are-alias-indexes.md). Its
+Components are plain data with no methods, every field exported.
 
-- **`bundles/scene`** is the root, and holds the renderer's declarations only:
-  the `*OpQueue` resource, the recording vocabulary (`CameraID`, `CameraDescr`,
-  `ProjectionKind`, `Pass`, `PassTag`, `LayerMask`, `Material`, `MaterialTag`,
-  `MeshDraw`, `ModelDraw`, …), the inspection views (`Op`, `PassView`,
-  `BatchView`), the renderer's `Err*` types, `Name` and the ordering identity
-  `FlushOnUpdate`. Its functions — `Layer` and the coordinate helpers
-  (`ViewProjection`, `WorldToScreen`, `ScreenToWorld`, `ScreenToRay`) — are
-  forwarders in `utils.go`. It declares no plugin, and it is what every other
-  package imports.
-- **`bundles/model`** is not scene's, but a recorder imports it beside scene.
-  Everything a model file can contain is named from there and aliased nowhere:
-  `*model.Lookup` with `model.NewLookupAccess` and `model.NewLookupDeviceAccess`,
-  `model.Vertex`, `model.VertexLayout`, `model.MeshRef`, `model.ClipPlay`,
-  `model.LightDescr`, the query types (`model.ModelRef`, `model.ModelLight`,
-  `model.ClipInfo`), `model.VertexDecodePath`, `model.Config`, and the
-  `ErrModel…`, `ErrMesh…` and spot-light reports.
-- **`bundles/scene/internal/types`** declares `OpQueue` with its recording
-  methods and the consume side the flush reads, the recording vocabulary, the
-  frame-local temporary mesh, and the camera maths the flush and the coordinate
-  helpers share. The Lookup with its two scoped facades, the model cache and the
-  unloads, the mesh table and its deferred bakes, the glTF conversion and the
-  animation and morph bakes behind them, the vertex packing, `Config` and the
-  bundled PBR material are model's, in `bundles/model`, and are named here
-  from model's root. The parse command the Lookup enqueues, `LoadModelCmd`, is
-  declared here too; the plugin handles it. The root aliases what it exposes.
-- **`bundles/scene/internal`** is the plugin: its `New`, the flush that expands model draws, selects lights, culls,
-  sorts, interns materials and packs instances into gfx passes and draws, the
-  frame-build state all of that keeps across frames, and the handlers of the
-  two-hop model load. The bundled shader's sources are model's, embedded under
-  `bundles/model/internal/builtin/scene/` and mounted by the model plugin.
-- **`bundles/scene/sceneplugin`** exports only `New() kernel.Plugin`. Only
-  composition roots and tests import it.
+- **`bundles/scene`** is the root, and declares nothing: it aliases what
+  `internal/` declares — the Components a game spawns
+  (`Model`, `Mesh`, `Animation`, `Params`, `Material`, `Light`, `Camera` and
+  the five debug shapes), `MaterialTag`, the camera, layer and pass
+  vocabulary, the errors the recording System reports, `StorageReadMount`,
+  `Name` and the ordering identities `LoadOnUpdate`, `RecordOnUpdate` and
+  `DebugOnUpdate`. It is what a game's Systems import.
+- **`bundles/scene/internal`** is the plugin: everything the root aliases,
+  its `New`, the registration of every Component, the load System behind
+  `LoadOnUpdate` with the key scratch it writes, the recording System behind
+  `RecordOnUpdate` with its scratch and its frame code, and
+  the debug shapes' Systems. It never imports the root.
+- **`bundles/scene/sceneplugin`** exports only `New() kernel.Plugin`.
+  scene has no configuration, so there is no `Config`. Only composition
+  roots and tests import it.
 
-The aliased types stay concrete types (`type OpQueue = types.OpQueue`):
-recording a draw is a direct method call, with no interface anywhere on the
-per-instance path, and their exported methods (`OpQueue.Model`,
-`OpQueue.Passes`, …) are public API through the alias. What the plugin
-needs beyond that goes through plain functions `internal/types` exports, which
-nothing outside `bundles/scene` can call. `internal/types` never imports the
-root.
+**The Components are registered by the plugin that defines their Go type.**
+Their types are declared in `internal/`, which registers them under
+`scene.Name`. Every Store is owned
+by `scene`, so a game System that names one still has to declare `scene`
+as a dependency, and the ECS's coupling check keeps holding on Component data.
 
-## Plugin
+## Files
 
-- Name: `scene.Name` (`"scene"`)
-- Constructor: `sceneplugin.New() kernel.Plugin`
-- Plugin dependencies: `gfx`, `storage`, `model`
-- Requires: no Adapter
-- Contributes: no Adapter. The bundled shader is mounted by `model`, as the
-  `model.StorageReadMount` Adapter for `storage.ReadMountPort`
-- Go package dependencies: `app`, `gfx`, `kernel`, `m`, `model`, `storage`
-- Configuration: none. The pose sample rate is `model.Config`, which the model
-  plugin takes under `model.Name`
+In the root, `doc.go` holds the package documentation, and the rest are
+aliases: `id.go` of `Name`, `LoadOnUpdate`, `RecordOnUpdate` and
+`DebugOnUpdate`, `components.go` of every Component, `types.go` of
+`MaterialTag` and the vocabulary, `err.go` of the errors, `adapters.go` of
+`StorageReadMount`, and `utils.go` forwards `Layer`. `internal/` declares them
+in files of the same names, and `camera.go` the vocabulary. In `internal`, one System per file, named for it, beside the types
+they share:
+
+- `plugin.go` holds the plugin and its registration;
+- `loadsystem.go` the load System, and `keyer.go` the one run's keying it
+  drives;
+- `keyscratch.go` the key scratch both Systems share, the Batch key and the
+  material keys;
+- `recordsystem.go` the recording System, and `scratch.go` its scratch, the
+  Queries it and the bucketing name, and the per-pass flush;
+- `batch.go` the bucketing of Entities into Batches and their animation
+  blocks;
+- `debugkind.go` `debugKind`, whose two methods are each shape's bake and
+  change Systems, with their scratch and two Materials, and
+  `debuggeometry.go` the shapes' geometry;
+- `shaderfs.go` the embedded mount, and `builtin/scene/debug.wgsl` the
+  debug shapes' shader, which includes model's published sources by their
+  storage paths;
+- `cull.go`, `sort.go`, `arena.go`, `draw.go`, `material.go`, `light.go` and
+  `projection.go` its culling, sort keys, arena, emission, material table,
+  light selection and pass resolution.
+
+## Dependencies
+
+- Go packages: `app`, `ecs`, `gfx`, `kernel`, `m`, `model`, `storage`
+- Plugin dependencies: `ecs`, `model`, `gfx`, `storage`
+- Configuration: none — every Store reserves an internal default population,
+  which is a hint and not a cap
 - Events declared or published: none
 
+## Composing
+
 ```go
-kernel.New(map[kernel.PluginName]any{
-	model.Name: model.Config{PoseSampleRate: 30},
-})
+kernel.New(config).WithPlugins(
+    storageplugin.New(), diskstorageplugin.New(),
+    inputplugin.New(), appplugin.New(), gfxplugin.New(), modelplugin.New(), gogpuplugin.New(),
+    ecsplugin.New(), sceneplugin.New(), game.New())
 ```
 
-`PoseSampleRate` — the global animation bake rate in Hz — is model's, because
-the Lookup that bakes every clip is model's. A zero value takes its default, 60,
-and giving no configuration at all takes it too; a negative rate is refused.
-The model plugin's `Register` contributes the bundled shader's embedded sources
-to storage as a read mount, which storage installs at its own `Start`; scene
-mounts nothing.
+Only the composition root imports `sceneplugin`; a game's Systems import
+`scene`.
 
-**Register `storage` and `model` before `scene`.** The order the demos use is
-`storage`, `input`, `gfx`, `canvas`, `model`, `scene`, then the driver
-(`gogpu`), with the app's own recording plugin last, because it records into the
-queues those plugins declare. A plugin that locks `*model.Lookup` itself names
-`model.Name` among its dependencies, since the Lookup is model's resource.
+The binding takes no world. It declares `ecs`, `model` and `gfx` as
+dependencies, so they register first, and its Components and Systems reach the
+ecs plugin's `*ecs.Entities` at registration through
+`kernel.Registrar.Dependency`.
 
-**Scene needs a WebGPU core adapter.** It reads storage buffers from the vertex
-stage, which compatibility mode does not guarantee — `maxStorageBuffersInVertexStage`
-defaults to 0 there. The binding cog runs on cannot request compatibility mode at
-all, so a compat-only device fails `requestAdapter()` outright and gets no WebGPU
-rather than a degraded scene. There is no fallback path and no partial mode.
-
-## The Two-Statement Floor
-
-A camera and a box. Everything else is optional.
+## Components
 
 ```go
-q.Camera(cameraMain, scene.CameraDescr{
-	Transform: m.LookAt(m.Vec3{X: 3, Y: 2, Z: 4}, m.Vec3{}, m.Vec3{Y: 1}),
-	FovY:      1.0472,
-	Near:      0.1, Far: 100,
-	SunDirection: m.Vec3{X: -0.3, Y: -1, Z: -0.2},
-	SunColor:     m.NewColorSrgb(1, 1, 1, 1),
-})
-q.Box(0, m.At(0, 0, 0), m.NewColorSrgb(0.42, 0.71, 0.94, 1))
-```
-
-`Near` and `Far` are the only required fields: a zero in either is reported and
-the camera skipped. `Passes` empty means one forward pass into the screen; the
-zero `LayerMask` means every layer; a nil `Material` means the bundled PBR.
-
-## Resources
-
-- `*OpQueue` — frame-local recording surface. Scene consumes and republishes it
-  on `app.UpdateEvent`.
-- `*model.Lookup` — model's persistent resource, which the model plugin
-  registers and scene draws from: loaded models, baked pose and morph buffers, the texture
-  cache, buffer-built meshes and the unit meshes, plus the deferred bakes and
-  buffer releases scene's flush applies at the frame boundary. Query and mutate
-  it only through a scoped `LookupAccess` or `LookupDeviceAccess`.
-
-Gameplay normally writes only `*OpQueue`. Mesh baking and `UnloadModel` go
-through `*model.Lookup` via a `model.LookupAccess`; loading, the model queries
-and the texture unloads go through a `model.LookupDeviceAccess`, which needs the
-filesystem and the resource queue beside it. Scene's own flush writes
-`*model.Lookup` to load the models the frame named and to drain its bakes.
-
-## Recording API
-
-Bind `access.GetWrite[*scene.OpQueue]()` in the recording subscription's `Lock`
-and call:
-
-```go
-func (q *OpQueue) Camera(id CameraID, descr CameraDescr)
-func (q *OpQueue) Model(layers LayerMask, path string, draw ModelDraw)
-func (q *OpQueue) Mesh(layers LayerMask, mesh MeshRef, draw MeshDraw)
-func (q *OpQueue) PointLight(layers LayerMask, light LightDescr)
-func (q *OpQueue) SpotLight(layers LayerMask, light LightDescr)
-
-func (q *OpQueue) Box(layers LayerMask, transform m.Transform, color m.Color)
-func (q *OpQueue) Sphere(layers LayerMask, center m.Vec3, radius float32, color m.Color)
-func (q *OpQueue) Plane(layers LayerMask, center m.Vec3, size m.Vec2, color m.Color)
-func (q *OpQueue) Line3D(layers LayerMask, start, end m.Vec3, thickness float32, color m.Color)
-func (q *OpQueue) WireBox(layers LayerMask, center, size m.Vec3, thickness float32, color m.Color)
-
-func (q *OpQueue) TemporaryMesh[TVertex VertexLayout](
-	vertices []TVertex, indices []uint32, topology gfx.PrimitiveTopology) MeshRef
-
-func (q *OpQueue) Reset()
-func (q *OpQueue) OpCount() int
-func (q *OpQueue) Ops(dst []Op) []Op
-func (q *OpQueue) Passes(dst []PassView) []PassView
-```
-
-**Every slice field on every descriptor is borrowed for the duration of the
-call.** Scene copies into its frame arena before returning, so a hot-loop caller
-reuses one backing array. A draw's `Material` is copied too — its tag entries
-and each entry's parameters, though not the `assets.Blob` bytes a parameter carries,
-which are static by contract — so a material may be rebuilt or rewritten the
-moment the call returns. A material named by many draws is copied once a frame:
-the copy is found again by content, so rewriting a shared material between two
-draws still reaches the later one.
-
-### Transform
-
-scene places everything with `m.Transform` — a position, a rotation and a
-per-axis scale — built with `m.At` and `m.LookAt` and adjusted with `WithScale`
-and `WithRotation`, all in `libs/m`. scene declares no placement type of its
-own.
-
-The zero value is the identity. `Scale` is **per axis**, and only an all-zero
-`Scale` reads as `(1,1,1)`: a partly zero one is taken literally, so
-`m.Vec3{X: 2}` collapses the draw onto X and a flattened scale is expressible.
-`WithScale(s)` is the uniform spelling. A non-uniform scale puts that instance,
-and only that instance, on the inverse-transpose normal path. There is no matrix
-override: an `m.Transform` is plain values, which is what lets an ECS Component
-hold one.
-
-### Layers
-
-```go
-type LayerMask uint32 // zero reads as LayersAll
-const LayersAll LayerMask = ^LayerMask(0)
-func Layer(i uint) LayerMask
-```
-
-A camera draws a recorded item iff `layers & camera.CullMask != 0`. There are 32
-layers, and **zero reads as `LayersAll` on both sides**, so the degenerate frame
-works with no masks written anywhere. A light's own mask selects **cameras**,
-not the objects it lights.
-
-### Debug Vocabulary
-
-`Box`, `Sphere`, `Plane`, `Line3D` and `WireBox` are the scene twin of canvas's
-`FillRect` / `StrokeRect` / `Line`: sugar over scene-owned unit meshes and the
-bundled PBR, with no file on disk anywhere in the frame. `Box`, `Sphere` and
-`Plane` are lit; `Line3D` and `WireBox` are **self-lit** — black base colour,
-the given colour as `emissiveFactor` — so a debug line stays visible in a frame
-with no sun, which is precisely the frame being debugged.
-
-A line is a long thin box, not a line-list primitive: WebGPU has no line-width
-control, so a GPU line is one physical pixel and vanishes on a hidpi display.
-Thickness is therefore world-space, and a distant line thins out. The unit box,
-sphere (a 16 × 12 UV sphere, about 350 triangles) and plane are baked lazily on
-first use.
-
-## Cameras And Passes
-
-```go
-type CameraDescr struct {
-	Transform  m.Transform // the camera as a positioned object; scene inverts it
-	Projection ProjectionKind
-	FovY       float32 // Perspective: the literal vertical field of view, radians
-	Height     float32 // Orthographic and Oblique: world units across the target's height
-	Shear      float32 // Oblique: the gain depth rides up the screen by
-	Near, Far  float32 // both required
-
-	CullMask LayerMask // zero reads as LayersAll
-
-	SunDirection m.Vec3 // direction of travel; zero means no sun
-	SunColor     m.Color
-	SunIntensity float32 // zero means 1
-
-	AmbientSky       m.Color
-	AmbientGround    m.Color
-	AmbientIntensity float32 // zero means 1
-
-	Passes []Pass // empty means one default pass
+type Model struct {
+    Ref    model.ModelRef                      // Path, Scene, Node
+    Layers LayerMask
 }
-```
 
-`CameraID` is a defined type over `gfx.Order`: it is both the camera's identity
-— recording one twice is reported and the second dropped — and the default order
-of the passes it emits. gfx reserves no ranges, so a camera interleaves with
-canvas by taking an order between two canvas layer values; a scene camera
-conventionally takes a negative id when canvas draws entirely over it.
-
-A camera's `Transform.Scale` is **ignored**. Only its position and rotation are
-inverted into the view matrix.
-
-`ProjectionKind` is `Perspective`, `Orthographic` or `Oblique`. Both of the
-first two project along the camera's forward axis, so revealing a vertical face
-always costs ground-plane scale: tilt to elevation φ and the ground foreshortens
-by exactly sin φ. **`Oblique` separates the two** — it projects along a direction
-that is not perpendicular to the image plane, so the plane the camera sits in
-renders at true scale while depth is sheared into screen-up by `Shear` instead.
-`Shear: 1` is cavalier, `0.5` cabinet, `0` exactly `Orthographic`, and the
-implied elevation is `atan(1/Shear)`. It is the family behind most 2.5D looks,
-and it cannot be faked from outside scene: two cameras do not register, and a
-non-uniform world scale stretches every object along one horizontal axis.
-
-**An `Oblique` camera's distance is not free the way an `Orthographic` one's
-is.** The shear pivots about the camera's own plane, so standing the camera off
-pans the image: at `Shear: 1` a camera 50 units above the ground puts that ground
-50 units down the screen, with nothing reported. Put the camera **in** the plane
-you want held fixed and let `Near` go negative:
-
-```go
-q.Camera(-1, scene.CameraDescr{
-	// Straight down from inside the ground plane, screen-up towards -Z.
-	Transform:  m.LookAt(m.Vec3{}, m.Vec3{Y: -1}, m.Vec3{Z: -1}),
-	Projection: scene.Oblique,
-	Height:     30,
-	Shear:      0.5,
-	Near:       -100, Far: 100, // the camera sits inside its own depth range
-})
-```
-
-Depth is conventional: near → 0, far → 1, compare `Less`, **clear to 1.0**.
-Oblique does not change that: the shear leaves view-space depth untouched, so
-the ordinary depth buffer still sorts and frustum culling still holds.
-
-```go
-type Pass struct {
-	Tag        PassTag         // zero reads as TagForward
-	Target     gfx.TargetDescr // zero is the screen; gfx.NoTarget() for depth-only
-	Depth      gfx.DepthDescr  // zero is gfx.DepthAuto(), pooled by size and shared
-	ClearColor m.Maybe[m.Color] // absent preserves
-	ClearDepth m.Maybe[float32] // absent preserves; 1.0 is the useful value
-	Order      gfx.Order       // offset from the camera id, not an absolute
+type Mesh struct {                             // pointer-free
+    Ref       model.MeshRef
+    Bounds    m.Vec4
+    Layers    LayerMask
+    NeverCull bool
 }
-```
 
-A clear is an `m.Maybe` — `ClearDepth: m.Some[float32](1)` — whose zero value is
-absent, so **a zero `Pass` clears nothing**: colour and depth are both preserved.
-An empty `Passes` is the default pass: forward tag, screen target, pooled depth,
-**colour preserved and depth cleared to 1.0**. The asymmetry is deliberate — a
-defaulted colour clear would let a second camera silently erase the first, while
-a pooled depth texture shared with every other same-size pass in the frame must
-be cleared or it inherits garbage.
-
-Clears live only on passes; `CameraDescr` carries none. Store ops are inferred
-and not exposed: depth is kept iff the pass names an explicit depth texture,
-colour is always kept.
-
-`Target` is the gfx handle passed through untouched. Scene mints no textures of
-its own — that takes the gfx queue, which a scene recorder does not hold — so a
-render-to-texture camera calls `gfx.OpQueue.TemporaryTarget(w, h, format)`,
-which returns the target to render into and the texture to sample back, and
-hands the target across. A pass with `NoTarget()` takes its size from an
-explicit depth texture; one with neither, or with `NoTarget()` and a present
-`ClearColor`, is reported.
-
-A pass with zero surviving draws is still emitted, so a camera's clear does not
-depend on whether anything was visible.
-
-## Materials And Pass Tags
-
-```go
-type PassTag string
-const TagForward PassTag = "forward"
+type Animation struct{ Plays [model.MaxClipPlays]model.ClipPlay } // model.MaxClipPlays is 4
+type Params    struct{ Values m.List[gfx.ParameterDescr] }
+type Material  struct{ Tags m.List[MaterialTag] }
 
 type MaterialTag struct {
-	Tag   PassTag // zero reads as TagForward
-	Descr gfx.MaterialDescr
+    Tag    PassTag
+    Shader gfx.ShaderDescr
+    State  gfx.MaterialState
+    Params m.List[gfx.ParameterDescr]
 }
 
-type Material []MaterialTag
-```
-
-A `Material` is the gfx materials a draw serves, one per pass tag. **Tag
-participation is purely a material property**: a pass whose tag the material has
-no entry for skips every draw using it, and a draw gets no say in which passes it
-appears in. Layers give per-camera exclusion; the pass list gives per-pass
-control.
-
-A nil `Material` is the bundled PBR, so every draw literal that omits the field
-is untouched. The hand-written one-entry case is `scene.Material{{Descr: descr}}`.
-Materials are keyed by content, so two equal ones batch together however each
-was built, and each frame copies each distinct one once.
-A duplicate tag in one `Material` is reported and the first entry wins.
-
-An entry is a whole `gfx.MaterialDescr` rather than a shader, because pipeline
-state and the parameter set both vary per tag — and a declared-but-unused WGSL
-binding is still reflected and must be bound.
-
-In v1 the only tag is `forward`. The shape is paid for now so that shadows can
-add a `shadow` entry to the same value and every draw that passed nil gains
-shadow casting with no call-site change.
-
-## glTF Models
-
-```go
-q.Model(layers, "models/truck.glb", scene.ModelDraw{
-	Transform: m.At(0, 0, 0),
-	Scene:     "",      // empty is the file's declared default
-	Node:      "crate", // empty is the whole scene; a plain name, not a path
-})
-```
-
-`Scene` names an entry in the file's `scenes` array and `Node` a node within it,
-matched against the first depth-first node carrying that name. **A `Node` draw
-re-roots**: the node's authored world transform is discarded and `Transform`
-replaces it, descendants keeping their relative transforms, so one node of a
-props file behaves as an independent asset. An empty `Node` keeps the scene's
-root transforms, because a scene is authored as one unit.
-
-**Neither selector falls back.** A `Scene` or `Node` that matches nothing skips
-the draw and reports once — one typo'd node name rendering an entire building at
-the origin is the worse failure of the two.
-
-Two ways to change what a model looks like, and they do not overlap:
-
-- `OverrideParams` **merges** by name over each primitive's own material,
-  keeping the file's textures. glTF's parameter names are the contract, so
-  `gfx.ColorParam("baseColorFactor", c)` is what tints a model. It broadcasts to
-  every material the draw binds, and a name the resolved tag entry's shader does
-  not declare is ignored rather than reported.
-- `Material` **replaces** the file's materials wholesale. The file's params
-  are not bound at all, so its textures, base colours, factors and texture
-  transforms do not survive. That is the dissolve, the silhouette and the
-  depth-only case.
-
-A draw may use both: the overrides reach the replacement by name, as they reach
-the file's material. A number neither names is packed as zero, so a replacement
-that reads the bundled material's block supplies what it reads.
-
-`Transforms []m.Transform` instances the draw. Instancing is per primitive, so a
-six-primitive model at a hundred transforms is six batches of a hundred, not six
-hundred draw calls — and the instances share the draw's animation.
-
-### Residency
-
-Loading is synchronous and idempotent. A draw of a path the cache does not hold
-reads, parses and uploads it inside the flush that recorded the draw, so the
-model is drawn in that same frame — and a large file **hitches** that frame. A
-path that could not be loaded **draws nothing**: no placeholder, no substitute.
-
-`LookupDeviceAccess.Preload(path)` is the same load fired without a draw, and it
-is the lever: it moves the cost into a loading screen the app controls. A game
-that skips it takes the cost on first draw.
-
-Failure is terminal and reported once. `State(path)` returns `nil` for a model
-that loaded and the load's own failure otherwise — a wrapped `fs.ErrNotExist`
-for a file that is not there, `ErrModelUnavailable` for one that does not parse
-— so a HUD prints a reason rather than a state word. `UnloadModel` is the only
-way back, and because freeing is immediate, `UnloadModel` followed by `Preload`
-in one handler is a real retry.
-
-## Buffer-Built Meshes
-
-```go
-ref := la.BakeMesh(vertices, indices, gfx.TopologyTriangleList) // durable
-ref := q.TemporaryMesh(vertices, indices, gfx.TopologyTriangleList) // this frame only
-q.Mesh(layers, ref, scene.MeshDraw{Transform: m.At(0, 1, 0)})
-```
-
-`BakeMesh` mints the ref immediately and queues the upload onto the `Lookup` for
-scene's own flush to drain, so a mesh baked and drawn in the same handler still
-uploads in that frame. `UpdateMesh` replaces a durable mesh's geometry wholesale
-at any size, keeping the ref and its id, and refuses a change of vertex layout or
-topology. `ReleaseMesh` stales the ref at once and frees at the frame boundary.
-
-Scene blesses **two named layouts and no others**. `model.Vertex` is the
-**standard** layout: six attributes at locations 0..5, 72 bytes authored and 32
-stored, interleaved. The **skinned** layout is the same six plus `JOINTS_0` and
-`WEIGHTS_0` at locations 6..7, 40 bytes, and it belongs to the glTF loader — a
-converted geometry takes it iff some placement draws it under `SCENE_SKIN`,
-decided once per geometry. **No exported type reports it and no app can author
-one**: nothing but a loaded model's animation ever set a skin binding, so the
-public vertex carries no joints and no weights at all.
-
-A skinned-layout mesh drawn by a variant that declares only the first six is
-ordinary and happens on every model that shares a mesh between an animated node
-and a static one: extra attributes a shader never declares are permitted
-(measured on a conformant D3D12 adapter; the direction that fails is a shader
-input no attribute supplies). Any other `VertexLayout` is a custom layout, and
-**a custom layout requires a custom `Material`**; the reverse — a named layout
-with a custom material — is fine.
-
-`model.Vertex` is what an app *writes*, not what scene *stores*: scene packs it
-into the storage layout its `VertexLayout()` reports, and the two differ. The
-`Normal` and `Tangent` an app writes as `m.Vec3` and `m.Vec4` store octahedrally
-encoded in four bytes each — so they are **directions**, their length is divided
-out and unrecoverable after bake, and `Tangent.W` keeps only its sign. An
-unwritten one stores as +Z with positive handedness, which falls out of the
-encoding rather than being a special case.
-
-`UV0` and `UV1` store in four bytes each too, as two 16-bit unorms against a
-**scale and bias derived per mesh** from the spread of that mesh's own UVs. The
-range is never a parameter: `BakeMesh`, `UpdateMesh` and `TemporaryMesh` take
-none, and every one of them re-derives it, so an update that moves a mesh's UVs
-moves its precision with them. A half float would cost the same four bytes and
-carry no record, but an island touching exactly 1.0 crosses a binade and doubles
-its step for the whole primitive — over the vendored corpus, at a 4096-texel
-texture, the derived range's worst error is **0.48 texels where a half float at
-the same coordinate is 32**.
-
-The record lives in a per-frame storage buffer at `@group(0) @binding(3)`, and
-`sceneInstance`'s last spare word indexes it. **Slot 0 is a reserved identity
-record** — scale 1, bias 0 — which a custom-layout mesh and a standard mesh with
-no UVs both name, so their dequantisation is a branchless no-op with no validity
-flag anywhere. A UV set collapsed to one point stores scale 0 and bias equal to
-that point, which the same multiply-add decodes exactly.
-
-A **custom material drawing a standard-layout mesh must decode them**: include
-`model.VertexDecodePath` (`builtin/scene/vertexdecode.wgsl`) and declare
-`@location(1) normal: vec2<f32>` and `@location(2) tangent: u32`, then call
-`sceneDecodeNormal` and `sceneDecodeTangent` at the top of the vertex stage,
-before any morph or skin. Declaring the old `vec3<f32>`/`vec4<f32>` is refused at
-pipeline time by gfx's vertex-interface check rather than shading from garbage.
-A material that *samples* a texture must also call `sceneDecodeUV` with that
-set's scale and bias from the mesh record — `@location(3)` and `@location(4)`
-are still `vec2<f32>`, so nothing refuses a shader that reads them raw; it
-samples the wrong place instead. `instance.wgsl` declares the buffer and
-`sceneMeshOf(instance)` reaches it.
-
-`Color` is an `m.Color` and stores as a `Unorm8x4`. It is the one attribute
-whose authored and stored forms would otherwise have coincided, and a colour
-type also says which space a component is in where four raw bytes cannot —
-glTF's `COLOR_0` is linear, so a loaded model's byte colour round-trips through
-the float form exactly.
-
-The **skinned layout's** `JOINTS_0` and `WEIGHTS_0` store in four bytes each — a
-`Uint8x4` and a `Unorm8x4` — and neither needs a decode source, because the
-fetch unit hands a shader the same `vec4<u32>` and `vec4<f32>` the wide forms
-did. Only a loaded model has them, and two consequences are contract:
-
-- **A skin is capped at 256 joints**, because a joint index is one byte. It is a
-  per-model cap: every model has its own joint numbering, so a level full of
-  rigged characters does not share one budget. Exceeding it **fails the whole
-  model at load**, naming it, rather than truncating an index to a different
-  bone and welding a prop to the wrong limb with nothing reported.
-- **The shader renormalises.** `sceneDeformVertex` divides the deformed position
-  by the weight total it accumulates, because eight bits cannot hold four
-  weights that sum to exactly one. This is a **behaviour change on existing
-  content, in the direction of correctness**: glTF only says a producer *should*
-  normalise `WEIGHTS_0`, and a file that does not used to be skinned silently
-  shrunk or inflated. A custom material that skins a model's mesh itself owes
-  the same divide.
-
-A custom layout has no such split — scene cannot pack a struct it does not know,
-so its buffer is the caller's Go memory reinterpreted, and its declared offsets
-must be the struct's own.
-
-Buffer-built meshes never skin and never morph. A `MeshRef` has no equivalent of
-the group-2 bindings those need, and their draws take the bundled variant that
-declares no group 2 at all — fourteen bindings and four storage buffers, against
-the eighteen and eight a fully animated draw declares.
-
-## Animation
-
-Animation is **stateless**. Nothing in scene advances a clock, and no play
-survives the frame that recorded it: gameplay owns the time and hands the result
-to the draw, which is what makes scrubbing, reversing and pausing the caller's
-business.
-
-```go
-draw.Plays = []model.ClipPlay{{Clip: "Walk", Time: t, Loop: true, Weight: 1}}
-draw.MorphWeights = []float32{0.4, 0, 0.9}
-```
-
-Up to **four plays** blend per draw, weights normalised across them so they
-express proportions rather than intensities. An empty `Plays` draws the rest
-pose, which is a real pose: row 0 of every model is the authored hierarchy
-resolved once. Poses are baked at `PoseSampleRate` Hz per clip at load.
-
-`MorphWeights` is **positional** over the model's whole flattened target list,
-which `LookupAccess.MorphTargets(path)` names in the same order — one entry per
-target of every morphed node, in depth-first node order. It is the one
-index-addressed thing in the plugin; naming lives on the lookup facade so the
-recording path stays a memcpy. A short slice leaves the rest at 0 and is not an
-error; a long one ignores the tail and reports once. Up to 64 targets blend per
-draw.
-
-## Lights
-
-```go
-q.PointLight(layers, model.LightDescr{Position: p, Color: c, Range: 12})
-q.SpotLight(layers, model.LightDescr{Position: p, Direction: d, Color: c,
-	InnerCone: 0.2, OuterCone: 0.5})
-```
-
-The sun and the hemispheric ambient are per-camera fields; the light array holds
-point and spot lights only. Every zero in `LightDescr` is a default: `Intensity`
-zero means 1, `Range` zero means infinite, `OuterCone` zero means π/4, and
-`InnerCone` zero is a real value.
-
-Shading is naive forward — **every shaded fragment loops the whole list** — so
-the cap of **16 lights per pass** is load-bearing rather than decorative. Past
-the cap, lights are ranked by falloff at the eye and the rest dropped silently; a
-light whose `Range` does not reach the camera scores zero.
-
-A model file's own `KHR_lights_punctual` lights are exposed as data through
-`LookupAccess.ModelLights` and converted by nobody: an app reads them and
-declares the ones it wants.
-
-## Sorting, Culling And Batching
-
-All of it happens in the update-thread flush. **Within a pass, recording order is
-not preserved.**
-
-- **Culling** is the draw's bounding sphere against all six frustum planes. A
-  model uses the bounds its file declares; a `MeshDraw` uses the mesh's baked
-  sphere unless `Bounds` overrides it, and `NeverCull` exempts it outright. A
-  model with no declared bounds, and any draw animated through the pose buffer,
-  is never culled.
-- **Two sort classes**, not three: `alphaMode: MASK` is opaque plus a shader
-  `discard`, so it sorts with opaque. Opaque and mask sort by material then mesh
-  with no depth term; blend sorts back-to-front by view-space distance. Sorting
-  is scene's entire contribution to transparency.
-- **Batching** collapses the surviving instances of one instanced call into one
-  draw call. A blended instanced draw is the exception and splits back into one
-  batch per instance, so its entries keep their own depths.
-
-The sort is per pass, not per frame: a draw two cameras both see is culled,
-sorted and packed once in each of their passes.
-
-## Inspecting A Recording
-
-Two levels, both always retained, both aliasing flush storage and valid until the
-next flush — the same contract as `canvas.Ops`:
-
-- `Ops(dst []Op) []Op` is what a recorder recorded, canvas's shape exactly: the
-  call as it was made, not the draws scene derived from it, so a `WireBox` is one
-  `Op`.
-- `Passes(dst []PassView) []PassView` is the flush **result**.
-
-```go
-type PassView struct {
-	CameraID  CameraID
-	Order     gfx.Order
-	Tag       PassTag
-	Frustum   m.Frustum
-	Recorded  int // draws the camera's cull mask selected
-	Culled    int // of those, rejected by the frustum
-	Instances int // packed after the tag filtered the survivors
-	Lights    int // packed after light culling and the cap
-	Batches   []BatchView
+type Light struct {                            // pointer-free
+    Descr  model.LightDescr                    // Position and Direction ignored
+    Layers LayerMask
 }
 
-type BatchView struct {
-	MeshID, MaterialID           uint32
-	FirstInstance, InstanceCount int
+type Camera struct {
+    ID                                      CameraID
+    Projection                              ProjectionKind
+    FovY, Height, Shear, Near, Far          float32
+    CullMask                                LayerMask
+    SunDirection                            m.Vec3
+    SunColor                                m.Color
+    SunIntensity                            float32
+    AmbientSky, AmbientGround               m.Color
+    AmbientIntensity                        float32
+    Passes                                  m.List[Pass]
 }
 ```
 
-`Passes` publishes the frame the **last flush** consumed, so a reader inside an
-update handler is looking at the previous frame. `Frustum` is published because
-asserting that a specific sphere was rejected by a specific frustum is the whole
-point of a culling test; without it such a test can only count.
+`CameraID`, `ProjectionKind`, `PassTag`, `Pass` and `LayerMask` (with
+`LayersAll` and `Layer`) are the camera, layer and pass vocabulary, declared in
+`internal/camera.go` and aliased by the root.
 
-Everything here is decided with no GPU anywhere, which is what lets a demo's
-assertions be a plain `go test` beside its `main.go`.
+All seven are registered by this Bundle's plugin, in `internal`, because a
+Component is registered by the plugin that defines its Go type — which is what
+keeps cog's coupling check working on Component data. See
+[Packages](#packages).
 
-## Lookup API
-
-Residency, bounds, naming and mesh lifecycle go through `*model.Lookup`. A
-resource must not retain filesystem or GPU handles past its lock scope, so
-callers acquire a handler-scoped facade:
-
-```go
-la := model.NewLookupAccess(kernel, lookup)                          // one resource
-dev := model.NewLookupDeviceAccess(kernel, lookup, fsys, resources)  // three
-```
-
-**Two facades, because loading needs the device.** A load now runs inside the
-call that asks for it, so every verb that can load needs an `fs.FS` and the
-resource queue at the call. Putting them all on one facade would make a consumer
-that only bakes a mesh declare a `*gfx.ResourceQueue` write — which for an ECS
-System means serialising against canvas's flush, scene's flush and gfx. So the
-loading half is its own facade, and `fsys` is the storage filesystem converted
-once per handler, because handing it out as an interface allocates.
-
-| Method | Facade | Result | Notes |
-| --- | --- | --- | --- |
-| `State(path) error` | device | `nil`, or why not | The only call that says *why* a model is not there. |
-| `Preload(path)` | device | — | The same load a draw runs, run without one. |
-| `Nodes(ref, dst) ([]string, bool)` | device | addressable node names | Depth-first, the hierarchy's own order. Unnamed nodes are absent. |
-| `Bounds(ref) (m.Vec4, bool)` | device | xyz centre, w radius | Local space post-re-rooting; the **rest pose** for anything drawn through the pose buffer. |
-| `AABB(ref) (min, max m.Vec3, bool)` | device | axis-aligned box | Same space and same pose rules as `Bounds`. |
-| `Joints(path, dst) ([]string, bool)` | device | joint names in joint order | Names only; no hierarchy. |
-| `Clips(path, dst) ([]ClipInfo, bool)` | device | name and duration | Duration is what tells a caller a one-shot play has ended. |
-| `MorphTargets(path, dst) ([]string, bool)` | device | target names | The flattened order `MorphWeights` is positional over. |
-| `ModelLights(path, dst) ([]ModelLight, bool)` | device | the file's punctual lights | In the model's own space; nothing converts one automatically. |
-| `PoseBytes(path)` / `MorphBytes(path)` | device | `(int, bool)` | Per-model GPU memory. |
-| `TotalPoseBytes()` / `TotalMorphBytes()` | plain | `int` | Lookup-wide running counters; no `ok`, and they load nothing. |
-| `BakeMesh` / `UpdateMesh` / `ReleaseMesh` | plain | — | Buffer-built mesh lifecycle. |
-| `UnloadModel(path)` | plain | — | Geometry, poses and material records, freed at the call. **Does not cascade to textures.** |
-| `UnloadTexture(path)` | device | — | Every colour-space variant and embedded image that path baked. Checks no loaded model. |
-| `UnloadAll()` | device | — | Every loaded model and cached texture. |
-
-**Every query returns `(value, ok)` and every query loads.** `ok` means only
-"this value is real": it is false for a path that could not be read and for a
-selector that matched nothing alike, which is why `State` exists. A `ModelRef` is a struct
-rather than three bare strings because the bare form has a transposition bug that
-compiles.
-
-Unloads are queued and applied at the top of the next flush, so `UnloadModel`
-followed by `Preload` in one handler is a no-op — the preload sees the old entry.
-`UnloadModel` is also the only retry lever there is: a failed path clears there
-and nowhere else.
-
-## Coordinate Helpers
-
-```go
-func ViewProjection(camera CameraDescr, viewport m.Vec2) m.Mat4
-func WorldToScreen(camera CameraDescr, viewport m.Vec2, world m.Vec3) (m.Vec3, bool)
-func ScreenToWorld(camera CameraDescr, viewport m.Vec2, screen m.Vec3) (m.Vec3, bool)
-func ScreenToRay(camera CameraDescr, viewport m.Vec2, screen m.Vec2) (m.Ray, bool)
-```
-
-`WorldToScreen` returns X and Y in target pixels from the top-left and Z as the
-WebGPU 0..1 NDC depth, which is exactly what `ScreenToWorld` takes back, so the
-two round-trip. Off-screen but in front stays `ok` — the coordinate is
-extrapolated past the target edge and is correct there, which is what an
-off-screen indicator arrow needs. **Behind the eye plane never returns a
-coordinate**: dividing by a negative w yields a plausible, mirrored,
-confidently wrong point.
-
-Scene retains no draw list to raycast against, so picking is `ScreenToRay` plus a
-loop over the caller's own entities, calling `Bounds` or `AABB` and keeping the
-smallest `t`.
-
-## Shader-Side Contract
-
-Scene declares no uniform block. Everything it binds is a storage buffer or a
-bound range of one.
-
-| binding | group | contents |
+| Component | draws as | notes |
 | --- | --- | --- |
-| `sceneFrame` | 0 | view, projection, viewProj, camera position, sun, ambient, `lightCount`, `lights: array<SceneLight, 16>` |
-| `sceneInstances` | 0 | `array<SceneInstance>`, bound by range per pass |
-| `sceneAnim` | 0 | `array<vec4<f32>>` arena, indexed by `sceneInstance.animOffset` |
-| `sceneMeshes` | 0 | `array<SceneMesh>`, 32-byte UV scale/bias records, indexed by `sceneInstance.mesh`; slot 0 is the identity |
-| `scenePoses` | 2 | baked 48-byte pose records |
-| `sceneSkinJoints` | 2 | per-skin, per-joint 112-byte record |
-| `sceneMorphDeltas` | 2 | `array<u32>`, one block per morphed primitive: per-slot ranges, a base/first/count per target, then the records |
+| `m.Transform` | the instance's, light's or camera's placement | **Required**, and the ecs plugin's: an Entity without one is not recorded. |
+| `Model` | one instance per primitive of the view `Ref.Scene` and `Ref.Node` select in `Ref.Path` | The path is a string. The load System loads it; residency and a bad path's report are model's. |
+| `Mesh` | one instance of `Ref` | The ref comes from `model.LookupAccess.BakeMesh`. |
+| `Animation` | the Entity's own `sceneAnim` block | Optional. A play with an empty `Clip` is an unused slot. **Nothing here advances clip time**; that is the game's. |
+| `Params` | the Batch's gfx parameters, laid by name over every tag's, the material's numbers among them | Optional, and part of the Batch key, so `gfx.ColorParam("baseColorFactor", c)` tints a model or a mesh. |
+| `Material` | one entry per pass tag, each **laid over** what the file provides | Optional, any number of tags. **Absent is no material**: the default scene shader over the file's own material, or over the bundled PBR's for a mesh. Present with no tags serves no pass. See [A Material overlays the file](#a-material-overlays-the-file). |
+| `Light` | one light of each pass whose camera draws its layers | Position is the Transform's; a spot's direction is the Transform's rotation applied to −Z, the way `m.LookAt` faces. |
+| `Camera` | its passes, labelled `scene.camera<ID>.<tag>` | Placement is the Transform's; its scale is ignored. An empty `Passes` is one default pass. Two Cameras with one ID report `ErrCameraAlreadyRecorded`, and the first walked wins. |
 
-Plus the bundled material's own bindings in group 1: its five textures and
-five samplers, and `scenePbrMaterial`, the uniform block its numbers are in.
-scene binds none of those itself. They are params of the draw's material, the
-numbers among them, and gfx packs the block from them by member name, with the
-draw's params over its material's — so scene knows no shader's layout, and a
-debug shape's colour is two params laid over white paint. The `scene` name
-prefix is reserved for engine-supplied bindings.
+`Model`, `Mesh`, `Light` and `Camera` are what the recording System queries,
+each beside `m.Transform`. `Animation`, `Params` and `Material` are
+**optional** and reached through accessors — `Animation` once per animated
+Entity, `Params` and `Material` once per Batch — a Query
+matches an Entity having *at least* the Components it names, so naming an
+optional one would drop every Entity without it out of the walk.
 
-**The storage-buffer budget is seven of eight.** Reflection walks module
-globals without consulting entry points, so every reflected binding is emitted
-`Vertex|Fragment` and a vertex-only buffer consumes a fragment-stage slot too.
-Three rules follow, and they are contract:
+`Mesh` and `Light` are pointer-free and keep the ECS's fast path. The rest hold a
+string, a `List` or a `Blob` and give it up for their own Store only.
 
-- No scene shader may declare a ninth storage buffer. The fully animated
-  variant holds seven: the material's numbers left storage for the uniform
-  block, which gave one back.
-- **A caller-supplied material over the bundled stages may declare one of its
-  own.** It may freely use the bindings scene binds on every draw —
-  `sceneFrame`, `sceneInstances`, `sceneAnim` and `sceneMeshes`, any subset —
-  because those are scene's and already counted. That is what the `procedural`
-  demo does.
-- gfx checks every reflected shader against `gfx.DefaultLimits()`, the browser
-  floor, never against the device's reported limits, and reports
-  `ErrShaderExceedsWebLimits`. A desktop adapter reports hardware limits, so
-  checking the real device would pass a build no browser can run.
+A spawn names whichever it means:
 
-The shading sources are published. A caller supplies a whole
-`gfx.MaterialDescr` with its own WGSL and `//#include`s what model publishes by
-absolute storage name: `model.VertexDecodePath` to read the storage vertex,
-`model.FramePath` for the pass's camera, sun, ambient and lights, and
-`model.PbrPath` for `sceneShadeSurface`, which lights a `SceneSurface` exactly as
-the bundled material is lit. `PbrPath` includes `FramePath`, and between them
-they declare one binding, `sceneFrame`, which scene binds on every draw. Each
-constant's doc lists the names its source declares; do not declare those names
-again. The rest of the bundled shader stays private, and the contract is in
-[model.md](../../model/docs/specs/model.md#custom-shaders).
+```go
+type Crate struct {
+    Place m.Transform
+    Model scene.Model
+    Tint  scene.Params
+}
 
-## Errors
+func spawnCrates(sp *ecs.Spawn[Crate]) {
+    sp.New(Crate{
+        Place: m.At(0, 0, -5),
+        Model: scene.Model{Ref: model.ModelRef{Path: "models/crate.glb"}},
+        Tint:  scene.Params{Values: m.NewList(gfx.ColorParam("baseColorFactor", m.Color{R: 1, A: 1}))},
+    })
+}
+```
 
-Everything scene refuses is reported through `kernel.ReportError` as a typed
-error value, and the frame carries on. The house rules behind them:
+## The load System
 
-- **Skip, never substitute.** A model that could not be loaded, a selector that
-  matches nothing, a mesh ref that has gone stale, a light with no cone — each
-  costs its own draw and nothing else. Nothing is stood in for.
-- **Report once.** Load failures key on the path, so a model drawn every frame
-  reports once, not sixty times a second.
-- **Never default a required number.** A zero `Near` or `Far` skips the camera
-  rather than substituting a plausible value that would hide the caller's bug
-  behind a degenerate projection.
+It runs on what changed, and is ordered before the recording System:
 
-A load report fires from the handler whose call triggered the load — the flush
-for a draw, the caller's own handler for a query or a `Preload`.
+```go
+func load(
+    k kernel.Kernel,
+    modelHooks    *ecs.Hooks[scene.Model, ecs.HookAll],
+    meshHooks     *ecs.Hooks[scene.Mesh, ecs.HookAll],
+    materialHooks *ecs.Hooks[scene.Material, ecs.HookAll],
+    paramsHooks   *ecs.Hooks[scene.Params, ecs.HookAll],
+    models    *ecs.Get[scene.Model],
+    meshes    *ecs.Get[scene.Mesh],
+    materials *ecs.Get[scene.Material],
+    params    *ecs.Get[scene.Params],
+    lookup     *ecs.Write[*model.Lookup],
+    filesystem *ecs.Read[storage.FileSystem],
+    resources  *ecs.Write[*gfx.ResourceQueue],
+    work       *ecs.Write[*keyScratch],
+)
+```
 
-## Event Subscribed
+- **For each Entity a Hook names**, once however many name it, it resolves the
+  `ModelRef` to a `ModelHandle`, loading the model if needed, and computes the
+  Batch keys: (`ModelHandle`, primitive, material key, `Params` hash) for each
+  primitive of a `Model`, and (`MeshRef`, material key, `Params` hash) for a
+  `Mesh`. A primitive is named by the mesh it draws. The material key is the
+  model material's load-time key; under a `Material` it is that key and the
+  `Material`'s content key together, because one `Material` over two file
+  materials resolves to two materials. A `Mesh`'s is the `Material`'s alone,
+  and zero is the bundled PBR a `Mesh` with no `Material` draws with. `Params`
+  are hashed with `gfx.FingerprintParams`, and no parameters hash as zero.
+- **It stores both in its key scratch, keyed by Entity**, never in a
+  Component: writing a Component would make it that Component's writer. An
+  Entity that loses its `Model` and `Mesh`, or is despawned, leaves the scratch.
+- **It drives model's bake and release queues.** Nothing else in an app
+  drains them.
+- **It ensures the bundled PBR** once the backend is up, and hands its four
+  materials and the backend's readiness to the recording System through the
+  key scratch, since the recording System holds the Lookup only for reading.
+- **In a steady frame it walks no Entity and hashes nothing.** No Hook names
+  anything, so what is left is draining two empty queues.
+- **It is the only scene System that loads**, and it reads every Store it
+  keys from. Beside it only the [debug shapes'](#debug-shapes) ten Systems hold
+  `Write[*model.Lookup]`, to bake the shapes' meshes, and all ten run before
+  it. Loading is exclusive; nothing else is.
+- **A model that does not load stays unkeyed** until its Component changes
+  again, because every load failure but a missing backend is cached. Entities
+  touched before the backend is up wait for the first frame that has one.
+- **`Model` and `Mesh` spell their tail padding out**, and model's `MeshRef`
+  its padding after the source, because a Changed record is a difference in
+  bytes.
 
-`scene.FlushOnUpdate` subscribes to `app.UpdateEvent`. It writes the scene
-`*OpQueue` and `*model.Lookup`, reads `gfx.Viewport` and `storage.FileSystem` — the
-latter because a model draw loads the file it names — and writes `gfx.OpQueue`
-and `gfx.ResourceQueue`. It is ordered `Last()` but explicitly before
-`gfx.PresentOnUpdate`, exactly as canvas is: gameplay records first, canvas
-and scene emit graphics draws second, gfx presents last. The identity is
-declared in the root so a recorder can order itself
-`Before[scene.FlushOnUpdate]()` importing the root and nothing else.
+A game System that spawns drawables or writes these Components orders itself
+`Before[scene.LoadOnUpdate]()`, so the change is keyed in the same tick.
 
-**Everything scene decides happens in that flush, on the update thread** —
-projection resolve, culling, sorting, instance packing and buffer uploads. Scene
-never runs on the render thread: a frustum needs aspect, not pixel size, and
-`gfx.Viewport` already carries the exact aspect here. The one cost is that a
-screen-targeted camera's aspect is up to one frame stale during a window resize.
+## The recording System
 
-## Demos
+It lives in `internal`, beside its Queries and its scratch:
 
-Every contract above has a runnable demo in
-[cog-examples](https://github.com/dvoyni/cog-examples) under `cmd/scene/`, each
-with its own doc comment saying what it exercises and what only eyes can judge,
-and each with a `_test.go` beside it that asserts the flush result with no GPU.
-`go test ./cmd/scene/...` is the whole acceptance suite.
+```go
+func record(
+    k kernel.Kernel,
+    models  *ecs.Query[modelQuery],   // m.Transform + Model
+    meshes  *ecs.Query[meshQuery],    // m.Transform + Mesh
+    lights  *ecs.Query[lightQuery],   // m.Transform + Light
+    cameras *ecs.Query[cameraQuery],  // m.Transform + Camera
+    animations *ecs.Get[scene.Animation],
+    params     *ecs.Get[scene.Params],
+    materials  *ecs.Get[scene.Material],
+    keys     *ecs.Read[*keyScratch],
+    lookup   *ecs.Read[*model.Lookup],
+    viewport *ecs.Read[*gfx.Viewport],
+    work *ecs.Write[*scratch],
+    out  *ecs.Write[*gfx.OpQueue],
+)
+```
 
-| demo | what it is for |
+That signature is its whole lock set: every Store, the load System's keys,
+model's Lookup and the viewport read; its scratch and gfx's queue written; and
+nothing declared in a `Lock` func anywhere. **It holds the Lookup only for
+reading**, through `model.NewLookupReadAccess`, so it never loads: the load
+System is the only scene System that writes it.
+
+Once a tick it:
+
+1. **buckets** every placed `Model` and `Mesh` into the Batch its key names,
+   reading the key the load System wrote into the key scratch. A `Model` is one
+   instance per primitive of its view; each instance keeps its own world
+   matrix, world sphere, layers and animation offset. A Batch resolves its mesh,
+   its material and its `Params` once, from the first Entity bucketed into it;
+2. packs each light through `model.PackLight` and each camera's passes out of
+   their `List`;
+3. **for each camera and pass**, culls every instance by the camera's layer
+   mask and the pass's frustum, and filters each Batch's survivors by whether
+   its material serves the pass's tag;
+4. **sorts** the opaque survivors by material and Batch and the blended ones
+   back to front, and **packs one instanced draw per opaque Batch**, and one per
+   blended instance, through `model`'s packers;
+5. emits the arenas and the passes into `*gfx.OpQueue`, bound under `model`'s
+   binding names.
+
+A frame before the backend is up, or with no window, is skipped whole.
+
+**One recording System per bound plugin is the shape.** `*gfx.OpQueue` is one
+resource, so every System that writes it serialises against every other,
+whatever Components they read.
+
+`scene.RecordOnUpdate` is its subscription identity, aliased in the root's
+`id.go` and named verb plus event as gfx's `PresentOnUpdate` is. **It declares
+no ordering beyond the load System's `Before`.** gfx subscribes
+`gfx.PresentOnUpdate` `Last`, so anything that does not ask to be last already
+runs before it, and what the recording System draws in a tick is in what that
+tick presents. A game System that moves Transforms orders itself
+`Before[scene.RecordOnUpdate]()`.
+
+**Passes are labelled `scene.camera<ID>.<tag>`**, so a HUD reading
+`ArmFrameCmd` finds a pass by the camera and tag it draws.
+
+**It reports**: `ErrCameraAlreadyRecorded`,
+`ErrCameraClipPlanesMissing`, `ErrCameraProjectionDegenerate`,
+`ErrPassTargetUnsized`, `ErrColourlessPassWithoutDepth`,
+`ErrColourlessPassClearsColour`, `ErrMaterialTagAlreadyServed` and
+`ErrMeshCustomLayoutNeedsMaterial`, beside model's `ErrMeshUnavailable` and
+the light packer's errors.
+
+## Batches
+
+**A Batch is one instanced draw per pass**: every Entity whose key is equal.
+The key is the load System's, taken on change, so a steady frame never hashes a
+material or a parameter.
+
+- **What splits a Batch** is anything that changes the key: a different mesh or
+  primitive, a different `Material`, or different `Params` values. **Equal
+  `Params` batch**: 5 000 crates all tinted red are one Batch, and 5 000 crates
+  tinted 5 000 ways are 5 000.
+- **Not in the key:** layers, culling and the camera. They filter a Batch's
+  instances per pass, so one Batch can draw a different subset in each pass.
+- **Skinned and morphed Entities that share a mesh and material share a Batch.**
+  Each instance carries its own `sceneAnim` offset, which the shader reads per
+  instance.
+- **Blended materials stay one draw per instance**, sorted back to front across
+  Batches. An alpha-tested cutout is opaque, so it batches.
+- **Batching is always on**, with no Component to opt out. The only thing it
+  changes that a game could observe is the order of opaque draws, which is
+  unspecified anyway.
+
+The recording System also splits by shader variant, which follows from the key
+for a file's own material, so that a `Material` over a skinned and an unskinned
+use of one mesh never shares group 2 bindings only one declares.
+
+## A Material overlays the file
+
+A `Material` changes how a draw is shaded without losing what the file says
+about it. For **each primitive**, and for each tag, the recording System
+resolves:
+
+| Part | Resolved from |
 | --- | --- |
-| `tracer` | the narrowest complete path through every layer |
-| `box` | the whole debug vocabulary, with no file on disk in the frame |
-| `procedural` | caller-owned geometry, and a material the program wrote itself |
-| `pbr` | the material and lighting contract, over six Khronos models |
-| `animated` | skinning, morph targets, and the browser canary |
-| `instancing` | one call for five hundred crates, per-instance culling, the sort key |
-| `cameras` | two cameras, a texture target, layers, and screen-space projection |
-| `loading` | residency, addressing and the lookup facade |
+| **shader** | the tag's `Shader`, or the default scene shader where it is zero — either way under the variant's `SCENE_SKIN` / `SCENE_MORPH` for this primitive's geometry |
+| **params** | the primitive's own — its five textures and samplers, white and flat-normal defaults in empty slots, and its numbers, one per member of the `scenePbrMaterial` uniform block — overlaid by name with the default scene shader's `Params`, then the tag's; the `Params` Component rides on the draw, which gfx lays over all of them |
+| **state** | the tag's `State`, or the file's (alpha mode, double-sided) where it is zero |
 
-One contract a desktop run cannot check, because a native adapter reports
-hardware limits rather than the spec's floor: **the storage-buffer budget**. It
-needs a browser run — `bash cmd/web/build.sh <demo>`. The **depth-only pass** used
-to be the second one; it now executes on any Vulkan desktop as well as in a
-browser, and is declined only on GLES.
+A mesh takes the same path: its "file" is the bundled PBR's ingredients, white
+and flat in every slot, opaque, single-sided, white paint.
 
-## Deviations From The Specification
+**scene knows no shader.** It binds what describes the scene — the frame,
+the instances, the animation block, the mesh records and, for deforming
+geometry, the group 2 buffers — and hands a material's params to gfx, which
+packs whatever the shader in effect declares by name. The bundled material's
+numbers are that shader's uniform block; a shader of your own gets its
+same-named members filled the same way, and one declaring none of them costs
+nothing for their being there.
 
-`bundles/scene/docs/specs/scene.md` is the contract this implementation was judged against, and each
-place the build had to depart from it is recorded in the spec itself rather than
-absorbed quietly. The ones a caller can observe:
+- **Nothing the file says is lost**, per primitive, so a model of several
+  materials keeps each one's textures, numbers and state under one `Material`.
+- **The variant is cog's**, whatever shader is in effect, so a caller's shader
+  over a skinned model is compiled with `SCENE_SKIN` and gets the pose buffers,
+  and over a static one declares nothing it is not given.
+- **Replacing is a special case, not a second mode.** gfx matches params to
+  bindings by name and ignores one no binding declares, so an outline shader
+  declaring only its own bindings simply never reads the file's textures.
+- **A zero `Shader` and a zero `State` are unset**, not values: the zero
+  descriptor is no shader, and a tag wanting the zero state — `StateOverlay2D`
+  — cannot say so.
 
-- **There is no `scene.OpQueue.TemporaryTarget`.** The spec's recording API
-  listed one. A temporary target's texture id is minted through `gfx.OpQueue`,
-  which a scene recorder does not hold, so the passthrough would hand back a
-  target with no id in it. `gfx.OpQueue.TemporaryTarget` returns the target and
-  the texture together; `Pass.Target` takes the handle untouched.
-- **A `NoTarget()` depth-only pass executes on Vulkan and in a browser, and is
-  declined on GLES.** `cog/extensions/gogpu` asks the selected backend, not the build tag,
-  and reports `gogpu.ErrDepthOnlyPassUnsupported` once per run where it declines.
-  Vulkan was fixed by `gogpu/wgpu#353` in v0.34.5; the GLES HAL binds no
-  framebuffer for a colourless pass and would draw into whatever was bound last,
-  so it is refused rather than encoded. An unrecognised backend is refused too.
-  The rule this leaves: a depth-only pass may be written, but its output may not
-  be depended on in the same frame unless you know the backend. Shadow maps
-  inherit it.
-- **gfx places every texture barrier itself.** The spec claimed the frame being
-  one command encoder and one submit meant WebGPU inserted them. It does not —
-  `gogpu/wgpu` derives no barriers at all — so gfx transitions each texture in
-  both directions around the passes that use it.
-- **The morph attribute mask is a contiguous prefix** of position, normal,
-  tangent, not an arbitrary set. The record header carries a stride and no mask,
-  so which slots a record holds must be recoverable from the stride alone — which
-  survives the per-slot widths only because 8 / 12 / 16 bytes are distinct sums.
-  A target that deforms the normal and not the position stores an explicit zero
-  position slot.
-- **A morph target that moves nothing keeps its slot.** It stores no records and
-  costs 12 bytes of header. Dropping it would renumber every slot after it, and
-  `MorphWeights` is positional over that list.
-- **The storage-buffer budget is seven of eight**, not the "six with two
-  spare" the early tickets record. Interleaving the two per-skin arrays into one
-  `sceneSkinJoints` buffer recovered the eighth slot and the per-mesh UV record
-  spent it; the material's numbers moving to the uniform block
-  ([#568](https://github.com/dvoyni/cog/issues/568)) gave one back.
-- **`Bounds` and `AABB` answer about a primitive's rest placement**, not the
-  local matrix the load first used. That matrix is the identity for anything
-  drawn through the pose buffer — a glTF skin, and equally a node with an
-  animation channel of its own carrying a mesh.
-- **Canvas cannot composite a rendered texture through its built-in triangle
-  material.** All three canvas shaders run every texel through the key-colour
-  ramp, and no key colour makes it an identity, so a 3D render composited that
-  way loses its dark warm shadows to neutral grey. A caller-supplied passthrough
-  material is the fix; `cmd/scene/cameras/composite.go` is a minimal one.
-- **`SCENE_NONUNIFORM` is invisible on a box.** Every face normal of an
-  axis-aligned box is an eigenvector of an axis-aligned scale, rotation
-  included, so the spec's motivating examples — `Line3D` and `WireBox` — are
-  exactly the cases where the flag cannot be seen. Only a curved surface under a
-  caller's non-uniform `Scale` shows it.
+**The default scene shader** is model's, set with
+`model.LookupAccess.SetDefaultSceneShader(model.SceneShaderDescr{Source, Params})`
+and unset by the zero descriptor. It feeds every `Model` and `Mesh` with no
+`Material` and every tag that sets no shader, and its `Params` ride on every
+draw under the Entity's own, so a scene-wide binding needs nothing per Entity.
+Nothing is baked from it: materials are resolved from their ingredients every
+frame, so setting it after models load takes effect on the next frame.
+
+**An app shader is the bundled PBR plus a step.** It includes
+`model.VertexStagePath` and `model.FragmentStagePath`, declares its own
+bindings in group 3 — the one bind group the scene layout leaves free — and
+writes an `fs_main` around `scenePbrFragment`. The material's numbers are the
+one uniform block gfx allows a shader, and its own per-draw numbers are members
+it adds to that block, composing the block from `model.MaterialProloguePath`,
+its own fields over `model.MaterialFieldsPath` and `model.MaterialEpiloguePath`
+before it includes the stages. Larger data rides in textures and samplers, or
+in the one storage buffer the bundled shader's animated variant leaves of the
+web floor's eight:
+
+```wgsl
+//#include builtin/model/vertexstage.wgsl
+//#include builtin/model/fragmentstage.wgsl
+@group(3) @binding(0) var sightDepths: texture_2d<f32>;
+
+@fragment
+fn fs_main(in: SceneVertexOut, @builtin(front_facing) ff: bool) -> @location(0) vec4<f32> {
+    let lit = scenePbrFragment(in, ff);
+    return vec4(mix(vec3(0.0), lit.rgb, sightVisibility(in.worldPosition)), lit.a);
+}
+```
+
+**A binding nothing supplies does not cost the frame.** gfx fills an unfilled
+texture with white and an unfilled sampler with its default, and refuses a
+draw whose declared storage buffer nothing supplies, reporting
+`gfx.ErrStorageBufferUnsupplied` once under the shader's label and the
+binding's name. That draw is skipped, and the rest of the frame draws.
+
+## Debug shapes
+
+A box, a sphere, a plane, a line and a wire box, each a Component of its own:
+
+```go
+type DebugBox     struct{ Size m.Vec3; Color m.Color; Layers LayerMask }
+type DebugSphere  struct{ Radius float32; Color m.Color; Layers LayerMask }
+type DebugPlane   struct{ Normal m.Vec3; D float32; Size m.Vec2; Color m.Color; Layers LayerMask }
+type DebugLine    struct{ From, To m.Vec3; Width float32; Color m.Color; Layers LayerMask }
+type DebugWireBox struct{ Size m.Vec3; Width float32; Color m.Color; Layers LayerMask }
+```
+
+A shape is described in its Entity's local space and stands at the Entity's
+`m.Transform`, whose scale multiplies on top. A plane is the points with
+`Normal·p + D = 0`: its quad is centred at `-D` along the unit normal, one-sided,
+and `Size.X` runs along world +X projected onto the plane, or +Z where the
+normal is along X. A line is a box of `Width` by `Width` from `From` to `To`; a
+wire box's twelve edges run half a `Width` past each corner so the corners
+close.
+
+**A shape is drawn as an ordinary Mesh, not by a path of its own.** Each kind
+has two Systems, chained from `DebugOnUpdate` and all before `LoadOnUpdate`:
+
+- **the bake System** walks the shapes with no `Mesh`, builds the geometry,
+  bakes it through `model.LookupAccess.BakeMesh` and adds the `Mesh`, the
+  `Params` holding `Color` as `baseColorFactor`, and the `Material`. The shape
+  owns all three: a caller does not add or write them;
+- **the change System** reads the shape's Hooks. A geometry edit rebakes the
+  mesh in place with `UpdateMesh`, keeping the ref and freeing the buffers it
+  replaces; a `Color` or `Layers` edit rewrites the `Params`, `Material` and the
+  `Mesh`'s layers; removing the shape or despawning its Entity releases the
+  mesh, and on a living Entity takes the three Components away. The refs live in
+  the kind's scratch, because a despawn record has no `Mesh` left to read.
+
+Both write `model.Lookup`, as the load System does, so the chain costs no
+parallelism: none of the ten could overlap each other or it anyway. A game
+System that spawns or edits shapes orders itself `Before[DebugOnUpdate]`.
+
+**Every shape is self-lit.** The debug shader, `builtin/scene/debug.wgsl`
+in scene's own mount, is the bundled vertex stage and a fragment stage
+returning `baseColorFactor` untouched, so no light, sun or ambient reaches a
+shape. An alpha below 1 draws through a blended `Material`;
+at 1 the shape is opaque and batches.
+
+**A shape with nothing to draw draws nothing and reports nothing**: a size or
+radius not above zero, a zero `Width`, a line of no length, a plane with no
+normal. It gets no `Mesh`, and the bake System checks it again each tick; a
+drawable shape edited into one gives its mesh back.
+
+## What a binding may not do
+
+Stated as prohibitions, because they are what a second binding — physics, audio,
+or a backend adopted from outside cog — has to keep true, and none of them has a
+compiler behind it.
+
+- **A Component holds no mutable indirection, transitively.** Enforced at
+  registration. A string, an `assets.Blob` and an `m.List` are admitted; a bare
+  slice is not. Descriptors that keep a slice — `gfx.MaterialDescr`'s
+  params, a camera's passes — are therefore spelled out as Component fields
+  and rebuilt per Batch, which is what `MaterialTag` is.
+- **Copy a List out through `All()`; never hand gfx its backing.** There is
+  no `Raw()`, and a view of a Store's memory would be read after this System's
+  locks are gone. The copy into reused scratch costs no allocation.
+- **Anything a System keeps between calls is a resource.** The scratch is one,
+  owned by this plugin and named in the signature, so it is in the lock set and
+  the kernel keeps two holders apart. Nothing is captured in a closure.
+- **Per-frame slices come from scratch allocated once, never from a stack
+  array.**
+- **Reset scratch per frame, not per Batch or per material tag.** A material
+  descriptor keeps the params slice it is built around until gfx copies it at
+  the draw, so each Batch's material and `Params` are appended after the
+  previous ones and windowed with a full slice expression, and nothing is
+  overwritten before the frame is emitted.
+- **Release what the scratch held once the frame is emitted.** It holds copies
+  of Components — names, and `Blob` bytes that may be a texture's pixels — and a
+  stale slot would keep a despawned Entity's data reachable.
+- **Do not cache an Entity without checking liveness, and do not restructure the
+  world from a recording System.** Recording holds `*Entities` for read, which is
+  not the authority to retire anything.
+- **Do not declare a placement Component beside `m.Transform`.** Two Components
+  describing one position are unrelated to the scheduler, whose lock unit is the
+  Component type: two Systems writing them run concurrently, and nothing reports
+  that they disagree. A binding that keeps a position of its own, as physics
+  keeps `Position` on its plane, copies it into `m.Transform` one way, in one
+  System, and never back.
+
+## What it costs
+
+Measured by the five frame benches in `internal/recordbench_test.go` on a real
+`kernel.Engine` driven by `app.UpdateEvent` and `app.RenderEvent`: a camera
+over a 100-column grid, the model resident, and gfx replaying the frame into a
+backend that is `Ready` and discards it. Every arm is 5 000 `Model` Entities;
+*animated* blends two clips, *Params* is one colour for all, *Material* is two
+pass tags with one float parameter each.
+
+Two test binaries were built and run interleaved, 8 rounds, each arm its own
+process at `-test.benchtime 1s`, with the arm order rotated and the first
+binary alternated. *Before* is the proxy into the `OpQueue` of the recording
+renderer removed in #573, at `de8e5f9`; *after* is this recording System. Means, AMD Ryzen 9 7950X3D, go1.27.1
+windows/amd64.
+
+| whole frame | before, ns/op | after, ns/op | after, allocs/op |
+| --- | ---: | ---: | ---: |
+| nothing to record | 31 687 | 28 103 | 18 |
+| 5 000 | 14 162 122 | 1 105 657 | 19 |
+| 5 000 animated | 17 135 613 | 1 482 363 | 20 |
+| 5 000 with `Params` | 15 283 788 | 1 126 376 | 19 |
+| 5 000 with `Material` | 9 761 146 | 1 122 856 | 18 |
+
+**The call shape was the cost.** Every arm is one Batch, so a frame is one
+instanced draw where the proxy made 5 000, and what is left is about 220 ns an
+Entity: the walk, the key lookup, the cull and packing its instance record.
+**Allocations no longer scale with the population**: the proxy's one gfx
+shader label per draw is now one per Batch.
+
+`TestRecordingAllocatesNothingPerEntity` still holds its bar over 3 000-frame
+steady states. Its harness uses a backend that never comes up, so since the
+recording System draws into gfx itself it now skips those frames whole; the drawn frame's allocations are the benches' figures
+above.

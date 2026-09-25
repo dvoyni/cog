@@ -10,7 +10,6 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/dvoyni/cog/extensions/jssound"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 	"github.com/dvoyni/cog/slots/sound"
@@ -27,7 +26,7 @@ func TestRegisterRefusesAConfigThatIsNotOne(t *testing.T) {
 	fakeAudio(t)
 	err := (&plugin{}).Register(&kernel.Registrar{}, "interactive")
 
-	var refused jssound.ErrInvalidConfig
+	var refused ErrInvalidConfig
 	if !errors.As(err, &refused) {
 		t.Fatalf("Register accepted a %T: err = %v", "interactive", err)
 	}
@@ -35,8 +34,8 @@ func TestRegisterRefusesAConfigThatIsNotOne(t *testing.T) {
 
 func TestRegisterRefusesANegativeLatencyHint(t *testing.T) {
 	fakeAudio(t)
-	var refused jssound.ErrInvalidLatencyHint
-	if err := (&plugin{}).Register(&kernel.Registrar{}, jssound.Config{LatencyHint: -1}); !errors.As(err, &refused) {
+	var refused ErrInvalidLatencyHint
+	if err := (&plugin{}).Register(&kernel.Registrar{}, Config{LatencyHint: -1}); !errors.As(err, &refused) {
 		t.Fatalf("Register accepted a negative LatencyHint: err = %v", err)
 	}
 }
@@ -95,8 +94,8 @@ func TestTheGameSeesTheDeviceBecomeReadyOnTheGesture(t *testing.T) {
 	if !device.Ready {
 		t.Fatal("sound still reports an unready Device after the gesture resumed the context")
 	}
-	if device.Name != string(jssound.Name) {
-		t.Fatalf("the Device names %q, want %q", device.Name, jssound.Name)
+	if device.Name != string(Name) {
+		t.Fatalf("the Device names %q, want %q", device.Name, Name)
 	}
 }
 
@@ -119,7 +118,7 @@ func TestAPageWithNoWebAudioIsReportedOnceAndTheGameRunsOn(t *testing.T) {
 	if len(reported) != 1 {
 		t.Fatalf("a page with no Web Audio was reported %d times", len(reported))
 	}
-	var unavailable jssound.ErrDeviceUnavailable
+	var unavailable ErrDeviceUnavailable
 	if err := <-reported; !errors.As(err, &unavailable) {
 		t.Fatalf("what was reported is %v", err)
 	}
@@ -150,7 +149,7 @@ func TestABrokenLoopRegionIsReportedOnceThroughTheSubscription(t *testing.T) {
 	if len(reported) != 1 {
 		t.Fatalf("a Clip with a broken Loop Region was reported %d times, want once", len(reported))
 	}
-	var ignored jssound.ErrLoopRegionIgnored
+	var ignored ErrLoopRegionIgnored
 	if err := <-reported; !errors.As(err, &ignored) {
 		t.Fatalf("what was reported is %v", err)
 	}

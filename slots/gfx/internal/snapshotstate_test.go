@@ -11,11 +11,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
-	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // A frame snapshot is the renderer answering "why is nothing on screen", so
@@ -32,23 +35,23 @@ import (
 // in gfx's own tests. It is inert until a test gives it something to record.
 type flushPlugin struct {
 	mu     sync.Mutex
-	record func(*gfx.OpQueue)
+	record func(*OpQueue)
 }
 
 type flushUpdateHandler kernel.Subscription[app.UpdateEvent]
 
 func (*flushPlugin) Name() kernel.PluginName           { return "gfxtestflush" }
-func (*flushPlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{gfx.Name} }
+func (*flushPlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{Name} }
 
 func (f *flushPlugin) Register(r *kernel.Registrar, _ any) error {
-	r.Subscribe[flushUpdateHandler](f.flushOnUpdate).Last().Before[gfx.PresentOnUpdate]()
+	r.Subscribe[flushUpdateHandler](f.flushOnUpdate).Last().Before[PresentOnUpdate]()
 	return nil
 }
 
 func (f *flushPlugin) flushOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	var queue kernel.Write[*gfx.OpQueue]
+	var queue kernel.Write[*OpQueue]
 	return func(access kernel.ResourceAccess) {
-			queue = access.GetWrite[*gfx.OpQueue]()
+			queue = access.GetWrite[*OpQueue]()
 		}, func(kernel.Kernel, app.UpdateEvent) {
 			f.mu.Lock()
 			record := f.record
@@ -59,7 +62,7 @@ func (f *flushPlugin) flushOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEve
 		}
 }
 
-func (f *flushPlugin) on(record func(*gfx.OpQueue)) {
+func (f *flushPlugin) on(record func(*OpQueue)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.record = record
@@ -68,7 +71,7 @@ func (f *flushPlugin) on(record func(*gfx.OpQueue)) {
 // runSnapshot calls the capability body on its own goroutine and drives ticks
 // until it answers, recording what the test asked for into each one. That is
 // what an agent's call looks like from the engine's side.
-func (r *captureRig) runSnapshot(request frameSnapshotRequest, record func(*gfx.OpQueue)) (frameSnapshotResponse, error) {
+func (r *captureRig) runSnapshot(request frameSnapshotRequest, record func(*OpQueue)) (frameSnapshotResponse, error) {
 	r.t.Helper()
 	type answer struct {
 		response frameSnapshotResponse
@@ -96,18 +99,18 @@ func (r *captureRig) runSnapshot(request frameSnapshotRequest, record func(*gfx.
 
 // twoPasses records a frame whose declaration order is the reverse of its run
 // order, which is the only way to tell the two apart.
-func twoPasses(q *gfx.OpQueue) {
-	q.Pass(gfx.PassDescr{
-		Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Order: 20, Label: "overlay",
-		Load: gfx.LoadPreserve, Store: gfx.StoreKeep,
+func twoPasses(q *OpQueue) {
+	q.Pass(descriptors.PassDescr{
+		Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Order: 20, Label: "overlay",
+		Load: types.LoadPreserve, Store: types.StoreKeep,
 	})
 	drawInto(q)
-	q.Pass(gfx.PassDescr{
-		Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Order: 10, Label: "world",
-		Load: gfx.LoadClear, Clear: m.Color{R: 0.25, A: 1}, Store: gfx.StoreKeep,
+	q.Pass(descriptors.PassDescr{
+		Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Order: 10, Label: "world",
+		Load: types.LoadClear, Clear: m.Color{R: 0.25, A: 1}, Store: types.StoreKeep,
 	})
 	drawInto(q)
-	q.DrawInstanced(triangle(), testMaterial(), 7, gfx.MatParam("mvp", m.NewMat4()))
+	q.DrawInstanced(triangle(), testMaterial(), 7, descriptors.MatParam("mvp", m.NewMat4()))
 }
 
 func TestAFrameSnapshotReportsPassesInRunOrderWithTheirCounts(t *testing.T) {
@@ -207,26 +210,26 @@ func TestAFilteredSnapshotKeepsSourceIndicesAndNamesWhatItDropped(t *testing.T) 
 
 func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 	rig := newCaptureRig(t)
-	var durable gfx.TextureDescr
-	withResourceQueue(t, rig.k, func(q *gfx.ResourceQueue) {
-		durable = q.AllocateTexture(64, 32, 2, gfx.FormatRGBA8)
-		q.UpdateTexture(durable, 1, gfx.Region{X: 1, Y: 2, Width: 3, Height: 4}, make([]byte, 48), true)
-		q.ReleaseTexture(q.BakeTexture(8, 8, gfx.FormatRGBA8Srgb, make([]byte, 256), true, true))
+	var durable descriptors.TextureDescr
+	withResourceQueue(t, rig.k, func(q *ResourceQueue) {
+		durable = q.AllocateTexture(64, 32, 2, descriptors.FormatRGBA8)
+		q.UpdateTexture(durable, 1, types.Region{X: 1, Y: 2, Width: 3, Height: 4}, make([]byte, 48), true)
+		q.ReleaseTexture(q.BakeTexture(8, 8, descriptors.FormatRGBA8Srgb, make([]byte, 256), true, true))
 	})
 
-	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *gfx.OpQueue) {
-		q.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Label: "screen"})
+	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *OpQueue) {
+		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "screen"})
 		// An inline texture is baked into the frame queue, which is the other
 		// place resource traffic comes from.
 		q.Draw(triangle(), testMaterial(),
-			gfx.MatParam("mvp", m.NewMat4()),
-			gfx.TextureParam("albedo", gfx.TextureWithBytes(4, 4, gfx.FormatRGBA8, make([]byte, 64), true, false)))
+			descriptors.MatParam("mvp", m.NewMat4()),
+			descriptors.TextureParam("albedo", descriptors.TextureWithBytes(4, 4, descriptors.FormatRGBA8, make([]byte, 64), true, false)))
 	})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
 
-	byKind := map[string][]gfx.ResourceOpView{}
+	byKind := map[string][]ResourceOpView{}
 	for _, op := range response.ResourceOps {
 		byKind[op.Kind] = append(byKind[op.Kind], op)
 	}
@@ -245,7 +248,7 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 	if len(update) != 1 || update[0].Region == nil {
 		t.Fatalf("updateTexture ops = %+v, want the one with its region", update)
 	}
-	if *update[0].Region != (gfx.Region{X: 1, Y: 2, Width: 3, Height: 4}) || update[0].Layer != 1 {
+	if *update[0].Region != (types.Region{X: 1, Y: 2, Width: 3, Height: 4}) || update[0].Layer != 1 {
 		t.Errorf("update = %+v, want the layer and region it was given", update[0])
 	}
 	if update[0].Bytes != 48 {
@@ -263,7 +266,7 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 		t.Errorf("bake queues = %q then %q, want durable first, which is the order they execute in",
 			bakes[0].Queue, bakes[1].Queue)
 	}
-	if !bakes[0].Mipmaps || bakes[0].Format != gfx.FormatRGBA8Srgb.Name() {
+	if !bakes[0].Mipmaps || bakes[0].Format != descriptors.FormatRGBA8Srgb.String() {
 		t.Errorf("durable bake = %+v, want its format and mipmap flag", bakes[0])
 	}
 	if bakes[1].Bytes != 64 || bakes[1].Width != 4 {
@@ -281,7 +284,7 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 func TestAFrameSnapshotBindsToATickThatBeganAfterTheRequest(t *testing.T) {
 	rig := newCaptureRig(t)
 	before := recordRaw(t, rig.k)
-	before.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Label: "before"})
+	before.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "before"})
 	drawInto(before)
 	release := rig.gate.open()
 
@@ -294,7 +297,7 @@ func TestAFrameSnapshotBindsToATickThatBeganAfterTheRequest(t *testing.T) {
 		close(ticked)
 	}()
 	<-rig.gate.entered
-	armed := rig.k.ExecuteCommand[gfx.ArmFrameCmd](gfx.ArmFrameRequest{})
+	armed := rig.k.ExecuteCommand[ArmFrameCmd](ArmFrameRequest{})
 	if armed.Err != nil {
 		t.Fatalf("arm: %v", armed.Err)
 	}
@@ -308,7 +311,7 @@ func TestAFrameSnapshotBindsToATickThatBeganAfterTheRequest(t *testing.T) {
 	}
 
 	after := recordRaw(t, rig.k)
-	after.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Label: "after"})
+	after.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "after"})
 	drawInto(after)
 	rig.tick()
 
@@ -328,7 +331,7 @@ func TestAFrameSnapshotBindsToATickThatBeganAfterTheRequest(t *testing.T) {
 
 func TestASecondFrameSnapshotIsRefusedInWordsWhileOneIsInFlight(t *testing.T) {
 	rig := newCaptureRig(t)
-	if answer := rig.k.ExecuteCommand[gfx.ArmFrameCmd](gfx.ArmFrameRequest{}); answer.Err != nil {
+	if answer := rig.k.ExecuteCommand[ArmFrameCmd](ArmFrameRequest{}); answer.Err != nil {
 		t.Fatalf("first arm: %v", answer.Err)
 	}
 
@@ -343,8 +346,8 @@ func TestASecondFrameSnapshotIsRefusedInWordsWhileOneIsInFlight(t *testing.T) {
 
 	// A capture and the other packages' snapshots are separate slots. Refusing
 	// across kinds would destroy the pairing arming them together is for.
-	if answer := rig.k.ExecuteCommand[gfx.ArmCaptureCmd](gfx.ArmCaptureRequest{
-		Target: gfx.CaptureDesc{Screen: true},
+	if answer := rig.k.ExecuteCommand[ArmCaptureCmd](ArmCaptureRequest{
+		Target: types.CaptureDesc{Screen: true},
 	}); answer.Err != nil {
 		t.Fatalf("a capture was refused while a frame snapshot was in flight: %v", answer.Err)
 	}
@@ -360,7 +363,7 @@ func TestAFrameSnapshotUnderPausePerformsOneStepAndSaysSo(t *testing.T) {
 	// Recorded before the call and never ticked away: a paused engine runs no
 	// tick of its own, so the step the capability raises is the only one.
 	frozen := recordRaw(t, rig.k)
-	frozen.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Label: "frozen"})
+	frozen.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "frozen"})
 	drawInto(frozen)
 
 	response, err := callFrame(rig.k, frameSnapshotRequest{})
@@ -397,7 +400,7 @@ func TestAFrameSnapshotJoiningAPendingStepSaysThatToo(t *testing.T) {
 		return app.TimeResponse{Paused: true, Stepped: 1, Joined: true}
 	})
 	frozen := recordRaw(t, rig.k)
-	frozen.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Label: "shared"})
+	frozen.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "shared"})
 
 	response, err := callFrame(rig.k, frameSnapshotRequest{})
 	if err != nil {
@@ -422,7 +425,7 @@ func TestAFrameSnapshotNamesTheTickItDescribes(t *testing.T) {
 		return app.TimeResponse{Paused: true, Stepped: 1}
 	})
 	frozen := recordRaw(t, rig.k)
-	frozen.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Label: "shared"})
+	frozen.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "shared"})
 
 	response, err := callFrame(rig.k, frameSnapshotRequest{})
 	if err != nil {
@@ -517,13 +520,13 @@ func TestAFrameSnapshotIsOneFlatDocument(t *testing.T) {
 
 func TestAFrameSnapshotNamesDrawsThatBelongToNoPass(t *testing.T) {
 	rig := newCaptureRig(t)
-	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *gfx.OpQueue) {
+	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *OpQueue) {
 		// A draw recorded before any pass is dropped by the renderer and
 		// reported as ErrDrawWithoutPass. It is also one of the reasons a
 		// frame is black, so the snapshot says it rather than counting to
 		// zero.
 		drawInto(q)
-		q.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Label: "empty"})
+		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "empty"})
 	})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
@@ -547,14 +550,14 @@ func TestAFrameSnapshotSeesWhatALateRecorderFlushedIntoTheQueue(t *testing.T) {
 	// snapshot has to be after that and before the swap, or it describes a
 	// frame missing everything the canvas drew - which is precisely the frame
 	// an agent is asking about.
-	rig.flush.on(func(q *gfx.OpQueue) {
-		q.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Order: 100, Label: "canvas"})
+	rig.flush.on(func(q *OpQueue) {
+		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Order: 100, Label: "canvas"})
 		drawInto(q)
 	})
 	t.Cleanup(func() { rig.flush.on(nil) })
 
-	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *gfx.OpQueue) {
-		q.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Order: 10, Label: "world"})
+	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *OpQueue) {
+		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Order: 10, Label: "world"})
 		drawInto(q)
 	})
 	if err != nil {
@@ -575,15 +578,15 @@ func TestAFrameSnapshotSeesWhatALateRecorderFlushedIntoTheQueue(t *testing.T) {
 func TestTheNewAccessorsAnswerOutsideTheAgentPath(t *testing.T) {
 	// They are ordinary gfx API, not a debug back door: nothing here goes near
 	// a view, a capability or a JSON document.
-	vertices := gfx.BufferWithBytes(make([]byte, 3*32), false)
-	indices := gfx.BufferWithBytes(make([]byte, 6*4), false)
-	mesh := gfx.MeshIndexed(vertices, indices, gfx.IndexUint32, gfx.TopologyTriangleList,
-		gfx.Attr(0, gfx.Float32x4), gfx.Attr(16, gfx.Float32x4))
+	vertices := descriptors.BufferWithBytes(make([]byte, 3*32), false)
+	indices := descriptors.BufferWithBytes(make([]byte, 6*4), false)
+	mesh := descriptors.MeshIndexed(vertices, indices, descriptors.IndexUint32, types.TopologyTriangleList,
+		descriptors.Attr(0, descriptors.Float32x4), descriptors.Attr(16, descriptors.Float32x4))
 	if mesh.VertexCount() != 3 || mesh.IndexCount() != 6 {
 		t.Errorf("counts = %d vertices / %d indices, want 3 and 6",
 			mesh.VertexCount(), mesh.IndexCount())
 	}
-	if !mesh.Indexed() || mesh.Topology() != gfx.TopologyTriangleList {
+	if !mesh.Indexed() || mesh.Topology() != types.TopologyTriangleList {
 		t.Errorf("mesh = indexed %v / topology %v, want an indexed triangle list",
 			mesh.Indexed(), mesh.Topology())
 	}
@@ -592,8 +595,8 @@ func TestTheNewAccessorsAnswerOutsideTheAgentPath(t *testing.T) {
 			vertices.Size(), vertices.InlineBytes(), vertices.ID())
 	}
 
-	texture := gfx.TextureWithBytes(8, 4, gfx.FormatRGBA8Srgb, make([]byte, 128), false, true)
-	if texture.Format() != gfx.FormatRGBA8Srgb || !texture.Mipmaps() || texture.PixelBytes() != 128 {
+	texture := descriptors.TextureWithBytes(8, 4, descriptors.FormatRGBA8Srgb, make([]byte, 128), false, true)
+	if texture.Format() != descriptors.FormatRGBA8Srgb || !texture.Mipmaps() || texture.PixelBytes() != 128 {
 		t.Errorf("texture = format %v / mipmaps %v / %d bytes, want what it was built with",
 			texture.Format(), texture.Mipmaps(), texture.PixelBytes())
 	}
@@ -601,7 +604,7 @@ func TestTheNewAccessorsAnswerOutsideTheAgentPath(t *testing.T) {
 	// Each value accessor is keyed on the parameter's own kind, which is what
 	// makes reading one arm of the union for another impossible rather than
 	// merely unlikely.
-	matrix := gfx.MatParam("mvp", m.NewMat4())
+	matrix := descriptors.MatParam("mvp", m.NewMat4())
 	if _, ok := matrix.MatValue(); !ok {
 		t.Error("MatValue refused a mat4 parameter")
 	}
@@ -618,9 +621,9 @@ func TestTheNewAccessorsAnswerOutsideTheAgentPath(t *testing.T) {
 
 func TestAFrameSnapshotDescribesAPassDrawingSomewhereOtherThanTheScreen(t *testing.T) {
 	rig := newCaptureRig(t)
-	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *gfx.OpQueue) {
-		target, _ := q.TemporaryTarget(128, 64, gfx.FormatRGBA8)
-		q.Pass(gfx.PassDescr{Target: target, Depth: gfx.DepthNone(), Label: "offscreen", Load: gfx.LoadClear})
+	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *OpQueue) {
+		target, _ := q.TemporaryTarget(128, 64, descriptors.FormatRGBA8)
+		q.Pass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Label: "offscreen", Load: types.LoadClear})
 		drawInto(q)
 	})
 	if err != nil {

@@ -94,10 +94,10 @@ func TestReflectionTypesDepthTexturesAndComparisonSamplers(t *testing.T) {
 	for _, r := range layout.Resources {
 		byName[r.Name] = r
 	}
-	if sampler := byName["shadowSampler"]; !sampler.Sampler || !sampler.Comparison {
+	if sampler := byName["shadowSampler"]; sampler.Kind != gfx.ResourceSampler|gfx.ResourceComparison {
 		t.Errorf("shadowSampler = %+v, want a comparison sampler", sampler)
 	}
-	if texture := byName["shadowMap"]; texture.Sampler || !texture.Depth {
+	if texture := byName["shadowMap"]; texture.Kind != gfx.ResourceTexture|gfx.ResourceDepth {
 		t.Errorf("shadowMap = %+v, want a depth texture", texture)
 	}
 	// A colour texture and its filtering sampler keep their types.
@@ -106,7 +106,7 @@ func TestReflectionTypesDepthTexturesAndComparisonSamplers(t *testing.T) {
 		t.Fatalf("reflect: %v", err)
 	}
 	for _, r := range colour.Resources {
-		if r.Depth || r.Comparison {
+		if r.Kind.Has(gfx.ResourceDepth) || r.Kind.Has(gfx.ResourceComparison) {
 			t.Errorf("resource %+v, want neither depth nor comparison", r)
 		}
 	}

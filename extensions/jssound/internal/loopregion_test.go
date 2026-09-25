@@ -8,7 +8,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/dvoyni/cog/extensions/jssound"
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/jfreymuth/oggvorbis"
 )
@@ -240,7 +239,7 @@ func TestJssoundDropsAMalformedRegionWholeAndReportsItOncePerClip(t *testing.T) 
 			if len(dropped) != 1 {
 				t.Fatalf("the Adapter queued %d notices for one bad Clip, want 1", len(dropped))
 			}
-			var ignored jssound.ErrLoopRegionIgnored
+			var ignored ErrLoopRegionIgnored
 			if !errors.As(dropped[0], &ignored) {
 				t.Fatalf("the notice is %v, want an ErrLoopRegionIgnored", dropped[0])
 			}

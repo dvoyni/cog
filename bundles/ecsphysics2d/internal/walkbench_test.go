@@ -6,8 +6,7 @@ import (
 
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecs/ecsplugin"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d/internal/types"
+
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -63,7 +62,7 @@ func BenchmarkIntegrateOverBodyComponents(b *testing.B) {
 		registrar.Subscribe[walkOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar,
 			func(q *ecs.Query[positionQuery]) {
 				for _, it := range q.All() {
-					types.IntegratePosition(it.Place, &it.Velocity, tick)
+					IntegratePosition(it.Place, &it.Velocity, tick)
 				}
 			}))
 	})
@@ -100,8 +99,8 @@ type walkSpawnCmd kernel.Command[int, struct{}]
 // walkBody is the Component set the walk is measured over: the two Body
 // Components of the Query, in float64, as physics declares them.
 type walkBody struct {
-	Place    ecsphysics2d.Position
-	Velocity ecsphysics2d.Velocity
+	Place    Position
+	Velocity Velocity
 }
 
 // walkGame registers the two Body Components and whatever System the benchmark
@@ -114,15 +113,15 @@ func (*walkGame) Name() kernel.PluginName { return "physicswalkgame" }
 func (*walkGame) Dependencies() []kernel.PluginName { return []kernel.PluginName{ecs.Name} }
 
 func (g *walkGame) Register(registrar *kernel.Registrar, _ any) error {
-	ecs.RegisterComponent[ecsphysics2d.Position](registrar, 1024)
-	ecs.RegisterComponent[ecsphysics2d.Velocity](registrar, 1024)
+	ecs.RegisterComponent[Position](registrar, 1024)
+	ecs.RegisterComponent[Velocity](registrar, 1024)
 	registrar.HandleCommand[walkSpawnCmd](ecs.ToExecute[int, struct{}](registrar, func(
 		n int, bodies *ecs.Spawn[walkBody],
 	) {
 		for i := range n {
 			bodies.New(walkBody{
-				Place:    ecsphysics2d.Position{Current: m.Vec2d{X: float64(i)}},
-				Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 1, Y: 2}},
+				Place:    Position{Current: m.Vec2d{X: float64(i)}},
+				Velocity: Velocity{Linear: m.Vec2d{X: 1, Y: 2}},
 			})
 		}
 	}))

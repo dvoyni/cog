@@ -1,6 +1,6 @@
 package ecs
 
-import "github.com/dvoyni/cog/bundles/ecs/internal/types"
+import "github.com/dvoyni/cog/bundles/ecs/internal"
 
 // Entity is an opaque handle to one thing. It is comparable, copyable and
 // usable as a map key, and the zero value means no Entity.
@@ -19,10 +19,10 @@ import "github.com/dvoyni/cog/bundles/ecs/internal/types"
 // at generation 2, because a log that cannot distinguish a recycled index from
 // the handle that preceded it is useless; reading them back in code is what the
 // type refuses.
-type Entity = types.Entity
+type Entity = internal.Entity
 
 // NoEntity is the absent handle. Compare with ==.
-const NoEntity = types.NoEntity
+const NoEntity = internal.NoEntity
 
 // Query is a System's means of iterating the Entities that have a set of
 // Components. The set is the field list of Q, a struct type whose field types
@@ -37,7 +37,7 @@ const NoEntity = types.NoEntity
 // is planned once, at registration, and reached only as a parameter of a
 // System; All yields each matching Entity with a pointer to Q that is valid
 // only for the current step.
-type Query[Q any] = types.Query[Q]
+type Query[Q any] = internal.Query[Q]
 
 // Without narrows a Query to the Entities that do not have T. It is written as
 // a blank field, because it yields nothing into the Query struct:
@@ -52,14 +52,14 @@ type Query[Q any] = types.Query[Q]
 // reads that Store's sparse array. A Without can never drive a Query: its
 // Store lists the Entities to exclude, and nothing enumerates the rest. So a
 // Query needs at least one Component, Tag or With besides its Withouts.
-type Without[T any] = types.Without[T]
+type Without[T any] = internal.Without[T]
 
 // With narrows a Query to the Entities that do have T, without yielding T into
 // the struct: the recommended spelling for presence matched on but not read,
 // whether T is a Tag or not. It contributes read{T}, as Without does, and it
 // can drive: its Store holds a superset of the match set, so a Query walks it
 // when it is the shortest Store.
-type With[T any] = types.With[T]
+type With[T any] = internal.With[T]
 
 // Spawn creates Entities carrying a complete Component set, named as a struct
 // type whose field types are the Components and whose value carries them:
@@ -70,7 +70,7 @@ type With[T any] = types.With[T]
 //
 // It declares write{*Entities}, a total barrier: Entities holds a reference to
 // every Store, so one entry in the lock set excludes every System in the frame.
-type Spawn[S any] = types.Spawn[S]
+type Spawn[S any] = internal.Spawn[S]
 
 // DeferredSpawn queues a Spawn instead of making one, so a System that creates
 // Entities holds read{*Entities} and read{*Store[F]} per Component set field
@@ -89,7 +89,7 @@ type Spawn[S any] = types.Spawn[S]
 // Components, Alive is false for it, and an immediate Despawn, Set or Remove on
 // it misses. It comes to life at the next WriteableEntities.Drain, carrying
 // exactly the Component set it was queued with.
-type DeferredSpawn[S any] = types.DeferredSpawn[S]
+type DeferredSpawn[S any] = internal.DeferredSpawn[S]
 
 // WriteableEntities is the write-locked promotion of the id authority, and the
 // only thing that can retire an Entity: Despawn empties every Store of it. It
@@ -100,7 +100,7 @@ type DeferredSpawn[S any] = types.DeferredSpawn[S]
 // ordinary System of one parameter — func(entities *ecs.WriteableEntities) {
 // entities.Drain() } — which an app subscribes wherever it wants its queue
 // applied. The ECS subscribes one itself, as DrainOnUpdate.
-type WriteableEntities = types.WriteableEntities
+type WriteableEntities = internal.WriteableEntities
 
 // DeferredDespawn queues a Despawn instead of making one, so a System that
 // retires Entities holds read{*Entities} rather than the wide write: it runs
@@ -117,7 +117,7 @@ type WriteableEntities = types.WriteableEntities
 // queued Entity stays alive, and the queuer's own Query still iterates it —
 // until a System calls WriteableEntities.Drain. A queued Despawn of an Entity
 // that is not alive at the drain does nothing.
-type DeferredDespawn = types.DeferredDespawn
+type DeferredDespawn = internal.DeferredDespawn
 
 // Get reaches one Component of an Entity a System did not iterate to, such as
 // the target a Reference names. It is the read half: Of yields a copy, and
@@ -134,16 +134,16 @@ type DeferredDespawn = types.DeferredDespawn
 //	}
 //
 // It declares read{*Store[T]} and read{*Entities}.
-type Get[T any] = types.Get[T]
+type Get[T any] = internal.Get[T]
 
 // Set is the write half of reaching another Entity: Of reads the way Get does,
 // Ref hands out a pointer to the stored value, and UpdateFor inserts one where
 // the Entity has none. It declares write{*Store[T]} and read{*Entities}.
-type Set[T any] = types.Set[T]
+type Set[T any] = internal.Set[T]
 
 // Remove takes a Component away from an Entity and is the inverse of
 // Set.UpdateFor. It declares write{*Store[T]} and read{*Entities}.
-type Remove[T any] = types.Remove[T]
+type Remove[T any] = internal.Remove[T]
 
 // Read is the System parameter that names another plugin's kernel resource for
 // read, and with Write the whole of the binding mechanism: a System that draws
@@ -153,12 +153,12 @@ type Remove[T any] = types.Remove[T]
 // registration. Another parameter's Set on the same resource is not seen until
 // the next invocation. Neither names the ECS's own cells: *Entities and
 // *Store[T] are refused.
-type Read[T any] = types.Read[T]
+type Read[T any] = internal.Read[T]
 
 // Write is Read's writing form, and the one a recording System takes. Get
 // returns the resource resolved at the start of this System call; Set replaces
 // it wholesale, and this parameter's own Get reads it back.
-type Write[T any] = types.Write[T]
+type Write[T any] = internal.Write[T]
 
 // In carries a per-tick value into a System without the System naming where it
 // came from, so the same System can be driven by any event a Feed projects
@@ -173,11 +173,11 @@ type Write[T any] = types.Write[T]
 //
 // Read Get once outside the loop: In is a cell the adapter writes, so a Get
 // inside it is a load the compiler cannot hoist. In declares no lock.
-type In[T any] = types.In[T]
+type In[T any] = internal.In[T]
 
 // Feeder is one projection from the event E to one In, resolved at
 // registration. Build one with Feed at each registration site.
-type Feeder[E any] = types.Feeder[E]
+type Feeder[E any] = internal.Feeder[E]
 
 // Resp is how a System invoked as a command answers: it takes *ecs.Resp[Res],
 // where Res is the command's response type, and calls Set. Naming one is
@@ -188,7 +188,7 @@ type Feeder[E any] = types.Feeder[E]
 //	    for range q.All() { reply.N++ }
 //	    answer.Set(reply)
 //	}
-type Resp[T any] = types.Resp[T]
+type Resp[T any] = internal.Resp[T]
 
 // Hooks is what happened to one Component T since the System's last run, one
 // record per act, in the order the acts happened, filtered by the kind set K:
@@ -205,32 +205,32 @@ type Resp[T any] = types.Resp[T]
 // run. It declares read{*Store[T]} and read{*Entities}, a Query's lock set over
 // T, and changes no other handler's lock set: every record is appended under a
 // lock the act already holds. See bundles/ecs/docs/specs/hooks.md.
-type Hooks[T any, K types.KindSet] = types.Hooks[T, K]
+type Hooks[T any, K internal.KindSet] = internal.Hooks[T, K]
 
 // Hook is one record: Value is T as the record carries it, and the IsX methods
 // report every kind true of the act, not only the kinds K names. The pointer
 // All yields is valid until the System's run ends; Value may be copied out.
-type Hook[T any] = types.Hook[T]
+type Hook[T any] = internal.Hook[T]
 
 // The eight kind sets a Hooks names. A record is delivered when any of its kinds
 // is in the set. "Every addition" includes Spawns, and "every removal" includes
 // Despawns; every addition also carries Changed.
 type (
 	// HookSpawned delivers Spawns carrying T.
-	HookSpawned = types.HookSpawned
+	HookSpawned = internal.HookSpawned
 	// HookDespawned delivers Despawns of Entities holding T.
-	HookDespawned = types.HookDespawned
+	HookDespawned = internal.HookDespawned
 	// HookSpawnedDespawned delivers Spawns carrying T and Despawns of Entities
 	// holding it.
-	HookSpawnedDespawned = types.HookSpawnedDespawned
+	HookSpawnedDespawned = internal.HookSpawnedDespawned
 	// HookAdded delivers every addition of T.
-	HookAdded = types.HookAdded
+	HookAdded = internal.HookAdded
 	// HookRemoved delivers every removal of T, with its last value.
-	HookRemoved = types.HookRemoved
+	HookRemoved = internal.HookRemoved
 	// HookAddedRemoved delivers every addition and every removal.
-	HookAddedRemoved = types.HookAddedRemoved
+	HookAddedRemoved = internal.HookAddedRemoved
 	// HookAddedChanged delivers every addition and every change.
-	HookAddedChanged = types.HookAddedChanged
+	HookAddedChanged = internal.HookAddedChanged
 	// HookAll delivers every addition, change and removal.
-	HookAll = types.HookAll
+	HookAll = internal.HookAll
 )

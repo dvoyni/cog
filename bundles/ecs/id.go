@@ -1,14 +1,11 @@
 package ecs
 
-import (
-	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/slots/app"
-)
+import "github.com/dvoyni/cog/bundles/ecs/internal"
 
 // Name is the ecs plugin's name and configuration key. A plugin that registers
 // Components or Systems declares a dependency on it, because that is what
 // registers the authority first.
-const Name kernel.PluginName = "ecs"
+const Name = internal.Name
 
 // DrainOnUpdate is the subscription type of the ECS's own drain System on
 // app.UpdateEvent, which applies everything the deferring handles queued this
@@ -25,4 +22,4 @@ const Name kernel.PluginName = "ecs"
 // calling WriteableEntities.Drain on any event is an ordinary System, and is
 // how a change is made visible earlier. See
 // bundles/ecs/docs/specs/deferred.md § The drain.
-type DrainOnUpdate kernel.Subscription[app.UpdateEvent]
+type DrainOnUpdate = internal.DrainOnUpdate

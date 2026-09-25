@@ -4,19 +4,18 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/dvoyni/cog/slots/sound"
 )
 
 // The Buses a game declares. sound declares only Master, and these two are what
 // every settings screen ever built has on it.
 const (
-	music sound.Bus = 1
-	sfx   sound.Bus = 2
+	music Bus = 1
+	sfx   Bus = 2
 )
 
 // busVolume reads a Bus's volume the way a settings screen does: under a read
 // lock on a resource of its own, never by asking the queue it records into.
-func (h *harness) busVolume(bus sound.Bus) float32 {
+func (h *harness) busVolume(bus Bus) float32 {
 	h.t.Helper()
 	return h.kernel.ExecuteCommand[probeCmd](probeRequest{Bus: bus}).BusVolume
 }
@@ -29,14 +28,14 @@ func (h *harness) busVolume(bus sound.Bus) float32 {
 // matrix the Adapter is handed, which carries no Bus of any kind.
 func TestABusVolumeFallsOnItsOwnVoicesAndNoOthers(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 10, channels: 2, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
-	var track, footsteps sound.Voice
-	h.record(func(queue *sound.Queue) {
-		track = queue.Play(sound.ClipWithResource(bell), 0,
-			sound.Params{Bus: m.Some(music), Volume: m.Some[float32](0.8)})
-		footsteps = queue.Play(sound.ClipWithResource(bell), 0,
-			sound.Params{Bus: m.Some(sfx), Volume: m.Some[float32](0.8)})
+	var track, footsteps Voice
+	h.record(func(queue *Queue) {
+		track = queue.Play(ClipWithResource(bell), 0,
+			Params{Bus: m.Some(music), Volume: m.Some[float32](0.8)})
+		footsteps = queue.Play(ClipWithResource(bell), 0,
+			Params{Bus: m.Some(sfx), Volume: m.Some[float32](0.8)})
 	})
 	h.tick()
 
@@ -44,7 +43,7 @@ func TestABusVolumeFallsOnItsOwnVoicesAndNoOthers(t *testing.T) {
 		t.Fatalf("the music is audible at %v before any slider moved, want 0.8", got)
 	}
 
-	h.record(func(queue *sound.Queue) { queue.SetBus(music, 0.5) })
+	h.record(func(queue *Queue) { queue.SetBus(music, 0.5) })
 	h.tick()
 
 	if got := h.probe(track).Info.Audibility; got != 0.4 {
@@ -77,16 +76,16 @@ func TestABusVolumeFallsOnItsOwnVoicesAndNoOthers(t *testing.T) {
 // it, and the Voices on it are re-emitted once.
 func TestABusVolumeIsReadableAndCoalescedWithinOneTick(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 10, channels: 2, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
 	if got := h.busVolume(music); got != 1 {
 		t.Fatalf("a Bus nobody has set is at %v, want unity", got)
 	}
 
-	voice := h.play(sound.ClipWithResource(bell), 0, sound.Params{Bus: m.Some(music)})
+	voice := h.play(ClipWithResource(bell), 0, Params{Bus: m.Some(music)})
 	h.tick()
 
-	h.record(func(queue *sound.Queue) {
+	h.record(func(queue *Queue) {
 		for _, dragged := range []float32{0.9, 0.7, 0.3} {
 			queue.SetBus(music, dragged)
 		}
@@ -105,7 +104,7 @@ func TestABusVolumeIsReadableAndCoalescedWithinOneTick(t *testing.T) {
 
 	// A volume that did not move is not a change, so nothing is re-emitted for
 	// it: the cost is bounded by MaxVoices per change, not paid every tick.
-	h.record(func(queue *sound.Queue) { queue.SetBus(music, 0.3) })
+	h.record(func(queue *Queue) { queue.SetBus(music, 0.3) })
 	h.tick()
 	if got := h.backend.emitted()[2].Updates; len(got) != 0 {
 		t.Fatalf("setting a Bus to the volume it already had produced %d updates", len(got))
@@ -118,33 +117,33 @@ func TestABusVolumeIsReadableAndCoalescedWithinOneTick(t *testing.T) {
 // it asked for, one Bus over.
 func TestAnAbsentBusAndAnOutOfRangeOneBothLandOnMaster(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 10, channels: 2, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
-	const misdeclared sound.Bus = sound.MaxBuses + 7
+	const misdeclared Bus = MaxBuses + 7
 
-	var unset, strayed sound.Voice
-	h.record(func(queue *sound.Queue) {
-		unset = queue.Play(sound.ClipWithResource(bell), 0, sound.Params{})
-		strayed = queue.Play(sound.ClipWithResource(bell), 0, sound.Params{Bus: m.Some(misdeclared)})
+	var unset, strayed Voice
+	h.record(func(queue *Queue) {
+		unset = queue.Play(ClipWithResource(bell), 0, Params{})
+		strayed = queue.Play(ClipWithResource(bell), 0, Params{Bus: m.Some(misdeclared)})
 	})
 	h.tick()
 
-	if got := h.probe(unset).Info.Bus; got != sound.Master {
+	if got := h.probe(unset).Info.Bus; got != Master {
 		t.Fatalf("a Voice with no Bus is on Bus %d, want Master", got)
 	}
-	if got := h.probe(strayed).Info.Bus; got != sound.Master {
+	if got := h.probe(strayed).Info.Bus; got != Master {
 		t.Fatalf("a Voice on Bus %d is on Bus %d, want Master", misdeclared, got)
 	}
 
 	// The slider a game wired to its mis-declared constant moves Master, which
 	// is the Bus its sounds are actually on.
-	h.record(func(queue *sound.Queue) { queue.SetBus(misdeclared, 0.25) })
+	h.record(func(queue *Queue) { queue.SetBus(misdeclared, 0.25) })
 	h.tick()
 
 	if got := h.busVolume(misdeclared); got != 0.25 {
 		t.Fatalf("the out-of-range Bus reads back at %v, want 0.25", got)
 	}
-	if got := h.busVolume(sound.Master); got != 0.25 {
+	if got := h.busVolume(Master); got != 0.25 {
 		t.Fatalf("Master reads back at %v, want the 0.25 the out-of-range SetBus landed on", got)
 	}
 	if got := h.probe(unset).Info.Audibility; got != 0.25 {
@@ -160,20 +159,20 @@ func TestAnAbsentBusAndAnOutOfRangeOneBothLandOnMaster(t *testing.T) {
 // Master stops everything, because every Bus is directly under it.
 func TestStopBusEndsItsVoicesWithReasonStoppedAndMasterStopsEverything(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 10, channels: 2, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
-	var first, second, footsteps sound.Voice
-	h.record(func(queue *sound.Queue) {
-		first = queue.Play(sound.ClipWithResource(bell), 0, sound.Params{Bus: m.Some(music)})
-		second = queue.Play(sound.ClipWithResource(bell), 0, sound.Params{Bus: m.Some(music)})
-		footsteps = queue.Play(sound.ClipWithResource(bell), 0, sound.Params{Bus: m.Some(sfx)})
+	var first, second, footsteps Voice
+	h.record(func(queue *Queue) {
+		first = queue.Play(ClipWithResource(bell), 0, Params{Bus: m.Some(music)})
+		second = queue.Play(ClipWithResource(bell), 0, Params{Bus: m.Some(music)})
+		footsteps = queue.Play(ClipWithResource(bell), 0, Params{Bus: m.Some(sfx)})
 	})
 	h.tick()
 
-	h.record(func(queue *sound.Queue) { queue.StopBus(music) })
+	h.record(func(queue *Queue) { queue.StopBus(music) })
 	h.tick()
 
-	for _, voice := range []sound.Voice{first, second} {
+	for _, voice := range []Voice{first, second} {
 		if h.probe(voice).Found {
 			t.Fatalf("%v survived a StopBus on its own Bus", voice)
 		}
@@ -182,7 +181,7 @@ func TestStopBusEndsItsVoicesWithReasonStoppedAndMasterStopsEverything(t *testin
 		t.Fatalf("%v ended, and the StopBus named another Bus", footsteps)
 	}
 	for range 2 {
-		if ended := h.waitEnded(); ended.Reason != sound.ReasonStopped {
+		if ended := h.waitEnded(); ended.Reason != ReasonStopped {
 			t.Fatalf("%v ended as %v, want stopped", ended.Voice, ended.Reason)
 		}
 	}
@@ -190,13 +189,13 @@ func TestStopBusEndsItsVoicesWithReasonStoppedAndMasterStopsEverything(t *testin
 		t.Fatalf("the StopBus emitted %d stops, want the two Voices on that Bus", len(got))
 	}
 
-	h.record(func(queue *sound.Queue) { queue.StopBus(sound.Master) })
+	h.record(func(queue *Queue) { queue.StopBus(Master) })
 	h.tick()
 
 	if got := h.probe(footsteps); got.Found || got.Live != 0 {
 		t.Fatalf("a StopBus on Master left %d Voices, and Master stops everything", got.Live)
 	}
-	if ended := h.waitEnded(); ended.Voice != footsteps || ended.Reason != sound.ReasonStopped {
+	if ended := h.waitEnded(); ended.Voice != footsteps || ended.Reason != ReasonStopped {
 		t.Fatalf("%v ended as %v, want %v/stopped", ended.Voice, ended.Reason, footsteps)
 	}
 }
@@ -207,13 +206,13 @@ func TestStopBusEndsItsVoicesWithReasonStoppedAndMasterStopsEverything(t *testin
 // table the tick's last word wins and this one is an operation in the list.
 func TestStopBusStopsThePlaysBeforeItAndNotTheOnesAfter(t *testing.T) {
 	backend := newFakeBackend(fakeClip{duration: 10, channels: 2, rate: 48000})
-	h := newHarness(t, backend, sound.Config{}, clipBytes)
+	h := newHarness(t, backend, Config{}, clipBytes)
 
-	var before, after sound.Voice
-	h.record(func(queue *sound.Queue) {
-		before = queue.Play(sound.ClipWithResource(bell), 0, sound.Params{Bus: m.Some(music)})
+	var before, after Voice
+	h.record(func(queue *Queue) {
+		before = queue.Play(ClipWithResource(bell), 0, Params{Bus: m.Some(music)})
 		queue.StopBus(music)
-		after = queue.Play(sound.ClipWithResource(bell), 0, sound.Params{Bus: m.Some(music)})
+		after = queue.Play(ClipWithResource(bell), 0, Params{Bus: m.Some(music)})
 	})
 	h.tick()
 
@@ -223,7 +222,7 @@ func TestStopBusStopsThePlaysBeforeItAndNotTheOnesAfter(t *testing.T) {
 	if !h.probe(after).Found {
 		t.Fatalf("%v was recorded after the StopBus and did not survive it", after)
 	}
-	if ended := h.waitEnded(); ended.Voice != before || ended.Reason != sound.ReasonStopped {
+	if ended := h.waitEnded(); ended.Voice != before || ended.Reason != ReasonStopped {
 		t.Fatalf("%v ended as %v, want %v/stopped", ended.Voice, ended.Reason, before)
 	}
 

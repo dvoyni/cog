@@ -4,7 +4,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -13,12 +12,12 @@ import (
 // own, and gfx's merge rule collapses them because every pass but the first
 // preserves both attachments and every pass but the last keeps both.
 func TestCanvasLayersCollapseToOneGpuPass(t *testing.T) {
-	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
-	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *canvas.OpQueue) {
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
 		write.Clear(0, m.Color{A: 1})
-		write.FillRect(0, m.Rect{Width: 10, Height: 10}, canvas.ShapeDraw{Color: m.Color{R: 1, A: 1}})
-		write.FillRect(1, m.Rect{Width: 10, Height: 10}, canvas.ShapeDraw{Color: m.Color{G: 1, A: 1}})
-		write.FillRect(2, m.Rect{Width: 10, Height: 10}, canvas.ShapeDraw{Color: m.Color{B: 1, A: 1}})
+		write.FillRect(0, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{R: 1, A: 1}})
+		write.FillRect(1, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{G: 1, A: 1}})
+		write.FillRect(2, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{B: 1, A: 1}})
 	})
 	runFrame(k)
 
@@ -46,10 +45,10 @@ func TestCanvasLayersCollapseToOneGpuPass(t *testing.T) {
 // Clear is positioned: it stays on the layer it names even when that layer
 // draws nothing, instead of migrating to whichever layer happens to draw.
 func TestClearStaysOnItsLayerWhenThatLayerIsEmpty(t *testing.T) {
-	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
-	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *canvas.OpQueue) {
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
 		write.Clear(-5, m.Color{R: 1, A: 1})
-		write.FillRect(3, m.Rect{Width: 10, Height: 10}, canvas.ShapeDraw{Color: m.Color{A: 1}})
+		write.FillRect(3, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{A: 1}})
 	})
 	runFrame(k)
 

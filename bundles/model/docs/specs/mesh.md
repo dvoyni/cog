@@ -75,12 +75,21 @@ ran from, and is kept as the record of what changed rather than as an open list.
 > staging, the vertex, index and morph-delta packing, the glTF conversion and
 > the bundled PBR are in `bundles/model/internal/types`, and `Vertex`,
 > `VertexLayout`, `MeshRef`, `LookupAccess` and `VertexDecodePath` are spelled
-> `model.X`, which scene's root still aliases. A frame-local mesh is scene's:
-> `OpQueue.TemporaryMesh`, `MeshTemporary` and `TemporaryMeshID` stay in
-> `bundles/scene/internal/types`, and mint through `model.MintMesh`. The WGSL
+> `model.X`, which scene's root still aliased. A frame-local mesh was scene's:
+> `OpQueue.TemporaryMesh`, `MeshTemporary` and `TemporaryMeshID` stayed in
+> `bundles/scene/internal/types`, and minted through `model.MintMesh`. The WGSL
 > sources moved to `bundles/model/internal/builtin/scene/` in
 > [#532](https://github.com/dvoyni/cog/issues/532), mounted by the model plugin
 > under the same storage paths.
+>
+> **Amended by [#573](https://github.com/dvoyni/cog/issues/573).** The
+> recording renderer this document calls scene was removed, with `MeshDraw`,
+> `OpQueue.TemporaryMesh`, `MeshTemporary` and `TemporaryMeshID`, and the ECS
+> renderer took the name `scene`: a baked mesh is drawn by its `Mesh`
+> Component, and `ErrMeshCustomLayoutNeedsMaterial` is its report. The WGSL
+> sources moved to `bundles/model/internal/builtin/model/`, served under the
+> storage paths `builtin/model/*.wgsl` from model's mount `builtin:model`; the
+> paths below are the new ones. Nothing a mesh stores changed.
 
 **What remains open is the by-eye confirmation**
 ([#223](https://github.com/dvoyni/cog/issues/223)). The size figures in
@@ -629,13 +638,13 @@ assumed:
 **The decode ships as a published includable source**, following the precedent
 `bundles/canvas/builtin/canvas/keycolor.wgsl` set — extracted precisely so three copies
 became one include. Scene gains the equivalent at
-`builtin/scene/vertexdecode.wgsl`, exported as `VertexDecodePath`.
+`builtin/model/vertexdecode.wgsl`, exported as `VertexDecodePath`.
 
 > **Settled here.** [#171](https://github.com/dvoyni/cog/issues/171) committed to
 > publishing the decode and never named the file or the constant.
-> `VertexDecodePath = "builtin/scene/vertexdecode.wgsl"` matches
+> `VertexDecodePath = "builtin/model/vertexdecode.wgsl"` matches
 > `canvas.KeyColorPath`'s shape (`bundles/canvas/assets.go:65`) and
-> `bundles/scene/shadersplit_test.go`'s existing glob over `builtin/scene/*.wgsl` covers
+> `bundles/scene/shadersplit_test.go`'s existing glob over `builtin/model/*.wgsl` covers
 > it with no test change.
 
 That commitment only pays for itself if what it decodes is something an author is
@@ -681,7 +690,7 @@ way round, presence would have looked like half the prize.
 ### The cut runs along a seam WGSL already has
 
 `SceneVertexIn` declares `@location(6)`/`@location(7)` only under
-`//#if SCENE_SKIN` (`bundles/scene/builtin/scene/vertex.wgsl:20-23`). The Go side has
+`//#if SCENE_SKIN` (`bundles/model/internal/builtin/model/vertex.wgsl:20-23`). The Go side has
 never honoured that cut. **So this is not a new axis at all; it is the Go side
 stopping disagreeing with WGSL.** No new define, no new variant, no new
 pipeline-key field — `pipelineKey` already carries `layout vertexLayoutKey`
@@ -1390,7 +1399,7 @@ scene compiled against them.
   becomes a transform-copy.
 - Width derivation on every bake and re-derivation on `UpdateMesh`.
 
-**`bundles/scene/builtin/scene/`**
+**`bundles/model/internal/builtin/model/`**
 
 - New `vertexdecode.wgsl`: oct decode for normal and tangent, UV dequantisation
   against the per-mesh record. Exported as `VertexDecodePath` in

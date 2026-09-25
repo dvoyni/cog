@@ -4,8 +4,8 @@
 // with it.
 //
 // It is a binding and nothing else: two Components of its own and one recording
-// System, which is what the ecs prefix means in this repo - ecsscene,
-// ecsphysics2d. No
+// System, which is what the ecs prefix means in this repo - ecsphysics2d is
+// another, and scene, cog's renderer, is one without the prefix. No
 // commands, no state a game addresses, and no arithmetic. Every equation is
 // sound's, and this package computes nothing.
 //
@@ -19,7 +19,7 @@
 // Emitter is what an Entity sounds like: a sound.ClipRef and the sound.Params it
 // plays with. m.Transform is where it is heard from, with Scale ignored because
 // scale means nothing to audio. It is not this package's: the ecs plugin
-// registers its one Store, the same one ecsscene draws from, so a game keeps one
+// registers its one Store, the same one scene draws from, so a game keeps one
 // placement per Entity and never copies it between a renderer's and a mixer's.
 // It is m.Transform and never reached through scene, because that would make
 // every game with sound depend on the renderer. The axes need no conversion:
@@ -96,8 +96,10 @@
 //
 // ecsaudio is a Bundle. Its plugin, built by ecsaudioplugin.New, requires no
 // Adapter and contributes none; register ecs and sound beside it. The Component
-// registrations, the table and the one System are in internal/. The Components
-// are plain data with no methods, so there is no internal/types.
+// registrations, the table and the one System are in internal/, which also
+// declares everything this package offers; this package aliases it. The
+// Components are plain data with every field exported, and there is no
+// internal/types.
 //
 // bundles/ecsaudio/docs/specs/ecsaudio.md is the specification this package is
 // judged against.

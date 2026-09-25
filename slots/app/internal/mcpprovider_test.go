@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/mcp"
-	"github.com/dvoyni/cog/slots/app"
 )
 
 // unavailable reports the expected outcome an agent reads, or fails the test
@@ -49,7 +48,7 @@ func TestTimeCapability_IsAppsOneCapability(t *testing.T) {
 func TestTimeCapability_StatusReports(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig())
 
-	response, err := timeControl(harness.k, TimeRequest{Action: "status"})
+	response, err := timeControl(harness.k, timeToolRequest{Action: "status"})
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -57,8 +56,8 @@ func TestTimeCapability_StatusReports(t *testing.T) {
 		t.Error("a running engine reported itself paused")
 	}
 
-	harness.control(app.TimeRequest{Action: app.TimePause})
-	response, err = timeControl(harness.k, TimeRequest{Action: "status"})
+	harness.control(TimeRequest{Action: TimePause})
+	response, err = timeControl(harness.k, timeToolRequest{Action: "status"})
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -72,10 +71,10 @@ func TestTimeCapability_StatusReports(t *testing.T) {
 func TestTimeCapability_PausingTwiceIsAnOrdinaryAnswer(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig())
 
-	if _, err := timeControl(harness.k, TimeRequest{Action: "pause"}); err != nil {
+	if _, err := timeControl(harness.k, timeToolRequest{Action: "pause"}); err != nil {
 		t.Fatalf("pause: %v", err)
 	}
-	_, err := timeControl(harness.k, TimeRequest{Action: "pause"})
+	_, err := timeControl(harness.k, timeToolRequest{Action: "pause"})
 	reason := unavailable(t, err)
 	if !strings.Contains(reason.Reason, "already paused") {
 		t.Errorf("reason %q does not say the engine is already paused", reason.Reason)
@@ -89,9 +88,9 @@ func TestTimeCapability_PausingTwiceIsAnOrdinaryAnswer(t *testing.T) {
 func TestTimeCapability_StepAdvancesAndImpliesPause(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig())
 
-	done := make(chan TimeResponse, 1)
+	done := make(chan timeToolResponse, 1)
 	go func() {
-		response, err := timeControl(harness.k, TimeRequest{Action: "step", Steps: 3})
+		response, err := timeControl(harness.k, timeToolRequest{Action: "step", Steps: 3})
 		if err != nil {
 			t.Errorf("step: %v", err)
 		}
@@ -119,14 +118,14 @@ func TestTimeCapability_RefusesBadRequestsInWords(t *testing.T) {
 
 	for _, one := range []struct {
 		name    string
-		request TimeRequest
+		request timeToolRequest
 		says    string
 	}{
-		{"unknown action", TimeRequest{Action: "freeze"}, "not an action"},
-		{"no action", TimeRequest{}, "not an action"},
-		{"too many steps", TimeRequest{Action: "step", Steps: maxTimeSteps + 1}, "ten seconds"},
-		{"negative steps", TimeRequest{Action: "step", Steps: -1}, "ask for between"},
-		{"steps without step", TimeRequest{Action: "pause", Steps: 2}, "applies to step"},
+		{"unknown action", timeToolRequest{Action: "freeze"}, "not an action"},
+		{"no action", timeToolRequest{}, "not an action"},
+		{"too many steps", timeToolRequest{Action: "step", Steps: maxTimeSteps + 1}, "ten seconds"},
+		{"negative steps", timeToolRequest{Action: "step", Steps: -1}, "ask for between"},
+		{"steps without step", timeToolRequest{Action: "pause", Steps: 2}, "applies to step"},
 	} {
 		t.Run(one.name, func(t *testing.T) {
 			_, err := timeControl(harness.k, one.request)
@@ -137,7 +136,7 @@ func TestTimeCapability_RefusesBadRequestsInWords(t *testing.T) {
 		})
 	}
 
-	if response := harness.control(app.TimeRequest{Action: app.TimeStatus}); response.Paused {
+	if response := harness.control(TimeRequest{Action: TimeStatus}); response.Paused {
 		t.Error("a refused request paused the engine anyway")
 	}
 	if got := len(harness.recorded()); got != 0 {
@@ -151,7 +150,7 @@ func TestTimeCapability_RefusesBadRequestsInWords(t *testing.T) {
 func TestTimeCapability_HoldAndRelease(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig())
 
-	held, err := timeControl(harness.k, TimeRequest{Action: "hold"})
+	held, err := timeControl(harness.k, timeToolRequest{Action: "hold"})
 	if err != nil {
 		t.Fatalf("hold: %v", err)
 	}
@@ -162,19 +161,19 @@ func TestTimeCapability_HoldAndRelease(t *testing.T) {
 		t.Errorf("hold answered %d ms left, want the default within the cap", held.HoldMs)
 	}
 
-	again := unavailable(t, mustFail(t, harness, TimeRequest{Action: "hold"}))
+	again := unavailable(t, mustFail(t, harness, timeToolRequest{Action: "hold"}))
 	if !strings.Contains(again.Reason, "already open") {
 		t.Errorf("a second hold said %q, want it to name the standing one", again.Reason)
 	}
 
-	released, err := timeControl(harness.k, TimeRequest{Action: "release"})
+	released, err := timeControl(harness.k, timeToolRequest{Action: "release"})
 	if err != nil {
 		t.Fatalf("release: %v", err)
 	}
 	if released.Held {
 		t.Errorf("release answered %+v, want the hold gone", released)
 	}
-	spare := unavailable(t, mustFail(t, harness, TimeRequest{Action: "release"}))
+	spare := unavailable(t, mustFail(t, harness, timeToolRequest{Action: "release"}))
 	if !strings.Contains(spare.Reason, "no hold is open") {
 		t.Errorf("releasing nothing said %q, want it to say there is nothing held", spare.Reason)
 	}
@@ -188,12 +187,12 @@ func TestTimeCapability_RefusesAHoldLongerThanTheCap(t *testing.T) {
 
 	for _, one := range []struct {
 		name    string
-		request TimeRequest
+		request timeToolRequest
 		says    string
 	}{
-		{"too long", TimeRequest{Action: "hold", Ms: int(maxHoldDuration.Milliseconds()) + 1}, "hold for between"},
-		{"negative", TimeRequest{Action: "hold", Ms: -1}, "hold for between"},
-		{"ms without hold", TimeRequest{Action: "pause", Ms: 500}, "applies to hold"},
+		{"too long", timeToolRequest{Action: "hold", Ms: int(maxHoldDuration.Milliseconds()) + 1}, "hold for between"},
+		{"negative", timeToolRequest{Action: "hold", Ms: -1}, "hold for between"},
+		{"ms without hold", timeToolRequest{Action: "pause", Ms: 500}, "applies to hold"},
 	} {
 		t.Run(one.name, func(t *testing.T) {
 			reason := unavailable(t, mustFail(t, harness, one.request))
@@ -202,7 +201,7 @@ func TestTimeCapability_RefusesAHoldLongerThanTheCap(t *testing.T) {
 			}
 		})
 	}
-	if status, _ := timeControl(harness.k, TimeRequest{Action: "status"}); status.Held {
+	if status, _ := timeControl(harness.k, timeToolRequest{Action: "status"}); status.Held {
 		t.Error("a refused hold was taken out anyway")
 	}
 }
@@ -214,7 +213,7 @@ func TestTimeCapability_EveryAnswerNamesTheTick(t *testing.T) {
 	harness := newTickHarness(t, tickTestConfig())
 	harness.frame(0.010)
 
-	status, err := timeControl(harness.k, TimeRequest{Action: "status"})
+	status, err := timeControl(harness.k, timeToolRequest{Action: "status"})
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -225,7 +224,7 @@ func TestTimeCapability_EveryAnswerNamesTheTick(t *testing.T) {
 
 // mustFail runs a request that is expected to be refused and returns the
 // refusal, failing the test when the call succeeded instead.
-func mustFail(t *testing.T, harness *tickHarness, request TimeRequest) error {
+func mustFail(t *testing.T, harness *tickHarness, request timeToolRequest) error {
 	t.Helper()
 	response, err := timeControl(harness.k, request)
 	if err == nil {

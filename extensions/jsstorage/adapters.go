@@ -1,10 +1,7 @@
 package jsstorage
 
-import (
-	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/slots/storage"
-)
+import "github.com/dvoyni/cog/extensions/jsstorage/internal"
 
 // StoragePermanentFS is the Adapter through which jsstorage fills storage's
 // permanent filesystem Port.
-type StoragePermanentFS kernel.Adapter[storage.PermanentFSPort]
+type StoragePermanentFS = internal.StoragePermanentFS

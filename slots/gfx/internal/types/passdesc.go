@@ -1,6 +1,10 @@
 package types
 
-import "github.com/dvoyni/cog/libs/m"
+import (
+	"strconv"
+
+	"github.com/dvoyni/cog/libs/m"
+)
 
 // LoadOp says what a pass does with an attachment's existing contents.
 type LoadOp uint8
@@ -16,7 +20,7 @@ const (
 )
 
 // Name spells the load op for a debug document.
-func (load LoadOp) Name() string {
+func (load LoadOp) String() string {
 	switch load {
 	case LoadPreserve:
 		return "preserve"
@@ -25,7 +29,7 @@ func (load LoadOp) Name() string {
 	case LoadDiscard:
 		return "discard"
 	}
-	return UnknownName(int(load))
+	return "unknown(" + strconv.Itoa(int(load)) + ")"
 }
 
 // StoreOp says whether a pass's results survive it.
@@ -37,14 +41,14 @@ const (
 )
 
 // Name spells the store op for a debug document.
-func (store StoreOp) Name() string {
+func (store StoreOp) String() string {
 	switch store {
 	case StoreKeep:
 		return "keep"
 	case StoreDiscard:
 		return "discard"
 	}
-	return UnknownName(int(store))
+	return "unknown(" + strconv.Itoa(int(store)) + ")"
 }
 
 // PassDesc is one render pass for the backend to encode. Screen selects the

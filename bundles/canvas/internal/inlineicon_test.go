@@ -5,7 +5,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -35,8 +34,8 @@ func instanceTint(buffer []byte, i int) m.Color {
 func TestAnInlineIconTakesTheRunsAlphaAndNotItsColour(t *testing.T) {
 	ink := m.Color{R: 0.2, G: 0.4, B: 0.8, A: 0.5}
 	filesystem := fstest.MapFS{"icon.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}
-	k, _, backend := testKernel(t, filesystem, canvas.Config{}, func(write *canvas.OpQueue) {
-		write.Text(0, "", "${icon.png}", canvas.TextDraw{
+	k, _, backend := testKernel(t, filesystem, Config{}, func(write *OpQueue) {
+		write.Text(0, "", "${icon.png}", TextDraw{
 			Position: m.Vec2{X: 10, Y: 40}, Size: 16, Color: ink,
 		})
 	})
@@ -65,8 +64,8 @@ func TestAnInlineIconTakesTheRunsAlphaAndNotItsColour(t *testing.T) {
 func TestAGlyphAndAnInlineIconInOneRunTakeDifferentTints(t *testing.T) {
 	ink := m.Color{R: 0.2, G: 0.4, B: 0.8, A: 0.5}
 	filesystem := fstest.MapFS{"icon.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}
-	k, _, backend := testKernel(t, filesystem, canvas.Config{}, func(write *canvas.OpQueue) {
-		write.Text(0, "", "ab${icon.png}", canvas.TextDraw{
+	k, _, backend := testKernel(t, filesystem, Config{}, func(write *OpQueue) {
+		write.Text(0, "", "ab${icon.png}", TextDraw{
 			Position: m.Vec2{X: 10, Y: 40}, Size: 16, Color: ink,
 		})
 	})
@@ -107,11 +106,11 @@ func TestAGlyphAndAnInlineIconInOneRunTakeDifferentTints(t *testing.T) {
 func TestAnInlineIconHaloesWhiteAtTheRunsAlpha(t *testing.T) {
 	ink := m.Color{R: 0.2, G: 0.4, B: 0.8, A: 0.5}
 	filesystem := fstest.MapFS{"icon.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}
-	k, _, backend := testKernel(t, filesystem, canvas.Config{}, func(write *canvas.OpQueue) {
-		write.Text(0, "", "${icon.png}", canvas.TextDraw{
+	k, _, backend := testKernel(t, filesystem, Config{}, func(write *OpQueue) {
+		write.Text(0, "", "${icon.png}", TextDraw{
 			Position: m.Vec2{X: 10, Y: 40}, Size: 16, Color: ink,
 		})
-		write.SetLayerMaterial(0, canvas.HaloMaterialSet(canvas.DefaultHaloProfile()))
+		write.SetLayerMaterial(0, HaloMaterialSet(DefaultHaloProfile()))
 	})
 	runFrame(k)
 

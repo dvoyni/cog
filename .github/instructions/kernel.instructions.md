@@ -70,7 +70,8 @@ Register handlers by name; never inline the factory into `HandleCommand`:
 registrar.HandleCommand[LoadCmd](loadCmdImpl)
 ```
 
-The command type is declared in the root's `commands.go` and its handler in
+The command type is declared in the root's `commands.go` — in an alias-index
+plugin, in `internal/commands.go` and aliased there — and its handler in
 `internal/`, which registers it from the plugin's `Register`, directly or
 through an unexported `registerCommands(registrar)`. The handler stays private
 to `internal/`: callers dispatch the command type and never name the handler.
@@ -99,11 +100,21 @@ names the function, not the identity.
 A System registered as a command through `ecs.ToExecute` is a command handler, and
 follows § Naming A Command: `xCmdImpl`.
 
-**A file about one System is named for it**, lowercased as
+**One System per file, named for it**, lowercased as
 [`gostyle.instructions.md`](gostyle.instructions.md) names a type's file:
-`locomotionSystem` and the Query and helpers only it uses live in
-`locomotionsystem.go`. A System that is a method of a class-like type lives in
-that type's file, like any other method.
+`locomotionSystem` lives in `locomotionsystem.go`, unexported, in the plugin's
+`internal/`. The file holds that System and only what that System alone uses —
+its Query structs and helper functions. Anything two Systems share lives
+elsewhere: a shared Query or helper in a file named for what it is, a shared
+scratch in its type's file. A file never holds two function Systems, and a
+function System never sits in `plugin.go` beside the registration.
+
+The one exception is a System that is a method of a class-like type: it lives in
+that type's file, like any other method, because gostyle places a method with
+its type. That is an edge case, not a way around the rule — a System is a plain
+function unless it genuinely needs its receiver's state, as ecsphysics2d's
+Index, Detect, Solve and Sleep need the plugin's scratch and settings, and
+scene's debug Systems their shape kind's table.
 
 ### The Factory Closure Is Shared
 
@@ -360,7 +371,9 @@ dependencies, never to express a preference. Ready subscribers run concurrently.
 Name and place a subscription identity as `architecture.instructions.md`
 § Ordering Identities says: verb plus event, exported from the root's `id.go`
 when another package orders against it. `internal/` subscribes the root's
-identity, and everyone else orders against it through the root alone:
+identity — in an alias-index plugin, the identity `internal/id.go` declares
+and the root aliases — and everyone else orders against it through the root
+alone:
 
 ```go
 // bundles/canvas/id.go
@@ -448,8 +461,8 @@ registrar.ProvideAdapter[canvas.McpProvider](mcp.Provider(provider{}))
   `McpProvider` unconditionally.
 - **A test composing a plugin that requires a Port composes an Adapter too**: a
   small fixture plugin whose `Register` provides it under a test-local Adapter
-  type (the `backendAdapter` providing `testGfxBackend` in the canvas, scene,
-  ecsscene and ui tests). A `_test.go` file is outside the `adapters.go` check.
+  type (the `backendAdapter` providing `testGfxBackend` in the canvas, scene
+  and ui tests). A `_test.go` file is outside the `adapters.go` check.
 
 A plugin's mcp capabilities are an unexported `provider{}` in its `internal/`,
 contributed from its `Register`.
@@ -489,6 +502,16 @@ Holds; this is what goes in each. **This section governs a root only** —
 everywhere else, including every package under one, is
 [`gostyle.instructions.md`](gostyle.instructions.md).
 
+**The file names are the same in both root shapes; what a file holds is not.**
+In an alias-index root (ADR 0003; `architecture.instructions.md` § The Package
+Shape), every file below holds only aliases of what `internal/` or
+`internal/types` declares, under the same names, and `internal/` declares them
+in files named the same way — `internal/id.go`, `internal/components.go`,
+`internal/err.go` — so the root and its `internal/` read side by side. What
+each bullet says a file declares is then declared in `internal/`'s file of
+that name and aliased in the root's. In a declaration root (ADR 0002), the
+root declares it itself.
+
 In a **root**:
 
 - `doc.go`: package documentation: what the plugin offers, and which Ports it
@@ -503,12 +526,33 @@ In a **root**:
 - `ports.go`: the Port types the plugin declares, and the interface each
   carries.
 - `adapters.go`: the Adapter types the plugin provides.
+- `components.go`: **every** ECS Component and Tag the plugin registers, and
+  nothing else. A Component is never in `types.go`, even when it is also a
+  plain value type: a reader looking for what an Entity can carry reads one
+  file. In an alias-index plugin a plain-data Component is declared in
+  `internal/components.go`, and one with methods — ecsphysics2d's `Shape`,
+  `Dynamic`, `Joint` — as a type of its own in `internal/` by the general
+  [`gostyle.instructions.md`](gostyle.instructions.md) rule; never in
+  `internal/types`, which holds no methods. The root's `components.go` aliases
+  every one (`type Mesh = internal.Mesh`). A type that only a Component's field names,
+  such as scene's `MaterialTag`, is a value type and goes by `types.go`.
+
+  **A Component is data, and every field it has is exported**, so any
+  Component serialises whole. A field that carries an invariant — Shape's
+  `Verts` with its `Kind`, Dynamic's stored inverses — is still exported, and
+  its doc comment says not to write it directly and names what does: the
+  constructors, a validating setter. A Component's methods, when it has any,
+  only read or write its own fields under that invariant, or do maths on the
+  value (`m.Transform.Mat4`). A rule that changes the world — regenerating a
+  pool, paying a cost, advancing a timer — is never a method on a Component:
+  it is a System's, or a helper in that System's file.
 - `types.go`: the value types, enums and interfaces the declarations above
   name, and aliases of `internal/types` value types.
 - `config.go`: `Config`, read from the config map under the root's `Name`, and
   its builder methods. Its zero value is the default.
 - `err.go`: exported error types and their `Error` methods.
-- `utils.go`: the forwarders into `internal/types`.
+- `utils.go`: the forwarders into `internal/types`, or in an alias-index root
+  into `internal/`.
 
 A root's only other code is an inline anchor beside the aliases it anchors,
 `types.go` in gfx; architecture.instructions.md has the rule.

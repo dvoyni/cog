@@ -4,8 +4,7 @@ import (
 	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/bundles/input"
 	"github.com/dvoyni/cog/bundles/mcp"
-	"github.com/dvoyni/cog/bundles/ui"
-	"github.com/dvoyni/cog/bundles/ui/internal/types"
+
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 	"github.com/dvoyni/cog/slots/gfx"
@@ -26,13 +25,13 @@ type plugin struct {
 // keeps across ticks, so a warmed tick allocates nothing. It is a resource
 // rather than plugin state so that the snapshot subscriber's Read is ordered
 // against processUpdate's Write.
-type processor struct{ types.Processor }
+type processor struct{ Processor }
 
 // New creates the ui plugin. ui has no configuration.
 func New() kernel.Plugin { return &plugin{} }
 
 // Name reports the plugin name.
-func (*plugin) Name() kernel.PluginName { return ui.Name }
+func (*plugin) Name() kernel.PluginName { return Name }
 
 // Dependencies reports the plugins ui requires: input for the pointer, gfx for
 // the viewport, canvas, which it records into, and app, whose TimeCmd the
@@ -42,17 +41,17 @@ func (*plugin) Dependencies() []kernel.PluginName {
 }
 
 func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.InitResource(&ui.Frame{})
-	registrar.InitResource(&ui.Interactions{})
+	registrar.InitResource(&Frame{})
+	registrar.InitResource(&Interactions{})
 	registrar.InitResource(&processor{})
 	p.registerCommands(registrar)
-	registrar.Subscribe[ui.ProcessOnUpdate](processUpdate).
+	registrar.Subscribe[ProcessOnUpdate](processUpdate).
 		After[input.AdvanceOnUpdate]().
 		Before[canvas.FlushOnUpdate]()
 	registrar.Subscribe[armLayoutOnUpdate](p.armSnapshotOnUpdate).First()
 	registrar.Subscribe[layoutOnUpdate](p.snapshotOnUpdate).
-		After[ui.ProcessOnUpdate]()
-	registrar.ProvideAdapter[ui.McpProvider](mcp.Provider(provider{}))
+		After[ProcessOnUpdate]()
+	registrar.ProvideAdapter[McpProvider](mcp.Provider(provider{}))
 	return nil
 }
 
@@ -101,8 +100,8 @@ func (p *plugin) snapshotOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent
 // the viewport, resolves the pointer's edges against it, records every visual
 // into canvas, publishes the interactions and consumes the frame.
 func processUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	var frameResource kernel.Write[*ui.Frame]
-	var interactionsResource kernel.Write[*ui.Interactions]
+	var frameResource kernel.Write[*Frame]
+	var interactionsResource kernel.Write[*Interactions]
 	var processorResource kernel.Write[*processor]
 	var inputResource kernel.Read[*input.State]
 	var viewportResource kernel.Read[*gfx.Viewport]
@@ -110,8 +109,8 @@ func processUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	var lookupResource kernel.Write[*canvas.Lookup]
 	var filesystem kernel.Read[storage.FileSystem]
 	return func(access kernel.ResourceAccess) {
-			frameResource = access.GetWrite[*ui.Frame]()
-			interactionsResource = access.GetWrite[*ui.Interactions]()
+			frameResource = access.GetWrite[*Frame]()
+			interactionsResource = access.GetWrite[*Interactions]()
 			processorResource = access.GetWrite[*processor]()
 			inputResource = access.GetRead[*input.State]()
 			viewportResource = access.GetRead[*gfx.Viewport]()
@@ -126,33 +125,33 @@ func processUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 			viewport := viewportResource.Get()
 			queue := queueResource.Get()
 			access := canvas.NewLookupAccess(k, lookupResource.Get(), filesystem.Get())
-			defer types.ClearFrame(frame)
+			defer ClearFrame(frame)
 
 			pointer := pointerToViewport(inputState.Pointer(), *viewport)
-			var eventBuffer [10]types.PointerEvent
+			var eventBuffer [10]PointerEvent
 			events := eventBuffer[:0]
 			for button, key := range mouseButtons {
 				if inputState.JustPressed(key) {
-					events = append(events, types.PointerEvent{X: float32(pointer.X), Y: float32(pointer.Y), Button: button, Kind: types.PointerEventDown})
+					events = append(events, PointerEvent{X: float32(pointer.X), Y: float32(pointer.Y), Button: button, Kind: PointerEventDown})
 				}
 			}
 			for button, key := range mouseButtons {
 				if inputState.JustReleased(key) {
-					events = append(events, types.PointerEvent{X: float32(pointer.X), Y: float32(pointer.Y), Button: button, Kind: types.PointerEventUp})
+					events = append(events, PointerEvent{X: float32(pointer.X), Y: float32(pointer.Y), Button: button, Kind: PointerEventUp})
 				}
 			}
 
-			processor.Process(access, types.FrameRoots(frame), types.FrameLayers(frame), types.GlobalState{
-				Screen: ui.Rect{Width: viewport.Width, Height: viewport.Height},
-				Pointer: types.PointerState{
+			processor.Process(access, FrameRoots(frame), FrameLayers(frame), GlobalState{
+				Screen: Rect{Width: viewport.Width, Height: viewport.Height},
+				Pointer: PointerState{
 					X:      float32(pointer.X),
 					Y:      float32(pointer.Y),
 					Events: events,
 				},
-				Materials: types.FrameMaterials(frame),
+				Materials: FrameMaterials(frame),
 			}, queue)
 
-			types.PublishInteractions(&processor.Processor, interactions)
+			PublishInteractions(&processor.Processor, interactions)
 		}
 }
 

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/dvoyni/cog/bundles/ecsaudio"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/sound"
 )
@@ -197,7 +196,7 @@ func TestAChangedClipStopsTheVoiceAndPlaysTheNewOne(t *testing.T) {
 	h.tick()
 	first := h.voiceOf(e)
 
-	h.change(changeRequest{Entity: e, Emitter: &ecsaudio.Emitter{Clip: sound.ClipWithResource(otherClip)}})
+	h.change(changeRequest{Entity: e, Emitter: &Emitter{Clip: sound.ClipWithResource(otherClip)}})
 	h.tick()
 
 	if ended := h.waitEnded(); ended.Voice != first || ended.Reason != sound.ReasonStopped {
@@ -282,7 +281,7 @@ func TestRemovingAnEmitterStopsItsVoiceAndReAddingOneStartsAgain(t *testing.T) {
 		t.Fatalf("the entry survived the Emitter: held=%v, %d live Voices", got.Held, got.Live)
 	}
 
-	h.change(changeRequest{Entity: e, Emitter: &ecsaudio.Emitter{Clip: sound.ClipWithResource(clip)}})
+	h.change(changeRequest{Entity: e, Emitter: &Emitter{Clip: sound.ClipWithResource(clip)}})
 	h.tick()
 
 	got := h.probe(e)
@@ -303,7 +302,7 @@ func TestATransformMakesTheVoicePositionalAndKeepsMovingIt(t *testing.T) {
 
 	place := m.Transform{Position: m.Vec3{X: 3}}
 	e := h.spawn(spawnRequest{
-		Emitter: &ecsaudio.Emitter{Clip: sound.ClipWithResource(clip)},
+		Emitter: &Emitter{Clip: sound.ClipWithResource(clip)},
 		Place:   &place,
 	})
 	h.tick()
@@ -362,7 +361,7 @@ func TestATransformAddedLaterDoesNotSpatializeAPlayingVoiceAndOneRemovedDoesNotU
 
 	unplaced := h.emit(sound.ClipWithResource(clip), sound.Params{})
 	placed := h.spawn(spawnRequest{
-		Emitter: &ecsaudio.Emitter{Clip: sound.ClipWithResource(clip)},
+		Emitter: &Emitter{Clip: sound.ClipWithResource(clip)},
 		Place:   &m.Transform{Position: m.Vec3{X: 5}},
 	})
 	h.tick()
@@ -393,11 +392,11 @@ func TestTheTransformsRotationIsSentOnlyForAnEmitterWithACone(t *testing.T) {
 
 	turned := m.Transform{Position: m.Vec3{X: 2}, Rotation: m.QuatRotationZ(1)}
 	plain := h.spawn(spawnRequest{
-		Emitter: &ecsaudio.Emitter{Clip: sound.ClipWithResource(clip)},
+		Emitter: &Emitter{Clip: sound.ClipWithResource(clip)},
 		Place:   &turned,
 	})
 	coned := h.spawn(spawnRequest{
-		Emitter: &ecsaudio.Emitter{
+		Emitter: &Emitter{
 			Clip:   sound.ClipWithResource(clip),
 			Params: sound.Params{Cone: m.Some(sound.Cone{Inner: 30, Outer: 90})},
 		},
@@ -502,7 +501,7 @@ func TestTwoListenersReportOnceAndTakeTheLowestEntityEveryTick(t *testing.T) {
 	if len(errs) != 1 {
 		t.Fatalf("five ticks with two Listeners reported %d errors, want exactly one", len(errs))
 	}
-	var many ecsaudio.ErrManyListeners
+	var many ErrManyListeners
 	if !errors.As(errs[0], &many) || many.Count != 2 {
 		t.Fatalf("reported %v, want ErrManyListeners of 2", errs[0])
 	}
@@ -548,7 +547,7 @@ func TestChangingParamsRestatesTheVoiceRatherThanReplayingIt(t *testing.T) {
 		t.Fatalf("the Voice's volume is %v (set=%v) four ticks on, want the 0.25 it was played with", volume, ok)
 	}
 
-	h.change(changeRequest{Entity: e, Emitter: &ecsaudio.Emitter{
+	h.change(changeRequest{Entity: e, Emitter: &Emitter{
 		Clip:   sound.ClipWithResource(clip),
 		Params: sound.Params{Volume: m.Some[float32](0.5)},
 	}})

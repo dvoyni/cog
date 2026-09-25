@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -24,17 +23,17 @@ var update = flag.Bool("update", false, "rewrite the golden files from what the 
 
 // aFrameWithEveryOptional windows a layer, clips a framed sprite and a text,
 // and bounds a triangle list on a second layer.
-func aFrameWithEveryOptional(queue *canvas.OpQueue) {
-	queue.SetLayerTransform(1, m.Rect{X: -8, Y: -6, Width: 16, Height: 12}, canvas.AspectOverlap)
+func aFrameWithEveryOptional(queue *OpQueue) {
+	queue.SetLayerTransform(1, m.Rect{X: -8, Y: -6, Width: 16, Height: 12}, AspectOverlap)
 	queue.Clear(1, m.Color{R: 0.25, A: 1})
 	queue.SetClip(m.Rect{X: 1, Y: 2, Width: 30, Height: 40})
-	queue.Sprite(1, "images/hero.png", canvas.SpriteTransform{
+	queue.Sprite(1, "images/hero.png", SpriteTransform{
 		Position: m.Vec2{X: 10, Y: 20}, Size: m.Vec2{X: 32, Y: 48},
-		Frame:  canvas.SpriteFrame{Left: 2, Top: 4, Right: 18, Bottom: 20},
+		Frame:  SpriteFrame{Left: 2, Top: 4, Right: 18, Bottom: 20},
 		Filter: gfx.FilterNearest,
 	}, nil)
-	queue.Text(1, "fonts/body.ttf", "score", canvas.TextDraw{
-		Position: m.Vec2{X: 4, Y: 6}, Size: 12, Color: m.Color{G: 1, A: 1}, Align: canvas.AlignCenter,
+	queue.Text(1, "fonts/body.ttf", "score", TextDraw{
+		Position: m.Vec2{X: 4, Y: 6}, Size: 12, Color: m.Color{G: 1, A: 1}, Align: AlignCenter,
 	})
 	queue.RemoveClip()
 	queue.DrawTriangles(3, triangleFan(), nil)

@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -22,17 +21,17 @@ const boardFace = targetX - 0.05
 
 // board is the thin target: a box 0.1 m thick along the path and 4 m across
 // it, as a Static, a Sensor or not.
-func board(sensor bool) ecsphysics2d.Shape {
-	shape := ecsphysics2d.NewBoxShape(0.1, 4, 0)
+func board(sensor bool) Shape {
+	shape := NewBoxShape(0.1, 4, 0)
 	shape.Sensor = sensor
 	return shape
 }
 
-// crossing is what one throw across the board showed: the current entries for
+// boardCrossing is what one throw across the board showed: the current entries for
 // the pair, tick by tick, and where the mover stood on each side of the tick they
 // first met in.
-type crossing struct {
-	ticks         [][]ecsphysics2d.Contact
+type boardCrossing struct {
+	ticks         [][]Contact
 	first         int
 	before, after m.Vec2d
 	speedAfter    m.Vec2d
@@ -41,16 +40,16 @@ type crossing struct {
 // crossBoard throws the mover along +X at the target from two metres short,
 // less an eighth of a tick's travel for each phase, and keeps every tick's
 // entries for the pair.
-func crossBoard(t *testing.T, h *harness, mover ecs.Entity, target ecs.Entity, ticks int) crossing {
+func crossBoard(t *testing.T, h *harness, mover ecs.Entity, target ecs.Entity, ticks int) boardCrossing {
 	t.Helper()
-	seen := crossing{first: -1}
+	seen := boardCrossing{first: -1}
 	for tick := range ticks {
 		before := h.read(t, mover).Place.Current
 		h.frame(t)
 		// An Ended entry is the tick before's, reported once more as it ends.
-		var entries []ecsphysics2d.Contact
+		var entries []Contact
 		for _, entry := range meetingOf(h.contacts(t), mover, target) {
-			if entry.Phase != ecsphysics2d.PhaseEnded {
+			if entry.Phase != PhaseEnded {
 				entries = append(entries, entry)
 			}
 		}
@@ -68,7 +67,7 @@ func crossBoard(t *testing.T, h *harness, mover ecs.Entity, target ecs.Entity, t
 // the tick the pair first met, once, by an entry whose A is the Sensor, with
 // T < 1 and Depth 0 at the point the leading face met the board's; any later
 // tick the mover began inside the board reports T = 0.
-func (seen crossing) check(t *testing.T, phase int, sensor ecs.Entity, lead float64) {
+func (seen boardCrossing) check(t *testing.T, phase int, sensor ecs.Entity, lead float64) {
 	t.Helper()
 	if seen.first < 0 {
 		t.Fatalf("phase %d: the pair was never reported", phase)
@@ -102,14 +101,14 @@ func (seen crossing) check(t *testing.T, phase int, sensor ecs.Entity, lead floa
 }
 
 func TestAFastBoxSensorAndAFastSegmentSensorReportAThinTargetOnce(t *testing.T) {
-	box := ecsphysics2d.NewBoxShape(0.4, 0.4, 0)
+	box := NewBoxShape(0.4, 0.4, 0)
 	box.Sensor = true
-	segment := ecsphysics2d.NewSegmentShape(m.Vec2d{Y: -0.2}, m.Vec2d{Y: 0.2}, 0)
+	segment := NewSegmentShape(m.Vec2d{Y: -0.2}, m.Vec2d{Y: 0.2}, 0)
 	segment.Sensor = true
 
 	for _, sensor := range []struct {
 		name  string
-		shape ecsphysics2d.Shape
+		shape Shape
 		lead  float64
 	}{{"box", box, 0.2}, {"segment", segment, 0}} {
 		t.Run(sensor.name, func(t *testing.T) {
@@ -117,14 +116,14 @@ func TestAFastBoxSensorAndAFastSegmentSensorReportAThinTargetOnce(t *testing.T) 
 				h := newHarness(t)
 				target := h.spawn(t, spawnRequest{
 					Kind:  kindShapedStatic,
-					Place: ecsphysics2d.Position{Current: m.Vec2d{X: targetX}},
+					Place: Position{Current: m.Vec2d{X: targetX}},
 					Shape: board(false),
 				})
 				start := targetX - 2 - projectileSpeed*tick*float64(phase)/phases
 				thrown := h.spawn(t, spawnRequest{
 					Kind:     kindShapedBody,
-					Place:    ecsphysics2d.Position{Current: m.Vec2d{X: start}},
-					Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: projectileSpeed}},
+					Place:    Position{Current: m.Vec2d{X: start}},
+					Velocity: Velocity{Linear: m.Vec2d{X: projectileSpeed}},
 					Body:     dynamic(t, 1, 1, 0, 0),
 					Shape:    sensor.shape,
 				})
@@ -145,13 +144,13 @@ func TestAFastSolidBodyReportsASensorThatDidNotMoveAndIsNotStopped(t *testing.T)
 	}{{"a Static Sensor", false, func(t testing.TB, h *harness) ecs.Entity {
 		return h.spawn(t, spawnRequest{
 			Kind:  kindShapedStatic,
-			Place: ecsphysics2d.Position{Current: m.Vec2d{X: targetX}},
+			Place: Position{Current: m.Vec2d{X: targetX}},
 			Shape: board(true),
 		})
 	}}, {"a Sensor Body at rest", true, func(t testing.TB, h *harness) ecs.Entity {
 		return h.spawn(t, spawnRequest{
 			Kind:  kindShapedBody,
-			Place: ecsphysics2d.Position{Current: m.Vec2d{X: targetX}},
+			Place: Position{Current: m.Vec2d{X: targetX}},
 			Body:  dynamic(t, 1, 1, 0, 0),
 			Shape: board(true),
 		})
@@ -168,8 +167,8 @@ func TestAFastSolidBodyReportsASensorThatDidNotMoveAndIsNotStopped(t *testing.T)
 					start := targetX - 2 - projectileSpeed*tick*float64(phase)/phases
 					thrown := h.spawn(t, spawnRequest{
 						Kind:     kindShapedBody,
-						Place:    ecsphysics2d.Position{Current: m.Vec2d{X: start}},
-						Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: projectileSpeed}},
+						Place:    Position{Current: m.Vec2d{X: start}},
+						Velocity: Velocity{Linear: m.Vec2d{X: projectileSpeed}},
 						Body:     body,
 						Shape:    shape,
 					})
@@ -192,12 +191,12 @@ func TestAFastSolidBodyReportsASensorThatDidNotMoveAndIsNotStopped(t *testing.T)
 }
 
 func TestTwoMovingSensorsCrossingAreOneEntryWithOneT(t *testing.T) {
-	box := ecsphysics2d.NewBoxShape(0.4, 0.4, 0)
+	box := NewBoxShape(0.4, 0.4, 0)
 	box.Sensor = true
 
 	cases := []struct {
 		name         string
-		shape        ecsphysics2d.Shape
+		shape        Shape
 		fromA, fromB m.Vec2d
 		velA, velB   m.Vec2d
 		t            float64
@@ -227,15 +226,15 @@ func TestTwoMovingSensorsCrossingAreOneEntryWithOneT(t *testing.T) {
 				shift := m.Vec2d{X: 10 * float64(phase) / phases, Y: 3.7 * float64(phase) / phases}
 				a := h.spawn(t, spawnRequest{
 					Kind:     kindShapedBody,
-					Place:    ecsphysics2d.Position{Current: c.fromA.Add(shift)},
-					Velocity: ecsphysics2d.Velocity{Linear: c.velA},
+					Place:    Position{Current: c.fromA.Add(shift)},
+					Velocity: Velocity{Linear: c.velA},
 					Body:     dynamic(t, 1, 1, 0, 0),
 					Shape:    c.shape,
 				})
 				b := h.spawn(t, spawnRequest{
 					Kind:     kindShapedBody,
-					Place:    ecsphysics2d.Position{Current: c.fromB.Add(shift)},
-					Velocity: ecsphysics2d.Velocity{Linear: c.velB},
+					Place:    Position{Current: c.fromB.Add(shift)},
+					Velocity: Velocity{Linear: c.velB},
 					Body:     dynamic(t, 1, 1, 0, 0),
 					Shape:    c.shape,
 				})

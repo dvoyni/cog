@@ -3,8 +3,6 @@ package internal
 import (
 	"errors"
 	"testing"
-
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
 )
 
 // The settings are fixed at registration and every zero field takes its
@@ -31,7 +29,7 @@ func TestAnUnconfiguredPluginTakesTheDocumentedDefaults(t *testing.T) {
 // A named field replaces its default and every other field keeps one, which is
 // what "a zero field takes its default" means.
 func TestANamedSettingReplacesOnlyItsOwnDefault(t *testing.T) {
-	h := newHarnessWith(t, ecsphysics2d.Config{Slop: 0.02, Iterations: 4, Seed: 7}, 64)
+	h := newHarnessWith(t, Config{Slop: 0.02, Iterations: 4, Seed: 7}, 64)
 
 	got := h.plugin.settings
 	if got.slop != 0.02 || got.iterations != 4 || got.seed != 7 {
@@ -47,7 +45,7 @@ func TestANamedSettingReplacesOnlyItsOwnDefault(t *testing.T) {
 // nothing here reaches for a clock, because a simulation that differs run to run
 // for a reason nobody asked for is worse than one that does not.
 func TestASeedOfZeroIsTakenAsGiven(t *testing.T) {
-	if got, err := resolveConfig(ecsphysics2d.Config{Seed: 0}); err != nil || got.seed != 0 {
+	if got, err := resolveConfig(Config{Seed: 0}); err != nil || got.seed != 0 {
 		t.Fatalf("resolveConfig with a zero seed = %+v, %v", got, err)
 	}
 }
@@ -56,7 +54,7 @@ func TestASeedOfZeroIsTakenAsGiven(t *testing.T) {
 // caller that wrote one meant to configure this plugin.
 func TestAConfigOfTheWrongTypeIsRefused(t *testing.T) {
 	_, err := resolveConfig("not a Config")
-	var refusal ecsphysics2d.ErrInvalidConfig
+	var refusal ErrInvalidConfig
 	if !errors.As(err, &refusal) {
 		t.Fatalf("resolveConfig with a string returned %v, want an ErrInvalidConfig", err)
 	}

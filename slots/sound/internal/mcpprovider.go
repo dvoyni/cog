@@ -7,8 +7,6 @@ import (
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/dvoyni/cog/slots/sound"
-	"github.com/dvoyni/cog/slots/sound/internal/types"
 )
 
 // voicesName is the capability rendered as the tool sound_voices.
@@ -250,14 +248,14 @@ type voicesCmd kernel.Command[voicesRequest, voicesResponse]
 // tick. The Device thread is not on the tick clock at all, and nothing here is
 // read from it.
 func voicesCmdImpl() (kernel.Lock, kernel.Execute[voicesRequest, voicesResponse]) {
-	var live kernel.Read[*sound.Voices]
-	var heardFrom kernel.Read[*sound.Listener]
-	var device kernel.Read[*sound.Device]
+	var live kernel.Read[*Voices]
+	var heardFrom kernel.Read[*Listener]
+	var device kernel.Read[*Device]
 	var flush kernel.Read[*lastFlush]
 	return func(access kernel.ResourceAccess) {
-			live = access.GetRead[*sound.Voices]()
-			heardFrom = access.GetRead[*sound.Listener]()
-			device = access.GetRead[*sound.Device]()
+			live = access.GetRead[*Voices]()
+			heardFrom = access.GetRead[*Listener]()
+			device = access.GetRead[*Device]()
 			flush = access.GetRead[*lastFlush]()
 		}, func(_ kernel.Kernel, _ voicesRequest) voicesResponse {
 			table, last := live.Get(), flush.Get()
@@ -270,7 +268,7 @@ func voicesCmdImpl() (kernel.Lock, kernel.Execute[voicesRequest, voicesResponse]
 				Listener:    listenerViewOf(heardFrom.Get()),
 				Device:      deviceViewOf(*device.Get()),
 			}
-			for detail := range types.VoicesDetails(table) {
+			for detail := range VoicesDetails(table) {
 				response.Voices = append(response.Voices, voiceViewOf(detail))
 			}
 			last.each(func(e ending) {
@@ -286,7 +284,7 @@ func voicesCmdImpl() (kernel.Lock, kernel.Execute[voicesRequest, voicesResponse]
 // position at all, which is Params.Position and nothing else: the first
 // position a Voice receives makes it positional for the rest of its life, so
 // there is no second flag to disagree with.
-func voiceViewOf(detail types.VoiceDetail) voiceView {
+func voiceViewOf(detail VoiceDetail) voiceView {
 	view := voiceView{
 		Clip:       clipName(detail.Clip),
 		Bus:        int(detail.Bus),
@@ -307,9 +305,9 @@ func voiceViewOf(detail types.VoiceDetail) voiceView {
 
 // listenerViewOf renders the Listener with its orientation resolved to the
 // axes the equations are handed.
-func listenerViewOf(listener *sound.Listener) listenerView {
+func listenerViewOf(listener *Listener) listenerView {
 	position := listener.Position()
-	front, up := types.ListenerAxes(listener)
+	front, up := ListenerAxes(listener)
 	return listenerView{
 		Position: []float32{position.X, position.Y, position.Z},
 		Forward:  []float32{front.X, front.Y, front.Z},
@@ -320,7 +318,7 @@ func listenerViewOf(listener *sound.Listener) listenerView {
 // deviceViewOf renders the Device, with its latency in milliseconds because
 // that is the unit a reader thinks in and nanoseconds is the unit a Duration
 // marshals as.
-func deviceViewOf(device sound.Device) deviceView {
+func deviceViewOf(device Device) deviceView {
 	return deviceView{
 		Ready:      device.Ready,
 		Name:       device.Name,
@@ -333,8 +331,8 @@ func deviceViewOf(device sound.Device) deviceView {
 // clipName renders a ClipRef as the one string that says which sound it is: the
 // storage path it names, or the size of the bytes it carries, which is all
 // there is to say about a Clip nothing gave a name to.
-func clipName(ref sound.ClipRef) string {
-	path, bytes := types.ClipRefParts(ref)
+func clipName(ref ClipRef) string {
+	path, bytes := ClipRefParts(ref)
 	switch {
 	case path != "":
 		return path

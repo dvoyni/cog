@@ -4,7 +4,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/dvoyni/cog/bundles/canvas"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -19,9 +18,9 @@ import (
 // ask the table rather than the disk.
 func TestAMissingSpriteIsOpenedOnceReportedOnceAndNotReopened(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{}}
-	config := canvas.Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
-	k, errs, _ := testKernelCapturing(t, filesystem, config, func(write *canvas.OpQueue) {
-		write.Sprite(0, "gone.png", canvas.SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
+	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	k, errs, _ := testKernelCapturing(t, filesystem, config, func(write *OpQueue) {
+		write.Sprite(0, "gone.png", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
 	})
 	runFrame(k)
 	runFrame(k)
@@ -42,10 +41,10 @@ func TestAMissingSpriteIsOpenedOnceReportedOnceAndNotReopened(t *testing.T) {
 // file. The loudness belongs in the report.
 func TestAMissingSpriteIsSkippedRatherThanSubstituted(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{}}
-	config := canvas.Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
-	k, _, backend := testKernelCapturing(t, filesystem, config, func(write *canvas.OpQueue) {
-		write.Sprite(0, "gone.png", canvas.SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
-		write.Sprite(0, "gone-tiled.png", canvas.SpriteTransform{
+	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	k, _, backend := testKernelCapturing(t, filesystem, config, func(write *OpQueue) {
+		write.Sprite(0, "gone.png", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
+		write.Sprite(0, "gone-tiled.png", SpriteTransform{
 			Size: m.Vec2{X: 8, Y: 8}, TileX: true,
 		}, nil)
 	})
@@ -68,8 +67,8 @@ func TestAMissingSpriteIsSkippedRatherThanSubstituted(t *testing.T) {
 // from every sprite it draws with. A frame that records nothing at all still
 // reserves it, which is what "before any layer's ops" means.
 func TestTheWhiteTexelIsReservedBeforeAnyLayersOps(t *testing.T) {
-	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
-	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(*canvas.OpQueue) {})
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(*OpQueue) {})
 	runFrame(k)
 
 	if len(backend.updates) != 1 {
@@ -92,12 +91,12 @@ func TestTheWhiteTexelIsReservedBeforeAnyLayersOps(t *testing.T) {
 // resident - the residual this leaves, and what UnloadAll answers.
 func TestUnloadSpriteCannotNameTheGeneratedTexel(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{}}
-	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
-	k, errs, backend := testKernelCapturing(t, filesystem, config, func(write *canvas.OpQueue) {
-		write.FillRect(0, m.Rect{Width: 4, Height: 4}, canvas.ShapeDraw{Color: m.Color{R: 1, A: 1}})
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, errs, backend := testKernelCapturing(t, filesystem, config, func(write *OpQueue) {
+		write.FillRect(0, m.Rect{Width: 4, Height: 4}, ShapeDraw{Color: m.Color{R: 1, A: 1}})
 	})
 	runFrame(k)
-	probeLookupDevice(k, func(la canvas.LookupDeviceAccess) { la.UnloadSprite("") })
+	probeLookupDevice(k, func(la LookupDeviceAccess) { la.UnloadSprite("") })
 	runFrame(k)
 
 	if len(*errs) != 1 {
@@ -117,9 +116,9 @@ func TestUnloadSpriteCannotNameTheGeneratedTexel(t *testing.T) {
 // identity is an address, and two constructor calls compared in one expression
 // can share a stack slot and report an equality the heap does not have.
 func TestTheWhiteTexelIsOneEntryAcrossFrames(t *testing.T) {
-	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
-	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *canvas.OpQueue) {
-		write.FillRect(0, m.Rect{Width: 4, Height: 4}, canvas.ShapeDraw{Color: m.Color{R: 1, A: 1}})
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
+		write.FillRect(0, m.Rect{Width: 4, Height: 4}, ShapeDraw{Color: m.Color{R: 1, A: 1}})
 	})
 	runFrame(k)
 	runFrame(k)
@@ -136,11 +135,11 @@ func TestTheWhiteTexelIsOneEntryAcrossFrames(t *testing.T) {
 // cache. The empty path keeps meaning the white texel.
 func TestADotPathIsInvalidRatherThanASilentWhiteQuad(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{}}
-	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
-	k, errs, backend := testKernelCapturing(t, filesystem, config, func(write *canvas.OpQueue) {
-		write.Sprite(0, ".", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
-		write.Sprite(0, "../escape.png", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
-		write.Sprite(0, "", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, errs, backend := testKernelCapturing(t, filesystem, config, func(write *OpQueue) {
+		write.Sprite(0, ".", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
+		write.Sprite(0, "../escape.png", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
+		write.Sprite(0, "", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
 	})
 	runFrame(k)
 	runFrame(k)
@@ -167,9 +166,9 @@ func TestADotPathIsInvalidRatherThanASilentWhiteQuad(t *testing.T) {
 // so the largest that can pack is AtlasSize-4.
 func TestASpriteLargerThanAPageIsRefusedOnceAndTerminally(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"huge.png": &fstest.MapFile{Data: pngBytes(t, 14, 14)}}}
-	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
-	k, errs, backend := testKernelCapturing(t, filesystem, config, func(write *canvas.OpQueue) {
-		write.Sprite(0, "huge.png", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, errs, backend := testKernelCapturing(t, filesystem, config, func(write *OpQueue) {
+		write.Sprite(0, "huge.png", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
 	})
 	runFrame(k)
 	runFrame(k)
@@ -198,11 +197,11 @@ func TestASpriteOverTheAtlasByteBudgetIsRefusedOnceAndTerminally(t *testing.T) {
 	// A budget for exactly one array of two 16-texel pages. The white texel and
 	// two padded 14x14 sprites fill both pages, and the third sprite would need
 	// an array the budget cannot pay for.
-	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
-	k, errs, backend := testKernelCapturing(t, filesystem, config, func(write *canvas.OpQueue) {
-		write.Sprite(0, "first.png", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
-		write.Sprite(0, "second.png", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
-		write.Sprite(0, "late.png", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, errs, backend := testKernelCapturing(t, filesystem, config, func(write *OpQueue) {
+		write.Sprite(0, "first.png", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
+		write.Sprite(0, "second.png", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
+		write.Sprite(0, "late.png", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
 	})
 	runFrame(k)
 	runFrame(k)
@@ -226,9 +225,9 @@ func TestASpriteOverTheAtlasByteBudgetIsRefusedOnceAndTerminally(t *testing.T) {
 // atlas is still measured by reading its header.
 func TestSpriteSizeAnswersFromTheHeaderTierEvenWhenTheSpriteIsResident(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 6, 4)}}}
-	config := canvas.Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
-	k, _, _ := testKernel(t, filesystem, config, func(write *canvas.OpQueue) {
-		write.Sprite(0, "sprite.png", canvas.SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
+	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	k, _, _ := testKernel(t, filesystem, config, func(write *OpQueue) {
+		write.Sprite(0, "sprite.png", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
 	})
 	runFrame(k)
 	if filesystem.opens != 1 {
@@ -236,7 +235,7 @@ func TestSpriteSizeAnswersFromTheHeaderTierEvenWhenTheSpriteIsResident(t *testin
 	}
 
 	var size m.Vec2
-	probeLookup(k, func(la canvas.LookupAccess) { size = la.SpriteSize("sprite.png") })
+	probeLookup(k, func(la LookupAccess) { size = la.SpriteSize("sprite.png") })
 	if size != (m.Vec2{X: 6, Y: 4}) {
 		t.Fatalf("size = %+v, want 6x4", size)
 	}
@@ -253,16 +252,16 @@ func TestSpriteSizeAnswersFromTheHeaderTierEvenWhenTheSpriteIsResident(t *testin
 // one - eventually releasing an array still full of sprites.
 func TestFreeingASpriteThatNeverPackedReclaimsNothing(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}}
-	config := canvas.Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
-	k, _, backend := testKernelCapturing(t, filesystem, config, func(write *canvas.OpQueue) {
-		write.Sprite(0, "gone.png", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
-		write.Sprite(0, "also-gone.png", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
-		write.Sprite(0, "sprite.png", canvas.SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	k, _, backend := testKernelCapturing(t, filesystem, config, func(write *OpQueue) {
+		write.Sprite(0, "gone.png", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
+		write.Sprite(0, "also-gone.png", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
+		write.Sprite(0, "sprite.png", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
 	})
 	runFrame(k)
 	// Two of them, because the array holds two real occupants - the white texel
 	// and the sprite - so two bogus reclaims are what would count it empty.
-	probeLookupDevice(k, func(la canvas.LookupDeviceAccess) {
+	probeLookupDevice(k, func(la LookupDeviceAccess) {
 		la.UnloadSprite("gone.png")
 		la.UnloadSprite("also-gone.png")
 	})
@@ -287,15 +286,15 @@ func TestFreeingASpriteThatNeverPackedReclaimsNothing(t *testing.T) {
 // another would share its namespace.
 func TestOneMissingPathIsOneReportPerTier(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{}}
-	config := canvas.Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
-	k, errs, _ := testKernelCapturing(t, filesystem, config, func(write *canvas.OpQueue) {
-		write.Sprite(0, "gone.png", canvas.SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
-		write.Sprite(0, "gone.png", canvas.SpriteTransform{Size: m.Vec2{X: 8, Y: 8}, TileX: true}, nil)
+	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	k, errs, _ := testKernelCapturing(t, filesystem, config, func(write *OpQueue) {
+		write.Sprite(0, "gone.png", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
+		write.Sprite(0, "gone.png", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}, TileX: true}, nil)
 	})
 	runFrame(k)
 	runFrame(k)
-	probeLookup(k, func(la canvas.LookupAccess) { _ = la.SpriteSize("gone.png") })
-	probeLookup(k, func(la canvas.LookupAccess) { _ = la.SpriteSize("gone.png") })
+	probeLookup(k, func(la LookupAccess) { _ = la.SpriteSize("gone.png") })
+	probeLookup(k, func(la LookupAccess) { _ = la.SpriteSize("gone.png") })
 
 	if len(*errs) != 3 {
 		t.Fatalf("reported errors = %d, want one each for the draw, the tiled draw and the measurement: %v",
@@ -312,12 +311,12 @@ func TestOneMissingPathIsOneReportPerTier(t *testing.T) {
 // was fixed and was asked for again can speak.
 func TestUnloadingASpriteFreesEveryTierAndLetsItSpeakAgain(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{}}
-	config := canvas.Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
-	k, errs, _ := testKernelCapturing(t, filesystem, config, func(write *canvas.OpQueue) {
-		write.Sprite(0, "gone.png", canvas.SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
+	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	k, errs, _ := testKernelCapturing(t, filesystem, config, func(write *OpQueue) {
+		write.Sprite(0, "gone.png", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
 	})
 	runFrame(k)
-	probeLookup(k, func(la canvas.LookupAccess) { _ = la.SpriteSize("gone.png") })
+	probeLookup(k, func(la LookupAccess) { _ = la.SpriteSize("gone.png") })
 	// Two reports for one missing file: the draw tier and the measurement tier
 	// are two caches keyed by two descriptor types, so each says its own failure
 	// once. They are two different failures at two different times.
@@ -325,9 +324,9 @@ func TestUnloadingASpriteFreesEveryTierAndLetsItSpeakAgain(t *testing.T) {
 		t.Fatalf("reported errors = %d, want one per tier that tried: %v", len(*errs), *errs)
 	}
 
-	probeLookupDevice(k, func(la canvas.LookupDeviceAccess) { la.UnloadSprite("gone.png") })
+	probeLookupDevice(k, func(la LookupDeviceAccess) { la.UnloadSprite("gone.png") })
 	runFrame(k)
-	probeLookup(k, func(la canvas.LookupAccess) { _ = la.SpriteSize("gone.png") })
+	probeLookup(k, func(la LookupAccess) { _ = la.SpriteSize("gone.png") })
 	if len(*errs) != 4 {
 		t.Fatalf("reported errors after the unload = %d, want both tiers to speak again: %v", len(*errs), *errs)
 	}

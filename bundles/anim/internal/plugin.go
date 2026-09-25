@@ -1,8 +1,6 @@
 package internal
 
 import (
-	"github.com/dvoyni/cog/bundles/anim"
-	"github.com/dvoyni/cog/bundles/anim/internal/types"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -15,25 +13,25 @@ type plugin struct{}
 func New() kernel.Plugin { return &plugin{} }
 
 // Name reports the plugin name.
-func (p *plugin) Name() kernel.PluginName { return anim.Name }
+func (p *plugin) Name() kernel.PluginName { return Name }
 
 // Dependencies reports the plugins anim requires; it has none.
 func (p *plugin) Dependencies() []kernel.PluginName { return nil }
 
 // Register registers the Timelines resource and the per-tick advance.
 func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
-	registrar.InitResource(types.NewTimelines())
-	registrar.Subscribe[anim.AdvanceOnUpdate](advanceOnUpdate).First()
+	registrar.InitResource(NewTimelines())
+	registrar.Subscribe[AdvanceOnUpdate](advanceOnUpdate).First()
 	return nil
 }
 
 // advanceOnUpdate advances every timeline by the fixed step before gameplay
 // runs, promoting due cues into the fired view and dropping finished tracks.
 func advanceOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	var timelines kernel.Write[*anim.Timelines]
+	var timelines kernel.Write[*Timelines]
 	return func(access kernel.ResourceAccess) {
-			timelines = access.GetWrite[*anim.Timelines]()
+			timelines = access.GetWrite[*Timelines]()
 		}, func(_ kernel.Kernel, event app.UpdateEvent) {
-			types.TimelinesAdvance(timelines.Get(), float32(event.Dt))
+			TimelinesAdvance(timelines.Get(), float32(event.Dt))
 		}
 }

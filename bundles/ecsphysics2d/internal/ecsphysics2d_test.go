@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/bundles/ecs"
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
+
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 )
@@ -46,7 +46,7 @@ func TestAForceWrittenThisTickMovesTheBodyNextTick(t *testing.T) {
 	if want := 12 * tick / 2; !near(first.Velocity.Linear.X, want) {
 		t.Errorf("velocity after one tick = %v, want %v", first.Velocity.Linear.X, want)
 	}
-	if first.Force != (ecsphysics2d.Force{}) {
+	if first.Force != (Force{}) {
 		t.Errorf("the Force was left at %+v, want Solve to have cleared it", first.Force)
 	}
 
@@ -67,7 +67,7 @@ func TestAVelocityWrittenDirectlyMovesTheBodyTheSameTick(t *testing.T) {
 	h := newHarness(t)
 	e := h.spawn(t, spawnRequest{
 		Kind:     kindKinematic,
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 6, Y: -3}, Angular: 2},
+		Velocity: Velocity{Linear: m.Vec2d{X: 6, Y: -3}, Angular: 2},
 	})
 
 	h.frame(t)
@@ -88,7 +88,7 @@ func TestAVelocityWrittenDirectlyMovesTheBodyTheSameTick(t *testing.T) {
 // integrator moves it, and nothing damps it, because Damping is a Dynamic's.
 func TestAKinematicBodyIsMovedButNeverDamped(t *testing.T) {
 	h := newHarness(t)
-	e := h.spawn(t, spawnRequest{Kind: kindKinematic, Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 6}}})
+	e := h.spawn(t, spawnRequest{Kind: kindKinematic, Velocity: Velocity{Linear: m.Vec2d{X: 6}}})
 
 	h.frames(t, 60)
 
@@ -109,7 +109,7 @@ func TestAKinematicBodyIsMovedButNeverDamped(t *testing.T) {
 // nothing the plugin does can move it. Moving one means replacing the Entity.
 func TestAStaticBodyNeverMoves(t *testing.T) {
 	h := newHarness(t)
-	place := ecsphysics2d.Position{Current: m.Vec2d{X: 3, Y: 4}, Angle: 1}
+	place := Position{Current: m.Vec2d{X: 3, Y: 4}, Angle: 1}
 	e := h.spawn(t, spawnRequest{Kind: kindStatic, Place: place})
 	h.game.push, h.game.torque = m.Vec2d{X: 1000}, 1000
 
@@ -132,7 +132,7 @@ func TestADynamicBodyWithNoForceNeverMoves(t *testing.T) {
 	h.frames(t, 10)
 
 	got := h.read(t, e)
-	if got.Velocity != (ecsphysics2d.Velocity{}) {
+	if got.Velocity != (Velocity{}) {
 		t.Errorf("a Dynamic body with no Force reached %+v, want it never to have moved", got.Velocity)
 	}
 	if got.Place.Current != (m.Vec2d{}) {
@@ -209,10 +209,10 @@ func TestTheCouplingCheckHoldsOnThePluginsComponents(t *testing.T) {
 	if !errors.As(err, &undeclared) {
 		t.Fatalf("a System locking Position without declaring ecsphysics2d composed with %v", err)
 	}
-	if undeclared.Owner != ecsphysics2d.Name {
-		t.Errorf("the refusal is %+v, want the Store owned by %q", undeclared, ecsphysics2d.Name)
+	if undeclared.Owner != Name {
+		t.Errorf("the refusal is %+v, want the Store owned by %q", undeclared, Name)
 	}
-	if err := composeWithMover([]kernel.PluginName{ecs.Name, ecsphysics2d.Name}); err != nil {
+	if err := composeWithMover([]kernel.PluginName{ecs.Name, Name}); err != nil {
 		t.Fatalf("a System declaring ecsphysics2d did not compose: %v", err)
 	}
 }
@@ -226,14 +226,14 @@ func TestTheStaticDrainAndTheBodyRebuildAreTheTwoShapesIndexTakes(t *testing.T) 
 	h := newHarness(t)
 	wall := h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 5}},
+		Place: Position{Current: m.Vec2d{X: 5}},
 		Shape: circle(1),
 	})
 	// 60 m/s at a 1/60 s step is one metre a tick, so where the mover should be
 	// after n ticks needs no arithmetic.
 	mover := h.spawn(t, spawnRequest{
 		Kind:     kindShapedBody,
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 60}},
+		Velocity: Velocity{Linear: m.Vec2d{X: 60}},
 		Body:     dynamic(t, 2, 8, 0, 0),
 		Shape:    circle(0.5),
 	})
@@ -284,7 +284,7 @@ func TestAShapeGivenToALiveStaticIsDrainedInOnTheNextTick(t *testing.T) {
 	h := newHarness(t)
 	wall := h.spawn(t, spawnRequest{
 		Kind:  kindStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 3, Y: 4}},
+		Place: Position{Current: m.Vec2d{X: 3, Y: 4}},
 	})
 
 	h.frame(t)
@@ -308,7 +308,7 @@ func TestAStaticIsWorldCachedAtInsertAndMovingItsPositionDoesNothing(t *testing.
 	h := newHarness(t)
 	wall := h.spawn(t, spawnRequest{
 		Kind:  kindShapedStatic,
-		Place: ecsphysics2d.Position{Current: m.Vec2d{X: 5}},
+		Place: Position{Current: m.Vec2d{X: 5}},
 		Shape: circle(1),
 	})
 
@@ -332,7 +332,7 @@ func TestAShapedBodyIsRebuiltIntoTheBodyIndexAndNeverTheStaticOne(t *testing.T) 
 	h := newHarness(t)
 	mover := h.spawn(t, spawnRequest{
 		Kind:     kindShapedBody,
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 60}},
+		Velocity: Velocity{Linear: m.Vec2d{X: 60}},
 		Body:     dynamic(t, 2, 8, 0, 0),
 		Shape:    circle(0.5),
 	})

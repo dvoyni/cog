@@ -8,7 +8,7 @@ status: superseded by ADR-0002
 
 Cog's top-level packages had mixed contract and implementation in one package, so a plugin that wanted another's contract imported its implementation as well. Plugins also named each other: through `Name` constants, through ordering identities declared next to handlers, and through `Executioner.Plugins[T]`. We sort every plugin into exactly one kind, each with its own directory and its own import rules, and enforce those rules with a test instead of prose:
 
-- A **Bundle** is a Slot and its one Extension, shipped together and self-contained (`bundles/`: input, anim, canvas, scene, ui, ecs, ecsscene). Its root package is the slot. `Ximpl` holds `New` and `Config`, and `internal/` is the code the two share.
+- A **Bundle** is a Slot and its one Extension, shipped together and self-contained (`bundles/`: input, anim, canvas, scene, ui, ecs, and the ECS renderer that #573 later renamed `scene` when it removed the recording `scene`). Its root package is the slot. `Ximpl` holds `New` and `Config`, and `internal/` is the code the two share.
 - An **Open slot** is a contract with no Extension of its own (`slots/app`). It declares no Resources.
 - A **Port** is a plugin that ships its own contract and implementation but works only once an Adapter is bound to it: gfx and storage require exactly one, mcp collects any number. It uses the same root, `Ximpl` and `internal/` shape as a Bundle.
 - An **Adapter** is contributed by a plugin, for example wgpu's GPU backend, `diskfs`, `jsfs`, or each plugin's mcp capabilities.
@@ -18,7 +18,7 @@ Every plugin that isn't a Bundle lives in `extensions/`. A directory there with 
 
 The kernel gains `RequireAdapter[T]` and `CollectAdapters[T]` on the registrar, keyed by the interface type and bound at finalization. A missing or duplicate Adapter fails composition. `Executioner.Plugins[T]`, `SetBackendCmd` and `SetPermanentFSCmd` are deleted. So an Adapter must exist by `Register`, and a Port whose Adapter becomes usable later (wgpu's device arrives asynchronously) says so through readiness in its interface.
 
-Ordering identities that another package orders against live in the contract root next to `Name`, named verb-plus-event: `gfx.PresentOnUpdate`, `gfx.RenderOnRender`, `canvas.FlushOnUpdate`, `scene.FlushOnUpdate`, `input.AdvanceOnUpdate`, `ui.ProcessOnUpdate`, `ecsscene.RecordOnUpdate`, `anim.AdvanceOnUpdate`. Identities nothing outside orders against become unexported.
+Ordering identities that another package orders against live in the contract root next to `Name`, named verb-plus-event: `gfx.PresentOnUpdate`, `gfx.RenderOnRender`, `canvas.FlushOnUpdate`, `scene.FlushOnUpdate` (the recording renderer's, removed in #573), `input.AdvanceOnUpdate`, `ui.ProcessOnUpdate`, the ECS renderer's `RecordOnUpdate` (now `scene.RecordOnUpdate`), `anim.AdvanceOnUpdate`. Identities nothing outside orders against become unexported.
 
 This applies to the cog repo. Games and examples are composition roots and stay free-form.
 
@@ -26,7 +26,7 @@ This applies to the cog repo. Games and examples are composition roots and stay 
 
 - **A separate slot and plugin directory for every concept.** Rejected. Six of nine concepts had exactly one implementation, so the seam would be hypothetical, and every change would touch two trees. Go's `internal/` only scopes friend code within one subtree.
 - **gfx, input and storage as Open slots, because their implementation varies by platform.** Rejected. What varies beneath gfx and storage is an Adapter, not the whole Extension, and input's platform sources only *call* `ApplyCmd`. As Open slots they would need Resource ownership keyed by a slot-declared name, and every Resource type would become an interface.
-- **Resources as interfaces, so a slot carries no implementation.** Rejected for Bundles and Ports. `canvas.OpQueue` and `scene.OpQueue` are called per sprite and per instance. Concrete types, with the consume side in `internal/`, cost nothing.
+- **Resources as interfaces, so a slot carries no implementation.** Rejected for Bundles and Ports. `canvas.OpQueue` and `scene.OpQueue` (the recording renderer's, removed in #573) are called per sprite and per instance. Concrete types, with the consume side in `internal/`, cost nothing.
 - **Ports as plugin interfaces (`PortPlugin{Port() PortId; SetAdapter(any)}`).** Rejected in favour of typed registrar declarations. Declarations already go through the registrar, and `any` would move a compile-time check to runtime.
 - **"Module" for slot+extension.** Rejected. It collides with shader module and Go module. Taking "Bundle" renamed the ECS term: a Spawn now takes a Component set, spelled as a struct type with values.
 

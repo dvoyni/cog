@@ -8,7 +8,8 @@ applyTo: "**/*.go"
 
 Every plugin in cog is exactly one kind. Its kind fixes its directory, and every
 plugin has the same package shape. [`docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md`](../../docs/adr/0002-slots-extensions-and-bundles-as-declaration-roots.md)
-records why; [`CONTEXT.md`](../../CONTEXT.md) defines each term. The kinds, the
+records the kinds, and [`docs/adr/0003-roots-are-alias-indexes.md`](../../docs/adr/0003-roots-are-alias-indexes.md)
+the root's shape; [`CONTEXT.md`](../../CONTEXT.md) defines each term. The kinds, the
 shape and the import rules are enforced by `kernel/archtest`, not by review.
 
 Everything here is the rule for every plugin, new ones included.
@@ -21,14 +22,56 @@ Everything here is the rule for every plugin, new ones included.
 | **Library** | `libs/<name>` | Code that is not a Plugin and defines none (`libs/m`). |
 | **Slot** | `slots/<name>` | A Plugin whose root declares at least one required Port (app, gfx, storage). Composition fails until an Adapter fills it. |
 | **Extension** | `extensions/<name>` | A Plugin that provides Adapters, at least one of them for a Slot's required Port, and declares no API (gogpu, diskstorage, jsstorage). It may also contribute to a collected Port. |
-| **Bundle** | `bundles/<name>` | Every other Plugin (input, anim, canvas, scene, ui, ecs, ecsscene, mcp). Its root declares no required Port, and it may collect Adapters or contribute them. |
+| **Bundle** | `bundles/<name>` | Every other Plugin (input, anim, canvas, scene, ui, ecs, mcp). Its root declares no required Port, and it may collect Adapters or contribute them. |
 
 A plugin that would need both a Slot's Adapters and an API of its own is two
 plugins: an Extension and a Bundle.
 
 ## The Package Shape
 
-A plugin `X` is four places, and nothing else under `X` may hold Go code:
+A plugin `X` is four places, and nothing else under `X` may hold Go code.
+
+**Every plugin has an alias-index root (ADR 0003) but mcp**, which still has
+ADR 0002's declaration root, described after it, until its capability builders
+find a home that keeps the MCP SDK out of the plugins that declare tools.
+`kernel/archtest`'s `aliasIndexRoots` lists the moved plugins. Every new
+plugin takes the alias-index shape.
+
+**The alias-index shape (ADR 0003):**
+
+- **The root, `X/`, declares nothing: it is an index of aliases** of what its
+  own `internal/` and `internal/types` declare, each under the target's own
+  name — `type Mesh = internal.Mesh`, `const Name = internal.Name`,
+  `var ErrNoArea = types.ErrNoArea` — plus the forwarders in `utils.go` and
+  inline anchors. It keeps the file names below, so a reader opens
+  `components.go` for what an Entity carries and `commands.go` for what the
+  plugin answers. Each alias repeats its declaration's doc comment, because the
+  root is what a game reads.
+- **`X/internal/`** declares everything the root offers — `Name`, the ordering
+  identities, commands, events, Adapters, Components, errors, `Config` — in
+  files named as the root's are (`id.go`, `components.go`, `err.go`), beside
+  the implementation. It registers under those names directly. **It never
+  imports its own root**; nothing does but the root's importers.
+- **`X/internal/types/`** is optional, and **holds data only**: POD structs
+  with exported fields, enums, consts and errors — no function, and no method
+  but `Error` and `String`. Keep one when a plugin has plenty of such data
+  another package of its own needs apart from the logic; otherwise there is
+  none, as in every moved plugin today. Logic, and any type with methods, is
+  declared in `internal/`. It never imports its own root either.
+- **`X/internal/<part>/`** sub-packages hold the separable parts of a crowded
+  `internal/` — a part few other files reach into, such as gfx's shader
+  vocabulary and preprocessor in `internal/shader`. They are implementation,
+  so methods and logic are welcome; `internal/` imports them, they never import
+  `internal/` or the root, and the root aliases and forwards into them exactly
+  as into `internal/`, keeping each target's name.
+- **A test that composes plugins depending on this one** cannot be a test of
+  `internal/` itself: their roots import this root, which imports `internal/`.
+  It is an external test, `package internal_test`, beside the others, reaching
+  what it needs through an `export_test.go` (app's `pairing_test.go`).
+- An alias exposes every exported method of the type it names, so a method on
+  a type the root aliases is public API.
+
+**The declaration shape (ADR 0002), mcp's alone:**
 
 - **The root, `X/`**, holds declarations only: what the plugin offers others.
 - **`X/internal/types/`** holds the concrete types the root aliases, their
@@ -59,13 +102,13 @@ stay where they are.
 
 | Kind | Allowed files |
 | --- | --- |
-| Slot, Bundle | `doc.go`, `id.go`, `commands.go`, `events.go`, `resources.go`, `ports.go`, `adapters.go`, `types.go`, `config.go`, `err.go`, `utils.go` |
+| Slot, Bundle | `doc.go`, `id.go`, `commands.go`, `events.go`, `resources.go`, `ports.go`, `adapters.go`, `components.go`, `types.go`, `config.go`, `err.go`, `utils.go` |
 | Extension | `doc.go`, `id.go`, `config.go`, `adapters.go`, `err.go` |
 
 - **Data-driven declarations.** Types with exported fields, and no getters or
   setters.
 - **Aliases** go in the file matching what the aliased type is: a resource alias
-  in `resources.go`, a value type in `types.go`
+  in `resources.go`, a Component in `components.go`, a value type in `types.go`
   (`type OpQueue = types.OpQueue`).
 - **`Config`** is plain data whose zero value is the default. It may have
   builder methods (`WithValuesPath`), the only logic a root holds outside
@@ -161,9 +204,9 @@ performance or because `internal/types` code names it, goes in
 | --- | --- |
 | `kernel` | nothing else in cog |
 | `libs/*` | `libs`, `kernel` |
-| root `X` | `libs`, `kernel`, other plugins' roots, its own `internal/types` |
+| root `X` | `libs`, `kernel`, other plugins' roots, its own `internal/types`; an alias-index root also its own `internal/` and the packages under it |
 | `X/internal/types/…` | `libs`, `kernel`, other plugins' roots |
-| `X/internal/…` | `libs`, `kernel`, any root, its own `internal/…` and `internal/types` |
+| `X/internal/…` | `libs`, `kernel`, any root — **but its own, in an alias-index plugin** — its own `internal/…` and `internal/types` |
 | constructor `X/Xplugin` | `kernel`, its own `internal/` |
 
 - Nothing in cog imports a constructor package or another plugin's `internal/`,

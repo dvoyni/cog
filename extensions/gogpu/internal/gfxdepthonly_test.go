@@ -3,7 +3,6 @@ package internal
 import (
 	"testing"
 
-	cgogpu "github.com/dvoyni/cog/extensions/gogpu"
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
@@ -43,7 +42,7 @@ func TestTheRefusalNamesThePassAndSaysWhatWasSkipped(t *testing.T) {
 	// missing and that its depth texture was left as it found it, because the
 	// visible symptom is a later pass rendering against undefined depth rather
 	// than anything about the pass that was skipped.
-	err := cgogpu.ErrDepthOnlyPassUnsupported{Pass: "scene.camera-200.depth", Backend: "Pure Go (GLES)"}
+	err := ErrDepthOnlyPassUnsupported{Pass: "scene.camera-200.depth", Backend: "Pure Go (GLES)"}
 	text := err.Error()
 	for _, want := range []string{"scene.camera-200.depth", "Pure Go (GLES)", "skipped", "untouched"} {
 		if !contains(text, want) {

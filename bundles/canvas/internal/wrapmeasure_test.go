@@ -4,8 +4,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/dvoyni/cog/bundles/canvas"
-	"github.com/dvoyni/cog/bundles/canvas/internal/types"
 	"golang.org/x/image/font/gofont/goregular"
 )
 
@@ -21,7 +19,7 @@ func TestWrapMeasureFollowsLayoutMetrics(t *testing.T) {
 	const path = "font.ttf"
 	const size = 18
 	filesystem := fstest.MapFS{path: &fstest.MapFile{Data: goregular.TTF}}
-	k, _, _ := testKernel(t, filesystem, canvas.Config{}, func(*canvas.OpQueue) {})
+	k, _, _ := testKernel(t, filesystem, Config{}, func(*OpQueue) {})
 
 	probeFrame(k, func(fr *frame) {
 		logical := fr.face(path, size)
@@ -31,24 +29,24 @@ func TestWrapMeasureFollowsLayoutMetrics(t *testing.T) {
 		}
 
 		const text = "a line that exactly fills its measured width"
-		lines := types.ParseInlineText(text)
-		arranged := types.MeasureLine(logical, text)
-		rasterized := func(segments []types.InlineSegment) float32 {
+		lines := ParseInlineText(text)
+		arranged := MeasureLine(logical, text)
+		rasterized := func(segments []InlineSegment) float32 {
 			var width float32
 			for _, segment := range segments {
-				width += types.MeasureLine(raster, segment.Text) * 0.5
+				width += MeasureLine(raster, segment.Text) * 0.5
 			}
 			return width
 		}
 		if rasterized(lines[0]) <= arranged {
 			t.Skip("test text no longer exercises rasterization drift for this font")
 		}
-		if got := types.WrapInlineText(lines, arranged, rasterized); len(got) != 2 {
+		if got := WrapInlineText(lines, arranged, rasterized); len(got) != 2 {
 			t.Fatalf("rasterized wrapping produced %d lines, want the 2 the drift causes", len(got))
 		}
 
 		wrap := (&plugin{}).wrapMeasure(fr, path, size, rasterized)
-		got := types.WrapInlineText(lines, arranged, wrap)
+		got := WrapInlineText(lines, arranged, wrap)
 		if len(got) != 1 || len(got[0]) != 1 || got[0][0].Icon || got[0][0].Text != text {
 			t.Fatalf("layout-measured wrapping = %+v, want the one line %q", got, text)
 		}

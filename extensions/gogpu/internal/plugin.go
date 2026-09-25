@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/dvoyni/cog/bundles/input"
-	cgogpu "github.com/dvoyni/cog/extensions/gogpu"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 	cgfx "github.com/dvoyni/cog/slots/gfx"
@@ -16,7 +15,7 @@ import (
 // plugin is the gogpu driver. Its configuration arrives through the configured
 // map under cgogpu.Name.
 type plugin struct {
-	config cgogpu.Config
+	config Config
 	gpu    *gogpu.App
 
 	// loop is app's half of the application loop, attached by app from its
@@ -68,7 +67,7 @@ func New() kernel.Plugin {
 
 // Name reports the plugin name.
 func (p *plugin) Name() kernel.PluginName {
-	return cgogpu.Name
+	return Name
 }
 
 // Dependencies reports the plugins this plugin requires: gfx (whose viewport it
@@ -92,13 +91,13 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	if p.gfxBackend == nil {
 		p.gfxBackend = newGfxBackend()
 	}
-	registrar.ProvideAdapter[cgogpu.GfxBackend](cgfx.Backend(p.gfxBackend))
-	registrar.ProvideAdapter[cgogpu.AppMainLoop](app.MainLoop(mainLoop{p}))
-	var cfg cgogpu.Config
+	registrar.ProvideAdapter[GfxBackend](cgfx.Backend(p.gfxBackend))
+	registrar.ProvideAdapter[AppMainLoop](app.MainLoop(mainLoop{p}))
+	var cfg Config
 	if config != nil {
-		c, ok := config.(cgogpu.Config)
+		c, ok := config.(Config)
 		if !ok {
-			return cgogpu.ErrInvalidConfig{Got: config}
+			return ErrInvalidConfig{Got: config}
 		}
 		cfg = c
 	}

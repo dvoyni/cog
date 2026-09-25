@@ -1,6 +1,6 @@
 package model
 
-import "github.com/dvoyni/cog/bundles/model/internal/types"
+import "github.com/dvoyni/cog/bundles/model/internal"
 
 // Lookup is model's persistent resource, registered by the model plugin and
 // read by every renderer. It holds everything that outlives a frame - loaded
@@ -13,4 +13,4 @@ import "github.com/dvoyni/cog/bundles/model/internal/types"
 // never loads. Under the write lock, the load facade is LookupAccess,
 // LookupDeviceAccess and, for the renderer that holds it, the Lookup's own
 // methods: they load, preload, unload and drive the bake and release queues.
-type Lookup = types.Lookup
+type Lookup = internal.Lookup

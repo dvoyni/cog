@@ -36,7 +36,7 @@ func TestStorageStructMembersAreReflected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reflect: %v", err)
 	}
-	if len(layout.Resources) != 1 || !layout.Resources[0].StorageBuffer {
+	if len(layout.Resources) != 1 || layout.Resources[0].Kind.Base() != gfx.ResourceStorageBuffer {
 		t.Fatalf("resources = %+v, want one storage buffer", layout.Resources)
 	}
 	members := map[string]gfx.StorageMember{}
@@ -73,11 +73,26 @@ fn vs_main() -> @builtin(position) vec4<f32> { return a.x + b.y; }
 fn fs_main() -> @location(0) vec4<f32> { return a.x; }
 `
 
-func TestSecondUniformBlockIsRejected(t *testing.T) {
-	// Silently overwriting the first block misbehaves in a near-undiagnosable
-	// way: every parameter lands at the wrong offset.
-	if _, err := reflectShaderLayout(testTwoUniformBlocksWGSL); err == nil {
-		t.Fatal("two uniform blocks were accepted, want an error")
+// Each uniform block is its own resource at its own binding, with its own
+// members at offsets from its own start: a second block neither overwrites the
+// first nor shifts its members.
+func TestEveryUniformBlockIsReflected(t *testing.T) {
+	layout, err := reflectShaderLayout(testTwoUniformBlocksWGSL)
+	if err != nil {
+		t.Fatalf("reflect: %v", err)
+	}
+	blocks := uniformBlocks(layout)
+	if len(blocks) != 2 {
+		t.Fatalf("uniform blocks = %+v, want a and b", blocks)
+	}
+	for i, want := range []struct{ name, member string }{{"a", "x"}, {"b", "y"}} {
+		block := blocks[i]
+		if block.Name != want.name || block.Group != 0 || block.Binding != i || block.Size != 16 {
+			t.Errorf("block %d = %+v, want %s at 0/%d, 16 bytes", i, block, want.name, i)
+		}
+		if len(block.Members) != 1 || block.Members[0].Name != want.member || block.Members[0].Offset != 0 {
+			t.Errorf("block %s members = %+v, want %s at 0", want.name, block.Members, want.member)
+		}
 	}
 }
 

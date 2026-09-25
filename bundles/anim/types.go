@@ -1,6 +1,6 @@
 package anim
 
-import "github.com/dvoyni/cog/bundles/anim/internal/types"
+import "github.com/dvoyni/cog/bundles/anim/internal"
 
 // Timeline is one chain of tracks and cues with its own clock; see the package
 // documentation for the chain-point model. It is not a resource of its own:
@@ -11,37 +11,37 @@ import "github.com/dvoyni/cog/bundles/anim/internal/types"
 // Add, Query and Value queue and read tracks; Cue, Fired and FiredCues queue
 // and read cues; Rewind and Wait move the chain point; Time, Idle and Reset
 // read and clear the clock.
-type Timeline = types.Timeline
+type Timeline = internal.Timeline
 
 // Params describes how a track plays. The zero value is a zero-duration,
 // linear, one-shot track that starts at the chain point. WithEasing, WithLoop
 // and WithImmediate return modified copies.
-type Params = types.Params
+type Params = internal.Params
 
 // State is the result of a Query: whether a track matched the slot and, if
 // so, whether it is playing now or still pending. State.Found reports whether
 // any track, active or pending, matched.
-type State = types.State
+type State = internal.State
 
 const (
 	// StateNotFound reports that no track is stored under the slot.
-	StateNotFound = types.StateNotFound
+	StateNotFound = internal.StateNotFound
 	// StatePending reports a track that is queued but has not started; its
 	// progress is the easing of 0.
-	StatePending = types.StatePending
+	StatePending = internal.StatePending
 	// StateActive reports a track that is playing now.
-	StateActive = types.StateActive
+	StateActive = internal.StateActive
 )
 
 // Easing maps normalized progress in [0, 1] to eased progress. A track applies
 // its easing to clamped (or, when looping, wrapped) progress before the
 // sequence produces a value.
-type Easing = types.Easing
+type Easing = internal.Easing
 
 // Sequence produces a value of type T for eased progress in [0, 1]. Any type
 // may implement it; a track stores the sequence value it was added with, so a
 // sequence may carry whatever payload the reader needs at draw time.
-type Sequence[T any] = types.Sequence[T]
+type Sequence[T any] = internal.Sequence[T]
 
 // Lerp is a Sequence that mixes between two values: At mixes From and To by
 // progress with Mix, which must be set; the Lerp* constructors supply the m
@@ -54,7 +54,7 @@ type Sequence[T any] = types.Sequence[T]
 //	}
 //
 //	tl.Add(unitId, MoveSeq{Lerp: anim.LerpFloat(0, 1), From: a, To: b}, anim.Over(0.4))
-type Lerp[T any] = types.Lerp[T]
+type Lerp[T any] = internal.Lerp[T]
 
 // Flipbook is a Sequence that steps through a fixed list of frames, holding
 // each for an equal slice of the track. The frames are the values the track
@@ -70,4 +70,4 @@ type Lerp[T any] = types.Lerp[T]
 //
 //	book := anim.Flipbook[Sprite]{Frames: flagFrames, FPS: 30}
 //	tl.Add(NoId{}, FlagWaveSeq{book}, book.Params().WithLoop().WithImmediate())
-type Flipbook[T any] = types.Flipbook[T]
+type Flipbook[T any] = internal.Flipbook[T]

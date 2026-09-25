@@ -3,7 +3,6 @@
 package internal
 
 import (
-	"github.com/dvoyni/cog/extensions/otosound"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 	"github.com/dvoyni/cog/slots/sound"
@@ -41,7 +40,7 @@ type plugin struct {
 func New() kernel.Plugin { return &plugin{hardware: &otoAudio{}} }
 
 // Name reports the plugin name.
-func (p *plugin) Name() kernel.PluginName { return otosound.Name }
+func (p *plugin) Name() kernel.PluginName { return Name }
 
 // Dependencies reports the plugins otosound requires; it has none. The Port it
 // fills binds at composition and adds no dependency in either direction, and
@@ -54,25 +53,25 @@ func (p *plugin) Dependencies() []kernel.PluginName { return nil }
 // is taken at Voices(n), which is the first moment the Mixer it would pull from
 // is complete.
 func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
-	cfg := otosound.Config{}
+	cfg := Config{}
 	if config != nil {
 		var ok bool
-		cfg, ok = config.(otosound.Config)
+		cfg, ok = config.(Config)
 		if !ok {
-			return otosound.ErrInvalidConfig{Got: config}
+			return ErrInvalidConfig{Got: config}
 		}
 	}
 	if cfg.SampleRate < 0 {
-		return otosound.ErrInvalidSampleRate{SampleRate: cfg.SampleRate}
+		return ErrInvalidSampleRate{SampleRate: cfg.SampleRate}
 	}
 	if cfg.BufferSize < 0 {
-		return otosound.ErrInvalidBufferSize{BufferSize: cfg.BufferSize}
+		return ErrInvalidBufferSize{BufferSize: cfg.BufferSize}
 	}
 	if cfg.DecodedClipLimit < alwaysStream {
-		return otosound.ErrInvalidDecodedClipLimit{DecodedClipLimit: cfg.DecodedClipLimit}
+		return ErrInvalidDecodedClipLimit{DecodedClipLimit: cfg.DecodedClipLimit}
 	}
 	p.backend = newBackend(cfg, p.hardware)
-	registrar.ProvideAdapter[otosound.SoundBackend](sound.Backend(p.backend))
+	registrar.ProvideAdapter[SoundBackend](sound.Backend(p.backend))
 	registrar.Subscribe[reportOnUpdate](p.reportOnUpdate)
 	return nil
 }
@@ -99,7 +98,7 @@ func (p *plugin) Stop(kernel.Executioner) error {
 func (p *plugin) reportOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	return func(kernel.ResourceAccess) {}, func(k kernel.Kernel, _ app.UpdateEvent) {
 		if failure := p.backend.failure.Load(); failure != nil {
-			k.ReportErrorOnce(deviceUnavailableKey{}, otosound.ErrDeviceUnavailable{Err: failure.err})
+			k.ReportErrorOnce(deviceUnavailableKey{}, ErrDeviceUnavailable{Err: failure.err})
 		}
 		if ignored := p.backend.ignored.Load(); ignored != nil {
 			k.ReportErrorOnce(deviceConfigIgnoredKey{}, *ignored)

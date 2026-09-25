@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/dvoyni/cog/bundles/ecsphysics2d"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -83,10 +82,10 @@ func populateSweptPolygons(t testing.TB, h *harness, n int) {
 
 	hexagon, hexagonVerts := regularPolygon(t, 6, 0.35)
 	triangle, _ := regularPolygon(t, 3, 0.4)
-	box := ecsphysics2d.NewBoxShape(0.6, 0.6, 0)
+	box := NewBoxShape(0.6, 0.6, 0)
 
 	for i := range n {
-		shape, polygon := box, ecsphysics2d.Polygon{}
+		shape, polygon := box, Polygon{}
 		switch i % 4 {
 		case 1:
 			shape = triangle
@@ -95,7 +94,7 @@ func populateSweptPolygons(t testing.TB, h *harness, n int) {
 		}
 		h.spawn(t, spawnRequest{
 			Kind:    kindPolygonStatic,
-			Place:   ecsphysics2d.Position{Current: sweptGridAt(i)},
+			Place:   Position{Current: sweptGridAt(i)},
 			Shape:   shape,
 			Polygon: polygon,
 		})
@@ -117,8 +116,8 @@ func populateSweptPolygons(t testing.TB, h *harness, n int) {
 	for i := range max(n/16, 1) {
 		h.spawn(t, spawnRequest{
 			Kind:     kindShapedBody,
-			Place:    ecsphysics2d.Position{Current: sweptGridAt(i * 16)},
-			Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: 0.1}},
+			Place:    Position{Current: sweptGridAt(i * 16)},
+			Velocity: Velocity{Linear: m.Vec2d{X: 0.1}},
 			Body:     dynamic(t, 1e6, 1e6, 0, 0),
 			Shape:    sensorCircle(0.1),
 		})

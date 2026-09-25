@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dvoyni/cog/extensions/otosound"
 	"github.com/dvoyni/cog/slots/sound"
 )
 
@@ -28,7 +27,7 @@ const testCadence = time.Millisecond
 // fast enough to watch.
 func newWatchedBackend(t *testing.T, hardware *fakeAudio) *backend {
 	t.Helper()
-	b := newBackend(otosound.Config{}, hardware)
+	b := newBackend(Config{}, hardware)
 	b.cadence = testCadence
 	t.Cleanup(b.stop)
 	b.Voices(8)

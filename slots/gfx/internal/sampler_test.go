@@ -3,17 +3,22 @@ package internal
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
-	"github.com/dvoyni/cog/slots/gfx"
 )
 
 func TestSamplerDescZeroValueIsClampAndLinear(t *testing.T) {
-	var desc gfx.SamplerDesc
-	if desc.AddressU != gfx.AddressClamp || desc.AddressV != gfx.AddressClamp {
+	var desc types.SamplerDesc
+	if desc.AddressU != types.AddressClamp || desc.AddressV != types.AddressClamp {
 		t.Errorf("zero address = (%v, %v), want clamp on both axes", desc.AddressU, desc.AddressV)
 	}
-	if desc.Mag != gfx.FilterLinear || desc.Min != gfx.FilterLinear || desc.Mip != gfx.FilterLinear {
+	if desc.Mag != types.FilterLinear || desc.Min != types.FilterLinear || desc.Mip != types.FilterLinear {
 		t.Errorf("zero filters = (%v, %v, %v), want linear throughout", desc.Mag, desc.Min, desc.Mip)
 	}
 	if desc.Anisotropy != 0 || desc.Comparison {
@@ -21,7 +26,7 @@ func TestSamplerDescZeroValueIsClampAndLinear(t *testing.T) {
 	}
 	// Comparability is what makes the translator's dedup map work, so five
 	// samplers on one material cost one GPU object each at most.
-	deduped := map[gfx.SamplerDesc]int{desc: 1, {AddressU: gfx.AddressRepeat}: 2}
+	deduped := map[types.SamplerDesc]int{desc: 1, {AddressU: types.AddressRepeat}: 2}
 	if len(deduped) != 2 {
 		t.Errorf("sampler dedup map = %v, want two distinct keys", deduped)
 	}
@@ -31,7 +36,7 @@ func TestSamplerDescZeroValueIsClampAndLinear(t *testing.T) {
 func samplerOps(backend *fakeBackend) [][2]int {
 	var binds [][2]int
 	for _, op := range backend.lastOps {
-		if op.kind == opSetSampler {
+		if op.kind == testOpSetSampler {
 			binds = append(binds, [2]int{op.group, op.binding})
 		}
 	}
@@ -43,27 +48,26 @@ func TestEveryReflectedSamplerBindsIndependentlyByName(t *testing.T) {
 	k := newTestKernel(t, p)
 	// A material with a tiling texture beside a clamped one: two samplers, two
 	// textures, all in one bind group.
-	backend := &fakeBackend{layout: &gfx.ShaderLayout{
-		UniformSize: 64, UniformGroup: 0, UniformBinding: 0,
-		Uniforms: []gfx.UniformMember{{Name: "mvp", Offset: 0}},
-		Resources: []gfx.ShaderResource{
-			{Name: "groundSampler", Sampler: true, Group: 1, Binding: 0},
+	backend := &fakeBackend{layout: &shader.ShaderLayout{
+		Resources: []shader.ShaderResource{
+			{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64, Members: []shader.StorageMember{{Name: "mvp", Offset: 0}}},
+			{Name: "groundSampler", Kind: shader.ResourceSampler, Group: 1, Binding: 0},
 			{Name: "groundTexture", Group: 1, Binding: 1},
-			{Name: "decalSampler", Sampler: true, Group: 1, Binding: 2},
+			{Name: "decalSampler", Kind: shader.ResourceSampler, Group: 1, Binding: 2},
 			{Name: "decalTexture", Group: 1, Binding: 3},
 		},
 	}}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	material := testMaterial(
-		gfx.SamplerParam("groundSampler", gfx.SamplerDesc{AddressU: gfx.AddressRepeat, AddressV: gfx.AddressRepeat}),
-		gfx.SamplerParam("decalSampler", gfx.SamplerDesc{}),
-		gfx.TextureParam("groundTexture", gfx.TextureWithBytes(1, 1, gfx.FormatRGBA8Srgb, []byte{1, 2, 3, 4}, true, false)),
-		gfx.TextureParam("decalTexture", gfx.TextureWithBytes(1, 1, gfx.FormatRGBA8Srgb, []byte{5, 6, 7, 8}, true, false)),
+		descriptors.SamplerParam("groundSampler", types.SamplerDesc{AddressU: types.AddressRepeat, AddressV: types.AddressRepeat}),
+		descriptors.SamplerParam("decalSampler", types.SamplerDesc{}),
+		descriptors.TextureParam("groundTexture", descriptors.TextureWithBytes(1, 1, descriptors.FormatRGBA8Srgb, []byte{1, 2, 3, 4}, true, false)),
+		descriptors.TextureParam("decalTexture", descriptors.TextureWithBytes(1, 1, descriptors.FormatRGBA8Srgb, []byte{5, 6, 7, 8}, true, false)),
 	)
 	w := recordList(t, k)
-	w.Draw(triangle(), material, gfx.MatParam("mvp", m.NewMat4()))
-	k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+	w.Draw(triangle(), material, descriptors.MatParam("mvp", m.NewMat4()))
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	binds := samplerOps(backend)

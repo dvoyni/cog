@@ -1,8 +1,11 @@
 package gfx
 
-import "github.com/dvoyni/cog/slots/gfx/internal/types"
-
-// The recording descriptors. Build them with the constructors in utils.go.
+import (
+	"github.com/dvoyni/cog/slots/gfx/internal"
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+)
 
 // ShaderDescr describes a shader by inline source text (ShaderWithText) or a
 // resource path (ShaderWithResource), resolved to bytes by the renderer. The
@@ -13,15 +16,15 @@ import "github.com/dvoyni/cog/slots/gfx/internal/types"
 // preprocessor resolves the source against. A root source plus one supply is
 // one variant, and two supplies over one path are two shaders, so the supply is
 // part of the descriptor's identity everywhere identity is decided.
-type ShaderDescr = types.ShaderDescr
+type ShaderDescr = shader.ShaderDescr
 
 // ShaderOption is one entry of a shader's supply: a define or a const. Build it
 // with ShaderDefine or ShaderConst.
-type ShaderOption = types.ShaderOption
+type ShaderOption = shader.ShaderOption
 
 // ShaderLocation names one line of one shader source. Line is 1-based; a zero
 // value means the supply, which has no source line to point at.
-type ShaderLocation = types.ShaderLocation
+type ShaderLocation = shader.ShaderLocation
 
 // ShaderSourceMap says where every line of a flattened shader module came from.
 //
@@ -32,73 +35,70 @@ type ShaderLocation = types.ShaderLocation
 // concatenation of contiguous segments with 1:1 line correspondence inside each,
 // which a table describes as precisely as an array would at roughly one entry
 // per source. That property is the thing to preserve, not the data structure.
-type ShaderSourceMap = types.ShaderSourceMap
+type ShaderSourceMap = shader.ShaderSourceMap
 
 // ShaderSegment is one run of flattened output lines coming from one source.
 //
 // The hoisted WGSL §4 prologue is the one segment with no source
 // correspondence: its Source is empty and its lines map to nothing.
-type ShaderSegment = types.ShaderSegment
+type ShaderSegment = shader.ShaderSegment
 
 // TextureDescr describes a texture by resource path (TextureWithResource),
 // inline pixel bytes (TextureWithBytes), or a texture returned by
 // ResourceQueue.BakeTexture. The three are told apart by which field is set,
 // which is why there are no source markers beside it.
-type TextureDescr = types.TextureDescr
+type TextureDescr = descriptors.TextureDescr
 
 // BufferDescr describes a GPU buffer from inline bytes (BufferWithBytes) or a
 // baked storage buffer returned by ResourceQueue.BakeBuffer.
-type BufferDescr = types.BufferDescr
+type BufferDescr = descriptors.BufferDescr
 
 const (
-	BufferSourceBytes = types.BufferSourceBytes
-	BufferSourceBaked = types.BufferSourceBaked
+	BufferSourceBytes = descriptors.BufferSourceBytes
+	BufferSourceBaked = descriptors.BufferSourceBaked
 )
 
 // ParameterDescr is one declarative shader parameter: a texture, buffer, color,
 // scalar, vector, matrix, or sampler. Build it with the *Param constructors and
 // pass it to Material or OpQueue.Draw.
-type ParameterDescr = types.ParameterDescr
+type ParameterDescr = descriptors.ParameterDescr
 
 // MaterialDescr describes how to shade a mesh: a shader plus named parameters.
 // Build it with Material and the *Param constructors. OpQueue.Draw remaps its
 // texture and buffer parameters to baked resource IDs before recording the draw.
-type MaterialDescr = types.MaterialDescr
+type MaterialDescr = descriptors.MaterialDescr
 
 // VertexAttr describes one attribute of the single interleaved vertex array: its
 // byte offset and element type. Attributes bind to shader @location values in the
 // order given. Build it with Attr.
-type VertexAttr = types.VertexAttr
+type VertexAttr = descriptors.VertexAttr
 
 // MeshDescr is CPU-side geometry for one draw: a single interleaved vertex array
 // (and an optional index array at one of the two index widths) as buffer
 // descriptors, a primitive topology, and the vertex layout. Build it with Mesh
 // or MeshIndexed; its fields are unexported and read by the translator.
-type MeshDescr = types.MeshDescr
+type MeshDescr = descriptors.MeshDescr
 
 // Order places a pass in the frame's shared ordering space. gfx defines no
 // conventions and reserves no ranges: recorders that must interleave - canvas
 // layers and scene cameras - agree on numbers between themselves, because they
 // record from separate update subscriptions and stream order between them is
 // not defined.
-type Order = types.Order
+type Order = descriptors.Order
 
 // TargetDescr names a pass's colour attachment.
-type TargetDescr = types.TargetDescr
+type TargetDescr = descriptors.TargetDescr
 
 // DepthDescr names a pass's depth attachment.
-type DepthDescr = types.DepthDescr
+type DepthDescr = descriptors.DepthDescr
 
 // PassDescr declares one render pass: where it draws, in what order, and what
 // happens to its attachments at either end.
-type PassDescr = types.PassDescr
+type PassDescr = descriptors.PassDescr
 
 // PassRef selects a pass declared earlier in the same frame. Its zero value
 // refers to no pass.
-type PassRef = types.PassRef
-
-// The GPU vocabulary: the IDs, formats, enums and descriptors that gfx's
-// recording API and a Backend both speak.
+type PassRef = descriptors.PassRef
 
 // ResourceID underlies the opaque GPU handles below, which a Backend mints. The
 // zero value of each means "none".
@@ -129,22 +129,22 @@ type TextureViewID = types.TextureViewID
 // engine is linear, so the format is what says whether the bytes in a texture
 // are light or a gamma-encoded picker value, and callers name it rather than
 // inherit a default that is wrong half the time.
-type TextureFormat = types.TextureFormat
+type TextureFormat = descriptors.TextureFormat
 
 const (
 	// FormatRGBA8 is 8-bit-per-channel straight-alpha RGBA holding linear
 	// values: normal, metallic-roughness and occlusion maps.
-	FormatRGBA8 = types.FormatRGBA8
+	FormatRGBA8 = descriptors.FormatRGBA8
 	// FormatRGBA8Srgb is the same layout holding gamma-encoded values the
 	// hardware decodes on read: base colour, emissive and the canvas atlas.
-	FormatRGBA8Srgb = types.FormatRGBA8Srgb
+	FormatRGBA8Srgb = descriptors.FormatRGBA8Srgb
 	// FormatDepth32F is the one depth format, renderable and sampleable. There
 	// is no stencil aspect anywhere in the engine.
-	FormatDepth32F = types.FormatDepth32F
+	FormatDepth32F = descriptors.FormatDepth32F
 	// FormatScreen is the sentinel for "whatever the frame buffer is", so a
 	// pipeline can be keyed before the frame buffer exists. It resolves to
 	// FrameBufferFormat.
-	FormatScreen = types.FormatScreen
+	FormatScreen = descriptors.FormatScreen
 )
 
 // FrameBufferFormat is what every ScreenTarget pass renders into: the frame
@@ -162,7 +162,7 @@ const (
 // whether it applies the sRGB OETF, so the buffer's colour space and the
 // transfer function that puts it on screen stay one decision rather than two
 // that can disagree.
-const FrameBufferFormat = types.FrameBufferFormat
+const FrameBufferFormat = descriptors.FrameBufferFormat
 
 // BufferKind tags a buffer's role, which selects its GPU usage flags.
 type BufferKind = types.BufferKind
@@ -180,7 +180,7 @@ type BufferDesc = types.BufferDesc
 // StorageAlignment is the offset alignment a storage binding requires. A record
 // a draw binds a range of therefore pads up to a multiple of it - a pad, not a
 // cap on what a record may hold.
-const StorageAlignment = types.StorageAlignment
+const StorageAlignment = descriptors.StorageAlignment
 
 // IndexWidth is how wide one element of an index buffer is. There are exactly
 // two, fixed by the platform rather than chosen: WebGPU has no uint8 index
@@ -193,11 +193,11 @@ const StorageAlignment = types.StorageAlignment
 //
 // The zero value is IndexUint32, the width that is legal for any mesh, so a
 // descriptor built without naming one is wide rather than wrong.
-type IndexWidth = types.IndexWidth
+type IndexWidth = descriptors.IndexWidth
 
 const (
-	IndexUint32 = types.IndexUint32
-	IndexUint16 = types.IndexUint16
+	IndexUint32 = descriptors.IndexUint32
+	IndexUint16 = descriptors.IndexUint16
 )
 
 // PrimitiveTopology selects how vertices assemble into primitives.
@@ -212,61 +212,61 @@ const (
 // VertexType is the element type of one attribute in the interleaved vertex
 // array: float, half-float, normalized, or integer scalar/vector types. Names
 // mirror the WebGPU vertex formats.
-type VertexType = types.VertexType
+type VertexType = descriptors.VertexType
 
 const (
-	UnknownVertexType = types.UnknownVertexType
-	Float32           = types.Float32
-	Float32x2         = types.Float32x2
-	Float32x3         = types.Float32x3
-	Float32x4         = types.Float32x4
-	Float16x2         = types.Float16x2
-	Float16x4         = types.Float16x4
-	Uint8x2           = types.Uint8x2
-	Uint8x4           = types.Uint8x4
-	Sint8x2           = types.Sint8x2
-	Sint8x4           = types.Sint8x4
-	Unorm8x2          = types.Unorm8x2
-	Unorm8x4          = types.Unorm8x4
-	Snorm8x2          = types.Snorm8x2
-	Snorm8x4          = types.Snorm8x4
-	Uint16x2          = types.Uint16x2
-	Uint16x4          = types.Uint16x4
-	Sint16x2          = types.Sint16x2
-	Sint16x4          = types.Sint16x4
-	Unorm16x2         = types.Unorm16x2
-	Unorm16x4         = types.Unorm16x4
-	Snorm16x2         = types.Snorm16x2
-	Snorm16x4         = types.Snorm16x4
-	Uint32            = types.Uint32
-	Uint32x2          = types.Uint32x2
-	Uint32x3          = types.Uint32x3
-	Uint32x4          = types.Uint32x4
-	Sint32            = types.Sint32
-	Sint32x2          = types.Sint32x2
-	Sint32x3          = types.Sint32x3
-	Sint32x4          = types.Sint32x4
-	Unorm1010102      = types.Unorm1010102 // packed 10/10/10/2 normalized unsigned in one u32
+	UnknownVertexType = descriptors.UnknownVertexType
+	Float32           = descriptors.Float32
+	Float32x2         = descriptors.Float32x2
+	Float32x3         = descriptors.Float32x3
+	Float32x4         = descriptors.Float32x4
+	Float16x2         = descriptors.Float16x2
+	Float16x4         = descriptors.Float16x4
+	Uint8x2           = descriptors.Uint8x2
+	Uint8x4           = descriptors.Uint8x4
+	Sint8x2           = descriptors.Sint8x2
+	Sint8x4           = descriptors.Sint8x4
+	Unorm8x2          = descriptors.Unorm8x2
+	Unorm8x4          = descriptors.Unorm8x4
+	Snorm8x2          = descriptors.Snorm8x2
+	Snorm8x4          = descriptors.Snorm8x4
+	Uint16x2          = descriptors.Uint16x2
+	Uint16x4          = descriptors.Uint16x4
+	Sint16x2          = descriptors.Sint16x2
+	Sint16x4          = descriptors.Sint16x4
+	Unorm16x2         = descriptors.Unorm16x2
+	Unorm16x4         = descriptors.Unorm16x4
+	Snorm16x2         = descriptors.Snorm16x2
+	Snorm16x4         = descriptors.Snorm16x4
+	Uint32            = descriptors.Uint32
+	Uint32x2          = descriptors.Uint32x2
+	Uint32x3          = descriptors.Uint32x3
+	Uint32x4          = descriptors.Uint32x4
+	Sint32            = descriptors.Sint32
+	Sint32x2          = descriptors.Sint32x2
+	Sint32x3          = descriptors.Sint32x3
+	Sint32x4          = descriptors.Sint32x4
+	Unorm1010102      = descriptors.Unorm1010102
 )
 
 // VertexScalar is the scalar type an attribute presents to the shader once the
 // hardware has decoded it, which is not the same thing as the type its bytes
 // are stored in: every normalized format arrives as float however many bits it
 // occupies, and only the integer formats arrive as integers.
-type VertexScalar = types.VertexScalar
+type VertexScalar = shader.VertexScalar
 
 const (
 	// VertexScalarNone is the zero value: a type that decodes to nothing a
 	// shader can read. No legal vertex format has it.
-	VertexScalarNone  = types.VertexScalarNone
-	VertexScalarFloat = types.VertexScalarFloat
-	VertexScalarUint  = types.VertexScalarUint
-	VertexScalarSint  = types.VertexScalarSint
+	VertexScalarNone  = shader.VertexScalarNone
+	VertexScalarFloat = shader.VertexScalarFloat
+	VertexScalarUint  = shader.VertexScalarUint
+	VertexScalarSint  = shader.VertexScalarSint
 )
 
 // VertexAttribute is one attribute of the interleaved vertex buffer supplied to a
 // pipeline: its byte offset, element type, and shader @location.
-type VertexAttribute = types.VertexAttribute
+type VertexAttribute = descriptors.VertexAttribute
 
 // AddressMode selects how texture coordinates outside [0,1] are sampled on one
 // axis. It is an enum rather than a bitmask because mirroring is a third mode,
@@ -393,14 +393,14 @@ type Region = types.Region
 // TextureDesc describes a texture to create. Layers <= 1 creates a regular 2D
 // texture; larger values create a 2D-array texture. Renderable asks for a
 // texture a render pass can draw into as well as sample.
-type TextureDesc = types.TextureDesc
+type TextureDesc = internal.TextureDesc
 
 // TextureViewDimension selects the texture view expected by a shader binding.
-type TextureViewDimension = types.TextureViewDimension
+type TextureViewDimension = shader.TextureViewDimension
 
 const (
-	TextureView2D      = types.TextureView2D
-	TextureView2DArray = types.TextureView2DArray
+	TextureView2D      = shader.TextureView2D
+	TextureView2DArray = shader.TextureView2DArray
 )
 
 // TextureUsage names the role a texture is in as far as the GPU's memory
@@ -441,13 +441,13 @@ type TextureTransition = types.TextureTransition
 // ShaderDesc describes a shader module to create from opaque, backend-specific
 // source bytes (WGSL for the gogpu backend). gfx flattens a shader's sources
 // before it hands Code over, so a backend never sees a preprocessor directive.
-type ShaderDesc = types.ShaderDesc
+type ShaderDesc = shader.ShaderDesc
 
-// ShaderLayout describes a shader's reflected bindings: the uniform parameter
-// block (members + byte offsets, and its group/binding) plus texture and sampler
-// resources. The translator packs params at their declared offsets and binds
-// each resource by matching its name to a material parameter.
-type ShaderLayout = types.ShaderLayout
+// ShaderLayout describes a shader's reflected bindings: uniform blocks, storage
+// buffers, textures and samplers, each one a ShaderResource. The translator packs
+// params into a uniform block at its members' offsets and binds every other
+// resource by matching its name to a material parameter.
+type ShaderLayout = shader.ShaderLayout
 
 // ShaderVertexInput is one @location input of a shader's vertex stage: where it
 // binds and what it declares, reduced to the pair a vertex format can be
@@ -457,24 +457,36 @@ type ShaderLayout = types.ShaderLayout
 // because that is what the comparison is over: a format decodes to a scalar
 // kind and a component count, and nothing in a spelling like "vec3<f32>"
 // survives into the hardware beyond those two numbers.
-type ShaderVertexInput = types.ShaderVertexInput
+type ShaderVertexInput = shader.ShaderVertexInput
 
-// UniformMember is one member of the shader-parameter uniform block: its name and
-// byte offset within the block.
-type UniformMember = types.UniformMember
+// StorageMember is one top-level member of a reflected uniform block or storage
+// struct. Stride and Count are set for an array member - `lights:
+// array<SceneLight, 16>` - and zero otherwise.
+type StorageMember = shader.StorageMember
 
-// StorageMember is one top-level member of a reflected storage struct. Stride
-// and Count are set for an array member - `lights: array<SceneLight, 16>` - and
-// zero otherwise.
-type StorageMember = types.StorageMember
+// ResourceKind is what a reflected binding is - a texture, sampler, uniform
+// buffer or storage buffer, read by Base - plus the flags that refine it within
+// its kind: ResourceDepth, ResourceComparison, ResourceWritable.
+type ResourceKind = shader.ResourceKind
 
-// ShaderResource is a reflected texture, sampler, or storage-buffer binding.
-type ShaderResource = types.ShaderResource
+const (
+	ResourceTexture       = shader.ResourceTexture
+	ResourceSampler       = shader.ResourceSampler
+	ResourceUniformBuffer = shader.ResourceUniformBuffer
+	ResourceStorageBuffer = shader.ResourceStorageBuffer
+	ResourceDepth         = shader.ResourceDepth
+	ResourceComparison    = shader.ResourceComparison
+	ResourceWritable      = shader.ResourceWritable
+)
+
+// ShaderResource is a reflected uniform-block, storage-buffer, texture, or
+// sampler binding. A uniform block carries its byte Size and its Members.
+type ShaderResource = shader.ShaderResource
 
 // PipelineDesc describes a render pipeline to create. Bind group layouts are
 // derived by the backend from the shader's reflection; the vertex layout is
 // supplied by the mesh via Stride and Attributes.
-type PipelineDesc = types.PipelineDesc
+type PipelineDesc = internal.PipelineDesc
 
 // Limits is the subset of the WebGPU limits gfx checks shaders against.
 type Limits = types.Limits
@@ -486,9 +498,7 @@ type Limits = types.Limits
 // One struct carries success and failure so that a caller cannot handle one and
 // forget the other, which is how a capture that never arrives becomes a hang
 // somewhere far away.
-type Capture = types.Capture
-
-// The backend queue: what gfx translates a frame into and a Backend replays.
+type Capture = internal.Capture
 
 // Queue owns a translated command sequence. Commands are constructed as local
 // values and appended once. Bakes are hoisted ahead of every pass; render
@@ -496,22 +506,28 @@ type Capture = types.Capture
 //
 // gfx appends to it and a Backend reads it back only by replaying it into its
 // sinks: ReplayBakes, ReplayPasses and ReplayReleases are the whole read side.
-type Queue = types.Queue
+type Queue = internal.Queue
+
+// UniformAlignment is where a block may start in the frame's uniform arena:
+// every block's offset is a multiple of it. It is the largest
+// minUniformBufferOffsetAlignment WebGPU permits, so an offset aligned to it is
+// a valid uniform binding offset on every device. A Queue hands a backend the
+// arena through BakeSink.BakeUniforms and binds a block per draw through
+// RenderPass.SetUniformBlock(group, binding, offset, size).
+const UniformAlignment = internal.UniformAlignment
 
 // PassSink receives the frame's passes. BeginPass returns the RenderPass its
 // commands go to, so the backend owns encoder and pass lifetime entirely.
-type PassSink = types.PassSink
+type PassSink = internal.PassSink
 
 // BakeSink receives resource uploads before render-pass encoding.
-type BakeSink = types.BakeSink
+type BakeSink = internal.BakeSink
 
 // RenderPass receives render commands in recording order.
-type RenderPass = types.RenderPass
+type RenderPass = internal.RenderPass
 
 // ReleaseSink receives resource releases after submission.
-type ReleaseSink = types.ReleaseSink
-
-// The view types cog's snapshots share.
+type ReleaseSink = internal.ReleaseSink
 
 // SnapshotView is what every snapshot response carries whatever it is a
 // snapshot of: the three coordinate sizes, and whether producing it cost a
@@ -523,11 +539,11 @@ type ReleaseSink = types.ReleaseSink
 // is the inverse case - its coordinates are in that space - so leaving it out
 // breaks the find-the-button-click-the-button flow silently, which is the
 // failure mode worth spending a field on.
-type SnapshotView = types.SnapshotView
+type SnapshotView = internal.SnapshotView
 
 // ParameterView is one shader parameter rendered for an agent: its name, which
 // of the union's arms it is, and that arm's value alone.
-type ParameterView = types.ParameterView
+type ParameterView = internal.ParameterView
 
 // TextureView is one texture rendered for an agent: where it came from, how
 // big it is, and how many bytes of pixels it is carrying - never the pixels.
@@ -535,55 +551,48 @@ type ParameterView = types.ParameterView
 // The name is the one the spec family agreed on across three tools. It is not
 // a GPU texture view; that is TextureViewDimension and TextureViewID, which
 // are a different thing gfx also has.
-type TextureView = types.TextureView
+type TextureView = internal.TextureView
 
 // BufferView is one buffer rendered for an agent, plus the slice of it a
 // parameter binds when a parameter is what produced the view.
-type BufferView = types.BufferView
+type BufferView = internal.BufferView
 
 // SamplerView is one sampler rendered for an agent, with every mode named
 // rather than numbered: a sampler is small enough to report whole, and an
 // enum ordinal in a debug dump is a lookup an agent cannot perform.
-type SamplerView = types.SamplerView
+type SamplerView = internal.SamplerView
 
 // MaterialView is one material rendered for an agent: which shader variant
 // shades the draw, the fixed pipeline state, and the material's own
 // parameters, which a draw's same-named parameters override.
-type MaterialView = types.MaterialView
+type MaterialView = internal.MaterialView
 
 // ShaderView names one shader variant. A root source plus one supply is one
 // variant, so the supply is part of the name rather than a detail beside it.
-type ShaderView = types.ShaderView
+type ShaderView = internal.ShaderView
 
 // MaterialStateView is fixed pipeline state with its enums named. Depth
 // compare and depth write are separate here because they are separate in the
 // engine: test but do not write is a state 3D needs and one flag cannot say.
-type MaterialStateView = types.MaterialStateView
+type MaterialStateView = internal.MaterialStateView
 
 // ViewportMode selects how the logical viewport responds to window aspect
 // changes. ViewportWindow uses the window dimensions directly; fixed modes keep
 // one dimension constant; Fit shows the full desired rectangle, while Cover
 // fills the viewport from it.
-type ViewportMode uint8
+type ViewportMode = types.ViewportMode
 
 const (
-	ViewportWindow ViewportMode = iota
-	ViewportFixedWidth
-	ViewportFixedHeight
-	ViewportFit
-	ViewportCover
+	ViewportWindow      = types.ViewportWindow
+	ViewportFixedWidth  = types.ViewportFixedWidth
+	ViewportFixedHeight = types.ViewportFixedHeight
+	ViewportFit         = types.ViewportFit
+	ViewportCover       = types.ViewportCover
 )
 
 // FrameSnapshot is one produced snapshot, or the reason there is none. One
 // struct carries both so that a caller cannot handle one and forget the other.
-type FrameSnapshot struct {
-	Frame FrameView
-	// Tick is app.UpdateEvent.Tick of the tick the snapshot was taken in. It
-	// travels with the snapshot rather than being asked for afterwards,
-	// because only the tick itself knows which one it was.
-	Tick int64
-	Err  error
-}
+type FrameSnapshot = internal.FrameSnapshot
 
 // FrameView is one tick's renderer declarations, rendered while they are still
 // alive. It is not a copy of the queue: no queue outlives the tick that filled
@@ -595,115 +604,22 @@ type FrameSnapshot struct {
 // emitted array a subset, and if indices were positions in that subset every
 // cross-reference would point at the wrong thing. With source indices the
 // index is the address, and an elided pass stays addressable for free.
-type FrameView struct {
-	// Passes are the frame's declared passes in run order - Order first,
-	// declaration sequence breaking ties - which is the order the translator
-	// runs them in.
-	Passes []PassView `json:"passes,omitempty"`
-	// ResourceOps are the frame's resource traffic: the durable queue's
-	// pending operations first, then the frame queue's own, which is the order
-	// the translator emits them in. They belong to no pass - every bake is
-	// hoisted ahead of all of them - so they carry no pass index and a pass
-	// filter never drops them: "was the texture ever baked" is half of what
-	// this answers, and a filter that hid it would hide the answer.
-	ResourceOps []ResourceOpView `json:"resourceOps,omitempty"`
-	// PassCount, DrawCount and InstanceCount are the whole frame's, whatever
-	// the filter kept, so a filtered response still says how much of the frame
-	// it is describing.
-	PassCount     int `json:"passCount"`
-	DrawCount     int `json:"drawCount"`
-	InstanceCount int `json:"instanceCount"`
-	// StrayDraws are draws recorded outside every pass. They are dropped by
-	// the renderer and reported as ErrDrawWithoutPass, and they are the answer
-	// to "nothing is on screen" often enough to be named here too.
-	StrayDraws int `json:"strayDraws,omitempty"`
-	// Filter echoes the pass label the request asked for, and OmittedPasses is
-	// how many passes it dropped. Whatever a snapshot omits it says it
-	// omitted: a tool that silently truncates cannot be told from a game that
-	// drew nothing.
-	Filter        string `json:"filter,omitempty"`
-	OmittedPasses int    `json:"omittedPasses,omitempty"`
-}
+type FrameView = internal.FrameView
 
 // PassView is one declared render pass: where it draws, in what order, what
 // happens to its attachments at either end, and how much work it carries.
-type PassView struct {
-	// Index is the pass's declaration index in the frame's queue: its address,
-	// stable under filtering. Run is its position in the frame's whole run
-	// order, which is what "a pass ordered wrong" is read off.
-	Index int    `json:"index"`
-	Run   int    `json:"run"`
-	Label string `json:"label,omitempty"`
-	Order int    `json:"order"`
-	// Target is screen, texture or none. A pass drawing into something that is
-	// not the screen, and nothing compositing it afterwards, is one of the
-	// ways a frame ends up black.
-	Target        string    `json:"target"`
-	TargetTexture TextureID `json:"targetTexture,omitempty"`
-	TargetWidth   int       `json:"targetWidth,omitempty"`
-	TargetHeight  int       `json:"targetHeight,omitempty"`
-	TargetMip     int       `json:"targetMip,omitempty"`
-	TargetLayer   int       `json:"targetLayer,omitempty"`
-	// Depth is auto, texture or none.
-	Depth        string    `json:"depth"`
-	DepthTexture TextureID `json:"depthTexture,omitempty"`
-	Load         string    `json:"load"`
-	// Clear is the colour the pass clears to - r, g, b, a - and is present
-	// only when Load is clear.
-	Clear      []float32 `json:"clear,omitempty"`
-	Store      string    `json:"store"`
-	DepthLoad  string    `json:"depthLoad"`
-	DepthClear float32   `json:"depthClear,omitempty"`
-	DepthStore string    `json:"depthStore"`
-	// Draws and Instances are counted rather than listed, because a draw's
-	// mesh and material are opaque handles with nothing to resolve them
-	// against. The aggregate is the informative part, and it is exact.
-	Draws     int `json:"draws"`
-	Instances int `json:"instances"`
-	// Runs reports whether the pass is observable at all. A pass with no draws
-	// that loads nothing is skipped by the translator, which is the difference
-	// between a pass that ran and drew nothing and a pass that never ran.
-	Runs bool `json:"runs"`
-}
+type PassView = internal.PassView
 
 // ResourceOpView is one resource operation: what it does, to which handle, and
 // how big the thing is. Bulk bytes are reported as a count and left where they
 // are.
-type ResourceOpView struct {
-	// Queue is durable or frame: the persistent ResourceQueue, whose
-	// operations wait until the render thread consumes them, or the frame's
-	// own queue, whose uploads live and die with the frame. Index is the
-	// position within that queue, so the address is the pair.
-	Queue string `json:"queue"`
-	Index int    `json:"index"`
-	Kind  string `json:"kind"`
-	// Path is the resource path, for the operations that name one.
-	Path string `json:"path,omitempty"`
-	// Buffer, BufferKind and Size describe a buffer operation.
-	Buffer     BufferID `json:"buffer,omitempty"`
-	BufferKind string   `json:"bufferKind,omitempty"`
-	Size       int      `json:"size,omitempty"`
-	// Texture and the fields after it describe a texture operation.
-	Texture    TextureID `json:"texture,omitempty"`
-	Width      int       `json:"width,omitempty"`
-	Height     int       `json:"height,omitempty"`
-	Layers     int       `json:"layers,omitempty"`
-	Layer      int       `json:"layer,omitempty"`
-	Region     *Region   `json:"region,omitempty"`
-	Format     string    `json:"format,omitempty"`
-	Mipmaps    bool      `json:"mipmaps,omitempty"`
-	Renderable bool      `json:"renderable,omitempty"`
-	// Bytes is how much data the operation uploads. The data itself does not
-	// travel: a baked texture in a response is a base64 megabyte nobody asked
-	// for.
-	Bytes int `json:"bytes,omitempty"`
-}
+type ResourceOpView = internal.ResourceOpView
 
 // inlineAnchor is never called. It exists so that gfx's importers can inline
 // the accessors they call per instance - canvas per sprite, scene per draw,
 // gogpu per pass. Go inlines a method of a package the caller does not import
 // only when a package it does import references that method, and these
-// methods are declared in gfx/internal/types, which nothing outside gfx can
+// methods are declared in gfx/internal, which nothing outside gfx can
 // import. Referencing them here puts their bodies in this package's export
 // data. The tier test allows this shape and nothing broader; see
 // architecture.instructions.md.

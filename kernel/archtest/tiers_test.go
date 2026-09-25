@@ -44,9 +44,42 @@ const (
 	ruleExtensionAPI       = "an Extension root declares only Name, Config, its Adapters and Err… errors"
 	ruleExtensionAdapter   = "an Extension root declares an Adapter for at least one required Port"
 	ruleSlotForwarder      = "a Slot's forwarders name only its own types, predeclared types, the standard library, Libraries and the kernel"
+
+	// The alias-index shape of ADR 0003, held by the plugins aliasIndexRoots
+	// names; every other plugin is still held to ADR 0002's rules above.
+	ruleAliasRootImports  = "an alias-index root imports only libs, kernel, other plugins' roots, its own internal/ and its own internal/types"
+	ruleAliasInternal     = "an alias-index plugin's internal/ and internal/types never import its own root"
+	ruleAliasDeclarations = "an alias-index root declares only aliases: type aliases of its own internal/ and internal/types keeping the target's name, and consts and vars each re-exporting one of the same name, besides its forwarders and inline anchors"
+	ruleTypesData         = "an alias-index plugin's internal/types, when it has one, holds data only: types, consts and vars, with no function and no method but Error and String"
 )
 
 // kind is a plugin's kind, which its top directory says.
+// aliasIndexRoots are the plugins moved to ADR 0003's alias-index root: the
+// root declares nothing of its own and aliases everything from its internal/,
+// which never imports it. The migration moves plugins here one at a time; when
+// every plugin is here, the ADR 0002 rules and this list go.
+var aliasIndexRoots = map[string]bool{
+	"slots/app":              true,
+	"slots/gfx":              true,
+	"slots/sound":            true,
+	"slots/storage":          true,
+	"bundles/anim":           true,
+	"bundles/canvas":         true,
+	"bundles/ecs":            true,
+	"bundles/ecsaudio":       true,
+	"bundles/ecsphysics2d":   true,
+	"bundles/scene":          true,
+	"bundles/input":          true,
+	"bundles/model":          true,
+	"bundles/ui":             true,
+	"extensions/diskstorage": true,
+	"extensions/gogpu":       true,
+	"extensions/jssound":     true,
+	"extensions/jsstorage":   true,
+	"extensions/nosound":     true,
+	"extensions/otosound":    true,
+}
+
 type kind int
 
 const (
@@ -134,6 +167,16 @@ func allowed(from, to place, testFile bool) (bool, string) {
 		return false, ruleReach
 	}
 	otherRoot := to.tier == tierRoot && to.plugin != from.plugin
+	if aliasIndexRoots[from.plugin] {
+		switch from.tier {
+		case tierRoot:
+			return base || otherRoot || inside, ruleAliasRootImports
+		case tierTypes, tierInternal:
+			if to.tier == tierRoot && to.plugin == from.plugin {
+				return false, ruleAliasInternal
+			}
+		}
+	}
 	switch from.tier {
 	case tierRoot:
 		return base || otherRoot || to.tier == tierTypes, ruleRootImports
@@ -269,8 +312,14 @@ func violationsIn(dir string) ([]violation, error) {
 			}
 			violations = append(violations, files...)
 			violations = append(violations, forwarderViolations(pkg, from, m)...)
+			if aliasIndexRoots[from.plugin] {
+				violations = append(violations, aliasViolations(pkg, from, m)...)
+			}
 			violations = append(violations, portViolations(pkg, from, m)...)
 			violations = append(violations, pluginViolations(pkg, rel, m)...)
+		}
+		if from.tier == tierTypes && aliasIndexRoots[from.plugin] {
+			violations = append(violations, logicViolations(pkg, rel, m)...)
 		}
 		if from.tier == tierConstructor {
 			violations = append(violations, constructorExportViolations(pkg, rel, m)...)
@@ -301,13 +350,20 @@ func importViolations(dir string, from place, m module) ([]violation, error) {
 			return nil, fmt.Errorf("parsing %s: %w", file, err)
 		}
 		testFile := strings.HasSuffix(file, "_test.go")
+		// An external test package is a package of its own, which may import
+		// the root its package under test is aliased by.
+		external := testFile && strings.HasSuffix(syntax.Name.Name, "_test")
 		for _, spec := range syntax.Imports {
 			importPath := strings.Trim(spec.Path.Value, "`\"")
 			rel, ok := m.relative(importPath)
 			if !ok {
 				continue // std and third-party are not checked
 			}
-			if ok, rule := allowed(from, m.classify(rel), testFile); !ok {
+			to := m.classify(rel)
+			if external && to.tier == tierRoot && to.plugin == from.plugin {
+				continue
+			}
+			if ok, rule := allowed(from, to, testFile); !ok {
 				violations = append(violations, violation{
 					file: m.within(file),
 					line: fset.Position(spec.Pos()).Line,

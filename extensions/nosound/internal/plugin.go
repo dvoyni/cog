@@ -1,15 +1,14 @@
 package internal
 
 import (
-	"github.com/dvoyni/cog/extensions/nosound"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 	"github.com/dvoyni/cog/slots/sound"
 )
 
 // defaultSampleRate is the rate nosound's Device reports when its Config names
-// none. It lives here rather than in the root because an Extension's root
-// declares only Name, Config, its Adapters and its errors.
+// none. It is unexported rather than aliased by the root because an Extension's
+// root offers only Name, Config, its Adapters and its errors.
 const defaultSampleRate = 48000
 
 // reportOnUpdate is the subscription the Adapter's one report goes out through.
@@ -28,7 +27,7 @@ type plugin struct{ backend *backend }
 func New() kernel.Plugin { return &plugin{} }
 
 // Name reports the plugin name.
-func (p *plugin) Name() kernel.PluginName { return nosound.Name }
+func (p *plugin) Name() kernel.PluginName { return Name }
 
 // Dependencies reports the plugins nosound requires; it has none. The Port it
 // fills binds at composition and adds no dependency in either direction, and
@@ -40,12 +39,12 @@ func (p *plugin) Dependencies() []kernel.PluginName { return nil }
 // none to open, which is the limit case of the rule that registration succeeds
 // whether or not a Device exists.
 func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
-	cfg := nosound.Config{}
+	cfg := Config{}
 	if config != nil {
 		var ok bool
-		cfg, ok = config.(nosound.Config)
+		cfg, ok = config.(Config)
 		if !ok {
-			return nosound.ErrInvalidConfig{Got: config}
+			return ErrInvalidConfig{Got: config}
 		}
 	}
 	sampleRate := cfg.SampleRate
@@ -53,7 +52,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 		sampleRate = defaultSampleRate
 	}
 	p.backend = newBackend(sampleRate)
-	registrar.ProvideAdapter[nosound.SoundBackend](sound.Backend(p.backend))
+	registrar.ProvideAdapter[SoundBackend](sound.Backend(p.backend))
 	registrar.Subscribe[reportOnUpdate](p.reportOnUpdate)
 	return nil
 }

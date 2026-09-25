@@ -1,304 +1,307 @@
 package internal
 
 import (
+	"bytes"
 	"testing"
-	"unsafe"
+	"testing/fstest"
+	"time"
 
 	"github.com/dvoyni/cog/bundles/model"
-	"github.com/dvoyni/cog/bundles/scene"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
+	"github.com/qmuntal/gltf"
+	"github.com/qmuntal/gltf/modeler"
 )
 
-const testCamera scene.CameraID = -100
+// The files the drawing tests load. Each is built rather than read, because
+// this package has no testdata and the point is that the path a Model
+// Component holds is a file scene really loads.
+const (
+	propsModel    = "models/props.glb"
+	animatedModel = "models/animated.glb"
+	paintedModel  = "models/painted.glb"
+)
 
-var testBoxColor = m.NewColorSrgb(0.42, 0.71, 0.94, 1)
+// triangle is the crate's one triangle, and quad the barrel's two: the vertex
+// count a draw reaches the backend with is what tells the two meshes apart.
+var (
+	triangle = [][3]float32{{0, 0, 0}, {1, 0, 0}, {0, 1, 0}}
+	quad     = [][3]float32{{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}}
+)
 
-// testCameraDescr is the floor of the API: a camera looking at the origin.
-func testCameraDescr() scene.CameraDescr {
-	return scene.CameraDescr{
-		Transform: m.LookAt(m.Vec3{X: 3, Y: 2, Z: 4}, m.Vec3{}, m.Vec3{Y: 1}),
-		FovY:      1.0472,
-		Near:      0.1,
-		Far:       100,
-	}
+// meshOf adds one mesh of unindexed positions to doc and returns its index.
+func meshOf(doc *gltf.Document, name string, positions [][3]float32) int {
+	doc.Meshes = append(doc.Meshes, &gltf.Mesh{
+		Name:       name,
+		Primitives: []*gltf.Primitive{{Attributes: gltf.PrimitiveAttributes{gltf.POSITION: modeler.WritePosition(doc, positions)}}},
+	})
+	return len(doc.Meshes) - 1
 }
 
-func TestBoxRecordsOneOp(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
-		q.Camera(testCamera, testCameraDescr())
-		q.Box(0, m.At(1, 2, 3), testBoxColor)
-	})
-	h.frame()
-
-	ops := h.ops()
-	if len(ops) != 2 {
-		t.Fatalf("recorded %d ops, want a camera and a box", len(ops))
+// encodeGLB writes doc as a binary glTF file.
+func encodeGLB(t testing.TB, doc *gltf.Document) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	if err := gltf.NewEncoder(&buffer).Encode(doc); err != nil {
+		t.Fatalf("encoding the model: %v", err)
 	}
-	box := ops[1]
-	if box.Kind != scene.OpBox {
-		t.Fatalf("the second op is kind %d, want OpBox", box.Kind)
-	}
-	if box.Transform.Position != (m.Vec3{X: 1, Y: 2, Z: 3}) {
-		t.Fatalf("the box is at %v, want (1,2,3)", box.Transform.Position)
-	}
-	if box.Color != testBoxColor {
-		t.Fatalf("the box is %v, want %v", box.Color, testBoxColor)
-	}
+	return buffer.Bytes()
 }
 
-func TestABoxIsOneInstancedDrawInItsCamerasPass(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
-		q.Camera(testCamera, testCameraDescr())
-		q.Box(0, m.At(0, 0, 0), testBoxColor)
-	})
-	h.frame()
-
-	passes := h.passes()
-	if len(passes) != 1 {
-		t.Fatalf("the frame published %d passes, want 1", len(passes))
-	}
-	pass := passes[0]
-	if pass.Recorded != 1 || pass.Instances != 1 {
-		t.Fatalf("pass recorded %d and packed %d instances, want 1 and 1", pass.Recorded, pass.Instances)
-	}
-	if len(pass.Batches) != 1 {
-		t.Fatalf("pass has %d batches, want 1", len(pass.Batches))
-	}
-	batch := pass.Batches[0]
-	if batch.MeshID == 0 || batch.MaterialID == 0 {
-		t.Fatalf("batch is %+v, want a mesh and a material id", batch)
-	}
-	if batch.FirstInstance != 0 || batch.InstanceCount != 1 {
-		t.Fatalf("batch spans instances [%d, %d), want [0, 1)", batch.FirstInstance, batch.FirstInstance+batch.InstanceCount)
-	}
+// crateGLB is the smallest drawable file: one triangle, one node, one scene.
+func crateGLB(t testing.TB) []byte {
+	t.Helper()
+	doc := &gltf.Document{Asset: gltf.Asset{Version: "2.0"}}
+	meshOf(doc, "crate", triangle)
+	doc.Nodes = []*gltf.Node{{Name: "crate", Mesh: gltf.Index(0)}}
+	doc.Scenes = []*gltf.Scene{{Name: "scene", Nodes: []int{0}}}
+	doc.Scene = gltf.Index(0)
+	return encodeGLB(t, doc)
 }
 
-func TestACameraDrawsOnlyTheLayersItsMaskSelects(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
-		q.Camera(testCamera, func() scene.CameraDescr {
-			descr := testCameraDescr()
-			descr.CullMask = scene.Layer(1)
-			return descr
-		}())
-		q.Box(scene.Layer(1), m.At(0, 0, 0), testBoxColor)
-		q.Box(scene.Layer(2), m.At(2, 0, 0), testBoxColor)
-	})
-	h.frame()
-
-	passes := h.passes()
-	if len(passes) != 1 {
-		t.Fatalf("the frame published %d passes, want 1", len(passes))
+// propsGLB is a file a Scene and a Node selector each change the answer for:
+// its default scene holds the barrel alone, and the scene named "props" holds
+// the crate and the barrel. Only {props, crate} draws the triangle and nothing
+// else.
+func propsGLB(t testing.TB) []byte {
+	t.Helper()
+	doc := &gltf.Document{Asset: gltf.Asset{Version: "2.0"}}
+	meshOf(doc, "crate", triangle)
+	meshOf(doc, "barrel", quad)
+	doc.Nodes = []*gltf.Node{
+		{Name: "crate", Mesh: gltf.Index(0)},
+		{Name: "barrel", Mesh: gltf.Index(1)},
 	}
-	if passes[0].Recorded != 1 || passes[0].Instances != 1 {
-		t.Fatalf("pass recorded %d and packed %d, want the one box on layer 1",
-			passes[0].Recorded, passes[0].Instances)
+	doc.Scenes = []*gltf.Scene{
+		{Name: "scene", Nodes: []int{1}},
+		{Name: "props", Nodes: []int{0, 1}},
 	}
+	doc.Scene = gltf.Index(0)
+	return encodeGLB(t, doc)
 }
 
-// firstInstance is what lets a batch read its own slice with no offset
-// plumbing, and the slice is per pass, so the second camera's first draw must
-// start at instance 0 of its own bound range - not at 1.
-func TestEveryPassBindsItsOwnInstanceSliceAndCountsFromZero(t *testing.T) {
-	const second scene.CameraID = -50
-	h := newHarness(t, func(q *scene.OpQueue) {
-		q.Camera(testCamera, testCameraDescr())
-		q.Camera(second, testCameraDescr())
-		// Two colours, so the boxes are two batches: equal boxes would merge
-		// into one, and this test is about where a pass's second batch starts.
-		q.Box(0, m.At(0, 0, 0), testBoxColor)
-		q.Box(0, m.At(2, 0, 0), testLineColor)
-	})
-	h.frame()
-
-	if len(h.backend.draws) != 4 {
-		t.Fatalf("the frame made %d draws, want two boxes in each of two passes", len(h.backend.draws))
-	}
-	want := []int{0, 1, 0, 1}
-	for i, draw := range h.backend.draws {
-		if draw.firstInstance != want[i] {
-			t.Fatalf("draw %d starts at instance %d, want %d", i, draw.firstInstance, want[i])
+// animatedGLB is the crate on a node two clips spin, which is a single-joint
+// skin: a draw of it that plays anything packs a sceneAnim block, one play
+// record per clip it resolved.
+func animatedGLB(t testing.TB) []byte {
+	t.Helper()
+	doc := &gltf.Document{Asset: gltf.Asset{Version: "2.0"}}
+	meshOf(doc, "crate", triangle)
+	doc.Nodes = []*gltf.Node{{Name: "crate", Mesh: gltf.Index(0)}}
+	doc.Scenes = []*gltf.Scene{{Name: "scene", Nodes: []int{0}}}
+	doc.Scene = gltf.Index(0)
+	for _, clip := range []struct {
+		name string
+		end  [4]float32
+	}{{"Walk", [4]float32{0, 0, 1, 0}}, {"Idle", [4]float32{1, 0, 0, 0}}} {
+		sampler := &gltf.AnimationSampler{
+			Input:  modeler.WriteAccessor(doc, gltf.TargetNone, []float32{0, 1}),
+			Output: modeler.WriteAccessor(doc, gltf.TargetNone, [][4]float32{{0, 0, 0, 1}, clip.end}),
 		}
-		if draw.instances != 1 {
-			t.Fatalf("draw %d covers %d instances, want 1", i, draw.instances)
-		}
+		doc.Animations = append(doc.Animations, &gltf.Animation{
+			Name:     clip.name,
+			Samplers: []*gltf.AnimationSampler{sampler},
+			Channels: []*gltf.AnimationChannel{{
+				Sampler: 0,
+				Target:  gltf.AnimationChannelTarget{Node: gltf.Index(0), Path: gltf.TRSRotation},
+			}},
+		})
 	}
-
-	instances := h.backend.buffersBoundTo("sceneInstances")
-	if len(instances) != 4 {
-		t.Fatalf("sceneInstances was bound %d times, want once per draw", len(instances))
-	}
-	if instances[0].offset != 0 {
-		t.Fatalf("the first pass binds its slice at %d, want 0", instances[0].offset)
-	}
-	if instances[2].offset == instances[0].offset {
-		t.Fatal("both passes bound the same instance slice")
-	}
-	for _, binding := range instances {
-		if binding.offset%gfx.StorageAlignment != 0 {
-			t.Fatalf("a storage range starts at %d, which is not %d-aligned", binding.offset, gfx.StorageAlignment)
-		}
-		if binding.size != 2*int(unsafe.Sizeof(model.Instance{})) {
-			t.Fatalf("a pass bound %d bytes of instances, want its own two records", binding.size)
-		}
-	}
+	return encodeGLB(t, doc)
 }
 
-// Every draw binds its pass's frame block, the same range for every draw in the
-// pass. It binds no material storage: a material's numbers are its params,
-// which gfx packs into whatever the shader in effect declares.
-func TestEveryDrawBindsItsPasssFrame(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
-		q.Camera(testCamera, testCameraDescr())
-		q.Box(0, m.At(0, 0, 0), testBoxColor)
-		q.Box(0, m.At(2, 0, 0), m.NewColorSrgb(1, 0, 0, 1))
+// paintedGLB is one node holding two primitives under two materials: the
+// triangle red and blended, the quad green and double-sided. What a draw of
+// either keeps of its own material is what tells the two apart.
+func paintedGLB(t testing.TB) []byte {
+	t.Helper()
+	doc := &gltf.Document{Asset: gltf.Asset{Version: "2.0"}}
+	doc.Materials = []*gltf.Material{
+		{Name: "red", AlphaMode: gltf.AlphaBlend,
+			PBRMetallicRoughness: &gltf.PBRMetallicRoughness{BaseColorFactor: &[4]float64{1, 0, 0, 1}}},
+		{Name: "green", DoubleSided: true,
+			PBRMetallicRoughness: &gltf.PBRMetallicRoughness{BaseColorFactor: &[4]float64{0, 1, 0, 1}}},
+	}
+	doc.Meshes = []*gltf.Mesh{{Name: "painted", Primitives: []*gltf.Primitive{
+		{Attributes: gltf.PrimitiveAttributes{gltf.POSITION: modeler.WritePosition(doc, triangle)}, Material: gltf.Index(0)},
+		{Attributes: gltf.PrimitiveAttributes{gltf.POSITION: modeler.WritePosition(doc, quad)}, Material: gltf.Index(1)},
+	}}}
+	doc.Nodes = []*gltf.Node{{Name: "painted", Mesh: gltf.Index(0)}}
+	doc.Scenes = []*gltf.Scene{{Name: "scene", Nodes: []int{0}}}
+	doc.Scene = gltf.Index(0)
+	return encodeGLB(t, doc)
+}
+
+// crateModelComponent is a Model naming the crate file's whole default scene.
+func crateModelComponent() *Model {
+	return &Model{Ref: model.ModelRef{Path: crateModel}}
+}
+
+// defaultEye is where the harness camera stands, looking at the origin.
+var defaultEye = m.LookAt(m.Vec3{Z: 30}, m.Vec3{}, m.Vec3{Y: 1})
+
+// newDrawingHarness is the harness with a recording backend, a viewport, every
+// model file on disk and one camera looking at the origin: the whole engine,
+// able to decide and render a frame.
+func newDrawingHarness(t testing.TB, ids uint32) *harness {
+	t.Helper()
+	h := newCameralessHarness(t, ids)
+	h.spawn(t, spawnRequest{Place: defaultEye, Camera: &Camera{FovY: 1.0472, Near: 0.1, Far: 200}})
+	return h
+}
+
+// newCameralessHarness is newDrawingHarness for a test that places its own
+// cameras.
+func newCameralessHarness(t testing.TB, ids uint32) *harness {
+	t.Helper()
+	files := fstest.MapFS{
+		crateModel:    &fstest.MapFile{Data: crateGLB(t)},
+		propsModel:    &fstest.MapFile{Data: propsGLB(t)},
+		animatedModel: &fstest.MapFile{Data: animatedGLB(t)},
+		paintedModel:  &fstest.MapFile{Data: paintedGLB(t)},
+	}
+	h := newHarnessWith(t, files, ids, &testBackend{})
+	h.kernel.ExecuteCommand[gfx.SetViewportCmd](gfx.SetViewportRequest{
+		Width: 800, Height: 600, FramebufferWidth: 1600, FramebufferHeight: 1200,
 	})
-	h.frame()
-
-	frames := h.backend.buffersBoundTo("sceneFrame")
-	if len(frames) != 2 {
-		t.Fatalf("sceneFrame was bound %d times, want once per draw", len(frames))
-	}
-	if frames[0] != frames[1] {
-		t.Fatalf("the two draws in one pass bound different frame blocks: %+v and %+v", frames[0], frames[1])
-	}
-	if frames[0].size != int(unsafe.Sizeof(model.FrameBlock{})) {
-		t.Fatalf("sceneFrame is bound as %d bytes, want the %d-byte block",
-			frames[0].size, unsafe.Sizeof(model.FrameBlock{}))
-	}
-
+	return h
 }
 
-// One arena per binding, one upload each, whatever the frame draws.
-func TestTheFrameUploadsOneBufferPerArena(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
-		q.Camera(testCamera, testCameraDescr())
-		for i := range 8 {
-			q.Box(0, m.At(float32(i), 0, 0), testBoxColor)
+// frameUntil runs frames until ready. What takes frames is the very first
+// ones, before the viewport and the backend are up, and a model's residency.
+func (h *harness) frameUntil(t testing.TB, what string, ready func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		h.frame(t)
+		if ready() {
+			return
 		}
-	})
-	h.frame()
-	first := h.backend.bakes
-	h.backend.bakes = 0
-	h.frame()
-
-	if h.backend.bakes != 4 {
-		t.Fatalf("a steady frame uploaded %d buffers, want the four arenas", h.backend.bakes)
-	}
-	// The first frame also bakes the unit box's two durable buffers, once. It
-	// bakes nothing else: a debug box declares no group 2, so there is no
-	// identity pose, identity joint or zero delta for it to bind.
-	if first != 6 {
-		t.Fatalf("the first frame uploaded %d buffers, want the four arenas and the unit box", first)
-	}
-}
-
-func TestAFrameWithNoBoxesStillEmitsItsPass(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
-		q.Camera(testCamera, testCameraDescr())
-	})
-	h.frame()
-
-	if len(h.backend.passes) == 0 {
-		t.Fatal("a camera with nothing to draw emitted no pass; its clear is an effect")
-	}
-	if len(h.backend.draws) != 0 {
-		t.Fatalf("an empty camera made %d draws", len(h.backend.draws))
-	}
-}
-
-// scene mounts no shader of its own: the bundled one is model's mount, and a
-// composition that registers model ahead of scene has it in place before the
-// first frame. model's own tests hold the mount to the embedded bytes.
-func TestTheBundledShaderIsMountedForTheFirstFrame(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {})
-	if len(h.readFile(t, model.SceneShaderPath)) == 0 {
-		t.Fatal("the bundled shader is mounted empty")
-	}
-}
-
-// WGSL requires every declared binding bound, and gfx does no preprocessing, so
-// omitting a texture is not available without shader variants: scene owns the
-// defaults and binds all five slots on every draw. Missing one does not degrade
-// the frame - CreateBindGroup fails, its error is swallowed, and the whole
-// frame's command buffer vanishes with no error anywhere.
-func TestEveryDrawBindsAllFivePbrSlots(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
-		q.Camera(testCamera, testCameraDescr())
-		q.Box(0, m.At(0, 0, 0), testBoxColor)
-	})
-	h.frame()
-
-	var white []gfx.TextureID
-	for _, slot := range []string{"baseColor", "metallicRoughness", "occlusion", "emissive"} {
-		textures := h.backend.texturesBoundTo(slot + "Texture")
-		if len(textures) != 1 || textures[0] == 0 {
-			t.Fatalf("%sTexture was bound %v, want the default white texel once per draw", slot, textures)
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s; errors so far: %v", what, h.errs.snapshot())
 		}
-		white = append(white, textures[0])
-		if samplers := h.backend.samplersBoundTo(slot + "Sampler"); len(samplers) != 1 || samplers[0] == 0 {
-			t.Fatalf("%sSampler was bound %v, want one sampler per draw", slot, samplers)
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// drawn is every instance the last frame drew.
+func (h *harness) drawn() []drawnInstance { return h.backend.instances() }
+
+// where narrows instances to those one predicate admits.
+func where(instances []drawnInstance, admit func(drawnInstance) bool) []drawnInstance {
+	var out []drawnInstance
+	for _, instance := range instances {
+		if admit(instance) {
+			out = append(out, instance)
 		}
 	}
-	// One white texel serves four slots, because 1.0 is a fixed point of the
-	// sRGB transfer curve: the sRGB-format and linear-format slots read the
-	// same 1.0 from it.
-	for _, texture := range white[1:] {
-		if texture != white[0] {
-			t.Fatalf("the four white-defaulted slots bound %v, want one texture for all four", white)
+	return out
+}
+
+// at admits the instances standing at one place, which is how a test finds
+// the Entity it placed there.
+func at(position m.Vec3) func(drawnInstance) bool {
+	return func(d drawnInstance) bool { return nearVec3(d.position(), position) }
+}
+
+// ofTriangle admits the draws of a three-vertex mesh, and ofQuad the draws of
+// the barrel's six.
+func ofTriangle(d drawnInstance) bool { return d.count == 3 }
+func ofQuad(d drawnInstance) bool     { return d.count == 6 }
+
+// inPass admits the instances drawn into the pass one camera emitted for one
+// tag, which the recording System labels the pass with.
+func inPass(label string) func(drawnInstance) bool {
+	return func(d drawnInstance) bool { return d.pass.Label == label }
+}
+
+// positions lists where instances stand, for a failure message.
+func positions(instances []drawnInstance) []m.Vec3 {
+	out := []m.Vec3{}
+	for _, instance := range instances {
+		out = append(out, instance.position())
+	}
+	return out
+}
+
+// noErrors fails the test on anything the engine reported: a draw gfx dropped
+// is a report, and a test that asserts what was drawn must see every drop.
+func (h *harness) noErrors(t testing.TB) {
+	t.Helper()
+	for _, err := range h.errs.snapshot() {
+		t.Errorf("the frame reported %v", err)
+	}
+}
+
+// TestDrawableEntitiesBecomeInstancesInAPass is the end-to-end: Components on a
+// real world, through the binding's load System, which loads the file a Model
+// names through model, and its recording System, which packs the Entities into
+// a pass that reaches the backend.
+//
+// Nothing between the Component and the instance was written for this test.
+func TestDrawableEntitiesBecomeInstancesInAPass(t *testing.T) {
+	h := newDrawingHarness(t, 256)
+	h.spawn(t, spawnRequest{Count: 3, Step: 2, Model: crateModelComponent()})
+
+	h.frameUntil(t, "the crate to become resident", func() bool {
+		return len(where(h.drawn(), ofTriangle)) == 3
+	})
+
+	crates := where(h.drawn(), ofTriangle)
+	for _, x := range []float32{0, 2, 4} {
+		if got := where(crates, at(m.Vec3{X: x})); len(got) != 1 {
+			t.Errorf("the crate at x=%v drew %d instances, want 1; the crates stand at %v", x, len(got), positions(crates))
 		}
 	}
-	normals := h.backend.texturesBoundTo("normalTexture")
-	if len(normals) != 1 || normals[0] == 0 {
-		t.Fatalf("normalTexture was bound %v, want the flat normal once per draw", normals)
-	}
-	if normals[0] == white[0] {
-		t.Fatal("the normal slot bound the white texel; a flat normal is (0.5, 0.5, 1)")
-	}
-	if samplers := h.backend.samplersBoundTo("normalSampler"); len(samplers) != 1 {
-		t.Fatalf("normalSampler was bound %v, want one sampler per draw", samplers)
+	h.noErrors(t)
+}
+
+// TestADespawnedDrawableStopsDrawing is the other end of the lifecycle, and it
+// needs nothing from the ECS: there are no lifecycle hooks, the Components are
+// the source of truth, and a frame records what is there when it runs.
+func TestADespawnedDrawableStopsDrawing(t *testing.T) {
+	h := newDrawingHarness(t, 256)
+	first := h.spawn(t, spawnRequest{Count: 2, Step: 2, Model: crateModelComponent()})
+
+	h.frameUntil(t, "the crate to become resident", func() bool {
+		return len(where(h.drawn(), ofTriangle)) == 2
+	})
+
+	h.despawn(t, first)
+	h.frame(t)
+
+	crates := where(h.drawn(), ofTriangle)
+	if len(crates) != 1 || !at(m.Vec3{X: 2})(crates[0]) {
+		t.Fatalf("after the despawn the crate drew at %v, want only the survivor at x=2", positions(crates))
 	}
 }
 
-// The defaults are baked once, not once per frame: they are durable textures
-// like any other, and rebaking them every frame would upload two texels forever.
-func TestTheDefaultTexturesAreBakedOnce(t *testing.T) {
-	h := newHarness(t, func(q *scene.OpQueue) {
-		q.Camera(testCamera, testCameraDescr())
-		q.Box(0, m.At(0, 0, 0), testBoxColor)
+// TestAPresentMaterialWithNoTagsDrawsNothing is presence meaning a material
+// serving no pass. Only the two Entities with
+// no Material draw - the bundled PBR for the mesh and the file's own material
+// for the model - and the two with an empty one draw nowhere.
+func TestAPresentMaterialWithNoTagsDrawsNothing(t *testing.T) {
+	h := newDrawingHarness(t, 256)
+	ref := h.bake(t)
+	h.spawn(t, spawnRequest{Place: m.At(-2, 0, 0), Mesh: &Mesh{Ref: ref, NeverCull: true}})
+	h.spawn(t, spawnRequest{Place: m.At(-4, 0, 0), Mesh: &Mesh{Ref: ref, NeverCull: true}, Material: &Material{}})
+	h.spawn(t, spawnRequest{Place: m.At(2, 0, 0), Model: crateModelComponent()})
+	h.spawn(t, spawnRequest{Place: m.At(4, 0, 0), Model: crateModelComponent(), Material: &Material{}})
+
+	h.frameUntil(t, "the crate to become resident", func() bool {
+		return len(where(h.drawn(), at(m.Vec3{X: 2}))) > 0
 	})
-	h.frame()
-	first := h.backend.texturesBoundTo("baseColorTexture")
-	h.frame()
-	second := h.backend.texturesBoundTo("baseColorTexture")
 
-	if len(second) != 2 {
-		t.Fatalf("two frames bound baseColorTexture %d times, want once per draw", len(second))
+	drawn := h.drawn()
+	for _, x := range []float32{-2, 2} {
+		if got := where(drawn, at(m.Vec3{X: x})); len(got) != 1 {
+			t.Errorf("the Entity with no Material at x=%v drew %d instances, want 1", x, len(got))
+		}
 	}
-	if second[1] != first[0] {
-		t.Fatalf("the second frame bound texture %d, want the first frame's %d", second[1], first[0])
+	for _, x := range []float32{-4, 4} {
+		if got := where(drawn, at(m.Vec3{X: x})); len(got) != 0 {
+			t.Errorf("the Entity with an empty Material at x=%v drew %d instances, want none", x, len(got))
+		}
 	}
-}
-
-// The lighting a camera declares reaches the shader through its own pass's
-// frame block, which is the only place a scene shader can read it.
-func TestACamerasSunAndAmbientReachItsFrameBlock(t *testing.T) {
-	descr := testCameraDescr()
-	descr.SunDirection = m.Vec3{Y: -1}
-	descr.SunColor = m.NewColorLinear(1, 1, 1, 1)
-	descr.AmbientSky = m.NewColorLinear(0.2, 0.3, 0.4, 1)
-	h := newHarness(t, func(q *scene.OpQueue) {
-		q.Camera(testCamera, descr)
-		q.Box(0, m.At(0, 0, 0), testBoxColor)
-	})
-	h.frame()
-
-	frames := h.backend.buffersBoundTo("sceneFrame")
-	if len(frames) != 1 {
-		t.Fatalf("sceneFrame was bound %d times, want once per draw", len(frames))
-	}
-	if frames[0].size != int(unsafe.Sizeof(model.FrameBlock{})) {
-		t.Fatalf("sceneFrame is bound as %d bytes, want the %d-byte block including its lighting",
-			frames[0].size, unsafe.Sizeof(model.FrameBlock{}))
-	}
+	h.noErrors(t)
 }

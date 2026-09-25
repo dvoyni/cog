@@ -4,22 +4,25 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
-	"github.com/dvoyni/cog/slots/gfx"
-	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
 // arrayTextureLayout declares the shape canvas' sprite path declares: a sampler
 // and a texture binding at texture_2d_array. It is the only non-2D texture
 // binding shape the engine has.
-func arrayTextureLayout() gfx.ShaderLayout {
-	return gfx.ShaderLayout{
-		UniformSize: 80, UniformGroup: 0, UniformBinding: 0,
-		Uniforms: []gfx.UniformMember{{Name: "mvp", Offset: 0}},
-		Resources: []gfx.ShaderResource{
-			{Name: "canvasSampler", Sampler: true, Group: 1, Binding: 0},
-			{Name: "canvasTexture", TextureView: gfx.TextureView2DArray, Group: 1, Binding: 1},
+func arrayTextureLayout() shader.ShaderLayout {
+	return shader.ShaderLayout{
+		Resources: []shader.ShaderResource{
+			{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 80, Members: []shader.StorageMember{{Name: "mvp", Offset: 0}}},
+			{Name: "canvasSampler", Kind: shader.ResourceSampler, Group: 1, Binding: 0},
+			{Name: "canvasTexture", TextureView: shader.TextureView2DArray, Group: 1, Binding: 1},
 		},
 	}
 }
@@ -28,7 +31,7 @@ func arrayTextureLayout() gfx.ShaderLayout {
 // layout, and reports what the backend was asked to encode alongside what gfx
 // reported. More than one frame is how report-once is observed: the plan is
 // shared, and only the seen-set can stop the second report.
-func arrayTextureFrame(t *testing.T, frames int, params ...gfx.ParameterDescr) (*fakeBackend, []error) {
+func arrayTextureFrame(t *testing.T, frames int, params ...descriptors.ParameterDescr) (*fakeBackend, []error) {
 	t.Helper()
 	p := newPlugin()
 	layout := arrayTextureLayout()
@@ -39,9 +42,9 @@ func arrayTextureFrame(t *testing.T, frames int, params ...gfx.ParameterDescr) (
 
 	for range frames {
 		w := recordRaw(t, k)
-		w.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthAuto(), Load: gfx.LoadClear, Label: "main"})
-		w.Draw(triangle(), testMaterial(params...), gfx.MatParam("mvp", m.NewMat4()))
-		k.ExecuteCommand[gfx.PresentCmd](gfx.PresentRequest{})
+		w.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "main"})
+		w.Draw(triangle(), testMaterial(params...), descriptors.MatParam("mvp", m.NewMat4()))
+		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 	}
 	return backend, reported
@@ -49,9 +52,9 @@ func arrayTextureFrame(t *testing.T, frames int, params ...gfx.ParameterDescr) (
 
 // texturesOfLayers mints a texture descriptor that reports the layer count it
 // was allocated with, which is what the check reads.
-func texturesOfLayers(layers int) gfx.TextureDescr {
-	queue := types.NewResourceQueue(idsOf(&fakeBackend{}))
-	return queue.AllocateTexture(4, 4, layers, gfx.FormatRGBA8Srgb)
+func texturesOfLayers(layers int) descriptors.TextureDescr {
+	queue := NewResourceQueue(idsOf(&fakeBackend{}))
+	return queue.AllocateTexture(4, 4, layers, descriptors.FormatRGBA8Srgb)
 }
 
 // A texture_2d_array binding no parameter fills is not fatal. It resolves to the
@@ -75,12 +78,12 @@ func TestADrawMissingAnArrayTextureStillRenders(t *testing.T) {
 // the texture they meant - and rendering it white would hide a mistake they can
 // fix, so the draw is dropped and the mistake named.
 func TestADrawSupplyingAFlatTextureForAnArrayBindingIsDroppedAndNamed(t *testing.T) {
-	backend, reported := arrayTextureFrame(t, 1, gfx.TextureParam("canvasTexture", texturesOfLayers(1)))
+	backend, reported := arrayTextureFrame(t, 1, descriptors.TextureParam("canvasTexture", texturesOfLayers(1)))
 
 	if backend.passDraws[0] != 0 {
 		t.Errorf("draws = %d, want the draw supplying a single-layer texture dropped", backend.passDraws[0])
 	}
-	var mismatch gfx.ErrTextureViewDimensionMismatch
+	var mismatch types.ErrTextureViewDimensionMismatch
 	if len(reported) != 1 || !errors.As(reported[0], &mismatch) {
 		t.Fatalf("reported = %v, want one ErrTextureViewDimensionMismatch", reported)
 	}
@@ -97,7 +100,7 @@ func TestADrawSupplyingAFlatTextureForAnArrayBindingIsDroppedAndNamed(t *testing
 // and the frame reports only its first error - so re-reporting every frame would
 // mask every later error in every later frame.
 func TestAnArrayBindingMismatchIsNamedOncePerShaderAndParameter(t *testing.T) {
-	_, reported := arrayTextureFrame(t, 3, gfx.TextureParam("canvasTexture", texturesOfLayers(1)))
+	_, reported := arrayTextureFrame(t, 3, descriptors.TextureParam("canvasTexture", texturesOfLayers(1)))
 
 	if len(reported) != 1 {
 		t.Fatalf("reported = %v over three frames, want exactly one", reported)
@@ -107,7 +110,7 @@ func TestAnArrayBindingMismatchIsNamedOncePerShaderAndParameter(t *testing.T) {
 // An array texture fills an array binding, which is the whole point, and nothing
 // is reported for a draw that is correct.
 func TestADrawSupplyingAnArrayTextureRenders(t *testing.T) {
-	backend, reported := arrayTextureFrame(t, 1, gfx.TextureParam("canvasTexture", texturesOfLayers(4)))
+	backend, reported := arrayTextureFrame(t, 1, descriptors.TextureParam("canvasTexture", texturesOfLayers(4)))
 
 	if backend.passDraws[0] != 1 {
 		t.Errorf("draws = %d, want the draw rendered", backend.passDraws[0])
@@ -122,7 +125,7 @@ func TestADrawSupplyingAnArrayTextureRenders(t *testing.T) {
 // refuse a correct draw over a descriptor's silence - the worst direction for a
 // fatal error. The backend's refused bind group remains the backstop.
 func TestADrawSupplyingATextureOfUnknownLayersIsNotJudged(t *testing.T) {
-	backend, reported := arrayTextureFrame(t, 1, gfx.TextureParam("canvasTexture", types.BakedTexture(9, 4, 4)))
+	backend, reported := arrayTextureFrame(t, 1, descriptors.TextureParam("canvasTexture", descriptors.BakedTexture(9, 4, 4)))
 
 	if backend.passDraws[0] != 1 {
 		t.Errorf("draws = %d, want a descriptor of unknown layers left alone", backend.passDraws[0])

@@ -1,8 +1,7 @@
 package ecsphysics2d
 
 import (
-	"github.com/dvoyni/cog/bundles/ecsphysics2d/internal/types"
-	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/bundles/ecsphysics2d/internal"
 )
 
 // ShrinkCmd gives physics' memory back after a spike, and it is the only thing
@@ -34,7 +33,7 @@ import (
 // must, and costs a tick that does not execute it nothing at all. It also
 // declares itself exclusive, so two invocations never overlap whatever its
 // locks become.
-type ShrinkCmd kernel.Command[ShrinkRequest, ShrinkResponse]
+type ShrinkCmd = internal.ShrinkCmd
 
 // ShrinkRequest names the areas a ShrinkCmd leaves alone. The zero value
 // shrinks everything:
@@ -59,7 +58,7 @@ type ShrinkCmd kernel.Command[ShrinkRequest, ShrinkResponse]
 //     otherwise are released whole. Nothing in them is read across a tick, so
 //     shrinking them changes no answer; the slot table is sized to the largest
 //     Body slot detection ever saw, so it is what a large spike leaves behind.
-type ShrinkRequest = types.ShrinkRequest
+type ShrinkRequest = internal.ShrinkRequest
 
 // ShrinkResponse is the bytes a ShrinkCmd released, per area, summed over both
 // indices where an area names two. An area kept reports 0.
@@ -68,7 +67,7 @@ type ShrinkRequest = types.ShrinkRequest
 // Entity to slot table is a Go map, and a map publishes its length and never
 // what its buckets cost, so what that map gives back is real and is not counted
 // here. The Body index keeps no such table, so its share of Indices is exact.
-type ShrinkResponse = types.ShrinkResponse
+type ShrinkResponse = internal.ShrinkResponse
 
 // WakeCmd wakes the Island of the Entity it names, for whatever disturbs a
 // Sleeping body that is not a touch, a Position, Velocity or Force written, a
@@ -86,11 +85,11 @@ type ShrinkResponse = types.ShrinkResponse
 // The physics plugin registers it, holding write on its own queue and nothing
 // besides, so a System dispatching it serialises with the sleep System and with
 // nothing else. It declares itself exclusive, as ShrinkCmd does.
-type WakeCmd kernel.Command[WakeRequest, WakeResponse]
+type WakeCmd = internal.WakeCmd
 
 // WakeRequest names the Entity whose Island a WakeCmd wakes.
-type WakeRequest = types.WakeRequest
+type WakeRequest = internal.WakeRequest
 
 // WakeResponse is what a WakeCmd answers, which is nothing: whether a Body
 // sleeps is read off the Sleeping Tag.
-type WakeResponse = types.WakeResponse
+type WakeResponse = internal.WakeResponse

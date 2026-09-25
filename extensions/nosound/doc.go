@@ -24,9 +24,9 @@
 // not hang forever under it and a test does not special-case it. Latency is
 // zero, which is true rather than a placeholder - nothing is buffered.
 //
-// nosound is an Extension. Its root declares only Name, Config, its one
-// Adapter, SoundBackend, and its errors; the plugin, built by nosoundplugin.New,
-// is in its internal/. It is built for every platform. Its Config is supplied
+// nosound is an Extension. Its root offers only Name, Config, its one Adapter,
+// SoundBackend, and its errors, each an alias of what its internal/ declares;
+// the plugin, built by nosoundplugin.New, is in its internal/ too. It is built for every platform. Its Config is supplied
 // under Name.
 //
 //	config := map[kernel.PluginName]any{

@@ -19,10 +19,12 @@ decision in
 
 ## Packages
 
-canvas has the declaration-root shape of
-[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md).
+canvas has the alias-index root of
+[`architecture.instructions.md`](../../../.github/instructions/architecture.instructions.md)
+and [ADR 0003](../../../docs/adr/0003-roots-are-alias-indexes.md).
 
-- **`bundles/canvas`** is the root, and holds declarations only: the `*OpQueue`
+- **`bundles/canvas`** is the root, and declares nothing: it aliases what
+  `internal/` declares — the `*OpQueue`
   and `*Lookup` resources with `LookupAccess`, `LookupDeviceAccess` and
   `FontMetrics`, the recording
   vocabulary (`Layer`, `SpriteTransform`, `SpriteFrame`, `TextDraw`,
@@ -34,27 +36,26 @@ canvas has the declaration-root shape of
   `NewLookupAccess`, `NewLookupDeviceAccess`, the coordinate helpers (`LayerTransform`, `WorldToScreen`,
   `ScreenToWorld`), `DefaultKeyColor`, the built-in material constructors,
   `DefaultHaloProfile` and `HaloMaterialSet` — are forwarders in `utils.go`. It
-  declares no plugin, and it is what every other package imports.
-- **`bundles/canvas/internal/types`** declares `OpQueue` with its recording
-  methods and the consume side the flush reads, `Lookup` with its two facades and
-  the five asset caches and two packers behind them, inline text parsing, the
-  recording vocabulary, `Config` (which the packers hold), `HaloProfile`, and the
-  built-in and halo materials. The root aliases what it exposes.
-- **`bundles/canvas/internal`** is the plugin: its `New`, the resolution of
-  `canvas.Config`, the flush that turns a recording into gfx draws, the sprite
-  and triangle batchers and their scratch, the draw-snapshot slot and its two
-  subscriptions, the read mount of the embedded shaders and default font
-  (under `internal/builtin/canvas/`), and the mcp Provider.
+  holds no plugin, and it is what every other package imports.
+- **`bundles/canvas/internal`** is the plugin, and declares everything the
+  root aliases: `OpQueue` with its recording methods and the consume side the
+  flush reads, `Lookup` with its two facades and the five asset caches and two
+  packers behind them, inline text parsing, the recording vocabulary, `Config`
+  (which the packers hold), `HaloProfile`, and the built-in and halo materials.
+  Beside them are its `New`, the resolution of `canvas.Config`, the flush that
+  turns a recording into gfx draws, the sprite and triangle batchers and their
+  scratch, the draw-snapshot slot and its two subscriptions, the read mount of
+  the embedded shaders and default font (under `internal/builtin/canvas/`), and
+  the mcp Provider. It never imports the root.
 - **`bundles/canvas/canvasplugin`** exports only `New() kernel.Plugin`. Only
   composition roots and tests import it.
 
-The aliased types stay concrete types (`type OpQueue = types.OpQueue`):
+The aliased types stay concrete types (`type OpQueue = internal.OpQueue`):
 recording a sprite is a direct method call, with no interface anywhere on the
 per-sprite path, and their exported methods (`OpQueue.Sprite`,
 `LookupAccess.MeasureTextSize`, …) are public API through the alias. What the
-plugin needs beyond that goes through plain functions `internal/types` exports,
-which nothing outside `bundles/canvas` can call. `internal/types` never imports
-the root.
+plugin needs beyond that goes through the friend functions in
+`internal/friends.go`, which nothing outside `bundles/canvas` can call.
 
 ## Plugin
 

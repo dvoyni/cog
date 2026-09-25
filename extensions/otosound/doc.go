@@ -50,10 +50,11 @@
 // to compile, because otosoundplugin.New does not exist there, rather than
 // quietly shipping a Mixer that starves; the browser gets jssound.
 //
-// otosound is an Extension. Its root declares only Name, Config, its one
-// Adapter, SoundBackend, and its errors, and is untagged so the declarations
-// build everywhere; the plugin, built by otosoundplugin.New, is in its
-// internal/, and that is what carries the tag. Its Config is supplied under
+// otosound is an Extension. Its root offers only Name, Config, its one Adapter,
+// SoundBackend, and its errors, each an alias of what its internal/ declares in
+// untagged files, so the root builds everywhere; the plugin, built by
+// otosoundplugin.New, is in its internal/ too, and its files are what carry the
+// tag. Its Config is supplied under
 // Name.
 //
 //	config := map[kernel.PluginName]any{
