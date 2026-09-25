@@ -75,6 +75,7 @@ func (idx *index) markPath(slot int32, shape Shape, at, previous m.Vec2d, previo
 		from = idx.slab[e.world].Sub(moved)
 	}
 	e.previousCentre, e.path = from, true
+	idx.listPath(slot, moved.Negate())
 }
 
 // sweepFrom marks the entry an Insert just filled as a moving circle Sensor,
@@ -104,6 +105,55 @@ func (idx *index) sweepFrom(slot int32, shape Shape, previous m.Vec2d, previousA
 		return
 	}
 	e.previousCentre, e.path = from, true
+	idx.listPath(slot, from.Sub(idx.slab[e.world]))
+}
+
+// listPath lists a marked entry by its path box, the union of its start and
+// end boxes, where Insert listed it by its end box alone
+// (continuous-collision.md § Index: one bit and a path box). back is the start
+// pose less the end pose: the path is held at the end angle, so the start box
+// is the end box translated by it.
+//
+// Without it, two fast Bodies crossing at an angle are never tested: neither
+// ends in a cell the other's path reaches. The entry's box stays its end box,
+// so a query meets more candidates around a marked entry and still tests the
+// end pose, and no answer changes. The cells already listed are skipped, the
+// path box holding the end box, and an entry whose path stays in its own cells
+// is left as it is.
+func (idx *index) listPath(slot int32, back m.Vec2d) {
+	e := &idx.entries[slot]
+	box := e.box.Merge(e.box.Offset(back))
+	if e.right < e.left || !finiteBB(box) {
+		return
+	}
+	left, bottom := idx.cell(box.L), idx.cell(box.B)
+	right, top := idx.cell(box.R), idx.cell(box.T)
+	if left == e.left && bottom == e.bottom && right == e.right && top == e.top {
+		return
+	}
+	e.left, e.bottom, e.right, e.top = left, bottom, right, top
+	cells := (int(right-left) + 1) * (int(top-bottom) + 1)
+	if idx.listings+cells > len(idx.buckets) {
+		idx.growBuckets(idx.listings + cells)
+		return
+	}
+	idx.pushCells(slot)
+}
+
+// pathBox is a marked entry's path box: its end box and the box it started the
+// tick in, which is the end box moved back along its path.
+func pathBox(e *entry, world []m.Vec2d) BB {
+	return e.box.Merge(e.box.Offset(pathDelta(e, world).Negate()))
+}
+
+// pathDelta is a marked entry's path through the tick, from where it starts to
+// where the tick left it: a circle's centre's chord, and any other Shape's
+// Position's.
+func pathDelta(e *entry, world []m.Vec2d) m.Vec2d {
+	if e.shape.Kind == ShapeCircle {
+		return world[0].Sub(e.previousCentre)
+	}
+	return m.Vec2d{X: e.transform.TX, Y: e.transform.TY}.Sub(e.previousCentre)
 }
 
 // lookup is the static index's own entry for an Entity it holds, with the

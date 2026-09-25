@@ -10,22 +10,25 @@ import (
 //
 // Index marks an entry with the one path bit when Detect is to test it along
 // its path through the tick: a moving circle Sensor, and a solid Body that
-// moved at least its own minimum extent. This pass runs once over the marked
-// entries, before the discrete walk, and the Sensor flag picks what a path
-// test keeps. A Sensor keeps every Hit, in contacts-sensors.go. A solid Body
-// keeps its first Hit that can stop it, and is stopped there: the Contact it
-// writes carries the Hit's T, and Solve moves a Dynamic body back to where it
-// stood at T before it solves anything.
+// moved at least its own minimum extent. It lists a marked entry in the grid
+// by its path box. This pass runs once over the marked entries, before the
+// discrete walk, and the Sensor flag picks what a path test keeps. A Sensor
+// keeps every Hit, in contacts-sensors.go. A solid Body keeps its first Hit
+// that can stop it, and is stopped there: the Contact it writes carries the
+// Hit's T, and Solve moves a Dynamic body back to where it stood at T before
+// it solves anything.
 //
-// Every target is taken where the tick left it. A target that moved into the
-// path during the tick counts as already there, which is the ghost Hit the
-// specification names as a limit.
+// A target that is not marked is taken where the tick left it. A target that
+// moved into the path during the tick counts as already there, which is the
+// ghost Hit the specification names as a limit. Two marked solid Bodies meet
+// along their relative motion instead, from both start poses, with one T.
 
 // stop is one fast solid Body the path pass stopped: its stopping Contact, and
 // a copy of its index entry placed where it stopped, which is what the
 // discrete walk tests its other pairs against.
 type stop struct {
-	// at is the stopping Contact's place in the tick's entries.
+	// at is the stopping Contact's place in the tick's entries. Both parties
+	// of a meeting stopped by it share one.
 	at int32
 	// slot is the Body's slot in the Body index's awake grid, which is the
 	// order the pass visits Bodies in and so the order of the run.
@@ -41,12 +44,51 @@ type stop struct {
 	body entry
 }
 
+// firstStop is one fast solid Body's earliest stop while the pass is still
+// finding them: the first Hit of its own path that stops it, or a meeting with
+// another marked Body that comes sooner. It is written once every Body's has
+// been found, because a meeting is found by one party's walk and may be the
+// other's earliest.
+type firstStop struct {
+	slot int32
+	// t is the stop's T, and above 1 while the Body has none.
+	t float64
+	// hit, other and otherSlot are the first stopping Hit of the Body's own
+	// path, on a target that is not marked: a Static at otherSlot −1.
+	hit       Hit
+	other     *entry
+	otherSlot int32
+	// meeting is the place in the tick's meetings of the one that stops the
+	// Body, or −1 when its own Hit does.
+	meeting int32
+}
+
+// meeting is a pair of marked solid Bodies that meet along their relative
+// motion, tested and judged once, by the walk of the lower Entity, a.
+type meeting struct {
+	a, b int32
+	// hit is a's path relative to b's, against b where the tick left it: T is
+	// the pair's one T, and Point is on b's surface translated by the rest of
+	// b's path, (1 − T)·d_b.
+	hit Hit
+	// at is the Contact's place in the tick's entries once written, else −1.
+	at int32
+}
+
+// partner is one marked solid Body a fast solid Body's path box meets, with
+// what the pair's relative motion found, Probed from the Body's side.
+type partner struct {
+	slot int32
+	hit  Hit
+	ok   bool
+}
+
 // pathPass is Detect's one pass over the marked entries of the Body index: a
 // moving Sensor is swept, and a fast solid Body is stopped at the first thing
 // its path meets.
 //
 // It runs before the discrete walk, so what it writes sits at the front of the
-// list: a Sensor's entries together and in order of T, and each stopping
+// list: a Sensor's entries together and in order of T, then each stopping
 // Contact.
 //
 // slop is the Slop setting, how far two Shapes may overlap and be left alone,
@@ -54,6 +96,7 @@ type stop struct {
 // path may reach without stopping it.
 func (c *Contacts) pathPass(bodies *BodyIndex, statics *StaticIndex, jointed *JointedPairs, slop float64) {
 	moving := &bodies.index
+	c.firsts, c.meetings = c.firsts[:0], c.meetings[:0]
 	for slot := range moving.entries {
 		marked := &moving.entries[slot]
 		if !marked.path || !marked.live {
@@ -63,13 +106,17 @@ func (c *Contacts) pathPass(bodies *BodyIndex, statics *StaticIndex, jointed *Jo
 			c.sweepSensor(bodies, statics, marked, slot)
 			continue
 		}
-		c.stopBody(bodies, statics, jointed, marked, int32(slot), slop)
+		c.findStop(bodies, statics, jointed, marked, int32(slot), slop)
+	}
+	if len(c.firsts) > 0 {
+		c.writeStops(bodies, statics, jointed)
 	}
 }
 
-// stopBody is the solid half of the path pass: one fast solid Body, at slot,
-// Probed along its path through both indices, and stopped at its first Hit
-// that can stop it.
+// findStop is the solid half of the path pass: one fast solid Body, at slot,
+// Probed along its path through both indices, and its first Hit that can stop
+// it found; and the marked Bodies its path box meets, each tested along the
+// pair's relative motion.
 //
 // The Shape is held at its end angle, so the path is its end pose moved back
 // along the Position's chord: a circle's centre by Probe, anything else by the
@@ -77,6 +124,9 @@ func (c *Contacts) pathPass(bodies *BodyIndex, statics *StaticIndex, jointed *Jo
 // find-all one, because the first Hit may not be one that stops: a Hit is
 // passed over when
 //
+//   - the target is marked itself. Where the tick left it is not where the
+//     Body meets it, the error being its whole movement in the tick, which is
+//     past its own extent; the pair meets along its relative motion instead;
 //   - the target is a Sensor, which never stops a Body;
 //   - it is at T = 0, a target the Body already touched where the tick began,
 //     which is left to the discrete walk, so a fast ball rolling along a floor
@@ -89,30 +139,39 @@ func (c *Contacts) pathPass(bodies *BodyIndex, statics *StaticIndex, jointed *Jo
 //
 // A Hit at T = 1 is a touch where the tick ended, which the discrete walk
 // finds, and it stops nothing.
-func (c *Contacts) stopBody(
+//
+// A pair of marked solid Bodies is judged by the lower Entity's walk, by the
+// same rules along the relative path, and a meeting that would stop it is
+// recorded for both parties, whichever of them it turns out to stop.
+func (c *Contacts) findStop(
 	bodies *BodyIndex, statics *StaticIndex, jointed *JointedPairs, body *entry, slot int32, slop float64,
 ) {
 	moving := &bodies.index
 	world := moving.world(body)
 	bits, collidesWith := body.shape.CollisionBits, body.shape.CollidesWith
 
+	// The run the Shape is Probed in holds three movers: its own path, a
+	// partner's relative path, and the one the resting depth measures with.
+	used := len(world)
+	if need := 6 * used; len(c.mover) < need {
+		c.mover = make([]m.Vec2d, need)
+	}
+
 	c.probeSlots = c.probeSlots[:0]
+	from := body.previousCentre
 	var delta m.Vec2d
 	var split int
 	var mover shapeProbe
 	if body.shape.Kind == ShapeCircle {
-		from, to, radius := body.previousCentre, world[0], body.shape.Radius
+		to, radius := world[0], body.shape.Radius
 		delta = to.Sub(from)
 		c.probes = bodies.probeAllSlots(c.probes[:0], &c.probeSlots,
 			from, to, radius, bits, collidesWith, body.entity)
 		split = len(c.probes)
 		c.probes = statics.ProbeAll(c.probes, from, to, radius, bits, collidesWith, body.entity)
 	} else {
-		delta = m.Vec2d{X: body.transform.TX, Y: body.transform.TY}.Sub(body.previousCentre)
-		if need := 2 * len(world); len(c.mover) < need {
-			c.mover = make([]m.Vec2d, need)
-		}
-		mover = shapeProbeBack(c.mover, body.shape, world, body.box, delta)
+		delta = m.Vec2d{X: body.transform.TX, Y: body.transform.TY}.Sub(from)
+		mover = shapeProbeBack(c.mover[:2*used], body.shape, world, body.box, delta)
 		c.probes = moving.shapeAllSlots(c.probes[:0], 0, &c.probeSlots, 0,
 			&mover, bits, collidesWith, body.entity)
 		if bodies.sleeping > 0 {
@@ -123,48 +182,154 @@ func (c *Contacts) stopBody(
 		c.probes = statics.shapeAllSlots(c.probes, split, nil, 0,
 			&mover, bits, collidesWith, body.entity)
 	}
+	path := bodyPath{body: body, world: world, from: from, delta: delta, mover: &mover, rests: -1, slop: slop}
+	c.findPartners(moving, &path, slot)
 
 	// Each run is ordered by T, so the first Hit that stops in each is that
 	// run's answer, and the nearer of the two is the stop.
-	var other *entry
-	var otherSlot int32
-	var hit Hit
-	path := bodyPath{body: body, world: world, delta: delta, mover: &mover, rests: -1, slop: slop}
+	first := firstStop{slot: slot, t: 2, otherSlot: -1, meeting: -1}
 	for at := range split {
 		candidate := c.probes[at]
 		within, found := bodies.entryAt(c.probeSlots[at])
-		if stops(body, candidate, found, jointed) &&
-			c.enters(&path, bodies, statics, split, candidate, found, within.world(found)) {
-			other, otherSlot, hit = found, c.probeSlots[at], candidate
+		if !found.path && stops(body, candidate, found, jointed) &&
+			c.enters(&path, &path, bodies, statics, split, candidate, found, within.world(found)) {
+			first.t, first.hit, first.other, first.otherSlot = candidate.T, candidate, found, c.probeSlots[at]
 			break
 		}
 	}
 	for _, candidate := range c.probes[split:] {
-		if other != nil && candidate.T >= hit.T {
+		if candidate.T >= first.t {
 			break
 		}
 		found, _, ok := statics.lookup(candidate.Entity)
 		if ok && stops(body, candidate, found, jointed) &&
-			c.enters(&path, bodies, statics, split, candidate, found, statics.index.world(found)) {
-			other, otherSlot, hit = found, -1, candidate
+			c.enters(&path, &path, bodies, statics, split, candidate, found, statics.index.world(found)) {
+			first.t, first.hit, first.other, first.otherSlot = candidate.T, candidate, found, -1
 			break
 		}
 	}
-	if other == nil {
-		return
+
+	// The meetings this walk judges: every partner of a higher Entity whose
+	// relative path would stop this Body. Each is kept whatever this Body's
+	// own first Hit, since it may be the other party's earliest.
+	var relative shapeProbe
+	for _, p := range c.partners {
+		other := &moving.entries[p.slot]
+		if !p.ok || other.entity < body.entity || !stops(body, p.hit, other, jointed) {
+			continue
+		}
+		otherWorld := moving.world(other)
+		along := path.relativeTo(&relative, c.mover[2*used:4*used], other, otherWorld)
+		if c.enters(&along, &path, bodies, statics, split, p.hit, other, otherWorld) {
+			c.meetings = append(c.meetings, meeting{a: slot, b: p.slot, hit: p.hit, at: -1})
+		}
 	}
-	c.stopAt(body, slot, world, delta, hit, other, otherSlot)
-	c.stillAtStop(bodies, statics, jointed, body, world, slot)
+	c.firsts = append(c.firsts, first)
+}
+
+// findPartners fills the partners with the marked solid Bodies whose path
+// boxes meet this Body's, each tested along the pair's relative motion. They
+// are found in the grid cells the Body is listed in, which are its path box's,
+// every marked entry being listed by its own path box: two paths that meet
+// share a cell.
+func (c *Contacts) findPartners(moving *index, path *bodyPath, slot int32) {
+	c.partners = c.partners[:0]
+	body := path.body
+	box := body.box.Merge(body.box.Offset(path.delta.Negate()))
+	used := len(path.world)
+	var relative shapeProbe
+	for i := body.left; i <= body.right; i++ {
+		for j := body.bottom; j <= body.top; j++ {
+			for at := moving.buckets[moving.bucket(i, j)]; at >= 0; at = moving.links[at].next {
+				other := moving.links[at].entry
+				second := &moving.entries[other]
+				if other == slot || !second.path || second.shape.Sensor ||
+					!firstScannedCell(second, i, j, body.left, body.bottom) {
+					continue
+				}
+				if !collides(body.shape.CollisionBits, body.shape.CollidesWith,
+					second.shape.CollisionBits, second.shape.CollidesWith) {
+					continue
+				}
+				world := moving.world(second)
+				if !box.Intersects(pathBox(second, world)) {
+					continue
+				}
+				along := path.relativeTo(&relative, c.mover[2*used:4*used], second, world)
+				hit, ok := along.probe(second, world)
+				c.partners = append(c.partners, partner{slot: other, hit: hit, ok: ok})
+			}
+		}
+	}
+}
+
+// writeStops settles each fast solid Body's earliest stop, its own first Hit
+// or a meeting that comes sooner, and writes it: the stopping Contact, the
+// Body's copy where it stopped, and its other pairs there. A meeting is written
+// once, by whichever of its parties it stops first in the order of the slots,
+// and every party it stops shares its Contact and its T.
+func (c *Contacts) writeStops(bodies *BodyIndex, statics *StaticIndex, jointed *JointedPairs) {
+	moving := &bodies.index
+	for i := range c.meetings {
+		met := &c.meetings[i]
+		for _, party := range [2]int32{met.a, met.b} {
+			if first := c.firstOf(party); first != nil && met.hit.T < first.t {
+				first.t, first.meeting = met.hit.T, int32(i)
+			}
+		}
+	}
+	for i := range c.firsts {
+		first := &c.firsts[i]
+		if first.t > 1 {
+			continue
+		}
+		body := &moving.entries[first.slot]
+		world := moving.world(body)
+		delta := pathDelta(body, world)
+		var at int32
+		if first.meeting < 0 {
+			at = c.stopAt(body, first.slot, delta, first.hit, first.other, first.otherSlot, m.Vec2d{})
+		} else {
+			met := &c.meetings[first.meeting]
+			if met.at < 0 {
+				a, b := &moving.entries[met.a], &moving.entries[met.b]
+				met.at = c.stopAt(a, met.a, pathDelta(a, moving.world(a)),
+					met.hit, b, met.b, pathDelta(b, moving.world(b)))
+			}
+			at = met.at
+		}
+		c.placeStop(body, first.slot, world, delta, first.t, at)
+		c.stillAtStop(bodies, statics, jointed, body, world, first.slot)
+	}
+}
+
+// firstOf is the earliest stop being found for the Body at slot, or nil for a
+// Body the pass did not test. The run is in the order of the slots.
+func (c *Contacts) firstOf(slot int32) *firstStop {
+	low, high := 0, len(c.firsts)
+	for low < high {
+		mid := int(uint(low+high) >> 1)
+		if c.firsts[mid].slot < slot {
+			low = mid + 1
+		} else {
+			high = mid
+		}
+	}
+	if low < len(c.firsts) && c.firsts[low].slot == slot {
+		return &c.firsts[low]
+	}
+	return nil
 }
 
 // stillAtStop tests a Body just stopped against the statics and the sleepers
 // about where it stopped, which the discrete walk would look for about its end
 // pose instead. Its pairs with the awake Bodies are left to that walk, which
-// meets them in the Body grid's listing and tests them where it stopped too.
+// meets them in the cells of the Body's path box, where it is listed, and
+// tests them where it stopped too.
 //
-// The discrete walk reaches these pairs again through the end pose's cells,
-// and finds each one it touches already written, so a pair is still written
-// once. Keeping the walk here keeps the discrete walk's own loop what it was
+// The discrete walk reaches these pairs again through the statics' and the
+// sleepers' cells about the end pose, and finds each one it touches already
+// written, so a pair is still written once. Keeping the walk here keeps the discrete walk's own loop what it was
 // for a world where nothing is stopped.
 func (c *Contacts) stillAtStop(
 	bodies *BodyIndex, statics *StaticIndex, jointed *JointedPairs,
@@ -207,38 +372,36 @@ func (c *Contacts) stillAtStop(
 	}
 }
 
-// stops reports that a Hit on a target is one that stops a fast solid Body.
-//
-// A target that is marked itself is passed over too, and the pair left to the
-// discrete walk, as it was before any Body was stopped. Its end pose is not
-// where the Body meets it: the error is its whole movement in the tick, which
-// is past its own extent, and the two walks would each stop the other at a
-// different T and write the one pair twice. Two marked parties meet along
-// their relative motion, which is the next part of the build.
+// stops reports that a Hit on a target is one that can stop a fast solid
+// Body: not a Sensor, strictly inside the tick, and not a pair a Joint holds
+// apart.
 func stops(body *entry, hit Hit, target *entry, jointed *JointedPairs) bool {
-	if target.shape.Sensor || target.path || !(hit.T > 0 && hit.T < 1) {
+	if target.shape.Sensor || !(hit.T > 0 && hit.T < 1) {
 		return false
 	}
 	return jointed.Len() == 0 || !jointed.Has(body.entity, target.entity)
 }
 
-// stopAt writes the stopping Contact for a Body stopped by a Hit, and records
-// the stop, with the Body's copy placed where it stopped.
+// stopAt writes the stopping Contact for a Body stopped by a Hit of its path,
+// d_self, on a target whose own path is d_other, zero for one that is not
+// marked, and answers the Contact's place in the tick's entries.
 //
 // The Contact is the Probed Sensor's form: T the Hit's, one point, the Hit's,
 // with a Depth of 0. A face-to-face landing gets its second point next tick
 // from the discrete walk; a full manifold here would be a second narrowphase
 // for every stop. A and the one normal follow the entry's rule, and r1 and r2
-// are taken at the stopping poses: the Body where it stopped, which is where
-// Solve moves a Dynamic one before PreStep reads them, and the target where the
-// tick left it.
+// are taken at the stopping poses, where each party stood at T: the Body is
+// where Solve moves a Dynamic one before PreStep reads them. A Hit along a
+// relative path is against the target where the tick left it, so its Point is
+// moved back along the target's path to where the two met.
 func (c *Contacts) stopAt(
-	body *entry, slot int32, world []m.Vec2d, delta m.Vec2d,
-	hit Hit, other *entry, otherSlot int32,
-) {
-	offset := delta.MulS(hit.T - 1)
-	stopped := m.Vec2d{X: body.transform.TX, Y: body.transform.TY}.Add(offset)
-	target := m.Vec2d{X: other.transform.TX, Y: other.transform.TY}
+	body *entry, slot int32, delta m.Vec2d,
+	hit Hit, other *entry, otherSlot int32, otherDelta m.Vec2d,
+) int32 {
+	stopped := m.Vec2d{X: body.transform.TX, Y: body.transform.TY}.Add(delta.MulS(hit.T - 1))
+	back := otherDelta.MulS(hit.T - 1)
+	target := m.Vec2d{X: other.transform.TX, Y: other.transform.TY}.Add(back)
+	met := hit.Point.Add(back)
 
 	// A is the party that is not Static, otherwise the lower Entity; neither
 	// is a Sensor. The Hit's Normal faces the Body, which is B's surface facing
@@ -247,17 +410,17 @@ func (c *Contacts) stopAt(
 
 	var made Contact
 	var aux contactAux
-	point := ContactPoint{Point: hit.Point, id: pointID(0, 0)}
+	point := ContactPoint{Point: met, id: pointID(0, 0)}
 	if bodyIsA {
 		made.A, made.B = body.entity, other.entity
 		made.Normal = hit.Normal
 		aux.slotA, aux.slotB = slot, otherSlot
-		point.r1, point.r2 = hit.Point.Sub(stopped), hit.Point.Sub(target)
+		point.r1, point.r2 = met.Sub(stopped), met.Sub(target)
 	} else {
 		made.A, made.B = other.entity, body.entity
 		made.Normal = hit.Normal.Negate()
 		aux.slotA, aux.slotB = otherSlot, slot
-		point.r1, point.r2 = hit.Point.Sub(target), hit.Point.Sub(stopped)
+		point.r1, point.r2 = met.Sub(target), met.Sub(stopped)
 	}
 	made.T = hit.T
 	made.Count = 1
@@ -267,12 +430,22 @@ func (c *Contacts) stopAt(
 
 	at, wasTouching := c.prevLookup.find(made.A, made.B)
 	c.carry(&made, at, wasTouching)
+	written := int32(len(c.entries))
+	c.append(made, aux)
+	return written
+}
+
+// placeStop records a Body's stop at t, by the Contact at at, with the Body's
+// copy placed there: its path, delta, taken back by the part of the tick that
+// was left.
+func (c *Contacts) placeStop(body *entry, slot int32, world []m.Vec2d, delta m.Vec2d, t float64, at int32) {
+	offset := delta.MulS(t - 1)
 
 	// The copy at T. Only the points of the world cache move; the normals a
 	// segment and a Polygon keep after them do not, the Shape not turning.
 	placed := *body
 	placed.path = false
-	placed.transform.TX, placed.transform.TY = stopped.X, stopped.Y
+	placed.transform.TX, placed.transform.TY = placed.transform.TX+offset.X, placed.transform.TY+offset.Y
 	placed.box = placed.box.Offset(offset)
 	start := len(c.stopWorld)
 	points := cachedPoints(body.shape.Kind, len(world))
@@ -283,13 +456,12 @@ func (c *Contacts) stopAt(
 		c.stopWorld = append(c.stopWorld, v)
 	}
 	c.stops = append(c.stops, stop{
-		at:    int32(len(c.entries)),
+		at:    at,
 		slot:  slot,
 		world: int32(start),
-		t:     hit.T,
+		t:     t,
 		body:  placed,
 	})
-	c.append(made, aux)
 }
 
 // stopOf is the stop the path pass made for the Body index entry at slot, or
@@ -382,18 +554,49 @@ func (c *Contacts) backToStops(dynamics *ecs.Get[Dynamic], places *ecs.Set[Posit
 }
 
 // bodyPath is one fast solid Body's path through the tick, as the rule that
-// tells a Hit its path enters from a seam reads it.
+// tells a Hit its path enters from a seam reads it: its own path, or its path
+// relative to another marked Body's, against that Body where the tick left it.
 type bodyPath struct {
 	body *entry
-	// world is the Body's world cache at its end pose, and delta its path.
+	// world is the Body's world cache at its end pose, from where a circle's
+	// centre starts, and delta the path.
 	world []m.Vec2d
+	from  m.Vec2d
 	delta m.Vec2d
 	// mover is the Probed Shape of anything but a circle.
 	mover *shapeProbe
 	// rests is how deep the Body stands in what it already touches, measured
-	// the first time a Hit asks for it; below zero, it has not been.
+	// the first time a Hit asks for it; below zero, it has not been. Only the
+	// Body's own path keeps it.
 	rests float64
 	slop  float64
+}
+
+// relativeTo is the Body's path relative to a marked Body's, other, whose
+// world cache is at its end pose: the Body moved by d_self − d_other and ending
+// where the tick left it, against other where the tick left it, which is the
+// pair's relative motion from both start poses shifted by other's whole path.
+// A T along it is the pair's one T. Anything but a circle is Probed in probe,
+// built over runs, which must hold twice the Body's world cache.
+func (path *bodyPath) relativeTo(probe *shapeProbe, runs []m.Vec2d, other *entry, world []m.Vec2d) bodyPath {
+	body := path.body
+	delta := path.delta.Sub(pathDelta(other, world))
+	along := bodyPath{body: body, world: path.world, delta: delta, mover: probe, rests: -1, slop: path.slop}
+	if body.shape.Kind == ShapeCircle {
+		along.from = path.world[0].Sub(delta)
+	} else {
+		*probe = shapeProbeBack(runs, body.shape, path.world, body.box, delta)
+	}
+	return along
+}
+
+// probe is the path test of the path against one target where the tick left
+// it.
+func (path *bodyPath) probe(target *entry, world []m.Vec2d) (Hit, bool) {
+	if body := path.body; body.shape.Kind == ShapeCircle {
+		return probeWorld(path.from, path.from.Add(path.delta), body.shape.Radius, target.shape, world)
+	}
+	return path.mover.against(target.shape, target.box, world)
 }
 
 // enters reports that the Body's path enters the target of a Hit, which is
@@ -420,8 +623,12 @@ type bodyPath struct {
 //     along its path lengthened by the same depth, so that the band keeps its
 //     length and a target the path meets just before it ends is still
 //     reached.
+//
+// path is the path the Hit was found along, the Body's own or its path
+// relative to a marked target's, and both tests read it; own is the Body's
+// own path, which keeps the depth it rests at.
 func (c *Contacts) enters(
-	path *bodyPath, bodies *BodyIndex, statics *StaticIndex, split int,
+	path, own *bodyPath, bodies *BodyIndex, statics *StaticIndex, split int,
 	hit Hit, target *entry, world []m.Vec2d,
 ) bool {
 	body := path.body
@@ -430,15 +637,14 @@ func (c *Contacts) enters(
 		return false
 	}
 
-	if path.rests < 0 {
-		path.rests = c.restingDepth(path, bodies, statics, split)
+	if own.rests < 0 {
+		own.rests = c.restingDepth(own, bodies, statics, split)
 	}
-	depth := path.rests + path.slop
+	depth := own.rests + own.slop
 	past := 1 + depth/path.delta.Length()
 	if body.shape.Kind == ShapeCircle {
-		from := body.previousCentre
-		to := from.Add(path.world[0].Sub(from).MulS(past))
-		_, ok := probeWorld(from, to, max(0, body.shape.Radius-depth), target.shape, world)
+		to := path.from.Add(path.delta.MulS(past))
+		_, ok := probeWorld(path.from, to, max(0, body.shape.Radius-depth), target.shape, world)
 		return ok
 	}
 	return path.mover.reaches(target.shape, target.box, world, depth, hit.T, past)
@@ -446,14 +652,20 @@ func (c *Contacts) enters(
 
 // restingDepth is how deep the Body stands, where the tick began, in the
 // solid targets it already touches there: the path test's Hits at T = 0, which
-// sit at the front of each run. Each is taken with how much deeper the path
-// carries the Body into that surface by the tick's end, along the surface's
-// normal, so that a Body settling onto the floor it slides along is measured
-// where it ends.
+// sit at the front of each run, and the marked partners its path starts
+// inside, along the pair's relative motion. Each is taken with how much deeper
+// the path carries the Body into that surface by the tick's end, along the
+// surface's normal, so that a Body settling onto the floor it slides along is
+// measured where it ends.
 func (c *Contacts) restingDepth(path *bodyPath, bodies *BodyIndex, statics *StaticIndex, split int) float64 {
 	deepest := 0.0
 	for at := 0; at < split && c.probes[at].T == 0; at++ {
 		within, found := bodies.entryAt(c.probeSlots[at])
+		if found.path {
+			// Marked: where the tick left it is not where the Body started
+			// beside it. The partners below say that.
+			continue
+		}
 		deepest = max(deepest, path.restsIn(c.probes[at], found, within.world(found)))
 	}
 	for at := split; at < len(c.probes) && c.probes[at].T == 0; at++ {
@@ -461,11 +673,25 @@ func (c *Contacts) restingDepth(path *bodyPath, bodies *BodyIndex, statics *Stat
 			deepest = max(deepest, path.restsIn(c.probes[at], found, statics.index.world(found)))
 		}
 	}
+	if len(c.partners) > 0 {
+		moving := &bodies.index
+		used := len(path.world)
+		var relative shapeProbe
+		for _, p := range c.partners {
+			if !p.ok || p.hit.T != 0 {
+				continue
+			}
+			other := &moving.entries[p.slot]
+			world := moving.world(other)
+			along := path.relativeTo(&relative, c.mover[4*used:6*used], other, world)
+			deepest = max(deepest, along.restsIn(p.hit, other, world))
+		}
+	}
 	return deepest
 }
 
-// restsIn is how deep the Body stands in one target it touches where the tick
-// began, with how much further its path carries it into that surface, or 0
+// restsIn is how deep the Body stands in one target it touches where the path
+// starts, with how much further the path carries it into that surface, or 0
 // for a Sensor, which holds nothing up.
 func (path *bodyPath) restsIn(hit Hit, target *entry, world []m.Vec2d) float64 {
 	if target.shape.Sensor {
@@ -473,7 +699,7 @@ func (path *bodyPath) restsIn(hit Hit, target *entry, world []m.Vec2d) float64 {
 	}
 	var depth float64
 	if body := path.body; body.shape.Kind == ShapeCircle {
-		_, distance, _ := pointQueryWorld(body.previousCentre, target.shape, world)
+		_, distance, _ := pointQueryWorld(path.from, target.shape, world)
 		depth = body.shape.Radius - distance
 	} else {
 		depth = path.mover.depthAt(target.shape, target.box, world)

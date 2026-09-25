@@ -1209,7 +1209,8 @@ table is a Go map: Go publishes a map's length and never what its buckets cost.
 tick — the solved list, the slot table, the Body and Joint rows — and the swept
 Sensor Probe buffer with the Body slot beside each Hit. Continuous collision's
 scratch joins it: the copy of each stopped Body placed where it stopped, with its
-world cache, and the run a fast Body's Shape is Probed in
+world cache, the run a fast Body's Shape is Probed in, and the earliest stops,
+meetings and partners the path pass finds before it writes them
 ([continuous-collision.md](continuous-collision.md#a-stopped-bodys-other-pairs-are-tested-where-it-stopped)).
 None of it is read across a tick, so the command releases it
 whole and changes no answer; the one exception is the run of stops itself, which

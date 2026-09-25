@@ -153,9 +153,10 @@
 // reacting System sees it there; the Body's other Contacts that tick were found
 // where it stopped and carry the same T. A filter that drops or ignores the
 // stopping Contact means no stop, which is how a one-way platform lets a fast
-// Body through. A target that itself moved fast enough to be Probed does not
-// stop it yet: the two are left to the discrete test, as they were before
-// (continuous-collision.md).
+// Body through. Two Bodies that both moved that fast meet along their relative
+// motion, head-on or crossing at an angle: the pair is one stopping Contact with
+// one T, and each Dynamic side moves back to it unless something on its own
+// path stopped it sooner (continuous-collision.md).
 //
 // Two holes are accepted rather than fixed. A Sensor's path is a chord and not
 // the polyline it flew, so a sharply curving one can clip a corner; and two

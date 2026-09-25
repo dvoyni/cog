@@ -225,7 +225,8 @@ crossing at an angle are never tested (579's amendment to 578):
 
 - ball A, radius 1, goes (−10, 0) → (10, 0);
 - ball B, radius 1, goes (0, −10) → (0, 10);
-- they meet at the origin at `T = 0.5`;
+- their centres would cross at the origin at `T = 0.5`; they first touch on
+  the way there, each √2 short of it, at `T = (10 − √2)/20 ≈ 0.429`;
 - A's path box reaches `y ∈ [−1, 1]`, and B ends at y = 10; B's reaches
   `x ∈ [−1, 1]`, and A ends at x = 10;
 - listed by end box, neither walk finds the other, and they pass through.
@@ -322,8 +323,15 @@ deeper, and it stops the Body where its path first meets it.
 
 **A pair tested along its relative motion keeps the rule.** Where both parties
 are marked ([Which target is tested where](#which-target-is-tested-where)), the
-path is the relative one, and the rule reads it in place of `d`. The ticket that
-builds that pair keeps the rule holding for it.
+path is the relative one, and the rule reads it in place of `d`: the gate along
+the normal is the pair's closing, and the depth test Probes the shrunk Body along
+the relative path, lengthened. A fast ball overtaking another that closes on it
+by less than its extent in the tick is left to the discrete walk, though its own
+path would close by far more. **Settled here:** the resting depth counts a marked
+partner the Body already overlaps where both paths start, taken along the pair's
+relative motion, as it counts any other target touched at `Previous`; a marked
+target where the tick left it is not where the Body stood beside it, so it is
+not counted there.
 
 **Why each half is there, by the sequence that fails without it:**
 
@@ -456,6 +464,25 @@ Dynamic target costs the same as a Kinematic one.
   unchanged: the Sensor, otherwise the party that is not Static, otherwise the
   lower Entity. Which walk writes a pair and which party is A are separate
   questions.
+
+**Settled here: how two fast solid Bodies' walks find and settle their pair.**
+
+- **Each finds the other in the grid**, in the cells of its own path box, which
+  are where it is listed: two paths that meet share a cell. Nothing else scans
+  for a partner, and a Body with no marked partner pays one scan of its own
+  cells.
+- **The lower Entity's walk judges the pair**: the Probe along the relative
+  path, the skips, and the seam rule with that Body's extent and resting depth.
+  Taking one side's extent is safe: getting through each other takes closing by
+  both parties' thickness, and either extent is less than that.
+- **A pair that would stop is kept whatever its judge's own first Hit**, since
+  it may be the other party's earliest. Each Body's earliest stop is settled
+  only once every walk has run, and a pair is written when it is the earliest
+  for either party, once, the Contact shared by every party it stops.
+- **The Hit is taken against the other party where the tick left it**, which is
+  the relative path shifted by that party's whole path; its point is moved back
+  along that party's path to where the two met, so `r1` and `r2` are taken at
+  both stopping poses.
 
 **Ordering.** The path pass runs first, so its entries sit at the front of the
 list. The spec's ordering line becomes **"A Sensor's entries, where it is A, sit
@@ -722,8 +749,8 @@ points, so none of those decisions can be undone silently:
 
 1. two fast balls head-on: A from x = 0 to 10, B from 10 to 0, meeting at
    `T = 0.4`;
-2. two fast balls crossing at right angles, meeting at the origin at `T = 0.5`
-   (the path box);
+2. two fast balls crossing at right angles, on their way to the origin, first
+   touching at `T = (10 − √2)/20 ≈ 0.429` (the path box);
 3. a fast Kinematic paddle against a Dynamic ball, fast and slow: the ball is
    carried along with the paddle, not passed through;
 4. a fast box Sensor and a fast segment Sensor crossing a thin target: each
