@@ -38,6 +38,10 @@ type stop struct {
 	world int32
 	// t is how far through the tick the Body was when it was stopped.
 	t float64
+	// met records that the Body was stopped by a meeting with another marked
+	// Body, along their relative motion, so the other party was where its own
+	// path had it at t; otherwise by a target taken where the tick left it.
+	met bool
 	// body is the Body's entry, its transform, box and world cache moved back
 	// along its path to t, and its path bit cleared. Its grid cells are the
 	// entry's own, so it is never listed or walked, only tested.
@@ -299,6 +303,7 @@ func (c *Contacts) writeStops(bodies *BodyIndex, statics *StaticIndex, jointed *
 			at = met.at
 		}
 		c.placeStop(body, first.slot, world, delta, first.t, at)
+		c.stops[len(c.stops)-1].met = first.meeting >= 0
 		c.stillAtStop(bodies, statics, jointed, body, world, first.slot)
 	}
 }
@@ -530,13 +535,28 @@ func (c *Contacts) pairStopped(
 // backToStops is the first thing Solve does: every Dynamic body the path pass
 // stopped is moved to where it stood when it was stopped, Previous + T·d along
 // its Position's chord, before anything reads its Position or its Contacts'
-// offsets.
+// offsets. Only Solve reads Dynamic, so only Solve decides which side moves.
 //
-// A side that is not Dynamic keeps its end pose, and so does a Body whose
-// stopping Contact a filter dropped or ignored: a stop the app refused stops
-// nothing. Each Body has at most one stop, its own path's first Hit, so each
-// stops at its own earliest T. The Angle is not moved back, the path having
-// been tested at the end angle.
+// A side that is not Dynamic keeps its end pose: a Kinematic body is never
+// stopped and never pushed, so a Dynamic body it meets is carried along with
+// it by the movement it still has after T:
+//
+//   - a Dynamic body stopped by a meeting with a marked side that is not
+//     Dynamic goes to Previous + T·d_self + (1 − T)·d_other, which is where it
+//     touches that side where the tick left it;
+//   - a Dynamic body a stopped side that is not Dynamic met on its own path is
+//     carried from its end pose by (1 − T)·d_other. It was taken where the
+//     tick left it, so it has no stop of its own, and it is carried by every
+//     such side that met it;
+//   - a Dynamic body stopped by a target it met on its own path is not
+//     carried: the target was taken where the tick left it already, so its
+//     movement is in T.
+//
+// A Kinematic body against a Static one moves neither side, and so does a stop
+// whose Contact a filter dropped or ignored: a stop the app refused stops
+// nothing. Each Body has at most one stop, its own earliest, so each stops at
+// its own earliest T. The Angle is not moved back, the path having been tested
+// at the end angle.
 func (c *Contacts) backToStops(dynamics *ecs.Get[Dynamic], places *ecs.Set[Position]) {
 	for i := range c.stops {
 		s := &c.stops[i]
@@ -544,11 +564,42 @@ func (c *Contacts) backToStops(dynamics *ecs.Get[Dynamic], places *ecs.Set[Posit
 		if entry.Dropped() || entry.Ignored() {
 			continue
 		}
-		if _, ok := dynamics.Of(s.body.entity); !ok {
+		self := s.body.entity
+		other, otherSlot := entry.B, c.aux[s.at].slotB
+		if other == self {
+			other, otherSlot = entry.A, c.aux[s.at].slotA
+		}
+		if _, dynamic := dynamics.Of(self); dynamic {
+			place, ok := places.Ref(self)
+			if !ok {
+				continue
+			}
+			place.Current = place.Previous.Add(place.Current.Sub(place.Previous).MulS(s.t))
+			if !s.met {
+				continue
+			}
+			if _, alsoDynamic := dynamics.Of(other); alsoDynamic {
+				continue
+			}
+			if carrier, ok := places.Of(other); ok {
+				place.Current = place.Current.Add(carrier.Current.Sub(carrier.Previous).MulS(1 - s.t))
+			}
 			continue
 		}
-		if place, ok := places.Ref(s.body.entity); ok {
-			place.Current = place.Previous.Add(place.Current.Sub(place.Previous).MulS(s.t))
+		// A side that is not Dynamic keeps its end pose, and carries a
+		// Dynamic body its own path met. A Static target is not carried.
+		if s.met || otherSlot < 0 {
+			continue
+		}
+		if _, carried := dynamics.Of(other); !carried {
+			continue
+		}
+		carrier, ok := places.Of(self)
+		if !ok {
+			continue
+		}
+		if target, ok := places.Ref(other); ok {
+			target.Current = target.Current.Add(carrier.Current.Sub(carrier.Previous).MulS(1 - s.t))
 		}
 	}
 }

@@ -156,7 +156,10 @@
 // Body through. Two Bodies that both moved that fast meet along their relative
 // motion, head-on or crossing at an angle: the pair is one stopping Contact with
 // one T, and each Dynamic side moves back to it unless something on its own
-// path stopped it sooner (continuous-collision.md).
+// path stopped it sooner. A Kinematic body is never stopped and never pushed:
+// a Dynamic body it meets on its path is carried along with it by the movement
+// it has left after T, so a fast paddle hits the ball instead of passing
+// through it (continuous-collision.md).
 //
 // Two holes are accepted rather than fixed. A Sensor's path is a chord and not
 // the polyline it flew, so a sharply curving one can clip a corner; and two
