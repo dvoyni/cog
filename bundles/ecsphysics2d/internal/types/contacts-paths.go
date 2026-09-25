@@ -270,11 +270,27 @@ func (c *Contacts) findPartners(moving *index, path *bodyPath, slot int32) {
 					continue
 				}
 				world := moving.world(second)
-				if !box.Intersects(pathBox(second, world)) {
+				back := pathDelta(second, world).Negate()
+				// Two circles are a closed form, cheaper than the path boxes
+				// that would reject them. Anything else is not.
+				bothCircles := body.shape.Kind == ShapeCircle && second.shape.Kind == ShapeCircle
+				if !bothCircles && !box.Intersects(second.box.Merge(second.box.Offset(back))) {
 					continue
 				}
-				along := path.relativeTo(&relative, c.mover[2*used:4*used], second, world)
-				hit, ok := along.probe(second, world)
+				// A circle's relative path is its centre's, which needs no
+				// run: it is relativeTo's, written out, so the stacked moving
+				// Sensors a circle Sensor meets every tick cost it a closed
+				// form each and nothing more.
+				var hit Hit
+				var ok bool
+				if body.shape.Kind == ShapeCircle {
+					delta := path.delta.Add(back)
+					from := path.world[0].Sub(delta)
+					hit, ok = probeWorld(from, from.Add(delta), body.shape.Radius, second.shape, world)
+				} else {
+					along := path.relativeTo(&relative, c.mover[2*used:4*used], second, world)
+					hit, ok = along.probe(second, world)
+				}
 				c.partners = append(c.partners, partner{slot: other, hit: hit, ok: ok})
 			}
 		}

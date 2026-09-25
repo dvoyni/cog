@@ -159,6 +159,11 @@ type probing struct {
 	// beside dst, one a Hit in the same order, which is how a sweep over the
 	// Body index learns the slot behind each Hit without a table to ask. It is
 	// a pointer so that every other Probe pays one word for it and no more.
+	//
+	// Such a walk is the path pass's, which meets a marked entry along the
+	// pair's relative motion instead of where the tick left it, so it passes
+	// marked entries over rather than test them for nothing
+	// (contacts-paths.go, findPartners).
 	slots *[]int32
 	// slotBase is added to every slot kept in slots: 0 for the Body index's
 	// own grid, and the length of that grid for its sleepers', whose slots the
@@ -462,7 +467,8 @@ func (idx *index) shapeWalk(
 // beside it, slotBase added, as probeAllSlots is ProbeAll's: the path test of
 // a fast solid Body that is not a circle, over the Body index, which keeps no
 // Entity to slot table to ask afterwards. start is where the ordered run
-// begins in dst.
+// begins in dst. Like every walk that keeps slots, it passes marked entries
+// over.
 func (idx *index) shapeAllSlots(
 	dst []Hit, start int, slots *[]int32, slotBase int32, mover *shapeProbe,
 	bits, collidesWith uint32, exclude ecs.Entity,
@@ -532,7 +538,8 @@ func (idx *index) Overlap(
 // stood on the way in; the caller empties *slots first. It is the swept
 // Sensor's Probe of the Body index, which keeps no Entity to slot table to ask
 // afterwards. slots is the caller's own long-lived buffer, so that pointing at
-// it costs no allocation.
+// it costs no allocation. Like every walk that keeps slots, it passes marked
+// entries over, which the path pass meets along their relative motion.
 func (idx *index) probeAllSlots(
 	dst []Hit, slots *[]int32, from, to m.Vec2d, radius float64,
 	bits, collidesWith uint32, exclude ecs.Entity,
@@ -718,7 +725,7 @@ func (idx *index) probeCell(walk *probing, i, j int32) {
 
 	for cursor := idx.buckets[idx.bucket(i, j)]; cursor >= 0; cursor = idx.links[cursor].next {
 		e := &idx.entries[idx.links[cursor].entry]
-		if e.entity == walk.exclude ||
+		if e.entity == walk.exclude || (e.path && walk.slots != nil) ||
 			!collides(walk.bits, walk.collidesWith, e.shape.CollisionBits, e.shape.CollidesWith) {
 			continue
 		}
@@ -772,7 +779,7 @@ func (idx *index) shapeCell(walk *probing, mover *shapeProbe, i, j int32) {
 
 	for cursor := idx.buckets[idx.bucket(i, j)]; cursor >= 0; cursor = idx.links[cursor].next {
 		e := &idx.entries[idx.links[cursor].entry]
-		if e.entity == walk.exclude ||
+		if e.entity == walk.exclude || (e.path && walk.slots != nil) ||
 			!collides(walk.bits, walk.collidesWith, e.shape.CollisionBits, e.shape.CollidesWith) {
 			continue
 		}

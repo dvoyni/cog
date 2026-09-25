@@ -131,9 +131,9 @@ func (c *Contacts) sweepSensor(bodies *BodyIndex, statics *StaticIndex, sensor *
 	}
 
 	// Each run is already ordered by T and the three never name the same
-	// Entity: an Entity is in one index or the other, and a marked one, met
-	// along the relative motion, is passed over in the first. So merging them
-	// is the whole of the ordering.
+	// Entity: an Entity is in one index or the other, and the Probe of the
+	// Body index passes a marked one over, the partners being where it is
+	// met. So merging them is the whole of the ordering.
 	for at, still, partner := 0, split, 0; at < split || still < len(c.probes) || partner < len(met); {
 		switch {
 		case at < split && (still >= len(c.probes) || c.probes[at].T <= c.probes[still].T) &&
@@ -147,9 +147,6 @@ func (c *Contacts) sweepSensor(bodies *BodyIndex, statics *StaticIndex, sensor *
 			otherSlot := c.probeSlots[at]
 			at++
 			grid, other := bodies.entryAt(otherSlot)
-			if other.path {
-				continue
-			}
 			c.sensorHit(&path, int32(slot), hit, other, otherSlot, grid.world(other), m.Vec2d{})
 		case still < len(c.probes) && (partner >= len(met) || c.probes[still].T <= met[partner].hit.T):
 			hit := c.probes[still]
@@ -200,14 +197,25 @@ func (c *Contacts) sensorHit(
 	// same one.
 	depth := 0.0
 	if hit.T == 0 {
-		along := path
-		if otherDelta != (m.Vec2d{}) {
+		switch {
+		case sensor.shape.Kind == ShapeCircle:
+			// The circle's start along the relative motion is relativeTo's,
+			// written out: its end less the relative path.
+			from := path.from
+			if otherDelta != (m.Vec2d{}) {
+				from = path.world[0].Sub(path.delta.Sub(otherDelta))
+			}
+			if _, distance, _ := pointQueryWorld(from, other.shape, otherWorld); distance < sensor.shape.Radius {
+				depth = sensor.shape.Radius - distance
+			}
+		case otherDelta != (m.Vec2d{}):
 			used := len(path.world)
 			var relative shapeProbe
-			moved := path.relativeTo(&relative, c.mover[2*used:4*used], other, otherWorld)
-			along = &moved
+			along := path.relativeTo(&relative, c.mover[2*used:4*used], other, otherWorld)
+			depth = along.startOverlap(other, otherWorld)
+		default:
+			depth = path.startOverlap(other, otherWorld)
 		}
-		depth = along.startOverlap(other, otherWorld)
 	}
 
 	var made Contact
@@ -258,9 +266,9 @@ type crossing struct {
 // did not move, which no walk of the Sensor's own ever tests, as an entry that
 // stops nothing (continuous-collision.md § A fast Body reports the Sensors it
 // crosses). The path test is already a find-all one, so the Hits are in hand:
-// the first split in the Body index, the rest in the static index. A marked
-// Sensor is passed over, the pair being its own walk's, along the relative
-// motion.
+// the first split in the Body index, the rest in the static index. The Probe
+// of the Body index already passed a marked Sensor over, the pair being its
+// own walk's, along the relative motion.
 //
 // The Sensor is A, as the entry's rule says, with the Hit's T and a Depth of
 // 0, or T = 0 and the overlap for one the Body started inside.
@@ -273,7 +281,7 @@ func (c *Contacts) crossSensors(bodies *BodyIndex, statics *StaticIndex, path *b
 		if at < split {
 			sensorSlot = c.probeSlots[at]
 			grid, found := bodies.entryAt(sensorSlot)
-			if !found.shape.Sensor || found.path {
+			if !found.shape.Sensor {
 				continue
 			}
 			sensor, world = found, grid.world(found)
