@@ -87,9 +87,19 @@ type Shape struct {
 	CollisionBits, CollidesWith uint32
 	Kind                        ShapeKind
 	Sensor                      bool
-	// The two bytes after Sensor are spare, and the first is reserved for
-	// continuous collision's fall-back flag should it ever be taken.
-	_ [2]byte
+	// StopsAtBodies says that a fast solid Body of this Shape meets the
+	// Kinematic and Dynamic Bodies on its path, and not only the Static ones:
+	// it is stopped at them, or carries them when it is Kinematic
+	// (continuous-collision.md § The fall-back for a solid Body). Its path test
+	// then queries the Body index beside the static index, which is most of
+	// what an engaged Body costs, so it is off unless the app sets it. A fast
+	// Body without it passes through a Kinematic or Dynamic Body its path
+	// meets within one tick, which the discrete walk alone may or may not
+	// catch, and does not report a resting Sensor that is a Body. A Sensor
+	// ignores it: every moving Sensor is swept against both indices.
+	StopsAtBodies bool
+	// The byte after StopsAtBodies is spare.
+	_ [1]byte
 	// faceDistance is a Polygon kind's distance from its Position to the line
 	// of its nearest face, which with the rounding radius is its minimum
 	// extent. It sits in what was padding, so the Shape stays 104 bytes.

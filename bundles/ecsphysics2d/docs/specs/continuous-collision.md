@@ -32,9 +32,11 @@ and no System that runs in parallel today is made to take turns.** Every choice
 below was checked against that, and where the obvious design broke it, the
 design changed.
 
-**Nothing of this is implemented.** The reference scene exists, and its nine
-cases fail today by design. [Required work](#required-work) is the whole build,
-and [Acceptance](#acceptance) is what it must show.
+**It is built**, and [Acceptance](#acceptance) records what it showed. The
+price of an engaged Body triggered [the fall-back](#the-fall-back-for-a-solid-body):
+a fast Body meets the Kinematic and Dynamic Bodies on its path only when its
+Shape asks for them with `StopsAtBodies`. Where a section below says "a Body"
+of those, it means one that asks.
 
 ---
 
@@ -60,8 +62,11 @@ Every term is in `CONTEXT.md` under **Physics**, which is the glossary of record
 - **Continuous collision**: stopping a Body that moves far enough in one tick
   to get through something, so it meets what it would have hit instead of ending
   up beyond it. It engages only for a Body whose movement in the tick reaches its
-  own thinnest width. A Kinematic body is never stopped: what it would have hit is
-  carried along with it instead.
+  own thinnest width. It always stops a Body at the Static bodies in its way;
+  meeting the Kinematic and Dynamic bodies in its way too is asked for by the
+  Body's Shape, because it costs a fast Body several times as much. A Kinematic
+  body is never stopped: what it would have hit is carried along with it
+  instead.
 - **Probe**, widened: moving a Shape, **without turning it**, in a straight line
   and finding what it touches. The Shape is most often a circle, possibly of
   radius 0.
@@ -81,11 +86,18 @@ names nothing here. In prose, **the path** is a Body's straight line from
 
 From 577 and 578.
 
-- **A solid Body does not tunnel.** A Dynamic body moving at least its own
-  thinnest width in a tick is stopped where it first meets a Static, Kinematic
-  or Dynamic Body on its path. It is not stopped short or pushed out the far
-  side. There is **no opt-in** and no Component to add. An app that throws a
-  boulder writes the same Components it writes today.
+- **A solid Body does not tunnel through Static geometry.** A Dynamic body
+  moving at least its own thinnest width in a tick is stopped where it first
+  meets a Static Body on its path. It is not stopped short or pushed out the
+  far side. There is no Component to add: an app that throws a boulder at a
+  wall writes the same Components it writes today.
+- **Kinematic and Dynamic Bodies are one flag away.** A Shape that sets
+  `StopsAtBodies` is also stopped where it first meets a Kinematic or Dynamic
+  Body on its path, and two fast Bodies meet along their relative motion when
+  either sets it. Without it, a fast Body can pass through a Kinematic or
+  Dynamic Body within one tick, as it did before continuous collision. This is
+  [the fall-back](#the-fall-back-for-a-solid-body), taken because querying the
+  Body index is most of what an engaged Body costs.
 - **A surface a Body slides along does not stop it**, even where one tile of a
   floor meets the next. A Hit stops a Body only where its path enters the
   target; a seam is left to ordinary contact
@@ -101,8 +113,9 @@ From 577 and 578.
 - **A filter that drops the stopping Contact means no stop.** The Body stays at
   its end pose, as if nothing had been found. A one-way platform is a filter
   System, as it is today, and needs no new API.
-- **A fast Kinematic body carries what it hits.** A Kinematic body is never
-  stopped and never pushed. **Every** Dynamic body it meets on its path, not
+- **A fast Kinematic body carries what it hits**, when its Shape sets
+  `StopsAtBodies`. A Kinematic body is never stopped and never pushed. **Every**
+  Dynamic body it meets on its path, not
   just the first, is carried along with it from the moment they meet, so a fast
   paddle hits each ball instead of passing through it. The Contact of a carry
   past the first is written by Solve, so a filter never sees it
@@ -238,9 +251,9 @@ and Probe queries meet more candidates around a marked entry, but narrowphase
 still tests the end pose, so **no query's answer changes**. Index already reads
 `Previous` and already writes the box, so no lock set widens.
 
-**The fall-back's flag** (see [Acceptance](#acceptance)): if it is ever taken,
-Index copies one more `bool` from the `Shape` onto the entry. Index already reads
-`Shape`, so that is not a new read.
+**The fall-back's flag** (see [Acceptance](#acceptance)), taken: `StopsAtBodies`
+reaches the entry inside the `Shape` copy Index already makes, so it is not a
+new read, and Detect reads it off the entry.
 
 ---
 
@@ -250,7 +263,9 @@ From 577, 578 and 579.
 
 **One pass, before the discrete walk, over every marked entry.** It generalises
 today's `sweepSensors`. For each marked entry, it runs one path test through both
-indices, and **the `Sensor` flag picks the keep rule**:
+indices (a solid Body's through the Body index only when its Shape sets
+`StopsAtBodies`, [the fall-back](#the-fall-back-for-a-solid-body)), and **the
+`Sensor` flag picks the keep rule**:
 
 - **a Sensor keeps every Hit, ordered by `T`**, excluding only itself, as today;
 - **a solid Body keeps every Hit on its path** that is not a Sensor, is not
@@ -428,7 +443,10 @@ goal-line trigger unseen, which is the tunnelling this spec exists to stop.
   along their relative motion. The Body's walk skips Sensors that are marked, so
   the pair is written once.
 - **Rejected: naming it as a limit.** A trigger a fast ball can skip is the
-  failure this map was drawn to close.
+  failure this map was drawn to close. Since [the
+  fall-back](#the-fall-back-for-a-solid-body), a resting Sensor that is a Body,
+  in the Body index, is crossed only by a Body whose Shape sets
+  `StopsAtBodies`; a Static Sensor, a goal line, is crossed by every one.
 - **A Dynamic body reports only the Sensors up to where it stopped**, so a goal
   line behind a wall does not fire. **A Kinematic body reports every Sensor on
   its path**, since it never stops (from 590). Detect cannot tell the two, so it
@@ -545,7 +563,15 @@ only on a tick with such a crossing.
   - two moving Sensors crossing within a tick are one entry with one `T`, so
     `sensorHit`'s re-Probe of the other Sensor and its tie-break go away.
 
-**Why every fast Body tests the whole Body index (578).** An index entry holds a
+**Why a fast Body tests the whole Body index, when it asks to (578).** Since
+[the fall-back](#the-fall-back-for-a-solid-body), a Body's path is tested
+against the Body index only when its Shape sets `StopsAtBodies`. The flag is
+one for every non-Static kind, not a fence around Dynamic targets, for the
+reason below. Without it the Body looks for no marked partner either; a pair
+of marked Bodies meets when either sets it, judged by the lower Entity's walk
+when both do, and by the one that does otherwise.
+
+An index entry holds a
 Shape, its world cache and its transform. Index's Body walk reads `Shape` and
 `Position` and never `Dynamic`, so Detect cannot tell a Kinematic target from a
 Dynamic one. Fencing off Dynamic targets behind an opt-in, as both engines do,
@@ -770,13 +796,14 @@ for. The new forms sit beside them and mirror `Overlap`'s way of taking a Shape:
 
 ## Named limits
 
-From 577, 578, 579, 580 and 588. Each is a behaviour a game can see. The four
+From 577, 578, 579, 580, 588 and 587. Each is a behaviour a game can see. The five
 marked **pinned** have a test that holds today's behaviour, so any change to it
 is deliberate. The others are written down only: each fixes itself within one tick,
 or is out of scope.
 
 | limit | what happens | |
 | --- | --- | --- |
+| **Bodies, without `StopsAtBodies`** | a fast Body whose Shape does not set it is tested against Static geometry only: it passes through a Kinematic or Dynamic Body within one tick, clean or pushed out the far side, and a fast Kinematic body carries nothing | **pinned** |
 | **A zero-thickness target** | a bare segment: tunnelling starts just past 1×, where the gate has only just engaged a mover that can still pass it at an angle | **pinned** |
 | **A Kinematic target closing on the Body** | each gate sees its own Body's motion, not the pair's, so a Body and a Kinematic target each under its own gate, closing on each other faster than the gates allow together, are caught only by the discrete walk | **pinned** |
 | **The target behind a dropped stop** | a one-way platform: a Dynamic body passes anything behind a dropped target in the same tick. A Kinematic body still carries the Dynamic bodies behind it | **pinned** |
@@ -828,7 +855,7 @@ Made by the ticket that lands the behaviour it describes, not before.
 | `> ½×` minimum extent | engages twice as many Bodies; the scene shows nothing tunnels at or below 1.25× |
 | Computing the face distance in Index | one cross product and one length per face, per Body, per tick |
 | An opt-in Component for Dynamic targets | Detect cannot see a Body's kind; Index reading `Dynamic` widens its lock set |
-| The static index by default, the Body index behind an opt-in | puts Kinematic targets behind the opt-in, reversing a settled point; **kept as the fall-back** |
+| The static index by default, the Body index behind an opt-in | puts Kinematic targets behind the opt-in, reversing a settled point; **kept as the fall-back, and taken** (see [Acceptance](#the-fall-back-for-a-solid-body)) |
 | Testing a Body again against another's actual stopping point | a second round of path tests, a chain with a third Body, and still blind to kind |
 | Writing the Hits past a stop in Detect, for Solve to drop a Dynamic mover's | every filter sees a Contact past a Dynamic mover's stop, a touch that never happened, and Solve cannot take it back once seen |
 | Detect or Index telling kinds, to keep a Kinematic mover's Hits only | reading `Dynamic`, even as a filter, widens the lock set |
@@ -868,7 +895,11 @@ Nothing is tested through Index's or Detect's internals.
 ### The pass bar
 
 - **All nine cases of `TestASolidBodyDoesNotTunnel` are green**: 0 of 8 starting
-  points tunnel, neither clean nor pushed through. The movers are a circle and a
+  points tunnel, neither clean nor pushed through. Since the fall-back, the
+  three Static cases are green without the flag, and the six Kinematic and
+  thin-Dynamic cases with the mover's `StopsAtBodies` set;
+  `TestAFastBodyWithoutStopsAtBodiesPassesThroughBodies` pins that those six
+  tunnel without it, in 4 to 6 of the 8 phases each. The movers are a circle and a
   box 0.4 m across and a 4 m × 0.2 m plank, thrown at 40.4 m/s at a 0.4 m Static
   wall, the same wall as a Kinematic body, and a thin Dynamic board 0.1 × 4 m.
   Its skip is removed by the ticket that turns it green.
@@ -914,9 +945,9 @@ hold, and at or above it the path test must.
 
 ### The pinned limits
 
-A test each for [the four pinned limits](#named-limits): a zero-thickness target
+A test each for [the five pinned limits](#named-limits): a zero-thickness target
 just under the gate, a closing Kinematic target, the target hidden behind a
-dropped stop, and a graze.
+dropped stop, a graze, and Bodies passed without `StopsAtBodies`.
 
 ### The cost bar
 
@@ -939,6 +970,76 @@ All read on the minimums, with interleaved A/B over two built binaries.
   with today's discrete test for it.
 - **Every new path allocates nothing**: the step stays on the engine's allocation
   line, and `AllocsPerRun` is 0 on the `…With` queries.
+
+### The price, as measured
+
+From [physics: the price per engaged Body, and the fall-back if it triggers](https://github.com/dvoyni/cog/issues/587).
+
+**The scene.** `BenchmarkTheEngagedBody` and `BenchmarkTheMovingSensor`, in
+`internal/engagedbench_test.go`: `BenchmarkTheStep`'s world at N, and N fast
+Bodies over it, 32 to a lane halfway between its rows, thrown along +X at
+40.4 m/s (0.673 m a tick, 3.4× their 0.2 m extent) and set back before every
+tick, so every tick is the same tick. The movers are a circle of radius 0.2 and
+a box 0.4 m square. With a Hit, a Static board 5 cm thick stands across each
+lane, met at `T ≈ 0.22`. `TestTheEngagedSceneEngagesEveryFastBody` holds the
+scene to that: every fast Body passes the gate, none is named by any entry
+without a Hit, and each is stopped once with one; the benchmark reports the
+stops it counted outside the timed loop.
+
+**The method.** The price is not measured against the plain world without the
+fast Bodies, which would price integrating, indexing and solving them too. It is
+the same scene in a throwaway build with the mechanism taken out (Index marks no
+solid Body, and a box or segment Sensor is tested discretely, as before the
+sweep), subtracted and divided by N. The Body-index share is the same scene
+again in a build whose solid path test skips the Body index and the partners.
+Three binaries, 18 rounds, all six orders in turn, on an AMD Ryzen 9 7950X3D
+under background load; read on the minimums, with the 25th percentile as a
+cross-check, in ns per engaged Body, min / p25:
+
+| | N = 256 | N = 1 024 |
+| --- | ---: | ---: |
+| circle, no Hit, both indices (as built before the fall-back) | 678 / 702 | 751 / 755 |
+| circle, no Hit, static index alone | 255 / 253 | 249 / 255 |
+| circle, no Hit, **Body-index share** | 423 / 449 | 502 / 500 |
+| box, no Hit, both indices | 1 156 / 1 169 | 1 170 / 1 179 |
+| box, no Hit, static index alone | 305 / 315 | 301 / 304 |
+| box, no Hit, **Body-index share** | 851 / 854 | 869 / 875 |
+| circle, with a Hit, both indices | 1 917 / 1 945 | 2 136 / 2 152 |
+| circle, with a Hit, static index alone | 1 463 / 1 476 | 1 637 / 1 641 |
+| box, with a Hit, both indices | 2 901 / 2 908 | 3 080 / 3 094 |
+| box, with a Hit, static index alone | 2 020 / 2 021 | 2 193 / 2 208 |
+| moving box Sensor, swept, over the discrete test | 855 / 862 | 858 / 861 |
+| moving segment Sensor, swept, over the discrete test | 568 / 578 | 588 / 594 |
+
+The minimums and the 25th percentiles agree on every side of every bar. A
+second run of 16 rounds, over the built fall-back with the flag off and on
+against the mechanism taken out, reads within 40 ns of these throughout.
+
+**What it says.**
+
+- **No Hit: over the bar, because of the Body index.** Against the static
+  index alone an engaged Body costs 250 to 325 ns, under 450. Querying the
+  Body index and the marked partners adds 420 to 870 ns, and takes the total to
+  680 to 1 170 ns. That is [the fall-back's](#the-fall-back-for-a-solid-body)
+  trigger, at both sizes, for both movers, on the minimums and on the 25th
+  percentiles alike, so **the fall-back is taken**: `StopsAtBodies`.
+- **With a Hit: over the bar either way, recorded as the price.** 1.5 to
+  2.2 µs against Static geometry alone, 1.9 to 3.1 µs with the Body index,
+  against a bar of 1 µs. The Hit's own cost, 1.2 to 1.9 µs over the no-Hit
+  price, is the stop: the stopping Contact, the Body's other pairs tested where
+  it stopped, Solve moving it back, and one more Contact through the solver,
+  which the build without the mechanism does not have, since its movers pass
+  clean through the boards. The fall-back does not bring it under, and only a
+  fast Body pays it, so nothing changes.
+- **A moving Sensor: recorded only, and it stays swept.** A box Sensor's sweep
+  costs about 860 ns over the discrete test it replaced, and a segment's about
+  580 ns, flat in N. The Sensor walk is untouched by the fall-back: its numbers
+  are the same in the build that skips the Body index for solid Bodies.
+- **The scene is dense on purpose**: N fast Bodies over a world of N, two to
+  every cell the world's Dynamic half fills, each with a marked partner ahead
+  and behind in the grid cells its path box covers. A sparser scene would show
+  less of the partner scan in the Body-index share, but not less of the Body
+  index's own query, which alone is most of that share.
 
 ### The kill criterion
 
@@ -976,6 +1077,13 @@ All read on the minimums, with interleaved A/B over two built binaries.
   - this spec's "no opt-in" lines change with it.
 - **If the static-index price alone is over the bar, nothing changes.** It is
   recorded as the price, since only a fast Body pays it.
+- **Taken** ([The price, as measured](#the-price-as-measured)). Two things the
+  form above left open were **settled here**:
+  - **a pair of marked Bodies meets when either Shape sets the flag.** Without
+    it a Body's walk looks for no partner, so the pair is judged by the lower
+    Entity's walk when both set it, and by the one that sets it otherwise;
+  - **a resting Sensor that is a Body is crossed only with the flag**, since it
+    is in the Body index. A Static Sensor is crossed by every fast Body.
 
 ### A swept Sensor over the bar
 
@@ -1030,9 +1138,9 @@ In blocking order. **The gate goes first, because it carries the kill check.**
 
 **The price**
 
-- [ ] The engaged-Body benchmark scene, the no-Hit and Hit prices, the
+- [x] The engaged-Body benchmark scene, the no-Hit and Hit prices, the
       Body-index share, and the moving-Sensor price. Take the fall-back if it
-      triggers.
+      triggers: taken.
 
 **Housekeeping**
 
@@ -1049,5 +1157,5 @@ In blocking order. **The gate goes first, because it carries the kill check.**
 - **Re-simulating the lost time.** That is sub-steps, dropped by the owner.
 - **A projectile concept.** A projectile is still an ordinary Body; nothing here
   names one.
-- **An opt-in**, unless [the fall-back](#the-fall-back-for-a-solid-body) is
-  taken.
+- **Any opt-in but `StopsAtBodies`**, which [the
+  fall-back](#the-fall-back-for-a-solid-body) added.

@@ -112,7 +112,8 @@ record; this list is a reading aid, not a second definition.
   nothing. One that moves, whatever its Shape, reports everything it touched on
   its way through the tick.
 - **Contact** — two Entities whose Shapes touch, found once a tick, marked begun,
-  continuing or ended.
+  continuing or ended. When one party is a Sensor, or a Body was stopped short,
+  it says how far through the tick the touch happened.
 - **Contact point** — one of the at most two places a Contact touches.
 - **Slop** — how far two Shapes may overlap and be left alone.
 - **Impulse** — how much push was delivered in an instant.
@@ -135,8 +136,16 @@ record; this list is a reading aid, not a second definition.
 - **Spring** — a Joint that pushes towards a rest distance or Angle.
 - **Absorption** — how strongly a Spring resists its ends moving, force per unit
   of that speed.
-- **Probe** — moving a circle, possibly of radius 0, in a straight line and
-  finding what it touches. **Hit** is what it reports.
+- **Probe** — moving a Shape, without turning it, in a straight line and
+  finding what it touches; most often a circle, possibly of radius 0. **Hit** is
+  what it reports.
+- **Continuous collision** — stopping a Body that moves far enough in one tick
+  to get through something, so it meets what it would have hit instead of ending
+  up beyond it. It engages only for a Body whose movement in the tick reaches
+  its own thinnest width. It always stops at Static bodies; at Kinematic and
+  Dynamic ones only when the Shape asks. A Kinematic body is never stopped: what
+  it would have hit is carried along with it instead
+  ([continuous-collision.md](continuous-collision.md)).
 - **Overlap** — asking which Entities a Shape at a position touches.
 - **Static index** / **Body index** — the plugin's two indices. Which one a query
   asks is the caller's choice.
@@ -475,7 +484,8 @@ From [Convex polygons](https://github.com/dvoyni/cog/issues/323),
 | `CollisionBits`, `CollidesWith` | `uint32` each | 8 | the groups it is in, and the groups it collides with |
 | `Kind` | `uint8` | 1 | Circle, Segment, Tri, Quad, Poly |
 | `Sensor` | `bool` | 1 | |
-| padding | | 2 | spare; the first byte is reserved for continuous collision's fall-back flag, `StopsAtBodies`, should it ever be taken |
+| `StopsAtBodies` | `bool` | 1 | continuous collision's one opt-in: a fast solid Body is stopped at, or carries, the Kinematic and Dynamic Bodies on its path, not only the Static ones; default false |
+| padding | | 1 | spare |
 | `faceDistance` | `float32` | 4 | unexported: a Polygon kind's distance from `Position` to its nearest face's line, 0 on every other kind |
 
 **The kind carries the vertex count.** `Circle` uses `verts[0]` as its centre
@@ -511,6 +521,15 @@ gate engages it on any motion. That is safe: it is tested more often and never
 tunnels. It is the same class of hazard as a bare literal's collision bits, which
 the package already accepts, and the way to avoid it is the same: build the
 Shape with a constructor.
+
+**`StopsAtBodies` is the fall-back continuous collision's price triggered.**
+A fast solid Body's path test queries the static index always, and the Body
+index only for a Shape that carries it: that query was measured at 1.7 to 2.9
+times the rest of an engaged Body's price, taking it past the 450 ns bar
+([continuous-collision.md § The fall-back for a solid
+Body](continuous-collision.md#the-fall-back-for-a-solid-body)). It sits in what
+was padding, so it adds no memory, and Index already reads `Shape`, so it adds
+no read and widens no lock set. A Sensor ignores it.
 
 **Local normals are not stored.** They are derived when the world cache is built,
 one `Normalize` per edge — and a static Polygon is cached once, at insert, so the
@@ -2777,9 +2796,10 @@ within a group; groups after the first assume the value types exist.
   scheduler is slower than one thread at N=256 at every worker count and only wins
   at N=1024. A parallel impulse solver needs graph colouring or Box2D v3's solver
   sets, which is a different engine's design.
-- **Continuous collision for the whole world**, and **Probing a box**. Only
-  circles Probe. A solid, non-Sensor Body that moves farther than its own extent in
-  one tick tunnels; a thrown boulder is discrete.
+- **What continuous collision leaves out**: rotational tunnelling, re-simulating
+  the lost time, and a projectile concept. Continuous collision itself, and
+  Probing a box, are in: see [continuous-collision.md](continuous-collision.md)
+  and its [Out of scope](continuous-collision.md#out-of-scope).
 - **Verticality and any third axis.** The `2d` in the package name is the
   commitment. Gravity as a constant acceleration *in the plane* is not out of
   scope: it is [Constants](#constants).

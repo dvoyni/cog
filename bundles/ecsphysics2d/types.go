@@ -112,6 +112,12 @@ type Sleeping = types.Sleeping
 // cp's do, and a pair's are their plain products. Neither is validated and
 // neither constructor takes one, so a material is written onto the Shape after
 // it is built.
+//
+// StopsAtBodies is continuous collision's one opt-in: a fast solid Body of
+// this Shape is stopped at the Kinematic and Dynamic bodies on its path, or
+// carries them when it is Kinematic, and not only at the Static ones. It is
+// off by default, because querying the Body index is most of what a fast Body
+// costs (continuous-collision.md § The fall-back for a solid Body).
 type Shape = types.Shape
 
 // Polygon is the vertices of a Shape too large to carry them inline: the second

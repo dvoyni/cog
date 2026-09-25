@@ -633,7 +633,7 @@ Moving a Shape, without turning it, in a straight line from one position to anot
 _Avoid_: Sweep, ray cast, shape cast, segment query, trace
 
 **Continuous collision**:
-Stopping a Body that moves far enough in one tick to get through something, either clean past it or deep enough to be pushed out its far side, so it meets what it would have hit instead of ending up beyond it. It engages only for a Body whose movement in the tick reaches its own thinnest width; anything slower is caught by ordinary contact. It follows the straight line between where the Body was and where it is, so a thin thing spinning fast can still slip through. A Kinematic body is never stopped: what it would have hit is carried along with it instead.
+Stopping a Body that moves far enough in one tick to get through something, either clean past it or deep enough to be pushed out its far side, so it meets what it would have hit instead of ending up beyond it. It engages only for a Body whose movement in the tick reaches its own thinnest width; anything slower is caught by ordinary contact. It always stops a Body at the Static bodies in its way; meeting the Kinematic and Dynamic bodies in its way too is asked for by the Body's Shape, because it costs a fast Body several times as much, and without it a fast Body can pass through them. It follows the straight line between where the Body was and where it is, so a thin thing spinning fast can still slip through. A Kinematic body is never stopped: what it would have hit is carried along with it instead.
 _Avoid_: Sweep, bullet, CCD, time of impact (one way of doing it, not the behaviour)
 
 **Hit**:
