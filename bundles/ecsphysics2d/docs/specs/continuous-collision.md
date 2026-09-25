@@ -546,6 +546,26 @@ Examples:
 - **A Kinematic Body against a Static one** moves neither side. The Contact is
   only reported.
 
+**Settled here: what `d_other` is, and how Solve tells the cases apart.**
+
+- **`d_other` is the other side's path as the path pass took it.** A marked
+  side met along the pair's relative motion stood at `Previous + T·d_other` when
+  they met, so a Dynamic body it stops is carried by the `(1 − T)·d_other` it
+  had left. A target that is not marked was taken where the tick left it, so the
+  Hit already has its whole movement in it: a Dynamic body stopped by a slow
+  Kinematic target is moved back to `T` and not carried, which would open a gap
+  of `(1 − T)·d_other` or push it into the target.
+- **A Dynamic body a fast Kinematic body meets on the Kinematic body's own path
+  is carried from its end pose.** It was not marked, so it has no stop of its
+  own; were it marked, the two would have met along their relative motion. A
+  Dynamic body two Kinematic bodies meet in the one tick is carried by each.
+- **Solve reads the stopping Contact's other party and one flag on the stop**,
+  set by Detect: whether the stop was a meeting. With `Dynamic`, which it
+  already reads, that is enough to pick the case, and the other side's path is
+  its `Position`, which it already writes. No lock set changes.
+- **`r1` and `r2` need no change.** Detect takes them at both stopping poses,
+  and a carry moves the Dynamic side and the point they touch at together.
+
 **Each Body stops at its own earliest `T`**, which is "first Hit only" applied
 one Body at a time. If B's first Hit is C at `T = 0.2` and the A–B pair meets at
 `T = 0.4`, B stops at 0.2, and A stops at 0.4 against where B would have been.
@@ -653,7 +673,7 @@ or is out of scope.
 | **Rotational tunnelling** | the path is a chord at the end angle, so a thin Shape spinning fast can slip through | out of scope |
 | **A dropped stop's other Contacts** | tested at the stopping point, they describe that pose for one tick | written down |
 | **The ghost Hit** | a target that moved into the path during the tick counts as already there | written down |
-| **Stale Contacts beside a Kinematic side** | Detect cannot tell kinds, so it tests a stopped Body's other pairs as if both sides move back to `T`; where one is Kinematic, the Dynamic side's other Contacts describe the wrong pose for one tick | written down |
+| **Stale Contacts beside a Kinematic side** | Detect cannot tell kinds, so it tests a stopped Body's other pairs as if both sides move back to `T`; where one is Kinematic, the Dynamic side's other Contacts describe the wrong pose for one tick, and so do those of a Dynamic body it carries, found where the tick left it | written down |
 | **The one-tick gap** | A stopped against where B would have been can stand short of B, and the gap closes next tick through ordinary contact | written down |
 | **The chord** | a sharply curving Body or Sensor can clip a corner within one tick | written down (already in `ecsphysics2d.md`) |
 
