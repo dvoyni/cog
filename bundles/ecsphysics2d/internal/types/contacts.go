@@ -96,6 +96,10 @@ type Contacts struct {
 	firsts   []firstStop
 	meetings []meeting
 	partners []partner
+	// crossings is the Sensors that did not move which fast solid Bodies'
+	// paths crossed, each an entry held back until the Body's own stop is
+	// settled, since it is reported only up to where the Body stopped.
+	crossings []crossing
 
 	// awakeSlots is where the Body index's sleepers' grid starts in the
 	// solver's slot numbering, as Detect saw it: a party at or past it is a

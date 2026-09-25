@@ -132,12 +132,14 @@
 //
 // The package has no projectile concept either. A projectile is an ordinary
 // Dynamic body with a circle Shape marked a Sensor, and the same mechanism
-// serves pressure plates and area damage. Every moving circle Sensor is Probed
-// once a tick, from Position.Previous to Current, with no opt-in flag: its
-// entries are its Entity plus a Hit, sitting together in the list and ordered
-// by T, so the app takes the first and stops at a wall. Box and segment Sensors
-// are tested discretely, a Static Sensor is never Probed, and two Sensors that
-// find each other keep the smaller T. T and Depth mean one thing on every
+// serves pressure plates and area damage. Every moving Sensor, whatever its
+// Shape, is Probed once a tick, from Position.Previous to Current, with no
+// opt-in flag: its entries are its Entity plus a Hit, sitting together in the
+// list and ordered by T, so the app takes the first and stops at a wall. A
+// Shape that is not a circle is held at its end angle. Two moving Sensors meet
+// along their relative motion, as one entry with one T, and a Static Sensor is
+// never Probed; a fast solid Body reports every Sensor that did not move which
+// its path crosses, up to where it stopped. T and Depth mean one thing on every
 // entry: a Probed Sensor carries the Probe's T and a Depth of 0, except one
 // that started inside something, which reports T = 0 with the overlap at the
 // start, and everything else reports T = 1 with the overlap where the tick
@@ -161,11 +163,9 @@
 // it has left after T, so a fast paddle hits the ball instead of passing
 // through it (continuous-collision.md).
 //
-// Two holes are accepted rather than fixed. A Sensor's path is a chord and not
-// the polyline it flew, so a sharply curving one can clip a corner; and two
-// moving Sensors are tested against each other's end positions rather than
-// their relative motion, so two with a radius crossing within one tick can miss
-// each other.
+// One hole is accepted rather than fixed. A Sensor's path is a chord and not
+// the polyline it flew, so a sharply curving one can clip a corner, as a solid
+// Body's can.
 //
 // The plugin never moves a Sensor back and never stops one. Snap-back is the
 // app's write — Position.Current = Previous, which is from.Lerp(to, T) — and so

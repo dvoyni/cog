@@ -146,19 +146,20 @@ func (c *Contacts) pair(
 	second *entry, worldSecond []m.Vec2d, secondSlot int32,
 	jointed *JointedPairs,
 ) {
-	// A swept Sensor's entries come from its Probe, whose Hits are a superset
-	// of what a discrete test at the tick's end would find, so the discrete
-	// pass leaves every pair it is party to alone. Writing the pair twice is
-	// also what the pair table forbids: it is inserted at most once a tick and
-	// has no replacement path. Only a Body index entry is ever swept, so a
-	// Static party answers false without the caller saying which index it came
-	// from.
+	// A pair of a marked entry and a Sensor was the path pass's: a moving
+	// Sensor's Probe, or a fast solid Body's, which writes every Sensor it
+	// crosses. Those Hits are a superset of what a discrete test at the tick's
+	// end would find, so the discrete pass leaves the pair alone. Writing the
+	// pair twice is also what the pair table forbids: it is inserted at most
+	// once a tick and has no replacement path. Only a Body index entry is ever
+	// marked, so a Static party answers false without the caller saying which
+	// index it came from.
 	//
 	// A fast solid Body the path pass stopped is tested where it stopped, and
 	// the pair reports that T; its stopping pair is already written. One
 	// branch on the path bit is all an unmarked pair pays.
 	if first.path || second.path {
-		if (first.path && first.shape.Sensor) || (second.path && second.shape.Sensor) {
+		if first.shape.Sensor || second.shape.Sensor {
 			return
 		}
 		if len(c.stops) > 0 && c.pairStopped(

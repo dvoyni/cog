@@ -120,13 +120,13 @@ func TestAProbedSensorThatStartedInsideSomethingReportsTheOverlapAtTheStart(t *t
 }
 
 func TestEverythingNotProbedReportsTAtOneWithTheOverlapWhereTheTickEnded(t *testing.T) {
-	// A segment Sensor is tested discretely however fast it moved, which is the
-	// accepted hole: only the circle kind is swept.
+	// A segment Sensor that did not move is tested discretely, as a circle one
+	// is: only a moving Sensor is swept, whatever its Shape.
 	shape := NewSegmentShape(m.Vec2d{X: -1}, m.Vec2d{X: 1}, 0.1)
 	shape.Sensor = true
 
 	bodies := NewBodyIndex(0)
-	bodies.InsertMoving(ecs.Entity(1), shape, m.Vec2d{}, m.Vec2d{X: -8}, 0, 0, nil)
+	bodies.InsertMoving(ecs.Entity(1), shape, m.Vec2d{}, m.Vec2d{}, 0, 0, nil)
 	bodies.Insert(ecs.Entity(2), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{Y: 0.5}, 0, nil)
 
 	contacts := NewContacts(7)
@@ -182,8 +182,11 @@ func TestAStaticSensorIsNeverProbedAndQueriesStillFindIt(t *testing.T) {
 		t.Errorf("Overlap found %d Shapes, want the Sensor", len(found))
 	}
 
+	// A Body moving less than its own extent is not tested along its path, so
+	// the pair is found where the tick ended. A fast one reports the Sensor
+	// from its own path test instead (TestAFastBodyReportsTheSensorsItCrosses).
 	bodies := NewBodyIndex(0)
-	bodies.InsertMoving(ecs.Entity(1), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{X: 0.6}, m.Vec2d{X: -8}, 0, 0, nil)
+	bodies.InsertMoving(ecs.Entity(1), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{X: 0.6}, m.Vec2d{X: 0.5}, 0, 0, nil)
 
 	contacts := NewContacts(7)
 	Collide(contacts, bodies, statics, noJoints, 3, testSlop)
@@ -195,70 +198,191 @@ func TestAStaticSensorIsNeverProbedAndQueriesStillFindIt(t *testing.T) {
 	}
 }
 
-func TestTwoMovingSensorsThatFindEachOtherKeepTheSmallerT(t *testing.T) {
+func TestTwoMovingSensorsMeetAlongTheirRelativeMotion(t *testing.T) {
 	first, second := ecs.Entity(1), ecs.Entity(2)
 
-	// Each Sensor Probes the other at the position the tick left it in, so both
-	// find the pair and only the smaller T is written. The two cases differ in
-	// which of them is swept first, so the answer cannot be the walk's order.
+	// Two Sensors of radius 0.1 meet along their relative motion, from both
+	// start poses, with one T, and the lower Entity's walk writes the pair, so
+	// it is A. The two cases are inserted in opposite orders, so the answer
+	// cannot be the walk's order.
 	cases := []struct {
-		name                         string
-		fromFirst, toFirst           m.Vec2d
-		fromSecond, toSecond         m.Vec2d
-		wantA, wantB                 ecs.Entity
-		wantT, wantPointX, wantNorml float64
+		name                 string
+		secondFirst          bool
+		fromFirst, toFirst   m.Vec2d
+		fromSecond, toSecond m.Vec2d
+		wantT, wantPointX    float64
 	}{{
-		// The first reaches the second's end position, grown by both radii, at
-		// x = 0.8 over a two-metre path; the second would have reached the
-		// first's at x = 2.2 over four metres, which is later.
-		name:       "the Sensor swept first has the smaller T",
+		// 5 m apart closing by 6 m: they touch 0.2 apart after 4.8, at
+		// T = 0.8, the first at 1.6 and the second at 1.8.
+		name:       "the lower Entity walked first",
 		fromFirst:  m.Vec2d{},
 		toFirst:    m.Vec2d{X: 2},
 		fromSecond: m.Vec2d{X: 5},
 		toSecond:   m.Vec2d{X: 1},
-		wantA:      first,
-		wantB:      second,
-		wantT:      0.4,
-		wantPointX: 0.9,
-		wantNorml:  -1,
+		wantT:      0.8,
+		wantPointX: 1.7,
 	}, {
-		// The other way round: the second reaches the first's end position at
-		// x = 4.2 over a 3.4 m path, well before the first reaches x = 0.8 over
-		// four metres.
-		name:       "the Sensor swept second has the smaller T",
-		fromFirst:  m.Vec2d{},
-		toFirst:    m.Vec2d{X: 4},
-		fromSecond: m.Vec2d{X: 4.4},
-		toSecond:   m.Vec2d{X: 1},
-		wantA:      second,
-		wantB:      first,
-		wantT:      0.2 / 3.4,
-		wantPointX: 4.1,
-		wantNorml:  1,
+		// 4.4 m apart closing by 7.4 m: they touch after 4.2, the first at
+		// 4·T and the second at 4.4 − 3.4·T, 0.2 apart.
+		name:        "the lower Entity walked second",
+		secondFirst: true,
+		fromFirst:   m.Vec2d{},
+		toFirst:     m.Vec2d{X: 4},
+		fromSecond:  m.Vec2d{X: 4.4},
+		toSecond:    m.Vec2d{X: 1},
+		wantT:       4.2 / 7.4,
+		wantPointX:  4*4.2/7.4 + 0.1,
 	}}
 
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
 			bodies := NewBodyIndex(0)
-			bodies.InsertMoving(first, sensorCircle(0.1), each.toFirst, each.fromFirst, 0, 0, nil)
-			bodies.InsertMoving(second, sensorCircle(0.1), each.toSecond, each.fromSecond, 0, 0, nil)
+			insertFirst := func() {
+				bodies.InsertMoving(first, sensorCircle(0.1), each.toFirst, each.fromFirst, 0, 0, nil)
+			}
+			insertSecond := func() {
+				bodies.InsertMoving(second, sensorCircle(0.1), each.toSecond, each.fromSecond, 0, 0, nil)
+			}
+			if each.secondFirst {
+				insertSecond()
+				insertFirst()
+			} else {
+				insertFirst()
+				insertSecond()
+			}
 
 			contacts := NewContacts(7)
 			Collide(contacts, bodies, NewStaticIndex(0), noJoints, 3, testSlop)
 
 			if contacts.Len() != 1 {
-				t.Fatalf("two Sensors that found each other made %d Contacts, want 1", contacts.Len())
+				t.Fatalf("two Sensors that met made %d Contacts, want 1", contacts.Len())
 			}
 			entry := contacts.All()[0]
-			if entry.A != each.wantA || entry.B != each.wantB {
-				t.Errorf("the entry names %v and %v, want %v and %v",
-					entry.A, entry.B, each.wantA, each.wantB)
+			if entry.A != first || entry.B != second {
+				t.Errorf("the entry names %v and %v, want %v and %v", entry.A, entry.B, first, second)
 			}
 			wantNear(t, "T", entry.T, each.wantT)
 			wantPoint(t, "Point", entry.Points[0].Point, each.wantPointX, 0)
-			wantNormal(t, entry.Normal, each.wantNorml, 0)
+			wantNormal(t, entry.Normal, -1, 0)
+			wantNear(t, "Depth", entry.Points[0].Depth, 0)
 		})
 	}
+}
+
+func TestAMovingSensorMeetsAFastBodyAlongTheirRelativeMotionOnItsOwnWalk(t *testing.T) {
+	// The fast Body is the lower Entity and is walked first, and the pair is
+	// still the Sensor's: one entry, the Sensor A, along the relative motion,
+	// and the Body is not stopped by it.
+	body, sensor := ecs.Entity(1), ecs.Entity(2)
+	bodies := NewBodyIndex(0)
+	bodies.InsertMoving(body, NewCircleShape(0.1, m.Vec2d{}), m.Vec2d{X: 1}, m.Vec2d{X: 5}, 0, 0, nil)
+	bodies.InsertMoving(sensor, sensorCircle(0.1), m.Vec2d{X: 2}, m.Vec2d{}, 0, 0, nil)
+
+	contacts := NewContacts(7)
+	Collide(contacts, bodies, NewStaticIndex(0), noJoints, 3, testSlop)
+
+	if contacts.Len() != 1 {
+		t.Fatalf("a Sensor meeting a fast Body made %d Contacts, want 1", contacts.Len())
+	}
+	entry := contacts.All()[0]
+	if entry.A != sensor || entry.B != body || !entry.Sensor {
+		t.Errorf("the entry names %v and %v, Sensor %v, want the Sensor, the Body and true",
+			entry.A, entry.B, entry.Sensor)
+	}
+	// The same closing as the two Sensors': 5 m apart closing by 6 m.
+	wantNear(t, "T", entry.T, 0.8)
+	wantPoint(t, "Point", entry.Points[0].Point, 1.7, 0)
+	wantNormal(t, entry.Normal, -1, 0)
+	if len(contacts.stops) != 0 {
+		t.Errorf("the Body was stopped %d times by a Sensor", len(contacts.stops))
+	}
+}
+
+func TestAFastBodyReportsTheSensorsItCrosses(t *testing.T) {
+	// Two fast Bodies cross a tall resting Sensor, and the first of them a
+	// small one behind it. The Sensor is A on each entry, and one Sensor's
+	// entries sit together, in order of T, whichever Body's walk found them.
+	tall, small := ecs.Entity(100), ecs.Entity(101)
+	first, second := ecs.Entity(1), ecs.Entity(2)
+
+	statics := NewStaticIndex(0)
+	tallShape := NewBoxShape(0.1, 10, 0)
+	tallShape.Sensor = true
+	statics.Insert(tall, tallShape, m.Vec2d{X: 5}, 0, nil)
+	statics.Insert(small, sensorCircle(0.05), m.Vec2d{X: 8}, 0, nil)
+
+	bodies := NewBodyIndex(0)
+	bodies.InsertMoving(first, NewCircleShape(0.1, m.Vec2d{}), m.Vec2d{X: 10}, m.Vec2d{}, 0, 0, nil)
+	bodies.InsertMoving(second, NewCircleShape(0.1, m.Vec2d{}), m.Vec2d{X: 14, Y: 2}, m.Vec2d{X: 4, Y: 2}, 0, 0, nil)
+
+	contacts := NewContacts(7)
+	Collide(contacts, bodies, statics, noJoints, 3, testSlop)
+
+	want := []struct {
+		a, b ecs.Entity
+		t    float64
+		x, y float64
+	}{
+		// The tall Sensor's face is at x = 4.95, met by each Body's leading
+		// edge; the small one's at 7.95.
+		{tall, second, (4.95 - 0.1 - 4) / 10, 4.95, 2},
+		{tall, first, (4.95 - 0.1) / 10, 4.95, 0},
+		{small, first, (7.95 - 0.1) / 10, 7.95, 0},
+	}
+	list := contacts.All()
+	if len(list) != len(want) {
+		t.Fatalf("the tick made %d Contacts, want %d", len(list), len(want))
+	}
+	for i, w := range want {
+		entry := list[i]
+		if entry.A != w.a || entry.B != w.b || !entry.Sensor {
+			t.Errorf("entry %d names %v and %v, Sensor %v, want %v, %v and true",
+				i, entry.A, entry.B, entry.Sensor, w.a, w.b)
+			continue
+		}
+		wantNear(t, "T", entry.T, w.t)
+		wantPoint(t, "Point", entry.Points[0].Point, w.x, w.y)
+		// Normal is B's surface facing A: the Body's leading edge faces +X.
+		wantNormal(t, entry.Normal, 1, 0)
+		wantNear(t, "Depth", entry.Points[0].Depth, 0)
+	}
+	if len(contacts.stops) != 0 {
+		t.Errorf("the Bodies were stopped %d times by Sensors", len(contacts.stops))
+	}
+}
+
+func TestAStoppedBodyReportsOnlyTheSensorsBeforeItsStop(t *testing.T) {
+	// A fast ball stopped by a wall crossed the Sensor before the wall and
+	// never reached the one behind it, so a goal line behind a wall does not
+	// fire.
+	before, wall, behind := ecs.Entity(100), ecs.Entity(101), ecs.Entity(102)
+	ball := ecs.Entity(1)
+
+	statics := NewStaticIndex(0)
+	statics.Insert(before, sensorCircle(0.05), m.Vec2d{X: 1}, 0, nil)
+	statics.Insert(wall, NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{X: 3}, 0, nil)
+	statics.Insert(behind, sensorCircle(0.05), m.Vec2d{X: 5}, 0, nil)
+
+	bodies := NewBodyIndex(0)
+	bodies.InsertMoving(ball, NewCircleShape(0.1, m.Vec2d{}), m.Vec2d{X: 6}, m.Vec2d{}, 0, 0, nil)
+
+	contacts := NewContacts(7)
+	Collide(contacts, bodies, statics, noJoints, 3, testSlop)
+
+	list := contacts.All()
+	if len(list) != 2 {
+		t.Fatalf("the tick made %d Contacts, want the wall's stop and the Sensor before it", len(list))
+	}
+	stop, crossed := list[0], list[1]
+	if stop.B != wall || stop.Sensor {
+		t.Errorf("the first entry names %v, Sensor %v, want the wall's stop", stop.B, stop.Sensor)
+	}
+	wantNear(t, "the stop's T", stop.T, 2.4/6)
+	if crossed.A != before || crossed.B != ball || !crossed.Sensor {
+		t.Errorf("the second entry names %v and %v, want the Sensor before the wall and the ball",
+			crossed.A, crossed.B)
+	}
+	wantNear(t, "the crossing's T", crossed.T, 0.85/6)
 }
 
 func TestASweptSensorIsFilteredByTheGroupsBeforeAnyShapeTest(t *testing.T) {
@@ -412,6 +536,66 @@ func TestTheSweptSensorPathAllocatesNothing(t *testing.T) {
 		Collide(contacts, bodies, statics, noJoints, 3, testSlop)
 	}); got != 0 {
 		t.Errorf("sweeping the Sensors allocates %v objects a tick, want none", got)
+	}
+}
+
+func TestEveryMovingSensorAndEveryCrossingAllocatesNothing(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
+	// Box and segment Sensors swept through a row of Static circles, two of
+	// them meeting head-on, and fast solid Bodies crossing resting Sensors.
+	statics := NewStaticIndex(0)
+	for i := range 32 {
+		statics.Insert(ecs.Entity(1000+i), NewCircleShape(0.2, m.Vec2d{}),
+			m.Vec2d{X: float64(i) * 0.5}, 0, nil)
+		gate := NewBoxShape(0.1, 1, 0)
+		gate.Sensor = true
+		statics.Insert(ecs.Entity(2000+i), gate, m.Vec2d{X: float64(i) * 0.5, Y: 5}, 0, nil)
+	}
+	box := NewBoxShape(0.2, 0.2, 0)
+	box.Sensor = true
+	segment := NewSegmentShape(m.Vec2d{Y: -0.1}, m.Vec2d{Y: 0.1}, 0.02)
+	segment.Sensor = true
+
+	bodies := NewBodyIndex(0)
+	fill := func() {
+		bodies.Clear()
+		for i := range 8 {
+			y := float64(i) * 0.01
+			bodies.InsertMoving(ecs.Entity(1+i), box, m.Vec2d{X: 16, Y: y}, m.Vec2d{Y: y}, 0, 0, nil)
+			bodies.InsertMoving(ecs.Entity(20+i), segment, m.Vec2d{Y: y}, m.Vec2d{X: 16, Y: y}, 0, 0, nil)
+			bodies.InsertMoving(ecs.Entity(40+i), NewCircleShape(0.1, m.Vec2d{}),
+				m.Vec2d{X: 16, Y: 5 + y}, m.Vec2d{Y: 5 + y}, 0, 0, nil)
+			bodies.InsertMoving(ecs.Entity(60+i), NewBoxShape(0.2, 0.2, 0),
+				m.Vec2d{Y: 5.2 + y}, m.Vec2d{X: 16, Y: 5.2 + y}, 0, 0, nil)
+		}
+	}
+
+	contacts := NewContacts(7)
+	for range 8 {
+		fill()
+		Collide(contacts, bodies, statics, noJoints, 3, testSlop)
+	}
+	crossed, met := 0, 0
+	for _, entry := range contacts.All() {
+		if entry.A >= 2000 {
+			crossed++
+		}
+		if entry.A < 20 && entry.B >= 20 && entry.B < 40 {
+			met++
+		}
+	}
+	if crossed == 0 || met == 0 {
+		t.Fatalf("the scene the measurement runs over has %d crossings and %d meetings of Sensors, want both",
+			crossed, met)
+	}
+
+	if got := testing.AllocsPerRun(200, func() {
+		fill()
+		Collide(contacts, bodies, statics, noJoints, 3, testSlop)
+	}); got != 0 {
+		t.Errorf("sweeping every Sensor and reporting the crossings allocates %v objects a tick, want none", got)
 	}
 }
 
