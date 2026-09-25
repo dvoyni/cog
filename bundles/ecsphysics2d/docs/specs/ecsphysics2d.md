@@ -1638,6 +1638,24 @@ Contact never goes quiet, and one between a sleeper and an awake Sensor is still
 found and reported every tick; one between two sleepers, or a sleeper and a
 Static, is not tested and ends, as cp's does.
 
+**A returning Contact finds the slot this tick already gave its Body.** The
+solver gathers one row per slot, so a Body named at two slots is solved twice
+over, each row against its own Contacts alone, and the last row written back wins
+([#591](https://github.com/dvoyni/cog/issues/591)). The tick an Island wakes is
+the tick something touched it, so a woken Body may already have a slot: Detect
+found it at its place in the sleepers' grid, in a discrete touch or a stop at the
+first Hit, or in a Hit held past a fast Kinematic body's first
+([continuous-collision.md](continuous-collision.md#the-hits-past-the-stop)).
+Before handing out any slot, the sleep System seeds its Entity-to-slot table with
+every slot at or past where the sleepers' numbering starts that this tick's
+current Contacts and held Hits name; only a sleeper has one, so a returning
+Contact reuses it, and only a Body nothing touched is numbered past every slot
+Detect did. It costs one pass over the current run on a tick an Island wakes and
+none on any other. **One row per Entity enforced in Solve's gather instead is
+rejected**: it would put an Entity lookup on every tick's gather to mend what
+only a waking tick breaks. A Joint reaches its rows by Entity from the rows the
+Contacts made, so one row per slot is one row per Body for it too.
+
 ### The Body index keeps sleepers in a grid of their own
 
 **The Body index holds sleepers in a second grid, updated when an Island falls
@@ -1656,7 +1674,8 @@ The Body index has no Entity-to-slot table ([#441](https://github.com/dvoyni/cog
 so taking sleepers out is one pass over the sleepers' grid however many leave,
 and the solver numbers the sleepers' slots after the awake grid's. A Body woken
 this tick is still in the sleepers' grid, and the Contacts it hands back are
-solved at a slot the sleep System numbers past every one Detect did.
+solved at the slot Detect gave it this tick if it has one, and otherwise at a
+slot the sleep System numbers past every one Detect did.
 
 ### What it costs, and where it pays
 
