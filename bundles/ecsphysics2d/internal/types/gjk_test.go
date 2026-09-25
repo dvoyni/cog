@@ -140,7 +140,7 @@ func detectTwoBodies(
 	bodies, statics := NewBodyIndex(0), NewStaticIndex(0)
 	bodies.Insert(ecs.Entity(1), a, atA, angleA, vertsA)
 	bodies.Insert(ecs.Entity(2), b, atB, angleB, vertsB)
-	Collide(contacts, bodies, statics, noJoints, 3)
+	Collide(contacts, bodies, statics, noJoints, 3, testSlop)
 	return contacts.Len()
 }
 

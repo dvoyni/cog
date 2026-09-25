@@ -86,6 +86,10 @@ From 577 and 578.
   or Dynamic Body on its path. It is not stopped short or pushed out the far
   side. There is **no opt-in** and no Component to add. An app that throws a
   boulder writes the same Components it writes today.
+- **A surface a Body slides along does not stop it**, even where one tile of a
+  floor meets the next. A Hit stops a Body only where its path enters the
+  target; a seam is left to ordinary contact
+  ([below](#a-seam-stops-nothing)).
 - **The stopping Contact is an ordinary Contact.** It carries `T < 1` and
   `Depth 0`, which is the form a Probed Sensor's Contact already has. A Contact
   gains no field, and `T` keeps one meaning: how far through the tick the Body
@@ -246,9 +250,11 @@ today's `sweepSensors`. For each marked entry, it runs one path test through bot
 indices, and **the `Sensor` flag picks the keep rule**:
 
 - **a Sensor keeps every Hit, ordered by `T`**, excluding only itself, as today;
-- **a solid Body keeps its first Hit** that is not a Sensor and is not already
-  touched at `Previous`, which stops it, and every Hit on a Sensor that did not
-  move, which does not ([below](#a-fast-body-reports-the-sensors-it-crosses)).
+- **a solid Body keeps its first Hit** that is not a Sensor, is not already
+  touched at `Previous`, and is one its path enters rather than a seam
+  ([below](#a-seam-stops-nothing)), which stops it, and every Hit on a Sensor
+  that did not move, which does not
+  ([below](#a-fast-body-reports-the-sensors-it-crosses)).
 
 Two passes were rejected: two loops over the entries, two copies of the path box
 and relative-motion code, and the same pair possibly tested twice where a Sensor
@@ -263,6 +269,131 @@ meets a fast Body.
   is still reported.
 - **Pairs detection already rejects:** the collision bits, and pairs a Joint
   holds apart (`JointedPairs`).
+- **Seams.** A target the path meets but does not enter, such as the next tile
+  of a floor the Body slides along, is left to the discrete walk
+  ([below](#a-seam-stops-nothing)). This is asked last, of a Hit that would
+  otherwise stop the Body.
+
+### A seam stops nothing
+
+From [physics: a fast Body sliding over the seams of a tiled floor is not stopped by the next tile](https://github.com/dvoyni/cog/issues/588).
+
+**A resting Body stands a Slop's depth into the surface it slides on, so its
+path meets the next tile.** The "already touched at `Previous`" skip does not
+cover that tile. Measured on the first build of the stop, with a floor of Static
+tiles 0.2 m thick, laid edge to edge, and a mover resting 5 mm into it under
+gravity:
+
+- a ball of radius 0.2 at 1×, 2× and 5× its extent a tick stops at every first
+  seam crossing, on box tiles and on a segment chain, 0.4 m and 1.6 m wide. The
+  stopping normal is the next tile's leading corner, about (−0.22, 0.975). A snag
+  costs up to 94% of that tick's travel and about 5% of the speed;
+- a 0.4 m box does the same, and its stopping normals include (−1, 0), the next
+  tile's vertical face;
+- the discrete walk alone resolves every one of those meetings upwards, out of the
+  tile, and never stops the Body.
+
+**The rule.** A Hit that passes the other skips stops the Body only if **both**
+hold. Otherwise it is a seam, and the pair is left to the discrete walk:
+
+- **The Body closes on the target by at least its own minimum extent, along the
+  Hit's normal.** This is the gate, taken along the normal the Body meets the
+  target by: `−d · n ≥` minimum extent, where `d` is the path and `n` the Hit's
+  normal, which faces the Body. A Body closing by less cannot get past the
+  surface within the tick, so the discrete walk resolves it from the side it
+  came from. That is the gate's own argument, and the speed sweep's evidence for
+  it carries over. It is one product, so it is asked first.
+- **The target reaches into the band the Body sweeps deeper than the Body
+  already rests, plus the Slop.** The resting depth is the deepest overlap, at
+  `Previous`, with any solid target the Body already touches (the path test's
+  Hits at `T = 0`). To it is added how much further the path takes the Body into
+  that surface by the end of the tick, along that surface's normal. The test is
+  the Body shrunk by that depth and Probed against the one target, along its
+  path lengthened by the same depth, so the band keeps its full length.
+  - For a circle it is `probeWorld` with the radius less the depth.
+  - For any other Shape it is the swept convex test's own Newton advance, run
+    on the signed distance plus the depth. EPA gives that distance inside an
+    overlap, and it stays convex along the path, so the advance still never
+    steps past the depth.
+
+A tile laid flush with the one underfoot reaches no deeper than that one does,
+so it stops nothing. A wall, a board or a post across the band reaches far
+deeper, and it stops the Body where its path first meets it.
+
+**A pair tested along its relative motion keeps the rule.** Where both parties
+are marked ([Which target is tested where](#which-target-is-tested-where)), the
+path is the relative one, and the rule reads it in place of `d`. The ticket that
+builds that pair keeps the rule holding for it.
+
+**Why each half is there, by the sequence that fails without it:**
+
+- **Without the gate along the normal**, the depth stops a Body landing on the
+  floor it slides over. A box that the discrete walk has bounced 9 mm clear of a
+  segment chain comes down at a slant, at 5× its extent. It rests on nothing, so
+  the depth it must beat is the Slop alone, and it lands deeper than that: the
+  floor it lands on stops it, at `T = 0.66`, with the Slop or without it. The
+  gate along the normal passes over the landing, which closes on the floor by
+  its fall of a centimetre or two, not by its speed.
+- **Without the depth**, the gate along the normal stops the ball at 5× on the
+  next tile's corner. At normal (−0.22, 0.975) it closes by 0.22 m a tick against
+  an extent of 0.2 m. It also stops the box at 1× on the next tile's face,
+  (−1, 0).
+- **Without the Slop**, the depth is exact, and a Body touching nothing is
+  stopped by the next tile's face. A box bounced 1.8 mm clear of a floor of
+  0.4 m box tiles, at 5× its extent, sinks 3.5 mm in the tick. Its corner meets
+  the next tile's face 1.7 mm deep, at normal (−1, 0.005), and it was stopped at
+  `T = 0.25`, at a tolerance of 1 µm and of 1 mm alike.
+- **Without the drift into the resting surface**, a box tipped by the discrete
+  walk rests 8.7 mm into one tile and settles 2.5 cm in the tick. Its corner
+  digs into the next tile deeper than the Slop allows, even at 2 cm, and it is
+  stopped at `T = 0.36`.
+- **Without lengthening the path**, a Body that meets a target just before the
+  tick ends is not stopped. The plank thrown at the thin Dynamic board, phase
+  2, ends 1.7 mm into the board. The plank shrunk by the Slop never reaches it,
+  so the Hit reads as a seam, and the pair is found at `T = 1` with no stop.
+  That breaks the nine cases' near-side check.
+
+**The off-centre post stops.** A post 5 cm wide whose top reaches halfway up the
+mover's lower half is passed beside by the mover's centre. It is met at the
+post's corner, at a normal the Body closes on by far more than its extent, and it
+reaches far deeper than the Slop. So every mover stops on it, from every phase.
+This was the lead candidate's weak case (see [Shapes that were rejected](#shapes-that-were-rejected)).
+
+**What it costs, and where.**
+
+- **It runs only on a Hit that would stop the Body**, after the other skips. It
+  never runs on the nothing-fast path, and never for a Body the gate did not
+  mark.
+- **The resting depth is measured once per Body**, and only when some Hit
+  reaches it. It costs one point query (a circle) or one GJK (anything else) per
+  target touched at `Previous`.
+- **Each Hit that reaches the depth test costs one more Probe**, against that
+  one target.
+- **No lock changes.** The Slop reaches Detect as a setting, beside the
+  persistence it already takes, and nothing new is read.
+- **Measured against the stop before it**, interleaved with an A/A copy of the
+  baseline, on the minimums (AMD Ryzen 9 7950X3D, GOMAXPROCS 32):
+  - `BenchmarkDetect` is flat: 56.5 µs against 56.6 and 56.3 at N = 1 024,
+    13.60 µs against 13.54 and 13.52 at N = 256;
+  - `BenchmarkThePolygonStep` is within 1%, and `BenchmarkTheStep` at N = 256
+    within the A/A spread;
+  - **No gap, once measured against the tree before the path pass.** Against
+    the stop, `BenchmarkTheStep` at N = 1 024 read 2.6 to 3.0% slower, in a
+    scene that engages no Body. A four-way interleave settles it: 12 rounds of
+    the tree before the path pass (a39cc01), the stop (23b5341), an A/A copy of
+    the stop, and this rule, read on the minimums. `BenchmarkTheStep` at
+    N = 1 024 reads 382 656, 372 941, 375 162 and 383 831 ns: this rule is
+    +0.3% on the tree before the path pass, with equal medians (385.6 and
+    385.7 µs). `BenchmarkThePolygonStep` at N = 1 024 reads 1 437 326,
+    1 436 465, 1 440 467 and 1 440 734 ns (+0.2%), and both at N = 256 sit
+    within 0.3%. The stop's own 2.6% speedup was code placement, which this
+    change gives back; continuous collision so far costs a scene with no fast
+    Body nothing the benchmarks can see.
+
+**Pinned: a graze.** A target that the Body closes on by less than its extent,
+or that reaches no deeper than the Slop past the resting depth, is left to the
+discrete walk, so a fast Body can pass a post that it only grazes. See
+[Named limits](#named-limits).
 
 ### A fast Body reports the Sensors it crosses
 
@@ -480,9 +611,9 @@ for. The new forms sit beside them and mirror `Overlap`'s way of taking a Shape:
 
 ## Named limits
 
-From 577, 578, 579 and 580. Each is a behaviour a game can see. The three marked
-**pinned** have a test that holds today's behaviour, so any change to it is
-deliberate. The others are written down only: each fixes itself within one tick,
+From 577, 578, 579, 580 and 588. Each is a behaviour a game can see. The four
+marked **pinned** have a test that holds today's behaviour, so any change to it
+is deliberate. The others are written down only: each fixes itself within one tick,
 or is out of scope.
 
 | limit | what happens | |
@@ -490,6 +621,8 @@ or is out of scope.
 | **A zero-thickness target** | a bare segment: tunnelling starts just past 1×, where the gate has only just engaged a mover that can still pass it at an angle | **pinned** |
 | **A Kinematic target closing on the Body** | each gate sees its own Body's motion, not the pair's, so a Body and a Kinematic target each under its own gate, closing on each other faster than the gates allow together, are caught only by the discrete walk | **pinned** |
 | **The target behind a dropped stop** | a one-way platform: anything behind a dropped target in the same tick is not tested | **pinned** |
+| **A graze** | a target the Body closes on, along the Hit's normal, by less than its extent, or that reaches into its band no deeper than the Slop past the depth it already rests at, is a seam to the path pass: a fast ball passes a post that reaches 3 mm into its path, and a Body sunk deep in something at `Previous` passes anything that reaches no deeper | **pinned** |
+| **A seam met while landing** | a Body touching nothing at `Previous` has only the Slop to beat, so one coming down onto a tiled floor more than the Slop deeper in the tick it crosses a seam is stopped by the next tile's face, and loses the rest of that tick's travel | written down |
 | **Rotational tunnelling** | the path is a chord at the end angle, so a thin Shape spinning fast can slip through | out of scope |
 | **A dropped stop's other Contacts** | tested at the stopping point, they describe that pose for one tick | written down |
 | **The ghost Hit** | a target that moved into the path during the tick counts as already there | written down |
@@ -542,6 +675,13 @@ Made by the ticket that lands the behaviour it describes, not before.
 | A gate for Sensors, or for box and segment Sensors only | loses the graze partway through a tick and the one meaning of a Sensor's entries; or splits the rule by Shape |
 | Widening `Probe` to take a Shape | changes every call site; the circle case pays for a parameter it never uses |
 | A full manifold at `T` for the stopping Contact | a second narrowphase per stop, for a point ordinary detection gives next tick |
+| Stop only if the Body's centre path enters the target (Box2D v3's rule, generalised; the lead candidate) | the centre can stop short of a target the Body meets: the circle and the box thrown at the 0.4 m Static wall, phases 3 and 4, end with their centres short of the wall, so nothing stops them, and the discrete walk finds each pair 0.17 m and 0.08 m deep at `T = 1`, which fails the nine cases' near-side check (the plank too, phase 3). A post the centre passes beside is never stopped: the three movers pass it without meeting it in 3 of 8 phases (the plank in 5), and in the rest meet it only in the discrete walk, at `T = 1`. The ball rolling into a wall's rounded lower end meets it with its edge, not its centre, and is not stopped |
+| The depth alone, a path reaching deeper than the resting depth | a Body touching nothing has nothing to rest on: a box the discrete walk bounced 1.8 mm clear of 0.4 m box tiles, at 5×, sinks 3.5 mm in the tick and meets the next tile's face 1.7 mm deep, and is stopped there at `T = 0.25`; a box landing at a slant on a segment chain at 5× is stopped by the floor it lands on, at `T = 0.66`, with the Slop added or not |
+| The gate along the Hit's normal alone | the next tile's corner meets the ball at 5× at normal (−0.22, 0.975), which it closes on by 0.22 m against an extent of 0.2 m, and the next tile's face meets the box at 1× at (−1, 0): both stopped at every seam |
+| The resting depth without the drift into the resting surface | a box tipped by the discrete walk rests 8.7 mm into a tile and settles 2.5 cm in the tick, and its corner digs into the next tile deeper than the Slop allows: stopped at `T = 0.36`, and still with a tolerance of 2 cm |
+| The depth test along the path as it is, not lengthened | a Body that meets a target just before the tick ends reaches it by less than the Slop: the plank at the thin Dynamic board, phase 2, ends 1.7 mm into it, so the Hit reads as a seam and the pair is found at `T = 1` with no stop, which fails the near-side check |
+| A tolerance of a fixed share of the extent (Box2D's quarter of the minimum extent, for chains) | the depth a Body rests at is the Slop, in metres, not a share of its size: a 1 cm marble has a tolerance of 2.5 mm, rests 5 mm into the floor, and would snag every seam. Not built; the sequence is enough |
+| A test of the end pose, stopping where the discrete walk would push the Body forward | a ball at 5× crossing a whole 0.4 m tile can end with its centre just past the tile's far end, overlapping its far corner by the depth it rests at; the push out of that corner leans forward, so it would read as pushed through and stop at the seam. Not built; the sequence is enough |
 | A prototype before handing over | a price needs most of the build, so it would be built twice, and the only cost every world pays is already priced at the noise floor |
 
 ---
@@ -590,7 +730,14 @@ points, so none of those decisions can be undone silently:
    reports it once, with `T < 1` and `Depth 0`;
 5. two moving Sensors crossing: one entry, one `T`;
 6. a fast solid Body crossing a box Sensor that did not move: the Sensor is
-   reported once, with `T < 1` and `Depth 0`, and the Body is not stopped.
+   reported once, with `T < 1` and `Depth 0`, and the Body is not stopped;
+7. the seam scene (588): the ball and the box, on box tiles and on a segment
+   chain, 0.4 m and 1.6 m wide, at 1×, 2× and 5× their extent, from 4 phases for
+   60 ticks under gravity: no tile Contact has `T < 1`, and no tick falls short
+   of its travel because of a stop;
+8. the off-centre post (588): each mover thrown over a post 5 cm wide whose top
+   reaches halfway up its lower half is stopped where it first meets it, from
+   every phase.
 
 ### The speed sweep
 
@@ -601,9 +748,9 @@ hold, and at or above it the path test must.
 
 ### The pinned limits
 
-A test each for [the three pinned limits](#named-limits): a zero-thickness target
-just under the gate, a closing Kinematic target, and the target hidden behind a
-dropped stop.
+A test each for [the four pinned limits](#named-limits): a zero-thickness target
+just under the gate, a closing Kinematic target, the target hidden behind a
+dropped stop, and a graze.
 
 ### The cost bar
 

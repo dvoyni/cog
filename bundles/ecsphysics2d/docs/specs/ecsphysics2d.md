@@ -2048,6 +2048,13 @@ would mean retuning the broadphase silently changes how deeply Bodies rest in ea
 other. Both defaults are documented against the same assumption — a metre-scaled
 world — and that is a cross-reference in the doc, not a coupling in the code.
 
+**Detect reads the Slop too.** Continuous collision stops a fast Body only where
+its path enters a target. A target that reaches into the Body's path no deeper
+than the Slop past the depth the Body already rests at is a seam, such as the
+next tile of a floor the Body slides along, and is left to ordinary contact. The
+Slop reaches Detect as a setting, beside the persistence, and no lock changes
+([continuous-collision.md § A seam stops nothing](continuous-collision.md#a-seam-stops-nothing)).
+
 **A `SolverSettings` Resource was rejected**, and so was a runtime settings
 command: nothing needs to change them mid-run, and a Resource an app System
 declared `write` on would conflict with Solve for the whole frame, on every tick,
