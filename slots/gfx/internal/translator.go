@@ -23,9 +23,6 @@ type frame struct {
 	backend Backend
 }
 
-// uniformMax caps a per-draw shader-parameter block.
-const uniformMax = 256
-
 // pipelineKey identifies a cached pipeline by shader identity, render state and
 // the formats of the attachments it renders into. MaterialState is embedded
 // whole so that adding a state field cannot silently return a pipeline built
@@ -109,7 +106,6 @@ type translator struct {
 	shaders   *assets.Cache[ShaderDescrParams, shaderUserData, *shader]
 	pipelines map[pipelineKey]PipelineID
 	samplers  map[SamplerDesc]SamplerID
-	uarena    []byte
 	layouts   map[ShaderID]ShaderLayout
 	// textures is the path-texture cache. It is a translator field like every
 	// other cache here, reached only on the render thread, so what protects it
@@ -192,14 +188,7 @@ func (t *translator) translate(
 	// nothing; paid per hit it is once a texture parameter and once a draw.
 	f := &frame{k: k, fsys: files(), backend: backend}
 
-	need := len(OpQueueOps(queue)) * uniformMax
-	if cap(t.uarena) < need {
-		t.uarena = make([]byte, need)
-	}
-	t.uarena = t.uarena[:need]
-
 	var firstErr error
-	uoff := 0
 	// Resource ops belong to no pass: every bake is hoisted ahead of all of
 	// them, so a pass can read anything the frame uploaded.
 	translateResources := func(list []Op) {
@@ -249,7 +238,7 @@ func (t *translator) translate(
 	translateResources(persistent)
 	translateResources(OpQueueOps(queue))
 
-	t.translatePasses(f, queue, &uoff, &firstErr, capture, capturing)
+	t.translatePasses(f, queue, &firstErr, capture, capturing)
 
 	// A report that did not stop anything is still worth surfacing, but only
 	// behind an error that did.
@@ -264,7 +253,7 @@ func (t *translator) translate(
 // translatePasses runs the frame's passes in Order, merging the runs that are
 // indistinguishable from one longer pass, and emits each one's draws.
 func (t *translator) translatePasses(
-	f *frame, queue *OpQueue, uoff *int, firstErr *error,
+	f *frame, queue *OpQueue, firstErr *error,
 	capture CaptureDesc, capturing bool,
 ) {
 	passes, ops := OpQueuePasses(queue), OpQueueOps(queue)
@@ -299,7 +288,7 @@ func (t *translator) translatePasses(
 		for j := i; j <= last; j++ {
 			pass := &passes[t.passOrder[j]]
 			for _, index := range t.passDrawOps(t.passOrder[j]) {
-				t.translateDraw(f, &ops[index], pass.Desc, uoff, firstErr)
+				t.translateDraw(f, &ops[index], pass.Desc, firstErr)
 			}
 		}
 		t.ops.EndPass()

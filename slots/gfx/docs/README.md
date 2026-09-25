@@ -744,7 +744,7 @@ Opaque handles are based on `ResourceID`: `TextureID`, `BufferID`, `SamplerID`,
 `ShaderID`, `PipelineID`, and `TextureViewID`. Zero means no resource.
 
 `Queue` records through `BakeBuffer`, `BakeTexture`, `AllocateTexture`,
-`UpdateTexture`, `BeginPass`, `EndPass`, `SetPipeline`, `SetParams`,
+`UpdateTexture`, `BeginPass`, `EndPass`, `SetPipeline`, `SetUniformBlock`,
 `SetTexture`, `SetSampler`, `SetVertexBuffer`, `SetIndexBuffer`, `SetBuffer`,
 `Draw`, `Present`, `Capture`, `ReleaseBuffer`, and `ReleaseTexture`. `ReplayBakes(BakeSink)`, `ReplayPasses(PassSink)`, and
 `ReplayReleases(ReleaseSink)` send each phase to a backend, and they are the

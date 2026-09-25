@@ -1,6 +1,9 @@
 package internal
 
 import (
+	"unsafe"
+
+	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
@@ -16,8 +19,8 @@ const gfxbUniformSlots = 64
 // buffer's id because the key's kind is part of it.
 const gfxbUniformArenaID = 0
 
-// gfxbUniformArena is the frame's shader-parameter blocks: one GPU buffer, one
-// CPU staging copy of it, and a cursor handing out 256-strided slots.
+// gfxbUniformArena is the GPU side of the frame's uniform arena: one buffer the
+// gfx queue's blocks are written into whole, at 256-strided slots.
 //
 // It replaced a pool of one 256-byte buffer object per uniform-carrying draw,
 // each written on its own. The pool grew to the high-water mark of any single
@@ -25,6 +28,10 @@ const gfxbUniformArenaID = 0
 // resident buffer count; and it cost a WriteBuffer per draw. One buffer at
 // 256-strided offsets costs one of each per frame, and turns "a growing count
 // of GPU objects" into one buffer whose size is a number - DrawCount x 256.
+//
+// It keeps no CPU copy. gfx packs every block straight into the queue's arena,
+// already at the stride the buffer wants, so the frame's write is that arena
+// as it stands.
 //
 // The device work is injected rather than reached for, the same seam
 // gfxbBindGroupCache takes and for the same reason: the arena's whole claim is
@@ -37,18 +44,15 @@ type gfxbUniformArena struct {
 	write      func(buffer *wgpu.Buffer, data []byte)
 	invalidate func()
 
-	buffer  *wgpu.Buffer
-	staging []byte
-	// slots is the capacity in blocks, which is len(staging)/gfxbUniformSize and
-	// the buffer's size in the same unit. generation moves whenever the buffer
-	// is replaced, and rides in every binding key so a cached bind group naming
-	// the old one cannot be mistaken for one naming the new.
+	buffer *wgpu.Buffer
+	// slots is the buffer's capacity in blocks. generation moves whenever the
+	// buffer is replaced, and rides in every binding key so a cached bind group
+	// naming the old one cannot be mistaken for one naming the new.
 	slots      int
 	generation uint32
-	// cursor is the next slot this frame hands out. It is the frame's, not a
-	// pass's: every draw in the frame stages into the same buffer, so all of it
-	// can be written in one call before the single submit.
-	cursor int
+	// written is how many of this frame's slots reached the buffer. A slot at
+	// or past it has no block behind it, and binds nothing.
+	written int
 }
 
 func newGfxbUniformArena(
@@ -60,25 +64,40 @@ func newGfxbUniformArena(
 	return &gfxbUniformArena{create: create, release: release, write: write, invalidate: invalidate}
 }
 
-// reset starts a frame. Capacity survives it; only the cursor does not.
-func (a *gfxbUniformArena) reset() { a.cursor = 0 }
+// upload takes the frame's blocks: it makes room for them and writes them in
+// one call. It runs from BakeUniforms, before the frame's encoder is created,
+// so a replaced buffer is gone before any bind group could name it; and a queue
+// write is ordered against the submit that follows it, so writing this early
+// still covers every draw.
+//
+// A device that refused to grow the buffer leaves it short, and only the blocks
+// that fit are written. The draws past them are handed no slot.
+func (a *gfxbUniformArena) upload(blocks []gfx.UniformBlock) {
+	a.reserve(len(blocks))
+	a.written = 0
+	if a.buffer == nil || len(blocks) == 0 {
+		return
+	}
+	a.written = min(len(blocks), a.slots)
+	a.write(a.buffer, unsafe.Slice(&blocks[0][0], a.written*gfxbUniformSize))
+}
 
 // reserve makes room for the frame's blocks, doubling from gfxbUniformSlots
 // until it fits and never shrinking. A frame needing none allocates none, which
 // is the scene-only app: every scene parameter binds as var<storage, read>.
 //
 // It runs before the frame's encoder is created, which is what keeps it simple.
-// The count comes from the queue that Execute is handed, so the size is known
-// before the first bind group exists, and a replaced buffer can be released on
-// the spot: nothing has been recorded against it, and the bind groups that name
-// it are dropped first. Both orderings matter. Releasing before invalidating
+// The count is the length of the queue's arena, so the size is known before
+// the first bind group exists, and a replaced buffer can be released on the
+// spot: nothing has been recorded against it, and the bind groups that name it
+// are dropped first. Both orderings matter. Releasing before invalidating
 // would leave the cache serving bind groups over a freed buffer, and growing
 // after the encoder opened would mean invalidating groups already recorded into
 // it.
 //
 // A device that refuses the allocation leaves the arena on the buffer it had.
-// claim then hands out no slot past that capacity, and the draw that asked for
-// one leaves its group unfilled, which flushBinds refuses and drops.
+// offset then hands out nothing past what was written, and the draw that asked
+// for it leaves its group unfilled, which flushBinds refuses and drops.
 func (a *gfxbUniformArena) reserve(slots int) {
 	if slots <= a.slots {
 		return
@@ -99,38 +118,19 @@ func (a *gfxbUniformArena) reserve(slots int) {
 		a.release(a.buffer)
 	}
 	a.buffer = buffer
-	a.staging = make([]byte, want*gfxbUniformSize)
 	a.slots = want
 	a.generation++
 }
 
-// claim stages one draw's block and reports the offset it was staged at. A
-// false is the caller's cue to emit no binding: there is no buffer, or the
-// frame asked for more slots than were reserved for it, which means the queue's
-// count was an underestimate and cannot be.
-//
-// The block's tail is cleared rather than left as whatever the last frame put
-// at this slot, so what reaches the GPU is a function of this frame alone.
-func (a *gfxbUniformArena) claim(params []byte) (int, bool) {
-	if a.buffer == nil || a.cursor >= a.slots {
+// offset reports where a slot's block sits in the buffer. A false is the
+// caller's cue to emit no binding: the slot's block never reached the buffer,
+// so binding it would render the draw with whatever an earlier frame left
+// there.
+func (a *gfxbUniformArena) offset(slot int) (int, bool) {
+	if slot < 0 || slot >= a.written {
 		return 0, false
 	}
-	offset := a.cursor * gfxbUniformSize
-	block := a.staging[offset : offset+gfxbUniformSize]
-	n := copy(block, params)
-	clear(block[n:])
-	a.cursor++
-	return offset, true
-}
-
-// flush writes every slot the frame claimed, in one call. It runs after the
-// passes are encoded and before the submit, which is the order the write needs:
-// a queue write is ordered against the submit that follows it.
-func (a *gfxbUniformArena) flush() {
-	if a.buffer == nil || a.cursor == 0 {
-		return
-	}
-	a.write(a.buffer, a.staging[:a.cursor*gfxbUniformSize])
+	return slot * gfxbUniformSize, true
 }
 
 // newGfxbUniformArenaOn builds the arena over a device, which is the only

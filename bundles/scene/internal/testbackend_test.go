@@ -36,6 +36,7 @@ type testBackend struct {
 	layouts   map[gfx.ShaderID]gfx.ShaderLayout
 	pipelines map[gfx.PipelineID]gfx.PipelineDesc
 	baked     map[gfx.BufferID][]byte
+	uniforms  []gfx.UniformBlock
 	// last is the most recent frame's passes, and building the one being
 	// replayed. A test reads last between frames.
 	last, building []recordedPass
@@ -255,8 +256,10 @@ func (b *testBackend) UpdateTexture(gfx.TextureID, int, gfx.Region, []byte)     
 
 func (b *testBackend) SetPipeline(id gfx.PipelineID) { b.state.pipeline = id }
 
-func (b *testBackend) SetParams(params []byte) {
-	b.state.params = append([]byte(nil), params...)
+func (b *testBackend) BakeUniforms(blocks []gfx.UniformBlock) { b.uniforms = blocks }
+
+func (b *testBackend) SetUniformBlock(slot int) {
+	b.state.params = append([]byte(nil), b.uniforms[slot][:]...)
 }
 
 func (b *testBackend) SetTexture(gfx.TextureID, int, int) {}

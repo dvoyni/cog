@@ -6,7 +6,7 @@ import (
 )
 
 // translateDraw emits one draw into the currently open pass.
-func (t *translator) translateDraw(f *frame, op *Op, pass PassDescr, uoff *int, firstErr *error) {
+func (t *translator) translateDraw(f *frame, op *Op, pass PassDescr, firstErr *error) {
 	m := &op.Mesh
 	stride := MeshStride(m)
 	vertices, indices := MeshVertices(m), MeshIndices(m)
@@ -73,13 +73,12 @@ func (t *translator) translateDraw(f *frame, op *Op, pass PassDescr, uoff *int, 
 	}
 	t.ops.SetPipeline(pipeline)
 	// A shader that declares no uniform block gets no uniform binding and no
-	// slot in the backend's arena. Emitting one anyway puts an entry in a group
+	// slot in the frame's uniform arena. Emitting one anyway puts an entry in a group
 	// the pipeline layout does not have, and CreateBindGroup fails the
 	// entry-count rule with the whole frame's command buffer as the casualty.
 	if plan.uniformSize > 0 {
-		u := t.packParams(t.uarena[*uoff:*uoff+uniformMax], op.Params, op.Material.Params(), plan)
-		*uoff += uniformMax
-		t.ops.SetParams(u)
+		block := t.ops.SetUniformBlock()
+		t.packParams(block, op.Params, op.Material.Params(), plan)
 	}
 	t.emitResources(f, op.Params, op.Material.Params(), plan)
 	t.ops.SetVertexBuffer(vertices.ID(), 0)
@@ -354,20 +353,17 @@ func (t *translator) planForShape(
 	return &bucket[len(bucket)-1].plan
 }
 
-// packParams writes reflected shader constants into dst. Per-draw parameters
-// override same-named material parameters; unmatched members remain zero.
-func (t *translator) packParams(dst []byte, drawParams, materialParams []ParameterDescr, plan *parameterPlan) []byte {
-	size := plan.uniformSize
-	if size <= 0 {
-		return dst[:0]
-	}
+// packParams writes reflected shader constants into block, which arrives
+// zeroed. Per-draw parameters override same-named material parameters;
+// unmatched members remain zero.
+func (t *translator) packParams(block *UniformBlock, drawParams, materialParams []ParameterDescr, plan *parameterPlan) {
 	// A guard only: checkUniformBlock refuses any shader whose block exceeds
-	// uniformMax when it is loaded, so no plan reaching here is larger than dst.
-	if size > len(dst) {
-		size = len(dst)
+	// UniformBlockSize when it is loaded, so no plan reaching here is larger.
+	size := min(plan.uniformSize, UniformBlockSize)
+	if size <= 0 {
+		return
 	}
-	buf := dst[:size]
-	clear(buf)
+	buf := block[:size]
 	for i := range plan.uniforms {
 		uniform := &plan.uniforms[i]
 		off := uniform.offset
@@ -378,7 +374,6 @@ func (t *translator) packParams(dst []byte, drawParams, materialParams []Paramet
 			writeParamAt(buf, off, p)
 		}
 	}
-	return buf
 }
 
 // writeParamAt writes a scalar/vec/color param at byte offset off (bounds-checked).

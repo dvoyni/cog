@@ -491,6 +491,18 @@ type Capture = internal.Capture
 // sinks: ReplayBakes, ReplayPasses and ReplayReleases are the whole read side.
 type Queue = internal.Queue
 
+// UniformBlockSize is one draw's uniform block, and so the stride of the
+// frame's uniform arena. It is both the cap on a block a shader may declare
+// and the largest minUniformBufferOffsetAlignment WebGPU permits, so slot x
+// UniformBlockSize is a valid uniform binding offset on every device.
+const UniformBlockSize = internal.UniformBlockSize
+
+// UniformBlock is one draw's packed uniform block: the shader's numeric
+// parameters at their reflected offsets, zero past the block's declared size.
+// A Queue hands a backend the frame's blocks through BakeSink.BakeUniforms and
+// binds one per draw through RenderPass.SetUniformBlock.
+type UniformBlock = internal.UniformBlock
+
 // PassSink receives the frame's passes. BeginPass returns the RenderPass its
 // commands go to, so the backend owns encoder and pass lifetime entirely.
 type PassSink = internal.PassSink

@@ -2,11 +2,11 @@ package internal
 
 // checkUniformBlock measures a reflected shader's uniform block against the
 // per-draw slot of the uniform arena. It is not a web-floor check: the floor is
-// 64 KiB, the slot is uniformMax, and a block past the slot renders truncated on
+// 64 KiB, the slot is UniformBlockSize, and a block past the slot renders truncated on
 // every device. The caller treats a failure as fatal to the shader.
 func checkUniformBlock(shader string, layout ShaderLayout) error {
-	if layout.UniformSize > uniformMax {
-		return ErrUniformBlockTooLarge{Shader: shader, Declared: layout.UniformSize, Max: uniformMax}
+	if layout.UniformSize > UniformBlockSize {
+		return ErrUniformBlockTooLarge{Shader: shader, Declared: layout.UniformSize, Max: UniformBlockSize}
 	}
 	return nil
 }

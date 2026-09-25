@@ -1,11 +1,21 @@
 package internal
 
+// UniformBlockSize is one draw's uniform block, and so the stride of the
+// frame's uniform arena. It is both the cap on a block a shader may declare
+// and the largest minUniformBufferOffsetAlignment WebGPU permits, so slot x
+// UniformBlockSize is a valid uniform binding offset on every device.
+const UniformBlockSize = 256
+
+// UniformBlock is one draw's packed uniform block: the shader's numeric
+// parameters at their reflected offsets, zero past the block's declared size.
+type UniformBlock [UniformBlockSize]byte
+
 // renderKind tags the variant of a renderOp.
 type renderKind uint8
 
 const (
 	renderSetPipeline renderKind = iota
-	renderSetParams
+	renderSetUniformBlock
 	renderSetTexture
 	renderSetSampler
 	renderSetVertexBuffer
@@ -18,14 +28,13 @@ const (
 // union - one resource slot and five int32 args are reinterpreted per kind by
 // the appenders and replayRange - so a frame's many render commands stay small.
 type renderOp struct {
-	kind   renderKind
-	res0   ResourceID // pipeline | vertex/index/uniform buffer | texture | sampler
-	arg0   int32      // offset | first | group
-	arg1   int32      // size | count | binding
-	arg2   int32      // group | indexed
-	arg3   int32      // binding | instances
-	arg4   int32      // first instance
-	params []byte     // params payload
+	kind renderKind
+	res0 ResourceID // pipeline | vertex/index/uniform buffer | texture | sampler
+	arg0 int32      // uniform slot | offset | first | group
+	arg1 int32      // size | count | binding
+	arg2 int32      // group | indexed
+	arg3 int32      // binding | instances
+	arg4 int32      // first instance
 }
 
 // bufferBake is one buffer upload. Buffers have a single bake op, so it needs
@@ -107,6 +116,12 @@ type PassSink interface {
 
 // BakeSink receives resource uploads before render-pass encoding.
 type BakeSink interface {
+	// BakeUniforms receives the frame's uniform arena, every block a draw
+	// packed, in slot order. It comes first and comes every frame, empty when
+	// no draw carries a uniform block, so a backend can size its uniform buffer
+	// before any bind group names it. The blocks are the queue's and are valid
+	// until it is reset.
+	BakeUniforms([]UniformBlock)
 	BakeBuffer(BufferID, BufferKind, int, []byte)
 	BakeTexture(TextureID, int, int, TextureFormat, []byte, bool)
 	AllocateTexture(TextureID, TextureDesc)
@@ -116,7 +131,9 @@ type BakeSink interface {
 // RenderPass receives render commands in recording order.
 type RenderPass interface {
 	SetPipeline(PipelineID)
-	SetParams([]byte)
+	// SetUniformBlock binds the draw's uniform block: the slot of the arena
+	// BakeUniforms handed over, at offset slot x UniformBlockSize.
+	SetUniformBlock(slot int)
 	SetTexture(TextureID, int, int)
 	SetSampler(SamplerID, int, int)
 	SetVertexBuffer(BufferID, int)
@@ -157,18 +174,15 @@ type Queue struct {
 	transitions     []TextureTransition
 	transitionsUsed int
 
-	// paramOps counts the SetParams this frame recorded. A backend staging the
-	// frame's shader-parameter blocks in one buffer needs room for them all
-	// before it replays the passes, because the first bind group naming that
-	// buffer is created during the replay and cannot outlive a resize.
-	paramOps int
+	// uniforms is the frame's uniform arena. A draw's block is packed straight
+	// into its slot, and the whole of it goes to the backend in one piece.
+	uniforms []UniformBlock
 }
 
 // Reset drops all commands but keeps queue capacity for reuse.
 func (q *Queue) Reset() {
 	clear(q.bufferBakes)
 	clear(q.textureBakes)
-	clear(q.render)
 	q.bufferBakes = q.bufferBakes[:0]
 	q.textureBakes = q.textureBakes[:0]
 	q.render = q.render[:0]
@@ -179,7 +193,7 @@ func (q *Queue) Reset() {
 	clear(q.transitions)
 	q.transitions = q.transitions[:0]
 	q.transitionsUsed = 0
-	q.paramOps = 0
+	q.uniforms = q.uniforms[:0]
 }
 
 // TransitionTexture records a barrier to place before the next pass opens.
@@ -231,19 +245,19 @@ func (q *Queue) SetPipeline(pipeline PipelineID) {
 	q.render = append(q.render, o)
 }
 
-func (q *Queue) SetParams(params []byte) {
-	o := renderOp{kind: renderSetParams, params: params}
-	q.render = append(q.render, o)
-	q.paramOps++
-}
-
-// ParamCount is how many shader-parameter blocks the frame recorded, which is
-// how many a backend must have room for before it replays the passes.
+// SetUniformBlock claims the frame's next uniform slot, binds it for the
+// draw that follows, and returns the zeroed block for the caller to pack. The
+// pointer is valid until the next claim, which may move the arena.
 //
-// It is an upper bound rather than exact, and errs in the harmless direction: a
-// SetParams recorded outside every pass belongs to a stray draw, which no
-// replay reaches, so the count can only over-reserve.
-func (q *Queue) ParamCount() int { return q.paramOps }
+// A block claimed outside every pass belongs to a stray draw that no replay
+// reaches. It is still handed to BakeUniforms, which costs a backend one unused
+// slot and nothing else.
+func (q *Queue) SetUniformBlock() *UniformBlock {
+	slot := len(q.uniforms)
+	q.uniforms = append(q.uniforms, UniformBlock{})
+	q.render = append(q.render, renderOp{kind: renderSetUniformBlock, arg0: int32(slot)})
+	return &q.uniforms[slot]
+}
 
 func (q *Queue) SetTexture(texture TextureID, group, binding int) {
 	o := renderOp{
@@ -331,9 +345,10 @@ func (q *Queue) ReleaseTexture(id TextureID) {
 	q.releasedTextures = append(q.releasedTextures, id)
 }
 
-// ReplayBakes sends every resource upload to sink: every buffer, then every
-// texture, each in recording order.
+// ReplayBakes sends every resource upload to sink: the uniform arena, then
+// every buffer, then every texture, each in recording order.
 func (q *Queue) ReplayBakes(sink BakeSink) {
+	sink.BakeUniforms(q.uniforms)
 	for i := range q.bufferBakes {
 		b := &q.bufferBakes[i]
 		sink.BakeBuffer(b.id, b.kind, b.size, b.data)
@@ -384,8 +399,8 @@ func (q *Queue) replayRange(sink RenderPass, start, end int) {
 		switch o.kind {
 		case renderSetPipeline:
 			sink.SetPipeline(PipelineID(o.res0))
-		case renderSetParams:
-			sink.SetParams(o.params)
+		case renderSetUniformBlock:
+			sink.SetUniformBlock(int(o.arg0))
 		case renderSetTexture:
 			sink.SetTexture(TextureID(o.res0), int(o.arg0), int(o.arg1))
 		case renderSetSampler:

@@ -13,12 +13,12 @@ import (
 	"github.com/gogpu/wgpu"
 )
 
-// gfxbUniformSize is one draw's shader-parameter block - mat4 MVP plus material
-// params - and so the stride the arena hands out slots at. 256 is both the cap
-// on a block and minUniformBufferOffsetAlignment, which is what lets every
-// block in a frame share one buffer: a uniform binding's offset must be a
-// multiple of that alignment, and every slot's is.
-const gfxbUniformSize = 256
+// gfxbUniformSize is one draw's uniform block, and so the stride of the arena's
+// slots. It is gfx's own size rather than a copy of it, because the arena
+// writes gfx's blocks as they are laid out: 256 is both the cap on a block and
+// minUniformBufferOffsetAlignment, which is what lets every block in a frame
+// share one buffer.
+const gfxbUniformSize = gfx.UniformBlockSize
 
 // gfxBackend implements gfx.Backend over gogpu/wgpu. TextureID and BufferID key
 // native textures and buffers directly; backend-minted IDs remain only for
@@ -175,16 +175,16 @@ func (s *gfxRenderPass) SetPipeline(id gfx.PipelineID) {
 	s.backend.resetAcc()
 }
 
-func (s *gfxRenderPass) SetParams(params []byte) {
+func (s *gfxRenderPass) SetUniformBlock(slot int) {
 	if s.shader == nil || s.backend.uniforms == nil {
 		return
 	}
-	// The block is staged rather than written: every draw in the frame shares
-	// one buffer, so the whole of it goes in one write before the single submit.
-	// A slot the arena cannot hand out emits no binding, which leaves the
-	// uniform's group unfilled - and flushBinds refuses that and drops the draw,
-	// rather than rendering it with whatever another draw put in the slot.
-	offset, ok := s.backend.uniforms.claim(params)
+	// The block is already in the buffer: BakeUniforms wrote the frame's whole
+	// arena before the encoder opened. A slot whose block did not make it emits
+	// no binding, which leaves the uniform's group unfilled - and flushBinds
+	// refuses that and drops the draw, rather than rendering it with whatever
+	// an earlier frame left in the slot.
+	offset, ok := s.backend.uniforms.offset(slot)
 	if !ok {
 		return
 	}
@@ -809,14 +809,11 @@ func (b *gfxBackend) resolveTarget(target gfx.TextureViewID) (*wgpu.TextureView,
 func (b *gfxBackend) Execute(queue *gfx.Queue) {
 	b.replacedBuffers = b.replacedBuffers[:0]
 	b.replacedTextures = b.replacedTextures[:0]
+	// Ahead of the encoder, and the uniform arena first within it, because a
+	// resize replaces the uniform buffer and drops every bind group naming it:
+	// doing that once the encoder is open would be invalidating groups already
+	// recorded into it.
 	queue.ReplayBakes(b)
-
-	// Ahead of the encoder, because a resize replaces the uniform buffer and
-	// drops every bind group naming it: doing that once the encoder is open
-	// would be invalidating groups already recorded into it. The queue's own
-	// count is what makes the size knowable this early.
-	b.uniforms.reset()
-	b.uniforms.reserve(queue.ParamCount())
 
 	encoder, err := b.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{Label: "gfx"})
 	if err != nil {
@@ -825,9 +822,6 @@ func (b *gfxBackend) Execute(queue *gfx.Queue) {
 	b.encoder = encoder
 	queue.ReplayPasses(b)
 	b.encoder = nil
-	// After the passes and before the submit: a queue write is ordered against
-	// the submit that follows it, so one write here covers every draw's block.
-	b.uniforms.flush()
 
 	cmd, err := encoder.Finish()
 	if err != nil {
@@ -843,6 +837,13 @@ func (b *gfxBackend) Execute(queue *gfx.Queue) {
 	b.armCapture()
 	b.releaseReplacedBaked()
 	queue.ReplayReleases(b)
+}
+
+// BakeUniforms writes the frame's uniform arena into the uniform buffer.
+func (b *gfxBackend) BakeUniforms(blocks []gfx.UniformBlock) {
+	if b.uniforms != nil {
+		b.uniforms.upload(blocks)
+	}
 }
 
 func (b *gfxBackend) BakeBuffer(id gfx.BufferID, kind gfx.BufferKind, size int, data []byte) {

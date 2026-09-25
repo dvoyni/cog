@@ -63,14 +63,12 @@ func TestTheUniformArenaIsOneBufferAndOneWritePerFrame(t *testing.T) {
 	arena := log.arena()
 
 	for frame := 0; frame < 3; frame++ {
-		arena.reset()
-		arena.reserve(8)
-		for draw := 0; draw < 8; draw++ {
-			if _, ok := arena.claim(make([]byte, 64)); !ok {
-				t.Fatalf("frame %d draw %d was handed no slot", frame, draw)
+		arena.upload(make([]gfx.UniformBlock, 8))
+		for slot := 0; slot < 8; slot++ {
+			if _, ok := arena.offset(slot); !ok {
+				t.Fatalf("frame %d slot %d has no offset", frame, slot)
 			}
 		}
-		arena.flush()
 	}
 
 	if got := log.count("create"); got != 1 {
@@ -83,26 +81,24 @@ func TestTheUniformArenaIsOneBufferAndOneWritePerFrame(t *testing.T) {
 
 // Every block lands at its own 256-strided offset, which is what makes one
 // buffer usable at all: a uniform binding's offset must be a multiple of
-// minUniformBufferOffsetAlignment, and 256 is both that and the stride the
-// blocks were already padded to.
-func TestTheUniformArenaStagesEachBlockAtItsOwnStride(t *testing.T) {
+// minUniformBufferOffsetAlignment, and 256 is both that and the stride gfx
+// packs its blocks at. The write is the queue's arena byte for byte, since the
+// arena keeps no copy of its own.
+func TestTheUniformArenaWritesEachBlockAtItsOwnStride(t *testing.T) {
 	log := newArenaLog()
 	arena := log.arena()
-	arena.reserve(3)
 
-	offsets := []int{}
-	for _, fill := range []byte{0xA1, 0xB2, 0xC3} {
-		offset, ok := arena.claim(bytes.Repeat([]byte{fill}, 16))
-		if !ok {
-			t.Fatalf("block %#x was handed no slot", fill)
-		}
-		offsets = append(offsets, offset)
+	fills := []byte{0xA1, 0xB2, 0xC3}
+	blocks := make([]gfx.UniformBlock, len(fills))
+	for slot, fill := range fills {
+		copy(blocks[slot][:16], bytes.Repeat([]byte{fill}, 16))
 	}
-	arena.flush()
+	arena.upload(blocks)
 
 	for slot, want := range []int{0, gfxbUniformSize, 2 * gfxbUniformSize} {
-		if offsets[slot] != want {
-			t.Errorf("slot %d offset = %d, want %d", slot, offsets[slot], want)
+		offset, ok := arena.offset(slot)
+		if !ok || offset != want {
+			t.Errorf("slot %d offset = (%d, %v), want (%d, true)", slot, offset, ok, want)
 		}
 	}
 	if len(log.writes) != 1 {
@@ -112,16 +108,10 @@ func TestTheUniformArenaStagesEachBlockAtItsOwnStride(t *testing.T) {
 	if len(written) != 3*gfxbUniformSize {
 		t.Fatalf("written bytes = %d, want 3 full strides", len(written))
 	}
-	for slot, fill := range []byte{0xA1, 0xB2, 0xC3} {
+	for slot := range fills {
 		block := written[slot*gfxbUniformSize : (slot+1)*gfxbUniformSize]
-		if !bytes.Equal(block[:16], bytes.Repeat([]byte{fill}, 16)) {
-			t.Errorf("slot %d = %x..., want %#x repeated", slot, block[:4], fill)
-		}
-		// The tail beyond a block's own bytes is cleared rather than left as
-		// whatever the last frame put there, so what reaches the GPU is a
-		// function of this frame alone.
-		if !bytes.Equal(block[16:], make([]byte, gfxbUniformSize-16)) {
-			t.Errorf("slot %d tail = %x..., want zeroes", slot, block[16:20])
+		if !bytes.Equal(block, blocks[slot][:]) {
+			t.Errorf("slot %d = %x..., want the queue's block", slot, block[:4])
 		}
 	}
 }
@@ -181,40 +171,59 @@ func TestTheUniformArenaInvalidatesBeforeItReleases(t *testing.T) {
 	}
 }
 
-// A device that refuses the allocation leaves the arena on the buffer it
-// already had, and hands out no slot it cannot back. The draw that asked for
-// one then leaves its group unfilled, which flushBinds refuses and drops - the
-// alternative being a draw that renders with another draw's parameters.
+// A device that refuses the allocation leaves the arena with no buffer, and it
+// hands out no slot it cannot back. The draw that asked for one then leaves its
+// group unfilled, which flushBinds refuses and drops - the alternative being a
+// draw that renders with another draw's parameters.
 func TestAUniformArenaThatCannotAllocateHandsOutNoSlot(t *testing.T) {
 	log := newArenaLog()
 	log.failFrom = 0
 	arena := log.arena()
 
-	arena.reserve(4)
-	if _, ok := arena.claim(make([]byte, 16)); ok {
+	arena.upload(make([]gfx.UniformBlock, 4))
+	if _, ok := arena.offset(0); ok {
 		t.Error("a slot was handed out with no buffer to back it")
 	}
-	arena.flush()
 	if got := log.count("write"); got != 0 {
 		t.Errorf("writes = %d, want none - there is nothing to write to", got)
 	}
 }
 
-// A claim past capacity is refused rather than served from a slot another draw
-// owns. The queue's count is an upper bound on what a frame needs, so reaching
-// this means the count was wrong, and the draw it refuses is reported.
-func TestTheUniformArenaRefusesAClaimPastItsCapacity(t *testing.T) {
+// A device that refuses to grow the buffer leaves it on the capacity it had:
+// the blocks that fit are written, and a slot past them is refused rather than
+// served from bytes an earlier frame left behind.
+func TestAUniformArenaThatCannotGrowWritesWhatFits(t *testing.T) {
 	log := newArenaLog()
 	arena := log.arena()
-	arena.reserve(1)
+	arena.upload(make([]gfx.UniformBlock, 1))
+	log.failFrom = 1
 
-	for slot := 0; slot < gfxbUniformSlots; slot++ {
-		if _, ok := arena.claim(make([]byte, 16)); !ok {
-			t.Fatalf("slot %d was refused inside capacity", slot)
-		}
+	arena.upload(make([]gfx.UniformBlock, gfxbUniformSlots+1))
+	if got := len(log.writes[len(log.writes)-1]); got != gfxbUniformSlots*gfxbUniformSize {
+		t.Errorf("written bytes = %d, want the %d slots that fit", got, gfxbUniformSlots)
 	}
-	if _, ok := arena.claim(make([]byte, 16)); ok {
-		t.Error("a claim past capacity was served")
+	if _, ok := arena.offset(gfxbUniformSlots - 1); !ok {
+		t.Error("the last slot inside capacity was refused")
+	}
+	if _, ok := arena.offset(gfxbUniformSlots); ok {
+		t.Error("a slot past capacity was served")
+	}
+}
+
+// A slot is good for the frame that wrote it and no other. A smaller frame
+// after a larger one leaves the larger one's blocks in the buffer, and binding
+// one of them would render a draw with parameters from a frame ago.
+func TestTheUniformArenaRefusesASlotThisFrameDidNotWrite(t *testing.T) {
+	log := newArenaLog()
+	arena := log.arena()
+
+	arena.upload(make([]gfx.UniformBlock, 4))
+	arena.upload(make([]gfx.UniformBlock, 1))
+	if _, ok := arena.offset(0); !ok {
+		t.Error("the frame's own slot was refused")
+	}
+	if _, ok := arena.offset(2); ok {
+		t.Error("a slot only the previous frame wrote was served")
 	}
 }
 
@@ -225,9 +234,7 @@ func TestTheUniformArenaAllocatesNothingForAFrameWithNoUniforms(t *testing.T) {
 	log := newArenaLog()
 	arena := log.arena()
 
-	arena.reset()
-	arena.reserve(0)
-	arena.flush()
+	arena.upload(nil)
 
 	if got := log.count("create"); got != 0 {
 		t.Errorf("creates = %d, want none", got)
@@ -237,20 +244,19 @@ func TestTheUniformArenaAllocatesNothingForAFrameWithNoUniforms(t *testing.T) {
 	}
 }
 
-func BenchmarkGfxUniformArenaClaim(b *testing.B) {
+func BenchmarkGfxUniformArenaUpload(b *testing.B) {
 	arena := newGfxbUniformArena(
 		func(int) (*wgpu.Buffer, error) { return &wgpu.Buffer{}, nil },
 		func(*wgpu.Buffer) {},
 		func(*wgpu.Buffer, []byte) {},
 		func() {},
 	)
-	arena.reserve(256)
-	params := make([]byte, 128)
+	blocks := make([]gfx.UniformBlock, 256)
 	b.ReportAllocs()
 	for b.Loop() {
-		arena.reset()
-		for slot := 0; slot < 256; slot++ {
-			arena.claim(params)
+		arena.upload(blocks)
+		for slot := range blocks {
+			arena.offset(slot)
 		}
 	}
 }
@@ -263,7 +269,7 @@ func TestAUniformBindingIsKeyedByOffsetAndNotByBuffer(t *testing.T) {
 	b := newGfxBackend()
 	log := newArenaLog()
 	b.uniforms = log.arena()
-	b.uniforms.reserve(4)
+	b.BakeUniforms(make([]gfx.UniformBlock, 4))
 	shader := &gfxbShader{
 		label:      "canvas.wgsl",
 		bgLayouts:  []*wgpu.BindGroupLayout{{}},
@@ -274,7 +280,7 @@ func TestAUniformBindingIsKeyedByOffsetAndNotByBuffer(t *testing.T) {
 
 	generation := b.uniforms.generation
 	for slot := 0; slot < 3; slot++ {
-		pass.SetParams(make([]byte, 64))
+		pass.SetUniformBlock(slot)
 		if len(b.acc[0]) != 1 {
 			t.Fatalf("slot %d emitted %d entries, want 1", slot, len(b.acc[0]))
 		}
@@ -323,10 +329,9 @@ func TestUniformBindGroupsSurviveFramesAndNotAResize(t *testing.T) {
 	// Two frames of two draws each, every draw the same shader, slot and
 	// texture. The cache is asked for the groups the way flushBinds asks.
 	frame := func(slots int) {
-		b.uniforms.reset()
-		b.uniforms.reserve(slots)
+		b.BakeUniforms(make([]gfx.UniformBlock, slots))
 		for draw := 0; draw < 2; draw++ {
-			pass.SetParams(make([]byte, 64))
+			pass.SetUniformBlock(draw)
 			b.addEntry(1, gfxbBindEntry{key: gfxbBindingKey{kind: gfxbBindTexture, binding: 0, id: 7}})
 			b.bindGroups.get(shader, 0, b.acc[0])
 			b.bindGroups.get(shader, 1, b.acc[1])

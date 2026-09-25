@@ -45,6 +45,7 @@ type testBackend struct {
 	allocations      []textureAllocation
 	updates          []textureUpdate
 	drawParams       [][]byte
+	uniforms         []gfx.UniformBlock
 	draws            int
 	pipelines        []gfx.PipelineDesc
 	passes           []gfx.PassDesc
@@ -275,10 +276,11 @@ func (b *testBackend) AllocateTexture(id gfx.TextureID, desc gfx.TextureDesc) {
 func (b *testBackend) UpdateTexture(id gfx.TextureID, layer int, region gfx.Region, pixels []byte) {
 	b.updates = append(b.updates, textureUpdate{id: id, layer: layer, region: region, pixels: append([]byte(nil), pixels...)})
 }
-func (b *testBackend) SetPipeline(gfx.PipelineID) {}
-func (b *testBackend) SetParams(params []byte) {
+func (b *testBackend) SetPipeline(gfx.PipelineID)             {}
+func (b *testBackend) BakeUniforms(blocks []gfx.UniformBlock) { b.uniforms = blocks }
+func (b *testBackend) SetUniformBlock(slot int) {
 	if b.capture {
-		b.drawParams = append(b.drawParams, append([]byte(nil), params...))
+		b.drawParams = append(b.drawParams, append([]byte(nil), b.uniforms[slot][:]...))
 	}
 }
 func (b *testBackend) SetTexture(gfx.TextureID, int, int) {}
