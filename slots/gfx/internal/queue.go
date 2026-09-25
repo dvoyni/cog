@@ -1,38 +1,66 @@
 package internal
 
-// opKind tags the variant of an op.
-type opKind uint8
+// renderKind tags the variant of a renderOp.
+type renderKind uint8
 
 const (
-	opSetPipeline opKind = iota
-	opSetParams
-	opSetTexture
-	opSetSampler
-	opSetVertexBuffer
-	opSetIndexBuffer
-	opSetBuffer
-	opDraw
-	opBakeBuffer
-	opReleaseBuffer
-	opBakeTexture
-	opReleaseTexture
-	opAllocateTexture
-	opUpdateTexture
+	renderSetPipeline renderKind = iota
+	renderSetParams
+	renderSetTexture
+	renderSetSampler
+	renderSetVertexBuffer
+	renderSetIndexBuffer
+	renderSetBuffer
+	renderDraw
 )
 
-// op is one entry in a translated, backend-agnostic op stream produced by gfx
-// and consumed by Backend.Execute. Its storage is a compact per-kind union - one
-// resource slot and five int32 args are reinterpreted per op kind by the
-// appenders and the replay above - so a frame's many ops stay small.
-type op struct {
-	kind   opKind
+// renderOp is one command inside a pass. Its storage is a compact per-kind
+// union - one resource slot and five int32 args are reinterpreted per kind by
+// the appenders and replayRange - so a frame's many render commands stay small.
+type renderOp struct {
+	kind   renderKind
 	res0   ResourceID // pipeline | vertex/index/uniform buffer | texture | sampler
-	arg0   int32      // offset | first | group | width | layer
-	arg1   int32      // size | count | binding | height | region x
-	arg2   int32      // group | indexed | layers | format | region y
-	arg3   int32      // binding | instances | format | mipmaps | region width
-	arg4   int32      // first instance | renderable | region height
-	params []byte     // params payload, buffer bytes or texture pixels
+	arg0   int32      // offset | first | group
+	arg1   int32      // size | count | binding
+	arg2   int32      // group | indexed
+	arg3   int32      // binding | instances
+	arg4   int32      // first instance
+	params []byte     // params payload
+}
+
+// bufferBake is one buffer upload. Buffers have a single bake op, so it needs
+// no kind.
+type bufferBake struct {
+	id   BufferID
+	kind BufferKind
+	size int
+	data []byte
+}
+
+// textureBakeKind tags the variant of a textureBake.
+type textureBakeKind uint8
+
+const (
+	textureBakePixels textureBakeKind = iota
+	textureBakeAllocate
+	textureBakeUpdate
+)
+
+// textureBake is one texture upload, allocation or region update. The three
+// share one list because they must replay in recording order: an update of a
+// texture allocated this frame has to follow its allocation.
+type textureBake struct {
+	kind       textureBakeKind
+	id         TextureID
+	width      int
+	height     int
+	layers     int
+	format     TextureFormat
+	mipmaps    bool
+	renderable bool
+	layer      int
+	region     Region
+	data       []byte
 }
 
 // pass is a pass descriptor and the half-open range of render commands in it.
@@ -114,10 +142,14 @@ type ReleaseSink interface {
 // gfx appends to it and a Backend reads it back only by replaying it into its
 // sinks: ReplayBakes, ReplayPasses and ReplayReleases are the whole read side.
 type Queue struct {
-	bakes    []op
-	render   []op
-	releases []op
-	passes   []pass
+	// Bakes are split by resource because order matters only within one
+	// resource, and a buffer and a texture never share one.
+	bufferBakes      []bufferBake
+	textureBakes     []textureBake
+	render           []renderOp
+	releasedBuffers  []BufferID
+	releasedTextures []TextureID
+	passes           []pass
 
 	// transitions is one flat arena for the whole frame; each pass holds a
 	// half-open range into it, the same way it holds one into render.
@@ -134,12 +166,14 @@ type Queue struct {
 
 // Reset drops all commands but keeps queue capacity for reuse.
 func (q *Queue) Reset() {
-	clear(q.bakes)
+	clear(q.bufferBakes)
+	clear(q.textureBakes)
 	clear(q.render)
-	clear(q.releases)
-	q.bakes = q.bakes[:0]
+	q.bufferBakes = q.bufferBakes[:0]
+	q.textureBakes = q.textureBakes[:0]
 	q.render = q.render[:0]
-	q.releases = q.releases[:0]
+	q.releasedBuffers = q.releasedBuffers[:0]
+	q.releasedTextures = q.releasedTextures[:0]
 	clear(q.passes)
 	q.passes = q.passes[:0]
 	clear(q.transitions)
@@ -193,12 +227,12 @@ func (q *Queue) EndPass() {
 }
 
 func (q *Queue) SetPipeline(pipeline PipelineID) {
-	o := op{kind: opSetPipeline, res0: ResourceID(pipeline)}
+	o := renderOp{kind: renderSetPipeline, res0: ResourceID(pipeline)}
 	q.render = append(q.render, o)
 }
 
 func (q *Queue) SetParams(params []byte) {
-	o := op{kind: opSetParams, params: params}
+	o := renderOp{kind: renderSetParams, params: params}
 	q.render = append(q.render, o)
 	q.paramOps++
 }
@@ -212,8 +246,8 @@ func (q *Queue) SetParams(params []byte) {
 func (q *Queue) ParamCount() int { return q.paramOps }
 
 func (q *Queue) SetTexture(texture TextureID, group, binding int) {
-	o := op{
-		kind: opSetTexture, res0: ResourceID(texture),
+	o := renderOp{
+		kind: renderSetTexture, res0: ResourceID(texture),
 		arg0: int32(group), arg1: int32(binding),
 	}
 	q.render = append(q.render, o)
@@ -223,29 +257,29 @@ func (q *Queue) SetTexture(texture TextureID, group, binding int) {
 // independently of textures because a material's textures may legitimately want
 // different ones - a tiling ground beside a clamped decal.
 func (q *Queue) SetSampler(sampler SamplerID, group, binding int) {
-	o := op{
-		kind: opSetSampler, res0: ResourceID(sampler),
+	o := renderOp{
+		kind: renderSetSampler, res0: ResourceID(sampler),
 		arg0: int32(group), arg1: int32(binding),
 	}
 	q.render = append(q.render, o)
 }
 
 func (q *Queue) SetVertexBuffer(buffer BufferID, offset int) {
-	o := op{kind: opSetVertexBuffer, res0: ResourceID(buffer), arg0: int32(offset)}
+	o := renderOp{kind: renderSetVertexBuffer, res0: ResourceID(buffer), arg0: int32(offset)}
 	q.render = append(q.render, o)
 }
 
 func (q *Queue) SetIndexBuffer(buffer BufferID, offset int, width IndexWidth) {
-	o := op{
-		kind: opSetIndexBuffer, res0: ResourceID(buffer),
+	o := renderOp{
+		kind: renderSetIndexBuffer, res0: ResourceID(buffer),
 		arg0: int32(offset), arg1: int32(width),
 	}
 	q.render = append(q.render, o)
 }
 
 func (q *Queue) SetBuffer(group, binding int, buffer BufferID, offset, size int) {
-	o := op{
-		kind: opSetBuffer, res0: ResourceID(buffer),
+	o := renderOp{
+		kind: renderSetBuffer, res0: ResourceID(buffer),
 		arg0: int32(offset), arg1: int32(size), arg2: int32(group), arg3: int32(binding),
 	}
 	q.render = append(q.render, o)
@@ -255,8 +289,8 @@ func (q *Queue) Draw(first, count, instances, firstInstance int, indexed bool) {
 	if instances < 1 {
 		instances = 1
 	}
-	o := op{
-		kind: opDraw, arg0: int32(first), arg1: int32(count),
+	o := renderOp{
+		kind: renderDraw, arg0: int32(first), arg1: int32(count),
 		arg3: int32(instances), arg4: int32(firstInstance),
 	}
 	if indexed {
@@ -266,70 +300,55 @@ func (q *Queue) Draw(first, count, instances, firstInstance int, indexed bool) {
 }
 
 func (q *Queue) BakeBuffer(id BufferID, kind BufferKind, size int, data []byte) {
-	o := op{
-		kind: opBakeBuffer, res0: ResourceID(id), arg0: int32(kind), arg1: int32(size), params: data,
-	}
-	q.bakes = append(q.bakes, o)
+	q.bufferBakes = append(q.bufferBakes, bufferBake{id: id, kind: kind, size: size, data: data})
 }
 
 func (q *Queue) ReleaseBuffer(id BufferID) {
-	o := op{kind: opReleaseBuffer, res0: ResourceID(id)}
-	q.releases = append(q.releases, o)
+	q.releasedBuffers = append(q.releasedBuffers, id)
 }
 
 func (q *Queue) BakeTexture(id TextureID, width, height int, format TextureFormat, pixels []byte, mipmaps bool) {
-	o := op{
-		kind: opBakeTexture, res0: ResourceID(id), arg0: int32(width), arg1: int32(height),
-		arg2: int32(format), params: pixels,
-	}
-	if mipmaps {
-		o.arg3 = 1
-	}
-	q.bakes = append(q.bakes, o)
+	q.textureBakes = append(q.textureBakes, textureBake{
+		kind: textureBakePixels, id: id, width: width, height: height, format: format,
+		mipmaps: mipmaps, data: pixels,
+	})
 }
 
 func (q *Queue) AllocateTexture(id TextureID, desc TextureDesc) {
-	o := op{
-		kind: opAllocateTexture, res0: ResourceID(id),
-		arg0: int32(desc.Width), arg1: int32(desc.Height), arg2: int32(desc.Layers), arg3: int32(desc.Format),
-	}
-	if desc.Renderable {
-		o.arg4 = 1
-	}
-	q.bakes = append(q.bakes, o)
+	q.textureBakes = append(q.textureBakes, textureBake{
+		kind: textureBakeAllocate, id: id, width: desc.Width, height: desc.Height, layers: desc.Layers,
+		format: desc.Format, renderable: desc.Renderable,
+	})
 }
 
 func (q *Queue) UpdateTexture(id TextureID, layer int, region Region, pixels []byte) {
-	q.bakes = append(q.bakes, op{
-		kind: opUpdateTexture, res0: ResourceID(id),
-		arg0: int32(layer), arg1: int32(region.X), arg2: int32(region.Y),
-		arg3: int32(region.Width), arg4: int32(region.Height), params: pixels,
+	q.textureBakes = append(q.textureBakes, textureBake{
+		kind: textureBakeUpdate, id: id, layer: layer, region: region, data: pixels,
 	})
 }
 
 func (q *Queue) ReleaseTexture(id TextureID) {
-	o := op{kind: opReleaseTexture, res0: ResourceID(id)}
-	q.releases = append(q.releases, o)
+	q.releasedTextures = append(q.releasedTextures, id)
 }
 
-// ReplayBakes sends every resource upload to sink.
+// ReplayBakes sends every resource upload to sink: every buffer, then every
+// texture, each in recording order.
 func (q *Queue) ReplayBakes(sink BakeSink) {
-	for i := range q.bakes {
-		o := &q.bakes[i]
-		switch o.kind {
-		case opBakeBuffer:
-			sink.BakeBuffer(BufferID(o.res0), BufferKind(o.arg0), int(o.arg1), o.params)
-		case opBakeTexture:
-			sink.BakeTexture(TextureID(o.res0), int(o.arg0), int(o.arg1), TextureFormat(o.arg2), o.params, o.arg3 != 0)
-		case opAllocateTexture:
-			sink.AllocateTexture(TextureID(o.res0), TextureDesc{
-				Width: int(o.arg0), Height: int(o.arg1), Layers: int(o.arg2), Format: TextureFormat(o.arg3),
-				Renderable: o.arg4 != 0,
+	for i := range q.bufferBakes {
+		b := &q.bufferBakes[i]
+		sink.BakeBuffer(b.id, b.kind, b.size, b.data)
+	}
+	for i := range q.textureBakes {
+		t := &q.textureBakes[i]
+		switch t.kind {
+		case textureBakePixels:
+			sink.BakeTexture(t.id, t.width, t.height, t.format, t.data, t.mipmaps)
+		case textureBakeAllocate:
+			sink.AllocateTexture(t.id, TextureDesc{
+				Width: t.width, Height: t.height, Layers: t.layers, Format: t.format, Renderable: t.renderable,
 			})
-		case opUpdateTexture:
-			sink.UpdateTexture(TextureID(o.res0), int(o.arg0), Region{
-				X: int(o.arg1), Y: int(o.arg2), Width: int(o.arg3), Height: int(o.arg4),
-			}, o.params)
+		case textureBakeUpdate:
+			sink.UpdateTexture(t.id, t.layer, t.region, t.data)
 		}
 	}
 }
@@ -363,21 +382,21 @@ func (q *Queue) replayRange(sink RenderPass, start, end int) {
 	for i := start; i < end && i < len(q.render); i++ {
 		o := &q.render[i]
 		switch o.kind {
-		case opSetPipeline:
+		case renderSetPipeline:
 			sink.SetPipeline(PipelineID(o.res0))
-		case opSetParams:
+		case renderSetParams:
 			sink.SetParams(o.params)
-		case opSetTexture:
+		case renderSetTexture:
 			sink.SetTexture(TextureID(o.res0), int(o.arg0), int(o.arg1))
-		case opSetSampler:
+		case renderSetSampler:
 			sink.SetSampler(SamplerID(o.res0), int(o.arg0), int(o.arg1))
-		case opSetVertexBuffer:
+		case renderSetVertexBuffer:
 			sink.SetVertexBuffer(BufferID(o.res0), int(o.arg0))
-		case opSetIndexBuffer:
+		case renderSetIndexBuffer:
 			sink.SetIndexBuffer(BufferID(o.res0), int(o.arg0), IndexWidth(o.arg1))
-		case opSetBuffer:
+		case renderSetBuffer:
 			sink.SetBuffer(int(o.arg2), int(o.arg3), BufferID(o.res0), int(o.arg0), int(o.arg1))
-		case opDraw:
+		case renderDraw:
 			sink.Draw(int(o.arg0), int(o.arg1), int(o.arg3), int(o.arg4), o.arg2 != 0)
 		}
 	}
@@ -385,13 +404,10 @@ func (q *Queue) replayRange(sink RenderPass, start, end int) {
 
 // ReplayReleases sends every resource release to sink.
 func (q *Queue) ReplayReleases(sink ReleaseSink) {
-	for i := range q.releases {
-		o := &q.releases[i]
-		switch o.kind {
-		case opReleaseBuffer:
-			sink.ReleaseBuffer(BufferID(o.res0))
-		case opReleaseTexture:
-			sink.ReleaseTexture(TextureID(o.res0))
-		}
+	for _, id := range q.releasedBuffers {
+		sink.ReleaseBuffer(id)
+	}
+	for _, id := range q.releasedTextures {
+		sink.ReleaseTexture(id)
 	}
 }

@@ -585,11 +585,11 @@ Which collision groups a Shape collides with, carried by the Shape itself and ch
 _Avoid_: Mask, collision matrix, layer matrix, filter
 
 **Sensor**:
-A Shape that reports contacts but is never pushed and pushes nothing. Its collision groups pair it like any other Shape's. A circle sensor that moves reports everything it touched on its way through the tick, not only where it ended, which is what keeps a point from passing through a wall unseen. What a sensor does on contact is the game's, never the physics.
+A Shape that reports contacts but is never pushed and pushes nothing. Its collision groups pair it like any other Shape's. A sensor that moves, whatever its Shape, reports everything it touched on its way through the tick, not only where it ended, which is what keeps a point from passing through a wall unseen. What a sensor does on contact is the game's, never the physics.
 _Avoid_: Trigger (a Hook word), ghost, phantom
 
 **Contact**:
-Two Entities whose Shapes touch, found once a tick for each pair their collision groups let collide, whatever kinds of Body they are. It holds the at most two Contact points where they meet, and one surface normal for both. A contact is marked as begun this tick, continuing from the last, or ended, so the tick two Entities stop touching is reported too. When one party is a Sensor, the contact also says how far along the Sensor's movement the touch happened. A game may drop a contact for the tick, or ignore the pair until the two come apart; a dropped contact that was continuing is reported as ended.
+Two Entities whose Shapes touch, found once a tick for each pair their collision groups let collide, whatever kinds of Body they are. It holds the at most two Contact points where they meet, and one surface normal for both. A contact is marked as begun this tick, continuing from the last, or ended, so the tick two Entities stop touching is reported too. When one party is a Sensor, or a Body was stopped short, the contact also says how far through the tick the touch happened. A game may drop a contact for the tick, or ignore the pair until the two come apart; a dropped contact that was continuing is reported as ended.
 _Avoid_: Collision, collision event, manifold, touch
 
 **Contact point**:
@@ -629,8 +629,12 @@ How strongly a Spring resists its two ends moving apart or together, as force pe
 _Avoid_: Damping, damping ratio, damper, drag
 
 **Probe**:
-Moving a circle, possibly of radius 0, in a straight line from one position to another, and finding what it touches on the way. Line of sight is one use of a Probe, not another operation.
+Moving a Shape, without turning it, in a straight line from one position to another, and finding what it touches on the way. The Shape is most often a circle, possibly of radius 0. Line of sight is one use of a Probe, not another operation.
 _Avoid_: Sweep, ray cast, shape cast, segment query, trace
+
+**Continuous collision**:
+Stopping a Body that moves far enough in one tick to get through something, either clean past it or deep enough to be pushed out its far side, so it meets what it would have hit instead of ending up beyond it. It engages only for a Body whose movement in the tick reaches its own thinnest width; anything slower is caught by ordinary contact. It follows the straight line between where the Body was and where it is, so a thin thing spinning fast can still slip through. A Kinematic body is never stopped: what it would have hit is carried along with it instead.
+_Avoid_: Sweep, bullet, CCD, time of impact (one way of doing it, not the behaviour)
 
 **Hit**:
 What a Probe reports about one thing it touched: the Entity, how far along the Probe, where, and the surface normal.
