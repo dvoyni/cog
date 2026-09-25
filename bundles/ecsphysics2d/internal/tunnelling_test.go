@@ -22,10 +22,10 @@ import (
 // pass, the census of which Bodies its gate would engage, and the count the
 // whole-step benchmark is read beside.
 //
-// The tunnelling cases state the guarantee continuous-collision.md specifies
-// and fail today: a solid Dynamic body does not end on the far side of any
-// Body it was thrown at, Static, Kinematic or Dynamic. They are skipped until
-// the path pass lands, and the ticket that lands it removes the skip.
+// The tunnelling cases state the guarantee continuous-collision.md specifies:
+// a solid Dynamic body does not end on the far side of any Body it was thrown
+// at, Static, Kinematic or Dynamic, and is stopped on the near side, touching
+// it. The path pass is what holds it (types/contacts-paths.go).
 
 // projectileSpeed is the swept Sensor's own acceptance speed: 0.673 m a tick at
 // 60 Hz, which clears a 0.4 m wall whole.
@@ -49,7 +49,10 @@ type tunnelMover struct {
 
 // tunnelTarget is one of the three things they are thrown at.
 type tunnelTarget struct {
-	name  string
+	name string
+	// face is how far the target's near face stands short of its Position
+	// along X: half its thickness.
+	face  float64
 	spawn func(t testing.TB, h *harness) ecs.Entity
 }
 
@@ -73,14 +76,14 @@ func wallShape() ecsphysics2d.Shape {
 
 func tunnelTargets() []tunnelTarget {
 	return []tunnelTarget{
-		{"a 0.4 m Static wall", func(t testing.TB, h *harness) ecs.Entity {
+		{"a 0.4 m Static wall", 0.2, func(t testing.TB, h *harness) ecs.Entity {
 			return h.spawn(t, spawnRequest{
 				Kind:  kindShapedStatic,
 				Place: ecsphysics2d.Position{Current: m.Vec2d{X: targetX}},
 				Shape: wallShape(),
 			})
 		}},
-		{"a 0.4 m Kinematic body", func(t testing.TB, h *harness) ecs.Entity {
+		{"a 0.4 m Kinematic body", 0.2, func(t testing.TB, h *harness) ecs.Entity {
 			return h.spawn(t, spawnRequest{
 				Kind:  kindShapedKinematic,
 				Place: ecsphysics2d.Position{Current: m.Vec2d{X: targetX}},
@@ -90,7 +93,7 @@ func tunnelTargets() []tunnelTarget {
 		// A board 0.1 m thick and 4 m tall, at rest, of the same density as the
 		// movers: light enough to be knocked aside, which is the case a fast
 		// Body's test of the whole Body index is for.
-		{"a thin Dynamic body", func(t testing.TB, h *harness) ecs.Entity {
+		{"a thin Dynamic body", 0.05, func(t testing.TB, h *harness) ecs.Entity {
 			body, shape, _ := solidFor(t, ecsphysics2d.NewBoxShape(0.1, 4, 0))
 			return h.spawn(t, spawnRequest{
 				Kind:  kindShapedBody,
@@ -233,16 +236,29 @@ func closeToFloat32(got, want float64) bool {
 // ends on the far side of the target's centre after half a second; it says
 // whether it did so clean (no Contact with the target on any tick) or pushed
 // through (seen overlapping, and resolved out the far side).
+//
+// The near-side check is the other half: on the tick the mover first meets
+// the target, it was stopped where it met it, so it stands on the near side
+// touching it, and the Contact that says so is a stopping one, T < 1 with one
+// point at Depth 0. A Body stopped at T whose Contact was then lost would end
+// short of the target, which the far-side test alone never sees.
 func TestASolidBodyDoesNotTunnel(t *testing.T) {
-	t.Skip("fails by design until continuous collision's path pass lands: " +
-		"continuous-collision.md § Acceptance")
 	for _, target := range tunnelTargets() {
 		for _, mover := range tunnelMovers() {
 			t.Run(fmt.Sprintf("%s at %s", mover.name, target.name), func(t *testing.T) {
 				clean, pushed := 0, 0
 				var tunnelled []string
 				for phase := range phases {
-					outcome, through, touched := throw(t, mover.shape, target, phase)
+					outcome, through, touched, met := throwAt(t, mover.shape, target, projectileSpeed, phase, 30)
+					if !met.seen {
+						t.Errorf("phase %d never met the target:\n%s", phase, outcome)
+					} else if !met.stopping {
+						t.Errorf("phase %d met the target with no stopping Contact: %s\n%s",
+							phase, met.contact, outcome)
+					} else if gap := met.gap; gap < -nearSide || gap > nearSide {
+						t.Errorf("phase %d stopped %.9f m short of the target's near face, want touching:\n%s",
+							phase, gap, outcome)
+					}
 					if through {
 						if touched {
 							pushed++
@@ -261,29 +277,59 @@ func TestASolidBodyDoesNotTunnel(t *testing.T) {
 	}
 }
 
-// throw runs one phase of one case in an engine of its own, and says where the
-// mover ended against the target, whether that is the far side, and whether
-// the pair ever reported a Contact.
-func throw(t *testing.T, shape ecsphysics2d.Shape, target tunnelTarget, phase int) (string, bool, bool) {
+// nearSide is how near the target's face a stopped mover has to stand to count
+// as touching it: the swept convex test stops within a nanometre of the
+// surface, and the circle's Probe is exact.
+const nearSide = 1e-6
+
+// meeting is what the tick the mover first met the target showed: whether it
+// ever did, whether the Contact was a stopping one, and how far the mover's
+// leading face then stood short of the target's near face.
+type meeting struct {
+	seen, stopping bool
+	gap            float64
+	contact        string
+}
+
+// throwAt runs one phase of one throw in an engine of its own, at speed for the
+// given number of ticks, from two metres short of the target and a phase's
+// share of one tick's travel further back. It says where the mover ended
+// against the target, whether that is the far side, whether the pair ever
+// reported a Contact, and what the first tick they met showed.
+func throwAt(
+	t *testing.T, shape ecsphysics2d.Shape, target tunnelTarget, speed float64, phase, ticks int,
+) (string, bool, bool, meeting) {
 	t.Helper()
 	h := newHarness(t)
 	wall := target.spawn(t, h)
-	body, shape, _ := solidFor(t, shape)
-	step := projectileSpeed * tick
+	body, shape, reach := solidFor(t, shape)
+	step := speed * tick
 	start := targetX - 2 - step*float64(phase)/phases
 	mover := h.spawn(t, spawnRequest{
 		Kind:     kindShapedBody,
 		Place:    ecsphysics2d.Position{Current: m.Vec2d{X: start}},
-		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: projectileSpeed}},
+		Velocity: ecsphysics2d.Velocity{Linear: m.Vec2d{X: speed}},
 		Body:     body,
 		Shape:    shape,
 	})
 
 	touched := false
-	for range 30 {
+	var met meeting
+	for range ticks {
 		h.frame(t)
 		for _, entry := range h.contacts(t) {
 			if (entry.A == mover && entry.B == wall) || (entry.A == wall && entry.B == mover) {
+				if !touched {
+					at, there := h.read(t, mover).Place.Current, h.read(t, wall).Place.Current
+					met = meeting{
+						seen: true,
+						stopping: entry.T < 1 && !entry.Sensor && entry.Count == 1 &&
+							entry.Points[0].Depth == 0,
+						gap: (there.X - target.face) - (at.X + reach),
+						contact: fmt.Sprintf("T %.4f, Sensor %v, %d point(s), Depth %.4f",
+							entry.T, entry.Sensor, entry.Count, entry.Points[0].Depth),
+					}
+				}
 				touched = true
 			}
 		}
@@ -291,7 +337,7 @@ func throw(t *testing.T, shape ecsphysics2d.Shape, target tunnelTarget, phase in
 	at, there := h.read(t, mover).Place.Current, h.read(t, wall).Place.Current
 	through := at.X > there.X
 	return fmt.Sprintf("  phase %d: from x = %.3f to %.3f, target at %.3f, touched %v",
-		phase, start, at.X, there.X, touched), through, touched
+		phase, start, at.X, there.X, touched), through, touched, met
 }
 
 func joinLines(lines []string) string {
@@ -441,6 +487,41 @@ func TestTheBenchScenesTripNoGate(t *testing.T) {
 					t.Errorf("the bench scene engages the gate: %d at ≥1×, %d at >½× over %d ticks", atOne, overHalf, ticks)
 				}
 			})
+		}
+	}
+}
+
+// sweepFactors are the speed sweep's travels in one tick, as multiples of the
+// mover's minimum extent: one below the gate, where the discrete walk has to
+// hold, and the rest at or past it, where the path test has to.
+var sweepFactors = []float64{0.5, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5}
+
+// TestNothingTunnelsAcrossTheSpeedSweep pins the ≥ 1× gate from both sides:
+// every mover thrown at every target, from eight phases, at each travel of the
+// sweep, and none may end on the far side. Below 1× nothing is marked and the
+// discrete walk alone keeps it on the near side; from 1× the path test does.
+func TestNothingTunnelsAcrossTheSpeedSweep(t *testing.T) {
+	for _, target := range tunnelTargets() {
+		for _, mover := range tunnelMovers() {
+			_, _, extent := solidFor(t, mover.shape)
+			for _, factor := range sweepFactors {
+				speed := factor * extent / tick
+				// Long enough to cover the two metres and some, at the slowest.
+				ticks := int(math.Ceil(3/(speed*tick))) + 5
+				t.Run(fmt.Sprintf("%s at %s, %gx", mover.name, target.name, factor), func(t *testing.T) {
+					var tunnelled []string
+					for phase := range phases {
+						outcome, through, _, _ := throwAt(t, mover.shape, target, speed, phase, ticks)
+						if through {
+							tunnelled = append(tunnelled, outcome)
+						}
+					}
+					if len(tunnelled) > 0 {
+						t.Errorf("tunnelled in %d of %d phases at %.2f m a tick:\n%s",
+							len(tunnelled), phases, speed*tick, joinLines(tunnelled))
+					}
+				})
+			}
 		}
 	}
 }

@@ -42,9 +42,9 @@ import "github.com/dvoyni/cog/libs/m"
 // the app's to write; the stationary Sensor a pressure plate is made of is a
 // Static one, which is never Probed at all.
 
-// sweepSensors is the Probe half of Detect: every moving circle Sensor in the
-// Body index, swept along its path through both indices, and every Shape it met
-// written as a Contact.
+// sweepSensor is the Sensor's half of the path pass (contacts-paths.go): one
+// moving circle Sensor in the Body index, at slot, swept along its path through
+// both indices, and every Shape it met written as a Contact.
 //
 // It runs before the discrete walk, so one Sensor's entries sit together and in
 // order of T, ahead of every solid pair and well ahead of the Ended run. The
@@ -53,77 +53,69 @@ import "github.com/dvoyni/cog/libs/m"
 //
 // The one buffer it needs is the list's own, refilled once a Sensor, so a
 // steady scene allocates nothing here.
-func (c *Contacts) sweepSensors(bodies *BodyIndex, statics *StaticIndex) {
+func (c *Contacts) sweepSensor(bodies *BodyIndex, statics *StaticIndex, sensor *entry, slot int) {
 	moving := &bodies.index
-	for slot := range moving.entries {
-		sensor := &moving.entries[slot]
-		// The path bit marks a fast solid Body too, which this pass does not
-		// test yet.
-		if !sensor.path || !sensor.shape.Sensor {
-			continue
-		}
-		world := moving.world(sensor)
-		from, to := sensor.previousCentre, world[0]
-		radius := sensor.shape.Radius
-		bits, collidesWith := sensor.shape.CollisionBits, sensor.shape.CollidesWith
+	world := moving.world(sensor)
+	from, to := sensor.previousCentre, world[0]
+	radius := sensor.shape.Radius
+	bits, collidesWith := sensor.shape.CollisionBits, sensor.shape.CollidesWith
 
-		// A Probe that starts inside something reports it, and a Sensor is in
-		// the Body index itself, so it would Hit itself first every tick — one
-		// excluded Entity, which is exactly what exclude is for. The groups are
-		// the Sensor's own, so a Sensor that collides with nothing is invisible
-		// to its own Probe too, and nothing here skips a Sensor: Overlap has to
-		// be able to find one, which is where the port departs from cp's point
-		// and segment queries.
-		//
-		// The awake grid is asked directly while nothing sleeps, which keeps
-		// the sweep the code it was before sleeping. The Body index's own
-		// probeAllSlots asks both grids and does not inline, and going through
-		// it measured 3% slower on the reference step at N = 1 024 with
-		// sleeping off, interleaved; the profile puts less than that in the
-		// sweep itself, so the number is quoted and the cause is not.
-		c.probeSlots = c.probeSlots[:0]
-		if bodies.sleeping == 0 {
-			c.probes = moving.probeAllSlots(c.probes[:0], &c.probeSlots,
-				from, to, radius, bits, collidesWith, sensor.entity)
+	// A Probe that starts inside something reports it, and a Sensor is in
+	// the Body index itself, so it would Hit itself first every tick — one
+	// excluded Entity, which is exactly what exclude is for. The groups are
+	// the Sensor's own, so a Sensor that collides with nothing is invisible
+	// to its own Probe too, and nothing here skips a Sensor: Overlap has to
+	// be able to find one, which is where the port departs from cp's point
+	// and segment queries.
+	//
+	// The awake grid is asked directly while nothing sleeps, which keeps
+	// the sweep the code it was before sleeping. The Body index's own
+	// probeAllSlots asks both grids and does not inline, and going through
+	// it measured 3% slower on the reference step at N = 1 024 with
+	// sleeping off, interleaved; the profile puts less than that in the
+	// sweep itself, so the number is quoted and the cause is not.
+	c.probeSlots = c.probeSlots[:0]
+	if bodies.sleeping == 0 {
+		c.probes = moving.probeAllSlots(c.probes[:0], &c.probeSlots,
+			from, to, radius, bits, collidesWith, sensor.entity)
+	} else {
+		c.probes = bodies.probeAllSlots(c.probes[:0], &c.probeSlots,
+			from, to, radius, bits, collidesWith, sensor.entity)
+	}
+	split := len(c.probes)
+	c.probes = statics.ProbeAll(c.probes, from, to, radius, bits, collidesWith, sensor.entity)
+
+	// Each run is already ordered by T and the two never name the same
+	// Entity, an Entity being in one index or the other, so merging them is
+	// the whole of the ordering.
+	for at, still := 0, split; at < split || still < len(c.probes); {
+		var hit Hit
+		var other *entry
+		var otherSlot int32
+		var otherWorld []m.Vec2d
+		if still >= len(c.probes) || (at < split && c.probes[at].T <= c.probes[still].T) {
+			hit, at = c.probes[at], at+1
+			// The Body index keeps no Entity to slot table, so its Probe
+			// hands each Hit's slot back beside it — a Sleeping body's
+			// numbered after the awake grid's, in the grid of its own it
+			// is kept in. A sleeper met by a Sensor stays asleep: a Sensor
+			// entry neither joins an Island nor wakes one.
+			otherSlot = c.probeSlots[at-1]
+			grid, found := bodies.entryAt(otherSlot)
+			other, otherWorld = found, grid.world(found)
 		} else {
-			c.probes = bodies.probeAllSlots(c.probes[:0], &c.probeSlots,
-				from, to, radius, bits, collidesWith, sensor.entity)
-		}
-		split := len(c.probes)
-		c.probes = statics.ProbeAll(c.probes, from, to, radius, bits, collidesWith, sensor.entity)
-
-		// Each run is already ordered by T and the two never name the same
-		// Entity, an Entity being in one index or the other, so merging them is
-		// the whole of the ordering.
-		for at, still := 0, split; at < split || still < len(c.probes); {
-			var hit Hit
-			var other *entry
-			var otherSlot int32
-			var otherWorld []m.Vec2d
-			if still >= len(c.probes) || (at < split && c.probes[at].T <= c.probes[still].T) {
-				hit, at = c.probes[at], at+1
-				// The Body index keeps no Entity to slot table, so its Probe
-				// hands each Hit's slot back beside it — a Sleeping body's
-				// numbered after the awake grid's, in the grid of its own it
-				// is kept in. A sleeper met by a Sensor stays asleep: a Sensor
-				// entry neither joins an Island nor wakes one.
-				otherSlot = c.probeSlots[at-1]
-				grid, found := bodies.entryAt(otherSlot)
-				other, otherWorld = found, grid.world(found)
-			} else {
-				hit, still = c.probes[still], still+1
-				found, _, ok := statics.lookup(hit.Entity)
-				if !ok {
-					continue
-				}
-				// A Static party is one immovable row in the solver's gather
-				// however many of them there are, which is what −1 says. A
-				// Sensor entry is never solved at all, but the two runs of the
-				// list are read by the same code and say the same thing.
-				other, otherSlot, otherWorld = found, -1, statics.world(found)
+			hit, still = c.probes[still], still+1
+			found, _, ok := statics.lookup(hit.Entity)
+			if !ok {
+				continue
 			}
-			c.sensorHit(sensor, int32(slot), from, radius, world, hit, other, otherSlot, otherWorld)
+			// A Static party is one immovable row in the solver's gather
+			// however many of them there are, which is what −1 says. A
+			// Sensor entry is never solved at all, but the two runs of the
+			// list are read by the same code and say the same thing.
+			other, otherSlot, otherWorld = found, -1, statics.world(found)
 		}
+		c.sensorHit(sensor, int32(slot), from, radius, world, hit, other, otherSlot, otherWorld)
 	}
 }
 

@@ -713,6 +713,13 @@ Every System also takes `read{*Entities}`. **The only new locks are on Resources
 physics owns**, and the chain serialises nothing that could have run in parallel.
 Making Systems that run in parallel today take turns is rejected outright.
 
+**Continuous collision changed no lock in this table.** Index's gate reads the
+`Shape` and `Position` it already reads, Detect's path pass reads the two indices
+and writes the `Contacts` it already does, and Solve moves a stopped Dynamic body
+back through the `Dynamic` read and the `Position` write it already holds. No
+System was added. The argument is in
+[continuous-collision.md § Where each part runs](continuous-collision.md#where-each-part-runs).
+
 Sleeping added the Sleep System and one read to three of the others:
 Integrate, Index and Solve each read the `Sleeping` Store, which only the sleep
 System writes, and every other lock the sleep System takes is one Solve, the next
@@ -1185,8 +1192,8 @@ written down.
 
 ### Ordering, and memory
 
-A Sensor's entries sit together, ordered by `T`; Ended entries come after every
-current entry; nothing else is ordered. **A System walks the list; there is no
+A Sensor's entries, where it is A, sit together, ordered by `T`; Ended entries
+come after every current entry; nothing else is ordered. **A System walks the list; there is no
 per-Entity index.** *"What is this Body touching now"* is a walk with the
 one-party view. Adding `Of(e)` later is purely additive, for when an app measures
 the walk as too slow.
@@ -1200,8 +1207,14 @@ nothing but slices, and **a floor for the static index**, whose Entity-to-slot
 table is a Go map: Go publishes a map's length and never what its buckets cost.
 **The solver's scratch shrinks too**, the fifth area: the gather Solve refills from nothing every
 tick — the solved list, the slot table, the Body and Joint rows — and the swept
-Sensor Probe buffer with the Body slot beside each Hit. None of it is read across a tick, so the command releases it
-whole and changes no answer; the slot table is sized to the largest Body slot
+Sensor Probe buffer with the Body slot beside each Hit. Continuous collision's
+scratch joins it: the copy of each stopped Body placed where it stopped, with its
+world cache, and the run a fast Body's Shape is Probed in
+([continuous-collision.md](continuous-collision.md#a-stopped-bodys-other-pairs-are-tested-where-it-stopped)).
+None of it is read across a tick, so the command releases it
+whole and changes no answer; the one exception is the run of stops itself, which
+Solve reads after Detect in the same tick, so it is cut to what it holds rather
+than released; the slot table is sized to the largest Body slot
 detection ever saw, which after a 100 000 Body spike is 400 KB, and up to twice
 that with the slack it grows by, that nothing else would ever give back. The
 sleeping Islands' records, members and quiet Contacts are Contact-list buffers and

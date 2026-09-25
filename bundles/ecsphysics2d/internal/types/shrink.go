@@ -26,8 +26,9 @@ type ShrinkRequest struct {
 	// world-space geometry the closed forms read.
 	KeepWorldCache bool
 	// KeepScratch keeps the solver's gather — the solved list, the slot table,
-	// the Body rows and the Joint rows with their Body table — and the swept
-	// Sensor Probe buffer. All of it is refilled from nothing every tick, so
+	// the Body rows and the Joint rows with their Body table — the swept
+	// Sensor Probe buffer, and continuous collision's copies of the Bodies it
+	// stopped. All of it is refilled from nothing every tick, so
 	// shrinking it releases it whole and changes nothing any tick computes.
 	KeepScratch bool
 }

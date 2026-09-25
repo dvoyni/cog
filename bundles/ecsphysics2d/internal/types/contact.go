@@ -132,7 +132,9 @@ type Contact struct {
 	// Points are the Contact's points, of which Count are meaningful.
 	Points [2]ContactPoint
 	// T is the fraction of the tick at which the pair met. Everything found
-	// where the tick ended reports 1.
+	// where the tick ended reports 1; a Probed Sensor's Hit, a fast solid
+	// Body's stop and that Body's other Contacts, found where it stopped,
+	// report how far through the tick it was.
 	T float64
 	// Friction is cp's u for this pair, the product of the two Shapes', filled
 	// by Detect every tick and writable by a filter for one tick.

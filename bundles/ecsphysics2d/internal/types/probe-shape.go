@@ -103,23 +103,56 @@ func newShapeProbe(
 	}
 	copy(moved, base[:used])
 
-	points := used
-	switch shape.Kind {
-	case ShapeCircle:
-	case ShapeSegment:
-		points = 2
-	default:
-		points = used / 2
-	}
 	return shapeProbe{
 		shape:  shape,
 		delta:  to.Sub(from),
 		base:   base[:used],
 		moved:  moved[:used],
-		points: points,
+		points: cachedPoints(shape.Kind, used),
 		box:    box,
 		centre: box.Centre(),
 	}, true
+}
+
+// shapeProbeBack is the Probed Shape of a placed one whose world cache and box
+// are already built where its path ends: the cache moved back along delta to
+// where the path starts, in runs, which must hold twice the cache. It is the
+// path test of a fast solid Body, whose index entry has its cache at the end
+// pose and whose Shape is held at its end angle, so the start is the end
+// translated and nothing is placed twice.
+func shapeProbeBack(runs []m.Vec2d, shape Shape, end []m.Vec2d, box BB, delta m.Vec2d) shapeProbe {
+	used := len(end)
+	base, moved := runs[:used], runs[used:2*used]
+	points := cachedPoints(shape.Kind, used)
+	for i := range points {
+		base[i] = end[i].Sub(delta)
+	}
+	copy(base[points:], end[points:])
+	copy(moved, base)
+	start := box.Offset(delta.Negate())
+	return shapeProbe{
+		shape:  shape,
+		delta:  delta,
+		base:   base,
+		moved:  moved,
+		points: points,
+		box:    start,
+		centre: start.Centre(),
+	}
+}
+
+// cachedPoints is how many leading vectors of a world cache of used vectors
+// are points, as opposed to the normals a segment and a Polygon keep after
+// them: every one of a circle's, a segment's two ends, and a Polygon's first
+// half.
+func cachedPoints(kind ShapeKind, used int) int {
+	switch kind {
+	case ShapeCircle:
+		return used
+	case ShapeSegment:
+		return 2
+	}
+	return used / 2
 }
 
 // place moves the mover's cache to fraction t of its path.

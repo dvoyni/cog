@@ -141,7 +141,21 @@
 // entry: a Probed Sensor carries the Probe's T and a Depth of 0, except one
 // that started inside something, which reports T = 0 with the overlap at the
 // start, and everything else reports T = 1 with the overlap where the tick
-// ended.
+// ended — except around a solid Body that was stopped short.
+//
+// A solid Body does not tunnel either. One that moves at least its own
+// thinnest width in a tick is Probed along its path, its Shape held at its end
+// angle, and stopped where it first meets a Body it collides with, of any
+// kind, that it was not already touching when the tick began; a Sensor never
+// stops it. There is no opt-in and no Component to add. The stopping Contact is
+// an ordinary one carrying the T it was stopped at, one point and a Depth of 0,
+// and Solve moves a Dynamic body back to that point before it solves, so a
+// reacting System sees it there; the Body's other Contacts that tick were found
+// where it stopped and carry the same T. A filter that drops or ignores the
+// stopping Contact means no stop, which is how a one-way platform lets a fast
+// Body through. A target that itself moved fast enough to be Probed does not
+// stop it yet: the two are left to the discrete test, as they were before
+// (continuous-collision.md).
 //
 // Two holes are accepted rather than fixed. A Sensor's path is a chord and not
 // the polyline it flew, so a sharply curving one can clip a corner; and two

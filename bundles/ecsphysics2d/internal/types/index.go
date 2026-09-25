@@ -115,9 +115,9 @@ type entry struct {
 	// path is the one path bit: Detect tests this entry along its path
 	// through the tick instead of only where the tick left it. InsertMoving
 	// sets it on a moving circle Sensor, and on a solid Body whose movement
-	// passes continuous collision's gate. Only the Sensor's is read yet, so
-	// every reader asks the Sensor flag beside it. Deciding it once at insert
-	// is what keeps the detection walk's own test a field read.
+	// passes continuous collision's gate, and the Sensor flag beside it picks
+	// what Detect's path pass keeps. Deciding it once at insert is what keeps
+	// the detection walk's own test a field read.
 	path bool
 	// previousCentre is where the path starts; the end is where the tick left
 	// the entry. For a circle it is the centre, and for any other Shape the
@@ -458,6 +458,22 @@ func (idx *index) shapeWalk(
 		bits, collidesWith, exclude, mover)
 }
 
+// shapeAllSlots is shapeWalk's find-all form with each Hit's entry slot kept
+// beside it, slotBase added, as probeAllSlots is ProbeAll's: the path test of
+// a fast solid Body that is not a circle, over the Body index, which keeps no
+// Entity to slot table to ask afterwards. start is where the ordered run
+// begins in dst.
+func (idx *index) shapeAllSlots(
+	dst []Hit, start int, slots *[]int32, slotBase int32, mover *shapeProbe,
+	bits, collidesWith uint32, exclude ecs.Entity,
+) []Hit {
+	box := mover.box
+	dst, _, _ = idx.probeWalk(dst, start, slots, slotBase, false,
+		mover.centre, mover.centre.Add(mover.delta), 0.5*math.Hypot(box.R-box.L, box.T-box.B),
+		bits, collidesWith, exclude, mover)
+	return dst
+}
+
 // circlePath is where a circle Shape's centre runs when its Position runs from
 // from to to at a fixed angle: its offset turned by the angle, ahead of both.
 func circlePath(shape Shape, from, to m.Vec2d, angle float64) (m.Vec2d, m.Vec2d) {
@@ -735,8 +751,8 @@ func (idx *index) probeCell(walk *probing, i, j int32) {
 }
 
 // shapeCell is probeCell for a moving Shape: the same band, filters and
-// ordering, with each candidate tested by the swept convex test. A shape walk
-// keeps no slots, so there is no slot run to keep beside its Hits.
+// ordering, with each candidate tested by the swept convex test. Only a fast
+// solid Body's path test keeps slots beside its Hits.
 //
 // It is a loop of its own rather than a branch in probeCell's, so that the
 // circle's loop, which is every Probe's and the swept Sensor's, is as it was:
@@ -774,6 +790,11 @@ func (idx *index) shapeCell(walk *probing, mover *shapeProbe, i, j int32) {
 				walk.best, walk.found = hit, true
 				walk.exit = hit.T
 			}
+			continue
+		}
+		if walk.slots != nil {
+			walk.dst, *walk.slots = insertHitSlot(walk.dst, *walk.slots, walk.start, hit,
+				walk.slotBase+idx.links[cursor].entry)
 			continue
 		}
 		walk.dst = insertHit(walk.dst, walk.start, hit)
