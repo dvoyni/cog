@@ -9,8 +9,8 @@ const uniformMax = 256
 // uniformMax. It is not a web-floor check: the floor is 64 KiB. The caller
 // treats a failure as fatal to the shader.
 func checkUniformBlock(shader string, layout ShaderLayout) error {
-	if layout.UniformSize > uniformMax {
-		return ErrUniformBlockTooLarge{Shader: shader, Declared: layout.UniformSize, Max: uniformMax}
+	if block := layout.UniformBlock(); block != nil && block.Size > uniformMax {
+		return ErrUniformBlockTooLarge{Shader: shader, Declared: block.Size, Max: uniformMax}
 	}
 	return nil
 }
@@ -25,15 +25,15 @@ func checkUniformBlock(shader string, layout ShaderLayout) error {
 // storage limit is counted once over the whole shader.
 func checkWebLimits(shader string, layout ShaderLayout, device Limits) error {
 	floor := DefaultLimits()
-	storage, groups := 0, 0
+	storage, groups, uniformSize := 0, 0, 0
 	for _, resource := range layout.Resources {
-		if resource.StorageBuffer {
+		switch resource.Kind.Base() {
+		case ResourceStorageBuffer:
 			storage++
+		case ResourceUniformBuffer:
+			uniformSize = max(uniformSize, resource.Size)
 		}
 		groups = max(groups, resource.Group+1)
-	}
-	if layout.UniformSize > 0 {
-		groups = max(groups, layout.UniformGroup+1)
 	}
 	switch {
 	case storage > floor.MaxStorageBuffersPerShaderStage:
@@ -47,10 +47,10 @@ func checkWebLimits(shader string, layout ShaderLayout, device Limits) error {
 			Shader: shader, Limit: "bind groups",
 			Declared: groups, Floor: floor.MaxBindGroups, Device: device.MaxBindGroups,
 		}
-	case layout.UniformSize > floor.MaxUniformBufferBindingSize:
+	case uniformSize > floor.MaxUniformBufferBindingSize:
 		return ErrShaderExceedsWebLimits{
 			Shader: shader, Limit: "uniform block bytes",
-			Declared: layout.UniformSize, Floor: floor.MaxUniformBufferBindingSize,
+			Declared: uniformSize, Floor: floor.MaxUniformBufferBindingSize,
 			Device: device.MaxUniformBufferBindingSize,
 		}
 	}

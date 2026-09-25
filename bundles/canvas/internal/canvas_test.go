@@ -157,7 +157,7 @@ func (b *testBackend) ShaderLayout(id gfx.ShaderID) gfx.ShaderLayout {
 	array := !strings.Contains(source, "texture_2d<")
 	kept := layout.Resources[:0:0]
 	for _, resource := range layout.Resources {
-		if resource.StorageBuffer && !strings.Contains(source, resource.Name) {
+		if resource.Kind.Base() == gfx.ResourceStorageBuffer && !strings.Contains(source, resource.Name) {
 			continue
 		}
 		if resource.Name == TextureSlot && !array {
@@ -171,24 +171,23 @@ func (b *testBackend) ShaderLayout(id gfx.ShaderID) gfx.ShaderLayout {
 
 func testUnionLayout() gfx.ShaderLayout {
 	return gfx.ShaderLayout{
-		UniformSize: 208, UniformGroup: 0, UniformBinding: 0,
-		Uniforms: []gfx.UniformMember{
-			{Name: "canvasViewport", Offset: 48},
-			{Name: "canvasLayer", Offset: 64},
-			{Name: "canvasClip", Offset: 128},
-			{Name: "tint", Offset: 144},
-			{Name: "keyColor", Offset: 160},
-			{Name: "customValue", Offset: 180},
-			{Name: "fade", Offset: 176},
-			{Name: "haloReach", Offset: testHaloReachOffset},
-			{Name: "haloPlateau", Offset: testHaloPlateauOffset},
-			{Name: "haloExponent", Offset: testHaloExponentOffset},
-		},
 		Resources: []gfx.ShaderResource{
-			{Name: "canvasSampler", Sampler: true, Group: 1, Binding: 0},
+			{Name: "params", Kind: gfx.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 208, Members: []gfx.StorageMember{
+				{Name: "canvasViewport", Offset: 48},
+				{Name: "canvasLayer", Offset: 64},
+				{Name: "canvasClip", Offset: 128},
+				{Name: "tint", Offset: 144},
+				{Name: "keyColor", Offset: 160},
+				{Name: "customValue", Offset: 180},
+				{Name: "fade", Offset: 176},
+				{Name: "haloReach", Offset: testHaloReachOffset},
+				{Name: "haloPlateau", Offset: testHaloPlateauOffset},
+				{Name: "haloExponent", Offset: testHaloExponentOffset},
+			}},
+			{Name: "canvasSampler", Kind: gfx.ResourceSampler, Group: 1, Binding: 0},
 			{Name: "canvasTexture", TextureView: gfx.TextureView2DArray, Group: 1, Binding: 1},
-			{Name: "instances", StorageBuffer: true, Group: 2, Binding: 0},
-			{Name: "wobble", StorageBuffer: true, Group: 2, Binding: 1},
+			{Name: "instances", Kind: gfx.ResourceStorageBuffer, Group: 2, Binding: 0},
+			{Name: "wobble", Kind: gfx.ResourceStorageBuffer, Group: 2, Binding: 1},
 		},
 	}
 }

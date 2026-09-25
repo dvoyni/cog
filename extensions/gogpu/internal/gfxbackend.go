@@ -177,11 +177,12 @@ func (s *gfxRenderPass) SetUniformBlock(offset, size int) {
 	// binding, which leaves the uniform's group unfilled - and flushBinds
 	// refuses that and drops the draw, rather than rendering it with whatever
 	// an earlier frame left there.
-	if !s.backend.uniforms.bound(offset, size) {
+	block := s.shader.uniform
+	if block == nil || !s.backend.uniforms.bound(offset, size) {
 		return
 	}
-	binding := uint32(s.shader.layout.UniformBinding)
-	s.backend.addEntry(s.shader.layout.UniformGroup, gfxbBindEntry{
+	binding := uint32(block.Binding)
+	s.backend.addEntry(block.Group, gfxbBindEntry{
 		key: gfxbBindingKey{
 			kind: gfxbBindUniform, binding: uint16(binding),
 			id: gfxbUniformArenaID, generation: s.backend.uniforms.generation,
@@ -519,7 +520,7 @@ func (b *gfxBackend) NewShader(desc gfx.ShaderDesc) (gfx.ShaderID, error) {
 }
 
 // buildShaderLayouts creates the GPU bind-group layouts (indexed by group) and the
-// pipeline layout from a shader's reflected uniform + resource bindings.
+// pipeline layout from a shader's reflected resource bindings.
 func (b *gfxBackend) buildShaderLayouts(sh *gfxbShader) error {
 	l := sh.layout
 	groups := map[int][]gputypes.BindGroupLayoutEntry{}
@@ -529,35 +530,30 @@ func (b *gfxBackend) buildShaderLayouts(sh *gfxbShader) error {
 			maxGroup = g
 		}
 	}
-	if l.UniformSize > 0 {
-		groups[l.UniformGroup] = append(groups[l.UniformGroup], gputypes.BindGroupLayoutEntry{
-			Binding:    uint32(l.UniformBinding),
-			Visibility: gputypes.ShaderStageVertex | gputypes.ShaderStageFragment,
-			Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform},
-		})
-		note(l.UniformGroup)
-	}
 	for _, r := range l.Resources {
 		e := gputypes.BindGroupLayoutEntry{Binding: uint32(r.Binding), Visibility: gputypes.ShaderStageVertex | gputypes.ShaderStageFragment}
-		if r.Sampler {
+		switch r.Kind.Base() {
+		case gfx.ResourceUniformBuffer:
+			e.Buffer = &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform}
+		case gfx.ResourceSampler:
 			samplerType := gputypes.SamplerBindingTypeFiltering
-			if r.Comparison {
+			if r.Kind.Has(gfx.ResourceComparison) {
 				samplerType = gputypes.SamplerBindingTypeComparison
 			}
 			e.Sampler = &gputypes.SamplerBindingLayout{Type: samplerType}
-		} else if r.StorageBuffer {
+		case gfx.ResourceStorageBuffer:
 			bindingType := gputypes.BufferBindingTypeReadOnlyStorage
-			if r.WritableBuffer {
+			if r.Kind.Has(gfx.ResourceWritable) {
 				bindingType = gputypes.BufferBindingTypeStorage
 			}
 			e.Buffer = &gputypes.BufferBindingLayout{Type: bindingType}
-		} else {
+		case gfx.ResourceTexture:
 			view := gputypes.TextureViewDimension2D
 			if r.TextureView == gfx.TextureView2DArray {
 				view = gputypes.TextureViewDimension2DArray
 			}
 			sampleType := gputypes.TextureSampleTypeFloat
-			if r.Depth {
+			if r.Kind.Has(gfx.ResourceDepth) {
 				sampleType = gputypes.TextureSampleTypeDepth
 			}
 			e.Texture = &gputypes.TextureBindingLayout{SampleType: sampleType, ViewDimension: view}

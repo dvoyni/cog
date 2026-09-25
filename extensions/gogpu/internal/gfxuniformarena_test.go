@@ -263,7 +263,7 @@ func TestAUniformBindingIsKeyedByOffsetAndSize(t *testing.T) {
 		label:      "canvas.wgsl",
 		bgLayouts:  []*wgpu.BindGroupLayout{{}},
 		groupSizes: []int{1},
-		layout:     gfx.ShaderLayout{UniformSize: 64, UniformGroup: 0, UniformBinding: 0},
+		uniform:    &gfx.ShaderResource{Name: "params", Kind: gfx.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64},
 	}
 	pass := &gfxRenderPass{backend: b, shader: shader}
 
@@ -310,7 +310,7 @@ func TestUniformBindGroupsSurviveFramesAndNotAResize(t *testing.T) {
 		label:      "canvas.wgsl",
 		bgLayouts:  []*wgpu.BindGroupLayout{{}, {}},
 		groupSizes: []int{1, 1},
-		layout:     gfx.ShaderLayout{UniformSize: 64, UniformGroup: 0, UniformBinding: 0},
+		uniform:    &gfx.ShaderResource{Name: "params", Kind: gfx.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64},
 	}
 	pass := &gfxRenderPass{backend: b, shader: shader}
 

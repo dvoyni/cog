@@ -438,10 +438,10 @@ type TextureTransition = internal.TextureTransition
 // before it hands Code over, so a backend never sees a preprocessor directive.
 type ShaderDesc = internal.ShaderDesc
 
-// ShaderLayout describes a shader's reflected bindings: the uniform parameter
-// block (members + byte offsets, and its group/binding) plus texture and sampler
-// resources. The translator packs params at their declared offsets and binds
-// each resource by matching its name to a material parameter.
+// ShaderLayout describes a shader's reflected bindings: uniform blocks, storage
+// buffers, textures and samplers, each one a ShaderResource. The translator packs
+// params into a uniform block at its members' offsets and binds every other
+// resource by matching its name to a material parameter.
 type ShaderLayout = internal.ShaderLayout
 
 // ShaderVertexInput is one @location input of a shader's vertex stage: where it
@@ -454,16 +454,28 @@ type ShaderLayout = internal.ShaderLayout
 // survives into the hardware beyond those two numbers.
 type ShaderVertexInput = internal.ShaderVertexInput
 
-// UniformMember is one member of the shader-parameter uniform block: its name and
-// byte offset within the block.
-type UniformMember = internal.UniformMember
-
-// StorageMember is one top-level member of a reflected storage struct. Stride
-// and Count are set for an array member - `lights: array<SceneLight, 16>` - and
-// zero otherwise.
+// StorageMember is one top-level member of a reflected uniform block or storage
+// struct. Stride and Count are set for an array member - `lights:
+// array<SceneLight, 16>` - and zero otherwise.
 type StorageMember = internal.StorageMember
 
-// ShaderResource is a reflected texture, sampler, or storage-buffer binding.
+// ResourceKind is what a reflected binding is - a texture, sampler, uniform
+// buffer or storage buffer, read by Base - plus the flags that refine it within
+// its kind: ResourceDepth, ResourceComparison, ResourceWritable.
+type ResourceKind = internal.ResourceKind
+
+const (
+	ResourceTexture       = internal.ResourceTexture
+	ResourceSampler       = internal.ResourceSampler
+	ResourceUniformBuffer = internal.ResourceUniformBuffer
+	ResourceStorageBuffer = internal.ResourceStorageBuffer
+	ResourceDepth         = internal.ResourceDepth
+	ResourceComparison    = internal.ResourceComparison
+	ResourceWritable      = internal.ResourceWritable
+)
+
+// ShaderResource is a reflected uniform-block, storage-buffer, texture, or
+// sampler binding. A uniform block carries its byte Size and its Members.
 type ShaderResource = internal.ShaderResource
 
 // PipelineDesc describes a render pipeline to create. Bind group layouts are

@@ -13,10 +13,9 @@ import (
 // binding shape the engine has.
 func arrayTextureLayout() ShaderLayout {
 	return ShaderLayout{
-		UniformSize: 80, UniformGroup: 0, UniformBinding: 0,
-		Uniforms: []UniformMember{{Name: "mvp", Offset: 0}},
 		Resources: []ShaderResource{
-			{Name: "canvasSampler", Sampler: true, Group: 1, Binding: 0},
+			{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: 80, Members: []StorageMember{{Name: "mvp", Offset: 0}}},
+			{Name: "canvasSampler", Kind: ResourceSampler, Group: 1, Binding: 0},
 			{Name: "canvasTexture", TextureView: TextureView2DArray, Group: 1, Binding: 1},
 		},
 	}

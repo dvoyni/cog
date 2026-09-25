@@ -40,6 +40,10 @@ type gfxbShader struct {
 	// It is an index rather than a search of layout.Resources for the same
 	// reason textureViews is: it is read once per group per draw.
 	groupSizes []int
+	// uniform is the shader's uniform block, or nil when it declares none. It is
+	// found once here rather than searched for in layout.Resources, because
+	// SetUniformBlock reads it once per draw.
+	uniform *gfx.ShaderResource
 }
 
 func newGfxbShader(label string, module *wgpu.ShaderModule, layout gfx.ShaderLayout) *gfxbShader {
@@ -47,6 +51,7 @@ func newGfxbShader(label string, module *wgpu.ShaderModule, layout gfx.ShaderLay
 		label: label, module: module, layout: layout,
 		textureViews: textureViewIndex(layout),
 		groupSizes:   groupSizeIndex(layout),
+		uniform:      layout.UniformBlock(),
 	}
 }
 
@@ -60,19 +65,15 @@ func (s *gfxbShader) declaredEntries(group int) int {
 	return s.groupSizes[group]
 }
 
-// groupSizeIndex counts the bindings each group declares, over the same two
-// sources buildShaderLayouts builds the layouts from - the uniform block and
-// the reflected resources - so the two cannot disagree about what a group holds.
+// groupSizeIndex counts the bindings each group declares, over the same
+// reflected resources buildShaderLayouts builds the layouts from, so the two
+// cannot disagree about what a group holds.
 func groupSizeIndex(layout gfx.ShaderLayout) []int {
 	var sizes []int
 	grow := func(group int) {
 		for len(sizes) <= group {
 			sizes = append(sizes, 0)
 		}
-	}
-	if layout.UniformSize > 0 && layout.UniformGroup >= 0 {
-		grow(layout.UniformGroup)
-		sizes[layout.UniformGroup]++
 	}
 	for i := range layout.Resources {
 		if group := layout.Resources[i].Group; group >= 0 {
@@ -99,13 +100,12 @@ func (s *gfxbShader) textureViewDimension(group, binding int) gfx.TextureViewDim
 }
 
 // textureViewIndex builds the (group, binding) -> dimension index from a
-// shader's reflected resources, skipping samplers and storage buffers because
-// neither has a view dimension to declare.
+// shader's reflected textures, the one kind with a view dimension to declare.
 func textureViewIndex(layout gfx.ShaderLayout) [][]gfx.TextureViewDimension {
 	var index [][]gfx.TextureViewDimension
 	for i := range layout.Resources {
 		r := &layout.Resources[i]
-		if r.Sampler || r.StorageBuffer || r.Group < 0 || r.Binding < 0 {
+		if r.Kind.Base() != gfx.ResourceTexture || r.Group < 0 || r.Binding < 0 {
 			continue
 		}
 		for len(index) <= r.Group {

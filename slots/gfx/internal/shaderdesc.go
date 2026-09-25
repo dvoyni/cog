@@ -8,16 +8,12 @@ type ShaderDesc struct {
 	Label string
 }
 
-// ShaderLayout describes a shader's reflected bindings: the uniform parameter
-// block (members + byte offsets, and its group/binding) plus texture and sampler
-// resources. The translator packs params at their declared offsets and binds
-// each resource by matching its name to a material parameter.
+// ShaderLayout describes a shader's reflected bindings: uniform blocks, storage
+// buffers, textures and samplers, each one a ShaderResource. The translator packs
+// params into a uniform block at its members' offsets and binds every other
+// resource by matching its name to a material parameter.
 type ShaderLayout struct {
-	UniformSize    int
-	UniformGroup   int
-	UniformBinding int
-	Uniforms       []UniformMember
-	Resources      []ShaderResource
+	Resources []ShaderResource
 	// VertexInputs is every @location the vertex stage declares, which is the
 	// half of the vertex interface only the shader knows. The other half is the
 	// mesh's vertex layout, and gfx.CheckVertexInterface is where they meet.
@@ -39,16 +35,21 @@ type ShaderVertexInput struct {
 	Count    int
 }
 
-// UniformMember is one member of the shader-parameter uniform block: its name and
-// byte offset within the block.
-type UniformMember struct {
-	Name   string
-	Offset int
+// UniformBlock is the shader's uniform block, or nil when it declares none. gfx
+// packs one block per draw, and reflection refuses a shader declaring a second,
+// so the first is the only one.
+func (l ShaderLayout) UniformBlock() *ShaderResource {
+	for i := range l.Resources {
+		if l.Resources[i].Kind.Base() == ResourceUniformBuffer {
+			return &l.Resources[i]
+		}
+	}
+	return nil
 }
 
-// StorageMember is one top-level member of a reflected storage struct. Stride
-// and Count are set for an array member - `lights: array<SceneLight, 16>` - and
-// zero otherwise.
+// StorageMember is one top-level member of a reflected uniform block or storage
+// struct. Stride and Count are set for an array member - `lights:
+// array<SceneLight, 16>` - and zero otherwise.
 type StorageMember struct {
 	Name   string
 	Offset int
@@ -56,22 +57,57 @@ type StorageMember struct {
 	Count  int
 }
 
-// ShaderResource is a reflected texture, sampler, or storage-buffer binding.
+// ResourceKind is what a reflected binding is - one of the kinds below, in the
+// low bits - plus the flags that refine it within its kind. Base separates the
+// kind from its flags, so a switch over kinds names every one of them rather
+// than leaving the texture as whatever matched no flag.
+type ResourceKind uint8
+
+const (
+	// ResourceTexture is a sampled texture. It is the zero kind, so a resource
+	// declared with no kind is one.
+	ResourceTexture ResourceKind = iota
+	ResourceSampler
+	ResourceUniformBuffer
+	ResourceStorageBuffer
+)
+
+// The flags refine a kind. WebGPU types a depth texture and a comparison sampler
+// differently from a colour texture and a filtering sampler, and binding one
+// where the other is declared is an error; a writable storage buffer is
+// read_write rather than read.
+const (
+	// ResourceDepth marks a depth texture.
+	ResourceDepth ResourceKind = 1 << (4 + iota)
+	// ResourceComparison marks a comparison sampler.
+	ResourceComparison
+	// ResourceWritable marks a read_write storage buffer.
+	ResourceWritable
+)
+
+// resourceKindMask covers the kind bits, below the flags.
+const resourceKindMask ResourceKind = 1<<4 - 1
+
+// Base is the kind without its flags.
+func (k ResourceKind) Base() ResourceKind { return k & resourceKindMask }
+
+// Has reports whether every bit of flag is set.
+func (k ResourceKind) Has(flag ResourceKind) bool { return k&flag == flag }
+
+// ShaderResource is a reflected uniform-block, storage-buffer, texture, or
+// sampler binding.
 type ShaderResource struct {
-	Name           string
-	Sampler        bool
-	StorageBuffer  bool
-	WritableBuffer bool
-	// Depth marks a depth texture and Comparison a comparison sampler: WebGPU
-	// types those bindings differently from a colour texture and its filtering
-	// sampler, and binding one where the other is declared is an error.
-	Depth       bool
-	Comparison  bool
+	Name string
+	// Kind is what the binding is, with the flags that refine it. Size is a
+	// uniform block's byte size and Members its layout, which is what gfx packs
+	// a draw's params by.
+	Kind        ResourceKind
 	TextureView TextureViewDimension
 	Group       int
 	Binding     int
-	// Members is the reflected layout of a storage struct's top-level members,
-	// which is how a recorder that declares no uniform block at all - scene -
-	// packs its records.
+	Size        int
+	// Members is the reflected layout of a uniform block's or storage struct's
+	// top-level members. A storage struct's is how a recorder that declares no
+	// uniform block at all - scene - packs its records.
 	Members []StorageMember
 }

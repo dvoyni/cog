@@ -653,7 +653,7 @@ What it holds:
   (`TextureUsageRenderAttachment`, `TextureUsageTextureBinding`,
   `TextureUsageCopySrc`) and `TextureTransition`.
 - **Descriptors:** `ShaderDesc`, `ShaderLayout`, `ShaderVertexInput`,
-  `UniformMember`, `StorageMember`, `ShaderResource`, `PipelineDesc`,
+  `StorageMember`, `ShaderResource`, `PipelineDesc`,
   `VertexAttribute`, `TextureDesc`, `SamplerDesc`, `BufferDesc`, `Region`,
   `Limits` and `DefaultLimits()`.
 - **IDs:** `ResourceID`, `TextureID`, `BufferID`, `SamplerID`, `ShaderID`,
@@ -719,7 +719,7 @@ never blocks: what it has ready is the copy the *previous* frame encoded,
 whose map resolved on the submit `Execute` just made.
 
 Low-level descriptors are `TextureDesc`, `BufferDesc`, `SamplerDesc`,
-`ShaderDesc`, `PipelineDesc`, `ShaderLayout`, `UniformMember`,
+`ShaderDesc`, `PipelineDesc`, `ShaderLayout`,
 `ShaderResource`, `StorageMember`, `ShaderVertexInput`, `VertexAttribute`, and
 `Region`. Reflection
 reports member layout for storage structs too — a one-level walk in which an

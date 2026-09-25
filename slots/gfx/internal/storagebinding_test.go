@@ -13,12 +13,11 @@ import (
 // and the third is fatal.
 func storageLayout() ShaderLayout {
 	return ShaderLayout{
-		UniformSize: 80, UniformGroup: 0, UniformBinding: 0,
-		Uniforms: []UniformMember{{Name: "mvp", Offset: 0}},
 		Resources: []ShaderResource{
-			{Name: "MainSampler", Sampler: true, Group: 1, Binding: 0},
+			{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: 80, Members: []StorageMember{{Name: "mvp", Offset: 0}}},
+			{Name: "MainSampler", Kind: ResourceSampler, Group: 1, Binding: 0},
 			{Name: "MainTexture", Group: 1, Binding: 1},
-			{Name: "Data", StorageBuffer: true, Group: 1, Binding: 2},
+			{Name: "Data", Kind: ResourceStorageBuffer, Group: 1, Binding: 2},
 		},
 	}
 }

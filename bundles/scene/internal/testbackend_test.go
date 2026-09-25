@@ -76,7 +76,7 @@ type bufferRange struct {
 // slot for each name a test binds of its own. A member the draw does not
 // supply is packed as zero. A test reads what a draw's material numbers
 // resolved to the way the shader would: packed by gfx, by name.
-var testUniforms = []gfx.UniformMember{
+var testUniforms = []gfx.StorageMember{
 	{Name: "baseColorFactor", Offset: 0}, {Name: "emissiveFactor", Offset: 16},
 	{Name: "baseColorTransform", Offset: 32}, {Name: "metallicRoughnessTransform", Offset: 48},
 	{Name: "normalTransform", Offset: 64}, {Name: "occlusionTransform", Offset: 80},
@@ -101,23 +101,23 @@ const testUniformSize = 240
 // material's module declares group 0 and the material record, which is what a
 // shader written against scene's contract does.
 var sceneResources = []gfx.ShaderResource{
-	{Name: "sceneFrame", StorageBuffer: true, Group: 0, Binding: 0},
-	{Name: "sceneInstances", StorageBuffer: true, Group: 0, Binding: 1},
-	{Name: "sceneAnim", StorageBuffer: true, Group: 0, Binding: 2},
-	{Name: "sceneMeshes", StorageBuffer: true, Group: 0, Binding: 3},
+	{Name: "sceneFrame", Kind: gfx.ResourceStorageBuffer, Group: 0, Binding: 0},
+	{Name: "sceneInstances", Kind: gfx.ResourceStorageBuffer, Group: 0, Binding: 1},
+	{Name: "sceneAnim", Kind: gfx.ResourceStorageBuffer, Group: 0, Binding: 2},
+	{Name: "sceneMeshes", Kind: gfx.ResourceStorageBuffer, Group: 0, Binding: 3},
 	{Name: "baseColorTexture", Group: 1, Binding: 1},
-	{Name: "baseColorSampler", Sampler: true, Group: 1, Binding: 2},
+	{Name: "baseColorSampler", Kind: gfx.ResourceSampler, Group: 1, Binding: 2},
 	{Name: "metallicRoughnessTexture", Group: 1, Binding: 3},
-	{Name: "metallicRoughnessSampler", Sampler: true, Group: 1, Binding: 4},
+	{Name: "metallicRoughnessSampler", Kind: gfx.ResourceSampler, Group: 1, Binding: 4},
 	{Name: "normalTexture", Group: 1, Binding: 5},
-	{Name: "normalSampler", Sampler: true, Group: 1, Binding: 6},
+	{Name: "normalSampler", Kind: gfx.ResourceSampler, Group: 1, Binding: 6},
 	{Name: "occlusionTexture", Group: 1, Binding: 7},
-	{Name: "occlusionSampler", Sampler: true, Group: 1, Binding: 8},
+	{Name: "occlusionSampler", Kind: gfx.ResourceSampler, Group: 1, Binding: 8},
 	{Name: "emissiveTexture", Group: 1, Binding: 9},
-	{Name: "emissiveSampler", Sampler: true, Group: 1, Binding: 10},
-	{Name: "scenePoses", StorageBuffer: true, Group: 2, Binding: 0},
-	{Name: "sceneSkinJoints", StorageBuffer: true, Group: 2, Binding: 1},
-	{Name: "sceneMorphDeltas", StorageBuffer: true, Group: 2, Binding: 2},
+	{Name: "emissiveSampler", Kind: gfx.ResourceSampler, Group: 1, Binding: 10},
+	{Name: "scenePoses", Kind: gfx.ResourceStorageBuffer, Group: 2, Binding: 0},
+	{Name: "sceneSkinJoints", Kind: gfx.ResourceStorageBuffer, Group: 2, Binding: 1},
+	{Name: "sceneMorphDeltas", Kind: gfx.ResourceStorageBuffer, Group: 2, Binding: 2},
 }
 
 // customResources are the bindings a custom material's module declares.
@@ -130,7 +130,9 @@ var customResources = map[string]bool{
 // differ in exactly which of group 2 they declare, and declaring one a draw
 // does not fill drops the draw. Any other source is a custom material's.
 func layoutOf(code string) gfx.ShaderLayout {
-	layout := gfx.ShaderLayout{UniformSize: testUniformSize, UniformGroup: 1, Uniforms: testUniforms}
+	layout := gfx.ShaderLayout{
+		Resources: []gfx.ShaderResource{{Name: "params", Kind: gfx.ResourceUniformBuffer, Group: 1, Binding: 0, Size: testUniformSize, Members: testUniforms}},
+	}
 	bundled := strings.Contains(code, "sceneInstances")
 	for _, resource := range sceneResources {
 		if (bundled && strings.Contains(code, resource.Name)) || (!bundled && customResources[resource.Name]) {

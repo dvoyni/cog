@@ -43,12 +43,11 @@ func TestEveryReflectedSamplerBindsIndependentlyByName(t *testing.T) {
 	// A material with a tiling texture beside a clamped one: two samplers, two
 	// textures, all in one bind group.
 	backend := &fakeBackend{layout: &ShaderLayout{
-		UniformSize: 64, UniformGroup: 0, UniformBinding: 0,
-		Uniforms: []UniformMember{{Name: "mvp", Offset: 0}},
 		Resources: []ShaderResource{
-			{Name: "groundSampler", Sampler: true, Group: 1, Binding: 0},
+			{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64, Members: []StorageMember{{Name: "mvp", Offset: 0}}},
+			{Name: "groundSampler", Kind: ResourceSampler, Group: 1, Binding: 0},
 			{Name: "groundTexture", Group: 1, Binding: 1},
-			{Name: "decalSampler", Sampler: true, Group: 1, Binding: 2},
+			{Name: "decalSampler", Kind: ResourceSampler, Group: 1, Binding: 2},
 			{Name: "decalTexture", Group: 1, Binding: 3},
 		},
 	}}

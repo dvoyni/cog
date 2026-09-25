@@ -36,7 +36,7 @@ func TestStorageStructMembersAreReflected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reflect: %v", err)
 	}
-	if len(layout.Resources) != 1 || !layout.Resources[0].StorageBuffer {
+	if len(layout.Resources) != 1 || layout.Resources[0].Kind.Base() != gfx.ResourceStorageBuffer {
 		t.Fatalf("resources = %+v, want one storage buffer", layout.Resources)
 	}
 	members := map[string]gfx.StorageMember{}

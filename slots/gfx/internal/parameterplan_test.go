@@ -9,9 +9,10 @@ import (
 func TestPreparedParameterPlanReusesShapeAndReadsCurrentValues(t *testing.T) {
 	translator := newTranslator()
 	layout := ShaderLayout{
-		UniformSize: 16,
-		Uniforms:    []UniformMember{{Name: "value", Offset: 0}},
-		Resources:   []ShaderResource{{Name: "texture", Group: 1, Binding: 0}},
+		Resources: []ShaderResource{
+			{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: 16, Members: []StorageMember{{Name: "value", Offset: 0}}},
+			{Name: "texture", Group: 1, Binding: 0},
+		},
 	}
 	material := []ParameterDescr{TextureParam("texture", BakedTexture(1, 0, 0))}
 	draw := []ParameterDescr{FloatParam("value", 1)}
@@ -33,7 +34,9 @@ func TestPreparedParameterPlanReusesShapeAndReadsCurrentValues(t *testing.T) {
 
 func TestPreparedParameterPlanKeysOrderAndPreservesFirstDrawMatch(t *testing.T) {
 	translator := newTranslator()
-	layout := ShaderLayout{UniformSize: 4, Uniforms: []UniformMember{{Name: "value", Offset: 0}}}
+	layout := ShaderLayout{
+		Resources: []ShaderResource{{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: 4, Members: []StorageMember{{Name: "value", Offset: 0}}}},
+	}
 	material := []ParameterDescr{FloatParam("value", 1)}
 	draw := []ParameterDescr{FloatParam("value", 2), FloatParam("value", 3), FloatParam("other", 4)}
 	plan := translator.prepareParameterPlan(1, "test", layout, material, draw)
@@ -53,8 +56,7 @@ func TestPreparedParameterPlanKeysOrderAndPreservesFirstDrawMatch(t *testing.T) 
 func TestPreparedParameterPlanRejectsAKindMismatch(t *testing.T) {
 	translator := newTranslator()
 	layout := ShaderLayout{
-		UniformSize: 4,
-		Uniforms:    []UniformMember{{Name: "wobble", Offset: 0}},
+		Resources: []ShaderResource{{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: 4, Members: []StorageMember{{Name: "wobble", Offset: 0}}}},
 	}
 	draw := []ParameterDescr{BufferParam("wobble", BakedBuffer(1, 0))}
 	plan := translator.prepareParameterPlan(1, "wobbly.wgsl", layout, nil, draw)
@@ -70,15 +72,14 @@ func TestPreparedParameterPlanRejectsAKindMismatch(t *testing.T) {
 func TestPreparedParameterPlanAcceptsEveryKindThatFillsItsBinding(t *testing.T) {
 	translator := newTranslator()
 	layout := ShaderLayout{
-		UniformSize: 64,
-		Uniforms: []UniformMember{
-			{Name: "scalar", Offset: 0}, {Name: "vector", Offset: 16},
-			{Name: "tint", Offset: 32}, {Name: "record", Offset: 48},
-		},
 		Resources: []ShaderResource{
-			{Name: "sampler", Sampler: true, Group: 1, Binding: 0},
+			{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64, Members: []StorageMember{
+				{Name: "scalar", Offset: 0}, {Name: "vector", Offset: 16},
+				{Name: "tint", Offset: 32}, {Name: "record", Offset: 48},
+			}},
+			{Name: "sampler", Kind: ResourceSampler, Group: 1, Binding: 0},
 			{Name: "texture", Group: 1, Binding: 1},
-			{Name: "instances", StorageBuffer: true, Group: 2, Binding: 0},
+			{Name: "instances", Kind: ResourceStorageBuffer, Group: 2, Binding: 0},
 		},
 	}
 	draw := []ParameterDescr{
@@ -96,7 +97,9 @@ func TestPreparedParameterPlanAcceptsEveryKindThatFillsItsBinding(t *testing.T) 
 // one for a sibling shader is ordinary, and the built-in canvas materials do it.
 func TestPreparedParameterPlanIgnoresAnUnmatchedName(t *testing.T) {
 	translator := newTranslator()
-	layout := ShaderLayout{UniformSize: 4, Uniforms: []UniformMember{{Name: "value", Offset: 0}}}
+	layout := ShaderLayout{
+		Resources: []ShaderResource{{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: 4, Members: []StorageMember{{Name: "value", Offset: 0}}}},
+	}
 	draw := []ParameterDescr{FloatParam("value", 1), BufferParam("unknown", BakedBuffer(1, 0))}
 	if plan := translator.prepareParameterPlan(1, "fine.wgsl", layout, nil, draw); plan.mismatch != nil {
 		t.Fatalf("plan mismatch = %v, want none", plan.mismatch)

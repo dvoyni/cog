@@ -316,30 +316,36 @@ func (t *translator) planForShape(
 	entry := cachedParameterPlan{
 		materialNames: parameterNames(material),
 		drawNames:     parameterNames(draw),
-		plan:          parameterPlan{uniformSize: layout.UniformSize},
 	}
-	entry.plan.uniforms = make([]plannedUniform, len(layout.Uniforms))
-	for i := range layout.Uniforms {
-		member := &layout.Uniforms[i]
-		ref := parameterRefFor(member.Name, material, draw)
-		entry.plan.checkKind(label, member.Name, ref, material, draw, declaredValue)
-		entry.plan.uniforms[i] = plannedUniform{offset: member.Offset, param: ref}
+	if block := layout.UniformBlock(); block != nil {
+		entry.plan.uniformSize = block.Size
+		entry.plan.uniforms = make([]plannedUniform, len(block.Members))
+		for i := range block.Members {
+			member := &block.Members[i]
+			ref := parameterRefFor(member.Name, material, draw)
+			entry.plan.checkKind(label, member.Name, ref, material, draw, declaredValue)
+			entry.plan.uniforms[i] = plannedUniform{offset: member.Offset, param: ref}
+		}
 	}
 	entry.plan.resources = make([]plannedResource, 0, len(layout.Resources))
 	for i := range layout.Resources {
 		resource := &layout.Resources[i]
-		ref := parameterRefFor(resource.Name, material, draw)
-		if resource.Sampler {
+		kind, declared := plannedTexture, declaredTexture
+		switch resource.Kind.Base() {
+		case ResourceUniformBuffer:
+			// The uniform block is packed above rather than bound by name.
+			continue
+		case ResourceSampler:
+			ref := parameterRefFor(resource.Name, material, draw)
 			entry.plan.checkKind(label, resource.Name, ref, material, draw, declaredSampler)
 			entry.plan.samplers = append(entry.plan.samplers, plannedSampler{
 				group: resource.Group, binding: resource.Binding, param: ref,
 			})
 			continue
-		}
-		kind, declared := plannedTexture, declaredTexture
-		if resource.StorageBuffer {
+		case ResourceStorageBuffer:
 			kind, declared = plannedBuffer, declaredBuffer
 		}
+		ref := parameterRefFor(resource.Name, material, draw)
 		entry.plan.checkKind(label, resource.Name, ref, material, draw, declared)
 		entry.plan.resources = append(entry.plan.resources, plannedResource{
 			kind: kind, group: resource.Group, binding: resource.Binding, param: ref, name: resource.Name,

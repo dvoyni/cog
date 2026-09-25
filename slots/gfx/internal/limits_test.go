@@ -29,12 +29,11 @@ func TestShaderOverTheWebFloorIsReportedOnceAndStillRenders(t *testing.T) {
 	var reported []error
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
 	layout := ShaderLayout{
-		UniformSize: 64, UniformGroup: 0, UniformBinding: 0,
-		Uniforms: []UniformMember{{Name: "mvp", Offset: 0}},
+		Resources: []ShaderResource{{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64, Members: []StorageMember{{Name: "mvp", Offset: 0}}}},
 	}
 	for i := range 9 {
 		layout.Resources = append(layout.Resources, ShaderResource{
-			Name: "records", StorageBuffer: true, Group: 1, Binding: i,
+			Name: "records", Kind: ResourceStorageBuffer, Group: 1, Binding: i,
 		})
 	}
 	backend := &fakeBackend{layout: &layout}
@@ -79,7 +78,12 @@ func TestCheckWebLimitsMeasuresAgainstTheFloorNotTheDevice(t *testing.T) {
 	// A desktop adapter reports far more than the web floor, so a check against
 	// the device would pass a shader no browser can run.
 	device := Limits{MaxStorageBuffersPerShaderStage: 200, MaxBindGroups: 8, MaxUniformBufferBindingSize: 1 << 20}
-	within := ShaderLayout{UniformSize: 256, Resources: []ShaderResource{{StorageBuffer: true, Group: 1}}}
+	within := ShaderLayout{
+		Resources: []ShaderResource{
+			{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: 256},
+			{Kind: ResourceStorageBuffer, Group: 1},
+		},
+	}
 	if err := checkWebLimits("canvas.sprite", within, device); err != nil {
 		t.Errorf("a shader within the floor was rejected: %v", err)
 	}
@@ -89,7 +93,9 @@ func TestCheckWebLimitsMeasuresAgainstTheFloorNotTheDevice(t *testing.T) {
 		t.Error("eight bind groups were accepted, want an error")
 	}
 
-	uniform := ShaderLayout{UniformSize: DefaultLimits().MaxUniformBufferBindingSize + 1}
+	uniform := ShaderLayout{
+		Resources: []ShaderResource{{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: DefaultLimits().MaxUniformBufferBindingSize + 1}},
+	}
 	if err := checkWebLimits("scene.pbr", uniform, device); err == nil {
 		t.Error("an oversized uniform block was accepted, want an error")
 	}
@@ -99,9 +105,10 @@ func TestBufferRangeParamBindsItsOwnSlice(t *testing.T) {
 	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{layout: &ShaderLayout{
-		UniformSize: 64, UniformGroup: 0, UniformBinding: 0,
-		Uniforms:  []UniformMember{{Name: "mvp", Offset: 0}},
-		Resources: []ShaderResource{{Name: "records", StorageBuffer: true, Group: 1, Binding: 0}},
+		Resources: []ShaderResource{
+			{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64, Members: []StorageMember{{Name: "mvp", Offset: 0}}},
+			{Name: "records", Kind: ResourceStorageBuffer, Group: 1, Binding: 0},
+		},
 	}}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
@@ -155,8 +162,7 @@ func TestUniformBlockOverTheSlotIsReportedOnceAndDropped(t *testing.T) {
 	var reported []error
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
 	layout := ShaderLayout{
-		UniformSize: uniformMax + 1, UniformGroup: 0, UniformBinding: 0,
-		Uniforms: []UniformMember{{Name: "mvp", Offset: 0}},
+		Resources: []ShaderResource{{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: uniformMax + 1, Members: []StorageMember{{Name: "mvp", Offset: 0}}}},
 	}
 	backend := &fakeBackend{layout: &layout}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -196,8 +202,7 @@ func TestUniformBlockThatFillsTheSlotRenders(t *testing.T) {
 	var reported []error
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
 	backend := &fakeBackend{layout: &ShaderLayout{
-		UniformSize: uniformMax, UniformGroup: 0, UniformBinding: 0,
-		Uniforms: []UniformMember{{Name: "mvp", Offset: 0}},
+		Resources: []ShaderResource{{Name: "params", Kind: ResourceUniformBuffer, Group: 0, Binding: 0, Size: uniformMax, Members: []StorageMember{{Name: "mvp", Offset: 0}}}},
 	}}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
