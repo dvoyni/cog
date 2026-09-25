@@ -548,7 +548,8 @@ render thread. Storage offsets are 256-aligned (`gfx.StorageAlignment`), so a
 record pads up to a multiple of it — a pad, not a cap on what it may hold.
 
 `gfx.DefaultLimits()` is the WebGPU spec floor: 4 bind groups, 8 storage buffers
-per shader stage, a 128 MiB storage binding, a 64 KiB uniform binding, and a
+per shader stage, a 128 MiB storage binding, 12 uniform buffers per shader
+stage, a 64 KiB uniform binding, and a
 256 MiB buffer. Every shader gfx reflects is checked against it, and never
 against the device's own limits — a desktop adapter reports hardware numbers, so
 checking those passes a build that cannot run in a browser. The device's limits
@@ -725,7 +726,10 @@ Low-level descriptors are `TextureDesc`, `BufferDesc`, `SamplerDesc`,
 reports member layout for storage structs too — a one-level walk in which an
 array member carries its element stride and count — so a recorder that declares
 no uniform block at all packs its records from the same source of truth. A
-shader declaring two uniform blocks is an error rather than a silent overwrite.
+shader may declare several uniform blocks: each is its own `ShaderResource`
+with its own members, packed into its own span of the frame's uniform arena and
+bound at its own group and binding, its members matched by name like every
+other parameter.
 It also reports the vertex stage's `@location` inputs as `ShaderVertexInput`
 values — the location plus a `VertexScalar` kind and a component count — which
 is the half of the vertex interface only the shader knows.
@@ -818,8 +822,9 @@ silently wrong. The draw is dropped and the shape is reported once. It is the
 `O(1)` half: whether every index is below the vertex count is checked by
 whoever built the geometry, where a pass over the indices already runs.
 
-`ErrUniformBlockTooLarge{Shader, Declared, Max}` reports a shader whose uniform
-block is larger than the 256 bytes gfx binds for it on every draw. It is checked
+`ErrUniformBlockTooLarge{Shader, Block, Declared, Max}` reports a shader with a
+uniform block larger than the 256 bytes gfx binds for each block on every draw,
+and names the first such block. It is checked
 once, when the shader is reflected, and it is fatal to the shader: the module is
 freed and every draw through it is dropped, because the alternative is a block
 cut to 256 bytes with nothing saying so. The web-floor reports are the opposite

@@ -136,9 +136,11 @@ type BakeSink interface {
 // RenderPass receives render commands in recording order.
 type RenderPass interface {
 	SetPipeline(types.PipelineID)
-	// SetUniformBlock binds the draw's uniform block: size bytes at offset in
-	// the arena BakeUniforms handed over. offset is aligned to UniformAlignment.
-	SetUniformBlock(offset, size int)
+	// SetUniformBlock binds one of the draw's uniform blocks, the one the
+	// shader declares at group and binding, to size bytes at offset in the arena
+	// BakeUniforms handed over. offset is aligned to UniformAlignment. A draw
+	// through a shader with several blocks gets one call per block.
+	SetUniformBlock(group, binding, offset, size int)
 	SetTexture(types.TextureID, int, int)
 	SetSampler(types.SamplerID, int, int)
 	SetVertexBuffer(types.BufferID, int)
@@ -251,8 +253,9 @@ func (q *Queue) SetPipeline(pipeline types.PipelineID) {
 }
 
 // SetUniformBlock claims size bytes of the frame's uniform arena at the next
-// offset aligned to UniformAlignment, binds them for the draw that follows, and
-// returns them zeroed for the caller to pack. The slice is valid until the next
+// offset aligned to UniformAlignment, binds them to the block at group and
+// binding for the draw that follows, and returns them zeroed for the caller to
+// pack. The slice is valid until the next
 // claim, which may move the arena.
 //
 // The claim takes size rounded up to UniformAlignment, so the next block starts
@@ -262,12 +265,14 @@ func (q *Queue) SetPipeline(pipeline types.PipelineID) {
 // A block claimed outside every pass belongs to a stray draw that no replay
 // reaches. It is still handed to BakeUniforms, which costs a backend the unused
 // bytes and nothing else.
-func (q *Queue) SetUniformBlock(size int) []byte {
+func (q *Queue) SetUniformBlock(group, binding, size int) []byte {
 	offset := len(q.uniforms)
 	span := (size + UniformAlignment - 1) / UniformAlignment * UniformAlignment
 	q.uniforms = slices.Grow(q.uniforms, span)[:offset+span]
 	clear(q.uniforms[offset:])
-	q.render = append(q.render, renderOp{kind: renderSetUniformBlock, arg0: int32(offset), arg1: int32(size)})
+	q.render = append(q.render, renderOp{
+		kind: renderSetUniformBlock, arg0: int32(offset), arg1: int32(size), arg2: int32(group), arg3: int32(binding),
+	})
 	return q.uniforms[offset : offset+size : offset+size]
 }
 
@@ -412,7 +417,7 @@ func (q *Queue) replayRange(sink RenderPass, start, end int) {
 		case renderSetPipeline:
 			sink.SetPipeline(types.PipelineID(o.res0))
 		case renderSetUniformBlock:
-			sink.SetUniformBlock(int(o.arg0), int(o.arg1))
+			sink.SetUniformBlock(int(o.arg2), int(o.arg3), int(o.arg0), int(o.arg1))
 		case renderSetTexture:
 			sink.SetTexture(types.TextureID(o.res0), int(o.arg0), int(o.arg1))
 		case renderSetSampler:

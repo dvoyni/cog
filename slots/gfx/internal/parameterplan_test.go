@@ -30,7 +30,7 @@ func TestPreparedParameterPlanReusesShapeAndReadsCurrentValues(t *testing.T) {
 	if second != first {
 		t.Fatal("identical parameter shape did not reuse its prepared plan")
 	}
-	if got := descriptors.ParameterNum(second.uniforms[0].param.value(material, draw)); got != 9 {
+	if got := descriptors.ParameterNum(second.blocks[0].members[0].param.value(material, draw)); got != 9 {
 		t.Fatalf("prepared uniform value = %v, want current value 9", got)
 	}
 	if got := descriptors.ParameterTexture(second.resources[0].param.value(material, draw)).ID(); got != 2 {
@@ -46,7 +46,7 @@ func TestPreparedParameterPlanKeysOrderAndPreservesFirstDrawMatch(t *testing.T) 
 	material := []descriptors.ParameterDescr{descriptors.FloatParam("value", 1)}
 	draw := []descriptors.ParameterDescr{descriptors.FloatParam("value", 2), descriptors.FloatParam("value", 3), descriptors.FloatParam("other", 4)}
 	plan := translator.prepareParameterPlan(1, "test", layout, material, draw)
-	if got := descriptors.ParameterNum(plan.uniforms[0].param.value(material, draw)); got != 2 {
+	if got := descriptors.ParameterNum(plan.blocks[0].members[0].param.value(material, draw)); got != 2 {
 		t.Fatalf("prepared duplicate draw value = %v, want first value 2", got)
 	}
 

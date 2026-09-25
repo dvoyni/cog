@@ -263,14 +263,13 @@ func TestAUniformBindingIsKeyedByOffsetAndSize(t *testing.T) {
 		label:      "canvas.wgsl",
 		bgLayouts:  []*wgpu.BindGroupLayout{{}},
 		groupSizes: []int{1},
-		uniform:    &gfx.ShaderResource{Name: "params", Kind: gfx.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64},
 	}
 	pass := &gfxRenderPass{backend: b, shader: shader}
 
 	generation := b.uniforms.generation
 	for block := 0; block < 3; block++ {
 		offset := block * align
-		pass.SetUniformBlock(offset, 64)
+		pass.SetUniformBlock(0, 0, offset, 64)
 		if len(b.acc[0]) != 1 {
 			t.Fatalf("block %d emitted %d entries, want 1", block, len(b.acc[0]))
 		}
@@ -287,6 +286,30 @@ func TestAUniformBindingIsKeyedByOffsetAndSize(t *testing.T) {
 			t.Errorf("block %d native = %+v, want the arena's buffer at its own offset and size", block, native)
 		}
 		b.resetAcc()
+	}
+}
+
+// A draw through a shader with two uniform blocks binds each at its own
+// binding and its own span of the one arena buffer.
+func TestEachUniformBlockBindsAtItsOwnBinding(t *testing.T) {
+	b := newGfxBackend()
+	log := newArenaLog()
+	b.uniforms = log.arena()
+	b.BakeUniforms(make([]byte, 2*align))
+	shader := &gfxbShader{label: "two.wgsl", bgLayouts: []*wgpu.BindGroupLayout{{}}, groupSizes: []int{2}}
+	pass := &gfxRenderPass{backend: b, shader: shader}
+
+	pass.SetUniformBlock(0, 0, 0, 16)
+	pass.SetUniformBlock(0, 1, align, 32)
+	if len(b.acc[0]) != 2 {
+		t.Fatalf("entries = %d, want one per block", len(b.acc[0]))
+	}
+	for i, want := range []struct{ binding, offset, size int }{{0, 0, 16}, {1, align, 32}} {
+		native := b.acc[0][i].native
+		if native.Binding != uint32(want.binding) || native.Buffer != b.uniforms.buffer ||
+			native.Offset != uint64(want.offset) || native.Size != uint64(want.size) {
+			t.Errorf("entry %d = %+v, want binding %d at %d, %d bytes", i, native, want.binding, want.offset, want.size)
+		}
 	}
 }
 
@@ -310,7 +333,6 @@ func TestUniformBindGroupsSurviveFramesAndNotAResize(t *testing.T) {
 		label:      "canvas.wgsl",
 		bgLayouts:  []*wgpu.BindGroupLayout{{}, {}},
 		groupSizes: []int{1, 1},
-		uniform:    &gfx.ShaderResource{Name: "params", Kind: gfx.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64},
 	}
 	pass := &gfxRenderPass{backend: b, shader: shader}
 
@@ -319,7 +341,7 @@ func TestUniformBindGroupsSurviveFramesAndNotAResize(t *testing.T) {
 	frame := func(size int) {
 		b.BakeUniforms(make([]byte, size))
 		for draw := 0; draw < 2; draw++ {
-			pass.SetUniformBlock(draw*align, 64)
+			pass.SetUniformBlock(0, 0, draw*align, 64)
 			b.addEntry(1, gfxbBindEntry{key: gfxbBindingKey{kind: gfxbBindTexture, binding: 0, id: 7}})
 			b.bindGroups.get(shader, 0, b.acc[0])
 			b.bindGroups.get(shader, 1, b.acc[1])

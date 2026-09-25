@@ -22,6 +22,7 @@ func TestDefaultLimitsAreTheBrowserFloor(t *testing.T) {
 		MaxBindGroups:                   4,
 		MaxStorageBuffersPerShaderStage: 8,
 		MaxStorageBufferBindingSize:     128 << 20,
+		MaxUniformBuffersPerShaderStage: 12,
 		MaxUniformBufferBindingSize:     64 << 10,
 		MaxBufferSize:                   256 << 20,
 	}
@@ -105,6 +106,20 @@ func TestCheckWebLimitsMeasuresAgainstTheFloorNotTheDevice(t *testing.T) {
 	if err := checkWebLimits("scene.pbr", uniform, device); err == nil {
 		t.Error("an oversized uniform block was accepted, want an error")
 	}
+
+	// Twelve uniform blocks is the floor; the thirteenth is past it.
+	blocks := shader.ShaderLayout{}
+	for i := range DefaultLimits().MaxUniformBuffersPerShaderStage + 1 {
+		blocks.Resources = append(blocks.Resources, shader.ShaderResource{Kind: shader.ResourceUniformBuffer, Binding: i, Size: 16})
+	}
+	var exceeded shader.ErrShaderExceedsWebLimits
+	if err := checkWebLimits("scene.pbr", blocks, device); !errors.As(err, &exceeded) || exceeded.Declared != 13 || exceeded.Floor != 12 {
+		t.Errorf("thirteen uniform blocks = %v, want 13 declared against the floor of 12", err)
+	}
+	blocks.Resources = blocks.Resources[:12]
+	if err := checkWebLimits("scene.pbr", blocks, device); err != nil {
+		t.Errorf("twelve uniform blocks were rejected: %v", err)
+	}
 }
 
 func TestBufferRangeParamBindsItsOwnSlice(t *testing.T) {
@@ -168,7 +183,10 @@ func TestUniformBlockOverTheSlotIsReportedOnceAndDropped(t *testing.T) {
 	var reported []error
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
 	layout := shader.ShaderLayout{
-		Resources: []shader.ShaderResource{{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: uniformMax + 1, Members: []shader.StorageMember{{Name: "mvp", Offset: 0}}}},
+		Resources: []shader.ShaderResource{
+			{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64, Members: []shader.StorageMember{{Name: "mvp", Offset: 0}}},
+			{Name: "lights", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 1, Size: uniformMax + 1},
+		},
 	}
 	backend := &fakeBackend{layout: &layout}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
@@ -198,8 +216,8 @@ func TestUniformBlockOverTheSlotIsReportedOnceAndDropped(t *testing.T) {
 	if found != 1 {
 		t.Fatalf("reports = %d over two frames, want exactly 1: %v", found, reported)
 	}
-	if tooLarge.Declared != 257 || tooLarge.Max != 256 {
-		t.Errorf("report = %+v, want 257 declared against 256", tooLarge)
+	if tooLarge.Block != "lights" || tooLarge.Declared != 257 || tooLarge.Max != 256 {
+		t.Errorf("report = %+v, want lights' 257 declared against 256", tooLarge)
 	}
 }
 

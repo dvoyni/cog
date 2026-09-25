@@ -513,7 +513,7 @@ type Queue = internal.Queue
 // minUniformBufferOffsetAlignment WebGPU permits, so an offset aligned to it is
 // a valid uniform binding offset on every device. A Queue hands a backend the
 // arena through BakeSink.BakeUniforms and binds a block per draw through
-// RenderPass.SetUniformBlock(offset, size).
+// RenderPass.SetUniformBlock(group, binding, offset, size).
 const UniformAlignment = internal.UniformAlignment
 
 // PassSink receives the frame's passes. BeginPass returns the RenderPass its

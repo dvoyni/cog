@@ -40,10 +40,6 @@ type gfxbShader struct {
 	// It is an index rather than a search of layout.Resources for the same
 	// reason textureViews is: it is read once per group per draw.
 	groupSizes []int
-	// uniform is the shader's uniform block, or nil when it declares none. It is
-	// found once here rather than searched for in layout.Resources, because
-	// SetUniformBlock reads it once per draw.
-	uniform *gfx.ShaderResource
 }
 
 func newGfxbShader(label string, module *wgpu.ShaderModule, layout gfx.ShaderLayout) *gfxbShader {
@@ -51,7 +47,6 @@ func newGfxbShader(label string, module *wgpu.ShaderModule, layout gfx.ShaderLay
 		label: label, module: module, layout: layout,
 		textureViews: textureViewIndex(layout),
 		groupSizes:   groupSizeIndex(layout),
-		uniform:      layout.UniformBlock(),
 	}
 }
 

@@ -78,12 +78,14 @@ func (t *translator) translateDraw(f *frame, op *Op, pass descriptors.PassDescr,
 		return
 	}
 	t.ops.SetPipeline(pipeline)
-	// A shader that declares no uniform block gets no uniform binding and no
-	// slot in the frame's uniform arena. Emitting one anyway puts an entry in a group
-	// the pipeline layout does not have, and CreateBindGroup fails the
-	// entry-count rule with the whole frame's command buffer as the casualty.
-	if plan.uniformSize > 0 {
-		t.packParams(t.ops.SetUniformBlock(plan.uniformSize), op.Params, op.Material.Params(), plan)
+	// Each uniform block the shader declares gets its own slot in the frame's
+	// uniform arena, and a shader that declares none gets no uniform binding at
+	// all. Emitting one anyway puts an entry in a group the pipeline layout does
+	// not have, and CreateBindGroup fails the entry-count rule with the whole
+	// frame's command buffer as the casualty.
+	for i := range plan.blocks {
+		block := &plan.blocks[i]
+		packParams(t.ops.SetUniformBlock(block.group, block.binding, block.size), op.Params, op.Material.Params(), block)
 	}
 	t.emitResources(f, op.Params, op.Material.Params(), plan)
 	t.ops.SetVertexBuffer(vertices.ID(), 0)
@@ -323,23 +325,25 @@ func (t *translator) planForShape(
 		materialNames: parameterNames(material),
 		drawNames:     parameterNames(draw),
 	}
-	if block := layout.UniformBlock(); block != nil {
-		entry.plan.uniformSize = block.Size
-		entry.plan.uniforms = make([]plannedUniform, len(block.Members))
-		for i := range block.Members {
-			member := &block.Members[i]
-			ref := parameterRefFor(member.Name, material, draw)
-			entry.plan.checkKind(label, member.Name, ref, material, draw, declaredValue)
-			entry.plan.uniforms[i] = plannedUniform{offset: member.Offset, param: ref}
-		}
-	}
 	entry.plan.resources = make([]plannedResource, 0, len(layout.Resources))
 	for i := range layout.Resources {
 		resource := &layout.Resources[i]
 		kind, declared := plannedTexture, declaredTexture
 		switch resource.Kind.Base() {
 		case shader.ResourceUniformBuffer:
-			// The uniform block is packed above rather than bound by name.
+			// A uniform block is packed member by member rather than bound by
+			// name.
+			block := plannedBlock{
+				group: resource.Group, binding: resource.Binding, size: resource.Size,
+				members: make([]plannedUniform, len(resource.Members)),
+			}
+			for j := range resource.Members {
+				member := &resource.Members[j]
+				ref := parameterRefFor(member.Name, material, draw)
+				entry.plan.checkKind(label, member.Name, ref, material, draw, declaredValue)
+				block.members[j] = plannedUniform{offset: member.Offset, param: ref}
+			}
+			entry.plan.blocks = append(entry.plan.blocks, block)
 			continue
 		case shader.ResourceSampler:
 			ref := parameterRefFor(resource.Name, material, draw)
@@ -364,17 +368,17 @@ func (t *translator) planForShape(
 	return &bucket[len(bucket)-1].plan
 }
 
-// packParams writes reflected shader constants into block, which arrives
-// zeroed and sized to the plan's block. Per-draw parameters override
-// same-named material parameters; unmatched members remain zero.
-func (t *translator) packParams(block []byte, drawParams, materialParams []descriptors.ParameterDescr, plan *parameterPlan) {
-	size := min(plan.uniformSize, len(block))
+// packParams writes reflected shader constants into buf, which arrives zeroed
+// and sized to the planned block. Per-draw parameters override same-named
+// material parameters; unmatched members remain zero.
+func packParams(buf []byte, drawParams, materialParams []descriptors.ParameterDescr, block *plannedBlock) {
+	size := min(block.size, len(buf))
 	if size <= 0 {
 		return
 	}
-	buf := block[:size]
-	for i := range plan.uniforms {
-		uniform := &plan.uniforms[i]
+	buf = buf[:size]
+	for i := range block.members {
+		uniform := &block.members[i]
 		off := uniform.offset
 		if off < 0 || off >= size {
 			continue

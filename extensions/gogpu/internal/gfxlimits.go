@@ -13,6 +13,7 @@ func (b *gfxBackend) Limits() gfx.Limits {
 		MaxBindGroups:                   int(device.MaxBindGroups),
 		MaxStorageBuffersPerShaderStage: int(device.MaxStorageBuffersPerShaderStage),
 		MaxStorageBufferBindingSize:     int(device.MaxStorageBufferBindingSize),
+		MaxUniformBuffersPerShaderStage: int(device.MaxUniformBuffersPerShaderStage),
 		MaxUniformBufferBindingSize:     int(device.MaxUniformBufferBindingSize),
 		MaxBufferSize:                   int(device.MaxBufferSize),
 	}

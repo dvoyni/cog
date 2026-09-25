@@ -35,6 +35,14 @@ type plannedUniform struct {
 	param  parameterRef
 }
 
+// plannedBlock is one uniform block the shader declares: where it binds, its
+// byte size, and the parameter each of its members is packed from.
+type plannedBlock struct {
+	group, binding int
+	size           int
+	members        []plannedUniform
+}
+
 type plannedResourceKind uint8
 
 const (
@@ -103,10 +111,9 @@ func (d declaredKind) accepts(kind descriptors.ParamKind) bool {
 }
 
 type parameterPlan struct {
-	uniformSize int
-	uniforms    []plannedUniform
-	samplers    []plannedSampler
-	resources   []plannedResource
+	blocks    []plannedBlock
+	samplers  []plannedSampler
+	resources []plannedResource
 	// mismatch is the first parameter whose kind cannot fill the binding its
 	// name matched. It is resolved during construction, which is cached per
 	// (shader, parameter shape), so detecting it costs nothing per draw.

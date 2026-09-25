@@ -13,8 +13,8 @@ import (
 // somewhere else.
 type ErrShaderExceedsWebLimits = shader.ErrShaderExceedsWebLimits
 
-// ErrUniformBlockTooLarge reports a shader whose uniform block is larger than
-// the slot gfx binds for it on every draw. Unlike a web-floor report it is fatal
+// ErrUniformBlockTooLarge reports a shader with a uniform block larger than the
+// slot gfx binds for it on every draw. Block names the first such block. Unlike a web-floor report it is fatal
 // to the shader: the module is freed and every draw through it is dropped,
 // because what would otherwise render is the block cut to the slot, read partly
 // from outside its binding, with nothing saying why.

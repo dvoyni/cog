@@ -55,6 +55,7 @@ var defaultLimits = types.Limits{
 	MaxBindGroups:                   4,
 	MaxStorageBuffersPerShaderStage: 8,
 	MaxStorageBufferBindingSize:     128 << 20,
+	MaxUniformBuffersPerShaderStage: 12,
 	MaxUniformBufferBindingSize:     64 << 10,
 	MaxBufferSize:                   256 << 20,
 }

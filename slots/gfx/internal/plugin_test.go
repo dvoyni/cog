@@ -373,8 +373,10 @@ func (b *fakeBackend) Present() {
 
 func (b *fakeBackend) SetPipeline(types.PipelineID) {}
 func (b *fakeBackend) BakeUniforms(arena []byte)    { b.uniforms = arena }
-func (b *fakeBackend) SetUniformBlock(offset, size int) {
-	b.lastOps = append(b.lastOps, backendOp{kind: testOpSetUniformBlock, data: bytes.Clone(b.uniforms[offset : offset+size])})
+func (b *fakeBackend) SetUniformBlock(group, binding, offset, size int) {
+	b.lastOps = append(b.lastOps, backendOp{
+		kind: testOpSetUniformBlock, group: group, binding: binding, data: bytes.Clone(b.uniforms[offset : offset+size]),
+	})
 }
 
 // SetTexture records the binding so a test can assert which texture reached the
@@ -609,7 +611,7 @@ func (benchmarkGpuSink) BakeTexture(types.TextureID, int, int, descriptors.Textu
 func (benchmarkGpuSink) AllocateTexture(types.TextureID, TextureDesc)             {}
 func (benchmarkGpuSink) UpdateTexture(types.TextureID, int, types.Region, []byte) {}
 func (benchmarkGpuSink) SetPipeline(types.PipelineID)                             {}
-func (benchmarkGpuSink) SetUniformBlock(int, int)                                 {}
+func (benchmarkGpuSink) SetUniformBlock(int, int, int, int)                       {}
 func (benchmarkGpuSink) SetTexture(types.TextureID, int, int)                     {}
 
 func (benchmarkGpuSink) SetSampler(types.SamplerID, int, int)                       {}
@@ -633,7 +635,7 @@ func BenchmarkGpuQueueReplaySteadyState(b *testing.B) {
 	for i := range 100 {
 		queue.BakeBuffer(types.BufferID(i+1), types.BufferVertex, 64, []byte{1})
 		queue.SetPipeline(1)
-		queue.SetUniformBlock(16)[0] = 1
+		queue.SetUniformBlock(0, 0, 16)[0] = 1
 		queue.SetVertexBuffer(types.BufferID(i+1), 0)
 		queue.Draw(0, 3, 1, 0, false)
 		queue.ReleaseBuffer(types.BufferID(i + 1))
@@ -1333,6 +1335,52 @@ func TestVertexLayoutKeyRejectsUnsupportedLayouts(t *testing.T) {
 				t.Fatal("unsupported vertex layout was accepted")
 			}
 		})
+	}
+}
+
+// Each uniform block the shader declares is packed into its own span of the
+// arena and bound at its own group and binding, its members matched by name
+// from the same material and draw params.
+func TestEveryUniformBlockPacksAndBindsOnItsOwn(t *testing.T) {
+	p := newPlugin()
+	k := newTestKernel(t, p)
+	layout := shader.ShaderLayout{
+		Resources: []shader.ShaderResource{
+			{Name: "camera", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64, Members: []shader.StorageMember{{Name: "view", Offset: 0}}},
+			{Name: "surface", Kind: shader.ResourceUniformBuffer, Group: 1, Binding: 2, Size: 32, Members: []shader.StorageMember{{Name: "tint", Offset: 16}}},
+		},
+	}
+	backend := &fakeBackend{layout: &layout}
+	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
+
+	green := m.Color{R: 0, G: 1, B: 0, A: 1}
+	view := m.Translation4(3, 4, 5)
+	w := recordList(t, k)
+	w.Draw(triangle(), testMaterial(descriptors.ColorParam("tint", green)), descriptors.MatParam("view", view))
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
+	k.PublishEvent(app.RenderEvent{}).Wait()
+
+	var blocks []backendOp
+	for _, op := range backend.lastOps {
+		if op.kind == testOpSetUniformBlock {
+			blocks = append(blocks, op)
+		}
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("uniform blocks bound = %d, want 2", len(blocks))
+	}
+	camera, surface := blocks[0], blocks[1]
+	if camera.group != 0 || camera.binding != 0 || len(camera.data) != 64 {
+		t.Errorf("camera = %d/%d, %d bytes, want 0/0, 64 bytes", camera.group, camera.binding, len(camera.data))
+	}
+	if surface.group != 1 || surface.binding != 2 || len(surface.data) != 32 {
+		t.Errorf("surface = %d/%d, %d bytes, want 1/2, 32 bytes", surface.group, surface.binding, len(surface.data))
+	}
+	if tx := math.Float32frombits(binary.LittleEndian.Uint32(camera.data[48:])); tx != view[12] {
+		t.Errorf("view[12] = %v, want %v", tx, view[12])
+	}
+	if g := math.Float32frombits(binary.LittleEndian.Uint32(surface.data[20:])); g != 1 {
+		t.Errorf("tint.g at offset 20 = %v, want 1", g)
 	}
 }
 

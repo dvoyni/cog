@@ -1,8 +1,6 @@
 package internal
 
 import (
-	"fmt"
-
 	"github.com/dvoyni/cog/slots/gfx"
 	"github.com/gogpu/naga"
 	"github.com/gogpu/naga/ir"
@@ -32,12 +30,11 @@ func reflectShaderLayout(source string) (gfx.ShaderLayout, error) {
 	return shaderLayoutFrom(mod)
 }
 
-// shaderLayoutFrom extracts the uniform block and every storage struct, each
+// shaderLayoutFrom extracts every uniform block and storage struct, each
 // with its member layout, and every texture and sampler binding from a lowered
 // module.
 func shaderLayoutFrom(mod *ir.Module) (gfx.ShaderLayout, error) {
 	var layout gfx.ShaderLayout
-	uniform := ""
 	for _, gv := range mod.GlobalVariables {
 		if gv.Binding == nil {
 			continue
@@ -59,13 +56,6 @@ func shaderLayoutFrom(mod *ir.Module) (gfx.ShaderLayout, error) {
 			if gv.Space != ir.SpaceUniform {
 				continue
 			}
-			// A second uniform block used to overwrite the first, which moves
-			// every parameter to the wrong offset with nothing to point at.
-			if uniform != "" {
-				return gfx.ShaderLayout{}, fmt.Errorf(
-					"gogpu: shader declares two uniform blocks, %q and %q; gfx supports one", uniform, gv.Name)
-			}
-			uniform = gv.Name
 			layout.Resources = append(layout.Resources, gfx.ShaderResource{
 				Name: gv.Name, Kind: gfx.ResourceUniformBuffer, Group: group, Binding: binding,
 				Size: int(inner.Span), Members: storageMembers(mod, inner),

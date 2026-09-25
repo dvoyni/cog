@@ -260,7 +260,7 @@ func (b *testBackend) SetPipeline(id gfx.PipelineID) { b.state.pipeline = id }
 
 func (b *testBackend) BakeUniforms(arena []byte) { b.uniforms = arena }
 
-func (b *testBackend) SetUniformBlock(offset, size int) {
+func (b *testBackend) SetUniformBlock(_, _, offset, size int) {
 	b.state.params = append([]byte(nil), b.uniforms[offset:offset+size]...)
 }
 

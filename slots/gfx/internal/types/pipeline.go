@@ -14,6 +14,7 @@ type Limits struct {
 	MaxBindGroups                   int
 	MaxStorageBuffersPerShaderStage int
 	MaxStorageBufferBindingSize     int
+	MaxUniformBuffersPerShaderStage int
 	MaxUniformBufferBindingSize     int
 	MaxBufferSize                   int
 }

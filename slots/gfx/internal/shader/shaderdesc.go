@@ -12,7 +12,7 @@ type ShaderDesc struct {
 
 // ShaderLayout describes a shader's reflected bindings: uniform blocks, storage
 // buffers, textures and samplers, each one a ShaderResource. The translator packs
-// params into a uniform block at its members' offsets and binds every other
+// params into each uniform block at its members' offsets and binds every other
 // resource by matching its name to a material parameter.
 type ShaderLayout struct {
 	Resources []ShaderResource
@@ -35,18 +35,6 @@ type ShaderVertexInput struct {
 	Location int
 	Kind     VertexScalar
 	Count    int
-}
-
-// UniformBlock is the shader's uniform block, or nil when it declares none. gfx
-// packs one block per draw, and reflection refuses a shader declaring a second,
-// so the first is the only one.
-func (l ShaderLayout) UniformBlock() *ShaderResource {
-	for i := range l.Resources {
-		if l.Resources[i].Kind.Base() == ResourceUniformBuffer {
-			return &l.Resources[i]
-		}
-	}
-	return nil
 }
 
 // StorageMember is one top-level member of a reflected uniform block or storage

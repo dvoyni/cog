@@ -60,8 +60,9 @@ type gfxBackend struct {
 	whiteArray     *wgpu.TextureView
 	defaultSampler *wgpu.Sampler
 
-	// uniforms is the frame's shader-parameter blocks: one buffer at 256-strided
-	// offsets, staged CPU-side and written once. It is nil until a device is
+	// uniforms is the frame's shader-parameter blocks: one buffer holding every
+	// block at its 256-aligned offset, written once a frame from the queue's
+	// arena. It is nil until a device is
 	// attached, and a frame with no uniform-carrying draw never gives it one.
 	uniforms *gfxbUniformArena
 
@@ -168,7 +169,7 @@ func (s *gfxRenderPass) SetPipeline(id gfx.PipelineID) {
 	s.backend.resetAcc()
 }
 
-func (s *gfxRenderPass) SetUniformBlock(offset, size int) {
+func (s *gfxRenderPass) SetUniformBlock(group, binding, offset, size int) {
 	if s.shader == nil || s.backend.uniforms == nil {
 		return
 	}
@@ -177,19 +178,17 @@ func (s *gfxRenderPass) SetUniformBlock(offset, size int) {
 	// binding, which leaves the uniform's group unfilled - and flushBinds
 	// refuses that and drops the draw, rather than rendering it with whatever
 	// an earlier frame left there.
-	block := s.shader.uniform
-	if block == nil || !s.backend.uniforms.bound(offset, size) {
+	if !s.backend.uniforms.bound(offset, size) {
 		return
 	}
-	binding := uint32(block.Binding)
-	s.backend.addEntry(block.Group, gfxbBindEntry{
+	s.backend.addEntry(group, gfxbBindEntry{
 		key: gfxbBindingKey{
 			kind: gfxbBindUniform, binding: uint16(binding),
 			id: gfxbUniformArenaID, generation: s.backend.uniforms.generation,
 			offset: uint32(offset), size: uint32(size),
 		},
 		native: wgpu.BindGroupEntry{
-			Binding: binding, Buffer: s.backend.uniforms.buffer,
+			Binding: uint32(binding), Buffer: s.backend.uniforms.buffer,
 			Offset: uint64(offset), Size: uint64(size),
 		},
 	})

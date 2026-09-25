@@ -126,11 +126,11 @@ const (
 	//     samplers PbrSlots names at @group(1) @binding(1) to (10), every one
 	//     filled on every draw from the file or the bundled defaults.
 	//
-	// scenePbrMaterial is the one uniform block gfx allows a shader. An
-	// includer with per-draw numbers of its own adds them to it, by composing
-	// the block itself from MaterialProloguePath, a fields source of its own
-	// over MaterialFieldsPath, and MaterialEpiloguePath, before it includes
-	// this. Group 3 is left for the includer's own bindings, which ride as
+	// scenePbrMaterial is the material's uniform block. An includer with
+	// per-draw numbers of its own adds them to it, by composing the block
+	// itself from MaterialProloguePath, a fields source of its own over
+	// MaterialFieldsPath, and MaterialEpiloguePath, before it includes this -
+	// or declares a uniform block of its own in group 3. Group 3 is left for the includer's own bindings, which ride as
 	// params on the Material or on the default scene shader. Do not declare
 	// those names again.
 	FragmentStagePath = "builtin/model/fragmentstage.wgsl"
@@ -138,9 +138,9 @@ const (
 	// MaterialProloguePath opens the material's uniform block: it declares
 	// the struct ScenePbrMaterial, and nothing after its opening brace.
 	//
-	// The block is three sources because gfx fills one uniform block per
-	// shader, by member name per draw, so a custom shader's own per-draw
-	// numbers belong in this block, and a struct cannot be reopened. The
+	// The block is three sources so that a custom shader's own per-draw
+	// numbers can join this block, which gfx fills by member name per draw,
+	// and a struct cannot be reopened. The
 	// bundled material includes the three in order. An extending shader
 	// includes this, then a fields source of its own that includes
 	// MaterialFieldsPath and lists its members after it, then

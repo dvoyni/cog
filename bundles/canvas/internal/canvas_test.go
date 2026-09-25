@@ -277,7 +277,7 @@ func (b *testBackend) UpdateTexture(id gfx.TextureID, layer int, region gfx.Regi
 }
 func (b *testBackend) SetPipeline(gfx.PipelineID) {}
 func (b *testBackend) BakeUniforms(arena []byte)  { b.uniforms = arena }
-func (b *testBackend) SetUniformBlock(offset, size int) {
+func (b *testBackend) SetUniformBlock(_, _, offset, size int) {
 	if b.capture {
 		b.drawParams = append(b.drawParams, append([]byte(nil), b.uniforms[offset:offset+size]...))
 	}

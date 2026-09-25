@@ -77,7 +77,7 @@ func (*discardSink) TransitionTextures([]gfx.TextureTransition)                 
 func (*discardSink) Present()                                                             {}
 func (*discardSink) Capture(gfx.CaptureDesc)                                              {}
 func (*discardSink) SetPipeline(gfx.PipelineID)                                           {}
-func (*discardSink) SetUniformBlock(int, int)                                             {}
+func (*discardSink) SetUniformBlock(int, int, int, int)                                   {}
 func (*discardSink) SetTexture(gfx.TextureID, int, int)                                   {}
 func (*discardSink) SetSampler(gfx.SamplerID, int, int)                                   {}
 func (*discardSink) SetVertexBuffer(gfx.BufferID, int)                                    {}

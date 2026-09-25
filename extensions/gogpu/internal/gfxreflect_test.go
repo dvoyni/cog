@@ -38,10 +38,11 @@ func TestReflectShaderLayout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reflect: %v", err)
 	}
-	block := layout.UniformBlock()
-	if block == nil {
-		t.Fatal("the uniform block is not reflected")
+	blocks := uniformBlocks(layout)
+	if len(blocks) != 1 {
+		t.Fatalf("uniform blocks = %+v, want the one", blocks)
 	}
+	block := blocks[0]
 	if block.Size != 80 {
 		t.Errorf("uniform size = %d, want 80", block.Size)
 	}
@@ -54,6 +55,18 @@ func TestReflectShaderLayout(t *testing.T) {
 			t.Errorf("member %q offset = %d, want %d", name, got[name], want)
 		}
 	}
+}
+
+// uniformBlocks is every uniform block a layout reflected, in declaration
+// order.
+func uniformBlocks(layout gfx.ShaderLayout) []gfx.ShaderResource {
+	var blocks []gfx.ShaderResource
+	for _, resource := range layout.Resources {
+		if resource.Kind.Base() == gfx.ResourceUniformBuffer {
+			blocks = append(blocks, resource)
+		}
+	}
+	return blocks
 }
 
 func TestReflectShaderStorageBuffers(t *testing.T) {

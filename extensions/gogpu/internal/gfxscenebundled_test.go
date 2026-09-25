@@ -50,8 +50,11 @@ func TestBundledSceneShaderDeclaresItsGroupZeroAndOneBindings(t *testing.T) {
 	// group: gfx packs it per draw from the draw's params by name, so no
 	// renderer knows its layout. Everything the renderer binds itself is
 	// storage.
-	block := layout.UniformBlock()
-	if block == nil || block.Name != "scenePbrMaterial" || block.Size == 0 || block.Size > 256 || block.Group != 1 || block.Binding != 0 {
+	blocks := uniformBlocks(layout)
+	if len(blocks) != 1 {
+		t.Fatalf("the scene shader's uniform blocks are %+v, want the material's alone", blocks)
+	}
+	if block := blocks[0]; block.Name != "scenePbrMaterial" || block.Size == 0 || block.Size > 256 || block.Group != 1 || block.Binding != 0 {
 		t.Fatalf("the scene shader's uniform block is %+v, want the material's, at most 256 bytes, at 1/0", block)
 	}
 	resources := map[string]cgfx.ShaderResource{}
