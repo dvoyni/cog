@@ -98,7 +98,9 @@ type Contacts struct {
 	partners []partner
 	// crossings is the Sensors that did not move which fast solid Bodies'
 	// paths crossed, each an entry held back until the Body's own stop is
-	// settled, since it is reported only up to where the Body stopped.
+	// settled, since a Dynamic body reports them only up to where it stopped.
+	// Once Detect has written those, it keeps only the ones past each stop,
+	// which Solve writes for a Kinematic mover, never stopped (carryHeld).
 	crossings []crossing
 	// held is the Hits of the fast solid Bodies' own paths past where each
 	// stopped, on Body index targets, held out of the list: Detect cannot tell

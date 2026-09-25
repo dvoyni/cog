@@ -21,7 +21,8 @@ import (
 // It keeps every later Hit that could stop it too, held out of the list,
 // because a Kinematic body is never stopped and Detect cannot tell one: Solve
 // carries each Dynamic body a Kinematic one's path met, and writes its
-// Contact, and a Dynamic mover's are dropped unseen.
+// Contact, and a Dynamic mover's are dropped unseen. The Sensors it crosses
+// past its stop are held the same way, and written for a Kinematic mover.
 //
 // A target that is not marked is taken where the tick left it. A target that
 // moved into the path during the tick counts as already there, which is the
@@ -694,16 +695,20 @@ func (c *Contacts) backToStops(dynamics *ecs.Get[Dynamic], places *ecs.Set[Posit
 }
 
 // carryHeld is Solve's half of the Hits the path pass held past each fast
-// solid Body's stop, and runs after backToStops. Only Solve reads Dynamic, so
-// only Solve decides what each one is:
+// solid Body's stop, and of the Sensors it crossed past it, and runs after
+// backToStops. Only Solve reads Dynamic, so only Solve decides what each one
+// is:
 //
-//   - a Dynamic mover stopped at its first Hit, so the Hits past it are not
-//     touches at all, and nothing of them is written or moved;
+//   - a Dynamic mover stopped at its first Hit, so the Hits and the crossings
+//     past it are not touches at all, and nothing of them is written or moved;
 //   - a Kinematic mover is never stopped, so each Dynamic body its path met
 //     is carried from its end pose by (1 − T)·d_K, as the first one is, and
 //     the Hit is written as its Contact: T the Hit's, one point and a Depth
 //     of 0. A body two Kinematic bodies met is carried by each;
-//   - a Kinematic or Static target is not carried, and nothing is written.
+//   - a Kinematic or Static target is not carried, and nothing is written;
+//   - each Sensor a Kinematic mover crossed past its stop is written as the
+//     path pass writes the ones before it: the Sensor as A, T the Hit's and a
+//     Depth of 0.
 //
 // A pair the discrete walk already wrote, the target touching the mover where
 // it stopped, keeps that Contact and is carried unless a filter dropped or
@@ -734,19 +739,40 @@ func (c *Contacts) carryHeld(dynamics *ecs.Get[Dynamic], places *ecs.Set[Positio
 			place.Current = place.Current.Add(carrier.Current.Sub(carrier.Previous).MulS(1 - held.made.T))
 		}
 	}
-	if len(c.carried) > 0 {
+
+	// The crossings past each stop, the Body B, cut to a Kinematic mover's, in
+	// the order the path pass sorted them in.
+	crossed := 0
+	for i := range c.crossings {
+		made := &c.crossings[i].made
+		if _, dynamic := dynamics.Of(made.B); dynamic {
+			continue
+		}
+		if at, written := c.lookup.find(made.A, made.B); written && int(at) < c.current {
+			continue
+		}
+		c.crossings[crossed] = c.crossings[i]
+		crossed++
+	}
+	c.crossings = c.crossings[:crossed]
+
+	if len(c.carried) > 0 || crossed > 0 {
 		c.writeCarried()
 	}
 }
 
 // writeCarried writes the carried Hits as Contacts at the end of the current
-// run, where the Ended and cached runs begin, which move up behind them. A
-// carried pair that was touching on an earlier tick has an Ended or a cached
+// run, where the Ended and cached runs begin, which move up behind them, and
+// each Sensor a Kinematic mover crossed past its stop among that Sensor's
+// entries, in order of T, the lower Body first at a tie, so that a Sensor's
+// entries still sit together and in order of T. A Sensor with none yet has its
+// entry at the end of the current run, before the carried Hits. A carried or
+// crossed pair that was touching on an earlier tick has an Ended or a cached
 // entry already, which gives way: the pair touches again, and carry takes its
 // phase and its Impulses from the previous tick's entry as for any Contact.
 // The pair table is rebuilt over the result, as the sleep System's rewrite
-// rebuilds it. It runs only on a tick a Kinematic body carried something past
-// its first Hit.
+// rebuilds it. It runs only on a tick a Kinematic body carried something or
+// crossed a Sensor past its first Hit.
 func (c *Contacts) writeCarried() {
 	current, visible := c.current, c.visible
 
@@ -758,10 +784,25 @@ func (c *Contacts) writeCarried() {
 			c.givingWay = append(c.givingWay, at-int32(current))
 		}
 	}
+	for i := range c.crossings {
+		made := &c.crossings[i].made
+		if at, found := c.lookup.find(made.A, made.B); found && int(at) >= current {
+			c.givingWay = append(c.givingWay, at-int32(current))
+		}
+	}
 
 	c.carriedTail = append(c.carriedTail[:0], c.entries[current:]...)
 	c.carriedAux = append(c.carriedAux[:0], c.aux[current:]...)
 	c.entries, c.aux = c.entries[:current], c.aux[:current]
+	for i := range c.crossings {
+		crossed := &c.crossings[i]
+		made := crossed.made
+		at, wasTouching := c.prevLookup.find(made.A, made.B)
+		c.carry(&made, at, wasTouching)
+		place := c.amongSensors(&made)
+		c.entries = slices.Insert(c.entries, place, made)
+		c.aux = slices.Insert(c.aux, place, crossed.aux)
+	}
 	for _, i := range c.carried {
 		held := &c.held[i]
 		made := held.made
@@ -787,6 +828,33 @@ func (c *Contacts) writeCarried() {
 	for i := range c.entries {
 		c.lookup.insert(c.entries[i].A, c.entries[i].B, int32(i))
 	}
+}
+
+// amongSensors is where in the current run, which is the whole of the entries
+// while writeCarried inserts, a Sensor's entry crossed past a stop goes: after
+// every entry of the same Sensor that comes before it in order of T, the lower
+// Body first at a tie, or before the first that comes after it; at the end,
+// for a Sensor with no entry yet.
+func (c *Contacts) amongSensors(made *Contact) int {
+	place := -1
+	for i := range c.entries {
+		entry := &c.entries[i]
+		if entry.A != made.A {
+			continue
+		}
+		if entry.T < made.T || (entry.T == made.T && entry.B < made.B) {
+			place = i + 1
+			continue
+		}
+		if place < 0 {
+			place = i
+		}
+		break
+	}
+	if place < 0 {
+		return len(c.entries)
+	}
+	return place
 }
 
 // bodyPath is one fast solid Body's path through the tick, as the rule that
