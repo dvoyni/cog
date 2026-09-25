@@ -360,7 +360,7 @@ func (p *plugin) detectSystem(
 ) {
 	types.Collide(
 		contacts.Get(), bodyIndex.Get(), staticIndex.Get(), jointed.Get(),
-		p.settings.persistenceTicks(step.Get()),
+		p.settings.persistenceTicks(step.Get()), p.settings.slop,
 	)
 }
 

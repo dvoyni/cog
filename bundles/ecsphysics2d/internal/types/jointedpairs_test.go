@@ -81,3 +81,8 @@ func TestTheJointedPairSetAllocatesNothingOnceItHasGrown(t *testing.T) {
 		t.Errorf("rebuilding the set allocates %v objects a tick, want none", got)
 	}
 }
+
+// testSlop is the Slop every Contact test hands Collide beside noJoints: the
+// plugin's default, which is what the path pass reads when it tells a seam from
+// a target a fast Body enters.
+const testSlop = 0.005

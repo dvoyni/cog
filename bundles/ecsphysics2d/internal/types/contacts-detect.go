@@ -20,10 +20,12 @@ import "github.com/dvoyni/cog/libs/m"
 //     lookup-key allocation has nothing to allocate.
 //
 // jointed is the set of pairs a Joint holds apart, which Index built from the
-// Joint Query; persistence is cp's collisionPersistence in ticks.
+// Joint Query; persistence is cp's collisionPersistence in ticks, and slop
+// the Slop, which the path pass reads to tell a seam from a target a fast Body
+// enters.
 func Collide(
 	contacts *Contacts, bodies *BodyIndex, statics *StaticIndex,
-	jointed *JointedPairs, persistence int,
+	jointed *JointedPairs, persistence int, slop float64,
 ) {
 	contacts.beginTick()
 
@@ -40,7 +42,7 @@ func Collide(
 	// the whole of the ordering the specification asks of the current run —
 	// and so that every fast solid Body is stopped before its other pairs are
 	// tested where it stopped.
-	contacts.pathPass(bodies, statics, jointed)
+	contacts.pathPass(bodies, statics, jointed, slop)
 
 	for slot := range moving.entries {
 		first := &moving.entries[slot]

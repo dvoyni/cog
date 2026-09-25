@@ -26,7 +26,7 @@ func TestAMovingCircleSensorIsProbedAlongItsPathAndNotOnlyWhereItLanded(t *testi
 	bodies.InsertMoving(sensor, sensorCircle(0), m.Vec2d{X: 4}, m.Vec2d{}, 0, 0, nil)
 
 	contacts := NewContacts(7)
-	Collide(contacts, bodies, statics, noJoints, 3)
+	Collide(contacts, bodies, statics, noJoints, 3, testSlop)
 
 	if contacts.Len() != 1 {
 		t.Fatalf("a Sensor swept through a circle made %d Contacts, want 1", contacts.Len())
@@ -51,7 +51,7 @@ func TestAMovingCircleSensorIsProbedAlongItsPathAndNotOnlyWhereItLanded(t *testi
 	discrete := NewBodyIndex(0)
 	discrete.Insert(sensor, sensorCircle(0), m.Vec2d{X: 4}, 0, nil)
 	landed := NewContacts(7)
-	Collide(landed, discrete, statics, noJoints, 3)
+	Collide(landed, discrete, statics, noJoints, 3, testSlop)
 	if landed.Len() != 0 {
 		t.Errorf("the Sensor tested only where it landed found %d Contacts, want none", landed.Len())
 	}
@@ -76,7 +76,7 @@ func TestASensorsEntriesSitTogetherOrderedByTAheadOfTheSolidPairs(t *testing.T) 
 	bodies.Insert(ecs.Entity(3), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{X: 0.5, Y: 10}, 0, nil)
 
 	contacts := NewContacts(7)
-	Collide(contacts, bodies, statics, noJoints, 3)
+	Collide(contacts, bodies, statics, noJoints, 3, testSlop)
 
 	list := contacts.All()
 	if len(list) != 4 {
@@ -103,7 +103,7 @@ func TestAProbedSensorThatStartedInsideSomethingReportsTheOverlapAtTheStart(t *t
 	bodies.InsertMoving(sensor, sensorCircle(0.5), m.Vec2d{X: 2}, m.Vec2d{}, 0, 0, nil)
 
 	contacts := NewContacts(7)
-	Collide(contacts, bodies, statics, noJoints, 3)
+	Collide(contacts, bodies, statics, noJoints, 3, testSlop)
 
 	if contacts.Len() != 1 {
 		t.Fatalf("a Sensor that began inside a circle made %d Contacts, want 1", contacts.Len())
@@ -130,7 +130,7 @@ func TestEverythingNotProbedReportsTAtOneWithTheOverlapWhereTheTickEnded(t *test
 	bodies.Insert(ecs.Entity(2), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{Y: 0.5}, 0, nil)
 
 	contacts := NewContacts(7)
-	Collide(contacts, bodies, NewStaticIndex(0), noJoints, 3)
+	Collide(contacts, bodies, NewStaticIndex(0), noJoints, 3, testSlop)
 
 	if contacts.Len() != 1 {
 		t.Fatalf("a segment Sensor overlapping a circle made %d Contacts, want 1", contacts.Len())
@@ -154,7 +154,7 @@ func TestASensorThatDidNotMoveIsTestedWhereItStands(t *testing.T) {
 	bodies.Insert(ecs.Entity(2), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{X: 5.6}, 0, nil)
 
 	contacts := NewContacts(7)
-	Collide(contacts, bodies, NewStaticIndex(0), noJoints, 3)
+	Collide(contacts, bodies, NewStaticIndex(0), noJoints, 3, testSlop)
 
 	if contacts.Len() != 1 {
 		t.Fatalf("a teleported Sensor made %d Contacts, want 1", contacts.Len())
@@ -186,7 +186,7 @@ func TestAStaticSensorIsNeverProbedAndQueriesStillFindIt(t *testing.T) {
 	bodies.InsertMoving(ecs.Entity(1), NewCircleShape(0.5, m.Vec2d{}), m.Vec2d{X: 0.6}, m.Vec2d{X: -8}, 0, 0, nil)
 
 	contacts := NewContacts(7)
-	Collide(contacts, bodies, statics, noJoints, 3)
+	Collide(contacts, bodies, statics, noJoints, 3, testSlop)
 	if contacts.Len() != 1 {
 		t.Fatalf("a Static Sensor made %d Contacts, want 1", contacts.Len())
 	}
@@ -244,7 +244,7 @@ func TestTwoMovingSensorsThatFindEachOtherKeepTheSmallerT(t *testing.T) {
 			bodies.InsertMoving(second, sensorCircle(0.1), each.toSecond, each.fromSecond, 0, 0, nil)
 
 			contacts := NewContacts(7)
-			Collide(contacts, bodies, NewStaticIndex(0), noJoints, 3)
+			Collide(contacts, bodies, NewStaticIndex(0), noJoints, 3, testSlop)
 
 			if contacts.Len() != 1 {
 				t.Fatalf("two Sensors that found each other made %d Contacts, want 1", contacts.Len())
@@ -282,7 +282,7 @@ func TestASweptSensorIsFilteredByTheGroupsBeforeAnyShapeTest(t *testing.T) {
 		bodies.InsertMoving(sensor, shape, m.Vec2d{X: 4}, m.Vec2d{}, 0, 0, nil)
 
 		contacts := NewContacts(7)
-		Collide(contacts, bodies, statics, noJoints, 3)
+		Collide(contacts, bodies, statics, noJoints, 3, testSlop)
 		return contacts.Len()
 	}
 
@@ -324,7 +324,7 @@ func TestASolidPairIsFilteredByTheGroupsBeforeAnyShapeTest(t *testing.T) {
 	rebuild()
 
 	contacts := NewContacts(7)
-	Collide(contacts, bodies, NewStaticIndex(0), noJoints, 3)
+	Collide(contacts, bodies, NewStaticIndex(0), noJoints, 3, testSlop)
 	if contacts.Len() != 0 {
 		t.Fatalf("two Shapes in groups that do not look for each other made %d Contacts", contacts.Len())
 	}
@@ -332,13 +332,13 @@ func TestASolidPairIsFilteredByTheGroupsBeforeAnyShapeTest(t *testing.T) {
 	// The same two Shapes, one of them widened to look for the other, touch.
 	person.CollidesWith = crowd | crates
 	rebuild()
-	Collide(contacts, bodies, NewStaticIndex(0), noJoints, 3)
+	Collide(contacts, bodies, NewStaticIndex(0), noJoints, 3, testSlop)
 	if contacts.Len() != 0 {
 		t.Fatalf("one side alone looking for the other made %d Contacts, want none", contacts.Len())
 	}
 	crate.CollidesWith = crates | crowd
 	rebuild()
-	Collide(contacts, bodies, NewStaticIndex(0), noJoints, 3)
+	Collide(contacts, bodies, NewStaticIndex(0), noJoints, 3, testSlop)
 	if contacts.Len() != 1 {
 		t.Fatalf("two sides that each look for the other made %d Contacts, want 1", contacts.Len())
 	}
@@ -357,19 +357,19 @@ func TestASweptSensorPairBeginsThenContinuesThenEndsExactlyOnce(t *testing.T) {
 
 	contacts := NewContacts(7)
 	sweep(m.Vec2d{}, m.Vec2d{X: 4})
-	Collide(contacts, bodies, statics, noJoints, 3)
+	Collide(contacts, bodies, statics, noJoints, 3, testSlop)
 	wantPhases(t, contacts, PhaseBegan)
 
 	sweep(m.Vec2d{}, m.Vec2d{X: 4})
-	Collide(contacts, bodies, statics, noJoints, 3)
+	Collide(contacts, bodies, statics, noJoints, 3, testSlop)
 	wantPhases(t, contacts, PhaseContinuing)
 
 	// Swept somewhere else entirely, so the pair comes apart.
 	sweep(m.Vec2d{Y: 20}, m.Vec2d{X: 4, Y: 20})
-	Collide(contacts, bodies, statics, noJoints, 3)
+	Collide(contacts, bodies, statics, noJoints, 3, testSlop)
 	wantPhases(t, contacts, PhaseEnded)
 
-	Collide(contacts, bodies, statics, noJoints, 3)
+	Collide(contacts, bodies, statics, noJoints, 3, testSlop)
 	wantPhases(t, contacts)
 }
 
@@ -398,7 +398,7 @@ func TestTheSweptSensorPathAllocatesNothing(t *testing.T) {
 	// and the Probe scratch the sweep refills once a Sensor.
 	for range 8 {
 		fill()
-		Collide(contacts, bodies, statics, noJoints, 3)
+		Collide(contacts, bodies, statics, noJoints, 3, testSlop)
 	}
 	if contacts.Len() == 0 {
 		t.Fatal("the scene the measurement runs over found no Contacts at all")
@@ -409,7 +409,7 @@ func TestTheSweptSensorPathAllocatesNothing(t *testing.T) {
 
 	if got := testing.AllocsPerRun(200, func() {
 		fill()
-		Collide(contacts, bodies, statics, noJoints, 3)
+		Collide(contacts, bodies, statics, noJoints, 3, testSlop)
 	}); got != 0 {
 		t.Errorf("sweeping the Sensors allocates %v objects a tick, want none", got)
 	}

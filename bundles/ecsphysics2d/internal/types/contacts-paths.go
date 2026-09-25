@@ -48,7 +48,11 @@ type stop struct {
 // It runs before the discrete walk, so what it writes sits at the front of the
 // list: a Sensor's entries together and in order of T, and each stopping
 // Contact.
-func (c *Contacts) pathPass(bodies *BodyIndex, statics *StaticIndex, jointed *JointedPairs) {
+//
+// slop is the Slop setting, how far two Shapes may overlap and be left alone,
+// which is how much deeper than a fast Body already rests a target on its
+// path may reach without stopping it.
+func (c *Contacts) pathPass(bodies *BodyIndex, statics *StaticIndex, jointed *JointedPairs, slop float64) {
 	moving := &bodies.index
 	for slot := range moving.entries {
 		marked := &moving.entries[slot]
@@ -59,7 +63,7 @@ func (c *Contacts) pathPass(bodies *BodyIndex, statics *StaticIndex, jointed *Jo
 			c.sweepSensor(bodies, statics, marked, slot)
 			continue
 		}
-		c.stopBody(bodies, statics, jointed, marked, int32(slot))
+		c.stopBody(bodies, statics, jointed, marked, int32(slot), slop)
 	}
 }
 
@@ -78,11 +82,16 @@ func (c *Contacts) pathPass(bodies *BodyIndex, statics *StaticIndex, jointed *Jo
 //     which is left to the discrete walk, so a fast ball rolling along a floor
 //     is not stopped by the floor;
 //   - a Joint holds the pair apart, as the discrete walk's own test rejects
-//     it. The collision bits are the Probe's own filter already.
+//     it. The collision bits are the Probe's own filter already;
+//   - the path does not enter the target: it is a seam in a surface the Body
+//     slides along, which the discrete walk resolves on the right side
+//     (enters). This is asked last, and only of a Hit that would stop.
 //
 // A Hit at T = 1 is a touch where the tick ended, which the discrete walk
 // finds, and it stops nothing.
-func (c *Contacts) stopBody(bodies *BodyIndex, statics *StaticIndex, jointed *JointedPairs, body *entry, slot int32) {
+func (c *Contacts) stopBody(
+	bodies *BodyIndex, statics *StaticIndex, jointed *JointedPairs, body *entry, slot int32, slop float64,
+) {
 	moving := &bodies.index
 	world := moving.world(body)
 	bits, collidesWith := body.shape.CollisionBits, body.shape.CollidesWith
@@ -90,6 +99,7 @@ func (c *Contacts) stopBody(bodies *BodyIndex, statics *StaticIndex, jointed *Jo
 	c.probeSlots = c.probeSlots[:0]
 	var delta m.Vec2d
 	var split int
+	var mover shapeProbe
 	if body.shape.Kind == ShapeCircle {
 		from, to, radius := body.previousCentre, world[0], body.shape.Radius
 		delta = to.Sub(from)
@@ -102,7 +112,7 @@ func (c *Contacts) stopBody(bodies *BodyIndex, statics *StaticIndex, jointed *Jo
 		if need := 2 * len(world); len(c.mover) < need {
 			c.mover = make([]m.Vec2d, need)
 		}
-		mover := shapeProbeBack(c.mover, body.shape, world, body.box, delta)
+		mover = shapeProbeBack(c.mover, body.shape, world, body.box, delta)
 		c.probes = moving.shapeAllSlots(c.probes[:0], 0, &c.probeSlots, 0,
 			&mover, bits, collidesWith, body.entity)
 		if bodies.sleeping > 0 {
@@ -119,10 +129,12 @@ func (c *Contacts) stopBody(bodies *BodyIndex, statics *StaticIndex, jointed *Jo
 	var other *entry
 	var otherSlot int32
 	var hit Hit
+	path := bodyPath{body: body, world: world, delta: delta, mover: &mover, rests: -1, slop: slop}
 	for at := range split {
 		candidate := c.probes[at]
-		_, found := bodies.entryAt(c.probeSlots[at])
-		if stops(body, candidate, found, jointed) {
+		within, found := bodies.entryAt(c.probeSlots[at])
+		if stops(body, candidate, found, jointed) &&
+			c.enters(&path, bodies, statics, split, candidate, found, within.world(found)) {
 			other, otherSlot, hit = found, c.probeSlots[at], candidate
 			break
 		}
@@ -132,7 +144,8 @@ func (c *Contacts) stopBody(bodies *BodyIndex, statics *StaticIndex, jointed *Jo
 			break
 		}
 		found, _, ok := statics.lookup(candidate.Entity)
-		if ok && stops(body, candidate, found, jointed) {
+		if ok && stops(body, candidate, found, jointed) &&
+			c.enters(&path, bodies, statics, split, candidate, found, statics.index.world(found)) {
 			other, otherSlot, hit = found, -1, candidate
 			break
 		}
@@ -364,6 +377,148 @@ func (c *Contacts) backToStops(dynamics *ecs.Get[Dynamic], places *ecs.Set[Posit
 		}
 		if place, ok := places.Ref(s.body.entity); ok {
 			place.Current = place.Previous.Add(place.Current.Sub(place.Previous).MulS(s.t))
+		}
+	}
+}
+
+// bodyPath is one fast solid Body's path through the tick, as the rule that
+// tells a Hit its path enters from a seam reads it.
+type bodyPath struct {
+	body *entry
+	// world is the Body's world cache at its end pose, and delta its path.
+	world []m.Vec2d
+	delta m.Vec2d
+	// mover is the Probed Shape of anything but a circle.
+	mover *shapeProbe
+	// rests is how deep the Body stands in what it already touches, measured
+	// the first time a Hit asks for it; below zero, it has not been.
+	rests float64
+	slop  float64
+}
+
+// enters reports that the Body's path enters the target of a Hit, which is
+// what stops it, as opposed to meeting a seam in a surface it slides along,
+// which the discrete walk resolves on the right side and which stops nothing
+// (continuous-collision.md § A seam stops nothing).
+//
+// A resting Body stands a few millimetres into the surface it slides on, so
+// its path meets the next tile's leading corner or face, which it did not
+// touch where the tick began. Two tests tell that meeting apart, and a Hit
+// stops the Body only when it passes both:
+//
+//   - the gate, along the Hit's normal. The Body must close on the target, in
+//     the tick, by at least its own minimum extent along the normal it meets
+//     it by. Closing by less, it cannot get past the surface within the tick,
+//     and the discrete walk resolves it from the side it came from, which is
+//     the gate's own argument, made along the normal. A Body landing on a
+//     floor at a slant closes on it by its fall, not by its speed. It is one
+//     product, so it goes first;
+//   - the depth. The target must reach into the band the Body sweeps deeper
+//     than the Body already stands in what it touches, plus the Slop: a tile
+//     laid flush with the one underfoot reaches no deeper than that one does.
+//     It is the Body shrunk by that depth, Probed against the target alone
+//     along its path lengthened by the same depth, so that the band keeps its
+//     length and a target the path meets just before it ends is still
+//     reached.
+func (c *Contacts) enters(
+	path *bodyPath, bodies *BodyIndex, statics *StaticIndex, split int,
+	hit Hit, target *entry, world []m.Vec2d,
+) bool {
+	body := path.body
+	closing := -path.delta.Dot(hit.Normal)
+	if !(closing >= MinimumExtent(body.shape) && closing > 0) {
+		return false
+	}
+
+	if path.rests < 0 {
+		path.rests = c.restingDepth(path, bodies, statics, split)
+	}
+	depth := path.rests + path.slop
+	past := 1 + depth/path.delta.Length()
+	if body.shape.Kind == ShapeCircle {
+		from := body.previousCentre
+		to := from.Add(path.world[0].Sub(from).MulS(past))
+		_, ok := probeWorld(from, to, max(0, body.shape.Radius-depth), target.shape, world)
+		return ok
+	}
+	return path.mover.reaches(target.shape, target.box, world, depth, hit.T, past)
+}
+
+// restingDepth is how deep the Body stands, where the tick began, in the
+// solid targets it already touches there: the path test's Hits at T = 0, which
+// sit at the front of each run. Each is taken with how much deeper the path
+// carries the Body into that surface by the tick's end, along the surface's
+// normal, so that a Body settling onto the floor it slides along is measured
+// where it ends.
+func (c *Contacts) restingDepth(path *bodyPath, bodies *BodyIndex, statics *StaticIndex, split int) float64 {
+	deepest := 0.0
+	for at := 0; at < split && c.probes[at].T == 0; at++ {
+		within, found := bodies.entryAt(c.probeSlots[at])
+		deepest = max(deepest, path.restsIn(c.probes[at], found, within.world(found)))
+	}
+	for at := split; at < len(c.probes) && c.probes[at].T == 0; at++ {
+		if found, _, ok := statics.lookup(c.probes[at].Entity); ok {
+			deepest = max(deepest, path.restsIn(c.probes[at], found, statics.index.world(found)))
+		}
+	}
+	return deepest
+}
+
+// restsIn is how deep the Body stands in one target it touches where the tick
+// began, with how much further its path carries it into that surface, or 0
+// for a Sensor, which holds nothing up.
+func (path *bodyPath) restsIn(hit Hit, target *entry, world []m.Vec2d) float64 {
+	if target.shape.Sensor {
+		return 0
+	}
+	var depth float64
+	if body := path.body; body.shape.Kind == ShapeCircle {
+		_, distance, _ := pointQueryWorld(body.previousCentre, target.shape, world)
+		depth = body.shape.Radius - distance
+	} else {
+		depth = path.mover.depthAt(target.shape, target.box, world)
+	}
+	return depth + max(0, -path.delta.Dot(hit.Normal))
+}
+
+// depthAt is how deeply the Probed Shape overlaps a target where its path
+// starts: GJK's signed distance, which EPA measures inside an overlap.
+func (probe *shapeProbe) depthAt(target Shape, box BB, world []m.Vec2d) float64 {
+	probe.place(0)
+	ctx := support{worldA: probe.moved, worldB: world, kindA: probe.shape.Kind, kindB: target.Kind}
+	points := gjk(ctx, probe.centre, box.Centre(), m.Vec2d{Y: 1}, 0)
+	return probe.shape.Radius + target.Radius - points.d
+}
+
+// reaches reports that the Probed Shape, advanced from fraction from of its
+// path up to fraction past, overlaps the target by depth or more. It is the
+// same Newton advance as against's, on the signed distance plus depth: the
+// signed distance stays convex along the path inside an overlap, where EPA
+// measures it, so the advance still never steps past the depth.
+func (probe *shapeProbe) reaches(target Shape, box BB, world []m.Vec2d, depth, from, past float64) bool {
+	ctx := support{worldA: probe.moved, worldB: world, kindA: probe.shape.Kind, kindB: target.Kind}
+	radii := probe.shape.Radius + target.Radius
+	centre := box.Centre()
+
+	t := from
+	var cached uint32
+	for iteration := 0; ; iteration++ {
+		offset := probe.place(t)
+		points := gjk(ctx, probe.centre.Add(offset), centre, m.Vec2d{Y: 1}, cached)
+		cached = points.id
+		short := points.d - radii + depth
+		closing := probe.delta.Dot(points.n)
+
+		switch {
+		case short <= probeShapeTolerance, iteration == maxProbeShapeIterations:
+			return true
+		case !(closing > 0):
+			return false
+		}
+
+		t += short / closing
+		if t > past {
+			return false
 		}
 	}
 }

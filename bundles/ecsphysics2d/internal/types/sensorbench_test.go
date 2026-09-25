@@ -52,13 +52,13 @@ func BenchmarkDetectWithSweptSensors(b *testing.B) {
 				// scratch, so what is measured is the steady state.
 				for range 8 {
 					fill()
-					Collide(contacts, bodies, statics, noJoints, 3)
+					Collide(contacts, bodies, statics, noJoints, 3, testSlop)
 				}
 
 				b.ReportAllocs()
 				b.ResetTimer()
 				for range b.N {
-					Collide(contacts, bodies, statics, noJoints, 3)
+					Collide(contacts, bodies, statics, noJoints, 3, testSlop)
 				}
 				b.StopTimer()
 				b.ReportMetric(float64(contacts.Len()), "contacts")
