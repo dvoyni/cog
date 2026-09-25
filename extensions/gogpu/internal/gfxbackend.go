@@ -13,13 +13,6 @@ import (
 	"github.com/gogpu/wgpu"
 )
 
-// gfxbUniformSize is one draw's uniform block, and so the stride of the arena's
-// slots. It is gfx's own size rather than a copy of it, because the arena
-// writes gfx's blocks as they are laid out: 256 is both the cap on a block and
-// minUniformBufferOffsetAlignment, which is what lets every block in a frame
-// share one buffer.
-const gfxbUniformSize = gfx.UniformBlockSize
-
 // gfxBackend implements gfx.Backend over gogpu/wgpu. TextureID and BufferID key
 // native textures and buffers directly; backend-minted IDs remain only for
 // shaders, pipelines, and samplers. All methods run on the render thread,
@@ -175,17 +168,16 @@ func (s *gfxRenderPass) SetPipeline(id gfx.PipelineID) {
 	s.backend.resetAcc()
 }
 
-func (s *gfxRenderPass) SetUniformBlock(slot int) {
+func (s *gfxRenderPass) SetUniformBlock(offset, size int) {
 	if s.shader == nil || s.backend.uniforms == nil {
 		return
 	}
 	// The block is already in the buffer: BakeUniforms wrote the frame's whole
-	// arena before the encoder opened. A slot whose block did not make it emits
-	// no binding, which leaves the uniform's group unfilled - and flushBinds
+	// arena before the encoder opened. A block that did not make it emits no
+	// binding, which leaves the uniform's group unfilled - and flushBinds
 	// refuses that and drops the draw, rather than rendering it with whatever
-	// an earlier frame left in the slot.
-	offset, ok := s.backend.uniforms.offset(slot)
-	if !ok {
+	// an earlier frame left there.
+	if !s.backend.uniforms.bound(offset, size) {
 		return
 	}
 	binding := uint32(s.shader.layout.UniformBinding)
@@ -193,11 +185,11 @@ func (s *gfxRenderPass) SetUniformBlock(slot int) {
 		key: gfxbBindingKey{
 			kind: gfxbBindUniform, binding: uint16(binding),
 			id: gfxbUniformArenaID, generation: s.backend.uniforms.generation,
-			offset: uint32(offset), size: gfxbUniformSize,
+			offset: uint32(offset), size: uint32(size),
 		},
 		native: wgpu.BindGroupEntry{
 			Binding: binding, Buffer: s.backend.uniforms.buffer,
-			Offset: uint64(offset), Size: gfxbUniformSize,
+			Offset: uint64(offset), Size: uint64(size),
 		},
 	})
 }
@@ -840,9 +832,9 @@ func (b *gfxBackend) Execute(queue *gfx.Queue) {
 }
 
 // BakeUniforms writes the frame's uniform arena into the uniform buffer.
-func (b *gfxBackend) BakeUniforms(blocks []gfx.UniformBlock) {
+func (b *gfxBackend) BakeUniforms(arena []byte) {
 	if b.uniforms != nil {
-		b.uniforms.upload(blocks)
+		b.uniforms.upload(arena)
 	}
 }
 

@@ -65,7 +65,7 @@ type discardSink struct {
 	instances int
 }
 
-func (*discardSink) BakeUniforms([]gfx.UniformBlock) {}
+func (*discardSink) BakeUniforms([]byte) {}
 
 func (*discardSink) BakeBuffer(gfx.BufferID, gfx.BufferKind, int, []byte)                 {}
 func (*discardSink) BakeTexture(gfx.TextureID, int, int, gfx.TextureFormat, []byte, bool) {}
@@ -77,7 +77,7 @@ func (*discardSink) TransitionTextures([]gfx.TextureTransition)                 
 func (*discardSink) Present()                                                             {}
 func (*discardSink) Capture(gfx.CaptureDesc)                                              {}
 func (*discardSink) SetPipeline(gfx.PipelineID)                                           {}
-func (*discardSink) SetUniformBlock(int)                                                  {}
+func (*discardSink) SetUniformBlock(int, int)                                             {}
 func (*discardSink) SetTexture(gfx.TextureID, int, int)                                   {}
 func (*discardSink) SetSampler(gfx.SamplerID, int, int)                                   {}
 func (*discardSink) SetVertexBuffer(gfx.BufferID, int)                                    {}

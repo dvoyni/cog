@@ -77,8 +77,7 @@ func (t *translator) translateDraw(f *frame, op *Op, pass PassDescr, firstErr *e
 	// the pipeline layout does not have, and CreateBindGroup fails the
 	// entry-count rule with the whole frame's command buffer as the casualty.
 	if plan.uniformSize > 0 {
-		block := t.ops.SetUniformBlock()
-		t.packParams(block, op.Params, op.Material.Params(), plan)
+		t.packParams(t.ops.SetUniformBlock(plan.uniformSize), op.Params, op.Material.Params(), plan)
 	}
 	t.emitResources(f, op.Params, op.Material.Params(), plan)
 	t.ops.SetVertexBuffer(vertices.ID(), 0)
@@ -354,12 +353,10 @@ func (t *translator) planForShape(
 }
 
 // packParams writes reflected shader constants into block, which arrives
-// zeroed. Per-draw parameters override same-named material parameters;
-// unmatched members remain zero.
-func (t *translator) packParams(block *UniformBlock, drawParams, materialParams []ParameterDescr, plan *parameterPlan) {
-	// A guard only: checkUniformBlock refuses any shader whose block exceeds
-	// UniformBlockSize when it is loaded, so no plan reaching here is larger.
-	size := min(plan.uniformSize, UniformBlockSize)
+// zeroed and sized to the plan's block. Per-draw parameters override
+// same-named material parameters; unmatched members remain zero.
+func (t *translator) packParams(block []byte, drawParams, materialParams []ParameterDescr, plan *parameterPlan) {
+	size := min(plan.uniformSize, len(block))
 	if size <= 0 {
 		return
 	}

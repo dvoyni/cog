@@ -1,14 +1,13 @@
 package internal
 
-// UniformBlockSize is one draw's uniform block, and so the stride of the
-// frame's uniform arena. It is both the cap on a block a shader may declare
-// and the largest minUniformBufferOffsetAlignment WebGPU permits, so slot x
-// UniformBlockSize is a valid uniform binding offset on every device.
-const UniformBlockSize = 256
+import "slices"
 
-// UniformBlock is one draw's packed uniform block: the shader's numeric
-// parameters at their reflected offsets, zero past the block's declared size.
-type UniformBlock [UniformBlockSize]byte
+// UniformAlignment is where a block may start in the frame's uniform arena:
+// every block's offset is a multiple of it. It is the largest
+// minUniformBufferOffsetAlignment WebGPU permits, so an offset aligned to it is
+// a valid uniform binding offset on every device. A block's size is its own;
+// only its start is aligned.
+const UniformAlignment = 256
 
 // renderKind tags the variant of a renderOp.
 type renderKind uint8
@@ -30,7 +29,7 @@ const (
 type renderOp struct {
 	kind renderKind
 	res0 ResourceID // pipeline | vertex/index/uniform buffer | texture | sampler
-	arg0 int32      // uniform slot | offset | first | group
+	arg0 int32      // offset | first | group
 	arg1 int32      // size | count | binding
 	arg2 int32      // group | indexed
 	arg3 int32      // binding | instances
@@ -116,12 +115,12 @@ type PassSink interface {
 
 // BakeSink receives resource uploads before render-pass encoding.
 type BakeSink interface {
-	// BakeUniforms receives the frame's uniform arena, every block a draw
-	// packed, in slot order. It comes first and comes every frame, empty when
-	// no draw carries a uniform block, so a backend can size its uniform buffer
-	// before any bind group names it. The blocks are the queue's and are valid
-	// until it is reset.
-	BakeUniforms([]UniformBlock)
+	// BakeUniforms receives the frame's uniform arena: every block a draw
+	// packed, each at an offset aligned to UniformAlignment. It comes first and
+	// comes every frame, empty when no draw carries a uniform block, so a
+	// backend can size its uniform buffer before any bind group names it. The
+	// bytes are the queue's and are valid until it is reset.
+	BakeUniforms([]byte)
 	BakeBuffer(BufferID, BufferKind, int, []byte)
 	BakeTexture(TextureID, int, int, TextureFormat, []byte, bool)
 	AllocateTexture(TextureID, TextureDesc)
@@ -131,9 +130,9 @@ type BakeSink interface {
 // RenderPass receives render commands in recording order.
 type RenderPass interface {
 	SetPipeline(PipelineID)
-	// SetUniformBlock binds the draw's uniform block: the slot of the arena
-	// BakeUniforms handed over, at offset slot x UniformBlockSize.
-	SetUniformBlock(slot int)
+	// SetUniformBlock binds the draw's uniform block: size bytes at offset in
+	// the arena BakeUniforms handed over. offset is aligned to UniformAlignment.
+	SetUniformBlock(offset, size int)
 	SetTexture(TextureID, int, int)
 	SetSampler(SamplerID, int, int)
 	SetVertexBuffer(BufferID, int)
@@ -175,8 +174,8 @@ type Queue struct {
 	transitionsUsed int
 
 	// uniforms is the frame's uniform arena. A draw's block is packed straight
-	// into its slot, and the whole of it goes to the backend in one piece.
-	uniforms []UniformBlock
+	// into it, and the whole of it goes to the backend in one piece.
+	uniforms []byte
 }
 
 // Reset drops all commands but keeps queue capacity for reuse.
@@ -245,18 +244,25 @@ func (q *Queue) SetPipeline(pipeline PipelineID) {
 	q.render = append(q.render, o)
 }
 
-// SetUniformBlock claims the frame's next uniform slot, binds it for the
-// draw that follows, and returns the zeroed block for the caller to pack. The
-// pointer is valid until the next claim, which may move the arena.
+// SetUniformBlock claims size bytes of the frame's uniform arena at the next
+// offset aligned to UniformAlignment, binds them for the draw that follows, and
+// returns them zeroed for the caller to pack. The slice is valid until the next
+// claim, which may move the arena.
+//
+// The claim takes size rounded up to UniformAlignment, so the next block starts
+// aligned. The padding is zeroed too, so what a backend uploads is a function of
+// this frame alone.
 //
 // A block claimed outside every pass belongs to a stray draw that no replay
-// reaches. It is still handed to BakeUniforms, which costs a backend one unused
-// slot and nothing else.
-func (q *Queue) SetUniformBlock() *UniformBlock {
-	slot := len(q.uniforms)
-	q.uniforms = append(q.uniforms, UniformBlock{})
-	q.render = append(q.render, renderOp{kind: renderSetUniformBlock, arg0: int32(slot)})
-	return &q.uniforms[slot]
+// reaches. It is still handed to BakeUniforms, which costs a backend the unused
+// bytes and nothing else.
+func (q *Queue) SetUniformBlock(size int) []byte {
+	offset := len(q.uniforms)
+	span := (size + UniformAlignment - 1) / UniformAlignment * UniformAlignment
+	q.uniforms = slices.Grow(q.uniforms, span)[:offset+span]
+	clear(q.uniforms[offset:])
+	q.render = append(q.render, renderOp{kind: renderSetUniformBlock, arg0: int32(offset), arg1: int32(size)})
+	return q.uniforms[offset : offset+size : offset+size]
 }
 
 func (q *Queue) SetTexture(texture TextureID, group, binding int) {
@@ -400,7 +406,7 @@ func (q *Queue) replayRange(sink RenderPass, start, end int) {
 		case renderSetPipeline:
 			sink.SetPipeline(PipelineID(o.res0))
 		case renderSetUniformBlock:
-			sink.SetUniformBlock(int(o.arg0))
+			sink.SetUniformBlock(int(o.arg0), int(o.arg1))
 		case renderSetTexture:
 			sink.SetTexture(TextureID(o.res0), int(o.arg0), int(o.arg1))
 		case renderSetSampler:

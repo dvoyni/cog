@@ -155,7 +155,7 @@ func TestUniformBlockOverTheSlotIsReportedOnceAndDropped(t *testing.T) {
 	var reported []error
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
 	layout := ShaderLayout{
-		UniformSize: UniformBlockSize + 1, UniformGroup: 0, UniformBinding: 0,
+		UniformSize: uniformMax + 1, UniformGroup: 0, UniformBinding: 0,
 		Uniforms: []UniformMember{{Name: "mvp", Offset: 0}},
 	}
 	backend := &fakeBackend{layout: &layout}
@@ -196,7 +196,7 @@ func TestUniformBlockThatFillsTheSlotRenders(t *testing.T) {
 	var reported []error
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
 	backend := &fakeBackend{layout: &ShaderLayout{
-		UniformSize: UniformBlockSize, UniformGroup: 0, UniformBinding: 0,
+		UniformSize: uniformMax, UniformGroup: 0, UniformBinding: 0,
 		Uniforms: []UniformMember{{Name: "mvp", Offset: 0}},
 	}}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})

@@ -32,8 +32,8 @@ func testMaterial(params ...ParameterDescr) MaterialDescr {
 // executed op stream so tests can assert the translation without a GPU.
 type fakeBackend struct {
 	// uniforms is the frame's uniform arena as BakeUniforms handed it over,
-	// which SetUniformBlock reads its slot back out of.
-	uniforms []UniformBlock
+	// which SetUniformBlock reads its block back out of.
+	uniforms []byte
 	// formats is what each texture was allocated or baked in, the fake's stand
 	// in for gogpu's bakedTextureDescs: written when a bake is replayed and
 	// dropped on release, so a texture is unknown until its frame's Execute.
@@ -366,10 +366,10 @@ func (b *fakeBackend) Present() {
 	b.presentAfter = len(b.lastPasses)
 }
 
-func (b *fakeBackend) SetPipeline(PipelineID)             {}
-func (b *fakeBackend) BakeUniforms(blocks []UniformBlock) { b.uniforms = blocks }
-func (b *fakeBackend) SetUniformBlock(slot int) {
-	b.lastOps = append(b.lastOps, backendOp{kind: testOpSetUniformBlock, data: bytes.Clone(b.uniforms[slot][:])})
+func (b *fakeBackend) SetPipeline(PipelineID)    {}
+func (b *fakeBackend) BakeUniforms(arena []byte) { b.uniforms = arena }
+func (b *fakeBackend) SetUniformBlock(offset, size int) {
+	b.lastOps = append(b.lastOps, backendOp{kind: testOpSetUniformBlock, data: bytes.Clone(b.uniforms[offset : offset+size])})
 }
 
 // SetTexture records the binding so a test can assert which texture reached the
@@ -598,13 +598,13 @@ func BenchmarkTranslateSteadyState(b *testing.B) {
 
 type benchmarkGpuSink struct{}
 
-func (benchmarkGpuSink) BakeUniforms([]UniformBlock)                                  {}
+func (benchmarkGpuSink) BakeUniforms([]byte)                                          {}
 func (benchmarkGpuSink) BakeBuffer(BufferID, BufferKind, int, []byte)                 {}
 func (benchmarkGpuSink) BakeTexture(TextureID, int, int, TextureFormat, []byte, bool) {}
 func (benchmarkGpuSink) AllocateTexture(TextureID, TextureDesc)                       {}
 func (benchmarkGpuSink) UpdateTexture(TextureID, int, Region, []byte)                 {}
 func (benchmarkGpuSink) SetPipeline(PipelineID)                                       {}
-func (benchmarkGpuSink) SetUniformBlock(int)                                          {}
+func (benchmarkGpuSink) SetUniformBlock(int, int)                                     {}
 func (benchmarkGpuSink) SetTexture(TextureID, int, int)                               {}
 
 func (benchmarkGpuSink) SetSampler(SamplerID, int, int)           {}
@@ -628,7 +628,7 @@ func BenchmarkGpuQueueReplaySteadyState(b *testing.B) {
 	for i := range 100 {
 		queue.BakeBuffer(BufferID(i+1), BufferVertex, 64, []byte{1})
 		queue.SetPipeline(1)
-		queue.SetUniformBlock()[0] = 1
+		queue.SetUniformBlock(16)[0] = 1
 		queue.SetVertexBuffer(BufferID(i+1), 0)
 		queue.Draw(0, 3, 1, 0, false)
 		queue.ReleaseBuffer(BufferID(i + 1))
@@ -1357,12 +1357,8 @@ func TestDrawParamsPackByNameAndOverrideMaterial(t *testing.T) {
 			params = backend.lastOps[i].data
 		}
 	}
-	if len(params) != UniformBlockSize {
-		t.Fatalf("params len = %d, want a whole %d-byte block", len(params), UniformBlockSize)
-	}
-	// Past the reflected uniform size the block stays zero.
-	if !bytes.Equal(params[80:], make([]byte, UniformBlockSize-80)) {
-		t.Errorf("block tail past the reflected size = %x..., want zeroes", params[80:84])
+	if len(params) != 80 {
+		t.Fatalf("params len = %d, want 80 (reflected uniform size)", len(params))
 	}
 	// The draw tint overrides the material tint at its reflected offset.
 	got := m.Color{
