@@ -1,6 +1,9 @@
 package internal
 
-import "github.com/dvoyni/cog/slots/gfx/internal/types"
+import (
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+)
 
 // PipelineDesc describes a render pipeline to create. Bind group layouts are
 // derived by the backend from the shader's reflection; the vertex layout is
@@ -9,8 +12,8 @@ type PipelineDesc struct {
 	Shader      types.ShaderID
 	Topology    types.PrimitiveTopology
 	State       types.MaterialState
-	ColorFormat TextureFormat
-	DepthFormat TextureFormat
+	ColorFormat descriptors.TextureFormat
+	DepthFormat descriptors.TextureFormat
 	// NoColorTarget builds a pipeline with no colour target at all, which is
 	// what a draw inside a depth-only pass needs. A render pass declares its
 	// attachments and a pipeline declares its targets, and the two are
@@ -33,12 +36,12 @@ type PipelineDesc struct {
 	// silent loss of the frame. DepthFormat is not read when it is set.
 	NoDepthTarget bool
 	Stride        int
-	Attributes    []VertexAttribute
+	Attributes    []descriptors.VertexAttribute
 	// IndexWidth is the width a strip topology cuts on. WebGPU requires a
 	// pipeline to declare that format before an indexed strip draw is legal and
 	// forbids it on every other topology, so a backend reads this only when
 	// Topology is a strip: a list pipeline never sees the index buffer at all.
-	IndexWidth IndexWidth
+	IndexWidth descriptors.IndexWidth
 	Label      string
 }
 

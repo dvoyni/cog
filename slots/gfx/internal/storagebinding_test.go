@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
@@ -28,7 +30,7 @@ func storageLayout() shader.ShaderLayout {
 
 // storageFrame records one frame drawing with the given material parameters and
 // reports what the backend was asked to encode alongside what gfx reported.
-func storageFrame(t *testing.T, params ...ParameterDescr) (*fakeBackend, []error) {
+func storageFrame(t *testing.T, params ...descriptors.ParameterDescr) (*fakeBackend, []error) {
 	t.Helper()
 	p := newPlugin()
 	layout := storageLayout()
@@ -38,8 +40,8 @@ func storageFrame(t *testing.T, params ...ParameterDescr) (*fakeBackend, []error
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w := recordRaw(t, k)
-	w.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear, Label: "main"})
-	w.Draw(triangle(), testMaterial(params...), MatParam("mvp", m.NewMat4()))
+	w.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "main"})
+	w.Draw(triangle(), testMaterial(params...), descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 	return backend, reported
@@ -67,7 +69,7 @@ func TestADrawMissingAStorageBindingIsDroppedAndNamed(t *testing.T) {
 // the same short bind group: emitResources skips a zero id. The plan cannot see
 // it, because a plan is cached per parameter shape and the id is per draw.
 func TestADrawSupplyingAnUnbakedStorageBufferIsDroppedAndNamed(t *testing.T) {
-	backend, reported := storageFrame(t, BufferParam("Data", BufferDescr{}))
+	backend, reported := storageFrame(t, descriptors.BufferParam("Data", descriptors.BufferDescr{}))
 
 	if backend.passDraws[0] != 0 {
 		t.Errorf("draws = %d, want the draw supplying an unbaked buffer dropped", backend.passDraws[0])
@@ -91,8 +93,8 @@ func TestADrawSupplyingAnUnbakedStorageBufferIsDroppedAndNamed(t *testing.T) {
 // also what an unresolved texture resource renders as - and a sampler to clamp
 // and linear, so a draw missing both still renders.
 func TestADrawMissingOnlyItsTextureAndSamplerStillRenders(t *testing.T) {
-	buffer := BufferWithBytes([]byte{1, 2, 3, 4}, true)
-	backend, reported := storageFrame(t, BufferParam("Data", buffer))
+	buffer := descriptors.BufferWithBytes([]byte{1, 2, 3, 4}, true)
+	backend, reported := storageFrame(t, descriptors.BufferParam("Data", buffer))
 
 	if backend.passDraws[0] != 1 {
 		t.Errorf("draws = %d, want the draw rendered against the fallbacks", backend.passDraws[0])
@@ -119,8 +121,8 @@ func TestAnUnfilledStorageBindingIsReportedOnceAndDroppedAlways(t *testing.T) {
 
 	drop := func() int {
 		w := recordRaw(t, k)
-		w.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear, Label: "main"})
-		w.Draw(triangle(), testMaterial(), MatParam("mvp", m.NewMat4()))
+		w.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "main"})
+		w.Draw(triangle(), testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 		return backend.passDraws[0]
@@ -141,9 +143,9 @@ func TestAnUnfilledStorageBindingIsReportedOnceAndDroppedAlways(t *testing.T) {
 	// binding would win it again and the mismatch behind it would never be
 	// heard - which is the whole cost of reporting at frame rate.
 	w := recordRaw(t, k)
-	w.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear, Label: "main"})
-	w.Draw(triangle(), testMaterial(), MatParam("mvp", m.NewMat4()))
-	w.Draw(triangle(), testMaterial(BufferParam("mvp", BufferWithBytes([]byte{1, 2, 3, 4}, true))))
+	w.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "main"})
+	w.Draw(triangle(), testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), testMaterial(descriptors.BufferParam("mvp", descriptors.BufferWithBytes([]byte{1, 2, 3, 4}, true))))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

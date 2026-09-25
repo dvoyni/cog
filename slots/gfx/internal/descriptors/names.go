@@ -1,11 +1,11 @@
-package internal
+package descriptors
 
 import "strconv"
 
 // The name tables of the recorder-side enums. They are plain functions rather
 // than methods on purpose: naming an enum for a debug document is not the same
 // promise as giving every gfx enum a String. The views and gfx's frame snapshot
-// both read them; the GPU vocabulary's enums name themselves through their Name
+// both read them; the GPU vocabulary's enums name themselves through their String
 // methods. An unknown value names its ordinal rather than
 // falling back to a legal-looking name, so a member added without touching
 // this file is visible instead of mislabelled.

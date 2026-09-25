@@ -3,6 +3,7 @@ package gfx
 import (
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx/internal"
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 )
 
@@ -39,7 +40,7 @@ func ShaderConst(name, value string) ShaderOption {
 // metallic-roughness, occlusion - is not a picture and does not come through
 // here; it comes through TextureWithBytes, which does take a format.
 func TextureWithResource(path string) TextureDescr {
-	return internal.TextureWithResource(path)
+	return descriptors.TextureWithResource(path)
 }
 
 // TextureWithBytes describes a texture from inline pixel bytes. copyData
@@ -47,51 +48,51 @@ func TextureWithResource(path string) TextureDescr {
 // until the recorded frame is consumed or dropped. mipmaps generates a full mip
 // chain at bake time for smoother minification.
 func TextureWithBytes(width, height int, format TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
-	return internal.TextureWithBytes(width, height, format, pixels, copyData, mipmaps)
+	return descriptors.TextureWithBytes(width, height, format, pixels, copyData, mipmaps)
 }
 
 // BufferWithBytes describes a buffer from inline bytes. copyData snapshots the
 // bytes when recorded if true; when false, the caller must keep them unchanged
 // until the recorded frame is consumed or dropped.
 func BufferWithBytes(data []byte, copyData bool) BufferDescr {
-	return internal.BufferWithBytes(data, copyData)
+	return descriptors.BufferWithBytes(data, copyData)
 }
 
 // FloatParam creates a scalar parameter.
 func FloatParam(name string, v float32) ParameterDescr {
-	return internal.FloatParam(name, v)
+	return descriptors.FloatParam(name, v)
 }
 
 // VecParam creates a vec4 parameter.
 func VecParam(name string, v m.Vec4) ParameterDescr {
-	return internal.VecParam(name, v)
+	return descriptors.VecParam(name, v)
 }
 
 // MatParam creates a 4x4 matrix parameter.
 func MatParam(name string, m m.Mat4) ParameterDescr {
-	return internal.MatParam(name, m)
+	return descriptors.MatParam(name, m)
 }
 
 // ColorParam creates a color parameter.
 func ColorParam(name string, c m.Color) ParameterDescr {
-	return internal.ColorParam(name, c)
+	return descriptors.ColorParam(name, c)
 }
 
 // TextureParam creates a texture parameter from a texture descriptor.
 func TextureParam(name string, tex TextureDescr) ParameterDescr {
-	return internal.TextureParam(name, tex)
+	return descriptors.TextureParam(name, tex)
 }
 
 // SamplerParam creates a sampler parameter. The zero SamplerDesc clamps and
 // filters linearly.
 func SamplerParam(name string, desc SamplerDesc) ParameterDescr {
-	return internal.SamplerParam(name, desc)
+	return descriptors.SamplerParam(name, desc)
 }
 
 // BufferParam creates a buffer parameter from a buffer descriptor, binding the
 // whole buffer.
 func BufferParam(name string, buf BufferDescr) ParameterDescr {
-	return internal.BufferParam(name, buf)
+	return descriptors.BufferParam(name, buf)
 }
 
 // BufferRangeParam binds one slice of a buffer, which is how a draw addresses
@@ -99,7 +100,7 @@ func BufferParam(name string, buf BufferDescr) ParameterDescr {
 // has to be agreed on across the record/translate thread boundary. offset must
 // be a multiple of StorageAlignment.
 func BufferRangeParam(name string, buf BufferDescr, offset, size int) ParameterDescr {
-	return internal.BufferRangeParam(name, buf, offset, size)
+	return descriptors.BufferRangeParam(name, buf, offset, size)
 }
 
 // RawParameter creates a parameter carrying an arbitrary plain-data struct by
@@ -121,19 +122,19 @@ func BufferRangeParam(name string, buf BufferDescr, offset, size int) ParameterD
 // m.Vec4, m.Color, m.Quat, m.Mat4, arrays of those, and structs of those. Any
 // other member type panics, which is what keeps a pointer out of a byte copy.
 func RawParameter[T any](name string, value T) ParameterDescr {
-	return internal.RawParameter[T](name, value)
+	return descriptors.RawParameter[T](name, value)
 }
 
 // Material describes a material from a shader and its named parameters. It
 // depth-tests and writes, which is what an opaque draw wants; a draw that wants
 // anything else names its state through MaterialWithState.
 func Material(shader ShaderDescr, params ...ParameterDescr) MaterialDescr {
-	return internal.Material(shader, params...)
+	return descriptors.Material(shader, params...)
 }
 
 // MaterialWithState describes a material with explicit fixed pipeline state.
 func MaterialWithState(shader ShaderDescr, state MaterialState, params ...ParameterDescr) MaterialDescr {
-	return internal.MaterialWithState(shader, state, params...)
+	return descriptors.MaterialWithState(shader, state, params...)
 }
 
 // FingerprintParams hashes a parameter slice in order by name, kind and value,
@@ -147,18 +148,18 @@ func MaterialWithState(shader ShaderDescr, state MaterialState, params ...Parame
 // mis-key every kind it forgot - and mis-keying merges two draws that differ,
 // which draws the wrong picture rather than costing a batch.
 func FingerprintParams(params []ParameterDescr) uint64 {
-	return internal.FingerprintParams(params)
+	return descriptors.FingerprintParams(params)
 }
 
 // Attr describes a vertex attribute at byte offset with element type typ.
 func Attr(offset int, typ VertexType) VertexAttr {
-	return internal.Attr(offset, typ)
+	return descriptors.Attr(offset, typ)
 }
 
 // Mesh builds non-indexed geometry from an interleaved vertex buffer, a topology,
 // and the vertex layout.
 func Mesh(vertices BufferDescr, topology PrimitiveTopology, layout ...VertexAttr) MeshDescr {
-	return internal.Mesh(vertices, topology, layout...)
+	return descriptors.Mesh(vertices, topology, layout...)
 }
 
 // MeshIndexed builds indexed geometry from vertex and index buffers, the width
@@ -174,26 +175,26 @@ func MeshIndexed(
 	vertices, indices BufferDescr, width IndexWidth,
 	topology PrimitiveTopology, layout ...VertexAttr,
 ) MeshDescr {
-	return internal.MeshIndexed(vertices, indices, width, topology, layout...)
+	return descriptors.MeshIndexed(vertices, indices, width, topology, layout...)
 }
 
 // ScreenTarget is the frame's screen attachment. It stays a sentinel the
 // recorder cannot resolve: the swapchain view is per-frame and known only on
 // the render thread.
 func ScreenTarget() TargetDescr {
-	return internal.ScreenTarget()
+	return descriptors.ScreenTarget()
 }
 
 // TextureTarget renders into one mip level of one layer of a texture, which
 // must have been allocated Renderable.
 func TextureTarget(texture TextureDescr, mip, layer int) TargetDescr {
-	return internal.TextureTarget(texture, mip, layer)
+	return descriptors.TextureTarget(texture, mip, layer)
 }
 
 // NoTarget declares a pass with no colour attachment, such as a depth-only
 // prepass.
 func NoTarget() TargetDescr {
-	return internal.NoTarget()
+	return descriptors.NoTarget()
 }
 
 // DepthAuto uses the backend's own depth texture for the target's size. Every
@@ -201,18 +202,18 @@ func NoTarget() TargetDescr {
 // start from a clean depth buffer must clear depth or it inherits whatever the
 // previous pass at that size left behind.
 func DepthAuto() DepthDescr {
-	return internal.DepthAuto()
+	return descriptors.DepthAuto()
 }
 
 // DepthNone declares a pass with no depth attachment.
 func DepthNone() DepthDescr {
-	return internal.DepthNone()
+	return descriptors.DepthNone()
 }
 
 // DepthTarget renders depth into a texture, which must be FormatDepth32F and
 // Renderable.
 func DepthTarget(texture TextureDescr) DepthDescr {
-	return internal.DepthTarget(texture)
+	return descriptors.DepthTarget(texture)
 }
 
 // StateOpaque3D returns the state of opaque geometry, the first of the three

@@ -3,6 +3,8 @@ package internal
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 )
 
@@ -11,12 +13,12 @@ import (
 func frameMaterialQueue() *OpQueue {
 	q := NewOpQueue(nil)
 	q.Reset()
-	q.Pass(PassDescr{})
+	q.Pass(descriptors.PassDescr{})
 	return q
 }
 
-func frameMaterialParams() []ParameterDescr {
-	return []ParameterDescr{FloatParam("a", 1), FloatParam("b", 2), FloatParam("c", 3)}
+func frameMaterialParams() []descriptors.ParameterDescr {
+	return []descriptors.ParameterDescr{descriptors.FloatParam("a", 1), descriptors.FloatParam("b", 2), descriptors.FloatParam("c", 3)}
 }
 
 // A material recorded for the frame is copied into the queue once: every draw
@@ -24,20 +26,20 @@ func frameMaterialParams() []ParameterDescr {
 // own params alone.
 func TestAFrameMaterialIsCopiedOnceForEveryDrawOfIt(t *testing.T) {
 	q := frameMaterialQueue()
-	material := Material(shader.ShaderWithText("s"), frameMaterialParams()...)
+	material := descriptors.Material(shader.ShaderWithText("s"), frameMaterialParams()...)
 	recorded := q.FrameMaterial(material)
 	afterRecord := len(q.parameterArena)
 	if afterRecord != len(material.Params()) {
 		t.Fatalf("recording put %d params in the arena, want the material's %d", afterRecord, len(material.Params()))
 	}
 	for range 3 {
-		q.Draw(MeshDescr{}, recorded, FloatParam("d", 4))
+		q.Draw(descriptors.MeshDescr{}, recorded, descriptors.FloatParam("d", 4))
 	}
 	if got := len(q.parameterArena) - afterRecord; got != 3 {
 		t.Fatalf("three draws grew the arena by %d params, want their own three", got)
 	}
 	for i, op := range q.ops {
-		if got := op.Material.params; len(got) != 3 || got[0].Name() != "a" || got[2].Name() != "c" {
+		if got := op.Material.Params(); len(got) != 3 || got[0].Name() != "a" || got[2].Name() != "c" {
 			t.Errorf("draw %d binds %v, want the recorded params", i, ParameterViewsOf(got))
 		}
 	}
@@ -48,10 +50,10 @@ func TestAFrameMaterialIsCopiedOnceForEveryDrawOfIt(t *testing.T) {
 func TestAFrameMaterialOwesNothingToTheCallersSlice(t *testing.T) {
 	q := frameMaterialQueue()
 	params := frameMaterialParams()
-	recorded := q.FrameMaterial(Material(shader.ShaderWithText("s"), params...))
-	params[0] = FloatParam("z", 9)
-	q.Draw(MeshDescr{}, recorded)
-	if name := q.ops[0].Material.params[0].Name(); name != "a" {
+	recorded := q.FrameMaterial(descriptors.Material(shader.ShaderWithText("s"), params...))
+	params[0] = descriptors.FloatParam("z", 9)
+	q.Draw(descriptors.MeshDescr{}, recorded)
+	if name := q.ops[0].Material.Params()[0].Name(); name != "a" {
 		t.Errorf("the draw binds %q, want the params as they were recorded", name)
 	}
 }
@@ -62,25 +64,25 @@ func TestAFrameMaterialOwesNothingToTheCallersSlice(t *testing.T) {
 func TestAStaleOrForeignFrameMaterialDrawsAsItsOriginal(t *testing.T) {
 	q := frameMaterialQueue()
 	params := frameMaterialParams()
-	recorded := q.FrameMaterial(Material(shader.ShaderWithText("s"), params...))
+	recorded := q.FrameMaterial(descriptors.Material(shader.ShaderWithText("s"), params...))
 
 	other := frameMaterialQueue()
-	other.Draw(MeshDescr{}, recorded)
-	if got := other.ops[0].Material.params; len(got) != 3 || &got[0] == &q.parameterArena[0] || got[2].Name() != "c" {
+	other.Draw(descriptors.MeshDescr{}, recorded)
+	if got := other.ops[0].Material.Params(); len(got) != 3 || &got[0] == &q.parameterArena[0] || got[2].Name() != "c" {
 		t.Errorf("another queue bound %v, want its own copy of the original params", ParameterViewsOf(got))
 	}
 
 	q.Reset()
-	q.Pass(PassDescr{})
+	q.Pass(descriptors.PassDescr{})
 	// The arena's backing is reused by the new frame, so the recorded window
 	// now holds this frame's params, not the material's.
-	q.Draw(MeshDescr{}, Material(shader.ShaderWithText("t"), FloatParam("x", 7), FloatParam("y", 8), FloatParam("w", 9)))
-	q.Draw(MeshDescr{}, recorded)
-	got := q.ops[1].Material.params
+	q.Draw(descriptors.MeshDescr{}, descriptors.Material(shader.ShaderWithText("t"), descriptors.FloatParam("x", 7), descriptors.FloatParam("y", 8), descriptors.FloatParam("w", 9)))
+	q.Draw(descriptors.MeshDescr{}, recorded)
+	got := q.ops[1].Material.Params()
 	if len(got) != 3 || got[0].Name() != "a" || got[2].Name() != "c" {
 		t.Errorf("a stale recording bound %v, want the original params", ParameterViewsOf(got))
 	}
-	if &got[0] == &q.ops[0].Material.params[0] {
+	if &got[0] == &q.ops[0].Material.Params()[0] {
 		t.Error("a stale recording bound the new frame's window")
 	}
 }
@@ -89,12 +91,12 @@ func TestAStaleOrForeignFrameMaterialDrawsAsItsOriginal(t *testing.T) {
 // not the queue's.
 func TestACloneOfAFrameMaterialIsNotRecorded(t *testing.T) {
 	q := frameMaterialQueue()
-	recorded := q.FrameMaterial(Material(shader.ShaderWithText("s"), frameMaterialParams()...))
-	for name, clone := range map[string]MaterialDescr{
+	recorded := q.FrameMaterial(descriptors.Material(shader.ShaderWithText("s"), frameMaterialParams()...))
+	for name, clone := range map[string]descriptors.MaterialDescr{
 		"Clone":   recorded.Clone(),
-		"CloneTo": func() MaterialDescr { c, _ := recorded.CloneTo(nil); return c }(),
+		"CloneTo": func() descriptors.MaterialDescr { c, _ := recorded.CloneTo(nil); return c }(),
 	} {
-		if _, ok := MaterialShapeState(&clone); ok {
+		if _, ok := descriptors.MaterialShapeState(&clone); ok {
 			t.Errorf("%s kept the recording", name)
 		}
 	}
@@ -104,16 +106,16 @@ func TestACloneOfAFrameMaterialIsNotRecorded(t *testing.T) {
 // so a plan cached through one is found through the other.
 func TestAFrameMaterialsShapeStateIsItsParamsNames(t *testing.T) {
 	q := frameMaterialQueue()
-	material := Material(shader.ShaderWithText("s"), frameMaterialParams()...)
+	material := descriptors.Material(shader.ShaderWithText("s"), frameMaterialParams()...)
 	recorded := q.FrameMaterial(material)
-	state, ok := MaterialShapeState(&recorded)
+	state, ok := descriptors.MaterialShapeState(&recorded)
 	if !ok {
 		t.Fatal("a recorded material carries no shape state")
 	}
-	if want := ParameterShapeState(material.Params()); state != want {
+	if want := descriptors.ParameterShapeState(material.Params()); state != want {
 		t.Errorf("the recorded state is %x, want the params' %x", state, want)
 	}
-	if _, ok := MaterialShapeState(&material); ok {
+	if _, ok := descriptors.MaterialShapeState(&material); ok {
 		t.Error("an unrecorded material claims a shape state")
 	}
 }

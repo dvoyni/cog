@@ -3,6 +3,8 @@ package internal
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
@@ -53,7 +55,7 @@ func TestPipelineDescCarriesStateAndTargetFormats(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w := recordList(t, k)
-	w.Draw(triangle(), MaterialWithState(shader.ShaderWithText("//test"), StateOpaque3D()), MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), descriptors.MaterialWithState(shader.ShaderWithText("//test"), StateOpaque3D()), descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -64,10 +66,10 @@ func TestPipelineDescCarriesStateAndTargetFormats(t *testing.T) {
 	if desc.State != StateOpaque3D() {
 		t.Errorf("pipeline state = %+v, want StateOpaque3D", desc.State)
 	}
-	if desc.ColorFormat != FrameBufferFormat {
+	if desc.ColorFormat != descriptors.FrameBufferFormat {
 		t.Errorf("pipeline colour format = %v, want the frame buffer's", desc.ColorFormat.String())
 	}
-	if desc.DepthFormat != FormatDepth32F {
+	if desc.DepthFormat != descriptors.FormatDepth32F {
 		t.Errorf("pipeline depth format = %v, want FormatDepth32F", desc.DepthFormat)
 	}
 }
@@ -79,14 +81,14 @@ func TestPipelineCacheDistinguishesDepthState(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	shaderDescr := shader.ShaderWithText("//test")
-	writing := MaterialWithState(shaderDescr, types.MaterialState{DepthCompare: types.CompareLess, DepthWrite: true})
+	writing := descriptors.MaterialWithState(shaderDescr, types.MaterialState{DepthCompare: types.CompareLess, DepthWrite: true})
 	// Same compare, no write: the transparent pass, and a different pipeline.
-	reading := MaterialWithState(shaderDescr, types.MaterialState{DepthCompare: types.CompareLess})
+	reading := descriptors.MaterialWithState(shaderDescr, types.MaterialState{DepthCompare: types.CompareLess})
 
 	w := recordList(t, k)
-	w.Draw(triangle(), writing, MatParam("mvp", m.NewMat4()))
-	w.Draw(triangle(), reading, MatParam("mvp", m.NewMat4()))
-	w.Draw(triangle(), writing, MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), writing, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), reading, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), writing, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

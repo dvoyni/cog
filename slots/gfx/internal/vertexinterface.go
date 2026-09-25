@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
@@ -32,10 +33,10 @@ import (
 // backend, and a package that owns both halves of a pair - scene holds its
 // layout and its shader - can ask the same question gfx will ask at draw time,
 // through the same call.
-func CheckVertexInterface(label string, layout shader.ShaderLayout, attrs []VertexAttr) error {
+func CheckVertexInterface(label string, layout shader.ShaderLayout, attrs []descriptors.VertexAttr) error {
 	stride := 0
 	for i := range attrs {
-		if end := VertexAttrOffset(&(attrs[i])) + VertexAttrTyp(&(attrs[i])).Size(); end > stride {
+		if end := descriptors.VertexAttrOffset(&(attrs[i])) + descriptors.VertexAttrTyp(&(attrs[i])).Size(); end > stride {
 			stride = end
 		}
 	}
@@ -56,7 +57,7 @@ func CheckVertexInterface(label string, layout shader.ShaderLayout, attrs []Vert
 				Declared: input.Kind.WGSL(input.Count),
 			}
 		}
-		kind, count := VertexAttrTyp(&(attrs[input.Location])).Decode()
+		kind, count := descriptors.VertexAttrTyp(&(attrs[input.Location])).Decode()
 		if kind != input.Kind || count != input.Count {
 			return shader.ErrVertexInputMismatch{
 				Shader: label, Input: input.Name, Location: input.Location,

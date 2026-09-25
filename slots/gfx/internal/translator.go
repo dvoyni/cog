@@ -5,6 +5,8 @@ import (
 	"io/fs"
 	"slices"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
@@ -35,8 +37,8 @@ type pipelineKey struct {
 	shader      types.ShaderID
 	topology    types.PrimitiveTopology
 	state       types.MaterialState
-	colorFormat TextureFormat
-	depthFormat TextureFormat
+	colorFormat descriptors.TextureFormat
+	depthFormat descriptors.TextureFormat
 	// noColor separates the pipeline a shader needs in a depth-only pass from
 	// the one it needs in a colour pass. Without it in the key, a shader drawn
 	// in both gets whichever pass reached it first, which is a validation
@@ -45,7 +47,7 @@ type pipelineKey struct {
 	// noDepth does the same for a DepthNone pass, which has no depth
 	// attachment for a pipeline's depth state to match.
 	noDepth bool
-	layout  VertexLayoutKey
+	layout  descriptors.VertexLayoutKey
 	// stripIndex is the index width a strip topology's pipeline has to declare,
 	// and nothing at all for every other topology. It is the strip format
 	// rather than the mesh's width because keying on the width unconditionally
@@ -64,11 +66,11 @@ const (
 	stripIndexUint32
 )
 
-func stripIndexKeyOf(topology types.PrimitiveTopology, width IndexWidth) stripIndexKey {
+func stripIndexKeyOf(topology types.PrimitiveTopology, width descriptors.IndexWidth) stripIndexKey {
 	if topology != types.TopologyTriangleStrip {
 		return stripIndexNone
 	}
-	if width == IndexUint16 {
+	if width == descriptors.IndexUint16 {
 		return stripIndexUint16
 	}
 	return stripIndexUint32
@@ -78,7 +80,7 @@ func stripIndexKeyOf(topology types.PrimitiveTopology, width IndexWidth) stripIn
 // did not divide, and the width it was declared at.
 type indexLengthKey struct {
 	length int
-	width  IndexWidth
+	width  descriptors.IndexWidth
 }
 
 // unsuppliedBufferKey is one storage binding a shader never got filled. The
@@ -114,7 +116,7 @@ type translator struct {
 	// textures is the path-texture cache. It is a translator field like every
 	// other cache here, reached only on the render thread, so what protects it
 	// is the confinement rather than a lock of its own.
-	textures       *assets.Cache[TextureDescrParams, textureUserData, texture]
+	textures       *assets.Cache[descriptors.TextureDescrParams, textureUserData, texture]
 	parameterPlans map[parameterPlanBucketKey][]cachedParameterPlan
 	ops            Queue
 	// Pass bookkeeping, reused each frame: the run order of the frame's passes
@@ -165,7 +167,7 @@ func newTranslator() *translator {
 		pipelines:         map[pipelineKey]types.PipelineID{},
 		samplers:          map[types.SamplerDesc]types.SamplerID{},
 		layouts:           map[types.ShaderID]shader.ShaderLayout{},
-		textures:          assets.New[TextureDescrParams, textureUserData, texture](textureLoader{}),
+		textures:          assets.New[descriptors.TextureDescrParams, textureUserData, texture](textureLoader{}),
 		parameterPlans:    map[parameterPlanBucketKey][]cachedParameterPlan{},
 		textureUsage:      map[types.TextureID]types.TextureUsage{},
 		badIndexLengths:   map[indexLengthKey]struct{}{},
@@ -276,13 +278,13 @@ func (t *translator) translatePasses(
 		last := i
 		for j := i + 1; j < len(t.passOrder); j++ {
 			next := passes[t.passOrder[j]].Desc
-			if !MergesInto(next, tail) {
+			if !descriptors.MergesInto(next, tail) {
 				break
 			}
 			tail, last = next, j
 			draws += t.passDrawCount(t.passOrder[j])
 		}
-		if !PassHasEffect(&head, draws) {
+		if !descriptors.PassHasEffect(&head, draws) {
 			i = last + 1
 			continue
 		}
@@ -332,7 +334,7 @@ func (t *translator) translatePasses(
 // (write then read), and a post-processing chain ping-pongs two targets (read
 // then write). A texture nothing has used as an attachment this frame is not
 // gfx's to order.
-func (t *translator) transitionRun(queue *OpQueue, head PassDescr, first, last int) {
+func (t *translator) transitionRun(queue *OpQueue, head descriptors.PassDescr, first, last int) {
 	ops := OpQueueOps(queue)
 	// Reads first: a texture this run samples has to have finished being written.
 	t.runSampled = t.runSampled[:0]
@@ -348,11 +350,11 @@ func (t *translator) transitionRun(queue *OpQueue, head PassDescr, first, last i
 	}
 	// Then writes: this run's own attachments. A texture that was sampled
 	// earlier in the frame is transitioned back before it is written again.
-	if TargetKindOf(&head.Target) == TargetTexture {
-		t.transitionTo(TargetTextureOf(&head.Target), types.TextureUsageRenderAttachment)
+	if descriptors.TargetKindOf(&head.Target) == descriptors.TargetTexture {
+		t.transitionTo(descriptors.TargetTextureOf(&head.Target), types.TextureUsageRenderAttachment)
 	}
-	if DepthKindOf(&head.Depth) == DepthKindTexture {
-		t.transitionTo(DepthTexture(&head.Depth), types.TextureUsageRenderAttachment)
+	if descriptors.DepthKindOf(&head.Depth) == descriptors.DepthKindTexture {
+		t.transitionTo(descriptors.DepthTexture(&head.Depth), types.TextureUsageRenderAttachment)
 	}
 }
 
@@ -364,15 +366,15 @@ func (t *translator) transitionRun(queue *OpQueue, head PassDescr, first, last i
 // run before the pass opens. That over-approximates by the textures a shader
 // does not actually declare, which costs a barrier nothing reads and is the
 // safe direction to be wrong in.
-func (t *translator) collectSampled(params []ParameterDescr) {
+func (t *translator) collectSampled(params []descriptors.ParameterDescr) {
 	for i := range params {
 		p := &params[i]
-		if ParameterKind(p) != ParamTexture {
+		if descriptors.ParameterKind(p) != descriptors.ParamTexture {
 			continue
 		}
 		// Only a baked texture carries an id, so the id is the whole test: a
 		// path or an inline run has nothing an attachment could collide with.
-		texture := ParameterTextureRef(p)
+		texture := descriptors.ParameterTextureRef(p)
 		if texture.ID() == 0 {
 			continue
 		}
@@ -407,30 +409,30 @@ func (t *translator) transitionTo(texture types.TextureID, to types.TextureUsage
 
 // gpuPassDesc resolves a merged run's attachments: it loads like the pass that
 // opened the run and stores like the one that closed it.
-func (t *translator) gpuPassDesc(backend Backend, head, tail PassDescr) types.PassDesc {
+func (t *translator) gpuPassDesc(backend Backend, head, tail descriptors.PassDescr) types.PassDesc {
 	desc := types.PassDesc{
 		Load: head.Load, Clear: head.Clear, Store: tail.Store,
 		DepthLoad: head.DepthLoad, DepthClear: head.DepthClear, DepthStore: tail.DepthStore,
 		Label: head.Label,
 	}
-	switch TargetKindOf(&head.Target) {
-	case TargetScreen:
+	switch descriptors.TargetKindOf(&head.Target) {
+	case descriptors.TargetScreen:
 		desc.Screen = true
-	case TargetNone:
+	case descriptors.TargetNone:
 		desc.NoColor = true
-	case TargetTexture:
+	case descriptors.TargetTexture:
 		// This can resolve to zero: a temporary target is allocated by the same
 		// frame's bakes, which the backend replays after these descriptors were
 		// built, so a target used for the first time has no view yet. NoColor
 		// stays false, which is what keeps that case distinguishable from a
 		// pass that declares no colour attachment at all.
-		desc.Target = backend.TextureView(TargetTextureOf(&head.Target), TargetMip(&head.Target), TargetLayer(&head.Target))
+		desc.Target = backend.TextureView(descriptors.TargetTextureOf(&head.Target), descriptors.TargetMip(&head.Target), descriptors.TargetLayer(&head.Target))
 	}
-	switch DepthKindOf(&head.Depth) {
-	case DepthKindAuto:
+	switch descriptors.DepthKindOf(&head.Depth) {
+	case descriptors.DepthKindAuto:
 		desc.DepthAuto = true
-	case DepthKindTexture:
-		desc.Depth = backend.TextureView(DepthTexture(&head.Depth), 0, 0)
+	case descriptors.DepthKindTexture:
+		desc.Depth = backend.TextureView(descriptors.DepthTexture(&head.Depth), 0, 0)
 	}
 	return desc
 }

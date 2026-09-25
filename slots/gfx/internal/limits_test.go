@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
@@ -46,10 +48,10 @@ func TestShaderOverTheWebFloorIsReportedOnceAndStillRenders(t *testing.T) {
 	// The nine bindings share one name, so one parameter fills them all. They
 	// have to be filled: an unsupplied storage binding is fatal to the draw,
 	// and this test is about a draw that renders despite the diagnostic.
-	records := BufferParam("records", BufferWithBytes([]byte{1, 2, 3, 4}, true))
+	records := descriptors.BufferParam("records", descriptors.BufferWithBytes([]byte{1, 2, 3, 4}, true))
 	for range 2 {
 		w := recordList(t, k)
-		w.Draw(triangle(), testMaterial(records), MatParam("mvp", m.NewMat4()))
+		w.Draw(triangle(), testMaterial(records), descriptors.MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 	}
@@ -116,12 +118,12 @@ func TestBufferRangeParamBindsItsOwnSlice(t *testing.T) {
 	}}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	var records BufferDescr
+	var records descriptors.BufferDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
 		records = resources.BakeBuffer(make([]byte, 1024), true)
 	})
 	w := recordList(t, k)
-	w.Draw(triangle(), testMaterial(BufferRangeParam("records", records, 256, 512)), MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), testMaterial(descriptors.BufferRangeParam("records", records, 256, 512)), descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -149,7 +151,7 @@ func TestFirstInstanceReachesTheDraw(t *testing.T) {
 	w := recordList(t, k)
 	// A batch reads its own slice of the shared instance arena: WebGPU's
 	// instance_index starts at firstInstance, so no offset plumbing is needed.
-	w.DrawInstancedFrom(triangle(), testMaterial(), 7, 3, MatParam("mvp", m.NewMat4()))
+	w.DrawInstancedFrom(triangle(), testMaterial(), 7, 3, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -173,7 +175,7 @@ func TestUniformBlockOverTheSlotIsReportedOnceAndDropped(t *testing.T) {
 
 	for range 2 {
 		w := recordList(t, k)
-		w.Draw(triangle(), testMaterial(), MatParam("mvp", m.NewMat4()))
+		w.Draw(triangle(), testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 	}
@@ -211,7 +213,7 @@ func TestUniformBlockThatFillsTheSlotRenders(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w := recordList(t, k)
-	w.Draw(triangle(), testMaterial(), MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

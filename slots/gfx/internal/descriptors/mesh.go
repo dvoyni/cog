@@ -1,4 +1,4 @@
-package internal
+package descriptors
 
 import "github.com/dvoyni/cog/slots/gfx/internal/types"
 

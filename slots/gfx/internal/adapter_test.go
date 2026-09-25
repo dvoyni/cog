@@ -8,6 +8,8 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
@@ -90,7 +92,7 @@ func (a *testAdapter) ScreenFramebuffer() (types.TextureViewID, int, int) {
 func (a *testAdapter) NewPipeline(desc PipelineDesc) (types.PipelineID, error) {
 	return a.get().NewPipeline(desc)
 }
-func (a *testAdapter) TextureFormat(texture types.TextureID) (TextureFormat, bool) {
+func (a *testAdapter) TextureFormat(texture types.TextureID) (descriptors.TextureFormat, bool) {
 	return a.get().TextureFormat(texture)
 }
 func (a *testAdapter) TextureView(texture types.TextureID, mip, layer int) types.TextureViewID {

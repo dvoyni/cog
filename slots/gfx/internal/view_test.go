@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
@@ -21,24 +23,24 @@ func TestAParameterSerializesToExactlyOneValue(t *testing.T) {
 	pixels := []byte{1, 2, 3, 4, 5, 6, 7, 8}
 	cases := []struct {
 		name      string
-		parameter ParameterDescr
+		parameter descriptors.ParameterDescr
 		kind      string
 		// field is the one key besides name and kind the JSON is allowed to
 		// carry.
 		field string
 	}{
-		{"float", FloatParam("alpha", 0.5), "float", "value"},
-		{"color", ColorParam("tint", m.Color{R: 1, A: 1}), "color", "value"},
-		{"vec4", VecParam("offset", m.Vec4{X: 1, Y: 2}), "vec4", "value"},
-		{"mat4", MatParam("mvp", m.NewMat4()), "mat4", "value"},
-		{"sampler", SamplerParam("smp", types.SamplerDesc{}), "sampler", "sampler"},
-		{"buffer", BufferParam("items", BufferWithBytes([]byte{1, 2, 3, 4}, false)), "buffer", "buffer"},
+		{"float", descriptors.FloatParam("alpha", 0.5), "float", "value"},
+		{"color", descriptors.ColorParam("tint", m.Color{R: 1, A: 1}), "color", "value"},
+		{"vec4", descriptors.VecParam("offset", m.Vec4{X: 1, Y: 2}), "vec4", "value"},
+		{"mat4", descriptors.MatParam("mvp", m.NewMat4()), "mat4", "value"},
+		{"sampler", descriptors.SamplerParam("smp", types.SamplerDesc{}), "sampler", "sampler"},
+		{"buffer", descriptors.BufferParam("items", descriptors.BufferWithBytes([]byte{1, 2, 3, 4}, false)), "buffer", "buffer"},
 		{
 			"texture",
-			TextureParam("albedo", TextureWithBytes(2, 1, FormatRGBA8, pixels, false, false)),
+			descriptors.TextureParam("albedo", descriptors.TextureWithBytes(2, 1, descriptors.FormatRGBA8, pixels, false, false)),
 			"texture", "texture",
 		},
-		{"none", ParameterDescr{}, "none", ""},
+		{"none", descriptors.ParameterDescr{}, "none", ""},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -66,18 +68,18 @@ func TestAParameterSerializesToExactlyOneValue(t *testing.T) {
 }
 
 func TestAParameterCarriesItsValueInShaderOrder(t *testing.T) {
-	color := ParameterViewOf(ColorParam("tint", m.Color{R: 0.1, G: 0.2, B: 0.3, A: 0.4}))
+	color := ParameterViewOf(descriptors.ColorParam("tint", m.Color{R: 0.1, G: 0.2, B: 0.3, A: 0.4}))
 	if want := []float32{0.1, 0.2, 0.3, 0.4}; !equalFloats(color.Value, want) {
 		t.Errorf("color value = %v, want %v", color.Value, want)
 	}
-	vec := ParameterViewOf(VecParam("offset", m.Vec4{X: 1, Y: 2, Z: 3, W: 4}))
+	vec := ParameterViewOf(descriptors.VecParam("offset", m.Vec4{X: 1, Y: 2, Z: 3, W: 4}))
 	if want := []float32{1, 2, 3, 4}; !equalFloats(vec.Value, want) {
 		t.Errorf("vec4 value = %v, want %v", vec.Value, want)
 	}
-	if mat := ParameterViewOf(MatParam("mvp", m.NewMat4())); len(mat.Value) != 16 {
+	if mat := ParameterViewOf(descriptors.MatParam("mvp", m.NewMat4())); len(mat.Value) != 16 {
 		t.Errorf("mat4 value has %d components, want 16", len(mat.Value))
 	}
-	if single := ParameterViewOf(FloatParam("alpha", 0.5)); !equalFloats(single.Value, []float32{0.5}) {
+	if single := ParameterViewOf(descriptors.FloatParam("alpha", 0.5)); !equalFloats(single.Value, []float32{0.5}) {
 		t.Errorf("float value = %v, want [0.5]", single.Value)
 	}
 }
@@ -89,7 +91,7 @@ func TestATextureWithInlinePixelsReportsTheirSizeAndNotThem(t *testing.T) {
 	for i := range pixels {
 		pixels[i] = byte(i + 1)
 	}
-	parameter := TextureParam("albedo", TextureWithBytes(4, 4, FormatRGBA8, pixels, false, true))
+	parameter := descriptors.TextureParam("albedo", descriptors.TextureWithBytes(4, 4, descriptors.FormatRGBA8, pixels, false, true))
 
 	document, err := json.Marshal(ParameterViewOf(parameter))
 	if err != nil {
@@ -105,7 +107,7 @@ func TestATextureWithInlinePixelsReportsTheirSizeAndNotThem(t *testing.T) {
 	if view.Texture.Width != 4 || view.Texture.Height != 4 {
 		t.Errorf("size = %dx%d, want 4x4", view.Texture.Width, view.Texture.Height)
 	}
-	if !view.Texture.Mipmaps || view.Texture.Format != FormatRGBA8.String() {
+	if !view.Texture.Mipmaps || view.Texture.Format != descriptors.FormatRGBA8.String() {
 		t.Errorf("texture = %+v, want the format and mipmap flag it was built with", view.Texture)
 	}
 	// base64 of the run, and the run itself, both absent: a whole texture in a
@@ -120,7 +122,7 @@ func TestATextureWithInlinePixelsReportsTheirSizeAndNotThem(t *testing.T) {
 }
 
 func TestARawParameterReportsItsLengthAndNotItsBytes(t *testing.T) {
-	raw := RawParameter("block", struct {
+	raw := descriptors.RawParameter("block", struct {
 		A float32
 		B float32
 	}{1, 2})
@@ -137,8 +139,8 @@ func TestARawParameterReportsItsLengthAndNotItsBytes(t *testing.T) {
 }
 
 func TestABufferParameterCarriesTheRangeItBinds(t *testing.T) {
-	buffer := BufferWithBytes(make([]byte, 512), false)
-	view := ParameterViewOf(BufferRangeParam("items", buffer, 128, 64))
+	buffer := descriptors.BufferWithBytes(make([]byte, 512), false)
+	view := ParameterViewOf(descriptors.BufferRangeParam("items", buffer, 128, 64))
 	if view.Buffer == nil {
 		t.Fatal("a buffer parameter carries no buffer view")
 	}
@@ -148,7 +150,7 @@ func TestABufferParameterCarriesTheRangeItBinds(t *testing.T) {
 	if view.Buffer.Size != 512 || view.Buffer.Bytes != 512 {
 		t.Errorf("buffer = %+v, want the 512 bytes it was built from", view.Buffer)
 	}
-	whole := ParameterViewOf(BufferParam("items", buffer))
+	whole := ParameterViewOf(descriptors.BufferParam("items", buffer))
 	if whole.Buffer.Offset != 0 || whole.Buffer.Range != 0 {
 		t.Errorf("a whole-buffer binding reports range %d+%d, want 0+0 - which is how it says whole",
 			whole.Buffer.Offset, whole.Buffer.Range)
@@ -156,10 +158,10 @@ func TestABufferParameterCarriesTheRangeItBinds(t *testing.T) {
 }
 
 func TestAMaterialViewNamesItsShaderVariantAndState(t *testing.T) {
-	material := MaterialWithState(
+	material := descriptors.MaterialWithState(
 		shader.ShaderWithResource("shaders/pbr.wgsl", shader.ShaderDefine("SKINNED"), shader.ShaderConst("LIGHTS", "4")),
 		StateOpaque3D(),
-		ColorParam("tint", m.White),
+		descriptors.ColorParam("tint", m.White),
 	)
 	view := MaterialViewOf(material)
 	if view.Shader.Path != "shaders/pbr.wgsl" || view.Shader.Inline {
@@ -176,7 +178,7 @@ func TestAMaterialViewNamesItsShaderVariantAndState(t *testing.T) {
 	if len(view.Parameters) != 1 || view.Parameters[0].Name != "tint" {
 		t.Errorf("parameters = %+v, want the material's own", view.Parameters)
 	}
-	inline := MaterialViewOf(Material(shader.ShaderWithText("// wgsl")))
+	inline := MaterialViewOf(descriptors.Material(shader.ShaderWithText("// wgsl")))
 	if !inline.Shader.Inline || inline.Shader.Path != "" {
 		t.Errorf("inline shader = %+v, want no path and the inline flag", inline.Shader)
 	}

@@ -14,6 +14,8 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
@@ -28,8 +30,8 @@ import (
 )
 
 // testMaterial builds a material with an inline (fake-compiled) shader.
-func testMaterial(params ...ParameterDescr) MaterialDescr {
-	return Material(shader.ShaderWithText("//test"), params...)
+func testMaterial(params ...descriptors.ParameterDescr) descriptors.MaterialDescr {
+	return descriptors.Material(shader.ShaderWithText("//test"), params...)
 }
 
 // fakeBackend records the calls the translator makes and captures the last
@@ -41,7 +43,7 @@ type fakeBackend struct {
 	// formats is what each texture was allocated or baked in, the fake's stand
 	// in for gogpu's bakedTextureDescs: written when a bake is replayed and
 	// dropped on release, so a texture is unknown until its frame's Execute.
-	formats        map[types.TextureID]TextureFormat
+	formats        map[types.TextureID]descriptors.TextureFormat
 	nextID         uint32
 	nextTex        uint32
 	nextBuf        uint32
@@ -150,7 +152,7 @@ func paddedCapture(width, height int, at func(x, y int) color.NRGBA) Capture {
 	}
 	return Capture{
 		Pixels: pixels, Width: width, Height: height,
-		Format: FrameBufferFormat, BytesPerRow: rowBytes,
+		Format: descriptors.FrameBufferFormat, BytesPerRow: rowBytes,
 	}
 }
 
@@ -221,7 +223,7 @@ func (b *fakeBackend) Limits() types.Limits {
 // TextureFormat answers from the formats recorded when a texture was allocated
 // or baked, which is the backend's own record in gogpu too. A texture whose
 // bake this backend has not replayed yet is unknown, exactly as there.
-func (b *fakeBackend) TextureFormat(id types.TextureID) (TextureFormat, bool) {
+func (b *fakeBackend) TextureFormat(id types.TextureID) (descriptors.TextureFormat, bool) {
 	format, ok := b.formats[id]
 	return format, ok
 }
@@ -268,7 +270,7 @@ type backendOp struct {
 	texture               types.TextureID
 	buffer                types.BufferID
 	bufferKind            types.BufferKind
-	format                TextureFormat
+	format                descriptors.TextureFormat
 	width, height, layers int
 	layer                 int
 	region                types.Region
@@ -284,7 +286,7 @@ func (b *fakeBackend) BakeBuffer(id types.BufferID, kind types.BufferKind, size 
 	b.lastOps = append(b.lastOps, backendOp{kind: testOpBakeBuffer, buffer: id, bufferKind: kind, size: size, data: data})
 }
 
-func (b *fakeBackend) BakeTexture(id types.TextureID, width, height int, format TextureFormat, pixels []byte, mipmaps bool) {
+func (b *fakeBackend) BakeTexture(id types.TextureID, width, height int, format descriptors.TextureFormat, pixels []byte, mipmaps bool) {
 	b.textures++
 	b.uploads++
 	b.recordFormat(id, format)
@@ -309,9 +311,9 @@ func (b *fakeBackend) ReleaseBuffer(id types.BufferID) {
 	b.lastOps = append(b.lastOps, backendOp{kind: testOpReleaseBuffer, buffer: id})
 }
 
-func (b *fakeBackend) recordFormat(id types.TextureID, format TextureFormat) {
+func (b *fakeBackend) recordFormat(id types.TextureID, format descriptors.TextureFormat) {
 	if b.formats == nil {
-		b.formats = map[types.TextureID]TextureFormat{}
+		b.formats = map[types.TextureID]descriptors.TextureFormat{}
 	}
 	b.formats[id] = format
 }
@@ -391,7 +393,7 @@ func (b *fakeBackend) SetSampler(_ types.SamplerID, group, binding int) {
 	b.lastOps = append(b.lastOps, backendOp{kind: testOpSetSampler, group: group, binding: binding})
 }
 func (b *fakeBackend) SetVertexBuffer(types.BufferID, int) {}
-func (b *fakeBackend) SetIndexBuffer(buffer types.BufferID, offset int, width IndexWidth) {
+func (b *fakeBackend) SetIndexBuffer(buffer types.BufferID, offset int, width descriptors.IndexWidth) {
 	b.indexBinds = append(b.indexBinds, indexBind{buffer: buffer, offset: offset, width: width})
 }
 func (b *fakeBackend) SetBuffer(group, binding int, buffer types.BufferID, offset, size int) {
@@ -413,7 +415,7 @@ func (b *fakeBackend) Draw(first, count, instances, firstInstance int, indexed b
 type indexBind struct {
 	buffer types.BufferID
 	offset int
-	width  IndexWidth
+	width  descriptors.IndexWidth
 }
 
 // drawCall is one recorded draw, so tests can assert on the arguments that
@@ -516,13 +518,13 @@ func testPNG(t *testing.T) []byte {
 	return encoded.Bytes()
 }
 
-func triangle() MeshDescr {
+func triangle() descriptors.MeshDescr {
 	const stride = 28 // vec3 position + vec4 color
-	return Mesh(
-		BufferWithBytes(make([]byte, 3*stride), true),
+	return descriptors.Mesh(
+		descriptors.BufferWithBytes(make([]byte, 3*stride), true),
 		types.TopologyTriangleList,
-		Attr(0, Float32x3),
-		Attr(12, Float32x4),
+		descriptors.Attr(0, descriptors.Float32x3),
+		descriptors.Attr(12, descriptors.Float32x4),
 	)
 }
 
@@ -530,12 +532,12 @@ func BenchmarkOpQueueDrawSteadyState(b *testing.B) {
 	queue := testOpQueue(&fakeBackend{})
 	mesh := triangle()
 	material := testMaterial(
-		ColorParam("tint", m.Color{R: 1, G: 1, B: 1, A: 1}),
-		BufferParam("data", BufferWithBytes(make([]byte, 64), true)),
+		descriptors.ColorParam("tint", m.Color{R: 1, G: 1, B: 1, A: 1}),
+		descriptors.BufferParam("data", descriptors.BufferWithBytes(make([]byte, 64), true)),
 	)
-	params := []ParameterDescr{
-		MatParam("mvp", m.NewMat4()),
-		FloatParam("time", 1),
+	params := []descriptors.ParameterDescr{
+		descriptors.MatParam("mvp", m.NewMat4()),
+		descriptors.FloatParam("time", 1),
 	}
 
 	queue.Draw(mesh, material, params...)
@@ -566,24 +568,24 @@ func BenchmarkTranslateSteadyState(b *testing.B) {
 	translator := newTranslator()
 	queue := testOpQueue(backend)
 	// Without a pass every draw is a stray and the bench translates none of them.
-	queue.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto()})
-	mesh := Mesh(
-		BakedBuffer(1, 3*28),
+	queue.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto()})
+	mesh := descriptors.Mesh(
+		descriptors.BakedBuffer(1, 3*28),
 		types.TopologyTriangleList,
-		Attr(0, Float32x3), Attr(12, Float32x4),
+		descriptors.Attr(0, descriptors.Float32x3), descriptors.Attr(12, descriptors.Float32x4),
 	)
 	material := testMaterial(
-		ColorParam("tint", m.Color{R: 1, G: 1, B: 1, A: 1}),
-		FloatParam("scale", 1),
-		TextureParam("MainTexture", BakedTexture(2, 0, 0)),
-		SamplerParam("MainSampler", types.SamplerDesc{}),
-		BufferParam("Data", BakedBuffer(3, 64)),
+		descriptors.ColorParam("tint", m.Color{R: 1, G: 1, B: 1, A: 1}),
+		descriptors.FloatParam("scale", 1),
+		descriptors.TextureParam("MainTexture", descriptors.BakedTexture(2, 0, 0)),
+		descriptors.SamplerParam("MainSampler", types.SamplerDesc{}),
+		descriptors.BufferParam("Data", descriptors.BakedBuffer(3, 64)),
 	)
 	for range 100 {
 		queue.Draw(mesh, material,
-			MatParam("mvp", m.NewMat4()),
-			FloatParam("time", 1),
-			ColorParam("tint", m.Color{R: 0.5, A: 1}),
+			descriptors.MatParam("mvp", m.NewMat4()),
+			descriptors.FloatParam("time", 1),
+			descriptors.ColorParam("tint", m.Color{R: 0.5, A: 1}),
 		)
 	}
 	// The zero Kernel is legal here because nothing this frame reaches it: every
@@ -600,22 +602,23 @@ func BenchmarkTranslateSteadyState(b *testing.B) {
 
 type benchmarkGpuSink struct{}
 
-func (benchmarkGpuSink) BakeUniforms([]byte)                                                {}
-func (benchmarkGpuSink) BakeBuffer(types.BufferID, types.BufferKind, int, []byte)           {}
-func (benchmarkGpuSink) BakeTexture(types.TextureID, int, int, TextureFormat, []byte, bool) {}
-func (benchmarkGpuSink) AllocateTexture(types.TextureID, TextureDesc)                       {}
-func (benchmarkGpuSink) UpdateTexture(types.TextureID, int, types.Region, []byte)           {}
-func (benchmarkGpuSink) SetPipeline(types.PipelineID)                                       {}
-func (benchmarkGpuSink) SetUniformBlock(int, int)                                           {}
-func (benchmarkGpuSink) SetTexture(types.TextureID, int, int)                               {}
+func (benchmarkGpuSink) BakeUniforms([]byte)                                      {}
+func (benchmarkGpuSink) BakeBuffer(types.BufferID, types.BufferKind, int, []byte) {}
+func (benchmarkGpuSink) BakeTexture(types.TextureID, int, int, descriptors.TextureFormat, []byte, bool) {
+}
+func (benchmarkGpuSink) AllocateTexture(types.TextureID, TextureDesc)             {}
+func (benchmarkGpuSink) UpdateTexture(types.TextureID, int, types.Region, []byte) {}
+func (benchmarkGpuSink) SetPipeline(types.PipelineID)                             {}
+func (benchmarkGpuSink) SetUniformBlock(int, int)                                 {}
+func (benchmarkGpuSink) SetTexture(types.TextureID, int, int)                     {}
 
-func (benchmarkGpuSink) SetSampler(types.SamplerID, int, int)           {}
-func (benchmarkGpuSink) SetVertexBuffer(types.BufferID, int)            {}
-func (benchmarkGpuSink) SetIndexBuffer(types.BufferID, int, IndexWidth) {}
-func (benchmarkGpuSink) SetBuffer(int, int, types.BufferID, int, int)   {}
-func (benchmarkGpuSink) Draw(int, int, int, int, bool)                  {}
-func (benchmarkGpuSink) ReleaseBuffer(types.BufferID)                   {}
-func (benchmarkGpuSink) ReleaseTexture(types.TextureID)                 {}
+func (benchmarkGpuSink) SetSampler(types.SamplerID, int, int)                       {}
+func (benchmarkGpuSink) SetVertexBuffer(types.BufferID, int)                        {}
+func (benchmarkGpuSink) SetIndexBuffer(types.BufferID, int, descriptors.IndexWidth) {}
+func (benchmarkGpuSink) SetBuffer(int, int, types.BufferID, int, int)               {}
+func (benchmarkGpuSink) Draw(int, int, int, int, bool)                              {}
+func (benchmarkGpuSink) ReleaseBuffer(types.BufferID)                               {}
+func (benchmarkGpuSink) ReleaseTexture(types.TextureID)                             {}
 
 func (benchmarkGpuSink) BeginPass(types.PassDesc) RenderPass          { return benchmarkGpuSink{} }
 func (benchmarkGpuSink) EndPass(RenderPass)                           {}
@@ -661,8 +664,8 @@ func TestPassSelectionIsFrameLocalState(t *testing.T) {
 	if len(OpQueuePasses(&queue)) != 0 || OpQueueCurrent(&queue) != -1 {
 		t.Fatalf("after reset: %d passes, current %d, want none declared or selected", len(OpQueuePasses(&queue)), OpQueueCurrent(&queue))
 	}
-	first := queue.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear})
-	second := queue.Pass(PassDescr{Order: 1, Target: ScreenTarget(), Depth: DepthAuto()})
+	first := queue.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear})
+	second := queue.Pass(descriptors.PassDescr{Order: 1, Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto()})
 	if OpQueueSelectedPass(&queue) != 1 {
 		t.Errorf("selected pass = %d, want the one just declared", OpQueueSelectedPass(&queue))
 	}
@@ -671,7 +674,7 @@ func TestPassSelectionIsFrameLocalState(t *testing.T) {
 		t.Errorf("selected pass = %d, want the re-selected first", OpQueueSelectedPass(&queue))
 	}
 	// An unknown reference leaves the selection alone rather than guessing.
-	queue.SetPass(PassRef(99))
+	queue.SetPass(descriptors.PassRef(99))
 	if OpQueueSelectedPass(&queue) != 0 {
 		t.Errorf("selected pass = %d, want the selection unchanged by an unknown ref", OpQueueSelectedPass(&queue))
 	}
@@ -698,9 +701,9 @@ func TestBakeOpsAllocateBakedResourceIDs(t *testing.T) {
 	queue := *NewResourceQueue(idsOf(backend))
 	pixels := []byte{1, 2, 3, 4}
 	buffer := queue.BakeBuffer(pixels, true)
-	texture := queue.BakeTexture(1, 1, FormatRGBA8, pixels, true, false)
+	texture := queue.BakeTexture(1, 1, descriptors.FormatRGBA8, pixels, true, false)
 	rebakedBuffer := queue.ReBakeBuffer(buffer, pixels, true)
-	rebakedTexture := queue.ReBakeTexture(texture, 1, 1, FormatRGBA8, pixels, true, false)
+	rebakedTexture := queue.ReBakeTexture(texture, 1, 1, descriptors.FormatRGBA8, pixels, true, false)
 
 	if buffer.ID() == 0 || texture.ID() == 0 {
 		t.Fatalf("baked handles = (%d, %d), want nonzero", buffer.ID(), texture.ID())
@@ -742,8 +745,8 @@ func TestBakeTextureCopyDataControlsOwnership(t *testing.T) {
 	queue := *NewResourceQueue(idsOf(&fakeBackend{}))
 	copied := []byte{1, 2, 3, 4}
 	borrowed := []byte{5, 6, 7, 8}
-	queue.BakeTexture(1, 1, FormatRGBA8, copied, true, false)
-	queue.BakeTexture(1, 1, FormatRGBA8, borrowed, false, false)
+	queue.BakeTexture(1, 1, descriptors.FormatRGBA8, copied, true, false)
+	queue.BakeTexture(1, 1, descriptors.FormatRGBA8, borrowed, false, false)
 
 	copied[0] = 9
 	borrowed[0] = 10
@@ -767,7 +770,7 @@ func TestTextureArrayAllocationAndLayerUpdateTranslate(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	pixels := []byte{1, 2, 3, 4}
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		texture := resources.AllocateTexture(64, 32, 4, FormatRGBA8)
+		texture := resources.AllocateTexture(64, 32, 4, descriptors.FormatRGBA8)
 		resources.UpdateTexture(texture, 2, types.Region{X: 5, Y: 7, Width: 1, Height: 1}, pixels, true)
 	})
 	pixels[0] = 9
@@ -783,7 +786,7 @@ func TestTextureArrayAllocationAndLayerUpdateTranslate(t *testing.T) {
 		op := &backend.lastOps[i]
 		switch op.kind {
 		case testOpAllocateTexture:
-			if op.width != 64 || op.height != 32 || op.layers != 4 || op.format != FormatRGBA8 {
+			if op.width != 64 || op.height != 32 || op.layers != 4 || op.format != descriptors.FormatRGBA8 {
 				t.Fatalf("allocation metadata = (%d,%d,%d,%d)", op.width, op.height, op.layers, op.format)
 			}
 		case testOpUpdateTexture:
@@ -805,7 +808,7 @@ func TestPersistentResourceTextureSurvivesDroppedFrame(t *testing.T) {
 
 	for range 2 {
 		w := recordList(t, k)
-		w.Draw(triangle(), testMaterial(TextureParam("MainTexture", TextureWithResource("persistent.png"))), MatParam("mvp", m.NewMat4()))
+		w.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("persistent.png"))), descriptors.MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 	}
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -834,17 +837,17 @@ func TestPersistentBakeRebakeAndReleaseSurviveDroppedFrame(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	var buffer BufferDescr
-	var texture TextureDescr
+	var buffer descriptors.BufferDescr
+	var texture descriptors.TextureDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
 		buffer = resources.BakeBuffer([]byte{1, 2, 3, 4}, true)
-		texture = resources.BakeTexture(1, 1, FormatRGBA8, []byte{1, 2, 3, 4}, true, false)
+		texture = resources.BakeTexture(1, 1, descriptors.FormatRGBA8, []byte{1, 2, 3, 4}, true, false)
 	})
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
 		resources.ReBakeBuffer(buffer, []byte{5, 6, 7, 8}, true)
-		resources.ReBakeTexture(texture, 1, 1, FormatRGBA8, []byte{5, 6, 7, 8}, true, false)
+		resources.ReBakeTexture(texture, 1, 1, descriptors.FormatRGBA8, []byte{5, 6, 7, 8}, true, false)
 		resources.ReleaseBuffer(buffer)
 		resources.ReleaseTexture(texture)
 	})
@@ -872,7 +875,7 @@ func TestDroppedFrameDiscardsTemporaryUploads(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w := recordList(t, k)
-	w.Draw(triangle(), testMaterial(TextureParam("MainTexture", TextureWithBytes(1, 1, FormatRGBA8, []byte{1, 2, 3, 4}, false, false))), MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", descriptors.TextureWithBytes(1, 1, descriptors.FormatRGBA8, []byte{1, 2, 3, 4}, false, false))), descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	w = recordList(t, k)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
@@ -917,17 +920,17 @@ func TestOpQueueTemporaryBufferPool(t *testing.T) {
 func TestDrawStoresTemporaryBufferIDsWithoutInlineGeometry(t *testing.T) {
 	queue := testOpQueue(&fakeBackend{})
 	mesh := triangle()
-	queue.Draw(mesh, testMaterial(), MatParam("mvp", m.NewMat4()))
+	queue.Draw(mesh, testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
 
 	if OpQueueOps(&queue)[0].Kind != OpBakeBuffer || OpQueueOps(&queue)[0].BufferKind != types.BufferVertex {
 		t.Fatal("draw did not populate a vertex bake op first")
 	}
 	draw := &OpQueueOps(&queue)[1]
-	if MeshVertices(&draw.Mesh).ID() == 0 || draw.Mesh.VertexCount() != 3 {
-		t.Fatalf("draw vertex resource = (%d, %d), want nonzero ID and 3 vertices", MeshVertices(&draw.Mesh).ID(), draw.Mesh.VertexCount())
+	if descriptors.MeshVertices(&draw.Mesh).ID() == 0 || draw.Mesh.VertexCount() != 3 {
+		t.Fatalf("draw vertex resource = (%d, %d), want nonzero ID and 3 vertices", descriptors.MeshVertices(&draw.Mesh).ID(), draw.Mesh.VertexCount())
 	}
-	if BufferBytes(MeshVerticesRef(&draw.Mesh)).Len() != 0 {
-		t.Fatalf("draw retained %d inline vertex bytes", BufferBytes(MeshVerticesRef(&draw.Mesh)).Len())
+	if descriptors.BufferBytes(descriptors.MeshVerticesRef(&draw.Mesh)).Len() != 0 {
+		t.Fatalf("draw retained %d inline vertex bytes", descriptors.BufferBytes(descriptors.MeshVerticesRef(&draw.Mesh)).Len())
 	}
 	if len(OpQueueTemporaryBuffers(&queue)) != 1 || !OpQueueTemporaryBuffers(&queue)[0].Used {
 		t.Fatal("draw did not lease one temporary vertex buffer")
@@ -938,32 +941,32 @@ func TestOpQueueArenasPreserveCallerDataIsolation(t *testing.T) {
 	queue := testOpQueue(&fakeBackend{})
 	vertices := make([]byte, 3*28)
 	vertices[0] = 1
-	layout := []VertexAttr{Attr(0, Float32x3), Attr(12, Float32x4)}
-	materialParams := []ParameterDescr{ColorParam("tint", m.Color{R: 1})}
-	drawParams := []ParameterDescr{FloatParam("time", 1)}
+	layout := []descriptors.VertexAttr{descriptors.Attr(0, descriptors.Float32x3), descriptors.Attr(12, descriptors.Float32x4)}
+	materialParams := []descriptors.ParameterDescr{descriptors.ColorParam("tint", m.Color{R: 1})}
+	drawParams := []descriptors.ParameterDescr{descriptors.FloatParam("time", 1)}
 
 	queue.Draw(
-		Mesh(BufferWithBytes(vertices, true), types.TopologyTriangleList, layout...),
-		Material(shader.ShaderWithText("//test"), materialParams...),
+		descriptors.Mesh(descriptors.BufferWithBytes(vertices, true), types.TopologyTriangleList, layout...),
+		descriptors.Material(shader.ShaderWithText("//test"), materialParams...),
 		drawParams...,
 	)
 	vertices[0] = 9
-	layout[0] = Attr(4, Float32x2)
-	materialParams[0] = ColorParam("tint", m.Color{G: 1})
-	drawParams[0] = FloatParam("time", 9)
+	layout[0] = descriptors.Attr(4, descriptors.Float32x2)
+	materialParams[0] = descriptors.ColorParam("tint", m.Color{G: 1})
+	drawParams[0] = descriptors.FloatParam("time", 9)
 
 	draw := &OpQueueOps(&queue)[len(OpQueueOps(&queue))-1]
 	if OpQueueOps(&queue)[0].Bytes[0] != 1 {
 		t.Fatalf("recorded vertex byte = %d, want 1", OpQueueOps(&queue)[0].Bytes[0])
 	}
-	if MeshLayout(&draw.Mesh)[0] != (Attr(0, Float32x3)) {
-		t.Fatalf("recorded layout = %+v, want original", MeshLayout(&draw.Mesh))
+	if descriptors.MeshLayout(&draw.Mesh)[0] != (descriptors.Attr(0, descriptors.Float32x3)) {
+		t.Fatalf("recorded layout = %+v, want original", descriptors.MeshLayout(&draw.Mesh))
 	}
-	if ParameterColor(&(draw.Material.Params()[0])) != (m.Color{R: 1}) {
-		t.Fatalf("recorded material color = %+v, want red", ParameterColor(&(draw.Material.Params()[0])))
+	if descriptors.ParameterColor(&(draw.Material.Params()[0])) != (m.Color{R: 1}) {
+		t.Fatalf("recorded material color = %+v, want red", descriptors.ParameterColor(&(draw.Material.Params()[0])))
 	}
-	if ParameterNum(&(draw.Params[0])) != 1 {
-		t.Fatalf("recorded draw parameter = %v, want 1", ParameterNum(&(draw.Params[0])))
+	if descriptors.ParameterNum(&(draw.Params[0])) != 1 {
+		t.Fatalf("recorded draw parameter = %v, want 1", descriptors.ParameterNum(&(draw.Params[0])))
 	}
 }
 
@@ -973,10 +976,10 @@ func TestBufferWithBytesCopyDataControlsOwnership(t *testing.T) {
 	borrowed := make([]byte, 12)
 	copied[0] = 1
 	borrowed[0] = 2
-	layout := []VertexAttr{Attr(0, Float32x3)}
+	layout := []descriptors.VertexAttr{descriptors.Attr(0, descriptors.Float32x3)}
 
-	queue.Draw(Mesh(BufferWithBytes(copied, true), types.TopologyTriangleList, layout...), testMaterial())
-	queue.Draw(Mesh(BufferWithBytes(borrowed, false), types.TopologyTriangleList, layout...), testMaterial())
+	queue.Draw(descriptors.Mesh(descriptors.BufferWithBytes(copied, true), types.TopologyTriangleList, layout...), testMaterial())
+	queue.Draw(descriptors.Mesh(descriptors.BufferWithBytes(borrowed, false), types.TopologyTriangleList, layout...), testMaterial())
 	copied[0] = 9
 	borrowed[0] = 10
 
@@ -997,8 +1000,8 @@ func TestTextureWithBytesCopyDataControlsOwnership(t *testing.T) {
 	queue := testOpQueue(&fakeBackend{})
 	copied := []byte{1, 2, 3, 4}
 	borrowed := []byte{5, 6, 7, 8}
-	OpQueueBakeTextureIfNeeded(&queue, TextureWithBytes(1, 1, FormatRGBA8, copied, true, false))
-	OpQueueBakeTextureIfNeeded(&queue, TextureWithBytes(1, 1, FormatRGBA8, borrowed, false, false))
+	OpQueueBakeTextureIfNeeded(&queue, descriptors.TextureWithBytes(1, 1, descriptors.FormatRGBA8, copied, true, false))
+	OpQueueBakeTextureIfNeeded(&queue, descriptors.TextureWithBytes(1, 1, descriptors.FormatRGBA8, borrowed, false, false))
 
 	copied[0] = 9
 	borrowed[0] = 10
@@ -1025,29 +1028,29 @@ func TestOpQueueBakesInlineMaterialAndDrawParameters(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	queue := recordList(t, k)
 	material := testMaterial(
-		TextureParam("MaterialTexture", TextureWithResource("shared.png")),
-		BufferParam("MaterialBuffer", BufferWithBytes([]byte{1, 2, 3, 4}, true)),
+		descriptors.TextureParam("MaterialTexture", descriptors.TextureWithResource("shared.png")),
+		descriptors.BufferParam("MaterialBuffer", descriptors.BufferWithBytes([]byte{1, 2, 3, 4}, true)),
 	)
-	drawTexture := TextureWithBytes(1, 1, FormatRGBA8, []byte{5, 6, 7, 8}, true, false)
-	drawBuffer := BufferWithBytes([]byte{9, 10, 11, 12}, true)
+	drawTexture := descriptors.TextureWithBytes(1, 1, descriptors.FormatRGBA8, []byte{5, 6, 7, 8}, true, false)
+	drawBuffer := descriptors.BufferWithBytes([]byte{9, 10, 11, 12}, true)
 
 	queue.Draw(triangle(), material,
-		TextureParam("DrawTexture", drawTexture),
-		BufferParam("DrawBuffer", drawBuffer),
+		descriptors.TextureParam("DrawTexture", drawTexture),
+		descriptors.BufferParam("DrawBuffer", drawBuffer),
 	)
 	draw := &OpQueueOps(queue)[len(OpQueueOps(queue))-1]
 	for _, param := range append(draw.Material.Params(), draw.Params...) {
-		switch ParameterKind(&param) {
-		case ParamTexture:
+		switch descriptors.ParameterKind(&param) {
+		case descriptors.ParamTexture:
 			// An inline run is baked into a temporary texture at record time
 			// and comes back as an id; a path is left alone for the render
 			// thread's cache. Either way no pixels survive the recording.
-			texture := ParameterTextureRef(&param)
+			texture := descriptors.ParameterTextureRef(&param)
 			if texture.Blob.Len() != 0 || (texture.Path() == "" && texture.ID() == 0) {
 				t.Errorf("texture param %q was not remapped to a baked ID", param.Name())
 			}
-		case ParamBuffer:
-			if BufferSource(ParameterBufferRef(&param)) != BufferSourceBaked || ParameterBuffer(&param).ID() == 0 || BufferBytes(ParameterBufferRef(&param)).Len() != 0 {
+		case descriptors.ParamBuffer:
+			if descriptors.BufferSource(descriptors.ParameterBufferRef(&param)) != descriptors.BufferSourceBaked || descriptors.ParameterBuffer(&param).ID() == 0 || descriptors.BufferBytes(descriptors.ParameterBufferRef(&param)).Len() != 0 {
 				t.Errorf("buffer param %q was not remapped to a baked ID", param.Name())
 			}
 		}
@@ -1065,14 +1068,14 @@ func TestOpQueueBakesInlineMaterialAndDrawParameters(t *testing.T) {
 
 func TestOpQueueTemporaryTexturePool(t *testing.T) {
 	queue := testOpQueue(&fakeBackend{})
-	first := OpQueueBakeTextureIfNeeded(&queue, TextureWithBytes(1, 1, FormatRGBA8, []byte{1, 2, 3, 4}, true, false))
-	second := OpQueueBakeTextureIfNeeded(&queue, TextureWithBytes(1, 1, FormatRGBA8, []byte{5, 6, 7, 8}, true, false))
+	first := OpQueueBakeTextureIfNeeded(&queue, descriptors.TextureWithBytes(1, 1, descriptors.FormatRGBA8, []byte{1, 2, 3, 4}, true, false))
+	second := OpQueueBakeTextureIfNeeded(&queue, descriptors.TextureWithBytes(1, 1, descriptors.FormatRGBA8, []byte{5, 6, 7, 8}, true, false))
 	if first.ID() == second.ID() {
 		t.Fatal("simultaneously used temporary textures share an ID")
 	}
 
 	queue.Reset()
-	reused := OpQueueBakeTextureIfNeeded(&queue, TextureWithBytes(1, 1, FormatRGBA8, []byte{9, 10, 11, 12}, true, false))
+	reused := OpQueueBakeTextureIfNeeded(&queue, descriptors.TextureWithBytes(1, 1, descriptors.FormatRGBA8, []byte{9, 10, 11, 12}, true, false))
 	if reused.ID() != first.ID() {
 		t.Errorf("reused temporary texture ID = %d, want %d", reused.ID(), first.ID())
 	}
@@ -1095,19 +1098,19 @@ func TestBakedResourcesTranslateToBakedBindings(t *testing.T) {
 	k := newTestKernel(t, p)
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	var texture TextureDescr
-	var buffer BufferDescr
+	var texture descriptors.TextureDescr
+	var buffer descriptors.BufferDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		texture = resources.BakeTexture(1, 1, FormatRGBA8, []byte{255, 255, 255, 255}, true, false)
+		texture = resources.BakeTexture(1, 1, descriptors.FormatRGBA8, []byte{255, 255, 255, 255}, true, false)
 		buffer = resources.BakeBuffer([]byte{1, 2, 3, 4}, true)
 	})
 	w := recordList(t, k)
 	material := testMaterial(
-		TextureParam("MainTexture", texture),
-		SamplerParam("MainSampler", types.SamplerDesc{}),
-		BufferParam("Data", buffer),
+		descriptors.TextureParam("MainTexture", texture),
+		descriptors.SamplerParam("MainSampler", types.SamplerDesc{}),
+		descriptors.BufferParam("Data", buffer),
 	)
-	w.Draw(triangle(), material, MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), material, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -1130,7 +1133,7 @@ func TestBakedResourcesTranslateToBakedBindings(t *testing.T) {
 	}
 
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		if got := resources.ReBakeTexture(texture, 2, 1, FormatRGBA8, make([]byte, 8), true, false); got.ID() != texture.ID() {
+		if got := resources.ReBakeTexture(texture, 2, 1, descriptors.FormatRGBA8, make([]byte, 8), true, false); got.ID() != texture.ID() {
 			t.Errorf("rebaked texture = %d, want %d", got.ID(), texture.ID())
 		}
 		if got := resources.ReBakeBuffer(buffer, []byte{5, 6, 7, 8}, true); got.ID() != buffer.ID() {
@@ -1138,7 +1141,7 @@ func TestBakedResourcesTranslateToBakedBindings(t *testing.T) {
 		}
 	})
 	w = recordList(t, k)
-	w.Draw(triangle(), material, MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), material, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -1194,13 +1197,13 @@ func TestConsumeTranslatesDraws(t *testing.T) {
 	// Record a frame: clear + one triangle with a tint material.
 	k.ExecuteCommand[PresentCmd](PresentRequest{}) // ensure clean start
 	w := recordRaw(t, k)
-	w.Pass(PassDescr{
-		Target: ScreenTarget(), Depth: DepthAuto(),
+	w.Pass(descriptors.PassDescr{
+		Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(),
 		Load: types.LoadClear, Clear: m.Color{A: 1},
 		DepthLoad: types.LoadClear, DepthClear: 0.5,
 	})
-	mat := testMaterial(ColorParam("tint", m.Color{R: 1, G: 1, B: 1, A: 1}))
-	w.Draw(triangle(), mat, MatParam("mvp", m.NewMat4()))
+	mat := testMaterial(descriptors.ColorParam("tint", m.Color{R: 1, G: 1, B: 1, A: 1}))
+	w.Draw(triangle(), mat, descriptors.MatParam("mvp", m.NewMat4()))
 
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -1252,8 +1255,8 @@ func TestConsumeCachesShaderAndPipeline(t *testing.T) {
 
 	for frame := 0; frame < 3; frame++ {
 		w := recordList(t, k)
-		w.Draw(triangle(), testMaterial(), MatParam("mvp", m.NewMat4()))
-		w.Draw(triangle(), testMaterial(), MatParam("mvp", m.Translation4(1, 0, 0)))
+		w.Draw(triangle(), testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
+		w.Draw(triangle(), testMaterial(), descriptors.MatParam("mvp", m.Translation4(1, 0, 0)))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 	}
@@ -1272,13 +1275,13 @@ func TestPipelineCacheDistinguishesEqualStrideLayouts(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	const stride = 28
-	vertices := BufferWithBytes(make([]byte, 3*stride), false)
+	vertices := descriptors.BufferWithBytes(make([]byte, 3*stride), false)
 	w := recordList(t, k)
-	w.Draw(Mesh(vertices, types.TopologyTriangleList,
-		Attr(0, Float32x3), Attr(12, Float32x4),
+	w.Draw(descriptors.Mesh(vertices, types.TopologyTriangleList,
+		descriptors.Attr(0, descriptors.Float32x3), descriptors.Attr(12, descriptors.Float32x4),
 	), testMaterial())
-	w.Draw(Mesh(vertices, types.TopologyTriangleList,
-		Attr(0, Float32x2), Attr(12, Float32x4),
+	w.Draw(descriptors.Mesh(vertices, types.TopologyTriangleList,
+		descriptors.Attr(0, descriptors.Float32x2), descriptors.Attr(12, descriptors.Float32x4),
 	), testMaterial())
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -1289,10 +1292,10 @@ func TestPipelineCacheDistinguishesEqualStrideLayouts(t *testing.T) {
 }
 
 func TestVertexLayoutKeyUsesZeroOnlyForMissingAttributes(t *testing.T) {
-	key, ok := VertexLayoutKeyOf([]VertexAttr{
-		Attr(0, Float32),
-		Attr(256, Float32x4),
-		Attr(MaxVertexStride-4, Unorm1010102),
+	key, ok := descriptors.VertexLayoutKeyOf([]descriptors.VertexAttr{
+		descriptors.Attr(0, descriptors.Float32),
+		descriptors.Attr(256, descriptors.Float32x4),
+		descriptors.Attr(descriptors.MaxVertexStride-4, descriptors.Unorm1010102),
 	})
 	if !ok {
 		t.Fatal("valid vertex layout was rejected")
@@ -1310,23 +1313,23 @@ func TestVertexLayoutKeyUsesZeroOnlyForMissingAttributes(t *testing.T) {
 }
 
 func TestVertexLayoutKeyRejectsUnsupportedLayouts(t *testing.T) {
-	tooMany := make([]VertexAttr, MaxVertexAttributes+1)
+	tooMany := make([]descriptors.VertexAttr, descriptors.MaxVertexAttributes+1)
 	for i := range tooMany {
-		tooMany[i] = Attr(0, Float32)
+		tooMany[i] = descriptors.Attr(0, descriptors.Float32)
 	}
 	tests := []struct {
 		name   string
-		layout []VertexAttr
+		layout []descriptors.VertexAttr
 	}{
-		{name: "unknown type", layout: []VertexAttr{Attr(0, UnknownVertexType)}},
-		{name: "type count sentinel", layout: []VertexAttr{Attr(0, VertexTypeCount)}},
-		{name: "negative offset", layout: []VertexAttr{Attr(-1, Float32)}},
-		{name: "attribute exceeds stride limit", layout: []VertexAttr{Attr(MaxVertexStride-2, Float32)}},
+		{name: "unknown type", layout: []descriptors.VertexAttr{descriptors.Attr(0, descriptors.UnknownVertexType)}},
+		{name: "type count sentinel", layout: []descriptors.VertexAttr{descriptors.Attr(0, descriptors.VertexTypeCount)}},
+		{name: "negative offset", layout: []descriptors.VertexAttr{descriptors.Attr(-1, descriptors.Float32)}},
+		{name: "attribute exceeds stride limit", layout: []descriptors.VertexAttr{descriptors.Attr(descriptors.MaxVertexStride-2, descriptors.Float32)}},
 		{name: "too many attributes", layout: tooMany},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if _, ok := VertexLayoutKeyOf(test.layout); ok {
+			if _, ok := descriptors.VertexLayoutKeyOf(test.layout); ok {
 				t.Fatal("unsupported vertex layout was accepted")
 			}
 		})
@@ -1346,8 +1349,8 @@ func TestDrawParamsPackByNameAndOverrideMaterial(t *testing.T) {
 	green := m.Color{R: 0, G: 1, B: 0, A: 1}
 	camera := m.Translation4(3, 4, 5)
 	w := recordList(t, k)
-	mat := testMaterial(ColorParam("tint", red))
-	w.Draw(triangle(), mat, MatParam("camera", camera), ColorParam("tint", green))
+	mat := testMaterial(descriptors.ColorParam("tint", red))
+	w.Draw(triangle(), mat, descriptors.MatParam("camera", camera), descriptors.ColorParam("tint", green))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -1387,8 +1390,8 @@ func TestStorageResolvesMaterialTexture(t *testing.T) {
 
 	for frame := 0; frame < 2; frame++ {
 		w := recordList(t, k)
-		mat := testMaterial(TextureParam("MainTexture", TextureWithResource("hero.png")), SamplerParam("MainSampler", types.SamplerDesc{}))
-		w.Draw(triangle(), mat, MatParam("mvp", m.NewMat4()))
+		mat := testMaterial(descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("hero.png")), descriptors.SamplerParam("MainSampler", types.SamplerDesc{}))
+		w.Draw(triangle(), mat, descriptors.MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 	}
@@ -1418,7 +1421,7 @@ func TestStorageResolvesShaderResource(t *testing.T) {
 
 	for range 2 {
 		w := recordList(t, k)
-		w.Draw(triangle(), Material(shader.ShaderWithResource("shader.wgsl")), MatParam("mvp", m.NewMat4()))
+		w.Draw(triangle(), descriptors.Material(shader.ShaderWithResource("shader.wgsl")), descriptors.MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 	}
@@ -1442,13 +1445,13 @@ func TestReleaseCachedResourceReleasesPathAndAllowsReload(t *testing.T) {
 	k := newTestKernelWithFS(t, p, filesystem)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
-	material := Material(
+	material := descriptors.Material(
 		shader.ShaderWithResource("shader.wgsl"),
-		TextureParam("MainTexture", TextureWithResource("hero.png")),
+		descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("hero.png")),
 	)
 
 	w := recordList(t, k)
-	w.Draw(triangle(), material, MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), material, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 	// Both caches are asked about through what a game can see - one upload and
@@ -1475,7 +1478,7 @@ func TestReleaseCachedResourceReleasesPathAndAllowsReload(t *testing.T) {
 	}
 
 	w = recordList(t, k)
-	w.Draw(triangle(), material, MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), material, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 	if filesystem.opens != 4 || backend.shaders != 2 || backend.uploads != 2 {
@@ -1489,15 +1492,15 @@ func TestFreeCachedResourcesClearsTranslatorOwnedCachesOnly(t *testing.T) {
 	k := newTestKernelWithFS(t, p, filesystem)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
-	var explicit TextureDescr
+	var explicit descriptors.TextureDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		explicit = resources.BakeTexture(1, 1, FormatRGBA8, []byte{1, 2, 3, 4}, true, false)
+		explicit = resources.BakeTexture(1, 1, descriptors.FormatRGBA8, []byte{1, 2, 3, 4}, true, false)
 	})
 	w := recordList(t, k)
 	w.Draw(triangle(), testMaterial(
-		TextureParam("MainTexture", TextureWithResource("hero.png")),
-		SamplerParam("MainSampler", types.SamplerDesc{}),
-	), MatParam("mvp", m.NewMat4()))
+		descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("hero.png")),
+		descriptors.SamplerParam("MainSampler", types.SamplerDesc{}),
+	), descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 	// The cached texture is observable as the bake this frame emitted that the
@@ -1551,10 +1554,10 @@ func TestFailedTextureIsCachedAsFailedAndEvictedByItsPath(t *testing.T) {
 	})
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
-	material := testMaterial(TextureParam("MainTexture", TextureWithResource("later.png")))
+	material := testMaterial(descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("later.png")))
 	draw := func() {
 		w := recordList(t, k)
-		w.Draw(triangle(), material, MatParam("mvp", m.NewMat4()))
+		w.Draw(triangle(), material, descriptors.MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 	}
@@ -1612,7 +1615,7 @@ func TestFailedShaderIsCachedAsFailedAndEvictedByItsPath(t *testing.T) {
 	k := engine.Executioner()
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
-	material := Material(shader.ShaderWithResource("later.wgsl"))
+	material := descriptors.Material(shader.ShaderWithResource("later.wgsl"))
 	draw := func() {
 		w := recordList(t, k)
 		w.Draw(triangle(), material)
@@ -1660,10 +1663,10 @@ func TestEvictionScansTheForwardIncludeSet(t *testing.T) {
 
 	// Two variants rooted at one path, plus a text shader that includes the same
 	// shared source: three modules, none of them found by that probe.
-	materials := []MaterialDescr{
-		Material(shader.ShaderWithResource("root.wgsl")),
-		Material(shader.ShaderWithResource("root.wgsl", shader.ShaderDefine("HQ"))),
-		Material(shader.ShaderWithText("#include shared.wgsl\nconst inline = 1;")),
+	materials := []descriptors.MaterialDescr{
+		descriptors.Material(shader.ShaderWithResource("root.wgsl")),
+		descriptors.Material(shader.ShaderWithResource("root.wgsl", shader.ShaderDefine("HQ"))),
+		descriptors.Material(shader.ShaderWithText("#include shared.wgsl\nconst inline = 1;")),
 	}
 	w := recordList(t, k)
 	for _, material := range materials {
@@ -1704,8 +1707,8 @@ func TestAnInlineShaderWithNoIncludeIsReachedOnlyByTheGlobalFree(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w := recordList(t, k)
-	w.Draw(triangle(), Material(shader.ShaderWithResource("root.wgsl")))
-	w.Draw(triangle(), Material(shader.ShaderWithText("const inline = 1;")))
+	w.Draw(triangle(), descriptors.Material(shader.ShaderWithResource("root.wgsl")))
+	w.Draw(triangle(), descriptors.Material(shader.ShaderWithText("const inline = 1;")))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 	if backend.shaders != 2 {
@@ -1738,10 +1741,10 @@ func TestTextureWithBytesReuploadsEveryFrame(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	pixels := []byte{255, 255, 255, 255}
-	texture := TextureWithBytes(1, 1, FormatRGBA8, pixels, false, false)
+	texture := descriptors.TextureWithBytes(1, 1, descriptors.FormatRGBA8, pixels, false, false)
 	for frame := 0; frame < 2; frame++ {
 		w := recordList(t, k)
-		w.Draw(triangle(), testMaterial(TextureParam("MainTexture", texture)), MatParam("mvp", m.NewMat4()))
+		w.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), descriptors.MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 		for i := range backend.lastOps {
@@ -1770,10 +1773,10 @@ func TestBufferWithBytesReuploadsEveryFrame(t *testing.T) {
 	backend := &fakeBackend{layout: &layout}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	buffer := BufferWithBytes([]byte{1, 2, 3, 4}, false)
+	buffer := descriptors.BufferWithBytes([]byte{1, 2, 3, 4}, false)
 	for frame := 0; frame < 2; frame++ {
 		w := recordList(t, k)
-		w.Draw(triangle(), testMaterial(BufferParam("Data", buffer)), MatParam("mvp", m.NewMat4()))
+		w.Draw(triangle(), testMaterial(descriptors.BufferParam("Data", buffer)), descriptors.MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 		storageBakes := 0
@@ -1803,7 +1806,7 @@ func TestBufferWithBytesReuploadsEveryFrame(t *testing.T) {
 func recordList(t *testing.T, k kernel.Executioner) *OpQueue {
 	t.Helper()
 	queue := recordRaw(t, k)
-	queue.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Label: "test"})
+	queue.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "test"})
 	return queue
 }
 
@@ -1830,14 +1833,14 @@ type recordResourcesResponse struct{}
 
 func TestTemporaryBufferUploadsOnceForEveryDrawThatBindsIt(t *testing.T) {
 	queue := testOpQueue(&fakeBackend{})
-	arena := make([]byte, 3*StorageAlignment)
+	arena := make([]byte, 3*descriptors.StorageAlignment)
 	arena[0] = 7
 
 	buffer := queue.TemporaryBuffer(arena, true)
 	arena[0] = 9
 	for i := range 3 {
 		queue.Draw(triangle(), testMaterial(),
-			BufferRangeParam("records", buffer, i*StorageAlignment, StorageAlignment))
+			descriptors.BufferRangeParam("records", buffer, i*descriptors.StorageAlignment, descriptors.StorageAlignment))
 	}
 
 	bakes := 0
@@ -1857,8 +1860,8 @@ func TestTemporaryBufferUploadsOnceForEveryDrawThatBindsIt(t *testing.T) {
 			continue
 		}
 		param := OpQueueOps(&queue)[i].Params[0]
-		if ParameterBuffer(&param).ID() != buffer.ID() || BufferSource(ParameterBufferRef(&param)) != BufferSourceBaked {
-			t.Fatalf("draw bound %+v, want the one baked arena %+v", ParameterBuffer(&param), buffer)
+		if descriptors.ParameterBuffer(&param).ID() != buffer.ID() || descriptors.BufferSource(descriptors.ParameterBufferRef(&param)) != descriptors.BufferSourceBaked {
+			t.Fatalf("draw bound %+v, want the one baked arena %+v", descriptors.ParameterBuffer(&param), buffer)
 		}
 	}
 }
@@ -1876,9 +1879,9 @@ func TestAShaderWithoutAUniformBlockGetsNoUniformBinding(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w := recordRaw(t, k)
-	w.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto()})
+	w.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto()})
 	w.Draw(triangle(), testMaterial(),
-		BufferParam("records", BufferWithBytes(make([]byte, 64), true)))
+		descriptors.BufferParam("records", descriptors.BufferWithBytes(make([]byte, 64), true)))
 
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -1912,7 +1915,7 @@ func TestEachVariantIsItsOwnModuleUnderItsOwnLabel(t *testing.T) {
 		{shader.ShaderDefine("MORPH")},
 		{shader.ShaderDefine("SKIN"), shader.ShaderDefine("MORPH")},
 	} {
-		w.Draw(triangle(), Material(shader.ShaderWithResource("scene.wgsl", opts...)))
+		w.Draw(triangle(), descriptors.Material(shader.ShaderWithResource("scene.wgsl", opts...)))
 	}
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -1957,7 +1960,7 @@ func TestABackendCompileFailureCarriesTheSegmentTable(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w := recordList(t, k)
-	w.Draw(triangle(), Material(shader.ShaderWithResource("root.wgsl", shader.ShaderDefine("HQ"))))
+	w.Draw(triangle(), descriptors.Material(shader.ShaderWithResource("root.wgsl", shader.ShaderDefine("HQ"))))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

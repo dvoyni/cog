@@ -1,4 +1,4 @@
-package internal
+package descriptors
 
 import "fmt"
 

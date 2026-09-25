@@ -5,6 +5,8 @@ import (
 	"slices"
 	"sort"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/libs/m"
@@ -33,9 +35,9 @@ type Op struct {
 	// pass indexes the OpQueue's pass list, and is meaningful for draws only:
 	// resource ops belong to no pass, since bakes are hoisted ahead of them all.
 	Pass          int32
-	Mesh          MeshDescr
-	Material      MaterialDescr
-	Params        []ParameterDescr
+	Mesh          descriptors.MeshDescr
+	Material      descriptors.MaterialDescr
+	Params        []descriptors.ParameterDescr
 	Instances     int
 	FirstInstance int
 	color         m.Color
@@ -48,7 +50,7 @@ type Op struct {
 	TexLayers     int
 	TexLayer      int
 	Region        types.Region
-	Format        TextureFormat
+	Format        descriptors.TextureFormat
 	Mipmaps       bool
 	Renderable    bool
 	Bytes         []byte
@@ -71,14 +73,14 @@ type temporaryTexture struct {
 type temporaryTextureKey struct {
 	width      int
 	height     int
-	format     TextureFormat
+	format     descriptors.TextureFormat
 	mipmaps    bool
 	renderable bool
 }
 
 // passRecord is one declared pass and the position that breaks Order ties.
 type passRecord struct {
-	Desc PassDescr
+	Desc descriptors.PassDescr
 	seq  int
 }
 
@@ -106,8 +108,8 @@ type OpQueue struct {
 	passes               []passRecord
 	current              int
 	uploadArena          []byte
-	parameterArena       []ParameterDescr
-	vertexAttrArena      []VertexAttr
+	parameterArena       []descriptors.ParameterDescr
+	vertexAttrArena      []descriptors.VertexAttr
 	temporaryBuffers     []temporaryBuffer
 	temporaryNext        []int
 	temporarySorted      int
@@ -173,15 +175,15 @@ func (q *OpQueue) Reset() {
 // Pass declares a pass and selects it: every op recorded afterwards appends to
 // it, until another Pass or SetPass call. Passes run in Order, not in the order
 // they were declared.
-func (q *OpQueue) Pass(desc PassDescr) PassRef {
+func (q *OpQueue) Pass(desc descriptors.PassDescr) descriptors.PassRef {
 	q.passes = append(q.passes, passRecord{Desc: desc, seq: len(q.passes)})
 	q.current = len(q.passes) - 1
-	return PassRef(len(q.passes))
+	return descriptors.PassRef(len(q.passes))
 }
 
 // SetPass re-selects a pass declared earlier this frame. An unknown reference
 // is ignored.
-func (q *OpQueue) SetPass(ref PassRef) {
+func (q *OpQueue) SetPass(ref descriptors.PassRef) {
 	if ref > 0 && int(ref) <= len(q.passes) {
 		q.current = int(ref) - 1
 	}
@@ -201,25 +203,25 @@ func (q *OpQueue) selectedPass() int {
 // Draw records a draw op. Parameters are matched to reflected shader constants
 // by name and override same-named material parameters. Inline geometry is baked
 // into queue-pooled BufferIDs using each BufferDescr's copyData policy.
-func (q *OpQueue) Draw(mesh MeshDescr, material MaterialDescr, params ...ParameterDescr) {
+func (q *OpQueue) Draw(mesh descriptors.MeshDescr, material descriptors.MaterialDescr, params ...descriptors.ParameterDescr) {
 	q.draw(mesh, material, 0, 1, params)
 }
 
 // DrawInstanced records a draw that replays the mesh geometry `instances` times.
 // Per-instance data is supplied through a storage-buffer parameter the shader
 // indexes by instance_index; the shared parameters apply to every instance.
-func (q *OpQueue) DrawInstanced(mesh MeshDescr, material MaterialDescr, instances int, params ...ParameterDescr) {
+func (q *OpQueue) DrawInstanced(mesh descriptors.MeshDescr, material descriptors.MaterialDescr, instances int, params ...descriptors.ParameterDescr) {
 	q.draw(mesh, material, 0, instances, params)
 }
 
 // DrawInstancedFrom records an instanced draw starting at firstInstance.
 // WebGPU's instance_index starts at firstInstance, so a batch reads its own
 // slice of a shared instance arena with no offset plumbing of its own.
-func (q *OpQueue) DrawInstancedFrom(mesh MeshDescr, material MaterialDescr, firstInstance, instances int, params ...ParameterDescr) {
+func (q *OpQueue) DrawInstancedFrom(mesh descriptors.MeshDescr, material descriptors.MaterialDescr, firstInstance, instances int, params ...descriptors.ParameterDescr) {
 	q.draw(mesh, material, firstInstance, instances, params)
 }
 
-func (q *OpQueue) draw(mesh MeshDescr, material MaterialDescr, firstInstance, instances int, params []ParameterDescr) {
+func (q *OpQueue) draw(mesh descriptors.MeshDescr, material descriptors.MaterialDescr, firstInstance, instances int, params []descriptors.ParameterDescr) {
 	pass := int32(q.selectedPass())
 	o := Op{
 		Kind:          OpDraw,
@@ -230,9 +232,10 @@ func (q *OpQueue) draw(mesh MeshDescr, material MaterialDescr, firstInstance, in
 		Instances:     instances,
 		FirstInstance: firstInstance,
 	}
-	o.Mesh.layout = q.copyVertexAttrs(mesh.layout)
-	o.Mesh.vertices = q.bakeBufferIfNeeded(mesh.vertices, types.BufferVertex)
-	o.Mesh.indices = q.bakeBufferIfNeeded(mesh.indices, types.BufferIndex)
+	o.Mesh = descriptors.WithMeshBuffers(mesh,
+		q.copyVertexAttrs(descriptors.MeshLayout(&mesh)),
+		q.bakeBufferIfNeeded(descriptors.MeshVertices(&mesh), types.BufferVertex),
+		q.bakeBufferIfNeeded(descriptors.MeshIndices(&mesh), types.BufferIndex))
 	q.ops = append(q.ops, o)
 }
 
@@ -253,39 +256,41 @@ func (q *OpQueue) draw(mesh MeshDescr, material MaterialDescr, firstInstance, in
 // it draws as the material it was recorded from - copied from the params the
 // caller passed here, as every material is - so a recording held too long costs
 // the copy again and nothing else.
-func (q *OpQueue) FrameMaterial(material MaterialDescr) MaterialDescr {
+func (q *OpQueue) FrameMaterial(material descriptors.MaterialDescr) descriptors.MaterialDescr {
 	if q.recordedHere(&material) {
 		return material
 	}
 	start := len(q.parameterArena)
-	baked := q.bakeParametersIfNeeded(material.params)
-	material.recorded = frameRecording{queue: q, frame: q.frame, start: start, shape: ParameterShapeState(baked)}
+	baked := q.bakeParametersIfNeeded(material.Params())
+	descriptors.SetMaterialRecording(&material, descriptors.FrameRecording{Queue: q, Frame: q.frame, Start: start, Shape: descriptors.ParameterShapeState(baked)})
 	return material
 }
 
 // recordedHere reports whether a material was recorded by this queue in this
 // frame, so its params are a window of this frame's arena.
-func (q *OpQueue) recordedHere(material *MaterialDescr) bool {
-	return material.recorded.queue == q && material.recorded.frame == q.frame
+func (q *OpQueue) recordedHere(material *descriptors.MaterialDescr) bool {
+	recording := descriptors.MaterialRecording(material)
+	return recording.Queue == any(q) && recording.Frame == q.frame
 }
 
-func (q *OpQueue) bakeMaterialIfNeeded(material MaterialDescr) MaterialDescr {
+func (q *OpQueue) bakeMaterialIfNeeded(material descriptors.MaterialDescr) descriptors.MaterialDescr {
 	if q.recordedHere(&material) {
 		// The window is found by its start rather than kept as a slice,
 		// because the arena may have grown into a new backing since, and the
 		// params belong in the op as the arena the frame hands over holds them.
-		start := material.recorded.start
-		material.params = q.parameterArena[start : start+len(material.params) : start+len(material.params)]
+		start := descriptors.MaterialRecording(&material).Start
+		count := len(material.Params())
+		descriptors.SetMaterialParams(&material, q.parameterArena[start:start+count:start+count])
 		return material
 	}
 	// Unrecorded, stale or another queue's: its params are the caller's, and
 	// the draw copies them as it copies every material's.
-	material.params = q.bakeParametersIfNeeded(material.params)
-	material.recorded = frameRecording{}
+	descriptors.SetMaterialParams(&material, q.bakeParametersIfNeeded(material.Params()))
+	descriptors.SetMaterialRecording(&material, descriptors.FrameRecording{})
 	return material
 }
 
-func (q *OpQueue) bakeParametersIfNeeded(params []ParameterDescr) []ParameterDescr {
+func (q *OpQueue) bakeParametersIfNeeded(params []descriptors.ParameterDescr) []descriptors.ParameterDescr {
 	start := len(q.parameterArena)
 	q.parameterArena = append(q.parameterArena, params...)
 	baked := q.parameterArena[start:]
@@ -295,7 +300,7 @@ func (q *OpQueue) bakeParametersIfNeeded(params []ParameterDescr) []ParameterDes
 	return baked
 }
 
-func (q *OpQueue) copyVertexAttrs(attrs []VertexAttr) []VertexAttr {
+func (q *OpQueue) copyVertexAttrs(attrs []descriptors.VertexAttr) []descriptors.VertexAttr {
 	start := len(q.vertexAttrArena)
 	q.vertexAttrArena = append(q.vertexAttrArena, attrs...)
 	return q.vertexAttrArena[start:]
@@ -307,36 +312,38 @@ func (q *OpQueue) copyUpload(data []byte) []byte {
 	return q.uploadArena[start:]
 }
 
-func (q *OpQueue) bakeParameterIfNeeded(param ParameterDescr) ParameterDescr {
-	switch param.kind {
-	case ParamBuffer:
-		param.buffer = q.bakeBufferIfNeeded(param.buffer, types.BufferStorage)
-	case ParamTexture:
-		param.texture = q.bakeTextureIfNeeded(param.texture)
+func (q *OpQueue) bakeParameterIfNeeded(param descriptors.ParameterDescr) descriptors.ParameterDescr {
+	switch descriptors.ParameterKind(&param) {
+	case descriptors.ParamBuffer:
+		return descriptors.WithParameterBuffer(param, q.bakeBufferIfNeeded(descriptors.ParameterBuffer(&param), types.BufferStorage))
+	case descriptors.ParamTexture:
+		return descriptors.WithParameterTexture(param, q.bakeTextureIfNeeded(descriptors.ParameterTexture(&param)))
 	}
 	return param
 }
 
-func (q *OpQueue) bakeBufferIfNeeded(buffer BufferDescr, kind types.BufferKind) BufferDescr {
-	if buffer.source == BufferSourceBaked || buffer.bytes.Len() == 0 {
+func (q *OpQueue) bakeBufferIfNeeded(buffer descriptors.BufferDescr, kind types.BufferKind) descriptors.BufferDescr {
+	bytes := descriptors.BufferBytes(&buffer)
+	if descriptors.BufferSource(&buffer) == descriptors.BufferSourceBaked || bytes.Len() == 0 {
 		return buffer
 	}
-	return q.temporaryBuffer(kind, buffer.bytes.Data(), buffer.copyData)
+	return q.temporaryBuffer(kind, bytes.Data(), descriptors.BufferCopyData(&buffer))
 }
 
-func (q *OpQueue) bakeTextureIfNeeded(texture TextureDescr) TextureDescr {
+func (q *OpQueue) bakeTextureIfNeeded(texture descriptors.TextureDescr) descriptors.TextureDescr {
 	// A baked texture already carries its id, and a path names one the render
 	// thread resolves against its own cache. Only inline pixels are this
 	// queue's to upload.
-	if texture.Params.id != 0 || texture.Name != "" {
+	if texture.ID() != 0 || texture.Name != "" {
 		return texture
 	}
-	if texture.Params.width <= 0 || texture.Params.height <= 0 || texture.Blob.Len() == 0 {
-		return TextureDescr{}
+	width, height := texture.Size()
+	if width <= 0 || height <= 0 || texture.Blob.Len() == 0 {
+		return descriptors.TextureDescr{}
 	}
 	return q.temporaryTexture(
-		texture.Params.width, texture.Params.height, texture.Params.format,
-		texture.Blob.Data(), texture.Params.copyData, texture.Params.mipmaps,
+		width, height, texture.Format(),
+		texture.Blob.Data(), descriptors.TextureCopyData(&texture), texture.Mipmaps(),
 	)
 }
 
@@ -349,14 +356,14 @@ func (q *OpQueue) bakeTextureIfNeeded(texture TextureDescr) TextureDescr {
 // copyData snapshots the bytes when true; when false the caller must keep them
 // unchanged until the recorded frame is consumed or dropped. Its contents do
 // not survive the frame.
-func (q *OpQueue) TemporaryBuffer(data []byte, copyData bool) BufferDescr {
+func (q *OpQueue) TemporaryBuffer(data []byte, copyData bool) descriptors.BufferDescr {
 	if len(data) == 0 {
-		return BufferDescr{}
+		return descriptors.BufferDescr{}
 	}
 	return q.temporaryBuffer(types.BufferStorage, data, copyData)
 }
 
-func (q *OpQueue) temporaryBuffer(kind types.BufferKind, data []byte, copyData bool) BufferDescr {
+func (q *OpQueue) temporaryBuffer(kind types.BufferKind, data []byte, copyData bool) descriptors.BufferDescr {
 	start := sort.Search(q.temporarySorted, func(i int) bool {
 		buffer := &q.temporaryBuffers[i]
 		return buffer.kind > kind || (buffer.kind == kind && buffer.Size >= len(data))
@@ -398,7 +405,7 @@ func (q *OpQueue) nextTemporaryBuffer(index int) int {
 	return q.temporaryNext[index]
 }
 
-func (q *OpQueue) temporaryTexture(width, height int, format TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
+func (q *OpQueue) temporaryTexture(width, height int, format descriptors.TextureFormat, pixels []byte, copyData, mipmaps bool) descriptors.TextureDescr {
 	key := temporaryTextureKey{width: width, height: height, format: format, mipmaps: mipmaps}
 	return q.bakeTexture(q.acquireTemporaryTexture(key), width, height, format, pixels, copyData, mipmaps)
 }
@@ -416,17 +423,15 @@ func (q *OpQueue) temporaryTexture(width, height int, format TextureFormat, pixe
 // A draw still may not sample the target its own pass renders into; that is
 // ErrDrawSamplesAttachment, and it is the guard that makes handing the texture
 // back safe.
-func (q *OpQueue) TemporaryTarget(width, height int, format TextureFormat) (TargetDescr, TextureDescr) {
+func (q *OpQueue) TemporaryTarget(width, height int, format descriptors.TextureFormat) (descriptors.TargetDescr, descriptors.TextureDescr) {
 	key := temporaryTextureKey{width: width, height: height, format: format, renderable: true}
 	id := q.acquireTemporaryTexture(key)
 	q.ops = append(q.ops, Op{
 		Kind: OpAllocateTexture, TextureID: id,
 		TexW: width, TexH: height, TexLayers: 1, Format: format, Renderable: true,
 	})
-	texture := TextureDescr{Params: TextureDescrParams{
-		id: id, width: width, height: height, layers: 1, format: format,
-	}}
-	return TextureTarget(texture, 0, 0), texture
+	texture := descriptors.BakedTextureWith(id, width, height, 1, format)
+	return descriptors.TextureTarget(texture, 0, 0), texture
 }
 
 // acquireTemporaryTexture takes a matching texture from the frame pool, minting
@@ -446,7 +451,7 @@ func (q *OpQueue) acquireTemporaryTexture(key temporaryTextureKey) types.Texture
 	return q.temporaryTextures[best].id
 }
 
-func (q *OpQueue) bakeBuffer(id types.BufferID, kind types.BufferKind, size int, data []byte, copyData bool) BufferDescr {
+func (q *OpQueue) bakeBuffer(id types.BufferID, kind types.BufferKind, size int, data []byte, copyData bool) descriptors.BufferDescr {
 	if copyData {
 		data = q.copyUpload(data)
 	}
@@ -455,10 +460,10 @@ func (q *OpQueue) bakeBuffer(id types.BufferID, kind types.BufferKind, size int,
 		Bytes: data,
 	}
 	q.ops = append(q.ops, o)
-	return BakedBuffer(id, len(data))
+	return descriptors.BakedBuffer(id, len(data))
 }
 
-func (q *OpQueue) bakeTexture(id types.TextureID, width, height int, format TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
+func (q *OpQueue) bakeTexture(id types.TextureID, width, height int, format descriptors.TextureFormat, pixels []byte, copyData, mipmaps bool) descriptors.TextureDescr {
 	if copyData {
 		pixels = q.copyUpload(pixels)
 	}
@@ -472,5 +477,5 @@ func (q *OpQueue) bakeTexture(id types.TextureID, width, height int, format Text
 		Bytes:     pixels,
 	}
 	q.ops = append(q.ops, o)
-	return BakedTexture(id, width, height)
+	return descriptors.BakedTexture(id, width, height)
 }

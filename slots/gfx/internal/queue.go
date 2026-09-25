@@ -3,6 +3,8 @@ package internal
 import (
 	"slices"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
@@ -67,7 +69,7 @@ type textureBake struct {
 	width      int
 	height     int
 	layers     int
-	format     TextureFormat
+	format     descriptors.TextureFormat
 	mipmaps    bool
 	renderable bool
 	layer      int
@@ -126,7 +128,7 @@ type BakeSink interface {
 	// bytes are the queue's and are valid until it is reset.
 	BakeUniforms([]byte)
 	BakeBuffer(types.BufferID, types.BufferKind, int, []byte)
-	BakeTexture(types.TextureID, int, int, TextureFormat, []byte, bool)
+	BakeTexture(types.TextureID, int, int, descriptors.TextureFormat, []byte, bool)
 	AllocateTexture(types.TextureID, TextureDesc)
 	UpdateTexture(types.TextureID, int, types.Region, []byte)
 }
@@ -144,7 +146,7 @@ type RenderPass interface {
 	// was written at. The width is the mesh's rather than the pass's: two
 	// meshes in one pass may well be indexed differently, because the width
 	// follows from how many vertices each of them has.
-	SetIndexBuffer(types.BufferID, int, IndexWidth)
+	SetIndexBuffer(types.BufferID, int, descriptors.IndexWidth)
 	SetBuffer(int, int, types.BufferID, int, int)
 	Draw(first, count, instances, firstInstance int, indexed bool)
 }
@@ -293,7 +295,7 @@ func (q *Queue) SetVertexBuffer(buffer types.BufferID, offset int) {
 	q.render = append(q.render, o)
 }
 
-func (q *Queue) SetIndexBuffer(buffer types.BufferID, offset int, width IndexWidth) {
+func (q *Queue) SetIndexBuffer(buffer types.BufferID, offset int, width descriptors.IndexWidth) {
 	o := renderOp{
 		kind: renderSetIndexBuffer, res0: types.ResourceID(buffer),
 		arg0: int32(offset), arg1: int32(width),
@@ -331,7 +333,7 @@ func (q *Queue) ReleaseBuffer(id types.BufferID) {
 	q.releasedBuffers = append(q.releasedBuffers, id)
 }
 
-func (q *Queue) BakeTexture(id types.TextureID, width, height int, format TextureFormat, pixels []byte, mipmaps bool) {
+func (q *Queue) BakeTexture(id types.TextureID, width, height int, format descriptors.TextureFormat, pixels []byte, mipmaps bool) {
 	q.textureBakes = append(q.textureBakes, textureBake{
 		kind: textureBakePixels, id: id, width: width, height: height, format: format,
 		mipmaps: mipmaps, data: pixels,
@@ -418,7 +420,7 @@ func (q *Queue) replayRange(sink RenderPass, start, end int) {
 		case renderSetVertexBuffer:
 			sink.SetVertexBuffer(types.BufferID(o.res0), int(o.arg0))
 		case renderSetIndexBuffer:
-			sink.SetIndexBuffer(types.BufferID(o.res0), int(o.arg0), IndexWidth(o.arg1))
+			sink.SetIndexBuffer(types.BufferID(o.res0), int(o.arg0), descriptors.IndexWidth(o.arg1))
 		case renderSetBuffer:
 			sink.SetBuffer(int(o.arg2), int(o.arg3), types.BufferID(o.res0), int(o.arg0), int(o.arg1))
 		case renderDraw:

@@ -3,6 +3,8 @@ package internal
 import (
 	"io/fs"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/kernel"
@@ -23,7 +25,7 @@ import (
 type texture struct {
 	id            types.TextureID
 	width, height int
-	format        TextureFormat
+	format        descriptors.TextureFormat
 }
 
 // textureUserData is what the texture loader needs that only the render handler
@@ -45,13 +47,13 @@ type textureLoader struct{}
 // value: the decode is attempted one time per path rather than once a frame,
 // and the draw is dropped on the zero id exactly as it was before.
 func (textureLoader) Load(
-	_ kernel.Kernel, data assets.Blob, params TextureDescrParams, _ fs.FS, userData textureUserData,
+	_ kernel.Kernel, data assets.Blob, params descriptors.TextureDescrParams, _ fs.FS, userData textureUserData,
 ) texture {
 	width, height, pixels, ok := DecodeTexture(data)
 	if !ok {
 		return texture{}
 	}
-	format := TextureParamsFormat(params)
+	format := descriptors.TextureParamsFormat(params)
 	id := userData.backend.NewTexture()
 	userData.ops.BakeTexture(id, width, height, format, pixels, false)
 	return texture{id: id, width: width, height: height, format: format}
@@ -62,7 +64,7 @@ func (textureLoader) Load(
 // substitution chosen here. What makes that sound now is that choosing id 0 no
 // longer means choosing silence: the Library has already reported the missing
 // file under this descriptor.
-func (textureLoader) Default(_ assets.Descr[TextureDescrParams], _ textureUserData) texture {
+func (textureLoader) Default(_ assets.Descr[descriptors.TextureDescrParams], _ textureUserData) texture {
 	return texture{}
 }
 

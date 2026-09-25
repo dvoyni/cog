@@ -1,4 +1,4 @@
-package internal
+package descriptors
 
 import (
 	"github.com/dvoyni/cog/libs/assets"
@@ -48,6 +48,13 @@ type TextureDescr assets.Descr[TextureDescrParams]
 
 // ID returns the baked texture identifier, or 0 when the descriptor is not baked.
 func (t TextureDescr) ID() types.TextureID { return t.Params.id }
+
+// BakedTextureWith describes a texture a queue has already baked or allocated,
+// as BakedTexture does, with its layer count and format too. format may be zero
+// where the bake does not say, and layers zero where the count is unknown.
+func BakedTextureWith(id types.TextureID, width, height, layers int, format TextureFormat) TextureDescr {
+	return TextureDescr{Params: TextureDescrParams{id: id, width: width, height: height, layers: layers, format: format}}
+}
 
 // Path returns the resource path for a TextureWithResource descriptor (empty otherwise).
 func (t TextureDescr) Path() string { return t.Name }

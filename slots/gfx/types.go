@@ -2,6 +2,7 @@ package gfx
 
 import (
 	"github.com/dvoyni/cog/slots/gfx/internal"
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
@@ -46,58 +47,58 @@ type ShaderSegment = shader.ShaderSegment
 // inline pixel bytes (TextureWithBytes), or a texture returned by
 // ResourceQueue.BakeTexture. The three are told apart by which field is set,
 // which is why there are no source markers beside it.
-type TextureDescr = internal.TextureDescr
+type TextureDescr = descriptors.TextureDescr
 
 // BufferDescr describes a GPU buffer from inline bytes (BufferWithBytes) or a
 // baked storage buffer returned by ResourceQueue.BakeBuffer.
-type BufferDescr = internal.BufferDescr
+type BufferDescr = descriptors.BufferDescr
 
 const (
-	BufferSourceBytes = internal.BufferSourceBytes
-	BufferSourceBaked = internal.BufferSourceBaked
+	BufferSourceBytes = descriptors.BufferSourceBytes
+	BufferSourceBaked = descriptors.BufferSourceBaked
 )
 
 // ParameterDescr is one declarative shader parameter: a texture, buffer, color,
 // scalar, vector, matrix, or sampler. Build it with the *Param constructors and
 // pass it to Material or OpQueue.Draw.
-type ParameterDescr = internal.ParameterDescr
+type ParameterDescr = descriptors.ParameterDescr
 
 // MaterialDescr describes how to shade a mesh: a shader plus named parameters.
 // Build it with Material and the *Param constructors. OpQueue.Draw remaps its
 // texture and buffer parameters to baked resource IDs before recording the draw.
-type MaterialDescr = internal.MaterialDescr
+type MaterialDescr = descriptors.MaterialDescr
 
 // VertexAttr describes one attribute of the single interleaved vertex array: its
 // byte offset and element type. Attributes bind to shader @location values in the
 // order given. Build it with Attr.
-type VertexAttr = internal.VertexAttr
+type VertexAttr = descriptors.VertexAttr
 
 // MeshDescr is CPU-side geometry for one draw: a single interleaved vertex array
 // (and an optional index array at one of the two index widths) as buffer
 // descriptors, a primitive topology, and the vertex layout. Build it with Mesh
 // or MeshIndexed; its fields are unexported and read by the translator.
-type MeshDescr = internal.MeshDescr
+type MeshDescr = descriptors.MeshDescr
 
 // Order places a pass in the frame's shared ordering space. gfx defines no
 // conventions and reserves no ranges: recorders that must interleave - canvas
 // layers and scene cameras - agree on numbers between themselves, because they
 // record from separate update subscriptions and stream order between them is
 // not defined.
-type Order = internal.Order
+type Order = descriptors.Order
 
 // TargetDescr names a pass's colour attachment.
-type TargetDescr = internal.TargetDescr
+type TargetDescr = descriptors.TargetDescr
 
 // DepthDescr names a pass's depth attachment.
-type DepthDescr = internal.DepthDescr
+type DepthDescr = descriptors.DepthDescr
 
 // PassDescr declares one render pass: where it draws, in what order, and what
 // happens to its attachments at either end.
-type PassDescr = internal.PassDescr
+type PassDescr = descriptors.PassDescr
 
 // PassRef selects a pass declared earlier in the same frame. Its zero value
 // refers to no pass.
-type PassRef = internal.PassRef
+type PassRef = descriptors.PassRef
 
 // ResourceID underlies the opaque GPU handles below, which a Backend mints. The
 // zero value of each means "none".
@@ -128,22 +129,22 @@ type TextureViewID = types.TextureViewID
 // engine is linear, so the format is what says whether the bytes in a texture
 // are light or a gamma-encoded picker value, and callers name it rather than
 // inherit a default that is wrong half the time.
-type TextureFormat = internal.TextureFormat
+type TextureFormat = descriptors.TextureFormat
 
 const (
 	// FormatRGBA8 is 8-bit-per-channel straight-alpha RGBA holding linear
 	// values: normal, metallic-roughness and occlusion maps.
-	FormatRGBA8 = internal.FormatRGBA8
+	FormatRGBA8 = descriptors.FormatRGBA8
 	// FormatRGBA8Srgb is the same layout holding gamma-encoded values the
 	// hardware decodes on read: base colour, emissive and the canvas atlas.
-	FormatRGBA8Srgb = internal.FormatRGBA8Srgb
+	FormatRGBA8Srgb = descriptors.FormatRGBA8Srgb
 	// FormatDepth32F is the one depth format, renderable and sampleable. There
 	// is no stencil aspect anywhere in the engine.
-	FormatDepth32F = internal.FormatDepth32F
+	FormatDepth32F = descriptors.FormatDepth32F
 	// FormatScreen is the sentinel for "whatever the frame buffer is", so a
 	// pipeline can be keyed before the frame buffer exists. It resolves to
 	// FrameBufferFormat.
-	FormatScreen = internal.FormatScreen
+	FormatScreen = descriptors.FormatScreen
 )
 
 // FrameBufferFormat is what every ScreenTarget pass renders into: the frame
@@ -161,7 +162,7 @@ const (
 // whether it applies the sRGB OETF, so the buffer's colour space and the
 // transfer function that puts it on screen stay one decision rather than two
 // that can disagree.
-const FrameBufferFormat = internal.FrameBufferFormat
+const FrameBufferFormat = descriptors.FrameBufferFormat
 
 // BufferKind tags a buffer's role, which selects its GPU usage flags.
 type BufferKind = types.BufferKind
@@ -179,7 +180,7 @@ type BufferDesc = types.BufferDesc
 // StorageAlignment is the offset alignment a storage binding requires. A record
 // a draw binds a range of therefore pads up to a multiple of it - a pad, not a
 // cap on what a record may hold.
-const StorageAlignment = internal.StorageAlignment
+const StorageAlignment = descriptors.StorageAlignment
 
 // IndexWidth is how wide one element of an index buffer is. There are exactly
 // two, fixed by the platform rather than chosen: WebGPU has no uint8 index
@@ -192,11 +193,11 @@ const StorageAlignment = internal.StorageAlignment
 //
 // The zero value is IndexUint32, the width that is legal for any mesh, so a
 // descriptor built without naming one is wide rather than wrong.
-type IndexWidth = internal.IndexWidth
+type IndexWidth = descriptors.IndexWidth
 
 const (
-	IndexUint32 = internal.IndexUint32
-	IndexUint16 = internal.IndexUint16
+	IndexUint32 = descriptors.IndexUint32
+	IndexUint16 = descriptors.IndexUint16
 )
 
 // PrimitiveTopology selects how vertices assemble into primitives.
@@ -211,41 +212,41 @@ const (
 // VertexType is the element type of one attribute in the interleaved vertex
 // array: float, half-float, normalized, or integer scalar/vector types. Names
 // mirror the WebGPU vertex formats.
-type VertexType = internal.VertexType
+type VertexType = descriptors.VertexType
 
 const (
-	UnknownVertexType = internal.UnknownVertexType
-	Float32           = internal.Float32
-	Float32x2         = internal.Float32x2
-	Float32x3         = internal.Float32x3
-	Float32x4         = internal.Float32x4
-	Float16x2         = internal.Float16x2
-	Float16x4         = internal.Float16x4
-	Uint8x2           = internal.Uint8x2
-	Uint8x4           = internal.Uint8x4
-	Sint8x2           = internal.Sint8x2
-	Sint8x4           = internal.Sint8x4
-	Unorm8x2          = internal.Unorm8x2
-	Unorm8x4          = internal.Unorm8x4
-	Snorm8x2          = internal.Snorm8x2
-	Snorm8x4          = internal.Snorm8x4
-	Uint16x2          = internal.Uint16x2
-	Uint16x4          = internal.Uint16x4
-	Sint16x2          = internal.Sint16x2
-	Sint16x4          = internal.Sint16x4
-	Unorm16x2         = internal.Unorm16x2
-	Unorm16x4         = internal.Unorm16x4
-	Snorm16x2         = internal.Snorm16x2
-	Snorm16x4         = internal.Snorm16x4
-	Uint32            = internal.Uint32
-	Uint32x2          = internal.Uint32x2
-	Uint32x3          = internal.Uint32x3
-	Uint32x4          = internal.Uint32x4
-	Sint32            = internal.Sint32
-	Sint32x2          = internal.Sint32x2
-	Sint32x3          = internal.Sint32x3
-	Sint32x4          = internal.Sint32x4
-	Unorm1010102      = internal.Unorm1010102
+	UnknownVertexType = descriptors.UnknownVertexType
+	Float32           = descriptors.Float32
+	Float32x2         = descriptors.Float32x2
+	Float32x3         = descriptors.Float32x3
+	Float32x4         = descriptors.Float32x4
+	Float16x2         = descriptors.Float16x2
+	Float16x4         = descriptors.Float16x4
+	Uint8x2           = descriptors.Uint8x2
+	Uint8x4           = descriptors.Uint8x4
+	Sint8x2           = descriptors.Sint8x2
+	Sint8x4           = descriptors.Sint8x4
+	Unorm8x2          = descriptors.Unorm8x2
+	Unorm8x4          = descriptors.Unorm8x4
+	Snorm8x2          = descriptors.Snorm8x2
+	Snorm8x4          = descriptors.Snorm8x4
+	Uint16x2          = descriptors.Uint16x2
+	Uint16x4          = descriptors.Uint16x4
+	Sint16x2          = descriptors.Sint16x2
+	Sint16x4          = descriptors.Sint16x4
+	Unorm16x2         = descriptors.Unorm16x2
+	Unorm16x4         = descriptors.Unorm16x4
+	Snorm16x2         = descriptors.Snorm16x2
+	Snorm16x4         = descriptors.Snorm16x4
+	Uint32            = descriptors.Uint32
+	Uint32x2          = descriptors.Uint32x2
+	Uint32x3          = descriptors.Uint32x3
+	Uint32x4          = descriptors.Uint32x4
+	Sint32            = descriptors.Sint32
+	Sint32x2          = descriptors.Sint32x2
+	Sint32x3          = descriptors.Sint32x3
+	Sint32x4          = descriptors.Sint32x4
+	Unorm1010102      = descriptors.Unorm1010102
 )
 
 // VertexScalar is the scalar type an attribute presents to the shader once the
@@ -265,7 +266,7 @@ const (
 
 // VertexAttribute is one attribute of the interleaved vertex buffer supplied to a
 // pipeline: its byte offset, element type, and shader @location.
-type VertexAttribute = internal.VertexAttribute
+type VertexAttribute = descriptors.VertexAttribute
 
 // AddressMode selects how texture coordinates outside [0,1] are sampled on one
 // axis. It is an enum rather than a bitmask because mirroring is a third mode,

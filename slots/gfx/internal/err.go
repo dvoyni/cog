@@ -2,13 +2,15 @@ package internal
 
 import (
 	"fmt"
+
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 )
 
 // ErrCaptureUnsupported reports a target a capture cannot be an image of:
 // depth, or any format that is not 8-bit RGBA. Depth readback is a real want
 // and it is a visualization question rather than a readback one - a depth
 // capture is a float field needing a range to be legible.
-type ErrCaptureUnsupported struct{ Format TextureFormat }
+type ErrCaptureUnsupported struct{ Format descriptors.TextureFormat }
 
 func (e ErrCaptureUnsupported) Error() string {
 	return fmt.Sprintf("gfx: %s cannot be captured; a capture is 8-bit RGBA", e.Format.String())

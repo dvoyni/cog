@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
@@ -115,8 +116,8 @@ type ParameterView struct {
 // ParameterViewOf renders one parameter. It reads through the accessors rather
 // than the fields, so a new arm on the union that forgets to answer here
 // serializes as its kind and no value, instead of as somebody else's value.
-func ParameterViewOf(parameter ParameterDescr) ParameterView {
-	view := ParameterView{Name: parameter.Name(), Kind: ParameterKind(&parameter).String()}
+func ParameterViewOf(parameter descriptors.ParameterDescr) ParameterView {
+	view := ParameterView{Name: parameter.Name(), Kind: descriptors.ParameterKind(&parameter).String()}
 	if value, ok := parameter.ColorValue(); ok {
 		view.Value = []float32{value.R, value.G, value.B, value.A}
 	}
@@ -151,7 +152,7 @@ func ParameterViewOf(parameter ParameterDescr) ParameterView {
 // ParameterViewsOf renders a parameter list in order. It is the form both
 // callers actually want, and it keeps the empty case one nil rather than one
 // empty array in every response.
-func ParameterViewsOf(parameters []ParameterDescr) []ParameterView {
+func ParameterViewsOf(parameters []descriptors.ParameterDescr) []ParameterView {
 	if len(parameters) == 0 {
 		return nil
 	}
@@ -188,9 +189,9 @@ type TextureView struct {
 }
 
 // TextureViewOf renders one texture descriptor.
-func TextureViewOf(texture TextureDescr) TextureView {
+func TextureViewOf(texture descriptors.TextureDescr) TextureView {
 	view := TextureView{
-		Source:  TextureSourceName(texture),
+		Source:  descriptors.TextureSourceName(texture),
 		Path:    texture.Path(),
 		ID:      texture.ID(),
 		Format:  texture.Format().String(),
@@ -219,9 +220,9 @@ type BufferView struct {
 
 // BufferViewOf renders one buffer descriptor. The bound range is not part of a
 // buffer and is filled in by whatever bound it.
-func BufferViewOf(buffer BufferDescr) BufferView {
+func BufferViewOf(buffer descriptors.BufferDescr) BufferView {
 	return BufferView{
-		Source: BufferSourceName(BufferSource(&buffer)),
+		Source: descriptors.BufferSourceName(descriptors.BufferSource(&buffer)),
 		ID:     buffer.ID(),
 		Size:   buffer.Size(),
 		Bytes:  buffer.InlineBytes(),
@@ -275,7 +276,7 @@ type MaterialView struct {
 }
 
 // MaterialViewOf renders one material descriptor.
-func MaterialViewOf(material MaterialDescr) MaterialView {
+func MaterialViewOf(material descriptors.MaterialDescr) MaterialView {
 	return MaterialView{
 		Shader:     ShaderViewOf(material.Shader()),
 		State:      MaterialStateViewOf(material.State()),

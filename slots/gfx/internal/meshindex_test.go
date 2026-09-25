@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/libs/m"
@@ -13,14 +15,14 @@ import (
 // indexedMesh is the smallest indexed mesh a translator test can draw: three
 // vertices of the fake backend's 28-byte stride, and an index buffer of the
 // given byte length declared at the given width.
-func indexedMesh(topology types.PrimitiveTopology, width IndexWidth, indexBytes int) MeshDescr {
+func indexedMesh(topology types.PrimitiveTopology, width descriptors.IndexWidth, indexBytes int) descriptors.MeshDescr {
 	const stride = 28
-	return MeshIndexed(
-		BufferWithBytes(make([]byte, 3*stride), true),
-		BufferWithBytes(make([]byte, indexBytes), true),
+	return descriptors.MeshIndexed(
+		descriptors.BufferWithBytes(make([]byte, 3*stride), true),
+		descriptors.BufferWithBytes(make([]byte, indexBytes), true),
 		width, topology,
-		Attr(0, Float32x3),
-		Attr(12, Float32x4),
+		descriptors.Attr(0, descriptors.Float32x3),
+		descriptors.Attr(12, descriptors.Float32x4),
 	)
 }
 
@@ -29,11 +31,11 @@ func indexedMesh(topology types.PrimitiveTopology, width IndexWidth, indexBytes 
 func TestIndexCountFollowsTheDeclaredWidth(t *testing.T) {
 	for _, c := range []struct {
 		name  string
-		width IndexWidth
+		width descriptors.IndexWidth
 		want  int
 	}{
-		{"uint16", IndexUint16, 6},
-		{"uint32", IndexUint32, 3},
+		{"uint16", descriptors.IndexUint16, 6},
+		{"uint32", descriptors.IndexUint32, 3},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			mesh := indexedMesh(types.TopologyTriangleList, c.width, 12)
@@ -50,12 +52,12 @@ func TestIndexCountFollowsTheDeclaredWidth(t *testing.T) {
 // The zero value is the wide one, so a descriptor built without naming a width
 // is wide rather than wrong.
 func TestTheZeroIndexWidthIsUint32(t *testing.T) {
-	var width IndexWidth
-	if width != IndexUint32 || width.Bytes() != 4 {
+	var width descriptors.IndexWidth
+	if width != descriptors.IndexUint32 || width.Bytes() != 4 {
 		t.Fatalf("the zero IndexWidth is %v at %d bytes, want IndexUint32 at 4", width, width.Bytes())
 	}
-	if IndexUint16.Bytes() != 2 {
-		t.Fatalf("IndexUint16.Bytes() = %d, want 2", IndexUint16.Bytes())
+	if descriptors.IndexUint16.Bytes() != 2 {
+		t.Fatalf("IndexUint16.Bytes() = %d, want 2", descriptors.IndexUint16.Bytes())
 	}
 }
 
@@ -65,7 +67,7 @@ func TestTheZeroIndexWidthIsUint32(t *testing.T) {
 func TestAnIndexBufferThatDoesNotDivideByItsWidthIsDroppedAndReportedOnce(t *testing.T) {
 	backend := &fakeBackend{}
 	// 13 bytes at two bytes an index: the last index is half a index.
-	mesh := indexedMesh(types.TopologyTriangleList, IndexUint16, 13)
+	mesh := indexedMesh(types.TopologyTriangleList, descriptors.IndexUint16, 13)
 
 	reported := pipelineErrFrames(t, backend, mesh, 3)
 
@@ -92,8 +94,8 @@ func TestAnIndexBufferThatDoesNotDivideByItsWidthIsDroppedAndReportedOnce(t *tes
 func TestTheDeclaredWidthReachesTheRenderPass(t *testing.T) {
 	for _, c := range []struct {
 		name  string
-		width IndexWidth
-	}{{"uint16", IndexUint16}, {"uint32", IndexUint32}} {
+		width descriptors.IndexWidth
+	}{{"uint16", descriptors.IndexUint16}, {"uint32", descriptors.IndexUint32}} {
 		t.Run(c.name, func(t *testing.T) {
 			backend := &fakeBackend{}
 			if reported := pipelineErrFrames(t, backend, indexedMesh(types.TopologyTriangleList, c.width, 12), 1); len(reported) != 0 {
@@ -113,15 +115,15 @@ func TestTheDeclaredWidthReachesTheRenderPass(t *testing.T) {
 // different widths are two pipelines.
 func TestAStripIsKeyedByItsIndexWidth(t *testing.T) {
 	backend := &fakeBackend{}
-	narrow := indexedMesh(types.TopologyTriangleStrip, IndexUint16, 12)
-	wide := indexedMesh(types.TopologyTriangleStrip, IndexUint32, 12)
+	narrow := indexedMesh(types.TopologyTriangleStrip, descriptors.IndexUint16, 12)
+	wide := indexedMesh(types.TopologyTriangleStrip, descriptors.IndexUint32, 12)
 
 	p := newPlugin()
 	k := newTestKernel(t, p)
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	w := recordList(t, k)
-	w.Draw(narrow, testMaterial(), MatParam("mvp", m.NewMat4()))
-	w.Draw(wide, testMaterial(), MatParam("mvp", m.NewMat4()))
+	w.Draw(narrow, testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(wide, testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -131,7 +133,7 @@ func TestAStripIsKeyedByItsIndexWidth(t *testing.T) {
 	if len(backend.lastPipelines) != 2 {
 		t.Fatalf("the backend saw %d pipeline descriptors, want 2", len(backend.lastPipelines))
 	}
-	if a, b := backend.lastPipelines[0].IndexWidth, backend.lastPipelines[1].IndexWidth; a != IndexUint16 || b != IndexUint32 {
+	if a, b := backend.lastPipelines[0].IndexWidth, backend.lastPipelines[1].IndexWidth; a != descriptors.IndexUint16 || b != descriptors.IndexUint32 {
 		t.Fatalf("the descriptors declared (%v, %v), want (IndexUint16, IndexUint32)", a, b)
 	}
 }
@@ -141,15 +143,15 @@ func TestAStripIsKeyedByItsIndexWidth(t *testing.T) {
 // differ only in an encoding detail.
 func TestATriangleListIsNotKeyedByItsIndexWidth(t *testing.T) {
 	backend := &fakeBackend{}
-	narrow := indexedMesh(types.TopologyTriangleList, IndexUint16, 12)
-	wide := indexedMesh(types.TopologyTriangleList, IndexUint32, 12)
+	narrow := indexedMesh(types.TopologyTriangleList, descriptors.IndexUint16, 12)
+	wide := indexedMesh(types.TopologyTriangleList, descriptors.IndexUint32, 12)
 
 	p := newPlugin()
 	k := newTestKernel(t, p)
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	w := recordList(t, k)
-	w.Draw(narrow, testMaterial(), MatParam("mvp", m.NewMat4()))
-	w.Draw(wide, testMaterial(), MatParam("mvp", m.NewMat4()))
+	w.Draw(narrow, testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(wide, testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

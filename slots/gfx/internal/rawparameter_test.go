@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -26,7 +28,7 @@ type badlyPacked struct {
 
 func TestRawParameterCopiesTheValueBytes(t *testing.T) {
 	value := wellPacked{Amount: m.Vec4{X: 1, Y: 2, Z: 3, W: 4}}
-	param := RawParameter("record", value)
+	param := descriptors.RawParameter("record", value)
 	bytes, ok := param.AppendValue(nil)
 	if !ok {
 		t.Fatal("a raw parameter reported no value")
@@ -56,7 +58,7 @@ func TestRawParameterPanicsOnAGoLayoutWGSLDoesNotShare(t *testing.T) {
 			}
 		}
 	}()
-	RawParameter("record", badlyPacked{})
+	descriptors.RawParameter("record", badlyPacked{})
 	t.Fatal("a badly packed struct did not panic")
 }
 
@@ -70,37 +72,37 @@ func TestRawParameterRejectsAMemberThatIsNotShaderData(t *testing.T) {
 		A m.Vec4
 		B *float32
 	}
-	RawParameter("record", withPointer{})
+	descriptors.RawParameter("record", withPointer{})
 }
 
 func TestRawParameterAcceptsArraysAtTheirWGSLStride(t *testing.T) {
 	type sixteen struct{ Values [4]m.Vec4 }
-	if bytes, _ := RawParameter("record", sixteen{}).AppendValue(nil); len(bytes) != 64 {
+	if bytes, _ := descriptors.RawParameter("record", sixteen{}).AppendValue(nil); len(bytes) != 64 {
 		t.Fatalf("array record = %d bytes, want 64", len(bytes))
 	}
 }
 
 func TestFingerprintParamsSeparatesValuesAndIgnoresBacking(t *testing.T) {
-	one := []ParameterDescr{FloatParam("fade", 0.25), ColorParam("tint", m.Color{R: 1, A: 1})}
-	same := []ParameterDescr{FloatParam("fade", 0.25), ColorParam("tint", m.Color{R: 1, A: 1})}
-	if FingerprintParams(one) != FingerprintParams(same) {
+	one := []descriptors.ParameterDescr{descriptors.FloatParam("fade", 0.25), descriptors.ColorParam("tint", m.Color{R: 1, A: 1})}
+	same := []descriptors.ParameterDescr{descriptors.FloatParam("fade", 0.25), descriptors.ColorParam("tint", m.Color{R: 1, A: 1})}
+	if descriptors.FingerprintParams(one) != descriptors.FingerprintParams(same) {
 		t.Fatal("equal parameter slices in different backings fingerprinted differently")
 	}
-	different := []ParameterDescr{FloatParam("fade", 0.5), ColorParam("tint", m.Color{R: 1, A: 1})}
-	if FingerprintParams(one) == FingerprintParams(different) {
+	different := []descriptors.ParameterDescr{descriptors.FloatParam("fade", 0.5), descriptors.ColorParam("tint", m.Color{R: 1, A: 1})}
+	if descriptors.FingerprintParams(one) == descriptors.FingerprintParams(different) {
 		t.Fatal("a changed value did not change the fingerprint")
 	}
-	reordered := []ParameterDescr{one[1], one[0]}
-	if FingerprintParams(one) == FingerprintParams(reordered) {
+	reordered := []descriptors.ParameterDescr{one[1], one[0]}
+	if descriptors.FingerprintParams(one) == descriptors.FingerprintParams(reordered) {
 		t.Fatal("reordered parameters fingerprinted the same")
 	}
 	// A kind change with the same name is the case a hand-written comparison
 	// misses, and it is the one that merges two draws that differ.
-	kindChanged := []ParameterDescr{VecParam("fade", m.Vec4{}), one[1]}
-	if FingerprintParams(one) == FingerprintParams(kindChanged) {
+	kindChanged := []descriptors.ParameterDescr{descriptors.VecParam("fade", m.Vec4{}), one[1]}
+	if descriptors.FingerprintParams(one) == descriptors.FingerprintParams(kindChanged) {
 		t.Fatal("a changed kind did not change the fingerprint")
 	}
-	if FingerprintParams(nil) != FingerprintParams([]ParameterDescr{}) {
+	if descriptors.FingerprintParams(nil) != descriptors.FingerprintParams([]descriptors.ParameterDescr{}) {
 		t.Fatal("nil and empty parameter slices fingerprinted differently")
 	}
 }

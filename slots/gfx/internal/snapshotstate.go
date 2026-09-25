@@ -5,6 +5,8 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/kernel"
@@ -174,26 +176,26 @@ func frameViewOf(queue *OpQueue, resources *ResourceQueue, filter string) FrameV
 
 // passViewOf renders one declared pass, at its declaration index and its
 // position in run order.
-func passViewOf(index, run int, desc PassDescr, draws, instances int) PassView {
+func passViewOf(index, run int, desc descriptors.PassDescr, draws, instances int) PassView {
 	view := PassView{
 		Index: index, Run: run, Label: desc.Label, Order: int(desc.Order),
-		Target:     targetKindName(TargetKindOf(&desc.Target)),
-		Depth:      depthKindName(DepthKindOf(&desc.Depth)),
+		Target:     targetKindName(descriptors.TargetKindOf(&desc.Target)),
+		Depth:      depthKindName(descriptors.DepthKindOf(&desc.Depth)),
 		Load:       desc.Load.String(),
 		Store:      desc.Store.String(),
 		DepthLoad:  desc.DepthLoad.String(),
 		DepthClear: desc.DepthClear,
 		DepthStore: desc.DepthStore.String(),
 		Draws:      draws, Instances: instances,
-		Runs: PassHasEffect(&desc, draws),
+		Runs: descriptors.PassHasEffect(&desc, draws),
 	}
-	if TargetKindOf(&desc.Target) == TargetTexture {
-		view.TargetTexture = TargetTextureOf(&desc.Target)
+	if descriptors.TargetKindOf(&desc.Target) == descriptors.TargetTexture {
+		view.TargetTexture = descriptors.TargetTextureOf(&desc.Target)
 		view.TargetWidth, view.TargetHeight, _ = desc.Target.Size()
-		view.TargetMip, view.TargetLayer = TargetMip(&desc.Target), TargetLayer(&desc.Target)
+		view.TargetMip, view.TargetLayer = descriptors.TargetMip(&desc.Target), descriptors.TargetLayer(&desc.Target)
 	}
 	if desc.Depth.IsTexture() {
-		view.DepthTexture = DepthTexture(&desc.Depth)
+		view.DepthTexture = descriptors.DepthTexture(&desc.Depth)
 	}
 	if desc.Load == types.LoadClear {
 		view.Clear = []float32{desc.Clear.R, desc.Clear.G, desc.Clear.B, desc.Clear.A}
@@ -264,29 +266,29 @@ func opKindName(kind OpKind) string {
 	case OpUpdateTexture:
 		return "updateTexture"
 	}
-	return UnknownName(int(kind))
+	return descriptors.UnknownName(int(kind))
 }
 
-func targetKindName(kind TargetKind) string {
+func targetKindName(kind descriptors.TargetKind) string {
 	switch kind {
-	case TargetScreen:
+	case descriptors.TargetScreen:
 		return "screen"
-	case TargetNone:
+	case descriptors.TargetNone:
 		return "none"
-	case TargetTexture:
+	case descriptors.TargetTexture:
 		return "texture"
 	}
-	return UnknownName(int(kind))
+	return descriptors.UnknownName(int(kind))
 }
 
-func depthKindName(kind DepthKind) string {
+func depthKindName(kind descriptors.DepthKind) string {
 	switch kind {
-	case DepthKindAuto:
+	case descriptors.DepthKindAuto:
 		return "auto"
-	case DepthKindNone:
+	case descriptors.DepthKindNone:
 		return "none"
-	case DepthKindTexture:
+	case descriptors.DepthKindTexture:
 		return "texture"
 	}
-	return UnknownName(int(kind))
+	return descriptors.UnknownName(int(kind))
 }

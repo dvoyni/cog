@@ -1,6 +1,10 @@
 package internal
 
-import "image"
+import (
+	"image"
+
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+)
 
 // Capture is one completed readback: either the mapped bytes or the reason
 // there are none. Pixels carries the GPU's own row padding, which BytesPerRow
@@ -12,7 +16,7 @@ import "image"
 type Capture struct {
 	Pixels        []byte
 	Width, Height int
-	Format        TextureFormat
+	Format        descriptors.TextureFormat
 	BytesPerRow   int
 	Err           error
 }
@@ -48,9 +52,9 @@ func (c Capture) Image() image.Image {
 // captureFormatSupported reports whether a format is the 8-bit RGBA a capture
 // can be an image of. Depth is not: it is a float field needing a range to be
 // legible, which is a visualization question rather than a readback one.
-func captureFormatSupported(format TextureFormat) bool {
+func captureFormatSupported(format descriptors.TextureFormat) bool {
 	switch format.Resolve() {
-	case FormatRGBA8, FormatRGBA8Srgb:
+	case descriptors.FormatRGBA8, descriptors.FormatRGBA8Srgb:
 		return true
 	default:
 		return false

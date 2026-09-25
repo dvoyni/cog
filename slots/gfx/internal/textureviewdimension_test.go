@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
@@ -29,7 +31,7 @@ func arrayTextureLayout() shader.ShaderLayout {
 // layout, and reports what the backend was asked to encode alongside what gfx
 // reported. More than one frame is how report-once is observed: the plan is
 // shared, and only the seen-set can stop the second report.
-func arrayTextureFrame(t *testing.T, frames int, params ...ParameterDescr) (*fakeBackend, []error) {
+func arrayTextureFrame(t *testing.T, frames int, params ...descriptors.ParameterDescr) (*fakeBackend, []error) {
 	t.Helper()
 	p := newPlugin()
 	layout := arrayTextureLayout()
@@ -40,8 +42,8 @@ func arrayTextureFrame(t *testing.T, frames int, params ...ParameterDescr) (*fak
 
 	for range frames {
 		w := recordRaw(t, k)
-		w.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear, Label: "main"})
-		w.Draw(triangle(), testMaterial(params...), MatParam("mvp", m.NewMat4()))
+		w.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "main"})
+		w.Draw(triangle(), testMaterial(params...), descriptors.MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 	}
@@ -50,9 +52,9 @@ func arrayTextureFrame(t *testing.T, frames int, params ...ParameterDescr) (*fak
 
 // texturesOfLayers mints a texture descriptor that reports the layer count it
 // was allocated with, which is what the check reads.
-func texturesOfLayers(layers int) TextureDescr {
+func texturesOfLayers(layers int) descriptors.TextureDescr {
 	queue := NewResourceQueue(idsOf(&fakeBackend{}))
-	return queue.AllocateTexture(4, 4, layers, FormatRGBA8Srgb)
+	return queue.AllocateTexture(4, 4, layers, descriptors.FormatRGBA8Srgb)
 }
 
 // A texture_2d_array binding no parameter fills is not fatal. It resolves to the
@@ -76,7 +78,7 @@ func TestADrawMissingAnArrayTextureStillRenders(t *testing.T) {
 // the texture they meant - and rendering it white would hide a mistake they can
 // fix, so the draw is dropped and the mistake named.
 func TestADrawSupplyingAFlatTextureForAnArrayBindingIsDroppedAndNamed(t *testing.T) {
-	backend, reported := arrayTextureFrame(t, 1, TextureParam("canvasTexture", texturesOfLayers(1)))
+	backend, reported := arrayTextureFrame(t, 1, descriptors.TextureParam("canvasTexture", texturesOfLayers(1)))
 
 	if backend.passDraws[0] != 0 {
 		t.Errorf("draws = %d, want the draw supplying a single-layer texture dropped", backend.passDraws[0])
@@ -98,7 +100,7 @@ func TestADrawSupplyingAFlatTextureForAnArrayBindingIsDroppedAndNamed(t *testing
 // and the frame reports only its first error - so re-reporting every frame would
 // mask every later error in every later frame.
 func TestAnArrayBindingMismatchIsNamedOncePerShaderAndParameter(t *testing.T) {
-	_, reported := arrayTextureFrame(t, 3, TextureParam("canvasTexture", texturesOfLayers(1)))
+	_, reported := arrayTextureFrame(t, 3, descriptors.TextureParam("canvasTexture", texturesOfLayers(1)))
 
 	if len(reported) != 1 {
 		t.Fatalf("reported = %v over three frames, want exactly one", reported)
@@ -108,7 +110,7 @@ func TestAnArrayBindingMismatchIsNamedOncePerShaderAndParameter(t *testing.T) {
 // An array texture fills an array binding, which is the whole point, and nothing
 // is reported for a draw that is correct.
 func TestADrawSupplyingAnArrayTextureRenders(t *testing.T) {
-	backend, reported := arrayTextureFrame(t, 1, TextureParam("canvasTexture", texturesOfLayers(4)))
+	backend, reported := arrayTextureFrame(t, 1, descriptors.TextureParam("canvasTexture", texturesOfLayers(4)))
 
 	if backend.passDraws[0] != 1 {
 		t.Errorf("draws = %d, want the draw rendered", backend.passDraws[0])
@@ -123,7 +125,7 @@ func TestADrawSupplyingAnArrayTextureRenders(t *testing.T) {
 // refuse a correct draw over a descriptor's silence - the worst direction for a
 // fatal error. The backend's refused bind group remains the backstop.
 func TestADrawSupplyingATextureOfUnknownLayersIsNotJudged(t *testing.T) {
-	backend, reported := arrayTextureFrame(t, 1, TextureParam("canvasTexture", BakedTexture(9, 4, 4)))
+	backend, reported := arrayTextureFrame(t, 1, descriptors.TextureParam("canvasTexture", descriptors.BakedTexture(9, 4, 4)))
 
 	if backend.passDraws[0] != 1 {
 		t.Errorf("draws = %d, want a descriptor of unknown layers left alone", backend.passDraws[0])

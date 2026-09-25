@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/bundles/mcp"
@@ -40,7 +42,7 @@ func TestGfxOffersItsTwoCapabilitiesAsReadOnly(t *testing.T) {
 }
 
 func TestDepthAndOtherFormatsAreNotAnImage(t *testing.T) {
-	for _, format := range []TextureFormat{FormatDepth32F, TextureFormat(99)} {
+	for _, format := range []descriptors.TextureFormat{descriptors.FormatDepth32F, descriptors.TextureFormat(99)} {
 		capture := Capture{
 			Pixels: make([]byte, 256), Width: 2, Height: 2, Format: format, BytesPerRow: 256,
 		}
@@ -48,7 +50,7 @@ func TestDepthAndOtherFormatsAreNotAnImage(t *testing.T) {
 			t.Fatalf("%s produced an image; only 8-bit RGBA can be one", format.String())
 		}
 	}
-	words := captureRefusal(ErrCaptureUnsupported{Format: FormatDepth32F}, 1, 1)
+	words := captureRefusal(ErrCaptureUnsupported{Format: descriptors.FormatDepth32F}, 1, 1)
 	var unavailable mcp.Unavailable
 	if !errors.As(words, &unavailable) {
 		t.Fatalf("depth refusal = %T, want words an agent can act on", words)

@@ -4,16 +4,18 @@ import (
 	"encoding/binary"
 	"math"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 )
 
 // translateDraw emits one draw into the currently open pass.
-func (t *translator) translateDraw(f *frame, op *Op, pass PassDescr, firstErr *error) {
+func (t *translator) translateDraw(f *frame, op *Op, pass descriptors.PassDescr, firstErr *error) {
 	m := &op.Mesh
-	stride := MeshStride(m)
-	vertices, indices := MeshVertices(m), MeshIndices(m)
+	stride := descriptors.MeshStride(m)
+	vertices, indices := descriptors.MeshVertices(m), descriptors.MeshIndices(m)
 	if vertices.ID() == 0 || m.VertexCount() <= 0 || stride <= 0 {
 		return
 	}
@@ -103,8 +105,8 @@ func (t *translator) translateDraw(f *frame, op *Op, pass PassDescr, firstErr *e
 // dropped either way: the caller returns before emitting anything, so
 // report-once-drop-always holds here the way it does for a failed pipeline.
 // The shader's label is spelled only for a report, never on the frames after it.
-func (t *translator) reportIndexLength(m *MeshDescr, shaderDescr shader.ShaderDescr) error {
-	key := indexLengthKey{length: MeshIndices(m).Size(), width: m.IndexWidth()}
+func (t *translator) reportIndexLength(m *descriptors.MeshDescr, shaderDescr shader.ShaderDescr) error {
+	key := indexLengthKey{length: descriptors.MeshIndices(m).Size(), width: m.IndexWidth()}
 	if _, seen := t.badIndexLengths[key]; seen {
 		return nil
 	}
@@ -117,7 +119,7 @@ func (t *translator) reportIndexLength(m *MeshDescr, shaderDescr shader.ShaderDe
 // sampledAttachment does, for the same reason: the plan is cached per parameter
 // shape, so it knows which names are declared but not which buffers this draw
 // carries, and an unbaked buffer is a per-draw value.
-func unsuppliedBuffer(plan *parameterPlan, drawParams, materialParams []ParameterDescr) (*plannedResource, bool, bool) {
+func unsuppliedBuffer(plan *parameterPlan, drawParams, materialParams []descriptors.ParameterDescr) (*plannedResource, bool, bool) {
 	for i := range plan.resources {
 		resource := &plan.resources[i]
 		if resource.kind != plannedBuffer {
@@ -129,7 +131,7 @@ func unsuppliedBuffer(plan *parameterPlan, drawParams, materialParams []Paramete
 		}
 		// The kind is already settled in plan.mismatch, so a parameter that is
 		// here at all is a buffer; only its id is still in question.
-		if ParameterBuffer(p).ID() == 0 {
+		if descriptors.ParameterBuffer(p).ID() == 0 {
 			return resource, true, true
 		}
 	}
@@ -165,7 +167,7 @@ func (t *translator) reportUnsuppliedBuffer(shaderID types.ShaderID, label strin
 // cannot say, and refusing a draw over a descriptor's silence would be a false
 // fatal.
 func mismatchedTextureView(
-	plan *parameterPlan, drawParams, materialParams []ParameterDescr,
+	plan *parameterPlan, drawParams, materialParams []descriptors.ParameterDescr,
 ) (*plannedResource, int, bool) {
 	for i := range plan.resources {
 		resource := &plan.resources[i]
@@ -178,7 +180,7 @@ func mismatchedTextureView(
 		}
 		// The kind is already settled in plan.mismatch, so a parameter that is
 		// here at all is a texture; only its shape is still in question.
-		layers := ParameterTexture(p).Layers()
+		layers := descriptors.ParameterTexture(p).Layers()
 		if layers == 0 {
 			continue
 		}
@@ -230,13 +232,13 @@ func textureViewNameOfLayers(layers int) string {
 // sampledAttachment names the first texture parameter a draw samples that its
 // own pass renders into. Only a baked texture can be an attachment, so this
 // resolves nothing and costs a comparison per binding.
-func sampledAttachment(plan *parameterPlan, drawParams, materialParams []ParameterDescr, pass PassDescr) (string, bool) {
+func sampledAttachment(plan *parameterPlan, drawParams, materialParams []descriptors.ParameterDescr, pass descriptors.PassDescr) (string, bool) {
 	attachment := func(id types.TextureID) bool {
 		if id == 0 {
 			return false
 		}
-		return (TargetKindOf(&pass.Target) == TargetTexture && TargetTextureOf(&pass.Target) == id) ||
-			(DepthKindOf(&pass.Depth) == DepthKindTexture && DepthTexture(&pass.Depth) == id)
+		return (descriptors.TargetKindOf(&pass.Target) == descriptors.TargetTexture && descriptors.TargetTextureOf(&pass.Target) == id) ||
+			(descriptors.DepthKindOf(&pass.Depth) == descriptors.DepthKindTexture && descriptors.DepthTexture(&pass.Depth) == id)
 	}
 	for i := range plan.resources {
 		resource := &plan.resources[i]
@@ -244,10 +246,10 @@ func sampledAttachment(plan *parameterPlan, drawParams, materialParams []Paramet
 			continue
 		}
 		p := resource.param.value(materialParams, drawParams)
-		if p == nil || ParameterKind(p) != ParamTexture {
+		if p == nil || descriptors.ParameterKind(p) != descriptors.ParamTexture {
 			continue
 		}
-		if texture := ParameterTextureRef(p); attachment(texture.ID()) {
+		if texture := descriptors.ParameterTextureRef(p); attachment(texture.ID()) {
 			return p.Name(), true
 		}
 	}
@@ -257,14 +259,14 @@ func sampledAttachment(plan *parameterPlan, drawParams, materialParams []Paramet
 // emitResources binds each reflected texture/sampler resource, matching its name
 // to a material parameter (defaulting to the white texture / a clamp+linear
 // sampler when unset), so every binding the shader declares is provided.
-func (t *translator) emitResources(f *frame, drawParams, materialParams []ParameterDescr, plan *parameterPlan) {
+func (t *translator) emitResources(f *frame, drawParams, materialParams []descriptors.ParameterDescr, plan *parameterPlan) {
 	// Each reflected sampler is filled by the parameter of its own name, and
 	// falls back to the zero descriptor - clamp and linear - when unset.
 	for i := range plan.samplers {
 		sampler := &plan.samplers[i]
 		var desc types.SamplerDesc
-		if p := sampler.param.value(materialParams, drawParams); p != nil && ParameterKind(p) == ParamSampler {
-			desc = ParameterSampler(p)
+		if p := sampler.param.value(materialParams, drawParams); p != nil && descriptors.ParameterKind(p) == descriptors.ParamSampler {
+			desc = descriptors.ParameterSampler(p)
 		}
 		t.ops.SetSampler(t.ensureSampler(f.backend, desc), sampler.group, sampler.binding)
 	}
@@ -272,16 +274,16 @@ func (t *translator) emitResources(f *frame, drawParams, materialParams []Parame
 		resource := &plan.resources[i]
 		p := resource.param.value(materialParams, drawParams)
 		if resource.kind == plannedBuffer {
-			if p != nil && ParameterKind(p) == ParamBuffer {
-				if ParameterBuffer(p).ID() != 0 {
-					t.ops.SetBuffer(resource.group, resource.binding, ParameterBuffer(p).ID(), ParameterBufferOffset(p), ParameterBufferSize(p))
+			if p != nil && descriptors.ParameterKind(p) == descriptors.ParamBuffer {
+				if descriptors.ParameterBuffer(p).ID() != 0 {
+					t.ops.SetBuffer(resource.group, resource.binding, descriptors.ParameterBuffer(p).ID(), descriptors.ParameterBufferOffset(p), descriptors.ParameterBufferSize(p))
 				}
 			}
 			continue
 		}
 		textureID := types.TextureID(0)
-		if p != nil && ParameterKind(p) == ParamTexture {
-			textureID = t.ensureTexture(f, ParameterTexture(p))
+		if p != nil && descriptors.ParameterKind(p) == descriptors.ParamTexture {
+			textureID = t.ensureTexture(f, descriptors.ParameterTexture(p))
 		}
 		t.ops.SetTexture(textureID, resource.group, resource.binding)
 	}
@@ -291,23 +293,23 @@ func (t *translator) emitResources(f *frame, drawParams, materialParams []Parame
 // material half of the shape hash from a material recorded for the frame
 // rather than hashing its names again.
 func (t *translator) preparePlanFor(
-	shaderID types.ShaderID, label string, layout shader.ShaderLayout, material *MaterialDescr, draw []ParameterDescr,
+	shaderID types.ShaderID, label string, layout shader.ShaderLayout, material *descriptors.MaterialDescr, draw []descriptors.ParameterDescr,
 ) *parameterPlan {
-	state, recorded := MaterialShapeState(material)
+	state, recorded := descriptors.MaterialShapeState(material)
 	if !recorded {
-		state = ParameterShapeState(material.Params())
+		state = descriptors.ParameterShapeState(material.Params())
 	}
-	return t.planForShape(shaderID, label, layout, material.Params(), draw, ContinueParameterShape(state, draw))
+	return t.planForShape(shaderID, label, layout, material.Params(), draw, descriptors.ContinueParameterShape(state, draw))
 }
 
-func (t *translator) prepareParameterPlan(shaderID types.ShaderID, label string, layout shader.ShaderLayout, material, draw []ParameterDescr) *parameterPlan {
+func (t *translator) prepareParameterPlan(shaderID types.ShaderID, label string, layout shader.ShaderLayout, material, draw []descriptors.ParameterDescr) *parameterPlan {
 	return t.planForShape(shaderID, label, layout, material, draw, parameterShapeHash(material, draw))
 }
 
 // planForShape finds or builds the plan for one parameter shape, given its
 // hash.
 func (t *translator) planForShape(
-	shaderID types.ShaderID, label string, layout shader.ShaderLayout, material, draw []ParameterDescr, hash uint64,
+	shaderID types.ShaderID, label string, layout shader.ShaderLayout, material, draw []descriptors.ParameterDescr, hash uint64,
 ) *parameterPlan {
 	key := parameterPlanBucketKey{shader: shaderID, hash: hash}
 	bucket := t.parameterPlans[key]
@@ -365,7 +367,7 @@ func (t *translator) planForShape(
 // packParams writes reflected shader constants into block, which arrives
 // zeroed and sized to the plan's block. Per-draw parameters override
 // same-named material parameters; unmatched members remain zero.
-func (t *translator) packParams(block []byte, drawParams, materialParams []ParameterDescr, plan *parameterPlan) {
+func (t *translator) packParams(block []byte, drawParams, materialParams []descriptors.ParameterDescr, plan *parameterPlan) {
 	size := min(plan.uniformSize, len(block))
 	if size <= 0 {
 		return
@@ -384,26 +386,26 @@ func (t *translator) packParams(block []byte, drawParams, materialParams []Param
 }
 
 // writeParamAt writes a scalar/vec/color param at byte offset off (bounds-checked).
-func writeParamAt(buf []byte, off int, p *ParameterDescr) {
-	switch ParameterKind(p) {
-	case ParamColor:
+func writeParamAt(buf []byte, off int, p *descriptors.ParameterDescr) {
+	switch descriptors.ParameterKind(p) {
+	case descriptors.ParamColor:
 		if off+16 <= len(buf) {
-			WriteColor(buf[off:off+16], ParameterColor(p))
+			descriptors.WriteColor(buf[off:off+16], descriptors.ParameterColor(p))
 		}
-	case ParamVec4:
+	case descriptors.ParamVec4:
 		if off+16 <= len(buf) {
-			WriteVec4(buf[off:off+16], ParameterVec(p))
+			descriptors.WriteVec4(buf[off:off+16], descriptors.ParameterVec(p))
 		}
-	case ParamMat4:
+	case descriptors.ParamMat4:
 		if off+64 <= len(buf) {
-			WriteMat4(buf[off:off+64], ParameterMat(p))
+			descriptors.WriteMat4(buf[off:off+64], descriptors.ParameterMat(p))
 		}
-	case ParamFloat:
+	case descriptors.ParamFloat:
 		if off+4 <= len(buf) {
-			binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(ParameterNum(p)))
+			binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(descriptors.ParameterNum(p)))
 		}
-	case ParamRaw:
-		raw := ParameterRaw(p)
+	case descriptors.ParamRaw:
+		raw := descriptors.ParameterRaw(p)
 		if off+raw.Len() <= len(buf) {
 			copy(buf[off:], raw.Data())
 		}

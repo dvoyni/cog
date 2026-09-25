@@ -2,6 +2,7 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
@@ -49,7 +50,7 @@ type Backend interface {
 	// frame's pipelines to FrameBufferFormat and loses nothing by it:
 	// TextureView above returns 0 on the same condition, leaving the pass with
 	// no attachment to begin, so the pipeline keyed there never renders.
-	TextureFormat(texture types.TextureID) (TextureFormat, bool)
+	TextureFormat(texture types.TextureID) (descriptors.TextureFormat, bool)
 
 	// Limits reports the device's own limits. gfx checks shaders against
 	// DefaultLimits, the web floor, and never against these: they are here to

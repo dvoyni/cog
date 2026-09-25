@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/bundles/ecs"
 )
 
@@ -12,9 +14,9 @@ import (
 // admits on the contract that it is never written after construction.
 func TestDescriptorsAreStorable(t *testing.T) {
 	for _, tp := range []reflect.Type{
-		reflect.TypeFor[ParameterDescr](),
-		reflect.TypeFor[TextureDescr](),
-		reflect.TypeFor[BufferDescr](),
+		reflect.TypeFor[descriptors.ParameterDescr](),
+		reflect.TypeFor[descriptors.TextureDescr](),
+		reflect.TypeFor[descriptors.BufferDescr](),
 	} {
 		if err := ecs.Storable(tp); err != nil {
 			t.Errorf("ecs.Storable(%s) = %v, want nil", tp, err)

@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/bundles/mcp"
@@ -75,7 +77,7 @@ func newCaptureRig(t *testing.T) *captureRig {
 func (r *captureRig) record(label string) {
 	r.t.Helper()
 	q := recordRaw(r.t, r.k)
-	q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear, Label: label})
+	q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: label})
 	drawInto(q)
 }
 
@@ -575,10 +577,10 @@ func TestABurstUnderPauseIsRefusedInWords(t *testing.T) {
 }
 
 func TestATextureCaptureDeclaresItsTransition(t *testing.T) {
-	var target TextureDescr
+	var target descriptors.TextureDescr
 	rig := newCaptureRig(t)
 	withResourceQueue(t, rig.k, func(resources *ResourceQueue) {
-		target = resources.AllocateTexture(64, 64, 1, FormatRGBA8)
+		target = resources.AllocateTexture(64, 64, 1, descriptors.FormatRGBA8)
 	})
 	if answer := rig.k.ExecuteCommand[ArmCaptureCmd](ArmCaptureRequest{
 		Target: types.CaptureDesc{Texture: target.ID()},
@@ -586,10 +588,10 @@ func TestATextureCaptureDeclaresItsTransition(t *testing.T) {
 		t.Fatalf("arm: %v", answer.Err)
 	}
 	q := recordRaw(t, rig.k)
-	q.Pass(PassDescr{
-		Target: TextureTarget(target, 0, 0), Depth: DepthNone(), Load: types.LoadClear, Label: "offscreen",
+	q.Pass(descriptors.PassDescr{
+		Target: descriptors.TextureTarget(target, 0, 0), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "offscreen",
 	})
-	q.Draw(triangle(), testMaterial(), MatParam("mvp", m.NewMat4()))
+	q.Draw(triangle(), testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
 	rig.tick()
 	rig.render()
 

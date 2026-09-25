@@ -1,4 +1,4 @@
-package internal
+package descriptors
 
 import (
 	"hash/maphash"
@@ -21,22 +21,26 @@ type MaterialDescr struct {
 	params []ParameterDescr
 	state  types.MaterialState
 	// recorded is set by OpQueue.FrameMaterial and zero otherwise; see there.
-	recorded frameRecording
+	recorded FrameRecording
 }
 
-// frameRecording is what OpQueue.FrameMaterial attaches to the material it
+// FrameRecording is what OpQueue.FrameMaterial attaches to the material it
 // returns: the queue and the queue frame its params were copied into, where in
 // that queue's parameter arena the copy starts, and the shape state of their
 // names. The material's own params stay the caller's, so a recording that is
 // stale or another queue's draws as the material it was recorded from.
 //
+// Queue is the recording queue, compared by identity only; it is held as any
+// so the descriptor does not name the queue type that records it.
+//
 // It is held by value: recording happens every frame, and a pointer would be
-// an allocation every frame for every material a renderer records.
-type frameRecording struct {
-	queue *OpQueue
-	frame uint64
-	start int
-	shape uint64
+// an allocation every frame for every material a renderer records. A pointer
+// stored in an interface allocates nothing.
+type FrameRecording struct {
+	Queue any
+	Frame uint64
+	Start int
+	Shape uint64
 }
 
 // Material describes a material from a shader and its named parameters. It
@@ -56,7 +60,7 @@ func MaterialWithState(shaderDescr shader.ShaderDescr, state types.MaterialState
 // to follow each descriptor's copyData policy when the material is recorded.
 func (m MaterialDescr) Clone() MaterialDescr {
 	m.params = append([]ParameterDescr(nil), m.params...)
-	m.recorded = frameRecording{}
+	m.recorded = FrameRecording{}
 	return m
 }
 
@@ -66,7 +70,7 @@ func (m MaterialDescr) CloneTo(arena []ParameterDescr) (MaterialDescr, []Paramet
 	start := len(arena)
 	arena = append(arena, m.params...)
 	m.params = arena[start:]
-	m.recorded = frameRecording{}
+	m.recorded = FrameRecording{}
 	return m, arena
 }
 

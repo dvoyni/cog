@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/kernel"
@@ -26,13 +28,13 @@ func passFrame(t *testing.T, record func(*OpQueue)) (*fakeBackend, kernel.Execut
 }
 
 func drawInto(q *OpQueue) {
-	q.Draw(triangle(), testMaterial(), MatParam("mvp", m.NewMat4()))
+	q.Draw(triangle(), testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
 }
 
 func TestAPassCarriesItsTargetAndClearToTheBackend(t *testing.T) {
 	backend, _ := passFrame(t, func(q *OpQueue) {
-		q.Pass(PassDescr{
-			Target: ScreenTarget(), Depth: DepthAuto(),
+		q.Pass(descriptors.PassDescr{
+			Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(),
 			Load: types.LoadClear, Clear: m.Color{R: 1, A: 1}, Label: "screen",
 		})
 		drawInto(q)
@@ -78,9 +80,9 @@ func TestDrawsOutsideAnyPassAreDroppedAndReported(t *testing.T) {
 
 func TestPassesRunInDeclaredOrderNotStreamOrder(t *testing.T) {
 	backend, _ := passFrame(t, func(q *OpQueue) {
-		late := q.Pass(PassDescr{Order: 10, Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear, Label: "late"})
+		late := q.Pass(descriptors.PassDescr{Order: 10, Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "late"})
 		drawInto(q)
-		early := q.Pass(PassDescr{Order: -10, Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear, Label: "early"})
+		early := q.Pass(descriptors.PassDescr{Order: -10, Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "early"})
 		drawInto(q)
 		// Re-selecting appends to a pass declared earlier in the frame.
 		q.SetPass(late)
@@ -100,9 +102,9 @@ func TestPassesRunInDeclaredOrderNotStreamOrder(t *testing.T) {
 
 func TestEqualOrderKeepsDeclarationSequence(t *testing.T) {
 	backend, _ := passFrame(t, func(q *OpQueue) {
-		q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear, Label: "first"})
+		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "first"})
 		drawInto(q)
-		q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear, Label: "second"})
+		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "second"})
 		drawInto(q)
 	})
 	if len(backend.lastPasses) != 2 || backend.lastPasses[0].Label != "first" {
@@ -112,11 +114,11 @@ func TestEqualOrderKeepsDeclarationSequence(t *testing.T) {
 
 func TestAdjacentPassesMergeWhenTheSuccessorOnlyContinues(t *testing.T) {
 	backend, _ := passFrame(t, func(q *OpQueue) {
-		q.Pass(PassDescr{Order: 0, Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear, Label: "layer0"})
+		q.Pass(descriptors.PassDescr{Order: 0, Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "layer0"})
 		drawInto(q)
 		// Same attachments, preserving both, after a pass that kept both: by
 		// definition indistinguishable from continuing the first.
-		q.Pass(PassDescr{Order: 1, Target: ScreenTarget(), Depth: DepthAuto(), Label: "layer1"})
+		q.Pass(descriptors.PassDescr{Order: 1, Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "layer1"})
 		drawInto(q)
 	})
 	if len(backend.lastPasses) != 1 {
@@ -132,9 +134,9 @@ func TestAdjacentPassesMergeWhenTheSuccessorOnlyContinues(t *testing.T) {
 
 func TestAPassThatClearsAgainDoesNotMerge(t *testing.T) {
 	backend, _ := passFrame(t, func(q *OpQueue) {
-		q.Pass(PassDescr{Order: 0, Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear, Label: "first"})
+		q.Pass(descriptors.PassDescr{Order: 0, Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "first"})
 		drawInto(q)
-		q.Pass(PassDescr{Order: 1, Target: ScreenTarget(), Depth: DepthAuto(), DepthLoad: types.LoadClear, Label: "second"})
+		q.Pass(descriptors.PassDescr{Order: 1, Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), DepthLoad: types.LoadClear, Label: "second"})
 		drawInto(q)
 	})
 	if len(backend.lastPasses) != 2 {
@@ -145,9 +147,9 @@ func TestAPassThatClearsAgainDoesNotMerge(t *testing.T) {
 func TestPassWithoutDrawsRunsOnlyWhenAnAttachmentLoads(t *testing.T) {
 	backend, _ := passFrame(t, func(q *OpQueue) {
 		// A camera that culled everything, but still clears its target.
-		q.Pass(PassDescr{Order: 0, Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear, Label: "clearing"})
+		q.Pass(descriptors.PassDescr{Order: 0, Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "clearing"})
 		// Nothing to draw and nothing to load: unobservable, so it is not encoded.
-		q.Pass(PassDescr{Order: 5, Target: ScreenTarget(), Depth: DepthAuto(), Label: "empty"})
+		q.Pass(descriptors.PassDescr{Order: 5, Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "empty"})
 	})
 	if len(backend.lastPasses) != 1 || backend.lastPasses[0].Label != "clearing" {
 		t.Fatalf("passes = %+v, want only the clearing one", backend.lastPasses)
@@ -156,9 +158,9 @@ func TestPassWithoutDrawsRunsOnlyWhenAnAttachmentLoads(t *testing.T) {
 
 func TestScreenPassesAreFollowedByOnePresentPass(t *testing.T) {
 	backend, _ := passFrame(t, func(q *OpQueue) {
-		q.Pass(PassDescr{Order: 0, Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear, Label: "first"})
+		q.Pass(descriptors.PassDescr{Order: 0, Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "first"})
 		drawInto(q)
-		q.Pass(PassDescr{Order: 1, Target: ScreenTarget(), Depth: DepthAuto(), DepthLoad: types.LoadClear, Label: "second"})
+		q.Pass(descriptors.PassDescr{Order: 1, Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), DepthLoad: types.LoadClear, Label: "second"})
 		drawInto(q)
 	})
 	if backend.presents != 1 {
@@ -176,13 +178,13 @@ func TestAFrameThatNeverTouchesTheScreenDoesNotPresent(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	var target TextureDescr
+	var target descriptors.TextureDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		target = resources.AllocateTexture(64, 64, 1, FormatRGBA8Srgb)
+		target = resources.AllocateTexture(64, 64, 1, descriptors.FormatRGBA8Srgb)
 	})
 	w := recordRaw(t, k)
-	w.Pass(PassDescr{Target: TextureTarget(target, 0, 0), Depth: DepthNone(), Load: types.LoadClear, Label: "offscreen"})
-	w.Draw(triangle(), testMaterial(), MatParam("mvp", m.NewMat4()))
+	w.Pass(descriptors.PassDescr{Target: descriptors.TextureTarget(target, 0, 0), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "offscreen"})
+	w.Draw(triangle(), testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -200,7 +202,7 @@ func TestAScreenPassThatIsDroppedDoesNotPresent(t *testing.T) {
 	backend, _ := passFrame(t, func(q *OpQueue) {
 		// Nothing to draw and nothing to load: the pass is not encoded, so the
 		// frame buffer is never allocated and there is nothing to present.
-		q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Label: "empty"})
+		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "empty"})
 	})
 	if len(backend.lastPasses) != 0 || backend.presents != 0 {
 		t.Errorf("passes = %d, presents = %d, want neither", len(backend.lastPasses), backend.presents)
@@ -214,13 +216,13 @@ func TestDrawSamplingItsOwnAttachmentIsRejected(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	var target TextureDescr
+	var target descriptors.TextureDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		target = resources.AllocateTexture(64, 64, 1, FormatRGBA8Srgb)
+		target = resources.AllocateTexture(64, 64, 1, descriptors.FormatRGBA8Srgb)
 	})
 	w := recordRaw(t, k)
-	w.Pass(PassDescr{Target: TextureTarget(target, 0, 0), Depth: DepthNone(), Load: types.LoadClear, Label: "feedback"})
-	w.Draw(triangle(), testMaterial(TextureParam("MainTexture", target)), MatParam("mvp", m.NewMat4()))
+	w.Pass(descriptors.PassDescr{Target: descriptors.TextureTarget(target, 0, 0), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "feedback"})
+	w.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", target)), descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -235,34 +237,34 @@ func TestDrawSamplingItsOwnAttachmentIsRejected(t *testing.T) {
 func TestATextureTargetCarriesItsSize(t *testing.T) {
 	// A recorder that resolves a projection needs the target's aspect, and the
 	// only place the size is known is the descriptor it was built from.
-	texture := BakedTexture(7, 1024, 256)
-	width, height, ok := TextureTarget(texture, 0, 0).Size()
+	texture := descriptors.BakedTexture(7, 1024, 256)
+	width, height, ok := descriptors.TextureTarget(texture, 0, 0).Size()
 	if !ok || width != 1024 || height != 256 {
 		t.Errorf("size = %d x %d (ok %v), want 1024 x 256", width, height, ok)
 	}
-	if _, _, ok := ScreenTarget().Size(); ok {
+	if _, _, ok := descriptors.ScreenTarget().Size(); ok {
 		t.Error("the screen sentinel reported a size; only the render thread knows it")
 	}
-	if _, _, ok := NoTarget().Size(); ok {
+	if _, _, ok := descriptors.NoTarget().Size(); ok {
 		t.Error("a colourless target reported a size")
 	}
 }
 
 func TestADepthTargetCarriesItsSize(t *testing.T) {
 	// A depth-only pass has no colour target, so its aspect comes from here.
-	texture := BakedTexture(9, 2048, 2048)
-	width, height, ok := DepthTarget(texture).Size()
+	texture := descriptors.BakedTexture(9, 2048, 2048)
+	width, height, ok := descriptors.DepthTarget(texture).Size()
 	if !ok || width != 2048 || height != 2048 {
 		t.Errorf("size = %d x %d (ok %v), want 2048 x 2048", width, height, ok)
 	}
-	if _, _, ok := DepthAuto().Size(); ok {
+	if _, _, ok := descriptors.DepthAuto().Size(); ok {
 		t.Error("DepthAuto reported a size; it takes the colour target's")
 	}
 }
 
 func TestATemporaryTargetCarriesItsSize(t *testing.T) {
 	q := NewOpQueue(idsOf(&fakeBackend{}))
-	target, _ := q.TemporaryTarget(640, 480, FormatRGBA8Srgb)
+	target, _ := q.TemporaryTarget(640, 480, descriptors.FormatRGBA8Srgb)
 	width, height, ok := target.Size()
 	if !ok || width != 640 || height != 480 {
 		t.Errorf("size = %d x %d (ok %v), want 640 x 480", width, height, ok)
@@ -275,18 +277,18 @@ func TestATemporaryTargetHandsBackTheTextureItRendersInto(t *testing.T) {
 	// about the texture behind it. So the texture has to come back from the
 	// same call, already carrying the size and format the caller asked for.
 	q := NewOpQueue(idsOf(&fakeBackend{}))
-	target, texture := q.TemporaryTarget(320, 200, FormatRGBA8Srgb)
+	target, texture := q.TemporaryTarget(320, 200, descriptors.FormatRGBA8Srgb)
 
 	if texture.ID() == 0 {
 		t.Fatal("the texture came back with no id, so nothing can sample it")
 	}
-	if texture.ID() != TargetTextureOf(&target) {
-		t.Errorf("texture id = %d, but the target renders into %d", texture.ID(), TargetTextureOf(&target))
+	if texture.ID() != descriptors.TargetTextureOf(&target) {
+		t.Errorf("texture id = %d, but the target renders into %d", texture.ID(), descriptors.TargetTextureOf(&target))
 	}
 	if width, height := texture.Size(); width != 320 || height != 200 {
 		t.Errorf("texture size = %d x %d, want 320 x 200", width, height)
 	}
-	if texture.Format() != FormatRGBA8Srgb {
+	if texture.Format() != descriptors.FormatRGBA8Srgb {
 		t.Errorf("texture format = %v, want FormatRGBA8Srgb", texture.Format())
 	}
 	// A baked texture is the one case that carries an id and no path, which is
@@ -303,12 +305,12 @@ func TestALaterPassSamplesWhatAnEarlierPassRenderedIntoATemporaryTarget(t *testi
 	backend := &fakeBackend{}
 	var sampled types.TextureID
 	frame := func(q *OpQueue) {
-		target, texture := q.TemporaryTarget(64, 64, FormatRGBA8Srgb)
+		target, texture := q.TemporaryTarget(64, 64, descriptors.FormatRGBA8Srgb)
 		sampled = texture.ID()
-		q.Pass(PassDescr{Target: target, Depth: DepthNone(), Load: types.LoadClear, Order: 0, Label: "offscreen"})
+		q.Pass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 0, Label: "offscreen"})
 		drawInto(q)
-		q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthNone(), Load: types.LoadClear, Order: 1, Label: "composite"})
-		q.Draw(triangle(), testMaterial(TextureParam("MainTexture", texture)), MatParam("mvp", m.NewMat4()))
+		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 1, Label: "composite"})
+		q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), descriptors.MatParam("mvp", m.NewMat4()))
 	}
 
 	p := newPlugin()
@@ -342,9 +344,9 @@ func TestADrawStillCannotSampleTheTemporaryTargetItsOwnPassRendersInto(t *testin
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w := recordRaw(t, k)
-	target, texture := w.TemporaryTarget(64, 64, FormatRGBA8Srgb)
-	w.Pass(PassDescr{Target: target, Depth: DepthNone(), Load: types.LoadClear, Label: "feedback"})
-	w.Draw(triangle(), testMaterial(TextureParam("MainTexture", texture)), MatParam("mvp", m.NewMat4()))
+	target, texture := w.TemporaryTarget(64, 64, descriptors.FormatRGBA8Srgb)
+	w.Pass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "feedback"})
+	w.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -360,13 +362,13 @@ func TestTheZeroAttachmentsAreTheScreenAndAutomaticDepth(t *testing.T) {
 	// A recorder that defaults a pass leaves these fields alone, so the zero
 	// value has to be the common case. NoTarget and DepthNone stay reachable and
 	// distinguishable, which is what a depth-only shadow pass needs.
-	if (TargetDescr{}) != ScreenTarget() {
+	if (descriptors.TargetDescr{}) != descriptors.ScreenTarget() {
 		t.Error("the zero target is not the screen sentinel")
 	}
-	if (DepthDescr{}) != DepthAuto() {
+	if (descriptors.DepthDescr{}) != descriptors.DepthAuto() {
 		t.Error("the zero depth attachment is not DepthAuto")
 	}
-	if NoTarget() == ScreenTarget() || DepthNone() == DepthAuto() {
+	if descriptors.NoTarget() == descriptors.ScreenTarget() || descriptors.DepthNone() == descriptors.DepthAuto() {
 		t.Error("a colourless or depthless pass is indistinguishable from an unset one")
 	}
 }

@@ -3,6 +3,8 @@ package internal
 import (
 	"slices"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
@@ -17,14 +19,14 @@ import (
 // baked texture already carries its id and needs nothing, an inline run was
 // baked into one when the frame was recorded, and a path is what the cache is
 // for.
-func (t *translator) ensureTexture(f *frame, descr TextureDescr) types.TextureID {
+func (t *translator) ensureTexture(f *frame, descr descriptors.TextureDescr) types.TextureID {
 	if id := descr.ID(); id != 0 {
 		return id
 	}
 	if descr.Path() == "" {
 		return 0
 	}
-	return t.textures.Get(f.k, assets.Descr[TextureDescrParams](descr), f.fsys, t.textureUserData(f)).id
+	return t.textures.Get(f.k, assets.Descr[descriptors.TextureDescrParams](descr), f.fsys, t.textureUserData(f)).id
 }
 
 // textureUserData is what the texture loader is handed on every call. The op queue
@@ -71,10 +73,10 @@ func (t *translator) shaderLayout(backend Backend, id types.ShaderID) shader.Sha
 // returns zero and no error, and the caller drops the draw on the zero id
 // exactly as it did before.
 func (t *translator) ensurePipeline(
-	backend Backend, shaderID types.ShaderID, label string, m *MeshDescr, state types.MaterialState, pass PassDescr,
+	backend Backend, shaderID types.ShaderID, label string, m *descriptors.MeshDescr, state types.MaterialState, pass descriptors.PassDescr,
 ) (types.PipelineID, error) {
-	stride := MeshStride(m)
-	layout, ok := VertexLayoutKeyOf(MeshLayout(m))
+	stride := descriptors.MeshStride(m)
+	layout, ok := descriptors.VertexLayoutKeyOf(descriptors.MeshLayout(m))
 	if !ok {
 		return 0, nil
 	}
@@ -89,7 +91,7 @@ func (t *translator) ensurePipeline(
 	// (DepthAuto allocates one, DepthTarget requires one, and the enum holds no
 	// other), so what varies is whether the pass has a depth attachment at all.
 	noDepth := pass.Depth.IsNone()
-	const depthFormat = FormatDepth32F
+	const depthFormat = descriptors.FormatDepth32F
 	k := pipelineKey{
 		shader: shaderID, topology: m.Topology(), state: state,
 		colorFormat: colorFormat, depthFormat: depthFormat, noColor: noColor, noDepth: noDepth, layout: layout,
@@ -103,13 +105,13 @@ func (t *translator) ensurePipeline(
 	// validation of any kind, the software rasterizer keeps an unsupplied
 	// input's zero value, and WebGPU itself fills the components a format does
 	// not supply with (0, 0, 0, 1).
-	if err := CheckVertexInterface(label, t.shaderLayout(backend, shaderID), MeshLayout(m)); err != nil {
+	if err := CheckVertexInterface(label, t.shaderLayout(backend, shaderID), descriptors.MeshLayout(m)); err != nil {
 		t.pipelines[k] = 0
 		return 0, err
 	}
-	attrs := make([]VertexAttribute, len(MeshLayout(m)))
-	for i := range MeshLayout(m) {
-		attrs[i] = VertexAttribute{Offset: VertexAttrOffset(&(MeshLayout(m)[i])), Type: VertexAttrTyp(&(MeshLayout(m)[i])), Location: i}
+	attrs := make([]descriptors.VertexAttribute, len(descriptors.MeshLayout(m)))
+	for i := range descriptors.MeshLayout(m) {
+		attrs[i] = descriptors.VertexAttribute{Offset: descriptors.VertexAttrOffset(&(descriptors.MeshLayout(m)[i])), Type: descriptors.VertexAttrTyp(&(descriptors.MeshLayout(m)[i])), Location: i}
 	}
 	id, err := backend.NewPipeline(PipelineDesc{
 		Shader:        shaderID,
@@ -157,18 +159,18 @@ func (t *translator) ensurePipeline(
 // material missing a storage binding, so a draw dropped here takes their
 // diagnostics with it - and it would take them on exactly the frame a caller
 // first writes the mistake.
-func (t *translator) targetFormat(backend Backend, pass PassDescr) TextureFormat {
+func (t *translator) targetFormat(backend Backend, pass descriptors.PassDescr) descriptors.TextureFormat {
 	if pass.Target.IsNone() {
 		return 0
 	}
 	if pass.Target.IsScreen() {
-		return FormatScreen.Resolve()
+		return descriptors.FormatScreen.Resolve()
 	}
 	texture, _, _, _ := pass.Target.Texture()
 	if format, ok := backend.TextureFormat(texture); ok {
 		return format
 	}
-	return FormatScreen.Resolve()
+	return descriptors.FormatScreen.Resolve()
 }
 
 func (t *translator) ensureSampler(backend Backend, desc types.SamplerDesc) types.SamplerID {
@@ -187,7 +189,7 @@ func (t *translator) releaseCachedResource(f *frame, path string) {
 	// A path names exactly one texture entry, because TextureWithResource is the
 	// only way one is made and it takes no options - so the key a Free names is
 	// the key a Get made, and the report that entry filed is forgotten with it.
-	t.textures.Free(f.k, assets.Descr[TextureDescrParams](TextureWithResource(path)), t.textureUserData(f))
+	t.textures.Free(f.k, assets.Descr[descriptors.TextureDescrParams](descriptors.TextureWithResource(path)), t.textureUserData(f))
 	// A shader cannot be freed by key, because three things break the probe of
 	// one descriptor: a path may root several variants, a path may be an
 	// included source of modules rooted elsewhere, and a ShaderWithText shader
