@@ -1,6 +1,8 @@
 package types
 
 import (
+	"slices"
+
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/libs/m"
 )
@@ -13,10 +15,13 @@ import (
 // moved at least its own minimum extent. It lists a marked entry in the grid
 // by its path box. This pass runs once over the marked entries, before the
 // discrete walk, and the Sensor flag picks what a path test keeps. A Sensor
-// keeps every Hit, in contacts-sensors.go. A solid Body keeps its first Hit
-// that can stop it, and is stopped there: the Contact it writes carries the
-// Hit's T, and Solve moves a Dynamic body back to where it stood at T before
-// it solves anything.
+// keeps every Hit, in contacts-sensors.go. A solid Body is stopped at its first
+// Hit that can stop it: the Contact it writes carries the Hit's T, and Solve
+// moves a Dynamic body back to where it stood at T before it solves anything.
+// It keeps every later Hit that could stop it too, held out of the list,
+// because a Kinematic body is never stopped and Detect cannot tell one: Solve
+// carries each Dynamic body a Kinematic one's path met, and writes its
+// Contact, and a Dynamic mover's are dropped unseen.
 //
 // A target that is not marked is taken where the tick left it. A target that
 // moved into the path during the tick counts as already there, which is the
@@ -87,10 +92,39 @@ type partner struct {
 	ok   bool
 }
 
+// heldHit is one Hit of a fast solid Body's own path past where it stopped,
+// on a Body index target that is not marked: the Contact it would be, held
+// out of the list, because only Solve can tell whether it is one. A Dynamic
+// mover stopped before it, so it is not; a Kinematic mover is never stopped,
+// so it is, and it carries a Dynamic target (carryHeld).
+type heldHit struct {
+	// mover is the fast Body whose path met the target.
+	mover ecs.Entity
+	made  Contact
+	aux   contactAux
+}
+
+// parties is the mover's slot, the target and the target's slot.
+func (h *heldHit) parties() (moverSlot int32, target ecs.Entity, targetSlot int32) {
+	if h.made.A == h.mover {
+		return h.aux.slotA, h.made.B, h.aux.slotB
+	}
+	return h.aux.slotB, h.made.A, h.aux.slotA
+}
+
+// hold keeps a Hit of a fast solid Body's own path past its stop, the Contact
+// made as stopAt makes one and nothing written: the app sees it only once
+// Solve has made it one (carryHeld). It is held for every mover, since
+// Detect cannot tell kinds.
+func (c *Contacts) hold(body *entry, slot int32, delta m.Vec2d, hit Hit, other *entry, otherSlot int32) {
+	made, aux := stopContact(body, slot, delta, hit, other, otherSlot, m.Vec2d{})
+	c.held = append(c.held, heldHit{mover: body.entity, made: made, aux: aux})
+}
+
 // pathPass is Detect's one pass over the marked entries of the Body index: a
 // moving Sensor is swept, and a fast solid Body is stopped at the first thing
-// its path meets and reports the Sensors that did not move which it crossed on
-// the way.
+// its path meets, holds the Bodies its path meets past it, and reports the
+// Sensors that did not move which it crossed on the way.
 //
 // It runs before the discrete walk, so what it writes sits at the front of the
 // list: a moving Sensor's entries together and in order of T, then each
@@ -123,9 +157,9 @@ func (c *Contacts) pathPass(bodies *BodyIndex, statics *StaticIndex, jointed *Jo
 }
 
 // findStop is the solid half of the path pass: one fast solid Body, at slot,
-// Probed along its path through both indices, and its first Hit that can stop
-// it found; and the marked Bodies its path box meets, each tested along the
-// pair's relative motion.
+// Probed along its path through both indices, its first Hit that can stop it
+// found and every later one on a Body held; and the marked Bodies its path box
+// meets, each tested along the pair's relative motion.
 //
 // The Shape is held at its end angle, so the path is its end pose moved back
 // along the Position's chord: a circle's centre by Probe, anything else by the
@@ -198,16 +232,24 @@ func (c *Contacts) findStop(
 	c.crossSensors(bodies, statics, &path, slot, split)
 
 	// Each run is ordered by T, so the first Hit that stops in each is that
-	// run's answer, and the nearer of the two is the stop.
+	// run's answer, and the nearer of the two is the stop. Every later Hit of
+	// the Body index's run that would stop the Body is held (hold): Detect
+	// cannot tell a Kinematic mover, which is never stopped, from a Dynamic
+	// one, so only Solve can say whether the path goes on past the stop. A
+	// Static past the stop is never carried, so the static run is not held.
 	first := firstStop{slot: slot, t: 2, otherSlot: -1, meeting: -1}
 	for at := range split {
 		candidate := c.probes[at]
 		within, found := bodies.entryAt(c.probeSlots[at])
-		if !found.path && stops(body, candidate, found, jointed) &&
-			c.enters(&path, &path, bodies, statics, split, candidate, found, within.world(found)) {
-			first.t, first.hit, first.other, first.otherSlot = candidate.T, candidate, found, c.probeSlots[at]
-			break
+		if found.path || !stops(body, candidate, found, jointed) ||
+			!c.enters(&path, &path, bodies, statics, split, candidate, found, within.world(found)) {
+			continue
 		}
+		if first.t > 1 {
+			first.t, first.hit, first.other, first.otherSlot = candidate.T, candidate, found, c.probeSlots[at]
+			continue
+		}
+		c.hold(body, slot, delta, candidate, found, c.probeSlots[at])
 	}
 	for _, candidate := range c.probes[split:] {
 		if candidate.T >= first.t {
@@ -216,6 +258,9 @@ func (c *Contacts) findStop(
 		found, _, ok := statics.lookup(candidate.Entity)
 		if ok && stops(body, candidate, found, jointed) &&
 			c.enters(&path, &path, bodies, statics, split, candidate, found, statics.index.world(found)) {
+			if first.t <= 1 {
+				c.hold(body, slot, delta, first.hit, first.other, first.otherSlot)
+			}
 			first.t, first.hit, first.other, first.otherSlot = candidate.T, candidate, found, -1
 			break
 		}
@@ -324,6 +369,11 @@ func (c *Contacts) writeStops(bodies *BodyIndex, statics *StaticIndex, jointed *
 		if first.meeting < 0 {
 			at = c.stopAt(body, first.slot, delta, first.hit, first.other, first.otherSlot, m.Vec2d{})
 		} else {
+			// A meeting came sooner than the first Hit of the Body's own
+			// path, which is held like every Hit past the stop.
+			if first.other != nil && first.otherSlot >= 0 {
+				c.hold(body, first.slot, delta, first.hit, first.other, first.otherSlot)
+			}
 			met := &c.meetings[first.meeting]
 			if met.at < 0 {
 				a, b := &moving.entries[met.a], &moving.entries[met.b]
@@ -433,6 +483,20 @@ func (c *Contacts) stopAt(
 	body *entry, slot int32, delta m.Vec2d,
 	hit Hit, other *entry, otherSlot int32, otherDelta m.Vec2d,
 ) int32 {
+	made, aux := stopContact(body, slot, delta, hit, other, otherSlot, otherDelta)
+	at, wasTouching := c.prevLookup.find(made.A, made.B)
+	c.carry(&made, at, wasTouching)
+	written := int32(len(c.entries))
+	c.append(made, aux)
+	return written
+}
+
+// stopContact is the Contact stopAt writes, before the previous tick's entry
+// for the pair is carried into it.
+func stopContact(
+	body *entry, slot int32, delta m.Vec2d,
+	hit Hit, other *entry, otherSlot int32, otherDelta m.Vec2d,
+) (Contact, contactAux) {
 	stopped := m.Vec2d{X: body.transform.TX, Y: body.transform.TY}.Add(delta.MulS(hit.T - 1))
 	back := otherDelta.MulS(hit.T - 1)
 	target := m.Vec2d{X: other.transform.TX, Y: other.transform.TY}.Add(back)
@@ -462,12 +526,7 @@ func (c *Contacts) stopAt(
 	made.Points[0] = point
 	made.Friction = body.shape.Friction * other.shape.Friction
 	made.Restitution = body.shape.Restitution * other.shape.Restitution
-
-	at, wasTouching := c.prevLookup.find(made.A, made.B)
-	c.carry(&made, at, wasTouching)
-	written := int32(len(c.entries))
-	c.append(made, aux)
-	return written
+	return made, aux
 }
 
 // placeStop records a Body's stop at t, by the Contact at at, with the Body's
@@ -631,6 +690,102 @@ func (c *Contacts) backToStops(dynamics *ecs.Get[Dynamic], places *ecs.Set[Posit
 		if target, ok := places.Ref(other); ok {
 			target.Current = target.Current.Add(carrier.Current.Sub(carrier.Previous).MulS(1 - s.t))
 		}
+	}
+}
+
+// carryHeld is Solve's half of the Hits the path pass held past each fast
+// solid Body's stop, and runs after backToStops. Only Solve reads Dynamic, so
+// only Solve decides what each one is:
+//
+//   - a Dynamic mover stopped at its first Hit, so the Hits past it are not
+//     touches at all, and nothing of them is written or moved;
+//   - a Kinematic mover is never stopped, so each Dynamic body its path met
+//     is carried from its end pose by (1 − T)·d_K, as the first one is, and
+//     the Hit is written as its Contact: T the Hit's, one point and a Depth
+//     of 0. A body two Kinematic bodies met is carried by each;
+//   - a Kinematic or Static target is not carried, and nothing is written.
+//
+// A pair the discrete walk already wrote, the target touching the mover where
+// it stopped, keeps that Contact and is carried unless a filter dropped or
+// ignored it.
+func (c *Contacts) carryHeld(dynamics *ecs.Get[Dynamic], places *ecs.Set[Position]) {
+	c.carried = c.carried[:0]
+	for i := range c.held {
+		held := &c.held[i]
+		if _, dynamic := dynamics.Of(held.mover); dynamic {
+			continue
+		}
+		_, target, _ := held.parties()
+		if _, dynamic := dynamics.Of(target); !dynamic {
+			continue
+		}
+		carrier, ok := places.Of(held.mover)
+		if !ok {
+			continue
+		}
+		if at, written := c.lookup.find(held.made.A, held.made.B); written && int(at) < c.current {
+			if entry := &c.entries[at]; entry.Dropped() || entry.Ignored() {
+				continue
+			}
+		} else {
+			c.carried = append(c.carried, int32(i))
+		}
+		if place, ok := places.Ref(target); ok {
+			place.Current = place.Current.Add(carrier.Current.Sub(carrier.Previous).MulS(1 - held.made.T))
+		}
+	}
+	if len(c.carried) > 0 {
+		c.writeCarried()
+	}
+}
+
+// writeCarried writes the carried Hits as Contacts at the end of the current
+// run, where the Ended and cached runs begin, which move up behind them. A
+// carried pair that was touching on an earlier tick has an Ended or a cached
+// entry already, which gives way: the pair touches again, and carry takes its
+// phase and its Impulses from the previous tick's entry as for any Contact.
+// The pair table is rebuilt over the result, as the sleep System's rewrite
+// rebuilds it. It runs only on a tick a Kinematic body carried something past
+// its first Hit.
+func (c *Contacts) writeCarried() {
+	current, visible := c.current, c.visible
+
+	// The earlier entries that give way, by their place in the tail.
+	c.givingWay = c.givingWay[:0]
+	for _, i := range c.carried {
+		held := &c.held[i]
+		if at, found := c.lookup.find(held.made.A, held.made.B); found && int(at) >= current {
+			c.givingWay = append(c.givingWay, at-int32(current))
+		}
+	}
+
+	c.carriedTail = append(c.carriedTail[:0], c.entries[current:]...)
+	c.carriedAux = append(c.carriedAux[:0], c.aux[current:]...)
+	c.entries, c.aux = c.entries[:current], c.aux[:current]
+	for _, i := range c.carried {
+		held := &c.held[i]
+		made := held.made
+		at, wasTouching := c.prevLookup.find(made.A, made.B)
+		c.carry(&made, at, wasTouching)
+		c.entries = append(c.entries, made)
+		c.aux = append(c.aux, held.aux)
+	}
+	c.current = len(c.entries)
+	c.visible = c.current + visible - current
+	for i := range c.carriedTail {
+		if slices.Contains(c.givingWay, int32(i)) {
+			if i < visible-current {
+				c.visible--
+			}
+			continue
+		}
+		c.entries = append(c.entries, c.carriedTail[i])
+		c.aux = append(c.aux, c.carriedAux[i])
+	}
+
+	c.lookup.clear()
+	for i := range c.entries {
+		c.lookup.insert(c.entries[i].A, c.entries[i].B, int32(i))
 	}
 }
 

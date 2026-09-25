@@ -6,7 +6,9 @@ import (
 
 	"github.com/dvoyni/cog/bundles/ecs"
 	"github.com/dvoyni/cog/bundles/ecsphysics2d"
+	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/app"
 )
 
 // A fast Kinematic body carries what it hits (continuous-collision.md § Solve:
@@ -182,5 +184,323 @@ func TestPinnedAKinematicTargetClosingOnTheBody(t *testing.T) {
 					phase, i, at, by)
 			}
 		}
+	}
+}
+
+// A fast Kinematic body carries every Dynamic body on its path, not just the
+// first (continuous-collision.md § Detect: one path pass, § Solve: back to
+// T). Detect cannot tell a Kinematic mover from a Dynamic one, so it keeps
+// every Hit of a fast solid Body's path, and Solve, which reads Dynamic,
+// decides: a Dynamic mover stops at its first Hit and the rest stop nothing,
+// and a Kinematic mover carries each Dynamic body it meets by (1 − T)·d_K.
+
+// carriedBall is one ball a paddle's path meets, where it rests, the T the
+// paddle meets it at, and where the carry leaves it.
+type carriedBall struct {
+	from, vel m.Vec2d
+	t         float64
+	at        m.Vec2d
+}
+
+// checkCarriedAll runs the scene from eight starting points, each Shape, and
+// both orders of spawning: extra spawns whatever else the scene holds, the
+// paddle goes x 10 → 0, and every ball is one stopping Contact with it at its
+// own T and stands where the paddle carried it.
+func checkCarriedAll(t *testing.T, balls []carriedBall, extra func(*harness, m.Vec2d)) {
+	t.Helper()
+	for _, shape := range carryShapes {
+		for _, paddleFirst := range []bool{false, true} {
+			order := "balls first"
+			if paddleFirst {
+				order = "paddle first"
+			}
+			t.Run(shape.name+", "+order, func(t *testing.T) {
+				for phase := range phases {
+					h := newHarness(t)
+					shift := m.Vec2d{X: 10 * float64(phase) / phases, Y: 3.7 * float64(phase) / phases}
+					if extra != nil {
+						extra(h, shift)
+					}
+					var k ecs.Entity
+					spawnPaddle := func() {
+						k = paddle(t, h, shape.shape, m.Vec2d{X: 10}.Add(shift), m.Vec2d{X: -meetSpeed})
+					}
+					if paddleFirst {
+						spawnPaddle()
+					}
+					ds := make([]ecs.Entity, len(balls))
+					for i, ball := range balls {
+						ds[i] = thrown(t, h, shape.shape, ball.from.Add(shift), ball.vel)
+					}
+					if !paddleFirst {
+						spawnPaddle()
+					}
+					h.frame(t)
+
+					list := h.contacts(t)
+					for i, ball := range balls {
+						entries := meetingOf(list, ds[i], k)
+						if len(entries) != 1 {
+							t.Fatalf("phase %d: the ball from %v is %d entries with the paddle, want one",
+								phase, ball.from, len(entries))
+						}
+						entry := entries[0]
+						if entry.Sensor || entry.Count != 1 || entry.Points[0].Depth != 0 ||
+							math.Abs(entry.T-ball.t) > shape.tolerance {
+							t.Errorf("phase %d: the ball from %v is not a stop at T %.3f: "+
+								"Sensor %v, %d point(s), Depth %.6f, T %.9f",
+								phase, ball.from, ball.t, entry.Sensor, entry.Count, entry.Points[0].Depth, entry.T)
+						}
+						if at, want := h.read(t, ds[i]).Place.Current, ball.at.Add(shift); at.Distance(want) > shape.tolerance {
+							t.Errorf("phase %d: the ball from %v stands at %v, want %v", phase, ball.from, at, want)
+						}
+					}
+					if at, want := h.read(t, k).Place.Current, shift; at.Distance(want) > shape.tolerance {
+						t.Errorf("phase %d: the paddle stands at %v, want %v", phase, at, want)
+					}
+				}
+			})
+		}
+	}
+}
+
+// Balls of radius 1 rest at x = 7 and x = 3, and the Kinematic paddle goes
+// 10 → 0. It meets the first at T = 0.1, standing at 9, and carries it by
+// 0.9·(−10) to −2; it meets the second at T = 0.5, standing at 5, and carries
+// it by 0.5·(−10) to −2 as well. Keeping only the first Hit, the paddle and
+// the carried ball passed straight through the second.
+func TestAFastKinematicPaddleCarriesEveryBallOnItsPath(t *testing.T) {
+	checkCarriedAll(t, []carriedBall{
+		{from: m.Vec2d{X: 7}, t: 0.1, at: m.Vec2d{X: -2}},
+		{from: m.Vec2d{X: 3}, t: 0.5, at: m.Vec2d{X: -2}},
+	}, nil)
+}
+
+// A Static wall at x = 7 is the paddle's first Hit, which moves neither side,
+// and the ball resting at x = 3 behind it is carried all the same: met at
+// T = 0.5, carried to −2.
+func TestAFastKinematicPaddleCarriesABallBehindAWall(t *testing.T) {
+	checkCarriedAll(t, []carriedBall{
+		{from: m.Vec2d{X: 3}, t: 0.5, at: m.Vec2d{X: -2}},
+	}, func(h *harness, shift m.Vec2d) {
+		h.spawn(t, spawnRequest{
+			Kind:  kindShapedStatic,
+			Place: ecsphysics2d.Position{Current: m.Vec2d{X: 7}.Add(shift)},
+			Shape: wallShape(),
+		})
+	})
+}
+
+// A meeting that comes sooner than the paddle's first Hit on its own path
+// does not hide that Hit. A fast ball goes x 4 → 14 and meets the paddle
+// along their relative motion at T = 0.2, where it stands at 6, and is
+// carried by 0.8·(−10) to −2. A ball resting at x = 1.5 is the paddle's own
+// first Hit, at T = 0.65, and is carried by 0.35·(−10) to −2.
+func TestAFastKinematicPaddleCarriesABallBehindOneItMet(t *testing.T) {
+	checkCarriedAll(t, []carriedBall{
+		{from: m.Vec2d{X: 4}, vel: m.Vec2d{X: meetSpeed}, t: 0.2, at: m.Vec2d{X: -2}},
+		{from: m.Vec2d{X: 1.5}, t: 0.65, at: m.Vec2d{X: -2}},
+	}, nil)
+}
+
+// A Dynamic mover is unchanged: a fast Dynamic ball going 10 → 0 with balls
+// resting at x = 7 and x = 3 stops at the first, at T = 0.1 and x = 9. The
+// second is past where it stopped, so no Contact names it, neither in the
+// list a filter System reads nor in the one a reacting System reads, and it
+// has not moved.
+func TestAFastDynamicBallStopsAtTheFirstOfTwoTargets(t *testing.T) {
+	for _, shape := range carryShapes {
+		t.Run(shape.name, func(t *testing.T) {
+			for phase := range phases {
+				h := newHarness(t)
+				shift := m.Vec2d{X: 10 * float64(phase) / phases, Y: 3.7 * float64(phase) / phases}
+				mover := thrown(t, h, shape.shape, m.Vec2d{X: 10}.Add(shift), m.Vec2d{X: -meetSpeed})
+				first := thrown(t, h, shape.shape, m.Vec2d{X: 7}.Add(shift), m.Vec2d{})
+				second := thrown(t, h, shape.shape, m.Vec2d{X: 3}.Add(shift), m.Vec2d{})
+				filtered := false
+				h.game.filter = func(entry *ecsphysics2d.Contact) {
+					if entry.Other(second) == mover {
+						filtered = true
+					}
+				}
+				h.frame(t)
+				if filtered {
+					t.Errorf("phase %d: a filter System saw a Contact with the second target", phase)
+				}
+
+				list := h.contacts(t)
+				if stop, found := between(list, mover, first); !found || math.Abs(stop.T-0.1) > shape.tolerance {
+					t.Errorf("phase %d: the first target is no stop at T 0.1: found %v, T %.9f", phase, found, stop.T)
+				}
+				if entry, found := between(list, mover, second); found {
+					t.Errorf("phase %d: the second target, past the stop, reports a Contact at T %.6f", phase, entry.T)
+				}
+				if at, want := h.read(t, mover).Place.Current, (m.Vec2d{X: 9}).Add(shift); at.Distance(want) > shape.tolerance {
+					t.Errorf("phase %d: the mover stands at %v, want where it stopped, %v", phase, at, want)
+				}
+				if at, want := h.read(t, second).Place.Current, (m.Vec2d{X: 3}).Add(shift); at != want {
+					t.Errorf("phase %d: the second target stands at %v, want %v", phase, at, want)
+				}
+			}
+		})
+	}
+}
+
+// Balls asleep on the paddle's path are carried too, and woken: the sleep
+// System wakes a sleeper a Kinematic mover's path meets past its first Hit,
+// as it wakes one the first Hit names, so each ball carried to −2 is solved
+// with the paddle and goes on in front of it the next tick instead of being
+// passed through. The two balls were carried to one place, so the next tick
+// also pushes them apart, and one may lean a little into the paddle: in front
+// of it is its centre short of the paddle's front face.
+func TestAFastKinematicPaddleCarriesAndWakesSleepingBalls(t *testing.T) {
+	h, _ := newSleepHarness(t, m.Vec2d{}, ecsphysics2d.Sleep{IdleSpeed: 0.1, Time: napTime})
+	ball := ecsphysics2d.NewCircleShape(1, m.Vec2d{})
+	balls := []ecs.Entity{
+		thrown(t, h, ball, m.Vec2d{X: 7}, m.Vec2d{}),
+		thrown(t, h, ball, m.Vec2d{X: 3}, m.Vec2d{}),
+	}
+	settle(t, h, balls, 200)
+	k := paddle(t, h, ball, m.Vec2d{X: 10}, m.Vec2d{X: -meetSpeed})
+	h.frame(t)
+	for _, d := range balls {
+		if at := h.read(t, d).Place.Current; at.Distance(m.Vec2d{X: -2}) > 1e-9 {
+			t.Errorf("the ball %v stands at %v, want carried to x = -2", d, at)
+		}
+		if h.asleep(t, d) {
+			t.Errorf("the ball %v the paddle carried still sleeps", d)
+		}
+	}
+	h.frame(t)
+	by := h.read(t, k).Place.Current.X
+	for _, d := range balls {
+		if at := h.read(t, d).Place.Current.X; at > by-1 {
+			t.Errorf("a tick later the ball %v stands at x = %.6f, not in front of the paddle at %.6f", d, at, by)
+		}
+	}
+}
+
+// A carried pair past the first Hit that touched on the tick before is one
+// entry that Continues, not an Ended one beside a new one: Detect held the
+// Hit, so it did not find the pair again and closed it Ended, and the Contact
+// Solve writes for the carry takes the Ended entry's place. The paddle
+// carries both balls on the first tick; before the second, both are set
+// down at rest on its path again, at x = −3 and −7, and the paddle, going
+// 0 → −10, meets them at T = 0.1 and 0.5.
+func TestACarriedPairThatTouchedTheTickBeforeContinues(t *testing.T) {
+	h, _ := newSleepHarness(t, m.Vec2d{}, ecsphysics2d.Sleep{})
+	ball := ecsphysics2d.NewCircleShape(1, m.Vec2d{})
+	k := paddle(t, h, ball, m.Vec2d{X: 10}, m.Vec2d{X: -meetSpeed})
+	balls := []ecs.Entity{
+		thrown(t, h, ball, m.Vec2d{X: 7}, m.Vec2d{}),
+		thrown(t, h, ball, m.Vec2d{X: 3}, m.Vec2d{}),
+	}
+	h.frame(t)
+	for i, x := range []float64{-3, -7} {
+		h.setVelocity(t, balls[i], ecsphysics2d.Velocity{})
+		at := m.Vec2d{X: x}
+		h.kernel.ExecuteCommand[placeCmd](placeRequest{Entity: balls[i], Place: ecsphysics2d.Position{Current: at, Previous: at}})
+	}
+	h.frame(t)
+
+	list := h.contacts(t)
+	for i, want := range []float64{0.1, 0.5} {
+		entries := meetingOf(list, balls[i], k)
+		if len(entries) != 1 {
+			t.Fatalf("ball %d is %d entries with the paddle, want one", i, len(entries))
+		}
+		if entry := entries[0]; entry.Phase != ecsphysics2d.PhaseContinuing || math.Abs(entry.T-want) > 1e-9 {
+			t.Errorf("ball %d's entry is phase %v at T %.9f, want Continuing at T %.3f", i, entry.Phase, entry.T, want)
+		}
+		if at := h.read(t, balls[i]).Place.Current; at.Distance(m.Vec2d{X: -12}) > 1e-9 {
+			t.Errorf("ball %d stands at %v, want carried to x = -12", i, at)
+		}
+	}
+}
+
+// resetter is an app that sets Bodies back where they started before every
+// tick, so a scene repeats the same tick for as long as it runs.
+type resetter struct{ resets []reset }
+
+type reset struct {
+	e        ecs.Entity
+	at       m.Vec2d
+	velocity m.Vec2d
+}
+
+type resetOnUpdate kernel.Subscription[app.UpdateEvent]
+
+func (*resetter) Name() kernel.PluginName { return "physicstestresetter" }
+
+func (*resetter) Dependencies() []kernel.PluginName {
+	return []kernel.PluginName{ecs.Name, ecsphysics2d.Name}
+}
+
+func (r *resetter) Register(registrar *kernel.Registrar, _ any) error {
+	registrar.Subscribe[resetOnUpdate](ecs.ToHandler[app.UpdateEvent](registrar, func(
+		places *ecs.Set[ecsphysics2d.Position], velocities *ecs.Set[ecsphysics2d.Velocity],
+	) {
+		for _, each := range r.resets {
+			if place, ok := places.Ref(each.e); ok {
+				*place = ecsphysics2d.Position{Current: each.at, Previous: each.at}
+			}
+			if velocity, ok := velocities.Ref(each.e); ok {
+				*velocity = ecsphysics2d.Velocity{Linear: each.velocity}
+			}
+		}
+	})).Before[ecsphysics2d.IntegrateOnUpdate]()
+	return nil
+}
+
+// TestTheCarriesSitOnTheEnginesAllocationLine is the step's allocation claim
+// over a scene where fast Kinematic paddles carry balls past their first Hit
+// every tick: lanes of a paddle going 10 → 0 over balls resting at 7, 3 and
+// −1, all set back before each tick. Each pair touched the tick before, so
+// every carried Contact also takes an Ended entry's place. It measures the
+// held Hits, the sleep System's reading of them, and Solve's carry and
+// writing, none of which the other scenes on the line reach.
+func TestTheCarriesSitOnTheEnginesAllocationLine(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
+	const ticks = 4_000
+
+	measure := func(n int) (float64, int) {
+		r := &resetter{}
+		h := newHarnessWithPlugins(t, nil, uint32(8*max(n, 1)), r)
+		ball := ecsphysics2d.NewCircleShape(1, m.Vec2d{})
+		for i := range n {
+			y := 4 * float64(i)
+			start := m.Vec2d{X: 10, Y: y}
+			k := paddle(t, h, ball, start, m.Vec2d{X: -meetSpeed})
+			r.resets = append(r.resets, reset{e: k, at: start, velocity: m.Vec2d{X: -meetSpeed}})
+			for _, x := range []float64{7, 3, -1} {
+				at := m.Vec2d{X: x, Y: y}
+				r.resets = append(r.resets, reset{e: thrown(t, h, ball, at, m.Vec2d{}), at: at})
+			}
+		}
+		h.frames(t, 100)
+		mallocs := allocationsDuring(func() {
+			for range ticks {
+				h.frame(t)
+			}
+		})
+		carried := 0
+		for _, entry := range h.contacts(t) {
+			if entry.T < 1 && !entry.Sensor && entry.Phase == ecsphysics2d.PhaseContinuing {
+				carried++
+			}
+		}
+		return float64(mallocs) / ticks, carried
+	}
+
+	empty, _ := measure(0)
+	full, carried := measure(64)
+	t.Logf("objects a step: %.3f with no Bodies, %.3f at N=64 with %d carried Contacts a tick", empty, full, carried)
+	if carried != 3*64 {
+		t.Fatalf("the measured scene carried %d balls a tick, want %d", carried, 3*64)
+	}
+	if full-empty > 0.05 {
+		t.Errorf("carrying past the first Hit costs %.3f objects a tick, want none", full-empty)
 	}
 }

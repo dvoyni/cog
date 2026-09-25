@@ -100,8 +100,11 @@ func (c *Contacts) bytes() uintptr {
 //
 // The path pass's scratch goes with it: the stopped Bodies' copies' world
 // caches, the run a fast Body's Shape is Probed in, and the earliest stops,
-// meetings, partners and Sensor crossings it finds, which only detection reads. The run of stops is the one piece clipped rather than released,
-// because Solve reads it after Detect within the same tick.
+// meetings, partners and Sensor crossings it finds, which only detection
+// reads. The run of stops is clipped rather than released, because Solve
+// reads it after Detect within the same tick, and so is the run of Hits held
+// past each stop, which the sleep System and Solve read; the scratch Solve
+// writes the carried ones with is released.
 //
 // The previous tick's step stays, because it is not scratch: the warm start
 // scales the cached Impulses by it, and dropping it would change the next
@@ -110,7 +113,8 @@ func (c *Contacts) releaseScratch() {
 	c.probes, c.probeSlots = nil, nil
 	c.stopWorld, c.mover = nil, nil
 	c.firsts, c.meetings, c.partners, c.crossings = nil, nil, nil, nil
-	c.stops = clip(c.stops)
+	c.stops, c.held = clip(c.stops), clip(c.held)
+	c.carried, c.carriedTail, c.carriedAux, c.givingWay = nil, nil, nil, nil
 	s := &c.solver
 	s.solved, s.slotDense, s.rows = nil, nil, nil
 	s.joints.rows = nil
@@ -130,6 +134,10 @@ func (c *Contacts) scratchBytes() uintptr {
 		uintptr(cap(c.meetings))*unsafe.Sizeof(meeting{}) +
 		uintptr(cap(c.partners))*unsafe.Sizeof(partner{}) +
 		uintptr(cap(c.crossings))*unsafe.Sizeof(crossing{}) +
+		uintptr(cap(c.held))*unsafe.Sizeof(heldHit{}) +
+		uintptr(cap(c.carried)+cap(c.givingWay))*unsafe.Sizeof(int32(0)) +
+		uintptr(cap(c.carriedTail))*unsafe.Sizeof(Contact{}) +
+		uintptr(cap(c.carriedAux))*unsafe.Sizeof(contactAux{}) +
 		uintptr(cap(s.solved)+cap(s.slotDense))*unsafe.Sizeof(int32(0)) +
 		uintptr(cap(s.rows))*unsafe.Sizeof(solverBody{}) +
 		uintptr(cap(s.joints.rows))*unsafe.Sizeof(jointRow{}) +

@@ -127,16 +127,21 @@ func ProcessIslands(
 			return
 		}
 		s.wakeAll()
-		s.applyWakes(rests, forces, untag)
+		s.applyWakes(s.waking, rests, forces, untag)
 		contacts.rewrite(nil, rests, places)
 		s.release()
 		return
 	}
 
 	s.findWakes(contacts, asleep, joints, rests, velocities, wakes, gravity)
-	s.applyWakes(rests, forces, untag)
+	s.applyWakes(s.waking, rests, forces, untag)
 
 	s.build(contacts, awake, joints, rests, velocities, idleSpeed, gravity, h)
+	if len(contacts.held) > 0 {
+		woken := len(s.waking)
+		s.touchHeld(contacts, rests)
+		s.applyWakes(s.waking[woken:], rests, forces, untag)
+	}
 	falling := s.fallAsleep(contacts, rests, forces, velocities, places, tag, sleepTime)
 
 	if falling > 0 {
@@ -334,8 +339,8 @@ func (s *islands) wakeAll() {
 // its idle time goes back to zero, and a Force the walk cleared this tick is
 // put back, so the tick it wakes spends it. What the System left in it stays,
 // for the rewrite to check its quiet Contacts against.
-func (s *islands) applyWakes(rests *ecs.Set[Rest], forces *ecs.Set[Force], untag *ecs.Remove[Sleeping]) {
-	for _, id := range s.waking {
+func (s *islands) applyWakes(ids []int32, rests *ecs.Set[Rest], forces *ecs.Set[Force], untag *ecs.Remove[Sleeping]) {
+	for _, id := range ids {
 		record := &s.records[id]
 		for _, e := range s.members[record.members : record.members+record.memberCount] {
 			rest, ok := rests.Ref(e)
@@ -425,6 +430,33 @@ func (s *islands) build(
 		a := s.jointParty(it.Joint.A, rests, velocities)
 		b := s.jointParty(it.Joint.B, rests, velocities)
 		s.join(a, b, rests)
+	}
+}
+
+// touchHeld is what the Hits the path pass held past each fast solid Body's
+// stop do to the Islands, once build has said which movers are Dynamic: a
+// Dynamic mover stopped before any of them, so they touch nothing, and a
+// Kinematic one is never stopped, so Solve carries each Dynamic body its path
+// met (carryHeld). A carried Body is kept awake, as one touching a Kinematic
+// body is, and a carried sleeper's Island wakes, as it wakes for a Contact
+// naming it, so that Solve moves and solves an awake Body. Only the sleep
+// System and Solve read Dynamic, so the held Hits are written as Contacts by
+// Solve and are read here from where Detect held them.
+func (s *islands) touchHeld(contacts *Contacts, rests *ecs.Set[Rest]) {
+	awake := contacts.awakeSlots
+	for i := range contacts.held {
+		held := &contacts.held[i]
+		moverSlot, target, targetSlot := held.parties()
+		if s.contactParty(held.mover, moverSlot, rests) != partyKinematic {
+			continue
+		}
+		if targetSlot >= awake {
+			s.wakeEntity(target, rests)
+			continue
+		}
+		if node := s.contactParty(target, targetSlot, rests); node >= 0 {
+			s.keepAwake(node, rests)
+		}
 	}
 }
 

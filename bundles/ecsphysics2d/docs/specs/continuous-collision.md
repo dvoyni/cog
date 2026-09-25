@@ -102,9 +102,11 @@ From 577 and 578.
   its end pose, as if nothing had been found. A one-way platform is a filter
   System, as it is today, and needs no new API.
 - **A fast Kinematic body carries what it hits.** A Kinematic body is never
-  stopped and never pushed. A Dynamic body it meets on its path is carried along
-  with it from the moment they meet, so a fast paddle hits the ball instead of
-  passing through it.
+  stopped and never pushed. **Every** Dynamic body it meets on its path, not
+  just the first, is carried along with it from the moment they meet, so a fast
+  paddle hits each ball instead of passing through it. The Contact of a carry
+  past the first is written by Solve, so a filter never sees it
+  ([below](#the-hits-past-the-stop)).
 - **Every moving Sensor is swept, whatever its Shape.** A box or segment Sensor's
   Contacts now take the circle Sensor's form (`T < 1`, `Depth 0`), and two moving
   Sensors crossing within a tick find each other.
@@ -180,10 +182,10 @@ From 577 and 579.
 | --- | --- | --- |
 | **Integrate** | nothing | none |
 | **Index** | the gate: sets the path bit on the entry, records where the path starts, and lists the entry by its path box | none; it already reads `Shape` and `Position` |
-| **Detect** | one path pass, before the discrete walk, for Sensors and fast Bodies together; writes the stopping Contacts, and tests a stopped Body's other pairs where it stopped | none; it already reads both indices and writes `Contacts` |
-| *(the app's filter Systems)* | see the stopping Contact while the Body is still at its end pose; may drop it | none |
-| **Sleep** | nothing | none |
-| **Solve** | moves each stopped Dynamic body back to its stopping point, carrying it by a Kinematic side's remaining movement, then solves as usual | none; it already reads `Dynamic` and writes `Position` |
+| **Detect** | one path pass, before the discrete walk, for Sensors and fast Bodies together; writes the stopping Contacts, holds every later Hit on a Body in `Contacts`' scratch, and tests a stopped Body's other pairs where it stopped | none; it already reads both indices and writes `Contacts` |
+| *(the app's filter Systems)* | see the stopping Contact while the Body is still at its end pose; may drop it. They see no held Hit | none |
+| **Sleep** | keeps awake a Body that a Kinematic mover's held Hit will carry, and wakes it if it sleeps | none; it already reads `Dynamic` and writes `Contacts` and `Sleeping` |
+| **Solve** | moves each stopped Dynamic body back to its stopping point, carrying it by a Kinematic side's remaining movement; carries every Dynamic body a Kinematic mover's held Hits name and writes their Contacts; then solves as usual | none; it already reads `Dynamic` and writes `Position` and `Contacts` |
 
 - **Integrate cannot hold the gate.** It never reads `Shape`, so it has no extent
   to compare against. Giving it one widens its lock set, or adds 8 B to `Position`
@@ -251,10 +253,12 @@ today's `sweepSensors`. For each marked entry, it runs one path test through bot
 indices, and **the `Sensor` flag picks the keep rule**:
 
 - **a Sensor keeps every Hit, ordered by `T`**, excluding only itself, as today;
-- **a solid Body keeps its first Hit** that is not a Sensor, is not already
-  touched at `Previous`, and is one its path enters rather than a seam
-  ([below](#a-seam-stops-nothing)), which stops it, and every Hit on a Sensor
-  that did not move, which does not
+- **a solid Body keeps every Hit on its path** that is not a Sensor, is not
+  already touched at `Previous`, and is one its path enters rather than a seam
+  ([below](#a-seam-stops-nothing)). The first stops it. Every later one on a
+  Body is held for Solve, which alone can tell whether the mover is stopped
+  ([below](#the-hits-past-the-stop)). It also keeps every Hit on a Sensor that
+  did not move, which stops nothing
   ([below](#a-fast-body-reports-the-sensors-it-crosses)).
 
 Two passes were rejected: two loops over the entries, two copies of the path box
@@ -424,6 +428,68 @@ goal-line trigger unseen, which is the tunnelling this spec exists to stop.
 - **Rejected: naming it as a limit.** A trigger a fast ball can skip is the
   failure this map was drawn to close.
 
+### The Hits past the stop
+
+From [physics: a fast Kinematic body carries every Dynamic body on its path, not just the first](https://github.com/dvoyni/cog/issues/589).
+
+**Keeping only the first Hit passes a Kinematic body through everything
+behind it.** Detect cannot tell a Kinematic mover from a Dynamic one, since
+reading `Dynamic` would widen its lock set, so both kept only their first Hit:
+
+- balls of radius 1 rest at x = 7 and x = 3, and a Kinematic paddle of
+  radius 1 goes 10 → 0;
+- the ball at 7 is the first Hit, at `T = 0.1`, and is carried to −2;
+- the ball at 3 is never tested, and the paddle and the carried ball pass
+  straight through it;
+- a Static wall as the first Hit does the same to every Dynamic body behind it.
+
+**Detect holds every later Hit, and Solve decides by kind.** The path test is
+already a find-all Probe, so the Hits are in hand:
+
+- **Detect holds, for every engaged solid Body, each Hit past the first that
+  would stop it**, the Contact it would be, made as the stopping Contact is,
+  in `Contacts`' scratch and not in the list. The seam rule and the skips apply
+  to each, as to the first. A meeting with a marked Body that comes sooner than
+  the first Hit of the Body's own path holds that Hit too. Only Hits on the Body
+  index are held: a Static past the stop is never carried.
+- **The sleep System reads the held Hits** once it has built the tick's nodes,
+  which are the awake Dynamic bodies. A held Hit whose mover is not one is a
+  Kinematic mover's. Its target is kept awake, as one touching a Kinematic body
+  is, or its Island is woken if it sleeps, as for a Contact naming it.
+- **Solve drops a Dynamic mover's held Hits**, which lie past where it stopped.
+  For a Kinematic mover, it carries each Dynamic target from its end pose by
+  `(1 − T)·d_K`, and **writes the Hit as its Contact**, at the end of the
+  current run: `T < 1`, one point, `Depth 0`. A Kinematic or Static target is
+  neither carried nor written.
+- **A carried pair that touched on an earlier tick** has an Ended or a cached
+  entry, which Detect wrote because it did not find the pair again. That entry
+  gives way to the carried Contact, which continues from it. The pair table is
+  rebuilt over the result. All of this runs only on a tick with such a carry.
+- **A pair the discrete walk already wrote**, the target touching the mover
+  where it stopped, keeps that Contact, and is carried unless a filter dropped
+  or ignored it.
+
+**Settled here: held in scratch and written by Solve, not written and then
+dropped.** A Hit past a Dynamic mover's stop is no touch. The filters run
+between Detect and Solve, and neither can tell kinds, so a Contact Detect
+writes for it would be seen by every filter:
+
+- a fast Dynamic ball goes 10 → 0 over resting balls at 7 and 3;
+- written and marked for Solve to drop, the Contact with the ball at 3 is in
+  the list a filter reads, though the mover stopped at 9;
+- a filter that scores on touch scores a ball that was never reached.
+
+Solve cannot delete a Contact once a filter has seen it, since a reacting
+System would then see a pair begin and vanish. So the held Hits stay out of the
+list until Solve knows what they are. **The price is that a filter never sees a
+carry past the first, and cannot drop it**; a reacting System sees it as an
+ordinary Contact. The first Hit is still written by Detect, and a filter may
+drop it. That is named [below](#named-limits).
+
+**Where it costs.** Nothing on the nothing-fast path. An engaged solid Body runs
+the skips and the seam rule on every Hit on the Body index, not only up to the
+first. Solve and the sleep System each test for an empty run once a tick.
+
 ### Which target is tested where
 
 - **A target that is not marked is taken at its end pose, whatever its kind.**
@@ -566,6 +632,12 @@ Examples:
 - **`r1` and `r2` need no change.** Detect takes them at both stopping poses,
   and a carry moves the Dynamic side and the point they touch at together.
 
+**A Kinematic body carries every Dynamic body on its path** (from 589). Each
+Hit of its own path past the first on a Dynamic body is carried as the first
+is, from the body's end pose by `(1 − T)·d_K`, and Solve writes its Contact
+([The Hits past the stop](#the-hits-past-the-stop)). A body two Kinematic
+bodies meet in the one tick is carried by both, the two carries added.
+
 **Each Body stops at its own earliest `T`**, which is "first Hit only" applied
 one Body at a time. If B's first Hit is C at `T = 0.2` and the A–B pair meets at
 `T = 0.4`, B stops at 0.2, and A stops at 0.4 against where B would have been.
@@ -667,7 +739,8 @@ or is out of scope.
 | --- | --- | --- |
 | **A zero-thickness target** | a bare segment: tunnelling starts just past 1×, where the gate has only just engaged a mover that can still pass it at an angle | **pinned** |
 | **A Kinematic target closing on the Body** | each gate sees its own Body's motion, not the pair's, so a Body and a Kinematic target each under its own gate, closing on each other faster than the gates allow together, are caught only by the discrete walk | **pinned** |
-| **The target behind a dropped stop** | a one-way platform: anything behind a dropped target in the same tick is not tested | **pinned** |
+| **The target behind a dropped stop** | a one-way platform: a Dynamic body passes anything behind a dropped target in the same tick. A Kinematic body still carries the Dynamic bodies behind it | **pinned** |
+| **A carry past the first, to a filter** | the Contact of a Dynamic body a Kinematic body carries past its first Hit is written by Solve, so a filter never sees it and cannot drop it; a reacting System does | written down |
 | **A graze** | a target the Body closes on, along the Hit's normal, by less than its extent, or that reaches into its band no deeper than the Slop past the depth it already rests at, is a seam to the path pass: a fast ball passes a post that reaches 3 mm into its path, and a Body sunk deep in something at `Previous` passes anything that reaches no deeper | **pinned** |
 | **A seam met while landing** | a Body touching nothing at `Previous` has only the Slop to beat, so one coming down onto a tiled floor more than the Slop deeper in the tick it crosses a seam is stopped by the next tile's face, and loses the rest of that tick's travel | written down |
 | **Rotational tunnelling** | the path is a chord at the end angle, so a thin Shape spinning fast can slip through | out of scope |
@@ -717,6 +790,8 @@ Made by the ticket that lands the behaviour it describes, not before.
 | An opt-in Component for Dynamic targets | Detect cannot see a Body's kind; Index reading `Dynamic` widens its lock set |
 | The static index by default, the Body index behind an opt-in | puts Kinematic targets behind the opt-in, reversing a settled point; **kept as the fall-back** |
 | Testing a Body again against another's actual stopping point | a second round of path tests, a chain with a third Body, and still blind to kind |
+| Writing the Hits past a stop in Detect, for Solve to drop a Dynamic mover's | every filter sees a Contact past a Dynamic mover's stop, a touch that never happened, and Solve cannot take it back once seen |
+| Detect or Index telling kinds, to keep a Kinematic mover's Hits only | reading `Dynamic`, even as a filter, widens the lock set |
 | Naming the angled crossing as a limit | "two fast Bodies meet along their relative motion" would hold only head-on |
 | Two path passes, one for Sensors and one for solid Bodies | two loops, two copies of the path-box and relative-motion code, the same pair tested twice |
 | A gate for Sensors, or for box and segment Sensors only | loses the graze partway through a tick and the one meaning of a Sensor's entries; or splits the rule by Shape |
@@ -785,6 +860,10 @@ points, so none of those decisions can be undone silently:
 8. the off-centre post (588): each mover thrown over a post 5 cm wide whose top
    reaches halfway up its lower half is stopped where it first meets it, from
    every phase.
+9. a fast Kinematic paddle over balls resting at x = 7 and x = 3, and over a
+   Static wall and then a ball (589): every ball is carried, circles and boxes,
+   both spawn orders; a fast Dynamic ball over the same two balls stops at the
+   first, and no Contact names the second.
 
 ### The speed sweep
 
