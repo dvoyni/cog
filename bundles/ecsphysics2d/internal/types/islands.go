@@ -767,6 +767,9 @@ func (c *Contacts) rewrite(marks []int32, rests *ecs.Set[Rest], places *ecs.Get[
 		return
 	}
 	s.slots.reset()
+	if returning {
+		c.seedReturningSlots()
+	}
 
 	current, visible := c.current, c.visible
 	s.tailEntries = append(s.tailEntries[:0], c.entries[current:]...)
@@ -839,13 +842,41 @@ func (c *Contacts) rewrite(marks []int32, rests *ecs.Set[Rest], places *ecs.Get[
 	}
 }
 
+// seedReturningSlots is the slots this tick already gives a woken member
+// before any returning Contact asks for one. Detect numbers a sleeper it finds
+// by its place in the sleepers' grid, at or past awakeSlots, in a Contact of
+// the current run — a discrete touch or a stop at the first Hit — or in a Hit
+// the path pass held, which Solve writes as a Contact (carryHeld). Only a
+// sleeper has such a slot, so every one of them is kept for its Entity, and a
+// returning Contact naming the same Body is solved in the same row.
+func (c *Contacts) seedReturningSlots() {
+	s := &c.islands
+	awake := c.awakeSlots
+	for i := range c.current {
+		aux := &c.aux[i]
+		if aux.slotA >= awake {
+			s.slots.put(c.entries[i].A, aux.slotA)
+		}
+		if aux.slotB >= awake {
+			s.slots.put(c.entries[i].B, aux.slotB)
+		}
+	}
+	for i := range c.held {
+		_, target, slot := c.held[i].parties()
+		if slot >= awake {
+			s.slots.put(target, slot)
+		}
+	}
+}
+
 // returningParty is the slot a party of a returning quiet Contact is solved
 // at, and false for a party that has gone or moved. A Static still in the
-// static index is −1. A woken member still where it slept is given a slot past
-// every one Detect numbered, one per Body however many Contacts name it: it is
-// in the sleepers' grid until the next Index, and the sleep System reads no
-// index to find it there, so it is numbered here instead and the solver's slot
-// table, sized by maxSlot, takes it like any other.
+// static index is −1. A woken member still where it slept is solved at the
+// slot this tick already gave it (seedReturningSlots), and otherwise at a slot
+// past every one Detect numbered, one per Body however many Contacts name it:
+// it is in the sleepers' grid until the next Index, and the sleep System reads
+// no index to find it there, so it is numbered here instead and the solver's
+// slot table, sized by maxSlot, takes it like any other.
 func (c *Contacts) returningParty(
 	entry *Contact, static uint8, e ecs.Entity, rests *ecs.Set[Rest], places *ecs.Get[Position],
 ) (int32, bool) {
