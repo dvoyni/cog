@@ -3,6 +3,8 @@ package internal
 import (
 	"bytes"
 	"testing"
+
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
 // uniformSink records what a replay hands a backend about uniforms, and drops
@@ -13,8 +15,8 @@ type uniformSink struct {
 	blocks [][2]int
 }
 
-func (s *uniformSink) BakeUniforms(arena []byte)     { s.arena = arena }
-func (s *uniformSink) BeginPass(PassDesc) RenderPass { return s }
+func (s *uniformSink) BakeUniforms(arena []byte)           { s.arena = arena }
+func (s *uniformSink) BeginPass(types.PassDesc) RenderPass { return s }
 func (s *uniformSink) SetUniformBlock(offset, size int) {
 	s.blocks = append(s.blocks, [2]int{offset, size})
 }
@@ -24,7 +26,7 @@ func (s *uniformSink) SetUniformBlock(offset, size int) {
 // bytes at an offset a uniform binding accepts.
 func TestUniformBlocksOfAnySizeStartAligned(t *testing.T) {
 	var queue Queue
-	queue.BeginPass(PassDesc{Screen: true})
+	queue.BeginPass(types.PassDesc{Screen: true})
 	for _, size := range []int{80, 300, 16} {
 		block := queue.SetUniformBlock(size)
 		if len(block) != size {

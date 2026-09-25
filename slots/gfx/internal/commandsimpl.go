@@ -3,6 +3,8 @@ package internal
 import (
 	"math"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/kernel"
 )
 
@@ -56,9 +58,9 @@ func (p *plugin) freeCachedResourcesCmdImpl() (kernel.Lock, kernel.Execute[FreeC
 // read for itself. The Viewport read is the only lock it needs: the capture
 // slot is plugin-owned and carries its own.
 func (p *plugin) armCaptureCmdImpl() (kernel.Lock, kernel.Execute[ArmCaptureRequest, ArmCaptureResponse]) {
-	var viewport kernel.Read[*Viewport]
+	var viewport kernel.Read[*types.Viewport]
 	return func(access kernel.ResourceAccess) {
-			viewport = access.GetRead[*Viewport]()
+			viewport = access.GetRead[*types.Viewport]()
 		}, func(_ kernel.Kernel, request ArmCaptureRequest) ArmCaptureResponse {
 			live, err := p.captures.arm(request)
 			if err != nil {
@@ -73,9 +75,9 @@ func (p *plugin) armCaptureCmdImpl() (kernel.Lock, kernel.Execute[ArmCaptureRequ
 // for itself. The Viewport read is the only lock it needs: the snapshot slot
 // is plugin-owned and carries its own.
 func (p *plugin) armFrameCmdImpl() (kernel.Lock, kernel.Execute[ArmFrameRequest, ArmFrameResponse]) {
-	var viewport kernel.Read[*Viewport]
+	var viewport kernel.Read[*types.Viewport]
 	return func(access kernel.ResourceAccess) {
-			viewport = access.GetRead[*Viewport]()
+			viewport = access.GetRead[*types.Viewport]()
 		}, func(_ kernel.Kernel, request ArmFrameRequest) ArmFrameResponse {
 			live, err := p.snapshots.arm(request)
 			if err != nil {
@@ -87,10 +89,10 @@ func (p *plugin) armFrameCmdImpl() (kernel.Lock, kernel.Execute[ArmFrameRequest,
 
 func setViewportCmdImpl() (kernel.Lock, kernel.Execute[SetViewportRequest, SetViewportResponse]) {
 	var preference kernel.Read[*desiredViewport]
-	var current kernel.Write[*Viewport]
+	var current kernel.Write[*types.Viewport]
 	return func(access kernel.ResourceAccess) {
 			preference = access.GetRead[*desiredViewport]()
-			current = access.GetWrite[*Viewport]()
+			current = access.GetWrite[*types.Viewport]()
 		}, func(_ kernel.Kernel, request SetViewportRequest) SetViewportResponse {
 			viewport := resolveViewport(request.Width, request.Height, *preference.Get())
 			viewport.FramebufferWidth = request.FramebufferWidth
@@ -102,17 +104,17 @@ func setViewportCmdImpl() (kernel.Lock, kernel.Execute[SetViewportRequest, SetVi
 
 func setDesiredViewportCmdImpl() (kernel.Lock, kernel.Execute[SetDesiredViewportRequest, SetDesiredViewportResponse]) {
 	var stored kernel.Write[*desiredViewport]
-	var current kernel.Write[*Viewport]
+	var current kernel.Write[*types.Viewport]
 	return func(access kernel.ResourceAccess) {
 			stored = access.GetWrite[*desiredViewport]()
-			current = access.GetWrite[*Viewport]()
+			current = access.GetWrite[*types.Viewport]()
 		}, func(_ kernel.Kernel, request SetDesiredViewportRequest) SetDesiredViewportResponse {
 			preference := desiredViewport{
 				mode: request.Mode, width: request.Width, height: request.Height, size: request.Size,
 			}
-			valid := request.Mode == ViewportWindow ||
-				((request.Mode == ViewportFixedWidth || request.Mode == ViewportFixedHeight) && request.Size > 0) ||
-				((request.Mode == ViewportFit || request.Mode == ViewportCover) && request.Width > 0 && request.Height > 0)
+			valid := request.Mode == types.ViewportWindow ||
+				((request.Mode == types.ViewportFixedWidth || request.Mode == types.ViewportFixedHeight) && request.Size > 0) ||
+				((request.Mode == types.ViewportFit || request.Mode == types.ViewportCover) && request.Width > 0 && request.Height > 0)
 			if !valid {
 				preference = desiredViewport{}
 			}
@@ -125,8 +127,8 @@ func setDesiredViewportCmdImpl() (kernel.Lock, kernel.Execute[SetDesiredViewport
 		}
 }
 
-func resolveViewport(windowWidth, windowHeight float32, preference desiredViewport) Viewport {
-	viewport := Viewport{
+func resolveViewport(windowWidth, windowHeight float32, preference desiredViewport) types.Viewport {
+	viewport := types.Viewport{
 		Width: windowWidth, Height: windowHeight,
 		WindowWidth: windowWidth, WindowHeight: windowHeight,
 	}
@@ -135,13 +137,13 @@ func resolveViewport(windowWidth, windowHeight float32, preference desiredViewpo
 		return viewport
 	}
 	switch preference.mode {
-	case ViewportFixedWidth:
+	case types.ViewportFixedWidth:
 		viewport.Width = preference.size
 		viewport.Height = float32(math.Round(float64(preference.size * windowHeight / windowWidth)))
-	case ViewportFixedHeight:
+	case types.ViewportFixedHeight:
 		viewport.Height = preference.size
 		viewport.Width = float32(math.Round(float64(preference.size * windowWidth / windowHeight)))
-	case ViewportFit:
+	case types.ViewportFit:
 		if windowWidth/windowHeight >= preference.width/preference.height {
 			viewport.Height = preference.height
 			viewport.Width = float32(math.Round(float64(preference.height * windowWidth / windowHeight)))
@@ -149,7 +151,7 @@ func resolveViewport(windowWidth, windowHeight float32, preference desiredViewpo
 			viewport.Width = preference.width
 			viewport.Height = float32(math.Round(float64(preference.width * windowHeight / windowWidth)))
 		}
-	case ViewportCover:
+	case types.ViewportCover:
 		if windowWidth/windowHeight >= preference.width/preference.height {
 			viewport.Width = preference.width
 			viewport.Height = float32(math.Round(float64(preference.width * windowHeight / windowWidth)))

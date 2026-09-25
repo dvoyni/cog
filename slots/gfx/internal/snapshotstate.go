@@ -5,6 +5,8 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -57,7 +59,7 @@ func (s *snapshotState) arm(request ArmFrameRequest) (*snapshotRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.request != nil {
-		return nil, ErrFrameBusy{}
+		return nil, types.ErrFrameBusy{}
 	}
 	live := &snapshotRequest{pass: request.Pass, done: make(chan FrameSnapshot, 1)}
 	s.request, s.pending, s.armed = live, true, false
@@ -115,7 +117,7 @@ func (s *snapshotState) abandon() {
 	request := s.request
 	s.clear()
 	select {
-	case request.done <- FrameSnapshot{Err: ErrFrameAbandoned{}}:
+	case request.done <- FrameSnapshot{Err: types.ErrFrameAbandoned{}}:
 	default:
 	}
 }
@@ -177,11 +179,11 @@ func passViewOf(index, run int, desc PassDescr, draws, instances int) PassView {
 		Index: index, Run: run, Label: desc.Label, Order: int(desc.Order),
 		Target:     targetKindName(TargetKindOf(&desc.Target)),
 		Depth:      depthKindName(DepthKindOf(&desc.Depth)),
-		Load:       desc.Load.Name(),
-		Store:      desc.Store.Name(),
-		DepthLoad:  desc.DepthLoad.Name(),
+		Load:       desc.Load.String(),
+		Store:      desc.Store.String(),
+		DepthLoad:  desc.DepthLoad.String(),
 		DepthClear: desc.DepthClear,
-		DepthStore: desc.DepthStore.Name(),
+		DepthStore: desc.DepthStore.String(),
 		Draws:      draws, Instances: instances,
 		Runs: PassHasEffect(&desc, draws),
 	}
@@ -193,7 +195,7 @@ func passViewOf(index, run int, desc PassDescr, draws, instances int) PassView {
 	if desc.Depth.IsTexture() {
 		view.DepthTexture = DepthTexture(&desc.Depth)
 	}
-	if desc.Load == LoadClear {
+	if desc.Load == types.LoadClear {
 		view.Clear = []float32{desc.Clear.R, desc.Clear.G, desc.Clear.B, desc.Clear.A}
 	}
 	return view
@@ -220,18 +222,18 @@ func resourceOpViewOf(queue string, index int, o *Op) ResourceOpView {
 	view := ResourceOpView{Queue: queue, Index: index, Kind: opKindName(o.Kind)}
 	switch o.Kind {
 	case OpBakeBuffer:
-		view.Buffer, view.BufferKind = o.BufferID, o.BufferKind.Name()
+		view.Buffer, view.BufferKind = o.BufferID, o.BufferKind.String()
 		view.Size, view.Bytes = o.BufferSize, len(o.Bytes)
 	case OpReleaseBuffer:
 		view.Buffer = o.BufferID
 	case OpBakeTexture:
 		view.Texture, view.Width, view.Height = o.TextureID, o.TexW, o.TexH
-		view.Format, view.Mipmaps, view.Bytes = o.Format.Name(), o.Mipmaps, len(o.Bytes)
+		view.Format, view.Mipmaps, view.Bytes = o.Format.String(), o.Mipmaps, len(o.Bytes)
 	case OpReleaseTexture:
 		view.Texture = o.TextureID
 	case OpAllocateTexture:
 		view.Texture, view.Width, view.Height = o.TextureID, o.TexW, o.TexH
-		view.Layers, view.Format, view.Renderable = o.TexLayers, o.Format.Name(), o.Renderable
+		view.Layers, view.Format, view.Renderable = o.TexLayers, o.Format.String(), o.Renderable
 	case OpUpdateTexture:
 		region := o.Region
 		view.Texture, view.Layer, view.Region, view.Bytes = o.TextureID, o.TexLayer, &region, len(o.Bytes)

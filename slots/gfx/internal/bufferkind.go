@@ -1,37 +1,5 @@
 package internal
 
-// BufferKind tags a buffer's role, which selects its GPU usage flags.
-type BufferKind uint8
-
-const (
-	BufferVertex BufferKind = iota
-	BufferIndex
-	BufferUniform
-	BufferStorage
-)
-
-// Name spells the buffer kind for a debug document.
-func (kind BufferKind) Name() string {
-	switch kind {
-	case BufferVertex:
-		return "vertex"
-	case BufferIndex:
-		return "index"
-	case BufferUniform:
-		return "uniform"
-	case BufferStorage:
-		return "storage"
-	}
-	return UnknownName(int(kind))
-}
-
-// BufferDesc describes a GPU buffer to create.
-type BufferDesc struct {
-	Kind  BufferKind
-	Size  int
-	Label string
-}
-
 // StorageAlignment is the offset alignment a storage binding requires. A record
 // a draw binds a range of therefore pads up to a multiple of it - a pad, not a
 // cap on what a record may hold.

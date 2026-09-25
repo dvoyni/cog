@@ -1,12 +1,15 @@
 package gfx
 
-import "github.com/dvoyni/cog/slots/gfx/internal"
+import (
+	"github.com/dvoyni/cog/slots/gfx/internal"
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+)
 
 // Viewport holds the logical world size, device-independent window size, and
 // physical framebuffer size. A game chooses the logical sizing policy through
 // SetDesiredViewportCmd; the driver supplies both output sizes through
 // SetViewportCmd.
-type Viewport = internal.Viewport
+type Viewport = types.Viewport
 
 // OpQueue is the writable kernel resource gameplay records high-level frame
 // commands into. Subscriptions must declare Writes[*gfx.OpQueue] and access it

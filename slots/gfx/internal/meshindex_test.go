@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -11,7 +13,7 @@ import (
 // indexedMesh is the smallest indexed mesh a translator test can draw: three
 // vertices of the fake backend's 28-byte stride, and an index buffer of the
 // given byte length declared at the given width.
-func indexedMesh(topology PrimitiveTopology, width IndexWidth, indexBytes int) MeshDescr {
+func indexedMesh(topology types.PrimitiveTopology, width IndexWidth, indexBytes int) MeshDescr {
 	const stride = 28
 	return MeshIndexed(
 		BufferWithBytes(make([]byte, 3*stride), true),
@@ -34,7 +36,7 @@ func TestIndexCountFollowsTheDeclaredWidth(t *testing.T) {
 		{"uint32", IndexUint32, 3},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			mesh := indexedMesh(TopologyTriangleList, c.width, 12)
+			mesh := indexedMesh(types.TopologyTriangleList, c.width, 12)
 			if mesh.IndexCount() != c.want {
 				t.Fatalf("IndexCount() = %d over 12 bytes, want %d", mesh.IndexCount(), c.want)
 			}
@@ -63,14 +65,14 @@ func TestTheZeroIndexWidthIsUint32(t *testing.T) {
 func TestAnIndexBufferThatDoesNotDivideByItsWidthIsDroppedAndReportedOnce(t *testing.T) {
 	backend := &fakeBackend{}
 	// 13 bytes at two bytes an index: the last index is half a index.
-	mesh := indexedMesh(TopologyTriangleList, IndexUint16, 13)
+	mesh := indexedMesh(types.TopologyTriangleList, IndexUint16, 13)
 
 	reported := pipelineErrFrames(t, backend, mesh, 3)
 
 	if len(reported) != 1 {
 		t.Fatalf("three frames reported %d errors, want 1: %v", len(reported), reported)
 	}
-	var length ErrIndexBufferLength
+	var length types.ErrIndexBufferLength
 	if !errors.As(reported[0], &length) {
 		t.Fatalf("reported %v, want ErrIndexBufferLength", reported[0])
 	}
@@ -94,7 +96,7 @@ func TestTheDeclaredWidthReachesTheRenderPass(t *testing.T) {
 	}{{"uint16", IndexUint16}, {"uint32", IndexUint32}} {
 		t.Run(c.name, func(t *testing.T) {
 			backend := &fakeBackend{}
-			if reported := pipelineErrFrames(t, backend, indexedMesh(TopologyTriangleList, c.width, 12), 1); len(reported) != 0 {
+			if reported := pipelineErrFrames(t, backend, indexedMesh(types.TopologyTriangleList, c.width, 12), 1); len(reported) != 0 {
 				t.Fatalf("the frame reported %v, want nothing", reported)
 			}
 			if len(backend.indexBinds) != 1 {
@@ -111,8 +113,8 @@ func TestTheDeclaredWidthReachesTheRenderPass(t *testing.T) {
 // different widths are two pipelines.
 func TestAStripIsKeyedByItsIndexWidth(t *testing.T) {
 	backend := &fakeBackend{}
-	narrow := indexedMesh(TopologyTriangleStrip, IndexUint16, 12)
-	wide := indexedMesh(TopologyTriangleStrip, IndexUint32, 12)
+	narrow := indexedMesh(types.TopologyTriangleStrip, IndexUint16, 12)
+	wide := indexedMesh(types.TopologyTriangleStrip, IndexUint32, 12)
 
 	p := newPlugin()
 	k := newTestKernel(t, p)
@@ -139,8 +141,8 @@ func TestAStripIsKeyedByItsIndexWidth(t *testing.T) {
 // differ only in an encoding detail.
 func TestATriangleListIsNotKeyedByItsIndexWidth(t *testing.T) {
 	backend := &fakeBackend{}
-	narrow := indexedMesh(TopologyTriangleList, IndexUint16, 12)
-	wide := indexedMesh(TopologyTriangleList, IndexUint32, 12)
+	narrow := indexedMesh(types.TopologyTriangleList, IndexUint16, 12)
+	wide := indexedMesh(types.TopologyTriangleList, IndexUint32, 12)
 
 	p := newPlugin()
 	k := newTestKernel(t, p)

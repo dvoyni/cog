@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"math"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 )
 
@@ -57,7 +59,7 @@ func (t *translator) translateDraw(f *frame, op *Op, pass PassDescr, firstErr *e
 	}
 	if name, ok := sampledAttachment(plan, op.Params, op.Material.Params(), pass); ok {
 		if *firstErr == nil {
-			*firstErr = ErrDrawSamplesAttachment{Pass: pass.Label, Parameter: name}
+			*firstErr = types.ErrDrawSamplesAttachment{Pass: pass.Label, Parameter: name}
 		}
 		return
 	}
@@ -107,7 +109,7 @@ func (t *translator) reportIndexLength(m *MeshDescr, shaderDescr shader.ShaderDe
 		return nil
 	}
 	t.badIndexLengths[key] = struct{}{}
-	return ErrIndexBufferLength{Shader: shader.ShaderLabel(shaderDescr), Length: key.length, Width: key.width.Bytes()}
+	return types.ErrIndexBufferLength{Shader: shader.ShaderLabel(shaderDescr), Length: key.length, Width: key.width.Bytes()}
 }
 
 // unsuppliedBuffer returns the first declared storage binding the draw does not
@@ -140,13 +142,13 @@ func unsuppliedBuffer(plan *parameterPlan, drawParams, materialParams []Paramete
 // binding misses it until someone fixes the material, and firstErr carries only
 // the frame's first error, so re-reporting would mask every later error in
 // every later frame.
-func (t *translator) reportUnsuppliedBuffer(shaderID ShaderID, label string, resource *plannedResource, unbaked bool) error {
+func (t *translator) reportUnsuppliedBuffer(shaderID types.ShaderID, label string, resource *plannedResource, unbaked bool) error {
 	key := unsuppliedBufferKey{shader: shaderID, parameter: resource.name}
 	if _, seen := t.unsuppliedBuffers[key]; seen {
 		return nil
 	}
 	t.unsuppliedBuffers[key] = struct{}{}
-	return ErrStorageBufferUnsupplied{
+	return types.ErrStorageBufferUnsupplied{
 		Shader: label, Parameter: resource.name,
 		Group: resource.group, Binding: resource.binding, Unbaked: unbaked,
 	}
@@ -192,14 +194,14 @@ func mismatchedTextureView(
 // frames after it. The draw is dropped either way, on reportUnsuppliedBuffer's
 // terms.
 func (t *translator) reportTextureView(
-	shaderID ShaderID, label string, resource *plannedResource, layers int,
+	shaderID types.ShaderID, label string, resource *plannedResource, layers int,
 ) error {
 	key := textureViewKey{shader: shaderID, parameter: resource.name}
 	if _, seen := t.textureViewMismatches[key]; seen {
 		return nil
 	}
 	t.textureViewMismatches[key] = struct{}{}
-	return ErrTextureViewDimensionMismatch{
+	return types.ErrTextureViewDimensionMismatch{
 		Shader: label, Parameter: resource.name,
 		Group: resource.group, Binding: resource.binding,
 		Declared: textureViewName(resource.view), Supplied: textureViewNameOfLayers(layers),
@@ -229,7 +231,7 @@ func textureViewNameOfLayers(layers int) string {
 // own pass renders into. Only a baked texture can be an attachment, so this
 // resolves nothing and costs a comparison per binding.
 func sampledAttachment(plan *parameterPlan, drawParams, materialParams []ParameterDescr, pass PassDescr) (string, bool) {
-	attachment := func(id TextureID) bool {
+	attachment := func(id types.TextureID) bool {
 		if id == 0 {
 			return false
 		}
@@ -260,7 +262,7 @@ func (t *translator) emitResources(f *frame, drawParams, materialParams []Parame
 	// falls back to the zero descriptor - clamp and linear - when unset.
 	for i := range plan.samplers {
 		sampler := &plan.samplers[i]
-		var desc SamplerDesc
+		var desc types.SamplerDesc
 		if p := sampler.param.value(materialParams, drawParams); p != nil && ParameterKind(p) == ParamSampler {
 			desc = ParameterSampler(p)
 		}
@@ -277,7 +279,7 @@ func (t *translator) emitResources(f *frame, drawParams, materialParams []Parame
 			}
 			continue
 		}
-		textureID := TextureID(0)
+		textureID := types.TextureID(0)
 		if p != nil && ParameterKind(p) == ParamTexture {
 			textureID = t.ensureTexture(f, ParameterTexture(p))
 		}
@@ -289,7 +291,7 @@ func (t *translator) emitResources(f *frame, drawParams, materialParams []Parame
 // material half of the shape hash from a material recorded for the frame
 // rather than hashing its names again.
 func (t *translator) preparePlanFor(
-	shaderID ShaderID, label string, layout shader.ShaderLayout, material *MaterialDescr, draw []ParameterDescr,
+	shaderID types.ShaderID, label string, layout shader.ShaderLayout, material *MaterialDescr, draw []ParameterDescr,
 ) *parameterPlan {
 	state, recorded := MaterialShapeState(material)
 	if !recorded {
@@ -298,14 +300,14 @@ func (t *translator) preparePlanFor(
 	return t.planForShape(shaderID, label, layout, material.Params(), draw, ContinueParameterShape(state, draw))
 }
 
-func (t *translator) prepareParameterPlan(shaderID ShaderID, label string, layout shader.ShaderLayout, material, draw []ParameterDescr) *parameterPlan {
+func (t *translator) prepareParameterPlan(shaderID types.ShaderID, label string, layout shader.ShaderLayout, material, draw []ParameterDescr) *parameterPlan {
 	return t.planForShape(shaderID, label, layout, material, draw, parameterShapeHash(material, draw))
 }
 
 // planForShape finds or builds the plan for one parameter shape, given its
 // hash.
 func (t *translator) planForShape(
-	shaderID ShaderID, label string, layout shader.ShaderLayout, material, draw []ParameterDescr, hash uint64,
+	shaderID types.ShaderID, label string, layout shader.ShaderLayout, material, draw []ParameterDescr, hash uint64,
 ) *parameterPlan {
 	key := parameterPlanBucketKey{shader: shaderID, hash: hash}
 	bucket := t.parameterPlans[key]

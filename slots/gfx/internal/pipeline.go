@@ -1,21 +1,14 @@
 package internal
 
-// PrimitiveTopology selects how vertices assemble into primitives.
-type PrimitiveTopology uint8
-
-const (
-	TopologyTriangleList PrimitiveTopology = iota
-	TopologyTriangleStrip
-	TopologyLineList
-)
+import "github.com/dvoyni/cog/slots/gfx/internal/types"
 
 // PipelineDesc describes a render pipeline to create. Bind group layouts are
 // derived by the backend from the shader's reflection; the vertex layout is
 // supplied by the mesh via Stride and Attributes.
 type PipelineDesc struct {
-	Shader      ShaderID
-	Topology    PrimitiveTopology
-	State       MaterialState
+	Shader      types.ShaderID
+	Topology    types.PrimitiveTopology
+	State       types.MaterialState
 	ColorFormat TextureFormat
 	DepthFormat TextureFormat
 	// NoColorTarget builds a pipeline with no colour target at all, which is
@@ -49,22 +42,13 @@ type PipelineDesc struct {
 	Label      string
 }
 
-// Limits is the subset of the WebGPU limits gfx checks shaders against.
-type Limits struct {
-	MaxBindGroups                   int
-	MaxStorageBuffersPerShaderStage int
-	MaxStorageBufferBindingSize     int
-	MaxUniformBufferBindingSize     int
-	MaxBufferSize                   int
-}
-
 // DefaultLimits returns the WebGPU spec floor every browser guarantees. It is
 // the comparison target on purpose: a desktop adapter reports its hardware
 // limits, where 200 storage buffers is ordinary, so checking a shader against
 // the device it happens to run on passes builds that cannot run in a browser.
-func DefaultLimits() Limits { return defaultLimits }
+func DefaultLimits() types.Limits { return defaultLimits }
 
-var defaultLimits = Limits{
+var defaultLimits = types.Limits{
 	MaxBindGroups:                   4,
 	MaxStorageBuffersPerShaderStage: 8,
 	MaxStorageBufferBindingSize:     128 << 20,

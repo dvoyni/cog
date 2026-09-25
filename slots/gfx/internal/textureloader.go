@@ -3,6 +3,8 @@ package internal
 import (
 	"io/fs"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/assets"
 )
@@ -19,7 +21,7 @@ import (
 // threw both away. Nothing reads them yet: emitResources wants an id and
 // SetTexture takes one.
 type texture struct {
-	id            TextureID
+	id            types.TextureID
 	width, height int
 	format        TextureFormat
 }

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 
 	"github.com/dvoyni/cog/libs/m"
@@ -158,7 +160,7 @@ func TestVertexInterfaceReportsAStrideThatIsNotAMultipleOfFour(t *testing.T) {
 	// WebGPU, GLES and older Apple GPUs.
 	attrs := []VertexAttr{Attr(0, Float32x3), Attr(12, Unorm16x2), Attr(16, Uint8x2), Attr(28, Uint8x2)}
 	err := CheckVertexInterface("mesh.wgsl", shader.ShaderLayout{}, attrs)
-	var stride ErrVertexStrideAlignment
+	var stride types.ErrVertexStrideAlignment
 	if !errors.As(err, &stride) {
 		t.Fatalf("err = %v, want ErrVertexStrideAlignment", err)
 	}
@@ -205,7 +207,7 @@ func oneInputBackend(input shader.ShaderVertexInput) *fakeBackend {
 
 func TestADrawWhoseLayoutMissesAShaderInputIsDroppedAndReportedOnce(t *testing.T) {
 	backend := oneInputBackend(shader.ShaderVertexInput{Name: "uv", Location: 2, Kind: shader.VertexScalarFloat, Count: 2})
-	mesh := Mesh(BufferWithBytes(make([]byte, 3*28), true), TopologyTriangleList,
+	mesh := Mesh(BufferWithBytes(make([]byte, 3*28), true), types.TopologyTriangleList,
 		Attr(0, Float32x3), Attr(12, Float32x4))
 
 	reported := pipelineErrFrames(t, backend, mesh, 3)
@@ -230,7 +232,7 @@ func TestADrawWhoseLayoutMissesAShaderInputIsDroppedAndReportedOnce(t *testing.T
 // shade it.
 func TestADrawWhoseLayoutSuppliesTheWrongTypeIsDroppedAndReported(t *testing.T) {
 	backend := oneInputBackend(shader.ShaderVertexInput{Name: "normal", Location: 1, Kind: shader.VertexScalarFloat, Count: 3})
-	mesh := Mesh(BufferWithBytes(make([]byte, 3*16), true), TopologyTriangleList,
+	mesh := Mesh(BufferWithBytes(make([]byte, 3*16), true), types.TopologyTriangleList,
 		Attr(0, Float32x3), Attr(12, Unorm16x2))
 
 	reported := pipelineErrFrames(t, backend, mesh, 2)
@@ -255,7 +257,7 @@ func TestADrawWhoseLayoutSuppliesTheWrongTypeIsDroppedAndReported(t *testing.T) 
 // it draws.
 func TestADrawWhoseLayoutSuppliesMoreThanTheShaderReadsStillDraws(t *testing.T) {
 	backend := oneInputBackend(shader.ShaderVertexInput{Name: "position", Location: 0, Kind: shader.VertexScalarFloat, Count: 3})
-	mesh := Mesh(BufferWithBytes(make([]byte, 3*28), true), TopologyTriangleList,
+	mesh := Mesh(BufferWithBytes(make([]byte, 3*28), true), types.TopologyTriangleList,
 		Attr(0, Float32x3), Attr(12, Float32x4))
 
 	reported := pipelineErrFrames(t, backend, mesh, 1)
@@ -271,7 +273,7 @@ func TestADrawWhoseLayoutSuppliesMoreThanTheShaderReadsStillDraws(t *testing.T) 
 func TestADrawWhoseStrideIsNotAMultipleOfFourIsDroppedAndReported(t *testing.T) {
 	backend := oneInputBackend(shader.ShaderVertexInput{Name: "position", Location: 0, Kind: shader.VertexScalarFloat, Count: 3})
 	// 12 + 12 + 4 + 2 = 30 bytes.
-	mesh := Mesh(BufferWithBytes(make([]byte, 3*30), true), TopologyTriangleList,
+	mesh := Mesh(BufferWithBytes(make([]byte, 3*30), true), types.TopologyTriangleList,
 		Attr(0, Float32x3), Attr(12, Float32x3), Attr(24, Unorm16x2), Attr(28, Uint8x2))
 
 	reported := pipelineErrFrames(t, backend, mesh, 2)
@@ -279,7 +281,7 @@ func TestADrawWhoseStrideIsNotAMultipleOfFourIsDroppedAndReported(t *testing.T) 
 	if len(reported) != 1 {
 		t.Fatalf("two frames reported %d errors, want 1: %v", len(reported), reported)
 	}
-	var stride ErrVertexStrideAlignment
+	var stride types.ErrVertexStrideAlignment
 	if !errors.As(reported[0], &stride) {
 		t.Fatalf("reported %v, want ErrVertexStrideAlignment", reported[0])
 	}

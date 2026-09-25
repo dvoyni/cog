@@ -1,6 +1,10 @@
 package internal
 
-import "slices"
+import (
+	"slices"
+
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+)
 
 // UniformAlignment is where a block may start in the frame's uniform arena:
 // every block's offset is a multiple of it. It is the largest
@@ -28,19 +32,19 @@ const (
 // the appenders and replayRange - so a frame's many render commands stay small.
 type renderOp struct {
 	kind renderKind
-	res0 ResourceID // pipeline | vertex/index/uniform buffer | texture | sampler
-	arg0 int32      // offset | first | group
-	arg1 int32      // size | count | binding
-	arg2 int32      // group | indexed
-	arg3 int32      // binding | instances
-	arg4 int32      // first instance
+	res0 types.ResourceID // pipeline | vertex/index/uniform buffer | texture | sampler
+	arg0 int32            // offset | first | group
+	arg1 int32            // size | count | binding
+	arg2 int32            // group | indexed
+	arg3 int32            // binding | instances
+	arg4 int32            // first instance
 }
 
 // bufferBake is one buffer upload. Buffers have a single bake op, so it needs
 // no kind.
 type bufferBake struct {
-	id   BufferID
-	kind BufferKind
+	id   types.BufferID
+	kind types.BufferKind
 	size int
 	data []byte
 }
@@ -59,7 +63,7 @@ const (
 // texture allocated this frame has to follow its allocation.
 type textureBake struct {
 	kind       textureBakeKind
-	id         TextureID
+	id         types.TextureID
 	width      int
 	height     int
 	layers     int
@@ -67,7 +71,7 @@ type textureBake struct {
 	mipmaps    bool
 	renderable bool
 	layer      int
-	region     Region
+	region     types.Region
 	data       []byte
 }
 
@@ -76,10 +80,10 @@ type textureBake struct {
 // descriptor and no commands: everything about it is the backend's. capture
 // marks the frame's readback the same way, and carries the one target it reads.
 type pass struct {
-	desc       PassDesc
+	desc       types.PassDesc
 	present    bool
 	capture    bool
-	captured   CaptureDesc
+	captured   types.CaptureDesc
 	start, end int
 	// transStart, transEnd is the range of transitions that must be placed
 	// before this pass is encoded. They sit outside the pass because a barrier
@@ -90,13 +94,13 @@ type pass struct {
 // PassSink receives the frame's passes. BeginPass returns the RenderPass its
 // commands go to, so the backend owns encoder and pass lifetime entirely.
 type PassSink interface {
-	BeginPass(PassDesc) RenderPass
+	BeginPass(types.PassDesc) RenderPass
 	EndPass(RenderPass)
 	// TransitionTextures places the barriers a pass needs before it is encoded,
 	// and is called outside any render pass because that is the only place a
 	// barrier can be recorded. It is never called with an empty slice: a frame
 	// with no render-then-sample pair pays nothing.
-	TransitionTextures([]TextureTransition)
+	TransitionTextures([]types.TextureTransition)
 	// Present puts the frame buffer on the swapchain. It takes no arguments
 	// because every piece of it - the buffer, the full-screen triangle, the
 	// transfer function and the swapchain's own format - belongs to the
@@ -110,7 +114,7 @@ type PassSink interface {
 	// transitions the frame buffer out of RenderAttachment and then samples it,
 	// so a copy encoded before it would name an old layout that is no longer
 	// true.
-	Capture(CaptureDesc)
+	Capture(types.CaptureDesc)
 }
 
 // BakeSink receives resource uploads before render-pass encoding.
@@ -121,34 +125,34 @@ type BakeSink interface {
 	// backend can size its uniform buffer before any bind group names it. The
 	// bytes are the queue's and are valid until it is reset.
 	BakeUniforms([]byte)
-	BakeBuffer(BufferID, BufferKind, int, []byte)
-	BakeTexture(TextureID, int, int, TextureFormat, []byte, bool)
-	AllocateTexture(TextureID, TextureDesc)
-	UpdateTexture(TextureID, int, Region, []byte)
+	BakeBuffer(types.BufferID, types.BufferKind, int, []byte)
+	BakeTexture(types.TextureID, int, int, TextureFormat, []byte, bool)
+	AllocateTexture(types.TextureID, TextureDesc)
+	UpdateTexture(types.TextureID, int, types.Region, []byte)
 }
 
 // RenderPass receives render commands in recording order.
 type RenderPass interface {
-	SetPipeline(PipelineID)
+	SetPipeline(types.PipelineID)
 	// SetUniformBlock binds the draw's uniform block: size bytes at offset in
 	// the arena BakeUniforms handed over. offset is aligned to UniformAlignment.
 	SetUniformBlock(offset, size int)
-	SetTexture(TextureID, int, int)
-	SetSampler(SamplerID, int, int)
-	SetVertexBuffer(BufferID, int)
+	SetTexture(types.TextureID, int, int)
+	SetSampler(types.SamplerID, int, int)
+	SetVertexBuffer(types.BufferID, int)
 	// SetIndexBuffer binds the index buffer at the width one of its elements
 	// was written at. The width is the mesh's rather than the pass's: two
 	// meshes in one pass may well be indexed differently, because the width
 	// follows from how many vertices each of them has.
-	SetIndexBuffer(BufferID, int, IndexWidth)
-	SetBuffer(int, int, BufferID, int, int)
+	SetIndexBuffer(types.BufferID, int, IndexWidth)
+	SetBuffer(int, int, types.BufferID, int, int)
 	Draw(first, count, instances, firstInstance int, indexed bool)
 }
 
 // ReleaseSink receives resource releases after submission.
 type ReleaseSink interface {
-	ReleaseBuffer(BufferID)
-	ReleaseTexture(TextureID)
+	ReleaseBuffer(types.BufferID)
+	ReleaseTexture(types.TextureID)
 }
 
 // Queue owns a translated command sequence. Commands are constructed as local
@@ -163,14 +167,14 @@ type Queue struct {
 	bufferBakes      []bufferBake
 	textureBakes     []textureBake
 	render           []renderOp
-	releasedBuffers  []BufferID
-	releasedTextures []TextureID
+	releasedBuffers  []types.BufferID
+	releasedTextures []types.TextureID
 	passes           []pass
 
 	// transitions is one flat arena for the whole frame; each pass holds a
 	// half-open range into it, the same way it holds one into render.
 	// transitionsUsed marks how much of it earlier passes already claimed.
-	transitions     []TextureTransition
+	transitions     []types.TextureTransition
 	transitionsUsed int
 
 	// uniforms is the frame's uniform arena. A draw's block is packed straight
@@ -198,13 +202,13 @@ func (q *Queue) Reset() {
 // TransitionTexture records a barrier to place before the next pass opens.
 // Calls accumulate until BeginPass claims them, so the translator can announce
 // a pass's hazards before it knows the pass descriptor is even worth emitting.
-func (q *Queue) TransitionTexture(transition TextureTransition) {
+func (q *Queue) TransitionTexture(transition types.TextureTransition) {
 	q.transitions = append(q.transitions, transition)
 }
 
 // BeginPass opens a pass; every render command until EndPass belongs to it, and
 // every transition recorded since the last pass is placed before it.
-func (q *Queue) BeginPass(desc PassDesc) {
+func (q *Queue) BeginPass(desc types.PassDesc) {
 	q.passes = append(q.passes, pass{
 		desc: desc, start: len(q.render), end: len(q.render),
 		transStart: q.transitionsUsed, transEnd: len(q.transitions),
@@ -224,7 +228,7 @@ func (q *Queue) Present() {
 // pass the same way BeginPass does, because a texture capture has to be moved
 // into TextureUsageCopySrc first; a screen capture declares none, since the
 // frame buffer is the one attachment gfx never names.
-func (q *Queue) Capture(desc CaptureDesc) {
+func (q *Queue) Capture(desc types.CaptureDesc) {
 	q.passes = append(q.passes, pass{
 		capture: true, captured: desc, start: len(q.render), end: len(q.render),
 		transStart: q.transitionsUsed, transEnd: len(q.transitions),
@@ -239,8 +243,8 @@ func (q *Queue) EndPass() {
 	}
 }
 
-func (q *Queue) SetPipeline(pipeline PipelineID) {
-	o := renderOp{kind: renderSetPipeline, res0: ResourceID(pipeline)}
+func (q *Queue) SetPipeline(pipeline types.PipelineID) {
+	o := renderOp{kind: renderSetPipeline, res0: types.ResourceID(pipeline)}
 	q.render = append(q.render, o)
 }
 
@@ -265,9 +269,9 @@ func (q *Queue) SetUniformBlock(size int) []byte {
 	return q.uniforms[offset : offset+size : offset+size]
 }
 
-func (q *Queue) SetTexture(texture TextureID, group, binding int) {
+func (q *Queue) SetTexture(texture types.TextureID, group, binding int) {
 	o := renderOp{
-		kind: renderSetTexture, res0: ResourceID(texture),
+		kind: renderSetTexture, res0: types.ResourceID(texture),
 		arg0: int32(group), arg1: int32(binding),
 	}
 	q.render = append(q.render, o)
@@ -276,30 +280,30 @@ func (q *Queue) SetTexture(texture TextureID, group, binding int) {
 // SetSampler binds one sampler by its own group and binding. Samplers bind
 // independently of textures because a material's textures may legitimately want
 // different ones - a tiling ground beside a clamped decal.
-func (q *Queue) SetSampler(sampler SamplerID, group, binding int) {
+func (q *Queue) SetSampler(sampler types.SamplerID, group, binding int) {
 	o := renderOp{
-		kind: renderSetSampler, res0: ResourceID(sampler),
+		kind: renderSetSampler, res0: types.ResourceID(sampler),
 		arg0: int32(group), arg1: int32(binding),
 	}
 	q.render = append(q.render, o)
 }
 
-func (q *Queue) SetVertexBuffer(buffer BufferID, offset int) {
-	o := renderOp{kind: renderSetVertexBuffer, res0: ResourceID(buffer), arg0: int32(offset)}
+func (q *Queue) SetVertexBuffer(buffer types.BufferID, offset int) {
+	o := renderOp{kind: renderSetVertexBuffer, res0: types.ResourceID(buffer), arg0: int32(offset)}
 	q.render = append(q.render, o)
 }
 
-func (q *Queue) SetIndexBuffer(buffer BufferID, offset int, width IndexWidth) {
+func (q *Queue) SetIndexBuffer(buffer types.BufferID, offset int, width IndexWidth) {
 	o := renderOp{
-		kind: renderSetIndexBuffer, res0: ResourceID(buffer),
+		kind: renderSetIndexBuffer, res0: types.ResourceID(buffer),
 		arg0: int32(offset), arg1: int32(width),
 	}
 	q.render = append(q.render, o)
 }
 
-func (q *Queue) SetBuffer(group, binding int, buffer BufferID, offset, size int) {
+func (q *Queue) SetBuffer(group, binding int, buffer types.BufferID, offset, size int) {
 	o := renderOp{
-		kind: renderSetBuffer, res0: ResourceID(buffer),
+		kind: renderSetBuffer, res0: types.ResourceID(buffer),
 		arg0: int32(offset), arg1: int32(size), arg2: int32(group), arg3: int32(binding),
 	}
 	q.render = append(q.render, o)
@@ -319,35 +323,35 @@ func (q *Queue) Draw(first, count, instances, firstInstance int, indexed bool) {
 	q.render = append(q.render, o)
 }
 
-func (q *Queue) BakeBuffer(id BufferID, kind BufferKind, size int, data []byte) {
+func (q *Queue) BakeBuffer(id types.BufferID, kind types.BufferKind, size int, data []byte) {
 	q.bufferBakes = append(q.bufferBakes, bufferBake{id: id, kind: kind, size: size, data: data})
 }
 
-func (q *Queue) ReleaseBuffer(id BufferID) {
+func (q *Queue) ReleaseBuffer(id types.BufferID) {
 	q.releasedBuffers = append(q.releasedBuffers, id)
 }
 
-func (q *Queue) BakeTexture(id TextureID, width, height int, format TextureFormat, pixels []byte, mipmaps bool) {
+func (q *Queue) BakeTexture(id types.TextureID, width, height int, format TextureFormat, pixels []byte, mipmaps bool) {
 	q.textureBakes = append(q.textureBakes, textureBake{
 		kind: textureBakePixels, id: id, width: width, height: height, format: format,
 		mipmaps: mipmaps, data: pixels,
 	})
 }
 
-func (q *Queue) AllocateTexture(id TextureID, desc TextureDesc) {
+func (q *Queue) AllocateTexture(id types.TextureID, desc TextureDesc) {
 	q.textureBakes = append(q.textureBakes, textureBake{
 		kind: textureBakeAllocate, id: id, width: desc.Width, height: desc.Height, layers: desc.Layers,
 		format: desc.Format, renderable: desc.Renderable,
 	})
 }
 
-func (q *Queue) UpdateTexture(id TextureID, layer int, region Region, pixels []byte) {
+func (q *Queue) UpdateTexture(id types.TextureID, layer int, region types.Region, pixels []byte) {
 	q.textureBakes = append(q.textureBakes, textureBake{
 		kind: textureBakeUpdate, id: id, layer: layer, region: region, data: pixels,
 	})
 }
 
-func (q *Queue) ReleaseTexture(id TextureID) {
+func (q *Queue) ReleaseTexture(id types.TextureID) {
 	q.releasedTextures = append(q.releasedTextures, id)
 }
 
@@ -404,19 +408,19 @@ func (q *Queue) replayRange(sink RenderPass, start, end int) {
 		o := &q.render[i]
 		switch o.kind {
 		case renderSetPipeline:
-			sink.SetPipeline(PipelineID(o.res0))
+			sink.SetPipeline(types.PipelineID(o.res0))
 		case renderSetUniformBlock:
 			sink.SetUniformBlock(int(o.arg0), int(o.arg1))
 		case renderSetTexture:
-			sink.SetTexture(TextureID(o.res0), int(o.arg0), int(o.arg1))
+			sink.SetTexture(types.TextureID(o.res0), int(o.arg0), int(o.arg1))
 		case renderSetSampler:
-			sink.SetSampler(SamplerID(o.res0), int(o.arg0), int(o.arg1))
+			sink.SetSampler(types.SamplerID(o.res0), int(o.arg0), int(o.arg1))
 		case renderSetVertexBuffer:
-			sink.SetVertexBuffer(BufferID(o.res0), int(o.arg0))
+			sink.SetVertexBuffer(types.BufferID(o.res0), int(o.arg0))
 		case renderSetIndexBuffer:
-			sink.SetIndexBuffer(BufferID(o.res0), int(o.arg0), IndexWidth(o.arg1))
+			sink.SetIndexBuffer(types.BufferID(o.res0), int(o.arg0), IndexWidth(o.arg1))
 		case renderSetBuffer:
-			sink.SetBuffer(int(o.arg2), int(o.arg3), BufferID(o.res0), int(o.arg0), int(o.arg1))
+			sink.SetBuffer(int(o.arg2), int(o.arg3), types.BufferID(o.res0), int(o.arg0), int(o.arg1))
 		case renderDraw:
 			sink.Draw(int(o.arg0), int(o.arg1), int(o.arg3), int(o.arg4), o.arg2 != 0)
 		}

@@ -3,6 +3,8 @@ package internal
 import (
 	"hash/maphash"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 )
 
@@ -17,7 +19,7 @@ var fingerprintSeed = maphash.MakeSeed()
 type MaterialDescr struct {
 	shader shader.ShaderDescr
 	params []ParameterDescr
-	state  MaterialState
+	state  types.MaterialState
 	// recorded is set by OpQueue.FrameMaterial and zero otherwise; see there.
 	recorded frameRecording
 }
@@ -41,11 +43,11 @@ type frameRecording struct {
 // depth-tests and writes, which is what an opaque draw wants; a draw that wants
 // anything else names its state through MaterialWithState.
 func Material(shaderDescr shader.ShaderDescr, params ...ParameterDescr) MaterialDescr {
-	return MaterialWithState(shaderDescr, MaterialState{Blend: BlendAlpha, DepthCompare: CompareLess, DepthWrite: true}, params...)
+	return MaterialWithState(shaderDescr, types.MaterialState{Blend: types.BlendAlpha, DepthCompare: types.CompareLess, DepthWrite: true}, params...)
 }
 
 // MaterialWithState describes a material with explicit fixed pipeline state.
-func MaterialWithState(shaderDescr shader.ShaderDescr, state MaterialState, params ...ParameterDescr) MaterialDescr {
+func MaterialWithState(shaderDescr shader.ShaderDescr, state types.MaterialState, params ...ParameterDescr) MaterialDescr {
 	return MaterialDescr{shader: shaderDescr, params: params, state: state}
 }
 
@@ -69,7 +71,7 @@ func (m MaterialDescr) CloneTo(arena []ParameterDescr) (MaterialDescr, []Paramet
 }
 
 // State reports the material's fixed pipeline state.
-func (m MaterialDescr) State() MaterialState { return m.state }
+func (m MaterialDescr) State() types.MaterialState { return m.state }
 
 // Shader reports the shader the material shades with, supply included: one
 // path under two supplies is two shaders, so the descriptor answers rather

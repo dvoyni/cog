@@ -3,6 +3,7 @@ package internal
 import (
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
 // Backend is the low-level realization interface: a vendor-neutral,
@@ -13,30 +14,30 @@ type Backend interface {
 	// NewTexture and NewBuffer reserve logical IDs. They are CPU-only and must be
 	// safe to call from the recording thread; native objects are created lazily
 	// when Execute processes the corresponding bake op.
-	NewTexture() TextureID
-	NewBuffer() BufferID
+	NewTexture() types.TextureID
+	NewBuffer() types.BufferID
 
-	NewSampler(SamplerDesc) (SamplerID, error)
-	FreeSampler(id SamplerID)
+	NewSampler(types.SamplerDesc) (types.SamplerID, error)
+	FreeSampler(id types.SamplerID)
 
-	NewShader(shader.ShaderDesc) (ShaderID, error)
-	FreeShader(id ShaderID)
+	NewShader(shader.ShaderDesc) (types.ShaderID, error)
+	FreeShader(id types.ShaderID)
 	// ShaderLayout returns the reflected uniform parameter layout of a shader.
-	ShaderLayout(id ShaderID) shader.ShaderLayout
+	ShaderLayout(id types.ShaderID) shader.ShaderLayout
 
-	NewPipeline(PipelineDesc) (PipelineID, error)
-	FreePipeline(id PipelineID)
+	NewPipeline(PipelineDesc) (types.PipelineID, error)
+	FreePipeline(id types.PipelineID)
 
 	// ScreenFramebuffer returns the surface the present pass draws into and its
 	// physical size, which is also the size the frame buffer is allocated at. It
 	// is not what a screen pass renders into - that is the frame buffer - and it
 	// is valid only while a frame is being rendered (the driver makes the
 	// surface current before triggering the render).
-	ScreenFramebuffer() (view TextureViewID, width, height int)
+	ScreenFramebuffer() (view types.TextureViewID, width, height int)
 
 	// TextureView returns a renderable view of one mip level of one layer of a
 	// baked texture, cached per (texture, mip, layer).
-	TextureView(texture TextureID, mip, layer int) TextureViewID
+	TextureView(texture types.TextureID, mip, layer int) types.TextureViewID
 
 	// TextureFormat reports the format a texture was allocated or baked in,
 	// and whether the backend knows the texture at all. It is what keys a
@@ -48,12 +49,12 @@ type Backend interface {
 	// frame's pipelines to FrameBufferFormat and loses nothing by it:
 	// TextureView above returns 0 on the same condition, leaving the pass with
 	// no attachment to begin, so the pipeline keyed there never renders.
-	TextureFormat(texture TextureID) (TextureFormat, bool)
+	TextureFormat(texture types.TextureID) (TextureFormat, bool)
 
 	// Limits reports the device's own limits. gfx checks shaders against
 	// DefaultLimits, the web floor, and never against these: they are here to
 	// say, in the report, what the device this build ran on allowed.
-	Limits() Limits
+	Limits() types.Limits
 
 	// Execute replays one already-translated queue: it performs bake operations,
 	// encodes each pass in turn with its own attachments and load/store ops,

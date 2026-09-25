@@ -2,6 +2,7 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/libs/assets"
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
 // TextureDescrParams is everything about a texture that is neither its path nor
@@ -24,7 +25,7 @@ type TextureDescrParams struct {
 	format   TextureFormat
 	mipmaps  bool
 	copyData bool
-	id       TextureID
+	id       types.TextureID
 }
 
 // TextureDescr describes a texture by resource path (TextureWithResource),
@@ -46,7 +47,7 @@ type TextureDescrParams struct {
 type TextureDescr assets.Descr[TextureDescrParams]
 
 // ID returns the baked texture identifier, or 0 when the descriptor is not baked.
-func (t TextureDescr) ID() TextureID { return t.Params.id }
+func (t TextureDescr) ID() types.TextureID { return t.Params.id }
 
 // Path returns the resource path for a TextureWithResource descriptor (empty otherwise).
 func (t TextureDescr) Path() string { return t.Name }
@@ -80,7 +81,7 @@ func (t TextureDescr) Mipmaps() bool { return t.Params.mipmaps }
 func (t TextureDescr) PixelBytes() int { return t.Blob.Len() }
 
 // BakedTexture is the descriptor of a texture already baked under id.
-func BakedTexture(id TextureID, width, height int) TextureDescr {
+func BakedTexture(id types.TextureID, width, height int) TextureDescr {
 	return TextureDescr{Params: TextureDescrParams{id: id, width: width, height: height}}
 }
 

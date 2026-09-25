@@ -1,6 +1,9 @@
 package internal
 
-import "github.com/dvoyni/cog/slots/gfx/internal/shader"
+import (
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+)
 
 // The view types are the vocabulary cog's snapshots share. gfx declares them
 // because gfx owns the descriptors they render - a texture, a parameter, a
@@ -76,7 +79,7 @@ type SnapshotView struct {
 // step fields belong to the capability body, which is the only place that
 // knows whether one was performed, and Tick to the snapshot, which is the
 // only thing produced inside the tick it names.
-func SnapshotViewOf(viewport Viewport) SnapshotView {
+func SnapshotViewOf(viewport types.Viewport) SnapshotView {
 	return SnapshotView{
 		PixelWidth:     int(viewport.FramebufferWidth),
 		PixelHeight:    int(viewport.FramebufferHeight),
@@ -172,10 +175,10 @@ type TextureView struct {
 	Path string `json:"path,omitempty"`
 	// ID is the baked handle. It is opaque - nothing lists textures to an agent
 	// - but it is how two ops naming one texture are recognised as doing so.
-	ID     TextureID `json:"id,omitempty"`
-	Width  int       `json:"width,omitempty"`
-	Height int       `json:"height,omitempty"`
-	Format string    `json:"format,omitempty"`
+	ID     types.TextureID `json:"id,omitempty"`
+	Width  int             `json:"width,omitempty"`
+	Height int             `json:"height,omitempty"`
+	Format string          `json:"format,omitempty"`
 	// Mipmaps reports that a full mip chain is generated at bake.
 	Mipmaps bool `json:"mipmaps,omitempty"`
 	// Bytes is the size of the inline upload the descriptor carries. An inline
@@ -190,7 +193,7 @@ func TextureViewOf(texture TextureDescr) TextureView {
 		Source:  TextureSourceName(texture),
 		Path:    texture.Path(),
 		ID:      texture.ID(),
-		Format:  texture.Format().Name(),
+		Format:  texture.Format().String(),
 		Mipmaps: texture.Mipmaps(),
 		Bytes:   texture.PixelBytes(),
 	}
@@ -202,9 +205,9 @@ func TextureViewOf(texture TextureDescr) TextureView {
 // parameter binds when a parameter is what produced the view.
 type BufferView struct {
 	// Source is how the buffer resolves: bytes or baked.
-	Source string   `json:"source"`
-	ID     BufferID `json:"id,omitempty"`
-	Size   int      `json:"size,omitempty"`
+	Source string         `json:"source"`
+	ID     types.BufferID `json:"id,omitempty"`
+	Size   int            `json:"size,omitempty"`
 	// Offset and Range are the bound slice. A zero Range means the whole buffer
 	// from Offset, which is how a draw that binds all of one says so.
 	Offset int `json:"offset,omitempty"`
@@ -245,19 +248,19 @@ type SamplerView struct {
 }
 
 // SamplerViewOf renders one sampler descriptor.
-func SamplerViewOf(sampler SamplerDesc) SamplerView {
+func SamplerViewOf(sampler types.SamplerDesc) SamplerView {
 	view := SamplerView{
-		AddressU:   sampler.AddressU.Name(),
-		AddressV:   sampler.AddressV.Name(),
-		Mag:        sampler.Mag.Name(),
-		Min:        sampler.Min.Name(),
-		Mip:        sampler.Mip.Name(),
+		AddressU:   sampler.AddressU.String(),
+		AddressV:   sampler.AddressV.String(),
+		Mag:        sampler.Mag.String(),
+		Min:        sampler.Min.String(),
+		Mip:        sampler.Mip.String(),
 		Anisotropy: sampler.Anisotropy,
 		Comparison: sampler.Comparison,
 		Label:      sampler.Label,
 	}
 	if sampler.Comparison {
-		view.Compare = sampler.Compare.Name()
+		view.Compare = sampler.Compare.String()
 	}
 	return view
 }
@@ -314,12 +317,12 @@ type MaterialStateView struct {
 }
 
 // MaterialStateViewOf renders one pipeline state.
-func MaterialStateViewOf(state MaterialState) MaterialStateView {
+func MaterialStateViewOf(state types.MaterialState) MaterialStateView {
 	return MaterialStateView{
-		Blend:        state.Blend.Name(),
-		DepthCompare: state.DepthCompare.Name(),
+		Blend:        state.Blend.String(),
+		DepthCompare: state.DepthCompare.String(),
 		DepthWrite:   state.DepthWrite,
-		Cull:         state.Cull.Name(),
-		FrontFace:    state.FrontFace.Name(),
+		Cull:         state.Cull.String(),
+		FrontFace:    state.FrontFace.String(),
 	}
 }

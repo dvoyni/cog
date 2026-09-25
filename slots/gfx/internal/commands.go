@@ -1,6 +1,9 @@
 package internal
 
-import "github.com/dvoyni/cog/kernel"
+import (
+	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+)
 
 // PresentCmd finalizes the writable OpQueue: it swaps it into the internal ready
 // slot (dropping any still-unconsumed queue, latest-wins) and installs a reset
@@ -62,7 +65,7 @@ type SetViewportRequest struct {
 }
 
 // SetViewportResponse reports the resolved logical and window dimensions.
-type SetViewportResponse struct{ Viewport Viewport }
+type SetViewportResponse struct{ Viewport types.Viewport }
 
 // SetDesiredViewportCmd selects the logical world-size policy. A game normally
 // calls it once during initialization; the handler resolves it against each
@@ -74,14 +77,14 @@ type SetDesiredViewportCmd kernel.Command[SetDesiredViewportRequest, SetDesiredV
 // rectangle for ViewportFit and ViewportCover. Invalid values fall back to
 // ViewportWindow.
 type SetDesiredViewportRequest struct {
-	Mode          ViewportMode
+	Mode          types.ViewportMode
 	Width, Height float32
 	Size          float32
 }
 
 // SetDesiredViewportResponse reports the viewport resolved against the most
 // recently supplied window size.
-type SetDesiredViewportResponse struct{ Viewport Viewport }
+type SetDesiredViewportResponse struct{ Viewport types.Viewport }
 
 // ArmCaptureCmd arms a readback of one colour target and hands back the wait.
 // It is ordinary gfx API: anything holding a kernel handle may arm a capture,
@@ -96,7 +99,7 @@ type ArmCaptureCmd kernel.Command[ArmCaptureRequest, ArmCaptureResponse]
 type ArmCaptureRequest struct {
 	// Target is what to read back: the frame buffer, or any colour texture the
 	// frame rendered into.
-	Target CaptureDesc
+	Target types.CaptureDesc
 	// Amount is how many stills to write; zero means one, and the maximum is
 	// sixty.
 	Amount int
@@ -124,7 +127,7 @@ type ArmCaptureResponse struct {
 	// for itself. The pixel dimensions always come from the capture, so a
 	// window resized inside the capture's two-frame window reports a stale
 	// window size but never mis-describes the image.
-	Viewport Viewport
+	Viewport types.Viewport
 	// Err is the outcome an arm was refused with: a request the capture state
 	// would not take, or one that arrived while another was already armed.
 	Err error
@@ -159,7 +162,7 @@ type ArmFrameResponse struct {
 	// Viewport is the window as of the arm, which a capability body cannot
 	// read for itself. A resize between the arm and the tick it binds to is a
 	// stated non-guarantee, exactly as it is for a capture.
-	Viewport Viewport
+	Viewport types.Viewport
 	// Err is the outcome an arm was refused with, exactly as it is for a
 	// capture.
 	Err error

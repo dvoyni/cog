@@ -3,6 +3,8 @@ package internal
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 
 	"github.com/dvoyni/cog/libs/m"
@@ -23,7 +25,7 @@ func TestFingerprintIsByContentNotByBacking(t *testing.T) {
 		return MaterialWithState(shader.ShaderWithResource("shader.wgsl"), StateOpaque3D(),
 			FloatParam("roughness", 0.5),
 			ColorParam("tint", m.NewColorSrgb(1, 0.5, 0.25, 1)),
-			SamplerParam("sampler", SamplerDesc{AddressU: AddressRepeat}),
+			SamplerParam("sampler", types.SamplerDesc{AddressU: types.AddressRepeat}),
 		)
 	}
 	if build().Fingerprint() != build().Fingerprint() {
@@ -80,8 +82,8 @@ func TestFingerprintSeesTextureBufferAndMatrixParameters(t *testing.T) {
 			Material(shaderDescr, BufferRangeParam("b", BufferDescr{source: BufferSourceBaked, id: 1}, 256, 256))},
 		{"matrix", Material(shaderDescr, MatParam("m", m.NewMat4())),
 			Material(shaderDescr, MatParam("m", m.Mat4{}))},
-		{"sampler", Material(shaderDescr, SamplerParam("s", SamplerDesc{})),
-			Material(shaderDescr, SamplerParam("s", SamplerDesc{Anisotropy: 16}))},
+		{"sampler", Material(shaderDescr, SamplerParam("s", types.SamplerDesc{})),
+			Material(shaderDescr, SamplerParam("s", types.SamplerDesc{Anisotropy: 16}))},
 	}
 	for _, pair := range pairs {
 		if pair.a.Fingerprint() == pair.b.Fingerprint() {
@@ -97,7 +99,7 @@ func TestFingerprintAllocatesNothing(t *testing.T) {
 	material := MaterialWithState(shader.ShaderWithResource("shader.wgsl"), StateOpaque3D(),
 		FloatParam("roughness", 0.5),
 		TextureParam("t", TextureWithResource("a.png")),
-		SamplerParam("s", SamplerDesc{}),
+		SamplerParam("s", types.SamplerDesc{}),
 	)
 	if allocations := testing.AllocsPerRun(100, func() { material.Fingerprint() }); allocations != 0 {
 		t.Fatalf("Fingerprint allocated %v times per call", allocations)

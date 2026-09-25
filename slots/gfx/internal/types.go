@@ -1,18 +1,6 @@
 package internal
 
-// ViewportMode selects how the logical viewport responds to window aspect
-// changes. ViewportWindow uses the window dimensions directly; fixed modes keep
-// one dimension constant; Fit shows the full desired rectangle, while Cover
-// fills the viewport from it.
-type ViewportMode uint8
-
-const (
-	ViewportWindow ViewportMode = iota
-	ViewportFixedWidth
-	ViewportFixedHeight
-	ViewportFit
-	ViewportCover
-)
+import "github.com/dvoyni/cog/slots/gfx/internal/types"
 
 // FrameSnapshot is one produced snapshot, or the reason there is none. One
 // struct carries both so that a caller cannot handle one and forget the other.
@@ -78,16 +66,16 @@ type PassView struct {
 	// Target is screen, texture or none. A pass drawing into something that is
 	// not the screen, and nothing compositing it afterwards, is one of the
 	// ways a frame ends up black.
-	Target        string    `json:"target"`
-	TargetTexture TextureID `json:"targetTexture,omitempty"`
-	TargetWidth   int       `json:"targetWidth,omitempty"`
-	TargetHeight  int       `json:"targetHeight,omitempty"`
-	TargetMip     int       `json:"targetMip,omitempty"`
-	TargetLayer   int       `json:"targetLayer,omitempty"`
+	Target        string          `json:"target"`
+	TargetTexture types.TextureID `json:"targetTexture,omitempty"`
+	TargetWidth   int             `json:"targetWidth,omitempty"`
+	TargetHeight  int             `json:"targetHeight,omitempty"`
+	TargetMip     int             `json:"targetMip,omitempty"`
+	TargetLayer   int             `json:"targetLayer,omitempty"`
 	// Depth is auto, texture or none.
-	Depth        string    `json:"depth"`
-	DepthTexture TextureID `json:"depthTexture,omitempty"`
-	Load         string    `json:"load"`
+	Depth        string          `json:"depth"`
+	DepthTexture types.TextureID `json:"depthTexture,omitempty"`
+	Load         string          `json:"load"`
 	// Clear is the colour the pass clears to - r, g, b, a - and is present
 	// only when Load is clear.
 	Clear      []float32 `json:"clear,omitempty"`
@@ -120,19 +108,19 @@ type ResourceOpView struct {
 	// Path is the resource path, for the operations that name one.
 	Path string `json:"path,omitempty"`
 	// Buffer, BufferKind and Size describe a buffer operation.
-	Buffer     BufferID `json:"buffer,omitempty"`
-	BufferKind string   `json:"bufferKind,omitempty"`
-	Size       int      `json:"size,omitempty"`
+	Buffer     types.BufferID `json:"buffer,omitempty"`
+	BufferKind string         `json:"bufferKind,omitempty"`
+	Size       int            `json:"size,omitempty"`
 	// Texture and the fields after it describe a texture operation.
-	Texture    TextureID `json:"texture,omitempty"`
-	Width      int       `json:"width,omitempty"`
-	Height     int       `json:"height,omitempty"`
-	Layers     int       `json:"layers,omitempty"`
-	Layer      int       `json:"layer,omitempty"`
-	Region     *Region   `json:"region,omitempty"`
-	Format     string    `json:"format,omitempty"`
-	Mipmaps    bool      `json:"mipmaps,omitempty"`
-	Renderable bool      `json:"renderable,omitempty"`
+	Texture    types.TextureID `json:"texture,omitempty"`
+	Width      int             `json:"width,omitempty"`
+	Height     int             `json:"height,omitempty"`
+	Layers     int             `json:"layers,omitempty"`
+	Layer      int             `json:"layer,omitempty"`
+	Region     *types.Region   `json:"region,omitempty"`
+	Format     string          `json:"format,omitempty"`
+	Mipmaps    bool            `json:"mipmaps,omitempty"`
+	Renderable bool            `json:"renderable,omitempty"`
 	// Bytes is how much data the operation uploads. The data itself does not
 	// travel: a baked texture in a response is a base64 megabyte nobody asked
 	// for.

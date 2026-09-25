@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 
 	"github.com/dvoyni/cog/libs/m"
@@ -36,7 +38,7 @@ func storageFrame(t *testing.T, params ...ParameterDescr) (*fakeBackend, []error
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w := recordRaw(t, k)
-	w.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: LoadClear, Label: "main"})
+	w.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear, Label: "main"})
 	w.Draw(triangle(), testMaterial(params...), MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -52,7 +54,7 @@ func TestADrawMissingAStorageBindingIsDroppedAndNamed(t *testing.T) {
 	if backend.passDraws[0] != 0 {
 		t.Errorf("draws = %d, want the draw missing its storage binding dropped", backend.passDraws[0])
 	}
-	var unsupplied ErrStorageBufferUnsupplied
+	var unsupplied types.ErrStorageBufferUnsupplied
 	if len(reported) != 1 || !errors.As(reported[0], &unsupplied) {
 		t.Fatalf("reported = %v, want one ErrStorageBufferUnsupplied", reported)
 	}
@@ -70,7 +72,7 @@ func TestADrawSupplyingAnUnbakedStorageBufferIsDroppedAndNamed(t *testing.T) {
 	if backend.passDraws[0] != 0 {
 		t.Errorf("draws = %d, want the draw supplying an unbaked buffer dropped", backend.passDraws[0])
 	}
-	var unsupplied ErrStorageBufferUnsupplied
+	var unsupplied types.ErrStorageBufferUnsupplied
 	if len(reported) != 1 || !errors.As(reported[0], &unsupplied) {
 		t.Fatalf("reported = %v, want one ErrStorageBufferUnsupplied", reported)
 	}
@@ -79,7 +81,7 @@ func TestADrawSupplyingAnUnbakedStorageBufferIsDroppedAndNamed(t *testing.T) {
 	}
 	// The two causes are different mistakes, so the message has to tell them
 	// apart rather than only naming the binding.
-	missing := ErrStorageBufferUnsupplied{Shader: "s", Parameter: "Data", Group: 1, Binding: 2}
+	missing := types.ErrStorageBufferUnsupplied{Shader: "s", Parameter: "Data", Group: 1, Binding: 2}
 	if unsupplied.Error() == missing.Error() {
 		t.Error("an unbaked buffer reads exactly like a binding no parameter names")
 	}
@@ -117,7 +119,7 @@ func TestAnUnfilledStorageBindingIsReportedOnceAndDroppedAlways(t *testing.T) {
 
 	drop := func() int {
 		w := recordRaw(t, k)
-		w.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: LoadClear, Label: "main"})
+		w.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear, Label: "main"})
 		w.Draw(triangle(), testMaterial(), MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
@@ -139,13 +141,13 @@ func TestAnUnfilledStorageBindingIsReportedOnceAndDroppedAlways(t *testing.T) {
 	// binding would win it again and the mismatch behind it would never be
 	// heard - which is the whole cost of reporting at frame rate.
 	w := recordRaw(t, k)
-	w.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: LoadClear, Label: "main"})
+	w.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear, Label: "main"})
 	w.Draw(triangle(), testMaterial(), MatParam("mvp", m.NewMat4()))
 	w.Draw(triangle(), testMaterial(BufferParam("mvp", BufferWithBytes([]byte{1, 2, 3, 4}, true))))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
-	var mismatch ErrParameterKindMismatch
+	var mismatch types.ErrParameterKindMismatch
 	if len(reported) != 2 || !errors.As(reported[1], &mismatch) {
 		t.Fatalf("reported = %v, want the later kind mismatch through", reported)
 	}

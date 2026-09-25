@@ -1,5 +1,7 @@
 package internal
 
+import "github.com/dvoyni/cog/slots/gfx/internal/types"
+
 // ResourceQueue records persistent GPU resource operations. Unlike OpQueue,
 // it is not triple-buffered or latest-wins: operations remain queued until the
 // render thread executes them.
@@ -20,17 +22,17 @@ func (q *ResourceQueue) Ready() bool { return q.ids != nil && q.ids().Ready() }
 // copyData snapshots bytes when true; when false, the caller must keep them
 // unchanged until the resource queue is consumed by the render thread.
 func (q *ResourceQueue) BakeBuffer(data []byte, copyData bool) BufferDescr {
-	return q.bakeBuffer(q.ids().NewBuffer(), BufferStorage, len(data), data, copyData)
+	return q.bakeBuffer(q.ids().NewBuffer(), types.BufferStorage, len(data), data, copyData)
 }
 
 // ReBakeBuffer queues a durable rebake while preserving the buffer descriptor.
 // copyData snapshots bytes when true; when false, the caller must keep them
 // unchanged until consumed.
 func (q *ResourceQueue) ReBakeBuffer(buffer BufferDescr, data []byte, copyData bool) BufferDescr {
-	return q.bakeBuffer(buffer.id, BufferStorage, len(data), data, copyData)
+	return q.bakeBuffer(buffer.id, types.BufferStorage, len(data), data, copyData)
 }
 
-func (q *ResourceQueue) bakeBuffer(id BufferID, kind BufferKind, size int, data []byte, copyData bool) BufferDescr {
+func (q *ResourceQueue) bakeBuffer(id types.BufferID, kind types.BufferKind, size int, data []byte, copyData bool) BufferDescr {
 	if copyData {
 		data = append([]byte(nil), data...)
 	}
@@ -95,7 +97,7 @@ func (q *ResourceQueue) allocateTexture(width, height, layers int, format Textur
 }
 
 // UpdateTexture queues a pixel upload into one texture layer and region.
-func (q *ResourceQueue) UpdateTexture(texture TextureDescr, layer int, region Region, pixels []byte, copyData bool) {
+func (q *ResourceQueue) UpdateTexture(texture TextureDescr, layer int, region types.Region, pixels []byte, copyData bool) {
 	if copyData {
 		pixels = append([]byte(nil), pixels...)
 	}
@@ -112,7 +114,7 @@ func (q *ResourceQueue) ReBakeTexture(texture TextureDescr, width, height int, f
 	return q.bakeTexture(texture.Params.id, width, height, format, pixels, copyData, mipmaps)
 }
 
-func (q *ResourceQueue) bakeTexture(id TextureID, width, height int, format TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
+func (q *ResourceQueue) bakeTexture(id types.TextureID, width, height int, format TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
 	if copyData {
 		pixels = append([]byte(nil), pixels...)
 	}

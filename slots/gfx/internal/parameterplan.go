@@ -1,6 +1,9 @@
 package internal
 
-import "github.com/dvoyni/cog/slots/gfx/internal/shader"
+import (
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+)
 
 type parameterSource uint8
 
@@ -110,7 +113,7 @@ type parameterPlan struct {
 }
 
 type parameterPlanBucketKey struct {
-	shader ShaderID
+	shader types.ShaderID
 	hash   uint64
 }
 
@@ -136,7 +139,7 @@ func (plan *parameterPlan) checkKind(label, name string, ref parameterRef, mater
 	if param == nil || declared.accepts(ParameterKind(param)) {
 		return
 	}
-	plan.mismatch = ErrParameterKindMismatch{
+	plan.mismatch = types.ErrParameterKindMismatch{
 		Shader: label, Parameter: name, Supplied: ParameterKind(param).String(), Declared: declared.String(),
 	}
 }

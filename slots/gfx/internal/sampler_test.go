@@ -3,6 +3,8 @@ package internal
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 
 	"github.com/dvoyni/cog/libs/m"
@@ -10,11 +12,11 @@ import (
 )
 
 func TestSamplerDescZeroValueIsClampAndLinear(t *testing.T) {
-	var desc SamplerDesc
-	if desc.AddressU != AddressClamp || desc.AddressV != AddressClamp {
+	var desc types.SamplerDesc
+	if desc.AddressU != types.AddressClamp || desc.AddressV != types.AddressClamp {
 		t.Errorf("zero address = (%v, %v), want clamp on both axes", desc.AddressU, desc.AddressV)
 	}
-	if desc.Mag != FilterLinear || desc.Min != FilterLinear || desc.Mip != FilterLinear {
+	if desc.Mag != types.FilterLinear || desc.Min != types.FilterLinear || desc.Mip != types.FilterLinear {
 		t.Errorf("zero filters = (%v, %v, %v), want linear throughout", desc.Mag, desc.Min, desc.Mip)
 	}
 	if desc.Anisotropy != 0 || desc.Comparison {
@@ -22,7 +24,7 @@ func TestSamplerDescZeroValueIsClampAndLinear(t *testing.T) {
 	}
 	// Comparability is what makes the translator's dedup map work, so five
 	// samplers on one material cost one GPU object each at most.
-	deduped := map[SamplerDesc]int{desc: 1, {AddressU: AddressRepeat}: 2}
+	deduped := map[types.SamplerDesc]int{desc: 1, {AddressU: types.AddressRepeat}: 2}
 	if len(deduped) != 2 {
 		t.Errorf("sampler dedup map = %v, want two distinct keys", deduped)
 	}
@@ -56,8 +58,8 @@ func TestEveryReflectedSamplerBindsIndependentlyByName(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	material := testMaterial(
-		SamplerParam("groundSampler", SamplerDesc{AddressU: AddressRepeat, AddressV: AddressRepeat}),
-		SamplerParam("decalSampler", SamplerDesc{}),
+		SamplerParam("groundSampler", types.SamplerDesc{AddressU: types.AddressRepeat, AddressV: types.AddressRepeat}),
+		SamplerParam("decalSampler", types.SamplerDesc{}),
 		TextureParam("groundTexture", TextureWithBytes(1, 1, FormatRGBA8Srgb, []byte{1, 2, 3, 4}, true, false)),
 		TextureParam("decalTexture", TextureWithBytes(1, 1, FormatRGBA8Srgb, []byte{5, 6, 7, 8}, true, false)),
 	)

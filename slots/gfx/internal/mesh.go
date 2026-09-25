@@ -1,5 +1,7 @@
 package internal
 
+import "github.com/dvoyni/cog/slots/gfx/internal/types"
+
 // VertexTypeCount is one past the last vertex format, the bound a layout key
 // is checked against.
 const VertexTypeCount = Unorm1010102 + 1
@@ -49,7 +51,7 @@ type MeshDescr struct {
 	indices     BufferDescr
 	indexWidth  IndexWidth
 	indexed     bool
-	topology    PrimitiveTopology
+	topology    types.PrimitiveTopology
 	layout      []VertexAttr
 	vertexCount int
 	indexCount  int
@@ -57,7 +59,7 @@ type MeshDescr struct {
 
 // Mesh builds non-indexed geometry from an interleaved vertex buffer, a topology,
 // and the vertex layout.
-func Mesh(vertices BufferDescr, topology PrimitiveTopology, layout ...VertexAttr) MeshDescr {
+func Mesh(vertices BufferDescr, topology types.PrimitiveTopology, layout ...VertexAttr) MeshDescr {
 	return MeshIndexed(vertices, BufferDescr{}, IndexUint32, topology, layout...)
 }
 
@@ -72,7 +74,7 @@ func Mesh(vertices BufferDescr, topology PrimitiveTopology, layout ...VertexAttr
 // a pure value constructor with no error return.
 func MeshIndexed(
 	vertices, indices BufferDescr, width IndexWidth,
-	topology PrimitiveTopology, layout ...VertexAttr,
+	topology types.PrimitiveTopology, layout ...VertexAttr,
 ) MeshDescr {
 	mesh := MeshDescr{
 		vertices:   vertices,
@@ -106,7 +108,7 @@ func (m MeshDescr) IndexWidth() IndexWidth { return m.indexWidth }
 func (m MeshDescr) Indexed() bool { return m.indexed }
 
 // Topology reports how the mesh's vertices assemble into primitives.
-func (m MeshDescr) Topology() PrimitiveTopology { return m.topology }
+func (m MeshDescr) Topology() types.PrimitiveTopology { return m.topology }
 
 // stride reports the interleaved vertex stride derived from the layout (the
 // largest attribute end offset).

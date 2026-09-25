@@ -51,7 +51,7 @@ func (f TextureFormat) Resolve() TextureFormat {
 }
 
 // Name names a texture format for a message, the sentinel resolved first.
-func (f TextureFormat) Name() string {
+func (f TextureFormat) String() string {
 	switch f.Resolve() {
 	case FormatRGBA8:
 		return "RGBA8"

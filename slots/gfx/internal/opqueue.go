@@ -5,6 +5,8 @@ import (
 	"slices"
 	"sort"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -38,14 +40,14 @@ type Op struct {
 	FirstInstance int
 	color         m.Color
 	depth         float32
-	BufferID      BufferID
-	BufferKind    BufferKind
+	BufferID      types.BufferID
+	BufferKind    types.BufferKind
 	BufferSize    int
-	TextureID     TextureID
+	TextureID     types.TextureID
 	TexW, TexH    int
 	TexLayers     int
 	TexLayer      int
-	Region        Region
+	Region        types.Region
 	Format        TextureFormat
 	Mipmaps       bool
 	Renderable    bool
@@ -54,15 +56,15 @@ type Op struct {
 }
 
 type temporaryBuffer struct {
-	id   BufferID
-	kind BufferKind
+	id   types.BufferID
+	kind types.BufferKind
 	Size int
 	Used bool
 }
 
 type temporaryTexture struct {
 	key  temporaryTextureKey
-	id   TextureID
+	id   types.TextureID
 	used bool
 }
 
@@ -83,8 +85,8 @@ type passRecord struct {
 // IDMinter is the half of the Backend a recording queue calls: it reserves
 // logical resource ids, which is CPU-only and safe from the recording thread.
 type IDMinter interface {
-	NewTexture() TextureID
-	NewBuffer() BufferID
+	NewTexture() types.TextureID
+	NewBuffer() types.BufferID
 	Ready() bool
 }
 
@@ -229,8 +231,8 @@ func (q *OpQueue) draw(mesh MeshDescr, material MaterialDescr, firstInstance, in
 		FirstInstance: firstInstance,
 	}
 	o.Mesh.layout = q.copyVertexAttrs(mesh.layout)
-	o.Mesh.vertices = q.bakeBufferIfNeeded(mesh.vertices, BufferVertex)
-	o.Mesh.indices = q.bakeBufferIfNeeded(mesh.indices, BufferIndex)
+	o.Mesh.vertices = q.bakeBufferIfNeeded(mesh.vertices, types.BufferVertex)
+	o.Mesh.indices = q.bakeBufferIfNeeded(mesh.indices, types.BufferIndex)
 	q.ops = append(q.ops, o)
 }
 
@@ -308,14 +310,14 @@ func (q *OpQueue) copyUpload(data []byte) []byte {
 func (q *OpQueue) bakeParameterIfNeeded(param ParameterDescr) ParameterDescr {
 	switch param.kind {
 	case ParamBuffer:
-		param.buffer = q.bakeBufferIfNeeded(param.buffer, BufferStorage)
+		param.buffer = q.bakeBufferIfNeeded(param.buffer, types.BufferStorage)
 	case ParamTexture:
 		param.texture = q.bakeTextureIfNeeded(param.texture)
 	}
 	return param
 }
 
-func (q *OpQueue) bakeBufferIfNeeded(buffer BufferDescr, kind BufferKind) BufferDescr {
+func (q *OpQueue) bakeBufferIfNeeded(buffer BufferDescr, kind types.BufferKind) BufferDescr {
 	if buffer.source == BufferSourceBaked || buffer.bytes.Len() == 0 {
 		return buffer
 	}
@@ -351,10 +353,10 @@ func (q *OpQueue) TemporaryBuffer(data []byte, copyData bool) BufferDescr {
 	if len(data) == 0 {
 		return BufferDescr{}
 	}
-	return q.temporaryBuffer(BufferStorage, data, copyData)
+	return q.temporaryBuffer(types.BufferStorage, data, copyData)
 }
 
-func (q *OpQueue) temporaryBuffer(kind BufferKind, data []byte, copyData bool) BufferDescr {
+func (q *OpQueue) temporaryBuffer(kind types.BufferKind, data []byte, copyData bool) BufferDescr {
 	start := sort.Search(q.temporarySorted, func(i int) bool {
 		buffer := &q.temporaryBuffers[i]
 		return buffer.kind > kind || (buffer.kind == kind && buffer.Size >= len(data))
@@ -429,7 +431,7 @@ func (q *OpQueue) TemporaryTarget(width, height int, format TextureFormat) (Targ
 
 // acquireTemporaryTexture takes a matching texture from the frame pool, minting
 // one when the pool has none free.
-func (q *OpQueue) acquireTemporaryTexture(key temporaryTextureKey) TextureID {
+func (q *OpQueue) acquireTemporaryTexture(key temporaryTextureKey) types.TextureID {
 	free := q.temporaryTextureFree[key]
 	best := -1
 	if len(free) > 0 {
@@ -444,7 +446,7 @@ func (q *OpQueue) acquireTemporaryTexture(key temporaryTextureKey) TextureID {
 	return q.temporaryTextures[best].id
 }
 
-func (q *OpQueue) bakeBuffer(id BufferID, kind BufferKind, size int, data []byte, copyData bool) BufferDescr {
+func (q *OpQueue) bakeBuffer(id types.BufferID, kind types.BufferKind, size int, data []byte, copyData bool) BufferDescr {
 	if copyData {
 		data = q.copyUpload(data)
 	}
@@ -456,7 +458,7 @@ func (q *OpQueue) bakeBuffer(id BufferID, kind BufferKind, size int, data []byte
 	return BakedBuffer(id, len(data))
 }
 
-func (q *OpQueue) bakeTexture(id TextureID, width, height int, format TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
+func (q *OpQueue) bakeTexture(id types.TextureID, width, height int, format TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
 	if copyData {
 		pixels = q.copyUpload(pixels)
 	}

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 
 	"github.com/dvoyni/cog/libs/m"
@@ -38,7 +40,7 @@ func arrayTextureFrame(t *testing.T, frames int, params ...ParameterDescr) (*fak
 
 	for range frames {
 		w := recordRaw(t, k)
-		w.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: LoadClear, Label: "main"})
+		w.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear, Label: "main"})
 		w.Draw(triangle(), testMaterial(params...), MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
@@ -79,7 +81,7 @@ func TestADrawSupplyingAFlatTextureForAnArrayBindingIsDroppedAndNamed(t *testing
 	if backend.passDraws[0] != 0 {
 		t.Errorf("draws = %d, want the draw supplying a single-layer texture dropped", backend.passDraws[0])
 	}
-	var mismatch ErrTextureViewDimensionMismatch
+	var mismatch types.ErrTextureViewDimensionMismatch
 	if len(reported) != 1 || !errors.As(reported[0], &mismatch) {
 		t.Fatalf("reported = %v, want one ErrTextureViewDimensionMismatch", reported)
 	}

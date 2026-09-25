@@ -8,6 +8,8 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 
 	"github.com/dvoyni/cog/kernel"
@@ -53,43 +55,45 @@ func (a *testAdapter) Ready() bool {
 // resource ids the moment the engine starts, as a driver's stable backend does.
 var detachedIDs atomic.Uint32
 
-func (a *testAdapter) NewTexture() TextureID {
+func (a *testAdapter) NewTexture() types.TextureID {
 	if backend := a.get(); backend != nil {
 		return backend.NewTexture()
 	}
-	return TextureID(detachedIDs.Add(1))
+	return types.TextureID(detachedIDs.Add(1))
 }
 
-func (a *testAdapter) NewBuffer() BufferID {
+func (a *testAdapter) NewBuffer() types.BufferID {
 	if backend := a.get(); backend != nil {
 		return backend.NewBuffer()
 	}
-	return BufferID(detachedIDs.Add(1))
+	return types.BufferID(detachedIDs.Add(1))
 }
 
-func (a *testAdapter) NewSampler(desc SamplerDesc) (SamplerID, error) {
+func (a *testAdapter) NewSampler(desc types.SamplerDesc) (types.SamplerID, error) {
 	return a.get().NewSampler(desc)
 }
-func (a *testAdapter) FreeSampler(id SamplerID) { a.get().FreeSampler(id) }
-func (a *testAdapter) NewShader(desc shader.ShaderDesc) (ShaderID, error) {
+func (a *testAdapter) FreeSampler(id types.SamplerID) { a.get().FreeSampler(id) }
+func (a *testAdapter) NewShader(desc shader.ShaderDesc) (types.ShaderID, error) {
 	return a.get().NewShader(desc)
 }
-func (a *testAdapter) FreeShader(id ShaderID)                       { a.get().FreeShader(id) }
-func (a *testAdapter) ShaderLayout(id ShaderID) shader.ShaderLayout { return a.get().ShaderLayout(id) }
-func (a *testAdapter) FreePipeline(id PipelineID)                   { a.get().FreePipeline(id) }
-func (a *testAdapter) Limits() Limits                               { return a.get().Limits() }
-func (a *testAdapter) Execute(queue *Queue)                         { a.get().Execute(queue) }
-func (a *testAdapter) TakeCapture() (Capture, bool)                 { return a.get().TakeCapture() }
-func (a *testAdapter) ScreenFramebuffer() (TextureViewID, int, int) {
+func (a *testAdapter) FreeShader(id types.ShaderID) { a.get().FreeShader(id) }
+func (a *testAdapter) ShaderLayout(id types.ShaderID) shader.ShaderLayout {
+	return a.get().ShaderLayout(id)
+}
+func (a *testAdapter) FreePipeline(id types.PipelineID) { a.get().FreePipeline(id) }
+func (a *testAdapter) Limits() types.Limits             { return a.get().Limits() }
+func (a *testAdapter) Execute(queue *Queue)             { a.get().Execute(queue) }
+func (a *testAdapter) TakeCapture() (Capture, bool)     { return a.get().TakeCapture() }
+func (a *testAdapter) ScreenFramebuffer() (types.TextureViewID, int, int) {
 	return a.get().ScreenFramebuffer()
 }
-func (a *testAdapter) NewPipeline(desc PipelineDesc) (PipelineID, error) {
+func (a *testAdapter) NewPipeline(desc PipelineDesc) (types.PipelineID, error) {
 	return a.get().NewPipeline(desc)
 }
-func (a *testAdapter) TextureFormat(texture TextureID) (TextureFormat, bool) {
+func (a *testAdapter) TextureFormat(texture types.TextureID) (TextureFormat, bool) {
 	return a.get().TextureFormat(texture)
 }
-func (a *testAdapter) TextureView(texture TextureID, mip, layer int) TextureViewID {
+func (a *testAdapter) TextureView(texture types.TextureID, mip, layer int) types.TextureViewID {
 	return a.get().TextureView(texture, mip, layer)
 }
 
@@ -139,7 +143,7 @@ func TestAFrameBeforeTheBackendIsReadyIsSkipped(t *testing.T) {
 	k.PublishEvent(app.RenderEvent{}).Wait()
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
-	if len(reported) != 1 || !errors.Is(reported[0], ErrBackendNotReady{}) {
+	if len(reported) != 1 || !errors.Is(reported[0], types.ErrBackendNotReady{}) {
 		t.Fatalf("two frames before the backend was ready reported %v, want one ErrBackendNotReady", reported)
 	}
 

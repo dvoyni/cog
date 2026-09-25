@@ -3,6 +3,8 @@ package internal
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
@@ -38,7 +40,7 @@ func allocatedTarget(t *testing.T, k kernel.Executioner, format TextureFormat) T
 func renderInto(t *testing.T, k kernel.Executioner, target TargetDescr, label string) {
 	t.Helper()
 	q := recordRaw(t, k)
-	q.Pass(PassDescr{Target: target, Depth: DepthNone(), Load: LoadClear, Label: label})
+	q.Pass(PassDescr{Target: target, Depth: DepthNone(), Load: types.LoadClear, Label: label})
 	drawInto(q)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -58,7 +60,7 @@ func TestAPassIntoALinearTargetBuildsALinearPipeline(t *testing.T) {
 	}
 	if got := backend.lastPipelines[0].ColorFormat; got != FormatRGBA8 {
 		t.Errorf("colour format = %v, want %v: the pass renders into a linear target",
-			got.Name(), FormatRGBA8.Name())
+			got.String(), FormatRGBA8.String())
 	}
 }
 
@@ -77,12 +79,12 @@ func TestTwoTargetFormatsSharingAShaderBuildTwoPipelines(t *testing.T) {
 	q := recordRaw(t, k)
 	q.Pass(PassDescr{
 		Target: TextureTarget(srgb, 0, 0), Depth: DepthNone(),
-		Load: LoadClear, Order: 0, Label: "srgb",
+		Load: types.LoadClear, Order: 0, Label: "srgb",
 	})
 	drawInto(q)
 	q.Pass(PassDescr{
 		Target: TextureTarget(linear, 0, 0), Depth: DepthNone(),
-		Load: LoadClear, Order: 1, Label: "linear",
+		Load: types.LoadClear, Order: 1, Label: "linear",
 	})
 	drawInto(q)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
@@ -94,7 +96,7 @@ func TestTwoTargetFormatsSharingAShaderBuildTwoPipelines(t *testing.T) {
 	first, second := backend.lastPipelines[0].ColorFormat, backend.lastPipelines[1].ColorFormat
 	if first != FormatRGBA8Srgb || second != FormatRGBA8 {
 		t.Errorf("colour formats = (%v, %v), want (%v, %v)",
-			first.Name(), second.Name(), FormatRGBA8Srgb.Name(), FormatRGBA8.Name())
+			first.String(), second.String(), FormatRGBA8Srgb.String(), FormatRGBA8.String())
 	}
 }
 
@@ -111,12 +113,12 @@ func TestAScreenPassAndATargetInTheFrameBufferFormatShareOnePipeline(t *testing.
 	q := recordRaw(t, k)
 	q.Pass(PassDescr{
 		Target: TextureTarget(target, 0, 0), Depth: DepthNone(),
-		Load: LoadClear, Order: 0, Label: "offscreen",
+		Load: types.LoadClear, Order: 0, Label: "offscreen",
 	})
 	drawInto(q)
 	q.Pass(PassDescr{
 		Target: ScreenTarget(), Depth: DepthNone(),
-		Load: LoadClear, Order: 1, Label: "screen",
+		Load: types.LoadClear, Order: 1, Label: "screen",
 	})
 	drawInto(q)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
@@ -150,7 +152,7 @@ func TestATargetsFirstFrameKeysTheFrameBufferAndItsNextFrameKeysItsOwn(t *testin
 		t.Fatalf("pipelines after the allocating frame = %d, want one", len(backend.lastPipelines))
 	}
 	if got := backend.lastPipelines[0].ColorFormat; got != FrameBufferFormat {
-		t.Errorf("colour format = %v, want the frame buffer's: the target is not baked yet", got.Name())
+		t.Errorf("colour format = %v, want the frame buffer's: the target is not baked yet", got.String())
 	}
 
 	renderInto(t, k, TextureTarget(target, 0, 0), "second")
@@ -160,7 +162,7 @@ func TestATargetsFirstFrameKeysTheFrameBufferAndItsNextFrameKeysItsOwn(t *testin
 			len(backend.lastPipelines))
 	}
 	if got := backend.lastPipelines[1].ColorFormat; got != FormatRGBA8 {
-		t.Errorf("colour format = %v, want %v once the target is baked", got.Name(), FormatRGBA8.Name())
+		t.Errorf("colour format = %v, want %v once the target is baked", got.String(), FormatRGBA8.String())
 	}
 }
 
@@ -178,7 +180,7 @@ func TestAColourlessPassTakesNoFormatFromItsTarget(t *testing.T) {
 	q := recordRaw(t, k)
 	q.Pass(PassDescr{
 		Target: NoTarget(), Depth: DepthTarget(shadow),
-		DepthLoad: LoadClear, Label: "shadow",
+		DepthLoad: types.LoadClear, Label: "shadow",
 	})
 	q.Draw(triangle(), testMaterial(), MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
@@ -192,6 +194,6 @@ func TestAColourlessPassTakesNoFormatFromItsTarget(t *testing.T) {
 	}
 	if backend.lastPipelines[0].DepthFormat != FormatDepth32F {
 		t.Errorf("depth format = %v, want the engine's one depth format",
-			backend.lastPipelines[0].DepthFormat.Name())
+			backend.lastPipelines[0].DepthFormat.String())
 	}
 }

@@ -2,6 +2,7 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/libs/assets"
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
 // bufferSource selects how a BufferDescr is resolved.
@@ -16,7 +17,7 @@ const (
 // baked storage buffer returned by ResourceQueue.BakeBuffer.
 type BufferDescr struct {
 	source bufferSource
-	id     BufferID
+	id     types.BufferID
 	size   int
 	// bytes is static: the descriptor never writes it, and a caller who built
 	// it from a slice they still hold must not either. That is what lets a
@@ -26,7 +27,7 @@ type BufferDescr struct {
 }
 
 // BakedBuffer is the descriptor of a buffer already baked under id.
-func BakedBuffer(id BufferID, size int) BufferDescr {
+func BakedBuffer(id types.BufferID, size int) BufferDescr {
 	return BufferDescr{source: BufferSourceBaked, id: id, size: size}
 }
 
@@ -39,7 +40,7 @@ func BufferWithBytes(data []byte, copyData bool) BufferDescr {
 
 // ID returns the baked buffer identifier, or 0 when the descriptor is not
 // baked.
-func (b BufferDescr) ID() BufferID { return b.id }
+func (b BufferDescr) ID() types.BufferID { return b.id }
 
 // Size returns the buffer's size in bytes: what was uploaded for an inline
 // descriptor, and what the baked buffer holds for a baked one.

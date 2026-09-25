@@ -3,6 +3,8 @@ package internal
 import (
 	"io/fs"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
@@ -82,7 +84,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.InitResource(&readList{OpQueue: NewOpQueue(ids)})
 	registrar.InitResource(&readyList{queue: NewOpQueue(ids)})
 	registrar.InitResource(NewResourceQueue(ids))
-	registrar.InitResource(&Viewport{})
+	registrar.InitResource(&types.Viewport{})
 	registrar.InitResource(&desiredViewport{})
 	registrar.HandleCommand[PresentCmd](p.presentCmdImpl)
 	registrar.HandleCommand[AcquireCmd](p.acquireCmdImpl)
@@ -184,7 +186,7 @@ func (p *plugin) renderOnRender() (kernel.Lock, kernel.Observe[app.RenderEvent])
 			list := read.Get()
 			backend := p.backend.Get()
 			if !backend.Ready() {
-				k.ReportErrorOnce(backendNotReadyKey{}, ErrBackendNotReady{})
+				k.ReportErrorOnce(backendNotReadyKey{}, types.ErrBackendNotReady{})
 				return
 			}
 			queue := resources.Get()

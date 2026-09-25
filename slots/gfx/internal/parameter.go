@@ -5,6 +5,8 @@ import (
 	"hash/maphash"
 	"math"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
 )
@@ -25,7 +27,7 @@ type ParameterDescr struct {
 	num          float32
 	vec          m.Vec4
 	mat          m.Mat4
-	sampler      SamplerDesc
+	sampler      types.SamplerDesc
 	// raw is the byte copy a RawParameter carries, already laid out the way the
 	// shader reads it. It is validated against WGSL's alignment rules once per
 	// type at construction, so nothing downstream re-derives a layout from it.
@@ -109,7 +111,7 @@ func TextureParam(name string, tex TextureDescr) ParameterDescr {
 
 // SamplerParam creates a sampler parameter. The zero SamplerDesc clamps and
 // filters linearly.
-func SamplerParam(name string, desc SamplerDesc) ParameterDescr {
+func SamplerParam(name string, desc types.SamplerDesc) ParameterDescr {
 	return ParameterDescr{name: name, kind: ParamSampler, sampler: desc}
 }
 
@@ -140,7 +142,7 @@ func (p ParameterDescr) FloatValue() (float32, bool) { return p.num, p.kind == P
 func (p ParameterDescr) TextureValue() (TextureDescr, bool) { return p.texture, p.kind == ParamTexture }
 
 // SamplerValue returns the parameter's sampler and true when it is a sampler parameter.
-func (p ParameterDescr) SamplerValue() (SamplerDesc, bool) {
+func (p ParameterDescr) SamplerValue() (types.SamplerDesc, bool) {
 	return p.sampler, p.kind == ParamSampler
 }
 

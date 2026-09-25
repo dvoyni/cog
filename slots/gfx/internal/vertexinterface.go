@@ -1,6 +1,9 @@
 package internal
 
-import "github.com/dvoyni/cog/slots/gfx/internal/shader"
+import (
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+)
 
 // CheckVertexInterface reports the first way a vertex layout fails the shader
 // about to be drawn with it, and nil when the pair is legal. Three things can
@@ -42,7 +45,7 @@ func CheckVertexInterface(label string, layout shader.ShaderLayout, attrs []Vert
 	// named scene layouts satisfy it by construction, so what this guards is the
 	// custom-layout path.
 	if stride%4 != 0 {
-		return ErrVertexStrideAlignment{Shader: label, Stride: stride}
+		return types.ErrVertexStrideAlignment{Shader: label, Stride: stride}
 	}
 	for _, input := range layout.VertexInputs {
 		// An attribute's @location is its index in the layout, which is the same

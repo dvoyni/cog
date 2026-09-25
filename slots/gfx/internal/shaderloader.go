@@ -3,6 +3,8 @@ package internal
 import (
 	"io/fs"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 
 	"github.com/dvoyni/cog/kernel"
@@ -27,7 +29,7 @@ import (
 // nothing mutates a texture after its load, while report() sets reported on
 // every hit, and a value stored in a map cannot be mutated in place.
 type loadedShader struct {
-	id      ShaderID
+	id      types.ShaderID
 	err     error
 	sources []string
 	// label is ShaderLabel of the descriptor, spelled once here because

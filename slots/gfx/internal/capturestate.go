@@ -2,12 +2,14 @@ package internal
 
 import (
 	"sync"
+
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
 // captureRequest is one live capture or burst: where its stills go, and how far
 // through them the engine has got.
 type captureRequest struct {
-	target   CaptureDesc
+	target   types.CaptureDesc
 	amount   int
 	interval int
 	// bounds counts the stills bound to a tick so far, and delivered the ones
@@ -52,17 +54,17 @@ func (s *captureState) arm(request ArmCaptureRequest) (*captureRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.request != nil {
-		return nil, ErrCaptureBusy{}
+		return nil, types.ErrCaptureBusy{}
 	}
 	amount := max(request.Amount, 1)
 	interval := max(request.Interval, 1)
 	switch {
 	case amount > MaxCaptureAmount:
-		return nil, ErrCaptureAmount{Amount: amount, Max: MaxCaptureAmount}
+		return nil, types.ErrCaptureAmount{Amount: amount, Max: MaxCaptureAmount}
 	case amount*interval > MaxCaptureSpan:
-		return nil, ErrCaptureSpan{Ticks: amount * interval, Max: MaxCaptureSpan}
+		return nil, types.ErrCaptureSpan{Ticks: amount * interval, Max: MaxCaptureSpan}
 	case amount > 1 && request.Paused:
-		return nil, ErrCaptureBurstPaused{}
+		return nil, types.ErrCaptureBurstPaused{}
 	}
 	live := &captureRequest{
 		target: request.Target, amount: amount, interval: interval,
@@ -114,11 +116,11 @@ func (s *captureState) endTick() {
 }
 
 // target reports what the frame about to be rendered should read back.
-func (s *captureState) target() (CaptureDesc, bool) {
+func (s *captureState) target() (types.CaptureDesc, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.request == nil || !s.bound {
-		return CaptureDesc{}, false
+		return types.CaptureDesc{}, false
 	}
 	return s.request.target, true
 }
@@ -169,7 +171,7 @@ func (s *captureState) abandon() {
 		return
 	}
 	select {
-	case s.request.done <- Capture{Err: ErrCaptureAbandoned{}}:
+	case s.request.done <- Capture{Err: types.ErrCaptureAbandoned{}}:
 	default:
 	}
 	s.clear()

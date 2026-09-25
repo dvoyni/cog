@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
@@ -73,7 +75,7 @@ func newCaptureRig(t *testing.T) *captureRig {
 func (r *captureRig) record(label string) {
 	r.t.Helper()
 	q := recordRaw(r.t, r.k)
-	q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: LoadClear, Label: label})
+	q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear, Label: label})
 	drawInto(q)
 }
 
@@ -222,7 +224,7 @@ func TestACaptureIsWrittenAsAPNGWithNoShear(t *testing.T) {
 		return color.NRGBA{R: uint8(10 + x*20), G: uint8(200 - y*50), B: uint8(x + y), A: 255}
 	}
 	rig := newCaptureRig(t)
-	rig.backend.captureResult = func(CaptureDesc) Capture {
+	rig.backend.captureResult = func(types.CaptureDesc) Capture {
 		return paddedCapture(width, height, want)
 	}
 	path := filepath.Join(t.TempDir(), "shot.png")
@@ -261,7 +263,7 @@ func TestACaptureIsWrittenAsAPNGWithNoShear(t *testing.T) {
 
 func TestACaptureReportsThePixelSizeAndTheWindowSize(t *testing.T) {
 	rig := newCaptureRig(t)
-	rig.backend.captureResult = func(CaptureDesc) Capture {
+	rig.backend.captureResult = func(types.CaptureDesc) Capture {
 		return paddedCapture(64, 48, func(int, int) color.NRGBA { return color.NRGBA{A: 255} })
 	}
 
@@ -294,7 +296,7 @@ func TestACaptureBindsToATickThatBeganAfterTheRequest(t *testing.T) {
 	}()
 	<-rig.gate.entered
 	armed := rig.k.ExecuteCommand[ArmCaptureCmd](ArmCaptureRequest{
-		Target: CaptureDesc{Screen: true},
+		Target: types.CaptureDesc{Screen: true},
 	})
 	if armed.Err != nil {
 		t.Fatalf("arm: %v", armed.Err)
@@ -349,14 +351,14 @@ func TestNoCaptureCostsTheRenderNothing(t *testing.T) {
 func TestASecondCaptureWhileOneIsInFlightIsRefused(t *testing.T) {
 	rig := newCaptureRig(t)
 	if answer := rig.k.ExecuteCommand[ArmCaptureCmd](ArmCaptureRequest{
-		Target: CaptureDesc{Screen: true},
+		Target: types.CaptureDesc{Screen: true},
 	}); answer.Err != nil {
 		t.Fatalf("first arm: %v", answer.Err)
 	}
 	second := rig.k.ExecuteCommand[ArmCaptureCmd](ArmCaptureRequest{
-		Target: CaptureDesc{Screen: true},
+		Target: types.CaptureDesc{Screen: true},
 	})
-	if !errors.Is(second.Err, ErrCaptureBusy{}) {
+	if !errors.Is(second.Err, types.ErrCaptureBusy{}) {
 		t.Fatalf("second arm = %v, want it refused as busy rather than queued", second.Err)
 	}
 }
@@ -374,7 +376,7 @@ func TestACaptureAbandonedByShutdownArrivesOnItsChannel(t *testing.T) {
 	<-engine.Ready()
 
 	armed := engine.Executioner().ExecuteCommand[ArmCaptureCmd](ArmCaptureRequest{
-		Target: CaptureDesc{Screen: true},
+		Target: types.CaptureDesc{Screen: true},
 	})
 	if armed.Err != nil {
 		t.Fatalf("arm: %v", armed.Err)
@@ -384,7 +386,7 @@ func TestACaptureAbandonedByShutdownArrivesOnItsChannel(t *testing.T) {
 
 	select {
 	case capture := <-armed.Done:
-		if !errors.Is(capture.Err, ErrCaptureAbandoned{}) {
+		if !errors.Is(capture.Err, types.ErrCaptureAbandoned{}) {
 			t.Fatalf("abandoned capture = %v, want it reported as abandoned", capture.Err)
 		}
 	default:
@@ -419,9 +421,9 @@ func TestABurstWritesNumberedStillsAndReportsTheOrdinals(t *testing.T) {
 func TestABurstTruncatesRatherThanFailing(t *testing.T) {
 	rig := newCaptureRig(t)
 	var taken atomic.Int64
-	rig.backend.captureResult = func(CaptureDesc) Capture {
+	rig.backend.captureResult = func(types.CaptureDesc) Capture {
 		if taken.Add(1) > 2 {
-			return Capture{Err: ErrCaptureNoTarget{}}
+			return Capture{Err: types.ErrCaptureNoTarget{}}
 		}
 		return paddedCapture(4, 2, func(int, int) color.NRGBA { return color.NRGBA{A: 255} })
 	}
@@ -440,8 +442,8 @@ func TestABurstTruncatesRatherThanFailing(t *testing.T) {
 
 func TestACaptureThatWritesNothingIsAnError(t *testing.T) {
 	rig := newCaptureRig(t)
-	rig.backend.captureResult = func(CaptureDesc) Capture {
-		return Capture{Err: ErrCaptureNoTarget{}}
+	rig.backend.captureResult = func(types.CaptureDesc) Capture {
+		return Capture{Err: types.ErrCaptureNoTarget{}}
 	}
 
 	_, err := rig.runCapture(captureScreenRequest{Path: filepath.Join(t.TempDir(), "none.png")})
@@ -491,7 +493,7 @@ func TestASingleCaptureUnderPauseCostsNoTick(t *testing.T) {
 	rig.tick()
 	rig.clock.paused.Store(true)
 
-	pixels := func(CaptureDesc) Capture {
+	pixels := func(types.CaptureDesc) Capture {
 		return paddedCapture(3, 2, func(x, y int) color.NRGBA {
 			return color.NRGBA{R: uint8(x * 30), G: uint8(y * 30), A: 255}
 		})
@@ -565,9 +567,9 @@ func TestABurstUnderPauseIsRefusedInWords(t *testing.T) {
 
 	// gfx refuses it on its own terms too, for the callers that are not an agent.
 	arm := rig.k.ExecuteCommand[ArmCaptureCmd](ArmCaptureRequest{
-		Target: CaptureDesc{Screen: true}, Amount: 4, Paused: true,
+		Target: types.CaptureDesc{Screen: true}, Amount: 4, Paused: true,
 	})
-	if !errors.Is(arm.Err, ErrCaptureBurstPaused{}) {
+	if !errors.Is(arm.Err, types.ErrCaptureBurstPaused{}) {
 		t.Fatalf("paused burst arm = %v, want it refused", arm.Err)
 	}
 }
@@ -579,13 +581,13 @@ func TestATextureCaptureDeclaresItsTransition(t *testing.T) {
 		target = resources.AllocateTexture(64, 64, 1, FormatRGBA8)
 	})
 	if answer := rig.k.ExecuteCommand[ArmCaptureCmd](ArmCaptureRequest{
-		Target: CaptureDesc{Texture: target.ID()},
+		Target: types.CaptureDesc{Texture: target.ID()},
 	}); answer.Err != nil {
 		t.Fatalf("arm: %v", answer.Err)
 	}
 	q := recordRaw(t, rig.k)
 	q.Pass(PassDescr{
-		Target: TextureTarget(target, 0, 0), Depth: DepthNone(), Load: LoadClear, Label: "offscreen",
+		Target: TextureTarget(target, 0, 0), Depth: DepthNone(), Load: types.LoadClear, Label: "offscreen",
 	})
 	q.Draw(triangle(), testMaterial(), MatParam("mvp", m.NewMat4()))
 	rig.tick()
@@ -594,8 +596,8 @@ func TestATextureCaptureDeclaresItsTransition(t *testing.T) {
 	if len(rig.backend.captureDescs) != 1 {
 		t.Fatalf("capture ops = %d, want the texture readback", len(rig.backend.captureDescs))
 	}
-	want := TextureTransition{
-		Texture: target.ID(), From: TextureUsageRenderAttachment, To: TextureUsageCopySrc,
+	want := types.TextureTransition{
+		Texture: target.ID(), From: types.TextureUsageRenderAttachment, To: types.TextureUsageCopySrc,
 	}
 	if _, placed := rig.backend.transitionBefore(want); !placed {
 		t.Fatalf("transitions = %v, want the texture moved into CopySrc before the copy",

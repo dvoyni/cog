@@ -3,6 +3,7 @@ package internal
 import (
 	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
 // The friend functions: what gfx's internal/ reads from a public type's
@@ -19,7 +20,7 @@ func BufferSource(v *BufferDescr) bufferSource { return v.source }
 func DepthKindOf(v *DepthDescr) DepthKind { return v.kind }
 
 // DepthTexture reads DepthDescr.texture for gfx's internal/.
-func DepthTexture(v *DepthDescr) TextureID { return v.texture }
+func DepthTexture(v *DepthDescr) types.TextureID { return v.texture }
 
 // MaterialShapeState reads the shape state OpQueue.FrameMaterial took of a
 // recorded material's param names, and whether it has one.
@@ -63,7 +64,7 @@ func OpQueuePasses(v *OpQueue) []passRecord { return v.passes }
 func OpQueueSelectedPass(v *OpQueue) int { return v.selectedPass() }
 
 // OpQueueTemporaryBuffer calls OpQueue.temporaryBuffer for gfx's internal/.
-func OpQueueTemporaryBuffer(v *OpQueue, a0 BufferKind, a1 []byte, a2 bool) BufferDescr {
+func OpQueueTemporaryBuffer(v *OpQueue, a0 types.BufferKind, a1 []byte, a2 bool) BufferDescr {
 	return v.temporaryBuffer(a0, a1, a2)
 }
 
@@ -98,7 +99,7 @@ func ParameterNum(v *ParameterDescr) float32 { return v.num }
 func ParameterRaw(v *ParameterDescr) assets.Blob { return v.raw }
 
 // ParameterSampler reads ParameterDescr.sampler for gfx's internal/.
-func ParameterSampler(v *ParameterDescr) SamplerDesc { return v.sampler }
+func ParameterSampler(v *ParameterDescr) types.SamplerDesc { return v.sampler }
 
 // ParameterTexture reads ParameterDescr.texture for gfx's internal/.
 func ParameterTexture(v *ParameterDescr) TextureDescr { return v.texture }
@@ -134,7 +135,7 @@ func TargetLayer(v *TargetDescr) int { return v.layer }
 func TargetMip(v *TargetDescr) int { return v.mip }
 
 // TargetTextureOf reads TargetDescr.texture for gfx's internal/.
-func TargetTextureOf(v *TargetDescr) TextureID { return v.texture }
+func TargetTextureOf(v *TargetDescr) types.TextureID { return v.texture }
 
 // TextureParamsFormat reads TextureDescrParams.format for gfx's internal/. The
 // texture loader lives in internal/, because it needs a gfx.Backend, and the

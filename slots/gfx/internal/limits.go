@@ -1,6 +1,9 @@
 package internal
 
-import "github.com/dvoyni/cog/slots/gfx/internal/shader"
+import (
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+)
 
 // uniformMax caps the uniform block a shader may declare. The arena packs
 // blocks of any size, so the cap is a policy rather than a stride; raising it
@@ -25,7 +28,7 @@ func checkUniformBlock(label string, layout shader.ShaderLayout) error {
 //
 // Every reflected binding is emitted for both shader stages, so the per-stage
 // storage limit is counted once over the whole shader.
-func checkWebLimits(label string, layout shader.ShaderLayout, device Limits) error {
+func checkWebLimits(label string, layout shader.ShaderLayout, device types.Limits) error {
 	floor := DefaultLimits()
 	storage, groups, uniformSize := 0, 0, 0
 	for _, resource := range layout.Resources {

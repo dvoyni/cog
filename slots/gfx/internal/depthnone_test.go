@@ -3,6 +3,8 @@ package internal
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -16,7 +18,7 @@ import (
 
 func TestADrawInADepthNonePassBuildsAPipelineWithNoDepthTarget(t *testing.T) {
 	backend, _ := passFrame(t, func(q *OpQueue) {
-		q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthNone(), Load: LoadClear, Label: "flat"})
+		q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthNone(), Load: types.LoadClear, Label: "flat"})
 		drawInto(q)
 	})
 	if len(backend.lastPipelines) != 1 {
@@ -31,7 +33,7 @@ func TestOneShaderInADepthPassAndADepthNonePassBuildsTwoPipelines(t *testing.T) 
 	// As with noColor, the flag has to be in the cache key: a key that ignored
 	// it would hand the second pass whichever pipeline the first one built.
 	backend, _ := passFrame(t, func(q *OpQueue) {
-		q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: LoadClear, Order: 0, Label: "lit"})
+		q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear, Order: 0, Label: "lit"})
 		drawInto(q)
 		q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthNone(), Order: 1, Label: "flat"})
 		drawInto(q)
@@ -54,7 +56,7 @@ func TestOneShaderInADepthPassAndADepthNonePassBuildsTwoPipelines(t *testing.T) 
 
 func TestADrawInADepthAutoPassKeepsItsDepthTarget(t *testing.T) {
 	backend, _ := passFrame(t, func(q *OpQueue) {
-		q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: LoadClear, Label: "lit"})
+		q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear, Label: "lit"})
 		q.Draw(triangle(), testMaterial(), MatParam("mvp", m.NewMat4()))
 	})
 	if len(backend.lastPipelines) != 1 {
@@ -65,7 +67,7 @@ func TestADrawInADepthAutoPassKeepsItsDepthTarget(t *testing.T) {
 		t.Error("a DepthAuto pass built a pipeline with no depth target")
 	}
 	if desc.DepthFormat != FormatDepth32F {
-		t.Errorf("depth format = %v, want the engine's one depth format", desc.DepthFormat.Name())
+		t.Errorf("depth format = %v, want the engine's one depth format", desc.DepthFormat.String())
 	}
 }
 
@@ -79,7 +81,7 @@ func TestADrawInADepthTargetPassKeepsItsDepthTarget(t *testing.T) {
 		shadow = resources.AllocateTexture(64, 64, 1, FormatDepth32F)
 	})
 	q := recordRaw(t, k)
-	q.Pass(PassDescr{Target: NoTarget(), Depth: DepthTarget(shadow), DepthLoad: LoadClear, Label: "shadow"})
+	q.Pass(PassDescr{Target: NoTarget(), Depth: DepthTarget(shadow), DepthLoad: types.LoadClear, Label: "shadow"})
 	drawInto(q)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -92,6 +94,6 @@ func TestADrawInADepthTargetPassKeepsItsDepthTarget(t *testing.T) {
 		t.Error("a DepthTarget pass built a pipeline with no depth target")
 	}
 	if desc.DepthFormat != FormatDepth32F {
-		t.Errorf("depth format = %v, want the engine's one depth format", desc.DepthFormat.Name())
+		t.Errorf("depth format = %v, want the engine's one depth format", desc.DepthFormat.String())
 	}
 }

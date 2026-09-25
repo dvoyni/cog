@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 
 	"github.com/dvoyni/cog/libs/m"
@@ -14,7 +16,7 @@ func TestDefaultLimitsAreTheBrowserFloor(t *testing.T) {
 	// These are the WebGPU spec floor, not any device's numbers: a desktop
 	// adapter reports hardware limits, and checking against those passes a build
 	// that cannot run in a browser.
-	want := Limits{
+	want := types.Limits{
 		MaxBindGroups:                   4,
 		MaxStorageBuffersPerShaderStage: 8,
 		MaxStorageBufferBindingSize:     128 << 20,
@@ -79,7 +81,7 @@ func TestShaderOverTheWebFloorIsReportedOnceAndStillRenders(t *testing.T) {
 func TestCheckWebLimitsMeasuresAgainstTheFloorNotTheDevice(t *testing.T) {
 	// A desktop adapter reports far more than the web floor, so a check against
 	// the device would pass a shader no browser can run.
-	device := Limits{MaxStorageBuffersPerShaderStage: 200, MaxBindGroups: 8, MaxUniformBufferBindingSize: 1 << 20}
+	device := types.Limits{MaxStorageBuffersPerShaderStage: 200, MaxBindGroups: 8, MaxUniformBufferBindingSize: 1 << 20}
 	within := shader.ShaderLayout{
 		Resources: []shader.ShaderResource{
 			{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 256},

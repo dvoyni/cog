@@ -1,4 +1,6 @@
-package internal
+package types
+
+import "strconv"
 
 // AddressMode selects how texture coordinates outside [0,1] are sampled on one
 // axis. It is an enum rather than a bitmask because mirroring is a third mode,
@@ -13,7 +15,7 @@ const (
 )
 
 // Name spells the address mode for a debug document.
-func (mode AddressMode) Name() string {
+func (mode AddressMode) String() string {
 	switch mode {
 	case AddressClamp:
 		return "clamp"
@@ -22,7 +24,7 @@ func (mode AddressMode) Name() string {
 	case AddressMirror:
 		return "mirror"
 	}
-	return UnknownName(int(mode))
+	return "unknown(" + strconv.Itoa(int(mode)) + ")"
 }
 
 // FilterMode selects texture minification/magnification filtering.
@@ -36,14 +38,14 @@ const (
 // Name spells the filter for a debug document. canvas reports one on every
 // sprite transform, so a sampler filter reaches an agent in one spelling
 // whichever tool showed it.
-func (mode FilterMode) Name() string {
+func (mode FilterMode) String() string {
 	switch mode {
 	case FilterLinear:
 		return "linear"
 	case FilterNearest:
 		return "nearest"
 	}
-	return UnknownName(int(mode))
+	return "unknown(" + strconv.Itoa(int(mode)) + ")"
 }
 
 // SamplerDesc describes a sampler to create. Its zero value clamps both axes

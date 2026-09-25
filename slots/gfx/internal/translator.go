@@ -5,6 +5,8 @@ import (
 	"io/fs"
 	"slices"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 
 	"github.com/dvoyni/cog/kernel"
@@ -30,9 +32,9 @@ type frame struct {
 // whole so that adding a state field cannot silently return a pipeline built
 // for the old one.
 type pipelineKey struct {
-	shader      ShaderID
-	topology    PrimitiveTopology
-	state       MaterialState
+	shader      types.ShaderID
+	topology    types.PrimitiveTopology
+	state       types.MaterialState
 	colorFormat TextureFormat
 	depthFormat TextureFormat
 	// noColor separates the pipeline a shader needs in a depth-only pass from
@@ -62,8 +64,8 @@ const (
 	stripIndexUint32
 )
 
-func stripIndexKeyOf(topology PrimitiveTopology, width IndexWidth) stripIndexKey {
-	if topology != TopologyTriangleStrip {
+func stripIndexKeyOf(topology types.PrimitiveTopology, width IndexWidth) stripIndexKey {
+	if topology != types.TopologyTriangleStrip {
 		return stripIndexNone
 	}
 	if width == IndexUint16 {
@@ -82,7 +84,7 @@ type indexLengthKey struct {
 // unsuppliedBufferKey is one storage binding a shader never got filled. The
 // parameter name is in it because one shader may declare several.
 type unsuppliedBufferKey struct {
-	shader    ShaderID
+	shader    types.ShaderID
 	parameter string
 }
 
@@ -91,7 +93,7 @@ type unsuppliedBufferKey struct {
 // and for the same reason: one shader may declare several texture bindings, and
 // each is its own fault.
 type textureViewKey struct {
-	shader    ShaderID
+	shader    types.ShaderID
 	parameter string
 }
 
@@ -106,9 +108,9 @@ type translator struct {
 	// reached only on the render thread, so what protects it is the confinement
 	// rather than a lock of its own.
 	shaders   *assets.Cache[shader.ShaderDescrParams, shaderUserData, *loadedShader]
-	pipelines map[pipelineKey]PipelineID
-	samplers  map[SamplerDesc]SamplerID
-	layouts   map[ShaderID]shader.ShaderLayout
+	pipelines map[pipelineKey]types.PipelineID
+	samplers  map[types.SamplerDesc]types.SamplerID
+	layouts   map[types.ShaderID]shader.ShaderLayout
 	// textures is the path-texture cache. It is a translator field like every
 	// other cache here, reached only on the render thread, so what protects it
 	// is the confinement rather than a lock of its own.
@@ -127,10 +129,10 @@ type translator struct {
 	// the frame so far. A transition has to name the usage the texture is
 	// actually in, so this is tracked rather than assumed; a texture absent
 	// from the map has never been an attachment and needs no barrier.
-	textureUsage map[TextureID]TextureUsage
+	textureUsage map[types.TextureID]types.TextureUsage
 	// runSampled is the scratch set of textures one merged run samples, reused
 	// across runs so a frame allocates nothing per pass.
-	runSampled []TextureID
+	runSampled []types.TextureID
 	// diagnostic holds a report that does not stop the frame - a shader over the
 	// web floor still renders here - until translate surfaces it.
 	diagnostic error
@@ -160,12 +162,12 @@ type translator struct {
 func newTranslator() *translator {
 	return &translator{
 		shaders:           assets.New[shader.ShaderDescrParams, shaderUserData, *loadedShader](shaderLoader{}),
-		pipelines:         map[pipelineKey]PipelineID{},
-		samplers:          map[SamplerDesc]SamplerID{},
-		layouts:           map[ShaderID]shader.ShaderLayout{},
+		pipelines:         map[pipelineKey]types.PipelineID{},
+		samplers:          map[types.SamplerDesc]types.SamplerID{},
+		layouts:           map[types.ShaderID]shader.ShaderLayout{},
 		textures:          assets.New[TextureDescrParams, textureUserData, texture](textureLoader{}),
 		parameterPlans:    map[parameterPlanBucketKey][]cachedParameterPlan{},
-		textureUsage:      map[TextureID]TextureUsage{},
+		textureUsage:      map[types.TextureID]types.TextureUsage{},
 		badIndexLengths:   map[indexLengthKey]struct{}{},
 		unsuppliedBuffers: map[unsuppliedBufferKey]struct{}{},
 
@@ -179,7 +181,7 @@ func newTranslator() *translator {
 // are still translated.
 func (t *translator) translate(
 	k kernel.Kernel, queue *OpQueue, persistent []Op, backend Backend, files func() fs.FS,
-	capture CaptureDesc, capturing bool,
+	capture types.CaptureDesc, capturing bool,
 ) (*Queue, error) {
 	t.ops.Reset()
 
@@ -256,12 +258,12 @@ func (t *translator) translate(
 // indistinguishable from one longer pass, and emits each one's draws.
 func (t *translator) translatePasses(
 	f *frame, queue *OpQueue, firstErr *error,
-	capture CaptureDesc, capturing bool,
+	capture types.CaptureDesc, capturing bool,
 ) {
 	passes, ops := OpQueuePasses(queue), OpQueueOps(queue)
 	t.planPasses(queue)
 	if t.strayDraws > 0 && *firstErr == nil {
-		*firstErr = ErrDrawWithoutPass{Count: t.strayDraws}
+		*firstErr = types.ErrDrawWithoutPass{Count: t.strayDraws}
 	}
 	// Attachment roles are per frame: the pool hands the same texture id to a
 	// different purpose next frame, and every frame's barriers are encoded from
@@ -314,7 +316,7 @@ func (t *translator) translatePasses(
 		// capture declares none: the frame buffer is the one attachment gfx
 		// never names, and the backend places that transition itself.
 		if !capture.Screen {
-			t.transitionTo(capture.Texture, TextureUsageCopySrc)
+			t.transitionTo(capture.Texture, types.TextureUsageCopySrc)
 		}
 		t.ops.Capture(capture)
 	}
@@ -342,15 +344,15 @@ func (t *translator) transitionRun(queue *OpQueue, head PassDescr, first, last i
 		}
 	}
 	for _, texture := range t.runSampled {
-		t.transitionTo(texture, TextureUsageTextureBinding)
+		t.transitionTo(texture, types.TextureUsageTextureBinding)
 	}
 	// Then writes: this run's own attachments. A texture that was sampled
 	// earlier in the frame is transitioned back before it is written again.
 	if TargetKindOf(&head.Target) == TargetTexture {
-		t.transitionTo(TargetTextureOf(&head.Target), TextureUsageRenderAttachment)
+		t.transitionTo(TargetTextureOf(&head.Target), types.TextureUsageRenderAttachment)
 	}
 	if DepthKindOf(&head.Depth) == DepthKindTexture {
-		t.transitionTo(DepthTexture(&head.Depth), TextureUsageRenderAttachment)
+		t.transitionTo(DepthTexture(&head.Depth), types.TextureUsageRenderAttachment)
 	}
 }
 
@@ -384,7 +386,7 @@ func (t *translator) collectSampled(params []ParameterDescr) {
 // that is a change from a role the frame has already put it in. A texture that
 // has never been an attachment this frame has no writes to order against, and
 // one already in the usage is a no-op the backend should not pay for.
-func (t *translator) transitionTo(texture TextureID, to TextureUsage) {
+func (t *translator) transitionTo(texture types.TextureID, to types.TextureUsage) {
 	if texture == 0 {
 		return
 	}
@@ -399,14 +401,14 @@ func (t *translator) transitionTo(texture TextureID, to TextureUsage) {
 	if from == to {
 		return
 	}
-	t.ops.TransitionTexture(TextureTransition{Texture: texture, From: from, To: to})
+	t.ops.TransitionTexture(types.TextureTransition{Texture: texture, From: from, To: to})
 	t.textureUsage[texture] = to
 }
 
 // gpuPassDesc resolves a merged run's attachments: it loads like the pass that
 // opened the run and stores like the one that closed it.
-func (t *translator) gpuPassDesc(backend Backend, head, tail PassDescr) PassDesc {
-	desc := PassDesc{
+func (t *translator) gpuPassDesc(backend Backend, head, tail PassDescr) types.PassDesc {
+	desc := types.PassDesc{
 		Load: head.Load, Clear: head.Clear, Store: tail.Store,
 		DepthLoad: head.DepthLoad, DepthClear: head.DepthClear, DepthStore: tail.DepthStore,
 		Label: head.Label,

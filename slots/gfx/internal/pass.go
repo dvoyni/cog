@@ -2,6 +2,7 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
 // Order places a pass in the frame's shared ordering space. gfx defines no
@@ -26,7 +27,7 @@ const (
 // TargetDescr names a pass's colour attachment.
 type TargetDescr struct {
 	kind          TargetKind
-	texture       TextureID
+	texture       types.TextureID
 	mip, layer    int
 	width, height int
 }
@@ -47,7 +48,7 @@ func (t TargetDescr) Size() (width, height int, ok bool) {
 // It is the read side of TextureTarget, for a caller holding a TargetDescr
 // somebody else built - canvas hands one to SetLayerTarget untouched, so
 // reporting where a layer draws means reading it back out.
-func (t TargetDescr) Texture() (texture TextureID, mip, layer int, ok bool) {
+func (t TargetDescr) Texture() (texture types.TextureID, mip, layer int, ok bool) {
 	if t.kind != TargetTexture {
 		return 0, 0, 0, false
 	}
@@ -91,7 +92,7 @@ const (
 // DepthDescr names a pass's depth attachment.
 type DepthDescr struct {
 	kind          DepthKind
-	texture       TextureID
+	texture       types.TextureID
 	width, height int
 }
 
@@ -132,12 +133,12 @@ type PassDescr struct {
 	Order      Order
 	Target     TargetDescr
 	Depth      DepthDescr
-	Load       LoadOp
+	Load       types.LoadOp
 	Clear      m.Color
-	Store      StoreOp
-	DepthLoad  LoadOp
+	Store      types.StoreOp
+	DepthLoad  types.LoadOp
 	DepthClear float32
-	DepthStore StoreOp
+	DepthStore types.StoreOp
 	Label      string
 }
 
@@ -171,14 +172,14 @@ func (d DepthDescr) sameAs(other DepthDescr) bool {
 // layer cost one GPU pass.
 func MergesInto(successor, predecessor PassDescr) bool {
 	return sameAttachments(successor, predecessor) &&
-		successor.Load == LoadPreserve && successor.DepthLoad == LoadPreserve &&
-		predecessor.Store == StoreKeep && predecessor.DepthStore == StoreKeep
+		successor.Load == types.LoadPreserve && successor.DepthLoad == types.LoadPreserve &&
+		predecessor.Store == types.StoreKeep && predecessor.DepthStore == types.StoreKeep
 }
 
 // hasEffect reports whether a pass is observable. Draws make it observable, and
 // so does any attachment that loads: "clear this target and nothing else" and a
 // camera that culled everything are both legitimate frames.
 func (p PassDescr) hasEffect(draws int) bool {
-	loads := func(op LoadOp) bool { return op == LoadClear || op == LoadDiscard }
+	loads := func(op types.LoadOp) bool { return op == types.LoadClear || op == types.LoadDiscard }
 	return draws > 0 || loads(p.Load) || loads(p.DepthLoad)
 }

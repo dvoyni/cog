@@ -3,6 +3,8 @@ package internal
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 
 	"github.com/dvoyni/cog/libs/m"
@@ -62,7 +64,7 @@ func TestPreparedParameterPlanRejectsAKindMismatch(t *testing.T) {
 	}
 	draw := []ParameterDescr{BufferParam("wobble", BakedBuffer(1, 0))}
 	plan := translator.prepareParameterPlan(1, "wobbly.wgsl", layout, nil, draw)
-	mismatch, ok := plan.mismatch.(ErrParameterKindMismatch)
+	mismatch, ok := plan.mismatch.(types.ErrParameterKindMismatch)
 	if !ok {
 		t.Fatalf("plan mismatch = %v, want ErrParameterKindMismatch", plan.mismatch)
 	}
@@ -87,7 +89,7 @@ func TestPreparedParameterPlanAcceptsEveryKindThatFillsItsBinding(t *testing.T) 
 	draw := []ParameterDescr{
 		FloatParam("scalar", 1), VecParam("vector", m.Vec4{X: 1}),
 		ColorParam("tint", m.Color{R: 1}), RawParameter("record", m.Vec4{Y: 1}),
-		SamplerParam("sampler", SamplerDesc{}), TextureParam("texture", BakedTexture(1, 0, 0)),
+		SamplerParam("sampler", types.SamplerDesc{}), TextureParam("texture", BakedTexture(1, 0, 0)),
 		BufferParam("instances", BakedBuffer(1, 0)),
 	}
 	if plan := translator.prepareParameterPlan(1, "fine.wgsl", layout, nil, draw); plan.mismatch != nil {

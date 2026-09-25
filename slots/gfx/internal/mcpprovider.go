@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
@@ -153,7 +155,7 @@ func captureScreen(k kernel.Executioner, request captureScreenRequest) (captureS
 	}
 
 	armed := k.ExecuteCommand[ArmCaptureCmd](ArmCaptureRequest{
-		Target: CaptureDesc{Screen: true}, Amount: amount, Interval: interval, Paused: paused,
+		Target: types.CaptureDesc{Screen: true}, Amount: amount, Interval: interval, Paused: paused,
 	})
 	if armed.Err != nil {
 		return captureScreenResponse{}, captureRefusal(armed.Err, amount, interval)
@@ -236,14 +238,14 @@ func captureRefusal(reason error, amount, interval int) error {
 		return mcp.Unavailable{Reason: fmt.Sprintf(
 			"no frame was rendered within %s — the game may be paused, minimised, or not rendering",
 			captureFloorDeadline+time.Duration(amount*interval)*captureTick)}
-	case errors.Is(reason, ErrCaptureBusy{}):
+	case errors.Is(reason, types.ErrCaptureBusy{}):
 		return mcp.Unavailable{Reason: "a capture is already in flight; ask again"}
-	case errors.Is(reason, ErrCaptureAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
+	case errors.Is(reason, types.ErrCaptureAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
 		errors.Is(reason, context.Canceled):
 		// A game exiting is the normal case, not a fault: an engine that
 		// terminated while shutting down normally would be the worse answer.
 		return mcp.Unavailable{Reason: "the game is shutting down"}
-	case errors.Is(reason, ErrCaptureNoTarget{}):
+	case errors.Is(reason, types.ErrCaptureNoTarget{}):
 		return mcp.Unavailable{Reason: "the game drew nothing to the screen in that frame"}
 	}
 	var unsupported ErrCaptureUnsupported
@@ -505,11 +507,11 @@ func frameRefusal(reason error) error {
 		return mcp.Unavailable{Reason: fmt.Sprintf(
 			"no tick was recorded within %s — the game may be paused with nothing stepping it, "+
 				"minimised, or not updating", frameDeadline)}
-	case errors.Is(reason, ErrFrameBusy{}):
+	case errors.Is(reason, types.ErrFrameBusy{}):
 		return mcp.Unavailable{Reason: "a frame snapshot is already in flight; ask again. A " +
 			"capture and the other snapshots may run alongside it, and arming them together is " +
 			"how they describe one tick."}
-	case errors.Is(reason, ErrFrameAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
+	case errors.Is(reason, types.ErrFrameAbandoned{}), errors.Is(reason, kernel.ErrSchedulerStopped{}),
 		errors.Is(reason, context.Canceled):
 		// A game exiting is the normal case, not a fault.
 		return mcp.Unavailable{Reason: "the game is shutting down"}

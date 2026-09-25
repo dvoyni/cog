@@ -3,6 +3,8 @@ package internal
 import (
 	"slices"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 
 	"github.com/dvoyni/cog/libs/assets"
@@ -15,7 +17,7 @@ import (
 // baked texture already carries its id and needs nothing, an inline run was
 // baked into one when the frame was recorded, and a path is what the cache is
 // for.
-func (t *translator) ensureTexture(f *frame, descr TextureDescr) TextureID {
+func (t *translator) ensureTexture(f *frame, descr TextureDescr) types.TextureID {
 	if id := descr.ID(); id != 0 {
 		return id
 	}
@@ -35,7 +37,7 @@ func (t *translator) textureUserData(f *frame) textureUserData {
 // ensureShader resolves one material's shader to the module id its draw is
 // encoded against, to the label its reports name it by, and to the error that
 // module has to say for itself.
-func (t *translator) ensureShader(f *frame, descr shader.ShaderDescr) (ShaderID, string, error) {
+func (t *translator) ensureShader(f *frame, descr shader.ShaderDescr) (types.ShaderID, string, error) {
 	cached := t.shaders.Get(
 		f.k, assets.Descr[shader.ShaderDescrParams](descr), f.fsys, t.shaderUserData(f, descr.Path()),
 	)
@@ -51,7 +53,7 @@ func (t *translator) shaderUserData(f *frame, root string) shaderUserData {
 }
 
 // shaderLayout returns the backend's reflected layout for a shader, cached by id.
-func (t *translator) shaderLayout(backend Backend, id ShaderID) shader.ShaderLayout {
+func (t *translator) shaderLayout(backend Backend, id types.ShaderID) shader.ShaderLayout {
 	if l, ok := t.layouts[id]; ok {
 		return l
 	}
@@ -69,8 +71,8 @@ func (t *translator) shaderLayout(backend Backend, id ShaderID) shader.ShaderLay
 // returns zero and no error, and the caller drops the draw on the zero id
 // exactly as it did before.
 func (t *translator) ensurePipeline(
-	backend Backend, shaderID ShaderID, label string, m *MeshDescr, state MaterialState, pass PassDescr,
-) (PipelineID, error) {
+	backend Backend, shaderID types.ShaderID, label string, m *MeshDescr, state types.MaterialState, pass PassDescr,
+) (types.PipelineID, error) {
 	stride := MeshStride(m)
 	layout, ok := VertexLayoutKeyOf(MeshLayout(m))
 	if !ok {
@@ -169,7 +171,7 @@ func (t *translator) targetFormat(backend Backend, pass PassDescr) TextureFormat
 	return FormatScreen.Resolve()
 }
 
-func (t *translator) ensureSampler(backend Backend, desc SamplerDesc) SamplerID {
+func (t *translator) ensureSampler(backend Backend, desc types.SamplerDesc) types.SamplerID {
 	if id, ok := t.samplers[desc]; ok {
 		return id
 	}

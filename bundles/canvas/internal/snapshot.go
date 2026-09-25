@@ -269,7 +269,7 @@ func spriteTransformViewOf(transform SpriteTransform) SpriteTransformView {
 		NineSliceScale: transform.NineSliceScale, NineSliceNoCenter: transform.NineSliceNoCenter,
 		FlipX: transform.FlipX, FlipY: transform.FlipY,
 		TileX: transform.TileX, TileY: transform.TileY,
-		Filter: transform.Filter.Name(),
+		Filter: transform.Filter.String(),
 	}
 	if transform.Size != (m.Vec2{}) {
 		view.Size = vec2Components(transform.Size)

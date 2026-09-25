@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
@@ -98,12 +100,12 @@ func (r *captureRig) runSnapshot(request frameSnapshotRequest, record func(*OpQu
 func twoPasses(q *OpQueue) {
 	q.Pass(PassDescr{
 		Target: ScreenTarget(), Depth: DepthAuto(), Order: 20, Label: "overlay",
-		Load: LoadPreserve, Store: StoreKeep,
+		Load: types.LoadPreserve, Store: types.StoreKeep,
 	})
 	drawInto(q)
 	q.Pass(PassDescr{
 		Target: ScreenTarget(), Depth: DepthAuto(), Order: 10, Label: "world",
-		Load: LoadClear, Clear: m.Color{R: 0.25, A: 1}, Store: StoreKeep,
+		Load: types.LoadClear, Clear: m.Color{R: 0.25, A: 1}, Store: types.StoreKeep,
 	})
 	drawInto(q)
 	q.DrawInstanced(triangle(), testMaterial(), 7, MatParam("mvp", m.NewMat4()))
@@ -209,7 +211,7 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 	var durable TextureDescr
 	withResourceQueue(t, rig.k, func(q *ResourceQueue) {
 		durable = q.AllocateTexture(64, 32, 2, FormatRGBA8)
-		q.UpdateTexture(durable, 1, Region{X: 1, Y: 2, Width: 3, Height: 4}, make([]byte, 48), true)
+		q.UpdateTexture(durable, 1, types.Region{X: 1, Y: 2, Width: 3, Height: 4}, make([]byte, 48), true)
 		q.ReleaseTexture(q.BakeTexture(8, 8, FormatRGBA8Srgb, make([]byte, 256), true, true))
 	})
 
@@ -244,7 +246,7 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 	if len(update) != 1 || update[0].Region == nil {
 		t.Fatalf("updateTexture ops = %+v, want the one with its region", update)
 	}
-	if *update[0].Region != (Region{X: 1, Y: 2, Width: 3, Height: 4}) || update[0].Layer != 1 {
+	if *update[0].Region != (types.Region{X: 1, Y: 2, Width: 3, Height: 4}) || update[0].Layer != 1 {
 		t.Errorf("update = %+v, want the layer and region it was given", update[0])
 	}
 	if update[0].Bytes != 48 {
@@ -262,7 +264,7 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 		t.Errorf("bake queues = %q then %q, want durable first, which is the order they execute in",
 			bakes[0].Queue, bakes[1].Queue)
 	}
-	if !bakes[0].Mipmaps || bakes[0].Format != FormatRGBA8Srgb.Name() {
+	if !bakes[0].Mipmaps || bakes[0].Format != FormatRGBA8Srgb.String() {
 		t.Errorf("durable bake = %+v, want its format and mipmap flag", bakes[0])
 	}
 	if bakes[1].Bytes != 64 || bakes[1].Width != 4 {
@@ -343,7 +345,7 @@ func TestASecondFrameSnapshotIsRefusedInWordsWhileOneIsInFlight(t *testing.T) {
 	// A capture and the other packages' snapshots are separate slots. Refusing
 	// across kinds would destroy the pairing arming them together is for.
 	if answer := rig.k.ExecuteCommand[ArmCaptureCmd](ArmCaptureRequest{
-		Target: CaptureDesc{Screen: true},
+		Target: types.CaptureDesc{Screen: true},
 	}); answer.Err != nil {
 		t.Fatalf("a capture was refused while a frame snapshot was in flight: %v", answer.Err)
 	}
@@ -576,13 +578,13 @@ func TestTheNewAccessorsAnswerOutsideTheAgentPath(t *testing.T) {
 	// a view, a capability or a JSON document.
 	vertices := BufferWithBytes(make([]byte, 3*32), false)
 	indices := BufferWithBytes(make([]byte, 6*4), false)
-	mesh := MeshIndexed(vertices, indices, IndexUint32, TopologyTriangleList,
+	mesh := MeshIndexed(vertices, indices, IndexUint32, types.TopologyTriangleList,
 		Attr(0, Float32x4), Attr(16, Float32x4))
 	if mesh.VertexCount() != 3 || mesh.IndexCount() != 6 {
 		t.Errorf("counts = %d vertices / %d indices, want 3 and 6",
 			mesh.VertexCount(), mesh.IndexCount())
 	}
-	if !mesh.Indexed() || mesh.Topology() != TopologyTriangleList {
+	if !mesh.Indexed() || mesh.Topology() != types.TopologyTriangleList {
 		t.Errorf("mesh = indexed %v / topology %v, want an indexed triangle list",
 			mesh.Indexed(), mesh.Topology())
 	}
@@ -619,7 +621,7 @@ func TestAFrameSnapshotDescribesAPassDrawingSomewhereOtherThanTheScreen(t *testi
 	rig := newCaptureRig(t)
 	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *OpQueue) {
 		target, _ := q.TemporaryTarget(128, 64, FormatRGBA8)
-		q.Pass(PassDescr{Target: target, Depth: DepthNone(), Label: "offscreen", Load: LoadClear})
+		q.Pass(PassDescr{Target: target, Depth: DepthNone(), Label: "offscreen", Load: types.LoadClear})
 		drawInto(q)
 	})
 	if err != nil {

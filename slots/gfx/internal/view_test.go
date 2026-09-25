@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 
 	"github.com/dvoyni/cog/libs/m"
@@ -29,7 +31,7 @@ func TestAParameterSerializesToExactlyOneValue(t *testing.T) {
 		{"color", ColorParam("tint", m.Color{R: 1, A: 1}), "color", "value"},
 		{"vec4", VecParam("offset", m.Vec4{X: 1, Y: 2}), "vec4", "value"},
 		{"mat4", MatParam("mvp", m.NewMat4()), "mat4", "value"},
-		{"sampler", SamplerParam("smp", SamplerDesc{}), "sampler", "sampler"},
+		{"sampler", SamplerParam("smp", types.SamplerDesc{}), "sampler", "sampler"},
 		{"buffer", BufferParam("items", BufferWithBytes([]byte{1, 2, 3, 4}, false)), "buffer", "buffer"},
 		{
 			"texture",
@@ -103,7 +105,7 @@ func TestATextureWithInlinePixelsReportsTheirSizeAndNotThem(t *testing.T) {
 	if view.Texture.Width != 4 || view.Texture.Height != 4 {
 		t.Errorf("size = %dx%d, want 4x4", view.Texture.Width, view.Texture.Height)
 	}
-	if !view.Texture.Mipmaps || view.Texture.Format != FormatRGBA8.Name() {
+	if !view.Texture.Mipmaps || view.Texture.Format != FormatRGBA8.String() {
 		t.Errorf("texture = %+v, want the format and mipmap flag it was built with", view.Texture)
 	}
 	// base64 of the run, and the run itself, both absent: a whole texture in a
@@ -181,7 +183,7 @@ func TestAMaterialViewNamesItsShaderVariantAndState(t *testing.T) {
 }
 
 func TestASnapshotViewCarriesAllThreeCoordinateSizes(t *testing.T) {
-	view := SnapshotViewOf(Viewport{
+	view := SnapshotViewOf(types.Viewport{
 		Width: 800, Height: 600,
 		WindowWidth: 400, WindowHeight: 300,
 		FramebufferWidth: 1600, FramebufferHeight: 1200,

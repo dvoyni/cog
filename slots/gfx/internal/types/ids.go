@@ -1,4 +1,4 @@
-package internal
+package types
 
 // Opaque GPU handles minted by a Backend. The zero value means "none".
 type (

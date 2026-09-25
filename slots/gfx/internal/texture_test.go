@@ -5,6 +5,8 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -125,7 +127,7 @@ func TestARenderTargetIsRenderedIntoAndSampledOnALaterFrame(t *testing.T) {
 		texture = resources.AllocateRenderTarget(64, 64, 1, FormatRGBA8Srgb)
 	})
 	q := recordRaw(t, k)
-	q.Pass(PassDescr{Target: TextureTarget(texture, 0, 0), Depth: DepthNone(), Load: LoadClear, Label: "bake"})
+	q.Pass(PassDescr{Target: TextureTarget(texture, 0, 0), Depth: DepthNone(), Load: types.LoadClear, Label: "bake"})
 	drawInto(q)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -135,7 +137,7 @@ func TestARenderTargetIsRenderedIntoAndSampledOnALaterFrame(t *testing.T) {
 	}
 
 	q = recordRaw(t, k)
-	q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthNone(), Load: LoadClear, Label: "use"})
+	q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthNone(), Load: types.LoadClear, Label: "use"})
 	q.Draw(triangle(), testMaterial(TextureParam("MainTexture", texture)), MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()

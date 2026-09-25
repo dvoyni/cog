@@ -3,6 +3,8 @@ package internal
 import (
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
@@ -25,7 +27,7 @@ func TestADrawInADepthOnlyPassBuildsAPipelineWithNoColourTarget(t *testing.T) {
 		shadow = resources.AllocateTexture(64, 64, 1, FormatDepth32F)
 	})
 	q := recordRaw(t, k)
-	q.Pass(PassDescr{Target: NoTarget(), Depth: DepthTarget(shadow), DepthLoad: LoadClear, Label: "shadow"})
+	q.Pass(PassDescr{Target: NoTarget(), Depth: DepthTarget(shadow), DepthLoad: types.LoadClear, Label: "shadow"})
 	drawInto(q)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -52,9 +54,9 @@ func TestOneShaderInAColourPassAndADepthPassBuildsTwoPipelines(t *testing.T) {
 		shadow = resources.AllocateTexture(64, 64, 1, FormatDepth32F)
 	})
 	q := recordRaw(t, k)
-	q.Pass(PassDescr{Target: NoTarget(), Depth: DepthTarget(shadow), DepthLoad: LoadClear, Order: 0, Label: "shadow"})
+	q.Pass(PassDescr{Target: NoTarget(), Depth: DepthTarget(shadow), DepthLoad: types.LoadClear, Order: 0, Label: "shadow"})
 	drawInto(q)
-	q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: LoadClear, Order: 1, Label: "lit"})
+	q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear, Order: 1, Label: "lit"})
 	drawInto(q)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -79,7 +81,7 @@ func TestAScreenDrawStillDeclaresTheFrameBufferAsItsColourTarget(t *testing.T) {
 	// The flag is additive: an ordinary pass has to be untouched by it, and its
 	// pipeline has to keep naming the frame buffer's format.
 	backend, _ := passFrame(t, func(q *OpQueue) {
-		q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: LoadClear, Label: "screen"})
+		q.Pass(PassDescr{Target: ScreenTarget(), Depth: DepthAuto(), Load: types.LoadClear, Label: "screen"})
 		q.Draw(triangle(), testMaterial(), MatParam("mvp", m.NewMat4()))
 	})
 	if len(backend.lastPipelines) != 1 {
@@ -92,6 +94,6 @@ func TestAScreenDrawStillDeclaresTheFrameBufferAsItsColourTarget(t *testing.T) {
 	// The sentinel is resolved where the key is built, so a screen pass and a
 	// pass into a texture of the frame buffer's own format share one pipeline.
 	if desc.ColorFormat != FrameBufferFormat {
-		t.Errorf("colour format = %v, want the frame buffer's", desc.ColorFormat.Name())
+		t.Errorf("colour format = %v, want the frame buffer's", desc.ColorFormat.String())
 	}
 }

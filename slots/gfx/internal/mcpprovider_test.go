@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+
 	"github.com/dvoyni/cog/bundles/mcp"
 )
 
@@ -43,7 +45,7 @@ func TestDepthAndOtherFormatsAreNotAnImage(t *testing.T) {
 			Pixels: make([]byte, 256), Width: 2, Height: 2, Format: format, BytesPerRow: 256,
 		}
 		if capture.Image() != nil {
-			t.Fatalf("%s produced an image; only 8-bit RGBA can be one", format.Name())
+			t.Fatalf("%s produced an image; only 8-bit RGBA can be one", format.String())
 		}
 	}
 	words := captureRefusal(ErrCaptureUnsupported{Format: FormatDepth32F}, 1, 1)
@@ -58,7 +60,7 @@ func TestDepthAndOtherFormatsAreNotAnImage(t *testing.T) {
 
 // A refusal reaches an agent as words it can act on rather than as a fault.
 func TestACaptureRefusalReadsAsWords(t *testing.T) {
-	refusal := captureRefusal(ErrCaptureBusy{}, 1, 1)
+	refusal := captureRefusal(types.ErrCaptureBusy{}, 1, 1)
 	var unavailable mcp.Unavailable
 	if !errors.As(refusal, &unavailable) {
 		t.Fatalf("refusal = %T, want words an agent can act on", refusal)
