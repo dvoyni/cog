@@ -159,9 +159,12 @@
 // motion, head-on or crossing at an angle: the pair is one stopping Contact with
 // one T, and each Dynamic side moves back to it unless something on its own
 // path stopped it sooner. A Kinematic body is never stopped and never pushed:
-// a Dynamic body it meets on its path is carried along with it by the movement
-// it has left after T, so a fast paddle hits the ball instead of passing
-// through it (continuous-collision.md).
+// every Dynamic body it meets on its path, not just the first, is carried
+// along with it by the movement it has left after T, so a fast paddle hits
+// each ball instead of passing through it. The Contact of a carry past the
+// first is written by Solve, the only System that can tell a Kinematic mover
+// from a Dynamic one, so a filter never sees it and cannot drop it; a reacting
+// System does (continuous-collision.md).
 //
 // One hole is accepted rather than fixed. A Sensor's path is a chord and not
 // the polyline it flew, so a sharply curving one can clip a corner, as a solid

@@ -100,6 +100,18 @@ type Contacts struct {
 	// paths crossed, each an entry held back until the Body's own stop is
 	// settled, since it is reported only up to where the Body stopped.
 	crossings []crossing
+	// held is the Hits of the fast solid Bodies' own paths past where each
+	// stopped, on Body index targets, held out of the list: Detect cannot tell
+	// a Kinematic mover, which carries each Dynamic one, from a Dynamic mover,
+	// which stopped before any of them. The sleep System and Solve read it
+	// after Detect, and Solve writes the ones that are Contacts (carryHeld).
+	// carried, carriedTail, carriedAux and givingWay are Solve's scratch
+	// while it writes them.
+	held        []heldHit
+	carried     []int32
+	carriedTail []Contact
+	carriedAux  []contactAux
+	givingWay   []int32
 
 	// awakeSlots is where the Body index's sleepers' grid starts in the
 	// solver's slot numbering, as Detect saw it: a party at or past it is a
@@ -180,7 +192,7 @@ func (c *Contacts) beginTick() {
 	c.lookup.clear()
 	c.current, c.visible = 0, 0
 	c.maxSlot = 0
-	c.stops, c.stopWorld = c.stops[:0], c.stopWorld[:0]
+	c.stops, c.stopWorld, c.held = c.stops[:0], c.stopWorld[:0], c.held[:0]
 	c.nudged = c.nudgeNormal()
 }
 

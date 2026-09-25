@@ -717,8 +717,10 @@ Making Systems that run in parallel today take turns is rejected outright.
 **Continuous collision changed no lock in this table.** Index's gate reads the
 `Shape` and `Position` it already reads, Detect's path pass reads the two indices
 and writes the `Contacts` it already does, and Solve moves a stopped Dynamic body
-back through the `Dynamic` read and the `Position` write it already holds. No
-System was added. The argument is in
+back, and carries every Dynamic body a fast Kinematic one meets, through the
+`Dynamic` read and the `Position` and `Contacts` writes it already holds. The
+sleep System reads the Hits a fast Body's path met past its stop out of the
+`Contacts` it already writes. No System was added. The argument is in
 [continuous-collision.md § Where each part runs](continuous-collision.md#where-each-part-runs).
 
 Sleeping added the Sleep System and one read to three of the others:
@@ -1210,14 +1212,15 @@ table is a Go map: Go publishes a map's length and never what its buckets cost.
 tick — the solved list, the slot table, the Body and Joint rows — and the swept
 Sensor Probe buffer with the Body slot beside each Hit. Continuous collision's
 scratch joins it: the copy of each stopped Body placed where it stopped, with its
-world cache, the run a fast Body's or a Sensor's Shape is Probed in, and the
+world cache, the run a fast Body's or a Sensor's Shape is Probed in, the
 earliest stops, meetings, partners and crossed Sensors the path pass finds
-before it writes them
+before it writes them, the Hits it holds past each stop, and what Solve writes
+the carried ones with
 ([continuous-collision.md](continuous-collision.md#a-stopped-bodys-other-pairs-are-tested-where-it-stopped)).
 None of it is read across a tick, so the command releases it
-whole and changes no answer; the one exception is the run of stops itself, which
-Solve reads after Detect in the same tick, so it is cut to what it holds rather
-than released; the slot table is sized to the largest Body slot
+whole and changes no answer; the exceptions are the run of stops and the run of
+held Hits, which Solve reads after Detect in the same tick, so they are cut to
+what they hold rather than released; the slot table is sized to the largest Body slot
 detection ever saw, which after a 100 000 Body spike is 400 KB, and up to twice
 that with the slack it grows by, that nothing else would ever give back. The
 sleeping Islands' records, members and quiet Contacts are Contact-list buffers and
@@ -1550,7 +1553,10 @@ which the port does not have. The buffers are kept across ticks, so the build
 allocates nothing. As cp: a Static or Kinematic body never joins an Island nor
 bridges two; a Contact or a Joint with a Kinematic body keeps its Island awake;
 a Sensor Contact neither joins nor wakes, and neither does one a filter dropped
-or ignored.
+or ignored. A Dynamic body a fast Kinematic one will carry past its first Hit
+is kept awake the same way, and woken if it sleeps, though its Contact is
+written only by Solve
+([continuous-collision.md](continuous-collision.md#the-hits-past-the-stop)).
 
 **Its locks are Solve's, and the Stores and Resources sleeping adds.** It reads
 `Sleep`, `Constants`, `Dynamic`, `Velocity`, `Position` and `Joint`, and writes
