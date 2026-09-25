@@ -1105,3 +1105,61 @@ func typesHasInteraction(interactions []Interaction, id ID, kind InteractionKind
 	}
 	return false
 }
+
+// baselineVisual draws a line of text: its box centred in the rect, with the
+// baseline ascent below the box's top.
+type baselineVisual struct {
+	recordingVisual
+	ascent float32
+}
+
+func (visual *baselineVisual) Baseline(_ canvas.LookupAccess, _ any, height float32) (float32, bool) {
+	return (height-visual.defaultSize.Y)/2 + visual.ascent, true
+}
+
+func TestProcessAlignsRowChildrenOnTheirBaselines(t *testing.T) {
+	small := &baselineVisual{recordingVisual: recordingVisual{defaultSize: m.Vec2{X: 10, Y: 18}}, ascent: 14}
+	large := &baselineVisual{recordingVisual: recordingVisual{defaultSize: m.Vec2{X: 10, Y: 24}}, ascent: 19}
+	row := &recordingVisual{}
+	root := Horizontal().
+		ChildrenAlignment(AlignBaseline).
+		Visual(row, nil).
+		Children(
+			Vertical().PaddingTop(2).Children(NewElement().Visual(small, nil)),
+			Vertical().Children(NewElement().Visual(large, nil)),
+		)
+
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 200, Height: 200}}, nil)
+
+	// The small column's baseline is 2+14 below its top and the large one's 19,
+	// so the small column drops 3 and the two baselines meet at 19.
+	assertRect(t, small.states[0].Rect, Rect{X: 0, Y: 5, Width: 10, Height: 18})
+	assertRect(t, large.states[0].Rect, Rect{X: 10, Y: 0, Width: 10, Height: 24})
+	assertRect(t, row.states[0].Rect, Rect{X: 0, Y: 0, Width: 20, Height: 24})
+}
+
+func TestProcessGrowsARowToHoldChildrenOnOneBaseline(t *testing.T) {
+	high := &baselineVisual{recordingVisual: recordingVisual{defaultSize: m.Vec2{X: 10, Y: 20}}, ascent: 5}
+	low := &baselineVisual{recordingVisual: recordingVisual{defaultSize: m.Vec2{X: 10, Y: 20}}, ascent: 15}
+	plain := &recordingVisual{defaultSize: m.Vec2{X: 10, Y: 10}}
+	row := &recordingVisual{}
+	root := Horizontal().
+		ChildrenAlignment(AlignBaseline).
+		Visual(row, nil).
+		Children(
+			NewElement().Visual(high, nil),
+			NewElement().Visual(low, nil),
+			NewElement().Visual(plain, nil),
+		)
+
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 200, Height: 200}}, nil)
+
+	// Fifteen above the baseline for low and fifteen below it for high: the row
+	// is 30 tall, not 20. A child with no baseline is placed at the start.
+	assertRect(t, high.states[0].Rect, Rect{X: 0, Y: 10, Width: 10, Height: 20})
+	assertRect(t, low.states[0].Rect, Rect{X: 10, Y: 0, Width: 10, Height: 20})
+	assertRect(t, plain.states[0].Rect, Rect{X: 20, Y: 0, Width: 10, Height: 10})
+	assertRect(t, row.states[0].Rect, Rect{X: 0, Y: 0, Width: 30, Height: 30})
+}

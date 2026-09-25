@@ -616,7 +616,7 @@ func layoutName(layout Layout) string {
 }
 
 // alignmentName names an Alignment. AlignTop, AlignLeft and the rest are
-// aliases of the same four values, so the axis-neutral name is the only one
+// aliases of the same values, so the axis-neutral name is the only one
 // that can be reported: which axis it means is the parent's Layout.
 func alignmentName(alignment Alignment) string {
 	switch alignment {
@@ -628,6 +628,8 @@ func alignmentName(alignment Alignment) string {
 		return "end"
 	case AlignStretch:
 		return "stretch"
+	case AlignBaseline:
+		return "baseline"
 	}
 	return unknownName(int(alignment))
 }

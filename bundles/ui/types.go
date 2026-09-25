@@ -26,11 +26,14 @@ const (
 	AlignCenter  = internal.AlignCenter
 	AlignEnd     = internal.AlignEnd
 	AlignStretch = internal.AlignStretch
-	AlignTop     = internal.AlignTop
-	AlignMiddle  = internal.AlignMiddle
-	AlignBottom  = internal.AlignBottom
-	AlignLeft    = internal.AlignLeft
-	AlignRight   = internal.AlignRight
+	// AlignBaseline sits a Horizontal's children on the baseline of their
+	// first line of text.
+	AlignBaseline = internal.AlignBaseline
+	AlignTop      = internal.AlignTop
+	AlignMiddle   = internal.AlignMiddle
+	AlignBottom   = internal.AlignBottom
+	AlignLeft     = internal.AlignLeft
+	AlignRight    = internal.AlignRight
 )
 
 // Arrangement distributes a container's children along its main axis.
@@ -75,6 +78,14 @@ type Visual = internal.Visual
 // and shared between elements; Element.Visual binds one to the params of a single
 // element.
 type ParamVisual[T any] = internal.ParamVisual[T]
+
+// BaselineVisual is a Visual that sits its content on a baseline, which
+// AlignBaseline lines up across a row.
+type BaselineVisual = internal.BaselineVisual
+
+// ParamBaselineVisual is a ParamVisual that reports a baseline for its params;
+// every element it is bound to then has one.
+type ParamBaselineVisual[T any] = internal.ParamBaselineVisual[T]
 
 // Element is a frame-local value describing layout, interaction and visual
 // intent. Its Modifiers return a changed copy, so declarations compose

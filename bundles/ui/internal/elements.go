@@ -486,6 +486,21 @@ func (textVisual) DefaultSize(lookup canvas.LookupAccess, params TextParams) m.V
 	return size
 }
 
+// Baseline is where Draw puts the first line's baseline: the text block is
+// centred in the rect, and the line's baseline is its ascent below the top.
+func (textVisual) Baseline(lookup canvas.LookupAccess, params TextParams, height float32) (float32, bool) {
+	if params.Font.Size <= 0 {
+		return 0, false
+	}
+	size := textVisual{}.DefaultSize(lookup, params)
+	ascent := lookup.FontMetrics(params.Font.Path, params.Font.Size).Ascent
+	return (height-size.Y)/2 + ascent, true
+}
+
+func (interactiveTextVisual) Baseline(lookup canvas.LookupAccess, params InteractiveTextPayload, height float32) (float32, bool) {
+	return sharedTextVisual.Baseline(lookup, params.defaultValue, height)
+}
+
 func (textVisual) Draw(lookup canvas.LookupAccess, queue *canvas.OpQueue, state State, params TextParams) {
 	if queue == nil || params.Font.Size <= 0 {
 		return

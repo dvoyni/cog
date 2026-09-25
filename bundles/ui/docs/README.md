@@ -187,7 +187,12 @@ Flow containers support intrinsic sizing, weighted stretch and shrink, wrapping,
 main-axis arrangement, cross-axis alignment, padding, and gaps.
 `ChildrenArrangement` controls the main axis and `ChildrenAlignment` controls
 the cross axis. `AlignStretch` fills an unset cross-axis dimension when the
-parent's cross axis is definite.
+parent's cross axis is definite. `AlignBaseline` sits a `Horizontal`'s children
+on the baseline of their first line of text, so labels of different sizes read
+as one line; the row grows to hold them. A label's baseline is its font's
+ascent; a column's is its first child's, and a row's is its shared baseline or
+its first child's. A visual reports one by implementing `ParamBaselineVisual`.
+A child without a baseline is placed as `AlignStart`.
 
 `Padding` and `PaddingRel` accept CSS-style one, two, three, or four values in
 top/right/bottom/left order. A visual draws in the outer `State.Rect`; padding

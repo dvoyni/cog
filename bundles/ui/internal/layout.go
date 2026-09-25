@@ -122,11 +122,17 @@ type walkItem struct {
 type flowItem struct {
 	node        int
 	main, cross float32
+	// baseline is where the item's baseline sits below its top, when the row
+	// lines it up on one.
+	baseline m.Maybe[float32]
 }
 
 type flowLine struct {
 	start, end int
 	cross      float32
+	// baseline is how far below the line's top its baseline-aligned items sit
+	// their baselines: the deepest of theirs.
+	baseline float32
 }
 
 type capture struct {
@@ -296,7 +302,69 @@ func (context *Processor) measure(lookup canvas.LookupAccess) {
 			element.intermediate.aspectRatio = defaultSize.X / defaultSize.Y
 		}
 		element.intermediate.measured = arrangedSize(element, Rect{})
+		element.intermediate.baseline = context.measureBaseline(nodeIndex, lookup)
 	}
+}
+
+// measureBaseline is where an element's first baseline sits below the top of
+// its measured box: its visual's when it draws one, otherwise a column's first
+// child's, or a row's shared baseline when it lines children up on one and its
+// first child's when it does not. A grid or an overlay has none.
+func (context *Processor) measureBaseline(nodeIndex int, lookup canvas.LookupAccess) m.Maybe[float32] {
+	node := &context.nodes[nodeIndex]
+	element := node.element
+	if visual, ok := element.visual.(BaselineVisual); ok {
+		if baseline, ok := visual.Baseline(lookup, element.intermediate.measured.Y); ok {
+			return m.Some(baseline)
+		}
+	}
+	if element.layout != LayoutHorizontal && element.layout != LayoutVertical {
+		return m.Maybe[float32]{}
+	}
+	top := intrinsicSize(element.paddingTop)
+	if element.layout == LayoutHorizontal {
+		var shared m.Maybe[float32]
+		for child := node.firstChild; child >= 0; child = context.nodes[child].nextSibling {
+			childNode := &context.nodes[child]
+			if !childNode.active || childNode.element.ignoreLayout {
+				continue
+			}
+			if baseline, ok := baselineAligned(element, childNode.element); ok {
+				shared = m.Some(max(shared.Or(baseline), baseline))
+			}
+		}
+		if baseline, ok := shared.Get(); ok {
+			return m.Some(top + baseline)
+		}
+	}
+	for child := node.firstChild; child >= 0; child = context.nodes[child].nextSibling {
+		childNode := &context.nodes[child]
+		if !childNode.active || childNode.element.ignoreLayout {
+			continue
+		}
+		childElement := childNode.element
+		baseline, ok := childElement.intermediate.baseline.Get()
+		if !ok {
+			return m.Maybe[float32]{}
+		}
+		if element.layout == LayoutHorizontal {
+			content := element.intermediate.measured.Y - top - intrinsicSize(element.paddingBottom)
+			alignment := childElement.align.Or(element.childrenAlignment.Or(AlignStart))
+			top += alignmentOffset(alignment, max(content-childElement.intermediate.measured.Y, 0))
+		}
+		return m.Some(top + baseline)
+	}
+	return m.Maybe[float32]{}
+}
+
+// baselineAligned is the baseline child sits on when parent lines its children
+// up on theirs: false when parent is not a row, child is not aligned to the
+// baseline, or it has none, and child is then placed as AlignStart.
+func baselineAligned(parent, child *Element) (float32, bool) {
+	if parent.layout != LayoutHorizontal || child.align.Or(parent.childrenAlignment.Or(AlignStart)) != AlignBaseline {
+		return 0, false
+	}
+	return child.intermediate.baseline.Get()
 }
 
 func (context *Processor) measureContent(nodeIndex int) m.Vec2 {
@@ -306,6 +374,10 @@ func (context *Processor) measureContent(nodeIndex int) m.Vec2 {
 	case LayoutHorizontal, LayoutVertical:
 		horizontal := element.layout == LayoutHorizontal
 		var main, cross float32
+		// Children on a shared baseline stand as far above it as the tallest
+		// ascent among them and hang as far below it as the deepest remainder,
+		// which is taller than either of them when their baselines differ.
+		var above, below float32
 		count := 0
 		for child := node.firstChild; child >= 0; child = context.nodes[child].nextSibling {
 			childNode := &context.nodes[child]
@@ -316,6 +388,11 @@ func (context *Processor) measureContent(nodeIndex int) m.Vec2 {
 			if horizontal {
 				main += size.X
 				cross = max(cross, size.Y)
+				if baseline, ok := baselineAligned(element, childNode.element); ok {
+					above = max(above, baseline)
+					below = max(below, size.Y-baseline)
+					cross = max(cross, above+below)
+				}
 			} else {
 				main += size.Y
 				cross = max(cross, size.X)
@@ -546,6 +623,9 @@ func (context *Processor) arrangeFlow(nodeIndex int, horizontal bool) {
 		item := flowItem{node: child, main: size.Y, cross: size.X}
 		if horizontal {
 			item.main, item.cross = size.X, size.Y
+			if baseline, ok := baselineAligned(element, childNode.element); ok {
+				item.baseline = m.Some(baseline)
+			}
 		}
 		context.flow = append(context.flow, item)
 	}
@@ -556,7 +636,7 @@ func (context *Processor) arrangeFlow(nodeIndex int, horizontal bool) {
 	fixedGap := resolveSignedSize(element.gap, availableMain)
 	context.lines = context.lines[:0]
 	lineStart := 0
-	var lineMain, lineCross float32
+	var lineMain, lineCross, lineAbove, lineBelow float32
 	for itemIndex := range context.flow {
 		item := context.flow[itemIndex]
 		itemGap := float32(0)
@@ -564,16 +644,23 @@ func (context *Processor) arrangeFlow(nodeIndex int, horizontal bool) {
 			itemGap = fixedGap
 		}
 		if canWrap && itemIndex > lineStart && lineMain+itemGap+item.main > availableMain {
-			context.lines = append(context.lines, flowLine{start: lineStart, end: itemIndex, cross: lineCross})
+			context.lines = append(context.lines, flowLine{start: lineStart, end: itemIndex, cross: lineCross, baseline: lineAbove})
 			lineStart = itemIndex
 			lineMain = 0
 			lineCross = 0
+			lineAbove = 0
+			lineBelow = 0
 			itemGap = 0
 		}
 		lineMain += itemGap + item.main
 		lineCross = max(lineCross, item.cross)
+		if baseline, ok := item.baseline.Get(); ok {
+			lineAbove = max(lineAbove, baseline)
+			lineBelow = max(lineBelow, item.cross-baseline)
+			lineCross = max(lineCross, lineAbove+lineBelow)
+		}
 	}
-	context.lines = append(context.lines, flowLine{start: lineStart, end: len(context.flow), cross: lineCross})
+	context.lines = append(context.lines, flowLine{start: lineStart, end: len(context.flow), cross: lineCross, baseline: lineAbove})
 	if !canWrap {
 		context.lines[0].cross = availableCross
 	}
@@ -601,6 +688,9 @@ func (context *Processor) arrangeFlow(nodeIndex int, horizontal bool) {
 			}
 			crossFree := max(line.cross-itemCross, 0)
 			childCross := crossPosition + alignmentOffset(alignment, crossFree)
+			if baseline, ok := item.baseline.Get(); ok {
+				childCross = crossPosition + line.baseline - baseline
+			}
 			if horizontal {
 				child.rect = Rect{X: content.X + mainPosition, Y: content.Y + childCross, Width: item.main, Height: itemCross}
 				child.definiteWidth = child.element.width.Present()

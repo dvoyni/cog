@@ -28,6 +28,11 @@ const (
 	AlignCenter
 	AlignEnd
 	AlignStretch
+	// AlignBaseline sits a row's children on one baseline: the first line of
+	// text in each, whatever its font and size. It means something only across
+	// a Horizontal; a child with no baseline, or under any other layout, is
+	// placed as AlignStart.
+	AlignBaseline
 
 	AlignTop    = AlignStart
 	AlignMiddle = AlignCenter
@@ -83,6 +88,20 @@ type Visual interface {
 	Draw(lookup canvas.LookupAccess, queue *canvas.OpQueue, state State)
 }
 
+// BaselineVisual is a Visual that sits its content on a baseline, which
+// AlignBaseline lines up across a row. A Visual without it has no baseline.
+type BaselineVisual interface {
+	// Baseline is how far below the top of a rect height tall the visual draws
+	// its first baseline, and false when it draws none.
+	Baseline(lookup canvas.LookupAccess, height float32) (float32, bool)
+}
+
+// ParamBaselineVisual is the ParamVisual side of BaselineVisual: a ParamVisual
+// that implements it gives every element it is bound to a baseline.
+type ParamBaselineVisual[T any] interface {
+	Baseline(lookup canvas.LookupAccess, params T, height float32) (float32, bool)
+}
+
 // ParamVisual produces output from typed params. Implementations are stateless
 // and shared between elements; Element.Visual binds one to the params of a single
 // element.
@@ -100,6 +119,15 @@ type boundVisual[T any] struct {
 
 func (b boundVisual[T]) DefaultSize(lookup canvas.LookupAccess) m.Vec2 {
 	return b.visual.DefaultSize(lookup, b.params)
+}
+
+// Baseline is the visual's baseline, when its ParamVisual reports one.
+func (b boundVisual[T]) Baseline(lookup canvas.LookupAccess, height float32) (float32, bool) {
+	visual, ok := b.visual.(ParamBaselineVisual[T])
+	if !ok {
+		return 0, false
+	}
+	return visual.Baseline(lookup, b.params, height)
 }
 
 func (b boundVisual[T]) Draw(lookup canvas.LookupAccess, queue *canvas.OpQueue, state State) {
@@ -162,6 +190,9 @@ type intermediate struct {
 	measured       m.Vec2
 	contentMinimum m.Vec2
 	aspectRatio    float32
-	layer          canvas.Layer
-	active         bool
+	// baseline is how far below the top of its measured box the element's
+	// first baseline sits, when it has one.
+	baseline m.Maybe[float32]
+	layer    canvas.Layer
+	active   bool
 }
