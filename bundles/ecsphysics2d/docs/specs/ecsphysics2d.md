@@ -109,7 +109,8 @@ record; this list is a reading aid, not a second definition.
 - **CollisionBits** / **CollidesWith** — the groups a Shape is in, and the groups
   it collides with. Both sides must agree.
 - **Sensor** — a Shape that reports Contacts but is never pushed and pushes
-  nothing.
+  nothing. One that moves, whatever its Shape, reports everything it touched on
+  its way through the tick.
 - **Contact** — two Entities whose Shapes touch, found once a tick, marked begun,
   continuing or ended.
 - **Contact point** — one of the at most two places a Contact touches.
@@ -1209,8 +1210,9 @@ table is a Go map: Go publishes a map's length and never what its buckets cost.
 tick — the solved list, the slot table, the Body and Joint rows — and the swept
 Sensor Probe buffer with the Body slot beside each Hit. Continuous collision's
 scratch joins it: the copy of each stopped Body placed where it stopped, with its
-world cache, the run a fast Body's Shape is Probed in, and the earliest stops,
-meetings and partners the path pass finds before it writes them
+world cache, the run a fast Body's or a Sensor's Shape is Probed in, and the
+earliest stops, meetings, partners and crossed Sensors the path pass finds
+before it writes them
 ([continuous-collision.md](continuous-collision.md#a-stopped-bodys-other-pairs-are-tested-where-it-stopped)).
 None of it is read across a tick, so the command releases it
 whole and changes no answer; the one exception is the run of stops itself, which
@@ -1235,17 +1237,27 @@ reads the same list response does.
 ### Sensors, and what keeps a point from tunnelling
 
 The package **has no projectile concept**. A projectile is an ordinary Dynamic
-body with a circle `Shape` marked a Sensor; drag, homing Force and inherited
-velocity all come from the integrator.
+body with a `Shape` marked a Sensor; drag, homing Force and inherited velocity
+all come from the integrator.
 
-**Every moving Sensor with a circle Shape is Probed once per tick, from
-`Position.Previous` to `Current`**, with no opt-in flag. A swept circle's Hits are
-a superset of a discrete Overlap's, since what it overlaps at the start is Hit at
-`T = 0` and what it overlaps at the end is Hit before `T = 1`. Its Contacts are
-its Entity plus a `Hit`, ordered by `T`, so the app takes the first and stops at a
-wall.
+**Every moving Sensor, whatever its Shape, is Probed once per tick, from
+`Position.Previous` to `Current`**, with no opt-in flag and no gate. A circle is
+Probed along its centre's chord; any other Shape is moved along its Position's
+chord, held at its end angle, by the same path test a fast solid Body's is
+([continuous-collision.md](continuous-collision.md#every-moving-sensor-is-swept)).
+A swept Sensor's Hits are a superset of a discrete Overlap's, since what it
+overlaps at the start is Hit at `T = 0` and what it overlaps at the end is Hit
+before `T = 1`. Its Contacts are its Entity plus a `Hit`, ordered by `T`, so the
+app takes the first and stops at a wall.
 
-- Box and segment Sensors are tested discretely; a fast one can miss.
+- **A marked party meets a moving Sensor along their relative motion**, from
+  both start poses, with one `T`. Two moving Sensors crossing within a tick are
+  one entry, written by the lower Entity's walk, which is A; a moving Sensor
+  meeting a fast solid Body is written by the Sensor's walk.
+- **A fast solid Body reports the Sensors that did not move which it crosses**,
+  up to where it stopped: the Sensor is A, with the Hit's `T` and `Depth` 0, and
+  the Body is not stopped
+  ([continuous-collision.md](continuous-collision.md#a-fast-body-reports-the-sensors-it-crosses)).
 - A Static Sensor is never Probed.
 - An app that teleports a Sensor sets `Previous = Current`, as render
   interpolation already requires.
@@ -1253,10 +1265,7 @@ wall.
   never stops one. The app reads the Contacts and writes
   `Position.Current = Previous`, then explodes, reflects or expires it.
 - A Sensor's path is **a chord, not the polyline**, so a sharply curving Sensor
-  can clip a corner within one tick.
-- **Two moving Sensors are tested against each other's end positions**, not their
-  relative motion, so two Sensors with a radius crossing within one tick can miss
-  each other. When both find each other, the Hit with the smaller `T` is kept.
+  can clip a corner within one tick. Solid Bodies share this, the one hole left.
 
 **`T` and `Depth` mean one thing on every entry.** For a Probed Sensor, `T` is the
 Probe's and `Depth` is 0, except for a Probe that started inside something, which

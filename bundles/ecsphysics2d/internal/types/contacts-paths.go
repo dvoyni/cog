@@ -9,7 +9,7 @@ import (
 // (continuous-collision.md § Detect: one path pass, § Solve: back to T).
 //
 // Index marks an entry with the one path bit when Detect is to test it along
-// its path through the tick: a moving circle Sensor, and a solid Body that
+// its path through the tick: a moving Sensor, and a solid Body that
 // moved at least its own minimum extent. It lists a marked entry in the grid
 // by its path box. This pass runs once over the marked entries, before the
 // discrete walk, and the Sensor flag picks what a path test keeps. A Sensor
@@ -89,18 +89,20 @@ type partner struct {
 
 // pathPass is Detect's one pass over the marked entries of the Body index: a
 // moving Sensor is swept, and a fast solid Body is stopped at the first thing
-// its path meets.
+// its path meets and reports the Sensors that did not move which it crossed on
+// the way.
 //
 // It runs before the discrete walk, so what it writes sits at the front of the
-// list: a Sensor's entries together and in order of T, then each stopping
-// Contact.
+// list: a moving Sensor's entries together and in order of T, then each
+// stopping Contact, then the crossed Sensors' entries, each Sensor's together
+// and in order of T.
 //
 // slop is the Slop setting, how far two Shapes may overlap and be left alone,
 // which is how much deeper than a fast Body already rests a target on its
 // path may reach without stopping it.
 func (c *Contacts) pathPass(bodies *BodyIndex, statics *StaticIndex, jointed *JointedPairs, slop float64) {
 	moving := &bodies.index
-	c.firsts, c.meetings = c.firsts[:0], c.meetings[:0]
+	c.firsts, c.meetings, c.crossings = c.firsts[:0], c.meetings[:0], c.crossings[:0]
 	for slot := range moving.entries {
 		marked := &moving.entries[slot]
 		if !marked.path || !marked.live {
@@ -114,6 +116,9 @@ func (c *Contacts) pathPass(bodies *BodyIndex, statics *StaticIndex, jointed *Jo
 	}
 	if len(c.firsts) > 0 {
 		c.writeStops(bodies, statics, jointed)
+	}
+	if len(c.crossings) > 0 {
+		c.writeCrossings()
 	}
 }
 
@@ -131,7 +136,9 @@ func (c *Contacts) pathPass(bodies *BodyIndex, statics *StaticIndex, jointed *Jo
 //   - the target is marked itself. Where the tick left it is not where the
 //     Body meets it, the error being its whole movement in the tick, which is
 //     past its own extent; the pair meets along its relative motion instead;
-//   - the target is a Sensor, which never stops a Body;
+//   - the target is a Sensor, which never stops a Body. One that did not
+//     move is reported instead, as an entry that stops nothing
+//     (crossSensors);
 //   - it is at T = 0, a target the Body already touched where the tick began,
 //     which is left to the discrete walk, so a fast ball rolling along a floor
 //     is not stopped by the floor;
@@ -188,6 +195,7 @@ func (c *Contacts) findStop(
 	}
 	path := bodyPath{body: body, world: world, from: from, delta: delta, mover: &mover, rests: -1, slop: slop}
 	c.findPartners(moving, &path, slot)
+	c.crossSensors(bodies, statics, &path, slot, split)
 
 	// Each run is ordered by T, so the first Hit that stops in each is that
 	// run's answer, and the nearer of the two is the stop.
@@ -231,11 +239,16 @@ func (c *Contacts) findStop(
 	c.firsts = append(c.firsts, first)
 }
 
-// findPartners fills the partners with the marked solid Bodies whose path
-// boxes meet this Body's, each tested along the pair's relative motion. They
-// are found in the grid cells the Body is listed in, which are its path box's,
-// every marked entry being listed by its own path box: two paths that meet
-// share a cell.
+// findPartners fills the partners with the marked entries whose path boxes
+// meet this one's, each tested along the pair's relative motion. They are found
+// in the grid cells the entry is listed in, which are its path box's, every
+// marked entry being listed by its own path box: two paths that meet share a
+// cell.
+//
+// Which partners a walk takes is which pairs it writes (continuous-collision.md
+// § Which walk writes a pair): a solid Body takes the marked solid Bodies, a
+// moving Sensor meeting it being the Sensor's walk's; a Sensor takes every
+// marked solid Body, and the marked Sensors of a higher Entity.
 func (c *Contacts) findPartners(moving *index, path *bodyPath, slot int32) {
 	c.partners = c.partners[:0]
 	body := path.body
@@ -247,7 +260,8 @@ func (c *Contacts) findPartners(moving *index, path *bodyPath, slot int32) {
 			for at := moving.buckets[moving.bucket(i, j)]; at >= 0; at = moving.links[at].next {
 				other := moving.links[at].entry
 				second := &moving.entries[other]
-				if other == slot || !second.path || second.shape.Sensor ||
+				if other == slot || !second.path ||
+					(second.shape.Sensor && (!body.shape.Sensor || second.entity < body.entity)) ||
 					!firstScannedCell(second, i, j, body.left, body.bottom) {
 					continue
 				}

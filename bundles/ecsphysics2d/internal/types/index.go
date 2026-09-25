@@ -114,15 +114,15 @@ type entry struct {
 	live                      bool
 	// path is the one path bit: Detect tests this entry along its path
 	// through the tick instead of only where the tick left it. InsertMoving
-	// sets it on a moving circle Sensor, and on a solid Body whose movement
+	// sets it on a moving Sensor, whatever its Shape, and on a solid Body whose movement
 	// passes continuous collision's gate, and the Sensor flag beside it picks
 	// what Detect's path pass keeps. Deciding it once at insert is what keeps
 	// the detection walk's own test a field read.
 	path bool
 	// previousCentre is where the path starts; the end is where the tick left
 	// the entry. For a circle it is the centre, and for any other Shape the
-	// Position. A Sensor's circle starts at its centre at the previous pose; a
-	// solid Body's path is held at its end angle, so it starts at its end pose
+	// Position. A Sensor's circle starts at its centre at the previous pose;
+	// any other path is held at its end angle, so it starts at its end pose
 	// translated by Previous − Current. InsertMoving writes it, and it means
 	// nothing unless path is set.
 	previousCentre m.Vec2d

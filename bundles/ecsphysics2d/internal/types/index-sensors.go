@@ -7,7 +7,7 @@ import (
 
 // The index's half of the path: the Insert that records where a Shape was when
 // the tick began, and the entry lookups Detect reads it back through. It marks
-// two things with the one path bit: a moving circle Sensor, whose sweep is in
+// two things with the one path bit: a moving Sensor, whose sweep is in
 // contacts-sensors.go, and a solid Body past continuous collision's gate
 // (continuous-collision.md § The gate), whose path test and stop are in
 // contacts-paths.go.
@@ -16,7 +16,7 @@ import (
 // recording where it stood when the tick began. It is what the Body index is
 // filled through.
 //
-// Only a moving circle Sensor, or a solid Body that moved at least its own
+// Only a moving Sensor, or a solid Body that moved at least its own
 // minimum extent, keeps anything. Every other Shape is inserted exactly as
 // Insert inserts it, so the path costs the rebuild one compare a Body and
 // nothing else.
@@ -42,14 +42,14 @@ func (idx *StaticIndex) InsertMoving(
 }
 
 // markPath sets the path bit on the entry an Insert just filled, when the
-// Shape is a moving circle Sensor or a solid Body past the gate, and records
+// Shape is a moving Sensor or a solid Body past the gate, and records
 // where its path starts.
 func (idx *index) markPath(slot int32, shape Shape, at, previous m.Vec2d, previousAngle float64) {
 	if slot < 0 {
 		return
 	}
 	if shape.Sensor {
-		idx.sweepFrom(slot, shape, previous, previousAngle)
+		idx.sweepFrom(slot, shape, at, previous, previousAngle)
 		return
 	}
 
@@ -78,26 +78,30 @@ func (idx *index) markPath(slot int32, shape Shape, at, previous m.Vec2d, previo
 	idx.listPath(slot, moved.Negate())
 }
 
-// sweepFrom marks the entry an Insert just filled as a moving circle Sensor,
-// when it is one, and records the centre its path starts at.
-func (idx *index) sweepFrom(slot int32, shape Shape, previous m.Vec2d, previousAngle float64) {
-	if shape.Kind != ShapeCircle {
-		return
-	}
+// sweepFrom marks the entry an Insert just filled as a moving Sensor, whatever
+// its Shape, and records where its path starts. A Sensor has no gate: it is
+// swept whenever it moves (continuous-collision.md § Every moving Sensor is
+// swept).
+func (idx *index) sweepFrom(slot int32, shape Shape, at, previous m.Vec2d, previousAngle float64) {
 	e := &idx.entries[slot]
 	if e.worldLen == 0 {
 		return
 	}
 
-	// The Probe is the circle's own centre from where it was to where it is.
-	// A circle about the Position itself — which is every projectile — needs no
+	// A circle's path is its own centre from where it was to where it is. A
+	// circle about the Position itself, which is every projectile, needs no
 	// transform for the start: the offset is zero, so the rotation cannot move
-	// it and the previous Position is the previous centre.
-	from := previous
-	if shape.verts[0] != (m.Vec2d{}) {
-		from = NewTransformRigid(previous, previousAngle).Point(shape.verts[0])
+	// it and the previous Position is the previous centre. Any other Shape is
+	// held at its end angle, as a solid Body's is, so its path is its
+	// Position's chord.
+	from, end := previous, at
+	if shape.Kind == ShapeCircle {
+		end = idx.slab[e.world]
+		if shape.verts[0] != (m.Vec2d{}) {
+			from = NewTransformRigid(previous, previousAngle).Point(shape.verts[0])
+		}
 	}
-	if from == idx.slab[e.world] {
+	if from == end {
 		// A Sensor that did not move is not a moving Sensor: it is tested
 		// discretely, reports T = 1 and carries the overlap where the tick
 		// ended, which is what an app that teleported it asked for by setting
@@ -105,7 +109,7 @@ func (idx *index) sweepFrom(slot int32, shape Shape, previous m.Vec2d, previousA
 		return
 	}
 	e.previousCentre, e.path = from, true
-	idx.listPath(slot, from.Sub(idx.slab[e.world]))
+	idx.listPath(slot, from.Sub(end))
 }
 
 // listPath lists a marked entry by its path box, the union of its start and

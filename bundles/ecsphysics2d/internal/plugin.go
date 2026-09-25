@@ -280,7 +280,7 @@ func (p *plugin) indexSystem(
 		}
 	}
 
-	// InsertMoving rather than Insert, so that a moving circle Sensor carries
+	// InsertMoving rather than Insert, so that a moving Sensor carries
 	// the path Detect Probes it along. The previous pose comes off the Position
 	// this walk already reads, which is what keeps the swept Sensor from
 	// costing any System a lock it did not already hold: Detect names no
