@@ -24,6 +24,13 @@ import (
 // Contact, and a Dynamic mover's are dropped unseen. The Sensors it crosses
 // past its stop are held the same way, and written for a Kinematic mover.
 //
+// A solid Body's path is tested against the static index, and against the
+// Body index too only when its Shape StopsAtBodies: the fall-back the price of
+// an engaged Body triggered (continuous-collision.md § The fall-back for a
+// solid Body). Without it the Body meets no Kinematic or Dynamic body, holds
+// no Hit past its stop, crosses no resting Sensor that is a Body, and looks
+// for no marked partner; a partner that does carry it judges the pair.
+//
 // A target that is not marked is taken where the tick left it. A target that
 // moved into the path during the tick counts as already there, which is the
 // ghost Hit the specification names as a limit. Two marked solid Bodies meet
@@ -158,8 +165,9 @@ func (c *Contacts) pathPass(bodies *BodyIndex, statics *StaticIndex, jointed *Jo
 }
 
 // findStop is the solid half of the path pass: one fast solid Body, at slot,
-// Probed along its path through both indices, its first Hit that can stop it
-// found and every later one on a Body held; and the marked Bodies its path box
+// Probed along its path through the static index, and through the Body index
+// when its Shape StopsAtBodies, its first Hit that can stop it found and every
+// later one on a Body held; and, with the flag, the marked Bodies its path box
 // meets, each tested along the pair's relative motion.
 //
 // The Shape is held at its end angle, so the path is its end pose moved back
@@ -187,7 +195,8 @@ func (c *Contacts) pathPass(bodies *BodyIndex, statics *StaticIndex, jointed *Jo
 // finds, and it stops nothing.
 //
 // A pair of marked solid Bodies is judged by the lower Entity's walk, by the
-// same rules along the relative path, and a meeting that would stop it is
+// same rules along the relative path, or by the one walk that looks for it
+// when only one Shape StopsAtBodies, and a meeting that would stop it is
 // recorded for both parties, whichever of them it turns out to stop.
 func (c *Contacts) findStop(
 	bodies *BodyIndex, statics *StaticIndex, jointed *JointedPairs, body *entry, slot int32, slop float64,
@@ -203,7 +212,12 @@ func (c *Contacts) findStop(
 		c.mover = make([]m.Vec2d, need)
 	}
 
-	c.probeSlots = c.probeSlots[:0]
+	// The Body index is queried only for a Shape that StopsAtBodies
+	// (continuous-collision.md § The fall-back for a solid Body): its run is
+	// empty otherwise, and so are the partners, so the Body meets the statics
+	// alone.
+	withBodies := body.shape.StopsAtBodies
+	c.probes, c.probeSlots = c.probes[:0], c.probeSlots[:0]
 	from := body.previousCentre
 	var delta m.Vec2d
 	var split int
@@ -211,25 +225,32 @@ func (c *Contacts) findStop(
 	if body.shape.Kind == ShapeCircle {
 		to, radius := world[0], body.shape.Radius
 		delta = to.Sub(from)
-		c.probes = bodies.probeAllSlots(c.probes[:0], &c.probeSlots,
-			from, to, radius, bits, collidesWith, body.entity)
+		if withBodies {
+			c.probes = bodies.probeAllSlots(c.probes, &c.probeSlots,
+				from, to, radius, bits, collidesWith, body.entity)
+		}
 		split = len(c.probes)
 		c.probes = statics.ProbeAll(c.probes, from, to, radius, bits, collidesWith, body.entity)
 	} else {
 		delta = m.Vec2d{X: body.transform.TX, Y: body.transform.TY}.Sub(from)
 		mover = shapeProbeBack(c.mover[:2*used], body.shape, world, body.box, delta)
-		c.probes = moving.shapeAllSlots(c.probes[:0], 0, &c.probeSlots, 0,
-			&mover, bits, collidesWith, body.entity)
-		if bodies.sleeping > 0 {
-			c.probes = bodies.sleepers.shapeAllSlots(c.probes, 0, &c.probeSlots, bodies.awakeSlots(),
+		if withBodies {
+			c.probes = moving.shapeAllSlots(c.probes, 0, &c.probeSlots, 0,
 				&mover, bits, collidesWith, body.entity)
+			if bodies.sleeping > 0 {
+				c.probes = bodies.sleepers.shapeAllSlots(c.probes, 0, &c.probeSlots, bodies.awakeSlots(),
+					&mover, bits, collidesWith, body.entity)
+			}
 		}
 		split = len(c.probes)
 		c.probes = statics.shapeAllSlots(c.probes, split, nil, 0,
 			&mover, bits, collidesWith, body.entity)
 	}
 	path := bodyPath{body: body, world: world, from: from, delta: delta, mover: &mover, rests: -1, slop: slop}
-	c.findPartners(moving, &path, slot)
+	c.partners = c.partners[:0]
+	if withBodies {
+		c.findPartners(moving, &path, slot)
+	}
 	c.crossSensors(bodies, statics, &path, slot, split)
 
 	// Each run is ordered by T, so the first Hit that stops in each is that
@@ -267,13 +288,16 @@ func (c *Contacts) findStop(
 		}
 	}
 
-	// The meetings this walk judges: every partner of a higher Entity whose
-	// relative path would stop this Body. Each is kept whatever this Body's
-	// own first Hit, since it may be the other party's earliest.
+	// The meetings this walk judges: every partner whose relative path would
+	// stop this Body, of a higher Entity, or of a lower one whose own walk
+	// looks for no partner because its Shape does not StopsAtBodies. Each is
+	// kept whatever this Body's own first Hit, since it may be the other
+	// party's earliest.
 	var relative shapeProbe
 	for _, p := range c.partners {
 		other := &moving.entries[p.slot]
-		if !p.ok || other.entity < body.entity || !stops(body, p.hit, other, jointed) {
+		judged := other.entity < body.entity && other.shape.StopsAtBodies
+		if !p.ok || judged || !stops(body, p.hit, other, jointed) {
 			continue
 		}
 		otherWorld := moving.world(other)

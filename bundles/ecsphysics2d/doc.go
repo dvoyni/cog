@@ -148,19 +148,23 @@
 //
 // A solid Body does not tunnel either. One that moves at least its own
 // thinnest width in a tick is Probed along its path, its Shape held at its end
-// angle, and stopped where it first meets a Body it collides with, of any
-// kind, that it was not already touching when the tick began; a Sensor never
-// stops it. There is no opt-in and no Component to add. The stopping Contact is
+// angle, and stopped where it first meets a Static body it collides with that
+// it was not already touching when the tick began; a Sensor never stops it.
+// Meeting the Kinematic and Dynamic bodies on its path too is asked for by its
+// Shape's StopsAtBodies, which makes an engaged Body cost three to four times
+// as much, so a Body without it passes through a Kinematic or Dynamic body it
+// crosses within one tick. Nothing else is to add. The stopping Contact is
 // an ordinary one carrying the T it was stopped at, one point and a Depth of 0,
 // and Solve moves a Dynamic body back to that point before it solves, so a
 // reacting System sees it there; the Body's other Contacts that tick were found
 // where it stopped and carry the same T. A filter that drops or ignores the
 // stopping Contact means no stop, which is how a one-way platform lets a fast
 // Body through. Two Bodies that both moved that fast meet along their relative
-// motion, head-on or crossing at an angle: the pair is one stopping Contact with
-// one T, and each Dynamic side moves back to it unless something on its own
-// path stopped it sooner. A Kinematic body is never stopped and never pushed:
-// every Dynamic body it meets on its path, not just the first, is carried
+// motion, head-on or crossing at an angle, when either one's Shape
+// StopsAtBodies: the pair is one stopping Contact with one T, and each Dynamic
+// side moves back to it unless something on its own path stopped it sooner. A
+// Kinematic body is never stopped and never pushed: with StopsAtBodies, every
+// Dynamic body it meets on its path, not just the first, is carried
 // along with it by the movement it has left after T, so a fast paddle hits
 // each ball instead of passing through it. The Contact of a carry past the
 // first, and the entry of a Sensor crossed past it, are written by Solve, the

@@ -134,17 +134,21 @@ func TestAFastBoxSensorAndAFastSegmentSensorReportAThinTargetOnce(t *testing.T) 
 	}
 }
 
+// A resting Sensor that is a Body is in the Body index, which a fast Body's path
+// test queries only when its Shape StopsAtBodies, so the thrown Body carries
+// the flag for that one.
 func TestAFastSolidBodyReportsASensorThatDidNotMoveAndIsNotStopped(t *testing.T) {
 	resting := []struct {
-		name  string
-		spawn func(t testing.TB, h *harness) ecs.Entity
-	}{{"a Static Sensor", func(t testing.TB, h *harness) ecs.Entity {
+		name   string
+		bodies bool
+		spawn  func(t testing.TB, h *harness) ecs.Entity
+	}{{"a Static Sensor", false, func(t testing.TB, h *harness) ecs.Entity {
 		return h.spawn(t, spawnRequest{
 			Kind:  kindShapedStatic,
 			Place: ecsphysics2d.Position{Current: m.Vec2d{X: targetX}},
 			Shape: board(true),
 		})
-	}}, {"a Sensor Body at rest", func(t testing.TB, h *harness) ecs.Entity {
+	}}, {"a Sensor Body at rest", true, func(t testing.TB, h *harness) ecs.Entity {
 		return h.spawn(t, spawnRequest{
 			Kind:  kindShapedBody,
 			Place: ecsphysics2d.Position{Current: m.Vec2d{X: targetX}},
@@ -160,6 +164,7 @@ func TestAFastSolidBodyReportsASensorThatDidNotMoveAndIsNotStopped(t *testing.T)
 					h := newHarness(t)
 					sensor := target.spawn(t, h)
 					body, shape, reach := solidFor(t, mover.shape)
+					shape.StopsAtBodies = target.bodies
 					start := targetX - 2 - projectileSpeed*tick*float64(phase)/phases
 					thrown := h.spawn(t, spawnRequest{
 						Kind:     kindShapedBody,

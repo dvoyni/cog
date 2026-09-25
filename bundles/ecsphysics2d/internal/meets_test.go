@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"fmt"
 	"math"
 	"testing"
 
@@ -20,10 +21,13 @@ import (
 const meetSpeed = 10 / tick
 
 // thrown spawns a solid Dynamic body of that Shape at a place, moving at a
-// velocity.
+// velocity. Its Shape StopsAtBodies, since what these scenes throw a Body at,
+// or leave in a fast one's way, is Bodies, which a fast Body meets only with
+// the flag set.
 func thrown(t testing.TB, h *harness, shape ecsphysics2d.Shape, at, velocity m.Vec2d) ecs.Entity {
 	t.Helper()
 	body, shape, _ := solidFor(t, shape)
+	shape.StopsAtBodies = true
 	return h.spawn(t, spawnRequest{
 		Kind:     kindShapedBody,
 		Place:    ecsphysics2d.Position{Current: at},
@@ -55,6 +59,9 @@ type meetCase struct {
 	t            float64
 	atA, atB     m.Vec2d
 	tolerance    float64
+	// alone, when 1 or 2, is the one party, A or B, whose Shape
+	// StopsAtBodies; otherwise both do.
+	alone int
 }
 
 // checkMeet runs one case from eight starting points, the whole scene shifted
@@ -68,6 +75,13 @@ func checkMeet(t *testing.T, c meetCase) {
 		shift := m.Vec2d{X: 10 * float64(phase) / phases, Y: 3.7 * float64(phase) / phases}
 		a := thrown(t, h, c.shape, c.fromA.Add(shift), c.velA)
 		b := thrown(t, h, c.shape, c.fromB.Add(shift), c.velB)
+		for party, e := range [2]ecs.Entity{a, b} {
+			if c.alone != 0 && c.alone != party+1 {
+				shape := h.read(t, e).Shape
+				shape.StopsAtBodies = false
+				h.setShape(t, e, shape)
+			}
+		}
 		h.frame(t)
 
 		entries := meetingOf(h.contacts(t), a, b)
@@ -109,6 +123,26 @@ func TestTwoFastBallsMeetHeadOn(t *testing.T) {
 		// The circle's Probe is exact.
 		tolerance: 1e-9,
 	})
+}
+
+// The same meeting where only one of the two Shapes StopsAtBodies, either one:
+// a pair meets when either party asks for Bodies. A is the lower Entity, whose
+// walk judges a pair when both ask; when only B does, B's walk judges it.
+func TestTwoFastBallsMeetWhenOnlyOneStopsAtBodies(t *testing.T) {
+	for _, alone := range []int{1, 2} {
+		t.Run(fmt.Sprintf("only %c", 'A'+alone-1), func(t *testing.T) {
+			checkMeet(t, meetCase{
+				name:  "balls",
+				shape: ecsphysics2d.NewCircleShape(1, m.Vec2d{}),
+				fromA: m.Vec2d{}, fromB: m.Vec2d{X: 10},
+				velA: m.Vec2d{X: meetSpeed}, velB: m.Vec2d{X: -meetSpeed},
+				t:   0.4,
+				atA: m.Vec2d{X: 4}, atB: m.Vec2d{X: 6},
+				tolerance: 1e-9,
+				alone:     alone,
+			})
+		})
+	}
 }
 
 // The same meeting for two boxes 2 m square, whose relative motion is

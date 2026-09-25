@@ -18,9 +18,11 @@ import (
 // path is d_other.
 
 // paddle spawns a Kinematic body of that Shape at a place, moving at a
-// velocity.
+// velocity. Its Shape StopsAtBodies, since what a paddle is thrown at here is
+// Bodies, which a fast Body meets only with the flag set.
 func paddle(t testing.TB, h *harness, shape ecsphysics2d.Shape, at, velocity m.Vec2d) ecs.Entity {
 	t.Helper()
+	shape.StopsAtBodies = true
 	return h.spawn(t, spawnRequest{
 		Kind:     kindShapedKinematic,
 		Place:    ecsphysics2d.Position{Current: at},
