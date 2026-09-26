@@ -153,6 +153,10 @@ type translator struct {
 	// mistake lives in the material until someone edits it, and the frame
 	// carries only its first error.
 	textureViewMismatches map[textureViewKey]struct{}
+	// released is every id the frames so far have released, so a draw a
+	// re-rendered frame still names over one of them is dropped rather than
+	// issued over buffers the backend no longer has.
+	released releasedIDs
 }
 
 func newTranslator() *translator {
@@ -200,6 +204,7 @@ func (t *translator) translate(
 					t.ops.BakeBuffer(op.BufferID, op.BufferKind, op.BufferSize, op.Bytes)
 				}
 			case OpReleaseBuffer:
+				t.released.releaseBuffer(op.BufferID)
 				t.ops.ReleaseBuffer(op.BufferID)
 			case OpReleaseTexture:
 				t.ops.ReleaseTexture(op.TextureID)

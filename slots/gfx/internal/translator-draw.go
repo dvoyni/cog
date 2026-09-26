@@ -19,6 +19,15 @@ func (t *translator) translateDraw(f *frame, op *DrawOp, pass descriptors.PassDe
 	if vertices.ID() == 0 || m.VertexCount() <= 0 || stride <= 0 {
 		return
 	}
+	// A draw naming a released id - its vertex buffer, or the index buffer it
+	// draws through - goes before anything else, reports included and silently:
+	// it is a frame rendered again after what it names was let go, not a
+	// mistake. The check is written out here rather than behind a helper so it
+	// inlines; a helper naming both buffers is over the inliner's budget, and
+	// the call alone measured about two percent of TranslateSteadyState.
+	if t.released.buffer(vertices.ID()) || (m.Indexed() && t.released.buffer(indices.ID())) {
+		return
+	}
 	// The index buffer is checked before anything is emitted for this draw, so
 	// a dropped one leaves no orphaned pipeline or binding behind it. It is the
 	// one thing gfx can say about an index buffer without walking it, and
