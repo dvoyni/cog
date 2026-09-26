@@ -542,12 +542,12 @@ func BenchmarkOpQueueDrawSteadyState(b *testing.B) {
 		descriptors.FloatParam("time", 1),
 	}
 
-	queue.Draw(0, mesh, material, 1, 0, params...)
+	queue.Draw(queue.NewPass(descriptors.PassDescr{}), mesh, material, 1, 0, params...)
 	queue.reset()
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		queue.Draw(0, mesh, material, 1, 0, params...)
+		queue.Draw(queue.NewPass(descriptors.PassDescr{}), mesh, material, 1, 0, params...)
 		queue.reset()
 	}
 }
@@ -669,8 +669,8 @@ func TestPassRefsAreFrameLocal(t *testing.T) {
 	queue.Draw(first, triangle(), testMaterial(), 1, 0)
 	// An unknown reference names no pass rather than guessing one.
 	queue.Draw(descriptors.PassRef(99), triangle(), testMaterial(), 1, 0)
-	if got := drawPasses(&queue); !slices.Equal(got, []int32{1, 0, -1}) {
-		t.Errorf("draw passes = %v, want [1 0 -1]", got)
+	if got := drawCounts(&queue); !slices.Equal(got, []int{1, 1, 1}) {
+		t.Errorf("draws per pass, then stray = %v, want [1 1 1]", got)
 	}
 
 	// A reference outlives nothing: after reset it names no pass until the new
@@ -680,18 +680,27 @@ func TestPassRefsAreFrameLocal(t *testing.T) {
 		t.Fatalf("after reset: %d passes, want none declared", len(OpQueuePasses(&queue)))
 	}
 	queue.Draw(first, triangle(), testMaterial(), 1, 0)
-	if got := drawPasses(&queue); !slices.Equal(got, []int32{-1}) {
-		t.Errorf("last frame's reference drew into passes %v, want none", got)
+	if got := drawCounts(&queue); !slices.Equal(got, []int{1}) {
+		t.Errorf("last frame's reference drew %v, want only a stray", got)
+	}
+
+	// A pass declared in a later frame reuses an earlier record, and starts
+	// with none of that record's draws.
+	queue.reset()
+	queue.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto()})
+	if got := drawCounts(&queue); !slices.Equal(got, []int{0, 0}) {
+		t.Errorf("a reused pass record holds %v, want no draws", got)
 	}
 }
 
-// drawPasses lists the pass index each recorded draw landed in, -1 for none.
-func drawPasses(q *OpQueue) []int32 {
-	var passes []int32
-	for _, op := range q.draws {
-		passes = append(passes, op.Pass)
+// drawCounts lists how many draws each declared pass holds, then the frame's
+// stray draws.
+func drawCounts(q *OpQueue) []int {
+	var counts []int
+	for _, pass := range q.passes {
+		counts = append(counts, len(pass.Draws))
 	}
-	return passes
+	return append(counts, q.strayDraws)
 }
 
 func testOpQueue(backend Backend) OpQueue {
@@ -928,13 +937,14 @@ func TestOpQueueTemporaryBufferPool(t *testing.T) {
 
 func TestDrawStoresTemporaryBufferIDsWithoutInlineGeometry(t *testing.T) {
 	queue := testOpQueue(&fakeBackend{})
+	ref := queue.NewPass(descriptors.PassDescr{})
 	mesh := triangle()
-	queue.Draw(0, mesh, testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	queue.Draw(ref, mesh, testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 
 	if bake := OpQueueResources(&queue); len(bake) != 1 || bake[0].Kind != OpBakeBuffer || bake[0].BufferKind != types.BufferVertex {
 		t.Fatal("draw did not record one vertex bake")
 	}
-	draw := &OpQueueDraws(&queue)[0]
+	draw := &queue.passes[0].Draws[0]
 	if descriptors.MeshVertices(&draw.Mesh).ID() == 0 || draw.Mesh.VertexCount() != 3 {
 		t.Fatalf("draw vertex resource = (%d, %d), want nonzero ID and 3 vertices", descriptors.MeshVertices(&draw.Mesh).ID(), draw.Mesh.VertexCount())
 	}
@@ -954,7 +964,8 @@ func TestOpQueueArenasPreserveCallerDataIsolation(t *testing.T) {
 	materialParams := []descriptors.ParameterDescr{descriptors.ColorParam("tint", m.Color{R: 1})}
 	drawParams := []descriptors.ParameterDescr{descriptors.FloatParam("time", 1)}
 
-	queue.Draw(0,
+	ref := queue.NewPass(descriptors.PassDescr{})
+	queue.Draw(ref,
 		descriptors.Mesh(descriptors.BufferWithBytes(vertices, true), types.TopologyTriangleList, layout...),
 		descriptors.Material(shader.ShaderWithText("//test"), materialParams...), 1, 0,
 		drawParams...,
@@ -964,7 +975,7 @@ func TestOpQueueArenasPreserveCallerDataIsolation(t *testing.T) {
 	materialParams[0] = descriptors.ColorParam("tint", m.Color{G: 1})
 	drawParams[0] = descriptors.FloatParam("time", 9)
 
-	draw := &OpQueueDraws(&queue)[0]
+	draw := &queue.passes[0].Draws[0]
 	if OpQueueResources(&queue)[0].Bytes[0] != 1 {
 		t.Fatalf("recorded vertex byte = %d, want 1", OpQueueResources(&queue)[0].Bytes[0])
 	}
@@ -987,8 +998,9 @@ func TestBufferWithBytesCopyDataControlsOwnership(t *testing.T) {
 	borrowed[0] = 2
 	layout := []descriptors.VertexAttr{descriptors.Attr(0, descriptors.Float32x3)}
 
-	queue.Draw(0, descriptors.Mesh(descriptors.BufferWithBytes(copied, true), types.TopologyTriangleList, layout...), testMaterial(), 1, 0)
-	queue.Draw(0, descriptors.Mesh(descriptors.BufferWithBytes(borrowed, false), types.TopologyTriangleList, layout...), testMaterial(), 1, 0)
+	ref := queue.NewPass(descriptors.PassDescr{})
+	queue.Draw(ref, descriptors.Mesh(descriptors.BufferWithBytes(copied, true), types.TopologyTriangleList, layout...), testMaterial(), 1, 0)
+	queue.Draw(ref, descriptors.Mesh(descriptors.BufferWithBytes(borrowed, false), types.TopologyTriangleList, layout...), testMaterial(), 1, 0)
 	copied[0] = 9
 	borrowed[0] = 10
 
@@ -1047,7 +1059,7 @@ func TestOpQueueBakesInlineMaterialAndDrawParameters(t *testing.T) {
 		descriptors.TextureParam("DrawTexture", drawTexture),
 		descriptors.BufferParam("DrawBuffer", drawBuffer),
 	)
-	draw := &OpQueueDraws(queue)[0]
+	draw := &queue.passes[0].Draws[0]
 	for _, param := range append(draw.Material.Params(), draw.Params...) {
 		switch descriptors.ParameterKind(&param) {
 		case descriptors.ParamTexture:
@@ -1898,8 +1910,9 @@ func TestTemporaryBufferUploadsOnceForEveryDrawThatBindsIt(t *testing.T) {
 
 	buffer := queue.NewTemporaryBuffer(arena, true)
 	arena[0] = 9
+	ref := queue.NewPass(descriptors.PassDescr{})
 	for i := range 3 {
-		queue.Draw(0, triangle(), testMaterial(), 1, 0,
+		queue.Draw(ref, triangle(), testMaterial(), 1, 0,
 			descriptors.BufferRangeParam("records", buffer, i*descriptors.StorageAlignment, descriptors.StorageAlignment))
 	}
 
@@ -1915,8 +1928,8 @@ func TestTemporaryBufferUploadsOnceForEveryDrawThatBindsIt(t *testing.T) {
 	if bakes != 1 {
 		t.Fatalf("the arena uploaded %d times, want once for the whole frame", bakes)
 	}
-	for i := range OpQueueDraws(&queue) {
-		param := OpQueueDraws(&queue)[i].Params[0]
+	for i := range queue.passes[0].Draws {
+		param := queue.passes[0].Draws[i].Params[0]
 		if descriptors.ParameterBuffer(&param).ID() != buffer.ID() || descriptors.BufferSource(descriptors.ParameterBufferRef(&param)) != descriptors.BufferSourceBaked {
 			t.Fatalf("draw bound %+v, want the one baked arena %+v", descriptors.ParameterBuffer(&param), buffer)
 		}
@@ -1929,8 +1942,9 @@ func TestTemporaryTextureUploadsOnceForEveryDrawThatSamplesIt(t *testing.T) {
 
 	texture := queue.NewTemporaryTexture(1, 1, descriptors.FormatRGBA8, pixels, true, false)
 	pixels[0] = 9
+	ref := queue.NewPass(descriptors.PassDescr{})
 	for range 3 {
-		queue.Draw(0, triangle(), testMaterial(), 1, 0, descriptors.TextureParam("MainTexture", texture))
+		queue.Draw(ref, triangle(), testMaterial(), 1, 0, descriptors.TextureParam("MainTexture", texture))
 	}
 
 	bakes := 0
@@ -1945,8 +1959,8 @@ func TestTemporaryTextureUploadsOnceForEveryDrawThatSamplesIt(t *testing.T) {
 	if bakes != 1 {
 		t.Fatalf("the texture uploaded %d times, want once for the whole frame", bakes)
 	}
-	for i := range OpQueueDraws(&queue) {
-		param := OpQueueDraws(&queue)[i].Params[0]
+	for i := range queue.passes[0].Draws {
+		param := queue.passes[0].Draws[i].Params[0]
 		if descriptors.ParameterTexture(&param).ID() != texture.ID() {
 			t.Fatalf("draw bound %+v, want the one baked texture %+v", descriptors.ParameterTexture(&param), texture)
 		}

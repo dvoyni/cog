@@ -137,18 +137,19 @@ func frameViewOf(queue *OpQueue, resources *ResourceQueue, filter string) FrameV
 
 	draws := make([]int, len(OpQueuePasses(queue)))
 	instances := make([]int, len(OpQueuePasses(queue)))
-	for i := range OpQueueDraws(queue) {
-		op := &OpQueueDraws(queue)[i]
-		view.DrawCount++
-		view.InstanceCount += op.Instances
-		pass := int(op.Pass)
-		if pass < 0 || pass >= len(OpQueuePasses(queue)) {
-			view.StrayDraws++
-			continue
+	for pass := range OpQueuePasses(queue) {
+		record := &OpQueuePasses(queue)[pass]
+		draws[pass] = len(record.Draws)
+		for i := range record.Draws {
+			instances[pass] += record.Draws[i].Instances
 		}
-		draws[pass]++
-		instances[pass] += op.Instances
+		view.DrawCount += draws[pass]
+		view.InstanceCount += instances[pass]
 	}
+	// A stray draw is counted and dropped at record time, so it adds to the
+	// frame's draws but carries no instances.
+	view.StrayDraws = OpQueueStrayDraws(queue)
+	view.DrawCount += view.StrayDraws
 
 	order := make([]int, len(OpQueuePasses(queue)))
 	for i := range order {

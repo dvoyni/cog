@@ -119,14 +119,8 @@ type translator struct {
 	textures       *assets.Cache[descriptors.TextureDescrParams, textureUserData, texture]
 	parameterPlans map[parameterPlanBucketKey][]cachedParameterPlan
 	ops            Queue
-	// Pass bookkeeping, reused each frame: the run order of the frame's passes
-	// and its draws bucketed behind the pass that recorded them.
-	passOrder  []int
-	passStart  []int
-	passDraws  []int
-	passCursor []int
-	// strayDraws counts the frame's draws naming no pass declared this frame.
-	strayDraws int
+	// passOrder is the run order of the frame's passes, reused each frame.
+	passOrder []int
 	// textureUsage is what role each attachment texture is currently in, for
 	// the frame so far. A transition has to name the usage the texture is
 	// actually in, so this is tracked rather than assumed; a texture absent
@@ -244,10 +238,10 @@ func (t *translator) translatePasses(
 	f *frame, queue *OpQueue, firstErr *error,
 	capture types.CaptureDesc, capturing bool,
 ) {
-	passes, drawOps := OpQueuePasses(queue), OpQueueDraws(queue)
+	passes := OpQueuePasses(queue)
 	t.planPasses(queue)
-	if t.strayDraws > 0 && *firstErr == nil {
-		*firstErr = types.ErrDrawWithoutPass{Count: t.strayDraws}
+	if stray := OpQueueStrayDraws(queue); stray > 0 && *firstErr == nil {
+		*firstErr = types.ErrDrawWithoutPass{Count: stray}
 	}
 	// Attachment roles are per frame: the pool hands the same texture id to a
 	// different purpose next frame, and every frame's barriers are encoded from
@@ -256,7 +250,7 @@ func (t *translator) translatePasses(
 	presents := false
 	for i := 0; i < len(t.passOrder); {
 		head := passes[t.passOrder[i]].Desc
-		tail, draws := head, t.passDrawCount(t.passOrder[i])
+		tail, draws := head, len(passes[t.passOrder[i]].Draws)
 		last := i
 		for j := i + 1; j < len(t.passOrder); j++ {
 			next := passes[t.passOrder[j]].Desc
@@ -264,7 +258,7 @@ func (t *translator) translatePasses(
 				break
 			}
 			tail, last = next, j
-			draws += t.passDrawCount(t.passOrder[j])
+			draws += len(passes[t.passOrder[j]].Draws)
 		}
 		if !descriptors.PassHasEffect(&head, draws) {
 			i = last + 1
@@ -275,8 +269,8 @@ func (t *translator) translatePasses(
 		t.ops.BeginPass(t.gpuPassDesc(f.backend, head, tail))
 		for j := i; j <= last; j++ {
 			pass := &passes[t.passOrder[j]]
-			for _, index := range t.passDrawOps(t.passOrder[j]) {
-				t.translateDraw(f, &drawOps[index], pass.Desc, firstErr)
+			for k := range pass.Draws {
+				t.translateDraw(f, &pass.Draws[k], pass.Desc, firstErr)
 			}
 		}
 		t.ops.EndPass()
@@ -317,12 +311,13 @@ func (t *translator) translatePasses(
 // then write). A texture nothing has used as an attachment this frame is not
 // gfx's to order.
 func (t *translator) transitionRun(queue *OpQueue, head descriptors.PassDescr, first, last int) {
-	draws := OpQueueDraws(queue)
+	passes := OpQueuePasses(queue)
 	// Reads first: a texture this run samples has to have finished being written.
 	t.runSampled = t.runSampled[:0]
 	for j := first; j <= last; j++ {
-		for _, index := range t.passDrawOps(t.passOrder[j]) {
-			op := &draws[index]
+		draws := passes[t.passOrder[j]].Draws
+		for k := range draws {
+			op := &draws[k]
 			t.collectSampled(op.Material.Params())
 			t.collectSampled(op.Params)
 		}
@@ -419,47 +414,15 @@ func (t *translator) gpuPassDesc(backend Backend, head, tail descriptors.PassDes
 	return desc
 }
 
-// planPasses puts the frame's passes in run order - Order first, declaration
-// sequence breaking ties - and buckets each pass's draws behind it.
+// planPasses puts the frame's passes in run order: Order first, declaration
+// sequence breaking ties. Each pass already holds its own draws.
 func (t *translator) planPasses(queue *OpQueue) {
-	passes, draws := OpQueuePasses(queue), OpQueueDraws(queue)
-	count := len(passes)
+	passes := OpQueuePasses(queue)
 	t.passOrder = t.passOrder[:0]
-	for i := range count {
+	for i := range passes {
 		t.passOrder = append(t.passOrder, i)
 	}
 	slices.SortStableFunc(t.passOrder, func(a, b int) int {
 		return cmp.Compare(passes[a].Desc.Order, passes[b].Desc.Order)
 	})
-
-	t.passStart = slices.Grow(t.passStart[:0], count+1)[:count+1]
-	clear(t.passStart)
-	t.strayDraws = 0
-	for i := range draws {
-		if pass := int(draws[i].Pass); pass >= 0 && pass < count {
-			t.passStart[pass+1]++
-		} else {
-			t.strayDraws++
-		}
-	}
-	for i := 1; i <= count; i++ {
-		t.passStart[i] += t.passStart[i-1]
-	}
-	t.passDraws = slices.Grow(t.passDraws[:0], t.passStart[count])[:t.passStart[count]]
-	cursor := append(t.passCursor[:0], t.passStart[:count]...)
-	for i := range draws {
-		if pass := int(draws[i].Pass); pass >= 0 && pass < count {
-			t.passDraws[cursor[pass]] = i
-			cursor[pass]++
-		}
-	}
-	t.passCursor = cursor
-}
-
-func (t *translator) passDrawOps(pass int) []int {
-	return t.passDraws[t.passStart[pass]:t.passStart[pass+1]]
-}
-
-func (t *translator) passDrawCount(pass int) int {
-	return t.passStart[pass+1] - t.passStart[pass]
 }

@@ -23,11 +23,8 @@ const (
 	OpUpdateTexture
 )
 
-// DrawOp is one mesh draw recorded into an OpQueue.
+// DrawOp is one mesh draw recorded into an OpQueue's pass.
 type DrawOp struct {
-	// Pass indexes the OpQueue's pass list, or is -1 for a draw that named no
-	// pass declared this frame.
-	Pass          int32
 	Mesh          descriptors.MeshDescr
 	Material      descriptors.MaterialDescr
 	Params        []descriptors.ParameterDescr
@@ -80,24 +77,28 @@ type temporaryTextureKey struct {
 	renderable bool
 }
 
-// passRecord is one declared pass and the position that breaks Order ties.
+// passRecord is one declared pass and the draws recorded into it, in the order
+// they were recorded. Its place in the pass list breaks Order ties.
 type passRecord struct {
-	Desc descriptors.PassDescr
-	seq  int
+	Desc  descriptors.PassDescr
+	Draws []DrawOp
 }
 
 // OpQueue records high-level frame commands. All uploads it owns are temporary
 // and may be dropped with the frame. Persistent GPU resources are managed
 // separately through ResourceQueue.
 type OpQueue struct {
-	ids   IDSource
-	draws []DrawOp
+	ids IDSource
 	// resources is the frame's temporary bakes, allocations and uploads, which
 	// the translator replays ahead of every draw.
 	resources []ResourceOp
 	// passes is the frame's declared passes; a PassRef is an index into it,
-	// plus one.
-	passes               []passRecord
+	// plus one. Records past its length keep their draw lists' backing for the
+	// passes later frames declare.
+	passes []passRecord
+	// strayDraws counts the frame's draws that named no pass declared this
+	// frame. They are dropped, and only counted, so the frame can report them.
+	strayDraws           int
 	uploadArena          []byte
 	parameterArena       []descriptors.ParameterDescr
 	vertexAttrArena      []descriptors.VertexAttr
@@ -120,12 +121,16 @@ func NewOpQueue(ids IDSource) *OpQueue {
 // reset drops all ops and makes temporary buffers available for reuse.
 func (q *OpQueue) reset() {
 	q.frame++
-	clear(q.draws)
-	q.draws = q.draws[:0]
 	clear(q.resources)
 	q.resources = q.resources[:0]
-	clear(q.passes)
+	for i := range q.passes {
+		pass := &q.passes[i]
+		clear(pass.Draws)
+		pass.Draws = pass.Draws[:0]
+		pass.Desc = descriptors.PassDescr{}
+	}
 	q.passes = q.passes[:0]
+	q.strayDraws = 0
 	q.uploadArena = q.uploadArena[:0]
 	q.parameterArena = q.parameterArena[:0]
 	q.vertexAttrArena = q.vertexAttrArena[:0]
@@ -167,7 +172,12 @@ func (q *OpQueue) reset() {
 // passes may be recorded interleaved. The reference is valid until the frame
 // ends; hand it to another System to let it draw into the same pass.
 func (q *OpQueue) NewPass(desc descriptors.PassDescr) descriptors.PassRef {
-	q.passes = append(q.passes, passRecord{Desc: desc, seq: len(q.passes)})
+	if n := len(q.passes); n < cap(q.passes) {
+		q.passes = q.passes[:n+1]
+		q.passes[n].Desc = desc
+	} else {
+		q.passes = append(q.passes, passRecord{Desc: desc})
+	}
 	return descriptors.PassRef(len(q.passes))
 }
 
@@ -190,12 +200,15 @@ func (q *OpQueue) passIndex(ref descriptors.PassRef) int {
 // plumbing of its own. Parameters are matched to reflected shader constants by
 // name, apply to every instance and override same-named material parameters.
 // Inline geometry is baked into queue-pooled BufferIDs using each BufferDescr's
-// copyData policy. A draw whose pass was not declared this frame is dropped
-// and reported.
+// copyData policy. A draw whose pass was not declared this frame is dropped,
+// before it bakes anything, and reported.
 func (q *OpQueue) Draw(pass descriptors.PassRef, mesh descriptors.MeshDescr, material descriptors.MaterialDescr, instances, firstInstance int, params ...descriptors.ParameterDescr) {
-	index := int32(q.passIndex(pass))
+	index := q.passIndex(pass)
+	if index < 0 {
+		q.strayDraws++
+		return
+	}
 	o := DrawOp{
-		Pass:          index,
 		Material:      q.bakeMaterialIfNeeded(material),
 		Mesh:          mesh,
 		Params:        q.bakeParametersIfNeeded(params),
@@ -206,7 +219,7 @@ func (q *OpQueue) Draw(pass descriptors.PassRef, mesh descriptors.MeshDescr, mat
 		q.copyVertexAttrs(descriptors.MeshLayout(&mesh)),
 		q.bakeBufferIfNeeded(descriptors.MeshVertices(&mesh), types.BufferVertex),
 		q.bakeBufferIfNeeded(descriptors.MeshIndices(&mesh), types.BufferIndex))
-	q.draws = append(q.draws, o)
+	q.passes[index].Draws = append(q.passes[index].Draws, o)
 }
 
 // FrameMaterial records a material's params into the queue once, for the rest

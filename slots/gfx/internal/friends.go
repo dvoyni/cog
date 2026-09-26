@@ -14,14 +14,14 @@ func OpQueueBakeTextureIfNeeded(v *OpQueue, a0 descriptors.TextureDescr) descrip
 	return v.bakeTextureIfNeeded(a0)
 }
 
-// OpQueueDraws reads OpQueue.draws for gfx's internal/.
-func OpQueueDraws(v *OpQueue) []DrawOp { return v.draws }
-
 // OpQueuePasses reads OpQueue.passes for gfx's internal/.
 func OpQueuePasses(v *OpQueue) []passRecord { return v.passes }
 
 // OpQueueResources reads OpQueue.resources for gfx's internal/.
 func OpQueueResources(v *OpQueue) []ResourceOp { return v.resources }
+
+// OpQueueStrayDraws reads OpQueue.strayDraws for gfx's internal/.
+func OpQueueStrayDraws(v *OpQueue) int { return v.strayDraws }
 
 // OpQueueTemporaryBuffer calls OpQueue.temporaryBuffer for gfx's internal/.
 func OpQueueTemporaryBuffer(v *OpQueue, a0 types.BufferKind, a1 []byte, a2 bool) descriptors.BufferDescr {
