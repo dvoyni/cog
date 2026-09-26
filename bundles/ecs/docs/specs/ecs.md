@@ -1662,6 +1662,7 @@ This is contract, not convention. A System takes any number of:
 | `*ecs.Remove[T]` | `write{*Store[T]}` | taking one Component away from an Entity |
 | `*ecs.Hooks[T, K]` | `read{*Entities}` + `read{*Store[T]}` | what happened to `T` since the System's last run — [`hooks.md`](hooks.md), *since Hooks* |
 | `*ecs.Read[T]`, `*ecs.Write[T]` | the kernel's own read/write on `T` | any other plugin's resource |
+| `*ecs.Uses[C, Req, Res]` | Command `C`'s lock closure, folded in at composition | dispatching a kernel Command — [below](#a-system-dispatches-a-command-through-uses), *since [#605](https://github.com/dvoyni/cog/issues/605)* |
 | `*ecs.In[T]` | nothing | a value projected out of the event |
 | `*ecs.Resp[Res]` | nothing | a command only: the answer it writes |
 | `kernel.Kernel` | nothing | the kernel value |
@@ -1767,6 +1768,32 @@ write-locked Store was never written.
 
 ---
 
+### A System dispatches a Command through `Uses`
+
+`ecs.Uses[C, Req, Res]` is `kernel.ResourceAccess.Uses` reached through the
+signature, with the kernel's name. `prepare` declares the use and keeps the
+dispatcher; nothing is resolved an invocation, because composition binds the
+dispatcher once; `Execute(k, req)` dispatches. Three type arguments, because Go
+infers none for a type.
+
+It was not built at first, and the reason was price, not principle: the 1113 ns
+in [Spawn is a handle, not a Command](#spawn-is-a-handle-not-a-command-by-a-factor-of-2270)
+was the coordinator round-trip. The kernel has since run a task holding no locks
+on the caller's goroutine (`kernel/engine-dispatch.go`, `runTask`), and a
+declared dispatch holds none, since the fold already granted the Command's locks
+to the caller. A `Uses` dispatch now measures **~22 ns and 0 allocs**, whether or
+not its Command locks anything. What forced it was
+[#600](https://github.com/dvoyni/cog/issues/600): model loads, and most shader
+compiles in feuds and nox, run inside Systems and must reach
+`gfx.CompileShaderCmd`. A library such as model takes `gfx.ShaderCompiler`, a
+plain func, and a System passes `compile.Execute`, so the library never sees the
+ECS.
+
+**No lock decision moves.** The fold is the kernel's and static, so the lock set
+is complete before the frame starts, as for every other parameter; a structural
+change is still not a Command, for the reason [Structural change](#structural-change)
+gives, which never rested on the price.
+
 ## The lock set
 
 A System's lock set is the union of what every parameter declares, computed once
@@ -1786,6 +1813,10 @@ Four rules make the whole of it.
    the frame.
 4. **`ecs.Read[T]`/`ecs.Write[T]` join the same set**, so a bound plugin's
    resource is as visible in the signature as a Component is.
+5. **`ecs.Uses[C, Req, Res]` joins it through the kernel's fold**: composition
+   adds Command `C`'s transitive lock closure, so a System dispatching a Command
+   holds what that Command holds for its whole run. An empty-lock Command adds
+   nothing. *Since [#605](https://github.com/dvoyni/cog/issues/605).*
 
 **A Hooks reader adds its own two reads and never changes another handler's lock
 set.** A reader existing makes no writer declare more. `TestAHookNeverWidensALockSet`
@@ -2106,6 +2137,16 @@ would itself cost 169 ns and 4 allocs. What remains is the **scheduler
 round-trip to the coordinator goroutine**, paid even though a declared dispatch
 requests no locks and therefore cannot block. At a 16-missile volley that is
 17.8 µs per cast.
+
+**The 1113 ns no longer holds for a `Uses` dispatch**, of any Command. The
+kernel now runs a task with an empty lock set on the caller's goroutine, and a
+declared dispatch always has one, so the round-trip above is gone: `ecs.Uses`
+measures **~22 ns** against an empty-lock Command and **~23 ns** against one
+that writes a resource (`BenchmarkUsesDispatch`, `BenchmarkUsesDispatchLocking`,
+[#605](https://github.com/dvoyni/cog/issues/605)). The handle still wins, by two
+orders of magnitude rather than three, and the argument never needed the price:
+a Command would carry the same `write{*Entities}` into the System's set through
+the fold, so it could buy nothing the handle does not already have.
 
 A handle declared in the System's signature declares the same lock set through
 its own `Lock`, with no dispatch at all. Component set fields are reflected **once at
@@ -3227,6 +3268,7 @@ Hooks* block after it is built too.
   above is the contract; a System returning anything is rejected.
 - `In[T]` and `Feed`.
 - `Read[T]` and `Write[T]`.
+- `Uses[C, Req, Res]`, *since [#605](https://github.com/dvoyni/cog/issues/605)*.
 - `Spawn[S]` staging its Component set **through a field**; `WriteableEntities`.
 - `Get[T]`, `Set[T]` (`Of`, `Ref`, `UpdateFor`), `Remove[T]` — the three the
   prototype did not build.

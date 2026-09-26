@@ -1,6 +1,9 @@
 package ecs
 
-import "github.com/dvoyni/cog/bundles/ecs/internal"
+import (
+	"github.com/dvoyni/cog/bundles/ecs/internal"
+	"github.com/dvoyni/cog/kernel"
+)
 
 // Entity is an opaque handle to one thing. It is comparable, copyable and
 // usable as a map key, and the zero value means no Entity.
@@ -159,6 +162,24 @@ type Read[T any] = internal.Read[T]
 // returns the resource resolved at the start of this System call; Set replaces
 // it wholesale, and this parameter's own Get reads it back.
 type Write[T any] = internal.Write[T]
+
+// Uses is the System parameter that dispatches a kernel Command, and it is the
+// kernel's own ResourceAccess.Uses reached through the signature: composition
+// folds the Command's lock closure into the System's set, so a Command that
+// locks a resource makes the System hold it, and one whose lock is empty adds
+// nothing. Execute dispatches on the System's goroutine and acquires nothing.
+// It takes three type arguments because Go infers none for a type:
+//
+//	func load(
+//	    k kernel.Kernel,
+//	    compile *ecs.Uses[gfx.CompileShaderCmd, gfx.CompileShaderRequest, gfx.CompileShaderResponse],
+//	) {
+//	    resp := compile.Execute(k, gfx.CompileShaderRequest{…})
+//	}
+//
+// A Command no plugin registered fails composition with
+// kernel.ErrUsingUnknownCommand.
+type Uses[TCommand kernel.CommandConstraint[TRequest, TResponse], TRequest any, TResponse any] = internal.Uses[TCommand, TRequest, TResponse]
 
 // In carries a per-tick value into a System without the System naming where it
 // came from, so the same System can be driven by any event a Feed projects

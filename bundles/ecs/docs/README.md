@@ -712,6 +712,7 @@ holds it for read.
 | `*ecs.Get[T]` | `read{*Store[T]}` + `read{*Entities}` | reading one Component of an Entity it did not iterate to |
 | `*ecs.Set[T]`, `*ecs.Remove[T]` | `write{*Store[T]}` + `read{*Entities}` | writing, inserting or taking away the same |
 | `*ecs.Read[T]`, `*ecs.Write[T]` | the kernel's own read/write on `T` | any other plugin's resource |
+| `*ecs.Uses[C, Req, Res]` | the lock closure of Command `C`, folded in at composition | dispatching a kernel Command |
 | `*ecs.In[T]` | nothing | a value projected out of the event or request |
 | `*ecs.Resp[Res]` | nothing | **a command only** — the answer it writes |
 | `kernel.Kernel` | nothing | the kernel value, for publishing an event |
@@ -929,6 +930,39 @@ an invocation, or a pointer to something that need not outlive the lock.
 The error is always nil. A System has no way to fail that is not a panic, and a
 panic is already `ErrPluginPanic`; expected rejection belongs in the response,
 which is where the kernel asks for it anyway.
+
+### Dispatching a Command
+
+```go
+func load(
+    k kernel.Kernel,
+    compile *ecs.Uses[gfx.CompileShaderCmd, gfx.CompileShaderRequest, gfx.CompileShaderResponse],
+) {
+    resp := compile.Execute(k, gfx.CompileShaderRequest{…})
+}
+```
+
+`Uses` is the kernel's own `ResourceAccess.Uses` reached through the signature,
+and keeps its name. Composition folds the Command's lock closure into the
+System's set, so **the signature shows everything the System holds**: a Command
+that writes a resource makes the System hold that write for its whole run and
+serialise against every other writer of it, and a Command whose lock is empty —
+`gfx.CompileShaderCmd` — adds nothing. `Describe` lists the Command among the
+System's `Uses`.
+
+It takes **three type arguments**, as `ResourceAccess.Uses` does: Go infers
+none for a type, so the request and response cannot be read off the Command in
+a parameter's declaration.
+
+**A dispatch acquires nothing and allocates nothing.** The fold already granted
+the Command's locks, so the kernel runs the nested dispatch on the System's own
+goroutine with an empty lock set — about 22 ns, whatever the Command locks; see
+the cost table. `Execute` is also the plain func a library taking a dispatcher
+wants, such as `gfx.ShaderCompiler`: the System passes `compile.Execute`, and the
+library never sees the ECS.
+
+A Command no plugin registered fails composition with
+`kernel.ErrUsingUnknownCommand`, naming the System's identity type.
 
 ## Structural change
 
@@ -1881,6 +1915,23 @@ object here, and `take` clears it on the way out so an invocation that answers
 nothing cannot inherit the answer before it. Nothing is boxed: the `reflect.Value`
 holding the cell pointer is built once and reused, the same way the event cell,
 the kernel cell and every handle are.
+
+### What dispatching a Command costs
+
+One call from inside a System, the System invoked once and making every call,
+so its own invocation is amortised away (`BenchmarkUsesDispatch`,
+`BenchmarkUsesDispatchLocking`, `BenchmarkUsesDirectCall`):
+
+| one call | ns/op | allocs/op |
+| --- | --- | --- |
+| `Uses` dispatch of an empty-lock Command | **22** | **0** |
+| `Uses` dispatch of a Command writing a resource | **23** | **0** |
+| the same handler called directly | 0.2 | 0 |
+
+**The Command's locks cost nothing at the call**: the fold paid for them at
+composition, as lock-set width. What the call pays is the kernel's pooled
+invocation. `TestAUsesDispatchAllocatesNothing` holds a hundred dispatches an
+invocation to the direct arm's objects, **0.000** against **0.000**.
 
 ### What a Hook costs
 

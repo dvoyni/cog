@@ -56,12 +56,21 @@ type spawnField struct {
 //
 // It is a handle the System already holds, and that is the whole of the design:
 // creating an Entity is a direct call on a value in the signature, not a
-// Command. A Uses dispatch measures 1113 ns against 0.49 ns for the direct call
-// — a factor of 2270, all of it the scheduler round-trip to the coordinator —
-// and it would buy nothing, because a dispatch runs on the calling goroutine
-// with no locks of its own and the Uses fold is static at finalisation. The
-// exclusion a structural change needs was therefore arranged before the frame
-// started, by the lock set this handle declares.
+// Command. A Command would buy nothing, because the Uses fold is static at
+// finalisation: a System using one holds its locks for the whole run, exactly
+// as it holds this handle's. The exclusion a structural change needs was
+// therefore arranged before the frame started, by the lock set this handle
+// declares.
+//
+// The price that first ruled a Command out has since moved. A Uses dispatch
+// measured 1113 ns against 0.49 ns for the direct call, and all of it was the
+// scheduler round-trip to the coordinator. The kernel now runs a task holding
+// no locks on the caller's goroutine (kernel/engine-dispatch.go, runTask), and
+// a declared dispatch always holds none, since the fold already granted its
+// Command's locks to the caller. So an ecs.Uses dispatch measures about 22 ns,
+// whether or not its Command locks anything (BenchmarkUsesDispatch and
+// BenchmarkUsesDispatchLocking). That is still two orders of magnitude over a
+// direct call, and the argument above never rested on the price.
 //
 // It declares write{*Entities}, which supersedes the read every System takes and
 // is a total barrier: Entities holds a reference to every Store, so one entry in

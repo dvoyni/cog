@@ -49,7 +49,7 @@ func PointerFree(t reflect.Type) error { return internal.PointerFree(t) }
 //
 // A System takes any number of *Query, *Spawn, *DeferredSpawn,
 // *WriteableEntities, *DeferredDespawn, *Get, *Set, *Remove, *Hooks, *Read,
-// *Write and *In; the kernel.Kernel value; at most once the event value; and,
+// *Write, *Uses and *In; the kernel.Kernel value; at most once the event value; and,
 // for a System registered with ToExecute, at most once the *Resp it answers
 // through. It returns nothing. Its lock set is the union of what its parameters
 // declare, computed once here. A signature outside that contract panics at
