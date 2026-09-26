@@ -214,6 +214,15 @@ func (t *translator) translate(
 				})
 			case OpUpdateTexture:
 				t.ops.UpdateTexture(op.TextureID, op.TexLayer, op.Region, op.Bytes)
+			case OpUploadProgram:
+				// An upload is replayed exactly once, because the durable queue
+				// is reset behind the frame that consumed it, so a refusal needs
+				// no quiet of its own to be said once.
+				if err := t.createShader(backend, op.ShaderID, op.Program); err != nil && firstErr == nil {
+					firstErr = err
+				}
+			case OpReleaseShader:
+				t.releaseShader(backend, op.ShaderID)
 			}
 		}
 	}

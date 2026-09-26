@@ -58,11 +58,12 @@ something no conversation did, it is marked **Settled here**.
 `CONTEXT.md` is the glossary of record; Shader source, Shader module, Batch,
 Pass and Vertex layout keep their meaning there. This document adds:
 
-- **Shader program** — the output of `CompileShader`: the flattened WGSL of one
-  shader descriptor, its source map, and its reflected layout. Pure data; no
-  GPU object stands behind it yet.
-- **Shader** — a durable GPU shader module created from a Shader program by
-  `NewShader`, named by a `ShaderID`, freed by `ReleaseShader`.
+- **Shader program** — the output of `CompileShaderCmd`: the flattened WGSL of
+  one shader descriptor, its source map, its reflected layout and the binding
+  table built from it. Pure, immutable data; no GPU object stands behind it yet.
+- **Shader** — a durable GPU shader module, named by a `ShaderID` that
+  `NewShader` reserves, created from the Shader program `UploadProgram` gives
+  it, freed by `ReleaseShader`.
 - **Binding** — one global resource a shader declares at a `@group`/`@binding`:
   a uniform, a storage buffer, a texture or a sampler. It is named by its WGSL
   global variable name, which a module cannot declare twice.
@@ -113,27 +114,65 @@ material set — because there it means one.
 ## Shaders
 
 ```go
-func CompileShader(fsys fs.FS, descr ShaderDescr) (ShaderProgram, error)
+type CompileShaderCmd kernel.Command[CompileShaderRequest, CompileShaderResponse]
 
-func (q *ResourceQueue) NewShader(k kernel.Kernel, program ShaderProgram) ShaderID
+type CompileShaderRequest struct {
+	FS    fs.FS
+	Descr ShaderDescr
+}
+
+type CompileShaderResponse struct {
+	Program ShaderProgram
+	Err     error
+}
+
+func (q *ResourceQueue) NewShader() ShaderID
+func (q *ResourceQueue) UploadProgram(k kernel.Kernel, shader ShaderID, program ShaderProgram)
 func (q *ResourceQueue) ReleaseShader(k kernel.Kernel, id ShaderID)
 ```
 
-`CompileShader` flattens the descriptor through the preprocessor, reflects the
-result, and builds the binding table by name. It is pure: it holds no gfx lock,
-only whatever read of storage the caller's System declares, so its cost — file
-reads, the preprocessor and a naga parse — never serialises another System.
+`CompileShaderCmd` flattens the descriptor through the preprocessor, reflects
+the result, and builds the binding table by name. It is a kernel Command with an
+**empty lock**: the kernel runs an empty-lock task on the caller's goroutine
+with no coordinator round-trip, so a System declaring `Uses[CompileShaderCmd]`
+widens its lock set by nothing, and the command's cost — file reads, the
+preprocessor and a naga parse — never serialises another System. It reads only
+the filesystem the request carries, which the caller holds its own read of.
 It is the one call whose failure is a normal outcome (a missing file, an
-include that does not resolve, WGSL that does not parse), so it is the one that
-returns an error, and the caller decides what a missing shader means.
+include that does not resolve, WGSL that does not parse), so its failure is the
+response's `Err`, never also reported, beside the zero program; the caller
+decides what a missing shader means.
 
-Reflection moves behind a **port** the backend Adapter fills, callable from any
-thread. `slots/gfx` cannot import naga, and a backend-neutral slot should not.
+Reflection moves behind a **port** on the Backend the driver's Adapter fills:
 
-`NewShader` records the module's creation in the ResourceQueue and returns its
-id at once; the backend creates the module at replay. Each variant — a
-different Define or Const — is a separate program and a separate shader, which
-the caller compiles when it loads, not when it draws.
+```go
+ReserveShader() ShaderID                          // CPU-only, any thread
+CreateShader(id ShaderID, desc ShaderDesc) error  // render thread, at replay
+ReflectShader(code []byte) (ShaderLayout, error)  // pure, any thread
+```
+
+`ReflectShader` needs no device and is safe from any thread; the command reaches
+it through the Backend adapter it captured at registration. `slots/gfx` cannot
+import naga, and a backend-neutral slot should not; gogpu fills the port from
+the naga reflection it already runs.
+
+`NewShader` and `UploadProgram` mirror `NewTexture` and `UploadTexture`.
+`NewShader` reserves an id at once, CPU-side, from `ReserveShader`'s own atomic
+counter. `UploadProgram` records the program: the CPU side keeps its binding
+table from that call on, so a set built on the shader resolves against it at
+creation, and the backend creates the module through `CreateShader` when the
+upload is replayed, measuring it against the web floor then, once. A set can
+therefore be built on a shader only once its program is uploaded.
+
+**An id takes one upload.** A second `UploadProgram` to the same id is reported
+through `k`, once, and ignored; so is the zero program a failed compile returns,
+which leaves the shader reserved for a program that compiled. An id `NewShader`
+never reserved, or one already released, is reported by both calls.
+`ReleaseShader` frees the module and every pipeline keyed on it; a shader
+released before its upload never reached the GPU and frees nothing there.
+
+Each variant — a different Define or Const — is a separate program and a
+separate shader, which the caller compiles when it loads, not when it draws.
 
 **Reloading is the caller's.** To reload, the app releases the shader and
 creates it again, with every set built on it. There is no replacement in place.
@@ -318,17 +357,18 @@ This is today's behaviour, unchanged.
 
 ## Errors
 
-Every error except `CompileShader`'s is a programmer mistake — deterministic,
-seen the first time the code runs:
+Every error except `CompileShaderCmd`'s is a programmer mistake —
+deterministic, seen the first time the code runs:
 
 - a param naming no binding of the shader;
 - a param of the wrong kind for its binding;
 - uniform bytes of the wrong size or layout;
 - a temporary id in a durable set;
-- a released or unknown shader or set.
+- a released or unknown shader or set;
+- a second upload to one shader, or an upload of the zero program.
 
 They are **reported through `kernel.Kernel`**, which each method that can find
-one takes as its first argument: `NewShader`, `ReleaseShader`,
+one takes as its first argument: `UploadProgram`, `ReleaseShader`,
 `NewDrawParams`, `UpdateDrawParams`, `ReleaseDrawParams` and `SetDrawParams`.
 The report comes from the System that made the mistake, in its own tick. The
 bad param is ignored; a set whose creation failed still exists and draws
@@ -401,9 +441,6 @@ it. It is reconsidered with scene's materials.
 
 ## What is not foreclosed
 
-- **Replacing a shader in place.** `ReplaceShader(id, program)` keeping the id
-  and re-resolving its sets at replay fits behind the same API, because
-  resolution is internal to the set.
 - **Bind groups by rate of change.** A set's bindings could become a bind group
   built once, and a version only the groups it changed. Nothing in the API
   prevents it.
@@ -451,7 +488,25 @@ it. It is reconsidered with scene's materials.
 - **A draw with no set,** shader and state given per draw. A second path with
   per-draw resolution.
 - **Returning errors from the set methods.** They are programmer mistakes;
-  only `CompileShader` fails for a reason the caller must handle.
+  only `CompileShaderCmd` fails for a reason the caller must handle.
+- **`CompileShader` as a free function,** `CompileShader(fsys, descr)`. An
+  Adapter is reachable only through the plugin that requires it, so a free
+  function could reach the reflection port only through process-global state
+  the backend installs — shared between engines and swapped by every test. A
+  Command with an empty lock reaches the adapter it captured at registration and
+  costs its caller exactly what the free function would have: no lock and no
+  coordinator round-trip.
+- **`NewShader(k, program)`, reserving and creating in one call.** The backend
+  minted a shader's id only when it created the module, on the render thread,
+  from a counter shared with pipelines and samplers. Reserving the id CPU-side
+  and uploading the program after mirrors `NewTexture` and `UploadTexture`,
+  which is the settled shape for a durable id handed out at once.
+- **`ReplaceShader(id, program)`, or a second `UploadProgram` replacing the
+  first.** Replacement in place would re-resolve every set built on the shader
+  at replay, while the CPU side has already resolved them against the old table
+  — two tables for one id, and a set valid against one and not the other. Hot
+  reload is out of scope, and release-and-recreate is exact because ids are
+  never reused: an id takes one upload for its life.
 - **A retained `kernel.Reporter`, or a queue holding a `Kernel`.** `Kernel` is
   documented as scoped to a dispatch, and no Kernel exists at Register. The
   reporter was prototyped; passing `k` was chosen, keeping error reporting free
@@ -468,10 +523,10 @@ desktop and wasm and passes its tests before the next; nothing is merged or
 pushed until all four branches are ready.
 
 **gfx**
-- [ ] A reflection port the backend Adapter fills; gogpu fills it from its naga
-      reflection.
-- [ ] `CompileShader` and `ShaderProgram`; `ResourceQueue.NewShader` and
-      `ReleaseShader`, with their resource ops.
+- [ ] The reflection port, `Backend.ReflectShader`, beside `ReserveShader` and
+      `CreateShader`; gogpu fills all three from its naga reflection.
+- [ ] `CompileShaderCmd` and `ShaderProgram`; `ResourceQueue.NewShader`,
+      `UploadProgram` and `ReleaseShader`, with their resource ops.
 - [ ] `DrawParams`, `NewDrawParams`, `UpdateDrawParams`, `ReleaseDrawParams`:
       the pointer-free binding table, byte arena, baked inline resources.
 - [ ] `ParameterDescr` reduced to four kinds, the typed uniform constructors
@@ -525,7 +580,7 @@ this order.
 - End to end: feuds-26 desktop driven over MCP, draw counts and screenshots
   compared before and after; wasm builds of feuds-26, nox and cog-examples.
 
-**Gap:** `CompileShader`'s cost — a naga parse on the update thread — is
+**Gap:** `CompileShaderCmd`'s cost — a naga parse on the caller's goroutine — is
 unmeasured. It runs at load, outside any gfx lock, so it costs no parallelism,
 but a loader compiling many variants in one tick should know the figure.
 

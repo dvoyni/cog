@@ -3,6 +3,7 @@ package internal
 import (
 	"math"
 
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/kernel"
@@ -31,6 +32,16 @@ func (p *plugin) acquireCmdImpl() (kernel.Lock, kernel.Execute[AcquireRequest, A
 		}, func(kernel.Kernel, AcquireRequest) AcquireResponse {
 			return AcquireResponse{Advanced: acquire(read, ready)}
 		}
+}
+
+// compileShaderCmdImpl compiles a descriptor through the bound Backend's
+// reflection port. It declares no lock: the adapter is bound at composition and
+// read-only after, and everything else the compile touches is the request's.
+func (p *plugin) compileShaderCmdImpl() (kernel.Lock, kernel.Execute[CompileShaderRequest, CompileShaderResponse]) {
+	return nil, func(_ kernel.Kernel, request CompileShaderRequest) CompileShaderResponse {
+		program, err := shader.CompileShader(request.FS, request.Descr, p.backend.Get().ReflectShader)
+		return CompileShaderResponse{Program: program, Err: err}
+	}
 }
 
 func (p *plugin) releaseCachedResourceCmdImpl() (kernel.Lock, kernel.Execute[ReleaseCachedResourceRequest, ReleaseCachedResourceResponse]) {
