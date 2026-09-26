@@ -493,7 +493,7 @@ func (l *Lookup) bakeModelGeometry(
 	// a converted one under either layout, so the pack fits inside the memory
 	// it reads.
 	record := MeshRecord{
-		Vertices: resources.BakeBuffer(
+		Vertices: resources.UploadBuffer(resources.NewBuffer(),
 			packOverAuthored(geometry.vertices, uv, geometry.skinnedLayout), false),
 		VertexCount: len(geometry.vertices),
 		indexCount:  len(geometry.indices),
@@ -509,7 +509,7 @@ func (l *Lookup) bakeModelGeometry(
 	// walk: the width itself costs a comparison, because a glTF accessor's
 	// indices are below the vertex count by construction and need no scan.
 	if record.indexCount > 0 {
-		record.Indices = resources.BakeBuffer(indexBytes(geometry.indices, record.IndexWidth), false)
+		record.Indices = resources.UploadBuffer(resources.NewBuffer(), indexBytes(geometry.indices, record.IndexWidth), false)
 		record.Indexed = true
 	}
 	return l.claimMesh(record)
@@ -523,8 +523,8 @@ func (l *Lookup) ensureDefaults(resources *gfx.ResourceQueue) PbrDefaults {
 		return l.defaults
 	}
 	l.defaults = PbrDefaults{
-		White:      resources.BakeTexture(1, 1, gfx.FormatRGBA8, []byte{0xff, 0xff, 0xff, 0xff}, true, false),
-		FlatNormal: resources.BakeTexture(1, 1, gfx.FormatRGBA8, []byte{0x80, 0x80, 0xff, 0xff}, true, false),
+		White:      resources.UploadTexture(resources.NewTexture(1, 1, 1, gfx.FormatRGBA8, false), 0, gfx.Region{}, []byte{0xff, 0xff, 0xff, 0xff}, true),
+		FlatNormal: resources.UploadTexture(resources.NewTexture(1, 1, 1, gfx.FormatRGBA8, false), 0, gfx.Region{}, []byte{0x80, 0x80, 0xff, 0xff}, true),
 	}
 	l.hasDefaults = true
 	return l.defaults
@@ -582,7 +582,7 @@ func (l *Lookup) residentAnimation(
 	// morph-only face has no pose row anywhere and still binds its own shapes.
 	if len(loaded.morphDeltas) > 0 {
 		resident.morphBytes = len(loaded.morphDeltas) * MorphWordSize
-		resident.morphDeltas = resources.BakeBuffer(recordSliceBytes(loaded.morphDeltas), false)
+		resident.morphDeltas = resources.UploadBuffer(resources.NewBuffer(), recordSliceBytes(loaded.morphDeltas), false)
 	}
 	if baked.jointCount == 0 {
 		return resident
@@ -592,8 +592,8 @@ func (l *Lookup) residentAnimation(
 	// The bytes are handed over rather than copied: this is the load's private
 	// copy and nothing reads it again - except where a re-root has to follow a
 	// moving bone, which is what poseRows is, and which almost no file needs.
-	resident.poses = resources.BakeBuffer(recordSliceBytes(baked.poses), false)
-	resident.skinJoints = resources.BakeBuffer(recordSliceBytes(baked.joints), false)
+	resident.poses = resources.UploadBuffer(resources.NewBuffer(), recordSliceBytes(baked.poses), false)
+	resident.skinJoints = resources.UploadBuffer(resources.NewBuffer(), recordSliceBytes(baked.joints), false)
 	if needsAnimatedReroot(loaded) {
 		resident.poseRows = baked.poses
 	}

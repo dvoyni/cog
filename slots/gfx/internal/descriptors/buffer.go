@@ -14,7 +14,7 @@ const (
 )
 
 // BufferDescr describes a GPU buffer from inline bytes (BufferWithBytes) or a
-// baked storage buffer returned by ResourceQueue.BakeBuffer.
+// storage buffer returned by ResourceQueue.NewBuffer.
 type BufferDescr struct {
 	source bufferSource
 	id     types.BufferID

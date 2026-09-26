@@ -180,7 +180,7 @@ func TestAFrameThatNeverTouchesTheScreenDoesNotPresent(t *testing.T) {
 
 	var target descriptors.TextureDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		target = resources.AllocateTexture(64, 64, 1, descriptors.FormatRGBA8Srgb)
+		target = resources.NewTexture(64, 64, 1, descriptors.FormatRGBA8Srgb, false)
 	})
 	w := recordRaw(t, k)
 	w.Pass(descriptors.PassDescr{Target: descriptors.TextureTarget(target, 0, 0), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "offscreen"})
@@ -218,7 +218,7 @@ func TestDrawSamplingItsOwnAttachmentIsRejected(t *testing.T) {
 
 	var target descriptors.TextureDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		target = resources.AllocateTexture(64, 64, 1, descriptors.FormatRGBA8Srgb)
+		target = resources.NewTexture(64, 64, 1, descriptors.FormatRGBA8Srgb, false)
 	})
 	w := recordRaw(t, k)
 	w.Pass(descriptors.PassDescr{Target: descriptors.TextureTarget(target, 0, 0), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "feedback"})

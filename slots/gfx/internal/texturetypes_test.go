@@ -27,15 +27,15 @@ func (m *countingMinter) Ready() bool                 { return true }
 func TestATextureDescriptorReportsTheLayersItWasAskedFor(t *testing.T) {
 	queue := NewResourceQueue(func() IDMinter { return &countingMinter{} })
 
-	if got := queue.AllocateTexture(16, 16, 4, descriptors.FormatRGBA8Srgb).Layers(); got != 4 {
+	if got := queue.NewTexture(16, 16, 4, descriptors.FormatRGBA8Srgb, false).Layers(); got != 4 {
 		t.Errorf("AllocateTexture layers = %d, want 4", got)
 	}
-	if got := queue.AllocateRenderTarget(16, 16, 3, descriptors.FormatRGBA8Srgb).Layers(); got != 3 {
+	if got := queue.NewRenderTarget(16, 16, 3, descriptors.FormatRGBA8Srgb).Layers(); got != 3 {
 		t.Errorf("AllocateRenderTarget layers = %d, want 3", got)
 	}
 	// A bake genuinely is one layer: BakeTexture takes a single pixel run and
 	// there is no op that gives it more.
-	if got := queue.BakeTexture(1, 1, descriptors.FormatRGBA8Srgb, []byte{255, 255, 255, 255}, true, false).Layers(); got != 1 {
+	if got := queue.UploadTexture(queue.NewTexture(1, 1, 1, descriptors.FormatRGBA8Srgb, false), 0, types.Region{}, []byte{255, 255, 255, 255}, true).Layers(); got != 1 {
 		t.Errorf("BakeTexture layers = %d, want 1", got)
 	}
 	if got := descriptors.BakedTexture(7, 16, 16).Layers(); got != 0 {

@@ -236,6 +236,7 @@ func resourceOpViewOf(queue string, index int, o *Op) ResourceOpView {
 	case OpAllocateTexture:
 		view.Texture, view.Width, view.Height = o.TextureID, o.TexW, o.TexH
 		view.Layers, view.Format, view.Renderable = o.TexLayers, o.Format.String(), o.Renderable
+		view.Mipmaps = o.Mipmaps
 	case OpUpdateTexture:
 		region := o.Region
 		view.Texture, view.Layer, view.Region, view.Bytes = o.TextureID, o.TexLayer, &region, len(o.Bytes)

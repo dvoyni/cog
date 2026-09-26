@@ -172,7 +172,7 @@ func (p *packer) insert(source insertion, resources *gfx.ResourceQueue) (AtlasEn
 	}
 	upload := paddedRGBA(source.pixels, source.width, source.height, source.padding, source.fill)
 	array := &p.arrays[arrayIndex]
-	resources.UpdateTexture(array.texture, layer, gfx.Region{
+	resources.UploadTexture(array.texture, layer, gfx.Region{
 		X: x, Y: y, Width: slotWidth, Height: slotHeight,
 	}, upload, false)
 	entry := AtlasEntry{
@@ -244,7 +244,7 @@ func (p *packer) place(width, height int, resources *gfx.ResourceQueue) (arrayIn
 	// the sprites, correct for the glyphs (they are RGB=255 with coverage in
 	// alpha, and 1.0 is a fixed point of the transfer function), and correct
 	// for the white texel for the same reason.
-	texture := resources.AllocateTexture(p.config.AtlasSize, p.config.AtlasSize, p.config.LayersPerArray, gfx.FormatRGBA8Srgb)
+	texture := resources.NewTexture(p.config.AtlasSize, p.config.AtlasSize, p.config.LayersPerArray, gfx.FormatRGBA8Srgb, false)
 	if index < 0 {
 		p.arrays = append(p.arrays, atlasArray{texture: texture, layers: make([]atlasShelf, p.config.LayersPerArray)})
 		index = len(p.arrays) - 1

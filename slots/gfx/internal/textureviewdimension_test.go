@@ -54,7 +54,7 @@ func arrayTextureFrame(t *testing.T, frames int, params ...descriptors.Parameter
 // was allocated with, which is what the check reads.
 func texturesOfLayers(layers int) descriptors.TextureDescr {
 	queue := NewResourceQueue(idsOf(&fakeBackend{}))
-	return queue.AllocateTexture(4, 4, layers, descriptors.FormatRGBA8Srgb)
+	return queue.NewTexture(4, 4, layers, descriptors.FormatRGBA8Srgb, false)
 }
 
 // A texture_2d_array binding no parameter fills is not fatal. It resolves to the

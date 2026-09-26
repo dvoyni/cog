@@ -212,9 +212,9 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 	rig := newCaptureRig(t)
 	var durable descriptors.TextureDescr
 	withResourceQueue(t, rig.k, func(q *ResourceQueue) {
-		durable = q.AllocateTexture(64, 32, 2, descriptors.FormatRGBA8)
-		q.UpdateTexture(durable, 1, types.Region{X: 1, Y: 2, Width: 3, Height: 4}, make([]byte, 48), true)
-		q.ReleaseTexture(q.BakeTexture(8, 8, descriptors.FormatRGBA8Srgb, make([]byte, 256), true, true))
+		durable = q.NewTexture(64, 32, 2, descriptors.FormatRGBA8, false)
+		q.UploadTexture(durable, 1, types.Region{X: 1, Y: 2, Width: 3, Height: 4}, make([]byte, 48), true)
+		q.ReleaseTexture(q.UploadTexture(q.NewTexture(8, 8, 1, descriptors.FormatRGBA8Srgb, true), 0, types.Region{}, make([]byte, 256), true))
 	})
 
 	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *OpQueue) {
@@ -234,8 +234,8 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 		byKind[op.Kind] = append(byKind[op.Kind], op)
 	}
 	allocate := byKind["allocateTexture"]
-	if len(allocate) != 1 {
-		t.Fatalf("allocateTexture ops = %d, want the durable one", len(allocate))
+	if len(allocate) != 2 {
+		t.Fatalf("allocateTexture ops = %d, want the two durable ones", len(allocate))
 	}
 	if allocate[0].Queue != "durable" || allocate[0].Texture != durable.ID() {
 		t.Errorf("allocate = %+v, want the durable queue and the texture it returned", allocate[0])
@@ -244,9 +244,12 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 		t.Errorf("allocate size = %dx%dx%d, want 64x32x2",
 			allocate[0].Width, allocate[0].Height, allocate[0].Layers)
 	}
+	if !allocate[1].Mipmaps || allocate[1].Format != descriptors.FormatRGBA8Srgb.String() {
+		t.Errorf("mipmapped allocate = %+v, want its format and mipmap flag", allocate[1])
+	}
 	update := byKind["updateTexture"]
-	if len(update) != 1 || update[0].Region == nil {
-		t.Fatalf("updateTexture ops = %+v, want the one with its region", update)
+	if len(update) != 2 || update[0].Region == nil || update[1].Region == nil {
+		t.Fatalf("updateTexture ops = %+v, want the two with their regions", update)
 	}
 	if *update[0].Region != (types.Region{X: 1, Y: 2, Width: 3, Height: 4}) || update[0].Layer != 1 {
 		t.Errorf("update = %+v, want the layer and region it was given", update[0])
@@ -254,23 +257,19 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 	if update[0].Bytes != 48 {
 		t.Errorf("update bytes = %d, want the 48 uploaded and none of them inline", update[0].Bytes)
 	}
+	if *update[1].Region != (types.Region{Width: 8, Height: 8}) {
+		t.Errorf("whole-layer update region = %+v, want the zero region resolved to 8x8", *update[1].Region)
+	}
 	if release := byKind["releaseTexture"]; len(release) != 1 {
 		t.Errorf("releaseTexture ops = %d, want the one queued - a resource released and still "+
 			"referenced is one of the answers this tool exists for", len(release))
 	}
 	bakes := byKind["bakeTexture"]
-	if len(bakes) != 2 {
-		t.Fatalf("bakeTexture ops = %d, want the durable one and the frame's inline one", len(bakes))
+	if len(bakes) != 1 || bakes[0].Queue != "frame" {
+		t.Fatalf("bakeTexture ops = %+v, want the frame's inline one alone", bakes)
 	}
-	if bakes[0].Queue != "durable" || bakes[1].Queue != "frame" {
-		t.Errorf("bake queues = %q then %q, want durable first, which is the order they execute in",
-			bakes[0].Queue, bakes[1].Queue)
-	}
-	if !bakes[0].Mipmaps || bakes[0].Format != descriptors.FormatRGBA8Srgb.String() {
-		t.Errorf("durable bake = %+v, want its format and mipmap flag", bakes[0])
-	}
-	if bakes[1].Bytes != 64 || bakes[1].Width != 4 {
-		t.Errorf("frame bake = %+v, want the 4x4 inline texture reported as 64 bytes", bakes[1])
+	if bakes[0].Bytes != 64 || bakes[0].Width != 4 {
+		t.Errorf("frame bake = %+v, want the 4x4 inline texture reported as 64 bytes", bakes[0])
 	}
 	// Every op is addressed by its own queue's index, and no index is a lie
 	// about which queue it belongs to.

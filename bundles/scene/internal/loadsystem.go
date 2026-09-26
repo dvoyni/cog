@@ -68,7 +68,7 @@ func loadSystem(
 	// the Lookup binds the same two forever after.
 	if !s.hasBundled {
 		s.bundled = lookup.EnsureBundledIngredients(func(width, height int, format gfx.TextureFormat, pixels []byte) gfx.TextureDescr {
-			return resources.BakeTexture(width, height, format, pixels, true, false)
+			return resources.UploadTexture(resources.NewTexture(width, height, 1, format, false), 0, gfx.Region{}, pixels, true)
 		})
 		s.hasBundled = true
 	}
@@ -92,9 +92,9 @@ func loadSystem(
 		clear(s.seen)
 	}
 	lookup.DrainMeshes(model.MeshBaker{
-		Bake: func(data []byte) gfx.BufferDescr { return resources.BakeBuffer(data, false) },
+		Bake: func(data []byte) gfx.BufferDescr { return resources.UploadBuffer(resources.NewBuffer(), data, false) },
 		Rebake: func(buffer gfx.BufferDescr, data []byte) gfx.BufferDescr {
-			return resources.ReBakeBuffer(buffer, data, false)
+			return resources.UploadBuffer(buffer, data, false)
 		},
 		Release: resources.ReleaseBuffer,
 	})

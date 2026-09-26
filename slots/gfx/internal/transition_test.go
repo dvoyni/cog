@@ -129,7 +129,7 @@ func TestADepthAttachmentSampledLaterGetsABarrier(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		shadow = resources.AllocateTexture(64, 64, 1, descriptors.FormatDepth32F)
+		shadow = resources.NewTexture(64, 64, 1, descriptors.FormatDepth32F, false)
 	})
 	q := recordRaw(t, k)
 	q.Pass(descriptors.PassDescr{Target: descriptors.NoTarget(), Depth: descriptors.DepthTarget(shadow), DepthLoad: types.LoadClear, Order: 0, Label: "shadow"})
@@ -190,7 +190,7 @@ func TestAnOrdinaryTextureIsNeverTransitioned(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	var uploaded descriptors.TextureDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		uploaded = resources.AllocateTexture(8, 8, 1, descriptors.FormatRGBA8Srgb)
+		uploaded = resources.NewTexture(8, 8, 1, descriptors.FormatRGBA8Srgb, false)
 	})
 	q := recordRaw(t, k)
 	q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "screen"})

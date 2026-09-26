@@ -411,8 +411,8 @@ func (b *gfxBackend) uploadTexture(texture *gfxbTexture, layer int, region gfx.R
 }
 
 // uploadMipChain box-filters level-0 pixels in the format's own colour space
-// and writes each smaller mip.
-func (b *gfxBackend) uploadMipChain(texture *gfxbTexture, width, height int, format gfx.TextureFormat, pixels []byte) {
+// and writes each smaller mip of layer.
+func (b *gfxBackend) uploadMipChain(texture *gfxbTexture, layer, width, height int, format gfx.TextureFormat, pixels []byte) {
 	if texture == nil || !mipmapsSupported(format) {
 		return
 	}
@@ -421,7 +421,7 @@ func (b *gfxBackend) uploadMipChain(texture *gfxbTexture, width, height int, for
 	for level := 1; w > 1 || h > 1; level++ {
 		src, w, h = downsampleTexels(src, w, h, format)
 		_ = b.queue.WriteTexture(
-			&wgpu.ImageCopyTexture{Texture: texture.tex, MipLevel: uint32(level), Origin: wgpu.Origin3D{}, Aspect: gputypes.TextureAspectAll},
+			&wgpu.ImageCopyTexture{Texture: texture.tex, MipLevel: uint32(level), Origin: wgpu.Origin3D{Z: uint32(layer)}, Aspect: gputypes.TextureAspectAll},
 			src,
 			&wgpu.ImageDataLayout{Offset: 0, BytesPerRow: uint32(w * stride), RowsPerImage: uint32(h)},
 			&wgpu.Extent3D{Width: uint32(w), Height: uint32(h), DepthOrArrayLayers: 1},
@@ -865,6 +865,9 @@ func (b *gfxBackend) UpdateTexture(id gfx.TextureID, layer int, region gfx.Regio
 		return
 	}
 	b.uploadTexture(texture, layer, region, desc.Format, pixels)
+	if desc.Mipmaps && region == (gfx.Region{Width: desc.Width, Height: desc.Height}) {
+		b.uploadMipChain(texture, layer, desc.Width, desc.Height, desc.Format, pixels)
+	}
 }
 
 func (b *gfxBackend) allocateTexture(id gfx.TextureID, desc gfx.TextureDesc) *gfxbTexture {
@@ -928,7 +931,7 @@ func (b *gfxBackend) bakeTexture(id gfx.TextureID, width, height int, format gfx
 	}
 	b.uploadTexture(texture, 0, gfx.Region{X: 0, Y: 0, Width: width, Height: height}, format, pixels)
 	if mipmaps {
-		b.uploadMipChain(texture, width, height, format, pixels)
+		b.uploadMipChain(texture, 0, width, height, format, pixels)
 	}
 }
 

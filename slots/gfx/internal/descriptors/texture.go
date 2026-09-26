@@ -30,7 +30,7 @@ type TextureDescrParams struct {
 
 // TextureDescr describes a texture by resource path (TextureWithResource),
 // inline pixel bytes (TextureWithBytes), or a texture returned by
-// ResourceQueue.BakeTexture.
+// ResourceQueue.NewTexture.
 //
 // It is an assets.Descr: Name is the resource path, Blob is the inline pixel run
 // - static, for the reason BufferDescr.bytes gives - and Params is everything

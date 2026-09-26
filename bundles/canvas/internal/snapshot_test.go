@@ -341,7 +341,7 @@ func TestADrawsSnapshotReportsEachLayersWindowTargetAndClear(t *testing.T) {
 	// here and passes it through untouched, so reporting where a layer draws
 	// means reading it back out of the descriptor.
 	withGfxResources(t, rig.k, func(resources *gfx.ResourceQueue) {
-		texture = resources.AllocateRenderTarget(64, 32, 1, gfx.FormatRGBA8)
+		texture = resources.NewRenderTarget(64, 32, 1, gfx.FormatRGBA8)
 		target = gfx.TextureTarget(texture, 0, 0)
 	})
 

@@ -91,8 +91,8 @@ func TestOnlyAllocateRenderTargetAsksForARenderableTexture(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		resources.AllocateTexture(64, 64, 1, descriptors.FormatRGBA8Srgb)
-		resources.AllocateRenderTarget(64, 64, 1, descriptors.FormatRGBA8Srgb)
+		resources.NewTexture(64, 64, 1, descriptors.FormatRGBA8Srgb, false)
+		resources.NewRenderTarget(64, 64, 1, descriptors.FormatRGBA8Srgb)
 	})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -126,7 +126,7 @@ func TestARenderTargetIsRenderedIntoAndSampledOnALaterFrame(t *testing.T) {
 
 	var texture descriptors.TextureDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		texture = resources.AllocateRenderTarget(64, 64, 1, descriptors.FormatRGBA8Srgb)
+		texture = resources.NewRenderTarget(64, 64, 1, descriptors.FormatRGBA8Srgb)
 	})
 	q := recordRaw(t, k)
 	q.Pass(descriptors.PassDescr{Target: descriptors.TextureTarget(texture, 0, 0), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "bake"})

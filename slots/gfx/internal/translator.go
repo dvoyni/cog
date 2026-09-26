@@ -231,7 +231,7 @@ func (t *translator) translate(
 			if op.Kind == OpAllocateTexture {
 				t.ops.AllocateTexture(op.TextureID, TextureDesc{
 					Width: op.TexW, Height: op.TexH, Layers: op.TexLayers, Format: op.Format,
-					Renderable: op.Renderable,
+					Mipmaps: op.Mipmaps, Renderable: op.Renderable,
 				})
 				continue
 			}

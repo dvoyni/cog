@@ -30,7 +30,7 @@ type pendingMesh struct {
 
 // MeshBaker is the flush's GPU half, handed to the Lookup for the length of one
 // drain. The Lookup takes three functions rather than the resource queue itself
-// because LookupAccess is deliberately GPU-free: BakeBuffer dereferences its
+// because LookupAccess is deliberately GPU-free: NewBuffer dereferences its
 // backend with no nil guard, so a mesh baked at startup through a queue held in
 // an app handler would either panic or silently not exist.
 type MeshBaker struct {

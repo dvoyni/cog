@@ -348,7 +348,7 @@ func (q *Queue) BakeTexture(id types.TextureID, width, height int, format descri
 func (q *Queue) AllocateTexture(id types.TextureID, desc TextureDesc) {
 	q.textureBakes = append(q.textureBakes, textureBake{
 		kind: textureBakeAllocate, id: id, width: desc.Width, height: desc.Height, layers: desc.Layers,
-		format: desc.Format, renderable: desc.Renderable,
+		format: desc.Format, mipmaps: desc.Mipmaps, renderable: desc.Renderable,
 	})
 }
 
@@ -377,7 +377,8 @@ func (q *Queue) ReplayBakes(sink BakeSink) {
 			sink.BakeTexture(t.id, t.width, t.height, t.format, t.data, t.mipmaps)
 		case textureBakeAllocate:
 			sink.AllocateTexture(t.id, TextureDesc{
-				Width: t.width, Height: t.height, Layers: t.layers, Format: t.format, Renderable: t.renderable,
+				Width: t.width, Height: t.height, Layers: t.layers, Format: t.format,
+				Mipmaps: t.mipmaps, Renderable: t.renderable,
 			})
 		case textureBakeUpdate:
 			sink.UpdateTexture(t.id, t.layer, t.region, t.data)

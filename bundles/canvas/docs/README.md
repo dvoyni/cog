@@ -439,7 +439,7 @@ binding:
   does not pack draws nothing at all;
 - every sprite, glyph and icon draw returns early on an atlas entry that did not
   resolve, so an unpacked entry draws nothing rather than binding id 0;
-- the atlas id always comes from `AllocateTexture`, and `LayersPerArray` below
+- the atlas id always comes from `NewTexture`, and `LayersPerArray` below
   two is refused at config validation, so the atlas view is always an array
   view;
 - canvas prepends its own `canvasTexture` parameter and resolution is
@@ -476,7 +476,7 @@ q.SpriteTexture(1, texture, canvas.SpriteTransform{Position: m.Vec2{X: 20, Y: 20
 caller allocated, passed through untouched, because minting a texture takes the
 gfx queue and a canvas recorder does not hold it. Take a frame-local target from
 `gfx.OpQueue.TemporaryTarget`, which hands back both the target and the texture,
-or a durable one from `gfx.ResourceQueue.AllocateRenderTarget` when the contents
+or a durable one from `gfx.ResourceQueue.NewRenderTarget` when the contents
 must outlive the frame - a panel baked once and sampled for many frames after.
 
 A layer with a target **measures against the target's size**, not the viewport:

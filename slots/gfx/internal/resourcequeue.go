@@ -21,56 +21,25 @@ func NewResourceQueue(ids IDSource) *ResourceQueue { return &ResourceQueue{ids: 
 // and is not ready until the device exists.
 func (q *ResourceQueue) Ready() bool { return q.ids != nil && q.ids().Ready() }
 
-// BakeBuffer queues a durable bake and returns its baked buffer descriptor.
-// copyData snapshots bytes when true; when false, the caller must keep them
-// unchanged until the resource queue is consumed by the render thread.
-func (q *ResourceQueue) BakeBuffer(data []byte, copyData bool) descriptors.BufferDescr {
-	return q.bakeBuffer(q.ids().NewBuffer(), types.BufferStorage, len(data), data, copyData)
+// NewBuffer reserves a buffer and returns its descriptor. Nothing reaches the
+// GPU until UploadBuffer gives it contents, which also fixes its size.
+func (q *ResourceQueue) NewBuffer() descriptors.BufferDescr {
+	return descriptors.BakedBuffer(q.ids().NewBuffer(), 0)
 }
 
-// ReBakeBuffer queues a durable rebake while preserving the buffer descriptor.
-// copyData snapshots bytes when true; when false, the caller must keep them
-// unchanged until consumed.
-func (q *ResourceQueue) ReBakeBuffer(buffer descriptors.BufferDescr, data []byte, copyData bool) descriptors.BufferDescr {
-	return q.bakeBuffer(buffer.ID(), types.BufferStorage, len(data), data, copyData)
+// NewTexture queues allocation of an empty texture to sample from. More than
+// one layer creates a 2D-array texture. mipmaps gives it a full mip chain,
+// which UploadTexture rebuilds for every upload that covers a whole layer. No
+// pass can render into it: ask NewRenderTarget for that.
+func (q *ResourceQueue) NewTexture(width, height, layers int, format descriptors.TextureFormat, mipmaps bool) descriptors.TextureDescr {
+	return q.newTexture(width, height, layers, format, mipmaps, false)
 }
 
-func (q *ResourceQueue) bakeBuffer(id types.BufferID, kind types.BufferKind, size int, data []byte, copyData bool) descriptors.BufferDescr {
-	if copyData {
-		data = append([]byte(nil), data...)
-	}
-	q.ops = append(q.ops, Op{
-		Kind: OpBakeBuffer, BufferID: id, BufferKind: kind, BufferSize: size,
-		Bytes: data,
-	})
-	return descriptors.BakedBuffer(id, len(data))
-}
-
-// ReleaseBuffer queues a durable release for buffer.
-func (q *ResourceQueue) ReleaseBuffer(buffer descriptors.BufferDescr) {
-	q.ops = append(q.ops, Op{Kind: OpReleaseBuffer, BufferID: buffer.ID()})
-}
-
-// BakeTexture queues a durable bake and returns its baked texture descriptor.
-// copyData snapshots pixels when true; when false, the caller must keep them
-// unchanged until the resource queue is consumed by the render thread. mipmaps
-// generates a full mip chain at bake time.
-func (q *ResourceQueue) BakeTexture(width, height int, format descriptors.TextureFormat, pixels []byte, copyData, mipmaps bool) descriptors.TextureDescr {
-	return q.bakeTexture(q.ids().NewTexture(), width, height, format, pixels, copyData, mipmaps)
-}
-
-// AllocateTexture queues allocation of an empty texture to sample from. More
-// than one layer creates a 2D-array texture. No pass can render into it: ask
-// AllocateRenderTarget for that.
-func (q *ResourceQueue) AllocateTexture(width, height, layers int, format descriptors.TextureFormat) descriptors.TextureDescr {
-	return q.allocateTexture(width, height, layers, format, false)
-}
-
-// AllocateRenderTarget queues allocation of an empty texture a pass can render
+// NewRenderTarget queues allocation of an empty texture a pass can render
 // into, through TextureTarget, and sample afterwards. More than one layer
 // creates a 2D-array texture, and TextureTarget names which layer a pass writes.
 //
-// It is a separate method rather than a flag on AllocateTexture because the
+// It is a separate method rather than a flag on NewTexture because the
 // render-attachment usage is not free: a backend may keep a sampled-only
 // texture in a compressed layout it cannot render into, so a texture that says
 // it might be a target pays for the possibility on every frame it is only read.
@@ -83,22 +52,47 @@ func (q *ResourceQueue) AllocateTexture(width, height, layers int, format descri
 // shadow map held across frames. When they need only live until the frame ends,
 // TemporaryTarget pools its textures and this one does not: what this returns is
 // caller-owned and must be released.
-func (q *ResourceQueue) AllocateRenderTarget(width, height, layers int, format descriptors.TextureFormat) descriptors.TextureDescr {
-	return q.allocateTexture(width, height, layers, format, true)
+func (q *ResourceQueue) NewRenderTarget(width, height, layers int, format descriptors.TextureFormat) descriptors.TextureDescr {
+	return q.newTexture(width, height, layers, format, false, true)
 }
 
-func (q *ResourceQueue) allocateTexture(width, height, layers int, format descriptors.TextureFormat, renderable bool) descriptors.TextureDescr {
+func (q *ResourceQueue) newTexture(width, height, layers int, format descriptors.TextureFormat, mipmaps, renderable bool) descriptors.TextureDescr {
 	id := q.ids().NewTexture()
 	q.ops = append(q.ops, Op{
 		Kind: OpAllocateTexture, TextureID: id,
 		TexW: width, TexH: height, TexLayers: layers, Format: format,
-		Renderable: renderable,
+		Mipmaps: mipmaps, Renderable: renderable,
 	})
 	return descriptors.BakedTextureWith(id, width, height, layers, format)
 }
 
-// UpdateTexture queues a pixel upload into one texture layer and region.
-func (q *ResourceQueue) UpdateTexture(texture descriptors.TextureDescr, layer int, region types.Region, pixels []byte, copyData bool) {
+// UploadBuffer queues data as buffer's whole contents and returns the
+// descriptor with its new size. Uploading again replaces the contents at any
+// length and keeps the buffer's id, so descriptors already handed out stay
+// valid. copyData snapshots data when true; when false, the caller must keep it
+// unchanged until the resource queue is consumed by the render thread.
+func (q *ResourceQueue) UploadBuffer(buffer descriptors.BufferDescr, data []byte, copyData bool) descriptors.BufferDescr {
+	id := buffer.ID()
+	if copyData {
+		data = append([]byte(nil), data...)
+	}
+	q.ops = append(q.ops, Op{
+		Kind: OpBakeBuffer, BufferID: id, BufferKind: types.BufferStorage, BufferSize: len(data),
+		Bytes: data,
+	})
+	return descriptors.BakedBuffer(id, len(data))
+}
+
+// UploadTexture queues pixels into one layer of texture, over region, and
+// returns texture; the zero region is the whole layer. A texture made with
+// mipmaps has that layer's chain rebuilt when the upload covers the whole
+// layer, and keeps its old smaller levels otherwise. copyData snapshots pixels
+// when true; when false, the caller must keep them unchanged until the
+// resource queue is consumed by the render thread.
+func (q *ResourceQueue) UploadTexture(texture descriptors.TextureDescr, layer int, region types.Region, pixels []byte, copyData bool) descriptors.TextureDescr {
+	if region == (types.Region{}) {
+		region.Width, region.Height = texture.Size()
+	}
 	if copyData {
 		pixels = append([]byte(nil), pixels...)
 	}
@@ -106,27 +100,12 @@ func (q *ResourceQueue) UpdateTexture(texture descriptors.TextureDescr, layer in
 		Kind: OpUpdateTexture, TextureID: texture.ID(),
 		TexLayer: layer, Region: region, Bytes: pixels,
 	})
+	return texture
 }
 
-// ReBakeTexture queues a durable rebake while preserving the texture descriptor.
-// copyData snapshots pixels when true; when false, the caller must keep them
-// unchanged until consumed. mipmaps generates a full mip chain at bake time.
-func (q *ResourceQueue) ReBakeTexture(texture descriptors.TextureDescr, width, height int, format descriptors.TextureFormat, pixels []byte, copyData, mipmaps bool) descriptors.TextureDescr {
-	return q.bakeTexture(texture.ID(), width, height, format, pixels, copyData, mipmaps)
-}
-
-func (q *ResourceQueue) bakeTexture(id types.TextureID, width, height int, format descriptors.TextureFormat, pixels []byte, copyData, mipmaps bool) descriptors.TextureDescr {
-	if copyData {
-		pixels = append([]byte(nil), pixels...)
-	}
-	q.ops = append(q.ops, Op{
-		Kind: OpBakeTexture, TextureID: id, TexW: width, TexH: height,
-		Format: format, Mipmaps: mipmaps, Bytes: pixels,
-	})
-	// A bake is one layer by construction: it takes a single pixel run and no op
-	// gives it more. Saying so keeps every path-loaded texture answerable, which
-	// is the case a draw against a texture_2d_array binding actually meets.
-	return descriptors.BakedTextureWith(id, width, height, 1, 0)
+// ReleaseBuffer queues a durable release for buffer.
+func (q *ResourceQueue) ReleaseBuffer(buffer descriptors.BufferDescr) {
+	q.ops = append(q.ops, Op{Kind: OpReleaseBuffer, BufferID: buffer.ID()})
 }
 
 // ReleaseTexture queues a durable release for texture.

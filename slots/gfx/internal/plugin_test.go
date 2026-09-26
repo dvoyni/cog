@@ -702,10 +702,10 @@ func TestBakeOpsAllocateBakedResourceIDs(t *testing.T) {
 	backend := &fakeBackend{}
 	queue := *NewResourceQueue(idsOf(backend))
 	pixels := []byte{1, 2, 3, 4}
-	buffer := queue.BakeBuffer(pixels, true)
-	texture := queue.BakeTexture(1, 1, descriptors.FormatRGBA8, pixels, true, false)
-	rebakedBuffer := queue.ReBakeBuffer(buffer, pixels, true)
-	rebakedTexture := queue.ReBakeTexture(texture, 1, 1, descriptors.FormatRGBA8, pixels, true, false)
+	buffer := queue.UploadBuffer(queue.NewBuffer(), pixels, true)
+	texture := queue.UploadTexture(queue.NewTexture(1, 1, 1, descriptors.FormatRGBA8, false), 0, types.Region{}, pixels, true)
+	rebakedBuffer := queue.UploadBuffer(buffer, pixels, true)
+	rebakedTexture := queue.UploadTexture(texture, 0, types.Region{}, pixels, true)
 
 	if buffer.ID() == 0 || texture.ID() == 0 {
 		t.Fatalf("baked handles = (%d, %d), want nonzero", buffer.ID(), texture.ID())
@@ -714,8 +714,8 @@ func TestBakeOpsAllocateBakedResourceIDs(t *testing.T) {
 		t.Fatalf("rebaked handles = (%d, %d), want (%d, %d)", rebakedBuffer.ID(), rebakedTexture.ID(), buffer.ID(), texture.ID())
 	}
 	pixels[0] = 99
-	for i := range ResourceQueueOps(&queue) {
-		if ResourceQueueOps(&queue)[i].Bytes[0] != 1 {
+	for i, op := range ResourceQueueOps(&queue) {
+		if op.Kind != OpAllocateTexture && op.Bytes[0] != 1 {
 			t.Fatalf("op %d did not copy caller data", i)
 		}
 	}
@@ -725,8 +725,8 @@ func TestBakeBufferCopyDataControlsOwnership(t *testing.T) {
 	queue := *NewResourceQueue(idsOf(&fakeBackend{}))
 	copied := []byte{1, 2, 3, 4}
 	borrowed := []byte{5, 6, 7, 8}
-	queue.BakeBuffer(copied, true)
-	queue.BakeBuffer(borrowed, false)
+	queue.UploadBuffer(queue.NewBuffer(), copied, true)
+	queue.UploadBuffer(queue.NewBuffer(), borrowed, false)
 
 	copied[0] = 9
 	borrowed[0] = 10
@@ -747,20 +747,21 @@ func TestBakeTextureCopyDataControlsOwnership(t *testing.T) {
 	queue := *NewResourceQueue(idsOf(&fakeBackend{}))
 	copied := []byte{1, 2, 3, 4}
 	borrowed := []byte{5, 6, 7, 8}
-	queue.BakeTexture(1, 1, descriptors.FormatRGBA8, copied, true, false)
-	queue.BakeTexture(1, 1, descriptors.FormatRGBA8, borrowed, false, false)
+	queue.UploadTexture(queue.NewTexture(1, 1, 1, descriptors.FormatRGBA8, false), 0, types.Region{}, copied, true)
+	queue.UploadTexture(queue.NewTexture(1, 1, 1, descriptors.FormatRGBA8, false), 0, types.Region{}, borrowed, false)
 
+	// Each upload is two ops, the allocation and then the pixels.
 	copied[0] = 9
 	borrowed[0] = 10
-	if got := ResourceQueueOps(&queue)[0].Bytes[0]; got != 1 {
+	if got := ResourceQueueOps(&queue)[1].Bytes[0]; got != 1 {
 		t.Fatalf("copied texture byte = %d, want 1", got)
 	}
-	if got := ResourceQueueOps(&queue)[1].Bytes[0]; got != 10 {
+	if got := ResourceQueueOps(&queue)[3].Bytes[0]; got != 10 {
 		t.Fatalf("borrowed texture byte = %d, want 10", got)
 	}
 	retainedOps := ResourceQueueOps(&queue)
 	ResourceQueueReset(&queue)
-	if retainedOps[1].Bytes != nil {
+	if retainedOps[3].Bytes != nil {
 		t.Fatal("reset retained borrowed texture pixels")
 	}
 }
@@ -772,8 +773,8 @@ func TestTextureArrayAllocationAndLayerUpdateTranslate(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	pixels := []byte{1, 2, 3, 4}
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		texture := resources.AllocateTexture(64, 32, 4, descriptors.FormatRGBA8)
-		resources.UpdateTexture(texture, 2, types.Region{X: 5, Y: 7, Width: 1, Height: 1}, pixels, true)
+		texture := resources.NewTexture(64, 32, 4, descriptors.FormatRGBA8, false)
+		resources.UploadTexture(texture, 2, types.Region{X: 5, Y: 7, Width: 1, Height: 1}, pixels, true)
 	})
 	pixels[0] = 9
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -842,14 +843,14 @@ func TestPersistentBakeRebakeAndReleaseSurviveDroppedFrame(t *testing.T) {
 	var buffer descriptors.BufferDescr
 	var texture descriptors.TextureDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		buffer = resources.BakeBuffer([]byte{1, 2, 3, 4}, true)
-		texture = resources.BakeTexture(1, 1, descriptors.FormatRGBA8, []byte{1, 2, 3, 4}, true, false)
+		buffer = resources.UploadBuffer(resources.NewBuffer(), []byte{1, 2, 3, 4}, true)
+		texture = resources.UploadTexture(resources.NewTexture(1, 1, 1, descriptors.FormatRGBA8, false), 0, types.Region{}, []byte{1, 2, 3, 4}, true)
 	})
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		resources.ReBakeBuffer(buffer, []byte{5, 6, 7, 8}, true)
-		resources.ReBakeTexture(texture, 1, 1, descriptors.FormatRGBA8, []byte{5, 6, 7, 8}, true, false)
+		resources.UploadBuffer(buffer, []byte{5, 6, 7, 8}, true)
+		resources.UploadTexture(texture, 0, types.Region{}, []byte{5, 6, 7, 8}, true)
 		resources.ReleaseBuffer(buffer)
 		resources.ReleaseTexture(texture)
 	})
@@ -859,8 +860,8 @@ func TestPersistentBakeRebakeAndReleaseSurviveDroppedFrame(t *testing.T) {
 	if got := countOps(backend.lastOps, testOpBakeBuffer); got != 2 {
 		t.Errorf("persistent buffer bakes = %d, want 2", got)
 	}
-	if got := countOps(backend.lastOps, testOpBakeTexture); got != 2 {
-		t.Errorf("persistent texture bakes = %d, want 2", got)
+	if got := countOps(backend.lastOps, testOpUpdateTexture); got != 2 {
+		t.Errorf("persistent texture uploads = %d, want 2", got)
 	}
 	if got := countOps(backend.lastOps, testOpReleaseBuffer); got != 1 {
 		t.Errorf("persistent buffer releases = %d, want 1", got)
@@ -1103,8 +1104,8 @@ func TestBakedResourcesTranslateToBakedBindings(t *testing.T) {
 	var texture descriptors.TextureDescr
 	var buffer descriptors.BufferDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		texture = resources.BakeTexture(1, 1, descriptors.FormatRGBA8, []byte{255, 255, 255, 255}, true, false)
-		buffer = resources.BakeBuffer([]byte{1, 2, 3, 4}, true)
+		texture = resources.UploadTexture(resources.NewTexture(1, 1, 1, descriptors.FormatRGBA8, false), 0, types.Region{}, []byte{255, 255, 255, 255}, true)
+		buffer = resources.UploadBuffer(resources.NewBuffer(), []byte{1, 2, 3, 4}, true)
 	})
 	w := recordList(t, k)
 	material := testMaterial(
@@ -1135,10 +1136,10 @@ func TestBakedResourcesTranslateToBakedBindings(t *testing.T) {
 	}
 
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		if got := resources.ReBakeTexture(texture, 2, 1, descriptors.FormatRGBA8, make([]byte, 8), true, false); got.ID() != texture.ID() {
+		if got := resources.UploadTexture(texture, 0, types.Region{}, make([]byte, 4), true); got.ID() != texture.ID() {
 			t.Errorf("rebaked texture = %d, want %d", got.ID(), texture.ID())
 		}
-		if got := resources.ReBakeBuffer(buffer, []byte{5, 6, 7, 8}, true); got.ID() != buffer.ID() {
+		if got := resources.UploadBuffer(buffer, []byte{5, 6, 7, 8}, true); got.ID() != buffer.ID() {
 			t.Errorf("rebaked buffer = %d, want %d", got.ID(), buffer.ID())
 		}
 	})
@@ -1152,7 +1153,7 @@ func TestBakedResourcesTranslateToBakedBindings(t *testing.T) {
 	for i := range backend.lastOps {
 		op := &backend.lastOps[i]
 		switch op.kind {
-		case testOpBakeTexture:
+		case testOpUpdateTexture:
 			rebakedTexture = op.texture
 		case testOpBakeBuffer:
 			if op.bufferKind == types.BufferStorage {
@@ -1542,7 +1543,7 @@ func TestFreeCachedResourcesClearsTranslatorOwnedCachesOnly(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	var explicit descriptors.TextureDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		explicit = resources.BakeTexture(1, 1, descriptors.FormatRGBA8, []byte{1, 2, 3, 4}, true, false)
+		explicit = resources.UploadTexture(resources.NewTexture(1, 1, 1, descriptors.FormatRGBA8, false), 0, types.Region{}, []byte{1, 2, 3, 4}, true)
 	})
 	w := recordList(t, k)
 	w.Draw(triangle(), testMaterial(

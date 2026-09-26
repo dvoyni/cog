@@ -580,7 +580,7 @@ func TestATextureCaptureDeclaresItsTransition(t *testing.T) {
 	var target descriptors.TextureDescr
 	rig := newCaptureRig(t)
 	withResourceQueue(t, rig.k, func(resources *ResourceQueue) {
-		target = resources.AllocateTexture(64, 64, 1, descriptors.FormatRGBA8)
+		target = resources.NewTexture(64, 64, 1, descriptors.FormatRGBA8, false)
 	})
 	if answer := rig.k.ExecuteCommand[ArmCaptureCmd](ArmCaptureRequest{
 		Target: types.CaptureDesc{Texture: target.ID()},

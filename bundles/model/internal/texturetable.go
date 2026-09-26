@@ -117,7 +117,9 @@ func (textureLoader) Load(
 	// without them aliases into noise the moment the camera moves. The pixels
 	// are handed over rather than copied - they are this decode's private
 	// buffer and nothing reads them again.
-	return userData.resources.BakeTexture(bounds.Dx(), bounds.Dy(), format, rgba.Pix, false, true)
+	resources := userData.resources
+	texture := resources.NewTexture(bounds.Dx(), bounds.Dy(), 1, format, true)
+	return resources.UploadTexture(texture, 0, gfx.Region{}, rgba.Pix, false)
 }
 
 // Default supplies the value for a picture whose file could not be read. The
@@ -156,7 +158,7 @@ func placeholderTexture(params textureDescrParams, resources *gfx.ResourceQueue)
 	if !params.srgb {
 		return gfx.TextureDescr{}
 	}
-	return resources.BakeTexture(1, 1, gfx.FormatRGBA8Srgb, magentaTexel[:], true, false)
+	return resources.UploadTexture(resources.NewTexture(1, 1, 1, gfx.FormatRGBA8Srgb, false), 0, gfx.Region{}, magentaTexel[:], true)
 }
 
 // magentaTexel is the placeholder's one opaque pixel. 1x1 rather than larger

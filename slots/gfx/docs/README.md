@@ -162,20 +162,30 @@ recorded outside every pass is dropped and reported as `ErrDrawWithoutPass`.
 `ResourceQueue` methods:
 
 - `Ready() bool`
-- `BakeBuffer`, `ReBakeBuffer`, `ReleaseBuffer`
-- `BakeTexture`, `ReBakeTexture`, `AllocateTexture`, `AllocateRenderTarget`,
-  `UpdateTexture`, `ReleaseTexture`
+- `NewBuffer`, `NewTexture`, `NewRenderTarget`
+- `UploadBuffer`, `UploadTexture`
+- `ReleaseBuffer`, `ReleaseTexture`
 
-`AllocateTexture` produces a texture to sample; `AllocateRenderTarget` produces
-one a pass can also render into, through `TextureTarget`. They are two methods
-because the render-attachment usage is not free, and almost every texture is
-sampled-only. `AllocateRenderTarget` is the durable counterpart of
+A resource is made by `New*` and given contents by `Upload*`, so a one-shot
+bake is `UploadBuffer(NewBuffer(), data, copyData)`. Uploading again keeps the
+id: `UploadBuffer` replaces the whole buffer at any length, and `UploadTexture`
+writes one layer over a region, the zero region being the whole layer. A
+texture keeps the size and format `NewTexture` gave it; to change them, release
+it and make another.
+
+`NewTexture(width, height, layers, format, mipmaps)` produces a texture to
+sample. With `mipmaps` it carries a full mip chain, which the backend rebuilds
+from every upload that covers a whole layer; a partial upload leaves the smaller
+levels as they were. `NewRenderTarget` produces one a pass can also render into,
+through `TextureTarget`. They are two methods because the render-attachment
+usage is not free, and almost every texture is sampled-only. `NewRenderTarget`
+is the durable counterpart of
 `OpQueue.TemporaryTarget`: take it when the rendered contents must outlive the
 frame, and `TemporaryTarget` when they need not.
 
 Methods accepting `copyData` snapshot bytes when true. When false, the caller
 must keep the source unchanged until the render thread consumes the operation.
-Explicit resources returned by `Bake*` are caller-owned and must be released.
+Resources returned by `New*` are caller-owned and must be released.
 
 ## The frame buffer and the present pass
 
@@ -408,7 +418,7 @@ and physical `FramebufferWidth`/`FramebufferHeight`.
 ## Draw Descriptors
 
 - `BufferDescr`: build inline data with `BufferWithBytes`; durable storage
-  buffers come from `ResourceQueue.BakeBuffer`. Inspect with `ID()`, `Size()`
+  buffers come from `ResourceQueue.NewBuffer`. Inspect with `ID()`, `Size()`
   and `InlineBytes()`.
 - `TextureDescr`: build with `TextureWithResource` or `TextureWithBytes`, or use
   `ResourceQueue`; inspect with `ID()`, `Path()`, `Size()`, `Format()`,

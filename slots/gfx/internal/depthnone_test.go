@@ -80,7 +80,7 @@ func TestADrawInADepthTargetPassKeepsItsDepthTarget(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		shadow = resources.AllocateTexture(64, 64, 1, descriptors.FormatDepth32F)
+		shadow = resources.NewTexture(64, 64, 1, descriptors.FormatDepth32F, false)
 	})
 	q := recordRaw(t, k)
 	q.Pass(descriptors.PassDescr{Target: descriptors.NoTarget(), Depth: descriptors.DepthTarget(shadow), DepthLoad: types.LoadClear, Label: "shadow"})

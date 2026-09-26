@@ -30,7 +30,7 @@ type Lookup struct {
 	// staging holds the bytes BakeMesh and UpdateMesh copied out of their
 	// callers, and pendingMeshes the uploads waiting on them. The arena is
 	// handed to gfx wholesale at the flush and a fresh one grown after, rather
-	// than reused: BakeBuffer takes the bytes without copying them, so reusing
+	// than reused: UploadBuffer takes the bytes without copying them, so reusing
 	// the backing would rewrite an upload still in flight.
 	staging       []byte
 	pendingMeshes []pendingMesh

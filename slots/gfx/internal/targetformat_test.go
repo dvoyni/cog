@@ -31,7 +31,7 @@ func allocatedTarget(t *testing.T, k kernel.Executioner, format descriptors.Text
 	t.Helper()
 	var target descriptors.TextureDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		target = resources.AllocateRenderTarget(64, 64, 1, format)
+		target = resources.NewRenderTarget(64, 64, 1, format)
 	})
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -146,7 +146,7 @@ func TestATargetsFirstFrameKeysTheFrameBufferAndItsNextFrameKeysItsOwn(t *testin
 
 	var target descriptors.TextureDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		target = resources.AllocateRenderTarget(64, 64, 1, descriptors.FormatRGBA8)
+		target = resources.NewRenderTarget(64, 64, 1, descriptors.FormatRGBA8)
 	})
 	renderInto(t, k, descriptors.TextureTarget(target, 0, 0), "first")
 
@@ -177,7 +177,7 @@ func TestAColourlessPassTakesNoFormatFromItsTarget(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		shadow = resources.AllocateTexture(64, 64, 1, descriptors.FormatDepth32F)
+		shadow = resources.NewTexture(64, 64, 1, descriptors.FormatDepth32F, false)
 	})
 	q := recordRaw(t, k)
 	q.Pass(descriptors.PassDescr{

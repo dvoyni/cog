@@ -135,7 +135,7 @@ func TestBufferRangeParamBindsItsOwnSlice(t *testing.T) {
 
 	var records descriptors.BufferDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		records = resources.BakeBuffer(make([]byte, 1024), true)
+		records = resources.UploadBuffer(resources.NewBuffer(), make([]byte, 1024), true)
 	})
 	w := recordList(t, k)
 	w.Draw(triangle(), testMaterial(descriptors.BufferRangeParam("records", records, 256, 512)), descriptors.MatParam("mvp", m.NewMat4()))
