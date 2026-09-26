@@ -269,9 +269,11 @@ indices (a solid Body's through the Body index only when its Shape sets
 
 - **a Sensor keeps every Hit, ordered by `T`**, excluding only itself, as today;
 - **a solid Body keeps every Hit on its path** that is not a Sensor, is not
-  already touched at `Previous`, and is one its path enters rather than a seam
-  ([below](#a-seam-stops-nothing)). The first stops it. Every later one on a
-  Body is held for Solve, which alone can tell whether the mover is stopped
+  already touched at `Previous` unless the Body is driven into it
+  ([below](#a-surface-the-body-is-driven-into-is-not-exempt)), and is one its
+  path enters rather than a seam ([below](#a-seam-stops-nothing)). The first
+  stops it. Every later one on a Body is held for Solve, which alone can tell
+  whether the mover is stopped
   ([below](#the-hits-past-the-stop)). It also keeps every Hit on a Sensor that
   did not move, which stops nothing
   ([below](#a-fast-body-reports-the-sensors-it-crosses)): those up to the stop
@@ -287,6 +289,8 @@ meets a fast Body.
 - **Targets it already touches at `Previous`.** Those are left to ordinary
   detection. Only a surface the path *enters* can stop a Body, so a fast ball
   rolling along the floor is not stopped by the floor. This is Box2D's rule too.
+  A surface the Body is driven into is the exception
+  ([below](#a-surface-the-body-is-driven-into-is-not-exempt)).
 - **Sensors, as a stop.** A Sensor never stops a Body. A resting one it crosses
   is still reported.
 - **Pairs detection already rejects:** the collision bits, and pairs a Joint
@@ -295,6 +299,43 @@ meets a fast Body.
   of a floor the Body slides along, is left to the discrete walk
   ([below](#a-seam-stops-nothing)). This is asked last, of a Hit that would
   otherwise stop the Body.
+
+### A surface the Body is driven into is not exempt
+
+From [physics: a shoved box is not pushed through a neighboured wall](https://github.com/dvoyni/cog/issues/592).
+
+**The failing sequence.** nox's crate, 2.952 × 1.476 m and 30 kg, stands at 15°
+touching a wall of neighboured 1 m segments of radius 0.2. A power-3 shove moves
+it 1.25 m in the tick, so it is engaged.
+
+- The two segments it touches are hit at `T = 0` and skipped as already touched
+  at `Previous`.
+- The next two are passed as seams by the depth test, because the resting depth
+  adds the drift into the touched surfaces, `max(0, −d · n)`. That drift is the
+  whole 0.9 to 1.25 m of the shove, which puts the resting depth at 1.71 m, far
+  deeper than the wall.
+- The crate ends 0.97 m deep, its centre past the core line, and the discrete
+  Contacts push it out of the far side.
+
+**The rule.** A `T = 0` Hit is not skipped when the Body closes on it by at
+least its own minimum extent along the Hit's normal, `−d · n ≥` minimum extent,
+the gate along the normal. It then takes the depth test like any other Hit
+([below](#a-seam-stops-nothing)), and one that passes stops the Body at
+`T = 0`: Solve moves it back to `Previous`, and the discrete Contacts found
+there push it out. Such a surface's drift is left out of the resting depth.
+
+- **The Joint check stays.** A pair a Joint holds apart is skipped at `T = 0`
+  as at any other `T`.
+- **The rule applies on both runs**, the static index's and, for a Shape that
+  sets `StopsAtBodies`, the Body index's. A marked partner met along the pair's
+  relative motion is not asked: a meeting at `T = 0` still stops nothing.
+
+**Rejected: the rule without the depth test.** It stops a Body sliding over a
+tiled floor at the seams. A mover resting a Slop into the floor straddles the
+seam at `Previous`, so the next tile's face is a `T = 0` Hit with normal
+(−1, 0) that the Body closes on by its whole speed.
+`TestAFastBodySlidesOverTheSeamsOfATiledFloor` fails on it. With the depth test,
+that face reaches no deeper than the tile underfoot, and it stays a seam.
 
 ### A seam stops nothing
 
@@ -329,7 +370,11 @@ hold. Otherwise it is a seam, and the pair is left to the discrete walk:
   already rests, plus the Slop.** The resting depth is the deepest overlap, at
   `Previous`, with any solid target the Body already touches (the path test's
   Hits at `T = 0`). To it is added how much further the path takes the Body into
-  that surface by the end of the tick, along that surface's normal. The test is
+  that surface by the end of the tick, along that surface's normal, unless the
+  path drives into that surface by at least the Body's minimum extent. That is
+  no Body settling onto what holds it up, and counting it put a shoved crate's
+  resting depth at 1.71 m
+  ([above](#a-surface-the-body-is-driven-into-is-not-exempt)). The test is
   the Body shrunk by that depth and Probed against the one target, along its
   path lengthened by the same depth, so the band keeps its full length.
   - For a circle it is `probeWorld` with the radius less the depth.
@@ -796,7 +841,7 @@ for. The new forms sit beside them and mirror `Overlap`'s way of taking a Shape:
 
 ## Named limits
 
-From 577, 578, 579, 580, 588 and 587. Each is a behaviour a game can see. The five
+From 577, 578, 579, 580, 588, 587 and 592. Each is a behaviour a game can see. The five
 marked **pinned** have a test that holds today's behaviour, so any change to it
 is deliberate. The others are written down only: each fixes itself within one tick,
 or is out of scope.
@@ -810,7 +855,7 @@ or is out of scope.
 | **A carry past the first, to a filter** | the Contact of a Dynamic body a Kinematic body carries past its first Hit, and the entry of a Sensor a Kinematic body crosses past it, are written by Solve, so a filter never sees them and cannot drop them; a reacting System does | written down |
 | **A graze** | a target the Body closes on, along the Hit's normal, by less than its extent, or that reaches into its band no deeper than the Slop past the depth it already rests at, is a seam to the path pass: a fast ball passes a post that reaches 3 mm into its path, and a Body sunk deep in something at `Previous` passes anything that reaches no deeper | **pinned** |
 | **A seam met while landing** | a Body touching nothing at `Previous` has only the Slop to beat, so one coming down onto a tiled floor more than the Slop deeper in the tick it crosses a seam is stopped by the next tile's face, and loses the rest of that tick's travel | written down |
-| **Rotational tunnelling** | the path is a chord at the end angle, so a thin Shape spinning fast can slip through | out of scope |
+| **Rotational tunnelling** | the path is a chord at the end angle, so a thin Shape spinning fast can slip through. A stop against a face gets one point with a Depth of 0 (a stop manifold is held, #592), so Solve can turn a shove into spin. At nox's numbers, a power-2 shove at a crate 5° off square and 0.3 m clear stops it at one corner and spins it at 30 rad/s, and the next tick swings its far end 0.99 m past the face of a 0.4 m wall, out of which the discrete Contacts push it over the next second. A shove every tick keeps it spinning into the wall: a power-1 shove every tick for 8 ticks takes the crate through in 8 of 168 runs of the sweep's poses, at 30°, 45° and 60°. The diagnosis harness counted 35 of 3 024 runs through, almost all of them this, and 6 with a stop manifold | out of scope |
 | **A dropped stop's other Contacts** | tested at the stopping point, they describe that pose for one tick | written down |
 | **The ghost Hit** | a target that moved into the path during the tick counts as already there | written down |
 | **Stale Contacts beside a Kinematic side** | Detect cannot tell kinds, so it tests a stopped Body's other pairs as if both sides move back to `T`; where one is Kinematic, the Dynamic side's other Contacts describe the wrong pose for one tick, and so do those of a Dynamic body it carries, found where the tick left it | written down |
@@ -935,6 +980,15 @@ points, so none of those decisions can be undone silently:
    Static wall and then a ball (589): every ball is carried, circles and boxes,
    both spawn orders; a fast Dynamic ball over the same two balls stops at the
    first, and no Contact names the second.
+10. the shoved crate (592), at nox's numbers against a wall of neighboured 1 m
+    segments of radius 0.2: the three failing sequences, each red before the
+    change; a sweep of 896 shoves of the crate and the block, at 7 angles, at a
+    segment's middle, a joint, 2 cm off it and the run's end, from 0.3 m clear
+    to 5 mm in, at power 1, 2 and 3 and at power 1 four times 5 ticks apart,
+    none of which goes through (305 did before the change); and the crate
+    sliding along the run square and tipped 5° and 15° onto a corner, at 2, 4
+    and 8 m/s from nine phases, keeping its speed through every joint within
+    1%.
 
 ### The speed sweep
 

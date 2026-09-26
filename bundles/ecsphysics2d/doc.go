@@ -149,7 +149,8 @@
 // A solid Body does not tunnel either. One that moves at least its own
 // thinnest width in a tick is Probed along its path, its Shape held at its end
 // angle, and stopped where it first meets a Static body it collides with that
-// it was not already touching when the tick began; a Sensor never stops it.
+// it was not already touching when the tick began, or that it was touching and
+// is driven into by at least that width; a Sensor never stops it.
 // Meeting the Kinematic and Dynamic bodies on its path too is asked for by its
 // Shape's StopsAtBodies, which makes an engaged Body cost three to four times
 // as much, so a Body without it passes through a Kinematic or Dynamic body it

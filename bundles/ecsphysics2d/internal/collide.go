@@ -312,6 +312,15 @@ func collideSegments(
 
 // collideSegmentPoly is cp's SegmentToPoly, the segment first as cp's kind
 // order requires.
+//
+// The neighbour tangents reject a touch only while the Polygon has not crossed
+// the segment's core line, points.d > 0 (ecsphysics2d.md § Segment neighbours
+// come from the app, issue #592). Before it, a witness on a joint's endpoint
+// whose normal leans into the neighbour is the neighbour's to answer, and
+// rejecting it keeps a Polygon sliding along a run from catching at the
+// joints. Past it, GJK/EPA puts the witness on the joint for both segments,
+// each normal leaning into the other, so the rule rejected both, and a corner
+// driven past the core line at a joint met nothing at all.
 func collideSegmentPoly(
 	segment Shape, transform Transform, worldSegment []m.Vec2d,
 	poly Shape, worldPoly []m.Vec2d,
@@ -327,9 +336,9 @@ func collideSegmentPoly(
 
 	n := points.n
 	rotation := rotationOf(transform)
-	if points.d-segment.Radius-poly.Radius <= 0 &&
-		(points.a != worldSegment[0] || n.Dot(segment.Verts[2].Rotate(rotation)) <= 0) &&
-		(points.a != worldSegment[1] || n.Dot(segment.Verts[3].Rotate(rotation)) <= 0) {
+	if points.d-segment.Radius-poly.Radius <= 0 && (points.d <= 0 ||
+		(!witnessAtEnd(points, worldSegment, 0) || n.Dot(segment.Verts[2].Rotate(rotation)) <= 0) &&
+			(!witnessAtEnd(points, worldSegment, 1) || n.Dot(segment.Verts[3].Rotate(rotation)) <= 0)) {
 		touch := touching{gjkId: points.id}
 		if contactPoints(
 			supportEdgeForSegment(segment.Radius, worldSegment, n),
@@ -340,6 +349,17 @@ func collideSegmentPoly(
 		}
 	}
 	return touching{}, false
+}
+
+// witnessAtEnd reports that GJK's witness on a segment is its endpoint i:
+// cp's exact comparison with the endpoint, or a simplex whose two points on the
+// segment are both that endpoint. GJK interpolates the witness between the two
+// even then, which can miss the endpoint by a rounding: a crate tipped 5° and
+// sliding along a neighboured run met a joint's endpoint as
+// x = 4.999999999999999 against 5, the neighbour rule did not fire, and the
+// cap's normal took 1.1% of its speed (issue #592).
+func witnessAtEnd(points closestPoints, world []m.Vec2d, i uint32) bool {
+	return points.a == world[i] || (points.id>>24)&0xFF == i && (points.id>>8)&0xFF == i
 }
 
 // collidePolys is cp's PolyToPoly, and is what makes boxes stack.
