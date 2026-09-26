@@ -431,9 +431,21 @@ draw the set, so the check costs no load of its own. A set built on a shader
 released since is dropped the same way: releasing the shader is the app
 reloading it.
 
-**Gap:** the check is a few indexed loads a draw. It ships if an interleaved
-A/B of `TranslateSteadyState` against the pre-change commit shows it within the
-±3% noise, and is reconsidered if not.
+**Settled here:** a resource a set binds, released since the frame was
+recorded, is an unsupplied binding, silently. A storage buffer has no default,
+so its draw is dropped as a released mesh's is - whether the set or the frame's
+version names it - and nothing is reported, where an unsupplied one is. A
+texture falls back to white, as an unsupplied one does and as the backend
+already binds a texture it no longer holds, and the draw is kept. A set's own
+bakes need nothing of their own: they are released with the set, whose draws
+drop, or replaced by an update, whose draws bind the new bake.
+
+**Measured:** the mesh check and the storage check are each one inlined
+lookup in a table that stays empty until something is released. Interleaved
+A/B against the commit before each: `TranslateSteadyState` +2.1% and +2.3%
+for the mesh check, `TranslateDrawSetSteadyState` +0.4% for the storage
+check, all within the ±3% noise and at zero allocations. The same mesh check
+behind a non-inlined helper measured +4%, so both are written inline.
 
 ---
 
@@ -565,6 +577,16 @@ it. It is reconsidered with scene's materials.
   and the render thread's cache is the one thing that can read the file; a set
   keeping the path costs a string, and a set refusing it moves the load into
   every recorder.
+- **Dropping a draw whose texture was released.** A texture has a default, and
+  white is what an unsupplied one draws with; dropping would make a released
+  texture stricter than a missing one.
+- **Tracking released textures in the translator to bind white itself.** A
+  lookup per texture binding a draw, on the hot path, for what the backend
+  already does with an id it no longer holds.
+- **Leaving a released storage buffer to the backend.** It drops the bind group
+  and reports the refusal, so the re-rendered frame would be reported as a
+  mistake; the translator's lookup is already in the loop that checks storage
+  bindings.
 
 ---
 

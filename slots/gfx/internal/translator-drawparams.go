@@ -153,7 +153,9 @@ func (t *translator) checkSetBindings(set *drawSet, pass descriptors.PassDescr) 
 
 // suppliesStorage reports whether every storage binding of the draw's set has
 // a buffer, and reports the first that has none, once. A storage buffer is the
-// one binding with no default: a draw missing one has no data.
+// one binding with no default: a draw missing one has no data. A buffer
+// released since the frame was recorded is missing too, silently - it is the
+// re-rendered frame, as a released mesh is.
 func (t *translator) suppliesStorage(set *drawSet, firstErr *error) bool {
 	for i := range set.bindings {
 		binding := &set.bindings[i]
@@ -162,6 +164,9 @@ func (t *translator) suppliesStorage(set *drawSet, firstErr *error) bool {
 		}
 		value, _ := set.value(i)
 		if value.buffer != 0 {
+			if t.released.buffer(value.buffer) {
+				return false
+			}
 			continue
 		}
 		key := unsuppliedBufferKey{shader: set.record.shader, parameter: binding.Name}
