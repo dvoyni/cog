@@ -117,6 +117,10 @@ type MaterialIngredients struct {
 	// gfx packs a member nothing supplies as zero.
 	Params []gfx.ParameterDescr
 	State  gfx.MaterialState
+	// Values are the same numbers as the Params' members, as the whole
+	// ScenePbrMaterial block: what a renderer drawing through draw params sets
+	// its binding with, after Overlay has laid its own members over a copy.
+	Values PbrValues
 }
 
 // BundledIngredients are a baked mesh's ingredients: the white texel in every
@@ -138,6 +142,7 @@ func BundledIngredients(defaults PbrDefaults) MaterialIngredients {
 	return MaterialIngredients{
 		Params: paint.appendParams(params),
 		State:  PbrState(AlphaOpaque, false),
+		Values: paint,
 	}
 }
 

@@ -60,15 +60,29 @@ type modelKeys struct {
 type keyScratch struct {
 	models map[ecs.Entity]modelKeys
 	meshes map[ecs.Entity]batchKey
+	// modelSets is every one of scene's sets a Model Entity's primitives
+	// hold, one hold per primitive drawing through one, and meshSets the set
+	// each Mesh Entity holds. They are the load System's alone, beside the
+	// keys rather than in them, so the recording System's per-instance map
+	// reads stay as small as they were.
+	modelSets map[ecs.Entity][]setKey
+	meshSets  map[ecs.Entity]setKey
+	// sets is scene's own draw params, which the keys above hold.
+	sets setCache
+	// held is scratch for the holds an Entity gave up while it is keyed
+	// again, released once its new ones are taken.
+	held []setKey
 	// pending is every Entity a Hook named and the load System has not keyed
 	// yet, and seen the same Entities as a set, so an Entity several Hooks
 	// name is keyed once. They outlive a run only while the backend is not
 	// ready, which is the one load failure that does not stick.
 	pending []ecs.Entity
 	seen    map[ecs.Entity]struct{}
-	// spare holds the key slices of Entities that stopped being Models, reused
-	// by the next Model Entity so spawn and despawn churn stops allocating.
-	spare [][]batchKey
+	// spare and spareSets hold the key and set slices of Entities that
+	// stopped being Models, reused by the next Model Entity so spawn and
+	// despawn churn stops allocating.
+	spare     [][]batchKey
+	spareSets [][]setKey
 	// params and tagParams are reused backings a List is copied out into
 	// before it is hashed.
 	params    []gfx.ParameterDescr
@@ -87,9 +101,12 @@ type keyScratch struct {
 
 func newKeyScratch() *keyScratch {
 	return &keyScratch{
-		models: map[ecs.Entity]modelKeys{},
-		meshes: map[ecs.Entity]batchKey{},
-		seen:   map[ecs.Entity]struct{}{},
+		models:    map[ecs.Entity]modelKeys{},
+		meshes:    map[ecs.Entity]batchKey{},
+		modelSets: map[ecs.Entity][]setKey{},
+		meshSets:  map[ecs.Entity]setKey{},
+		sets:      newSetCache(),
+		seen:      map[ecs.Entity]struct{}{},
 	}
 }
 
@@ -115,46 +132,58 @@ func (s *keyScratch) touch(e ecs.Entity) {
 }
 
 // dropModel takes an Entity's model keys out of the scratch, keeping the
-// backing for the next Model Entity.
-func (s *keyScratch) dropModel(e ecs.Entity) {
+// backings for the next Model Entity, and returns the sets it held.
+func (s *keyScratch) dropModel(e ecs.Entity) []setKey {
+	held := s.modelSets[e]
+	delete(s.modelSets, e)
+	if cap(held) > 0 {
+		s.spareSets = append(s.spareSets, held[:0])
+	}
 	entry, ok := s.models[e]
 	if !ok {
-		return
+		return held
 	}
 	delete(s.models, e)
 	if cap(entry.keys) > 0 {
 		s.spare = append(s.spare, entry.keys[:0])
 	}
+	return held
 }
 
 // spareKeys hands out a kept key backing, or nil when there is none.
 func (s *keyScratch) spareKeys() []batchKey {
-	n := len(s.spare)
+	return takeSpare(&s.spare)
+}
+
+// takeSpare hands out the last backing a spare list keeps, or nil.
+func takeSpare[T any](spare *[][]T) []T {
+	n := len(*spare)
 	if n == 0 {
 		return nil
 	}
-	keys := s.spare[n-1]
-	s.spare[n-1] = nil
-	s.spare = s.spare[:n-1]
-	return keys
+	backing := (*spare)[n-1]
+	(*spare)[n-1] = nil
+	*spare = (*spare)[:n-1]
+	return backing
 }
 
-// paramsHash is the Params hash: gfx's own fingerprint of the parameters, so
-// equal values hash equal whichever List holds them. No parameters is zero,
-// the same as no Params, because both draw the same; any other hash that lands
-// on zero reads as one.
-func (s *keyScratch) paramsHash(p *Params) uint64 {
+// paramsHash is the Params hash and binding shape: gfx's own fingerprint of
+// the parameters, so equal values hash equal whichever List holds them, and
+// paramsShape of their names. No parameters is zero for both, the same as no
+// Params, because both draw the same; any other hash that lands on zero reads
+// as one.
+func (s *keyScratch) paramsHash(p *Params) (hash, shape uint64) {
 	if p.Values.Len() == 0 {
-		return 0
+		return 0, 0
 	}
 	values := s.params[:0]
 	for _, param := range p.Values.All() {
 		values = append(values, param)
 	}
 	s.params = values
-	hash := nonZero(gfx.FingerprintParams(values))
+	hash, shape = nonZero(gfx.FingerprintParams(values)), paramsShape(values)
 	clear(values)
-	return hash
+	return hash, shape
 }
 
 // materialKey keys a Material override by content: each tag's pass and gfx

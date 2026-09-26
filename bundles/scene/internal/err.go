@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx"
 )
 
 // ErrCameraAlreadyRecorded reports a second Camera Entity with an ID another
@@ -99,4 +100,28 @@ func (e ErrMeshCustomLayoutNeedsMaterial) Error() string {
 	return fmt.Sprintf(
 		"scene: mesh %d has a custom vertex layout, which the bundled PBR cannot draw; give the Entity a Material",
 		e.Mesh)
+}
+
+// ErrMaterialShaderUnavailable reports a material's shader that did not
+// compile: a missing file, an include that does not resolve, or WGSL that does
+// not parse. Every draw through it draws nothing, and it is reported once.
+type ErrMaterialShaderUnavailable struct {
+	// Shader is the shader's storage path, quoted, or (inline) for text.
+	Shader string
+	Err    error
+}
+
+func (e ErrMaterialShaderUnavailable) Error() string {
+	return fmt.Sprintf("scene: material shader %s did not compile, and draws nothing: %v", e.Shader, e.Err)
+}
+
+func (e ErrMaterialShaderUnavailable) Unwrap() error { return e.Err }
+
+// shaderText names a shader the way a report wants it: its path, or that it
+// was inline text.
+func shaderText(descr gfx.ShaderDescr) string {
+	if path := descr.Path(); path != "" {
+		return fmt.Sprintf("%q", path)
+	}
+	return "(inline)"
 }

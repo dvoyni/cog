@@ -36,7 +36,7 @@ func TestEveryUploadedRecordMatchesItsShaderStruct(t *testing.T) {
 	var light Light
 	var instance Instance
 	var mesh SceneMesh
-	var material pbrValues
+	var material PbrValues
 	records := []shaderRecord{
 		{"SceneFrame", unsafe.Sizeof(frame), []shaderMember{
 			{"view", unsafe.Offsetof(frame.View)},
@@ -122,7 +122,7 @@ func TestEveryUploadedRecordMatchesItsShaderStruct(t *testing.T) {
 
 // slotMembers pairs each slot's flat transform and rotation members with the
 // element of the Go arrays that holds it.
-func slotMembers(material *pbrValues) []shaderMember {
+func slotMembers(material *PbrValues) []shaderMember {
 	var members []shaderMember
 	for slot, names := range PbrSlots {
 		members = append(members,

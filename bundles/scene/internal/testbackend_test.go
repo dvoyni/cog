@@ -21,9 +21,9 @@ import (
 // are kept per buffer, so a test decodes the records scene packed rather than
 // only their offsets.
 //
-// It keeps the SetParams bytes, and every shader it compiles
-// declares a uniform block naming testUniforms, so gfx packs the parameters a
-// draw binds instead of dropping them.
+// Every shader it reflects declares scenePbrMaterial whole and one uniform of
+// its own for each name in testBindings, so the values a draw's set and its
+// frame's version supply reach the backend and read back by name.
 type testBackend struct {
 	mu          sync.Mutex
 	nextTexture gfx.TextureID
@@ -53,7 +53,9 @@ type recordedPass struct {
 // recordedDraw is one draw call and the state it was issued under.
 type recordedDraw struct {
 	pipeline gfx.PipelineID
-	params   []byte
+	// params is every uniform block bound when the draw was issued, by group
+	// and binding.
+	params   map[[2]int][]byte
 	vertices gfx.BufferID
 	index    gfx.BufferID
 	// buffers is every storage range bound when the draw was issued, keyed by
@@ -70,12 +72,12 @@ type bufferRange struct {
 	offset, size int
 }
 
-// testUniforms is the uniform block every shader here declares: the bundled
-// material's scenePbrMaterial block at the offsets gogpu reflects, so gfx packs
-// as many members per draw as it does for the real shader, and then one vec4
-// slot for each name a test binds of its own. A member the draw does not
-// supply is packed as zero. A test reads what a draw's material numbers
-// resolved to the way the shader would: packed by gfx, by name.
+// testUniforms is the bundled material's scenePbrMaterial block at the offsets
+// gogpu reflects, which is where a test reads a draw's material numbers back
+// the way the shader would. The block is set whole by a draw's set and its
+// frame's version. The names after it are a uniform block's members only for
+// the old path's shaders, NewShader's; a reflected shader declares them as
+// testBindings instead.
 var testUniforms = []gfx.StorageMember{
 	{Name: "baseColorFactor", Offset: 0}, {Name: "emissiveFactor", Offset: 16},
 	{Name: "baseColorTransform", Offset: 32}, {Name: "metallicRoughnessTransform", Offset: 48},
@@ -183,9 +185,20 @@ func (b *testBackend) NewShader(desc gfx.ShaderDesc) (gfx.ShaderID, error) {
 	return id, nil
 }
 
-func (b *testBackend) FreeShader(gfx.ShaderID)                         {}
-func (b *testBackend) ReserveShader() gfx.ShaderID                     { return gfx.ShaderID(b.next()) }
-func (b *testBackend) CreateShader(gfx.ShaderID, gfx.ShaderDesc) error { return nil }
+func (b *testBackend) FreeShader(gfx.ShaderID)     {}
+func (b *testBackend) ReserveShader() gfx.ShaderID { return gfx.ShaderID(b.next()) }
+
+// CreateShader keeps a reserved shader's source, which is how a test tells the
+// shader a draw's set was built on.
+func (b *testBackend) CreateShader(id gfx.ShaderID, desc gfx.ShaderDesc) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.shaders == nil {
+		b.shaders, b.layouts = map[gfx.ShaderID]string{}, map[gfx.ShaderID]gfx.ShaderLayout{}
+	}
+	b.shaders[id] = string(desc.Code)
+	return nil
+}
 
 // ReflectShader is the reflection a compile goes through, which is how model
 // builds its draw params at load: layoutOf's narrowing, with the material
@@ -196,7 +209,21 @@ func (b *testBackend) ReflectShader(code []byte) (gfx.ShaderLayout, error) {
 	layout.Resources[0] = gfx.ShaderResource{
 		Name: "scenePbrMaterial", Kind: gfx.ResourceUniformBuffer, Group: 1, Binding: 0, Size: scenePbrMaterialSize,
 	}
+	layout.Resources = append(layout.Resources, testBindings...)
 	return layout, nil
+}
+
+// testBindings are the uniforms of their own every reflected shader here
+// declares, in group 3, for the names the tests bind: whole bindings, as a
+// shader declaring a per-draw number of its own does.
+var testBindings = []gfx.ShaderResource{
+	{Name: "fade", Kind: gfx.ResourceUniformBuffer, Group: 3, Binding: 0, Size: 4},
+	{Name: "a", Kind: gfx.ResourceUniformBuffer, Group: 3, Binding: 1, Size: 4},
+	{Name: "b", Kind: gfx.ResourceUniformBuffer, Group: 3, Binding: 2, Size: 4},
+	{Name: "c", Kind: gfx.ResourceUniformBuffer, Group: 3, Binding: 3, Size: 4},
+	{Name: "d", Kind: gfx.ResourceUniformBuffer, Group: 3, Binding: 4, Size: 4},
+	{Name: "bias", Kind: gfx.ResourceUniformBuffer, Group: 3, Binding: 5, Size: 4},
+	{Name: "tint", Kind: gfx.ResourceUniformBuffer, Group: 3, Binding: 6, Size: 16},
 }
 
 // scenePbrMaterialSize is ScenePbrMaterial's size: seven vec4s and eleven
@@ -254,7 +281,7 @@ func (b *testBackend) Execute(queue *gfx.Queue) {
 func (b *testBackend) BeginPass(desc gfx.PassDesc) gfx.RenderPass {
 	b.building = append(b.building, recordedPass{desc: desc})
 	b.current = &b.building[len(b.building)-1]
-	b.state = recordedDraw{buffers: map[string]bufferRange{}}
+	b.state = recordedDraw{buffers: map[string]bufferRange{}, params: map[[2]int][]byte{}}
 	return b
 }
 
@@ -278,8 +305,8 @@ func (b *testBackend) SetPipeline(id gfx.PipelineID) { b.state.pipeline = id }
 
 func (b *testBackend) BakeUniforms(arena []byte) { b.uniforms = arena }
 
-func (b *testBackend) SetUniformBlock(_, _, offset, size int) {
-	b.state.params = append([]byte(nil), b.uniforms[offset:offset+size]...)
+func (b *testBackend) SetUniformBlock(group, binding, offset, size int) {
+	b.state.params[[2]int{group, binding}] = append([]byte(nil), b.uniforms[offset:offset+size]...)
 }
 
 func (b *testBackend) SetTexture(gfx.TextureID, int, int) {}
@@ -302,6 +329,10 @@ func (b *testBackend) Draw(first, count, instances, firstInstance int, indexed b
 	draw.buffers = make(map[string]bufferRange, len(b.state.buffers))
 	for name, bound := range b.state.buffers {
 		draw.buffers[name] = bound
+	}
+	draw.params = make(map[[2]int][]byte, len(b.state.params))
+	for at, block := range b.state.params {
+		draw.params[at] = block
 	}
 	draw.first, draw.count, draw.instances, draw.firstInstance, draw.indexed =
 		first, count, instances, firstInstance, indexed
@@ -336,7 +367,7 @@ type drawnInstance struct {
 	pass     gfx.PassDesc
 	shader   string
 	state    gfx.MaterialState
-	params   []byte
+	params   map[[2]int][]byte
 	vertices gfx.BufferID
 	count    int
 	indexed  bool
@@ -358,11 +389,22 @@ func (d drawnInstance) position() m.Vec3 {
 	return m.Vec3{X: d.world[12], Y: d.world[13], Z: d.world[14]}
 }
 
-// param reads one member of the uniform block the draw packed.
+// param reads what a draw bound under one name, the way the shader would: a
+// member of the scenePbrMaterial block at its offset, or one of testBindings
+// whole, padded out to a vec4. A binding the draw did not bind reads as zero.
 func (d drawnInstance) param(name string) m.Vec4 {
 	for _, member := range testUniforms {
-		if member.Name == name && len(d.params) >= member.Offset+16 {
-			return vec4At(d.params, member.Offset)
+		if block := d.params[[2]int{1, 0}]; member.Name == name && len(block) > member.Offset {
+			var padded [16]byte
+			copy(padded[:], block[member.Offset:])
+			return vec4At(padded[:], 0)
+		}
+	}
+	for _, binding := range testBindings {
+		if binding.Name == name {
+			var padded [16]byte
+			copy(padded[:], d.params[[2]int{binding.Group, binding.Binding}])
+			return vec4At(padded[:], 0)
 		}
 	}
 	return m.Vec4{}

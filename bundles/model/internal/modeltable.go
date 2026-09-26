@@ -459,7 +459,9 @@ func bindModelMaterial(
 		)
 	}
 	params = loaded.values.appendParams(params)
-	built := modelMaterial{MaterialIngredients: MaterialIngredients{Params: params, State: loaded.state}}
+	built := modelMaterial{MaterialIngredients: MaterialIngredients{
+		Params: params, State: loaded.state, Values: loaded.values,
+	}}
 	for variant := range built.Forward {
 		// One params slice serves all four, and the ingredients too: only
 		// the shader differs.

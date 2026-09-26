@@ -27,6 +27,9 @@ const (
 	BindingScenePoses       = "scenePoses"
 	BindingSceneSkinJoints  = "sceneSkinJoints"
 	BindingSceneMorphDeltas = "sceneMorphDeltas"
+	// BindingScenePbrMaterial is the material's uniform block,
+	// ScenePbrMaterial, which a draw params set carries whole as PbrValues.
+	BindingScenePbrMaterial = "scenePbrMaterial"
 )
 
 // Instance is the per-instance record every draw of the bundled shader reads

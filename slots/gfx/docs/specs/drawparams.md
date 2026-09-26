@@ -535,6 +535,37 @@ buffers. `UnloadModel` is on the facade that carries no device, so a free
 queues the sets and `DrainMeshes` hands them to `MeshBaker.ReleaseDrawParams`,
 which scene fills with `ReleaseDrawParams` under the drain's kernel.
 
+**Settled here:** scene keeps a param naming a member of `ScenePbrMaterial`
+working - `gfx.ColorParam("baseColorFactor", c)` in a `Params` Component, a
+`Material` tag's params or the default scene shader's - as the one
+member-level write left, and it is model's and scene's, never gfx's. Model
+publishes the block's Go mirror as `model.PbrValues`, a file's whole value as
+`MaterialIngredients.Values`, and `PbrValues.Overlay`, which writes a param
+named for a member into a copy by the member's offset. Scene lays the default
+scene shader's and a tag's members into a set's values when it creates the set,
+and a Batch's `Params` members into a copy of those values per draw, set whole
+through `SetDrawParams` with `RawParameterRef`, which allocates nothing. Every
+other name is a whole binding, dropped where the set's shader does not declare
+it, as canvas drops one. gfx stays whole-binding. Scene's own proper materials,
+the next refactor, are where the member write goes.
+
+**Settled here:** scene's own sets are created and released by its load
+System, which already holds the resource queue and declares
+`Uses[CompileShaderCmd]`, whose lock is empty; the recording System keeps its
+lock set, the OpQueue and reads. They are cached in the load System's scratch
+by the material key it already computes, the shader variant, and the binding
+shape of the `Params` - the bindings they set, a member of the block counting as
+the block - for the reason canvas keys by shape: a version carries forward what
+the next does not name. A model primitive with no `Material`, under the bundled
+default shader and with no `Params` binding, draws model's own set, whose
+bindings scene reads off the bundled variant it compiles once for the purpose.
+A set is held once per primitive or mesh drawing through it and released with
+the last hold; a new default scene shader releases every set and keys every
+drawable again. A zero set - model's for a variant that did not compile, or
+scene's for a shader that did not, which is reported once as
+`scene.ErrMaterialShaderUnavailable` - draws nothing, with no fall back to the
+old path.
+
 **Settled here:** canvas compiles in its flush, on a material's first batch.
 The flush already holds the ResourceQueue and the storage filesystem, and
 declares `Uses[CompileShaderCmd]`, whose lock is empty, so no System's lock set
@@ -702,6 +733,18 @@ it. It is reconsidered with scene's materials.
 - **Programs per model.** The four variants are the same four programs for
   every file; compiling them per load would be four naga parses a file for
   nothing, so they are the Lookup's.
+- **Whole bindings only in scene, members of `ScenePbrMaterial` dropped.** It
+  is the letter of this specification and what canvas did, but every
+  per-Entity tint would be lost in silence - the debug shapes' colour, the
+  examples' `Params` tints and `model.PaintParams` - with nothing to replace
+  them until scene's proper materials: tinting a file's model would mean
+  resubmitting its whole block, which the caller does not hold.
+- **Scene's sets created in the recording System.** It holds the OpQueue and
+  not the resource queue; creating there would add the resource queue to its
+  lock set and serialise it against every durable writer.
+- **Setting the material block on every draw, instead of a set per binding
+  shape.** 160 bytes a Batch a pass for the Batches that do not tint, to stop a
+  tint leaking from the ones that do; the shape keeps the cost with the tint.
 - **Releasing a model's sets at the unload call.** `UnloadModel` is on
   `LookupAccess`, which carries no resource queue precisely so that a System
   baking a mesh does not declare a gfx write; releasing at the call would move

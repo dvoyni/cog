@@ -330,7 +330,7 @@ bind pose, and one with it over a static model lost the frame. **It now means
 | Part | Resolved from |
 | --- | --- |
 | shader | the tag's, else the default scene shader; either way `model.VariantShader` adds the primitive's `SCENE_SKIN` / `SCENE_MORPH` |
-| params | the primitive's `model.MaterialIngredients.Params` — textures, samplers and numbers — ⊕ the default scene shader's `Params` ⊕ the tag's, by name; the `Params` Component rides on the draw, which gfx lays over them |
+| params | the primitive's `model.MaterialIngredients` — textures and samplers from `Params`, the numbers as `Values`, the whole `scenePbrMaterial` block — ⊕ the default scene shader's `Params` ⊕ the tag's, by name, a member of the block written into it through `model.PbrValues.Overlay`; the `Params` Component rides on the draw, laid over them the same way |
 | state | the tag's, else the file's |
 
 **model keeps each material's ingredients** — params and state — beside the
@@ -369,6 +369,24 @@ renderer's `BenchmarkFrame` was 12-17% faster, since merging draws no longer
 built and compared a record for each. Allocations are unchanged: 19 objects a
 frame in every scene arm, and the recording renderer one fewer, 22, for the
 materials arena it no longer uploaded.
+
+**Since #601 every material draws through gfx draw params**, and nothing is
+recorded per frame. A file material drawn as the file says draws the set model
+built at load. Every other key draws a set of scene's own, which the load
+System creates as it keys a drawable - it alone holds the resource queue and
+the empty-lock shader compile - and caches by material key, variant and the
+binding shape of the `Params`, so the recording System's lock set is its
+OpQueue as before. The shape is in the key because a frame's version of a set
+carries forward what the next does not name: a tinted Batch and an untinted one
+of one material would otherwise share a tint. A set is held once per
+primitive or mesh drawing through it and released with the last hold; a new
+default scene shader releases them all and keys every drawable again. Per
+Batch, the recording System versions the set with the frame block, the
+instances, the animation and mesh arenas, group 2, and the `Params` - a member
+of `scenePbrMaterial` folded into the tag's values and set whole through
+`gfx.RawParameterRef` - each where the set's shader declares it, and then draws
+it with `DrawSet`. A zero set, from a shader that did not compile, draws
+nothing; the failure is reported once as `ErrMaterialShaderUnavailable`.
 
 **The default scene shader is model's**, on the Lookup
 (`LookupAccess.SetDefaultSceneShader`), read by the recording System once a

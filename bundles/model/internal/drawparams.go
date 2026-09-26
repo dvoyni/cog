@@ -7,11 +7,6 @@ import (
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
-// pbrMaterialBinding is the WGSL global a model's draw params set its numbers
-// through: the ScenePbrMaterial uniform block materialepilogue.wgsl declares,
-// set whole from the load's pbrValues.
-const pbrMaterialBinding = "scenePbrMaterial"
-
 // bundledShader is one variant of the bundled shader as the Lookup holds it:
 // not tried yet, compiled and uploaded under id, or failed to compile.
 type bundledShader struct {
@@ -78,10 +73,10 @@ func (l *Lookup) ensureShaders(
 // param carries inline - and NewDrawParams copies them before it returns.
 func (l *Lookup) newMaterialSets(
 	k kernel.Kernel, resources *gfx.ResourceQueue, shaders *[VariantCount]bundledShader,
-	built *modelMaterial, values *pbrValues,
+	built *modelMaterial, values *PbrValues,
 ) (sets [VariantCount]gfx.DrawParams) {
 	params := append(l.setParams[:0], built.Params[:2*pbrSlotCount]...)
-	params = append(params, gfx.RawParameterRef(pbrMaterialBinding, values))
+	params = append(params, gfx.RawParameterRef(BindingScenePbrMaterial, values))
 	for variant := range sets {
 		if shaders[variant].state == bundledReady {
 			sets[variant] = resources.NewDrawParams(k, shaders[variant].id, built.State, params...)

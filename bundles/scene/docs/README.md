@@ -174,7 +174,7 @@ keeps cog's coupling check working on Component data. See
 | `Model` | one instance per primitive of the view `Ref.Scene` and `Ref.Node` select in `Ref.Path` | The path is a string. The load System loads it; residency and a bad path's report are model's. |
 | `Mesh` | one instance of `Ref` | The ref comes from `model.LookupAccess.BakeMesh`. |
 | `Animation` | the Entity's own `sceneAnim` block | Optional. A play with an empty `Clip` is an unused slot. **Nothing here advances clip time**; that is the game's. |
-| `Params` | the Batch's gfx parameters, laid by name over every tag's, the material's numbers among them | Optional, and part of the Batch key, so `gfx.ColorParam("baseColorFactor", c)` tints a model or a mesh. |
+| `Params` | the Batch's gfx parameters, laid by name over every tag's, the material's numbers among them | Optional, and part of the Batch key, so `gfx.ColorParam("baseColorFactor", c)` tints a model or a mesh. A member of `scenePbrMaterial` is folded into the block, which is set whole; any other name is a whole binding, set where the tag's shader declares it. |
 | `Material` | one entry per pass tag, each **laid over** what the file provides | Optional, any number of tags. **Absent is no material**: the default scene shader over the file's own material, or over the bundled PBR's for a mesh. Present with no tags serves no pass. See [A Material overlays the file](#a-material-overlays-the-file). |
 | `Light` | one light of each pass whose camera draws its layers | Position is the Transform's; a spot's direction is the Transform's rotation applied to −Z, the way `m.LookAt` faces. |
 | `Camera` | its passes, labelled `scene.camera<ID>.<tag>` | Placement is the Transform's; its scale is ignored. An empty `Passes` is one default pass. Two Cameras with one ID report `ErrCameraAlreadyRecorded`, and the first walked wins. |
@@ -367,7 +367,7 @@ resolves:
 | Part | Resolved from |
 | --- | --- |
 | **shader** | the tag's `Shader`, or the default scene shader where it is zero — either way under the variant's `SCENE_SKIN` / `SCENE_MORPH` for this primitive's geometry |
-| **params** | the primitive's own — its five textures and samplers, white and flat-normal defaults in empty slots, and its numbers, one per member of the `scenePbrMaterial` uniform block — overlaid by name with the default scene shader's `Params`, then the tag's; the `Params` Component rides on the draw, which gfx lays over all of them |
+| **params** | the primitive's own — its five textures and samplers, white and flat-normal defaults in empty slots, and its numbers, the `scenePbrMaterial` uniform block whole — overlaid by name with the default scene shader's `Params`, then the tag's, a param naming a member of the block written into it; the `Params` Component rides on the draw, laid over all of them the same way |
 | **state** | the tag's `State`, or the file's (alpha mode, double-sided) where it is zero |
 
 A mesh takes the same path: its "file" is the bundled PBR's ingredients, white
@@ -376,19 +376,33 @@ and flat in every slot, opaque, single-sided, white paint.
 **scene knows no shader.** It binds what describes the scene — the frame,
 the instances, the animation block, the mesh records and, for deforming
 geometry, the group 2 buffers — and hands a material's params to gfx, which
-packs whatever the shader in effect declares by name. The bundled material's
-numbers are that shader's uniform block; a shader of your own gets its
-same-named members filled the same way, and one declaring none of them costs
-nothing for their being there.
+binds whatever the shader in effect declares by name, each binding whole. The
+bundled material's numbers are that shader's uniform block, `scenePbrMaterial`,
+and a param named for one of its members — `baseColorFactor` and its siblings —
+is written into the block before it is set, which is the one member-level
+write left; a shader of your own that declares the block gets it filled the
+same way, and one declaring none of it costs nothing for its being there.
+
+**Each material draws through gfx draw params.** A file's material drawn as
+the file says — no `Material`, the bundled default shader, no `Params` — draws
+the set model built when it loaded the file. Everything else draws a set scene
+builds when it first keys the drawable, compiling the shader then: one per
+material key, variant and the bindings the `Params` set, shared by every
+drawable naming it and released with the last. A steady frame compiles and
+creates nothing; per Batch it versions the set with the frame, the instances,
+the animation, the poses and the `Params`. A shader that does not compile is
+reported once as `scene.ErrMaterialShaderUnavailable`, and its draws draw
+nothing.
 
 - **Nothing the file says is lost**, per primitive, so a model of several
   materials keeps each one's textures, numbers and state under one `Material`.
 - **The variant is cog's**, whatever shader is in effect, so a caller's shader
   over a skinned model is compiled with `SCENE_SKIN` and gets the pose buffers,
   and over a static one declares nothing it is not given.
-- **Replacing is a special case, not a second mode.** gfx matches params to
-  bindings by name and ignores one no binding declares, so an outline shader
-  declaring only its own bindings simply never reads the file's textures.
+- **Replacing is a special case, not a second mode.** scene matches params to
+  bindings by name and drops one the shader does not declare, so an outline
+  shader declaring only its own bindings simply never reads the file's
+  textures.
 - **A zero `Shader` and a zero `State` are unset**, not values: the zero
   descriptor is no shader, and a tag wanting the zero state — `StateOverlay2D`
   — cannot say so.
@@ -398,17 +412,16 @@ nothing for their being there.
 and unset by the zero descriptor. It feeds every `Model` and `Mesh` with no
 `Material` and every tag that sets no shader, and its `Params` ride on every
 draw under the Entity's own, so a scene-wide binding needs nothing per Entity.
-Nothing is baked from it: materials are resolved from their ingredients every
-frame, so setting it after models load takes effect on the next frame.
+Setting it releases every set scene built under the old one and keys every
+drawable again, so setting it after models load takes effect on the next frame.
 
 **An app shader is the bundled PBR plus a step.** It includes
 `model.VertexStagePath` and `model.FragmentStagePath`, declares its own
 bindings in group 3 — the one bind group the scene layout leaves free — and
-writes an `fs_main` around `scenePbrFragment`. The material's numbers are the
-one uniform block gfx allows a shader, and its own per-draw numbers are members
-it adds to that block, composing the block from `model.MaterialProloguePath`,
-its own fields over `model.MaterialFieldsPath` and `model.MaterialEpiloguePath`
-before it includes the stages. Larger data rides in textures and samplers, or
+writes an `fs_main` around `scenePbrFragment`. Its own per-draw numbers are a
+uniform of its own in group 3, set whole through `Params` by the binding's
+name; the material block is model's and takes no members of anyone else's.
+Larger data rides in textures and samplers, or
 in the one storage buffer the bundled shader's animated variant leaves of the
 web floor's eight:
 
