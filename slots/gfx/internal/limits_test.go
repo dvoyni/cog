@@ -2,6 +2,7 @@ package internal
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
@@ -10,7 +11,6 @@ import (
 
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 
-	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
 
@@ -36,23 +36,27 @@ func TestShaderOverTheWebFloorIsReportedOnceAndStillRenders(t *testing.T) {
 	var reported []error
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
 	layout := shader.ShaderLayout{
-		Resources: []shader.ShaderResource{{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64, Members: []shader.StorageMember{{Name: "mvp", Offset: 0}}}},
+		Resources: []shader.ShaderResource{{Name: "mvp", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64}},
 	}
 	for i := range 9 {
 		layout.Resources = append(layout.Resources, shader.ShaderResource{
-			Name: "records", Kind: shader.ResourceStorageBuffer, Group: 1, Binding: i,
+			Name: fmt.Sprintf("records%d", i), Kind: shader.ResourceStorageBuffer, Group: 1, Binding: i,
 		})
 	}
 	backend := &fakeBackend{layout: &layout}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	// The nine bindings share one name, so one parameter fills them all. They
-	// have to be filled: an unsupplied storage binding is fatal to the draw,
-	// and this test is about a draw that renders despite the diagnostic.
-	records := descriptors.BufferParam("records", descriptors.BufferWithBytes([]byte{1, 2, 3, 4}, true))
+	// The nine bindings have to be filled: an unsupplied storage binding is
+	// fatal to the draw, and this test is about a draw that renders despite the
+	// diagnostic.
+	var records []descriptors.ParameterDescr
+	for i := range 9 {
+		records = append(records, descriptors.BufferParam(fmt.Sprintf("records%d", i), descriptors.BufferWithBytes([]byte{1, 2, 3, 4}, true)))
+	}
+	set := testSet(t, k, records...)
 	for range 2 {
 		w, ref := recordList(t, k)
-		w.Draw(ref, triangle(), testMaterial(records), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+		w.Draw(ref, triangle(), set, 1, 0)
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 	}
@@ -69,7 +73,7 @@ func TestShaderOverTheWebFloorIsReportedOnceAndStillRenders(t *testing.T) {
 			found++
 		}
 	}
-	// Shaders are cached, so the check runs at creation: two frames, one report.
+	// The check runs when the upload is replayed, once: two frames, one report.
 	if found != 1 {
 		t.Fatalf("reports = %d over two frames, want exactly 1: %v", found, reported)
 	}
@@ -127,7 +131,7 @@ func TestBufferRangeParamBindsItsOwnSlice(t *testing.T) {
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{layout: &shader.ShaderLayout{
 		Resources: []shader.ShaderResource{
-			{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64, Members: []shader.StorageMember{{Name: "mvp", Offset: 0}}},
+			{Name: "mvp", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64},
 			{Name: "records", Kind: shader.ResourceStorageBuffer, Group: 1, Binding: 0},
 		},
 	}}
@@ -138,7 +142,7 @@ func TestBufferRangeParamBindsItsOwnSlice(t *testing.T) {
 		records = resources.UploadBuffer(resources.NewBuffer(), make([]byte, 1024), true)
 	})
 	w, ref := recordList(t, k)
-	w.Draw(ref, triangle(), testMaterial(descriptors.BufferRangeParam("records", records, 256, 512)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(ref, triangle(), testSet(t, k, descriptors.BufferRangeParam("records", records, 256, 512)), 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -166,7 +170,7 @@ func TestFirstInstanceReachesTheDraw(t *testing.T) {
 	w, ref := recordList(t, k)
 	// A batch reads its own slice of the shared instance arena: WebGPU's
 	// instance_index starts at firstInstance, so no offset plumbing is needed.
-	w.Draw(ref, triangle(), testMaterial(), 3, 7, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(ref, triangle(), testSet(t, k), 3, 7)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

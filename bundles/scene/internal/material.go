@@ -15,7 +15,7 @@ type (
 	materialTag struct {
 		tag      PassTag
 		set      gfx.DrawParams
-		state    gfx.MaterialState
+		state    gfx.DrawState
 		bindings sceneBindings
 		program  gfx.ShaderProgram
 		values   model.PbrValues

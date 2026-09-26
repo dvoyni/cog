@@ -17,25 +17,6 @@ func DepthKindOf(v *DepthDescr) DepthKind { return v.kind }
 // DepthTexture reads DepthDescr.texture for gfx's internal/.
 func DepthTexture(v *DepthDescr) types.TextureID { return v.texture }
 
-// MaterialShapeState reads the shape state OpQueue.FrameMaterial took of a
-// recorded material's param names, and whether it has one.
-func MaterialShapeState(v *MaterialDescr) (uint64, bool) {
-	if v.recorded.Queue == nil {
-		return 0, false
-	}
-	return v.recorded.Shape, true
-}
-
-// MaterialRecording reads MaterialDescr.recorded for gfx's internal/.
-func MaterialRecording(v *MaterialDescr) FrameRecording { return v.recorded }
-
-// SetMaterialRecording writes MaterialDescr.recorded for OpQueue.FrameMaterial.
-func SetMaterialRecording(v *MaterialDescr, recording FrameRecording) { v.recorded = recording }
-
-// SetMaterialParams writes MaterialDescr.params, which is how OpQueue points a
-// recorded material at its window of the frame's parameter arena.
-func SetMaterialParams(v *MaterialDescr, params []ParameterDescr) { v.params = params }
-
 // MeshIndices reads MeshDescr.indices for gfx's internal/.
 func MeshIndices(v *MeshDescr) BufferDescr { return v.indices }
 
@@ -129,18 +110,6 @@ func TextureCopyData(v *TextureDescr) bool { return v.Params.copyData }
 func WithMeshBuffers(mesh MeshDescr, layout []VertexAttr, vertices, indices BufferDescr) MeshDescr {
 	mesh.layout, mesh.vertices, mesh.indices = layout, vertices, indices
 	return mesh
-}
-
-// WithParameterBuffer returns param with its buffer replaced by a baked one.
-func WithParameterBuffer(param ParameterDescr, buffer BufferDescr) ParameterDescr {
-	param.buffer = buffer
-	return param
-}
-
-// WithParameterTexture returns param with its texture replaced by a baked one.
-func WithParameterTexture(param ParameterDescr, texture TextureDescr) ParameterDescr {
-	param.texture = texture
-	return param
 }
 
 // DrawParamsOf is the handle of set id, for gfx's internal/.

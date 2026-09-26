@@ -138,22 +138,9 @@ func RawParameterRef[T any](name string, value *T) ParameterDescr {
 	return descriptors.RawParameterRef[T](name, value)
 }
 
-// Material describes a material from a shader and its named parameters. It
-// depth-tests and writes, which is what an opaque draw wants; a draw that wants
-// anything else names its state through MaterialWithState.
-func Material(shader ShaderDescr, params ...ParameterDescr) MaterialDescr {
-	return descriptors.Material(shader, params...)
-}
-
-// MaterialWithState describes a material with explicit fixed pipeline state.
-func MaterialWithState(shader ShaderDescr, state MaterialState, params ...ParameterDescr) MaterialDescr {
-	return descriptors.MaterialWithState(shader, state, params...)
-}
-
-// FingerprintParams hashes a parameter slice in order by name, kind and value,
-// under exactly the rules Fingerprint applies to a material's own parameters -
-// same seed, same per-kind encoding, inline texture and buffer bytes by pointer
-// identity rather than by content.
+// FingerprintParams hashes a parameter slice in order by name, kind and value:
+// one seed, one encoding per kind, and inline texture and buffer bytes by
+// pointer identity rather than by content.
 //
 // It exists because a recorder that keys a batch on a draw's parameters cannot
 // write the comparison itself: ParameterDescr exposes an accessor for some
@@ -232,19 +219,19 @@ func DepthTarget(texture TextureDescr) DepthDescr {
 // StateOpaque3D returns the state of opaque geometry, the first of the three
 // states the engine's passes are made of: opaque geometry, then transparent
 // geometry over it, then 2D on top of everything.
-func StateOpaque3D() MaterialState {
+func StateOpaque3D() DrawState {
 	return internal.StateOpaque3D()
 }
 
 // StateTransparent3D returns the state of transparent geometry drawn over
 // opaque geometry; see StateOpaque3D.
-func StateTransparent3D() MaterialState {
+func StateTransparent3D() DrawState {
 	return internal.StateTransparent3D()
 }
 
 // StateOverlay2D returns the state of 2D drawn on top of everything; see
 // StateOpaque3D.
-func StateOverlay2D() MaterialState {
+func StateOverlay2D() DrawState {
 	return internal.StateOverlay2D()
 }
 
@@ -325,23 +312,12 @@ func SamplerViewOf(sampler SamplerDesc) SamplerView {
 	return internal.SamplerViewOf(sampler)
 }
 
-// MaterialViewOf renders one material descriptor.
-func MaterialViewOf(material MaterialDescr) MaterialView {
-	return internal.MaterialViewOf(material)
-}
-
 // ShaderViewOf renders one shader descriptor.
 func ShaderViewOf(shader ShaderDescr) ShaderView {
 	return internal.ShaderViewOf(shader)
 }
 
 // DrawStateViewOf renders one pipeline state.
-func DrawStateViewOf(state MaterialState) DrawStateView {
+func DrawStateViewOf(state DrawState) DrawStateView {
 	return internal.DrawStateViewOf(state)
-}
-
-// MaterialStateViewOf renders one pipeline state; it is DrawStateViewOf under
-// the old path's name.
-func MaterialStateViewOf(state MaterialState) MaterialStateView {
-	return internal.MaterialStateViewOf(state)
 }

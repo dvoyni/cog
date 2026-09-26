@@ -175,7 +175,7 @@ func (r *keyer) acquire(s *keyScratch, key setKey, file *model.MaterialIngredien
 	}
 	cached := &cachedSets{refs: 1}
 	if override == nil {
-		cached.material = material{r.resolveTag(c, TagForward, gfx.ShaderDescr{}, gfx.MaterialState{}, nil, file, key.variant)}
+		cached.material = material{r.resolveTag(c, TagForward, gfx.ShaderDescr{}, gfx.DrawState{}, nil, file, key.variant)}
 	} else {
 		cached.material = make(material, 0, override.Tags.Len())
 		for _, tag := range override.Tags.All() {
@@ -221,13 +221,13 @@ func (r *keyer) release(s *keyScratch, key setKey) {
 // Nothing here knows what any binding means. A shader that does not compile
 // leaves the tag's set zero, which draws nothing.
 func (r *keyer) resolveTag(
-	c *setCache, tag PassTag, shader gfx.ShaderDescr, state gfx.MaterialState,
+	c *setCache, tag PassTag, shader gfx.ShaderDescr, state gfx.DrawState,
 	own *m.List[gfx.ParameterDescr], file *model.MaterialIngredients, variant model.ShaderVariant,
 ) materialTag {
 	if shader == (gfx.ShaderDescr{}) {
 		shader = c.defaultShader.Source
 	}
-	if state == (gfx.MaterialState{}) {
+	if state == (gfx.DrawState{}) {
 		state = file.State
 	}
 	compiled := r.compiled(c, model.VariantShader(shader, variant))

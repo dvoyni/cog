@@ -315,11 +315,11 @@ unset by the zero descriptor. It feeds every Entity with no `Material` and every
 tag that names no shader, and takes effect on the next frame.
 
 **A custom shader has group 3 and one storage buffer of its own.** Groups 0 to 2
-are what cog binds. The material's numbers are the one uniform block gfx allows
-a shader, so per-draw numbers of the app's own are members it adds to that
-block, composing it from `model.MaterialProloguePath`, its own fields over
-`model.MaterialFieldsPath`, and `model.MaterialEpiloguePath`, before it includes
-the stages. It may also declare the bindings scene binds on every draw —
+are what cog binds. Per-draw numbers of the app's own are a uniform of its own
+in group 3, set whole through `Params` by the binding's name; the material's
+block, `scenePbrMaterial`, is model's and takes no members. A variant with no
+group 2 leaves a gap beneath group 3, which the backend binds empty. It may also
+declare the bindings scene binds on every draw —
 `sceneFrame`, `sceneInstances`, `sceneAnim`, `sceneMeshes`, any subset — because
 those are scene's and already counted against a budget of eight that the
 bundled shader holds seven of. Declare exactly what the shader reads: **a

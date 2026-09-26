@@ -68,12 +68,6 @@ type Lookup struct {
 	// has no reserved zero value.
 	defaults    PbrDefaults
 	hasDefaults bool
-	// bundled is the bundled PBR material once per shader variant, built on
-	// first use around the two default textures. It is not a package-level value because those textures
-	// are baked resources: the backend may not be Ready() at startup, and a
-	// texture baked then would either panic or silently not exist.
-	bundled    [VariantCount]gfx.MaterialDescr
-	hasBundled bool
 	// defaultShader is the default scene shader, zero for the bundled PBR.
 	// See SetDefaultSceneShader.
 	defaultShader SceneShaderDescr
@@ -180,27 +174,16 @@ func (la LookupDeviceAccess) resolve(path string) (*residentModel, bool) {
 	return model, err == nil
 }
 
-// EnsureBundled builds the bundled PBR's four forward materials the first time
-// something draws, baking the two 1x1 default textures they bind into every
-// absent slot, and returns the same materials forever after. A renderer wraps
-// them under its own pass tag.
+// EnsureBundledIngredients returns the bundled PBR's ingredients for a renderer
+// that resolves its own materials, around the two 1x1 default textures every
+// absent slot binds, baked through bake the first time they are asked for and
+// the same two forever after.
 //
 // 1x1 rather than larger because uploads carry no row-alignment rule and for a
 // constant texel every mip level is identical, so there is nothing to generate.
 // Both are linear-format: 1.0 is a fixed point of the sRGB transfer curve, so
 // the white texel reads 1.0 through an sRGB slot and a linear one alike, and
 // the flat normal is not a picture at all.
-func (l *Lookup) EnsureBundled(bake BakeTextureFunc) [VariantCount]gfx.MaterialDescr {
-	if l.hasBundled {
-		return l.bundled
-	}
-	l.bundled, l.hasBundled = BundledPbr(l.ensureBakedDefaults(bake)), true
-	return l.bundled
-}
-
-// EnsureBundledIngredients is EnsureBundled for a renderer that resolves its
-// own materials: the bundled PBR's ingredients, around the same two default
-// textures, baked the first time either is asked for.
 func (l *Lookup) EnsureBundledIngredients(bake BakeTextureFunc) MaterialIngredients {
 	return BundledIngredients(l.ensureBakedDefaults(bake))
 }

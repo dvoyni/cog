@@ -42,7 +42,7 @@ func TestABlendedPipelineKeepsItsBlendStateOnTheTarget(t *testing.T) {
 	// state for a depth pass must not be the same code path that carries it.
 	state := fragmentState(nil, gfx.PipelineDesc{
 		ColorFormat: gfx.FormatScreen,
-		State:       gfx.MaterialState{Blend: gfx.BlendAlpha},
+		State:       gfx.DrawState{Blend: gfx.BlendAlpha},
 	})
 	if state == nil || len(state.Targets) != 1 || state.Targets[0].Blend == nil {
 		t.Fatalf("an alpha-blended pipeline lost its blend state: %+v", state)

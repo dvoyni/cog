@@ -16,7 +16,7 @@ import (
 type setRecord struct {
 	state     setState
 	shader    types.ShaderID
-	drawState types.MaterialState
+	drawState types.DrawState
 	program   shader.ShaderProgram
 	// values is the set's binding table in setValues, one slot per binding of
 	// its program, and bytes its uniforms' bytes in setBytes.
@@ -62,7 +62,7 @@ type drawParamsStore struct {
 // binding, of the wrong kind or the wrong size, or a temporary - are reported
 // through k, once each, and the param is ignored. A set whose shader had no
 // program still exists and draws nothing.
-func (q *ResourceQueue) NewDrawParams(k kernel.Kernel, shaderID types.ShaderID, state types.MaterialState, params ...descriptors.ParameterDescr) descriptors.DrawParams {
+func (q *ResourceQueue) NewDrawParams(k kernel.Kernel, shaderID types.ShaderID, state types.DrawState, params ...descriptors.ParameterDescr) descriptors.DrawParams {
 	store := &q.drawParams
 	if len(store.records) == 0 {
 		// Id zero is the zero handle, which names no set.

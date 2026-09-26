@@ -49,7 +49,7 @@ func TestAMaterialOverlaysEachPrimitivesOwnMaterial(t *testing.T) {
 	for _, c := range []struct {
 		name       string
 		got, file  drawnInstance
-		state      gfx.MaterialState
+		state      gfx.DrawState
 		baseColour m.Vec4
 	}{
 		{"red triangle", red, fileRed, model.PbrState(model.AlphaBlend, false), m.Vec4{X: 1, W: 1}},

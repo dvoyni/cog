@@ -17,11 +17,9 @@ import (
 // one whole binding, scenePbrMaterial, through gfx.RawParameterRef, whose check
 // and the layout test hold the two together.
 //
-// For the forward material, appendParams turns them into named gfx params, one
-// per member of the block, and gfx packs those by reflected name like any
-// shader's params - so a renderer binds a material's numbers without knowing
-// what they are, and a caller's same-named param overrides one exactly as it
-// overrides a texture.
+// appendParams turns them into named gfx params, one per member of the block,
+// which is what a material's key covers; no binding is named for a member, so
+// no set binds one.
 //
 // A renderer drawing through draw params cannot lay a param over one member of
 // a set's block, because gfx binds whole bindings only. Overlay is how it keeps

@@ -112,16 +112,7 @@ func (b *testBackend) NewSampler(desc gfx.SamplerDesc) (gfx.SamplerID, error) {
 	}
 	return gfx.SamplerID(b.nextID), nil
 }
-func (b *testBackend) FreeSampler(gfx.SamplerID) {}
-func (b *testBackend) NewShader(desc gfx.ShaderDesc) (gfx.ShaderID, error) {
-	b.nextID++
-	id := gfx.ShaderID(b.nextID)
-	if b.shaderSources == nil {
-		b.shaderSources = map[gfx.ShaderID]string{}
-	}
-	b.shaderSources[id] = string(desc.Code)
-	return id, nil
-}
+func (b *testBackend) FreeSampler(gfx.SamplerID)   {}
 func (b *testBackend) FreeShader(gfx.ShaderID)     {}
 func (b *testBackend) ReserveShader() gfx.ShaderID { b.nextID++; return gfx.ShaderID(b.nextID) }
 func (b *testBackend) CreateShader(id gfx.ShaderID, desc gfx.ShaderDesc) error {
@@ -137,10 +128,6 @@ func (b *testBackend) CreateShader(id gfx.ShaderID, desc gfx.ShaderDesc) error {
 func (b *testBackend) ReflectShader(code []byte) (gfx.ShaderLayout, error) {
 	b.reflections++
 	return testLayoutFor(string(code)), nil
-}
-
-func (b *testBackend) ShaderLayout(id gfx.ShaderID) gfx.ShaderLayout {
-	return testLayoutFor(b.shaderSources[id])
 }
 
 // testLayoutFor is one hand-written union standing in for every shader, so it
@@ -917,7 +904,7 @@ func TestDrawTrianglesSupportsCustomVertexLayout(t *testing.T) {
 	}
 	material := MaterialWithState(
 		gfx.ShaderWithText("var canvasTexture: texture_2d<f32>;"),
-		gfx.MaterialState{Blend: gfx.BlendOpaque},
+		gfx.DrawState{Blend: gfx.BlendOpaque},
 	)
 	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
@@ -957,7 +944,7 @@ func TestCustomMaterialKeepsItsStateAndCannotReclaimTint(t *testing.T) {
 	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
 	custom := MaterialWithState(
 		gfx.ShaderWithText("// custom canvas shader"),
-		gfx.MaterialState{Blend: gfx.BlendOpaque},
+		gfx.DrawState{Blend: gfx.BlendOpaque},
 		gfx.FloatParam("customValue", 1),
 	)
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
@@ -991,7 +978,7 @@ func TestCustomMaterialKeepsItsStateAndCannotReclaimTint(t *testing.T) {
 	if got := floatAt(record, 48); got != 0.25 {
 		t.Fatalf("instance tint red = %v, want the caller's 0.25", got)
 	}
-	if len(backend.pipelines) != 1 || backend.pipelines[0].State != (gfx.MaterialState{Blend: gfx.BlendOpaque}) {
+	if len(backend.pipelines) != 1 || backend.pipelines[0].State != (gfx.DrawState{Blend: gfx.BlendOpaque}) {
 		t.Fatalf("custom pipeline state = %+v", backend.pipelines)
 	}
 }

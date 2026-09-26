@@ -78,7 +78,7 @@ type ErrStorageBufferUnsupplied struct {
 	Binding   int
 	// Unbaked separates the two ways in: false when no parameter names the
 	// binding, true when one does and its buffer has no id. They are different
-	// mistakes - a material that forgot a parameter against one that handed
+	// mistakes - a set that forgot a parameter against one that handed
 	// over a buffer it never baked - and the fix differs with them.
 	Unbaked bool
 }

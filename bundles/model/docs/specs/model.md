@@ -355,8 +355,14 @@ storage paths they already had.
 
 **The model material holds its ingredients and, for each shader variant:**
 
-- a ready forward `gfx.MaterialDescr`;
+- a set of draw params, created at load;
 - a content key computed once at load.
+
+> **Amended by [#604](https://github.com/dvoyni/cog/issues/604).** gfx has no materials, so the forward
+> `gfx.MaterialDescr` each variant held is gone, and with it `BundledPbr` and
+> `Lookup.EnsureBundled`, which returned the bundled PBR's four. The key
+> stays, as model's own hash of the variant's shader descriptor, the pipeline
+> state and `gfx.FingerprintParams` over the ingredients, taken at load.
 
 The ingredients are `MaterialIngredients{Params, State, Values}`: the ten
 texture and sampler params with defaults in empty slots, then the material's
@@ -373,7 +379,7 @@ They came with [#568](https://github.com/dvoyni/cog/issues/568), so a renderer
 can resolve a caller's shader over what the file says instead of in place of
 it; scene does, and the recording scene drew the forward descrs until #573. A baked mesh's
 ingredients are `BundledIngredients`, which `Lookup.EnsureBundledIngredients`
-returns around the same two default textures `EnsureBundled` binds.
+returns around the same two default textures `EnsureBundled` bound.
 
 It names no `PassTag`. A renderer wraps the forward descr in its own material
 under its own tag. A file material's renderer key derives from the model key, so
@@ -489,8 +495,8 @@ in #573.
 replaced the recording scene's friend accessors: `ModelView` resolves one
 draw's selectors, loading the model if needed; `Mesh` resolves a durable ref;
 `EnsureUnit` bakes a `model.UnitMesh`, which the recording scene mapped its
-shape enum onto; `EnsureBundled` returns
-the bundled PBR's forward descrs; and `DrainMeshes` applies the staged bakes and
+shape enum onto; `EnsureBundled` returned
+the bundled PBR's forward descrs until [#604](https://github.com/dvoyni/cog/issues/604) deleted it; and `DrainMeshes` applies the staged bakes and
 releases. The two facades and `ModelHandle` below landed in
 [#531](https://github.com/dvoyni/cog/issues/531): the read facade is
 `LookupReadAccess`, and the load facade is `LookupAccess`, `LookupDeviceAccess`
@@ -616,7 +622,8 @@ they asserted what its flush bound and uploaded, which only its harness could
 drive. The tests went with it in #573; the names stay on the root:
 
 - the bundled material's construction, `PbrDefaults`, `PbrSlots`, `PbrSampler`,
-  `NormalSlot`, `PbrState` with the `Alpha…` modes, `BundledPbr`, `SceneShader`
+  `NormalSlot`, `PbrState` with the `Alpha…` modes, `BundledPbr` (deleted by
+  [#604](https://github.com/dvoyni/cog/issues/604) with gfx's materials), `SceneShader`
   and `SceneShaderPath`, from which the recording scene's material and flush
   tests built the material they expected to see bound (`model`'s own shader
   tests use the last three as well);
@@ -1930,6 +1937,10 @@ The bundled PBR is a `gfx.MaterialDescr` like any other, wrapped in a `Material`
 with **one `forward` entry and nothing else**. `MeshDraw.Material` /
 `ModelDraw.Material` nil selects it.
 
+> **Amended by [#604](https://github.com/dvoyni/cog/issues/604).** It is a set of draw params per variant now, built at
+> load over the bundled shader, which model compiles once per Lookup; gfx's
+> `MaterialDescr` is deleted.
+
 ### Parameters are glTF's names, verbatim
 
 `baseColorFactor`, `baseColorTexture`, `metallicFactor`, `roughnessFactor`,
@@ -2396,6 +2407,15 @@ own. Larger or non-numeric data still rides in textures, or in the one storage
 buffer the bundled shader leaves. All three sources are published, as
 `model.MaterialProloguePath`, `model.MaterialFieldsPath` and
 `model.MaterialEpiloguePath`.
+
+> **Amended by [#604](https://github.com/dvoyni/cog/issues/604).** Draw params set a uniform binding whole, so a member
+> an app added to the block would be set by nothing: model sets
+> `scenePbrMaterial` from `PbrValues` and takes no one else's members. The three
+> sources are one, `materialblock.wgsl`, unpublished, which `material.wgsl` and
+> scene's debug shader include; the three constants are deleted. An app
+> shader's own numbers are a uniform of its own in group 3, set whole by its
+> name, and a variant that declares no group 2 leaves a gap beneath it that the
+> backend binds with an empty group.
 
 **Still no index.** A `u32` material index in the instance record **does not
 work**: gfx packs at translate time on the render thread, because offsets come

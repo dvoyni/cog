@@ -10,7 +10,6 @@ import (
 
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 
-	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
 
@@ -20,7 +19,7 @@ import (
 func storageLayout() shader.ShaderLayout {
 	return shader.ShaderLayout{
 		Resources: []shader.ShaderResource{
-			{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 80, Members: []shader.StorageMember{{Name: "mvp", Offset: 0}}},
+			{Name: "mvp", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64},
 			{Name: "MainSampler", Kind: shader.ResourceSampler, Group: 1, Binding: 0},
 			{Name: "MainTexture", Group: 1, Binding: 1},
 			{Name: "Data", Kind: shader.ResourceStorageBuffer, Group: 1, Binding: 2},
@@ -28,7 +27,7 @@ func storageLayout() shader.ShaderLayout {
 	}
 }
 
-// storageFrame records one frame drawing with the given material parameters and
+// storageFrame records one frame drawing through a set of the given parameters and
 // reports what the backend was asked to encode alongside what gfx reported.
 func storageFrame(t *testing.T, params ...descriptors.ParameterDescr) (*fakeBackend, []error) {
 	t.Helper()
@@ -41,7 +40,7 @@ func storageFrame(t *testing.T, params ...descriptors.ParameterDescr) (*fakeBack
 
 	w := recordRaw(t, k)
 	ref := w.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "main"})
-	w.Draw(ref, triangle(), testMaterial(params...), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(ref, triangle(), testSet(t, k, params...), 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 	return backend, reported
@@ -65,9 +64,9 @@ func TestADrawMissingAStorageBindingIsDroppedAndNamed(t *testing.T) {
 	}
 }
 
-// A parameter that names the binding but carries a buffer nothing baked reaches
-// the same short bind group: emitResources skips a zero id. The plan cannot see
-// it, because a plan is cached per parameter shape and the id is per draw.
+// A parameter that names the binding but carries a buffer nothing baked would
+// reach the same short bind group, so it is dropped and named the same way,
+// saying which of the two it was.
 func TestADrawSupplyingAnUnbakedStorageBufferIsDroppedAndNamed(t *testing.T) {
 	backend, reported := storageFrame(t, descriptors.BufferParam("Data", descriptors.BufferDescr{}))
 
@@ -107,7 +106,7 @@ func TestADrawMissingOnlyItsTextureAndSamplerStillRenders(t *testing.T) {
 	}
 }
 
-// A material that misses a binding misses it until someone fixes the material,
+// A set that misses a binding misses it until someone fixes the set,
 // and firstErr carries only the frame's first error - so re-reporting would
 // mask every later error in every later frame. The report is made once; the
 // draw is dropped every time.
@@ -119,10 +118,11 @@ func TestAnUnfilledStorageBindingIsReportedOnceAndDroppedAlways(t *testing.T) {
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
+	broken := testSet(t, k)
 	drop := func() int {
 		w := recordRaw(t, k)
 		ref := w.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "main"})
-		w.Draw(ref, triangle(), testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+		w.Draw(ref, triangle(), broken, 1, 0)
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 		return backend.passDraws[0]
@@ -138,19 +138,21 @@ func TestAnUnfilledStorageBindingIsReportedOnceAndDroppedAlways(t *testing.T) {
 	}
 
 	// And the quiet is what keeps the channel open. A third frame draws the
-	// broken material first and a second, differently broken one behind it.
+	// broken set first and a draw sampling its own attachment behind it.
 	// firstErr keeps only the frame's first error, so without the latch the
-	// binding would win it again and the mismatch behind it would never be
+	// binding would win it again and the mistake behind it would never be
 	// heard - which is the whole cost of reporting at frame rate.
+	sampler := testSet(t, k)
 	w := recordRaw(t, k)
-	ref := w.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "main"})
-	w.Draw(ref, triangle(), testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
-	w.Draw(ref, triangle(), testMaterial(descriptors.BufferParam("mvp", descriptors.BufferWithBytes([]byte{1, 2, 3, 4}, true))), 1, 0)
+	target, texture := w.NewTemporaryTarget(8, 8, descriptors.FormatRGBA8Srgb)
+	ref := w.NewPass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "feedback"})
+	w.Draw(ref, triangle(), broken, 1, 0)
+	drawSampling(w, ref, sampler, texture)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
-	var mismatch types.ErrParameterKindMismatch
-	if len(reported) != 2 || !errors.As(reported[1], &mismatch) {
-		t.Fatalf("reported = %v, want the later kind mismatch through", reported)
+	var feedback types.ErrDrawSamplesAttachment
+	if len(reported) != 2 || !errors.As(reported[1], &feedback) {
+		t.Fatalf("reported = %v, want the later feedback draw through", reported)
 	}
 }

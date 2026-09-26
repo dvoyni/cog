@@ -325,9 +325,6 @@ func TestReleaseShaderFreesTheModuleAndItsPipelines(t *testing.T) {
 	if len(p.translator.pipelines) != 1 {
 		t.Errorf("pipelines left %v, want only the other shader's", p.translator.pipelines)
 	}
-	if _, ok := p.translator.layouts[id]; ok {
-		t.Error("the released shader's layout is still cached")
-	}
 	if len(*reported) != 0 {
 		t.Errorf("reported %v", *reported)
 	}

@@ -36,22 +36,16 @@ type Backend interface {
 	NewSampler(types.SamplerDesc) (types.SamplerID, error)
 	FreeSampler(id types.SamplerID)
 
-	NewShader(shader.ShaderDesc) (types.ShaderID, error)
-	FreeShader(id types.ShaderID)
-	// ShaderLayout returns the reflected uniform parameter layout of a shader.
-	ShaderLayout(id types.ShaderID) shader.ShaderLayout
-
 	// ReserveShader reserves the id ResourceQueue.NewShader hands out at once.
 	// Like NewTexture and NewBuffer it is CPU-only and safe from any thread, and
 	// its ids are never reused, so a released id cannot alias a later shader.
-	// NewShader above mints from the same counter, so the two never collide
-	// while the descriptor path lasts.
 	ReserveShader() types.ShaderID
 	// CreateShader creates the module of a reserved id from a program's
 	// flattened source. It is called on the render thread, when the upload
 	// ResourceQueue.UploadProgram recorded is replayed, and the module is freed
 	// with FreeShader like any other.
 	CreateShader(id types.ShaderID, desc shader.ShaderDesc) error
+	FreeShader(id types.ShaderID)
 	// ReflectShader is the reflection port: it reflects a flattened module's
 	// bindings and vertex inputs from its source alone. It needs no device, it
 	// is pure, and it must be safe from any thread, because CompileShaderCmd

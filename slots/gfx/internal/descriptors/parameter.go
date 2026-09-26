@@ -15,7 +15,7 @@ import (
 // named by the binding's WGSL global name. It is one of four kinds - bytes for
 // a uniform, a texture, a sampler, or a buffer and the range of it bound -
 // built with the *Param constructors and handed to ResourceQueue.NewDrawParams,
-// OpQueue.SetDrawParams, Material or OpQueue.Draw.
+// ResourceQueue.UpdateDrawParams or OpQueue.SetDrawParams.
 type ParameterDescr struct {
 	name    string
 	kind    ParamKind

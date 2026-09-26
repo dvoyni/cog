@@ -35,9 +35,8 @@ type gfxBackend struct {
 	nextID        uint32
 	nextTextureID atomic.Uint32
 	nextBufferID  atomic.Uint32
-	// nextShaderID is every shader's id, reserved or created: NewShader mints
-	// from it too, so a module the descriptor path created and one reserved
-	// through ReserveShader can never share a key in shaders.
+	// nextShaderID is the counter ReserveShader mints every shader's id from,
+	// so no two modules ever share a key in shaders.
 	nextShaderID atomic.Uint32
 	samplers     map[gfx.SamplerID]*wgpu.Sampler
 	shaders      map[gfx.ShaderID]*gfxbShader
@@ -491,16 +490,6 @@ func (b *gfxBackend) FreeSampler(id gfx.SamplerID) {
 	}
 }
 
-func (b *gfxBackend) NewShader(desc gfx.ShaderDesc) (gfx.ShaderID, error) {
-	sh, err := b.newShaderModule(desc)
-	if err != nil {
-		return 0, err
-	}
-	id := b.ReserveShader()
-	b.shaders[id] = sh
-	return id, nil
-}
-
 // ReserveShader reserves a shader id. It is CPU-only and safe from the
 // recording thread, like NewTexture and NewBuffer; the module is created when
 // Execute's caller replays the program's upload through CreateShader.
@@ -528,7 +517,7 @@ func (b *gfxBackend) ReflectShader(code []byte) (gfx.ShaderLayout, error) {
 }
 
 // newShaderModule compiles one module and builds the layouts its draws bind
-// against, keyed by no id: NewShader and CreateShader decide where it lives.
+// against, keyed by no id: CreateShader decides where it lives.
 func (b *gfxBackend) newShaderModule(desc gfx.ShaderDesc) (*gfxbShader, error) {
 	if len(desc.Code) == 0 {
 		return nil, errors.New("gfx: shader has no source code")
@@ -633,14 +622,6 @@ func (b *gfxBackend) FreeShader(id gfx.ShaderID) {
 	}
 	s.module.Release()
 	delete(b.shaders, id)
-}
-
-// ShaderLayout returns the reflected uniform layout cached at shader creation.
-func (b *gfxBackend) ShaderLayout(id gfx.ShaderID) gfx.ShaderLayout {
-	if s, ok := b.shaders[id]; ok {
-		return s.layout
-	}
-	return gfx.ShaderLayout{}
 }
 
 func (b *gfxBackend) newBuffer(desc gfx.BufferDesc) (*wgpu.Buffer, error) {
@@ -1028,18 +1009,22 @@ func (b *gfxBackend) addEntry(group int, e gfxbBindEntry) {
 	b.acc[group] = append(b.acc[group], e)
 }
 
-// flushBinds reuses or creates one bind group per group the shader declares,
-// and reports whether every one of them bound. A false is the caller's cue to
-// drop the draw: a group that did not bind leaves its bindings unset, and
-// encoding into that produces a second validation error over the first.
+// flushBinds reuses or creates one bind group per group the shader's pipeline
+// layout holds, and reports whether every one of them bound. A false is the
+// caller's cue to drop the draw: a group that did not bind leaves its bindings
+// unset, and encoding into that produces a second validation error over the
+// first.
 //
 // It walks the shader's groups rather than the accumulator's, because a group
 // with no pending entries at all is the one case the accumulator cannot show.
 // A group the shader declares bindings for and nothing filled is a refusal like
 // any other: skipping it - which is what walking the accumulator did - encodes
 // the draw with that group unset and reports nothing, the quietest way a draw
-// can be wrong. A group the shader declares nothing for is skipped, because
-// there is nothing there to have gone missing; see gfxbShader.groupSizes for
+// can be wrong. A group the shader declares nothing for is a gap in its group
+// numbering, and it is bound too, with an empty bind group over its empty
+// layout: the pipeline layout holds every index below the highest group, and
+// WebGPU requires every group of the layout set before a draw, so a gap left
+// unset fails the draw - on Vulkan, every frame. See gfxbShader.groupSizes for
 // why a shader has such a group at all.
 func (b *gfxBackend) flushBinds(rp *wgpu.RenderPassEncoder, shader *gfxbShader) bool {
 	bound := true
@@ -1051,20 +1036,23 @@ func (b *gfxBackend) flushBinds(rp *wgpu.RenderPassEncoder, shader *gfxbShader) 
 		if g >= len(shader.bgLayouts) || shader.bgLayouts[g] == nil {
 			continue
 		}
-		if g >= len(b.acc) || len(b.acc[g]) == 0 {
-			if shader.declaredEntries(g) == 0 {
-				continue
-			}
+		var entries []gfxbBindEntry
+		if g < len(b.acc) {
+			entries = b.acc[g]
+		}
+		if len(entries) == 0 && shader.declaredEntries(g) != 0 {
 			if err := b.noteRefusedBindGroup(shader, g); err != nil && b.refusal == nil {
 				b.refusal = err
 			}
 			bound = false
 			continue
 		}
-		slices.SortFunc(b.acc[g], func(a, b gfxbBindEntry) int {
+		slices.SortFunc(entries, func(a, b gfxbBindEntry) int {
 			return cmp.Compare(a.key.binding, b.key.binding)
 		})
-		bg := b.bindGroups.get(shader, g, b.acc[g])
+		// A gap's entries are none, and its bind group is cached per shader and
+		// group like any other, so it is created once.
+		bg := b.bindGroups.get(shader, g, entries)
 		if bg == nil {
 			// Every route to a short or malformed entry list ends here, this
 			// one included: gfx checks what it emits, but a binding filled by a

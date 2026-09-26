@@ -10,7 +10,6 @@ import (
 
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 
-	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
 
@@ -189,9 +188,10 @@ func pipelineErrFrames(t *testing.T, backend *fakeBackend, mesh descriptors.Mesh
 	var reported []error
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
+	set := testSet(t, k)
 	for range frames {
 		w, ref := recordList(t, k)
-		w.Draw(ref, mesh, testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+		w.Draw(ref, mesh, set, 1, 0)
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 	}
@@ -202,7 +202,7 @@ func pipelineErrFrames(t *testing.T, backend *fakeBackend, mesh descriptors.Mesh
 // standard uniform layout, so a mesh can be paired against a shader that
 // declares exactly one thing.
 func oneInputBackend(input shader.ShaderVertexInput) *fakeBackend {
-	layout := (&fakeBackend{}).ShaderLayout(0)
+	layout := defaultLayout()
 	layout.VertexInputs = []shader.ShaderVertexInput{input}
 	return &fakeBackend{layout: &layout}
 }

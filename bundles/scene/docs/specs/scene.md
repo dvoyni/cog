@@ -385,7 +385,7 @@ Batch, the recording System versions the set with the frame block, the
 instances, the animation and mesh arenas, group 2, and the `Params` - a member
 of `scenePbrMaterial` folded into the tag's values and set whole through
 `gfx.RawParameterRef` - each where the set's shader declares it, and then draws
-it with `DrawSet`. A zero set, from a shader that did not compile, draws
+it with `Draw`. A zero set, from a shader that did not compile, draws
 nothing; the failure is reported once as `ErrMaterialShaderUnavailable`.
 
 **The default scene shader is model's**, on the Lookup
@@ -409,12 +409,18 @@ buffers can no longer be that binding.
 bundled fragment rather than copying it: `model.VertexStagePath` (`vs_main`)
 and `model.FragmentStagePath` (`scenePbrFragment`). `scene.wgsl` is the two plus
 a one-line `fs_main`. **Group 3 is the app's.** Groups 0 to 2 stay what cog
-binds. The material's block is the one uniform block gfx allows, so an app's own
-per-draw numbers are members it adds to that block, composing it from
-`model.MaterialProloguePath`, its own fields over `model.MaterialFieldsPath`,
-and `model.MaterialEpiloguePath` before it includes the stages. Larger data rides
-in textures and samplers, or in the one storage buffer of the eight the bundled
-shader leaves.
+binds. An app's own per-draw numbers are a uniform of its own in group 3,
+set whole through `Params` by the binding's name; the material's block is
+model's and takes no members. Larger data rides in textures and samplers, or in
+the one storage buffer of the eight the bundled shader leaves. A variant that
+declares no group 2 leaves a gap beneath group 3, which the backend binds with
+an empty group.
+
+> **Amended by [#604](https://github.com/dvoyni/cog/issues/604).** The block
+> was once composed from three published sources so an app could add members
+> to it. Draw params set a uniform whole, so those members would be set by
+> nothing; the sources are one unpublished `materialblock.wgsl`, and the three
+> `model.Material*Path` constants are deleted.
 
 ---
 

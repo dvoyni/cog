@@ -2,13 +2,9 @@
 // that turns them into shading inputs.
 //#include ./pbr.wgsl
 
-// The material's numbers are its uniform block, composed from three sources
-// so that a custom shader can add numbers of its own: see
-// materialprologue.wgsl. An extending shader includes its own composition
-// first, and these three are then skipped as already included.
-//#include ./materialprologue.wgsl
-//#include ./materialfields.wgsl
-//#include ./materialepilogue.wgsl
+// The material's numbers are its uniform block, set whole: see
+// materialblock.wgsl.
+//#include ./materialblock.wgsl
 
 // Five textures and five samplers, one pair per slot. glTF references a sampler
 // per texture and two slots of one material can legitimately differ - a tiling

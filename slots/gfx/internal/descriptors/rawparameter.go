@@ -52,9 +52,7 @@ func RawParameter[T any](name string, value T) ParameterDescr {
 // it is handed to must read it before the caller changes it.
 // ResourceQueue.NewDrawParams, UpdateDrawParams and OpQueue.SetDrawParams all
 // copy a param's bytes before they return, so a caller refilling one record per
-// batch and handing each fill to SetDrawParams allocates nothing; a param
-// recorded for later - the material path's Draw - borrows until the frame that
-// recorded it is consumed or dropped, as BufferWithBytes without copyData does.
+// batch and handing each fill to SetDrawParams allocates nothing.
 //
 // value must point at memory that outlives the call: taking the address of a
 // local moves it to the heap, which is the allocation this exists to avoid.

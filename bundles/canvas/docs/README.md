@@ -195,8 +195,8 @@ own parameters — built once and passed by address:
 var fade = canvas.MaterialWithState(
     gfx.ShaderWithResource("shaders/fade-sprite.wgsl"), gfx.StateOverlay2D())
 
-func NewMaterial(shader gfx.ShaderDescr, params ...gfx.ParameterDescr) Material                    // gfx.Material's state: depth-tested and written
-func MaterialWithState(shader gfx.ShaderDescr, state gfx.MaterialState, params ...gfx.ParameterDescr) Material
+func NewMaterial(shader gfx.ShaderDescr, params ...gfx.ParameterDescr) Material                    // alpha-blended, depth-tested and written
+func MaterialWithState(shader gfx.ShaderDescr, state gfx.DrawState, params ...gfx.ParameterDescr) Material
 ```
 
 gfx has no materials: a gfx draw names a durable set of draw params. Canvas

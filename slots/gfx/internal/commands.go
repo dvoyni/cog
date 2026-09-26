@@ -68,17 +68,11 @@ type AcquireRequest struct{}
 
 type AcquireResponse struct{ Advanced bool }
 
-// ReleaseCachedResourceCmd queues release of translator-owned texture and
-// shader caches matching Path. Cleanup runs on the render thread before the
-// latest frame; a later use of the path loads it again.
-//
-// A shader matches on membership rather than on its name: every module whose
-// flatten read Path goes, whether Path rooted it or was included into it. So a
-// shader built from inline text goes too, if it included the path - but one
-// built from inline text with no #include has no source to match and no path
-// this command can name. FreeCachedResourcesCmd is its only release, and no
-// name is invented to give it a second one: a path for the one thing defined by
-// not having one would be a sentinel inside a namespace of real paths.
+// ReleaseCachedResourceCmd queues release of the translator-owned texture
+// cached for Path. Cleanup runs on the render thread before the latest frame; a
+// later use of the path loads it again. A shader is not a cache entry: it is the
+// caller's, created and released through the ResourceQueue, so reloading one is
+// releasing it and compiling it again.
 //
 // It is also the only retry there is. A read that failed is cached as failed and
 // reported once, so a path whose file was missing stays missing as far as gfx is
@@ -91,8 +85,9 @@ type ReleaseCachedResourceRequest struct{ Path string }
 type ReleaseCachedResourceResponse struct{}
 
 // FreeCachedResourcesCmd queues release of every translator-owned texture,
-// shader, pipeline, sampler, layout, and parameter plan. Explicit resources
-// returned by ResourceQueue.Bake* remain caller-owned and are not released.
+// pipeline and sampler. Explicit resources - the shaders, sets, textures and
+// buffers the ResourceQueue made - remain caller-owned and are not released;
+// a pipeline is built again by the next draw that needs it.
 type FreeCachedResourcesCmd kernel.Command[FreeCachedResourcesRequest, FreeCachedResourcesResponse]
 
 type FreeCachedResourcesRequest struct{}

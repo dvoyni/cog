@@ -157,13 +157,14 @@ func TestABufferParameterCarriesTheRangeItBinds(t *testing.T) {
 	}
 }
 
-func TestAMaterialViewNamesItsShaderVariantAndState(t *testing.T) {
-	material := descriptors.MaterialWithState(
-		shader.ShaderWithResource("shaders/pbr.wgsl", shader.ShaderDefine("SKINNED"), shader.ShaderConst("LIGHTS", "4")),
-		StateOpaque3D(),
-		descriptors.ColorParam("tint", m.White),
-	)
-	view := MaterialViewOf(material)
+func TestAShaderViewNamesItsVariantAndADrawStateViewItsState(t *testing.T) {
+	view := struct {
+		Shader ShaderView
+		State  DrawStateView
+	}{
+		ShaderViewOf(shader.ShaderWithResource("shaders/pbr.wgsl", shader.ShaderDefine("SKINNED"), shader.ShaderConst("LIGHTS", "4"))),
+		DrawStateViewOf(StateOpaque3D()),
+	}
 	if view.Shader.Path != "shaders/pbr.wgsl" || view.Shader.Inline {
 		t.Errorf("shader = %+v, want the resource path it names", view.Shader)
 	}
@@ -175,12 +176,9 @@ func TestAMaterialViewNamesItsShaderVariantAndState(t *testing.T) {
 	if view.State.DepthCompare != "less" || !view.State.DepthWrite || view.State.Cull != "back" {
 		t.Errorf("state = %+v, want the opaque 3D state named rather than numbered", view.State)
 	}
-	if len(view.Parameters) != 1 || view.Parameters[0].Name != "tint" {
-		t.Errorf("parameters = %+v, want the material's own", view.Parameters)
-	}
-	inline := MaterialViewOf(descriptors.Material(shader.ShaderWithText("// wgsl")))
-	if !inline.Shader.Inline || inline.Shader.Path != "" {
-		t.Errorf("inline shader = %+v, want no path and the inline flag", inline.Shader)
+	inline := ShaderViewOf(shader.ShaderWithText("// wgsl"))
+	if !inline.Inline || inline.Path != "" {
+		t.Errorf("inline shader = %+v, want no path and the inline flag", inline)
 	}
 }
 

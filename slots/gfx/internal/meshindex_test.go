@@ -8,7 +8,6 @@ import (
 
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
-	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
 
@@ -121,9 +120,10 @@ func TestAStripIsKeyedByItsIndexWidth(t *testing.T) {
 	p := newPlugin()
 	k := newTestKernel(t, p)
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
+	set := testSet(t, k)
 	w, ref := recordList(t, k)
-	w.Draw(ref, narrow, testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
-	w.Draw(ref, wide, testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(ref, narrow, set, 1, 0)
+	w.Draw(ref, wide, set, 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -149,9 +149,10 @@ func TestATriangleListIsNotKeyedByItsIndexWidth(t *testing.T) {
 	p := newPlugin()
 	k := newTestKernel(t, p)
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
+	set := testSet(t, k)
 	w, ref := recordList(t, k)
-	w.Draw(ref, narrow, testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
-	w.Draw(ref, wide, testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(ref, narrow, set, 1, 0)
+	w.Draw(ref, wide, set, 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

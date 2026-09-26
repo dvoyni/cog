@@ -66,8 +66,12 @@ func (t *translator) translateSetDraw(f *frame, op *DrawOp, pass descriptors.Pas
 	if vertices.ID() == 0 || m.VertexCount() <= 0 || stride <= 0 {
 		return
 	}
-	// Written out rather than behind a helper so it inlines, as in
-	// translateDraw.
+	// A draw naming a released id - its vertex buffer, or the index buffer it
+	// draws through - goes before anything else, reports included and silently:
+	// it is a frame rendered again after what it names was let go, not a
+	// mistake. The check is written out here rather than behind a helper so it
+	// inlines; a helper naming both buffers is over the inliner's budget, and
+	// the call alone measured about two percent of TranslateSteadyState.
 	if t.released.buffer(vertices.ID()) || (m.Indexed() && t.released.buffer(indices.ID())) {
 		return
 	}
@@ -82,7 +86,7 @@ func (t *translator) translateSetDraw(f *frame, op *DrawOp, pass descriptors.Pas
 		}
 		return
 	}
-	pipeline, err := t.ensurePipeline(f.backend, set.record.shader, label, m, set.record.drawState, pass)
+	pipeline, err := t.ensurePipeline(f.backend, set.record.shader, set.record.program, m, set.record.drawState, pass)
 	if err != nil && *firstErr == nil {
 		*firstErr = err
 	}
@@ -238,8 +242,9 @@ func (t *translator) uploadUniform(uploads *[]uniformUpload, key int, bytes []by
 }
 
 // collectSetSampled adds every texture a set draw samples to the run's sampled
-// set, on collectSampled's terms: a set that will not draw costs a barrier
-// nothing reads, which is the safe direction to be wrong in.
+// set. It runs before the pass opens, so it resolves nothing past the set: a
+// set that will not draw costs a barrier nothing reads, which is the safe
+// direction to be wrong in.
 func (t *translator) collectSetSampled(f *frame, op *DrawOp) {
 	set, ok := t.resolveSet(f, op)
 	if !ok {

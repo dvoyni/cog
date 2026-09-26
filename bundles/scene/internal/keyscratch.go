@@ -186,9 +186,10 @@ func (s *keyScratch) paramsHash(p *Params) (hash, shape uint64) {
 	return hash, shape
 }
 
-// materialKey keys a Material override by content: each tag's pass and gfx
-// fingerprint, in order. A Material with no tags is a key too, because it
-// draws differently from no Material.
+// materialKey keys a Material override by content: each tag's pass, its params'
+// gfx fingerprint, its shader by the whole descriptor, supply included, and its
+// state, in order. A Material with no tags is a key too, because it draws
+// differently from no Material.
 func (s *keyScratch) materialKey(material *Material) uint64 {
 	var h maphash.Hash
 	h.SetSeed(materialSeed)
@@ -198,18 +199,17 @@ func (s *keyScratch) materialKey(material *Material) uint64 {
 			params = append(params, param)
 		}
 		s.tagParams = params
-		descr := gfx.MaterialWithState(tag.Shader, tag.State, params...)
-		writeMaterialEntry(&h, tag.Tag, descr.Fingerprint())
+		writeMaterialEntry(&h, tag.Tag, gfx.FingerprintParams(params))
+		maphash.WriteComparable(&h, tag.Shader)
+		maphash.WriteComparable(&h, tag.State)
 		clear(params)
 	}
 	return nonZero(h.Sum64())
 }
 
-// forwardMaterialKey is materialKey of a Material whose one tag is the forward
-// pass, given that tag's gfx fingerprint. A model material carries its
-// fingerprint from its load, so a file's own material is keyed without
-// fingerprinting anything, and an override naming the same forward material
-// keys the same.
+// forwardMaterialKey keys a file's own material under the forward pass, given
+// the key model took of it at load, so a file's own material is keyed without
+// fingerprinting anything.
 func forwardMaterialKey(fingerprint uint64) uint64 {
 	var h maphash.Hash
 	h.SetSeed(materialSeed)
@@ -218,7 +218,7 @@ func forwardMaterialKey(fingerprint uint64) uint64 {
 }
 
 // overlaidMaterialKey keys a Material laid over one file material: the
-// Material's key and the file material's fingerprint together, because the
+// Material's key and the file material's key together, because the
 // same Material over two file materials resolves to two materials, each with
 // its own textures and state.
 func overlaidMaterialKey(override, fingerprint uint64) uint64 {
@@ -232,7 +232,7 @@ func overlaidMaterialKey(override, fingerprint uint64) uint64 {
 }
 
 // writeMaterialEntry hashes one tag of a material: its pass, with an empty tag
-// read as the forward pass, then its gfx fingerprint.
+// read as the forward pass, then a fingerprint of what it draws.
 func writeMaterialEntry(h *maphash.Hash, tag PassTag, fingerprint uint64) {
 	if tag == "" {
 		tag = TagForward

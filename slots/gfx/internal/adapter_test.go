@@ -75,13 +75,7 @@ func (a *testAdapter) NewSampler(desc types.SamplerDesc) (types.SamplerID, error
 	return a.get().NewSampler(desc)
 }
 func (a *testAdapter) FreeSampler(id types.SamplerID) { a.get().FreeSampler(id) }
-func (a *testAdapter) NewShader(desc shader.ShaderDesc) (types.ShaderID, error) {
-	return a.get().NewShader(desc)
-}
-func (a *testAdapter) FreeShader(id types.ShaderID) { a.get().FreeShader(id) }
-func (a *testAdapter) ShaderLayout(id types.ShaderID) shader.ShaderLayout {
-	return a.get().ShaderLayout(id)
-}
+func (a *testAdapter) FreeShader(id types.ShaderID)   { a.get().FreeShader(id) }
 
 // ReserveShader keeps counting before a backend is attached, as NewTexture
 // does: a shader id is reservable the moment the engine starts.
@@ -154,8 +148,10 @@ func TestAFrameBeforeTheBackendIsReadyIsSkipped(t *testing.T) {
 	k := newTestKernelWithErrors(t, newPlugin(), func(err error) { reported = append(reported, err) })
 	backend := &fakeBackend{}
 
+	// Nothing is translated, so the draw needs no set: there is no backend to
+	// compile one against yet.
 	w, ref := recordList(t, k)
-	w.Draw(ref, triangle(), testMaterial(), 1, 0)
+	w.Draw(ref, triangle(), descriptors.DrawParams{}, 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -165,8 +161,9 @@ func TestAFrameBeforeTheBackendIsReadyIsSkipped(t *testing.T) {
 	}
 
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
+	set := testSet(t, k)
 	w, ref = recordList(t, k)
-	w.Draw(ref, triangle(), testMaterial(), 1, 0)
+	w.Draw(ref, triangle(), set, 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

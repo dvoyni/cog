@@ -10,7 +10,7 @@ import (
 
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 
-	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 )
 
@@ -20,7 +20,7 @@ import (
 func arrayTextureLayout() shader.ShaderLayout {
 	return shader.ShaderLayout{
 		Resources: []shader.ShaderResource{
-			{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 80, Members: []shader.StorageMember{{Name: "mvp", Offset: 0}}},
+			{Name: "mvp", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64},
 			{Name: "canvasSampler", Kind: shader.ResourceSampler, Group: 1, Binding: 0},
 			{Name: "canvasTexture", TextureView: shader.TextureView2DArray, Group: 1, Binding: 1},
 		},
@@ -29,8 +29,8 @@ func arrayTextureLayout() shader.ShaderLayout {
 
 // arrayTextureFrame records draws frames of one draw each against the array
 // layout, and reports what the backend was asked to encode alongside what gfx
-// reported. More than one frame is how report-once is observed: the plan is
-// shared, and only the seen-set can stop the second report.
+// reported. More than one frame is how report-once is observed: only the
+// seen-set can stop the second report.
 func arrayTextureFrame(t *testing.T, frames int, params ...descriptors.ParameterDescr) (*fakeBackend, []error) {
 	t.Helper()
 	p := newPlugin()
@@ -40,10 +40,14 @@ func arrayTextureFrame(t *testing.T, frames int, params ...descriptors.Parameter
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
+	// The texture is the frame's version: a flat and an array texture are
+	// both what a set could hold, and the check is the draw's either way.
+	set := testSet(t, k)
 	for range frames {
 		w := recordRaw(t, k)
 		ref := w.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "main"})
-		w.Draw(ref, triangle(), testMaterial(params...), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+		w.SetDrawParams(kernel.Kernel{}, set, params...)
+		w.Draw(ref, triangle(), set, 1, 0)
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 	}
@@ -96,7 +100,7 @@ func TestADrawSupplyingAFlatTextureForAnArrayBindingIsDroppedAndNamed(t *testing
 	}
 }
 
-// A material that misses a binding misses it until someone fixes the material,
+// A set that misses a binding misses it until someone fixes the set,
 // and the frame reports only its first error - so re-reporting every frame would
 // mask every later error in every later frame.
 func TestAnArrayBindingMismatchIsNamedOncePerShaderAndParameter(t *testing.T) {

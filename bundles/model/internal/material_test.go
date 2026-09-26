@@ -12,7 +12,7 @@ import (
 // entirely a fragment-shader concern.
 func TestAlphaModeAndDoubleSidedMapOntoPipelineState(t *testing.T) {
 	opaque := PbrState(AlphaOpaque, false)
-	if opaque != (gfx.MaterialState{
+	if opaque != (gfx.DrawState{
 		Blend: gfx.BlendOpaque, DepthCompare: gfx.CompareLess, DepthWrite: true, Cull: gfx.CullBack,
 	}) {
 		t.Fatalf("an opaque single-sided material is %+v, want the opaque 3D state culling back faces", opaque)

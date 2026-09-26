@@ -2,7 +2,7 @@
 
 `github.com/dvoyni/cog/slots/gfx` is Cog's driver-neutral renderer. Gameplay records
 high-level draws into an `OpQueue`; gfx rotates queues through a latest-wins
-triple buffer, resolves resource-backed shaders and textures, translates to a
+triple buffer, resolves resource-backed textures, translates to a
 `gfx.Queue`, and hands that queue to a driver-provided `gfx.Backend`.
 
 gfx is a **Slot**: it declares a required Port, `BackendPort`, and works only
@@ -13,9 +13,13 @@ once a `gfx.Backend` **Adapter** fills it. The vocabulary is in
 [`specs/preprocessor.md`](specs/preprocessor.md) is the design record
 for the WGSL shader preprocessor — the `#include` / `#define` / `#const` / `#if`
 language shader sources are written in, and what each rule is and why. It is
-internal to gfx: `ensureShader` flattens a shader on a cache miss, so that every
-backend receives flattened source and none of them knows the preprocessor
-exists; nothing else in this README describes it.
+internal to gfx: `CompileShaderCmd` flattens a shader before it reflects it, so
+that every backend receives flattened source and none of them knows the
+preprocessor exists; nothing else in this README describes it.
+
+[`specs/drawparams.md`](specs/drawparams.md) is the design record for how a
+draw is shaded: explicit shaders compiled on the CPU, durable sets of draw
+params, and the frame's version of a set. The sections below summarise it.
 
 ## Packages
 
@@ -58,7 +62,7 @@ package the caller does not import only when a package it does import
 references that method, and nothing outside gfx can import `internal/`, so
 the anchor references the accessors importers call per instance —
 `ParameterDescr.Name` and its value accessors, `TextureDescr.ID` and `Size`,
-`MaterialDescr.State`, `TextureFormat.Resolve` — and canvas, scene and gogpu
+`TextureFormat.Resolve` — and canvas, scene and gogpu
 inline them. Add an accessor to it when a hot importer stops inlining one; the
 tier test allows exactly that shape.
 
@@ -106,28 +110,57 @@ engine walked away from.
 - `*Viewport`: logical, window, and framebuffer dimensions.
 
 `OpQueue` methods are `NewPass`, `NewTemporaryBuffer`, `NewTemporaryTexture`,
-`NewTemporaryTarget`, `FrameMaterial`, and `Draw`; the plugin resets a queue
-itself when it rotates the frame slots. `Draw(pass, mesh, material, instances,
-firstInstance, params...)` is the one draw: a plain draw passes `1, 0`, and
-fewer than one instance still draws once. Draw parameters override same-named material
-parameters. `firstInstance` is where WebGPU's `instance_index` starts, so a batch
-reads its own slice of a shared instance arena without plumbing an offset of its
-own.
+`NewTemporaryTarget`, `SetDrawParams`, and `Draw`; the plugin resets a queue
+itself when it rotates the frame slots. `Draw(pass, mesh, set, instances,
+firstInstance)` is the one draw: a plain draw passes `1, 0`, and fewer than one
+instance still draws once. `firstInstance` is where WebGPU's `instance_index`
+starts, so a batch reads its own slice of a shared instance arena without
+plumbing an offset of its own.
 
-**A draw copies its material's params**, because gfx owns nothing a caller
-passes and the caller may reuse its slice when `Draw` returns - and the
-translator hashes every param name to find the draw's parameter plan. Both are
-per draw. A recorder drawing one material many times in a frame records it once
-with `q.FrameMaterial(material)`, which copies the params and takes the names'
-hash then, and names the returned material in every draw: those draws copy
-nothing of the material and hash only their own params. The returned material is
-the queue's for the frame it was recorded in. The caller may reuse its own slice
-at once, as after `Draw`, and in a later frame or on another queue the material
-draws as the one it was recorded from, copied as usual. scene records every
-material it interns
-([#568](https://github.com/dvoyni/cog/issues/568)), where a material carries its
-numbers as params and 5 000 draws of one material otherwise copied 27 params
-each.
+## Shaders and draw params
+
+gfx has no materials. A draw names a **set of draw params**: one shader, one
+fixed `DrawState`, and a value for some or all of the shader's bindings,
+created once and named by the opaque, comparable `DrawParams` handle, which is
+also the complete batch key a recorder needs.
+
+- **A shader is compiled on the CPU and created once.** `CompileShaderCmd`
+  takes `CompileShaderRequest{FS, Descr}`, flattens the descriptor, reflects it
+  through the Backend's `ReflectShader` and answers with a `ShaderProgram` or
+  the `Err` it failed with - the one failure that is a normal outcome, and never
+  also reported. Its lock is empty, so a System declaring
+  `ecs.Uses[CompileShaderCmd, ...]` widens its lock set by nothing; a library
+  takes the plain `gfx.ShaderCompiler` func instead.
+  `ResourceQueue.NewShader()` reserves an id at once,
+  `UploadProgram(k, id, program)` gives it its one program, and
+  `ReleaseShader(k, id)` frees the module and every pipeline built on it.
+  Reloading is the caller's: release, compile and create again.
+- **A set is resolved once.** `ResourceQueue.NewDrawParams(k, shader, state,
+  params...)` resolves each param against the shader's program by binding name
+  when it is called, so the translator never looks a name up.
+  `UpdateDrawParams(k, set, params...)` changes the set's own values and
+  persists; `ReleaseDrawParams(k, set)` frees it and the resources it baked. A
+  durable set names durable ids only - a temporary is refused - and inline bytes
+  a param carries are baked into ids the set owns.
+- **A param is a whole binding.** It names a WGSL global and supplies all of
+  it: bytes of the binding's reflected size for a uniform (`FloatParam`,
+  `VecParam`, `MatParam`, `ColorParam`, `RawParameter`, `RawParameterRef`), a
+  texture, a sampler, or a buffer and a range of it. There are no member-level
+  writes: to change one field of a struct, resubmit the struct.
+- **The frame's version.** `OpQueue.SetDrawParams(k, set, params...)` changes a
+  set for the rest of this frame, from this point on, and the next frame starts
+  from the set's own values again. A draw sees the values the set had when it
+  was recorded, however the passes are ordered: a change makes a version,
+  copy-on-write per binding, and a version no draw has captured yet is patched
+  in place. Temporaries belong here, a per-frame instance arena above all.
+
+A binding neither the set nor its version supplies takes a default when the
+draw is resolved - zero bytes, the clamp-and-linear sampler, white - except a
+storage buffer, whose draw is dropped and reported once. Every set method that
+can find a mistake takes the `kernel.Kernel` it reports through, once, and
+ignores the bad param; `Draw` takes none. A draw naming a set, shader or mesh
+released since the frame was recorded is dropped silently: it is a frame
+rendered again after what it names was let go.
 
 ## Passes
 
@@ -169,6 +202,8 @@ pass declared this frame is dropped and reported as `ErrDrawWithoutPass`.
 - `NewBuffer`, `NewTexture`, `NewRenderTarget`
 - `UploadBuffer`, `UploadTexture`
 - `ReleaseBuffer`, `ReleaseTexture`
+- `NewShader`, `UploadProgram`, `ReleaseShader`
+- `NewDrawParams`, `UpdateDrawParams`, `ReleaseDrawParams`
 
 A resource is made by `New*` and given contents by `Upload*`, so a one-shot
 bake is `UploadBuffer(NewBuffer(), data, copyData)`. Uploading again keeps the
@@ -300,8 +335,7 @@ mipmap flag. Individual draws are counted rather than listed; what they draw
 with is listed once per set of draw params and version they name, under
 `drawParams`: the shader's label, the Draw state with its enums named, and each
 binding's name, kind, group, binding and size or resource, with whether the
-value is the set's own, the frame's version's, or the binding's default. A draw
-through the old material path names no set and is only counted.
+value is the set's own, the frame's version's, or the binding's default.
 Every index in the response is a **source index** — a position in the queue
 that recorded the thing — so an index stays the address of what it named when a
 filter is on. `pass` filters by label and says how many passes it dropped;
@@ -324,9 +358,8 @@ field's.
 ### The shared view types
 
 gfx also declares the vocabulary every cog snapshot shares, in
-[`internal/views.go`](../internal/views.go), aliased in `types.go`: `ParameterView`, `TextureView`, `DrawStateView`,
-`MaterialView` (the old material path's, kept for `canvas_draws` until
-materials are deleted), and
+[`internal/views.go`](../internal/views.go), aliased in `types.go`: `ParameterView`, `TextureView`, `ShaderView`,
+`DrawStateView`, `DrawParamsView`, and
 `SnapshotView` — the three coordinate sizes, the tick the snapshot describes,
 and the step fields, all of which every snapshot response carries. `canvas` and `ui` embed them, so one value reaches an agent in
 one shape whichever tool showed it.
@@ -368,8 +401,11 @@ specify are implemented.
 
 `PresentCmd` and `AcquireCmd` are public for explicit queue control, but normal
 operation uses the update and render subscriptions. Cache-release commands
-affect translator-owned path resources; they do not release explicit
-`ResourceQueue.Bake*` resources.
+affect what the translator owns: `ReleaseCachedResourceCmd` the texture a path
+names, and `FreeCachedResourcesCmd` every cached texture, pipeline and sampler.
+Neither releases what the `ResourceQueue` made - shaders, sets, textures and
+buffers are the caller's - and a pipeline is built again by the next draw that
+needs it.
 
 ## Events
 
@@ -453,11 +489,10 @@ and physical `FramebufferWidth`/`FramebufferHeight`.
   does not divide by its declared width is reported once and its draw dropped;
   checking that every index is below the vertex count belongs to whoever built
   the geometry.
-- `MaterialDescr`: build with `Material` or `MaterialWithState`; inspect with
-  `State()`, `Shader()` and `Params()`; `Clone` and
-  `CloneTo` snapshot parameter descriptors. `Fingerprint()` hashes everything
-  that makes one material different from another, and `FingerprintParams` does
-  the same for a bare parameter slice — which is how a recorder keys a batch on
+- `DrawParams`: the handle `ResourceQueue.NewDrawParams` returns; comparable,
+  pointer-free and storable, with the zero value naming no set.
+- `FingerprintParams` hashes a bare parameter slice in order by name, kind and
+  value — which is how a recorder keys a batch on
   what a draw carries without writing a type switch that silently mis-keys the
   kind it forgot.
 - `ParameterDescr`: build with `FloatParam`, `VecParam`, `MatParam`,
@@ -505,18 +540,19 @@ param's bytes before they return, which is what makes the borrow safe; the
 value must outlive the call, and the address of a local escapes to the heap.
 
 **A parameter whose kind cannot fill the binding its name matched is rejected.**
-Parameters resolve by name, and one name has one frequency: a value is a uniform
-member and a buffer is a storage binding. Supplying either where the shader
+Parameters resolve by name, and one name has one kind of binding: a value is a
+uniform and a buffer is a storage binding. Supplying either where the shader
 declared the other used to bind the wrong descriptor into the slot and draw
 garbage with no diagnostic — and a missing storage binding is worse, because
 `CreateBindGroup` rejects the short list and the draw encodes with no bindings at
-all. It is now `ErrParameterKindMismatch` and the draw is dropped. The check
-lives in plan construction, which is cached per `(shader, parameter shape)`, so
-it costs nothing per draw. A name that matched no binding is not a mismatch:
-gfx drops a parameter no shader declared, which is ordinary.
+all. It is now `ErrParameterKindMismatch`. The check is made when the param
+reaches a set - `NewDrawParams`, `UpdateDrawParams` or `SetDrawParams` - which
+reports it through its kernel, once, and ignores the param; so is a param naming
+no binding of the shader (`ErrDrawParamUnknown`) and uniform bytes of the wrong
+size (`ErrUniformSizeMismatch`). Nothing is checked by name at the draw.
 
-**A binding behaves by kind when no parameter fills it, and by shape when one
-does.** A shader declares three sorts of binding and an unfilled one used to
+**A binding behaves by kind when neither the set nor the frame's version fills
+it, and by shape when one does.** A shader declares three sorts of binding and an unfilled one used to
 fail three different ways, only one of them deliberate. Two cases are fatal:
 an unfilled storage buffer, and a texture supplied at a dimension its binding
 did not declare.
@@ -557,8 +593,8 @@ did not declare.
 Every fatal case is reported once per `(shader, parameter)`, and the storage one
 covers a binding no parameter names **and** a parameter that names it while
 carrying a buffer nothing baked; the message says which. The draw is dropped
-every time and the report comes once, because a material that misses a binding
-misses it until someone fixes the material, and the frame reports only its first
+every time and the report comes once, because a set that misses a binding
+misses it until someone fixes the set, and the frame reports only its first
 error � so saying it every frame would mask every later error in every later
 frame.
 
@@ -585,8 +621,9 @@ appear in the message instead.
 The pipeline-state vocabulary below is part of the root like every other gfx
 type, and so are `VertexType` and `SamplerDesc`; a recorder names it as `gfx.X`.
 
-`gfx.MaterialState` contains `Blend`, `DepthCompare`, `DepthWrite`, `Cull`, and
-`FrontFace`. Its zero value is both the WebGPU default and what the backend
+`gfx.DrawState` contains `Blend`, `DepthCompare`, `DepthWrite`, `Cull`, and
+`FrontFace`, and is fixed on a set: the same surface under another state is a
+second set. Its zero value is both the WebGPU default and what the backend
 always did: alpha over, `CompareAlways`, no depth write, `CullNone`, `FrontCCW`.
 The named states are `StateOpaque3D()`, `StateTransparent3D()`, and
 `StateOverlay2D()` (the zero value). `CompareFunc` is `CompareAlways`,
@@ -605,7 +642,7 @@ The named states are `StateOpaque3D()`, `StateTransparent3D()`, and
 mean off, clamped to 16, and rejected unless all three filters are linear), and
 `Comparison` plus `Compare` for a shadow-style comparison sampler. The zero
 value clamps and filters linearly. Every sampler a shader declares binds
-independently by name, so a material's textures can sample differently.
+independently by name, so a set's textures can sample differently.
 
 `VertexType` formats are `UnknownVertexType`, `Float32`, `Float32x2`,
 `Float32x3`, `Float32x4`, `Float16x2`, `Float16x4`, `Uint8x2`, `Uint8x4`,
@@ -689,7 +726,7 @@ What it holds:
 - **Formats and enums:** `TextureFormat` with `FrameBufferFormat`,
   `TextureViewDimension`, `AddressMode`, `FilterMode`, `BufferKind`,
   `PrimitiveTopology`, `BlendMode`, `CompareFunc`, `CullMode`, `FrontFace`,
-  `MaterialState` with `StateOpaque3D()`, `StateTransparent3D()` and
+  `DrawState` with `StateOpaque3D()`, `StateTransparent3D()` and
   `StateOverlay2D()`, `VertexType`, `VertexScalar`, `IndexWidth`, `LoadOp`,
   `StoreOp`, and `StorageAlignment`.
 - **Errors a backend reports:** `ErrCaptureBusy`, `ErrCaptureAbandoned`,
@@ -703,8 +740,8 @@ What it holds:
   `VertexScalar.WGSL(count)`, which `gfx.CheckVertexInterface` compares with.
 
 `Backend` reserves logical texture and buffer IDs, creates and frees
-samplers/shaders/pipelines, reflects `ShaderLayout`, reports the surface it
-presents to, and executes a translated queue. Its methods are:
+samplers/shaders/pipelines, reflects a flattened module into a `ShaderLayout`,
+reports the surface it presents to, and executes a translated queue. Its methods are:
 
 ```go
 type Backend interface {
@@ -712,11 +749,9 @@ type Backend interface {
     NewBuffer() BufferID
     NewSampler(SamplerDesc) (SamplerID, error)
     FreeSampler(SamplerID)
-    NewShader(ShaderDesc) (ShaderID, error)
-    FreeShader(ShaderID)
-    ShaderLayout(ShaderID) ShaderLayout
     ReserveShader() ShaderID
     CreateShader(ShaderID, ShaderDesc) error
+    FreeShader(ShaderID)
     ReflectShader(code []byte) (ShaderLayout, error)
     NewPipeline(PipelineDesc) (PipelineID, error)
     FreePipeline(PipelineID)
@@ -737,6 +772,10 @@ that is not ready, and those five must be safe from any goroutine.
 needs no device, and it is pure, a function of the flattened source alone.
 `ReserveShader` reserves the id `ResourceQueue.NewShader` hands out at once,
 and `CreateShader` creates that shader's module when its upload is replayed.
+A shader's bind groups may skip an index - a scene variant with no group 2
+beneath an app's group 3 - and the pipeline layout still holds every index
+below the highest, so the backend binds an empty group at each gap: WebGPU
+requires every group of the layout set before a draw.
 
 `TextureFormat` reports what format a texture was allocated or baked in, and
 whether the backend knows the texture at all. It is what keys a pipeline to
@@ -760,10 +799,9 @@ Low-level descriptors are `TextureDesc`, `BufferDesc`, `SamplerDesc`,
 reports member layout for storage structs too — a one-level walk in which an
 array member carries its element stride and count — so a recorder that declares
 no uniform block at all packs its records from the same source of truth. A
-shader may declare several uniform blocks: each is its own `ShaderResource`
-with its own members, packed into its own span of the frame's uniform arena and
-bound at its own group and binding, its members matched by name like every
-other parameter.
+shader may declare several uniform bindings: each is its own `ShaderResource`,
+set whole by a param of its name, uploaded into its own span of the frame's
+uniform arena once a frame and bound at its own group and binding.
 It also reports the vertex stage's `@location` inputs as `ShaderVertexInput`
 values — the location plus a `VertexScalar` kind and a component count — which
 is the half of the vertex interface only the shader knows.
@@ -821,16 +859,17 @@ use `m.Vec*`, `m.Rect`, `m.Color`, and column-major `m.Mat4` directly.
 Backend Adapter is ready, and the frame is skipped. A missing Adapter is not a
 gfx error: composition fails with `kernel.ErrMissingAdapter`.
 
-A resource-backed shader whose file cannot be read is reported through the
-kernel by the asset library that performed the read, named by the descriptor
-that failed, and said once per entry: gfx has no error type of its own for it.
-What gfx reports itself is what only gfx can see - `ErrShaderSource` for a
-module the preprocessor or the backend refused.
+A shader whose source cannot be read, flattened or reflected is not reported:
+`CompileShaderCmd` returns why in its response's `Err` - the read's own error,
+or `ErrShaderSource` for a module the preprocessor or reflection refused - and
+the caller decides what a missing shader means. A module the backend refuses
+when the upload is replayed is reported once as `ErrShaderSource`, carrying the
+segment table of the flattened module.
 
 `ErrParameterKindMismatch{Shader, Parameter, Supplied, Declared}` is reported
-when a parameter's name matches a binding its kind cannot fill, and the draw is
-dropped. See the parameter section above for why an unreported one is worse than
-a dropped draw.
+when a parameter's name matches a binding its kind cannot fill, by the set
+method it reached, once, and the param is ignored. See the parameter section
+above for why an unreported one is worse than an ignored param.
 
 `ErrStorageBufferUnsupplied{Shader, Parameter, Group, Binding, Unbaked}` is
 reported when a declared storage binding goes unfilled, and the draw is dropped.

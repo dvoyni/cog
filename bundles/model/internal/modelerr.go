@@ -235,7 +235,7 @@ func (e ErrClipTransitionTriggerInvalid) Error() string {
 // ErrSceneShaderUnavailable reports a variant of the bundled scene shader that
 // did not compile. The Lookup compiles the four once, on the first load, so it
 // is reported once and never retried; every model's draw params for that
-// variant stay zero, and the forward material draws as before. Err is the
+// variant stay zero, and draw nothing. Err is the
 // compile's own, naming the file and line the source map resolved.
 type ErrSceneShaderUnavailable struct {
 	Variant ShaderVariant

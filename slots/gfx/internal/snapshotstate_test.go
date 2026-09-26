@@ -99,24 +99,24 @@ func (r *captureRig) runSnapshot(request frameSnapshotRequest, record func(*OpQu
 
 // twoPasses records a frame whose declaration order is the reverse of its run
 // order, which is the only way to tell the two apart.
-func twoPasses(q *OpQueue) {
+func (r *captureRig) twoPasses(q *OpQueue) {
 	ref := q.NewPass(descriptors.PassDescr{
 		Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Order: 20, Label: "overlay",
 		Load: types.LoadPreserve, Store: types.StoreKeep,
 	})
-	drawInto(q, ref)
+	drawInto(q, ref, r.set)
 	ref = q.NewPass(descriptors.PassDescr{
 		Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Order: 10, Label: "world",
 		Load: types.LoadClear, Clear: m.Color{R: 0.25, A: 1}, Store: types.StoreKeep,
 	})
-	drawInto(q, ref)
-	q.Draw(ref, triangle(), testMaterial(), 7, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	drawInto(q, ref, r.set)
+	q.Draw(ref, triangle(), r.set, 7, 0)
 }
 
 func TestAFrameSnapshotReportsPassesInRunOrderWithTheirCounts(t *testing.T) {
 	rig := newCaptureRig(t)
 
-	response, err := rig.runSnapshot(frameSnapshotRequest{}, twoPasses)
+	response, err := rig.runSnapshot(frameSnapshotRequest{}, rig.twoPasses)
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -174,11 +174,11 @@ func TestAFrameSnapshotReportsPassesInRunOrderWithTheirCounts(t *testing.T) {
 func TestAFilteredSnapshotKeepsSourceIndicesAndNamesWhatItDropped(t *testing.T) {
 	rig := newCaptureRig(t)
 
-	whole, err := rig.runSnapshot(frameSnapshotRequest{}, twoPasses)
+	whole, err := rig.runSnapshot(frameSnapshotRequest{}, rig.twoPasses)
 	if err != nil {
 		t.Fatalf("unfiltered snapshot: %v", err)
 	}
-	filtered, err := rig.runSnapshot(frameSnapshotRequest{Pass: "world"}, twoPasses)
+	filtered, err := rig.runSnapshot(frameSnapshotRequest{Pass: "world"}, rig.twoPasses)
 	if err != nil {
 		t.Fatalf("filtered snapshot: %v", err)
 	}
@@ -221,9 +221,8 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 		ref := q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "screen"})
 		// An inline texture is baked into the frame queue, which is the other
 		// place resource traffic comes from.
-		q.Draw(ref, triangle(), testMaterial(), 1, 0,
-			descriptors.MatParam("mvp", m.NewMat4()),
-			descriptors.TextureParam("albedo", descriptors.TextureWithBytes(4, 4, descriptors.FormatRGBA8, make([]byte, 64), true, false)))
+		q.SetDrawParams(kernel.Kernel{}, rig.set, descriptors.TextureParam("MainTexture", descriptors.TextureWithBytes(4, 4, descriptors.FormatRGBA8, make([]byte, 64), true, false)))
+		q.Draw(ref, triangle(), rig.set, 1, 0)
 	})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
@@ -297,9 +296,10 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 
 func TestAFrameSnapshotBindsToATickThatBeganAfterTheRequest(t *testing.T) {
 	rig := newCaptureRig(t)
+	set := testSet(t, rig.k)
 	before := recordRaw(t, rig.k)
 	ref := before.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "before"})
-	drawInto(before, ref)
+	drawInto(before, ref, set)
 	release := rig.gate.open()
 
 	// The arm lands inside a tick that is already running, which is the case a
@@ -326,7 +326,7 @@ func TestAFrameSnapshotBindsToATickThatBeganAfterTheRequest(t *testing.T) {
 
 	after := recordRaw(t, rig.k)
 	ref = after.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "after"})
-	drawInto(after, ref)
+	drawInto(after, ref, set)
 	rig.tick()
 
 	select {
@@ -376,9 +376,10 @@ func TestAFrameSnapshotUnderPausePerformsOneStepAndSaysSo(t *testing.T) {
 	})
 	// Recorded before the call and never ticked away: a paused engine runs no
 	// tick of its own, so the step the capability raises is the only one.
+	set := testSet(t, rig.k)
 	frozen := recordRaw(t, rig.k)
 	ref := frozen.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "frozen"})
-	drawInto(frozen, ref)
+	drawInto(frozen, ref, set)
 
 	response, err := callFrame(rig.k, frameSnapshotRequest{})
 	if err != nil {
@@ -455,7 +456,7 @@ func TestAFrameSnapshotIsWrittenToThePathTheAgentNames(t *testing.T) {
 	rig := newCaptureRig(t)
 	path := filepath.Join(t.TempDir(), "nested", "frame.json")
 
-	response, err := rig.runSnapshot(frameSnapshotRequest{Path: path}, twoPasses)
+	response, err := rig.runSnapshot(frameSnapshotRequest{Path: path}, rig.twoPasses)
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -509,7 +510,7 @@ func TestAFrameSnapshotRefusesAPathItCannotHonour(t *testing.T) {
 
 func TestAFrameSnapshotIsOneFlatDocument(t *testing.T) {
 	rig := newCaptureRig(t)
-	response, err := rig.runSnapshot(frameSnapshotRequest{}, twoPasses)
+	response, err := rig.runSnapshot(frameSnapshotRequest{}, rig.twoPasses)
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -539,7 +540,7 @@ func TestAFrameSnapshotNamesDrawsThatBelongToNoPass(t *testing.T) {
 		// reported as ErrDrawWithoutPass. It is also one of the reasons a
 		// frame is black, so the snapshot says it rather than counting to
 		// zero.
-		drawInto(q, 0)
+		drawInto(q, 0, rig.set)
 		q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "empty"})
 	})
 	if err != nil {
@@ -566,13 +567,13 @@ func TestAFrameSnapshotSeesWhatALateRecorderFlushedIntoTheQueue(t *testing.T) {
 	// an agent is asking about.
 	rig.flush.on(func(q *OpQueue) {
 		ref := q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Order: 100, Label: "canvas"})
-		drawInto(q, ref)
+		drawInto(q, ref, rig.set)
 	})
 	t.Cleanup(func() { rig.flush.on(nil) })
 
 	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *OpQueue) {
 		ref := q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Order: 10, Label: "world"})
-		drawInto(q, ref)
+		drawInto(q, ref, rig.set)
 	})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
@@ -638,7 +639,7 @@ func TestAFrameSnapshotDescribesAPassDrawingSomewhereOtherThanTheScreen(t *testi
 	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *OpQueue) {
 		target, _ := q.NewTemporaryTarget(128, 64, descriptors.FormatRGBA8)
 		ref := q.NewPass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Label: "offscreen", Load: types.LoadClear})
-		drawInto(q, ref)
+		drawInto(q, ref, rig.set)
 	})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)

@@ -132,7 +132,7 @@ func (d *setDrawer) draw(gfxWrite *gfx.OpQueue, pass gfx.PassRef, mesh gfx.MeshD
 	d.add(gfx.RawParameterRef(uniformsSlot, &d.uniforms))
 	set := d.set()
 	gfxWrite.SetDrawParams(d.frame.k, set, d.params...)
-	gfxWrite.DrawSet(pass, mesh, set, instances, 0)
+	gfxWrite.Draw(pass, mesh, set, instances, 0)
 }
 
 // set returns the set the batch being built draws through, creating it the

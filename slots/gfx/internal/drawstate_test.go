@@ -7,14 +7,11 @@ import (
 
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
-	"github.com/dvoyni/cog/slots/gfx/internal/shader"
-
-	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
 
-func TestMaterialStateZeroValueIsTheWebGPUDefault(t *testing.T) {
-	var state types.MaterialState
+func TestDrawStateZeroValueIsTheWebGPUDefault(t *testing.T) {
+	var state types.DrawState
 	if state.Blend != types.BlendAlpha {
 		t.Errorf("zero Blend = %v, want BlendAlpha", state.Blend)
 	}
@@ -38,12 +35,12 @@ func TestMaterialStateZeroValueIsTheWebGPUDefault(t *testing.T) {
 }
 
 func TestNamed3DStatesSpellOutTheirPasses(t *testing.T) {
-	if want := (types.MaterialState{Blend: types.BlendOpaque, DepthCompare: types.CompareLess, DepthWrite: true, Cull: types.CullBack}); StateOpaque3D() != want {
+	if want := (types.DrawState{Blend: types.BlendOpaque, DepthCompare: types.CompareLess, DepthWrite: true, Cull: types.CullBack}); StateOpaque3D() != want {
 		t.Errorf("StateOpaque3D = %+v, want %+v", StateOpaque3D(), want)
 	}
 	// Transparent draws test against the opaque depth but must not write, or
 	// they occlude each other in draw order.
-	if want := (types.MaterialState{Blend: types.BlendAlpha, DepthCompare: types.CompareLess}); StateTransparent3D() != want {
+	if want := (types.DrawState{Blend: types.BlendAlpha, DepthCompare: types.CompareLess}); StateTransparent3D() != want {
 		t.Errorf("StateTransparent3D = %+v, want %+v", StateTransparent3D(), want)
 	}
 }
@@ -54,8 +51,9 @@ func TestPipelineDescCarriesStateAndTargetFormats(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
+	set := testSetOn(t, k, testShader(t, k), StateOpaque3D())
 	w, ref := recordList(t, k)
-	w.Draw(ref, triangle(), descriptors.MaterialWithState(shader.ShaderWithText("//test"), StateOpaque3D()), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(ref, triangle(), set, 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -80,15 +78,15 @@ func TestPipelineCacheDistinguishesDepthState(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	shaderDescr := shader.ShaderWithText("//test")
-	writing := descriptors.MaterialWithState(shaderDescr, types.MaterialState{DepthCompare: types.CompareLess, DepthWrite: true})
+	shader := testShader(t, k)
+	writing := testSetOn(t, k, shader, types.DrawState{DepthCompare: types.CompareLess, DepthWrite: true})
 	// Same compare, no write: the transparent pass, and a different pipeline.
-	reading := descriptors.MaterialWithState(shaderDescr, types.MaterialState{DepthCompare: types.CompareLess})
+	reading := testSetOn(t, k, shader, types.DrawState{DepthCompare: types.CompareLess})
 
 	w, ref := recordList(t, k)
-	w.Draw(ref, triangle(), writing, 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
-	w.Draw(ref, triangle(), reading, 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
-	w.Draw(ref, triangle(), writing, 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(ref, triangle(), writing, 1, 0)
+	w.Draw(ref, triangle(), reading, 1, 0)
+	w.Draw(ref, triangle(), writing, 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

@@ -1,6 +1,8 @@
 package internal
 
 import (
+	"cmp"
+	"slices"
 	"testing"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
@@ -9,7 +11,6 @@ import (
 
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 
-	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
 
@@ -40,6 +41,9 @@ func samplerOps(backend *fakeBackend) [][2]int {
 			binds = append(binds, [2]int{op.group, op.binding})
 		}
 	}
+	// A set binds in the order its program tables its bindings, by name, so
+	// the binds are compared in binding order.
+	slices.SortFunc(binds, func(a, b [2]int) int { return cmp.Or(cmp.Compare(a[0], b[0]), cmp.Compare(a[1], b[1])) })
 	return binds
 }
 
@@ -50,7 +54,7 @@ func TestEveryReflectedSamplerBindsIndependentlyByName(t *testing.T) {
 	// textures, all in one bind group.
 	backend := &fakeBackend{layout: &shader.ShaderLayout{
 		Resources: []shader.ShaderResource{
-			{Name: "params", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64, Members: []shader.StorageMember{{Name: "mvp", Offset: 0}}},
+			{Name: "mvp", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 64},
 			{Name: "groundSampler", Kind: shader.ResourceSampler, Group: 1, Binding: 0},
 			{Name: "groundTexture", Group: 1, Binding: 1},
 			{Name: "decalSampler", Kind: shader.ResourceSampler, Group: 1, Binding: 2},
@@ -59,14 +63,14 @@ func TestEveryReflectedSamplerBindsIndependentlyByName(t *testing.T) {
 	}}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	material := testMaterial(
+	set := testSet(t, k,
 		descriptors.SamplerParam("groundSampler", types.SamplerDesc{AddressU: types.AddressRepeat, AddressV: types.AddressRepeat}),
 		descriptors.SamplerParam("decalSampler", types.SamplerDesc{}),
 		descriptors.TextureParam("groundTexture", descriptors.TextureWithBytes(1, 1, descriptors.FormatRGBA8Srgb, []byte{1, 2, 3, 4}, true, false)),
 		descriptors.TextureParam("decalTexture", descriptors.TextureWithBytes(1, 1, descriptors.FormatRGBA8Srgb, []byte{5, 6, 7, 8}, true, false)),
 	)
 	w, ref := recordList(t, k)
-	w.Draw(ref, triangle(), material, 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(ref, triangle(), set, 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

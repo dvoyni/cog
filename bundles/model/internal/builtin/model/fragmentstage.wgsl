@@ -15,9 +15,9 @@
 // model.FragmentStagePath, so a custom scene shader is the bundled PBR plus
 // whatever it does after: its fs_main calls scenePbrFragment and changes the
 // colour, and a shading fix here reaches it with nothing copied. Group 3 is
-// the one bind group left for its own bindings, and its per-draw numbers are
-// members it adds to scenePbrMaterial by composing the block before including
-// this: see materialprologue.wgsl.
+// the one bind group left for its own bindings, its own numbers among them: a
+// uniform of its own, set whole. A variant that declares no group 2 leaves a
+// gap below it, which the backend binds with an empty group.
 //#include ./vertex.wgsl
 //#include ./material.wgsl
 

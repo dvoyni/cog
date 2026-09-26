@@ -238,7 +238,7 @@ func TestParamsReachAMeshsParamsAndAModelsOverrides(t *testing.T) {
 // the parameters its tag named.
 type passView struct {
 	Shader string
-	State  gfx.MaterialState
+	State  gfx.DrawState
 	A, B   float32
 	C, D   float32
 }

@@ -101,14 +101,8 @@ func SelectMorphTargets(
 }
 
 // PbrState maps glTF's alphaMode and doubleSided onto pipeline state.
-func PbrState(alpha AlphaMode, doubleSided bool) gfx.MaterialState {
+func PbrState(alpha AlphaMode, doubleSided bool) gfx.DrawState {
 	return internal.PbrState(alpha, doubleSided)
-}
-
-// BundledPbr builds the bundled PBR material's forward gfx material, once per
-// shader variant, around the given default textures.
-func BundledPbr(defaults PbrDefaults) [VariantCount]gfx.MaterialDescr {
-	return internal.BundledPbr(defaults)
 }
 
 // BundledIngredients are a baked mesh's ingredients around the given default

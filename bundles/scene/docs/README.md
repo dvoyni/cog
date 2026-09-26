@@ -136,7 +136,7 @@ type Material  struct{ Tags m.List[MaterialTag] }
 type MaterialTag struct {
     Tag    PassTag
     Shader gfx.ShaderDescr
-    State  gfx.MaterialState
+    State  gfx.DrawState
     Params m.List[gfx.ParameterDescr]
 }
 
@@ -418,7 +418,9 @@ drawable again, so setting it after models load takes effect on the next frame.
 **An app shader is the bundled PBR plus a step.** It includes
 `model.VertexStagePath` and `model.FragmentStagePath`, declares its own
 bindings in group 3 — the one bind group the scene layout leaves free — and
-writes an `fs_main` around `scenePbrFragment`. Its own per-draw numbers are a
+writes an `fs_main` around `scenePbrFragment`. The static variant declares no
+group 2, and the backend binds an empty group at that gap, so group 3 draws
+over every variant. Its own per-draw numbers are a
 uniform of its own in group 3, set whole through `Params` by the binding's
 name; the material block is model's and takes no members of anyone else's.
 Larger data rides in textures and samplers, or
@@ -500,9 +502,9 @@ compiler behind it.
 
 - **A Component holds no mutable indirection, transitively.** Enforced at
   registration. A string, an `assets.Blob` and an `m.List` are admitted; a bare
-  slice is not. Descriptors that keep a slice — `gfx.MaterialDescr`'s
-  params, a camera's passes — are therefore spelled out as Component fields
-  and rebuilt per Batch, which is what `MaterialTag` is.
+  slice is not. What would keep a slice — a material's params, a camera's
+  passes — is therefore spelled out as Component fields, which is what
+  `MaterialTag` is.
 - **Copy a List out through `All()`; never hand gfx its backing.** There is
   no `Raw()`, and a view of a Store's memory would be read after this System's
   locks are gone. The copy into reused scratch costs no allocation.

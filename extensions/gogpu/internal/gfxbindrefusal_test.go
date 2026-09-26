@@ -2,7 +2,6 @@ package internal
 
 import (
 	"errors"
-
 	"testing"
 
 	"github.com/gogpu/wgpu"
@@ -119,31 +118,47 @@ func TestADeclaredGroupNothingFilledIsRefused(t *testing.T) {
 // frame (group 0) and morph (group 2) but not material (group 1) is exactly
 // that, and refusing it would drop every draw of it forever, because a refusal
 // is latched once and dropped always.
-func TestAGroupDeclaringNoEntriesIsSkipped(t *testing.T) {
+//
+// Nor can the gap be left unset: WebGPU requires every group of the pipeline
+// layout set before a draw, and an app shader putting a group 3 above a scene
+// variant that declares no group 2 broke every frame on Vulkan that way. The
+// gap is bound with an empty bind group over its empty layout, created once.
+func TestAGroupDeclaringNoEntriesIsBoundEmpty(t *testing.T) {
 	b := newGfxBackend()
 	bg := &wgpu.BindGroup{}
+	gap := &wgpu.BindGroupLayout{}
+	var created []int
 	b.bindGroups = newGfxBindGroupCache(
-		func(*wgpu.BindGroupLayout, []wgpu.BindGroupEntry) (*wgpu.BindGroup, error) {
+		func(layout *wgpu.BindGroupLayout, entries []wgpu.BindGroupEntry) (*wgpu.BindGroup, error) {
+			if layout == gap {
+				created = append(created, len(entries))
+			}
 			return bg, nil
 		},
 		func(*wgpu.BindGroup) {},
 	)
 	shader := &gfxbShader{
 		label:      "scene.wgsl",
-		bgLayouts:  []*wgpu.BindGroupLayout{{}, {}, {}},
+		bgLayouts:  []*wgpu.BindGroupLayout{{}, gap, {}},
 		groupSizes: []int{1, 0, 1},
 	}
 	b.addEntry(0, gfxbBindEntry{key: gfxbBindingKey{kind: gfxbBindBuffer, binding: 0, id: 4}})
 	b.addEntry(2, gfxbBindEntry{key: gfxbBindingKey{kind: gfxbBindBuffer, binding: 0, id: 9}})
-	// The encoder is nil, so the two groups that do bind are seeded as already
-	// bound: the redundant-bind filter suppresses their SetBindGroup calls, and
-	// what this observes is the loop's verdict rather than its encoding.
-	b.bound = []*wgpu.BindGroup{bg, nil, bg}
+	// The encoder is nil, so every group is seeded as already bound: the
+	// redundant-bind filter suppresses the SetBindGroup calls, and what this
+	// observes is the loop's verdict and the bind groups it asked for rather
+	// than its encoding.
+	b.bound = []*wgpu.BindGroup{bg, bg, bg}
 
-	if !b.flushBinds(nil, shader) {
-		t.Fatal("a group declaring no entries was refused, want it skipped")
+	for range 2 {
+		if !b.flushBinds(nil, shader) {
+			t.Fatal("a group declaring no entries was refused, want it bound empty")
+		}
 	}
 	if b.refusal != nil {
 		t.Errorf("an empty declared group was reported: %v", b.refusal)
+	}
+	if len(created) != 1 || created[0] != 0 {
+		t.Errorf("the gap's bind groups = %v entries each, want one, created once with none", created)
 	}
 }

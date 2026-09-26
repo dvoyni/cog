@@ -16,21 +16,21 @@ import (
 // distinct one into a shader and a set the first time a batch draws with it.
 type Material struct {
 	shader gfx.ShaderDescr
-	state  gfx.MaterialState
+	state  gfx.DrawState
 	params []gfx.ParameterDescr
 }
 
 // NewMaterial describes a material from a shader and its own parameters, with
-// the state gfx.Material gave: alpha blending, depth-tested and written. A
+// an opaque 3D draw's state: alpha blending, depth-tested and written. A
 // canvas material almost always wants MaterialWithState and
 // gfx.StateOverlay2D instead; see canvas.NewMaterial.
 func NewMaterial(shader gfx.ShaderDescr, params ...gfx.ParameterDescr) Material {
-	return MaterialWithState(shader, gfx.MaterialState{Blend: gfx.BlendAlpha, DepthCompare: gfx.CompareLess, DepthWrite: true}, params...)
+	return MaterialWithState(shader, gfx.DrawState{Blend: gfx.BlendAlpha, DepthCompare: gfx.CompareLess, DepthWrite: true}, params...)
 }
 
 // MaterialWithState describes a material with explicit fixed pipeline state;
 // see canvas.MaterialWithState.
-func MaterialWithState(shader gfx.ShaderDescr, state gfx.MaterialState, params ...gfx.ParameterDescr) Material {
+func MaterialWithState(shader gfx.ShaderDescr, state gfx.DrawState, params ...gfx.ParameterDescr) Material {
 	return Material{shader: shader, state: state, params: params}
 }
 
@@ -38,7 +38,7 @@ func MaterialWithState(shader gfx.ShaderDescr, state gfx.MaterialState, params .
 func (m Material) Shader() gfx.ShaderDescr { return m.shader }
 
 // State reports the material's fixed pipeline state.
-func (m Material) State() gfx.MaterialState { return m.state }
+func (m Material) State() gfx.DrawState { return m.state }
 
 // Params reports the material's own parameters. The slice aliases the
 // material's storage and must not be written to.
