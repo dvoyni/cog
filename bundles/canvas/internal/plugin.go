@@ -76,7 +76,7 @@ type frame struct {
 	lookup    *Lookup
 	// compile is CompileShaderCmd's dispatcher, which a material's first batch
 	// compiles its shader through.
-	compile func(kernel.Kernel, gfx.CompileShaderRequest) gfx.CompileShaderResponse
+	compile gfx.ShaderCompiler
 }
 
 // sprite resolves one recorded sprite to its atlas entry. A path canvas will not
@@ -203,7 +203,7 @@ func (p *plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	var viewport kernel.Read[*gfx.Viewport]
 	var filesystem kernel.Read[storage.FileSystem]
 	var lookupResource kernel.Write[*Lookup]
-	var compile func(kernel.Kernel, gfx.CompileShaderRequest) gfx.CompileShaderResponse
+	var compile gfx.ShaderCompiler
 	return func(access kernel.ResourceAccess) {
 			writeQueue = access.GetWrite[*OpQueue]()
 			gfxQueue = access.GetWrite[*gfx.OpQueue]()
@@ -224,7 +224,7 @@ func (p *plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 func (p *plugin) flushFrame(
 	k kernel.Kernel, write *OpQueue, gfxWrite *gfx.OpQueue, gfxResources *gfx.ResourceQueue,
 	view *gfx.Viewport, filesystem storage.FileSystem, lookup *Lookup,
-	compile func(kernel.Kernel, gfx.CompileShaderRequest) gfx.CompileShaderResponse,
+	compile gfx.ShaderCompiler,
 ) error {
 	defer OpQueueReset(write)
 	if !gfxResources.Ready() || view.Width <= 0 || view.Height <= 0 {

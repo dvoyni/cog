@@ -8,7 +8,8 @@
 // set it creates; the WriteableEntities that can retire one; the Get, Set and
 // Remove accessors that reach one Component of an Entity it did not iterate to;
 // the Hooks that say what happened to one Component since its last run;
-// the Read and Write handles that name another plugin's resource; the In that
+// the Read and Write handles that name another plugin's resource; the Uses that
+// dispatches a kernel Command, its locks folded into the System's; the In that
 // carries a value projected out of the event; and, for a command, the Resp it
 // answers through. ToHandler turns one into the factory an ordinary cog
 // subscription takes and ToExecute into the factory a command takes, so the ECS

@@ -186,7 +186,7 @@ Numbers fall into four classes and the difference matters:
 - **cog's, derived** — the ECS walk at **≈ 9 ns an Entity over these Components**,
   **re-taken in float64** against `ecs.md`'s ≈ 3.4 ns; scheduling at ≈ 5.7 µs a
   System, confirmed here at 5.3–6.3 µs for a frame with one System and no Bodies
-  in it; `Uses` dispatch at 1113 ns against 0.49 ns for a direct call, from
+  in it; `Uses` dispatch at ≈ 22 ns against ≈ 0.2 ns for a direct call, from
   `ecs.md` and not re-derived.
 - **Gaps** — stated as such where they appear.
 
@@ -1361,7 +1361,7 @@ structural and costs the destination's *"cp's feature set, out of the box"*.
 `DampedRotarySpring.SpringTorqueFunc` are **function pointers in what would be
 Component data**, and a Component holds no pointers, transitively, enforced at
 registration. There is no form they survive in: not as an index into a registry,
-which is a `Uses` dispatch at 1113 ns against 0.49 ns for a direct call; not as a
+which is a `Uses` dispatch at ≈ 22 ns against ≈ 0.2 ns for a direct call; not as a
 Reference.
 
 So the port keeps **cp's linear law only**: `(RestLength − dist) · Stiffness` and

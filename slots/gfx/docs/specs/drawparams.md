@@ -143,6 +143,17 @@ include that does not resolve, WGSL that does not parse), so its failure is the
 response's `Err`, never also reported, beside the zero program; the caller
 decides what a missing shader means.
 
+**A System reaches it through `ecs.Uses`, and a library takes
+`gfx.ShaderCompiler`.** A System names
+`*ecs.Uses[gfx.CompileShaderCmd, gfx.CompileShaderRequest, gfx.CompileShaderResponse]`
+and calls `Execute`; a plain handler declares `access.Uses[CompileShaderCmd]()`
+in its `Lock`. A library that compiles — model's loader, canvas's flush — takes
+neither: it takes `ShaderCompiler`, the plain
+`func(kernel.Kernel, CompileShaderRequest) CompileShaderResponse`, so it never
+sees the ECS and a test hands it a stub. Whoever passes it declared the use, and
+the lock set covering the compile is theirs.
+([#605](https://github.com/dvoyni/cog/issues/605))
+
 Reflection moves behind a **port** on the Backend the driver's Adapter fills:
 
 ```go

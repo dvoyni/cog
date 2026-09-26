@@ -130,3 +130,12 @@ type CompileShaderRequest = internal.CompileShaderRequest
 // CompileShaderResponse carries the program, or the reason there is none. A
 // failed compile leaves Program the zero value, which UploadProgram refuses.
 type CompileShaderResponse = internal.CompileShaderResponse
+
+// ShaderCompiler is how a library that compiles shaders takes the compile: a
+// plain func, so the library names neither the kernel's dispatcher nor the ECS.
+// A System passes the Execute method of its
+// ecs.Uses[CompileShaderCmd, CompileShaderRequest, CompileShaderResponse], a
+// plain handler passes what ResourceAccess.Uses[CompileShaderCmd] returns, and
+// a test passes a stub. Whoever holds it declared the use, so the lock set that
+// covers the compile is the caller's, and CompileShaderCmd's is empty.
+type ShaderCompiler = internal.ShaderCompiler
