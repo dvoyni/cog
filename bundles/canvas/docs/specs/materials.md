@@ -69,6 +69,37 @@ which is not to be merged.
 > `canvasimpl` to `bundles/canvas/internal`. It is constructed with
 > `canvasplugin.New()` and configured with `canvas.Config`, whose zero value is
 > the default.
+>
+> **Amended by [#602](https://github.com/dvoyni/cog/issues/602)**, under gfx's
+> [draw params](../../../../slots/gfx/docs/specs/drawparams.md). gfx has no
+> materials any more: a gfx draw names a durable set of draw params, and a
+> param sets a *whole* binding by its WGSL global name. Canvas keeps its API as
+> a stopgap until it is rebuilt on scene, and three things in this document
+> changed with it.
+>
+> - **The material is canvas's.** `*gfx.MaterialDescr` is `*canvas.Material`
+>   everywhere below — shader descriptor, pipeline state and own parameters,
+>   built with `canvas.NewMaterial` or `canvas.MaterialWithState`. Canvas turns
+>   each distinct one into a shader, compiled through `gfx.CompileShaderCmd` in
+>   the flush the first time a batch draws with it, and a set. The batch key and
+>   the resolution order are unchanged: the material's own parameters are its
+>   set's values, and the draw's and the scope's are the batch's version over
+>   them, first-wins by name as before. A parameter naming a binding the shader
+>   never declared is dropped by canvas, as gfx used to drop it.
+> - **The uniform block is never extended.** `CanvasUniforms` is canvas's, set
+>   whole once a batch, and every canvas material includes `uniforms.wgsl`. A
+>   material's own per-batch values are uniforms of their own in group 0 at any
+>   binding but 0 — triangles' `keyColor` is `var<uniform> keyColor: vec4<f32>`
+>   and the halo's knobs are `var<uniform> halo: HaloProfile`, set whole from
+>   `canvas.HaloProfile`. Everything below about *extending* the block, and
+>   about a material that hand-writes it and may not include `uniforms.wgsl`, is
+>   superseded by this; the include-once reasoning it rests on no longer arises.
+> - **Sets are one per material and binding shape.** A frame's version of a set
+>   carries forward whatever the next `SetDrawParams` does not change, so two
+>   batches of one material setting different bindings — a textured triangle
+>   list, then an untextured one — would leak the first's texture into the
+>   second. Keying the set on the names a batch sets, as well as the material,
+>   makes every batch of a set overwrite everything the frame changed.
 
 ---
 
@@ -91,7 +122,7 @@ there are added to `CONTEXT.md`. They were pinned because most of the rules
 below are resolution-order rules, and a resolution-order rule stated in
 interchangeable words is ambiguous.
 
-- **Canvas material** — a `*gfx.MaterialDescr` bound to a canvas draw: a shader
+- **Canvas material** — a `*canvas.Material` bound to a canvas draw: a shader
   plus pipeline state plus the parameters that belong to the material rather
   than to a draw. Canvas supplies a default per family, publishes others an app
   can name, and an app may supply its own. *Three built-ins* used to mean both
@@ -411,7 +442,7 @@ changes.**
 
 | group | what lives there | declared by |
 |---|---|---|
-| 0 | the canvas uniform block, `var<uniform> u: CanvasUniforms` | `uniforms.wgsl`, or the app when it extends the block |
+| 0 | the canvas uniform block, `var<uniform> u: CanvasUniforms`, at binding 0; a material's own uniforms at any other binding | `uniforms.wgsl`, which every material includes; the material for its own |
 | 1 | `canvasSampler` @0 and `canvasTexture` @1 — the texture a draw samples | the bindings source of its family |
 | 2 | per-sprite storage: `instances` @0, and any parameter arrays @1… | `spritebindings.wgsl`, plus the app |
 

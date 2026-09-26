@@ -20,7 +20,7 @@ type SpriteOp struct {
 	Path      string
 	Texture   gfx.TextureDescr
 	Params    []gfx.ParameterDescr
-	Material  gfx.MaterialDescr
+	Material  Material
 	Transform SpriteTransform
 	// Fingerprint is Material's batch key, taken once here beside the clone into
 	// the material arena rather than per draw at flush. It survives the clone by
@@ -45,7 +45,7 @@ type SpriteOp struct {
 
 // NamedMaterial reports the material this op named, or nil where it named none
 // and its family's slot has to supply one.
-func (op *SpriteOp) NamedMaterial() *gfx.MaterialDescr {
+func (op *SpriteOp) NamedMaterial() *Material {
 	if !op.HasMaterial {
 		return nil
 	}
@@ -59,13 +59,13 @@ type TextOp struct {
 	Draw     TextDraw
 	// Material is the clone of Draw.Material into the queue's arena, with its
 	// Fingerprint, on the same terms a sprite op's is.
-	Material    gfx.MaterialDescr
+	Material    Material
 	Fingerprint uint64
 	HasMaterial bool
 }
 
 // NamedMaterial reports the material this op named, or nil where it named none.
-func (op *TextOp) NamedMaterial() *gfx.MaterialDescr {
+func (op *TextOp) NamedMaterial() *Material {
 	if !op.HasMaterial {
 		return nil
 	}
@@ -76,7 +76,7 @@ func (op *TextOp) NamedMaterial() *gfx.MaterialDescr {
 type TrianglesOp struct {
 	Vertices    []byte
 	Params      []gfx.ParameterDescr
-	Material    gfx.MaterialDescr
+	Material    Material
 	Fingerprint uint64
 	LayoutID    int
 
@@ -91,7 +91,7 @@ type TrianglesOp struct {
 }
 
 // NamedMaterial reports the material this op named, or nil where it named none.
-func (op *TrianglesOp) NamedMaterial() *gfx.MaterialDescr {
+func (op *TrianglesOp) NamedMaterial() *Material {
 	if !op.HasMaterial {
 		return nil
 	}
@@ -263,11 +263,11 @@ func (w *OpQueue) recordSet(set MaterialSet) ScopeMaterials {
 // clone lives in the layer rather than in an op, so it is stored by value behind
 // a pointer into a per-layer cell: the layer map holds it, and nothing reallocs
 // it for the rest of the tick.
-func cloneMaterial(material *gfx.MaterialDescr, arena []gfx.ParameterDescr) (*gfx.MaterialDescr, []gfx.ParameterDescr) {
+func cloneMaterial(material *Material, arena []gfx.ParameterDescr) (*Material, []gfx.ParameterDescr) {
 	if material == nil {
 		return nil, arena
 	}
-	clone, arena := material.CloneTo(arena)
+	clone, arena := material.cloneTo(arena)
 	return &clone, arena
 }
 
@@ -282,7 +282,7 @@ func (w *OpQueue) RemoveClip() {
 	w.hasClip = false
 }
 
-func (w *OpQueue) Sprite(layerID Layer, texturePath string, transform SpriteTransform, material *gfx.MaterialDescr, params ...gfx.ParameterDescr) {
+func (w *OpQueue) Sprite(layerID Layer, texturePath string, transform SpriteTransform, material *Material, params ...gfx.ParameterDescr) {
 	op := SpriteOp{Transform: transform}
 	op.Path, op.InvalidPath = SpritePath(texturePath)
 	op.Material, op.Fingerprint, op.HasMaterial, w.materialArena = w.recordMaterial(material)
@@ -303,7 +303,7 @@ func (w *OpQueue) Sprite(layerID Layer, texturePath string, transform SpriteTran
 // size, Frame selects a pixel sub-rectangle of it, and TileX/TileY repeat it.
 // A texture that does not know its size yet - a resource path that has not
 // baked - has no natural size and draws nothing.
-func (w *OpQueue) SpriteTexture(layerID Layer, texture gfx.TextureDescr, transform SpriteTransform, material *gfx.MaterialDescr, params ...gfx.ParameterDescr) {
+func (w *OpQueue) SpriteTexture(layerID Layer, texture gfx.TextureDescr, transform SpriteTransform, material *Material, params ...gfx.ParameterDescr) {
 	op := SpriteOp{Texture: texture, HasTexture: true, Transform: transform}
 	op.Material, op.Fingerprint, op.HasMaterial, w.materialArena = w.recordMaterial(material)
 	start := len(w.paramArena)
@@ -375,11 +375,11 @@ func (w *OpQueue) Text(layerID Layer, fontPath, text string, draw TextDraw) {
 // its batch key, both at record time. A nil material takes neither: it resolves
 // to the layer's set or the built-in at flush, and each of those carries a
 // fingerprint of its own.
-func (w *OpQueue) recordMaterial(material *gfx.MaterialDescr) (gfx.MaterialDescr, uint64, bool, []gfx.ParameterDescr) {
+func (w *OpQueue) recordMaterial(material *Material) (Material, uint64, bool, []gfx.ParameterDescr) {
 	if material == nil {
-		return gfx.MaterialDescr{}, 0, false, w.materialArena
+		return Material{}, 0, false, w.materialArena
 	}
-	clone, arena := material.CloneTo(w.materialArena)
+	clone, arena := material.cloneTo(w.materialArena)
 	// The fingerprint survives the clone by design: it hashes the descriptor's
 	// content, not its address.
 	return clone, clone.Fingerprint(), true, arena
@@ -390,7 +390,7 @@ func (w *OpQueue) recordMaterial(material *gfx.MaterialDescr) (gfx.MaterialDescr
 // and the material shader's vertex inputs. Bind a texture and sampler to
 // TextureSlot/SamplerSlot (via material or params) to texture the triangles; the
 // default material samples an opaque-white texel, so output equals vertex color.
-func (w *OpQueue) DrawTriangles[TVertex VertexLayout](layerID Layer, vertices []TVertex, material *gfx.MaterialDescr, params ...gfx.ParameterDescr) {
+func (w *OpQueue) DrawTriangles[TVertex VertexLayout](layerID Layer, vertices []TVertex, material *Material, params ...gfx.ParameterDescr) {
 	w.drawTriangles(layerID, vertices, material, gfx.TextureDescr{}, false, params)
 }
 
@@ -410,7 +410,7 @@ func (w *OpQueue) DrawTriangles[TVertex VertexLayout](layerID Layer, vertices []
 // The sampler comes from TextureMaterial, whose default is clamped and linear -
 // what resampling a render target into a panel wants. Pass a SamplerParam to
 // override it.
-func (w *OpQueue) DrawTexture[TVertex VertexLayout](layerID Layer, texture gfx.TextureDescr, vertices []TVertex, material *gfx.MaterialDescr, params ...gfx.ParameterDescr) {
+func (w *OpQueue) DrawTexture[TVertex VertexLayout](layerID Layer, texture gfx.TextureDescr, vertices []TVertex, material *Material, params ...gfx.ParameterDescr) {
 	w.drawTriangles(layerID, vertices, material, texture, true, params)
 }
 
@@ -418,7 +418,7 @@ func (w *OpQueue) DrawTexture[TVertex VertexLayout](layerID Layer, texture gfx.T
 // TextureSlot ahead of the caller's own parameters, and under first-wins that
 // means the binding is canvas's: a caller who wants their own texture on their
 // own shape uses DrawTriangles instead.
-func (w *OpQueue) drawTriangles[TVertex VertexLayout](layerID Layer, vertices []TVertex, material *gfx.MaterialDescr, texture gfx.TextureDescr, unkeyed bool, params []gfx.ParameterDescr) {
+func (w *OpQueue) drawTriangles[TVertex VertexLayout](layerID Layer, vertices []TVertex, material *Material, texture gfx.TextureDescr, unkeyed bool, params []gfx.ParameterDescr) {
 	if len(vertices) < 3 || len(vertices)%3 != 0 {
 		return
 	}

@@ -1,11 +1,9 @@
 // The layer clip test, as one function.
 //
 // DECLARES: fn canvasClipped. No binding, no struct - only a read of u, which
-// module-scope order independence permits, so this is includable by extending
-// and non-extending materials alike. That is the whole reason it is its own
-// source rather than a helper inside uniforms.wgsl: the material most likely to
-// omit the test is the one that extends the block, and that one can never
-// include uniforms.wgsl.
+// module-scope order independence permits. It is its own source rather than a
+// helper inside uniforms.wgsl so that a material writing its own fs_main opts
+// in to the test by name, beside the other published pieces it includes.
 //
 // WARNING: calling it is offered, not required, and canvas cannot enforce a call
 // inside a body it does not own. SetClip and RemoveClip are implemented entirely

@@ -83,7 +83,7 @@ const (
 // texture param, so the backend's built-in white texture is used (texture id 0).
 // It must NOT carry an inline TextureWithBytes default: that would re-bake a
 // temporary texture on every draw.
-var defaultTrianglesMaterial = gfx.MaterialWithState(
+var defaultTrianglesMaterial = MaterialWithState(
 	gfx.ShaderWithResource(TrianglesShaderPath),
 	gfx.StateOverlay2D(),
 	gfx.SamplerParam(SamplerSlot, gfx.SamplerDesc{}),
@@ -96,7 +96,7 @@ var defaultTrianglesMaterial = gfx.MaterialWithState(
 // texel, which is right for artwork and silent damage to a rendered image, and
 // no key colour turns the ramp off. Like the triangle material it carries no
 // inline texture default, because that would re-bake a temporary on every draw.
-var defaultTextureMaterial = gfx.MaterialWithState(
+var defaultTextureMaterial = MaterialWithState(
 	gfx.ShaderWithResource(TextureShaderPath),
 	gfx.StateOverlay2D(),
 	gfx.SamplerParam(SamplerSlot, gfx.SamplerDesc{}),
@@ -106,7 +106,7 @@ var defaultTextureMaterial = gfx.MaterialWithState(
 // call: per-instance data comes from the "instances" storage buffer, and the
 // texture, sampler and shared uniforms are bound per draw. It is the only sprite
 // material canvas has, and a lone sprite is its one-instance case.
-var defaultSpriteMaterial = gfx.MaterialWithState(
+var defaultSpriteMaterial = MaterialWithState(
 	gfx.ShaderWithResource(SpriteShaderPath),
 	gfx.StateOverlay2D(),
 )
@@ -117,22 +117,22 @@ func DefaultKeyColor() m.Color { return defaultKeyColor }
 
 // DefaultMaterial returns the built-in sprite material; see
 // canvas.DefaultMaterial.
-func DefaultMaterial() *gfx.MaterialDescr { return &defaultSpriteMaterial }
+func DefaultMaterial() *Material { return &defaultSpriteMaterial }
 
 // DefaultTrianglesMaterial returns the built-in triangles material; see
 // canvas.DefaultTrianglesMaterial.
-func DefaultTrianglesMaterial() *gfx.MaterialDescr { return &defaultTrianglesMaterial }
+func DefaultTrianglesMaterial() *Material { return &defaultTrianglesMaterial }
 
 // TextureMaterial returns the built-in texture material; see
 // canvas.TextureMaterial.
-func TextureMaterial() *gfx.MaterialDescr { return &defaultTextureMaterial }
+func TextureMaterial() *Material { return &defaultTextureMaterial }
 
 // The three built-ins indexed by family, with their fingerprints taken once. A
 // draw that names no material of its own adopts one of these as its batch key,
 // so computing the hash per draw would be per-draw work for a value that cannot
 // change.
 var (
-	builtinMaterials = [3]*gfx.MaterialDescr{
+	builtinMaterials = [3]*Material{
 		FamilySprite:    &defaultSpriteMaterial,
 		FamilyTriangles: &defaultTrianglesMaterial,
 		FamilyTexture:   &defaultTextureMaterial,

@@ -16,7 +16,7 @@ import (
 // scope's own parameters - is per batch, because a bind group is per draw and a
 // scope's values do not vary within one.
 type spriteShading struct {
-	material    *gfx.MaterialDescr
+	material    *Material
 	fingerprint uint64
 	arrays      []gfx.ParameterDescr
 	shared      []gfx.ParameterDescr
@@ -49,7 +49,7 @@ type spriteBatch struct {
 	// collision would merge two different materials and draw the wrong one; at
 	// canvas's draw counts that is around 1e-16 a frame, and a verification
 	// branch that never runs costs more than it protects.
-	material    *gfx.MaterialDescr
+	material    *Material
 	fingerprint uint64
 
 	// arrayNames is the ordered list of per-instance parameter names every sprite
@@ -75,7 +75,9 @@ type spriteBatch struct {
 	shared    []gfx.ParameterDescr
 	sharedKey uint64
 
-	params []gfx.ParameterDescr
+	// drawer is what the batch flushes through, shared with the triangles
+	// batcher; the plugin points it at its own for the frame.
+	drawer *setDrawer
 }
 
 func (b *spriteBatch) keyMatches(texture gfx.TextureDescr, layer m.Mat4, clip m.Rect, hasClip bool, filter gfx.FilterMode, shading *spriteShading) bool {
@@ -141,28 +143,19 @@ func (b *spriteBatch) flush(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr) {
 		b.instances = b.instances[:0]
 		return
 	}
-	clipEnabled := float32(0)
-	if b.hasClip {
-		clipEnabled = 1
+	d := b.drawer
+	if d.begin(b.material, b.fingerprint) {
+		// Lowest precedence first: the scope's and the draw's shared parameters,
+		// then the per-sprite arrays, then canvas's own. See setDrawer.
+		d.addReversed(b.shared)
+		for i := range b.arrayNames {
+			d.add(gfx.BufferParam(b.arrayNames[i], gfx.BufferWithBytes(b.arrayBytes[i], true)))
+		}
+		d.add(gfx.BufferParam(instancesSlot, gfx.BufferWithBytes(spriteInstanceBytes(b.instances), true)))
+		d.add(gfx.TextureParam(TextureSlot, b.texture))
+		d.add(gfx.SamplerParam(SamplerSlot, canvasSampler(gfx.AddressClamp, gfx.AddressClamp, b.filter)))
+		d.draw(gfxWrite, b.pass, quad, len(b.instances), b.viewport, b.layer, b.clip, b.hasClip)
 	}
-	buffer := gfx.BufferWithBytes(spriteInstanceBytes(b.instances), true)
-	// Canvas's own parameters go first. Resolution is first-wins, so prepending
-	// them is what guarantees the viewport, the transform, the clip and the
-	// instance buffer against anything a caller passes; the draw's own follow,
-	// and the scope's follow those.
-	b.params = append(b.params[:0],
-		gfx.VecParam("canvasViewport", m.Vec4{X: b.viewport.X, Y: b.viewport.Y, Z: clipEnabled}),
-		gfx.MatParam("canvasLayer", b.layer),
-		gfx.VecParam("canvasClip", m.Vec4{X: b.clip.X, Y: b.clip.Y, Z: b.clip.X + b.clip.Width, W: b.clip.Y + b.clip.Height}),
-		gfx.BufferParam("instances", buffer),
-		gfx.TextureParam(TextureSlot, b.texture),
-		gfx.SamplerParam(SamplerSlot, canvasSampler(gfx.AddressClamp, gfx.AddressClamp, b.filter)),
-	)
-	for i := range b.arrayNames {
-		b.params = append(b.params, gfx.BufferParam(b.arrayNames[i], gfx.BufferWithBytes(b.arrayBytes[i], true)))
-	}
-	b.params = append(b.params, b.shared...)
-	gfxWrite.Draw(b.pass, quad, *b.material, len(b.instances), 0, b.params...)
 	b.active = false
 	b.instances = b.instances[:0]
 }
@@ -196,7 +189,7 @@ func (p *plugin) batchEntry(gfxWrite *gfx.OpQueue, surf surface, entry AtlasEntr
 // draw names is per material. Two values really are two materials, which is why
 // the key takes the parameters by value.
 type trianglesShading struct {
-	material    *gfx.MaterialDescr
+	material    *Material
 	fingerprint uint64
 	params      []gfx.ParameterDescr
 	paramsKey   uint64
@@ -227,7 +220,7 @@ type trianglesBatch struct {
 	viewport m.Vec2
 	vertices []byte
 
-	material    *gfx.MaterialDescr
+	material    *Material
 	fingerprint uint64
 	// params are the op's own parameters, stored so the flush replays them, and
 	// paramsKey is their fingerprint with values included. It comes from gfx's
@@ -237,7 +230,8 @@ type trianglesBatch struct {
 	params    []gfx.ParameterDescr
 	paramsKey uint64
 
-	scratch []gfx.ParameterDescr
+	// drawer is what the batch flushes through; see spriteBatch.drawer.
+	drawer *setDrawer
 }
 
 func (b *trianglesBatch) keyMatches(layoutID int, layer m.Mat4, clip m.Rect, hasClip bool, shading *trianglesShading) bool {
@@ -272,18 +266,12 @@ func (b *trianglesBatch) flush(gfxWrite *gfx.OpQueue) {
 		b.vertices = b.vertices[:0]
 		return
 	}
-	clipEnabled := float32(0)
-	if b.hasClip {
-		clipEnabled = 1
+	d := b.drawer
+	if d.begin(b.material, b.fingerprint) {
+		d.addReversed(b.params)
+		mesh := gfx.Mesh(gfx.BufferWithBytes(b.vertices, true), gfx.TopologyTriangleList, b.layout...)
+		d.draw(gfxWrite, b.pass, mesh, 1, b.viewport, b.layer, b.clip, b.hasClip)
 	}
-	b.scratch = append(b.scratch[:0],
-		gfx.VecParam("canvasViewport", m.Vec4{X: b.viewport.X, Y: b.viewport.Y, Z: clipEnabled}),
-		gfx.MatParam("canvasLayer", b.layer),
-		gfx.VecParam("canvasClip", m.Vec4{X: b.clip.X, Y: b.clip.Y, Z: b.clip.X + b.clip.Width, W: b.clip.Y + b.clip.Height}),
-	)
-	b.scratch = append(b.scratch, b.params...)
-	mesh := gfx.Mesh(gfx.BufferWithBytes(b.vertices, true), gfx.TopologyTriangleList, b.layout...)
-	gfxWrite.Draw(b.pass, mesh, *b.material, 1, 0, b.scratch...)
 	b.active = false
 	b.vertices = b.vertices[:0]
 }

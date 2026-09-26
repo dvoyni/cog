@@ -5,8 +5,8 @@
 // trianglesbindings.wgsl alone to write a vs_main of your own.
 //
 // The vertex input is canvas.Vertex: position, colour and uv at locations 0, 1
-// and 2. It reads u.canvasLayer and u.canvasViewport but declares neither, so an
-// extending material that hand-writes its own CanvasUniforms works unchanged.
+// and 2. It reads u.canvasLayer and u.canvasViewport but declares neither: the
+// material includes uniforms.wgsl beside it.
 //#include builtin/canvas/trianglesbindings.wgsl
 
 @vertex

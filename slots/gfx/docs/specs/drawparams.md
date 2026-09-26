@@ -498,6 +498,40 @@ out of scope here.
   `SetDrawParams`. Halo's members and triangles' `keyColor` move to bindings of
   their own.
 - **UI** draws through canvas and changes with it.
+
+**Settled here:** canvas compiles in its flush, on a material's first batch.
+The flush already holds the ResourceQueue and the storage filesystem, and
+declares `Uses[CompileShaderCmd]`, whose lock is empty, so no System's lock set
+grows; a steady-state frame finds every material in its cache and compiles
+nothing. A shader that fails to compile is reported once, under canvas's own
+key, and cached as failed, so its draws draw nothing rather than retry a frame.
+`canvas.NewMaterial` keeps `gfx.Material`'s state and `MaterialWithState` takes
+one, as the constructors they replace did.
+
+**Settled here:** canvas's sets are one per material fingerprint *and binding
+shape* — the names a batch sets, in order — rather than one per fingerprint. A
+version carries forward what the next `SetDrawParams` does not name, and canvas
+sets optional bindings per batch:
+
+```go
+q.DrawTriangles(layer, verts, nil, gfx.TextureParam(canvas.TextureSlot, grass)) // version: canvasTexture = grass
+q.DrawTriangles(layer, verts, nil)                                             // copies it: grass, not white
+```
+
+Under one shape a set, every batch of it names the same bindings and overwrites
+everything the frame changed. Shapes do not vary with values, so the sets stay
+bounded. Canvas also drops a param naming a binding the shader never declared
+before `SetDrawParams` sees it: one scope's list serves every family, and gfx
+used to drop such a name silently.
+
+**Settled here:** `CanvasUniforms` is 96 bytes, past the 64 a param carries
+inline, so `RawParameter` would allocate once a batch. `RawParameterRef[T](name,
+*T)` is `RawParameter` over a value the caller keeps: validated the same way,
+inline when it fits, and borrowed rather than copied when it does not. Every
+draw-params call copies a param's bytes before it returns, so canvas refills one
+`canvasUniforms` in its flush scratch per batch and allocates nothing. It is
+also what an app with a large per-draw record reaches for.
+
 - **Extension shaders** each declare their own uniform struct at their own
   binding: feuds' lens and three fade shaders, and nox's sight shader. The
   struct they used to extend stays its owner's, unmixed.
@@ -612,6 +646,19 @@ it. It is reconsidered with scene's materials.
   one shader and nothing tells the view what they mean, since a set keeps bytes
   and not the constructor that made them; they are reported by size, as bulk
   bytes are everywhere else in the snapshots.
+- **Canvas resetting what an earlier batch set, per batch.** A version cannot
+  hand a binding back to the set, so a reset would re-supply the material's
+  value or the binding's default — and a zero uniform of a reflected size has no
+  param to say it in. A set per binding shape needs no reset at all.
+- **A reset call on the OpQueue, restoring a set's own value to a version.** It
+  would do what canvas needs, but it is a second verb on the hot path for a
+  problem the one bundle with optional bindings solves by keying its cache.
+- **Raising the inline size to fit `CanvasUniforms`.** Every param would grow
+  by the difference, in every arena that copies params, for one struct's sake;
+  and the next record past it would allocate again.
+- **Compiling canvas's shaders at load, outside the flush.** Canvas's materials
+  are values an app builds anywhere and names at a draw; there is no load step
+  that sees them before the flush does.
 
 ---
 

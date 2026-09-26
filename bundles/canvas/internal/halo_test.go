@@ -15,15 +15,15 @@ import (
 	"github.com/gogpu/naga/spirv"
 )
 
-// Where the halo's three knobs sit inside the test backend's hand-written union
-// layout. It is one union standing in for every shader, so these are the
-// union's offsets and not the halo shader's - the real ones are asserted
-// against naga in TestTheHaloBlockIsThePublishedPrefixPlusThreeKnobs.
-const (
-	testHaloReachOffset    = 192
-	testHaloPlateauOffset  = 196
-	testHaloExponentOffset = 200
-)
+// haloProfileOf reads a profile back out of the bytes a halo binding carries,
+// which are HaloProfile's own.
+func haloProfileOf(t *testing.T, data []byte) HaloProfile {
+	t.Helper()
+	if len(data) != 12 {
+		t.Fatalf("halo binding = %d bytes, want HaloProfile's 12", len(data))
+	}
+	return HaloProfile{Reach: floatAt(data, 0), Plateau: floatAt(data, 4), Exponent: floatAt(data, 8)}
+}
 
 // The profile came off painted art rather than being guessed: 84% of the halo
 // pixels in feuds' militiaman.png are exactly #ae9f8d, with alpha holding near
@@ -37,45 +37,34 @@ func TestDefaultHaloProfileIsTheProfileMeasuredOffTheArt(t *testing.T) {
 	}
 }
 
-// The set carries the whole profile as per-batch parameters on its Params,
-// which is the only frequency the knobs have: every valued parameter
-// constructor sets HasValue, and shadeSprite sends a draw's valued parameter to
-// the per-sprite arrays while appending a scope's to shared. Two reaches are two
-// scopes.
+// The set carries the whole profile as one per-batch parameter on its Params,
+// which is the only frequency it has: every valued parameter constructor sets
+// HasValue, and shadeSprite sends a draw's valued parameter to the per-sprite
+// arrays while keeping a scope's for the batch. Two reaches are two scopes.
 func TestTheHaloSetCarriesTheWholeProfilePerBatch(t *testing.T) {
-	set := HaloMaterialSet(HaloProfile{Reach: 12, Plateau: 0.25, Exponent: 2})
-	want := map[string]float32{"haloReach": 12, "haloPlateau": 0.25, "haloExponent": 2}
-	got := map[string]float32{}
-	for _, param := range set.Params {
-		value, ok := param.FloatValue()
-		if !ok {
-			t.Fatalf("parameter %q is not a float; a knob that is not a value cannot be per batch", param.Name())
-		}
-		if !param.HasValue() {
-			t.Fatalf("parameter %q carries no value", param.Name())
-		}
-		got[param.Name()] = value
+	profile := HaloProfile{Reach: 12, Plateau: 0.25, Exponent: 2}
+	set := HaloMaterialSet(profile)
+	if len(set.Params) != 1 || set.Params[0].Name() != HaloSlot || !set.Params[0].HasValue() {
+		t.Fatalf("set parameters = %+v, want the one %q value", set.Params, HaloSlot)
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("set parameters = %v, want %v", got, want)
+	data, _ := set.Params[0].AppendValue(nil)
+	if got := haloProfileOf(t, data); got != profile {
+		t.Fatalf("set profile = %+v, want %+v", got, profile)
 	}
 }
 
-// A complete profile, never a struct emitting a parameter per non-zero field:
-// Plateau 0 is a legitimate value - no plateau, pure falloff - that a sentinel
-// would read as the default.
+// A complete profile, never a parameter per non-zero field: Plateau 0 is a
+// legitimate value - no plateau, pure falloff - that a sentinel would read as
+// the default.
 func TestAZeroPlateauReachesTheShaderAsZero(t *testing.T) {
-	set := HaloMaterialSet(HaloProfile{Reach: 6, Plateau: 0, Exponent: 1})
-	for _, param := range set.Params {
-		if param.Name() != "haloPlateau" {
-			continue
-		}
-		if value, _ := param.FloatValue(); value != 0 {
-			t.Fatalf("haloPlateau = %v, want the zero the caller asked for", value)
-		}
-		return
+	k, _, backend := testKernel(t, fstest.MapFS{}, haloConfig(), func(write *OpQueue) {
+		write.FillRect(0, m.Rect{Width: 8, Height: 8}, ShapeDraw{Color: m.Color{R: 1, A: 1}})
+		write.SetLayerMaterial(0, HaloMaterialSet(HaloProfile{Reach: 6, Plateau: 0, Exponent: 1}))
+	})
+	runFrame(k)
+	if got := haloProfileOf(t, backend.uniformOf(0, HaloSlot)); got.Plateau != 0 || got.Reach != 6 {
+		t.Fatalf("bound profile = %+v, want the zero plateau the caller asked for", got)
 	}
-	t.Fatal("the set carries no haloPlateau; a zero field was dropped rather than sent")
 }
 
 // Triangles and Texture stay nil, so a DrawTriangles recorded on the halo layer
@@ -91,10 +80,10 @@ func TestTheHaloSetLeavesTheOtherTwoFamiliesAlone(t *testing.T) {
 	}
 }
 
-// The material is a singleton whose parameters are baked at construction, and
-// MaterialDescr.Fingerprint hashes those parameters. Two sets at two profiles
-// must therefore name the same material and differ only in their scope
-// parameters - otherwise every profile would be a second pipeline.
+// The material is a singleton whose parameter is baked at construction, and
+// Material.Fingerprint hashes it. Two sets at two profiles must therefore name
+// the same material and differ only in their scope parameters - otherwise
+// every profile would be a second set.
 func TestEveryHaloSetNamesOneMaterialAtOneFingerprint(t *testing.T) {
 	wide := HaloMaterialSet(HaloProfile{Reach: 30, Plateau: 0.5, Exponent: 3})
 	narrow := HaloMaterialSet(DefaultHaloProfile())
@@ -106,9 +95,9 @@ func TestEveryHaloSetNamesOneMaterialAtOneFingerprint(t *testing.T) {
 	}
 }
 
-// The defaults live on the material's own parameters, because parameterRefFor
-// searches the draw's first and the material's second - so the material's are
-// defaults a scope overrides by name. This is what makes a hand-assembled set
+// The default lives on the material's own parameter, which is its set's own
+// value, and a scope's is the frame's version over it - so the material's is a
+// default a scope overrides by name. This is what makes a hand-assembled set
 // with no parameters render at reach 6 rather than rendering nothing.
 func TestAHandAssembledHaloSetRendersAtTheMaterialsOwnDefaults(t *testing.T) {
 	bare := MaterialSet{Sprite: HaloMaterialSet(DefaultHaloProfile()).Sprite}
@@ -120,30 +109,25 @@ func TestAHandAssembledHaloSetRendersAtTheMaterialsOwnDefaults(t *testing.T) {
 	if len(backend.drawParams) != 1 {
 		t.Fatalf("draws = %d, want 1", len(backend.drawParams))
 	}
-	if got := floatAt(backend.drawParams[0], testHaloReachOffset); got != DefaultHaloReach {
-		t.Fatalf("haloReach = %v, want the material's own default %v", got, DefaultHaloReach)
-	}
-	if got := floatAt(backend.drawParams[0], testHaloPlateauOffset); got != DefaultHaloPlateau {
-		t.Fatalf("haloPlateau = %v, want %v", got, DefaultHaloPlateau)
+	if got := haloProfileOf(t, backend.uniformOf(0, HaloSlot)); got != DefaultHaloProfile() {
+		t.Fatalf("bound profile = %+v, want the material's own default %+v", got, DefaultHaloProfile())
 	}
 }
 
 // And a scope that names a profile overrides those defaults by name, which is
 // the whole of how a caller says how wide the band is.
 func TestAScopesProfileOverridesTheMaterialsDefaults(t *testing.T) {
+	profile := HaloProfile{Reach: 12, Plateau: 0.25, Exponent: 2}
 	k, _, backend := testKernel(t, fstest.MapFS{}, haloConfig(), func(write *OpQueue) {
 		write.FillRect(0, m.Rect{Width: 8, Height: 8}, ShapeDraw{Color: m.Color{R: 1, A: 1}})
-		write.SetLayerMaterial(0, HaloMaterialSet(HaloProfile{Reach: 12, Plateau: 0.25, Exponent: 2}))
+		write.SetLayerMaterial(0, HaloMaterialSet(profile))
 	})
 	runFrame(k)
 	if len(backend.drawParams) != 1 {
 		t.Fatalf("draws = %d, want 1", len(backend.drawParams))
 	}
-	if got := floatAt(backend.drawParams[0], testHaloReachOffset); got != 12 {
-		t.Fatalf("haloReach = %v, want the scope's 12", got)
-	}
-	if got := floatAt(backend.drawParams[0], testHaloExponentOffset); got != 2 {
-		t.Fatalf("haloExponent = %v, want the scope's 2", got)
+	if got := haloProfileOf(t, backend.uniformOf(0, HaloSlot)); got != profile {
+		t.Fatalf("bound profile = %+v, want the scope's %+v", got, profile)
 	}
 }
 
@@ -224,26 +208,23 @@ func TestHaloShaderParses(t *testing.T) {
 	assertBuiltinShaderLowers(t, HaloShaderPath)
 }
 
-// The halo extends the uniform block with its three knobs, which is the
-// mechanism a custom material declares per-batch parameters with. The canvas
-// prefix has to stay exactly what uniforms.wgsl declares, because an appended
-// member after a drifted prefix is silently misaddressed.
-func TestTheHaloBlockIsThePublishedPrefixPlusThreeKnobs(t *testing.T) {
-	want := []struct {
-		name   string
-		offset uint32
-	}{
-		{"canvasViewport", 0}, {"canvasLayer", 16}, {"canvasClip", 80},
-		{"haloReach", 96}, {"haloPlateau", 100}, {"haloExponent", 104},
-	}
-	members := uniformBlockMembers(t, lowerBuiltinShader(t, HaloShaderPath))
-	if len(members) != len(want) {
-		t.Fatalf("the halo block has %d members, want %d: %+v", len(members), len(want), members)
+// The halo's profile is set whole as one HaloProfile, so the WGSL struct and the
+// Go one are one layout for the same reason the canvas block is.
+func TestTheHaloBindingMatchesHaloProfile(t *testing.T) {
+	module := lowerBuiltinShader(t, HaloShaderPath)
+	goType := reflect.TypeFor[HaloProfile]()
+	members := uniformMembers(t, module, HaloSlot)
+	if len(members) != goType.NumField() {
+		t.Fatalf("halo profile has %d members, want HaloProfile's %d", len(members), goType.NumField())
 	}
 	for i, member := range members {
-		if member.Name != want[i].name || member.Offset != want[i].offset {
-			t.Fatalf("member %d = %q@%d, want %q@%d", i, member.Name, member.Offset, want[i].name, want[i].offset)
+		field := goType.Field(i)
+		if !strings.EqualFold(member.Name, field.Name) || int(member.Offset) != int(field.Offset) {
+			t.Fatalf("halo member %d = %q@%d, want HaloProfile.%s@%d", i, member.Name, member.Offset, field.Name, field.Offset)
 		}
+	}
+	if size := uniformSize(t, module, HaloSlot); size != int(goType.Size()) {
+		t.Fatalf("halo profile is %d bytes, want HaloProfile's %d", size, goType.Size())
 	}
 }
 
@@ -374,12 +355,12 @@ func TestTheHaloDoesNotIncludeTheKeyColourRamp(t *testing.T) {
 	}
 }
 
-// Groups are numbered by what a binding is, and the halo binds exactly what the
-// built-in sprite material binds: it declares no parameter array of its own and
-// claims nothing in group 3.
+// Groups are numbered by what a binding is, and the halo binds what the
+// built-in sprite material binds plus its own profile in group 0: it declares no
+// parameter array of its own and claims nothing in group 3.
 func TestTheHaloNumbersItsGroupsByKind(t *testing.T) {
 	want := map[string][2]uint32{
-		"u": {0, 0}, "canvasSampler": {1, 0}, "canvasTexture": {1, 1}, "instances": {2, 0},
+		"u": {0, 0}, "halo": {0, 1}, "canvasSampler": {1, 0}, "canvasTexture": {1, 1}, "instances": {2, 0},
 	}
 	seen := map[string][2]uint32{}
 	for _, variable := range lowerBuiltinShader(t, HaloShaderPath).GlobalVariables {

@@ -8,8 +8,8 @@
 // read that selects the record are part of the contract: canvas draws a unit
 // quad instanced, and a lone sprite is the one-instance case.
 //
-// It reads u.canvasLayer and u.canvasViewport but declares neither, so an
-// extending material that hand-writes its own CanvasUniforms works unchanged.
+// It reads u.canvasLayer and u.canvasViewport but declares neither: the
+// material includes uniforms.wgsl beside it.
 //#include builtin/canvas/spritebindings.wgsl
 
 @vertex

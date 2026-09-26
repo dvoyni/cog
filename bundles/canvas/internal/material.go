@@ -1,6 +1,77 @@
 package internal
 
-import "github.com/dvoyni/cog/slots/gfx"
+import (
+	"hash/maphash"
+
+	"github.com/dvoyni/cog/slots/gfx"
+)
+
+// Material is how a canvas draw shades: a shader descriptor, the fixed pipeline
+// state it draws with, and its own parameters - the defaults a draw's and a
+// scope's parameters override by name. See canvas.Material.
+//
+// It is canvas's rather than gfx's because gfx no longer has materials: a gfx
+// draw names a durable set of draw params, created once. Canvas keeps this
+// descriptor as its public shape until it is rebuilt on scene, and turns each
+// distinct one into a shader and a set the first time a batch draws with it.
+type Material struct {
+	shader gfx.ShaderDescr
+	state  gfx.MaterialState
+	params []gfx.ParameterDescr
+}
+
+// NewMaterial describes a material from a shader and its own parameters, with
+// the state gfx.Material gave: alpha blending, depth-tested and written. A
+// canvas material almost always wants MaterialWithState and
+// gfx.StateOverlay2D instead; see canvas.NewMaterial.
+func NewMaterial(shader gfx.ShaderDescr, params ...gfx.ParameterDescr) Material {
+	return MaterialWithState(shader, gfx.MaterialState{Blend: gfx.BlendAlpha, DepthCompare: gfx.CompareLess, DepthWrite: true}, params...)
+}
+
+// MaterialWithState describes a material with explicit fixed pipeline state;
+// see canvas.MaterialWithState.
+func MaterialWithState(shader gfx.ShaderDescr, state gfx.MaterialState, params ...gfx.ParameterDescr) Material {
+	return Material{shader: shader, state: state, params: params}
+}
+
+// Shader reports the shader the material shades with.
+func (m Material) Shader() gfx.ShaderDescr { return m.shader }
+
+// State reports the material's fixed pipeline state.
+func (m Material) State() gfx.MaterialState { return m.state }
+
+// Params reports the material's own parameters. The slice aliases the
+// material's storage and must not be written to.
+func (m Material) Params() []gfx.ParameterDescr { return m.params }
+
+// materialSeed is fixed for the process: a fingerprint compares only against
+// others taken in the same process, which is all a batch key and the set cache
+// need.
+var materialSeed = maphash.MakeSeed()
+
+// Fingerprint hashes everything that makes one material different from
+// another: the shader by its whole descriptor, supply included, the pipeline
+// state, and the parameters in order by name, kind and value, under
+// gfx.FingerprintParams's rules. It is both the batch key a material
+// contributes and the key of the set canvas draws it through, so two materials
+// that fingerprint alike are one set.
+func (m *Material) Fingerprint() uint64 {
+	var h maphash.Hash
+	h.SetSeed(materialSeed)
+	maphash.WriteComparable(&h, m.shader)
+	maphash.WriteComparable(&h, m.state)
+	maphash.WriteComparable(&h, gfx.FingerprintParams(m.params))
+	return h.Sum64()
+}
+
+// cloneTo snapshots the material's parameters into arena, so a caller mutating
+// theirs afterwards does not change what was recorded.
+func (m Material) cloneTo(arena []gfx.ParameterDescr) (Material, []gfx.ParameterDescr) {
+	start := len(arena)
+	arena = append(arena, m.params...)
+	m.params = arena[start:]
+	return m, arena
+}
 
 // Family is sprite or triangles or texture: which built-in a draw replaces.
 //
@@ -32,7 +103,7 @@ const (
 // whole-cloth requirement, and an entirely zero set is the built-ins - which is
 // what a scope that names none has.
 //
-// One parameter list serves all three slots because gfx drops a name the bound
+// One parameter list serves all three slots because canvas drops a name the bound
 // shader never declared, so a single fade amount reaches the sprite, triangles
 // and texture shaders without being written three times. The parameters travel
 // with the set rather than living on the material because one material set at
@@ -40,15 +111,15 @@ const (
 // different amounts, and mutating a shared material can only ever express one of
 // them.
 type MaterialSet struct {
-	Sprite    *gfx.MaterialDescr
-	Triangles *gfx.MaterialDescr
-	Texture   *gfx.MaterialDescr
+	Sprite    *Material
+	Triangles *Material
+	Texture   *Material
 	Params    []gfx.ParameterDescr
 }
 
 // slot reports the material this set supplies for one family, or nil where it
 // keeps the built-in.
-func (s *MaterialSet) slot(f Family) *gfx.MaterialDescr {
+func (s *MaterialSet) slot(f Family) *Material {
 	switch f {
 	case FamilySprite:
 		return s.Sprite
@@ -92,7 +163,7 @@ func (l *ScopeMaterials) Has() bool { return l.has }
 // a draw that has said what it wants takes neither. The alternative - scope
 // parameters always applying - turns a layer into a general parameter-injection
 // channel, which is not what a material set is.
-func (l *ScopeMaterials) Resolve(f Family, draw *gfx.MaterialDescr, drawKey uint64) (material *gfx.MaterialDescr, key uint64, scopeParams []gfx.ParameterDescr) {
+func (l *ScopeMaterials) Resolve(f Family, draw *Material, drawKey uint64) (material *Material, key uint64, scopeParams []gfx.ParameterDescr) {
 	if draw != nil {
 		return draw, drawKey, nil
 	}

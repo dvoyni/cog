@@ -233,7 +233,7 @@ func opViewOf(index int, op Op, expand bool) OpView {
 		view.Clip = m.Some(rectViewOf(op.Clip))
 	}
 	if op.HasMaterial {
-		material := gfx.MaterialViewOf(op.Material)
+		material := MaterialViewOf(op.Material)
 		view.Material = &material
 	}
 	if op.HasTexture {

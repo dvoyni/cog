@@ -30,24 +30,21 @@
 //
 // The two branches are indistinguishable at the seam.
 
-// The canvas prefix of the uniform block, then this material's own three knobs.
-// An extending material hand-writes these lines and must NOT include
-// uniforms.wgsl: include-once by resolved path would have declared the struct
-// already, and WGSL has no way to add a member to a struct declared elsewhere.
+// The canvas block, then this material's own three knobs as a uniform of their
+// own. HaloProfile is mirrored field for field by canvas.HaloProfile, which is
+// set whole as the one parameter halo.
 //
-// All three are per batch and arrive on the scope's MaterialSet.Params. They
-// cannot be named at a draw: every valued parameter constructor sets HasValue,
-// and a draw's valued parameter goes to the per-sprite storage arrays while a
-// scope's is appended to the shared list. Two reaches are two scopes.
-struct CanvasUniforms {
-    canvasViewport: vec4<f32>,
-    canvasLayer: mat4x4<f32>,
-    canvasClip: vec4<f32>,
-    haloReach: f32,     // how far the band extends, in layer-local world units
-    haloPlateau: f32,   // the fraction of the band that holds flat before the falloff
-    haloExponent: f32,  // the shape of that falloff
+// It is per batch and arrives on the scope's MaterialSet.Params. It cannot be
+// named at a draw: every valued parameter constructor sets HasValue, and a
+// draw's valued parameter goes to the per-sprite storage arrays while a scope's
+// is the batch's. Two reaches are two scopes.
+//#include builtin/canvas/uniforms.wgsl
+struct HaloProfile {
+    reach: f32,     // how far the band extends, in layer-local world units
+    plateau: f32,   // the fraction of the band that holds flat before the falloff
+    exponent: f32,  // the shape of that falloff
 };
-@group(0) @binding(0) var<uniform> u: CanvasUniforms;
+@group(0) @binding(1) var<uniform> halo: HaloProfile;
 
 //#include builtin/canvas/spritebindings.wgsl
 //#include builtin/canvas/clip.wgsl
@@ -86,9 +83,9 @@ const haloTau: f32 = 6.2831853;
 // band and then falls away almost exactly linearly. A plain pow(1 - t, k) from
 // the ink outward does not match painted art.
 fn haloFalloff(t: f32) -> f32 {
-    let plateau = clamp(u.haloPlateau, 0.0, 0.99);
+    let plateau = clamp(halo.plateau, 0.0, 0.99);
     let x = clamp((clamp(t, 0.0, 1.0) - plateau) / (1.0 - plateau), 0.0, 1.0);
-    return pow(1.0 - x, max(u.haloExponent, 0.001));
+    return pow(1.0 - x, max(halo.exponent, 0.001));
 }
 
 @vertex
@@ -103,7 +100,7 @@ fn vs_main(@location(0) quad: vec2<f32>, @builtin(instance_index) instance: u32)
     // Nothing in canvas reads a sprite's extent - no clip intersection, no
     // batch-key field, no culling of any kind - so a quad larger than the sprite
     // is simply drawn. That is what makes this legal without a contract change.
-    let grow = vec2<f32>(max(u.haloReach, 0.0)) / size;
+    let grow = vec2<f32>(max(halo.reach, 0.0)) / size;
     let expanded = quad + (quad * 2.0 - 1.0) * grow;
 
     let origin = s.transform1.xy;
@@ -148,7 +145,7 @@ fn fs_main(in: HaloVertexOut) -> @location(0) vec4<f32> {
     let lo = min(s.frame.xy, s.frame.zw);
     let hi = max(s.frame.xy, s.frame.zw);
     let span = hi - lo;
-    let reach = max(u.haloReach, 0.0001);
+    let reach = max(halo.reach, 0.0001);
 
     var coverage = 0.0;
     if span.x <= 0.0 || span.y <= 0.0 {

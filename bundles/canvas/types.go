@@ -92,6 +92,30 @@ type LookupDeviceAccess = internal.LookupDeviceAccess
 // pixels, for baseline placement and inline-icon alignment.
 type FontMetrics = internal.FontMetrics
 
+// Material is how a canvas draw shades: a shader descriptor, the fixed pipeline
+// state it draws with, and its own parameters, which a draw's and a scope's
+// parameters override by name. Build one with NewMaterial or MaterialWithState,
+// once, and pass its address to the draws and material sets that shade with it.
+//
+// Canvas turns each distinct material into a gfx shader and a durable set of
+// draw params the first time a batch draws with it - compiling the shader
+// through gfx.CompileShaderCmd inside canvas's flush - and draws every batch
+// after through that set, with the batch's own values as the frame's version of
+// it. The material's own parameters are baked into the set, so a material is
+// keyed by its values too: one rebuilt every frame at a changing value is a new
+// set every frame. A value that changes belongs on the draw or the scope.
+//
+// A parameter binds a whole shader binding by its WGSL global name, and one
+// naming a binding the material's shader never declared is dropped. Canvas's
+// own block is u, at @group(0) @binding(0), which canvas fills; a material's
+// own values are uniforms of their own. docs/specs/materials.md carries the
+// contract a custom shader is written against.
+type Material = internal.Material
+
+// MaterialView is one material as a draws snapshot renders it: its shader, its
+// pipeline state with the enums named, and its own parameters.
+type MaterialView = internal.MaterialView
+
 // MaterialSet is the shading a scope - the queue, a layer, a ui.Frame or a ui
 // element subtree - supplies to the draws beneath it that name none of their
 // own: one material per family (Sprite, Triangles, Texture), plus one parameter
@@ -100,7 +124,7 @@ type FontMetrics = internal.FontMetrics
 // A scope names a set rather than a material because a layer is never one
 // family: every interesting layer carries sprites and triangles, and the two can
 // never be one shader. A nil slot keeps its built-in, so an entirely zero set is
-// the built-ins. One parameter list serves all three slots because gfx drops a
+// the built-ins. One parameter list serves all three slots because canvas drops a
 // name the bound shader never declared. docs/specs/materials.md carries the
 // whole reasoning.
 type MaterialSet = internal.MaterialSet
@@ -149,9 +173,9 @@ const (
 
 const (
 	// UniformsPath declares struct CanvasUniforms and the group 0 binding.
-	// Include it only if you are NOT extending the block: an extending material
-	// hand-writes those six lines, which is exactly why the block is its own
-	// source.
+	// Every canvas material includes it: canvas fills u whole, once a batch, and
+	// a material declares its own values as uniforms of their own beside it,
+	// never as members of this one.
 	UniformsPath = internal.UniformsPath
 	// ClipPath declares canvasClipped, and nothing else. Calling it is offered
 	// rather than required, and a hand-written fs_main that omits it draws
@@ -197,7 +221,7 @@ const (
 // instance buffer for the instanced draw.
 //
 // The record is frozen. A custom sprite material may replace both entry points
-// and append members to the uniform block, but it may not change this: the Go
+// and declare uniforms of its own, but it may not change this: the Go
 // struct is hand-mirrored against the WGSL one and uploaded by direct
 // reinterpretation, so a divergence is a silent misread rather than a compile
 // error. TestSpriteInstanceMatchesTheShaderRecord is what catches it.

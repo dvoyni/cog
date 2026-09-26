@@ -127,6 +127,17 @@ func RawParameter[T any](name string, value T) ParameterDescr {
 	return descriptors.RawParameter[T](name, value)
 }
 
+// RawParameterRef is RawParameter over a value the caller keeps: validated
+// the same way, but a record larger than sixty-four bytes is borrowed rather
+// than copied, so the call it is handed to must read it before the caller
+// changes it. NewDrawParams, UpdateDrawParams and SetDrawParams copy a param's
+// bytes before they return, which is what lets a record refilled per batch and
+// set through SetDrawParams cost no allocation. value must outlive the call:
+// the address of a local escapes to the heap.
+func RawParameterRef[T any](name string, value *T) ParameterDescr {
+	return descriptors.RawParameterRef[T](name, value)
+}
+
 // Material describes a material from a shader and its named parameters. It
 // depth-tests and writes, which is what an opaque draw wants; a draw that wants
 // anything else names its state through MaterialWithState.

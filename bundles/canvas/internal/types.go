@@ -167,7 +167,7 @@ type TextDraw struct {
 	// Text already spends both reserved names: Color becomes the instance tint
 	// and glyphs carry the default key colour, so a text material may not
 	// reclaim TintSlot or KeyColorSlot.
-	Material *gfx.MaterialDescr
+	Material *Material
 	Params   []gfx.ParameterDescr
 }
 
@@ -190,7 +190,7 @@ type TextDraw struct {
 type ShapeDraw struct {
 	Color     m.Color
 	Thickness float32
-	Material  *gfx.MaterialDescr
+	Material  *Material
 	Params    []gfx.ParameterDescr
 }
 
@@ -205,9 +205,9 @@ func (d ShapeDraw) tint() m.Color {
 
 const (
 	// UniformsPath declares struct CanvasUniforms and the group 0 binding.
-	// Include it only if you are NOT extending the block: an extending material
-	// hand-writes those six lines, which is exactly why the block is its own
-	// source.
+	// Every canvas material includes it: canvas fills u whole, once a batch, and
+	// a material declares its own values as uniforms of their own beside it,
+	// never as members of this one.
 	UniformsPath = "builtin/canvas/uniforms.wgsl"
 	// ClipPath declares canvasClipped, and nothing else. Calling it is offered
 	// rather than required, and a hand-written fs_main that omits it draws
@@ -237,7 +237,7 @@ const (
 // instance buffer for the instanced draw.
 //
 // The record is frozen. A custom sprite material may replace both entry points
-// and append members to the uniform block, but it may not change this: the Go
+// and declare uniforms of its own, but it may not change this: the Go
 // struct is hand-mirrored against the WGSL one and uploaded by direct
 // reinterpretation, so a divergence is a silent misread rather than a compile
 // error. TestSpriteInstanceMatchesTheShaderRecord is what catches it.
@@ -363,7 +363,7 @@ type OpView struct {
 	// Material is the material the op named, and its absence means the op named
 	// none: such a draw resolves to the layer's material set and then to the
 	// built-in for its family, both at flush.
-	Material *gfx.MaterialView `json:"material,omitempty"`
+	Material *MaterialView `json:"material,omitempty"`
 	// Params are the parameters recorded with the op, each carrying the live
 	// arm of its union and nothing else.
 	Params []gfx.ParameterView `json:"params,omitempty"`
@@ -437,4 +437,22 @@ type RectView struct {
 	Y      float32 `json:"y"`
 	Width  float32 `json:"width"`
 	Height float32 `json:"height"`
+}
+
+// MaterialView is one canvas material as an agent reads it: its shader, its
+// pipeline state with the enums named, and its own parameters. It is the shape
+// gfx's material view had, kept by canvas now that the material is canvas's.
+type MaterialView struct {
+	Shader     gfx.ShaderView      `json:"shader"`
+	State      gfx.DrawStateView   `json:"state"`
+	Parameters []gfx.ParameterView `json:"parameters,omitempty"`
+}
+
+// MaterialViewOf renders one material.
+func MaterialViewOf(material Material) MaterialView {
+	return MaterialView{
+		Shader:     gfx.ShaderViewOf(material.shader),
+		State:      gfx.DrawStateViewOf(material.state),
+		Parameters: gfx.ParameterViewsOf(material.params),
+	}
 }
