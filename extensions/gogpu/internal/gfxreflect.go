@@ -30,9 +30,15 @@ func reflectShaderLayout(source string) (gfx.ShaderLayout, error) {
 	return shaderLayoutFrom(mod)
 }
 
-// shaderLayoutFrom extracts every uniform block and storage struct, each
-// with its member layout, and every texture and sampler binding from a lowered
-// module.
+// shaderLayoutFrom extracts every uniform and storage binding, whatever type it
+// is declared at - a struct's with its member layout - and every texture and
+// sampler binding from a lowered module.
+//
+// A buffer binding is told by its address space rather than its type. A
+// uniform may be a bare vec4f or mat4x4f and a storage binding a bare
+// array<T>, and each is a binding the pipeline layout has to declare and a
+// param has to be able to name; reading only the struct-typed ones would leave
+// them out of both.
 func shaderLayoutFrom(mod *ir.Module) (gfx.ShaderLayout, error) {
 	var layout gfx.ShaderLayout
 	for _, gv := range mod.GlobalVariables {
@@ -40,26 +46,25 @@ func shaderLayoutFrom(mod *ir.Module) (gfx.ShaderLayout, error) {
 			continue
 		}
 		group, binding := int(gv.Binding.Group), int(gv.Binding.Binding)
-		switch inner := mod.Types[gv.Type].Inner.(type) {
-		case ir.StructType:
-			if gv.Space == ir.SpaceStorage {
-				kind := gfx.ResourceStorageBuffer
-				if gv.Access == ir.StorageReadWrite {
-					kind |= gfx.ResourceWritable
-				}
-				layout.Resources = append(layout.Resources, gfx.ShaderResource{
-					Name: gv.Name, Kind: kind,
-					Group: group, Binding: binding, Members: storageMembers(mod, inner),
-				})
-				continue
-			}
-			if gv.Space != ir.SpaceUniform {
-				continue
+		switch gv.Space {
+		case ir.SpaceStorage:
+			kind := gfx.ResourceStorageBuffer
+			if gv.Access == ir.StorageReadWrite {
+				kind |= gfx.ResourceWritable
 			}
 			layout.Resources = append(layout.Resources, gfx.ShaderResource{
-				Name: gv.Name, Kind: gfx.ResourceUniformBuffer, Group: group, Binding: binding,
-				Size: int(inner.Span), Members: storageMembers(mod, inner),
+				Name: gv.Name, Kind: kind,
+				Group: group, Binding: binding, Members: bufferMembers(mod, gv.Type),
 			})
+			continue
+		case ir.SpaceUniform:
+			layout.Resources = append(layout.Resources, gfx.ShaderResource{
+				Name: gv.Name, Kind: gfx.ResourceUniformBuffer, Group: group, Binding: binding,
+				Size: int(ir.TypeSize(mod, gv.Type)), Members: bufferMembers(mod, gv.Type),
+			})
+			continue
+		}
+		switch inner := mod.Types[gv.Type].Inner.(type) {
 		case ir.ImageType:
 			view := gfx.TextureView2D
 			if inner.Dim == ir.Dim2D && inner.Arrayed {
@@ -170,6 +175,15 @@ func vertexScalar(kind ir.ScalarKind) gfx.VertexScalar {
 		return gfx.VertexScalarSint
 	}
 	return gfx.VertexScalarNone
+}
+
+// bufferMembers is the member layout of a buffer binding declared at a struct,
+// and nothing for one declared at any other type.
+func bufferMembers(mod *ir.Module, typ ir.TypeHandle) []gfx.StorageMember {
+	if structure, ok := mod.Types[typ].Inner.(ir.StructType); ok {
+		return storageMembers(mod, structure)
+	}
+	return nil
 }
 
 // storageMembers walks one level of a storage struct. An array member carries

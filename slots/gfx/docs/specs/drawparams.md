@@ -211,6 +211,14 @@ from an OpQueue lives one frame; a set outliving it would bind a stale id.
 Inline bytes a param carries — `TextureWithBytes`, an inline buffer — are baked
 into durable ids that the set owns and that `ReleaseDrawParams` frees.
 
+**Settled here:** a durable id is one the ResourceQueue minted — `NewBuffer`,
+`NewTexture`, `NewRenderTarget`, or a bake of a set's own — and the queue keeps
+one bit an id to say so; any other id is refused as a temporary. A texture named
+by path is neither, and is kept: the set holds the path, interned, and the
+render thread's texture cache resolves it as it resolves every path. Canvas's
+materials name their sprites by path, and a set that refused one would have to
+load the file itself.
+
 `UpdateDrawParams` changes the set's own values and persists. Because the
 ResourceQueue is consumed by whichever render comes next, a durable update is
 for material-rate changes — a swapped texture, a tint, a value an editor
@@ -252,6 +260,18 @@ ordinary WGSL practice and it is what keeps a frame's version small.
 module cannot declare two, so the only check a name needs is that the binding
 exists.
 
+**Settled here:** a bytes param of up to 64 bytes — every typed constructor's,
+and a small `RawParameter` — carries its value inside the descriptor, so a param
+built per draw allocates nothing. The bytes remember which constructor built
+them, which binding never reads: it is what keeps `ColorValue` and its siblings
+answering, and a snapshot naming a param a color rather than bytes.
+
+**Settled here:** reflection names every buffer binding by its address space,
+whatever type it is declared at. A bare `var<uniform> tint: vec4f` is a uniform
+with its size, and a bare `var<storage> models: array<mat4x4f>` a storage buffer;
+reading only the struct-typed ones left them out of the pipeline layout and out
+of every set's binding table.
+
 ---
 
 ## The frame's version of a set
@@ -278,8 +298,9 @@ q.Draw(passB, mesh, set, 1, 0) // passB may run before passA
 
 So a change makes a **version**, copy-on-write, per binding:
 
-1. the set's current binding table is copied — a few dozen bytes per binding,
-   pointer-free — into the frame's arena;
+1. the version's binding table is made in the frame's arena — a few dozen
+   bytes per binding, pointer-free — copied from the version the draws so far
+   captured, or empty for the set's first version this frame;
 2. each uniform binding the call names gets its new bytes in the frame's byte
    arena, and its slot points there; bindings it does not name keep pointing at
    the bytes they had, shared rather than copied;
@@ -289,6 +310,17 @@ So a change makes a **version**, copy-on-write, per binding:
 A version no draw has captured yet is patched in place rather than copied
 again, so several Systems each setting a few bindings before the draws pay one
 copy. Draws with no change between them share a version.
+
+**Settled here:** a version holds only what the frame changed. An empty slot is
+the set's own, and the translator reads it from the set as the render finds it,
+which is what "shared rather than copied" comes to once the set's values live
+where only the render reads them. `SetDrawParams` is called from Systems that
+hold the OpQueue and not the ResourceQueue, so it never reads a set's values:
+it resolves names against the set's program, which is immutable, through a
+table the ResourceQueue publishes each set to — the program written first, the
+state after, atomically — and reads without a lock. What that costs is that a
+durable update made later in the same tick shows through a version's untouched
+bindings, which the durable update's one-frame-early rule already allows.
 
 Temporaries belong here. A per-frame instance arena is
 `SetDrawParams(k, set, BufferParam("instances", arena))`, and `firstInstance`
@@ -372,8 +404,10 @@ one takes as its first argument: `UploadProgram`, `ReleaseShader`,
 `NewDrawParams`, `UpdateDrawParams`, `ReleaseDrawParams` and `SetDrawParams`.
 The report comes from the System that made the mistake, in its own tick. The
 bad param is ignored; a set whose creation failed still exists and draws
-nothing, silently. `SetDrawParams` is on the hot path and reports each
-condition once, under a key naming the set and the binding.
+nothing, silently — naming it is no mistake, so `UpdateDrawParams` and
+`SetDrawParams` ignore it without a report and `ReleaseDrawParams` releases
+it. `SetDrawParams` is on the hot path and reports each condition once, under a
+key naming the set and the binding.
 
 `Draw` keeps no kernel. Its failures are the frame's — a pass not declared, a
 pipeline that does not build, a storage buffer unsupplied — and the translator
@@ -390,6 +424,12 @@ re-rendered frame. Ids are never reused, so liveness is a lookup in a dense
 table indexed by id.
 
 This closes the unguarded mesh case too.
+
+**Settled here:** a set's liveness is its own record's state. The ResourceQueue
+keeps its sets in a table indexed by id, which the translator already reads to
+draw the set, so the check costs no load of its own. A set built on a shader
+released since is dropped the same way: releasing the shader is the app
+reloading it.
 
 **Gap:** the check is a few indexed loads a draw. It ships if an interleaved
 A/B of `TranslateSteadyState` against the pre-change commit shows it within the
@@ -513,6 +553,18 @@ it. It is reconsidered with scene's materials.
   to be refactored as a whole later.
 - **Extensions adding members to another bundle's struct.** With whole-binding
   params the owner fills its struct whole; each extension has its own.
+- **`SetDrawParams` copying the set's current values.** The values live on the
+  ResourceQueue and `SetDrawParams` is called holding the OpQueue; reading them
+  would add the ResourceQueue to the lock set of every System that versions a
+  set, which serialises those Systems against every durable writer. A version
+  holds what the frame changed and nothing else.
+- **A mutex around the table `SetDrawParams` reads sets from.** Every System
+  versioning a set in parallel would contend one lock a call. The program is
+  immutable and the state one atomic word, so the table is read with none.
+- **Refusing a texture path in a durable set.** Canvas names its sprites by path,
+  and the render thread's cache is the one thing that can read the file; a set
+  keeping the path costs a string, and a set refusing it moves the load into
+  every recorder.
 
 ---
 

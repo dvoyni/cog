@@ -1,9 +1,6 @@
 package internal
 
 import (
-	"encoding/binary"
-	"math"
-
 	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
@@ -117,12 +114,30 @@ func (t *translator) translateDraw(f *frame, op *DrawOp, pass descriptors.PassDe
 // report-once-drop-always holds here the way it does for a failed pipeline.
 // The shader's label is spelled only for a report, never on the frames after it.
 func (t *translator) reportIndexLength(m *descriptors.MeshDescr, shaderDescr shader.ShaderDescr) error {
-	key := indexLengthKey{length: descriptors.MeshIndices(m).Size(), width: m.IndexWidth()}
-	if _, seen := t.badIndexLengths[key]; seen {
+	if t.indexLengthSeen(m) {
 		return nil
 	}
+	return types.ErrIndexBufferLength{Shader: shader.ShaderLabel(shaderDescr), Length: descriptors.MeshIndices(m).Size(), Width: m.IndexWidth().Bytes()}
+}
+
+// reportIndexLengthOf is reportIndexLength for a draw whose shader's label is
+// already in hand, as a set's program carries it.
+func (t *translator) reportIndexLengthOf(m *descriptors.MeshDescr, label string) error {
+	if t.indexLengthSeen(m) {
+		return nil
+	}
+	return types.ErrIndexBufferLength{Shader: label, Length: descriptors.MeshIndices(m).Size(), Width: m.IndexWidth().Bytes()}
+}
+
+// indexLengthSeen reports whether a malformed index buffer of this shape was
+// reported already, and marks it reported.
+func (t *translator) indexLengthSeen(m *descriptors.MeshDescr) bool {
+	key := indexLengthKey{length: descriptors.MeshIndices(m).Size(), width: m.IndexWidth()}
+	if _, seen := t.badIndexLengths[key]; seen {
+		return true
+	}
 	t.badIndexLengths[key] = struct{}{}
-	return types.ErrIndexBufferLength{Shader: shader.ShaderLabel(shaderDescr), Length: key.length, Width: key.width.Bytes()}
+	return false
 }
 
 // unsuppliedBuffer returns the first declared storage binding the draw does not
@@ -398,29 +413,12 @@ func packParams(buf []byte, drawParams, materialParams []descriptors.ParameterDe
 	}
 }
 
-// writeParamAt writes a scalar/vec/color param at byte offset off (bounds-checked).
+// writeParamAt writes a bytes param at byte offset off (bounds-checked).
 func writeParamAt(buf []byte, off int, p *descriptors.ParameterDescr) {
-	switch descriptors.ParameterKind(p) {
-	case descriptors.ParamColor:
-		if off+16 <= len(buf) {
-			descriptors.WriteColor(buf[off:off+16], descriptors.ParameterColor(p))
-		}
-	case descriptors.ParamVec4:
-		if off+16 <= len(buf) {
-			descriptors.WriteVec4(buf[off:off+16], descriptors.ParameterVec(p))
-		}
-	case descriptors.ParamMat4:
-		if off+64 <= len(buf) {
-			descriptors.WriteMat4(buf[off:off+64], descriptors.ParameterMat(p))
-		}
-	case descriptors.ParamFloat:
-		if off+4 <= len(buf) {
-			binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(descriptors.ParameterNum(p)))
-		}
-	case descriptors.ParamRaw:
-		raw := descriptors.ParameterRaw(p)
-		if off+raw.Len() <= len(buf) {
-			copy(buf[off:], raw.Data())
-		}
+	if descriptors.ParameterKind(p) != descriptors.ParamBytes {
+		return
+	}
+	if value := descriptors.ParameterBytes(p); off+len(value) <= len(buf) {
+		copy(buf[off:], value)
 	}
 }

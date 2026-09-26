@@ -35,9 +35,11 @@ struct Material { tint: vec4<f32>, roughness: f32 }
 @group(1) @binding(2) var albedoSampler: sampler;
 struct Instances { models: array<mat4x4<f32>> }
 @group(2) @binding(0) var<storage, read> instances: Instances;
+@group(2) @binding(1) var<storage, read> tints: array<vec4<f32>>;
+@group(1) @binding(3) var<uniform> fade: f32;
 
 @vertex fn vs_main(@location(0) position: vec3<f32>, @builtin(instance_index) i: u32) -> @builtin(position) vec4<f32> {
-	return frame.viewProjection * instances.models[i] * vec4<f32>(position, 1.0) * material.tint.x;
+	return frame.viewProjection * instances.models[i] * vec4<f32>(position, 1.0) * material.tint.x * tints[i].x * fade;
 }
 
 @fragment fn fs_main() -> @location(0) vec4<f32> {
@@ -79,6 +81,9 @@ func TestCompileShaderReflectsRealWGSLThroughNaga(t *testing.T) {
 		{Name: "albedo", Kind: gfx.ResourceTexture, Group: 1, Binding: 1},
 		{Name: "albedoSampler", Kind: gfx.ResourceSampler, Group: 1, Binding: 2},
 		{Name: "instances", Kind: gfx.ResourceStorageBuffer, Group: 2, Binding: 0},
+		// A bare array and a bare scalar are bindings like any struct.
+		{Name: "tints", Kind: gfx.ResourceStorageBuffer, Group: 2, Binding: 1},
+		{Name: "fade", Kind: gfx.ResourceUniformBuffer, Group: 1, Binding: 3, Size: 4},
 	}
 	for _, w := range want {
 		got, ok := response.Program.Binding(w.Name)

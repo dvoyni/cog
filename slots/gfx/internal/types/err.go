@@ -280,3 +280,87 @@ type ErrShaderUploadedTwice struct {
 func (e ErrShaderUploadedTwice) Error() string {
 	return fmt.Sprintf("gfx: shader %d already holds program %q; a shader takes one upload - release it and create a new one to reload", e.Shader, e.Label)
 }
+
+// ErrShaderHasNoProgram reports a set built on a shader that is reserved but
+// has no program yet. A set is resolved against its shader's binding table the
+// moment it is created, and a shader has one only from UploadProgram on, so the
+// set is created failed: it exists, and draws nothing.
+type ErrShaderHasNoProgram struct {
+	Shader ShaderID
+	// Call is the ResourceQueue method that named it.
+	Call string
+}
+
+func (e ErrShaderHasNoProgram) Error() string {
+	return fmt.Sprintf("gfx: %s names shader %d, which has no program yet; upload one with UploadProgram first", e.Call, e.Shader)
+}
+
+// ErrDrawParamsNotLive reports a call naming a set of draw params that is not
+// live: one NewDrawParams never created, or one ReleaseDrawParams already
+// released. The call is ignored. Set ids are never reused, so the check is
+// exact.
+type ErrDrawParamsNotLive struct {
+	Set uint32
+	// Call is the method that named it.
+	Call string
+	// Released is true when the set was live once and has been released, and
+	// false when nothing ever created it.
+	Released bool
+}
+
+func (e ErrDrawParamsNotLive) Error() string {
+	state := "was never created by NewDrawParams"
+	if e.Released {
+		state = "has been released"
+	}
+	return fmt.Sprintf("gfx: %s names draw params %d, which %s", e.Call, e.Set, state)
+}
+
+// ErrDrawParamUnknown reports a param naming no binding its set's shader
+// declares. A param is a whole binding, named by the binding's WGSL global
+// name, so a name the shader does not declare is a typo or a param meant for
+// another shader. The param is ignored.
+type ErrDrawParamUnknown struct {
+	Shader    string
+	Parameter string
+	// Call is the method the param was handed to.
+	Call string
+}
+
+func (e ErrDrawParamUnknown) Error() string {
+	return fmt.Sprintf("gfx: %s supplies %q, which shader %q declares no binding named", e.Call, e.Parameter, e.Shader)
+}
+
+// ErrUniformSizeMismatch reports uniform bytes whose size is not the size the
+// binding they name was reflected at. A param supplies a whole uniform, so the
+// bytes are the binding: shorter leaves its tail unset and longer spills into
+// nothing, and either is a Go value that does not mirror the WGSL one. The
+// param is ignored.
+type ErrUniformSizeMismatch struct {
+	Shader    string
+	Parameter string
+	Supplied  int
+	Declared  int
+}
+
+func (e ErrUniformSizeMismatch) Error() string {
+	return fmt.Sprintf("gfx: shader %q declares the uniform %q at %d bytes, but the param supplies %d",
+		e.Shader, e.Parameter, e.Declared, e.Supplied)
+}
+
+// ErrDrawParamTemporary reports a durable set handed a resource id the
+// ResourceQueue did not mint: a temporary buffer, texture or target from an
+// OpQueue, which lives one frame while the set outlives it. The param is
+// ignored. A value that lives one frame belongs in the frame's version, through
+// OpQueue.SetDrawParams.
+type ErrDrawParamTemporary struct {
+	Shader    string
+	Parameter string
+	// Call is the ResourceQueue method the param was handed to.
+	Call string
+}
+
+func (e ErrDrawParamTemporary) Error() string {
+	return fmt.Sprintf("gfx: %s gives shader %q's %q a resource the ResourceQueue did not create; a durable set names durable resources only - set a temporary through OpQueue.SetDrawParams",
+		e.Call, e.Shader, e.Parameter)
+}

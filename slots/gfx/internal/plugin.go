@@ -80,10 +80,14 @@ func (p *plugin) Dependencies() []kernel.PluginName {
 func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
 	p.backend = registrar.RequireAdapter[BackendPort]()
 	ids := func() IDMinter { return p.backend.Get() }
-	registrar.InitResource(NewOpQueue(ids))
-	registrar.InitResource(&readList{OpQueue: NewOpQueue(ids)})
-	registrar.InitResource(&readyList{queue: NewOpQueue(ids)})
-	registrar.InitResource(NewResourceQueue(ids))
+	// The three frame queues share the ResourceQueue's registry of sets, which
+	// is how SetDrawParams reads a set without the ResourceQueue's lock.
+	resources := NewResourceQueue(ids)
+	sets := resources.drawParams.registry
+	registrar.InitResource(newOpQueue(ids, sets))
+	registrar.InitResource(&readList{OpQueue: newOpQueue(ids, sets)})
+	registrar.InitResource(&readyList{queue: newOpQueue(ids, sets)})
+	registrar.InitResource(resources)
 	registrar.InitResource(&types.Viewport{})
 	registrar.InitResource(&desiredViewport{})
 	registrar.HandleCommand[PresentCmd](p.presentCmdImpl)
@@ -193,7 +197,7 @@ func (p *plugin) renderOnRender() (kernel.Lock, kernel.Observe[app.RenderEvent])
 			queue := resources.Get()
 			capture, capturing := p.captures.target()
 			ops, err := p.translator.translate(
-				k, list.OpQueue, ResourceQueueOps(queue), backend, files, capture, capturing)
+				k, list.OpQueue, queue, backend, files, capture, capturing)
 			if err != nil {
 				k.ReportError(err)
 			}

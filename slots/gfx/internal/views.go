@@ -117,7 +117,7 @@ type ParameterView struct {
 // than the fields, so a new arm on the union that forgets to answer here
 // serializes as its kind and no value, instead of as somebody else's value.
 func ParameterViewOf(parameter descriptors.ParameterDescr) ParameterView {
-	view := ParameterView{Name: parameter.Name(), Kind: descriptors.ParameterKind(&parameter).String()}
+	view := ParameterView{Name: parameter.Name(), Kind: descriptors.ParameterKindName(&parameter)}
 	if value, ok := parameter.ColorValue(); ok {
 		view.Value = []float32{value.R, value.G, value.B, value.A}
 	}

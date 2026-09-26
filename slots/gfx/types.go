@@ -65,10 +65,22 @@ const (
 	BufferSourceBaked = descriptors.BufferSourceBaked
 )
 
-// ParameterDescr is one declarative shader parameter: a texture, buffer, color,
-// scalar, vector, matrix, or sampler. Build it with the *Param constructors and
-// pass it to Material or OpQueue.Draw.
+// ParameterDescr is one declarative shader parameter: a whole binding's value,
+// named by the binding's WGSL global name. It is one of four kinds - bytes for
+// a uniform, a texture, a sampler, or a buffer and the range of it bound.
+// FloatParam, VecParam, MatParam, ColorParam and RawParameter all build bytes.
+// Pass it to ResourceQueue.NewDrawParams, OpQueue.SetDrawParams, Material or
+// OpQueue.Draw.
 type ParameterDescr = descriptors.ParameterDescr
+
+// DrawParams names one durable set of draw params: a shader, a fixed
+// MaterialState and a value for some or all of the shader's bindings, created by
+// ResourceQueue.NewDrawParams and drawn with OpQueue.DrawSet. It is an opaque
+// handle, and its identity is the set's: two draws naming one DrawParams share
+// shader, state and values, so the handle alone is the complete batch key a
+// recorder needs. It is comparable and pointer-free, so a Component may hold
+// one. The zero value names no set.
+type DrawParams = descriptors.DrawParams
 
 // MaterialDescr describes how to shade a mesh: a shader plus named parameters.
 // Build it with Material and the *Param constructors. OpQueue.Draw remaps its

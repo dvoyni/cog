@@ -266,14 +266,32 @@ func (q *Queue) SetPipeline(pipeline types.PipelineID) {
 // reaches. It is still handed to BakeUniforms, which costs a backend the unused
 // bytes and nothing else.
 func (q *Queue) SetUniformBlock(group, binding, size int) []byte {
+	offset, block := q.ClaimUniform(size)
+	q.BindUniformBlock(group, binding, offset, size)
+	return block
+}
+
+// ClaimUniform claims size bytes of the frame's uniform arena at the next
+// offset aligned to UniformAlignment, and returns the offset and the bytes,
+// zeroed, for the caller to fill. The slice is valid until the next claim,
+// which may move the arena; the offset is valid for the frame.
+//
+// It is SetUniformBlock without the binding, for a value several draws bind:
+// it is claimed once and bound by offset as often as it is drawn.
+func (q *Queue) ClaimUniform(size int) (int, []byte) {
 	offset := len(q.uniforms)
 	span := (size + UniformAlignment - 1) / UniformAlignment * UniformAlignment
 	q.uniforms = slices.Grow(q.uniforms, span)[:offset+span]
 	clear(q.uniforms[offset:])
+	return offset, q.uniforms[offset : offset+size : offset+size]
+}
+
+// BindUniformBlock binds size bytes a ClaimUniform returned at offset to the
+// block at group and binding, for the draw that follows.
+func (q *Queue) BindUniformBlock(group, binding, offset, size int) {
 	q.render = append(q.render, renderOp{
 		kind: renderSetUniformBlock, arg0: int32(offset), arg1: int32(size), arg2: int32(group), arg3: int32(binding),
 	})
-	return q.uniforms[offset : offset+size : offset+size]
 }
 
 func (q *Queue) SetTexture(texture types.TextureID, group, binding int) {

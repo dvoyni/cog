@@ -2,7 +2,6 @@ package descriptors
 
 import (
 	"github.com/dvoyni/cog/libs/assets"
-	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
@@ -64,20 +63,25 @@ func ParameterBufferRef(v *ParameterDescr) *BufferDescr { return &v.buffer }
 // ParameterBufferSize reads ParameterDescr.bufferSize for gfx's internal/.
 func ParameterBufferSize(v *ParameterDescr) int { return v.bufferSize }
 
-// ParameterColor reads ParameterDescr.color for gfx's internal/.
-func ParameterColor(v *ParameterDescr) m.Color { return v.color }
+// ParameterBytes reads a bytes parameter's value for gfx's internal/. It
+// aliases the descriptor and must not be written to.
+func ParameterBytes(v *ParameterDescr) []byte { return v.bytes() }
+
+// ParameterForm reads ParameterDescr.form for gfx's internal/.
+func ParameterForm(v *ParameterDescr) ParamForm { return v.form }
 
 // ParameterKind reads ParameterDescr.kind for gfx's internal/.
 func ParameterKind(v *ParameterDescr) ParamKind { return v.kind }
 
-// ParameterMat reads ParameterDescr.mat for gfx's internal/.
-func ParameterMat(v *ParameterDescr) m.Mat4 { return v.mat }
-
-// ParameterNum reads ParameterDescr.num for gfx's internal/.
-func ParameterNum(v *ParameterDescr) float32 { return v.num }
-
-// ParameterRaw reads ParameterDescr.raw for gfx's internal/.
-func ParameterRaw(v *ParameterDescr) assets.Blob { return v.raw }
+// ParameterKindName names a parameter the way an inspection view spells its
+// kind: a bytes parameter by the constructor that built it, since an agent
+// reading a snapshot knows a value as a color or a mat4 rather than as bytes.
+func ParameterKindName(v *ParameterDescr) string {
+	if v.kind == ParamBytes {
+		return v.form.String()
+	}
+	return v.kind.String()
+}
 
 // ParameterSampler reads ParameterDescr.sampler for gfx's internal/.
 func ParameterSampler(v *ParameterDescr) types.SamplerDesc { return v.sampler }
@@ -87,9 +91,6 @@ func ParameterTexture(v *ParameterDescr) TextureDescr { return v.texture }
 
 // ParameterTextureRef points at ParameterDescr.texture for gfx's internal/.
 func ParameterTextureRef(v *ParameterDescr) *TextureDescr { return &v.texture }
-
-// ParameterVec reads ParameterDescr.vec for gfx's internal/.
-func ParameterVec(v *ParameterDescr) m.Vec4 { return v.vec }
 
 // PassHasEffect calls PassDescr.hasEffect for gfx's internal/.
 func PassHasEffect(v *PassDescr, a0 int) bool { return v.hasEffect(a0) }
@@ -141,3 +142,9 @@ func WithParameterTexture(param ParameterDescr, texture TextureDescr) ParameterD
 	param.texture = texture
 	return param
 }
+
+// DrawParamsOf is the handle of set id, for gfx's internal/.
+func DrawParamsOf(id uint32) DrawParams { return DrawParams{id: id} }
+
+// DrawParamsIndex reads DrawParams.id for gfx's internal/.
+func DrawParamsIndex(set DrawParams) uint32 { return set.id }

@@ -139,6 +139,28 @@ func ProgramSourceMap(p ShaderProgram) ShaderSourceMap {
 	return p.p.sourceMap
 }
 
+// ProgramBindings is the program's binding table: every binding it declares,
+// sorted by WGSL global name. A binding's index in it is its slot in every set
+// built on the program, so a set and its versions are one record per binding in
+// this order. It aliases the program and must not be written to.
+func ProgramBindings(p ShaderProgram) []ShaderResource {
+	if p.p == nil {
+		return nil
+	}
+	return p.p.bindings
+}
+
+// ProgramBindingIndex returns the slot the binding of a WGSL global name takes
+// in ProgramBindings, and whether the program declares one.
+func ProgramBindingIndex(p ShaderProgram, name string) (int, bool) {
+	if p.p == nil {
+		return 0, false
+	}
+	return slices.BinarySearchFunc(p.p.bindings, name, func(r ShaderResource, name string) int {
+		return strings.Compare(r.Name, name)
+	})
+}
+
 // ProgramLayout is the program's reflected layout, which the translator checks
 // against the web floor and a mesh's vertex layout.
 func ProgramLayout(p ShaderProgram) ShaderLayout {

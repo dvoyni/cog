@@ -33,6 +33,11 @@ type DrawOp struct {
 	Params        []descriptors.ParameterDescr
 	Instances     int
 	FirstInstance int
+	// Set is the draw params a DrawSet draw names, and zero for a Draw. Version
+	// is where the set's version for this draw starts in the queue's version
+	// slots, plus one, and zero draws the set's own values.
+	Set     descriptors.DrawParams
+	Version int32
 }
 
 // ResourceOp is one resource command recorded into an OpQueue or a
@@ -119,11 +124,27 @@ type OpQueue struct {
 	// FrameMaterial recorded is the queue's for the frame it names, and an
 	// ordinary material in any other.
 	frame uint64
+
+	// sets is what the ResourceQueue publishes of every set, which is all
+	// SetDrawParams reads of one; see drawParamsRegistry.
+	sets *drawParamsRegistry
+	// cursors is each set's current version this frame, indexed by set id.
+	cursors []setCursor
+	// versionValues, versionBytes and versionPaths are the frame's versions:
+	// their binding tables, their uniforms' bytes and the texture paths they
+	// name. Reset truncates them.
+	versionValues []bindingValue
+	versionBytes  []byte
+	versionPaths  []string
 }
 
-// NewOpQueue builds an empty queue that reserves ids through ids.
-func NewOpQueue(ids IDSource) *OpQueue {
-	return &OpQueue{ids: ids, temporaryTextureFree: map[temporaryTextureKey][]int{}}
+// NewOpQueue builds an empty queue that reserves ids through ids. It knows no
+// set of draw params; the plugin's queues are built by newOpQueue, beside the
+// ResourceQueue whose sets they version.
+func NewOpQueue(ids IDSource) *OpQueue { return newOpQueue(ids, nil) }
+
+func newOpQueue(ids IDSource, sets *drawParamsRegistry) *OpQueue {
+	return &OpQueue{ids: ids, sets: sets, temporaryTextureFree: map[temporaryTextureKey][]int{}}
 }
 
 // reset drops all ops and makes temporary buffers available for reuse.
@@ -142,6 +163,10 @@ func (q *OpQueue) reset() {
 	q.uploadArena = q.uploadArena[:0]
 	q.parameterArena = q.parameterArena[:0]
 	q.vertexAttrArena = q.vertexAttrArena[:0]
+	q.versionValues = q.versionValues[:0]
+	q.versionBytes = q.versionBytes[:0]
+	clear(q.versionPaths)
+	q.versionPaths = q.versionPaths[:0]
 	slices.SortFunc(q.temporaryBuffers, func(a, b temporaryBuffer) int {
 		if a.kind != b.kind {
 			return cmp.Compare(a.kind, b.kind)
