@@ -99,7 +99,7 @@ func (la LookupDeviceAccess) State(path string) error {
 	if !la.Valid() {
 		return ErrModelUnavailable{Model: path, Err: errLookupUnavailable}
 	}
-	_, err := la.lookup.model(la.kernel, la.fsys, la.resources, path)
+	_, err := la.lookup.model(la.kernel, la.fsys, la.resources, la.compile, path)
 	return err
 }
 

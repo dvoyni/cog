@@ -167,8 +167,9 @@ type LookupAccess = internal.LookupAccess
 // LookupDeviceAccess is the scoped facade for everything about a Lookup that
 // needs the device: Preload, State and the model queries, all of which load,
 // and the two unload verbs that free a GPU texture at the call. Acquire
-// *Lookup write, storage.FileSystem read and *gfx.ResourceQueue write in a
-// handler, build one with NewLookupDeviceAccess, and never store the result.
+// *Lookup write, storage.FileSystem read and *gfx.ResourceQueue write and
+// declare gfx.CompileShaderCmd in a handler, build one with
+// NewLookupDeviceAccess, and never store the result.
 type LookupDeviceAccess = internal.LookupDeviceAccess
 
 // MeshSource discriminates where a MeshRef came from. model knows only its own

@@ -77,6 +77,15 @@ type Lookup struct {
 	// defaultShader is the default scene shader, zero for the bundled PBR.
 	// See SetDefaultSceneShader.
 	defaultShader SceneShaderDescr
+	// shaders are the bundled shader's four variants, compiled and uploaded by
+	// the first load that has a compiler and shared by every model's draw
+	// params after it. See drawparams.go.
+	shaders [VariantCount]bundledShader
+	// setParams is the scratch a load builds each material's set params in.
+	setParams []gfx.ParameterDescr
+	// pendingSets are the draw params a model's free gave up, released at the
+	// frame boundary beside pendingReleases, for the same reason.
+	pendingSets []gfx.DrawParams
 }
 
 // NewLookup builds an empty Lookup at model's default configuration; see
@@ -134,23 +143,27 @@ func (la LookupAccess) Valid() bool { return la.lookup != nil }
 // two plugins sees the same word.
 //
 // Build one inside a handler holding *Lookup write, storage.FileSystem read and
-// *gfx.ResourceQueue write. The filesystem arrives already converted to an
-// fs.FS, because handing a storage.FileSystem out as an interface boxes and
-// that box is worth paying once a frame rather than once a call.
+// *gfx.ResourceQueue write, and declaring gfx.CompileShaderCmd - through
+// ecs.Uses in a System, access.Uses in a plain handler - whose dispatcher is
+// the compiler it takes. The filesystem arrives already converted to an fs.FS,
+// because handing a storage.FileSystem out as an interface boxes and that box
+// is worth paying once a frame rather than once a call.
 type LookupDeviceAccess struct {
 	kernel    kernel.Kernel
 	lookup    *Lookup
 	fsys      fs.FS
 	resources *gfx.ResourceQueue
+	compile   gfx.ShaderCompiler
 }
 
 // NewLookupDeviceAccess builds the device facade. Call it inside a handler that
 // holds the *Lookup write lock, the filesystem read lock and the resource queue
-// write lock.
+// write lock, and passes the gfx.CompileShaderCmd dispatcher it declared as
+// compile: the first load compiles the bundled shader through it.
 func NewLookupDeviceAccess(
-	k kernel.Kernel, lookup *Lookup, fsys fs.FS, resources *gfx.ResourceQueue,
+	k kernel.Kernel, lookup *Lookup, fsys fs.FS, resources *gfx.ResourceQueue, compile gfx.ShaderCompiler,
 ) LookupDeviceAccess {
-	return LookupDeviceAccess{kernel: k, lookup: lookup, fsys: fsys, resources: resources}
+	return LookupDeviceAccess{kernel: k, lookup: lookup, fsys: fsys, resources: resources, compile: compile}
 }
 
 // Valid reports whether the facade is backed by a live Lookup.
@@ -163,7 +176,7 @@ func (la LookupDeviceAccess) resolve(path string) (*residentModel, bool) {
 	if !la.Valid() {
 		return nil, false
 	}
-	model, err := la.lookup.model(la.kernel, la.fsys, la.resources, path)
+	model, err := la.lookup.model(la.kernel, la.fsys, la.resources, la.compile, path)
 	return model, err == nil
 }
 

@@ -29,14 +29,19 @@ type pendingMesh struct {
 }
 
 // MeshBaker is the flush's GPU half, handed to the Lookup for the length of one
-// drain. The Lookup takes three functions rather than the resource queue itself
+// drain. The Lookup takes functions rather than the resource queue itself
 // because LookupAccess is deliberately GPU-free: NewBuffer dereferences its
 // backend with no nil guard, so a mesh baked at startup through a queue held in
 // an app handler would either panic or silently not exist.
+//
+// ReleaseDrawParams releases the draw params of a model freed since the last
+// drain - ordinarily ResourceQueue.ReleaseDrawParams under the drain's kernel.
+// A baker without it drops them unreleased.
 type MeshBaker struct {
-	Bake    func(data []byte) gfx.BufferDescr
-	Rebake  func(buffer gfx.BufferDescr, data []byte) gfx.BufferDescr
-	Release func(buffer gfx.BufferDescr)
+	Bake              func(data []byte) gfx.BufferDescr
+	Rebake            func(buffer gfx.BufferDescr, data []byte) gfx.BufferDescr
+	Release           func(buffer gfx.BufferDescr)
+	ReleaseDrawParams func(set gfx.DrawParams)
 }
 
 // BakeMesh registers caller-owned geometry and returns the ref that draws it.
@@ -213,6 +218,12 @@ func (l *Lookup) DrainMeshes(baker MeshBaker) {
 		baker.Release(buffer)
 	}
 	l.pendingReleases = l.pendingReleases[:0]
+	if baker.ReleaseDrawParams != nil {
+		for _, set := range l.pendingSets {
+			baker.ReleaseDrawParams(set)
+		}
+	}
+	l.pendingSets = l.pendingSets[:0]
 }
 
 // rebakeIndices re-uploads a mesh's indices, minting or releasing the buffer

@@ -2117,7 +2117,7 @@ strengthening it.
 
 ```go
 la := model.NewLookupAccess(kernel, lookup)                          // bakes, unloads a model, reads the totals
-dev := model.NewLookupDeviceAccess(kernel, lookup, fsys, resources)  // everything that loads, and the texture unloads
+dev := model.NewLookupDeviceAccess(kernel, lookup, fsys, resources, compile)  // everything that loads, and the texture unloads
 
 type ModelRef struct{ Path, Scene, Node string } // mirrors ModelDraw's selectors
 
@@ -2303,9 +2303,18 @@ set is rejected outright in this repo, not traded off.**
 
 So `NewLookupAccess(k, lookup)` keeps its two dependencies and carries the mesh
 verbs, `UnloadModel` and the two totals, and
-`NewLookupDeviceAccess(k, lookup, fsys, resources)` carries everything that
-loads plus the two unload verbs that free a GPU texture. The cost becomes
+`NewLookupDeviceAccess(k, lookup, fsys, resources, compile)` carries everything
+that loads plus the two unload verbs that free a GPU texture. The cost becomes
 visible where it belongs — in each consumer's own `Lock` closure.
+
+`compile` is a `gfx.ShaderCompiler`: the dispatcher of the
+`gfx.CompileShaderCmd` the handler declares — a System's
+`ecs.Uses[gfx.CompileShaderCmd, …].Execute`, a plain handler's
+`access.Uses[gfx.CompileShaderCmd]()`. The first load compiles the bundled
+shader's four variants through it, once for the Lookup, and every load creates
+its materials' draw params on them; the command's lock is empty, so declaring
+it widens nothing. See `slots/gfx/docs/specs/drawparams.md`
+([#600](https://github.com/dvoyni/cog/issues/600)).
 
 **`LookupDeviceAccess` is a convention, not a local choice.** Canvas splits the
 *opposite* halves under the same name: there the loading half is cheap and the

@@ -7,11 +7,19 @@ import (
 
 // pbrValues are the bundled material's numbers as the load works them out:
 // glTF's factors, each slot's KHR_texture_transform and TEXCOORD set, and the
-// MASK cutoff. They never leave model as a struct. appendParams turns them into
-// named gfx params, one per member of the shader's ScenePbrMaterial uniform
-// block, and gfx packs those by reflected name like any shader's params - so a
-// renderer binds a material's numbers without knowing what they are, and a
-// caller's same-named param overrides one exactly as it overrides a texture.
+// MASK cutoff.
+//
+// It is also the Go mirror of the shader's ScenePbrMaterial, member for member
+// and byte for byte: seven vec4s, then eleven 4-byte scalars, then the four
+// bytes WGSL rounds the struct up to 160 with. A model's draw params set it as
+// one whole binding, scenePbrMaterial, through gfx.RawParameterRef, whose check
+// and the layout test hold the two together.
+//
+// For the forward material, appendParams turns them into named gfx params, one
+// per member of the block, and gfx packs those by reflected name like any
+// shader's params - so a renderer binds a material's numbers without knowing
+// what they are, and a caller's same-named param overrides one exactly as it
+// overrides a texture.
 //
 // The names are glTF's, verbatim, because they are user-facing: the loader maps
 // 1:1 with no translation table to drift, and the glTF specification is their
@@ -44,6 +52,9 @@ type pbrValues struct {
 	// cap scene keeps. It travels as a raw u32, the one member no numeric
 	// parameter kind spells.
 	uvSets uint32
+	// _ is the struct's trailing padding: WGSL rounds ScenePbrMaterial up to
+	// its 16-byte alignment, and the set's binding is that size.
+	_ uint32
 }
 
 // pbrSlotCount is the number of texture slots the bundled PBR has.

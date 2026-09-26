@@ -27,11 +27,14 @@ func NewLookupAccess(k kernel.Kernel, lookup *Lookup) LookupAccess {
 
 // NewLookupDeviceAccess builds the device facade over lookup. Call it inside a
 // handler that holds the *Lookup write lock, the filesystem read lock and the
-// resource queue write lock, and never store the result.
+// resource queue write lock and declares gfx.CompileShaderCmd, passing its
+// dispatcher as compile - a System's ecs.Uses Execute, or what a plain
+// handler's access.Uses returns - and never store the result. The first load
+// compiles the bundled shader through it.
 func NewLookupDeviceAccess(
-	k kernel.Kernel, lookup *Lookup, fsys fs.FS, resources *gfx.ResourceQueue,
+	k kernel.Kernel, lookup *Lookup, fsys fs.FS, resources *gfx.ResourceQueue, compile gfx.ShaderCompiler,
 ) LookupDeviceAccess {
-	return internal.NewLookupDeviceAccess(k, lookup, fsys, resources)
+	return internal.NewLookupDeviceAccess(k, lookup, fsys, resources, compile)
 }
 
 // NewMeshRef builds the ref of a mesh a renderer minted itself, under a source

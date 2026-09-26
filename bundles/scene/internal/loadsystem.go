@@ -25,7 +25,9 @@ import (
 //
 // Everything it reads from the Stores is a read, so it keeps no System off
 // them. What it writes is exclusive by nature: the Lookup, and the resource
-// queue a load uploads through.
+// queue a load uploads through. It also dispatches gfx.CompileShaderCmd, which
+// model's first load compiles the bundled shader through; that Command's lock
+// is empty, so declaring it widens the System's set by nothing.
 func loadSystem(
 	k kernel.Kernel,
 	modelHooks *ecs.Hooks[Model, ecs.HookAll],
@@ -39,6 +41,7 @@ func loadSystem(
 	lookupResource *ecs.Write[*model.Lookup],
 	filesystem *ecs.Read[storage.FileSystem],
 	resourceQueue *ecs.Write[*gfx.ResourceQueue],
+	compile *ecs.Uses[gfx.CompileShaderCmd, gfx.CompileShaderRequest, gfx.CompileShaderResponse],
 	work *ecs.Write[*keyScratch],
 ) {
 	s := work.Get()
@@ -74,7 +77,7 @@ func loadSystem(
 	}
 	if len(s.pending) > 0 {
 		keyer := keyer{
-			k: k, lookup: lookup, resources: resources,
+			k: k, lookup: lookup, resources: resources, compile: compile.Execute,
 			// The one boxed filesystem a run pays for, and only a run that
 			// has something to key.
 			fsys:      fs.FS(filesystem.Get()),
@@ -97,5 +100,8 @@ func loadSystem(
 			return resources.UploadBuffer(buffer, data, false)
 		},
 		Release: resources.ReleaseBuffer,
+		ReleaseDrawParams: func(set gfx.DrawParams) {
+			resources.ReleaseDrawParams(k, set)
+		},
 	})
 }

@@ -186,7 +186,22 @@ func (b *testBackend) NewShader(desc gfx.ShaderDesc) (gfx.ShaderID, error) {
 func (b *testBackend) FreeShader(gfx.ShaderID)                         {}
 func (b *testBackend) ReserveShader() gfx.ShaderID                     { return gfx.ShaderID(b.next()) }
 func (b *testBackend) CreateShader(gfx.ShaderID, gfx.ShaderDesc) error { return nil }
-func (b *testBackend) ReflectShader([]byte) (gfx.ShaderLayout, error)  { return gfx.ShaderLayout{}, nil }
+
+// ReflectShader is the reflection a compile goes through, which is how model
+// builds its draw params at load: layoutOf's narrowing, with the material
+// block as the shader declares it - scenePbrMaterial, whole, at its real size.
+// model's own tests hold that size to the WGSL through naga.
+func (b *testBackend) ReflectShader(code []byte) (gfx.ShaderLayout, error) {
+	layout := layoutOf(string(code))
+	layout.Resources[0] = gfx.ShaderResource{
+		Name: "scenePbrMaterial", Kind: gfx.ResourceUniformBuffer, Group: 1, Binding: 0, Size: scenePbrMaterialSize,
+	}
+	return layout, nil
+}
+
+// scenePbrMaterialSize is ScenePbrMaterial's size: seven vec4s and eleven
+// scalars, rounded up to the struct's 16-byte alignment.
+const scenePbrMaterialSize = 160
 
 func (b *testBackend) ShaderLayout(id gfx.ShaderID) gfx.ShaderLayout {
 	b.mu.Lock()

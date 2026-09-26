@@ -159,3 +159,8 @@ type ErrSpotConeInverted = internal.ErrSpotConeInverted
 // would evaluate to zero everywhere and the light would silently render black,
 // so PackLight returns it and the light is skipped instead.
 type ErrSpotDirectionMissing = internal.ErrSpotDirectionMissing
+
+// ErrSceneShaderUnavailable reports a variant of the bundled scene shader that
+// did not compile. It is reported once, on the first load; every model's draw
+// params for that variant stay zero.
+type ErrSceneShaderUnavailable = internal.ErrSceneShaderUnavailable
