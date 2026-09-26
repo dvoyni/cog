@@ -8,7 +8,6 @@ import (
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
 
@@ -41,9 +40,10 @@ func allocatedTarget(t *testing.T, k kernel.Executioner, format descriptors.Text
 // renderInto renders one frame of one pass into target, with one draw in it.
 func renderInto(t *testing.T, k kernel.Executioner, target descriptors.TargetDescr, label string) {
 	t.Helper()
+	set := testSet(t, k)
 	q := recordRaw(t, k)
 	ref := q.NewPass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: label})
-	drawInto(q, ref)
+	drawInto(q, ref, set)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 }
@@ -78,17 +78,18 @@ func TestTwoTargetFormatsSharingAShaderBuildTwoPipelines(t *testing.T) {
 	srgb := allocatedTarget(t, k, descriptors.FormatRGBA8Srgb)
 	linear := allocatedTarget(t, k, descriptors.FormatRGBA8)
 
+	set := testSet(t, k)
 	q := recordRaw(t, k)
 	ref := q.NewPass(descriptors.PassDescr{
 		Target: descriptors.TextureTarget(srgb, 0, 0), Depth: descriptors.DepthNone(),
 		Load: types.LoadClear, Order: 0, Label: "srgb",
 	})
-	drawInto(q, ref)
+	drawInto(q, ref, set)
 	ref = q.NewPass(descriptors.PassDescr{
 		Target: descriptors.TextureTarget(linear, 0, 0), Depth: descriptors.DepthNone(),
 		Load: types.LoadClear, Order: 1, Label: "linear",
 	})
-	drawInto(q, ref)
+	drawInto(q, ref, set)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -112,17 +113,18 @@ func TestAScreenPassAndATargetInTheFrameBufferFormatShareOnePipeline(t *testing.
 
 	target := allocatedTarget(t, k, descriptors.FrameBufferFormat)
 
+	set := testSet(t, k)
 	q := recordRaw(t, k)
 	ref := q.NewPass(descriptors.PassDescr{
 		Target: descriptors.TextureTarget(target, 0, 0), Depth: descriptors.DepthNone(),
 		Load: types.LoadClear, Order: 0, Label: "offscreen",
 	})
-	drawInto(q, ref)
+	drawInto(q, ref, set)
 	ref = q.NewPass(descriptors.PassDescr{
 		Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(),
 		Load: types.LoadClear, Order: 1, Label: "screen",
 	})
-	drawInto(q, ref)
+	drawInto(q, ref, set)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -184,7 +186,7 @@ func TestAColourlessPassTakesNoFormatFromItsTarget(t *testing.T) {
 		Target: descriptors.NoTarget(), Depth: descriptors.DepthTarget(shadow),
 		DepthLoad: types.LoadClear, Label: "shadow",
 	})
-	q.Draw(ref, triangle(), testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	q.Draw(ref, triangle(), testSet(t, k), 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

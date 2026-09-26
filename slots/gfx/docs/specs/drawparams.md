@@ -34,8 +34,8 @@ Where a claim rests on something unverified it is marked **Gap** and says what
 would settle it; where assembling decisions next to each other settled
 something no conversation did, it is marked **Settled here**.
 
-**This specification is not yet implemented.** It is built on the branch
-`draw-params` in cog, feuds-26, nox and cog-examples, merged together.
+**This specification is implemented**, on the branch `draw-params` in cog,
+feuds-26, nox and cog-examples, merged together, as #596-#604.
 
 ---
 
@@ -525,10 +525,8 @@ through `RawParameterRef`. The record is 160 bytes - eleven scalars after seven
 the Go mirror to the struct naga reflects. A set names no per-draw binding: the
 frame, the instances and the poses are the renderer's version. A variant that
 does not compile is reported once, under model's own key, and remembered, and
-every model's set for it stays zero, so those draws go through the forward
-material as before. The sets reach a renderer as
-`ModelView.Materials[i].Sets[variant]`, beside `Forward` and `Key` until the
-deletion.
+every model's set for it stays zero, so those draws draw nothing. The sets
+reach a renderer as `ModelView.Materials[i].Sets[variant]`, beside `Key`.
 
 **Settled here:** a model's sets are released at the frame boundary, beside its
 buffers. `UnloadModel` is on the facade that carries no device, so a free
@@ -745,6 +743,16 @@ it. It is reconsidered with scene's materials.
 - **Setting the material block on every draw, instead of a set per binding
   shape.** 160 bytes a Batch a pass for the Batches that do not tint, to stop a
   tint leaking from the ones that do; the shape keeps the cost with the tint.
+- **Keeping `Backend.NewShader` and `ShaderLayout` for a port that has no
+  caller.** Every shader is reserved and created through the program path; a
+  second creation method is a second id space to keep apart for nothing.
+- **Leaving a gap group unset and documenting group 3 as unusable over the
+  static variant.** A rule every app shader has to know, for what the backend
+  that built the pipeline layout can close in one place.
+- **Model's `Key` as the handle of model's own set.** It is zero for a variant
+  that did not compile or a load with no compiler, so every such material would
+  key alike, and an override laid over two of them would share one set built
+  from the first's textures.
 - **Releasing a model's sets at the unload call.** `UnloadModel` is on
   `LookupAccess`, which carries no resource queue precisely so that a System
   baking a mesh does not declare a gfx write; releasing at the call would move
@@ -759,24 +767,24 @@ desktop and wasm and passes its tests before the next; nothing is merged or
 pushed until all four branches are ready.
 
 **gfx**
-- [ ] The reflection port, `Backend.ReflectShader`, beside `ReserveShader` and
+- [x] The reflection port, `Backend.ReflectShader`, beside `ReserveShader` and
       `CreateShader`; gogpu fills all three from its naga reflection.
-- [ ] `CompileShaderCmd` and `ShaderProgram`; `ResourceQueue.NewShader`,
+- [x] `CompileShaderCmd` and `ShaderProgram`; `ResourceQueue.NewShader`,
       `UploadProgram` and `ReleaseShader`, with their resource ops.
-- [ ] `DrawParams`, `NewDrawParams`, `UpdateDrawParams`, `ReleaseDrawParams`:
+- [x] `DrawParams`, `NewDrawParams`, `UpdateDrawParams`, `ReleaseDrawParams`:
       the pointer-free binding table, byte arena, baked inline resources.
-- [ ] `ParameterDescr` reduced to four kinds, the typed uniform constructors
+- [x] `ParameterDescr` reduced to four kinds, the typed uniform constructors
       producing bytes.
-- [ ] `OpQueue.SetDrawParams`: versions, copy-on-write per binding, in-place
+- [x] `OpQueue.SetDrawParams`: versions, copy-on-write per binding, in-place
       patch of an uncaptured version.
-- [ ] `Draw(pass, mesh, set, instances, firstInstance)` - built as `DrawSet`
+- [x] `Draw(pass, mesh, set, instances, firstInstance)` - built as `DrawSet`
       beside the old `Draw` so every step builds, and renamed by the deletion.
-- [ ] The translator over versions: pipeline keying, uniform versions uploaded
+- [x] The translator over versions: pipeline keying, uniform versions uploaded
       once, resource records bound; the name-keyed plans deleted.
-- [ ] Unsupplied bindings as tabled; the liveness check, A/B-measured.
-- [ ] Draw params views in the snapshot and MCP; `mcp.md` and the README
+- [x] Unsupplied bindings as tabled; the liveness check, A/B-measured.
+- [x] Draw params views in the snapshot and MCP; `mcp.md` and the README
       amended.
-- [ ] `MaterialState` renamed `DrawState`.
+- [x] `MaterialState` renamed `DrawState`.
 
 **model** — shaders and sets created at load; `ScenePbrMaterial` packed whole.
 
@@ -792,6 +800,53 @@ uniform structs; call sites moved.
 **deletion** — `MaterialDescr`, `Material`, `MaterialWithState`,
 `FrameMaterial`, `FrameRecording`, `Clone`, `CloneTo`, `Fingerprint`,
 `ParameterShapeState`, `ContinueParameterShape` and their friend accessors.
+
+**Settled here ([#604](https://github.com/dvoyni/cog/issues/604)):** the
+deletion takes the descriptor path whole, not only the names above. The name-keyed
+parameter plans, the translator's shader cache and its loader, and the
+Backend's `NewShader(ShaderDesc)` and `ShaderLayout(ShaderID)` go with it:
+nothing creates a shader but `CreateShader` any more, and the translator reads
+a pipeline's vertex interface and web limits off the set's own program.
+`ReleaseCachedResourceCmd` and `FreeCachedResourcesCmd` therefore name only
+what the translator still caches - path textures, pipelines and samplers - and
+never a shader, which is the caller's. `MaterialView`, `MaterialViewOf`,
+`MaterialStateView` and `MaterialStateViewOf` go too; `ShaderView` stays,
+because canvas's own material view renders a `canvas.Material`'s shader with
+it. `MaterialState` is `DrawState` and `DrawSet` is `Draw`, and nothing else is
+renamed.
+
+**Settled here (#604):** a material's key is its owner's content hash, not a
+gfx fingerprint. Model keeps `Key` per variant - the variant's shader
+descriptor, the Draw state and `FingerprintParams` over the ingredients, hashed
+by model at load - and drops `Forward`, `BundledPbr` and `EnsureBundled`, which
+returned `gfx.MaterialDescr`. Scene keys a `Material` tag the same way, by its
+pass, its shader, its state and `FingerprintParams` over its params. An
+override naming exactly a file's forward material no longer keys equal to the
+file's own material; it draws scene's set rather than model's either way, so
+nothing merged there that should.
+
+**Settled here (#604):** the material block is one source. The prologue, fields
+and epilogue sources existed so an app shader could add members to
+`ScenePbrMaterial`, which whole bindings rejected; they are one unpublished
+`builtin/model/materialblock.wgsl`, which `material.wgsl` and scene's debug
+shader include, and `model.MaterialProloguePath`, `MaterialFieldsPath` and
+`MaterialEpiloguePath` are deleted. An app shader's own values are bindings of
+its own in group 3.
+
+**Settled here (#604):** a gap in a shader's bind groups is bound empty.
+gogpu's pipeline layout already held an empty layout at every index below a
+shader's highest group, but nothing bound a group there, and WebGPU requires
+every group of the layout set before a draw: a group 3 above a scene variant
+with no group 2 failed every frame on Vulkan. gogpu's bind flush now binds an
+empty bind group, created once per shader and gap, at every group the shader
+declares nothing in. It is the backend's, because the pipeline layout is.
+
+**Measured (#604):** the old benchmarks were deleted with the path they
+measured, and the set path's took their names:
+`BenchmarkTranslateDrawSetSteadyState` is `BenchmarkTranslateSteadyState` and
+`BenchmarkOpQueueDrawSetSteadyState` is `BenchmarkOpQueueDrawSteadyState`, so an
+A/B against the commit before the branch compares the old path and the new under
+one name. The figures are in #595.
 
 The work is tracked as sub-issues #596-#604 of #595, with blocking edges in
 this order.

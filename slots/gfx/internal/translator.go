@@ -9,8 +9,6 @@ import (
 
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
-	"github.com/dvoyni/cog/slots/gfx/internal/shader"
-
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/assets"
 )
@@ -34,13 +32,13 @@ type frame struct {
 }
 
 // pipelineKey identifies a cached pipeline by shader identity, render state and
-// the formats of the attachments it renders into. MaterialState is embedded
+// the formats of the attachments it renders into. DrawState is embedded
 // whole so that adding a state field cannot silently return a pipeline built
 // for the old one.
 type pipelineKey struct {
 	shader      types.ShaderID
 	topology    types.PrimitiveTopology
-	state       types.MaterialState
+	state       types.DrawState
 	colorFormat descriptors.TextureFormat
 	depthFormat descriptors.TextureFormat
 	// noColor separates the pipeline a shader needs in a depth-only pass from
@@ -108,21 +106,13 @@ type textureViewKey struct {
 // baked resource ID. It is owned by the plugin and used only on the driver's
 // render thread inside ConsumeCmd.
 type translator struct {
-	// shaders is the module cache, keyed on the whole descriptor - a root plus
-	// one supply is one variant - and holding a compiled id or the failure that
-	// stood in for one. It is a translator field like every other cache here,
-	// reached only on the render thread, so what protects it is the confinement
-	// rather than a lock of its own.
-	shaders   *assets.Cache[shader.ShaderDescrParams, shaderUserData, *loadedShader]
 	pipelines map[pipelineKey]types.PipelineID
 	samplers  map[types.SamplerDesc]types.SamplerID
-	layouts   map[types.ShaderID]shader.ShaderLayout
 	// textures is the path-texture cache. It is a translator field like every
 	// other cache here, reached only on the render thread, so what protects it
 	// is the confinement rather than a lock of its own.
-	textures       *assets.Cache[descriptors.TextureDescrParams, textureUserData, texture]
-	parameterPlans map[parameterPlanBucketKey][]cachedParameterPlan
-	ops            Queue
+	textures *assets.Cache[descriptors.TextureDescrParams, textureUserData, texture]
+	ops      Queue
 	// passOrder is the run order of the frame's passes, reused each frame.
 	passOrder []int
 	// textureUsage is what role each attachment texture is currently in, for
@@ -147,14 +137,13 @@ type translator struct {
 	// the same way report once between them.
 	badIndexLengths map[indexLengthKey]struct{}
 	// unsuppliedBuffers is the set of storage bindings already reported as
-	// unfilled, so a material that misses one is named once rather than at
-	// frame rate. It is keyed by shader and parameter name rather than by
-	// plan, because a plan is keyed by parameter shape and two materials of
-	// one shape carrying different buffers are two faults.
+	// unfilled, so a set that misses one is named once rather than at frame
+	// rate. It is keyed by shader and binding name rather than by set, because
+	// the binding is the shader's and a frame carries only its first error.
 	unsuppliedBuffers map[unsuppliedBufferKey]struct{}
 	// textureViewMismatches is the set of texture bindings already reported as
 	// filled at the wrong view dimension, on unsuppliedBuffers' terms: the
-	// mistake lives in the material until someone edits it, and the frame
+	// mistake lives in the set until someone edits it, and the frame
 	// carries only its first error.
 	textureViewMismatches map[textureViewKey]struct{}
 	// released is every id the frames so far have released, so a draw a
@@ -182,12 +171,9 @@ type uniformUpload struct {
 
 func newTranslator() *translator {
 	return &translator{
-		shaders:           assets.New[shader.ShaderDescrParams, shaderUserData, *loadedShader](shaderLoader{}),
 		pipelines:         map[pipelineKey]types.PipelineID{},
 		samplers:          map[types.SamplerDesc]types.SamplerID{},
-		layouts:           map[types.ShaderID]shader.ShaderLayout{},
 		textures:          assets.New[descriptors.TextureDescrParams, textureUserData, texture](textureLoader{}),
-		parameterPlans:    map[parameterPlanBucketKey][]cachedParameterPlan{},
 		textureUsage:      map[types.TextureID]types.TextureUsage{},
 		badIndexLengths:   map[indexLengthKey]struct{}{},
 		unsuppliedBuffers: map[unsuppliedBufferKey]struct{}{},
@@ -316,11 +302,7 @@ func (t *translator) translatePasses(
 		for j := i; j <= last; j++ {
 			pass := &passes[t.passOrder[j]]
 			for k := range pass.Draws {
-				if draw := &pass.Draws[k]; draw.Set != (descriptors.DrawParams{}) {
-					t.translateSetDraw(f, draw, pass.Desc, firstErr)
-				} else {
-					t.translateDraw(f, draw, pass.Desc, firstErr)
-				}
+				t.translateSetDraw(f, &pass.Draws[k], pass.Desc, firstErr)
 			}
 		}
 		t.ops.EndPass()
@@ -367,13 +349,7 @@ func (t *translator) transitionRun(f *frame, head descriptors.PassDescr, first, 
 	for j := first; j <= last; j++ {
 		draws := passes[t.passOrder[j]].Draws
 		for k := range draws {
-			op := &draws[k]
-			if op.Set != (descriptors.DrawParams{}) {
-				t.collectSetSampled(f, op)
-				continue
-			}
-			t.collectSampled(op.Material.Params())
-			t.collectSampled(op.Params)
+			t.collectSetSampled(f, &draws[k])
 		}
 	}
 	for _, texture := range t.runSampled {
@@ -389,29 +365,9 @@ func (t *translator) transitionRun(f *frame, head descriptors.PassDescr, first, 
 	}
 }
 
-// collectSampled adds every baked texture the parameters name to the run's
-// sampled set, skipping the ones already in it: two draws sampling one render
-// target is a single hazard, and a duplicate barrier is a real pipeline stall.
-//
-// It reads the raw parameters rather than a resolved parameter plan, so it can
-// run before the pass opens. That over-approximates by the textures a shader
-// does not actually declare, which costs a barrier nothing reads and is the
-// safe direction to be wrong in.
-func (t *translator) collectSampled(params []descriptors.ParameterDescr) {
-	for i := range params {
-		p := &params[i]
-		if descriptors.ParameterKind(p) != descriptors.ParamTexture {
-			continue
-		}
-		// Only a baked texture carries an id, so the id is the whole test: a
-		// path or an inline run has nothing an attachment could collide with.
-		texture := descriptors.ParameterTextureRef(p)
-		t.noteSampled(texture.ID())
-	}
-}
-
-// noteSampled adds one texture to the run's sampled set, on collectSampled's
-// terms.
+// noteSampled adds one texture to the run's sampled set, skipping one already
+// in it: two draws sampling one render target is a single hazard, and a
+// duplicate barrier is a real pipeline stall.
 func (t *translator) noteSampled(texture types.TextureID) {
 	if texture != 0 && !slices.Contains(t.runSampled, texture) {
 		t.runSampled = append(t.runSampled, texture)

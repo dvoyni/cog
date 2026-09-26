@@ -38,8 +38,7 @@ type FrameView struct {
 	// DrawParams are the sets the kept passes draw through, one per set and
 	// version, in the order the first draw of each runs. A draw names a set
 	// and the version it was recorded with, and both resolve: this is what a
-	// draw draws with, without listing the draws one by one. A draw through the
-	// old material path names no set and is counted only.
+	// draw draws with, without listing the draws one by one.
 	DrawParams []DrawParamsView `json:"drawParams,omitempty"`
 	// PassCount, DrawCount and InstanceCount are the whole frame's, whatever
 	// the filter kept, so a filtered response still says how much of the frame

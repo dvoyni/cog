@@ -1,6 +1,6 @@
 // Package gfx declares the gfx Slot, cog's driver-agnostic high-level renderer
 // (renderer v2). It exposes declarative, high-level concepts to gameplay -
-// Mesh, Material, OpQueue, Viewport - over the low-level GPU contract a driver
+// Mesh, DrawParams, OpQueue, Viewport - over the low-level GPU contract a driver
 // implements: the Backend interface, the Queue gfx replays into it, and the
 // IDs, formats, enums and descriptors both halves speak, each with the one
 // name gfx.X.

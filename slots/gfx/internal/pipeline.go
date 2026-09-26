@@ -11,7 +11,7 @@ import (
 type PipelineDesc struct {
 	Shader      types.ShaderID
 	Topology    types.PrimitiveTopology
-	State       types.MaterialState
+	State       types.DrawState
 	ColorFormat descriptors.TextureFormat
 	DepthFormat descriptors.TextureFormat
 	// NoColorTarget builds a pipeline with no colour target at all, which is

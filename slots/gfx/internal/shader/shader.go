@@ -40,11 +40,10 @@ type ShaderDescrParams struct {
 }
 
 // ShaderDescr describes a shader by inline source text (ShaderWithText) or a
-// resource path (ShaderWithResource), resolved to bytes by the renderer.
+// resource path (ShaderWithResource), resolved to bytes by CompileShaderCmd.
 //
 // It is an assets.Descr: Name is the resource path, Blob is the inline text -
-// wrapped, never copied - and Params is the supply. That is also what makes it
-// the key of gfx's shader cache rather than merely the request handed to one.
+// wrapped, never copied - and Params is the supply.
 //
 // The two cases are disjoint and are told apart by which field carries the
 // answer: a Name for a path, a Blob for inline text. There is no source enum,

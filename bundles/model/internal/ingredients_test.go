@@ -18,10 +18,10 @@ func testDefaults() PbrDefaults {
 }
 
 // A file's material keeps what it is made of, not only what the bundled shader
-// made of it: the forward material of every variant is exactly the bundled
-// variant over the ingredients, so a renderer resolving a caller's shader over
-// the same ingredients loses nothing the bundled draw would have bound.
-func TestAModelMaterialsForwardIsTheBundledShaderOverItsIngredients(t *testing.T) {
+// made of it, so a renderer resolving a caller's shader over the same
+// ingredients loses nothing the bundled draw would have bound; and it is keyed
+// per variant by the bundled variant over those ingredients.
+func TestAModelMaterialIsKeyedByTheBundledShaderOverItsIngredients(t *testing.T) {
 	loaded := &loadedMaterial{
 		values: paintPbrValues(m.NewColorLinear(0.5, 0.25, 1, 1), false),
 		state:  PbrState(AlphaBlend, true),
@@ -47,17 +47,21 @@ func TestAModelMaterialsForwardIsTheBundledShaderOverItsIngredients(t *testing.T
 				i, built.Params[2*i].Name(), built.Params[2*i+1].Name(), slot.Texture)
 		}
 	}
+	seen := map[uint64]int{}
 	for variant := range VariantCount {
-		want := gfx.MaterialWithState(VariantShader(gfx.ShaderDescr{}, ShaderVariant(variant)), built.State, built.Params...)
-		if built.Forward[variant].Fingerprint() != want.Fingerprint() {
-			t.Errorf("variant %d's forward material is not the bundled variant over the ingredients", variant)
+		want := materialKey(VariantShader(gfx.ShaderDescr{}, ShaderVariant(variant)), built.State, built.Params)
+		if built.Key[variant] != want {
+			t.Errorf("variant %d is not keyed by the bundled variant over the ingredients", variant)
 		}
+		if other, ok := seen[built.Key[variant]]; ok {
+			t.Errorf("variants %d and %d key the same", other, variant)
+		}
+		seen[built.Key[variant]] = variant
 	}
 }
 
 // A baked mesh has a file too: the bundled PBR's ingredients, white and flat
-// in every slot, opaque, single-sided and painted white. Its forward material
-// is the same shader over them.
+// in every slot, opaque, single-sided and painted white.
 func TestTheBundledIngredientsAreWhatTheBundledMaterialBinds(t *testing.T) {
 	defaults := testDefaults()
 	ingredients := BundledIngredients(defaults)
@@ -67,14 +71,6 @@ func TestTheBundledIngredientsAreWhatTheBundledMaterialBinds(t *testing.T) {
 	white := paintPbrValues(m.NewColorLinear(1, 1, 1, 1), false)
 	if got := ingredients.Params[2*len(PbrSlots):]; gfx.FingerprintParams(got) != gfx.FingerprintParams(white.appendParams(nil)) {
 		t.Errorf("the bundled numbers are not white paint")
-	}
-	bundled := BundledPbr(defaults)
-	for variant := range VariantCount {
-		want := gfx.MaterialWithState(VariantShader(gfx.ShaderDescr{}, ShaderVariant(variant)),
-			ingredients.State, ingredients.Params...)
-		if bundled[variant].Fingerprint() != want.Fingerprint() {
-			t.Errorf("variant %d of the bundled PBR is not its shader over the bundled ingredients", variant)
-		}
 	}
 }
 

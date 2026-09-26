@@ -54,7 +54,7 @@ func ScreenToWorld(window m.Rect, aspect AspectMode, viewport, screen m.Vec2) m.
 func DefaultKeyColor() m.Color { return internal.DefaultKeyColor() }
 
 // NewMaterial describes a material from a shader and its own parameters. Its
-// state is gfx.Material's - alpha-blended, depth-tested and written - which is
+// state is alpha-blended, depth-tested and written, which is
 // what an opaque 3D draw wants and rarely what a canvas draw does: canvas layers
 // share a depth attachment, so a material that writes depth hides whatever it
 // covers at the same depth. Most canvas materials want MaterialWithState with
@@ -67,7 +67,7 @@ func NewMaterial(shader gfx.ShaderDescr, params ...gfx.ParameterDescr) Material 
 //
 //	var fade = canvas.MaterialWithState(
 //		gfx.ShaderWithResource("shaders/fade-sprite.wgsl"), gfx.StateOverlay2D())
-func MaterialWithState(shader gfx.ShaderDescr, state gfx.MaterialState, params ...gfx.ParameterDescr) Material {
+func MaterialWithState(shader gfx.ShaderDescr, state gfx.DrawState, params ...gfx.ParameterDescr) Material {
 	return internal.MaterialWithState(shader, state, params...)
 }
 

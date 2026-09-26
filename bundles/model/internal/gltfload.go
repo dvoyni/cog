@@ -108,7 +108,7 @@ type loadedScene = DecodedScene
 // sampler each of the five slots binds.
 type loadedMaterial struct {
 	values PbrValues
-	state  gfx.MaterialState
+	state  gfx.DrawState
 	// slots index LoadedModel.textures, or missingTexture for a slot the file
 	// left empty or named no readable image for. Both fall back to the slot's
 	// own 1x1 default, which is what makes a partial failure a resident model.

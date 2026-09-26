@@ -343,11 +343,11 @@ The name of what a Pass is for, and the key that selects which of a Scene materi
 _Avoid_: Queue, light mode
 
 **Scene material**:
-The set of graphics materials one recorded thing offers, one per Pass tag. A Pass whose tag it has no entry for does not draw that thing. A recording call copies it — its entries and each entry's parameters, but not their Blobs, and once per frame per distinct content — so the caller may change it the moment the call returns; two equal ones batch together however each was built, because a Scene material is keyed by content.
+The entries one recorded thing offers, one per Pass tag, each a shader, a Draw state and parameters. A Pass whose tag it has no entry for does not draw that thing. A recording call copies it — its entries and each entry's parameters, but not their Blobs, and once per frame per distinct content — so the caller may change it the moment the call returns; two equal ones batch together however each was built, because a Scene material is keyed by content.
 _Avoid_: Shader
 
 **Model material**:
-What one material in a model file becomes once loaded: for each shader variant, the graphics material that draws it in a forward pass, together with the numbers the bundled PBR reads, and a content key fixed at load. It names no Pass tag. A renderer wraps it in its own material under whatever tag it chooses, so the same loaded file serves both renderers unchanged, and nothing re-keys it per draw.
+What one material in a model file becomes once loaded: for each shader variant, the set of draw params that draws it, together with the ingredients and numbers the bundled PBR reads, and a content key fixed at load. It names no Pass tag. A renderer wraps it in its own material under whatever tag it chooses, so the same loaded file serves both renderers unchanged, and nothing re-keys it per draw.
 _Avoid_: Scene material (that is a renderer's, and carries tags)
 
 **Layer mask**:

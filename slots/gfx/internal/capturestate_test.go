@@ -18,7 +18,6 @@ import (
 
 	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 	"github.com/dvoyni/cog/slots/app/appplugin"
 	"github.com/dvoyni/cog/slots/storage"
@@ -42,6 +41,8 @@ type captureRig struct {
 	clock   *timePlugin
 	gate    *gatePlugin
 	flush   *flushPlugin
+	// set is what every draw the rig records draws through.
+	set descriptors.DrawParams
 }
 
 func newCaptureRig(t *testing.T) *captureRig {
@@ -69,6 +70,7 @@ func newCaptureRig(t *testing.T) *captureRig {
 	rig.k.ExecuteCommand[SetViewportCmd](SetViewportRequest{
 		Width: 800, Height: 600, FramebufferWidth: 1600, FramebufferHeight: 1200,
 	})
+	rig.set = testSet(t, rig.k)
 	return rig
 }
 
@@ -78,7 +80,7 @@ func (r *captureRig) record(label string) {
 	r.t.Helper()
 	q := recordRaw(r.t, r.k)
 	ref := q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: label})
-	drawInto(q, ref)
+	drawInto(q, ref, r.set)
 }
 
 func (r *captureRig) tick() {
@@ -591,7 +593,7 @@ func TestATextureCaptureDeclaresItsTransition(t *testing.T) {
 	ref := q.NewPass(descriptors.PassDescr{
 		Target: descriptors.TextureTarget(target, 0, 0), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "offscreen",
 	})
-	q.Draw(ref, triangle(), testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	q.Draw(ref, triangle(), rig.set, 1, 0)
 	rig.tick()
 	rig.render()
 

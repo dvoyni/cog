@@ -18,7 +18,7 @@ func TestADepthlessPipelineDeclaresNoDepthState(t *testing.T) {
 func TestADepthPipelineTakesItsFormatFromTheDescriptor(t *testing.T) {
 	state := depthStencilState(gfx.PipelineDesc{
 		DepthFormat: gfx.FormatDepth32F,
-		State:       gfx.MaterialState{DepthCompare: gfx.CompareLessEqual, DepthWrite: true},
+		State:       gfx.DrawState{DepthCompare: gfx.CompareLessEqual, DepthWrite: true},
 	})
 	if state == nil {
 		t.Fatal("a depth pipeline got no depth state")

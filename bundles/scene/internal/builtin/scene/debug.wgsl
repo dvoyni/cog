@@ -2,18 +2,16 @@
 // returns the material's baseColorFactor untouched, so no light - the sun and
 // ambient included - reaches a debug shape.
 //
-// It declares the material's uniform block through the three published
-// Material paths and none of the bundled material's textures, so a draw binds
-// the block alone in group 1. The vertex stage reads the pass's sceneFrame,
+// It declares the material's uniform block through model's materialblock.wgsl
+// and none of the bundled material's textures, so a draw binds the block alone
+// in group 1. The vertex stage reads the pass's sceneFrame,
 // which the bundled shader brings in on its fragment side, so FramePath is
 // included here.
 //
 // It is mounted at builtin/scene/debug.wgsl, the path debugShaderPath
 // spells.
 //#include builtin/model/frame.wgsl
-//#include builtin/model/materialprologue.wgsl
-//#include builtin/model/materialfields.wgsl
-//#include builtin/model/materialepilogue.wgsl
+//#include builtin/model/materialblock.wgsl
 //#include builtin/model/vertexstage.wgsl
 
 @fragment

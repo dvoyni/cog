@@ -33,9 +33,12 @@ type gfxbShader struct {
 	// layout for every index below the highest group a shader uses, so an
 	// unused middle group has a non-nil layout with no entries in it, and a
 	// scene shader composed from frame (group 0) and morph (group 2) but not
-	// material (group 1) is exactly that. Refusing it would drop every draw of
-	// it for the life of the process, because a refusal is latched once and
-	// dropped always.
+	// material (group 1) is exactly that, and so is an app shader that puts a
+	// group 3 above a variant declaring no group 2. Refusing it would drop every
+	// draw of it for the life of the process, because a refusal is latched once
+	// and dropped always; leaving it unset fails every draw of it, because
+	// WebGPU requires every group of the pipeline layout set. So flushBinds
+	// binds it with an empty bind group.
 	//
 	// It is an index rather than a search of layout.Resources for the same
 	// reason textureViews is: it is read once per group per draw.

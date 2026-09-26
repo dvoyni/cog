@@ -69,9 +69,9 @@ const oneInputWGSL = `
 // Before the pin the same call returned no error (dvoyni/cog#47).
 func TestAMisalignedVertexStrideFailsThePipelineOnTheNativePath(t *testing.T) {
 	b := newNoopGfxBackend(t)
-	shader, err := b.NewShader(gfx.ShaderDesc{Label: "stride.wgsl", Code: []byte(oneInputWGSL)})
-	if err != nil {
-		t.Fatalf("NewShader: %v", err)
+	shader := b.ReserveShader()
+	if err := b.CreateShader(shader, gfx.ShaderDesc{Label: "stride.wgsl", Code: []byte(oneInputWGSL)}); err != nil {
+		t.Fatalf("CreateShader: %v", err)
 	}
 	desc := gfx.PipelineDesc{
 		Shader:        shader,
@@ -87,7 +87,7 @@ func TestAMisalignedVertexStrideFailsThePipelineOnTheNativePath(t *testing.T) {
 	}
 
 	desc.Stride = 30
-	_, err = b.NewPipeline(desc)
+	_, err := b.NewPipeline(desc)
 	var pipelineErr *core.CreateRenderPipelineError
 	if !errors.As(err, &pipelineErr) {
 		t.Fatalf("stride 30: err = %v (%T), want a *core.CreateRenderPipelineError", err, err)

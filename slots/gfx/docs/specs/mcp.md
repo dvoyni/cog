@@ -394,6 +394,12 @@ at the wrong thing. With source indices no addressing scheme needs inventing:
 > materials removes none. `MaterialView` survives only as `canvas_draws`'
 > rendering of a canvas op's gfx material, and goes with it; its pipeline state
 > is `DrawStateView`, which `MaterialStateView` now aliases.
+>
+> **Amended by [#604](https://github.com/dvoyni/cog/issues/604).** The old
+> material path is deleted, so every draw names a set and none is only counted;
+> `MaterialView`, `MaterialViewOf`, `MaterialStateView` and
+> `MaterialStateViewOf` are deleted with it, and `canvas_draws` renders a
+> canvas op's `canvas.Material` through canvas's own view.
 
 That answers *why is nothing on screen* precisely — no passes, a pass ordered
 wrong, a target that is not the screen, a texture never baked, a resource
@@ -443,6 +449,11 @@ shapes across two tools.
 > material path: they are kept only while `canvas_draws` renders a canvas op's
 > gfx material, and are deleted with materials. `DrawParamsView` and
 > `DrawParamsBindingView` are `gfx_frame`'s own, beside `PassView`.
+>
+> **Amended by [#604](https://github.com/dvoyni/cog/issues/604).** Materials
+> are deleted, and `MaterialView` and `MaterialStateView` with them. The shared
+> vocabulary is `ParameterView`, `TextureView`, `ShaderView` and
+> `DrawStateView`.
 
 > **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).**
 > `SnapshotView` — shipped as the three coordinate sizes plus `stepped` and

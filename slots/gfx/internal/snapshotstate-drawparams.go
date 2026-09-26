@@ -14,8 +14,7 @@ type drawParamsKey struct {
 
 // appendDrawParamsViews renders the sets one kept pass draws through, adding
 // each set and version the first time a draw names it and counting every draw
-// against the entry. seen maps an entry to its position in dst. A draw through
-// the old material path names no set and adds nothing.
+// against the entry. seen maps an entry to its position in dst.
 func appendDrawParamsViews(dst []DrawParamsView, seen map[drawParamsKey]int, queue *OpQueue, resources *ResourceQueue, index int) []DrawParamsView {
 	draws := OpQueuePasses(queue)[index].Draws
 	for i := range draws {

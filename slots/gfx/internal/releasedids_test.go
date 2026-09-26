@@ -8,7 +8,6 @@ import (
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
 
@@ -44,7 +43,7 @@ func TestARerenderedFrameDropsADrawWhoseMeshWasReleased(t *testing.T) {
 				descriptors.Attr(0, descriptors.Float32x3), descriptors.Attr(12, descriptors.Float32x4),
 			)
 			w, ref := recordList(t, k)
-			w.Draw(ref, mesh, testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+			w.Draw(ref, mesh, testSet(t, k), 1, 0)
 			k.ExecuteCommand[PresentCmd](PresentRequest{})
 			k.PublishEvent(app.RenderEvent{}).Wait()
 			if got := countOps(backend.lastOps, testOpDraw); got != 1 {
@@ -115,13 +114,13 @@ func TestARerenderedFrameDropsADrawWhoseSetWasReleased(t *testing.T) {
 				w.texture = q.NewTexture(1, 1, 1, descriptors.FormatRGBA8, false)
 				q.UploadTexture(w.texture, 0, types.Region{}, []byte{1, 2, 3, 4}, true)
 			})
-			w.set = w.newSet(types.MaterialState{}, descriptors.TextureParam("albedo", w.texture))
-			w.unrelated = w.newSet(types.MaterialState{})
+			w.set = w.newSet(types.DrawState{}, descriptors.TextureParam("albedo", w.texture))
+			w.unrelated = w.newSet(types.DrawState{})
 			w.k.ExecuteCommand[recordCmd](recordRequest{withKernel: func(k kernel.Kernel, q *OpQueue) {
 				if c.version {
 					q.SetDrawParams(k, w.set, descriptors.BufferParam("instances", w.versioned))
 				}
-				q.DrawSet(screenPass(q, 0, "main"), triangle(), w.set, 1, 0)
+				q.Draw(screenPass(q, 0, "main"), triangle(), w.set, 1, 0)
 			}})
 			w.k.ExecuteCommand[PresentCmd](PresentRequest{})
 			w.k.PublishEvent(app.RenderEvent{}).Wait()
@@ -151,11 +150,11 @@ func TestReleasingASetReleasesItsBakesAsItsDrawIsDropped(t *testing.T) {
 	w := newSetWorld(t)
 	var set descriptors.DrawParams
 	w.resources(func(k kernel.Kernel, q *ResourceQueue) {
-		set = q.NewDrawParams(k, w.shader, types.MaterialState{},
+		set = q.NewDrawParams(k, w.shader, types.DrawState{},
 			descriptors.BufferParam("instances", descriptors.BufferWithBytes(make([]byte, 64), true)),
 			descriptors.TextureParam("albedo", descriptors.TextureWithBytes(1, 1, descriptors.FormatRGBA8, []byte{1, 2, 3, 4}, true, false)))
 	})
-	w.frame(func(_ kernel.Kernel, q *OpQueue) { q.DrawSet(screenPass(q, 0, "main"), triangle(), set, 1, 0) })
+	w.frame(func(_ kernel.Kernel, q *OpQueue) { q.Draw(screenPass(q, 0, "main"), triangle(), set, 1, 0) })
 	var buffer types.BufferID
 	var texture types.TextureID
 	for _, op := range w.backend.lastOps {

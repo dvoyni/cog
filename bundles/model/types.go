@@ -318,30 +318,10 @@ const (
 	// a function. It declares scenePbrFragment, which a custom fs_main calls
 	// for the shaded colour, and through what it includes SceneVertexOut,
 	// PbrPath, FramePath and the material's group 1 bindings, which the
-	// renderer fills on every draw. Group 3 is the includer's own, and its
-	// per-draw numbers go in the material's uniform block, composed from the
-	// three Material paths below. Do not declare those names again.
+	// renderer fills on every draw. Group 3 is the includer's own: its values
+	// are bindings of their own there, a uniform set whole among them, never
+	// members added to the material's block. Do not declare those names again.
 	FragmentStagePath = internal.FragmentStagePath
-	// MaterialProloguePath is the storage path of the opening of the
-	// material's uniform block: it declares the struct ScenePbrMaterial. A
-	// shader adding per-draw numbers of its own includes it, then a fields
-	// source of its own that includes MaterialFieldsPath and lists its members
-	// after it, then MaterialEpiloguePath, before FragmentStagePath. Includes
-	// are once per path, so the material's own three are skipped and the block
-	// holds every member once. Do not declare those names again.
-	MaterialProloguePath = internal.MaterialProloguePath
-	// MaterialFieldsPath is the storage path of the material's uniform block's
-	// members: baseColorFactor, emissiveFactor, baseColorTransform,
-	// metallicRoughnessTransform, normalTransform, occlusionTransform,
-	// emissiveTransform, baseColorRotation, metallicRoughnessRotation,
-	// normalRotation, occlusionRotation, emissiveRotation, metallicFactor,
-	// roughnessFactor, normalScale, occlusionStrength, alphaCutoff and uvSets,
-	// 160 bytes of the block. Do not declare those names again.
-	MaterialFieldsPath = internal.MaterialFieldsPath
-	// MaterialEpiloguePath is the storage path of the close of the material's
-	// uniform block, which declares its binding, scenePbrMaterial, at
-	// @group(1) @binding(0). Do not declare those names again.
-	MaterialEpiloguePath = internal.MaterialEpiloguePath
 )
 
 // PbrSlots are the bundled material's five texture slots, in record order, and

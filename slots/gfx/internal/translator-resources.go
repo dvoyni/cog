@@ -1,8 +1,6 @@
 package internal
 
 import (
-	"slices"
-
 	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
@@ -36,34 +34,6 @@ func (t *translator) textureUserData(f *frame) textureUserData {
 	return textureUserData{backend: f.backend, ops: &t.ops}
 }
 
-// ensureShader resolves one material's shader to the module id its draw is
-// encoded against, to the label its reports name it by, and to the error that
-// module has to say for itself.
-func (t *translator) ensureShader(f *frame, descr shader.ShaderDescr) (types.ShaderID, string, error) {
-	cached := t.shaders.Get(
-		f.k, assets.Descr[shader.ShaderDescrParams](descr), f.fsys, t.shaderUserData(f, descr.Path()),
-	)
-	return cached.id, cached.label, cached.report()
-}
-
-// shaderUserData is what the shader loader is handed on every call. root is the
-// module's path on a load and empty on a free, which is the whole difference
-// between the two: a free reads the value, and only a load needs to be told
-// what the bytes it was given are called.
-func (t *translator) shaderUserData(f *frame, root string) shaderUserData {
-	return shaderUserData{t: t, backend: f.backend, root: root}
-}
-
-// shaderLayout returns the backend's reflected layout for a shader, cached by id.
-func (t *translator) shaderLayout(backend Backend, id types.ShaderID) shader.ShaderLayout {
-	if l, ok := t.layouts[id]; ok {
-		return l
-	}
-	l := backend.ShaderLayout(id)
-	t.layouts[id] = l
-	return l
-}
-
 // createShader creates the module of an uploaded program under the id
 // ResourceQueue.NewShader reserved for it. The layout is the program's own, so
 // the backend is never asked to reflect again, and it is measured against the
@@ -71,22 +41,18 @@ func (t *translator) shaderLayout(backend Backend, id types.ShaderID) shader.Sha
 func (t *translator) createShader(backend Backend, id types.ShaderID, program shader.ShaderProgram) error {
 	desc := shader.ProgramDesc(program)
 	if err := backend.CreateShader(id, desc); err != nil {
-		// As in the descriptor path, nothing the backend said is rewritten: the
-		// segment table rides beside it and the reader subtracts.
+		// Nothing the backend said is rewritten and no line number is parsed out
+		// of its message: the segment table rides beside it and the reader
+		// subtracts.
 		return shader.CompileError(desc.Label, err, shader.ProgramSourceMap(program))
 	}
-	layout := shader.ProgramLayout(program)
-	t.layouts[id] = layout
-	if diagnostic := checkWebLimits(desc.Label, layout, backend.Limits()); diagnostic != nil && t.diagnostic == nil {
+	if diagnostic := checkWebLimits(desc.Label, shader.ProgramLayout(program), backend.Limits()); diagnostic != nil && t.diagnostic == nil {
 		t.diagnostic = diagnostic
 	}
 	return nil
 }
 
-// releaseShader frees a shader's module and everything the translator derived
-// from it: the pipelines keyed on its id, the parameter plans behind them and
-// its reflected layout. It is the cascade both an explicit ReleaseShader and
-// the descriptor path's cache eviction run.
+// releaseShader frees a shader's module and the pipelines keyed on its id.
 func (t *translator) releaseShader(backend Backend, id types.ShaderID) {
 	for key, pipeline := range t.pipelines {
 		if key.shader != id {
@@ -99,12 +65,6 @@ func (t *translator) releaseShader(backend Backend, id types.ShaderID) {
 		}
 		delete(t.pipelines, key)
 	}
-	for key := range t.parameterPlans {
-		if key.shader == id {
-			delete(t.parameterPlans, key)
-		}
-	}
-	delete(t.layouts, id)
 	backend.FreeShader(id)
 }
 
@@ -117,7 +77,7 @@ func (t *translator) releaseShader(backend Backend, id types.ShaderID) {
 // returns zero and no error, and the caller drops the draw on the zero id
 // exactly as it did before.
 func (t *translator) ensurePipeline(
-	backend Backend, shaderID types.ShaderID, label string, m *descriptors.MeshDescr, state types.MaterialState, pass descriptors.PassDescr,
+	backend Backend, shaderID types.ShaderID, program shader.ShaderProgram, m *descriptors.MeshDescr, state types.DrawState, pass descriptors.PassDescr,
 ) (types.PipelineID, error) {
 	stride := descriptors.MeshStride(m)
 	layout, ok := descriptors.VertexLayoutKeyOf(descriptors.MeshLayout(m))
@@ -149,7 +109,7 @@ func (t *translator) ensurePipeline(
 	// validation of any kind, the software rasterizer keeps an unsupplied
 	// input's zero value, and WebGPU itself fills the components a format does
 	// not supply with (0, 0, 0, 1).
-	if err := CheckVertexInterface(label, t.shaderLayout(backend, shaderID), descriptors.MeshLayout(m)); err != nil {
+	if err := CheckVertexInterface(program.Label(), shader.ProgramLayout(program), descriptors.MeshLayout(m)); err != nil {
 		t.pipelines[k] = 0
 		return 0, err
 	}
@@ -172,7 +132,7 @@ func (t *translator) ensurePipeline(
 	})
 	if err != nil {
 		t.pipelines[k] = 0
-		return 0, ErrPipelineFailed{Shader: label, Err: err}
+		return 0, ErrPipelineFailed{Shader: program.Label(), Err: err}
 	}
 	t.pipelines[k] = id
 	return id, nil
@@ -233,42 +193,27 @@ func (t *translator) releaseCachedResource(f *frame, path string) {
 	// A path names exactly one texture entry, because TextureWithResource is the
 	// only way one is made and it takes no options - so the key a Free names is
 	// the key a Get made, and the report that entry filed is forgotten with it.
+	// Shaders are not cached here: each is the caller's, created and released
+	// through the ResourceQueue.
 	t.textures.Free(f.k, assets.Descr[descriptors.TextureDescrParams](descriptors.TextureWithResource(path)), t.textureUserData(f))
-	// A shader cannot be freed by key, because three things break the probe of
-	// one descriptor: a path may root several variants, a path may be an
-	// included source of modules rooted elsewhere, and a ShaderWithText shader
-	// can include resources, so a text shader is evictable by a path it never
-	// names. The decision is over the value, and the value already holds the
-	// answer - which is what FreeWhere is, and why gfx builds no reverse
-	// path-to-modules index to hold what the include set holds already.
-	t.shaders.FreeWhere(f.k, t.shaderUserData(f, ""), func(_ assets.Descr[shader.ShaderDescrParams], value *loadedShader) bool {
-		return slices.Contains(value.sources, path)
-	})
 }
 
 func (t *translator) freeCachedResources(f *frame) {
-	// Pipelines and plans go first, and the order is the point. Freeing an entry
-	// runs the loader's cascade, which sweeps both maps for the dead ShaderID;
-	// left full, that is O(shaders x pipelines) across the FreeAll. Emptied
-	// ahead of it, every sweep scans nothing and the pipelines are still handed
-	// back exactly once - here, where the shader ids they were keyed on are
-	// about to stop meaning anything.
+	// Pipelines are rebuilt on the next draw that needs one; the shaders they
+	// were keyed on are the caller's, and stay.
 	for _, pipeline := range t.pipelines {
 		if pipeline != 0 {
 			f.backend.FreePipeline(pipeline)
 		}
 	}
 	clear(t.pipelines)
-	clear(t.parameterPlans)
 
 	t.textures.FreeAll(f.k, t.textureUserData(f))
-	t.shaders.FreeAll(f.k, t.shaderUserData(f, ""))
 
 	for _, sampler := range t.samplers {
 		f.backend.FreeSampler(sampler)
 	}
 	clear(t.samplers)
-	clear(t.layouts)
 	clear(t.badIndexLengths)
 	clear(t.unsuppliedBuffers)
 }

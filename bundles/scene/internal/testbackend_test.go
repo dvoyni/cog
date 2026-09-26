@@ -33,7 +33,6 @@ type testBackend struct {
 	// custom material's shader from the bundled one: gfx.ShaderWithText hands
 	// its text through untouched.
 	shaders   map[gfx.ShaderID]string
-	layouts   map[gfx.ShaderID]gfx.ShaderLayout
 	pipelines map[gfx.PipelineID]gfx.PipelineDesc
 	baked     map[gfx.BufferID][]byte
 	uniforms  []byte
@@ -173,18 +172,6 @@ func (b *testBackend) NewSampler(gfx.SamplerDesc) (gfx.SamplerID, error) {
 
 func (b *testBackend) FreeSampler(gfx.SamplerID) {}
 
-func (b *testBackend) NewShader(desc gfx.ShaderDesc) (gfx.ShaderID, error) {
-	id := gfx.ShaderID(b.next())
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.shaders == nil {
-		b.shaders, b.layouts = map[gfx.ShaderID]string{}, map[gfx.ShaderID]gfx.ShaderLayout{}
-	}
-	b.shaders[id] = string(desc.Code)
-	b.layouts[id] = layoutOf(string(desc.Code))
-	return id, nil
-}
-
 func (b *testBackend) FreeShader(gfx.ShaderID)     {}
 func (b *testBackend) ReserveShader() gfx.ShaderID { return gfx.ShaderID(b.next()) }
 
@@ -194,7 +181,7 @@ func (b *testBackend) CreateShader(id gfx.ShaderID, desc gfx.ShaderDesc) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.shaders == nil {
-		b.shaders, b.layouts = map[gfx.ShaderID]string{}, map[gfx.ShaderID]gfx.ShaderLayout{}
+		b.shaders = map[gfx.ShaderID]string{}
 	}
 	b.shaders[id] = string(desc.Code)
 	return nil
@@ -229,12 +216,6 @@ var testBindings = []gfx.ShaderResource{
 // scenePbrMaterialSize is ScenePbrMaterial's size: seven vec4s and eleven
 // scalars, rounded up to the struct's 16-byte alignment.
 const scenePbrMaterialSize = 160
-
-func (b *testBackend) ShaderLayout(id gfx.ShaderID) gfx.ShaderLayout {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.layouts[id]
-}
 
 func (b *testBackend) NewPipeline(desc gfx.PipelineDesc) (gfx.PipelineID, error) {
 	id := gfx.PipelineID(b.next())
@@ -366,7 +347,7 @@ const (
 type drawnInstance struct {
 	pass     gfx.PassDesc
 	shader   string
-	state    gfx.MaterialState
+	state    gfx.DrawState
 	params   map[[2]int][]byte
 	vertices gfx.BufferID
 	count    int

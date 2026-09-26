@@ -1,6 +1,9 @@
 package internal
 
 import (
+	"encoding/binary"
+	"hash/maphash"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -71,52 +74,25 @@ var PbrSlots = [...]PbrSlot{
 // white texel.
 const NormalSlot = 2
 
-// BundledPbr builds the bundled PBR material's forward gfx material, once per
-// shader variant. Every draw that names no material of its own uses it, under
-// whatever pass tag its renderer wraps it in: model names no pass.
-//
-// Its params are BundledIngredients': the five textures and five samplers,
-// and white paint's numbers as the members of the scenePbrMaterial uniform
-// block. gfx binds and packs all of them by name, so a renderer drawing it
-// never names one.
-//
-// The scene-prefixed parameter name space is reserved for engine-supplied
-// bindings, mirroring canvas's canvasTexture and canvasSampler. There is no
-// separate system-bindings channel to keep in sync: sceneFrame, sceneInstances
-// and the rest are injected as ordinary per-draw parameters and the existing
-// matcher binds them exactly like a material texture. A caller
-// material that names a scene* parameter is an app bug; gfx does not police it,
-// and the material simply loses.
-func BundledPbr(defaults PbrDefaults) [VariantCount]gfx.MaterialDescr {
-	ingredients := BundledIngredients(defaults)
-	var bundled [VariantCount]gfx.MaterialDescr
-	for variant := range bundled {
-		// One params slice serves all four: only the shader differs, and gfx
-		// copies parameters into its own arena as it records.
-		bundled[variant] = gfx.MaterialWithState(
-			ShaderVariant(variant).shader(), ingredients.State, ingredients.Params...)
-	}
-	return bundled
-}
-
 // MaterialIngredients are what a draw's material is resolved from, apart from
-// its shader: the params gfx binds by name and the pipeline state. A glTF
+// its shader: the params a set binds by name and the pipeline state. A glTF
 // material keeps its own, and a baked mesh has BundledIngredients, which is
 // the "file" a mesh draws from.
 //
 // A renderer resolves a caller's shader over them rather than over nothing, so
 // a shader that replaces the bundled one keeps every texture, sampler, state
-// and number the file gave its primitive. gfx matches params to bindings by
-// name and drops a param no binding declares, so a shader that reads none of
-// them costs nothing for their being there.
+// and number the file gave its primitive. A renderer keeps only the params its
+// shader declares a binding for, so a shader that reads none of them costs
+// nothing for their being there.
 type MaterialIngredients struct {
 	// Params are the five texture slots and their samplers, a default texel
 	// in each slot the file left empty - all ten, always, because WGSL
 	// requires every declared binding bound - and then one param per member
-	// of the scenePbrMaterial uniform block, glTF's defaults included, because
-	// gfx packs a member nothing supplies as zero.
+	// of the scenePbrMaterial uniform block, glTF's defaults included: the
+	// numbers Values holds whole, spelled by member so a material's key covers
+	// them. No binding is named for a member, so a set never binds one.
 	Params []gfx.ParameterDescr
-	State  gfx.MaterialState
+	State  gfx.DrawState
 	// Values are the same numbers as the Params' members, as the whole
 	// ScenePbrMaterial block: what a renderer drawing through draw params sets
 	// its binding with, after Overlay has laid its own members over a copy.
@@ -228,7 +204,7 @@ const (
 // concern: the shader discards against alphaCutoff, which is zero for an opaque
 // material and therefore a no-op there. It cannot be alpha-to-coverage, which
 // needs MSAA.
-func PbrState(alpha AlphaMode, doubleSided bool) gfx.MaterialState {
+func PbrState(alpha AlphaMode, doubleSided bool) gfx.DrawState {
 	state := gfx.StateOpaque3D()
 	if alpha == AlphaBlend {
 		state = gfx.StateTransparent3D()
@@ -239,4 +215,25 @@ func PbrState(alpha AlphaMode, doubleSided bool) gfx.MaterialState {
 		state.Cull = gfx.CullBack
 	}
 	return state
+}
+
+// materialSeed is fixed for the process, so a material key compares only
+// against others taken in the same process, which is all a renderer's batch
+// and set caches need.
+var materialSeed = maphash.MakeSeed()
+
+// materialKey fingerprints what makes one material different from another:
+// the shader by its whole descriptor, supply included, the pipeline state, and
+// every param in order through gfx.FingerprintParams. Without the supply, two
+// materials differing only in their defines would key the same and one would
+// draw the other's module.
+func materialKey(shader gfx.ShaderDescr, state gfx.DrawState, params []gfx.ParameterDescr) uint64 {
+	var h maphash.Hash
+	h.SetSeed(materialSeed)
+	maphash.WriteComparable(&h, shader)
+	maphash.WriteComparable(&h, state)
+	var buf [8]byte
+	binary.LittleEndian.PutUint64(buf[:], gfx.FingerprintParams(params))
+	h.Write(buf[:])
+	return h.Sum64()
 }

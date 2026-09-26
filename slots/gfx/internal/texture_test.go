@@ -9,7 +9,6 @@ import (
 
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
-	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
 
@@ -44,7 +43,7 @@ func TestResourceTextureAlwaysBakesSrgb(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w, ref := recordList(t, k)
-	w.Draw(ref, triangle(), testMaterial(descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("normal.png"))), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(ref, triangle(), testSet(t, k, descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("normal.png"))), 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -64,8 +63,8 @@ func TestSameResourcePathBakesOnce(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w, ref := recordList(t, k)
-	w.Draw(ref, triangle(), testMaterial(descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("hero.png"))), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
-	w.Draw(ref, triangle(), testMaterial(descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("hero.png"))), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(ref, triangle(), testSet(t, k, descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("hero.png"))), 1, 0)
+	w.Draw(ref, triangle(), testSet(t, k, descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("hero.png"))), 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -128,9 +127,10 @@ func TestARenderTargetIsRenderedIntoAndSampledOnALaterFrame(t *testing.T) {
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
 		texture = resources.NewRenderTarget(64, 64, 1, descriptors.FormatRGBA8Srgb)
 	})
+	set := testSet(t, k)
 	q := recordRaw(t, k)
 	ref := q.NewPass(descriptors.PassDescr{Target: descriptors.TextureTarget(texture, 0, 0), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "bake"})
-	drawInto(q, ref)
+	drawInto(q, ref, set)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -140,7 +140,7 @@ func TestARenderTargetIsRenderedIntoAndSampledOnALaterFrame(t *testing.T) {
 
 	q = recordRaw(t, k)
 	ref = q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "use"})
-	q.Draw(ref, triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	q.Draw(ref, triangle(), testSet(t, k, descriptors.TextureParam("MainTexture", texture)), 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

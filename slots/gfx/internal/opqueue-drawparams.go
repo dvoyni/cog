@@ -124,7 +124,7 @@ func (q *OpQueue) cursor(id uint32) *setCursor {
 	return &q.cursors[id]
 }
 
-// DrawSet records a draw of mesh into pass through a set of draw params, which
+// Draw records a draw of mesh into pass through a set of draw params, which
 // replays the mesh instances times starting at firstInstance; a plain draw is
 // 1, 0, and instances below 1 draw once. The draw sees the set as it stands in
 // this frame at this call - its own values, and whatever SetDrawParams changed
@@ -139,10 +139,7 @@ func (q *OpQueue) cursor(id uint32) *setCursor {
 // draw whose pass was not declared this frame is dropped and counted, and one
 // naming a set that is not live is dropped silently when the frame is
 // rendered - it is a frame rendered after what it names was let go.
-//
-// It is named DrawSet while Draw still takes a material, and becomes Draw when
-// materials are deleted.
-func (q *OpQueue) DrawSet(pass descriptors.PassRef, mesh descriptors.MeshDescr, set descriptors.DrawParams, instances, firstInstance int) {
+func (q *OpQueue) Draw(pass descriptors.PassRef, mesh descriptors.MeshDescr, set descriptors.DrawParams, instances, firstInstance int) {
 	index := q.passIndex(pass)
 	if index < 0 {
 		q.strayDraws++

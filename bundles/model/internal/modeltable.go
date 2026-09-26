@@ -142,23 +142,23 @@ type modelPrimitive struct {
 // per primitive, from the same bindings that primitive's draw supplies, and the
 // material carries all four rather than deciding.
 //
-// Key is each forward descr's gfx fingerprint, taken once here at load. The
-// descr never changes after it, so the key never goes stale, and a renderer
-// derives its own material key from it rather than fingerprinting the descr
-// on every draw of every frame.
+// Key is each variant's content fingerprint - its shader, the state and the
+// ingredients' params - taken once here at load. None of them changes after
+// it, so the key never goes stale, and a renderer derives its own material key
+// from it rather than fingerprinting the ingredients on every draw of every
+// frame.
 //
 // Sets are the same material as draw params, one set per variant over that
 // variant's bundled shader, created at load and released with the model: its
 // five textures, five samplers and ScenePbrMaterial whole. A set is zero when
 // the load had no compiler or its variant did not compile, and such a
-// material draws through Forward alone. A set names none of the per-draw
+// material draws nothing under that variant. A set names none of the per-draw
 // bindings - the frame, the instances, the poses - which are a renderer's to
 // supply through its frame's version of the set.
 type modelMaterial struct {
 	MaterialIngredients
-	Forward [VariantCount]gfx.MaterialDescr
-	Key     [VariantCount]uint64
-	Sets    [VariantCount]gfx.DrawParams
+	Key  [VariantCount]uint64
+	Sets [VariantCount]gfx.DrawParams
 }
 
 // modelReportKey and textureReportKey are the keys the load's report-once calls
@@ -430,10 +430,11 @@ func (l *Lookup) reportLoad(k kernel.Kernel, path string, reports []error) {
 // bindModelMaterial builds one converted glTF material's ingredients - the
 // pipeline state its alphaMode, doubleSided and winding produced, all ten of the
 // shader's texture and sampler bindings, and its numbers as named params - and
-// the forward materials the bundled shader draws them with.
+// the key of each variant of the bundled shader over them.
 //
-// All ten, always: WGSL requires every declared binding bound and gfx does no
-// preprocessing, so an empty slot binds a default rather than being omitted.
+// All ten, always: an empty slot binds its default rather than being omitted,
+// because gfx's own fallback is white, which is wrong for the normal slot, and
+// a sampler's is clamp, which is not glTF's.
 // That is the same rule the bundled PBR follows, and the reason there are only
 // two default textures rather than five.
 func bindModelMaterial(
@@ -462,12 +463,9 @@ func bindModelMaterial(
 	built := modelMaterial{MaterialIngredients: MaterialIngredients{
 		Params: params, State: loaded.state, Values: loaded.values,
 	}}
-	for variant := range built.Forward {
-		// One params slice serves all four, and the ingredients too: only
-		// the shader differs.
-		built.Forward[variant] = gfx.MaterialWithState(
-			ShaderVariant(variant).shader(), loaded.state, params...)
-		built.Key[variant] = built.Forward[variant].Fingerprint()
+	for variant := range built.Key {
+		// One params slice serves all four: only the shader differs.
+		built.Key[variant] = materialKey(ShaderVariant(variant).shader(), loaded.state, params)
 	}
 	return built
 }
@@ -534,8 +532,8 @@ func (l *Lookup) bakeModelGeometry(
 }
 
 // ensureDefaults bakes the two 1x1 textures every empty slot binds, once. It is
-// the half of EnsureBundled a model load needs: a model builds its own
-// materials but shares those defaults.
+// ensureBakedDefaults for a model load, which holds the resource queue: a model
+// builds its own materials but shares those defaults.
 func (l *Lookup) ensureDefaults(resources *gfx.ResourceQueue) PbrDefaults {
 	if l.hasDefaults {
 		return l.defaults

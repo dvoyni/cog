@@ -486,16 +486,12 @@ func (b *pairingBackend) NewSampler(gfx.SamplerDesc) (gfx.SamplerID, error) {
 }
 func (b *pairingBackend) FreeSampler(gfx.SamplerID) {}
 
-func (b *pairingBackend) NewShader(gfx.ShaderDesc) (gfx.ShaderID, error) {
-	return gfx.ShaderID(b.id()), nil
-}
 func (b *pairingBackend) FreeShader(gfx.ShaderID)                         {}
 func (b *pairingBackend) ReserveShader() gfx.ShaderID                     { return gfx.ShaderID(b.id()) }
 func (b *pairingBackend) CreateShader(gfx.ShaderID, gfx.ShaderDesc) error { return nil }
 func (b *pairingBackend) ReflectShader([]byte) (gfx.ShaderLayout, error) {
 	return gfx.ShaderLayout{}, nil
 }
-func (b *pairingBackend) ShaderLayout(gfx.ShaderID) gfx.ShaderLayout { return gfx.ShaderLayout{} }
 func (b *pairingBackend) FreePipeline(gfx.PipelineID)                {}
 func (b *pairingBackend) Limits() gfx.Limits                         { return gfx.DefaultLimits() }
 func (b *pairingBackend) TransitionTextures([]gfx.TextureTransition) {}

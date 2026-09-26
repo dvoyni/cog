@@ -37,8 +37,8 @@ type bundledShaderReport struct{ variant ShaderVariant }
 // load finds all four here and compiles nothing.
 //
 // A variant that does not compile is reported once and remembered as failed,
-// so it is not compiled again a load; a model's set for it stays zero and its
-// Forward material draws as before. A nil compile tries nothing and remembers
+// so it is not compiled again a load; a model's set for it stays zero and
+// draws nothing. A nil compile tries nothing and remembers
 // nothing, so a later load that has one still compiles.
 func (l *Lookup) ensureShaders(
 	k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue, compile gfx.ShaderCompiler,

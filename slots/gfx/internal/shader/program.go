@@ -51,9 +51,9 @@ type program struct {
 // reported, and the program beside them is the zero one.
 func CompileShader(fsys fs.FS, descr ShaderDescr, reflect Reflect) (ShaderProgram, error) {
 	label := ShaderLabel(descr)
-	// The root read is this call's own. In the descriptor path the asset
-	// Library performs it and reports a missing file itself; here there is no
-	// Library, and the caller decides what a missing shader means.
+	// The root read is this call's own. There is no asset Library to perform
+	// it and report a missing file, and the caller decides what a missing shader
+	// means.
 	if descr.Name != "" {
 		if fsys == nil {
 			return ShaderProgram{}, ErrShaderSource{Shader: label, Message: "no filesystem to read the root from"}

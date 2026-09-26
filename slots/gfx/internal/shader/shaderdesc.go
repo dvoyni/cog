@@ -11,9 +11,9 @@ type ShaderDesc struct {
 }
 
 // ShaderLayout describes a shader's reflected bindings: uniform blocks, storage
-// buffers, textures and samplers, each one a ShaderResource. The translator packs
-// params into each uniform block at its members' offsets and binds every other
-// resource by matching its name to a material parameter.
+// buffers, textures and samplers, each one a ShaderResource. CompileShaderCmd
+// tables them by name, and a set binds each whole, by the name the shader gives
+// it.
 type ShaderLayout struct {
 	Resources []ShaderResource
 	// VertexInputs is every @location the vertex stage declares, which is the

@@ -29,13 +29,11 @@ const (
 // DrawOp is one mesh draw recorded into an OpQueue's pass.
 type DrawOp struct {
 	Mesh          descriptors.MeshDescr
-	Material      descriptors.MaterialDescr
-	Params        []descriptors.ParameterDescr
 	Instances     int
 	FirstInstance int
-	// Set is the draw params a DrawSet draw names, and zero for a Draw. Version
-	// is where the set's version for this draw starts in the queue's version
-	// slots, plus one, and zero draws the set's own values.
+	// Set is the draw params the draw names. Version is where the set's version
+	// for this draw starts in the queue's version slots, plus one, and zero
+	// draws the set's own values.
 	Set     descriptors.DrawParams
 	Version int32
 }
@@ -113,16 +111,14 @@ type OpQueue struct {
 	// frame. They are dropped, and only counted, so the frame can report them.
 	strayDraws           int
 	uploadArena          []byte
-	parameterArena       []descriptors.ParameterDescr
 	vertexAttrArena      []descriptors.VertexAttr
 	temporaryBuffers     []temporaryBuffer
 	temporaryNext        []int
 	temporarySorted      int
 	temporaryTextures    []temporaryTexture
 	temporaryTextureFree map[temporaryTextureKey][]int
-	// frame counts the queue's frames, advanced by every Reset. A material
-	// FrameMaterial recorded is the queue's for the frame it names, and an
-	// ordinary material in any other.
+	// frame counts the queue's frames, advanced by every Reset. A set's cursor
+	// belongs to the frame it names, and is empty in any other.
 	frame uint64
 
 	// sets is what the ResourceQueue publishes of every set, which is all
@@ -161,7 +157,6 @@ func (q *OpQueue) reset() {
 	q.passes = q.passes[:0]
 	q.strayDraws = 0
 	q.uploadArena = q.uploadArena[:0]
-	q.parameterArena = q.parameterArena[:0]
 	q.vertexAttrArena = q.vertexAttrArena[:0]
 	q.versionValues = q.versionValues[:0]
 	q.versionBytes = q.versionBytes[:0]
@@ -225,97 +220,6 @@ func (q *OpQueue) passIndex(ref descriptors.PassRef) int {
 	return int(ref) - 1
 }
 
-// Draw records a draw op into pass that replays the mesh geometry instances
-// times, starting at firstInstance; a plain draw is 1, 0, and instances below 1
-// draw once. Per-instance data is supplied through a storage-buffer parameter
-// the shader indexes by instance_index, which WebGPU starts at firstInstance,
-// so a batch reads its own slice of a shared instance arena with no offset
-// plumbing of its own. Parameters are matched to reflected shader constants by
-// name, apply to every instance and override same-named material parameters.
-// Inline geometry is baked into queue-pooled BufferIDs using each BufferDescr's
-// copyData policy. A draw whose pass was not declared this frame is dropped,
-// before it bakes anything, and reported.
-func (q *OpQueue) Draw(pass descriptors.PassRef, mesh descriptors.MeshDescr, material descriptors.MaterialDescr, instances, firstInstance int, params ...descriptors.ParameterDescr) {
-	index := q.passIndex(pass)
-	if index < 0 {
-		q.strayDraws++
-		return
-	}
-	o := DrawOp{
-		Material:      q.bakeMaterialIfNeeded(material),
-		Mesh:          mesh,
-		Params:        q.bakeParametersIfNeeded(params),
-		Instances:     instances,
-		FirstInstance: firstInstance,
-	}
-	o.Mesh = descriptors.WithMeshBuffers(mesh,
-		q.copyVertexAttrs(descriptors.MeshLayout(&mesh)),
-		q.bakeBufferIfNeeded(descriptors.MeshVertices(&mesh), types.BufferVertex),
-		q.bakeBufferIfNeeded(descriptors.MeshIndices(&mesh), types.BufferIndex))
-	q.passes[index].Draws = append(q.passes[index].Draws, o)
-}
-
-// FrameMaterial records a material's params into the queue once, for the rest
-// of this frame, and returns a material every draw of it can name without the
-// queue copying and baking them again.
-//
-// Draw copies a material's params on every draw, because gfx owns nothing a
-// caller passes and the caller may reuse its slice when Draw returns. A caller
-// drawing one material many times in a frame - a renderer's Batches, which
-// share a material and differ in their own params - pays that copy, and the
-// translator's hash of every name, once a draw. Recording pays both once: the
-// params are copied here, and the shape state of their names is taken here, so
-// the translator hashes only a draw's own params to find its plan.
-//
-// The returned material is this queue's for this frame. The caller may reuse
-// its own slice at once, as after Draw. In a later frame, or on another queue,
-// it draws as the material it was recorded from - copied from the params the
-// caller passed here, as every material is - so a recording held too long costs
-// the copy again and nothing else.
-func (q *OpQueue) FrameMaterial(material descriptors.MaterialDescr) descriptors.MaterialDescr {
-	if q.recordedHere(&material) {
-		return material
-	}
-	start := len(q.parameterArena)
-	baked := q.bakeParametersIfNeeded(material.Params())
-	descriptors.SetMaterialRecording(&material, descriptors.FrameRecording{Queue: q, Frame: q.frame, Start: start, Shape: descriptors.ParameterShapeState(baked)})
-	return material
-}
-
-// recordedHere reports whether a material was recorded by this queue in this
-// frame, so its params are a window of this frame's arena.
-func (q *OpQueue) recordedHere(material *descriptors.MaterialDescr) bool {
-	recording := descriptors.MaterialRecording(material)
-	return recording.Queue == any(q) && recording.Frame == q.frame
-}
-
-func (q *OpQueue) bakeMaterialIfNeeded(material descriptors.MaterialDescr) descriptors.MaterialDescr {
-	if q.recordedHere(&material) {
-		// The window is found by its start rather than kept as a slice,
-		// because the arena may have grown into a new backing since, and the
-		// params belong in the op as the arena the frame hands over holds them.
-		start := descriptors.MaterialRecording(&material).Start
-		count := len(material.Params())
-		descriptors.SetMaterialParams(&material, q.parameterArena[start:start+count:start+count])
-		return material
-	}
-	// Unrecorded, stale or another queue's: its params are the caller's, and
-	// the draw copies them as it copies every material's.
-	descriptors.SetMaterialParams(&material, q.bakeParametersIfNeeded(material.Params()))
-	descriptors.SetMaterialRecording(&material, descriptors.FrameRecording{})
-	return material
-}
-
-func (q *OpQueue) bakeParametersIfNeeded(params []descriptors.ParameterDescr) []descriptors.ParameterDescr {
-	start := len(q.parameterArena)
-	q.parameterArena = append(q.parameterArena, params...)
-	baked := q.parameterArena[start:]
-	for i := range baked {
-		baked[i] = q.bakeParameterIfNeeded(baked[i])
-	}
-	return baked
-}
-
 func (q *OpQueue) copyVertexAttrs(attrs []descriptors.VertexAttr) []descriptors.VertexAttr {
 	start := len(q.vertexAttrArena)
 	q.vertexAttrArena = append(q.vertexAttrArena, attrs...)
@@ -326,16 +230,6 @@ func (q *OpQueue) copyUpload(data []byte) []byte {
 	start := len(q.uploadArena)
 	q.uploadArena = append(q.uploadArena, data...)
 	return q.uploadArena[start:]
-}
-
-func (q *OpQueue) bakeParameterIfNeeded(param descriptors.ParameterDescr) descriptors.ParameterDescr {
-	switch descriptors.ParameterKind(&param) {
-	case descriptors.ParamBuffer:
-		return descriptors.WithParameterBuffer(param, q.bakeBufferIfNeeded(descriptors.ParameterBuffer(&param), types.BufferStorage))
-	case descriptors.ParamTexture:
-		return descriptors.WithParameterTexture(param, q.bakeTextureIfNeeded(descriptors.ParameterTexture(&param)))
-	}
-	return param
 }
 
 func (q *OpQueue) bakeBufferIfNeeded(buffer descriptors.BufferDescr, kind types.BufferKind) descriptors.BufferDescr {

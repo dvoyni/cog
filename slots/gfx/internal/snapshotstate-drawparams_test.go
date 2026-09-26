@@ -40,7 +40,7 @@ func newSetRig(t *testing.T) *setRig {
 	return rig
 }
 
-func (r *setRig) newSet(state types.MaterialState, params ...descriptors.ParameterDescr) descriptors.DrawParams {
+func (r *setRig) newSet(state types.DrawState, params ...descriptors.ParameterDescr) descriptors.DrawParams {
 	var set descriptors.DrawParams
 	withShaders(r.k, func(k kernel.Kernel, q *ResourceQueue) {
 		set = q.NewDrawParams(k, r.shader, state, params...)
@@ -92,7 +92,7 @@ func bindingNamed(t *testing.T, view DrawParamsView, name string) DrawParamsBind
 
 func TestAFrameSnapshotResolvesEachSetAndVersionItsDrawsName(t *testing.T) {
 	rig := newSetRig(t)
-	state := types.MaterialState{Blend: types.BlendOpaque, DepthCompare: types.CompareLess, DepthWrite: true, Cull: types.CullBack, FrontFace: types.FrontCW}
+	state := types.DrawState{Blend: types.BlendOpaque, DepthCompare: types.CompareLess, DepthWrite: true, Cull: types.CullBack, FrontFace: types.FrontCW}
 	set := rig.newSet(state,
 		descriptors.BufferRangeParam("instances", rig.records, 16, 32),
 		descriptors.VecParam("tint", m.Vec4{X: 1}),
@@ -101,17 +101,15 @@ func TestAFrameSnapshotResolvesEachSetAndVersionItsDrawsName(t *testing.T) {
 	response := rig.runSnapshotWith(frameSnapshotRequest{}, func(k kernel.Kernel, q *OpQueue) {
 		world := screenPass(q, 10, "world")
 		overlay := screenPass(q, 20, "overlay")
-		q.DrawSet(overlay, triangle(), set, 2, 0)
+		q.Draw(overlay, triangle(), set, 2, 0)
 		q.SetDrawParams(k, set, descriptors.MatParam("frame", translation(1)),
 			descriptors.SamplerParam("albedoSampler", types.SamplerDesc{Mag: types.FilterNearest}))
-		q.DrawSet(world, triangle(), set, 3, 0)
-		q.DrawSet(overlay, triangle(), set, 1, 0)
-		// A draw through the old material path names no set and is counted only.
-		drawInto(q, world)
+		q.Draw(world, triangle(), set, 3, 0)
+		q.Draw(overlay, triangle(), set, 1, 0)
 	})
 
-	if response.DrawCount != 4 || response.InstanceCount != 7 {
-		t.Errorf("frame = %d draws / %d instances, want 4 and 7: the totals are unchanged",
+	if response.DrawCount != 3 || response.InstanceCount != 6 {
+		t.Errorf("frame = %d draws / %d instances, want 3 and 6",
 			response.DrawCount, response.InstanceCount)
 	}
 	if len(response.DrawParams) != 2 {
@@ -175,12 +173,12 @@ func TestAFrameSnapshotResolvesEachSetAndVersionItsDrawsName(t *testing.T) {
 
 func TestAFilteredSnapshotReportsOnlyTheSetsItsPassesDraw(t *testing.T) {
 	rig := newSetRig(t)
-	kept := rig.newSet(types.MaterialState{})
-	dropped := rig.newSet(types.MaterialState{})
+	kept := rig.newSet(types.DrawState{})
+	dropped := rig.newSet(types.DrawState{})
 
 	response := rig.runSnapshotWith(frameSnapshotRequest{Pass: "world"}, func(_ kernel.Kernel, q *OpQueue) {
-		q.DrawSet(screenPass(q, 20, "overlay"), triangle(), dropped, 1, 0)
-		q.DrawSet(screenPass(q, 10, "world"), triangle(), kept, 1, 0)
+		q.Draw(screenPass(q, 20, "overlay"), triangle(), dropped, 1, 0)
+		q.Draw(screenPass(q, 10, "world"), triangle(), kept, 1, 0)
 	})
 
 	if len(response.DrawParams) != 1 || response.DrawParams[0].Set != descriptors.DrawParamsIndex(kept) {
@@ -196,16 +194,16 @@ func TestAFilteredSnapshotReportsOnlyTheSetsItsPassesDraw(t *testing.T) {
 
 func TestAFrameSnapshotSaysWhyASetsDrawsAreDropped(t *testing.T) {
 	rig := newSetRig(t)
-	released := rig.newSet(types.MaterialState{})
+	released := rig.newSet(types.DrawState{})
 	withShaders(rig.k, func(k kernel.Kernel, q *ResourceQueue) { q.ReleaseDrawParams(k, released) })
-	orphaned := rig.newSet(types.MaterialState{})
+	orphaned := rig.newSet(types.DrawState{})
 	withShaders(rig.k, func(k kernel.Kernel, q *ResourceQueue) { q.ReleaseShader(k, rig.shader) })
 
 	response := rig.runSnapshotWith(frameSnapshotRequest{}, func(_ kernel.Kernel, q *OpQueue) {
 		pass := screenPass(q, 0, "main")
-		q.DrawSet(pass, triangle(), released, 1, 0)
-		q.DrawSet(pass, triangle(), descriptors.DrawParamsOf(999), 1, 0)
-		q.DrawSet(pass, triangle(), orphaned, 1, 0)
+		q.Draw(pass, triangle(), released, 1, 0)
+		q.Draw(pass, triangle(), descriptors.DrawParamsOf(999), 1, 0)
+		q.Draw(pass, triangle(), orphaned, 1, 0)
 	})
 
 	if len(response.DrawParams) != 3 {

@@ -7,7 +7,6 @@ import (
 
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
-	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
 )
 
@@ -15,13 +14,14 @@ import (
 // backend was asked to place, interleaved with the passes, so a test can assert
 // both that a transition happened and that it happened before the pass that
 // needs it.
-func transitionFrame(t *testing.T, record func(*OpQueue)) *fakeBackend {
+func transitionFrame(t *testing.T, record func(q *OpQueue, set, sampler descriptors.DrawParams)) *fakeBackend {
 	t.Helper()
 	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
-	record(recordRaw(t, k))
+	set, sampler := testSet(t, k), testSet(t, k)
+	record(recordRaw(t, k), set, sampler)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 	return backend
@@ -34,13 +34,13 @@ func TestSamplingWhatAnEarlierPassRenderedGetsABarrier(t *testing.T) {
 	// Vulkan the sample reads the image mid-write. The translator knows the
 	// write-then-read pairs, so it is the one that places the transition.
 	var sampled types.TextureID
-	backend := transitionFrame(t, func(q *OpQueue) {
+	backend := transitionFrame(t, func(q *OpQueue, set, sampler descriptors.DrawParams) {
 		target, texture := q.NewTemporaryTarget(64, 64, descriptors.FormatRGBA8Srgb)
 		sampled = texture.ID()
 		ref := q.NewPass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 0, Label: "offscreen"})
-		drawInto(q, ref)
+		drawInto(q, ref, set)
 		ref = q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 1, Label: "composite"})
-		q.Draw(ref, triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+		drawSampling(q, ref, sampler, texture)
 	})
 
 	want := types.TextureTransition{Texture: sampled, From: types.TextureUsageRenderAttachment, To: types.TextureUsageTextureBinding}
@@ -58,12 +58,12 @@ func TestAPassThatSamplesNothingItRenderedGetsNoBarrier(t *testing.T) {
 	// write-then-read pairs. A frame that renders into a texture and never reads
 	// it back has nothing to order, and paying for an image transition there
 	// would be a cost with no hazard behind it.
-	backend := transitionFrame(t, func(q *OpQueue) {
+	backend := transitionFrame(t, func(q *OpQueue, set, sampler descriptors.DrawParams) {
 		target, _ := q.NewTemporaryTarget(64, 64, descriptors.FormatRGBA8Srgb)
 		ref := q.NewPass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 0, Label: "offscreen"})
-		drawInto(q, ref)
+		drawInto(q, ref, set)
 		ref = q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 1, Label: "screen"})
-		drawInto(q, ref)
+		drawInto(q, ref, set)
 	})
 
 	if len(backend.transitions) != 0 {
@@ -77,18 +77,18 @@ func TestRenderingIntoATextureAnEarlierPassSampledGetsTheReverseBarrier(t *testi
 	// and the declared old usage has to be the one the texture is actually in or
 	// the layout transition is a lie.
 	var pong types.TextureID
-	backend := transitionFrame(t, func(q *OpQueue) {
+	backend := transitionFrame(t, func(q *OpQueue, set, sampler descriptors.DrawParams) {
 		targetA, textureA := q.NewTemporaryTarget(64, 64, descriptors.FormatRGBA8Srgb)
 		targetB, textureB := q.NewTemporaryTarget(32, 32, descriptors.FormatRGBA8Srgb)
 		pong = textureB.ID()
 
 		// B is written, then read, then written again.
 		ref := q.NewPass(descriptors.PassDescr{Target: targetB, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 0, Label: "b-first"})
-		drawInto(q, ref)
+		drawInto(q, ref, set)
 		ref = q.NewPass(descriptors.PassDescr{Target: targetA, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 1, Label: "a-reads-b"})
-		q.Draw(ref, triangle(), testMaterial(descriptors.TextureParam("MainTexture", textureB)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+		drawSampling(q, ref, sampler, textureB)
 		ref = q.NewPass(descriptors.PassDescr{Target: targetB, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 2, Label: "b-again"})
-		q.Draw(ref, triangle(), testMaterial(descriptors.TextureParam("MainTexture", textureA)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+		drawSampling(q, ref, sampler, textureA)
 	})
 
 	forward := types.TextureTransition{Texture: pong, From: types.TextureUsageRenderAttachment, To: types.TextureUsageTextureBinding}
@@ -105,13 +105,13 @@ func TestATextureIsTransitionedOncePerPassThatNeedsIt(t *testing.T) {
 	// Two draws in one pass sampling the same render target is one hazard, not
 	// two, and a duplicate barrier is a real pipeline stall rather than a
 	// bookkeeping wart.
-	backend := transitionFrame(t, func(q *OpQueue) {
+	backend := transitionFrame(t, func(q *OpQueue, set, sampler descriptors.DrawParams) {
 		target, texture := q.NewTemporaryTarget(64, 64, descriptors.FormatRGBA8Srgb)
 		ref := q.NewPass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 0, Label: "offscreen"})
-		drawInto(q, ref)
+		drawInto(q, ref, set)
 		ref = q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 1, Label: "composite"})
-		q.Draw(ref, triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
-		q.Draw(ref, triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+		drawSampling(q, ref, sampler, texture)
+		drawSampling(q, ref, sampler, texture)
 	})
 
 	if len(backend.transitions) != 1 {
@@ -131,11 +131,12 @@ func TestADepthAttachmentSampledLaterGetsABarrier(t *testing.T) {
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
 		shadow = resources.NewTexture(64, 64, 1, descriptors.FormatDepth32F, false)
 	})
+	set := testSet(t, k)
 	q := recordRaw(t, k)
 	ref := q.NewPass(descriptors.PassDescr{Target: descriptors.NoTarget(), Depth: descriptors.DepthTarget(shadow), DepthLoad: types.LoadClear, Order: 0, Label: "shadow"})
-	drawInto(q, ref)
+	drawInto(q, ref, set)
 	ref = q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 1, Label: "lit"})
-	q.Draw(ref, triangle(), testMaterial(descriptors.TextureParam("MainTexture", shadow)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	q.Draw(ref, triangle(), testSet(t, k, descriptors.TextureParam("MainTexture", shadow)), 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -150,15 +151,15 @@ func TestATextureStaysTransitionedAcrossConsecutivePassesThatSampleIt(t *testing
 	// again. A second barrier saying TextureBinding -> TextureBinding orders
 	// nothing and costs a real pipeline stall, so the usage the frame left the
 	// texture in is tracked rather than re-asserted per pass.
-	backend := transitionFrame(t, func(q *OpQueue) {
+	backend := transitionFrame(t, func(q *OpQueue, set, sampler descriptors.DrawParams) {
 		source, texture := q.NewTemporaryTarget(64, 64, descriptors.FormatRGBA8Srgb)
 		other, _ := q.NewTemporaryTarget(32, 32, descriptors.FormatRGBA8Srgb)
 		ref := q.NewPass(descriptors.PassDescr{Target: source, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 0, Label: "offscreen"})
-		drawInto(q, ref)
+		drawInto(q, ref, set)
 		ref = q.NewPass(descriptors.PassDescr{Target: other, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 1, Label: "reads-once"})
-		q.Draw(ref, triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+		drawSampling(q, ref, sampler, texture)
 		ref = q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 2, Label: "reads-again"})
-		q.Draw(ref, triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+		drawSampling(q, ref, sampler, texture)
 	})
 
 	if len(backend.transitions) != 1 {
@@ -169,9 +170,9 @@ func TestATextureStaysTransitionedAcrossConsecutivePassesThatSampleIt(t *testing
 func TestNoPassIsHandedAnEmptyBarrierList(t *testing.T) {
 	// The sink contract says TransitionTextures is never called with nothing to
 	// do, so a backend can treat the call itself as the signal.
-	backend := transitionFrame(t, func(q *OpQueue) {
+	backend := transitionFrame(t, func(q *OpQueue, set, sampler descriptors.DrawParams) {
 		ref := q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "screen"})
-		drawInto(q, ref)
+		drawInto(q, ref, set)
 	})
 	if backend.emptyTransitions != 0 {
 		t.Errorf("empty TransitionTextures calls = %d, want 0", backend.emptyTransitions)
@@ -194,7 +195,7 @@ func TestAnOrdinaryTextureIsNeverTransitioned(t *testing.T) {
 	})
 	q := recordRaw(t, k)
 	ref := q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "screen"})
-	q.Draw(ref, triangle(), testMaterial(descriptors.TextureParam("MainTexture", uploaded)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	q.Draw(ref, triangle(), testSet(t, k, descriptors.TextureParam("MainTexture", uploaded)), 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

@@ -8,7 +8,7 @@ import (
 )
 
 // ShaderDescr describes a shader by inline source text (ShaderWithText) or a
-// resource path (ShaderWithResource), resolved to bytes by the renderer. The
+// resource path (ShaderWithResource), resolved to bytes by CompileShaderCmd. The
 // two cases are told apart by which field carries the answer, so there is no
 // source enum to read.
 //
@@ -69,23 +69,18 @@ const (
 // named by the binding's WGSL global name. It is one of four kinds - bytes for
 // a uniform, a texture, a sampler, or a buffer and the range of it bound.
 // FloatParam, VecParam, MatParam, ColorParam and RawParameter all build bytes.
-// Pass it to ResourceQueue.NewDrawParams, OpQueue.SetDrawParams, Material or
-// OpQueue.Draw.
+// Pass it to ResourceQueue.NewDrawParams, ResourceQueue.UpdateDrawParams or
+// OpQueue.SetDrawParams.
 type ParameterDescr = descriptors.ParameterDescr
 
 // DrawParams names one durable set of draw params: a shader, a fixed
-// MaterialState and a value for some or all of the shader's bindings, created by
-// ResourceQueue.NewDrawParams and drawn with OpQueue.DrawSet. It is an opaque
+// DrawState and a value for some or all of the shader's bindings, created by
+// ResourceQueue.NewDrawParams and drawn with OpQueue.Draw. It is an opaque
 // handle, and its identity is the set's: two draws naming one DrawParams share
 // shader, state and values, so the handle alone is the complete batch key a
 // recorder needs. It is comparable and pointer-free, so a Component may hold
 // one. The zero value names no set.
 type DrawParams = descriptors.DrawParams
-
-// MaterialDescr describes how to shade a mesh: a shader plus named parameters.
-// Build it with Material and the *Param constructors. OpQueue.Draw remaps its
-// texture and buffer parameters to baked resource IDs before recording the draw.
-type MaterialDescr = descriptors.MaterialDescr
 
 // VertexAttr describes one attribute of the single interleaved vertex array: its
 // byte offset and element type. Attributes bind to shader @location values in the
@@ -362,12 +357,12 @@ const (
 	FrontCW  = types.FrontCW
 )
 
-// MaterialState controls fixed render-pipeline state. Depth compare and depth
+// DrawState controls fixed render-pipeline state. Depth compare and depth
 // write are independent because the states 3D needs most - test but do not
 // write, or test with another compare - are inexpressible as one flag. Every
 // zero value is both the WebGPU default and what the backend did before the
-// field existed, so MaterialState{} renders as it always has.
-type MaterialState = types.MaterialState
+// field existed, so DrawState{} renders as it always has.
+type DrawState = types.DrawState
 
 // LoadOp says what a pass does with an attachment's existing contents.
 type LoadOp = types.LoadOp
@@ -463,9 +458,9 @@ type TextureTransition = types.TextureTransition
 type ShaderDesc = shader.ShaderDesc
 
 // ShaderLayout describes a shader's reflected bindings: uniform blocks, storage
-// buffers, textures and samplers, each one a ShaderResource. The translator packs
-// params into a uniform block at its members' offsets and binds every other
-// resource by matching its name to a material parameter.
+// buffers, textures and samplers, each one a ShaderResource. CompileShaderCmd
+// tables them by name, and a set binds each whole, by the name the shader gives
+// it.
 type ShaderLayout = shader.ShaderLayout
 
 // ShaderVertexInput is one @location input of a shader's vertex stage: where it
@@ -581,14 +576,6 @@ type BufferView = internal.BufferView
 // enum ordinal in a debug dump is a lookup an agent cannot perform.
 type SamplerView = internal.SamplerView
 
-// MaterialView is one material rendered for an agent: which shader variant
-// shades the draw, the fixed pipeline state, and the material's own
-// parameters, which a draw's same-named parameters override. It is the old
-// material path's view, kept while canvas_draws reports a canvas op's gfx
-// material, and deleted with materials; a draw through a set is rendered as a
-// DrawParamsView.
-type MaterialView = internal.MaterialView
-
 // ShaderView names one shader variant. A root source plus one supply is one
 // variant, so the supply is part of the name rather than a detail beside it.
 type ShaderView = internal.ShaderView
@@ -597,10 +584,6 @@ type ShaderView = internal.ShaderView
 // compare and depth write are separate here because they are separate in the
 // engine: test but do not write is a state 3D needs and one flag cannot say.
 type DrawStateView = internal.DrawStateView
-
-// MaterialStateView is DrawStateView under the old path's name, kept with
-// MaterialView and deleted with it.
-type MaterialStateView = internal.MaterialStateView
 
 // ViewportMode selects how the logical viewport responds to window aspect
 // changes. ViewportWindow uses the window dimensions directly; fixed modes keep
@@ -660,7 +643,7 @@ type ResourceOpView = internal.ResourceOpView
 // import. Referencing them here puts their bodies in this package's export
 // data. The tier test allows this shape and nothing broader; see
 // architecture.instructions.md.
-func inlineAnchor(parameter ParameterDescr, texture TextureDescr, material MaterialDescr, format TextureFormat) {
+func inlineAnchor(parameter ParameterDescr, texture TextureDescr, format TextureFormat) {
 	_ = parameter.Name()
 	_, _ = parameter.ColorValue()
 	_, _ = parameter.VecValue()
@@ -668,6 +651,5 @@ func inlineAnchor(parameter ParameterDescr, texture TextureDescr, material Mater
 	_, _ = parameter.TextureValue()
 	_ = texture.ID()
 	_, _ = texture.Size()
-	_ = material.State()
 	_ = format.Resolve()
 }
