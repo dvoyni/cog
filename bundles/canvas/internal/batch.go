@@ -28,7 +28,9 @@ type spriteShading struct {
 // then emits them as a single instanced draw. Flushing on any key change
 // preserves draw order.
 type spriteBatch struct {
-	active    bool
+	active bool
+	// pass is the layer's pass the batch flushes into.
+	pass      gfx.PassRef
 	texture   gfx.TextureDescr
 	textureID gfx.TextureID
 	layer     m.Mat4
@@ -160,7 +162,7 @@ func (b *spriteBatch) flush(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr) {
 		b.params = append(b.params, gfx.BufferParam(b.arrayNames[i], gfx.BufferWithBytes(b.arrayBytes[i], true)))
 	}
 	b.params = append(b.params, b.shared...)
-	gfxWrite.Draw(quad, *b.material, len(b.instances), 0, b.params...)
+	gfxWrite.Draw(b.pass, quad, *b.material, len(b.instances), 0, b.params...)
 	b.active = false
 	b.instances = b.instances[:0]
 }
@@ -214,7 +216,9 @@ type trianglesShading struct {
 // carrying the same custom material at the same values are one draw, under the
 // same rule the sprite batcher follows.
 type trianglesBatch struct {
-	active   bool
+	active bool
+	// pass is the layer's pass the batch flushes into.
+	pass     gfx.PassRef
 	layoutID int
 	layout   []gfx.VertexAttr
 	layer    m.Mat4
@@ -279,7 +283,7 @@ func (b *trianglesBatch) flush(gfxWrite *gfx.OpQueue) {
 	)
 	b.scratch = append(b.scratch, b.params...)
 	mesh := gfx.Mesh(gfx.BufferWithBytes(b.vertices, true), gfx.TopologyTriangleList, b.layout...)
-	gfxWrite.Draw(mesh, *b.material, 1, 0, b.scratch...)
+	gfxWrite.Draw(b.pass, mesh, *b.material, 1, 0, b.scratch...)
 	b.active = false
 	b.vertices = b.vertices[:0]
 }

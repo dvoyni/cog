@@ -19,14 +19,14 @@ func (e ErrVertexStrideAlignment) Error() string {
 		e.Shader, e.Stride)
 }
 
-// ErrDrawWithoutPass is reported when a frame records draws before declaring a
-// pass. There is no implicit pass to absorb them, so they are dropped: a draw
-// with no pass has no target, no depth attachment and no place in the frame's
-// order.
+// ErrDrawWithoutPass is reported when a frame records draws naming no pass
+// declared that frame. There is no implicit pass to absorb them, so they are
+// dropped: a draw with no pass has no target, no depth attachment and no place
+// in the frame's order.
 type ErrDrawWithoutPass struct{ Count int }
 
 func (e ErrDrawWithoutPass) Error() string {
-	return fmt.Sprintf("gfx: %d draws recorded outside any pass were dropped; declare a pass with OpQueue.Pass", e.Count)
+	return fmt.Sprintf("gfx: %d draws naming no pass declared this frame were dropped; declare one with OpQueue.NewPass and draw into its PassRef", e.Count)
 }
 
 // ErrDrawSamplesAttachment is reported when a draw samples a texture its own

@@ -42,8 +42,8 @@ func allocatedTarget(t *testing.T, k kernel.Executioner, format descriptors.Text
 func renderInto(t *testing.T, k kernel.Executioner, target descriptors.TargetDescr, label string) {
 	t.Helper()
 	q := recordRaw(t, k)
-	q.Pass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: label})
-	drawInto(q)
+	ref := q.NewPass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: label})
+	drawInto(q, ref)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 }
@@ -79,16 +79,16 @@ func TestTwoTargetFormatsSharingAShaderBuildTwoPipelines(t *testing.T) {
 	linear := allocatedTarget(t, k, descriptors.FormatRGBA8)
 
 	q := recordRaw(t, k)
-	q.Pass(descriptors.PassDescr{
+	ref := q.NewPass(descriptors.PassDescr{
 		Target: descriptors.TextureTarget(srgb, 0, 0), Depth: descriptors.DepthNone(),
 		Load: types.LoadClear, Order: 0, Label: "srgb",
 	})
-	drawInto(q)
-	q.Pass(descriptors.PassDescr{
+	drawInto(q, ref)
+	ref = q.NewPass(descriptors.PassDescr{
 		Target: descriptors.TextureTarget(linear, 0, 0), Depth: descriptors.DepthNone(),
 		Load: types.LoadClear, Order: 1, Label: "linear",
 	})
-	drawInto(q)
+	drawInto(q, ref)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -113,16 +113,16 @@ func TestAScreenPassAndATargetInTheFrameBufferFormatShareOnePipeline(t *testing.
 	target := allocatedTarget(t, k, descriptors.FrameBufferFormat)
 
 	q := recordRaw(t, k)
-	q.Pass(descriptors.PassDescr{
+	ref := q.NewPass(descriptors.PassDescr{
 		Target: descriptors.TextureTarget(target, 0, 0), Depth: descriptors.DepthNone(),
 		Load: types.LoadClear, Order: 0, Label: "offscreen",
 	})
-	drawInto(q)
-	q.Pass(descriptors.PassDescr{
+	drawInto(q, ref)
+	ref = q.NewPass(descriptors.PassDescr{
 		Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(),
 		Load: types.LoadClear, Order: 1, Label: "screen",
 	})
-	drawInto(q)
+	drawInto(q, ref)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -180,11 +180,11 @@ func TestAColourlessPassTakesNoFormatFromItsTarget(t *testing.T) {
 		shadow = resources.NewTexture(64, 64, 1, descriptors.FormatDepth32F, false)
 	})
 	q := recordRaw(t, k)
-	q.Pass(descriptors.PassDescr{
+	ref := q.NewPass(descriptors.PassDescr{
 		Target: descriptors.NoTarget(), Depth: descriptors.DepthTarget(shadow),
 		DepthLoad: types.LoadClear, Label: "shadow",
 	})
-	q.Draw(triangle(), testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	q.Draw(ref, triangle(), testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

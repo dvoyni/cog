@@ -142,8 +142,8 @@ type PassDescr struct {
 	Label      string
 }
 
-// PassRef selects a pass declared earlier in the same frame. Its zero value
-// refers to no pass.
+// PassRef names a pass OpQueue.NewPass declared this frame, for Draw to record
+// into. Its zero value refers to no pass.
 type PassRef int
 
 // sameAttachments reports whether two passes render into the same places. Two

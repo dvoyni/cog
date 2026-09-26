@@ -10,11 +10,10 @@ import (
 
 // frameMaterialQueue is a queue whose draws need no id: every param below is a
 // value, so nothing is baked into a temporary.
-func frameMaterialQueue() *OpQueue {
+func frameMaterialQueue() (*OpQueue, descriptors.PassRef) {
 	q := NewOpQueue(nil)
 	q.reset()
-	q.Pass(descriptors.PassDescr{})
-	return q
+	return q, q.NewPass(descriptors.PassDescr{})
 }
 
 func frameMaterialParams() []descriptors.ParameterDescr {
@@ -25,7 +24,7 @@ func frameMaterialParams() []descriptors.ParameterDescr {
 // that names it binds that one copy, and the queue's arena grows by the draws'
 // own params alone.
 func TestAFrameMaterialIsCopiedOnceForEveryDrawOfIt(t *testing.T) {
-	q := frameMaterialQueue()
+	q, ref := frameMaterialQueue()
 	material := descriptors.Material(shader.ShaderWithText("s"), frameMaterialParams()...)
 	recorded := q.FrameMaterial(material)
 	afterRecord := len(q.parameterArena)
@@ -33,7 +32,7 @@ func TestAFrameMaterialIsCopiedOnceForEveryDrawOfIt(t *testing.T) {
 		t.Fatalf("recording put %d params in the arena, want the material's %d", afterRecord, len(material.Params()))
 	}
 	for range 3 {
-		q.Draw(descriptors.MeshDescr{}, recorded, 1, 0, descriptors.FloatParam("d", 4))
+		q.Draw(ref, descriptors.MeshDescr{}, recorded, 1, 0, descriptors.FloatParam("d", 4))
 	}
 	if got := len(q.parameterArena) - afterRecord; got != 3 {
 		t.Fatalf("three draws grew the arena by %d params, want their own three", got)
@@ -48,11 +47,11 @@ func TestAFrameMaterialIsCopiedOnceForEveryDrawOfIt(t *testing.T) {
 // The caller may reuse its own slice the moment FrameMaterial returns, which is
 // the guarantee Draw gives: the recorded params are the queue's.
 func TestAFrameMaterialOwesNothingToTheCallersSlice(t *testing.T) {
-	q := frameMaterialQueue()
+	q, ref := frameMaterialQueue()
 	params := frameMaterialParams()
 	recorded := q.FrameMaterial(descriptors.Material(shader.ShaderWithText("s"), params...))
 	params[0] = descriptors.FloatParam("z", 9)
-	q.Draw(descriptors.MeshDescr{}, recorded, 1, 0)
+	q.Draw(ref, descriptors.MeshDescr{}, recorded, 1, 0)
 	if name := q.ops[0].Material.Params()[0].Name(); name != "a" {
 		t.Errorf("the draw binds %q, want the params as they were recorded", name)
 	}
@@ -62,22 +61,22 @@ func TestAFrameMaterialOwesNothingToTheCallersSlice(t *testing.T) {
 // any other queue, it draws exactly as the material it was recorded from:
 // copied from the caller's params, as every material is.
 func TestAStaleOrForeignFrameMaterialDrawsAsItsOriginal(t *testing.T) {
-	q := frameMaterialQueue()
+	q, ref := frameMaterialQueue()
 	params := frameMaterialParams()
 	recorded := q.FrameMaterial(descriptors.Material(shader.ShaderWithText("s"), params...))
 
-	other := frameMaterialQueue()
-	other.Draw(descriptors.MeshDescr{}, recorded, 1, 0)
+	other, ref := frameMaterialQueue()
+	other.Draw(ref, descriptors.MeshDescr{}, recorded, 1, 0)
 	if got := other.ops[0].Material.Params(); len(got) != 3 || &got[0] == &q.parameterArena[0] || got[2].Name() != "c" {
 		t.Errorf("another queue bound %v, want its own copy of the original params", ParameterViewsOf(got))
 	}
 
 	q.reset()
-	q.Pass(descriptors.PassDescr{})
+	ref = q.NewPass(descriptors.PassDescr{})
 	// The arena's backing is reused by the new frame, so the recorded window
 	// now holds this frame's params, not the material's.
-	q.Draw(descriptors.MeshDescr{}, descriptors.Material(shader.ShaderWithText("t"), descriptors.FloatParam("x", 7), descriptors.FloatParam("y", 8), descriptors.FloatParam("w", 9)), 1, 0)
-	q.Draw(descriptors.MeshDescr{}, recorded, 1, 0)
+	q.Draw(ref, descriptors.MeshDescr{}, descriptors.Material(shader.ShaderWithText("t"), descriptors.FloatParam("x", 7), descriptors.FloatParam("y", 8), descriptors.FloatParam("w", 9)), 1, 0)
+	q.Draw(ref, descriptors.MeshDescr{}, recorded, 1, 0)
 	got := q.ops[1].Material.Params()
 	if len(got) != 3 || got[0].Name() != "a" || got[2].Name() != "c" {
 		t.Errorf("a stale recording bound %v, want the original params", ParameterViewsOf(got))
@@ -90,7 +89,7 @@ func TestAStaleOrForeignFrameMaterialDrawsAsItsOriginal(t *testing.T) {
 // A clone is an ordinary material again: its params are wherever it put them,
 // not the queue's.
 func TestACloneOfAFrameMaterialIsNotRecorded(t *testing.T) {
-	q := frameMaterialQueue()
+	q, _ := frameMaterialQueue()
 	recorded := q.FrameMaterial(descriptors.Material(shader.ShaderWithText("s"), frameMaterialParams()...))
 	for name, clone := range map[string]descriptors.MaterialDescr{
 		"Clone":   recorded.Clone(),
@@ -105,7 +104,7 @@ func TestACloneOfAFrameMaterialIsNotRecorded(t *testing.T) {
 // The recorded shape state is exactly what hashing the params' names gives,
 // so a plan cached through one is found through the other.
 func TestAFrameMaterialsShapeStateIsItsParamsNames(t *testing.T) {
-	q := frameMaterialQueue()
+	q, _ := frameMaterialQueue()
 	material := descriptors.Material(shader.ShaderWithText("s"), frameMaterialParams()...)
 	recorded := q.FrameMaterial(material)
 	state, ok := descriptors.MaterialShapeState(&recorded)

@@ -125,7 +125,7 @@ type translator struct {
 	passStart  []int
 	passDraws  []int
 	passCursor []int
-	// strayDraws counts the frame's draws recorded outside any pass.
+	// strayDraws counts the frame's draws naming no pass declared this frame.
 	strayDraws int
 	// textureUsage is what role each attachment texture is currently in, for
 	// the frame so far. A transition has to name the usage the texture is

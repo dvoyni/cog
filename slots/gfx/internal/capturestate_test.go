@@ -77,8 +77,8 @@ func newCaptureRig(t *testing.T) *captureRig {
 func (r *captureRig) record(label string) {
 	r.t.Helper()
 	q := recordRaw(r.t, r.k)
-	q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: label})
-	drawInto(q)
+	ref := q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: label})
+	drawInto(q, ref)
 }
 
 func (r *captureRig) tick() {
@@ -588,10 +588,10 @@ func TestATextureCaptureDeclaresItsTransition(t *testing.T) {
 		t.Fatalf("arm: %v", answer.Err)
 	}
 	q := recordRaw(t, rig.k)
-	q.Pass(descriptors.PassDescr{
+	ref := q.NewPass(descriptors.PassDescr{
 		Target: descriptors.TextureTarget(target, 0, 0), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "offscreen",
 	})
-	q.Draw(triangle(), testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	q.Draw(ref, triangle(), testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	rig.tick()
 	rig.render()
 

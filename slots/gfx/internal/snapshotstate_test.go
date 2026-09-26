@@ -100,17 +100,17 @@ func (r *captureRig) runSnapshot(request frameSnapshotRequest, record func(*OpQu
 // twoPasses records a frame whose declaration order is the reverse of its run
 // order, which is the only way to tell the two apart.
 func twoPasses(q *OpQueue) {
-	q.Pass(descriptors.PassDescr{
+	ref := q.NewPass(descriptors.PassDescr{
 		Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Order: 20, Label: "overlay",
 		Load: types.LoadPreserve, Store: types.StoreKeep,
 	})
-	drawInto(q)
-	q.Pass(descriptors.PassDescr{
+	drawInto(q, ref)
+	ref = q.NewPass(descriptors.PassDescr{
 		Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Order: 10, Label: "world",
 		Load: types.LoadClear, Clear: m.Color{R: 0.25, A: 1}, Store: types.StoreKeep,
 	})
-	drawInto(q)
-	q.Draw(triangle(), testMaterial(), 7, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	drawInto(q, ref)
+	q.Draw(ref, triangle(), testMaterial(), 7, 0, descriptors.MatParam("mvp", m.NewMat4()))
 }
 
 func TestAFrameSnapshotReportsPassesInRunOrderWithTheirCounts(t *testing.T) {
@@ -218,10 +218,10 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 	})
 
 	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *OpQueue) {
-		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "screen"})
+		ref := q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "screen"})
 		// An inline texture is baked into the frame queue, which is the other
 		// place resource traffic comes from.
-		q.Draw(triangle(), testMaterial(), 1, 0,
+		q.Draw(ref, triangle(), testMaterial(), 1, 0,
 			descriptors.MatParam("mvp", m.NewMat4()),
 			descriptors.TextureParam("albedo", descriptors.TextureWithBytes(4, 4, descriptors.FormatRGBA8, make([]byte, 64), true, false)))
 	})
@@ -298,8 +298,8 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 func TestAFrameSnapshotBindsToATickThatBeganAfterTheRequest(t *testing.T) {
 	rig := newCaptureRig(t)
 	before := recordRaw(t, rig.k)
-	before.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "before"})
-	drawInto(before)
+	ref := before.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "before"})
+	drawInto(before, ref)
 	release := rig.gate.open()
 
 	// The arm lands inside a tick that is already running, which is the case a
@@ -325,8 +325,8 @@ func TestAFrameSnapshotBindsToATickThatBeganAfterTheRequest(t *testing.T) {
 	}
 
 	after := recordRaw(t, rig.k)
-	after.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "after"})
-	drawInto(after)
+	ref = after.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "after"})
+	drawInto(after, ref)
 	rig.tick()
 
 	select {
@@ -377,8 +377,8 @@ func TestAFrameSnapshotUnderPausePerformsOneStepAndSaysSo(t *testing.T) {
 	// Recorded before the call and never ticked away: a paused engine runs no
 	// tick of its own, so the step the capability raises is the only one.
 	frozen := recordRaw(t, rig.k)
-	frozen.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "frozen"})
-	drawInto(frozen)
+	ref := frozen.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "frozen"})
+	drawInto(frozen, ref)
 
 	response, err := callFrame(rig.k, frameSnapshotRequest{})
 	if err != nil {
@@ -414,7 +414,7 @@ func TestAFrameSnapshotJoiningAPendingStepSaysThatToo(t *testing.T) {
 		return app.TimeResponse{Paused: true, Stepped: 1, Joined: true}
 	})
 	frozen := recordRaw(t, rig.k)
-	frozen.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "shared"})
+	frozen.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "shared"})
 
 	response, err := callFrame(rig.k, frameSnapshotRequest{})
 	if err != nil {
@@ -439,7 +439,7 @@ func TestAFrameSnapshotNamesTheTickItDescribes(t *testing.T) {
 		return app.TimeResponse{Paused: true, Stepped: 1}
 	})
 	frozen := recordRaw(t, rig.k)
-	frozen.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "shared"})
+	frozen.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "shared"})
 
 	response, err := callFrame(rig.k, frameSnapshotRequest{})
 	if err != nil {
@@ -535,12 +535,12 @@ func TestAFrameSnapshotIsOneFlatDocument(t *testing.T) {
 func TestAFrameSnapshotNamesDrawsThatBelongToNoPass(t *testing.T) {
 	rig := newCaptureRig(t)
 	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *OpQueue) {
-		// A draw recorded before any pass is dropped by the renderer and
+		// A draw naming no pass is dropped by the renderer and
 		// reported as ErrDrawWithoutPass. It is also one of the reasons a
 		// frame is black, so the snapshot says it rather than counting to
 		// zero.
-		drawInto(q)
-		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "empty"})
+		drawInto(q, 0)
+		q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "empty"})
 	})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
@@ -565,14 +565,14 @@ func TestAFrameSnapshotSeesWhatALateRecorderFlushedIntoTheQueue(t *testing.T) {
 	// frame missing everything the canvas drew - which is precisely the frame
 	// an agent is asking about.
 	rig.flush.on(func(q *OpQueue) {
-		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Order: 100, Label: "canvas"})
-		drawInto(q)
+		ref := q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Order: 100, Label: "canvas"})
+		drawInto(q, ref)
 	})
 	t.Cleanup(func() { rig.flush.on(nil) })
 
 	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *OpQueue) {
-		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Order: 10, Label: "world"})
-		drawInto(q)
+		ref := q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Order: 10, Label: "world"})
+		drawInto(q, ref)
 	})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
@@ -637,8 +637,8 @@ func TestAFrameSnapshotDescribesAPassDrawingSomewhereOtherThanTheScreen(t *testi
 	rig := newCaptureRig(t)
 	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *OpQueue) {
 		target, _ := q.NewTemporaryTarget(128, 64, descriptors.FormatRGBA8)
-		q.Pass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Label: "offscreen", Load: types.LoadClear})
-		drawInto(q)
+		ref := q.NewPass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Label: "offscreen", Load: types.LoadClear})
+		drawInto(q, ref)
 	})
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)

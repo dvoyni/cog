@@ -41,7 +41,7 @@ type FrameView struct {
 	PassCount     int `json:"passCount"`
 	DrawCount     int `json:"drawCount"`
 	InstanceCount int `json:"instanceCount"`
-	// StrayDraws are draws recorded outside every pass. They are dropped by
+	// StrayDraws are draws naming no pass declared this frame. They are dropped by
 	// the renderer and reported as ErrDrawWithoutPass, and they are the answer
 	// to "nothing is on screen" often enough to be named here too.
 	StrayDraws int `json:"strayDraws,omitempty"`

@@ -13,10 +13,10 @@ import (
 // somewhere else.
 type ErrShaderExceedsWebLimits = shader.ErrShaderExceedsWebLimits
 
-// ErrDrawWithoutPass is reported when a frame records draws before declaring a
-// pass. There is no implicit pass to absorb them, so they are dropped: a draw
-// with no pass has no target, no depth attachment and no place in the frame's
-// order.
+// ErrDrawWithoutPass is reported when a frame records draws naming no pass
+// declared that frame. There is no implicit pass to absorb them, so they are
+// dropped: a draw with no pass has no target, no depth attachment and no place
+// in the frame's order.
 type ErrDrawWithoutPass = types.ErrDrawWithoutPass
 
 // ErrDrawSamplesAttachment is reported when a draw samples a texture its own

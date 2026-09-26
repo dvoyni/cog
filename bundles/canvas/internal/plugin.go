@@ -260,7 +260,8 @@ func (p *plugin) flushFrame(
 		value := ops[layerID]
 		first := index == 0 || ops[p.layers[index-1]].Target != value.Target
 		last := index == len(p.layers)-1 || ops[p.layers[index+1]].Target != value.Target
-		gfxWrite.Pass(canvasPass(layerID, value, first, last))
+		pass := gfxWrite.NewPass(canvasPass(layerID, value, first, last))
+		p.batch.pass, p.tris.pass = pass, pass
 		surf := layerSurface(value.Target, view)
 		transform := resolveLayerTransform(value, surf)
 		// The layer's set is read through a pointer into this layer's own copy,

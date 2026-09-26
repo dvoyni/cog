@@ -89,10 +89,9 @@ type passRecord struct {
 type OpQueue struct {
 	ids IDSource
 	ops []Op
-	// passes is the frame's declared passes and current the selected one, or -1
-	// before anything selects a pass.
+	// passes is the frame's declared passes; a PassRef is an index into it,
+	// plus one.
 	passes               []passRecord
-	current              int
 	uploadArena          []byte
 	parameterArena       []descriptors.ParameterDescr
 	vertexAttrArena      []descriptors.VertexAttr
@@ -119,7 +118,6 @@ func (q *OpQueue) reset() {
 	q.ops = q.ops[:0]
 	clear(q.passes)
 	q.passes = q.passes[:0]
-	q.current = -1
 	q.uploadArena = q.uploadArena[:0]
 	q.parameterArena = q.parameterArena[:0]
 	q.vertexAttrArena = q.vertexAttrArena[:0]
@@ -155,48 +153,42 @@ func (q *OpQueue) reset() {
 	}
 }
 
-// Pass declares a pass and selects it: every op recorded afterwards appends to
-// it, until another Pass or SetPass call. Passes run in Order, not in the order
-// they were declared.
-func (q *OpQueue) Pass(desc descriptors.PassDescr) descriptors.PassRef {
+// NewPass declares a pass for this frame and returns the reference every Draw
+// into it names. Passes run in Order, not in the order they were declared, and
+// a pass's draws run in the order they were recorded, so draws into several
+// passes may be recorded interleaved. The reference is valid until the frame
+// ends; hand it to another System to let it draw into the same pass.
+func (q *OpQueue) NewPass(desc descriptors.PassDescr) descriptors.PassRef {
 	q.passes = append(q.passes, passRecord{Desc: desc, seq: len(q.passes)})
-	q.current = len(q.passes) - 1
 	return descriptors.PassRef(len(q.passes))
 }
 
-// SetPass re-selects a pass declared earlier this frame. An unknown reference
-// is ignored.
-func (q *OpQueue) SetPass(ref descriptors.PassRef) {
-	if ref > 0 && int(ref) <= len(q.passes) {
-		q.current = int(ref) - 1
-	}
-}
-
-// selectedPass returns the index of the pass ops are appended to, or -1 when no
-// pass is selected. Every draw names a pass: there is no implicit one, because
-// a default screen pass would silently absorb draws that belonged in a camera's
-// target, and it would have to guess an Order.
-func (q *OpQueue) selectedPass() int {
-	if q.current < 0 || q.current >= len(q.passes) {
+// passIndex returns the index of the pass ref names, or -1 when it names none
+// declared this frame. Every draw names a pass: there is no implicit one,
+// because a default screen pass would silently absorb draws that belonged in a
+// camera's target, and it would have to guess an Order.
+func (q *OpQueue) passIndex(ref descriptors.PassRef) int {
+	if ref < 1 || int(ref) > len(q.passes) {
 		return -1
 	}
-	return q.current
+	return int(ref) - 1
 }
 
-// Draw records a draw op that replays the mesh geometry instances times,
-// starting at firstInstance; a plain draw is 1, 0, and instances below 1 draw
-// once. Per-instance data is supplied through a storage-buffer parameter the
-// shader indexes by instance_index, which WebGPU starts at firstInstance, so a
-// batch reads its own slice of a shared instance arena with no offset plumbing
-// of its own. Parameters are matched to reflected shader constants by name,
-// apply to every instance and override same-named material parameters. Inline
-// geometry is baked into queue-pooled BufferIDs using each BufferDescr's
-// copyData policy.
-func (q *OpQueue) Draw(mesh descriptors.MeshDescr, material descriptors.MaterialDescr, instances, firstInstance int, params ...descriptors.ParameterDescr) {
-	pass := int32(q.selectedPass())
+// Draw records a draw op into pass that replays the mesh geometry instances
+// times, starting at firstInstance; a plain draw is 1, 0, and instances below 1
+// draw once. Per-instance data is supplied through a storage-buffer parameter
+// the shader indexes by instance_index, which WebGPU starts at firstInstance,
+// so a batch reads its own slice of a shared instance arena with no offset
+// plumbing of its own. Parameters are matched to reflected shader constants by
+// name, apply to every instance and override same-named material parameters.
+// Inline geometry is baked into queue-pooled BufferIDs using each BufferDescr's
+// copyData policy. A draw whose pass was not declared this frame is dropped
+// and reported.
+func (q *OpQueue) Draw(pass descriptors.PassRef, mesh descriptors.MeshDescr, material descriptors.MaterialDescr, instances, firstInstance int, params ...descriptors.ParameterDescr) {
+	index := int32(q.passIndex(pass))
 	o := Op{
 		Kind:          OpDraw,
-		Pass:          pass,
+		Pass:          index,
 		Material:      q.bakeMaterialIfNeeded(material),
 		Mesh:          mesh,
 		Params:        q.bakeParametersIfNeeded(params),

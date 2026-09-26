@@ -96,8 +96,8 @@ type DepthDescr = descriptors.DepthDescr
 // happens to its attachments at either end.
 type PassDescr = descriptors.PassDescr
 
-// PassRef selects a pass declared earlier in the same frame. Its zero value
-// refers to no pass.
+// PassRef names a pass OpQueue.NewPass declared this frame, for Draw to record
+// into. Its zero value refers to no pass.
 type PassRef = descriptors.PassRef
 
 // ResourceID underlies the opaque GPU handles below, which a Backend mints. The

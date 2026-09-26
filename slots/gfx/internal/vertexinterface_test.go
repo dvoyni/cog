@@ -190,8 +190,8 @@ func pipelineErrFrames(t *testing.T, backend *fakeBackend, mesh descriptors.Mesh
 	k := newTestKernelWithErrors(t, p, func(err error) { reported = append(reported, err) })
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	for range frames {
-		w := recordList(t, k)
-		w.Draw(mesh, testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+		w, ref := recordList(t, k)
+		w.Draw(ref, mesh, testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 	}

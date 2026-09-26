@@ -19,7 +19,7 @@ func TestSuppliedShaderDrawAllocatesNothing(t *testing.T) {
 	backend := &fakeBackend{}
 	translator := newTranslator()
 	queue := testOpQueue(backend)
-	queue.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto()})
+	ref := queue.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto()})
 	mesh := descriptors.Mesh(
 		descriptors.BakedBuffer(1, 3*28),
 		types.TopologyTriangleList,
@@ -28,7 +28,7 @@ func TestSuppliedShaderDrawAllocatesNothing(t *testing.T) {
 	material := descriptors.Material(shader.ShaderWithText("//test", shader.ShaderDefine("HQ"), shader.ShaderConst("N", "4")))
 	const draws = 100
 	for range draws {
-		queue.Draw(mesh, material, 1, 0)
+		queue.Draw(ref, mesh, material, 1, 0)
 	}
 	translate := func() {
 		if _, err := translator.translate(kernel.Kernel{}, &queue, nil, backend, noFiles, types.CaptureDesc{}, false); err != nil {

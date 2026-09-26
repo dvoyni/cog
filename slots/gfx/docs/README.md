@@ -105,11 +105,11 @@ engine walked away from.
   are retained until the render thread consumes them.
 - `*Viewport`: logical, window, and framebuffer dimensions.
 
-`OpQueue` methods are `Pass`, `SetPass`, `NewTemporaryBuffer`,
-`NewTemporaryTexture`, `NewTemporaryTarget`, `FrameMaterial`, and `Draw`; the
-plugin resets a queue itself when it rotates the frame slots. `Draw(mesh, material, instances, firstInstance,
-params...)` is the one draw: a plain draw passes `1, 0`, and fewer than one
-instance still draws once. Draw parameters override same-named material
+`OpQueue` methods are `NewPass`, `NewTemporaryBuffer`, `NewTemporaryTexture`,
+`NewTemporaryTarget`, `FrameMaterial`, and `Draw`; the plugin resets a queue
+itself when it rotates the frame slots. `Draw(pass, mesh, material, instances,
+firstInstance, params...)` is the one draw: a plain draw passes `1, 0`, and
+fewer than one instance still draws once. Draw parameters override same-named material
 parameters. `firstInstance` is where WebGPU's `instance_index` starts, so a batch
 reads its own slice of a shared instance arena without plumbing an offset of its
 own.
@@ -131,10 +131,12 @@ each.
 
 ## Passes
 
-A recorder declares a pass with `q.Pass(PassDescr{...})`, which also selects it:
-every op recorded afterwards belongs to it, and `q.SetPass(ref)` re-selects one
-declared earlier in the frame. There is no implicit default pass: a draw
-recorded outside every pass is dropped and reported as `ErrDrawWithoutPass`.
+A recorder declares a pass with `ref := q.NewPass(PassDescr{...})`, and every
+draw names the pass it belongs to: `q.Draw(ref, mesh, ...)`. Nothing is selected,
+so a recorder may interleave draws into several passes, and a System may draw
+into a pass another System declared by being handed its `PassRef`, which is
+valid until the frame ends. There is no implicit default pass: a draw naming no
+pass declared this frame is dropped and reported as `ErrDrawWithoutPass`.
 
 `PassDescr` carries `Order`, a `Target` (`ScreenTarget()`,
 `TextureTarget(tex, mip, layer)`, or `NoTarget()`), a `Depth` (`DepthAuto()`,

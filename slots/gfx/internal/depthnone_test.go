@@ -20,8 +20,8 @@ import (
 
 func TestADrawInADepthNonePassBuildsAPipelineWithNoDepthTarget(t *testing.T) {
 	backend, _ := passFrame(t, func(q *OpQueue) {
-		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "flat"})
-		drawInto(q)
+		ref := q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "flat"})
+		drawInto(q, ref)
 	})
 	if len(backend.lastPipelines) != 1 {
 		t.Fatalf("pipelines = %d, want the one the flat pass needed", len(backend.lastPipelines))
@@ -35,10 +35,10 @@ func TestOneShaderInADepthPassAndADepthNonePassBuildsTwoPipelines(t *testing.T) 
 	// As with noColor, the flag has to be in the cache key: a key that ignored
 	// it would hand the second pass whichever pipeline the first one built.
 	backend, _ := passFrame(t, func(q *OpQueue) {
-		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Order: 0, Label: "lit"})
-		drawInto(q)
-		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Order: 1, Label: "flat"})
-		drawInto(q)
+		ref := q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Order: 0, Label: "lit"})
+		drawInto(q, ref)
+		ref = q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Order: 1, Label: "flat"})
+		drawInto(q, ref)
 	})
 	if len(backend.lastPipelines) != 2 {
 		t.Fatalf("pipelines = %d, want one per depth kind", len(backend.lastPipelines))
@@ -58,8 +58,8 @@ func TestOneShaderInADepthPassAndADepthNonePassBuildsTwoPipelines(t *testing.T) 
 
 func TestADrawInADepthAutoPassKeepsItsDepthTarget(t *testing.T) {
 	backend, _ := passFrame(t, func(q *OpQueue) {
-		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "lit"})
-		q.Draw(triangle(), testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+		ref := q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "lit"})
+		q.Draw(ref, triangle(), testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	})
 	if len(backend.lastPipelines) != 1 {
 		t.Fatalf("pipelines = %d, want one", len(backend.lastPipelines))
@@ -83,8 +83,8 @@ func TestADrawInADepthTargetPassKeepsItsDepthTarget(t *testing.T) {
 		shadow = resources.NewTexture(64, 64, 1, descriptors.FormatDepth32F, false)
 	})
 	q := recordRaw(t, k)
-	q.Pass(descriptors.PassDescr{Target: descriptors.NoTarget(), Depth: descriptors.DepthTarget(shadow), DepthLoad: types.LoadClear, Label: "shadow"})
-	drawInto(q)
+	ref := q.NewPass(descriptors.PassDescr{Target: descriptors.NoTarget(), Depth: descriptors.DepthTarget(shadow), DepthLoad: types.LoadClear, Label: "shadow"})
+	drawInto(q, ref)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

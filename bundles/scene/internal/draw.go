@@ -95,7 +95,7 @@ func (b *frameBuild) emit(gfxWrite *gfx.OpQueue) {
 	meshes := gfxWrite.NewTemporaryBuffer(b.meshes.bytes(), true)
 	for i := range b.passes {
 		pass := &b.passes[i]
-		gfxWrite.Pass(pass.descr)
+		ref := gfxWrite.NewPass(pass.descr)
 		for _, draw := range b.draws[pass.firstDraw : pass.firstDraw+pass.drawCount] {
 			b.params = append(b.params[:0],
 				gfx.BufferRangeParam(model.BindingSceneFrame, frames, pass.frameOffset, model.FrameBlockSize),
@@ -115,7 +115,7 @@ func (b *frameBuild) emit(gfxWrite *gfx.OpQueue) {
 				b.params = append(b.params, gfx.BufferParam(model.BindingSceneMorphDeltas, draw.skin.Morphs))
 			}
 			b.params = append(b.params, draw.params...)
-			gfxWrite.Draw(draw.mesh, *draw.material,
+			gfxWrite.Draw(ref, draw.mesh, *draw.material,
 				draw.instances, draw.firstInstance, b.params...)
 		}
 	}

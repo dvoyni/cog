@@ -14,17 +14,11 @@ func OpQueueBakeTextureIfNeeded(v *OpQueue, a0 descriptors.TextureDescr) descrip
 	return v.bakeTextureIfNeeded(a0)
 }
 
-// OpQueueCurrent reads OpQueue.current for gfx's internal/.
-func OpQueueCurrent(v *OpQueue) int { return v.current }
-
 // OpQueueOps reads OpQueue.ops for gfx's internal/.
 func OpQueueOps(v *OpQueue) []Op { return v.ops }
 
 // OpQueuePasses reads OpQueue.passes for gfx's internal/.
 func OpQueuePasses(v *OpQueue) []passRecord { return v.passes }
-
-// OpQueueSelectedPass calls OpQueue.selectedPass for gfx's internal/.
-func OpQueueSelectedPass(v *OpQueue) int { return v.selectedPass() }
 
 // OpQueueTemporaryBuffer calls OpQueue.temporaryBuffer for gfx's internal/.
 func OpQueueTemporaryBuffer(v *OpQueue, a0 types.BufferKind, a1 []byte, a2 bool) descriptors.BufferDescr {

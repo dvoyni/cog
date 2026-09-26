@@ -54,8 +54,8 @@ func TestPipelineDescCarriesStateAndTargetFormats(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	w := recordList(t, k)
-	w.Draw(triangle(), descriptors.MaterialWithState(shader.ShaderWithText("//test"), StateOpaque3D()), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	w, ref := recordList(t, k)
+	w.Draw(ref, triangle(), descriptors.MaterialWithState(shader.ShaderWithText("//test"), StateOpaque3D()), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -85,10 +85,10 @@ func TestPipelineCacheDistinguishesDepthState(t *testing.T) {
 	// Same compare, no write: the transparent pass, and a different pipeline.
 	reading := descriptors.MaterialWithState(shaderDescr, types.MaterialState{DepthCompare: types.CompareLess})
 
-	w := recordList(t, k)
-	w.Draw(triangle(), writing, 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
-	w.Draw(triangle(), reading, 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
-	w.Draw(triangle(), writing, 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	w, ref := recordList(t, k)
+	w.Draw(ref, triangle(), writing, 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(ref, triangle(), reading, 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(ref, triangle(), writing, 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

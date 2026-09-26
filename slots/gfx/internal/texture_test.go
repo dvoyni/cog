@@ -43,8 +43,8 @@ func TestResourceTextureAlwaysBakesSrgb(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	w := recordList(t, k)
-	w.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("normal.png"))), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	w, ref := recordList(t, k)
+	w.Draw(ref, triangle(), testMaterial(descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("normal.png"))), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -63,9 +63,9 @@ func TestSameResourcePathBakesOnce(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	w := recordList(t, k)
-	w.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("hero.png"))), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
-	w.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("hero.png"))), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	w, ref := recordList(t, k)
+	w.Draw(ref, triangle(), testMaterial(descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("hero.png"))), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(ref, triangle(), testMaterial(descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("hero.png"))), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -129,8 +129,8 @@ func TestARenderTargetIsRenderedIntoAndSampledOnALaterFrame(t *testing.T) {
 		texture = resources.NewRenderTarget(64, 64, 1, descriptors.FormatRGBA8Srgb)
 	})
 	q := recordRaw(t, k)
-	q.Pass(descriptors.PassDescr{Target: descriptors.TextureTarget(texture, 0, 0), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "bake"})
-	drawInto(q)
+	ref := q.NewPass(descriptors.PassDescr{Target: descriptors.TextureTarget(texture, 0, 0), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "bake"})
+	drawInto(q, ref)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -139,8 +139,8 @@ func TestARenderTargetIsRenderedIntoAndSampledOnALaterFrame(t *testing.T) {
 	}
 
 	q = recordRaw(t, k)
-	q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "use"})
-	q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	ref = q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "use"})
+	q.Draw(ref, triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
