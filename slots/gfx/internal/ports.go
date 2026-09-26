@@ -7,6 +7,20 @@ import (
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
+// IDMinter is the half of the Backend the recording queues, OpQueue and
+// ResourceQueue, call: it reserves logical resource ids, which is CPU-only and
+// safe from the recording thread.
+type IDMinter interface {
+	NewTexture() types.TextureID
+	NewBuffer() types.BufferID
+	Ready() bool
+}
+
+// IDSource reaches the Backend adapter. It is read when an id is needed rather
+// than when the queue is built, because a queue is built during registration
+// and the adapter is bound only when composition finishes.
+type IDSource func() IDMinter
+
 // Backend is the low-level realization interface: a vendor-neutral,
 // "wgpu-shaped" API that a driver (e.g. gogpu) implements. The gfx plugin holds
 // one Backend and never imports a GPU library. All methods are called on the

@@ -84,19 +84,6 @@ type passRecord struct {
 	seq  int
 }
 
-// IDMinter is the half of the Backend a recording queue calls: it reserves
-// logical resource ids, which is CPU-only and safe from the recording thread.
-type IDMinter interface {
-	NewTexture() types.TextureID
-	NewBuffer() types.BufferID
-	Ready() bool
-}
-
-// IDSource reaches the Backend adapter. It is read when an id is needed rather
-// than when the queue is built, because a queue is built during registration
-// and the adapter is bound only when composition finishes.
-type IDSource func() IDMinter
-
 // OpQueue records high-level frame commands. All uploads it owns are temporary
 // and may be dropped with the frame. Persistent GPU resources are managed
 // separately through ResourceQueue.
