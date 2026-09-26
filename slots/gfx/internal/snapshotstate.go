@@ -159,6 +159,7 @@ func frameViewOf(queue *OpQueue, resources *ResourceQueue, filter string) FrameV
 	slices.SortStableFunc(order, func(a, b int) int {
 		return cmp.Compare(OpQueuePasses(queue)[a].Desc.Order, OpQueuePasses(queue)[b].Desc.Order)
 	})
+	seen := map[drawParamsKey]int{}
 	for run, index := range order {
 		desc := OpQueuePasses(queue)[index].Desc
 		if filter != "" && desc.Label != filter {
@@ -166,6 +167,7 @@ func frameViewOf(queue *OpQueue, resources *ResourceQueue, filter string) FrameV
 			continue
 		}
 		view.Passes = append(view.Passes, passViewOf(index, run, desc, draws[index], instances[index]))
+		view.DrawParams = appendDrawParamsViews(view.DrawParams, seen, queue, resources, index)
 	}
 
 	view.ResourceOps = appendResourceOpViews(view.ResourceOps, "durable", ResourceQueueOps(resources))

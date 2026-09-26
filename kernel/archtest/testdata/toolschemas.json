@@ -1366,6 +1366,196 @@
         "drawCount": {
           "type": "integer"
         },
+        "drawParams": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "bindings": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "binding": {
+                      "type": "integer"
+                    },
+                    "buffer": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "dimension": {
+                      "type": "string"
+                    },
+                    "group": {
+                      "type": "integer"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "offset": {
+                      "type": "integer"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "range": {
+                      "type": "integer"
+                    },
+                    "sampler": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "addressU": {
+                          "type": "string"
+                        },
+                        "addressV": {
+                          "type": "string"
+                        },
+                        "anisotropy": {
+                          "maximum": 255,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "compare": {
+                          "type": "string"
+                        },
+                        "comparison": {
+                          "type": "boolean"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "mag": {
+                          "type": "string"
+                        },
+                        "min": {
+                          "type": "string"
+                        },
+                        "mip": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "addressU",
+                        "addressV",
+                        "mag",
+                        "min",
+                        "mip"
+                      ],
+                      "type": [
+                        "null",
+                        "object"
+                      ]
+                    },
+                    "size": {
+                      "type": "integer"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "texture": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "kind",
+                    "group",
+                    "binding",
+                    "source"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "drawState": {
+                "additionalProperties": false,
+                "properties": {
+                  "blend": {
+                    "type": "string"
+                  },
+                  "cull": {
+                    "type": "string"
+                  },
+                  "depthCompare": {
+                    "type": "string"
+                  },
+                  "depthWrite": {
+                    "type": "boolean"
+                  },
+                  "frontFace": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "blend",
+                  "depthCompare",
+                  "depthWrite",
+                  "cull",
+                  "frontFace"
+                ],
+                "type": [
+                  "null",
+                  "object"
+                ]
+              },
+              "draws": {
+                "type": "integer"
+              },
+              "instances": {
+                "type": "integer"
+              },
+              "label": {
+                "type": "string"
+              },
+              "passes": {
+                "items": {
+                  "type": "integer"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "set": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "shader": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "state": {
+                "type": "string"
+              },
+              "version": {
+                "maximum": 2147483647,
+                "minimum": -2147483648,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "set",
+              "state",
+              "passes",
+              "draws",
+              "instances"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
         "filter": {
           "type": "string"
         },

@@ -354,6 +354,47 @@ at the wrong thing. With source indices no addressing scheme needs inventing:
 - **Whether a step was performed** to produce this snapshot, when the engine was
   paused.
 
+> **Amended by [#599](https://github.com/dvoyni/cog/issues/599)
+> ([drawparams.md §Inspection](./drawparams.md#inspection)).** A draw now names a
+> durable set of draw params and the frame's version of it, and both resolve, so
+> what a draw draws with is no longer an opaque handle. The response gains
+> **`drawParams`**: one entry per set and version the kept passes draw through,
+> in the order the first draw of each runs, each with
+>
+> - `set` and `version` — opaque handles; a zero `version` is the set's own
+>   values, and two entries naming one set under two versions are one set
+>   changed by `SetDrawParams` between its draws;
+> - `state` — `live`, or why the render drops its draws: `failed`, `released`,
+>   `unknown`, or `shaderReleased`;
+> - `shader` and `label` — the shader's id and its program's label;
+> - `drawState` — blend, depth compare, depth write, cull and front face, named;
+> - `bindings` — every binding the shader declares, in its program's order, each
+>   with `name`, `kind` (`uniform`, `storage`, `readWriteStorage`, `texture`,
+>   `depthTexture`, `sampler`, `comparisonSampler`), `group`, `binding`, and
+>   `source`: `set`, `frame` or `default`. A uniform carries its `size` and
+>   never its bytes; a texture its id or `path` and the `dimension` the shader
+>   declares; a sampler its modes, named; a storage buffer its id and bound
+>   `offset` and `range`;
+> - `passes`, `draws` and `instances` — the declaration indices of the kept
+>   passes that draw through it, in run order, and how many draws and instances
+>   of theirs do.
+>
+> Draws are still **counted, not listed**: an entry is per set and version, so a
+> frame of five thousand draws through forty sets is forty entries, and the pass
+> and frame totals are unchanged. A pass filter keeps only the entries its
+> passes draw. `default` is reported rather than the zero record behind it,
+> because an unsupplied binding is the answer often enough — a storage buffer
+> left `default` is a dropped draw. The set is read as the render that follows
+> finds it: a version's untouched bindings are the set's own, and a durable
+> update later in the tick shows through them.
+>
+> **Settled here:** a draw through the old material path names no set and is
+> only counted, as every draw was; nothing in `gfx_frame` ever rendered a
+> `MaterialView`, so the transition adds no field for it and the deletion of
+> materials removes none. `MaterialView` survives only as `canvas_draws`'
+> rendering of a canvas op's gfx material, and goes with it; its pipeline state
+> is `DrawStateView`, which `MaterialStateView` now aliases.
+
 That answers *why is nothing on screen* precisely — no passes, a pass ordered
 wrong, a target that is not the screen, a texture never baked, a resource
 released and still referenced — and refuses to pretend a `MeshDescr` is legible.
@@ -394,6 +435,14 @@ rather than a hand-rolled printer.
 Not `mcp`, which is the contract leaf and must never learn what a texture is;
 and not each package separately, which would show the agent one value in two
 shapes across two tools.
+
+> **Amended by [#599](https://github.com/dvoyni/cog/issues/599).** The shared
+> pipeline-state view is **`DrawStateView`**, the Draw state of
+> [drawparams.md](./drawparams.md) with its enums named. `MaterialView` and
+> `MaterialStateView` — now an alias of `DrawStateView` — belong to the old
+> material path: they are kept only while `canvas_draws` renders a canvas op's
+> gfx material, and are deleted with materials. `DrawParamsView` and
+> `DrawParamsBindingView` are `gfx_frame`'s own, beside `PassView`.
 
 > **Amended at implementation ([#259](https://github.com/dvoyni/cog/issues/259)).**
 > `SnapshotView` — shipped as the three coordinate sizes plus `stepped` and
@@ -455,8 +504,10 @@ mirror throws away.
 > uploaded or released, with their paths and sizes. Use it when nothing appears
 > on screen, or appears in the wrong order: it shows whether a pass ran at all,
 > what it drew into, and whether the texture you expected was ever baked.
-> Individual draws are counted rather than listed, because a draw's mesh and
-> material are opaque handles with nothing to resolve them against.
+> Individual draws are counted rather than listed; what they draw with is
+> listed once per set of draw params — its shader, its draw state, and every
+> binding's group, binding, size or resource, with whether the value is the
+> set's own, this frame's version of it, or the binding's default.
 >
 > Blocks until the next tick has been recorded, so it reflects anything you did
 > before calling it. Filter by `pass` to cut a busy frame down. Pass `path` to
@@ -478,6 +529,12 @@ mirror throws away.
 > still get two ticks, because sharing the step is opportunistic without a
 > `app_time hold`, and nothing in the response said which tick it got. The
 > prose now names the hold and the check.
+
+> **Amended by [#599](https://github.com/dvoyni/cog/issues/599).** The last
+> sentence of the first paragraph is new. As shipped it read *"Individual draws
+> are counted rather than listed, because a draw's mesh and material are opaque
+> handles with nothing to resolve them against"*, which stopped being true when
+> a draw came to name a set of draw params.
 
 ---
 
@@ -559,6 +616,11 @@ is implemented.
   something an agent can read, which is a `gfx` API decision and not a debug
   one. Fog on the map; not sharp until someone is chasing a bug the pass list
   cannot show.
+
+  > **Amended by [#599](https://github.com/dvoyni/cog/issues/599).** Half of
+  > this is done: a draw's material became a set of draw params, which resolves,
+  > and `drawParams` renders it once per set and version. The mesh is still an
+  > opaque handle, and draws are still counted rather than listed.
 
 - **Capturing something that is not the screen**, and the name-based selector
   plus listing it would need. Fog.

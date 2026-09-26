@@ -269,17 +269,21 @@ func SamplerViewOf(sampler types.SamplerDesc) SamplerView {
 // MaterialView is one material rendered for an agent: which shader variant
 // shades the draw, the fixed pipeline state, and the material's own
 // parameters, which a draw's same-named parameters override.
+//
+// It is the old material path's view, kept only while canvas_draws still
+// reports a canvas op's gfx material; a draw through a set is rendered as a
+// DrawParamsView. It goes when materials are deleted.
 type MaterialView struct {
-	Shader     ShaderView        `json:"shader"`
-	State      MaterialStateView `json:"state"`
-	Parameters []ParameterView   `json:"parameters,omitempty"`
+	Shader     ShaderView      `json:"shader"`
+	State      DrawStateView   `json:"state"`
+	Parameters []ParameterView `json:"parameters,omitempty"`
 }
 
 // MaterialViewOf renders one material descriptor.
 func MaterialViewOf(material descriptors.MaterialDescr) MaterialView {
 	return MaterialView{
 		Shader:     ShaderViewOf(material.Shader()),
-		State:      MaterialStateViewOf(material.State()),
+		State:      DrawStateViewOf(material.State()),
 		Parameters: ParameterViewsOf(material.Params()),
 	}
 }
@@ -306,10 +310,10 @@ func ShaderViewOf(shaderDescr shader.ShaderDescr) ShaderView {
 	return ShaderView{Path: path, Inline: path == "", Supply: shaderDescr.Supply()}
 }
 
-// MaterialStateView is fixed pipeline state with its enums named. Depth
+// DrawStateView is a set's fixed pipeline state with its enums named. Depth
 // compare and depth write are separate here because they are separate in the
 // engine: test but do not write is a state 3D needs and one flag cannot say.
-type MaterialStateView struct {
+type DrawStateView struct {
 	Blend        string `json:"blend"`
 	DepthCompare string `json:"depthCompare"`
 	DepthWrite   bool   `json:"depthWrite"`
@@ -317,13 +321,23 @@ type MaterialStateView struct {
 	FrontFace    string `json:"frontFace"`
 }
 
-// MaterialStateViewOf renders one pipeline state.
-func MaterialStateViewOf(state types.MaterialState) MaterialStateView {
-	return MaterialStateView{
+// DrawStateViewOf renders one pipeline state.
+func DrawStateViewOf(state types.MaterialState) DrawStateView {
+	return DrawStateView{
 		Blend:        state.Blend.String(),
 		DepthCompare: state.DepthCompare.String(),
 		DepthWrite:   state.DepthWrite,
 		Cull:         state.Cull.String(),
 		FrontFace:    state.FrontFace.String(),
 	}
+}
+
+// MaterialStateView is DrawStateView under the old path's name, kept with
+// MaterialView and deleted with it.
+type MaterialStateView = DrawStateView
+
+// MaterialStateViewOf renders one pipeline state; it is DrawStateViewOf under
+// the old path's name.
+func MaterialStateViewOf(state types.MaterialState) MaterialStateView {
+	return DrawStateViewOf(state)
 }
