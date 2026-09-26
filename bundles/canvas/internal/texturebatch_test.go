@@ -13,7 +13,7 @@ import (
 // straight to the queue, which made a nine-slice nine draws for one sprite.
 func TestNineSliceOverOneTextureIsOneDraw(t *testing.T) {
 	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
-		_, texture := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
+		_, texture := gfxWrite.NewTemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.SpriteTexture(0, texture, SpriteTransform{
 			Size:      m.Vec2{X: 128, Y: 64},
 			NineSlice: SpriteFrame{Left: 8, Top: 8, Right: 8, Bottom: 8},
@@ -28,7 +28,7 @@ func TestNineSliceOverOneTextureIsOneDraw(t *testing.T) {
 // The batch is what makes a run of panels, portraits or camera views one draw.
 func TestConsecutiveTextureSpritesOverOneTextureMerge(t *testing.T) {
 	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
-		_, texture := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
+		_, texture := gfxWrite.NewTemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		for i := range 3 {
 			write.SpriteTexture(0, texture, SpriteTransform{Position: m.Vec2{X: float32(i * 70)}}, nil)
 		}
@@ -44,8 +44,8 @@ func TestConsecutiveTextureSpritesOverOneTextureMerge(t *testing.T) {
 // hashes a texture parameter by identity.
 func TestTextureSpritesOverDifferentTexturesSplit(t *testing.T) {
 	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
-		_, first := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
-		_, second := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
+		_, first := gfxWrite.NewTemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
+		_, second := gfxWrite.NewTemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.SpriteTexture(0, first, SpriteTransform{}, nil)
 		write.SpriteTexture(0, second, SpriteTransform{Position: m.Vec2{X: 70}}, nil)
 	})
@@ -59,7 +59,7 @@ func TestTextureSpritesOverDifferentTexturesSplit(t *testing.T) {
 // and a plain one through a clamp, and a sampler is bind-group state too.
 func TestATiledAndAPlainTextureSpriteSplit(t *testing.T) {
 	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
-		_, texture := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
+		_, texture := gfxWrite.NewTemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.SpriteTexture(0, texture, SpriteTransform{Size: m.Vec2{X: 128, Y: 32}, TileX: true}, nil)
 		write.SpriteTexture(0, texture, SpriteTransform{Position: m.Vec2{Y: 40}}, nil)
 	})
@@ -93,7 +93,7 @@ func TestAnAtlasSpriteBetweenTwoTextureSpritesSplitsThem(t *testing.T) {
 	filesystem := fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}
 	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
 	k, _, backend := testKernelGfx(t, filesystem, config, func(write *OpQueue, gfxWrite *gfx.OpQueue) {
-		_, texture := gfxWrite.TemporaryTarget(8, 8, gfx.FormatRGBA8Srgb)
+		_, texture := gfxWrite.NewTemporaryTarget(8, 8, gfx.FormatRGBA8Srgb)
 		write.SpriteTexture(0, texture, SpriteTransform{}, nil)
 		write.Sprite(0, "sprite.png", SpriteTransform{Position: m.Vec2{X: 20}}, nil)
 		write.SpriteTexture(0, texture, SpriteTransform{Position: m.Vec2{X: 40}}, nil)

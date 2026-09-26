@@ -35,7 +35,7 @@ func TestSamplingWhatAnEarlierPassRenderedGetsABarrier(t *testing.T) {
 	// write-then-read pairs, so it is the one that places the transition.
 	var sampled types.TextureID
 	backend := transitionFrame(t, func(q *OpQueue) {
-		target, texture := q.TemporaryTarget(64, 64, descriptors.FormatRGBA8Srgb)
+		target, texture := q.NewTemporaryTarget(64, 64, descriptors.FormatRGBA8Srgb)
 		sampled = texture.ID()
 		q.Pass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 0, Label: "offscreen"})
 		drawInto(q)
@@ -59,7 +59,7 @@ func TestAPassThatSamplesNothingItRenderedGetsNoBarrier(t *testing.T) {
 	// it back has nothing to order, and paying for an image transition there
 	// would be a cost with no hazard behind it.
 	backend := transitionFrame(t, func(q *OpQueue) {
-		target, _ := q.TemporaryTarget(64, 64, descriptors.FormatRGBA8Srgb)
+		target, _ := q.NewTemporaryTarget(64, 64, descriptors.FormatRGBA8Srgb)
 		q.Pass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 0, Label: "offscreen"})
 		drawInto(q)
 		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 1, Label: "screen"})
@@ -78,8 +78,8 @@ func TestRenderingIntoATextureAnEarlierPassSampledGetsTheReverseBarrier(t *testi
 	// the layout transition is a lie.
 	var pong types.TextureID
 	backend := transitionFrame(t, func(q *OpQueue) {
-		targetA, textureA := q.TemporaryTarget(64, 64, descriptors.FormatRGBA8Srgb)
-		targetB, textureB := q.TemporaryTarget(32, 32, descriptors.FormatRGBA8Srgb)
+		targetA, textureA := q.NewTemporaryTarget(64, 64, descriptors.FormatRGBA8Srgb)
+		targetB, textureB := q.NewTemporaryTarget(32, 32, descriptors.FormatRGBA8Srgb)
 		pong = textureB.ID()
 
 		// B is written, then read, then written again.
@@ -106,7 +106,7 @@ func TestATextureIsTransitionedOncePerPassThatNeedsIt(t *testing.T) {
 	// two, and a duplicate barrier is a real pipeline stall rather than a
 	// bookkeeping wart.
 	backend := transitionFrame(t, func(q *OpQueue) {
-		target, texture := q.TemporaryTarget(64, 64, descriptors.FormatRGBA8Srgb)
+		target, texture := q.NewTemporaryTarget(64, 64, descriptors.FormatRGBA8Srgb)
 		q.Pass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 0, Label: "offscreen"})
 		drawInto(q)
 		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 1, Label: "composite"})
@@ -151,8 +151,8 @@ func TestATextureStaysTransitionedAcrossConsecutivePassesThatSampleIt(t *testing
 	// nothing and costs a real pipeline stall, so the usage the frame left the
 	// texture in is tracked rather than re-asserted per pass.
 	backend := transitionFrame(t, func(q *OpQueue) {
-		source, texture := q.TemporaryTarget(64, 64, descriptors.FormatRGBA8Srgb)
-		other, _ := q.TemporaryTarget(32, 32, descriptors.FormatRGBA8Srgb)
+		source, texture := q.NewTemporaryTarget(64, 64, descriptors.FormatRGBA8Srgb)
+		other, _ := q.NewTemporaryTarget(32, 32, descriptors.FormatRGBA8Srgb)
 		q.Pass(descriptors.PassDescr{Target: source, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 0, Label: "offscreen"})
 		drawInto(q)
 		q.Pass(descriptors.PassDescr{Target: other, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 1, Label: "reads-once"})

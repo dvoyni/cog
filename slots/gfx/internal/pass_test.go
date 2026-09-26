@@ -264,7 +264,7 @@ func TestADepthTargetCarriesItsSize(t *testing.T) {
 
 func TestATemporaryTargetCarriesItsSize(t *testing.T) {
 	q := NewOpQueue(idsOf(&fakeBackend{}))
-	target, _ := q.TemporaryTarget(640, 480, descriptors.FormatRGBA8Srgb)
+	target, _ := q.NewTemporaryTarget(640, 480, descriptors.FormatRGBA8Srgb)
 	width, height, ok := target.Size()
 	if !ok || width != 640 || height != 480 {
 		t.Errorf("size = %d x %d (ok %v), want 640 x 480", width, height, ok)
@@ -277,7 +277,7 @@ func TestATemporaryTargetHandsBackTheTextureItRendersInto(t *testing.T) {
 	// about the texture behind it. So the texture has to come back from the
 	// same call, already carrying the size and format the caller asked for.
 	q := NewOpQueue(idsOf(&fakeBackend{}))
-	target, texture := q.TemporaryTarget(320, 200, descriptors.FormatRGBA8Srgb)
+	target, texture := q.NewTemporaryTarget(320, 200, descriptors.FormatRGBA8Srgb)
 
 	if texture.ID() == 0 {
 		t.Fatal("the texture came back with no id, so nothing can sample it")
@@ -305,7 +305,7 @@ func TestALaterPassSamplesWhatAnEarlierPassRenderedIntoATemporaryTarget(t *testi
 	backend := &fakeBackend{}
 	var sampled types.TextureID
 	frame := func(q *OpQueue) {
-		target, texture := q.TemporaryTarget(64, 64, descriptors.FormatRGBA8Srgb)
+		target, texture := q.NewTemporaryTarget(64, 64, descriptors.FormatRGBA8Srgb)
 		sampled = texture.ID()
 		q.Pass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 0, Label: "offscreen"})
 		drawInto(q)
@@ -344,7 +344,7 @@ func TestADrawStillCannotSampleTheTemporaryTargetItsOwnPassRendersInto(t *testin
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w := recordRaw(t, k)
-	target, texture := w.TemporaryTarget(64, 64, descriptors.FormatRGBA8Srgb)
+	target, texture := w.NewTemporaryTarget(64, 64, descriptors.FormatRGBA8Srgb)
 	w.Pass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "feedback"})
 	w.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})

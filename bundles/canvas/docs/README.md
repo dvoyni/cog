@@ -464,7 +464,7 @@ rendered into is the one a later layer, another camera, or a `scene.Material`
 samples - there is no canvas-owned target type and no name registry.
 
 ```go
-target, texture := gfxQueue.TemporaryTarget(512, 512, gfx.FormatRGBA8Srgb)
+target, texture := gfxQueue.NewTemporaryTarget(512, 512, gfx.FormatRGBA8Srgb)
 q.SetLayerTarget(0, target)
 q.Clear(0, m.Transparent)
 q.Text(0, "", "PANEL", canvas.TextDraw{Size: 48})
@@ -475,7 +475,7 @@ q.SpriteTexture(1, texture, canvas.SpriteTransform{Position: m.Vec2{X: 20, Y: 20
 **Canvas mints nothing and names nothing.** The target is the gfx handle the
 caller allocated, passed through untouched, because minting a texture takes the
 gfx queue and a canvas recorder does not hold it. Take a frame-local target from
-`gfx.OpQueue.TemporaryTarget`, which hands back both the target and the texture,
+`gfx.OpQueue.NewTemporaryTarget`, which hands back both the target and the texture,
 or a durable one from `gfx.ResourceQueue.NewRenderTarget` when the contents
 must outlive the frame - a panel baked once and sampled for many frames after.
 

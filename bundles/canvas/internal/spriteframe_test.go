@@ -100,7 +100,7 @@ func TestASingleAxisSizeDerivesTheOtherFromTheFramesAspect(t *testing.T) {
 // does, so a framed texture sprite stretched its sub-rect the same way.
 func TestAFramedTextureSpriteTakesItsNaturalSizeFromTheFrame(t *testing.T) {
 	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
-		_, texture := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
+		_, texture := gfxWrite.NewTemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.SpriteTexture(0, texture, SpriteTransform{
 			Frame: SpriteFrame{Right: 48, Bottom: 24},
 		}, nil)
@@ -215,13 +215,13 @@ func testKernelGfxCapturing(t testing.TB, config Config, record func(*OpQueue, *
 // path because a texture-sourced sprite has no path of its own to be named by.
 //
 // The dedupe is asserted within one frame rather than across frames, because a
-// TemporaryTarget is a different texture every frame and so is a different
+// NewTemporaryTarget is a different texture every frame and so is a different
 // mistake every frame: once is once per texture, which is the strongest thing
 // the key can honestly promise. Three draws of one texture is the case a UI
 // actually produces.
 func TestAFrameThatDoesNotFitATextureIsReportedOnce(t *testing.T) {
 	k, errs, backend := testKernelGfxCapturing(t, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
-		_, texture := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
+		_, texture := gfxWrite.NewTemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		for i := 0; i < 3; i++ {
 			write.SpriteTexture(0, texture, SpriteTransform{
 				Position: m.Vec2{X: float32(i) * 8},

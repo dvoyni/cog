@@ -49,7 +49,7 @@ const TagForward PassTag = "forward"
 //
 // Target is the gfx handle passed through untouched: the screen sentinel, a
 // durable texture from the resource queue, or a frame-local target from
-// gfx.OpQueue.TemporaryTarget. A pass with NoTarget() takes its size from an
+// gfx.OpQueue.NewTemporaryTarget. A pass with NoTarget() takes its size from an
 // explicit depth texture, and one with neither, or with NoTarget() and a
 // ClearColor, is reported.
 //

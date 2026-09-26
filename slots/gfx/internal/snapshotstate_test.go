@@ -621,7 +621,7 @@ func TestTheNewAccessorsAnswerOutsideTheAgentPath(t *testing.T) {
 func TestAFrameSnapshotDescribesAPassDrawingSomewhereOtherThanTheScreen(t *testing.T) {
 	rig := newCaptureRig(t)
 	response, err := rig.runSnapshot(frameSnapshotRequest{}, func(q *OpQueue) {
-		target, _ := q.TemporaryTarget(128, 64, descriptors.FormatRGBA8)
+		target, _ := q.NewTemporaryTarget(128, 64, descriptors.FormatRGBA8)
 		q.Pass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Label: "offscreen", Load: types.LoadClear})
 		drawInto(q)
 	})

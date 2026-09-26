@@ -178,7 +178,7 @@ func (w *OpQueue) Clear(layerID Layer, color m.Color) {
 // Canvas mints nothing and names nothing here: the target is the gfx handle the
 // caller allocated, passed through untouched, because minting a texture takes
 // the gfx queue and a canvas recorder does not hold it. Take a frame-local one
-// from gfx.OpQueue.TemporaryTarget, or a durable one from
+// from gfx.OpQueue.NewTemporaryTarget, or a durable one from
 // gfx.ResourceQueue.NewRenderTarget when the contents must outlive the
 // frame. The texture that comes back with it is an ordinary gfx.TextureDescr,
 // so the same handle serves DrawTexture, SpriteTexture and a scene material

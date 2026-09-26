@@ -115,7 +115,7 @@ func TestOnlyAllocateRenderTargetAsksForARenderableTexture(t *testing.T) {
 
 // The durable round trip, which is the whole point of the method: a texture
 // allocated once is rendered into on one frame and sampled on the next. A
-// TemporaryTarget cannot do this - its contents do not survive the frame - so
+// NewTemporaryTarget cannot do this - its contents do not survive the frame - so
 // anything cached across frames (a canvas layer baked into a scene material, a
 // shadow map, a UI panel drawn once) needs this allocator.
 func TestARenderTargetIsRenderedIntoAndSampledOnALaterFrame(t *testing.T) {

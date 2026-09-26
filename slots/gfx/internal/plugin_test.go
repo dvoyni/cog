@@ -1885,7 +1885,7 @@ func TestTemporaryBufferUploadsOnceForEveryDrawThatBindsIt(t *testing.T) {
 	arena := make([]byte, 3*descriptors.StorageAlignment)
 	arena[0] = 7
 
-	buffer := queue.TemporaryBuffer(arena, true)
+	buffer := queue.NewTemporaryBuffer(arena, true)
 	arena[0] = 9
 	for i := range 3 {
 		queue.Draw(triangle(), testMaterial(),
@@ -1912,6 +1912,43 @@ func TestTemporaryBufferUploadsOnceForEveryDrawThatBindsIt(t *testing.T) {
 		if descriptors.ParameterBuffer(&param).ID() != buffer.ID() || descriptors.BufferSource(descriptors.ParameterBufferRef(&param)) != descriptors.BufferSourceBaked {
 			t.Fatalf("draw bound %+v, want the one baked arena %+v", descriptors.ParameterBuffer(&param), buffer)
 		}
+	}
+}
+
+func TestTemporaryTextureUploadsOnceForEveryDrawThatSamplesIt(t *testing.T) {
+	queue := testOpQueue(&fakeBackend{})
+	pixels := []byte{7, 0, 0, 255}
+
+	texture := queue.NewTemporaryTexture(1, 1, descriptors.FormatRGBA8, pixels, true, false)
+	pixels[0] = 9
+	for range 3 {
+		queue.Draw(triangle(), testMaterial(), descriptors.TextureParam("MainTexture", texture))
+	}
+
+	bakes := 0
+	for i := range OpQueueOps(&queue) {
+		if OpQueueOps(&queue)[i].Kind == OpBakeTexture {
+			bakes++
+			if OpQueueOps(&queue)[i].Bytes[0] != 7 {
+				t.Fatal("the temporary texture aliases caller pixels past the call")
+			}
+		}
+	}
+	if bakes != 1 {
+		t.Fatalf("the texture uploaded %d times, want once for the whole frame", bakes)
+	}
+	for i := range OpQueueOps(&queue) {
+		if OpQueueOps(&queue)[i].Kind != OpDraw {
+			continue
+		}
+		param := OpQueueOps(&queue)[i].Params[0]
+		if descriptors.ParameterTexture(&param).ID() != texture.ID() {
+			t.Fatalf("draw bound %+v, want the one baked texture %+v", descriptors.ParameterTexture(&param), texture)
+		}
+	}
+
+	if got := queue.NewTemporaryTexture(0, 1, descriptors.FormatRGBA8, pixels, true, false); got.ID() != 0 {
+		t.Fatalf("an empty texture baked as %d, want the zero descriptor", got.ID())
 	}
 }
 

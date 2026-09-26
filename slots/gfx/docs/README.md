@@ -105,7 +105,8 @@ engine walked away from.
   are retained until the render thread consumes them.
 - `*Viewport`: logical, window, and framebuffer dimensions.
 
-`OpQueue` methods are `Pass`, `SetPass`, `TemporaryTarget`, `FrameMaterial`,
+`OpQueue` methods are `Pass`, `SetPass`, `NewTemporaryBuffer`,
+`NewTemporaryTexture`, `NewTemporaryTarget`, `FrameMaterial`,
 `Draw`, `DrawInstanced`, `DrawInstancedFrom`, `Len`, and `Reset`. Draw
 parameters override same-named material parameters. `DrawInstancedFrom` starts
 at a given `firstInstance`: WebGPU's `instance_index` starts there, so a batch
@@ -180,8 +181,8 @@ levels as they were. `NewRenderTarget` produces one a pass can also render into,
 through `TextureTarget`. They are two methods because the render-attachment
 usage is not free, and almost every texture is sampled-only. `NewRenderTarget`
 is the durable counterpart of
-`OpQueue.TemporaryTarget`: take it when the rendered contents must outlive the
-frame, and `TemporaryTarget` when they need not.
+`OpQueue.NewTemporaryTarget`: take it when the rendered contents must outlive the
+frame, and `NewTemporaryTarget` when they need not.
 
 Methods accepting `copyData` snapshot bytes when true. When false, the caller
 must keep the source unchanged until the render thread consumes the operation.

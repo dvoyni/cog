@@ -44,7 +44,7 @@ func quadVertices(t *testing.T, backend *testBackend) (positions, uvs []m.Vec2) 
 // and a canvas recorder does not hold it.
 func TestALayerWithATargetRendersIntoItsTextureRatherThanTheScreen(t *testing.T) {
 	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
-		target, _ := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
+		target, _ := gfxWrite.NewTemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.SetLayerTarget(1, target)
 		write.FillRect(1, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{R: 1, A: 1}})
 		write.FillRect(2, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{G: 1, A: 1}})
@@ -69,7 +69,7 @@ func TestALayerWithATargetRendersIntoItsTextureRatherThanTheScreen(t *testing.T)
 // every run, not just the frame's first and last layer.
 func TestEveryTargetRunClearsAndDiscardsItsOwnDepth(t *testing.T) {
 	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
-		target, _ := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
+		target, _ := gfxWrite.NewTemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.FillRect(0, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{A: 1}})
 		write.SetLayerTarget(1, target)
 		write.FillRect(1, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{R: 1, A: 1}})
@@ -94,7 +94,7 @@ func TestEveryTargetRunClearsAndDiscardsItsOwnDepth(t *testing.T) {
 // target does not cost the frame a pass per layer.
 func TestLayersSharingATargetStillCollapseToOnePass(t *testing.T) {
 	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
-		target, _ := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
+		target, _ := gfxWrite.NewTemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.SetLayerTarget(1, target)
 		write.SetLayerTarget(2, target)
 		write.FillRect(1, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{R: 1, A: 1}})
@@ -114,7 +114,7 @@ func TestEveryLayerClearsItsOwnTarget(t *testing.T) {
 	offscreenClear := m.Color{R: 1, A: 1}
 	screenClear := m.Color{B: 1, A: 1}
 	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
-		target, _ := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
+		target, _ := gfxWrite.NewTemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.SetLayerTarget(0, target)
 		write.Clear(0, offscreenClear)
 		write.FillRect(0, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{G: 1, A: 1}})
@@ -141,7 +141,7 @@ func TestEveryLayerClearsItsOwnTarget(t *testing.T) {
 // when it has one, the viewport otherwise.
 func TestATextureTargetedLayerMeasuresAgainstItsTextureNotTheViewport(t *testing.T) {
 	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
-		target, _ := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
+		target, _ := gfxWrite.NewTemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.SetLayerTarget(0, target)
 		write.FillRect(0, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{A: 1}})
 		write.FillRect(1, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{A: 1}})
@@ -167,7 +167,7 @@ func TestATextureTargetedLayerMeasuresAgainstItsTextureNotTheViewport(t *testing
 // size is the texture's own.
 func TestSpriteTextureSizesItselfFromTheTexture(t *testing.T) {
 	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
-		_, texture := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
+		_, texture := gfxWrite.NewTemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.SpriteTexture(0, texture, SpriteTransform{Position: m.Vec2{X: 5, Y: 7}}, nil)
 	})
 	runFrame(k)
@@ -188,7 +188,7 @@ func TestSpriteTextureSizesItselfFromTheTexture(t *testing.T) {
 // drawn as itself needs a material that samples and returns.
 func TestATextureDrawDoesNotGoThroughTheKeyColourRamp(t *testing.T) {
 	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
-		_, texture := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
+		_, texture := gfxWrite.NewTemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.SpriteTexture(0, texture, SpriteTransform{}, nil)
 	})
 	runFrame(k)
@@ -215,7 +215,7 @@ func TestATextureDrawDoesNotGoThroughTheKeyColourRamp(t *testing.T) {
 func TestDrawTextureBindsTheTextureToACustomShape(t *testing.T) {
 	white := m.Color{R: 1, G: 1, B: 1, A: 1}
 	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
-		_, texture := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
+		_, texture := gfxWrite.NewTemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.DrawTexture(0, texture, []Vertex{
 			{Position: m.Vec2{}, Color: white},
 			{Position: m.Vec2{X: 40}, Color: white, UV: m.Vec2{X: 1}},
@@ -238,7 +238,7 @@ func TestDrawTextureBindsTheTextureToACustomShape(t *testing.T) {
 // gfx.TextureParam the same way.
 func TestATextureACanvasLayerRenderedIsSampledByALaterLayer(t *testing.T) {
 	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
-		target, texture := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
+		target, texture := gfxWrite.NewTemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.SetLayerTarget(0, target)
 		write.Clear(0, m.Color{R: 1, A: 1})
 		write.FillRect(0, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{G: 1, A: 1}})
@@ -286,7 +286,7 @@ func TestTextureShaderParses(t *testing.T) {
 func TestATextureSpriteDrawsAfterTheTrianglesRecordedBeforeIt(t *testing.T) {
 	white := m.Color{R: 1, G: 1, B: 1, A: 1}
 	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
-		_, texture := gfxWrite.TemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
+		_, texture := gfxWrite.NewTemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.DrawTriangles(0, []Vertex{
 			{Position: m.Vec2{}, Color: white},
 			{Position: m.Vec2{X: 4}, Color: white},

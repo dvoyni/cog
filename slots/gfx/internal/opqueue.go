@@ -334,16 +334,16 @@ func (q *OpQueue) bakeTextureIfNeeded(texture descriptors.TextureDescr) descript
 	)
 }
 
-// TemporaryBuffer uploads one frame-lifetime storage buffer and returns the
+// NewTemporaryBuffer uploads one frame-lifetime storage buffer and returns the
 // baked descriptor for it, so every draw that binds a range of it shares one
-// upload. It is the arena counterpart of TemporaryTarget: BufferWithBytes
+// upload. It is the arena counterpart of NewTemporaryTarget: BufferWithBytes
 // re-bakes wherever it is recorded, which is right for a buffer one draw owns
 // and wrong for one the whole frame reads.
 //
 // copyData snapshots the bytes when true; when false the caller must keep them
 // unchanged until the recorded frame is consumed or dropped. Its contents do
 // not survive the frame.
-func (q *OpQueue) TemporaryBuffer(data []byte, copyData bool) descriptors.BufferDescr {
+func (q *OpQueue) NewTemporaryBuffer(data []byte, copyData bool) descriptors.BufferDescr {
 	if len(data) == 0 {
 		return descriptors.BufferDescr{}
 	}
@@ -392,12 +392,29 @@ func (q *OpQueue) nextTemporaryBuffer(index int) int {
 	return q.temporaryNext[index]
 }
 
+// NewTemporaryTexture uploads one frame-lifetime texture and returns the baked
+// descriptor for it, so every draw that samples it shares one upload. It is the
+// texture counterpart of NewTemporaryBuffer, and for the same reason:
+// TextureWithBytes re-bakes wherever it is bound, because the queue cannot tell
+// the same pixels bound twice from the same slice refilled between draws. Only
+// the caller knows, and taking this handle is how it says so.
+//
+// mipmaps has the backend build the chain from pixels. copyData snapshots the
+// pixels when true; when false the caller must keep them unchanged until the
+// recorded frame is consumed or dropped. Its contents do not survive the frame.
+func (q *OpQueue) NewTemporaryTexture(width, height int, format descriptors.TextureFormat, pixels []byte, copyData, mipmaps bool) descriptors.TextureDescr {
+	if width <= 0 || height <= 0 || len(pixels) == 0 {
+		return descriptors.TextureDescr{}
+	}
+	return q.temporaryTexture(width, height, format, pixels, copyData, mipmaps)
+}
+
 func (q *OpQueue) temporaryTexture(width, height int, format descriptors.TextureFormat, pixels []byte, copyData, mipmaps bool) descriptors.TextureDescr {
 	key := temporaryTextureKey{width: width, height: height, format: format, mipmaps: mipmaps}
 	return q.bakeTexture(q.acquireTemporaryTexture(key), width, height, format, pixels, copyData, mipmaps)
 }
 
-// TemporaryTarget allocates a frame-lifetime renderable texture and returns
+// NewTemporaryTarget allocates a frame-lifetime renderable texture and returns
 // both handles onto it: the target a pass renders into, and the texture a later
 // pass samples. Its contents do not survive the frame.
 //
@@ -410,7 +427,7 @@ func (q *OpQueue) temporaryTexture(width, height int, format descriptors.Texture
 // A draw still may not sample the target its own pass renders into; that is
 // ErrDrawSamplesAttachment, and it is the guard that makes handing the texture
 // back safe.
-func (q *OpQueue) TemporaryTarget(width, height int, format descriptors.TextureFormat) (descriptors.TargetDescr, descriptors.TextureDescr) {
+func (q *OpQueue) NewTemporaryTarget(width, height int, format descriptors.TextureFormat) (descriptors.TargetDescr, descriptors.TextureDescr) {
 	key := temporaryTextureKey{width: width, height: height, format: format, renderable: true}
 	id := q.acquireTemporaryTexture(key)
 	q.ops = append(q.ops, Op{

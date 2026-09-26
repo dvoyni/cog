@@ -86,13 +86,13 @@ func (b *frameBuild) emit(gfxWrite *gfx.OpQueue) {
 	if len(b.passes) == 0 {
 		return
 	}
-	instances := gfxWrite.TemporaryBuffer(b.instances.bytes(), true)
-	frames := gfxWrite.TemporaryBuffer(b.frames.bytes(), true)
+	instances := gfxWrite.NewTemporaryBuffer(b.instances.bytes(), true)
+	frames := gfxWrite.NewTemporaryBuffer(b.frames.bytes(), true)
 	// sceneAnim is declared whether or not anything animates, so a frame that
 	// packed no block still uploads one empty record: an unbound declared
 	// binding is the silent whole-frame loss, not a degraded frame.
-	anims := gfxWrite.TemporaryBuffer(b.animBytes(), true)
-	meshes := gfxWrite.TemporaryBuffer(b.meshes.bytes(), true)
+	anims := gfxWrite.NewTemporaryBuffer(b.animBytes(), true)
+	meshes := gfxWrite.NewTemporaryBuffer(b.meshes.bytes(), true)
 	for i := range b.passes {
 		pass := &b.passes[i]
 		gfxWrite.Pass(pass.descr)
@@ -184,7 +184,7 @@ func (b *frameBuild) appendAnim(plays []model.ScenePlayRecord, morph model.AnimM
 }
 
 // animBytes is the sceneAnim arena's upload. An empty arena still uploads one
-// vec4, because TemporaryBuffer returns no buffer at all for no bytes and the
+// vec4, because NewTemporaryBuffer returns no buffer at all for no bytes and the
 // binding is declared on every draw.
 func (b *frameBuild) animBytes() []byte {
 	if len(b.anims.bytes()) == 0 {
@@ -194,5 +194,5 @@ func (b *frameBuild) animBytes() []byte {
 }
 
 // emptyAnimBlock is one zeroed vec4, and it is read-only by convention:
-// TemporaryBuffer copies what it is handed.
+// NewTemporaryBuffer copies what it is handed.
 var emptyAnimBlock [16]byte

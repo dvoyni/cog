@@ -373,7 +373,7 @@ three away.
 
 `Pass.Target` takes the gfx handle untouched: the screen sentinel (zero), a
 durable texture through `gfx.TextureTarget`, or a frame-local one from
-`gfx.OpQueue.TemporaryTarget(w, h, format)`, which hands back the target to
+`gfx.OpQueue.NewTemporaryTarget(w, h, format)`, which hands back the target to
 render into and the texture to sample. **A `Camera` Component outlives the
 frame and a temporary target does not**: a pass holding one is valid for the
 frame it was allocated in only, so a System that uses one allocates it and

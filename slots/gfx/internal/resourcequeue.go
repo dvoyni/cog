@@ -46,11 +46,11 @@ func (q *ResourceQueue) NewTexture(width, height, layers int, format descriptors
 // Almost every texture in a frame is sampled-only, and the default belongs to
 // the cheap case.
 //
-// This is the durable counterpart of OpQueue.TemporaryTarget. Take it when the
+// This is the durable counterpart of OpQueue.NewTemporaryTarget. Take it when the
 // rendered contents must outlive the frame - a canvas layer baked once and
 // sampled by a scene material for many frames after, a cached UI panel, a
 // shadow map held across frames. When they need only live until the frame ends,
-// TemporaryTarget pools its textures and this one does not: what this returns is
+// NewTemporaryTarget pools its textures and this one does not: what this returns is
 // caller-owned and must be released.
 func (q *ResourceQueue) NewRenderTarget(width, height, layers int, format descriptors.TextureFormat) descriptors.TextureDescr {
 	return q.newTexture(width, height, layers, format, false, true)
