@@ -1,11 +1,13 @@
 package internal
 
 import (
+	"unsafe"
+
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
-// pbrValues are the bundled material's numbers as the load works them out:
+// PbrValues are the bundled material's numbers as the load works them out:
 // glTF's factors, each slot's KHR_texture_transform and TEXCOORD set, and the
 // MASK cutoff.
 //
@@ -21,6 +23,12 @@ import (
 // what they are, and a caller's same-named param overrides one exactly as it
 // overrides a texture.
 //
+// A renderer drawing through draw params cannot lay a param over one member of
+// a set's block, because gfx binds whole bindings only. Overlay is how it keeps
+// doing so for this one block: it folds a param named for a member into a copy
+// of the values, and the renderer sets the copy whole. It is the only
+// member-level write left, and it lives with the struct whose members it names.
+//
 // The names are glTF's, verbatim, because they are user-facing: the loader maps
 // 1:1 with no translation table to drift, and the glTF specification is their
 // documentation - including the exact semantics of occlusionStrength and
@@ -29,7 +37,7 @@ import (
 // baseColorRotation and their four siblings - rather than an array, because an
 // array member is not name-addressable and animating baseColorTransform per
 // frame is UV scrolling.
-type pbrValues struct {
+type PbrValues struct {
 	baseColorFactor m.Vec4
 	// emissiveFactor is linear radiance added after shading. Its w is spare;
 	// KHR_materials_emissive_strength folds into the rgb at load.
@@ -66,8 +74,8 @@ const pbrValueCount = 2 + 2*pbrSlotCount + 6
 
 // defaultPbrValues are glTF's own default material: white, fully metallic,
 // fully rough, with every texture slot multiplying through unchanged.
-func defaultPbrValues() pbrValues {
-	values := pbrValues{
+func defaultPbrValues() PbrValues {
+	values := PbrValues{
 		baseColorFactor:   m.Vec4{X: 1, Y: 1, Z: 1, W: 1},
 		metallicFactor:    1,
 		roughnessFactor:   1,
@@ -90,7 +98,7 @@ func defaultPbrValues() pbrValues {
 // emissiveFactor, which the shader adds after shading, and the base colour is
 // black so the lights contribute nothing to it. Alpha stays on the base colour
 // either way.
-func paintPbrValues(color m.Color, selfLit bool) pbrValues {
+func paintPbrValues(color m.Color, selfLit bool) PbrValues {
 	values := defaultPbrValues()
 	values.metallicFactor = 0
 	values.baseColorFactor, values.emissiveFactor = paintFactors(color, selfLit)
@@ -122,7 +130,7 @@ func PaintParams(dst []gfx.ParameterDescr, color m.Color, selfLit bool) []gfx.Pa
 // member's name, in declaration order. Every member is written, defaults
 // included, because gfx packs a member nothing supplies as zero - and a zero
 // normalScale or texture scale is a broken surface, not a default one.
-func (v *pbrValues) appendParams(dst []gfx.ParameterDescr) []gfx.ParameterDescr {
+func (v *PbrValues) appendParams(dst []gfx.ParameterDescr) []gfx.ParameterDescr {
 	dst = append(dst,
 		gfx.VecParam("baseColorFactor", v.baseColorFactor),
 		gfx.VecParam("emissiveFactor", v.emissiveFactor),
@@ -147,7 +155,7 @@ func (v *pbrValues) appendParams(dst []gfx.ParameterDescr) []gfx.ParameterDescr 
 // cap falls back to set 0 and is reported: ignoring texCoord: 1 would be a
 // silent wrong-output failure on a core glTF feature, so the fallback says so
 // out loud.
-func (v *pbrValues) selectUVSet(report func(error), slot, texCoord int) {
+func (v *PbrValues) selectUVSet(report func(error), slot, texCoord int) {
 	if texCoord < 0 || texCoord >= pbrUVSetCount {
 		report(ErrTextureUVSetUnsupported{Slot: PbrSlots[slot].Texture, TexCoord: texCoord})
 		texCoord = 0
@@ -159,3 +167,57 @@ func (v *pbrValues) selectUVSet(report func(error), slot, texCoord int) {
 // pbrUVSetCount is the UV-set cap: TEXCOORD_0 and TEXCOORD_1, glTF core's
 // minimum. The selector is one bit per slot because of it.
 const pbrUVSetCount = 2
+
+// pbrMember is one member of ScenePbrMaterial: where it sits in PbrValues and
+// how many bytes it spans.
+type pbrMember struct{ offset, size uintptr }
+
+// pbrMembers is every member of ScenePbrMaterial by its WGSL name, which is
+// the name appendParams writes it under.
+var pbrMembers = func() map[string]pbrMember {
+	var v PbrValues
+	vec4, scalar := unsafe.Sizeof(m.Vec4{}), unsafe.Sizeof(float32(0))
+	members := map[string]pbrMember{
+		"baseColorFactor":   {unsafe.Offsetof(v.baseColorFactor), vec4},
+		"emissiveFactor":    {unsafe.Offsetof(v.emissiveFactor), vec4},
+		"metallicFactor":    {unsafe.Offsetof(v.metallicFactor), scalar},
+		"roughnessFactor":   {unsafe.Offsetof(v.roughnessFactor), scalar},
+		"normalScale":       {unsafe.Offsetof(v.normalScale), scalar},
+		"occlusionStrength": {unsafe.Offsetof(v.occlusionStrength), scalar},
+		"alphaCutoff":       {unsafe.Offsetof(v.alphaCutoff), scalar},
+		"uvSets":            {unsafe.Offsetof(v.uvSets), scalar},
+	}
+	for slot := range PbrSlots {
+		members[PbrSlots[slot].Transform] = pbrMember{unsafe.Offsetof(v.transforms) + uintptr(slot)*vec4, vec4}
+		members[PbrSlots[slot].Rotation] = pbrMember{unsafe.Offsetof(v.rotations) + uintptr(slot)*scalar, scalar}
+	}
+	return members
+}()
+
+// IsPbrValue reports whether name is a member of ScenePbrMaterial - one of the
+// names appendParams writes - rather than a binding of its own.
+func IsPbrValue(name string) bool {
+	_, ok := pbrMembers[name]
+	return ok
+}
+
+// Overlay writes a param named for a member of ScenePbrMaterial into that
+// member, as gfx once packed it: the param's bytes verbatim, whichever
+// constructor built them. It reports whether the name is a member at all; a
+// member param of the wrong size writes nothing, as it never fitted the slot.
+// Any other param is left to bind by its own name.
+func (v *PbrValues) Overlay(param gfx.ParameterDescr) bool {
+	member, ok := pbrMembers[param.Name()]
+	if !ok {
+		return false
+	}
+	if uintptr(param.ValueSize()) != member.size {
+		return true
+	}
+	// The struct is laid out as WGSL reads it, little-endian, which the layout
+	// test holds; so the member's bytes are the window of the value it spans,
+	// and the append lands inside it rather than growing anything.
+	bytes := unsafe.Slice((*byte)(unsafe.Pointer(v)), unsafe.Sizeof(*v))
+	param.AppendValue(bytes[member.offset : member.offset : member.offset+member.size])
+	return true
+}

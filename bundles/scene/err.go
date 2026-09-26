@@ -39,3 +39,7 @@ type ErrMaterialTagAlreadyServed = internal.ErrMaterialTagAlreadyServed
 // ErrMeshCustomLayoutNeedsMaterial reports a Mesh with a custom vertex
 // layout and no Material, which the bundled PBR cannot draw.
 type ErrMeshCustomLayoutNeedsMaterial = internal.ErrMeshCustomLayoutNeedsMaterial
+
+// ErrMaterialShaderUnavailable reports a material's shader that did not
+// compile. Every draw through it draws nothing, and it is reported once.
+type ErrMaterialShaderUnavailable = internal.ErrMaterialShaderUnavailable

@@ -177,3 +177,8 @@ func AppendAnim(dst []byte, plays []ScenePlayRecord, morph AnimMorph) ([]byte, u
 func PaintParams(dst []gfx.ParameterDescr, color m.Color, selfLit bool) []gfx.ParameterDescr {
 	return internal.PaintParams(dst, color, selfLit)
 }
+
+// IsPbrValue reports whether name is a member of the bundled material's
+// ScenePbrMaterial block - baseColorFactor and its siblings - which a renderer
+// folds into PbrValues through Overlay, rather than a binding of its own.
+func IsPbrValue(name string) bool { return internal.IsPbrValue(name) }

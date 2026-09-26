@@ -5,13 +5,20 @@ import (
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
-// materialTag is one pass tag of a material as the frame draws it: the tag and
-// the gfx material that serves it. material is a whole material, one entry per
-// tag it serves; an empty one serves no pass and draws nowhere.
+// materialTag is one pass tag of a material as the frame draws it: the tag,
+// the set that serves it and what the frame needs to version that set - its
+// state, which of scene's per-Batch bindings its shader declares, the program
+// a Params binding is checked against, and the material block's values a
+// Params member is laid over. material is a whole material, one entry per tag
+// it serves; an empty one serves no pass and draws nowhere.
 type (
 	materialTag struct {
-		tag   PassTag
-		descr gfx.MaterialDescr
+		tag      PassTag
+		set      gfx.DrawParams
+		state    gfx.MaterialState
+		bindings sceneBindings
+		program  gfx.ShaderProgram
+		values   model.PbrValues
 	}
 	material []materialTag
 )
@@ -32,10 +39,10 @@ type tagID int32
 // per-Batch test is one array read and a sign test.
 const noEntry int32 = -1
 
-// materialEntry is one resolved (material, tag) pair: the gfx material to draw
-// with, and the dense id the opaque sort key groups by.
+// materialEntry is one resolved (material, tag) pair: the tag to draw with,
+// and the dense id the opaque sort key groups by.
 type materialEntry struct {
-	descr      *gfx.MaterialDescr
+	tag        *materialTag
 	materialID uint32
 	// blend is the entry's sort class: true for anything that blends against
 	// the target and so must draw back to front. Alpha-masked is opaque plus a
@@ -55,22 +62,20 @@ type internedMaterial struct {
 // plugin's lifetime, because the tag set is a property of the passes an app
 // declares rather than of a frame; materials are per frame.
 //
-// A material is interned by the material half of its Batch key, which the
-// load System took on change, so a frame never fingerprints a material.
+// A material is interned by the set key of its Batch, which the load System
+// took on change, so a frame never fingerprints a material.
 type materialTable struct {
 	tags     map[PassTag]tagID
 	tagNames []PassTag
-	keys     map[uint64]int32
+	keys     map[setKey]int32
 	interned []internedMaterial
 	nextID   uint32
 }
 
-// reset starts a frame, interning the bundled PBR's four variants first and in
-// variant order, so that a Batch with no material of its own resolves to its
-// variant with no map probe at all.
-func (t *materialTable) reset(bundled *[model.VariantCount]material) {
+// reset starts a frame.
+func (t *materialTable) reset() {
 	if t.keys == nil {
-		t.keys = map[uint64]int32{}
+		t.keys = map[setKey]int32{}
 		t.tags = map[PassTag]tagID{}
 	}
 	clear(t.keys)
@@ -79,9 +84,6 @@ func (t *materialTable) reset(bundled *[model.VariantCount]material) {
 	}
 	t.interned = t.interned[:0]
 	t.nextID = 0
-	for _, material := range bundled {
-		t.add(discardReports{}, material)
-	}
 }
 
 // internTag interns one pass tag. It is called once per pass, and an empty tag
@@ -100,8 +102,9 @@ func (t *materialTable) internTag(tag PassTag) tagID {
 	return id
 }
 
-// entry reports the gfx material one interned material uses in one pass, and
-// whether it serves that pass at all.
+// entry reports the tag one interned material draws with in one pass, and
+// whether it serves that pass at all. A tag whose set is zero - its shader did
+// not compile, or model had none to build it on - serves nothing.
 func (t *materialTable) entry(interned int32, tag tagID) (materialEntry, bool) {
 	material := &t.interned[interned]
 	if int(tag) >= len(material.entries) {
@@ -111,27 +114,28 @@ func (t *materialTable) entry(interned int32, tag tagID) (materialEntry, bool) {
 	if index < 0 {
 		return materialEntry{}, false
 	}
-	descr := &material.material[index].descr
+	resolved := &material.material[index]
+	if resolved.set == (gfx.DrawParams{}) {
+		return materialEntry{}, false
+	}
 	return materialEntry{
-		descr:      descr,
+		tag:        resolved,
 		materialID: material.ids[tag],
-		blend:      descr.State().Blend != gfx.BlendOpaque,
+		blend:      resolved.state.Blend != gfx.BlendOpaque,
 	}, true
 }
 
 // lookup reports the frame-local index of the material a key names, if the
 // frame has resolved it already. A Batch asks before resolving its material,
 // so a key the frame has seen resolves nothing twice.
-func (t *materialTable) lookup(key uint64) (int32, bool) {
+func (t *materialTable) lookup(key setKey) (int32, bool) {
 	index, ok := t.keys[key]
 	return index, ok
 }
 
 // intern interns one Batch's resolved material under its key and returns its
-// frame-local index. It is called at most once per key per frame; a Batch with
-// no material of its own takes the bundled PBR's variant, which is interned
-// first and in variant order, and never calls it.
-func (t *materialTable) intern(report errorReporter, material material, key uint64) int32 {
+// frame-local index. It is called at most once per key per frame.
+func (t *materialTable) intern(report errorReporter, material material, key setKey) int32 {
 	index := t.add(report, material)
 	t.keys[key] = index
 	return index
@@ -183,10 +187,3 @@ func grow[T any](values []T, n int) []T {
 	}
 	return make([]T, n)
 }
-
-// discardReports is the report sink the bundled PBR interns through. It is
-// model's own material, so a report from it would be an engine bug rather than
-// something a caller can act on.
-type discardReports struct{}
-
-func (discardReports) ReportError(error) {}

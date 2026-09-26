@@ -18,7 +18,8 @@ import (
 // only thing a test asserts.
 
 // keysCmd snapshots the load System's scratch: every keyed Entity's handle and
-// keys, and how many Entities its last run keyed.
+// keys, how many Entities its last run keyed, and how many holds each of
+// scene's own sets has.
 type keysCmd kernel.Command[keysRequest, keysResponse]
 
 type keysRequest struct{}
@@ -27,6 +28,9 @@ type keysResponse struct {
 	models map[ecs.Entity]modelKeys
 	meshes map[ecs.Entity]batchKey
 	walked int
+	sets   map[setKey]int
+	// modelSets is the sets each Model Entity holds.
+	modelSets map[ecs.Entity][]setKey
 }
 
 func keysCmdImpl() (kernel.Lock, kernel.Execute[keysRequest, keysResponse]) {
@@ -39,6 +43,14 @@ func keysCmdImpl() (kernel.Lock, kernel.Execute[keysRequest, keysResponse]) {
 				models: make(map[ecs.Entity]modelKeys, len(s.models)),
 				meshes: make(map[ecs.Entity]batchKey, len(s.meshes)),
 				walked: s.walked,
+				sets:   make(map[setKey]int, len(s.sets.sets)),
+			}
+			for key, cached := range s.sets.sets {
+				response.sets[key] = cached.refs
+			}
+			response.modelSets = make(map[ecs.Entity][]setKey, len(s.modelSets))
+			for e, sets := range s.modelSets {
+				response.modelSets[e] = slices.Clone(sets)
 			}
 			for e, entry := range s.models {
 				entry.keys = slices.Clone(entry.keys)

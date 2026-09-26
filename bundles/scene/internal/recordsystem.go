@@ -47,7 +47,7 @@ func recordSystem(
 		return
 	}
 	read := model.NewLookupReadAccess(lookup.Get())
-	s.begin(k, keyed, read.DefaultSceneShader(), out.Get())
+	s.begin(k)
 	frame := frameInputs{
 		read: read, keys: keyed,
 		animations: animations, params: params, materials: materials,
@@ -76,6 +76,6 @@ func recordSystem(
 	for i := range s.cameras {
 		s.flushCamera(k, view, &s.cameras[i])
 	}
-	s.build.emit(out.Get())
+	s.build.emit(k, out.Get())
 	s.release()
 }

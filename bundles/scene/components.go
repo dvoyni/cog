@@ -24,9 +24,12 @@ type Animation = internal.Animation
 // Params are gfx parameters bound on top of whatever the draw's material binds.
 // It is optional.
 //
-// They ride on the draw, so gfx lays them by name over every tag's params, the
-// material's numbers among them, a Model's and a Mesh's alike — so
-// gfx.ColorParam("baseColorFactor", c) tints either.
+// They ride on the draw, laid by name over every tag's params, the material's
+// numbers among them, a Model's and a Mesh's alike — so
+// gfx.ColorParam("baseColorFactor", c) tints either. A param naming a member of
+// the material block is written into it and the block set whole; any other is
+// a whole binding, set where the tag's shader declares it and dropped where it
+// does not.
 type Params = internal.Params
 
 // Material changes what a draw is shaded with, one entry per pass tag, laid
@@ -38,9 +41,9 @@ type Params = internal.Params
 // geometry needs; the primitive's own params - its textures, samplers and
 // numbers - overlaid by name with the default scene shader's params and then
 // its own; and its State, or the file's where it names none. A Mesh's "file" is the bundled PBR's: white and
-// flat in every slot, opaque, single-sided, white paint. gfx binds params by
-// name and ignores one no binding declares, so a shader that reads none of the
-// file's simply replaces it.
+// flat in every slot, opaque, single-sided, white paint. Params bind by
+// name, and one the shader does not declare is dropped, so a shader that reads
+// none of the file's simply replaces it.
 //
 // An absent Material is no material: the default scene shader over the file's
 // own materials for a Model, and over the bundled PBR's for a Mesh. Presence is

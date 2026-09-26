@@ -358,10 +358,17 @@ storage paths they already had.
 - a ready forward `gfx.MaterialDescr`;
 - a content key computed once at load.
 
-The ingredients are `MaterialIngredients{Params, State}`: the ten texture and
-sampler params with defaults in empty slots, then the material's numbers as one
-param per member of the shader's `scenePbrMaterial` uniform block, and the
-pipeline state. Each forward descr is the bundled variant over them.
+The ingredients are `MaterialIngredients{Params, State, Values}`: the ten
+texture and sampler params with defaults in empty slots, then the material's
+numbers as one param per member of the shader's `scenePbrMaterial` uniform
+block, the pipeline state, and the same numbers as `PbrValues`, the Go mirror of
+the block, which a renderer drawing through draw params sets whole. Each forward
+descr is the bundled variant over them. Since
+[#601](https://github.com/dvoyni/cog/issues/601) `PbrValues.Overlay` writes a
+param named for a member into a copy - `IsPbrValue` says which names are - so a
+renderer keeps `gfx.ColorParam("baseColorFactor", c)` tinting while gfx binds
+whole bindings only; it is the one member-level write left, and it lives with
+the struct whose members it names.
 They came with [#568](https://github.com/dvoyni/cog/issues/568), so a renderer
 can resolve a caller's shader over what the file says instead of in place of
 it; scene does, and the recording scene drew the forward descrs until #573. A baked mesh's

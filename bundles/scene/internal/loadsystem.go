@@ -18,16 +18,19 @@ import (
 //
 // It runs on what changed: every addition, change and removal of a Model,
 // Mesh, Material or Params since its last run, each Entity once. For each it
-// resolves the ModelRef to a ModelHandle, loading the model if needed, and
-// computes the Batch keys into keyScratch. In a steady frame no Hook names
+// resolves the ModelRef to a ModelHandle, loading the model if needed,
+// computes the Batch keys into keyScratch, and creates the draw params each
+// key draws through that model did not - releasing those no key holds any
+// more. In a steady frame no Hook names
 // anything, so it walks no Entity and hashes nothing; what is left is the
 // drain of two empty queues.
 //
 // Everything it reads from the Stores is a read, so it keeps no System off
 // them. What it writes is exclusive by nature: the Lookup, and the resource
 // queue a load uploads through. It also dispatches gfx.CompileShaderCmd, which
-// model's first load compiles the bundled shader through; that Command's lock
-// is empty, so declaring it widens the System's set by nothing.
+// model's first load compiles the bundled shader through and scene compiles
+// every material's shader through as it first keys it; that Command's lock is
+// empty, so declaring it widens the System's set by nothing.
 func loadSystem(
 	k kernel.Kernel,
 	modelHooks *ecs.Hooks[Model, ecs.HookAll],
@@ -74,6 +77,11 @@ func loadSystem(
 			return resources.UploadTexture(resources.NewTexture(width, height, 1, format, false), 0, gfx.Region{}, pixels, true)
 		})
 		s.hasBundled = true
+	}
+	// Scene's own sets are built under the default scene shader, so a new one
+	// releases them and keys every drawable again under it.
+	if current := model.NewLookupReadAccess(lookup).DefaultSceneShader(); s.sets.defaultChanged(current) {
+		resetSets(k, resources, s, current)
 	}
 	if len(s.pending) > 0 {
 		keyer := keyer{

@@ -107,7 +107,7 @@ type loadedScene = DecodedScene
 // scene binds per batch, the pipeline state it draws under, and the texture and
 // sampler each of the five slots binds.
 type loadedMaterial struct {
-	values pbrValues
+	values PbrValues
 	state  gfx.MaterialState
 	// slots index LoadedModel.textures, or missingTexture for a slot the file
 	// left empty or named no readable image for. Both fall back to the slot's

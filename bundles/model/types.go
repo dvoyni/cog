@@ -254,6 +254,11 @@ type (
 	// pipeline state. A file's material keeps its own, and a baked mesh has
 	// BundledIngredients.
 	MaterialIngredients = internal.MaterialIngredients
+	// PbrValues are the bundled material's numbers: the Go mirror of the
+	// shader's ScenePbrMaterial block, member for member and byte for byte,
+	// which a renderer sets whole as BindingScenePbrMaterial. Overlay lays a
+	// param named for one member over a copy.
+	PbrValues = internal.PbrValues
 	// SceneShaderDescr is the default scene shader: the shader a draw uses
 	// when nothing it names sets one, and params of its own overlaid under
 	// the draw's. Its zero value is the bundled PBR. See
@@ -368,6 +373,9 @@ const (
 	BindingScenePoses       = internal.BindingScenePoses
 	BindingSceneSkinJoints  = internal.BindingSceneSkinJoints
 	BindingSceneMorphDeltas = internal.BindingSceneMorphDeltas
+	// BindingScenePbrMaterial is the material's uniform block,
+	// ScenePbrMaterial, set whole from PbrValues.
+	BindingScenePbrMaterial = internal.BindingScenePbrMaterial
 )
 
 // The sizes of the records the shader reads, in bytes, which binding ranges

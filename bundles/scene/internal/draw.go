@@ -2,6 +2,7 @@ package internal
 
 import (
 	"github.com/dvoyni/cog/bundles/model"
+	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/gfx"
 )
 
@@ -27,14 +28,14 @@ type pendingDraw struct {
 	// what picked the draw's shader variant: a half it does not have is a half
 	// the module does not declare, so there is nothing left unbound.
 	skin model.SkinBuffers
-	// material is the gfx material the Batch's material serves this pass
-	// with. It is carried per draw because resolution is a pass-relative
-	// answer: the same material serves a different gfx material in a shadow
-	// pass.
-	material      *gfx.MaterialDescr
+	// tag is the tag the Batch's material serves this pass with, and its set
+	// the one the draw names. It is carried per draw because resolution is a
+	// pass-relative answer: the same material serves a different set in a
+	// shadow pass.
+	tag           *materialTag
 	firstInstance int
 	instances     int
-	// params are the Batch's Params, bound after the ranges the recording
+	// params are the Batch's Params, set before the ranges the recording
 	// binds itself, so a Params value cannot displace them by naming one of
 	// their names.
 	params []gfx.ParameterDescr
@@ -59,10 +60,12 @@ type frameBuild struct {
 	// opaque and blend are the two sort classes of the pass being built,
 	// reused by every pass in the frame so the sort allocates nothing.
 	opaque, blend []sortEntry
-	// params is the scratch one draw's full parameter list is assembled in.
-	// gfx copies parameters into its own arena as it records, so one slice
-	// serves every draw in the frame.
+	// params is the scratch one draw's frame values are assembled in, and
+	// values the material block a draw's Params members are laid over. gfx
+	// copies both as it records, so one of each serves every draw in the
+	// frame.
 	params []gfx.ParameterDescr
+	values model.PbrValues
 }
 
 func (b *frameBuild) reset() {
@@ -81,8 +84,13 @@ func (b *frameBuild) reset() {
 // draws behind it. Passes run in Order, not in emission order, so a pass may
 // be declared here whenever its draws are known.
 //
+// A draw is its set's version for the frame, then the draw of the set: the
+// Params first, then what the recording binds itself, each only where the
+// set's shader declares it. SetDrawParams is last-wins per binding, so a
+// Params value cannot displace one of scene's own ranges.
+//
 // The binding names are model's, because the shader that reads them is.
-func (b *frameBuild) emit(gfxWrite *gfx.OpQueue) {
+func (b *frameBuild) emit(k kernel.Kernel, gfxWrite *gfx.OpQueue) {
 	if len(b.passes) == 0 {
 		return
 	}
@@ -96,30 +104,75 @@ func (b *frameBuild) emit(gfxWrite *gfx.OpQueue) {
 	for i := range b.passes {
 		pass := &b.passes[i]
 		ref := gfxWrite.NewPass(pass.descr)
-		for _, draw := range b.draws[pass.firstDraw : pass.firstDraw+pass.drawCount] {
-			b.params = append(b.params[:0],
-				gfx.BufferRangeParam(model.BindingSceneFrame, frames, pass.frameOffset, model.FrameBlockSize),
-				gfx.BufferRangeParam(model.BindingSceneInstances, instances, pass.instanceOffset, pass.instanceBytes),
-				gfx.BufferParam(model.BindingSceneAnim, anims),
-				gfx.BufferParam(model.BindingSceneMeshes, meshes),
-			)
+		for j := range b.draws[pass.firstDraw : pass.firstDraw+pass.drawCount] {
+			draw := &b.draws[pass.firstDraw+j]
+			tag := draw.tag
+			b.params = b.appendParams(b.params[:0], tag, draw.params)
+			bound := tag.bindings
+			if bound&bindFrame != 0 {
+				b.params = append(b.params,
+					gfx.BufferRangeParam(model.BindingSceneFrame, frames, pass.frameOffset, model.FrameBlockSize))
+			}
+			if bound&bindInstances != 0 {
+				b.params = append(b.params,
+					gfx.BufferRangeParam(model.BindingSceneInstances, instances, pass.instanceOffset, pass.instanceBytes))
+			}
+			if bound&bindAnim != 0 {
+				b.params = append(b.params, gfx.BufferParam(model.BindingSceneAnim, anims))
+			}
+			if bound&bindMeshes != 0 {
+				b.params = append(b.params, gfx.BufferParam(model.BindingSceneMeshes, meshes))
+			}
 			// Group 2 is bound only where the draw's variant declares it. The
 			// two halves go separately because the variants split them: a
 			// morph-only face declares binding 2 alone.
 			if draw.skin.Bound {
-				b.params = append(b.params,
-					gfx.BufferParam(model.BindingScenePoses, draw.skin.Poses),
-					gfx.BufferParam(model.BindingSceneSkinJoints, draw.skin.Joints))
+				if bound&bindPoses != 0 {
+					b.params = append(b.params, gfx.BufferParam(model.BindingScenePoses, draw.skin.Poses))
+				}
+				if bound&bindSkinJoints != 0 {
+					b.params = append(b.params, gfx.BufferParam(model.BindingSceneSkinJoints, draw.skin.Joints))
+				}
 			}
-			if draw.skin.Morphed {
+			if draw.skin.Morphed && bound&bindMorphDeltas != 0 {
 				b.params = append(b.params, gfx.BufferParam(model.BindingSceneMorphDeltas, draw.skin.Morphs))
 			}
-			b.params = append(b.params, draw.params...)
-			gfxWrite.Draw(ref, draw.mesh, *draw.material,
-				draw.instances, draw.firstInstance, b.params...)
+			gfxWrite.SetDrawParams(k, tag.set, b.params...)
+			gfxWrite.DrawSet(ref, draw.mesh, tag.set, draw.instances, draw.firstInstance)
 		}
 	}
 	clear(b.params)
+}
+
+// appendParams appends a Batch's Params as the frame's version sets them: a
+// member of the material block laid over the tag's own values, which are then
+// set whole, and any other binding by its name where the tag's shader declares
+// it. gfx dropped a param no binding declared without a word, and one Params
+// Component serves every tag of a material, so a binding one tag's shader
+// lacks is not a mistake.
+func (b *frameBuild) appendParams(dst []gfx.ParameterDescr, tag *materialTag, params []gfx.ParameterDescr) []gfx.ParameterDescr {
+	if len(params) == 0 {
+		return dst
+	}
+	members := false
+	for i := range params {
+		if !members && model.IsPbrValue(params[i].Name()) {
+			b.values, members = tag.values, true
+		}
+		if b.values.Overlay(params[i]) {
+			continue
+		}
+		if _, declared := tag.program.Binding(params[i].Name()); declared {
+			dst = append(dst, params[i])
+		}
+	}
+	if members && tag.bindings&bindPbrMaterial != 0 {
+		// Borrowed rather than copied: the block is 160 bytes, past what a
+		// param carries inline, and SetDrawParams copies it before it
+		// returns.
+		dst = append(dst, gfx.RawParameterRef(model.BindingScenePbrMaterial, &b.values))
+	}
+	return dst
 }
 
 // beginPass starts accumulating one pass, taking its sceneFrame block and the
@@ -139,7 +192,7 @@ func (b *frameBuild) beginPass(descr gfx.PassDescr, block model.FrameBlock) *pen
 // packer. firstInstance is relative to the pass's own slice, so the shader is
 // the same whether the draw holds one instance or five thousand.
 func (b *frameBuild) addDraw(
-	pass *pendingPass, batch *batch, material materialEntry,
+	pass *pendingPass, batch *batch, entry materialEntry,
 	sorted []sortEntry, survivors []survivor, entries []entry,
 ) {
 	first := (len(b.instances.bytes()) - pass.instanceOffset) / model.InstanceSize
@@ -152,7 +205,7 @@ func (b *frameBuild) addDraw(
 	b.draws = append(b.draws, pendingDraw{
 		mesh:          batch.mesh.Descr(),
 		skin:          batch.skin,
-		material:      material.descr,
+		tag:           entry.tag,
 		firstInstance: first,
 		instances:     len(sorted),
 		params:        batch.params,

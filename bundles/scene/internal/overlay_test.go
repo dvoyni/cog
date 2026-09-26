@@ -215,15 +215,17 @@ func TestTheDefaultSceneShaderFeedsEveryDrawThatNamesNone(t *testing.T) {
 	h.noErrors(t)
 }
 
-// overlayParams is the merge every resolution is made of: later params replace
+// layParams is the merge every resolution is made of: later params replace
 // earlier ones of the same name in place, and a new name is appended, so the
-// file's order survives and nothing is bound twice.
-func TestOverlayParamsReplacesByNameAndAppendsTheRest(t *testing.T) {
+// file's order survives and nothing is bound twice; a member of the material
+// block goes into the values instead.
+func TestLayParamsReplacesByNameAndAppendsTheRest(t *testing.T) {
+	var values model.PbrValues
 	arena := []gfx.ParameterDescr{gfx.FloatParam("before", 9)}
 	start := len(arena)
 	arena = append(arena, gfx.FloatParam("a", 1), gfx.FloatParam("b", 2))
-	arena = overlayParams(arena, start, []gfx.ParameterDescr{gfx.FloatParam("b", 3), gfx.FloatParam("c", 4)})
-	arena = overlayParams(arena, start, []gfx.ParameterDescr{gfx.FloatParam("a", 5)})
+	arena = layParams(arena, start, &values, gfx.FloatParam("b", 3), gfx.FloatParam("c", 4))
+	arena = layParams(arena, start, &values, gfx.FloatParam("a", 5), gfx.FloatParam("metallicFactor", 6))
 
 	var got []string
 	for _, param := range arena[start:] {
@@ -235,5 +237,10 @@ func TestOverlayParamsReplacesByNameAndAppendsTheRest(t *testing.T) {
 	}
 	if value, _ := arena[0].FloatValue(); arena[0].Name() != "before" || value != 9 {
 		t.Errorf("the overlay reached outside its window: %v", arena[0].Name())
+	}
+	var want model.PbrValues
+	want.Overlay(gfx.FloatParam("metallicFactor", 6))
+	if values != want {
+		t.Errorf("the member reached the values as %+v, want %+v", values, want)
 	}
 }
