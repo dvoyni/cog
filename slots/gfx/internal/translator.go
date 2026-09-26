@@ -182,7 +182,7 @@ func newTranslator() *translator {
 // the next translate call. It returns the first error encountered; valid draws
 // are still translated.
 func (t *translator) translate(
-	k kernel.Kernel, queue *OpQueue, persistent []Op, backend Backend, files func() fs.FS,
+	k kernel.Kernel, queue *OpQueue, persistent []ResourceOp, backend Backend, files func() fs.FS,
 	capture types.CaptureDesc, capturing bool,
 ) (*Queue, error) {
 	t.ops.Reset()
@@ -195,48 +195,36 @@ func (t *translator) translate(
 	f := &frame{k: k, fsys: files(), backend: backend}
 
 	var firstErr error
-	// Resource ops belong to no pass: every bake is hoisted ahead of all of
-	// them, so a pass can read anything the frame uploaded.
-	translateResources := func(list []Op) {
+	// Resource ops belong to no pass: every one is replayed ahead of them all,
+	// durable before temporary, so a pass can read anything the frame uploaded.
+	translateResources := func(list []ResourceOp) {
 		for i := range list {
 			op := &list[i]
-			if op.Kind == OpBakeBuffer {
+			switch op.Kind {
+			case OpBakeBuffer:
 				if len(op.Bytes) > 0 {
 					t.ops.BakeBuffer(op.BufferID, op.BufferKind, op.BufferSize, op.Bytes)
 				}
-				continue
-			}
-			if op.Kind == OpReleaseBuffer {
+			case OpReleaseBuffer:
 				t.ops.ReleaseBuffer(op.BufferID)
-				continue
-			}
-			if op.Kind == OpReleaseTexture {
+			case OpReleaseTexture:
 				t.ops.ReleaseTexture(op.TextureID)
-				continue
-			}
-			if op.Kind == OpReleaseCachedResource {
+			case OpReleaseCachedResource:
 				t.releaseCachedResource(f, op.Path)
-				continue
-			}
-			if op.Kind == OpFreeCachedResources {
+			case OpFreeCachedResources:
 				t.freeCachedResources(f)
-				continue
-			}
-			if op.Kind == OpAllocateTexture {
+			case OpAllocateTexture:
 				t.ops.AllocateTexture(op.TextureID, TextureDesc{
 					Width: op.TexW, Height: op.TexH, Layers: op.TexLayers, Format: op.Format,
 					Mipmaps: op.Mipmaps, Renderable: op.Renderable,
 				})
-				continue
-			}
-			if op.Kind == OpUpdateTexture {
+			case OpUpdateTexture:
 				t.ops.UpdateTexture(op.TextureID, op.TexLayer, op.Region, op.Bytes)
-				continue
 			}
 		}
 	}
 	translateResources(persistent)
-	translateResources(OpQueueOps(queue))
+	translateResources(OpQueueResources(queue))
 
 	t.translatePasses(f, queue, &firstErr, capture, capturing)
 
@@ -256,7 +244,7 @@ func (t *translator) translatePasses(
 	f *frame, queue *OpQueue, firstErr *error,
 	capture types.CaptureDesc, capturing bool,
 ) {
-	passes, ops := OpQueuePasses(queue), OpQueueOps(queue)
+	passes, drawOps := OpQueuePasses(queue), OpQueueDraws(queue)
 	t.planPasses(queue)
 	if t.strayDraws > 0 && *firstErr == nil {
 		*firstErr = types.ErrDrawWithoutPass{Count: t.strayDraws}
@@ -288,7 +276,7 @@ func (t *translator) translatePasses(
 		for j := i; j <= last; j++ {
 			pass := &passes[t.passOrder[j]]
 			for _, index := range t.passDrawOps(t.passOrder[j]) {
-				t.translateDraw(f, &ops[index], pass.Desc, firstErr)
+				t.translateDraw(f, &drawOps[index], pass.Desc, firstErr)
 			}
 		}
 		t.ops.EndPass()
@@ -329,12 +317,12 @@ func (t *translator) translatePasses(
 // then write). A texture nothing has used as an attachment this frame is not
 // gfx's to order.
 func (t *translator) transitionRun(queue *OpQueue, head descriptors.PassDescr, first, last int) {
-	ops := OpQueueOps(queue)
+	draws := OpQueueDraws(queue)
 	// Reads first: a texture this run samples has to have finished being written.
 	t.runSampled = t.runSampled[:0]
 	for j := first; j <= last; j++ {
 		for _, index := range t.passDrawOps(t.passOrder[j]) {
-			op := &ops[index]
+			op := &draws[index]
 			t.collectSampled(op.Material.Params())
 			t.collectSampled(op.Params)
 		}
@@ -434,7 +422,7 @@ func (t *translator) gpuPassDesc(backend Backend, head, tail descriptors.PassDes
 // planPasses puts the frame's passes in run order - Order first, declaration
 // sequence breaking ties - and buckets each pass's draws behind it.
 func (t *translator) planPasses(queue *OpQueue) {
-	passes, ops := OpQueuePasses(queue), OpQueueOps(queue)
+	passes, draws := OpQueuePasses(queue), OpQueueDraws(queue)
 	count := len(passes)
 	t.passOrder = t.passOrder[:0]
 	for i := range count {
@@ -447,11 +435,8 @@ func (t *translator) planPasses(queue *OpQueue) {
 	t.passStart = slices.Grow(t.passStart[:0], count+1)[:count+1]
 	clear(t.passStart)
 	t.strayDraws = 0
-	for i := range ops {
-		if ops[i].Kind != OpDraw {
-			continue
-		}
-		if pass := int(ops[i].Pass); pass >= 0 && pass < count {
+	for i := range draws {
+		if pass := int(draws[i].Pass); pass >= 0 && pass < count {
 			t.passStart[pass+1]++
 		} else {
 			t.strayDraws++
@@ -462,8 +447,8 @@ func (t *translator) planPasses(queue *OpQueue) {
 	}
 	t.passDraws = slices.Grow(t.passDraws[:0], t.passStart[count])[:t.passStart[count]]
 	cursor := append(t.passCursor[:0], t.passStart[:count]...)
-	for i := range ops {
-		if pass := int(ops[i].Pass); ops[i].Kind == OpDraw && pass >= 0 && pass < count {
+	for i := range draws {
+		if pass := int(draws[i].Pass); pass >= 0 && pass < count {
 			t.passDraws[cursor[pass]] = i
 			cursor[pass]++
 		}

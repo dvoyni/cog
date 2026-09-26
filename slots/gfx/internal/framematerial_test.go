@@ -37,7 +37,7 @@ func TestAFrameMaterialIsCopiedOnceForEveryDrawOfIt(t *testing.T) {
 	if got := len(q.parameterArena) - afterRecord; got != 3 {
 		t.Fatalf("three draws grew the arena by %d params, want their own three", got)
 	}
-	for i, op := range q.ops {
+	for i, op := range q.draws {
 		if got := op.Material.Params(); len(got) != 3 || got[0].Name() != "a" || got[2].Name() != "c" {
 			t.Errorf("draw %d binds %v, want the recorded params", i, ParameterViewsOf(got))
 		}
@@ -52,7 +52,7 @@ func TestAFrameMaterialOwesNothingToTheCallersSlice(t *testing.T) {
 	recorded := q.FrameMaterial(descriptors.Material(shader.ShaderWithText("s"), params...))
 	params[0] = descriptors.FloatParam("z", 9)
 	q.Draw(ref, descriptors.MeshDescr{}, recorded, 1, 0)
-	if name := q.ops[0].Material.Params()[0].Name(); name != "a" {
+	if name := q.draws[0].Material.Params()[0].Name(); name != "a" {
 		t.Errorf("the draw binds %q, want the params as they were recorded", name)
 	}
 }
@@ -67,7 +67,7 @@ func TestAStaleOrForeignFrameMaterialDrawsAsItsOriginal(t *testing.T) {
 
 	other, ref := frameMaterialQueue()
 	other.Draw(ref, descriptors.MeshDescr{}, recorded, 1, 0)
-	if got := other.ops[0].Material.Params(); len(got) != 3 || &got[0] == &q.parameterArena[0] || got[2].Name() != "c" {
+	if got := other.draws[0].Material.Params(); len(got) != 3 || &got[0] == &q.parameterArena[0] || got[2].Name() != "c" {
 		t.Errorf("another queue bound %v, want its own copy of the original params", ParameterViewsOf(got))
 	}
 
@@ -77,11 +77,11 @@ func TestAStaleOrForeignFrameMaterialDrawsAsItsOriginal(t *testing.T) {
 	// now holds this frame's params, not the material's.
 	q.Draw(ref, descriptors.MeshDescr{}, descriptors.Material(shader.ShaderWithText("t"), descriptors.FloatParam("x", 7), descriptors.FloatParam("y", 8), descriptors.FloatParam("w", 9)), 1, 0)
 	q.Draw(ref, descriptors.MeshDescr{}, recorded, 1, 0)
-	got := q.ops[1].Material.Params()
+	got := q.draws[1].Material.Params()
 	if len(got) != 3 || got[0].Name() != "a" || got[2].Name() != "c" {
 		t.Errorf("a stale recording bound %v, want the original params", ParameterViewsOf(got))
 	}
-	if &got[0] == &q.ops[0].Material.Params()[0] {
+	if &got[0] == &q.draws[0].Material.Params()[0] {
 		t.Error("a stale recording bound the new frame's window")
 	}
 }

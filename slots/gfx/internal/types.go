@@ -101,7 +101,7 @@ type ResourceOpView struct {
 	// Queue is durable or frame: the persistent ResourceQueue, whose
 	// operations wait until the render thread consumes them, or the frame's
 	// own queue, whose uploads live and die with the frame. Index is the
-	// position within that queue, so the address is the pair.
+	// position among that queue's resource ops, so the address is the pair.
 	Queue string `json:"queue"`
 	Index int    `json:"index"`
 	Kind  string `json:"kind"`

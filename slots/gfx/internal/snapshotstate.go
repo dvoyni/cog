@@ -137,11 +137,8 @@ func frameViewOf(queue *OpQueue, resources *ResourceQueue, filter string) FrameV
 
 	draws := make([]int, len(OpQueuePasses(queue)))
 	instances := make([]int, len(OpQueuePasses(queue)))
-	for i := range OpQueueOps(queue) {
-		op := &OpQueueOps(queue)[i]
-		if op.Kind != OpDraw {
-			continue
-		}
+	for i := range OpQueueDraws(queue) {
+		op := &OpQueueDraws(queue)[i]
 		view.DrawCount++
 		view.InstanceCount += op.Instances
 		pass := int(op.Pass)
@@ -170,7 +167,7 @@ func frameViewOf(queue *OpQueue, resources *ResourceQueue, filter string) FrameV
 	}
 
 	view.ResourceOps = appendResourceOpViews(view.ResourceOps, "durable", ResourceQueueOps(resources))
-	view.ResourceOps = appendResourceOpViews(view.ResourceOps, "frame", OpQueueOps(queue))
+	view.ResourceOps = appendResourceOpViews(view.ResourceOps, "frame", OpQueueResources(queue))
 	return view
 }
 
@@ -203,14 +200,11 @@ func passViewOf(index, run int, desc descriptors.PassDescr, draws, instances int
 	return view
 }
 
-// appendResourceOpViews renders one queue's resource operations, skipping its
-// draws. The index carried is the position in that queue, which is what an op
+// appendResourceOpViews renders one queue's resource operations. The index
+// carried is the position among that queue's resource ops, which is what an op
 // is addressed by.
-func appendResourceOpViews(dst []ResourceOpView, queue string, ops []Op) []ResourceOpView {
+func appendResourceOpViews(dst []ResourceOpView, queue string, ops []ResourceOp) []ResourceOpView {
 	for i := range ops {
-		if ops[i].Kind == OpDraw {
-			continue
-		}
 		dst = append(dst, resourceOpViewOf(queue, i, &ops[i]))
 	}
 	return dst
@@ -220,7 +214,7 @@ func appendResourceOpViews(dst []ResourceOpView, queue string, ops []Op) []Resou
 // its kind gives meaning to. The op struct is one flat union shared by every
 // kind, so emitting all of it would put eight irrelevant zeroes beside each
 // answer.
-func resourceOpViewOf(queue string, index int, o *Op) ResourceOpView {
+func resourceOpViewOf(queue string, index int, o *ResourceOp) ResourceOpView {
 	view := ResourceOpView{Queue: queue, Index: index, Kind: opKindName(o.Kind)}
 	switch o.Kind {
 	case OpBakeBuffer:
@@ -245,8 +239,6 @@ func resourceOpViewOf(queue string, index int, o *Op) ResourceOpView {
 
 func opKindName(kind OpKind) string {
 	switch kind {
-	case OpDraw:
-		return "draw"
 	case OpBakeBuffer:
 		return "bakeBuffer"
 	case OpReleaseBuffer:

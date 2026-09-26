@@ -8,16 +8,13 @@ import (
 	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
-
-	"github.com/dvoyni/cog/libs/m"
 )
 
-// OpKind tags the variant of an op.
+// OpKind tags the variant of a resource op.
 type OpKind uint8
 
 const (
-	OpDraw OpKind = iota
-	OpBakeBuffer
+	OpBakeBuffer OpKind = iota
 	OpReleaseBuffer
 	OpReleaseTexture
 	OpReleaseCachedResource
@@ -26,34 +23,40 @@ const (
 	OpUpdateTexture
 )
 
-// Op is one high-level command recorded into an OpQueue or a ResourceQueue: a
-// mesh draw, a buffer bake, a texture allocation or upload, or a release.
-// Its fields are unexported; the translator reads them.
-type Op struct {
-	Kind OpKind
-	// pass indexes the OpQueue's pass list, and is meaningful for draws only:
-	// resource ops belong to no pass, since bakes are hoisted ahead of them all.
+// DrawOp is one mesh draw recorded into an OpQueue.
+type DrawOp struct {
+	// Pass indexes the OpQueue's pass list, or is -1 for a draw that named no
+	// pass declared this frame.
 	Pass          int32
 	Mesh          descriptors.MeshDescr
 	Material      descriptors.MaterialDescr
 	Params        []descriptors.ParameterDescr
 	Instances     int
 	FirstInstance int
-	color         m.Color
-	depth         float32
-	BufferID      types.BufferID
-	BufferKind    types.BufferKind
-	BufferSize    int
-	TextureID     types.TextureID
-	TexW, TexH    int
-	TexLayers     int
-	TexLayer      int
-	Region        types.Region
-	Format        descriptors.TextureFormat
-	Mipmaps       bool
-	Renderable    bool
-	Bytes         []byte
-	Path          string
+}
+
+// ResourceOp is one resource command recorded into an OpQueue or a
+// ResourceQueue: a buffer bake, a texture allocation or upload, or a release.
+// Resource ops belong to no pass: the translator replays every one of them, in
+// the order they were recorded, ahead of the frame's first pass, so their order
+// against draws never matters. Their order among themselves does - a texture is
+// allocated before it is uploaded, and a durable one released before its id is
+// seen again.
+type ResourceOp struct {
+	Kind       OpKind
+	BufferID   types.BufferID
+	BufferKind types.BufferKind
+	BufferSize int
+	TextureID  types.TextureID
+	TexW, TexH int
+	TexLayers  int
+	TexLayer   int
+	Region     types.Region
+	Format     descriptors.TextureFormat
+	Mipmaps    bool
+	Renderable bool
+	Bytes      []byte
+	Path       string
 }
 
 type temporaryBuffer struct {
@@ -87,8 +90,11 @@ type passRecord struct {
 // and may be dropped with the frame. Persistent GPU resources are managed
 // separately through ResourceQueue.
 type OpQueue struct {
-	ids IDSource
-	ops []Op
+	ids   IDSource
+	draws []DrawOp
+	// resources is the frame's temporary bakes, allocations and uploads, which
+	// the translator replays ahead of every draw.
+	resources []ResourceOp
 	// passes is the frame's declared passes; a PassRef is an index into it,
 	// plus one.
 	passes               []passRecord
@@ -114,8 +120,10 @@ func NewOpQueue(ids IDSource) *OpQueue {
 // reset drops all ops and makes temporary buffers available for reuse.
 func (q *OpQueue) reset() {
 	q.frame++
-	clear(q.ops)
-	q.ops = q.ops[:0]
+	clear(q.draws)
+	q.draws = q.draws[:0]
+	clear(q.resources)
+	q.resources = q.resources[:0]
 	clear(q.passes)
 	q.passes = q.passes[:0]
 	q.uploadArena = q.uploadArena[:0]
@@ -186,8 +194,7 @@ func (q *OpQueue) passIndex(ref descriptors.PassRef) int {
 // and reported.
 func (q *OpQueue) Draw(pass descriptors.PassRef, mesh descriptors.MeshDescr, material descriptors.MaterialDescr, instances, firstInstance int, params ...descriptors.ParameterDescr) {
 	index := int32(q.passIndex(pass))
-	o := Op{
-		Kind:          OpDraw,
+	o := DrawOp{
 		Pass:          index,
 		Material:      q.bakeMaterialIfNeeded(material),
 		Mesh:          mesh,
@@ -199,7 +206,7 @@ func (q *OpQueue) Draw(pass descriptors.PassRef, mesh descriptors.MeshDescr, mat
 		q.copyVertexAttrs(descriptors.MeshLayout(&mesh)),
 		q.bakeBufferIfNeeded(descriptors.MeshVertices(&mesh), types.BufferVertex),
 		q.bakeBufferIfNeeded(descriptors.MeshIndices(&mesh), types.BufferIndex))
-	q.ops = append(q.ops, o)
+	q.draws = append(q.draws, o)
 }
 
 // FrameMaterial records a material's params into the queue once, for the rest
@@ -393,7 +400,7 @@ func (q *OpQueue) temporaryTexture(width, height int, format descriptors.Texture
 	if copyData {
 		pixels = q.copyUpload(pixels)
 	}
-	q.ops = append(q.ops, Op{
+	q.resources = append(q.resources, ResourceOp{
 		Kind: OpUpdateTexture, TextureID: texture.ID(),
 		Region: types.Region{Width: width, Height: height}, Bytes: pixels,
 	})
@@ -424,7 +431,7 @@ func (q *OpQueue) NewTemporaryTarget(width, height int, format descriptors.Textu
 // so a settled pool allocates nothing.
 func (q *OpQueue) allocateTemporaryTexture(key temporaryTextureKey) descriptors.TextureDescr {
 	id := q.acquireTemporaryTexture(key)
-	q.ops = append(q.ops, Op{
+	q.resources = append(q.resources, ResourceOp{
 		Kind: OpAllocateTexture, TextureID: id,
 		TexW: key.width, TexH: key.height, TexLayers: 1, Format: key.format,
 		Mipmaps: key.mipmaps, Renderable: key.renderable,
@@ -453,10 +460,9 @@ func (q *OpQueue) bakeBuffer(id types.BufferID, kind types.BufferKind, size int,
 	if copyData {
 		data = q.copyUpload(data)
 	}
-	o := Op{
+	q.resources = append(q.resources, ResourceOp{
 		Kind: OpBakeBuffer, BufferID: id, BufferKind: kind, BufferSize: size,
 		Bytes: data,
-	}
-	q.ops = append(q.ops, o)
+	})
 	return descriptors.BakedBuffer(id, len(data))
 }

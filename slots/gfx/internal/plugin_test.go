@@ -688,10 +688,8 @@ func TestPassRefsAreFrameLocal(t *testing.T) {
 // drawPasses lists the pass index each recorded draw landed in, -1 for none.
 func drawPasses(q *OpQueue) []int32 {
 	var passes []int32
-	for _, op := range q.ops {
-		if op.Kind == OpDraw {
-			passes = append(passes, op.Pass)
-		}
+	for _, op := range q.draws {
+		passes = append(passes, op.Pass)
 	}
 	return passes
 }
@@ -906,7 +904,7 @@ func TestOpQueueTemporaryBufferPool(t *testing.T) {
 	smallBuffer := OpQueueTemporaryBuffer(&queue, types.BufferVertex, small, true)
 	largeBuffer := OpQueueTemporaryBuffer(&queue, types.BufferVertex, large, true)
 	small[0] = 99
-	if OpQueueOps(&queue)[0].Bytes[0] != 1 {
+	if OpQueueResources(&queue)[0].Bytes[0] != 1 {
 		t.Fatal("temporary bake op aliases caller data")
 	}
 
@@ -933,10 +931,10 @@ func TestDrawStoresTemporaryBufferIDsWithoutInlineGeometry(t *testing.T) {
 	mesh := triangle()
 	queue.Draw(0, mesh, testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 
-	if OpQueueOps(&queue)[0].Kind != OpBakeBuffer || OpQueueOps(&queue)[0].BufferKind != types.BufferVertex {
-		t.Fatal("draw did not populate a vertex bake op first")
+	if bake := OpQueueResources(&queue); len(bake) != 1 || bake[0].Kind != OpBakeBuffer || bake[0].BufferKind != types.BufferVertex {
+		t.Fatal("draw did not record one vertex bake")
 	}
-	draw := &OpQueueOps(&queue)[1]
+	draw := &OpQueueDraws(&queue)[0]
 	if descriptors.MeshVertices(&draw.Mesh).ID() == 0 || draw.Mesh.VertexCount() != 3 {
 		t.Fatalf("draw vertex resource = (%d, %d), want nonzero ID and 3 vertices", descriptors.MeshVertices(&draw.Mesh).ID(), draw.Mesh.VertexCount())
 	}
@@ -966,9 +964,9 @@ func TestOpQueueArenasPreserveCallerDataIsolation(t *testing.T) {
 	materialParams[0] = descriptors.ColorParam("tint", m.Color{G: 1})
 	drawParams[0] = descriptors.FloatParam("time", 9)
 
-	draw := &OpQueueOps(&queue)[len(OpQueueOps(&queue))-1]
-	if OpQueueOps(&queue)[0].Bytes[0] != 1 {
-		t.Fatalf("recorded vertex byte = %d, want 1", OpQueueOps(&queue)[0].Bytes[0])
+	draw := &OpQueueDraws(&queue)[0]
+	if OpQueueResources(&queue)[0].Bytes[0] != 1 {
+		t.Fatalf("recorded vertex byte = %d, want 1", OpQueueResources(&queue)[0].Bytes[0])
 	}
 	if descriptors.MeshLayout(&draw.Mesh)[0] != (descriptors.Attr(0, descriptors.Float32x3)) {
 		t.Fatalf("recorded layout = %+v, want original", descriptors.MeshLayout(&draw.Mesh))
@@ -994,15 +992,15 @@ func TestBufferWithBytesCopyDataControlsOwnership(t *testing.T) {
 	copied[0] = 9
 	borrowed[0] = 10
 
-	if got := OpQueueOps(&queue)[0].Bytes[0]; got != 1 {
+	if got := OpQueueResources(&queue)[0].Bytes[0]; got != 1 {
 		t.Fatalf("copied mesh byte = %d, want 1", got)
 	}
-	if got := OpQueueOps(&queue)[2].Bytes[0]; got != 10 {
+	if got := OpQueueResources(&queue)[1].Bytes[0]; got != 10 {
 		t.Fatalf("borrowed mesh byte = %d, want 10", got)
 	}
-	retainedOps := OpQueueOps(&queue)
+	retainedOps := OpQueueResources(&queue)
 	queue.reset()
-	if retainedOps[2].Bytes != nil {
+	if retainedOps[1].Bytes != nil {
 		t.Fatal("reset retained borrowed mesh bytes")
 	}
 }
@@ -1016,13 +1014,13 @@ func TestTextureWithBytesCopyDataControlsOwnership(t *testing.T) {
 
 	copied[0] = 9
 	borrowed[0] = 10
-	if got := OpQueueOps(&queue)[1].Bytes[0]; got != 1 {
+	if got := OpQueueResources(&queue)[1].Bytes[0]; got != 1 {
 		t.Fatalf("copied temporary texture byte = %d, want 1", got)
 	}
-	if got := OpQueueOps(&queue)[3].Bytes[0]; got != 10 {
+	if got := OpQueueResources(&queue)[3].Bytes[0]; got != 10 {
 		t.Fatalf("borrowed temporary texture byte = %d, want 10", got)
 	}
-	retainedOps := OpQueueOps(&queue)
+	retainedOps := OpQueueResources(&queue)
 	queue.reset()
 	if retainedOps[3].Bytes != nil {
 		t.Fatal("reset retained borrowed temporary texture pixels")
@@ -1049,7 +1047,7 @@ func TestOpQueueBakesInlineMaterialAndDrawParameters(t *testing.T) {
 		descriptors.TextureParam("DrawTexture", drawTexture),
 		descriptors.BufferParam("DrawBuffer", drawBuffer),
 	)
-	draw := &OpQueueOps(queue)[len(OpQueueOps(queue))-1]
+	draw := &OpQueueDraws(queue)[0]
 	for _, param := range append(draw.Material.Params(), draw.Params...) {
 		switch descriptors.ParameterKind(&param) {
 		case descriptors.ParamTexture:
@@ -1090,7 +1088,7 @@ func TestOpQueueTemporaryTexturePool(t *testing.T) {
 	if reused.ID() != first.ID() {
 		t.Errorf("reused temporary texture ID = %d, want %d", reused.ID(), first.ID())
 	}
-	ops := OpQueueOps(&queue)
+	ops := OpQueueResources(&queue)
 	if len(ops) != 2 || ops[0].Kind != OpAllocateTexture || ops[1].Kind != OpUpdateTexture {
 		t.Fatal("temporary texture did not record one allocation and one upload")
 	}
@@ -1906,10 +1904,10 @@ func TestTemporaryBufferUploadsOnceForEveryDrawThatBindsIt(t *testing.T) {
 	}
 
 	bakes := 0
-	for i := range OpQueueOps(&queue) {
-		if OpQueueOps(&queue)[i].Kind == OpBakeBuffer && OpQueueOps(&queue)[i].BufferKind == types.BufferStorage {
+	for i := range OpQueueResources(&queue) {
+		if OpQueueResources(&queue)[i].Kind == OpBakeBuffer && OpQueueResources(&queue)[i].BufferKind == types.BufferStorage {
 			bakes++
-			if OpQueueOps(&queue)[i].Bytes[0] != 7 {
+			if OpQueueResources(&queue)[i].Bytes[0] != 7 {
 				t.Fatal("the temporary arena aliases caller data past the call")
 			}
 		}
@@ -1917,11 +1915,8 @@ func TestTemporaryBufferUploadsOnceForEveryDrawThatBindsIt(t *testing.T) {
 	if bakes != 1 {
 		t.Fatalf("the arena uploaded %d times, want once for the whole frame", bakes)
 	}
-	for i := range OpQueueOps(&queue) {
-		if OpQueueOps(&queue)[i].Kind != OpDraw {
-			continue
-		}
-		param := OpQueueOps(&queue)[i].Params[0]
+	for i := range OpQueueDraws(&queue) {
+		param := OpQueueDraws(&queue)[i].Params[0]
 		if descriptors.ParameterBuffer(&param).ID() != buffer.ID() || descriptors.BufferSource(descriptors.ParameterBufferRef(&param)) != descriptors.BufferSourceBaked {
 			t.Fatalf("draw bound %+v, want the one baked arena %+v", descriptors.ParameterBuffer(&param), buffer)
 		}
@@ -1939,10 +1934,10 @@ func TestTemporaryTextureUploadsOnceForEveryDrawThatSamplesIt(t *testing.T) {
 	}
 
 	bakes := 0
-	for i := range OpQueueOps(&queue) {
-		if OpQueueOps(&queue)[i].Kind == OpUpdateTexture {
+	for i := range OpQueueResources(&queue) {
+		if OpQueueResources(&queue)[i].Kind == OpUpdateTexture {
 			bakes++
-			if OpQueueOps(&queue)[i].Bytes[0] != 7 {
+			if OpQueueResources(&queue)[i].Bytes[0] != 7 {
 				t.Fatal("the temporary texture aliases caller pixels past the call")
 			}
 		}
@@ -1950,11 +1945,8 @@ func TestTemporaryTextureUploadsOnceForEveryDrawThatSamplesIt(t *testing.T) {
 	if bakes != 1 {
 		t.Fatalf("the texture uploaded %d times, want once for the whole frame", bakes)
 	}
-	for i := range OpQueueOps(&queue) {
-		if OpQueueOps(&queue)[i].Kind != OpDraw {
-			continue
-		}
-		param := OpQueueOps(&queue)[i].Params[0]
+	for i := range OpQueueDraws(&queue) {
+		param := OpQueueDraws(&queue)[i].Params[0]
 		if descriptors.ParameterTexture(&param).ID() != texture.ID() {
 			t.Fatalf("draw bound %+v, want the one baked texture %+v", descriptors.ParameterTexture(&param), texture)
 		}

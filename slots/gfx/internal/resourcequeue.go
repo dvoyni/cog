@@ -10,7 +10,7 @@ import (
 // render thread executes them.
 type ResourceQueue struct {
 	ids IDSource
-	ops []Op
+	ops []ResourceOp
 }
 
 // NewResourceQueue builds an empty queue that reserves ids through ids.
@@ -58,7 +58,7 @@ func (q *ResourceQueue) NewRenderTarget(width, height, layers int, format descri
 
 func (q *ResourceQueue) newTexture(width, height, layers int, format descriptors.TextureFormat, mipmaps, renderable bool) descriptors.TextureDescr {
 	id := q.ids().NewTexture()
-	q.ops = append(q.ops, Op{
+	q.ops = append(q.ops, ResourceOp{
 		Kind: OpAllocateTexture, TextureID: id,
 		TexW: width, TexH: height, TexLayers: layers, Format: format,
 		Mipmaps: mipmaps, Renderable: renderable,
@@ -76,7 +76,7 @@ func (q *ResourceQueue) UploadBuffer(buffer descriptors.BufferDescr, data []byte
 	if copyData {
 		data = append([]byte(nil), data...)
 	}
-	q.ops = append(q.ops, Op{
+	q.ops = append(q.ops, ResourceOp{
 		Kind: OpBakeBuffer, BufferID: id, BufferKind: types.BufferStorage, BufferSize: len(data),
 		Bytes: data,
 	})
@@ -96,7 +96,7 @@ func (q *ResourceQueue) UploadTexture(texture descriptors.TextureDescr, layer in
 	if copyData {
 		pixels = append([]byte(nil), pixels...)
 	}
-	q.ops = append(q.ops, Op{
+	q.ops = append(q.ops, ResourceOp{
 		Kind: OpUpdateTexture, TextureID: texture.ID(),
 		TexLayer: layer, Region: region, Bytes: pixels,
 	})
@@ -105,23 +105,23 @@ func (q *ResourceQueue) UploadTexture(texture descriptors.TextureDescr, layer in
 
 // ReleaseBuffer queues a durable release for buffer.
 func (q *ResourceQueue) ReleaseBuffer(buffer descriptors.BufferDescr) {
-	q.ops = append(q.ops, Op{Kind: OpReleaseBuffer, BufferID: buffer.ID()})
+	q.ops = append(q.ops, ResourceOp{Kind: OpReleaseBuffer, BufferID: buffer.ID()})
 }
 
 // ReleaseTexture queues a durable release for texture.
 func (q *ResourceQueue) ReleaseTexture(texture descriptors.TextureDescr) {
-	q.ops = append(q.ops, Op{Kind: OpReleaseTexture, TextureID: texture.ID()})
+	q.ops = append(q.ops, ResourceOp{Kind: OpReleaseTexture, TextureID: texture.ID()})
 }
 
 func (q *ResourceQueue) releaseCachedResource(path string) {
 	if path == "" {
 		return
 	}
-	q.ops = append(q.ops, Op{Kind: OpReleaseCachedResource, Path: path})
+	q.ops = append(q.ops, ResourceOp{Kind: OpReleaseCachedResource, Path: path})
 }
 
 func (q *ResourceQueue) freeCachedResources() {
-	q.ops = append(q.ops, Op{Kind: OpFreeCachedResources})
+	q.ops = append(q.ops, ResourceOp{Kind: OpFreeCachedResources})
 }
 
 func (q *ResourceQueue) reset() {

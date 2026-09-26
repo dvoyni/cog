@@ -14,11 +14,14 @@ func OpQueueBakeTextureIfNeeded(v *OpQueue, a0 descriptors.TextureDescr) descrip
 	return v.bakeTextureIfNeeded(a0)
 }
 
-// OpQueueOps reads OpQueue.ops for gfx's internal/.
-func OpQueueOps(v *OpQueue) []Op { return v.ops }
+// OpQueueDraws reads OpQueue.draws for gfx's internal/.
+func OpQueueDraws(v *OpQueue) []DrawOp { return v.draws }
 
 // OpQueuePasses reads OpQueue.passes for gfx's internal/.
 func OpQueuePasses(v *OpQueue) []passRecord { return v.passes }
+
+// OpQueueResources reads OpQueue.resources for gfx's internal/.
+func OpQueueResources(v *OpQueue) []ResourceOp { return v.resources }
 
 // OpQueueTemporaryBuffer calls OpQueue.temporaryBuffer for gfx's internal/.
 func OpQueueTemporaryBuffer(v *OpQueue, a0 types.BufferKind, a1 []byte, a2 bool) descriptors.BufferDescr {
@@ -32,7 +35,7 @@ func OpQueueTemporaryBuffers(v *OpQueue) []temporaryBuffer { return v.temporaryB
 func ResourceQueueFreeCachedResources(v *ResourceQueue) { v.freeCachedResources() }
 
 // ResourceQueueOps reads ResourceQueue.ops for gfx's internal/.
-func ResourceQueueOps(v *ResourceQueue) []Op { return v.ops }
+func ResourceQueueOps(v *ResourceQueue) []ResourceOp { return v.ops }
 
 // ResourceQueueReleaseCachedResource calls ResourceQueue.releaseCachedResource for gfx's internal/.
 func ResourceQueueReleaseCachedResource(v *ResourceQueue, a0 string) { v.releaseCachedResource(a0) }

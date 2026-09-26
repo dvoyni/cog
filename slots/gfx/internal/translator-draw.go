@@ -12,7 +12,7 @@ import (
 )
 
 // translateDraw emits one draw into the currently open pass.
-func (t *translator) translateDraw(f *frame, op *Op, pass descriptors.PassDescr, firstErr *error) {
+func (t *translator) translateDraw(f *frame, op *DrawOp, pass descriptors.PassDescr, firstErr *error) {
 	m := &op.Mesh
 	stride := descriptors.MeshStride(m)
 	vertices, indices := descriptors.MeshVertices(m), descriptors.MeshIndices(m)
