@@ -184,7 +184,10 @@ func (c *Contacts) pathPass(bodies *BodyIndex, statics *StaticIndex, jointed *Jo
 //     (crossSensors);
 //   - it is at T = 0, a target the Body already touched where the tick began,
 //     which is left to the discrete walk, so a fast ball rolling along a floor
-//     is not stopped by the floor;
+//     is not stopped by the floor. A surface the Body is driven into is not
+//     passed over: one it closes on, along the Hit's normal, by at least its
+//     own minimum extent, which the depth test then asks as it asks any other
+//     (stopsAlong). It stops the Body at T = 0, and Solve pushes it out;
 //   - a Joint holds the pair apart, as the discrete walk's own test rejects
 //     it. The collision bits are the Probe's own filter already;
 //   - the path does not enter the target: it is a seam in a surface the Body
@@ -263,7 +266,7 @@ func (c *Contacts) findStop(
 	for at := range split {
 		candidate := c.probes[at]
 		within, found := bodies.entryAt(c.probeSlots[at])
-		if found.path || !stops(body, candidate, found, jointed) ||
+		if found.path || !stopsAlong(body, delta, candidate, found, jointed) ||
 			!c.enters(&path, &path, bodies, statics, split, candidate, found, within.world(found)) {
 			continue
 		}
@@ -278,7 +281,7 @@ func (c *Contacts) findStop(
 			break
 		}
 		found, _, ok := statics.lookup(candidate.Entity)
-		if ok && stops(body, candidate, found, jointed) &&
+		if ok && stopsAlong(body, delta, candidate, found, jointed) &&
 			c.enters(&path, &path, bodies, statics, split, candidate, found, statics.index.world(found)) {
 			if first.t <= 1 {
 				c.hold(body, slot, delta, first.hit, first.other, first.otherSlot)
@@ -490,6 +493,30 @@ func stops(body *entry, hit Hit, target *entry, jointed *JointedPairs) bool {
 		return false
 	}
 	return jointed.Len() == 0 || !jointed.Has(body.entity, target.entity)
+}
+
+// stopsAlong is stops for a Hit of the Body's own path, delta, which a Hit at
+// T = 0 passes too when the Body is driven into the surface it already touches
+// (continuous-collision.md § A surface the Body is driven into is not exempt).
+// A crate shoved at a wall it touches at a slant closes on the two segments it
+// touches by its whole shove: skipped as touched at Previous, they left it to
+// the discrete walk, which met its corner past their core lines and pushed it
+// out the far side. The depth test still asks it, after this: the next tile of
+// a floor a Body slides over, which it straddles at Previous, is driven into
+// along its face too, and reaches no deeper than the tile underfoot.
+func stopsAlong(body *entry, delta m.Vec2d, hit Hit, target *entry, jointed *JointedPairs) bool {
+	if hit.T == 0 && !target.shape.Sensor && drives(body, delta, hit.Normal) {
+		return jointed.Len() == 0 || !jointed.Has(body.entity, target.entity)
+	}
+	return stops(body, hit, target, jointed)
+}
+
+// drives reports that a path, delta, closes on a surface along its normal n,
+// which faces the Body, by at least the Body's own minimum extent: the gate,
+// taken along the normal (continuous-collision.md § A seam stops nothing).
+func drives(body *entry, delta, n m.Vec2d) bool {
+	closing := -delta.Dot(n)
+	return closing >= MinimumExtent(body.shape) && closing > 0
 }
 
 // stopAt writes the stopping Contact for a Body stopped by a Hit of its path,
@@ -960,8 +987,7 @@ func (c *Contacts) enters(
 	hit Hit, target *entry, world []m.Vec2d,
 ) bool {
 	body := path.body
-	closing := -path.delta.Dot(hit.Normal)
-	if !(closing >= MinimumExtent(body.shape) && closing > 0) {
+	if !drives(body, path.delta, hit.Normal) {
 		return false
 	}
 
@@ -984,7 +1010,8 @@ func (c *Contacts) enters(
 // inside, along the pair's relative motion. Each is taken with how much deeper
 // the path carries the Body into that surface by the tick's end, along the
 // surface's normal, so that a Body settling onto the floor it slides along is
-// measured where it ends.
+// measured where it ends; a surface the Body is driven into is taken without
+// it (restsIn).
 func (c *Contacts) restingDepth(path *bodyPath, bodies *BodyIndex, statics *StaticIndex, split int) float64 {
 	deepest := 0.0
 	for at := 0; at < split && c.probes[at].T == 0; at++ {
@@ -1021,6 +1048,12 @@ func (c *Contacts) restingDepth(path *bodyPath, bodies *BodyIndex, statics *Stat
 // restsIn is how deep the Body stands in one target it touches where the path
 // starts, with how much further the path carries it into that surface, or 0
 // for a Sensor, which holds nothing up.
+//
+// The drift is a Body settling into what holds it up, which is less than its
+// extent a tick. A surface the path drives into by its extent or more is left
+// at the depth the Body stands in it (issue #592): a crate shoved at a wall it
+// touches drifts into it by its whole shove, which made the resting depth
+// deeper than the wall is thick, and every other segment of the wall a seam.
 func (path *bodyPath) restsIn(hit Hit, target *entry, world []m.Vec2d) float64 {
 	if target.shape.Sensor {
 		return 0
@@ -1031,6 +1064,9 @@ func (path *bodyPath) restsIn(hit Hit, target *entry, world []m.Vec2d) float64 {
 		depth = body.shape.Radius - distance
 	} else {
 		depth = path.mover.depthAt(target.shape, target.box, world)
+	}
+	if drives(path.body, path.delta, hit.Normal) {
+		return depth
 	}
 	return depth + max(0, -path.delta.Dot(hit.Normal))
 }

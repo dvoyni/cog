@@ -597,6 +597,26 @@ segment neighbours which is the app's knowledge, like door axes and merged runs.
 Naming a chain would invent the concept [Static geometry as
 Entities](https://github.com/dvoyni/cog/issues/288) refused to have.
 
+**Against a Polygon, the rejection holds only before the core line**
+([#592](https://github.com/dvoyni/cog/issues/592)). A Polygon whose GJK distance
+to the segment's core is above 0 has its witness on the joint's endpoint
+rejected when the normal leans into the neighbour. That is what keeps a box
+sliding along a run from catching at the joints. Past the core line the rule does
+not apply.
+
+- **The failing sequence.** A 45° crate's corner is driven 0.166 m past the core
+  line 2 cm from a joint. GJK/EPA puts the witness on the joint for both
+  segments, each normal leaning into the other, so the rule rejected both. The
+  crate had no Contact at all and sank through the wall in 4 ticks.
+- **Rejected: removing the rejection.** It breaks no older test, but it brings
+  back catching at the joints, about 5% of the speed at each one.
+- **The endpoint is read from the simplex too.** cp compares the witness with the
+  endpoint exactly, but GJK interpolates it between the simplex's two points on
+  the segment even when both are the endpoint. A crate tipped 5° met a joint's
+  endpoint as x = 4.999999999999999 against 5, the rule did not fire, and the
+  cap took 1.1% of its speed. A witness whose two simplex points on the segment
+  are both endpoint `i` counts as endpoint `i`.
+
 ### The world cache lives in the index entry
 
 cp recomputes the transformed circle centre, segment endpoints and normal, and
