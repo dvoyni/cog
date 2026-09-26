@@ -119,8 +119,13 @@ func (b *flattenBackend) NewBuffer() gfx.BufferID   { return gfx.BufferID(b.id()
 func (b *flattenBackend) NewSampler(gfx.SamplerDesc) (gfx.SamplerID, error) {
 	return gfx.SamplerID(b.id()), nil
 }
-func (b *flattenBackend) FreeSampler(gfx.SamplerID)                  {}
-func (b *flattenBackend) FreeShader(gfx.ShaderID)                    {}
+func (b *flattenBackend) FreeSampler(gfx.SamplerID)                       {}
+func (b *flattenBackend) FreeShader(gfx.ShaderID)                         {}
+func (b *flattenBackend) ReserveShader() gfx.ShaderID                     { return gfx.ShaderID(b.id()) }
+func (b *flattenBackend) CreateShader(gfx.ShaderID, gfx.ShaderDesc) error { return nil }
+func (b *flattenBackend) ReflectShader([]byte) (gfx.ShaderLayout, error) {
+	return gfx.ShaderLayout{}, nil
+}
 func (b *flattenBackend) ShaderLayout(gfx.ShaderID) gfx.ShaderLayout { return gfx.ShaderLayout{} }
 func (b *flattenBackend) FreePipeline(gfx.PipelineID)                {}
 func (b *flattenBackend) Limits() gfx.Limits                         { return gfx.DefaultLimits() }

@@ -18,6 +18,13 @@ import (
 // part of the descriptor's identity everywhere identity is decided.
 type ShaderDescr = shader.ShaderDescr
 
+// ShaderProgram is what CompileShaderCmd makes of one shader descriptor: the
+// flattened module, its source map, its reflected layout and the binding table
+// built from it by WGSL global name. It is pure, immutable data - no GPU object
+// stands behind it until ResourceQueue.UploadProgram hands it to a shader - so
+// it is passed by value and shared freely. The zero value is no program.
+type ShaderProgram = shader.ShaderProgram
+
 // ShaderOption is one entry of a shader's supply: a define or a const. Build it
 // with ShaderDefine or ShaderConst.
 type ShaderOption = shader.ShaderOption

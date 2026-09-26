@@ -1516,6 +1516,9 @@
               "kind": {
                 "type": "string"
               },
+              "label": {
+                "type": "string"
+              },
               "layer": {
                 "type": "integer"
               },
@@ -1560,6 +1563,11 @@
               },
               "renderable": {
                 "type": "boolean"
+              },
+              "shader": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
               },
               "size": {
                 "type": "integer"

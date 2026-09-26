@@ -183,7 +183,10 @@ func (b *testBackend) NewShader(desc gfx.ShaderDesc) (gfx.ShaderID, error) {
 	return id, nil
 }
 
-func (b *testBackend) FreeShader(gfx.ShaderID) {}
+func (b *testBackend) FreeShader(gfx.ShaderID)                         {}
+func (b *testBackend) ReserveShader() gfx.ShaderID                     { return gfx.ShaderID(b.next()) }
+func (b *testBackend) CreateShader(gfx.ShaderID, gfx.ShaderDesc) error { return nil }
+func (b *testBackend) ReflectShader([]byte) (gfx.ShaderLayout, error)  { return gfx.ShaderLayout{}, nil }
 
 func (b *testBackend) ShaderLayout(id gfx.ShaderID) gfx.ShaderLayout {
 	b.mu.Lock()

@@ -121,6 +121,10 @@ type ResourceOpView struct {
 	Format     string          `json:"format,omitempty"`
 	Mipmaps    bool            `json:"mipmaps,omitempty"`
 	Renderable bool            `json:"renderable,omitempty"`
+	// Shader and Label describe a shader operation: the id, and for an upload
+	// the program's label, which is what a person knows the shader by.
+	Shader types.ShaderID `json:"shader,omitempty"`
+	Label  string         `json:"label,omitempty"`
 	// Bytes is how much data the operation uploads. The data itself does not
 	// travel: a baked texture in a response is a base64 megabyte nobody asked
 	// for.

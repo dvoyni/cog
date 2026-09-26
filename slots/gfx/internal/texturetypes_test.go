@@ -10,11 +10,12 @@ import (
 
 // countingMinter hands out ids without a backend, which is all a descriptor
 // needs to be minted.
-type countingMinter struct{ texture, buffer int }
+type countingMinter struct{ texture, buffer, shader int }
 
-func (m *countingMinter) NewTexture() types.TextureID { m.texture++; return types.TextureID(m.texture) }
-func (m *countingMinter) NewBuffer() types.BufferID   { m.buffer++; return types.BufferID(m.buffer) }
-func (m *countingMinter) Ready() bool                 { return true }
+func (m *countingMinter) NewTexture() types.TextureID   { m.texture++; return types.TextureID(m.texture) }
+func (m *countingMinter) NewBuffer() types.BufferID     { m.buffer++; return types.BufferID(m.buffer) }
+func (m *countingMinter) ReserveShader() types.ShaderID { m.shader++; return types.ShaderID(m.shader) }
+func (m *countingMinter) Ready() bool                   { return true }
 
 // A descriptor is the request, and an allocation's layer count is part of the
 // request - unlike a path load's decoded size, which only the file knows. It is

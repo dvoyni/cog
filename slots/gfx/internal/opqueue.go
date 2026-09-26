@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
@@ -21,6 +22,8 @@ const (
 	OpFreeCachedResources
 	OpAllocateTexture
 	OpUpdateTexture
+	OpUploadProgram
+	OpReleaseShader
 )
 
 // DrawOp is one mesh draw recorded into an OpQueue's pass.
@@ -33,7 +36,8 @@ type DrawOp struct {
 }
 
 // ResourceOp is one resource command recorded into an OpQueue or a
-// ResourceQueue: a buffer bake, a texture allocation or upload, or a release.
+// ResourceQueue: a buffer bake, a texture allocation or upload, a shader's
+// program upload, or a release.
 // Resource ops belong to no pass: the translator replays every one of them, in
 // the order they were recorded, ahead of the frame's first pass, so their order
 // against draws never matters. Their order among themselves does - a texture is
@@ -54,6 +58,10 @@ type ResourceOp struct {
 	Renderable bool
 	Bytes      []byte
 	Path       string
+	// ShaderID and Program describe a shader's upload or release. Program is
+	// one word, a handle to the immutable compiled module.
+	ShaderID types.ShaderID
+	Program  shader.ShaderProgram
 }
 
 type temporaryBuffer struct {

@@ -183,3 +183,18 @@ type ErrFrameAbandoned = types.ErrFrameAbandoned
 // nothing can recover from a shader that will not compile - so nothing ever
 // will branch, and a type per directive plus a Kind enum would be pure surface.
 type ErrShaderSource = shader.ErrShaderSource
+
+// ErrShaderNotLive reports a ResourceQueue call naming a shader id that is not
+// live: one NewShader never reserved, or one ReleaseShader already released.
+// The call is ignored.
+type ErrShaderNotLive = types.ErrShaderNotLive
+
+// ErrShaderProgramInvalid reports an UploadProgram handed no program - the zero
+// ShaderProgram a failed CompileShaderCmd returns beside its error. The upload
+// is ignored and the shader stays reserved.
+type ErrShaderProgramInvalid = types.ErrShaderProgramInvalid
+
+// ErrShaderUploadedTwice reports a second UploadProgram to one shader. A shader
+// takes one program for its life; to reload one, release it and create it
+// again. The second upload is ignored.
+type ErrShaderUploadedTwice = types.ErrShaderUploadedTwice

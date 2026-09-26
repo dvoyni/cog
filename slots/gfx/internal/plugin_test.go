@@ -61,6 +61,17 @@ type fakeBackend struct {
 	freedPipelines []types.PipelineID
 	lastPipelines  []PipelineDesc
 
+	// The explicit shader path: ids reserved from their own counter, every
+	// module CreateShader was handed, and the reflection port's hand-written
+	// answer - reflection when set, the fixed ShaderLayout otherwise - with
+	// every source it was asked about.
+	nextShader     uint32
+	createdShaders []createdShader
+	createErr      error
+	reflection     *shader.ShaderLayout
+	reflectErr     error
+	reflected      []string
+
 	// lastOps is every call the last Execute's replay made, in replay order:
 	// bakes, then each pass's render commands, then releases.
 	lastOps    []backendOp
@@ -178,6 +189,37 @@ func (b *fakeBackend) NewShader(desc shader.ShaderDesc) (types.ShaderID, error) 
 	return types.ShaderID(b.id()), nil
 }
 func (b *fakeBackend) FreeShader(id types.ShaderID) { b.freedShaders = append(b.freedShaders, id) }
+
+// createdShader is one module CreateShader was handed.
+type createdShader struct {
+	id    types.ShaderID
+	label string
+	code  string
+}
+
+func (b *fakeBackend) ReserveShader() types.ShaderID {
+	b.nextShader++
+	return types.ShaderID(b.nextShader)
+}
+
+func (b *fakeBackend) CreateShader(id types.ShaderID, desc shader.ShaderDesc) error {
+	if b.createErr != nil {
+		return b.createErr
+	}
+	b.createdShaders = append(b.createdShaders, createdShader{id: id, label: desc.Label, code: string(desc.Code)})
+	return nil
+}
+
+func (b *fakeBackend) ReflectShader(code []byte) (shader.ShaderLayout, error) {
+	b.reflected = append(b.reflected, string(code))
+	if b.reflectErr != nil {
+		return shader.ShaderLayout{}, b.reflectErr
+	}
+	if b.reflection != nil {
+		return *b.reflection, nil
+	}
+	return b.ShaderLayout(0), nil
+}
 
 // ShaderLayout reports a fixed layout matching the built-in shader: mvp at 0,
 // a "tint" color at 64 (80-byte block), plus a texture+sampler in group 1.
@@ -471,7 +513,11 @@ func recordResourcesCmdImpl() (kernel.Lock, kernel.Execute[recordResourcesReques
 	var queue kernel.Write[*ResourceQueue]
 	return func(access kernel.ResourceAccess) {
 			queue = access.GetWrite[*ResourceQueue]()
-		}, func(_ kernel.Kernel, req recordResourcesRequest) recordResourcesResponse {
+		}, func(k kernel.Kernel, req recordResourcesRequest) recordResourcesResponse {
+			if req.withKernel != nil {
+				req.withKernel(k, queue.Get())
+				return recordResourcesResponse{}
+			}
 			req.fn(queue.Get())
 			return recordResourcesResponse{}
 		}
@@ -1900,7 +1946,13 @@ func withResourceQueue(t *testing.T, k kernel.Executioner, use func(*ResourceQue
 }
 
 type recordResourcesCmd kernel.Command[recordResourcesRequest, recordResourcesResponse]
-type recordResourcesRequest struct{ fn func(*ResourceQueue) }
+
+// recordResourcesRequest runs fn, or withKernel for the calls that report
+// through the dispatch's Kernel.
+type recordResourcesRequest struct {
+	fn         func(*ResourceQueue)
+	withKernel func(kernel.Kernel, *ResourceQueue)
+}
 type recordResourcesResponse struct{}
 
 func TestTemporaryBufferUploadsOnceForEveryDrawThatBindsIt(t *testing.T) {

@@ -11,6 +11,10 @@ import (
 type ResourceQueue struct {
 	ids IDSource
 	ops []ResourceOp
+	// shaders is every shader NewShader reserved, indexed by id. It is durable:
+	// reset truncates the ops and leaves it, because it is what the CPU side
+	// resolves against between an upload and the shader's release.
+	shaders []shaderRecord
 }
 
 // NewResourceQueue builds an empty queue that reserves ids through ids.

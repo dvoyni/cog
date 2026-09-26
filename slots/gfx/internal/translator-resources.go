@@ -64,6 +64,50 @@ func (t *translator) shaderLayout(backend Backend, id types.ShaderID) shader.Sha
 	return l
 }
 
+// createShader creates the module of an uploaded program under the id
+// ResourceQueue.NewShader reserved for it. The layout is the program's own, so
+// the backend is never asked to reflect again, and it is measured against the
+// web floor here, once, because the upload is replayed once.
+func (t *translator) createShader(backend Backend, id types.ShaderID, program shader.ShaderProgram) error {
+	desc := shader.ProgramDesc(program)
+	if err := backend.CreateShader(id, desc); err != nil {
+		// As in the descriptor path, nothing the backend said is rewritten: the
+		// segment table rides beside it and the reader subtracts.
+		return shader.CompileError(desc.Label, err, shader.ProgramSourceMap(program))
+	}
+	layout := shader.ProgramLayout(program)
+	t.layouts[id] = layout
+	if diagnostic := checkWebLimits(desc.Label, layout, backend.Limits()); diagnostic != nil && t.diagnostic == nil {
+		t.diagnostic = diagnostic
+	}
+	return nil
+}
+
+// releaseShader frees a shader's module and everything the translator derived
+// from it: the pipelines keyed on its id, the parameter plans behind them and
+// its reflected layout. It is the cascade both an explicit ReleaseShader and
+// the descriptor path's cache eviction run.
+func (t *translator) releaseShader(backend Backend, id types.ShaderID) {
+	for key, pipeline := range t.pipelines {
+		if key.shader != id {
+			continue
+		}
+		// A zero entry is the marker for a pipeline that failed to build, not
+		// a resource: there is nothing to hand back.
+		if pipeline != 0 {
+			backend.FreePipeline(pipeline)
+		}
+		delete(t.pipelines, key)
+	}
+	for key := range t.parameterPlans {
+		if key.shader == id {
+			delete(t.parameterPlans, key)
+		}
+	}
+	delete(t.layouts, id)
+	backend.FreeShader(id)
+}
+
 // ensurePipeline returns the cached pipeline for one (shader, mesh layout,
 // state, attachments) combination, building it on a miss.
 //

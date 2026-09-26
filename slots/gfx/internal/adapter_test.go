@@ -82,6 +82,21 @@ func (a *testAdapter) FreeShader(id types.ShaderID) { a.get().FreeShader(id) }
 func (a *testAdapter) ShaderLayout(id types.ShaderID) shader.ShaderLayout {
 	return a.get().ShaderLayout(id)
 }
+
+// ReserveShader keeps counting before a backend is attached, as NewTexture
+// does: a shader id is reservable the moment the engine starts.
+func (a *testAdapter) ReserveShader() types.ShaderID {
+	if backend := a.get(); backend != nil {
+		return backend.ReserveShader()
+	}
+	return types.ShaderID(detachedIDs.Add(1))
+}
+func (a *testAdapter) CreateShader(id types.ShaderID, desc shader.ShaderDesc) error {
+	return a.get().CreateShader(id, desc)
+}
+func (a *testAdapter) ReflectShader(code []byte) (shader.ShaderLayout, error) {
+	return a.get().ReflectShader(code)
+}
 func (a *testAdapter) FreePipeline(id types.PipelineID) { a.get().FreePipeline(id) }
 func (a *testAdapter) Limits() types.Limits             { return a.get().Limits() }
 func (a *testAdapter) Execute(queue *Queue)             { a.get().Execute(queue) }

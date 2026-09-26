@@ -90,6 +90,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.HandleCommand[AcquireCmd](p.acquireCmdImpl)
 	registrar.HandleCommand[ReleaseCachedResourceCmd](p.releaseCachedResourceCmdImpl)
 	registrar.HandleCommand[FreeCachedResourcesCmd](p.freeCachedResourcesCmdImpl)
+	registrar.HandleCommand[CompileShaderCmd](p.compileShaderCmdImpl)
 	registrar.HandleCommand[SetViewportCmd](setViewportCmdImpl)
 	registrar.HandleCommand[SetDesiredViewportCmd](setDesiredViewportCmdImpl)
 	registrar.HandleCommand[ArmCaptureCmd](p.armCaptureCmdImpl)

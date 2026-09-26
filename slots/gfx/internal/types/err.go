@@ -236,3 +236,47 @@ type ErrFrameAbandoned struct{}
 func (ErrFrameAbandoned) Error() string {
 	return "gfx: the engine stopped before a frame was recorded"
 }
+
+// ErrShaderNotLive reports a ResourceQueue call naming a shader id that is not
+// live: one NewShader never reserved, or one ReleaseShader already released.
+// The call is ignored. Ids are never reused, so the check is exact, and it is a
+// programmer mistake rather than a state the frame can be in.
+type ErrShaderNotLive struct {
+	Shader ShaderID
+	// Call is the ResourceQueue method that named it.
+	Call string
+	// Released separates the two ways in: true when the id was live once and
+	// has been released, false when nothing ever reserved it.
+	Released bool
+}
+
+func (e ErrShaderNotLive) Error() string {
+	state := "was never reserved by NewShader"
+	if e.Released {
+		state = "has been released"
+	}
+	return fmt.Sprintf("gfx: %s names shader %d, which %s", e.Call, e.Shader, state)
+}
+
+// ErrShaderProgramInvalid reports an UploadProgram handed no program - the zero
+// ShaderProgram a failed CompileShaderCmd returns beside its error. The upload
+// is ignored and the shader stays reserved, so a later upload of a program that
+// compiled still takes.
+type ErrShaderProgramInvalid struct{ Shader ShaderID }
+
+func (e ErrShaderProgramInvalid) Error() string {
+	return fmt.Sprintf("gfx: UploadProgram hands shader %d no program; CompileShaderCmd returned an error for it", e.Shader)
+}
+
+// ErrShaderUploadedTwice reports a second UploadProgram to one shader. A shader
+// takes one program for its life; to reload one, release it and create it
+// again. The second upload is ignored.
+type ErrShaderUploadedTwice struct {
+	Shader ShaderID
+	// Label names the program the shader already holds.
+	Label string
+}
+
+func (e ErrShaderUploadedTwice) Error() string {
+	return fmt.Sprintf("gfx: shader %d already holds program %q; a shader takes one upload - release it and create a new one to reload", e.Shader, e.Label)
+}

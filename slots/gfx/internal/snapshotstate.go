@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
@@ -234,6 +235,11 @@ func resourceOpViewOf(queue string, index int, o *ResourceOp) ResourceOpView {
 		view.Texture, view.Layer, view.Region, view.Bytes = o.TextureID, o.TexLayer, &region, len(o.Bytes)
 	case OpReleaseCachedResource:
 		view.Path = o.Path
+	case OpUploadProgram:
+		view.Shader, view.Label = o.ShaderID, o.Program.Label()
+		view.Bytes = len(shader.ProgramDesc(o.Program).Code)
+	case OpReleaseShader:
+		view.Shader = o.ShaderID
 	}
 	return view
 }
@@ -254,6 +260,10 @@ func opKindName(kind OpKind) string {
 		return "allocateTexture"
 	case OpUpdateTexture:
 		return "updateTexture"
+	case OpUploadProgram:
+		return "uploadProgram"
+	case OpReleaseShader:
+		return "releaseShader"
 	}
 	return descriptors.UnknownName(int(kind))
 }

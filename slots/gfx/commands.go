@@ -108,3 +108,25 @@ type ArmFrameRequest = internal.ArmFrameRequest
 
 // ArmFrameResponse hands back the wait and the viewport.
 type ArmFrameResponse = internal.ArmFrameResponse
+
+// CompileShaderCmd compiles one shader descriptor on the CPU: it flattens the
+// descriptor through the preprocessor, reflects the result through the
+// Backend's reflection port, and builds the binding table by WGSL global name.
+// The ShaderProgram it returns is pure data, which ResourceQueue.UploadProgram
+// hands to a shader ResourceQueue.NewShader reserved.
+//
+// Its lock is empty, so a System declaring Uses[CompileShaderCmd] widens its
+// lock set by nothing and the kernel runs it on the caller's goroutine. It is
+// the one gfx call whose failure is a normal outcome - a missing file, an
+// include that does not resolve, WGSL that does not parse - so the failure is
+// the response's Err and is never also reported.
+type CompileShaderCmd = internal.CompileShaderCmd
+
+// CompileShaderRequest names the shader and the filesystem its root and
+// includes are read from - ordinarily storage.FileSystem, which the caller
+// declares its own read of.
+type CompileShaderRequest = internal.CompileShaderRequest
+
+// CompileShaderResponse carries the program, or the reason there is none. A
+// failed compile leaves Program the zero value, which UploadProgram refuses.
+type CompileShaderResponse = internal.CompileShaderResponse

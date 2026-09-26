@@ -1,9 +1,46 @@
 package internal
 
 import (
+	"io/fs"
+
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
+
+// CompileShaderCmd compiles one shader descriptor on the CPU: it flattens the
+// descriptor through the preprocessor, reflects the result through the Backend's
+// reflection port, and builds the binding table by WGSL global name. What it
+// returns is a ShaderProgram - pure data, which ResourceQueue.UploadProgram
+// then hands to a shader NewShader reserved.
+//
+// Its lock is empty. It reads only the filesystem the request carries, which
+// the caller's System holds its own read of, and the reflection port is pure
+// and safe from any thread, so the kernel runs it on the caller's goroutine with
+// no coordinator round-trip: a System that declares Uses[CompileShaderCmd]
+// widens its lock set by nothing and loses no parallelism, however long a naga
+// parse takes.
+//
+// It is the one gfx call whose failure is a normal outcome - a missing file, an
+// include that does not resolve, WGSL that does not parse - so the failure is
+// the response's Err and is never also reported. The caller decides what a
+// missing shader means.
+type CompileShaderCmd kernel.Command[CompileShaderRequest, CompileShaderResponse]
+
+// CompileShaderRequest names the shader and the filesystem its root and
+// includes are read from - ordinarily storage.FileSystem, which the caller
+// declares its own read of.
+type CompileShaderRequest struct {
+	FS    fs.FS
+	Descr shader.ShaderDescr
+}
+
+// CompileShaderResponse carries the program, or the reason there is none. A
+// failed compile leaves Program the zero value, which UploadProgram refuses.
+type CompileShaderResponse struct {
+	Program shader.ShaderProgram
+	Err     error
+}
 
 // PresentCmd finalizes the writable OpQueue: it swaps it into the internal ready
 // slot (dropping any still-unconsumed queue, latest-wins) and installs a reset

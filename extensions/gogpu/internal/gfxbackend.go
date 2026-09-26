@@ -35,9 +35,13 @@ type gfxBackend struct {
 	nextID        uint32
 	nextTextureID atomic.Uint32
 	nextBufferID  atomic.Uint32
-	samplers      map[gfx.SamplerID]*wgpu.Sampler
-	shaders       map[gfx.ShaderID]*gfxbShader
-	pipelines     map[gfx.PipelineID]*gfxbPipeline
+	// nextShaderID is every shader's id, reserved or created: NewShader mints
+	// from it too, so a module the descriptor path created and one reserved
+	// through ReserveShader can never share a key in shaders.
+	nextShaderID atomic.Uint32
+	samplers     map[gfx.SamplerID]*wgpu.Sampler
+	shaders      map[gfx.ShaderID]*gfxbShader
+	pipelines    map[gfx.PipelineID]*gfxbPipeline
 
 	bakedBuffers       map[gfx.BufferID]*wgpu.Buffer
 	bakedBufferDescs   map[gfx.BufferID]gfx.BufferDesc
@@ -488,8 +492,46 @@ func (b *gfxBackend) FreeSampler(id gfx.SamplerID) {
 }
 
 func (b *gfxBackend) NewShader(desc gfx.ShaderDesc) (gfx.ShaderID, error) {
+	sh, err := b.newShaderModule(desc)
+	if err != nil {
+		return 0, err
+	}
+	id := b.ReserveShader()
+	b.shaders[id] = sh
+	return id, nil
+}
+
+// ReserveShader reserves a shader id. It is CPU-only and safe from the
+// recording thread, like NewTexture and NewBuffer; the module is created when
+// Execute's caller replays the program's upload through CreateShader.
+func (b *gfxBackend) ReserveShader() gfx.ShaderID {
+	return gfx.ShaderID(b.nextShaderID.Add(1))
+}
+
+// CreateShader creates the module of a reserved id. It reflects the source
+// again rather than taking gfx's layout: the bind-group layouts are built from
+// the reflection this backend trusts, which is the same naga pass
+// ReflectShader ran on the same bytes.
+func (b *gfxBackend) CreateShader(id gfx.ShaderID, desc gfx.ShaderDesc) error {
+	sh, err := b.newShaderModule(desc)
+	if err != nil {
+		return err
+	}
+	b.shaders[id] = sh
+	return nil
+}
+
+// ReflectShader is gfx's reflection port: naga's parse and lowering, which
+// touch no device and share no state, so it is safe from any thread.
+func (b *gfxBackend) ReflectShader(code []byte) (gfx.ShaderLayout, error) {
+	return reflectShaderLayout(string(code))
+}
+
+// newShaderModule compiles one module and builds the layouts its draws bind
+// against, keyed by no id: NewShader and CreateShader decide where it lives.
+func (b *gfxBackend) newShaderModule(desc gfx.ShaderDesc) (*gfxbShader, error) {
 	if len(desc.Code) == 0 {
-		return 0, errors.New("gfx: shader has no source code")
+		return nil, errors.New("gfx: shader has no source code")
 	}
 	label := desc.Label
 	if label == "" {
@@ -497,7 +539,7 @@ func (b *gfxBackend) NewShader(desc gfx.ShaderDesc) (gfx.ShaderID, error) {
 	}
 	module, err := b.device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{Label: label, WGSL: string(desc.Code)})
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	// A shader whose bindings cannot be reflected, or whose layouts the device
 	// refuses, is unusable: nothing would bind and every draw through it would
@@ -506,16 +548,14 @@ func (b *gfxBackend) NewShader(desc gfx.ShaderDesc) (gfx.ShaderID, error) {
 	layout, err := reflectShaderLayout(string(desc.Code))
 	if err != nil {
 		module.Release()
-		return 0, fmt.Errorf("gogpu: shader %q reflection failed: %w", label, err)
+		return nil, fmt.Errorf("gogpu: shader %q reflection failed: %w", label, err)
 	}
 	sh := newGfxbShader(label, module, layout)
 	if err := b.buildShaderLayouts(sh); err != nil {
 		module.Release()
-		return 0, fmt.Errorf("gogpu: shader %q layout build failed: %w", label, err)
+		return nil, fmt.Errorf("gogpu: shader %q layout build failed: %w", label, err)
 	}
-	id := gfx.ShaderID(b.id())
-	b.shaders[id] = sh
-	return id, nil
+	return sh, nil
 }
 
 // buildShaderLayouts creates the GPU bind-group layouts (indexed by group) and the

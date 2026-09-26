@@ -702,6 +702,9 @@ type Backend interface {
     NewShader(ShaderDesc) (ShaderID, error)
     FreeShader(ShaderID)
     ShaderLayout(ShaderID) ShaderLayout
+    ReserveShader() ShaderID
+    CreateShader(ShaderID, ShaderDesc) error
+    ReflectShader(code []byte) (ShaderLayout, error)
     NewPipeline(PipelineDesc) (PipelineID, error)
     FreePipeline(PipelineID)
     ScreenFramebuffer() (TextureViewID, int, int)
@@ -715,8 +718,12 @@ type Backend interface {
 ```
 
 `Ready` reports whether the backend can render. gfx calls nothing but `Ready`,
-`NewTexture` and `NewBuffer` on a backend that is not ready, and `Ready` must
-be safe from any goroutine.
+`NewTexture`, `NewBuffer`, `ReserveShader` and `ReflectShader` on a backend
+that is not ready, and those five must be safe from any goroutine.
+`ReflectShader` is the reflection port `CompileShaderCmd` compiles through: it
+needs no device, and it is pure, a function of the flattened source alone.
+`ReserveShader` reserves the id `ResourceQueue.NewShader` hands out at once,
+and `CreateShader` creates that shader's module when its upload is replayed.
 
 `TextureFormat` reports what format a texture was allocated or baked in, and
 whether the backend knows the texture at all. It is what keys a pipeline to

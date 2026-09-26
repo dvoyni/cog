@@ -117,7 +117,10 @@ func (b *testBackend) NewShader(desc gfx.ShaderDesc) (gfx.ShaderID, error) {
 	b.shaderSources[id] = string(desc.Code)
 	return id, nil
 }
-func (b *testBackend) FreeShader(gfx.ShaderID) {}
+func (b *testBackend) FreeShader(gfx.ShaderID)                         {}
+func (b *testBackend) ReserveShader() gfx.ShaderID                     { b.nextID++; return gfx.ShaderID(b.nextID) }
+func (b *testBackend) CreateShader(gfx.ShaderID, gfx.ShaderDesc) error { return nil }
+func (b *testBackend) ReflectShader([]byte) (gfx.ShaderLayout, error)  { return gfx.ShaderLayout{}, nil }
 
 // ShaderLayout is one hand-written union standing in for every shader, so it
 // puts bindings and offsets where the real shaders do not. Anything asserting

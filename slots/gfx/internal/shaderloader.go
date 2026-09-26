@@ -155,8 +155,8 @@ func (shaderLoader) Default(d assets.Descr[shader.ShaderDescrParams], _ shaderUs
 
 // Free releases the module and everything the translator derived from it. This
 // cascade is the release half of what Load built - the pipelines keyed on the
-// dead ShaderID, the parameter plans behind them and the reflected layout - so
-// it belongs to the loader rather than beside the table.
+// dead ShaderID, the parameter plans behind them and the reflected layout - and
+// it is the one translator.releaseShader runs for an explicit ReleaseShader.
 //
 // It is also why freeCachedResources clears pipelines and plans before it frees
 // the entries: run per entry over full maps, this is O(shaders x pipelines).
@@ -164,23 +164,5 @@ func (shaderLoader) Free(value *loadedShader, userData shaderUserData) {
 	if value.id == 0 {
 		return
 	}
-	t := userData.t
-	for key, pipeline := range t.pipelines {
-		if key.shader != value.id {
-			continue
-		}
-		// A zero entry is the marker for a pipeline that failed to build, not
-		// a resource: there is nothing to hand back.
-		if pipeline != 0 {
-			userData.backend.FreePipeline(pipeline)
-		}
-		delete(t.pipelines, key)
-	}
-	for key := range t.parameterPlans {
-		if key.shader == value.id {
-			delete(t.parameterPlans, key)
-		}
-	}
-	delete(t.layouts, value.id)
-	userData.backend.FreeShader(value.id)
+	userData.t.releaseShader(userData.backend, value.id)
 }
