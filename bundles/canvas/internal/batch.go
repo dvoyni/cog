@@ -160,7 +160,7 @@ func (b *spriteBatch) flush(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr) {
 		b.params = append(b.params, gfx.BufferParam(b.arrayNames[i], gfx.BufferWithBytes(b.arrayBytes[i], true)))
 	}
 	b.params = append(b.params, b.shared...)
-	gfxWrite.DrawInstanced(quad, *b.material, len(b.instances), b.params...)
+	gfxWrite.Draw(quad, *b.material, len(b.instances), 0, b.params...)
 	b.active = false
 	b.instances = b.instances[:0]
 }
@@ -279,7 +279,7 @@ func (b *trianglesBatch) flush(gfxWrite *gfx.OpQueue) {
 	)
 	b.scratch = append(b.scratch, b.params...)
 	mesh := gfx.Mesh(gfx.BufferWithBytes(b.vertices, true), gfx.TopologyTriangleList, b.layout...)
-	gfxWrite.Draw(mesh, *b.material, b.scratch...)
+	gfxWrite.Draw(mesh, *b.material, 1, 0, b.scratch...)
 	b.active = false
 	b.vertices = b.vertices[:0]
 }

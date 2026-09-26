@@ -591,7 +591,7 @@ func TestATextureCaptureDeclaresItsTransition(t *testing.T) {
 	q.Pass(descriptors.PassDescr{
 		Target: descriptors.TextureTarget(target, 0, 0), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "offscreen",
 	})
-	q.Draw(triangle(), testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
+	q.Draw(triangle(), testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	rig.tick()
 	rig.render()
 

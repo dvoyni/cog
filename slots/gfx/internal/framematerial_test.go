@@ -12,7 +12,7 @@ import (
 // value, so nothing is baked into a temporary.
 func frameMaterialQueue() *OpQueue {
 	q := NewOpQueue(nil)
-	q.Reset()
+	q.reset()
 	q.Pass(descriptors.PassDescr{})
 	return q
 }
@@ -33,7 +33,7 @@ func TestAFrameMaterialIsCopiedOnceForEveryDrawOfIt(t *testing.T) {
 		t.Fatalf("recording put %d params in the arena, want the material's %d", afterRecord, len(material.Params()))
 	}
 	for range 3 {
-		q.Draw(descriptors.MeshDescr{}, recorded, descriptors.FloatParam("d", 4))
+		q.Draw(descriptors.MeshDescr{}, recorded, 1, 0, descriptors.FloatParam("d", 4))
 	}
 	if got := len(q.parameterArena) - afterRecord; got != 3 {
 		t.Fatalf("three draws grew the arena by %d params, want their own three", got)
@@ -52,7 +52,7 @@ func TestAFrameMaterialOwesNothingToTheCallersSlice(t *testing.T) {
 	params := frameMaterialParams()
 	recorded := q.FrameMaterial(descriptors.Material(shader.ShaderWithText("s"), params...))
 	params[0] = descriptors.FloatParam("z", 9)
-	q.Draw(descriptors.MeshDescr{}, recorded)
+	q.Draw(descriptors.MeshDescr{}, recorded, 1, 0)
 	if name := q.ops[0].Material.Params()[0].Name(); name != "a" {
 		t.Errorf("the draw binds %q, want the params as they were recorded", name)
 	}
@@ -67,17 +67,17 @@ func TestAStaleOrForeignFrameMaterialDrawsAsItsOriginal(t *testing.T) {
 	recorded := q.FrameMaterial(descriptors.Material(shader.ShaderWithText("s"), params...))
 
 	other := frameMaterialQueue()
-	other.Draw(descriptors.MeshDescr{}, recorded)
+	other.Draw(descriptors.MeshDescr{}, recorded, 1, 0)
 	if got := other.ops[0].Material.Params(); len(got) != 3 || &got[0] == &q.parameterArena[0] || got[2].Name() != "c" {
 		t.Errorf("another queue bound %v, want its own copy of the original params", ParameterViewsOf(got))
 	}
 
-	q.Reset()
+	q.reset()
 	q.Pass(descriptors.PassDescr{})
 	// The arena's backing is reused by the new frame, so the recorded window
 	// now holds this frame's params, not the material's.
-	q.Draw(descriptors.MeshDescr{}, descriptors.Material(shader.ShaderWithText("t"), descriptors.FloatParam("x", 7), descriptors.FloatParam("y", 8), descriptors.FloatParam("w", 9)))
-	q.Draw(descriptors.MeshDescr{}, recorded)
+	q.Draw(descriptors.MeshDescr{}, descriptors.Material(shader.ShaderWithText("t"), descriptors.FloatParam("x", 7), descriptors.FloatParam("y", 8), descriptors.FloatParam("w", 9)), 1, 0)
+	q.Draw(descriptors.MeshDescr{}, recorded, 1, 0)
 	got := q.ops[1].Material.Params()
 	if len(got) != 3 || got[0].Name() != "a" || got[2].Name() != "c" {
 		t.Errorf("a stale recording bound %v, want the original params", ParameterViewsOf(got))

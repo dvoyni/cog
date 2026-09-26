@@ -44,7 +44,7 @@ func TestResourceTextureAlwaysBakesSrgb(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w := recordList(t, k)
-	w.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("normal.png"))), descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("normal.png"))), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -64,8 +64,8 @@ func TestSameResourcePathBakesOnce(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w := recordList(t, k)
-	w.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("hero.png"))), descriptors.MatParam("mvp", m.NewMat4()))
-	w.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("hero.png"))), descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("hero.png"))), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("hero.png"))), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -140,7 +140,7 @@ func TestARenderTargetIsRenderedIntoAndSampledOnALaterFrame(t *testing.T) {
 
 	q = recordRaw(t, k)
 	q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "use"})
-	q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), descriptors.MatParam("mvp", m.NewMat4()))
+	q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

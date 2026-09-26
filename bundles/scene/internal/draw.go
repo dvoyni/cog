@@ -115,8 +115,8 @@ func (b *frameBuild) emit(gfxWrite *gfx.OpQueue) {
 				b.params = append(b.params, gfx.BufferParam(model.BindingSceneMorphDeltas, draw.skin.Morphs))
 			}
 			b.params = append(b.params, draw.params...)
-			gfxWrite.DrawInstancedFrom(draw.mesh, *draw.material,
-				draw.firstInstance, draw.instances, b.params...)
+			gfxWrite.Draw(draw.mesh, *draw.material,
+				draw.instances, draw.firstInstance, b.params...)
 		}
 	}
 	clear(b.params)

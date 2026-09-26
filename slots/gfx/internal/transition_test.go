@@ -40,7 +40,7 @@ func TestSamplingWhatAnEarlierPassRenderedGetsABarrier(t *testing.T) {
 		q.Pass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 0, Label: "offscreen"})
 		drawInto(q)
 		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 1, Label: "composite"})
-		q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), descriptors.MatParam("mvp", m.NewMat4()))
+		q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	})
 
 	want := types.TextureTransition{Texture: sampled, From: types.TextureUsageRenderAttachment, To: types.TextureUsageTextureBinding}
@@ -86,9 +86,9 @@ func TestRenderingIntoATextureAnEarlierPassSampledGetsTheReverseBarrier(t *testi
 		q.Pass(descriptors.PassDescr{Target: targetB, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 0, Label: "b-first"})
 		drawInto(q)
 		q.Pass(descriptors.PassDescr{Target: targetA, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 1, Label: "a-reads-b"})
-		q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", textureB)), descriptors.MatParam("mvp", m.NewMat4()))
+		q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", textureB)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 		q.Pass(descriptors.PassDescr{Target: targetB, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 2, Label: "b-again"})
-		q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", textureA)), descriptors.MatParam("mvp", m.NewMat4()))
+		q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", textureA)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	})
 
 	forward := types.TextureTransition{Texture: pong, From: types.TextureUsageRenderAttachment, To: types.TextureUsageTextureBinding}
@@ -110,8 +110,8 @@ func TestATextureIsTransitionedOncePerPassThatNeedsIt(t *testing.T) {
 		q.Pass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 0, Label: "offscreen"})
 		drawInto(q)
 		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 1, Label: "composite"})
-		q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), descriptors.MatParam("mvp", m.NewMat4()))
-		q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), descriptors.MatParam("mvp", m.NewMat4()))
+		q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+		q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	})
 
 	if len(backend.transitions) != 1 {
@@ -135,7 +135,7 @@ func TestADepthAttachmentSampledLaterGetsABarrier(t *testing.T) {
 	q.Pass(descriptors.PassDescr{Target: descriptors.NoTarget(), Depth: descriptors.DepthTarget(shadow), DepthLoad: types.LoadClear, Order: 0, Label: "shadow"})
 	drawInto(q)
 	q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 1, Label: "lit"})
-	q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", shadow)), descriptors.MatParam("mvp", m.NewMat4()))
+	q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", shadow)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -156,9 +156,9 @@ func TestATextureStaysTransitionedAcrossConsecutivePassesThatSampleIt(t *testing
 		q.Pass(descriptors.PassDescr{Target: source, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 0, Label: "offscreen"})
 		drawInto(q)
 		q.Pass(descriptors.PassDescr{Target: other, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 1, Label: "reads-once"})
-		q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), descriptors.MatParam("mvp", m.NewMat4()))
+		q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 2, Label: "reads-again"})
-		q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), descriptors.MatParam("mvp", m.NewMat4()))
+		q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	})
 
 	if len(backend.transitions) != 1 {
@@ -194,7 +194,7 @@ func TestAnOrdinaryTextureIsNeverTransitioned(t *testing.T) {
 	})
 	q := recordRaw(t, k)
 	q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "screen"})
-	q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", uploaded)), descriptors.MatParam("mvp", m.NewMat4()))
+	q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", uploaded)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

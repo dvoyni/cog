@@ -215,7 +215,7 @@ func (p *plugin) renderOnRender() (kernel.Lock, kernel.Observe[app.RenderEvent])
 func present(write kernel.Write[*OpQueue], ready kernel.Write[*readyList]) {
 	rd := ready.Get()
 	recycled := rd.queue
-	recycled.Reset()
+	recycled.reset()
 	rd.queue = write.Get()
 	write.Set(recycled)
 	rd.pending = true

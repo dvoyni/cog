@@ -210,12 +210,6 @@ func (t *translator) translate(
 				t.ops.ReleaseBuffer(op.BufferID)
 				continue
 			}
-			if op.Kind == OpBakeTexture {
-				if len(op.Bytes) > 0 {
-					t.ops.BakeTexture(op.TextureID, op.TexW, op.TexH, op.Format, op.Bytes, op.Mipmaps)
-				}
-				continue
-			}
 			if op.Kind == OpReleaseTexture {
 				t.ops.ReleaseTexture(op.TextureID)
 				continue

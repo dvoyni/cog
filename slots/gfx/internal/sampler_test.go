@@ -66,7 +66,7 @@ func TestEveryReflectedSamplerBindsIndependentlyByName(t *testing.T) {
 		descriptors.TextureParam("decalTexture", descriptors.TextureWithBytes(1, 1, descriptors.FormatRGBA8Srgb, []byte{5, 6, 7, 8}, true, false)),
 	)
 	w := recordList(t, k)
-	w.Draw(triangle(), material, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), material, 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

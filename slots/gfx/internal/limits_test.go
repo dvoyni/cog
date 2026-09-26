@@ -52,7 +52,7 @@ func TestShaderOverTheWebFloorIsReportedOnceAndStillRenders(t *testing.T) {
 	records := descriptors.BufferParam("records", descriptors.BufferWithBytes([]byte{1, 2, 3, 4}, true))
 	for range 2 {
 		w := recordList(t, k)
-		w.Draw(triangle(), testMaterial(records), descriptors.MatParam("mvp", m.NewMat4()))
+		w.Draw(triangle(), testMaterial(records), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 	}
@@ -138,7 +138,7 @@ func TestBufferRangeParamBindsItsOwnSlice(t *testing.T) {
 		records = resources.UploadBuffer(resources.NewBuffer(), make([]byte, 1024), true)
 	})
 	w := recordList(t, k)
-	w.Draw(triangle(), testMaterial(descriptors.BufferRangeParam("records", records, 256, 512)), descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), testMaterial(descriptors.BufferRangeParam("records", records, 256, 512)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -166,7 +166,7 @@ func TestFirstInstanceReachesTheDraw(t *testing.T) {
 	w := recordList(t, k)
 	// A batch reads its own slice of the shared instance arena: WebGPU's
 	// instance_index starts at firstInstance, so no offset plumbing is needed.
-	w.DrawInstancedFrom(triangle(), testMaterial(), 7, 3, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), testMaterial(), 3, 7, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

@@ -122,8 +122,8 @@ func TestAStripIsKeyedByItsIndexWidth(t *testing.T) {
 	k := newTestKernel(t, p)
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	w := recordList(t, k)
-	w.Draw(narrow, testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
-	w.Draw(wide, testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(narrow, testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(wide, testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -150,8 +150,8 @@ func TestATriangleListIsNotKeyedByItsIndexWidth(t *testing.T) {
 	k := newTestKernel(t, p)
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	w := recordList(t, k)
-	w.Draw(narrow, testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
-	w.Draw(wide, testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(narrow, testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(wide, testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

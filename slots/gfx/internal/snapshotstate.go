@@ -228,9 +228,6 @@ func resourceOpViewOf(queue string, index int, o *Op) ResourceOpView {
 		view.Size, view.Bytes = o.BufferSize, len(o.Bytes)
 	case OpReleaseBuffer:
 		view.Buffer = o.BufferID
-	case OpBakeTexture:
-		view.Texture, view.Width, view.Height = o.TextureID, o.TexW, o.TexH
-		view.Format, view.Mipmaps, view.Bytes = o.Format.String(), o.Mipmaps, len(o.Bytes)
 	case OpReleaseTexture:
 		view.Texture = o.TextureID
 	case OpAllocateTexture:
@@ -254,8 +251,6 @@ func opKindName(kind OpKind) string {
 		return "bakeBuffer"
 	case OpReleaseBuffer:
 		return "releaseBuffer"
-	case OpBakeTexture:
-		return "bakeTexture"
 	case OpReleaseTexture:
 		return "releaseTexture"
 	case OpReleaseCachedResource:

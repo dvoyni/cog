@@ -59,7 +59,7 @@ func TestOneShaderInADepthPassAndADepthNonePassBuildsTwoPipelines(t *testing.T) 
 func TestADrawInADepthAutoPassKeepsItsDepthTarget(t *testing.T) {
 	backend, _ := passFrame(t, func(q *OpQueue) {
 		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "lit"})
-		q.Draw(triangle(), testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
+		q.Draw(triangle(), testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	})
 	if len(backend.lastPipelines) != 1 {
 		t.Fatalf("pipelines = %d, want one", len(backend.lastPipelines))

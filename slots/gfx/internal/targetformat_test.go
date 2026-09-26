@@ -184,7 +184,7 @@ func TestAColourlessPassTakesNoFormatFromItsTarget(t *testing.T) {
 		Target: descriptors.NoTarget(), Depth: descriptors.DepthTarget(shadow),
 		DepthLoad: types.LoadClear, Label: "shadow",
 	})
-	q.Draw(triangle(), testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
+	q.Draw(triangle(), testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

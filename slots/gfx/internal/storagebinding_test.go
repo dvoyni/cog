@@ -41,7 +41,7 @@ func storageFrame(t *testing.T, params ...descriptors.ParameterDescr) (*fakeBack
 
 	w := recordRaw(t, k)
 	w.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "main"})
-	w.Draw(triangle(), testMaterial(params...), descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), testMaterial(params...), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 	return backend, reported
@@ -122,7 +122,7 @@ func TestAnUnfilledStorageBindingIsReportedOnceAndDroppedAlways(t *testing.T) {
 	drop := func() int {
 		w := recordRaw(t, k)
 		w.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "main"})
-		w.Draw(triangle(), testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
+		w.Draw(triangle(), testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 		return backend.passDraws[0]
@@ -144,8 +144,8 @@ func TestAnUnfilledStorageBindingIsReportedOnceAndDroppedAlways(t *testing.T) {
 	// heard - which is the whole cost of reporting at frame rate.
 	w := recordRaw(t, k)
 	w.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "main"})
-	w.Draw(triangle(), testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
-	w.Draw(triangle(), testMaterial(descriptors.BufferParam("mvp", descriptors.BufferWithBytes([]byte{1, 2, 3, 4}, true))))
+	w.Draw(triangle(), testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), testMaterial(descriptors.BufferParam("mvp", descriptors.BufferWithBytes([]byte{1, 2, 3, 4}, true))), 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

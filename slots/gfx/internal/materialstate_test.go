@@ -55,7 +55,7 @@ func TestPipelineDescCarriesStateAndTargetFormats(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w := recordList(t, k)
-	w.Draw(triangle(), descriptors.MaterialWithState(shader.ShaderWithText("//test"), StateOpaque3D()), descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), descriptors.MaterialWithState(shader.ShaderWithText("//test"), StateOpaque3D()), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -86,9 +86,9 @@ func TestPipelineCacheDistinguishesDepthState(t *testing.T) {
 	reading := descriptors.MaterialWithState(shaderDescr, types.MaterialState{DepthCompare: types.CompareLess})
 
 	w := recordList(t, k)
-	w.Draw(triangle(), writing, descriptors.MatParam("mvp", m.NewMat4()))
-	w.Draw(triangle(), reading, descriptors.MatParam("mvp", m.NewMat4()))
-	w.Draw(triangle(), writing, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), writing, 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), reading, 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), writing, 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

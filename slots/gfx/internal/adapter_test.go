@@ -140,7 +140,7 @@ func TestAFrameBeforeTheBackendIsReadyIsSkipped(t *testing.T) {
 	backend := &fakeBackend{}
 
 	w := recordList(t, k)
-	w.Draw(triangle(), testMaterial())
+	w.Draw(triangle(), testMaterial(), 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -151,7 +151,7 @@ func TestAFrameBeforeTheBackendIsReadyIsSkipped(t *testing.T) {
 
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	w = recordList(t, k)
-	w.Draw(triangle(), testMaterial())
+	w.Draw(triangle(), testMaterial(), 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

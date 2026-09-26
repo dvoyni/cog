@@ -19,7 +19,6 @@ const (
 	OpDraw OpKind = iota
 	OpBakeBuffer
 	OpReleaseBuffer
-	OpBakeTexture
 	OpReleaseTexture
 	OpReleaseCachedResource
 	OpFreeCachedResources
@@ -27,8 +26,8 @@ const (
 	OpUpdateTexture
 )
 
-// Op is one high-level command recorded into an OpQueue: a mesh draw, or a
-// buffer/texture bake/release.
+// Op is one high-level command recorded into an OpQueue or a ResourceQueue: a
+// mesh draw, a buffer bake, a texture allocation or upload, or a release.
 // Its fields are unexported; the translator reads them.
 type Op struct {
 	Kind OpKind
@@ -113,11 +112,8 @@ func NewOpQueue(ids IDSource) *OpQueue {
 	return &OpQueue{ids: ids, temporaryTextureFree: map[temporaryTextureKey][]int{}}
 }
 
-// Len reports the number of recorded ops.
-func (q *OpQueue) Len() int { return len(q.ops) }
-
-// Reset drops all ops and makes temporary buffers available for reuse.
-func (q *OpQueue) Reset() {
+// reset drops all ops and makes temporary buffers available for reuse.
+func (q *OpQueue) reset() {
 	q.frame++
 	clear(q.ops)
 	q.ops = q.ops[:0]
@@ -187,28 +183,16 @@ func (q *OpQueue) selectedPass() int {
 	return q.current
 }
 
-// Draw records a draw op. Parameters are matched to reflected shader constants
-// by name and override same-named material parameters. Inline geometry is baked
-// into queue-pooled BufferIDs using each BufferDescr's copyData policy.
-func (q *OpQueue) Draw(mesh descriptors.MeshDescr, material descriptors.MaterialDescr, params ...descriptors.ParameterDescr) {
-	q.draw(mesh, material, 0, 1, params)
-}
-
-// DrawInstanced records a draw that replays the mesh geometry `instances` times.
-// Per-instance data is supplied through a storage-buffer parameter the shader
-// indexes by instance_index; the shared parameters apply to every instance.
-func (q *OpQueue) DrawInstanced(mesh descriptors.MeshDescr, material descriptors.MaterialDescr, instances int, params ...descriptors.ParameterDescr) {
-	q.draw(mesh, material, 0, instances, params)
-}
-
-// DrawInstancedFrom records an instanced draw starting at firstInstance.
-// WebGPU's instance_index starts at firstInstance, so a batch reads its own
-// slice of a shared instance arena with no offset plumbing of its own.
-func (q *OpQueue) DrawInstancedFrom(mesh descriptors.MeshDescr, material descriptors.MaterialDescr, firstInstance, instances int, params ...descriptors.ParameterDescr) {
-	q.draw(mesh, material, firstInstance, instances, params)
-}
-
-func (q *OpQueue) draw(mesh descriptors.MeshDescr, material descriptors.MaterialDescr, firstInstance, instances int, params []descriptors.ParameterDescr) {
+// Draw records a draw op that replays the mesh geometry instances times,
+// starting at firstInstance; a plain draw is 1, 0, and instances below 1 draw
+// once. Per-instance data is supplied through a storage-buffer parameter the
+// shader indexes by instance_index, which WebGPU starts at firstInstance, so a
+// batch reads its own slice of a shared instance arena with no offset plumbing
+// of its own. Parameters are matched to reflected shader constants by name,
+// apply to every instance and override same-named material parameters. Inline
+// geometry is baked into queue-pooled BufferIDs using each BufferDescr's
+// copyData policy.
+func (q *OpQueue) Draw(mesh descriptors.MeshDescr, material descriptors.MaterialDescr, instances, firstInstance int, params ...descriptors.ParameterDescr) {
 	pass := int32(q.selectedPass())
 	o := Op{
 		Kind:          OpDraw,
@@ -409,9 +393,19 @@ func (q *OpQueue) NewTemporaryTexture(width, height int, format descriptors.Text
 	return q.temporaryTexture(width, height, format, pixels, copyData, mipmaps)
 }
 
+// temporaryTexture allocates a pooled texture and uploads pixels as its one
+// whole layer, the same allocate-then-upload pair ResourceQueue records, so a
+// mipmapped one has its chain rebuilt by the backend from that upload.
 func (q *OpQueue) temporaryTexture(width, height int, format descriptors.TextureFormat, pixels []byte, copyData, mipmaps bool) descriptors.TextureDescr {
-	key := temporaryTextureKey{width: width, height: height, format: format, mipmaps: mipmaps}
-	return q.bakeTexture(q.acquireTemporaryTexture(key), width, height, format, pixels, copyData, mipmaps)
+	texture := q.allocateTemporaryTexture(temporaryTextureKey{width: width, height: height, format: format, mipmaps: mipmaps})
+	if copyData {
+		pixels = q.copyUpload(pixels)
+	}
+	q.ops = append(q.ops, Op{
+		Kind: OpUpdateTexture, TextureID: texture.ID(),
+		Region: types.Region{Width: width, Height: height}, Bytes: pixels,
+	})
+	return texture
 }
 
 // NewTemporaryTarget allocates a frame-lifetime renderable texture and returns
@@ -428,14 +422,22 @@ func (q *OpQueue) temporaryTexture(width, height int, format descriptors.Texture
 // ErrDrawSamplesAttachment, and it is the guard that makes handing the texture
 // back safe.
 func (q *OpQueue) NewTemporaryTarget(width, height int, format descriptors.TextureFormat) (descriptors.TargetDescr, descriptors.TextureDescr) {
-	key := temporaryTextureKey{width: width, height: height, format: format, renderable: true}
+	texture := q.allocateTemporaryTexture(temporaryTextureKey{width: width, height: height, format: format, renderable: true})
+	return descriptors.TextureTarget(texture, 0, 0), texture
+}
+
+// allocateTemporaryTexture takes a matching texture from the frame pool and
+// records its allocation. The allocation is recorded every frame the texture is
+// taken, and a backend that already holds the id at that description keeps it,
+// so a settled pool allocates nothing.
+func (q *OpQueue) allocateTemporaryTexture(key temporaryTextureKey) descriptors.TextureDescr {
 	id := q.acquireTemporaryTexture(key)
 	q.ops = append(q.ops, Op{
 		Kind: OpAllocateTexture, TextureID: id,
-		TexW: width, TexH: height, TexLayers: 1, Format: format, Renderable: true,
+		TexW: key.width, TexH: key.height, TexLayers: 1, Format: key.format,
+		Mipmaps: key.mipmaps, Renderable: key.renderable,
 	})
-	texture := descriptors.BakedTextureWith(id, width, height, 1, format)
-	return descriptors.TextureTarget(texture, 0, 0), texture
+	return descriptors.BakedTextureWith(id, key.width, key.height, 1, key.format)
 }
 
 // acquireTemporaryTexture takes a matching texture from the frame pool, minting
@@ -465,21 +467,4 @@ func (q *OpQueue) bakeBuffer(id types.BufferID, kind types.BufferKind, size int,
 	}
 	q.ops = append(q.ops, o)
 	return descriptors.BakedBuffer(id, len(data))
-}
-
-func (q *OpQueue) bakeTexture(id types.TextureID, width, height int, format descriptors.TextureFormat, pixels []byte, copyData, mipmaps bool) descriptors.TextureDescr {
-	if copyData {
-		pixels = q.copyUpload(pixels)
-	}
-	o := Op{
-		Kind:      OpBakeTexture,
-		TextureID: id,
-		TexW:      width,
-		TexH:      height,
-		Format:    format,
-		Mipmaps:   mipmaps,
-		Bytes:     pixels,
-	}
-	q.ops = append(q.ops, o)
-	return descriptors.BakedTexture(id, width, height)
 }

@@ -110,7 +110,7 @@ func twoPasses(q *OpQueue) {
 		Load: types.LoadClear, Clear: m.Color{R: 0.25, A: 1}, Store: types.StoreKeep,
 	})
 	drawInto(q)
-	q.DrawInstanced(triangle(), testMaterial(), 7, descriptors.MatParam("mvp", m.NewMat4()))
+	q.Draw(triangle(), testMaterial(), 7, 0, descriptors.MatParam("mvp", m.NewMat4()))
 }
 
 func TestAFrameSnapshotReportsPassesInRunOrderWithTheirCounts(t *testing.T) {
@@ -221,7 +221,7 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: "screen"})
 		// An inline texture is baked into the frame queue, which is the other
 		// place resource traffic comes from.
-		q.Draw(triangle(), testMaterial(),
+		q.Draw(triangle(), testMaterial(), 1, 0,
 			descriptors.MatParam("mvp", m.NewMat4()),
 			descriptors.TextureParam("albedo", descriptors.TextureWithBytes(4, 4, descriptors.FormatRGBA8, make([]byte, 64), true, false)))
 	})
@@ -233,9 +233,24 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 	for _, op := range response.ResourceOps {
 		byKind[op.Kind] = append(byKind[op.Kind], op)
 	}
-	allocate := byKind["allocateTexture"]
+	var allocate, update []ResourceOpView
+	var frameAllocate, frameUpdate []ResourceOpView
+	for _, op := range byKind["allocateTexture"] {
+		if op.Queue == "frame" {
+			frameAllocate = append(frameAllocate, op)
+		} else {
+			allocate = append(allocate, op)
+		}
+	}
+	for _, op := range byKind["updateTexture"] {
+		if op.Queue == "frame" {
+			frameUpdate = append(frameUpdate, op)
+		} else {
+			update = append(update, op)
+		}
+	}
 	if len(allocate) != 2 {
-		t.Fatalf("allocateTexture ops = %d, want the two durable ones", len(allocate))
+		t.Fatalf("durable allocateTexture ops = %d, want two", len(allocate))
 	}
 	if allocate[0].Queue != "durable" || allocate[0].Texture != durable.ID() {
 		t.Errorf("allocate = %+v, want the durable queue and the texture it returned", allocate[0])
@@ -247,9 +262,8 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 	if !allocate[1].Mipmaps || allocate[1].Format != descriptors.FormatRGBA8Srgb.String() {
 		t.Errorf("mipmapped allocate = %+v, want its format and mipmap flag", allocate[1])
 	}
-	update := byKind["updateTexture"]
 	if len(update) != 2 || update[0].Region == nil || update[1].Region == nil {
-		t.Fatalf("updateTexture ops = %+v, want the two with their regions", update)
+		t.Fatalf("durable updateTexture ops = %+v, want the two with their regions", update)
 	}
 	if *update[0].Region != (types.Region{X: 1, Y: 2, Width: 3, Height: 4}) || update[0].Layer != 1 {
 		t.Errorf("update = %+v, want the layer and region it was given", update[0])
@@ -264,12 +278,13 @@ func TestAFrameSnapshotReportsResourceTrafficFromBothQueues(t *testing.T) {
 		t.Errorf("releaseTexture ops = %d, want the one queued - a resource released and still "+
 			"referenced is one of the answers this tool exists for", len(release))
 	}
-	bakes := byKind["bakeTexture"]
-	if len(bakes) != 1 || bakes[0].Queue != "frame" {
-		t.Fatalf("bakeTexture ops = %+v, want the frame's inline one alone", bakes)
+	// The inline texture is the frame's own: one pooled allocation and one
+	// whole-layer upload into it.
+	if len(frameAllocate) != 1 || frameAllocate[0].Width != 4 || frameAllocate[0].Height != 4 {
+		t.Fatalf("frame allocateTexture ops = %+v, want the 4x4 inline one alone", frameAllocate)
 	}
-	if bakes[0].Bytes != 64 || bakes[0].Width != 4 {
-		t.Errorf("frame bake = %+v, want the 4x4 inline texture reported as 64 bytes", bakes[0])
+	if len(frameUpdate) != 1 || frameUpdate[0].Bytes != 64 || frameUpdate[0].Texture != frameAllocate[0].Texture {
+		t.Fatalf("frame updateTexture ops = %+v, want the inline texture's 64 bytes into its allocation", frameUpdate)
 	}
 	// Every op is addressed by its own queue's index, and no index is a lie
 	// about which queue it belongs to.

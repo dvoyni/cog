@@ -28,7 +28,7 @@ func passFrame(t *testing.T, record func(*OpQueue)) (*fakeBackend, kernel.Execut
 }
 
 func drawInto(q *OpQueue) {
-	q.Draw(triangle(), testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
+	q.Draw(triangle(), testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 }
 
 func TestAPassCarriesItsTargetAndClearToTheBackend(t *testing.T) {
@@ -184,7 +184,7 @@ func TestAFrameThatNeverTouchesTheScreenDoesNotPresent(t *testing.T) {
 	})
 	w := recordRaw(t, k)
 	w.Pass(descriptors.PassDescr{Target: descriptors.TextureTarget(target, 0, 0), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "offscreen"})
-	w.Draw(triangle(), testMaterial(), descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), testMaterial(), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -222,7 +222,7 @@ func TestDrawSamplingItsOwnAttachmentIsRejected(t *testing.T) {
 	})
 	w := recordRaw(t, k)
 	w.Pass(descriptors.PassDescr{Target: descriptors.TextureTarget(target, 0, 0), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "feedback"})
-	w.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", target)), descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", target)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -310,7 +310,7 @@ func TestALaterPassSamplesWhatAnEarlierPassRenderedIntoATemporaryTarget(t *testi
 		q.Pass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 0, Label: "offscreen"})
 		drawInto(q)
 		q.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Order: 1, Label: "composite"})
-		q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), descriptors.MatParam("mvp", m.NewMat4()))
+		q.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	}
 
 	p := newPlugin()
@@ -346,7 +346,7 @@ func TestADrawStillCannotSampleTheTemporaryTargetItsOwnPassRendersInto(t *testin
 	w := recordRaw(t, k)
 	target, texture := w.NewTemporaryTarget(64, 64, descriptors.FormatRGBA8Srgb)
 	w.Pass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "feedback"})
-	w.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), descriptors.MatParam("mvp", m.NewMat4()))
+	w.Draw(triangle(), testMaterial(descriptors.TextureParam("MainTexture", texture)), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

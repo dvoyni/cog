@@ -85,7 +85,7 @@ func (r flattenRecorder) Register(registrar *kernel.Registrar, _ any) error {
 				q := queue.Get()
 				q.Pass(gfx.PassDescr{Target: gfx.ScreenTarget(), Depth: gfx.DepthNone()})
 				vertices := gfx.BufferWithBytes(make([]byte, 12), true)
-				q.Draw(gfx.Mesh(vertices, gfx.TopologyTriangleList, gfx.Attr(0, gfx.Float32x3)), gfx.Material(r.shader))
+				q.Draw(gfx.Mesh(vertices, gfx.TopologyTriangleList, gfx.Attr(0, gfx.Float32x3)), gfx.Material(r.shader), 1, 0)
 			}
 	})
 	return nil

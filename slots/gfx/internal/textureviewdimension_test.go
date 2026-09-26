@@ -43,7 +43,7 @@ func arrayTextureFrame(t *testing.T, frames int, params ...descriptors.Parameter
 	for range frames {
 		w := recordRaw(t, k)
 		w.Pass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "main"})
-		w.Draw(triangle(), testMaterial(params...), descriptors.MatParam("mvp", m.NewMat4()))
+		w.Draw(triangle(), testMaterial(params...), 1, 0, descriptors.MatParam("mvp", m.NewMat4()))
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
 	}

@@ -106,10 +106,11 @@ engine walked away from.
 - `*Viewport`: logical, window, and framebuffer dimensions.
 
 `OpQueue` methods are `Pass`, `SetPass`, `NewTemporaryBuffer`,
-`NewTemporaryTexture`, `NewTemporaryTarget`, `FrameMaterial`,
-`Draw`, `DrawInstanced`, `DrawInstancedFrom`, `Len`, and `Reset`. Draw
-parameters override same-named material parameters. `DrawInstancedFrom` starts
-at a given `firstInstance`: WebGPU's `instance_index` starts there, so a batch
+`NewTemporaryTexture`, `NewTemporaryTarget`, `FrameMaterial`, and `Draw`; the
+plugin resets a queue itself when it rotates the frame slots. `Draw(mesh, material, instances, firstInstance,
+params...)` is the one draw: a plain draw passes `1, 0`, and fewer than one
+instance still draws once. Draw parameters override same-named material
+parameters. `firstInstance` is where WebGPU's `instance_index` starts, so a batch
 reads its own slice of a shared instance arena without plumbing an offset of its
 own.
 
