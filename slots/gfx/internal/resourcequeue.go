@@ -15,10 +15,15 @@ type ResourceQueue struct {
 	// reset truncates the ops and leaves it, because it is what the CPU side
 	// resolves against between an upload and the shader's release.
 	shaders []shaderRecord
+	// drawParams is every set NewDrawParams created. It is durable for the
+	// reason shaders is.
+	drawParams drawParamsStore
 }
 
 // NewResourceQueue builds an empty queue that reserves ids through ids.
-func NewResourceQueue(ids IDSource) *ResourceQueue { return &ResourceQueue{ids: ids} }
+func NewResourceQueue(ids IDSource) *ResourceQueue {
+	return &ResourceQueue{ids: ids, drawParams: drawParamsStore{registry: &drawParamsRegistry{}}}
+}
 
 // Ready reports whether the Backend adapter is ready, so resource IDs can be
 // minted. A driver whose device arrives asynchronously is bound at composition
@@ -28,7 +33,9 @@ func (q *ResourceQueue) Ready() bool { return q.ids != nil && q.ids().Ready() }
 // NewBuffer reserves a buffer and returns its descriptor. Nothing reaches the
 // GPU until UploadBuffer gives it contents, which also fixes its size.
 func (q *ResourceQueue) NewBuffer() descriptors.BufferDescr {
-	return descriptors.BakedBuffer(q.ids().NewBuffer(), 0)
+	id := q.ids().NewBuffer()
+	setBit(&q.drawParams.durableBuffers, uint32(id))
+	return descriptors.BakedBuffer(id, 0)
 }
 
 // NewTexture queues allocation of an empty texture to sample from. More than
@@ -62,6 +69,7 @@ func (q *ResourceQueue) NewRenderTarget(width, height, layers int, format descri
 
 func (q *ResourceQueue) newTexture(width, height, layers int, format descriptors.TextureFormat, mipmaps, renderable bool) descriptors.TextureDescr {
 	id := q.ids().NewTexture()
+	setBit(&q.drawParams.durableTextures, uint32(id))
 	q.ops = append(q.ops, ResourceOp{
 		Kind: OpAllocateTexture, TextureID: id,
 		TexW: width, TexH: height, TexLayers: layers, Format: format,

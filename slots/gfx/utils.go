@@ -58,22 +58,24 @@ func BufferWithBytes(data []byte, copyData bool) BufferDescr {
 	return descriptors.BufferWithBytes(data, copyData)
 }
 
-// FloatParam creates a scalar parameter.
+// FloatParam creates a parameter carrying the four bytes of one f32, which
+// fills a uniform declared at f32.
 func FloatParam(name string, v float32) ParameterDescr {
 	return descriptors.FloatParam(name, v)
 }
 
-// VecParam creates a vec4 parameter.
+// VecParam creates a parameter carrying the sixteen bytes of one vec4f.
 func VecParam(name string, v m.Vec4) ParameterDescr {
 	return descriptors.VecParam(name, v)
 }
 
-// MatParam creates a 4x4 matrix parameter.
+// MatParam creates a parameter carrying the sixty-four bytes of one mat4x4f.
 func MatParam(name string, m m.Mat4) ParameterDescr {
 	return descriptors.MatParam(name, m)
 }
 
-// ColorParam creates a color parameter.
+// ColorParam creates a parameter carrying a color as the sixteen bytes of one
+// vec4f, r, g, b, a.
 func ColorParam(name string, c m.Color) ParameterDescr {
 	return descriptors.ColorParam(name, c)
 }

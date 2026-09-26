@@ -417,7 +417,8 @@ func (b *fakeBackend) SetPipeline(types.PipelineID) {}
 func (b *fakeBackend) BakeUniforms(arena []byte)    { b.uniforms = arena }
 func (b *fakeBackend) SetUniformBlock(group, binding, offset, size int) {
 	b.lastOps = append(b.lastOps, backendOp{
-		kind: testOpSetUniformBlock, group: group, binding: binding, data: bytes.Clone(b.uniforms[offset : offset+size]),
+		kind: testOpSetUniformBlock, group: group, binding: binding, offset: offset, size: size,
+		data: bytes.Clone(b.uniforms[offset : offset+size]),
 	})
 }
 
@@ -503,7 +504,11 @@ func recordCmdImpl() (kernel.Lock, kernel.Execute[recordRequest, recordResponse]
 	var queue kernel.Write[*OpQueue]
 	return func(access kernel.ResourceAccess) {
 			queue = access.GetWrite[*OpQueue]()
-		}, func(_ kernel.Kernel, req recordRequest) recordResponse {
+		}, func(k kernel.Kernel, req recordRequest) recordResponse {
+			if req.withKernel != nil {
+				req.withKernel(k, queue.Get())
+				return recordResponse{}
+			}
 			req.fn(queue.Get())
 			return recordResponse{}
 		}
@@ -1028,11 +1033,11 @@ func TestOpQueueArenasPreserveCallerDataIsolation(t *testing.T) {
 	if descriptors.MeshLayout(&draw.Mesh)[0] != (descriptors.Attr(0, descriptors.Float32x3)) {
 		t.Fatalf("recorded layout = %+v, want original", descriptors.MeshLayout(&draw.Mesh))
 	}
-	if descriptors.ParameterColor(&(draw.Material.Params()[0])) != (m.Color{R: 1}) {
-		t.Fatalf("recorded material color = %+v, want red", descriptors.ParameterColor(&(draw.Material.Params()[0])))
+	if color, _ := draw.Material.Params()[0].ColorValue(); color != (m.Color{R: 1}) {
+		t.Fatalf("recorded material color = %+v, want red", color)
 	}
-	if descriptors.ParameterNum(&(draw.Params[0])) != 1 {
-		t.Fatalf("recorded draw parameter = %v, want 1", descriptors.ParameterNum(&(draw.Params[0])))
+	if value, _ := draw.Params[0].FloatValue(); value != 1 {
+		t.Fatalf("recorded draw parameter = %v, want 1", value)
 	}
 }
 
@@ -1937,7 +1942,13 @@ func recordRaw(t *testing.T, k kernel.Executioner) *OpQueue {
 }
 
 type recordCmd kernel.Command[recordRequest, recordResponse]
-type recordRequest struct{ fn func(*OpQueue) }
+
+// recordRequest runs fn, or withKernel for the calls that report through the
+// dispatch's Kernel.
+type recordRequest struct {
+	fn         func(*OpQueue)
+	withKernel func(kernel.Kernel, *OpQueue)
+}
 type recordResponse struct{}
 
 func withResourceQueue(t *testing.T, k kernel.Executioner, use func(*ResourceQueue)) {

@@ -15,18 +15,22 @@ import (
 	"github.com/dvoyni/cog/libs/assets"
 )
 
-// frame is the three values one dispatch of translate carries all the way down
-// to a cache: the kernel a load reports its failures through, the filesystem it
-// reads from, and the backend it mints handles on.
+// frame is the values one dispatch of translate carries all the way down to a
+// cache: the kernel a load reports its failures through, the filesystem it
+// reads from, the backend it mints handles on, and the two queues a draw's set
+// of draw params is read from - the ResourceQueue that holds the sets, and the
+// OpQueue that holds the frame's versions of them.
 //
 // They travel as one struct threaded by pointer because they would otherwise
 // grow six signatures by two parameters each, and they travel per dispatch
-// rather than as translator fields because none of the three may be retained
-// past the handler that granted it.
+// rather than as translator fields because none of them may be retained past
+// the handler that granted it.
 type frame struct {
-	k       kernel.Kernel
-	fsys    fs.FS
-	backend Backend
+	k         kernel.Kernel
+	fsys      fs.FS
+	backend   Backend
+	resources *ResourceQueue
+	queue     *OpQueue
 }
 
 // pipelineKey identifies a cached pipeline by shader identity, render state and
@@ -157,6 +161,23 @@ type translator struct {
 	// re-rendered frame still names over one of them is dropped rather than
 	// issued over buffers the backend no longer has.
 	released releasedIDs
+	// stamp counts translations. setUniforms and versionUniforms are where
+	// this translation put each uniform a set or a version supplies in the
+	// frame's uniform arena, stamped with the translation that put it there:
+	// every draw sharing a value binds the one upload. setUniforms is indexed
+	// by a slot's place in the ResourceQueue's binding table, versionUniforms by
+	// a version's bytes' place in the OpQueue's byte arena, in steps of the
+	// arena's alignment.
+	stamp           uint32
+	setUniforms     []uniformUpload
+	versionUniforms []uniformUpload
+}
+
+// uniformUpload is one value's place in the frame's uniform arena, valid in the
+// translation stamp names.
+type uniformUpload struct {
+	stamp  uint32
+	offset int32
 }
 
 func newTranslator() *translator {
@@ -179,18 +200,29 @@ func newTranslator() *translator {
 // by the latest frame. The returned ops (and their payloads) are valid until
 // the next translate call. It returns the first error encountered; valid draws
 // are still translated.
+//
+// resources is the durable queue: its pending operations, replayed first, and
+// the sets of draw params the frame's draws name. It may be nil where a frame
+// names none.
 func (t *translator) translate(
-	k kernel.Kernel, queue *OpQueue, persistent []ResourceOp, backend Backend, files func() fs.FS,
+	k kernel.Kernel, queue *OpQueue, resources *ResourceQueue, backend Backend, files func() fs.FS,
 	capture types.CaptureDesc, capturing bool,
 ) (*Queue, error) {
 	t.ops.Reset()
+	// Every uniform a set or a version supplied is uploaded once a frame, and
+	// the stamp is what says which frame a cached upload belongs to.
+	t.stamp++
 
 	// files() is called once, here, rather than once per cache miss. Handing
 	// storage.FileSystem out as an fs.FS boxes it - 32 bytes, measured - and a
 	// cache wants it materialised before every Get rather than only behind the
 	// probe both ensure* functions used to do themselves. Paid per frame that is
 	// nothing; paid per hit it is once a texture parameter and once a draw.
-	f := &frame{k: k, fsys: files(), backend: backend}
+	f := &frame{k: k, fsys: files(), backend: backend, resources: resources, queue: queue}
+	var persistent []ResourceOp
+	if resources != nil {
+		persistent = ResourceQueueOps(resources)
+	}
 
 	var firstErr error
 	// Resource ops belong to no pass: every one is replayed ahead of them all,
@@ -279,12 +311,16 @@ func (t *translator) translatePasses(
 			continue
 		}
 		presents = presents || head.Target.IsScreen()
-		t.transitionRun(queue, head, i, last)
+		t.transitionRun(f, head, i, last)
 		t.ops.BeginPass(t.gpuPassDesc(f.backend, head, tail))
 		for j := i; j <= last; j++ {
 			pass := &passes[t.passOrder[j]]
 			for k := range pass.Draws {
-				t.translateDraw(f, &pass.Draws[k], pass.Desc, firstErr)
+				if draw := &pass.Draws[k]; draw.Set != (descriptors.DrawParams{}) {
+					t.translateSetDraw(f, draw, pass.Desc, firstErr)
+				} else {
+					t.translateDraw(f, draw, pass.Desc, firstErr)
+				}
 			}
 		}
 		t.ops.EndPass()
@@ -324,14 +360,18 @@ func (t *translator) translatePasses(
 // (write then read), and a post-processing chain ping-pongs two targets (read
 // then write). A texture nothing has used as an attachment this frame is not
 // gfx's to order.
-func (t *translator) transitionRun(queue *OpQueue, head descriptors.PassDescr, first, last int) {
-	passes := OpQueuePasses(queue)
+func (t *translator) transitionRun(f *frame, head descriptors.PassDescr, first, last int) {
+	passes := OpQueuePasses(f.queue)
 	// Reads first: a texture this run samples has to have finished being written.
 	t.runSampled = t.runSampled[:0]
 	for j := first; j <= last; j++ {
 		draws := passes[t.passOrder[j]].Draws
 		for k := range draws {
 			op := &draws[k]
+			if op.Set != (descriptors.DrawParams{}) {
+				t.collectSetSampled(f, op)
+				continue
+			}
 			t.collectSampled(op.Material.Params())
 			t.collectSampled(op.Params)
 		}
@@ -366,12 +406,15 @@ func (t *translator) collectSampled(params []descriptors.ParameterDescr) {
 		// Only a baked texture carries an id, so the id is the whole test: a
 		// path or an inline run has nothing an attachment could collide with.
 		texture := descriptors.ParameterTextureRef(p)
-		if texture.ID() == 0 {
-			continue
-		}
-		if !slices.Contains(t.runSampled, texture.ID()) {
-			t.runSampled = append(t.runSampled, texture.ID())
-		}
+		t.noteSampled(texture.ID())
+	}
+}
+
+// noteSampled adds one texture to the run's sampled set, on collectSampled's
+// terms.
+func (t *translator) noteSampled(texture types.TextureID) {
+	if texture != 0 && !slices.Contains(t.runSampled, texture) {
+		t.runSampled = append(t.runSampled, texture)
 	}
 }
 

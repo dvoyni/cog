@@ -198,3 +198,27 @@ type ErrShaderProgramInvalid = types.ErrShaderProgramInvalid
 // takes one program for its life; to reload one, release it and create it
 // again. The second upload is ignored.
 type ErrShaderUploadedTwice = types.ErrShaderUploadedTwice
+
+// ErrShaderHasNoProgram reports a set of draw params built on a shader that is
+// reserved but has no program yet. The set is created failed: it exists, and
+// draws nothing.
+type ErrShaderHasNoProgram = types.ErrShaderHasNoProgram
+
+// ErrDrawParamsNotLive reports a call naming a set of draw params NewDrawParams
+// never created, or one ReleaseDrawParams already released. The call is
+// ignored.
+type ErrDrawParamsNotLive = types.ErrDrawParamsNotLive
+
+// ErrDrawParamUnknown reports a param naming no binding its set's shader
+// declares. The param is ignored.
+type ErrDrawParamUnknown = types.ErrDrawParamUnknown
+
+// ErrUniformSizeMismatch reports uniform bytes whose size is not the size of
+// the binding they name. The param is ignored.
+type ErrUniformSizeMismatch = types.ErrUniformSizeMismatch
+
+// ErrDrawParamTemporary reports a durable set handed a resource the
+// ResourceQueue did not create - a temporary from an OpQueue. The param is
+// ignored; a temporary belongs in the frame's version, through
+// OpQueue.SetDrawParams.
+type ErrDrawParamTemporary = types.ErrDrawParamTemporary

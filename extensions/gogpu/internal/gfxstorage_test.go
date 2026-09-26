@@ -96,6 +96,54 @@ func TestEveryUniformBlockIsReflected(t *testing.T) {
 	}
 }
 
+const testBareBindingsWGSL = `
+@group(0) @binding(0) var<uniform> tint: vec4<f32>;
+@group(0) @binding(1) var<uniform> mvp: mat4x4<f32>;
+@group(0) @binding(2) var<uniform> alpha: f32;
+@group(1) @binding(0) var<storage, read> models: array<mat4x4<f32>>;
+@group(1) @binding(1) var<storage, read_write> counters: array<u32>;
+
+@vertex
+fn vs_main(@builtin(instance_index) i: u32) -> @builtin(position) vec4<f32> {
+	counters[i] = i;
+	return mvp * models[i] * tint * alpha;
+}
+
+@fragment
+fn fs_main() -> @location(0) vec4<f32> { return tint; }
+`
+
+// A buffer binding is a binding whatever type it is declared at: a bare
+// uniform carries its size, and a bare storage array is a storage buffer,
+// writable when it is read_write. Leaving them out would leave them out of the
+// pipeline layout and out of every set's binding table.
+func TestBuffersOfAnyTypeAreReflected(t *testing.T) {
+	layout, err := reflectShaderLayout(testBareBindingsWGSL)
+	if err != nil {
+		t.Fatalf("reflect: %v", err)
+	}
+	byName := map[string]gfx.ShaderResource{}
+	for _, resource := range layout.Resources {
+		byName[resource.Name] = resource
+	}
+	for name, size := range map[string]int{"tint": 16, "mvp": 64, "alpha": 4} {
+		got, ok := byName[name]
+		if !ok || got.Kind.Base() != gfx.ResourceUniformBuffer || got.Size != size || got.Group != 0 {
+			t.Errorf("%s = %+v (found %v), want a %d-byte uniform in group 0", name, got, ok, size)
+		}
+	}
+	models, counters := byName["models"], byName["counters"]
+	if models.Kind != gfx.ResourceStorageBuffer || models.Group != 1 || models.Binding != 0 {
+		t.Errorf("models = %+v, want a read-only storage buffer at 1/0", models)
+	}
+	if counters.Kind != gfx.ResourceStorageBuffer|gfx.ResourceWritable || counters.Binding != 1 {
+		t.Errorf("counters = %+v, want a writable storage buffer at 1/1", counters)
+	}
+	if len(layout.Resources) != 5 {
+		t.Errorf("resources = %+v, want the five bindings", layout.Resources)
+	}
+}
+
 func TestUnreflectableShaderSourceIsAnError(t *testing.T) {
 	// A shader whose bindings cannot be read is unusable, not degraded: nothing
 	// would bind and every draw through it would render undefined.

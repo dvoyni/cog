@@ -28,12 +28,21 @@ import (
 // Only plain-data members are accepted - float32, int32, uint32, m.Vec2, m.Vec3,
 // m.Vec4, m.Color, m.Quat, m.Mat4, arrays of those, and structs of those. Any
 // other member type panics, which is what keeps a pointer out of a byte copy.
+//
+// A value of up to sixty-four bytes is carried inside the descriptor, as the
+// typed constructors' are, so a small record set per draw costs no allocation;
+// a larger one is copied out once, here.
 func RawParameter[T any](name string, value T) ParameterDescr {
 	validateRawLayout(reflect.TypeFor[T]())
 	size := int(unsafe.Sizeof(value))
-	raw := make([]byte, size)
-	copy(raw, unsafe.Slice((*byte)(unsafe.Pointer(&value)), size))
-	return ParameterDescr{name: name, kind: ParamRaw, raw: assets.NewBlob(raw)}
+	bytes := unsafe.Slice((*byte)(unsafe.Pointer(&value)), size)
+	p := ParameterDescr{name: name, kind: ParamBytes, form: FormRaw}
+	if size <= smallBytes {
+		p.size = uint8(copy(p.small[:], bytes))
+		return p
+	}
+	p.raw = assets.NewBlob(append([]byte(nil), bytes...))
+	return p
 }
 
 // rawLayouts caches one validation per type. The check walks the struct by
