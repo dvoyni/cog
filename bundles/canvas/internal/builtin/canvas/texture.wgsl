@@ -10,8 +10,8 @@
 // function of red alone. Artwork wants the ramp; a render target is not
 // artwork, so it gets this shader instead.
 //
-// It is an entry point, not an includable source. It declares no member of its
-// own, so it includes the published uniform block rather than hand-writing one.
+// It is an entry point, not an includable source, and declares no value of its
+// own: the canvas block is all it reads.
 //#include builtin/canvas/uniforms.wgsl
 //#include builtin/canvas/trianglesvertex.wgsl
 //#include builtin/canvas/clip.wgsl

@@ -233,7 +233,7 @@ func TestATiledAxisWithNoSizeDrawsNothing(t *testing.T) {
 // one as an untiled sprite therefore merges with it, which is the same rule every
 // other sprite obeys.
 func TestATiledSpriteNamesTheSameSpriteMaterialAndMerges(t *testing.T) {
-	custom := gfx.MaterialWithState(gfx.ShaderWithText("fn tiledSpriteMark() {}"), gfx.StateOverlay2D())
+	custom := MaterialWithState(gfx.ShaderWithText("fn tiledSpriteMark() {}"), gfx.StateOverlay2D())
 	filesystem := fstest.MapFS{"edge.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}
 	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {

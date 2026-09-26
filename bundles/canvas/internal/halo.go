@@ -24,14 +24,12 @@ const (
 	DefaultHaloExponent = 1
 )
 
-// The three per-batch parameter names the halo material declares as members of
-// its uniform block. They are not reserved names and not published: a caller
-// names them by passing a canvas.HaloProfile, never by spelling them.
-const (
-	HaloReachSlot    = "haloReach"
-	HaloPlateauSlot  = "haloPlateau"
-	HaloExponentSlot = "haloExponent"
-)
+// HaloSlot is the binding the halo material declares its profile at: a uniform
+// of its own, struct HaloProfile in halo.wgsl, which the Go HaloProfile mirrors
+// field for field, so a profile is set whole as one raw parameter. It is not a
+// reserved name and not published: a caller names it by passing a
+// canvas.HaloProfile, never by spelling it.
+const HaloSlot = "halo"
 
 // haloSpriteMaterial is the fourth sprite material canvas ships: it paints a
 // soft outward band and no mark at all, so a caller records the same marks twice
@@ -43,25 +41,27 @@ const (
 // inline icons, FillRect, Line, StrokeRect - because all of them are sprite
 // instances in one instanced atlas draw.
 //
-// Its own parameters are the profile's defaults, because parameterRefFor
-// searches a draw's parameters first and the material's second: the material's
-// are defaults that a scope overrides by name, which is what makes a
+// Its own parameter is the default profile, because the material's parameters
+// are its set's own values and a scope's are the frame's version over them: the
+// material's are defaults that a scope overrides by name, which is what makes a
 // hand-assembled MaterialSet{Sprite: ...} with no parameters render at reach 6
 // rather than render nothing.
 //
-// They are baked here and MUST NOT be mutated. MaterialDescr.Fingerprint hashes
-// them, and the fingerprint is the batch key - so a mutated singleton would
+// It is baked here and MUST NOT be mutated. Material.Fingerprint hashes it, and
+// the fingerprint is the batch key and the set's - so a mutated singleton would
 // silently re-key every batch that named it.
-var haloSpriteMaterial = gfx.MaterialWithState(
+var haloSpriteMaterial = MaterialWithState(
 	gfx.ShaderWithResource(HaloShaderPath),
 	gfx.StateOverlay2D(),
-	gfx.FloatParam(HaloReachSlot, DefaultHaloReach),
-	gfx.FloatParam(HaloPlateauSlot, DefaultHaloPlateau),
-	gfx.FloatParam(HaloExponentSlot, DefaultHaloExponent),
+	gfx.RawParameter(HaloSlot, DefaultHaloProfile()),
 )
 
 // HaloProfile is the shape of the band, independent of its colour; see
 // canvas.HaloProfile.
+//
+// It is also the bytes of halo.wgsl's struct HaloProfile - three f32, twelve
+// bytes, no padding - so its fields are in the shader's order and may not be
+// reordered or added to without changing the shader with them.
 type HaloProfile struct {
 	// Reach is how far the band extends beyond the mark, in layer-local world
 	// units. It is what the vertex stage grows the sprite's quad by on every
@@ -86,10 +86,6 @@ func DefaultHaloProfile() HaloProfile {
 func HaloMaterialSet(profile HaloProfile) MaterialSet {
 	return MaterialSet{
 		Sprite: &haloSpriteMaterial,
-		Params: []gfx.ParameterDescr{
-			gfx.FloatParam(HaloReachSlot, profile.Reach),
-			gfx.FloatParam(HaloPlateauSlot, profile.Plateau),
-			gfx.FloatParam(HaloExponentSlot, profile.Exponent),
-		},
+		Params: []gfx.ParameterDescr{gfx.RawParameter(HaloSlot, profile)},
 	}
 }

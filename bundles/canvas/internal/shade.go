@@ -14,7 +14,7 @@ import (
 // buffer has no per-instance form - there is one bind group per draw - so it is
 // per batch. The scope's parameters follow the draw's, so the draw wins under
 // first-wins.
-func (p *plugin) shadeSprite(materials *ScopeMaterials, material *gfx.MaterialDescr, fingerprint uint64, params []gfx.ParameterDescr) spriteShading {
+func (p *plugin) shadeSprite(materials *ScopeMaterials, material *Material, fingerprint uint64, params []gfx.ParameterDescr) spriteShading {
 	shading := spriteShading{}
 	var scope []gfx.ParameterDescr
 	shading.material, shading.fingerprint, scope = materials.Resolve(FamilySprite, material, fingerprint)
@@ -66,7 +66,7 @@ const builtinQuadLayoutID = -1
 // batch state, not op state - the batcher holds them as key fields and prepends
 // them at flush - and naming them here would put two writers on one parameter.
 func (p *plugin) shadeQuad(
-	material *gfx.MaterialDescr, fingerprint uint64, texture gfx.TextureDescr, sampler gfx.SamplerDesc,
+	material *Material, fingerprint uint64, texture gfx.TextureDescr, sampler gfx.SamplerDesc,
 	params, scope []gfx.ParameterDescr,
 ) trianglesShading {
 	p.quadParams = append(p.quadParams[:0],

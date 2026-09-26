@@ -45,6 +45,32 @@ func RawParameter[T any](name string, value T) ParameterDescr {
 	return p
 }
 
+// RawParameterRef is RawParameter over a value the caller keeps, for a record
+// larger than sixty-four bytes set every frame: it is validated the same way,
+// and a value that fits is carried inside the descriptor as RawParameter's is,
+// but a larger one is not copied out. The descriptor borrows *value, so the call
+// it is handed to must read it before the caller changes it.
+// ResourceQueue.NewDrawParams, UpdateDrawParams and OpQueue.SetDrawParams all
+// copy a param's bytes before they return, so a caller refilling one record per
+// batch and handing each fill to SetDrawParams allocates nothing; a param
+// recorded for later - the material path's Draw - borrows until the frame that
+// recorded it is consumed or dropped, as BufferWithBytes without copyData does.
+//
+// value must point at memory that outlives the call: taking the address of a
+// local moves it to the heap, which is the allocation this exists to avoid.
+func RawParameterRef[T any](name string, value *T) ParameterDescr {
+	validateRawLayout(reflect.TypeFor[T]())
+	size := int(unsafe.Sizeof(*value))
+	bytes := unsafe.Slice((*byte)(unsafe.Pointer(value)), size)
+	p := ParameterDescr{name: name, kind: ParamBytes, form: FormRaw}
+	if size <= smallBytes {
+		p.size = uint8(copy(p.small[:], bytes))
+		return p
+	}
+	p.raw = assets.NewBlob(bytes)
+	return p
+}
+
 // rawLayouts caches one validation per type. The check walks the struct by
 // reflection, which is far too much work to repeat per draw and exactly the
 // right amount to do once.

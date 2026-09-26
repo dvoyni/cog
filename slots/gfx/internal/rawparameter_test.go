@@ -106,3 +106,26 @@ func TestFingerprintParamsSeparatesValuesAndIgnoresBacking(t *testing.T) {
 		t.Fatal("nil and empty parameter slices fingerprinted differently")
 	}
 }
+
+// A record past the inline size is borrowed, not copied: the descriptor reads
+// the caller's value, and building one per batch allocates nothing.
+func TestRawParameterRefBorrowsALargeRecord(t *testing.T) {
+	value := &wellPacked{Amount: m.Vec4{X: 1}}
+	param := descriptors.RawParameterRef("record", value)
+	value.Amount.X = 7
+	bytes, _ := param.AppendValue(nil)
+	if len(bytes) != 96 || math.Float32frombits(binary.LittleEndian.Uint32(bytes)) != 7 {
+		t.Fatalf("borrowed record = %d bytes starting %v, want 96 reading the caller's 7", len(bytes), bytes[:4])
+	}
+	if allocs := testing.AllocsPerRun(20, func() { param = descriptors.RawParameterRef("record", value) }); allocs != 0 {
+		t.Fatalf("RawParameterRef allocated %v times, want 0", allocs)
+	}
+	// A record that fits is carried inline, as RawParameter's is, so its
+	// descriptor no longer reads the caller's value.
+	small := &struct{ A m.Vec4 }{A: m.Vec4{X: 1}}
+	inline := descriptors.RawParameterRef("small", small)
+	small.A.X = 9
+	if got, _ := inline.AppendValue(nil); math.Float32frombits(binary.LittleEndian.Uint32(got)) != 1 {
+		t.Fatalf("inline record read %v, want the 1 it was built from", got[:4])
+	}
+}

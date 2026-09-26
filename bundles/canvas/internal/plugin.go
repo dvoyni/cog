@@ -33,6 +33,10 @@ type plugin struct {
 	tileVertices []byte
 	batch        spriteBatch
 	tris         trianglesBatch
+	// drawer turns the materials both batchers flush with into shaders and sets,
+	// once each, and versions them per batch. It outlives the frame, which is
+	// what makes a steady-state frame compile and create nothing.
+	drawer setDrawer
 
 	// arrays and shared split one sprite draw's parameters by frequency. They are
 	// scratch for the op being drawn, which is one at a time, and the batcher
@@ -70,6 +74,9 @@ type frame struct {
 	fsys      fs.FS
 	resources *gfx.ResourceQueue
 	lookup    *Lookup
+	// compile is CompileShaderCmd's dispatcher, which a material's first batch
+	// compiles its shader through.
+	compile func(kernel.Kernel, gfx.CompileShaderRequest) gfx.CompileShaderResponse
 }
 
 // sprite resolves one recorded sprite to its atlas entry. A path canvas will not
@@ -196,6 +203,7 @@ func (p *plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 	var viewport kernel.Read[*gfx.Viewport]
 	var filesystem kernel.Read[storage.FileSystem]
 	var lookupResource kernel.Write[*Lookup]
+	var compile func(kernel.Kernel, gfx.CompileShaderRequest) gfx.CompileShaderResponse
 	return func(access kernel.ResourceAccess) {
 			writeQueue = access.GetWrite[*OpQueue]()
 			gfxQueue = access.GetWrite[*gfx.OpQueue]()
@@ -203,15 +211,20 @@ func (p *plugin) flush() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 			viewport = access.GetRead[*gfx.Viewport]()
 			filesystem = access.GetRead[storage.FileSystem]()
 			lookupResource = access.GetWrite[*Lookup]()
+			// The command's lock is empty, so this widens the flush's set by
+			// nothing: it compiles on the flush's goroutine, reading the
+			// filesystem the flush already holds.
+			compile = access.Uses[gfx.CompileShaderCmd]()
 		}, func(k kernel.Kernel, _ app.UpdateEvent) {
 			p.flushFrame(k, writeQueue.Get(), gfxQueue.Get(), gfxResourceQueue.Get(),
-				viewport.Get(), filesystem.Get(), lookupResource.Get())
+				viewport.Get(), filesystem.Get(), lookupResource.Get(), compile)
 		}
 }
 
 func (p *plugin) flushFrame(
 	k kernel.Kernel, write *OpQueue, gfxWrite *gfx.OpQueue, gfxResources *gfx.ResourceQueue,
 	view *gfx.Viewport, filesystem storage.FileSystem, lookup *Lookup,
+	compile func(kernel.Kernel, gfx.CompileShaderRequest) gfx.CompileShaderResponse,
 ) error {
 	defer OpQueueReset(write)
 	if !gfxResources.Ready() || view.Width <= 0 || view.Height <= 0 {
@@ -221,8 +234,10 @@ func (p *plugin) flushFrame(
 	if !p.ensureQuad(gfxResources) {
 		return nil
 	}
-	p.frame = frame{k: k, fsys: filesystem, resources: gfxResources, lookup: lookup}
+	p.frame = frame{k: k, fsys: filesystem, resources: gfxResources, lookup: lookup, compile: compile}
 	fr := &p.frame
+	p.drawer.frame = fr
+	p.batch.drawer, p.tris.drawer = &p.drawer, &p.drawer
 	// Nothing the frame carries may outlive this handler, and a kernel read out
 	// of the zero value panics, so a draw that kept hold of one fails loudly
 	// rather than reporting through a stale kernel.

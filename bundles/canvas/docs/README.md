@@ -122,12 +122,12 @@ and call:
   operations.
 - `SetLayerMaterial(Layer, MaterialSet)` to put one material set over everything
   a layer draws that named no material of its own. See **Materials** below.
-- `Sprite(Layer, path, SpriteTransform, *gfx.MaterialDescr, ...gfx.ParameterDescr)`.
+- `Sprite(Layer, path, SpriteTransform, *Material, ...gfx.ParameterDescr)`.
   A nil material batches the sprite into the built-in instanced sprite material,
   which is what `DefaultMaterial()` returns; naming a material batches too.
-- `SpriteTexture(Layer, gfx.TextureDescr, SpriteTransform, *gfx.MaterialDescr, ...gfx.ParameterDescr)`
+- `SpriteTexture(Layer, gfx.TextureDescr, SpriteTransform, *Material, ...gfx.ParameterDescr)`
   for the same rectangle sourced from a gfx texture rather than a sprite path.
-- `DrawTexture[TVertex](Layer, gfx.TextureDescr, []TVertex, *gfx.MaterialDescr, ...gfx.ParameterDescr)`
+- `DrawTexture[TVertex](Layer, gfx.TextureDescr, []TVertex, *Material, ...gfx.ParameterDescr)`
   for an arbitrary shape sourcing a gfx texture.
 - `FillRect(Layer, m.Rect, ShapeDraw)`, `StrokeRect(Layer, m.Rect, ShapeDraw)`
   and `Line(Layer, start, end m.Vec2, ShapeDraw)` for primitives.
@@ -188,6 +188,31 @@ draw: the material joins the batch key by fingerprint, so two sprites sharing a
 material merge exactly as two sprites sharing none do, and
 `Sprite(..., DefaultMaterial())` batches identically to `Sprite(..., nil)`.
 
+A material is a `canvas.Material` — shader descriptor, pipeline state and its
+own parameters — built once and passed by address:
+
+```go
+var fade = canvas.MaterialWithState(
+    gfx.ShaderWithResource("shaders/fade-sprite.wgsl"), gfx.StateOverlay2D())
+
+func NewMaterial(shader gfx.ShaderDescr, params ...gfx.ParameterDescr) Material                    // gfx.Material's state: depth-tested and written
+func MaterialWithState(shader gfx.ShaderDescr, state gfx.MaterialState, params ...gfx.ParameterDescr) Material
+```
+
+gfx has no materials: a gfx draw names a durable set of draw params. Canvas
+turns each distinct material into a shader and a set **the first time a batch
+draws with it** — compiling the shader through `gfx.CompileShaderCmd` inside its
+flush, which holds no lock the flush does not already hold — and draws every
+batch after through that set, with the batch's values as the frame's version of
+it. A steady-state frame compiles and creates nothing. A shader that does not
+compile is reported once, and every draw through it draws nothing.
+
+A parameter sets a **whole binding**, named by its WGSL global name. A
+material's own parameters are baked into its set, so a material is keyed by its
+values: one rebuilt every frame at a changing value is a new set every frame.
+**A value that changes belongs on the draw or the scope**, which reach the set
+per batch.
+
 There are three **defaults**, one per **family** — what a draw that names no
 material gets — and a material belongs to exactly one family:
 
@@ -208,15 +233,15 @@ shared parameter list, because a layer is never one family:
 
 ```go
 type MaterialSet struct {
-    Sprite    *gfx.MaterialDescr
-    Triangles *gfx.MaterialDescr
-    Texture   *gfx.MaterialDescr
+    Sprite    *Material
+    Triangles *Material
+    Texture   *Material
     Params    []gfx.ParameterDescr
 }
 ```
 
 A nil slot keeps its built-in, so a set is an override rather than a whole-cloth
-requirement, and one parameter list serves all three slots because gfx drops a
+requirement, and one parameter list serves all three slots because canvas drops a
 name the bound shader never declared.
 
 `SetLayerMaterial(Layer, MaterialSet)` puts one over a whole layer. Like `Clear`,
@@ -303,9 +328,9 @@ has to reproduce a halo.
 
 | named on | frequency | where it lands |
 |---|---|---|
-| the **material** | one value per batch | a member of the uniform block, which a custom shader may append to |
+| the **material** | one value per batch | a uniform of the shader's own, whole, in group 0 beside canvas's `u` |
 | a **sprite draw** | one value per sprite | one storage buffer per parameter name, at group 2, indexed by `@builtin(instance_index)` |
-| a **triangles draw** | per material | the uniform block; two values are two draws |
+| a **triangles draw** | per material | a uniform of the shader's own; two values are two draws |
 | a **triangles vertex** | one value per vertex | a member of the caller's own `TVertex`, at a `@location` its shader declares |
 
 Draw-parameter *values* are not in the sprite key, so two sprites differing only
@@ -370,16 +395,11 @@ duplicated binding is not a compile error but a silent whole-frame loss.
 `sprite.wgsl`, `triangles.wgsl` and `texture.wgsl` stay **entry points**: roots a
 material names, not sources you include.
 
-A whole fade sprite material is six lines of declaration and three includes:
+A whole fade sprite material is one line of declaration and four includes:
 
 ```wgsl
-struct CanvasUniforms {
-    canvasViewport: vec4<f32>,
-    canvasLayer: mat4x4<f32>,
-    canvasClip: vec4<f32>,
-    fade: f32,
-};
-@group(0) @binding(0) var<uniform> u: CanvasUniforms;
+//#include builtin/canvas/uniforms.wgsl
+@group(0) @binding(1) var<uniform> fade: f32;
 
 //#include builtin/canvas/spritevertex.wgsl
 //#include builtin/canvas/clip.wgsl
@@ -392,15 +412,45 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         textureSample(canvasTexture, canvasSampler, in.uv, in.atlasLayer),
         in.keyColor.rgb,
     );
-    return sampled * in.tint * vec4<f32>(1.0, 1.0, 1.0, u.fade);
+    return sampled * in.tint * vec4<f32>(1.0, 1.0, 1.0, fade);
 }
 ```
 
-That material **extends** the uniform block, which is how a custom material
-declares its own per-batch parameters — so it hand-writes the block and does not
-include `uniforms.wgsl`. It cannot: include-once by resolved path means the
-struct would already be declared, and WGSL has no way to add a member to a struct
-declared elsewhere. That is exactly why the block is its own source.
+```go
+var fade = canvas.MaterialWithState(gfx.ShaderWithResource("shaders/fade-sprite.wgsl"), gfx.StateOverlay2D())
+
+queue.SetMaterial(canvas.MaterialSet{Sprite: &fade, Params: []gfx.ParameterDescr{gfx.FloatParam("fade", amount)}})
+```
+
+**`CanvasUniforms` is canvas's and is never extended.** Every canvas material
+includes `uniforms.wgsl`, and canvas sets `u` whole, once a batch. A material
+declares its own per-batch values as **uniforms of their own** in group 0, at any
+binding but 0, and each is set whole by the parameter that names it — a scalar
+or a `vec4` by the typed constructors, a struct by `gfx.RawParameter` over a Go
+struct mirroring it field for field:
+
+```wgsl
+struct Lens { centre: vec2<f32>, radius: f32, strength: f32 };
+@group(0) @binding(1) var<uniform> lens: Lens;
+```
+
+```go
+type lens struct {
+    Centre   m.Vec2
+    Radius   float32
+    Strength float32
+}
+
+q.DrawTexture(layer, texture, disc, &lensMaterial, gfx.RawParameter("lens", lens{Centre: c, Radius: r, Strength: s}))
+```
+
+The binding number is only the module's own: a parameter binds by the global's
+name. `RawParameter` checks the Go layout against WGSL's alignment rules, and gfx
+checks the size against the reflected binding, so a struct that drifted is
+reported rather than misread. The built-ins do the same: triangles' `keyColor`
+is its own `var<uniform> keyColor: vec4<f32>`, and the halo's profile its own
+`var<uniform> halo: HaloProfile`. A custom triangles material that keys declares
+the `keyColor` line itself and carries `DefaultKeyColor()` as its own default.
 
 **⚠ The clip test is offered, not required, and its omission is silent.**
 `SetClip`/`RemoveClip` are implemented entirely as a test inside `fs_main` —
@@ -411,8 +461,9 @@ anywhere**. The three built-in entry points call it and are the worked example.
 ### What a custom material must match exactly
 
 - **Group and binding numbers, and the resource kind at each.** Groups are
-  numbered by what a binding *is*, not by how often it changes: 0 the uniform
-  block, 1 the texture a draw samples, 2 per-sprite storage. Group 3 is claimed
+  numbered by what a binding *is*, not by how often it changes: 0 the uniforms —
+  canvas's `u` at binding 0 and the material's own beside it — 1 the texture a
+  draw samples, 2 per-sprite storage. Group 3 is claimed
   by nothing. An app's own per-instance parameter arrays go at group 2, binding 1
   and up — seven of them fit beside `instances`.
 - **The `SpriteInstance` record** — struct name, member names, order and size: six

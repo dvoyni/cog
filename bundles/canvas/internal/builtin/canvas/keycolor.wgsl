@@ -3,8 +3,8 @@
 //
 // DECLARES: fn keyColorRamp; fn srgbEncode, srgbDecode, srgbEncode3,
 // srgbDecode3; const keyChannelTolerance, keyGreenCutoff, keyRampMidpoint. No
-// binding and no struct, so it is includable by extending and non-extending
-// materials alike.
+// binding and no struct, so it is includable by any material, sprite and
+// triangles alike.
 //
 // Included by every built-in canvas shader that draws artwork - sprite.wgsl and
 // triangles.wgsl - so the ramp is one declaration and a change to it cannot land

@@ -44,7 +44,7 @@ type Op struct {
 	// time, and HasMaterial says whether it named one at all. Reading it is how
 	// a caller answers "what shades this draw" without running the flush; the
 	// resolution an op that named none goes through is described above.
-	Material    gfx.MaterialDescr
+	Material    Material
 	HasMaterial bool
 	// FontPath, Text and Draw describe an OpText.
 	FontPath string

@@ -153,10 +153,10 @@ func TestATextureTargetedLayerMeasuresAgainstItsTextureNotTheViewport(t *testing
 	}
 	// canvasViewport sits at uniform offset 48 and carries the logical size a
 	// draw converts to clip space against.
-	if w, h := floatAt(backend.drawParams[0], 48), floatAt(backend.drawParams[0], 52); w != 64 || h != 32 {
+	if w, h := floatAt(backend.drawParams[0], 0), floatAt(backend.drawParams[0], 4); w != 64 || h != 32 {
 		t.Errorf("texture layer viewport = (%v,%v), want the target's 64x32", w, h)
 	}
-	if w, h := floatAt(backend.drawParams[1], 48), floatAt(backend.drawParams[1], 52); w != 100 || h != 100 {
+	if w, h := floatAt(backend.drawParams[1], 0), floatAt(backend.drawParams[1], 4); w != 100 || h != 100 {
 		t.Errorf("screen layer viewport = (%v,%v), want the app viewport's 100x100", w, h)
 	}
 }

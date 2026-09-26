@@ -786,3 +786,45 @@ func TestTheRegistryIsReadWhilePublished(t *testing.T) {
 		t.Errorf("a released set reads %d, want released", state)
 	}
 }
+
+// SetDrawParams copies a param's bytes before it returns, so a record borrowed
+// through RawParameterRef can be refilled for the next batch at once: each draw
+// binds the fill it was recorded with.
+func TestSetDrawParamsCopiesABorrowedRecord(t *testing.T) {
+	_, backend, k, reported := shaderEngine(t, fstest.MapFS{})
+	layout := shader.ShaderLayout{Resources: []shader.ShaderResource{
+		{Name: "record", Kind: shader.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 96},
+	}}
+	backend.reflection = &layout
+	program := compileShader(k, nil, shader.ShaderWithText(programSource)).Program
+	var set descriptors.DrawParams
+	withShaders(k, func(k kernel.Kernel, q *ResourceQueue) {
+		id := q.NewShader()
+		q.UploadProgram(k, id, program)
+		set = q.NewDrawParams(k, id, types.MaterialState{})
+	})
+	record := &wellPacked{}
+	k.ExecuteCommand[recordCmd](recordRequest{withKernel: func(k kernel.Kernel, q *OpQueue) {
+		pass := screenPass(q, 0, "main")
+		for _, x := range []float32{1, 2} {
+			record.Amount.X = x
+			q.SetDrawParams(k, set, descriptors.RawParameterRef("record", record))
+			q.DrawSet(pass, triangle(), set, 1, 0)
+		}
+		record.Amount.X = 3
+	}})
+	k.ExecuteCommand[PresentCmd](PresentRequest{})
+	k.PublishEvent(app.RenderEvent{}).Wait()
+	if len(*reported) != 0 {
+		t.Fatalf("reported %v", *reported)
+	}
+	var bound []float32
+	for _, op := range backend.lastOps {
+		if op.kind == testOpSetUniformBlock {
+			bound = append(bound, floatsOf(op.data)[0])
+		}
+	}
+	if !equalFloats(bound, []float32{1, 2}) {
+		t.Fatalf("draws bound %v, want each its own fill", bound)
+	}
+}

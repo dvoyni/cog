@@ -48,25 +48,43 @@ func ScreenToWorld(window m.Rect, aspect AspectMode, viewport, screen m.Vec2) m.
 
 // DefaultKeyColor is the key colour a triangles draw gets when it names none:
 // mid grey, which leaves the ramp a no-op on artwork that was not authored for
-// keying. It is exported because a custom triangles material has to carry it as
-// its own default - keyColor is a reserved name canvas packs into the uniform
-// block, and a material that omits it keys every texel against black.
+// keying. It is exported because a custom triangles material that keys has to
+// carry it as its own default - keyColor is a uniform of the shader's own, and a
+// material that leaves it unset keys every texel against black.
 func DefaultKeyColor() m.Color { return internal.DefaultKeyColor() }
+
+// NewMaterial describes a material from a shader and its own parameters. Its
+// state is gfx.Material's - alpha-blended, depth-tested and written - which is
+// what an opaque 3D draw wants and rarely what a canvas draw does: canvas layers
+// share a depth attachment, so a material that writes depth hides whatever it
+// covers at the same depth. Most canvas materials want MaterialWithState with
+// gfx.StateOverlay2D.
+func NewMaterial(shader gfx.ShaderDescr, params ...gfx.ParameterDescr) Material {
+	return internal.NewMaterial(shader, params...)
+}
+
+// MaterialWithState describes a material with explicit fixed pipeline state.
+//
+//	var fade = canvas.MaterialWithState(
+//		gfx.ShaderWithResource("shaders/fade-sprite.wgsl"), gfx.StateOverlay2D())
+func MaterialWithState(shader gfx.ShaderDescr, state gfx.MaterialState, params ...gfx.ParameterDescr) Material {
+	return internal.MaterialWithState(shader, state, params...)
+}
 
 // DefaultMaterial returns the built-in sprite material: the instanced atlas
 // draw every sprite, glyph, inline icon and fill reaches the screen through.
 // Passing it explicitly batches identically to passing nil, because the batch
 // key takes the material's fingerprint rather than the fact of naming one.
-func DefaultMaterial() *gfx.MaterialDescr { return internal.DefaultMaterial() }
+func DefaultMaterial() *Material { return internal.DefaultMaterial() }
 
 // DefaultTrianglesMaterial returns the built-in triangles material: sample
 // canvasTexture through the key-colour ramp, times vertex colour.
-func DefaultTrianglesMaterial() *gfx.MaterialDescr { return internal.DefaultTrianglesMaterial() }
+func DefaultTrianglesMaterial() *Material { return internal.DefaultTrianglesMaterial() }
 
 // TextureMaterial returns the built-in material a texture-sourced draw uses:
 // sample the texture bound to TextureSlot, multiply by vertex colour, clip. Pass
 // it to DrawTriangles to get that behaviour for geometry recorded by hand.
-func TextureMaterial() *gfx.MaterialDescr { return internal.TextureMaterial() }
+func TextureMaterial() *Material { return internal.TextureMaterial() }
 
 // DefaultHaloProfile returns the profile measured off painted art - 84% of the
 // halo pixels in feuds' militiaman.png sit on a plateau for the first fifth of

@@ -491,6 +491,13 @@ after the first reads the wrong memory. Members may be `float32`, `int32`,
 those, and structs of those; anything else panics, which is what keeps a pointer
 out of a byte copy.
 
+`RawParameterRef[T](name, *T)` is the same over a value the caller keeps: a
+record that fits in 64 bytes is carried inline as `RawParameter`'s is, and a
+larger one is borrowed rather than copied, so building one per batch allocates
+nothing. `NewDrawParams`, `UpdateDrawParams` and `SetDrawParams` copy a
+param's bytes before they return, which is what makes the borrow safe; the
+value must outlive the call, and the address of a local escapes to the heap.
+
 **A parameter whose kind cannot fill the binding its name matched is rejected.**
 Parameters resolve by name, and one name has one frequency: a value is a uniform
 member and a buffer is a storage binding. Supplying either where the shader
