@@ -583,16 +583,23 @@ type SamplerView = internal.SamplerView
 
 // MaterialView is one material rendered for an agent: which shader variant
 // shades the draw, the fixed pipeline state, and the material's own
-// parameters, which a draw's same-named parameters override.
+// parameters, which a draw's same-named parameters override. It is the old
+// material path's view, kept while canvas_draws reports a canvas op's gfx
+// material, and deleted with materials; a draw through a set is rendered as a
+// DrawParamsView.
 type MaterialView = internal.MaterialView
 
 // ShaderView names one shader variant. A root source plus one supply is one
 // variant, so the supply is part of the name rather than a detail beside it.
 type ShaderView = internal.ShaderView
 
-// MaterialStateView is fixed pipeline state with its enums named. Depth
+// DrawStateView is a set's fixed pipeline state with its enums named. Depth
 // compare and depth write are separate here because they are separate in the
 // engine: test but do not write is a state 3D needs and one flag cannot say.
+type DrawStateView = internal.DrawStateView
+
+// MaterialStateView is DrawStateView under the old path's name, kept with
+// MaterialView and deleted with it.
 type MaterialStateView = internal.MaterialStateView
 
 // ViewportMode selects how the logical viewport responds to window aspect
@@ -628,6 +635,17 @@ type FrameView = internal.FrameView
 // PassView is one declared render pass: where it draws, in what order, what
 // happens to its attachments at either end, and how much work it carries.
 type PassView = internal.PassView
+
+// DrawParamsView is one set of draw params as the frame's draws see it: its
+// shader, its Draw state, and each binding's value with where that value came
+// from - the set's own, the frame's version of it, or nothing, and so the
+// binding's default.
+type DrawParamsView = internal.DrawParamsView
+
+// DrawParamsBindingView is one binding of a set: where the shader declares it,
+// what it is, and the value it has - a uniform's size and never its bytes, a
+// texture, sampler or buffer by what names it.
+type DrawParamsBindingView = internal.DrawParamsBindingView
 
 // ResourceOpView is one resource operation: what it does, to which handle, and
 // how big the thing is. Bulk bytes are reported as a count and left where they

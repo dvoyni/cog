@@ -296,8 +296,12 @@ together convert a point in the picture into a point that can be clicked.
 `gfx_frame` is the snapshot: every declared pass in run order with its label,
 ordering key, target, depth and clears, a draw and instance count per pass, and
 every resource operation from both queues with its handle, size, format and
-mipmap flag. Individual draws are counted rather than listed, because a draw's
-mesh and material are opaque handles with nothing to resolve them against.
+mipmap flag. Individual draws are counted rather than listed; what they draw
+with is listed once per set of draw params and version they name, under
+`drawParams`: the shader's label, the Draw state with its enums named, and each
+binding's name, kind, group, binding and size or resource, with whether the
+value is the set's own, the frame's version's, or the binding's default. A draw
+through the old material path names no set and is only counted.
 Every index in the response is a **source index** — a position in the queue
 that recorded the thing — so an index stays the address of what it named when a
 filter is on. `pass` filters by label and says how many passes it dropped;
@@ -320,7 +324,9 @@ field's.
 ### The shared view types
 
 gfx also declares the vocabulary every cog snapshot shares, in
-[`internal/views.go`](../internal/views.go), aliased in `types.go`: `ParameterView`, `TextureView`, `MaterialView`, and
+[`internal/views.go`](../internal/views.go), aliased in `types.go`: `ParameterView`, `TextureView`, `DrawStateView`,
+`MaterialView` (the old material path's, kept for `canvas_draws` until
+materials are deleted), and
 `SnapshotView` — the three coordinate sizes, the tick the snapshot describes,
 and the step fields, all of which every snapshot response carries. `canvas` and `ui` embed them, so one value reaches an agent in
 one shape whichever tool showed it.

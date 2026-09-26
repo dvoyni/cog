@@ -332,8 +332,10 @@ const frameDescription = "What the renderer was told to do for one frame: every 
 	"pass, and every resource operation — textures baked, allocated, uploaded or released, with " +
 	"their paths and sizes. Use it when nothing appears on screen, or appears in the wrong " +
 	"order: it shows whether a pass ran at all, what it drew into, and whether the texture you " +
-	"expected was ever baked. Individual draws are counted rather than listed, because a draw's " +
-	"mesh and material are opaque handles with nothing to resolve them against.\n\n" +
+	"expected was ever baked. Individual draws are counted rather than listed; what they draw " +
+	"with is listed once per set of draw params — its shader, its draw state, and every " +
+	"binding's group, binding, size or resource, with whether the value is the set's own, this " +
+	"frame's version of it, or the binding's default.\n\n" +
 	"Blocks until the next tick has been recorded, so it reflects anything you did before " +
 	"calling it. Filter by `pass` to cut a busy frame down. Pass `path` to write the JSON to a " +
 	"file instead of returning it inline. While the game is paused this performs one step to " +
@@ -365,7 +367,7 @@ type frameSnapshotRequest struct {
 type frameSnapshotResponse struct {
 	// Path is the file the JSON was written to, when one was asked for. The
 	// file holds the whole document; what comes back inline then carries the
-	// counts and the viewport but not the two arrays, so the reply says what
+	// counts and the viewport but not the three arrays, so the reply says what
 	// the frame was without repeating it.
 	Path string `json:"path,omitempty"`
 	FrameView
@@ -430,7 +432,7 @@ func frameSnapshot(k kernel.Executioner, request frameSnapshotRequest) (frameSna
 			return frameSnapshotResponse{}, mcp.Unavailable{Reason: fmt.Sprintf(
 				"the snapshot could not be written to %s: %v", request.Path, err)}
 		}
-		response.Passes, response.ResourceOps = nil, nil
+		response.Passes, response.ResourceOps, response.DrawParams = nil, nil, nil
 	}
 	return response, nil
 }

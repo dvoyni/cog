@@ -446,6 +446,23 @@ kind, group, binding and either its size or its resource id, naming whether the
 value came from the set or the frame's version. Draw and instance counts are
 unchanged. The spec of record is `mcp.md`, which is amended with it.
 
+**Settled here:** the view is per set and version, not per draw. `gfx_frame`
+gains `drawParams`, one entry for each set and version the kept passes draw
+through, carrying the passes, draws and instances that name it; draws stay
+counted rather than listed, so a frame's report grows with its sets, not its
+draws. A binding no param supplied is reported as `default` rather than as the
+zero record behind it, since an unsupplied binding - a storage buffer above
+all - is often the answer. A set that is not live is still an entry, naming why
+its draws are dropped.
+
+**Settled here:** during the transition a draw through the old `Draw` names no
+set and is only counted, as every draw was: `gfx_frame` never rendered a
+`MaterialView`, so it gains no field for the old path and the deletion removes
+none. `MaterialView` survives only as `canvas_draws`' rendering of a canvas op's
+gfx material, which canvas replaces with its own view of `canvas.Material`, and
+it is deleted with materials. Its state is `DrawStateView`, which
+`MaterialStateView` aliases until then.
+
 ---
 
 ## The bundles, for now
@@ -565,6 +582,14 @@ it. It is reconsidered with scene's materials.
   and the render thread's cache is the one thing that can read the file; a set
   keeping the path costs a string, and a set refusing it moves the load into
   every recorder.
+- **A draw params view per draw in `gfx_frame`.** Every draw of one set and
+  version draws with the same values, so listing them per draw repeats one
+  entry thousands of times a frame and grows the report with the draws rather
+  than the sets; the entry carries the draws and instances instead.
+- **Uniform values in the draw params view.** A binding's bytes are laid out for
+  one shader and nothing tells the view what they mean, since a set keeps bytes
+  and not the constructor that made them; they are reported by size, as bulk
+  bytes are everywhere else in the snapshots.
 
 ---
 

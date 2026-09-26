@@ -324,7 +324,13 @@ func ShaderViewOf(shader ShaderDescr) ShaderView {
 	return internal.ShaderViewOf(shader)
 }
 
-// MaterialStateViewOf renders one pipeline state.
+// DrawStateViewOf renders one pipeline state.
+func DrawStateViewOf(state MaterialState) DrawStateView {
+	return internal.DrawStateViewOf(state)
+}
+
+// MaterialStateViewOf renders one pipeline state; it is DrawStateViewOf under
+// the old path's name.
 func MaterialStateViewOf(state MaterialState) MaterialStateView {
 	return internal.MaterialStateViewOf(state)
 }
