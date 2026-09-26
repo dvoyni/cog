@@ -231,3 +231,20 @@ type ErrClipTransitionTriggerInvalid struct {
 func (e ErrClipTransitionTriggerInvalid) Error() string {
 	return fmt.Sprintf("model: clip transition %q -> %q must set exactly one of On and OnFinish", e.From, e.To)
 }
+
+// ErrSceneShaderUnavailable reports a variant of the bundled scene shader that
+// did not compile. The Lookup compiles the four once, on the first load, so it
+// is reported once and never retried; every model's draw params for that
+// variant stay zero, and the forward material draws as before. Err is the
+// compile's own, naming the file and line the source map resolved.
+type ErrSceneShaderUnavailable struct {
+	Variant ShaderVariant
+	Err     error
+}
+
+func (e ErrSceneShaderUnavailable) Error() string {
+	return fmt.Sprintf("scene: the bundled shader's variant %d (skin %t, morph %t) did not compile, so models have no draw params for it: %v",
+		e.Variant, e.Variant&variantSkin != 0, e.Variant&variantMorph != 0, e.Err)
+}
+
+func (e ErrSceneShaderUnavailable) Unwrap() error { return e.Err }

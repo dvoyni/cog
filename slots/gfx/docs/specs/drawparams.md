@@ -510,6 +510,31 @@ out of scope here.
   their own.
 - **UI** draws through canvas and changes with it.
 
+**Settled here:** model compiles at load, in the System that loads. Its load
+facade - `NewLookupDeviceAccess`, and the Lookup's own `Resolve` and
+`ModelView` - takes a `gfx.ShaderCompiler` beside the resource queue, and
+scene's load System passes the `Execute` of the
+`ecs.Uses[CompileShaderCmd, …]` it declares, whose lock is empty. The first
+load with a compiler compiles the four variants once for the Lookup and uploads
+them; those shaders are the Lookup's, shared by every model and never released,
+as its two default textures are. Every load then creates, per material, one
+set per variant whose shader compiled: the five textures and five samplers of
+its ingredients and `scenePbrMaterial` whole, from the load's own values
+through `RawParameterRef`. The record is 160 bytes - eleven scalars after seven
+`vec4`s, rounded up to the struct's alignment - and model's layout test holds
+the Go mirror to the struct naga reflects. A set names no per-draw binding: the
+frame, the instances and the poses are the renderer's version. A variant that
+does not compile is reported once, under model's own key, and remembered, and
+every model's set for it stays zero, so those draws go through the forward
+material as before. The sets reach a renderer as
+`ModelView.Materials[i].Sets[variant]`, beside `Forward` and `Key` until the
+deletion.
+
+**Settled here:** a model's sets are released at the frame boundary, beside its
+buffers. `UnloadModel` is on the facade that carries no device, so a free
+queues the sets and `DrainMeshes` hands them to `MeshBaker.ReleaseDrawParams`,
+which scene fills with `ReleaseDrawParams` under the drain's kernel.
+
 **Settled here:** canvas compiles in its flush, on a material's first batch.
 The flush already holds the ResourceQueue and the storage filesystem, and
 declares `Uses[CompileShaderCmd]`, whose lock is empty, so no System's lock set
@@ -670,6 +695,17 @@ it. It is reconsidered with scene's materials.
 - **Compiling canvas's shaders at load, outside the flush.** Canvas's materials
   are values an app builds anywhere and names at a draw; there is no load step
   that sees them before the flush does.
+- **Compiling model's shaders at a draw, in a renderer's flush.** A model file
+  has a load step that sees every material first, and the load is where model
+  already builds its materials once; compiling at the draw would put a
+  first-draw hitch and a failure check on the recording path.
+- **Programs per model.** The four variants are the same four programs for
+  every file; compiling them per load would be four naga parses a file for
+  nothing, so they are the Lookup's.
+- **Releasing a model's sets at the unload call.** `UnloadModel` is on
+  `LookupAccess`, which carries no resource queue precisely so that a System
+  baking a mesh does not declare a gfx write; releasing at the call would move
+  the unload onto the device facade or widen every such System's lock set.
 
 ---
 

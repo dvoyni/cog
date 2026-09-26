@@ -36,6 +36,7 @@ func TestEveryUploadedRecordMatchesItsShaderStruct(t *testing.T) {
 	var light Light
 	var instance Instance
 	var mesh SceneMesh
+	var material pbrValues
 	records := []shaderRecord{
 		{"SceneFrame", unsafe.Sizeof(frame), []shaderMember{
 			{"view", unsafe.Offsetof(frame.View)},
@@ -78,6 +79,18 @@ func TestEveryUploadedRecordMatchesItsShaderStruct(t *testing.T) {
 		// an array member is not name-addressable and animating
 		// baseColorTransform per frame is UV scrolling, while Go indexes the
 		// same bytes by slot. This is where that correspondence is checked.
+		// A model's draw params set the record whole, so the size - the
+		// struct's trailing padding included - is contract as well.
+		{"ScenePbrMaterial", unsafe.Sizeof(material), append([]shaderMember{
+			{"baseColorFactor", unsafe.Offsetof(material.baseColorFactor)},
+			{"emissiveFactor", unsafe.Offsetof(material.emissiveFactor)},
+			{"metallicFactor", unsafe.Offsetof(material.metallicFactor)},
+			{"roughnessFactor", unsafe.Offsetof(material.roughnessFactor)},
+			{"normalScale", unsafe.Offsetof(material.normalScale)},
+			{"occlusionStrength", unsafe.Offsetof(material.occlusionStrength)},
+			{"alphaCutoff", unsafe.Offsetof(material.alphaCutoff)},
+			{"uvSets", unsafe.Offsetof(material.uvSets)},
+		}, slotMembers(&material)...)},
 	}
 
 	types := shaderStructs(t)
@@ -105,6 +118,19 @@ func TestEveryUploadedRecordMatchesItsShaderStruct(t *testing.T) {
 			}
 		}
 	}
+}
+
+// slotMembers pairs each slot's flat transform and rotation members with the
+// element of the Go arrays that holds it.
+func slotMembers(material *pbrValues) []shaderMember {
+	var members []shaderMember
+	for slot, names := range PbrSlots {
+		members = append(members,
+			shaderMember{names.Transform, unsafe.Offsetof(material.transforms) + uintptr(slot)*unsafe.Sizeof(material.transforms[0])},
+			shaderMember{names.Rotation, unsafe.Offsetof(material.rotations) + uintptr(slot)*unsafe.Sizeof(material.rotations[0])},
+		)
+	}
+	return members
 }
 
 // shaderStructs lowers the bundled shader and indexes its struct types by name.

@@ -24,9 +24,10 @@ type ModelDescrParams struct{}
 type modelDescr = assets.Descr[ModelDescrParams]
 
 // modelUserData is what the model loader needs that a handler holds: the Lookup it
-// mints mesh slots and texture entries in, and the resource queue it uploads
-// through. A loader is stateless and long-lived, so both arrive per call and
-// neither is retained.
+// mints mesh slots and texture entries in, the resource queue it uploads
+// through, and the compiler the first load compiles the bundled shader with. A
+// loader is stateless and long-lived, so all three arrive per call and none is
+// retained.
 //
 // path rides here too, and it is the one member that is not a handler's. The
 // Library hands Load the bytes and the parameters but not the descriptor, and
@@ -38,6 +39,7 @@ type modelDescr = assets.Descr[ModelDescrParams]
 type modelUserData struct {
 	lookup    *Lookup
 	resources *gfx.ResourceQueue
+	compile   gfx.ShaderCompiler
 	path      string
 }
 
@@ -131,7 +133,7 @@ type modelPrimitive struct {
 // modelMaterial is one converted glTF material: its ingredients - the params,
 // its numbers among them, and the state - and the forward
 // gfx material the bundled shader makes of them, once per shader variant, with
-// the content key of each. It names no pass: a renderer wraps the forward
+// the content key of each, and the durable draw params of each. It names no pass: a renderer wraps the forward
 // material under its own tag, or resolves a shader of its own over the
 // ingredients, which is how a caller's shader keeps what the file says.
 //
@@ -144,10 +146,19 @@ type modelPrimitive struct {
 // descr never changes after it, so the key never goes stale, and a renderer
 // derives its own material key from it rather than fingerprinting the descr
 // on every draw of every frame.
+//
+// Sets are the same material as draw params, one set per variant over that
+// variant's bundled shader, created at load and released with the model: its
+// five textures, five samplers and ScenePbrMaterial whole. A set is zero when
+// the load had no compiler or its variant did not compile, and such a
+// material draws through Forward alone. A set names none of the per-draw
+// bindings - the frame, the instances, the poses - which are a renderer's to
+// supply through its frame's version of the set.
 type modelMaterial struct {
 	MaterialIngredients
 	Forward [VariantCount]gfx.MaterialDescr
 	Key     [VariantCount]uint64
+	Sets    [VariantCount]gfx.DrawParams
 }
 
 // modelReportKey and textureReportKey are the keys the load's report-once calls
@@ -199,7 +210,7 @@ var errLookupUnavailable = errors.New("the scene lookup is not available")
 // against an absent backend would panic, and caching the failure would make a
 // startup race terminal.
 func (l *Lookup) model(
-	k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue, modelPath string,
+	k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue, compile gfx.ShaderCompiler, modelPath string,
 ) (*residentModel, error) {
 	key, valid := ModelKey(modelPath)
 	if !valid {
@@ -211,7 +222,7 @@ func (l *Lookup) model(
 		return nil, ErrModelUnavailable{Model: modelPath, Err: errBackendNotReady}
 	}
 	loaded := l.models.Get(k, modelDescr{Name: key}, fsys,
-		modelUserData{lookup: l, resources: resources, path: key})
+		modelUserData{lookup: l, resources: resources, compile: compile, path: key})
 	if loaded == nil {
 		return nil, ErrModelUnavailable{Model: modelPath, Err: errModelNotRead}
 	}
@@ -227,11 +238,12 @@ func (l *Lookup) model(
 // that matches nothing is err, which the caller reports under its ReportKey.
 //
 // It is the load facade's read for a renderer's flush, which holds the Lookup
-// for writing, the filesystem and the resource queue.
+// for writing, the filesystem and the resource queue, and passes the
+// gfx.CompileShaderCmd dispatcher it declared as compile.
 func (l *Lookup) ModelView(
-	k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue, path, scene, node string,
+	k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue, compile gfx.ShaderCompiler, path, scene, node string,
 ) (view ModelView, err ModelSelectorError, ok bool) {
-	model, loadErr := l.model(k, fsys, resources, path)
+	model, loadErr := l.model(k, fsys, resources, compile, path)
 	if loadErr != nil {
 		return ModelView{}, nil, false
 	}
@@ -259,7 +271,7 @@ func (modelLoader) Load(
 		k.ReportErrorOnce(modelReportKey(userData.path), failure)
 		return &residentModel{err: failure}
 	}
-	return userData.lookup.installModel(k, userData.path, loaded, fsys, userData.resources)
+	return userData.lookup.installModel(k, userData.path, loaded, fsys, userData.resources, userData.compile)
 }
 
 // Default is nil, and a nil model expands into no primitives, so "skip, never
@@ -268,11 +280,12 @@ func (modelLoader) Load(
 // made, not from the pixels.
 func (modelLoader) Default(modelDescr, modelUserData) *residentModel { return nil }
 
-// Free gives up one model's geometry, baked poses and morph deltas. The mesh
-// slots retire at once, so a ref to one goes stale immediately; their buffers
-// join the pending releases the flush drains at the frame boundary, which is
-// the same queue ReleaseMesh uses and the reason nothing the frame has already
-// recorded draws from a dead buffer.
+// Free gives up one model's geometry, baked poses, morph deltas and draw params.
+// The mesh slots retire at once, so a ref to one goes stale immediately; their
+// buffers join the pending releases the flush drains at the frame boundary,
+// which is the same queue ReleaseMesh uses and the reason nothing the frame has
+// already recorded draws from a dead buffer. The sets are drained there too,
+// because an unload holds no resource queue.
 //
 // It does not cascade to textures. With no refcount the Lookup cannot know
 // whether another resident model binds the same image by path, and freeing one
@@ -295,6 +308,7 @@ func (modelLoader) Free(value *residentModel, userData modelUserData) {
 	}
 	l.poseBytes -= animation.poseBytes
 	l.morphBytes -= animation.morphBytes
+	l.releaseSets(value)
 	l.evict(value)
 }
 
@@ -325,7 +339,7 @@ func parseModel(
 // atomic.
 func (l *Lookup) installModel(
 	k kernel.Kernel, modelPath string, loaded *LoadedModel,
-	fsys fs.FS, resources *gfx.ResourceQueue,
+	fsys fs.FS, resources *gfx.ResourceQueue, compile gfx.ShaderCompiler,
 ) *residentModel {
 	defaults := l.ensureDefaults(resources)
 	// The pictures resolve through the texture cache, which is where the
@@ -346,9 +360,11 @@ func (l *Lookup) installModel(
 		defaultScene: loaded.defaultScene,
 		neverCull:    loaded.neverCull,
 	}
+	shaders := l.ensureShaders(k, fsys, resources, compile)
 	for i := range loaded.materials {
-		model.Materials = append(model.Materials,
-			bindModelMaterial(&loaded.materials[i], textures, defaults))
+		built := bindModelMaterial(&loaded.materials[i], textures, defaults)
+		built.Sets = l.newMaterialSets(k, resources, shaders, &built, &loaded.materials[i].values)
+		model.Materials = append(model.Materials, built)
 	}
 	// Geometry is baked once per distinct glTF primitive and placed once per
 	// node that referenced it, so a mesh two nodes share is one upload and one
@@ -554,7 +570,7 @@ func (la LookupDeviceAccess) ModelLights(path string, dst []ModelLight) ([]Model
 // record that the load already ran.
 func (la LookupDeviceAccess) Preload(path string) {
 	if la.Valid() {
-		la.lookup.model(la.kernel, la.fsys, la.resources, path)
+		la.lookup.model(la.kernel, la.fsys, la.resources, la.compile, path)
 	}
 }
 

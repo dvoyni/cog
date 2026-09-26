@@ -14,6 +14,7 @@ type keyer struct {
 	k         kernel.Kernel
 	lookup    *model.Lookup
 	resources *gfx.ResourceQueue
+	compile   gfx.ShaderCompiler
 	fsys      fs.FS
 	models    *ecs.Get[Model]
 	meshes    *ecs.Get[Mesh]
@@ -75,7 +76,7 @@ func (r *keyer) primitiveKeys(
 	keys []batchKey, ref model.ModelRef,
 	override uint64, hasOverride bool, params uint64,
 ) (model.ModelHandle, []batchKey) {
-	handle, ok := r.lookup.Resolve(r.k, r.fsys, r.resources, ref)
+	handle, ok := r.lookup.Resolve(r.k, r.fsys, r.resources, r.compile, ref)
 	if !ok {
 		return 0, keys
 	}

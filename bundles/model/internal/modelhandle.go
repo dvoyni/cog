@@ -64,11 +64,12 @@ func (l *Lookup) resident(handle ModelHandle) *residentModel {
 // every selector of one file.
 //
 // It is the load facade's resolve for a renderer that holds the Lookup for
-// writing, the filesystem and the resource queue.
+// writing, the filesystem and the resource queue, and passes the
+// gfx.CompileShaderCmd dispatcher it declared as compile.
 func (l *Lookup) Resolve(
-	k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue, ref ModelRef,
+	k kernel.Kernel, fsys fs.FS, resources *gfx.ResourceQueue, compile gfx.ShaderCompiler, ref ModelRef,
 ) (ModelHandle, bool) {
-	model, err := l.model(k, fsys, resources, ref.Path)
+	model, err := l.model(k, fsys, resources, compile, ref.Path)
 	if err != nil {
 		return 0, false
 	}
@@ -82,7 +83,7 @@ func (la LookupDeviceAccess) Resolve(ref ModelRef) (ModelHandle, bool) {
 	if !la.Valid() {
 		return 0, false
 	}
-	return la.lookup.Resolve(la.kernel, la.fsys, la.resources, ref)
+	return la.lookup.Resolve(la.kernel, la.fsys, la.resources, la.compile, ref)
 }
 
 // LookupReadAccess is the read facade: everything a draw reads from a
