@@ -92,12 +92,12 @@ type customTriangleVertex struct {
 	Data     m.Vec4
 }
 
-var customTriangleVertexLayout = [...]gfx.VertexAttr{
-	gfx.Attr(0, gfx.Float32x2),
-	gfx.Attr(8, gfx.Float32x4),
+var customTriangleVertexLayout = [...]gfx.VertexAttribute{
+	{Offset: 0, Type: gfx.Float32x2},
+	{Offset: 8, Type: gfx.Float32x4},
 }
 
-func (customTriangleVertex) VertexLayout() []gfx.VertexAttr {
+func (customTriangleVertex) VertexLayout() []gfx.VertexAttribute {
 	return customTriangleVertexLayout[:]
 }
 
@@ -565,7 +565,7 @@ func TestDefaultAtlasUsesTwoLayerArrays(t *testing.T) {
 
 func BenchmarkCanvasRecordSteadyState(b *testing.B) {
 	var list OpQueue
-	params := []gfx.ParameterDescr{gfx.ColorParam("tint", m.Color{R: 1, A: 1})}
+	params := []gfx.ShaderParameterDescr{gfx.ShaderParameterColor("tint", m.Color{R: 1, A: 1})}
 	transform := SpriteTransform{Position: m.Vec2{X: 10, Y: 20}, Size: m.Vec2{X: 32, Y: 32}}
 	list.Sprite(1, "images/sprite.png", transform, nil, params...)
 	list.Reset()
@@ -578,8 +578,8 @@ func BenchmarkCanvasRecordSteadyState(b *testing.B) {
 
 func BenchmarkCanvasRecordCustomMaterial(b *testing.B) {
 	var list OpQueue
-	material := NewMaterial(gfx.ShaderWithText("// custom"), gfx.FloatParam("base", 1))
-	params := []gfx.ParameterDescr{gfx.ColorParam("tint", m.Color{R: 1, A: 1})}
+	material := NewMaterial(gfx.ShaderWithText("// custom"), gfx.ShaderParameterFloat("base", 1))
+	params := []gfx.ShaderParameterDescr{gfx.ShaderParameterColor("tint", m.Color{R: 1, A: 1})}
 	transform := SpriteTransform{Position: m.Vec2{X: 10, Y: 20}, Size: m.Vec2{X: 32, Y: 32}}
 	list.Sprite(1, "images/sprite.png", transform, &material, params...)
 	list.Reset()
@@ -639,8 +639,8 @@ func BenchmarkCanvasFlushTexturedTriangles(b *testing.B) {
 	k, _, backend := testKernel(b, filesystem, config, func(write *OpQueue) {
 		for i := 0; i < 300; i++ {
 			write.DrawTriangles(Layer(i%6), verts, nil,
-				gfx.TextureParam(TextureSlot, gfx.TextureWithResource(paths[i%len(paths)])),
-				gfx.SamplerParam(SamplerSlot, gfx.SamplerDesc{}))
+				gfx.ShaderParameterTexture(TextureSlot, gfx.TextureWithResource(paths[i%len(paths)])),
+				gfx.ShaderParameterSampler(SamplerSlot, gfx.SamplerDesc{}))
 		}
 	})
 	runFrame(k)
@@ -857,9 +857,9 @@ func TestDrawTrianglesSnapshotsStandardVerticesAndUsesLayerTransform(t *testing.
 	}
 	pipeline := backend.pipelines[0]
 	if pipeline.Stride != 32 || len(pipeline.Attributes) != 3 ||
-		pipeline.Attributes[0] != (gfx.VertexAttribute{Offset: 0, Type: gfx.Float32x2, Location: 0}) ||
-		pipeline.Attributes[1] != (gfx.VertexAttribute{Offset: 8, Type: gfx.Float32x4, Location: 1}) ||
-		pipeline.Attributes[2] != (gfx.VertexAttribute{Offset: 24, Type: gfx.Float32x2, Location: 2}) {
+		pipeline.Attributes[0] != (gfx.VertexAttribute{Offset: 0, Type: gfx.Float32x2}) ||
+		pipeline.Attributes[1] != (gfx.VertexAttribute{Offset: 8, Type: gfx.Float32x4}) ||
+		pipeline.Attributes[2] != (gfx.VertexAttribute{Offset: 24, Type: gfx.Float32x2}) {
 		t.Fatalf("triangle vertex pipeline = %+v", pipeline)
 	}
 	var uploaded []byte
@@ -886,8 +886,8 @@ func TestDrawTrianglesBindsTextureViaSlotParams(t *testing.T) {
 			{Position: m.Vec2{X: 4}, Color: white, UV: m.Vec2{X: 2}},
 			{Position: m.Vec2{Y: 4}, Color: white, UV: m.Vec2{Y: 2}},
 		}, nil,
-			gfx.TextureParam(TextureSlot, gfx.TextureWithBytes(2, 2, gfx.FormatRGBA8, make([]byte, 16), true, false)),
-			gfx.SamplerParam(SamplerSlot, gfx.SamplerDesc{AddressU: gfx.AddressRepeat, AddressV: gfx.AddressRepeat, Mag: gfx.FilterNearest, Min: gfx.FilterNearest, Mip: gfx.FilterNearest}),
+			gfx.ShaderParameterTexture(TextureSlot, gfx.TextureWithBytes(2, 2, gfx.FormatRGBA8, make([]byte, 16), true, false)),
+			gfx.ShaderParameterSampler(SamplerSlot, gfx.SamplerDesc{AddressU: gfx.AddressRepeat, AddressV: gfx.AddressRepeat, Mag: gfx.FilterNearest, Min: gfx.FilterNearest, Mip: gfx.FilterNearest}),
 		)
 	})
 	runFrame(k)
@@ -910,17 +910,17 @@ func TestDrawTrianglesSupportsCustomVertexLayout(t *testing.T) {
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
 		write.DrawTriangles(1, vertices, &material)
 		vertices[0].Position.X = 99
-		customTriangleVertexLayout[0] = gfx.Attr(4, gfx.Float32)
+		customTriangleVertexLayout[0] = gfx.VertexAttribute{Offset: 4, Type: gfx.Float32}
 	})
-	t.Cleanup(func() { customTriangleVertexLayout[0] = gfx.Attr(0, gfx.Float32x2) })
+	t.Cleanup(func() { customTriangleVertexLayout[0] = gfx.VertexAttribute{Offset: 0, Type: gfx.Float32x2} })
 	runFrame(k)
 	if len(backend.pipelines) != 1 {
 		t.Fatalf("pipelines = %d, want 1", len(backend.pipelines))
 	}
 	pipeline := backend.pipelines[0]
 	if pipeline.Stride != 24 || len(pipeline.Attributes) != 2 ||
-		pipeline.Attributes[0] != (gfx.VertexAttribute{Offset: 0, Type: gfx.Float32x2, Location: 0}) ||
-		pipeline.Attributes[1] != (gfx.VertexAttribute{Offset: 8, Type: gfx.Float32x4, Location: 1}) ||
+		pipeline.Attributes[0] != (gfx.VertexAttribute{Offset: 0, Type: gfx.Float32x2}) ||
+		pipeline.Attributes[1] != (gfx.VertexAttribute{Offset: 8, Type: gfx.Float32x4}) ||
 		pipeline.State.Blend != gfx.BlendOpaque {
 		t.Fatalf("custom triangle pipeline = %+v", pipeline)
 	}
@@ -945,11 +945,11 @@ func TestCustomMaterialKeepsItsStateAndCannotReclaimTint(t *testing.T) {
 	custom := MaterialWithState(
 		gfx.ShaderWithText("// custom canvas shader"),
 		gfx.DrawState{Blend: gfx.BlendOpaque},
-		gfx.FloatParam("customValue", 1),
+		gfx.ShaderParameterFloat("customValue", 1),
 	)
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
 		write.Sprite(0, "", SpriteTransform{Position: m.Vec2{X: 12}, Size: m.Vec2{X: 8, Y: 8}}, &custom,
-			gfx.ColorParam(TintSlot, m.Color{R: 0.25, G: 0.5, B: 0.75, A: 1}),
+			gfx.ShaderParameterColor(TintSlot, m.Color{R: 0.25, G: 0.5, B: 0.75, A: 1}),
 		)
 	})
 	runFrame(k)
@@ -1021,9 +1021,9 @@ func TestSpritesDifferingOnlyInTintStillMerge(t *testing.T) {
 	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
 		write.Sprite(0, "", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil,
-			gfx.ColorParam(TintSlot, m.Color{R: 1, A: 1}))
+			gfx.ShaderParameterColor(TintSlot, m.Color{R: 1, A: 1}))
 		write.Sprite(0, "", SpriteTransform{Position: m.Vec2{X: 8}, Size: m.Vec2{X: 4, Y: 4}}, nil,
-			gfx.ColorParam(TintSlot, m.Color{G: 1, A: 1}))
+			gfx.ShaderParameterColor(TintSlot, m.Color{G: 1, A: 1}))
 	})
 	runFrame(k)
 	instances := spriteInstances(backend)
@@ -1045,8 +1045,8 @@ func TestAPerSpriteParameterBecomesOneArrayAndItsNameSplitsTheBatch(t *testing.T
 		at := func(x float32) SpriteTransform {
 			return SpriteTransform{Position: m.Vec2{X: x}, Size: m.Vec2{X: 4, Y: 4}}
 		}
-		write.Sprite(0, "", at(0), &wobbly, gfx.FloatParam("wobble", 1))
-		write.Sprite(0, "", at(8), &wobbly, gfx.FloatParam("wobble", 2))
+		write.Sprite(0, "", at(0), &wobbly, gfx.ShaderParameterFloat("wobble", 1))
+		write.Sprite(0, "", at(8), &wobbly, gfx.ShaderParameterFloat("wobble", 2))
 		write.Sprite(0, "", at(16), &wobbly)
 	})
 	runFrame(k)
@@ -1165,14 +1165,14 @@ func TestUnloadSpriteReloadsOnNextFrame(t *testing.T) {
 
 func TestSpriteSnapshotsMaterialAndParametersWhileLayerTransformIsFinal(t *testing.T) {
 	var list OpQueue
-	materialParams := []gfx.ParameterDescr{gfx.FloatParam("base", 1)}
+	materialParams := []gfx.ShaderParameterDescr{gfx.ShaderParameterFloat("base", 1)}
 	material := NewMaterial(gfx.ShaderWithText("// custom"), materialParams...)
-	params := []gfx.ParameterDescr{gfx.FloatParam("value", 2)}
+	params := []gfx.ShaderParameterDescr{gfx.ShaderParameterFloat("value", 2)}
 	window := m.Rect{X: 3, Y: 4, Width: 20, Height: 10}
 	list.SetLayerTransform(2, window, AspectStretch)
 	list.Sprite(2, "image.png", SpriteTransform{Size: m.Vec2{X: 1, Y: 1}}, &material, params...)
-	params[0] = gfx.FloatParam("other", 9)
-	materialParams[0] = gfx.FloatParam("mutated", 9)
+	params[0] = gfx.ShaderParameterFloat("other", 9)
+	materialParams[0] = gfx.ShaderParameterFloat("mutated", 9)
 	list.SetLayerTransform(2, m.Rect{Width: 30, Height: 15}, AspectOverlap)
 	op := OpQueueLayers(&list)[2].Ops[0].Sprite
 	if !op.HasMaterial || reflect.DeepEqual(op.Params[0], params[0]) || reflect.DeepEqual(op.Material, material) {
@@ -1286,7 +1286,7 @@ func TestTiledSpriteRepeatsInsideItsAtlasEntry(t *testing.T) {
 	tint := m.Color{R: 1, G: 0, B: 0, A: 1}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "wave.png", SpriteTransform{Size: m.Vec2{X: 12, Y: 4}, TileX: true}, nil,
-			gfx.ColorParam("tint", tint))
+			gfx.ShaderParameterColor("tint", tint))
 	})
 	runFrame(k)
 	runFrame(k)
@@ -1761,7 +1761,7 @@ func TestASpriteDrawParameterNamingAUniformIsReported(t *testing.T) {
 	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
 	k, errs, _ := testKernelCapturing(t, fstest.MapFS{}, config, func(write *OpQueue) {
 		write.Sprite(0, "", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil,
-			gfx.FloatParam("customValue", 7))
+			gfx.ShaderParameterFloat("customValue", 7))
 	})
 	runFrame(k)
 	if len(*errs) != 1 {
@@ -1782,9 +1782,9 @@ func TestDifferingKeyColoursShareOneBatch(t *testing.T) {
 	files := fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 4, 3)}}
 	k, _, backend := testKernel(t, files, config, func(write *OpQueue) {
 		write.Sprite(0, "sprite.png", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}},
-			nil, gfx.ColorParam(KeyColorSlot, m.NewColorSrgb(0.2, 0.4, 0.9, 1)))
+			nil, gfx.ShaderParameterColor(KeyColorSlot, m.NewColorSrgb(0.2, 0.4, 0.9, 1)))
 		write.Sprite(0, "sprite.png", SpriteTransform{Position: m.Vec2{X: 8}, Size: m.Vec2{X: 4, Y: 4}},
-			nil, gfx.ColorParam(KeyColorSlot, m.NewColorSrgb(0.9, 0.3, 0.1, 1)))
+			nil, gfx.ShaderParameterColor(KeyColorSlot, m.NewColorSrgb(0.9, 0.3, 0.1, 1)))
 	})
 	runFrame(k)
 	instances := spriteInstances(backend)

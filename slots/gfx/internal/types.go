@@ -2,17 +2,6 @@ package internal
 
 import "github.com/dvoyni/cog/slots/gfx/internal/types"
 
-// FrameSnapshot is one produced snapshot, or the reason there is none. One
-// struct carries both so that a caller cannot handle one and forget the other.
-type FrameSnapshot struct {
-	Frame FrameView
-	// Tick is app.UpdateEvent.Tick of the tick the snapshot was taken in. It
-	// travels with the snapshot rather than being asked for afterwards,
-	// because only the tick itself knows which one it was.
-	Tick int64
-	Err  error
-}
-
 // FrameView is one tick's renderer declarations, rendered while they are still
 // alive. It is not a copy of the queue: no queue outlives the tick that filled
 // it, and between ticks the queue is empty rather than stale, so the view is

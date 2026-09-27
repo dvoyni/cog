@@ -91,21 +91,20 @@ func cameraPosition(transform m.Transform) m.Vec4 {
 // shadow map and the screen in the same frame. A screen-targeted pass takes
 // the window's aspect, which the update thread can read.
 func passAspect(id CameraID, pass *Pass, view *gfx.Viewport) (float32, error) {
-	if pass.Target.IsNone() {
+	if pass.Target.Kind == gfx.TargetNone {
 		if _, clears := pass.ClearColor.Get(); clears {
 			return 0, ErrColourlessPassClearsColour{Camera: id, Tag: tagOf(pass.Tag)}
 		}
 		// A depth-only pass has no colour attachment to take a size from, and
 		// falling through to the screen would build its frustum from the
 		// window's aspect and silently drop casters.
-		width, height, ok := pass.Depth.Size()
-		if !ok {
+		if pass.Depth.Kind != gfx.DepthKindTexture {
 			return 0, ErrColourlessPassWithoutDepth{Camera: id, Tag: tagOf(pass.Tag)}
 		}
-		return aspectOf(id, pass, float32(width), float32(height))
+		return aspectOf(id, pass, float32(pass.Depth.Width), float32(pass.Depth.Height))
 	}
-	if width, height, ok := pass.Target.Size(); ok {
-		return aspectOf(id, pass, float32(width), float32(height))
+	if pass.Target.Kind == gfx.TargetTexture {
+		return aspectOf(id, pass, float32(pass.Target.Width), float32(pass.Target.Height))
 	}
 	return aspectOf(id, pass, view.WindowWidth, view.WindowHeight)
 }
@@ -136,7 +135,7 @@ func passDescr(labels map[passLabel]string, id CameraID, pass *Pass, order gfx.O
 		DepthStore: gfx.StoreDiscard,
 		Label:      label(labels, id, tagOf(pass.Tag)),
 	}
-	if pass.Depth.IsTexture() {
+	if pass.Depth.Kind == gfx.DepthKindTexture {
 		desc.DepthStore = gfx.StoreKeep
 	}
 	if color, ok := pass.ClearColor.Get(); ok {

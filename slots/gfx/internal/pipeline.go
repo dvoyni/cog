@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
@@ -12,8 +11,8 @@ type PipelineDesc struct {
 	Shader      types.ShaderID
 	Topology    types.PrimitiveTopology
 	State       types.DrawState
-	ColorFormat descriptors.TextureFormat
-	DepthFormat descriptors.TextureFormat
+	ColorFormat types.TextureFormat
+	DepthFormat types.TextureFormat
 	// NoColorTarget builds a pipeline with no colour target at all, which is
 	// what a draw inside a depth-only pass needs. A render pass declares its
 	// attachments and a pipeline declares its targets, and the two are
@@ -22,26 +21,27 @@ type PipelineDesc struct {
 	// error along with the rest of the command buffer.
 	//
 	// It is a bool rather than a FormatNone member of TextureFormat because
-	// every member of that enum is a real texel layout and Resolve() is defined
-	// over all of them - a non-format in it would put a case into every switch
-	// that reads one.
+	// every member of that enum is a real texel layout - a non-format in it
+	// would put a case into every switch that reads one.
 	//
 	// A backend that honours this builds no fragment stage, so a depth-only
 	// shader may declare no fs_main at all.
 	NoColorTarget bool
 	// NoDepthTarget is NoColorTarget's depth twin: it builds a pipeline with no
-	// depth state, which is what a draw inside a DepthNone pass needs. Such a
+	// depth state, which is what a draw inside a DepthDescrNone pass needs. Such a
 	// pass declares no depth attachment, and a pipeline that declares one
 	// anyway is rejected at setPipeline for the same reason and with the same
 	// silent loss of the frame. DepthFormat is not read when it is set.
 	NoDepthTarget bool
 	Stride        int
-	Attributes    []descriptors.VertexAttribute
+	// Attributes is the interleaved vertex buffer's layout, and each one binds
+	// to the shader @location of its index.
+	Attributes []types.VertexAttribute
 	// IndexWidth is the width a strip topology cuts on. WebGPU requires a
 	// pipeline to declare that format before an indexed strip draw is legal and
 	// forbids it on every other topology, so a backend reads this only when
 	// Topology is a strip: a list pipeline never sees the index buffer at all.
-	IndexWidth descriptors.IndexWidth
+	IndexWidth types.IndexWidth
 	Label      string
 }
 

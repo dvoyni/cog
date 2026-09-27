@@ -55,7 +55,7 @@ func captureRowBytes(width, bytesPerTexel int) int {
 // RGBA: cog's format table is closed, so this is a whitelist rather than a
 // guess.
 func captureSupported(format gfx.TextureFormat) bool {
-	switch format.Resolve() {
+	switch format {
 	case gfx.FormatRGBA8, gfx.FormatRGBA8Srgb:
 		return true
 	default:

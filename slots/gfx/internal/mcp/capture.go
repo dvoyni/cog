@@ -1,10 +1,22 @@
-package internal
+package mcp
 
 import (
 	"sync"
 
+	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/slots/app"
+	"github.com/dvoyni/cog/slots/gfx/internal"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
+
+// captureOnUpdate is the subscription type of the start-of-tick capture
+// handler, admitCapture, on app.UpdateEvent. It is ordered First - ahead of
+// every other subscriber, not merely in the first phase - because that is what
+// makes "a tick that began after the request" decidable: a capture armed while
+// a tick is already running has to wait for the next one, and nothing later in
+// the publication can tell the two apart. Its whole body is a mutex-guarded
+// no-op when no capture is waiting.
+type captureOnUpdate kernel.Subscription[app.UpdateEvent]
 
 // captureRequest is one live capture or burst: where its stills go, and how far
 // through them the engine has got.
@@ -19,7 +31,7 @@ type captureRequest struct {
 	delivered int
 	// ticks is how many more ticks must begin before the next still binds.
 	ticks int
-	done  chan Capture
+	done  chan internal.Capture
 }
 
 // captureState is gfx's one capture slot. A still moves through it in four
@@ -35,7 +47,7 @@ type captureRequest struct {
 // as of a tick that *began* after the request, so an arm landing inside a tick
 // already running waits for the next one rather than binding to it.
 //
-// It is plugin-owned state with its own lock rather than a kernel resource,
+// It is observer-owned state with its own lock rather than a kernel resource,
 // which is the one thing here that is forced rather than chosen: shutdown has
 // to complete a waiting capture, Stop runs after the scheduler has stopped,
 // and a stopped scheduler grants no locks - so a resource would be unreachable
@@ -68,7 +80,7 @@ func (s *captureState) arm(request ArmCaptureRequest) (*captureRequest, error) {
 	}
 	live := &captureRequest{
 		target: request.Target, amount: amount, interval: interval,
-		done: make(chan Capture, amount),
+		done: make(chan internal.Capture, amount),
 	}
 	s.request = live
 	// A paused engine will complete no further tick, so the last one already is
@@ -143,7 +155,7 @@ func (s *captureState) encoded() {
 //
 // A failure ends the request wherever it lands. A burst truncates rather than
 // failing, and the ordinals already delivered are the short success.
-func (s *captureState) deliver(capture Capture) {
+func (s *captureState) deliver(capture internal.Capture) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.request == nil || !s.inflight {
@@ -171,7 +183,7 @@ func (s *captureState) abandon() {
 		return
 	}
 	select {
-	case s.request.done <- Capture{Err: types.ErrCaptureAbandoned{}}:
+	case s.request.done <- internal.Capture{Err: types.ErrCaptureAbandoned{}}:
 	default:
 	}
 	s.clear()

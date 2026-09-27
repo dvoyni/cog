@@ -4,7 +4,6 @@ import (
 	"slices"
 
 	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
@@ -62,14 +61,14 @@ type drawParamsStore struct {
 // binding, of the wrong kind or the wrong size, or a temporary - are reported
 // through k, once each, and the param is ignored. A set whose shader had no
 // program still exists and draws nothing.
-func (q *ResourceQueue) NewDrawParams(k kernel.Kernel, shaderID types.ShaderID, state types.DrawState, params ...descriptors.ParameterDescr) descriptors.DrawParams {
+func (q *ResourceQueue) NewDrawParams(k kernel.Kernel, shaderID types.ShaderID, state types.DrawState, params ...types.ShaderParameterDescr) types.DrawStateId {
 	store := &q.drawParams
 	if len(store.records) == 0 {
 		// Id zero is the zero handle, which names no set.
 		store.records = append(store.records, setRecord{})
 	}
 	id := uint32(len(store.records))
-	set := descriptors.DrawParamsOf(id)
+	set := types.DrawStateId(id)
 	program, ok := q.shaderProgram(shaderID)
 	if !ok {
 		q.reportNoProgram(k, id, shaderID)
@@ -110,8 +109,8 @@ func (q *ResourceQueue) NewDrawParams(k kernel.Kernel, shaderID types.ShaderID, 
 // re-rendered frame; a value that must match its frame belongs in the frame's
 // version, through OpQueue.SetDrawParams. A set that is not live is reported
 // through k once and the call ignored.
-func (q *ResourceQueue) UpdateDrawParams(k kernel.Kernel, set descriptors.DrawParams, params ...descriptors.ParameterDescr) {
-	id := descriptors.DrawParamsIndex(set)
+func (q *ResourceQueue) UpdateDrawParams(k kernel.Kernel, set types.DrawStateId, params ...types.ShaderParameterDescr) {
+	id := uint32(set)
 	if q.namedSet(k, id, "UpdateDrawParams") != setLive {
 		return
 	}
@@ -121,8 +120,8 @@ func (q *ResourceQueue) UpdateDrawParams(k kernel.Kernel, set descriptors.DrawPa
 // ReleaseDrawParams releases a set and every resource it baked from inline
 // bytes. A frame still naming it - one rendered again after the release - drops
 // its draws. A set that is not live is reported through k once and ignored.
-func (q *ResourceQueue) ReleaseDrawParams(k kernel.Kernel, set descriptors.DrawParams) {
-	id := descriptors.DrawParamsIndex(set)
+func (q *ResourceQueue) ReleaseDrawParams(k kernel.Kernel, set types.DrawStateId) {
+	id := uint32(set)
 	// A failed set is released like a live one; its runs are empty.
 	if state := q.namedSet(k, id, "ReleaseDrawParams"); state != setLive && state != setFailed {
 		return
@@ -172,7 +171,7 @@ func (q *ResourceQueue) reportNoProgram(k kernel.Kernel, set uint32, id types.Sh
 }
 
 // applyDrawParams writes params into a live set's own values.
-func (q *ResourceQueue) applyDrawParams(k kernel.Kernel, id uint32, call string, params []descriptors.ParameterDescr) {
+func (q *ResourceQueue) applyDrawParams(k kernel.Kernel, id uint32, call string, params []types.ShaderParameterDescr) {
 	store := &q.drawParams
 	record := &store.records[id]
 	values := store.values[record.values.start : record.values.start+record.values.count]
@@ -180,30 +179,31 @@ func (q *ResourceQueue) applyDrawParams(k kernel.Kernel, id uint32, call string,
 		param := &params[i]
 		slot, _, fault, err := paramSlot(record.program, param, call)
 		if err != nil {
-			reportDrawParams(k, id, param.Name(), fault, call, err)
+			reportDrawParams(k, id, param.Name, fault, call, err)
 			continue
 		}
 		value := &values[slot]
-		switch descriptors.ParameterKind(param) {
-		case descriptors.ParamBytes:
-			copy(store.bytes[value.offset:value.offset+value.size], descriptors.ParameterBytes(param))
+		switch param.Kind {
+		case types.ShaderParameterKindRaw, types.ShaderParameterKindFloat, types.ShaderParameterKindVec4,
+			types.ShaderParameterKindMat4, types.ShaderParameterKindColor:
+			copy(store.bytes[value.offset:value.offset+value.size], param.Bytes())
 			value.supplied = true
-		case descriptors.ParamSampler:
-			value.sampler, value.supplied = descriptors.ParameterSampler(param), true
-		case descriptors.ParamTexture:
-			resolved, ok := q.durableTexture(descriptors.ParameterTexture(param))
+		case types.ShaderParameterKindSampler:
+			value.sampler, value.supplied = param.Sampler, true
+		case types.ShaderParameterKindTexture:
+			resolved, ok := q.durableTexture(param.Texture)
 			if !ok {
-				reportDrawParams(k, id, param.Name(), drawParamsFaultTemporary, call,
-					types.ErrDrawParamTemporary{Shader: record.program.Label(), Parameter: param.Name(), Call: call})
+				reportDrawParams(k, id, param.Name, drawParamsFaultTemporary, call,
+					types.ErrDrawParamTemporary{Shader: record.program.Label(), Parameter: param.Name, Call: call})
 				continue
 			}
 			q.releaseOwned(value)
 			*value = resolved
-		case descriptors.ParamBuffer:
+		case types.ShaderParameterKindBuffer:
 			resolved, ok := q.durableBuffer(param)
 			if !ok {
-				reportDrawParams(k, id, param.Name(), drawParamsFaultTemporary, call,
-					types.ErrDrawParamTemporary{Shader: record.program.Label(), Parameter: param.Name(), Call: call})
+				reportDrawParams(k, id, param.Name, drawParamsFaultTemporary, call,
+					types.ErrDrawParamTemporary{Shader: record.program.Label(), Parameter: param.Name, Call: call})
 				continue
 			}
 			q.releaseOwned(value)
@@ -215,24 +215,24 @@ func (q *ResourceQueue) applyDrawParams(k kernel.Kernel, id uint32, call string,
 // durableTexture resolves a texture param's descriptor to the value a set
 // keeps: a durable id as it is, a path interned, inline pixels baked into a
 // texture the set owns. It refuses an id this queue did not mint.
-func (q *ResourceQueue) durableTexture(texture descriptors.TextureDescr) (bindingValue, bool) {
+func (q *ResourceQueue) durableTexture(texture types.TextureDescr) (bindingValue, bool) {
 	value := bindingValue{supplied: true}
 	switch {
-	case texture.ID() != 0:
-		if !hasBit(q.drawParams.durableTextures, uint32(texture.ID())) {
+	case texture.Params.ID != 0:
+		if !hasBit(q.drawParams.durableTextures, uint32(texture.Params.ID)) {
 			return bindingValue{}, false
 		}
-		value.texture, value.layers = texture.ID(), int32(texture.Layers())
-	case texture.Path() != "":
-		value.path = q.drawParams.internPath(texture.Path())
+		value.texture, value.layers = texture.Params.ID, int32(texture.Params.Layers)
+	case texture.Name != "":
+		value.path = q.drawParams.internPath(texture.Name)
 	case texture.Blob.Len() > 0:
-		width, height := texture.Size()
+		width, height := texture.Params.Width, texture.Params.Height
 		if width <= 0 || height <= 0 {
 			break
 		}
-		baked := q.NewTexture(width, height, 1, texture.Format(), texture.Mipmaps())
-		q.UploadTexture(baked, 0, types.Region{}, texture.Blob.Data(), descriptors.TextureCopyData(&texture))
-		value.texture, value.layers, value.owned = baked.ID(), 1, true
+		baked := q.NewTexture(width, height, 1, texture.Params.Format, texture.Params.Mipmaps)
+		q.UploadTexture(baked, 0, types.Region{}, texture.Blob.Data(), texture.Params.CopyData)
+		value.texture, value.layers, value.owned = baked.Params.ID, 1, true
 	}
 	return value, true
 }
@@ -240,22 +240,22 @@ func (q *ResourceQueue) durableTexture(texture descriptors.TextureDescr) (bindin
 // durableBuffer resolves a buffer param to the value a set keeps: a durable id
 // and its range as they are, inline bytes baked into a buffer the set owns. It
 // refuses an id this queue did not mint.
-func (q *ResourceQueue) durableBuffer(param *descriptors.ParameterDescr) (bindingValue, bool) {
-	buffer := descriptors.ParameterBuffer(param)
+func (q *ResourceQueue) durableBuffer(param *types.ShaderParameterDescr) (bindingValue, bool) {
+	buffer := param.Buffer
 	value := bindingValue{
 		supplied:     true,
-		bufferOffset: int32(descriptors.ParameterBufferOffset(param)),
-		bufferSize:   int32(descriptors.ParameterBufferSize(param)),
+		bufferOffset: int32(param.BufferOffset),
+		bufferSize:   int32(param.BufferSize),
 	}
-	switch bytes := descriptors.BufferBytes(&buffer); {
-	case buffer.ID() != 0:
-		if !hasBit(q.drawParams.durableBuffers, uint32(buffer.ID())) {
+	switch bytes := buffer.Bytes; {
+	case buffer.ID != 0:
+		if !hasBit(q.drawParams.durableBuffers, uint32(buffer.ID)) {
 			return bindingValue{}, false
 		}
-		value.buffer = buffer.ID()
+		value.buffer = buffer.ID
 	case bytes.Len() > 0:
-		baked := q.UploadBuffer(q.NewBuffer(), bytes.Data(), descriptors.BufferCopyData(&buffer))
-		value.buffer, value.owned = baked.ID(), true
+		baked := q.UploadBuffer(q.NewBuffer(), bytes.Data(), buffer.CopyData)
+		value.buffer, value.owned = baked.ID, true
 	}
 	return value, true
 }
@@ -267,10 +267,10 @@ func (q *ResourceQueue) releaseOwned(value *bindingValue) {
 		return
 	}
 	if value.texture != 0 {
-		q.ReleaseTexture(descriptors.BakedTexture(value.texture, 0, 0))
+		q.ReleaseTexture(types.BakedTexture(value.texture, 0, 0))
 	}
 	if value.buffer != 0 {
-		q.ReleaseBuffer(descriptors.BakedBuffer(value.buffer, 0))
+		q.ReleaseBuffer(types.BufferDescrWithId(value.buffer, 0))
 	}
 	value.owned = false
 }

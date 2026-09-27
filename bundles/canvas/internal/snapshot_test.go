@@ -240,7 +240,7 @@ func aSpriteAndTriangles(queue *OpQueue) {
 	queue.Sprite(1, "images/hero.png", SpriteTransform{
 		Position: m.Vec2{X: 10, Y: 20}, Size: m.Vec2{X: 32, Y: 48},
 		Filter: gfx.FilterNearest,
-	}, nil, gfx.ColorParam(TintSlot, m.Color{R: 1, A: 1}))
+	}, nil, gfx.ShaderParameterColor(TintSlot, m.Color{R: 1, A: 1}))
 	queue.Text(1, "fonts/body.ttf", "score", TextDraw{
 		Position: m.Vec2{X: 4, Y: 6}, Size: 12, Color: m.Color{G: 1, A: 1}, Align: AlignCenter,
 	})
@@ -342,7 +342,7 @@ func TestADrawsSnapshotReportsEachLayersWindowTargetAndClear(t *testing.T) {
 	// means reading it back out of the descriptor.
 	withGfxResources(t, rig.k, func(resources *gfx.ResourceQueue) {
 		texture = resources.NewRenderTarget(64, 32, 1, gfx.FormatRGBA8)
-		target = gfx.TextureTarget(texture, 0, 0)
+		target = gfx.TargetDescrTexture(texture, 0, 0)
 	})
 
 	response, err := rig.runDraws(drawsRequest{})
@@ -373,7 +373,7 @@ func TestADrawsSnapshotReportsEachLayersWindowTargetAndClear(t *testing.T) {
 	if world.Ops != 1 {
 		t.Errorf("layer 1 recorded %d ops, want the one it did", world.Ops)
 	}
-	if offscreen.Target != "texture" || offscreen.TargetTexture != texture.ID() {
+	if offscreen.Target != "texture" || offscreen.TargetTexture != texture.Params.ID {
 		t.Errorf("target = %q/%d, want the texture the layer draws into",
 			offscreen.Target, offscreen.TargetTexture)
 	}
@@ -742,7 +742,7 @@ func TestADrawsSnapshotHoldsNothingThatAliasesTheQueue(t *testing.T) {
 		for i := range 20 {
 			queue.Sprite(Layer(i), "images/other.png", SpriteTransform{
 				Position: m.Vec2{X: float32(i) * 3, Y: 7}, Scale: 2,
-			}, nil, gfx.FloatParam("noise", float32(i)))
+			}, nil, gfx.ShaderParameterFloat("noise", float32(i)))
 			queue.DrawTriangles(Layer(i), triangleFan(), nil)
 		}
 	})
@@ -762,7 +762,7 @@ func TestADrawsSnapshotReportsATextureParameterWithoutItsPixels(t *testing.T) {
 	rig.fixture.on(func(queue *OpQueue) {
 		texture := gfx.TextureWithBytes(16, 16, gfx.FormatRGBA8, pixels, false, false)
 		queue.SpriteTexture(1, texture, SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil,
-			gfx.TextureParam("mask", texture))
+			gfx.ShaderParameterTexture("mask", texture))
 	})
 
 	response, err := rig.runDraws(drawsRequest{})

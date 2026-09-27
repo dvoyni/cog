@@ -33,8 +33,8 @@ func TestTrianglesSharingAMaterialAndValuesMerge(t *testing.T) {
 	custom := MaterialWithState(gfx.ShaderWithText("fn customMark() {}"+flatTexture), gfx.StateOverlay2D())
 	k, _, backend := testKernel(t, fstest.MapFS{}, trianglesConfig(), func(write *OpQueue) {
 		first, second := triangle(0), triangle(8)
-		write.DrawTriangles(0, first[:], &custom, gfx.FloatParam("amount", 0.5))
-		write.DrawTriangles(0, second[:], &custom, gfx.FloatParam("amount", 0.5))
+		write.DrawTriangles(0, first[:], &custom, gfx.ShaderParameterFloat("amount", 0.5))
+		write.DrawTriangles(0, second[:], &custom, gfx.ShaderParameterFloat("amount", 0.5))
 	})
 	runFrame(k)
 	if backend.draws != 1 {
@@ -49,8 +49,8 @@ func TestTrianglesDifferingInAParameterValueSplit(t *testing.T) {
 	custom := MaterialWithState(gfx.ShaderWithText("fn customMark() {}"+flatTexture), gfx.StateOverlay2D())
 	k, _, backend := testKernel(t, fstest.MapFS{}, trianglesConfig(), func(write *OpQueue) {
 		first, second := triangle(0), triangle(8)
-		write.DrawTriangles(0, first[:], &custom, gfx.FloatParam("amount", 0.5))
-		write.DrawTriangles(0, second[:], &custom, gfx.FloatParam("amount", 0.25))
+		write.DrawTriangles(0, first[:], &custom, gfx.ShaderParameterFloat("amount", 0.5))
+		write.DrawTriangles(0, second[:], &custom, gfx.ShaderParameterFloat("amount", 0.25))
 	})
 	runFrame(k)
 	if backend.draws != 2 {
@@ -90,8 +90,8 @@ func TestTrianglesVaryingAValuePerVertexStillMerge(t *testing.T) {
 func TestTrianglesWithAnUnrecognisedParameterStillBatch(t *testing.T) {
 	k, _, backend := testKernel(t, fstest.MapFS{}, trianglesConfig(), func(write *OpQueue) {
 		first, second := triangle(0), triangle(8)
-		write.DrawTriangles(0, first[:], nil, gfx.FloatParam("customValue", 3))
-		write.DrawTriangles(0, second[:], nil, gfx.FloatParam("customValue", 3))
+		write.DrawTriangles(0, first[:], nil, gfx.ShaderParameterFloat("customValue", 3))
+		write.DrawTriangles(0, second[:], nil, gfx.ShaderParameterFloat("customValue", 3))
 	})
 	runFrame(k)
 	if backend.draws != 1 {
@@ -151,7 +151,7 @@ func TestADrawNamingItsOwnMaterialIgnoresTheLayerSet(t *testing.T) {
 		write.Sprite(0, "", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, &own)
 		write.SetLayerMaterial(0, MaterialSet{
 			Sprite: &layerSprite,
-			Params: []gfx.ParameterDescr{gfx.FloatParam("customValue", 9)},
+			Params: []gfx.ShaderParameterDescr{gfx.ShaderParameterFloat("customValue", 9)},
 		})
 	})
 	runFrame(k)
@@ -172,7 +172,7 @@ func TestTheLayerSetsParametersAreAppliedPerBatch(t *testing.T) {
 		write.Sprite(0, "", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
 		write.SetLayerMaterial(0, MaterialSet{
 			Sprite: &sprite,
-			Params: []gfx.ParameterDescr{gfx.FloatParam("customValue", 9)},
+			Params: []gfx.ShaderParameterDescr{gfx.ShaderParameterFloat("customValue", 9)},
 		})
 	})
 	runFrame(k)
@@ -226,9 +226,9 @@ func TestALayerMaterialDoesNotSurviveTheFrame(t *testing.T) {
 func TestOneArrayNameAtTwoKindsSplitsTheBatch(t *testing.T) {
 	k, _, backend := testKernel(t, fstest.MapFS{}, trianglesConfig(), func(write *OpQueue) {
 		write.Sprite(0, "", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil,
-			gfx.FloatParam("wobble", 1))
+			gfx.ShaderParameterFloat("wobble", 1))
 		write.Sprite(0, "", SpriteTransform{Position: m.Vec2{X: 8}, Size: m.Vec2{X: 4, Y: 4}}, nil,
-			gfx.VecParam("wobble", m.Vec4{X: 1}))
+			gfx.ShaderParameterVec4("wobble", m.Vec4{X: 1}))
 	})
 	runFrame(k)
 	if got := len(spriteInstances(backend)); got != 2 {

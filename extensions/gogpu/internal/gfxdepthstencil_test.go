@@ -8,7 +8,7 @@ import (
 )
 
 func TestADepthlessPipelineDeclaresNoDepthState(t *testing.T) {
-	// BeginPass writes no DepthStencilAttachment for a DepthNone pass, so the
+	// BeginPass writes no DepthStencilAttachment for a DepthDescrNone pass, so the
 	// pipeline set into it must declare no depth state either.
 	if state := depthStencilState(gfx.PipelineDesc{NoDepthTarget: true, DepthFormat: gfx.FormatDepth32F}); state != nil {
 		t.Errorf("depth state = %+v, want none for a depthless pipeline", state)

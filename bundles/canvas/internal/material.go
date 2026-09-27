@@ -17,20 +17,20 @@ import (
 type Material struct {
 	shader gfx.ShaderDescr
 	state  gfx.DrawState
-	params []gfx.ParameterDescr
+	params []gfx.ShaderParameterDescr
 }
 
 // NewMaterial describes a material from a shader and its own parameters, with
 // an opaque 3D draw's state: alpha blending, depth-tested and written. A
 // canvas material almost always wants MaterialWithState and
 // gfx.StateOverlay2D instead; see canvas.NewMaterial.
-func NewMaterial(shader gfx.ShaderDescr, params ...gfx.ParameterDescr) Material {
+func NewMaterial(shader gfx.ShaderDescr, params ...gfx.ShaderParameterDescr) Material {
 	return MaterialWithState(shader, gfx.DrawState{Blend: gfx.BlendAlpha, DepthCompare: gfx.CompareLess, DepthWrite: true}, params...)
 }
 
 // MaterialWithState describes a material with explicit fixed pipeline state;
 // see canvas.MaterialWithState.
-func MaterialWithState(shader gfx.ShaderDescr, state gfx.DrawState, params ...gfx.ParameterDescr) Material {
+func MaterialWithState(shader gfx.ShaderDescr, state gfx.DrawState, params ...gfx.ShaderParameterDescr) Material {
 	return Material{shader: shader, state: state, params: params}
 }
 
@@ -42,7 +42,7 @@ func (m Material) State() gfx.DrawState { return m.state }
 
 // Params reports the material's own parameters. The slice aliases the
 // material's storage and must not be written to.
-func (m Material) Params() []gfx.ParameterDescr { return m.params }
+func (m Material) Params() []gfx.ShaderParameterDescr { return m.params }
 
 // materialSeed is fixed for the process: a fingerprint compares only against
 // others taken in the same process, which is all a batch key and the set cache
@@ -66,7 +66,7 @@ func (m *Material) Fingerprint() uint64 {
 
 // cloneTo snapshots the material's parameters into arena, so a caller mutating
 // theirs afterwards does not change what was recorded.
-func (m Material) cloneTo(arena []gfx.ParameterDescr) (Material, []gfx.ParameterDescr) {
+func (m Material) cloneTo(arena []gfx.ShaderParameterDescr) (Material, []gfx.ShaderParameterDescr) {
 	start := len(arena)
 	arena = append(arena, m.params...)
 	m.params = arena[start:]
@@ -114,7 +114,7 @@ type MaterialSet struct {
 	Sprite    *Material
 	Triangles *Material
 	Texture   *Material
-	Params    []gfx.ParameterDescr
+	Params    []gfx.ShaderParameterDescr
 }
 
 // slot reports the material this set supplies for one family, or nil where it
@@ -163,7 +163,7 @@ func (l *ScopeMaterials) Has() bool { return l.has }
 // a draw that has said what it wants takes neither. The alternative - scope
 // parameters always applying - turns a layer into a general parameter-injection
 // channel, which is not what a material set is.
-func (l *ScopeMaterials) Resolve(f Family, draw *Material, drawKey uint64) (material *Material, key uint64, scopeParams []gfx.ParameterDescr) {
+func (l *ScopeMaterials) Resolve(f Family, draw *Material, drawKey uint64) (material *Material, key uint64, scopeParams []gfx.ShaderParameterDescr) {
 	if draw != nil {
 		return draw, drawKey, nil
 	}

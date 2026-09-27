@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"github.com/dvoyni/cog/libs/assets"
 	"math"
 	"testing"
 	"unsafe"
@@ -26,13 +27,13 @@ func TestVertexAuthorsInFloatsAndStoresInThirtyTwoBytes(t *testing.T) {
 		t.Fatalf("the authoring Vertex is %d bytes, want 72", size)
 	}
 	layout := Vertex{}.VertexLayout()
-	want := []gfx.VertexAttr{
-		gfx.Attr(0, gfx.Float32x3),  // POSITION
-		gfx.Attr(12, gfx.Unorm16x2), // NORMAL     - oct32
-		gfx.Attr(16, gfx.Uint32),    // TANGENT    - oct 15/15 + handedness
-		gfx.Attr(20, gfx.Unorm16x2), // TEXCOORD_0 - against the mesh record
-		gfx.Attr(24, gfx.Unorm16x2), // TEXCOORD_1 - against the mesh record
-		gfx.Attr(28, gfx.Unorm8x4),  // COLOR_0
+	want := []gfx.VertexAttribute{
+		{Offset: 0, Type: gfx.Float32x3},  // POSITION
+		{Offset: 12, Type: gfx.Unorm16x2}, // NORMAL     - oct32
+		{Offset: 16, Type: gfx.Uint32},    // TANGENT    - oct 15/15 + handedness
+		{Offset: 20, Type: gfx.Unorm16x2}, // TEXCOORD_0 - against the mesh record
+		{Offset: 24, Type: gfx.Unorm16x2}, // TEXCOORD_1 - against the mesh record
+		{Offset: 28, Type: gfx.Unorm8x4},  // COLOR_0
 	}
 	if len(layout) != len(want) {
 		t.Fatalf("layout has %d attributes, want %d", len(layout), len(want))
@@ -106,7 +107,7 @@ func TestUnitBoxBakesOnceAndOnlyOnFirstUse(t *testing.T) {
 	}
 	var baked []gfx.BufferDescr
 	bake := func(data []byte) gfx.BufferDescr {
-		baked = append(baked, gfx.BufferWithBytes(data, false))
+		baked = append(baked, gfx.BufferDescrWithBlob(assets.NewBlob(data), false))
 		return baked[len(baked)-1]
 	}
 	first := lookup.EnsureUnit(UnitBox, bake)
@@ -125,7 +126,7 @@ func TestUnitBoxBakesOnceAndOnlyOnFirstUse(t *testing.T) {
 func TestMeshLookupResolvesABakedRef(t *testing.T) {
 	lookup := NewSizedLookup(WithDefaults(Config{}))
 	ref := lookup.EnsureUnit(UnitBox, func(data []byte) gfx.BufferDescr {
-		return gfx.BufferWithBytes(data, false)
+		return gfx.BufferDescrWithBlob(assets.NewBlob(data), false)
 	})
 	mesh, ok := lookup.Mesh(ref)
 	if !ok {
@@ -148,7 +149,7 @@ func TestMeshLookupResolvesABakedRef(t *testing.T) {
 func TestUnitBoxBakesItsBoundingSphere(t *testing.T) {
 	lookup := NewSizedLookup(WithDefaults(Config{}))
 	ref := lookup.EnsureUnit(UnitBox, func(data []byte) gfx.BufferDescr {
-		return gfx.BufferWithBytes(data, false)
+		return gfx.BufferDescrWithBlob(assets.NewBlob(data), false)
 	})
 	mesh, _ := lookup.Mesh(ref)
 	if mesh.Bounds.Center != (m.Vec3{}) {

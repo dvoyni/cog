@@ -18,10 +18,6 @@ func TestThePresentShaderTakesItsTransferFunctionFromTheFrameBufferFormat(t *tes
 	if strings.Contains(presentSource(gfx.FormatRGBA8), "1.0 / 2.4") {
 		t.Error("the unorm frame buffer's present shader encodes an already-encoded frame")
 	}
-	// FormatScreen is the sentinel, not a third answer.
-	if presentSource(gfx.FormatScreen) != presentSource(gfx.FrameBufferFormat) {
-		t.Error("FormatScreen and the frame buffer format chose different present shaders")
-	}
 }
 
 func TestBothPresentShadersCompile(t *testing.T) {

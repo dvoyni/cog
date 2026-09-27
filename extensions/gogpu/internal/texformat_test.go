@@ -15,7 +15,6 @@ func TestTextureFormatMapsEveryGfxFormat(t *testing.T) {
 		{gfx.FormatRGBA8, gputypes.TextureFormatRGBA8Unorm},
 		{gfx.FormatRGBA8Srgb, gputypes.TextureFormatRGBA8UnormSrgb},
 		{gfx.FormatDepth32F, gputypes.TextureFormatDepth32Float},
-		{gfx.FormatScreen, textureFormat(gfx.FrameBufferFormat)},
 	}
 	for _, c := range cases {
 		if got := textureFormat(c.format); got != c.want {
@@ -25,7 +24,7 @@ func TestTextureFormatMapsEveryGfxFormat(t *testing.T) {
 }
 
 func TestBytesPerTexelComesFromTheFormat(t *testing.T) {
-	for _, format := range []gfx.TextureFormat{gfx.FormatRGBA8, gfx.FormatRGBA8Srgb, gfx.FormatDepth32F, gfx.FormatScreen} {
+	for _, format := range []gfx.TextureFormat{gfx.FormatRGBA8, gfx.FormatRGBA8Srgb, gfx.FormatDepth32F} {
 		if got := bytesPerTexel(format); got != 4 {
 			t.Errorf("bytesPerTexel(%v) = %d, want 4", format, got)
 		}
@@ -61,7 +60,7 @@ func TestMipmapsAreRefusedForDepth(t *testing.T) {
 	if mipmapsSupported(gfx.FormatDepth32F) {
 		t.Error("mipmapsSupported(FormatDepth32F) = true, want false: a box filter over depth is meaningless")
 	}
-	for _, format := range []gfx.TextureFormat{gfx.FormatRGBA8, gfx.FormatRGBA8Srgb, gfx.FormatScreen} {
+	for _, format := range []gfx.TextureFormat{gfx.FormatRGBA8, gfx.FormatRGBA8Srgb} {
 		if !mipmapsSupported(format) {
 			t.Errorf("mipmapsSupported(%v) = false, want true", format)
 		}

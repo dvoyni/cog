@@ -5,8 +5,6 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
-
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
@@ -64,10 +62,10 @@ func TestEveryReflectedSamplerBindsIndependentlyByName(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	set := testSet(t, k,
-		descriptors.SamplerParam("groundSampler", types.SamplerDesc{AddressU: types.AddressRepeat, AddressV: types.AddressRepeat}),
-		descriptors.SamplerParam("decalSampler", types.SamplerDesc{}),
-		descriptors.TextureParam("groundTexture", descriptors.TextureWithBytes(1, 1, descriptors.FormatRGBA8Srgb, []byte{1, 2, 3, 4}, true, false)),
-		descriptors.TextureParam("decalTexture", descriptors.TextureWithBytes(1, 1, descriptors.FormatRGBA8Srgb, []byte{5, 6, 7, 8}, true, false)),
+		types.ShaderParameterSampler("groundSampler", types.SamplerDesc{AddressU: types.AddressRepeat, AddressV: types.AddressRepeat}),
+		types.ShaderParameterSampler("decalSampler", types.SamplerDesc{}),
+		types.ShaderParameterTexture("groundTexture", types.TextureWithBytes(1, 1, types.FormatRGBA8Srgb, []byte{1, 2, 3, 4}, true, false)),
+		types.ShaderParameterTexture("decalTexture", types.TextureWithBytes(1, 1, types.FormatRGBA8Srgb, []byte{5, 6, 7, 8}, true, false)),
 	)
 	w, ref := recordList(t, k)
 	w.Draw(ref, triangle(), set, 1, 0)

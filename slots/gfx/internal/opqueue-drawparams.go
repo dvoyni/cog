@@ -4,7 +4,6 @@ import (
 	"slices"
 
 	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
@@ -43,8 +42,8 @@ type setCursor struct {
 // call can make are reported through k once each, keyed by the set and the
 // binding, and the param ignored. A set whose creation failed takes nothing and
 // says nothing.
-func (q *OpQueue) SetDrawParams(k kernel.Kernel, set descriptors.DrawParams, params ...descriptors.ParameterDescr) {
-	id := descriptors.DrawParamsIndex(set)
+func (q *OpQueue) SetDrawParams(k kernel.Kernel, set types.DrawStateId, params ...types.ShaderParameterDescr) {
+	id := uint32(set)
 	state, program := q.sets.state(id)
 	if state != setLive {
 		if state != setFailed {
@@ -71,7 +70,7 @@ func (q *OpQueue) SetDrawParams(k kernel.Kernel, set descriptors.DrawParams, par
 		param := &params[i]
 		slot, _, fault, err := paramSlot(program, param, "SetDrawParams")
 		if err != nil {
-			reportDrawParams(k, id, param.Name(), fault, "SetDrawParams", err)
+			reportDrawParams(k, id, param.Name, fault, "SetDrawParams", err)
 			continue
 		}
 		q.setVersionValue(&values[slot], param, cursor.bytesMark)
@@ -81,10 +80,11 @@ func (q *OpQueue) SetDrawParams(k kernel.Kernel, set descriptors.DrawParams, par
 // setVersionValue writes one param into a version's slot. Bytes are written
 // over the slot's own when this version wrote them, and appended otherwise,
 // since earlier bytes may be a captured version's too.
-func (q *OpQueue) setVersionValue(value *bindingValue, param *descriptors.ParameterDescr, bytesMark int32) {
-	switch descriptors.ParameterKind(param) {
-	case descriptors.ParamBytes:
-		bytes := descriptors.ParameterBytes(param)
+func (q *OpQueue) setVersionValue(value *bindingValue, param *types.ShaderParameterDescr, bytesMark int32) {
+	switch param.Kind {
+	case types.ShaderParameterKindRaw, types.ShaderParameterKindFloat, types.ShaderParameterKindVec4,
+		types.ShaderParameterKindMat4, types.ShaderParameterKindColor:
+		bytes := param.Bytes()
 		if value.supplied && value.offset >= bytesMark && int(value.size) == len(bytes) {
 			copy(q.versionBytes[value.offset:], bytes)
 			return
@@ -95,21 +95,21 @@ func (q *OpQueue) setVersionValue(value *bindingValue, param *descriptors.Parame
 		clear(q.versionBytes[end:start])
 		copy(q.versionBytes[start:], bytes)
 		*value = bindingValue{supplied: true, offset: int32(start), size: int32(len(bytes))}
-	case descriptors.ParamSampler:
-		*value = bindingValue{supplied: true, sampler: descriptors.ParameterSampler(param)}
-	case descriptors.ParamTexture:
-		texture := q.bakeTextureIfNeeded(descriptors.ParameterTexture(param))
-		*value = bindingValue{supplied: true, texture: texture.ID(), layers: int32(texture.Layers())}
-		if texture.ID() == 0 && texture.Path() != "" {
-			q.versionPaths = append(q.versionPaths, texture.Path())
+	case types.ShaderParameterKindSampler:
+		*value = bindingValue{supplied: true, sampler: param.Sampler}
+	case types.ShaderParameterKindTexture:
+		texture := q.bakeTextureIfNeeded(param.Texture)
+		*value = bindingValue{supplied: true, texture: texture.Params.ID, layers: int32(texture.Params.Layers)}
+		if texture.Params.ID == 0 && texture.Name != "" {
+			q.versionPaths = append(q.versionPaths, texture.Name)
 			value.path = int32(len(q.versionPaths))
 		}
-	case descriptors.ParamBuffer:
-		buffer := q.bakeBufferIfNeeded(descriptors.ParameterBuffer(param), types.BufferStorage)
+	case types.ShaderParameterKindBuffer:
+		buffer := q.bakeBufferIfNeeded(param.Buffer, types.BufferStorage)
 		*value = bindingValue{
-			supplied: true, buffer: buffer.ID(),
-			bufferOffset: int32(descriptors.ParameterBufferOffset(param)),
-			bufferSize:   int32(descriptors.ParameterBufferSize(param)),
+			supplied: true, buffer: buffer.ID,
+			bufferOffset: int32(param.BufferOffset),
+			bufferSize:   int32(param.BufferSize),
 		}
 	}
 }
@@ -139,22 +139,22 @@ func (q *OpQueue) cursor(id uint32) *setCursor {
 // draw whose pass was not declared this frame is dropped and counted, and one
 // naming a set that is not live is dropped silently when the frame is
 // rendered - it is a frame rendered after what it names was let go.
-func (q *OpQueue) Draw(pass descriptors.PassRef, mesh descriptors.MeshDescr, set descriptors.DrawParams, instances, firstInstance int) {
+func (q *OpQueue) Draw(pass types.PassRef, mesh types.MeshDescr, set types.DrawStateId, instances, firstInstance int) {
 	index := q.passIndex(pass)
 	if index < 0 {
 		q.strayDraws++
 		return
 	}
 	o := DrawOp{Set: set, Instances: instances, FirstInstance: firstInstance}
-	if id := descriptors.DrawParamsIndex(set); int(id) < len(q.cursors) {
+	if id := uint32(set); int(id) < len(q.cursors) {
 		if cursor := &q.cursors[id]; cursor.frame == q.frame && cursor.version != 0 {
 			o.Version = cursor.version
 			cursor.captured = true
 		}
 	}
-	o.Mesh = descriptors.WithMeshBuffers(mesh,
-		q.copyVertexAttrs(descriptors.MeshLayout(&mesh)),
-		q.bakeBufferIfNeeded(descriptors.MeshVertices(&mesh), types.BufferVertex),
-		q.bakeBufferIfNeeded(descriptors.MeshIndices(&mesh), types.BufferIndex))
+	o.Mesh = mesh
+	o.Mesh.Layout = q.copyVertexAttrs(mesh.Layout)
+	o.Mesh.Vertices = q.bakeBufferIfNeeded(mesh.Vertices, types.BufferVertex)
+	o.Mesh.Indices = q.bakeBufferIfNeeded(mesh.Indices, types.BufferIndex)
 	q.passes[index].Draws = append(q.passes[index].Draws, o)
 }

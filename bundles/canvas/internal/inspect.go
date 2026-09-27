@@ -58,17 +58,17 @@ type Op struct {
 	// geometry, and it is what tells "recorded with a layout nothing here can
 	// read" apart from "recorded nothing".
 	VertexBytes int
-	Params      []gfx.ParameterDescr
+	Params      []gfx.ShaderParameterDescr
 }
 
 // Param returns the recorded parameter with the given name.
-func (o Op) Param(name string) (gfx.ParameterDescr, bool) {
+func (o Op) Param(name string) (gfx.ShaderParameterDescr, bool) {
 	for i := range o.Params {
-		if o.Params[i].Name() == name {
+		if o.Params[i].Name == name {
 			return o.Params[i], true
 		}
 	}
-	return gfx.ParameterDescr{}, false
+	return gfx.ShaderParameterDescr{}, false
 }
 
 // ColorParam returns the recorded color parameter with the given name.
@@ -149,7 +149,7 @@ func (w *OpQueue) inspectOp(layerID Layer, op *DrawOp) Op {
 		view.Material, view.HasMaterial = op.Triangles.Material, op.Triangles.HasMaterial
 		view.Params = op.Triangles.Params
 		if param, ok := view.Param(TextureSlot); ok {
-			view.Texture, view.HasTexture = param.TextureValue()
+			view.Texture, view.HasTexture = param.Texture, param.Kind == gfx.ShaderParameterKindTexture
 		}
 		view.Vertices = builtinVertices(&op.Triangles)
 		view.VertexBytes = len(op.Triangles.Vertices)

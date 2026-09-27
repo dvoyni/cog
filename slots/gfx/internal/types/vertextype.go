@@ -1,4 +1,4 @@
-package descriptors
+package types
 
 import (
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
@@ -42,7 +42,10 @@ const (
 	Sint32x3
 	Sint32x4
 	Unorm1010102 // packed 10/10/10/2 normalized unsigned in one u32
+	VertexTypeCount__
 )
+
+const vertexTypeBits = 5
 
 // Decode reports the scalar kind and component count this format presents to
 // the shader that reads it, and VertexScalarNone with zero for a type that is
@@ -98,12 +101,4 @@ func (t VertexType) Size() int {
 		return 16
 	}
 	return 0
-}
-
-// VertexAttribute is one attribute of the interleaved vertex buffer supplied to a
-// pipeline: its byte offset, element type, and shader @location.
-type VertexAttribute struct {
-	Offset   int
-	Type     VertexType
-	Location int
 }

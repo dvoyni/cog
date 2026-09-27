@@ -19,7 +19,8 @@ const (
 
 // canvasUniforms mirrors struct CanvasUniforms in uniforms.wgsl, and is set
 // whole, once a batch. The layout is WGSL's as it stands - a vec4 at 0, a mat4
-// at 16, a vec4 at 80 - so gfx.RawParameterRef's check passes it unpadded.
+// at 16, a vec4 at 80 - so gfx.ShaderParameterRawRef's check passes it
+// unpadded.
 type canvasUniforms struct {
 	// Viewport is width, height, clipEnabled and an unused component.
 	Viewport m.Vec4
@@ -48,8 +49,8 @@ type canvasUniforms struct {
 // forward to its next draw whatever it does not change, so two batches of one
 // material that set different bindings would leak into each other:
 //
-//	DrawTriangles(layer, verts, nil, TextureParam(TextureSlot, grass)) // version 1: canvasTexture = grass
-//	DrawTriangles(layer, verts, nil)                                   // version 2 inherits grass, not white
+//	DrawTriangles(layer, verts, nil, gfx.ShaderParameterTexture(TextureSlot, grass)) // version 1: canvasTexture = grass
+//	DrawTriangles(layer, verts, nil)                                                 // version 2 inherits grass, not white
 //
 // Under one shape per set every batch of a set sets the same bindings, so each
 // version overwrites everything the frame's earlier versions changed. The
@@ -64,18 +65,18 @@ type setDrawer struct {
 	// compiled and reported once, not once a frame.
 	shaders   map[gfx.ShaderDescr]canvasShader
 	materials map[uint64]canvasShader
-	sets      map[setKey]gfx.DrawParams
+	sets      map[setKey]gfx.DrawStateId
 
 	// material and shader are what the batch being built draws with, params its
 	// frame values, and uniforms the block they borrow.
 	material    *Material
 	fingerprint uint64
 	shader      canvasShader
-	params      []gfx.ParameterDescr
+	params      []gfx.ShaderParameterDescr
 	uniforms    canvasUniforms
 	// materialParams is scratch for filtering a material's own parameters on
 	// the one frame a set is created.
-	materialParams []gfx.ParameterDescr
+	materialParams []gfx.ShaderParameterDescr
 }
 
 // canvasShader is one shader descriptor compiled and uploaded, or the failure
@@ -101,15 +102,15 @@ func (d *setDrawer) begin(material *Material, fingerprint uint64) bool {
 
 // add appends one frame value, dropped when the shader declares no binding of
 // its name.
-func (d *setDrawer) add(param gfx.ParameterDescr) {
-	if _, ok := d.shader.program.Binding(param.Name()); ok {
+func (d *setDrawer) add(param gfx.ShaderParameterDescr) {
+	if _, ok := d.shader.program.Binding(param.Name); ok {
 		d.params = append(d.params, param)
 	}
 }
 
 // addReversed appends a first-wins list so that SetDrawParams, which is
 // last-wins, lands the same values.
-func (d *setDrawer) addReversed(params []gfx.ParameterDescr) {
+func (d *setDrawer) addReversed(params []gfx.ShaderParameterDescr) {
 	for i := len(params) - 1; i >= 0; i-- {
 		d.add(params[i])
 	}
@@ -129,7 +130,7 @@ func (d *setDrawer) draw(gfxWrite *gfx.OpQueue, pass gfx.PassRef, mesh gfx.MeshD
 	}
 	// Borrowed rather than copied: the block is 96 bytes, past what a param
 	// carries inline, and SetDrawParams copies it before it returns.
-	d.add(gfx.RawParameterRef(uniformsSlot, &d.uniforms))
+	d.add(gfx.ShaderParameterRawRef(uniformsSlot, &d.uniforms))
 	set := d.set()
 	gfxWrite.SetDrawParams(d.frame.k, set, d.params...)
 	gfxWrite.Draw(pass, mesh, set, instances, 0)
@@ -144,7 +145,7 @@ func (d *setDrawer) draw(gfxWrite *gfx.OpQueue, pass gfx.PassRef, mesh gfx.MeshD
 // so its own parameters are baked into it once. A material rebuilt every frame
 // at a changing value is a new set every frame; a value that changes belongs on
 // the draw or the scope, which reach the set as the frame's version.
-func (d *setDrawer) set() gfx.DrawParams {
+func (d *setDrawer) set() gfx.DrawStateId {
 	key := setKey{material: d.fingerprint, shape: bindingShape(d.params)}
 	if set, ok := d.sets[key]; ok {
 		return set
@@ -152,13 +153,13 @@ func (d *setDrawer) set() gfx.DrawParams {
 	fr := d.frame
 	d.materialParams = d.materialParams[:0]
 	for _, param := range d.material.params {
-		if _, declared := d.shader.program.Binding(param.Name()); declared {
+		if _, declared := d.shader.program.Binding(param.Name); declared {
 			d.materialParams = append(d.materialParams, param)
 		}
 	}
 	set := fr.resources.NewDrawParams(fr.k, d.shader.id, d.material.state, d.materialParams...)
 	if d.sets == nil {
-		d.sets = map[setKey]gfx.DrawParams{}
+		d.sets = map[setKey]gfx.DrawStateId{}
 	}
 	d.sets[key] = set
 	return set
@@ -166,11 +167,11 @@ func (d *setDrawer) set() gfx.DrawParams {
 
 // bindingShape hashes the names a batch sets, in order: FNV-1a over each name
 // and a terminator.
-func bindingShape(params []gfx.ParameterDescr) uint64 {
+func bindingShape(params []gfx.ShaderParameterDescr) uint64 {
 	const prime, offset = 1099511628211, 14695981039346656037
 	hash := uint64(offset)
 	for i := range params {
-		name := params[i].Name()
+		name := params[i].Name
 		for j := range len(name) {
 			hash = (hash ^ uint64(name[j])) * prime
 		}

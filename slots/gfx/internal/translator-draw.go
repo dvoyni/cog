@@ -1,8 +1,6 @@
 package internal
 
 import (
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
-
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
@@ -13,17 +11,17 @@ import (
 // dropped either way: the caller returns before emitting anything, so
 // report-once-drop-always holds here the way it does for a failed pipeline.
 // label is the shader's, as the set's program carries it.
-func (t *translator) reportIndexLengthOf(m *descriptors.MeshDescr, label string) error {
+func (t *translator) reportIndexLengthOf(m *types.MeshDescr, label string) error {
 	if t.indexLengthSeen(m) {
 		return nil
 	}
-	return types.ErrIndexBufferLength{Shader: label, Length: descriptors.MeshIndices(m).Size(), Width: m.IndexWidth().Bytes()}
+	return types.ErrIndexBufferLength{Shader: label, Length: m.Indices.Size, Width: m.IndexWidth.Bytes()}
 }
 
 // indexLengthSeen reports whether a malformed index buffer of this shape was
 // reported already, and marks it reported.
-func (t *translator) indexLengthSeen(m *descriptors.MeshDescr) bool {
-	key := indexLengthKey{length: descriptors.MeshIndices(m).Size(), width: m.IndexWidth()}
+func (t *translator) indexLengthSeen(m *types.MeshDescr) bool {
+	key := indexLengthKey{length: m.Indices.Size, width: m.IndexWidth}
 	if _, seen := t.badIndexLengths[key]; seen {
 		return true
 	}

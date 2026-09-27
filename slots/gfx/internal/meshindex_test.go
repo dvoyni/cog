@@ -2,9 +2,8 @@ package internal
 
 import (
 	"errors"
+	"github.com/dvoyni/cog/libs/assets"
 	"testing"
-
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
@@ -14,14 +13,14 @@ import (
 // indexedMesh is the smallest indexed mesh a translator test can draw: three
 // vertices of the fake backend's 28-byte stride, and an index buffer of the
 // given byte length declared at the given width.
-func indexedMesh(topology types.PrimitiveTopology, width descriptors.IndexWidth, indexBytes int) descriptors.MeshDescr {
+func indexedMesh(topology types.PrimitiveTopology, width types.IndexWidth, indexBytes int) types.MeshDescr {
 	const stride = 28
-	return descriptors.MeshIndexed(
-		descriptors.BufferWithBytes(make([]byte, 3*stride), true),
-		descriptors.BufferWithBytes(make([]byte, indexBytes), true),
+	return types.MeshDescrWithIndices(
+		types.BufferDescrWithBlob(assets.NewBlob(make([]byte, 3*stride)), true),
+		types.BufferDescrWithBlob(assets.NewBlob(make([]byte, indexBytes)), true),
 		width, topology,
-		descriptors.Attr(0, descriptors.Float32x3),
-		descriptors.Attr(12, descriptors.Float32x4),
+		types.VertexAttribute{Offset: 0, Type: types.Float32x3},
+		types.VertexAttribute{Offset: 12, Type: types.Float32x4},
 	)
 }
 
@@ -30,19 +29,19 @@ func indexedMesh(topology types.PrimitiveTopology, width descriptors.IndexWidth,
 func TestIndexCountFollowsTheDeclaredWidth(t *testing.T) {
 	for _, c := range []struct {
 		name  string
-		width descriptors.IndexWidth
+		width types.IndexWidth
 		want  int
 	}{
-		{"uint16", descriptors.IndexUint16, 6},
-		{"uint32", descriptors.IndexUint32, 3},
+		{"uint16", types.IndexUint16, 6},
+		{"uint32", types.IndexUint32, 3},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			mesh := indexedMesh(types.TopologyTriangleList, c.width, 12)
-			if mesh.IndexCount() != c.want {
-				t.Fatalf("IndexCount() = %d over 12 bytes, want %d", mesh.IndexCount(), c.want)
+			if mesh.IndexCount != c.want {
+				t.Fatalf("IndexCount() = %d over 12 bytes, want %d", mesh.IndexCount, c.want)
 			}
-			if mesh.IndexWidth() != c.width {
-				t.Fatalf("IndexWidth() = %v, want %v", mesh.IndexWidth(), c.width)
+			if mesh.IndexWidth != c.width {
+				t.Fatalf("IndexWidth() = %v, want %v", mesh.IndexWidth, c.width)
 			}
 		})
 	}
@@ -51,22 +50,22 @@ func TestIndexCountFollowsTheDeclaredWidth(t *testing.T) {
 // The zero value is the wide one, so a descriptor built without naming a width
 // is wide rather than wrong.
 func TestTheZeroIndexWidthIsUint32(t *testing.T) {
-	var width descriptors.IndexWidth
-	if width != descriptors.IndexUint32 || width.Bytes() != 4 {
+	var width types.IndexWidth
+	if width != types.IndexUint32 || width.Bytes() != 4 {
 		t.Fatalf("the zero IndexWidth is %v at %d bytes, want IndexUint32 at 4", width, width.Bytes())
 	}
-	if descriptors.IndexUint16.Bytes() != 2 {
-		t.Fatalf("IndexUint16.Bytes() = %d, want 2", descriptors.IndexUint16.Bytes())
+	if types.IndexUint16.Bytes() != 2 {
+		t.Fatalf("IndexUint16.Bytes() = %d, want 2", types.IndexUint16.Bytes())
 	}
 }
 
-// MeshIndexed is a pure value constructor with no error return, so the one
+// MeshDescrWithIndices is a pure value constructor with no error return, so the one
 // thing gfx can check about an index buffer - that its bytes divide by the
 // width it was declared at - is checked where the draw is translated.
 func TestAnIndexBufferThatDoesNotDivideByItsWidthIsDroppedAndReportedOnce(t *testing.T) {
 	backend := &fakeBackend{}
 	// 13 bytes at two bytes an index: the last index is half a index.
-	mesh := indexedMesh(types.TopologyTriangleList, descriptors.IndexUint16, 13)
+	mesh := indexedMesh(types.TopologyTriangleList, types.IndexUint16, 13)
 
 	reported := pipelineErrFrames(t, backend, mesh, 3)
 
@@ -93,8 +92,8 @@ func TestAnIndexBufferThatDoesNotDivideByItsWidthIsDroppedAndReportedOnce(t *tes
 func TestTheDeclaredWidthReachesTheRenderPass(t *testing.T) {
 	for _, c := range []struct {
 		name  string
-		width descriptors.IndexWidth
-	}{{"uint16", descriptors.IndexUint16}, {"uint32", descriptors.IndexUint32}} {
+		width types.IndexWidth
+	}{{"uint16", types.IndexUint16}, {"uint32", types.IndexUint32}} {
 		t.Run(c.name, func(t *testing.T) {
 			backend := &fakeBackend{}
 			if reported := pipelineErrFrames(t, backend, indexedMesh(types.TopologyTriangleList, c.width, 12), 1); len(reported) != 0 {
@@ -114,8 +113,8 @@ func TestTheDeclaredWidthReachesTheRenderPass(t *testing.T) {
 // different widths are two pipelines.
 func TestAStripIsKeyedByItsIndexWidth(t *testing.T) {
 	backend := &fakeBackend{}
-	narrow := indexedMesh(types.TopologyTriangleStrip, descriptors.IndexUint16, 12)
-	wide := indexedMesh(types.TopologyTriangleStrip, descriptors.IndexUint32, 12)
+	narrow := indexedMesh(types.TopologyTriangleStrip, types.IndexUint16, 12)
+	wide := indexedMesh(types.TopologyTriangleStrip, types.IndexUint32, 12)
 
 	p := newPlugin()
 	k := newTestKernel(t, p)
@@ -133,7 +132,7 @@ func TestAStripIsKeyedByItsIndexWidth(t *testing.T) {
 	if len(backend.lastPipelines) != 2 {
 		t.Fatalf("the backend saw %d pipeline descriptors, want 2", len(backend.lastPipelines))
 	}
-	if a, b := backend.lastPipelines[0].IndexWidth, backend.lastPipelines[1].IndexWidth; a != descriptors.IndexUint16 || b != descriptors.IndexUint32 {
+	if a, b := backend.lastPipelines[0].IndexWidth, backend.lastPipelines[1].IndexWidth; a != types.IndexUint16 || b != types.IndexUint32 {
 		t.Fatalf("the descriptors declared (%v, %v), want (IndexUint16, IndexUint32)", a, b)
 	}
 }
@@ -143,8 +142,8 @@ func TestAStripIsKeyedByItsIndexWidth(t *testing.T) {
 // differ only in an encoding detail.
 func TestATriangleListIsNotKeyedByItsIndexWidth(t *testing.T) {
 	backend := &fakeBackend{}
-	narrow := indexedMesh(types.TopologyTriangleList, descriptors.IndexUint16, 12)
-	wide := indexedMesh(types.TopologyTriangleList, descriptors.IndexUint32, 12)
+	narrow := indexedMesh(types.TopologyTriangleList, types.IndexUint16, 12)
+	wide := indexedMesh(types.TopologyTriangleList, types.IndexUint32, 12)
 
 	p := newPlugin()
 	k := newTestKernel(t, p)

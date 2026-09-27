@@ -5,28 +5,15 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
-
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/slots/app"
 )
 
-func TestFormatScreenResolvesToTheFrameBufferFormat(t *testing.T) {
-	if got := descriptors.FormatScreen.Resolve(); got != descriptors.FrameBufferFormat {
-		t.Errorf("FormatScreen.Resolve() = %v, want the frame buffer's %v", got, descriptors.FrameBufferFormat)
-	}
-	for _, format := range []descriptors.TextureFormat{descriptors.FormatRGBA8, descriptors.FormatRGBA8Srgb, descriptors.FormatDepth32F} {
-		if got := format.Resolve(); got != format {
-			t.Errorf("%v.Resolve() = %v, want itself", format, got)
-		}
-	}
-}
-
 // bakedTextureFormats reports the format of every texture bake the backend saw,
 // in recording order.
-func bakedTextureFormats(backend *fakeBackend) []descriptors.TextureFormat {
-	var formats []descriptors.TextureFormat
+func bakedTextureFormats(backend *fakeBackend) []types.TextureFormat {
+	var formats []types.TextureFormat
 	for _, op := range backend.lastOps {
 		if op.kind == testOpBakeTexture {
 			formats = append(formats, op.format)
@@ -43,12 +30,12 @@ func TestResourceTextureAlwaysBakesSrgb(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w, ref := recordList(t, k)
-	w.Draw(ref, triangle(), testSet(t, k, descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("normal.png"))), 1, 0)
+	w.Draw(ref, triangle(), testSet(t, k, types.ShaderParameterTexture("MainTexture", types.TextureWithResource("normal.png"))), 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	got := bakedTextureFormats(backend)
-	if len(got) != 1 || got[0] != descriptors.FormatRGBA8Srgb {
+	if len(got) != 1 || got[0] != types.FormatRGBA8Srgb {
 		t.Fatalf("baked formats = %v, want one FormatRGBA8Srgb: a decoded image is sRGB whatever it is named", got)
 	}
 }
@@ -63,13 +50,13 @@ func TestSameResourcePathBakesOnce(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w, ref := recordList(t, k)
-	w.Draw(ref, triangle(), testSet(t, k, descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("hero.png"))), 1, 0)
-	w.Draw(ref, triangle(), testSet(t, k, descriptors.TextureParam("MainTexture", descriptors.TextureWithResource("hero.png"))), 1, 0)
+	w.Draw(ref, triangle(), testSet(t, k, types.ShaderParameterTexture("MainTexture", types.TextureWithResource("hero.png"))), 1, 0)
+	w.Draw(ref, triangle(), testSet(t, k, types.ShaderParameterTexture("MainTexture", types.TextureWithResource("hero.png"))), 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
 	got := bakedTextureFormats(backend)
-	if len(got) != 1 || got[0] != descriptors.FormatRGBA8Srgb {
+	if len(got) != 1 || got[0] != types.FormatRGBA8Srgb {
 		t.Fatalf("baked formats = %v, want one FormatRGBA8Srgb: a path has one colour space, so it bakes once", got)
 	}
 	if filesystem.opens != 1 {
@@ -90,8 +77,8 @@ func TestOnlyAllocateRenderTargetAsksForARenderableTexture(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		resources.NewTexture(64, 64, 1, descriptors.FormatRGBA8Srgb, false)
-		resources.NewRenderTarget(64, 64, 1, descriptors.FormatRGBA8Srgb)
+		resources.NewTexture(64, 64, 1, types.FormatRGBA8Srgb, false)
+		resources.NewRenderTarget(64, 64, 1, types.FormatRGBA8Srgb)
 	})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
@@ -123,13 +110,13 @@ func TestARenderTargetIsRenderedIntoAndSampledOnALaterFrame(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	var texture descriptors.TextureDescr
+	var texture types.TextureDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		texture = resources.NewRenderTarget(64, 64, 1, descriptors.FormatRGBA8Srgb)
+		texture = resources.NewRenderTarget(64, 64, 1, types.FormatRGBA8Srgb)
 	})
 	set := testSet(t, k)
 	q := recordRaw(t, k)
-	ref := q.NewPass(descriptors.PassDescr{Target: descriptors.TextureTarget(texture, 0, 0), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "bake"})
+	ref := q.NewPass(types.PassDescr{Target: types.TargetDescrTexture(texture, 0, 0), Depth: types.DepthDescrNone(), Load: types.LoadClear, Label: "bake"})
 	drawInto(q, ref, set)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -139,14 +126,14 @@ func TestARenderTargetIsRenderedIntoAndSampledOnALaterFrame(t *testing.T) {
 	}
 
 	q = recordRaw(t, k)
-	ref = q.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "use"})
-	q.Draw(ref, triangle(), testSet(t, k, descriptors.TextureParam("MainTexture", texture)), 1, 0)
+	ref = q.NewPass(types.PassDescr{Target: types.TargetDescrScreen(), Depth: types.DepthDescrNone(), Load: types.LoadClear, Label: "use"})
+	q.Draw(ref, triangle(), testSet(t, k, types.ShaderParameterTexture("MainTexture", texture)), 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 
-	if len(backend.boundTextures) == 0 || !slices.Contains(backend.boundTextures, texture.ID()) {
+	if len(backend.boundTextures) == 0 || !slices.Contains(backend.boundTextures, texture.Params.ID) {
 		t.Fatalf("bound textures = %v, want the render target %v sampled a frame after it was written",
-			backend.boundTextures, texture.ID())
+			backend.boundTextures, texture.Params.ID)
 	}
 	// The write was a frame ago and the backend's own submit ordered it, so the
 	// second frame has no write of its own to order this read against.

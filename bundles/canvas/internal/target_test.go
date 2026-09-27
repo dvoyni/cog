@@ -63,7 +63,7 @@ func TestALayerWithATargetRendersIntoItsTextureRatherThanTheScreen(t *testing.T)
 	}
 }
 
-// Depth is per attachment, and DepthAuto pools one texture per target size, so
+// Depth is per attachment, and DepthDescrAuto pools one texture per target size, so
 // a run that inherited the previous run's depth would z-test against whatever
 // the other target left behind. The clear and the discard therefore bracket
 // every run, not just the frame's first and last layer.
@@ -235,7 +235,7 @@ func TestDrawTextureBindsTheTextureToACustomShape(t *testing.T) {
 // Part 3 is interop, and it needs no code at all: the unit of exchange is a
 // plain gfx texture, so the same handle a canvas layer rendered into is the one
 // a later canvas layer samples. A scene material takes it through
-// gfx.TextureParam the same way.
+// gfx.ShaderParameterTexture the same way.
 func TestATextureACanvasLayerRenderedIsSampledByALaterLayer(t *testing.T) {
 	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
 		target, texture := gfxWrite.NewTemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)

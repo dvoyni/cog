@@ -85,8 +85,8 @@ type keyScratch struct {
 	spareSets [][]setKey
 	// params and tagParams are reused backings a List is copied out into
 	// before it is hashed.
-	params    []gfx.ParameterDescr
-	tagParams []gfx.ParameterDescr
+	params    []gfx.ShaderParameterDescr
+	tagParams []gfx.ShaderParameterDescr
 	// walked is how many Entities the last run keyed. A steady frame keys
 	// none.
 	walked int

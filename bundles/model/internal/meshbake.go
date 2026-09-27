@@ -41,7 +41,7 @@ type MeshBaker struct {
 	Bake              func(data []byte) gfx.BufferDescr
 	Rebake            func(buffer gfx.BufferDescr, data []byte) gfx.BufferDescr
 	Release           func(buffer gfx.BufferDescr)
-	ReleaseDrawParams func(set gfx.DrawParams)
+	ReleaseDrawParams func(set gfx.DrawStateId)
 }
 
 // BakeMesh registers caller-owned geometry and returns the ref that draws it.

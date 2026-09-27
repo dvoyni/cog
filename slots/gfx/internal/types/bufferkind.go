@@ -26,10 +26,3 @@ func (kind BufferKind) String() string {
 	}
 	return "unknown(" + strconv.Itoa(int(kind)) + ")"
 }
-
-// BufferDesc describes a GPU buffer to create.
-type BufferDesc struct {
-	Kind  BufferKind
-	Size  int
-	Label string
-}

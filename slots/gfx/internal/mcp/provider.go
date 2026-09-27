@@ -1,4 +1,4 @@
-package internal
+package mcp
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dvoyni/cog/slots/gfx/internal"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/bundles/mcp"
@@ -212,10 +213,10 @@ func collectCapture(
 // writeCapturePNG un-strides one readback and puts it on disk. An existing
 // file is overwritten without complaint: re-writing the same name is the
 // iterate-and-look loop.
-func writeCapturePNG(path string, capture Capture) error {
+func writeCapturePNG(path string, capture internal.Capture) error {
 	picture := capture.Image()
 	if picture == nil {
-		return ErrCaptureUnsupported{Format: capture.Format}
+		return internal.ErrCaptureUnsupported{Format: capture.Format}
 	}
 	file, err := os.Create(path)
 	if err != nil {
@@ -248,7 +249,7 @@ func captureRefusal(reason error, amount, interval int) error {
 	case errors.Is(reason, types.ErrCaptureNoTarget{}):
 		return mcp.Unavailable{Reason: "the game drew nothing to the screen in that frame"}
 	}
-	var unsupported ErrCaptureUnsupported
+	var unsupported internal.ErrCaptureUnsupported
 	if errors.As(reason, &unsupported) {
 		return mcp.Unavailable{Reason: unsupported.Error()}
 	}
@@ -370,8 +371,8 @@ type frameSnapshotResponse struct {
 	// counts and the viewport but not the three arrays, so the reply says what
 	// the frame was without repeating it.
 	Path string `json:"path,omitempty"`
-	FrameView
-	SnapshotView
+	internal.FrameView
+	internal.SnapshotView
 }
 
 // frameSnapshot is the gfx_frame body: validate, arm, step if the engine is
@@ -402,7 +403,7 @@ func frameSnapshot(k kernel.Executioner, request frameSnapshotRequest) (frameSna
 	if armed.Err != nil {
 		return frameSnapshotResponse{}, frameRefusal(armed.Err)
 	}
-	response := frameSnapshotResponse{SnapshotView: SnapshotViewOf(armed.Viewport)}
+	response := frameSnapshotResponse{SnapshotView: internal.SnapshotViewOf(armed.Viewport)}
 	// The arm is placed first so that the tick the step produces is one that
 	// began after it. Joining a step another arm already raised is what makes
 	// three snapshots armed together describe one tick instead of three.

@@ -86,8 +86,8 @@ const (
 var defaultTrianglesMaterial = MaterialWithState(
 	gfx.ShaderWithResource(TrianglesShaderPath),
 	gfx.StateOverlay2D(),
-	gfx.SamplerParam(SamplerSlot, gfx.SamplerDesc{}),
-	gfx.ColorParam(KeyColorSlot, defaultKeyColor),
+	gfx.ShaderParameterSampler(SamplerSlot, gfx.SamplerDesc{}),
+	gfx.ShaderParameterColor(KeyColorSlot, defaultKeyColor),
 )
 
 // defaultTextureMaterial samples an arbitrary gfx texture as it is. It is a
@@ -99,7 +99,7 @@ var defaultTrianglesMaterial = MaterialWithState(
 var defaultTextureMaterial = MaterialWithState(
 	gfx.ShaderWithResource(TextureShaderPath),
 	gfx.StateOverlay2D(),
-	gfx.SamplerParam(SamplerSlot, gfx.SamplerDesc{}),
+	gfx.ShaderParameterSampler(SamplerSlot, gfx.SamplerDesc{}),
 )
 
 // defaultSpriteMaterial draws many sprites, glyphs and fills in one instanced
@@ -144,8 +144,8 @@ var (
 	}
 )
 
-var triangleVertexLayout = [...]gfx.VertexAttr{
-	gfx.Attr(int(unsafe.Offsetof(Vertex{}.Position)), gfx.Float32x2),
-	gfx.Attr(int(unsafe.Offsetof(Vertex{}.Color)), gfx.Float32x4),
-	gfx.Attr(int(unsafe.Offsetof(Vertex{}.UV)), gfx.Float32x2),
+var triangleVertexLayout = [...]gfx.VertexAttribute{
+	{Offset: int(unsafe.Offsetof(Vertex{}.Position)), Type: gfx.Float32x2},
+	{Offset: int(unsafe.Offsetof(Vertex{}.Color)), Type: gfx.Float32x4},
+	{Offset: int(unsafe.Offsetof(Vertex{}.UV)), Type: gfx.Float32x2},
 }

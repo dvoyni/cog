@@ -1,7 +1,8 @@
 package internal
 
 import (
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+	"strconv"
+
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 )
 
@@ -19,7 +20,7 @@ func appendDrawParamsViews(dst []DrawParamsView, seen map[drawParamsKey]int, que
 	draws := OpQueuePasses(queue)[index].Draws
 	for i := range draws {
 		op := &draws[i]
-		id := descriptors.DrawParamsIndex(op.Set)
+		id := uint32(op.Set)
 		if id == 0 {
 			continue
 		}
@@ -150,5 +151,5 @@ func setStateName(state setState) string {
 	case setReleased:
 		return "released"
 	}
-	return descriptors.UnknownName(int(state))
+	return "unknown(" + strconv.Itoa(int(state)) + ")"
 }

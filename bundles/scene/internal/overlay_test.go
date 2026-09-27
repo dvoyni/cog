@@ -36,7 +36,7 @@ func TestAMaterialOverlaysEachPrimitivesOwnMaterial(t *testing.T) {
 	h := newDrawingHarness(t, 256)
 	painted := &Model{Ref: model.ModelRef{Path: paintedModel}}
 	h.spawn(t, spawnRequest{Place: m.At(-3, 0, 0), Model: painted, Material: &Material{Tags: m.NewList(
-		MaterialTag{Shader: gfx.ShaderWithText("fade"), Params: m.NewList(gfx.FloatParam("a", 7))},
+		MaterialTag{Shader: gfx.ShaderWithText("fade"), Params: m.NewList(gfx.ShaderParameterFloat("a", 7))},
 	)}})
 	h.spawn(t, spawnRequest{Place: m.At(3, 0, 0), Model: painted})
 
@@ -84,14 +84,14 @@ func TestATagsStateAndParamsWinOverTheFile(t *testing.T) {
 			Pass{Tag: "shadow", Order: 1},
 		),
 	}})
-	blue := gfx.ColorParam("baseColorFactor", m.Color{B: 1, A: 1})
+	blue := gfx.ShaderParameterColor("baseColorFactor", m.Color{B: 1, A: 1})
 	h.spawn(t, spawnRequest{
 		Place: m.At(0, 0, 0), Model: &Model{Ref: model.ModelRef{Path: paintedModel}},
 		Material: &Material{Tags: m.NewList(
 			MaterialTag{Shader: gfx.ShaderWithText("fade"), State: gfx.StateOpaque3D(), Params: m.NewList(blue)},
 			MaterialTag{Tag: "shadow", Shader: gfx.ShaderWithText("shadow")},
 		)},
-		Params: &Params{Values: m.NewList(gfx.FloatParam("metallicFactor", 0.25))},
+		Params: &Params{Values: m.NewList(gfx.ShaderParameterFloat("metallicFactor", 0.25))},
 	})
 
 	h.frameUntil(t, "the painted model to become resident", func() bool { return len(h.drawn()) == 4 })
@@ -168,15 +168,15 @@ func TestTheDefaultSceneShaderFeedsEveryDrawThatNamesNone(t *testing.T) {
 	h := newDrawingHarness(t, 256)
 	h.kernel.ExecuteCommand[defaultShaderCmd](model.SceneShaderDescr{
 		Source: gfx.ShaderWithText("sight"),
-		Params: []gfx.ParameterDescr{gfx.FloatParam("fade", 0.5)},
+		Params: []gfx.ShaderParameterDescr{gfx.ShaderParameterFloat("fade", 0.5)},
 	})
 	ref := h.bake(t)
 	h.spawn(t, spawnRequest{Place: m.At(-6, 0, 0), Mesh: &Mesh{Ref: ref}})
 	h.spawn(t, spawnRequest{Place: m.At(-3, 0, 0), Model: crateModelComponent()})
 	h.spawn(t, spawnRequest{Place: m.At(0, 0, 0), Model: crateModelComponent(),
-		Material: &Material{Tags: m.NewList(MaterialTag{Params: m.NewList(gfx.FloatParam("a", 2))})}})
+		Material: &Material{Tags: m.NewList(MaterialTag{Params: m.NewList(gfx.ShaderParameterFloat("a", 2))})}})
 	h.spawn(t, spawnRequest{Place: m.At(3, 0, 0), Model: crateModelComponent(),
-		Params: &Params{Values: m.NewList(gfx.FloatParam("fade", 0.25))}})
+		Params: &Params{Values: m.NewList(gfx.ShaderParameterFloat("fade", 0.25))}})
 	h.spawn(t, spawnRequest{Place: m.At(6, 0, 0), Model: crateModelComponent(),
 		Material: &Material{Tags: m.NewList(MaterialTag{Shader: gfx.ShaderWithText("outline")})}})
 
@@ -221,25 +221,25 @@ func TestTheDefaultSceneShaderFeedsEveryDrawThatNamesNone(t *testing.T) {
 // block goes into the values instead.
 func TestLayParamsReplacesByNameAndAppendsTheRest(t *testing.T) {
 	var values model.PbrValues
-	arena := []gfx.ParameterDescr{gfx.FloatParam("before", 9)}
+	arena := []gfx.ShaderParameterDescr{gfx.ShaderParameterFloat("before", 9)}
 	start := len(arena)
-	arena = append(arena, gfx.FloatParam("a", 1), gfx.FloatParam("b", 2))
-	arena = layParams(arena, start, &values, gfx.FloatParam("b", 3), gfx.FloatParam("c", 4))
-	arena = layParams(arena, start, &values, gfx.FloatParam("a", 5), gfx.FloatParam("metallicFactor", 6))
+	arena = append(arena, gfx.ShaderParameterFloat("a", 1), gfx.ShaderParameterFloat("b", 2))
+	arena = layParams(arena, start, &values, gfx.ShaderParameterFloat("b", 3), gfx.ShaderParameterFloat("c", 4))
+	arena = layParams(arena, start, &values, gfx.ShaderParameterFloat("a", 5), gfx.ShaderParameterFloat("metallicFactor", 6))
 
 	var got []string
 	for _, param := range arena[start:] {
 		value, _ := param.FloatValue()
-		got = append(got, param.Name()+"="+string(rune('0'+int(value))))
+		got = append(got, param.Name+"="+string(rune('0'+int(value))))
 	}
 	if want := "a=5 b=3 c=4"; strings.Join(got, " ") != want {
 		t.Errorf("the overlay is %v, want %s", got, want)
 	}
-	if value, _ := arena[0].FloatValue(); arena[0].Name() != "before" || value != 9 {
-		t.Errorf("the overlay reached outside its window: %v", arena[0].Name())
+	if value, _ := arena[0].FloatValue(); arena[0].Name != "before" || value != 9 {
+		t.Errorf("the overlay reached outside its window: %v", arena[0].Name)
 	}
 	var want model.PbrValues
-	want.Overlay(gfx.FloatParam("metallicFactor", 6))
+	want.Overlay(gfx.ShaderParameterFloat("metallicFactor", 6))
 	if values != want {
 		t.Errorf("the member reached the values as %+v, want %+v", values, want)
 	}

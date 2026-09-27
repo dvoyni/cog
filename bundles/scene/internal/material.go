@@ -14,7 +14,7 @@ import (
 type (
 	materialTag struct {
 		tag      PassTag
-		set      gfx.DrawParams
+		set      gfx.DrawStateId
 		state    gfx.DrawState
 		bindings sceneBindings
 		program  gfx.ShaderProgram
@@ -115,7 +115,7 @@ func (t *materialTable) entry(interned int32, tag tagID) (materialEntry, bool) {
 		return materialEntry{}, false
 	}
 	resolved := &material.material[index]
-	if resolved.set == (gfx.DrawParams{}) {
+	if resolved.set == 0 {
 		return materialEntry{}, false
 	}
 	return materialEntry{

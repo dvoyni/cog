@@ -149,7 +149,7 @@ func resetSets(k kernel.Kernel, resources *gfx.ResourceQueue, s *keyScratch, cur
 	c := &s.sets
 	for _, cached := range c.sets {
 		for i := range cached.material {
-			if set := cached.material[i].set; set != (gfx.DrawParams{}) {
+			if set := cached.material[i].set; set != 0 {
 				resources.ReleaseDrawParams(k, set)
 			}
 		}

@@ -239,7 +239,7 @@ func (spriteVisual) Draw(lookup canvas.LookupAccess, queue *canvas.OpQueue, stat
 		Size:     m.Vec2{X: bounds.Width, Y: bounds.Height},
 		Rotation: params.Rotation, Origin: m.Vec2{X: 0.5, Y: 0.5}, Frame: frame, Filter: params.Filter,
 	}
-	tint := gfx.ColorParam(canvas.TintSlot, defaultTint(params.Tint))
+	tint := gfx.ShaderParameterColor(canvas.TintSlot, defaultTint(params.Tint))
 	// A zero key colour names the slot not at all, so canvas applies its own
 	// default. Restating that default here would be a second copy of a value
 	// only canvas should own.
@@ -248,7 +248,7 @@ func (spriteVisual) Draw(lookup canvas.LookupAccess, queue *canvas.OpQueue, stat
 		return
 	}
 	queue.Sprite(state.Layer, params.Path, transform, state.Materials.Sprite, tint,
-		gfx.ColorParam(canvas.KeyColorSlot, params.KeyColor))
+		gfx.ShaderParameterColor(canvas.KeyColorSlot, params.KeyColor))
 }
 
 func Sprite9Sliced(params Sprite9SlicedParams) (ParamVisual[Sprite9SlicedParams], Sprite9SlicedParams) {
@@ -300,7 +300,7 @@ func (sprite9SlicedVisual) Draw(_ canvas.LookupAccess, queue *canvas.OpQueue, st
 		Size:      m.Vec2{X: bounds.Width, Y: bounds.Height},
 		NineSlice: params.Insets, NineSliceScale: defaultScale(params.Scale), NineSliceNoCenter: params.NoCenter,
 		Filter: params.Filter,
-	}, state.Materials.Sprite, gfx.ColorParam(canvas.TintSlot, defaultTint(params.Tint)))
+	}, state.Materials.Sprite, gfx.ShaderParameterColor(canvas.TintSlot, defaultTint(params.Tint)))
 }
 
 func Sprite9SliceTiled(params Sprite9SliceTiledParams) (ParamVisual[Sprite9SliceTiledParams], Sprite9SliceTiledParams) {
@@ -372,7 +372,7 @@ func (sprite9SliceTiledVisual) Draw(lookup canvas.LookupAccess, queue *canvas.Op
 				Position: m.Vec2{X: bounds.X + x[column], Y: bounds.Y + y[row]},
 				Size:     m.Vec2{X: width, Y: height},
 				Scale:    scale, TileX: column == 1, TileY: row == 1, Filter: params.Filter,
-			}, state.Materials.Sprite, gfx.ColorParam(canvas.TintSlot, defaultTint(params.Tint)))
+			}, state.Materials.Sprite, gfx.ShaderParameterColor(canvas.TintSlot, defaultTint(params.Tint)))
 		}
 	}
 }

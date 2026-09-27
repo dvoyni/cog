@@ -10,7 +10,6 @@ import (
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/app"
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
@@ -40,7 +39,7 @@ type setWorld struct {
 	k        kernel.Executioner
 	reported *[]error
 	shader   types.ShaderID
-	records  descriptors.BufferDescr
+	records  types.BufferDescr
 }
 
 func newSetWorld(t *testing.T) *setWorld {
@@ -61,10 +60,10 @@ func newSetWorld(t *testing.T) *setWorld {
 func (w *setWorld) resources(use func(kernel.Kernel, *ResourceQueue)) { withShaders(w.k, use) }
 
 // newSet creates a set on the world's shader that fills its storage binding.
-func (w *setWorld) newSet(state types.DrawState, params ...descriptors.ParameterDescr) descriptors.DrawParams {
-	var set descriptors.DrawParams
+func (w *setWorld) newSet(state types.DrawState, params ...types.ShaderParameterDescr) types.DrawStateId {
+	var set types.DrawStateId
 	w.resources(func(k kernel.Kernel, q *ResourceQueue) {
-		params = append([]descriptors.ParameterDescr{descriptors.BufferParam("instances", w.records)}, params...)
+		params = append([]types.ShaderParameterDescr{types.ShaderParameterBuffer("instances", w.records)}, params...)
 		set = q.NewDrawParams(k, w.shader, state, params...)
 	})
 	return set
@@ -77,9 +76,9 @@ func (w *setWorld) frame(record func(kernel.Kernel, *OpQueue)) {
 	w.k.PublishEvent(app.RenderEvent{}).Wait()
 }
 
-func screenPass(q *OpQueue, order int, label string) descriptors.PassRef {
-	return q.NewPass(descriptors.PassDescr{
-		Order: descriptors.Order(order), Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Label: label,
+func screenPass(q *OpQueue, order int, label string) types.PassRef {
+	return q.NewPass(types.PassDescr{
+		Order: types.Order(order), Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto(), Label: label,
 	})
 }
 
@@ -114,14 +113,14 @@ func translation(x float32) m.Mat4 {
 // was created rather than looked up by name at the draw.
 func TestADrawBindsItsSetsOwnValues(t *testing.T) {
 	w := newSetWorld(t)
-	var albedo descriptors.TextureDescr
+	var albedo types.TextureDescr
 	w.resources(func(_ kernel.Kernel, q *ResourceQueue) {
-		albedo = q.NewTexture(2, 2, 1, descriptors.FormatRGBA8, false)
+		albedo = q.NewTexture(2, 2, 1, types.FormatRGBA8, false)
 	})
 	set := w.newSet(types.DrawState{},
-		descriptors.ColorParam("tint", m.Color{R: 1, G: 0.5, B: 0.25, A: 1}),
-		descriptors.TextureParam("albedo", albedo),
-		descriptors.SamplerParam("albedoSampler", types.SamplerDesc{AddressU: types.AddressRepeat}),
+		types.ShaderParameterColor("tint", m.Color{R: 1, G: 0.5, B: 0.25, A: 1}),
+		types.ShaderParameterTexture("albedo", albedo),
+		types.ShaderParameterSampler("albedoSampler", types.SamplerDesc{AddressU: types.AddressRepeat}),
 	)
 
 	w.frame(func(_ kernel.Kernel, q *OpQueue) { q.Draw(screenPass(q, 0, "main"), triangle(), set, 1, 0) })
@@ -136,12 +135,12 @@ func TestADrawBindsItsSetsOwnValues(t *testing.T) {
 	if len(tint) != 1 || !equalFloats(floatsOf(tint[0].data), []float32{1, 0.5, 0.25, 1}) {
 		t.Errorf("tint bound %+v, want the set's color", tint)
 	}
-	if !w.backend.boundTexture(albedo.ID()) {
-		t.Errorf("texture %d was never bound", albedo.ID())
+	if !w.backend.boundTexture(albedo.Params.ID) {
+		t.Errorf("texture %d was never bound", albedo.Params.ID)
 	}
 	var buffer, sampler bool
 	for _, op := range w.backend.lastOps {
-		buffer = buffer || (op.kind == testOpSetBuffer && op.buffer == w.records.ID() && op.group == 2)
+		buffer = buffer || (op.kind == testOpSetBuffer && op.buffer == w.records.ID && op.group == 2)
 		sampler = sampler || (op.kind == testOpSetSampler && op.group == 1 && op.binding == 0)
 	}
 	if !buffer || !sampler {
@@ -159,9 +158,9 @@ func TestADrawSeesTheVersionItWasRecordedWith(t *testing.T) {
 	w.frame(func(k kernel.Kernel, q *OpQueue) {
 		passA := screenPass(q, 1, "a")
 		passB := screenPass(q, 0, "b")
-		q.SetDrawParams(k, set, descriptors.MatParam("frame", translation(1)))
+		q.SetDrawParams(k, set, types.ShaderParameterMat4("frame", translation(1)))
 		q.Draw(passA, triangle(), set, 1, 0)
-		q.SetDrawParams(k, set, descriptors.MatParam("frame", translation(2)))
+		q.SetDrawParams(k, set, types.ShaderParameterMat4("frame", translation(2)))
 		q.Draw(passB, triangle(), set, 1, 0)
 	})
 
@@ -190,9 +189,9 @@ func TestAnUncapturedVersionIsPatchedInPlace(t *testing.T) {
 	var slots, bytes int
 
 	w.frame(func(k kernel.Kernel, q *OpQueue) {
-		q.SetDrawParams(k, set, descriptors.MatParam("frame", translation(1)))
-		q.SetDrawParams(k, set, descriptors.ColorParam("tint", m.Color{G: 1, A: 1}))
-		q.SetDrawParams(k, set, descriptors.MatParam("frame", translation(3)))
+		q.SetDrawParams(k, set, types.ShaderParameterMat4("frame", translation(1)))
+		q.SetDrawParams(k, set, types.ShaderParameterColor("tint", m.Color{G: 1, A: 1}))
+		q.SetDrawParams(k, set, types.ShaderParameterMat4("frame", translation(3)))
 		q.Draw(screenPass(q, 0, "main"), triangle(), set, 1, 0)
 		slots, bytes = len(q.versionValues), len(q.versionBytes)
 	})
@@ -220,9 +219,9 @@ func TestACapturedVersionIsCopiedAndSharesWhatItKeeps(t *testing.T) {
 
 	w.frame(func(k kernel.Kernel, q *OpQueue) {
 		pass := screenPass(q, 0, "main")
-		q.SetDrawParams(k, set, descriptors.MatParam("frame", translation(1)), descriptors.ColorParam("tint", m.Color{B: 1, A: 1}))
+		q.SetDrawParams(k, set, types.ShaderParameterMat4("frame", translation(1)), types.ShaderParameterColor("tint", m.Color{B: 1, A: 1}))
 		q.Draw(pass, triangle(), set, 1, 0)
-		q.SetDrawParams(k, set, descriptors.MatParam("frame", translation(2)))
+		q.SetDrawParams(k, set, types.ShaderParameterMat4("frame", translation(2)))
 		q.Draw(pass, triangle(), set, 1, 0)
 		bytes = len(q.versionBytes)
 	})
@@ -243,10 +242,10 @@ func TestACapturedVersionIsCopiedAndSharesWhatItKeeps(t *testing.T) {
 // The next frame starts from the set's own values: a version is the frame's.
 func TestTheNextFrameStartsFromTheSetsOwnValues(t *testing.T) {
 	w := newSetWorld(t)
-	set := w.newSet(types.DrawState{}, descriptors.ColorParam("tint", m.Color{R: 1, A: 1}))
+	set := w.newSet(types.DrawState{}, types.ShaderParameterColor("tint", m.Color{R: 1, A: 1}))
 
 	w.frame(func(k kernel.Kernel, q *OpQueue) {
-		q.SetDrawParams(k, set, descriptors.ColorParam("tint", m.Color{G: 1, A: 1}))
+		q.SetDrawParams(k, set, types.ShaderParameterColor("tint", m.Color{G: 1, A: 1}))
 		q.Draw(screenPass(q, 0, "main"), triangle(), set, 1, 0)
 	})
 	w.frame(func(_ kernel.Kernel, q *OpQueue) { q.Draw(screenPass(q, 0, "main"), triangle(), set, 1, 0) })
@@ -261,11 +260,11 @@ func TestTheNextFrameStartsFromTheSetsOwnValues(t *testing.T) {
 // nothing per draw.
 func TestEachDistinctUniformIsUploadedOnce(t *testing.T) {
 	w := newSetWorld(t)
-	set := w.newSet(types.DrawState{}, descriptors.ColorParam("tint", m.Color{R: 1, A: 1}))
+	set := w.newSet(types.DrawState{}, types.ShaderParameterColor("tint", m.Color{R: 1, A: 1}))
 
 	w.frame(func(k kernel.Kernel, q *OpQueue) {
 		pass := screenPass(q, 0, "main")
-		q.SetDrawParams(k, set, descriptors.MatParam("frame", translation(1)))
+		q.SetDrawParams(k, set, types.ShaderParameterMat4("frame", translation(1)))
 		for range 3 {
 			q.Draw(pass, triangle(), set, 1, 0)
 		}
@@ -316,7 +315,7 @@ func TestUnsuppliedBindingsTakeTheirDefaults(t *testing.T) {
 // unsupplied is dropped every frame and reported once.
 func TestAnUnsuppliedStorageBufferDropsTheDrawAndIsReportedOnce(t *testing.T) {
 	w := newSetWorld(t)
-	var set descriptors.DrawParams
+	var set types.DrawStateId
 	w.resources(func(k kernel.Kernel, q *ResourceQueue) { set = q.NewDrawParams(k, w.shader, types.DrawState{}) })
 
 	for range 2 {
@@ -335,13 +334,13 @@ func TestAnUnsuppliedStorageBufferDropsTheDrawAndIsReportedOnce(t *testing.T) {
 // storage binding for that frame's draws.
 func TestAVersionBindsATemporary(t *testing.T) {
 	w := newSetWorld(t)
-	var set descriptors.DrawParams
+	var set types.DrawStateId
 	w.resources(func(k kernel.Kernel, q *ResourceQueue) { set = q.NewDrawParams(k, w.shader, types.DrawState{}) })
-	var arena descriptors.BufferDescr
+	var arena types.BufferDescr
 
 	w.frame(func(k kernel.Kernel, q *OpQueue) {
-		arena = q.NewTemporaryBuffer(make([]byte, 2*descriptors.StorageAlignment), true)
-		q.SetDrawParams(k, set, descriptors.BufferRangeParam("instances", arena, descriptors.StorageAlignment, descriptors.StorageAlignment))
+		arena = q.NewTemporaryBuffer(make([]byte, 2*types.StorageAlignment), true)
+		q.SetDrawParams(k, set, types.ShaderParameterBufferRange("instances", arena, types.StorageAlignment, types.StorageAlignment))
 		q.Draw(screenPass(q, 0, "main"), triangle(), set, 4, 1)
 	})
 
@@ -350,8 +349,8 @@ func TestAVersionBindsATemporary(t *testing.T) {
 	}
 	var bound bool
 	for _, op := range w.backend.lastOps {
-		bound = bound || (op.kind == testOpSetBuffer && op.buffer == arena.ID() &&
-			op.offset == descriptors.StorageAlignment && op.size == descriptors.StorageAlignment)
+		bound = bound || (op.kind == testOpSetBuffer && op.buffer == arena.ID &&
+			op.offset == types.StorageAlignment && op.size == types.StorageAlignment)
 	}
 	if !bound {
 		t.Error("the temporary's range was not bound")
@@ -366,13 +365,13 @@ func TestAVersionBindsATemporary(t *testing.T) {
 func TestSetsShareAPipelineOnlyUnderOneState(t *testing.T) {
 	w := newSetWorld(t)
 	opaque := types.DrawState{Blend: types.BlendOpaque, DepthCompare: types.CompareLess, DepthWrite: true}
-	first := w.newSet(opaque, descriptors.ColorParam("tint", m.Color{R: 1, A: 1}))
-	second := w.newSet(opaque, descriptors.ColorParam("tint", m.Color{G: 1, A: 1}))
+	first := w.newSet(opaque, types.ShaderParameterColor("tint", m.Color{R: 1, A: 1}))
+	second := w.newSet(opaque, types.ShaderParameterColor("tint", m.Color{G: 1, A: 1}))
 	overlay := w.newSet(types.DrawState{Blend: types.BlendAdditive})
 
 	w.frame(func(_ kernel.Kernel, q *OpQueue) {
 		pass := screenPass(q, 0, "main")
-		for _, set := range []descriptors.DrawParams{first, second, overlay} {
+		for _, set := range []types.DrawStateId{first, second, overlay} {
 			q.Draw(pass, triangle(), set, 1, 0)
 		}
 	})
@@ -391,9 +390,9 @@ func TestSetsShareAPipelineOnlyUnderOneState(t *testing.T) {
 // UpdateDrawParams changes the set's own values for good.
 func TestUpdateDrawParamsPersists(t *testing.T) {
 	w := newSetWorld(t)
-	set := w.newSet(types.DrawState{}, descriptors.ColorParam("tint", m.Color{R: 1, A: 1}))
+	set := w.newSet(types.DrawState{}, types.ShaderParameterColor("tint", m.Color{R: 1, A: 1}))
 	w.resources(func(k kernel.Kernel, q *ResourceQueue) {
-		q.UpdateDrawParams(k, set, descriptors.ColorParam("tint", m.Color{B: 1, A: 1}))
+		q.UpdateDrawParams(k, set, types.ShaderParameterColor("tint", m.Color{B: 1, A: 1}))
 	})
 
 	for range 2 {
@@ -410,7 +409,7 @@ func TestInlineBytesAreBakedIntoResourcesTheSetOwns(t *testing.T) {
 	w := newSetWorld(t)
 	pixels := []byte{1, 2, 3, 4}
 	set := w.newSet(types.DrawState{},
-		descriptors.TextureParam("albedo", descriptors.TextureWithBytes(1, 1, descriptors.FormatRGBA8, pixels, true, false)))
+		types.ShaderParameterTexture("albedo", types.TextureWithBytes(1, 1, types.FormatRGBA8, pixels, true, false)))
 	w.frame(func(_ kernel.Kernel, q *OpQueue) { q.Draw(screenPass(q, 0, "main"), triangle(), set, 1, 0) })
 	// The bake is a durable one, replayed with the frame that followed it.
 	var owned types.TextureID
@@ -464,12 +463,12 @@ func TestADrawNamingAReleasedSetIsDroppedSilently(t *testing.T) {
 func TestASetDrawSamplingItsOwnAttachmentIsDropped(t *testing.T) {
 	w := newSetWorld(t)
 	set := w.newSet(types.DrawState{})
-	var target descriptors.TextureDescr
-	w.resources(func(_ kernel.Kernel, q *ResourceQueue) { target = q.NewRenderTarget(4, 4, 1, descriptors.FormatRGBA8) })
+	var target types.TextureDescr
+	w.resources(func(_ kernel.Kernel, q *ResourceQueue) { target = q.NewRenderTarget(4, 4, 1, types.FormatRGBA8) })
 
 	w.frame(func(k kernel.Kernel, q *OpQueue) {
-		pass := q.NewPass(descriptors.PassDescr{Target: descriptors.TextureTarget(target, 0, 0), Label: "offscreen"})
-		q.SetDrawParams(k, set, descriptors.TextureParam("albedo", target))
+		pass := q.NewPass(types.PassDescr{Target: types.TargetDescrTexture(target, 0, 0), Label: "offscreen"})
+		q.SetDrawParams(k, set, types.ShaderParameterTexture("albedo", target))
 		q.Draw(pass, triangle(), set, 1, 0)
 	})
 
@@ -488,21 +487,21 @@ func TestASetDrawSamplingItsOwnAttachmentIsDropped(t *testing.T) {
 func TestSetMistakesAreReportedOnceAndIgnored(t *testing.T) {
 	w := newSetWorld(t)
 	set := w.newSet(types.DrawState{})
-	var temporary descriptors.BufferDescr
+	var temporary types.BufferDescr
 	w.k.ExecuteCommand[recordCmd](recordRequest{fn: func(q *OpQueue) {
 		temporary = q.NewTemporaryBuffer(make([]byte, 16), true)
 	}})
-	bad := []descriptors.ParameterDescr{
-		descriptors.FloatParam("missing", 1),
-		descriptors.TextureParam("tint", descriptors.BakedTexture(1, 1, 1)),
-		descriptors.FloatParam("tint", 1),
-		descriptors.ColorParam("tint", m.Color{R: 1, A: 1}),
+	bad := []types.ShaderParameterDescr{
+		types.ShaderParameterFloat("missing", 1),
+		types.ShaderParameterTexture("tint", types.BakedTexture(1, 1, 1)),
+		types.ShaderParameterFloat("tint", 1),
+		types.ShaderParameterColor("tint", m.Color{R: 1, A: 1}),
 	}
 
 	for range 2 {
 		w.resources(func(k kernel.Kernel, q *ResourceQueue) {
 			q.UpdateDrawParams(k, set, bad...)
-			q.UpdateDrawParams(k, set, descriptors.BufferParam("instances", temporary))
+			q.UpdateDrawParams(k, set, types.ShaderParameterBuffer("instances", temporary))
 		})
 		w.frame(func(k kernel.Kernel, q *OpQueue) {
 			q.SetDrawParams(k, set, bad...)
@@ -555,7 +554,7 @@ func TestACallNamingASetThatIsNotLiveIsReported(t *testing.T) {
 	w := newSetWorld(t)
 	released := w.newSet(types.DrawState{})
 	w.resources(func(k kernel.Kernel, q *ResourceQueue) { q.ReleaseDrawParams(k, released) })
-	unknown := descriptors.DrawParamsOf(9999)
+	unknown := types.DrawStateId(9999)
 
 	for range 2 {
 		w.resources(func(k kernel.Kernel, q *ResourceQueue) {
@@ -563,15 +562,15 @@ func TestACallNamingASetThatIsNotLiveIsReported(t *testing.T) {
 			q.ReleaseDrawParams(k, released)
 		})
 		w.frame(func(k kernel.Kernel, q *OpQueue) {
-			q.SetDrawParams(k, released, descriptors.ColorParam("tint", m.Color{}))
+			q.SetDrawParams(k, released, types.ShaderParameterColor("tint", m.Color{}))
 			q.SetDrawParams(k, unknown)
 		})
 	}
 
 	want := []types.ErrDrawParamsNotLive{
 		{Set: 9999, Call: "UpdateDrawParams"},
-		{Set: descriptors.DrawParamsIndex(released), Call: "ReleaseDrawParams", Released: true},
-		{Set: descriptors.DrawParamsIndex(released), Call: "SetDrawParams", Released: true},
+		{Set: uint32(released), Call: "ReleaseDrawParams", Released: true},
+		{Set: uint32(released), Call: "SetDrawParams", Released: true},
 		{Set: 9999, Call: "SetDrawParams"},
 	}
 	if len(*w.reported) != len(want) {
@@ -589,15 +588,15 @@ func TestACallNamingASetThatIsNotLiveIsReported(t *testing.T) {
 // reported, and the set exists, takes nothing, says nothing and draws nothing.
 func TestASetOnAShaderWithNoProgramIsCreatedFailed(t *testing.T) {
 	w := newSetWorld(t)
-	var set descriptors.DrawParams
+	var set types.DrawStateId
 	var reserved types.ShaderID
 	w.resources(func(k kernel.Kernel, q *ResourceQueue) {
 		reserved = q.NewShader()
-		set = q.NewDrawParams(k, reserved, types.DrawState{}, descriptors.ColorParam("tint", m.Color{}))
-		q.UpdateDrawParams(k, set, descriptors.ColorParam("tint", m.Color{}))
+		set = q.NewDrawParams(k, reserved, types.DrawState{}, types.ShaderParameterColor("tint", m.Color{}))
+		q.UpdateDrawParams(k, set, types.ShaderParameterColor("tint", m.Color{}))
 	})
 	w.frame(func(k kernel.Kernel, q *OpQueue) {
-		q.SetDrawParams(k, set, descriptors.ColorParam("tint", m.Color{}))
+		q.SetDrawParams(k, set, types.ShaderParameterColor("tint", m.Color{}))
 		q.Draw(screenPass(q, 0, "main"), triangle(), set, 1, 0)
 	})
 
@@ -605,7 +604,7 @@ func TestASetOnAShaderWithNoProgramIsCreatedFailed(t *testing.T) {
 	if len(*w.reported) != 1 || !errors.As((*w.reported)[0], &none) || none.Shader != reserved {
 		t.Fatalf("reported %v, want one ErrShaderHasNoProgram", *w.reported)
 	}
-	if set == (descriptors.DrawParams{}) || countOps(w.backend.lastOps, testOpDraw) != 0 {
+	if set == 0 || countOps(w.backend.lastOps, testOpDraw) != 0 {
 		t.Errorf("set %v drew %d, want a set that draws nothing", set, countOps(w.backend.lastOps, testOpDraw))
 	}
 }
@@ -632,8 +631,8 @@ type setBench struct {
 	resources  *ResourceQueue
 	queue      *OpQueue
 	translator *translator
-	set        descriptors.DrawParams
-	mesh       descriptors.MeshDescr
+	set        types.DrawStateId
+	mesh       types.MeshDescr
 }
 
 func newSetBench(tb testing.TB) *setBench {
@@ -644,10 +643,10 @@ func newSetBench(tb testing.TB) *setBench {
 	b := &setBench{
 		backend: backend, resources: resources, translator: newTranslator(),
 		queue: newOpQueue(idsOf(backend), resources.drawParams.registry),
-		mesh: descriptors.Mesh(
-			descriptors.BakedBuffer(1, 3*28),
+		mesh: types.MeshDescrWithVertices(
+			types.BufferDescrWithId(1, 3*28),
 			types.TopologyTriangleList,
-			descriptors.Attr(0, descriptors.Float32x3), descriptors.Attr(12, descriptors.Float32x4),
+			types.VertexAttribute{Offset: 0, Type: types.Float32x3}, types.VertexAttribute{Offset: 12, Type: types.Float32x4},
 		),
 	}
 	program, err := shader.CompileShader(nil, shader.ShaderWithText(programSource), backend.ReflectShader)
@@ -659,12 +658,12 @@ func newSetBench(tb testing.TB) *setBench {
 	id := resources.NewShader()
 	resources.UploadProgram(kernel.Kernel{}, id, program)
 	records := resources.UploadBuffer(resources.NewBuffer(), make([]byte, 64), true)
-	albedo := resources.NewTexture(2, 2, 1, descriptors.FormatRGBA8, false)
+	albedo := resources.NewTexture(2, 2, 1, types.FormatRGBA8, false)
 	b.set = resources.NewDrawParams(kernel.Kernel{}, id, types.DrawState{},
-		descriptors.ColorParam("tint", m.Color{R: 1, G: 1, B: 1, A: 1}),
-		descriptors.TextureParam("albedo", albedo),
-		descriptors.SamplerParam("albedoSampler", types.SamplerDesc{}),
-		descriptors.BufferParam("instances", records),
+		types.ShaderParameterColor("tint", m.Color{R: 1, G: 1, B: 1, A: 1}),
+		types.ShaderParameterTexture("albedo", albedo),
+		types.ShaderParameterSampler("albedoSampler", types.SamplerDesc{}),
+		types.ShaderParameterBuffer("instances", records),
 	)
 	// The durable ops are replayed once, as the render does, and dropped.
 	b.translate(tb)
@@ -682,9 +681,9 @@ func (b *setBench) translate(tb testing.TB) *Queue {
 
 // record records draws draws of the set, each with a version of its own.
 func (b *setBench) record(draws int) {
-	pass := b.queue.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto()})
+	pass := b.queue.NewPass(types.PassDescr{Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto()})
 	for i := range draws {
-		b.queue.SetDrawParams(kernel.Kernel{}, b.set, descriptors.MatParam("frame", translation(float32(i))))
+		b.queue.SetDrawParams(kernel.Kernel{}, b.set, types.ShaderParameterMat4("frame", translation(float32(i))))
 		b.queue.Draw(pass, b.mesh, b.set, 1, 0)
 	}
 }
@@ -788,8 +787,8 @@ func TestTheRegistryIsReadWhilePublished(t *testing.T) {
 }
 
 // SetDrawParams copies a param's bytes before it returns, so a record borrowed
-// through RawParameterRef can be refilled for the next batch at once: each draw
-// binds the fill it was recorded with.
+// through ShaderParameterRawRef can be refilled for the next batch at once:
+// each draw binds the fill it was recorded with.
 func TestSetDrawParamsCopiesABorrowedRecord(t *testing.T) {
 	_, backend, k, reported := shaderEngine(t, fstest.MapFS{})
 	layout := shader.ShaderLayout{Resources: []shader.ShaderResource{
@@ -797,7 +796,7 @@ func TestSetDrawParamsCopiesABorrowedRecord(t *testing.T) {
 	}}
 	backend.reflection = &layout
 	program := compileShader(k, nil, shader.ShaderWithText(programSource)).Program
-	var set descriptors.DrawParams
+	var set types.DrawStateId
 	withShaders(k, func(k kernel.Kernel, q *ResourceQueue) {
 		id := q.NewShader()
 		q.UploadProgram(k, id, program)
@@ -808,7 +807,7 @@ func TestSetDrawParamsCopiesABorrowedRecord(t *testing.T) {
 		pass := screenPass(q, 0, "main")
 		for _, x := range []float32{1, 2} {
 			record.Amount.X = x
-			q.SetDrawParams(k, set, descriptors.RawParameterRef("record", record))
+			q.SetDrawParams(k, set, types.ShaderParameterRawRef("record", record))
 			q.Draw(pass, triangle(), set, 1, 0)
 		}
 		record.Amount.X = 3

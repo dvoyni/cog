@@ -43,7 +43,7 @@ type gfxBackend struct {
 	pipelines    map[gfx.PipelineID]*gfxbPipeline
 
 	bakedBuffers       map[gfx.BufferID]*wgpu.Buffer
-	bakedBufferDescs   map[gfx.BufferID]gfx.BufferDesc
+	bakedBufferDescs   map[gfx.BufferID]bufferDesc
 	bufferGenerations  map[gfx.BufferID]uint32
 	bakedTextures      map[gfx.TextureID]*gfxbTexture
 	bakedTextureDescs  map[gfx.TextureID]gfx.TextureDesc
@@ -284,7 +284,7 @@ func newGfxBackend() *gfxBackend {
 		shaders:            map[gfx.ShaderID]*gfxbShader{},
 		pipelines:          map[gfx.PipelineID]*gfxbPipeline{},
 		bakedBuffers:       map[gfx.BufferID]*wgpu.Buffer{},
-		bakedBufferDescs:   map[gfx.BufferID]gfx.BufferDesc{},
+		bakedBufferDescs:   map[gfx.BufferID]bufferDesc{},
 		bufferGenerations:  map[gfx.BufferID]uint32{},
 		bakedTextures:      map[gfx.TextureID]*gfxbTexture{},
 		bakedTextureDescs:  map[gfx.TextureID]gfx.TextureDesc{},
@@ -624,7 +624,15 @@ func (b *gfxBackend) FreeShader(id gfx.ShaderID) {
 	delete(b.shaders, id)
 }
 
-func (b *gfxBackend) newBuffer(desc gfx.BufferDesc) (*wgpu.Buffer, error) {
+// bufferDesc is what gogpu creates a baked buffer from, and what it compares
+// against to tell whether a re-bake can keep the buffer it already has.
+type bufferDesc struct {
+	Kind  gfx.BufferKind
+	Size  int
+	Label string
+}
+
+func (b *gfxBackend) newBuffer(desc bufferDesc) (*wgpu.Buffer, error) {
 	usage := gputypes.BufferUsageCopyDst
 	switch desc.Kind {
 	case gfx.BufferVertex:
@@ -671,7 +679,7 @@ func (b *gfxBackend) NewPipeline(desc gfx.PipelineDesc) (gfx.PipelineID, error) 
 			attrs[i] = gputypes.VertexAttribute{
 				Format:         vertexFormat(a.Type),
 				Offset:         uint64(a.Offset),
-				ShaderLocation: uint32(a.Location),
+				ShaderLocation: uint32(i),
 			}
 		}
 		buffers = []gputypes.VertexBufferLayout{{
@@ -708,7 +716,7 @@ func (b *gfxBackend) NewPipeline(desc gfx.PipelineDesc) (gfx.PipelineID, error) 
 // pipeline that has no depth target.
 //
 // A pipeline's depth state and its pass's depth attachment are validated
-// against each other at setPipeline time, as the colour side is: a DepthNone
+// against each other at setPipeline time, as the colour side is: a DepthDescrNone
 // pass has no attachment - passDepth returns nil and BeginPass writes none - so
 // a pipeline declaring one is rejected by browser WebGPU, and native Dawn lets
 // it through, which is why only the browser loses the frame. Compare and write
@@ -741,9 +749,9 @@ func fragmentState(module *wgpu.ShaderModule, desc gfx.PipelineDesc) *wgpu.Fragm
 	}
 	return &wgpu.FragmentState{
 		Module: module, EntryPoint: "fs_main",
-		// FormatScreen resolves to the frame buffer's format, not the
-		// surface's: a screen pass renders into the frame buffer, and the
-		// present pipeline is the only one built for the surface.
+		// A screen pass is keyed on the frame buffer's format, not the
+		// surface's: it renders into the frame buffer, and the present
+		// pipeline is the only one built for the surface.
 		Targets: []gputypes.ColorTargetState{{
 			Format:    textureFormat(desc.ColorFormat),
 			WriteMask: gputypes.ColorWriteMaskAll,
@@ -921,7 +929,7 @@ func (b *gfxBackend) bakeBuffer(id gfx.BufferID, kind gfx.BufferKind, size int, 
 	if id == 0 || size <= 0 || len(data) == 0 {
 		return
 	}
-	desc := gfx.BufferDesc{Kind: kind, Size: size, Label: "gfx.baked"}
+	desc := bufferDesc{Kind: kind, Size: size, Label: "gfx.baked"}
 	if old, ok := b.bakedBuffers[id]; ok && b.bakedBufferDescs[id] == desc {
 		b.uploadBuffer(old, 0, data)
 		return

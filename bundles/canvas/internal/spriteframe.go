@@ -43,10 +43,10 @@ type invalidTextureFrame struct {
 // textureText names a texture the way a report can be traced back to the code
 // that drew it: by resource path when it has one, and by baked id otherwise.
 func textureText(texture gfx.TextureDescr) string {
-	if path := texture.Path(); path != "" {
+	if path := texture.Name; path != "" {
 		return fmt.Sprintf("%q", path)
 	}
-	return fmt.Sprintf("texture %d", texture.ID())
+	return fmt.Sprintf("texture %d", texture.Params.ID)
 }
 
 // ReportInvalidSpriteFrame says once that a Frame does not select a non-empty
@@ -59,7 +59,7 @@ func ReportInvalidSpriteFrame(k kernel.Kernel, path string, width, height int, f
 // ReportInvalidTextureFrame is ReportInvalidSpriteFrame for a texture-sourced
 // sprite, which names its texture because it has no path.
 func ReportInvalidTextureFrame(k kernel.Kernel, texture gfx.TextureDescr, width, height int, frame SpriteFrame) {
-	k.ReportErrorOnce(invalidTextureFrame{texture: texture.ID(), path: texture.Path(), frame: frame},
+	k.ReportErrorOnce(invalidTextureFrame{texture: texture.Params.ID, path: texture.Name, frame: frame},
 		fmt.Errorf("canvas: sprite frame %s does not fit %s (%dx%d)", frameText(frame), textureText(texture), width, height))
 }
 
@@ -76,7 +76,7 @@ func ReportInvalidSpriteNineSlice(k kernel.Kernel, path string, width, height in
 // ReportInvalidTextureNineSlice is ReportInvalidSpriteNineSlice for a
 // texture-sourced sprite.
 func ReportInvalidTextureNineSlice(k kernel.Kernel, texture gfx.TextureDescr, width, height int, frame, insets SpriteFrame) {
-	k.ReportErrorOnce(invalidTextureFrame{texture: texture.ID(), path: texture.Path(), frame: frame, insets: insets},
+	k.ReportErrorOnce(invalidTextureFrame{texture: texture.Params.ID, path: texture.Name, frame: frame, insets: insets},
 		fmt.Errorf("canvas: nine-slice insets %s do not fit the %dx%d source %s selects", frameText(insets), width, height, textureText(texture)))
 }
 

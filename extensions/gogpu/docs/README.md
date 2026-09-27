@@ -149,7 +149,7 @@ the members of a struct argument alike — and reports each as a
 bound vertex layout against. `vs_main` is a constant shared with pipeline
 creation, so what is checked cannot drift from what is built.
 
-A pass whose target is `gfx.ScreenTarget()` does not render into the surface. It
+A pass whose target is `gfx.TargetDescrScreen()` does not render into the surface. It
 renders into a frame-sized frame buffer the backend allocates on first use in
 `gfx.FrameBufferFormat` and drops whenever the surface resizes; the frame's
 implicit present pass then draws a full-screen triangle that samples it into the

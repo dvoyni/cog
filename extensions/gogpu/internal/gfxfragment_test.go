@@ -8,7 +8,7 @@ import (
 )
 
 func TestADepthOnlyPipelineDeclaresNoFragmentStage(t *testing.T) {
-	// BeginPass already encodes a NoTarget() pass with an empty
+	// BeginPass already encodes a TargetDescrNone() pass with an empty
 	// ColorAttachments, so the pipeline set into it must declare no target
 	// either. Returning nil here rather than an empty Targets slice is what
 	// also lets a depth-only shader carry no fs_main at all: there is no
@@ -19,7 +19,7 @@ func TestADepthOnlyPipelineDeclaresNoFragmentStage(t *testing.T) {
 }
 
 func TestAColourPipelineDeclaresOneTargetInTheFrameBufferFormat(t *testing.T) {
-	state := fragmentState(nil, gfx.PipelineDesc{ColorFormat: gfx.FormatScreen})
+	state := fragmentState(nil, gfx.PipelineDesc{ColorFormat: gfx.FrameBufferFormat})
 	if state == nil {
 		t.Fatal("a colour pipeline got no fragment state")
 	}
@@ -41,7 +41,7 @@ func TestABlendedPipelineKeepsItsBlendStateOnTheTarget(t *testing.T) {
 	// The blend mode rides on the colour target, so dropping the fragment
 	// state for a depth pass must not be the same code path that carries it.
 	state := fragmentState(nil, gfx.PipelineDesc{
-		ColorFormat: gfx.FormatScreen,
+		ColorFormat: gfx.FrameBufferFormat,
 		State:       gfx.DrawState{Blend: gfx.BlendAlpha},
 	})
 	if state == nil || len(state.Targets) != 1 || state.Targets[0].Blend == nil {

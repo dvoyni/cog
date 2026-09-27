@@ -265,7 +265,7 @@ func (s *scratch) packMorphs(anim *model.ResidentAnimation, view *model.ModelVie
 
 // copyParams copies a Params List out into the frame's arena, which is the
 // only route out of a List and costs no allocation into a reused backing.
-func (s *scratch) copyParams(params *Params) []gfx.ParameterDescr {
+func (s *scratch) copyParams(params *Params) []gfx.ShaderParameterDescr {
 	start := len(s.params)
 	for _, param := range params.Values.All() {
 		s.params = append(s.params, param)
@@ -277,10 +277,10 @@ func (s *scratch) copyParams(params *Params) []gfx.ParameterDescr {
 // whose name the window holds replaces that one in place, and any other is
 // appended. The window's order is kept, so the file's params stay where they
 // were and nothing is bound twice.
-func overlayParam(arena []gfx.ParameterDescr, start int, param gfx.ParameterDescr) []gfx.ParameterDescr {
-	name := param.Name()
+func overlayParam(arena []gfx.ShaderParameterDescr, start int, param gfx.ShaderParameterDescr) []gfx.ShaderParameterDescr {
+	name := param.Name
 	for i := start; i < len(arena); i++ {
-		if arena[i].Name() == name {
+		if arena[i].Name == name {
 			arena[i] = param
 			return arena
 		}

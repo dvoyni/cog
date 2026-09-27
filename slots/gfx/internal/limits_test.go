@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+	"github.com/dvoyni/cog/libs/assets"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
@@ -49,9 +49,9 @@ func TestShaderOverTheWebFloorIsReportedOnceAndStillRenders(t *testing.T) {
 	// The nine bindings have to be filled: an unsupplied storage binding is
 	// fatal to the draw, and this test is about a draw that renders despite the
 	// diagnostic.
-	var records []descriptors.ParameterDescr
+	var records []types.ShaderParameterDescr
 	for i := range 9 {
-		records = append(records, descriptors.BufferParam(fmt.Sprintf("records%d", i), descriptors.BufferWithBytes([]byte{1, 2, 3, 4}, true)))
+		records = append(records, types.ShaderParameterBuffer(fmt.Sprintf("records%d", i), types.BufferDescrWithBlob(assets.NewBlob([]byte{1, 2, 3, 4}), true)))
 	}
 	set := testSet(t, k, records...)
 	for range 2 {
@@ -137,12 +137,12 @@ func TestBufferRangeParamBindsItsOwnSlice(t *testing.T) {
 	}}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	var records descriptors.BufferDescr
+	var records types.BufferDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
 		records = resources.UploadBuffer(resources.NewBuffer(), make([]byte, 1024), true)
 	})
 	w, ref := recordList(t, k)
-	w.Draw(ref, triangle(), testSet(t, k, descriptors.BufferRangeParam("records", records, 256, 512)), 1, 0)
+	w.Draw(ref, triangle(), testSet(t, k, types.ShaderParameterBufferRange("records", records, 256, 512)), 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 

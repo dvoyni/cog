@@ -29,7 +29,7 @@ type plugin struct {
 	// quad rather than replaying vertices an app recorded: the tiled sprite and
 	// the texture sprite. Both join the triangles batcher, which copies what it
 	// keeps, so one buffer serves every quad in a frame.
-	quadParams   []gfx.ParameterDescr
+	quadParams   []gfx.ShaderParameterDescr
 	tileVertices []byte
 	batch        spriteBatch
 	tris         trianglesBatch
@@ -41,11 +41,11 @@ type plugin struct {
 	// arrays and shared split one sprite draw's parameters by frequency. They are
 	// scratch for the op being drawn, which is one at a time, and the batcher
 	// copies what it keeps.
-	arrays []gfx.ParameterDescr
-	shared []gfx.ParameterDescr
+	arrays []gfx.ShaderParameterDescr
+	shared []gfx.ShaderParameterDescr
 	// trianglesParams is the same for a triangle draw, which needs one list
 	// rather than two because every parameter it names is per material.
-	trianglesParams []gfx.ParameterDescr
+	trianglesParams []gfx.ShaderParameterDescr
 
 	// snapshots is canvas's one draw-snapshot slot, plugin-owned and
 	// self-synchronizing. See snapshotState for why it is not a kernel
@@ -318,7 +318,7 @@ func (p *plugin) flushFrame(
 // requires.
 //
 // first and last bracket the run, not the frame. Depth is per attachment and
-// DepthAuto pools one texture per target size, so a layer that preserved depth
+// DepthDescrAuto pools one texture per target size, so a layer that preserved depth
 // across a target change would z-test against whatever the other target left
 // behind. The zero TargetDescr is the screen, which is what a layer nobody gave
 // a target means by saying nothing.
@@ -326,7 +326,7 @@ func canvasPass(layerID Layer, value LayerOps, first, last bool) gfx.PassDescr {
 	desc := gfx.PassDescr{
 		Order:  layerID,
 		Target: value.Target,
-		Depth:  gfx.DepthAuto(),
+		Depth:  gfx.DepthDescrAuto(),
 		Label:  "canvas.layer",
 	}
 	if first {
@@ -347,7 +347,7 @@ func canvasPass(layerID Layer, value LayerOps, first, last bool) gfx.PassDescr {
 // longer a reason to leave it: the material joins the key by fingerprint and the
 // parameters join it by value, so two draws that agree on both are one draw and
 // an unrecognised parameter name is a key field rather than a bail-out.
-func (p *plugin) drawTriangles(gfxWrite *gfx.OpQueue, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, layout []gfx.VertexAttr, materials *ScopeMaterials, op *TrianglesOp) {
+func (p *plugin) drawTriangles(gfxWrite *gfx.OpQueue, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, layout []gfx.VertexAttribute, materials *ScopeMaterials, op *TrianglesOp) {
 	if hasClip && (clip.Width <= 0 || clip.Height <= 0) {
 		return
 	}
@@ -375,8 +375,8 @@ type surface struct {
 // view is per-frame and sized on the render thread - and the viewport is the
 // number canvas can read on the update thread.
 func layerSurface(target gfx.TargetDescr, view *gfx.Viewport) surface {
-	if width, height, ok := target.Size(); ok && width > 0 && height > 0 {
-		return surface{size: m.Vec2{X: float32(width), Y: float32(height)}, scale: 1}
+	if target.Kind == gfx.TargetTexture && target.Width > 0 && target.Height > 0 {
+		return surface{size: m.Vec2{X: float32(target.Width), Y: float32(target.Height)}, scale: 1}
 	}
 	scale := float32(1)
 	if view.Width > 0 && view.FramebufferWidth > 0 {
@@ -401,8 +401,8 @@ func (p *plugin) ensureQuad(resources *gfx.ResourceQueue) bool {
 	// declares. Four vertices would fit in uint16 twice over; canvas's index
 	// buffer is six indices long once for the life of the plugin, so there is
 	// nothing there to halve.
-	p.quad = gfx.MeshIndexed(p.quadVertices, p.quadIndices, gfx.IndexUint32,
-		gfx.TopologyTriangleList, gfx.Attr(0, gfx.Float32x2))
+	p.quad = gfx.MeshDescrWithIndices(p.quadVertices, p.quadIndices, gfx.IndexUint32,
+		gfx.TopologyTriangleList, gfx.VertexAttribute{Offset: 0, Type: gfx.Float32x2})
 	p.quadReady = true
 	return true
 }
@@ -635,7 +635,7 @@ func (p *plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface,
 // binding type, not anything about the geometry. Two quads over one texture and
 // one sampler are one draw; a second texture splits them.
 func (p *plugin) drawTextureSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, materials *ScopeMaterials, op *SpriteOp) {
-	width, height := op.Texture.Size()
+	width, height := op.Texture.Params.Width, op.Texture.Params.Height
 	if width <= 0 || height <= 0 {
 		// Skip, never substitute. A texture that does not know its size yet - a
 		// resource path nothing has baked - has no natural size to draw at and no
@@ -758,9 +758,9 @@ func tileSampler(t SpriteTransform) gfx.SamplerDesc {
 }
 
 // spriteTint returns the first "tint" color parameter, defaulting to opaque white.
-func spriteTint(params []gfx.ParameterDescr) m.Color {
+func spriteTint(params []gfx.ShaderParameterDescr) m.Color {
 	for i := range params {
-		if params[i].Name() == "tint" {
+		if params[i].Name == "tint" {
 			if color, ok := params[i].ColorValue(); ok {
 				return color
 			}
@@ -902,9 +902,9 @@ func sincos(rotation float32) (sine, cosine float32) {
 }
 
 // paramColorOr returns the named color parameter, or def when it is absent.
-func paramColorOr(params []gfx.ParameterDescr, name string, def m.Color) m.Color {
+func paramColorOr(params []gfx.ShaderParameterDescr, name string, def m.Color) m.Color {
 	for i := range params {
-		if params[i].Name() == name {
+		if params[i].Name == name {
 			if color, ok := params[i].ColorValue(); ok {
 				return color
 			}

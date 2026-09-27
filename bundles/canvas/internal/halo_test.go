@@ -44,10 +44,10 @@ func TestDefaultHaloProfileIsTheProfileMeasuredOffTheArt(t *testing.T) {
 func TestTheHaloSetCarriesTheWholeProfilePerBatch(t *testing.T) {
 	profile := HaloProfile{Reach: 12, Plateau: 0.25, Exponent: 2}
 	set := HaloMaterialSet(profile)
-	if len(set.Params) != 1 || set.Params[0].Name() != HaloSlot || !set.Params[0].HasValue() {
+	if len(set.Params) != 1 || set.Params[0].Name != HaloSlot || !set.Params[0].Kind.IsValue() {
 		t.Fatalf("set parameters = %+v, want the one %q value", set.Params, HaloSlot)
 	}
-	data, _ := set.Params[0].AppendValue(nil)
+	data, _ := set.Params[0].AppendValueTo(nil)
 	if got := haloProfileOf(t, data); got != profile {
 		t.Fatalf("set profile = %+v, want %+v", got, profile)
 	}
@@ -141,7 +141,7 @@ func TestOneLayerSetHaloesEveryShapeInTheSpriteFamily(t *testing.T) {
 	k, _, backend := testKernel(t, fstest.MapFS{}, Config{}, func(write *OpQueue) {
 		write.Text(0, "", "42", TextDraw{Position: m.Vec2{X: 10, Y: 40}, Size: 16, Color: ink})
 		write.Sprite(0, "", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil,
-			gfx.ColorParam(TintSlot, ink))
+			gfx.ShaderParameterColor(TintSlot, ink))
 		write.FillRect(0, m.Rect{X: 20, Width: 8, Height: 8}, ShapeDraw{Color: ink})
 		write.StrokeRect(0, m.Rect{X: 40, Width: 8, Height: 8}, ShapeDraw{Color: ink, Thickness: 1})
 		write.Line(0, m.Vec2{X: 60}, m.Vec2{X: 68, Y: 8}, ShapeDraw{Color: ink, Thickness: 1})

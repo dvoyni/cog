@@ -38,7 +38,7 @@ type skinnedVertex struct {
 // table resolves a model's geometry through the same layout cache every other
 // mesh takes - one dense id per Go type - rather than through a second path
 // that would have to intern layouts of its own.
-func (skinnedVertex) VertexLayout() []gfx.VertexAttr { return SkinnedVertexLayout() }
+func (skinnedVertex) VertexLayout() []gfx.VertexAttribute { return SkinnedVertexLayout() }
 
 // PackVertices writes the storage bytes of standard-layout vertices into the
 // arena and reports the span they landed in, together with the bounding sphere

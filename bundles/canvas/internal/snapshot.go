@@ -209,11 +209,11 @@ func layerViewOf(layerID Layer, value LayerOps) LayerView {
 	if value.Window != (m.Rect{}) {
 		view.Window, view.Aspect = m.Some(rectViewOf(value.Window)), aspectModeName(value.Aspect)
 	}
-	if texture, mip, arrayLayer, ok := value.Target.Texture(); ok {
-		view.Target, view.TargetTexture = "texture", texture
-		view.TargetMip, view.TargetLayer = mip, arrayLayer
-		view.TargetWidth, view.TargetHeight, _ = value.Target.Size()
-	} else if value.Target.IsNone() {
+	if target := value.Target; target.Kind == gfx.TargetTexture {
+		view.Target, view.TargetTexture = "texture", target.Texture
+		view.TargetMip, view.TargetLayer = target.Mip, target.Layer
+		view.TargetWidth, view.TargetHeight = target.Width, target.Height
+	} else if value.Target.Kind == gfx.TargetNone {
 		view.Target = "none"
 	}
 	if value.HasColor {

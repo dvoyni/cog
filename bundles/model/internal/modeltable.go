@@ -158,7 +158,7 @@ type modelPrimitive struct {
 type modelMaterial struct {
 	MaterialIngredients
 	Key  [VariantCount]uint64
-	Sets [VariantCount]gfx.DrawParams
+	Sets [VariantCount]gfx.DrawStateId
 }
 
 // modelReportKey and textureReportKey are the keys the load's report-once calls
@@ -440,7 +440,7 @@ func (l *Lookup) reportLoad(k kernel.Kernel, path string, reports []error) {
 func bindModelMaterial(
 	loaded *loadedMaterial, textures []gfx.TextureDescr, defaults PbrDefaults,
 ) modelMaterial {
-	params := make([]gfx.ParameterDescr, 0, 2*pbrSlotCount+pbrValueCount)
+	params := make([]gfx.ShaderParameterDescr, 0, 2*pbrSlotCount+pbrValueCount)
 	for slot, name := range PbrSlots {
 		texture := defaults.White
 		if slot == NormalSlot {
@@ -451,12 +451,12 @@ func bindModelMaterial(
 		// get magenta and these keep the white texel and the flat normal,
 		// because magenta as a normal map is a surface lit from nowhere.
 		if index := loaded.slots[slot]; index >= 0 && index < len(textures) &&
-			textures[index].ID() != 0 {
+			textures[index].Params.ID != 0 {
 			texture = textures[index]
 		}
 		params = append(params,
-			gfx.TextureParam(name.Texture, texture),
-			gfx.SamplerParam(name.Sampler, loaded.samplers[slot]),
+			gfx.ShaderParameterTexture(name.Texture, texture),
+			gfx.ShaderParameterSampler(name.Sampler, loaded.samplers[slot]),
 		)
 	}
 	params = loaded.values.appendParams(params)
@@ -491,7 +491,7 @@ func (l *Lookup) bakeModelGeometry(
 	// cache every other mesh takes, so each gets a dense id of its own and an
 	// UpdateMesh comparing ids still compares one integer.
 	var layoutID int
-	var layout []gfx.VertexAttr
+	var layout []gfx.VertexAttribute
 	if geometry.skinnedLayout {
 		layoutID, layout, _ = l.layouts.resolve[skinnedVertex]()
 	} else {

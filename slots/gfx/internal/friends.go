@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
@@ -10,7 +9,7 @@ import (
 // these are not public API.
 
 // OpQueueBakeTextureIfNeeded calls OpQueue.bakeTextureIfNeeded for gfx's internal/.
-func OpQueueBakeTextureIfNeeded(v *OpQueue, a0 descriptors.TextureDescr) descriptors.TextureDescr {
+func OpQueueBakeTextureIfNeeded(v *OpQueue, a0 types.TextureDescr) types.TextureDescr {
 	return v.bakeTextureIfNeeded(a0)
 }
 
@@ -24,7 +23,7 @@ func OpQueueResources(v *OpQueue) []ResourceOp { return v.resources }
 func OpQueueStrayDraws(v *OpQueue) int { return v.strayDraws }
 
 // OpQueueTemporaryBuffer calls OpQueue.temporaryBuffer for gfx's internal/.
-func OpQueueTemporaryBuffer(v *OpQueue, a0 types.BufferKind, a1 []byte, a2 bool) descriptors.BufferDescr {
+func OpQueueTemporaryBuffer(v *OpQueue, a0 types.BufferKind, a1 []byte, a2 bool) types.BufferDescr {
 	return v.temporaryBuffer(a0, a1, a2)
 }
 

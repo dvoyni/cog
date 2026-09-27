@@ -3,12 +3,9 @@ package internal
 import (
 	"errors"
 	"io/fs"
-	"reflect"
 	"sync/atomic"
 	"testing"
 	"testing/fstest"
-
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
@@ -16,9 +13,6 @@ import (
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
-	"github.com/dvoyni/cog/slots/app/appplugin"
-	"github.com/dvoyni/cog/slots/storage"
-	"github.com/dvoyni/cog/slots/storage/storageplugin"
 )
 
 // testAdapter is the Backend adapter the gfx tests compose. It is provided at
@@ -101,7 +95,7 @@ func (a *testAdapter) ScreenFramebuffer() (types.TextureViewID, int, int) {
 func (a *testAdapter) NewPipeline(desc PipelineDesc) (types.PipelineID, error) {
 	return a.get().NewPipeline(desc)
 }
-func (a *testAdapter) TextureFormat(texture types.TextureID) (descriptors.TextureFormat, bool) {
+func (a *testAdapter) TextureFormat(texture types.TextureID) (types.TextureFormat, bool) {
 	return a.get().TextureFormat(texture)
 }
 func (a *testAdapter) TextureView(texture types.TextureID, mip, layer int) types.TextureViewID {
@@ -118,27 +112,6 @@ var emptyFS = fstest.MapFS{}
 // noFiles is the filesystem of a translation that loads nothing.
 func noFiles() fs.FS { return emptyFS }
 
-// gfx is a Slot: it requires exactly one Backend adapter, so a composition
-// that has none fails before anything starts, rather than rendering nothing
-// and reporting it a frame later.
-func TestACompositionWithoutABackendAdapterFails(t *testing.T) {
-	var reported []error
-	kernel.New(map[kernel.PluginName]any{
-		storage.Name: storage.Config{},
-	}).Handler(func(err error) error {
-		reported = append(reported, err)
-		return err
-	}).WithPlugins(storageplugin.New(), permanentAdapter{}, appplugin.New(), mainLoopAdapter{}, newPlugin())
-
-	var missing kernel.ErrMissingAdapter
-	if !errors.As(errors.Join(reported...), &missing) {
-		t.Fatalf("composition reported %v, want ErrMissingAdapter", reported)
-	}
-	if missing.Plugin != Name || missing.Port != reflect.TypeFor[BackendPort]() {
-		t.Fatalf("missing adapter = %+v, want gfx's BackendPort", missing)
-	}
-}
-
 // A driver provides its Backend at registration, before its device exists. A
 // frame rendered before the backend is ready is skipped: nothing is
 // translated or executed, the condition is reported once rather than at frame
@@ -151,7 +124,7 @@ func TestAFrameBeforeTheBackendIsReadyIsSkipped(t *testing.T) {
 	// Nothing is translated, so the draw needs no set: there is no backend to
 	// compile one against yet.
 	w, ref := recordList(t, k)
-	w.Draw(ref, triangle(), descriptors.DrawParams{}, 1, 0)
+	w.Draw(ref, triangle(), types.DrawStateId(0), 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 	k.PublishEvent(app.RenderEvent{}).Wait()

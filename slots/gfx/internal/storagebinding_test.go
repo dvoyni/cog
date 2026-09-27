@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+	"github.com/dvoyni/cog/libs/assets"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
@@ -29,7 +29,7 @@ func storageLayout() shader.ShaderLayout {
 
 // storageFrame records one frame drawing through a set of the given parameters and
 // reports what the backend was asked to encode alongside what gfx reported.
-func storageFrame(t *testing.T, params ...descriptors.ParameterDescr) (*fakeBackend, []error) {
+func storageFrame(t *testing.T, params ...types.ShaderParameterDescr) (*fakeBackend, []error) {
 	t.Helper()
 	p := newPlugin()
 	layout := storageLayout()
@@ -39,7 +39,7 @@ func storageFrame(t *testing.T, params ...descriptors.ParameterDescr) (*fakeBack
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
 	w := recordRaw(t, k)
-	ref := w.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "main"})
+	ref := w.NewPass(types.PassDescr{Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto(), Load: types.LoadClear, Label: "main"})
 	w.Draw(ref, triangle(), testSet(t, k, params...), 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -68,7 +68,7 @@ func TestADrawMissingAStorageBindingIsDroppedAndNamed(t *testing.T) {
 // reach the same short bind group, so it is dropped and named the same way,
 // saying which of the two it was.
 func TestADrawSupplyingAnUnbakedStorageBufferIsDroppedAndNamed(t *testing.T) {
-	backend, reported := storageFrame(t, descriptors.BufferParam("Data", descriptors.BufferDescr{}))
+	backend, reported := storageFrame(t, types.ShaderParameterBuffer("Data", types.BufferDescr{}))
 
 	if backend.passDraws[0] != 0 {
 		t.Errorf("draws = %d, want the draw supplying an unbaked buffer dropped", backend.passDraws[0])
@@ -92,8 +92,8 @@ func TestADrawSupplyingAnUnbakedStorageBufferIsDroppedAndNamed(t *testing.T) {
 // also what an unresolved texture resource renders as - and a sampler to clamp
 // and linear, so a draw missing both still renders.
 func TestADrawMissingOnlyItsTextureAndSamplerStillRenders(t *testing.T) {
-	buffer := descriptors.BufferWithBytes([]byte{1, 2, 3, 4}, true)
-	backend, reported := storageFrame(t, descriptors.BufferParam("Data", buffer))
+	buffer := types.BufferDescrWithBlob(assets.NewBlob([]byte{1, 2, 3, 4}), true)
+	backend, reported := storageFrame(t, types.ShaderParameterBuffer("Data", buffer))
 
 	if backend.passDraws[0] != 1 {
 		t.Errorf("draws = %d, want the draw rendered against the fallbacks", backend.passDraws[0])
@@ -121,7 +121,7 @@ func TestAnUnfilledStorageBindingIsReportedOnceAndDroppedAlways(t *testing.T) {
 	broken := testSet(t, k)
 	drop := func() int {
 		w := recordRaw(t, k)
-		ref := w.NewPass(descriptors.PassDescr{Target: descriptors.ScreenTarget(), Depth: descriptors.DepthAuto(), Load: types.LoadClear, Label: "main"})
+		ref := w.NewPass(types.PassDescr{Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto(), Load: types.LoadClear, Label: "main"})
 		w.Draw(ref, triangle(), broken, 1, 0)
 		k.ExecuteCommand[PresentCmd](PresentRequest{})
 		k.PublishEvent(app.RenderEvent{}).Wait()
@@ -144,8 +144,8 @@ func TestAnUnfilledStorageBindingIsReportedOnceAndDroppedAlways(t *testing.T) {
 	// heard - which is the whole cost of reporting at frame rate.
 	sampler := testSet(t, k)
 	w := recordRaw(t, k)
-	target, texture := w.NewTemporaryTarget(8, 8, descriptors.FormatRGBA8Srgb)
-	ref := w.NewPass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: "feedback"})
+	target, texture := w.NewTemporaryTarget(8, 8, types.FormatRGBA8Srgb)
+	ref := w.NewPass(types.PassDescr{Target: target, Depth: types.DepthDescrNone(), Load: types.LoadClear, Label: "feedback"})
 	w.Draw(ref, triangle(), broken, 1, 0)
 	drawSampling(w, ref, sampler, texture)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})

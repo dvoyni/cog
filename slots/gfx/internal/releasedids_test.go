@@ -1,9 +1,8 @@
 package internal
 
 import (
+	"github.com/dvoyni/cog/libs/assets"
 	"testing"
-
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
@@ -19,11 +18,11 @@ import (
 func TestARerenderedFrameDropsADrawWhoseMeshWasReleased(t *testing.T) {
 	for _, c := range []struct {
 		name    string
-		release func(vertices, indices descriptors.BufferDescr) descriptors.BufferDescr
+		release func(vertices, indices types.BufferDescr) types.BufferDescr
 		want    int
 	}{
-		{"vertex buffer", func(v, _ descriptors.BufferDescr) descriptors.BufferDescr { return v }, 0},
-		{"index buffer", func(_, i descriptors.BufferDescr) descriptors.BufferDescr { return i }, 0},
+		{"vertex buffer", func(v, _ types.BufferDescr) types.BufferDescr { return v }, 0},
+		{"index buffer", func(_, i types.BufferDescr) types.BufferDescr { return i }, 0},
 		{"an unrelated buffer", nil, 1},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -32,15 +31,15 @@ func TestARerenderedFrameDropsADrawWhoseMeshWasReleased(t *testing.T) {
 			backend := &fakeBackend{}
 			k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-			var vertices, indices, unrelated descriptors.BufferDescr
+			var vertices, indices, unrelated types.BufferDescr
 			withResourceQueue(t, k, func(resources *ResourceQueue) {
 				vertices = resources.UploadBuffer(resources.NewBuffer(), make([]byte, 3*28), true)
 				indices = resources.UploadBuffer(resources.NewBuffer(), make([]byte, 12), true)
 				unrelated = resources.UploadBuffer(resources.NewBuffer(), make([]byte, 4), true)
 			})
-			mesh := descriptors.MeshIndexed(
-				vertices, indices, descriptors.IndexUint32, types.TopologyTriangleList,
-				descriptors.Attr(0, descriptors.Float32x3), descriptors.Attr(12, descriptors.Float32x4),
+			mesh := types.MeshDescrWithIndices(
+				vertices, indices, types.IndexUint32, types.TopologyTriangleList,
+				types.VertexAttribute{Offset: 0, Type: types.Float32x3}, types.VertexAttribute{Offset: 12, Type: types.Float32x4},
 			)
 			w, ref := recordList(t, k)
 			w.Draw(ref, mesh, testSet(t, k), 1, 0)
@@ -82,10 +81,10 @@ func TestARerenderedFrameDropsADrawWhoseMeshWasReleased(t *testing.T) {
 func TestARerenderedFrameDropsADrawWhoseSetWasReleased(t *testing.T) {
 	type world struct {
 		*setWorld
-		set              descriptors.DrawParams
-		other, versioned descriptors.BufferDescr
-		texture          descriptors.TextureDescr
-		unrelated        descriptors.DrawParams
+		set              types.DrawStateId
+		other, versioned types.BufferDescr
+		texture          types.TextureDescr
+		unrelated        types.DrawStateId
 	}
 	for _, c := range []struct {
 		name    string
@@ -103,7 +102,7 @@ func TestARerenderedFrameDropsADrawWhoseSetWasReleased(t *testing.T) {
 		{"an unrelated set", true, func(k kernel.Kernel, q *ResourceQueue, w *world) { q.ReleaseDrawParams(k, w.unrelated) }, 1},
 		{"an unrelated buffer", true, func(_ kernel.Kernel, q *ResourceQueue, w *world) { q.ReleaseBuffer(w.other) }, 1},
 		{"the set's inline buffer, by an update", false, func(k kernel.Kernel, q *ResourceQueue, w *world) {
-			q.UpdateDrawParams(k, w.set, descriptors.BufferParam("instances", descriptors.BufferWithBytes(make([]byte, 64), true)))
+			q.UpdateDrawParams(k, w.set, types.ShaderParameterBuffer("instances", types.BufferDescrWithBlob(assets.NewBlob(make([]byte, 64)), true)))
 		}, 1},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -111,14 +110,14 @@ func TestARerenderedFrameDropsADrawWhoseSetWasReleased(t *testing.T) {
 			w.resources(func(k kernel.Kernel, q *ResourceQueue) {
 				w.other = q.UploadBuffer(q.NewBuffer(), make([]byte, 64), true)
 				w.versioned = q.UploadBuffer(q.NewBuffer(), make([]byte, 64), true)
-				w.texture = q.NewTexture(1, 1, 1, descriptors.FormatRGBA8, false)
+				w.texture = q.NewTexture(1, 1, 1, types.FormatRGBA8, false)
 				q.UploadTexture(w.texture, 0, types.Region{}, []byte{1, 2, 3, 4}, true)
 			})
-			w.set = w.newSet(types.DrawState{}, descriptors.TextureParam("albedo", w.texture))
+			w.set = w.newSet(types.DrawState{}, types.ShaderParameterTexture("albedo", w.texture))
 			w.unrelated = w.newSet(types.DrawState{})
 			w.k.ExecuteCommand[recordCmd](recordRequest{withKernel: func(k kernel.Kernel, q *OpQueue) {
 				if c.version {
-					q.SetDrawParams(k, w.set, descriptors.BufferParam("instances", w.versioned))
+					q.SetDrawParams(k, w.set, types.ShaderParameterBuffer("instances", w.versioned))
 				}
 				q.Draw(screenPass(q, 0, "main"), triangle(), w.set, 1, 0)
 			}})
@@ -148,11 +147,11 @@ func TestARerenderedFrameDropsADrawWhoseSetWasReleased(t *testing.T) {
 // re-rendered frame never binds a bake the backend no longer holds.
 func TestReleasingASetReleasesItsBakesAsItsDrawIsDropped(t *testing.T) {
 	w := newSetWorld(t)
-	var set descriptors.DrawParams
+	var set types.DrawStateId
 	w.resources(func(k kernel.Kernel, q *ResourceQueue) {
 		set = q.NewDrawParams(k, w.shader, types.DrawState{},
-			descriptors.BufferParam("instances", descriptors.BufferWithBytes(make([]byte, 64), true)),
-			descriptors.TextureParam("albedo", descriptors.TextureWithBytes(1, 1, descriptors.FormatRGBA8, []byte{1, 2, 3, 4}, true, false)))
+			types.ShaderParameterBuffer("instances", types.BufferDescrWithBlob(assets.NewBlob(make([]byte, 64)), true)),
+			types.ShaderParameterTexture("albedo", types.TextureWithBytes(1, 1, types.FormatRGBA8, []byte{1, 2, 3, 4}, true, false)))
 	})
 	w.frame(func(_ kernel.Kernel, q *OpQueue) { q.Draw(screenPass(q, 0, "main"), triangle(), set, 1, 0) })
 	var buffer types.BufferID

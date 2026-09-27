@@ -3,8 +3,6 @@ package internal
 import (
 	"testing"
 
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
-
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/slots/app"
@@ -64,10 +62,10 @@ func TestPipelineDescCarriesStateAndTargetFormats(t *testing.T) {
 	if desc.State != StateOpaque3D() {
 		t.Errorf("pipeline state = %+v, want StateOpaque3D", desc.State)
 	}
-	if desc.ColorFormat != descriptors.FrameBufferFormat {
+	if desc.ColorFormat != types.FrameBufferFormat {
 		t.Errorf("pipeline colour format = %v, want the frame buffer's", desc.ColorFormat.String())
 	}
-	if desc.DepthFormat != descriptors.FormatDepth32F {
+	if desc.DepthFormat != types.FormatDepth32F {
 		t.Errorf("pipeline depth format = %v, want FormatDepth32F", desc.DepthFormat)
 	}
 }

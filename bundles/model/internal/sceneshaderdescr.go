@@ -21,7 +21,7 @@ import (
 // their names never reads them.
 type SceneShaderDescr struct {
 	Source gfx.ShaderDescr
-	Params []gfx.ParameterDescr
+	Params []gfx.ShaderParameterDescr
 }
 
 // SetDefaultSceneShader makes descr the default scene shader from the next

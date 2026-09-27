@@ -14,15 +14,15 @@ import (
 // buffer has no per-instance form - there is one bind group per draw - so it is
 // per batch. The scope's parameters follow the draw's, so the draw wins under
 // first-wins.
-func (p *plugin) shadeSprite(materials *ScopeMaterials, material *Material, fingerprint uint64, params []gfx.ParameterDescr) spriteShading {
+func (p *plugin) shadeSprite(materials *ScopeMaterials, material *Material, fingerprint uint64, params []gfx.ShaderParameterDescr) spriteShading {
 	shading := spriteShading{}
-	var scope []gfx.ParameterDescr
+	var scope []gfx.ShaderParameterDescr
 	shading.material, shading.fingerprint, scope = materials.Resolve(FamilySprite, material, fingerprint)
 	p.arrays, p.shared = p.arrays[:0], p.shared[:0]
 	for i := range params {
 		switch {
-		case reservedName(params[i].Name()):
-		case params[i].HasValue():
+		case reservedName(params[i].Name):
+		case params[i].Kind.IsValue():
 			p.arrays = append(p.arrays, params[i])
 		default:
 			p.shared = append(p.shared, params[i])
@@ -67,11 +67,11 @@ const builtinQuadLayoutID = -1
 // them at flush - and naming them here would put two writers on one parameter.
 func (p *plugin) shadeQuad(
 	material *Material, fingerprint uint64, texture gfx.TextureDescr, sampler gfx.SamplerDesc,
-	params, scope []gfx.ParameterDescr,
+	params, scope []gfx.ShaderParameterDescr,
 ) trianglesShading {
 	p.quadParams = append(p.quadParams[:0],
-		gfx.TextureParam(TextureSlot, texture),
-		gfx.SamplerParam(SamplerSlot, sampler),
+		gfx.ShaderParameterTexture(TextureSlot, texture),
+		gfx.ShaderParameterSampler(SamplerSlot, sampler),
 	)
 	p.quadParams = append(p.quadParams, params...)
 	p.quadParams = append(p.quadParams, scope...)
@@ -92,7 +92,7 @@ func (p *plugin) shadeTriangles(materials *ScopeMaterials, op *TrianglesOp) tria
 		f = FamilyTexture
 	}
 	shading := trianglesShading{}
-	var scope []gfx.ParameterDescr
+	var scope []gfx.ShaderParameterDescr
 	shading.material, shading.fingerprint, scope = materials.Resolve(f, op.NamedMaterial(), op.Fingerprint)
 	if len(scope) == 0 {
 		shading.params = op.Params

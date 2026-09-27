@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
@@ -113,38 +112,38 @@ type ParameterView struct {
 	Bytes int `json:"bytes,omitempty"`
 }
 
-// ParameterViewOf renders one parameter. It reads through the accessors rather
-// than the fields, so a new arm on the union that forgets to answer here
-// serializes as its kind and no value, instead of as somebody else's value.
-func ParameterViewOf(parameter descriptors.ParameterDescr) ParameterView {
-	view := ParameterView{Name: parameter.Name(), Kind: descriptors.ParameterKindName(&parameter)}
-	if value, ok := parameter.ColorValue(); ok {
-		view.Value = []float32{value.R, value.G, value.B, value.A}
-	}
-	if value, ok := parameter.FloatValue(); ok {
-		view.Value = []float32{value}
-	}
-	if value, ok := parameter.VecValue(); ok {
-		view.Value = []float32{value.X, value.Y, value.Z, value.W}
-	}
-	if value, ok := parameter.MatValue(); ok {
-		view.Value = value[:]
-	}
-	if value, ok := parameter.TextureValue(); ok {
-		texture := TextureViewOf(value)
+// ParameterViewOf renders one parameter: the value its Kind says it carries,
+// and nothing of the fields another kind would use.
+func ParameterViewOf(parameter types.ShaderParameterDescr) ParameterView {
+	view := ParameterView{Name: parameter.Name, Kind: parameter.Kind.String()}
+	switch parameter.Kind {
+	case types.ShaderParameterKindRaw, types.ShaderParameterKindFloat, types.ShaderParameterKindVec4,
+		types.ShaderParameterKindMat4, types.ShaderParameterKindColor:
+		if value, ok := parameter.ColorValue(); ok {
+			view.Value = []float32{value.R, value.G, value.B, value.A}
+		}
+		if value, ok := parameter.FloatValue(); ok {
+			view.Value = []float32{value}
+		}
+		if value, ok := parameter.VecValue(); ok {
+			view.Value = []float32{value.X, value.Y, value.Z, value.W}
+		}
+		if value, ok := parameter.MatValue(); ok {
+			view.Value = value[:]
+		}
+		if parameter.Kind == types.ShaderParameterKindRaw {
+			view.Bytes = parameter.ValueSize()
+		}
+	case types.ShaderParameterKindTexture:
+		texture := TextureViewOf(parameter.Texture)
 		view.Texture = &texture
-	}
-	if value, ok := parameter.SamplerValue(); ok {
-		sampler := SamplerViewOf(value)
+	case types.ShaderParameterKindSampler:
+		sampler := SamplerViewOf(parameter.Sampler)
 		view.Sampler = &sampler
-	}
-	if value, ok := parameter.BufferValue(); ok {
-		buffer := BufferViewOf(value)
-		buffer.Offset, buffer.Range, _ = parameter.BufferRange()
+	case types.ShaderParameterKindBuffer:
+		buffer := BufferViewOf(parameter.Buffer)
+		buffer.Offset, buffer.Range = int(parameter.BufferOffset), int(parameter.BufferSize)
 		view.Buffer = &buffer
-	}
-	if bytes, ok := parameter.RawLen(); ok {
-		view.Bytes = bytes
 	}
 	return view
 }
@@ -152,7 +151,7 @@ func ParameterViewOf(parameter descriptors.ParameterDescr) ParameterView {
 // ParameterViewsOf renders a parameter list in order. It is the form both
 // callers actually want, and it keeps the empty case one nil rather than one
 // empty array in every response.
-func ParameterViewsOf(parameters []descriptors.ParameterDescr) []ParameterView {
+func ParameterViewsOf(parameters []types.ShaderParameterDescr) []ParameterView {
 	if len(parameters) == 0 {
 		return nil
 	}
@@ -188,24 +187,34 @@ type TextureView struct {
 	Bytes int `json:"bytes,omitempty"`
 }
 
-// TextureViewOf renders one texture descriptor.
-func TextureViewOf(texture descriptors.TextureDescr) TextureView {
+// TextureViewOf renders one texture descriptor. Its source is read off
+// whichever field carries the answer, since the three cases are disjoint, and a
+// descriptor carrying none of them says so rather than reading as an empty path.
+func TextureViewOf(texture types.TextureDescr) TextureView {
 	view := TextureView{
-		Source:  descriptors.TextureSourceName(texture),
-		Path:    texture.Path(),
-		ID:      texture.ID(),
-		Format:  texture.Format().String(),
-		Mipmaps: texture.Mipmaps(),
-		Bytes:   texture.PixelBytes(),
+		Source:  "none",
+		Path:    texture.Name,
+		ID:      texture.Params.ID,
+		Format:  texture.Params.Format.String(),
+		Mipmaps: texture.Params.Mipmaps,
+		Bytes:   texture.Blob.Len(),
 	}
-	view.Width, view.Height = texture.Size()
+	view.Width, view.Height = texture.Params.Width, texture.Params.Height
+	switch {
+	case texture.Params.ID != 0:
+		view.Source = "baked"
+	case texture.Name != "":
+		view.Source = "resource"
+	case texture.Blob.Len() != 0:
+		view.Source = "bytes"
+	}
 	return view
 }
 
 // BufferView is one buffer rendered for an agent, plus the slice of it a
 // parameter binds when a parameter is what produced the view.
 type BufferView struct {
-	// Source is how the buffer resolves: bytes or baked.
+	// Source is how the buffer resolves: bytes, baked, or none.
 	Source string         `json:"source"`
 	ID     types.BufferID `json:"id,omitempty"`
 	Size   int            `json:"size,omitempty"`
@@ -220,13 +229,15 @@ type BufferView struct {
 
 // BufferViewOf renders one buffer descriptor. The bound range is not part of a
 // buffer and is filled in by whatever bound it.
-func BufferViewOf(buffer descriptors.BufferDescr) BufferView {
-	return BufferView{
-		Source: descriptors.BufferSourceName(descriptors.BufferSource(&buffer)),
-		ID:     buffer.ID(),
-		Size:   buffer.Size(),
-		Bytes:  buffer.InlineBytes(),
+func BufferViewOf(buffer types.BufferDescr) BufferView {
+	view := BufferView{Source: "none", ID: buffer.ID, Size: buffer.Size, Bytes: buffer.Bytes.Len()}
+	switch {
+	case buffer.ID != 0:
+		view.Source = "baked"
+	case buffer.Bytes.Len() != 0:
+		view.Source = "bytes"
 	}
+	return view
 }
 
 // SamplerView is one sampler rendered for an agent, with every mode named

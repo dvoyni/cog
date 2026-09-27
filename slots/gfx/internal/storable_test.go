@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/bundles/ecs"
 )
@@ -15,10 +15,10 @@ import (
 // after construction.
 func TestDescriptorsAreStorable(t *testing.T) {
 	for _, tp := range []reflect.Type{
-		reflect.TypeFor[descriptors.ParameterDescr](),
-		reflect.TypeFor[descriptors.TextureDescr](),
-		reflect.TypeFor[descriptors.BufferDescr](),
-		reflect.TypeFor[descriptors.DrawParams](),
+		reflect.TypeFor[types.ShaderParameterDescr](),
+		reflect.TypeFor[types.TextureDescr](),
+		reflect.TypeFor[types.BufferDescr](),
+		reflect.TypeFor[types.DrawStateId](),
 	} {
 		if err := ecs.Storable(tp); err != nil {
 			t.Errorf("ecs.Storable(%s) = %v, want nil", tp, err)

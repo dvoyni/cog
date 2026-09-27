@@ -42,9 +42,9 @@ func TestAModelMaterialIsKeyedByTheBundledShaderOverItsIngredients(t *testing.T)
 		t.Errorf("the ingredients carry baseColorFactor %v, want the file's %v", got, loaded.values.baseColorFactor)
 	}
 	for i, slot := range PbrSlots {
-		if built.Params[2*i].Name() != slot.Texture || built.Params[2*i+1].Name() != slot.Sampler {
+		if built.Params[2*i].Name != slot.Texture || built.Params[2*i+1].Name != slot.Sampler {
 			t.Errorf("param pair %d is %s, %s; want slot %s's texture and sampler",
-				i, built.Params[2*i].Name(), built.Params[2*i+1].Name(), slot.Texture)
+				i, built.Params[2*i].Name, built.Params[2*i+1].Name, slot.Texture)
 		}
 	}
 	seen := map[uint64]int{}
@@ -109,16 +109,16 @@ func TestTheDefaultSceneShaderIsSetOnceAndReadBack(t *testing.T) {
 	if got := read.DefaultSceneShader(); got.Source != (gfx.ShaderDescr{}) || len(got.Params) != 0 {
 		t.Fatalf("an untouched Lookup's default is %+v, want the zero descriptor", got)
 	}
-	params := []gfx.ParameterDescr{gfx.FloatParam("fade", 0.5)}
+	params := []gfx.ShaderParameterDescr{gfx.ShaderParameterFloat("fade", 0.5)}
 	source := gfx.ShaderWithResource("app/fade.wgsl")
 	NewLookupAccess(kernel.Kernel{}, lookup).SetDefaultSceneShader(SceneShaderDescr{Source: source, Params: params})
-	params[0] = gfx.FloatParam("other", 1)
+	params[0] = gfx.ShaderParameterFloat("other", 1)
 
 	got := read.DefaultSceneShader()
 	if got.Source != source {
 		t.Errorf("the default's source is %q, want %q", got.Source.Path(), source.Path())
 	}
-	if len(got.Params) != 1 || got.Params[0].Name() != "fade" {
+	if len(got.Params) != 1 || got.Params[0].Name != "fade" {
 		t.Errorf("the default's params are %v, want the fade the call passed", gfx.ParameterViewsOf(got.Params))
 	}
 

@@ -95,7 +95,7 @@ func (h *harness) setParams(t testing.TB, e ecs.Entity, params Params) {
 // tint is a Params holding one base colour, built afresh each call so no two
 // Entities share a List's backing.
 func tint(c m.Color) *Params {
-	return &Params{Values: m.ListOf([]gfx.ParameterDescr{gfx.ColorParam("baseColorFactor", c)})}
+	return &Params{Values: m.ListOf([]gfx.ShaderParameterDescr{gfx.ShaderParameterColor("baseColorFactor", c)})}
 }
 
 var (
@@ -264,7 +264,7 @@ func TestTheMaterialKeyIsTheFilesOrTheOverrides(t *testing.T) {
 	override := func() *Material {
 		return &Material{Tags: m.ListOf([]MaterialTag{{
 			Shader: gfx.ShaderWithResource("shaders/flat.wgsl"),
-			Params: m.ListOf([]gfx.ParameterDescr{gfx.ColorParam("tint", red)}),
+			Params: m.ListOf([]gfx.ShaderParameterDescr{gfx.ShaderParameterColor("tint", red)}),
 		}})}
 	}
 	file := h.spawn(t, spawnRequest{Place: m.At(0, 0, 0), Model: crateModelComponent()})

@@ -21,11 +21,11 @@ type Vertex struct {
 // OpQueue.DrawTriangles. The returned attributes map struct byte offsets to
 // shader locations in order.
 type VertexLayout interface {
-	VertexLayout() []gfx.VertexAttr
+	VertexLayout() []gfx.VertexAttribute
 }
 
 // VertexLayout returns the built-in position/color/UV layout.
-func (Vertex) VertexLayout() []gfx.VertexAttr { return triangleVertexLayout[:] }
+func (Vertex) VertexLayout() []gfx.VertexAttribute { return triangleVertexLayout[:] }
 
 type AspectMode uint8
 
@@ -137,17 +137,18 @@ type TextDraw struct {
 	// The field carries two things at once, because m.Color does. Rgb says what
 	// colour the ink is, and for a glyph that is the whole mark: the font atlas
 	// holds RGB=255 with coverage in alpha, so multiplying by tint is literally
-	// what colours the text. An icon's texel is already the artwork, so the same
-	// multiply is a modulation that would destroy it, and white stays the
+	// what colours the text. An icon's texel is already the artwork, so the
+	// same multiply is a modulation that would destroy it, and white stays the
 	// identity. Alpha says how present the run is, which is true of anything
-	// drawn - a label fading out takes its icon down with it rather than leaving
-	// it riding fully opaque over faded text.
+	// drawn - a label fading out takes its icon down with it rather than
+	// leaving it riding fully opaque over faded text.
 	//
-	// An inline icon therefore has no way to be given the ink colour, and that is
-	// deliberate rather than missing: a mark that wants the ink colour is a
+	// An inline icon therefore has no way to be given the ink colour, and that
+	// is deliberate rather than missing: a mark that wants the ink colour is a
 	// glyph, and belongs in the font, where it also gets kerning and baseline
 	// handling. Failing that it is a Sprite draw carrying
-	// gfx.ColorParam(TintSlot, ...) beside the text rather than inside it.
+	// gfx.ShaderParameterColor(TintSlot, ...) beside the text rather than
+	// inside it.
 	//
 	// Effects read tint, so this is what they see of an icon: an inline icon
 	// haloes white at the run's alpha - a band that follows the run in presence
@@ -168,7 +169,7 @@ type TextDraw struct {
 	// and glyphs carry the default key colour, so a text material may not
 	// reclaim TintSlot or KeyColorSlot.
 	Material *Material
-	Params   []gfx.ParameterDescr
+	Params   []gfx.ShaderParameterDescr
 }
 
 // ShapeDraw describes a FillRect, StrokeRect or Line: what colour it is, how
@@ -191,7 +192,7 @@ type ShapeDraw struct {
 	Color     m.Color
 	Thickness float32
 	Material  *Material
-	Params    []gfx.ParameterDescr
+	Params    []gfx.ShaderParameterDescr
 }
 
 // tint reports the colour a shape draws at, reading a zero colour as opaque

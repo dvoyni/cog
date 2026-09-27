@@ -108,7 +108,7 @@ func loadSystem(
 			return resources.UploadBuffer(buffer, data, false)
 		},
 		Release: resources.ReleaseBuffer,
-		ReleaseDrawParams: func(set gfx.DrawParams) {
+		ReleaseDrawParams: func(set gfx.DrawStateId) {
 			resources.ReleaseDrawParams(k, set)
 		},
 	})

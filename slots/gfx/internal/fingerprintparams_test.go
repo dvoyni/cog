@@ -4,30 +4,29 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
 func TestFingerprintParamsSeesTextureBufferMatrixAndSamplerParameters(t *testing.T) {
 	pairs := []struct {
 		name string
-		a, b descriptors.ParameterDescr
+		a, b types.ShaderParameterDescr
 	}{
-		{"texture path", descriptors.TextureParam("t", descriptors.TextureWithResource("a.png")),
-			descriptors.TextureParam("t", descriptors.TextureWithResource("b.png"))},
-		{"texture id", descriptors.TextureParam("t", descriptors.BakedTexture(1, 0, 0)),
-			descriptors.TextureParam("t", descriptors.BakedTexture(2, 0, 0))},
-		{"buffer id", descriptors.BufferParam("b", descriptors.BakedBuffer(1, 0)),
-			descriptors.BufferParam("b", descriptors.BakedBuffer(2, 0))},
-		{"buffer range", descriptors.BufferRangeParam("b", descriptors.BakedBuffer(1, 0), 0, 256),
-			descriptors.BufferRangeParam("b", descriptors.BakedBuffer(1, 0), 256, 256)},
-		{"matrix", descriptors.MatParam("m", m.NewMat4()), descriptors.MatParam("m", m.Mat4{})},
-		{"sampler", descriptors.SamplerParam("s", types.SamplerDesc{}),
-			descriptors.SamplerParam("s", types.SamplerDesc{Anisotropy: 16})},
+		{"texture path", types.ShaderParameterTexture("t", types.TextureWithResource("a.png")),
+			types.ShaderParameterTexture("t", types.TextureWithResource("b.png"))},
+		{"texture id", types.ShaderParameterTexture("t", types.BakedTexture(1, 0, 0)),
+			types.ShaderParameterTexture("t", types.BakedTexture(2, 0, 0))},
+		{"buffer id", types.ShaderParameterBuffer("b", types.BufferDescrWithId(1, 0)),
+			types.ShaderParameterBuffer("b", types.BufferDescrWithId(2, 0))},
+		{"buffer range", types.ShaderParameterBufferRange("b", types.BufferDescrWithId(1, 0), 0, 256),
+			types.ShaderParameterBufferRange("b", types.BufferDescrWithId(1, 0), 256, 256)},
+		{"matrix", types.ShaderParameterMat4("m", m.NewMat4()), types.ShaderParameterMat4("m", m.Mat4{})},
+		{"sampler", types.ShaderParameterSampler("s", types.SamplerDesc{}),
+			types.ShaderParameterSampler("s", types.SamplerDesc{Anisotropy: 16})},
 	}
 	for _, pair := range pairs {
-		a := descriptors.FingerprintParams([]descriptors.ParameterDescr{pair.a})
-		b := descriptors.FingerprintParams([]descriptors.ParameterDescr{pair.b})
+		a := types.FingerprintParams([]types.ShaderParameterDescr{pair.a})
+		b := types.FingerprintParams([]types.ShaderParameterDescr{pair.b})
 		if a == b {
 			t.Errorf("two slices differing in a %s parameter fingerprint the same", pair.name)
 		}
@@ -38,12 +37,12 @@ func TestFingerprintParamsAllocatesNothing(t *testing.T) {
 	if raceEnabled {
 		t.Skip("allocation counts are not meaningful under -race")
 	}
-	params := []descriptors.ParameterDescr{
-		descriptors.FloatParam("roughness", 0.5),
-		descriptors.TextureParam("t", descriptors.TextureWithResource("a.png")),
-		descriptors.SamplerParam("s", types.SamplerDesc{}),
+	params := []types.ShaderParameterDescr{
+		types.ShaderParameterFloat("roughness", 0.5),
+		types.ShaderParameterTexture("t", types.TextureWithResource("a.png")),
+		types.ShaderParameterSampler("s", types.SamplerDesc{}),
 	}
-	if allocations := testing.AllocsPerRun(100, func() { descriptors.FingerprintParams(params) }); allocations != 0 {
+	if allocations := testing.AllocsPerRun(100, func() { types.FingerprintParams(params) }); allocations != 0 {
 		t.Fatalf("FingerprintParams allocated %v times per call", allocations)
 	}
 }

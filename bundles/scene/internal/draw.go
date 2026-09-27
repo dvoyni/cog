@@ -38,7 +38,7 @@ type pendingDraw struct {
 	// params are the Batch's Params, set before the ranges the recording
 	// binds itself, so a Params value cannot displace them by naming one of
 	// their names.
-	params []gfx.ParameterDescr
+	params []gfx.ShaderParameterDescr
 }
 
 // frameBuild is everything one frame accumulates before it emits: the arenas
@@ -64,7 +64,7 @@ type frameBuild struct {
 	// values the material block a draw's Params members are laid over. gfx
 	// copies both as it records, so one of each serves every draw in the
 	// frame.
-	params []gfx.ParameterDescr
+	params []gfx.ShaderParameterDescr
 	values model.PbrValues
 }
 
@@ -111,31 +111,31 @@ func (b *frameBuild) emit(k kernel.Kernel, gfxWrite *gfx.OpQueue) {
 			bound := tag.bindings
 			if bound&bindFrame != 0 {
 				b.params = append(b.params,
-					gfx.BufferRangeParam(model.BindingSceneFrame, frames, pass.frameOffset, model.FrameBlockSize))
+					gfx.ShaderParameterBufferRange(model.BindingSceneFrame, frames, pass.frameOffset, model.FrameBlockSize))
 			}
 			if bound&bindInstances != 0 {
 				b.params = append(b.params,
-					gfx.BufferRangeParam(model.BindingSceneInstances, instances, pass.instanceOffset, pass.instanceBytes))
+					gfx.ShaderParameterBufferRange(model.BindingSceneInstances, instances, pass.instanceOffset, pass.instanceBytes))
 			}
 			if bound&bindAnim != 0 {
-				b.params = append(b.params, gfx.BufferParam(model.BindingSceneAnim, anims))
+				b.params = append(b.params, gfx.ShaderParameterBuffer(model.BindingSceneAnim, anims))
 			}
 			if bound&bindMeshes != 0 {
-				b.params = append(b.params, gfx.BufferParam(model.BindingSceneMeshes, meshes))
+				b.params = append(b.params, gfx.ShaderParameterBuffer(model.BindingSceneMeshes, meshes))
 			}
 			// Group 2 is bound only where the draw's variant declares it. The
 			// two halves go separately because the variants split them: a
 			// morph-only face declares binding 2 alone.
 			if draw.skin.Bound {
 				if bound&bindPoses != 0 {
-					b.params = append(b.params, gfx.BufferParam(model.BindingScenePoses, draw.skin.Poses))
+					b.params = append(b.params, gfx.ShaderParameterBuffer(model.BindingScenePoses, draw.skin.Poses))
 				}
 				if bound&bindSkinJoints != 0 {
-					b.params = append(b.params, gfx.BufferParam(model.BindingSceneSkinJoints, draw.skin.Joints))
+					b.params = append(b.params, gfx.ShaderParameterBuffer(model.BindingSceneSkinJoints, draw.skin.Joints))
 				}
 			}
 			if draw.skin.Morphed && bound&bindMorphDeltas != 0 {
-				b.params = append(b.params, gfx.BufferParam(model.BindingSceneMorphDeltas, draw.skin.Morphs))
+				b.params = append(b.params, gfx.ShaderParameterBuffer(model.BindingSceneMorphDeltas, draw.skin.Morphs))
 			}
 			gfxWrite.SetDrawParams(k, tag.set, b.params...)
 			gfxWrite.Draw(ref, draw.mesh, tag.set, draw.instances, draw.firstInstance)
@@ -150,19 +150,19 @@ func (b *frameBuild) emit(k kernel.Kernel, gfxWrite *gfx.OpQueue) {
 // it. gfx dropped a param no binding declared without a word, and one Params
 // Component serves every tag of a material, so a binding one tag's shader
 // lacks is not a mistake.
-func (b *frameBuild) appendParams(dst []gfx.ParameterDescr, tag *materialTag, params []gfx.ParameterDescr) []gfx.ParameterDescr {
+func (b *frameBuild) appendParams(dst []gfx.ShaderParameterDescr, tag *materialTag, params []gfx.ShaderParameterDescr) []gfx.ShaderParameterDescr {
 	if len(params) == 0 {
 		return dst
 	}
 	members := false
 	for i := range params {
-		if !members && model.IsPbrValue(params[i].Name()) {
+		if !members && model.IsPbrValue(params[i].Name) {
 			b.values, members = tag.values, true
 		}
 		if b.values.Overlay(params[i]) {
 			continue
 		}
-		if _, declared := tag.program.Binding(params[i].Name()); declared {
+		if _, declared := tag.program.Binding(params[i].Name); declared {
 			dst = append(dst, params[i])
 		}
 	}
@@ -170,7 +170,7 @@ func (b *frameBuild) appendParams(dst []gfx.ParameterDescr, tag *materialTag, pa
 		// Borrowed rather than copied: the block is 160 bytes, past what a
 		// param carries inline, and SetDrawParams copies it before it
 		// returns.
-		dst = append(dst, gfx.RawParameterRef(model.BindingScenePbrMaterial, &b.values))
+		dst = append(dst, gfx.ShaderParameterRawRef(model.BindingScenePbrMaterial, &b.values))
 	}
 	return dst
 }

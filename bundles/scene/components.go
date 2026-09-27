@@ -26,10 +26,10 @@ type Animation = internal.Animation
 //
 // They ride on the draw, laid by name over every tag's params, the material's
 // numbers among them, a Model's and a Mesh's alike — so
-// gfx.ColorParam("baseColorFactor", c) tints either. A param naming a member of
-// the material block is written into it and the block set whole; any other is
-// a whole binding, set where the tag's shader declares it and dropped where it
-// does not.
+// gfx.ShaderParameterColor("baseColorFactor", c) tints either. A param naming a
+// member of the material block is written into it and the block set whole; any
+// other is a whole binding, set where the tag's shader declares it and dropped
+// where it does not.
 type Params = internal.Params
 
 // Material changes what a draw is shaded with, one entry per pass tag, laid

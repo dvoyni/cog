@@ -22,10 +22,10 @@ func TestOverlayingEveryMemberRebuildsTheValues(t *testing.T) {
 	var rebuilt PbrValues
 	for _, param := range values.appendParams(nil) {
 		if !rebuilt.Overlay(param) {
-			t.Errorf("appendParams wrote %q, which Overlay does not know as a member", param.Name())
+			t.Errorf("appendParams wrote %q, which Overlay does not know as a member", param.Name)
 		}
-		if !IsPbrValue(param.Name()) {
-			t.Errorf("IsPbrValue(%q) is false for a member appendParams writes", param.Name())
+		if !IsPbrValue(param.Name) {
+			t.Errorf("IsPbrValue(%q) is false for a member appendParams writes", param.Name)
 		}
 	}
 	if rebuilt != values {
@@ -40,13 +40,13 @@ func TestOverlayWritesOneMemberAndLeavesTheRest(t *testing.T) {
 	values := defaultPbrValues()
 	want := values
 	want.baseColorFactor = m.Vec4{X: 1, W: 0.5}
-	if !values.Overlay(gfx.ColorParam("baseColorFactor", m.Color{R: 1, A: 0.5})) {
+	if !values.Overlay(gfx.ShaderParameterColor("baseColorFactor", m.Color{R: 1, A: 0.5})) {
 		t.Fatal("baseColorFactor is not a member")
 	}
-	if values.Overlay(gfx.FloatParam("fade", 1)) || IsPbrValue("fade") {
+	if values.Overlay(gfx.ShaderParameterFloat("fade", 1)) || IsPbrValue("fade") {
 		t.Error("fade was taken for a member")
 	}
-	if !values.Overlay(gfx.FloatParam("emissiveFactor", 9)) {
+	if !values.Overlay(gfx.ShaderParameterFloat("emissiveFactor", 9)) {
 		t.Error("emissiveFactor at the wrong size was not recognised as a member")
 	}
 	if values != want {

@@ -5,21 +5,11 @@ import (
 
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
-	"github.com/dvoyni/cog/bundles/mcp"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/slots/app"
 
 	"github.com/dvoyni/cog/slots/storage"
 )
-
-// captureOnUpdate is the subscription type of the plugin's
-// start-of-tick capture handler, admitCapture, on app.UpdateEvent. It is ordered First - ahead
-// of every other subscriber, not merely in the first phase - because that is
-// what makes "a tick that began after the request" decidable: a capture armed
-// while a tick is already running has to wait for the next one, and nothing
-// later in the publication can tell the two apart. Its whole body is a
-// mutex-guarded no-op when no capture is waiting.
-type captureOnUpdate kernel.Subscription[app.UpdateEvent]
 
 // readList is the read side of the triple buffer: the queue the render
 // handler translates.
@@ -47,36 +37,34 @@ type plugin struct {
 	translator *translator
 	// backend is the bound Backend adapter, valid from Start onwards.
 	backend kernel.RequiredAdapter[Backend]
-	// captures is gfx's one capture slot, plugin-owned and self-synchronizing.
-	// See captureState for why it is not a kernel resource.
-	captures captureState
-	// snapshots is gfx's one frame-snapshot slot, plugin-owned for the same
-	// reason and separate from captures because the two are separate kinds: a
-	// capture and a snapshot may be in flight together, and refusing them
-	// would destroy the pairing they exist for.
-	snapshots snapshotState
+	// observer watches the frames from outside gfx. See FrameObserver.
+	observer FrameObserver
 }
 
-// New creates the gfx plugin.
-func New() kernel.Plugin { return newPlugin() }
+// New creates the gfx plugin, watched by observer.
+func New(observer FrameObserver) kernel.Plugin {
+	p := newPlugin()
+	p.observer = observer
+	return p
+}
 
-// newPlugin creates the gfx plugin as its own type, for the tests that reach
-// its translator and capture slots.
-func newPlugin() *plugin { return &plugin{translator: newTranslator()} }
+// newPlugin creates the gfx plugin as its own type, unobserved, for the tests
+// that reach its translator.
+func newPlugin() *plugin { return &plugin{translator: newTranslator(), observer: noObserver{}} }
 
 // Name reports the plugin name.
 func (p *plugin) Name() kernel.PluginName { return Name }
 
 // Dependencies reports the plugins gfx requires: storage, from which it loads
-// shader and texture resources, and app, whose TimeCmd the gfx_capture and
-// gfx_frame capabilities dispatch.
+// shader and texture resources, and app, whose events drive it and whose
+// TimeCmd the observer's capabilities dispatch.
 func (p *plugin) Dependencies() []kernel.PluginName {
 	return []kernel.PluginName{app.Name, storage.Name}
 }
 
-// Register requires the Backend adapter, and registers the three command-list
-// buffers, the Present/Acquire/Consume commands, and the end-of-tick present
-// subscription on app.UpdateEvent.
+// Register requires the Backend adapter, registers the three command-list
+// buffers, the Present/Acquire/Consume commands and the end-of-tick present
+// subscription on app.UpdateEvent, and lets the observer register its own.
 func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
 	p.backend = registrar.RequireAdapter[BackendPort]()
 	ids := func() IDMinter { return p.backend.Get() }
@@ -97,51 +85,26 @@ func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.HandleCommand[CompileShaderCmd](p.compileShaderCmdImpl)
 	registrar.HandleCommand[SetViewportCmd](setViewportCmdImpl)
 	registrar.HandleCommand[SetDesiredViewportCmd](setDesiredViewportCmdImpl)
-	registrar.HandleCommand[ArmCaptureCmd](p.armCaptureCmdImpl)
-	registrar.HandleCommand[ArmFrameCmd](p.armFrameCmdImpl)
-	registrar.Subscribe[captureOnUpdate](p.admitCapture).First()
-	registrar.Subscribe[frameOnUpdate](p.admitFrame).First()
 	registrar.Subscribe[PresentOnUpdate](p.presentOnUpdate).Last()
 	registrar.Subscribe[RenderOnRender](p.renderOnRender)
-	registrar.ProvideAdapter[McpProvider](mcp.Provider(provider{}))
+	p.observer.Register(registrar)
 	return nil
 }
 
-// Stop completes any capture the engine walked away from. A capture armed in
-// frame N resolves in N+1; if the window closes between them no further submit
-// happens, the pending map never resolves, and a waiter left alone learns
-// nothing at all. Abandonment is delivered rather than merely true.
-//
-// It touches the capture slot directly because by Stop the scheduler has
-// stopped and grants no locks, which is also why nothing else can be touching
-// it: the host loop has returned and every handler is done.
+// Stop lets the observer complete whatever the engine walked away from. By
+// Stop the scheduler has stopped and grants no locks, which is also why
+// nothing else can be touching the observer's state: the host loop has
+// returned and every handler is done.
 func (p *plugin) Stop(kernel.Executioner) error {
-	p.captures.abandon()
-	p.snapshots.abandon()
+	p.observer.Abandon()
 	return nil
 }
 
-// admitCapture admits a waiting capture to the tick that has just begun. It
-// declares no resources: the capture slot carries its own lock.
-func (p *plugin) admitCapture() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	return nil, func(kernel.Kernel, app.UpdateEvent) {
-		p.captures.beginTick()
-	}
-}
-
-// admitFrame admits a waiting frame snapshot to the tick that has just
-// begun. It declares no resources: the snapshot slot carries its own lock.
-func (p *plugin) admitFrame() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
-	return nil, func(kernel.Kernel, app.UpdateEvent) {
-		p.snapshots.beginTick()
-	}
-}
-
-// presentOnUpdate swaps the recorded queue into the ready slot, and takes the
-// frame snapshot immediately before doing so.
+// presentOnUpdate swaps the recorded queue into the ready slot, and hands the
+// observer the queue immediately before doing so.
 //
-// The snapshot is taken here rather than from a subscriber of its own because
-// this is the only place the ordering it needs can be expressed. It has to run
+// The observer is called here rather than from a subscriber of its own because
+// this is the only place the ordering a frame snapshot needs can be expressed. It has to run
 // after canvas has flushed into the queue and before present swaps it away -
 // but canvas.FlushOnUpdate is a type gfx cannot name, since canvas
 // imports gfx and not the other way round. A second Last subscriber would
@@ -164,11 +127,8 @@ func (p *plugin) presentOnUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]
 			ready = access.GetWrite[*readyList]()
 			resources = access.GetRead[*ResourceQueue]()
 		}, func(_ kernel.Kernel, event app.UpdateEvent) {
-			p.snapshots.record(write.Get(), resources.Get(), event.Tick)
+			p.observer.Presenting(write.Get(), resources.Get(), event.Tick)
 			present(write, ready)
-			// Bound beside the queue swap, so the capture rides the ready slot
-			// rather than one particular queue.
-			p.captures.endTick()
 		}
 }
 
@@ -195,7 +155,7 @@ func (p *plugin) renderOnRender() (kernel.Lock, kernel.Observe[app.RenderEvent])
 				return
 			}
 			queue := resources.Get()
-			capture, capturing := p.captures.target()
+			capture, capturing := p.observer.Capturing()
 			ops, err := p.translator.translate(
 				k, list.OpQueue, queue, backend, files, capture, capturing)
 			if err != nil {
@@ -206,10 +166,10 @@ func (p *plugin) renderOnRender() (kernel.Lock, kernel.Observe[app.RenderEvent])
 			// backend has ready now is the copy the previous frame encoded: its
 			// map resolved on the submit Execute just made.
 			if done, ready := backend.TakeCapture(); ready {
-				p.captures.deliver(done)
+				p.observer.Captured(done)
 			}
 			if capturing {
-				p.captures.encoded()
+				p.observer.Encoded()
 			}
 			ResourceQueueReset(queue)
 		}

@@ -6,10 +6,9 @@ import (
 	"github.com/gogpu/gputypes"
 )
 
-// textureFormat maps a gfx format onto the backend format. FormatScreen is
-// resolved first, so the sentinel never reaches a texture descriptor.
+// textureFormat maps a gfx format onto the backend format.
 func textureFormat(format gfx.TextureFormat) gputypes.TextureFormat {
-	switch format.Resolve() {
+	switch format {
 	case gfx.FormatRGBA8Srgb:
 		return gputypes.TextureFormatRGBA8UnormSrgb
 	case gfx.FormatDepth32F:
@@ -39,7 +38,7 @@ func bytesPerTexel(format gfx.TextureFormat) int {
 // not taken: that pays on every atlas and material map in the scene.
 func textureUsage(desc gfx.TextureDesc) gputypes.TextureUsage {
 	usage := gputypes.TextureUsageTextureBinding
-	if desc.Format.Resolve() == gfx.FormatDepth32F {
+	if desc.Format == gfx.FormatDepth32F {
 		return usage | gputypes.TextureUsageRenderAttachment
 	}
 	usage |= gputypes.TextureUsageCopyDst
@@ -52,13 +51,13 @@ func textureUsage(desc gfx.TextureDesc) gputypes.TextureUsage {
 // mipmapsSupported reports whether a mip chain can be generated for a format.
 // Box-filtering depth is meaningless, so it is refused rather than approximated.
 func mipmapsSupported(format gfx.TextureFormat) bool {
-	return format.Resolve() != gfx.FormatDepth32F
+	return format != gfx.FormatDepth32F
 }
 
 // downsampleTexels halves an image for the next mip level, filtering in the
 // space the format says its texels are in.
 func downsampleTexels(src []byte, width, height int, format gfx.TextureFormat) (dst []byte, dw, dh int) {
-	if format.Resolve() == gfx.FormatRGBA8Srgb {
+	if format == gfx.FormatRGBA8Srgb {
 		return downsampleSrgb(src, width, height)
 	}
 	return downsampleRGBA(src, width, height)

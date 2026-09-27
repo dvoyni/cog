@@ -23,5 +23,5 @@ type MaterialTag struct {
 	State gfx.DrawState
 	// Params are overlaid by name on the file's and the default scene
 	// shader's.
-	Params m.List[gfx.ParameterDescr]
+	Params m.List[gfx.ShaderParameterDescr]
 }

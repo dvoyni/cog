@@ -122,12 +122,12 @@ and call:
   operations.
 - `SetLayerMaterial(Layer, MaterialSet)` to put one material set over everything
   a layer draws that named no material of its own. See **Materials** below.
-- `Sprite(Layer, path, SpriteTransform, *Material, ...gfx.ParameterDescr)`.
+- `Sprite(Layer, path, SpriteTransform, *Material, ...gfx.ShaderParameterDescr)`.
   A nil material batches the sprite into the built-in instanced sprite material,
   which is what `DefaultMaterial()` returns; naming a material batches too.
-- `SpriteTexture(Layer, gfx.TextureDescr, SpriteTransform, *Material, ...gfx.ParameterDescr)`
+- `SpriteTexture(Layer, gfx.TextureDescr, SpriteTransform, *Material, ...gfx.ShaderParameterDescr)`
   for the same rectangle sourced from a gfx texture rather than a sprite path.
-- `DrawTexture[TVertex](Layer, gfx.TextureDescr, []TVertex, *Material, ...gfx.ParameterDescr)`
+- `DrawTexture[TVertex](Layer, gfx.TextureDescr, []TVertex, *Material, ...gfx.ShaderParameterDescr)`
   for an arbitrary shape sourcing a gfx texture.
 - `FillRect(Layer, m.Rect, ShapeDraw)`, `StrokeRect(Layer, m.Rect, ShapeDraw)`
   and `Line(Layer, start, end m.Vec2, ShapeDraw)` for primitives.
@@ -178,7 +178,7 @@ material is rare enough that the argument list is the wrong place to pay for it.
 
 `Vertex` is the built-in position/color/UV vertex and implements
 `VertexLayout`. Custom pointer-free vertex structs implement
-`VertexLayout() []gfx.VertexAttr`. `SpriteInstance` is the public 96-byte
+`VertexLayout() []gfx.VertexAttribute`. `SpriteInstance` is the public 96-byte
 instance record matching the built-in sprite shader.
 
 ## Materials
@@ -195,8 +195,8 @@ own parameters — built once and passed by address:
 var fade = canvas.MaterialWithState(
     gfx.ShaderWithResource("shaders/fade-sprite.wgsl"), gfx.StateOverlay2D())
 
-func NewMaterial(shader gfx.ShaderDescr, params ...gfx.ParameterDescr) Material                    // alpha-blended, depth-tested and written
-func MaterialWithState(shader gfx.ShaderDescr, state gfx.DrawState, params ...gfx.ParameterDescr) Material
+func NewMaterial(shader gfx.ShaderDescr, params ...gfx.ShaderParameterDescr) Material                    // alpha-blended, depth-tested and written
+func MaterialWithState(shader gfx.ShaderDescr, state gfx.DrawState, params ...gfx.ShaderParameterDescr) Material
 ```
 
 gfx has no materials: a gfx draw names a durable set of draw params. Canvas
@@ -236,7 +236,7 @@ type MaterialSet struct {
     Sprite    *Material
     Triangles *Material
     Texture   *Material
-    Params    []gfx.ParameterDescr
+    Params    []gfx.ShaderParameterDescr
 }
 ```
 
@@ -419,14 +419,14 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 ```go
 var fade = canvas.MaterialWithState(gfx.ShaderWithResource("shaders/fade-sprite.wgsl"), gfx.StateOverlay2D())
 
-queue.SetMaterial(canvas.MaterialSet{Sprite: &fade, Params: []gfx.ParameterDescr{gfx.FloatParam("fade", amount)}})
+queue.SetMaterial(canvas.MaterialSet{Sprite: &fade, Params: []gfx.ShaderParameterDescr{gfx.ShaderParameterFloat("fade", amount)}})
 ```
 
 **`CanvasUniforms` is canvas's and is never extended.** Every canvas material
 includes `uniforms.wgsl`, and canvas sets `u` whole, once a batch. A material
 declares its own per-batch values as **uniforms of their own** in group 0, at any
 binding but 0, and each is set whole by the parameter that names it — a scalar
-or a `vec4` by the typed constructors, a struct by `gfx.RawParameter` over a Go
+or a `vec4` by the typed constructors, a struct by `gfx.ShaderParameterRaw` over a Go
 struct mirroring it field for field:
 
 ```wgsl
@@ -441,11 +441,11 @@ type lens struct {
     Strength float32
 }
 
-q.DrawTexture(layer, texture, disc, &lensMaterial, gfx.RawParameter("lens", lens{Centre: c, Radius: r, Strength: s}))
+q.DrawTexture(layer, texture, disc, &lensMaterial, gfx.ShaderParameterRaw("lens", lens{Centre: c, Radius: r, Strength: s}))
 ```
 
 The binding number is only the module's own: a parameter binds by the global's
-name. `RawParameter` checks the Go layout against WGSL's alignment rules, and gfx
+name. `gfx.ShaderParameterRaw` checks the Go layout against WGSL's alignment rules, and gfx
 checks the size against the reflected binding, so a struct that drifted is
 reported rather than misread. The built-ins do the same: triangles' `keyColor`
 is its own `var<uniform> keyColor: vec4<f32>`, and the halo's profile its own
@@ -537,7 +537,7 @@ second framebuffer scale on top of that.
 
 Passes still merge. A contiguous run of layers naming one target collapses into
 a single GPU pass; a target change ends the run, and each run clears its own
-depth at the bottom and discards it at the top, because `DepthAuto` pools one
+depth at the bottom and discards it at the top, because `DepthDescrAuto` pools one
 depth texture per target size.
 
 **Barriers are gfx's.** It computes the frame's write-then-read pairs and emits

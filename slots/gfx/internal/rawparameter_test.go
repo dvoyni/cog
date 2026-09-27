@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/libs/m"
 )
@@ -28,8 +28,8 @@ type badlyPacked struct {
 
 func TestRawParameterCopiesTheValueBytes(t *testing.T) {
 	value := wellPacked{Amount: m.Vec4{X: 1, Y: 2, Z: 3, W: 4}}
-	param := descriptors.RawParameter("record", value)
-	bytes, ok := param.AppendValue(nil)
+	param := types.ShaderParameterRaw("record", value)
+	bytes, ok := param.AppendValueTo(nil)
 	if !ok {
 		t.Fatal("a raw parameter reported no value")
 	}
@@ -58,7 +58,7 @@ func TestRawParameterPanicsOnAGoLayoutWGSLDoesNotShare(t *testing.T) {
 			}
 		}
 	}()
-	descriptors.RawParameter("record", badlyPacked{})
+	types.ShaderParameterRaw("record", badlyPacked{})
 	t.Fatal("a badly packed struct did not panic")
 }
 
@@ -72,37 +72,37 @@ func TestRawParameterRejectsAMemberThatIsNotShaderData(t *testing.T) {
 		A m.Vec4
 		B *float32
 	}
-	descriptors.RawParameter("record", withPointer{})
+	types.ShaderParameterRaw("record", withPointer{})
 }
 
 func TestRawParameterAcceptsArraysAtTheirWGSLStride(t *testing.T) {
 	type sixteen struct{ Values [4]m.Vec4 }
-	if bytes, _ := descriptors.RawParameter("record", sixteen{}).AppendValue(nil); len(bytes) != 64 {
+	if bytes, _ := types.ShaderParameterRaw("record", sixteen{}).AppendValueTo(nil); len(bytes) != 64 {
 		t.Fatalf("array record = %d bytes, want 64", len(bytes))
 	}
 }
 
 func TestFingerprintParamsSeparatesValuesAndIgnoresBacking(t *testing.T) {
-	one := []descriptors.ParameterDescr{descriptors.FloatParam("fade", 0.25), descriptors.ColorParam("tint", m.Color{R: 1, A: 1})}
-	same := []descriptors.ParameterDescr{descriptors.FloatParam("fade", 0.25), descriptors.ColorParam("tint", m.Color{R: 1, A: 1})}
-	if descriptors.FingerprintParams(one) != descriptors.FingerprintParams(same) {
+	one := []types.ShaderParameterDescr{types.ShaderParameterFloat("fade", 0.25), types.ShaderParameterColor("tint", m.Color{R: 1, A: 1})}
+	same := []types.ShaderParameterDescr{types.ShaderParameterFloat("fade", 0.25), types.ShaderParameterColor("tint", m.Color{R: 1, A: 1})}
+	if types.FingerprintParams(one) != types.FingerprintParams(same) {
 		t.Fatal("equal parameter slices in different backings fingerprinted differently")
 	}
-	different := []descriptors.ParameterDescr{descriptors.FloatParam("fade", 0.5), descriptors.ColorParam("tint", m.Color{R: 1, A: 1})}
-	if descriptors.FingerprintParams(one) == descriptors.FingerprintParams(different) {
+	different := []types.ShaderParameterDescr{types.ShaderParameterFloat("fade", 0.5), types.ShaderParameterColor("tint", m.Color{R: 1, A: 1})}
+	if types.FingerprintParams(one) == types.FingerprintParams(different) {
 		t.Fatal("a changed value did not change the fingerprint")
 	}
-	reordered := []descriptors.ParameterDescr{one[1], one[0]}
-	if descriptors.FingerprintParams(one) == descriptors.FingerprintParams(reordered) {
+	reordered := []types.ShaderParameterDescr{one[1], one[0]}
+	if types.FingerprintParams(one) == types.FingerprintParams(reordered) {
 		t.Fatal("reordered parameters fingerprinted the same")
 	}
 	// A kind change with the same name is the case a hand-written comparison
 	// misses, and it is the one that merges two draws that differ.
-	kindChanged := []descriptors.ParameterDescr{descriptors.VecParam("fade", m.Vec4{}), one[1]}
-	if descriptors.FingerprintParams(one) == descriptors.FingerprintParams(kindChanged) {
+	kindChanged := []types.ShaderParameterDescr{types.ShaderParameterVec4("fade", m.Vec4{}), one[1]}
+	if types.FingerprintParams(one) == types.FingerprintParams(kindChanged) {
 		t.Fatal("a changed kind did not change the fingerprint")
 	}
-	if descriptors.FingerprintParams(nil) != descriptors.FingerprintParams([]descriptors.ParameterDescr{}) {
+	if types.FingerprintParams(nil) != types.FingerprintParams([]types.ShaderParameterDescr{}) {
 		t.Fatal("nil and empty parameter slices fingerprinted differently")
 	}
 }
@@ -111,21 +111,21 @@ func TestFingerprintParamsSeparatesValuesAndIgnoresBacking(t *testing.T) {
 // the caller's value, and building one per batch allocates nothing.
 func TestRawParameterRefBorrowsALargeRecord(t *testing.T) {
 	value := &wellPacked{Amount: m.Vec4{X: 1}}
-	param := descriptors.RawParameterRef("record", value)
+	param := types.ShaderParameterRawRef("record", value)
 	value.Amount.X = 7
-	bytes, _ := param.AppendValue(nil)
+	bytes, _ := param.AppendValueTo(nil)
 	if len(bytes) != 96 || math.Float32frombits(binary.LittleEndian.Uint32(bytes)) != 7 {
 		t.Fatalf("borrowed record = %d bytes starting %v, want 96 reading the caller's 7", len(bytes), bytes[:4])
 	}
-	if allocs := testing.AllocsPerRun(20, func() { param = descriptors.RawParameterRef("record", value) }); allocs != 0 {
-		t.Fatalf("RawParameterRef allocated %v times, want 0", allocs)
+	if allocs := testing.AllocsPerRun(20, func() { param = types.ShaderParameterRawRef("record", value) }); allocs != 0 {
+		t.Fatalf("ShaderParameterRawRef allocated %v times, want 0", allocs)
 	}
-	// A record that fits is carried inline, as RawParameter's is, so its
+	// A record that fits is carried inline, as ShaderParameterRaw's is, so its
 	// descriptor no longer reads the caller's value.
 	small := &struct{ A m.Vec4 }{A: m.Vec4{X: 1}}
-	inline := descriptors.RawParameterRef("small", small)
+	inline := types.ShaderParameterRawRef("small", small)
 	small.A.X = 9
-	if got, _ := inline.AppendValue(nil); math.Float32frombits(binary.LittleEndian.Uint32(got)) != 1 {
+	if got, _ := inline.AppendValueTo(nil); math.Float32frombits(binary.LittleEndian.Uint32(got)) != 1 {
 		t.Fatalf("inline record read %v, want the 1 it was built from", got[:4])
 	}
 }

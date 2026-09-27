@@ -3,8 +3,6 @@ package internal
 import (
 	"testing"
 
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
-
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
 	"github.com/dvoyni/cog/kernel"
@@ -26,9 +24,9 @@ import (
 
 // allocatedTarget allocates a render target and renders the frame that bakes
 // it, so the backend can answer for it while the next frame is translated.
-func allocatedTarget(t *testing.T, k kernel.Executioner, format descriptors.TextureFormat) descriptors.TextureDescr {
+func allocatedTarget(t *testing.T, k kernel.Executioner, format types.TextureFormat) types.TextureDescr {
 	t.Helper()
-	var target descriptors.TextureDescr
+	var target types.TextureDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
 		target = resources.NewRenderTarget(64, 64, 1, format)
 	})
@@ -38,11 +36,11 @@ func allocatedTarget(t *testing.T, k kernel.Executioner, format descriptors.Text
 }
 
 // renderInto renders one frame of one pass into target, with one draw in it.
-func renderInto(t *testing.T, k kernel.Executioner, target descriptors.TargetDescr, label string) {
+func renderInto(t *testing.T, k kernel.Executioner, target types.TargetDescr, label string) {
 	t.Helper()
 	set := testSet(t, k)
 	q := recordRaw(t, k)
-	ref := q.NewPass(descriptors.PassDescr{Target: target, Depth: descriptors.DepthNone(), Load: types.LoadClear, Label: label})
+	ref := q.NewPass(types.PassDescr{Target: target, Depth: types.DepthDescrNone(), Load: types.LoadClear, Label: label})
 	drawInto(q, ref, set)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -54,15 +52,15 @@ func TestAPassIntoALinearTargetBuildsALinearPipeline(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	target := allocatedTarget(t, k, descriptors.FormatRGBA8)
-	renderInto(t, k, descriptors.TextureTarget(target, 0, 0), "linear")
+	target := allocatedTarget(t, k, types.FormatRGBA8)
+	renderInto(t, k, types.TargetDescrTexture(target, 0, 0), "linear")
 
 	if len(backend.lastPipelines) != 1 {
 		t.Fatalf("pipelines = %d, want the one the linear pass needed", len(backend.lastPipelines))
 	}
-	if got := backend.lastPipelines[0].ColorFormat; got != descriptors.FormatRGBA8 {
+	if got := backend.lastPipelines[0].ColorFormat; got != types.FormatRGBA8 {
 		t.Errorf("colour format = %v, want %v: the pass renders into a linear target",
-			got.String(), descriptors.FormatRGBA8.String())
+			got.String(), types.FormatRGBA8.String())
 	}
 }
 
@@ -75,18 +73,18 @@ func TestTwoTargetFormatsSharingAShaderBuildTwoPipelines(t *testing.T) {
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	srgb := allocatedTarget(t, k, descriptors.FormatRGBA8Srgb)
-	linear := allocatedTarget(t, k, descriptors.FormatRGBA8)
+	srgb := allocatedTarget(t, k, types.FormatRGBA8Srgb)
+	linear := allocatedTarget(t, k, types.FormatRGBA8)
 
 	set := testSet(t, k)
 	q := recordRaw(t, k)
-	ref := q.NewPass(descriptors.PassDescr{
-		Target: descriptors.TextureTarget(srgb, 0, 0), Depth: descriptors.DepthNone(),
+	ref := q.NewPass(types.PassDescr{
+		Target: types.TargetDescrTexture(srgb, 0, 0), Depth: types.DepthDescrNone(),
 		Load: types.LoadClear, Order: 0, Label: "srgb",
 	})
 	drawInto(q, ref, set)
-	ref = q.NewPass(descriptors.PassDescr{
-		Target: descriptors.TextureTarget(linear, 0, 0), Depth: descriptors.DepthNone(),
+	ref = q.NewPass(types.PassDescr{
+		Target: types.TargetDescrTexture(linear, 0, 0), Depth: types.DepthDescrNone(),
 		Load: types.LoadClear, Order: 1, Label: "linear",
 	})
 	drawInto(q, ref, set)
@@ -97,31 +95,31 @@ func TestTwoTargetFormatsSharingAShaderBuildTwoPipelines(t *testing.T) {
 		t.Fatalf("pipelines = %d, want one per target format", len(backend.lastPipelines))
 	}
 	first, second := backend.lastPipelines[0].ColorFormat, backend.lastPipelines[1].ColorFormat
-	if first != descriptors.FormatRGBA8Srgb || second != descriptors.FormatRGBA8 {
+	if first != types.FormatRGBA8Srgb || second != types.FormatRGBA8 {
 		t.Errorf("colour formats = (%v, %v), want (%v, %v)",
-			first.String(), second.String(), descriptors.FormatRGBA8Srgb.String(), descriptors.FormatRGBA8.String())
+			first.String(), second.String(), types.FormatRGBA8Srgb.String(), types.FormatRGBA8.String())
 	}
 }
 
 func TestAScreenPassAndATargetInTheFrameBufferFormatShareOnePipeline(t *testing.T) {
-	// The screen sentinel is resolved where the key is built rather than
-	// carried into it, so the two passes do not build byte-identical pipelines.
+	// A screen pass is keyed on the frame buffer's format itself, so it and a
+	// texture target in that format build one pipeline, not two identical ones.
 	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	target := allocatedTarget(t, k, descriptors.FrameBufferFormat)
+	target := allocatedTarget(t, k, types.FrameBufferFormat)
 
 	set := testSet(t, k)
 	q := recordRaw(t, k)
-	ref := q.NewPass(descriptors.PassDescr{
-		Target: descriptors.TextureTarget(target, 0, 0), Depth: descriptors.DepthNone(),
+	ref := q.NewPass(types.PassDescr{
+		Target: types.TargetDescrTexture(target, 0, 0), Depth: types.DepthDescrNone(),
 		Load: types.LoadClear, Order: 0, Label: "offscreen",
 	})
 	drawInto(q, ref, set)
-	ref = q.NewPass(descriptors.PassDescr{
-		Target: descriptors.ScreenTarget(), Depth: descriptors.DepthNone(),
+	ref = q.NewPass(types.PassDescr{
+		Target: types.TargetDescrScreen(), Depth: types.DepthDescrNone(),
 		Load: types.LoadClear, Order: 1, Label: "screen",
 	})
 	drawInto(q, ref, set)
@@ -146,44 +144,44 @@ func TestATargetsFirstFrameKeysTheFrameBufferAndItsNextFrameKeysItsOwn(t *testin
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 
-	var target descriptors.TextureDescr
+	var target types.TextureDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		target = resources.NewRenderTarget(64, 64, 1, descriptors.FormatRGBA8)
+		target = resources.NewRenderTarget(64, 64, 1, types.FormatRGBA8)
 	})
-	renderInto(t, k, descriptors.TextureTarget(target, 0, 0), "first")
+	renderInto(t, k, types.TargetDescrTexture(target, 0, 0), "first")
 
 	if len(backend.lastPipelines) != 1 {
 		t.Fatalf("pipelines after the allocating frame = %d, want one", len(backend.lastPipelines))
 	}
-	if got := backend.lastPipelines[0].ColorFormat; got != descriptors.FrameBufferFormat {
+	if got := backend.lastPipelines[0].ColorFormat; got != types.FrameBufferFormat {
 		t.Errorf("colour format = %v, want the frame buffer's: the target is not baked yet", got.String())
 	}
 
-	renderInto(t, k, descriptors.TextureTarget(target, 0, 0), "second")
+	renderInto(t, k, types.TargetDescrTexture(target, 0, 0), "second")
 
 	if len(backend.lastPipelines) != 2 {
 		t.Fatalf("pipelines after the drawing frame = %d, want a second for the real format",
 			len(backend.lastPipelines))
 	}
-	if got := backend.lastPipelines[1].ColorFormat; got != descriptors.FormatRGBA8 {
-		t.Errorf("colour format = %v, want %v once the target is baked", got.String(), descriptors.FormatRGBA8.String())
+	if got := backend.lastPipelines[1].ColorFormat; got != types.FormatRGBA8 {
+		t.Errorf("colour format = %v, want %v once the target is baked", got.String(), types.FormatRGBA8.String())
 	}
 }
 
 func TestAColourlessPassTakesNoFormatFromItsTarget(t *testing.T) {
 	// A depth-only pass has no colour attachment to take a format from and is
 	// keyed by noColor instead; depthpass_test.go pins what that flag does.
-	var shadow descriptors.TextureDescr
+	var shadow types.TextureDescr
 	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		shadow = resources.NewTexture(64, 64, 1, descriptors.FormatDepth32F, false)
+		shadow = resources.NewTexture(64, 64, 1, types.FormatDepth32F, false)
 	})
 	q := recordRaw(t, k)
-	ref := q.NewPass(descriptors.PassDescr{
-		Target: descriptors.NoTarget(), Depth: descriptors.DepthTarget(shadow),
+	ref := q.NewPass(types.PassDescr{
+		Target: types.TargetDescrNone(), Depth: types.DepthDescrTarget(shadow),
 		DepthLoad: types.LoadClear, Label: "shadow",
 	})
 	q.Draw(ref, triangle(), testSet(t, k), 1, 0)
@@ -196,7 +194,7 @@ func TestAColourlessPassTakesNoFormatFromItsTarget(t *testing.T) {
 	if !backend.lastPipelines[0].NoColorTarget {
 		t.Error("a colourless pass built a pipeline with a colour target")
 	}
-	if backend.lastPipelines[0].DepthFormat != descriptors.FormatDepth32F {
+	if backend.lastPipelines[0].DepthFormat != types.FormatDepth32F {
 		t.Errorf("depth format = %v, want the engine's one depth format",
 			backend.lastPipelines[0].DepthFormat.String())
 	}

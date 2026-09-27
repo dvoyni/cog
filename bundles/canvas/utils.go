@@ -59,7 +59,7 @@ func DefaultKeyColor() m.Color { return internal.DefaultKeyColor() }
 // share a depth attachment, so a material that writes depth hides whatever it
 // covers at the same depth. Most canvas materials want MaterialWithState with
 // gfx.StateOverlay2D.
-func NewMaterial(shader gfx.ShaderDescr, params ...gfx.ParameterDescr) Material {
+func NewMaterial(shader gfx.ShaderDescr, params ...gfx.ShaderParameterDescr) Material {
 	return internal.NewMaterial(shader, params...)
 }
 
@@ -67,7 +67,7 @@ func NewMaterial(shader gfx.ShaderDescr, params ...gfx.ParameterDescr) Material 
 //
 //	var fade = canvas.MaterialWithState(
 //		gfx.ShaderWithResource("shaders/fade-sprite.wgsl"), gfx.StateOverlay2D())
-func MaterialWithState(shader gfx.ShaderDescr, state gfx.DrawState, params ...gfx.ParameterDescr) Material {
+func MaterialWithState(shader gfx.ShaderDescr, state gfx.DrawState, params ...gfx.ShaderParameterDescr) Material {
 	return internal.MaterialWithState(shader, state, params...)
 }
 

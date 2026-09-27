@@ -57,7 +57,7 @@ type batch struct {
 	skin model.SkinBuffers
 	// params are the Entity's Params, which the frame's version of each
 	// pass's set lays over what the set binds.
-	params []gfx.ParameterDescr
+	params []gfx.ShaderParameterDescr
 	// interned is the Batch's material's index in the frame's material table.
 	interned int32
 }
@@ -120,7 +120,7 @@ type scratch struct {
 	// copied into. Each copy is a full-slice window, so no later copy can
 	// grow into it.
 	forward []materialTag
-	params  []gfx.ParameterDescr
+	params  []gfx.ShaderParameterDescr
 
 	// The animation resolution: plays is one Entity's used
 	// Animation slots, modelPlays its folded play records, and the morph

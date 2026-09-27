@@ -47,21 +47,26 @@ and [ADR 0003](../../../docs/adr/0003-roots-are-alias-indexes.md):
 - **`slots/gfx/gfxplugin`** exports only `New`. Only composition roots and
   tests import it.
 
-A recording type whose insides the plugin reads (`OpQueue`, `ResourceQueue`,
-the descriptors) is declared in `internal/` with its fields unexported,
-and aliased in the root (`type OpQueue = internal.OpQueue`), each constructor
+A recording type whose insides the plugin reads (`OpQueue`, `ResourceQueue`)
+is declared in `internal/` with its fields unexported, and aliased in the root (`type OpQueue = internal.OpQueue`), each constructor
 behind a forwarder in `utils.go`. It stays a concrete type, and its exported
 methods are public API through the alias. The GPU vocabulary is aliased the
 same way, and the exported variables it used to have are functions:
 `gfx.DefaultLimits()`, `gfx.StateOpaque3D()`, `gfx.StateTransparent3D()` and
 `gfx.StateOverlay2D()`.
 
+The descriptors are different: a user builds them, so they are declared in
+`internal/types` with public fields and no accessors. The constructors are the
+usual way to build one and fill every field a descriptor's kind needs, but a
+descriptor written by hand is as good as one they build, and it is the writer's
+job to keep its fields consistent.
+
 The root's one piece of code outside its forwarders is `inlineAnchor` in
 `types.go`, an unexported function nothing calls. Go inlines a method of a
 package the caller does not import only when a package it does import
 references that method, and nothing outside gfx can import `internal/`, so
 the anchor references the accessors importers call per instance —
-`ParameterDescr.Name` and its value accessors, `TextureDescr.ID` and `Size`,
+`ShaderParameterDescr.Name` and its value accessors, `TextureDescr.ID` and `Size`,
 `TextureFormat.Resolve` — and canvas, scene and gogpu
 inline them. Add an accessor to it when a hot importer stops inlining one; the
 tier test allows exactly that shape.
@@ -121,7 +126,7 @@ plumbing an offset of its own.
 
 gfx has no materials. A draw names a **set of draw params**: one shader, one
 fixed `DrawState`, and a value for some or all of the shader's bindings,
-created once and named by the opaque, comparable `DrawParams` handle, which is
+created once and named by the comparable `DrawStateId`, which is
 also the complete batch key a recorder needs.
 
 - **A shader is compiled on the CPU and created once.** `CompileShaderCmd`
@@ -143,8 +148,8 @@ also the complete batch key a recorder needs.
   durable set names durable ids only - a temporary is refused - and inline bytes
   a param carries are baked into ids the set owns.
 - **A param is a whole binding.** It names a WGSL global and supplies all of
-  it: bytes of the binding's reflected size for a uniform (`FloatParam`,
-  `VecParam`, `MatParam`, `ColorParam`, `RawParameter`, `RawParameterRef`), a
+  it: bytes of the binding's reflected size for a uniform (`ShaderParameterFloat`,
+  `ShaderParameterVec4`, `ShaderParameterMat4`, `ShaderParameterColor`, `ShaderParameterRaw`, `ShaderParameterRawRef`), a
   texture, a sampler, or a buffer and a range of it. There are no member-level
   writes: to change one field of a struct, resubmit the struct.
 - **The frame's version.** `OpQueue.SetDrawParams(k, set, params...)` changes a
@@ -171,9 +176,9 @@ into a pass another System declared by being handed its `PassRef`, which is
 valid until the frame ends. There is no implicit default pass: a draw naming no
 pass declared this frame is dropped and reported as `ErrDrawWithoutPass`.
 
-`PassDescr` carries `Order`, a `Target` (`ScreenTarget()`,
-`TextureTarget(tex, mip, layer)`, or `NoTarget()`), a `Depth` (`DepthAuto()`,
-`DepthNone()`, or `DepthTarget(tex)`), `Load`/`Clear`/`Store`,
+`PassDescr` carries `Order`, a `Target` (`TargetDescrScreen()`,
+`TargetDescrTexture(tex, mip, layer)`, or `TargetDescrNone()`), a `Depth` (`DepthDescrAuto()`,
+`DepthDescrNone()`, or `DepthDescrTarget(tex)`), `Load`/`Clear`/`Store`,
 `DepthLoad`/`DepthClear`/`DepthStore`, and a `Label`.
 
 - **Passes run in `Order`**, ties broken by declaration sequence — never stream
@@ -190,7 +195,7 @@ pass declared this frame is dropped and reported as `ErrDrawWithoutPass`.
   dependency graph; the whole frame is one command encoder and one submit, so
   the driver inserts the barriers. Sampling a texture the same pass renders into
   is rejected with `ErrDrawSamplesAttachment` and the draw is dropped.
-- **`DepthAuto` is shared per target size.** Every `DepthAuto` pass at one size
+- **`DepthDescrAuto` is shared per target size.** Every `DepthDescrAuto` pass at one size
   uses one depth texture, so a pass that needs clean depth must clear it or it
   inherits what the previous pass left there.
 - There is no per-pass viewport or scissor, no multiple render targets, and no
@@ -216,7 +221,7 @@ it and make another.
 sample. With `mipmaps` it carries a full mip chain, which the backend rebuilds
 from every upload that covers a whole layer; a partial upload leaves the smaller
 levels as they were. `NewRenderTarget` produces one a pass can also render into,
-through `TextureTarget`. They are two methods because the render-attachment
+through `TargetDescrTexture`. They are two methods because the render-attachment
 usage is not free, and almost every texture is sampled-only. `NewRenderTarget`
 is the durable counterpart of
 `OpQueue.NewTemporaryTarget`: take it when the rendered contents must outlive the
@@ -228,7 +233,7 @@ Resources returned by `New*` are caller-owned and must be released.
 
 ## The frame buffer and the present pass
 
-`ScreenTarget()` does not mean the swapchain. It means a frame-sized colour
+`TargetDescrScreen()` does not mean the swapchain. It means a frame-sized colour
 buffer in `gfx.FrameBufferFormat` that the backend allocates on first use, and
 gfx appends one implicit full-screen **present pass** after every declared pass
 to put it on the surface. A frame that renders only into its own textures never
@@ -464,11 +469,12 @@ and physical `FramebufferWidth`/`FramebufferHeight`.
 ## Draw Descriptors
 
 - `BufferDescr`: build inline data with `BufferWithBytes`; durable storage
-  buffers come from `ResourceQueue.NewBuffer`. Inspect with `ID()`, `Size()`
-  and `InlineBytes()`.
+  buffers come from `ResourceQueue.NewBuffer`. `Source` says which one it is,
+  and `ID`, `Size`, `Bytes` and `CopyData` are fields.
 - `TextureDescr`: build with `TextureWithResource` or `TextureWithBytes`, or use
-  `ResourceQueue`; inspect with `ID()`, `Path()`, `Size()`, `Format()`,
-  `Mipmaps()` and `PixelBytes()`. Only `TextureWithBytes` takes a
+  `ResourceQueue`. `Name` is the resource path, `Blob` the inline pixels, and
+  `Params` holds `ID`, `Width`, `Height`, `Layers`, `Format`, `Mipmaps` and
+  `CopyData`. Only `TextureWithBytes` takes a
   `gfx.TextureFormat`, which says whether the texels are light or a gamma-encoded
   picker value. `TextureWithResource` hardcodes sRGB and generates no mipmaps,
   because the loader decodes PNG and JPEG and both are gamma-encoded by
@@ -480,42 +486,49 @@ and physical `FramebufferWidth`/`FramebufferHeight`.
   is identified by the run of bytes rather than by its spelling, so a literal, a
   `const` or a package `var` is one module however often it is written down, and
   a string computed afresh per call is a module per call.
-- `MeshDescr`: build with `Mesh` or `MeshIndexed` from buffer descriptors,
-  topology, and `VertexAttr` values created by `Attr`; inspect with
-  `VertexCount()`, `IndexCount()`, `Indexed()`, `IndexWidth()` and `Topology()`.
-  `MeshIndexed` also takes a `gfx.IndexWidth` - `gfx.IndexUint32` (the zero value)
+- `MeshDescr`: build with `MeshDescrWithVertices` or `MeshDescrWithIndices` from buffer descriptors,
+  topology, and `VertexAttribute` values. Its fields are
+  `Vertices`, `Indices`, `IndexWidth`, `Topology`, `Layout`, `Stride`,
+  `VertexCount` and `IndexCount`; the constructors derive the last three, and a mesh
+  written by hand must fill them itself. A mesh is indexed exactly when
+  `IndexCount` is above zero.
+  `MeshDescrWithIndices` also takes a `gfx.IndexWidth` - `gfx.IndexUint32` (the zero value)
   or `gfx.IndexUint16`, the only two WebGPU has - which describes how the caller wrote
   its index bytes rather than asking gfx to convert them. A buffer whose length
   does not divide by its declared width is reported once and its draw dropped;
   checking that every index is below the vertex count belongs to whoever built
   the geometry.
-- `DrawParams`: the handle `ResourceQueue.NewDrawParams` returns; comparable,
-  pointer-free and storable, with the zero value naming no set.
+- `DrawStateId`: the id `ResourceQueue.NewDrawParams` returns, a plain
+  `uint32`; comparable, pointer-free and storable, with zero naming no set.
 - `FingerprintParams` hashes a bare parameter slice in order by name, kind and
   value — which is how a recorder keys a batch on
   what a draw carries without writing a type switch that silently mis-keys the
   kind it forgot.
-- `ParameterDescr`: build with `FloatParam`, `VecParam`, `MatParam`,
-  `ColorParam`, `TextureParam`, `SamplerParam`, `BufferParam`,
-  `BufferRangeParam`, or `RawParameter`. Accessors are `Name`, `FloatValue`,
-  `ColorValue`, `TextureValue`, `SamplerValue`, `VecValue`, `MatValue`,
-  `BufferValue`, `BufferRange`, `RawLen`, `HasValue`, and `AppendValue`. Each
-  value accessor returns `(value, ok)` keyed on the parameter's own kind, so a
-  reader can never take one arm of the union for another.
+- `ShaderParameterDescr`: build with `ShaderParameterFloat`,
+  `ShaderParameterVec4`, `ShaderParameterMat4`, `ShaderParameterColor`,
+  `ShaderParameterTexture`, `ShaderParameterSampler`, `ShaderParameterBuffer`,
+  `ShaderParameterBufferRange`, or `ShaderParameterRaw`. Its one `Kind` says
+  which fields carry the value and, for a uniform value, what built it: `raw`,
+  `float`, `vec4`, `mat4` and `color` are bytes in `Small`/`SmallLen` or `Raw`
+  (`Kind.IsValue()` asks for any of them), and `texture`, `sampler` and
+  `buffer` (with `BufferOffset` and `BufferSize`) are bindings. `FloatValue`,
+  `ColorValue`, `VecValue` and `MatValue` decode the bytes and return
+  `(value, ok)` keyed on the kind, and `Bytes`, `ValueSize` and `AppendValueTo`
+  read them wherever they are held.
 
-**`BufferDescr`, `TextureDescr` and `ParameterDescr` are storable**: an ECS
+**`BufferDescr`, `TextureDescr` and `ShaderParameterDescr` are storable**: an ECS
 Component may hold one as it stands. Every byte run they carry — a buffer's
 inline bytes, a texture's pixels, a raw parameter's layout — is an `assets.Blob`,
 which the ECS admits on the contract that nothing writes the bytes after the
 descriptor is built. The constructors still take a `[]byte`, and converting is
 free; the contract is the caller's to keep, and nothing checks it.
 
-`HasValue` separates a value a shader reads out of its uniform block from a
-binding it attaches to a bind group, and `AppendValue(dst)` appends the value's
+`Kind.IsValue()` separates a value a shader reads out of its uniform block
+from a binding it attaches to a bind group, and `AppendValueTo(dst)` appends the value's
 bytes in the layout the shader reads them at. Together they let a recorder pack
 a parameter it did not construct.
 
-`RawParameter[T](name, value)` carries an arbitrary plain-data struct by copying
+`ShaderParameterRaw[T](name, value)` carries an arbitrary plain-data struct by copying
 its bytes, so a per-instance parameter can be a record rather than a scalar. It
 **validates `T`'s layout against WGSL's alignment rules once per type and panics
 on a mismatch**, naming the field, both offsets, and the padding that would fix
@@ -532,8 +545,8 @@ after the first reads the wrong memory. Members may be `float32`, `int32`,
 those, and structs of those; anything else panics, which is what keeps a pointer
 out of a byte copy.
 
-`RawParameterRef[T](name, *T)` is the same over a value the caller keeps: a
-record that fits in 64 bytes is carried inline as `RawParameter`'s is, and a
+`ShaderParameterRawRef[T](name, *T)` is the same over a value the caller keeps: a
+record that fits in 64 bytes is carried inline as `ShaderParameterRaw`'s is, and a
 larger one is borrowed rather than copied, so building one per batch allocates
 nothing. `NewDrawParams`, `UpdateDrawParams` and `SetDrawParams` copy a
 param's bytes before they return, which is what makes the borrow safe; the
@@ -604,7 +617,7 @@ the route gfx cannot see: a binding gfx did emit, against a buffer the backend
 no longer holds.
 
 
-`BufferRangeParam(name, buf, offset, size)` binds one slice of a buffer, which
+`ShaderParameterBufferRange(name, buf, offset, size)` binds one slice of a buffer, which
 is how a draw addresses its own record in a shared arena: the binding is the
 addressing, so no index has to be agreed on between the recording thread and the
 render thread. Storage offsets are 256-aligned (`gfx.StorageAlignment`), so a
@@ -637,7 +650,7 @@ The named states are `StateOpaque3D()`, `StateTransparent3D()`, and
 `AddressMirror`, chosen per axis. `FilterMode` is `FilterLinear` or
 `FilterNearest`.
 
-`SamplerParam(name, gfx.SamplerDesc)` takes the descriptor whole: per-axis
+`ShaderParameterSampler(name, gfx.SamplerDesc)` takes the descriptor whole: per-axis
 `AddressU`/`AddressV`, separate `Mag`/`Min`/`Mip` filters, `Anisotropy` (0 and 1
 mean off, clamped to 16, and rejected unless all three filters are linear), and
 `Comparison` plus `Compare` for a shadow-style comparison sampler. The zero
@@ -684,7 +697,7 @@ Vulkan, Apple-silicon Metal and D3D12 and fails on `js/wasm`, on GLES and on
 older Apple GPUs — green on a Windows dev machine, broken in the browser.
 
 The shader half comes from `ShaderLayout.VertexInputs`, which a backend reflects
-alongside the bindings; the mesh half is the `VertexAttr` list, whose index *is*
+alongside the bindings; the mesh half is the `VertexAttribute` list, whose index *is*
 the `@location`. `CheckVertexInterface(shader, layout, attrs)` is where they
 meet, exported because it is the test surface for a rule that otherwise could
 only be exercised through a backend, and because a package that owns both
@@ -719,7 +732,7 @@ What it holds:
   `TextureUsageCopySrc`) and `TextureTransition`.
 - **Descriptors:** `ShaderDesc`, `ShaderLayout`, `ShaderVertexInput`,
   `StorageMember`, `ShaderResource`, `PipelineDesc`,
-  `VertexAttribute`, `TextureDesc`, `SamplerDesc`, `BufferDesc`, `Region`,
+  `TextureDesc`, `SamplerDesc`, `Region`,
   `Limits` and `DefaultLimits()`.
 - **IDs:** `ResourceID`, `TextureID`, `BufferID`, `SamplerID`, `ShaderID`,
   `PipelineID`, `TextureViewID`.
@@ -792,9 +805,9 @@ attachment to begin, so the pipeline keyed there never renders.
 never blocks: what it has ready is the copy the *previous* frame encoded,
 whose map resolved on the submit `Execute` just made.
 
-Low-level descriptors are `TextureDesc`, `BufferDesc`, `SamplerDesc`,
+Low-level descriptors are `TextureDesc`, `SamplerDesc`,
 `ShaderDesc`, `PipelineDesc`, `ShaderLayout`,
-`ShaderResource`, `StorageMember`, `ShaderVertexInput`, `VertexAttribute`, and
+`ShaderResource`, `StorageMember`, `ShaderVertexInput`, and
 `Region`. Reflection
 reports member layout for storage structs too — a one-level walk in which an
 array member carries its element stride and count — so a recorder that declares
@@ -806,8 +819,8 @@ It also reports the vertex stage's `@location` inputs as `ShaderVertexInput`
 values — the location plus a `VertexScalar` kind and a component count — which
 is the half of the vertex interface only the shader knows.
 Enums include
-`TextureFormat` (`FormatRGBA8`, `FormatRGBA8Srgb`, `FormatDepth32F`, and the
-`FormatScreen` sentinel that `Resolve()` turns into `FrameBufferFormat`),
+`TextureFormat` (`FormatRGBA8`, `FormatRGBA8Srgb`, `FormatDepth32F`, and
+`FrameBufferFormat`, the one every screen pass renders into),
 `BufferKind` (`BufferVertex`, `BufferIndex`, `BufferUniform`, `BufferStorage`),
 and `TextureViewDimension` (`TextureView2D`, `TextureView2DArray`).
 

@@ -12,8 +12,8 @@ type customInspectVertex struct {
 	Position m.Vec2
 }
 
-func (customInspectVertex) VertexLayout() []gfx.VertexAttr {
-	return []gfx.VertexAttr{gfx.Attr(0, gfx.Float32x2)}
+func (customInspectVertex) VertexLayout() []gfx.VertexAttribute {
+	return []gfx.VertexAttribute{{Offset: 0, Type: gfx.Float32x2}}
 }
 
 func TestOpsReturnRecordedOperationsInFlushOrder(t *testing.T) {
@@ -22,7 +22,7 @@ func TestOpsReturnRecordedOperationsInFlushOrder(t *testing.T) {
 	write.Text(5, "font.ttf", "score", TextDraw{Position: m.Vec2{X: 4}, Size: 12})
 	write.SetClip(m.Rect{X: 1, Y: 2, Width: 3, Height: 4})
 	write.Sprite(2, "hero.png", SpriteTransform{Scale: 2, FlipX: true, TileY: true},
-		nil, gfx.ColorParam("tint", m.Color{R: 1, A: 1}))
+		nil, gfx.ShaderParameterColor("tint", m.Color{R: 1, A: 1}))
 	write.RemoveClip()
 	write.DrawTriangles(2, []Vertex{
 		{Position: m.Vec2{X: 1}}, {Position: m.Vec2{X: 2}}, {Position: m.Vec2{X: 3}},
@@ -112,13 +112,13 @@ func TestOpsReportTheTextureASpriteAndACustomShapeSource(t *testing.T) {
 	if len(ops) != 3 {
 		t.Fatalf("ops = %d, want 3", len(ops))
 	}
-	if width, height := ops[0].Texture.Size(); ops[0].Kind != OpSprite || ops[0].Path != "" || width != 8 || height != 4 {
+	if width, height := ops[0].Texture.Params.Width, ops[0].Texture.Params.Height; ops[0].Kind != OpSprite || ops[0].Path != "" || width != 8 || height != 4 {
 		t.Fatalf("sprite op = %+v, want the recorded texture and no path", ops[0])
 	}
-	if ops[1].Kind != OpTriangles || ops[1].Texture.ID() != texture.ID() {
+	if ops[1].Kind != OpTriangles || ops[1].Texture.Params.ID != texture.Params.ID {
 		t.Fatalf("triangles op = %+v, want the texture DrawTexture bound", ops[1])
 	}
-	if width, height := ops[2].Texture.Size(); width != 0 || height != 0 {
+	if width, height := ops[2].Texture.Params.Width, ops[2].Texture.Params.Height; width != 0 || height != 0 {
 		t.Fatalf("fill rect texture = %dx%d, want none: it names a path, not a texture", width, height)
 	}
 }
@@ -128,7 +128,7 @@ func TestOpsReportTheTextureASpriteAndACustomShapeSource(t *testing.T) {
 // target reports none, which is the screen.
 func TestLayerTargetReportsWhereALayerDraws(t *testing.T) {
 	texture := gfx.TextureWithBytes(64, 32, gfx.FormatRGBA8Srgb, make([]byte, 64*32*4), true, false)
-	target := gfx.TextureTarget(texture, 0, 0)
+	target := gfx.TargetDescrTexture(texture, 0, 0)
 	write := &OpQueue{}
 	write.SetLayerTarget(3, target)
 	write.FillRect(3, m.Rect{Width: 5, Height: 5}, ShapeDraw{Color: m.Color{A: 1}})

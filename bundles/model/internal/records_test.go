@@ -182,8 +182,8 @@ func TestPaintParamsAreTheTwoFactorsPaintChanges(t *testing.T) {
 		}
 		for _, param := range params {
 			got, ok := param.VecValue()
-			if !ok || got != want[param.Name()] {
-				t.Errorf("self-lit %v: %s is %v, want %v", selfLit, param.Name(), got, want[param.Name()])
+			if !ok || got != want[param.Name] {
+				t.Errorf("self-lit %v: %s is %v, want %v", selfLit, param.Name, got, want[param.Name])
 			}
 		}
 	}

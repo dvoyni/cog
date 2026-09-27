@@ -121,7 +121,7 @@ type debugDrawn struct {
 // the Params the debug shader reads, and the Material its alpha calls for.
 func (d debugDrawn) paint(e ecs.Entity, ref model.MeshRef, color m.Color, layers LayerMask) {
 	d.meshes.UpdateFor(e, Mesh{Ref: ref, Layers: layers})
-	d.params.UpdateFor(e, Params{Values: m.NewList(gfx.ColorParam("baseColorFactor", color))})
+	d.params.UpdateFor(e, Params{Values: m.NewList(gfx.ShaderParameterColor("baseColorFactor", color))})
 	material := debugOpaqueMaterial
 	if color.A < 1 {
 		material = debugBlendedMaterial

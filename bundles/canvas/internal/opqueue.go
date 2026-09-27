@@ -19,7 +19,7 @@ type SpriteOp struct {
 	// what was written rather than what it cleaned to.
 	Path      string
 	Texture   gfx.TextureDescr
-	Params    []gfx.ParameterDescr
+	Params    []gfx.ShaderParameterDescr
 	Material  Material
 	Transform SpriteTransform
 	// Fingerprint is Material's batch key, taken once here beside the clone into
@@ -75,7 +75,7 @@ func (op *TextOp) NamedMaterial() *Material {
 // TrianglesOp is one recorded DrawTriangles or DrawTexture list.
 type TrianglesOp struct {
 	Vertices    []byte
-	Params      []gfx.ParameterDescr
+	Params      []gfx.ShaderParameterDescr
 	Material    Material
 	Fingerprint uint64
 	LayoutID    int
@@ -124,11 +124,11 @@ type DrawOp struct {
 // tick, reading its insides through the friend functions.
 type OpQueue struct {
 	ops           map[Layer]LayerOps
-	paramArena    []gfx.ParameterDescr
-	materialArena []gfx.ParameterDescr
+	paramArena    []gfx.ShaderParameterDescr
+	materialArena []gfx.ShaderParameterDescr
 	vertexArena   []byte
 	layoutIDs     map[reflect.Type]int
-	layouts       [][]gfx.VertexAttr
+	layouts       [][]gfx.VertexAttribute
 	// defaults is the set SetMaterial put over the whole queue, supplying a slot
 	// to every layer that named none of its own.
 	defaults ScopeMaterials
@@ -263,7 +263,7 @@ func (w *OpQueue) recordSet(set MaterialSet) ScopeMaterials {
 // clone lives in the layer rather than in an op, so it is stored by value behind
 // a pointer into a per-layer cell: the layer map holds it, and nothing reallocs
 // it for the rest of the tick.
-func cloneMaterial(material *Material, arena []gfx.ParameterDescr) (*Material, []gfx.ParameterDescr) {
+func cloneMaterial(material *Material, arena []gfx.ShaderParameterDescr) (*Material, []gfx.ShaderParameterDescr) {
 	if material == nil {
 		return nil, arena
 	}
@@ -282,7 +282,7 @@ func (w *OpQueue) RemoveClip() {
 	w.hasClip = false
 }
 
-func (w *OpQueue) Sprite(layerID Layer, texturePath string, transform SpriteTransform, material *Material, params ...gfx.ParameterDescr) {
+func (w *OpQueue) Sprite(layerID Layer, texturePath string, transform SpriteTransform, material *Material, params ...gfx.ShaderParameterDescr) {
 	op := SpriteOp{Transform: transform}
 	op.Path, op.InvalidPath = SpritePath(texturePath)
 	op.Material, op.Fingerprint, op.HasMaterial, w.materialArena = w.recordMaterial(material)
@@ -303,7 +303,7 @@ func (w *OpQueue) Sprite(layerID Layer, texturePath string, transform SpriteTran
 // size, Frame selects a pixel sub-rectangle of it, and TileX/TileY repeat it.
 // A texture that does not know its size yet - a resource path that has not
 // baked - has no natural size and draws nothing.
-func (w *OpQueue) SpriteTexture(layerID Layer, texture gfx.TextureDescr, transform SpriteTransform, material *Material, params ...gfx.ParameterDescr) {
+func (w *OpQueue) SpriteTexture(layerID Layer, texture gfx.TextureDescr, transform SpriteTransform, material *Material, params ...gfx.ShaderParameterDescr) {
 	op := SpriteOp{Texture: texture, HasTexture: true, Transform: transform}
 	op.Material, op.Fingerprint, op.HasMaterial, w.materialArena = w.recordMaterial(material)
 	start := len(w.paramArena)
@@ -355,7 +355,7 @@ func (w *OpQueue) shape(layerID Layer, transform SpriteTransform, draw ShapeDraw
 	op := SpriteOp{Transform: transform}
 	op.Material, op.Fingerprint, op.HasMaterial, w.materialArena = w.recordMaterial(draw.Material)
 	start := len(w.paramArena)
-	w.paramArena = append(w.paramArena, gfx.ColorParam(TintSlot, draw.tint()))
+	w.paramArena = append(w.paramArena, gfx.ShaderParameterColor(TintSlot, draw.tint()))
 	w.paramArena = append(w.paramArena, draw.Params...)
 	op.Params = w.paramArena[start:]
 	w.record(layerID, DrawOp{Kind: DrawSpriteKind, Sprite: op})
@@ -375,7 +375,7 @@ func (w *OpQueue) Text(layerID Layer, fontPath, text string, draw TextDraw) {
 // its batch key, both at record time. A nil material takes neither: it resolves
 // to the layer's set or the built-in at flush, and each of those carries a
 // fingerprint of its own.
-func (w *OpQueue) recordMaterial(material *Material) (Material, uint64, bool, []gfx.ParameterDescr) {
+func (w *OpQueue) recordMaterial(material *Material) (Material, uint64, bool, []gfx.ShaderParameterDescr) {
 	if material == nil {
 		return Material{}, 0, false, w.materialArena
 	}
@@ -390,7 +390,7 @@ func (w *OpQueue) recordMaterial(material *Material) (Material, uint64, bool, []
 // and the material shader's vertex inputs. Bind a texture and sampler to
 // TextureSlot/SamplerSlot (via material or params) to texture the triangles; the
 // default material samples an opaque-white texel, so output equals vertex color.
-func (w *OpQueue) DrawTriangles[TVertex VertexLayout](layerID Layer, vertices []TVertex, material *Material, params ...gfx.ParameterDescr) {
+func (w *OpQueue) DrawTriangles[TVertex VertexLayout](layerID Layer, vertices []TVertex, material *Material, params ...gfx.ShaderParameterDescr) {
 	w.drawTriangles(layerID, vertices, material, gfx.TextureDescr{}, false, params)
 }
 
@@ -404,13 +404,13 @@ func (w *OpQueue) DrawTriangles[TVertex VertexLayout](layerID Layer, vertices []
 // which is right for artwork and silent damage to a rendered image; this
 // samples the texture as it is. A non-nil material overrides that, and the
 // texture is still bound to TextureSlot for it - canvas binds the slot itself,
-// ahead of the caller's parameters, and first-wins means canvas's binding is the
-// one that lands.
+// ahead of the caller's parameters, and first-wins means canvas's binding is
+// the one that lands.
 //
 // The sampler comes from TextureMaterial, whose default is clamped and linear -
-// what resampling a render target into a panel wants. Pass a SamplerParam to
-// override it.
-func (w *OpQueue) DrawTexture[TVertex VertexLayout](layerID Layer, texture gfx.TextureDescr, vertices []TVertex, material *Material, params ...gfx.ParameterDescr) {
+// what resampling a render target into a panel wants. Pass a
+// gfx.ShaderParameterSampler to override it.
+func (w *OpQueue) DrawTexture[TVertex VertexLayout](layerID Layer, texture gfx.TextureDescr, vertices []TVertex, material *Material, params ...gfx.ShaderParameterDescr) {
 	w.drawTriangles(layerID, vertices, material, texture, true, params)
 }
 
@@ -418,7 +418,7 @@ func (w *OpQueue) DrawTexture[TVertex VertexLayout](layerID Layer, texture gfx.T
 // TextureSlot ahead of the caller's own parameters, and under first-wins that
 // means the binding is canvas's: a caller who wants their own texture on their
 // own shape uses DrawTriangles instead.
-func (w *OpQueue) drawTriangles[TVertex VertexLayout](layerID Layer, vertices []TVertex, material *Material, texture gfx.TextureDescr, unkeyed bool, params []gfx.ParameterDescr) {
+func (w *OpQueue) drawTriangles[TVertex VertexLayout](layerID Layer, vertices []TVertex, material *Material, texture gfx.TextureDescr, unkeyed bool, params []gfx.ShaderParameterDescr) {
 	if len(vertices) < 3 || len(vertices)%3 != 0 {
 		return
 	}
@@ -434,7 +434,7 @@ func (w *OpQueue) drawTriangles[TVertex VertexLayout](layerID Layer, vertices []
 	op.BuiltinLayout = reflect.TypeFor[TVertex]() == reflect.TypeFor[Vertex]()
 	paramStart := len(w.paramArena)
 	if unkeyed {
-		w.paramArena = append(w.paramArena, gfx.TextureParam(TextureSlot, texture))
+		w.paramArena = append(w.paramArena, gfx.ShaderParameterTexture(TextureSlot, texture))
 	}
 	w.paramArena = append(w.paramArena, params...)
 	op.Params = w.paramArena[paramStart:]
@@ -511,6 +511,6 @@ func (w *OpQueue) cacheVertexLayout[TVertex VertexLayout]() int {
 	}
 	id := len(w.layouts)
 	w.layoutIDs[vertexType] = id
-	w.layouts = append(w.layouts, append([]gfx.VertexAttr(nil), layout...))
+	w.layouts = append(w.layouts, append([]gfx.VertexAttribute(nil), layout...))
 	return id
 }

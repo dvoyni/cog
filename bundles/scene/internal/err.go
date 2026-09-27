@@ -70,7 +70,7 @@ type ErrColourlessPassWithoutDepth struct {
 }
 
 func (e ErrColourlessPassWithoutDepth) Error() string {
-	return fmt.Sprintf("scene: pass %q of camera %d has no colour target and no depth texture; name one with gfx.DepthTarget", e.Tag, e.Camera)
+	return fmt.Sprintf("scene: pass %q of camera %d has no colour target and no depth texture; name one with gfx.DepthDescrTarget", e.Tag, e.Camera)
 }
 
 // ErrColourlessPassClearsColour reports a depth-only pass that asks to clear

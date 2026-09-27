@@ -5,7 +5,6 @@ import (
 	"slices"
 	"sort"
 
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
@@ -28,13 +27,13 @@ const (
 
 // DrawOp is one mesh draw recorded into an OpQueue's pass.
 type DrawOp struct {
-	Mesh          descriptors.MeshDescr
+	Mesh          types.MeshDescr
 	Instances     int
 	FirstInstance int
 	// Set is the draw params the draw names. Version is where the set's version
 	// for this draw starts in the queue's version slots, plus one, and zero
 	// draws the set's own values.
-	Set     descriptors.DrawParams
+	Set     types.DrawStateId
 	Version int32
 }
 
@@ -56,7 +55,7 @@ type ResourceOp struct {
 	TexLayers  int
 	TexLayer   int
 	Region     types.Region
-	Format     descriptors.TextureFormat
+	Format     types.TextureFormat
 	Mipmaps    bool
 	Renderable bool
 	Bytes      []byte
@@ -83,7 +82,7 @@ type temporaryTexture struct {
 type temporaryTextureKey struct {
 	width      int
 	height     int
-	format     descriptors.TextureFormat
+	format     types.TextureFormat
 	mipmaps    bool
 	renderable bool
 }
@@ -91,7 +90,7 @@ type temporaryTextureKey struct {
 // passRecord is one declared pass and the draws recorded into it, in the order
 // they were recorded. Its place in the pass list breaks Order ties.
 type passRecord struct {
-	Desc  descriptors.PassDescr
+	Desc  types.PassDescr
 	Draws []DrawOp
 }
 
@@ -111,7 +110,7 @@ type OpQueue struct {
 	// frame. They are dropped, and only counted, so the frame can report them.
 	strayDraws           int
 	uploadArena          []byte
-	vertexAttrArena      []descriptors.VertexAttr
+	vertexAttrArena      []types.VertexAttribute
 	temporaryBuffers     []temporaryBuffer
 	temporaryNext        []int
 	temporarySorted      int
@@ -152,7 +151,7 @@ func (q *OpQueue) reset() {
 		pass := &q.passes[i]
 		clear(pass.Draws)
 		pass.Draws = pass.Draws[:0]
-		pass.Desc = descriptors.PassDescr{}
+		pass.Desc = types.PassDescr{}
 	}
 	q.passes = q.passes[:0]
 	q.strayDraws = 0
@@ -199,28 +198,28 @@ func (q *OpQueue) reset() {
 // a pass's draws run in the order they were recorded, so draws into several
 // passes may be recorded interleaved. The reference is valid until the frame
 // ends; hand it to another System to let it draw into the same pass.
-func (q *OpQueue) NewPass(desc descriptors.PassDescr) descriptors.PassRef {
+func (q *OpQueue) NewPass(desc types.PassDescr) types.PassRef {
 	if n := len(q.passes); n < cap(q.passes) {
 		q.passes = q.passes[:n+1]
 		q.passes[n].Desc = desc
 	} else {
 		q.passes = append(q.passes, passRecord{Desc: desc})
 	}
-	return descriptors.PassRef(len(q.passes))
+	return types.PassRef(len(q.passes))
 }
 
 // passIndex returns the index of the pass ref names, or -1 when it names none
 // declared this frame. Every draw names a pass: there is no implicit one,
 // because a default screen pass would silently absorb draws that belonged in a
 // camera's target, and it would have to guess an Order.
-func (q *OpQueue) passIndex(ref descriptors.PassRef) int {
+func (q *OpQueue) passIndex(ref types.PassRef) int {
 	if ref < 1 || int(ref) > len(q.passes) {
 		return -1
 	}
 	return int(ref) - 1
 }
 
-func (q *OpQueue) copyVertexAttrs(attrs []descriptors.VertexAttr) []descriptors.VertexAttr {
+func (q *OpQueue) copyVertexAttrs(attrs []types.VertexAttribute) []types.VertexAttribute {
 	start := len(q.vertexAttrArena)
 	q.vertexAttrArena = append(q.vertexAttrArena, attrs...)
 	return q.vertexAttrArena[start:]
@@ -232,48 +231,48 @@ func (q *OpQueue) copyUpload(data []byte) []byte {
 	return q.uploadArena[start:]
 }
 
-func (q *OpQueue) bakeBufferIfNeeded(buffer descriptors.BufferDescr, kind types.BufferKind) descriptors.BufferDescr {
-	bytes := descriptors.BufferBytes(&buffer)
-	if descriptors.BufferSource(&buffer) == descriptors.BufferSourceBaked || bytes.Len() == 0 {
+func (q *OpQueue) bakeBufferIfNeeded(buffer types.BufferDescr, kind types.BufferKind) types.BufferDescr {
+	bytes := buffer.Bytes
+	if buffer.ID != 0 || bytes.Len() == 0 {
 		return buffer
 	}
-	return q.temporaryBuffer(kind, bytes.Data(), descriptors.BufferCopyData(&buffer))
+	return q.temporaryBuffer(kind, bytes.Data(), buffer.CopyData)
 }
 
-func (q *OpQueue) bakeTextureIfNeeded(texture descriptors.TextureDescr) descriptors.TextureDescr {
+func (q *OpQueue) bakeTextureIfNeeded(texture types.TextureDescr) types.TextureDescr {
 	// A baked texture already carries its id, and a path names one the render
 	// thread resolves against its own cache. Only inline pixels are this
 	// queue's to upload.
-	if texture.ID() != 0 || texture.Name != "" {
+	if texture.Params.ID != 0 || texture.Name != "" {
 		return texture
 	}
-	width, height := texture.Size()
+	width, height := texture.Params.Width, texture.Params.Height
 	if width <= 0 || height <= 0 || texture.Blob.Len() == 0 {
-		return descriptors.TextureDescr{}
+		return types.TextureDescr{}
 	}
 	return q.temporaryTexture(
-		width, height, texture.Format(),
-		texture.Blob.Data(), descriptors.TextureCopyData(&texture), texture.Mipmaps(),
+		width, height, texture.Params.Format,
+		texture.Blob.Data(), texture.Params.CopyData, texture.Params.Mipmaps,
 	)
 }
 
 // NewTemporaryBuffer uploads one frame-lifetime storage buffer and returns the
 // baked descriptor for it, so every draw that binds a range of it shares one
-// upload. It is the arena counterpart of NewTemporaryTarget: BufferWithBytes
+// upload. It is the arena counterpart of NewTemporaryTarget: BufferDescrWithBlob
 // re-bakes wherever it is recorded, which is right for a buffer one draw owns
 // and wrong for one the whole frame reads.
 //
 // copyData snapshots the bytes when true; when false the caller must keep them
 // unchanged until the recorded frame is consumed or dropped. Its contents do
 // not survive the frame.
-func (q *OpQueue) NewTemporaryBuffer(data []byte, copyData bool) descriptors.BufferDescr {
+func (q *OpQueue) NewTemporaryBuffer(data []byte, copyData bool) types.BufferDescr {
 	if len(data) == 0 {
-		return descriptors.BufferDescr{}
+		return types.BufferDescr{}
 	}
 	return q.temporaryBuffer(types.BufferStorage, data, copyData)
 }
 
-func (q *OpQueue) temporaryBuffer(kind types.BufferKind, data []byte, copyData bool) descriptors.BufferDescr {
+func (q *OpQueue) temporaryBuffer(kind types.BufferKind, data []byte, copyData bool) types.BufferDescr {
 	start := sort.Search(q.temporarySorted, func(i int) bool {
 		buffer := &q.temporaryBuffers[i]
 		return buffer.kind > kind || (buffer.kind == kind && buffer.Size >= len(data))
@@ -325,9 +324,9 @@ func (q *OpQueue) nextTemporaryBuffer(index int) int {
 // mipmaps has the backend build the chain from pixels. copyData snapshots the
 // pixels when true; when false the caller must keep them unchanged until the
 // recorded frame is consumed or dropped. Its contents do not survive the frame.
-func (q *OpQueue) NewTemporaryTexture(width, height int, format descriptors.TextureFormat, pixels []byte, copyData, mipmaps bool) descriptors.TextureDescr {
+func (q *OpQueue) NewTemporaryTexture(width, height int, format types.TextureFormat, pixels []byte, copyData, mipmaps bool) types.TextureDescr {
 	if width <= 0 || height <= 0 || len(pixels) == 0 {
-		return descriptors.TextureDescr{}
+		return types.TextureDescr{}
 	}
 	return q.temporaryTexture(width, height, format, pixels, copyData, mipmaps)
 }
@@ -335,13 +334,13 @@ func (q *OpQueue) NewTemporaryTexture(width, height int, format descriptors.Text
 // temporaryTexture allocates a pooled texture and uploads pixels as its one
 // whole layer, the same allocate-then-upload pair ResourceQueue records, so a
 // mipmapped one has its chain rebuilt by the backend from that upload.
-func (q *OpQueue) temporaryTexture(width, height int, format descriptors.TextureFormat, pixels []byte, copyData, mipmaps bool) descriptors.TextureDescr {
+func (q *OpQueue) temporaryTexture(width, height int, format types.TextureFormat, pixels []byte, copyData, mipmaps bool) types.TextureDescr {
 	texture := q.allocateTemporaryTexture(temporaryTextureKey{width: width, height: height, format: format, mipmaps: mipmaps})
 	if copyData {
 		pixels = q.copyUpload(pixels)
 	}
 	q.resources = append(q.resources, ResourceOp{
-		Kind: OpUpdateTexture, TextureID: texture.ID(),
+		Kind: OpUpdateTexture, TextureID: texture.Params.ID,
 		Region: types.Region{Width: width, Height: height}, Bytes: pixels,
 	})
 	return texture
@@ -360,23 +359,23 @@ func (q *OpQueue) temporaryTexture(width, height int, format descriptors.Texture
 // A draw still may not sample the target its own pass renders into; that is
 // ErrDrawSamplesAttachment, and it is the guard that makes handing the texture
 // back safe.
-func (q *OpQueue) NewTemporaryTarget(width, height int, format descriptors.TextureFormat) (descriptors.TargetDescr, descriptors.TextureDescr) {
+func (q *OpQueue) NewTemporaryTarget(width, height int, format types.TextureFormat) (types.TargetDescr, types.TextureDescr) {
 	texture := q.allocateTemporaryTexture(temporaryTextureKey{width: width, height: height, format: format, renderable: true})
-	return descriptors.TextureTarget(texture, 0, 0), texture
+	return types.TargetDescrTexture(texture, 0, 0), texture
 }
 
 // allocateTemporaryTexture takes a matching texture from the frame pool and
 // records its allocation. The allocation is recorded every frame the texture is
 // taken, and a backend that already holds the id at that description keeps it,
 // so a settled pool allocates nothing.
-func (q *OpQueue) allocateTemporaryTexture(key temporaryTextureKey) descriptors.TextureDescr {
+func (q *OpQueue) allocateTemporaryTexture(key temporaryTextureKey) types.TextureDescr {
 	id := q.acquireTemporaryTexture(key)
 	q.resources = append(q.resources, ResourceOp{
 		Kind: OpAllocateTexture, TextureID: id,
 		TexW: key.width, TexH: key.height, TexLayers: 1, Format: key.format,
 		Mipmaps: key.mipmaps, Renderable: key.renderable,
 	})
-	return descriptors.BakedTextureWith(id, key.width, key.height, 1, key.format)
+	return types.BakedTextureWith(id, key.width, key.height, 1, key.format)
 }
 
 // acquireTemporaryTexture takes a matching texture from the frame pool, minting
@@ -396,7 +395,7 @@ func (q *OpQueue) acquireTemporaryTexture(key temporaryTextureKey) types.Texture
 	return q.temporaryTextures[best].id
 }
 
-func (q *OpQueue) bakeBuffer(id types.BufferID, kind types.BufferKind, size int, data []byte, copyData bool) descriptors.BufferDescr {
+func (q *OpQueue) bakeBuffer(id types.BufferID, kind types.BufferKind, size int, data []byte, copyData bool) types.BufferDescr {
 	if copyData {
 		data = q.copyUpload(data)
 	}
@@ -404,5 +403,5 @@ func (q *OpQueue) bakeBuffer(id types.BufferID, kind types.BufferKind, size int,
 		Kind: OpBakeBuffer, BufferID: id, BufferKind: kind, BufferSize: size,
 		Bytes: data,
 	})
-	return descriptors.BakedBuffer(id, len(data))
+	return types.BufferDescrWithId(id, len(data))
 }

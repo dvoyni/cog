@@ -76,10 +76,10 @@ type Lookup struct {
 	// params after it. See drawparams.go.
 	shaders [VariantCount]bundledShader
 	// setParams is the scratch a load builds each material's set params in.
-	setParams []gfx.ParameterDescr
+	setParams []gfx.ShaderParameterDescr
 	// pendingSets are the draw params a model's free gave up, released at the
 	// frame boundary beside pendingReleases, for the same reason.
-	pendingSets []gfx.DrawParams
+	pendingSets []gfx.DrawStateId
 }
 
 // NewLookup builds an empty Lookup at model's default configuration; see

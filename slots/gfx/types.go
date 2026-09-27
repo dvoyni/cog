@@ -2,7 +2,7 @@ package gfx
 
 import (
 	"github.com/dvoyni/cog/slots/gfx/internal"
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+	gfxmcp "github.com/dvoyni/cog/slots/gfx/internal/mcp"
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
@@ -54,65 +54,97 @@ type ShaderSegment = shader.ShaderSegment
 // inline pixel bytes (TextureWithBytes), or a texture returned by
 // ResourceQueue.NewTexture. The three are told apart by which field is set,
 // which is why there are no source markers beside it.
-type TextureDescr = descriptors.TextureDescr
+type TextureDescr = types.TextureDescr
 
-// BufferDescr describes a GPU buffer from inline bytes (BufferWithBytes) or a
+// BufferDescr describes a GPU buffer from inline bytes (BufferDescrWithBlob) or a
 // storage buffer returned by ResourceQueue.NewBuffer.
-type BufferDescr = descriptors.BufferDescr
+type BufferDescr = types.BufferDescr
+
+// ShaderParameterDescr is one declarative shader parameter: a whole binding's
+// value, named by the binding's WGSL global name. It is one of four kinds -
+// bytes for a uniform, a texture, a sampler, or a buffer and the range of it
+// bound. ShaderParameterFloat, ShaderParameterVec4, ShaderParameterMat4,
+// ShaderParameterColor and ShaderParameterRaw all build bytes. Pass it to
+// ResourceQueue.NewDrawParams, ResourceQueue.UpdateDrawParams or
+// OpQueue.SetDrawParams.
+type ShaderParameterDescr = types.ShaderParameterDescr
+
+// ShaderParameterKind tags which of a ShaderParameterDescr's fields carry its
+// value.
+type ShaderParameterKind = types.ShaderParameterKind
 
 const (
-	BufferSourceBytes = descriptors.BufferSourceBytes
-	BufferSourceBaked = descriptors.BufferSourceBaked
+	ShaderParameterKindRaw     = types.ShaderParameterKindRaw
+	ShaderParameterKindFloat   = types.ShaderParameterKindFloat
+	ShaderParameterKindVec4    = types.ShaderParameterKindVec4
+	ShaderParameterKindMat4    = types.ShaderParameterKindMat4
+	ShaderParameterKindColor   = types.ShaderParameterKindColor
+	ShaderParameterKindTexture = types.ShaderParameterKindTexture
+	ShaderParameterKindSampler = types.ShaderParameterKindSampler
+	ShaderParameterKindBuffer  = types.ShaderParameterKindBuffer
 )
 
-// ParameterDescr is one declarative shader parameter: a whole binding's value,
-// named by the binding's WGSL global name. It is one of four kinds - bytes for
-// a uniform, a texture, a sampler, or a buffer and the range of it bound.
-// FloatParam, VecParam, MatParam, ColorParam and RawParameter all build bytes.
-// Pass it to ResourceQueue.NewDrawParams, ResourceQueue.UpdateDrawParams or
-// OpQueue.SetDrawParams.
-type ParameterDescr = descriptors.ParameterDescr
+// SmallBytes is the largest value a ShaderParameterDescr carries inline.
+const SmallBytes = types.ParameterDescriptorInlineBytesCount
 
-// DrawParams names one durable set of draw params: a shader, a fixed
+// DrawStateId names one durable set of draw params: a shader, a fixed
 // DrawState and a value for some or all of the shader's bindings, created by
-// ResourceQueue.NewDrawParams and drawn with OpQueue.Draw. It is an opaque
-// handle, and its identity is the set's: two draws naming one DrawParams share
-// shader, state and values, so the handle alone is the complete batch key a
-// recorder needs. It is comparable and pointer-free, so a Component may hold
-// one. The zero value names no set.
-type DrawParams = descriptors.DrawParams
+// ResourceQueue.NewDrawParams and drawn with OpQueue.Draw. Its identity is the
+// set's: two draws naming one DrawStateId share shader, state and values, so
+// the id alone is the complete batch key a recorder needs. It is comparable and
+// pointer-free, so a Component may hold one. The zero value names no set.
+type DrawStateId = types.DrawStateId
 
-// VertexAttr describes one attribute of the single interleaved vertex array: its
+// VertexAttribute describes one attribute of the single interleaved vertex array: its
 // byte offset and element type. Attributes bind to shader @location values in the
-// order given. Build it with Attr.
-type VertexAttr = descriptors.VertexAttr
+// order given.
+type VertexAttribute = types.VertexAttribute
 
-// MeshDescr is CPU-side geometry for one draw: a single interleaved vertex array
-// (and an optional index array at one of the two index widths) as buffer
-// descriptors, a primitive topology, and the vertex layout. Build it with Mesh
-// or MeshIndexed; its fields are unexported and read by the translator.
-type MeshDescr = descriptors.MeshDescr
+// MeshDescr is CPU-side geometry for one draw: a single interleaved vertex
+// array (and an optional index array at one of the two index widths) as buffer
+// descriptors, a primitive topology, and the vertex layout.
+// MeshDescrWithVertices and MeshDescrWithIndices build one with the counts
+// derived.
+type MeshDescr = types.MeshDescr
 
 // Order places a pass in the frame's shared ordering space. gfx defines no
 // conventions and reserves no ranges: recorders that must interleave - canvas
 // layers and scene cameras - agree on numbers between themselves, because they
 // record from separate update subscriptions and stream order between them is
 // not defined.
-type Order = descriptors.Order
+type Order = types.Order
 
 // TargetDescr names a pass's colour attachment.
-type TargetDescr = descriptors.TargetDescr
+type TargetDescr = types.TargetDescr
+
+// TargetKind says what a TargetDescr renders into.
+type TargetKind = types.TargetKind
+
+const (
+	TargetScreen  = types.TargetScreen
+	TargetNone    = types.TargetNone
+	TargetTexture = types.TargetTexture
+)
 
 // DepthDescr names a pass's depth attachment.
-type DepthDescr = descriptors.DepthDescr
+type DepthDescr = types.DepthDescr
+
+// DepthKind says what a DepthDescr renders depth into.
+type DepthKind = types.DepthKind
+
+const (
+	DepthKindAuto    = types.DepthKindAuto
+	DepthKindNone    = types.DepthKindNone
+	DepthKindTexture = types.DepthKindTexture
+)
 
 // PassDescr declares one render pass: where it draws, in what order, and what
 // happens to its attachments at either end.
-type PassDescr = descriptors.PassDescr
+type PassDescr = types.PassDescr
 
 // PassRef names a pass OpQueue.NewPass declared this frame, for Draw to record
 // into. Its zero value refers to no pass.
-type PassRef = descriptors.PassRef
+type PassRef = types.PassRef
 
 // ResourceID underlies the opaque GPU handles below, which a Backend mints. The
 // zero value of each means "none".
@@ -143,25 +175,21 @@ type TextureViewID = types.TextureViewID
 // engine is linear, so the format is what says whether the bytes in a texture
 // are light or a gamma-encoded picker value, and callers name it rather than
 // inherit a default that is wrong half the time.
-type TextureFormat = descriptors.TextureFormat
+type TextureFormat = types.TextureFormat
 
 const (
 	// FormatRGBA8 is 8-bit-per-channel straight-alpha RGBA holding linear
 	// values: normal, metallic-roughness and occlusion maps.
-	FormatRGBA8 = descriptors.FormatRGBA8
+	FormatRGBA8 = types.FormatRGBA8
 	// FormatRGBA8Srgb is the same layout holding gamma-encoded values the
 	// hardware decodes on read: base colour, emissive and the canvas atlas.
-	FormatRGBA8Srgb = descriptors.FormatRGBA8Srgb
+	FormatRGBA8Srgb = types.FormatRGBA8Srgb
 	// FormatDepth32F is the one depth format, renderable and sampleable. There
 	// is no stencil aspect anywhere in the engine.
-	FormatDepth32F = descriptors.FormatDepth32F
-	// FormatScreen is the sentinel for "whatever the frame buffer is", so a
-	// pipeline can be keyed before the frame buffer exists. It resolves to
-	// FrameBufferFormat.
-	FormatScreen = descriptors.FormatScreen
+	FormatDepth32F = types.FormatDepth32F
 )
 
-// FrameBufferFormat is what every ScreenTarget pass renders into: the frame
+// FrameBufferFormat is what every TargetDescrScreen pass renders into: the frame
 // buffer gfx owns, which the implicit present pass then puts on the swapchain.
 // The swapchain itself is unreachable as an sRGB surface - gogpu hardcodes
 // BGRA8Unorm and exposes no view formats, and bgra8unorm-srgb is not a legal
@@ -176,7 +204,7 @@ const (
 // whether it applies the sRGB OETF, so the buffer's colour space and the
 // transfer function that puts it on screen stay one decision rather than two
 // that can disagree.
-const FrameBufferFormat = descriptors.FrameBufferFormat
+const FrameBufferFormat = types.FrameBufferFormat
 
 // BufferKind tags a buffer's role, which selects its GPU usage flags.
 type BufferKind = types.BufferKind
@@ -188,13 +216,10 @@ const (
 	BufferStorage = types.BufferStorage
 )
 
-// BufferDesc describes a GPU buffer to create.
-type BufferDesc = types.BufferDesc
-
 // StorageAlignment is the offset alignment a storage binding requires. A record
 // a draw binds a range of therefore pads up to a multiple of it - a pad, not a
 // cap on what a record may hold.
-const StorageAlignment = descriptors.StorageAlignment
+const StorageAlignment = types.StorageAlignment
 
 // IndexWidth is how wide one element of an index buffer is. There are exactly
 // two, fixed by the platform rather than chosen: WebGPU has no uint8 index
@@ -207,11 +232,11 @@ const StorageAlignment = descriptors.StorageAlignment
 //
 // The zero value is IndexUint32, the width that is legal for any mesh, so a
 // descriptor built without naming one is wide rather than wrong.
-type IndexWidth = descriptors.IndexWidth
+type IndexWidth = types.IndexWidth
 
 const (
-	IndexUint32 = descriptors.IndexUint32
-	IndexUint16 = descriptors.IndexUint16
+	IndexUint32 = types.IndexUint32
+	IndexUint16 = types.IndexUint16
 )
 
 // PrimitiveTopology selects how vertices assemble into primitives.
@@ -226,41 +251,41 @@ const (
 // VertexType is the element type of one attribute in the interleaved vertex
 // array: float, half-float, normalized, or integer scalar/vector types. Names
 // mirror the WebGPU vertex formats.
-type VertexType = descriptors.VertexType
+type VertexType = types.VertexType
 
 const (
-	UnknownVertexType = descriptors.UnknownVertexType
-	Float32           = descriptors.Float32
-	Float32x2         = descriptors.Float32x2
-	Float32x3         = descriptors.Float32x3
-	Float32x4         = descriptors.Float32x4
-	Float16x2         = descriptors.Float16x2
-	Float16x4         = descriptors.Float16x4
-	Uint8x2           = descriptors.Uint8x2
-	Uint8x4           = descriptors.Uint8x4
-	Sint8x2           = descriptors.Sint8x2
-	Sint8x4           = descriptors.Sint8x4
-	Unorm8x2          = descriptors.Unorm8x2
-	Unorm8x4          = descriptors.Unorm8x4
-	Snorm8x2          = descriptors.Snorm8x2
-	Snorm8x4          = descriptors.Snorm8x4
-	Uint16x2          = descriptors.Uint16x2
-	Uint16x4          = descriptors.Uint16x4
-	Sint16x2          = descriptors.Sint16x2
-	Sint16x4          = descriptors.Sint16x4
-	Unorm16x2         = descriptors.Unorm16x2
-	Unorm16x4         = descriptors.Unorm16x4
-	Snorm16x2         = descriptors.Snorm16x2
-	Snorm16x4         = descriptors.Snorm16x4
-	Uint32            = descriptors.Uint32
-	Uint32x2          = descriptors.Uint32x2
-	Uint32x3          = descriptors.Uint32x3
-	Uint32x4          = descriptors.Uint32x4
-	Sint32            = descriptors.Sint32
-	Sint32x2          = descriptors.Sint32x2
-	Sint32x3          = descriptors.Sint32x3
-	Sint32x4          = descriptors.Sint32x4
-	Unorm1010102      = descriptors.Unorm1010102
+	UnknownVertexType = types.UnknownVertexType
+	Float32           = types.Float32
+	Float32x2         = types.Float32x2
+	Float32x3         = types.Float32x3
+	Float32x4         = types.Float32x4
+	Float16x2         = types.Float16x2
+	Float16x4         = types.Float16x4
+	Uint8x2           = types.Uint8x2
+	Uint8x4           = types.Uint8x4
+	Sint8x2           = types.Sint8x2
+	Sint8x4           = types.Sint8x4
+	Unorm8x2          = types.Unorm8x2
+	Unorm8x4          = types.Unorm8x4
+	Snorm8x2          = types.Snorm8x2
+	Snorm8x4          = types.Snorm8x4
+	Uint16x2          = types.Uint16x2
+	Uint16x4          = types.Uint16x4
+	Sint16x2          = types.Sint16x2
+	Sint16x4          = types.Sint16x4
+	Unorm16x2         = types.Unorm16x2
+	Unorm16x4         = types.Unorm16x4
+	Snorm16x2         = types.Snorm16x2
+	Snorm16x4         = types.Snorm16x4
+	Uint32            = types.Uint32
+	Uint32x2          = types.Uint32x2
+	Uint32x3          = types.Uint32x3
+	Uint32x4          = types.Uint32x4
+	Sint32            = types.Sint32
+	Sint32x2          = types.Sint32x2
+	Sint32x3          = types.Sint32x3
+	Sint32x4          = types.Sint32x4
+	Unorm1010102      = types.Unorm1010102
 )
 
 // VertexScalar is the scalar type an attribute presents to the shader once the
@@ -277,10 +302,6 @@ const (
 	VertexScalarUint  = shader.VertexScalarUint
 	VertexScalarSint  = shader.VertexScalarSint
 )
-
-// VertexAttribute is one attribute of the interleaved vertex buffer supplied to a
-// pipeline: its byte offset, element type, and shader @location.
-type VertexAttribute = descriptors.VertexAttribute
 
 // AddressMode selects how texture coordinates outside [0,1] are sampled on one
 // axis. It is an enum rather than a bitmask because mirroring is a third mode,
@@ -601,7 +622,7 @@ const (
 
 // FrameSnapshot is one produced snapshot, or the reason there is none. One
 // struct carries both so that a caller cannot handle one and forget the other.
-type FrameSnapshot = internal.FrameSnapshot
+type FrameSnapshot = gfxmcp.FrameSnapshot
 
 // FrameView is one tick's renderer declarations, rendered while they are still
 // alive. It is not a copy of the queue: no queue outlives the tick that filled
@@ -643,13 +664,8 @@ type ResourceOpView = internal.ResourceOpView
 // import. Referencing them here puts their bodies in this package's export
 // data. The tier test allows this shape and nothing broader; see
 // architecture.instructions.md.
-func inlineAnchor(parameter ParameterDescr, texture TextureDescr, format TextureFormat) {
-	_ = parameter.Name()
+func inlineAnchor(parameter ShaderParameterDescr, format TextureFormat) {
 	_, _ = parameter.ColorValue()
 	_, _ = parameter.VecValue()
 	_, _ = parameter.FloatValue()
-	_, _ = parameter.TextureValue()
-	_ = texture.ID()
-	_, _ = texture.Size()
-	_ = format.Resolve()
 }

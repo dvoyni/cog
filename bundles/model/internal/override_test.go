@@ -30,10 +30,10 @@ func TestEveryMemberOfTheMaterialBlockIsAParam(t *testing.T) {
 		if view.Texture != nil || view.Sampler != nil {
 			continue
 		}
-		if _, twice := numbers[param.Name()]; twice {
-			t.Errorf("%s is carried twice", param.Name())
+		if _, twice := numbers[param.Name]; twice {
+			t.Errorf("%s is carried twice", param.Name)
 		}
-		numbers[param.Name()] = view.Kind
+		numbers[param.Name] = view.Kind
 	}
 	for _, name := range members {
 		kind, ok := numbers[name]

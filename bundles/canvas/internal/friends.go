@@ -23,7 +23,7 @@ func OpQueueLayers(v *OpQueue) map[Layer]LayerOps { return v.ops }
 func OpQueueDefaults(v *OpQueue) *ScopeMaterials { return &v.defaults }
 
 // OpQueueLayout reads one of OpQueue.layouts for canvas's internal/.
-func OpQueueLayout(v *OpQueue, layoutID int) []gfx.VertexAttr { return v.layouts[layoutID] }
+func OpQueueLayout(v *OpQueue, layoutID int) []gfx.VertexAttribute { return v.layouts[layoutID] }
 
 // OpQueueReset calls OpQueue.reset for canvas's internal/.
 func OpQueueReset(v *OpQueue) { v.reset() }

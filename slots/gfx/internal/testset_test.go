@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
@@ -32,15 +31,15 @@ func testShader(t testing.TB, k kernel.Executioner) types.ShaderID {
 
 // testSet creates a set of draw params on a shader of its own, drawn under
 // testState.
-func testSet(t testing.TB, k kernel.Executioner, params ...descriptors.ParameterDescr) descriptors.DrawParams {
+func testSet(t testing.TB, k kernel.Executioner, params ...types.ShaderParameterDescr) types.DrawStateId {
 	t.Helper()
 	return testSetOn(t, k, testShader(t, k), testState, params...)
 }
 
 // testSetOn creates a set of draw params on shader under state.
-func testSetOn(t testing.TB, k kernel.Executioner, shader types.ShaderID, state types.DrawState, params ...descriptors.ParameterDescr) descriptors.DrawParams {
+func testSetOn(t testing.TB, k kernel.Executioner, shader types.ShaderID, state types.DrawState, params ...types.ShaderParameterDescr) types.DrawStateId {
 	t.Helper()
-	var set descriptors.DrawParams
+	var set types.DrawStateId
 	withShaders(k, func(k kernel.Kernel, q *ResourceQueue) {
 		set = q.NewDrawParams(k, shader, state, params...)
 	})
@@ -50,7 +49,7 @@ func testSetOn(t testing.TB, k kernel.Executioner, shader types.ShaderID, state 
 // drawSampling draws through sampler with texture bound as MainTexture for the
 // rest of this frame. The texture goes in the frame's version rather than in a
 // set, because a render target a frame samples is a temporary.
-func drawSampling(q *OpQueue, ref descriptors.PassRef, sampler descriptors.DrawParams, texture descriptors.TextureDescr) {
-	q.SetDrawParams(kernel.Kernel{}, sampler, descriptors.TextureParam("MainTexture", texture))
+func drawSampling(q *OpQueue, ref types.PassRef, sampler types.DrawStateId, texture types.TextureDescr) {
+	q.SetDrawParams(kernel.Kernel{}, sampler, types.ShaderParameterTexture("MainTexture", texture))
 	q.Draw(ref, triangle(), sampler, 1, 0)
 }

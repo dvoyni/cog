@@ -64,40 +64,6 @@ func (p *plugin) freeCachedResourcesCmdImpl() (kernel.Lock, kernel.Execute[FreeC
 		}
 }
 
-// armCaptureCmdImpl installs the frame's one capture request and hands back
-// the channel its stills arrive on, plus the window size the caller cannot
-// read for itself. The Viewport read is the only lock it needs: the capture
-// slot is plugin-owned and carries its own.
-func (p *plugin) armCaptureCmdImpl() (kernel.Lock, kernel.Execute[ArmCaptureRequest, ArmCaptureResponse]) {
-	var viewport kernel.Read[*types.Viewport]
-	return func(access kernel.ResourceAccess) {
-			viewport = access.GetRead[*types.Viewport]()
-		}, func(_ kernel.Kernel, request ArmCaptureRequest) ArmCaptureResponse {
-			live, err := p.captures.arm(request)
-			if err != nil {
-				return ArmCaptureResponse{Err: err}
-			}
-			return ArmCaptureResponse{Done: live.done, Viewport: *viewport.Get()}
-		}
-}
-
-// armFrameCmdImpl installs the frame's one snapshot request and hands back
-// the channel the result arrives on, plus the viewport the caller cannot read
-// for itself. The Viewport read is the only lock it needs: the snapshot slot
-// is plugin-owned and carries its own.
-func (p *plugin) armFrameCmdImpl() (kernel.Lock, kernel.Execute[ArmFrameRequest, ArmFrameResponse]) {
-	var viewport kernel.Read[*types.Viewport]
-	return func(access kernel.ResourceAccess) {
-			viewport = access.GetRead[*types.Viewport]()
-		}, func(_ kernel.Kernel, request ArmFrameRequest) ArmFrameResponse {
-			live, err := p.snapshots.arm(request)
-			if err != nil {
-				return ArmFrameResponse{Err: err}
-			}
-			return ArmFrameResponse{Done: live.done, Viewport: *viewport.Get()}
-		}
-}
-
 func setViewportCmdImpl() (kernel.Lock, kernel.Execute[SetViewportRequest, SetViewportResponse]) {
 	var preference kernel.Read[*desiredViewport]
 	var current kernel.Write[*types.Viewport]

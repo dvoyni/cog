@@ -168,7 +168,7 @@ func AppendAnim(dst []byte, plays []ScenePlayRecord, morph AnimMorph) ([]byte, u
 // PaintParams appends the params that turn the bundled PBR's white paint into
 // paint of one colour, lit or self-lit, for a renderer to lay over it on the
 // draw.
-func PaintParams(dst []gfx.ParameterDescr, color m.Color, selfLit bool) []gfx.ParameterDescr {
+func PaintParams(dst []gfx.ShaderParameterDescr, color m.Color, selfLit bool) []gfx.ShaderParameterDescr {
 	return internal.PaintParams(dst, color, selfLit)
 }
 

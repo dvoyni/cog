@@ -39,7 +39,7 @@ func TestARowIsPaddedToTheCopyAlignment(t *testing.T) {
 }
 
 func TestOnly8BitRGBACanBeCaptured(t *testing.T) {
-	for _, format := range []gfx.TextureFormat{gfx.FormatRGBA8, gfx.FormatRGBA8Srgb, gfx.FormatScreen} {
+	for _, format := range []gfx.TextureFormat{gfx.FormatRGBA8, gfx.FormatRGBA8Srgb} {
 		if !captureSupported(format) {
 			t.Errorf("%v was refused, and it is 8-bit RGBA", format)
 		}

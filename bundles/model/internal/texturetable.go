@@ -134,7 +134,7 @@ func (textureLoader) Default(d textureDescr, userData textureUserData) gfx.Textu
 // data slot is the zero descriptor and had nothing baked for it, so there is
 // nothing to hand back.
 func (textureLoader) Free(value gfx.TextureDescr, userData textureUserData) {
-	if value.ID() != 0 {
+	if value.Params.ID != 0 {
 		userData.resources.ReleaseTexture(value)
 	}
 }

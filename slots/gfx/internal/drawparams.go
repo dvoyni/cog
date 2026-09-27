@@ -4,7 +4,6 @@ import (
 	"sync/atomic"
 
 	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
@@ -173,41 +172,42 @@ func reportSetNotLive(k kernel.Kernel, set uint32, state setState, call string) 
 // The check is the same for a set and its version: the binding exists, the
 // param is of its kind, and uniform bytes are its reflected size. Their layout
 // was checked once per Go type when the param was built.
-func paramSlot(program shader.ShaderProgram, param *descriptors.ParameterDescr, call string) (int, *shader.ShaderResource, drawParamsFault, error) {
-	slot, ok := shader.ProgramBindingIndex(program, param.Name())
+func paramSlot(program shader.ShaderProgram, param *types.ShaderParameterDescr, call string) (int, *shader.ShaderResource, drawParamsFault, error) {
+	slot, ok := shader.ProgramBindingIndex(program, param.Name)
 	if !ok {
-		return 0, nil, drawParamsFaultUnknownBinding, types.ErrDrawParamUnknown{Shader: program.Label(), Parameter: param.Name(), Call: call}
+		return 0, nil, drawParamsFaultUnknownBinding, types.ErrDrawParamUnknown{Shader: program.Label(), Parameter: param.Name, Call: call}
 	}
 	binding := &shader.ProgramBindings(program)[slot]
-	kind := descriptors.ParameterKind(param)
-	declared, want := bindingKindName(binding.Kind)
-	if kind != want {
+	kind := param.Kind
+	declared, fills := bindingFilledBy(binding.Kind, kind)
+	if !fills {
 		return 0, nil, drawParamsFaultKind, types.ErrParameterKindMismatch{
-			Shader: program.Label(), Parameter: param.Name(), Supplied: kind.String(), Declared: declared,
+			Shader: program.Label(), Parameter: param.Name, Supplied: kind.String(), Declared: declared,
 		}
 	}
 	// A size the reflection could not give is zero, and zero checks nothing
 	// rather than refusing every value.
-	if size := param.ValueSize(); kind == descriptors.ParamBytes && binding.Size > 0 && size != binding.Size {
+	if size := param.ValueSize(); kind.IsValue() && binding.Size > 0 && size != binding.Size {
 		return 0, nil, drawParamsFaultSize, types.ErrUniformSizeMismatch{
-			Shader: program.Label(), Parameter: param.Name(), Supplied: size, Declared: binding.Size,
+			Shader: program.Label(), Parameter: param.Name, Supplied: size, Declared: binding.Size,
 		}
 	}
 	return slot, binding, 0, nil
 }
 
-// bindingKindName is the kind a binding declares as a report names it, and the
-// param kind that fills it.
-func bindingKindName(kind shader.ResourceKind) (string, descriptors.ParamKind) {
-	switch kind.Base() {
+// bindingFilledBy is the kind a binding declares as a report names it, and
+// whether a param of kind fills it. A uniform takes any value kind: its bytes
+// are its own size whatever built them.
+func bindingFilledBy(binding shader.ResourceKind, kind types.ShaderParameterKind) (string, bool) {
+	switch binding.Base() {
 	case shader.ResourceUniformBuffer:
-		return "a uniform", descriptors.ParamBytes
+		return "a uniform", kind.IsValue()
 	case shader.ResourceSampler:
-		return "a sampler", descriptors.ParamSampler
+		return "a sampler", kind == types.ShaderParameterKindSampler
 	case shader.ResourceStorageBuffer:
-		return "a storage buffer", descriptors.ParamBuffer
+		return "a storage buffer", kind == types.ShaderParameterKindBuffer
 	}
-	return "a texture", descriptors.ParamTexture
+	return "a texture", kind == types.ShaderParameterKindTexture
 }
 
 // uniformArenaAlign is where each uniform's bytes start in a set's or a

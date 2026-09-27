@@ -1,4 +1,4 @@
-package descriptors
+package types
 
 import (
 	"fmt"
@@ -10,9 +10,9 @@ import (
 	"github.com/dvoyni/cog/libs/m"
 )
 
-// RawParameter creates a parameter carrying an arbitrary plain-data struct by
-// copying its bytes, so a shader value that is a record rather than a scalar or
-// a vector can be named like any other parameter.
+// ShaderParameterRaw creates a parameter carrying an arbitrary plain-data
+// struct by copying its bytes, so a shader value that is a record rather than a
+// scalar or a vector can be named like any other parameter.
 //
 // T's memory layout is validated against WGSL's alignment rules once per type,
 // and a mismatch panics. That check is the whole point of the constructor. Go
@@ -25,47 +25,49 @@ import (
 // element after the first reads the wrong memory with no error anywhere. The
 // panic names the field, both offsets, and the padding that would fix it.
 //
-// Only plain-data members are accepted - float32, int32, uint32, m.Vec2, m.Vec3,
-// m.Vec4, m.Color, m.Quat, m.Mat4, arrays of those, and structs of those. Any
-// other member type panics, which is what keeps a pointer out of a byte copy.
+// Only plain-data members are accepted - float32, int32, uint32, m.Vec2,
+// m.Vec3, m.Vec4, m.Color, m.Quat, m.Mat4, arrays of those, and structs of
+// those. Any other member type panics, which is what keeps a pointer out of a
+// byte copy.
 //
 // A value of up to sixty-four bytes is carried inside the descriptor, as the
 // typed constructors' are, so a small record set per draw costs no allocation;
 // a larger one is copied out once, here.
-func RawParameter[T any](name string, value T) ParameterDescr {
+func ShaderParameterRaw[T any](name string, value T) ShaderParameterDescr {
 	validateRawLayout(reflect.TypeFor[T]())
 	size := int(unsafe.Sizeof(value))
 	bytes := unsafe.Slice((*byte)(unsafe.Pointer(&value)), size)
-	p := ParameterDescr{name: name, kind: ParamBytes, form: FormRaw}
-	if size <= smallBytes {
-		p.size = uint8(copy(p.small[:], bytes))
+	p := ShaderParameterDescr{Name: name, Kind: ShaderParameterKindRaw}
+	if size <= ParameterDescriptorInlineBytesCount {
+		p.SmallLen = uint8(copy(p.Small[:], bytes))
 		return p
 	}
-	p.raw = assets.NewBlob(append([]byte(nil), bytes...))
+	p.Raw = assets.NewBlob(append([]byte(nil), bytes...))
 	return p
 }
 
-// RawParameterRef is RawParameter over a value the caller keeps, for a record
-// larger than sixty-four bytes set every frame: it is validated the same way,
-// and a value that fits is carried inside the descriptor as RawParameter's is,
-// but a larger one is not copied out. The descriptor borrows *value, so the call
-// it is handed to must read it before the caller changes it.
-// ResourceQueue.NewDrawParams, UpdateDrawParams and OpQueue.SetDrawParams all
-// copy a param's bytes before they return, so a caller refilling one record per
-// batch and handing each fill to SetDrawParams allocates nothing.
+// ShaderParameterRawRef is ShaderParameterRaw over a value the caller keeps,
+// for a record larger than sixty-four bytes set every frame: it is validated
+// the same way, and a value that fits is carried inside the descriptor as
+// ShaderParameterRaw's is, but a larger one is not copied out. The descriptor
+// borrows *value, so the call it is handed to must read it before the caller
+// changes it. ResourceQueue.NewDrawParams, UpdateDrawParams and
+// OpQueue.SetDrawParams all copy a param's bytes before they return, so a
+// caller refilling one record per batch and handing each fill to SetDrawParams
+// allocates nothing.
 //
 // value must point at memory that outlives the call: taking the address of a
 // local moves it to the heap, which is the allocation this exists to avoid.
-func RawParameterRef[T any](name string, value *T) ParameterDescr {
+func ShaderParameterRawRef[T any](name string, value *T) ShaderParameterDescr {
 	validateRawLayout(reflect.TypeFor[T]())
 	size := int(unsafe.Sizeof(*value))
 	bytes := unsafe.Slice((*byte)(unsafe.Pointer(value)), size)
-	p := ParameterDescr{name: name, kind: ParamBytes, form: FormRaw}
-	if size <= smallBytes {
-		p.size = uint8(copy(p.small[:], bytes))
+	p := ShaderParameterDescr{Name: name, Kind: ShaderParameterKindRaw}
+	if size <= ParameterDescriptorInlineBytesCount {
+		p.SmallLen = uint8(copy(p.Small[:], bytes))
 		return p
 	}
-	p.raw = assets.NewBlob(bytes)
+	p.Raw = assets.NewBlob(bytes)
 	return p
 }
 
@@ -79,7 +81,7 @@ func validateRawLayout(t reflect.Type) {
 		return
 	}
 	if _, _, err := wgslLayoutOf(t); err != nil {
-		panic(fmt.Sprintf("gfx.RawParameter: %s does not match its WGSL layout: %v", t, err))
+		panic(fmt.Sprintf("gfx.ShaderParameterRaw: %s does not match its WGSL layout: %v", t, err))
 	}
 	rawLayouts.Store(t, struct{}{})
 }

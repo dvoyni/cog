@@ -91,7 +91,7 @@ type MaterialIngredients struct {
 	// of the scenePbrMaterial uniform block, glTF's defaults included: the
 	// numbers Values holds whole, spelled by member so a material's key covers
 	// them. No binding is named for a member, so a set never binds one.
-	Params []gfx.ParameterDescr
+	Params []gfx.ShaderParameterDescr
 	State  gfx.DrawState
 	// Values are the same numbers as the Params' members, as the whole
 	// ScenePbrMaterial block: what a renderer drawing through draw params sets
@@ -103,15 +103,15 @@ type MaterialIngredients struct {
 // picture slot and the flat normal in the normal one, each under glTF's
 // default sampler, drawn opaque and single-sided with white paint.
 func BundledIngredients(defaults PbrDefaults) MaterialIngredients {
-	params := make([]gfx.ParameterDescr, 0, 2*len(PbrSlots)+pbrValueCount)
+	params := make([]gfx.ShaderParameterDescr, 0, 2*len(PbrSlots)+pbrValueCount)
 	for i, slot := range PbrSlots {
 		texture := defaults.White
 		if i == NormalSlot {
 			texture = defaults.FlatNormal
 		}
 		params = append(params,
-			gfx.TextureParam(slot.Texture, texture),
-			gfx.SamplerParam(slot.Sampler, PbrSampler),
+			gfx.ShaderParameterTexture(slot.Texture, texture),
+			gfx.ShaderParameterSampler(slot.Sampler, PbrSampler),
 		)
 	}
 	paint := paintPbrValues(m.NewColorLinear(1, 1, 1, 1), false)
@@ -227,7 +227,7 @@ var materialSeed = maphash.MakeSeed()
 // every param in order through gfx.FingerprintParams. Without the supply, two
 // materials differing only in their defines would key the same and one would
 // draw the other's module.
-func materialKey(shader gfx.ShaderDescr, state gfx.DrawState, params []gfx.ParameterDescr) uint64 {
+func materialKey(shader gfx.ShaderDescr, state gfx.DrawState, params []gfx.ShaderParameterDescr) uint64 {
 	var h maphash.Hash
 	h.SetSeed(materialSeed)
 	maphash.WriteComparable(&h, shader)

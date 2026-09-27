@@ -61,17 +61,17 @@ var (
 	// and one param every draw carries under the Entity's.
 	sightShader = model.SceneShaderDescr{
 		Source: gfx.ShaderWithText("sight"),
-		Params: []gfx.ParameterDescr{gfx.FloatParam("fade", 0.5)},
+		Params: []gfx.ShaderParameterDescr{gfx.ShaderParameterFloat("fade", 0.5)},
 	}
 	// benchParams is one tint, which is the per-Entity variation case.
-	benchParams = Params{Values: m.NewList(gfx.ColorParam("baseColorFactor", m.Color{R: 1, A: 1}))}
+	benchParams = Params{Values: m.NewList(gfx.ShaderParameterColor("baseColorFactor", m.Color{R: 1, A: 1}))}
 	// benchMaterial is two pass tags with one parameter each, so the per-tag
 	// scratch rule is exercised on every draw.
 	benchMaterial = Material{Tags: m.NewList(
 		MaterialTag{Shader: gfx.ShaderWithText("forward"), State: gfx.StateOpaque3D(),
-			Params: m.NewList(gfx.FloatParam("fade", 1))},
+			Params: m.NewList(gfx.ShaderParameterFloat("fade", 1))},
 		MaterialTag{Tag: "shadow", Shader: gfx.ShaderWithText("shadow"), State: gfx.StateOpaque3D(),
-			Params: m.NewList(gfx.FloatParam("bias", 0.01))},
+			Params: m.NewList(gfx.ShaderParameterFloat("bias", 0.01))},
 	)}
 )
 
@@ -307,7 +307,7 @@ func BenchmarkFrameDistinct5000(b *testing.B) {
 			Model: &Model{Ref: model.ModelRef{Path: crateModel}},
 			ParamsEach: func(i int) Params {
 				tint := float32(row*benchColumns+i) / (rows * benchColumns)
-				return Params{Values: m.NewList(gfx.ColorParam("baseColorFactor", m.Color{R: tint, A: 1}))}
+				return Params{Values: m.NewList(gfx.ShaderParameterColor("baseColorFactor", m.Color{R: tint, A: 1}))}
 			},
 		})
 	}

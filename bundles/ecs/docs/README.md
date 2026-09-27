@@ -315,7 +315,7 @@ watch. Both of its fields are unexported, so a holder can read the run and
 cannot repoint it. It is admitted because the bytes engine types carry
 — a texture's pixels, a buffer's contents, a parameter's raw layout — are static
 in practice, and a `List[byte]` would copy them for a guarantee nothing uses.
-That is what makes `gfx.ParameterDescr`, `TextureDescr` and `BufferDescr`
+That is what makes `gfx.ShaderParameterDescr`, `TextureDescr` and `BufferDescr`
 Components as they stand. `PointerFree` still refuses one.
 
 The error names the offending field **by path**, because the field that fails is

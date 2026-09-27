@@ -1,55 +1,8 @@
 package types
 
 import (
-	"strconv"
-
 	"github.com/dvoyni/cog/libs/m"
 )
-
-// LoadOp says what a pass does with an attachment's existing contents.
-type LoadOp uint8
-
-const (
-	// LoadPreserve keeps what is already in the attachment.
-	LoadPreserve LoadOp = iota
-	// LoadClear overwrites it with the pass's clear value.
-	LoadClear
-	// LoadDiscard declares the contents irrelevant, which lets the driver skip
-	// reading them back in.
-	LoadDiscard
-)
-
-// Name spells the load op for a debug document.
-func (load LoadOp) String() string {
-	switch load {
-	case LoadPreserve:
-		return "preserve"
-	case LoadClear:
-		return "clear"
-	case LoadDiscard:
-		return "discard"
-	}
-	return "unknown(" + strconv.Itoa(int(load)) + ")"
-}
-
-// StoreOp says whether a pass's results survive it.
-type StoreOp uint8
-
-const (
-	StoreKeep StoreOp = iota
-	StoreDiscard
-)
-
-// Name spells the store op for a debug document.
-func (store StoreOp) String() string {
-	switch store {
-	case StoreKeep:
-		return "keep"
-	case StoreDiscard:
-		return "discard"
-	}
-	return "unknown(" + strconv.Itoa(int(store)) + ")"
-}
 
 // PassDesc is one render pass for the backend to encode. Screen selects the
 // frame buffer, which only the backend can resolve because it is sized from the

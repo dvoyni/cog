@@ -63,10 +63,10 @@ type setsRequest struct {
 
 type setsResponse struct {
 	// sets are each loaded path's materials' sets, in material order.
-	sets     map[string][][VariantCount]gfx.DrawParams
+	sets     map[string][][VariantCount]gfx.DrawStateId
 	compiles int
 	// released are the sets the drain handed its baker.
-	released []gfx.DrawParams
+	released []gfx.DrawStateId
 }
 
 // setsProbe registers setsCmd and hands gfx its backend.
@@ -94,7 +94,7 @@ func (p setsProbe) Register(registrar *kernel.Registrar, _ any) error {
 				resources = access.GetWrite[*gfx.ResourceQueue]()
 				compile = access.Uses[gfx.CompileShaderCmd]()
 			}, func(k kernel.Kernel, request setsRequest) setsResponse {
-				response := setsResponse{sets: map[string][][VariantCount]gfx.DrawParams{}}
+				response := setsResponse{sets: map[string][][VariantCount]gfx.DrawStateId{}}
 				counted := func(k kernel.Kernel, compileRequest gfx.CompileShaderRequest) gfx.CompileShaderResponse {
 					response.compiles++
 					if request.broken {
@@ -124,7 +124,7 @@ func (p setsProbe) Register(registrar *kernel.Registrar, _ any) error {
 							return queue.UploadBuffer(buffer, data, false)
 						},
 						Release: queue.ReleaseBuffer,
-						ReleaseDrawParams: func(set gfx.DrawParams) {
+						ReleaseDrawParams: func(set gfx.DrawStateId) {
 							response.released = append(response.released, set)
 							queue.ReleaseDrawParams(k, set)
 						},
@@ -227,14 +227,14 @@ func TestLoadingTwoModelsCompilesTheBundledShaderOnce(t *testing.T) {
 	if first.compiles != VariantCount || second.compiles != 0 {
 		t.Errorf("the loads compiled %d and %d times, want %d for the first and none after", first.compiles, second.compiles, VariantCount)
 	}
-	seen := map[gfx.DrawParams]bool{}
+	seen := map[gfx.DrawStateId]bool{}
 	for _, response := range []setsResponse{first, second} {
 		for path, materials := range response.sets {
 			if len(materials) != 1 {
 				t.Fatalf("%s loaded %d materials, want its one", path, len(materials))
 			}
 			for variant, set := range materials[0] {
-				if set == (gfx.DrawParams{}) {
+				if set == 0 {
 					t.Errorf("%s has no set for variant %d", path, variant)
 				}
 				if seen[set] {
@@ -263,7 +263,7 @@ func TestUnloadingAModelReleasesItsSets(t *testing.T) {
 	}
 	drained := k.ExecuteCommand[setsCmd](setsRequest{drain: true})
 
-	want := map[gfx.DrawParams]bool{}
+	want := map[gfx.DrawStateId]bool{}
 	for _, set := range loaded.sets[crateGLBPath][0] {
 		want[set] = true
 	}
@@ -296,7 +296,7 @@ func TestABundledShaderThatDoesNotCompileIsReportedOnceAndLeavesTheSetsZero(t *t
 	}
 	for _, response := range []setsResponse{first, second} {
 		for path, materials := range response.sets {
-			if len(materials) != 1 || materials[0] != ([VariantCount]gfx.DrawParams{}) {
+			if len(materials) != 1 || materials[0] != ([VariantCount]gfx.DrawStateId{}) {
 				t.Errorf("%s loaded with sets %v, want one material with none", path, materials)
 			}
 		}

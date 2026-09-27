@@ -1,6 +1,6 @@
 package internal
 
-import "github.com/dvoyni/cog/slots/gfx/internal/descriptors"
+import "github.com/dvoyni/cog/slots/gfx/internal/types"
 
 // TextureDesc describes a texture to create. Layers <= 1 creates a regular 2D
 // texture; larger values create a 2D-array texture. Renderable asks for a
@@ -8,7 +8,7 @@ import "github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 type TextureDesc struct {
 	Width, Height int
 	Layers        int
-	Format        descriptors.TextureFormat
+	Format        types.TextureFormat
 	Mipmaps       bool
 	Renderable    bool
 	Label         string

@@ -92,7 +92,7 @@ func TestAParamsTintDoesNotLeakIntoAnotherBatch(t *testing.T) {
 		{-6, tint(red)},
 		{-3, nil},
 		{0, tint(blue)},
-		{3, &Params{Values: m.NewList(gfx.FloatParam("fade", 0.5))}},
+		{3, &Params{Values: m.NewList(gfx.ShaderParameterFloat("fade", 0.5))}},
 		{6, nil},
 	} {
 		h.spawn(t, spawnRequest{Place: m.At(c.x, 0, 0), Mesh: &Mesh{Ref: ref}, Material: material, Params: c.params})

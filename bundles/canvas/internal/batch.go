@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
 )
@@ -18,8 +19,8 @@ import (
 type spriteShading struct {
 	material    *Material
 	fingerprint uint64
-	arrays      []gfx.ParameterDescr
-	shared      []gfx.ParameterDescr
+	arrays      []gfx.ShaderParameterDescr
+	shared      []gfx.ShaderParameterDescr
 	sharedKey   uint64
 }
 
@@ -72,7 +73,7 @@ type spriteBatch struct {
 	// shared are the parameters that are per batch rather than per sprite, and
 	// sharedKey is their fingerprint, values included. They enter the key by
 	// value because they cannot vary within a batch at all.
-	shared    []gfx.ParameterDescr
+	shared    []gfx.ShaderParameterDescr
 	sharedKey uint64
 
 	// drawer is what the batch flushes through, shared with the triangles
@@ -81,14 +82,14 @@ type spriteBatch struct {
 }
 
 func (b *spriteBatch) keyMatches(texture gfx.TextureDescr, layer m.Mat4, clip m.Rect, hasClip bool, filter gfx.FilterMode, shading *spriteShading) bool {
-	if b.textureID != texture.ID() || b.layer != layer || b.clip != clip ||
+	if b.textureID != texture.Params.ID || b.layer != layer || b.clip != clip ||
 		b.hasClip != hasClip || b.filter != filter ||
 		b.fingerprint != shading.fingerprint || b.sharedKey != shading.sharedKey ||
 		len(b.arrayNames) != len(shading.arrays) {
 		return false
 	}
 	for i := range shading.arrays {
-		if b.arrayNames[i] != shading.arrays[i].Name() || b.arraySizes[i] != shading.arrays[i].ValueSize() {
+		if b.arrayNames[i] != shading.arrays[i].Name || b.arraySizes[i] != shading.arrays[i].ValueSize() {
 			return false
 		}
 	}
@@ -102,7 +103,7 @@ func (b *spriteBatch) add(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr, texture gfx
 	if !b.active {
 		b.active = true
 		b.texture = texture
-		b.textureID = texture.ID()
+		b.textureID = texture.Params.ID
 		b.layer = layer
 		b.clip = clip
 		b.hasClip = hasClip
@@ -119,19 +120,19 @@ func (b *spriteBatch) add(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr, texture gfx
 		Transform0: t0, Transform1: t1, Frame: frame, Tint: tint, Misc: misc, KeyColor: keyColor,
 	})
 	for i := range shading.arrays {
-		b.arrayBytes[i], _ = shading.arrays[i].AppendValue(b.arrayBytes[i])
+		b.arrayBytes[i], _ = shading.arrays[i].AppendValueTo(b.arrayBytes[i])
 	}
 }
 
 // startArrays reopens one buffer per per-instance parameter name, reusing the
 // backing arrays across batches so a steady-state frame allocates nothing here.
-func (b *spriteBatch) startArrays(arrays []gfx.ParameterDescr) {
+func (b *spriteBatch) startArrays(arrays []gfx.ShaderParameterDescr) {
 	b.arrayNames, b.arraySizes = b.arrayNames[:0], b.arraySizes[:0]
 	for len(b.arrayBytes) < len(arrays) {
 		b.arrayBytes = append(b.arrayBytes, nil)
 	}
 	for i := range arrays {
-		b.arrayNames = append(b.arrayNames, arrays[i].Name())
+		b.arrayNames = append(b.arrayNames, arrays[i].Name)
 		b.arraySizes = append(b.arraySizes, arrays[i].ValueSize())
 		b.arrayBytes[i] = b.arrayBytes[i][:0]
 	}
@@ -149,11 +150,11 @@ func (b *spriteBatch) flush(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr) {
 		// then the per-sprite arrays, then canvas's own. See setDrawer.
 		d.addReversed(b.shared)
 		for i := range b.arrayNames {
-			d.add(gfx.BufferParam(b.arrayNames[i], gfx.BufferWithBytes(b.arrayBytes[i], true)))
+			d.add(gfx.ShaderParameterBuffer(b.arrayNames[i], gfx.BufferDescrWithBlob(assets.NewBlob(b.arrayBytes[i]), true)))
 		}
-		d.add(gfx.BufferParam(instancesSlot, gfx.BufferWithBytes(spriteInstanceBytes(b.instances), true)))
-		d.add(gfx.TextureParam(TextureSlot, b.texture))
-		d.add(gfx.SamplerParam(SamplerSlot, canvasSampler(gfx.AddressClamp, gfx.AddressClamp, b.filter)))
+		d.add(gfx.ShaderParameterBuffer(instancesSlot, gfx.BufferDescrWithBlob(assets.NewBlob(spriteInstanceBytes(b.instances)), true)))
+		d.add(gfx.ShaderParameterTexture(TextureSlot, b.texture))
+		d.add(gfx.ShaderParameterSampler(SamplerSlot, canvasSampler(gfx.AddressClamp, gfx.AddressClamp, b.filter)))
 		d.draw(gfxWrite, b.pass, quad, len(b.instances), b.viewport, b.layer, b.clip, b.hasClip)
 	}
 	b.active = false
@@ -191,7 +192,7 @@ func (p *plugin) batchEntry(gfxWrite *gfx.OpQueue, surf surface, entry AtlasEntr
 type trianglesShading struct {
 	material    *Material
 	fingerprint uint64
-	params      []gfx.ParameterDescr
+	params      []gfx.ShaderParameterDescr
 	paramsKey   uint64
 }
 
@@ -213,7 +214,7 @@ type trianglesBatch struct {
 	// pass is the layer's pass the batch flushes into.
 	pass     gfx.PassRef
 	layoutID int
-	layout   []gfx.VertexAttr
+	layout   []gfx.VertexAttribute
 	layer    m.Mat4
 	clip     m.Rect
 	hasClip  bool
@@ -227,7 +228,7 @@ type trianglesBatch struct {
 	// exported helper rather than a comparison written here: a type switch in
 	// canvas would silently mis-key every kind it forgot, and mis-keying merges
 	// two draws that differ.
-	params    []gfx.ParameterDescr
+	params    []gfx.ShaderParameterDescr
 	paramsKey uint64
 
 	// drawer is what the batch flushes through; see spriteBatch.drawer.
@@ -239,7 +240,7 @@ func (b *trianglesBatch) keyMatches(layoutID int, layer m.Mat4, clip m.Rect, has
 		b.fingerprint == shading.fingerprint && b.paramsKey == shading.paramsKey
 }
 
-func (b *trianglesBatch) add(gfxWrite *gfx.OpQueue, viewport m.Vec2, layoutID int, layout []gfx.VertexAttr, layer m.Mat4, clip m.Rect, hasClip bool, shading *trianglesShading, vertices []byte) {
+func (b *trianglesBatch) add(gfxWrite *gfx.OpQueue, viewport m.Vec2, layoutID int, layout []gfx.VertexAttribute, layer m.Mat4, clip m.Rect, hasClip bool, shading *trianglesShading, vertices []byte) {
 	if b.active && !b.keyMatches(layoutID, layer, clip, hasClip, shading) {
 		b.flush(gfxWrite)
 	}
@@ -269,7 +270,7 @@ func (b *trianglesBatch) flush(gfxWrite *gfx.OpQueue) {
 	d := b.drawer
 	if d.begin(b.material, b.fingerprint) {
 		d.addReversed(b.params)
-		mesh := gfx.Mesh(gfx.BufferWithBytes(b.vertices, true), gfx.TopologyTriangleList, b.layout...)
+		mesh := gfx.MeshDescrWithVertices(gfx.BufferDescrWithBlob(assets.NewBlob(b.vertices), true), gfx.TopologyTriangleList, b.layout...)
 		d.draw(gfxWrite, b.pass, mesh, 1, b.viewport, b.layer, b.clip, b.hasClip)
 	}
 	b.active = false

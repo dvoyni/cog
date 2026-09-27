@@ -14,8 +14,8 @@ import (
 // It is also the Go mirror of the shader's ScenePbrMaterial, member for member
 // and byte for byte: seven vec4s, then eleven 4-byte scalars, then the four
 // bytes WGSL rounds the struct up to 160 with. A model's draw params set it as
-// one whole binding, scenePbrMaterial, through gfx.RawParameterRef, whose check
-// and the layout test hold the two together.
+// one whole binding, scenePbrMaterial, through gfx.ShaderParameterRawRef, whose
+// check and the layout test hold the two together.
 //
 // appendParams turns them into named gfx params, one per member of the block,
 // which is what a material's key covers; no binding is named for a member, so
@@ -116,11 +116,11 @@ func paintFactors(color m.Color, selfLit bool) (base, emissive m.Vec4) {
 // what BundledIngredients binds - into paint of one colour, lit or self-lit:
 // its base colour and its emissive factor. A renderer lays them over the
 // bundled material by name on the draw, and never names either itself.
-func PaintParams(dst []gfx.ParameterDescr, color m.Color, selfLit bool) []gfx.ParameterDescr {
+func PaintParams(dst []gfx.ShaderParameterDescr, color m.Color, selfLit bool) []gfx.ShaderParameterDescr {
 	base, emissive := paintFactors(color, selfLit)
 	return append(dst,
-		gfx.VecParam("baseColorFactor", base),
-		gfx.VecParam("emissiveFactor", emissive),
+		gfx.ShaderParameterVec4("baseColorFactor", base),
+		gfx.ShaderParameterVec4("emissiveFactor", emissive),
 	)
 }
 
@@ -128,24 +128,24 @@ func PaintParams(dst []gfx.ParameterDescr, color m.Color, selfLit bool) []gfx.Pa
 // member's name, in declaration order. Every member is written, defaults
 // included, because gfx packs a member nothing supplies as zero - and a zero
 // normalScale or texture scale is a broken surface, not a default one.
-func (v *PbrValues) appendParams(dst []gfx.ParameterDescr) []gfx.ParameterDescr {
+func (v *PbrValues) appendParams(dst []gfx.ShaderParameterDescr) []gfx.ShaderParameterDescr {
 	dst = append(dst,
-		gfx.VecParam("baseColorFactor", v.baseColorFactor),
-		gfx.VecParam("emissiveFactor", v.emissiveFactor),
+		gfx.ShaderParameterVec4("baseColorFactor", v.baseColorFactor),
+		gfx.ShaderParameterVec4("emissiveFactor", v.emissiveFactor),
 	)
 	for slot := range PbrSlots {
-		dst = append(dst, gfx.VecParam(PbrSlots[slot].Transform, v.transforms[slot]))
+		dst = append(dst, gfx.ShaderParameterVec4(PbrSlots[slot].Transform, v.transforms[slot]))
 	}
 	for slot := range PbrSlots {
-		dst = append(dst, gfx.FloatParam(PbrSlots[slot].Rotation, v.rotations[slot]))
+		dst = append(dst, gfx.ShaderParameterFloat(PbrSlots[slot].Rotation, v.rotations[slot]))
 	}
 	return append(dst,
-		gfx.FloatParam("metallicFactor", v.metallicFactor),
-		gfx.FloatParam("roughnessFactor", v.roughnessFactor),
-		gfx.FloatParam("normalScale", v.normalScale),
-		gfx.FloatParam("occlusionStrength", v.occlusionStrength),
-		gfx.FloatParam("alphaCutoff", v.alphaCutoff),
-		gfx.RawParameter("uvSets", v.uvSets),
+		gfx.ShaderParameterFloat("metallicFactor", v.metallicFactor),
+		gfx.ShaderParameterFloat("roughnessFactor", v.roughnessFactor),
+		gfx.ShaderParameterFloat("normalScale", v.normalScale),
+		gfx.ShaderParameterFloat("occlusionStrength", v.occlusionStrength),
+		gfx.ShaderParameterFloat("alphaCutoff", v.alphaCutoff),
+		gfx.ShaderParameterRaw("uvSets", v.uvSets),
 	)
 }
 
@@ -204,8 +204,8 @@ func IsPbrValue(name string) bool {
 // constructor built them. It reports whether the name is a member at all; a
 // member param of the wrong size writes nothing, as it never fitted the slot.
 // Any other param is left to bind by its own name.
-func (v *PbrValues) Overlay(param gfx.ParameterDescr) bool {
-	member, ok := pbrMembers[param.Name()]
+func (v *PbrValues) Overlay(param gfx.ShaderParameterDescr) bool {
+	member, ok := pbrMembers[param.Name]
 	if !ok {
 		return false
 	}
@@ -216,6 +216,6 @@ func (v *PbrValues) Overlay(param gfx.ParameterDescr) bool {
 	// test holds; so the member's bytes are the window of the value it spans,
 	// and the append lands inside it rather than growing anything.
 	bytes := unsafe.Slice((*byte)(unsafe.Pointer(v)), unsafe.Sizeof(*v))
-	param.AppendValue(bytes[member.offset : member.offset : member.offset+member.size])
+	param.AppendValueTo(bytes[member.offset : member.offset : member.offset+member.size])
 	return true
 }

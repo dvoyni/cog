@@ -1,6 +1,9 @@
 package gfx
 
-import "github.com/dvoyni/cog/slots/gfx/internal"
+import (
+	"github.com/dvoyni/cog/slots/gfx/internal"
+	gfxmcp "github.com/dvoyni/cog/slots/gfx/internal/mcp"
+)
 
 // PresentCmd finalizes the writable OpQueue: it swaps it into the internal ready
 // slot (dropping any still-unconsumed queue, latest-wins) and installs a reset
@@ -78,13 +81,13 @@ type SetDesiredViewportResponse = internal.SetDesiredViewportResponse
 // The response's channel is the only delivery path, and refusals travel it too,
 // because Capture carries Err. The alternative - a channel passed in with
 // the request - leaves gfx unable to refuse a second arm synchronously.
-type ArmCaptureCmd = internal.ArmCaptureCmd
+type ArmCaptureCmd = gfxmcp.ArmCaptureCmd
 
 // ArmCaptureRequest names the target and how many stills to take of it.
-type ArmCaptureRequest = internal.ArmCaptureRequest
+type ArmCaptureRequest = gfxmcp.ArmCaptureRequest
 
 // ArmCaptureResponse hands back the wait and the window size.
-type ArmCaptureResponse = internal.ArmCaptureResponse
+type ArmCaptureResponse = gfxmcp.ArmCaptureResponse
 
 // ArmFrameCmd arms one frame snapshot and hands back the wait. It is ordinary
 // gfx API: anything holding a kernel handle may ask what the renderer was told
@@ -94,15 +97,15 @@ type ArmCaptureResponse = internal.ArmCaptureResponse
 // because FrameSnapshot carries Err - the same shape ArmCaptureCmd uses, for
 // the same reason: a channel passed in with the request would leave gfx unable
 // to refuse a second arm synchronously.
-type ArmFrameCmd = internal.ArmFrameCmd
+type ArmFrameCmd = gfxmcp.ArmFrameCmd
 
 // ArmFrameRequest carries the filter, because the filter is what bounds the
 // work done inside the tick. Nothing about the output is decided before the
 // request is known.
-type ArmFrameRequest = internal.ArmFrameRequest
+type ArmFrameRequest = gfxmcp.ArmFrameRequest
 
 // ArmFrameResponse hands back the wait and the viewport.
-type ArmFrameResponse = internal.ArmFrameResponse
+type ArmFrameResponse = gfxmcp.ArmFrameResponse
 
 // CompileShaderCmd compiles one shader descriptor on the CPU: it flattens the
 // descriptor through the preprocessor, reflects the result through the

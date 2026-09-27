@@ -78,11 +78,11 @@ func TestBundledSceneShaderReflectsItsVertexStageInputs(t *testing.T) {
 func TestEveryBundledShaderAndLayoutPairPassesTheVertexInterfaceCheck(t *testing.T) {
 	// The quad is canvas's own, declared at bundles/canvas/internal/plugin.go where the sprite
 	// mesh is built: one vec2 corner, instanced.
-	quad := []cgfx.VertexAttr{cgfx.Attr(0, cgfx.Float32x2)}
+	quad := []cgfx.VertexAttribute{{Offset: 0, Type: cgfx.Float32x2}}
 	for _, pair := range []struct {
 		name   string
 		source string
-		attrs  []cgfx.VertexAttr
+		attrs  []cgfx.VertexAttribute
 	}{
 		{"scene", bundledSceneShader(t), model.Vertex{}.VertexLayout()},
 		{"scene skinned", bundledSceneShader(t, everyFeature()...), sceneSkinnedLayout(t)},
@@ -118,15 +118,15 @@ func TestEveryBundledShaderAndLayoutPairPassesTheVertexInterfaceCheck(t *testing
 // Those two rows are the only thing in this file that can drift from scene, and
 // what would notice is scene's own TestBothNamedLayoutsAreFourAlignedAndUnpadded:
 // it pins the same two offsets and formats against the same constants.
-func sceneSkinnedLayout(t *testing.T) []cgfx.VertexAttr {
+func sceneSkinnedLayout(t *testing.T) []cgfx.VertexAttribute {
 	t.Helper()
 	standard := model.Vertex{}.VertexLayout()
 	if len(standard) != 6 {
 		t.Fatalf("the standard layout has %d attributes, want the six it shares", len(standard))
 	}
-	return append(append([]cgfx.VertexAttr(nil), standard...),
-		cgfx.Attr(32, cgfx.Uint8x4),  // joints
-		cgfx.Attr(36, cgfx.Unorm8x4), // weights
+	return append(append([]cgfx.VertexAttribute(nil), standard...),
+		cgfx.VertexAttribute{Offset: 32, Type: cgfx.Uint8x4},  // joints
+		cgfx.VertexAttribute{Offset: 36, Type: cgfx.Unorm8x4}, // weights
 	)
 }
 

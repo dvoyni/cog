@@ -53,7 +53,7 @@ const HaloSlot = "halo"
 var haloSpriteMaterial = MaterialWithState(
 	gfx.ShaderWithResource(HaloShaderPath),
 	gfx.StateOverlay2D(),
-	gfx.RawParameter(HaloSlot, DefaultHaloProfile()),
+	gfx.ShaderParameterRaw(HaloSlot, DefaultHaloProfile()),
 )
 
 // HaloProfile is the shape of the band, independent of its colour; see
@@ -86,6 +86,6 @@ func DefaultHaloProfile() HaloProfile {
 func HaloMaterialSet(profile HaloProfile) MaterialSet {
 	return MaterialSet{
 		Sprite: &haloSpriteMaterial,
-		Params: []gfx.ParameterDescr{gfx.RawParameter(HaloSlot, profile)},
+		Params: []gfx.ShaderParameterDescr{gfx.ShaderParameterRaw(HaloSlot, profile)},
 	}
 }

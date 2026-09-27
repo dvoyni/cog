@@ -194,8 +194,8 @@ func TestAnimationSkipsEmptySlots(t *testing.T) {
 func TestParamsReachAMeshsParamsAndAModelsOverrides(t *testing.T) {
 	h := newDrawingHarness(t, 256)
 	ref := h.bake(t)
-	tint := gfx.ColorParam("baseColorFactor", m.Color{R: 1, A: 1})
-	fade := gfx.FloatParam("fade", 0.5)
+	tint := gfx.ShaderParameterColor("baseColorFactor", m.Color{R: 1, A: 1})
+	fade := gfx.ShaderParameterFloat("fade", 0.5)
 	h.spawn(t, spawnRequest{
 		Place:  m.At(-3, 0, 0),
 		Mesh:   &Mesh{Ref: ref},
@@ -272,13 +272,13 @@ func TestAMaterialsTagsEachKeepTheirOwnParams(t *testing.T) {
 	shadow := gfx.ShaderWithText("shadow")
 	h.spawn(t, spawnRequest{Place: m.At(-3, 0, 0), Mesh: &Mesh{Ref: ref}, Material: &Material{Tags: m.NewList(
 		MaterialTag{Shader: forward, State: gfx.StateOpaque3D(), Params: m.NewList(
-			gfx.FloatParam("a", 1), gfx.FloatParam("b", 2))},
+			gfx.ShaderParameterFloat("a", 1), gfx.ShaderParameterFloat("b", 2))},
 		MaterialTag{Tag: "shadow", Shader: shadow, State: gfx.StateTransparent3D(), Params: m.NewList(
-			gfx.FloatParam("c", 3))},
+			gfx.ShaderParameterFloat("c", 3))},
 		MaterialTag{Tag: "outline", Shader: forward},
 	)}})
 	h.spawn(t, spawnRequest{Place: m.At(3, 0, 0), Mesh: &Mesh{Ref: ref, Layers: Layer(1)}, Material: &Material{Tags: m.NewList(
-		MaterialTag{Shader: shadow, Params: m.NewList(gfx.FloatParam("d", 4))},
+		MaterialTag{Shader: shadow, Params: m.NewList(gfx.ShaderParameterFloat("d", 4))},
 	)}})
 
 	h.frameUntil(t, "the frame to draw", func() bool { return len(h.drawn()) > 0 })

@@ -70,6 +70,20 @@ func (provider) Capabilities() []mcp.Capability {
 > behaviour are unchanged; the file paths and line numbers cited below are as
 > they were when this was written.
 
+> **Amended.** Everything that exists for these two tools moved to its own
+> package, `slots/gfx/internal/mcp`, which depends on `internal` and is never
+> imported by it: the Provider and the capability bodies, the capture and
+> snapshot slots with their `First` subscriptions, `ArmCaptureCmd`,
+> `ArmFrameCmd`, `FrameSnapshot` and the `MaxCapture*` caps. It watches gfx
+> through `internal.FrameObserver`, which gfx calls from present (the queue
+> before the swap) and render (the capture target, the readback, the encode)
+> and from Stop; `gfxplugin.New()` passes the package's observer to
+> `internal.New`. What stays in gfx is the backend readback facility
+> (`Queue.Capture`, `Backend.TakeCapture`, `Capture`, `CaptureDesc`, the capture
+> errors), the view types, and `FrameViewOf`, which reads the queues' private
+> state. The root still exports the arm commands and `FrameSnapshot` by alias,
+> so gfx's public API, tool names, schemas and behaviour are unchanged.
+
 > **Amended by [#368](https://github.com/dvoyni/cog/issues/368).** `app` became
 > a Slot whose plugin owns time control — pause, step, hold and tick numbering
 > — and requires wgpu's `Driver` Adapter, so the time tool is now `app_time`,

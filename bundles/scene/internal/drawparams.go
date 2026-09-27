@@ -105,7 +105,7 @@ type setCache struct {
 	defaultBundled bool
 
 	// params and values are the scratch a set is resolved in.
-	params []gfx.ParameterDescr
+	params []gfx.ShaderParameterDescr
 	values model.PbrValues
 }
 
@@ -141,14 +141,14 @@ func (c *setCache) defaultChanged(current model.SceneShaderDescr) bool {
 // name that is a binding of its own, and one token for however many members
 // of the material block it names, since those reach the draw as the block.
 // No binding at all is zero.
-func paramsShape(params []gfx.ParameterDescr) uint64 {
+func paramsShape(params []gfx.ShaderParameterDescr) uint64 {
 	const prime, offset = 1099511628211, 14695981039346656037
 	if len(params) == 0 {
 		return 0
 	}
 	hash, members := uint64(offset), false
 	for i := range params {
-		name := params[i].Name()
+		name := params[i].Name
 		if model.IsPbrValue(name) {
 			members = true
 			continue
@@ -199,7 +199,7 @@ func (r *keyer) release(s *keyScratch, key setKey) {
 		return
 	}
 	for i := range cached.material {
-		if set := cached.material[i].set; set != (gfx.DrawParams{}) {
+		if set := cached.material[i].set; set != 0 {
 			r.resources.ReleaseDrawParams(r.k, set)
 		}
 	}
@@ -222,7 +222,7 @@ func (r *keyer) release(s *keyScratch, key setKey) {
 // leaves the tag's set zero, which draws nothing.
 func (r *keyer) resolveTag(
 	c *setCache, tag PassTag, shader gfx.ShaderDescr, state gfx.DrawState,
-	own *m.List[gfx.ParameterDescr], file *model.MaterialIngredients, variant model.ShaderVariant,
+	own *m.List[gfx.ShaderParameterDescr], file *model.MaterialIngredients, variant model.ShaderVariant,
 ) materialTag {
 	if shader == (gfx.ShaderDescr{}) {
 		shader = c.defaultShader.Source
@@ -240,7 +240,7 @@ func (r *keyer) resolveTag(
 	}
 	params := c.params[:0]
 	for _, param := range file.Params {
-		if !model.IsPbrValue(param.Name()) {
+		if !model.IsPbrValue(param.Name) {
 			params = append(params, param)
 		}
 	}
@@ -252,7 +252,7 @@ func (r *keyer) resolveTag(
 	}
 	kept := params[:0]
 	for _, param := range params {
-		if _, declared := compiled.program.Binding(param.Name()); declared {
+		if _, declared := compiled.program.Binding(param.Name); declared {
 			kept = append(kept, param)
 		}
 	}
@@ -260,7 +260,7 @@ func (r *keyer) resolveTag(
 		c.values = resolved.values
 		// Borrowed rather than copied: the block is 160 bytes, past what a
 		// param carries inline, and NewDrawParams copies it before it returns.
-		kept = append(kept, gfx.RawParameterRef(model.BindingScenePbrMaterial, &c.values))
+		kept = append(kept, gfx.ShaderParameterRawRef(model.BindingScenePbrMaterial, &c.values))
 	}
 	resolved.set = r.resources.NewDrawParams(r.k, compiled.id, state, kept...)
 	// The scratch is kept for the next set, and cleared so it holds no
@@ -273,7 +273,7 @@ func (r *keyer) resolveTag(
 // layParams lays params over what a tag resolves so far, in order: a member of
 // the material block into its values, and any other binding over the window
 // arena[start:] by name, through overlayParam.
-func layParams(arena []gfx.ParameterDescr, start int, values *model.PbrValues, params ...gfx.ParameterDescr) []gfx.ParameterDescr {
+func layParams(arena []gfx.ShaderParameterDescr, start int, values *model.PbrValues, params ...gfx.ShaderParameterDescr) []gfx.ShaderParameterDescr {
 	for _, param := range params {
 		if !values.Overlay(param) {
 			arena = overlayParam(arena, start, param)

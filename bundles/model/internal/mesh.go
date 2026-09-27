@@ -3,6 +3,7 @@ package internal
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/dvoyni/cog/libs/assets"
 	"reflect"
 	"unsafe"
 
@@ -87,7 +88,7 @@ type MeshRecord struct {
 	// is part of a mesh's contract with a material, and width is not - for a
 	// triangle list it never reaches the pipeline at all.
 	IndexWidth gfx.IndexWidth
-	Layout     []gfx.VertexAttr
+	Layout     []gfx.VertexAttribute
 	// layoutID is the layout's dense index in the cache that resolved it, kept
 	// so UpdateMesh can reject a layout change with one integer compare rather
 	// than by walking two attribute slices.
@@ -120,7 +121,7 @@ type MeshRecord struct {
 
 // Descr builds the gfx geometry for one resident mesh.
 func (r MeshRecord) Descr() gfx.MeshDescr {
-	return gfx.MeshIndexed(r.Vertices, r.Indices, r.IndexWidth, r.Topology, r.Layout...)
+	return gfx.MeshDescrWithIndices(r.Vertices, r.Indices, r.IndexWidth, r.Topology, r.Layout...)
 }
 
 // LayoutCache interns vertex layouts by their Go type, so a per-frame mint pays
@@ -129,7 +130,7 @@ func (r MeshRecord) Descr() gfx.MeshDescr {
 // issued them.
 type LayoutCache struct {
 	ids     map[reflect.Type]int
-	layouts [][]gfx.VertexAttr
+	layouts [][]gfx.VertexAttribute
 }
 
 // resolve returns the layout's dense id, the interned attributes, and whether
@@ -137,7 +138,7 @@ type LayoutCache struct {
 // rather than reinterprets, and is narrower than the MeshRecord flag it feeds:
 // a model's geometry is a layout the bundled PBR knows without ever passing
 // through here, and bakeModelGeometry says so directly.
-func (c *LayoutCache) resolve[TVertex VertexLayout]() (int, []gfx.VertexAttr, bool) {
+func (c *LayoutCache) resolve[TVertex VertexLayout]() (int, []gfx.VertexAttribute, bool) {
 	vertexType := reflect.TypeFor[TVertex]()
 	standard := vertexType == reflect.TypeFor[Vertex]()
 	if id, ok := c.ids[vertexType]; ok {
@@ -149,7 +150,7 @@ func (c *LayoutCache) resolve[TVertex VertexLayout]() (int, []gfx.VertexAttr, bo
 	var vertex TVertex
 	id := len(c.layouts)
 	c.ids[vertexType] = id
-	c.layouts = append(c.layouts, append([]gfx.VertexAttr(nil), vertex.VertexLayout()...))
+	c.layouts = append(c.layouts, append([]gfx.VertexAttribute(nil), vertex.VertexLayout()...))
 	return id, c.layouts[id], standard
 }
 
@@ -166,7 +167,7 @@ type MeshInput struct {
 	indexCount  int
 	topology    gfx.PrimitiveTopology
 	indexWidth  gfx.IndexWidth
-	layout      []gfx.VertexAttr
+	layout      []gfx.VertexAttribute
 	layoutID    int
 	standard    bool
 	// bounds is the local-space sphere, computed only for standard-layout
@@ -389,12 +390,12 @@ func indexBytes(indices []uint32, width gfx.IndexWidth) []byte {
 // culled by a sphere of its own.
 func (in MeshInput) InlineRecord(arena []byte) MeshRecord {
 	record := MeshRecord{
-		Vertices:    gfx.BufferWithBytes(in.vertices.Of(arena), true),
+		Vertices:    gfx.BufferDescrWithBlob(assets.NewBlob(in.vertices.Of(arena)), true),
 		VertexCount: in.vertexCount, indexCount: in.indexCount,
 		Topology: in.topology, Layout: in.layout, Standard: in.standard, UV: in.uv,
 	}
 	if in.indexCount > 0 {
-		record.Indices, record.Indexed = gfx.BufferWithBytes(in.indices.Of(arena), true), true
+		record.Indices, record.Indexed = gfx.BufferDescrWithBlob(assets.NewBlob(in.indices.Of(arena)), true), true
 	}
 	return record
 }

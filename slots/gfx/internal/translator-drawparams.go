@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
@@ -25,7 +24,7 @@ func (t *translator) resolveSet(f *frame, op *DrawOp) (drawSet, bool) {
 		return drawSet{}, false
 	}
 	store := &f.resources.drawParams
-	id := descriptors.DrawParamsIndex(op.Set)
+	id := uint32(op.Set)
 	if int(id) >= len(store.records) || store.records[id].state != setLive {
 		return drawSet{}, false
 	}
@@ -59,11 +58,10 @@ func (s *drawSet) value(i int) (*bindingValue, bool) {
 // its version recorded, so nothing here looks a name up: it binds each slot's
 // record, uploads each distinct uniform once a frame, and keeps only the checks
 // that depend on the frame.
-func (t *translator) translateSetDraw(f *frame, op *DrawOp, pass descriptors.PassDescr, firstErr *error) {
+func (t *translator) translateSetDraw(f *frame, op *DrawOp, pass types.PassDescr, firstErr *error) {
 	m := &op.Mesh
-	stride := descriptors.MeshStride(m)
-	vertices, indices := descriptors.MeshVertices(m), descriptors.MeshIndices(m)
-	if vertices.ID() == 0 || m.VertexCount() <= 0 || stride <= 0 {
+	vertices, indices := m.Vertices, m.Indices
+	if vertices.ID == 0 || m.VertexCount <= 0 || m.Stride <= 0 {
 		return
 	}
 	// A draw naming a released id - its vertex buffer, or the index buffer it
@@ -72,7 +70,7 @@ func (t *translator) translateSetDraw(f *frame, op *DrawOp, pass descriptors.Pas
 	// mistake. The check is written out here rather than behind a helper so it
 	// inlines; a helper naming both buffers is over the inliner's budget, and
 	// the call alone measured about two percent of TranslateSteadyState.
-	if t.released.buffer(vertices.ID()) || (m.Indexed() && t.released.buffer(indices.ID())) {
+	if t.released.buffer(vertices.ID) || (m.IndexCount > 0 && t.released.buffer(indices.ID)) {
 		return
 	}
 	set, ok := t.resolveSet(f, op)
@@ -80,7 +78,7 @@ func (t *translator) translateSetDraw(f *frame, op *DrawOp, pass descriptors.Pas
 		return
 	}
 	label := set.record.program.Label()
-	if m.Indexed() && indices.ID() != 0 && indices.Size()%m.IndexWidth().Bytes() != 0 {
+	if indices.ID != 0 && indices.Size%m.IndexWidth.Bytes() != 0 {
 		if err := t.reportIndexLengthOf(m, label); err != nil && *firstErr == nil {
 			*firstErr = err
 		}
@@ -104,17 +102,17 @@ func (t *translator) translateSetDraw(f *frame, op *DrawOp, pass descriptors.Pas
 	}
 	t.ops.SetPipeline(pipeline)
 	t.emitSetBindings(f, &set)
-	t.ops.SetVertexBuffer(vertices.ID(), 0)
+	t.ops.SetVertexBuffer(vertices.ID, 0)
 
 	instances := op.Instances
 	if instances < 1 {
 		instances = 1
 	}
-	if m.Indexed() && indices.ID() != 0 && m.IndexCount() > 0 {
-		t.ops.SetIndexBuffer(indices.ID(), 0, m.IndexWidth())
-		t.ops.Draw(0, m.IndexCount(), instances, op.FirstInstance, true)
+	if m.IndexCount > 0 && indices.ID != 0 {
+		t.ops.SetIndexBuffer(indices.ID, 0, m.IndexWidth)
+		t.ops.Draw(0, m.IndexCount, instances, op.FirstInstance, true)
 	} else {
-		t.ops.Draw(0, m.VertexCount(), instances, op.FirstInstance, false)
+		t.ops.Draw(0, m.VertexCount, instances, op.FirstInstance, false)
 	}
 }
 
@@ -124,7 +122,7 @@ func (t *translator) translateSetDraw(f *frame, op *DrawOp, pass descriptors.Pas
 // texture a version supplied - so they are the checks the set could not make
 // when it was created. The view mismatch is reported once a binding, on
 // reportTextureView's terms, and dropped every time.
-func (t *translator) checkSetBindings(set *drawSet, pass descriptors.PassDescr) (bool, error) {
+func (t *translator) checkSetBindings(set *drawSet, pass types.PassDescr) (bool, error) {
 	for i := range set.bindings {
 		binding := &set.bindings[i]
 		if binding.Kind.Base() != shader.ResourceTexture {
@@ -134,8 +132,8 @@ func (t *translator) checkSetBindings(set *drawSet, pass descriptors.PassDescr) 
 		if value.texture == 0 {
 			continue
 		}
-		if (descriptors.TargetKindOf(&pass.Target) == descriptors.TargetTexture && descriptors.TargetTextureOf(&pass.Target) == value.texture) ||
-			(descriptors.DepthKindOf(&pass.Depth) == descriptors.DepthKindTexture && descriptors.DepthTexture(&pass.Depth) == value.texture) {
+		if (pass.Target.Kind == types.TargetTexture && pass.Target.Texture == value.texture) ||
+			(pass.Depth.Kind == types.DepthKindTexture && pass.Depth.Texture == value.texture) {
 			return true, types.ErrDrawSamplesAttachment{Pass: pass.Label, Parameter: binding.Name}
 		}
 		if value.layers == 0 || (value.layers > 1) == (binding.TextureView == shader.TextureView2DArray) {
@@ -218,7 +216,7 @@ func (t *translator) emitSetBindings(f *frame, set *drawSet) {
 				if fromFrame {
 					paths = f.queue.versionPaths
 				}
-				texture = t.ensureTexture(f, descriptors.TextureWithResource(paths[value.path-1]))
+				texture = t.ensureTexture(f, types.TextureWithResource(paths[value.path-1]))
 			}
 			t.ops.SetTexture(texture, binding.Group, binding.Binding)
 		}

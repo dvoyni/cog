@@ -49,16 +49,16 @@ const TagForward PassTag = "forward"
 //
 // Target is the gfx handle passed through untouched: the screen sentinel, a
 // durable texture from the resource queue, or a frame-local target from
-// gfx.OpQueue.NewTemporaryTarget. A pass with NoTarget() takes its size from an
-// explicit depth texture, and one with neither, or with NoTarget() and a
+// gfx.OpQueue.NewTemporaryTarget. A pass with TargetDescrNone() takes its size from an
+// explicit depth texture, and one with neither, or with TargetDescrNone() and a
 // ClearColor, is reported.
 //
 // Store ops are inferred, not exposed. Depth is kept iff Depth names a texture;
 // colour is always kept.
 type Pass struct {
 	Tag        PassTag          // zero reads as TagForward
-	Target     gfx.TargetDescr  // zero is the screen sentinel; gfx.NoTarget() for depth-only
-	Depth      gfx.DepthDescr   // zero is gfx.DepthAuto(), pooled by size and shared
+	Target     gfx.TargetDescr  // zero is the screen sentinel; gfx.TargetDescrNone() for depth-only
+	Depth      gfx.DepthDescr   // zero is gfx.DepthDescrAuto(), pooled by size and shared
 	ClearColor m.Maybe[m.Color] // absent preserves
 	ClearDepth m.Maybe[float32] // absent preserves; 1.0 is the useful value
 	Order      gfx.Order        // offset from the camera id, not an absolute

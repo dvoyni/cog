@@ -3,8 +3,6 @@ package internal
 import (
 	"testing"
 
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
-
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
@@ -28,21 +26,21 @@ func (m *countingMinter) Ready() bool                   { return true }
 func TestATextureDescriptorReportsTheLayersItWasAskedFor(t *testing.T) {
 	queue := NewResourceQueue(func() IDMinter { return &countingMinter{} })
 
-	if got := queue.NewTexture(16, 16, 4, descriptors.FormatRGBA8Srgb, false).Layers(); got != 4 {
+	if got := queue.NewTexture(16, 16, 4, types.FormatRGBA8Srgb, false).Params.Layers; got != 4 {
 		t.Errorf("AllocateTexture layers = %d, want 4", got)
 	}
-	if got := queue.NewRenderTarget(16, 16, 3, descriptors.FormatRGBA8Srgb).Layers(); got != 3 {
+	if got := queue.NewRenderTarget(16, 16, 3, types.FormatRGBA8Srgb).Params.Layers; got != 3 {
 		t.Errorf("AllocateRenderTarget layers = %d, want 3", got)
 	}
 	// A bake genuinely is one layer: BakeTexture takes a single pixel run and
 	// there is no op that gives it more.
-	if got := queue.UploadTexture(queue.NewTexture(1, 1, 1, descriptors.FormatRGBA8Srgb, false), 0, types.Region{}, []byte{255, 255, 255, 255}, true).Layers(); got != 1 {
+	if got := queue.UploadTexture(queue.NewTexture(1, 1, 1, types.FormatRGBA8Srgb, false), 0, types.Region{}, []byte{255, 255, 255, 255}, true).Params.Layers; got != 1 {
 		t.Errorf("BakeTexture layers = %d, want 1", got)
 	}
-	if got := descriptors.BakedTexture(7, 16, 16).Layers(); got != 0 {
+	if got := types.BakedTexture(7, 16, 16).Params.Layers; got != 0 {
 		t.Errorf("BakedTexture layers = %d, want 0 for unknown", got)
 	}
-	if got := descriptors.TextureWithResource("sprites/hero.png").Layers(); got != 0 {
+	if got := types.TextureWithResource("sprites/hero.png").Params.Layers; got != 0 {
 		t.Errorf("TextureWithResource layers = %d, want 0 for unknown", got)
 	}
 }

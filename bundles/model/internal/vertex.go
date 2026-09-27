@@ -59,7 +59,7 @@ type Vertex struct {
 // VertexLayout reports the standard vertex's storage layout, in @location
 // order. It is the one exported implementation whose attributes are not this
 // struct's field offsets - see the interface's own documentation below.
-func (Vertex) VertexLayout() []gfx.VertexAttr { return standardVertexLayout }
+func (Vertex) VertexLayout() []gfx.VertexAttribute { return standardVertexLayout }
 
 // VertexLayout is implemented by the plain-data vertex types scene accepts.
 // The returned attributes describe the *buffer* scene uploads: they map byte
@@ -84,7 +84,7 @@ func (Vertex) VertexLayout() []gfx.VertexAttr { return standardVertexLayout }
 // layout supplying an attribute the shader never declares is legal and common,
 // and gfx checks the pairing at pipeline time either way.
 type VertexLayout interface {
-	VertexLayout() []gfx.VertexAttr
+	VertexLayout() []gfx.VertexAttribute
 }
 
 // The storage vertex: where each attribute sits in the buffer scene uploads,
@@ -146,15 +146,15 @@ const (
 // What holds the UV rows together is the mesh record, and what holds the weight
 // row together is that divide.
 var (
-	skinnedVertexLayout = [...]gfx.VertexAttr{
-		gfx.Attr(StoragePosition, gfx.Float32x3), // POSITION
-		gfx.Attr(StorageNormal, gfx.Unorm16x2),   // NORMAL     - oct32
-		gfx.Attr(StorageTangent, gfx.Uint32),     // TANGENT    - oct 15/15 + handedness
-		gfx.Attr(StorageUV0, gfx.Unorm16x2),      // TEXCOORD_0 - against the mesh record
-		gfx.Attr(StorageUV1, gfx.Unorm16x2),      // TEXCOORD_1 - against the mesh record
-		gfx.Attr(StorageColor, gfx.Unorm8x4),     // COLOR_0
-		gfx.Attr(StorageJoints, gfx.Uint8x4),     // JOINTS_0   - one byte a joint, capped at 256
-		gfx.Attr(StorageWeights, gfx.Unorm8x4),   // WEIGHTS_0  - renormalised in the shader
+	skinnedVertexLayout = [...]gfx.VertexAttribute{
+		{Offset: StoragePosition, Type: gfx.Float32x3}, // POSITION
+		{Offset: StorageNormal, Type: gfx.Unorm16x2},   // NORMAL     - oct32
+		{Offset: StorageTangent, Type: gfx.Uint32},     // TANGENT    - oct 15/15 + handedness
+		{Offset: StorageUV0, Type: gfx.Unorm16x2},      // TEXCOORD_0 - against the mesh record
+		{Offset: StorageUV1, Type: gfx.Unorm16x2},      // TEXCOORD_1 - against the mesh record
+		{Offset: StorageColor, Type: gfx.Unorm8x4},     // COLOR_0
+		{Offset: StorageJoints, Type: gfx.Uint8x4},     // JOINTS_0   - one byte a joint, capped at 256
+		{Offset: StorageWeights, Type: gfx.Unorm8x4},   // WEIGHTS_0  - renormalised in the shader
 	}
 	standardVertexLayout = skinnedVertexLayout[:StandardVertexAttrs]
 )
@@ -167,4 +167,4 @@ const StandardVertexAttrs = 6
 // SkinnedVertexLayout reports the skinned storage layout, all eight rows. It is
 // a function rather than an exported variable so that no caller can write a
 // row of the one table both layouts are sliced from.
-func SkinnedVertexLayout() []gfx.VertexAttr { return skinnedVertexLayout[:] }
+func SkinnedVertexLayout() []gfx.VertexAttribute { return skinnedVertexLayout[:] }

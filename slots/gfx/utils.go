@@ -1,10 +1,11 @@
 package gfx
 
 import (
+	"github.com/dvoyni/cog/libs/assets"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx/internal"
-	"github.com/dvoyni/cog/slots/gfx/internal/descriptors"
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
 // ShaderWithText describes a shader from inline source bytes (e.g. WGSL).
@@ -40,7 +41,7 @@ func ShaderConst(name, value string) ShaderOption {
 // metallic-roughness, occlusion - is not a picture and does not come through
 // here; it comes through TextureWithBytes, which does take a format.
 func TextureWithResource(path string) TextureDescr {
-	return descriptors.TextureWithResource(path)
+	return types.TextureWithResource(path)
 }
 
 // TextureWithBytes describes a texture from inline pixel bytes. copyData
@@ -48,66 +49,68 @@ func TextureWithResource(path string) TextureDescr {
 // until the recorded frame is consumed or dropped. mipmaps generates a full mip
 // chain at bake time for smoother minification.
 func TextureWithBytes(width, height int, format TextureFormat, pixels []byte, copyData, mipmaps bool) TextureDescr {
-	return descriptors.TextureWithBytes(width, height, format, pixels, copyData, mipmaps)
+	return types.TextureWithBytes(width, height, format, pixels, copyData, mipmaps)
 }
 
-// BufferWithBytes describes a buffer from inline bytes. copyData snapshots the
-// bytes when recorded if true; when false, the caller must keep them unchanged
-// until the recorded frame is consumed or dropped.
-func BufferWithBytes(data []byte, copyData bool) BufferDescr {
-	return descriptors.BufferWithBytes(data, copyData)
+// BufferDescrWithBlob describes a buffer from inline bytes. copyData snapshots
+// the bytes when recorded if true; when false, the caller must keep them
+// unchanged until the recorded frame is consumed or dropped.
+func BufferDescrWithBlob(data assets.Blob, copyData bool) BufferDescr {
+	return types.BufferDescrWithBlob(data, copyData)
 }
 
-// FloatParam creates a parameter carrying the four bytes of one f32, which
-// fills a uniform declared at f32.
-func FloatParam(name string, v float32) ParameterDescr {
-	return descriptors.FloatParam(name, v)
+// ShaderParameterFloat creates a parameter carrying the four bytes of one f32,
+// which fills a uniform declared at f32.
+func ShaderParameterFloat(name string, v float32) ShaderParameterDescr {
+	return types.ShaderParameterFloat(name, v)
 }
 
-// VecParam creates a parameter carrying the sixteen bytes of one vec4f.
-func VecParam(name string, v m.Vec4) ParameterDescr {
-	return descriptors.VecParam(name, v)
+// ShaderParameterVec4 creates a parameter carrying the sixteen bytes of one
+// vec4f.
+func ShaderParameterVec4(name string, v m.Vec4) ShaderParameterDescr {
+	return types.ShaderParameterVec4(name, v)
 }
 
-// MatParam creates a parameter carrying the sixty-four bytes of one mat4x4f.
-func MatParam(name string, m m.Mat4) ParameterDescr {
-	return descriptors.MatParam(name, m)
+// ShaderParameterMat4 creates a parameter carrying the sixty-four bytes of one
+// mat4x4f.
+func ShaderParameterMat4(name string, m m.Mat4) ShaderParameterDescr {
+	return types.ShaderParameterMat4(name, m)
 }
 
-// ColorParam creates a parameter carrying a color as the sixteen bytes of one
-// vec4f, r, g, b, a.
-func ColorParam(name string, c m.Color) ParameterDescr {
-	return descriptors.ColorParam(name, c)
+// ShaderParameterColor creates a parameter carrying a color as the sixteen
+// bytes of one vec4f, r, g, b, a.
+func ShaderParameterColor(name string, c m.Color) ShaderParameterDescr {
+	return types.ShaderParameterColor(name, c)
 }
 
-// TextureParam creates a texture parameter from a texture descriptor.
-func TextureParam(name string, tex TextureDescr) ParameterDescr {
-	return descriptors.TextureParam(name, tex)
+// ShaderParameterTexture creates a texture parameter from a texture descriptor.
+func ShaderParameterTexture(name string, tex TextureDescr) ShaderParameterDescr {
+	return types.ShaderParameterTexture(name, tex)
 }
 
-// SamplerParam creates a sampler parameter. The zero SamplerDesc clamps and
-// filters linearly.
-func SamplerParam(name string, desc SamplerDesc) ParameterDescr {
-	return descriptors.SamplerParam(name, desc)
+// ShaderParameterSampler creates a sampler parameter. The zero SamplerDesc
+// clamps and filters linearly.
+func ShaderParameterSampler(name string, desc SamplerDesc) ShaderParameterDescr {
+	return types.ShaderParameterSampler(name, desc)
 }
 
-// BufferParam creates a buffer parameter from a buffer descriptor, binding the
-// whole buffer.
-func BufferParam(name string, buf BufferDescr) ParameterDescr {
-	return descriptors.BufferParam(name, buf)
+// ShaderParameterBuffer creates a buffer parameter from a buffer descriptor,
+// binding the whole buffer.
+func ShaderParameterBuffer(name string, buf BufferDescr) ShaderParameterDescr {
+	return types.ShaderParameterBuffer(name, buf)
 }
 
-// BufferRangeParam binds one slice of a buffer, which is how a draw addresses
-// its own record in a shared arena: the binding is the addressing, so no index
-// has to be agreed on across the record/translate thread boundary. offset must
-// be a multiple of StorageAlignment.
-func BufferRangeParam(name string, buf BufferDescr, offset, size int) ParameterDescr {
-	return descriptors.BufferRangeParam(name, buf, offset, size)
+// ShaderParameterBufferRange binds one slice of a buffer, which is how a draw
+// addresses its own record in a shared arena: the binding is the addressing, so
+// no index has to be agreed on across the record/translate thread boundary.
+// offset must be a multiple of StorageAlignment.
+func ShaderParameterBufferRange(name string, buf BufferDescr, offset, size int) ShaderParameterDescr {
+	return types.ShaderParameterBufferRange(name, buf, offset, size)
 }
 
-// RawParameter creates a parameter carrying an arbitrary plain-data struct by
-// copying its bytes, so a shader value that is a record rather than a scalar or
-// a vector can be named like any other parameter.
+// ShaderParameterRaw creates a parameter carrying an arbitrary plain-data
+// struct by copying its bytes, so a shader value that is a record rather than a
+// scalar or a vector can be named like any other parameter.
 //
 // T's memory layout is validated against WGSL's alignment rules once per type,
 // and a mismatch panics. That check is the whole point of the constructor. Go
@@ -120,100 +123,96 @@ func BufferRangeParam(name string, buf BufferDescr, offset, size int) ParameterD
 // element after the first reads the wrong memory with no error anywhere. The
 // panic names the field, both offsets, and the padding that would fix it.
 //
-// Only plain-data members are accepted - float32, int32, uint32, m.Vec2, m.Vec3,
-// m.Vec4, m.Color, m.Quat, m.Mat4, arrays of those, and structs of those. Any
-// other member type panics, which is what keeps a pointer out of a byte copy.
-func RawParameter[T any](name string, value T) ParameterDescr {
-	return descriptors.RawParameter[T](name, value)
+// Only plain-data members are accepted - float32, int32, uint32, m.Vec2,
+// m.Vec3, m.Vec4, m.Color, m.Quat, m.Mat4, arrays of those, and structs of
+// those. Any other member type panics, which is what keeps a pointer out of a
+// byte copy.
+func ShaderParameterRaw[T any](name string, value T) ShaderParameterDescr {
+	return types.ShaderParameterRaw[T](name, value)
 }
 
-// RawParameterRef is RawParameter over a value the caller keeps: validated
-// the same way, but a record larger than sixty-four bytes is borrowed rather
-// than copied, so the call it is handed to must read it before the caller
-// changes it. NewDrawParams, UpdateDrawParams and SetDrawParams copy a param's
-// bytes before they return, which is what lets a record refilled per batch and
-// set through SetDrawParams cost no allocation. value must outlive the call:
-// the address of a local escapes to the heap.
-func RawParameterRef[T any](name string, value *T) ParameterDescr {
-	return descriptors.RawParameterRef[T](name, value)
+// ShaderParameterRawRef is ShaderParameterRaw over a value the caller keeps:
+// validated the same way, but a record larger than sixty-four bytes is borrowed
+// rather than copied, so the call it is handed to must read it before the
+// caller changes it. NewDrawParams, UpdateDrawParams and SetDrawParams copy a
+// param's bytes before they return, which is what lets a record refilled per
+// batch and set through SetDrawParams cost no allocation. value must outlive
+// the call: the address of a local escapes to the heap.
+func ShaderParameterRawRef[T any](name string, value *T) ShaderParameterDescr {
+	return types.ShaderParameterRawRef[T](name, value)
 }
 
 // FingerprintParams hashes a parameter slice in order by name, kind and value:
 // one seed, one encoding per kind, and inline texture and buffer bytes by
 // pointer identity rather than by content.
 //
-// It exists because a recorder that keys a batch on a draw's parameters cannot
-// write the comparison itself: ParameterDescr exposes an accessor for some
-// kinds and none for others, so a hand-written type switch would silently
-// mis-key every kind it forgot - and mis-keying merges two draws that differ,
-// which draws the wrong picture rather than costing a batch.
-func FingerprintParams(params []ParameterDescr) uint64 {
-	return descriptors.FingerprintParams(params)
+// It exists because a recorder that keys a batch on a draw's parameters would
+// otherwise write the comparison itself, and a hand-written type switch would
+// silently mis-key every kind or field it forgot - and mis-keying merges two
+// draws that differ, which draws the wrong picture rather than costing a batch.
+func FingerprintParams(params []ShaderParameterDescr) uint64 {
+	return types.FingerprintParams(params)
 }
 
-// Attr describes a vertex attribute at byte offset with element type typ.
-func Attr(offset int, typ VertexType) VertexAttr {
-	return descriptors.Attr(offset, typ)
+// MeshDescrWithVertices builds non-indexed geometry from an interleaved vertex
+// buffer, a topology, and the vertex layout.
+func MeshDescrWithVertices(vertices BufferDescr, topology PrimitiveTopology, layout ...VertexAttribute) MeshDescr {
+	return types.MeshDescrWithVertices(vertices, topology, layout...)
 }
 
-// Mesh builds non-indexed geometry from an interleaved vertex buffer, a topology,
-// and the vertex layout.
-func Mesh(vertices BufferDescr, topology PrimitiveTopology, layout ...VertexAttr) MeshDescr {
-	return descriptors.Mesh(vertices, topology, layout...)
-}
-
-// MeshIndexed builds indexed geometry from vertex and index buffers, the width
-// one index of that buffer is written at, a topology, and the vertex layout. A
-// zero index buffer (as passed by Mesh) yields a non-indexed mesh.
+// MeshDescrWithIndices builds indexed geometry from vertex and index buffers,
+// the width one index of that buffer is written at, a topology, and the vertex
+// layout. A zero index buffer (as passed by MeshDescrWithVertices) yields a
+// non-indexed mesh.
 //
 // The width describes the bytes rather than constraining them: gfx has no way
 // to know how a caller wrote its indices, so declaring uint16 over uint32 bytes
 // reads pairs of indices as one. What it can check - that the buffer's length
 // divides by the width - it checks where the draw is translated, since this is
 // a pure value constructor with no error return.
-func MeshIndexed(
+func MeshDescrWithIndices(
 	vertices, indices BufferDescr, width IndexWidth,
-	topology PrimitiveTopology, layout ...VertexAttr,
+	topology PrimitiveTopology, layout ...VertexAttribute,
 ) MeshDescr {
-	return descriptors.MeshIndexed(vertices, indices, width, topology, layout...)
+	return types.MeshDescrWithIndices(vertices, indices, width, topology, layout...)
 }
 
-// ScreenTarget is the frame's screen attachment. It stays a sentinel the
+// TargetDescrScreen is the frame's screen attachment. It stays a sentinel the
 // recorder cannot resolve: the swapchain view is per-frame and known only on
 // the render thread.
-func ScreenTarget() TargetDescr {
-	return descriptors.ScreenTarget()
+func TargetDescrScreen() TargetDescr {
+	return types.TargetDescrScreen()
 }
 
-// TextureTarget renders into one mip level of one layer of a texture, which
+// TargetDescrTexture renders into one mip level of one layer of a texture, which
 // must have been allocated Renderable.
-func TextureTarget(texture TextureDescr, mip, layer int) TargetDescr {
-	return descriptors.TextureTarget(texture, mip, layer)
+func TargetDescrTexture(texture TextureDescr, mip, layer int) TargetDescr {
+	return types.TargetDescrTexture(texture, mip, layer)
 }
 
-// NoTarget declares a pass with no colour attachment, such as a depth-only
+// TargetDescrNone declares a pass with no colour attachment, such as a depth-only
 // prepass.
-func NoTarget() TargetDescr {
-	return descriptors.NoTarget()
+func TargetDescrNone() TargetDescr {
+	return types.TargetDescrNone()
 }
 
-// DepthAuto uses the backend's own depth texture for the target's size. Every
-// DepthAuto pass at a given size shares one texture, so a pass that means to
+// DepthDescrAuto uses the backend's own depth texture for the target's size. Every
+// DepthDescrAuto pass at a given size shares one texture, so a pass that means to
 // start from a clean depth buffer must clear depth or it inherits whatever the
 // previous pass at that size left behind.
-func DepthAuto() DepthDescr {
-	return descriptors.DepthAuto()
+func DepthDescrAuto() DepthDescr {
+	return types.DepthDescrAuto()
 }
 
-// DepthNone declares a pass with no depth attachment.
-func DepthNone() DepthDescr {
-	return descriptors.DepthNone()
+// DepthDescrNone declares a pass with no depth attachment.
+func DepthDescrNone() DepthDescr {
+	return types.DepthDescrNone()
 }
 
-// DepthTarget renders depth into a texture, which must be FormatDepth32F and
+// DepthDescrTarget renders depth into a texture, which must be FormatDepth32F and
 // Renderable.
-func DepthTarget(texture TextureDescr) DepthDescr {
-	return descriptors.DepthTarget(texture)
+func DepthDescrTarget(texture TextureDescr) DepthDescr {
+	return types.DepthDescrTarget(texture)
 }
 
 // StateOpaque3D returns the state of opaque geometry, the first of the three
@@ -270,7 +269,7 @@ func DefaultLimits() Limits {
 // backend, and a package that owns both halves of a pair - scene holds its
 // layout and its shader - can ask the same question gfx will ask at draw time,
 // through the same call.
-func CheckVertexInterface(shader string, layout ShaderLayout, attrs []VertexAttr) error {
+func CheckVertexInterface(shader string, layout ShaderLayout, attrs []VertexAttribute) error {
 	return internal.CheckVertexInterface(shader, layout, attrs)
 }
 
@@ -285,14 +284,14 @@ func SnapshotViewOf(viewport Viewport) SnapshotView {
 // ParameterViewOf renders one parameter. It reads through the accessors rather
 // than the fields, so a new arm on the union that forgets to answer here
 // serializes as its kind and no value, instead of as somebody else's value.
-func ParameterViewOf(parameter ParameterDescr) ParameterView {
+func ParameterViewOf(parameter ShaderParameterDescr) ParameterView {
 	return internal.ParameterViewOf(parameter)
 }
 
 // ParameterViewsOf renders a parameter list in order. It is the form both
 // callers actually want, and it keeps the empty case one nil rather than one
 // empty array in every response.
-func ParameterViewsOf(parameters []ParameterDescr) []ParameterView {
+func ParameterViewsOf(parameters []ShaderParameterDescr) []ParameterView {
 	return internal.ParameterViewsOf(parameters)
 }
 

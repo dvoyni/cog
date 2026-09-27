@@ -11,7 +11,7 @@ register it and schedules no ECS Systems.
 
 **It is cog's one 3D renderer.** Its Components wrap `model`'s values — a
 `model.ModelRef`, a `model.MeshRef`, `model.ClipPlay`s, a `model.LightDescr` —
-beside `gfx.ParameterDescr`s and its own camera, layer and pass vocabulary. Its
+beside `gfx.ShaderParameterDescr`s and its own camera, layer and pass vocabulary. Its
 load System keys each changed Entity into a Batch, and its recording System
 draws the frame into `gfx` itself, over its own arena, culling, sorting and
 emission, through `model`'s packers and binding names. It replaced the
@@ -130,14 +130,14 @@ type Mesh struct {                             // pointer-free
 }
 
 type Animation struct{ Plays [model.MaxClipPlays]model.ClipPlay } // model.MaxClipPlays is 4
-type Params    struct{ Values m.List[gfx.ParameterDescr] }
+type Params    struct{ Values m.List[gfx.ShaderParameterDescr] }
 type Material  struct{ Tags m.List[MaterialTag] }
 
 type MaterialTag struct {
     Tag    PassTag
     Shader gfx.ShaderDescr
     State  gfx.DrawState
-    Params m.List[gfx.ParameterDescr]
+    Params m.List[gfx.ShaderParameterDescr]
 }
 
 type Light struct {                            // pointer-free
@@ -174,7 +174,7 @@ keeps cog's coupling check working on Component data. See
 | `Model` | one instance per primitive of the view `Ref.Scene` and `Ref.Node` select in `Ref.Path` | The path is a string. The load System loads it; residency and a bad path's report are model's. |
 | `Mesh` | one instance of `Ref` | The ref comes from `model.LookupAccess.BakeMesh`. |
 | `Animation` | the Entity's own `sceneAnim` block | Optional. A play with an empty `Clip` is an unused slot. **Nothing here advances clip time**; that is the game's. |
-| `Params` | the Batch's gfx parameters, laid by name over every tag's, the material's numbers among them | Optional, and part of the Batch key, so `gfx.ColorParam("baseColorFactor", c)` tints a model or a mesh. A member of `scenePbrMaterial` is folded into the block, which is set whole; any other name is a whole binding, set where the tag's shader declares it. |
+| `Params` | the Batch's gfx parameters, laid by name over every tag's, the material's numbers among them | Optional, and part of the Batch key, so `gfx.ShaderParameterColor("baseColorFactor", c)` tints a model or a mesh. A member of `scenePbrMaterial` is folded into the block, which is set whole; any other name is a whole binding, set where the tag's shader declares it. |
 | `Material` | one entry per pass tag, each **laid over** what the file provides | Optional, any number of tags. **Absent is no material**: the default scene shader over the file's own material, or over the bundled PBR's for a mesh. Present with no tags serves no pass. See [A Material overlays the file](#a-material-overlays-the-file). |
 | `Light` | one light of each pass whose camera draws its layers | Position is the Transform's; a spot's direction is the Transform's rotation applied to −Z, the way `m.LookAt` faces. |
 | `Camera` | its passes, labelled `scene.camera<ID>.<tag>` | Placement is the Transform's; its scale is ignored. An empty `Passes` is one default pass. Two Cameras with one ID report `ErrCameraAlreadyRecorded`, and the first walked wins. |
@@ -202,7 +202,7 @@ func spawnCrates(sp *ecs.Spawn[Crate]) {
     sp.New(Crate{
         Place: m.At(0, 0, -5),
         Model: scene.Model{Ref: model.ModelRef{Path: "models/crate.glb"}},
-        Tint:  scene.Params{Values: m.NewList(gfx.ColorParam("baseColorFactor", m.Color{R: 1, A: 1}))},
+        Tint:  scene.Params{Values: m.NewList(gfx.ShaderParameterColor("baseColorFactor", m.Color{R: 1, A: 1}))},
     })
 }
 ```

@@ -74,9 +74,9 @@ func (l *Lookup) ensureShaders(
 func (l *Lookup) newMaterialSets(
 	k kernel.Kernel, resources *gfx.ResourceQueue, shaders *[VariantCount]bundledShader,
 	built *modelMaterial, values *PbrValues,
-) (sets [VariantCount]gfx.DrawParams) {
+) (sets [VariantCount]gfx.DrawStateId) {
 	params := append(l.setParams[:0], built.Params[:2*pbrSlotCount]...)
-	params = append(params, gfx.RawParameterRef(BindingScenePbrMaterial, values))
+	params = append(params, gfx.ShaderParameterRawRef(BindingScenePbrMaterial, values))
 	for variant := range sets {
 		if shaders[variant].state == bundledReady {
 			sets[variant] = resources.NewDrawParams(k, shaders[variant].id, built.State, params...)
@@ -95,7 +95,7 @@ func (l *Lookup) newMaterialSets(
 func (l *Lookup) releaseSets(model *residentModel) {
 	for i := range model.Materials {
 		for _, set := range model.Materials[i].Sets {
-			if set != (gfx.DrawParams{}) {
+			if set != 0 {
 				l.pendingSets = append(l.pendingSets, set)
 			}
 		}

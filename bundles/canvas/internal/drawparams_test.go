@@ -63,7 +63,7 @@ func TestABatchDoesNotInheritABindingAnEarlierBatchSet(t *testing.T) {
 	textured := gfx.TextureWithBytes(1, 1, gfx.FormatRGBA8, []byte{255, 0, 0, 255}, true, false)
 	k, _, backend := testKernelGfx(t, fstest.MapFS{}, trianglesConfig(), func(write *OpQueue, _ *gfx.OpQueue) {
 		first, second := triangle(0), triangle(8)
-		write.DrawTriangles(0, first[:], nil, gfx.TextureParam(TextureSlot, textured))
+		write.DrawTriangles(0, first[:], nil, gfx.ShaderParameterTexture(TextureSlot, textured))
 		write.DrawTriangles(0, second[:], nil)
 	})
 	runFrame(k)
@@ -95,7 +95,7 @@ func TestAScopeParameterTheShaderDoesNotDeclareIsDroppedQuietly(t *testing.T) {
 		write.Sprite(0, "", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
 		verts := triangle(0)
 		write.DrawTriangles(0, verts[:], nil)
-		write.SetMaterial(MaterialSet{Params: []gfx.ParameterDescr{gfx.FloatParam("declaredNowhere", 1)}})
+		write.SetMaterial(MaterialSet{Params: []gfx.ShaderParameterDescr{gfx.ShaderParameterFloat("declaredNowhere", 1)}})
 	})
 	runFrame(k)
 	if backend.draws != 2 {

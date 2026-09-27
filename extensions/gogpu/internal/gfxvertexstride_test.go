@@ -77,7 +77,7 @@ func TestAMisalignedVertexStrideFailsThePipelineOnTheNativePath(t *testing.T) {
 		Shader:        shader,
 		Topology:      gfx.TopologyTriangleList,
 		NoDepthTarget: true,
-		Attributes:    []gfx.VertexAttribute{{Offset: 0, Type: gfx.Float32x3, Location: 0}},
+		Attributes:    []gfx.VertexAttribute{{Offset: 0, Type: gfx.Float32x3}},
 		Label:         "stride",
 	}
 

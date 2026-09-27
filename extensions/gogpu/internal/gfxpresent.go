@@ -8,7 +8,7 @@ import (
 
 // The frame buffer and the pass that shows it.
 //
-// ScreenTarget does not mean the swapchain: it means a frame-sized colour
+// TargetDescrScreen does not mean the swapchain: it means a frame-sized colour
 // buffer this backend owns, which every screen pass renders into and which one
 // implicit full-screen pass then copies to the surface. The engine has no
 // choice about that. gogpu hardcodes BGRA8Unorm for the surface and exposes no
@@ -67,7 +67,7 @@ fn fs_main(in: Vertex) -> @location(0) vec4<f32> {
     return vec4<f32>(encoded, light.a);
 }
 `
-	if format.Resolve() == gfx.FormatRGBA8Srgb {
+	if format == gfx.FormatRGBA8Srgb {
 		return header + encode
 	}
 	return header + passthrough
