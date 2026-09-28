@@ -86,7 +86,7 @@ func (a *testAdapter) ReflectShader(code []byte) (shader.ShaderLayout, error) {
 	return a.get().ReflectShader(code)
 }
 func (a *testAdapter) FreePipeline(id types.PipelineID) { a.get().FreePipeline(id) }
-func (a *testAdapter) Limits() types.Limits             { return a.get().Limits() }
+func (a *testAdapter) Limits() types.PipelineLimits     { return a.get().Limits() }
 func (a *testAdapter) Execute(queue *Queue)             { a.get().Execute(queue) }
 func (a *testAdapter) TakeCapture() (Capture, bool)     { return a.get().TakeCapture() }
 func (a *testAdapter) ScreenFramebuffer() (types.TextureViewID, int, int) {
@@ -97,9 +97,6 @@ func (a *testAdapter) NewPipeline(desc PipelineDesc) (types.PipelineID, error) {
 }
 func (a *testAdapter) TextureFormat(texture types.TextureID) (types.TextureFormat, bool) {
 	return a.get().TextureFormat(texture)
-}
-func (a *testAdapter) TextureView(texture types.TextureID, mip, layer int) types.TextureViewID {
-	return a.get().TextureView(texture, mip, layer)
 }
 
 // emptyFS is built once rather than per call, because translate now materialises
@@ -124,7 +121,7 @@ func TestAFrameBeforeTheBackendIsReadyIsSkipped(t *testing.T) {
 	// Nothing is translated, so the draw needs no set: there is no backend to
 	// compile one against yet.
 	w, ref := recordList(t, k)
-	w.Draw(ref, triangle(), types.DrawStateId(0), 1, 0)
+	w.Draw(ref, triangle(), types.DrawStateID(0), 1, 0)
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 	k.PublishEvent(app.RenderEvent{}).Wait()
 	k.PublishEvent(app.RenderEvent{}).Wait()

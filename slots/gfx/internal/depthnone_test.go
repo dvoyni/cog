@@ -16,7 +16,7 @@ import (
 // that keeps the two in step.
 
 func TestADrawInADepthNonePassBuildsAPipelineWithNoDepthTarget(t *testing.T) {
-	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateId) {
+	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateID) {
 		ref := q.NewPass(types.PassDescr{Target: types.TargetDescrScreen(), Depth: types.DepthDescrNone(), Load: types.LoadClear, Label: "flat"})
 		drawInto(q, ref, set)
 	})
@@ -31,7 +31,7 @@ func TestADrawInADepthNonePassBuildsAPipelineWithNoDepthTarget(t *testing.T) {
 func TestOneShaderInADepthPassAndADepthNonePassBuildsTwoPipelines(t *testing.T) {
 	// As with noColor, the flag has to be in the cache key: a key that ignored
 	// it would hand the second pass whichever pipeline the first one built.
-	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateId) {
+	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateID) {
 		ref := q.NewPass(types.PassDescr{Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto(), Load: types.LoadClear, Order: 0, Label: "lit"})
 		drawInto(q, ref, set)
 		ref = q.NewPass(types.PassDescr{Target: types.TargetDescrScreen(), Depth: types.DepthDescrNone(), Order: 1, Label: "flat"})
@@ -54,7 +54,7 @@ func TestOneShaderInADepthPassAndADepthNonePassBuildsTwoPipelines(t *testing.T) 
 }
 
 func TestADrawInADepthAutoPassKeepsItsDepthTarget(t *testing.T) {
-	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateId) {
+	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateID) {
 		ref := q.NewPass(types.PassDescr{Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto(), Load: types.LoadClear, Label: "lit"})
 		q.Draw(ref, triangle(), set, 1, 0)
 	})

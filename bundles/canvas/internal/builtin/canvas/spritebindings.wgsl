@@ -68,17 +68,22 @@ struct VertexOut {
 //
 // A flip leaves frame.xy above frame.zw and the span negative; the offset is
 // then negative too, so the quotient is still 0..1 and nothing needs a branch.
-// The identity case returns uv untouched rather than taking fract of it, which
-// keeps the one coordinate fract would send to the wrong edge - a quad boundary
-// landing exactly on 1.0 - sampling where it should, and keeps a collapsed
-// sub-rect (the generated texel, whose frame is a point) off a zero divide.
+// An axis that repeats once keeps its uv untouched rather than taking fract of
+// it, per axis and not only when neither axis tiles. fract sends a coordinate
+// that lands exactly on the quad's edge to the opposite one: a pixel centre on
+// the first row of a strip tiled only across comes out a hair below 0, wraps to
+// the last row, and a border side draws its far edge as a thin line along its
+// near one - wherever the layout happens to put a pixel centre on that edge.
+// The identity case also keeps a collapsed sub-rect (the generated texel,
+// whose frame is a point) off a zero divide.
 fn canvasTiledUV(in: VertexOut) -> vec2<f32> {
     let s = instances.data[in.index];
     let repeat = s.misc.yz;
-    if repeat.x == 1.0 && repeat.y == 1.0 {
+    let once = repeat == vec2<f32>(1.0, 1.0);
+    if all(once) {
         return in.uv;
     }
     let span = s.frame.zw - s.frame.xy;
     let quad = (in.uv - s.frame.xy) / span;
-    return s.frame.xy + fract(quad * repeat) * span;
+    return select(s.frame.xy + fract(quad * repeat) * span, in.uv, once);
 }

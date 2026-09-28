@@ -69,35 +69,27 @@ func depthOnlyPassesWork(backend string) bool {
 
 // hasDepthAttachment reports whether a pass names a depth attachment, either
 // the pooled automatic one or a texture of its own.
-func hasDepthAttachment(desc gfx.PassDesc) bool {
-	return desc.DepthAuto || desc.Depth != 0
+func hasDepthAttachment(desc gfx.PassDescr) bool {
+	return desc.Depth.Kind != gfx.DepthKindNone
 }
 
 // isDepthOnly reports the pass shape a backend may decline: a pass that
-// declares no colour attachment and does declare a depth one.
-//
-// It reads NoColor rather than a zero Target, and that distinction is the whole
-// reason NoColor exists. A texture target whose view has not been created yet
-// resolves to zero as well - which every temporary target does on its first
-// frame, because the allocation is a bake the backend replays after these
-// descriptors were built - and that pass is not a depth-only pass, it is a
-// colour pass with nothing to render into yet. Both are skipped, but only one
-// of them is worth reporting.
+// declares no colour attachment and does declare a depth one. It reads what the
+// pass declares rather than what resolved, so a texture target whose view does
+// not exist yet is still a colour pass.
 //
 // A pass with neither attachment is not this case either: it is nothing at all,
 // and BeginPass already returns nil for it.
-func isDepthOnly(desc gfx.PassDesc) bool {
-	return desc.NoColor && hasDepthAttachment(desc)
+func isDepthOnly(desc gfx.PassDescr) bool {
+	return desc.Target.Kind == gfx.TargetNone && hasDepthAttachment(desc)
 }
 
 // passBegins reports whether a pass has the attachments to be opened, given
 // whether its colour and depth views resolved. It runs after the refusal, so a
 // depth-only pass that reaches it is one this backend can encode.
 //
-// A pass that declared colour and resolved none is skipped: either there is
-// nothing to render at all, or its target's view does not exist yet, as on
-// every temporary target's first frame, since its allocation is a bake the same
-// Execute replays after the descriptors were built.
+// A pass that declared colour and resolved none is skipped: its target is not
+// a texture the backend holds.
 //
 // A depth-only pass needs only its depth view. This used to sit behind the same
 // colour check, which outlived the refusal it duplicated: with the refusal
@@ -105,7 +97,7 @@ func isDepthOnly(desc gfx.PassDesc) bool {
 // depth writes never happened and a later pass loading that texture rendered
 // against whatever was in it. Pooled depth takes its size from the colour
 // target, so a depth-only pass on it resolves no view and is skipped here.
-func passBegins(desc gfx.PassDesc, colour, depth bool) bool {
+func passBegins(desc gfx.PassDescr, colour, depth bool) bool {
 	if isDepthOnly(desc) {
 		return depth
 	}

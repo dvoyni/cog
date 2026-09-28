@@ -45,7 +45,7 @@ type testBackend struct {
 
 // recordedPass is one render pass as the backend received it.
 type recordedPass struct {
-	desc  gfx.PassDesc
+	desc  gfx.PassDescr
 	draws []recordedDraw
 }
 
@@ -240,11 +240,7 @@ func (b *testBackend) TextureFormat(gfx.TextureID) (gfx.TextureFormat, bool) {
 	return 0, false
 }
 
-func (b *testBackend) TextureView(gfx.TextureID, int, int) gfx.TextureViewID {
-	return gfx.TextureViewID(b.next())
-}
-
-func (b *testBackend) Limits() gfx.Limits { return gfx.DefaultLimits() }
+func (b *testBackend) Limits() gfx.PipelineLimits { return gfx.DefaultLimits() }
 
 func (b *testBackend) TakeCapture() (gfx.Capture, bool) { return gfx.Capture{}, false }
 
@@ -259,7 +255,7 @@ func (b *testBackend) Execute(queue *gfx.Queue) {
 	b.last = b.building
 }
 
-func (b *testBackend) BeginPass(desc gfx.PassDesc) gfx.RenderPass {
+func (b *testBackend) BeginPass(desc gfx.PassDescr) gfx.RenderPass {
 	b.building = append(b.building, recordedPass{desc: desc})
 	b.current = &b.building[len(b.building)-1]
 	b.state = recordedDraw{buffers: map[string]bufferRange{}, params: map[[2]int][]byte{}}
@@ -345,7 +341,7 @@ const (
 // drawnInstance is one instance a frame drew: the pass it was in, the
 // pipeline and parameters it drew with, and the records packed for it.
 type drawnInstance struct {
-	pass     gfx.PassDesc
+	pass     gfx.PassDescr
 	shader   string
 	state    gfx.DrawState
 	params   map[[2]int][]byte

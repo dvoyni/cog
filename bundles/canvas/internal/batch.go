@@ -31,7 +31,7 @@ type spriteShading struct {
 type spriteBatch struct {
 	active bool
 	// pass is the layer's pass the batch flushes into.
-	pass      gfx.PassRef
+	pass      gfx.PassId
 	texture   gfx.TextureDescr
 	textureID gfx.TextureID
 	layer     m.Mat4
@@ -212,7 +212,7 @@ type trianglesShading struct {
 type trianglesBatch struct {
 	active bool
 	// pass is the layer's pass the batch flushes into.
-	pass     gfx.PassRef
+	pass     gfx.PassId
 	layoutID int
 	layout   []gfx.VertexAttribute
 	layer    m.Mat4

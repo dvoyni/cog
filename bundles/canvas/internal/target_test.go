@@ -55,10 +55,10 @@ func TestALayerWithATargetRendersIntoItsTextureRatherThanTheScreen(t *testing.T)
 		t.Fatalf("GPU passes = %d, want the texture layer kept apart from the screen layer", len(backend.passes))
 	}
 	offscreen, screen := backend.passes[0], backend.passes[1]
-	if offscreen.Screen || offscreen.NoColor || offscreen.Target == 0 {
+	if offscreen.Target.Kind != gfx.TargetTexture || offscreen.Target.Texture == 0 {
 		t.Errorf("first pass = %+v, want a texture attachment", offscreen)
 	}
-	if !screen.Screen {
+	if screen.Target.Kind != gfx.TargetScreen {
 		t.Errorf("second pass = %+v, want the screen", screen)
 	}
 }
@@ -249,10 +249,10 @@ func TestATextureACanvasLayerRenderedIsSampledByALaterLayer(t *testing.T) {
 	if len(backend.passes) != 2 {
 		t.Fatalf("GPU passes = %d, want the offscreen layer then the screen one", len(backend.passes))
 	}
-	if backend.passes[0].Screen || backend.passes[0].Target == 0 {
+	if backend.passes[0].Target.Kind != gfx.TargetTexture || backend.passes[0].Target.Texture == 0 {
 		t.Errorf("first pass = %+v, want the texture", backend.passes[0])
 	}
-	if !backend.passes[1].Screen {
+	if backend.passes[1].Target.Kind != gfx.TargetScreen {
 		t.Errorf("second pass = %+v, want the screen", backend.passes[1])
 	}
 	positions, _ := quadVertices(t, backend)

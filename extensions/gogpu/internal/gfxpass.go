@@ -16,24 +16,24 @@ type gfxbViewKey struct {
 	mip, layer int
 }
 
-// gfxbView is a cached texture view, the ID pass descriptors name it by, and
-// the size it renders at.
+// gfxbView is a cached texture view and the size it renders at.
 type gfxbView struct {
-	id            gfx.TextureViewID
 	view          *wgpu.TextureView
 	width, height int
 }
 
-// TextureView returns a renderable view of one mip level of one layer,
-// minting and caching it on first use.
-func (b *gfxBackend) TextureView(texture gfx.TextureID, mip, layer int) gfx.TextureViewID {
+// textureView returns a renderable view of one mip level of one layer, creating
+// and caching it on first use, and nil for a texture that is not baked. A pass
+// resolves its attachments here, as it is opened, so a target the same frame's
+// bakes allocated already has one.
+func (b *gfxBackend) textureView(texture gfx.TextureID, mip, layer int) *gfxbView {
 	key := gfxbViewKey{texture: texture, mip: mip, layer: layer}
 	if cached, ok := b.views[key]; ok {
-		return cached.id
+		return cached
 	}
 	tex, ok := b.bakedTextures[texture]
 	if !ok {
-		return 0
+		return nil
 	}
 	desc := b.bakedTextureDescs[texture]
 	view, err := b.device.CreateTextureView(tex.tex, &wgpu.TextureViewDescriptor{
@@ -43,17 +43,15 @@ func (b *gfxBackend) TextureView(texture gfx.TextureID, mip, layer int) gfx.Text
 		BaseArrayLayer: uint32(layer), ArrayLayerCount: 1,
 	})
 	if err != nil {
-		return 0
+		return nil
 	}
 	cached := &gfxbView{
-		id:     gfx.TextureViewID(b.id()),
 		view:   view,
 		width:  max(desc.Width>>mip, 1),
 		height: max(desc.Height>>mip, 1),
 	}
 	b.views[key] = cached
-	b.viewID[cached.id] = cached
-	return cached.id
+	return cached
 }
 
 // releaseTextureViews drops the cached views of a texture that is being
@@ -65,13 +63,12 @@ func (b *gfxBackend) releaseTextureViews(texture gfx.TextureID) {
 		}
 		view.view.Release()
 		delete(b.views, key)
-		delete(b.viewID, view.id)
 	}
 }
 
 // BeginPass encodes one pass's attachments into the frame's encoder and returns
 // the RenderPass its commands go to.
-func (b *gfxBackend) BeginPass(desc gfx.PassDesc) gfx.RenderPass {
+func (b *gfxBackend) BeginPass(desc gfx.PassDescr) gfx.RenderPass {
 	if b.encoder == nil {
 		return nil
 	}
@@ -87,10 +84,10 @@ func (b *gfxBackend) BeginPass(desc gfx.PassDesc) gfx.RenderPass {
 	}
 	var colour *wgpu.TextureView
 	var width, height int
-	if !desc.NoColor {
-		colour, width, height = b.passColour(desc)
+	if desc.Target.Kind != gfx.TargetNone {
+		colour, width, height = b.passColour(desc.Target)
 	}
-	depth := b.passDepth(desc, width, height)
+	depth := b.passDepth(desc.Depth, width, height)
 	if !passBegins(desc, colour != nil, depth != nil) {
 		return nil
 	}
@@ -196,8 +193,8 @@ func (b *gfxBackend) EndPass(pass gfx.RenderPass) {
 }
 
 // passColour resolves a pass's colour attachment and the size it renders at.
-func (b *gfxBackend) passColour(desc gfx.PassDesc) (*wgpu.TextureView, int, int) {
-	if desc.Screen {
+func (b *gfxBackend) passColour(target gfx.TargetDescr) (*wgpu.TextureView, int, int) {
+	if target.Kind == gfx.TargetScreen {
 		// A screen pass renders into the frame buffer, never into the surface:
 		// only the present pass touches that. This is also where the buffer is
 		// allocated, so first use is what pays for it.
@@ -207,7 +204,7 @@ func (b *gfxBackend) passColour(desc gfx.PassDesc) (*wgpu.TextureView, int, int)
 		}
 		return frame.view, b.frameW, b.frameH
 	}
-	if view, ok := b.viewID[desc.Target]; ok {
+	if view := b.textureView(target.Texture, target.Mip, target.Layer); view != nil {
 		return view.view, view.width, view.height
 	}
 	return nil, 0, 0
@@ -215,12 +212,14 @@ func (b *gfxBackend) passColour(desc gfx.PassDesc) (*wgpu.TextureView, int, int)
 
 // passDepth resolves a pass's depth attachment, allocating the shared DepthAuto
 // texture for the target's size when it does not exist yet.
-func (b *gfxBackend) passDepth(desc gfx.PassDesc, width, height int) *wgpu.TextureView {
-	if desc.DepthAuto {
+func (b *gfxBackend) passDepth(depth gfx.DepthDescr, width, height int) *wgpu.TextureView {
+	switch depth.Kind {
+	case gfx.DepthKindAuto:
 		return b.autoDepth(width, height)
-	}
-	if view, ok := b.viewID[desc.Depth]; ok {
-		return view.view
+	case gfx.DepthKindTexture:
+		if view := b.textureView(depth.Texture, 0, 0); view != nil {
+			return view.view
+		}
 	}
 	return nil
 }

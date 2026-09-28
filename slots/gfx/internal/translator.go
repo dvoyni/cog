@@ -118,6 +118,10 @@ type translator struct {
 	// actually in, so this is tracked rather than assumed; a texture absent
 	// from the map has never been an attachment and needs no barrier.
 	textureUsage map[types.TextureID]types.TextureUsage
+	// allocated is the format of every texture this frame allocates. The
+	// backend cannot answer for one until Execute replays the allocation, so a
+	// pass rendering into it the same frame keys its pipelines from here.
+	allocated map[types.TextureID]types.TextureFormat
 	// runSampled is the scratch set of textures one merged run samples, reused
 	// across runs so a frame allocates nothing per pass.
 	runSampled []types.TextureID
@@ -173,6 +177,7 @@ func newTranslator() *translator {
 		samplers:          map[types.SamplerDesc]types.SamplerID{},
 		textures:          assets.New[types.TextureDescrParams, textureUserData, texture](textureLoader{}),
 		textureUsage:      map[types.TextureID]types.TextureUsage{},
+		allocated:         map[types.TextureID]types.TextureFormat{},
 		badIndexLengths:   map[indexLengthKey]struct{}{},
 		unsuppliedBuffers: map[unsuppliedBufferKey]struct{}{},
 
@@ -193,6 +198,7 @@ func (t *translator) translate(
 	capture types.CaptureDesc, capturing bool,
 ) (*Queue, error) {
 	t.ops.Reset()
+	clear(t.allocated)
 	// Every uniform a set or a version supplied is uploaded once a frame, and
 	// the stamp is what says which frame a cached upload belongs to.
 	t.stamp++
@@ -229,6 +235,7 @@ func (t *translator) translate(
 			case OpFreeCachedResources:
 				t.freeCachedResources(f)
 			case OpAllocateTexture:
+				t.allocated[op.TextureID] = op.Format
 				t.ops.AllocateTexture(op.TextureID, TextureDesc{
 					Width: op.TexW, Height: op.TexH, Layers: op.TexLayers, Format: op.Format,
 					Mipmaps: op.Mipmaps, Renderable: op.Renderable,
@@ -284,19 +291,19 @@ func (t *translator) translatePasses(
 		last := i
 		for j := i + 1; j < len(t.passOrder); j++ {
 			next := passes[t.passOrder[j]].Desc
-			if !types.MergesInto(next, tail) {
+			if !next.MergesInto(tail) {
 				break
 			}
 			tail, last = next, j
 			draws += len(passes[t.passOrder[j]].Draws)
 		}
-		if !head.HasEffect(draws) {
+		if !head.IsObservable(draws) {
 			i = last + 1
 			continue
 		}
 		presents = presents || head.Target.Kind == types.TargetScreen
 		t.transitionRun(f, head, i, last)
-		t.ops.BeginPass(t.gpuPassDesc(f.backend, head, tail))
+		t.ops.BeginPass(runPassDescr(head, tail))
 		for j := i; j <= last; j++ {
 			pass := &passes[t.passOrder[j]]
 			for k := range pass.Draws {
@@ -395,34 +402,14 @@ func (t *translator) transitionTo(texture types.TextureID, to types.TextureUsage
 	t.textureUsage[texture] = to
 }
 
-// gpuPassDesc resolves a merged run's attachments: it loads like the pass that
-// opened the run and stores like the one that closed it.
-func (t *translator) gpuPassDesc(backend Backend, head, tail types.PassDescr) types.PassDesc {
-	desc := types.PassDesc{
-		Load: head.Load, Clear: head.Clear, Store: tail.Store,
-		DepthLoad: head.DepthLoad, DepthClear: head.DepthClear, DepthStore: tail.DepthStore,
-		Label: head.Label,
-	}
-	switch head.Target.Kind {
-	case types.TargetScreen:
-		desc.Screen = true
-	case types.TargetNone:
-		desc.NoColor = true
-	case types.TargetTexture:
-		// This can resolve to zero: a temporary target is allocated by the same
-		// frame's bakes, which the backend replays after these descriptors were
-		// built, so a target used for the first time has no view yet. NoColor
-		// stays false, which is what keeps that case distinguishable from a
-		// pass that declares no colour attachment at all.
-		desc.Target = backend.TextureView(head.Target.Texture, head.Target.Mip, head.Target.Layer)
-	}
-	switch head.Depth.Kind {
-	case types.DepthKindAuto:
-		desc.DepthAuto = true
-	case types.DepthKindTexture:
-		desc.Depth = backend.TextureView(head.Depth.Texture, 0, 0)
-	}
-	return desc
+// runPassDescr is the pass a merged run encodes as: it loads like the pass that
+// opened the run and stores like the one that closed it. Its attachments are
+// the head's - every pass in a run shares them - and the backend resolves them
+// when it opens the pass, after the frame's bakes have allocated any target
+// used for the first time.
+func runPassDescr(head, tail types.PassDescr) types.PassDescr {
+	head.Store, head.DepthStore = tail.Store, tail.DepthStore
+	return head
 }
 
 // planPasses puts the frame's passes in run order: Order first, declaration

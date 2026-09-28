@@ -132,13 +132,12 @@ func TestAScreenPassAndATargetInTheFrameBufferFormatShareOnePipeline(t *testing.
 	}
 }
 
-func TestATargetsFirstFrameKeysTheFrameBufferAndItsNextFrameKeysItsOwn(t *testing.T) {
+func TestATargetsFirstFrameKeysItsOwnFormat(t *testing.T) {
 	// A texture is unknown to the backend until the bake that allocates it has
-	// been replayed, so the frame that allocates a target cannot key its real
-	// format. It falls back to what every pipeline was keyed to before, and
-	// loses nothing by it: the same condition leaves TextureView with no view
-	// to return, so that pass is skipped and the pipeline keyed here never
-	// renders.
+	// been replayed, but the allocation passed through the translator the same
+	// frame, so that frame already keys the target's real format. Keying the
+	// frame buffer's instead would build a pipeline that does not match the
+	// attachment the pass opens.
 	p := newPlugin()
 	k := newTestKernel(t, p)
 	backend := &fakeBackend{}
@@ -153,18 +152,16 @@ func TestATargetsFirstFrameKeysTheFrameBufferAndItsNextFrameKeysItsOwn(t *testin
 	if len(backend.lastPipelines) != 1 {
 		t.Fatalf("pipelines after the allocating frame = %d, want one", len(backend.lastPipelines))
 	}
-	if got := backend.lastPipelines[0].ColorFormat; got != types.FrameBufferFormat {
-		t.Errorf("colour format = %v, want the frame buffer's: the target is not baked yet", got.String())
+	if got := backend.lastPipelines[0].ColorFormat; got != types.FormatRGBA8 {
+		t.Errorf("colour format = %v, want %v on the allocating frame", got.String(), types.FormatRGBA8.String())
 	}
 
 	renderInto(t, k, types.TargetDescrTexture(target, 0, 0), "second")
 
-	if len(backend.lastPipelines) != 2 {
-		t.Fatalf("pipelines after the drawing frame = %d, want a second for the real format",
-			len(backend.lastPipelines))
-	}
-	if got := backend.lastPipelines[1].ColorFormat; got != types.FormatRGBA8 {
-		t.Errorf("colour format = %v, want %v once the target is baked", got.String(), types.FormatRGBA8.String())
+	for i, pipeline := range backend.lastPipelines {
+		if pipeline.ColorFormat != types.FormatRGBA8 {
+			t.Errorf("pipeline %d colour format = %v, want %v", i, pipeline.ColorFormat.String(), types.FormatRGBA8.String())
+		}
 	}
 }
 

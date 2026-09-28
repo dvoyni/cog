@@ -18,15 +18,19 @@ type (
 	// TextureViewID references a renderable view (a render target). The screen
 	// framebuffer and offscreen render targets are both TextureViewIDs.
 	TextureViewID ResourceID
-)
 
-// DrawStateId names one durable set of draw params: a shader, a fixed
-// DrawState and a value for some or all of the shader's bindings, created by
-// ResourceQueue.NewDrawParams. Its identity is the set's: two draws naming one
-// DrawStateId share shader, state and values, so the id alone is the complete
-// batch key a recorder needs.
-//
-// It is minted by the ResourceQueue rather than a Backend, and like the handles
-// above it is comparable and pointer-free, so a Component may hold one. The
-// zero value names no set.
-type DrawStateId uint32
+	// DrawStateID names one durable set of draw params: a shader, a fixed
+	// DrawState and a value for some or all of the shader's bindings, created by
+	// ResourceQueue.NewDrawParams. Its identity is the set's: two draws naming one
+	// DrawStateID share shader, state and values, so the id alone is the complete
+	// batch key a recorder needs.
+	//
+	// It is minted by the ResourceQueue rather than a Backend, and like the handles
+	// above it is comparable and pointer-free, so a Component may hold one. The
+	// zero value names no set.
+	DrawStateID uint32
+
+	// PassID names a pass OpQueue.NewPass declared this frame, for Draw to record
+	// into. Its zero value names no pass.
+	PassID int
+)

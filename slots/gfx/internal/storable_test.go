@@ -18,7 +18,7 @@ func TestDescriptorsAreStorable(t *testing.T) {
 		reflect.TypeFor[types.ShaderParameterDescr](),
 		reflect.TypeFor[types.TextureDescr](),
 		reflect.TypeFor[types.BufferDescr](),
-		reflect.TypeFor[types.DrawStateId](),
+		reflect.TypeFor[types.DrawStateID](),
 	} {
 		if err := ecs.Storable(tp); err != nil {
 			t.Errorf("ecs.Storable(%s) = %v, want nil", tp, err)

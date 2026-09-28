@@ -33,7 +33,7 @@ type DrawOp struct {
 	// Set is the draw params the draw names. Version is where the set's version
 	// for this draw starts in the queue's version slots, plus one, and zero
 	// draws the set's own values.
-	Set     types.DrawStateId
+	Set     types.DrawStateID
 	Version int32
 }
 
@@ -102,7 +102,7 @@ type OpQueue struct {
 	// resources is the frame's temporary bakes, allocations and uploads, which
 	// the translator replays ahead of every draw.
 	resources []ResourceOp
-	// passes is the frame's declared passes; a PassRef is an index into it,
+	// passes is the frame's declared passes; a PassId is an index into it,
 	// plus one. Records past its length keep their draw lists' backing for the
 	// passes later frames declare.
 	passes []passRecord
@@ -198,21 +198,21 @@ func (q *OpQueue) reset() {
 // a pass's draws run in the order they were recorded, so draws into several
 // passes may be recorded interleaved. The reference is valid until the frame
 // ends; hand it to another System to let it draw into the same pass.
-func (q *OpQueue) NewPass(desc types.PassDescr) types.PassRef {
+func (q *OpQueue) NewPass(desc types.PassDescr) types.PassID {
 	if n := len(q.passes); n < cap(q.passes) {
 		q.passes = q.passes[:n+1]
 		q.passes[n].Desc = desc
 	} else {
 		q.passes = append(q.passes, passRecord{Desc: desc})
 	}
-	return types.PassRef(len(q.passes))
+	return types.PassID(len(q.passes))
 }
 
 // passIndex returns the index of the pass ref names, or -1 when it names none
 // declared this frame. Every draw names a pass: there is no implicit one,
 // because a default screen pass would silently absorb draws that belonged in a
 // camera's target, and it would have to guess an Order.
-func (q *OpQueue) passIndex(ref types.PassRef) int {
+func (q *OpQueue) passIndex(ref types.PassID) int {
 	if ref < 1 || int(ref) > len(q.passes) {
 		return -1
 	}

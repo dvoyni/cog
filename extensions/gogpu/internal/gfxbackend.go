@@ -85,7 +85,6 @@ type gfxBackend struct {
 	// renderable views by texture, mip and layer.
 	depths map[gfxbDepthKey]*gfxbTexture
 	views  map[gfxbViewKey]*gfxbView
-	viewID map[gfx.TextureViewID]*gfxbView
 
 	// screen is the current frame's surface render target, refreshed by setScreen
 	// before each render and exposed to the plugin as screenID.
@@ -291,7 +290,6 @@ func newGfxBackend() *gfxBackend {
 		textureGenerations: map[gfx.TextureID]uint32{},
 		depths:             map[gfxbDepthKey]*gfxbTexture{},
 		views:              map[gfxbViewKey]*gfxbView{},
-		viewID:             map[gfx.TextureViewID]*gfxbView{},
 	}
 }
 

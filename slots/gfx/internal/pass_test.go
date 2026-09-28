@@ -13,7 +13,7 @@ import (
 
 // passFrame records one frame through the plugin and reports the passes the
 // backend was asked to encode.
-func passFrame(t *testing.T, record func(*OpQueue, types.DrawStateId)) (*fakeBackend, kernel.Executioner) {
+func passFrame(t *testing.T, record func(*OpQueue, types.DrawStateID)) (*fakeBackend, kernel.Executioner) {
 	t.Helper()
 	p := newPlugin()
 	k := newTestKernel(t, p)
@@ -26,12 +26,12 @@ func passFrame(t *testing.T, record func(*OpQueue, types.DrawStateId)) (*fakeBac
 	return backend, k
 }
 
-func drawInto(q *OpQueue, ref types.PassRef, set types.DrawStateId) {
+func drawInto(q *OpQueue, ref types.PassID, set types.DrawStateID) {
 	q.Draw(ref, triangle(), set, 1, 0)
 }
 
 func TestAPassCarriesItsTargetAndClearToTheBackend(t *testing.T) {
-	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateId) {
+	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateID) {
 		ref := q.NewPass(types.PassDescr{
 			Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto(),
 			Load: types.LoadClear, Clear: m.Color{R: 1, A: 1}, Label: "screen",
@@ -42,7 +42,7 @@ func TestAPassCarriesItsTargetAndClearToTheBackend(t *testing.T) {
 		t.Fatalf("passes = %d, want 1", len(backend.lastPasses))
 	}
 	pass := backend.lastPasses[0]
-	if !pass.Screen || !pass.DepthAuto {
+	if pass.Target.Kind != types.TargetScreen || pass.Depth.Kind != types.DepthKindAuto {
 		t.Errorf("pass = %+v, want the screen target with automatic depth", pass)
 	}
 	if pass.Load != types.LoadClear || pass.Clear != (m.Color{R: 1, A: 1}) {
@@ -79,7 +79,7 @@ func TestDrawsOutsideAnyPassAreDroppedAndReported(t *testing.T) {
 }
 
 func TestPassesRunInDeclaredOrderNotStreamOrder(t *testing.T) {
-	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateId) {
+	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateID) {
 		late := q.NewPass(types.PassDescr{Order: 10, Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto(), Load: types.LoadClear, Label: "late"})
 		drawInto(q, late, set)
 		early := q.NewPass(types.PassDescr{Order: -10, Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto(), Load: types.LoadClear, Label: "early"})
@@ -99,7 +99,7 @@ func TestPassesRunInDeclaredOrderNotStreamOrder(t *testing.T) {
 }
 
 func TestEqualOrderKeepsDeclarationSequence(t *testing.T) {
-	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateId) {
+	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateID) {
 		ref := q.NewPass(types.PassDescr{Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto(), Load: types.LoadClear, Label: "first"})
 		drawInto(q, ref, set)
 		ref = q.NewPass(types.PassDescr{Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto(), Load: types.LoadClear, Label: "second"})
@@ -111,7 +111,7 @@ func TestEqualOrderKeepsDeclarationSequence(t *testing.T) {
 }
 
 func TestAdjacentPassesMergeWhenTheSuccessorOnlyContinues(t *testing.T) {
-	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateId) {
+	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateID) {
 		ref := q.NewPass(types.PassDescr{Order: 0, Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto(), Load: types.LoadClear, Label: "layer0"})
 		drawInto(q, ref, set)
 		// Same attachments, preserving both, after a pass that kept both: by
@@ -131,7 +131,7 @@ func TestAdjacentPassesMergeWhenTheSuccessorOnlyContinues(t *testing.T) {
 }
 
 func TestAPassThatClearsAgainDoesNotMerge(t *testing.T) {
-	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateId) {
+	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateID) {
 		ref := q.NewPass(types.PassDescr{Order: 0, Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto(), Load: types.LoadClear, Label: "first"})
 		drawInto(q, ref, set)
 		ref = q.NewPass(types.PassDescr{Order: 1, Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto(), DepthLoad: types.LoadClear, Label: "second"})
@@ -143,7 +143,7 @@ func TestAPassThatClearsAgainDoesNotMerge(t *testing.T) {
 }
 
 func TestPassWithoutDrawsRunsOnlyWhenAnAttachmentLoads(t *testing.T) {
-	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateId) {
+	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateID) {
 		// A camera that culled everything, but still clears its target.
 		q.NewPass(types.PassDescr{Order: 0, Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto(), Load: types.LoadClear, Label: "clearing"})
 		// Nothing to draw and nothing to load: unobservable, so it is not encoded.
@@ -155,7 +155,7 @@ func TestPassWithoutDrawsRunsOnlyWhenAnAttachmentLoads(t *testing.T) {
 }
 
 func TestScreenPassesAreFollowedByOnePresentPass(t *testing.T) {
-	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateId) {
+	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateID) {
 		ref := q.NewPass(types.PassDescr{Order: 0, Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto(), Load: types.LoadClear, Label: "first"})
 		drawInto(q, ref, set)
 		ref = q.NewPass(types.PassDescr{Order: 1, Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto(), DepthLoad: types.LoadClear, Label: "second"})
@@ -197,7 +197,7 @@ func TestAFrameThatNeverTouchesTheScreenDoesNotPresent(t *testing.T) {
 }
 
 func TestAScreenPassThatIsDroppedDoesNotPresent(t *testing.T) {
-	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateId) {
+	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateID) {
 		// Nothing to draw and nothing to load: the pass is not encoded, so the
 		// frame buffer is never allocated and there is nothing to present.
 		q.NewPass(types.PassDescr{Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto(), Label: "empty"})
@@ -292,7 +292,7 @@ func TestALaterPassSamplesWhatAnEarlierPassRenderedIntoATemporaryTarget(t *testi
 	// fire here: the sampling draw is in a different pass.
 	backend := &fakeBackend{}
 	var sampled types.TextureID
-	frame := func(q *OpQueue, set, sampler types.DrawStateId) {
+	frame := func(q *OpQueue, set, sampler types.DrawStateID) {
 		target, texture := q.NewTemporaryTarget(64, 64, types.FormatRGBA8Srgb)
 		sampled = texture.Params.ID
 		ref := q.NewPass(types.PassDescr{Target: target, Depth: types.DepthDescrNone(), Load: types.LoadClear, Order: 0, Label: "offscreen"})

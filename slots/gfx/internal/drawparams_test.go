@@ -60,8 +60,8 @@ func newSetWorld(t *testing.T) *setWorld {
 func (w *setWorld) resources(use func(kernel.Kernel, *ResourceQueue)) { withShaders(w.k, use) }
 
 // newSet creates a set on the world's shader that fills its storage binding.
-func (w *setWorld) newSet(state types.DrawState, params ...types.ShaderParameterDescr) types.DrawStateId {
-	var set types.DrawStateId
+func (w *setWorld) newSet(state types.DrawState, params ...types.ShaderParameterDescr) types.DrawStateID {
+	var set types.DrawStateID
 	w.resources(func(k kernel.Kernel, q *ResourceQueue) {
 		params = append([]types.ShaderParameterDescr{types.ShaderParameterBuffer("instances", w.records)}, params...)
 		set = q.NewDrawParams(k, w.shader, state, params...)
@@ -76,7 +76,7 @@ func (w *setWorld) frame(record func(kernel.Kernel, *OpQueue)) {
 	w.k.PublishEvent(app.RenderEvent{}).Wait()
 }
 
-func screenPass(q *OpQueue, order int, label string) types.PassRef {
+func screenPass(q *OpQueue, order int, label string) types.PassID {
 	return q.NewPass(types.PassDescr{
 		Order: types.Order(order), Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto(), Label: label,
 	})
@@ -315,7 +315,7 @@ func TestUnsuppliedBindingsTakeTheirDefaults(t *testing.T) {
 // unsupplied is dropped every frame and reported once.
 func TestAnUnsuppliedStorageBufferDropsTheDrawAndIsReportedOnce(t *testing.T) {
 	w := newSetWorld(t)
-	var set types.DrawStateId
+	var set types.DrawStateID
 	w.resources(func(k kernel.Kernel, q *ResourceQueue) { set = q.NewDrawParams(k, w.shader, types.DrawState{}) })
 
 	for range 2 {
@@ -334,7 +334,7 @@ func TestAnUnsuppliedStorageBufferDropsTheDrawAndIsReportedOnce(t *testing.T) {
 // storage binding for that frame's draws.
 func TestAVersionBindsATemporary(t *testing.T) {
 	w := newSetWorld(t)
-	var set types.DrawStateId
+	var set types.DrawStateID
 	w.resources(func(k kernel.Kernel, q *ResourceQueue) { set = q.NewDrawParams(k, w.shader, types.DrawState{}) })
 	var arena types.BufferDescr
 
@@ -371,7 +371,7 @@ func TestSetsShareAPipelineOnlyUnderOneState(t *testing.T) {
 
 	w.frame(func(_ kernel.Kernel, q *OpQueue) {
 		pass := screenPass(q, 0, "main")
-		for _, set := range []types.DrawStateId{first, second, overlay} {
+		for _, set := range []types.DrawStateID{first, second, overlay} {
 			q.Draw(pass, triangle(), set, 1, 0)
 		}
 	})
@@ -554,7 +554,7 @@ func TestACallNamingASetThatIsNotLiveIsReported(t *testing.T) {
 	w := newSetWorld(t)
 	released := w.newSet(types.DrawState{})
 	w.resources(func(k kernel.Kernel, q *ResourceQueue) { q.ReleaseDrawParams(k, released) })
-	unknown := types.DrawStateId(9999)
+	unknown := types.DrawStateID(9999)
 
 	for range 2 {
 		w.resources(func(k kernel.Kernel, q *ResourceQueue) {
@@ -588,7 +588,7 @@ func TestACallNamingASetThatIsNotLiveIsReported(t *testing.T) {
 // reported, and the set exists, takes nothing, says nothing and draws nothing.
 func TestASetOnAShaderWithNoProgramIsCreatedFailed(t *testing.T) {
 	w := newSetWorld(t)
-	var set types.DrawStateId
+	var set types.DrawStateID
 	var reserved types.ShaderID
 	w.resources(func(k kernel.Kernel, q *ResourceQueue) {
 		reserved = q.NewShader()
@@ -631,7 +631,7 @@ type setBench struct {
 	resources  *ResourceQueue
 	queue      *OpQueue
 	translator *translator
-	set        types.DrawStateId
+	set        types.DrawStateID
 	mesh       types.MeshDescr
 }
 
@@ -796,7 +796,7 @@ func TestSetDrawParamsCopiesABorrowedRecord(t *testing.T) {
 	}}
 	backend.reflection = &layout
 	program := compileShader(k, nil, shader.ShaderWithText(programSource)).Program
-	var set types.DrawStateId
+	var set types.DrawStateID
 	withShaders(k, func(k kernel.Kernel, q *ResourceQueue) {
 		id := q.NewShader()
 		q.UploadProgram(k, id, program)

@@ -61,14 +61,14 @@ type drawParamsStore struct {
 // binding, of the wrong kind or the wrong size, or a temporary - are reported
 // through k, once each, and the param is ignored. A set whose shader had no
 // program still exists and draws nothing.
-func (q *ResourceQueue) NewDrawParams(k kernel.Kernel, shaderID types.ShaderID, state types.DrawState, params ...types.ShaderParameterDescr) types.DrawStateId {
+func (q *ResourceQueue) NewDrawParams(k kernel.Kernel, shaderID types.ShaderID, state types.DrawState, params ...types.ShaderParameterDescr) types.DrawStateID {
 	store := &q.drawParams
 	if len(store.records) == 0 {
 		// Id zero is the zero handle, which names no set.
 		store.records = append(store.records, setRecord{})
 	}
 	id := uint32(len(store.records))
-	set := types.DrawStateId(id)
+	set := types.DrawStateID(id)
 	program, ok := q.shaderProgram(shaderID)
 	if !ok {
 		q.reportNoProgram(k, id, shaderID)
@@ -109,7 +109,7 @@ func (q *ResourceQueue) NewDrawParams(k kernel.Kernel, shaderID types.ShaderID, 
 // re-rendered frame; a value that must match its frame belongs in the frame's
 // version, through OpQueue.SetDrawParams. A set that is not live is reported
 // through k once and the call ignored.
-func (q *ResourceQueue) UpdateDrawParams(k kernel.Kernel, set types.DrawStateId, params ...types.ShaderParameterDescr) {
+func (q *ResourceQueue) UpdateDrawParams(k kernel.Kernel, set types.DrawStateID, params ...types.ShaderParameterDescr) {
 	id := uint32(set)
 	if q.namedSet(k, id, "UpdateDrawParams") != setLive {
 		return
@@ -120,7 +120,7 @@ func (q *ResourceQueue) UpdateDrawParams(k kernel.Kernel, set types.DrawStateId,
 // ReleaseDrawParams releases a set and every resource it baked from inline
 // bytes. A frame still naming it - one rendered again after the release - drops
 // its draws. A set that is not live is reported through k once and ignored.
-func (q *ResourceQueue) ReleaseDrawParams(k kernel.Kernel, set types.DrawStateId) {
+func (q *ResourceQueue) ReleaseDrawParams(k kernel.Kernel, set types.DrawStateID) {
 	id := uint32(set)
 	// A failed set is released like a live one; its runs are empty.
 	if state := q.namedSet(k, id, "ReleaseDrawParams"); state != setLive && state != setFailed {

@@ -12,7 +12,7 @@ import (
 // backend was asked to place, interleaved with the passes, so a test can assert
 // both that a transition happened and that it happened before the pass that
 // needs it.
-func transitionFrame(t *testing.T, record func(q *OpQueue, set, sampler types.DrawStateId)) *fakeBackend {
+func transitionFrame(t *testing.T, record func(q *OpQueue, set, sampler types.DrawStateID)) *fakeBackend {
 	t.Helper()
 	p := newPlugin()
 	k := newTestKernel(t, p)
@@ -32,7 +32,7 @@ func TestSamplingWhatAnEarlierPassRenderedGetsABarrier(t *testing.T) {
 	// Vulkan the sample reads the image mid-write. The translator knows the
 	// write-then-read pairs, so it is the one that places the transition.
 	var sampled types.TextureID
-	backend := transitionFrame(t, func(q *OpQueue, set, sampler types.DrawStateId) {
+	backend := transitionFrame(t, func(q *OpQueue, set, sampler types.DrawStateID) {
 		target, texture := q.NewTemporaryTarget(64, 64, types.FormatRGBA8Srgb)
 		sampled = texture.Params.ID
 		ref := q.NewPass(types.PassDescr{Target: target, Depth: types.DepthDescrNone(), Load: types.LoadClear, Order: 0, Label: "offscreen"})
@@ -56,7 +56,7 @@ func TestAPassThatSamplesNothingItRenderedGetsNoBarrier(t *testing.T) {
 	// write-then-read pairs. A frame that renders into a texture and never reads
 	// it back has nothing to order, and paying for an image transition there
 	// would be a cost with no hazard behind it.
-	backend := transitionFrame(t, func(q *OpQueue, set, sampler types.DrawStateId) {
+	backend := transitionFrame(t, func(q *OpQueue, set, sampler types.DrawStateID) {
 		target, _ := q.NewTemporaryTarget(64, 64, types.FormatRGBA8Srgb)
 		ref := q.NewPass(types.PassDescr{Target: target, Depth: types.DepthDescrNone(), Load: types.LoadClear, Order: 0, Label: "offscreen"})
 		drawInto(q, ref, set)
@@ -75,7 +75,7 @@ func TestRenderingIntoATextureAnEarlierPassSampledGetsTheReverseBarrier(t *testi
 	// and the declared old usage has to be the one the texture is actually in or
 	// the layout transition is a lie.
 	var pong types.TextureID
-	backend := transitionFrame(t, func(q *OpQueue, set, sampler types.DrawStateId) {
+	backend := transitionFrame(t, func(q *OpQueue, set, sampler types.DrawStateID) {
 		targetA, textureA := q.NewTemporaryTarget(64, 64, types.FormatRGBA8Srgb)
 		targetB, textureB := q.NewTemporaryTarget(32, 32, types.FormatRGBA8Srgb)
 		pong = textureB.Params.ID
@@ -103,7 +103,7 @@ func TestATextureIsTransitionedOncePerPassThatNeedsIt(t *testing.T) {
 	// Two draws in one pass sampling the same render target is one hazard, not
 	// two, and a duplicate barrier is a real pipeline stall rather than a
 	// bookkeeping wart.
-	backend := transitionFrame(t, func(q *OpQueue, set, sampler types.DrawStateId) {
+	backend := transitionFrame(t, func(q *OpQueue, set, sampler types.DrawStateID) {
 		target, texture := q.NewTemporaryTarget(64, 64, types.FormatRGBA8Srgb)
 		ref := q.NewPass(types.PassDescr{Target: target, Depth: types.DepthDescrNone(), Load: types.LoadClear, Order: 0, Label: "offscreen"})
 		drawInto(q, ref, set)
@@ -149,7 +149,7 @@ func TestATextureStaysTransitionedAcrossConsecutivePassesThatSampleIt(t *testing
 	// again. A second barrier saying TextureBinding -> TextureBinding orders
 	// nothing and costs a real pipeline stall, so the usage the frame left the
 	// texture in is tracked rather than re-asserted per pass.
-	backend := transitionFrame(t, func(q *OpQueue, set, sampler types.DrawStateId) {
+	backend := transitionFrame(t, func(q *OpQueue, set, sampler types.DrawStateID) {
 		source, texture := q.NewTemporaryTarget(64, 64, types.FormatRGBA8Srgb)
 		other, _ := q.NewTemporaryTarget(32, 32, types.FormatRGBA8Srgb)
 		ref := q.NewPass(types.PassDescr{Target: source, Depth: types.DepthDescrNone(), Load: types.LoadClear, Order: 0, Label: "offscreen"})
@@ -168,7 +168,7 @@ func TestATextureStaysTransitionedAcrossConsecutivePassesThatSampleIt(t *testing
 func TestNoPassIsHandedAnEmptyBarrierList(t *testing.T) {
 	// The sink contract says TransitionTextures is never called with nothing to
 	// do, so a backend can treat the call itself as the signal.
-	backend := transitionFrame(t, func(q *OpQueue, set, sampler types.DrawStateId) {
+	backend := transitionFrame(t, func(q *OpQueue, set, sampler types.DrawStateID) {
 		ref := q.NewPass(types.PassDescr{Target: types.TargetDescrScreen(), Depth: types.DepthDescrNone(), Load: types.LoadClear, Label: "screen"})
 		drawInto(q, ref, set)
 	})

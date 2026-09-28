@@ -118,7 +118,7 @@ func (d *setDrawer) addReversed(params []gfx.ShaderParameterDescr) {
 
 // draw fills the uniform block, versions the set with everything added since
 // begin, and records the draw.
-func (d *setDrawer) draw(gfxWrite *gfx.OpQueue, pass gfx.PassRef, mesh gfx.MeshDescr, instances int, viewport m.Vec2, layer m.Mat4, clip m.Rect, hasClip bool) {
+func (d *setDrawer) draw(gfxWrite *gfx.OpQueue, pass gfx.PassId, mesh gfx.MeshDescr, instances int, viewport m.Vec2, layer m.Mat4, clip m.Rect, hasClip bool) {
 	clipEnabled := float32(0)
 	if hasClip {
 		clipEnabled = 1

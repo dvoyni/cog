@@ -493,11 +493,11 @@ func (b *pairingBackend) ReflectShader([]byte) (gfx.ShaderLayout, error) {
 	return gfx.ShaderLayout{}, nil
 }
 func (b *pairingBackend) FreePipeline(gfx.PipelineID)                {}
-func (b *pairingBackend) Limits() gfx.Limits                         { return gfx.DefaultLimits() }
+func (b *pairingBackend) Limits() gfx.PipelineLimits                 { return gfx.DefaultLimits() }
 func (b *pairingBackend) TransitionTextures([]gfx.TextureTransition) {}
 func (b *pairingBackend) EndPass(gfx.RenderPass)                     {}
 func (b *pairingBackend) Present()                                   {}
-func (b *pairingBackend) BeginPass(gfx.PassDesc) gfx.RenderPass      { return nil }
+func (b *pairingBackend) BeginPass(gfx.PassDescr) gfx.RenderPass     { return nil }
 
 func (b *pairingBackend) NewPipeline(gfx.PipelineDesc) (gfx.PipelineID, error) {
 	return gfx.PipelineID(b.id()), nil
@@ -512,10 +512,6 @@ func (b *pairingBackend) ScreenFramebuffer() (gfx.TextureViewID, int, int) {
 // which is what every pipeline in this fixture was keyed to anyway.
 func (b *pairingBackend) TextureFormat(gfx.TextureID) (gfx.TextureFormat, bool) {
 	return 0, false
-}
-
-func (b *pairingBackend) TextureView(gfx.TextureID, int, int) gfx.TextureViewID {
-	return gfx.TextureViewID(b.id())
 }
 
 // Execute promotes what the previous frame staged and then replays this

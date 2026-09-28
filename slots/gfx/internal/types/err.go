@@ -26,7 +26,7 @@ func (e ErrVertexStrideAlignment) Error() string {
 type ErrDrawWithoutPass struct{ Count int }
 
 func (e ErrDrawWithoutPass) Error() string {
-	return fmt.Sprintf("gfx: %d draws naming no pass declared this frame were dropped; declare one with OpQueue.NewPass and draw into its PassRef", e.Count)
+	return fmt.Sprintf("gfx: %d draws naming no pass declared this frame were dropped; declare one with OpQueue.NewPass and draw into its PassId", e.Count)
 }
 
 // ErrDrawSamplesAttachment is reported when a draw samples a texture its own

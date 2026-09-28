@@ -53,7 +53,7 @@ type testBackend struct {
 	uniforms         []byte
 	draws            int
 	pipelines        []gfx.PipelineDesc
-	passes           []gfx.PassDesc
+	passes           []gfx.PassDescr
 	releasedTextures []gfx.TextureID
 	releasedBuffers  []gfx.BufferID
 	buffers          []bufferBake
@@ -239,7 +239,7 @@ func (b *testBackend) FreePipeline(gfx.PipelineID) {}
 func (b *testBackend) ScreenFramebuffer() (gfx.TextureViewID, int, int) {
 	return 1, 100, 100
 }
-func (b *testBackend) Limits() gfx.Limits { return gfx.DefaultLimits() }
+func (b *testBackend) Limits() gfx.PipelineLimits { return gfx.DefaultLimits() }
 
 // TextureFormat answers for no texture: this double keeps no descriptors, and
 // gfx falls back to the frame buffer's format for a target it cannot place -
@@ -248,16 +248,12 @@ func (b *testBackend) TextureFormat(gfx.TextureID) (gfx.TextureFormat, bool) {
 	return 0, false
 }
 
-func (b *testBackend) TextureView(texture gfx.TextureID, mip, layer int) gfx.TextureViewID {
-	b.nextID++
-	return gfx.TextureViewID(b.nextID)
-}
 func (b *testBackend) Execute(queue *gfx.Queue) {
 	queue.ReplayBakes(b)
 	queue.ReplayPasses(b)
 	queue.ReplayReleases(b)
 }
-func (b *testBackend) BeginPass(desc gfx.PassDesc) gfx.RenderPass {
+func (b *testBackend) BeginPass(desc gfx.PassDescr) gfx.RenderPass {
 	b.passes = append(b.passes, desc)
 	return b
 }

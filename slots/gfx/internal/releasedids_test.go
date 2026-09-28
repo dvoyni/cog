@@ -1,8 +1,9 @@
 package internal
 
 import (
-	"github.com/dvoyni/cog/libs/assets"
 	"testing"
+
+	"github.com/dvoyni/cog/libs/assets"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 
@@ -81,10 +82,10 @@ func TestARerenderedFrameDropsADrawWhoseMeshWasReleased(t *testing.T) {
 func TestARerenderedFrameDropsADrawWhoseSetWasReleased(t *testing.T) {
 	type world struct {
 		*setWorld
-		set              types.DrawStateId
+		set              types.DrawStateID
 		other, versioned types.BufferDescr
 		texture          types.TextureDescr
-		unrelated        types.DrawStateId
+		unrelated        types.DrawStateID
 	}
 	for _, c := range []struct {
 		name    string
@@ -147,7 +148,7 @@ func TestARerenderedFrameDropsADrawWhoseSetWasReleased(t *testing.T) {
 // re-rendered frame never binds a bake the backend no longer holds.
 func TestReleasingASetReleasesItsBakesAsItsDrawIsDropped(t *testing.T) {
 	w := newSetWorld(t)
-	var set types.DrawStateId
+	var set types.DrawStateID
 	w.resources(func(k kernel.Kernel, q *ResourceQueue) {
 		set = q.NewDrawParams(k, w.shader, types.DrawState{},
 			types.ShaderParameterBuffer("instances", types.BufferDescrWithBlob(assets.NewBlob(make([]byte, 64)), true)),

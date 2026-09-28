@@ -71,7 +71,7 @@ func (*discardSink) BakeBuffer(gfx.BufferID, gfx.BufferKind, int, []byte)       
 func (*discardSink) BakeTexture(gfx.TextureID, int, int, gfx.TextureFormat, []byte, bool) {}
 func (*discardSink) AllocateTexture(gfx.TextureID, gfx.TextureDesc)                       {}
 func (*discardSink) UpdateTexture(gfx.TextureID, int, gfx.Region, []byte)                 {}
-func (s *discardSink) BeginPass(gfx.PassDesc) gfx.RenderPass                              { return s }
+func (s *discardSink) BeginPass(gfx.PassDescr) gfx.RenderPass                             { return s }
 func (*discardSink) EndPass(gfx.RenderPass)                                               {}
 func (*discardSink) TransitionTextures([]gfx.TextureTransition)                           {}
 func (*discardSink) Present()                                                             {}

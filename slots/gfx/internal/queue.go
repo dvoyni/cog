@@ -80,7 +80,7 @@ type textureBake struct {
 // descriptor and no commands: everything about it is the backend's. capture
 // marks the frame's readback the same way, and carries the one target it reads.
 type pass struct {
-	desc       types.PassDesc
+	desc       types.PassDescr
 	present    bool
 	capture    bool
 	captured   types.CaptureDesc
@@ -94,7 +94,7 @@ type pass struct {
 // PassSink receives the frame's passes. BeginPass returns the RenderPass its
 // commands go to, so the backend owns encoder and pass lifetime entirely.
 type PassSink interface {
-	BeginPass(types.PassDesc) RenderPass
+	BeginPass(types.PassDescr) RenderPass
 	EndPass(RenderPass)
 	// TransitionTextures places the barriers a pass needs before it is encoded,
 	// and is called outside any render pass because that is the only place a
@@ -210,7 +210,7 @@ func (q *Queue) TransitionTexture(transition types.TextureTransition) {
 
 // BeginPass opens a pass; every render command until EndPass belongs to it, and
 // every transition recorded since the last pass is placed before it.
-func (q *Queue) BeginPass(desc types.PassDesc) {
+func (q *Queue) BeginPass(desc types.PassDescr) {
 	q.passes = append(q.passes, pass{
 		desc: desc, start: len(q.render), end: len(q.render),
 		transStart: q.transitionsUsed, transEnd: len(q.transitions),

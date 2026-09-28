@@ -93,7 +93,7 @@ const SmallBytes = types.ParameterDescriptorInlineBytesCount
 // set's: two draws naming one DrawStateId share shader, state and values, so
 // the id alone is the complete batch key a recorder needs. It is comparable and
 // pointer-free, so a Component may hold one. The zero value names no set.
-type DrawStateId = types.DrawStateId
+type DrawStateId = types.DrawStateID
 
 // VertexAttribute describes one attribute of the single interleaved vertex array: its
 // byte offset and element type. Attributes bind to shader @location values in the
@@ -142,9 +142,9 @@ const (
 // happens to its attachments at either end.
 type PassDescr = types.PassDescr
 
-// PassRef names a pass OpQueue.NewPass declared this frame, for Draw to record
+// PassId names a pass OpQueue.NewPass declared this frame, for Draw to record
 // into. Its zero value refers to no pass.
-type PassRef = types.PassRef
+type PassId = types.PassID
 
 // ResourceID underlies the opaque GPU handles below, which a Backend mints. The
 // zero value of each means "none".
@@ -406,14 +406,9 @@ const (
 	StoreDiscard = types.StoreDiscard
 )
 
-// PassDesc is one render pass for the backend to encode. Screen selects the
-// frame buffer, which only the backend can resolve because it is sized from the
-// surface; Target names any other colour attachment, and zero means none.
-type PassDesc = types.PassDesc
-
 // CaptureDesc names one colour target to read back. Screen selects the frame
 // buffer, which only the backend can resolve; Texture names any other colour
-// texture, and zero means none. It mirrors PassDesc's addressing exactly.
+// texture, and zero means none.
 //
 // A capture always reads mip 0, layer 0. Texture is a TextureID rather than a
 // TextureViewID because a texture-to-buffer copy names a texture, and because
@@ -523,8 +518,8 @@ type ShaderResource = shader.ShaderResource
 // supplied by the mesh via Stride and Attributes.
 type PipelineDesc = internal.PipelineDesc
 
-// Limits is the subset of the WebGPU limits gfx checks shaders against.
-type Limits = types.Limits
+// PipelineLimits is the subset of the WebGPU limits gfx checks shaders against.
+type PipelineLimits = types.PipelineLimits
 
 // Capture is one completed readback: either the mapped bytes or the reason
 // there are none. Pixels carries the GPU's own row padding, which BytesPerRow

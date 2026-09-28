@@ -15,8 +15,8 @@ type uniformSink struct {
 	blocks [][2]int
 }
 
-func (s *uniformSink) BakeUniforms(arena []byte)           { s.arena = arena }
-func (s *uniformSink) BeginPass(types.PassDesc) RenderPass { return s }
+func (s *uniformSink) BakeUniforms(arena []byte)            { s.arena = arena }
+func (s *uniformSink) BeginPass(types.PassDescr) RenderPass { return s }
 func (s *uniformSink) SetUniformBlock(_, _, offset, size int) {
 	s.blocks = append(s.blocks, [2]int{offset, size})
 }
@@ -26,7 +26,7 @@ func (s *uniformSink) SetUniformBlock(_, _, offset, size int) {
 // bytes at an offset a uniform binding accepts.
 func TestUniformBlocksOfAnySizeStartAligned(t *testing.T) {
 	var queue Queue
-	queue.BeginPass(types.PassDesc{Screen: true})
+	queue.BeginPass(types.PassDescr{Target: types.TargetDescrScreen(), Depth: types.DepthDescrNone()})
 	for _, size := range []int{80, 300, 16} {
 		block := queue.SetUniformBlock(0, 0, size)
 		if len(block) != size {

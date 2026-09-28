@@ -13,22 +13,16 @@ func TestOnlyAPassWithDepthAndNoColourIsDeclined(t *testing.T) {
 	// error anything can catch.
 	cases := []struct {
 		name string
-		desc gfx.PassDesc
+		desc gfx.PassDescr
 		want bool
 	}{
-		{"the screen", gfx.PassDesc{Screen: true, DepthAuto: true}, false},
-		{"a texture target with pooled depth", gfx.PassDesc{Target: 7, DepthAuto: true}, false},
-		{"a texture target with its own depth", gfx.PassDesc{Target: 7, Depth: 9}, false},
-		{"a colour pass with no depth", gfx.PassDesc{Target: 7}, false},
-		{"a depth-only pass", gfx.PassDesc{NoColor: true, Depth: 9}, true},
-		{"a depth-only pass on the pooled texture", gfx.PassDesc{NoColor: true, DepthAuto: true}, true},
-		{"no attachments at all", gfx.PassDesc{NoColor: true}, false},
-		// The case NoColor exists for: a temporary target on its first frame
-		// has no view yet, so its id is zero exactly as a colourless pass's is.
-		// It is a colour pass with nothing to render into, not a depth-only
-		// pass, and reporting it would fire on the first frame of every app
-		// that uses a render target.
-		{"a texture target whose view is not created yet", gfx.PassDesc{DepthAuto: true}, false},
+		{"the screen", pass(screen, auto), false},
+		{"a texture target with pooled depth", pass(texture, auto), false},
+		{"a texture target with its own depth", pass(texture, depthTexture), false},
+		{"a colour pass with no depth", pass(texture, noDepth), false},
+		{"a depth-only pass", pass(noColour, depthTexture), true},
+		{"a depth-only pass on the pooled texture", pass(noColour, auto), true},
+		{"no attachments at all", pass(noColour, noDepth), false},
 	}
 	for _, c := range cases {
 		if got := isDepthOnly(c.desc); got != c.want {
@@ -91,19 +85,19 @@ func TestADepthOnlyPassBeginsWithoutAColourAttachment(t *testing.T) {
 	// into; a pass that declared none needs only its depth.
 	cases := []struct {
 		name          string
-		desc          gfx.PassDesc
+		desc          gfx.PassDescr
 		colour, depth bool
 		want          bool
 	}{
-		{"a colour pass", gfx.PassDesc{Target: 7, DepthAuto: true}, true, true, true},
-		{"a colour pass with no depth", gfx.PassDesc{Target: 7}, true, false, true},
-		{"a depth-only pass", gfx.PassDesc{NoColor: true, Depth: 9}, false, true, true},
-		// A temporary depth texture has no view on its first frame either.
-		{"a depth-only pass whose depth view is not created yet", gfx.PassDesc{NoColor: true, Depth: 9}, false, false, false},
+		{"a colour pass", pass(texture, auto), true, true, true},
+		{"a colour pass with no depth", pass(texture, noDepth), true, false, true},
+		{"a depth-only pass", pass(noColour, depthTexture), false, true, true},
+		// A depth texture the backend does not hold resolves no view.
+		{"a depth-only pass whose depth view does not resolve", pass(noColour, depthTexture), false, false, false},
 		// Pooled depth takes its size from the colour target, and there is none.
-		{"a depth-only pass on the pooled texture", gfx.PassDesc{NoColor: true, DepthAuto: true}, false, false, false},
-		{"a colour target whose view is not created yet", gfx.PassDesc{DepthAuto: true}, false, true, false},
-		{"no attachments at all", gfx.PassDesc{NoColor: true}, false, false, false},
+		{"a depth-only pass on the pooled texture", pass(noColour, auto), false, false, false},
+		{"a colour target whose view does not resolve", pass(texture, auto), false, true, false},
+		{"no attachments at all", pass(noColour, noDepth), false, false, false},
 	}
 	for _, c := range cases {
 		if got := passBegins(c.desc, c.colour, c.depth); got != c.want {
@@ -119,4 +113,19 @@ func contains(haystack, needle string) bool {
 		}
 	}
 	return false
+}
+
+// The attachments the tables combine: which a pass declares is all isDepthOnly
+// and passBegins read.
+var (
+	screen       = gfx.TargetDescrScreen()
+	texture      = gfx.TargetDescr{Kind: gfx.TargetTexture, Texture: 7}
+	noColour     = gfx.TargetDescrNone()
+	auto         = gfx.DepthDescrAuto()
+	depthTexture = gfx.DepthDescr{Kind: gfx.DepthKindTexture, Texture: 9}
+	noDepth      = gfx.DepthDescrNone()
+)
+
+func pass(target gfx.TargetDescr, depth gfx.DepthDescr) gfx.PassDescr {
+	return gfx.PassDescr{Target: target, Depth: depth}
 }

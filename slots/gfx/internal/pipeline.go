@@ -49,9 +49,9 @@ type PipelineDesc struct {
 // the comparison target on purpose: a desktop adapter reports its hardware
 // limits, where 200 storage buffers is ordinary, so checking a shader against
 // the device it happens to run on passes builds that cannot run in a browser.
-func DefaultLimits() types.Limits { return defaultLimits }
+func DefaultLimits() types.PipelineLimits { return defaultLimits }
 
-var defaultLimits = types.Limits{
+var defaultLimits = types.PipelineLimits{
 	MaxBindGroups:                   4,
 	MaxStorageBuffersPerShaderStage: 8,
 	MaxStorageBufferBindingSize:     128 << 20,

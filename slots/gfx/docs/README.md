@@ -34,7 +34,7 @@ and [ADR 0003](../../../docs/adr/0003-roots-are-alias-indexes.md):
   identities `PresentOnUpdate` and `RenderOnRender` — and beside them the
   backend contract: `Backend` and `BackendPort` in `ports.go`, `Queue` and its
   sinks, `RenderPass`, `Capture`, the shader, pipeline, texture, sampler and
-  buffer descriptors, `Limits`, and every ID, format and enum in `types.go`.
+  buffer descriptors, `PipelineLimits`, and every ID, format and enum in `types.go`.
   Recorders (canvas, scene, ui and games) import it to draw, and an
   Adapter's backend (gogpu's `gfx*.go` files, cog-examples' headless `Backend`)
   imports it and nothing else of gfx.
@@ -172,7 +172,7 @@ rendered again after what it names was let go.
 A recorder declares a pass with `ref := q.NewPass(PassDescr{...})`, and every
 draw names the pass it belongs to: `q.Draw(ref, mesh, ...)`. Nothing is selected,
 so a recorder may interleave draws into several passes, and a System may draw
-into a pass another System declared by being handed its `PassRef`, which is
+into a pass another System declared by being handed its `PassId`, which is
 valid until the frame ends. There is no implicit default pass: a draw naming no
 pass declared this frame is dropped and reported as `ErrDrawWithoutPass`.
 
@@ -268,8 +268,7 @@ and forget a failure. `gfx.Capture.Image()` un-strides the padded rows into an
 `image.NRGBA` — straight-alpha, because `image.RGBA` is premultiplied and
 `FormatRGBA8` is not.
 
-`Target` is a `gfx.CaptureDesc{Screen bool, Texture TextureID}`, mirroring
-`gfx.PassDesc`'s addressing. A capture always reads mip 0, layer 0. Depth is
+`Target` is a `gfx.CaptureDesc{Screen bool, Texture TextureID}`. A capture always reads mip 0, layer 0. Depth is
 refused, and so is any format that is not 8-bit RGBA.
 
 **The moment a capture names.** The still binds to a tick that *began* after
@@ -726,14 +725,14 @@ one name, `gfx.X`, in code, docs and error messages alike.
 What it holds:
 
 - **The backend:** `Backend` and `BackendPort` (in `ports.go`), `Queue`,
-  `PassSink`, `BakeSink`, `ReleaseSink`, `RenderPass`, `PassDesc`,
+  `PassSink`, `BakeSink`, `ReleaseSink`, `RenderPass`,
   `CaptureDesc`, `Capture` (with `Image()`), `TextureUsage`
   (`TextureUsageRenderAttachment`, `TextureUsageTextureBinding`,
   `TextureUsageCopySrc`) and `TextureTransition`.
 - **Descriptors:** `ShaderDesc`, `ShaderLayout`, `ShaderVertexInput`,
   `StorageMember`, `ShaderResource`, `PipelineDesc`,
   `TextureDesc`, `SamplerDesc`, `Region`,
-  `Limits` and `DefaultLimits()`.
+  `PipelineLimits` and `DefaultLimits()`.
 - **IDs:** `ResourceID`, `TextureID`, `BufferID`, `SamplerID`, `ShaderID`,
   `PipelineID`, `TextureViewID`.
 - **Formats and enums:** `TextureFormat` with `FrameBufferFormat`,
@@ -797,9 +796,10 @@ the pass it renders into: a pipeline declares its target's format and
 per texture is where the format is read from rather than being copied into the
 pass. A texture is unknown until `Execute` replays the bake that allocates it,
 so the frame that allocates a target cannot answer for it and gfx keys that
-frame's pipelines to `FrameBufferFormat`. Nothing is lost: `TextureView`
-returns the zero view on the same condition, leaving the pass with no
-attachment to begin, so the pipeline keyed there never renders.
+frame's pipelines from the allocation it translated, so the pass renders on
+its first frame. `BeginPass`
+takes the recorder's own `PassDescr`, and the backend resolves its attachments
+as it opens the pass.
 
 `TakeCapture` is drained once per frame, immediately after `Execute`, and
 never blocks: what it has ready is the copy the *previous* frame encoded,

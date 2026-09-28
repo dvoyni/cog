@@ -238,7 +238,7 @@ func StateOverlay2D() DrawState {
 // the comparison target on purpose: a desktop adapter reports its hardware
 // limits, where 200 storage buffers is ordinary, so checking a shader against
 // the device it happens to run on passes builds that cannot run in a browser.
-func DefaultLimits() Limits {
+func DefaultLimits() PipelineLimits {
 	return internal.DefaultLimits()
 }
 

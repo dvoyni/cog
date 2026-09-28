@@ -42,7 +42,7 @@ type setCursor struct {
 // call can make are reported through k once each, keyed by the set and the
 // binding, and the param ignored. A set whose creation failed takes nothing and
 // says nothing.
-func (q *OpQueue) SetDrawParams(k kernel.Kernel, set types.DrawStateId, params ...types.ShaderParameterDescr) {
+func (q *OpQueue) SetDrawParams(k kernel.Kernel, set types.DrawStateID, params ...types.ShaderParameterDescr) {
 	id := uint32(set)
 	state, program := q.sets.state(id)
 	if state != setLive {
@@ -139,7 +139,7 @@ func (q *OpQueue) cursor(id uint32) *setCursor {
 // draw whose pass was not declared this frame is dropped and counted, and one
 // naming a set that is not live is dropped silently when the frame is
 // rendered - it is a frame rendered after what it names was let go.
-func (q *OpQueue) Draw(pass types.PassRef, mesh types.MeshDescr, set types.DrawStateId, instances, firstInstance int) {
+func (q *OpQueue) Draw(pass types.PassID, mesh types.MeshDescr, set types.DrawStateID, instances, firstInstance int) {
 	index := q.passIndex(pass)
 	if index < 0 {
 		q.strayDraws++

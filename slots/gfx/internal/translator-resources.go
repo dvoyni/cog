@@ -138,23 +138,20 @@ func (t *translator) ensurePipeline(
 
 // targetFormat resolves the colour format a pass's pipelines render into.
 //
-// A screen pass resolves the sentinel here rather than carrying it into the
-// key, so that a screen pass and a pass into a texture of the frame buffer's
-// own format share one pipeline instead of building two identical ones - which
-// is the common case while every renderable texture in the tree is allocated
-// FormatRGBA8Srgb. The backend resolves it either way; only the key can tell
-// the difference.
+// A screen pass is keyed on the frame buffer's format itself, so that it and a
+// pass into a texture of that format share one pipeline instead of building two
+// identical ones - which is the common case while every renderable texture in
+// the tree is allocated FormatRGBA8Srgb.
 //
 // A colourless pass has no format to resolve and is keyed by noColor instead.
 //
 // A texture target asks the backend, which is where a texture's descriptor
 // lives, and which cannot answer on the frame the texture is allocated: the
-// bake that creates it is replayed after this frame is translated. That frame
-// falls back to the frame buffer's format, which is what every pipeline was
-// keyed to before this resolved anything, and it costs nothing - the same
-// condition leaves TextureView with no view to return, so the pass is skipped
-// and the pipeline keyed here never renders. The frame after keys the target's
-// real format, which is a different cache entry and the one that draws.
+// allocation is replayed after this frame is translated. That frame's
+// allocation passed through the translator, though, so its format is read
+// from there, and the pass renders on its first frame with the pipeline that
+// matches its attachment. A texture neither knows falls back to the frame
+// buffer's format.
 //
 // Falling back rather than refusing the draw is deliberate. ensurePipeline runs
 // ahead of the checks that report a draw sampling its own attachment and a
@@ -170,6 +167,9 @@ func (t *translator) targetFormat(backend Backend, pass types.PassDescr) types.T
 	}
 	texture := pass.Target.Texture
 	if format, ok := backend.TextureFormat(texture); ok {
+		return format
+	}
+	if format, ok := t.allocated[texture]; ok {
 		return format
 	}
 	return types.FrameBufferFormat

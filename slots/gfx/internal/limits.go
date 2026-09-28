@@ -13,7 +13,7 @@ import (
 //
 // Every reflected binding is emitted for both shader stages, so the per-stage
 // storage and uniform limits are counted once over the whole shader.
-func checkWebLimits(label string, layout shader.ShaderLayout, device types.Limits) error {
+func checkWebLimits(label string, layout shader.ShaderLayout, device types.PipelineLimits) error {
 	floor := DefaultLimits()
 	storage, uniforms, groups, uniformSize := 0, 0, 0, 0
 	for _, resource := range layout.Resources {

@@ -69,7 +69,7 @@ func passViewOf(index, run int, desc types.PassDescr, draws, instances int) Pass
 		DepthClear: desc.DepthClear,
 		DepthStore: desc.DepthStore.String(),
 		Draws:      draws, Instances: instances,
-		Runs: desc.HasEffect(draws),
+		Runs: desc.IsObservable(draws),
 	}
 	if desc.Target.Kind == types.TargetTexture {
 		view.TargetTexture = desc.Target.Texture

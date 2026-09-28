@@ -61,10 +61,6 @@ type Backend interface {
 	// surface current before triggering the render).
 	ScreenFramebuffer() (view types.TextureViewID, width, height int)
 
-	// TextureView returns a renderable view of one mip level of one layer of a
-	// baked texture, cached per (texture, mip, layer).
-	TextureView(texture types.TextureID, mip, layer int) types.TextureViewID
-
 	// TextureFormat reports the format a texture was allocated or baked in,
 	// and whether the backend knows the texture at all. It is what keys a
 	// pipeline to the pass it renders into: a pipeline declares its target's
@@ -72,15 +68,13 @@ type Backend interface {
 	//
 	// A texture is unknown until Execute replays the bake that allocates it, so
 	// the frame that allocates a target cannot answer for it. gfx keys that
-	// frame's pipelines to FrameBufferFormat and loses nothing by it:
-	// TextureView above returns 0 on the same condition, leaving the pass with
-	// no attachment to begin, so the pipeline keyed there never renders.
+	// frame's pipelines from the allocation it translated instead.
 	TextureFormat(texture types.TextureID) (types.TextureFormat, bool)
 
 	// Limits reports the device's own limits. gfx checks shaders against
 	// DefaultLimits, the web floor, and never against these: they are here to
 	// say, in the report, what the device this build ran on allowed.
-	Limits() types.Limits
+	Limits() types.PipelineLimits
 
 	// Execute replays one already-translated queue: it performs bake operations,
 	// encodes each pass in turn with its own attachments and load/store ops,

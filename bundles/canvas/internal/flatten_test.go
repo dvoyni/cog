@@ -131,7 +131,7 @@ func (b *flattenBackend) ReflectShader([]byte) (gfx.ShaderLayout, error) {
 	return gfx.ShaderLayout{}, nil
 }
 func (b *flattenBackend) FreePipeline(gfx.PipelineID)      {}
-func (b *flattenBackend) Limits() gfx.Limits               { return gfx.DefaultLimits() }
+func (b *flattenBackend) Limits() gfx.PipelineLimits       { return gfx.DefaultLimits() }
 func (b *flattenBackend) Execute(*gfx.Queue)               {}
 func (b *flattenBackend) TakeCapture() (gfx.Capture, bool) { return gfx.Capture{}, false }
 
@@ -141,9 +141,6 @@ func (b *flattenBackend) TextureFormat(gfx.TextureID) (gfx.TextureFormat, bool) 
 	return 0, false
 }
 
-func (b *flattenBackend) TextureView(gfx.TextureID, int, int) gfx.TextureViewID {
-	return gfx.TextureViewID(b.id())
-}
 func (b *flattenBackend) NewPipeline(gfx.PipelineDesc) (gfx.PipelineID, error) {
 	return gfx.PipelineID(b.id()), nil
 }

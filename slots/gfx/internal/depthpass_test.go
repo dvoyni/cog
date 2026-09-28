@@ -81,7 +81,7 @@ func TestOneShaderInAColourPassAndADepthPassBuildsTwoPipelines(t *testing.T) {
 func TestAScreenDrawStillDeclaresTheFrameBufferAsItsColourTarget(t *testing.T) {
 	// The flag is additive: an ordinary pass has to be untouched by it, and its
 	// pipeline has to keep naming the frame buffer's format.
-	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateId) {
+	backend, _ := passFrame(t, func(q *OpQueue, set types.DrawStateID) {
 		ref := q.NewPass(types.PassDescr{Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto(), Load: types.LoadClear, Label: "screen"})
 		q.Draw(ref, triangle(), set, 1, 0)
 	})

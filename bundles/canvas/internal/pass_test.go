@@ -25,7 +25,7 @@ func TestCanvasLayersCollapseToOneGpuPass(t *testing.T) {
 		t.Fatalf("GPU passes = %d, want the three layers merged into 1", len(backend.passes))
 	}
 	pass := backend.passes[0]
-	if !pass.Screen || !pass.DepthAuto {
+	if pass.Target.Kind != gfx.TargetScreen || pass.Depth.Kind != gfx.DepthKindAuto {
 		t.Errorf("pass = %+v, want the screen with automatic depth", pass)
 	}
 	// The clear belongs to the layer it was recorded at, which is the lowest

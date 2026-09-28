@@ -64,9 +64,8 @@ type fakeBackend struct {
 	// lastOps is every call the last Execute's replay made, in replay order:
 	// bakes, then each pass's render commands, then releases.
 	lastOps    []backendOp
-	lastPasses []types.PassDesc
+	lastPasses []types.PassDescr
 	passDraws  []int
-	views      [][3]int
 	draws      []drawCall
 	// indexBinds records every index buffer the pass bound and the width it was
 	// bound at, which is the only place the width is observable: a draw call
@@ -233,8 +232,8 @@ func (b *fakeBackend) ScreenFramebuffer() (types.TextureViewID, int, int) {
 
 // Limits reports what a desktop adapter typically allows, which is far above
 // the web floor gfx measures shaders against.
-func (b *fakeBackend) Limits() types.Limits {
-	return types.Limits{
+func (b *fakeBackend) Limits() types.PipelineLimits {
+	return types.PipelineLimits{
 		MaxBindGroups:                   8,
 		MaxStorageBuffersPerShaderStage: 200,
 		MaxStorageBufferBindingSize:     1 << 31,
@@ -249,11 +248,6 @@ func (b *fakeBackend) Limits() types.Limits {
 func (b *fakeBackend) TextureFormat(id types.TextureID) (types.TextureFormat, bool) {
 	format, ok := b.formats[id]
 	return format, ok
-}
-
-func (b *fakeBackend) TextureView(texture types.TextureID, mip, layer int) types.TextureViewID {
-	b.views = append(b.views, [3]int{int(texture), mip, layer})
-	return types.TextureViewID(len(b.views))
 }
 
 func (b *fakeBackend) Execute(queue *Queue) {
@@ -348,7 +342,7 @@ func (b *fakeBackend) ReleaseTexture(id types.TextureID) {
 
 // BeginPass records the pass and returns the backend itself as its RenderPass,
 // which counts the draws that land in it.
-func (b *fakeBackend) BeginPass(desc types.PassDesc) RenderPass {
+func (b *fakeBackend) BeginPass(desc types.PassDescr) RenderPass {
 	b.lastPasses = append(b.lastPasses, desc)
 	b.passDraws = append(b.passDraws, 0)
 	return b
@@ -582,7 +576,7 @@ func (benchmarkGpuSink) Draw(int, int, int, int, bool)                        {}
 func (benchmarkGpuSink) ReleaseBuffer(types.BufferID)                         {}
 func (benchmarkGpuSink) ReleaseTexture(types.TextureID)                       {}
 
-func (benchmarkGpuSink) BeginPass(types.PassDesc) RenderPass          { return benchmarkGpuSink{} }
+func (benchmarkGpuSink) BeginPass(types.PassDescr) RenderPass         { return benchmarkGpuSink{} }
 func (benchmarkGpuSink) EndPass(RenderPass)                           {}
 func (benchmarkGpuSink) TransitionTextures([]types.TextureTransition) {}
 func (benchmarkGpuSink) Present()                                     {}
@@ -591,7 +585,7 @@ func (benchmarkGpuSink) Capture(types.CaptureDesc)                    {}
 func BenchmarkGpuQueueReplaySteadyState(b *testing.B) {
 	var queue Queue
 	queue.Reset()
-	queue.BeginPass(types.PassDesc{Screen: true, DepthAuto: true})
+	queue.BeginPass(types.PassDescr{Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto()})
 	for i := range 100 {
 		queue.BakeBuffer(types.BufferID(i+1), types.BufferVertex, 64, []byte{1})
 		queue.SetPipeline(1)
@@ -625,10 +619,10 @@ func TestPassRefsAreFrameLocal(t *testing.T) {
 	queue.reset()
 	first := queue.NewPass(types.PassDescr{Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto(), Load: types.LoadClear})
 	second := queue.NewPass(types.PassDescr{Order: 1, Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto()})
-	queue.Draw(second, triangle(), types.DrawStateId(0), 1, 0)
-	queue.Draw(first, triangle(), types.DrawStateId(0), 1, 0)
+	queue.Draw(second, triangle(), types.DrawStateID(0), 1, 0)
+	queue.Draw(first, triangle(), types.DrawStateID(0), 1, 0)
 	// An unknown reference names no pass rather than guessing one.
-	queue.Draw(types.PassRef(99), triangle(), types.DrawStateId(0), 1, 0)
+	queue.Draw(types.PassID(99), triangle(), types.DrawStateID(0), 1, 0)
 	if got := drawCounts(&queue); !slices.Equal(got, []int{1, 1, 1}) {
 		t.Errorf("draws per pass, then stray = %v, want [1 1 1]", got)
 	}
@@ -639,7 +633,7 @@ func TestPassRefsAreFrameLocal(t *testing.T) {
 	if len(OpQueuePasses(&queue)) != 0 {
 		t.Fatalf("after reset: %d passes, want none declared", len(OpQueuePasses(&queue)))
 	}
-	queue.Draw(first, triangle(), types.DrawStateId(0), 1, 0)
+	queue.Draw(first, triangle(), types.DrawStateID(0), 1, 0)
 	if got := drawCounts(&queue); !slices.Equal(got, []int{1}) {
 		t.Errorf("last frame's reference drew %v, want only a stray", got)
 	}
@@ -901,7 +895,7 @@ func TestDrawStoresTemporaryBufferIDsWithoutInlineGeometry(t *testing.T) {
 	queue := testOpQueue(&fakeBackend{})
 	ref := queue.NewPass(types.PassDescr{})
 	mesh := triangle()
-	queue.Draw(ref, mesh, types.DrawStateId(0), 1, 0)
+	queue.Draw(ref, mesh, types.DrawStateID(0), 1, 0)
 
 	if bake := OpQueueResources(&queue); len(bake) != 1 || bake[0].Kind != OpBakeBuffer || bake[0].BufferKind != types.BufferVertex {
 		t.Fatal("draw did not record one vertex bake")
@@ -927,7 +921,7 @@ func TestOpQueueArenasPreserveCallerDataIsolation(t *testing.T) {
 	ref := queue.NewPass(types.PassDescr{})
 	queue.Draw(ref,
 		types.MeshDescrWithVertices(types.BufferDescrWithBlob(assets.NewBlob(vertices), true), types.TopologyTriangleList, layout...),
-		types.DrawStateId(0), 1, 0,
+		types.DrawStateID(0), 1, 0,
 	)
 	vertices[0] = 9
 	layout[0] = types.VertexAttribute{Offset: 4, Type: types.Float32x2}
@@ -950,8 +944,8 @@ func TestABlobBufferCopyDataControlsOwnership(t *testing.T) {
 	layout := []types.VertexAttribute{{Offset: 0, Type: types.Float32x3}}
 
 	ref := queue.NewPass(types.PassDescr{})
-	queue.Draw(ref, types.MeshDescrWithVertices(types.BufferDescrWithBlob(assets.NewBlob(copied), true), types.TopologyTriangleList, layout...), types.DrawStateId(0), 1, 0)
-	queue.Draw(ref, types.MeshDescrWithVertices(types.BufferDescrWithBlob(assets.NewBlob(borrowed), false), types.TopologyTriangleList, layout...), types.DrawStateId(0), 1, 0)
+	queue.Draw(ref, types.MeshDescrWithVertices(types.BufferDescrWithBlob(assets.NewBlob(copied), true), types.TopologyTriangleList, layout...), types.DrawStateID(0), 1, 0)
+	queue.Draw(ref, types.MeshDescrWithVertices(types.BufferDescrWithBlob(assets.NewBlob(borrowed), false), types.TopologyTriangleList, layout...), types.DrawStateID(0), 1, 0)
 	copied[0] = 9
 	borrowed[0] = 10
 
@@ -1544,7 +1538,7 @@ func TestABlobBufferReuploadsEveryFrame(t *testing.T) {
 // recordList opens the frame's queue with a screen pass already declared, and
 // returns it for the draws, since every draw names a pass and most tests do not
 // care which one.
-func recordList(t *testing.T, k kernel.Executioner) (*OpQueue, types.PassRef) {
+func recordList(t *testing.T, k kernel.Executioner) (*OpQueue, types.PassID) {
 	t.Helper()
 	queue := recordRaw(t, k)
 	return queue, queue.NewPass(types.PassDescr{Target: types.TargetDescrScreen(), Depth: types.DepthDescrAuto(), Label: "test"})
