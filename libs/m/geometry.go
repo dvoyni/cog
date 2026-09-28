@@ -6,8 +6,8 @@ import "math"
 // A positive signed distance is in front of the plane, on the side Normal
 // points to.
 type Plane struct {
-	Normal   Vec3
-	Distance float32
+	Normal   Vec3    `json:"normal"`
+	Distance float32 `json:"distance"`
 }
 
 // Normalize scales the plane so Normal has unit length and SignedDistance
@@ -67,8 +67,8 @@ func (frustum Frustum) ContainsSphere(center Vec3, radius float32) bool {
 
 // Sphere is the bounding volume scene culls and picks with.
 type Sphere struct {
-	Center Vec3
-	Radius float32
+	Center Vec3    `json:"center"`
+	Radius float32 `json:"radius"`
 }
 
 // Transform moves the sphere by an affine matrix, scaling the radius by the
@@ -113,7 +113,8 @@ func (sphere Sphere) Union(other Sphere) Sphere {
 // reports as min and max. The zero Box3 is a point at the origin, not an empty
 // box, so Union over a set starts from the set's first member.
 type Box3 struct {
-	Min, Max Vec3
+	Min Vec3 `json:"min"`
+	Max Vec3 `json:"max"`
 }
 
 // Sphere returns the box's bounding sphere, for the per-primitive spheres scene
@@ -148,7 +149,8 @@ func (box Box3) Transform(matrix Mat4) Box3 {
 // Ray is a half-line whose Dir is unit length, which is what makes every
 // intersect's t a world distance. Build one with NewRay rather than by literal.
 type Ray struct {
-	Origin, Dir Vec3
+	Origin Vec3 `json:"origin"`
+	Dir    Vec3 `json:"dir"`
 }
 
 func NewRay(origin, dir Vec3) Ray { return Ray{Origin: origin, Dir: dir.Normalize()} }

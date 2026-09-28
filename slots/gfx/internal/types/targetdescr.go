@@ -1,17 +1,5 @@
 package types
 
-type TargetKind uint8
-
-// The screen is the zero value: a recorder that defaults a pass leaves Target
-// alone, and the screen is what it means by that. A colourless pass has to say
-// so explicitly, because "no colour attachment" is a deliberate choice a
-// depth-only prepass makes, never an omission.
-const (
-	TargetScreen TargetKind = iota
-	TargetNone
-	TargetTexture
-)
-
 // TargetDescr names a pass's colour attachment. Texture, Mip and Layer say
 // where a TargetTexture renders; Width and Height are its texel dimensions,
 // which a recorder resolving a projection reads the aspect from. The screen

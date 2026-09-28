@@ -4,13 +4,37 @@ package m
 
 import "math"
 
-type Vec2 struct{ X, Y float32 }
-type Vec3 struct{ X, Y, Z float32 }
-type Vec4 struct{ X, Y, Z, W float32 }
+type Vec2 struct {
+	X float32 `json:"x"`
+	Y float32 `json:"y"`
+}
+type Vec3 struct {
+	X float32 `json:"x"`
+	Y float32 `json:"y"`
+	Z float32 `json:"z"`
+}
+type Vec4 struct {
+	X float32 `json:"x"`
+	Y float32 `json:"y"`
+	Z float32 `json:"z"`
+	W float32 `json:"w"`
+}
 
-type Vec2i struct{ X, Y int }
-type Vec3i struct{ X, Y, Z int }
-type Vec4i struct{ X, Y, Z, W int }
+type Vec2i struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+}
+type Vec3i struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+	Z int `json:"z"`
+}
+type Vec4i struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+	Z int `json:"z"`
+	W int `json:"w"`
+}
 
 func NewVec2(values ...float32) Vec2 {
 	switch len(values) {

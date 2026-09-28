@@ -172,7 +172,7 @@ func (p *packer) insert(source insertion, resources *gfx.ResourceQueue) (AtlasEn
 	}
 	upload := paddedRGBA(source.pixels, source.width, source.height, source.padding, source.fill)
 	array := &p.arrays[arrayIndex]
-	resources.UploadTexture(array.texture, layer, gfx.Region{
+	resources.UploadTexture(array.texture, layer, m.Recti{
 		X: x, Y: y, Width: slotWidth, Height: slotHeight,
 	}, upload, false)
 	entry := AtlasEntry{

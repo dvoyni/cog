@@ -61,8 +61,8 @@ func FrameViewOf(queue *OpQueue, resources *ResourceQueue, filter string) FrameV
 func passViewOf(index, run int, desc types.PassDescr, draws, instances int) PassView {
 	view := PassView{
 		Index: index, Run: run, Label: desc.Label, Order: int(desc.Order),
-		Target:     targetKindName(desc.Target.Kind),
-		Depth:      depthKindName(desc.Depth.Kind),
+		Target:     desc.Target.Kind.String(),
+		Depth:      desc.Depth.Kind.String(),
 		Load:       desc.Load.String(),
 		Store:      desc.Store.String(),
 		DepthLoad:  desc.DepthLoad.String(),
@@ -147,30 +147,6 @@ func opKindName(kind OpKind) string {
 		return "uploadProgram"
 	case OpReleaseShader:
 		return "releaseShader"
-	}
-	return "unknown(" + strconv.Itoa(int(kind)) + ")"
-}
-
-func targetKindName(kind types.TargetKind) string {
-	switch kind {
-	case types.TargetScreen:
-		return "screen"
-	case types.TargetNone:
-		return "none"
-	case types.TargetTexture:
-		return "texture"
-	}
-	return "unknown(" + strconv.Itoa(int(kind)) + ")"
-}
-
-func depthKindName(kind types.DepthKind) string {
-	switch kind {
-	case types.DepthKindAuto:
-		return "auto"
-	case types.DepthKindNone:
-		return "none"
-	case types.DepthKindTexture:
-		return "texture"
 	}
 	return "unknown(" + strconv.Itoa(int(kind)) + ")"
 }

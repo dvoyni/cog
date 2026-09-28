@@ -85,24 +85,24 @@ func TestRawParameterAcceptsArraysAtTheirWGSLStride(t *testing.T) {
 func TestFingerprintParamsSeparatesValuesAndIgnoresBacking(t *testing.T) {
 	one := []types.ShaderParameterDescr{types.ShaderParameterFloat("fade", 0.25), types.ShaderParameterColor("tint", m.Color{R: 1, A: 1})}
 	same := []types.ShaderParameterDescr{types.ShaderParameterFloat("fade", 0.25), types.ShaderParameterColor("tint", m.Color{R: 1, A: 1})}
-	if types.FingerprintParams(one) != types.FingerprintParams(same) {
+	if FingerprintParams(one) != FingerprintParams(same) {
 		t.Fatal("equal parameter slices in different backings fingerprinted differently")
 	}
 	different := []types.ShaderParameterDescr{types.ShaderParameterFloat("fade", 0.5), types.ShaderParameterColor("tint", m.Color{R: 1, A: 1})}
-	if types.FingerprintParams(one) == types.FingerprintParams(different) {
+	if FingerprintParams(one) == FingerprintParams(different) {
 		t.Fatal("a changed value did not change the fingerprint")
 	}
 	reordered := []types.ShaderParameterDescr{one[1], one[0]}
-	if types.FingerprintParams(one) == types.FingerprintParams(reordered) {
+	if FingerprintParams(one) == FingerprintParams(reordered) {
 		t.Fatal("reordered parameters fingerprinted the same")
 	}
 	// A kind change with the same name is the case a hand-written comparison
 	// misses, and it is the one that merges two draws that differ.
 	kindChanged := []types.ShaderParameterDescr{types.ShaderParameterVec4("fade", m.Vec4{}), one[1]}
-	if types.FingerprintParams(one) == types.FingerprintParams(kindChanged) {
+	if FingerprintParams(one) == FingerprintParams(kindChanged) {
 		t.Fatal("a changed kind did not change the fingerprint")
 	}
-	if types.FingerprintParams(nil) != types.FingerprintParams([]types.ShaderParameterDescr{}) {
+	if FingerprintParams(nil) != FingerprintParams([]types.ShaderParameterDescr{}) {
 		t.Fatal("nil and empty parameter slices fingerprinted differently")
 	}
 }

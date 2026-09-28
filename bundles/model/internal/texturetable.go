@@ -3,6 +3,7 @@ package internal
 import (
 	"bytes"
 	"fmt"
+	"github.com/dvoyni/cog/libs/m"
 	"image"
 	"image/draw"
 	_ "image/jpeg"
@@ -119,7 +120,7 @@ func (textureLoader) Load(
 	// buffer and nothing reads them again.
 	resources := userData.resources
 	texture := resources.NewTexture(bounds.Dx(), bounds.Dy(), 1, format, true)
-	return resources.UploadTexture(texture, 0, gfx.Region{}, rgba.Pix, false)
+	return resources.UploadTexture(texture, 0, m.Recti{}, rgba.Pix, false)
 }
 
 // Default supplies the value for a picture whose file could not be read. The
@@ -158,7 +159,7 @@ func placeholderTexture(params textureDescrParams, resources *gfx.ResourceQueue)
 	if !params.srgb {
 		return gfx.TextureDescr{}
 	}
-	return resources.UploadTexture(resources.NewTexture(1, 1, 1, gfx.FormatRGBA8Srgb, false), 0, gfx.Region{}, magentaTexel[:], true)
+	return resources.UploadTexture(resources.NewTexture(1, 1, 1, gfx.FormatRGBA8Srgb, false), 0, m.Recti{}, magentaTexel[:], true)
 }
 
 // magentaTexel is the placeholder's one opaque pixel. 1x1 rather than larger

@@ -3,7 +3,12 @@ package m
 import "math"
 
 // Quat stores the vector part in XYZ and the scalar part in W.
-type Quat struct{ X, Y, Z, W float32 }
+type Quat struct {
+	X float32 `json:"x"`
+	Y float32 `json:"y"`
+	Z float32 `json:"z"`
+	W float32 `json:"w"`
+}
 
 // NewQuat returns identity with no values, fills all components with one value,
 // or accepts X, Y, Z, W in that order.

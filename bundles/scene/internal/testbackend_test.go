@@ -276,7 +276,7 @@ func (b *testBackend) BakeBuffer(id gfx.BufferID, _ gfx.BufferKind, _ int, data 
 
 func (b *testBackend) BakeTexture(gfx.TextureID, int, int, gfx.TextureFormat, []byte, bool) {}
 func (b *testBackend) AllocateTexture(gfx.TextureID, gfx.TextureDesc)                       {}
-func (b *testBackend) UpdateTexture(gfx.TextureID, int, gfx.Region, []byte)                 {}
+func (b *testBackend) UpdateTexture(gfx.TextureID, int, m.Recti, []byte)                    {}
 
 func (b *testBackend) SetPipeline(id gfx.PipelineID) { b.state.pipeline = id }
 

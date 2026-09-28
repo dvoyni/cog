@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"github.com/dvoyni/cog/libs/m"
 	"slices"
 	"sync/atomic"
 
@@ -399,7 +400,7 @@ func (b *gfxBackend) newTexture(desc gfx.TextureDesc) (*gfxbTexture, error) {
 	return &gfxbTexture{tex: tex, view: view}, nil
 }
 
-func (b *gfxBackend) uploadTexture(texture *gfxbTexture, layer int, region gfx.Region, format gfx.TextureFormat, pixels []byte) {
+func (b *gfxBackend) uploadTexture(texture *gfxbTexture, layer int, region m.Recti, format gfx.TextureFormat, pixels []byte) {
 	if texture == nil {
 		return
 	}
@@ -884,7 +885,7 @@ func (b *gfxBackend) TextureFormat(id gfx.TextureID) (gfx.TextureFormat, bool) {
 	return b.bakedTextureDescs[id].Format, true
 }
 
-func (b *gfxBackend) UpdateTexture(id gfx.TextureID, layer int, region gfx.Region, pixels []byte) {
+func (b *gfxBackend) UpdateTexture(id gfx.TextureID, layer int, region m.Recti, pixels []byte) {
 	texture, ok := b.bakedTextures[id]
 	desc := b.bakedTextureDescs[id]
 	if !ok || layer < 0 || layer >= max(desc.Layers, 1) || region.X < 0 || region.Y < 0 ||
@@ -892,7 +893,7 @@ func (b *gfxBackend) UpdateTexture(id gfx.TextureID, layer int, region gfx.Regio
 		return
 	}
 	b.uploadTexture(texture, layer, region, desc.Format, pixels)
-	if desc.Mipmaps && region == (gfx.Region{Width: desc.Width, Height: desc.Height}) {
+	if desc.Mipmaps && region == (m.Recti{Width: desc.Width, Height: desc.Height}) {
 		b.uploadMipChain(texture, layer, desc.Width, desc.Height, desc.Format, pixels)
 	}
 }
@@ -956,7 +957,7 @@ func (b *gfxBackend) bakeTexture(id gfx.TextureID, width, height int, format gfx
 	if texture == nil {
 		return
 	}
-	b.uploadTexture(texture, 0, gfx.Region{X: 0, Y: 0, Width: width, Height: height}, format, pixels)
+	b.uploadTexture(texture, 0, m.Recti{X: 0, Y: 0, Width: width, Height: height}, format, pixels)
 	if mipmaps {
 		b.uploadMipChain(texture, 0, width, height, format, pixels)
 	}

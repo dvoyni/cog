@@ -290,7 +290,7 @@ type backendOp struct {
 	format                types.TextureFormat
 	width, height, layers int
 	layer                 int
-	region                types.Region
+	region                m.Recti
 	renderable            bool
 	group, binding        int
 	offset, size          int
@@ -320,7 +320,7 @@ func (b *fakeBackend) AllocateTexture(id types.TextureID, desc TextureDesc) {
 	})
 }
 
-func (b *fakeBackend) UpdateTexture(id types.TextureID, layer int, region types.Region, pixels []byte) {
+func (b *fakeBackend) UpdateTexture(id types.TextureID, layer int, region m.Recti, pixels []byte) {
 	b.lastOps = append(b.lastOps, backendOp{kind: testOpUpdateTexture, texture: id, layer: layer, region: region, data: pixels})
 }
 
@@ -562,11 +562,11 @@ func (benchmarkGpuSink) BakeUniforms([]byte)                                    
 func (benchmarkGpuSink) BakeBuffer(types.BufferID, types.BufferKind, int, []byte) {}
 func (benchmarkGpuSink) BakeTexture(types.TextureID, int, int, types.TextureFormat, []byte, bool) {
 }
-func (benchmarkGpuSink) AllocateTexture(types.TextureID, TextureDesc)             {}
-func (benchmarkGpuSink) UpdateTexture(types.TextureID, int, types.Region, []byte) {}
-func (benchmarkGpuSink) SetPipeline(types.PipelineID)                             {}
-func (benchmarkGpuSink) SetUniformBlock(int, int, int, int)                       {}
-func (benchmarkGpuSink) SetTexture(types.TextureID, int, int)                     {}
+func (benchmarkGpuSink) AllocateTexture(types.TextureID, TextureDesc)        {}
+func (benchmarkGpuSink) UpdateTexture(types.TextureID, int, m.Recti, []byte) {}
+func (benchmarkGpuSink) SetPipeline(types.PipelineID)                        {}
+func (benchmarkGpuSink) SetUniformBlock(int, int, int, int)                  {}
+func (benchmarkGpuSink) SetTexture(types.TextureID, int, int)                {}
 
 func (benchmarkGpuSink) SetSampler(types.SamplerID, int, int)                 {}
 func (benchmarkGpuSink) SetVertexBuffer(types.BufferID, int)                  {}
@@ -672,9 +672,9 @@ func TestBakeOpsAllocateBakedResourceIDs(t *testing.T) {
 	queue := *NewResourceQueue(idsOf(backend))
 	pixels := []byte{1, 2, 3, 4}
 	buffer := queue.UploadBuffer(queue.NewBuffer(), pixels, true)
-	texture := queue.UploadTexture(queue.NewTexture(1, 1, 1, types.FormatRGBA8, false), 0, types.Region{}, pixels, true)
+	texture := queue.UploadTexture(queue.NewTexture(1, 1, 1, types.FormatRGBA8, false), 0, m.Recti{}, pixels, true)
 	rebakedBuffer := queue.UploadBuffer(buffer, pixels, true)
-	rebakedTexture := queue.UploadTexture(texture, 0, types.Region{}, pixels, true)
+	rebakedTexture := queue.UploadTexture(texture, 0, m.Recti{}, pixels, true)
 
 	if buffer.ID == 0 || texture.Params.ID == 0 {
 		t.Fatalf("baked handles = (%d, %d), want nonzero", buffer.ID, texture.Params.ID)
@@ -716,8 +716,8 @@ func TestBakeTextureCopyDataControlsOwnership(t *testing.T) {
 	queue := *NewResourceQueue(idsOf(&fakeBackend{}))
 	copied := []byte{1, 2, 3, 4}
 	borrowed := []byte{5, 6, 7, 8}
-	queue.UploadTexture(queue.NewTexture(1, 1, 1, types.FormatRGBA8, false), 0, types.Region{}, copied, true)
-	queue.UploadTexture(queue.NewTexture(1, 1, 1, types.FormatRGBA8, false), 0, types.Region{}, borrowed, false)
+	queue.UploadTexture(queue.NewTexture(1, 1, 1, types.FormatRGBA8, false), 0, m.Recti{}, copied, true)
+	queue.UploadTexture(queue.NewTexture(1, 1, 1, types.FormatRGBA8, false), 0, m.Recti{}, borrowed, false)
 
 	// Each upload is two ops, the allocation and then the pixels.
 	copied[0] = 9
@@ -743,7 +743,7 @@ func TestTextureArrayAllocationAndLayerUpdateTranslate(t *testing.T) {
 	pixels := []byte{1, 2, 3, 4}
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
 		texture := resources.NewTexture(64, 32, 4, types.FormatRGBA8, false)
-		resources.UploadTexture(texture, 2, types.Region{X: 5, Y: 7, Width: 1, Height: 1}, pixels, true)
+		resources.UploadTexture(texture, 2, m.Recti{X: 5, Y: 7, Width: 1, Height: 1}, pixels, true)
 	})
 	pixels[0] = 9
 	k.PublishEvent(app.RenderEvent{}).Wait()
@@ -762,7 +762,7 @@ func TestTextureArrayAllocationAndLayerUpdateTranslate(t *testing.T) {
 				t.Fatalf("allocation metadata = (%d,%d,%d,%d)", op.width, op.height, op.layers, op.format)
 			}
 		case testOpUpdateTexture:
-			if op.layer != 2 || op.region != (types.Region{X: 5, Y: 7, Width: 1, Height: 1}) || op.data[0] != 1 {
+			if op.layer != 2 || op.region != (m.Recti{X: 5, Y: 7, Width: 1, Height: 1}) || op.data[0] != 1 {
 				t.Fatalf("update metadata = layer/region/data (%d,%+v,%d)", op.layer, op.region, op.data[0])
 			}
 		}
@@ -813,13 +813,13 @@ func TestPersistentBakeRebakeAndReleaseSurviveDroppedFrame(t *testing.T) {
 	var texture types.TextureDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
 		buffer = resources.UploadBuffer(resources.NewBuffer(), []byte{1, 2, 3, 4}, true)
-		texture = resources.UploadTexture(resources.NewTexture(1, 1, 1, types.FormatRGBA8, false), 0, types.Region{}, []byte{1, 2, 3, 4}, true)
+		texture = resources.UploadTexture(resources.NewTexture(1, 1, 1, types.FormatRGBA8, false), 0, m.Recti{}, []byte{1, 2, 3, 4}, true)
 	})
 	k.ExecuteCommand[PresentCmd](PresentRequest{})
 
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
 		resources.UploadBuffer(buffer, []byte{5, 6, 7, 8}, true)
-		resources.UploadTexture(texture, 0, types.Region{}, []byte{5, 6, 7, 8}, true)
+		resources.UploadTexture(texture, 0, m.Recti{}, []byte{5, 6, 7, 8}, true)
 		resources.ReleaseBuffer(buffer)
 		resources.ReleaseTexture(texture)
 	})
@@ -1001,7 +1001,7 @@ func TestOpQueueTemporaryTexturePool(t *testing.T) {
 	if len(ops) != 2 || ops[0].Kind != OpAllocateTexture || ops[1].Kind != OpUpdateTexture {
 		t.Fatal("temporary texture did not record one allocation and one upload")
 	}
-	if ops[1].Region != (types.Region{Width: 1, Height: 1}) {
+	if ops[1].Region != (m.Recti{Width: 1, Height: 1}) {
 		t.Errorf("temporary texture uploaded region %+v, want its whole layer", ops[1].Region)
 	}
 }
@@ -1023,7 +1023,7 @@ func TestBakedResourcesTranslateToBakedBindings(t *testing.T) {
 	var texture types.TextureDescr
 	var buffer types.BufferDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		texture = resources.UploadTexture(resources.NewTexture(1, 1, 1, types.FormatRGBA8, false), 0, types.Region{}, []byte{255, 255, 255, 255}, true)
+		texture = resources.UploadTexture(resources.NewTexture(1, 1, 1, types.FormatRGBA8, false), 0, m.Recti{}, []byte{255, 255, 255, 255}, true)
 		buffer = resources.UploadBuffer(resources.NewBuffer(), []byte{1, 2, 3, 4}, true)
 	})
 	w, ref := recordList(t, k)
@@ -1055,7 +1055,7 @@ func TestBakedResourcesTranslateToBakedBindings(t *testing.T) {
 	}
 
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		if got := resources.UploadTexture(texture, 0, types.Region{}, make([]byte, 4), true); got.Params.ID != texture.Params.ID {
+		if got := resources.UploadTexture(texture, 0, m.Recti{}, make([]byte, 4), true); got.Params.ID != texture.Params.ID {
 			t.Errorf("rebaked texture = %d, want %d", got.Params.ID, texture.Params.ID)
 		}
 		if got := resources.UploadBuffer(buffer, []byte{5, 6, 7, 8}, true); got.ID != buffer.ID {
@@ -1187,7 +1187,7 @@ func TestPipelineCacheDistinguishesEqualStrideLayouts(t *testing.T) {
 }
 
 func TestVertexLayoutKeyUsesZeroOnlyForMissingAttributes(t *testing.T) {
-	key, ok := types.VertexLayoutKeyOf([]types.VertexAttribute{
+	key, ok := VertexLayoutKeyOf([]types.VertexAttribute{
 		{Offset: 0, Type: types.Float32},
 		{Offset: 256, Type: types.Float32x4},
 		{Offset: types.MaxVertexStride - 4, Type: types.Unorm1010102},
@@ -1224,7 +1224,7 @@ func TestVertexLayoutKeyRejectsUnsupportedLayouts(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if _, ok := types.VertexLayoutKeyOf(test.layout); ok {
+			if _, ok := VertexLayoutKeyOf(test.layout); ok {
 				t.Fatal("unsupported vertex layout was accepted")
 			}
 		})
@@ -1358,7 +1358,7 @@ func TestFreeCachedResourcesClearsTranslatorOwnedCachesOnly(t *testing.T) {
 	k.ExecuteCommand[attachBackendCmd](attachBackendRequest{Backend: backend})
 	var explicit types.TextureDescr
 	withResourceQueue(t, k, func(resources *ResourceQueue) {
-		explicit = resources.UploadTexture(resources.NewTexture(1, 1, 1, types.FormatRGBA8, false), 0, types.Region{}, []byte{1, 2, 3, 4}, true)
+		explicit = resources.UploadTexture(resources.NewTexture(1, 1, 1, types.FormatRGBA8, false), 0, m.Recti{}, []byte{1, 2, 3, 4}, true)
 	})
 	set := testSet(t, k,
 		types.ShaderParameterTexture("MainTexture", types.TextureWithResource("hero.png")),

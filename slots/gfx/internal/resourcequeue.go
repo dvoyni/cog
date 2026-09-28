@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
@@ -100,8 +101,8 @@ func (q *ResourceQueue) UploadBuffer(buffer types.BufferDescr, data []byte, copy
 // layer, and keeps its old smaller levels otherwise. copyData snapshots pixels
 // when true; when false, the caller must keep them unchanged until the
 // resource queue is consumed by the render thread.
-func (q *ResourceQueue) UploadTexture(texture types.TextureDescr, layer int, region types.Region, pixels []byte, copyData bool) types.TextureDescr {
-	if region == (types.Region{}) {
+func (q *ResourceQueue) UploadTexture(texture types.TextureDescr, layer int, region m.Recti, pixels []byte, copyData bool) types.TextureDescr {
+	if region == (m.Recti{}) {
 		region.Width, region.Height = texture.Params.Width, texture.Params.Height
 	}
 	if copyData {

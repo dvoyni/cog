@@ -25,8 +25,8 @@ func TestFingerprintParamsSeesTextureBufferMatrixAndSamplerParameters(t *testing
 			types.ShaderParameterSampler("s", types.SamplerDesc{Anisotropy: 16})},
 	}
 	for _, pair := range pairs {
-		a := types.FingerprintParams([]types.ShaderParameterDescr{pair.a})
-		b := types.FingerprintParams([]types.ShaderParameterDescr{pair.b})
+		a := FingerprintParams([]types.ShaderParameterDescr{pair.a})
+		b := FingerprintParams([]types.ShaderParameterDescr{pair.b})
 		if a == b {
 			t.Errorf("two slices differing in a %s parameter fingerprint the same", pair.name)
 		}
@@ -42,7 +42,7 @@ func TestFingerprintParamsAllocatesNothing(t *testing.T) {
 		types.ShaderParameterTexture("t", types.TextureWithResource("a.png")),
 		types.ShaderParameterSampler("s", types.SamplerDesc{}),
 	}
-	if allocations := testing.AllocsPerRun(100, func() { types.FingerprintParams(params) }); allocations != 0 {
+	if allocations := testing.AllocsPerRun(100, func() { FingerprintParams(params) }); allocations != 0 {
 		t.Fatalf("FingerprintParams allocated %v times per call", allocations)
 	}
 }

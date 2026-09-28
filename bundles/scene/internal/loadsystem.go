@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"github.com/dvoyni/cog/libs/m"
 	"io/fs"
 
 	"github.com/dvoyni/cog/bundles/ecs"
@@ -74,7 +75,7 @@ func loadSystem(
 	// the Lookup binds the same two forever after.
 	if !s.hasBundled {
 		s.bundled = lookup.EnsureBundledIngredients(func(width, height int, format gfx.TextureFormat, pixels []byte) gfx.TextureDescr {
-			return resources.UploadTexture(resources.NewTexture(width, height, 1, format, false), 0, gfx.Region{}, pixels, true)
+			return resources.UploadTexture(resources.NewTexture(width, height, 1, format, false), 0, m.Recti{}, pixels, true)
 		})
 		s.hasBundled = true
 	}

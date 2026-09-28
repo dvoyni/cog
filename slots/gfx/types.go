@@ -415,11 +415,6 @@ const (
 // TextureTransition.Texture already names one.
 type CaptureDesc = types.CaptureDesc
 
-// Region is a rectangular sub-area of a texture in texels. The json tags are
-// there because a region reaches an agent inside a frame snapshot, and the
-// rest of that document is lowerCamel.
-type Region = types.Region
-
 // TextureDesc describes a texture to create. Layers <= 1 creates a regular 2D
 // texture; larger values create a 2D-array texture. Renderable asks for a
 // texture a render pass can draw into as well as sample.

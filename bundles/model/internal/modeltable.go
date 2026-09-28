@@ -539,8 +539,8 @@ func (l *Lookup) ensureDefaults(resources *gfx.ResourceQueue) PbrDefaults {
 		return l.defaults
 	}
 	l.defaults = PbrDefaults{
-		White:      resources.UploadTexture(resources.NewTexture(1, 1, 1, gfx.FormatRGBA8, false), 0, gfx.Region{}, []byte{0xff, 0xff, 0xff, 0xff}, true),
-		FlatNormal: resources.UploadTexture(resources.NewTexture(1, 1, 1, gfx.FormatRGBA8, false), 0, gfx.Region{}, []byte{0x80, 0x80, 0xff, 0xff}, true),
+		White:      resources.UploadTexture(resources.NewTexture(1, 1, 1, gfx.FormatRGBA8, false), 0, m.Recti{}, []byte{0xff, 0xff, 0xff, 0xff}, true),
+		FlatNormal: resources.UploadTexture(resources.NewTexture(1, 1, 1, gfx.FormatRGBA8, false), 0, m.Recti{}, []byte{0x80, 0x80, 0xff, 0xff}, true),
 	}
 	l.hasDefaults = true
 	return l.defaults

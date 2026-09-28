@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"github.com/dvoyni/cog/libs/m"
 	"testing"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
@@ -34,7 +35,7 @@ func TestATextureDescriptorReportsTheLayersItWasAskedFor(t *testing.T) {
 	}
 	// A bake genuinely is one layer: BakeTexture takes a single pixel run and
 	// there is no op that gives it more.
-	if got := queue.UploadTexture(queue.NewTexture(1, 1, 1, types.FormatRGBA8Srgb, false), 0, types.Region{}, []byte{255, 255, 255, 255}, true).Params.Layers; got != 1 {
+	if got := queue.UploadTexture(queue.NewTexture(1, 1, 1, types.FormatRGBA8Srgb, false), 0, m.Recti{}, []byte{255, 255, 255, 255}, true).Params.Layers; got != 1 {
 		t.Errorf("BakeTexture layers = %d, want 1", got)
 	}
 	if got := types.BakedTexture(7, 16, 16).Params.Layers; got != 0 {

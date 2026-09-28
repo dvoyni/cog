@@ -151,7 +151,7 @@ func ShaderParameterRawRef[T any](name string, value *T) ShaderParameterDescr {
 // silently mis-key every kind or field it forgot - and mis-keying merges two
 // draws that differ, which draws the wrong picture rather than costing a batch.
 func FingerprintParams(params []ShaderParameterDescr) uint64 {
-	return types.FingerprintParams(params)
+	return internal.FingerprintParams(params)
 }
 
 // MeshDescrWithVertices builds non-indexed geometry from an interleaved vertex

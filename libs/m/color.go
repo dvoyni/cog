@@ -6,7 +6,12 @@ import "math"
 // canvas and scene share one frame buffer and one Color, so the engine is
 // linear throughout and a caller says which space it is speaking by choosing a
 // constructor. Alpha is coverage rather than light and never converts.
-type Color struct{ R, G, B, A float32 }
+type Color struct {
+	R float32 `json:"r"`
+	G float32 `json:"g"`
+	B float32 `json:"b"`
+	A float32 `json:"a"`
+}
 
 var (
 	Transparent = Color{}

@@ -47,7 +47,7 @@ type pipelineKey struct {
 	// noDepth does the same for a DepthDescrNone pass, which has no depth
 	// attachment for a pipeline's depth state to match.
 	noDepth bool
-	layout  types.VertexLayoutKey
+	layout  VertexLayoutKey
 	// stripIndex is the index width a strip topology's pipeline has to declare,
 	// and nothing at all for every other topology. It is the strip format
 	// rather than the mesh's width because keying on the width unconditionally

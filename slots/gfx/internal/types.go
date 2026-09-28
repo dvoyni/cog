@@ -1,6 +1,9 @@
 package internal
 
-import "github.com/dvoyni/cog/slots/gfx/internal/types"
+import (
+	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
+)
 
 // FrameView is one tick's renderer declarations, rendered while they are still
 // alive. It is not a copy of the queue: no queue outlives the tick that filled
@@ -179,7 +182,7 @@ type ResourceOpView struct {
 	Height     int             `json:"height,omitempty"`
 	Layers     int             `json:"layers,omitempty"`
 	Layer      int             `json:"layer,omitempty"`
-	Region     *types.Region   `json:"region,omitempty"`
+	Region     *m.Recti        `json:"region,omitempty"`
 	Format     string          `json:"format,omitempty"`
 	Mipmaps    bool            `json:"mipmaps,omitempty"`
 	Renderable bool            `json:"renderable,omitempty"`

@@ -150,7 +150,7 @@ func (standaloneLoader) Load(k kernel.Kernel, data assets.Blob, _ tiledDescrPara
 	return StandaloneEntry{
 		// A decoded image is sRGB by definition, and there is no caller to say
 		// otherwise: canvas draws pictures, never data maps.
-		Texture: resources.UploadTexture(resources.NewTexture(width, height, 1, gfx.FormatRGBA8Srgb, false), 0, gfx.Region{}, pixels, true),
+		Texture: resources.UploadTexture(resources.NewTexture(width, height, 1, gfx.FormatRGBA8Srgb, false), 0, m.Recti{}, pixels, true),
 		Width:   width,
 		Height:  height,
 	}

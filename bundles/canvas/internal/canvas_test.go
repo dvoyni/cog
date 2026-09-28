@@ -78,7 +78,7 @@ type textureAllocation struct {
 type textureUpdate struct {
 	id     gfx.TextureID
 	layer  int
-	region gfx.Region
+	region m.Recti
 	pixels []byte
 }
 
@@ -276,7 +276,7 @@ func (b *testBackend) BakeTexture(gfx.TextureID, int, int, gfx.TextureFormat, []
 func (b *testBackend) AllocateTexture(id gfx.TextureID, desc gfx.TextureDesc) {
 	b.allocations = append(b.allocations, textureAllocation{id: id, desc: desc})
 }
-func (b *testBackend) UpdateTexture(id gfx.TextureID, layer int, region gfx.Region, pixels []byte) {
+func (b *testBackend) UpdateTexture(id gfx.TextureID, layer int, region m.Recti, pixels []byte) {
 	b.updates = append(b.updates, textureUpdate{id: id, layer: layer, region: region, pixels: append([]byte(nil), pixels...)})
 }
 func (b *testBackend) SetPipeline(gfx.PipelineID) {}

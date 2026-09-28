@@ -45,8 +45,6 @@ const (
 	VertexTypeCount__
 )
 
-const vertexTypeBits = 5
-
 // Decode reports the scalar kind and component count this format presents to
 // the shader that reads it, and VertexScalarNone with zero for a type that is
 // not a vertex format.

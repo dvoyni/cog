@@ -1,8 +1,10 @@
-package types
+package internal
 
 import (
 	"encoding/binary"
 	"hash/maphash"
+
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
 // fingerprintSeed is fixed for the process, so a fingerprint compares only
@@ -22,20 +24,20 @@ var fingerprintSeed = maphash.MakeSeed()
 // otherwise write the comparison itself, and a hand-written type switch would
 // silently mis-key every kind or field it forgot - and mis-keying merges two
 // draws that differ, which draws the wrong picture rather than costing a batch.
-func FingerprintParams(params []ShaderParameterDescr) uint64 {
+func FingerprintParams(params []types.ShaderParameterDescr) uint64 {
 	var h maphash.Hash
 	h.SetSeed(fingerprintSeed)
 	for i := range params {
-		params[i].fingerprint(&h)
+		fingerprintParam(&h, &params[i])
 	}
 	return h.Sum64()
 }
 
-func (p *ShaderParameterDescr) fingerprint(h *maphash.Hash) {
+func fingerprintParam(h *maphash.Hash, p *types.ShaderParameterDescr) {
 	h.WriteString(p.Name)
 	writeUint(h, uint64(p.Kind))
 	switch p.Kind {
-	case ShaderParameterKindTexture:
+	case types.ShaderParameterKindTexture:
 		// The three cases are disjoint, so the id, the path and the blob say
 		// between them which one this is: there is no source term to fold in.
 		t := &p.Texture
@@ -44,14 +46,14 @@ func (p *ShaderParameterDescr) fingerprint(h *maphash.Hash) {
 		writeUint(h, uint64(t.Params.Width)|uint64(t.Params.Height)<<32)
 		writeUint(h, uint64(t.Params.Format)|boolBit(t.Params.Mipmaps)<<8)
 		maphash.WriteComparable(h, t.Blob)
-	case ShaderParameterKindBuffer:
+	case types.ShaderParameterKindBuffer:
 		b := &p.Buffer
 		writeUint(h, uint64(b.ID))
 		writeUint(h, uint64(b.Size))
 		maphash.WriteComparable(h, b.Bytes)
 		writeUint(h, uint64(p.BufferOffset)|uint64(p.BufferSize)<<32)
-	case ShaderParameterKindRaw, ShaderParameterKindFloat, ShaderParameterKindVec4,
-		ShaderParameterKindMat4, ShaderParameterKindColor:
+	case types.ShaderParameterKindRaw, types.ShaderParameterKindFloat, types.ShaderParameterKindVec4,
+		types.ShaderParameterKindMat4, types.ShaderParameterKindColor:
 		// The kind is already hashed above, which is what keeps a color and a
 		// vec4 of the same components apart: they are the same bytes, and a
 		// fingerprint that merged them would merge two batches that inspect
@@ -63,7 +65,7 @@ func (p *ShaderParameterDescr) fingerprint(h *maphash.Hash) {
 		} else {
 			h.Write(p.Small[:p.SmallLen])
 		}
-	case ShaderParameterKindSampler:
+	case types.ShaderParameterKindSampler:
 		s := &p.Sampler
 		writeUint(h, uint64(s.AddressU)|uint64(s.AddressV)<<8|uint64(s.Mag)<<16|
 			uint64(s.Min)<<24|uint64(s.Mip)<<32|uint64(s.Anisotropy)<<40|

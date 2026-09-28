@@ -51,7 +51,7 @@ func TestMaybeCrossesJSONAsAPointerDid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if got, want := string(encoded), `{"from":0,"size":{"X":1,"Y":2}}`; got != want {
+	if got, want := string(encoded), `{"from":0,"size":{"x":1,"y":2}}`; got != want {
 		t.Fatalf("encoded = %s, want %s", got, want)
 	}
 

@@ -21,7 +21,10 @@ const smallestNormalFloat64 = 2.2250738585072014e-308
 // jakecoffman/cp v2.4.0 (MIT, Copyright (c) 2017 Jake Coffman), checked against
 // Chipmunk2D f2f3d66 (MIT, Copyright (c) 2007-2015 Scott Lembcke and Howling
 // Moon Software), and keep their algorithms.
-type Vec2d struct{ X, Y float64 }
+type Vec2d struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+}
 
 func NewVec2d(values ...float64) Vec2d {
 	switch len(values) {

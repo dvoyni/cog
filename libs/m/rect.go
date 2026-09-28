@@ -1,7 +1,18 @@
 package m
 
-type Rect struct{ X, Y, Width, Height float32 }
-type Recti struct{ X, Y, Width, Height int }
+type Rect struct {
+	X      float32 `json:"x"`
+	Y      float32 `json:"y"`
+	Width  float32 `json:"width"`
+	Height float32 `json:"height"`
+}
+
+type Recti struct {
+	X      int `json:"x"`
+	Y      int `json:"y"`
+	Width  int `json:"width"`
+	Height int `json:"height"`
+}
 
 func (rect Rect) Normalize() Rect {
 	if rect.Width < 0 {

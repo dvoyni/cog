@@ -2,6 +2,7 @@ package internal
 
 import (
 	"cmp"
+	"github.com/dvoyni/cog/libs/m"
 	"slices"
 	"sort"
 
@@ -54,7 +55,7 @@ type ResourceOp struct {
 	TexW, TexH int
 	TexLayers  int
 	TexLayer   int
-	Region     types.Region
+	Region     m.Recti
 	Format     types.TextureFormat
 	Mipmaps    bool
 	Renderable bool
@@ -341,7 +342,7 @@ func (q *OpQueue) temporaryTexture(width, height int, format types.TextureFormat
 	}
 	q.resources = append(q.resources, ResourceOp{
 		Kind: OpUpdateTexture, TextureID: texture.Params.ID,
-		Region: types.Region{Width: width, Height: height}, Bytes: pixels,
+		Region: m.Recti{Width: width, Height: height}, Bytes: pixels,
 	})
 	return texture
 }

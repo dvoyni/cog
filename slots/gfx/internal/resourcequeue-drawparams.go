@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"github.com/dvoyni/cog/libs/m"
 	"slices"
 
 	"github.com/dvoyni/cog/kernel"
@@ -231,7 +232,7 @@ func (q *ResourceQueue) durableTexture(texture types.TextureDescr) (bindingValue
 			break
 		}
 		baked := q.NewTexture(width, height, 1, texture.Params.Format, texture.Params.Mipmaps)
-		q.UploadTexture(baked, 0, types.Region{}, texture.Blob.Data(), texture.Params.CopyData)
+		q.UploadTexture(baked, 0, m.Recti{}, texture.Blob.Data(), texture.Params.CopyData)
 		value.texture, value.layers, value.owned = baked.Params.ID, 1, true
 	}
 	return value, true

@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"github.com/dvoyni/cog/libs/m"
 	"testing"
 
 	"github.com/dvoyni/cog/libs/assets"
@@ -112,7 +113,7 @@ func TestARerenderedFrameDropsADrawWhoseSetWasReleased(t *testing.T) {
 				w.other = q.UploadBuffer(q.NewBuffer(), make([]byte, 64), true)
 				w.versioned = q.UploadBuffer(q.NewBuffer(), make([]byte, 64), true)
 				w.texture = q.NewTexture(1, 1, 1, types.FormatRGBA8, false)
-				q.UploadTexture(w.texture, 0, types.Region{}, []byte{1, 2, 3, 4}, true)
+				q.UploadTexture(w.texture, 0, m.Recti{}, []byte{1, 2, 3, 4}, true)
 			})
 			w.set = w.newSet(types.DrawState{}, types.ShaderParameterTexture("albedo", w.texture))
 			w.unrelated = w.newSet(types.DrawState{})

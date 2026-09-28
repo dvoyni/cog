@@ -19,9 +19,9 @@ package m
 // Component that says where an Entity stands: the ecs plugin registers its one
 // Store, and every binding reads that Store rather than a copy of its own.
 type Transform struct {
-	Position Vec3
-	Rotation Quat
-	Scale    Vec3 // all zero means (1,1,1); otherwise literal
+	Position Vec3 `json:"position"`
+	Rotation Quat `json:"rotation"`
+	Scale    Vec3 `json:"scale"` // all zero means (1,1,1); otherwise literal
 }
 
 // At is the transform of a thing standing at a point, unrotated and unscaled.

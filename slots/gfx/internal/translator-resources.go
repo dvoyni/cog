@@ -79,7 +79,7 @@ func (t *translator) releaseShader(backend Backend, id types.ShaderID) {
 func (t *translator) ensurePipeline(
 	backend Backend, shaderID types.ShaderID, program shader.ShaderProgram, m *types.MeshDescr, state types.DrawState, pass types.PassDescr,
 ) (types.PipelineID, error) {
-	layout, ok := types.VertexLayoutKeyOf(m.Layout)
+	layout, ok := VertexLayoutKeyOf(m.Layout)
 	if !ok {
 		return 0, nil
 	}

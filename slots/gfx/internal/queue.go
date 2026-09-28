@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"github.com/dvoyni/cog/libs/m"
 	"slices"
 
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
@@ -71,7 +72,7 @@ type textureBake struct {
 	mipmaps    bool
 	renderable bool
 	layer      int
-	region     types.Region
+	region     m.Recti
 	data       []byte
 }
 
@@ -128,7 +129,7 @@ type BakeSink interface {
 	BakeBuffer(types.BufferID, types.BufferKind, int, []byte)
 	BakeTexture(types.TextureID, int, int, types.TextureFormat, []byte, bool)
 	AllocateTexture(types.TextureID, TextureDesc)
-	UpdateTexture(types.TextureID, int, types.Region, []byte)
+	UpdateTexture(types.TextureID, int, m.Recti, []byte)
 }
 
 // RenderPass receives render commands in recording order.
@@ -368,7 +369,7 @@ func (q *Queue) AllocateTexture(id types.TextureID, desc TextureDesc) {
 	})
 }
 
-func (q *Queue) UpdateTexture(id types.TextureID, layer int, region types.Region, pixels []byte) {
+func (q *Queue) UpdateTexture(id types.TextureID, layer int, region m.Recti, pixels []byte) {
 	q.textureBakes = append(q.textureBakes, textureBake{
 		kind: textureBakeUpdate, id: id, layer: layer, region: region, data: pixels,
 	})
