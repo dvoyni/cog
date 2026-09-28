@@ -163,16 +163,46 @@ fn fs_main(in: HaloVertexOut) -> @location(0) vec4<f32> {
         // The tap count is derived here and published nowhere: a count right at
         // reach 6 bands at reach 30, and one right at 30 wastes taps at 6.
         //
-        // The spacings are the prototype's accepted setting read back as a rule.
-        // 4 rings and 12 spokes were judged right against painted art at a reach
-        // of about 6 screen pixels, which works out at one ring every 1.5 px and
-        // neighbouring taps about 3 px apart around the outermost ring; both
-        // hold that. The caps are the ranges the prototype's own controls
-        // explored, so past a reach of roughly 24 px the band softens rather
-        // than costing more.
+        // The spacings are the prototype's accepted setting, halved. The
+        // prototype judged 4 rings and 12 spokes right against painted art at a
+        // reach of about 6 screen pixels - one ring every 1.5 px, neighbouring
+        // taps about 3 px apart around the outermost ring - but localPerPixel
+        // comes from dpdx, so it is a DEVICE pixel, and that spacing therefore
+        // bought twice the angular and radial resolution on a HiDPI display
+        // than it did on the display it was judged on. The band is a smooth
+        // falloff with a plateau; the extra resolution was not visible, and it
+        // was not cheap. Paid for at reach 8.75 on a 128-unit mark at dpr 2, it
+        // was 444 taps a fragment over a quad grown by the reach on every side,
+        // on every one of a campaign map's ~50 always-visible landmarks: enough
+        // to put Safari at 40 fps where a 4-tap kernel over the same geometry
+        // held 60. Doubling both spacings quarters the taps and leaves the band
+        // indistinguishable.
+        //
+        // The caps halve with them, which keeps the reach they bite at: rings
+        // still caps at pixels 24 and spokes at about 23, so past a reach of
+        // roughly 24 px the band still softens rather than costing more.
+        //
+        // The honest fix is to divide pixels by the framebuffer scale, so the
+        // density is per logical pixel and a dpr-1 display is not quietly
+        // halved along with a dpr-2 one - but CanvasUniforms does not carry
+        // that scale and HaloProfile would have to grow a field to pass it.
         let pixels = max(reach / max(localPerPixel, 0.0001), 1.0);
-        let rings = clamp(i32(ceil(pixels / 1.5)), 1, 16);
-        let spokes = clamp(i32(ceil(haloTau * pixels / 3.0)), 4, 48);
+        let rings = clamp(i32(ceil(pixels / 3.0)), 1, 8);
+        let spokes = clamp(i32(ceil(haloTau * pixels / 6.0)), 4, 24);
+
+        // Under the ink the band is already at full strength and no tap can beat
+        // it: every tap is an alpha in [0,1] scaled by a weight in [0,1], so
+        // best never exceeds 1. A fragment inside the frame whose own texel is
+        // opaque has its answer before the kernel runs. That is a third of a
+        // haloed quad on feuds' art, and the sample is needed after the loop
+        // anyway, so it costs nothing to take it first.
+        var own = 0.0;
+        if all(in.uv >= lo) && all(in.uv <= hi) {
+            own = textureSampleLevel(canvasTexture, canvasSampler, in.uv, in.atlasLayer, 0.0).a;
+            if own >= 1.0 {
+                return vec4<f32>(in.tint.rgb, in.tint.a);
+            }
+        }
 
         var best = 0.0;
         for (var ring = 1; ring <= rings; ring = ring + 1) {
@@ -195,11 +225,9 @@ fn fs_main(in: HaloVertexOut) -> @location(0) vec4<f32> {
         }
         // Under the silhouette the band is at full strength, not only outside
         // it - otherwise an antialiased glyph edge blends against the backdrop
-        // through the gap between the ink and the band.
-        if all(in.uv >= lo) && all(in.uv <= hi) {
-            best = max(best, textureSampleLevel(canvasTexture, canvasSampler, in.uv, in.atlasLayer, 0.0).a);
-        }
-        coverage = best;
+        // through the gap between the ink and the band. own is that texel,
+        // already sampled above.
+        coverage = max(best, own);
     }
 
     // The band, and nothing else. The atlas was sampled for alpha only and the
