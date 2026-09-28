@@ -22,3 +22,7 @@ func (mode FilterMode) String() string {
 	}
 	return "unknown(" + strconv.Itoa(int(mode)) + ")"
 }
+
+// MarshalText names the value in a JSON document, so a snapshot spells it
+// rather than numbering it.
+func (mode FilterMode) MarshalText() ([]byte, error) { return []byte(mode.String()), nil }

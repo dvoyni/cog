@@ -1,6 +1,7 @@
 package shader
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -197,6 +198,18 @@ func (d ShaderDescr) Path() string { return d.Name }
 // NAME and a const NAME=value. It is part of the shader's identity: one path
 // under two supplies is two shaders.
 func (d ShaderDescr) Supply() string { return d.Params.supply }
+
+// MarshalJSON names the shader variant for a snapshot: the root source's path,
+// or that it was inline text, and the supply, which is part of the name - one
+// path under two supplies is two shaders. Inline text is not reported: a whole
+// WGSL source is not an identity, and it would swamp every draw that used one.
+func (d ShaderDescr) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Path   string `json:"path,omitempty"`
+		Inline bool   `json:"inline,omitempty"`
+		Supply string `json:"supply,omitempty"`
+	}{d.Name, d.Name == "", d.Params.supply})
+}
 
 // supplyEntries splits the canonical supply back into its defines and consts.
 // It is meaningful only for a supply that is not malformed.

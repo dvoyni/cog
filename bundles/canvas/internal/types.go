@@ -345,7 +345,7 @@ type OpView struct {
 	// Path and Transform describe a sprite, and Texture the gfx texture it
 	// samples where it named one instead of a resource path.
 	Path      string               `json:"path,omitempty"`
-	Texture   *gfx.TextureView     `json:"texture,omitempty"`
+	Texture   *gfx.TextureDescr    `json:"texture,omitempty"`
 	Transform *SpriteTransformView `json:"transform,omitempty"`
 	// FontPath, Text and Draw describe a text op.
 	FontPath string        `json:"fontPath,omitempty"`
@@ -364,10 +364,10 @@ type OpView struct {
 	// Material is the material the op named, and its absence means the op named
 	// none: such a draw resolves to the layer's material set and then to the
 	// built-in for its family, both at flush.
-	Material *MaterialView `json:"material,omitempty"`
+	Material *Material `json:"material,omitempty"`
 	// Params are the parameters recorded with the op, each carrying the live
 	// arm of its union and nothing else.
-	Params []gfx.ParameterView `json:"params,omitempty"`
+	Params []gfx.ShaderParameterDescr `json:"params,omitempty"`
 }
 
 // SpriteTransformView is one sprite's placement, with its enum named and its
@@ -408,8 +408,8 @@ type SpriteFrameView struct {
 // TextDrawView is one text op's layout and colour.
 //
 // It carries neither the draw's material nor its parameters, and that is not
-// an omission: the op reports both already, its Material through the same
-// MaterialView every other op uses and its Params as the recorded list, which
+// an omission: the op reports both already, its Material the way
+// every other op does and its Params as the recorded list, which
 // for a text op is the draw's own.
 type TextDrawView struct {
 	Position []float32 `json:"position"`
@@ -438,22 +438,4 @@ type RectView struct {
 	Y      float32 `json:"y"`
 	Width  float32 `json:"width"`
 	Height float32 `json:"height"`
-}
-
-// MaterialView is one canvas material as an agent reads it: its shader, its
-// pipeline state with the enums named, and its own parameters. It is the shape
-// gfx's material view had, kept by canvas now that the material is canvas's.
-type MaterialView struct {
-	Shader     gfx.ShaderView      `json:"shader"`
-	State      gfx.DrawStateView   `json:"state"`
-	Parameters []gfx.ParameterView `json:"parameters,omitempty"`
-}
-
-// MaterialViewOf renders one material.
-func MaterialViewOf(material Material) MaterialView {
-	return MaterialView{
-		Shader:     gfx.ShaderViewOf(material.shader),
-		State:      gfx.DrawStateViewOf(material.state),
-		Parameters: gfx.ParameterViewsOf(material.params),
-	}
 }

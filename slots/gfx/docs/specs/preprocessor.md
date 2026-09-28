@@ -1029,6 +1029,9 @@ A fixed six-entry table maps the C, GLSL and naga_oil habits onto a message:
 No fuzzy matching, no edit distance. It is the cheapest diagnostic on the list,
 and the split confirmed `#ifdef` is what a C habit actually reaches for.
 
+> **Amended.** The table is removed. An unknown directive reports only the word
+> it names, as any other unknown directive does.
+
 ### Two facts worth carrying into implementation
 
 - **The pure-Go backend swallows WGSL compile errors.**

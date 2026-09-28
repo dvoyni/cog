@@ -41,3 +41,7 @@ func (compare CompareFunc) String() string {
 	}
 	return "unknown(" + strconv.Itoa(int(compare)) + ")"
 }
+
+// MarshalText names the value in a JSON document, so a snapshot spells it
+// rather than numbering it.
+func (compare CompareFunc) MarshalText() ([]byte, error) { return []byte(compare.String()), nil }

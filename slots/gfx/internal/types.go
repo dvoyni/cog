@@ -115,9 +115,9 @@ type DrawParamsView struct {
 	State string `json:"state"`
 	// Shader is the shader the set draws with, and Label its program's label:
 	// the root path, or gfx.shader for inline text, and its supply.
-	Shader    types.ShaderID `json:"shader,omitempty"`
-	Label     string         `json:"label,omitempty"`
-	DrawState *DrawStateView `json:"drawState,omitempty"`
+	Shader    types.ShaderID   `json:"shader,omitempty"`
+	Label     string           `json:"label,omitempty"`
+	DrawState *types.DrawState `json:"drawState,omitempty"`
 	// Bindings are every binding the shader declares, in its program's order,
 	// present for a set that is live or whose shader was released.
 	Bindings []DrawParamsBindingView `json:"bindings,omitempty"`
@@ -148,10 +148,10 @@ type DrawParamsBindingView struct {
 	Size int `json:"size,omitempty"`
 	// Texture is a texture's id, or Path the resource path the render thread's
 	// cache resolves it from; Dimension is what the shader declares it as.
-	Texture   types.TextureID `json:"texture,omitempty"`
-	Path      string          `json:"path,omitempty"`
-	Dimension string          `json:"dimension,omitempty"`
-	Sampler   *SamplerView    `json:"sampler,omitempty"`
+	Texture   types.TextureID    `json:"texture,omitempty"`
+	Path      string             `json:"path,omitempty"`
+	Dimension string             `json:"dimension,omitempty"`
+	Sampler   *types.SamplerDesc `json:"sampler,omitempty"`
 	// Buffer is a storage buffer's id, and Offset and Range the slice of it
 	// bound; a zero Range is the whole buffer from Offset.
 	Buffer types.BufferID `json:"buffer,omitempty"`

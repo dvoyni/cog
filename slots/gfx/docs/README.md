@@ -359,32 +359,22 @@ either agree on that number or they have split, and the agent can see which.
 Making them agree is `app_time hold`'s job; saying whether they did is this
 field's.
 
-### The shared view types
+### Snapshots
 
-gfx also declares the vocabulary every cog snapshot shares, in
-[`internal/views.go`](../internal/views.go), aliased in `types.go`: `ParameterView`, `TextureView`, `ShaderView`,
-`DrawStateView`, `DrawParamsView`, and
-`SnapshotView` — the three coordinate sizes, the tick the snapshot describes,
-and the step fields, all of which every snapshot response carries. `canvas` and `ui` embed them, so one value reaches an agent in
-one shape whichever tool showed it.
+The descriptors marshal themselves for the snapshots an agent reads:
+`TextureDescr`, `BufferDescr`, `ShaderParameterDescr` and `ShaderDescr` carry a
+`MarshalJSON`, `SamplerDesc` and `DrawState` carry json tags, and the enums they
+hold marshal as their `String` names. `canvas` and `ui` embed the descriptors in
+their own snapshot documents, so one value reaches an agent in one shape
+whichever tool showed it. Two rules hold for all of them:
 
-They exist because every gfx descriptor has entirely unexported fields, so
-`json.Marshal` over one yields `{}`. The rejected repair — an `unsafe` cast to a
-mirror struct with public fields — fails four ways: it emits the dead half of a
-tagged union, it base64s inline pixel data into the reply, it puts JSON in gfx's
-public contract for every cog app, and nothing checks that the mirror still
-matches the struct it shadows. Each view is built through gfx's own union-aware
-accessors instead, which the compiler checks. Two rules hold across all of them:
-a tagged union serializes to exactly one value, and bulk bytes never travel —
-inline pixels and raw parameter data are reported as a byte count.
+- A tagged union serializes to exactly one value. A parameter that is one float
+  carries one number, not the fields another kind would use.
+- Bulk bytes never travel. Inline pixels, buffer bytes and raw parameter data
+  are reported as a byte count and left where they are.
 
-The views spell every enum by name. The GPU vocabulary's enums spell themselves
-through `Name()` methods (`gfx.FilterMode.Name()`, which `canvas` also
-reads for every sprite transform, so one filter reaches an agent in one
-spelling whichever tool showed it). They are `Name` rather than `String`, so
-formatting an enum with `%v` still prints its number. The tables for gfx's own
-recording enums stay in `internal/` as functions, because naming them for a debug document
-is not a commitment to render them for every cog app.
+`SnapshotView` is the header every snapshot response carries: the three
+coordinate sizes, the tick the snapshot describes, and the step fields.
 
 The full contract is in [specs/capture.md](specs/capture.md) and
 [specs/mcp.md](specs/mcp.md); both capabilities those documents
@@ -768,9 +758,8 @@ type Backend interface {
     NewPipeline(PipelineDesc) (PipelineID, error)
     FreePipeline(PipelineID)
     ScreenFramebuffer() (TextureViewID, int, int)
-    TextureView(TextureID, mip, layer int) TextureViewID
     TextureFormat(TextureID) (TextureFormat, bool)
-    Limits() Limits
+    Limits() PipelineLimits
     Execute(*Queue)
     TakeCapture() (Capture, bool)
     Ready() bool

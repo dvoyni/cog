@@ -96,7 +96,7 @@ type hoistedDiagnostic struct {
 // condLine is the conditional directive one flattened line was, if any.
 type condLine struct {
 	kind directiveKind
-	expr condExpr
+	expr conditionExpression
 	at   ShaderLocation
 }
 
@@ -104,7 +104,7 @@ type condLine struct {
 type lineScan struct {
 	kind    directiveKind
 	arg     string
-	expr    condExpr
+	expr    conditionExpression
 	openIf  ShaderLocation // the innermost open #if; zero at depth 0
 	nesting int
 }

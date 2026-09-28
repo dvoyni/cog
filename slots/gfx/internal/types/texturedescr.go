@@ -1,6 +1,8 @@
 package types
 
 import (
+	"encoding/json"
+
 	"github.com/dvoyni/cog/libs/assets"
 )
 
@@ -79,4 +81,33 @@ func TextureWithBytes(width, height int, format TextureFormat, pixels []byte, co
 			Width: width, Height: height, Format: format, CopyData: copyData, Mipmaps: mipmaps,
 		},
 	}
+}
+
+// MarshalJSON reports where the texture comes from, how big it is, and how many
+// bytes of pixels it carries - never the pixels: bulk bytes never travel in a
+// snapshot. Its source is read off
+// whichever field carries the answer, since the three cases are disjoint.
+func (t TextureDescr) MarshalJSON() ([]byte, error) {
+	source := "none"
+	switch {
+	case t.Params.ID != 0:
+		source = "baked"
+	case t.Name != "":
+		source = "resource"
+	case t.Blob.Len() != 0:
+		source = "bytes"
+	}
+	return json.Marshal(struct {
+		Source  string        `json:"source"`
+		Path    string        `json:"path,omitempty"`
+		ID      TextureID     `json:"id,omitempty"`
+		Width   int           `json:"width,omitempty"`
+		Height  int           `json:"height,omitempty"`
+		Format  TextureFormat `json:"format"`
+		Mipmaps bool          `json:"mipmaps,omitempty"`
+		Bytes   int           `json:"bytes,omitempty"`
+	}{
+		source, t.Name, t.Params.ID, t.Params.Width, t.Params.Height,
+		t.Params.Format, t.Params.Mipmaps, t.Blob.Len(),
+	})
 }

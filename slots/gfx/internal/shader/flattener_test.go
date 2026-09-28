@@ -145,26 +145,6 @@ func TestUnknownDirectiveNamesTheWord(t *testing.T) {
 	}
 }
 
-// The named-misspelling table is fixed and six entries long: no fuzzy matching,
-// no edit distance. It is the cheapest diagnostic on the list, and #ifdef is
-// what a C habit actually reaches for.
-func TestNamedMisspellingsSayTheSpelling(t *testing.T) {
-	tests := map[string]string{
-		"#ifdef X":       "`#if NAME`",
-		"#ifndef X":      "`#if !NAME`",
-		"#elseif X":      "`#elif`",
-		"#end":           "`#endif`",
-		"#undef X":       "no equivalent",
-		"#import x.wgsl": "`#include`",
-	}
-	for source, want := range tests {
-		err := flattenErr(t, map[string]string{"s.wgsl": source + "\n"}, ShaderWithResource("s.wgsl"))
-		if !strings.Contains(err.Message, want) {
-			t.Errorf("%q: message %q does not offer %q", source, err.Message, want)
-		}
-	}
-}
-
 // What an editor's comment-toggle produces is inert, not an error: a directive
 // commented out is a directive the author disabled.
 func TestCommentedOutDirectivesAreInert(t *testing.T) {

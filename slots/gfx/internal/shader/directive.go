@@ -20,36 +20,33 @@ const (
 	dirEndif
 )
 
-var directiveKeywords = map[string]directiveKind{
-	"include": dirInclude,
-	"define":  dirDefine,
-	"const":   dirConst,
-	"if":      dirIf,
-	"elif":    dirElif,
-	"else":    dirElse,
-	"endif":   dirEndif,
+// directiveKeywords spells each kind, indexed by it; dirNone has no spelling.
+var directiveKeywords = [...]string{
+	dirNone:    "?",
+	dirInclude: "include",
+	dirDefine:  "define",
+	dirConst:   "const",
+	dirIf:      "if",
+	dirElif:    "elif",
+	dirElse:    "else",
+	dirEndif:   "endif",
 }
+
+// directiveKinds is directiveKeywords the other way round: the kind each
+// keyword names, for reading a directive line.
+var directiveKinds = func() map[string]directiveKind {
+	kinds := make(map[string]directiveKind, len(directiveKeywords))
+	for kind := dirInclude; int(kind) < len(directiveKeywords); kind++ {
+		kinds[directiveKeywords[kind]] = kind
+	}
+	return kinds
+}()
 
 func (k directiveKind) String() string {
-	for keyword, kind := range directiveKeywords {
-		if kind == k {
-			return "#" + keyword
-		}
+	if k <= dirNone || int(k) >= len(directiveKeywords) {
+		k = dirNone
 	}
-	return "#?"
-}
-
-// directiveMisspellings maps the C, GLSL and naga_oil habits onto the spelling
-// this language uses. A fixed table with no fuzzy matching and no edit
-// distance: it is the cheapest diagnostic on the list, and #ifdef is what a C
-// habit actually reaches for.
-var directiveMisspellings = map[string]string{
-	"ifdef":  "this language spells it `#if NAME`",
-	"ifndef": "this language spells it `#if !NAME`",
-	"elseif": "this language spells it `#elif`",
-	"end":    "this language spells it `#endif`",
-	"undef":  "this language has no equivalent",
-	"import": "this language spells it `#include`",
+	return "#" + directiveKeywords[k]
 }
 
 // directive is one line's parsed preprocessor directive.
@@ -88,7 +85,7 @@ func parseDirective(line string) directive {
 		end++
 	}
 	keyword := rest[:end]
-	kind, known := directiveKeywords[keyword]
+	kind, known := directiveKinds[keyword]
 	return directive{
 		kind:    kind,
 		keyword: keyword,
@@ -102,18 +99,12 @@ func isKeywordByte(b byte) bool {
 	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
 }
 
-// unknownDirectiveMessage names the word a reserved sigil was followed by, and
-// the spelling this language uses when the word is a known habit from another
-// preprocessor.
+// unknownDirectiveMessage names the word a reserved sigil was followed by.
 func unknownDirectiveMessage(keyword string) string {
 	if keyword == "" {
 		return "unknown directive: a keyword must follow the sigil immediately, with no space"
 	}
-	message := "unknown directive `#" + keyword + "`"
-	if advice, ok := directiveMisspellings[keyword]; ok {
-		return message + "; " + advice
-	}
-	return message
+	return "unknown directive `#" + keyword + "`"
 }
 
 // blankComments replaces every comment in a source with spaces, line by line,

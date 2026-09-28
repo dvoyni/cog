@@ -227,17 +227,17 @@ func layerViewOf(layerID Layer, value LayerOps) LayerView {
 func opViewOf(index int, op Op, expand bool) OpView {
 	view := OpView{
 		Index: index, Kind: opKindName(op.Kind), Layer: int(op.Layer),
-		Params: gfx.ParameterViewsOf(op.Params),
+		Params: slices.Clone(op.Params),
 	}
 	if op.HasClip {
 		view.Clip = m.Some(rectViewOf(op.Clip))
 	}
 	if op.HasMaterial {
-		material := MaterialViewOf(op.Material)
+		material := op.Material
 		view.Material = &material
 	}
 	if op.HasTexture {
-		texture := gfx.TextureViewOf(op.Texture)
+		texture := op.Texture
 		view.Texture = &texture
 	}
 	switch op.Kind {

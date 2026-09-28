@@ -566,36 +566,6 @@ type ReleaseSink = internal.ReleaseSink
 // failure mode worth spending a field on.
 type SnapshotView = internal.SnapshotView
 
-// ParameterView is one shader parameter rendered for an agent: its name, which
-// of the union's arms it is, and that arm's value alone.
-type ParameterView = internal.ParameterView
-
-// TextureView is one texture rendered for an agent: where it came from, how
-// big it is, and how many bytes of pixels it is carrying - never the pixels.
-//
-// The name is the one the spec family agreed on across three tools. It is not
-// a GPU texture view; that is TextureViewDimension and TextureViewID, which
-// are a different thing gfx also has.
-type TextureView = internal.TextureView
-
-// BufferView is one buffer rendered for an agent, plus the slice of it a
-// parameter binds when a parameter is what produced the view.
-type BufferView = internal.BufferView
-
-// SamplerView is one sampler rendered for an agent, with every mode named
-// rather than numbered: a sampler is small enough to report whole, and an
-// enum ordinal in a debug dump is a lookup an agent cannot perform.
-type SamplerView = internal.SamplerView
-
-// ShaderView names one shader variant. A root source plus one supply is one
-// variant, so the supply is part of the name rather than a detail beside it.
-type ShaderView = internal.ShaderView
-
-// DrawStateView is a set's fixed pipeline state with its enums named. Depth
-// compare and depth write are separate here because they are separate in the
-// engine: test but do not write is a state 3D needs and one flag cannot say.
-type DrawStateView = internal.DrawStateView
-
 // ViewportMode selects how the logical viewport responds to window aspect
 // changes. ViewportWindow uses the window dimensions directly; fixed modes keep
 // one dimension constant; Fit shows the full desired rectangle, while Cover

@@ -6,9 +6,9 @@ package types
 // zero value is both the WebGPU default and what the backend did before the
 // field existed, so DrawState{} renders as it always has.
 type DrawState struct {
-	Blend        BlendMode
-	DepthCompare CompareFunc
-	DepthWrite   bool
-	Cull         CullMode
-	FrontFace    FrontFace
+	Blend        BlendMode   `json:"blend"`
+	DepthCompare CompareFunc `json:"depthCompare"`
+	DepthWrite   bool        `json:"depthWrite"`
+	Cull         CullMode    `json:"cull"`
+	FrontFace    FrontFace   `json:"frontFace"`
 }

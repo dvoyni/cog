@@ -54,3 +54,7 @@ func (k ShaderParameterKind) String() string {
 	}
 	return "none"
 }
+
+// MarshalText names the value in a JSON document, so a snapshot spells it
+// rather than numbering it.
+func (k ShaderParameterKind) MarshalText() ([]byte, error) { return []byte(k.String()), nil }

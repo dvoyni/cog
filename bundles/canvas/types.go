@@ -112,10 +112,6 @@ type FontMetrics = internal.FontMetrics
 // contract a custom shader is written against.
 type Material = internal.Material
 
-// MaterialView is one material as a draws snapshot renders it: its shader, its
-// pipeline state with the enums named, and its own parameters.
-type MaterialView = internal.MaterialView
-
 // MaterialSet is the shading a scope - the queue, a layer, a ui.Frame or a ui
 // element subtree - supplies to the draws beneath it that name none of their
 // own: one material per family (Sprite, Triangles, Texture), plus one parameter

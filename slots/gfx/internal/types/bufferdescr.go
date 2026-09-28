@@ -1,6 +1,8 @@
 package types
 
 import (
+	"encoding/json"
+
 	"github.com/dvoyni/cog/libs/assets"
 )
 
@@ -39,4 +41,22 @@ func BufferDescrWithId(id BufferID, size int) BufferDescr {
 // unchanged until the recorded frame is consumed or dropped.
 func BufferDescrWithBlob(data assets.Blob, copyData bool) BufferDescr {
 	return BufferDescr{Size: data.Len(), Bytes: data, CopyData: copyData}
+}
+
+// MarshalJSON reports where the buffer comes from and its size, and the inline
+// bytes it carries as a count, for the reason TextureDescr gives.
+func (b BufferDescr) MarshalJSON() ([]byte, error) {
+	source := "none"
+	switch {
+	case b.ID != 0:
+		source = "baked"
+	case b.Bytes.Len() != 0:
+		source = "bytes"
+	}
+	return json.Marshal(struct {
+		Source string   `json:"source"`
+		ID     BufferID `json:"id,omitempty"`
+		Size   int      `json:"size,omitempty"`
+		Bytes  int      `json:"bytes,omitempty"`
+	}{source, b.ID, b.Size, b.Bytes.Len()})
 }

@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"encoding/json"
 	"hash/maphash"
 
 	"github.com/dvoyni/cog/slots/gfx"
@@ -18,6 +19,16 @@ type Material struct {
 	shader gfx.ShaderDescr
 	state  gfx.DrawState
 	params []gfx.ShaderParameterDescr
+}
+
+// MarshalJSON renders the material as an agent reads it in a draws snapshot:
+// its shader, its pipeline state with the enums named, and its own parameters.
+func (material Material) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Shader     gfx.ShaderDescr            `json:"shader"`
+		State      gfx.DrawState              `json:"state"`
+		Parameters []gfx.ShaderParameterDescr `json:"parameters,omitempty"`
+	}{material.shader, material.state, material.params})
 }
 
 // NewMaterial describes a material from a shader and its own parameters, with

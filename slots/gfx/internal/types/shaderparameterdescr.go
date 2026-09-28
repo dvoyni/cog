@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"math"
 	"reflect"
 	"unsafe"
@@ -254,4 +255,47 @@ func (p *ShaderParameterDescr) Bytes() []byte {
 		return p.Raw.Data()
 	}
 	return p.Small[:p.SmallLen]
+}
+
+// MarshalJSON reports the parameter's name, its kind, and the value that kind
+// carries alone: a tagged union serializes to exactly one value, not the
+// fields another kind would use. A numeric value is its components in shader order - one for a
+// float, four for a color (r, g, b, a) or a vec4 (x, y, z, w), sixteen for a
+// mat4 - and a raw one only its length, since its bytes are laid out for one
+// shader and an agent can do nothing with them but carry them.
+func (p ShaderParameterDescr) MarshalJSON() ([]byte, error) {
+	document := struct {
+		Name         string              `json:"name"`
+		Kind         ShaderParameterKind `json:"kind"`
+		Value        []float32           `json:"value,omitempty"`
+		Texture      *TextureDescr       `json:"texture,omitempty"`
+		Sampler      *SamplerDesc        `json:"sampler,omitempty"`
+		Buffer       *BufferDescr        `json:"buffer,omitempty"`
+		BufferOffset uint32              `json:"bufferOffset,omitempty"`
+		BufferSize   uint32              `json:"bufferSize,omitempty"`
+		Bytes        int                 `json:"bytes,omitempty"`
+	}{Name: p.Name, Kind: p.Kind}
+	switch p.Kind {
+	case ShaderParameterKindFloat:
+		value, _ := p.FloatValue()
+		document.Value = []float32{value}
+	case ShaderParameterKindVec4:
+		value, _ := p.VecValue()
+		document.Value = []float32{value.X, value.Y, value.Z, value.W}
+	case ShaderParameterKindColor:
+		value, _ := p.ColorValue()
+		document.Value = []float32{value.R, value.G, value.B, value.A}
+	case ShaderParameterKindMat4:
+		value, _ := p.MatValue()
+		document.Value = value[:]
+	case ShaderParameterKindRaw:
+		document.Bytes = p.ValueSize()
+	case ShaderParameterKindTexture:
+		document.Texture = &p.Texture
+	case ShaderParameterKindSampler:
+		document.Sampler = &p.Sampler
+	case ShaderParameterKindBuffer:
+		document.Buffer, document.BufferOffset, document.BufferSize = &p.Buffer, p.BufferOffset, p.BufferSize
+	}
+	return json.Marshal(document)
 }

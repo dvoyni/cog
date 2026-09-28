@@ -54,7 +54,7 @@ func drawParamsViewOf(queue *OpQueue, resources *ResourceQueue, key drawParamsKe
 	if record.state != setLive && record.state != setFailed {
 		return view
 	}
-	state := DrawStateViewOf(record.drawState)
+	state := record.drawState
 	view.DrawState, view.Label = &state, record.program.Label()
 	if record.state != setLive {
 		return view
@@ -102,7 +102,7 @@ func drawParamsBindingViewOf(binding *shader.ShaderResource, value *bindingValue
 		view.Size = int(value.size)
 	case shader.ResourceSampler:
 		if value.supplied {
-			sampler := SamplerViewOf(value.sampler)
+			sampler := value.sampler
 			view.Sampler = &sampler
 		}
 	case shader.ResourceStorageBuffer:

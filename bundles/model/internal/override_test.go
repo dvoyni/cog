@@ -26,14 +26,13 @@ func TestEveryMemberOfTheMaterialBlockIsAParam(t *testing.T) {
 	ingredients := BundledIngredients(PbrDefaults{White: white, FlatNormal: white})
 	numbers := map[string]string{}
 	for _, param := range ingredients.Params {
-		view := gfx.ParameterViewOf(param)
-		if view.Texture != nil || view.Sampler != nil {
+		if !param.Kind.IsValue() {
 			continue
 		}
 		if _, twice := numbers[param.Name]; twice {
 			t.Errorf("%s is carried twice", param.Name)
 		}
-		numbers[param.Name] = view.Kind
+		numbers[param.Name] = param.Kind.String()
 	}
 	for _, name := range members {
 		kind, ok := numbers[name]

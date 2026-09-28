@@ -21,3 +21,7 @@ func (face FrontFace) String() string {
 	}
 	return "unknown(" + strconv.Itoa(int(face)) + ")"
 }
+
+// MarshalText names the value in a JSON document, so a snapshot spells it
+// rather than numbering it.
+func (face FrontFace) MarshalText() ([]byte, error) { return []byte(face.String()), nil }

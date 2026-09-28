@@ -119,7 +119,7 @@ func TestTheDefaultSceneShaderIsSetOnceAndReadBack(t *testing.T) {
 		t.Errorf("the default's source is %q, want %q", got.Source.Path(), source.Path())
 	}
 	if len(got.Params) != 1 || got.Params[0].Name != "fade" {
-		t.Errorf("the default's params are %v, want the fade the call passed", gfx.ParameterViewsOf(got.Params))
+		t.Errorf("the default's params are %v, want the fade the call passed", got.Params)
 	}
 
 	NewLookupAccess(kernel.Kernel{}, lookup).SetDefaultSceneShader(SceneShaderDescr{})

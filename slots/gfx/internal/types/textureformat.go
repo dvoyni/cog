@@ -49,3 +49,7 @@ func (f TextureFormat) String() string {
 		return fmt.Sprintf("texture format %d", f)
 	}
 }
+
+// MarshalText names the value in a JSON document, so a snapshot spells it
+// rather than numbering it.
+func (f TextureFormat) MarshalText() ([]byte, error) { return []byte(f.String()), nil }

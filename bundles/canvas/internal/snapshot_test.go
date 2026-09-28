@@ -683,7 +683,15 @@ func TestADrawsSnapshotIsWrittenToThePathTheAgentNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the written snapshot: %v", err)
 	}
-	var written drawsResponse
+	// The document is read back through the fields this checks: a descriptor
+	// reports counts and names in place of its bytes, so it does not decode
+	// back into itself.
+	var written struct {
+		Path string `json:"path"`
+		Ops  []struct {
+			Kind string `json:"kind"`
+		} `json:"ops"`
+	}
 	if err := json.Unmarshal(document, &written); err != nil {
 		t.Fatalf("the written snapshot is not JSON: %v", err)
 	}
@@ -773,10 +781,10 @@ func TestADrawsSnapshotReportsATextureParameterWithoutItsPixels(t *testing.T) {
 		t.Fatalf("ops = %d, want the one recorded", len(response.Ops))
 	}
 	op := response.Ops[0]
-	if op.Texture == nil || op.Texture.Width != 16 || op.Texture.Bytes != len(pixels) {
+	if op.Texture == nil || op.Texture.Params.Width != 16 || op.Texture.Blob.Len() != len(pixels) {
 		t.Fatalf("texture = %+v, want its size and a byte count", op.Texture)
 	}
-	if len(op.Params) != 1 || op.Params[0].Texture == nil {
+	if len(op.Params) != 1 || op.Params[0].Kind != gfx.ShaderParameterKindTexture {
 		t.Fatalf("params = %+v, want the texture parameter resolved", op.Params)
 	}
 	// Bulk bytes never travel: an inline texture in a reply is a base64

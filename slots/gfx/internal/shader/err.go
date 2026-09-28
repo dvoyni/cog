@@ -1,6 +1,7 @@
 package shader
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -115,3 +116,11 @@ func (e ErrShaderExceedsWebLimits) Error() string {
 	return fmt.Sprintf("gfx: shader %q declares %d %s; the web floor is %d (this device allows %d)",
 		e.Shader, e.Declared, e.Limit, e.Floor, e.Device)
 }
+
+// errMixedOperators is the one condition error worth naming, because the repair
+// is not obvious from "syntax error": there is no precedence between & and |,
+// so mixing them at one level does not compile rather than becoming a puzzle.
+var errMixedOperators = errors.New("`&` and `|` do not mix without parentheses; write `A | (B & C)` or `(A | B) & C`")
+
+// errEmptyCondition is an #if or #elif with nothing after it.
+var errEmptyCondition = errors.New("empty condition")
