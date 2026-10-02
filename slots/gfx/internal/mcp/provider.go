@@ -216,7 +216,7 @@ func collectCapture(
 func writeCapturePNG(path string, capture internal.Capture) error {
 	picture := capture.Image()
 	if picture == nil {
-		return internal.ErrCaptureUnsupported{Format: capture.Format}
+		return types.ErrCaptureUnsupported{Format: capture.Format}
 	}
 	file, err := os.Create(path)
 	if err != nil {
@@ -249,7 +249,7 @@ func captureRefusal(reason error, amount, interval int) error {
 	case errors.Is(reason, types.ErrCaptureNoTarget{}):
 		return mcp.Unavailable{Reason: "the game drew nothing to the screen in that frame"}
 	}
-	var unsupported internal.ErrCaptureUnsupported
+	var unsupported types.ErrCaptureUnsupported
 	if errors.As(reason, &unsupported) {
 		return mcp.Unavailable{Reason: unsupported.Error()}
 	}

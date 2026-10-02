@@ -25,7 +25,7 @@ func (t *translator) resolveSet(f *frame, op *DrawOp) (drawSet, bool) {
 	}
 	store := &f.resources.drawParams
 	id := uint32(op.Set)
-	if int(id) >= len(store.records) || store.records[id].state != setLive {
+	if int(id) >= len(store.records) || store.records[id].state != types.DrawParamsSetLive {
 		return drawSet{}, false
 	}
 	record := &store.records[id]

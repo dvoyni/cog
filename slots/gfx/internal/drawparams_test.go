@@ -667,7 +667,7 @@ func newSetBench(tb testing.TB) *setBench {
 	)
 	// The durable ops are replayed once, as the render does, and dropped.
 	b.translate(tb)
-	ResourceQueueReset(resources)
+	resources.reset()
 	return b
 }
 
@@ -760,7 +760,7 @@ func TestTheRegistryIsReadWhilePublished(t *testing.T) {
 	go func() {
 		defer close(done)
 		for id := uint32(1); id <= sets; id++ {
-			registry.publish(id, program, setLive)
+			registry.publish(id, program, types.DrawParamsSetLive)
 			if id%3 == 0 {
 				registry.release(id)
 			}
@@ -773,15 +773,15 @@ func TestTheRegistryIsReadWhilePublished(t *testing.T) {
 		default:
 		}
 		for id := uint32(1); id <= sets; id += 7 {
-			if state, seen := registry.state(id); state == setLive && !seen.Valid() {
+			if state, seen := registry.state(id); state == types.DrawParamsSetLive && !seen.Valid() {
 				t.Fatalf("set %d read live with no program", id)
 			}
 		}
 	}
-	if state, _ := registry.state(sets); state != setLive {
+	if state, _ := registry.state(sets); state != types.DrawParamsSetLive {
 		t.Errorf("the last set reads %d, want live", state)
 	}
-	if state, _ := registry.state(3); state != setReleased {
+	if state, _ := registry.state(3); state != types.DrawParamsSetReleased {
 		t.Errorf("a released set reads %d, want released", state)
 	}
 }

@@ -211,7 +211,7 @@ func (t *translator) translate(
 	f := &frame{k: k, fsys: files(), backend: backend, resources: resources, queue: queue}
 	var persistent []ResourceOp
 	if resources != nil {
-		persistent = ResourceQueueOps(resources)
+		persistent = resources.ops
 	}
 
 	var firstErr error
@@ -255,7 +255,7 @@ func (t *translator) translate(
 		}
 	}
 	translateResources(persistent)
-	translateResources(OpQueueResources(queue))
+	translateResources(queue.resources)
 
 	t.translatePasses(f, queue, &firstErr, capture, capturing)
 
@@ -275,9 +275,9 @@ func (t *translator) translatePasses(
 	f *frame, queue *OpQueue, firstErr *error,
 	capture types.CaptureDesc, capturing bool,
 ) {
-	passes := OpQueuePasses(queue)
+	passes := queue.passes
 	t.planPasses(queue)
-	if stray := OpQueueStrayDraws(queue); stray > 0 && *firstErr == nil {
+	if stray := queue.strayDraws; stray > 0 && *firstErr == nil {
 		*firstErr = types.ErrDrawWithoutPass{Count: stray}
 	}
 	// Attachment roles are per frame: the pool hands the same texture id to a
@@ -348,7 +348,7 @@ func (t *translator) translatePasses(
 // then write). A texture nothing has used as an attachment this frame is not
 // gfx's to order.
 func (t *translator) transitionRun(f *frame, head types.PassDescr, first, last int) {
-	passes := OpQueuePasses(f.queue)
+	passes := f.queue.passes
 	// Reads first: a texture this run samples has to have finished being written.
 	t.runSampled = t.runSampled[:0]
 	for j := first; j <= last; j++ {
@@ -415,7 +415,7 @@ func runPassDescr(head, tail types.PassDescr) types.PassDescr {
 // planPasses puts the frame's passes in run order: Order first, declaration
 // sequence breaking ties. Each pass already holds its own draws.
 func (t *translator) planPasses(queue *OpQueue) {
-	passes := OpQueuePasses(queue)
+	passes := queue.passes
 	t.passOrder = t.passOrder[:0]
 	for i := range passes {
 		t.passOrder = append(t.passOrder, i)

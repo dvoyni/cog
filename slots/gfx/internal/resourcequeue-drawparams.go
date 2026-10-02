@@ -14,7 +14,7 @@ import (
 // keeps the table they are read from pointer-free; the program is the record's
 // one reference, to data nothing ever writes.
 type setRecord struct {
-	state     setState
+	state     types.DrawParamsSet
 	shader    types.ShaderID
 	drawState types.DrawState
 	program   shader.ShaderProgram
@@ -73,12 +73,12 @@ func (q *ResourceQueue) NewDrawParams(k kernel.Kernel, shaderID types.ShaderID, 
 	program, ok := q.shaderProgram(shaderID)
 	if !ok {
 		q.reportNoProgram(k, id, shaderID)
-		store.records = append(store.records, setRecord{state: setFailed, shader: shaderID, drawState: state})
-		store.registry.publish(id, shader.ShaderProgram{}, setFailed)
+		store.records = append(store.records, setRecord{state: types.DrawParamsSetFailed, shader: shaderID, drawState: state})
+		store.registry.publish(id, shader.ShaderProgram{}, types.DrawParamsSetFailed)
 		return set
 	}
 	bindings := shader.ProgramBindings(program)
-	record := setRecord{state: setLive, shader: shaderID, drawState: state, program: program}
+	record := setRecord{state: types.DrawParamsSetLive, shader: shaderID, drawState: state, program: program}
 	record.values = store.claimValues(len(bindings))
 	size := 0
 	for i := range bindings {
@@ -99,7 +99,7 @@ func (q *ResourceQueue) NewDrawParams(k kernel.Kernel, shaderID types.ShaderID, 
 		}
 	}
 	store.records = append(store.records, record)
-	store.registry.publish(id, program, setLive)
+	store.registry.publish(id, program, types.DrawParamsSetLive)
 	q.applyDrawParams(k, id, "NewDrawParams", params)
 	return set
 }
@@ -112,7 +112,7 @@ func (q *ResourceQueue) NewDrawParams(k kernel.Kernel, shaderID types.ShaderID, 
 // through k once and the call ignored.
 func (q *ResourceQueue) UpdateDrawParams(k kernel.Kernel, set types.DrawStateID, params ...types.ShaderParameterDescr) {
 	id := uint32(set)
-	if q.namedSet(k, id, "UpdateDrawParams") != setLive {
+	if q.namedSet(k, id, "UpdateDrawParams") != types.DrawParamsSetLive {
 		return
 	}
 	q.applyDrawParams(k, id, "UpdateDrawParams", params)
@@ -124,7 +124,7 @@ func (q *ResourceQueue) UpdateDrawParams(k kernel.Kernel, set types.DrawStateID,
 func (q *ResourceQueue) ReleaseDrawParams(k kernel.Kernel, set types.DrawStateID) {
 	id := uint32(set)
 	// A failed set is released like a live one; its runs are empty.
-	if state := q.namedSet(k, id, "ReleaseDrawParams"); state != setLive && state != setFailed {
+	if state := q.namedSet(k, id, "ReleaseDrawParams"); state != types.DrawParamsSetLive && state != types.DrawParamsSetFailed {
 		return
 	}
 	store := &q.drawParams
@@ -139,19 +139,19 @@ func (q *ResourceQueue) ReleaseDrawParams(k kernel.Kernel, set types.DrawStateID
 	if record.bytes.count > 0 {
 		store.freeBytes = append(store.freeBytes, record.bytes)
 	}
-	*record = setRecord{state: setReleased, shader: record.shader}
+	*record = setRecord{state: types.DrawParamsSetReleased, shader: record.shader}
 	store.registry.release(id)
 }
 
 // namedSet returns the state of the set id names, reporting once under call
 // when it names none that exists. A set whose creation failed exists, and is no
 // mistake to name.
-func (q *ResourceQueue) namedSet(k kernel.Kernel, id uint32, call string) setState {
-	state := setUnknown
+func (q *ResourceQueue) namedSet(k kernel.Kernel, id uint32, call string) types.DrawParamsSet {
+	state := types.DrawParamsSetUnknown
 	if int(id) < len(q.drawParams.records) {
 		state = q.drawParams.records[id].state
 	}
-	if state != setLive && state != setFailed {
+	if state != types.DrawParamsSetLive && state != types.DrawParamsSetFailed {
 		reportSetNotLive(k, id, state, call)
 	}
 	return state

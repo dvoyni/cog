@@ -77,7 +77,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, _ any) error {
 	registrar.InitResource(&readyList{queue: newOpQueue(ids, sets)})
 	registrar.InitResource(resources)
 	registrar.InitResource(&types.Viewport{})
-	registrar.InitResource(&desiredViewport{})
+	registrar.InitResource(&types.DesiredViewport{})
 	registrar.HandleCommand[PresentCmd](p.presentCmdImpl)
 	registrar.HandleCommand[AcquireCmd](p.acquireCmdImpl)
 	registrar.HandleCommand[ReleaseCachedResourceCmd](p.releaseCachedResourceCmdImpl)
@@ -171,7 +171,7 @@ func (p *plugin) renderOnRender() (kernel.Lock, kernel.Observe[app.RenderEvent])
 			if capturing {
 				p.observer.Encoded()
 			}
-			ResourceQueueReset(queue)
+			queue.reset()
 		}
 }
 

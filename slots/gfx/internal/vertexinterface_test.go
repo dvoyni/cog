@@ -307,7 +307,7 @@ func TestABackendPipelineFailureReachesTheCallerOnce(t *testing.T) {
 	if len(reported) != 1 {
 		t.Fatalf("three frames reported %d errors, want 1: %v", len(reported), reported)
 	}
-	var failed ErrPipelineFailed
+	var failed types.ErrPipelineFailed
 	if !errors.As(reported[0], &failed) {
 		t.Fatalf("reported %v, want ErrPipelineFailed", reported[0])
 	}

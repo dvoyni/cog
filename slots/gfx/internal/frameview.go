@@ -15,12 +15,12 @@ import (
 // translator's own - Order first, declaration sequence breaking ties - so what
 // an agent reads as run order is the order the GPU sees.
 func FrameViewOf(queue *OpQueue, resources *ResourceQueue, filter string) FrameView {
-	view := FrameView{Filter: filter, PassCount: len(OpQueuePasses(queue))}
+	view := FrameView{Filter: filter, PassCount: len(queue.passes)}
 
-	draws := make([]int, len(OpQueuePasses(queue)))
-	instances := make([]int, len(OpQueuePasses(queue)))
-	for pass := range OpQueuePasses(queue) {
-		record := &OpQueuePasses(queue)[pass]
+	draws := make([]int, len(queue.passes))
+	instances := make([]int, len(queue.passes))
+	for pass := range queue.passes {
+		record := &queue.passes[pass]
 		draws[pass] = len(record.Draws)
 		for i := range record.Draws {
 			instances[pass] += record.Draws[i].Instances
@@ -30,19 +30,19 @@ func FrameViewOf(queue *OpQueue, resources *ResourceQueue, filter string) FrameV
 	}
 	// A stray draw is counted and dropped at record time, so it adds to the
 	// frame's draws but carries no instances.
-	view.StrayDraws = OpQueueStrayDraws(queue)
+	view.StrayDraws = queue.strayDraws
 	view.DrawCount += view.StrayDraws
 
-	order := make([]int, len(OpQueuePasses(queue)))
+	order := make([]int, len(queue.passes))
 	for i := range order {
 		order[i] = i
 	}
 	slices.SortStableFunc(order, func(a, b int) int {
-		return cmp.Compare(OpQueuePasses(queue)[a].Desc.Order, OpQueuePasses(queue)[b].Desc.Order)
+		return cmp.Compare(queue.passes[a].Desc.Order, queue.passes[b].Desc.Order)
 	})
 	seen := map[drawParamsKey]int{}
 	for run, index := range order {
-		desc := OpQueuePasses(queue)[index].Desc
+		desc := queue.passes[index].Desc
 		if filter != "" && desc.Label != filter {
 			view.OmittedPasses++
 			continue
@@ -51,8 +51,8 @@ func FrameViewOf(queue *OpQueue, resources *ResourceQueue, filter string) FrameV
 		view.DrawParams = appendDrawParamsViews(view.DrawParams, seen, queue, resources, index)
 	}
 
-	view.ResourceOps = appendResourceOpViews(view.ResourceOps, "durable", ResourceQueueOps(resources))
-	view.ResourceOps = appendResourceOpViews(view.ResourceOps, "frame", OpQueueResources(queue))
+	view.ResourceOps = appendResourceOpViews(view.ResourceOps, "durable", resources.ops)
+	view.ResourceOps = appendResourceOpViews(view.ResourceOps, "frame", queue.resources)
 	return view
 }
 

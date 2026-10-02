@@ -1,9 +1,8 @@
 package internal
 
 import (
-	"strconv"
-
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
+	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
 // drawParamsKey is one set under one of the frame's versions of it: what a
@@ -17,7 +16,7 @@ type drawParamsKey struct {
 // each set and version the first time a draw names it and counting every draw
 // against the entry. seen maps an entry to its position in dst.
 func appendDrawParamsViews(dst []DrawParamsView, seen map[drawParamsKey]int, queue *OpQueue, resources *ResourceQueue, index int) []DrawParamsView {
-	draws := OpQueuePasses(queue)[index].Draws
+	draws := queue.passes[index].Draws
 	for i := range draws {
 		op := &draws[i]
 		id := uint32(op.Set)
@@ -50,13 +49,13 @@ func drawParamsViewOf(queue *OpQueue, resources *ResourceQueue, key drawParamsKe
 	}
 	store := &resources.drawParams
 	record := &store.records[key.set]
-	view.State, view.Shader = setStateName(record.state), record.shader
-	if record.state != setLive && record.state != setFailed {
+	view.State, view.Shader = record.state.String(), record.shader
+	if record.state != types.DrawParamsSetLive && record.state != types.DrawParamsSetFailed {
 		return view
 	}
 	state := record.drawState
 	view.DrawState, view.Label = &state, record.program.Label()
-	if record.state != setLive {
+	if record.state != types.DrawParamsSetLive {
 		return view
 	}
 	if _, uploaded := resources.shaderProgram(record.shader); !uploaded {
@@ -138,18 +137,4 @@ func bindingKindViewName(kind shader.ResourceKind) string {
 		return "depthTexture"
 	}
 	return "texture"
-}
-
-func setStateName(state setState) string {
-	switch state {
-	case setUnknown:
-		return "unknown"
-	case setLive:
-		return "live"
-	case setFailed:
-		return "failed"
-	case setReleased:
-		return "released"
-	}
-	return "unknown(" + strconv.Itoa(int(state)) + ")"
 }

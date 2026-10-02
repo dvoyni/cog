@@ -26,7 +26,7 @@ func TestTemporaryBufferUploadsOnceForEveryDrawThatBindsIt(t *testing.T) {
 	}
 
 	bakes := 0
-	for _, op := range OpQueueResources(b.queue) {
+	for _, op := range b.queue.resources {
 		if op.Kind == OpBakeBuffer && op.BufferKind == types.BufferStorage {
 			bakes++
 			if op.Bytes[0] != 7 {
@@ -66,7 +66,7 @@ func TestTemporaryTextureUploadsOnceForEveryDrawThatSamplesIt(t *testing.T) {
 	}
 
 	bakes := 0
-	for _, op := range OpQueueResources(b.queue) {
+	for _, op := range b.queue.resources {
 		if op.Kind == OpUpdateTexture {
 			bakes++
 			if op.Bytes[0] != 7 {

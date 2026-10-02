@@ -1,7 +1,6 @@
 package gfx
 
 import (
-	"github.com/dvoyni/cog/slots/gfx/internal"
 	"github.com/dvoyni/cog/slots/gfx/internal/shader"
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
@@ -113,7 +112,7 @@ type ErrCaptureAbandoned = types.ErrCaptureAbandoned
 // depth, or any format that is not 8-bit RGBA. Depth readback is a real want
 // and it is a visualization question rather than a readback one - a depth
 // capture is a float field needing a range to be legible.
-type ErrCaptureUnsupported = internal.ErrCaptureUnsupported
+type ErrCaptureUnsupported = types.ErrCaptureUnsupported
 
 // ErrCaptureNoTarget reports a capture of something the frame never rendered
 // into: a screen capture in a frame that drew nothing to the screen, or a
@@ -126,7 +125,7 @@ type ErrCaptureNoTarget = types.ErrCaptureNoTarget
 // this diagnosis and return a zero id, which from the caller's seat made "gfx
 // refused to build this" and "the backend refused to build this" the same
 // silent event.
-type ErrPipelineFailed = internal.ErrPipelineFailed
+type ErrPipelineFailed = types.ErrPipelineFailed
 
 // ErrIndexBufferLength reports an index buffer whose byte length is not a
 // multiple of the width the mesh declared it at. With two widths in the engine

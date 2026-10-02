@@ -8,19 +8,6 @@ import (
 	"github.com/dvoyni/cog/slots/gfx/internal/types"
 )
 
-// setState is where one set of draw params is in its life. The zero state is an
-// id NewDrawParams never handed out, which is what a gap in any table reads as.
-type setState uint32
-
-const (
-	setUnknown setState = iota
-	setLive
-	// setFailed is a set whose creation was refused - its shader had no
-	// program. It exists, so naming it is no mistake, and it draws nothing.
-	setFailed
-	setReleased
-)
-
 // bindingValue is one binding's value in a set or in a frame's version of one:
 // a slot of the pointer-free binding table, in the order of its shader
 // program's bindings. Which fields mean anything follows from the binding's
@@ -92,22 +79,22 @@ func (r *drawParamsRegistry) entry(id uint32) *setEntry {
 	return &(*chunks)[id>>setChunkBits][id&(1<<setChunkBits-1)]
 }
 
-// state reads a set's state, setUnknown for an id nothing created, and its
+// state reads a set's state, types.DrawParamsSetUnknown for an id nothing created, and its
 // program when it is live.
-func (r *drawParamsRegistry) state(id uint32) (setState, shader.ShaderProgram) {
+func (r *drawParamsRegistry) state(id uint32) (types.DrawParamsSet, shader.ShaderProgram) {
 	entry := r.entry(id)
 	if entry == nil {
-		return setUnknown, shader.ShaderProgram{}
+		return types.DrawParamsSetUnknown, shader.ShaderProgram{}
 	}
-	state := setState(entry.state.Load())
-	if state != setLive {
+	state := types.DrawParamsSet(entry.state.Load())
+	if state != types.DrawParamsSetLive {
 		return state, shader.ShaderProgram{}
 	}
 	return state, entry.program
 }
 
 // publish makes a new set visible: its program first, then its state.
-func (r *drawParamsRegistry) publish(id uint32, program shader.ShaderProgram, state setState) {
+func (r *drawParamsRegistry) publish(id uint32, program shader.ShaderProgram, state types.DrawParamsSet) {
 	var chunks []*setChunk
 	if loaded := r.chunks.Load(); loaded != nil {
 		chunks = *loaded
@@ -129,7 +116,7 @@ func (r *drawParamsRegistry) publish(id uint32, program shader.ShaderProgram, st
 // that loaded the state before this may still be reading it.
 func (r *drawParamsRegistry) release(id uint32) {
 	if entry := r.entry(id); entry != nil {
-		entry.state.Store(uint32(setReleased))
+		entry.state.Store(uint32(types.DrawParamsSetReleased))
 	}
 }
 
@@ -161,9 +148,9 @@ func reportDrawParams(k kernel.Kernel, set uint32, parameter string, fault drawP
 }
 
 // reportSetNotLive reports a call naming a set that is not live.
-func reportSetNotLive(k kernel.Kernel, set uint32, state setState, call string) {
+func reportSetNotLive(k kernel.Kernel, set uint32, state types.DrawParamsSet, call string) {
 	reportDrawParams(k, set, "", drawParamsFaultNotLive, call,
-		types.ErrDrawParamsNotLive{Set: set, Call: call, Released: state == setReleased})
+		types.ErrDrawParamsNotLive{Set: set, Call: call, Released: state == types.DrawParamsSetReleased})
 }
 
 // paramSlot resolves one param against a set's program: the slot it fills and

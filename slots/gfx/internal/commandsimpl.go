@@ -49,7 +49,7 @@ func (p *plugin) releaseCachedResourceCmdImpl() (kernel.Lock, kernel.Execute[Rel
 	return func(access kernel.ResourceAccess) {
 			resources = access.GetWrite[*ResourceQueue]()
 		}, func(_ kernel.Kernel, request ReleaseCachedResourceRequest) ReleaseCachedResourceResponse {
-			ResourceQueueReleaseCachedResource(resources.Get(), request.Path)
+			resources.Get().releaseCachedResource(request.Path)
 			return ReleaseCachedResourceResponse{}
 		}
 }
@@ -59,16 +59,16 @@ func (p *plugin) freeCachedResourcesCmdImpl() (kernel.Lock, kernel.Execute[FreeC
 	return func(access kernel.ResourceAccess) {
 			resources = access.GetWrite[*ResourceQueue]()
 		}, func(kernel.Kernel, FreeCachedResourcesRequest) FreeCachedResourcesResponse {
-			ResourceQueueFreeCachedResources(resources.Get())
+			resources.Get().freeCachedResources()
 			return FreeCachedResourcesResponse{}
 		}
 }
 
 func setViewportCmdImpl() (kernel.Lock, kernel.Execute[SetViewportRequest, SetViewportResponse]) {
-	var preference kernel.Read[*desiredViewport]
+	var preference kernel.Read[*types.DesiredViewport]
 	var current kernel.Write[*types.Viewport]
 	return func(access kernel.ResourceAccess) {
-			preference = access.GetRead[*desiredViewport]()
+			preference = access.GetRead[*types.DesiredViewport]()
 			current = access.GetWrite[*types.Viewport]()
 		}, func(_ kernel.Kernel, request SetViewportRequest) SetViewportResponse {
 			viewport := resolveViewport(request.Width, request.Height, *preference.Get())
@@ -80,20 +80,20 @@ func setViewportCmdImpl() (kernel.Lock, kernel.Execute[SetViewportRequest, SetVi
 }
 
 func setDesiredViewportCmdImpl() (kernel.Lock, kernel.Execute[SetDesiredViewportRequest, SetDesiredViewportResponse]) {
-	var stored kernel.Write[*desiredViewport]
+	var stored kernel.Write[*types.DesiredViewport]
 	var current kernel.Write[*types.Viewport]
 	return func(access kernel.ResourceAccess) {
-			stored = access.GetWrite[*desiredViewport]()
+			stored = access.GetWrite[*types.DesiredViewport]()
 			current = access.GetWrite[*types.Viewport]()
 		}, func(_ kernel.Kernel, request SetDesiredViewportRequest) SetDesiredViewportResponse {
-			preference := desiredViewport{
-				mode: request.Mode, width: request.Width, height: request.Height, size: request.Size,
+			preference := types.DesiredViewport{
+				Mode: request.Mode, Width: request.Width, Height: request.Height, Size: request.Size,
 			}
 			valid := request.Mode == types.ViewportWindow ||
 				((request.Mode == types.ViewportFixedWidth || request.Mode == types.ViewportFixedHeight) && request.Size > 0) ||
 				((request.Mode == types.ViewportFit || request.Mode == types.ViewportCover) && request.Width > 0 && request.Height > 0)
 			if !valid {
-				preference = desiredViewport{}
+				preference = types.DesiredViewport{}
 			}
 			stored.Set(&preference)
 			viewport := resolveViewport(current.Get().WindowWidth, current.Get().WindowHeight, preference)
@@ -104,7 +104,7 @@ func setDesiredViewportCmdImpl() (kernel.Lock, kernel.Execute[SetDesiredViewport
 		}
 }
 
-func resolveViewport(windowWidth, windowHeight float32, preference desiredViewport) types.Viewport {
+func resolveViewport(windowWidth, windowHeight float32, preference types.DesiredViewport) types.Viewport {
 	viewport := types.Viewport{
 		Width: windowWidth, Height: windowHeight,
 		WindowWidth: windowWidth, WindowHeight: windowHeight,
@@ -113,28 +113,28 @@ func resolveViewport(windowWidth, windowHeight float32, preference desiredViewpo
 		viewport.Width, viewport.Height = 0, 0
 		return viewport
 	}
-	switch preference.mode {
+	switch preference.Mode {
 	case types.ViewportFixedWidth:
-		viewport.Width = preference.size
-		viewport.Height = float32(math.Round(float64(preference.size * windowHeight / windowWidth)))
+		viewport.Width = preference.Size
+		viewport.Height = float32(math.Round(float64(preference.Size * windowHeight / windowWidth)))
 	case types.ViewportFixedHeight:
-		viewport.Height = preference.size
-		viewport.Width = float32(math.Round(float64(preference.size * windowWidth / windowHeight)))
+		viewport.Height = preference.Size
+		viewport.Width = float32(math.Round(float64(preference.Size * windowWidth / windowHeight)))
 	case types.ViewportFit:
-		if windowWidth/windowHeight >= preference.width/preference.height {
-			viewport.Height = preference.height
-			viewport.Width = float32(math.Round(float64(preference.height * windowWidth / windowHeight)))
+		if windowWidth/windowHeight >= preference.Width/preference.Height {
+			viewport.Height = preference.Height
+			viewport.Width = float32(math.Round(float64(preference.Height * windowWidth / windowHeight)))
 		} else {
-			viewport.Width = preference.width
-			viewport.Height = float32(math.Round(float64(preference.width * windowHeight / windowWidth)))
+			viewport.Width = preference.Width
+			viewport.Height = float32(math.Round(float64(preference.Width * windowHeight / windowWidth)))
 		}
 	case types.ViewportCover:
-		if windowWidth/windowHeight >= preference.width/preference.height {
-			viewport.Width = preference.width
-			viewport.Height = float32(math.Round(float64(preference.width * windowHeight / windowWidth)))
+		if windowWidth/windowHeight >= preference.Width/preference.Height {
+			viewport.Width = preference.Width
+			viewport.Height = float32(math.Round(float64(preference.Width * windowHeight / windowWidth)))
 		} else {
-			viewport.Height = preference.height
-			viewport.Width = float32(math.Round(float64(preference.height * windowWidth / windowHeight)))
+			viewport.Height = preference.Height
+			viewport.Width = float32(math.Round(float64(preference.Height * windowWidth / windowHeight)))
 		}
 	}
 	return viewport

@@ -630,8 +630,8 @@ func TestPassRefsAreFrameLocal(t *testing.T) {
 	// A reference outlives nothing: after reset it names no pass until the new
 	// frame declares one.
 	queue.reset()
-	if len(OpQueuePasses(&queue)) != 0 {
-		t.Fatalf("after reset: %d passes, want none declared", len(OpQueuePasses(&queue)))
+	if len(queue.passes) != 0 {
+		t.Fatalf("after reset: %d passes, want none declared", len(queue.passes))
 	}
 	queue.Draw(first, triangle(), types.DrawStateID(0), 1, 0)
 	if got := drawCounts(&queue); !slices.Equal(got, []int{1}) {
@@ -683,7 +683,7 @@ func TestBakeOpsAllocateBakedResourceIDs(t *testing.T) {
 		t.Fatalf("rebaked handles = (%d, %d), want (%d, %d)", rebakedBuffer.ID, rebakedTexture.Params.ID, buffer.ID, texture.Params.ID)
 	}
 	pixels[0] = 99
-	for i, op := range ResourceQueueOps(&queue) {
+	for i, op := range queue.ops {
 		if op.Kind != OpAllocateTexture && op.Bytes[0] != 1 {
 			t.Fatalf("op %d did not copy caller data", i)
 		}
@@ -699,14 +699,14 @@ func TestBakeBufferCopyDataControlsOwnership(t *testing.T) {
 
 	copied[0] = 9
 	borrowed[0] = 10
-	if got := ResourceQueueOps(&queue)[0].Bytes[0]; got != 1 {
+	if got := queue.ops[0].Bytes[0]; got != 1 {
 		t.Fatalf("copied buffer byte = %d, want 1", got)
 	}
-	if got := ResourceQueueOps(&queue)[1].Bytes[0]; got != 10 {
+	if got := queue.ops[1].Bytes[0]; got != 10 {
 		t.Fatalf("borrowed buffer byte = %d, want 10", got)
 	}
-	retainedOps := ResourceQueueOps(&queue)
-	ResourceQueueReset(&queue)
+	retainedOps := queue.ops
+	queue.reset()
 	if retainedOps[1].Bytes != nil {
 		t.Fatal("reset retained borrowed buffer bytes")
 	}
@@ -722,14 +722,14 @@ func TestBakeTextureCopyDataControlsOwnership(t *testing.T) {
 	// Each upload is two ops, the allocation and then the pixels.
 	copied[0] = 9
 	borrowed[0] = 10
-	if got := ResourceQueueOps(&queue)[1].Bytes[0]; got != 1 {
+	if got := queue.ops[1].Bytes[0]; got != 1 {
 		t.Fatalf("copied texture byte = %d, want 1", got)
 	}
-	if got := ResourceQueueOps(&queue)[3].Bytes[0]; got != 10 {
+	if got := queue.ops[3].Bytes[0]; got != 10 {
 		t.Fatalf("borrowed texture byte = %d, want 10", got)
 	}
-	retainedOps := ResourceQueueOps(&queue)
-	ResourceQueueReset(&queue)
+	retainedOps := queue.ops
+	queue.reset()
 	if retainedOps[3].Bytes != nil {
 		t.Fatal("reset retained borrowed texture pixels")
 	}
@@ -866,25 +866,25 @@ func TestOpQueueTemporaryBufferPool(t *testing.T) {
 
 	small := []byte{1, 2, 3, 4}
 	large := make([]byte, 16)
-	smallBuffer := OpQueueTemporaryBuffer(&queue, types.BufferVertex, small, true)
-	largeBuffer := OpQueueTemporaryBuffer(&queue, types.BufferVertex, large, true)
+	smallBuffer := queue.temporaryBuffer(types.BufferVertex, small, true)
+	largeBuffer := queue.temporaryBuffer(types.BufferVertex, large, true)
 	small[0] = 99
-	if OpQueueResources(&queue)[0].Bytes[0] != 1 {
+	if queue.resources[0].Bytes[0] != 1 {
 		t.Fatal("temporary bake op aliases caller data")
 	}
 
 	queue.reset()
-	fit := OpQueueTemporaryBuffer(&queue, types.BufferVertex, make([]byte, 12), true)
+	fit := queue.temporaryBuffer(types.BufferVertex, make([]byte, 12), true)
 	if fit.ID != largeBuffer.ID {
 		t.Errorf("best-fit buffer = %d, want %d", fit.ID, largeBuffer.ID)
 	}
 	queue.reset()
-	resized := OpQueueTemporaryBuffer(&queue, types.BufferVertex, make([]byte, 32), true)
+	resized := queue.temporaryBuffer(types.BufferVertex, make([]byte, 32), true)
 	if resized.ID != largeBuffer.ID {
 		t.Errorf("resized buffer ID = %d, want reused %d", resized.ID, largeBuffer.ID)
 	}
-	if OpQueueTemporaryBuffers(&queue)[1].Size < 32 {
-		t.Errorf("resized size = %d, want at least 32", OpQueueTemporaryBuffers(&queue)[1].Size)
+	if queue.temporaryBuffers[1].Size < 32 {
+		t.Errorf("resized size = %d, want at least 32", queue.temporaryBuffers[1].Size)
 	}
 	if smallBuffer.ID == largeBuffer.ID {
 		t.Fatal("simultaneously used temporary buffers share an ID")
@@ -897,7 +897,7 @@ func TestDrawStoresTemporaryBufferIDsWithoutInlineGeometry(t *testing.T) {
 	mesh := triangle()
 	queue.Draw(ref, mesh, types.DrawStateID(0), 1, 0)
 
-	if bake := OpQueueResources(&queue); len(bake) != 1 || bake[0].Kind != OpBakeBuffer || bake[0].BufferKind != types.BufferVertex {
+	if bake := queue.resources; len(bake) != 1 || bake[0].Kind != OpBakeBuffer || bake[0].BufferKind != types.BufferVertex {
 		t.Fatal("draw did not record one vertex bake")
 	}
 	draw := &queue.passes[0].Draws[0]
@@ -907,7 +907,7 @@ func TestDrawStoresTemporaryBufferIDsWithoutInlineGeometry(t *testing.T) {
 	if (&draw.Mesh.Vertices).Bytes.Len() != 0 {
 		t.Fatalf("draw retained %d inline vertex bytes", (&draw.Mesh.Vertices).Bytes.Len())
 	}
-	if len(OpQueueTemporaryBuffers(&queue)) != 1 || !OpQueueTemporaryBuffers(&queue)[0].Used {
+	if len(queue.temporaryBuffers) != 1 || !queue.temporaryBuffers[0].Used {
 		t.Fatal("draw did not lease one temporary vertex buffer")
 	}
 }
@@ -927,8 +927,8 @@ func TestOpQueueArenasPreserveCallerDataIsolation(t *testing.T) {
 	layout[0] = types.VertexAttribute{Offset: 4, Type: types.Float32x2}
 
 	draw := &queue.passes[0].Draws[0]
-	if OpQueueResources(&queue)[0].Bytes[0] != 1 {
-		t.Fatalf("recorded vertex byte = %d, want 1", OpQueueResources(&queue)[0].Bytes[0])
+	if queue.resources[0].Bytes[0] != 1 {
+		t.Fatalf("recorded vertex byte = %d, want 1", queue.resources[0].Bytes[0])
 	}
 	if draw.Mesh.Layout[0] != (types.VertexAttribute{Offset: 0, Type: types.Float32x3}) {
 		t.Fatalf("recorded layout = %+v, want original", draw.Mesh.Layout)
@@ -949,13 +949,13 @@ func TestABlobBufferCopyDataControlsOwnership(t *testing.T) {
 	copied[0] = 9
 	borrowed[0] = 10
 
-	if got := OpQueueResources(&queue)[0].Bytes[0]; got != 1 {
+	if got := queue.resources[0].Bytes[0]; got != 1 {
 		t.Fatalf("copied mesh byte = %d, want 1", got)
 	}
-	if got := OpQueueResources(&queue)[1].Bytes[0]; got != 10 {
+	if got := queue.resources[1].Bytes[0]; got != 10 {
 		t.Fatalf("borrowed mesh byte = %d, want 10", got)
 	}
-	retainedOps := OpQueueResources(&queue)
+	retainedOps := queue.resources
 	queue.reset()
 	if retainedOps[1].Bytes != nil {
 		t.Fatal("reset retained borrowed mesh bytes")
@@ -966,18 +966,18 @@ func TestTextureWithBytesCopyDataControlsOwnership(t *testing.T) {
 	queue := testOpQueue(&fakeBackend{})
 	copied := []byte{1, 2, 3, 4}
 	borrowed := []byte{5, 6, 7, 8}
-	OpQueueBakeTextureIfNeeded(&queue, types.TextureWithBytes(1, 1, types.FormatRGBA8, copied, true, false))
-	OpQueueBakeTextureIfNeeded(&queue, types.TextureWithBytes(1, 1, types.FormatRGBA8, borrowed, false, false))
+	queue.bakeTextureIfNeeded(types.TextureWithBytes(1, 1, types.FormatRGBA8, copied, true, false))
+	queue.bakeTextureIfNeeded(types.TextureWithBytes(1, 1, types.FormatRGBA8, borrowed, false, false))
 
 	copied[0] = 9
 	borrowed[0] = 10
-	if got := OpQueueResources(&queue)[1].Bytes[0]; got != 1 {
+	if got := queue.resources[1].Bytes[0]; got != 1 {
 		t.Fatalf("copied temporary texture byte = %d, want 1", got)
 	}
-	if got := OpQueueResources(&queue)[3].Bytes[0]; got != 10 {
+	if got := queue.resources[3].Bytes[0]; got != 10 {
 		t.Fatalf("borrowed temporary texture byte = %d, want 10", got)
 	}
-	retainedOps := OpQueueResources(&queue)
+	retainedOps := queue.resources
 	queue.reset()
 	if retainedOps[3].Bytes != nil {
 		t.Fatal("reset retained borrowed temporary texture pixels")
@@ -986,18 +986,18 @@ func TestTextureWithBytesCopyDataControlsOwnership(t *testing.T) {
 
 func TestOpQueueTemporaryTexturePool(t *testing.T) {
 	queue := testOpQueue(&fakeBackend{})
-	first := OpQueueBakeTextureIfNeeded(&queue, types.TextureWithBytes(1, 1, types.FormatRGBA8, []byte{1, 2, 3, 4}, true, false))
-	second := OpQueueBakeTextureIfNeeded(&queue, types.TextureWithBytes(1, 1, types.FormatRGBA8, []byte{5, 6, 7, 8}, true, false))
+	first := queue.bakeTextureIfNeeded(types.TextureWithBytes(1, 1, types.FormatRGBA8, []byte{1, 2, 3, 4}, true, false))
+	second := queue.bakeTextureIfNeeded(types.TextureWithBytes(1, 1, types.FormatRGBA8, []byte{5, 6, 7, 8}, true, false))
 	if first.Params.ID == second.Params.ID {
 		t.Fatal("simultaneously used temporary textures share an ID")
 	}
 
 	queue.reset()
-	reused := OpQueueBakeTextureIfNeeded(&queue, types.TextureWithBytes(1, 1, types.FormatRGBA8, []byte{9, 10, 11, 12}, true, false))
+	reused := queue.bakeTextureIfNeeded(types.TextureWithBytes(1, 1, types.FormatRGBA8, []byte{9, 10, 11, 12}, true, false))
 	if reused.Params.ID != first.Params.ID {
 		t.Errorf("reused temporary texture ID = %d, want %d", reused.Params.ID, first.Params.ID)
 	}
-	ops := OpQueueResources(&queue)
+	ops := queue.resources
 	if len(ops) != 2 || ops[0].Kind != OpAllocateTexture || ops[1].Kind != OpUpdateTexture {
 		t.Fatal("temporary texture did not record one allocation and one upload")
 	}

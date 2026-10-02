@@ -130,7 +130,7 @@ func (t *translator) ensurePipeline(
 	})
 	if err != nil {
 		t.pipelines[k] = 0
-		return 0, ErrPipelineFailed{Shader: program.Label(), Err: err}
+		return 0, types.ErrPipelineFailed{Shader: program.Label(), Err: err}
 	}
 	t.pipelines[k] = id
 	return id, nil

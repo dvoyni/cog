@@ -45,8 +45,8 @@ type setCursor struct {
 func (q *OpQueue) SetDrawParams(k kernel.Kernel, set types.DrawStateID, params ...types.ShaderParameterDescr) {
 	id := uint32(set)
 	state, program := q.sets.state(id)
-	if state != setLive {
-		if state != setFailed {
+	if state != types.DrawParamsSetLive {
+		if state != types.DrawParamsSetFailed {
 			reportSetNotLive(k, id, state, "SetDrawParams")
 		}
 		return
