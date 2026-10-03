@@ -193,6 +193,11 @@ const (
 	// written in, and the three key* constants, so a custom material wears the
 	// exact ramp the built-ins do rather than a re-typed approximation.
 	KeyColorPath = internal.KeyColorPath
+	// HaloBandPath declares the halo's profile uniform, its inter-stage struct,
+	// its vs_main and haloBand, which is the band at one fragment. Include it to
+	// write a halo material whose fs_main does something to the band - one named
+	// over a layer as HaloMaterialSet(profile) with its Sprite slot replaced.
+	HaloBandPath = internal.HaloBandPath
 	// DefaultFontPath is the font Canvas draws with when Text is given no font
 	// path. It ships inside the binary and is mounted alongside the built-in
 	// shaders, so putting a number on screen costs no asset, no mount and no

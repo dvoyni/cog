@@ -41,7 +41,7 @@ which is not to be merged.
 > specifies is unchanged, and so is every name an app writes a material
 > against: `MaterialSet`, `HaloMaterialSet`, `DefaultMaterial`,
 > `DefaultTrianglesMaterial`, `TextureMaterial`, `DefaultKeyColor`, the four
-> reserved slot names, the seven published path constants and `SpriteInstance`
+> reserved slot names, the eight published path constants and `SpriteInstance`
 > all stay in the root, `bundles/canvas`. What moved is where the code lives.
 > The built-in WGSL is embedded and mounted by `canvasimpl`, from
 > `bundles/canvas/canvasimpl/builtin/canvas/`. The batchers, the flush with
@@ -356,7 +356,7 @@ learns the frame rect](https://github.com/dvoyni/cog/issues/189), which blessed
 the route, and
 [canvas: a halo material, and the two-layer idiom that reaches it](https://github.com/dvoyni/cog/issues/224),
 which is the first material to take it. **This part is built**, in
-`builtin/canvas/halo.wgsl`.
+`builtin/canvas/haloband.wgsl`, which `builtin/canvas/halo.wgsl` includes.
 
 **A sprite material's `vs_main` may map the frozen unit quad onto a rect larger
 than `s.transform0.zw`.** Nothing in canvas reads a sprite's on-screen extent —
@@ -500,6 +500,14 @@ an inline Go string.
 | `trianglesbindings.wgsl` | `canvas.TrianglesBindingsPath` | group 1 `canvasSampler` + `canvasTexture: texture_2d<f32>`; `struct VertexOut` |
 | `trianglesvertex.wgsl` | `canvas.TrianglesVertexPath` | includes `trianglesbindings.wgsl`; declares `vs_main` |
 | `keycolor.wgsl` | `canvas.KeyColorPath` | the sRGB transfer functions, the three `key*` constants, and `keyColorRamp` |
+| `haloband.wgsl` | `canvas.HaloBandPath` | includes `uniforms.wgsl`, `spritebindings.wgsl` and `clip.wgsl`; `struct HaloProfile` and `@group(0) @binding(1) var<uniform> halo`; `struct HaloVertexOut`; `vs_main`; `fn haloBand(in: HaloVertexOut) -> vec4<f32>` |
+
+`haloband.wgsl` is the eighth, added after the seven: it is the
+[halo](#the-halo-and-widening-the-inter-stage-struct) with its `fs_main` taken
+off, published so that a material can do something to the band — a layer's set
+replaces the wider scope's, so a halo layer takes none of a queue-wide effect
+unless its own material applies it. `halo.wgsl` stays an unpublished entry point
+whose whole body is that include and an `fs_main` returning `haloBand(in)`.
 
 The constants join `DefaultFontPath`, `TextureSlot` and `SamplerSlot` as the
 surface an app builds a shader against, and they give the compiler a say in the
@@ -1414,7 +1422,7 @@ against this.
 - Add the pointer to this document, worded so a reader knows what is specified and
   what is implemented.
 - Document `ShapeDraw`, `TextDraw`'s new fields, `SetLayerMaterial`,
-  `MaterialSet`, the seven published sources and their constants, and the clip
+  `MaterialSet`, the eight published sources and their constants, and the clip
   warning.
 
 **`CONTEXT.md`**

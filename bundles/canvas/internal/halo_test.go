@@ -11,8 +11,10 @@ import (
 
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/slots/gfx"
+	"github.com/gogpu/naga"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/spirv"
+	"github.com/gogpu/naga/wgsl"
 )
 
 // haloProfileOf reads a profile back out of the bytes a halo binding carries,
@@ -322,8 +324,10 @@ func spirvCarriesOpcode(blob []byte, opcode uint32) bool {
 // copy of the FROZEN SpriteInstance record, which only
 // TestSpriteInstanceMatchesTheShaderRecord guards and only inside cog.
 func TestTheHaloDeclaresNoCopyOfTheFrozenRecord(t *testing.T) {
-	if strings.Contains(builtinSourceCode(t, HaloShaderPath), "struct SpriteInstance") {
-		t.Fatalf("%s declares its own SpriteInstance; include %s and read the published one", HaloShaderPath, SpriteBindingsPath)
+	for _, path := range []string{HaloShaderPath, HaloBandPath} {
+		if strings.Contains(builtinSourceCode(t, path), "struct SpriteInstance") {
+			t.Fatalf("%s declares its own SpriteInstance; include %s and read the published one", path, SpriteBindingsPath)
+		}
 	}
 	if got := strings.Count(flattenBuiltinShader(t, HaloShaderPath), "struct SpriteInstance"); got != 1 {
 		t.Fatalf("the halo flattens to %d SpriteInstance declarations, want 1", got)
@@ -333,12 +337,12 @@ func TestTheHaloDeclaresNoCopyOfTheFrozenRecord(t *testing.T) {
 // It replaces both entry points, so it must include the bindings without
 // spritevertex.wgsl - which declares a vs_main that does not expand the quad.
 func TestTheHaloDeclaresItsOwnVertexStage(t *testing.T) {
-	code := builtinSourceCode(t, HaloShaderPath)
+	code := builtinSourceCode(t, HaloBandPath)
 	if strings.Contains(code, SpriteVertexPath) {
-		t.Fatalf("%s includes %s; a material that expands the quad writes its own vs_main", HaloShaderPath, SpriteVertexPath)
+		t.Fatalf("%s includes %s; a material that expands the quad writes its own vs_main", HaloBandPath, SpriteVertexPath)
 	}
 	if !strings.Contains(code, SpriteBindingsPath) {
-		t.Fatalf("%s does not include %s", HaloShaderPath, SpriteBindingsPath)
+		t.Fatalf("%s does not include %s", HaloBandPath, SpriteBindingsPath)
 	}
 	if got := strings.Count(flattenBuiltinShader(t, HaloShaderPath), "fn vs_main"); got != 1 {
 		t.Fatalf("the halo flattens to %d vs_main declarations, want 1", got)
@@ -350,7 +354,7 @@ func TestTheHaloDeclaresItsOwnVertexStage(t *testing.T) {
 // key-colour ramp, and carrying it would cost a location in the inter-stage
 // struct for nothing.
 func TestTheHaloDoesNotIncludeTheKeyColourRamp(t *testing.T) {
-	if strings.Contains(builtinSourceCode(t, HaloShaderPath), "keycolor.wgsl") {
+	if strings.Contains(flattenBuiltinShader(t, HaloShaderPath), "fn keyColorRamp") {
 		t.Fatalf("%s includes the ramp; the halo paints a band in one colour and never reads the mark's", HaloShaderPath)
 	}
 }
@@ -374,16 +378,82 @@ func TestTheHaloNumbersItsGroupsByKind(t *testing.T) {
 	}
 }
 
-// The material is unexported deliberately, and the WGSL is not published:
-// keycolor.wgsl is published because a custom triangles material must reproduce
-// the ramp or key every texel against black, and nothing has to reproduce the
-// halo. This is the test that the source is mounted for canvas's own use and
-// named by no exported constant.
-func TestTheHaloSourceIsMountedButNotPublished(t *testing.T) {
+// The material is unexported deliberately and its root is named by no exported
+// constant, but the band it is made of is published as HaloBandPath. Both are
+// mounted: the root for canvas's own material, the band for that root and for
+// any material an app builds on it.
+func TestTheHaloRootAndItsBandAreMounted(t *testing.T) {
 	k, _, _ := testKernel(t, fstest.MapFS{}, Config{}, func(*OpQueue) {})
-	got := k.ExecuteCommand[readFileProbeCmd](readFileProbeRequest{Name: HaloShaderPath})
-	if !bytes.Equal(got.Data, readBuiltinSource(t, HaloShaderPath)) {
-		t.Fatalf("%s is not mounted; the material's own shader would not resolve", HaloShaderPath)
+	for _, path := range []string{HaloShaderPath, HaloBandPath} {
+		got := k.ExecuteCommand[readFileProbeCmd](readFileProbeRequest{Name: path})
+		if !bytes.Equal(got.Data, readBuiltinSource(t, path)) {
+			t.Fatalf("%s is not mounted; a halo material's shader would not resolve", path)
+		}
+	}
+}
+
+// The root is the band and nothing else: an include and an fs_main that returns
+// haloBand. That is what makes the published source the whole halo rather than
+// most of it - a material built on HaloBandPath that passes the band through
+// untouched is canvas's own halo.
+func TestTheHaloRootIsItsBandUntouched(t *testing.T) {
+	code := builtinSourceCode(t, HaloShaderPath)
+	if !strings.Contains(code, "//#include "+HaloBandPath) {
+		t.Fatalf("%s does not include %s", HaloShaderPath, HaloBandPath)
+	}
+	for _, declared := range []string{"struct ", "var<", "fn vs_main", "fn haloBand"} {
+		if strings.Contains(code, declared) {
+			t.Fatalf("%s declares %q itself; it belongs in %s, where a material built on the band gets it too", HaloShaderPath, declared, HaloBandPath)
+		}
+	}
+	if !strings.Contains(code, "return haloBand(in);") {
+		t.Fatalf("%s does not return the band untouched", HaloShaderPath)
+	}
+}
+
+// What the band is published for: a material that includes it, declares a
+// uniform of its own beside the profile and passes haloBand through a function
+// of its own. It has to lower as the halo does, with the profile still at the
+// binding HaloMaterialSet's parameter reaches and exactly one of each stage.
+func TestAMaterialBuiltOnTheBandLowers(t *testing.T) {
+	const source = "//#include " + HaloBandPath + `
+@group(0) @binding(2) var<uniform> fade: f32;
+
+@fragment
+fn fs_main(in: HaloVertexOut) -> @location(0) vec4<f32> {
+    let band = haloBand(in);
+    return vec4<f32>(band.rgb, band.a * fade);
+}
+`
+	text, err := flattenShader(t, builtinMountID, builtinFS, gfx.ShaderWithText(source))
+	if err != nil {
+		t.Fatalf("flatten a material built on %s: %v", HaloBandPath, err)
+	}
+	for _, stage := range []string{"fn vs_main", "fn fs_main"} {
+		if got := strings.Count(text, stage); got != 1 {
+			t.Fatalf("a material built on the band flattens to %d %q declarations, want 1", got, stage)
+		}
+	}
+	parsed, err := naga.Parse(text)
+	if err != nil {
+		t.Fatalf("parse a material built on %s: %v", HaloBandPath, err)
+	}
+	module, err := wgsl.Lower(parsed)
+	if err != nil {
+		t.Fatalf("lower a material built on %s: %v", HaloBandPath, err)
+	}
+	want := map[string][2]uint32{
+		"u": {0, 0}, "halo": {0, 1}, "fade": {0, 2}, "canvasSampler": {1, 0}, "canvasTexture": {1, 1}, "instances": {2, 0},
+	}
+	seen := map[string][2]uint32{}
+	for _, variable := range module.GlobalVariables {
+		if variable.Binding == nil {
+			continue
+		}
+		seen[variable.Name] = [2]uint32{variable.Binding.Group, variable.Binding.Binding}
+	}
+	if !reflect.DeepEqual(seen, want) {
+		t.Fatalf("bindings of a material built on the band = %v, want %v", seen, want)
 	}
 }
 

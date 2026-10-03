@@ -230,6 +230,11 @@ const (
 	// written in, and the three key* constants, so a custom material wears the
 	// exact ramp the built-ins do rather than a re-typed approximation.
 	KeyColorPath = "builtin/canvas/keycolor.wgsl"
+	// HaloBandPath declares the halo's profile uniform, its inter-stage struct,
+	// its vs_main and haloBand, which is the band at one fragment. Include it to
+	// write a halo material whose fs_main does something to the band - one named
+	// over a layer as HaloMaterialSet(profile) with its Sprite slot replaced.
+	HaloBandPath = "builtin/canvas/haloband.wgsl"
 )
 
 // SpriteInstance is one per-instance record the sprite shader reads from its

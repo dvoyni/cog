@@ -318,9 +318,22 @@ There is deliberately **no `HaloMaterial()`** beside `DefaultMaterial()`, despit
 the symmetry: a draw naming its own material takes none of its scope's
 parameters, so naming the halo at a draw would render at the material's own
 defaults and silently ignore every profile above it. A scope is the only way in.
-Its WGSL is not published either — `keycolor.wgsl` is, because a custom triangles
-material *must* reproduce the ramp or key every texel against black, and nothing
-has to reproduce a halo.
+
+**A material that does something to the band includes `haloband.wgsl`.** A
+layer's set replaces the wider scope's rather than composing with it, so a halo
+layer takes none of a queue-wide effect — a fade over the whole frame leaves
+every band standing. The band is therefore a published source: a material
+includes it, writes an `fs_main` that passes `haloBand(in)` through its own
+function, and is named as `HaloMaterialSet(profile)` with the `Sprite` slot
+replaced, which keeps the profile reaching the `halo` uniform the source
+declares.
+
+```go
+set := canvas.HaloMaterialSet(profile)
+set.Sprite = &burningHalo
+set.Params = append(set.Params, gfx.ShaderParameterFloat("fade", amount))
+write.SetLayerMaterial(layerHalo, set)
+```
 
 ### Parameters and their frequency
 
@@ -370,7 +383,7 @@ sprite shader reads them from the shared `VertexOut` rather than from a uniform
 and may not reclaim either name. Text already spends both: `TextDraw.Color`
 becomes the instance tint and glyphs carry the default key colour.
 
-### Writing one: the seven published sources
+### Writing one: the eight published sources
 
 An app writes a canvas material against published WGSL rather than copying the
 contract. Each is named by an exported constant and included by **absolute
@@ -387,6 +400,7 @@ mount.
 | `trianglesbindings.wgsl` | `TrianglesBindingsPath` | group 1 `canvasSampler` + `canvasTexture: texture_2d<f32>`; `struct VertexOut` |
 | `trianglesvertex.wgsl` | `TrianglesVertexPath` | includes `trianglesbindings.wgsl`; declares `vs_main` |
 | `keycolor.wgsl` | `KeyColorPath` | the sRGB transfer functions, the three `key*` constants, and `keyColorRamp` |
+| `haloband.wgsl` | `HaloBandPath` | includes `uniforms.wgsl`, `spritebindings.wgsl` and `clip.wgsl`; `struct HaloProfile` and `@group(0) @binding(1) var<uniform> halo`; `struct HaloVertexOut`; `vs_main`; `fn haloBand(in: HaloVertexOut) -> vec4<f32>` |
 
 Each source's header states exactly what it declares, because the rule you must
 obey is **do not declare anything a source you included declares** — and a

@@ -20,9 +20,9 @@ const (
 	// parameters and render at the material's own defaults, silently ignoring
 	// every profile named above it.
 	//
-	// Its WGSL is not published either. keycolor.wgsl is, because a custom
-	// triangles material must reproduce the key-colour ramp or key every texel
-	// against black; nothing has to reproduce a halo.
+	// The root is not published, but what it is made of is: its whole body is an
+	// include of HaloBandPath and an fs_main returning haloBand, so a material
+	// that has to do something to the band includes the same source.
 	HaloShaderPath = "builtin/canvas/halo.wgsl"
 
 	// DefaultFontPath is the font Canvas draws with when Text is given no font

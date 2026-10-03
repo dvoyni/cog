@@ -15,7 +15,7 @@ const (
 )
 
 // builtinFS is what Start mounts at math.MaxInt priority: the built-in entry
-// points, the seven published sources, the halo, and the default font with its
+// points, the eight published sources, the halo, and the default font with its
 // licence. The paths inside it are the ones canvas.UniformsPath and the other
 // published constants spell.
 //
