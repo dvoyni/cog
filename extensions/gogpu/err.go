@@ -19,3 +19,8 @@ type ErrDepthOnlyPassUnsupported = internal.ErrDepthOnlyPassUnsupported
 // It is reported once per shader and group. A refused group is a property of
 // the material rather than of the HAL, so a second site is a second report.
 type ErrBindGroupRefused = internal.ErrBindGroupRefused
+
+// ErrGamepads reports the platform's gamepad layer failing. It is reported
+// once, and gamepads stop being polled for the rest of the run; keyboard and
+// mouse are unaffected.
+type ErrGamepads = internal.ErrGamepads

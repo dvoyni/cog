@@ -1,6 +1,6 @@
 package internal
 
-// ActionKind tags the variant of an Action. The seven kinds are the whole
+// ActionKind tags the variant of an Action. The ten kinds are the whole
 // vocabulary of a synthetic input sequence: there is no compound click and no
 // compound press, because two spellings of a click would make a caller choose
 // between them.
@@ -29,6 +29,14 @@ const (
 	// ActionDelay waits Ms milliseconds of wall clock. It is the only step
 	// that splits a sequence: everything between two delays lands in one tick.
 	ActionDelay ActionKind = "delay"
+	// ActionGamepadDown presses Button on the gamepad in slot Gamepad. A slot
+	// with no gamepad gets a synthetic one first, connected like a driver's.
+	ActionGamepadDown ActionKind = "gamepad_down"
+	// ActionGamepadUp releases Button on the gamepad in slot Gamepad.
+	ActionGamepadUp ActionKind = "gamepad_up"
+	// ActionGamepadAxis moves Axis on the gamepad in slot Gamepad to Value.
+	// An axis stays where it was put until something moves it back to 0.
+	ActionGamepadAxis ActionKind = "gamepad_axis"
 )
 
 // actionKinds is the set of steps that exist. It is what makes an unknown
@@ -42,6 +50,10 @@ var actionKinds = map[ActionKind]bool{
 	ActionScroll:  true,
 	ActionText:    true,
 	ActionDelay:   true,
+
+	ActionGamepadDown: true,
+	ActionGamepadUp:   true,
+	ActionGamepadAxis: true,
 }
 
 // Action is one step of a synthetic input sequence.
@@ -53,7 +65,7 @@ var actionKinds = map[ActionKind]bool{
 // the JSON schema one object rather than a oneOf.
 type Action struct {
 	// Do selects the step kind. An unknown kind refuses the whole sequence.
-	Do ActionKind `json:"do" jsonschema:"one of key_down, key_up, move, move_by, scroll, text or delay"`
+	Do ActionKind `json:"do" jsonschema:"one of key_down, key_up, move, move_by, scroll, text, delay, gamepad_down, gamepad_up or gamepad_axis"`
 	// X and Y are the absolute pointer position for move, in window units.
 	X float64 `json:"x,omitempty" jsonschema:"move: pointer x in window units"`
 	Y float64 `json:"y,omitempty" jsonschema:"move: pointer y in window units"`
@@ -66,4 +78,11 @@ type Action struct {
 	Text string `json:"text,omitempty" jsonschema:"text: the characters to enter"`
 	// Ms is how long delay waits, in milliseconds of wall clock.
 	Ms int `json:"ms,omitempty" jsonschema:"delay: milliseconds to wait before the next steps"`
+	// Gamepad is the slot gamepad_down, gamepad_up and gamepad_axis act on.
+	Gamepad Gamepad `json:"gamepad,omitempty" jsonschema:"gamepad_down, gamepad_up or gamepad_axis: the gamepad's slot, 0 for the first"`
+	// Button is the standard-layout button for gamepad_down and gamepad_up.
+	Button GamepadButton `json:"button,omitempty" jsonschema:"gamepad_down or gamepad_up: a standard-layout button, named by position: south is A on an Xbox pad"`
+	// Axis and Value are the axis gamepad_axis moves and where to.
+	Axis  GamepadAxis `json:"axis,omitempty" jsonschema:"gamepad_axis: the axis to move"`
+	Value float64     `json:"value,omitempty" jsonschema:"gamepad_axis: -1 to 1 for a stick, left and up negative; 0 to 1 for a trigger"`
 }

@@ -28,7 +28,7 @@ func TestKey_CrossesAsAJSONString(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(seam) != `{"down":["left_control","#9999"],"pointer":{"x":0,"y":0}}` {
+	if string(seam) != `{"down":["left_control","#9999"],"pointer":{"x":0,"y":0},"gamepads":null}` {
 		t.Errorf("the seam encoded as %s", seam)
 	}
 

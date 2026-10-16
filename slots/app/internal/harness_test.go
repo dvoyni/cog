@@ -22,6 +22,7 @@ func (d *fakeMainLoop) Attach(loop Loop) { d.loop.Store(&loop) }
 func (d *fakeMainLoop) Quit()            { d.quits.Add(1) }
 
 func (d *fakeMainLoop) ClipboardWrite(string) error { return nil }
+func (d *fakeMainLoop) SetCursorHidden(bool)        {}
 
 // attached is the Loop app handed over, or nil when it handed none.
 func (d *fakeMainLoop) attached() Loop {

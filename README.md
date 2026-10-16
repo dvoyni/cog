@@ -70,6 +70,9 @@ error handling.
     binary — `--cog.<plugin>.<Field>=<value>`, `COG_<PLUGIN>_<FIELD>`, and a
     `COG_ENV` string in the browser's localStorage — applied by one call at the
     composition root.
+- [`gamepad`](libs/gamepad/gamepad.go): physical gamepads on Windows, macOS,
+    Linux and the browser in the standard layout, polled by a platform driver
+    and fed to `input`. Its device layer is Ebitengine's, vendored.
 - [`gfx`](slots/gfx/docs/README.md): driver-neutral rendering queues, resources, viewport,
     backend contract, frame capture, and per-tick snapshots.
 - [`canvas`](bundles/canvas/docs/README.md): layered 2D sprites, text, primitives, and custom

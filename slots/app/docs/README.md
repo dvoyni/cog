@@ -43,7 +43,7 @@ package of its own needs apart from the logic.
 - Implements: `kernel.PluginStarter`
 - Subscribed kernel events: none
 
-A plugin that dispatches `QuitCmd`, `ClipboardWriteCmd` or `TimeCmd` declares `app.Name` as a
+A plugin that dispatches `QuitCmd`, `ClipboardWriteCmd`, `CursorCmd` or `TimeCmd` declares `app.Name` as a
 dependency, which is what guarantees the command its handler: gfx, canvas and ui
 do for their snapshot capabilities, and a game does for quitting. Subscribing to
 app's events needs no dependency, because an event nobody publishes is simply
@@ -70,6 +70,7 @@ type MainLoop interface {
     Attach(loop Loop)
     Quit()
     ClipboardWrite(text string) error
+    SetCursorHidden(hidden bool)
 }
 
 type MainLoopPort kernel.RequiredPort[MainLoop]
@@ -107,6 +108,9 @@ frame.
   `Quit` must be safe on any goroutine.
 - **`ClipboardWriteCmd` calls `MainLoop.ClipboardWrite`**, from whatever
   goroutine dispatched it, under the same rule.
+- **`CursorCmd` calls `MainLoop.SetCursorHidden`**, under the same rule. A
+  platform whose cursor belongs to one thread records the wish and applies it
+  there.
 - **Composition fails without a MainLoop**, with `kernel.ErrMissingAdapter`
   naming `app.MainLoopPort`.
 
@@ -169,6 +173,18 @@ game dispatches it from the tick that handled the key or click that asked for
 it. There is no read command: a browser hands the clipboard only to a paste, so
 pasted text arrives as input, `input.ClipboardPasteEvent` and
 `input.State.ClipboardPaste`.
+
+### `CursorCmd`
+
+```go
+type CursorCmd kernel.Command[CursorRequest, CursorResponse]
+```
+
+Hides the mouse cursor over the window when `CursorRequest.Hidden` is set, and
+shows it otherwise, through the MainLoop; the zero request shows it. The
+handler takes no locks, and returns once the wish is recorded: the platform
+applies it on its next frame. A game hides the cursor while it is played with
+a gamepad or the keyboard and shows it again when the mouse is taken up.
 
 ### `TimeCmd`
 

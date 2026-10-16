@@ -7,3 +7,7 @@ import "github.com/dvoyni/cog/bundles/input/internal"
 // place it usually surfaces is a JSON decode whose own message says only that a
 // string did not fit.
 type ErrUnknownKey = internal.ErrUnknownKey
+
+// ErrUnknownGamepadInput reports a name that is neither a gamepad button's nor
+// a gamepad axis's.
+type ErrUnknownGamepadInput = internal.ErrUnknownGamepadInput

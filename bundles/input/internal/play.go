@@ -120,7 +120,7 @@ func check(actions []Action) error {
 		if !actionKinds[action.Do] {
 			return mcp.Unavailable{Reason: fmt.Sprintf(
 				"step %d asks for %q, which is not a step — use key_down, key_up, move, move_by, "+
-					"scroll, text or delay", i, action.Do)}
+					"scroll, text, delay, gamepad_down, gamepad_up or gamepad_axis", i, action.Do)}
 		}
 		if action.Do != ActionDelay {
 			continue

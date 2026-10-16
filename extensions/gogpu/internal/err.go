@@ -46,3 +46,14 @@ func (e ErrBindGroupRefused) Error() string {
 			"does not hold",
 		e.Group, e.Shader)
 }
+
+// ErrGamepads reports the platform's gamepad layer failing. It is reported
+// once, and gamepads stop being polled for the rest of the run; keyboard and
+// mouse are unaffected.
+type ErrGamepads struct{ Err error }
+
+func (e ErrGamepads) Error() string {
+	return fmt.Sprintf("gogpu: gamepads stopped being polled: %v", e.Err)
+}
+
+func (e ErrGamepads) Unwrap() error { return e.Err }

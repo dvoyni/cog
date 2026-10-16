@@ -17,9 +17,11 @@ and [ADR 0003](../../../docs/adr/0003-roots-are-alias-indexes.md).
 
 - **`bundles/input`** is the root, and declares nothing: it aliases what
   `internal/` declares — `ApplyCmd`,
-  `SynthesizeCmd` and `StateCmd` with their requests and responses, the four
-  events, the `State` resource, `Key`, `Mods`, `Pos`, `Change`, `Action`, the
-  `McpProvider` Adapter, `ErrUnknownKey`, `Name` and the ordering identity
+  `SynthesizeCmd` and `StateCmd` with their requests and responses, the seven
+  events, the `State` resource, `Key`, `Mods`, `Pos`, `Gamepad`,
+  `GamepadButton`, `GamepadAxis`, `GamepadSnapshot`, `Change`, `Action`, the
+  `McpProvider` Adapter, `ErrUnknownKey`, `ErrUnknownGamepadInput`, `Name` and
+  the ordering identity
   `AdvanceOnUpdate`. Its functions, the `Change` constructors, `ParseKey` and
   `Play`, are forwarders in `utils.go`. It holds no plugin, and it is what
   every other package imports.
@@ -74,6 +76,13 @@ Drivers construct changes with:
 - `ScrollChange(dx, dy)`
 - `TextChange(rune)`
 - `ClipboardPasteChange(text)`
+- `GamepadConnectChange(pad, name)`, `GamepadDisconnectChange(pad)`
+- `GamepadButtonChange(pad, button, down)`, `GamepadAxisChange(pad, axis, value)`
+
+A driver connects a gamepad before sending its buttons and axes; `State` ignores
+changes for a slot with no gamepad. A disconnection releases whatever the pad
+still held, as edges for the tick but without events, so a driver that wants
+each release published sends the button-up changes first, as gogpu does.
 
 `Change` intentionally has no exported fields; consumers do not inspect driver
 input batches.
@@ -125,10 +134,16 @@ them.
 | `key_down, delay 500, key_up` | a key held across ~30 ticks |
 | `move, key_down, delay 100, move, key_up` | a drag |
 
-The seven step kinds are `key_down`, `key_up`, `move`, `move_by`, `scroll`,
-`text` and `delay`. Coordinates are window units, the same as `Pos`. `text`
-emits text changes only and presses no keys — a game that reads keys wants
-`key_down`/`key_up`.
+The ten step kinds are `key_down`, `key_up`, `move`, `move_by`, `scroll`,
+`text`, `delay`, `gamepad_down`, `gamepad_up` and `gamepad_axis`. Coordinates
+are window units, the same as `Pos`. `text` emits text changes only and presses
+no keys — a game that reads keys wants `key_down`/`key_up`.
+
+The gamepad steps act on the slot in `gamepad` (0 when left out):
+`gamepad_down`/`gamepad_up` take a `button` and `gamepad_axis` takes an `axis`
+and a `value`, which stays until a later step moves it. A gamepad step on a
+slot with no gamepad connects a synthetic one there first, published like a
+driver's connection, so a script never has to plug a pad in before pressing it.
 
 What to expect at the edges:
 
@@ -157,8 +172,14 @@ What to expect at the edges:
 - `ScrollEvent{Dx, Dy}` for scroll deltas.
 - `TextEvent{Rune}` for each text-input rune.
 - `ClipboardPasteEvent{Text}` for each clipboard paste.
+- `GamepadConnectionEvent{Gamepad, Name, Connected}` for each gamepad
+  connecting or disconnecting.
+- `GamepadButtonEvent{Gamepad, Button, Down}` for gamepad button transitions.
 
-The root aliases all five event types and the plugin publishes them.
+Gamepad axes publish no event: a stick moves every frame it is held, so a game
+reads axes by polling `State`.
+
+The root aliases all seven event types and the plugin publishes them.
 Neither subscribes to them.
 
 ## Event Subscribed
@@ -185,8 +206,53 @@ root; only the plugin folds changes into it and advances it. Subscribers should 
 - `ClipboardPaste() (string, bool)`: text pasted from the clipboard during this
   tick, and whether anything was. Two pastes in one tick keep the later.
 
-Pressed state and pointer position are live. Edge, scroll, text and paste values
-are tick-scoped.
+For gamepads, where every query that takes a `Gamepad` also takes `AnyGamepad`
+to ask about all connected pads at once:
+
+- `Gamepads() []Gamepad`: the connected slots, in order. The slice is the
+  State's own; read it under the lock and do not keep it.
+- `GamepadConnected(Gamepad) bool` and `GamepadName(Gamepad) string`. The name,
+  such as "Xbox Controller", is the only hint of the pad family.
+- `GamepadPressed`, `GamepadJustPressed` and `GamepadJustReleased(Gamepad,
+  GamepadButton) bool`, with the same edges as keys.
+- `GamepadAxis(Gamepad, GamepadAxis) float64`: the raw value, so a stick at
+  rest rarely reads exactly 0 and the dead zone is the game's to choose. For
+  `AnyGamepad` it is the value furthest from rest.
+
+Pressed state, pointer position and gamepad axes are live. Edge, scroll, text
+and paste values are tick-scoped.
+
+## Gamepads
+
+A `Gamepad` is a slot: it stays the same while its pad is connected, and a slot
+freed by a disconnection is the first one a later connection takes, so a single
+player's pad is 0. A pad is reported in the standard layout, the W3C Gamepad
+remapping, which is SDL's game controller layout under other names. Buttons are
+named by position rather than label, because labels differ between pad
+families: `GamepadButtonSouth` is A on an Xbox pad, Cross on a PlayStation pad
+and B on a Nintendo pad.
+
+| button | name |
+| --- | --- |
+| `GamepadButtonSouth`, `East`, `West`, `North` | `south`, `east`, `west`, `north` |
+| `GamepadButtonLeftShoulder`, `RightShoulder` | `left_shoulder`, `right_shoulder` |
+| `GamepadButtonLeftTrigger`, `RightTrigger` | `left_trigger`, `right_trigger` |
+| `GamepadButtonBack`, `Start`, `Guide` | `back`, `start`, `guide` |
+| `GamepadButtonLeftStick`, `RightStick` | `left_stick`, `right_stick` |
+| `GamepadButtonDpadUp`, `Down`, `Left`, `Right` | `dpad_up`, `dpad_down`, `dpad_left`, `dpad_right` |
+
+| axis | name | range |
+| --- | --- | --- |
+| `GamepadAxisLeftX`, `LeftY`, `RightX`, `RightY` | `left_x`, `left_y`, `right_x`, `right_y` | -1 to 1, left and up negative |
+| `GamepadAxisLeftTrigger`, `RightTrigger` | `left_trigger`, `right_trigger` | 0 to 1 |
+
+A trigger is both an axis and a button, the button pressed past the platform's
+or the mapping's threshold. `GamepadButton` and `GamepadAxis` print as their
+names and parse back from them, so they are JSON strings, and `StateResponse`
+lists each connected pad with its held buttons and the axes away from rest.
+
+The values come from whichever driver feeds `ApplyCmd`; on the desktop and the
+web that is gogpu, over [`libs/gamepad`](../../../libs/gamepad/gamepad.go).
 
 ## Keys And Modifiers
 

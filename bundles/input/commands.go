@@ -49,5 +49,6 @@ type StateRequest = internal.StateRequest
 //
 // Down is every key and mouse button currently held, sorted by key code because
 // map iteration is not ordered; a key nothing releases stays there. Pointer is
-// where the pointer is, in window units.
+// where the pointer is, in window units. Gamepads is every connected gamepad in
+// slot order, with the buttons it holds and the axes away from rest.
 type StateResponse = internal.StateResponse

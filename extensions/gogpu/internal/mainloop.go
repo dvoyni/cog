@@ -20,3 +20,9 @@ func (d mainLoop) Quit() { d.plugin.gpu.Quit() }
 // ClipboardWrite puts text on the system clipboard through gogpu. app calls it
 // for app.ClipboardWriteCmd, from the goroutine that dispatched the command.
 func (d mainLoop) ClipboardWrite(text string) error { return d.plugin.gpu.ClipboardWrite(text) }
+
+// SetCursorHidden records whether the cursor is to be hidden. app calls it for
+// app.CursorCmd, from the goroutine that dispatched the command; the main
+// thread applies it in its next onUpdate, since a window's cursor belongs to
+// the thread that owns the window.
+func (d mainLoop) SetCursorHidden(hidden bool) { d.plugin.cursorHidden.Store(hidden) }

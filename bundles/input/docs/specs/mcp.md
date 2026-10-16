@@ -300,13 +300,20 @@ Reproduced in full, per the house style, so it is reviewed as prompt text.
 > press stays down until something releases it, and the response tells you what
 > is currently held.
 >
+> Gamepads: `gamepad_down` and `gamepad_up` press and release a `button` of the
+> standard layout, named by position — `south` is A on an Xbox pad and Cross on
+> a PlayStation pad — and `gamepad_axis` moves an `axis` such as `left_x` to a
+> `value`, where it stays until you move it back to 0. `gamepad` is the pad's
+> slot, 0 when left out, and a slot with no pad gets a synthetic one.
+>
 > While the game is paused a `delay` separates nothing, because no tick runs —
 > to hold a key for exactly one tick, send `key_down`, step once, send `key_up`,
 > step again.
 
 > **`input_state`** — What the input seam holds right now: every key and mouse
-> button that is down, and where the pointer is, in window units. Changes
-> nothing. Use it to check whether the game is really seeing a key you are
+> button that is down, where the pointer is, in window units, and every
+> connected gamepad with the buttons it holds and the axes away from rest.
+> Changes nothing. Use it to check whether the game is really seeing a key you are
 > holding, or to find a key left down by an earlier call.
 
 On `#<n>`, in the `key` field's own description:

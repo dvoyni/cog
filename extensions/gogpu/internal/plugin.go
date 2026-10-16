@@ -44,6 +44,16 @@ type plugin struct {
 	// (main thread), flushed once per frame in onUpdate. Main-thread-only; no lock.
 	pending []input.Change
 
+	// gamepads is what the last gamepad poll saw, so the next one reports
+	// only what changed. Main-thread-only, like pending.
+	gamepads gamepads
+
+	// cursorHidden is whether app.CursorCmd last asked for the cursor hidden,
+	// set from any goroutine; cursorApplied is what the main thread last told
+	// the window, so it calls the platform only on a change. Main-thread-only.
+	cursorHidden  atomic.Bool
+	cursorApplied bool
+
 	// gfxBackend is gfx's Backend adapter: provided at registration, and
 	// attached to the device once the device exists.
 	gfxBackend *gfxBackend
@@ -154,13 +164,16 @@ func (p *plugin) Stop(kernel.Executioner) error {
 	return nil
 }
 
-// onUpdate runs on the gogpu (main) thread each frame. It flushes batched input,
+// onUpdate runs on the gogpu (main) thread each frame. It polls the gamepads
+// into the batch and flushes batched input,
 // then hands the Loop the real time of any newly rendered frames (measured in
 // onDraw), because gogpu's deltaTime is 0 on wasm and onUpdate's own time deltas
 // are quantized within gogpu's busy-loop burst. The flush comes first so every
 // tick the frame publishes sees that input, and it runs whether or not the tick
 // source is paused, because pause stops the tick and not the frame.
 func (p *plugin) onUpdate(k kernel.Executioner, _ float64) {
+	p.applyCursor()
+	p.pollGamepads(k)
 	p.flushInput(k)
 	p.loop.Frame(k, p.consumeFrameTime())
 }

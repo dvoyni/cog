@@ -20,6 +20,29 @@ func TextChange(r rune) Change { return internal.TextChange(r) }
 // ClipboardPasteChange builds a change for text pasted from the clipboard.
 func ClipboardPasteChange(text string) Change { return internal.ClipboardPasteChange(text) }
 
+// GamepadConnectChange builds a change for a gamepad connecting in slot pad,
+// calling itself name. A driver sends it before any button or axis change for
+// that slot; State ignores those for a slot that is not connected.
+func GamepadConnectChange(pad Gamepad, name string) Change {
+	return internal.GamepadConnectChange(pad, name)
+}
+
+// GamepadDisconnectChange builds a change for the gamepad in slot pad
+// disconnecting. The buttons it held are released with it, and each release is
+// an edge for the tick. A driver that wants each release published as a
+// GamepadButtonEvent sends the button changes first.
+func GamepadDisconnectChange(pad Gamepad) Change { return internal.GamepadDisconnectChange(pad) }
+
+// GamepadButtonChange builds a gamepad button up-or-down change.
+func GamepadButtonChange(pad Gamepad, button GamepadButton, down bool) Change {
+	return internal.GamepadButtonChange(pad, button, down)
+}
+
+// GamepadAxisChange builds a change moving a gamepad axis to value.
+func GamepadAxisChange(pad Gamepad, axis GamepadAxis, value float64) Change {
+	return internal.GamepadAxisChange(pad, axis, value)
+}
+
 // ParseKey resolves a key name, or the "#<n>" printed form of an unnamed key.
 // It is exported because a name for a key is something config files and debug
 // tools want as much as an agent does.

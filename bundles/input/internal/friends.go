@@ -25,6 +25,18 @@ func ChangeMods(v *Change) Mods { return v.mods }
 // ChangeModsRef points at Change.mods for input's internal/.
 func ChangeModsRef(v *Change) *Mods { return &v.mods }
 
+// ChangePad reads Change.pad for input's internal/.
+func ChangePad(v *Change) Gamepad { return v.pad }
+
+// ChangeButton reads Change.button for input's internal/.
+func ChangeButton(v *Change) GamepadButton { return v.button }
+
+// ChangeAxis reads Change.axis for input's internal/.
+func ChangeAxis(v *Change) GamepadAxis { return v.axis }
+
+// ChangeValue reads Change.value for input's internal/.
+func ChangeValue(v *Change) float64 { return v.value }
+
 // ChangePos reads Change.pos for input's internal/.
 func ChangePos(v *Change) Pos { return v.pos }
 
@@ -42,6 +54,9 @@ func StateApply(v *State, a0 Change) { v.apply(a0) }
 
 // StateHeld calls State.held for input's internal/.
 func StateHeld(v *State) []Key { return v.held() }
+
+// StateGamepads calls State.gamepadSnapshots for input's internal/.
+func StateGamepads(v *State) []GamepadSnapshot { return v.gamepadSnapshots() }
 
 // StateModifiers calls State.modifiers for input's internal/.
 func StateModifiers(v *State) Mods { return v.modifiers() }

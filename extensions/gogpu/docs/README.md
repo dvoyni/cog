@@ -15,7 +15,7 @@ it as app's `app.MainLoop` Adapter, provides gfx's `gfx.Backend` Adapter, and fe
   alias of what `internal/` declares; everything else is in `internal/` too.
 - Constructor: `gogpuplugin.New() kernel.Plugin`
 - Plugin dependencies: `gfx`, `input`
-- Go package dependencies: `app`, `gfx`, `input`, `kernel`, the gogpu library,
+- Go package dependencies: `app`, `gfx`, `input`, `kernel`, `libs/gamepad`, the gogpu library,
   WebGPU implementation packages. The root imports only its own `internal/`;
   the gogpu library is imported by `internal/` alone.
 - Contributes: one `app.MainLoop` Adapter and one `gfx.Backend` Adapter
@@ -68,7 +68,9 @@ The root's `err.go` aliases the errors the plugin reports that a caller may
 match: `ErrInvalidConfig`; `ErrDepthOnlyPassUnsupported`, reported once
 per run for a depth-only pass the selected backend declines to encode; and
 `ErrBindGroupRefused{Shader, Group}`, reported once per shader and group for a
-bind group the device would not create. The time errors are app's.
+bind group the device would not create; and `ErrGamepads{Err}`, reported once
+when the platform's gamepad layer fails, after which gamepads are no longer
+polled. The time errors are app's.
 
 A refused bind group leaves every draw through it encoding with nothing bound
 for that group, which renders wrongly or not at all. gfx catches the bindings it
@@ -87,6 +89,14 @@ and asks it to `Quit` for `app.QuitCmd`, which stops the gogpu library's App
 from any goroutine. The binding adds no dependency: gogpu dispatches none of
 app's commands.
 
+`app.CursorCmd` reaches it as `SetCursorHidden`, which records the wish from
+any goroutine; `onUpdate` applies it on the main thread before anything else,
+as `gogpu.App.SetCursor` with `gpucontext.CursorNone` or
+`gpucontext.CursorDefault`, because a window's cursor belongs to the thread that
+owns the window. On macOS the gogpu library hides the cursor with
+`NSCursor hide` and never unhides it when the cursor is set back, so there a
+hidden cursor stays hidden.
+
 gogpu calls the Loop from the gogpu library's callbacks and owns no time control
 of its own:
 
@@ -97,7 +107,9 @@ of its own:
   atomic frame clock, calls `Loop.WindowSize` when the DIP window size changes,
   resolves the viewport with `gfx.SetViewportCmd`, attaches the backend to the
   surface, and calls `Loop.Render`.
-- `onUpdate`, on the main thread, flushes the frame's batched input and then
+- `onUpdate`, on the main thread, applies the cursor's visibility, polls the
+  gamepads, flushes the frame's
+  batched input and then
   calls `Loop.Frame` with the real time of the frames drawn since the last
   update. The gogpu library's own `deltaTime` is 0 on wasm and its busy-loop
   deltas are quantized, which is why the time comes from `onDraw`. The flush
@@ -110,8 +122,30 @@ pause, step, hold, tick numbering and the `app_time` tool are app's, in
 
 ## Commands Executed
 
-- `input.ApplyCmd`: flushes the frame's ordered key, pointer, scroll, and text
-  changes into the input plugin before updates.
+- `input.ApplyCmd`: flushes the frame's ordered key, pointer, scroll, text and
+  gamepad changes into the input plugin before updates.
+
+## Gamepads
+
+The gogpu library reads no gamepads, so gogpu polls
+[`libs/gamepad`](../../../libs/gamepad/gamepad.go) itself, once per frame at the
+top of `onUpdate`, on the main thread the platform layer must be polled from.
+It keeps what the last poll saw and appends only what changed to the frame's
+input batch: a connection, then each button and axis that moved, and for a pad
+that left, a release for every button it held and then the disconnection, so
+every release is published as an event.
+
+On Windows the gamepad layer hears hot-plug through the game window's
+procedure, and the gogpu library does not hand out its window. gogpu finds it
+instead, as the visible top-level window owned by the main thread, and polls
+nothing until there is one.
+
+**Building for macOS without cgo** (`CGO_ENABLED=0`, which is what
+cross-compiling does) needs `-tags nofakecgo`. The gogpu library's FFI, goffi,
+and the gamepad layer's, purego, each carry a fakecgo runtime shim, and two
+copies fail to link with `duplicated definition of symbol _cgo_init`. The tag
+drops goffi's copy, and goffi then runs on purego's, as goffi documents. A build
+with cgo enabled links neither and needs no tag.
 - `gfx.SetViewportCmd`: supplies logical-window and physical-framebuffer sizes
   each drawable frame.
 

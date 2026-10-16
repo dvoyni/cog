@@ -25,6 +25,10 @@ type MainLoop interface {
 	// ClipboardWriteCmd, from whatever goroutine dispatched the command, so it
 	// must be safe to call from any goroutine.
 	ClipboardWrite(text string) error
+	// SetCursorHidden hides the mouse cursor over the window, or shows it.
+	// app calls it for CursorCmd, from whatever goroutine dispatched the
+	// command, so it must be safe to call from any goroutine.
+	SetCursorHidden(hidden bool)
 }
 
 // MainLoopPort is the Port app requires exactly one Adapter for: the platform

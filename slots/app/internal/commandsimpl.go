@@ -20,6 +20,14 @@ func (p *plugin) clipboardWriteCmdImpl() (kernel.Lock, kernel.Execute[ClipboardW
 	}
 }
 
+// cursorCmdImpl hands the cursor's visibility to the MainLoop.
+func (p *plugin) cursorCmdImpl() (kernel.Lock, kernel.Execute[CursorRequest, CursorResponse]) {
+	return nil, func(_ kernel.Kernel, request CursorRequest) CursorResponse {
+		p.mainLoop.Get().SetCursorHidden(request.Hidden)
+		return CursorResponse{}
+	}
+}
+
 // timeCmdImpl controls the tick source: it pauses update ticks, resumes them,
 // steps a named number of them, and reports which is true.
 //

@@ -52,6 +52,10 @@ func synthesize(k kernel.Kernel, s *State, action Action) {
 	if !applicable {
 		return
 	}
+	if kind := ChangeKindOf(&change); (kind == ChangeKindGamepadButton || kind == ChangeKindGamepadAxis) &&
+		!s.GamepadConnected(ChangePad(&change)) {
+		fold(k, s, GamepadConnectChange(ChangePad(&change), syntheticGamepadName))
+	}
 	fold(k, s, change)
 }
 
@@ -86,10 +90,22 @@ func changeFor(s *State, action Action) (Change, bool) {
 		return PointerChange(Pos{X: at.X + action.Dx, Y: at.Y + action.Dy}), true
 	case ActionScroll:
 		return ScrollChange(action.Dx, action.Dy), true
+	case ActionGamepadDown:
+		return GamepadButtonChange(action.Gamepad, action.Button, true), true
+	case ActionGamepadUp:
+		return GamepadButtonChange(action.Gamepad, action.Button, false), true
+	case ActionGamepadAxis:
+		return GamepadAxisChange(action.Gamepad, action.Axis, action.Value), true
 	default:
 		return Change{}, false
 	}
 }
+
+// syntheticGamepadName is what a gamepad that a script connected calls itself.
+// A gamepad step on a slot with no gamepad connects one there first, because a
+// script that has to connect a pad before pressing it gains a step and no
+// meaning; the connection is published like a driver's.
+const syntheticGamepadName = "synthetic gamepad"
 
 // stateCmdImpl reads the seam under the State read lock and changes nothing.
 func stateCmdImpl() (kernel.Lock, kernel.Execute[StateRequest, StateResponse]) {
@@ -106,7 +122,7 @@ func stateCmdImpl() (kernel.Lock, kernel.Execute[StateRequest, StateResponse]) {
 // slice is always non-nil, so "nothing is held" reads as an empty list rather
 // than as a missing answer.
 func snapshot(s *State) StateResponse {
-	return StateResponse{Down: StateHeld(s), Pointer: s.Pointer()}
+	return StateResponse{Down: StateHeld(s), Pointer: s.Pointer(), Gamepads: StateGamepads(s)}
 }
 
 // SynthesizeCmd folds one batch of a synthetic input sequence into the State
@@ -132,6 +148,9 @@ type StateResponse struct {
 	Down []Key `json:"down" jsonschema:"every key and mouse button currently held"`
 	// Pointer is where the pointer is, in window units.
 	Pointer Pos `json:"pointer" jsonschema:"the pointer position in window units"`
+	// Gamepads is every connected gamepad in slot order, with the buttons it
+	// holds and the axes away from rest. Always non-nil.
+	Gamepads []GamepadSnapshot `json:"gamepads" jsonschema:"every connected gamepad, with its held buttons and the axes not at rest"`
 }
 
 // ApplyCmd applies a batch of input Changes to the State (under its write lock)

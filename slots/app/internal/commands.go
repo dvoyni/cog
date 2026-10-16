@@ -30,6 +30,19 @@ type ClipboardWriteRequest struct{ Text string }
 // write.
 type ClipboardWriteResponse struct{ Err error }
 
+// CursorCmd shows or hides the mouse cursor over the window, through the
+// MainLoop: a game hides it while it is played with something other than the
+// mouse, and shows it again when the mouse is taken up. It returns once the
+// wish is recorded; the platform applies it on its next frame.
+type CursorCmd kernel.Command[CursorRequest, CursorResponse]
+
+// CursorRequest carries whether the cursor is hidden; the zero request shows
+// it.
+type CursorRequest struct{ Hidden bool }
+
+// CursorResponse is the empty response from CursorCmd.
+type CursorResponse struct{}
+
 // TimeCmd controls the engine's tick source: it pauses the update loop,
 // resumes it, steps it a named number of ticks, and reports which of those is
 // true. The app plugin handles it, because the tick source is part of the loop

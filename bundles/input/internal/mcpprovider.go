@@ -42,13 +42,19 @@ const sendDescription = "Send input to the game as a list of steps applied in or
 	"types characters and does **not** press keys; a game that reads keys needs " +
 	"`key_down`/`key_up`. Nothing is undone when you disconnect: a key you press stays down until " +
 	"something releases it, and the response tells you what is currently held.\n\n" +
+	"Gamepads: `gamepad_down` and `gamepad_up` press and release a `button` of the standard " +
+	"layout, named by position — `south` is A on an Xbox pad and Cross on a PlayStation pad — and " +
+	"`gamepad_axis` moves an `axis` such as `left_x` to a `value`, where it stays until you move " +
+	"it back to 0. `gamepad` is the pad's slot, 0 when left out, and a slot with no pad gets a " +
+	"synthetic one.\n\n" +
 	"While the game is paused a `delay` separates nothing, because no tick runs — to hold a key " +
 	"for exactly one tick, send `key_down`, step once, send `key_up`, step again."
 
 // stateDescription is prompt text, reproduced in bundles/input/docs/specs/mcp.md for
 // the same reason.
 const stateDescription = "What the input seam holds right now: every key and mouse button that " +
-	"is down, and where the pointer is, in window units. Changes nothing. Use it to check whether " +
+	"is down, where the pointer is, in window units, and every connected gamepad with the buttons " +
+	"it holds and the axes away from rest. Changes nothing. Use it to check whether " +
 	"the game is really seeing a key you are holding, or to find a key left down by an earlier call."
 
 // Capabilities reports what input offers an agent: one tool that acts and one

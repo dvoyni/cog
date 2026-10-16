@@ -26,11 +26,15 @@ type Pos struct {
 type changeKind uint8
 
 const (
-	ChangeKindKey            changeKind = iota // key/button up or down
-	ChangeKindPointer                          // pointer moved
-	ChangeKindScroll                           // scroll delta
-	ChangeKindText                             // text input (one rune)
-	ChangeKindClipboardPaste                   // text pasted from the clipboard
+	ChangeKindKey               changeKind = iota // key/button up or down
+	ChangeKindPointer                             // pointer moved
+	ChangeKindScroll                              // scroll delta
+	ChangeKindText                                // text input (one rune)
+	ChangeKindClipboardPaste                      // text pasted from the clipboard
+	ChangeKindGamepadConnect                      // a gamepad connected
+	ChangeKindGamepadDisconnect                   // a gamepad disconnected
+	ChangeKindGamepadButton                       // gamepad button up or down
+	ChangeKindGamepadAxis                         // gamepad axis moved
 )
 
 // Change is a single input delta. Build it with the KeyChange/PointerChange/
@@ -45,6 +49,10 @@ type Change struct {
 	dx, dy float64
 	r      rune
 	text   string
+	pad    Gamepad
+	button GamepadButton
+	axis   GamepadAxis
+	value  float64
 }
 
 // KeyChange builds a key/button up-or-down change.
@@ -65,4 +73,30 @@ func TextChange(r rune) Change { return Change{kind: ChangeKindText, r: r} }
 // clipboard.
 func ClipboardPasteChange(text string) Change {
 	return Change{kind: ChangeKindClipboardPaste, text: text}
+}
+
+// GamepadConnectChange builds a change for a gamepad connecting in slot pad,
+// calling itself name. A driver sends it before any button or axis change for
+// that slot; State ignores those for a slot that is not connected.
+func GamepadConnectChange(pad Gamepad, name string) Change {
+	return Change{kind: ChangeKindGamepadConnect, pad: pad, text: name}
+}
+
+// GamepadDisconnectChange builds a change for the gamepad in slot pad
+// disconnecting. The buttons it held are released with it, and each release is
+// an edge for the tick, so a held button never stays down on a pad that left. A
+// driver that wants each release published as a GamepadButtonEvent sends the
+// button changes first.
+func GamepadDisconnectChange(pad Gamepad) Change {
+	return Change{kind: ChangeKindGamepadDisconnect, pad: pad}
+}
+
+// GamepadButtonChange builds a gamepad button up-or-down change.
+func GamepadButtonChange(pad Gamepad, button GamepadButton, down bool) Change {
+	return Change{kind: ChangeKindGamepadButton, pad: pad, button: button, down: down}
+}
+
+// GamepadAxisChange builds a change moving a gamepad axis to value.
+func GamepadAxisChange(pad Gamepad, axis GamepadAxis, value float64) Change {
+	return Change{kind: ChangeKindGamepadAxis, pad: pad, axis: axis, value: value}
 }

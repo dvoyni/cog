@@ -16,3 +16,12 @@ type TextEvent = internal.TextEvent
 
 // ClipboardPasteEvent is published for each applied clipboard paste.
 type ClipboardPasteEvent = internal.ClipboardPasteEvent
+
+// GamepadConnectionEvent is published for each gamepad connecting or
+// disconnecting.
+type GamepadConnectionEvent = internal.GamepadConnectionEvent
+
+// GamepadButtonEvent is published for each applied gamepad button change. Axes
+// publish no event: a stick moves every frame it is held, and a game reads it
+// by polling State.
+type GamepadButtonEvent = internal.GamepadButtonEvent

@@ -182,7 +182,7 @@ type Pos = internal.Pos
 // unexported because drivers construct changes, they don't inspect them.
 type Change = internal.Change
 
-// ActionKind tags the variant of an Action. The seven kinds are the whole
+// ActionKind tags the variant of an Action. The ten kinds are the whole
 // vocabulary of a synthetic input sequence: there is no compound click and no
 // compound press, because two spellings of a click would make a caller choose
 // between them.
@@ -216,7 +216,9 @@ const (
 // Action is one step of a synthetic input sequence: Do selects the step kind,
 // X and Y are move's absolute pointer position, Dx and Dy are move_by's and
 // scroll's delta, Key is key_down's and key_up's key, Text is what text enters
-// and Ms is how long delay waits.
+// and Ms is how long delay waits. Gamepad is the slot the three gamepad steps
+// act on, Button is gamepad_down's and gamepad_up's button, and Axis and Value
+// are the axis gamepad_axis moves and where to.
 //
 // Its fields are exported, unlike Change's. A Change is a driver's internal
 // delta, constructed and never inspected; an Action is a script, and the thing
@@ -224,3 +226,75 @@ const (
 // tagged union flattened, which keeps the JSON schema one object rather than a
 // oneOf.
 type Action = internal.Action
+
+const (
+	// ActionGamepadDown presses Button on the gamepad in slot Gamepad. A slot
+	// with no gamepad gets a synthetic one first, connected like a driver's.
+	ActionGamepadDown = internal.ActionGamepadDown
+	// ActionGamepadUp releases Button on the gamepad in slot Gamepad.
+	ActionGamepadUp = internal.ActionGamepadUp
+	// ActionGamepadAxis moves Axis on the gamepad in slot Gamepad to Value.
+	// An axis stays where it was put until something moves it back to 0.
+	ActionGamepadAxis = internal.ActionGamepadAxis
+)
+
+// Gamepad identifies a connected gamepad by its slot. A slot stays the same
+// while its gamepad is connected, and a slot freed by a disconnection is the
+// first one a later connection takes, so a single player's pad is 0.
+type Gamepad = internal.Gamepad
+
+// AnyGamepad, passed where a query takes a Gamepad, asks about every connected
+// gamepad at once. It is how a game with one player reads "the pad" without
+// caring which slot it landed in.
+const AnyGamepad = internal.AnyGamepad
+
+// GamepadButton is a button of the standard layout: the W3C Gamepad remapping,
+// which is SDL's game controller layout under other names. Faces are named by
+// position, not by label, because labels differ between pad families: South is
+// A on an Xbox pad, Cross on a PlayStation pad and B on a Nintendo pad.
+//
+// A GamepadButton prints as its name and parses back from it, so it is a JSON
+// string wherever it appears.
+type GamepadButton = internal.GamepadButton
+
+const (
+	GamepadButtonSouth         = internal.GamepadButtonSouth
+	GamepadButtonEast          = internal.GamepadButtonEast
+	GamepadButtonWest          = internal.GamepadButtonWest
+	GamepadButtonNorth         = internal.GamepadButtonNorth
+	GamepadButtonLeftShoulder  = internal.GamepadButtonLeftShoulder
+	GamepadButtonRightShoulder = internal.GamepadButtonRightShoulder
+	GamepadButtonLeftTrigger   = internal.GamepadButtonLeftTrigger
+	GamepadButtonRightTrigger  = internal.GamepadButtonRightTrigger
+	GamepadButtonBack          = internal.GamepadButtonBack
+	GamepadButtonStart         = internal.GamepadButtonStart
+	GamepadButtonLeftStick     = internal.GamepadButtonLeftStick
+	GamepadButtonRightStick    = internal.GamepadButtonRightStick
+	GamepadButtonDpadUp        = internal.GamepadButtonDpadUp
+	GamepadButtonDpadDown      = internal.GamepadButtonDpadDown
+	GamepadButtonDpadLeft      = internal.GamepadButtonDpadLeft
+	GamepadButtonDpadRight     = internal.GamepadButtonDpadRight
+	GamepadButtonGuide         = internal.GamepadButtonGuide
+)
+
+// GamepadAxis is an analog input of the standard layout. Sticks run from -1 to
+// 1, with left and up negative; triggers run from 0, released, to 1, fully
+// pulled. A trigger is also a GamepadButton, pressed past the platform's or the
+// mapping's threshold.
+type GamepadAxis = internal.GamepadAxis
+
+const (
+	GamepadAxisLeftX        = internal.GamepadAxisLeftX
+	GamepadAxisLeftY        = internal.GamepadAxisLeftY
+	GamepadAxisRightX       = internal.GamepadAxisRightX
+	GamepadAxisRightY       = internal.GamepadAxisRightY
+	GamepadAxisLeftTrigger  = internal.GamepadAxisLeftTrigger
+	GamepadAxisRightTrigger = internal.GamepadAxisRightTrigger
+)
+
+// GamepadSnapshot is one connected gamepad in the picture of the seam: its
+// slot, its name, the buttons held and the axes away from rest.
+type GamepadSnapshot = internal.GamepadSnapshot
+
+// GamepadAxisValue is one axis and where it is.
+type GamepadAxisValue = internal.GamepadAxisValue
