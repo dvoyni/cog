@@ -96,7 +96,7 @@ func (b *spriteBatch) keyMatches(texture gfx.TextureDescr, layer m.Mat4, clip m.
 	return true
 }
 
-func (b *spriteBatch) add(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr, texture gfx.TextureDescr, layer m.Mat4, clip m.Rect, hasClip bool, filter gfx.FilterMode, viewport m.Vec2, shading *spriteShading, t0, t1, frame, tint, misc, keyColor m.Vec4) {
+func (b *spriteBatch) add(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr, texture gfx.TextureDescr, layer m.Mat4, clip m.Rect, hasClip bool, filter gfx.FilterMode, viewport m.Vec2, shading *spriteShading, t0, t1, frame, tint, misc m.Vec4) {
 	if b.active && !b.keyMatches(texture, layer, clip, hasClip, filter, shading) {
 		b.flush(gfxWrite, quad)
 	}
@@ -117,7 +117,7 @@ func (b *spriteBatch) add(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr, texture gfx
 		b.startArrays(shading.arrays)
 	}
 	b.instances = append(b.instances, SpriteInstance{
-		Transform0: t0, Transform1: t1, Frame: frame, Tint: tint, Misc: misc, KeyColor: keyColor,
+		Transform0: t0, Transform1: t1, Frame: frame, Tint: tint, Misc: misc,
 	})
 	for i := range shading.arrays {
 		b.arrayBytes[i], _ = shading.arrays[i].AppendValueTo(b.arrayBytes[i])
@@ -162,7 +162,7 @@ func (b *spriteBatch) flush(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr) {
 }
 
 // batchEntry computes one sprite/glyph instance and adds it to the batcher.
-func (p *plugin) batchEntry(gfxWrite *gfx.OpQueue, surf surface, entry AtlasEntry, transform SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, shading *spriteShading, tint m.Color, keyColor m.Color) {
+func (p *plugin) batchEntry(gfxWrite *gfx.OpQueue, surf surface, entry AtlasEntry, transform SpriteTransform, layerTransform m.Mat4, clip m.Rect, hasClip bool, shading *spriteShading, tint m.Color) {
 	size := entrySize(entry, transform)
 	if size.X == 0 || size.Y == 0 {
 		return
@@ -180,7 +180,7 @@ func (p *plugin) batchEntry(gfxWrite *gfx.OpQueue, surf surface, entry AtlasEntr
 	repeat := tiledRepeat(entry, transform, size)
 	misc := m.Vec4{X: float32(entry.Layer), Y: repeat.X, Z: repeat.Y}
 	p.batch.add(gfxWrite, p.quad, entry.Texture, layerTransform, clip, hasClip, transform.Filter,
-		surf.size, shading, t0, t1, uv, colorVec(tint), misc, colorVec(keyColor))
+		surf.size, shading, t0, t1, uv, colorVec(tint), misc)
 }
 
 // trianglesShading is one triangle draw's resolved shading. Unlike a sprite

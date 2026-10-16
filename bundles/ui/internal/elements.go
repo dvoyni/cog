@@ -22,15 +22,9 @@ type SpriteParams struct {
 	Fit      SpriteFit
 	Frame    canvas.SpriteFrame
 	Rotation float32
-	// KeyColor recolours the key ramp an artist painted into the sprite, the
-	// way canvas.KeyColorSlot does for a draw recorded directly: it is how one
-	// piece of artwork is shown in a player's colour. A zero KeyColor names the
-	// slot not at all, leaving canvas's own default in place.
-	//
-	// Like Tint it is consumed into the per-instance record, so it never
-	// reaches the material or the batch key: a row of icons in five different
-	// player colours is still one draw.
-	KeyColor m.Color
+	// FlipX mirrors the sprite left to right within the rect it is laid out
+	// to, as canvas.SpriteTransform.FlipX does.
+	FlipX bool
 }
 
 type VisualStates[T any] map[VisualState]T
@@ -238,17 +232,10 @@ func (spriteVisual) Draw(lookup canvas.LookupAccess, queue *canvas.OpQueue, stat
 		},
 		Size:     m.Vec2{X: bounds.Width, Y: bounds.Height},
 		Rotation: params.Rotation, Origin: m.Vec2{X: 0.5, Y: 0.5}, Frame: frame, Filter: params.Filter,
+		FlipX: params.FlipX,
 	}
-	tint := gfx.ShaderParameterColor(canvas.TintSlot, defaultTint(params.Tint))
-	// A zero key colour names the slot not at all, so canvas applies its own
-	// default. Restating that default here would be a second copy of a value
-	// only canvas should own.
-	if params.KeyColor == (m.Color{}) {
-		queue.Sprite(state.Layer, params.Path, transform, state.Materials.Sprite, tint)
-		return
-	}
-	queue.Sprite(state.Layer, params.Path, transform, state.Materials.Sprite, tint,
-		gfx.ShaderParameterColor(canvas.KeyColorSlot, params.KeyColor))
+	queue.Sprite(state.Layer, params.Path, transform, state.Materials.Sprite,
+		gfx.ShaderParameterColor(canvas.TintSlot, defaultTint(params.Tint)))
 }
 
 func Sprite9Sliced(params Sprite9SlicedParams) (ParamVisual[Sprite9SlicedParams], Sprite9SlicedParams) {
@@ -561,9 +548,11 @@ func defaultScale(scale float32) float32 {
 	return scale
 }
 
+// defaultTint reads a zero tint as canvas's neutral one, so a sprite given no
+// tint draws as painted.
 func defaultTint(color m.Color) m.Color {
 	if color == (m.Color{}) {
-		return m.Color{R: 1, G: 1, B: 1, A: 1}
+		return canvas.DefaultTint()
 	}
 	return color
 }

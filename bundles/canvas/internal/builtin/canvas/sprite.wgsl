@@ -9,11 +9,10 @@
 //#include builtin/canvas/uniforms.wgsl
 //#include builtin/canvas/spritevertex.wgsl
 //#include builtin/canvas/clip.wgsl
-//#include builtin/canvas/keycolor.wgsl
+//#include builtin/canvas/tint.wgsl
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     if canvasClipped(in.canvasPosition) { discard; }
-    let sampled = keyColorRamp(textureSample(canvasTexture, canvasSampler, canvasTiledUV(in), in.atlasLayer), in.keyColor.rgb);
-    return sampled * in.tint;
+    return canvasTint(textureSample(canvasTexture, canvasSampler, canvasTiledUV(in), in.atlasLayer), in.tint);
 }

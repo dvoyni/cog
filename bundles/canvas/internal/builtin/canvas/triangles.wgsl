@@ -1,24 +1,20 @@
-// The material hand-recorded geometry gets: sample canvasTexture through the
-// key-colour ramp, times the vertex colour.
+// The material hand-recorded geometry gets: sample canvasTexture, times the
+// vertex colour.
 //
-// It declares its own per-batch value, keyColor, as a uniform of its own beside
-// the canvas block - which is the mechanism a custom material uses for its own
-// per-batch parameters, with a built-in demonstration rather than only a
-// documented one. A draw's gfx.ColorParam(canvas.KeyColorSlot, colour) sets it
-// whole, and the material's own default is the mid grey that leaves artwork as
-// painted. A custom triangles material that keys declares the same line.
+// The vertex colour is a plain multiply, not the tint ramp: it is the colour the
+// geometry is, and a vertex coloured white over the backend's white texture
+// draws white. A sprite that canvas routes through this family - a tiled one -
+// has its tint carried onto the ramp before it becomes a vertex colour, so it
+// draws as it would have on the sprite path.
 //
-// It is an entry point, not an includable source.
+// It is an entry point, not an includable source, and declares no value of its
+// own: the canvas block is all it reads.
 //#include builtin/canvas/uniforms.wgsl
-@group(0) @binding(1) var<uniform> keyColor: vec4<f32>;
-
 //#include builtin/canvas/trianglesvertex.wgsl
 //#include builtin/canvas/clip.wgsl
-//#include builtin/canvas/keycolor.wgsl
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     if canvasClipped(in.canvasPosition) { discard; }
-    let sampled = keyColorRamp(textureSample(canvasTexture, canvasSampler, in.uv), keyColor.rgb);
-    return sampled * in.color;
+    return textureSample(canvasTexture, canvasSampler, in.uv) * in.color;
 }

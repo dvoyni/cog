@@ -18,13 +18,13 @@ func canvasSampler(u, v gfx.AddressMode, filter gfx.FilterMode) gfx.SamplerDesc 
 // reservedName reports whether canvas consumes a parameter name itself.
 //
 // A reserved name never becomes a per-instance array and never enters the sprite
-// batch key. That second half is load-bearing: tint and keyColor arrive as draw
-// parameters and are consumed into the instance record, so keying on them would
+// batch key. That second half is load-bearing: tint arrives as a draw
+// parameter and are consumed into the instance record, so keying on them would
 // split a batch whose draws differ only in tint - the exact merge the instanced
 // path exists to make.
 func reservedName(name string) bool {
 	switch name {
-	case TextureSlot, SamplerSlot, TintSlot, KeyColorSlot:
+	case TextureSlot, SamplerSlot, TintSlot:
 		return true
 	}
 	return false
@@ -57,26 +57,41 @@ func unitQuadBytes() (vertices, indices []byte) {
 	return vertices, indices
 }
 
-// defaultKeyColor is what a draw that names no key colour gets: the mid-grey
-// that makes the shader's ramp reproduce the grey ramp the artist painted,
-// leaving an unkeyed sprite looking like its own artwork rather than like a
-// player colour nobody chose.
-//
-// It is sRGB 0.5 rather than linear 0.5 because 0.5 is what the artist's
-// colour picker said, and the ramp puts keyColor exactly at that intensity.
-// This is the one canvas constant where the two spaces differ visibly, which
-// is why it is named once and referenced everywhere else. It is a variable only
-// because m.Color has no constant form; nothing assigns it.
-var defaultKeyColor = m.NewColorSrgb(0.5, 0.5, 0.5, 1)
+// tintNeutral is the middle of the tint ramp, canvasTintNeutral in tint.wgsl:
+// #6D6D6D, the grey the art paints its player-colour masks in, in the linear
+// light the ramp multiplies in. It is the tint channel that leaves a texel as it was
+// painted.
+const tintNeutral = 0.15292619
 
-// The four reserved canvas parameter names: the names canvas consumes itself and
-// never forwards to a material. The root re-exports them; see
+// defaultTint is what a draw that names no tint gets: neutral, so a sprite
+// draws as its own artwork, at full alpha. It is a variable only because
+// m.Color has no constant form; nothing assigns it.
+var defaultTint = m.Color{R: tintNeutral, G: tintNeutral, B: tintNeutral, A: 1}
+
+// DefaultTint returns the tint a draw that names none gets; see
+// canvas.DefaultTint.
+func DefaultTint() m.Color { return defaultTint }
+
+// TintFor returns the tint that draws white art in color: color's rgb scaled
+// onto the ramp by the neutral, its alpha as it is. See canvas.TintFor.
+func TintFor(color m.Color) m.Color {
+	return m.Color{R: color.R * tintNeutral, G: color.G * tintNeutral, B: color.B * tintNeutral, A: color.A}
+}
+
+// tintColor is TintFor inverted: the colour white art takes under tint, which
+// is what a sprite routed through the triangles family wears as its vertex
+// colour, where the colour is a plain multiply rather than the ramp.
+func tintColor(tint m.Color) m.Color {
+	return m.Color{R: tint.R / tintNeutral, G: tint.G / tintNeutral, B: tint.B / tintNeutral, A: tint.A}
+}
+
+// The three reserved canvas parameter names: the names canvas consumes itself
+// and never forwards to a material. The root re-exports them; see
 // canvas.TextureSlot.
 const (
-	TextureSlot  = "canvasTexture"
-	SamplerSlot  = "canvasSampler"
-	TintSlot     = "tint"
-	KeyColorSlot = "keyColor"
+	TextureSlot = "canvasTexture"
+	SamplerSlot = "canvasSampler"
+	TintSlot    = "tint"
 )
 
 // defaultTrianglesMaterial samples canvasTexture; untextured draws bind no
@@ -87,15 +102,13 @@ var defaultTrianglesMaterial = MaterialWithState(
 	gfx.ShaderWithResource(TrianglesShaderPath),
 	gfx.StateOverlay2D(),
 	gfx.ShaderParameterSampler(SamplerSlot, gfx.SamplerDesc{}),
-	gfx.ShaderParameterColor(KeyColorSlot, defaultKeyColor),
 )
 
 // defaultTextureMaterial samples an arbitrary gfx texture as it is. It is a
-// second built-in rather than a parameter on the triangle one because the
-// difference is the shader: triangles.wgsl runs the key-colour ramp over every
-// texel, which is right for artwork and silent damage to a rendered image, and
-// no key colour turns the ramp off. Like the triangle material it carries no
-// inline texture default, because that would re-bake a temporary on every draw.
+// second built-in rather than the triangle one so that a scope can name a
+// material over texture-sourced draws alone. Like the triangle material it
+// carries no inline texture default, because that would re-bake a temporary on
+// every draw.
 var defaultTextureMaterial = MaterialWithState(
 	gfx.ShaderWithResource(TextureShaderPath),
 	gfx.StateOverlay2D(),
@@ -110,10 +123,6 @@ var defaultSpriteMaterial = MaterialWithState(
 	gfx.ShaderWithResource(SpriteShaderPath),
 	gfx.StateOverlay2D(),
 )
-
-// DefaultKeyColor returns the key colour a draw that names none gets; see
-// canvas.DefaultKeyColor.
-func DefaultKeyColor() m.Color { return defaultKeyColor }
 
 // DefaultMaterial returns the built-in sprite material; see
 // canvas.DefaultMaterial.

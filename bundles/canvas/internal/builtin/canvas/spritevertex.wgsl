@@ -32,7 +32,6 @@ fn vs_main(@location(0) quad: vec2<f32>, @builtin(instance_index) instance: u32)
     out.uv = mix(s.frame.xy, s.frame.zw, quad);
     out.atlasLayer = i32(s.misc.x);
     out.tint = s.tint;
-    out.keyColor = s.keyColor;
     out.index = instance;
     return out;
 }

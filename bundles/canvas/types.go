@@ -147,24 +147,25 @@ type MaterialSet = internal.MaterialSet
 // which means fading a cluster fades its halo with it.
 type HaloProfile = internal.HaloProfile
 
-// The four reserved canvas parameter names: the names canvas consumes itself and
-// never forwards to a material.
+// The three reserved canvas parameter names: the names canvas consumes itself
+// and never forwards to a material.
 //
 // TextureSlot and SamplerSlot are the texture and sampler a draw samples; bind
 // them through a material or through DrawTriangles params, and the built-in
-// triangle shader samples them with raw uv. TintSlot and KeyColorSlot are fields
-// of the sprite instance record, which canvas reads out of a draw's parameters
-// by name and packs in, so a custom sprite shader reads them from the shared
-// VertexOut rather than from a uniform and may not reclaim either name.
+// triangle shader samples them with raw uv. TintSlot is a field of the sprite
+// instance record, which canvas reads out of a draw's parameters by name and
+// packs in, so a custom sprite shader reads it from the shared VertexOut rather
+// than from a uniform and may not reclaim the name. A tint is a point on the
+// ramp in TintPath, not a colour: DefaultTint leaves art as painted, and
+// TintFor gives the tint that draws white art in a colour.
 //
-// All four are constants rather than string literals scattered through the
+// All three are constants rather than string literals scattered through the
 // flush, because a reserved name spelled in four places is reserved only by
 // coincidence.
 const (
-	TextureSlot  = internal.TextureSlot
-	SamplerSlot  = internal.SamplerSlot
-	TintSlot     = internal.TintSlot
-	KeyColorSlot = internal.KeyColorSlot
+	TextureSlot = internal.TextureSlot
+	SamplerSlot = internal.SamplerSlot
+	TintSlot    = internal.TintSlot
 )
 
 const (
@@ -189,10 +190,10 @@ const (
 	TrianglesBindingsPath = internal.TrianglesBindingsPath
 	// TrianglesVertexPath includes TrianglesBindingsPath and declares vs_main.
 	TrianglesVertexPath = internal.TrianglesVertexPath
-	// KeyColorPath declares keyColorRamp, the sRGB transfer functions it is
-	// written in, and the three key* constants, so a custom material wears the
-	// exact ramp the built-ins do rather than a re-typed approximation.
-	KeyColorPath = internal.KeyColorPath
+	// TintPath declares canvasTint, the tint ramp, and canvasTintNeutral, so a
+	// custom material wears the exact ramp the built-ins do rather than a
+	// re-typed approximation.
+	TintPath = internal.TintPath
 	// HaloBandPath declares the halo's profile uniform, its inter-stage struct,
 	// its vs_main and haloBand, which is the band at one fragment. Include it to
 	// write a halo material whose fs_main does something to the band - one named

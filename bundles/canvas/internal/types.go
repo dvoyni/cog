@@ -136,10 +136,10 @@ type TextDraw struct {
 	//
 	// The field carries two things at once, because m.Color does. Rgb says what
 	// colour the ink is, and for a glyph that is the whole mark: the font atlas
-	// holds RGB=255 with coverage in alpha, so multiplying by tint is literally
-	// what colours the text. An icon's texel is already the artwork, so the
-	// same multiply is a modulation that would destroy it, and white stays the
-	// identity. Alpha says how present the run is, which is true of anything
+	// holds RGB=255 with coverage in alpha, so the glyph's tint is TintFor(Color)
+	// and the ramp draws it in exactly Color. An icon's texel is already the
+	// artwork, so the same tint is a modulation that would destroy it, and an
+	// icon takes the neutral tint instead. Alpha says how present the run is, which is true of anything
 	// drawn - a label fading out takes its icon down with it rather than
 	// leaving it riding fully opaque over faded text.
 	//
@@ -151,7 +151,7 @@ type TextDraw struct {
 	// inside it.
 	//
 	// Effects read tint, so this is what they see of an icon: an inline icon
-	// haloes white at the run's alpha - a band that follows the run in presence
+	// haloes white at the run's alpha, its tint being neutral - a band that follows the run in presence
 	// and not in colour.
 	Color        m.Color
 	Align        TextAlign
@@ -165,9 +165,8 @@ type TextDraw struct {
 	// extra draw, because the batch key already separates glyphs from sprites
 	// through the texture, the font atlas not being the sprite atlas.
 	//
-	// Text already spends both reserved names: Color becomes the instance tint
-	// and glyphs carry the default key colour, so a text material may not
-	// reclaim TintSlot or KeyColorSlot.
+	// Text already spends the reserved tint: Color becomes the instance tint, so
+	// a text material may not reclaim TintSlot.
 	Material *Material
 	Params   []gfx.ShaderParameterDescr
 }
@@ -187,7 +186,8 @@ type TextDraw struct {
 // this type creates.
 //
 // A fill is a sprite draw, so Material is a sprite material and the reserved
-// names apply to it as they do to text: Color becomes the instance tint.
+// names apply to it as they do to text: TintFor(Color) becomes the instance
+// tint, so the fill is drawn in exactly Color.
 type ShapeDraw struct {
 	Color     m.Color
 	Thickness float32
@@ -195,13 +195,13 @@ type ShapeDraw struct {
 	Params    []gfx.ShaderParameterDescr
 }
 
-// tint reports the colour a shape draws at, reading a zero colour as opaque
-// white.
+// tint reports the tint that draws a shape's white texel in its colour,
+// reading a zero colour as opaque white.
 func (d ShapeDraw) tint() m.Color {
 	if d.Color == (m.Color{}) {
-		return m.Color{R: 1, G: 1, B: 1, A: 1}
+		return defaultTint
 	}
-	return d.Color
+	return TintFor(d.Color)
 }
 
 const (
@@ -226,10 +226,10 @@ const (
 	TrianglesBindingsPath = "builtin/canvas/trianglesbindings.wgsl"
 	// TrianglesVertexPath includes TrianglesBindingsPath and declares vs_main.
 	TrianglesVertexPath = "builtin/canvas/trianglesvertex.wgsl"
-	// KeyColorPath declares keyColorRamp, the sRGB transfer functions it is
-	// written in, and the three key* constants, so a custom material wears the
-	// exact ramp the built-ins do rather than a re-typed approximation.
-	KeyColorPath = "builtin/canvas/keycolor.wgsl"
+	// TintPath declares canvasTint, the tint ramp, and canvasTintNeutral, so a
+	// custom material wears the exact ramp the built-ins do rather than a
+	// re-typed approximation.
+	TintPath = "builtin/canvas/tint.wgsl"
 	// HaloBandPath declares the halo's profile uniform, its inter-stage struct,
 	// its vs_main and haloBand, which is the band at one fragment. Include it to
 	// write a halo material whose fs_main does something to the band - one named
@@ -239,7 +239,7 @@ const (
 
 // SpriteInstance is one per-instance record the sprite shader reads from its
 // storage buffer. Field order and size must match the shader's SpriteInstance
-// (6 vec4, 96 bytes, no padding), so a []SpriteInstance uploads directly as the
+// (5 vec4, 80 bytes, no padding), so a []SpriteInstance uploads directly as the
 // instance buffer for the instanced draw.
 //
 // The record is frozen. A custom sprite material may replace both entry points
@@ -253,7 +253,6 @@ type SpriteInstance struct {
 	Frame      m.Vec4 // uv rect (x0, y0, x1, y1)
 	Tint       m.Vec4
 	Misc       m.Vec4 // atlasLayer, repeatX, repeatY, unused
-	KeyColor   m.Vec4
 }
 
 // DrawsSnapshot is one produced snapshot, or the reason there is none. One

@@ -475,8 +475,7 @@ func (p *plugin) drawSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface, laye
 	// fingerprint, so a sprite that names one merges with every sprite that names
 	// the same one, and a lone sprite is the one-instance case.
 	shading := p.shadeSprite(materials, op.NamedMaterial(), op.Fingerprint, op.Params)
-	tint := paramColorOr(op.Params, TintSlot, m.Color{R: 1, G: 1, B: 1, A: 1})
-	keyColor := paramColorOr(op.Params, KeyColorSlot, DefaultKeyColor())
+	tint := paramColorOr(op.Params, TintSlot, defaultTint)
 	if t.NineSlice != (SpriteFrame{}) {
 		frameWidth, frameHeight := framedSource(entry.Width, entry.Height, t.Frame)
 		if !insetsFit(frameWidth, frameHeight, t.NineSlice) {
@@ -484,11 +483,11 @@ func (p *plugin) drawSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface, laye
 			return
 		}
 		nineSliceParts(t, entry.Width, entry.Height, func(part SpriteTransform) {
-			p.batchEntry(gfxWrite, surf, entry, part, layerTransform, clip, hasClip, &shading, tint, keyColor)
+			p.batchEntry(gfxWrite, surf, entry, part, layerTransform, clip, hasClip, &shading, tint)
 		})
 		return
 	}
-	p.batchEntry(gfxWrite, surf, entry, t, layerTransform, clip, hasClip, &shading, tint, keyColor)
+	p.batchEntry(gfxWrite, surf, entry, t, layerTransform, clip, hasClip, &shading, tint)
 }
 
 // nineSliceParts splits one transform into the sub-draws a nine-slice is made
@@ -595,7 +594,9 @@ func (p *plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface,
 	if t.TileY {
 		spanY = size.Y / (float32(entry.Height) * tileScale)
 	}
-	tint := spriteTint(op.Params)
+	// The triangles family multiplies by the vertex colour plainly, so the tint
+	// goes in as the colour it gives white art on the ramp.
+	tint := tintColor(paramColorOr(op.Params, TintSlot, defaultTint))
 	sine := float32(math.Sin(float64(t.Rotation)))
 	cosine := float32(math.Cos(float64(t.Rotation)))
 	corners := [4]m.Vec2{{X: 0, Y: 0}, {X: 1, Y: 0}, {X: 1, Y: 1}, {X: 0, Y: 1}}
@@ -613,8 +614,8 @@ func (p *plugin) drawTiledSprite(gfxWrite *gfx.OpQueue, fr *frame, surf surface,
 	for _, i := range [6]int{0, 1, 2, 0, 2, 3} {
 		p.tileVertices = appendTileVertex(p.tileVertices, positions[i], tint, uvs[i])
 	}
-	// A tiled sprite keeps FamilyTriangles: it is artwork, and artwork wants the
-	// key-colour ramp. Only the texture sprite below is exempt.
+	// A tiled sprite keeps FamilyTriangles: it is artwork from the atlas, and
+	// only a texture-sourced sprite is the texture family's.
 	material, fingerprint, scope := materials.Resolve(FamilyTriangles, nil, 0)
 	shading := p.shadeQuad(material, fingerprint, entry.Texture, tileSampler(t), op.Params, scope)
 	p.tris.add(gfxWrite, surf.size, builtinQuadLayoutID, Vertex{}.VertexLayout(),
@@ -679,7 +680,7 @@ func (p *plugin) emitTextureQuad(gfxWrite *gfx.OpQueue, surf surface, layerTrans
 	if !ok {
 		return
 	}
-	tint := paramColorOr(op.Params, TintSlot, m.Color{R: 1, G: 1, B: 1, A: 1})
+	tint := tintColor(paramColorOr(op.Params, TintSlot, defaultTint))
 	sine, cosine := sincos(t.Rotation)
 	corners := [4]m.Vec2{{X: 0, Y: 0}, {X: 1, Y: 0}, {X: 1, Y: 1}, {X: 0, Y: 1}}
 	uvs := [4]m.Vec2{{X: uv.X, Y: uv.Y}, {X: uv.Z, Y: uv.Y}, {X: uv.Z, Y: uv.W}, {X: uv.X, Y: uv.W}}
@@ -755,18 +756,6 @@ func tileSampler(t SpriteTransform) gfx.SamplerDesc {
 		return gfx.AddressClamp
 	}
 	return canvasSampler(address(t.TileX), address(t.TileY), t.Filter)
-}
-
-// spriteTint returns the first "tint" color parameter, defaulting to opaque white.
-func spriteTint(params []gfx.ShaderParameterDescr) m.Color {
-	for i := range params {
-		if params[i].Name == "tint" {
-			if color, ok := params[i].ColorValue(); ok {
-				return color
-			}
-		}
-	}
-	return m.Color{R: 1, G: 1, B: 1, A: 1}
 }
 
 // appendTileVertex writes one position/color/uv vertex in the built-in triangle
@@ -955,7 +944,7 @@ func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, fr *frame, surf surface, la
 					Position: m.Vec2{X: x + glyph.Offset.X*toLogical, Y: y + glyph.Offset.Y*toLogical},
 					Size:     m.Vec2{X: float32(glyph.Entry.Width) * toLogical, Y: float32(glyph.Entry.Height) * toLogical},
 				}
-				p.batchEntry(gfxWrite, surf, glyph.Entry, transform, layerTransform, clip, hasClip, shading, op.Draw.Color, DefaultKeyColor())
+				p.batchEntry(gfxWrite, surf, glyph.Entry, transform, layerTransform, clip, hasClip, shading, TintFor(op.Draw.Color))
 			}
 			x += glyph.Advance * toLogical
 			previous = character
@@ -1030,7 +1019,7 @@ func (p *plugin) drawText(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerT
 				// with coverage in alpha, and an icon does not because its
 				// texel is already the artwork. Alpha is how present the run
 				// is, which is true of anything drawn.
-				p.batchEntry(gfxWrite, surf, entry, transform, layerTransform, clip, hasClip, &shading, m.Color{R: 1, G: 1, B: 1, A: op.Draw.Color.A}, DefaultKeyColor())
+				p.batchEntry(gfxWrite, surf, entry, transform, layerTransform, clip, hasClip, &shading, defaultTint.Fade(op.Draw.Color.A))
 				x += width
 				continue
 			}

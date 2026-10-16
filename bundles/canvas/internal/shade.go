@@ -8,8 +8,8 @@ import (
 // its own, else the layer set's sprite slot, else the built-in - and its
 // parameters split by the frequency each one lands at.
 //
-// A reserved name reaches neither half: tint and keyColor are consumed into the
-// instance record, and the texture and sampler are canvas's own bindings. A
+// A reserved name reaches neither half: tint is consumed into the instance
+// record, and the texture and sampler are canvas's own bindings. A
 // value parameter is per sprite and becomes an array; a texture, sampler or
 // buffer has no per-instance form - there is one bind group per draw - so it is
 // per batch. The scope's parameters follow the draw's, so the draw wins under

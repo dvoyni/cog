@@ -155,23 +155,15 @@ array, so a per-scope value belongs on the material itself or on
 `canvas.OpQueue.SetLayerMaterial`, where it is per batch by construction. See
 `bundles/canvas/docs/README.md` for the frequency rules.
 
-### Tint and key colour
+### Tint
 
-`SpriteParams` carries the two artwork slots of the sprite record directly.
-`Tint` multiplies the sprite; `KeyColor` recolours the key ramp an artist
-painted into it, which is how one piece of artwork is shown in a player's
-colour:
+`SpriteParams.Tint` is the sprite record's tint, a point on canvas's tint ramp
+(see `bundles/canvas/docs/README.md`): 0.5 per channel leaves the art as
+painted, and `canvas.TintFor(c)` draws white art in `c`. A zero `Tint` is
+`canvas.DefaultTint()`, so a sprite given none draws as painted.
 
-```go
-ui.Image(ui.SpriteParams{Path: unitSprite, KeyColor: unit.Owner.Color()})
-```
-
-A zero `KeyColor` names the slot not at all, so canvas's own default applies —
-`ui` does not restate a default only canvas should own. A zero `Tint` is opaque
-white, as it always was.
-
-Neither slot is a material parameter: both are reserved names consumed into the
-per-instance record, so they never reach the material or the batch key. A roster
+The tint is not a material parameter: it is a reserved name consumed into the
+per-instance record, so it never reaches the material or the batch key. A roster
 of unit icons in five different player colours is still **one draw**.
 
 ## Composition

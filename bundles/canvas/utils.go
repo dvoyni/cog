@@ -46,12 +46,16 @@ func ScreenToWorld(window m.Rect, aspect AspectMode, viewport, screen m.Vec2) m.
 	return internal.ScreenToWorld(window, aspect, viewport, screen)
 }
 
-// DefaultKeyColor is the key colour a triangles draw gets when it names none:
-// mid grey, which leaves the ramp a no-op on artwork that was not authored for
-// keying. It is exported because a custom triangles material that keys has to
-// carry it as its own default - keyColor is a uniform of the shader's own, and a
-// material that leaves it unset keys every texel against black.
-func DefaultKeyColor() m.Color { return internal.DefaultKeyColor() }
+// DefaultTint is the tint a sprite draw gets when it names none: #6D6D6D grey
+// (linear 0.153) at full alpha, the middle of the tint ramp, which leaves art
+// as painted. The ramp is lerp(0, tint/0.153, texel) per channel in linear: a
+// texel painted #6D6D6D comes out in exactly the tint.
+func DefaultTint() m.Color { return internal.DefaultTint() }
+
+// TintFor returns the tint that draws white art - a glyph, a fill, a white
+// sprite - in color: its rgb scaled by the ramp's neutral, its alpha as it
+// is.
+func TintFor(color m.Color) m.Color { return internal.TintFor(color) }
 
 // NewMaterial describes a material from a shader and its own parameters. Its
 // state is alpha-blended, depth-tested and written, which is

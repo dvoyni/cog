@@ -401,11 +401,9 @@ is the backend that decides, not the platform. A later pass loading that depth
 with `ClearDepth` absent therefore renders against undefined depth wherever the
 pass was skipped — the whole target, not the one draw.
 
-**Canvas cannot composite a rendered texture through its built-in triangle
-material.** All three canvas shaders run every texel through the key-colour
-ramp, whose output is a function of red alone, and no key colour makes it an
-identity — so a 3D render composited that way loses every dark warm shadow to
-neutral grey. Supply a passthrough material.
+**Composite a rendered texture through `SpriteTexture` or `DrawTexture`.**
+They default to canvas's texture material, which binds a plain 2D texture rather
+than the sprite atlas's array.
 
 ## Verification
 

@@ -34,7 +34,7 @@ and [ADR 0003](../../../docs/adr/0003-roots-are-alias-indexes.md).
   types, `Config`, the `McpProvider` Adapter, the `ErrDraws…` errors, `Name` and
   the ordering identity `FlushOnUpdate`. Its functions — `NewLookup`,
   `NewLookupAccess`, `NewLookupDeviceAccess`, the coordinate helpers (`LayerTransform`, `WorldToScreen`,
-  `ScreenToWorld`), `DefaultKeyColor`, the built-in material constructors,
+  `ScreenToWorld`), `DefaultTint` and `TintFor`, the built-in material constructors,
   `DefaultHaloProfile` and `HaloMaterialSet` — are forwarders in `utils.go`. It
   holds no plugin, and it is what every other package imports.
 - **`bundles/canvas/internal`** is the plugin, and declares everything the
@@ -168,7 +168,9 @@ and `TileX`/`TileY` cannot be combined with `NineSlice` in one op.
 `TextDraw` ignores `WrapWidth` without `WordWrapping`. **A zero `Color` is
 opaque white**, matching `ui`'s default tint and canvas's habit of reading a
 zero scale as 1 — without it a `ShapeDraw` naming only a material would draw
-nothing at all.
+nothing at all. `Color` (like `TextDraw.Color`) is the colour the mark is drawn
+in; canvas puts `TintFor(Color)` in the instance record, so it lands exactly on
+the [tint ramp](#tint).
 
 The two groups of entry points are deliberately not aligned into one shape.
 `Sprite`, `SpriteTexture`, `DrawTriangles` and `DrawTexture` take a transform or
@@ -219,8 +221,8 @@ material gets — and a material belongs to exactly one family:
 | constructor | family | entry point | what it does |
 |---|---|---|---|
 | `DefaultMaterial()` | sprite | `builtin/canvas/sprite.wgsl` | the instanced atlas draw every sprite, glyph, inline icon and fill goes through |
-| `DefaultTrianglesMaterial()` | triangles | `builtin/canvas/triangles.wgsl` | samples `canvasTexture` through the key-colour ramp, times vertex colour |
-| `TextureMaterial()` | triangles | `builtin/canvas/texture.wgsl` | samples and returns; no ramp |
+| `DefaultTrianglesMaterial()` | triangles | `builtin/canvas/triangles.wgsl` | samples `canvasTexture`, times vertex colour |
+| `TextureMaterial()` | texture | `builtin/canvas/texture.wgsl` | samples `canvasTexture`, times vertex colour; its own family so a scope can name a material over texture-sourced draws alone |
 
 Canvas also publishes one material that is **not** a default — the
 [halo](#the-halo) — which an app names deliberately over a scope or does not get
@@ -375,13 +377,29 @@ caller who wants their own texture on their own shape uses `DrawTriangles`.
 
 ### Reserved names
 
-`TextureSlot` (`"canvasTexture"`), `SamplerSlot` (`"canvasSampler"`),
-`TintSlot` (`"tint"`) and `KeyColorSlot` (`"keyColor"`) are the names canvas
-consumes itself and **never forwards to a material**. The first two are canvas's
-own bindings; the last two are fields of the sprite instance record, so a custom
-sprite shader reads them from the shared `VertexOut` rather than from a uniform
-and may not reclaim either name. Text already spends both: `TextDraw.Color`
-becomes the instance tint and glyphs carry the default key colour.
+`TextureSlot` (`"canvasTexture"`), `SamplerSlot` (`"canvasSampler"`) and
+`TintSlot` (`"tint"`) are the names canvas consumes itself and **never forwards
+to a material**. The first two are canvas's own bindings; the tint is a field of
+the sprite instance record, so a custom sprite shader reads it from the shared
+`VertexOut` rather than from a uniform and may not reclaim the name. Text
+already spends it: `TextDraw.Color` becomes the instance tint.
+
+### Tint
+
+A tint is a point on a ramp, not a colour: per colour channel the sprite path
+draws `lerp(0, tint / 0.153, texel)` in linear, 0.153 being #6D6D6D decoded —
+the grey the art paints its colour masks in: a texel painted #6D6D6D comes out
+in exactly the tint, white at about 2.3 times its brightness, black stays black
+— so **a #6D6D6D tint leaves art as painted**. Alpha is not ramped — `tint.a`
+scales coverage plainly. `DefaultTint()` (#6D6D6D, alpha 1) is what a draw naming no
+tint gets, and `TintFor(color)` is the tint that draws white art — a glyph, a
+fill, a white sprite — in exactly `color`. The ramp is `canvasTint` in
+`tint.wgsl`; the halo's band is white art under the same ramp.
+
+The triangles and texture families multiply by the vertex colour plainly. A
+sprite canvas routes through them (a tiled or texture-sourced one) has its tint
+converted to the colour it gives white art first, so it draws as it would on the
+sprite path.
 
 ### Writing one: the eight published sources
 
@@ -399,8 +417,8 @@ mount.
 | `spritevertex.wgsl` | `SpriteVertexPath` | includes `spritebindings.wgsl`; declares `vs_main` |
 | `trianglesbindings.wgsl` | `TrianglesBindingsPath` | group 1 `canvasSampler` + `canvasTexture: texture_2d<f32>`; `struct VertexOut` |
 | `trianglesvertex.wgsl` | `TrianglesVertexPath` | includes `trianglesbindings.wgsl`; declares `vs_main` |
-| `keycolor.wgsl` | `KeyColorPath` | the sRGB transfer functions, the three `key*` constants, and `keyColorRamp` |
-| `haloband.wgsl` | `HaloBandPath` | includes `uniforms.wgsl`, `spritebindings.wgsl` and `clip.wgsl`; `struct HaloProfile` and `@group(0) @binding(1) var<uniform> halo`; `struct HaloVertexOut`; `vs_main`; `fn haloBand(in: HaloVertexOut) -> vec4<f32>` |
+| `tint.wgsl` | `TintPath` | `const canvasTintNeutral` and `fn canvasTint(sampled, tint: vec4<f32>) -> vec4<f32>`, the tint ramp |
+| `haloband.wgsl` | `HaloBandPath` | includes `uniforms.wgsl`, `spritebindings.wgsl`, `clip.wgsl` and `tint.wgsl`; `struct HaloProfile` and `@group(0) @binding(1) var<uniform> halo`; `struct HaloVertexOut`; `vs_main`; `fn haloBand(in: HaloVertexOut) -> vec4<f32>` |
 
 Each source's header states exactly what it declares, because the rule you must
 obey is **do not declare anything a source you included declares** — and a
@@ -417,16 +435,16 @@ A whole fade sprite material is one line of declaration and four includes:
 
 //#include builtin/canvas/spritevertex.wgsl
 //#include builtin/canvas/clip.wgsl
-//#include builtin/canvas/keycolor.wgsl
+//#include builtin/canvas/tint.wgsl
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     if canvasClipped(in.canvasPosition) { discard; }
-    let sampled = keyColorRamp(
+    let sampled = canvasTint(
         textureSample(canvasTexture, canvasSampler, in.uv, in.atlasLayer),
-        in.keyColor.rgb,
+        in.tint,
     );
-    return sampled * in.tint * vec4<f32>(1.0, 1.0, 1.0, fade);
+    return sampled * vec4<f32>(1.0, 1.0, 1.0, fade);
 }
 ```
 
@@ -461,10 +479,8 @@ q.DrawTexture(layer, texture, disc, &lensMaterial, gfx.ShaderParameterRaw("lens"
 The binding number is only the module's own: a parameter binds by the global's
 name. `gfx.ShaderParameterRaw` checks the Go layout against WGSL's alignment rules, and gfx
 checks the size against the reflected binding, so a struct that drifted is
-reported rather than misread. The built-ins do the same: triangles' `keyColor`
-is its own `var<uniform> keyColor: vec4<f32>`, and the halo's profile its own
-`var<uniform> halo: HaloProfile`. A custom triangles material that keys declares
-the `keyColor` line itself and carries `DefaultKeyColor()` as its own default.
+reported rather than misread. The built-ins do the same: the halo's profile is
+its own `var<uniform> halo: HaloProfile`.
 
 **⚠ The clip test is offered, not required, and its omission is silent.**
 `SetClip`/`RemoveClip` are implemented entirely as a test inside `fs_main` —
@@ -517,7 +533,7 @@ block, and additional per-instance parameter arrays at group 2.
 
 **Overriding a published source is a feature.** An included path resolves through
 the full mount overlay, so an app that mounts its own
-`builtin/canvas/keycolor.wgsl` at higher priority replaces that one source inside
+`builtin/canvas/tint.wgsl` at higher priority replaces that one source inside
 canvas's own module and keeps the rest.
 
 
@@ -560,14 +576,10 @@ neither does a caller.
 
 Two things a caller has to get right:
 
-- **Do not draw a render target through the sprite or triangle material.** Both
-  run the key-colour ramp, which rewrites any texel whose red and blue agree
-  within 0.2 in sRGB and whose green is below 0.2 to grey at its own red
-  intensity, with no key colour that switches it off. That is what makes a
-  sprite sheet wear a player colour, and it silently desaturates every dark,
-  low-green pixel of a rendered image. `SpriteTexture` and `DrawTexture` default
-  to `TextureMaterial()`, which samples and returns; keep that unless you are
-  supplying a shader of your own.
+- **Draw a render target through `SpriteTexture` or `DrawTexture`.** They
+  default to `TextureMaterial()`, which binds a plain 2D texture where the
+  sprite path binds the atlas array; keep that unless you are supplying a
+  shader of your own.
 - **Allocate the target `FormatRGBA8Srgb`.** The atlas is sRGB and the engine
   blends linear, so that format is what everything else canvas draws matches. A
   linear target is no longer broken - gfx keys each pipeline to the format of

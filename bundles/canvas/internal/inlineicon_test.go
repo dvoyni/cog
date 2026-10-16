@@ -45,7 +45,7 @@ func TestAnInlineIconTakesTheRunsAlphaAndNotItsColour(t *testing.T) {
 	if len(instances) != 1 || len(instances[0])/testInstanceSize != 1 {
 		t.Fatalf("instance buffers = %d, want the one icon", len(instances))
 	}
-	want := m.Color{R: 1, G: 1, B: 1, A: ink.A}
+	want := DefaultTint().Fade(ink.A)
 	if got := instanceTint(instances[0], 0); got != want {
 		t.Fatalf("inline icon tint = %+v, want %+v - the artwork untouched, at the run's presence", got, want)
 	}
@@ -84,11 +84,11 @@ func TestAGlyphAndAnInlineIconInOneRunTakeDifferentTints(t *testing.T) {
 		t.Fatalf("instance buffers = %d, want the two-glyph run and the one icon", len(spriteInstances(backend)))
 	}
 	for i := 0; i < 2; i++ {
-		if got := instanceTint(glyphs, i); got != ink {
-			t.Fatalf("glyph %d tint = %+v, want the run's whole colour %+v", i, got, ink)
+		if got := instanceTint(glyphs, i); got != TintFor(ink) {
+			t.Fatalf("glyph %d tint = %+v, want the tint of the run's whole colour %+v", i, got, TintFor(ink))
 		}
 	}
-	want := m.Color{R: 1, G: 1, B: 1, A: ink.A}
+	want := DefaultTint().Fade(ink.A)
 	if got := instanceTint(icons, 0); got != want {
 		t.Fatalf("inline icon tint = %+v, want %+v", got, want)
 	}
@@ -126,7 +126,7 @@ func TestAnInlineIconHaloesWhiteAtTheRunsAlpha(t *testing.T) {
 	if len(instances) != 1 || len(instances[0])/testInstanceSize != 1 {
 		t.Fatalf("instance buffers = %d, want the one haloed icon", len(instances))
 	}
-	want := m.Color{R: 1, G: 1, B: 1, A: ink.A}
+	want := DefaultTint().Fade(ink.A)
 	if got := instanceTint(instances[0], 0); got != want {
 		t.Fatalf("haloed icon tint = %+v, want %+v - a neutral band at the run's presence", got, want)
 	}

@@ -1,14 +1,8 @@
 // The material a draw sourcing an arbitrary gfx texture gets: it samples and
-// returns, and that is the whole difference from triangles.wgsl.
-//
-// triangles.wgsl runs every texel through the key-colour ramp, which rewrites
-// any texel whose red and blue agree within 0.2 in sRGB and whose green is
-// below 0.2 to grey at its own red intensity. That is what makes a sprite sheet
-// wear a player colour, and it is silent damage to a rendered image: a dark
-// warm shadow at linear (0.10, 0.02, 0.02) is keyed and leaves the shader
-// neutral grey. No key colour switches it off, because the ramp's output is a
-// function of red alone. Artwork wants the ramp; a render target is not
-// artwork, so it gets this shader instead.
+// returns, exactly as triangles.wgsl does. It is a family of its own for its
+// scope slot and its sampler rather than for its shader: a scope can name a
+// material over texture-sourced draws without naming one over hand-recorded
+// geometry, and the default sampler here is clamped and linear.
 //
 // It is an entry point, not an includable source, and declares no value of its
 // own: the canvas block is all it reads.

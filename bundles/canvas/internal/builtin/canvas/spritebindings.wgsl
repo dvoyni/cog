@@ -23,7 +23,7 @@
 //     struct Wobble { data: array<f32> };
 //     @group(2) @binding(1) var<storage, read> wobble: Wobble;
 //
-// SpriteInstance is FROZEN: six vec4 at 16-byte offsets, 96 bytes, no padding.
+// SpriteInstance is FROZEN: five vec4 at 16-byte offsets, 80 bytes, no padding.
 // It is hand-mirrored by canvas.SpriteInstance in Go and uploaded by direct
 // reinterpretation, so changing it here is a silent misread rather than a
 // compile error. Extending per-sprite data is not something a material may do.
@@ -36,7 +36,6 @@ struct SpriteInstance {
     frame: vec4<f32>,      // uv rect (x0, y0, x1, y1)
     tint: vec4<f32>,
     misc: vec4<f32>,       // atlasLayer, repeatX, repeatY, unused
-    keyColor: vec4<f32>,
 };
 
 struct Instances {
@@ -51,8 +50,7 @@ struct VertexOut {
     @location(1) uv: vec2<f32>,
     @location(2) @interpolate(flat) atlasLayer: i32,
     @location(3) tint: vec4<f32>,
-    @location(4) keyColor: vec4<f32>,
-    @location(5) @interpolate(flat) index: u32,
+    @location(4) @interpolate(flat) index: u32,
 };
 
 // canvasTiledUV wraps a sprite's uv inside its own atlas sub-rect, so a tiled

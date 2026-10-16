@@ -2,8 +2,8 @@
 //
 // DECLARES: struct HaloProfile; @group(0) @binding(1) var<uniform> halo; struct
 // HaloVertexOut; const haloTau; fn haloFalloff; vs_main; fn haloBand. It
-// includes uniforms.wgsl, spritebindings.wgsl and clip.wgsl, so it also brings
-// everything those declare.
+// includes uniforms.wgsl, spritebindings.wgsl, clip.wgsl and tint.wgsl, so it
+// also brings everything those declare.
 //
 // It is published for one reason: a material that has to do something to the
 // band AFTER it is computed - burn it away with the rest of a frame, say -
@@ -62,14 +62,15 @@ struct HaloProfile {
 
 //#include builtin/canvas/spritebindings.wgsl
 //#include builtin/canvas/clip.wgsl
+//#include builtin/canvas/tint.wgsl
 
 // The published VertexOut is not frozen and is named nowhere in Go, so a
-// material declares its own beside it under its own name. This one drops
-// keyColor - the halo never reads the mark's colour - and adds two things: the
-// instance index, flat, and the position within the sprite's own unit quad.
+// material declares its own beside it under its own name. This one adds two
+// things: the instance index, flat, and the position within the sprite's own
+// unit quad.
 //
 // The index rather than the frame rect, because every canvas binding is bound
-// Vertex|Fragment, so one component buys the whole 96-byte record where the
+// Vertex|Fragment, so one component buys the whole 80-byte record where the
 // frame alone would cost four. The quad coordinate cannot come the same way: it
 // is the one thing here that varies across the fragment.
 //
@@ -216,7 +217,7 @@ fn haloBand(in: HaloVertexOut) -> vec4<f32> {
         if all(in.uv >= lo) && all(in.uv <= hi) {
             own = textureSampleLevel(canvasTexture, canvasSampler, in.uv, in.atlasLayer, 0.0).a;
             if own >= 1.0 {
-                return vec4<f32>(in.tint.rgb, in.tint.a);
+                return haloColor(in.tint, 1.0);
             }
         }
 
@@ -247,9 +248,16 @@ fn haloBand(in: HaloVertexOut) -> vec4<f32> {
     }
 
     // The band, and nothing else. The atlas was sampled for alpha only and the
-    // mark's colour was never read: tint.rgb is the band's colour and tint.a its
-    // peak alpha, both per sprite and free, because tint is a frozen field of
+    // mark's colour was never read: the band is white art under tint, and tint.a
+    // its peak alpha, both per sprite and free, because tint is a frozen field of
     // the instance record rather than a storage array. Fading a cluster fades
     // its halo with it.
-    return vec4<f32>(in.tint.rgb, coverage * in.tint.a);
+    return haloColor(in.tint, coverage);
+}
+
+// haloColor is the band at coverage: the colour white art would take under
+// tint, so a band and a mark tinted alike are the same colour, and tint.a as
+// its peak alpha.
+fn haloColor(tint: vec4<f32>, coverage: f32) -> vec4<f32> {
+    return canvasTint(vec4<f32>(1.0), vec4<f32>(tint.rgb, coverage * tint.a));
 }

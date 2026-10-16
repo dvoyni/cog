@@ -143,7 +143,7 @@ func TestOneLayerSetHaloesEveryShapeInTheSpriteFamily(t *testing.T) {
 	k, _, backend := testKernel(t, fstest.MapFS{}, Config{}, func(write *OpQueue) {
 		write.Text(0, "", "42", TextDraw{Position: m.Vec2{X: 10, Y: 40}, Size: 16, Color: ink})
 		write.Sprite(0, "", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil,
-			gfx.ShaderParameterColor(TintSlot, ink))
+			gfx.ShaderParameterColor(TintSlot, TintFor(ink)))
 		write.FillRect(0, m.Rect{X: 20, Width: 8, Height: 8}, ShapeDraw{Color: ink})
 		write.StrokeRect(0, m.Rect{X: 40, Width: 8, Height: 8}, ShapeDraw{Color: ink, Thickness: 1})
 		write.Line(0, m.Vec2{X: 60}, m.Vec2{X: 68, Y: 8}, ShapeDraw{Color: ink, Thickness: 1})
@@ -172,8 +172,8 @@ func TestOneLayerSetHaloesEveryShapeInTheSpriteFamily(t *testing.T) {
 				R: floatAt(record, 48), G: floatAt(record, 52),
 				B: floatAt(record, 56), A: floatAt(record, 60),
 			}
-			if got != ink {
-				t.Fatalf("instance tint = %+v, want the draw's own colour %+v", got, ink)
+			if want := TintFor(ink); got != want {
+				t.Fatalf("instance tint = %+v, want the tint of the draw's own colour %+v", got, want)
 			}
 		}
 	}
@@ -349,16 +349,6 @@ func TestTheHaloDeclaresItsOwnVertexStage(t *testing.T) {
 	}
 }
 
-// The halo never reads the mark's colour - it samples the atlas for alpha only
-// and returns vec4(tint.rgb, coverage * tint.a) - so it has no use for the
-// key-colour ramp, and carrying it would cost a location in the inter-stage
-// struct for nothing.
-func TestTheHaloDoesNotIncludeTheKeyColourRamp(t *testing.T) {
-	if strings.Contains(flattenBuiltinShader(t, HaloShaderPath), "fn keyColorRamp") {
-		t.Fatalf("%s includes the ramp; the halo paints a band in one colour and never reads the mark's", HaloShaderPath)
-	}
-}
-
 // Groups are numbered by what a binding is, and the halo binds what the
 // built-in sprite material binds plus its own profile in group 0: it declares no
 // parameter array of its own and claims nothing in group 3.
@@ -478,7 +468,7 @@ func readBuiltinSource(t *testing.T, path string) []byte {
 // builtinSourceCode is one embedded source with its prose removed: everything
 // after a "//" that is not an "//#include" directive. A shader's header comment
 // names the very things these tests forbid the code from doing - it says why the
-// halo does not include keycolor.wgsl, and why it declares no SpriteInstance of
+// halo reads no mark colour, and why it declares no SpriteInstance of
 // its own - so a scan of the raw bytes reads its own explanation as a violation.
 func builtinSourceCode(t *testing.T, path string) string {
 	t.Helper()

@@ -136,7 +136,7 @@ func (b *testBackend) ReflectShader(code []byte) (gfx.ShaderLayout, error) {
 // wgsl.Lower instead - see TestCanvasNumbersItsGroupsByKind.
 //
 // Every uniform is a whole binding, as the real ones are: u is canvas's block,
-// keyColor and halo the triangles and halo shaders' own, and the rest are the
+// halo the halo shader's own, and the rest are the
 // values the tests' custom materials declare. wobble is here so a per-instance
 // parameter array has a binding to resolve against.
 func testLayoutFor(source string) gfx.ShaderLayout {
@@ -192,7 +192,6 @@ func testUnionLayout() gfx.ShaderLayout {
 	return gfx.ShaderLayout{
 		Resources: []gfx.ShaderResource{
 			{Name: uniformsSlot, Kind: gfx.ResourceUniformBuffer, Group: 0, Binding: 0, Size: 96},
-			{Name: KeyColorSlot, Kind: gfx.ResourceUniformBuffer, Group: 0, Binding: 1, Size: 16},
 			{Name: HaloSlot, Kind: gfx.ResourceUniformBuffer, Group: 0, Binding: 2, Size: 12},
 			{Name: TintSlot, Kind: gfx.ResourceUniformBuffer, Group: 0, Binding: 3, Size: 16},
 			{Name: "customValue", Kind: gfx.ResourceUniformBuffer, Group: 0, Binding: 4, Size: 4},
@@ -215,16 +214,16 @@ const fadeSpriteMaterialSource = `//#include builtin/canvas/uniforms.wgsl
 
 //#include builtin/canvas/spritevertex.wgsl
 //#include builtin/canvas/clip.wgsl
-//#include builtin/canvas/keycolor.wgsl
+//#include builtin/canvas/tint.wgsl
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     if canvasClipped(in.canvasPosition) { discard; }
-    let sampled = keyColorRamp(
+    let sampled = canvasTint(
         textureSample(canvasTexture, canvasSampler, in.uv, in.atlasLayer),
-        in.keyColor.rgb,
+        in.tint,
     );
-    return sampled * in.tint * vec4<f32>(1.0, 1.0, 1.0, fade);
+    return sampled * vec4<f32>(1.0, 1.0, 1.0, fade);
 }
 `
 
@@ -540,7 +539,7 @@ func runFrame(k kernel.Executioner) {
 
 func TestPluginMountsBuiltInShaders(t *testing.T) {
 	k, _, _ := testKernel(t, fstest.MapFS{}, Config{}, func(*OpQueue) {})
-	for _, path := range []string{SpriteShaderPath, TrianglesShaderPath, KeyColorPath} {
+	for _, path := range []string{SpriteShaderPath, TrianglesShaderPath, TintPath} {
 		want, err := fs.ReadFile(builtinFS, path)
 		if err != nil {
 			t.Fatalf("read embedded shader %q: %v", path, err)
@@ -1082,15 +1081,28 @@ func TestAFillAndAGlyphCarryingAMaterialAreSpriteDraws(t *testing.T) {
 	}
 }
 
-// A zero colour is opaque white. Without that rule a ShapeDraw naming only a
-// material draws nothing at all, which is the likelier mistake in the world the
-// type creates.
+// A zero colour is opaque white, which on the tint ramp is the neutral tint.
+// Without that rule a ShapeDraw naming only a material draws nothing at all,
+// which is the likelier mistake in the world the type creates.
 func TestAZeroShapeColourIsOpaqueWhite(t *testing.T) {
 	var list OpQueue
 	list.FillRect(0, m.Rect{Width: 4, Height: 4}, ShapeDraw{})
 	color, ok := OpQueueLayers(&list)[0].Ops[0].Sprite.Params[0].ColorValue()
-	if !ok || color != (m.Color{R: 1, G: 1, B: 1, A: 1}) {
-		t.Fatalf("zero shape colour = %+v (%v), want opaque white", color, ok)
+	if !ok || color != DefaultTint() {
+		t.Fatalf("zero shape tint = %+v (%v), want the neutral tint that draws white", color, ok)
+	}
+}
+
+// A shape's colour goes onto the ramp as the tint that draws its white texel in
+// exactly that colour.
+func TestAShapeColourBecomesTheTintThatDrawsIt(t *testing.T) {
+	var list OpQueue
+	ink := m.NewColorSrgb(0.2, 0.4, 0.8, 0.5)
+	list.FillRect(0, m.Rect{Width: 4, Height: 4}, ShapeDraw{Color: ink})
+	color, ok := OpQueueLayers(&list)[0].Ops[0].Sprite.Params[0].ColorValue()
+	want := m.Color{R: ink.R * 0.15292619, G: ink.G * 0.15292619, B: ink.B * 0.15292619, A: ink.A}
+	if !ok || color != want {
+		t.Fatalf("shape tint = %+v (%v), want %+v", color, ok, want)
 	}
 }
 
@@ -1140,8 +1152,8 @@ func TestSpriteNineSliceExpandsAfterTextureDimensionsResolve(t *testing.T) {
 	})
 	runFrame(k)
 	instances := spriteInstances(backend)
-	if len(instances) != 1 || len(instances[0])/96 != 9 {
-		t.Fatalf("nine-slice instances = %d batches, %d instances; want 1, 9", len(instances), len(instances[0])/96)
+	if len(instances) != 1 || len(instances[0])/testInstanceSize != 9 {
+		t.Fatalf("nine-slice instances = %d batches, %d instances; want 1, 9", len(instances), len(instances[0])/testInstanceSize)
 	}
 }
 
@@ -1409,15 +1421,15 @@ func TestTheUniformBlockMatchesCanvasUniforms(t *testing.T) {
 // Groups are numbered by what a binding is: 0 the uniforms, 1 the texture a
 // draw samples, 2 per-sprite storage. Group 3 is claimed by nothing, and nothing
 // in Go names any of these numbers - gfx reflects them out of the source. A
-// material's own values sit in group 0 beside the canvas block, as triangles'
-// keyColor and the halo's profile do.
+// material's own values sit in group 0 beside the canvas block, as the halo's
+// profile does.
 func TestCanvasNumbersItsGroupsByKind(t *testing.T) {
 	want := map[string]map[string][2]uint32{
 		SpriteShaderPath: {
 			"u": {0, 0}, "canvasSampler": {1, 0}, "canvasTexture": {1, 1}, "instances": {2, 0},
 		},
 		TrianglesShaderPath: {
-			"u": {0, 0}, "keyColor": {0, 1}, "canvasSampler": {1, 0}, "canvasTexture": {1, 1},
+			"u": {0, 0}, "canvasSampler": {1, 0}, "canvasTexture": {1, 1},
 		},
 		TextureShaderPath: {
 			"u": {0, 0}, "canvasSampler": {1, 0}, "canvasTexture": {1, 1},
@@ -1583,7 +1595,7 @@ func TestTrianglesShaderParses(t *testing.T) {
 // The include has to resolve on the real path too: through the mount the plugin
 // installs, inside the translate step the backend drives, not only through a
 // filesystem a test hands to flattenShader. If it did not, the pipeline would be
-// built from a module missing keyColorRamp.
+// built from a module missing canvasTint.
 func TestASpriteDrawReachesTheBackendWithTheRampIncluded(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 2, 2)}}}
 	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
@@ -1594,8 +1606,8 @@ func TestASpriteDrawReachesTheBackendWithTheRampIncluded(t *testing.T) {
 	if len(backend.pipelines) != 1 {
 		t.Fatalf("pipelines = %d, want 1", len(backend.pipelines))
 	}
-	if !strings.Contains(backend.pipelineShader(0), "fn keyColorRamp") {
-		t.Error("the sprite pipeline was built from a module with no keyColorRamp: the include did not resolve")
+	if !strings.Contains(backend.pipelineShader(0), "fn canvasTint") {
+		t.Error("the sprite pipeline was built from a module with no canvasTint: the include did not resolve")
 	}
 }
 
@@ -1604,7 +1616,7 @@ func TestASpriteDrawReachesTheBackendWithTheRampIncluded(t *testing.T) {
 // on - the ramp is shared with downstream shaders, not merely between canvas's
 // own three - and nothing else exercises it.
 func TestAnAppShaderIncludesTheBuiltInRampAcrossMounts(t *testing.T) {
-	appShader := `//#include builtin/canvas/keycolor.wgsl
+	appShader := `//#include builtin/canvas/tint.wgsl
 struct AppUniforms {
     canvasTransform0: vec4<f32>,
     canvasTransform1: vec4<f32>,
@@ -1615,7 +1627,6 @@ struct AppUniforms {
     canvasLayer: mat4x4<f32>,
     canvasClip: vec4<f32>,
     tint: vec4<f32>,
-    keyColor: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> u: AppUniforms;
 @group(1) @binding(0) var canvasSampler: sampler;
@@ -1628,7 +1639,7 @@ fn vs_main(@location(0) quad: vec2<f32>) -> @builtin(position) vec4<f32> {
 
 @fragment
 fn fs_main() -> @location(0) vec4<f32> {
-    return keyColorRamp(u.tint, u.keyColor.rgb);
+    return canvasTint(u.tint, u.tint);
 }
 `
 	filesystem := fstest.MapFS{"app.wgsl": &fstest.MapFile{Data: []byte(appShader)}}
@@ -1641,7 +1652,7 @@ fn fs_main() -> @location(0) vec4<f32> {
 	if len(backend.pipelines) != 1 {
 		t.Fatalf("pipelines = %d, want 1", len(backend.pipelines))
 	}
-	if !strings.Contains(backend.pipelineShader(0), "fn keyColorRamp") {
+	if !strings.Contains(backend.pipelineShader(0), "fn canvasTint") {
 		t.Error("an app shader's absolute #include of the built-in ramp did not resolve")
 	}
 }
@@ -1650,25 +1661,18 @@ fn fs_main() -> @location(0) vec4<f32> {
 // preprocessor resolves a relative include for a shader loaded from canvas's
 // mount at all - nothing exercised that before - and the one that would catch a
 // copy creeping back into a second source.
-func TestTheKeyColorRampIsIncludedRatherThanCopied(t *testing.T) {
-	for _, path := range []string{SpriteShaderPath, TrianglesShaderPath} {
+func TestTheTintRampIsIncludedRatherThanCopied(t *testing.T) {
+	for _, path := range []string{SpriteShaderPath, HaloShaderPath} {
 		source, err := fs.ReadFile(builtinFS, path)
 		if err != nil {
 			t.Fatalf("read embedded shader %q: %v", path, err)
 		}
-		if bytes.Contains(source, []byte("fn keyColorRamp")) {
-			t.Errorf("%s declares keyColorRamp itself; it should include %s", path, KeyColorPath)
+		if bytes.Contains(source, []byte("fn canvasTint")) {
+			t.Errorf("%s declares canvasTint itself; it should include %s", path, TintPath)
 		}
-		if got := strings.Count(flattenBuiltinShader(t, path), "fn keyColorRamp"); got != 1 {
-			t.Errorf("%s flattens to %d keyColorRamp declarations, want 1", path, got)
+		if got := strings.Count(flattenBuiltinShader(t, path), "fn canvasTint"); got != 1 {
+			t.Errorf("%s flattens to %d canvasTint declarations, want 1", path, got)
 		}
-	}
-	texture, err := fs.ReadFile(builtinFS, TextureShaderPath)
-	if err != nil {
-		t.Fatalf("read embedded shader %q: %v", TextureShaderPath, err)
-	}
-	if bytes.Contains(texture, []byte("keycolor.wgsl")) {
-		t.Errorf("%s includes the ramp; a render target is not artwork", TextureShaderPath)
 	}
 }
 
@@ -1724,7 +1728,7 @@ func floatAt(data []byte, offset int) float32 {
 }
 
 // testInstanceSize is the byte size of one batched sprite/glyph instance record.
-const testInstanceSize = 96
+const testInstanceSize = 80
 
 // spriteInstances returns the per-draw instance storage buffers captured during
 // the frame, in draw (flush) order. Instance buffers are storage buffers whose
@@ -1742,7 +1746,7 @@ func spriteInstances(b *testBackend) [][]byte {
 
 // instanceAt returns the i-th instance record within one storage buffer. Field
 // offsets: transform0@0 (pos.xy,size.xy), transform1@16 (origin.xy,sin,cos),
-// frame@32 (uv), tint@48, misc@64 (atlasLayer), keyColor@80.
+// frame@32 (uv), tint@48, misc@64 (atlasLayer).
 func instanceAt(buffer []byte, i int) []byte {
 	return buffer[i*testInstanceSize : (i+1)*testInstanceSize]
 }
@@ -1769,22 +1773,22 @@ func TestASpriteDrawParameterNamingAUniformIsReported(t *testing.T) {
 	}
 }
 
-// Two sprites differing only in key colour are one batch. keyColor is a
-// reserved slot consumed into the per-instance record, so it never reaches the
-// material or the batch key - which is what lets a roster of units in different
-// player colours cost one draw rather than one per player.
-func TestDifferingKeyColoursShareOneBatch(t *testing.T) {
+// Two sprites differing only in tint are one batch. tint is a reserved slot
+// consumed into the per-instance record, so it never reaches the material or
+// the batch key - which is what lets a roster of units in different player
+// colours cost one draw rather than one per player.
+func TestDifferingTintsShareOneBatch(t *testing.T) {
 	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
 	files := fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 4, 3)}}
 	k, _, backend := testKernel(t, files, config, func(write *OpQueue) {
 		write.Sprite(0, "sprite.png", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}},
-			nil, gfx.ShaderParameterColor(KeyColorSlot, m.NewColorSrgb(0.2, 0.4, 0.9, 1)))
+			nil, gfx.ShaderParameterColor(TintSlot, m.NewColorSrgb(0.2, 0.4, 0.9, 1)))
 		write.Sprite(0, "sprite.png", SpriteTransform{Position: m.Vec2{X: 8}, Size: m.Vec2{X: 4, Y: 4}},
-			nil, gfx.ShaderParameterColor(KeyColorSlot, m.NewColorSrgb(0.9, 0.3, 0.1, 1)))
+			nil, gfx.ShaderParameterColor(TintSlot, m.NewColorSrgb(0.9, 0.3, 0.1, 1)))
 	})
 	runFrame(k)
 	instances := spriteInstances(backend)
 	if len(instances) != 1 || len(instances[0])/testInstanceSize != 2 {
-		t.Fatalf("key-coloured sprite draws = %d batches, want one batch of two", len(instances))
+		t.Fatalf("tinted sprite draws = %d batches, want one batch of two", len(instances))
 	}
 }

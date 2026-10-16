@@ -181,12 +181,9 @@ func TestSpriteTextureSizesItselfFromTheTexture(t *testing.T) {
 	}
 }
 
-// The finding the cameras demo had to hand-roll a shader around: canvas's
-// built-in triangle shader runs every texel through the key-colour ramp, and
-// the ramp is not an identity on a rendered image - it desaturates every dark,
-// low-green pixel to grey, with no key colour that switches it off. A texture
-// drawn as itself needs a material that samples and returns.
-func TestATextureDrawDoesNotGoThroughTheKeyColourRamp(t *testing.T) {
+// A texture drawn as itself goes through the texture material, which binds a
+// plain 2D texture rather than the sprite atlas's array.
+func TestATextureDrawBindsAPlainTexture(t *testing.T) {
 	k, _, backend := testKernelGfx(t, fstest.MapFS{}, targetTestConfig(), func(write *OpQueue, gfxWrite *gfx.OpQueue) {
 		_, texture := gfxWrite.NewTemporaryTarget(64, 32, gfx.FormatRGBA8Srgb)
 		write.SpriteTexture(0, texture, SpriteTransform{}, nil)
@@ -199,9 +196,6 @@ func TestATextureDrawDoesNotGoThroughTheKeyColourRamp(t *testing.T) {
 	source := backend.pipelineShader(0)
 	if source == "" {
 		t.Fatal("pipeline was built from a shader the backend never saw")
-	}
-	if strings.Contains(source, "keyColorRamp") {
-		t.Error("a texture draw went through the key-colour ramp, which silently desaturates a rendered image")
 	}
 	if !strings.Contains(source, "texture_2d<f32>") {
 		t.Error("texture shader does not bind a plain 2D texture")
@@ -226,9 +220,6 @@ func TestDrawTextureBindsTheTextureToACustomShape(t *testing.T) {
 
 	if backend.draws != 1 || len(backend.pipelines) != 1 {
 		t.Fatalf("draws/pipelines = (%d,%d), want one textured triangle", backend.draws, len(backend.pipelines))
-	}
-	if strings.Contains(backend.pipelineShader(0), "keyColorRamp") {
-		t.Error("DrawTexture went through the key-colour ramp")
 	}
 }
 
