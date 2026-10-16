@@ -914,6 +914,15 @@ func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, fr *frame, surf surface, la
 		return
 	}
 	toLogical := op.Draw.Size / float32(px)
+	// The pen advances by the face at the logical size, the one LookupAccess and
+	// wrapMeasure measure with. Advances hinted at the raster size sum to a
+	// different width, so a line that exactly fit its measured box would draw
+	// past its edge by however much they drifted over the line.
+	layout, layoutScale := face, toLogical
+	logicalPx := max(1, int(math.Round(float64(op.Draw.Size))))
+	if logical := fr.face(op.FontPath, logicalPx); logical != nil {
+		layout, layoutScale = logical, op.Draw.Size/float32(logicalPx)
+	}
 	y := op.Draw.Position.Y
 	for start := 0; start <= len(op.Text); {
 		end := start
@@ -921,7 +930,7 @@ func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, fr *frame, surf surface, la
 			end++
 		}
 		line := op.Text[start:end]
-		width := GlyphLineWidth(fr.lookup, face, line, fr.resources) * toLogical
+		width := MeasureLine(layout, line) * layoutScale
 		x := op.Draw.Position.X
 		switch op.Draw.Align {
 		case AlignCenter:
@@ -937,7 +946,7 @@ func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, fr *frame, surf surface, la
 				continue
 			}
 			if !first {
-				x += float32(face.Face.Kern(previous, character)) / 64 * toLogical
+				x += float32(layout.Face.Kern(previous, character)) / 64 * layoutScale
 			}
 			if glyph.Visible {
 				transform := SpriteTransform{
@@ -946,7 +955,11 @@ func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, fr *frame, surf surface, la
 				}
 				p.batchEntry(gfxWrite, surf, glyph.Entry, transform, layerTransform, clip, hasClip, shading, TintFor(op.Draw.Color))
 			}
-			x += glyph.Advance * toLogical
+			if advance, ok := layout.Face.GlyphAdvance(character); ok {
+				x += float32(advance) / 64 * layoutScale
+			} else {
+				x += glyph.Advance * toLogical
+			}
 			previous = character
 			first = false
 		}
@@ -988,14 +1001,16 @@ func (p *plugin) drawText(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerT
 		}
 		return width
 	}
+	// Breaks, alignment and the pen all use the logical-face measure, the same
+	// one drawGlyphRun advances by, so the drawn line is as wide as measured.
+	layout := p.wrapMeasure(fr, op.FontPath, op.Draw.Size, measure)
 	lines := ParseInlineText(op.Text)
 	if op.Draw.WordWrapping && ValidWrapWidth(op.Draw.WrapWidth) {
-		wrap := p.wrapMeasure(fr, op.FontPath, op.Draw.Size, measure)
-		lines = WrapInlineText(lines, op.Draw.WrapWidth, wrap)
+		lines = WrapInlineText(lines, op.Draw.WrapWidth, layout)
 	}
 	y := op.Draw.Position.Y
 	for _, line := range lines {
-		total := measure(line)
+		total := layout(line)
 		x := op.Draw.Position.X
 		switch op.Draw.Align {
 		case AlignCenter:
@@ -1028,7 +1043,7 @@ func (p *plugin) drawText(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerT
 			}}
 			p.drawGlyphRun(gfxWrite, fr, surf, layerTransform, clip, hasClip, &shading, &run)
 
-			x += GlyphLineWidth(fr.lookup, face, segment.Text, fr.resources) * toLogical
+			x += layout([]InlineSegment{segment})
 		}
 		y += lineHeight
 	}
