@@ -10,7 +10,7 @@ import (
 // the tick after advance, just released for the tick after its release.
 func TestStateGamepadButtonEdges(t *testing.T) {
 	s := NewState()
-	s.apply(GamepadConnectChange(0, "pad"))
+	s.apply(GamepadConnectChange(0, "pad", GamepadTypeUnknown))
 
 	s.apply(GamepadButtonChange(0, GamepadButtonSouth, true))
 	if !s.GamepadPressed(0, GamepadButtonSouth) {
@@ -38,8 +38,8 @@ func TestStateGamepadButtonEdges(t *testing.T) {
 // AnyGamepad answers for every connected pad; a slot answers only for itself.
 func TestStateAnyGamepad(t *testing.T) {
 	s := NewState()
-	s.apply(GamepadConnectChange(0, "first"))
-	s.apply(GamepadConnectChange(1, "second"))
+	s.apply(GamepadConnectChange(0, "first", GamepadTypeXbox))
+	s.apply(GamepadConnectChange(1, "second", GamepadTypePlayStation))
 	s.apply(GamepadButtonChange(1, GamepadButtonEast, true))
 	s.apply(GamepadAxisChange(0, GamepadAxisLeftX, 0.25))
 	s.apply(GamepadAxisChange(1, GamepadAxisLeftX, -0.75))
@@ -60,12 +60,18 @@ func TestStateAnyGamepad(t *testing.T) {
 	if got := s.Gamepads(); !slices.Equal(got, []Gamepad{0, 1}) {
 		t.Errorf("Gamepads = %v, want [0 1]", got)
 	}
+	if got := s.GamepadType(1); got != GamepadTypePlayStation {
+		t.Errorf("GamepadType(1) = %v, want playstation", got)
+	}
+	if got := s.GamepadType(2); got != GamepadTypeUnknown {
+		t.Errorf("GamepadType of an empty slot = %v, want unknown", got)
+	}
 }
 
 // A disconnection releases what the pad held, as edges, and forgets the pad.
 func TestStateGamepadDisconnectReleases(t *testing.T) {
 	s := NewState()
-	s.apply(GamepadConnectChange(0, "pad"))
+	s.apply(GamepadConnectChange(0, "pad", GamepadTypeUnknown))
 	s.apply(GamepadButtonChange(0, GamepadButtonNorth, true))
 	s.apply(GamepadAxisChange(0, GamepadAxisRightY, 1))
 	s.advance()

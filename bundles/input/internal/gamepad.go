@@ -65,6 +65,23 @@ const (
 // gamepadAxisCount is the number of standard axes.
 const gamepadAxisCount = int(GamepadAxisRightTrigger) + 1
 
+// GamepadType is the family a gamepad belongs to, which decides the labels on
+// its buttons, so a game can draw the glyphs the player sees on the pad. The
+// driver tells it at connection, from what it knows of the device; Unknown is
+// a pad it could not place.
+type GamepadType uint8
+
+const (
+	GamepadTypeUnknown GamepadType = iota
+	GamepadTypeXbox
+	GamepadTypePlayStation
+	GamepadTypeSwitch
+	GamepadTypeSteamDeck
+)
+
+// gamepadTypeCount is the number of gamepad types.
+const gamepadTypeCount = int(GamepadTypeSteamDeck) + 1
+
 var gamepadButtonNames = [gamepadButtonCount]string{
 	"south", "east", "west", "north",
 	"left_shoulder", "right_shoulder", "left_trigger", "right_trigger",
@@ -75,6 +92,10 @@ var gamepadButtonNames = [gamepadButtonCount]string{
 
 var gamepadAxisNames = [gamepadAxisCount]string{
 	"left_x", "left_y", "right_x", "right_y", "left_trigger", "right_trigger",
+}
+
+var gamepadTypeNames = [gamepadTypeCount]string{
+	"unknown", "xbox", "playstation", "switch", "steam_deck",
 }
 
 // String reports the button's name, such as "south" or "dpad_up".
@@ -129,9 +150,36 @@ func (GamepadAxis) TextValues() (values []string, other string) {
 	return slices.Clone(gamepadAxisNames[:]), ""
 }
 
+// String reports the type's name, such as "xbox" or "steam_deck".
+func (t GamepadType) String() string {
+	if int(t) < gamepadTypeCount {
+		return gamepadTypeNames[t]
+	}
+	return fmt.Sprintf("#%d", int(t))
+}
+
+// MarshalText writes the type's name, so a GamepadType is a JSON string.
+func (t GamepadType) MarshalText() ([]byte, error) { return []byte(t.String()), nil }
+
+// UnmarshalText reads a type name.
+func (t *GamepadType) UnmarshalText(text []byte) error {
+	i := slices.Index(gamepadTypeNames[:], string(text))
+	if i < 0 {
+		return ErrUnknownGamepadInput{Name: string(text)}
+	}
+	*t = GamepadType(i)
+	return nil
+}
+
+// TextValues reports the type names, so a tool schema lists them.
+func (GamepadType) TextValues() (values []string, other string) {
+	return slices.Clone(gamepadTypeNames[:]), ""
+}
+
 // padState is what State knows about one connected gamepad.
 type padState struct {
 	name string
+	kind GamepadType
 	down [gamepadButtonCount]bool
 	axes [gamepadAxisCount]float64
 }
@@ -145,8 +193,9 @@ type padButton struct {
 // GamepadSnapshot is one connected gamepad in the picture of the seam: its
 // name, the buttons held and the axes away from rest.
 type GamepadSnapshot struct {
-	Gamepad Gamepad `json:"gamepad" jsonschema:"the gamepad's slot"`
-	Name    string  `json:"name" jsonschema:"what the device calls itself"`
+	Gamepad Gamepad     `json:"gamepad" jsonschema:"the gamepad's slot"`
+	Name    string      `json:"name" jsonschema:"what the device calls itself"`
+	Type    GamepadType `json:"type" jsonschema:"the family the gamepad belongs to, which decides its button labels"`
 	// Down is every button held, in layout order. Always non-nil.
 	Down []GamepadButton `json:"down" jsonschema:"every button held"`
 	// Axes is every axis not at rest, in layout order. Always non-nil.

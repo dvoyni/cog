@@ -20,11 +20,12 @@ func TextChange(r rune) Change { return internal.TextChange(r) }
 // ClipboardPasteChange builds a change for text pasted from the clipboard.
 func ClipboardPasteChange(text string) Change { return internal.ClipboardPasteChange(text) }
 
-// GamepadConnectChange builds a change for a gamepad connecting in slot pad,
-// calling itself name. A driver sends it before any button or axis change for
-// that slot; State ignores those for a slot that is not connected.
-func GamepadConnectChange(pad Gamepad, name string) Change {
-	return internal.GamepadConnectChange(pad, name)
+// GamepadConnectChange builds a change for a gamepad of type padType
+// connecting in slot pad, calling itself name. A driver sends it before any
+// button or axis change for that slot; State ignores those for a slot that is
+// not connected.
+func GamepadConnectChange(pad Gamepad, name string, padType GamepadType) Change {
+	return internal.GamepadConnectChange(pad, name, padType)
 }
 
 // GamepadDisconnectChange builds a change for the gamepad in slot pad

@@ -20,11 +20,13 @@ type TextEvent struct{ Rune rune }
 type ClipboardPasteEvent struct{ Text string }
 
 // GamepadConnectionEvent is published for each gamepad connecting or
-// disconnecting. Name is what the gamepad calls itself; it is set on a
-// disconnection too, when the change carried it, and is otherwise "".
+// disconnecting. Name is what the gamepad calls itself and Type the family it
+// belongs to; they are set on a connection, and are "" and
+// GamepadTypeUnknown on a disconnection.
 type GamepadConnectionEvent struct {
 	Gamepad   Gamepad
 	Name      string
+	Type      GamepadType
 	Connected bool
 }
 

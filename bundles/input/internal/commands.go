@@ -54,7 +54,7 @@ func synthesize(k kernel.Kernel, s *State, action Action) {
 	}
 	if kind := ChangeKindOf(&change); (kind == ChangeKindGamepadButton || kind == ChangeKindGamepadAxis) &&
 		!s.GamepadConnected(ChangePad(&change)) {
-		fold(k, s, GamepadConnectChange(ChangePad(&change), syntheticGamepadName))
+		fold(k, s, GamepadConnectChange(ChangePad(&change), syntheticGamepadName, GamepadTypeUnknown))
 	}
 	fold(k, s, change)
 }

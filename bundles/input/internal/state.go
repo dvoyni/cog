@@ -86,7 +86,7 @@ func (s *State) apply(c Change) {
 		// content, and the later one is what the clipboard holds.
 		s.pendPaste, s.pendPasted = c.text, true
 	case ChangeKindGamepadConnect:
-		s.connectGamepad(c.pad, c.text)
+		s.connectGamepad(c.pad, c.text, c.padType)
 	case ChangeKindGamepadDisconnect:
 		s.disconnectGamepad(c.pad)
 	case ChangeKindGamepadButton:
@@ -98,13 +98,14 @@ func (s *State) apply(c Change) {
 	}
 }
 
-// connectGamepad adds a gamepad, or renames one already in the slot.
-func (s *State) connectGamepad(id Gamepad, name string) {
+// connectGamepad adds a gamepad, or renames and retypes one already in the
+// slot.
+func (s *State) connectGamepad(id Gamepad, name string, padType GamepadType) {
 	if pad := s.gamepads[id]; pad != nil {
-		pad.name = name
+		pad.name, pad.kind = name, padType
 		return
 	}
-	s.gamepads[id] = &padState{name: name}
+	s.gamepads[id] = &padState{name: name, kind: padType}
 	at, _ := slices.BinarySearch(s.gamepadOrder, id)
 	s.gamepadOrder = slices.Insert(s.gamepadOrder, at, id)
 }
@@ -195,13 +196,22 @@ func (s *State) GamepadConnected(pad Gamepad) bool {
 }
 
 // GamepadName returns what the gamepad in slot pad calls itself, such as
-// "Xbox Controller", or "" when none is connected there. The name is the only
-// hint of the pad family, for a game that draws button glyphs.
+// "Xbox Controller", or "" when none is connected there.
 func (s *State) GamepadName(pad Gamepad) string {
 	if p := s.gamepads[pad]; p != nil {
 		return p.name
 	}
 	return ""
+}
+
+// GamepadType returns the family of the gamepad in slot pad, for a game that
+// draws button glyphs, or GamepadTypeUnknown when none is connected there or
+// the driver could not place it.
+func (s *State) GamepadType(pad Gamepad) GamepadType {
+	if p := s.gamepads[pad]; p != nil {
+		return p.kind
+	}
+	return GamepadTypeUnknown
 }
 
 // GamepadPressed reports whether button is held on the gamepad in slot pad, or,
@@ -287,6 +297,7 @@ func (s *State) gamepadSnapshots() []GamepadSnapshot {
 		snapshot := GamepadSnapshot{
 			Gamepad: id,
 			Name:    pad.name,
+			Type:    pad.kind,
 			Down:    []GamepadButton{},
 			Axes:    []GamepadAxisValue{},
 		}

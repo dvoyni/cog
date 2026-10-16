@@ -28,6 +28,9 @@ func ChangeModsRef(v *Change) *Mods { return &v.mods }
 // ChangePad reads Change.pad for input's internal/.
 func ChangePad(v *Change) Gamepad { return v.pad }
 
+// ChangePadType reads Change.padType for input's internal/.
+func ChangePadType(v *Change) GamepadType { return v.padType }
+
 // ChangeButton reads Change.button for input's internal/.
 func ChangeButton(v *Change) GamepadButton { return v.button }
 

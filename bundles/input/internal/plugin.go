@@ -58,7 +58,9 @@ func publish(k kernel.Kernel, c Change) {
 	case ChangeKindClipboardPaste:
 		k.PublishEvent(ClipboardPasteEvent{Text: ChangeText(&c)})
 	case ChangeKindGamepadConnect:
-		k.PublishEvent(GamepadConnectionEvent{Gamepad: ChangePad(&c), Name: ChangeText(&c), Connected: true})
+		k.PublishEvent(GamepadConnectionEvent{
+			Gamepad: ChangePad(&c), Name: ChangeText(&c), Type: ChangePadType(&c), Connected: true,
+		})
 	case ChangeKindGamepadDisconnect:
 		k.PublishEvent(GamepadConnectionEvent{Gamepad: ChangePad(&c)})
 	case ChangeKindGamepadButton:

@@ -41,18 +41,19 @@ const (
 // ScrollChange/TextChange constructors and pass it to ApplyCmd; its fields are
 // unexported because drivers construct changes, they don't inspect them.
 type Change struct {
-	kind   changeKind
-	key    Key
-	mods   Mods
-	down   bool
-	pos    Pos
-	dx, dy float64
-	r      rune
-	text   string
-	pad    Gamepad
-	button GamepadButton
-	axis   GamepadAxis
-	value  float64
+	kind    changeKind
+	key     Key
+	mods    Mods
+	down    bool
+	pos     Pos
+	dx, dy  float64
+	r       rune
+	text    string
+	pad     Gamepad
+	padType GamepadType
+	button  GamepadButton
+	axis    GamepadAxis
+	value   float64
 }
 
 // KeyChange builds a key/button up-or-down change.
@@ -75,11 +76,12 @@ func ClipboardPasteChange(text string) Change {
 	return Change{kind: ChangeKindClipboardPaste, text: text}
 }
 
-// GamepadConnectChange builds a change for a gamepad connecting in slot pad,
-// calling itself name. A driver sends it before any button or axis change for
-// that slot; State ignores those for a slot that is not connected.
-func GamepadConnectChange(pad Gamepad, name string) Change {
-	return Change{kind: ChangeKindGamepadConnect, pad: pad, text: name}
+// GamepadConnectChange builds a change for a gamepad of type padType
+// connecting in slot pad, calling itself name. A driver sends it before any
+// button or axis change for that slot; State ignores those for a slot that is
+// not connected.
+func GamepadConnectChange(pad Gamepad, name string, padType GamepadType) Change {
+	return Change{kind: ChangeKindGamepadConnect, pad: pad, text: name, padType: padType}
 }
 
 // GamepadDisconnectChange builds a change for the gamepad in slot pad

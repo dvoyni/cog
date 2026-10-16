@@ -292,6 +292,21 @@ const (
 	GamepadAxisRightTrigger = internal.GamepadAxisRightTrigger
 )
 
+// GamepadType is the family a gamepad belongs to, which decides the labels on
+// its buttons, so a game can draw the glyphs the player sees on the pad. The
+// driver tells it at connection, from what it knows of the device;
+// GamepadTypeUnknown is a pad it could not place. A GamepadType prints as its
+// name and parses back from it, so it is a JSON string wherever it appears.
+type GamepadType = internal.GamepadType
+
+const (
+	GamepadTypeUnknown     = internal.GamepadTypeUnknown
+	GamepadTypeXbox        = internal.GamepadTypeXbox
+	GamepadTypePlayStation = internal.GamepadTypePlayStation
+	GamepadTypeSwitch      = internal.GamepadTypeSwitch
+	GamepadTypeSteamDeck   = internal.GamepadTypeSteamDeck
+)
+
 // GamepadSnapshot is one connected gamepad in the picture of the seam: its
 // slot, its name, the buttons held and the axes away from rest.
 type GamepadSnapshot = internal.GamepadSnapshot

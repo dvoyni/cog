@@ -76,7 +76,7 @@ Drivers construct changes with:
 - `ScrollChange(dx, dy)`
 - `TextChange(rune)`
 - `ClipboardPasteChange(text)`
-- `GamepadConnectChange(pad, name)`, `GamepadDisconnectChange(pad)`
+- `GamepadConnectChange(pad, name, type)`, `GamepadDisconnectChange(pad)`
 - `GamepadButtonChange(pad, button, down)`, `GamepadAxisChange(pad, axis, value)`
 
 A driver connects a gamepad before sending its buttons and axes; `State` ignores
@@ -172,7 +172,7 @@ What to expect at the edges:
 - `ScrollEvent{Dx, Dy}` for scroll deltas.
 - `TextEvent{Rune}` for each text-input rune.
 - `ClipboardPasteEvent{Text}` for each clipboard paste.
-- `GamepadConnectionEvent{Gamepad, Name, Connected}` for each gamepad
+- `GamepadConnectionEvent{Gamepad, Name, Type, Connected}` for each gamepad
   connecting or disconnecting.
 - `GamepadButtonEvent{Gamepad, Button, Down}` for gamepad button transitions.
 
@@ -211,8 +211,10 @@ to ask about all connected pads at once:
 
 - `Gamepads() []Gamepad`: the connected slots, in order. The slice is the
   State's own; read it under the lock and do not keep it.
-- `GamepadConnected(Gamepad) bool` and `GamepadName(Gamepad) string`. The name,
-  such as "Xbox Controller", is the only hint of the pad family.
+- `GamepadConnected(Gamepad) bool` and `GamepadName(Gamepad) string`, what
+  the pad calls itself, such as "Xbox Controller".
+- `GamepadType(Gamepad) GamepadType`: the pad's family, for drawing button
+  glyphs; see [Gamepads](#gamepads).
 - `GamepadPressed`, `GamepadJustPressed` and `GamepadJustReleased(Gamepad,
   GamepadButton) bool`, with the same edges as keys.
 - `GamepadAxis(Gamepad, GamepadAxis) float64`: the raw value, so a stick at
@@ -249,7 +251,18 @@ and B on a Nintendo pad.
 A trigger is both an axis and a button, the button pressed past the platform's
 or the mapping's threshold. `GamepadButton` and `GamepadAxis` print as their
 names and parse back from them, so they are JSON strings, and `StateResponse`
-lists each connected pad with its held buttons and the axes away from rest.
+lists each connected pad with its type, held buttons and the axes away from
+rest.
+
+`GamepadType` is the pad's family, which decides the labels printed on its
+buttons, so a game can draw the glyph the player sees: `GamepadTypeXbox`,
+`GamepadTypePlayStation`, `GamepadTypeSwitch`, `GamepadTypeSteamDeck`, or
+`GamepadTypeUnknown` for a pad the driver could not place, and for a pad a
+script connected. It prints as `unknown`, `xbox`, `playstation`, `switch` or
+`steam_deck`. The driver tells it at connection: gogpu places a pad by the USB
+vendor in its id where it carries one, then by its name, and on a Steam Deck
+takes a pad placed as Xbox or not at all for the Deck's own, since Steam hands
+the Deck's controls to games as a virtual Xbox pad.
 
 The values come from whichever driver feeds `ApplyCmd`; on the desktop and the
 web that is gogpu, over [`libs/gamepad`](../../../libs/gamepad/gamepad.go).

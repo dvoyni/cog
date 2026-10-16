@@ -54,7 +54,7 @@ func (p *plugin) pollGamepads(k kernel.Executioner) {
 		slot := input.Gamepad(now.ID)
 		before, known := g.last[now.ID]
 		if !known {
-			p.pending = append(p.pending, input.GamepadConnectChange(slot, now.Name))
+			p.pending = append(p.pending, input.GamepadConnectChange(slot, now.Name, inputGamepadType(gamepad.DetectType(now.ID))))
 		}
 		for b := range gamepad.ButtonCount {
 			if now.Buttons[b] != before.Buttons[b] {
@@ -104,3 +104,19 @@ var (
 	_ = [1]struct{}{}[int(input.GamepadAxisRightTrigger)-int(gamepad.AxisRightTrigger)]
 	_ = [1]struct{}{}[int(input.GamepadAxisLeftTrigger)-int(gamepad.AxisLeftTrigger)]
 )
+
+// inputGamepadType is input's name for the platform layer's gamepad type.
+func inputGamepadType(kind gamepad.Type) input.GamepadType {
+	switch kind {
+	case gamepad.TypeXbox:
+		return input.GamepadTypeXbox
+	case gamepad.TypePlayStation:
+		return input.GamepadTypePlayStation
+	case gamepad.TypeSwitch:
+		return input.GamepadTypeSwitch
+	case gamepad.TypeSteamDeck:
+		return input.GamepadTypeSteamDeck
+	default:
+		return input.GamepadTypeUnknown
+	}
+}
