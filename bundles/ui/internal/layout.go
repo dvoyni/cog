@@ -41,6 +41,7 @@ func (context *Processor) Process(lookup canvas.LookupAccess, roots []Element, l
 	context.disableGridOverflow()
 	context.measure(lookup)
 	context.arrange(state.Screen)
+	context.snapToPixels(state.PixelScale)
 	context.resolveClips(state.Screen)
 	context.orderNodes()
 	context.processInteractions(state.Pointer)
@@ -50,8 +51,15 @@ func (context *Processor) Process(lookup canvas.LookupAccess, roots []Element, l
 // GlobalState is what one tick of layout is resolved against: the logical
 // viewport, the pointer, and the frame's default material set.
 type GlobalState struct {
-	Screen  Rect
-	Pointer PointerState
+	Screen Rect
+	// PixelScale is how many device pixels one logical unit is. Above zero,
+	// every laid-out rect has its edges rounded to whole device pixels, so an
+	// element centred or otherwise placed between pixels does not straddle
+	// them: a solid fill and a sprite round a half pixel differently, and a
+	// panel and the buttons beside it would draw a pixel apart. Zero leaves
+	// the rects as laid out.
+	PixelScale float32
+	Pointer    PointerState
 	// Materials is the frame's default material set, seeding every root.
 	Materials canvas.MaterialSet
 }
@@ -547,6 +555,29 @@ func (context *Processor) arrange(screen Rect) {
 			node.rect = clampToBounds(node.rect, screen)
 		}
 		context.arrangeChildren(nodeIndex)
+	}
+}
+
+// snapToPixels rounds every active node's edges to whole device pixels, scale
+// being device pixels per logical unit; zero or less leaves them be. Each edge
+// is rounded on its own rather than the position and the size, so elements
+// that share an edge still share it and elements that line up still do.
+func (context *Processor) snapToPixels(scale float32) {
+	if scale <= 0 {
+		return
+	}
+	snap := func(value float32) float32 { return float32(math.Round(float64(value*scale))) / scale }
+	for nodeIndex := range context.nodes {
+		node := &context.nodes[nodeIndex]
+		if !node.active {
+			continue
+		}
+		left, top := snap(node.rect.X), snap(node.rect.Y)
+		node.rect = Rect{
+			X: left, Y: top,
+			Width:  snap(node.rect.X+node.rect.Width) - left,
+			Height: snap(node.rect.Y+node.rect.Height) - top,
+		}
 	}
 }
 

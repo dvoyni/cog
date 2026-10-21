@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"math"
 	"reflect"
 	"testing"
 
@@ -1162,4 +1163,56 @@ func TestProcessGrowsARowToHoldChildrenOnOneBaseline(t *testing.T) {
 	assertRect(t, low.states[0].Rect, Rect{X: 10, Y: 0, Width: 10, Height: 20})
 	assertRect(t, plain.states[0].Rect, Rect{X: 20, Y: 0, Width: 10, Height: 10})
 	assertRect(t, row.states[0].Rect, Rect{X: 0, Y: 0, Width: 30, Height: 30})
+}
+
+func TestProcessSnapsRectEdgesToDevicePixels(t *testing.T) {
+	rootVisual := &recordingVisual{}
+	childVisual := &recordingVisual{}
+	child := NewElement().Top(10).Width(10).Height(20).Visual(childVisual, nil)
+	// 41 wide and tall, centred on a 100 square: its edges fall on 29.5 and
+	// 70.5, half a pixel at 1x and a quarter at 1.5x.
+	root := NewElement().
+		LeftRel(0.5).TopRel(0.5).PivotLeftRel(0.5).PivotTopRel(0.5).
+		Width(41).Height(41).
+		Visual(rootVisual, nil).
+		Children(child)
+
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil,
+		GlobalState{Screen: Rect{Width: 100, Height: 100}, PixelScale: 1.5}, nil)
+
+	for _, rect := range []Rect{rootVisual.states[0].Rect, childVisual.states[0].Rect} {
+		for _, edge := range []float32{rect.X, rect.Y, rect.X + rect.Width, rect.Y + rect.Height} {
+			if device := edge * 1.5; math.Abs(float64(device)-math.Round(float64(device))) > 1e-3 {
+				t.Fatalf("rect %+v has an edge at %v device pixels, want a whole number", rect, device)
+			}
+		}
+	}
+	// 29.5 is 44.25 device pixels, which rounds to 44; 70.5 is 105.75, to 106.
+	assertNear(t, rootVisual.states[0].Rect.X, 44/1.5)
+	assertNear(t, rootVisual.states[0].Rect.X+rootVisual.states[0].Rect.Width, 106/1.5)
+	// The child's top, 39.5, is 59.25 device pixels: it rounds down, as the
+	// root's top does, and keeps its 20 high.
+	assertNear(t, childVisual.states[0].Rect.Y, 59/1.5)
+	assertNear(t, childVisual.states[0].Rect.Height, 20)
+}
+
+func TestProcessLeavesRectsUnsnappedWithoutPixelScale(t *testing.T) {
+	rootVisual := &recordingVisual{}
+	root := NewElement().
+		LeftRel(0.5).PivotLeftRel(0.5).
+		Width(41).Height(10).
+		Visual(rootVisual, nil)
+
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 100, Height: 100}}, nil)
+
+	assertRect(t, rootVisual.states[0].Rect, Rect{X: 29.5, Width: 41, Height: 10})
+}
+
+func assertNear(t *testing.T, got, want float32) {
+	t.Helper()
+	if math.Abs(float64(got-want)) > 1e-4 {
+		t.Fatalf("got %v, want %v", got, want)
+	}
 }

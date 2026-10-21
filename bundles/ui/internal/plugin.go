@@ -142,7 +142,8 @@ func processUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 			}
 
 			processor.Process(access, FrameRoots(frame), FrameLayers(frame), GlobalState{
-				Screen: Rect{Width: viewport.Width, Height: viewport.Height},
+				Screen:     Rect{Width: viewport.Width, Height: viewport.Height},
+				PixelScale: viewportPixelScale(*viewport),
 				Pointer: PointerState{
 					X:      float32(pointer.X),
 					Y:      float32(pointer.Y),
@@ -153,6 +154,15 @@ func processUpdate() (kernel.Lock, kernel.Observe[app.UpdateEvent]) {
 
 			PublishInteractions(&processor.Processor, interactions)
 		}
+}
+
+// viewportPixelScale is how many framebuffer pixels one logical unit of the
+// viewport is, or zero before the viewport has a size.
+func viewportPixelScale(viewport gfx.Viewport) float32 {
+	if viewport.Height <= 0 || viewport.FramebufferHeight <= 0 {
+		return 0
+	}
+	return viewport.FramebufferHeight / viewport.Height
 }
 
 func pointerToViewport(pointer input.Pos, viewport gfx.Viewport) input.Pos {
