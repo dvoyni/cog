@@ -488,14 +488,24 @@ func (interactiveTextVisual) Baseline(lookup canvas.LookupAccess, params Interac
 	return sharedTextVisual.Baseline(lookup, params.defaultValue, height)
 }
 
+// textSnapSlack is how much wider than its rect a label wraps its text, to
+// absorb the pixel snapping can take off the rect (see textVisual.Draw).
+const textSnapSlack float32 = 1
+
 func (textVisual) Draw(lookup canvas.LookupAccess, queue *canvas.OpQueue, state State, params TextParams) {
 	if queue == nil || params.Font.Size <= 0 {
 		return
 	}
 	bounds := state.Rect
+	// Layout snaps a rect's edges to whole device pixels, which can take up to
+	// a pixel off a label laid out exactly as wide as its text. Wrapping at the
+	// snapped width would break that text's last word onto a line its rect has
+	// no room for, so the wrap allows a unit more: a device pixel is at most one
+	// unit wide wherever a unit is at least one pixel.
+	wrapWidth := bounds.Width + textSnapSlack
 	measured := lookup.MeasureTextSize(params.Font.Path, params.Font.Size, params.Text)
 	if params.WordWrapping && bounds.Width > 0 {
-		measured = lookup.MeasureWrappedTextSize(params.Font.Path, params.Font.Size, params.Text, bounds.Width)
+		measured = lookup.MeasureWrappedTextSize(params.Font.Path, params.Font.Size, params.Text, wrapWidth)
 	}
 	position := m.Vec2{X: bounds.X, Y: bounds.Y + (bounds.Height-measured.Y)/2}
 	align := canvas.AlignLeft
@@ -511,7 +521,7 @@ func (textVisual) Draw(lookup canvas.LookupAccess, queue *canvas.OpQueue, state 
 	// sprite slot like every other visual here.
 	queue.Text(state.Layer, params.Font.Path, params.Text, canvas.TextDraw{
 		Position: position, Size: float32(params.Font.Size), Color: params.Color, Align: align,
-		WordWrapping: params.WordWrapping, WrapWidth: bounds.Width,
+		WordWrapping: params.WordWrapping, WrapWidth: wrapWidth,
 		Material: state.Materials.Sprite,
 	})
 
