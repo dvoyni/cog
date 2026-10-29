@@ -71,6 +71,28 @@ func (w *webFS) WriteFile(name string, data []byte, perm fs.FileMode) error {
 	return w.save(state)
 }
 
+// AppendFile appends to the stored bytes, which keeps the file's mode, and
+// creates it with perm like WriteFile when it does not exist.
+func (w *webFS) AppendFile(name string, data []byte, perm fs.FileMode) error {
+	if err := validatePath("append", name); err != nil {
+		return err
+	}
+	state, err := w.load()
+	if err != nil {
+		return err
+	}
+	file, exists := state.Files[name]
+	if !exists {
+		if parent := path.Dir(name); parent != "." && !state.hasDir(parent) {
+			return &fs.PathError{Op: "append", Path: name, Err: fs.ErrNotExist}
+		}
+		file.Mode = uint32(perm)
+	}
+	file.Data = append(append([]byte(nil), file.Data...), data...)
+	state.Files[name] = file
+	return w.save(state)
+}
+
 func (w *webFS) MkdirAll(name string, perm fs.FileMode) error {
 	if err := validatePath("mkdir", name); err != nil {
 		return err

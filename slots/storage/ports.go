@@ -23,6 +23,11 @@ import (
 //	}
 type PermanentFS = internal.PermanentFS
 
+// AppendFS is what a PermanentFS may also implement to append to a file in
+// place. WriteFS.AppendFile uses it when it is there, and otherwise reads the
+// file back and writes it whole.
+type AppendFS = internal.AppendFS
+
 // PermanentFSPort is the Port storage requires exactly one Adapter for: the
 // permanent filesystem an Extension such as diskstorage or jsstorage provides.
 // A composition without one fails with kernel.ErrMissingAdapter.

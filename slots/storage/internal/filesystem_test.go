@@ -226,3 +226,22 @@ func (m *typesMemoryFS) Rename(oldName, newName string) error {
 	m.files[newName] = file
 	return nil
 }
+
+// A permanent filesystem without AppendFile still appends: the file is read
+// back and written whole, and a file that is not there yet is created.
+func TestAppendFileFallsBackToReadingTheFileBack(t *testing.T) {
+	permanent := typesNewMemoryFS()
+	write := WriteFS{permanent: permanent}
+	if err := write.AppendFile("log.csv", []byte("a\n"), 0o644); err != nil {
+		t.Fatalf("append to a new file: %v", err)
+	}
+	if err := write.AppendFile("log.csv", []byte("b\n"), 0o644); err != nil {
+		t.Fatalf("append to an existing file: %v", err)
+	}
+	if got := string(permanent.files["log.csv"].Data); got != "a\nb\n" {
+		t.Fatalf("log.csv = %q, want both appends in order", got)
+	}
+	if err := (WriteFS{}).AppendFile("log.csv", nil, 0o644); !errors.As(err, new(ErrNoWriteAccess)) {
+		t.Fatalf("append with no backend = %v, want ErrNoWriteAccess", err)
+	}
+}

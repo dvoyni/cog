@@ -33,3 +33,10 @@ type PermanentFS interface {
 	Remove(name string) error
 	Rename(oldName, newName string) error
 }
+
+// AppendFS is what a PermanentFS implements to append to a file in place.
+// It is optional: WriteFS.AppendFile appends through it when the permanent
+// filesystem has it, and otherwise reads the file back and writes it whole.
+type AppendFS interface {
+	AppendFile(name string, data []byte, perm fs.FileMode) error
+}

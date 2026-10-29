@@ -13,3 +13,8 @@ import "github.com/dvoyni/cog/bundles/canvas/internal"
 //
 // It is declared in internal, because the atlases hold it, and aliased here.
 type Config = internal.Config
+
+// FallbackFont is one font of Config.FallbackFonts: a font file, and the
+// language it is drawn for, which $[language]{...} spans and
+// SetFallbackLanguageCmd choose it by.
+type FallbackFont = internal.FallbackFont

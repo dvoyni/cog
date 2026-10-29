@@ -115,8 +115,10 @@ func (fontFaceLoader) Load(k kernel.Kernel, _ assets.Blob, params faceDescrParam
 		return nil
 	}
 	return &Font{
-		Face: face, Glyphs: map[rune]Glyph{},
+		Face: face, Glyphs: map[GlyphKey]Glyph{},
 		LineHeight: float32(face.Metrics().Height.Ceil()),
+		path:       params.path, px: params.px, source: source,
+		owners: map[GlyphKey]*Font{},
 	}
 }
 

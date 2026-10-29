@@ -12,13 +12,23 @@ type InlineSegment struct {
 	Icon bool
 	// Text is the literal run (with escapes resolved) or the icon path.
 	Text string
+	// Language is the language a $[language]{...} span set the run in, which
+	// picks the fallback font its characters are looked up in first. It is
+	// empty outside a span, and on an icon.
+	Language string
 }
 
 // ParseInlineText splits text into lines of literal/icon segments. It recognizes
-// ${path} icon tokens and backslash escaping: "\${" yields a literal "${" and
-// "\\" yields a literal "\". Unterminated "${" (no closing brace before end of
-// line) stays literal; an empty "${}" token is reported by callers and omitted.
-// Newlines split lines so measurement and drawing stay in lockstep.
+// ${path} icon tokens, $[language]{text} spans and backslash escaping: "\${"
+// yields a literal "${" and "\\" yields a literal "\". Unterminated "${" (no
+// closing brace before end of line) stays literal; an empty "${}" token is
+// reported by callers and omitted. Newlines split lines so measurement and
+// drawing stay in lockstep.
+//
+// A span's text is literal up to its first unescaped "}": it holds no icons and
+// no nested span, and "\}" puts a brace inside one. A span that is malformed -
+// an empty or unterminated language, no "{" straight after the "]", no closing
+// brace before end of line - stays literal, as an unterminated icon does.
 func ParseInlineText(text string) [][]InlineSegment {
 	var lines [][]InlineSegment
 	var current []InlineSegment
@@ -45,6 +55,18 @@ func ParseInlineText(text string) [][]InlineSegment {
 		case c == '\n':
 			endLine()
 			i++
+		case c == '$' && i+1 < len(text) && text[i+1] == '[':
+			language, content, next, ok := parseLanguageSpan(text, i)
+			if !ok {
+				literal.WriteByte(c)
+				i++
+				continue
+			}
+			flushLiteral()
+			if content != "" {
+				current = append(current, InlineSegment{Text: content, Language: language})
+			}
+			i = next
 		case c == '$' && i+1 < len(text) && text[i+1] == '{':
 			closeIndex := -1
 			for j := i + 2; j < len(text); j++ {
@@ -72,6 +94,44 @@ func ParseInlineText(text string) [][]InlineSegment {
 	}
 	endLine()
 	return lines
+}
+
+// parseLanguageSpan reads the $[language]{text} span starting at text[start],
+// returning its language, its text with escapes resolved, and the index just
+// past it. ok is false when the span is malformed.
+func parseLanguageSpan(text string, start int) (language, content string, next int, ok bool) {
+	i := start + 2
+	for i < len(text) && text[i] != ']' {
+		if !languageByte(text[i]) {
+			return "", "", 0, false
+		}
+		i++
+	}
+	if i == start+2 || i+1 >= len(text) || text[i+1] != '{' {
+		return "", "", 0, false
+	}
+	language = text[start+2 : i]
+	var body strings.Builder
+	for j := i + 2; j < len(text); j++ {
+		switch c := text[j]; {
+		case c == '\\' && j+1 < len(text) && text[j+1] != '\n':
+			body.WriteByte(text[j+1])
+			j++
+		case c == '}':
+			return language, body.String(), j + 1, true
+		case c == '\n':
+			return "", "", 0, false
+		default:
+			body.WriteByte(c)
+		}
+	}
+	return "", "", 0, false
+}
+
+// languageByte reports whether c may appear in a span's language name, which is
+// a tag such as "ja" or "zh-Hans".
+func languageByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_'
 }
 
 func WrapInlineText(lines [][]InlineSegment, width float32, measure func([]InlineSegment) float32) [][]InlineSegment {
@@ -127,14 +187,14 @@ func inlineWords(segments []InlineSegment) [][]InlineSegment {
 			if !unicode.IsSpace(character) {
 				continue
 			}
-			word = appendInlineText(word, segment.Text[start:index])
+			word = appendInlineText(word, segment.Text[start:index], segment.Language)
 			if len(word) > 0 {
 				words = append(words, word)
 				word = nil
 			}
 			start = index + len(string(character))
 		}
-		word = appendInlineText(word, segment.Text[start:])
+		word = appendInlineText(word, segment.Text[start:], segment.Language)
 	}
 	if len(word) > 0 {
 		words = append(words, word)
@@ -150,7 +210,7 @@ func inlineUnits(segments []InlineSegment) [][]InlineSegment {
 			continue
 		}
 		for _, character := range segment.Text {
-			units = append(units, []InlineSegment{{Text: string(character)}})
+			units = append(units, []InlineSegment{{Text: string(character), Language: segment.Language}})
 		}
 	}
 	return units
@@ -158,7 +218,7 @@ func inlineUnits(segments []InlineSegment) [][]InlineSegment {
 
 func appendInlineWord(line, word []InlineSegment, space bool) []InlineSegment {
 	if space {
-		line = appendInlineText(line, " ")
+		line = appendInlineText(line, " ", "")
 	}
 	return appendInlineSegments(line, word)
 }
@@ -169,20 +229,23 @@ func appendInlineSegments(dst, source []InlineSegment) []InlineSegment {
 			dst = append(dst, segment)
 			continue
 		}
-		dst = appendInlineText(dst, segment.Text)
+		dst = appendInlineText(dst, segment.Text, segment.Language)
 	}
 	return dst
 }
 
-func appendInlineText(segments []InlineSegment, text string) []InlineSegment {
+// appendInlineText appends a literal run, joining it onto the last segment when
+// that is a run in the same language, so a line holds one segment per stretch
+// of text that draws alike.
+func appendInlineText(segments []InlineSegment, text, language string) []InlineSegment {
 	if text == "" {
 		return segments
 	}
-	if len(segments) > 0 && !segments[len(segments)-1].Icon {
-		segments[len(segments)-1].Text += text
+	if last := len(segments) - 1; last >= 0 && !segments[last].Icon && segments[last].Language == language {
+		segments[last].Text += text
 		return segments
 	}
-	return append(segments, InlineSegment{Text: text})
+	return append(segments, InlineSegment{Text: text, Language: language})
 }
 
 func cloneInlineSegments(segments []InlineSegment) []InlineSegment {

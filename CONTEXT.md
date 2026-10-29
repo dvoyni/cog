@@ -52,6 +52,10 @@ _Avoid_: Plugin, as the name of a kind; the interface alone, which is what a Por
 A plugin's implementation of another plugin's Port, identified by its own type and bound to that Port by the engine during composition. It is a plain value rather than a Resource, so reaching it takes no lock. A window driver's GPU backend is an Adapter of the renderer's backend Port; each plugin's Provider is an Adapter of the Broker's Port.
 _Avoid_: Backend, driver, as the name of the kind
 
+**Platform**:
+The storefront a game ships on (Steam, or none), and the Slot that reaches it: achievements unlocked by name and stats set to absolute values, uploaded on platform's own schedule, and the language the storefront runs the game in. The game's records are the source of truth and nothing is read back. It is not the operating system: an OS-specific build is a build tag, not a Platform.
+_Avoid_: Store, storefront API, online service
+
 **Open slot**, **Vocabulary package**, **Contract root**:
 _Retired._ An Open slot was a contract shipped with no implementation, filled by whichever Extension an engine was composed with; a Slot now ships its own implementation and requires an Adapter instead. A Vocabulary package held a Port's Adapter contract beneath it, apart from its recording API; a Slot now declares both together. A contract root was the package holding a plugin's API beside the logic that API needed; a plugin's root now holds declarations only.
 _Avoid_: all three.

@@ -171,3 +171,26 @@ func start(t *testing.T, config Config) running {
 		<-done
 	}}
 }
+
+// The disk appends in place, through storage's AppendFS, and keeps to its root.
+func TestDiskFSAppendsInPlace(t *testing.T) {
+	permanent, err := openDiskFS(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	appender, ok := permanent.(storage.AppendFS)
+	if !ok {
+		t.Fatal("the disk filesystem does not append in place")
+	}
+	for _, line := range []string{"a\n", "b\n"} {
+		if err := appender.AppendFile("log.csv", []byte(line), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if data, err := fs.ReadFile(permanent, "log.csv"); err != nil || string(data) != "a\nb\n" {
+		t.Fatalf("log.csv = %q, %v; want both appends in order", data, err)
+	}
+	if err := appender.AppendFile("../escape", nil, 0o644); !errors.Is(err, fs.ErrInvalid) {
+		t.Fatalf("traversal error = %v, want fs.ErrInvalid", err)
+	}
+}

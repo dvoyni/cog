@@ -60,6 +60,24 @@ func (d diskFS) WriteFile(name string, data []byte, perm fs.FileMode) error {
 	return d.withRoot(func(root *os.Root) error { return root.WriteFile(name, data, perm) })
 }
 
+// AppendFile appends in place, so storage need not read the file back.
+func (d diskFS) AppendFile(name string, data []byte, perm fs.FileMode) error {
+	if err := validatePath("append", name); err != nil {
+		return err
+	}
+	return d.withRoot(func(root *os.Root) error {
+		file, err := root.OpenFile(name, os.O_APPEND|os.O_CREATE|os.O_WRONLY, perm)
+		if err != nil {
+			return err
+		}
+		_, writeErr := file.Write(data)
+		if closeErr := file.Close(); writeErr == nil {
+			writeErr = closeErr
+		}
+		return writeErr
+	})
+}
+
 func (d diskFS) MkdirAll(path string, perm fs.FileMode) error {
 	if err := validatePath("mkdir", path); err != nil {
 		return err

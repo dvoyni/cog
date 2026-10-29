@@ -30,8 +30,10 @@ and [ADR 0003](../../../docs/adr/0003-roots-are-alias-indexes.md).
   vocabulary (`Layer`, `SpriteTransform`, `SpriteFrame`, `TextDraw`,
   `ShapeDraw`, `Vertex`, `VertexLayout`, `AspectMode`, `TextAlign`),
   `MaterialSet` and `HaloProfile`, the reserved slot names and published WGSL
-  paths, `SpriteInstance`, `Op`, `ArmDrawsCmd` with `DrawsSnapshot` and its view
-  types, `Config`, the `McpProvider` Adapter, the `ErrDraws…` errors, `Name` and
+  paths, `SpriteInstance`, `Op`, `SetFallbackLanguageCmd`, `ClearGlyphsCmd`,
+  `ArmDrawsCmd` with `DrawsSnapshot` and its view types, `Config` with
+  `FallbackFont`, the `McpProvider` Adapter, the `ErrDraws…` errors,
+  `ErrUnknownFallbackLanguage`, `Name` and
   the ordering identity `FlushOnUpdate`. Its functions — `NewLookup`,
   `NewLookupAccess`, `NewLookupDeviceAccess`, the coordinate helpers (`LayerTransform`, `WorldToScreen`,
   `ScreenToWorld`), `DefaultTint` and `TintFor`, the built-in material constructors,
@@ -77,11 +79,54 @@ kernel.New(map[kernel.PluginName]any{
 })
 ```
 
-`Config` has `AtlasSize`, `LayersPerArray` and `MaxAtlasBytes`. A zero field
+`Config` has `AtlasSize`, `LayersPerArray` and `MaxAtlasBytes`, and the
+optional `FallbackFonts` and `FallbackLanguage` of
+[Fallback fonts](#fallback-fonts). A zero atlas field
 takes its default — 4096, 2 and 256 MiB — so the zero `Config`, or giving no
 configuration at all, takes all three. `LayersPerArray` must be at least two.
 Atlas dimensions and the memory budget must be positive, and one array must fit
 within `MaxAtlasBytes`.
+
+### Fallback fonts
+
+A character the text's font does not have is looked up along a chain: the
+text's font, then the built-in default font, then `Config.FallbackFonts`. A
+character none of them has draws as the text font's missing-glyph box. Each
+`FallbackFont` names a font file and the language it is drawn for:
+
+```go
+canvas.Config{
+	FallbackFonts: []canvas.FallbackFont{
+		{Language: "zh-Hans", Path: "fonts/NotoSerifSC-Regular.otf"},
+		{Language: "zh-Hant", Path: "fonts/NotoSerifTC-Regular.otf"},
+		{Language: "ja", Path: "fonts/NotoSerifJP-Regular.otf"},
+		{Language: "ko", Path: "fonts/NotoSerifKR-Regular.otf"},
+	},
+	FallbackLanguage: "ja",
+}
+```
+
+The order matters for Han characters. Chinese, Japanese and Korean share one
+code point for most of them and draw them differently, so whichever fallback
+is tried first decides what a reader sees. `FallbackLanguage` is tried first,
+and the rest follow in configured order. A game sets it from the language the
+player reads in, at run time with `SetFallbackLanguageCmd`, which answers
+`ErrUnknownFallbackLanguage` for a language no fallback carries.
+
+A face remembers which font drew each character, so a changed fallback
+language reaches only characters not drawn yet. `ClearGlyphsCmd` drops the
+glyph atlas and every baked face at the next flush, as a framebuffer scale
+change does, so everything is looked up and rasterized again. Send both to
+switch at once.
+
+Text whose language a game knows, such as a player name typed in another
+script, can name it inline: `$[ja]{...}` sets the span in that language, so its
+characters try that language's fallback first. A span's text is literal up to
+its first unescaped `}`, holds no icons, and stays literal when malformed.
+
+A glyph from a fallback is rasterized on the text font's baseline, and a line
+keeps the text font's line height. Kerning applies only between two characters
+drawn by the same font.
 
 During `Register`, canvas contributes its embedded shaders and default font to
 storage as a read mount at `math.MaxInt` priority, which storage installs at its
@@ -131,8 +176,9 @@ and call:
   for an arbitrary shape sourcing a gfx texture.
 - `FillRect(Layer, m.Rect, ShapeDraw)`, `StrokeRect(Layer, m.Rect, ShapeDraw)`
   and `Line(Layer, start, end m.Vec2, ShapeDraw)` for primitives.
-- `Text(Layer, fontPath, text, TextDraw)` for text with multiline and `${path}`
-  inline-image support. A backslash escapes a literal `${` or `\`. An inline
+- `Text(Layer, fontPath, text, TextDraw)` for text with multiline, `${path}`
+  inline-image and `$[language]{text}` language-span support (see
+  [Fallback fonts](#fallback-fonts)). A backslash escapes a literal `${` or `\`. An inline
   icon takes the run's alpha and not its colour: `TextDraw.Color` colours a
   glyph, whose atlas entry is white plus coverage, and would modulate an icon,
   whose texel is already the artwork.

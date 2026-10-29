@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"errors"
 	"io/fs"
 
 	"github.com/dvoyni/cog/kernel"
@@ -53,4 +54,21 @@ func (w WriteFS) Rename(oldName, newName string) error {
 		return ErrNoWriteAccess{Op: "rename", Path: oldName}
 	}
 	return w.permanent.Rename(oldName, newName)
+}
+
+// AppendFile appends data to the named file, creating it with perm when it does
+// not exist. A permanent filesystem that is an AppendFS appends in place; any
+// other has the file read back and written whole.
+func (w WriteFS) AppendFile(name string, data []byte, perm fs.FileMode) error {
+	if w.permanent == nil {
+		return ErrNoWriteAccess{Op: "append", Path: name}
+	}
+	if appender, ok := w.permanent.(AppendFS); ok {
+		return appender.AppendFile(name, data, perm)
+	}
+	existing, err := fs.ReadFile(w.permanent, name)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return w.permanent.WriteFile(name, append(existing, data...), perm)
 }

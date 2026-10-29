@@ -29,3 +29,11 @@ type ErrDrawsUnknownKind struct{ Kind string }
 func (e ErrDrawsUnknownKind) Error() string {
 	return "canvas: " + e.Kind + " is not a draw kind; the kinds are sprite, text and triangles"
 }
+
+// ErrUnknownFallbackLanguage reports a SetFallbackLanguageCmd naming a language
+// no fallback font is configured for.
+type ErrUnknownFallbackLanguage struct{ Language string }
+
+func (e ErrUnknownFallbackLanguage) Error() string {
+	return "canvas: no fallback font is configured for language " + e.Language
+}

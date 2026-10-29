@@ -30,11 +30,11 @@ func TestWrapMeasureFollowsLayoutMetrics(t *testing.T) {
 
 		const text = "a line that exactly fills its measured width"
 		lines := ParseInlineText(text)
-		arranged := MeasureLine(logical, text)
+		arranged := MeasureLine(fr.fonts(), logical, text, "")
 		rasterized := func(segments []InlineSegment) float32 {
 			var width float32
 			for _, segment := range segments {
-				width += MeasureLine(raster, segment.Text) * 0.5
+				width += MeasureLine(fr.fonts(), raster, segment.Text, "") * 0.5
 			}
 			return width
 		}

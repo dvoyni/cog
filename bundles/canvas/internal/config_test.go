@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"reflect"
 	"testing"
 )
 
@@ -14,10 +15,10 @@ func TestAZeroConfigFieldTakesItsDefault(t *testing.T) {
 	}
 	defaults := WithDefaults(Config{})
 	want := Config{AtlasSize: 16, LayersPerArray: defaults.LayersPerArray, MaxAtlasBytes: defaults.MaxAtlasBytes}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("resolved %+v, want %+v", got, want)
 	}
-	if got, err := resolveConfig(nil); err != nil || got != defaults {
+	if got, err := resolveConfig(nil); err != nil || !reflect.DeepEqual(got, defaults) {
 		t.Fatalf("no configuration resolved to %+v (%v), want the defaults %+v", got, err, defaults)
 	}
 }

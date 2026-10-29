@@ -21,3 +21,7 @@ type ErrDrawsAbandoned = internal.ErrDrawsAbandoned
 // record. It is raised before anything is armed, because a typo that costs a
 // tick and comes back as an empty array reads as a game that drew nothing.
 type ErrDrawsUnknownKind = internal.ErrDrawsUnknownKind
+
+// ErrUnknownFallbackLanguage reports a SetFallbackLanguageCmd naming a language
+// no fallback font is configured for.
+type ErrUnknownFallbackLanguage = internal.ErrUnknownFallbackLanguage

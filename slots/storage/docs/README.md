@@ -235,6 +235,11 @@ All operation names use `fs.ValidPath` form. `Rename` onto an existing file
 replaces it, which is how a save is made atomic. An Adapter is never handed back
 to callers.
 
+An Adapter may also implement `AppendFS`, `AppendFile(string, []byte,
+fs.FileMode) error`, to append to a file in place; diskstorage and jsstorage do.
+`WriteFS.AppendFile` uses it when it is there, and otherwise reads the file back
+and writes it whole, so appending works over any `PermanentFS`.
+
 ### `Values`
 
 The key-value store backing the value commands. It caches the values file after

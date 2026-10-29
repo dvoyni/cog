@@ -3,6 +3,7 @@ package internal
 import (
 	"fmt"
 	"io/fs"
+	"slices"
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/assets"
@@ -52,6 +53,17 @@ type Lookup struct {
 	fontSources *assets.Cache[sourceDescrParams, struct{}, *opentype.Font]
 	fontFaces   *assets.Cache[faceDescrParams, fontUserData, *Font]
 
+	// fallbackFonts and fallbackLanguage are the fallback chain a character a
+	// text's font lacks is looked up along; see Config.FallbackFonts.
+	// fallbackLanguage starts as the configured one and SetFallbackLanguageCmd
+	// changes it.
+	fallbackFonts    []FallbackFont
+	fallbackLanguage string
+	// clearGlyphs asks the next flush to drop the glyph atlas and every baked
+	// face, which is what ClearGlyphsCmd records: the release needs the resource
+	// queue, which the flush holds and the command does not.
+	clearGlyphs bool
+
 	lastFramebufferScale float32
 }
 
@@ -67,14 +79,68 @@ func NewLookup() *Lookup { return NewSizedLookup(WithDefaults(Config{})) }
 // and the resource queue - arrives on the call that needs it.
 func NewSizedLookup(config Config) *Lookup {
 	return &Lookup{
-		spritePacker: newPacker(config),
-		glyphPacker:  newPacker(config),
-		sprites:      assets.New[spriteDescrParams, spriteUserData, AtlasEntry](spriteLoader{}),
-		tiled:        assets.New[tiledDescrParams, *gfx.ResourceQueue, StandaloneEntry](standaloneLoader{}),
-		spriteSizes:  assets.New[sizeDescrParams, struct{}, m.Vec2i](spriteSizeLoader{}),
-		fontSources:  assets.New[sourceDescrParams, struct{}, *opentype.Font](fontSourceLoader{}),
-		fontFaces:    assets.New[faceDescrParams, fontUserData, *Font](fontFaceLoader{}),
+		spritePacker:     newPacker(config),
+		glyphPacker:      newPacker(config),
+		sprites:          assets.New[spriteDescrParams, spriteUserData, AtlasEntry](spriteLoader{}),
+		tiled:            assets.New[tiledDescrParams, *gfx.ResourceQueue, StandaloneEntry](standaloneLoader{}),
+		spriteSizes:      assets.New[sizeDescrParams, struct{}, m.Vec2i](spriteSizeLoader{}),
+		fontSources:      assets.New[sourceDescrParams, struct{}, *opentype.Font](fontSourceLoader{}),
+		fontFaces:        assets.New[faceDescrParams, fontUserData, *Font](fontFaceLoader{}),
+		fallbackFonts:    append([]FallbackFont(nil), config.FallbackFonts...),
+		fallbackLanguage: config.FallbackLanguage,
 	}
+}
+
+// fallbackChain is the fonts a character a text's own font lacks is looked up
+// in, in order: canvas's default font, then the fallback for language - or, for
+// text outside a $[language]{...} span, the current fallback language - then
+// every other fallback in the order configured. A language with no fallback of
+// its own leaves the configured order as it is.
+//
+// It is called once per character, face and language a face has not met, never
+// per frame, so building it each time costs nothing that matters.
+func (l *Lookup) fallbackChain(language string) []string {
+	if language == "" {
+		language = l.fallbackLanguage
+	}
+	chain := make([]string, 0, len(l.fallbackFonts)+1)
+	chain = append(chain, DefaultFontPath)
+	for _, fallback := range l.fallbackFonts {
+		if fallback.Language == language {
+			chain = append(chain, fallback.Path)
+		}
+	}
+	for _, fallback := range l.fallbackFonts {
+		if fallback.Language != language {
+			chain = append(chain, fallback.Path)
+		}
+	}
+	return chain
+}
+
+// onFallbackChain reports whether path is a font other faces may draw glyphs
+// from: the default font or a fallback.
+func (l *Lookup) onFallbackChain(path string) bool {
+	if path == DefaultFontPath {
+		return true
+	}
+	for _, fallback := range l.fallbackFonts {
+		if fallback.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+// setFallbackLanguage makes language the fallback tried first, reporting false
+// when no fallback carries it. The empty language tries them in configured
+// order.
+func (l *Lookup) setFallbackLanguage(language string) bool {
+	if language != "" && !slices.ContainsFunc(l.fallbackFonts, func(f FallbackFont) bool { return f.Language == language }) {
+		return false
+	}
+	l.fallbackLanguage = language
+	return true
 }
 
 // spriteDescr names one sprite at one gutter fill. A path names a file; the
@@ -124,9 +190,14 @@ func (l *Lookup) fontUserData() fontUserData { return fontUserData{sources: l.fo
 // The glyph atlas pages are not freed per font: the whole glyph atlas is
 // released together on a framebuffer scale change, which is the only time glyph
 // pages are reclaimed at all.
+//
+// A font on the fallback chain may have drawn glyphs for any other face, and
+// those faces remember it, so unloading one frees every face rather than leave
+// them holding a face that was closed.
 func (l *Lookup) unloadFont(k kernel.Kernel, path string) {
+	everyFace := l.onFallbackChain(path)
 	l.fontFaces.FreeWhere(k, l.fontUserData(), func(d assets.Descr[faceDescrParams], _ *Font) bool {
-		return d.Params.path == path
+		return everyFace || d.Params.path == path
 	})
 	l.fontSources.Free(k, assets.Descr[sourceDescrParams]{Name: path}, struct{}{})
 }
@@ -138,15 +209,18 @@ func (l *Lookup) unloadFont(k kernel.Kernel, path string) {
 // goes and every parsed source stays, so nothing is re-read from storage and
 // nothing is re-parsed - only re-baked. A single cache keyed by path, with the
 // faces inside its value, cannot say this at all.
+//
+// A ClearGlyphsCmd since the last flush takes the same release, at any scale.
 func (l *Lookup) invalidateFontsOnResize(k kernel.Kernel, resources *gfx.ResourceQueue, view *gfx.Viewport) {
 	scale := float32(1)
 	if view.Width > 0 && view.FramebufferWidth > 0 {
 		scale = view.FramebufferWidth / view.Width
 	}
-	if l.lastFramebufferScale != 0 && scale != l.lastFramebufferScale {
+	if l.clearGlyphs || l.lastFramebufferScale != 0 && scale != l.lastFramebufferScale {
 		l.glyphPacker.releaseAll(resources)
 		l.fontFaces.FreeAll(k, l.fontUserData())
 	}
+	l.clearGlyphs = false
 	l.lastFramebufferScale = scale
 }
 
@@ -256,13 +330,14 @@ func (la LookupAccess) measureTextSize(path string, size int, text string, width
 }
 
 func (la LookupAccess) measureInlineLine(face *Font, line []InlineSegment, capHeight float32) float32 {
+	fonts := GlyphFonts{k: la.kernel, fsys: la.fsys, lookup: la.lookup}
 	var width float32
 	for _, segment := range line {
 		if segment.Icon {
 			width += la.iconWidth(segment.Text, capHeight)
 			continue
 		}
-		width += MeasureLine(face, segment.Text)
+		width += MeasureLine(fonts, face, segment.Text, segment.Language)
 	}
 	return width
 }
@@ -441,22 +516,4 @@ func (la LookupAccess) face(path string, size int) *Font {
 		return nil
 	}
 	return la.lookup.font(la.kernel, clean, size, la.fsys)
-}
-
-// MeasureLine returns the logical advance width of one line (kerning included).
-func MeasureLine(face *Font, text string) float32 {
-	var width float32
-	var previous rune
-	first := true
-	for _, character := range text {
-		if !first {
-			width += float32(face.Face.Kern(previous, character)) / 64
-		}
-		if advance, ok := face.Face.GlyphAdvance(character); ok {
-			width += float32(advance) / 64
-		}
-		previous = character
-		first = false
-	}
-	return width
 }

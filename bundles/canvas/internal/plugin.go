@@ -111,6 +111,12 @@ func (fr *frame) face(path string, px int) *Font {
 	return LookupFace(fr.lookup, fr.k, path, px, fr.fsys)
 }
 
+// fonts is what resolves a character to the font of the chain that draws it,
+// for the flush in progress.
+func (fr *frame) fonts() GlyphFonts {
+	return GlyphFonts{k: fr.k, fsys: fr.fsys, lookup: fr.lookup}
+}
+
 // New creates the canvas plugin. Configure it with a canvas.Config under
 // canvas.Name.
 func New() kernel.Plugin { return &plugin{} }
@@ -134,6 +140,8 @@ func (p *plugin) Register(registrar *kernel.Registrar, value any) error {
 	registrar.InitResource(&OpQueue{})
 	registrar.InitResource(NewSizedLookup(config))
 	registrar.HandleCommand[ArmDrawsCmd](p.armDrawsCmdImpl)
+	registrar.HandleCommand[SetFallbackLanguageCmd](p.setFallbackLanguageCmdImpl)
+	registrar.HandleCommand[ClearGlyphsCmd](p.clearGlyphsCmdImpl)
 	registrar.Subscribe[armDrawsOnUpdate](p.armSnapshotOnUpdate).First()
 	registrar.Subscribe[drawsOnUpdate](p.snapshotOnUpdate).
 		Last().Before[FlushOnUpdate]()
@@ -902,7 +910,7 @@ func paramColorOr(params []gfx.ShaderParameterDescr, name string, def m.Color) m
 	return def
 }
 
-func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, shading *spriteShading, op *TextOp) {
+func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerTransform m.Mat4, clip m.Rect, hasClip bool, shading *spriteShading, op *TextOp, language string) {
 	if op.Draw.Size <= 0 || op.Text == "" || op.FontPath == "" {
 		return
 	}
@@ -923,6 +931,7 @@ func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, fr *frame, surf surface, la
 	if logical := fr.face(op.FontPath, logicalPx); logical != nil {
 		layout, layoutScale = logical, op.Draw.Size/float32(logicalPx)
 	}
+	fonts := fr.fonts()
 	y := op.Draw.Position.Y
 	for start := 0; start <= len(op.Text); {
 		end := start
@@ -930,7 +939,7 @@ func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, fr *frame, surf surface, la
 			end++
 		}
 		line := op.Text[start:end]
-		width := MeasureLine(layout, line) * layoutScale
+		width := MeasureLine(fonts, layout, line, language) * layoutScale
 		x := op.Draw.Position.X
 		switch op.Draw.Align {
 		case AlignCenter:
@@ -939,14 +948,15 @@ func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, fr *frame, surf surface, la
 			x -= width
 		}
 		var previous rune
-		first := true
+		var previousOwner *Font
 		for _, character := range line {
-			glyph, ok := LoadGlyph(fr.lookup, character, face, fr.resources)
+			glyph, ok := LoadGlyph(fonts, character, language, face, fr.resources)
 			if !ok {
 				continue
 			}
-			if !first {
-				x += float32(layout.Face.Kern(previous, character)) / 64 * layoutScale
+			owner := fonts.faceFor(layout, character, language)
+			if previousOwner != nil {
+				x += pairKern(previousOwner, owner, previous, character) * layoutScale
 			}
 			if glyph.Visible {
 				transform := SpriteTransform{
@@ -955,13 +965,12 @@ func (p *plugin) drawGlyphRun(gfxWrite *gfx.OpQueue, fr *frame, surf surface, la
 				}
 				p.batchEntry(gfxWrite, surf, glyph.Entry, transform, layerTransform, clip, hasClip, shading, TintFor(op.Draw.Color))
 			}
-			if advance, ok := layout.Face.GlyphAdvance(character); ok {
+			if advance, ok := owner.Face.GlyphAdvance(character); ok {
 				x += float32(advance) / 64 * layoutScale
 			} else {
 				x += glyph.Advance * toLogical
 			}
-			previous = character
-			first = false
+			previous, previousOwner = character, owner
 		}
 		y += face.LineHeight * toLogical
 		if end == len(op.Text) {
@@ -990,6 +999,7 @@ func (p *plugin) drawText(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerT
 	ascent := float32(metrics.Ascent) / 64 * toLogical
 	capHeight := float32(metrics.CapHeight) / 64 * toLogical
 	lineHeight := face.LineHeight * toLogical
+	fonts := fr.fonts()
 	measure := func(line []InlineSegment) float32 {
 		var width float32
 		for _, segment := range line {
@@ -997,7 +1007,7 @@ func (p *plugin) drawText(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerT
 				width += p.iconWidth(fr, segment.Text, capHeight)
 				continue
 			}
-			width += GlyphLineWidth(fr.lookup, face, segment.Text, fr.resources) * toLogical
+			width += GlyphLineWidth(fonts, face, segment.Text, segment.Language, fr.resources) * toLogical
 		}
 		return width
 	}
@@ -1041,7 +1051,7 @@ func (p *plugin) drawText(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerT
 			run := TextOp{FontPath: op.FontPath, Text: segment.Text, Draw: TextDraw{
 				Position: m.Vec2{X: x, Y: y}, Size: op.Draw.Size, Color: op.Draw.Color, Align: AlignLeft,
 			}}
-			p.drawGlyphRun(gfxWrite, fr, surf, layerTransform, clip, hasClip, &shading, &run)
+			p.drawGlyphRun(gfxWrite, fr, surf, layerTransform, clip, hasClip, &shading, &run, segment.Language)
 
 			x += layout([]InlineSegment{segment})
 		}
@@ -1065,6 +1075,7 @@ func (p *plugin) wrapMeasure(fr *frame, fontPath string, size float32, fallback 
 	}
 	scale := size / float32(px)
 	capHeight := float32(face.Face.Metrics().CapHeight) / 64 * scale
+	fonts := fr.fonts()
 	return func(line []InlineSegment) float32 {
 		var width float32
 		for _, segment := range line {
@@ -1072,7 +1083,7 @@ func (p *plugin) wrapMeasure(fr *frame, fontPath string, size float32, fallback 
 				width += p.iconWidth(fr, segment.Text, capHeight)
 				continue
 			}
-			width += MeasureLine(face, segment.Text) * scale
+			width += MeasureLine(fonts, face, segment.Text, segment.Language) * scale
 		}
 		return width
 	}

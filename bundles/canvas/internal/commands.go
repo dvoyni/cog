@@ -48,3 +48,34 @@ type ArmDrawsResponse struct {
 	// capture.
 	Err error
 }
+
+// SetFallbackLanguageCmd makes one of Config.FallbackFonts, named by its
+// language, the fallback tried first for text outside a $[language]{...} span.
+// A game sets it from the language the player reads in, so that a Han
+// character draws the way that reader writes it.
+//
+// It changes what characters not met yet are drawn with. A face remembers which
+// font drew each character it has drawn, so characters already on screen keep
+// their font until ClearGlyphsCmd drops them.
+type SetFallbackLanguageCmd kernel.Command[SetFallbackLanguageRequest, SetFallbackLanguageResponse]
+
+// SetFallbackLanguageRequest names the fallback language. Empty tries the
+// fallbacks in the order Config.FallbackFonts lists them.
+type SetFallbackLanguageRequest struct{ Language string }
+
+// SetFallbackLanguageResponse carries ErrUnknownFallbackLanguage when no
+// fallback font is configured for the language, which leaves the current one
+// in place.
+type SetFallbackLanguageResponse struct{ Err error }
+
+// ClearGlyphsCmd drops the glyph atlas and every baked face at the next flush,
+// as a framebuffer scale change does, so every character is looked up along the
+// fallback chain and rasterized again. It is what makes a SetFallbackLanguageCmd
+// reach text already drawn.
+type ClearGlyphsCmd kernel.Command[ClearGlyphsRequest, ClearGlyphsResponse]
+
+// ClearGlyphsRequest is the empty request to ClearGlyphsCmd.
+type ClearGlyphsRequest struct{}
+
+// ClearGlyphsResponse is the empty response from ClearGlyphsCmd.
+type ClearGlyphsResponse struct{}

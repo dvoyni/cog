@@ -20,3 +20,26 @@ type ArmDrawsRequest = internal.ArmDrawsRequest
 
 // ArmDrawsResponse hands back the wait and the viewport.
 type ArmDrawsResponse = internal.ArmDrawsResponse
+
+// SetFallbackLanguageCmd makes one of Config.FallbackFonts, named by its
+// language, the fallback tried first for text outside a $[language]{...} span.
+// Characters already drawn keep their font until ClearGlyphsCmd.
+type SetFallbackLanguageCmd = internal.SetFallbackLanguageCmd
+
+// SetFallbackLanguageRequest names the fallback language; empty tries the
+// fallbacks in configured order.
+type SetFallbackLanguageRequest = internal.SetFallbackLanguageRequest
+
+// SetFallbackLanguageResponse carries ErrUnknownFallbackLanguage for a language
+// no fallback is configured for.
+type SetFallbackLanguageResponse = internal.SetFallbackLanguageResponse
+
+// ClearGlyphsCmd drops the glyph atlas and every baked face at the next flush,
+// so every character is rasterized again along the current fallback chain.
+type ClearGlyphsCmd = internal.ClearGlyphsCmd
+
+// ClearGlyphsRequest is the empty request to ClearGlyphsCmd.
+type ClearGlyphsRequest = internal.ClearGlyphsRequest
+
+// ClearGlyphsResponse is the empty response from ClearGlyphsCmd.
+type ClearGlyphsResponse = internal.ClearGlyphsResponse
