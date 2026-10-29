@@ -54,6 +54,14 @@ type plugin struct {
 	cursorHidden  atomic.Bool
 	cursorApplied bool
 
+	// fullscreen is whether app.FullscreenCmd last asked for the window
+	// fullscreen, and fullscreenPending that it asked since the main thread
+	// last looked; both set from any goroutine. The window is asked rather
+	// than remembered, because the player can leave fullscreen without the
+	// command (Esc in a browser).
+	fullscreen        atomic.Bool
+	fullscreenPending atomic.Bool
+
 	// gfxBackend is gfx's Backend adapter: provided at registration, and
 	// attached to the device once the device exists.
 	gfxBackend *gfxBackend
@@ -173,6 +181,7 @@ func (p *plugin) Stop(kernel.Executioner) error {
 // source is paused, because pause stops the tick and not the frame.
 func (p *plugin) onUpdate(k kernel.Executioner, _ float64) {
 	p.applyCursor()
+	p.applyFullscreen()
 	p.pollGamepads(k)
 	p.flushInput(k)
 	p.loop.Frame(k, p.consumeFrameTime())

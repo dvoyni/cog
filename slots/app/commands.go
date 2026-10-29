@@ -39,6 +39,19 @@ type CursorRequest = internal.CursorRequest
 // CursorResponse is the empty response from CursorCmd.
 type CursorResponse = internal.CursorResponse
 
+// FullscreenCmd puts the window into fullscreen or back into a window, through
+// the MainLoop. It returns once the wish is recorded; the platform applies it
+// on its next frame. A browser enters fullscreen only in answer to a user's
+// gesture, so there it is asked for straight after a click or not at all.
+type FullscreenCmd = internal.FullscreenCmd
+
+// FullscreenRequest carries whether the window is fullscreen; the zero request
+// makes it a window.
+type FullscreenRequest = internal.FullscreenRequest
+
+// FullscreenResponse is the empty response from FullscreenCmd.
+type FullscreenResponse = internal.FullscreenResponse
+
 // TimeCmd controls the engine's tick source: it pauses the update loop,
 // resumes it, steps it a named number of ticks, and reports which of those is
 // true. The app plugin handles it, because the tick source is part of the loop

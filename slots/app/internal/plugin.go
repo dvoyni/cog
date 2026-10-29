@@ -43,6 +43,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	registrar.HandleCommand[QuitCmd](p.quitCmdImpl)
 	registrar.HandleCommand[ClipboardWriteCmd](p.clipboardWriteCmdImpl)
 	registrar.HandleCommand[CursorCmd](p.cursorCmdImpl)
+	registrar.HandleCommand[FullscreenCmd](p.fullscreenCmdImpl)
 	registrar.HandleCommand[TimeCmd](p.timeCmdImpl)
 	registrar.ProvideAdapter[McpProvider](mcp.Provider(provider{}))
 	return nil

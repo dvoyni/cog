@@ -28,4 +28,5 @@ type idleMainLoop struct{}
 func (idleMainLoop) Attach(app.Loop)             {}
 func (idleMainLoop) ClipboardWrite(string) error { return nil }
 func (idleMainLoop) SetCursorHidden(bool)        {}
+func (idleMainLoop) SetFullscreen(bool)          {}
 func (idleMainLoop) Quit()                       {}

@@ -29,6 +29,10 @@ type MainLoop interface {
 	// app calls it for CursorCmd, from whatever goroutine dispatched the
 	// command, so it must be safe to call from any goroutine.
 	SetCursorHidden(hidden bool)
+	// SetFullscreen puts the window into fullscreen, or back into a window.
+	// app calls it for FullscreenCmd, from whatever goroutine dispatched the
+	// command, so it must be safe to call from any goroutine.
+	SetFullscreen(fullscreen bool)
 }
 
 // MainLoopPort is the Port app requires exactly one Adapter for: the platform

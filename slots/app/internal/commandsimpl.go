@@ -28,6 +28,14 @@ func (p *plugin) cursorCmdImpl() (kernel.Lock, kernel.Execute[CursorRequest, Cur
 	}
 }
 
+// fullscreenCmdImpl hands the window's fullscreen wish to the MainLoop.
+func (p *plugin) fullscreenCmdImpl() (kernel.Lock, kernel.Execute[FullscreenRequest, FullscreenResponse]) {
+	return nil, func(_ kernel.Kernel, request FullscreenRequest) FullscreenResponse {
+		p.mainLoop.Get().SetFullscreen(request.Fullscreen)
+		return FullscreenResponse{}
+	}
+}
+
 // timeCmdImpl controls the tick source: it pauses update ticks, resumes them,
 // steps a named number of them, and reports which is true.
 //

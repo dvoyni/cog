@@ -17,3 +17,16 @@ func (p *plugin) applyCursor() {
 	}
 	p.gpu.SetCursor(gpucontext.CursorDefault)
 }
+
+// applyFullscreen puts the window into fullscreen or out of it as
+// app.FullscreenCmd last asked, when it has asked since the last call and the
+// window is not that way already. Called at the start of onUpdate, on the main
+// thread, like applyCursor.
+func (p *plugin) applyFullscreen() {
+	if !p.fullscreenPending.Swap(false) {
+		return
+	}
+	if fullscreen := p.fullscreen.Load(); fullscreen != p.gpu.IsFullscreen() {
+		p.gpu.SetFullscreen(fullscreen)
+	}
+}

@@ -26,3 +26,11 @@ func (d mainLoop) ClipboardWrite(text string) error { return d.plugin.gpu.Clipbo
 // thread applies it in its next onUpdate, since a window's cursor belongs to
 // the thread that owns the window.
 func (d mainLoop) SetCursorHidden(hidden bool) { d.plugin.cursorHidden.Store(hidden) }
+
+// SetFullscreen records whether the window is to be fullscreen. app calls it
+// for app.FullscreenCmd, from the goroutine that dispatched the command; the
+// main thread applies it in its next onUpdate, as it does the cursor.
+func (d mainLoop) SetFullscreen(fullscreen bool) {
+	d.plugin.fullscreen.Store(fullscreen)
+	d.plugin.fullscreenPending.Store(true)
+}

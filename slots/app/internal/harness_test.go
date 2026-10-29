@@ -23,6 +23,7 @@ func (d *fakeMainLoop) Quit()            { d.quits.Add(1) }
 
 func (d *fakeMainLoop) ClipboardWrite(string) error { return nil }
 func (d *fakeMainLoop) SetCursorHidden(bool)        {}
+func (d *fakeMainLoop) SetFullscreen(bool)          {}
 
 // attached is the Loop app handed over, or nil when it handed none.
 func (d *fakeMainLoop) attached() Loop {
