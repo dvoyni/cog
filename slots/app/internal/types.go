@@ -33,6 +33,10 @@ type Loop interface {
 	// window's size in device-independent pixels changes, before it resolves
 	// that frame's viewport.
 	WindowSize(k kernel.Executioner, width, height float32)
+	// MonitorSize publishes MonitorSizeChangeEvent. The MainLoop calls it on
+	// its main thread when it first learns the size in device pixels of the
+	// window's monitor, and when that size changes, before that frame's Frame.
+	MonitorSize(k kernel.Executioner, width, height int)
 	// Quit publishes QuitEvent. The MainLoop calls it once, after its loop
 	// returns.
 	Quit(k kernel.Executioner)

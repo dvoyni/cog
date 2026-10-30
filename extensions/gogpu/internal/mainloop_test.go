@@ -32,6 +32,7 @@ func (l *recordingLoop) Render(kernel.Executioner)     {}
 func (l *recordingLoop) Quit(kernel.Executioner)       {}
 
 func (l *recordingLoop) WindowSize(kernel.Executioner, float32, float32) {}
+func (l *recordingLoop) MonitorSize(kernel.Executioner, int, int)        {}
 
 func (l *recordingLoop) Frame(_ kernel.Executioner, dt float64) {
 	l.frames = append(l.frames, dt)

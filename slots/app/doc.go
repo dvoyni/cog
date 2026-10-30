@@ -1,6 +1,7 @@
 // Package app declares the app Slot: the platform-agnostic application loop. It
 // offers the events every loop publishes (InitEvent, UpdateEvent,
-// RenderEvent, WindowSizeChangeEvent, QuitEvent), the QuitCmd and TimeCmd
+// RenderEvent, WindowSizeChangeEvent, MonitorSizeChangeEvent, QuitEvent), the
+// QuitCmd and TimeCmd
 // commands, and the MainLoop the Slot requires.
 //
 // The plugin, built by appplugin.New, owns everything about the loop that does

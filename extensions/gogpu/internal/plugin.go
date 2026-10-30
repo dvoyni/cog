@@ -39,6 +39,10 @@ type plugin struct {
 	lastFrameSeq uint64
 	windowWidth  int
 	windowHeight int
+	// monitorWidth and monitorHeight are the monitor size last reported to the
+	// Loop, zero before the first. Main-thread-only.
+	monitorWidth  int
+	monitorHeight int
 
 	// pending holds input changes accumulated from gogpu's EventSource callbacks
 	// (main thread), flushed once per frame in onUpdate. Main-thread-only; no lock.
@@ -182,6 +186,7 @@ func (p *plugin) Stop(kernel.Executioner) error {
 func (p *plugin) onUpdate(k kernel.Executioner, _ float64) {
 	p.applyCursor()
 	p.applyFullscreen()
+	p.reportMonitorSize(k)
 	p.pollGamepads(k)
 	p.flushInput(k)
 	p.loop.Frame(k, p.consumeFrameTime())

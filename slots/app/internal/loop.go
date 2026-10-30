@@ -55,6 +55,11 @@ func (l *loop) WindowSize(k kernel.Executioner, width, height float32) {
 	k.PublishEvent(WindowSizeChangeEvent{Width: width, Height: height}).Wait()
 }
 
+// MonitorSize publishes app.MonitorSizeChangeEvent and waits for its subscribers.
+func (l *loop) MonitorSize(k kernel.Executioner, width, height int) {
+	k.PublishEvent(MonitorSizeChangeEvent{Width: width, Height: height}).Wait()
+}
+
 // Frame publishes one fixed app.UpdateEvent per whole Step accumulated, each
 // waited for in turn. Publishing on the MainLoop's main thread — not a separate
 // goroutine — avoids starving the game under a busy platform loop.

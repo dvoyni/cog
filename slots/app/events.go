@@ -41,3 +41,9 @@ type QuitEvent = internal.QuitEvent
 // pixels. app publishes it when the MainLoop reports one, before the MainLoop
 // resolves the logical viewport.
 type WindowSizeChangeEvent = internal.WindowSizeChangeEvent
+
+// MonitorSizeChangeEvent reports the size in device pixels of the monitor the
+// window is on: the size fullscreen covers. app publishes it when the MainLoop
+// first learns that size and whenever it changes, before that frame's
+// UpdateEvents. A platform that cannot tell never publishes it.
+type MonitorSizeChangeEvent = internal.MonitorSizeChangeEvent
