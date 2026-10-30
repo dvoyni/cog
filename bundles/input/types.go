@@ -295,8 +295,10 @@ const (
 // GamepadType is the family a gamepad belongs to, which decides the labels on
 // its buttons, so a game can draw the glyphs the player sees on the pad. The
 // driver tells it at connection, from what it knows of the device;
-// GamepadTypeUnknown is a pad it could not place. A GamepadType prints as its
-// name and parses back from it, so it is a JSON string wherever it appears.
+// GamepadTypeUnknown is a pad it could not place. GamepadTypeKeyboard is a pad
+// a game feeds from keys itself, through ApplyCmd, labelled with those keys. A
+// GamepadType prints as its name and parses back from it, so it is a JSON
+// string wherever it appears.
 type GamepadType = internal.GamepadType
 
 const (
@@ -305,6 +307,7 @@ const (
 	GamepadTypePlayStation = internal.GamepadTypePlayStation
 	GamepadTypeSwitch      = internal.GamepadTypeSwitch
 	GamepadTypeSteamDeck   = internal.GamepadTypeSteamDeck
+	GamepadTypeKeyboard    = internal.GamepadTypeKeyboard
 )
 
 // GamepadSnapshot is one connected gamepad in the picture of the seam: its

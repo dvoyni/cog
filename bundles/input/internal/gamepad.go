@@ -68,7 +68,8 @@ const gamepadAxisCount = int(GamepadAxisRightTrigger) + 1
 // GamepadType is the family a gamepad belongs to, which decides the labels on
 // its buttons, so a game can draw the glyphs the player sees on the pad. The
 // driver tells it at connection, from what it knows of the device; Unknown is
-// a pad it could not place.
+// a pad it could not place. Keyboard is no device at all: a pad a game feeds
+// from keys, whose buttons are labelled with the keys standing in for them.
 type GamepadType uint8
 
 const (
@@ -77,10 +78,11 @@ const (
 	GamepadTypePlayStation
 	GamepadTypeSwitch
 	GamepadTypeSteamDeck
+	GamepadTypeKeyboard
 )
 
 // gamepadTypeCount is the number of gamepad types.
-const gamepadTypeCount = int(GamepadTypeSteamDeck) + 1
+const gamepadTypeCount = int(GamepadTypeKeyboard) + 1
 
 var gamepadButtonNames = [gamepadButtonCount]string{
 	"south", "east", "west", "north",
@@ -95,7 +97,7 @@ var gamepadAxisNames = [gamepadAxisCount]string{
 }
 
 var gamepadTypeNames = [gamepadTypeCount]string{
-	"unknown", "xbox", "playstation", "switch", "steam_deck",
+	"unknown", "xbox", "playstation", "switch", "steam_deck", "keyboard",
 }
 
 // String reports the button's name, such as "south" or "dpad_up".

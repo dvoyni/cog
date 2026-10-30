@@ -258,8 +258,10 @@ rest.
 buttons, so a game can draw the glyph the player sees: `GamepadTypeXbox`,
 `GamepadTypePlayStation`, `GamepadTypeSwitch`, `GamepadTypeSteamDeck`, or
 `GamepadTypeUnknown` for a pad the driver could not place, and for a pad a
-script connected. It prints as `unknown`, `xbox`, `playstation`, `switch` or
-`steam_deck`. The driver tells it at connection: gogpu places a pad by the USB
+script connected. `GamepadTypeKeyboard` is no driver's: it is for a pad a game
+feeds from keys itself through `ApplyCmd`, so its glyphs are those keys. It
+prints as `unknown`, `xbox`, `playstation`, `switch`, `steam_deck` or
+`keyboard`. The driver tells it at connection: gogpu places a pad by the USB
 vendor in its id where it carries one, then by its name, and on a Steam Deck
 takes a pad placed as Xbox or not at all for the Deck's own, since Steam hands
 the Deck's controls to games as a virtual Xbox pad.
