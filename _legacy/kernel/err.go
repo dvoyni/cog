@@ -5,8 +5,9 @@ import (
 	"reflect"
 )
 
-// ErrSchedulerStopped is returned when work is submitted after the scheduler's
-// coordinator has stopped, which happens once every plugin has been stopped.
+// ErrSchedulerStopped is returned when work is submitted after the scheduler
+// has stopped, which happens once every plugin has been stopped, and by work
+// that was still waiting for its locks when it did.
 type ErrSchedulerStopped struct{}
 
 func (ErrSchedulerStopped) Error() string {

@@ -42,6 +42,5 @@ func (e Executioner) ExecuteCommand[
 		var zero TResponse
 		return zero
 	}
-	return dispatch[TRequest, TResponse](
-		engine, cmd, cmd.resources.read, cmd.resources.write, request)
+	return dispatch[TRequest, TResponse](engine, cmd, &cmd.resources.locks, request)
 }

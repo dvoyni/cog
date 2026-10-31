@@ -2,11 +2,6 @@ package kernel
 
 import "reflect"
 
-// noLocks is the shared empty lock set used by declared nested dispatches, which
-// reuse their caller's locks rather than acquiring their own. The scheduler only
-// ranges over lock sets, so one immutable instance is safe to share.
-var noLocks = map[reflect.Type]struct{}{}
-
 // usage is what a Uses declaration returns to its dispatcher closure. command is
 // filled at composition, once every plugin has registered, so a Uses declaration
 // does not depend on registration order.
@@ -24,6 +19,9 @@ type ResourceAccess struct {
 	read  map[reflect.Type]struct{}
 	write map[reflect.Type]struct{}
 	uses  map[reflect.Type]*usage
+	// locks is read and write compiled for the scheduler. Finalization fills it
+	// once the Uses closure has widened the two maps.
+	locks lockSet
 }
 
 func newResourceAccess(resources map[reflect.Type]*resource, self reflect.Type) *ResourceAccess {
@@ -87,10 +85,10 @@ func (r ResourceAccess) Uses[
 		r.uses[id] = target
 	}
 	return func(k Kernel, request TRequest) TResponse {
-		// noLocks on both sides: composition folded the callee's closure into this
-		// handler's own set, so the caller already holds everything the callee
-		// needs and the nested dispatch acquires nothing.
-		return dispatch[TRequest, TResponse](k.engine, target.command, noLocks, noLocks, request)
+		// noLockSet: composition folded the callee's closure into this handler's
+		// own set, so the caller already holds everything the callee needs and the
+		// nested dispatch acquires nothing.
+		return dispatch[TRequest, TResponse](k.engine, target.command, noLockSet, request)
 	}
 }
 

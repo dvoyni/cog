@@ -1,7 +1,6 @@
 package kernel
 
 import (
-	"reflect"
 	"runtime"
 	"sync"
 	"testing"
@@ -15,16 +14,16 @@ import (
 //     a task inside its critical section and observe locking.
 //   - fn (if non-nil) runs synchronously inside run.
 type testTask struct {
-	read    map[reflect.Type]struct{}
-	write   map[reflect.Type]struct{}
+	read    []int32
+	write   []int32
 	started chan struct{}
 	release chan struct{}
 	fn      func() error
 	err     error
 }
 
-func (tt *testTask) locks() (read, write map[reflect.Type]struct{}) {
-	return tt.read, tt.write
+func (tt *testTask) locks() *lockSet {
+	return &lockSet{read: tt.read, write: tt.write, span: testResources}
 }
 
 func (tt *testTask) run(any) error {
@@ -43,7 +42,7 @@ func (tt *testTask) run(any) error {
 }
 
 // blockingTask returns a task that signals when it starts and blocks until released.
-func blockingTask(read, write map[reflect.Type]struct{}) *testTask {
+func blockingTask(read, write []int32) *testTask {
 	return &testTask{
 		read:    read,
 		write:   write,
@@ -52,39 +51,37 @@ func blockingTask(read, write map[reflect.Type]struct{}) *testTask {
 	}
 }
 
-type testResourceR struct{}
-type testResourceA struct{}
-type testResourceB struct{}
-type testResourceW struct{}
+// testResources names the tracks the scheduler tests lock, by the letter each
+// test uses for it.
+const testResources = 4
 
-func testResourceType(name string) reflect.Type {
+func testResourceIndex(name string) int32 {
 	switch name {
 	case "R":
-		return reflect.TypeFor[testResourceR]()
+		return 0
 	case "A":
-		return reflect.TypeFor[testResourceA]()
+		return 1
 	case "B":
-		return reflect.TypeFor[testResourceB]()
+		return 2
 	case "W":
-		return reflect.TypeFor[testResourceW]()
+		return 3
 	default:
 		panic("unknown test resource " + name)
 	}
 }
 
-func set(names ...string) map[reflect.Type]struct{} {
-	m := make(map[reflect.Type]struct{}, len(names))
+func set(names ...string) []int32 {
+	indices := make([]int32, 0, len(names))
 	for _, n := range names {
-		m[testResourceType(n)] = struct{}{}
+		indices = append(indices, testResourceIndex(n))
 	}
-	return m
+	return indices
 }
 
-// schedule runs one task through the coordinator, which is what the engine's
+// schedule runs one task through the scheduler, which is what the engine's
 // runTask does for a task that asks for locks.
 func schedule(s *scheduler, t task) error {
-	read, write := t.locks()
-	return s.execute(t, nil, read, write)
+	return s.execute(t, nil, t.locks())
 }
 
 func startScheduler(t *testing.T) *scheduler {
@@ -170,16 +167,17 @@ func TestScheduler_WaitingWriterBlocksLaterReader(t *testing.T) {
 	go func() { _ = schedule(s, activeReader) }()
 	mustStart(t, activeReader.started, time.Second)
 
-	writer := &lockRequest{write: set("R"), granted: make(chan struct{})}
-	s.acquire <- writer
+	writer := blockingTask(nil, set("R"))
+	go func() { _ = schedule(s, writer) }()
+	mustNotStart(t, writer.started, 50*time.Millisecond)
 	laterReader := blockingTask(set("R"), nil)
 	go func() { _ = schedule(s, laterReader) }()
 	mustNotStart(t, laterReader.started, 50*time.Millisecond)
 
 	close(activeReader.release)
-	mustStart(t, writer.granted, time.Second)
+	mustStart(t, writer.started, time.Second)
 	mustNotStart(t, laterReader.started, 50*time.Millisecond)
-	s.release <- writer
+	close(writer.release)
 	mustStart(t, laterReader.started, time.Second)
 	close(laterReader.release)
 }
@@ -191,16 +189,17 @@ func TestScheduler_UnrelatedRequestPassesBlockedRequest(t *testing.T) {
 	go func() { _ = schedule(s, activeReader) }()
 	mustStart(t, activeReader.started, time.Second)
 
-	writer := &lockRequest{write: set("R"), granted: make(chan struct{})}
-	s.acquire <- writer
+	writer := blockingTask(nil, set("R"))
+	go func() { _ = schedule(s, writer) }()
+	mustNotStart(t, writer.started, 50*time.Millisecond)
 	unrelated := blockingTask(nil, set("B"))
 	go func() { _ = schedule(s, unrelated) }()
 	mustStart(t, unrelated.started, time.Second)
 
 	close(unrelated.release)
 	close(activeReader.release)
-	mustStart(t, writer.granted, time.Second)
-	s.release <- writer
+	mustStart(t, writer.started, time.Second)
+	close(writer.release)
 }
 
 // Writers on different resources must run in parallel.
@@ -288,4 +287,47 @@ func TestScheduler_SingleThreaded(t *testing.T) {
 	close(w.release)
 	mustStart(t, rd.started, time.Second)
 	close(rd.release)
+}
+
+// testOwner records how each of its pooled jobs ended.
+type testOwner struct{ outcomes chan error }
+
+func (o testOwner) jobDone(err error) { o.outcomes <- err }
+
+// A pooled job still waiting for its locks when the scheduler stops is ended
+// with ErrSchedulerStopped, so whoever owns it - a publication being waited on -
+// is never left hanging. The job holding the lock finishes normally.
+func TestScheduler_ShutdownEndsWaitingPooledJobs(t *testing.T) {
+	s := newScheduler()
+	holder := blockingTask(nil, set("R"))
+	waiter := blockingTask(nil, set("R"))
+	owner := testOwner{outcomes: make(chan error, 2)}
+	if err := s.submitBatch([]batchJob{
+		{task: holder, locks: holder.locks()},
+		{task: waiter, locks: waiter.locks()},
+	}, nil, owner); err != nil {
+		t.Fatalf("submitBatch = %v", err)
+	}
+	mustStart(t, holder.started, time.Second)
+
+	s.shutdown()
+	select {
+	case err := <-owner.outcomes:
+		if _, ok := err.(ErrSchedulerStopped); !ok {
+			t.Fatalf("waiting job ended with %v, want ErrSchedulerStopped", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("waiting job was never ended")
+	}
+	mustNotStart(t, waiter.started, 50*time.Millisecond)
+
+	close(holder.release)
+	select {
+	case err := <-owner.outcomes:
+		if err != nil {
+			t.Fatalf("running job ended with %v, want nil", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("running job never finished")
+	}
 }

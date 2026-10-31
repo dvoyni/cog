@@ -28,17 +28,15 @@ type command struct {
 // to acquire, the typed request, and the slot for the typed result. It is both
 // the task the scheduler runs and the invocation handed back to that task.
 type commandContext[TRequest any, TResponse any] struct {
-	engine      *Engine
-	command     *command
-	read, write map[reflect.Type]struct{}
-	execute     Execute[TRequest, TResponse]
-	request     TRequest
-	result      TResponse
+	engine  *Engine
+	command *command
+	lockSet *lockSet
+	execute Execute[TRequest, TResponse]
+	request TRequest
+	result  TResponse
 }
 
-func (c *commandContext[TRequest, TResponse]) locks() (read, write map[reflect.Type]struct{}) {
-	return c.read, c.write
-}
+func (c *commandContext[TRequest, TResponse]) locks() *lockSet { return c.lockSet }
 
 func (c *commandContext[TRequest, TResponse]) run(any) (err error) {
 	cmd := c.command
@@ -62,12 +60,23 @@ func (c *commandContext[TRequest, TResponse]) release() {
 	var zeroRequest TRequest
 	var zeroResponse TResponse
 	c.engine, c.command = nil, nil
-	c.read, c.write, c.execute = nil, nil, nil
+	c.lockSet, c.execute = nil, nil
 	c.request, c.result = zeroRequest, zeroResponse
 }
 
+// jobDone is an asynchronous invocation's outcome: nobody waits for its
+// response, so what went wrong is reported and the invocation is recycled.
+func (c *commandContext[TRequest, TResponse]) jobDone(err error) {
+	engine, cmd := c.engine, c.command
+	c.release()
+	cmd.invocations.Put(c)
+	if err != nil {
+		engine.reportError(shutdownAside(err))
+	}
+}
+
 // dispatch runs one command invocation to completion on the calling goroutine,
-// with read and write as the lock set the scheduler must grant it.
+// with locks as the lock set the scheduler must grant it.
 //
 // It answers with the response alone. What can go wrong here is the kernel's
 // own business — a body that panicked, a scheduler that has stopped — and it is
@@ -75,16 +84,9 @@ func (c *commandContext[TRequest, TResponse]) release() {
 // it that reporting has not already done. A dispatch that failed answers with
 // the zero response.
 func dispatch[TRequest any, TResponse any](
-	engine *Engine, cmd *command,
-	read, write map[reflect.Type]struct{}, request TRequest,
+	engine *Engine, cmd *command, locks *lockSet, request TRequest,
 ) TResponse {
-	invocation := cmd.invocations.Get().(*commandContext[TRequest, TResponse])
-	invocation.engine = engine
-	invocation.command = cmd
-	invocation.read, invocation.write = read, write
-	invocation.execute = cmd.execute.(Execute[TRequest, TResponse])
-	invocation.request = request
-
+	invocation := newInvocation[TRequest, TResponse](engine, cmd, locks, request)
 	err := engine.runTask(invocation, invocation)
 	response := invocation.result
 	invocation.release()
@@ -95,4 +97,28 @@ func dispatch[TRequest any, TResponse any](
 		return zero
 	}
 	return response
+}
+
+// dispatchAsync submits one command invocation as a job of its own and returns
+// at once. A worker runs it under the command's declared locks and hands the
+// outcome back through jobDone, which reports it and recycles the invocation.
+func dispatchAsync[TRequest any, TResponse any](engine *Engine, cmd *command, request TRequest) {
+	invocation := newInvocation[TRequest, TResponse](engine, cmd, &cmd.resources.locks, request)
+	if err := engine.scheduler.submit(invocation.lockSet, workItem{
+		task: invocation, invocation: invocation, owner: invocation,
+	}); err != nil {
+		invocation.jobDone(err)
+	}
+}
+
+func newInvocation[TRequest any, TResponse any](
+	engine *Engine, cmd *command, locks *lockSet, request TRequest,
+) *commandContext[TRequest, TResponse] {
+	invocation := cmd.invocations.Get().(*commandContext[TRequest, TResponse])
+	invocation.engine = engine
+	invocation.command = cmd
+	invocation.lockSet = locks
+	invocation.execute = cmd.execute.(Execute[TRequest, TResponse])
+	invocation.request = request
+	return invocation
 }

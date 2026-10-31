@@ -42,13 +42,17 @@ func (r *registry) fail(err error) {
 
 // finalize validates resources, checks that every declared lock is owned by the
 // locking plugin or one of its declared dependencies, resolves Uses declarations,
-// binds Adapters to the Ports that declared them, and compiles each event's
-// subscription DAG.
+// binds Adapters to the Ports that declared them, compiles each event's
+// subscription DAG, and compiles every lock set for the scheduler.
 // It stops at the first fault and answers with it. The walks below are ordered
 // by type rather than by map iteration, so the first fault a broken
 // composition hits is the same one on every run — which is what the old sort
 // over the joined error messages was really for.
 func (r *registry) finalize(dependencies map[PluginName]map[PluginName]struct{}) error {
+	// Lock sets are compiled however finalization ends, from whatever the maps
+	// hold by then, so a dispatch on a composition that failed part way still
+	// locks what its handler declared.
+	defer r.compileLocks()
 	if r.err != nil {
 		return r.err
 	}
@@ -142,6 +146,58 @@ func (r *registry) resolveUses() error {
 		}
 	}
 	return failure
+}
+
+// compileLocks gives every lock key a dense track index and compiles each
+// handler's set against it. Keys are numbered in type order, which keeps the
+// numbering, and therefore every trace of it, the same on every run. Exclusive
+// keys are numbered with the resources: to the scheduler both are a track.
+func (r *registry) compileLocks() {
+	var accesses []*ResourceAccess
+	for _, id := range sortedTypes(r.commands) {
+		accesses = append(accesses, r.commands[id].resources)
+	}
+	for _, eventType := range sortedTypes(r.subscriptions) {
+		for _, task := range r.subscriptions[eventType] {
+			_, access := task.coupling()
+			accesses = append(accesses, access)
+		}
+	}
+	keys := map[reflect.Type]struct{}{}
+	for _, access := range accesses {
+		for resourceType := range access.read {
+			keys[resourceType] = struct{}{}
+		}
+		for resourceType := range access.write {
+			keys[resourceType] = struct{}{}
+		}
+	}
+	index := make(map[reflect.Type]int32, len(keys))
+	for i, resourceType := range sortedTypes(keys) {
+		index[resourceType] = int32(i)
+	}
+	for _, access := range accesses {
+		access.locks = compileLockSet(index, access.read, access.write)
+	}
+}
+
+func compileLockSet(index map[reflect.Type]int32, read, write map[reflect.Type]struct{}) lockSet {
+	compiled := lockSet{}
+	for resourceType := range read {
+		compiled.read = append(compiled.read, index[resourceType])
+	}
+	for resourceType := range write {
+		compiled.write = append(compiled.write, index[resourceType])
+	}
+	slices.Sort(compiled.read)
+	slices.Sort(compiled.write)
+	if last := len(compiled.read) - 1; last >= 0 {
+		compiled.span = compiled.read[last] + 1
+	}
+	if last := len(compiled.write) - 1; last >= 0 {
+		compiled.span = max(compiled.span, compiled.write[last]+1)
+	}
+	return compiled
 }
 
 // checkCoupling reports every locked resource whose owner the locking plugin did

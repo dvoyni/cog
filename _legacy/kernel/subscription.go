@@ -62,9 +62,7 @@ func (s *Ordering[TEvent]) coupling() (PluginName, *ResourceAccess) {
 	return s.owner, s.resources
 }
 
-func (s *Ordering[TEvent]) locks() (read, write map[reflect.Type]struct{}) {
-	return s.resources.read, s.resources.write
-}
+func (s *Ordering[TEvent]) locks() *lockSet { return &s.resources.locks }
 
 func (s *Ordering[TEvent]) run(invocation any) (err error) {
 	event := invocation.(*eventContext[TEvent])
@@ -96,8 +94,13 @@ type publicationNode struct {
 	dependents []int
 }
 
+// publicationPlan is one event's subscription DAG. nodes are in registration
+// order, which is what Describe reports; jobs are the same subscriptions in
+// dependency order, which is the order a publication submits them in, so every
+// edge a job declares points at a job already submitted.
 type publicationPlan struct {
 	nodes []publicationNode
+	jobs  []batchJob
 }
 
 func buildPublicationPlan(tasks []subscription) (*publicationPlan, []reflect.Type) {
@@ -169,11 +172,11 @@ func buildPublicationPlan(tasks []subscription) (*publicationPlan, []reflect.Typ
 			ready = append(ready, i)
 		}
 	}
-	visited := 0
+	order := make([]int, 0, n)
 	for len(ready) > 0 {
 		node := ready[0]
 		ready = ready[1:]
-		visited++
+		order = append(order, node)
 		for _, dependent := range plan.nodes[node].dependents {
 			remaining[dependent]--
 			if remaining[dependent] == 0 {
@@ -181,14 +184,30 @@ func buildPublicationPlan(tasks []subscription) (*publicationPlan, []reflect.Typ
 			}
 		}
 	}
-	if visited != n {
-		cycle := make([]reflect.Type, 0, n-visited)
+	if len(order) != n {
+		cycle := make([]reflect.Type, 0, n-len(order))
 		for i, count := range remaining {
 			if count > 0 {
 				cycle = append(cycle, tasks[i].orderID())
 			}
 		}
 		return nil, cycle
+	}
+
+	position := make([]int32, n)
+	for at, node := range order {
+		position[node] = int32(at)
+	}
+	plan.jobs = make([]batchJob, n)
+	for at, node := range order {
+		plan.jobs[at].task = tasks[node]
+		plan.jobs[at].locks = tasks[node].locks()
+	}
+	for from := range plan.nodes {
+		for _, to := range plan.nodes[from].dependents {
+			job := &plan.jobs[position[to]]
+			job.after = append(job.after, position[from])
+		}
 	}
 	return plan, nil
 }

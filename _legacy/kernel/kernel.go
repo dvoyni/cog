@@ -85,7 +85,7 @@ func (k Kernel) ForgetReportedErrors[T comparable](match func(T) bool) {
 func (k Kernel) PublishEvent[TEvent any](event TEvent) *Publication {
 	engine := k.engine
 	plan := engine.registry.publications[reflect.TypeFor[TEvent]()]
-	publication := newPublication()
+	publication := newPublication(engine)
 	if plan == nil || len(plan.nodes) == 0 {
 		// An event nobody subscribes to is not a fault, and neither is one whose
 		// plans a failed composition never built: that composition already came
@@ -95,7 +95,7 @@ func (k Kernel) PublishEvent[TEvent any](event TEvent) *Publication {
 	}
 
 	invocation := &eventContext[TEvent]{engine: engine, event: event}
-	go engine.runPublication(plan, invocation, publication)
+	engine.runPublication(plan, invocation, publication)
 	return publication
 }
 
@@ -115,5 +115,5 @@ func (k Kernel) ExecuteCommandAsync[
 		engine.reportError(ErrExecutingUnknownCommand[TCommand]{})
 		return
 	}
-	go dispatch[TRequest, TResponse](engine, cmd, cmd.resources.read, cmd.resources.write, request)
+	dispatchAsync[TRequest, TResponse](engine, cmd, request)
 }
