@@ -2,9 +2,10 @@
 //
 // A Supervisor runs one or more Kernels inside one application. Each Kernel
 // owns its resources and its job graph; kernels share nothing but the
-// Supervisor's worker pool and Logger, and talk to each other only by the
-// Supervisor's Send. Kernels do not manage kernels: only the Supervisor spawns,
-// destroys and quits, and a plugin that must is given it in its config.
+// Supervisor's LogHandler, and reach each other only by publishing into one
+// another through the Supervisor's GetKernel and Broadcast. Kernels do not
+// manage kernels: only the Supervisor spawns, destroys and quits, and a
+// plugin that must is given it in its config.
 //
 // A Plugin registers against a Configurator, declaring resources, tasks and
 // event handlers, and is then started and stopped with its kernel. What one

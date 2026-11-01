@@ -1,56 +1,93 @@
 package kernel
 
-// Supervisor runs the kernels of one application. It owns the worker pool
-// every kernel's jobs run on, the Logger every kernel writes to, routes Send
-// between kernels, and spawns and destroys kernels on demand.
-//
-// Kernels do not manage kernels. A plugin that must spawn, destroy, send or
-// quit is given the Supervisor in its config, and every method here is safe
-// from any goroutine, jobs and handlers included.
-type Supervisor struct{}
+import (
+	"errors"
+	"slices"
+	"sync"
+	"sync/atomic"
 
-// NewSupervisor creates a supervisor with no kernels, logging through logger,
-// or through a new StdLogger if logger is nil.
-func NewSupervisor(logger Logger) *Supervisor { return &Supervisor{} }
+	"github.com/dvoyni/cog/kernel/internal/concurrent"
+)
 
-// Spawn creates a kernel, registers plugins into it in order, handing each the
-// same config, then starts them in the same order, all on the calling
-// goroutine. The kernel is running when Spawn returns, and answers its ID.
-//
-// If any Register or Start fails, the plugins already started are stopped in
-// reverse, nothing of the kernel survives, and Spawn answers the zero
-// KernelID and the failures.
-func (s *Supervisor) Spawn(config any, plugins ...Plugin) (KernelID, error) { return 0, nil }
+// ErrQuitting is what Spawn answers once Quit has been called.
+var ErrQuitting = errors.New("kernel: the supervisor is quitting")
 
-// SpawnSingleThreaded is Spawn for a kernel whose jobs all run one at a time,
-// on one goroutine of its own locked to an OS thread, instead of on the pool.
-// It is for a kernel that wants sequential execution, such as a server
-// simulation. A job still waits for its dependencies, and runs in the order
-// it became ready; locks never contend, since nothing runs alongside it. A
-// task pinned to the main thread still runs there.
+// Supervisor runs the kernels of one application. It spawns and destroys
+// kernels on demand, hands them to each other through GetKernel and
+// Broadcast, runs their pinned jobs on the main thread, and owns the
+// LogHandler every kernel writes to. Each kernel runs its own jobs on
+// goroutines of its own.
 //
-// The thread is the kernel's only goroutine, and ends with the kernel.
-func (s *Supervisor) SpawnSingleThreaded(config any, plugins ...Plugin) (KernelID, error) {
-	return 0, nil
+// Kernels do not manage kernels. A plugin that must spawn, destroy, reach
+// another kernel or quit is given the Supervisor in its config, and every
+// method here is safe from any goroutine, jobs and handlers included.
+type Supervisor struct {
+	logHandler LogHandler
+
+	// kernelsMu guards kernels and spawnOrder. Kernels come and go rarely and
+	// are looked up rarely, so one mutex is enough.
+	kernelsMu sync.Mutex
+	// kernels is every live kernel: added once its plugins have started,
+	// removed as its destroy begins.
+	kernels map[KernelID]*Kernel
+	// spawnOrder is the same kernels in the order they were spawned. It is
+	// replaced on every change, never changed in place, so Broadcast takes it
+	// under kernelsMu and publishes outside, without copying.
+	spawnOrder []*Kernel
+	lastID     atomic.Uint64
+	// quitting is read anywhere, but set only under kernelsMu, so a Spawn that
+	// checks it under kernelsMu before adding its kernel never adds one after
+	// Quit has taken the map.
+	quitting atomic.Bool
+	done     chan struct{}
+
+	// pinned is every pinned job ready to run, in the order kernels handed
+	// them over. mainWake wakes WaitMainThread when one is pushed.
+	pinned   concurrent.Queue[pinnedJob]
+	mainWake chan struct{}
+	// pinnedBatch is TickMainThread's buffer, reused between ticks. Only the
+	// main thread touches it.
+	pinnedBatch []pinnedJob
+}
+
+// pinnedJob is a pinned job of kernel, ready for the main thread.
+type pinnedJob struct {
+	kernel *Kernel
+	job    JobHandle
+}
+
+// WaitMainThread blocks until a pinned job may be pending or Done is closed,
+// and answers false once Done is closed. It may wake with nothing pending, in
+// which case the next TickMainThread returns at once. It lets main idle
+// without spinning a core between ticks.
+func (s *Supervisor) WaitMainThread() bool {
+	select {
+	case <-s.done:
+		return false
+	default:
+	}
+	select {
+	case <-s.mainWake:
+		return true
+	case <-s.done:
+		return false
+	}
 }
 
 // TickMainThread runs every pinned job of every kernel that is pending, on the
-// calling goroutine, which must be the main thread, and returns. It never
-// waits: with nothing pending it returns at once. main calls it in its loop
-// until Done is closed:
+// calling goroutine, which must be the main thread, and returns. It keeps
+// going until none is pending, so a pinned job made ready by one that just
+// ran runs in the same tick. It never waits: with nothing pending it returns
+// at once. main calls it in its loop, parking in WaitMainThread between
+// ticks, until Done is closed:
 //
 //	func init() { runtime.LockOSThread() } // keep main on the main thread
 //
 //	func main() {
 //		s := kernel.NewSupervisor(nil)
 //		// ... spawn kernels
-//		for {
+//		for s.WaitMainThread() {
 //			s.TickMainThread()
-//			select {
-//			case <-s.Done():
-//				return
-//			default:
-//			}
 //		}
 //	}
 //
@@ -58,40 +95,176 @@ func (s *Supervisor) SpawnSingleThreaded(config any, plugins ...Plugin) (KernelI
 // events from its own goroutine, so kernels can tick at different rates and
 // main never waits on any of them. A pinned job nobody ticks waits forever,
 // and so does everything after it.
-func (s *Supervisor) TickMainThread() {}
+func (s *Supervisor) TickMainThread() {
+	for {
+		s.pinnedBatch = s.pinned.Drain(s.pinnedBatch[:0])
+		if len(s.pinnedBatch) == 0 {
+			return
+		}
+		for _, pinned := range s.pinnedBatch {
+			pinned.kernel.runPinned(pinned.job)
+		}
+		// Let removed kernels go rather than keep them alive in the buffer.
+		clear(s.pinnedBatch)
+	}
+}
 
-// GetKernel returns the live kernel id, or nil if there is none. It is how
-// code outside the pool, such as the main loop, publishes into a kernel and
-// waits on its jobs. A plugin that must reach another kernel uses Send, not
-// GetKernel: kernels do not manage kernels.
-func (s *Supervisor) GetKernel(id KernelID) *Kernel { return nil }
+// NewSupervisor creates a supervisor with no kernels, logging through logHandler,
+// or through a new StdLogger if logHandler is nil.
+func NewSupervisor(logHandler LogHandler) *Supervisor {
+	if logHandler == nil {
+		logHandler = &StdLogger{}
+	}
+	return &Supervisor{
+		logHandler: logHandler,
+		kernels:    map[KernelID]*Kernel{},
+		done:       make(chan struct{}),
+		mainWake:   make(chan struct{}, 1),
+	}
+}
 
-// Destroy asks kernel id to stop and returns at once. The kernel stops its
-// plugins, finishes the jobs it already has, drops what is sent to it from
-// then on, and is removed. Destroying an id that is not live does nothing.
-// Because it never waits, a kernel's own job may destroy it.
-func (s *Supervisor) Destroy(id KernelID) {}
-
-// Send publishes event in kernel to, asynchronously. It is the whole of
-// interop between kernels: event is copied across and published there like
-// any event of that kernel's own, so it must not refer to anything another
-// kernel owns. Sending to an id that is not live is logged; an event that
-// arrives after its target has begun stopping is dropped.
+// Spawn creates a kernel, registers plugins into it in order, handing each the
+// same config, then starts them in the same order, all on the calling
+// goroutine. The kernel is running when Spawn returns, and answers its ID.
 //
-// An event nothing in the target kernel subscribes to is dropped silently.
-// Each kernel has one inbox per event type it subscribes to, made at
-// registration, so sending never allocates.
+// A singleThreaded kernel runs all its jobs one at a time, on one goroutine of
+// its own locked to an OS thread, which ends with the kernel. It is for a
+// kernel that wants sequential execution, such as a server simulation. A job
+// still waits for its dependencies, and runs in the order it became ready;
+// locks never contend, since nothing runs alongside it. A task pinned to the
+// main thread still runs there, and so may run alongside the kernel's own
+// thread.
 //
-// Send copies event as it is and does not look inside it. A field that means
-// something only in the sending kernel, such as a JobHandle, arrives
-// meaningless, and keeping such fields out is the sender's business.
-func (s *Supervisor) Send[E any](to KernelID, event E) {}
+// The kernel becomes live, reachable by GetKernel, Broadcast and Destroy,
+// once every Start has returned. Before then it is not live: GetKernel
+// answers nil for it, and a Destroy does nothing.
+//
+// If any Init or Start fails, the plugins already started are stopped in
+// reverse, Spawn waits for every job they scheduled to finish, the plugins
+// already initialized are destroyed in reverse, nothing of the kernel
+// survives, and Spawn answers the zero KernelID and the first failure. A
+// Spawn still running when Quit is called does the same once its plugins have
+// started, and answers ErrQuitting.
+func (s *Supervisor) Spawn(config any, singleThreaded bool, plugins ...Plugin) (KernelID, error) {
+	if s.quitting.Load() {
+		return 0, ErrQuitting
+	}
+	id := KernelID(s.lastID.Add(1))
+	k := newKernel(s, id, config, singleThreaded, plugins)
+	if err := k.init(); err != nil {
+		return 0, err
+	}
+
+	s.kernelsMu.Lock()
+	if s.quitting.Load() {
+		s.kernelsMu.Unlock()
+		k.destroy()
+		return 0, ErrQuitting
+	}
+	s.kernels[id] = k
+	// Appended to a clipped slice, so the append copies and a Broadcast still
+	// holding the old one is unaffected.
+	s.spawnOrder = append(slices.Clip(s.spawnOrder), k)
+	s.kernelsMu.Unlock()
+	return id, nil
+}
+
+// GetKernel returns the live kernel id, or nil if there is none: if id was
+// never spawned, is still spawning, or is being destroyed. It is how code
+// outside the kernels, such as the main loop, publishes into a kernel and
+// waits on its jobs, and how a plugin reaches another kernel.
+//
+// Publishing into another kernel is the whole of interop between kernels: the
+// event is copied in and published there like any event of its own, with its
+// handlers on the calling goroutine and its jobs in that kernel. It must not
+// refer to anything the publishing kernel owns: a field such as a JobHandle
+// arrives meaningless, and keeping such fields out is the publisher's
+// business. A handler that publishes back in reply recurses, so an exchange
+// between kernels needs a condition that ends it.
+func (s *Supervisor) GetKernel(id KernelID) *Kernel {
+	s.kernelsMu.Lock()
+	defer s.kernelsMu.Unlock()
+	return s.kernels[id]
+}
+
+// Broadcast publishes event in every live kernel, the calling kernel's own
+// included, one after another in spawn order, with Kernel.Publish: each
+// kernel's handlers run on the calling goroutine, and Broadcast returns once
+// the last have. A kernel spawned or destroyed meanwhile may or may not get
+// it. Kernels where nothing subscribes to E drop it silently.
+//
+// The rules of GetKernel's interop hold for every kernel: event must not
+// refer to anything one kernel owns. Broadcast allocates nothing.
+func (s *Supervisor) Broadcast[E any](event E) {
+	s.kernelsMu.Lock()
+	kernels := s.spawnOrder
+	s.kernelsMu.Unlock()
+	// Published outside the lock, so handlers may spawn, destroy and
+	// broadcast. A kernel whose destroy begins meanwhile publishes nothing
+	// once its plugins have stopped.
+	for _, k := range kernels {
+		k.Publish(event)
+	}
+}
+
+// Destroy asks kernel id to stop and returns at once. The kernel stops being
+// live, stops its plugins in reverse, finishes the jobs it already has,
+// including those its plugins' Stop scheduled, and is gone. Destroying an id
+// that is not live does nothing. Because it never waits, a kernel's own job
+// may destroy it.
+func (s *Supervisor) Destroy(id KernelID) {
+	s.kernelsMu.Lock()
+	k := s.kernels[id]
+	if k != nil {
+		delete(s.kernels, id)
+		s.spawnOrder = slices.DeleteFunc(slices.Clone(s.spawnOrder), func(other *Kernel) bool { return other == k })
+	}
+	s.kernelsMu.Unlock()
+	if k != nil {
+		go k.destroy()
+	}
+}
+
+// pushPinned hands pinned job of kernel to the main thread, and wakes
+// WaitMainThread.
+func (s *Supervisor) pushPinned(kernel *Kernel, job JobHandle) {
+	s.pinned.Push(pinnedJob{kernel: kernel, job: job})
+	select {
+	case s.mainWake <- struct{}{}:
+	default: // a wake is already pending
+	}
+}
 
 // Quit ends the application: it destroys every live kernel, refuses any
-// further Spawn, and closes Done once every kernel has been removed. It is
-// safe from any goroutine and safe to call twice.
-func (s *Supervisor) Quit() {}
+// further Spawn, and closes Done once those kernels are gone. It returns at
+// once, so a kernel's own job may call it, and is safe to call twice. The
+// supervisor lives until Quit, with or without kernels.
+//
+// A Spawn already running destroys its kernel once its plugins have started,
+// and answers ErrQuitting. Done does not wait for that kernel, nor for one a
+// Destroy had already begun stopping.
+func (s *Supervisor) Quit() {
+	s.kernelsMu.Lock()
+	if s.quitting.Load() {
+		s.kernelsMu.Unlock()
+		return
+	}
+	s.quitting.Store(true)
+	kernels := s.kernels
+	s.kernels = map[KernelID]*Kernel{}
+	s.spawnOrder = nil
+	s.kernelsMu.Unlock()
+
+	go func() {
+		var wait sync.WaitGroup
+		for _, k := range kernels {
+			wait.Go(k.destroy)
+		}
+		wait.Wait()
+		close(s.done)
+	}()
+}
 
 // Done is closed once Quit has finished. A kernel destroyed on its own, even
 // the last one, does not close it.
-func (s *Supervisor) Done() <-chan struct{} { return nil }
+func (s *Supervisor) Done() <-chan struct{} { return s.done }
