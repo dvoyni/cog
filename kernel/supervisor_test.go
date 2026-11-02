@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"errors"
+	"maps"
 	"slices"
 	"sync"
 	"testing"
@@ -156,4 +157,27 @@ func TestConcurrentSpawnDestroyQuit(t *testing.T) {
 
 func TestSpawnWithNoWorkersPanics(t *testing.T) {
 	expectPanic(t, "no workers", func() { NewSupervisor(nil).Spawn(nil, 0) })
+}
+
+func TestSpawnHandsEachPluginItsPartOfConfig(t *testing.T) {
+	s := NewSupervisor(nil)
+	t.Cleanup(s.Quit)
+	received := map[PluginName]any{}
+	receiver := func(name PluginName) hookPlugin {
+		return hookPlugin{name: name, receive: func(config any) { received[name] = config }}
+	}
+	config := map[PluginName]any{"physics": 1, "render": "vulkan"}
+	if _, err := s.Spawn(config, 2, receiver("physics"), receiver("render"), receiver("audio")); err != nil {
+		t.Fatal(err)
+	}
+	want := map[PluginName]any{"physics": 1, "render": "vulkan", "audio": nil}
+	if !maps.Equal(received, want) {
+		t.Fatalf("plugins received %v, want %v", received, want)
+	}
+}
+
+func TestSpawnWithTwoPluginsOfOneNamePanics(t *testing.T) {
+	expectPanic(t, "two plugins of one name", func() {
+		NewSupervisor(nil).Spawn(nil, 2, hookPlugin{name: "physics"}, hookPlugin{name: "physics"})
+	})
 }

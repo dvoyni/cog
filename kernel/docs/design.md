@@ -53,7 +53,7 @@ Supervisor ── lifetime, GetKernel and Broadcast, LogHandler
 | `*Task[A, B]`| Registered code with pointer-free arg `A` and pointer-free result `B`; returned by `RegisterTask`. |
 | `Job[T]`     | One scheduled run answering `T`; what `ScheduleAfter` feeds from. |
 | `JobHandle`  | Untyped job handle, `Job[T].Handle()`; what dependencies are declared with. |
-| `Plugin`     | Interface: `Init(configurator, config)`, `Start(kernel)`, `Stop(kernel)`, `Destroy()`. |
+| `Plugin`     | Interface: `Name()`, `Init(configurator, config)`, `Start(kernel)`, `Stop(kernel)`, `Destroy()`. |
 
 ## Supervisor
 
@@ -89,8 +89,8 @@ jobs and handlers.
   the next.
 
 A kernel's config is given to `Spawn`, its constructor:
-`Spawn(config, workerCount, plugins...) (KernelID, error)`. Plugins cannot
-change it. `workerCount` is how many goroutines run the kernel's jobs, chosen
+`Spawn(config map[PluginName]any, workerCount, plugins...) (KernelID, error)`.
+Plugins cannot change it. `workerCount` is how many goroutines run the kernel's jobs, chosen
 by the caller: `runtime.GOMAXPROCS(0)` keeps every CPU busy, and 1 runs the
 kernel sequentially (see Sequential kernels). Below 1 is a composition error
 and panics.
@@ -118,9 +118,12 @@ silently.
 
 ## Plugins
 
-`Plugin` is an interface with `Init(configurator, config)`, `Start(kernel)`,
-`Stop(kernel)` and `Destroy()`. It has no name and no dependency list:
+`Plugin` is an interface with `Name()`, `Init(configurator, config)`,
+`Start(kernel)`, `Stop(kernel)` and `Destroy()`. It has no dependency list:
 
+- **Name** is a `PluginName`, unique among one kernel's plugins; two plugins
+  of one name are a composition error and panic in `Spawn`. It keys the
+  plugin's part of the config.
 - **Order** is the order of the plugins passed to `Spawn`. A plugin
   that needs another's resource during registration is listed after it and calls
   `Configurator.Resource[T]`. `Start` runs in that order, `Stop` in reverse.
@@ -128,8 +131,9 @@ silently.
   acquires, such as an implementation it installs with `InitResource`,
   `Destroy` releases. `Destroy` runs after the kernel's last job, for every
   plugin whose `Init` succeeded, started or not.
-- **Config** is one value per kernel, given to `Spawn` and handed to every
-  plugin's `Init`. Each plugin takes from it what it needs.
+- **Config** is a `map[PluginName]any` per kernel, given to `Spawn`. Each
+  plugin's `Init` is handed only its own part, the value under its `Name`, or
+  nil if there is none.
 - **Ports and Adapters are gone.** A slot declares what it needs as a resource
   of interface type, and the extension that fills it calls
   `InitResource[gfx.Backend](impl)`. Any number of contributors is a resource

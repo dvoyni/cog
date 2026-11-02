@@ -12,12 +12,19 @@ import (
 
 // hookPlugin is a Plugin running whichever of its hooks are set.
 type hookPlugin struct {
+	name    PluginName
 	init    func(c *Configurator)
+	receive func(config any)
 	stop    func(k *Kernel)
 	destroy func()
 }
 
+func (p hookPlugin) Name() PluginName { return p.name }
+
 func (p hookPlugin) Init(c *Configurator, config any) error {
+	if p.receive != nil {
+		p.receive(config)
+	}
 	if p.init != nil {
 		p.init(c)
 	}

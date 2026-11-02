@@ -10,7 +10,9 @@ import "sync"
 // the job has already finished.
 //
 // Its buffer is a ring that only grows, so once it has held its peak a Queue
-// allocates nothing. The zero Queue is empty and open.
+// allocates nothing. A slot is cleared as its item is taken, so the ring
+// keeps nothing a pointer in T refers to alive. The zero Queue is empty and
+// open.
 type Queue[T any] struct {
 	mutex  sync.Mutex
 	ring   []T
@@ -44,6 +46,8 @@ func (q *Queue[T]) Pop() (T, bool) {
 		return zero, false
 	}
 	item := q.ring[q.head]
+	var zero T
+	q.ring[q.head] = zero
 	q.head = (q.head + 1) % len(q.ring)
 	q.length--
 	return item, true
@@ -91,7 +95,8 @@ func (q *Queue[T]) Reset() {
 	q.head, q.length, q.closed = 0, 0, false
 }
 
-// take moves everything queued onto into. The caller holds mutex.
+// take moves everything queued onto into, clearing the slots it took. The
+// caller holds mutex.
 func (q *Queue[T]) take(into []T) []T {
 	if q.length == 0 {
 		return into
@@ -99,9 +104,12 @@ func (q *Queue[T]) take(into []T) []T {
 	end := q.head + q.length
 	if end <= len(q.ring) {
 		into = append(into, q.ring[q.head:end]...)
+		clear(q.ring[q.head:end])
 	} else {
 		into = append(into, q.ring[q.head:]...)
 		into = append(into, q.ring[:end-len(q.ring)]...)
+		clear(q.ring[q.head:])
+		clear(q.ring[:end-len(q.ring)])
 	}
 	q.head, q.length = 0, 0
 	return into

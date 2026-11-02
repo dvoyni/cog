@@ -125,13 +125,14 @@ func NewSupervisor(logHandler LogHandler) *Supervisor {
 	}
 }
 
-// Spawn creates a kernel, registers plugins into it in order, handing each the
-// same config, then starts them in the same order, all on the calling
-// goroutine. The kernel is running when Spawn returns, and answers its ID.
+// Spawn creates a kernel, registers plugins into it in order, handing each its
+// part of config, the value under its Name, then starts them in the same
+// order, all on the calling goroutine. The kernel is running when Spawn
+// returns, and answers its ID.
 //
 // The kernel runs its jobs on workerCount goroutines of its own, which end
 // with the kernel; runtime.GOMAXPROCS(0) keeps every CPU busy. A workerCount
-// below 1 panics.
+// below 1, or two plugins of one name, panics.
 //
 // A workerCount of 1 runs every job one at a time, for a kernel that wants
 // sequential execution, such as a server simulation. A job still waits for
@@ -149,9 +150,16 @@ func NewSupervisor(logHandler LogHandler) *Supervisor {
 // survives, and Spawn answers the zero KernelID and the first failure. A
 // Spawn still running when Quit is called does the same once its plugins have
 // started, and answers ErrQuitting.
-func (s *Supervisor) Spawn(config any, workerCount int, plugins ...Plugin) (KernelID, error) {
+func (s *Supervisor) Spawn(config map[PluginName]any, workerCount int, plugins ...Plugin) (KernelID, error) {
 	if workerCount < 1 {
 		panic(fmt.Sprintf("kernel: spawning a kernel with %d workers", workerCount))
+	}
+	for i, plugin := range plugins {
+		for _, earlier := range plugins[:i] {
+			if earlier.Name() == plugin.Name() {
+				panic(fmt.Sprintf("kernel: spawning a kernel with two plugins named %q", plugin.Name()))
+			}
+		}
 	}
 	if s.quitting.Load() {
 		return 0, ErrQuitting

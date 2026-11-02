@@ -1,5 +1,9 @@
 package kernel
 
+// PluginName names a plugin within a kernel, and keys its part of the
+// kernel's config.
+type PluginName string
+
 // Plugin is a statically linked unit of functionality installed into a kernel.
 // What it offers other plugins is a resource: a struct, or an interface
 // another plugin fills.
@@ -7,9 +11,13 @@ package kernel
 // Init and Destroy are a pair, as Start and Stop are: whatever Init acquires,
 // such as an implementation it installs with InitResource, Destroy releases.
 type Plugin interface {
+	// Name returns the plugin's name, unique among the plugins of one kernel.
+	Name() PluginName
+
 	// Init declares the plugin's resources, tasks and handlers. It runs once,
-	// in the order the plugins were given to Spawn, with the config Spawn was
-	// given. A plugin that needs another's resource is given after it. An Init
+	// in the order the plugins were given to Spawn, with the plugin's part of
+	// the config Spawn was given: the value under its Name, or nil if there is
+	// none. A plugin that needs another's resource is given after it. An Init
 	// that fails destroys the plugins already initialized, in reverse, and the
 	// spawn fails.
 	Init(configurator *Configurator, config any) error

@@ -31,8 +31,8 @@ type Kernel struct {
 	// plugins is the order Init and Start ran in; Stop and Destroy run it in
 	// reverse.
 	plugins []Plugin
-	// config is what every plugin's Init was handed.
-	config any
+	// config holds each plugin's part by its name, which its Init is handed.
+	config map[PluginName]any
 	// workerCount is how many goroutines run k's jobs.
 	workerCount int
 	// resources holds every resource by its type. Only Init adds to it, so it
@@ -108,9 +108,9 @@ type resource struct {
 }
 
 // newKernel creates kernel id of supervisor, logging through supervisor's
-// LogHandler, with the config each plugin is handed, running its jobs on
-// workerCount workers, and plugins to register in order.
-func newKernel(supervisor *Supervisor, id KernelID, config any, workerCount int, plugins []Plugin) *Kernel {
+// LogHandler, with the config each plugin is handed its part of, running its
+// jobs on workerCount workers, and plugins to register in order.
+func newKernel(supervisor *Supervisor, id KernelID, config map[PluginName]any, workerCount int, plugins []Plugin) *Kernel {
 	return &Kernel{
 		supervisor:  supervisor,
 		id:          id,
@@ -191,7 +191,7 @@ func (k *Kernel) Logger() *Logger {
 // through LogErr, and answers that first failure.
 func (k *Kernel) init() error {
 	for i, plugin := range k.plugins {
-		if err := plugin.Init(&Configurator{kernel: k}, k.config); err != nil {
+		if err := plugin.Init(&Configurator{kernel: k}, k.config[plugin.Name()]); err != nil {
 			for initialized := i - 1; initialized >= 0; initialized-- {
 				if err := k.plugins[initialized].Destroy(); err != nil {
 					k.logger.LogErr(fmt.Errorf("kernel: plugin %d (%T) failed to destroy: %w", initialized, k.plugins[initialized], err))

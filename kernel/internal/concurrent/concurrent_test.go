@@ -129,6 +129,27 @@ func TestQueueIsFIFOAcrossGrowth(t *testing.T) {
 	}
 }
 
+func TestQueueClearsTakenSlots(t *testing.T) {
+	q := &Queue[*int]{}
+	for range 10 {
+		q.Push(new(int))
+	}
+	for range 10 {
+		q.Pop()
+	}
+	// Pushed past the end of the ring, so the Drain below wraps.
+	for range 12 {
+		q.Push(new(int))
+	}
+	q.Pop()
+	q.Drain(nil)
+	for i, item := range q.ring {
+		if item != nil {
+			t.Fatalf("ring slot %d still holds a taken item", i)
+		}
+	}
+}
+
 func TestQueueCloseRefusesPushes(t *testing.T) {
 	q := &Queue[uint32]{}
 	q.Push(1)
