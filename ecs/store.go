@@ -1,7 +1,6 @@
 package ecs
 
 import (
-	"reflect"
 	"unsafe"
 
 	"github.com/dvoyni/cog/kernel"
@@ -32,7 +31,7 @@ var zeroBase byte
 // moves to the tail, after the live rows, keeping its value and shadow for
 // observers until the reset drops it.
 type store struct {
-	component componentInfo
+	component ComponentInfo
 	// rowByIndex maps an entity index to its dense row plus 1; 0 is no row.
 	// A row in the tail stays linked, so a re-add finds its shadow.
 	rowByIndex  indexTable[uint32]
@@ -76,12 +75,7 @@ type storeOf[W WorldID, T any] struct {
 
 func newStoreOf[W WorldID, T any](id ComponentID) *storeOf[W, T] {
 	s := &storeOf[W, T]{}
-	s.component = componentInfo{
-		ID:    id,
-		Type:  reflect.TypeFor[T](),
-		Size:  unsafe.Sizeof(*new(T)),
-		Align: unsafe.Alignof(*new(T)),
-	}
+	s.component = makeComponentInfo[T](id)
 	s.newChunk = func() unsafe.Pointer { return unsafe.Pointer(new([rowsPerChunk]T)) }
 	s.lockRead = func(access *kernel.Access) { access.Read[*storeOf[W, T]]() }
 	s.lockWrite = func(access *kernel.Access) { access.Write[*storeOf[W, T]]() }
@@ -138,29 +132,16 @@ func (s Store[W, T]) Write(e Entity) *T {
 // Add gives e value as its T, replacing the one it has, and reports whether
 // e is alive.
 func (s Store[W, T]) Add(e Entity, value T) bool {
-	if !s.world.alive(e) {
-		return false
-	}
-	row, ok := s.store.row(e)
+	row, ok := s.world.addComponent(e, s.store)
 	if ok {
-		s.store.markChanged(row)
-	} else {
-		row = s.store.add(e)
-		maskSet(&s.world.entitySlots.at(e.index()).componentMask, s.store.component.ID)
+		*(*T)(s.store.address(row)) = value
 	}
-	*(*T)(s.store.address(row)) = value
-	return true
+	return ok
 }
 
 // Remove removes e's T, and reports whether it had one.
 func (s Store[W, T]) Remove(e Entity) bool {
-	row, ok := s.store.row(e)
-	if !ok {
-		return false
-	}
-	s.store.remove(e, row)
-	maskUnset(&s.world.entitySlots.at(e.index()).componentMask, s.store.component.ID)
-	return true
+	return s.world.removeComponent(e, s.store)
 }
 
 // Declare declares a read on T's store and on world W.

@@ -3,6 +3,7 @@ package ecs
 import (
 	"fmt"
 	"reflect"
+	"unsafe"
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/kernel/container"
@@ -13,9 +14,10 @@ import (
 // same plugins.
 type ComponentID uint32
 
-// componentInfo is what the registry keeps of a component type, for code
-// that works on rows without the type.
-type componentInfo struct {
+// ComponentInfo is what the registry keeps of a component type, for code
+// that works on rows as bytes without the type, such as a serializer. It
+// keeps nothing about fields: a consumer builds its own view from Type.
+type ComponentInfo struct {
 	ID    ComponentID
 	Type  reflect.Type
 	Size  uintptr
@@ -46,4 +48,14 @@ func RegisterComponent[W WorldID, T any](configurator *kernel.Configurator) Comp
 	w.stores = append(w.stores, &s.store)
 	w.storesByType[t] = &s.store
 	return s.component.ID
+}
+
+// makeComponentInfo describes component type T, registered as id.
+func makeComponentInfo[T any](id ComponentID) ComponentInfo {
+	return ComponentInfo{
+		ID:    id,
+		Type:  reflect.TypeFor[T](),
+		Size:  unsafe.Sizeof(*new(T)),
+		Align: unsafe.Alignof(*new(T)),
+	}
 }

@@ -46,10 +46,15 @@ type harness struct {
 // spawn spawns a kernel of the ECS plugin and a test plugin whose Init runs
 // init after registering the world game.
 func spawn(t testing.TB, init func(c *kernel.Configurator)) *harness {
+	return spawnWorkers(t, 4, init)
+}
+
+// spawnWorkers is spawn with workers workers.
+func spawnWorkers(t testing.TB, workers int, init func(c *kernel.Configurator)) *harness {
 	h := &harness{}
 	s := kernel.NewSupervisor(nil)
 	t.Cleanup(s.Quit)
-	id, err := s.Spawn(nil, 4, NewPlugin(), testPlugin{init: func(c *kernel.Configurator) {
+	id, err := s.Spawn(nil, workers, NewPlugin(), testPlugin{init: func(c *kernel.Configurator) {
 		RegisterWorld[game](c, WorldOptions{LastIndex: 1<<20 - 1, Entities: 64})
 		c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event runEvent) (runEvent, kernel.JobHandle) {
 			return event, h.schedule(ex)

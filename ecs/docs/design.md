@@ -7,7 +7,7 @@ knows nothing about networking, rendering or any other consumer: those build
 on the generic pieces here (type-erased row access, change detection, command
 buffers).
 
-Status: agreed; steps 1 to 4 of the [Work order](#work-order) are built.
+Status: agreed; steps 1 to 5 of the [Work order](#work-order) are built.
 
 ## Constraints
 
@@ -133,10 +133,11 @@ Kernel
   reads; the `*T` / `T` rule is for query terms only. The world and command
   buffers are unexported resources too, reached only through handles:
   `World`, `CommandBuffer`, `CommandSink`.
-- **Erased metadata.** The registry keeps each component's size, alignment and
-  field offsets (from reflection, at registration), for consumers that work
-  on rows as bytes. It keeps no meaning for fields: no ranges, no precision,
-  no flags.
+- **Erased metadata.** The registry keeps each component's `reflect.Type`,
+  size and alignment, for consumers that work on rows as bytes. It keeps
+  nothing about fields: a consumer that needs a field view (a serializer, the
+  network layer) builds its own from the type, once, with whatever meaning
+  it gives fields.
 
 ## Locking
 
@@ -151,6 +152,14 @@ Kernel
   read a row as bytes, write it, add a component from bytes, spawn with a
   mask and the bytes of each component. A consumer that serializes or mirrors
   a world (networking, saving) is a system holding the barrier.
+- **`World` is typed and raw.** Typed: `Has[T](e)`, `Get[T](e)`,
+  `Write[T](e)` (marks changed), `Add[T](e, v)`, `Remove[T](e)`, each finding
+  `T`'s store by a map lookup, for barrier work rather than hot loops. Raw,
+  by `ComponentID`: `ReadRaw(e, id)`, `WriteRaw(e, id)`, `AddRaw(e, id,
+  bytes)`, `RemoveRaw(e, id)`, `SpawnRaw(mask, values)` and
+  `CreateAtRaw(e, mask, values)`, whose values are each component's bytes in
+  ascending `ComponentID` order. `ComponentCount`, `Component(id)`,
+  `ComponentID[T]()` and `ComponentMask(e)` describe the world.
 - **Outside the barrier,** a system holds what its parameters declare:
   - a query's `*T` term writes `T`'s store, a `T` term reads it;
   - `Store[W, T]` writes it, `Lookup[W, T]` reads it;
@@ -216,7 +225,7 @@ c.move = configurator.RegisterTask2(move)
   })
   ```
 - **No reflection on the hot path.** Reflection runs at registration only
-  (term modes, field offsets). The body is a direct call with values bound
+  (term modes). The body is a direct call with values bound
   once.
 - **A system is a task.** It is scheduled, depended on and fed like any
   other. Ordering systems is ordering jobs.
@@ -338,19 +347,23 @@ func commitAi(k *kernel.Kernel, _ kernel.NoArg, commit ecs.CommandSink[Game, AiC
 - **Producers read the buffer.** `CommandBuffer[W, Tag]` declares a read on it, so
   producers run in parallel. Each system taking it gets its own **lane** at
   registration and appends there. Two jobs of one read-only system may share
-  a lane at once, so an append takes the lane's uncontended `TryLock`; their
-  records then interleave.
+  a lane at once, so an append takes the lane's mutex, uncontended but for
+  that case; their records then interleave.
 - **The commit writes the buffer and holds the barrier.** The commit is a
   system the user writes, and is one call: `commit.Commit()`.
   `CommandSink[W, Tag]` declares the write on the buffer and on the world,
   so any record, structural or not, can be applied.
 - **Records:** `Reserve`, `Spawn`, `Despawn`, `Add[T]`, `Set[T]`, `Remove[T]`.
-  A record is a header (op, entity, component, size) and the value's bytes,
-  appended to the lane's chunked buffer.
+  A record is a header (op, entity, component, where its value starts) in
+  one chunked array, and the value's bytes in another, each value starting
+  at a word.
 - **Order.** Despawns of every lane first, then the other records in lane
   order (registration order) and sequence order. A record on an entity not
-  alive is dropped and counted. `Add` adds or replaces, `Set` replaces only,
-  `Remove` of a component the entity lacks does nothing.
+  alive is dropped, and so is a `Spawn` of an entity that is not a
+  reservation still waiting (its index holds a live entity, or it is not the
+  generation the index hands out next); `Commit` answers how many were.
+  `Add` adds or replaces, `Set` replaces only, `Remove` of a component the
+  entity lacks does nothing.
 - **Commits go through the same row-state path** as direct writes, so
   observers see committed changes.
 - **Reservations** come from one atomic cursor over the free list, under a
@@ -451,7 +464,7 @@ Each step ends with its tests passing under `go test -race`.
    `ObservationReset[W]`. A property test against a reference model.
 5. **Commands.** `RegisterCommandBuffer`, `CommandBuffer[W, Tag]`, lanes,
    `CommandSink[W, Tag]`, type-erased row access under the barrier, spawning from a mask
-   and bytes, field offsets in the registry. A property test of buffered changes from several systems, and
+   and bytes. A property test of buffered changes from several systems, and
    same results with one worker and many.
 6. **Refs.** Designed first, then built.
 7. **Benchmarks.** Iteration, change detection, commits; measured against
