@@ -38,7 +38,7 @@ module (Go 1.27) and depends on nothing but the standard library.
   a kernel, and are started and stopped with it. Each has a `Name`, and the
   kernel's config is a `map[PluginName]any` of which each plugin gets only
   its own part.
-- A **task** is the only code that touches resources. Its declare function
+- A **task** is the only code that touches resources. Its constructor
   requests resource handles, and those requests are its locks.
 - Handlers schedule **jobs** (runs of tasks) when an event is published.
 

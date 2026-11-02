@@ -5,9 +5,9 @@ import (
 	"reflect"
 )
 
-// Access is handed to a task's declare function while RegisterTask runs.
+// Access is handed to a task's constructor while RegisterTask runs.
 // Requesting a handle from it is what declares the matching lock, so binding
-// and declaring cannot drift apart. It is invalid once the declare function
+// and declaring cannot drift apart. It is invalid once the constructor
 // returns; the handles it gave out stay valid for the kernel's life.
 type Access struct {
 	kernel *Kernel
@@ -51,7 +51,7 @@ func (a *Access) Write[T any]() Write[T] {
 // this kernel's; it is a composition error otherwise, and panics.
 func (a *Access) Use[A, B any](task *Task[A, B]) func(kernel *Kernel, arg A) B {
 	if a.kernel == nil {
-		panic("kernel: an Access used after its declare function returned")
+		panic("kernel: an Access used after its constructor returned")
 	}
 	if task == nil || task.kernel != a.kernel {
 		panic("kernel: using a task that is not this kernel's")
@@ -69,7 +69,7 @@ func (a *Access) Use[A, B any](task *Task[A, B]) func(kernel *Kernel, arg A) B {
 // resource returns resource T, panicking if it is not initialized.
 func (a *Access) resource[T any]() *resource {
 	if a.kernel == nil {
-		panic("kernel: an Access used after its declare function returned")
+		panic("kernel: an Access used after its constructor returned")
 	}
 	t := reflect.TypeFor[T]()
 	r, ok := a.kernel.resources[t]
@@ -99,6 +99,11 @@ type Read[T any] struct {
 	value *T
 }
 
+// Declare is access.Read[T](), for code that builds a constructor from
+// handle types, such as a wrapper filling a function's parameters: it is
+// called on the zero handle and returns the bound one.
+func (Read[T]) Declare(access *Access) Read[T] { return access.Read[T]() }
+
 // Get reads the resource. It is valid only while the owning job runs.
 func (r Read[T]) Get() T { return *r.value }
 
@@ -107,6 +112,9 @@ func (r Read[T]) Get() T { return *r.value }
 type Write[T any] struct {
 	value *T
 }
+
+// Declare is access.Write[T](), as Read.Declare is access.Read[T]().
+func (Write[T]) Declare(access *Access) Write[T] { return access.Write[T]() }
 
 // Get reads the resource. It is valid only while the owning job runs.
 func (w Write[T]) Get() T { return *w.value }

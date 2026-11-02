@@ -67,16 +67,16 @@ func (c *Configurator) Resource[T any]() (T, bool) {
 }
 
 // RegisterTask registers a task of this kernel and returns it for
-// scheduling. declare runs once, here: it requests from its Access the
+// scheduling. constructor runs once, here: it requests from its Access the
 // handles the body uses, which declares the task's locks, and returns the
 // body, which closes over those handles. A and B have no size limit.
 //
-// It is a composition error, and panics, for declare or the body it returns
-// to be nil, for A or B not to be pointer-free, or for declare to break a
-// rule of Access.
-func (c *Configurator) RegisterTask[A, B any](declare func(access *Access) TaskBody[A, B]) *Task[A, B] {
-	if declare == nil {
-		panic("kernel: registering a task with a nil declare function")
+// It is a composition error, and panics, for constructor or the body it
+// returns to be nil, for A or B not to be pointer-free, or for constructor to
+// break a rule of Access.
+func (c *Configurator) RegisterTask[A, B any](constructor TaskConstructorFunc[A, B]) *Task[A, B] {
+	if constructor == nil {
+		panic("kernel: registering a task with a nil constructor")
 	}
 	for _, t := range [2]reflect.Type{reflect.TypeFor[A](), reflect.TypeFor[B]()} {
 		if !container.IsPointerFree(t) {
@@ -84,10 +84,10 @@ func (c *Configurator) RegisterTask[A, B any](declare func(access *Access) TaskB
 		}
 	}
 	access := &Access{kernel: c.kernel}
-	body := declare(access)
+	body := constructor(access)
 	access.kernel = nil
 	if body == nil {
-		panic("kernel: a task's declare function returned a nil body")
+		panic("kernel: a task's constructor returned a nil body")
 	}
 	task := &Task[A, B]{
 		kernel: c.kernel,

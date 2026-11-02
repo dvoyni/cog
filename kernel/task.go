@@ -8,7 +8,12 @@ import (
 	"github.com/dvoyni/cog/kernel/container"
 )
 
-// TaskBody is a task's body: what its declare function returns once it has
+// TaskConstructorFunc is what RegisterTask takes: it runs once, at
+// registration, requests from access the handles its body uses, which
+// declares the task's locks, and returns the body.
+type TaskConstructorFunc[A, B any] func(access *Access) TaskBody[A, B]
+
+// TaskBody is a task's body: what its constructor returns once it has
 // requested the handles the body uses. It closes over those handles, and is
 // created once, at registration, so running it allocates nothing:
 //

@@ -30,7 +30,7 @@ Supervisor ── lifetime, GetKernel and Broadcast, LogHandler
 | `Kernel` | Runtime handle passed to handlers and tasks: `ID`, `Publish`, `Notify`, `Logger`. |
 | `Plugin` | Your code: `Init`, `Start`, `Stop`, `Destroy`. |
 | `Configurator` | Handed to `Plugin.Init`: declares resources, tasks and subscriptions. |
-| `Access` | Handed to a task's declare function: `Read[T]`, `Write[T]`, `Use(task)`. |
+| `Access` | Handed to a task's constructor: `Read[T]`, `Write[T]`, `Use(task)`. |
 | `*Task[A, B]` | Registered code taking arg `A` and answering result `B`. |
 | `Executor` | One publication's batch of work: `Schedule`, `ScheduleAfter`, `Join`, `Publish`. |
 | `Job[T]` / `JobHandle` | One scheduled run of a task; the handle is what dependencies are declared with. |
@@ -289,7 +289,7 @@ Initializing the same type twice panics.
 ## Tasks
 
 A task is the only code that touches resources. `RegisterTask` runs its
-declare function once; each handle it requests declares a lock, and the body
+constructor once; each handle it requests declares a lock, and the body
 it returns closes over those handles.
 
 ```go

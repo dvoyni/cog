@@ -13,10 +13,10 @@
 // plugin fills.
 //
 // Every piece of code that touches resources is a Task, registered once: its
-// declare function requests the resource handles its body uses, which
-// declares its locks. Each scheduled run of a task is
-// a Job, which runs asynchronously with those locks held, may depend on other
-// jobs, and may take its arg from another job's result.
+// constructor requests the resource handles its body uses, which declares its
+// locks. Each scheduled run of a task is a Job, which runs asynchronously with
+// those locks held, may depend on other jobs, and may take its arg from another
+// job's result.
 //
 // Jobs are only scheduled during a publication. Publish runs each handler in
 // turn on the calling goroutine, passing the event by value from one to the

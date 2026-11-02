@@ -49,7 +49,7 @@ Supervisor ── lifetime, GetKernel and Broadcast, LogHandler
 | `Signal`     | Reusable completion signal for code outside the kernel; armed by `Kernel.Notify`, read through `C()`. |
 | `Executor`   | One publication's work batch, handed to its handlers: `Schedule`, `ScheduleAfter`, `Join`, `Publish`. |
 | `Configurator` | Registration surface given to each plugin once: `InitResource`, `Resource`, `RegisterTask`, `PinToMainThread`, `Subscribe`, `OrderSubscriptions`. |
-| `Access`     | Handed to a task's declare function: `Read[T]`, `Write[T]` and `Use(task)` declare its locks and return what the body uses. |
+| `Access`     | Handed to a task's constructor: `Read[T]`, `Write[T]` and `Use(task)` declare its locks and return what the body uses. |
 | `*Task[A, B]`| Registered code with pointer-free arg `A` and pointer-free result `B`; returned by `RegisterTask`. |
 | `Job[T]`     | One scheduled run answering `T`; what `ScheduleAfter` feeds from. |
 | `JobHandle`  | Untyped job handle, `Job[T].Handle()`; what dependencies are declared with. |
@@ -161,7 +161,7 @@ c.announce = configurator.RegisterTask(func(access *kernel.Access) kernel.TaskBo
 ```
 
 - **Requesting a handle is declaring the lock.** `RegisterTask` runs the
-  declare function once. Each `access.Read[T]()` or `access.Write[T]()` both
+  constructor once. Each `access.Read[T]()` or `access.Write[T]()` both
   declares the lock and returns the handle the body uses, so the two cannot
   drift apart. A write supersedes a read of the same resource. The body is a
   `TaskBody[A, B]`, `func(k *Kernel, arg A) B`, closing over its handles. A
@@ -172,7 +172,7 @@ c.announce = configurator.RegisterTask(func(access *kernel.Access) kernel.TaskBo
   own job with those locks already held: no scheduling, no allocation, the
   result returned directly. Pinning does not apply to such a call.
 - **Composition errors panic.** A resource not yet initialized, an arg or
-  result that is not pointer-free, a nil declare function or body, or a task
+  result that is not pointer-free, a nil constructor or body, or a task
   of another kernel passed to `Use` panics at registration, so the mistake
   surfaces in `Spawn` rather than at the first run. `A` and `B` have no size
   limit.

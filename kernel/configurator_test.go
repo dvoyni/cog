@@ -178,6 +178,27 @@ func TestRegisterTaskBuildsLockMasks(t *testing.T) {
 	}
 }
 
+func TestDeclareBindsHandlesAndLocks(t *testing.T) {
+	c := newTestConfigurator()
+	c.InitResource(position{X: 2}) // resource 0, read
+	c.InitResource(health{})       // resource 1, written
+	task := c.RegisterTask(func(access *Access) TaskBody[NoArg, NoResult] {
+		pos := Read[position]{}.Declare(access)
+		hp := Write[health]{}.Declare(access)
+		return func(k *Kernel, arg NoArg) NoResult {
+			hp.Set(health{Points: int32(pos.Get().X)})
+			return NoResult{}
+		}
+	})
+	if task.locks.reads[0] != 0b01 || task.locks.writes[0] != 0b10 {
+		t.Fatalf("masks are reads %b writes %b, want 01 and 10", task.locks.reads, task.locks.writes)
+	}
+	task.run(c.kernel, NoArg{})
+	if got, _ := c.Resource[health](); got.Points != 2 {
+		t.Fatalf("resource holds %d points, want 2", got.Points)
+	}
+}
+
 func TestRegisterTaskReadAndWriteIsWrite(t *testing.T) {
 	c := newTestConfigurator()
 	c.InitResource(health{})
@@ -214,7 +235,7 @@ func TestRegisterTaskHighResourceGrowsMasks(t *testing.T) {
 func TestRegisterTaskPanics(t *testing.T) {
 	type named struct{ Name string }
 	c := newTestConfigurator()
-	expectPanic(t, "a nil declare function", func() { c.RegisterTask[NoArg, NoResult](nil) })
+	expectPanic(t, "a nil constructor", func() { c.RegisterTask[NoArg, NoResult](nil) })
 	expectPanic(t, "a nil body", func() {
 		c.RegisterTask(func(access *Access) TaskBody[NoArg, NoResult] { return nil })
 	})
@@ -236,7 +257,7 @@ func TestRegisterTaskPanics(t *testing.T) {
 		return func(k *Kernel, arg NoArg) NoResult { return NoResult{} }
 	})
 	c.InitResource(health{})
-	expectPanic(t, "an Access kept past its declare function", func() { kept.Read[health]() })
+	expectPanic(t, "an Access kept past its constructor", func() { kept.Read[health]() })
 }
 
 type armor struct{ Value int32 }
