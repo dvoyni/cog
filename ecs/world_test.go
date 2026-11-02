@@ -1,6 +1,7 @@
 package ecs
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/dvoyni/cog/kernel"
@@ -23,6 +24,19 @@ func TestMaskBits(t *testing.T) {
 	maskUnset(&m, 3)
 	if maskHas(&m, 3) || !maskHas(&m, 100) || m[1] != 1<<36 {
 		t.Fatalf("mask is %b after setting 3 and 100 and unsetting 3", m)
+	}
+	var spread game
+	for _, id := range []ComponentID{127, 0, 64, 63} {
+		maskSet(&spread, id)
+	}
+	if got := slices.Collect(maskIDs(&spread)); !slices.Equal(got, []ComponentID{0, 63, 64, 127}) {
+		t.Fatalf("maskIDs yielded %v, want 0 63 64 127", got)
+	}
+	for id := range maskIDs(&spread) {
+		if id != 0 {
+			t.Fatalf("maskIDs yielded %d after the loop broke", id)
+		}
+		break
 	}
 	if maskBits[game]() != 128 {
 		t.Fatalf("game holds %d component types, want 128", maskBits[game]())

@@ -3,7 +3,6 @@ package ecs
 import (
 	"fmt"
 	"math"
-	"math/bits"
 	"reflect"
 	"unsafe"
 
@@ -234,13 +233,10 @@ func (w *world[W]) despawn(e Entity) bool {
 	if !ok {
 		return false
 	}
-	words := maskWords(&mask)
-	for word := range words {
-		for set := words[word]; set != 0; set &= set - 1 {
-			s := w.stores[word<<6+bits.TrailingZeros64(set)]
-			row, _ := s.row(e)
-			s.remove(e, row)
-		}
+	for id := range maskIDs(&mask) {
+		s := w.stores[id]
+		row, _ := s.row(e)
+		s.remove(e, row)
 	}
 	return true
 }
@@ -273,15 +269,11 @@ func (w *world[W]) remove(e Entity, s *store) bool {
 // checkValues panics unless values is as long as mask's components need.
 func (w *world[W]) checkValues(mask *W, values []byte) {
 	need := uintptr(0)
-	words := maskWords(mask)
-	for word := range words {
-		for set := words[word]; set != 0; set &= set - 1 {
-			id := word<<6 + bits.TrailingZeros64(set)
-			if id >= len(w.stores) {
-				panic(fmt.Sprintf("ecs: a mask names component %d, beyond the %d registered", id, len(w.stores)))
-			}
-			need += w.stores[id].component.Size
+	for id := range maskIDs(mask) {
+		if int(id) >= len(w.stores) {
+			panic(fmt.Sprintf("ecs: a mask names component %d, beyond the %d registered", id, len(w.stores)))
 		}
+		need += w.stores[id].component.Size
 	}
 	if uintptr(len(values)) != need {
 		panic(fmt.Sprintf("ecs: %d bytes of values for a mask needing %d", len(values), need))
@@ -291,14 +283,11 @@ func (w *world[W]) checkValues(mask *W, values []byte) {
 // addAll gives alive e the components in mask from values, laid out as for
 // SpawnRaw and checked.
 func (w *world[W]) addAll(e Entity, mask *W, values []byte) {
-	words := maskWords(mask)
-	for word := range words {
-		for set := words[word]; set != 0; set &= set - 1 {
-			s := w.stores[word<<6+bits.TrailingZeros64(set)]
-			size := s.component.Size
-			copy(unsafe.Slice((*byte)(w.put(e, s)), size), values[:size])
-			values = values[size:]
-		}
+	for id := range maskIDs(mask) {
+		s := w.stores[id]
+		size := s.component.Size
+		copy(unsafe.Slice((*byte)(w.put(e, s)), size), values[:size])
+		values = values[size:]
 	}
 }
 

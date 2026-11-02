@@ -1,6 +1,8 @@
 package ecs
 
 import (
+	"iter"
+	"math/bits"
 	"sync/atomic"
 	"unsafe"
 )
@@ -12,6 +14,21 @@ import (
 // every operation on a mask compiles for its size.
 func maskWords[W WorldID](m *W) []uint64 {
 	return unsafe.Slice((*uint64)(unsafe.Pointer(m)), unsafe.Sizeof(*m)/8)
+}
+
+// maskIDs yields the ComponentID of every bit set in m, in ascending order.
+// It inlines into its callers, loop body included, and allocates nothing.
+func maskIDs[W WorldID](m *W) iter.Seq[ComponentID] {
+	return func(yield func(ComponentID) bool) {
+		words := maskWords(m)
+		for word := range words {
+			for set := words[word]; set != 0; set &= set - 1 {
+				if !yield(ComponentID(word<<6 + bits.TrailingZeros64(set))) {
+					return
+				}
+			}
+		}
+	}
 }
 
 // maskBits answers how many component types W holds.

@@ -493,9 +493,10 @@ Each step ends with its tests passing under `go test -race`.
    3. **One row-access path.** Built: the store answers `get` and `write`
       (marked) by entity, the world `put` and `remove`; `Store`, `Lookup`,
       typed and raw `World`, and the commit only declare locks and convert.
-   4. **Walking a mask.** `mask.go` yields a mask's component IDs in
-      ascending order, for despawn, checking and spawning from bytes, and
-      later refs release; kept only if it inlines.
+   4. **Walking a mask.** Built as `maskIDs`, an iterator over a mask's
+      component IDs in ascending order, for despawn, checking and spawning
+      from bytes, and later refs release. It inlines whole, loop body
+      included.
    5. **The query walk.** A dense two-term query costs about 15 ns per
       entity against 0.5 ns for a slice loop. `match` probes the driver
       through `rowByIndex` though its row is known, probes each write term
