@@ -43,7 +43,7 @@ func TestPublishSubmitsOnlyAfterTheLastHandler(t *testing.T) {
 		})
 		c.Subscribe(func(k *Kernel, ex *Executor, in JobHandle, e tick) (tick, JobHandle) {
 			// in is the first handler's job: its hold is still on.
-			heldDuringHandlers = k.jobs.jobs.At(in.slot).waiting.Load() > 0
+			heldDuringHandlers = k.graph.jobs.At(in.slot).waiting.Load() > 0
 			e.Frame++
 			return e, ex.Join(in, ex.Schedule(add, 2).Handle())
 		})

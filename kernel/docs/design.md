@@ -459,6 +459,11 @@ comments carry the detail; this is the shape.
   `uint32` index, reused most recent first. A job slot carries a generation,
   advanced each time the slot is released, so a stale `JobHandle` reads as
   finished rather than naming the slot's next job.
+- **The job graph owns waiting.** Only the job graph counts what a job
+  still waits for (its dependencies and its batch's hold), so only it decides
+  when a job is ready. It hands each ready job to the kernel, which routes it
+  to the lock combiner, the workers or the main thread; finishing a job there
+  sends its Signals, feeds its result and hands on its successors.
 - **A job's successors are edge lists, not queues.** Each of a job's two
   lists (dependent jobs, armed `Signal`s) is one atomic `uint64`: the slot's
   generation in the high 32 bits, the head edge in the low 32. Linking is one

@@ -8,5 +8,6 @@
 ## Tests
 
 - Tests reach a kernel the way plugins do: spawn it through the `Supervisor` (`spawnTestKernel`, `spawnHooked`) and register in a plugin's `Init`. Internals are read to assert, never called to stand in for a lifecycle step.
+- An internal module with an interface of its own, such as `lockState` or `jobGraph`, is tested at that interface, without a kernel.
 
 ## Potential rules

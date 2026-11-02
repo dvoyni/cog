@@ -8,17 +8,29 @@ import (
 	"github.com/dvoyni/cog/kernel/internal/concurrent"
 )
 
-func newTestKernel() *Kernel { return newKernel(NewSupervisor(nil), 1, nil, 1, nil) }
+// fedArgs is a task taking an int32 that keeps every arg fed to it, by arg
+// index, and runs nothing.
+type fedArgs struct {
+	args [8]int32
+}
 
-// successorsOf walks a successor list finishJob answered, oldest first.
-func successorsOf(s *jobStorage, head uint32) []successorEdge {
-	var edges []successorEdge
-	for head != concurrent.None {
-		edge := *s.successorEdges.At(head)
-		edges = append([]successorEdge{edge}, edges...)
-		head = edge.next
-	}
-	return edges
+func (*fedArgs) runJob(kernel *Kernel, slot uint32) {}
+
+func (f *fedArgs) receiveArg(index uint32, arg int32) { f.args[index] = arg }
+
+// readyCounts counts how many times the job graph handed on each slot.
+type readyCounts struct {
+	counts [4096]atomic.Int32
+}
+
+func (r *readyCounts) ready(slot uint32) { r.counts[slot].Add(1) }
+
+func (r *readyCounts) of(slot uint32) int32 { return r.counts[slot].Load() }
+
+// newTestGraph answers a job graph whose one task, index 0, is fed, and which
+// counts what it hands on in ready.
+func newTestGraph(fed *fedArgs, ready *readyCounts) *jobGraph {
+	return &jobGraph{tasks: []runnable{fed}, ready: ready.ready}
 }
 
 func signalled(sig *Signal) bool {
@@ -30,185 +42,190 @@ func signalled(sig *Signal) bool {
 	}
 }
 
-func TestNewJobWaitsOnItsHold(t *testing.T) {
-	s := &jobStorage{}
-	slot, handle := s.acquireJob(0, concurrent.None)
-	if slot == concurrent.None || handle.slot != slot {
-		t.Fatalf("acquireJob answered slot %d, handle %v", slot, handle)
+func TestJobWaitsForItsBatch(t *testing.T) {
+	ready := &readyCounts{}
+	g := newTestGraph(&fedArgs{}, ready)
+	job := g.acquireJob(0, 0, JobHandle{}, nil)
+	if job.slot == concurrent.None || ready.of(job.slot) != 0 {
+		t.Fatalf("a job was handed on before its batch was submitted")
 	}
-	if got := s.jobs.At(slot).waiting.Load(); got != 1 {
-		t.Fatalf("a new job waits on %d, want 1", got)
-	}
-}
-
-func TestAddSuccessorRaisesWaiting(t *testing.T) {
-	s := &jobStorage{}
-	_, first := s.acquireJob(0, concurrent.None)
-	_, second := s.acquireJob(0, concurrent.None)
-	successor, _ := s.acquireJob(0, concurrent.None)
-	if !s.addSuccessor(first, successor, true) || !s.addSuccessor(second, successor, false) {
-		t.Fatal("addSuccessor refused a running predecessor")
-	}
-	if got := s.jobs.At(successor).waiting.Load(); got != 3 {
-		t.Fatalf("successor waits on %d, want its hold and two predecessors", got)
-	}
-	edges := successorsOf(s, s.finishJob(first.slot))
-	if len(edges) != 1 || edges[0].successor != successor || !edges[0].feedsResult {
-		t.Fatalf("first's successors are %v", edges)
+	g.submit([]uint32{job.slot})
+	if ready.of(job.slot) != 1 {
+		t.Fatalf("submitting the batch handed the job on %d times, want once", ready.of(job.slot))
 	}
 }
 
-func TestFinishedPredecessorIsNotWaitedFor(t *testing.T) {
-	s := &jobStorage{}
-	slot, finished := s.acquireJob(0, concurrent.None)
-	s.releaseSuccessors(s.finishJob(slot))
-	successor, _ := s.acquireJob(0, concurrent.None)
-	if s.addSuccessor(finished, successor, false) {
-		t.Fatal("addSuccessor linked a finished job")
+func TestJobWaitsForEveryDependencyAndIsFed(t *testing.T) {
+	ready, fed := &readyCounts{}, &fedArgs{}
+	g := newTestGraph(fed, ready)
+	from := g.acquireJob(0, 0, JobHandle{}, nil)
+	dep := g.acquireJob(0, 0, JobHandle{}, nil)
+	successor := g.acquireJob(0, 3, from, []JobHandle{dep})
+	g.submit([]uint32{from.slot, dep.slot, successor.slot})
+	if ready.of(successor.slot) != 0 {
+		t.Fatal("the successor was handed on before its dependencies finished")
 	}
-	s.releaseJob(slot)
-	if s.addSuccessor(finished, successor, false) {
-		t.Fatal("addSuccessor linked a released job")
+	g.finishJob(from.slot, int32(7))
+	if ready.of(successor.slot) != 0 {
+		t.Fatal("the successor was handed on before its last dependency finished")
 	}
-	if s.addSuccessor(JobHandle{}, successor, false) {
-		t.Fatal("addSuccessor linked the zero JobHandle")
+	if fed.args[3] != 7 {
+		t.Fatalf("the successor was fed %d, want 7", fed.args[3])
 	}
-	if got := s.jobs.At(successor).waiting.Load(); got != 1 {
-		t.Fatalf("successor waits on %d, want only its hold", got)
+	g.finishJob(dep.slot, int32(9))
+	if ready.of(successor.slot) != 1 {
+		t.Fatalf("the successor was handed on %d times, want once", ready.of(successor.slot))
+	}
+	if fed.args[3] != 7 {
+		t.Fatalf("a plain dependency fed the successor %d", fed.args[3])
+	}
+}
+
+func TestFinishedDependencyIsNotWaitedFor(t *testing.T) {
+	ready := &readyCounts{}
+	g := newTestGraph(&fedArgs{}, ready)
+	finished := g.acquireJob(0, 0, JobHandle{}, nil)
+	g.submit([]uint32{finished.slot})
+	g.finishJob(finished.slot, int32(0))
+	// The successor may take finished's slot, so it counts from here.
+	successor := g.acquireJob(0, 0, finished, []JobHandle{finished, {}})
+	before := ready.of(successor.slot)
+	g.submit([]uint32{successor.slot})
+	if ready.of(successor.slot) != before+1 {
+		t.Fatal("a successor of finished and zero handles waited")
 	}
 }
 
 func TestStaleHandleDoesNotNameTheSlotsNextJob(t *testing.T) {
-	s := &jobStorage{}
-	slot, stale := s.acquireJob(0, concurrent.None)
-	s.releaseSuccessors(s.finishJob(slot))
-	s.releaseJob(slot)
-	reused, current := s.acquireJob(0, concurrent.None)
-	if reused != slot || current == stale {
-		t.Fatalf("slot %d reused as %d with handle %v, stale %v", slot, reused, current, stale)
+	ready := &readyCounts{}
+	g := newTestGraph(&fedArgs{}, ready)
+	stale := g.acquireJob(0, 0, JobHandle{}, nil)
+	g.submit([]uint32{stale.slot})
+	g.finishJob(stale.slot, int32(0))
+	current := g.acquireJob(0, 0, JobHandle{}, nil)
+	if current.slot != stale.slot || current == stale {
+		t.Fatalf("slot %d reused with handle %v, stale %v", stale.slot, current, stale)
 	}
-	successor, _ := s.acquireJob(0, concurrent.None)
-	if s.addSuccessor(stale, successor, false) || !s.addSuccessor(current, successor, false) {
+	ofStale := g.acquireJob(0, 0, JobHandle{}, []JobHandle{stale})
+	ofCurrent := g.acquireJob(0, 0, JobHandle{}, []JobHandle{current})
+	g.submit([]uint32{ofStale.slot, ofCurrent.slot})
+	if ready.of(ofStale.slot) != 1 || ready.of(ofCurrent.slot) != 0 {
 		t.Fatal("a stale handle was taken for the slot's next job")
 	}
 }
 
-func TestNotifySignalsOnFinish(t *testing.T) {
-	k := newTestKernel()
-	slot, handle := k.jobs.acquireJob(0, concurrent.None)
+func TestSignalIsSentOnFinish(t *testing.T) {
+	g := newTestGraph(&fedArgs{}, &readyCounts{})
+	job := g.acquireJob(0, 0, JobHandle{}, nil)
 	sig := NewSignal()
-	k.Notify(sig, handle)
+	if !g.armSignal(job, sig) {
+		t.Fatal("armSignal refused a job not yet finished")
+	}
 	if signalled(sig) {
-		t.Fatal("Notify signalled before the job finished")
+		t.Fatal("the signal was sent before the job finished")
 	}
-	k.jobs.finishJob(slot)
+	g.finishJob(job.slot, int32(0))
 	if !signalled(sig) {
-		t.Fatal("finishing the job did not signal")
+		t.Fatal("finishing the job did not send the signal")
 	}
-}
-
-func TestNotifyFinishedJobSignalsAtOnce(t *testing.T) {
-	k := newTestKernel()
-	sig := NewSignal()
-	k.Notify(sig, JobHandle{})
-	if !signalled(sig) {
-		t.Fatal("Notify on the zero JobHandle did not signal at once")
-	}
-	slot, handle := k.jobs.acquireJob(0, concurrent.None)
-	k.jobs.finishJob(slot)
-	k.Notify(sig, handle)
-	if !signalled(sig) {
-		t.Fatal("Notify on a finished job did not signal at once")
-	}
-	k.jobs.releaseJob(slot)
-	k.Notify(sig, handle)
-	if !signalled(sig) {
-		t.Fatal("Notify on a released job did not signal at once")
+	if g.armSignal(job, sig) || g.armSignal(JobHandle{}, sig) {
+		t.Fatal("armSignal armed a finished job")
 	}
 }
 
 // Every successor and Signal added while the predecessor finishes is either
-// linked and reached by the finish, or refused: none is lost, none counted
-// twice.
+// linked and reached by the finish, or refused and handed on at once: none is
+// lost, none handed on twice.
 func TestArmingRacesFinish(t *testing.T) {
 	for range 200 {
-		k := newTestKernel()
-		predecessor, handle := k.jobs.acquireJob(0, concurrent.None)
+		ready := &readyCounts{}
+		g := newTestGraph(&fedArgs{}, ready)
+		// Never submitted, so a racer reusing its slot after the finish is the
+		// only job ever handed on from it.
+		predecessor := g.acquireJob(0, 0, JobHandle{}, nil)
 		const racers = 32
 		successors := make([]uint32, racers)
 		signals := make([]*Signal, racers)
+		armed := make([]bool, racers)
 		for i := range racers {
-			successors[i], _ = k.jobs.acquireJob(0, concurrent.None)
 			signals[i] = NewSignal()
 		}
-		var linked atomic.Int32
 		var wait sync.WaitGroup
 		for i := range racers {
 			wait.Go(func() {
-				if k.jobs.addSuccessor(handle, successors[i], false) {
-					linked.Add(1)
-				}
-				k.Notify(signals[i], handle)
+				successor := g.acquireJob(0, 0, JobHandle{}, []JobHandle{predecessor})
+				successors[i] = successor.slot
+				g.submit([]uint32{successor.slot})
+				armed[i] = g.armSignal(predecessor, signals[i])
 			})
 		}
-		head := k.jobs.finishJob(predecessor)
+		g.finishJob(predecessor.slot, int32(0))
 		wait.Wait()
-		edges := successorsOf(&k.jobs, head)
-		if len(edges) != int(linked.Load()) {
-			t.Fatalf("finish reached %d successors, %d were linked", len(edges), linked.Load())
-		}
-		for i, sig := range signals {
-			if !signalled(sig) {
-				t.Fatalf("signal %d was neither signalled by the finish nor at once", i)
+		for i := range racers {
+			if got := ready.of(successors[i]); got != 1 {
+				t.Fatalf("successor %d was handed on %d times, want once", i, got)
+			}
+			if armed[i] && !signalled(signals[i]) {
+				t.Fatalf("signal %d was armed but not sent", i)
 			}
 		}
 	}
 }
 
-func TestJobStorageAllocatesNothingOnceWarm(t *testing.T) {
-	k := newTestKernel()
+func TestJobGraphAllocatesNothingOnceWarm(t *testing.T) {
+	g := newTestGraph(&fedArgs{}, &readyCounts{})
 	sig := NewSignal()
+	batch := make([]uint32, 0, 2)
 	cycle := func() {
-		predecessor, handle := k.jobs.acquireJob(0, concurrent.None)
-		successor, _ := k.jobs.acquireJob(0, concurrent.None)
-		k.jobs.addSuccessor(handle, successor, true)
-		k.Notify(sig, handle)
-		k.jobs.releaseSuccessors(k.jobs.finishJob(predecessor))
+		predecessor := g.acquireJob(0, 0, JobHandle{}, nil)
+		successor := g.acquireJob(0, 0, predecessor, nil)
+		g.submit(append(batch[:0], predecessor.slot, successor.slot))
+		g.armSignal(predecessor, sig)
+		g.finishJob(predecessor.slot, int32(1))
 		<-sig.C()
-		k.jobs.releaseSuccessors(k.jobs.finishJob(successor))
-		k.jobs.releaseJob(predecessor)
-		k.jobs.releaseJob(successor)
+		g.finishJob(successor.slot, int32(0))
 	}
 	cycle()
 	if got := testing.AllocsPerRun(1000, cycle); got != 0 {
-		t.Fatalf("a job's storage cycle allocated %v times", got)
+		t.Fatalf("a job graph cycle allocated %v times", got)
 	}
 }
 
-// A stale handle racing the slot's release and reuse never links to the job that
-// holds the slot now.
+// A stale handle racing the slot's finish and reuse never makes a job wait
+// for the job that holds the slot now.
 func TestStaleHandleRacingReuse(t *testing.T) {
 	for range 200 {
-		s := &jobStorage{}
-		slot, stale := s.acquireJob(0, concurrent.None)
+		ready := &readyCounts{}
+		g := newTestGraph(&fedArgs{}, ready)
+		// Never submitted, so a racer reusing its slot is the only job ever
+		// handed on from it.
+		stale := g.acquireJob(0, 0, JobHandle{}, nil)
 		const racers = 16
 		successors := make([]uint32, racers)
-		for i := range racers {
-			successors[i], _ = s.acquireJob(0, concurrent.None)
-		}
 		var wait sync.WaitGroup
 		for i := range racers {
-			wait.Go(func() { s.addSuccessor(stale, successors[i], false) })
+			wait.Go(func() {
+				successor := g.acquireJob(0, 0, JobHandle{}, []JobHandle{stale})
+				successors[i] = successor.slot
+				g.submit([]uint32{successor.slot})
+			})
 		}
-		s.releaseSuccessors(s.finishJob(slot))
-		s.releaseJob(slot)
-		reused, _ := s.acquireJob(0, concurrent.None)
+		g.finishJob(stale.slot, int32(0))
+		reused := g.acquireJob(0, 0, JobHandle{}, nil)
 		wait.Wait()
-		if reused != slot {
-			t.Fatalf("slot %d was not reused, got %d", slot, reused)
+		for i := range racers {
+			if got := ready.of(successors[i]); got != 1 {
+				t.Fatalf("successor %d was handed on %d times, want once", i, got)
+			}
 		}
-		if edges := successorsOf(s, s.finishJob(reused)); len(edges) != 0 {
-			t.Fatalf("stale handles linked %d successors to the slot's next job", len(edges))
+		if reused.slot == stale.slot {
+			g.submit([]uint32{reused.slot})
+			g.finishJob(reused.slot, int32(0))
+			for i := range racers {
+				if got := ready.of(successors[i]); got != 1 {
+					t.Fatalf("finishing the slot's next job handed successor %d on again", i)
+				}
+			}
 		}
 	}
 }

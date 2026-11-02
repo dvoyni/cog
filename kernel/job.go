@@ -11,7 +11,7 @@ import (
 // through Job.Handle. The zero JobHandle names a job that has already
 // finished.
 //
-// slot is the job's slot in the kernel's job storage, and generation that
+// slot is the job's slot in the kernel's job graph, and generation that
 // slot's generation when the job took it. A slot's generation advances every
 // time the slot is released, so a handle kept past its job reads as finished
 // rather than as whichever job holds the slot now. Slot 0 is never handed
@@ -33,7 +33,7 @@ type Job[T any] struct {
 // Handle returns j without its result type, for declaring a dependency.
 func (j Job[T]) Handle() JobHandle { return j.handle }
 
-// job is one slot of a kernel's job storage: what every job has whatever its
+// job is one slot of a kernel's job graph: what every job has whatever its
 // task. It holds no pointers, so the GC never scans the storage, and no
 // mutex: each field is one atomic word.
 type job struct {
@@ -85,78 +85,151 @@ type successorEdge struct {
 }
 
 // signalEdge links a job to a Signal armed for it. It is apart from
-// successorEdge because it holds a pointer: its pool is the only part of job
-// storage the GC scans.
+// successorEdge because it holds a pointer: its pool is the only part of the job
+// graph the GC scans.
 type signalEdge struct {
 	// next is the following edge of the same list, or None.
 	next   uint32
 	signal *Signal
 }
 
-// jobStorage is a kernel's jobs and the edges between them.
-type jobStorage struct {
+// jobGraph is a kernel's job graph: every job not yet finished, and the
+// dependencies and feedings between them. It alone counts what each job still
+// waits for, so it alone decides when a job is ready, and hands it on through
+// ready.
+type jobGraph struct {
 	jobs           concurrent.Pool[job]
 	successorEdges concurrent.Pool[successorEdge]
 	signalEdges    concurrent.Pool[signalEdge]
+	// tasks is the kernel's task table, through which a finished job's result
+	// is fed to the arg of each job scheduled after it. It is set once
+	// registration ends, before the first job, and never changes after.
+	tasks []runnable
+	// ready is handed every job that waits for nothing any more: its batch is
+	// submitted and its dependencies have all finished. It is set with tasks,
+	// and may be called from any goroutine.
+	ready func(slot uint32)
 }
 
 // acquireJob takes a free slot for a job of task, whose arg is at arg in the
-// task's arg pool, and answers the slot and the job's handle. The job starts
-// waiting on one hold, which its batch releases once submitted.
-func (s *jobStorage) acquireJob(task, arg uint32) (uint32, JobHandle) {
-	slot := s.jobs.Acquire()
-	j := s.jobs.At(slot)
+// task's arg pool, and answers its handle. The job waits for every job in
+// deps, and for from, whose result it takes as its arg; a zero from feeds
+// nothing. It also waits on one hold, which submit releases. deps is never
+// kept.
+func (g *jobGraph) acquireJob(task, arg uint32, from JobHandle, deps []JobHandle) JobHandle {
+	slot := g.jobs.Acquire()
+	j := g.jobs.At(slot)
 	j.task, j.arg = task, arg
 	generation, _ := unpackList(j.successors.Load())
 	j.successors.Store(packList(generation, concurrent.None))
 	j.signals.Store(packList(generation, concurrent.None))
 	j.waiting.Store(1)
-	return slot, JobHandle{slot: slot, generation: generation}
-}
-
-// handle answers the handle of the job in slot.
-func (s *jobStorage) handle(slot uint32) JobHandle {
-	generation, _ := unpackList(s.jobs.At(slot).successors.Load())
+	for _, dep := range deps {
+		g.addSuccessor(dep, slot, false)
+	}
+	g.addSuccessor(from, slot, true)
 	return JobHandle{slot: slot, generation: generation}
 }
 
-// addSuccessor makes successor wait for predecessor, and answers whether it
-// does. A predecessor that has already finished, the zero JobHandle
-// included, is not waited for, and answers false. The successor's waiting
-// count is raised before the edge is linked, so a finish never brings it to
-// zero early.
-func (s *jobStorage) addSuccessor(predecessor JobHandle, successor uint32, feedsResult bool) bool {
-	if predecessor.slot == concurrent.None {
-		return false
+// submit releases the hold of every job in batch, handing each that waits for
+// nothing else to ready.
+func (g *jobGraph) submit(batch []uint32) {
+	for _, slot := range batch {
+		if g.jobs.At(slot).waiting.Add(-1) == 0 {
+			g.ready(slot)
+		}
 	}
-	waiting := &s.jobs.At(successor).waiting
-	waiting.Add(1)
-	edge := s.successorEdges.Acquire()
-	*s.successorEdges.At(edge) = successorEdge{successor: successor, feedsResult: feedsResult}
-	next := &s.successorEdges.At(edge).next
-	if link(&s.jobs.At(predecessor.slot).successors, predecessor.generation, edge, next) {
-		return true
+}
+
+// finishJob finishes the job in slot, which answered result: it sends every
+// Signal armed for it, feeds result to every job scheduled after it, hands
+// each successor that waits for nothing else to ready, and releases the slot.
+// Every handle to the job reads as finished from then on.
+func (g *jobGraph) finishJob[B any](slot uint32, result B) {
+	j := g.jobs.At(slot)
+	// Only this job's finish changes the generation, so it is stable here.
+	generation, _ := unpackList(j.successors.Load())
+	_, successors := unpackList(j.successors.Swap(packList(generation, closedList)))
+	_, signals := unpackList(j.signals.Swap(packList(generation, closedList)))
+
+	for signals != concurrent.None {
+		edge := g.signalEdges.At(signals)
+		edge.signal.send()
+		next := edge.next
+		edge.signal = nil // let the Signal go
+		g.signalEdges.Release(signals)
+		signals = next
 	}
-	s.successorEdges.Release(edge)
-	waiting.Add(-1)
-	return false
+	for successors != concurrent.None {
+		edge := g.successorEdges.At(successors)
+		successor := g.jobs.At(edge.successor)
+		if edge.feedsResult {
+			g.tasks[successor.task].(argReceiver[B]).receiveArg(successor.arg, result)
+		}
+		if successor.waiting.Add(-1) == 0 {
+			g.ready(edge.successor)
+		}
+		next := edge.next
+		g.successorEdges.Release(successors)
+		successors = next
+	}
+
+	// Its lists stay closed, under a generation no handle names yet.
+	j.successors.Store(packList(generation+1, closedList))
+	j.signals.Store(packList(generation+1, closedList))
+	g.jobs.Release(slot)
 }
 
 // armSignal links signal to the job handle names, and answers whether it did.
 // A job that has already finished, the zero JobHandle included, is not armed
 // and answers false, and the caller signals at once.
-func (s *jobStorage) armSignal(handle JobHandle, signal *Signal) bool {
+func (g *jobGraph) armSignal(handle JobHandle, signal *Signal) bool {
 	if handle.slot == concurrent.None {
 		return false
 	}
-	edge := s.signalEdges.Acquire()
-	*s.signalEdges.At(edge) = signalEdge{signal: signal}
-	next := &s.signalEdges.At(edge).next
-	if link(&s.jobs.At(handle.slot).signals, handle.generation, edge, next) {
+	edge := g.signalEdges.Acquire()
+	*g.signalEdges.At(edge) = signalEdge{signal: signal}
+	next := &g.signalEdges.At(edge).next
+	if link(&g.jobs.At(handle.slot).signals, handle.generation, edge, next) {
 		return true
 	}
-	s.signalEdges.At(edge).signal = nil
-	s.signalEdges.Release(edge)
+	g.signalEdges.At(edge).signal = nil
+	g.signalEdges.Release(edge)
+	return false
+}
+
+// task answers the index in the kernel's task table of what the job in slot
+// runs.
+func (g *jobGraph) task(slot uint32) uint32 { return g.jobs.At(slot).task }
+
+// arg answers the index of the job in slot's arg in its task's arg pool.
+func (g *jobGraph) arg(slot uint32) uint32 { return g.jobs.At(slot).arg }
+
+// handle answers the handle of the job in slot.
+func (g *jobGraph) handle(slot uint32) JobHandle {
+	generation, _ := unpackList(g.jobs.At(slot).successors.Load())
+	return JobHandle{slot: slot, generation: generation}
+}
+
+// addSuccessor makes successor wait for predecessor, feeding it
+// predecessor's result if feedsResult, and answers whether it does. A
+// predecessor that has already finished, the zero JobHandle included, is not
+// waited for, and answers false. The successor's waiting count is raised
+// before the edge is linked, so a finish never brings it to zero early.
+func (g *jobGraph) addSuccessor(predecessor JobHandle, successor uint32, feedsResult bool) bool {
+	if predecessor.slot == concurrent.None {
+		return false
+	}
+	waiting := &g.jobs.At(successor).waiting
+	waiting.Add(1)
+	edge := g.successorEdges.Acquire()
+	*g.successorEdges.At(edge) = successorEdge{successor: successor, feedsResult: feedsResult}
+	next := &g.successorEdges.At(edge).next
+	if link(&g.jobs.At(predecessor.slot).successors, predecessor.generation, edge, next) {
+		return true
+	}
+	g.successorEdges.Release(edge)
+	waiting.Add(-1)
 	return false
 }
 
@@ -175,46 +248,4 @@ func link(word *atomic.Uint64, generation, edge uint32, next *uint32) bool {
 			return true
 		}
 	}
-}
-
-// finishJob marks the job in slot finished, sends every Signal armed for it,
-// and answers the head of its successor list, newest first, which the caller
-// now owns: it walks the list, then returns the edges with releaseSuccessors.
-// Nothing is linked to the job after.
-func (s *jobStorage) finishJob(slot uint32) uint32 {
-	j := s.jobs.At(slot)
-	// Only this job's finish changes the generation, so it is stable here.
-	generation, _ := unpackList(j.successors.Load())
-	_, successors := unpackList(j.successors.Swap(packList(generation, closedList)))
-	_, signals := unpackList(j.signals.Swap(packList(generation, closedList)))
-
-	for signals != concurrent.None {
-		edge := s.signalEdges.At(signals)
-		edge.signal.send()
-		next := edge.next
-		edge.signal = nil // let the Signal go
-		s.signalEdges.Release(signals)
-		signals = next
-	}
-	return successors
-}
-
-// releaseSuccessors returns every edge of a successor list finishJob answered.
-func (s *jobStorage) releaseSuccessors(head uint32) {
-	for head != concurrent.None {
-		next := s.successorEdges.At(head).next
-		s.successorEdges.Release(head)
-		head = next
-	}
-}
-
-// releaseJob returns the slot of a finished job, advancing its generation so
-// every handle to the job reads as finished from then on: its lists stay
-// closed, under a generation no handle names yet.
-func (s *jobStorage) releaseJob(slot uint32) {
-	j := s.jobs.At(slot)
-	generation, _ := unpackList(j.successors.Load())
-	j.successors.Store(packList(generation+1, closedList))
-	j.signals.Store(packList(generation+1, closedList))
-	s.jobs.Release(slot)
 }

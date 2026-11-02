@@ -20,7 +20,7 @@ import (
 //
 // A is the task's arg and B its result. Both must be pointer-free: no
 // pointers, slices, maps, strings, interfaces, channels or funcs, at any
-// depth, so the GC never scans job storage. Text travels as a hash or an ID,
+// depth, so the GC never scans the job graph. Text travels as a hash or an ID,
 // with the text itself in a resource. A task that takes nothing uses NoArg,
 // one that answers nothing returns NoResult, and one that locks nothing
 // requests no handles.
@@ -74,7 +74,7 @@ var errTaskPanicked = errors.New("kernel: task panicked")
 // job completes with the zero B, so the jobs and Signals waiting on it still
 // go on.
 func (t *Task[A, B]) runJob(kernel *Kernel, slot uint32) {
-	index := kernel.jobs.jobs.At(slot).arg
+	index := kernel.graph.arg(slot)
 	arg := *t.args.At(index)
 	t.args.Release(index)
 	kernel.completeJob(slot, t.runRecovering(kernel, arg))

@@ -49,8 +49,9 @@ type Kernel struct {
 	// beside tasks so the lock combiner reads it without knowing a task's
 	// types. Index 0, the Join task's, locks nothing.
 	taskLocks []*taskLocks
-	// jobs is every job of k and the edges between them.
-	jobs jobStorage
+	// graph is k's job graph, which hands every job that waits for nothing
+	// any more to arrive.
+	graph jobGraph
 	// executors holds the Executors of finished publications, for the next
 	// to reuse.
 	executors concurrent.Queue[*Executor]
@@ -167,7 +168,7 @@ func (k *Kernel) Publish[E any](event E) (E, JobHandle) {
 // It allocates nothing once the kernel has armed as many Signals at once
 // before, so one Signal can be armed every frame.
 func (k *Kernel) Notify(sig *Signal, job JobHandle) {
-	if !k.jobs.armSignal(job, sig) {
+	if !k.graph.armSignal(job, sig) {
 		sig.send()
 	}
 }
@@ -200,7 +201,9 @@ func (k *Kernel) init() error {
 			return fmt.Errorf("kernel: plugin %d (%T) failed to init: %w", i, plugin, err)
 		}
 	}
-	// No resource or handler can be added from here on.
+	// No resource, task or handler can be added from here on, and no job has
+	// been scheduled yet.
+	k.graph.tasks, k.graph.ready = k.tasks, k.arrive
 	for _, d := range k.dispatchers {
 		d.sortHandlers()
 	}
@@ -252,7 +255,7 @@ func (k *Kernel) destroy() {
 // finishes it as a worker would. Supervisor.TickMainThread calls it for each
 // job k handed over.
 func (k *Kernel) runPinned(job JobHandle) {
-	k.tasks[k.jobs.jobs.At(job.slot).task].runJob(k, job.slot)
+	k.tasks[k.graph.task(job.slot)].runJob(k, job.slot)
 }
 
 // dispatcher returns the dispatcher of E in k, creating it on first use.
@@ -279,7 +282,7 @@ func (k *Kernel) acquireExecutor() *Executor {
 // job that locks nothing needs no lock combiner, and is ready at once;
 // otherwise it waits in arrivals for the combiner to grant its locks.
 func (k *Kernel) arrive(slot uint32) {
-	locks := k.taskLocks[k.jobs.jobs.At(slot).task]
+	locks := k.taskLocks[k.graph.task(slot)]
 	if locks.locksNothing() {
 		k.makeReady(slot, locks)
 		return
@@ -292,7 +295,7 @@ func (k *Kernel) arrive(slot uint32) {
 // thread if its task is pinned there, otherwise to ready.
 func (k *Kernel) makeReady(slot uint32, locks *taskLocks) {
 	if locks.pinnedToMainThread {
-		k.supervisor.pushPinned(k, k.jobs.handle(slot))
+		k.supervisor.pushPinned(k, k.graph.handle(slot))
 		return
 	}
 	k.ready.Push(slot)
@@ -325,7 +328,7 @@ func (k *Kernel) combineLocks() {
 		k.locks.clearReservations()
 		stillWaiting := k.waiting[:0]
 		for _, slot := range k.waiting {
-			locks := k.taskLocks[k.jobs.jobs.At(slot).task]
+			locks := k.taskLocks[k.graph.task(slot)]
 			if k.locks.canLock(locks) {
 				k.locks.lock(locks)
 				k.makeReady(slot, locks)
@@ -344,31 +347,16 @@ func (k *Kernel) combineLocks() {
 }
 
 // completeJob finishes the job in slot, which answered result: it unlocks
-// its locks, sends every Signal armed for it, feeds result to every job
-// scheduled after it, hands on each successor that waits for nothing else,
-// and releases the slot.
+// its locks, then finishes it in the job graph, which hands on every
+// successor that waits for nothing else.
 func (k *Kernel) completeJob[B any](slot uint32, result B) {
-	task := k.jobs.jobs.At(slot).task
-	if !k.taskLocks[task].locksNothing() {
+	if !k.taskLocks[k.graph.task(slot)].locksNothing() {
 		// Unlocked first, so a successor locking the same resources can be
 		// granted them in the same pass.
-		k.unlocks.Push(task)
+		k.unlocks.Push(k.graph.task(slot))
 		k.combineLocks()
 	}
-	head := k.jobs.finishJob(slot)
-	for index := head; index != concurrent.None; {
-		edge := k.jobs.successorEdges.At(index)
-		successor := k.jobs.jobs.At(edge.successor)
-		if edge.feedsResult {
-			k.tasks[successor.task].(argReceiver[B]).receiveArg(successor.arg, result)
-		}
-		index = edge.next
-		if successor.waiting.Add(-1) == 0 {
-			k.arrive(edge.successor)
-		}
-	}
-	k.jobs.releaseSuccessors(head)
-	k.jobs.releaseJob(slot)
+	k.graph.finishJob(slot, result)
 	k.settle()
 }
 
@@ -377,7 +365,7 @@ func (k *Kernel) completeJob[B any](slot uint32, result B) {
 func (k *Kernel) work() {
 	for {
 		if slot, ok := k.ready.Pop(); ok {
-			k.tasks[k.jobs.jobs.At(slot).task].runJob(k, slot)
+			k.tasks[k.graph.task(slot)].runJob(k, slot)
 			continue
 		}
 		// Counted idle before looking again, so a job pushed in between is

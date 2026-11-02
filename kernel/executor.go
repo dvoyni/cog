@@ -35,7 +35,7 @@ func (ex *Executor) Schedule[A, B any](task *Task[A, B], arg A, deps ...JobHandl
 	}
 	index := task.args.Acquire()
 	*task.args.At(index) = arg
-	return Job[B]{handle: ex.add(task.index, index, deps)}
+	return Job[B]{handle: ex.add(task.index, index, JobHandle{}, deps)}
 }
 
 // ScheduleAfter is Schedule with from's result as the arg: the job starts
@@ -51,15 +51,13 @@ func (ex *Executor) ScheduleAfter[A, B any](task *Task[A, B], from Job[A], deps 
 	index := task.args.Acquire()
 	var zero A
 	*task.args.At(index) = zero
-	handle := ex.add(task.index, index, deps)
-	ex.kernel.jobs.addSuccessor(from.handle, handle.slot, true)
-	return Job[B]{handle: handle}
+	return Job[B]{handle: ex.add(task.index, index, from.handle, deps)}
 }
 
 // Join adds a job that runs nothing and finishes once every job in deps has.
 // It is how a handler hands several jobs on as one out dependency.
 func (ex *Executor) Join(deps ...JobHandle) JobHandle {
-	return ex.add(0, 0, deps)
+	return ex.add(0, 0, JobHandle{}, deps)
 }
 
 // Publish delivers event to E's handlers as Kernel.Publish does, but into this
@@ -76,13 +74,11 @@ func (ex *Executor) Publish[E any](in JobHandle, event E) (E, JobHandle) {
 }
 
 // add puts a new job of task, with its arg at arg, into the batch, waiting on
-// every job in deps as well as its hold, and answers its handle.
-func (ex *Executor) add(task, arg uint32, deps []JobHandle) JobHandle {
-	slot, handle := ex.kernel.jobs.acquireJob(task, arg)
-	for _, dep := range deps {
-		ex.kernel.jobs.addSuccessor(dep, slot, false)
-	}
-	ex.batch = append(ex.batch, slot)
+// every job in deps and on from, whose result it takes, as well as its hold,
+// and answers its handle.
+func (ex *Executor) add(task, arg uint32, from JobHandle, deps []JobHandle) JobHandle {
+	handle := ex.kernel.graph.acquireJob(task, arg, from, deps)
+	ex.batch = append(ex.batch, handle.slot)
 	return handle
 }
 
@@ -91,11 +87,7 @@ func (ex *Executor) add(task, arg uint32, deps []JobHandle) JobHandle {
 func (ex *Executor) submit() {
 	// Counted while the publication still is, so drain never misses them.
 	ex.kernel.outstanding.Add(int64(len(ex.batch)))
-	for _, slot := range ex.batch {
-		if ex.kernel.jobs.jobs.At(slot).waiting.Add(-1) == 0 {
-			ex.kernel.arrive(slot)
-		}
-	}
+	ex.kernel.graph.submit(ex.batch)
 	ex.batch = ex.batch[:0]
 	ex.kernel.executors.Push(ex)
 }
