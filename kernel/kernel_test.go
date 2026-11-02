@@ -43,11 +43,11 @@ func (p hookPlugin) Destroy() error {
 // spawnTestKernel spawns a kernel whose one plugin registers with register,
 // and answers the kernel and the Configurator register was given. The
 // kernel is destroyed as the test ends.
-func spawnTestKernel(t *testing.T, register func(c *Configurator)) (*Kernel, *Configurator) {
+func spawnTestKernel(t testing.TB, register func(c *Configurator)) (*Kernel, *Configurator) {
 	var configurator *Configurator
 	s := NewSupervisor(nil)
 	t.Cleanup(s.Quit)
-	id, err := s.Spawn(nil, false, runtime.GOMAXPROCS(0), hookPlugin{init: func(c *Configurator) {
+	id, err := s.Spawn(nil, runtime.GOMAXPROCS(0), hookPlugin{init: func(c *Configurator) {
 		configurator = c
 		register(c)
 	}})
@@ -109,7 +109,7 @@ func TestPanickingJobIsLoggedAndStillFinishes(t *testing.T) {
 	t.Cleanup(s.Quit)
 	var order recording
 	var out JobHandle
-	id, err := s.Spawn(nil, false, runtime.GOMAXPROCS(0), hookPlugin{init: func(c *Configurator) {
+	id, err := s.Spawn(nil, runtime.GOMAXPROCS(0), hookPlugin{init: func(c *Configurator) {
 		panicking := c.RegisterTask(func(access *Access) TaskBody[NoArg, int32] {
 			return func(k *Kernel, arg NoArg) int32 { panic("body failed") }
 		})
@@ -136,7 +136,7 @@ func TestPanickingJobIsLoggedAndStillFinishes(t *testing.T) {
 // spawnHooked spawns a kernel of plugin on s, failing t if it cannot.
 func spawnHooked(t *testing.T, s *Supervisor, plugin hookPlugin) *Kernel {
 	t.Helper()
-	id, err := s.Spawn(nil, false, runtime.GOMAXPROCS(0), plugin)
+	id, err := s.Spawn(nil, runtime.GOMAXPROCS(0), plugin)
 	if err != nil {
 		t.Fatal(err)
 	}

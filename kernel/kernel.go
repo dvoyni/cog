@@ -3,7 +3,6 @@ package kernel
 import (
 	"fmt"
 	"reflect"
-	"runtime"
 	"sync"
 	"sync/atomic"
 
@@ -34,9 +33,6 @@ type Kernel struct {
 	plugins []Plugin
 	// config is what every plugin's Init was handed.
 	config any
-	// singleThreaded kernels run every job on one goroutine of their own,
-	// locked to an OS thread.
-	singleThreaded bool
 	// workerCount is how many goroutines run k's jobs.
 	workerCount int
 	// resources holds every resource by its type. Only Init adds to it, so it
@@ -113,24 +109,22 @@ type resource struct {
 
 // newKernel creates kernel id of supervisor, logging through supervisor's
 // LogHandler, with the config each plugin is handed, running its jobs on
-// workerCount workers, locked to an OS thread if singleThreaded is set, and
-// plugins to register in order.
-func newKernel(supervisor *Supervisor, id KernelID, config any, singleThreaded bool, workerCount int, plugins []Plugin) *Kernel {
+// workerCount workers, and plugins to register in order.
+func newKernel(supervisor *Supervisor, id KernelID, config any, workerCount int, plugins []Plugin) *Kernel {
 	return &Kernel{
-		supervisor:     supervisor,
-		id:             id,
-		logger:         &Logger{kernel: id, handler: supervisor.logHandler},
-		plugins:        plugins,
-		config:         config,
-		singleThreaded: singleThreaded,
-		workerCount:    workerCount,
-		resources:      map[reflect.Type]*resource{},
-		dispatchers:    map[reflect.Type]eventDispatcher{},
-		tasks:          []runnable{joinTask{}},
-		taskLocks:      []*taskLocks{{}},
-		wake:           make(chan struct{}, workerCount),
-		stop:           make(chan struct{}),
-		drained:        make(chan struct{}, 1),
+		supervisor:  supervisor,
+		id:          id,
+		logger:      &Logger{kernel: id, handler: supervisor.logHandler},
+		plugins:     plugins,
+		config:      config,
+		workerCount: workerCount,
+		resources:   map[reflect.Type]*resource{},
+		dispatchers: map[reflect.Type]eventDispatcher{},
+		tasks:       []runnable{joinTask{}},
+		taskLocks:   []*taskLocks{{}},
+		wake:        make(chan struct{}, workerCount),
+		stop:        make(chan struct{}),
+		drained:     make(chan struct{}, 1),
 	}
 }
 
@@ -379,12 +373,8 @@ func (k *Kernel) completeJob[B any](slot uint32, result B) {
 }
 
 // work is one worker: it runs ready jobs until stop is closed, parking on
-// wake while there is none. A single-threaded kernel's one worker keeps its OS
-// thread for its whole life.
+// wake while there is none.
 func (k *Kernel) work() {
-	if k.singleThreaded {
-		runtime.LockOSThread()
-	}
 	for {
 		if slot, ok := k.ready.Pop(); ok {
 			k.tasks[k.jobs.jobs.At(slot).task].runJob(k, slot)

@@ -10,11 +10,11 @@ import (
 
 func TestSpawnAssignsFreshIDs(t *testing.T) {
 	s := NewSupervisor(nil)
-	first, err := s.Spawn(nil, false, 2)
+	first, err := s.Spawn(nil, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := s.Spawn(nil, true, 1)
+	second, err := s.Spawn(nil, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestSpawnAssignsFreshIDs(t *testing.T) {
 
 func TestDestroyRemovesKernel(t *testing.T) {
 	s := NewSupervisor(nil)
-	id, _ := s.Spawn(nil, false, 2)
+	id, _ := s.Spawn(nil, 2)
 	s.Destroy(id)
 	if s.GetKernel(id) != nil {
 		t.Fatal("GetKernel answered a kernel being destroyed")
@@ -44,7 +44,7 @@ func TestDestroyRemovesKernel(t *testing.T) {
 func TestQuitClosesDoneOnceKernelsAreGone(t *testing.T) {
 	s := NewSupervisor(nil)
 	for range 3 {
-		if _, err := s.Spawn(nil, false, 2); err != nil {
+		if _, err := s.Spawn(nil, 2); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -58,7 +58,7 @@ func TestQuitClosesDoneOnceKernelsAreGone(t *testing.T) {
 	if len(s.kernels) != 0 {
 		t.Fatal("kernels left after Done")
 	}
-	if _, err := s.Spawn(nil, false, 2); !errors.Is(err, ErrQuitting) {
+	if _, err := s.Spawn(nil, 2); !errors.Is(err, ErrQuitting) {
 		t.Fatalf("Spawn after Quit answered %v, want ErrQuitting", err)
 	}
 	if s.WaitMainThread() {
@@ -78,9 +78,9 @@ func TestQuitWithNoKernelsClosesDone(t *testing.T) {
 
 func TestBroadcastFollowsSpawnAndDestroy(t *testing.T) {
 	s := NewSupervisor(nil)
-	first, _ := s.Spawn(nil, false, 2)
-	second, _ := s.Spawn(nil, false, 2)
-	third, _ := s.Spawn(nil, false, 2)
+	first, _ := s.Spawn(nil, 2)
+	second, _ := s.Spawn(nil, 2)
+	third, _ := s.Spawn(nil, 2)
 	before := s.spawnOrder
 	s.Destroy(second)
 	ids := []KernelID{}
@@ -100,7 +100,7 @@ func TestBroadcastFollowsSpawnAndDestroy(t *testing.T) {
 
 func TestPinnedJobWakesMainThread(t *testing.T) {
 	s := NewSupervisor(nil)
-	id, _ := s.Spawn(nil, false, 2)
+	id, _ := s.Spawn(nil, 2)
 	woke := make(chan bool)
 	go func() { woke <- s.WaitMainThread() }()
 	s.pushPinned(s.GetKernel(id), JobHandle{})
@@ -135,7 +135,7 @@ func TestConcurrentSpawnDestroyQuit(t *testing.T) {
 	for range 8 {
 		wait.Go(func() {
 			for range 50 {
-				id, err := s.Spawn(nil, false, 2)
+				id, err := s.Spawn(nil, 2)
 				if err != nil {
 					return // quitting
 				}
@@ -155,17 +155,5 @@ func TestConcurrentSpawnDestroyQuit(t *testing.T) {
 }
 
 func TestSpawnWithNoWorkersPanics(t *testing.T) {
-	expectPanic(t, "no workers", func() { NewSupervisor(nil).Spawn(nil, false, 0) })
-}
-
-func TestSingleThreadedKernelHasOneWorker(t *testing.T) {
-	s := NewSupervisor(nil)
-	t.Cleanup(s.Quit)
-	id, err := s.Spawn(nil, true, 8)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := s.GetKernel(id).workerCount; got != 1 {
-		t.Fatalf("a single-threaded kernel has %d workers, want 1", got)
-	}
+	expectPanic(t, "no workers", func() { NewSupervisor(nil).Spawn(nil, 0) })
 }

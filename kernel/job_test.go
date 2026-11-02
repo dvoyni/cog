@@ -8,7 +8,7 @@ import (
 	"github.com/dvoyni/cog/kernel/internal/concurrent"
 )
 
-func newTestKernel() *Kernel { return newKernel(NewSupervisor(nil), 1, nil, false, 1, nil) }
+func newTestKernel() *Kernel { return newKernel(NewSupervisor(nil), 1, nil, 1, nil) }
 
 // successorsOf walks a successor list finishJob answered, oldest first.
 func successorsOf(s *jobStorage, head uint32) []successorEdge {

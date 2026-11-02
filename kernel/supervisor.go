@@ -131,15 +131,13 @@ func NewSupervisor(logHandler LogHandler) *Supervisor {
 //
 // The kernel runs its jobs on workerCount goroutines of its own, which end
 // with the kernel; runtime.GOMAXPROCS(0) keeps every CPU busy. A workerCount
-// below 1 panics, unless the kernel is singleThreaded.
+// below 1 panics.
 //
-// A singleThreaded kernel ignores workerCount and runs all its jobs one at a
-// time, on one worker locked to an OS thread. It is for a
-// kernel that wants sequential execution, such as a server simulation. A job
-// still waits for its dependencies, and runs in the order it became ready;
-// locks never contend, since nothing runs alongside it. A task pinned to the
-// main thread still runs there, and so may run alongside the kernel's own
-// thread.
+// A workerCount of 1 runs every job one at a time, for a kernel that wants
+// sequential execution, such as a server simulation. A job still waits for
+// its dependencies, and runs in the order it became ready; locks never
+// contend, since nothing runs alongside it. A task pinned to the main thread
+// still runs there, and so may run alongside the kernel's worker.
 //
 // The kernel becomes live, reachable by GetKernel, Broadcast and Destroy,
 // once every Start has returned. Before then it is not live: GetKernel
@@ -151,17 +149,15 @@ func NewSupervisor(logHandler LogHandler) *Supervisor {
 // survives, and Spawn answers the zero KernelID and the first failure. A
 // Spawn still running when Quit is called does the same once its plugins have
 // started, and answers ErrQuitting.
-func (s *Supervisor) Spawn(config any, singleThreaded bool, workerCount int, plugins ...Plugin) (KernelID, error) {
-	if singleThreaded {
-		workerCount = 1
-	} else if workerCount < 1 {
+func (s *Supervisor) Spawn(config any, workerCount int, plugins ...Plugin) (KernelID, error) {
+	if workerCount < 1 {
 		panic(fmt.Sprintf("kernel: spawning a kernel with %d workers", workerCount))
 	}
 	if s.quitting.Load() {
 		return 0, ErrQuitting
 	}
 	id := KernelID(s.lastID.Add(1))
-	k := newKernel(s, id, config, singleThreaded, workerCount, plugins)
+	k := newKernel(s, id, config, workerCount, plugins)
 	if err := k.init(); err != nil {
 		return 0, err
 	}

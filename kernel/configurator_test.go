@@ -11,7 +11,7 @@ type position struct{ X, Y float32 }
 type backend interface{ Name() string }
 
 func newTestConfigurator() *Configurator {
-	return &Configurator{kernel: newKernel(NewSupervisor(nil), 7, nil, false, 1, nil)}
+	return &Configurator{kernel: newKernel(NewSupervisor(nil), 7, nil, 1, nil)}
 }
 
 func TestConfiguratorID(t *testing.T) {

@@ -89,11 +89,11 @@ jobs and handlers.
   the next.
 
 A kernel's config is given to `Spawn`, its constructor:
-`Spawn(config, singleThreaded, workerCount, plugins...) (KernelID, error)`.
-Plugins cannot change it. `workerCount` is how many goroutines run the
-kernel's jobs, chosen by the caller (`runtime.GOMAXPROCS(0)` keeps every CPU
-busy); below 1 is a composition error and panics. A single-threaded kernel
-ignores it and runs one (see Single-threaded kernels).
+`Spawn(config, workerCount, plugins...) (KernelID, error)`. Plugins cannot
+change it. `workerCount` is how many goroutines run the kernel's jobs, chosen
+by the caller: `runtime.GOMAXPROCS(0)` keeps every CPU busy, and 1 runs the
+kernel sequentially (see Sequential kernels). Below 1 is a composition error
+and panics.
 
 **Kernels are named by ID.** `Spawn` answers a `KernelID` from a counter the
 supervisor increments atomically, so it is unique for the process's life and
@@ -265,8 +265,7 @@ func (ex *Executor) Publish[E any](in JobHandle, event E) (E, JobHandle)
 
 - **Where jobs run is the kernel's business.** A job starts once its
   dependencies have finished and its locks are free; nothing is promised
-  about which goroutine runs it, except for pinned jobs and single-threaded
-  kernels.
+  about which goroutine runs it, except for pinned jobs.
 - **Workers.** Each kernel runs its jobs on its own `workerCount` goroutines,
   started before the first `Start` and ended once the kernel has drained. An
   idle worker parks and is woken when a job becomes ready.
@@ -276,18 +275,22 @@ func (ex *Executor) Publish[E any](in JobHandle, event E) (E, JobHandle)
   so the jobs left can only run out. That includes pinned jobs, so a kernel's
   destroy waits on the main thread to tick them.
 
-### Single-threaded kernels
+### Sequential kernels
 
-`Supervisor.Spawn(config, true, 0, plugins...)` spawns a kernel whose
-jobs all run one at a time, on one goroutine of its own locked to an OS
-thread; `workerCount` is ignored. It suits a kernel that wants sequential execution, such as a server
-simulation.
+`Supervisor.Spawn(config, 1, plugins...)` spawns a kernel whose jobs all run
+one at a time, on its one worker. It suits a kernel that wants sequential
+execution, such as a server simulation, where parallelism comes from running
+many kernels.
 
 - A job still waits for its dependencies, and runs in the order it became
   ready.
 - Locks never contend, since nothing runs alongside a job.
 - A task pinned to the main thread still runs there.
-- The thread ends with the kernel.
+- **No kernel is tied to an OS thread.** Only the main thread is, for pinned
+  jobs. A worker locked to its own thread was measured against one that is
+  not: on mostly idle servers the locked one cost twice the CPU and three to
+  four times the tick latency, because waking it means waking that one OS
+  thread, and under full load it gained nothing.
 
 ### The main thread and pacing
 

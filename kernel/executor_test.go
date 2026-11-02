@@ -161,7 +161,7 @@ func TestScheduleForeignTaskIsLogged(t *testing.T) {
 	s := NewSupervisor(handler)
 	t.Cleanup(s.Quit)
 	foreign := newTestConfigurator().RegisterTask(nothing)
-	id, err := s.Spawn(nil, false, runtime.GOMAXPROCS(0), hookPlugin{init: func(c *Configurator) {
+	id, err := s.Spawn(nil, runtime.GOMAXPROCS(0), hookPlugin{init: func(c *Configurator) {
 		c.Subscribe(func(k *Kernel, ex *Executor, in JobHandle, e tick) (tick, JobHandle) {
 			if job := ex.Schedule(foreign, NoArg{}); job != (Job[NoResult]{}) {
 				t.Error("scheduling a foreign task answered a Job")
