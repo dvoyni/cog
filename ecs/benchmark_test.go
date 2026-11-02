@@ -259,3 +259,36 @@ func BenchmarkSpawnDespawn(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkRefsGet reads refs of strings by handle, in an order unrelated
+// to their slots.
+func BenchmarkRefsGet(b *testing.B) {
+	o := spawnRefs(b)
+	handles := make([]Ref[string], benchEntities)
+	for i := range handles {
+		handles[i] = o.refs.New("name")
+	}
+	measure(b, func() {
+		for i := range benchEntities {
+			benchSum += float32(len(*o.lookup.Get(handles[(i*7919)%benchEntities])))
+		}
+	})
+}
+
+// BenchmarkRefsSet sets refs of strings through the components holding
+// them, observed, in an order unrelated to the rows.
+func BenchmarkRefsSet(b *testing.B) {
+	o := spawnRefs(b)
+	ObservationReset(nil, kernel.NoArg{}, o.world)
+	entities := make([]Entity, benchEntities)
+	for i := range entities {
+		entities[i] = o.world.Spawn()
+		o.store.Add(entities[i], named{Name: o.refs.New("name")})
+	}
+	ObservationReset(nil, kernel.NoArg{}, o.world)
+	measure(b, func() {
+		for i := range benchEntities {
+			o.refs.Set(&o.store.Write(entities[(i*7919)%benchEntities]).Name, "other")
+		}
+	})
+}

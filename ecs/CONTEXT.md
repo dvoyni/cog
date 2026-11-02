@@ -33,8 +33,12 @@ All values of one component type in one world, and the unit a system locks.
 _Avoid_: Pool, table, column, archetype
 
 **Ref**:
-A pointer-free handle, held in a component, to variable-size data (text, a list, a blob) kept by the world.
+A pointer-free handle, held in a component, to a value of any type kept outside the stores: text, a list, anything a component cannot hold. Setting its value gives it a new handle, so the component holding it changes.
 _Avoid_: Pointer, reference, asset
+
+**Refs**:
+All refs to values of one type in one world, and the unit a system locks for them.
+_Avoid_: Arena, heap, blob store
 
 ## Systems
 

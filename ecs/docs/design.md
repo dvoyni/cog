@@ -32,7 +32,7 @@ Kernel
   └─ world[Game]          resource: entities, registry, structure
        ├─ store[Game, Position]   resource per component type
        ├─ store[Game, Velocity]
-       ├─ Refs[Game]             resource: variable-size data
+       ├─ refs[Game, string]      resource per ref payload type
        └─ commandBuffer[Game, AiCmds]   resource, registered by the user
 ```
 
@@ -44,6 +44,8 @@ Kernel
 | `Lookup[W, T]` | Reads `T`'s store by entity: `Has`, and `Get` a copy. |
 | `Query1[W, A]` … `Query8[W, ...]` | Walks the entities holding every term, yielding each entity and its row. `*T` writes, `T` reads a copy. |
 | `Changes[W, T]` | Reads what changed in `T`'s store this observation window, and turns observation on for it. |
+| `Refs[W, T]` | Writes the refs holding `T`: `New`, `Get` a pointer, `Set`, `Release`. |
+| `RefsLookup[W, T]` | Reads the refs holding `T`: `Get` a pointer, to read only. |
 | `CommandBuffer[W, Tag]` | Records into the command buffer `Tag` of world `W`, holding a read on it. |
 | `CommandSink[W, Tag]` | Applies that buffer to its world: the write on the buffer and the barrier. |
 | `Entity` | 64-bit `{index:32, gen:32}`, layout private; `NoEntity` is 0. |
@@ -381,20 +383,44 @@ func commitAi(k *kernel.Kernel, _ kernel.NoArg, commit ecs.CommandSink[Game, AiC
 
 ## Refs
 
-Text, lists and blobs cannot live in a component. They live in refs; the
-details are designed separately. Agreed so far:
+Text, lists, maps and anything else that cannot live in a component lives
+in a ref:
 
-- **One container per world,** `Refs[W]`, a resource of its own, holding
-  every kind of variable-size data in chunked arenas.
-- **Typed handles.** A component holds `Ref[string]`, `Ref[[]Waypoint]` or
-  `Ref[Blob]`: an index and a generation, pointer-free.
-- **Values change only through a call** (`refs.Set(h, v)`), which copies the
-  value in and advances the handle's version, so a consumer finds changed
-  refs by comparing versions without reading payloads.
-- **Released with their owner.** The registry finds `Ref` fields by
-  reflection at registration; removing the component or despawning the
-  entity releases them. A ref belongs to one component field and is never
-  shared.
+- **A handle in the component, the value outside it.** A component holds a
+  `Ref[T]`: an index and a generation, pointer-free. The value is a `T` in
+  its world's refs of that type. Any `T` is allowed, pointers included; the
+  GC scans refs, never stores.
+- **One container and one lock per payload type.** `RegisterRefs[W, T](c)`
+  registers world `W`'s refs holding `T`, a resource of its own, so systems
+  on refs of different types run in parallel. Declaring refs that were never
+  registered is a composition error. Each declaration also holds a read on
+  the world, so the barrier excludes it.
+- **Values sit in a chunked array of `T`,** with a generation per slot and
+  freed slots reused last in, first out. Chunks never move, so the `*T` a
+  `Get` returns stays valid until the ref is released.
+- **`Refs[W, T]` writes:** `New(v)` returns a handle, `Get(h)` a `*T`,
+  `Set(&field, v)` stores a value, `Release(h)` frees the slot.
+  **`RefsLookup[W, T]` reads:** `Get(h)` returns a `*T` that must only be
+  read. Several lookups run in parallel.
+- **`Set` is the change.** It writes the value into the same slot, advances
+  the slot's generation and writes the new handle back into the field, on
+  every call. The component's bytes change, so `Changes` reports the
+  component as changed, provided the component was reached through a pointer
+  that marks: a `*T` query term or `Store.Write`. Writing through a `*T` from
+  `Get` is not a change.
+- **A stale handle reads as nothing.** `Get` returns nil for the zero handle,
+  a released one, and a copy kept from before a `Set`; generations start at
+  1, so the zero handle matches no slot. `Set` and `Release` report whether
+  the handle was alive, as `Store.Add` does.
+- **Released by the user.** The ECS knows nothing about a component's
+  fields, so it cannot find the refs a component holds: whoever removes the
+  component or despawns its entity calls `Release` first. A ref never
+  released lives as long as its world. `Release` frees the slot at once and
+  advances its generation, so every handle to it, a shadow's included, goes
+  stale.
+- **A ref belongs to one field and is never shared.** Copying a component
+  that holds one gives two fields one ref; after either is set or released,
+  the other reads nothing. This is documented, not checked.
 
 ## Fit for networking
 
@@ -425,6 +451,12 @@ exists:
 - **Components holding strings, slices or lists directly.** A row stops being
   a fixed width, copying and comparing it needs a walk per type, and the GC
   scans every store. Refs keep that data out of rows.
+- **Finding refs in components by reflection,** to release them with their
+  component. It gives the ECS knowledge of fields; releasing is the user's.
+- **A version per ref.** Advancing the generation on `Set` changes the
+  handle, which makes a set an ordinary component change.
+- **One refs container per world.** One lock would serialize every system
+  touching any ref.
 - **Reflected system calls.** The body is a direct call of the system with
   parameters bound at registration.
 - **A change log per store.** Its memory grows with the changes made (a level
@@ -506,6 +538,7 @@ Each step ends with its tests passing under `go test -race`.
       forward. A row now holds each term's address as a field of its own,
       in registers for up to three terms. Dense costs 6.4 ns per entity,
       7.4 ns observed, against 0.5 ns for a slice loop.
-8. **Refs.** Designed first, then built.
+8. **Refs.** Built as above. Reading a ref by handle costs 2.4 ns; setting
+   one through its component, observed, 12 ns.
 
 Networking comes after, as its own design on top of these pieces.
