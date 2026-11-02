@@ -110,7 +110,7 @@ func match(terms []term, addresses []unsafe.Pointer, e Entity) bool {
 		}
 	}
 	for _, t := range terms {
-		if t.mode == termWrite && t.store.observed {
+		if t.mode == termWrite && t.store.observed() {
 			row, _ := t.store.row(e)
 			t.store.markChanged(row)
 		}

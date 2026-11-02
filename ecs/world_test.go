@@ -121,3 +121,65 @@ func TestRegisterWorldCompositionErrors(t *testing.T) {
 		}})
 	})
 }
+
+// TestWorldAllocatesNothingOnceGrown covers what the other allocation tests
+// leave out: spawning and despawning directly, the typed and raw World
+// methods, and commits, with observation on and off. Observing, a round also
+// abandons reservations, which the reset reclaims; without observation such
+// an index is lost, so the round abandons none.
+func TestWorldAllocatesNothingOnceGrown(t *testing.T) {
+	for _, observing := range []bool{false, true} {
+		o := spawnCommands(t)
+		if observing {
+			ObservationReset(nil, kernel.NoArg{}, o.world)
+		}
+		w := o.world
+		healthID := w.ComponentID[health]()
+		var mask game
+		maskSet(&mask, healthID)
+		values := []byte{1, 0, 0, 0}
+		spawned := make([]Entity, 0, 300)
+		round := func() {
+			spawned = spawned[:0]
+			for i := range 100 {
+				e := w.Spawn()
+				w.Add(e, health{Points: int32(i)})
+				w.Write[health](e).Points++
+				if !w.Has[health](e) || w.Get[health](e) == nil {
+					t.Fatal("a spawned entity lost its health")
+				}
+				w.WriteRaw(e, healthID)[0]++
+				w.AddRaw(e, healthID, w.ReadRaw(e, healthID))
+				spawned = append(spawned, e)
+			}
+			for range 50 {
+				spawned = append(spawned, w.SpawnRaw(mask, values))
+			}
+			for i := range 50 {
+				e := o.first.Reserve()
+				o.first.Spawn(e)
+				o.first.Add(e, health{Points: 1})
+				o.first.Set(spawned[i], health{Points: 2})
+				o.second.Remove[health](spawned[i+50])
+				spawned = append(spawned, e)
+				if observing {
+					o.second.Reserve() // abandoned, reclaimed by the reset
+				}
+			}
+			o.sink.Commit()
+			for _, e := range spawned {
+				w.Despawn(e)
+			}
+			if observing {
+				for range o.changes.All() {
+				}
+				ObservationReset(nil, kernel.NoArg{}, w)
+			}
+		}
+		round()
+		round()
+		if got := testing.AllocsPerRun(20, round); got != 0 {
+			t.Fatalf("observing %v: a round of spawns, typed and raw access, commits and despawns allocated %v times", observing, got)
+		}
+	}
+}

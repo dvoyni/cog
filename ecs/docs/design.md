@@ -486,7 +486,7 @@ Each step ends with its tests passing under `go test -race`.
       and settling shifts the whole free list, so `BenchmarkSpawnDespawn`
       costs about 3.7 µs per entity, quadratic in the free entities. Taking
       from the back (LIFO reuse) makes settling a truncation.
-   2. **Observation behind the store.** The store yields its own changes
+   2. **Observation behind the store.** Built, with a row cursor. The store yields its own changes
       (owner, kind, value and shadow addresses, the bytewise skip
       included) and holds one observation state instead of two flags;
       `Changes[W, T]` only converts to `T`.

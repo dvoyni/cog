@@ -1,6 +1,7 @@
 package ecs
 
 import (
+	"math/rand/v2"
 	"testing"
 
 	"github.com/dvoyni/cog/kernel"
@@ -100,4 +101,121 @@ func TestRegisterComponentCompositionErrors(t *testing.T) {
 			RegisterComponent[small, position](c)
 		})
 	})
+}
+
+// storeChanges answers s's changes by entity, converted to health.
+func storeChanges(s *store) map[Entity]Change[health] {
+	got := map[Entity]Change[health]{}
+	for row, change, ok := s.nextChange(0); ok; row, change, ok = s.nextChange(row + 1) {
+		converted := Change[health]{Kind: change.kind, Value: *(*health)(change.value)}
+		if change.previous != nil {
+			converted.Previous = *(*health)(change.previous)
+		}
+		got[change.owner] = converted
+	}
+	return got
+}
+
+// TestStoreChangesMatchAReferenceModel drives one store directly. Its
+// entities share 16 indices: despawning one moves on to the next generation
+// at its index, so a removed row in the tail and a live row often share an
+// index.
+func TestStoreChangesMatchAReferenceModel(t *testing.T) {
+	for seed := range uint64(10) {
+		s := &newStoreOf[game, health](0).store
+		s.registerObserver()
+		m := &changeModel{atReset: map[Entity]health{}, now: map[Entity]health{}, last: map[Entity]health{}}
+		random := rand.New(rand.NewPCG(seed, 5))
+		var generations [16]uint32
+		for i := range generations {
+			generations[i] = 1
+		}
+		pick := func() Entity {
+			index := random.IntN(len(generations))
+			return makeEntity(uint32(index), generations[index])
+		}
+		put := func(e Entity, value health) {
+			row, ok := s.row(e)
+			if ok {
+				s.markChanged(row)
+			} else {
+				row = s.add(e)
+			}
+			*(*health)(s.address(row)) = value
+			m.now[e] = value
+		}
+		for range 10 { // before observation starts, so every row counts as added
+			put(pick(), health{Points: random.Int32N(4)})
+		}
+		s.startObservation()
+		for step := range 5000 {
+			switch op := random.IntN(100); {
+			case op < 35:
+				put(pick(), health{Points: random.Int32N(4)})
+			case op < 55:
+				e := pick()
+				if row, ok := s.row(e); ok {
+					s.remove(e, row)
+					m.remove(e)
+				}
+			case op < 65:
+				e := pick()
+				if row, ok := s.row(e); ok {
+					s.remove(e, row)
+					m.remove(e)
+				}
+				generations[e.index()]++ // despawned: the index moves on
+			case op < 92:
+				e := pick()
+				if row, ok := s.row(e); ok {
+					s.markChanged(row)
+					value := (*health)(s.address(row))
+					value.Points = random.Int32N(4) // often back to what it was
+					m.now[e] = *value
+				}
+			default:
+				s.resetObservation()
+				m.atReset = map[Entity]health{}
+				for e, value := range m.now {
+					m.atReset[e] = value
+				}
+				m.last = map[Entity]health{}
+			}
+			got := storeChanges(s)
+			want := m.expected()
+			if len(got) != len(want) {
+				t.Fatalf("seed %d step %d: %d changes, want %d:\n got %v\nwant %v", seed, step, len(got), len(want), got, want)
+			}
+			for e, change := range want {
+				if got[e] != change {
+					t.Fatalf("seed %d step %d: entity %#x changed %+v, want %+v", seed, step, uint64(e), got[e], change)
+				}
+			}
+			for e, value := range m.now {
+				if row, ok := s.row(e); !ok || *(*health)(s.address(row)) != value {
+					t.Fatalf("seed %d step %d: entity %#x lost its value %v", seed, step, uint64(e), value)
+				}
+			}
+			if s.len() != len(m.now) {
+				t.Fatalf("seed %d step %d: %d live rows, want %d", seed, step, s.len(), len(m.now))
+			}
+		}
+	}
+}
+
+func TestStoreObservesOnlyWithAnObserver(t *testing.T) {
+	s := &newStoreOf[game, health](0).store
+	s.add(makeEntity(1, 1))
+	s.startObservation()
+	if s.observed() || len(storeChanges(s)) != 0 {
+		t.Fatal("a store nobody observes started observing")
+	}
+	s.registerObserver()
+	if s.observed() {
+		t.Fatal("a store observed before the world's first reset")
+	}
+	s.startObservation()
+	if !s.observed() || storeChanges(s)[makeEntity(1, 1)].Kind != ChangeAdded {
+		t.Fatal("the first reset did not start observing with every row added")
+	}
 }

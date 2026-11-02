@@ -1,6 +1,7 @@
 package ecs
 
 import (
+	"bytes"
 	"unsafe"
 
 	"github.com/dvoyni/cog/kernel"
@@ -39,19 +40,38 @@ type store struct {
 	valueChunks []unsafe.Pointer
 	// liveRows counts the live rows, which come first. Only an observed
 	// store has rows after them: its tail.
-	liveRows int
-	// observerRegistered is set once a system takes Changes of this store;
-	// observed, once it observes, from the world's first observation reset.
-	observerRegistered bool
-	observed           bool
-	shadowChunks       []unsafe.Pointer
-	rowStates          container.Array[rowState]
+	liveRows     int
+	observation  observationState
+	shadowChunks []unsafe.Pointer
+	rowStates    container.Array[rowState]
 	// newChunk allocates one chunk of values. It is typed, made where the
 	// component's type is known.
 	newChunk func() unsafe.Pointer
 	// lockRead and lockWrite declare a lock on this store's kernel resource,
 	// for code that knows the component only by its reflect.Type.
 	lockRead, lockWrite func(access *kernel.Access)
+}
+
+// observationState is whether a store keeps changes for observers.
+type observationState uint8
+
+const (
+	// unobserved: no system takes Changes of the store.
+	unobserved observationState = iota
+	// observerWaiting: a system takes Changes of the store, and the store
+	// observes from the world's first observation reset.
+	observerWaiting
+	// observed: the store keeps a shadow and a state per row.
+	observed
+)
+
+// rowChange is one row's change in an observation window, as the store
+// reports it without the component's type: its owner, and the addresses of
+// its value and of its value as of the last reset, nil for an addition.
+type rowChange struct {
+	owner           Entity
+	kind            ChangeKind
+	value, previous unsafe.Pointer
 }
 
 // rowState is what happened to an observed row in this observation window.
@@ -201,7 +221,7 @@ func (s *store) shadow(row int) unsafe.Pointer {
 // add gives e a live row, whose value is left as it was, and returns it. e
 // must have none. A row e left in the tail this window is brought back.
 func (s *store) add(e Entity) int {
-	if s.observed {
+	if s.observation == observed {
 		if row, ok := s.tailRow(e); ok {
 			s.swap(row, s.liveRows)
 			state := s.rowStates.At(s.liveRows)
@@ -217,12 +237,12 @@ func (s *store) add(e Entity) int {
 	row := s.owners.Append(e)
 	if s.component.Size != 0 && row>>rowShift == len(s.valueChunks) {
 		s.valueChunks = append(s.valueChunks, s.newChunk())
-		if s.observed {
+		if s.observation == observed {
 			s.shadowChunks = append(s.shadowChunks, s.newChunk())
 		}
 	}
 	*s.rowByIndex.atOrCreate(e.index()) = uint32(row) + 1
-	if s.observed {
+	if s.observation == observed {
 		s.rowStates.Append(rowAdded)
 		s.swap(row, s.liveRows)
 	}
@@ -235,7 +255,7 @@ func (s *store) add(e Entity) int {
 func (s *store) remove(e Entity, row int) {
 	last := s.liveRows - 1
 	s.liveRows = last
-	if s.observed {
+	if s.observation == observed {
 		s.swap(row, last)
 		state := s.rowStates.At(last)
 		if *state == rowAdded {
@@ -256,10 +276,58 @@ func (s *store) remove(e Entity, row int) {
 	*s.rowByIndex.at(e.index()) = 0
 }
 
+// registerObserver records that a system takes Changes of the store, so it
+// observes from the world's first observation reset.
+func (s *store) registerObserver() {
+	if s.observation == unobserved {
+		s.observation = observerWaiting
+	}
+}
+
+// observed reports whether the store keeps changes, so writes to it are
+// marked.
+func (s *store) observed() bool {
+	return s.observation == observed
+}
+
+// nextChange answers the first change of the window at row or after it, and
+// the row it is at, or false if there is none: an added, changed or removed
+// row, skipping a changed row whose bytes equal its shadow. Walking from row
+// 0, each next one from the row after the last, yields the window's changes
+// in row order. A store that does not observe has none.
+func (s *store) nextChange(row int) (int, rowChange, bool) {
+	if s.observation != observed {
+		return 0, rowChange{}, false
+	}
+	size := s.component.Size
+	for ; row < s.owners.Len(); row++ {
+		var change rowChange
+		switch *s.rowStates.At(row) {
+		case rowAdded:
+			change.kind = ChangeAdded
+		case rowChanged:
+			change.previous = s.shadow(row)
+			if bytes.Equal(unsafe.Slice((*byte)(s.address(row)), size), unsafe.Slice((*byte)(change.previous), size)) {
+				continue
+			}
+			change.kind = ChangeChanged
+		case rowRemoved:
+			change.kind = ChangeRemoved
+			change.previous = s.shadow(row)
+		default:
+			continue
+		}
+		change.owner = *s.owners.At(row)
+		change.value = s.address(row)
+		return row, change, true
+	}
+	return 0, rowChange{}, false
+}
+
 // markChanged marks live row changed, unless it was added this window. It
 // does nothing in a store nobody observes.
 func (s *store) markChanged(row int) {
-	if !s.observed {
+	if s.observation != observed {
 		return
 	}
 	if state := s.rowStates.At(row); *state == rowUnchanged {
@@ -267,10 +335,14 @@ func (s *store) markChanged(row int) {
 	}
 }
 
-// startObservation starts observing, every row counting as added. The store
-// has no tail yet.
+// startObservation starts observing if a system takes Changes of the store,
+// every row counting as added. It is the world's first observation reset:
+// the store has no tail yet.
 func (s *store) startObservation() {
-	s.observed = true
+	if s.observation != observerWaiting {
+		return
+	}
+	s.observation = observed
 	for range s.valueChunks {
 		s.shadowChunks = append(s.shadowChunks, s.newChunk())
 	}
@@ -282,7 +354,7 @@ func (s *store) startObservation() {
 // resetObservation ends the observation window: each live row's shadow
 // takes its value, and the tail is dropped.
 func (s *store) resetObservation() {
-	if !s.observed {
+	if s.observation != observed {
 		return
 	}
 	size := s.component.Size

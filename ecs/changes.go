@@ -1,9 +1,7 @@
 package ecs
 
 import (
-	"bytes"
 	"iter"
-	"unsafe"
 
 	"github.com/dvoyni/cog/kernel"
 )
@@ -41,7 +39,7 @@ type Changes[W WorldID, T any] struct {
 func (Changes[W, T]) Declare(access *kernel.Access) Changes[W, T] {
 	access.Read[*world[W]]()
 	s := &access.Read[*storeOf[W, T]]().Get().store
-	s.observerRegistered = true
+	s.registerObserver()
 	return Changes[W, T]{store: s}
 }
 
@@ -50,30 +48,12 @@ func (Changes[W, T]) Declare(access *kernel.Access) Changes[W, T] {
 // change; the comparison is bytewise, so -0.0 and 0.0 differ.
 func (c Changes[W, T]) All() iter.Seq2[Entity, Change[T]] {
 	return func(yield func(Entity, Change[T]) bool) {
-		s := c.store
-		if !s.observed {
-			return
-		}
-		size := s.component.Size
-		for row := range s.owners.Len() {
-			var change Change[T]
-			switch *s.rowStates.At(row) {
-			case rowAdded:
-				change.Kind = ChangeAdded
-			case rowChanged:
-				if bytes.Equal(unsafe.Slice((*byte)(s.address(row)), size), unsafe.Slice((*byte)(s.shadow(row)), size)) {
-					continue
-				}
-				change.Kind = ChangeChanged
-				change.Previous = *(*T)(s.shadow(row))
-			case rowRemoved:
-				change.Kind = ChangeRemoved
-				change.Previous = *(*T)(s.shadow(row))
-			default:
-				continue
+		for row, change, ok := c.store.nextChange(0); ok; row, change, ok = c.store.nextChange(row + 1) {
+			converted := Change[T]{Kind: change.kind, Value: *(*T)(change.value)}
+			if change.previous != nil {
+				converted.Previous = *(*T)(change.previous)
 			}
-			change.Value = *(*T)(s.address(row))
-			if !yield(*s.owners.At(row), change) {
+			if !yield(change.owner, converted) {
 				return
 			}
 		}

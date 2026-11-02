@@ -322,14 +322,11 @@ func (w *world[W]) addAll(e Entity, mask *W, values []byte) {
 // resetObservation ends the observation window: every observed store's
 // shadows take their rows' values and its tail is dropped, and the entity
 // table ends its window. The first reset turns observation on instead: each
-// store with an observer starts observing, every row it holds counting as
-// added in the first window.
+// store with an observer starts observing.
 func (w *world[W]) resetObservation() {
 	if w.entities.endWindow() {
 		for _, s := range w.stores {
-			if s.observerRegistered {
-				s.startObservation()
-			}
+			s.startObservation()
 		}
 		return
 	}
