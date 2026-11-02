@@ -66,6 +66,8 @@ func (c *Configurator) Resource[T any]() (T, bool) {
 	return *r.value.(*T), true
 }
 
+//go:generate go run ./internal/generate
+
 // RegisterTask registers a task of this kernel and returns it for
 // scheduling. constructor runs once, here: it requests from its Access the
 // handles the body uses, which declares the task's locks, and returns the

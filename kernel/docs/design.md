@@ -48,7 +48,7 @@ Supervisor ── lifetime, GetKernel and Broadcast, LogHandler
 | `Logger`     | A kernel's way to the `LogHandler`, from `Kernel.Logger()`: `LogErr`, `LogWarn`, `LogDebug`, their `Once` forms and `ForgetLogOnce`. |
 | `Signal`     | Reusable completion signal for code outside the kernel; armed by `Kernel.Notify`, read through `C()`. |
 | `Executor`   | One publication's work batch, handed to its handlers: `Schedule`, `ScheduleAfter`, `Join`, `Publish`. |
-| `Configurator` | Registration surface given to each plugin once: `InitResource`, `Resource`, `RegisterTask`, `PinToMainThread`, `Subscribe`, `OrderSubscriptions`. |
+| `Configurator` | Registration surface given to each plugin once: `InitResource`, `Resource`, `RegisterTask`, `RegisterTask0`…`RegisterTask8`, `PinToMainThread`, `Subscribe`, `OrderSubscriptions`. |
 | `Access`     | Handed to a task's constructor: `Read[T]`, `Write[T]` and `Use(task)` declare its locks and return what the body uses. |
 | `*Task[A, B]`| Registered code with pointer-free arg `A` and pointer-free result `B`; returned by `RegisterTask`. |
 | `Job[T]`     | One scheduled run answering `T`; what `ScheduleAfter` feeds from. |
@@ -167,6 +167,13 @@ c.announce = configurator.RegisterTask(func(access *kernel.Access) kernel.TaskBo
   `TaskBody[A, B]`, `func(k *Kernel, arg A) B`, closing over its handles. A
   task that locks nothing requests no handle, takes nothing `NoArg`, answers
   nothing `NoResult`.
+- **A plain function as a task.** `RegisterTask0` … `RegisterTask8` take a
+  function of the form kernel, arg, zero to eight parameters, result. Each
+  parameter is a `Parameter`, a handle type whose zero value's
+  `Declare(access)` declares its locks and returns it bound; `Read` and
+  `Write` are parameters, and other packages build their own on `Access`.
+  The constructor is written for you, so this is the common form; a task that
+  needs `Use` or setup of its own is written with `RegisterTask`.
 - **Calling another task inline.** `access.Use(task)` folds `task`'s locks
   into this task's and returns the direct call, which the body runs inside its
   own job with those locks already held: no scheduling, no allocation, the

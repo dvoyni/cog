@@ -94,14 +94,22 @@ func maskPosition(index int) (word int, bit uint64) {
 	return index / 64, uint64(1) << (index % 64)
 }
 
+// Parameter is the constraint over the parameters of a function registered
+// with RegisterTask0 to RegisterTask8: a handle type whose zero value
+// declares, from access, the locks it needs and returns itself bound to what
+// it reaches. Read and Write are parameters, and so are the handles other
+// packages build on Access.
+type Parameter[P any] interface {
+	Declare(access *Access) P
+}
+
 // Read is a handle to a resource locked for read, returned by Access.Read.
 type Read[T any] struct {
 	value *T
 }
 
-// Declare is access.Read[T](), for code that builds a constructor from
-// handle types, such as a wrapper filling a function's parameters: it is
-// called on the zero handle and returns the bound one.
+// Declare is access.Read[T](), making Read a Parameter: it is called on the
+// zero handle and returns the bound one.
 func (Read[T]) Declare(access *Access) Read[T] { return access.Read[T]() }
 
 // Get reads the resource. It is valid only while the owning job runs.

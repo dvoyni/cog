@@ -4,6 +4,7 @@
 
 - A composition error (registering something invalid, a bad `Spawn` argument) panics. A runtime failure goes to `LogErr` and the kernel carries on.
 - Task args, task results and events are pointer-free: no pointers, slices, maps, strings, interfaces, channels or funcs at any depth.
+- `configurator_gen.go` is written by `internal/generate`: change the generator and run `go generate`, never the output.
 
 ## Tests
 

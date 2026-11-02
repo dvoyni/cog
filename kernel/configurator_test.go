@@ -178,18 +178,16 @@ func TestRegisterTaskBuildsLockMasks(t *testing.T) {
 	}
 }
 
-func TestDeclareBindsHandlesAndLocks(t *testing.T) {
+func copyPosition(k *Kernel, arg NoArg, pos Read[position], hp Write[health]) NoResult {
+	hp.Set(health{Points: int32(pos.Get().X)})
+	return NoResult{}
+}
+
+func TestRegisterTaskNDeclaresItsParameters(t *testing.T) {
 	c := newTestConfigurator()
 	c.InitResource(position{X: 2}) // resource 0, read
 	c.InitResource(health{})       // resource 1, written
-	task := c.RegisterTask(func(access *Access) TaskBody[NoArg, NoResult] {
-		pos := Read[position]{}.Declare(access)
-		hp := Write[health]{}.Declare(access)
-		return func(k *Kernel, arg NoArg) NoResult {
-			hp.Set(health{Points: int32(pos.Get().X)})
-			return NoResult{}
-		}
-	})
+	task := c.RegisterTask2(copyPosition)
 	if task.locks.reads[0] != 0b01 || task.locks.writes[0] != 0b10 {
 		t.Fatalf("masks are reads %b writes %b, want 01 and 10", task.locks.reads, task.locks.writes)
 	}
@@ -197,6 +195,7 @@ func TestDeclareBindsHandlesAndLocks(t *testing.T) {
 	if got, _ := c.Resource[health](); got.Points != 2 {
 		t.Fatalf("resource holds %d points, want 2", got.Points)
 	}
+	expectPanic(t, "a nil task function", func() { c.RegisterTask0[NoArg, NoResult](nil) })
 }
 
 func TestRegisterTaskReadAndWriteIsWrite(t *testing.T) {

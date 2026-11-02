@@ -5,12 +5,12 @@ The ECS is Cog's entity component system: worlds of entities whose data lives in
 ## Worlds and entities
 
 **World**:
-One set of entities and their components inside a kernel, named by its mask type. A kernel may hold several worlds.
+One set of entities and their components inside a kernel, named by its world ID. A kernel may hold several worlds.
 _Avoid_: Scene, registry, kernel
 
-**Mask type**:
-A named array of words, such as `type Game [2]uint64`, that both names a world and bounds how many component types it holds.
-_Avoid_: World tag, world ID
+**World ID**:
+A type that names a world, such as `type Game [2]uint64`. Its values are the world's component masks, one per entity, so its size bounds how many component types the world holds.
+_Avoid_: World tag, mask type
 
 **Entity**:
 An identity in one world: an index and a generation. It holds no data itself.
@@ -39,7 +39,7 @@ _Avoid_: Pointer, reference, asset
 ## Systems
 
 **System**:
-A function of a fixed form (kernel, arg, then parameters, returning a result) that becomes a kernel task once wrapped.
+A function of a fixed form (kernel, arg, then parameters, returning a result) that is registered as a kernel task.
 _Avoid_: Handler, job, behaviour
 
 **System parameter**:

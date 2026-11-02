@@ -7,7 +7,7 @@ knows nothing about networking, rendering or any other consumer: those build
 on the generic pieces here (type-erased row access, change detection, command
 buffers).
 
-Status: agreed, not implemented. See [Work order](#work-order).
+Status: agreed; steps 1 to 3 of the [Work order](#work-order) are built.
 
 ## Constraints
 
@@ -38,26 +38,26 @@ Kernel
 
 | Type | Role |
 |---|---|
-| `Mask` | Constraint over the mask types: `~[1]uint64 \| ~[2]uint64 \| ~[4]uint64 \| ~[8]uint64`. |
+| `WorldID` | Constraint over world IDs: `~[1]uint64 \| ~[2]uint64 \| ~[4]uint64 \| ~[8]uint64`. |
 | `World[W]` | The barrier: write on the world. Spawn, despawn, `CreateAt`, type-erased row access. |
 | `Store[W, T]` | Writes `T`'s store by entity: `Get` a pointer, `Write`, `Add`, `Remove`. |
 | `Lookup[W, T]` | Reads `T`'s store by entity: `Has`, and `Get` a copy. |
-| `Query1[W, A]` … `Query8[W, ...]` | Walks the entities holding every term. `*T` writes, `T` reads a copy. |
+| `Query1[W, A]` … `Query8[W, ...]` | Walks the entities holding every term, yielding each entity and its row. `*T` writes, `T` reads a copy. |
 | `Changes[W, T]` | Reads what changed in `T`'s store this observation window, and turns observation on for it. |
 | `CommandBuffer[W, Tag]` | Records into the command buffer `Tag` of world `W`, holding a read on it. |
 | `CommandSink[W, Tag]` | Applies that buffer to its world: the write on the buffer and the barrier. |
 | `Entity` | 64-bit `{index:32, gen:32}`, layout private; `NoEntity` is 0. |
-| `SystemTask0` … `SystemTask8` | Wrap a system function into a `kernel.TaskConstructorFunc[A, B]`. |
 | `ObservationReset[W]` | The system that ends an observation window. |
 
 ## Worlds
 
-- **A world is named by its mask type.** `type Game [2]uint64` declares a
-  world that holds up to 128 component types. Its identity and its capacity
+- **A world is named by its world ID.** `type Game [2]uint64` declares a
+  world that holds up to 128 component types: the ID's values are also the
+  world's per-entity component masks. Its identity and its capacity
   are one type parameter, so every handle names its world once:
   `Query2[Game, *Position, Velocity]`. Two worlds of one size are two named
   types: `type Sim [2]uint64`, `type View [2]uint64`. Registering more
-  component types than the mask holds is a composition error, and panics.
+  component types than the ID holds is a composition error, and panics.
 - **Mask operations are generic, not an interface.** The words are reached
   through `unsafe.Slice` with a length fixed per instantiation, so every
   operation on a mask compiles for its size and inlines; nothing dispatches
@@ -67,7 +67,7 @@ Kernel
   without changing any handle: make the constraint `comparable`, check at
   registration that `W` is an array of `uint64` (any length), and keep
   `unsafe.Sizeof(W)/8` as the word count, still a constant per instantiation.
-  The cost is a wrong mask type caught at spawn rather than at compile time,
+  The cost is a wrong world ID caught at spawn rather than at compile time,
   and wider masks make every per-entity mask operation (add, remove, despawn,
   type-erased visits) touch more words, so a larger limit is a measurement
   question.
@@ -99,7 +99,9 @@ Kernel
   the server never uses, and places mirrored ones exactly where the server has
   them.
 - **`CreateAt(e)`** makes `e` alive at its index and generation, for mirrors
-  and for loading a save. The index must be free.
+  and for loading a save. The index must hold no live entity and lie outside
+  the allocation range, so it never collides with an index the world hands
+  out or has reserved.
 - **FIFO reuse.** A despawned index goes to the back of the free list, and
   only at the next observation reset, so an index is not reused in the
   observation window it died in, and reuse order is deterministic.
@@ -166,27 +168,52 @@ A system is a function of one fixed form:
 
 ```go
 func move(k *kernel.Kernel, t Tick, q ecs.Query2[Game, *Position, Velocity], settings kernel.Read[Settings]) kernel.NoResult {
-	for pos, vel := range q.All() {
+	for _, row := range q.All() {
+		pos, vel := row.Get()
 		pos.X += vel.X * t.Dt * settings.Get().Speed
 	}
 	return kernel.NoResult{}
 }
 
 // in Init:
-c.move = configurator.RegisterTask(ecs.SystemTask2(move))
+c.move = configurator.RegisterTask2(move)
 ```
 
 - **The form is always the same:** the kernel, the job's arg, up to eight
   system parameters, and the job's result. A system that takes nothing takes
   `kernel.NoArg`; one that answers nothing returns `kernel.NoResult`.
-- **`SystemTask0` … `SystemTask8`** take a system and return a
-  `kernel.TaskConstructorFunc[A, B]`, which goes straight to `RegisterTask`.
-  Go generics are not variadic, so there is one per parameter count.
-- **A system parameter is any type with `Declare(*kernel.Access) P`.** The
-  constructor calls it once per parameter, at registration: that declares the
-  parameter's locks and binds it to its stores. The body only calls the
-  system. Every ECS parameter type implements it, and so do the kernel's
-  `Read[R]` and `Write[R]`, so resources are taken as they are in any task.
+- **A system is registered as any task is,** with the kernel's
+  `RegisterTask0` … `RegisterTask8`, which take a plain function. The ECS has
+  no wrapper of its own: a system is a task whose parameters include ECS
+  handles.
+- **A system parameter is a `kernel.Parameter`:** a type with
+  `Declare(*kernel.Access) P`. Registration calls it once per parameter on
+  its zero value: that declares the parameter's locks and binds it to its
+  stores. The body only calls the system. Every ECS handle is one, and so are
+  the kernel's `Read[R]` and `Write[R]`, so resources are taken as in any
+  task.
+- **A system that calls another task directly** (`Access.Use`) is registered
+  with the kernel's `RegisterTask` instead, binding its handles by hand.
+  `Use` needs a particular `*Task`, which a parameter declared from its zero
+  value cannot know, so `RegisterTaskN` cannot offer it. Each handle's
+  `Declare` is the same call `RegisterTaskN` makes, so locks, the direct call
+  and the hot path are as they would be:
+
+  ```go
+  c.think = configurator.RegisterTask(func(access *kernel.Access) kernel.TaskBody[kernel.NoArg, kernel.NoResult] {
+  	q := ecs.Query1[Game, *Brain]{}.Declare(access)
+  	positions := ecs.Lookup[Game, Position]{}.Declare(access)
+  	findPath := access.Use(c.findPath)
+  	return func(k *kernel.Kernel, _ kernel.NoArg) kernel.NoResult {
+  		for e, row := range q.All() {
+  			brain := row.Get()
+  			from, _ := positions.Get(e)
+  			brain.Path = findPath(k, PathArg{From: from, To: brain.Goal})
+  		}
+  		return kernel.NoResult{}
+  	}
+  })
+  ```
 - **No reflection on the hot path.** Reflection runs at registration only
   (term modes, field offsets). The body is a direct call with values bound
   once.
@@ -204,8 +231,10 @@ c.move = configurator.RegisterTask(ecs.SystemTask2(move))
   reflection at registration.
 - **Filters** `With[T]` and `Without[T]` are terms that yield nothing and
   read `T`'s store.
-- **`All()`** is a range-over-func iterator yielding the entity and the
-  terms. It allocates nothing.
+- **`All()`** is a range-over-func iterator yielding the entity and its row;
+  `row.Get()` returns the terms. Go ranges over at most two values, so the
+  terms come through the row, the same way for every query size. It
+  allocates nothing.
 - **The smallest store drives.** The others are probed by index.
 - **Iteration goes backwards,** so removing the current entity from any
   store, the driver included, is safe. Adding to a queried store, or removing
@@ -256,7 +285,7 @@ c.move = configurator.RegisterTask(ecs.SystemTask2(move))
 - **`ObservationReset[W]`** is a system the ECS provides:
 
   ```go
-  c.reset = configurator.RegisterTask(ecs.SystemTask1(ecs.ObservationReset[Game]))
+  c.reset = configurator.RegisterTask1(ecs.ObservationReset[Game])
   ```
 
   It takes `World[W]`, the barrier. It copies changed and added rows into each observed
@@ -401,16 +430,16 @@ Each step ends with its tests passing under `go test -race`.
 2. **Kernel API.** Rename the declare function type to
    `TaskConstructorFunc[A, B]`; give `Read[T]` and `Write[T]` an exported
    `Declare(*Access)`.
-3. **Core.** The `ecs` module; `Mask`; `Entity` and the entity table
+3. **Core.** The `ecs` module; `WorldID`; `Entity` and the entity table
    (allocation range, `CreateAt`, FIFO reuse, reservations); `World[W]`, the
    plugin, `RegisterWorld` and the component registry; `Store[W, T]`, tags, `Lookup`; `Query1`…`Query8`
-   with `With` and `Without`; `SystemTask0`…`SystemTask8`. Alloc tests for
+   with `With` and `Without`; `RegisterTask0`…`RegisterTask8` in the kernel. Alloc tests for
    queries and system calls.
 4. **Change detection.** Shadows and row states, `Changes[W, T]`,
    `ObservationReset[W]`. A property test against a reference model.
 5. **Commands.** `RegisterCommandBuffer`, `CommandBuffer[W, Tag]`, lanes,
    `CommandSink[W, Tag]`, type-erased row access under the barrier, spawning from a mask
-   and bytes. A property test of buffered changes from several systems, and
+   and bytes, field offsets in the registry. A property test of buffered changes from several systems, and
    same results with one worker and many.
 6. **Refs.** Designed first, then built.
 7. **Benchmarks.** Iteration, change detection, commits; measured against

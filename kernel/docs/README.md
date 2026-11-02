@@ -292,6 +292,38 @@ A task is the only code that touches resources. `RegisterTask` runs its
 constructor once; each handle it requests declares a lock, and the body
 it returns closes over those handles.
 
+A plain function whose parameters are handles registers without writing the
+constructor: `RegisterTask0` … `RegisterTask8` declare each parameter.
+
+```go
+func heal(k *kernel.Kernel, amount int32, health kernel.Write[Health]) kernel.NoResult {
+	h := health.Get()
+	h.Points += amount
+	health.Set(h)
+	return kernel.NoResult{}
+}
+
+p.heal = c.RegisterTask1(heal)
+```
+
+A task that calls another directly with `Use` writes its constructor with
+`RegisterTask`, since a parameter declared from its zero value cannot know
+which task to use. Its handles are bound with the same `Declare` the
+numbered forms call:
+
+```go
+p.healAll = c.RegisterTask(func(access *kernel.Access) kernel.TaskBody[int32, kernel.NoResult] {
+	roster := kernel.Read[Roster]{}.Declare(access)
+	heal := access.Use(p.heal)
+	return func(k *kernel.Kernel, amount int32) kernel.NoResult {
+		for range roster.Get().Count {
+			heal(k, amount)
+		}
+		return kernel.NoResult{}
+	}
+})
+```
+
 ```go
 p.damage = c.RegisterTask(func(access *kernel.Access) kernel.TaskBody[int32, Damaged] {
 	health := access.Write[Health]()
