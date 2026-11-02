@@ -7,7 +7,7 @@ knows nothing about networking, rendering or any other consumer: those build
 on the generic pieces here (type-erased row access, change detection, command
 buffers).
 
-Status: agreed; steps 1 to 5 of the [Work order](#work-order) are built.
+Status: agreed; steps 1 to 6 of the [Work order](#work-order) are built.
 
 ## Constraints
 
@@ -466,8 +466,39 @@ Each step ends with its tests passing under `go test -race`.
    `CommandSink[W, Tag]`, type-erased row access under the barrier, spawning from a mask
    and bytes. A property test of buffered changes from several systems, and
    same results with one worker and many.
-6. **Refs.** Designed first, then built.
-7. **Benchmarks.** Iteration, change detection, commits; measured against
-   hand-written loops.
+6. **Benchmarks.** Iteration, change detection, commits; measured against
+   hand-written loops. `docs/benchmarks-baseline.txt` holds ten runs from
+   before step 7; a change is checked with
+   `go test -run '^$' -bench . -count 10 > new.txt` and
+   `benchstat docs/benchmarks-baseline.txt new.txt`.
+7. **Deepening.** Each is designed with the user first, then built, and
+   measured against step 6:
+   1. **An entity allocator.** One module owns allocation, reservations,
+      windowed reuse and the generation burn, which are now split across
+      `Spawn`, despawn, the observation reset and the commit, each branching
+      on whether the world observes. Callers say what happened (reserved,
+      spawned, released, window ended); the allocator decides the
+      settling. The alive check stays one load. The baseline shows why:
+      in a world that does not observe, every `Spawn` and despawn settles,
+      and settling shifts the whole free list, so `BenchmarkSpawnDespawn`
+      costs about 3.7 µs per entity, quadratic in the free entities. The
+      free list wants a head cursor, not a shift.
+   2. **Observation behind the store.** The store yields its own changes
+      (owner, kind, value and shadow addresses, the bytewise skip
+      included) and holds one observation state instead of two flags;
+      `Changes[W, T]` only converts to `T`.
+   3. **One row-access path.** The store answers get, write (marked) and
+      put by entity; `Store`, `Lookup`, typed and raw `World`, and the
+      commit only declare locks and convert.
+   4. **Walking a mask.** `mask.go` yields a mask's component IDs in
+      ascending order, for despawn, checking and spawning from bytes, and
+      later refs release; kept only if it inlines.
+   5. **The query walk.** A dense two-term query costs about 15 ns per
+      entity against 0.5 ns for a slice loop. `match` probes the driver
+      through `rowByIndex` though its row is known, probes each write term
+      a second time to mark it, and resolves every row's chunk on its own;
+      a walk by driver chunk that probes only the other terms is the first
+      thing to measure.
+8. **Refs.** Designed first, then built.
 
 Networking comes after, as its own design on top of these pieces.
