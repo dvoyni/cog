@@ -154,13 +154,6 @@ func (s *Supervisor) Spawn(config map[PluginName]any, workerCount int, plugins .
 	if workerCount < 1 {
 		panic(fmt.Sprintf("kernel: spawning a kernel with %d workers", workerCount))
 	}
-	for i, plugin := range plugins {
-		for _, earlier := range plugins[:i] {
-			if earlier.Name() == plugin.Name() {
-				panic(fmt.Sprintf("kernel: spawning a kernel with two plugins named %q", plugin.Name()))
-			}
-		}
-	}
 	if s.quitting.Load() {
 		return 0, ErrQuitting
 	}

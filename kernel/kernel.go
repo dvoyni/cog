@@ -1,7 +1,6 @@
 package kernel
 
 import (
-	"fmt"
 	"reflect"
 
 	"github.com/dvoyni/cog/kernel/internal/concurrent"
@@ -26,11 +25,6 @@ type Kernel struct {
 	supervisor *Supervisor
 	id         KernelID
 	logger     *Logger
-	// plugins is the order Init and Start ran in; Stop and Destroy run it in
-	// reverse.
-	plugins []Plugin
-	// config holds each plugin's part by its name, which its Init is handed.
-	config map[PluginName]any
 	// workerCount is how many goroutines run k's jobs.
 	workerCount int
 	// resources holds every resource by its type. Only Init adds to it, so it
@@ -58,6 +52,9 @@ type Kernel struct {
 	// locks, and hands it to the runner.
 	combiner lockCombiner
 
+	// lifecycle runs k's plugins through Init, Start, Stop and Destroy.
+	lifecycle lifecycle
+
 	// runner runs k's jobs, on its workers or on the main thread for pinned
 	// ones, and counts what is outstanding so k can drain.
 	runner runner
@@ -79,17 +76,17 @@ func newKernel(supervisor *Supervisor, id KernelID, config map[PluginName]any, w
 		supervisor:  supervisor,
 		id:          id,
 		logger:      &Logger{kernel: id, handler: supervisor.logHandler},
-		plugins:     plugins,
-		config:      config,
 		workerCount: workerCount,
 		resources:   map[reflect.Type]*resource{},
 		dispatchers: map[reflect.Type]eventDispatcher{},
 		tasks:       []runnable{joinTask{}},
 		taskLocks:   []*taskLocks{{}},
+		lifecycle:   lifecycle{plugins: plugins, config: config},
 	}
 	k.graph.kernel = k
 	k.combiner.kernel = k
 	k.runner.kernel = k
+	k.lifecycle.kernel = k
 	return k
 }
 
@@ -142,26 +139,18 @@ func (k *Kernel) Logger() *Logger {
 	return k.logger
 }
 
-// init brings k up: it runs every plugin's Init in order with this
-// kernel's Configurator and settles registration (handler order, lock
-// sets), starts k's workerCount workers, then runs every plugin's Start in
-// order.
+// init brings k up: it runs every plugin's Init and settles registration
+// (handler order, lock sets), starts k's workerCount workers, then runs every
+// plugin's Start.
 //
-// It fails at the first failure, and leaves nothing behind: it stops the
-// plugins already started in reverse, not the one that failed, waits for
-// every job they scheduled, ends the workers, then destroys the plugins
-// already initialized in reverse, logging each Stop and Destroy failure
-// through LogErr, and answers that first failure.
+// It fails at the first failure, and leaves nothing behind: a failed Init has
+// already destroyed the plugins initialized before it; after a failed Start,
+// once the plugins started before it have stopped, init waits for every job
+// they scheduled, ends the workers, and destroys every plugin. It answers
+// that first failure.
 func (k *Kernel) init() error {
-	for i, plugin := range k.plugins {
-		if err := plugin.Init(&Configurator{kernel: k}, k.config[plugin.Name()]); err != nil {
-			for initialized := i - 1; initialized >= 0; initialized-- {
-				if err := k.plugins[initialized].Destroy(); err != nil {
-					k.logger.LogErr(fmt.Errorf("kernel: plugin %d (%T) failed to destroy: %w", initialized, k.plugins[initialized], err))
-				}
-			}
-			return fmt.Errorf("kernel: plugin %d (%T) failed to init: %w", i, plugin, err)
-		}
+	if err := k.lifecycle.init(); err != nil {
+		return err
 	}
 	// No resource or handler can be added from here on.
 	for _, d := range k.dispatchers {
@@ -170,43 +159,24 @@ func (k *Kernel) init() error {
 	k.combiner.locks = makeLockState(len(k.resources))
 
 	k.runner.start(k.workerCount)
-	for i, plugin := range k.plugins {
-		if err := plugin.Start(k); err != nil {
-			for started := i - 1; started >= 0; started-- {
-				if err := k.plugins[started].Stop(k); err != nil {
-					k.logger.LogErr(fmt.Errorf("kernel: plugin %d (%T) failed to stop: %w", started, k.plugins[started], err))
-				}
-			}
-			k.runner.drain()
-			for initialized := len(k.plugins) - 1; initialized >= 0; initialized-- {
-				if err := k.plugins[initialized].Destroy(); err != nil {
-					k.logger.LogErr(fmt.Errorf("kernel: plugin %d (%T) failed to destroy: %w", initialized, k.plugins[initialized], err))
-				}
-			}
-			return fmt.Errorf("kernel: plugin %d (%T) failed to start: %w", i, plugin, err)
-		}
+	if err := k.lifecycle.start(); err != nil {
+		k.runner.drain()
+		k.lifecycle.destroy()
+		return err
 	}
 	return nil
 }
 
-// destroy takes k down: it runs Stop on every plugin in reverse, logging
-// each failure through LogErr, then makes Publish publish nothing from then
-// on. Publish still works while the Stops run, so they can schedule
-// cleanup. It then blocks until every job k has has finished, including those
-// the Stops scheduled, ends k's workers, and runs Destroy on every plugin in
-// reverse, logging each failure through LogErr.
+// destroy takes k down: it runs Stop on every plugin in reverse, then makes
+// Publish publish nothing from then on. Publish still works while the Stops
+// run, so they can schedule cleanup. It then blocks until every job k has
+// has finished, including those the Stops scheduled, ends k's workers, and
+// runs Destroy on every plugin in reverse. Each failure is logged through
+// LogErr.
 func (k *Kernel) destroy() {
-	for i := len(k.plugins) - 1; i >= 0; i-- {
-		if err := k.plugins[i].Stop(k); err != nil {
-			k.logger.LogErr(fmt.Errorf("kernel: plugin %d (%T) failed to stop: %w", i, k.plugins[i], err))
-		}
-	}
+	k.lifecycle.stop()
 	k.runner.drain()
-	for i := len(k.plugins) - 1; i >= 0; i-- {
-		if err := k.plugins[i].Destroy(); err != nil {
-			k.logger.LogErr(fmt.Errorf("kernel: plugin %d (%T) failed to destroy: %w", i, k.plugins[i], err))
-		}
-	}
+	k.lifecycle.destroy()
 }
 
 // dispatcher returns the dispatcher of E in k, creating it on first use.
