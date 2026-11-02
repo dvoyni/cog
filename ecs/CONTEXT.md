@@ -68,7 +68,7 @@ An observed store's copy of each value as of the last observation reset, which a
 What an observer can see: changes made by systems that ran before it since the last observation reset.
 
 **Observation reset**:
-The system that ends an observation window: it brings every shadow up to date and frees despawned indices. The user decides where it runs.
+The system that ends an observation window: it brings every shadow up to date and frees despawned indices. Its first run turns observation on; a world it never runs in observes nothing. The user decides where it runs.
 _Avoid_: Flush, clear, frame end
 
 ## Commands

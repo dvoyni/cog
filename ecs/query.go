@@ -96,7 +96,8 @@ func driverOf(terms []term) *store {
 }
 
 // match reports whether e satisfies every term, filling addresses with the
-// address of each term's row.
+// address of each term's row. A term that writes an observed store marks
+// a matched row changed, since it is yielded for writing.
 func match(terms []term, addresses []unsafe.Pointer, e Entity) bool {
 	for i, t := range terms {
 		row, ok := t.store.row(e)
@@ -106,6 +107,12 @@ func match(terms []term, addresses []unsafe.Pointer, e Entity) bool {
 		addresses[i] = unsafe.Pointer(&zeroBase)
 		if ok {
 			addresses[i] = t.store.address(row)
+		}
+	}
+	for _, t := range terms {
+		if t.mode == termWrite && t.store.observed {
+			row, _ := t.store.row(e)
+			t.store.markChanged(row)
 		}
 	}
 	return true

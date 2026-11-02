@@ -84,7 +84,7 @@ func TestSystemsOnDifferentStoresKeepMasksApart(t *testing.T) {
 	velocityID := w.world.storesByType[reflect.TypeFor[velocity]()].component.ID
 	frozenID := w.world.storesByType[reflect.TypeFor[frozen]()].component.ID
 	for i, e := range entities {
-		mask := &w.world.entities.at(e.index()).mask
+		mask := &w.world.entitySlots.at(e.index()).componentMask
 		if maskHas(mask, velocityID) != (i%2 != 0) || maskHas(mask, frozenID) != (i%3 != 0) {
 			t.Fatalf("entity %d's mask is %b after toggling both stores", i, *mask)
 		}

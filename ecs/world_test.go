@@ -98,8 +98,8 @@ func TestDespawnRemovesEveryComponent(t *testing.T) {
 	if positions.Add(a, position{}) {
 		t.Fatal("Add on a despawned entity succeeded")
 	}
-	if w.world.despawned.Len() != 1 || *w.world.despawned.At(0) != a.index() {
-		t.Fatal("Despawn did not record a's index for the observation reset")
+	if c := w.Spawn(); c != makeEntity(a.index(), 2) {
+		t.Fatalf("Spawn answered %#x, want a's index reused at once, as nothing observes", uint64(c))
 	}
 }
 

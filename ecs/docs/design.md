@@ -7,7 +7,7 @@ knows nothing about networking, rendering or any other consumer: those build
 on the generic pieces here (type-erased row access, change detection, command
 buffers).
 
-Status: agreed; steps 1 to 3 of the [Work order](#work-order) are built.
+Status: agreed; steps 1 to 4 of the [Work order](#work-order) are built.
 
 ## Constraints
 
@@ -40,7 +40,7 @@ Kernel
 |---|---|
 | `WorldID` | Constraint over world IDs: `~[1]uint64 \| ~[2]uint64 \| ~[4]uint64 \| ~[8]uint64`. |
 | `World[W]` | The barrier: write on the world. Spawn, despawn, `CreateAt`, type-erased row access. |
-| `Store[W, T]` | Writes `T`'s store by entity: `Get` a pointer, `Write`, `Add`, `Remove`. |
+| `Store[W, T]` | Writes `T`'s store by entity: `Get` a pointer to read, `Write` a pointer marked changed, `Add`, `Remove`. |
 | `Lookup[W, T]` | Reads `T`'s store by entity: `Has`, and `Get` a copy. |
 | `Query1[W, A]` … `Query8[W, ...]` | Walks the entities holding every term, yielding each entity and its row. `*T` writes, `T` reads a copy. |
 | `Changes[W, T]` | Reads what changed in `T`'s store this observation window, and turns observation on for it. |
@@ -102,9 +102,10 @@ Kernel
   and for loading a save. The index must hold no live entity and lie outside
   the allocation range, so it never collides with an index the world hands
   out or has reserved.
-- **FIFO reuse.** A despawned index goes to the back of the free list, and
-  only at the next observation reset, so an index is not reused in the
-  observation window it died in, and reuse order is deterministic.
+- **FIFO reuse.** A despawned index goes to the back of the free list, so
+  reuse order is deterministic. In an observing world it goes there only at
+  the next observation reset, so an index is not reused in the observation
+  window it died in; in a world that does not observe, at once.
 - **Component mask.** The world keeps each entity's components as one mask
   (`W` itself). A store's writer updates its bit atomically when it adds or
   removes, so no global lock is taken; type-erased access and despawn read it
@@ -244,9 +245,15 @@ c.move = configurator.RegisterTask2(move)
 
 ## Change detection
 
-- **Opt-in per store.** A system taking `Changes[W, T]` turns observation on
-  for `T`'s store at registration. A store nobody observes keeps no shadow
-  and no states, and pays nothing.
+- **Opt-in per store.** A system taking `Changes[W, T]` registers an
+  observer of `T`'s store. A store nobody observes keeps no shadow and no
+  states, and pays nothing.
+- **Off until the first reset.** A world observes nothing until its first
+  observation reset runs: no store keeps a tail or states, a despawned index
+  is freed at once, and `Changes()` reports nothing. That first reset turns
+  observation on, and every row present then counts as added in the first
+  window, so an observer joining late, such as replication, sees the whole
+  world. A world nobody resets therefore keeps nothing it would leak.
 - **An observed store keeps a shadow and a state per row.** The shadow is
   each value as of the last observation reset. The state is one byte:
   unchanged, changed, added, removed, or discarded (added and removed within
@@ -290,9 +297,11 @@ c.move = configurator.RegisterTask2(move)
 
   It takes `World[W]`, the barrier. It copies changed and added rows into each observed
   store's shadow, clears their states, drops the tail, and frees the
-  window's despawned indices to the free list. The user schedules it where
-  their frame needs: last, first, after the network send, after the
-  renderer has read its changes.
+  window's despawned indices in the allocation range to the free list.
+  A reservation never spawned goes back too, under a new generation, so the
+  stale entity never comes alive. Its first run turns observation on
+  instead. The user schedules it where their frame needs: first, last,
+  after the network send, after the renderer has read its changes.
 - **Writes after a store's last observer are reset unseen.** That is the
   window's definition, not an error.
 
@@ -346,8 +355,11 @@ func commitAi(k *kernel.Kernel, _ kernel.NoArg, commit ecs.CommandSink[Game, AiC
   observers see committed changes.
 - **Reservations** come from one atomic cursor over the free list, under a
   read on the world. A reserved entity is not alive until its spawn is
-  committed, and the reservation lasts until the next observation reset,
-  which settles it.
+  committed. The cursor is folded back under the barrier. In an observing
+  world the observation reset does it, and a reservation never spawned goes
+  back to the free list under a new generation. In a world that does not
+  observe, every barrier operation does it, and such an index is lost:
+  reserving without spawning is a bug, and costs one index.
 - **Lanes keep their capacity.** After warm-up, recording and committing
   allocate nothing.
 
