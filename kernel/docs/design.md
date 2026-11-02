@@ -44,11 +44,13 @@ Supervisor ── lifetime, GetKernel and Broadcast, LogHandler
 | Type         | Role                                                              |
 |--------------|-------------------------------------------------------------------|
 | `Supervisor` | Spawns and destroys kernels, runs pinned jobs on the main thread, ends the application (`Spawn`, `GetKernel`, `Destroy`, `Broadcast`, `TickMainThread`, `WaitMainThread`, `Quit`, `Done`); owns the one `LogHandler`. |
-| `Kernel`     | Runtime handle given to handlers, tasks and the main loop: `Publish`, `Notify`, `LogErr`, `LogWarn`, `LogDebug` and their `Once` forms. It manages no kernels and schedules nothing directly. |
+| `Kernel`     | Runtime handle given to handlers, tasks and the main loop: `ID`, `Publish`, `Notify`, `Logger`. It manages no kernels and schedules nothing directly. |
+| `Logger`     | A kernel's way to the `LogHandler`, from `Kernel.Logger()`: `LogErr`, `LogWarn`, `LogDebug`, their `Once` forms and `ForgetLogOnce`. |
 | `Signal`     | Reusable completion signal for code outside the kernel; armed by `Kernel.Notify`, read through `C()`. |
 | `Executor`   | One publication's work batch, handed to its handlers: `Schedule`, `ScheduleAfter`, `Join`, `Publish`. |
 | `Configurator` | Registration surface given to each plugin once: `InitResource`, `Resource`, `RegisterTask`, `PinToMainThread`, `Subscribe`, `OrderSubscriptions`. |
-| `*Task[A, B]`| Registered code with a resource struct, pointer-free arg `A` and pointer-free result `B`; returned by `RegisterTask`, nil on failure. |
+| `Access`     | Handed to a task's declare function: `Read[T]`, `Write[T]` and `Use(task)` declare its locks and return what the body uses. |
+| `*Task[A, B]`| Registered code with pointer-free arg `A` and pointer-free result `B`; returned by `RegisterTask`. |
 | `Job[T]`     | One scheduled run answering `T`; what `ScheduleAfter` feeds from. |
 | `JobHandle`  | Untyped job handle, `Job[T].Handle()`; what dependencies are declared with. |
 | `Plugin`     | Interface: `Init(configurator, config)`, `Start(kernel)`, `Stop(kernel)`, `Destroy()`. |
@@ -87,8 +89,11 @@ jobs and handlers.
   the next.
 
 A kernel's config is given to `Spawn`, its constructor:
-`Spawn(config, singleThreaded, workerCount, plugins...) (KernelID, error)`. Plugins cannot
-change it.
+`Spawn(config, singleThreaded, workerCount, plugins...) (KernelID, error)`.
+Plugins cannot change it. `workerCount` is how many goroutines run the
+kernel's jobs, chosen by the caller (`runtime.GOMAXPROCS(0)` keeps every CPU
+busy); below 1 is a composition error and panics. A single-threaded kernel
+ignores it and runs one (see Single-threaded kernels).
 
 **Kernels are named by ID.** `Spawn` answers a `KernelID` from a counter the
 supervisor increments atomically, so it is unique for the process's life and
@@ -137,50 +142,57 @@ a task. Tasks are the only code that holds locks, and jobs are only ever
 scheduled from inside a publication (see Executor).
 
 ```go
-type damageRes struct {
-	Health kernel.Write[Health]
-	Pos    kernel.Read[Position]
-}
 type DamageArg struct{ Target EntityID; Amount int32 }
 type Dead struct{ Target EntityID; Dead bool }
 
-func applyDamage(k *kernel.Kernel, res damageRes, arg DamageArg) Dead { /* ... */ }
-func announce(k *kernel.Kernel, res kernel.NoResources, d Dead) kernel.NoResult { /* ... */ }
-
 // in Init:
-c.damage = configurator.RegisterTask(applyDamage) // *Task[DamageArg, Dead]
-c.announce = configurator.RegisterTask(announce)  // *Task[Dead, NoResult]
+c.damage = configurator.RegisterTask(func(access *kernel.Access) kernel.TaskBody[DamageArg, Dead] {
+	health := access.Write[Health]()
+	pos := access.Read[Position]()
+	return func(k *kernel.Kernel, arg DamageArg) Dead { /* health.Get(), health.Set(...), pos.Get() */ }
+})
+c.announce = configurator.RegisterTask(func(access *kernel.Access) kernel.TaskBody[Dead, kernel.NoResult] {
+	return func(k *kernel.Kernel, d Dead) kernel.NoResult { /* ... */ }
+})
 ```
 
-- **Resources are the signature.** A task's body is a `TaskFunc[R, A, B]`:
-  `func(k *Kernel, res R, arg A) B`, where `R` is a struct whose every field
-  is a `Read[T]` or `Write[T]`. Declaring a field is declaring the lock, so the
-  two cannot drift apart. A task that locks nothing uses `NoResources`, takes
-  nothing `NoArg`, answers nothing `NoResult`.
-- **Registration does the checking.** `RegisterTask` reads `R`'s lock set and
-  checks that `A` and `B` are pointer-free. They have no size limit. A missing resource
-  or a bad type is a registration failure, so `Spawn` fails rather than the
-  first run.
+- **Requesting a handle is declaring the lock.** `RegisterTask` runs the
+  declare function once. Each `access.Read[T]()` or `access.Write[T]()` both
+  declares the lock and returns the handle the body uses, so the two cannot
+  drift apart. A write supersedes a read of the same resource. The body is a
+  `TaskBody[A, B]`, `func(k *Kernel, arg A) B`, closing over its handles. A
+  task that locks nothing requests no handle, takes nothing `NoArg`, answers
+  nothing `NoResult`.
+- **Calling another task inline.** `access.Use(task)` folds `task`'s locks
+  into this task's and returns the direct call, which the body runs inside its
+  own job with those locks already held: no scheduling, no allocation, the
+  result returned directly. Pinning does not apply to such a call.
+- **Composition errors panic.** A resource not yet initialized, an arg or
+  result that is not pointer-free, a nil declare function or body, or a task
+  of another kernel passed to `Use` panics at registration, so the mistake
+  surfaces in `Spawn` rather than at the first run. `A` and `B` have no size
+  limit.
 - **A task is a pointer, not a type.** `RegisterTask` returns a `*Task[A, B]`
-  belonging to that kernel, or nil if registration failed. A plugin keeps it,
-  usually in a field of its own struct. One plugin value per kernel keeps each
-  kernel's tasks apart.
-- **Running allocates nothing.** Scheduling and running a job allocate
-  nothing. The body should be a top-level func or a closure that captures
-  nothing: a capturing closure allocates once per call.
+  belonging to that kernel. A plugin keeps it, usually in a field of its own
+  struct. One plugin value per kernel keeps each kernel's tasks apart.
+- **Running allocates nothing.** The body is created once, at registration,
+  so its captures are allocated once; scheduling and running a job allocate
+  nothing.
 - **Typed jobs, untyped dependencies.** Scheduling returns a `Job[B]`, typed
   by the task's result. Dependencies are declared with `JobHandle`, which
   `Job[B].Handle()` gives, so any job can wait on any other while only a
   matching job can feed one. `JobHandle` is a concrete struct, not an
   interface, because boxing a `Job[B]` allocates. A `JobHandle` kept past its
   job reads as finished.
-- **Concurrency is the lock set's.** Jobs of one task run at once when its
-  `R` holds only `Read` fields, and one at a time when it holds a `Write`.
+- **Concurrency is the lock set's.** Jobs of one task run at once when it
+  declares only reads, and one at a time when it declares a write.
   Many writers to different parts of one resource are better batched into one
   job than split across many.
 - **No order between conflicting jobs.** Jobs whose locks conflict run one at
-  a time, in no guaranteed order. Work that must happen in an order says so
-  with a dependency.
+  a time, in no guaranteed order. The one promise is against starvation: a
+  waiting writer reserves what it writes, so no job that became ready after it
+  locks those resources first. Work that must happen in an order says so with
+  a dependency.
 - **Jobs always complete.** There is no failed job. A body that panics is
   recovered, its panic and stack go to `LogErr`, and the job finishes with the
   zero result, so its dependents, and the jobs fed by its result, still run.
@@ -255,15 +267,20 @@ func (ex *Executor) Publish[E any](in JobHandle, event E) (E, JobHandle)
   dependencies have finished and its locks are free; nothing is promised
   about which goroutine runs it, except for pinned jobs and single-threaded
   kernels.
+- **Workers.** Each kernel runs its jobs on its own `workerCount` goroutines,
+  started before the first `Start` and ended once the kernel has drained. An
+  idle worker parks and is woken when a job becomes ready.
 - **Destroy completes.** A destroyed kernel is removed once its plugins'
   `Stop` has run and every job it has, including those `Stop` scheduled, has
-  finished.
+  finished. From the moment the `Stop`s return, `Publish` publishes nothing,
+  so the jobs left can only run out. That includes pinned jobs, so a kernel's
+  destroy waits on the main thread to tick them.
 
 ### Single-threaded kernels
 
-`Supervisor.Spawn(config, true, 1, plugins...)` spawns a kernel whose
+`Supervisor.Spawn(config, true, 0, plugins...)` spawns a kernel whose
 jobs all run one at a time, on one goroutine of its own locked to an OS
-thread. It suits a kernel that wants sequential execution, such as a server
+thread; `workerCount` is ignored. It suits a kernel that wants sequential execution, such as a server
 simulation.
 
 - A job still waits for its dependencies, and runs in the order it became
@@ -304,6 +321,9 @@ func main() {
   holds the main thread for good.
 - **A kernel's destroy cannot end the main thread,** because no kernel owns
   it. `Quit` does, through `Done`.
+- **Main ticks until `Done`.** A kernel being destroyed waits for its pinned
+  jobs, so a main loop that stops ticking early leaves that destroy, and so
+  `Quit`, waiting for good.
 
 ### Waiting from outside
 
@@ -372,7 +392,7 @@ game.Notify(sig, done) // signals once done finishes, or now if it has
   })
   ```
 
-  An event is pointer-free, so it can be the arg: a `TaskFunc[R, HitEvent, B]`.
+  An event is pointer-free, so it can be the arg: a `Task[HitEvent, B]`.
   The closure above captures `c`, but `Subscribe` runs at registration, so it is
   allocated once, not per publish.
 - A task may publish. Its handlers run inline in the job while the job's
@@ -385,8 +405,8 @@ game.Notify(sig, done) // signals once done finishes, or now if it has
 There is one `LogHandler` per supervisor, given to `NewSupervisor`.
 Every method takes the source `KernelID` first: `LogErr(source, err)`,
 `LogWarn(source, msg, args...)`, `LogDebug(source, msg, args...)`.
-`Kernel.LogErr`, `Kernel.LogWarn` and `Kernel.LogDebug` are proxies that fill
-in their own ID. The kernel formats nothing and writes nothing itself.
+`Kernel.Logger()` returns the kernel's `Logger`, whose methods fill in its
+ID. The kernel formats nothing and writes nothing itself.
 
 The LogHandler is the only place errors go, and it is also what decides what they
 mean. There is no error handler and no verdict: the kernel forwards the error
@@ -395,10 +415,13 @@ and carries on. A LogHandler that wants a failing kernel gone calls
 `Quit` or panics. An application that wants the errors back implements a
 LogHandler that keeps them. `LogWarn` and `LogDebug` are slog-style.
 
-A job or handler that panics is recovered and the panic passed to `LogErr`.
-A panic raised by `LogErr` itself is not recovered again, so it ends the
-process. That is what `StdLogger`
-does on purpose.
+A job whose body panics is recovered, and the panic passed to `LogErr` with
+its stack. That covers a handler panicking in a publication the body made,
+though the batch that publication was building is lost. A panic anywhere
+else, such as a handler run by a `Publish` from outside a job, is not the
+kernel's to recover: a panic is a terminal state. A panic raised by `LogErr`
+itself is not recovered again, so it ends the process. That is what
+`StdLogger` does on purpose.
 
 **Once forms.** `LogErrOnce`, `LogWarnOnce` and `LogDebugOnce` take a
 string key and log only the first call under it, until `ForgetLogOnce(key)`
@@ -415,14 +438,60 @@ stderr, `LogDebug` to stdout, each prefixed `[kernel N]`, and the Once forms
 keep their keys in a map. Every error is fatal under it, which suits
 development.
 
-Every method other than a getter (`ID`, `Done`, `Configurator.Resource`,
-`Read.Get`) is named for what it does, starting with a verb.
+Every method other than a getter (`ID`, `Done`, `Logger`,
+`Configurator.Resource`, `Read.Get`) is named for what it does, starting with
+a verb. Internally, paired verbs follow rules/GO-RULES.md.
+
+## Implementation
+
+How the kernel keeps its promises, and why it does so this way. The code
+comments carry the detail; this is the shape.
+
+- **Storage is pools of slots.** Jobs, successor edges, signal edges and each
+  task's args live in `concurrent.Pool`s: chunks that never move, addressed by
+  `uint32` index, reused most recent first. A job slot carries a generation,
+  advanced each time the slot is released, so a stale `JobHandle` reads as
+  finished rather than naming the slot's next job.
+- **A job's successors are edge lists, not queues.** Each of a job's two
+  lists (dependent jobs, armed `Signal`s) is one atomic `uint64`: the slot's
+  generation in the high 32 bits, the head edge in the low 32. Linking is one
+  compare-and-swap that succeeds only while the generation is the handle's
+  and the list is not closed, so a dependent added after the job finished
+  learns that at once, and a stale handle is refused. Finishing swaps in the
+  closed marker and walks what it took. A mutex per job would guard the same
+  invariant across several fields; packing it into one word makes it one
+  compare-and-swap, and contention is per job and rare. Signal edges hold a
+  pointer, so they have their own pool and the job and successor pools stay
+  pointer-free.
+- **Shared queues use a mutex.** Measured against lock-free versions, the
+  mutex `concurrent.Queue` and `Pool` lose little uncontended and avoid
+  compare-and-swap storms under contention, without a tuned backoff.
+- **A batch holds its jobs.** Every job starts waiting on one hold besides its
+  dependencies; `submit` releases the batch's holds once the last handler
+  returns, which is what keeps every job of a batch pending while handlers
+  build it.
+- **Locks are granted by a combiner.** A task's locks are two bit masks
+  (reads, writes) over the kernel's resources, as long as its highest
+  resource needs. A job whose dependencies have finished is queued for the
+  lock combiner, which whichever goroutine wins a `TryLock` becomes: it
+  unlocks the resources of finished jobs, then walks the waiting jobs oldest
+  first, granting each whose locks are free and letting each that cannot run
+  reserve what it writes. It looks at the queues again after unlocking, so no
+  queued work is stranded. A job that locks nothing skips it.
+- **Workers park on a token channel.** A worker that finds nothing ready
+  counts itself idle, looks once more, and parks; a job made ready while any
+  worker is idle puts a token in a channel with a slot per worker, so no wake
+  is lost and a busy kernel pays one atomic load per job for it.
+- **Draining counts what is outstanding.** One counter covers every job not
+  yet finished and every `Publish` still running. A `Publish` counts itself
+  before checking whether the kernel is closed, so a drain never sees zero
+  while a publication that passed the check still runs.
 
 ## Decided against
 
 - **`Exclusive`.** v1 let a handler refuse to run alongside itself, to guard
-  mutable state in its factory closure. Task bodies capture nothing, so there
-  is no such state to guard, and v2 has no `Exclusive`.
+  mutable state in its factory closure. A v2 task's state lives in the
+  resources it locks, which already guards it, so v2 has no `Exclusive`.
 - **Policing payloads between kernels.** An event published into another
   kernel is copied as it is and never looked inside. A field that means something only in the sending kernel, such as a
   `JobHandle`, arrives meaningless, and keeping such fields out is the

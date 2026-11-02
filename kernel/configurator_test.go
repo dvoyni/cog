@@ -60,37 +60,35 @@ func handlerNamed(order *[]string, name string) SubscriptionFunc[hit] {
 	}
 }
 
-// runSorted sorts c's handlers of hit and calls each in order.
-func runSorted(c *Configurator) {
-	d := c.kernel.dispatcher[hit]()
-	d.sortHandlers()
-	for _, handler := range d.handlers {
-		handler(nil, nil, JobHandle{}, hit{})
-	}
+// publishHit spawns a kernel subscribing as subscribe does, publishes a hit
+// into it, and answers the order its handlers ran in.
+func publishHit(t *testing.T, subscribe func(c *Configurator, order *[]string)) string {
+	var order []string
+	k, _ := spawnTestKernel(t, func(c *Configurator) { subscribe(c, &order) })
+	k.Publish(hit{})
+	return strings.Join(order, "")
 }
 
 func TestSubscriptionsKeepSubscriptionOrder(t *testing.T) {
-	c := newTestConfigurator()
-	var order []string
-	c.Subscribe(handlerNamed(&order, "a"))
-	c.Subscribe(handlerNamed(&order, "b"))
-	c.Subscribe(handlerNamed(&order, "c"))
-	runSorted(c)
-	if got := strings.Join(order, ""); got != "abc" {
+	got := publishHit(t, func(c *Configurator, order *[]string) {
+		c.Subscribe(handlerNamed(order, "a"))
+		c.Subscribe(handlerNamed(order, "b"))
+		c.Subscribe(handlerNamed(order, "c"))
+	})
+	if got != "abc" {
 		t.Fatalf("handlers ran %q, want abc", got)
 	}
 }
 
 func TestOrderSubscriptionsReorders(t *testing.T) {
-	c := newTestConfigurator()
-	var order []string
-	a := c.Subscribe(handlerNamed(&order, "a"))
-	b := c.Subscribe(handlerNamed(&order, "b"))
-	cc := c.Subscribe(handlerNamed(&order, "c"))
-	c.OrderSubscriptions(cc, a) // c before a
-	c.OrderSubscriptions(b, cc) // b before c
-	runSorted(c)
-	if got := strings.Join(order, ""); got != "bca" {
+	got := publishHit(t, func(c *Configurator, order *[]string) {
+		a := c.Subscribe(handlerNamed(order, "a"))
+		b := c.Subscribe(handlerNamed(order, "b"))
+		cc := c.Subscribe(handlerNamed(order, "c"))
+		c.OrderSubscriptions(cc, a) // c before a
+		c.OrderSubscriptions(b, cc) // b before c
+	})
+	if got != "bca" {
 		t.Fatalf("handlers ran %q, want bca", got)
 	}
 }
@@ -106,13 +104,14 @@ func expectPanic(t *testing.T, what string, f func()) {
 }
 
 func TestOrderSubscriptionsCyclePanics(t *testing.T) {
-	c := newTestConfigurator()
-	var order []string
-	a := c.Subscribe(handlerNamed(&order, "a"))
-	b := c.Subscribe(handlerNamed(&order, "b"))
-	c.OrderSubscriptions(a, b)
-	c.OrderSubscriptions(b, a)
-	expectPanic(t, "a cycle", func() { c.kernel.dispatcher[hit]().sortHandlers() })
+	expectPanic(t, "a cycle", func() {
+		publishHit(t, func(c *Configurator, order *[]string) {
+			a := c.Subscribe(handlerNamed(order, "a"))
+			b := c.Subscribe(handlerNamed(order, "b"))
+			c.OrderSubscriptions(a, b)
+			c.OrderSubscriptions(b, a)
+		})
+	})
 }
 
 func TestOrderSubscriptionsZeroSubPanics(t *testing.T) {

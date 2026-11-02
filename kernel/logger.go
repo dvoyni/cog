@@ -94,8 +94,11 @@ type LogHandler interface {
 	// kernel source is ended here, by the LogHandler calling Supervisor.Destroy or
 	// Supervisor.Quit; one that should end the process may panic.
 	//
-	// A job or handler that panics is recovered and its panic passed here as
-	// err, with the stack it panicked on, on the goroutine that ran it.
+	// A job whose body panics is recovered and its panic passed here as err,
+	// with the stack it panicked on, on the goroutine that ran it. That covers
+	// a handler panicking in a publication the body made; a panic anywhere else
+	// is not the kernel's to recover. A panic raised here is not recovered
+	// again, so it ends the process.
 	LogErr(source KernelID, err error)
 
 	// LogWarn logs msg with args as alternating keys and values, as log/slog

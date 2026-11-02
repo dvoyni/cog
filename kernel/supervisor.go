@@ -131,10 +131,10 @@ func NewSupervisor(logHandler LogHandler) *Supervisor {
 //
 // The kernel runs its jobs on workerCount goroutines of its own, which end
 // with the kernel; runtime.GOMAXPROCS(0) keeps every CPU busy. A workerCount
-// below 1 panics.
+// below 1 panics, unless the kernel is singleThreaded.
 //
-// A singleThreaded kernel runs all its jobs one at a time, on its one worker,
-// locked to an OS thread; any workerCount but 1 for it panics. It is for a
+// A singleThreaded kernel ignores workerCount and runs all its jobs one at a
+// time, on one worker locked to an OS thread. It is for a
 // kernel that wants sequential execution, such as a server simulation. A job
 // still waits for its dependencies, and runs in the order it became ready;
 // locks never contend, since nothing runs alongside it. A task pinned to the
@@ -152,11 +152,10 @@ func NewSupervisor(logHandler LogHandler) *Supervisor {
 // Spawn still running when Quit is called does the same once its plugins have
 // started, and answers ErrQuitting.
 func (s *Supervisor) Spawn(config any, singleThreaded bool, workerCount int, plugins ...Plugin) (KernelID, error) {
-	if workerCount < 1 {
+	if singleThreaded {
+		workerCount = 1
+	} else if workerCount < 1 {
 		panic(fmt.Sprintf("kernel: spawning a kernel with %d workers", workerCount))
-	}
-	if singleThreaded && workerCount != 1 {
-		panic(fmt.Sprintf("kernel: spawning a single-threaded kernel with %d workers", workerCount))
 	}
 	if s.quitting.Load() {
 		return 0, ErrQuitting

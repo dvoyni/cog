@@ -3,6 +3,7 @@ package kernel
 import (
 	"errors"
 	"fmt"
+	"runtime/debug"
 
 	"github.com/dvoyni/cog/kernel/internal/concurrent"
 )
@@ -112,11 +113,11 @@ type taskLocks struct {
 func (l *taskLocks) locksNothing() bool { return len(l.writes) == 0 }
 
 // runRecovering runs the body on arg and answers its result, or the zero B if
-// the body panics, logging the panic.
+// the body panics, logging the panic with the stack it panicked on.
 func (t *Task[A, B]) runRecovering(kernel *Kernel, arg A) (result B) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			kernel.logger.LogErr(fmt.Errorf("%w: task %d: %v", errTaskPanicked, t.index, recovered))
+			kernel.logger.LogErr(fmt.Errorf("%w: task %d: %v\n%s", errTaskPanicked, t.index, recovered, debug.Stack()))
 		}
 	}()
 	return t.run(kernel, arg)

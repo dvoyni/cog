@@ -154,8 +154,18 @@ func TestConcurrentSpawnDestroyQuit(t *testing.T) {
 	}
 }
 
-func TestSpawnWithBadWorkerCountPanics(t *testing.T) {
+func TestSpawnWithNoWorkersPanics(t *testing.T) {
+	expectPanic(t, "no workers", func() { NewSupervisor(nil).Spawn(nil, false, 0) })
+}
+
+func TestSingleThreadedKernelHasOneWorker(t *testing.T) {
 	s := NewSupervisor(nil)
-	expectPanic(t, "no workers", func() { s.Spawn(nil, false, 0) })
-	expectPanic(t, "a single-threaded kernel with two workers", func() { s.Spawn(nil, true, 2) })
+	t.Cleanup(s.Quit)
+	id, err := s.Spawn(nil, true, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.GetKernel(id).workerCount; got != 1 {
+		t.Fatalf("a single-threaded kernel has %d workers, want 1", got)
+	}
 }
