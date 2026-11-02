@@ -83,6 +83,12 @@ func TestCommitSetAndRemoveOfAMissingComponentDoNothing(t *testing.T) {
 	if o.healths.Has(e) {
 		t.Fatal("Remove after Add left the component")
 	}
+	o.world.Despawn(e)
+	o.first.Set(e, health{Points: 9})
+	o.first.Remove[health](e)
+	if dropped := o.sink.Commit(); dropped != 2 {
+		t.Fatalf("the commit dropped %d records of a dead entity, want 2", dropped)
+	}
 }
 
 func TestStaleReservationIsRefusedAfterTheReset(t *testing.T) {
@@ -246,7 +252,7 @@ func TestTypeErasedAccess(t *testing.T) {
 	if !w.AddRaw(e, positionID, []byte{0, 0, 0, 0, 0, 0, 0, 0}) || *positions.Get(e) != (position{}) {
 		t.Fatal("Add by id did not replace the position")
 	}
-	if !w.RemoveRaw(e, healthID) || w.ReadRaw(e, healthID) != nil {
+	if !w.RemoveRaw(e, healthID) || w.ReadRaw(e, healthID) != nil || w.WriteRaw(e, healthID) != nil {
 		t.Fatal("Remove by id left the health")
 	}
 	if err := w.CreateAtRaw(makeEntity(1<<30, 1), mask, values); err != nil {

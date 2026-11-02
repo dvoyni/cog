@@ -27,6 +27,9 @@ func TestStoreAddGetRemoveSwapsLastRow(t *testing.T) {
 	if got, ok := lookup.Get(entities[5]); !ok || got != (position{X: 5, Y: 9}) {
 		t.Fatalf("Lookup answered %v, %v after a write, want {5 9}", got, ok)
 	}
+	if _, ok := lookup.Get(w.Spawn()); ok {
+		t.Fatal("Lookup answered an entity without the component")
+	}
 	if !positions.Remove(entities[0]) || positions.Remove(entities[0]) || lookup.Has(entities[0]) {
 		t.Fatal("Remove did not remove once")
 	}

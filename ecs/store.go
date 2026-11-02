@@ -123,45 +123,35 @@ func (Store[W, T]) Declare(access *kernel.Access) Store[W, T] {
 
 // Has reports whether e has a T.
 func (s Store[W, T]) Has(e Entity) bool {
-	_, ok := s.store.row(e)
-	return ok
+	return s.store.get(e) != nil
 }
 
 // Get returns e's T, or nil if it has none, for reading in place. The pointer
 // is valid for the system call, until the next add or remove on the store.
 // Writing through it goes unseen by observers: use Write.
 func (s Store[W, T]) Get(e Entity) *T {
-	row, ok := s.store.row(e)
-	if !ok {
-		return nil
-	}
-	return (*T)(s.store.address(row))
+	return (*T)(s.store.get(e))
 }
 
 // Write returns e's T, or nil if it has none, for writing in place, and
 // marks it changed for observers. The pointer is valid as Get's is.
 func (s Store[W, T]) Write(e Entity) *T {
-	row, ok := s.store.row(e)
-	if !ok {
-		return nil
-	}
-	s.store.markChanged(row)
-	return (*T)(s.store.address(row))
+	return (*T)(s.store.write(e))
 }
 
-// Add gives e value as its T, replacing the one it has, and reports whether
+// Add gives e given as its T, replacing the one it has, and reports whether
 // e is alive.
-func (s Store[W, T]) Add(e Entity, value T) bool {
-	row, ok := s.world.addComponent(e, s.store)
-	if ok {
-		*(*T)(s.store.address(row)) = value
+func (s Store[W, T]) Add(e Entity, given T) bool {
+	value := s.world.put(e, s.store)
+	if value != nil {
+		*(*T)(value) = given
 	}
-	return ok
+	return value != nil
 }
 
 // Remove removes e's T, and reports whether it had one.
 func (s Store[W, T]) Remove(e Entity) bool {
-	return s.world.removeComponent(e, s.store)
+	return s.world.remove(e, s.store)
 }
 
 // Declare declares a read on T's store and on world W.
@@ -172,18 +162,17 @@ func (Lookup[W, T]) Declare(access *kernel.Access) Lookup[W, T] {
 
 // Has reports whether e has a T.
 func (l Lookup[W, T]) Has(e Entity) bool {
-	_, ok := l.store.row(e)
-	return ok
+	return l.store.get(e) != nil
 }
 
 // Get returns a copy of e's T, or false if it has none.
 func (l Lookup[W, T]) Get(e Entity) (T, bool) {
-	row, ok := l.store.row(e)
-	if !ok {
+	value := l.store.get(e)
+	if value == nil {
 		var zero T
 		return zero, false
 	}
-	return *(*T)(l.store.address(row)), true
+	return *(*T)(value), true
 }
 
 // len answers how many live rows the store holds.
@@ -200,6 +189,37 @@ func (s *store) row(e Entity) (int, bool) {
 	}
 	row := int(*slot - 1)
 	return row, row < s.liveRows && *s.owners.At(row) == e
+}
+
+// get answers the address of e's value, or nil if e has none here. A tag's
+// value has an address too, so nil means only that e has no row. It probes
+// as row does, written out: row is too costly to inline, and every access
+// by entity goes through get or write, so each stays one call.
+func (s *store) get(e Entity) unsafe.Pointer {
+	slot := s.rowByIndex.at(e.index())
+	if slot == nil || *slot == 0 {
+		return nil
+	}
+	row := int(*slot - 1)
+	if row >= s.liveRows || *s.owners.At(row) != e {
+		return nil
+	}
+	return s.address(row)
+}
+
+// write is get for writing in place: it also marks e's row changed for
+// observers.
+func (s *store) write(e Entity) unsafe.Pointer {
+	slot := s.rowByIndex.at(e.index())
+	if slot == nil || *slot == 0 {
+		return nil
+	}
+	row := int(*slot - 1)
+	if row >= s.liveRows || *s.owners.At(row) != e {
+		return nil
+	}
+	s.markChanged(row)
+	return s.address(row)
 }
 
 // address returns the address of row's value.

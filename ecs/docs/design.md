@@ -490,9 +490,9 @@ Each step ends with its tests passing under `go test -race`.
       (owner, kind, value and shadow addresses, the bytewise skip
       included) and holds one observation state instead of two flags;
       `Changes[W, T]` only converts to `T`.
-   3. **One row-access path.** The store answers get, write (marked) and
-      put by entity; `Store`, `Lookup`, typed and raw `World`, and the
-      commit only declare locks and convert.
+   3. **One row-access path.** Built: the store answers `get` and `write`
+      (marked) by entity, the world `put` and `remove`; `Store`, `Lookup`,
+      typed and raw `World`, and the commit only declare locks and convert.
    4. **Walking a mask.** `mask.go` yields a mask's component IDs in
       ascending order, for despawn, checking and spawning from bytes, and
       later refs release; kept only if it inlines.

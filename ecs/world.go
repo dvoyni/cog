@@ -114,47 +114,34 @@ func (w World[W]) ComponentID[T any]() ComponentID {
 // such as building a level. A loop over many entities is faster with a
 // query or a Store, which bind the store once, at registration.
 func (w World[W]) Has[T any](e Entity) bool {
-	_, ok := w.world.storeOf(reflect.TypeFor[T]()).row(e)
-	return ok
+	return w.world.storeOf(reflect.TypeFor[T]()).get(e) != nil
 }
 
 // Get returns e's T, or nil if it has none, for reading in place, as
 // Store.Get does: writing through it goes unseen by observers.
 func (w World[W]) Get[T any](e Entity) *T {
-	s := w.world.storeOf(reflect.TypeFor[T]())
-	row, ok := s.row(e)
-	if !ok {
-		return nil
-	}
-	return (*T)(s.address(row))
+	return (*T)(w.world.storeOf(reflect.TypeFor[T]()).get(e))
 }
 
 // Write returns e's T, or nil if it has none, for writing in place, and
 // marks it changed for observers, as Store.Write does.
 func (w World[W]) Write[T any](e Entity) *T {
-	s := w.world.storeOf(reflect.TypeFor[T]())
-	row, ok := s.row(e)
-	if !ok {
-		return nil
-	}
-	s.markChanged(row)
-	return (*T)(s.address(row))
+	return (*T)(w.world.storeOf(reflect.TypeFor[T]()).write(e))
 }
 
-// Add gives e value as its T, replacing the one it has, and reports whether
+// Add gives e given as its T, replacing the one it has, and reports whether
 // e is alive.
-func (w World[W]) Add[T any](e Entity, value T) bool {
-	s := w.world.storeOf(reflect.TypeFor[T]())
-	row, ok := w.world.addComponent(e, s)
-	if ok {
-		*(*T)(s.address(row)) = value
+func (w World[W]) Add[T any](e Entity, given T) bool {
+	value := w.world.put(e, w.world.storeOf(reflect.TypeFor[T]()))
+	if value != nil {
+		*(*T)(value) = given
 	}
-	return ok
+	return value != nil
 }
 
 // Remove removes e's T, and reports whether it had one.
 func (w World[W]) Remove[T any](e Entity) bool {
-	return w.world.removeComponent(e, w.world.storeOf(reflect.TypeFor[T]()))
+	return w.world.remove(e, w.world.storeOf(reflect.TypeFor[T]()))
 }
 
 // SpawnRaw makes a new entity with the components in mask and returns it,
@@ -202,43 +189,42 @@ func (w World[W]) ComponentMask(e Entity) (W, bool) {
 // reading in place. The slice is valid as Store.Get's pointer is.
 func (w World[W]) ReadRaw(e Entity, id ComponentID) []byte {
 	s := w.world.stores[id]
-	row, ok := s.row(e)
-	if !ok {
+	value := s.get(e)
+	if value == nil {
 		return nil
 	}
-	return unsafe.Slice((*byte)(s.address(row)), s.component.Size)
+	return unsafe.Slice((*byte)(value), s.component.Size)
 }
 
 // WriteRaw returns e's component id as bytes, or nil if e has none, for
 // writing in place, and marks it changed for observers.
 func (w World[W]) WriteRaw(e Entity, id ComponentID) []byte {
 	s := w.world.stores[id]
-	row, ok := s.row(e)
-	if !ok {
+	value := s.write(e)
+	if value == nil {
 		return nil
 	}
-	s.markChanged(row)
-	return unsafe.Slice((*byte)(s.address(row)), s.component.Size)
+	return unsafe.Slice((*byte)(value), s.component.Size)
 }
 
-// AddRaw gives e value as its component id, replacing the one it has, and
-// reports whether e is alive. It panics if value is not the component's
+// AddRaw gives e given as its component id, replacing the one it has, and
+// reports whether e is alive. It panics if given is not the component's
 // Size long.
-func (w World[W]) AddRaw(e Entity, id ComponentID, value []byte) bool {
+func (w World[W]) AddRaw(e Entity, id ComponentID, given []byte) bool {
 	s := w.world.stores[id]
-	if uintptr(len(value)) != s.component.Size {
-		panic(fmt.Sprintf("ecs: adding %d bytes as component %v of %d", len(value), s.component.Type, s.component.Size))
+	if uintptr(len(given)) != s.component.Size {
+		panic(fmt.Sprintf("ecs: adding %d bytes as component %v of %d", len(given), s.component.Type, s.component.Size))
 	}
-	row, ok := w.world.addComponent(e, s)
-	if ok {
-		copy(unsafe.Slice((*byte)(s.address(row)), s.component.Size), value)
+	value := w.world.put(e, s)
+	if value != nil {
+		copy(unsafe.Slice((*byte)(value), s.component.Size), given)
 	}
-	return ok
+	return value != nil
 }
 
 // RemoveRaw removes e's component id, and reports whether it had one.
 func (w World[W]) RemoveRaw(e Entity, id ComponentID) bool {
-	return w.world.removeComponent(e, w.world.stores[id])
+	return w.world.remove(e, w.world.stores[id])
 }
 
 // despawn removes e and every component it has, and reports whether it was
@@ -259,24 +245,22 @@ func (w *world[W]) despawn(e Entity) bool {
 	return true
 }
 
-// addComponent gives alive e a row in s, or marks the one it has changed,
-// and returns it. It answers false if e is not alive.
-func (w *world[W]) addComponent(e Entity, s *store) (int, bool) {
+// put gives alive e a row in s, or marks the one it has changed, and
+// returns the address of its value, or nil if e is not alive.
+func (w *world[W]) put(e Entity, s *store) unsafe.Pointer {
 	if !w.entities.alive(e) {
-		return 0, false
+		return nil
 	}
-	row, ok := s.row(e)
-	if ok {
-		s.markChanged(row)
-		return row, true
+	if value := s.write(e); value != nil {
+		return value
 	}
-	row = s.add(e)
+	row := s.add(e)
 	w.entities.setComponent(e, s.component.ID)
-	return row, true
+	return s.address(row)
 }
 
-// removeComponent removes e's row in s, and reports whether it had one.
-func (w *world[W]) removeComponent(e Entity, s *store) bool {
+// remove removes e's row in s, and reports whether it had one.
+func (w *world[W]) remove(e Entity, s *store) bool {
 	row, ok := s.row(e)
 	if !ok {
 		return false
@@ -311,9 +295,8 @@ func (w *world[W]) addAll(e Entity, mask *W, values []byte) {
 	for word := range words {
 		for set := words[word]; set != 0; set &= set - 1 {
 			s := w.stores[word<<6+bits.TrailingZeros64(set)]
-			row, _ := w.addComponent(e, s)
 			size := s.component.Size
-			copy(unsafe.Slice((*byte)(s.address(row)), size), values[:size])
+			copy(unsafe.Slice((*byte)(w.put(e, s)), size), values[:size])
 			values = values[size:]
 		}
 	}

@@ -171,26 +171,25 @@ func (s CommandSink[W, Tag]) apply(lane *commandLane, record *commandRecord) boo
 		return w.entities.spawnReserved(record.entity)
 	case commandAdd:
 		store := w.stores[record.component]
-		row, ok := w.addComponent(record.entity, store)
-		if ok {
-			lane.copyValue(record.valueStart, store.address(row), store.component.Size)
+		value := w.put(record.entity, store)
+		if value != nil {
+			lane.copyValue(record.valueStart, value, store.component.Size)
 		}
-		return ok
+		return value != nil
 	case commandSet:
 		if !w.entities.alive(record.entity) {
 			return false
 		}
 		store := w.stores[record.component]
-		if row, ok := store.row(record.entity); ok {
-			store.markChanged(row)
-			lane.copyValue(record.valueStart, store.address(row), store.component.Size)
+		if value := store.write(record.entity); value != nil {
+			lane.copyValue(record.valueStart, value, store.component.Size)
 		}
 		return true
 	case commandRemove:
 		if !w.entities.alive(record.entity) {
 			return false
 		}
-		w.removeComponent(record.entity, w.stores[record.component])
+		w.remove(record.entity, w.stores[record.component])
 		return true
 	}
 	return true
