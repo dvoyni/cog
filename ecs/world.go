@@ -5,11 +5,9 @@ import (
 	"math"
 	"math/bits"
 	"reflect"
-	"sync/atomic"
 	"unsafe"
 
 	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/kernel/container"
 )
 
 // WorldID is the constraint over world IDs. A world ID is a named array of
@@ -41,42 +39,9 @@ type World[W WorldID] struct {
 
 // world is the kernel resource of world W: its entities and its stores.
 type world[W WorldID] struct {
-	// firstIndex and lastIndex bound the allocation range, inclusive.
-	firstIndex, lastIndex uint32
-	entitySlots           indexTable[entitySlot[W]]
-	stores                []*store
-	storesByType          map[reflect.Type]*store
-
-	// freeEntities holds the entities to hand out next, oldest first: each
-	// is a freed index in the allocation range at its next generation.
-	freeEntities container.Array[Entity]
-	// reservationCount counts the entities handed out since reservations
-	// were last settled: the free entities first, then fresh indices from
-	// nextFreshIndex.
-	reservationCount atomic.Int64
-	// nextFreshIndex is the first index in the allocation range never handed
-	// out. It is one past lastIndex once the range is used up.
-	nextFreshIndex int64
-	// observationEnabled is set by the first observation reset. Until then
-	// the world keeps nothing for observers: a despawned index is freed at
-	// once, and a removed row is dropped.
-	observationEnabled bool
-	// despawnedIndices holds the indices despawned in this observation
-	// window, freed at the next observation reset so none is reused within
-	// it. It stays empty while observation is off.
-	despawnedIndices container.Array[uint32]
-}
-
-// entitySlot is the entity table's entry for one index.
-type entitySlot[W WorldID] struct {
-	// liveGeneration is the generation of the entity alive at this index, or
-	// 0 if none is.
-	liveGeneration uint32
-	// lastGeneration is the last generation placed at this index.
-	lastGeneration uint32
-	// componentMask holds the components the entity has, one bit per
-	// ComponentID.
-	componentMask W
+	entities     entityTable[W]
+	stores       []*store
+	storesByType map[reflect.Type]*store
 }
 
 // RegisterWorld registers world W, named by its world ID, as a kernel
@@ -101,15 +66,8 @@ func RegisterWorld[W WorldID](configurator *kernel.Configurator, options WorldOp
 	if last < options.FirstIndex {
 		panic(fmt.Sprintf("ecs: world %v has an empty allocation range", t))
 	}
-	w := &world[W]{
-		firstIndex:     options.FirstIndex,
-		lastIndex:      last,
-		nextFreshIndex: int64(options.FirstIndex),
-		storesByType:   map[reflect.Type]*store{},
-	}
-	for i := range options.Entities {
-		w.entitySlots.atOrCreate(options.FirstIndex + uint32(i))
-	}
+	w := &world[W]{storesByType: map[reflect.Type]*store{}}
+	w.entities.init(options.FirstIndex, last, options.Entities)
 	configurator.InitResource(w)
 	registry.worlds = append(registry.worlds, t)
 }
@@ -121,37 +79,20 @@ func (World[W]) Declare(access *kernel.Access) World[W] {
 
 // Alive reports whether e is alive.
 func (w World[W]) Alive(e Entity) bool {
-	return w.world.alive(e)
+	return w.world.entities.alive(e)
 }
 
 // Spawn makes a new entity, with no components, and returns it. It answers
 // NoEntity once the allocation range is used up.
 func (w World[W]) Spawn() Entity {
-	if !w.world.observationEnabled {
-		w.world.settleReservations(false)
-	}
-	e := w.world.reserve()
-	if e != NoEntity {
-		w.world.place(e)
-	}
-	return e
+	return w.world.entities.spawn()
 }
 
 // CreateAt makes e alive at its index and generation, for mirrors and for
 // loading a save. e's index must lie outside the allocation range and hold
 // no live entity.
 func (w World[W]) CreateAt(e Entity) error {
-	if e.generation() == 0 {
-		return fmt.Errorf("ecs: creating entity %#x, whose generation is 0", uint64(e))
-	}
-	if index := e.index(); index >= w.world.firstIndex && index <= w.world.lastIndex {
-		return fmt.Errorf("ecs: creating entity %#x inside the allocation range", uint64(e))
-	}
-	if slot := w.world.entitySlots.at(e.index()); slot != nil && slot.liveGeneration != 0 {
-		return fmt.Errorf("ecs: creating entity %#x where one is alive", uint64(e))
-	}
-	w.world.place(e)
-	return nil
+	return w.world.entities.place(e)
 }
 
 // Despawn removes e and every component it has, and reports whether it was
@@ -254,11 +195,7 @@ func (w World[W]) Component(id ComponentID) ComponentInfo {
 // ComponentMask answers the components e has, one bit per ComponentID, or
 // false if e is not alive.
 func (w World[W]) ComponentMask(e Entity) (W, bool) {
-	if !w.world.alive(e) {
-		var none W
-		return none, false
-	}
-	return w.world.entitySlots.at(e.index()).componentMask, true
+	return w.world.entities.mask(e)
 }
 
 // ReadRaw returns e's component id as bytes, or nil if e has none, for
@@ -304,20 +241,14 @@ func (w World[W]) RemoveRaw(e Entity, id ComponentID) bool {
 	return w.world.removeComponent(e, w.world.stores[id])
 }
 
-// alive reports whether e is alive. It is one load and one compare.
-func (w *world[W]) alive(e Entity) bool {
-	slot := w.entitySlots.at(e.index())
-	return slot != nil && slot.liveGeneration == e.generation() && slot.liveGeneration != 0
-}
-
 // despawn removes e and every component it has, and reports whether it was
 // alive.
 func (w *world[W]) despawn(e Entity) bool {
-	if !w.alive(e) {
+	mask, ok := w.entities.despawn(e)
+	if !ok {
 		return false
 	}
-	slot := w.entitySlots.at(e.index())
-	words := maskWords(&slot.componentMask)
+	words := maskWords(&mask)
 	for word := range words {
 		for set := words[word]; set != 0; set &= set - 1 {
 			s := w.stores[word<<6+bits.TrailingZeros64(set)]
@@ -325,39 +256,13 @@ func (w *world[W]) despawn(e Entity) bool {
 			s.remove(e, row)
 		}
 	}
-	slot.componentMask = *new(W)
-	slot.liveGeneration = 0
-	if w.observationEnabled {
-		w.despawnedIndices.Append(e.index())
-	} else {
-		w.settleReservations(false)
-		w.free(e.index())
-	}
-	return true
-}
-
-// spawnReserved makes reserved entity e alive, and reports whether it was a
-// reservation not yet spawned: its index holds no live entity and e is the
-// generation the index hands out next.
-func (w *world[W]) spawnReserved(e Entity) bool {
-	lastGeneration := uint32(0)
-	if slot := w.entitySlots.at(e.index()); slot != nil {
-		if slot.liveGeneration != 0 {
-			return false
-		}
-		lastGeneration = slot.lastGeneration
-	}
-	if e.generation() != nextGeneration(lastGeneration) {
-		return false
-	}
-	w.place(e)
 	return true
 }
 
 // addComponent gives alive e a row in s, or marks the one it has changed,
 // and returns it. It answers false if e is not alive.
 func (w *world[W]) addComponent(e Entity, s *store) (int, bool) {
-	if !w.alive(e) {
+	if !w.entities.alive(e) {
 		return 0, false
 	}
 	row, ok := s.row(e)
@@ -366,7 +271,7 @@ func (w *world[W]) addComponent(e Entity, s *store) (int, bool) {
 		return row, true
 	}
 	row = s.add(e)
-	maskSet(&w.entitySlots.at(e.index()).componentMask, s.component.ID)
+	w.entities.setComponent(e, s.component.ID)
 	return row, true
 }
 
@@ -377,7 +282,7 @@ func (w *world[W]) removeComponent(e Entity, s *store) bool {
 		return false
 	}
 	s.remove(e, row)
-	maskUnset(&w.entitySlots.at(e.index()).componentMask, s.component.ID)
+	w.entities.unsetComponent(e, s.component.ID)
 	return true
 }
 
@@ -414,95 +319,13 @@ func (w *world[W]) addAll(e Entity, mask *W, values []byte) {
 	}
 }
 
-// reserve takes the next entity to spawn: the oldest free index, else the
-// next fresh one. It answers NoEntity once the allocation range is used up.
-// Concurrent reserves take distinct entities; nothing else may change the
-// world meanwhile.
-func (w *world[W]) reserve() Entity {
-	reservation := w.reservationCount.Add(1) - 1
-	freeCount := int64(w.freeEntities.Len())
-	if reservation < freeCount {
-		return *w.freeEntities.At(int(reservation))
-	}
-	index := w.nextFreshIndex + reservation - freeCount
-	if index > int64(w.lastIndex) {
-		return NoEntity
-	}
-	return makeEntity(uint32(index), 1)
-}
-
-// place makes e alive at its index and generation.
-func (w *world[W]) place(e Entity) {
-	slot := w.entitySlots.atOrCreate(e.index())
-	slot.lastGeneration = e.generation()
-	slot.liveGeneration = e.generation()
-}
-
-// settleReservations folds the reservations taken since they were last
-// settled into the free list and nextFreshIndex, so the free list starts at
-// the next entity to hand out. It runs under the barrier, where no
-// reservation is being taken.
-//
-// With reclaim, a reservation never spawned goes back to the back of the
-// free list with its generation burned, so the stale entity never comes
-// alive. Only the observation reset reclaims: it is the one point where no
-// reservation of the window still waits for its commit. Without reclaim,
-// such an index is lost.
-func (w *world[W]) settleReservations(reclaim bool) {
-	reservations := int(w.reservationCount.Load())
-	if reservations == 0 {
-		return
-	}
-	takenFree := min(reservations, w.freeEntities.Len())
-	takenFresh := min(int64(reservations-takenFree), int64(w.lastIndex)+1-w.nextFreshIndex)
-	if reclaim {
-		for i := range takenFree {
-			w.reclaim(*w.freeEntities.At(i))
-		}
-		for i := range takenFresh {
-			w.reclaim(makeEntity(uint32(w.nextFreshIndex+i), 1))
-		}
-	}
-	w.nextFreshIndex += takenFresh
-	remainingFree := w.freeEntities.Len() - takenFree
-	for i := range remainingFree {
-		*w.freeEntities.At(i) = *w.freeEntities.At(takenFree + i)
-	}
-	w.freeEntities.Resize(remainingFree)
-	w.reservationCount.Store(0)
-}
-
-// reclaim puts reserved's index back at the back of the free list if
-// reserved was never spawned, burning its generation: the index's slot
-// records it as handed out, so a commit of the stale entity is refused and
-// the index comes back at the next generation.
-func (w *world[W]) reclaim(reserved Entity) {
-	slot := w.entitySlots.atOrCreate(reserved.index())
-	if slot.lastGeneration == reserved.generation() {
-		return
-	}
-	slot.lastGeneration = reserved.generation()
-	w.freeEntities.Append(makeEntity(reserved.index(), nextGeneration(reserved.generation())))
-}
-
-// free puts a despawned index at the back of the free list, at its next
-// generation, if it lies in the allocation range. Reservations are settled.
-func (w *world[W]) free(index uint32) {
-	if index >= w.firstIndex && index <= w.lastIndex {
-		w.freeEntities.Append(makeEntity(index, nextGeneration(w.entitySlots.at(index).lastGeneration)))
-	}
-}
-
 // resetObservation ends the observation window: every observed store's
-// shadows take their rows' values and its tail is dropped, reservations are
-// settled and reclaimed, and the window's despawned indices are freed in
-// despawn order. The first reset turns observation on instead: each store
-// with an observer starts observing, every row it holds counting as added
-// in the first window.
+// shadows take their rows' values and its tail is dropped, and the entity
+// table ends its window. The first reset turns observation on instead: each
+// store with an observer starts observing, every row it holds counting as
+// added in the first window.
 func (w *world[W]) resetObservation() {
-	if !w.observationEnabled {
-		w.settleReservations(false)
-		w.observationEnabled = true
+	if w.entities.endWindow() {
 		for _, s := range w.stores {
 			if s.observerRegistered {
 				s.startObservation()
@@ -513,11 +336,6 @@ func (w *world[W]) resetObservation() {
 	for _, s := range w.stores {
 		s.resetObservation()
 	}
-	w.settleReservations(true)
-	for i := range w.despawnedIndices.Len() {
-		w.free(*w.despawnedIndices.At(i))
-	}
-	w.despawnedIndices.Resize(0)
 }
 
 // registeredWorld returns world W, panicking if it is not registered.

@@ -102,8 +102,11 @@ Kernel
   and for loading a save. The index must hold no live entity and lie outside
   the allocation range, so it never collides with an index the world hands
   out or has reserved.
-- **FIFO reuse.** A despawned index goes to the back of the free list, so
-  reuse order is deterministic. In an observing world it goes there only at
+- **LIFO reuse.** A despawned index goes to the back of the free list, and
+  entities are handed out from the back, so reuse order is deterministic,
+  live indices stay packed low, and taking entities never moves the rest.
+  FIFO only spread generation wear, whose wrap is negligible at 32 bits.
+  In an observing world an index goes on the list only at
   the next observation reset, so an index is not reused in the observation
   window it died in; in a world that does not observe, at once.
 - **Component mask.** The world keeps each entity's components as one mask
@@ -456,7 +459,7 @@ Each step ends with its tests passing under `go test -race`.
    `TaskConstructorFunc[A, B]`; give `Read[T]` and `Write[T]` an exported
    `Declare(*Access)`.
 3. **Core.** The `ecs` module; `WorldID`; `Entity` and the entity table
-   (allocation range, `CreateAt`, FIFO reuse, reservations); `World[W]`, the
+   (allocation range, `CreateAt`, LIFO reuse, reservations); `World[W]`, the
    plugin, `RegisterWorld` and the component registry; `Store[W, T]`, tags, `Lookup`; `Query1`…`Query8`
    with `With` and `Without`; `RegisterTask0`…`RegisterTask8` in the kernel. Alloc tests for
    queries and system calls.
@@ -473,7 +476,7 @@ Each step ends with its tests passing under `go test -race`.
    `benchstat docs/benchmarks-baseline.txt new.txt`.
 7. **Deepening.** Each is designed with the user first, then built, and
    measured against step 6:
-   1. **An entity allocator.** One module owns allocation, reservations,
+   1. **An entity allocator.** Built as `entityTable`. One module owns allocation, reservations,
       windowed reuse and the generation burn, which are now split across
       `Spawn`, despawn, the observation reset and the commit, each branching
       on whether the world observes. Callers say what happened (reserved,
@@ -481,8 +484,8 @@ Each step ends with its tests passing under `go test -race`.
       settling. The alive check stays one load. The baseline shows why:
       in a world that does not observe, every `Spawn` and despawn settles,
       and settling shifts the whole free list, so `BenchmarkSpawnDespawn`
-      costs about 3.7 µs per entity, quadratic in the free entities. The
-      free list wants a head cursor, not a shift.
+      costs about 3.7 µs per entity, quadratic in the free entities. Taking
+      from the back (LIFO reuse) makes settling a truncation.
    2. **Observation behind the store.** The store yields its own changes
       (owner, kind, value and shadow addresses, the bytewise skip
       included) and holds one observation state instead of two flags;

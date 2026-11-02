@@ -34,7 +34,7 @@ func TestStoreAddGetRemoveSwapsLastRow(t *testing.T) {
 			t.Fatalf("entity %d holds %v after a swap-remove, want X %d", i+1, got, i+1)
 		}
 	}
-	slot := w.world.entitySlots.at(entities[0].index())
+	slot := w.world.entities.slots.at(entities[0].index())
 	if maskHas(&slot.componentMask, positions.store.component.ID) {
 		t.Fatal("Remove left the entity's mask bit set")
 	}

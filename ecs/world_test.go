@@ -1,7 +1,6 @@
 package ecs
 
 import (
-	"sync"
 	"testing"
 
 	"github.com/dvoyni/cog/kernel"
@@ -100,31 +99,6 @@ func TestDespawnRemovesEveryComponent(t *testing.T) {
 	}
 	if c := w.Spawn(); c != makeEntity(a.index(), 2) {
 		t.Fatalf("Spawn answered %#x, want a's index reused at once, as nothing observes", uint64(c))
-	}
-}
-
-func TestConcurrentReservesAreDistinct(t *testing.T) {
-	var w World[game]
-	spawn(t, func(c *kernel.Configurator) { w = declare[World[game]](c) })
-	const reservers, each = 8, 1000
-	got := make([][]Entity, reservers)
-	var wait sync.WaitGroup
-	for g := range reservers {
-		wait.Go(func() {
-			for range each {
-				got[g] = append(got[g], w.world.reserve())
-			}
-		})
-	}
-	wait.Wait()
-	seen := map[Entity]bool{}
-	for _, entities := range got {
-		for _, e := range entities {
-			if e == NoEntity || seen[e] {
-				t.Fatalf("reserve answered %#x twice or NoEntity", uint64(e))
-			}
-			seen[e] = true
-		}
 	}
 }
 

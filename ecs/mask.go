@@ -20,18 +20,26 @@ func maskBits[W WorldID]() int {
 	return int(unsafe.Sizeof(m)) * 8
 }
 
+// maskWord returns the word of m holding bit id, which must be below
+// maskBits, as every registered ComponentID is. It is pointer arithmetic,
+// with no bounds check, so the bit operations stay cheap enough to inline
+// into their callers.
+func maskWord[W WorldID](m *W, id ComponentID) *uint64 {
+	return (*uint64)(unsafe.Add(unsafe.Pointer(m), uintptr(id>>6)*8))
+}
+
 // maskHas reports whether bit id is set in m.
 func maskHas[W WorldID](m *W, id ComponentID) bool {
-	return atomic.LoadUint64(&maskWords(m)[id>>6])&(1<<(id&63)) != 0
+	return atomic.LoadUint64(maskWord(m, id))&(1<<(id&63)) != 0
 }
 
 // maskSet sets bit id in m, atomically, so writers of different stores can
 // update one entity's mask at once.
 func maskSet[W WorldID](m *W, id ComponentID) {
-	atomic.OrUint64(&maskWords(m)[id>>6], 1<<(id&63))
+	atomic.OrUint64(maskWord(m, id), 1<<(id&63))
 }
 
 // maskUnset clears bit id in m, atomically.
 func maskUnset[W WorldID](m *W, id ComponentID) {
-	atomic.AndUint64(&maskWords(m)[id>>6], ^uint64(1<<(id&63)))
+	atomic.AndUint64(maskWord(m, id), ^uint64(1<<(id&63)))
 }

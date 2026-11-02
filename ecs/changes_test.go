@@ -177,17 +177,17 @@ func TestDespawnedIndicesAreReusedOnlyAfterTheReset(t *testing.T) {
 	o.harness.run(func(ex *kernel.Executor) kernel.JobHandle {
 		return ex.Schedule(o.reset, kernel.NoArg{}).Handle()
 	})
+	if got := o.world.Spawn(); got != makeEntity(a.index(), 2) {
+		t.Fatalf("Spawn after the reset answered %#x, want a's index, despawned last, at generation 2", uint64(got))
+	}
 	if got := o.world.Spawn(); got != makeEntity(b.index(), 2) {
 		t.Fatalf("Spawn after the reset answered %#x, want b's index at generation 2", uint64(got))
-	}
-	if got := o.world.Spawn(); got != makeEntity(a.index(), 2) {
-		t.Fatalf("Spawn after the reset answered %#x, want a's index at generation 2", uint64(got))
 	}
 }
 
 func TestAbandonedReservationsComeBackBurned(t *testing.T) {
 	o := spawnObserved(t)
-	abandoned := o.world.world.reserve()
+	abandoned := o.world.world.entities.reserve()
 	spawned := o.world.Spawn()
 	ObservationReset(nil, kernel.NoArg{}, o.world)
 	if !o.world.Alive(spawned) || o.world.Alive(abandoned) {
@@ -204,7 +204,7 @@ func TestDespawnedIndicesOutsideTheRangeAreNotFreed(t *testing.T) {
 	o.world.CreateAt(mirrored)
 	o.world.Despawn(mirrored)
 	ObservationReset(nil, kernel.NoArg{}, o.world)
-	if o.world.world.freeEntities.Len() != 0 {
+	if o.world.world.entities.freeEntities.Len() != 0 {
 		t.Fatal("a mirrored index went onto the free list")
 	}
 }
@@ -280,7 +280,7 @@ func TestUnobservedReservationsNeverRepeat(t *testing.T) {
 	for range 5000 {
 		switch op := random.IntN(10); {
 		case op < 2:
-			take(o.world.world.reserve()) // abandoned: its index is lost
+			take(o.world.world.entities.reserve()) // abandoned: its index is lost
 		case op < 6 || len(alive) == 0:
 			e := o.world.Spawn()
 			take(e)

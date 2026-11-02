@@ -95,7 +95,7 @@ func (CommandBuffer[W, Tag]) Declare(access *kernel.Access) CommandBuffer[W, Tag
 // the next observation reset, which takes back a reservation not spawned.
 // It answers NoEntity once the allocation range is used up.
 func (c CommandBuffer[W, Tag]) Reserve() Entity {
-	return c.recorder.world.reserve()
+	return c.recorder.world.entities.reserve()
 }
 
 // Spawn records making reserved entity e alive, with no components.
@@ -168,7 +168,7 @@ func (s CommandSink[W, Tag]) apply(lane *commandLane, record *commandRecord) boo
 	w := s.recorder.world
 	switch record.operation {
 	case commandSpawn:
-		return w.spawnReserved(record.entity)
+		return w.entities.spawnReserved(record.entity)
 	case commandAdd:
 		store := w.stores[record.component]
 		row, ok := w.addComponent(record.entity, store)
@@ -177,7 +177,7 @@ func (s CommandSink[W, Tag]) apply(lane *commandLane, record *commandRecord) boo
 		}
 		return ok
 	case commandSet:
-		if !w.alive(record.entity) {
+		if !w.entities.alive(record.entity) {
 			return false
 		}
 		store := w.stores[record.component]
@@ -187,7 +187,7 @@ func (s CommandSink[W, Tag]) apply(lane *commandLane, record *commandRecord) boo
 		}
 		return true
 	case commandRemove:
-		if !w.alive(record.entity) {
+		if !w.entities.alive(record.entity) {
 			return false
 		}
 		w.removeComponent(record.entity, w.stores[record.component])
