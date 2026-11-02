@@ -1,0 +1,3 @@
+# A store is the lock unit, and a write on the world is the barrier
+
+Each component's store is its own kernel resource, so systems touching different components run in parallel. Every handle of a world also declares a read on the world's own resource, which makes the `World[W]` parameter, the only one that writes it, exclude every other system of that world. Spawning, despawning, commits, the observation reset and type-erased access by `ComponentID` happen under that barrier. One resource holding every store was rejected because it serializes every system; archetypes were rejected because they have no per-component lock unit. Don't drop the read on the world from a handle: the barrier stops being one.

@@ -1,0 +1,3 @@
+# Change detection uses a shadow and a reset the user places
+
+An observed store keeps a shadow copy and a state byte per row; `Changes()` reports added, changed and removed rows with their previous value from the shadow, skipping rows whose bytes did not change. `ObservationReset[W]`, a system the user schedules where their frame needs it, brings the shadows up to date. A change log per store was rejected because its memory grows with the changes made; copying the whole store per writer run (the earlier ECS's way) because it costs the store's size on every write. The ECS reports no field masks: it has no field meaning, and raw-byte masks report noise its consumers filter anyway.

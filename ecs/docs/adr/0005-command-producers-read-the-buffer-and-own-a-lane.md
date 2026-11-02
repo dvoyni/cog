@@ -1,0 +1,3 @@
+# Command producers read the buffer and own a lane
+
+A command buffer is reached through two handles named by world and tag. `CommandBuffer[W, Tag]` declares a read on the buffer and appends to a lane of its own, assigned at registration; `CommandSink[W, Tag]` declares the write on the buffer and the barrier on the world. Producers therefore run in parallel, and commit order is deterministic: despawns first, then lane (registration) order, then sequence order. Producers writing the buffer was rejected because every producer would then exclude every other. A lane is guarded by an uncontended `TryLock`, because two jobs of one read-only system may run at once.

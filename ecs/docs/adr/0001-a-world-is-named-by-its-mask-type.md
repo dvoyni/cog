@@ -1,0 +1,3 @@
+# A world is named by its mask type
+
+A world's type parameter is a named array of words, `type Game [2]uint64`, which both names the world and bounds how many component types it holds. One kernel can then hold several worlds (a client's simulated and displayed worlds), each with its own resources, and one system can query several. Mask operations are generic over `~[1]uint64 | ~[2]uint64 | ~[4]uint64 | ~[8]uint64` and reach the words through `unsafe.Slice`, so they compile per size and inline. An interface over the mask, or a separate world tag beside a mask parameter, was rejected: the first dispatches on the hot path, the second puts two type parameters on every handle.
