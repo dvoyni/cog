@@ -2106,11 +2106,11 @@ software rasteriser dropped the whole draw, GLES read 0 as "tightly packed", Met
 set `stepRate: 1`. A trick that works in a browser and silently corrupts the
 desktop HAL is exactly the divergence the map forbids
 ([gogpu/wgpu: arrayStride 0 is unvalidated and backends diverge](https://github.com/dvoyni/cog/issues/47)).
-cog now pins the fork `dvoyni/wgpu` by `replace`, and its pipeline validation
+Upstream wgpu v0.34.6 took cog's patch, and its pipeline validation now
 rejects stride 0, a stride that is not a multiple of 4, a stride over
 `maxVertexBufferArrayStride` and an attribute that runs past its stride, on every
 native backend, before any HAL sees them. Stride 0 is rejected, not emulated, so
-the trick stays unusable; the same patch is bound for upstream.
+the trick stays unusable.
 
 **Packing waited on a measured trigger and then got one.** v1 stored all eight
 attributes wide, at 84 bytes; the narrowing above — oct normals and tangents,

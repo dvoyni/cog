@@ -8,8 +8,8 @@ require (
 	github.com/gogpu/gogpu v0.54.0
 	github.com/gogpu/gpucontext v0.31.3
 	github.com/gogpu/gputypes v0.8.0
-	github.com/gogpu/naga v0.19.0
-	github.com/gogpu/wgpu v0.34.5
+	github.com/gogpu/naga v0.20.5
+	github.com/gogpu/wgpu v0.34.6
 	github.com/google/jsonschema-go v0.4.3
 	github.com/jfreymuth/oggvorbis v1.0.5
 	github.com/modelcontextprotocol/go-sdk v1.7.0
@@ -20,7 +20,7 @@ require (
 )
 
 require (
-	github.com/go-webgpu/goffi v0.6.3 // indirect
+	github.com/go-webgpu/goffi v0.6.8 // indirect
 	github.com/go-webgpu/webgpu v0.5.5 // indirect
 	github.com/jfreymuth/pulse v0.1.3 // indirect
 	github.com/jfreymuth/vorbis v1.0.2 // indirect
@@ -34,16 +34,8 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 )
 
-replace github.com/gogpu/naga => github.com/dvoyni/naga v0.19.1-0.20260910142728-7fd5ed312699
-
 replace github.com/gogpu/gogpu => ../../gogpu/gogpu
 
 replace github.com/jfreymuth/vorbis => github.com/dvoyni/vorbis v1.0.3-0.20260921150454-ab3e6ce988a8
 
 replace github.com/jfreymuth/oggvorbis => github.com/dvoyni/oggvorbis v1.0.6-0.20260921150857-546236badfd4
-
-// The dvoyni/wgpu cog branch: v0.34.5 plus vertex arrayStride validation, so
-// a zero or misaligned stride fails pipeline creation on every native backend
-// instead of diverging per backend (dvoyni/cog#47). It comes out once upstream
-// ships the fix.
-replace github.com/gogpu/wgpu => github.com/dvoyni/wgpu v0.34.6-0.20260922155231-6ce612817da4
