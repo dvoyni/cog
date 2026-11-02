@@ -3,6 +3,8 @@ package kernel
 import (
 	"fmt"
 	"reflect"
+
+	"github.com/dvoyni/cog/kernel/container"
 )
 
 // SubscriptionFunc is a subscription's body: the event handler Subscribe
@@ -77,7 +79,7 @@ func (c *Configurator) RegisterTask[A, B any](declare func(access *Access) TaskB
 		panic("kernel: registering a task with a nil declare function")
 	}
 	for _, t := range [2]reflect.Type{reflect.TypeFor[A](), reflect.TypeFor[B]()} {
-		if !isPointerFree(t) {
+		if !container.IsPointerFree(t) {
 			panic(fmt.Sprintf("kernel: task arg or result %v is not pointer-free", t))
 		}
 	}
@@ -121,7 +123,7 @@ func (c *Configurator) PinToMainThread[A, B any](task *Task[A, B]) {
 // an event nothing subscribes to is never delivered.
 func (c *Configurator) Subscribe[E any](fn SubscriptionFunc[E]) Sub[E] {
 	t := reflect.TypeFor[E]()
-	if !isPointerFree(t) {
+	if !container.IsPointerFree(t) {
 		panic(fmt.Sprintf("kernel: event %v is not pointer-free", t))
 	}
 	if fn == nil {
@@ -149,28 +151,4 @@ func (c *Configurator) OrderSubscriptions[E any](before, after Sub[E]) {
 		}
 	}
 	d.orders = append(d.orders, [2]int32{before.index - 1, after.index - 1})
-}
-
-// isPointerFree reports whether t holds no pointer at any depth: no pointer,
-// unsafe pointer, slice, map, string, interface, channel or func. Numbers,
-// bools, and arrays and structs of those are pointer-free.
-func isPointerFree(t reflect.Type) bool {
-	switch t.Kind() {
-	case reflect.Bool,
-		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
-		reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128:
-		return true
-	case reflect.Array:
-		return isPointerFree(t.Elem())
-	case reflect.Struct:
-		for i := range t.NumField() {
-			if !isPointerFree(t.Field(i).Type) {
-				return false
-			}
-		}
-		return true
-	default:
-		return false
-	}
 }

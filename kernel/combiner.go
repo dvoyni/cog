@@ -3,7 +3,7 @@ package kernel
 import (
 	"sync"
 
-	"github.com/dvoyni/cog/kernel/internal/concurrent"
+	"github.com/dvoyni/cog/kernel/container"
 )
 
 // lockRequest is a job asking the lock combiner for its task's locks.
@@ -32,8 +32,8 @@ type lockCombiner struct {
 	// arrivals is every job that arrived and locks something, and releases
 	// the task of every finished job whose locks are not unlocked yet, both
 	// waiting for the combiner.
-	arrivals concurrent.Queue[lockRequest]
-	releases concurrent.Queue[uint32]
+	arrivals container.Queue[lockRequest]
+	releases container.Queue[uint32]
 
 	// mutex is held by whichever goroutine is the combiner. It is only ever
 	// tried, never waited for.

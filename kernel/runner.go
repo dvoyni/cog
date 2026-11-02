@@ -4,7 +4,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/dvoyni/cog/kernel/internal/concurrent"
+	"github.com/dvoyni/cog/kernel/container"
 )
 
 // runner runs a kernel's jobs once their locks are held: pinned ones on
@@ -18,7 +18,7 @@ type runner struct {
 
 	// ready is every job whose locks are held, or that locks nothing,
 	// waiting for a worker. Pinned jobs go to the Supervisor instead.
-	ready concurrent.Queue[uint32]
+	ready container.Queue[uint32]
 
 	// workers is every goroutine running jobs. A worker that finds ready
 	// empty counts itself in idle and parks on wake, which has a slot per

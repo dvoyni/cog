@@ -3,7 +3,7 @@ package kernel
 import (
 	"reflect"
 
-	"github.com/dvoyni/cog/kernel/internal/concurrent"
+	"github.com/dvoyni/cog/kernel/container"
 )
 
 // KernelID identifies a Kernel. Spawn assigns it from a counter the
@@ -46,7 +46,7 @@ type Kernel struct {
 	graph jobGraph
 	// executors holds the Executors of finished publications, for the next
 	// to reuse.
-	executors concurrent.Queue[*Executor]
+	executors container.Queue[*Executor]
 
 	// combiner grants every job whose dependencies have all finished its
 	// locks, and hands it to the runner.

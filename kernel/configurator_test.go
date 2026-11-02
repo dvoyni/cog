@@ -133,20 +133,6 @@ func TestSubscribeNilHandlerPanics(t *testing.T) {
 	expectPanic(t, "a nil handler", func() { newTestConfigurator().Subscribe[hit](nil) })
 }
 
-func TestIsPointerFree(t *testing.T) {
-	type plain struct {
-		A [4]int32
-		B struct{ C float64 }
-	}
-	type nested struct{ Inner [2]struct{ P *int } }
-	if !isPointerFree(reflect.TypeFor[plain]()) {
-		t.Fatal("a struct of numbers and arrays is not pointer-free")
-	}
-	if isPointerFree(reflect.TypeFor[nested]()) {
-		t.Fatal("a pointer nested in an array of structs is pointer-free")
-	}
-}
-
 type health struct{ Points int32 }
 
 type damageArg struct{ Amount int32 }

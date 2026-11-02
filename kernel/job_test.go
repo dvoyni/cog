@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/dvoyni/cog/kernel/internal/concurrent"
+	"github.com/dvoyni/cog/kernel/container"
 )
 
 // fedArgs is a task taking an int32 that keeps every arg fed to it, by arg
@@ -58,7 +58,7 @@ func signalled(sig *Signal) bool {
 func TestJobWaitsForItsBatch(t *testing.T) {
 	g, ready := newTestGraph(&fedArgs{})
 	job := g.acquireJob(0, 0, JobHandle{}, nil)
-	if job.slot == concurrent.None || ready.of(job.slot) != 0 {
+	if job.slot == container.None || ready.of(job.slot) != 0 {
 		t.Fatalf("a job was handed on before its batch was submitted")
 	}
 	g.submit([]uint32{job.slot})

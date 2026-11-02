@@ -455,7 +455,7 @@ How the kernel keeps its promises, and why it does so this way. The code
 comments carry the detail; this is the shape.
 
 - **Storage is pools of slots.** Jobs, successor edges, signal edges and each
-  task's args live in `concurrent.Pool`s: chunks that never move, addressed by
+  task's args live in `container.Pool`s: chunks that never move, addressed by
   `uint32` index, reused most recent first. A job slot carries a generation,
   advanced each time the slot is released, so a stale `JobHandle` reads as
   finished rather than naming the slot's next job.
@@ -476,7 +476,7 @@ comments carry the detail; this is the shape.
   pointer, so they have their own pool and the job and successor pools stay
   pointer-free.
 - **Shared queues use a mutex.** Measured against lock-free versions, the
-  mutex `concurrent.Queue` and `Pool` lose little uncontended and avoid
+  mutex `container.Queue` and `Pool` lose little uncontended and avoid
   compare-and-swap storms under contention, without a tuned backoff.
 - **A batch holds its jobs.** Every job starts waiting on one hold besides its
   dependencies; `submit` releases the batch's holds once the last handler

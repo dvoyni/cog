@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"runtime/debug"
 
-	"github.com/dvoyni/cog/kernel/internal/concurrent"
+	"github.com/dvoyni/cog/kernel/container"
 )
 
 // TaskBody is a task's body: what its declare function returns once it has
@@ -50,7 +50,7 @@ type Task[A, B any] struct {
 	run   TaskBody[A, B]
 	// args holds the arg of every job of the task not yet run. A is
 	// pointer-free, so the GC never scans it.
-	args concurrent.Pool[A]
+	args container.Pool[A]
 }
 
 // runnable is what the kernel's task table holds: every Task, whatever its

@@ -1,6 +1,7 @@
-package concurrent
+package container
 
 import (
+	"reflect"
 	"slices"
 	"sync"
 	"testing"
@@ -339,4 +340,104 @@ func BenchmarkPoolManyParallel(b *testing.B) {
 			p.ReleaseMany(held)
 		}
 	})
+}
+
+func TestArrayAppendResizeSwapRemove(t *testing.T) {
+	a := &Array[uint64]{}
+	for i := range 2*chunkSize + 3 {
+		if got := a.Append(uint64(i)); got != i {
+			t.Fatalf("Append answered position %d, want %d", got, i)
+		}
+	}
+	first := a.At(0)
+	a.Append(99) // pointers survive growth
+	if first != a.At(0) || *first != 0 {
+		t.Fatal("growing moved an item")
+	}
+	last := a.Len() - 1
+	if moved := a.SwapRemove(1); moved != last || *a.At(1) != 99 || a.Len() != last {
+		t.Fatalf("SwapRemove moved %d holding %d, want %d holding 99", moved, *a.At(1), last)
+	}
+	a.Resize(2)
+	a.Resize(chunkSize + 1)
+	if *a.At(2) != 0 || *a.At(chunkSize) != 0 {
+		t.Fatal("Resize up kept items cut off before")
+	}
+}
+
+func TestArrayChunksCoverEveryItem(t *testing.T) {
+	a := &Array[int]{}
+	for i := range 2*chunkSize + 5 {
+		a.Append(i)
+	}
+	a.Resize(chunkSize + 7)
+	want := 0
+	for c := range a.Chunks() {
+		for _, got := range a.Chunk(c) {
+			if got != want {
+				t.Fatalf("chunk walk answered %d, want %d", got, want)
+			}
+			want++
+		}
+	}
+	if want != a.Len() {
+		t.Fatalf("chunk walk visited %d items, the array holds %d", want, a.Len())
+	}
+}
+
+func TestArrayAllocatesNothingOnceGrown(t *testing.T) {
+	a := &Array[uint64]{}
+	a.Resize(3 * chunkSize)
+	got := testing.AllocsPerRun(100, func() {
+		a.Resize(0)
+		for i := range 3 * chunkSize {
+			a.Append(uint64(i))
+		}
+		a.SwapRemove(0)
+	})
+	if got != 0 {
+		t.Fatalf("Append, Resize and SwapRemove allocated %v times", got)
+	}
+}
+
+func TestBitsSetUnsetNext(t *testing.T) {
+	b := &Bits{}
+	want := []int{0, 63, 64, 1000, 64*chunkSize + 1}
+	for _, i := range want {
+		b.Set(i)
+	}
+	b.Set(5)
+	b.Unset(5)
+	b.Unset(1 << 30) // beyond the set: nothing to do
+	var got []int
+	for i, ok := b.Next(0); ok; i, ok = b.Next(i + 1) {
+		got = append(got, i)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("walk answered %v, want %v", got, want)
+	}
+	if b.Has(5) || !b.Has(1000) || b.Has(1<<30) {
+		t.Fatal("Has disagrees with what was set")
+	}
+	b.Clear()
+	if _, ok := b.Next(0); ok {
+		t.Fatal("a cleared set still holds an index")
+	}
+	if allocs := testing.AllocsPerRun(100, func() { b.Set(1000); b.Clear() }); allocs != 0 {
+		t.Fatalf("Set and Clear allocated %v times", allocs)
+	}
+}
+
+func TestIsPointerFree(t *testing.T) {
+	type plain struct {
+		A [4]int32
+		B struct{ C float64 }
+	}
+	type nested struct{ Inner [2]struct{ P *int } }
+	if !IsPointerFree(reflect.TypeFor[plain]()) {
+		t.Fatal("a struct of numbers and arrays is not pointer-free")
+	}
+	if IsPointerFree(reflect.TypeFor[nested]()) {
+		t.Fatal("a pointer nested in an array of structs is pointer-free")
+	}
 }

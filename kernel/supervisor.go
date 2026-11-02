@@ -7,7 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/dvoyni/cog/kernel/internal/concurrent"
+	"github.com/dvoyni/cog/kernel/container"
 )
 
 // ErrQuitting is what Spawn answers once Quit has been called.
@@ -44,7 +44,7 @@ type Supervisor struct {
 
 	// pinned is every pinned job ready to run, in the order kernels handed
 	// them over. mainWake wakes WaitMainThread when one is pushed.
-	pinned   concurrent.Queue[pinnedJob]
+	pinned   container.Queue[pinnedJob]
 	mainWake chan struct{}
 	// pinnedBatch is TickMainThread's buffer, reused between ticks. Only the
 	// main thread touches it.

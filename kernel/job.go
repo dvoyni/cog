@@ -3,7 +3,7 @@ package kernel
 import (
 	"sync/atomic"
 
-	"github.com/dvoyni/cog/kernel/internal/concurrent"
+	"github.com/dvoyni/cog/kernel/container"
 )
 
 // JobHandle names one scheduled job without its result type. It is what
@@ -102,9 +102,9 @@ type jobGraph struct {
 	// fed through, and its combiner is handed every job that waits for nothing
 	// any more.
 	kernel         *Kernel
-	jobs           concurrent.Pool[job]
-	successorEdges concurrent.Pool[successorEdge]
-	signalEdges    concurrent.Pool[signalEdge]
+	jobs           container.Pool[job]
+	successorEdges container.Pool[successorEdge]
+	signalEdges    container.Pool[signalEdge]
 }
 
 // acquireJob takes a free slot for a job of task, whose arg is at arg in the
@@ -118,8 +118,8 @@ func (g *jobGraph) acquireJob(task, arg uint32, from JobHandle, deps []JobHandle
 	j.task = task
 	j.arg = arg
 	generation, _ := unpackList(j.successors.Load())
-	j.successors.Store(packList(generation, concurrent.None))
-	j.signals.Store(packList(generation, concurrent.None))
+	j.successors.Store(packList(generation, container.None))
+	j.signals.Store(packList(generation, container.None))
 	j.waiting.Store(1)
 	for _, dep := range deps {
 		g.addSuccessor(dep, slot, false)
@@ -150,7 +150,7 @@ func (g *jobGraph) finishJob[B any](slot uint32, result B) {
 	_, successors := unpackList(j.successors.Swap(packList(generation, closedList)))
 	_, signals := unpackList(j.signals.Swap(packList(generation, closedList)))
 
-	for signals != concurrent.None {
+	for signals != container.None {
 		edge := g.signalEdges.At(signals)
 		edge.signal.send()
 		next := edge.next
@@ -158,7 +158,7 @@ func (g *jobGraph) finishJob[B any](slot uint32, result B) {
 		g.signalEdges.Release(signals)
 		signals = next
 	}
-	for successors != concurrent.None {
+	for successors != container.None {
 		edge := g.successorEdges.At(successors)
 		successor := g.jobs.At(edge.successor)
 		if edge.feedsResult {
@@ -182,7 +182,7 @@ func (g *jobGraph) finishJob[B any](slot uint32, result B) {
 // A job that has already finished, the zero JobHandle included, is not armed
 // and answers false, and the caller signals at once.
 func (g *jobGraph) armSignal(handle JobHandle, signal *Signal) bool {
-	if handle.slot == concurrent.None {
+	if handle.slot == container.None {
 		return false
 	}
 	edge := g.signalEdges.Acquire()
@@ -215,7 +215,7 @@ func (g *jobGraph) handle(slot uint32) JobHandle {
 // waited for, and answers false. The successor's waiting count is raised
 // before the edge is linked, so a finish never brings it to zero early.
 func (g *jobGraph) addSuccessor(predecessor JobHandle, successor uint32, feedsResult bool) bool {
-	if predecessor.slot == concurrent.None {
+	if predecessor.slot == container.None {
 		return false
 	}
 	waiting := &g.jobs.At(successor).waiting
