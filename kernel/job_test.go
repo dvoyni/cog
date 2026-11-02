@@ -33,7 +33,7 @@ func (r *readyCounts) of(slot uint32) int32 {
 
 // collect counts every slot waiting in the ready queue, and empties it.
 func (r *readyCounts) collect() {
-	r.buffer = r.kernel.ready.Drain(r.buffer[:0])
+	r.buffer = r.kernel.runner.ready.Drain(r.buffer[:0])
 	for _, slot := range r.buffer {
 		r.counts[slot]++
 	}

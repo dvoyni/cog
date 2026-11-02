@@ -86,7 +86,7 @@ func (ex *Executor) add(task, arg uint32, from JobHandle, deps []JobHandle) JobH
 // waits for nothing else, and gives the Executor back to the kernel.
 func (ex *Executor) submit() {
 	// Counted while the publication still is, so drain never misses them.
-	ex.kernel.outstanding.Add(int64(len(ex.batch)))
+	ex.kernel.runner.add(len(ex.batch))
 	ex.kernel.graph.submit(ex.batch)
 	ex.batch = ex.batch[:0]
 	ex.kernel.executors.Push(ex)

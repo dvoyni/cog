@@ -53,7 +53,7 @@ type grantLog struct {
 }
 
 func (g *grantLog) is(want ...uint32) bool {
-	g.slots = g.kernel.ready.Drain(g.slots)
+	g.slots = g.kernel.runner.ready.Drain(g.slots)
 	return slices.Equal(g.slots, want)
 }
 
@@ -162,7 +162,7 @@ func TestEveryArrivalIsGrantedOnce(t *testing.T) {
 	for range 4 {
 		workers.Go(func() {
 			for {
-				slot, ok := log.kernel.ready.Pop()
+				slot, ok := log.kernel.runner.ready.Pop()
 				if !ok {
 					select {
 					case <-stop:
@@ -233,7 +233,7 @@ func TestPinnedJobGoesToTheMainThread(t *testing.T) {
 		job = ex.Schedule(pinned, 1).Handle()
 		return job
 	})
-	if k.ready.Len() != 0 {
+	if k.runner.ready.Len() != 0 {
 		t.Fatal("a pinned job went to the workers' ready queue")
 	}
 	if got := k.supervisor.pinned.Drain(nil); len(got) != 1 || got[0].kernel != k || got[0].job != job {

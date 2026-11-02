@@ -3,8 +3,6 @@ package kernel
 import (
 	"fmt"
 	"reflect"
-	"sync"
-	"sync/atomic"
 
 	"github.com/dvoyni/cog/kernel/internal/concurrent"
 )
@@ -57,30 +55,12 @@ type Kernel struct {
 	executors concurrent.Queue[*Executor]
 
 	// combiner grants every job whose dependencies have all finished its
-	// locks, and hands it to makeReady.
+	// locks, and hands it to the runner.
 	combiner lockCombiner
 
-	// ready is every job whose locks are held, or that locks nothing,
-	// waiting to run. Pinned jobs go to the Supervisor instead.
-	ready concurrent.Queue[uint32]
-
-	// workers is every goroutine running k's jobs. A worker that finds ready
-	// empty counts itself in idle and parks on wake, which has a slot per
-	// worker: a job made ready while one is idle puts a token in it, so a
-	// worker that parks after the job was pushed still wakes. stop is closed
-	// to end them.
-	workers sync.WaitGroup
-	idle    atomic.Int32
-	wake    chan struct{}
-	stop    chan struct{}
-
-	// outstanding counts every job not yet finished and every Publish still
-	// running. closed is set as k drains, and from then on Publish publishes
-	// nothing; the last outstanding job or publication then puts a token in
-	// drained.
-	outstanding atomic.Int64
-	closed      atomic.Bool
-	drained     chan struct{}
+	// runner runs k's jobs, on its workers or on the main thread for pinned
+	// ones, and counts what is outstanding so k can drain.
+	runner runner
 }
 
 // resource is one resource of a kernel.
@@ -106,12 +86,10 @@ func newKernel(supervisor *Supervisor, id KernelID, config map[PluginName]any, w
 		dispatchers: map[reflect.Type]eventDispatcher{},
 		tasks:       []runnable{joinTask{}},
 		taskLocks:   []*taskLocks{{}},
-		wake:        make(chan struct{}, workerCount),
-		stop:        make(chan struct{}),
-		drained:     make(chan struct{}, 1),
 	}
 	k.graph.kernel = k
 	k.combiner.kernel = k
+	k.runner.kernel = k
 	return k
 }
 
@@ -133,11 +111,9 @@ func (k *Kernel) ID() KernelID { return k.id }
 // handler publishing on k starts a separate batch; one wanting its nested
 // handlers' jobs in its own batch publishes on its Executor instead.
 func (k *Kernel) Publish[E any](event E) (E, JobHandle) {
-	// Counted before closed is checked, so drain never finds nothing
-	// outstanding while a publication that passed the check still runs.
-	k.outstanding.Add(1)
-	defer k.settle()
-	if k.closed.Load() {
+	open := k.runner.add(1)
+	defer k.runner.settle()
+	if !open {
 		return event, JobHandle{}
 	}
 	ex := k.acquireExecutor()
@@ -193,9 +169,7 @@ func (k *Kernel) init() error {
 	}
 	k.combiner.locks = makeLockState(len(k.resources))
 
-	for range k.workerCount {
-		k.workers.Go(k.work)
-	}
+	k.runner.start(k.workerCount)
 	for i, plugin := range k.plugins {
 		if err := plugin.Start(k); err != nil {
 			for started := i - 1; started >= 0; started-- {
@@ -203,7 +177,7 @@ func (k *Kernel) init() error {
 					k.logger.LogErr(fmt.Errorf("kernel: plugin %d (%T) failed to stop: %w", started, k.plugins[started], err))
 				}
 			}
-			k.drain()
+			k.runner.drain()
 			for initialized := len(k.plugins) - 1; initialized >= 0; initialized-- {
 				if err := k.plugins[initialized].Destroy(); err != nil {
 					k.logger.LogErr(fmt.Errorf("kernel: plugin %d (%T) failed to destroy: %w", initialized, k.plugins[initialized], err))
@@ -227,19 +201,12 @@ func (k *Kernel) destroy() {
 			k.logger.LogErr(fmt.Errorf("kernel: plugin %d (%T) failed to stop: %w", i, k.plugins[i], err))
 		}
 	}
-	k.drain()
+	k.runner.drain()
 	for i := len(k.plugins) - 1; i >= 0; i-- {
 		if err := k.plugins[i].Destroy(); err != nil {
 			k.logger.LogErr(fmt.Errorf("kernel: plugin %d (%T) failed to destroy: %w", i, k.plugins[i], err))
 		}
 	}
-}
-
-// runPinned runs pinned job on the calling goroutine, the main thread, and
-// finishes it as a worker would. Supervisor.TickMainThread calls it for each
-// job k handed over.
-func (k *Kernel) runPinned(job JobHandle) {
-	k.tasks[k.graph.task(job.slot)].runJob(k, job.slot)
 }
 
 // dispatcher returns the dispatcher of E in k, creating it on first use.
@@ -262,22 +229,6 @@ func (k *Kernel) acquireExecutor() *Executor {
 	return &Executor{kernel: k}
 }
 
-// makeReady hands on the job in slot, a job of task whose locks are held: to
-// the main thread if task is pinned there, otherwise to ready.
-func (k *Kernel) makeReady(slot, task uint32) {
-	if k.taskLocks[task].pinnedToMainThread {
-		k.supervisor.pushPinned(k, k.graph.handle(slot))
-		return
-	}
-	k.ready.Push(slot)
-	if k.idle.Load() > 0 {
-		select {
-		case k.wake <- struct{}{}:
-		default: // every worker already has a token
-		}
-	}
-}
-
 // completeJob finishes the job in slot, which answered result: it releases
 // its locks, then finishes it in the job graph, which hands on every
 // successor that waits for nothing else.
@@ -286,49 +237,5 @@ func (k *Kernel) completeJob[B any](slot uint32, result B) {
 	// granted them in the same pass.
 	k.combiner.release(k.graph.task(slot))
 	k.graph.finishJob(slot, result)
-	k.settle()
-}
-
-// work is one worker: it runs ready jobs until stop is closed, parking on
-// wake while there is none.
-func (k *Kernel) work() {
-	for {
-		if slot, ok := k.ready.Pop(); ok {
-			k.tasks[k.graph.task(slot)].runJob(k, slot)
-			continue
-		}
-		// Counted idle before looking again, so a job pushed in between is
-		// either seen here or wakes this worker.
-		k.idle.Add(1)
-		if k.ready.Len() == 0 {
-			select {
-			case <-k.wake:
-			case <-k.stop:
-				return
-			}
-		}
-		k.idle.Add(-1)
-	}
-}
-
-// drain makes Publish publish nothing from now on, blocks until every job and
-// publication still outstanding has finished, then ends k's workers.
-func (k *Kernel) drain() {
-	k.closed.Store(true)
-	if k.outstanding.Load() != 0 {
-		<-k.drained
-	}
-	close(k.stop)
-	k.workers.Wait()
-}
-
-// settle marks one outstanding job or publication finished, waking drain at
-// the last once k is closed.
-func (k *Kernel) settle() {
-	if k.outstanding.Add(-1) == 0 && k.closed.Load() {
-		select {
-		case k.drained <- struct{}{}:
-		default: // drain already has a token
-		}
-	}
+	k.runner.settle()
 }

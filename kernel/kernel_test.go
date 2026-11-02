@@ -55,6 +55,7 @@ func newPartialKernel(tasks []runnable, taskLocks []*taskLocks, resources int) *
 	k := &Kernel{tasks: tasks, taskLocks: taskLocks}
 	k.graph.kernel = k
 	k.combiner.kernel = k
+	k.runner.kernel = k
 	k.combiner.locks = makeLockState(resources)
 	return k
 }

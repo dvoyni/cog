@@ -104,7 +104,7 @@ func (s *Supervisor) TickMainThread() {
 			return
 		}
 		for _, pinned := range s.pinnedBatch {
-			pinned.kernel.runPinned(pinned.job)
+			pinned.kernel.runner.runPinned(pinned.job)
 		}
 		// Let removed kernels go rather than keep them alive in the buffer.
 		clear(s.pinnedBatch)

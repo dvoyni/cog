@@ -12,7 +12,7 @@ type lockRequest struct {
 }
 
 // lockCombiner grants jobs the locks of their tasks. A job whose dependencies
-// have all finished arrives, and is handed to the kernel's makeReady once its
+// have all finished arrives, and is handed to the kernel's runner once its
 // locks are held,
 // or at once if it locks nothing; a job that finishes releases them. Jobs
 // whose locks conflict are granted one at a time, oldest first, and a waiting
@@ -24,7 +24,7 @@ type lockRequest struct {
 // one and returns at once. Nothing waits for the combiner.
 type lockCombiner struct {
 	// kernel owns the combiner: its lock table is what the combiner reads a
-	// task's locks from, and its makeReady is handed every job whose locks are
+	// task's locks from, and its runner is handed every job whose locks are
 	// held, by whichever goroutine is the combiner, or by the arriving one for
 	// a job that locks nothing.
 	kernel *Kernel
@@ -51,11 +51,11 @@ type lockCombiner struct {
 }
 
 // arrive asks for the locks of task for the job in slot, whose dependencies
-// have all finished. The job is handed to makeReady once they are held, which
+// have all finished. The job is handed to the runner once they are held, which
 // may be before arrive returns, or later on another goroutine.
 func (c *lockCombiner) arrive(slot, task uint32) {
 	if c.kernel.taskLocks[task].locksNothing() {
-		c.kernel.makeReady(slot, task)
+		c.kernel.runner.makeReady(slot, task)
 		return
 	}
 	c.arrivals.Push(lockRequest{slot: slot, task: task})
@@ -95,7 +95,7 @@ func (c *lockCombiner) combine() {
 			locks := c.kernel.taskLocks[request.task]
 			if c.locks.canLock(locks) {
 				c.locks.lock(locks)
-				c.kernel.makeReady(request.slot, request.task)
+				c.kernel.runner.makeReady(request.slot, request.task)
 				continue
 			}
 			c.locks.reserve(locks)
