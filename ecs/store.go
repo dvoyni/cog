@@ -230,6 +230,16 @@ func (s *store) address(row int) unsafe.Pointer {
 	return unsafe.Add(s.valueChunks[row>>rowShift], uintptr(row&rowMask)*s.component.Size)
 }
 
+// chunk returns the owners of chunk c's live rows, and the address of the
+// chunk's first value; a row's value is Size bytes after the one before.
+func (s *store) chunk(c int) ([]Entity, unsafe.Pointer) {
+	owners := s.owners.Chunk(c)[:min(s.liveRows-c<<rowShift, rowsPerChunk)]
+	if s.component.Size == 0 {
+		return owners, unsafe.Pointer(&zeroBase)
+	}
+	return owners, s.valueChunks[c]
+}
+
 // shadow returns the address of row's shadow. The store is observed.
 func (s *store) shadow(row int) unsafe.Pointer {
 	if s.component.Size == 0 {

@@ -35,10 +35,14 @@ type Query{{.N}}[W WorldID, {{.Types}} any] struct {
 	writes uint8
 }
 
-// Row{{.N}} is one entity's terms, yielded by Query{{.N}}.All.
+// Row{{.N}} is one entity's terms, yielded by Query{{.N}}.All. Each term's
+// address is a field of its own: a small struct of scalars stays in
+// registers, where an array is copied through memory.
 type Row{{.N}}[{{.Types}} any] struct {
-	addresses [{{.N}}]unsafe.Pointer
-	writes    uint8
+{{- range .Terms}}
+	address{{.Index}} unsafe.Pointer
+{{- end}}
+	writes uint8
 }
 
 // Declare declares a lock on each term's store and a read on world W.
@@ -53,16 +57,29 @@ func (Query{{.N}}[W, {{.Types}}]) Declare(access *kernel.Access) Query{{.N}}[W, 
 }
 
 // All walks the entities holding every term, yielding each with its row.
-// It goes backwards from the smallest store's last row, so removing the
-// current entity from any store is safe.
+// It goes backwards from the smallest store's last row, chunk by chunk, so
+// removing the current entity from any store is safe.
 func (q Query{{.N}}[W, {{.Types}}]) All() iter.Seq2[Entity, Row{{.N}}[{{.Types}}]] {
 	return func(yield func(Entity, Row{{.N}}[{{.Types}}]) bool) {
-		row := Row{{.N}}[{{.Types}}]{writes: q.writes}
-		driver := driverOf(q.terms[:])
-		for r := driver.len() - 1; r >= 0; r-- {
-			e := *driver.owners.At(r)
-			if match(q.terms[:], row.addresses[:], e) && !yield(e, row) {
-				return
+		walk := makeQueryWalk(q.terms[:])
+		driver := q.terms[walk.driver].store
+		size := driver.component.Size
+		for c := (driver.len() - 1) >> rowShift; c >= 0; c-- {
+			owners, values := driver.chunk(c)
+			for r := len(owners) - 1; r >= 0; r-- {
+				walk.addresses[walk.driver] = unsafe.Add(values, uintptr(r)*size)
+				if !walk.match(q.terms[:], c<<rowShift+r, owners[r]) {
+					continue
+				}
+				row := Row{{.N}}[{{.Types}}]{
+				{{- range .Terms}}
+					address{{.Index}}: walk.addresses[{{.Index}}],
+				{{- end}}
+					writes: q.writes,
+				}
+				if !yield(owners[r], row) {
+					return
+				}
 			}
 		}
 	}
@@ -70,7 +87,7 @@ func (q Query{{.N}}[W, {{.Types}}]) All() iter.Seq2[Entity, Row{{.N}}[{{.Types}}
 
 // Get returns the row's terms.
 func (r Row{{.N}}[{{.Types}}]) Get() ({{.Types}}) {
-	return {{range $i, $t := .Terms}}{{if $i}}, {{end}}termValue[{{$t.Type}}](r.addresses[{{$t.Index}}], r.writes&(1<<{{$t.Index}}) != 0){{end}}
+	return {{range $i, $t := .Terms}}{{if $i}}, {{end}}termValue[{{$t.Type}}](r.address{{$t.Index}}, r.writes&(1<<{{$t.Index}}) != 0){{end}}
 }
 `))
 

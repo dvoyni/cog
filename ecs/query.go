@@ -2,6 +2,7 @@ package ecs
 
 import (
 	"fmt"
+	"math/bits"
 	"reflect"
 	"unsafe"
 
@@ -83,37 +84,62 @@ func declareQuery(terms []term) uint8 {
 	return writes
 }
 
-// driverOf returns the smallest store a walk can be driven by: every other
-// term is probed by entity.
-func driverOf(terms []term) *store {
-	var driver *store
-	for _, t := range terms {
-		if t.mode != termWithout && (driver == nil || t.store.len() < driver.len()) {
-			driver = t.store
-		}
-	}
-	return driver
+// queryWalk is one walk of a query's terms. It is driven by the smallest
+// store a walk can be driven by, whose rows it goes through chunk by chunk;
+// every other term is probed by entity. It does not hold the terms: a walk
+// that did would put its query on the heap, since match stores addresses
+// read through them.
+type queryWalk struct {
+	// driver is the index of the term that drives the walk.
+	driver int
+	// marked has a bit per term whose rows are marked changed when matched:
+	// the terms that write an observed store. Observation cannot start
+	// during a walk, which holds the stores' locks.
+	marked uint8
+	// addresses holds the address of each term's row in the entity last
+	// matched: a filter's is zeroBase.
+	addresses [8]unsafe.Pointer
 }
 
-// match reports whether e satisfies every term, filling addresses with the
-// address of each term's row. A term that writes an observed store marks
-// a matched row changed, since it is yielded for writing.
-func match(terms []term, addresses []unsafe.Pointer, e Entity) bool {
+// makeQueryWalk picks the term that drives a walk of terms, and the terms
+// it marks.
+func makeQueryWalk(terms []term) queryWalk {
+	walk := queryWalk{driver: -1}
 	for i, t := range terms {
+		if t.mode != termWithout && (walk.driver < 0 || t.store.len() < terms[walk.driver].store.len()) {
+			walk.driver = i
+		}
+		if t.mode == termWrite && t.store.observed() {
+			walk.marked |= 1 << i
+		}
+	}
+	return walk
+}
+
+// match reports whether e, at driverRow of the driving store, satisfies
+// every other one of terms, filling addresses with the address of each one's row;
+// the driver's is the caller's to fill. Once e matches, the rows of the
+// marked terms are marked changed, since they are yielded for writing.
+func (w *queryWalk) match(terms []term, driverRow int, e Entity) bool {
+	var rows [8]int // a query has at most 8 terms, one bit each in marked
+	rows[w.driver] = driverRow
+	for i, t := range terms {
+		if i == w.driver {
+			continue
+		}
 		row, ok := t.store.row(e)
 		if ok == (t.mode == termWithout) {
 			return false
 		}
-		addresses[i] = unsafe.Pointer(&zeroBase)
+		w.addresses[i] = unsafe.Pointer(&zeroBase)
 		if ok {
-			addresses[i] = t.store.address(row)
+			rows[i] = row
+			w.addresses[i] = t.store.address(row)
 		}
 	}
-	for _, t := range terms {
-		if t.mode == termWrite && t.store.observed() {
-			row, _ := t.store.row(e)
-			t.store.markChanged(row)
-		}
+	for marked := w.marked; marked != 0; marked &= marked - 1 {
+		i := bits.TrailingZeros8(marked)
+		terms[i].store.markChanged(rows[i])
 	}
 	return true
 }

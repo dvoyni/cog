@@ -497,12 +497,15 @@ Each step ends with its tests passing under `go test -race`.
       component IDs in ascending order, for despawn, checking and spawning
       from bytes, and later refs release. It inlines whole, loop body
       included.
-   5. **The query walk.** A dense two-term query costs about 15 ns per
-      entity against 0.5 ns for a slice loop. `match` probes the driver
-      through `rowByIndex` though its row is known, probes each write term
-      a second time to mark it, and resolves every row's chunk on its own;
-      a walk by driver chunk that probes only the other terms is the first
-      thing to measure.
+   5. **The query walk.** Built: a walk goes by the driver's chunks, stepping
+      its address, probes only the other terms, once each, and marks the
+      matched rows of observed write terms from those probes. Most of the
+      15 ns a dense two-term query cost per entity was not probing but the
+      row: an array of addresses lives in memory, and copying it to the
+      loop body loaded 16 bytes over two 8-byte stores, which the CPU cannot
+      forward. A row now holds each term's address as a field of its own,
+      in registers for up to three terms. Dense costs 6.4 ns per entity,
+      7.4 ns observed, against 0.5 ns for a slice loop.
 8. **Refs.** Designed first, then built.
 
 Networking comes after, as its own design on top of these pieces.
