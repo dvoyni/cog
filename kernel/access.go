@@ -56,10 +56,11 @@ func (a *Access) Use[A, B any](task *Task[A, B]) func(kernel *Kernel, arg A) B {
 	if task == nil || task.kernel != a.kernel {
 		panic("kernel: using a task that is not this kernel's")
 	}
-	a.growMasks(len(task.writes))
-	for i := range task.writes {
-		a.writes[i] |= task.writes[i]
-		a.reads[i] |= task.reads[i]
+	used := task.locks
+	a.growMasks(len(used.writes))
+	for i := range used.writes {
+		a.writes[i] |= used.writes[i]
+		a.reads[i] |= used.reads[i]
 		a.reads[i] &^= a.writes[i]
 	}
 	return task.run

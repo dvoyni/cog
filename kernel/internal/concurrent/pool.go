@@ -18,22 +18,22 @@ const None uint32 = 0
 // fixed-size chunks that never move, so an index, and a pointer At returns,
 // stays valid for the pool's life however much it grows.
 //
-// Get and Put take the pool's mutex; GetMany and PutMany take it once for a
-// whole batch. At takes none, since it only reads chunks that are never
-// changed once published. Only growing allocates. The zero Pool is empty and
-// ready to use.
+// Acquire and Release take the pool's mutex; AcquireMany and ReleaseMany
+// take it once for a whole batch. At takes none, since it only reads chunks
+// that are never changed once published. Only growing allocates. The zero
+// Pool is empty and ready to use.
 //
 // T should hold no pointers, so the GC never scans the chunks.
 type Pool[T any] struct {
 	chunks atomic.Pointer[[]*[chunkSize]T]
 	mutex  sync.Mutex
-	// free holds the indexes put back, reused most recent first while their
+	// free holds the indexes released, reused most recent first while their
 	// slots are still in cache.
 	free []uint32
 }
 
 // NewPool returns a pool already grown to hold at least capacity slots, so
-// that the first capacity Gets allocate nothing.
+// that the first capacity Acquires allocate nothing.
 func NewPool[T any](capacity int) *Pool[T] {
 	p := &Pool[T]{}
 	p.mutex.Lock()
@@ -44,17 +44,17 @@ func NewPool[T any](capacity int) *Pool[T] {
 	return p
 }
 
-// Get takes a free slot and returns its index. The slot holds whatever it held
-// when it was put back, or the zero T if it is new.
-func (p *Pool[T]) Get() uint32 {
+// Acquire takes a free slot and returns its index. The slot holds whatever it
+// held when it was released, or the zero T if it is new.
+func (p *Pool[T]) Acquire() uint32 {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	return p.take()
 }
 
-// GetMany is Get n times under one lock: it appends n slot indexes to into
-// and returns it.
-func (p *Pool[T]) GetMany(into []uint32, n int) []uint32 {
+// AcquireMany is Acquire n times under one lock: it appends n slot indexes to
+// into and returns it.
+func (p *Pool[T]) AcquireMany(into []uint32, n int) []uint32 {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	for range n {
@@ -63,15 +63,15 @@ func (p *Pool[T]) GetMany(into []uint32, n int) []uint32 {
 	return into
 }
 
-// Put returns slot i, which must have come from Get, to the pool.
-func (p *Pool[T]) Put(i uint32) {
+// Release returns slot i, which must have come from Acquire, to the pool.
+func (p *Pool[T]) Release(i uint32) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	p.free = append(p.free, i)
 }
 
-// PutMany is Put for every index in indexes under one lock.
-func (p *Pool[T]) PutMany(indexes []uint32) {
+// ReleaseMany is Release for every index in indexes under one lock.
+func (p *Pool[T]) ReleaseMany(indexes []uint32) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	p.free = append(p.free, indexes...)
@@ -117,7 +117,7 @@ func (p *Pool[T]) grow() uint32 {
 	if first == None {
 		first++
 	}
-	// Highest first, so Gets hand the chunk out in ascending order.
+	// Highest first, so Acquires hand the chunk out in ascending order.
 	for i := base + chunkSize - 1; i > first; i-- {
 		p.free = append(p.free, i)
 	}

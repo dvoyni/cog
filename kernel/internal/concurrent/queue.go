@@ -67,6 +67,15 @@ func (q *Queue[T]) Close(into []T) []T {
 	return q.take(into)
 }
 
+// Len answers how many items are queued. It may change as soon as it is read,
+// so it is a hint: a caller that has just pushed, or is about to drain,
+// relies on it only to decide whether to look again.
+func (q *Queue[T]) Len() int {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	return q.length
+}
+
 // Closed reports whether the queue is closed.
 func (q *Queue[T]) Closed() bool {
 	q.mutex.Lock()

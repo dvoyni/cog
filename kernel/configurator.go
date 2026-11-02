@@ -87,7 +87,15 @@ func (c *Configurator) RegisterTask[A, B any](declare func(access *Access) TaskB
 	if body == nil {
 		panic("kernel: a task's declare function returned a nil body")
 	}
-	return &Task[A, B]{kernel: c.kernel, reads: access.reads, writes: access.writes, run: body}
+	task := &Task[A, B]{
+		kernel: c.kernel,
+		index:  uint32(len(c.kernel.tasks)),
+		locks:  &taskLocks{reads: access.reads, writes: access.writes},
+		run:    body,
+	}
+	c.kernel.tasks = append(c.kernel.tasks, task)
+	c.kernel.taskLocks = append(c.kernel.taskLocks, task.locks)
+	return task
 }
 
 // PinToMainThread makes every job of task run on the main thread instead of a
@@ -101,7 +109,7 @@ func (c *Configurator) PinToMainThread[A, B any](task *Task[A, B]) {
 	if task == nil || task.kernel != c.kernel {
 		panic("kernel: pinning a task that is not this kernel's")
 	}
-	task.pinnedToMainThread = true
+	task.locks.pinnedToMainThread = true
 }
 
 // Subscribe adds fn to E's handlers and returns its subscription, for

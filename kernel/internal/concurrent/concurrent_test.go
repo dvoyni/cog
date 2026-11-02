@@ -12,9 +12,9 @@ func TestPoolHandsOutEachSlotOnce(t *testing.T) {
 	p := &Pool[slot]{}
 	seen := map[uint32]bool{}
 	for range 3*chunkSize + 7 {
-		i := p.Get()
+		i := p.Acquire()
 		if i == None || seen[i] {
-			t.Fatalf("Get answered %d twice or None", i)
+			t.Fatalf("Acquire answered %d twice or None", i)
 		}
 		seen[i] = true
 	}
@@ -22,60 +22,60 @@ func TestPoolHandsOutEachSlotOnce(t *testing.T) {
 
 func TestPoolReusesPutSlots(t *testing.T) {
 	p := NewPool[slot](1)
-	i := p.Get()
+	i := p.Acquire()
 	p.At(i).value = 42
-	p.Put(i)
-	if j := p.Get(); j != i || p.At(j).value != 42 {
-		t.Fatalf("Get answered %d holding %d, want %d holding 42", j, p.At(j).value, i)
+	p.Release(i)
+	if j := p.Acquire(); j != i || p.At(j).value != 42 {
+		t.Fatalf("Acquire answered %d holding %d, want %d holding 42", j, p.At(j).value, i)
 	}
 }
 
 func TestNewPoolPreallocates(t *testing.T) {
 	p := NewPool[slot](1000)
-	// AllocsPerRun runs once to warm up, then once measured: 1000 Gets in all.
+	// AllocsPerRun runs once to warm up, then once measured: 1000 Acquires in all.
 	got := testing.AllocsPerRun(1, func() {
 		for range 500 {
-			p.Get()
+			p.Acquire()
 		}
 	})
 	if got != 0 {
-		t.Fatalf("Gets from a pool of 1000 allocated %v times", got)
+		t.Fatalf("Acquires from a pool of 1000 allocated %v times", got)
 	}
 }
 
 func TestPoolAllocatesNothingOnceWarm(t *testing.T) {
 	p := NewPool[slot](1)
-	if got := testing.AllocsPerRun(1000, func() { p.Put(p.Get()) }); got != 0 {
-		t.Fatalf("Get and Put allocated %v times", got)
+	if got := testing.AllocsPerRun(1000, func() { p.Release(p.Acquire()) }); got != 0 {
+		t.Fatalf("Acquire and Release allocated %v times", got)
 	}
 }
 
-func TestPoolGetManyPutMany(t *testing.T) {
+func TestPoolAcquireManyReleaseMany(t *testing.T) {
 	p := &Pool[slot]{}
-	held := p.GetMany(nil, chunkSize+10) // spans a growth
+	held := p.AcquireMany(nil, chunkSize+10) // spans a growth
 	seen := map[uint32]bool{}
 	for _, i := range held {
 		if i == None || seen[i] {
-			t.Fatalf("GetMany answered %d twice or None", i)
+			t.Fatalf("AcquireMany answered %d twice or None", i)
 		}
 		seen[i] = true
 	}
-	p.PutMany(held)
-	again := p.GetMany(nil, len(held))
+	p.ReleaseMany(held)
+	again := p.AcquireMany(nil, len(held))
 	for _, i := range again {
 		if !seen[i] {
-			t.Fatalf("GetMany after PutMany answered %d, never handed out before", i)
+			t.Fatalf("AcquireMany after ReleaseMany answered %d, never handed out before", i)
 		}
 	}
 	if got := testing.AllocsPerRun(100, func() {
-		p.PutMany(again)
-		again = p.GetMany(again[:0], len(held))
+		p.ReleaseMany(again)
+		again = p.AcquireMany(again[:0], len(held))
 	}); got != 0 {
-		t.Fatalf("GetMany and PutMany allocated %v times", got)
+		t.Fatalf("AcquireMany and ReleaseMany allocated %v times", got)
 	}
 }
 
-func TestPoolConcurrentGetPut(t *testing.T) {
+func TestPoolConcurrentAcquireRelease(t *testing.T) {
 	p := &Pool[slot]{}
 	var holders sync.Map
 	var wait sync.WaitGroup
@@ -87,10 +87,10 @@ func TestPoolConcurrentGetPut(t *testing.T) {
 					i := held[len(held)-1]
 					held = held[:len(held)-1]
 					holders.Delete(i)
-					p.Put(i)
+					p.Release(i)
 					continue
 				}
-				i := p.Get()
+				i := p.Acquire()
 				if other, taken := holders.LoadOrStore(i, g); taken {
 					t.Errorf("slot %d held by %d and %d at once", i, other, g)
 				}
@@ -237,18 +237,18 @@ func TestQueueAllocatesNothingOnceGrown(t *testing.T) {
 	}
 }
 
-func BenchmarkPoolGetPut(b *testing.B) {
+func BenchmarkPoolAcquireRelease(b *testing.B) {
 	p := NewPool[slot](1)
 	for b.Loop() {
-		p.Put(p.Get())
+		p.Release(p.Acquire())
 	}
 }
 
-func BenchmarkPoolGetPutParallel(b *testing.B) {
+func BenchmarkPoolAcquireReleaseParallel(b *testing.B) {
 	p := NewPool[slot](1024)
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			p.Put(p.Get())
+			p.Release(p.Acquire())
 		}
 	})
 }
@@ -295,11 +295,11 @@ func BenchmarkPoolBatchParallel(b *testing.B) {
 		var held [16]uint32
 		for pb.Next() {
 			for k := range held {
-				held[k] = p.Get()
+				held[k] = p.Acquire()
 				p.At(held[k]).value++
 			}
 			for _, i := range held {
-				p.Put(i)
+				p.Release(i)
 			}
 		}
 	})
@@ -311,11 +311,11 @@ func BenchmarkPoolManyParallel(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		held := make([]uint32, 0, 16)
 		for pb.Next() {
-			held = p.GetMany(held[:0], 16)
+			held = p.AcquireMany(held[:0], 16)
 			for _, i := range held {
 				p.At(i).value++
 			}
-			p.PutMany(held)
+			p.ReleaseMany(held)
 		}
 	})
 }

@@ -11,7 +11,7 @@ type position struct{ X, Y float32 }
 type backend interface{ Name() string }
 
 func newTestConfigurator() *Configurator {
-	return &Configurator{kernel: newKernel(NewSupervisor(nil), 7, nil, false, nil)}
+	return &Configurator{kernel: newKernel(NewSupervisor(nil), 7, nil, false, 1, nil)}
 }
 
 func TestConfiguratorID(t *testing.T) {
@@ -188,8 +188,8 @@ func TestRegisterTaskBuildsLockMasks(t *testing.T) {
 	c.InitResource(position{}) // resource 0, read
 	c.InitResource(health{})   // resource 1, written
 	task := registerDamage(c)
-	if len(task.reads) != 1 || task.reads[0] != 0b01 || task.writes[0] != 0b10 {
-		t.Fatalf("masks are reads %b writes %b, want 01 and 10", task.reads, task.writes)
+	if len(task.locks.reads) != 1 || task.locks.reads[0] != 0b01 || task.locks.writes[0] != 0b10 {
+		t.Fatalf("masks are reads %b writes %b, want 01 and 10", task.locks.reads, task.locks.writes)
 	}
 }
 
@@ -202,14 +202,14 @@ func TestRegisterTaskReadAndWriteIsWrite(t *testing.T) {
 		access.Read[health]()
 		return func(k *Kernel, arg NoArg) NoResult { return NoResult{} }
 	})
-	if task.reads[0] != 0 || task.writes[0] != 1 {
-		t.Fatalf("masks are reads %b writes %b, want 0 and 1", task.reads, task.writes)
+	if task.locks.reads[0] != 0 || task.locks.writes[0] != 1 {
+		t.Fatalf("masks are reads %b writes %b, want 0 and 1", task.locks.reads, task.locks.writes)
 	}
 }
 
 func TestRegisterTaskLockingNothing(t *testing.T) {
 	task := newTestConfigurator().RegisterTask(nothing)
-	if len(task.reads) != 0 || len(task.writes) != 0 {
+	if len(task.locks.reads) != 0 || len(task.locks.writes) != 0 {
 		t.Fatal("a task locking nothing has lock masks")
 	}
 }
@@ -221,8 +221,8 @@ func TestRegisterTaskHighResourceGrowsMasks(t *testing.T) {
 		access.Read[health]()
 		return func(k *Kernel, arg NoArg) NoResult { return NoResult{} }
 	})
-	if len(task.reads) != 3 || task.reads[2] != 1<<2 {
-		t.Fatalf("masks are reads %b, want bit 2 of word 2", task.reads)
+	if len(task.locks.reads) != 3 || task.locks.reads[2] != 1<<2 {
+		t.Fatalf("masks are reads %b, want bit 2 of word 2", task.locks.reads)
 	}
 }
 
@@ -269,8 +269,8 @@ func TestUseFoldsLocksAndCallsDirectly(t *testing.T) {
 			return applyDamage(k, damageArg{Amount: max(arg.Amount-shield.Get().Value, 0)})
 		}
 	})
-	if shielded.reads[0] != 0b101 || shielded.writes[0] != 0b010 {
-		t.Fatalf("masks are reads %b writes %b, want 101 and 010", shielded.reads, shielded.writes)
+	if shielded.locks.reads[0] != 0b101 || shielded.locks.writes[0] != 0b010 {
+		t.Fatalf("masks are reads %b writes %b, want 101 and 010", shielded.locks.reads, shielded.locks.writes)
 	}
 	if got := shielded.run(c.kernel, damageArg{Amount: 5}); got.Points != 6 {
 		t.Fatalf("task answered %d points, want 6", got.Points)
@@ -289,8 +289,8 @@ func TestUseWriteSupersedesUsedRead(t *testing.T) {
 		access.Use(reader)
 		return func(k *Kernel, arg NoArg) NoResult { return NoResult{} }
 	})
-	if writer.reads[0] != 0 || writer.writes[0] != 1 {
-		t.Fatalf("masks are reads %b writes %b, want 0 and 1", writer.reads, writer.writes)
+	if writer.locks.reads[0] != 0 || writer.locks.writes[0] != 1 {
+		t.Fatalf("masks are reads %b writes %b, want 0 and 1", writer.locks.reads, writer.locks.writes)
 	}
 }
 
@@ -309,7 +309,7 @@ func TestUsePinnedTaskInEitherOrder(t *testing.T) {
 		return func(k *Kernel, arg NoArg) NoResult { return NoResult{} }
 	})
 	c.PinToMainThread(used)
-	if !used.pinnedToMainThread {
+	if !used.locks.pinnedToMainThread {
 		t.Fatal("pinning a used task did not pin it")
 	}
 }
@@ -329,7 +329,7 @@ func TestPinToMainThread(t *testing.T) {
 	c := newTestConfigurator()
 	task := c.RegisterTask(nothing)
 	c.PinToMainThread(task)
-	if !task.pinnedToMainThread {
+	if !task.locks.pinnedToMainThread {
 		t.Fatal("task is not pinned")
 	}
 	other := newTestConfigurator()

@@ -14,6 +14,16 @@ type dispatcher[E any] struct {
 	orders [][2]int32
 }
 
+// publish runs every handler in order on ex, each receiving the event and out
+// dependency the one before returned, the first receiving event and in, and
+// answers what the last returned.
+func (d *dispatcher[E]) publish(kernel *Kernel, ex *Executor, in JobHandle, event E) (E, JobHandle) {
+	for _, handler := range d.handlers {
+		event, in = handler(kernel, ex, in, event)
+	}
+	return event, in
+}
+
 // eventDispatcher is what every dispatcher shares, so that init sorts each
 // event's handlers without knowing its type.
 type eventDispatcher interface {

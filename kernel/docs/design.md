@@ -87,7 +87,7 @@ jobs and handlers.
   the next.
 
 A kernel's config is given to `Spawn`, its constructor:
-`Spawn(config, singleThreaded, plugins...) (KernelID, error)`. Plugins cannot
+`Spawn(config, singleThreaded, workerCount, plugins...) (KernelID, error)`. Plugins cannot
 change it.
 
 **Kernels are named by ID.** `Spawn` answers a `KernelID` from a counter the
@@ -261,7 +261,7 @@ func (ex *Executor) Publish[E any](in JobHandle, event E) (E, JobHandle)
 
 ### Single-threaded kernels
 
-`Supervisor.Spawn(config, true, plugins...)` spawns a kernel whose
+`Supervisor.Spawn(config, true, 1, plugins...)` spawns a kernel whose
 jobs all run one at a time, on one goroutine of its own locked to an OS
 thread. It suits a kernel that wants sequential execution, such as a server
 simulation.

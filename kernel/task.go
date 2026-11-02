@@ -1,5 +1,12 @@
 package kernel
 
+import (
+	"errors"
+	"fmt"
+
+	"github.com/dvoyni/cog/kernel/internal/concurrent"
+)
+
 // TaskBody is a task's body: what its declare function returns once it has
 // requested the handles the body uses. It closes over those handles, and is
 // created once, at registration, so running it allocates nothing:
@@ -33,44 +40,84 @@ type TaskBody[A, B any] func(kernel *Kernel, arg A) B
 // and body, so scheduling reads them straight off it.
 type Task[A, B any] struct {
 	kernel *Kernel
-	// reads and writes are the lock masks: bit i of word i/64 is resource i.
-	// They are only as long as the task's highest resource needs, and a word
-	// past their end locks nothing. A resource both read and written is only
-	// in writes. They include the locks of every task this one uses.
-	reads, writes      []uint64
-	pinnedToMainThread bool
-	run                TaskBody[A, B]
+	// index is the task's place in its kernel's task table, which is what a
+	// job names the task it runs by.
+	index uint32
+	// locks is the task's entry in its kernel's lock table, shared so that
+	// the lock combiner reads it by index without knowing A or B.
+	locks *taskLocks
+	run   TaskBody[A, B]
+	// args holds the arg of every job of the task not yet run. A is
+	// pointer-free, so the GC never scans it.
+	args concurrent.Pool[A]
 }
 
-// JobHandle names one scheduled job without its result type. It is what
-// dependencies are declared with. Only an Executor makes one, directly or
-// through Job.Handle. The zero JobHandle names a job that has already
-// finished.
-//
-// slot is the job slot the run occupies, and gen that slot's generation when
-// the run took it. A slot's generation advances every time it is reused, so a
-// handle kept past its run reads as finished rather than as whichever run
-// holds the slot now. gen starts at 1, which keeps the zero JobHandle from
-// naming slot 0.
-//
-// A JobHandle means something only in the kernel that made it.
-type JobHandle struct {
-	slot uint32
-	gen  uint32
+// runnable is what the kernel's task table holds: every Task, whatever its
+// types, and the Join task.
+type runnable interface {
+	// runJob runs the job in slot, then completes it.
+	runJob(kernel *Kernel, slot uint32)
 }
 
-// Job is one scheduled run of a task answering T. It is what
-// Executor.ScheduleAfter takes, so a job can only be fed by one whose result
-// has its arg type.
-type Job[T any] struct {
-	handle JobHandle
+// argReceiver is every Task taking A, whatever its result: what a job
+// answering A feeds its result through to the jobs scheduled after it.
+type argReceiver[A any] interface {
+	receiveArg(index uint32, arg A)
 }
 
-// Handle returns j without its result type, for declaring a dependency.
-func (j Job[T]) Handle() JobHandle { return j.handle }
+// errTaskPanicked is what a task body that panics logs.
+var errTaskPanicked = errors.New("kernel: task panicked")
+
+// runJob takes the job's arg out of the arg pool, runs the body on it, and
+// completes the job with the result. A body that panics is logged, and its
+// job completes with the zero B, so the jobs and Signals waiting on it still
+// go on.
+func (t *Task[A, B]) runJob(kernel *Kernel, slot uint32) {
+	index := kernel.jobs.jobs.At(slot).arg
+	arg := *t.args.At(index)
+	t.args.Release(index)
+	kernel.completeJob(slot, t.runRecovering(kernel, arg))
+}
+
+// receiveArg stores arg as the arg at index, for a job fed by another's
+// result.
+func (t *Task[A, B]) receiveArg(index uint32, arg A) { *t.args.At(index) = arg }
+
+// joinTask is the task at index 0 of every kernel's task table: what a Join
+// runs, which is nothing.
+type joinTask struct{}
+
+// runJob completes the job at once.
+func (joinTask) runJob(kernel *Kernel, slot uint32) { kernel.completeJob(slot, NoResult{}) }
 
 // NoArg is the arg of a task that takes none.
 type NoArg = struct{}
 
 // NoResult is the result of a task that answers nothing.
 type NoResult = struct{}
+
+// taskLocks is what the lock combiner needs of a task: its lock masks and
+// where its jobs run.
+type taskLocks struct {
+	// reads and writes are the lock masks: bit i of word i/64 is resource i.
+	// They are only as long as the task's highest resource needs, and a word
+	// past their end locks nothing. A resource both read and written is only
+	// in writes. They include the locks of every task this one uses.
+	reads, writes      []uint64
+	pinnedToMainThread bool
+}
+
+// locksNothing reports whether the task holds no lock, so its jobs need no
+// lock combiner.
+func (l *taskLocks) locksNothing() bool { return len(l.writes) == 0 }
+
+// runRecovering runs the body on arg and answers its result, or the zero B if
+// the body panics, logging the panic.
+func (t *Task[A, B]) runRecovering(kernel *Kernel, arg A) (result B) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			kernel.logger.LogErr(fmt.Errorf("%w: task %d: %v", errTaskPanicked, t.index, recovered))
+		}
+	}()
+	return t.run(kernel, arg)
+}

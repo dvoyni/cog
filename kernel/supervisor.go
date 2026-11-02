@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -94,7 +95,8 @@ func (s *Supervisor) WaitMainThread() bool {
 // Kernels pace themselves: a plugin with a timer publishes its own update
 // events from its own goroutine, so kernels can tick at different rates and
 // main never waits on any of them. A pinned job nobody ticks waits forever,
-// and so does everything after it.
+// and so does everything after it, its kernel's destroy included: main keeps
+// ticking until Done is closed.
 func (s *Supervisor) TickMainThread() {
 	for {
 		s.pinnedBatch = s.pinned.Drain(s.pinnedBatch[:0])
@@ -127,8 +129,12 @@ func NewSupervisor(logHandler LogHandler) *Supervisor {
 // same config, then starts them in the same order, all on the calling
 // goroutine. The kernel is running when Spawn returns, and answers its ID.
 //
-// A singleThreaded kernel runs all its jobs one at a time, on one goroutine of
-// its own locked to an OS thread, which ends with the kernel. It is for a
+// The kernel runs its jobs on workerCount goroutines of its own, which end
+// with the kernel; runtime.GOMAXPROCS(0) keeps every CPU busy. A workerCount
+// below 1 panics.
+//
+// A singleThreaded kernel runs all its jobs one at a time, on its one worker,
+// locked to an OS thread; any workerCount but 1 for it panics. It is for a
 // kernel that wants sequential execution, such as a server simulation. A job
 // still waits for its dependencies, and runs in the order it became ready;
 // locks never contend, since nothing runs alongside it. A task pinned to the
@@ -145,12 +151,18 @@ func NewSupervisor(logHandler LogHandler) *Supervisor {
 // survives, and Spawn answers the zero KernelID and the first failure. A
 // Spawn still running when Quit is called does the same once its plugins have
 // started, and answers ErrQuitting.
-func (s *Supervisor) Spawn(config any, singleThreaded bool, plugins ...Plugin) (KernelID, error) {
+func (s *Supervisor) Spawn(config any, singleThreaded bool, workerCount int, plugins ...Plugin) (KernelID, error) {
+	if workerCount < 1 {
+		panic(fmt.Sprintf("kernel: spawning a kernel with %d workers", workerCount))
+	}
+	if singleThreaded && workerCount != 1 {
+		panic(fmt.Sprintf("kernel: spawning a single-threaded kernel with %d workers", workerCount))
+	}
 	if s.quitting.Load() {
 		return 0, ErrQuitting
 	}
 	id := KernelID(s.lastID.Add(1))
-	k := newKernel(s, id, config, singleThreaded, plugins)
+	k := newKernel(s, id, config, singleThreaded, workerCount, plugins)
 	if err := k.init(); err != nil {
 		return 0, err
 	}
