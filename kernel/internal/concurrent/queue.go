@@ -92,7 +92,9 @@ func (q *Queue[T]) Closed() bool {
 func (q *Queue[T]) Reset() {
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
-	q.head, q.length, q.closed = 0, 0, false
+	q.head = 0
+	q.length = 0
+	q.closed = false
 }
 
 // take moves everything queued onto into, clearing the slots it took. The
@@ -111,7 +113,8 @@ func (q *Queue[T]) take(into []T) []T {
 		clear(q.ring[q.head:])
 		clear(q.ring[:end-len(q.ring)])
 	}
-	q.head, q.length = 0, 0
+	q.head = 0
+	q.length = 0
 	return into
 }
 
@@ -121,5 +124,6 @@ func (q *Queue[T]) grow() {
 	length := q.length
 	ring := q.take(make([]T, 0, max(2*len(q.ring), 16)))
 	q.ring = ring[:cap(ring)]
-	q.head, q.length = 0, length
+	q.head = 0
+	q.length = length
 }

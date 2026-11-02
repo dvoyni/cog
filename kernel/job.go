@@ -95,20 +95,16 @@ type signalEdge struct {
 
 // jobGraph is a kernel's job graph: every job not yet finished, and the
 // dependencies and feedings between them. It alone counts what each job still
-// waits for, so it alone decides when a job is ready, and hands it on through
-// ready.
+// waits for, so it alone decides when a job is ready, and hands it to the
+// kernel's lock combiner.
 type jobGraph struct {
+	// kernel owns the graph: its task table is what a finished job's result is
+	// fed through, and its combiner is handed every job that waits for nothing
+	// any more.
+	kernel         *Kernel
 	jobs           concurrent.Pool[job]
 	successorEdges concurrent.Pool[successorEdge]
 	signalEdges    concurrent.Pool[signalEdge]
-	// tasks is the kernel's task table, through which a finished job's result
-	// is fed to the arg of each job scheduled after it. It is set once
-	// registration ends, before the first job, and never changes after.
-	tasks []runnable
-	// ready is handed every job that waits for nothing any more: its batch is
-	// submitted and its dependencies have all finished. It is set with tasks,
-	// and may be called from any goroutine.
-	ready func(slot uint32)
 }
 
 // acquireJob takes a free slot for a job of task, whose arg is at arg in the
@@ -119,7 +115,8 @@ type jobGraph struct {
 func (g *jobGraph) acquireJob(task, arg uint32, from JobHandle, deps []JobHandle) JobHandle {
 	slot := g.jobs.Acquire()
 	j := g.jobs.At(slot)
-	j.task, j.arg = task, arg
+	j.task = task
+	j.arg = arg
 	generation, _ := unpackList(j.successors.Load())
 	j.successors.Store(packList(generation, concurrent.None))
 	j.signals.Store(packList(generation, concurrent.None))
@@ -132,18 +129,19 @@ func (g *jobGraph) acquireJob(task, arg uint32, from JobHandle, deps []JobHandle
 }
 
 // submit releases the hold of every job in batch, handing each that waits for
-// nothing else to ready.
+// nothing else to the lock combiner.
 func (g *jobGraph) submit(batch []uint32) {
 	for _, slot := range batch {
-		if g.jobs.At(slot).waiting.Add(-1) == 0 {
-			g.ready(slot)
+		if j := g.jobs.At(slot); j.waiting.Add(-1) == 0 {
+			g.kernel.combiner.arrive(slot, j.task)
 		}
 	}
 }
 
 // finishJob finishes the job in slot, which answered result: it sends every
 // Signal armed for it, feeds result to every job scheduled after it, hands
-// each successor that waits for nothing else to ready, and releases the slot.
+// each successor that waits for nothing else to the lock combiner, and
+// releases the slot.
 // Every handle to the job reads as finished from then on.
 func (g *jobGraph) finishJob[B any](slot uint32, result B) {
 	j := g.jobs.At(slot)
@@ -164,10 +162,10 @@ func (g *jobGraph) finishJob[B any](slot uint32, result B) {
 		edge := g.successorEdges.At(successors)
 		successor := g.jobs.At(edge.successor)
 		if edge.feedsResult {
-			g.tasks[successor.task].(argReceiver[B]).receiveArg(successor.arg, result)
+			g.kernel.tasks[successor.task].(argReceiver[B]).receiveArg(successor.arg, result)
 		}
 		if successor.waiting.Add(-1) == 0 {
-			g.ready(edge.successor)
+			g.kernel.combiner.arrive(edge.successor, successor.task)
 		}
 		next := edge.next
 		g.successorEdges.Release(successors)

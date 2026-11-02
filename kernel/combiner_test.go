@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -44,104 +45,179 @@ func scheduleBatch(k *Kernel, schedule func(ex *Executor) JobHandle) JobHandle {
 	return out
 }
 
-func TestConflictingWritersRunOneAtATime(t *testing.T) {
-	var running atomic.Int32
-	var overlapped atomic.Bool
-	var write *Task[NoArg, NoResult]
-	k, _ := spawnTestKernel(t, func(c *Configurator) {
-		c.InitResource(counter{})
-		write = c.RegisterTask(func(access *Access) TaskBody[NoArg, NoResult] {
-			access.Write[counter]()
-			return func(k *Kernel, arg NoArg) NoResult {
-				if running.Add(1) != 1 {
-					overlapped.Store(true)
-				}
-				runtime.Gosched()
-				running.Add(-1)
-				return NoResult{}
-			}
-		})
-	})
-	out := scheduleBatch(k, func(ex *Executor) JobHandle {
-		jobs := make([]JobHandle, 50)
-		for i := range jobs {
-			jobs[i] = ex.Schedule(write, NoArg{}).Handle()
-		}
-		return ex.Join(jobs...)
-	})
-	waitFor(t, k, out)
-	if overlapped.Load() {
-		t.Fatal("two writers of one resource ran at once")
+// grantLog is every job a lock combiner granted, in order, read from its
+// kernel's ready queue.
+type grantLog struct {
+	kernel *Kernel
+	slots  []uint32
+}
+
+func (g *grantLog) is(want ...uint32) bool {
+	g.slots = g.kernel.ready.Drain(g.slots)
+	return slices.Equal(g.slots, want)
+}
+
+// Lock tables for one resource: task 0 locks nothing, 1 writes the resource
+// and 2 reads it.
+const (
+	noLocks = iota
+	writer
+	reader
+)
+
+func oneResourceLockTable() []*taskLocks {
+	return []*taskLocks{
+		noLocks: {},
+		writer:  {reads: []uint64{0}, writes: []uint64{1}},
+		reader:  {reads: []uint64{1}, writes: []uint64{0}},
 	}
 }
 
-func TestReadersRunTogether(t *testing.T) {
-	if runtime.GOMAXPROCS(0) < 2 {
-		t.Skip("needs two workers")
+// newTestCombiner answers the lock combiner of a partial kernel over one
+// resource with the lock table oneResourceLockTable answers, and the log of
+// what it grants.
+func newTestCombiner() (*lockCombiner, *grantLog) {
+	k := newPartialKernel(nil, oneResourceLockTable(), 1)
+	return &k.combiner, &grantLog{kernel: k}
+}
+
+func TestConflictingWritersAreGrantedOneAtATime(t *testing.T) {
+	c, log := newTestCombiner()
+	c.arrive(1, writer)
+	c.arrive(2, writer)
+	c.arrive(3, writer)
+	if !log.is(1) {
+		t.Fatalf("granted %v, want only the first writer", log.slots)
 	}
-	var arrived atomic.Int32
-	met := make(chan struct{})
-	var apart atomic.Bool
-	var read *Task[NoArg, NoResult]
-	k, _ := spawnTestKernel(t, func(c *Configurator) {
-		c.InitResource(counter{})
-		read = c.RegisterTask(func(access *Access) TaskBody[NoArg, NoResult] {
-			access.Read[counter]()
-			return func(k *Kernel, arg NoArg) NoResult {
-				// Each reader waits for the other, which only works if both
-				// hold the read lock at once.
-				if arrived.Add(1) == 2 {
-					close(met)
-				}
-				select {
-				case <-met:
-				case <-time.After(time.Second):
-					apart.Store(true)
-				}
-				return NoResult{}
-			}
-		})
-	})
-	out := scheduleBatch(k, func(ex *Executor) JobHandle {
-		return ex.Join(ex.Schedule(read, NoArg{}).Handle(), ex.Schedule(read, NoArg{}).Handle())
-	})
-	waitFor(t, k, out)
-	if apart.Load() {
-		t.Fatal("two readers of one resource did not run together")
+	c.release(writer)
+	if !log.is(1, 2) {
+		t.Fatalf("granted %v after one release, want the second writer next", log.slots)
+	}
+	c.release(writer)
+	if !log.is(1, 2, 3) {
+		t.Fatalf("granted %v after two releases, want every writer in order", log.slots)
+	}
+}
+
+func TestReadersAreGrantedTogether(t *testing.T) {
+	c, log := newTestCombiner()
+	c.arrive(1, reader)
+	c.arrive(2, reader)
+	if !log.is(1, 2) {
+		t.Fatalf("granted %v, want both readers at once", log.slots)
 	}
 }
 
 func TestWaitingWriterIsNotOvertakenByReaders(t *testing.T) {
-	var order recording
-	var read, write *Task[int32, NoResult]
-	k, _ := spawnTestKernel(t, func(c *Configurator) {
-		c.InitResource(counter{})
-		read = c.RegisterTask(func(access *Access) TaskBody[int32, NoResult] {
-			access.Read[counter]()
-			return func(k *Kernel, arg int32) NoResult {
-				time.Sleep(time.Millisecond) // long enough for the late reader to try
-				order.record(arg)
-				return NoResult{}
+	c, log := newTestCombiner()
+	c.arrive(1, reader)
+	c.arrive(2, writer)
+	c.arrive(3, reader)
+	if !log.is(1) {
+		t.Fatalf("granted %v, want the late reader to wait behind the writer", log.slots)
+	}
+	c.release(reader)
+	if !log.is(1, 2) {
+		t.Fatalf("granted %v once the first reader released, want the writer", log.slots)
+	}
+	c.release(writer)
+	if !log.is(1, 2, 3) {
+		t.Fatalf("granted %v once the writer released, want the late reader", log.slots)
+	}
+}
+
+func TestJobLockingNothingIsGrantedAtOnce(t *testing.T) {
+	c, log := newTestCombiner()
+	c.arrive(1, writer)
+	c.arrive(2, noLocks)
+	c.release(noLocks)
+	c.arrive(3, writer)
+	if !log.is(1, 2) {
+		t.Fatalf("granted %v, want the lock-free job beside the writer, and its release to free nothing", log.slots)
+	}
+}
+
+// Goroutines arrive and release at once, as workers do: every arrival is
+// granted exactly once, none is left waiting, and no writer ever runs
+// alongside another job of the resource.
+func TestEveryArrivalIsGrantedOnce(t *testing.T) {
+	const arrivers, perArriver = 8, 500
+	const jobs = arrivers * perArriver
+	var (
+		taskOf       [jobs + 1]uint32
+		grantedCount [jobs + 1]atomic.Int32
+		held         atomic.Int32 // readers holding, or -1 for a writer
+		conflict     atomic.Bool
+		finished     atomic.Int32
+	)
+	for slot := 1; slot <= jobs; slot++ {
+		taskOf[slot] = reader
+		if slot%3 == 0 {
+			taskOf[slot] = writer
+		}
+	}
+	c, log := newTestCombiner()
+	stop := make(chan struct{})
+	var workers sync.WaitGroup
+	for range 4 {
+		workers.Go(func() {
+			for {
+				slot, ok := log.kernel.ready.Pop()
+				if !ok {
+					select {
+					case <-stop:
+						return
+					default:
+						runtime.Gosched()
+						continue
+					}
+				}
+				grantedCount[slot].Add(1)
+				task := taskOf[slot]
+				if task == writer {
+					if !held.CompareAndSwap(0, -1) {
+						conflict.Store(true)
+					}
+					runtime.Gosched()
+					held.CompareAndSwap(-1, 0)
+				} else {
+					if held.Add(1) <= 0 {
+						conflict.Store(true)
+					}
+					runtime.Gosched()
+					held.Add(-1)
+				}
+				c.release(task)
+				finished.Add(1)
 			}
 		})
-		write = c.RegisterTask(func(access *Access) TaskBody[int32, NoResult] {
-			access.Write[counter]()
-			return func(k *Kernel, arg int32) NoResult {
-				order.record(arg)
-				return NoResult{}
+	}
+	var arriving sync.WaitGroup
+	for arriver := range arrivers {
+		arriving.Go(func() {
+			for i := range perArriver {
+				slot := uint32(arriver*perArriver + i + 1)
+				c.arrive(slot, taskOf[slot])
 			}
 		})
-	})
-	out := scheduleBatch(k, func(ex *Executor) JobHandle {
-		return ex.Join(
-			ex.Schedule(read, 1).Handle(),
-			ex.Schedule(write, 2).Handle(),
-			ex.Schedule(read, 3).Handle(),
-		)
-	})
-	waitFor(t, k, out)
-	if !order.is(1, 2, 3) {
-		t.Fatalf("ran %v, want the writer between the readers", &order)
+	}
+	arriving.Wait()
+	deadline := time.Now().Add(10 * time.Second)
+	for finished.Load() < jobs && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	close(stop)
+	workers.Wait()
+	if got := finished.Load(); got != jobs {
+		t.Fatalf("%d of %d arrivals were left waiting for the combiner", jobs-got, jobs)
+	}
+	if conflict.Load() {
+		t.Fatal("a writer ran alongside another job of its resource")
+	}
+	for slot := 1; slot <= jobs; slot++ {
+		if got := grantedCount[slot].Load(); got != 1 {
+			t.Fatalf("slot %d was granted %d times, want once", slot, got)
+		}
 	}
 }
 

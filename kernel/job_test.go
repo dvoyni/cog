@@ -2,7 +2,6 @@ package kernel
 
 import (
 	"sync"
-	"sync/atomic"
 	"testing"
 
 	"github.com/dvoyni/cog/kernel/internal/concurrent"
@@ -18,19 +17,33 @@ func (*fedArgs) runJob(kernel *Kernel, slot uint32) {}
 
 func (f *fedArgs) receiveArg(index uint32, arg int32) { f.args[index] = arg }
 
-// readyCounts counts how many times the job graph handed on each slot.
+// readyCounts counts how many times the job graph handed on each slot, from
+// its kernel's ready queue.
 type readyCounts struct {
-	counts [4096]atomic.Int32
+	kernel *Kernel
+	counts [4096]int32
+	buffer []uint32
 }
 
-func (r *readyCounts) ready(slot uint32) { r.counts[slot].Add(1) }
+// of answers how many times slot has been handed on so far.
+func (r *readyCounts) of(slot uint32) int32 {
+	r.collect()
+	return r.counts[slot]
+}
 
-func (r *readyCounts) of(slot uint32) int32 { return r.counts[slot].Load() }
+// collect counts every slot waiting in the ready queue, and empties it.
+func (r *readyCounts) collect() {
+	r.buffer = r.kernel.ready.Drain(r.buffer[:0])
+	for _, slot := range r.buffer {
+		r.counts[slot]++
+	}
+}
 
-// newTestGraph answers a job graph whose one task, index 0, is fed, and which
-// counts what it hands on in ready.
-func newTestGraph(fed *fedArgs, ready *readyCounts) *jobGraph {
-	return &jobGraph{tasks: []runnable{fed}, ready: ready.ready}
+// newTestGraph answers the job graph of a partial kernel whose one task,
+// index 0, locks nothing and is fed, and the count of what it hands on.
+func newTestGraph(fed *fedArgs) (*jobGraph, *readyCounts) {
+	k := newPartialKernel([]runnable{fed}, []*taskLocks{{}}, 0)
+	return &k.graph, &readyCounts{kernel: k}
 }
 
 func signalled(sig *Signal) bool {
@@ -43,8 +56,7 @@ func signalled(sig *Signal) bool {
 }
 
 func TestJobWaitsForItsBatch(t *testing.T) {
-	ready := &readyCounts{}
-	g := newTestGraph(&fedArgs{}, ready)
+	g, ready := newTestGraph(&fedArgs{})
 	job := g.acquireJob(0, 0, JobHandle{}, nil)
 	if job.slot == concurrent.None || ready.of(job.slot) != 0 {
 		t.Fatalf("a job was handed on before its batch was submitted")
@@ -56,8 +68,8 @@ func TestJobWaitsForItsBatch(t *testing.T) {
 }
 
 func TestJobWaitsForEveryDependencyAndIsFed(t *testing.T) {
-	ready, fed := &readyCounts{}, &fedArgs{}
-	g := newTestGraph(fed, ready)
+	fed := &fedArgs{}
+	g, ready := newTestGraph(fed)
 	from := g.acquireJob(0, 0, JobHandle{}, nil)
 	dep := g.acquireJob(0, 0, JobHandle{}, nil)
 	successor := g.acquireJob(0, 3, from, []JobHandle{dep})
@@ -82,8 +94,7 @@ func TestJobWaitsForEveryDependencyAndIsFed(t *testing.T) {
 }
 
 func TestFinishedDependencyIsNotWaitedFor(t *testing.T) {
-	ready := &readyCounts{}
-	g := newTestGraph(&fedArgs{}, ready)
+	g, ready := newTestGraph(&fedArgs{})
 	finished := g.acquireJob(0, 0, JobHandle{}, nil)
 	g.submit([]uint32{finished.slot})
 	g.finishJob(finished.slot, int32(0))
@@ -97,8 +108,7 @@ func TestFinishedDependencyIsNotWaitedFor(t *testing.T) {
 }
 
 func TestStaleHandleDoesNotNameTheSlotsNextJob(t *testing.T) {
-	ready := &readyCounts{}
-	g := newTestGraph(&fedArgs{}, ready)
+	g, ready := newTestGraph(&fedArgs{})
 	stale := g.acquireJob(0, 0, JobHandle{}, nil)
 	g.submit([]uint32{stale.slot})
 	g.finishJob(stale.slot, int32(0))
@@ -115,7 +125,7 @@ func TestStaleHandleDoesNotNameTheSlotsNextJob(t *testing.T) {
 }
 
 func TestSignalIsSentOnFinish(t *testing.T) {
-	g := newTestGraph(&fedArgs{}, &readyCounts{})
+	g, _ := newTestGraph(&fedArgs{})
 	job := g.acquireJob(0, 0, JobHandle{}, nil)
 	sig := NewSignal()
 	if !g.armSignal(job, sig) {
@@ -138,8 +148,7 @@ func TestSignalIsSentOnFinish(t *testing.T) {
 // lost, none handed on twice.
 func TestArmingRacesFinish(t *testing.T) {
 	for range 200 {
-		ready := &readyCounts{}
-		g := newTestGraph(&fedArgs{}, ready)
+		g, ready := newTestGraph(&fedArgs{})
 		// Never submitted, so a racer reusing its slot after the finish is the
 		// only job ever handed on from it.
 		predecessor := g.acquireJob(0, 0, JobHandle{}, nil)
@@ -173,7 +182,7 @@ func TestArmingRacesFinish(t *testing.T) {
 }
 
 func TestJobGraphAllocatesNothingOnceWarm(t *testing.T) {
-	g := newTestGraph(&fedArgs{}, &readyCounts{})
+	g, ready := newTestGraph(&fedArgs{})
 	sig := NewSignal()
 	batch := make([]uint32, 0, 2)
 	cycle := func() {
@@ -184,6 +193,7 @@ func TestJobGraphAllocatesNothingOnceWarm(t *testing.T) {
 		g.finishJob(predecessor.slot, int32(1))
 		<-sig.C()
 		g.finishJob(successor.slot, int32(0))
+		ready.collect()
 	}
 	cycle()
 	if got := testing.AllocsPerRun(1000, cycle); got != 0 {
@@ -195,8 +205,7 @@ func TestJobGraphAllocatesNothingOnceWarm(t *testing.T) {
 // for the job that holds the slot now.
 func TestStaleHandleRacingReuse(t *testing.T) {
 	for range 200 {
-		ready := &readyCounts{}
-		g := newTestGraph(&fedArgs{}, ready)
+		g, ready := newTestGraph(&fedArgs{})
 		// Never submitted, so a racer reusing its slot is the only job ever
 		// handed on from it.
 		stale := g.acquireJob(0, 0, JobHandle{}, nil)

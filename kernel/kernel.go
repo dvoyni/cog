@@ -50,19 +50,16 @@ type Kernel struct {
 	// types. Index 0, the Join task's, locks nothing.
 	taskLocks []*taskLocks
 	// graph is k's job graph, which hands every job that waits for nothing
-	// any more to arrive.
+	// any more to the combiner.
 	graph jobGraph
 	// executors holds the Executors of finished publications, for the next
 	// to reuse.
 	executors concurrent.Queue[*Executor]
 
-	// arrivals is every job whose dependencies have all finished and that
-	// locks something, waiting for the lock combiner.
-	arrivals concurrent.Queue[uint32]
-	// unlocks is the task index of every finished job whose locks the lock
-	// combiner has yet to unlock. A task index, not a slot: the slot is
-	// released as the job finishes.
-	unlocks concurrent.Queue[uint32]
+	// combiner grants every job whose dependencies have all finished its
+	// locks, and hands it to makeReady.
+	combiner lockCombiner
+
 	// ready is every job whose locks are held, or that locks nothing,
 	// waiting to run. Pinned jobs go to the Supervisor instead.
 	ready concurrent.Queue[uint32]
@@ -84,20 +81,6 @@ type Kernel struct {
 	outstanding atomic.Int64
 	closed      atomic.Bool
 	drained     chan struct{}
-
-	// combinerMu is held by whichever goroutine is the lock combiner. It is
-	// only ever tried, never waited for: a goroutine that does not get it
-	// leaves its work queued for the one that has it.
-	combinerMu sync.Mutex
-	// Everything below belongs to the lock combiner, and is touched only
-	// while combinerMu is held.
-	locks lockState
-	// waiting is every arrived job whose locks are not free yet, oldest
-	// first.
-	waiting []uint32
-	// arrived and unlocked are the buffers arrivals and unlocks drain
-	// into, kept between passes.
-	arrived, unlocked []uint32
 }
 
 // resource is one resource of a kernel.
@@ -112,7 +95,7 @@ type resource struct {
 // LogHandler, with the config each plugin is handed its part of, running its
 // jobs on workerCount workers, and plugins to register in order.
 func newKernel(supervisor *Supervisor, id KernelID, config map[PluginName]any, workerCount int, plugins []Plugin) *Kernel {
-	return &Kernel{
+	k := &Kernel{
 		supervisor:  supervisor,
 		id:          id,
 		logger:      &Logger{kernel: id, handler: supervisor.logHandler},
@@ -127,6 +110,9 @@ func newKernel(supervisor *Supervisor, id KernelID, config map[PluginName]any, w
 		stop:        make(chan struct{}),
 		drained:     make(chan struct{}, 1),
 	}
+	k.graph.kernel = k
+	k.combiner.kernel = k
+	return k
 }
 
 // ID returns the ID Spawn assigned this kernel.
@@ -201,13 +187,11 @@ func (k *Kernel) init() error {
 			return fmt.Errorf("kernel: plugin %d (%T) failed to init: %w", i, plugin, err)
 		}
 	}
-	// No resource, task or handler can be added from here on, and no job has
-	// been scheduled yet.
-	k.graph.tasks, k.graph.ready = k.tasks, k.arrive
+	// No resource or handler can be added from here on.
 	for _, d := range k.dispatchers {
 		d.sortHandlers()
 	}
-	k.locks = makeLockState(len(k.resources))
+	k.combiner.locks = makeLockState(len(k.resources))
 
 	for range k.workerCount {
 		k.workers.Go(k.work)
@@ -278,23 +262,10 @@ func (k *Kernel) acquireExecutor() *Executor {
 	return &Executor{kernel: k}
 }
 
-// arrive hands on the job in slot, whose dependencies have all finished. A
-// job that locks nothing needs no lock combiner, and is ready at once;
-// otherwise it waits in arrivals for the combiner to grant its locks.
-func (k *Kernel) arrive(slot uint32) {
-	locks := k.taskLocks[k.graph.task(slot)]
-	if locks.locksNothing() {
-		k.makeReady(slot, locks)
-		return
-	}
-	k.arrivals.Push(slot)
-	k.combineLocks()
-}
-
-// makeReady hands on the job in slot, whose locks are held: to the main
-// thread if its task is pinned there, otherwise to ready.
-func (k *Kernel) makeReady(slot uint32, locks *taskLocks) {
-	if locks.pinnedToMainThread {
+// makeReady hands on the job in slot, a job of task whose locks are held: to
+// the main thread if task is pinned there, otherwise to ready.
+func (k *Kernel) makeReady(slot, task uint32) {
+	if k.taskLocks[task].pinnedToMainThread {
 		k.supervisor.pushPinned(k, k.graph.handle(slot))
 		return
 	}
@@ -307,55 +278,13 @@ func (k *Kernel) makeReady(slot uint32, locks *taskLocks) {
 	}
 }
 
-// combineLocks becomes the lock combiner, unless another goroutine is: then
-// it returns at once, and that combiner does the work. The combiner unlocks
-// the resources of every finished job, then grants locks to waiting jobs,
-// oldest first, each whose locks are all free; a waiting writer reserves what
-// it writes, so no job behind it locks that before it does.
-//
-// Before giving the combiner up it looks again, so a job queued while it was
-// busy, by a goroutine that then failed to become combiner, is never left
-// behind.
-func (k *Kernel) combineLocks() {
-	for k.combinerMu.TryLock() {
-		k.unlocked = k.unlocks.Drain(k.unlocked[:0])
-		for _, task := range k.unlocked {
-			k.locks.unlock(k.taskLocks[task])
-		}
-		k.arrived = k.arrivals.Drain(k.arrived[:0])
-		k.waiting = append(k.waiting, k.arrived...)
-
-		k.locks.clearReservations()
-		stillWaiting := k.waiting[:0]
-		for _, slot := range k.waiting {
-			locks := k.taskLocks[k.graph.task(slot)]
-			if k.locks.canLock(locks) {
-				k.locks.lock(locks)
-				k.makeReady(slot, locks)
-				continue
-			}
-			k.locks.reserve(locks)
-			stillWaiting = append(stillWaiting, slot)
-		}
-		k.waiting = stillWaiting
-		k.combinerMu.Unlock()
-
-		if k.unlocks.Len() == 0 && k.arrivals.Len() == 0 {
-			return
-		}
-	}
-}
-
-// completeJob finishes the job in slot, which answered result: it unlocks
+// completeJob finishes the job in slot, which answered result: it releases
 // its locks, then finishes it in the job graph, which hands on every
 // successor that waits for nothing else.
 func (k *Kernel) completeJob[B any](slot uint32, result B) {
-	if !k.taskLocks[k.graph.task(slot)].locksNothing() {
-		// Unlocked first, so a successor locking the same resources can be
-		// granted them in the same pass.
-		k.unlocks.Push(k.graph.task(slot))
-		k.combineLocks()
-	}
+	// Released first, so a successor locking the same resources can be
+	// granted them in the same pass.
+	k.combiner.release(k.graph.task(slot))
 	k.graph.finishJob(slot, result)
 	k.settle()
 }

@@ -47,6 +47,18 @@ func (p hookPlugin) Destroy() error {
 	return nil
 }
 
+// newPartialKernel answers a kernel holding only what its job graph and lock
+// combiner need: the task table tasks, its lock table taskLocks, and a
+// lockState over resources resources. Jobs they make ready wait in its ready
+// queue, and nothing runs them.
+func newPartialKernel(tasks []runnable, taskLocks []*taskLocks, resources int) *Kernel {
+	k := &Kernel{tasks: tasks, taskLocks: taskLocks}
+	k.graph.kernel = k
+	k.combiner.kernel = k
+	k.combiner.locks = makeLockState(resources)
+	return k
+}
+
 // spawnTestKernel spawns a kernel whose one plugin registers with register,
 // and answers the kernel and the Configurator register was given. The
 // kernel is destroyed as the test ends.
