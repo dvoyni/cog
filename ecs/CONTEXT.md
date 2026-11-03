@@ -53,6 +53,10 @@ A value a system takes whose type declares, at registration, the locks it needs:
 A system parameter that walks every entity holding a set of components. A pointer term writes its component, a value term reads a copy.
 _Avoid_: View, filter, iterator
 
+**Optional term**:
+A query component an entity may lack: the entity matches either way, and the query tells whether it has one.
+_Avoid_: Maybe, nullable term
+
 **Delta query**:
 A system parameter that walks the entities with a delta in one of its components this observation window, among those that have or had every one of them, giving each component's value now, its value as of the reset, and its delta.
 

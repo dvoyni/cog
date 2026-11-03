@@ -30,10 +30,12 @@ var queryTemplate = template.Must(template.New("query").Parse(`
 // Query{{.N}} walks the entities of world W holding every one of its {{.N}}
 // terms. A pointer term *T writes T's store and yields the row's address; a
 // value term T reads it and yields a copy; With[T] and Without[T] filter and
-// yield nothing.
+// yield nothing; Optional[T] and Optional[*T] match with or without a T and
+// yield themselves.
 type Query{{.N}}[W WorldID, {{.Types}} any] struct {
-	terms  [{{.N}}]term
-	writes uint8
+	terms     [{{.N}}]term
+	writes    uint8
+	optionals uint8
 }
 
 // Row{{.N}} is one entity's terms, yielded by Query{{.N}}.All. Each term's
@@ -43,7 +45,8 @@ type Row{{.N}}[{{.Types}} any] struct {
 {{- range .Terms}}
 	address{{.Index}} unsafe.Pointer
 {{- end}}
-	writes uint8
+	writes    uint8
+	optionals uint8
 }
 
 // Declare declares a lock on each term's store and a read on world W.
@@ -53,7 +56,7 @@ func (Query{{.N}}[W, {{.Types}}]) Declare(access *kernel.Access) Query{{.N}}[W, 
 {{- range .Terms}}
 	q.terms[{{.Index}}] = declareTerm[W, {{.Type}}](access, w)
 {{- end}}
-	q.writes = declareQuery(q.terms[:])
+	q.writes, q.optionals = declareQuery(q.terms[:])
 	return q
 }
 
@@ -76,7 +79,8 @@ func (q Query{{.N}}[W, {{.Types}}]) All() iter.Seq2[Entity, Row{{.N}}[{{.Types}}
 				{{- range .Terms}}
 					address{{.Index}}: walk.addresses[{{.Index}}],
 				{{- end}}
-					writes: q.writes,
+					writes:    q.writes,
+					optionals: q.optionals,
 				}
 				if !yield(owners[r], row) {
 					return
@@ -88,7 +92,7 @@ func (q Query{{.N}}[W, {{.Types}}]) All() iter.Seq2[Entity, Row{{.N}}[{{.Types}}
 
 // Get returns the row's terms.
 func (r Row{{.N}}[{{.Types}}]) Get() ({{.Types}}) {
-	return {{range $i, $t := .Terms}}{{if $i}}, {{end}}termValue[{{$t.Type}}](r.address{{$t.Index}}, r.writes&(1<<{{$t.Index}}) != 0){{end}}
+	return {{range $i, $t := .Terms}}{{if $i}}, {{end}}termValue[{{$t.Type}}](r.address{{$t.Index}}, r.writes&(1<<{{$t.Index}}) != 0, r.optionals&(1<<{{$t.Index}}) != 0){{end}}
 }
 `))
 

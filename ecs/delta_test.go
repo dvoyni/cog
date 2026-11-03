@@ -570,6 +570,13 @@ func TestDeltaQueryCompositionErrors(t *testing.T) {
 			declare[DeltaQuery1[game, *health]](c)
 		})
 	})
+	expectPanic(t, "delta query term is optional", func() {
+		spawn(t, func(c *kernel.Configurator) {
+			RegisterComponent[game, health](c)
+			RegisterComponent[game, position](c)
+			declare[DeltaQuery2[game, health, Optional[position]]](c)
+		})
+	})
 	expectPanic(t, "With and Without terms only", func() {
 		spawn(t, func(c *kernel.Configurator) {
 			RegisterComponent[game, health](c)

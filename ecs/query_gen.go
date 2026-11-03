@@ -12,18 +12,21 @@ import (
 // Query1 walks the entities of world W holding every one of its 1
 // terms. A pointer term *T writes T's store and yields the row's address; a
 // value term T reads it and yields a copy; With[T] and Without[T] filter and
-// yield nothing.
+// yield nothing; Optional[T] and Optional[*T] match with or without a T and
+// yield themselves.
 type Query1[W WorldID, T1 any] struct {
-	terms  [1]term
-	writes uint8
+	terms     [1]term
+	writes    uint8
+	optionals uint8
 }
 
 // Row1 is one entity's terms, yielded by Query1.All. Each term's
 // address is a field of its own: a small struct of scalars stays in
 // registers, where an array is copied through memory.
 type Row1[T1 any] struct {
-	address0 unsafe.Pointer
-	writes   uint8
+	address0  unsafe.Pointer
+	writes    uint8
+	optionals uint8
 }
 
 // Declare declares a lock on each term's store and a read on world W.
@@ -31,7 +34,7 @@ func (Query1[W, T1]) Declare(access *kernel.Access) Query1[W, T1] {
 	w := access.Read[*worldResource[W]]().Get()
 	var q Query1[W, T1]
 	q.terms[0] = declareTerm[W, T1](access, w)
-	q.writes = declareQuery(q.terms[:])
+	q.writes, q.optionals = declareQuery(q.terms[:])
 	return q
 }
 
@@ -51,8 +54,9 @@ func (q Query1[W, T1]) All() iter.Seq2[Entity, Row1[T1]] {
 					continue
 				}
 				row := Row1[T1]{
-					address0: walk.addresses[0],
-					writes:   q.writes,
+					address0:  walk.addresses[0],
+					writes:    q.writes,
+					optionals: q.optionals,
 				}
 				if !yield(owners[r], row) {
 					return
@@ -64,25 +68,28 @@ func (q Query1[W, T1]) All() iter.Seq2[Entity, Row1[T1]] {
 
 // Get returns the row's terms.
 func (r Row1[T1]) Get() T1 {
-	return termValue[T1](r.address0, r.writes&(1<<0) != 0)
+	return termValue[T1](r.address0, r.writes&(1<<0) != 0, r.optionals&(1<<0) != 0)
 }
 
 // Query2 walks the entities of world W holding every one of its 2
 // terms. A pointer term *T writes T's store and yields the row's address; a
 // value term T reads it and yields a copy; With[T] and Without[T] filter and
-// yield nothing.
+// yield nothing; Optional[T] and Optional[*T] match with or without a T and
+// yield themselves.
 type Query2[W WorldID, T1, T2 any] struct {
-	terms  [2]term
-	writes uint8
+	terms     [2]term
+	writes    uint8
+	optionals uint8
 }
 
 // Row2 is one entity's terms, yielded by Query2.All. Each term's
 // address is a field of its own: a small struct of scalars stays in
 // registers, where an array is copied through memory.
 type Row2[T1, T2 any] struct {
-	address0 unsafe.Pointer
-	address1 unsafe.Pointer
-	writes   uint8
+	address0  unsafe.Pointer
+	address1  unsafe.Pointer
+	writes    uint8
+	optionals uint8
 }
 
 // Declare declares a lock on each term's store and a read on world W.
@@ -91,7 +98,7 @@ func (Query2[W, T1, T2]) Declare(access *kernel.Access) Query2[W, T1, T2] {
 	var q Query2[W, T1, T2]
 	q.terms[0] = declareTerm[W, T1](access, w)
 	q.terms[1] = declareTerm[W, T2](access, w)
-	q.writes = declareQuery(q.terms[:])
+	q.writes, q.optionals = declareQuery(q.terms[:])
 	return q
 }
 
@@ -111,9 +118,10 @@ func (q Query2[W, T1, T2]) All() iter.Seq2[Entity, Row2[T1, T2]] {
 					continue
 				}
 				row := Row2[T1, T2]{
-					address0: walk.addresses[0],
-					address1: walk.addresses[1],
-					writes:   q.writes,
+					address0:  walk.addresses[0],
+					address1:  walk.addresses[1],
+					writes:    q.writes,
+					optionals: q.optionals,
 				}
 				if !yield(owners[r], row) {
 					return
@@ -125,26 +133,29 @@ func (q Query2[W, T1, T2]) All() iter.Seq2[Entity, Row2[T1, T2]] {
 
 // Get returns the row's terms.
 func (r Row2[T1, T2]) Get() (T1, T2) {
-	return termValue[T1](r.address0, r.writes&(1<<0) != 0), termValue[T2](r.address1, r.writes&(1<<1) != 0)
+	return termValue[T1](r.address0, r.writes&(1<<0) != 0, r.optionals&(1<<0) != 0), termValue[T2](r.address1, r.writes&(1<<1) != 0, r.optionals&(1<<1) != 0)
 }
 
 // Query3 walks the entities of world W holding every one of its 3
 // terms. A pointer term *T writes T's store and yields the row's address; a
 // value term T reads it and yields a copy; With[T] and Without[T] filter and
-// yield nothing.
+// yield nothing; Optional[T] and Optional[*T] match with or without a T and
+// yield themselves.
 type Query3[W WorldID, T1, T2, T3 any] struct {
-	terms  [3]term
-	writes uint8
+	terms     [3]term
+	writes    uint8
+	optionals uint8
 }
 
 // Row3 is one entity's terms, yielded by Query3.All. Each term's
 // address is a field of its own: a small struct of scalars stays in
 // registers, where an array is copied through memory.
 type Row3[T1, T2, T3 any] struct {
-	address0 unsafe.Pointer
-	address1 unsafe.Pointer
-	address2 unsafe.Pointer
-	writes   uint8
+	address0  unsafe.Pointer
+	address1  unsafe.Pointer
+	address2  unsafe.Pointer
+	writes    uint8
+	optionals uint8
 }
 
 // Declare declares a lock on each term's store and a read on world W.
@@ -154,7 +165,7 @@ func (Query3[W, T1, T2, T3]) Declare(access *kernel.Access) Query3[W, T1, T2, T3
 	q.terms[0] = declareTerm[W, T1](access, w)
 	q.terms[1] = declareTerm[W, T2](access, w)
 	q.terms[2] = declareTerm[W, T3](access, w)
-	q.writes = declareQuery(q.terms[:])
+	q.writes, q.optionals = declareQuery(q.terms[:])
 	return q
 }
 
@@ -174,10 +185,11 @@ func (q Query3[W, T1, T2, T3]) All() iter.Seq2[Entity, Row3[T1, T2, T3]] {
 					continue
 				}
 				row := Row3[T1, T2, T3]{
-					address0: walk.addresses[0],
-					address1: walk.addresses[1],
-					address2: walk.addresses[2],
-					writes:   q.writes,
+					address0:  walk.addresses[0],
+					address1:  walk.addresses[1],
+					address2:  walk.addresses[2],
+					writes:    q.writes,
+					optionals: q.optionals,
 				}
 				if !yield(owners[r], row) {
 					return
@@ -189,27 +201,30 @@ func (q Query3[W, T1, T2, T3]) All() iter.Seq2[Entity, Row3[T1, T2, T3]] {
 
 // Get returns the row's terms.
 func (r Row3[T1, T2, T3]) Get() (T1, T2, T3) {
-	return termValue[T1](r.address0, r.writes&(1<<0) != 0), termValue[T2](r.address1, r.writes&(1<<1) != 0), termValue[T3](r.address2, r.writes&(1<<2) != 0)
+	return termValue[T1](r.address0, r.writes&(1<<0) != 0, r.optionals&(1<<0) != 0), termValue[T2](r.address1, r.writes&(1<<1) != 0, r.optionals&(1<<1) != 0), termValue[T3](r.address2, r.writes&(1<<2) != 0, r.optionals&(1<<2) != 0)
 }
 
 // Query4 walks the entities of world W holding every one of its 4
 // terms. A pointer term *T writes T's store and yields the row's address; a
 // value term T reads it and yields a copy; With[T] and Without[T] filter and
-// yield nothing.
+// yield nothing; Optional[T] and Optional[*T] match with or without a T and
+// yield themselves.
 type Query4[W WorldID, T1, T2, T3, T4 any] struct {
-	terms  [4]term
-	writes uint8
+	terms     [4]term
+	writes    uint8
+	optionals uint8
 }
 
 // Row4 is one entity's terms, yielded by Query4.All. Each term's
 // address is a field of its own: a small struct of scalars stays in
 // registers, where an array is copied through memory.
 type Row4[T1, T2, T3, T4 any] struct {
-	address0 unsafe.Pointer
-	address1 unsafe.Pointer
-	address2 unsafe.Pointer
-	address3 unsafe.Pointer
-	writes   uint8
+	address0  unsafe.Pointer
+	address1  unsafe.Pointer
+	address2  unsafe.Pointer
+	address3  unsafe.Pointer
+	writes    uint8
+	optionals uint8
 }
 
 // Declare declares a lock on each term's store and a read on world W.
@@ -220,7 +235,7 @@ func (Query4[W, T1, T2, T3, T4]) Declare(access *kernel.Access) Query4[W, T1, T2
 	q.terms[1] = declareTerm[W, T2](access, w)
 	q.terms[2] = declareTerm[W, T3](access, w)
 	q.terms[3] = declareTerm[W, T4](access, w)
-	q.writes = declareQuery(q.terms[:])
+	q.writes, q.optionals = declareQuery(q.terms[:])
 	return q
 }
 
@@ -240,11 +255,12 @@ func (q Query4[W, T1, T2, T3, T4]) All() iter.Seq2[Entity, Row4[T1, T2, T3, T4]]
 					continue
 				}
 				row := Row4[T1, T2, T3, T4]{
-					address0: walk.addresses[0],
-					address1: walk.addresses[1],
-					address2: walk.addresses[2],
-					address3: walk.addresses[3],
-					writes:   q.writes,
+					address0:  walk.addresses[0],
+					address1:  walk.addresses[1],
+					address2:  walk.addresses[2],
+					address3:  walk.addresses[3],
+					writes:    q.writes,
+					optionals: q.optionals,
 				}
 				if !yield(owners[r], row) {
 					return
@@ -256,28 +272,31 @@ func (q Query4[W, T1, T2, T3, T4]) All() iter.Seq2[Entity, Row4[T1, T2, T3, T4]]
 
 // Get returns the row's terms.
 func (r Row4[T1, T2, T3, T4]) Get() (T1, T2, T3, T4) {
-	return termValue[T1](r.address0, r.writes&(1<<0) != 0), termValue[T2](r.address1, r.writes&(1<<1) != 0), termValue[T3](r.address2, r.writes&(1<<2) != 0), termValue[T4](r.address3, r.writes&(1<<3) != 0)
+	return termValue[T1](r.address0, r.writes&(1<<0) != 0, r.optionals&(1<<0) != 0), termValue[T2](r.address1, r.writes&(1<<1) != 0, r.optionals&(1<<1) != 0), termValue[T3](r.address2, r.writes&(1<<2) != 0, r.optionals&(1<<2) != 0), termValue[T4](r.address3, r.writes&(1<<3) != 0, r.optionals&(1<<3) != 0)
 }
 
 // Query5 walks the entities of world W holding every one of its 5
 // terms. A pointer term *T writes T's store and yields the row's address; a
 // value term T reads it and yields a copy; With[T] and Without[T] filter and
-// yield nothing.
+// yield nothing; Optional[T] and Optional[*T] match with or without a T and
+// yield themselves.
 type Query5[W WorldID, T1, T2, T3, T4, T5 any] struct {
-	terms  [5]term
-	writes uint8
+	terms     [5]term
+	writes    uint8
+	optionals uint8
 }
 
 // Row5 is one entity's terms, yielded by Query5.All. Each term's
 // address is a field of its own: a small struct of scalars stays in
 // registers, where an array is copied through memory.
 type Row5[T1, T2, T3, T4, T5 any] struct {
-	address0 unsafe.Pointer
-	address1 unsafe.Pointer
-	address2 unsafe.Pointer
-	address3 unsafe.Pointer
-	address4 unsafe.Pointer
-	writes   uint8
+	address0  unsafe.Pointer
+	address1  unsafe.Pointer
+	address2  unsafe.Pointer
+	address3  unsafe.Pointer
+	address4  unsafe.Pointer
+	writes    uint8
+	optionals uint8
 }
 
 // Declare declares a lock on each term's store and a read on world W.
@@ -289,7 +308,7 @@ func (Query5[W, T1, T2, T3, T4, T5]) Declare(access *kernel.Access) Query5[W, T1
 	q.terms[2] = declareTerm[W, T3](access, w)
 	q.terms[3] = declareTerm[W, T4](access, w)
 	q.terms[4] = declareTerm[W, T5](access, w)
-	q.writes = declareQuery(q.terms[:])
+	q.writes, q.optionals = declareQuery(q.terms[:])
 	return q
 }
 
@@ -309,12 +328,13 @@ func (q Query5[W, T1, T2, T3, T4, T5]) All() iter.Seq2[Entity, Row5[T1, T2, T3, 
 					continue
 				}
 				row := Row5[T1, T2, T3, T4, T5]{
-					address0: walk.addresses[0],
-					address1: walk.addresses[1],
-					address2: walk.addresses[2],
-					address3: walk.addresses[3],
-					address4: walk.addresses[4],
-					writes:   q.writes,
+					address0:  walk.addresses[0],
+					address1:  walk.addresses[1],
+					address2:  walk.addresses[2],
+					address3:  walk.addresses[3],
+					address4:  walk.addresses[4],
+					writes:    q.writes,
+					optionals: q.optionals,
 				}
 				if !yield(owners[r], row) {
 					return
@@ -326,29 +346,32 @@ func (q Query5[W, T1, T2, T3, T4, T5]) All() iter.Seq2[Entity, Row5[T1, T2, T3, 
 
 // Get returns the row's terms.
 func (r Row5[T1, T2, T3, T4, T5]) Get() (T1, T2, T3, T4, T5) {
-	return termValue[T1](r.address0, r.writes&(1<<0) != 0), termValue[T2](r.address1, r.writes&(1<<1) != 0), termValue[T3](r.address2, r.writes&(1<<2) != 0), termValue[T4](r.address3, r.writes&(1<<3) != 0), termValue[T5](r.address4, r.writes&(1<<4) != 0)
+	return termValue[T1](r.address0, r.writes&(1<<0) != 0, r.optionals&(1<<0) != 0), termValue[T2](r.address1, r.writes&(1<<1) != 0, r.optionals&(1<<1) != 0), termValue[T3](r.address2, r.writes&(1<<2) != 0, r.optionals&(1<<2) != 0), termValue[T4](r.address3, r.writes&(1<<3) != 0, r.optionals&(1<<3) != 0), termValue[T5](r.address4, r.writes&(1<<4) != 0, r.optionals&(1<<4) != 0)
 }
 
 // Query6 walks the entities of world W holding every one of its 6
 // terms. A pointer term *T writes T's store and yields the row's address; a
 // value term T reads it and yields a copy; With[T] and Without[T] filter and
-// yield nothing.
+// yield nothing; Optional[T] and Optional[*T] match with or without a T and
+// yield themselves.
 type Query6[W WorldID, T1, T2, T3, T4, T5, T6 any] struct {
-	terms  [6]term
-	writes uint8
+	terms     [6]term
+	writes    uint8
+	optionals uint8
 }
 
 // Row6 is one entity's terms, yielded by Query6.All. Each term's
 // address is a field of its own: a small struct of scalars stays in
 // registers, where an array is copied through memory.
 type Row6[T1, T2, T3, T4, T5, T6 any] struct {
-	address0 unsafe.Pointer
-	address1 unsafe.Pointer
-	address2 unsafe.Pointer
-	address3 unsafe.Pointer
-	address4 unsafe.Pointer
-	address5 unsafe.Pointer
-	writes   uint8
+	address0  unsafe.Pointer
+	address1  unsafe.Pointer
+	address2  unsafe.Pointer
+	address3  unsafe.Pointer
+	address4  unsafe.Pointer
+	address5  unsafe.Pointer
+	writes    uint8
+	optionals uint8
 }
 
 // Declare declares a lock on each term's store and a read on world W.
@@ -361,7 +384,7 @@ func (Query6[W, T1, T2, T3, T4, T5, T6]) Declare(access *kernel.Access) Query6[W
 	q.terms[3] = declareTerm[W, T4](access, w)
 	q.terms[4] = declareTerm[W, T5](access, w)
 	q.terms[5] = declareTerm[W, T6](access, w)
-	q.writes = declareQuery(q.terms[:])
+	q.writes, q.optionals = declareQuery(q.terms[:])
 	return q
 }
 
@@ -381,13 +404,14 @@ func (q Query6[W, T1, T2, T3, T4, T5, T6]) All() iter.Seq2[Entity, Row6[T1, T2, 
 					continue
 				}
 				row := Row6[T1, T2, T3, T4, T5, T6]{
-					address0: walk.addresses[0],
-					address1: walk.addresses[1],
-					address2: walk.addresses[2],
-					address3: walk.addresses[3],
-					address4: walk.addresses[4],
-					address5: walk.addresses[5],
-					writes:   q.writes,
+					address0:  walk.addresses[0],
+					address1:  walk.addresses[1],
+					address2:  walk.addresses[2],
+					address3:  walk.addresses[3],
+					address4:  walk.addresses[4],
+					address5:  walk.addresses[5],
+					writes:    q.writes,
+					optionals: q.optionals,
 				}
 				if !yield(owners[r], row) {
 					return
@@ -399,30 +423,33 @@ func (q Query6[W, T1, T2, T3, T4, T5, T6]) All() iter.Seq2[Entity, Row6[T1, T2, 
 
 // Get returns the row's terms.
 func (r Row6[T1, T2, T3, T4, T5, T6]) Get() (T1, T2, T3, T4, T5, T6) {
-	return termValue[T1](r.address0, r.writes&(1<<0) != 0), termValue[T2](r.address1, r.writes&(1<<1) != 0), termValue[T3](r.address2, r.writes&(1<<2) != 0), termValue[T4](r.address3, r.writes&(1<<3) != 0), termValue[T5](r.address4, r.writes&(1<<4) != 0), termValue[T6](r.address5, r.writes&(1<<5) != 0)
+	return termValue[T1](r.address0, r.writes&(1<<0) != 0, r.optionals&(1<<0) != 0), termValue[T2](r.address1, r.writes&(1<<1) != 0, r.optionals&(1<<1) != 0), termValue[T3](r.address2, r.writes&(1<<2) != 0, r.optionals&(1<<2) != 0), termValue[T4](r.address3, r.writes&(1<<3) != 0, r.optionals&(1<<3) != 0), termValue[T5](r.address4, r.writes&(1<<4) != 0, r.optionals&(1<<4) != 0), termValue[T6](r.address5, r.writes&(1<<5) != 0, r.optionals&(1<<5) != 0)
 }
 
 // Query7 walks the entities of world W holding every one of its 7
 // terms. A pointer term *T writes T's store and yields the row's address; a
 // value term T reads it and yields a copy; With[T] and Without[T] filter and
-// yield nothing.
+// yield nothing; Optional[T] and Optional[*T] match with or without a T and
+// yield themselves.
 type Query7[W WorldID, T1, T2, T3, T4, T5, T6, T7 any] struct {
-	terms  [7]term
-	writes uint8
+	terms     [7]term
+	writes    uint8
+	optionals uint8
 }
 
 // Row7 is one entity's terms, yielded by Query7.All. Each term's
 // address is a field of its own: a small struct of scalars stays in
 // registers, where an array is copied through memory.
 type Row7[T1, T2, T3, T4, T5, T6, T7 any] struct {
-	address0 unsafe.Pointer
-	address1 unsafe.Pointer
-	address2 unsafe.Pointer
-	address3 unsafe.Pointer
-	address4 unsafe.Pointer
-	address5 unsafe.Pointer
-	address6 unsafe.Pointer
-	writes   uint8
+	address0  unsafe.Pointer
+	address1  unsafe.Pointer
+	address2  unsafe.Pointer
+	address3  unsafe.Pointer
+	address4  unsafe.Pointer
+	address5  unsafe.Pointer
+	address6  unsafe.Pointer
+	writes    uint8
+	optionals uint8
 }
 
 // Declare declares a lock on each term's store and a read on world W.
@@ -436,7 +463,7 @@ func (Query7[W, T1, T2, T3, T4, T5, T6, T7]) Declare(access *kernel.Access) Quer
 	q.terms[4] = declareTerm[W, T5](access, w)
 	q.terms[5] = declareTerm[W, T6](access, w)
 	q.terms[6] = declareTerm[W, T7](access, w)
-	q.writes = declareQuery(q.terms[:])
+	q.writes, q.optionals = declareQuery(q.terms[:])
 	return q
 }
 
@@ -456,14 +483,15 @@ func (q Query7[W, T1, T2, T3, T4, T5, T6, T7]) All() iter.Seq2[Entity, Row7[T1, 
 					continue
 				}
 				row := Row7[T1, T2, T3, T4, T5, T6, T7]{
-					address0: walk.addresses[0],
-					address1: walk.addresses[1],
-					address2: walk.addresses[2],
-					address3: walk.addresses[3],
-					address4: walk.addresses[4],
-					address5: walk.addresses[5],
-					address6: walk.addresses[6],
-					writes:   q.writes,
+					address0:  walk.addresses[0],
+					address1:  walk.addresses[1],
+					address2:  walk.addresses[2],
+					address3:  walk.addresses[3],
+					address4:  walk.addresses[4],
+					address5:  walk.addresses[5],
+					address6:  walk.addresses[6],
+					writes:    q.writes,
+					optionals: q.optionals,
 				}
 				if !yield(owners[r], row) {
 					return
@@ -475,31 +503,34 @@ func (q Query7[W, T1, T2, T3, T4, T5, T6, T7]) All() iter.Seq2[Entity, Row7[T1, 
 
 // Get returns the row's terms.
 func (r Row7[T1, T2, T3, T4, T5, T6, T7]) Get() (T1, T2, T3, T4, T5, T6, T7) {
-	return termValue[T1](r.address0, r.writes&(1<<0) != 0), termValue[T2](r.address1, r.writes&(1<<1) != 0), termValue[T3](r.address2, r.writes&(1<<2) != 0), termValue[T4](r.address3, r.writes&(1<<3) != 0), termValue[T5](r.address4, r.writes&(1<<4) != 0), termValue[T6](r.address5, r.writes&(1<<5) != 0), termValue[T7](r.address6, r.writes&(1<<6) != 0)
+	return termValue[T1](r.address0, r.writes&(1<<0) != 0, r.optionals&(1<<0) != 0), termValue[T2](r.address1, r.writes&(1<<1) != 0, r.optionals&(1<<1) != 0), termValue[T3](r.address2, r.writes&(1<<2) != 0, r.optionals&(1<<2) != 0), termValue[T4](r.address3, r.writes&(1<<3) != 0, r.optionals&(1<<3) != 0), termValue[T5](r.address4, r.writes&(1<<4) != 0, r.optionals&(1<<4) != 0), termValue[T6](r.address5, r.writes&(1<<5) != 0, r.optionals&(1<<5) != 0), termValue[T7](r.address6, r.writes&(1<<6) != 0, r.optionals&(1<<6) != 0)
 }
 
 // Query8 walks the entities of world W holding every one of its 8
 // terms. A pointer term *T writes T's store and yields the row's address; a
 // value term T reads it and yields a copy; With[T] and Without[T] filter and
-// yield nothing.
+// yield nothing; Optional[T] and Optional[*T] match with or without a T and
+// yield themselves.
 type Query8[W WorldID, T1, T2, T3, T4, T5, T6, T7, T8 any] struct {
-	terms  [8]term
-	writes uint8
+	terms     [8]term
+	writes    uint8
+	optionals uint8
 }
 
 // Row8 is one entity's terms, yielded by Query8.All. Each term's
 // address is a field of its own: a small struct of scalars stays in
 // registers, where an array is copied through memory.
 type Row8[T1, T2, T3, T4, T5, T6, T7, T8 any] struct {
-	address0 unsafe.Pointer
-	address1 unsafe.Pointer
-	address2 unsafe.Pointer
-	address3 unsafe.Pointer
-	address4 unsafe.Pointer
-	address5 unsafe.Pointer
-	address6 unsafe.Pointer
-	address7 unsafe.Pointer
-	writes   uint8
+	address0  unsafe.Pointer
+	address1  unsafe.Pointer
+	address2  unsafe.Pointer
+	address3  unsafe.Pointer
+	address4  unsafe.Pointer
+	address5  unsafe.Pointer
+	address6  unsafe.Pointer
+	address7  unsafe.Pointer
+	writes    uint8
+	optionals uint8
 }
 
 // Declare declares a lock on each term's store and a read on world W.
@@ -514,7 +545,7 @@ func (Query8[W, T1, T2, T3, T4, T5, T6, T7, T8]) Declare(access *kernel.Access) 
 	q.terms[5] = declareTerm[W, T6](access, w)
 	q.terms[6] = declareTerm[W, T7](access, w)
 	q.terms[7] = declareTerm[W, T8](access, w)
-	q.writes = declareQuery(q.terms[:])
+	q.writes, q.optionals = declareQuery(q.terms[:])
 	return q
 }
 
@@ -534,15 +565,16 @@ func (q Query8[W, T1, T2, T3, T4, T5, T6, T7, T8]) All() iter.Seq2[Entity, Row8[
 					continue
 				}
 				row := Row8[T1, T2, T3, T4, T5, T6, T7, T8]{
-					address0: walk.addresses[0],
-					address1: walk.addresses[1],
-					address2: walk.addresses[2],
-					address3: walk.addresses[3],
-					address4: walk.addresses[4],
-					address5: walk.addresses[5],
-					address6: walk.addresses[6],
-					address7: walk.addresses[7],
-					writes:   q.writes,
+					address0:  walk.addresses[0],
+					address1:  walk.addresses[1],
+					address2:  walk.addresses[2],
+					address3:  walk.addresses[3],
+					address4:  walk.addresses[4],
+					address5:  walk.addresses[5],
+					address6:  walk.addresses[6],
+					address7:  walk.addresses[7],
+					writes:    q.writes,
+					optionals: q.optionals,
 				}
 				if !yield(owners[r], row) {
 					return
@@ -554,5 +586,5 @@ func (q Query8[W, T1, T2, T3, T4, T5, T6, T7, T8]) All() iter.Seq2[Entity, Row8[
 
 // Get returns the row's terms.
 func (r Row8[T1, T2, T3, T4, T5, T6, T7, T8]) Get() (T1, T2, T3, T4, T5, T6, T7, T8) {
-	return termValue[T1](r.address0, r.writes&(1<<0) != 0), termValue[T2](r.address1, r.writes&(1<<1) != 0), termValue[T3](r.address2, r.writes&(1<<2) != 0), termValue[T4](r.address3, r.writes&(1<<3) != 0), termValue[T5](r.address4, r.writes&(1<<4) != 0), termValue[T6](r.address5, r.writes&(1<<5) != 0), termValue[T7](r.address6, r.writes&(1<<6) != 0), termValue[T8](r.address7, r.writes&(1<<7) != 0)
+	return termValue[T1](r.address0, r.writes&(1<<0) != 0, r.optionals&(1<<0) != 0), termValue[T2](r.address1, r.writes&(1<<1) != 0, r.optionals&(1<<1) != 0), termValue[T3](r.address2, r.writes&(1<<2) != 0, r.optionals&(1<<2) != 0), termValue[T4](r.address3, r.writes&(1<<3) != 0, r.optionals&(1<<3) != 0), termValue[T5](r.address4, r.writes&(1<<4) != 0, r.optionals&(1<<4) != 0), termValue[T6](r.address5, r.writes&(1<<5) != 0, r.optionals&(1<<5) != 0), termValue[T7](r.address6, r.writes&(1<<6) != 0, r.optionals&(1<<6) != 0), termValue[T8](r.address7, r.writes&(1<<7) != 0, r.optionals&(1<<7) != 0)
 }

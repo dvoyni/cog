@@ -37,13 +37,15 @@ func ObservationReset[W WorldID](k *kernel.Kernel, _ kernel.NoArg, world World[W
 
 // declareDeltaQuery checks that terms can make a delta query, and registers
 // an observer of each value term's store. It is a composition error, and
-// panics, for a term to write or for no term to be a value.
+// panics, for a term to write or be optional, or for no term to be a value.
 func declareDeltaQuery(terms []term) {
 	values := false
 	for _, t := range terms {
 		switch t.mode {
 		case termWrite:
 			panic("ecs: a delta query term writes its store: delta query terms are values")
+		case termOptionalRead, termOptionalWrite:
+			panic("ecs: a delta query term is optional: delta query terms are values")
 		case termRead:
 			values = true
 			t.store.registerObserver()

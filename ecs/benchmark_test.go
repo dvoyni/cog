@@ -15,14 +15,17 @@ var benchSum float32
 // benchWorld is a world of benchEntities entities, each holding a position
 // and a velocity, with the handles the benchmarks use outside any job.
 type benchWorld struct {
-	world      World[game]
-	positions  Store[game, position]
-	velocities Store[game, velocity]
-	moving     Query2[game, *position, velocity]
-	deltas     DeltaQuery1[game, position]
-	commands   CommandBuffer[game, aiCommands]
-	sink       CommandSink[game, aiCommands]
-	entities   []Entity
+	world          World[game]
+	positions      Store[game, position]
+	velocities     Store[game, velocity]
+	moving         Query2[game, *position, velocity]
+	drifting       Query2[game, *position, Optional[velocity]]
+	placed         Query1[game, *position]
+	velocityLookup Lookup[game, velocity]
+	deltas         DeltaQuery1[game, position]
+	commands       CommandBuffer[game, aiCommands]
+	sink           CommandSink[game, aiCommands]
+	entities       []Entity
 }
 
 // spawnBench spawns a benchWorld whose every velocity-th entity has a
@@ -37,6 +40,9 @@ func spawnBench(b *testing.B, velocityEvery int, observed bool) *benchWorld {
 		o.positions = declare[Store[game, position]](c)
 		o.velocities = declare[Store[game, velocity]](c)
 		o.moving = declare[Query2[game, *position, velocity]](c)
+		o.drifting = declare[Query2[game, *position, Optional[velocity]]](c)
+		o.placed = declare[Query1[game, *position]](c)
+		o.velocityLookup = declare[Lookup[game, velocity]](c)
 		if observed {
 			o.deltas = declare[DeltaQuery1[game, position]](c)
 		}
@@ -113,6 +119,34 @@ func BenchmarkQuerySparse(b *testing.B) {
 		for _, row := range o.moving.All() {
 			pos, vel := row.Get()
 			pos.X += vel.X
+		}
+	})
+}
+
+// BenchmarkQueryOptional walks every position with a velocity on every
+// tenth entity, read through an optional term.
+func BenchmarkQueryOptional(b *testing.B) {
+	o := spawnBench(b, 10, false)
+	measure(b, func() {
+		for _, row := range o.drifting.All() {
+			pos, velocityTerm := row.Get()
+			if vel, ok := velocityTerm.Get(); ok {
+				pos.X += vel.X
+			}
+		}
+	})
+}
+
+// BenchmarkQueryLookup is BenchmarkQueryOptional with the velocity read
+// through a lookup probed per row.
+func BenchmarkQueryLookup(b *testing.B) {
+	o := spawnBench(b, 10, false)
+	measure(b, func() {
+		for e, row := range o.placed.All() {
+			pos := row.Get()
+			if vel, ok := o.velocityLookup.Get(e); ok {
+				pos.X += vel.X
+			}
 		}
 	})
 }

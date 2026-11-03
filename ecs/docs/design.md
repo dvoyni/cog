@@ -43,7 +43,7 @@ Kernel
 | `WorldLookup[W]` | Reads the world: `Alive`, and the component registry. No component. |
 | `Store[W, T]` | Writes `T`'s store by entity: `Get` a pointer to read, `Write` a pointer marked changed, `Add`, `Remove`. |
 | `Lookup[W, T]` | Reads `T`'s store by entity: `Has`, and `Get` a copy. |
-| `Query1[W, A]` … `Query8[W, ...]` | Walks the entities holding every term, yielding each entity and its row. `*T` writes, `T` reads a copy. |
+| `Query1[W, A]` … `Query8[W, ...]` | Walks the entities holding every term, yielding each entity and its row. `*T` writes, `T` reads a copy, `Optional[T]` and `Optional[*T]` match with or without one. |
 | `DeltaQuery1[W, A]` … `DeltaQuery8[W, ...]` | Walks the entities with a delta in a term this observation window, among those that have or had every term, yielding each entity and its row: values now, as of the reset, and deltas. Observes each term's store. |
 | `Refs[W, T]` | Writes the refs holding `T`: `New`, `Get` a pointer, `Set`, `Release`. |
 | `RefsLookup[W, T]` | Reads the refs holding `T`: `Get` a pointer, to read only. |
@@ -259,6 +259,15 @@ c.move = configurator.RegisterTask2(move)
   reflection at registration.
 - **Filters** `With[T]` and `Without[T]` are terms that yield nothing and
   read `T`'s store.
+- **Optional terms** `Optional[T]` and `Optional[*T]` match an entity with
+  or without a `T`, reading or writing `T`'s store as `T` and `*T` do, and
+  yield themselves: `Has()` tells whether the entity has one, copying
+  nothing, and `Get()` returns it and true, or the zero `T` and false. An
+  `Optional[*T]` row is marked changed only when the entity has one. An
+  optional term never drives, so a query of `Without` and `Optional` terms
+  only panics at registration. `Optional` reads the walked entity's
+  components; `Lookup` reads any other's, such as an entity held in a
+  component.
 - **`All()`** is a range-over-func iterator yielding the entity and its row;
   `row.Get()` returns the terms. Go ranges over at most two values, so the
   terms come through the row, the same way for every query size. It
@@ -547,6 +556,9 @@ exists:
 - **A list of changed rows per store,** so a delta query walk costs
   O(changes) instead of a state byte per row. It costs every first write in
   a window; it can come behind the same delta query.
+- **Optional delta query terms,** with a delta when the entity has the
+  component and no part in whether it matches. An `Optional` term in a delta
+  query panics at registration until then.
 - **Shrink.** Giving capacity back, as a system under the barrier.
 - **Introspection** for tools (by-name reads and writes).
 
@@ -609,17 +621,17 @@ Each step ends with its tests passing under `go test -race`.
       loop body loaded 16 bytes over two 8-byte stores, which the CPU cannot
       forward. A row now holds each term's address as a field of its own,
       in registers for up to three terms. Dense costs 6.4 ns per entity,
-      7.4 ns observed, against 0.5 ns for a slice loop.
+      7.4 ns observed, against 0.5 ns for a slice loop. An `Optional` term
+      is probed like any other: a walk of positions with a velocity on
+      every tenth entity costs 6.3 ns per entity, against 4.1 ns for the
+      same walk reading the velocity through a `Lookup`. The gap is the
+      walk's probe of a term, not the optional: a dense two-term query
+      pays it too, 7.4 ns against 5.0 ns with a `Lookup`.
 8. **Refs.** Built as above. Reading a ref by handle costs 2.4 ns; setting
    one through its component, observed, 15 ns. Making one through a command
    buffer and releasing it through another commit, 22 ns.
 
 ## Todo next
-
-Gaps in the design:
-
-1. **Optional query terms.** A term that yields the row's `T` when the
-   entity has one and nil when not, instead of a `Lookup` probed per row.
 
 Major features other ECSs have:
 

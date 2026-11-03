@@ -189,6 +189,153 @@ func TestQueryMatchesAReferenceAcrossChunks(t *testing.T) {
 	}
 }
 
+// TestQueryOptionalTermsMatchAReference walks optional terms over stores
+// filled at random, each smaller than the store that drives, and checks what
+// the walks yield, write and mark against a pass over every entity.
+func TestQueryOptionalTermsMatchAReference(t *testing.T) {
+	for seed := range uint64(6) {
+		var w World[game]
+		var positions Store[game, position]
+		var velocities Store[game, velocity]
+		var tags Store[game, frozen]
+		var push Query3[game, position, Optional[*velocity], Optional[frozen]]
+		var peek Query2[game, With[position], Optional[velocity]]
+		spawn(t, func(c *kernel.Configurator) {
+			RegisterComponent[game, position](c)
+			RegisterComponent[game, velocity](c)
+			RegisterComponent[game, frozen](c)
+			w = declare[World[game]](c)
+			positions = declare[Store[game, position]](c)
+			velocities = declare[Store[game, velocity]](c)
+			tags = declare[Store[game, frozen]](c)
+			declare[DeltaQuery1[game, velocity]](c)
+			push = declare[Query3[game, position, Optional[*velocity], Optional[frozen]]](c)
+			peek = declare[Query2[game, With[position], Optional[velocity]]](c)
+		})
+		ObservationReset(nil, kernel.NoArg{}, w)
+		random := rand.New(rand.NewPCG(seed, 11))
+		entities := make([]Entity, 600)
+		for i := range entities {
+			entities[i] = w.Spawn()
+		}
+		percents := [3][3]int{{90, 40, 30}, {70, 10, 60}, {95, 60, 5}}[seed%3]
+		for _, i := range random.Perm(len(entities)) {
+			if random.IntN(100) < percents[0] {
+				positions.Add(entities[i], position{X: float32(i + 1)})
+			}
+		}
+		for _, i := range random.Perm(len(entities)) {
+			if random.IntN(100) < percents[1] {
+				velocities.Add(entities[i], velocity{X: float32(i % 7)})
+			}
+		}
+		for _, i := range random.Perm(len(entities)) {
+			if random.IntN(100) < percents[2] {
+				tags.Add(entities[i], frozen{})
+			}
+		}
+		ObservationReset(nil, kernel.NoArg{}, w)
+		pushed := map[Entity]bool{}
+		for e, row := range push.All() {
+			pos, velocityTerm, tagTerm := row.Get()
+			vel, ok := velocityTerm.Get()
+			if pushed[e] || pos != *positions.Get(e) || ok != velocities.Has(e) || velocityTerm.Has() != ok ||
+				tagTerm.Has() != tags.Has(e) || (ok && vel != velocities.Get(e)) || (!ok && vel != nil) {
+				t.Fatalf("seed %d: push yielded entity %#x twice, or not its own terms", seed, uint64(e))
+			}
+			pushed[e] = true
+			if ok {
+				vel.X += pos.X
+			}
+		}
+		peeked := map[Entity]bool{}
+		for e, row := range peek.All() {
+			_, velocityTerm := row.Get()
+			vel, ok := velocityTerm.Get()
+			if peeked[e] || ok != velocities.Has(e) || (ok && vel != *velocities.Get(e)) || (!ok && vel != velocity{}) {
+				t.Fatalf("seed %d: peek yielded entity %#x twice, or not its own velocity", seed, uint64(e))
+			}
+			peeked[e] = true
+			vel.X = -1
+		}
+		pushedVelocities := 0
+		for i, e := range entities {
+			if pushed[e] != positions.Has(e) || peeked[e] != positions.Has(e) {
+				t.Fatalf("seed %d: entity %#x pushed %v and peeked %v, against its components", seed, uint64(e), pushed[e], peeked[e])
+			}
+			if !velocities.Has(e) {
+				continue
+			}
+			want := float32(i % 7)
+			if pushed[e] {
+				want += float32(i + 1)
+				pushedVelocities++
+			}
+			if got := velocities.Get(e).X; got != want {
+				t.Fatalf("seed %d: entity %#x has velocity X %v, want %v", seed, uint64(e), got, want)
+			}
+		}
+		markedRows := 0
+		for row := range velocities.store.len() {
+			if *velocities.store.rowStates.At(row) == rowChanged {
+				markedRows++
+			}
+		}
+		if markedRows != pushedVelocities {
+			t.Fatalf("seed %d: %d velocity rows marked, want the %d pushed", seed, markedRows, pushedVelocities)
+		}
+	}
+}
+
+// velocitySum holds what sumVelocities summed.
+var velocitySum float32
+
+// accelerate adds each entity's position X to its velocity X, if it has one.
+func accelerate(k *kernel.Kernel, _ kernel.NoArg, q Query2[game, position, Optional[*velocity]]) kernel.NoResult {
+	for _, row := range q.All() {
+		pos, velocityTerm := row.Get()
+		if vel, ok := velocityTerm.Get(); ok {
+			vel.X += pos.X
+		}
+	}
+	return kernel.NoResult{}
+}
+
+// sumVelocities sums every velocity X into velocitySum.
+func sumVelocities(k *kernel.Kernel, _ kernel.NoArg, q Query1[game, velocity]) kernel.NoResult {
+	velocitySum = 0
+	for _, row := range q.All() {
+		velocitySum += row.Get().X
+	}
+	return kernel.NoResult{}
+}
+
+// TestQueryOptionalWriteExcludesReaders schedules a system writing through
+// an optional term and one reading the same store with nothing between
+// them. Run under -race, it checks that Optional[*T] takes T's write lock.
+func TestQueryOptionalWriteExcludesReaders(t *testing.T) {
+	var accelerateTask, sumTask *kernel.Task[kernel.NoArg, kernel.NoResult]
+	var velocities Store[game, velocity]
+	h, entities := queryWorld(t, 600, func(c *kernel.Configurator) {
+		accelerateTask = c.RegisterTask1(accelerate)
+		sumTask = c.RegisterTask1(sumVelocities)
+		velocities = declare[Store[game, velocity]](c)
+	})
+	const rounds = 5
+	for range rounds {
+		h.run(func(ex *kernel.Executor) kernel.JobHandle {
+			accelerating := ex.Schedule(accelerateTask, kernel.NoArg{}).Handle()
+			summing := ex.Schedule(sumTask, kernel.NoArg{}).Handle()
+			return ex.Join(accelerating, summing)
+		})
+	}
+	for i, e := range entities {
+		if want := float32(1 + rounds*i); velocities.Has(e) && velocities.Get(e).X != want {
+			t.Fatalf("entity %#x has velocity X %v, want %v", uint64(e), velocities.Get(e).X, want)
+		}
+	}
+}
+
 func TestQueryRemovingTheCurrentEntityIsSafe(t *testing.T) {
 	var walk Query1[game, velocity]
 	var velocities Store[game, velocity]
@@ -225,13 +372,21 @@ func TestQueryStopsOnBreak(t *testing.T) {
 
 func TestQueryAllocatesNothing(t *testing.T) {
 	var move Query3[game, *position, velocity, Without[frozen]]
+	var drift Query3[game, *position, Optional[*velocity], Optional[frozen]]
 	queryWorld(t, 1000, func(c *kernel.Configurator) {
 		move = declare[Query3[game, *position, velocity, Without[frozen]]](c)
+		drift = declare[Query3[game, *position, Optional[*velocity], Optional[frozen]]](c)
 	})
 	got := testing.AllocsPerRun(100, func() {
 		for _, row := range move.All() {
 			pos, vel, _ := row.Get()
 			pos.X += vel.X
+		}
+		for _, row := range drift.All() {
+			pos, velocityTerm, tagTerm := row.Get()
+			if vel, ok := velocityTerm.Get(); ok && !tagTerm.Has() {
+				vel.X += pos.X
+			}
 		}
 	})
 	if got != 0 {
@@ -244,10 +399,20 @@ func TestQueryCompositionErrors(t *testing.T) {
 	expectPanic(t, "not registered", func() {
 		spawn(t, func(c *kernel.Configurator) { declare[Query1[game, unregistered]](c) })
 	})
-	expectPanic(t, "Without terms only", func() {
+	expectPanic(t, "Without and Optional terms only", func() {
 		spawn(t, func(c *kernel.Configurator) {
 			RegisterComponent[game, frozen](c)
 			declare[Query1[game, Without[frozen]]](c)
 		})
+	})
+	expectPanic(t, "Without and Optional terms only", func() {
+		spawn(t, func(c *kernel.Configurator) {
+			RegisterComponent[game, position](c)
+			RegisterComponent[game, frozen](c)
+			declare[Query2[game, Optional[*position], Without[frozen]]](c)
+		})
+	})
+	expectPanic(t, "not registered", func() {
+		spawn(t, func(c *kernel.Configurator) { declare[Query1[game, Optional[unregistered]]](c) })
 	})
 }
