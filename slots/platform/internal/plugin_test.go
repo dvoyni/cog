@@ -2,6 +2,7 @@ package internal
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"sync"
 	"testing"
@@ -62,6 +63,11 @@ func (b *fakeBackend) ShowTextInput(field TextField) bool {
 }
 
 func (b *fakeBackend) HideTextInput() { b.record("hide text input") }
+
+func (b *fakeBackend) ShowStorePage(appID uint32) bool {
+	b.record(fmt.Sprintf("store page %d", appID))
+	return true
+}
 
 func (b *fakeBackend) Update() error {
 	b.record("update")
@@ -222,6 +228,28 @@ func TestTextInputReachesTheBackendUntilStop(t *testing.T) {
 	stop()
 	backend.taken(false)
 	if k.ExecuteCommand[ShowTextInputCmd](ShowTextInputRequest{Field: TextField{Width: 100}}).Shown {
+		t.Fatal("Shown after Stop = true, want false")
+	}
+	if calls := backend.taken(false); len(calls) != 0 {
+		t.Fatalf("calls after Stop = %v, want none", calls)
+	}
+}
+
+// The store page reaches the Backend with the app asked for and answers
+// whether it opened, and nothing reaches the Backend once it is closed.
+func TestStorePageReachesTheBackendUntilStop(t *testing.T) {
+	backend := &fakeBackend{}
+	var reported []error
+	k, stop := testEngine(t, Config{}, backend, &reported)
+	if !k.ExecuteCommand[ShowStorePageCmd](ShowStorePageRequest{AppID: 480}).Shown {
+		t.Fatal("Shown = false, want the Backend's true")
+	}
+	if calls := backend.taken(false); !slices.Equal(calls, []string{"store page 480"}) {
+		t.Fatalf("calls = %v, want the store page for 480", calls)
+	}
+	stop()
+	backend.taken(false)
+	if k.ExecuteCommand[ShowStorePageCmd](ShowStorePageRequest{AppID: 480}).Shown {
 		t.Fatal("Shown after Stop = true, want false")
 	}
 	if calls := backend.taken(false); len(calls) != 0 {

@@ -20,6 +20,10 @@ const initOK = 0
 // one line, and Enter closes the keyboard.
 const floatingTextInputSingleLine = 0
 
+// overlayToStoreNone is k_EOverlayToStoreFlag_None: the store page shown as it
+// is, with nothing put in the cart.
+const overlayToStoreNone = 0
+
 // api is the slice of the Steamworks flat API steamplatform calls, bound with
 // purego so the build needs no cgo. The interface accessors are versioned
 // because the flat library exports only the versioned names: these are the
@@ -43,12 +47,14 @@ type api struct {
 	apps                   func() uintptr
 	getCurrentGameLanguage func(self uintptr) string
 
-	friends        func() uintptr
-	getPersonaName func(self uintptr) string
+	friends                    func() uintptr
+	getPersonaName             func(self uintptr) string
+	activateGameOverlayToStore func(self uintptr, appID uint32, flag int32)
 
 	utils                           func() uintptr
 	showFloatingGamepadTextInput    func(self uintptr, mode int32, x, y, width, height int32) bool
 	dismissFloatingGamepadTextInput func(self uintptr) bool
+	isOverlayEnabled                func(self uintptr) bool
 }
 
 // loadAPI opens the Steam library and binds every function api names. It
@@ -77,9 +83,11 @@ func loadAPI() (*api, error) {
 		{&a.getCurrentGameLanguage, "SteamAPI_ISteamApps_GetCurrentGameLanguage"},
 		{&a.friends, "SteamAPI_SteamFriends_v018"},
 		{&a.getPersonaName, "SteamAPI_ISteamFriends_GetPersonaName"},
+		{&a.activateGameOverlayToStore, "SteamAPI_ISteamFriends_ActivateGameOverlayToStore"},
 		{&a.utils, "SteamAPI_SteamUtils_v011"},
 		{&a.showFloatingGamepadTextInput, "SteamAPI_ISteamUtils_ShowFloatingGamepadTextInput"},
 		{&a.dismissFloatingGamepadTextInput, "SteamAPI_ISteamUtils_DismissFloatingGamepadTextInput"},
+		{&a.isOverlayEnabled, "SteamAPI_ISteamUtils_IsOverlayEnabled"},
 	}
 	for _, binding := range bindings {
 		if err := bind(binding.fptr, handle, binding.name); err != nil {

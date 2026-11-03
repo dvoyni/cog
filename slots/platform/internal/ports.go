@@ -39,6 +39,12 @@ type Backend interface {
 	ShowTextInput(field TextField) bool
 	// HideTextInput closes the on-screen keyboard, if it is open.
 	HideTextInput()
+	// ShowStorePage shows the player the storefront's page for appID, where
+	// they can wishlist or buy it, and reports whether anything opened. No
+	// storefront lets a game wishlist on the player's behalf, so the page is
+	// as far as a game can take them. A Backend with no storefront opens
+	// nothing and reports false.
+	ShowStorePage(appID uint32) bool
 	// Update runs once per frame, for a Backend that has to pump its
 	// storefront. Its error is a failure nothing else could have reported, such
 	// as a storefront that never came up.

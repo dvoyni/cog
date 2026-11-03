@@ -4,6 +4,7 @@ package internal
 
 import (
 	"bytes"
+	"fmt"
 	"sync"
 
 	"github.com/dvoyni/cog/slots/platform"
@@ -117,6 +118,20 @@ func (b *backend) HideTextInput() {
 		return
 	}
 	b.api.dismissFloatingGamepadTextInput(b.utils)
+}
+
+// ShowStorePage shows the app's store page in the Steam overlay, over the game.
+// With the overlay off, or Steam not reached, it asks the system to open the
+// page in the Steam client, and failing that on the web, in the browser.
+func (b *backend) ShowStorePage(appID uint32) bool {
+	if b.api != nil && b.api.isOverlayEnabled(b.utils) {
+		b.api.activateGameOverlayToStore(b.friends, appID, overlayToStoreNone)
+		return true
+	}
+	if openURL(fmt.Sprintf("steam://store/%d", appID)) == nil {
+		return true
+	}
+	return openURL(fmt.Sprintf("https://store.steampowered.com/app/%d/", appID)) == nil
 }
 
 // Update pumps Steam's callbacks. Nothing reads them, but Steam needs its

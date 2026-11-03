@@ -18,6 +18,7 @@ func (p *plugin) registerCommands(registrar *kernel.Registrar) {
 	registrar.HandleCommand[PlayerNameCmd](p.playerNameCmdImpl)
 	registrar.HandleCommand[ShowTextInputCmd](p.showTextInputCmdImpl)
 	registrar.HandleCommand[HideTextInputCmd](p.hideTextInputCmdImpl)
+	registrar.HandleCommand[ShowStorePageCmd](p.showStorePageCmdImpl)
 	registrar.HandleCommand[closeCmd](p.closeCmdImpl)
 }
 
@@ -106,6 +107,18 @@ func (p *plugin) hideTextInputCmdImpl() (kernel.Lock, kernel.Execute[HideTextInp
 				p.backend.Get().HideTextInput()
 			}
 			return HideTextInputResponse{}
+		}
+}
+
+func (p *plugin) showStorePageCmdImpl() (kernel.Lock, kernel.Execute[ShowStorePageRequest, ShowStorePageResponse]) {
+	var current kernel.Write[*state]
+	return func(access kernel.ResourceAccess) {
+			current = access.GetWrite[*state]()
+		}, func(_ kernel.Kernel, request ShowStorePageRequest) ShowStorePageResponse {
+			if current.Get().closed {
+				return ShowStorePageResponse{}
+			}
+			return ShowStorePageResponse{Shown: p.backend.Get().ShowStorePage(request.AppID)}
 		}
 }
 

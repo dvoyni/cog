@@ -64,3 +64,17 @@ type HideTextInputCmd = internal.HideTextInputCmd
 type HideTextInputRequest = internal.HideTextInputRequest
 
 type HideTextInputResponse = internal.HideTextInputResponse
+
+// ShowStorePageCmd shows the player the storefront's page for an app, where
+// they wishlist or buy it themselves: no storefront lets a game do either on
+// their behalf.
+type ShowStorePageCmd = internal.ShowStorePageCmd
+
+// ShowStorePageRequest names the app by its storefront id. A demo or a
+// playtest names the full game's, whose page is the one with the wishlist.
+type ShowStorePageRequest = internal.ShowStorePageRequest
+
+// ShowStorePageResponse reports whether the page opened. A build with no
+// storefront opens nothing, and a game that wants the page anyway opens it
+// on the web itself.
+type ShowStorePageResponse = internal.ShowStorePageResponse

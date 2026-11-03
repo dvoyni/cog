@@ -64,3 +64,17 @@ type HideTextInputCmd kernel.Command[HideTextInputRequest, HideTextInputResponse
 type HideTextInputRequest struct{}
 
 type HideTextInputResponse struct{}
+
+// ShowStorePageCmd shows the player the storefront's page for an app, where
+// they wishlist or buy it themselves: no storefront lets a game do either on
+// their behalf.
+type ShowStorePageCmd kernel.Command[ShowStorePageRequest, ShowStorePageResponse]
+
+// ShowStorePageRequest names the app by its storefront id. A demo or a
+// playtest names the full game's, whose page is the one with the wishlist.
+type ShowStorePageRequest struct{ AppID uint32 }
+
+// ShowStorePageResponse reports whether the page opened. A build with no
+// storefront opens nothing, and a game that wants the page anyway opens it
+// on the web itself.
+type ShowStorePageResponse struct{ Shown bool }

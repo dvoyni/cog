@@ -4,7 +4,7 @@ import "github.com/dvoyni/cog/slots/platform"
 
 // backend is the storefront that is not there: every unlock, stat and upload
 // succeeds and goes nowhere, it has no language or player name to report and
-// no on-screen keyboard to open.
+// no on-screen keyboard or store page to open.
 type backend struct{}
 
 func (backend) UnlockAchievement(string) error { return nil }
@@ -20,6 +20,8 @@ func (backend) PlayerName() string { return "" }
 func (backend) ShowTextInput(platform.TextField) bool { return false }
 
 func (backend) HideTextInput() {}
+
+func (backend) ShowStorePage(uint32) bool { return false }
 
 func (backend) Update() error { return nil }
 
