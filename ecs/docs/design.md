@@ -664,6 +664,9 @@ exists:
   not need them: a set hook costs an indirect call per write in the writing
   jobs, where a delta query finds the changes once under the barrier and
   drops writes that leave a value as it was.
+- **Prefabs and bundles.** Typed templates of several components spawned
+  together, and instances that share or copy from a prefab. `SpawnRaw` does
+  it untyped, and keyed refs share the heavy data a prefab would.
 
 ## Performance
 
@@ -724,14 +727,8 @@ hand-written loops:
 
 Major features other ECSs have:
 
-- **Prefabs and bundles.** Typed templates of several components spawned
-  together, and instances that share or copy from a prefab. `SpawnRaw` does
-  it untyped.
 - **Serialization and reflection.** A field view of components for saving,
   loading and the network layer, built on the erased metadata (see
   Introspection under Deferred).
-- **Cached queries and groups.** Keeping a query's matches, or packing
-  stores owned together in one order, so walks skip the probes. Weighed
-  against the sparse-set choice; low.
 
 Networking comes after, as its own design on top of these pieces.
