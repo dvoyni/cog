@@ -2,6 +2,7 @@ package ecs
 
 import (
 	"fmt"
+	"iter"
 	"sync/atomic"
 
 	"github.com/dvoyni/cog/kernel/container"
@@ -70,6 +71,24 @@ func (t *entityTable[W]) init(first, last uint32, prepared int) {
 func (t *entityTable[W]) alive(e Entity) bool {
 	slot := t.slots.at(e.index())
 	return slot != nil && slot.liveGeneration == e.generation() && slot.liveGeneration != 0
+}
+
+// live yields every live entity and its slot, in index order. Despawning
+// one moves no other; one spawned during the walk may or may not be yielded.
+func (t *entityTable[W]) live() iter.Seq2[Entity, *entitySlot[W]] {
+	return func(yield func(Entity, *entitySlot[W]) bool) {
+		for p, page := range t.slots.pages {
+			if page == nil {
+				continue
+			}
+			for i := range page {
+				slot := &page[i]
+				if slot.liveGeneration != 0 && !yield(makeEntity(uint32(p<<indexPageShift|i), slot.liveGeneration), slot) {
+					return
+				}
+			}
+		}
+	}
 }
 
 // mask answers the components e has, or false if e is not alive. It runs

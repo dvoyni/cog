@@ -8,7 +8,8 @@ import (
 
 // Schema describes what a world holds: its component types and its refs, for
 // code that works on the world without the types, such as a serializer or
-// the network layer. Its slices are the registry's own, to read only.
+// the network layer. Each call builds it anew; the Markers and Fields of each
+// component are the registry's own, to read only.
 type Schema struct {
 	// Components holds every component type, indexed by ComponentID.
 	Components []ComponentInfo

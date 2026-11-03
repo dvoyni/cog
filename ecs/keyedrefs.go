@@ -2,6 +2,7 @@ package ecs
 
 import (
 	"fmt"
+	"iter"
 	"reflect"
 
 	"github.com/dvoyni/cog/kernel"
@@ -104,7 +105,10 @@ func (r KeyedRefs[W, K, T]) Find(key K) (Ref[T], bool) {
 }
 
 // Get returns the value of ref h, or nil if h is released or zero. Writing
-// through it is not a change: Update is.
+// through it is not a change: Update is. The value's key must not change
+// through it: the ref stays found by its old key, which a release then never
+// frees, and the release frees the new key instead, from whichever ref has
+// it.
 func (r KeyedRefs[W, K, T]) Get(h Ref[T]) *T {
 	return r.refs.get(h)
 }
@@ -125,6 +129,13 @@ func (r KeyedRefs[W, K, T]) Release(h Ref[T]) bool {
 func (r KeyedRefs[W, K, T]) ReleaseKey(key K) bool {
 	h, ok := r.keys[key]
 	return ok && releaseKeyed(r.refs, r.keys, h)
+}
+
+// All yields every live ref and its value, in index order. Releasing one
+// during the walk moves no other; one put during it may or may not be
+// yielded.
+func (r KeyedRefs[W, K, T]) All() iter.Seq2[Ref[T], *T] {
+	return r.refs.all()
 }
 
 // Declare declares a read on W's keyed refs of T and on world W. It is a
@@ -150,6 +161,11 @@ func (l KeyedRefsLookup[W, K, T]) Get(h Ref[T]) *T {
 // Alive reports whether ref h is alive.
 func (l KeyedRefsLookup[W, K, T]) Alive(h Ref[T]) bool {
 	return l.refs.slot(h) != nil
+}
+
+// All yields every live ref and its value, to read only, in index order.
+func (l KeyedRefsLookup[W, K, T]) All() iter.Seq2[Ref[T], *T] {
+	return l.refs.all()
 }
 
 // keysOf answers the key map of refs, panicking if they are not keyed by K.

@@ -2,8 +2,11 @@ package ecs
 
 import (
 	"fmt"
+	"iter"
 	"math/rand/v2"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/dvoyni/cog/kernel"
 )
@@ -443,4 +446,100 @@ func TestRegisterRefsCompositionErrors(t *testing.T) {
 			declare[KeyedRefs[game, string, mesh]](c)
 		})
 	})
+}
+
+func TestDeltaRefsFarFromZeroWalkOnlyTheirPages(t *testing.T) {
+	var refs Refs[game, int]
+	var deltas DeltaRefs[game, int]
+	var w World[game]
+	spawn(t, func(c *kernel.Configurator) {
+		RegisterRefs[game, int](c, "number", RefsOptions{FirstIndex: 1 << 30})
+		refs = declare[Refs[game, int]](c)
+		deltas = declare[DeltaRefs[game, int]](c)
+		w = declare[World[game]](c)
+	})
+	ObservationResetSystem(nil, kernel.NoArg{}, w)
+	h := refs.New(1)
+	// Fewer than eight live refs overflow the listing, so the walk visits
+	// every slot: those of the one page holding h.
+	visited := 0
+	for range refs.refs.walkedSlots() {
+		visited++
+	}
+	if visited != indexPageSize {
+		t.Fatalf("the walk visited %d slots, want the %d of h's page", visited, indexPageSize)
+	}
+	var got []Ref[int]
+	for yielded := range deltas.All() {
+		got = append(got, yielded)
+	}
+	if len(got) != 1 || got[0] != h {
+		t.Fatalf("DeltaRefs yielded %v, want %v", got, h)
+	}
+	// A walk of every index below h's page would take a second.
+	start := time.Now()
+	for range deltas.All() {
+	}
+	ObservationResetSystem(nil, kernel.NoArg{}, w)
+	if took := time.Since(start); took > 100*time.Millisecond {
+		t.Fatalf("a walk and a reset of one ref far from 0 took %v", took)
+	}
+}
+
+func TestRefsAllWalkEveryLiveRef(t *testing.T) {
+	var texts Refs[game, string]
+	var textLookup RefsLookup[game, string]
+	var meshes KeyedRefs[game, string, mesh]
+	var meshLookup KeyedRefsLookup[game, string, mesh]
+	spawn(t, func(c *kernel.Configurator) {
+		RegisterRefs[game, string](c, "text", RefsOptions{})
+		RegisterKeyedRefs[game, string, mesh](c, "mesh", RefsOptions{})
+		texts = declare[Refs[game, string]](c)
+		textLookup = declare[RefsLookup[game, string]](c)
+		meshes = declare[KeyedRefs[game, string, mesh]](c)
+		meshLookup = declare[KeyedRefsLookup[game, string, mesh]](c)
+	})
+	a := texts.New("a")
+	b := texts.New("b")
+	c := texts.New("c")
+	texts.Release(b)
+	cube := meshes.Put(mesh{Path: "cube"})
+	walk := func(all iter.Seq2[Ref[string], *string]) []string {
+		var got []string
+		for h, value := range all {
+			got = append(got, fmt.Sprintf("%v %s", h, *value))
+		}
+		return got
+	}
+	want := []string{fmt.Sprint(a, " a"), fmt.Sprint(c, " c")}
+	if got := walk(texts.All()); !slices.Equal(got, want) {
+		t.Fatalf("Refs walked %v, want %v", got, want)
+	}
+	if got := walk(textLookup.All()); !slices.Equal(got, want) {
+		t.Fatalf("RefsLookup walked %v, want %v", got, want)
+	}
+	for _, all := range []iter.Seq2[Ref[mesh], *mesh]{meshes.All(), meshLookup.All()} {
+		var got []Ref[mesh]
+		for h, value := range all {
+			if value.Path != "cube" {
+				t.Fatalf("a keyed walk yielded %v", *value)
+			}
+			got = append(got, h)
+		}
+		if !slices.Equal(got, []Ref[mesh]{cube}) {
+			t.Fatalf("a keyed walk yielded %v, want %v", got, cube)
+		}
+	}
+	for h := range texts.All() {
+		texts.Release(h)
+	}
+	if got := walk(texts.All()); len(got) != 0 {
+		t.Fatalf("%v live after releasing every ref walked", got)
+	}
+	if allocs := testing.AllocsPerRun(100, func() {
+		for range textLookup.All() {
+		}
+	}); allocs != 0 {
+		t.Fatalf("walking every ref allocated %v times", allocs)
+	}
 }

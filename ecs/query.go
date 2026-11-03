@@ -2,6 +2,7 @@ package ecs
 
 import (
 	"fmt"
+	"iter"
 	"math/bits"
 	"reflect"
 	"unsafe"
@@ -40,6 +41,32 @@ func (o Optional[T]) Get() (T, bool) {
 		return zero, false
 	}
 	return termValue[T](o.address, o.write, false), true
+}
+
+// Query0 walks every live entity of world W, in index order. It holds a
+// read on the world alone, so it reaches no component: Lookup and Store do.
+// A system that also takes World holds the world's write, which supersedes
+// the read, and may despawn the entity the walk is at, as when clearing a
+// level.
+type Query0[W WorldID] struct {
+	world *worldResource[W]
+}
+
+// Declare declares a read on world W.
+func (Query0[W]) Declare(access *kernel.Access) Query0[W] {
+	return Query0[W]{world: access.Read[*worldResource[W]]().Get()}
+}
+
+// All yields every live entity, in index order. Despawning one during the
+// walk moves no other; one spawned during it may or may not be yielded.
+func (q Query0[W]) All() iter.Seq[Entity] {
+	return func(yield func(Entity) bool) {
+		for e := range q.world.entities.live() {
+			if !yield(e) {
+				return
+			}
+		}
+	}
 }
 
 // term is one term of a query: the store it walks or probes, and how.

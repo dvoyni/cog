@@ -212,6 +212,13 @@ func (r Refs[W, T]) Release(h Ref[T]) bool {
 	return r.refs.release(h)
 }
 
+// All yields every live ref and its value, in index order. Releasing one
+// during the walk moves no other; one made during it may or may not be
+// yielded.
+func (r Refs[W, T]) All() iter.Seq2[Ref[T], *T] {
+	return r.refs.all()
+}
+
 // Declare declares a read on W's refs of T and on world W.
 func (RefsLookup[W, T]) Declare(access *kernel.Access) RefsLookup[W, T] {
 	access.Read[*worldResource[W]]()
@@ -227,6 +234,11 @@ func (l RefsLookup[W, T]) Get(h Ref[T]) *T {
 // Alive reports whether ref h is alive.
 func (l RefsLookup[W, T]) Alive(h Ref[T]) bool {
 	return l.refs.slot(h) != nil
+}
+
+// All yields every live ref and its value, to read only, in index order.
+func (l RefsLookup[W, T]) All() iter.Seq2[Ref[T], *T] {
+	return l.refs.all()
 }
 
 // Declare declares a read on W's refs of T and on world W, and observes
@@ -250,15 +262,7 @@ func (d DeltaRefs[W, T]) All() iter.Seq2[Ref[T], RefDelta[T]] {
 		if refs.observation != observed {
 			return
 		}
-		for i := range refs.walkedSlots() {
-			index := uint32(i)
-			if !refs.changedRefsOverflowed {
-				index = refs.changedRefs[i].index
-			}
-			slot := refs.slots.at(index)
-			if slot == nil {
-				continue
-			}
+		for index, slot := range refs.walkedSlots() {
 			var delta Delta
 			switch slot.state {
 			case refAdded:
@@ -314,6 +318,24 @@ func registerRefs[W WorldID, T any](configurator *kernel.Configurator, name RefN
 // included: converting it keeps the read path within the inlining budget.
 func (r *refsResource[W, T]) get(h Ref[T]) *T {
 	return (*T)(unsafe.Pointer(r.slot(h)))
+}
+
+// all yields every live ref and its value, in index order. Releasing one
+// moves no other; one made during the walk may or may not be yielded.
+func (r *refsResource[W, T]) all() iter.Seq2[Ref[T], *T] {
+	return func(yield func(Ref[T], *T) bool) {
+		for p, page := range r.slots.pages {
+			if page == nil {
+				continue
+			}
+			for i := range page {
+				slot := &page[i]
+				if slot.live && !yield(Ref[T]{index: uint32(p<<indexPageShift | i), generation: slot.generation}, &slot.value) {
+					return
+				}
+			}
+		}
+	}
 }
 
 // slot returns live ref h's slot, or nil if h is released or zero.
@@ -419,14 +441,30 @@ func (r *refsResource[W, T]) listChanged(h Ref[T]) {
 	}
 }
 
-// walkedSlots answers how many slots DeltaRefs and the reset visit: those
-// of changedRefs, or every index the slots have pages for, once the listing
-// stopped.
-func (r *refsResource[W, T]) walkedSlots() int {
-	if r.changedRefsOverflowed {
-		return len(r.slots.pages) << indexPageShift
+// walkedSlots yields the index and slot DeltaRefs and the reset visit: those
+// of changedRefs, or every slot on a page that exists, once the listing
+// stopped, so refs far from index 0 cost only their pages.
+func (r *refsResource[W, T]) walkedSlots() iter.Seq2[uint32, *refSlot[T]] {
+	return func(yield func(uint32, *refSlot[T]) bool) {
+		if !r.changedRefsOverflowed {
+			for _, h := range r.changedRefs {
+				if !yield(h.index, r.slots.at(h.index)) {
+					return
+				}
+			}
+			return
+		}
+		for p, page := range r.slots.pages {
+			if page == nil {
+				continue
+			}
+			for i := range page {
+				if !yield(uint32(p<<indexPageShift|i), &page[i]) {
+					return
+				}
+			}
+		}
 	}
-	return len(r.changedRefs)
 }
 
 // release frees ref h, and reports whether it was alive. Observed refs keep
@@ -493,13 +531,8 @@ func (r *refsResource[W, T]) resetObservation() {
 		return
 	}
 	r.settleReservations()
-	for i := range r.walkedSlots() {
-		index := uint32(i)
-		if !r.changedRefsOverflowed {
-			index = r.changedRefs[i].index
-		}
-		slot := r.slots.at(index)
-		if slot == nil || slot.state == refUnchanged {
+	for index, slot := range r.walkedSlots() {
+		if slot.state == refUnchanged {
 			continue
 		}
 		if slot.state == refReleased || slot.state == refDiscarded {

@@ -3,6 +3,7 @@ package ecs
 import (
 	"maps"
 	"math/rand/v2"
+	"slices"
 	"testing"
 
 	"github.com/dvoyni/cog/kernel"
@@ -415,4 +416,47 @@ func TestQueryCompositionErrors(t *testing.T) {
 	expectPanic(t, "not registered", func() {
 		spawn(t, func(c *kernel.Configurator) { declare[Query1[game, Optional[unregistered]]](c) })
 	})
+}
+
+func TestQuery0WalksEveryLiveEntity(t *testing.T) {
+	var all Query0[game]
+	var clear *kernel.Task[kernel.NoArg, kernel.NoResult]
+	var w World[game]
+	h := spawn(t, func(c *kernel.Configurator) {
+		all = declare[Query0[game]](c)
+		w = declare[World[game]](c)
+		clear = c.RegisterTask2(func(k *kernel.Kernel, _ kernel.NoArg, w World[game], q Query0[game]) kernel.NoResult {
+			for e := range q.All() {
+				w.Despawn(e)
+			}
+			return kernel.NoResult{}
+		})
+	})
+	a := w.Spawn()
+	b := w.Spawn()
+	c := w.Spawn()
+	w.Despawn(b)
+	placed := makeEntity(1<<21, 3)
+	if err := w.CreateAt(placed); err != nil {
+		t.Fatal(err)
+	}
+	var got []Entity
+	for e := range all.All() {
+		got = append(got, e)
+	}
+	if want := []Entity{a, c, placed}; !slices.Equal(got, want) {
+		t.Fatalf("walked %v, want %v", got, want)
+	}
+	if allocs := testing.AllocsPerRun(100, func() {
+		for range all.All() {
+		}
+	}); allocs != 0 {
+		t.Fatalf("walking every entity allocated %v times", allocs)
+	}
+	h.run(func(ex *kernel.Executor) kernel.JobHandle {
+		return ex.Schedule(clear, kernel.NoArg{}).Handle()
+	})
+	for e := range all.All() {
+		t.Fatalf("%v is alive after a system despawned every entity it walked", e)
+	}
 }

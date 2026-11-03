@@ -45,6 +45,18 @@ type cache struct {
 // score is a component that is not a struct.
 type score int32
 
+// member is an element of squad's array: its marker and unexported field
+// stay out of saves, and its json tag means nothing to them.
+type member struct {
+	replicated
+	Unit   Entity
+	Rank   int16 `json:"rank"`
+	secret int32
+}
+
+// squad is a component holding an array of structs.
+type squad struct{ Members [2]member }
+
 // warnings is a LogHandler that keeps the warnings it is told of.
 type warnings struct {
 	mutex sync.Mutex
@@ -276,12 +288,17 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if err := to.world.Load(to.kernel.Logger(), strings.NewReader(file)); err != nil {
 		t.Fatal(err)
 	}
-	moved := func(e Entity) Entity { return makeEntity(3+e.index(), e.generation()) }
-	got := to.units.Get(moved(first))
-	if got == nil {
-		t.Fatalf("%v did not load as %v", first, moved(first))
+	// The saved entities load one after another past the world's three,
+	// the despawned one leaving no hole.
+	moved := map[Entity]Entity{}
+	for i, e := range []Entity{first, second, last} {
+		moved[e] = makeEntity(3+uint32(i), e.generation())
 	}
-	if got.Health != 5 || got.Target != moved(second) || got.Slots != saved.Slots || got.Position != saved.Position || got.Angle != 0.5 || got.secret != 0 {
+	got := to.units.Get(moved[first])
+	if got == nil {
+		t.Fatalf("%v did not load as %v", first, moved[first])
+	}
+	if got.Health != 5 || got.Target != moved[second] || got.Slots != saved.Slots || got.Position != saved.Position || got.Angle != 0.5 || got.secret != 0 {
 		t.Fatalf("loaded %+v, saved %+v", *got, saved)
 	}
 	if got.Name == existingText || *to.texts.Get(got.Name) != "hello" {
@@ -290,20 +307,14 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if got.Mesh != existingCube || to.meshes.Get(existingCube).Vertices[0] != 9 {
 		t.Fatalf("the cube loaded as %v, not the world's %v keeping its value", got.Mesh, existingCube)
 	}
-	lastUnit := to.units.Get(moved(last))
+	lastUnit := to.units.Get(moved[last])
 	if lastUnit == nil || lastUnit.Target != NoEntity || to.meshes.Get(lastUnit.Mesh).Path != "sphere" {
 		t.Fatalf("the last unit loaded as %+v", lastUnit)
 	}
-	if *to.positions.Get(moved(second)) != (position{X: 7, Y: 8}) || !to.frozens.Has(moved(second)) || to.caches.Has(moved(second)) {
+	if *to.positions.Get(moved[second]) != (position{X: 7, Y: 8}) || !to.frozens.Has(moved[second]) || to.caches.Has(moved[second]) {
 		t.Fatal("the second entity did not load its position and frozen alone")
 	}
-	if to.world.Alive(moved(gone)) {
-		t.Fatal("the despawned entity loaded")
-	}
-	if hole := to.world.Spawn(); hole.index() != moved(gone).index() {
-		t.Fatalf("spawned %v, not the hole the despawned entity left at %d", hole, moved(gone).index())
-	}
-	if fresh := to.world.Spawn(); fresh.index() != 3+last.index()+1 {
+	if fresh := to.world.Spawn(); fresh.index() != 6 {
 		t.Fatalf("spawned %v, not the first index past the loaded ones", fresh)
 	}
 	if fresh := to.texts.New("next"); fresh.index != 2 {
@@ -338,6 +349,59 @@ func TestLoadForgives(t *testing.T) {
 	if !slices.Equal(logged.lines, want) {
 		t.Fatalf("warned\n%v\nwant\n%v", strings.Join(logged.lines, "\n"), strings.Join(want, "\n"))
 	}
+	if err := o.world.Load(nil, strings.NewReader(`{"entities": [{"entity": 4294967296, "ghost": {}}]}`)); err != nil {
+		t.Fatalf("a load with no logger failed: %v", err)
+	}
+}
+
+func TestSaveArraysOfStructsByTheirFields(t *testing.T) {
+	var w World[game]
+	var squads Store[game, squad]
+	spawn(t, func(c *kernel.Configurator) {
+		RegisterComponent[game, squad](c, "squad")
+		w = declare[World[game]](c)
+		squads = declare[Store[game, squad]](c)
+	})
+	leader := w.Spawn()
+	follower := w.Spawn()
+	squads.Add(leader, squad{Members: [2]member{{Unit: follower, Rank: 1, secret: 5}, {Unit: leader, Rank: 2}}})
+	var out bytes.Buffer
+	if err := w.Save(&out); err != nil {
+		t.Fatal(err)
+	}
+	compact := strings.Join(strings.Fields(out.String()), "")
+	want := fmt.Sprintf(`"squad":{"Members":[{"Unit":%d,"Rank":1},{"Unit":%d,"Rank":2}]}`, SerializeEntity(follower), SerializeEntity(leader))
+	if !strings.Contains(compact, want) {
+		t.Fatalf("saved\n%s\nwant it to hold %s", compact, want)
+	}
+	file := fmt.Sprintf(`{"entities": [
+		{"entity": %d, "squad": {"Members": [{"Unit": %d, "Rank": 1}, {}, {"Rank": 9}]}},
+		{"entity": %d}
+	]}`, SerializeEntity(leader), SerializeEntity(follower), SerializeEntity(follower))
+	if err := w.Load(nil, strings.NewReader(file)); err != nil {
+		t.Fatal(err)
+	}
+	moved := func(e Entity) Entity { return makeEntity(2+e.index(), e.generation()) }
+	got := squads.Get(moved(leader))
+	if got == nil || *got != (squad{Members: [2]member{{Unit: moved(follower), Rank: 1}}}) {
+		t.Fatalf("loaded %+v, want the first member remapped, the second zero and the third skipped", got)
+	}
+}
+
+func TestLoadOfNoRefsKeepsTheirAllocation(t *testing.T) {
+	o := spawnSaved(t, nil)
+	file := o.save(t)
+	if !strings.Contains(file, `"text": []`) {
+		t.Fatalf("the save holds no empty texts:\n%s", file)
+	}
+	kept := o.texts.New("kept")
+	o.texts.New("other")
+	if err := o.world.Load(nil, strings.NewReader(file)); err != nil {
+		t.Fatal(err)
+	}
+	if fresh := o.texts.New("fresh"); fresh.index != 2 || *o.texts.Get(kept) != "kept" {
+		t.Fatalf("made %v after loading no texts, and the first reads %q", fresh, *o.texts.Get(kept))
+	}
 }
 
 func TestLoadKeyedRefs(t *testing.T) {
@@ -366,13 +430,10 @@ func TestLoadKeyedRefs(t *testing.T) {
 	if !ok || meshOf(1) != cone || meshOf(2) != cone || o.meshes.Get(cone).Vertices[0] != 2 {
 		t.Fatalf("the saved cones loaded as %v and %v, the key finds %v", meshOf(1), meshOf(2), cone)
 	}
-	// The saved refs loaded at 1 to 3; the cube's index and the second
-	// cone's are holes, handed out last first.
-	if hole := o.meshes.Put(mesh{Path: "torus"}); hole.index != 3 {
-		t.Fatalf("a new mesh took %v, not the index the second cone left", hole)
-	}
-	if hole := o.meshes.Put(mesh{Path: "prism"}); hole.index != 1 {
-		t.Fatalf("a new mesh took %v, not the index the saved cube left", hole)
+	// Only the first cone took an index: the cube took the world's ref,
+	// and the second cone the first one's.
+	if fresh := o.meshes.Put(mesh{Path: "torus"}); fresh.index != 2 {
+		t.Fatalf("a new mesh took %v, not the index past the first cone", fresh)
 	}
 }
 
@@ -389,16 +450,60 @@ func TestLoadFailsChangingNothing(t *testing.T) {
 		"no handle":          `{"entities": [{"position": {}}]}`,
 		"generation 0":       `{"entities": [{"entity": 1}]}`,
 		"two at one index":   `{"entities": [{"entity": 4294967296}, {"entity": 8589934592}]}`,
-		"past the range":     `{"entities": [{"entity": 4294967296}, {"entity": 4296015872}]}`,
 		"not an object":      `[]`,
 	}
 	for name, file := range files {
-		if err := o.world.Load(o.kernel.Logger(), strings.NewReader(file)); err == nil {
+		err := o.world.Load(o.kernel.Logger(), strings.NewReader(file))
+		if err == nil {
 			t.Fatalf("%s: loaded", name)
+		}
+		if name == "mistyped field" && !strings.Contains(err.Error(), `entity 4294967296: component "position"`) {
+			t.Fatalf("%s: the error %q does not name the entity and its component", name, err)
+		}
+		if name == "mistyped ref value" && !strings.Contains(err.Error(), `refs "text": ref 4294967296`) {
+			t.Fatalf("%s: the error %q does not name the ref", name, err)
 		}
 		if after := o.save(t); after != before {
 			t.Fatalf("%s: a failed load changed the world from\n%s\nto\n%s", name, before, after)
 		}
+	}
+}
+
+func TestLoadPastTheRangeFails(t *testing.T) {
+	type cramped [1]uint64
+	var w World[cramped]
+	var texts Refs[cramped, string]
+	spawn(t, func(c *kernel.Configurator) {
+		RegisterWorld[cramped](c, WorldOptions{LastIndex: 1})
+		RegisterRefs[cramped, string](c, "text", RefsOptions{LastIndex: 1})
+		w = declare[World[cramped]](c)
+		texts = declare[Refs[cramped, string]](c)
+	})
+	w.Spawn()
+	texts.New("kept")
+	var before bytes.Buffer
+	if err := w.Save(&before); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"entities": `{"entities": [{"entity": 4294967296}, {"entity": 4294967297}]}`,
+		"refs":     `{"refs": {"text": [{"ref": 4294967296, "value": "a"}, {"ref": 4294967297, "value": "b"}]}}`,
+	}
+	for name, file := range files {
+		err := w.Load(nil, strings.NewReader(file))
+		if err == nil || !strings.Contains(err.Error(), "do not fit the allocation range past index 1") {
+			t.Fatalf("%s: loading two into one free index answered %v", name, err)
+		}
+		var after bytes.Buffer
+		if err := w.Save(&after); err != nil {
+			t.Fatal(err)
+		}
+		if after.String() != before.String() {
+			t.Fatalf("%s: a failed load changed the world from\n%s\nto\n%s", name, before.String(), after.String())
+		}
+	}
+	if err := w.Load(nil, strings.NewReader(`{"refs": {"text": [{"ref": 4294967296, "value": "a"}]}, "entities": [{"entity": 4294967296}]}`)); err != nil {
+		t.Fatalf("loading one into one free index failed: %v", err)
 	}
 }
 

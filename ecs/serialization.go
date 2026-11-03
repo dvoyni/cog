@@ -65,28 +65,18 @@ func (w World[W]) Save(writer io.Writer) error {
 			trees[i] = makeFieldTree(s.component.Fields)
 		}
 	}
-	for p, page := range world.entities.slots.pages {
-		if page == nil {
-			continue
-		}
-		for i := range page {
-			slot := &page[i]
-			if slot.liveGeneration == 0 {
-				continue
+	for e, slot := range world.entities.live() {
+		save.token(jsontext.BeginObject)
+		save.token(jsontext.String("entity"))
+		save.token(jsontext.Uint(SerializeEntity(e)))
+		for id := range maskIDs(&slot.componentMask) {
+			if tree := trees[id]; tree != nil {
+				s := world.stores[id]
+				save.token(jsontext.String(string(s.component.Name)))
+				save.fields(tree, s.get(e))
 			}
-			e := makeEntity(uint32(p<<indexPageShift|i), slot.liveGeneration)
-			save.token(jsontext.BeginObject)
-			save.token(jsontext.String("entity"))
-			save.token(jsontext.Uint(SerializeEntity(e)))
-			for id := range maskIDs(&slot.componentMask) {
-				if tree := trees[id]; tree != nil {
-					s := world.stores[id]
-					save.token(jsontext.String(string(s.component.Name)))
-					save.fields(tree, s.get(e))
-				}
-			}
-			save.token(jsontext.EndObject)
 		}
+		save.token(jsontext.EndObject)
 	}
 	save.token(jsontext.EndArray)
 	save.token(jsontext.EndObject)
@@ -94,19 +84,19 @@ func (w World[W]) Save(writer io.Writer) error {
 }
 
 // Load adds the entities and refs of a save read from reader to the world.
-// Saved entities take fresh indices past every index in use, keeping their
-// order, spacing and generations, and indices between them go on the free
-// list; plain refs do the same. A keyed ref takes the ref its key has in the
-// world, if any, keeping that value. Every Entity and Ref field is remapped
-// to match, and one naming nothing in the save becomes NoEntity or the zero
-// Ref.
+// Saved entities take the next fresh indices, one after another in the
+// order the save lists them, keeping their generations; refs do the same. A
+// keyed ref takes the ref its key has in the world, if any, keeping that
+// value, or the ref of an earlier saved ref of its key, and then takes no
+// index. Every Entity and Ref field is remapped to match, and one naming
+// nothing in the save becomes NoEntity or the zero Ref.
 //
 // Fields the save has and the components lack are ignored, and fields it
 // lacks are zero. A component or refs name the world does not know is
-// warned of through logger and skipped. Load fails, changing nothing, on
+// warned of through logger, unless it is nil, and skipped. Load fails, changing nothing, on
 // malformed JSON, a value of the wrong type, an entity or ref without a
-// handle or with generation 0, two at one index, or saved indices that do
-// not fit the allocation range.
+// handle or with generation 0, two at one index, or more than the
+// allocation range has fresh indices for.
 func (w World[W]) Load(logger *kernel.Logger, reader io.Reader) error {
 	load := &worldLoad[W]{
 		world:       w.world,
@@ -159,12 +149,15 @@ type serializedRefs interface {
 	info() RefInfo
 	// save writes the refs as a member of the save's refs object.
 	save(save *saveWriter)
-	// prepareLoad takes the indices load's saved refs load at, and fills its
-	// remap with their handles there.
+	// prepareLoad checks load's saved handles and settles the refs'
+	// reservations.
 	prepareLoad(load *refsLoad) error
-	// resolveKeys points the remap of each saved keyed ref whose key has a
-	// ref at that ref, so it is not stored. It does nothing for plain refs.
+	// resolveKeys finds the ref each saved keyed ref takes when its key has
+	// one, so it is not stored. It does nothing for plain refs.
 	resolveKeys(load *refsLoad, options json.Options) error
+	// placeLoad gives each stored saved ref the next fresh index, and fills
+	// load's remap.
+	placeLoad(load *refsLoad) error
 	// decodeLoad decodes the values of the saved refs that are stored.
 	decodeLoad(load *refsLoad, options json.Options) error
 	// applyLoad stores the decoded values.
@@ -188,11 +181,19 @@ type saveWriter struct {
 }
 
 // fieldNode is a component's fields as a tree, by path: a leaf is a field,
-// any other node a nested struct.
+// written as encoding/json/v2 writes it; an array of structs is an array of
+// its elements' trees, so their fields follow the component's rules; any
+// other node is a nested struct.
 type fieldNode struct {
-	name     string
-	field    *FieldInfo
-	children []*fieldNode
+	name string
+	leaf bool
+	// fieldType and offset are a leaf's or an array's: its type, and its
+	// offset from the start of the value it is in.
+	fieldType reflect.Type
+	offset    uintptr
+	children  []*fieldNode
+	// element is an array's element, with offsets from the element's start.
+	element *fieldNode
 }
 
 // worldLoad is a save being loaded into world W: what was read of it, and
@@ -210,9 +211,6 @@ type worldLoad[W WorldID] struct {
 	// refRemaps each saved ref, by value type, to the ref it loads as.
 	entityRemap map[uint64]Entity
 	refRemaps   map[reflect.Type]map[uint64]uint64
-	// firstIndex is the index the lowest saved entity loads at, and
-	// indexCount how many indices the saved entities span.
-	firstIndex, indexCount uint32
 	// warned holds the unknown names warned of.
 	warned map[string]bool
 }
@@ -237,12 +235,13 @@ type refsLoad struct {
 	saved []savedRef
 	// remap maps each saved ref to the ref it loads as.
 	remap map[uint64]uint64
-	// firstIndex is the index the lowest saved ref loads at, and indexCount
-	// how many indices the saved refs span.
-	firstIndex, indexCount uint32
-	// stored tells, for each saved ref, whether it is stored, not taking
-	// the ref its key has. values holds the decoded []T.
-	stored []bool
+	// indices holds the saved refs' indices, to find two at one.
+	indices map[uint32]bool
+	// refOf holds, for each saved ref, the saved ref whose ref it loads as:
+	// itself when it is stored, an earlier one of its key, or -1 for the
+	// world's ref of its key, already in remap.
+	refOf []int
+	// values holds the decoded []T.
 	values any
 }
 
@@ -290,8 +289,17 @@ func (s *saveWriter) fields(node *fieldNode, base unsafe.Pointer) {
 	if s.err != nil {
 		return
 	}
-	if node.field != nil {
-		s.err = json.MarshalEncode(s.encoder, reflect.NewAt(node.field.Type, unsafe.Add(base, node.field.Offset)).Interface(), s.options)
+	switch {
+	case node.element != nil:
+		base = unsafe.Add(base, node.offset)
+		s.token(jsontext.BeginArray)
+		for i := range node.fieldType.Len() {
+			s.fields(node.element, unsafe.Add(base, uintptr(i)*node.fieldType.Elem().Size()))
+		}
+		s.token(jsontext.EndArray)
+		return
+	case node.leaf:
+		s.err = json.MarshalEncode(s.encoder, reflect.NewAt(node.fieldType, unsafe.Add(base, node.offset)).Interface(), s.options)
 		return
 	}
 	s.token(jsontext.BeginObject)
@@ -317,9 +325,28 @@ func makeFieldTree(fields []FieldInfo) *fieldNode {
 				node = child
 			}
 		}
-		node.field = &fields[i]
+		node.fieldType = fields[i].Type
+		node.offset = fields[i].Offset
+		node.element = makeElementTree(fields[i].Type)
+		node.leaf = node.element == nil
 	}
 	return root
+}
+
+// makeElementTree makes the tree of an element of array type t, or answers
+// nil unless its elements hold structs, which a field tree writes.
+func makeElementTree(t reflect.Type) *fieldNode {
+	if t.Kind() != reflect.Array {
+		return nil
+	}
+	element := t.Elem()
+	if element.Kind() == reflect.Struct && !element.Implements(serializedRefType) {
+		return makeFieldTree(appendFields(nil, element, "", 0))
+	}
+	if inner := makeElementTree(element); inner != nil {
+		return &fieldNode{fieldType: element, element: inner}
+	}
+	return nil
 }
 
 // child answers the child of n named name, or nil.
@@ -342,76 +369,76 @@ func (r *refsResource[W, T]) info() RefInfo {
 func (r *refsResource[W, T]) save(save *saveWriter) {
 	save.token(jsontext.String(string(r.name)))
 	save.token(jsontext.BeginArray)
-	for p, page := range r.slots.pages {
-		if page == nil {
-			continue
+	for h, value := range r.all() {
+		save.token(jsontext.BeginObject)
+		save.token(jsontext.String("ref"))
+		save.token(jsontext.Uint(h.serialized()))
+		save.token(jsontext.String("value"))
+		if save.err == nil {
+			save.err = json.MarshalEncode(save.encoder, value, save.options)
 		}
-		for i := range page {
-			slot := &page[i]
-			if !slot.live {
-				continue
-			}
-			save.token(jsontext.BeginObject)
-			save.token(jsontext.String("ref"))
-			save.token(jsontext.Uint(Ref[T]{index: uint32(p<<indexPageShift | i), generation: slot.generation}.serialized()))
-			save.token(jsontext.String("value"))
-			if save.err == nil {
-				save.err = json.MarshalEncode(save.encoder, &slot.value, save.options)
-			}
-			save.token(jsontext.EndObject)
-		}
+		save.token(jsontext.EndObject)
 	}
 	save.token(jsontext.EndArray)
 }
 
-// prepareLoad takes fresh indices for load's saved refs, keeping their
-// spacing, and fills its remap with their handles there, keeping their
-// generations.
+// prepareLoad checks load's saved handles, settles the refs' reservations
+// and marks every saved ref stored.
 func (r *refsResource[W, T]) prepareLoad(load *refsLoad) error {
 	r.settleReservations()
-	handles := make([]uint64, len(load.saved))
+	load.refOf = make([]int, len(load.saved))
 	for i, saved := range load.saved {
-		handles[i] = saved.handle
-	}
-	lowest, first, count, err := spanOf(handles, r.nextFreshIndex, r.lastIndex)
-	if err != nil {
-		return fmt.Errorf("refs %q: %w", r.name, err)
-	}
-	load.firstIndex = first
-	load.indexCount = count
-	for _, h := range handles {
-		load.remap[h] = Ref[T]{index: first + uint32(h) - lowest, generation: uint32(h >> 32)}.serialized()
-	}
-	load.stored = make([]bool, len(load.saved))
-	for i := range load.stored {
-		load.stored[i] = true
+		load.refOf[i] = i
+		if err := checkHandle(load.indices, saved.handle); err != nil {
+			return fmt.Errorf("refs %q: %w", r.name, err)
+		}
 	}
 	return nil
 }
 
-// resolveKeys points the remap of each saved keyed ref whose key has a ref
-// in the world, or in an earlier saved ref, at that ref, and marks it not
-// stored.
+// resolveKeys finds, for each saved keyed ref whose key has a ref in the
+// world or in an earlier saved ref, the ref it takes, and marks it not
+// stored. A key is read from its value before any ref is placed, so a key
+// holding a Ref reads it as zero.
 func (r *refsResource[W, T]) resolveKeys(load *refsLoad, options json.Options) error {
 	keys, ok := r.keys.(loadedKeys[T])
 	if !ok {
 		return nil
 	}
-	saved := map[any]uint64{}
+	firstOfKey := map[any]int{}
 	for i, s := range load.saved {
 		var value T
 		if err := json.Unmarshal(s.raw, &value, options); err != nil {
-			return fmt.Errorf("refs %q: %w", r.name, err)
+			return fmt.Errorf("refs %q: ref %d: %w", r.name, s.handle, err)
 		}
 		key := keys.keyOf(&value)
 		if h, ok := keys.find(key); ok {
 			load.remap[s.handle] = h.serialized()
-			load.stored[i] = false
-		} else if h, ok := saved[key]; ok {
-			load.remap[s.handle] = h
-			load.stored[i] = false
+			load.refOf[i] = -1
+		} else if first, ok := firstOfKey[key]; ok {
+			load.refOf[i] = first
 		} else {
-			saved[key] = load.remap[s.handle]
+			firstOfKey[key] = i
+		}
+	}
+	return nil
+}
+
+// placeLoad gives each stored saved ref the next fresh index, in the order
+// saved, keeping its generation, and points each saved ref taking an
+// earlier one's ref at it.
+func (r *refsResource[W, T]) placeLoad(load *refsLoad) error {
+	next := r.nextFreshIndex
+	for i, s := range load.saved {
+		switch first := load.refOf[i]; {
+		case first == i:
+			if next > int64(r.lastIndex) {
+				return fmt.Errorf("refs %q: %d refs do not fit the allocation range past index %d", r.name, len(load.saved), r.nextFreshIndex)
+			}
+			load.remap[s.handle] = Ref[T]{index: uint32(next), generation: uint32(s.handle >> 32)}.serialized()
+			next++
+		case first >= 0:
+			load.remap[s.handle] = load.remap[load.saved[first].handle]
 		}
 	}
 	return nil
@@ -421,25 +448,24 @@ func (r *refsResource[W, T]) resolveKeys(load *refsLoad, options json.Options) e
 func (r *refsResource[W, T]) decodeLoad(load *refsLoad, options json.Options) error {
 	values := make([]T, len(load.saved))
 	for i, s := range load.saved {
-		if !load.stored[i] {
+		if load.refOf[i] != i {
 			continue
 		}
 		if err := json.Unmarshal(s.raw, &values[i], options); err != nil {
-			return fmt.Errorf("refs %q: %w", r.name, err)
+			return fmt.Errorf("refs %q: ref %d: %w", r.name, s.handle, err)
 		}
 	}
 	load.values = values
 	return nil
 }
 
-// applyLoad stores load's decoded refs at their indices, puts the indices
-// between them on the free list and moves nextFreshIndex past them.
+// applyLoad stores load's decoded refs at their indices and moves
+// nextFreshIndex past them.
 func (r *refsResource[W, T]) applyLoad(load *refsLoad) {
 	values := load.values.([]T)
 	keys, _ := r.keys.(loadedKeys[T])
-	used := make([]bool, load.indexCount)
 	for i, s := range load.saved {
-		if !load.stored[i] {
+		if load.refOf[i] != i {
 			continue
 		}
 		var h Ref[T]
@@ -448,14 +474,8 @@ func (r *refsResource[W, T]) applyLoad(load *refsLoad) {
 		if keys != nil {
 			keys.set(keys.keyOf(&values[i]), h)
 		}
-		used[h.index-load.firstIndex] = true
+		r.nextFreshIndex = int64(h.index) + 1
 	}
-	for i, isUsed := range used {
-		if !isUsed {
-			r.freeRefs.Append(Ref[T]{index: load.firstIndex + uint32(i), generation: 1})
-		}
-	}
-	r.nextFreshIndex = int64(load.firstIndex) + int64(load.indexCount)
 }
 
 // read reads a save, keeping each entity's and ref's JSON for decode.
@@ -504,7 +524,7 @@ func (l *worldLoad[W]) readRefs(decoder *jsontext.Decoder) error {
 		}
 		load := l.loadsByRefs[refs]
 		if load == nil {
-			load = &refsLoad{refs: refs, remap: map[uint64]uint64{}}
+			load = &refsLoad{refs: refs, remap: map[uint64]uint64{}, indices: map[uint32]bool{}}
 			l.loadsByRefs[refs] = load
 			l.refs = append(l.refs, load)
 			l.refRemaps[refs.info().Type] = load.remap
@@ -587,6 +607,9 @@ func (l *worldLoad[W]) warn(kind, name string) {
 		return
 	}
 	l.warned[kind+" "+name] = true
+	if l.logger == nil {
+		return
+	}
 	l.logger.LogWarn("ecs: load skips a "+kind+" the world does not have", "world", reflect.TypeFor[W](), kind, name)
 }
 
@@ -595,18 +618,15 @@ func (l *worldLoad[W]) warn(kind, name string) {
 func (l *worldLoad[W]) decode() error {
 	table := &l.world.entities
 	table.settleReservations(false)
-	handles := make([]uint64, len(l.entities))
+	if int64(len(l.entities)) > int64(table.lastIndex)+1-table.nextFreshIndex {
+		return fmt.Errorf("entities: %d entities do not fit the allocation range past index %d", len(l.entities), table.nextFreshIndex)
+	}
+	indices := make(map[uint32]bool, len(l.entities))
 	for i, saved := range l.entities {
-		handles[i] = saved.handle
-	}
-	lowest, first, count, err := spanOf(handles, table.nextFreshIndex, table.lastIndex)
-	if err != nil {
-		return fmt.Errorf("entities: %w", err)
-	}
-	l.firstIndex = first
-	l.indexCount = count
-	for _, h := range handles {
-		l.entityRemap[h] = makeEntity(first+uint32(h)-lowest, uint32(h>>32))
+		if err := checkHandle(indices, saved.handle); err != nil {
+			return fmt.Errorf("entities: %w", err)
+		}
+		l.entityRemap[saved.handle] = makeEntity(uint32(table.nextFreshIndex)+uint32(i), uint32(saved.handle>>32))
 	}
 	for _, load := range l.refs {
 		if err := load.refs.prepareLoad(load); err != nil {
@@ -615,6 +635,11 @@ func (l *worldLoad[W]) decode() error {
 	}
 	for _, load := range l.refs {
 		if err := load.refs.resolveKeys(load, l.options); err != nil {
+			return err
+		}
+	}
+	for _, load := range l.refs {
+		if err := load.refs.placeLoad(load); err != nil {
 			return err
 		}
 	}
@@ -634,7 +659,7 @@ func (l *worldLoad[W]) decode() error {
 			saved.value = reflect.New(saved.store.component.Type).UnsafePointer()
 			decoder := jsontext.NewDecoder(bytes.NewReader(saved.raw))
 			if err := l.fields(decoder, trees[id], saved.value); err != nil {
-				return fmt.Errorf("component %q: %w", saved.store.component.Name, err)
+				return fmt.Errorf("entity %d: component %q: %w", l.entities[i].handle, saved.store.component.Name, err)
 			}
 		}
 	}
@@ -642,10 +667,29 @@ func (l *worldLoad[W]) decode() error {
 }
 
 // fields decodes the fields of node into the value at base. Members naming
-// no field are skipped.
+// no field, and elements past an array's length, are skipped.
 func (l *worldLoad[W]) fields(decoder *jsontext.Decoder, node *fieldNode, base unsafe.Pointer) error {
-	if node.field != nil {
-		return json.UnmarshalDecode(decoder, reflect.NewAt(node.field.Type, unsafe.Add(base, node.field.Offset)).Interface(), l.options)
+	switch {
+	case node.element != nil:
+		if err := readBegin(decoder, jsontext.KindBeginArray); err != nil {
+			return err
+		}
+		base = unsafe.Add(base, node.offset)
+		for i := 0; decoder.PeekKind() != jsontext.KindEndArray; i++ {
+			var err error
+			if i < node.fieldType.Len() {
+				err = l.fields(decoder, node.element, unsafe.Add(base, uintptr(i)*node.fieldType.Elem().Size()))
+			} else {
+				err = decoder.SkipValue()
+			}
+			if err != nil {
+				return err
+			}
+		}
+		_, err := decoder.ReadToken()
+		return err
+	case node.leaf:
+		return json.UnmarshalDecode(decoder, reflect.NewAt(node.fieldType, unsafe.Add(base, node.offset)).Interface(), l.options)
 	}
 	return readMembers(decoder, func(member string) error {
 		child := node.child(member)
@@ -660,55 +704,31 @@ func (l *worldLoad[W]) fields(decoder *jsontext.Decoder, node *fieldNode, base u
 // the decoded refs.
 func (l *worldLoad[W]) apply() {
 	table := &l.world.entities
-	used := make([]bool, l.indexCount)
 	for _, saved := range l.entities {
 		e := l.entityRemap[saved.handle]
 		table.setAlive(e)
-		used[e.index()-l.firstIndex] = true
 		for _, component := range saved.components {
 			s := component.store
 			copy(unsafe.Slice((*byte)(l.world.put(e, s)), s.component.Size), unsafe.Slice((*byte)(component.value), s.component.Size))
 		}
 	}
-	for i, isUsed := range used {
-		if !isUsed {
-			table.freeEntities.Append(makeEntity(l.firstIndex+uint32(i), 1))
-		}
-	}
-	if l.indexCount > 0 {
-		table.nextFreshIndex = int64(l.firstIndex) + int64(l.indexCount)
-	}
+	table.nextFreshIndex += int64(len(l.entities))
 	for _, load := range l.refs {
 		load.refs.applyLoad(load)
 	}
 }
 
-// spanOf answers the lowest index of handles, the fresh index it loads at,
-// nextFreshIndex, and how many indices they span. It fails for a generation
-// of 0, two handles at one index, or a span past lastIndex.
-func spanOf(handles []uint64, nextFreshIndex int64, lastIndex uint32) (lowest, first, count uint32, err error) {
-	if len(handles) == 0 {
-		return 0, 0, 0, nil
+// checkHandle fails for saved handle h of generation 0, or at an index in
+// indices, the indices of the handles checked before it, and adds its index.
+func checkHandle(indices map[uint32]bool, h uint64) error {
+	if h>>32 == 0 {
+		return fmt.Errorf("handle %#x has generation 0", h)
 	}
-	lowest = uint32(handles[0])
-	highest := lowest
-	indices := make(map[uint32]bool, len(handles))
-	for _, h := range handles {
-		index := uint32(h)
-		if h>>32 == 0 {
-			return 0, 0, 0, fmt.Errorf("handle %#x has generation 0", h)
-		}
-		if indices[index] {
-			return 0, 0, 0, fmt.Errorf("two handles at index %d", index)
-		}
-		indices[index] = true
-		lowest = min(lowest, index)
-		highest = max(highest, index)
+	if indices[uint32(h)] {
+		return fmt.Errorf("two handles at index %d", uint32(h))
 	}
-	if nextFreshIndex+int64(highest-lowest) > int64(lastIndex) {
-		return 0, 0, 0, fmt.Errorf("%d indices do not fit the allocation range past index %d", int64(highest-lowest)+1, nextFreshIndex)
-	}
-	return lowest, uint32(nextFreshIndex), highest - lowest + 1, nil
+	indices[uint32(h)] = true
+	return nil
 }
 
 // readBegin reads the token beginning an object or array, of kind.

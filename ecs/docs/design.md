@@ -33,22 +33,23 @@ Kernel
        ├─ storeResource[Game, Position]   resource per component type
        ├─ storeResource[Game, Velocity]
        ├─ refsResource[Game, Text]        resource per ref payload type
-       └─ commandBuffer[Game, AiCmds]   resource, registered by the user
+       └─ commandRecorder[Game, AiCmds] resource, registered by the user
 ```
 
 | Type | Role |
 |---|---|
 | `WorldID` | Constraint over world IDs: `~[1]uint64 \| ~[2]uint64 \| ~[4]uint64 \| ~[8]uint64`. |
-| `World[W]` | The barrier: write on the world. Spawn, despawn, `CreateAt`, type-erased row access, `Shrink`. |
-| `WorldLookup[W]` | Reads the world: `Alive`, and the component registry. No component. |
+| `World[W]` | The barrier: write on the world. Spawn, despawn, `CreateAt`, type-erased row access, `Shrink`, `Save`, `Load`. |
+| `WorldLookup[W]` | Reads the world: `Alive`, and the `Schema`. No component. |
 | `Store[W, T]` | Writes `T`'s store by entity: `Get` a pointer to read, `Write` a pointer marked changed, `Add`, `Remove`. |
 | `Lookup[W, T]` | Reads `T`'s store by entity: `Has`, and `Get` a copy. |
+| `Query0[W]` | Walks every live entity, in index order. Reads the world alone. |
 | `Query1[W, A]` … `Query8[W, ...]` | Walks the entities holding every term, yielding each entity and its row. `*T` writes, `T` reads a copy, `Optional[T]` and `Optional[*T]` match with or without one. |
 | `DeltaQuery1[W, A]` … `DeltaQuery8[W, ...]` | Walks the entities with a delta in a term this observation window, among those that have or had every term, yielding each entity and its row: values now, as of the reset, and deltas. Observes each term's store. |
-| `Refs[W, T]` | Writes the refs holding `T`: `New`, `NewAt`, `Get` a pointer, `Set`, `Alive`, `Release`. |
-| `RefsLookup[W, T]` | Reads the refs holding `T`: `Get` a pointer, to read only, and `Alive`. |
-| `KeyedRefs[W, K, T]` | Writes refs found by their value's key, one per key: `Put`, `PutAt`, `Update`, `Find`, `Get`, `Alive`, `Release`, `ReleaseKey`. |
-| `KeyedRefsLookup[W, K, T]` | Reads keyed refs: `Find`, `Get` and `Alive`. |
+| `Refs[W, T]` | Writes the refs holding `T`: `New`, `NewAt`, `Get` a pointer, `Set`, `Alive`, `Release`, `All`. |
+| `RefsLookup[W, T]` | Reads the refs holding `T`: `Get` a pointer, to read only, `Alive` and `All`. |
+| `KeyedRefs[W, K, T]` | Writes refs found by their value's key, one per key: `Put`, `PutAt`, `Update`, `Find`, `Get`, `Alive`, `Release`, `ReleaseKey`, `All`. |
+| `KeyedRefsLookup[W, K, T]` | Reads keyed refs: `Find`, `Get`, `Alive` and `All`. |
 | `DeltaRefs[W, T]` | Walks the refs of `T`, plain or keyed, with a delta this observation window: added, changed or released, with the value. Observes them. |
 | `CommandBuffer[W, Tag]` | Records into the command buffer `Tag` of world `W`, holding a read on it. |
 | `CommandSink[W, Tag]` | Applies that buffer to its world: the write on the buffer and the barrier. |
@@ -191,7 +192,7 @@ Kernel
 
 - **Every handle of a world declares a read on it,** besides its own locks.
   `WorldLookup[W]` takes that read alone, for alive checks and the
-  component registry; reservations are on `CommandBuffer`. A world read
+  schema; reservations are on `CommandBuffer`. A world read
   shuts out only the barrier: store writers run beside it and set mask bits,
   so it reaches neither a store nor a mask.
 - **`World[W]` is the write.** A system taking it is the barrier: nothing
@@ -286,6 +287,11 @@ c.move = configurator.RegisterTask2(move)
 
 ## Queries
 
+- **`Query0[W]` walks every live entity,** in index order, yielding only
+  the entity. It reads the world alone, so it reaches no component; a
+  `Lookup` or a `Store` beside it does. A system taking `World` too holds
+  the world's write, which supersedes the read, and may despawn the entity
+  it is at: slots never move, so clearing a level is one walk.
 - **`Query1` … `Query8`, terms by type.** A pointer term `*T` writes `T` and
   yields the row's address; a value term `T` reads `T` and yields a copy, so
   a read cannot write through. The mode is read from the term type by
@@ -498,6 +504,9 @@ in a ref:
   a live handle from a dead one. **`RefsLookup[W, T]` reads:** `Get(h)`
   returns a `*T` that must only be read, and `Alive(h)`. Several lookups
   run in parallel.
+- **`All()` walks every live ref,** on each of the four handles, in index
+  order, yielding its handle and value: for tools, and for releasing every
+  ref of a level. Releasing during the walk moves no other ref.
 - **`Set` is the change.** Writing through a `*T` from `Get` is not one.
 - **A released handle reads as nothing.** `Get` returns nil for the zero
   handle and for a released one, and `Alive` false. Generations start at 1,
@@ -525,8 +534,10 @@ in a ref:
   `Get(h)`, `Alive(h)`, `Release(h)` and `ReleaseKey(k)`, which free the key
   with the ref, so a later `Put` makes a new one. `PutAt(h, v)` places a
   mirrored ref and its key. There is no `Set`: a value with another key
-  would move the ref to it. **`KeyedRefsLookup[W, K, T]`** reads: `Find`,
-  `Get`, `Alive`.
+  would move the ref to it. For the same reason a value's key must not
+  change through the `*T` from `Get`: the ref stays found by its old key,
+  and a release frees the new one. **`KeyedRefsLookup[W, K, T]`** reads:
+  `Find`, `Get`, `Alive`, `All`.
 - **One kind per type.** Refs of one `T` in one world are plain or keyed,
   never both: registering both panics, and so does declaring `Refs` or
   `CommandRefs` of keyed refs, or a keyed handle of plain ones.
@@ -555,8 +566,9 @@ in a ref:
   Refs nobody observes keep no state, and free a slot at once.
 - **The listing.** Observed refs list the refs whose slots changed this
   window, once each, so `DeltaRefs` and the reset cost per change. Past an
-  eighth of the live refs the listing stops, and they visit every slot, as
-  stores do.
+  eighth of the live refs the listing stops, and they visit every slot on a
+  page that exists, as stores visit every row, so refs far from index 0 cost
+  only their pages.
 
 ### Refs through a command buffer
 
@@ -593,6 +605,11 @@ by hand:
 
   It is entity-major, so an entity reads and diffs as one piece; a tag is
   `{}`. It is indented, and map values in refs are sorted.
+- **Fields by the schema's rules.** A component is written field by field,
+  by Go name, its markers and unexported fields left out; an array of
+  structs is an array of its elements, written by the same rules. Any other
+  field is marshaled by `encoding/json/v2` whole, so a `json` tag means
+  nothing to a component's own fields or its elements'.
 - **Transient is left out.** A component embedding `Transient`, or refs
   registered with `RefsOptions.Transient`, are not saved: caches, state that
   lives a frame.
@@ -601,24 +618,29 @@ by hand:
   through per-call marshalers of `encoding/json/v2`. Ref values are
   marshaled by it whole, so any `T` it handles saves.
 - **`World.Load(logger, reader)` adds a save to the world.** Saved entities
-  take fresh indices past every index in use, keeping their order, spacing
-  and generations; the indices between them go on the free list. Plain refs
-  do the same. A saved keyed ref whose key has a ref in the world, or in an
-  earlier saved ref, takes that ref, and the world's value is kept. Every
+  take the next fresh indices, one after another in the order the save
+  lists them, keeping their generations, so a save's gaps, and indices far
+  apart, cost nothing. `Save` lists them in index order, so their order is
+  kept too; a file edited out of order loads in its own. Refs do the same. A
+  saved keyed ref whose key has a ref in the world, or in an earlier saved
+  ref, takes that ref and no index, and the world's value is kept. Every
   `Entity` and `Ref` field is remapped to match; one naming nothing in the
   save, a dead entity or a released ref, loads as `NoEntity` or the zero
   `Ref`.
 - **Load forgives drift.** Fields the save has and the component lacks are
   ignored, fields it lacks are zero, and so are unexported fields, which are
-  never saved. A component or refs name the world does not know is warned of
-  once through the logger and skipped, and top-level members other than
+  never saved; so are elements past an array's length, and those it lacks.
+  A component or refs name the world does not know is warned of once through
+  the logger, if one is given, and skipped, and top-level members other than
   `refs` and `entities` are ignored. A change beyond that is the user's to
   patch in the JSON.
 - **Load fails whole.** It reads and decodes everything before changing the
-  world, so malformed JSON, a value of the wrong type, a missing handle or
-  saved indices past the allocation range return an error and leave the
-  world as it was. Only reservations are settled: one never committed loses
-  its index, as a despawn outside a window does.
+  world, so malformed JSON, a value of the wrong type, a missing handle, two
+  handles at one index, or more saved than the allocation range has fresh
+  indices for return an error and leave the world as it was. An error in a
+  value names its saved entity and component, or its refs and saved ref,
+  with the offset in that value's JSON. Only reservations are settled: one
+  never committed loses its index, as a despawn outside a window does.
 - **Observers see a load as adds,** of every loaded component and ref.
 
 ## Fit for networking
@@ -713,7 +735,6 @@ exists:
   delta query panics at registration.
 - **A warning for a forgotten reset.** A world never reset does no harm, and
   catching resets that stopped needs a size check on the remove path.
-
 - **Migrations and a saved schema.** A save holds no schema nor version,
   and load takes no migrator: fields are matched by name, and a component
   renamed, split or retyped is patched in the JSON by whoever changed it.
