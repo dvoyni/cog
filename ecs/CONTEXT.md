@@ -32,6 +32,17 @@ An entity taken from the world for a later spawn. It is not alive until a commit
 A pointer-free value type attached to entities. Each component type has one store per world.
 _Avoid_: Property, field, attribute
 
+**Component name**:
+The name a component type is known by in its world, which saves use. It stays when the Go type is renamed or moved.
+
+**Marker**:
+An empty struct embedded in a component to say what it is rather than what it holds, such as transient or replicated.
+_Avoid_: Tag, attribute, annotation
+
+**Schema**:
+What a world holds, described without its types: each component's name, markers and fields, and each refs' name.
+_Avoid_: Reflection, metadata
+
 **Store**:
 All values of one component type in one world, and the unit a system locks.
 _Avoid_: Pool, table, column, archetype
@@ -47,6 +58,15 @@ _Avoid_: Arena, heap, blob store
 **Keyed refs**:
 Refs found by a key their values give, at most one per key, such as meshes by asset path or texts by themselves. Putting a value returns the ref of its key, or makes one.
 _Avoid_: Interned refs, auto refs, cache
+
+## Saves
+
+**Save**:
+A world's entities, their components and its refs, written as JSON. Loading a save adds them to a world, under new indices.
+_Avoid_: Snapshot, dump
+
+**Transient**:
+A component or refs left out of saves.
 
 ## Systems
 

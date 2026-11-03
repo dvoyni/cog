@@ -22,6 +22,9 @@ func (t Text) Key() Text {
 	return t
 }
 
+// keyMap is the refs of each key of keyed refs.
+type keyMap[K comparable, T Keyed[K]] map[K]Ref[T]
+
 // KeyedRefs writes world W's refs holding T, each found by its value's key:
 // there is at most one ref per key. It holds the write on them and a read on
 // the world.
@@ -37,15 +40,15 @@ type KeyedRefsLookup[W WorldID, K comparable, T Keyed[K]] struct {
 	keys map[K]Ref[T]
 }
 
-// RegisterKeyedRefs registers world W's refs holding T, found by key K, a
-// kernel resource of their own. It is called in a plugin's Init, after W is
-// registered.
+// RegisterKeyedRefs registers world W's refs holding T under name, found by
+// key K, a kernel resource of their own. It is called in a plugin's Init,
+// after W is registered.
 //
 // It is a composition error, and panics, for W not to be registered, for
-// refs of T to be registered in W twice, plain or keyed, or for the
+// refs of T or name to be registered in W twice, plain or keyed, or for the
 // allocation range to be empty.
-func RegisterKeyedRefs[W WorldID, K comparable, T Keyed[K]](configurator *kernel.Configurator, options RefsOptions) {
-	registerRefs[W, T](configurator, options).keys = map[K]Ref[T]{}
+func RegisterKeyedRefs[W WorldID, K comparable, T Keyed[K]](configurator *kernel.Configurator, name RefName, options RefsOptions) {
+	registerRefs[W, T](configurator, name, options).keys = keyMap[K, T]{}
 }
 
 // Declare declares the write on W's keyed refs of T and a read on world W.
@@ -150,8 +153,8 @@ func (l KeyedRefsLookup[W, K, T]) Alive(h Ref[T]) bool {
 }
 
 // keysOf answers the key map of refs, panicking if they are not keyed by K.
-func keysOf[W WorldID, K comparable, T any](refs *refsResource[W, T]) map[K]Ref[T] {
-	keys, ok := refs.keys.(map[K]Ref[T])
+func keysOf[W WorldID, K comparable, T Keyed[K]](refs *refsResource[W, T]) map[K]Ref[T] {
+	keys, ok := refs.keys.(keyMap[K, T])
 	if !ok {
 		panic(fmt.Sprintf("ecs: refs of %v in world %v are not keyed by %v", reflect.TypeFor[T](), reflect.TypeFor[W](), reflect.TypeFor[K]()))
 	}

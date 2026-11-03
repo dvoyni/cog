@@ -36,9 +36,9 @@ type refsWorld struct {
 func spawnRefs(t testing.TB) *refsWorld {
 	o := &refsWorld{}
 	spawn(t, func(c *kernel.Configurator) {
-		RegisterComponent[game, named](c)
-		RegisterRefs[game, string](c, RefsOptions{LastIndex: 1<<20 - 1})
-		RegisterKeyedRefs[game, string, mesh](c, RefsOptions{LastIndex: 1<<20 - 1})
+		RegisterComponent[game, named](c, "named")
+		RegisterRefs[game, string](c, "string", RefsOptions{LastIndex: 1<<20 - 1})
+		RegisterKeyedRefs[game, string, mesh](c, "mesh", RefsOptions{LastIndex: 1<<20 - 1})
 		o.world = declare[World[game]](c)
 		o.store = declare[Store[game, named]](c)
 		o.deltas = declare[DeltaQuery1[game, named]](c)
@@ -304,8 +304,8 @@ func TestRefsPlacedAtLieOutsideTheRange(t *testing.T) {
 	var meshes KeyedRefs[game, string, mesh]
 	var w World[game]
 	spawn(t, func(c *kernel.Configurator) {
-		RegisterRefs[game, string](c, RefsOptions{FirstIndex: 10, LastIndex: 11})
-		RegisterKeyedRefs[game, string, mesh](c, RefsOptions{FirstIndex: 10, LastIndex: 11})
+		RegisterRefs[game, string](c, "string", RefsOptions{FirstIndex: 10, LastIndex: 11})
+		RegisterKeyedRefs[game, string, mesh](c, "mesh", RefsOptions{FirstIndex: 10, LastIndex: 11})
 		declare[DeltaRefs[game, string]](c)
 		w = declare[World[game]](c)
 		refs = declare[Refs[game, string]](c)
@@ -409,35 +409,37 @@ func TestKeyedRefsAllocateNothingOnceGrown(t *testing.T) {
 func TestRegisterRefsCompositionErrors(t *testing.T) {
 	type unregistered [1]uint64
 	expectPanic(t, "not registered", func() {
-		spawn(t, func(c *kernel.Configurator) { RegisterRefs[unregistered, string](c, RefsOptions{}) })
+		spawn(t, func(c *kernel.Configurator) { RegisterRefs[unregistered, string](c, "string", RefsOptions{}) })
 	})
 	expectPanic(t, "twice", func() {
 		spawn(t, func(c *kernel.Configurator) {
-			RegisterRefs[game, string](c, RefsOptions{})
-			RegisterRefs[game, string](c, RefsOptions{})
+			RegisterRefs[game, string](c, "string", RefsOptions{})
+			RegisterRefs[game, string](c, "string", RefsOptions{})
 		})
 	})
 	expectPanic(t, "twice", func() {
 		spawn(t, func(c *kernel.Configurator) {
-			RegisterRefs[game, mesh](c, RefsOptions{})
-			RegisterKeyedRefs[game, string, mesh](c, RefsOptions{})
+			RegisterRefs[game, mesh](c, "mesh", RefsOptions{})
+			RegisterKeyedRefs[game, string, mesh](c, "mesh", RefsOptions{})
 		})
 	})
 	expectPanic(t, "empty allocation range", func() {
-		spawn(t, func(c *kernel.Configurator) { RegisterRefs[game, string](c, RefsOptions{FirstIndex: 5, LastIndex: 4}) })
+		spawn(t, func(c *kernel.Configurator) {
+			RegisterRefs[game, string](c, "string", RefsOptions{FirstIndex: 5, LastIndex: 4})
+		})
 	})
 	expectPanic(t, "not initialized", func() {
 		spawn(t, func(c *kernel.Configurator) { declare[Refs[game, string]](c) })
 	})
 	expectPanic(t, "KeyedRefs writes them", func() {
 		spawn(t, func(c *kernel.Configurator) {
-			RegisterKeyedRefs[game, string, mesh](c, RefsOptions{})
+			RegisterKeyedRefs[game, string, mesh](c, "mesh", RefsOptions{})
 			declare[Refs[game, mesh]](c)
 		})
 	})
 	expectPanic(t, "not keyed", func() {
 		spawn(t, func(c *kernel.Configurator) {
-			RegisterRefs[game, mesh](c, RefsOptions{})
+			RegisterRefs[game, mesh](c, "mesh", RefsOptions{})
 			declare[KeyedRefs[game, string, mesh]](c)
 		})
 	})

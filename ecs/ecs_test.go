@@ -51,8 +51,14 @@ func spawn(t testing.TB, init func(c *kernel.Configurator)) *harness {
 
 // spawnWorkers is spawn with workers workers.
 func spawnWorkers(t testing.TB, workers int, init func(c *kernel.Configurator)) *harness {
+	return spawnLogged(t, workers, nil, init)
+}
+
+// spawnLogged is spawnWorkers whose supervisor logs to logHandler, or to the
+// standard logger if it is nil.
+func spawnLogged(t testing.TB, workers int, logHandler kernel.LogHandler, init func(c *kernel.Configurator)) *harness {
 	h := &harness{}
-	s := kernel.NewSupervisor(nil)
+	s := kernel.NewSupervisor(logHandler)
 	t.Cleanup(s.Quit)
 	id, err := s.Spawn(nil, workers, NewPlugin(), testPlugin{init: func(c *kernel.Configurator) {
 		RegisterWorld[game](c, WorldOptions{LastIndex: 1<<20 - 1, Entities: 64})

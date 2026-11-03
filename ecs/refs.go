@@ -35,6 +35,9 @@ type RefsOptions struct {
 	// ever placed with NewAt or PutAt. A LastIndex of 0 means the top of the
 	// 32-bit range.
 	FirstIndex, LastIndex uint32
+	// Transient leaves the refs out of saves, as Transient does a
+	// component.
+	Transient bool
 }
 
 // Refs writes world W's refs holding T. It holds the write on them and a
@@ -100,8 +103,12 @@ type refsResource[W WorldID, T any] struct {
 	// eighth of the live refs the listing stops and they visit every slot.
 	changedRefs           []Ref[T]
 	changedRefsOverflowed bool
-	// keys is the map[K]Ref[T] of keyed refs, nil for plain ones.
+	// keys is the keyMap[K, T] of keyed refs, nil for plain ones.
 	keys any
+	// name and transient are what RegisterRefs or RegisterKeyedRefs was
+	// given.
+	name      RefName
+	transient bool
 }
 
 // refSlot is one ref's value, generation and state.
@@ -134,16 +141,16 @@ type windowedRefs interface {
 	resetObservation()
 }
 
-// RegisterRefs registers world W's refs holding T, a kernel resource of
-// their own, so systems on refs of different types run in parallel. It is
-// called in a plugin's Init, after W is registered.
+// RegisterRefs registers world W's refs holding T under name, a kernel
+// resource of their own, so systems on refs of different types run in
+// parallel. It is called in a plugin's Init, after W is registered.
 //
 // It is a composition error, and panics, for W not to be registered, for
-// refs of T to be registered in W twice, plain or keyed, or for the
+// refs of T or name to be registered in W twice, plain or keyed, or for the
 // allocation range to be empty. Declaring refs that were never registered
 // panics too.
-func RegisterRefs[W WorldID, T any](configurator *kernel.Configurator, options RefsOptions) {
-	registerRefs[W, T](configurator, options)
+func RegisterRefs[W WorldID, T any](configurator *kernel.Configurator, name RefName, options RefsOptions) {
+	registerRefs[W, T](configurator, name, options)
 }
 
 // Declare declares the write on W's refs of T and a read on world W. It is a
@@ -272,10 +279,13 @@ func (d DeltaRefs[W, T]) All() iter.Seq2[Ref[T], RefDelta[T]] {
 
 // registerRefs registers world W's refs holding T, as RegisterRefs and
 // RegisterKeyedRefs do, and returns them.
-func registerRefs[W WorldID, T any](configurator *kernel.Configurator, options RefsOptions) *refsResource[W, T] {
+func registerRefs[W WorldID, T any](configurator *kernel.Configurator, name RefName, options RefsOptions) *refsResource[W, T] {
 	w := registeredWorld[W](configurator)
 	if _, ok := configurator.Resource[*refsResource[W, T]](); ok {
 		panic(fmt.Sprintf("ecs: refs of %v are registered in world %v twice", reflect.TypeFor[T](), reflect.TypeFor[W]()))
+	}
+	if _, ok := w.refsByName[name]; ok {
+		panic(fmt.Sprintf("ecs: refs name %q is registered in world %v twice", name, reflect.TypeFor[W]()))
 	}
 	last := options.LastIndex
 	if last == 0 {
@@ -284,9 +294,17 @@ func registerRefs[W WorldID, T any](configurator *kernel.Configurator, options R
 	if last < options.FirstIndex {
 		panic(fmt.Sprintf("ecs: refs of %v in world %v have an empty allocation range", reflect.TypeFor[T](), reflect.TypeFor[W]()))
 	}
-	refs := &refsResource[W, T]{firstIndex: options.FirstIndex, lastIndex: last, nextFreshIndex: int64(options.FirstIndex)}
+	refs := &refsResource[W, T]{
+		firstIndex:     options.FirstIndex,
+		lastIndex:      last,
+		nextFreshIndex: int64(options.FirstIndex),
+		name:           name,
+		transient:      options.Transient,
+	}
 	w.shrinkers = append(w.shrinkers, refs)
 	w.windowedRefs = append(w.windowedRefs, refs)
+	w.refs = append(w.refs, refs)
+	w.refsByName[name] = refs
 	configurator.InitResource(refs)
 	return refs
 }

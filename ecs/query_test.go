@@ -16,9 +16,9 @@ func queryWorld(t *testing.T, n int, declareQueries func(c *kernel.Configurator)
 	var velocities Store[game, velocity]
 	var tags Store[game, frozen]
 	h := spawn(t, func(c *kernel.Configurator) {
-		RegisterComponent[game, position](c)
-		RegisterComponent[game, velocity](c)
-		RegisterComponent[game, frozen](c)
+		RegisterComponent[game, position](c, "position")
+		RegisterComponent[game, velocity](c, "velocity")
+		RegisterComponent[game, frozen](c, "frozen")
 		w = declare[World[game]](c)
 		positions = declare[Store[game, position]](c)
 		velocities = declare[Store[game, velocity]](c)
@@ -114,9 +114,9 @@ func TestQueryMatchesAReferenceAcrossChunks(t *testing.T) {
 		var move Query3[game, *position, velocity, Without[frozen]]
 		var still Query2[game, *position, With[frozen]]
 		spawn(t, func(c *kernel.Configurator) {
-			RegisterComponent[game, position](c)
-			RegisterComponent[game, velocity](c)
-			RegisterComponent[game, frozen](c)
+			RegisterComponent[game, position](c, "position")
+			RegisterComponent[game, velocity](c, "velocity")
+			RegisterComponent[game, frozen](c, "frozen")
 			w = declare[World[game]](c)
 			positions = declare[Store[game, position]](c)
 			velocities = declare[Store[game, velocity]](c)
@@ -201,9 +201,9 @@ func TestQueryOptionalTermsMatchAReference(t *testing.T) {
 		var push Query3[game, position, Optional[*velocity], Optional[frozen]]
 		var peek Query2[game, With[position], Optional[velocity]]
 		spawn(t, func(c *kernel.Configurator) {
-			RegisterComponent[game, position](c)
-			RegisterComponent[game, velocity](c)
-			RegisterComponent[game, frozen](c)
+			RegisterComponent[game, position](c, "position")
+			RegisterComponent[game, velocity](c, "velocity")
+			RegisterComponent[game, frozen](c, "frozen")
 			w = declare[World[game]](c)
 			positions = declare[Store[game, position]](c)
 			velocities = declare[Store[game, velocity]](c)
@@ -401,14 +401,14 @@ func TestQueryCompositionErrors(t *testing.T) {
 	})
 	expectPanic(t, "Without and Optional terms only", func() {
 		spawn(t, func(c *kernel.Configurator) {
-			RegisterComponent[game, frozen](c)
+			RegisterComponent[game, frozen](c, "frozen")
 			declare[Query1[game, Without[frozen]]](c)
 		})
 	})
 	expectPanic(t, "Without and Optional terms only", func() {
 		spawn(t, func(c *kernel.Configurator) {
-			RegisterComponent[game, position](c)
-			RegisterComponent[game, frozen](c)
+			RegisterComponent[game, position](c, "position")
+			RegisterComponent[game, frozen](c, "frozen")
 			declare[Query2[game, Optional[*position], Without[frozen]]](c)
 		})
 	})

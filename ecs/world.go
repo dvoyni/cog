@@ -57,6 +57,13 @@ type worldResource[W WorldID] struct {
 	// windowedRefs holds the world's refs, which the observation reset
 	// reaches under the barrier as it does the stores.
 	windowedRefs []windowedRefs
+	// storesByName holds the stores by component name, and refsByName the
+	// refs by name, for loading a save.
+	storesByName map[ComponentName]*storeResource
+	refsByName   map[RefName]serializedRefs
+	// refs holds the world's refs in registration order, for the schema and
+	// saves.
+	refs []serializedRefs
 }
 
 // shrinker is a resource of a world that gives back the memory it holds past
@@ -87,7 +94,11 @@ func RegisterWorld[W WorldID](configurator *kernel.Configurator, options WorldOp
 	if last < options.FirstIndex {
 		panic(fmt.Sprintf("ecs: world %v has an empty allocation range", t))
 	}
-	w := &worldResource[W]{storesByType: map[reflect.Type]*storeResource{}}
+	w := &worldResource[W]{
+		storesByType: map[reflect.Type]*storeResource{},
+		storesByName: map[ComponentName]*storeResource{},
+		refsByName:   map[RefName]serializedRefs{},
+	}
 	w.entities.init(options.FirstIndex, last, options.Entities)
 	configurator.InitResource(w)
 	registry.worlds = append(registry.worlds, t)
@@ -201,16 +212,6 @@ func (w World[W]) CreateAtRaw(e Entity, mask W, values []byte) error {
 	return nil
 }
 
-// ComponentCount answers how many component types the world holds.
-func (w World[W]) ComponentCount() int {
-	return len(w.world.stores)
-}
-
-// Component describes component id, which must be below ComponentCount.
-func (w World[W]) Component(id ComponentID) ComponentInfo {
-	return w.world.stores[id].component
-}
-
 // ComponentMask answers the components e has, one bit per ComponentID, or
 // false if e is not alive.
 func (w World[W]) ComponentMask(e Entity) (W, bool) {
@@ -275,16 +276,6 @@ func (l WorldLookup[W]) Alive(e Entity) bool {
 // does.
 func (l WorldLookup[W]) ComponentID[T any]() ComponentID {
 	return l.world.storeOf(reflect.TypeFor[T]()).component.ID
-}
-
-// ComponentCount answers how many component types the world holds.
-func (l WorldLookup[W]) ComponentCount() int {
-	return len(l.world.stores)
-}
-
-// Component describes component id, which must be below ComponentCount.
-func (l WorldLookup[W]) Component(id ComponentID) ComponentInfo {
-	return l.world.stores[id].component
 }
 
 // despawn removes e and every component it has, and reports whether it was

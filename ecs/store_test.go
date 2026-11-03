@@ -12,7 +12,7 @@ func TestStoreAddGetRemoveSwapsLastRow(t *testing.T) {
 	var positions Store[game, position]
 	var lookup Lookup[game, position]
 	spawn(t, func(c *kernel.Configurator) {
-		RegisterComponent[game, position](c)
+		RegisterComponent[game, position](c, "position")
 		w = declare[World[game]](c)
 		positions = declare[Store[game, position]](c)
 		lookup = declare[Lookup[game, position]](c)
@@ -52,7 +52,7 @@ func TestStoreAllocatesNothingOnceGrown(t *testing.T) {
 	var w World[game]
 	var positions Store[game, position]
 	spawn(t, func(c *kernel.Configurator) {
-		RegisterComponent[game, position](c)
+		RegisterComponent[game, position](c, "position")
 		w = declare[World[game]](c)
 		positions = declare[Store[game, position]](c)
 	})
@@ -86,22 +86,22 @@ func TestRegisterComponentCompositionErrors(t *testing.T) {
 		}})
 	}
 	expectPanic(t, "not pointer-free", func() {
-		spawnWith(func(c *kernel.Configurator) { RegisterComponent[small, struct{ Name string }](c) })
+		spawnWith(func(c *kernel.Configurator) { RegisterComponent[small, struct{ Name string }](c, "named") })
 	})
 	expectPanic(t, "not registered", func() {
-		spawnWith(func(c *kernel.Configurator) { RegisterComponent[game, position](c) })
+		spawnWith(func(c *kernel.Configurator) { RegisterComponent[game, position](c, "position") })
 	})
 	expectPanic(t, "twice", func() {
 		spawnWith(func(c *kernel.Configurator) {
-			RegisterComponent[small, position](c)
-			RegisterComponent[small, position](c)
+			RegisterComponent[small, position](c, "position")
+			RegisterComponent[small, position](c, "position")
 		})
 	})
 	expectPanic(t, "no more than 64", func() {
 		spawnWith(func(c *kernel.Configurator) {
 			w := registeredWorld[small](c)
 			w.stores = make([]*storeResource, 64) // as if 64 were registered
-			RegisterComponent[small, position](c)
+			RegisterComponent[small, position](c, "position")
 		})
 	})
 }
@@ -145,7 +145,7 @@ func storeDeltas(t *testing.T, s *storeResource) map[Entity]observedDelta[health
 // index.
 func TestStoreChangesMatchAReferenceModel(t *testing.T) {
 	for seed := range uint64(10) {
-		s := &newStoreOf[game, health](0).storeResource
+		s := &newStoreOf[game, health](0, "health").storeResource
 		s.registerObserver()
 		m := &changeModel{atReset: map[Entity]health{}, now: map[Entity]health{}, last: map[Entity]health{}}
 		random := rand.New(rand.NewPCG(seed, 5))
@@ -227,7 +227,7 @@ func TestStoreChangesMatchAReferenceModel(t *testing.T) {
 }
 
 func TestStoreObservesOnlyWithAnObserver(t *testing.T) {
-	s := &newStoreOf[game, health](0).storeResource
+	s := &newStoreOf[game, health](0, "health").storeResource
 	s.add(makeEntity(1, 1))
 	s.startObservation()
 	if s.observed() || len(storeDeltas(t, s)) != 0 {

@@ -148,11 +148,13 @@ Kernel
 
 ## Components and stores
 
-- **A component is a pointer-free value type,** registered once per world:
-  `ecs.RegisterComponent[Game, Position](configurator)` in a plugin's `Init`.
-  It is checked with `container.IsPointerFree`. Each gets a dense
-  `ComponentID` in registration order, which plugin order makes the same on
-  every run with the same plugins.
+- **A component is a pointer-free value type,** registered once per world
+  under a name: `ecs.RegisterComponent[Game, Position](configurator,
+  "position")` in a plugin's `Init`. It is checked with
+  `container.IsPointerFree`. Each gets a dense `ComponentID` in registration
+  order, which plugin order makes the same on every run with the same
+  plugins. The name is what saves know it by, so the Go type can be renamed
+  or moved; a name registered twice in a world panics.
 - **A store is a sparse set.** A sparse array maps an entity's index to a
   dense row; the dense part holds the owners and the values. Both are chunked.
   Removing swaps the last row into the gap. A probe is one load and one
@@ -167,11 +169,23 @@ Kernel
   reads; the `*T` / `T` rule is for query terms only. The world and command
   buffers are unexported resources too, reached only through handles:
   `World`, `WorldLookup`, `CommandBuffer`, `CommandSink`.
-- **Erased metadata.** The registry keeps each component's `reflect.Type`,
-  size and alignment, for consumers that work on rows as bytes. It keeps
-  nothing about fields: a consumer that needs a field view (a serializer, the
-  network layer) builds its own from the type, once, with whatever meaning
-  it gives fields.
+- **The schema.** `World.Schema()` and `WorldLookup.Schema()` describe the
+  world without its types: each component's `ComponentInfo` (ID, name,
+  `reflect.Type`, size, alignment, markers and fields) and each refs' `RefInfo`
+  (name, value type, keyed, transient). It is built once, at registration,
+  for consumers that work on rows as bytes: saves, the network layer, tools.
+- **Fields are the exported ones,** flattened into dotted paths with their
+  type, offset, size and struct tag: `Position.X`. An embedded struct's
+  fields are promoted, as Go promotes them; an array, an `Entity` and a `Ref`
+  are one field each; a component that is not a struct is one field with an
+  empty path. Two fields at one path panic at registration. The ECS gives
+  tags no meaning: the network layer reads its own (`net:"bits=12"`).
+- **Markers say what a component is,** beyond what it holds: every embedded
+  zero-size struct, listed in `ComponentInfo.Markers` and asked with
+  `HasMarker[M](info)`. The ECS has one, `Transient`; the network layer
+  defines its own (replicated, owned by a player). Markers come before every
+  field, or registration panics: they read as the component's header, and a
+  zero-size field last would pad the struct.
 
 ## Locking
 
@@ -194,8 +208,8 @@ Kernel
   by `ComponentID`: `ReadRaw(e, id)`, `WriteRaw(e, id)`, `AddRaw(e, id,
   bytes)`, `RemoveRaw(e, id)`, `SpawnRaw(mask, values)` and
   `CreateAtRaw(e, mask, values)`, whose values are each component's bytes in
-  ascending `ComponentID` order. `ComponentCount`, `Component(id)`,
-  `ComponentID[T]()` and `ComponentMask(e)` describe the world.
+  ascending `ComponentID` order. `Schema()`, `ComponentID[T]()` and
+  `ComponentMask(e)` describe the world.
 - **Outside the barrier,** a system holds what its parameters declare:
   - a query's `*T` term writes `T`'s store, a `T` term reads it;
   - `Store[W, T]` writes it, `Lookup[W, T]` reads it;
@@ -470,9 +484,9 @@ in a ref:
   holder does not change when the value does: `DeltaRefs` sees the change.
   A component changes only when a handle is written into it.
 - **One container and one lock per payload type.**
-  `RegisterRefs[W, T](c, options)` registers world `W`'s refs holding `T`, a
-  resource of its own, so systems on refs of different types run in
-  parallel. Declaring refs that were never registered is a composition
+  `RegisterRefs[W, T](c, name, options)` registers world `W`'s refs holding
+  `T` under a name, a resource of its own, so systems on refs of different
+  types run in parallel. Declaring refs that were never registered is a composition
   error. Each declaration also holds a read on the world, so the barrier
   excludes it.
 - **Values sit in slots paged by index,** as entity slots are, with a
@@ -502,7 +516,7 @@ in a ref:
 
 ### Keyed refs
 
-- **A ref per key.** `RegisterKeyedRefs[W, K, T](c, options)` registers
+- **A ref per key.** `RegisterKeyedRefs[W, K, T](c, name, options)` registers
   refs of a `T` that answers `Key() K`, as `Keyed[K]`: a mesh its asset path.
   `Text`, a string keyed by itself, serves names and labels.
 - **`KeyedRefs[W, K, T]` writes:** `Put(v)` returns the ref of `v.Key()`,
@@ -563,6 +577,50 @@ in a ref:
   parallel would take two refs for it. An update or a release by key of a
   key with no ref is dropped.
 
+## Saves
+
+A world saves to JSON and loads from it, for save games and levels edited
+by hand:
+
+- **`World.Save(writer)` writes the whole world** under the barrier: every
+  live ref of every refs not transient, then every live entity with its
+  components not transient, each by its name.
+
+  ```json
+  {"refs": {"text": [{"ref": 4294967297, "value": "hello"}]},
+   "entities": [{"entity": 4294967297, "position": {"X": 1, "Y": 2}, "frozen": {}}]}
+  ```
+
+  It is entity-major, so an entity reads and diffs as one piece; a tag is
+  `{}`. It is indented, and map values in refs are sorted.
+- **Transient is left out.** A component embedding `Transient`, or refs
+  registered with `RefsOptions.Transient`, are not saved: caches, state that
+  lives a frame.
+- **Entities and refs are numbers:** `SerializeEntity(e)` and
+  `SerializeRef(r)`, wherever they appear, in components and in ref values,
+  through per-call marshalers of `encoding/json/v2`. Ref values are
+  marshaled by it whole, so any `T` it handles saves.
+- **`World.Load(logger, reader)` adds a save to the world.** Saved entities
+  take fresh indices past every index in use, keeping their order, spacing
+  and generations; the indices between them go on the free list. Plain refs
+  do the same. A saved keyed ref whose key has a ref in the world, or in an
+  earlier saved ref, takes that ref, and the world's value is kept. Every
+  `Entity` and `Ref` field is remapped to match; one naming nothing in the
+  save, a dead entity or a released ref, loads as `NoEntity` or the zero
+  `Ref`.
+- **Load forgives drift.** Fields the save has and the component lacks are
+  ignored, fields it lacks are zero, and so are unexported fields, which are
+  never saved. A component or refs name the world does not know is warned of
+  once through the logger and skipped, and top-level members other than
+  `refs` and `entities` are ignored. A change beyond that is the user's to
+  patch in the JSON.
+- **Load fails whole.** It reads and decodes everything before changing the
+  world, so malformed JSON, a value of the wrong type, a missing handle or
+  saved indices past the allocation range return an error and leave the
+  world as it was. Only reservations are settled: one never committed loses
+  its index, as a despawn outside a window does.
+- **Observers see a load as adds,** of every loaded component and ref.
+
 ## Fit for networking
 
 A replication layer is meant to be built on this without the ECS knowing it
@@ -578,6 +636,10 @@ exists:
   whatever number of components hold it; the client places it with `NewAt`
   or `PutAt`, so a handle inside a mirrored component reads the mirrored
   value unchanged.
+- **The schema is its field view.** It bit-packs fields by the paths and
+  offsets the schema gives, reads its markers (replicated, owned by a
+  player, affects visibility) and its field tags (bits, interpolation), and
+  hashes the schema its own way to match peers. Saves are not its format.
 - **A delta query on the replicated stores** narrows what is captured again;
   field masks, quantization, ownership and interest are the consumer's own
   components and code.
@@ -652,12 +714,21 @@ exists:
 - **A warning for a forgotten reset.** A world never reset does no harm, and
   catching resets that stopped needs a size check on the remove path.
 
+- **Migrations and a saved schema.** A save holds no schema nor version,
+  and load takes no migrator: fields are matched by name, and a component
+  renamed, split or retyped is patched in the JSON by whoever changed it.
+- **A schema hash in the ECS.** The network layer is its one user, and
+  hashes what it means to match.
+- **Components marshaled by their own JSON.** Saves marshal each field
+  through `encoding/json/v2` at the schema's offsets, so markers and
+  unexported fields stay out as the schema says, whatever the type's JSON
+  would write.
+
 ## Deferred
 
 - **Parallel writes to one store.** Two jobs writing disjoint rows of one
   component serialize on its lock. Partitioned write locks can be added
   without changing the system form.
-- **Introspection** for tools (by-name reads and writes).
 - **Hooks on add, remove and set.** A callback when a component arrives,
   leaves or is set, run where the change is applied. A remove hook could
   release a component's refs without the user recording it. Networking does
@@ -725,10 +796,4 @@ hand-written loops:
 
 ## Todo next
 
-Major features other ECSs have:
-
-- **Serialization and reflection.** A field view of components for saving,
-  loading and the network layer, built on the erased metadata (see
-  Introspection under Deferred).
-
-Networking comes after, as its own design on top of these pieces.
+Networking, as its own design on top of these pieces.

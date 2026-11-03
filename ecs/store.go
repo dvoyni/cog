@@ -95,9 +95,9 @@ type storeOf[W WorldID, T any] struct {
 	storeResource
 }
 
-func newStoreOf[W WorldID, T any](id ComponentID) *storeOf[W, T] {
+func newStoreOf[W WorldID, T any](id ComponentID, name ComponentName) *storeOf[W, T] {
 	s := &storeOf[W, T]{}
-	s.component = makeComponentInfo[T](id)
+	s.component = makeComponentInfo[T](id, name)
 	s.newChunk = func() unsafe.Pointer { return unsafe.Pointer(new([rowsPerChunk]T)) }
 	s.lockRead = func(access *kernel.Access) { access.Read[*storeOf[W, T]]() }
 	s.lockWrite = func(access *kernel.Access) { access.Write[*storeOf[W, T]]() }

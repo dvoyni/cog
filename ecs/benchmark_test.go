@@ -35,8 +35,8 @@ type benchWorld struct {
 func spawnBench(b *testing.B, velocityEvery int, observed bool) *benchWorld {
 	o := &benchWorld{}
 	spawn(b, func(c *kernel.Configurator) {
-		RegisterComponent[game, position](c)
-		RegisterComponent[game, velocity](c)
+		RegisterComponent[game, position](c, "position")
+		RegisterComponent[game, velocity](c, "velocity")
 		RegisterCommandBuffer[game, aiCommands](c)
 		o.world = declare[World[game]](c)
 		o.positions = declare[Store[game, position]](c)

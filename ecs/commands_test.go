@@ -25,7 +25,7 @@ type commandWorld struct {
 func spawnCommands(t *testing.T) *commandWorld {
 	o := &commandWorld{}
 	spawn(t, func(c *kernel.Configurator) {
-		RegisterComponent[game, health](c)
+		RegisterComponent[game, health](c, "health")
 		RegisterCommandBuffer[game, aiCommands](c)
 		o.world = declare[World[game]](c)
 		o.first = declare[CommandBuffer[game, aiCommands]](c)
@@ -190,7 +190,7 @@ func runProducers(t *testing.T, workers int) []int32 {
 	var commitTask *kernel.Task[kernel.NoArg, kernel.NoResult]
 	var healths Query1[game, health]
 	h := spawnWorkers(t, workers, func(c *kernel.Configurator) {
-		RegisterComponent[game, health](c)
+		RegisterComponent[game, health](c, "health")
 		RegisterCommandBuffer[game, aiCommands](c)
 		for range producers {
 			producerTasks = append(producerTasks, c.RegisterTask2(produce))
@@ -228,13 +228,13 @@ func TestTypeErasedAccess(t *testing.T) {
 	var positions Store[game, position]
 	var healthID, positionID ComponentID
 	spawn(t, func(c *kernel.Configurator) {
-		healthID = RegisterComponent[game, health](c)
-		positionID = RegisterComponent[game, position](c)
+		healthID = RegisterComponent[game, health](c, "health")
+		positionID = RegisterComponent[game, position](c, "position")
 		w = declare[World[game]](c)
 		positions = declare[Store[game, position]](c)
 	})
-	if w.ComponentCount() != 2 || w.Component(positionID).Size != 8 {
-		t.Fatalf("the registry describes %d components, position %+v", w.ComponentCount(), w.Component(positionID))
+	if schema := w.Schema(); len(schema.Components) != 2 || schema.Components[positionID].Size != 8 {
+		t.Fatalf("the registry describes %d components, position %+v", len(schema.Components), schema.Components[positionID])
 	}
 	var mask game
 	maskSet(&mask, healthID)
@@ -268,7 +268,7 @@ func TestTypedWorldAccess(t *testing.T) {
 	var w World[game]
 	var deltas DeltaQuery1[game, health]
 	spawn(t, func(c *kernel.Configurator) {
-		RegisterComponent[game, health](c)
+		RegisterComponent[game, health](c, "health")
 		w = declare[World[game]](c)
 		deltas = declare[DeltaQuery1[game, health]](c)
 	})
@@ -304,8 +304,8 @@ type commandRefsWorld struct {
 func spawnCommandRefs(t testing.TB) *commandRefsWorld {
 	o := &commandRefsWorld{refsWorld: &refsWorld{}}
 	spawn(t, func(c *kernel.Configurator) {
-		RegisterComponent[game, named](c)
-		RegisterRefs[game, string](c, RefsOptions{})
+		RegisterComponent[game, named](c, "named")
+		RegisterRefs[game, string](c, "string", RefsOptions{})
 		RegisterCommandBuffer[game, aiCommands](c)
 		o.world = declare[World[game]](c)
 		o.store = declare[Store[game, named]](c)
@@ -497,20 +497,20 @@ func TestCommandRefsCompositionErrors(t *testing.T) {
 	})
 	expectPanic(t, "not initialized", func() {
 		spawn(t, func(c *kernel.Configurator) {
-			RegisterRefs[game, string](c, RefsOptions{})
+			RegisterRefs[game, string](c, "string", RefsOptions{})
 			declare[CommandRefs[game, aiCommands, string]](c)
 		})
 	})
 	expectPanic(t, "CommandKeyedRefs records them", func() {
 		spawn(t, func(c *kernel.Configurator) {
-			RegisterKeyedRefs[game, Text, Text](c, RefsOptions{})
+			RegisterKeyedRefs[game, Text, Text](c, "Text", RefsOptions{})
 			RegisterCommandBuffer[game, aiCommands](c)
 			declare[CommandRefs[game, aiCommands, Text]](c)
 		})
 	})
 	expectPanic(t, "not keyed", func() {
 		spawn(t, func(c *kernel.Configurator) {
-			RegisterRefs[game, Text](c, RefsOptions{})
+			RegisterRefs[game, Text](c, "Text", RefsOptions{})
 			RegisterCommandBuffer[game, aiCommands](c)
 			declare[CommandKeyedRefs[game, aiCommands, Text, Text]](c)
 		})
@@ -527,7 +527,7 @@ func TestCommandKeyedRefsUpdateAndRelease(t *testing.T) {
 	var deltas DeltaRefs[game, Text]
 	var w World[game]
 	spawn(t, func(c *kernel.Configurator) {
-		RegisterKeyedRefs[game, Text, Text](c, RefsOptions{})
+		RegisterKeyedRefs[game, Text, Text](c, "Text", RefsOptions{})
 		RegisterCommandBuffer[game, aiCommands](c)
 		w = declare[World[game]](c)
 		texts = declare[KeyedRefs[game, Text, Text]](c)
@@ -604,8 +604,8 @@ func runNameProducers(t *testing.T, workers int) []string {
 	var names Query1[game, named]
 	var lookup RefsLookup[game, string]
 	h := spawnWorkers(t, workers, func(c *kernel.Configurator) {
-		RegisterComponent[game, named](c)
-		RegisterRefs[game, string](c, RefsOptions{})
+		RegisterComponent[game, named](c, "named")
+		RegisterRefs[game, string](c, "string", RefsOptions{})
 		RegisterCommandBuffer[game, aiCommands](c)
 		for range producers {
 			producerTasks = append(producerTasks, c.RegisterTask4(nameProducer))

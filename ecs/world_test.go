@@ -2,6 +2,7 @@ package ecs
 
 import (
 	"fmt"
+	"reflect"
 	"runtime"
 	"slices"
 	"testing"
@@ -93,8 +94,8 @@ func TestDespawnRemovesEveryComponent(t *testing.T) {
 	var positions Store[game, position]
 	var tags Store[game, frozen]
 	spawn(t, func(c *kernel.Configurator) {
-		RegisterComponent[game, position](c)
-		RegisterComponent[game, frozen](c)
+		RegisterComponent[game, position](c, "position")
+		RegisterComponent[game, frozen](c, "frozen")
 		w = declare[World[game]](c)
 		positions = declare[Store[game, position]](c)
 		tags = declare[Store[game, frozen]](c)
@@ -207,8 +208,8 @@ func TestWorldLookupAgreesWithWorld(t *testing.T) {
 	var sink CommandSink[game, aiCommands]
 	var positionID ComponentID
 	spawn(t, func(c *kernel.Configurator) {
-		RegisterComponent[game, health](c)
-		positionID = RegisterComponent[game, position](c)
+		RegisterComponent[game, health](c, "health")
+		positionID = RegisterComponent[game, position](c, "position")
 		RegisterCommandBuffer[game, aiCommands](c)
 		w = declare[World[game]](c)
 		lookup = declare[WorldLookup[game]](c)
@@ -230,7 +231,7 @@ func TestWorldLookupAgreesWithWorld(t *testing.T) {
 	if !lookup.Alive(reserved) {
 		t.Fatal("the lookup reads a committed reservation as dead")
 	}
-	if lookup.ComponentCount() != w.ComponentCount() || lookup.ComponentID[position]() != positionID || lookup.Component(positionID) != w.Component(positionID) {
+	if lookup.ComponentID[position]() != positionID || !reflect.DeepEqual(lookup.Schema(), w.Schema()) {
 		t.Fatal("the lookup describes the components otherwise than the world")
 	}
 }
@@ -270,7 +271,7 @@ func TestWorldLookupsRunAlongsideWriters(t *testing.T) {
 	var w World[game]
 	var targets Store[game, target]
 	h, prey := queryWorld(t, 300, func(c *kernel.Configurator) {
-		RegisterComponent[game, target](c)
+		RegisterComponent[game, target](c, "target")
 		RegisterCommandBuffer[game, aiCommands](c)
 		hunts = append(hunts, c.RegisterTask2(hunt), c.RegisterTask2(hunt))
 		toggleTask = c.RegisterTask2(toggle[velocity])
@@ -321,9 +322,9 @@ type shrinkWorld struct {
 func spawnShrink(t testing.TB) *shrinkWorld {
 	o := &shrinkWorld{}
 	spawn(t, func(c *kernel.Configurator) {
-		RegisterComponent[game, health](c)
-		RegisterComponent[game, position](c)
-		RegisterRefs[game, string](c, RefsOptions{})
+		RegisterComponent[game, health](c, "health")
+		RegisterComponent[game, position](c, "position")
+		RegisterRefs[game, string](c, "string", RefsOptions{})
 		RegisterCommandBuffer[game, aiCommands](c)
 		o.world = declare[World[game]](c)
 		o.healths = declare[Store[game, health]](c)
@@ -548,7 +549,7 @@ func TestShrinkRunsApartFromWorldResources(t *testing.T) {
 	var shrinkTask, spawnTask, churnTask, recordTask, commitTask *kernel.Task[kernel.NoArg, kernel.NoResult]
 	var tags Store[game, frozen]
 	h, _ := queryWorld(t, 300, func(c *kernel.Configurator) {
-		RegisterRefs[game, string](c, RefsOptions{})
+		RegisterRefs[game, string](c, "string", RefsOptions{})
 		RegisterCommandBuffer[game, aiCommands](c)
 		shrinkTask = c.RegisterTask1(ShrinkSystem[game])
 		spawnTask = c.RegisterTask1(spawnFrozen)

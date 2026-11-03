@@ -24,7 +24,7 @@ type observedWorld struct {
 func spawnUnobserved(t *testing.T) *observedWorld {
 	o := &observedWorld{}
 	o.harness = spawn(t, func(c *kernel.Configurator) {
-		RegisterComponent[game, health](c)
+		RegisterComponent[game, health](c, "health")
 		o.world = declare[World[game]](c)
 		o.store = declare[Store[game, health]](c)
 		o.lookup = declare[Lookup[game, health]](c)
@@ -372,7 +372,7 @@ func TestWorldWithoutResetObservesNothing(t *testing.T) {
 	var sink CommandSink[game, aiCommands]
 	var healthID ComponentID
 	spawn(t, func(c *kernel.Configurator) {
-		healthID = RegisterComponent[game, health](c)
+		healthID = RegisterComponent[game, health](c, "health")
 		RegisterCommandBuffer[game, aiCommands](c)
 		w = declare[World[game]](c)
 		healths = declare[Store[game, health]](c)
@@ -530,9 +530,9 @@ func TestDeltaQueriesMatchAReferenceModel(t *testing.T) {
 	var all DeltaQuery3[game, health, position, frozen]
 	var thawed DeltaQuery2[game, health, Without[frozen]]
 	spawn(t, func(c *kernel.Configurator) {
-		RegisterComponent[game, health](c)
-		RegisterComponent[game, position](c)
-		RegisterComponent[game, frozen](c)
+		RegisterComponent[game, health](c, "health")
+		RegisterComponent[game, position](c, "position")
+		RegisterComponent[game, frozen](c, "frozen")
 		w = declare[World[game]](c)
 		healths = declare[Store[game, health]](c)
 		positions = declare[Store[game, position]](c)
@@ -675,20 +675,20 @@ func TestDeltaQueriesMatchAReferenceModel(t *testing.T) {
 func TestDeltaQueryCompositionErrors(t *testing.T) {
 	expectPanic(t, "delta query terms are values", func() {
 		spawn(t, func(c *kernel.Configurator) {
-			RegisterComponent[game, health](c)
+			RegisterComponent[game, health](c, "health")
 			declare[DeltaQuery1[game, *health]](c)
 		})
 	})
 	expectPanic(t, "delta query term is optional", func() {
 		spawn(t, func(c *kernel.Configurator) {
-			RegisterComponent[game, health](c)
-			RegisterComponent[game, position](c)
+			RegisterComponent[game, health](c, "health")
+			RegisterComponent[game, position](c, "position")
 			declare[DeltaQuery2[game, health, Optional[position]]](c)
 		})
 	})
 	expectPanic(t, "With and Without terms only", func() {
 		spawn(t, func(c *kernel.Configurator) {
-			RegisterComponent[game, health](c)
+			RegisterComponent[game, health](c, "health")
 			declare[DeltaQuery2[game, With[health], Without[health]]](c)
 		})
 	})
@@ -705,9 +705,9 @@ func TestDeltaQueryAllocatesNothing(t *testing.T) {
 	var positions Store[game, position]
 	var both DeltaQuery3[game, health, position, Without[frozen]]
 	spawn(t, func(c *kernel.Configurator) {
-		RegisterComponent[game, health](c)
-		RegisterComponent[game, position](c)
-		RegisterComponent[game, frozen](c)
+		RegisterComponent[game, health](c, "health")
+		RegisterComponent[game, position](c, "position")
+		RegisterComponent[game, frozen](c, "frozen")
 		w = declare[World[game]](c)
 		healths = declare[Store[game, health]](c)
 		positions = declare[Store[game, position]](c)
