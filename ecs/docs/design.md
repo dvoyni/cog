@@ -724,21 +724,6 @@ exists:
   unexported fields stay out as the schema says, whatever the type's JSON
   would write.
 
-## Deferred
-
-- **Parallel writes to one store.** Two jobs writing disjoint rows of one
-  component serialize on its lock. Partitioned write locks can be added
-  without changing the system form.
-- **Hooks on add, remove and set.** A callback when a component arrives,
-  leaves or is set, run where the change is applied. A remove hook could
-  release a component's refs without the user recording it. Networking does
-  not need them: a set hook costs an indirect call per write in the writing
-  jobs, where a delta query finds the changes once under the barrier and
-  drops writes that leave a value as it was.
-- **Prefabs and bundles.** Typed templates of several components spawned
-  together, and instances that share or copy from a prefab. `SpawnRaw` does
-  it untyped, and keyed refs share the heavy data a prefab would.
-
 ## Performance
 
 Measured per entity over 10,000 entities in `benchmark_test.go`, against
@@ -794,6 +779,17 @@ hand-written loops:
 `go test -run '^$' -bench . -count 10 > new.txt` and
 `benchstat docs/benchmarks-baseline.txt new.txt`.
 
-## Todo next
+## Deferred
 
-Networking, as its own design on top of these pieces.
+- **Parallel writes to one store.** Two jobs writing disjoint rows of one
+  component serialize on its lock. Partitioned write locks can be added
+  without changing the system form.
+- **Hooks on add, remove and set.** A callback when a component arrives,
+  leaves or is set, run where the change is applied. A remove hook could
+  release a component's refs without the user recording it. Networking does
+  not need them: a set hook costs an indirect call per write in the writing
+  jobs, where a delta query finds the changes once under the barrier and
+  drops writes that leave a value as it was.
+- **Prefabs and bundles.** Typed templates of several components spawned
+  together, and instances that share or copy from a prefab. `SpawnRaw` does
+  it untyped, and keyed refs share the heavy data a prefab would.
