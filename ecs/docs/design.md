@@ -48,6 +48,7 @@ Kernel
 | `RefsLookup[W, T]` | Reads the refs holding `T`: `Get` a pointer, to read only. |
 | `CommandBuffer[W, Tag]` | Records into the command buffer `Tag` of world `W`, holding a read on it. |
 | `CommandSink[W, Tag]` | Applies that buffer to its world: the write on the buffer and the barrier. |
+| `CommandRefs[W, Tag, T]` | Records making, setting and releasing refs of `T` into that buffer, holding a read on the refs. |
 | `Entity` | 64-bit `{index:32, gen:32}`, layout private; `NoEntity` is 0. |
 | `ObservationReset[W]` | The system that ends an observation window. |
 
@@ -365,12 +366,14 @@ func commitAi(k *kernel.Kernel, _ kernel.NoArg, commit ecs.CommandSink[Game, AiC
 - **Records:** `Reserve`, `Spawn`, `Despawn`, `Add[T]`, `Set[T]`, `Remove[T]`.
   A record is a header (op, entity, component, where its value starts) in
   one chunked array, and the value's bytes in another, each value starting
-  at a word.
+  at a word. Ref records come from `CommandRefs` (see Refs).
 - **Order.** Despawns of every lane first, then the other records in lane
-  order (registration order) and sequence order. A record on an entity not
-  alive is dropped, and so is a `Spawn` of an entity that is not a
-  reservation still waiting (its index holds a live entity, or it is not the
-  generation the index hands out next); `Commit` answers how many were.
+  order (registration order) and sequence order, the lanes of ref records
+  last: nothing in a commit reads a ref, so their place is free. A record on
+  an entity not alive is dropped, and so is a `Spawn` of an entity that is
+  not a reservation still waiting (its index holds a live entity, or it is
+  not the generation the index hands out next), and a release of a ref not
+  alive; `Commit` answers how many were.
   `Add` adds or replaces, `Set` replaces only, `Remove` of a component the
   entity lacks does nothing.
 - **Commits go through the same row-state path** as direct writes, so
@@ -400,8 +403,10 @@ in a ref:
   registered is a composition error. Each declaration also holds a read on
   the world, so the barrier excludes it.
 - **Values sit in a chunked array of `T`,** with a generation per slot and
-  freed slots reused last in, first out. Chunks never move, so the `*T` a
-  `Get` returns stays valid until the ref is released.
+  freed slots reused last in, first out: the free list holds each freed slot
+  at its next generation, and a free slot's own generation is 0, so nothing
+  reads it. Chunks never move, so the `*T` a `Get` returns stays valid until
+  the ref is released.
 - **`Refs[W, T]` writes:** `New(v)` returns a handle, `Get(h)` a `*T`,
   `Set(&field, v)` stores a value, `Release(h)` frees the slot.
   **`RefsLookup[W, T]` reads:** `Get(h)` returns a `*T` that must only be
@@ -413,15 +418,32 @@ in a ref:
   that marks: a `*T` query term or `Store.Write`. Writing through a `*T` from
   `Get` is not a change.
 - **A stale handle reads as nothing.** `Get` returns nil for the zero handle,
-  a released one, and a copy kept from before a `Set`; generations start at
-  1, so the zero handle matches no slot. `Set` and `Release` report whether
-  the handle was alive, as `Store.Add` does.
+  a released one, and a copy kept from before a `Set`. A handle holds its
+  slot's index plus one, so the zero handle lies past every slot, and
+  generations start at 1, so no handle matches a free slot. `Set` and
+  `Release` report whether the handle was alive, as `Store.Add` does.
 - **Released by the user.** The ECS knows nothing about a component's
   fields, so it cannot find the refs a component holds: whoever removes the
-  component or despawns its entity calls `Release` first. A ref never
-  released lives as long as its world. `Release` frees the slot at once and
-  advances its generation, so every handle to it, a shadow's included, goes
-  stale.
+  component or despawns its entity calls `Release` first, or records a
+  release beside a buffered `Remove` or `Despawn` in the same buffer. A ref
+  never released lives as long as its world. `Release` frees the slot at
+  once and advances its generation, so every handle to it, a shadow's
+  included, goes stale.
+- **Refs through a command buffer.** `CommandRefs[W, Tag, T]` records into
+  buffer `Tag`: `New(v)` and `Set(old, v)` return a handle at once, to record
+  in a component, and `Release(h)` frees one, all at the commit. It holds a
+  read on the refs, so producers run in parallel with each other and with
+  lookups, and `Refs` writers wait. Each system taking it gets a lane of its
+  own, holding the values of its new refs typed, so the GC sees them.
+  - A handle is reserved as an entity is: one atomic cursor over the free
+    list, then fresh slots. Every `Refs` write and every commit folds the
+    cursor back first. A reserved ref reads nothing until its commit.
+  - A buffered `Set` takes a new slot for the value and releases `old`. A
+    direct `Set` keeps the slot; either way the handle changes, the old one
+    goes stale and the component holding it changes.
+  - A release of a ref not alive is dropped and counted in `Commit`'s
+    answer. A release does not depend on its entity, so it applies even when
+    the despawn beside it is dropped.
 - **A ref belongs to one field and is never shared.** Copying a component
   that holds one gives two fields one ref; after either is set or released,
   the other reads nothing. This is documented, not checked.
@@ -459,6 +481,9 @@ exists:
   component. It gives the ECS knowledge of fields; releasing is the user's.
 - **A version per ref.** Advancing the generation on `Set` changes the
   handle, which makes a set an ordinary component change.
+- **Ref records as generic methods on `CommandBuffer`.** Nothing would be
+  declared on the refs, so a reservation could not touch their free list:
+  refs made through buffers would never reuse a freed slot.
 - **One refs container per world.** One lock would serialize every system
   touching any ref.
 - **Reflected system calls.** The body is a direct call of the system with
@@ -544,24 +569,20 @@ Each step ends with its tests passing under `go test -race`.
       in registers for up to three terms. Dense costs 6.4 ns per entity,
       7.4 ns observed, against 0.5 ns for a slice loop.
 8. **Refs.** Built as above. Reading a ref by handle costs 2.4 ns; setting
-   one through its component, observed, 15 ns.
+   one through its component, observed, 15 ns. Making one through a command
+   buffer and releasing it through another commit, 22 ns.
 
 ## Todo next
 
 Gaps in the design:
 
-1. **Commands and refs.** A ref is released before its component is
-   removed, but a command buffer's `Remove` and `Despawn` take effect only at
-   commit: releasing at record time leaves a live component reading nil until
-   then, and after the commit the component is gone. An entity holding a ref
-   and despawned through a buffer leaks it.
-2. **Entities held in components.** A stored `Entity` only goes stale when
+1. **Entities held in components.** A stored `Entity` only goes stale when
    its entity dies; nothing clears or reports it. To be decided, or
    documented as the rule.
-3. **Change filters in queries.** `Changes[W, T]` walks one store; a query
+2. **Change filters in queries.** `Changes[W, T]` walks one store; a query
    cannot ask for changed or added `T` among its terms, so a system walks the
    changes and probes the other stores by hand.
-4. **Optional query terms.** A term that yields the row's `T` when the
+3. **Optional query terms.** A term that yields the row's `T` when the
    entity has one and nil when not, instead of a `Lookup` probed per row.
 
 Major features other ECSs have:
@@ -571,8 +592,8 @@ Major features other ECSs have:
 - **Relations and hierarchy.** Pairs between entities, parent and child,
   despawning a subtree, propagating along it (see Deferred).
 - **Hooks on add, remove and set.** A callback when a component arrives,
-  leaves or is set, run where the change is applied. A remove hook would
-  also close item 1.
+  leaves or is set, run where the change is applied. A remove hook could
+  release a component's refs without the user recording it.
 - **Prefabs and bundles.** Typed templates of several components spawned
   together, and instances that share or copy from a prefab. `SpawnRaw` does
   it untyped.

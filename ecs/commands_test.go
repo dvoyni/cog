@@ -1,6 +1,8 @@
 package ecs
 
 import (
+	"fmt"
+	"math/rand/v2"
 	"slices"
 	"testing"
 
@@ -291,4 +293,262 @@ func TestTypedWorldAccess(t *testing.T) {
 		t.Fatal("Remove by type left the component")
 	}
 	expectPanic(t, "not registered", func() { w.Has[position](e) })
+}
+
+// commandRefsWorld is refsWorld with a command buffer, two lanes of ref
+// records on it, a lane of component records and its sink.
+type commandRefsWorld struct {
+	*refsWorld
+	first, second CommandRefs[game, aiCommands, string]
+	commands      CommandBuffer[game, aiCommands]
+	sink          CommandSink[game, aiCommands]
+}
+
+func spawnCommandRefs(t testing.TB) *commandRefsWorld {
+	o := &commandRefsWorld{refsWorld: &refsWorld{}}
+	spawn(t, func(c *kernel.Configurator) {
+		RegisterComponent[game, named](c)
+		RegisterRefs[game, string](c)
+		RegisterCommandBuffer[game, aiCommands](c)
+		o.world = declare[World[game]](c)
+		o.store = declare[Store[game, named]](c)
+		o.refs = declare[Refs[game, string]](c)
+		o.lookup = declare[RefsLookup[game, string]](c)
+		o.first = declare[CommandRefs[game, aiCommands, string]](c)
+		o.second = declare[CommandRefs[game, aiCommands, string]](c)
+		o.commands = declare[CommandBuffer[game, aiCommands]](c)
+		o.sink = declare[CommandSink[game, aiCommands]](c)
+	})
+	return o
+}
+
+// TestCommandRefsMatchAReferenceModel mixes refs made, set and released
+// directly and through two lanes of a buffer, committed now and then, and
+// checks after every step that live handles read their values and that
+// handles waiting for the commit or gone stale read nothing.
+func TestCommandRefsMatchAReferenceModel(t *testing.T) {
+	o := spawnCommandRefs(t)
+	random := rand.New(rand.NewPCG(5, 9))
+	model := map[Ref[string]]string{}
+	waiting := map[Ref[string]]string{}
+	releasing := map[Ref[string]]bool{}
+	var stale []Ref[string]
+	wantDropped := 0
+	// settled picks a live handle no release is recorded for.
+	settled := func() (Ref[string], bool) {
+		for h := range model {
+			if !releasing[h] {
+				return h, true
+			}
+		}
+		return Ref[string]{}, false
+	}
+	for step := range 5000 {
+		value := fmt.Sprint(step)
+		lane := o.first
+		if random.IntN(2) == 0 {
+			lane = o.second
+		}
+		h, ok := settled()
+		switch op := random.IntN(9); {
+		case op == 0 || !ok:
+			model[o.refs.New(value)] = value
+		case op == 1:
+			field := h
+			o.refs.Set(&field, value)
+			delete(model, h)
+			model[field] = value
+			stale = append(stale, h)
+		case op == 2:
+			o.refs.Release(h)
+			delete(model, h)
+			stale = append(stale, h)
+		case op == 3:
+			waiting[lane.New(value)] = value
+		case op == 4:
+			waiting[lane.Set(h, value)] = value
+			releasing[h] = true
+		case op == 5:
+			lane.Release(h)
+			releasing[h] = true
+		case op == 6 && len(stale) > 0:
+			lane.Release(stale[random.IntN(len(stale))])
+			wantDropped++
+		default:
+			if dropped := o.sink.Commit(); dropped != wantDropped {
+				t.Fatalf("step %d: the commit dropped %d records, want %d", step, dropped, wantDropped)
+			}
+			wantDropped = 0
+			for h := range releasing {
+				delete(model, h)
+				stale = append(stale, h)
+			}
+			clear(releasing)
+			for h, value := range waiting {
+				if _, ok := model[h]; ok {
+					t.Fatalf("step %d: handle %+v was handed out twice", step, h)
+				}
+				model[h] = value
+			}
+			clear(waiting)
+		}
+		for h, want := range model {
+			if got := o.lookup.Get(h); got == nil || *got != want {
+				t.Fatalf("step %d: handle %+v reads %v, want %q", step, h, got, want)
+			}
+		}
+		for h := range waiting {
+			if _, ok := model[h]; ok || o.lookup.Get(h) != nil {
+				t.Fatalf("step %d: handle %+v reads before its commit, or is live twice", step, h)
+			}
+		}
+	}
+	for _, h := range stale {
+		if o.lookup.Get(h) != nil {
+			t.Fatalf("stale handle %+v still reads", h)
+		}
+	}
+}
+
+// TestCommandRefsDieWithABufferedDespawn releases a ref beside the buffered
+// despawn of the entity holding it: the ref reads until the commit, and its
+// slot is the next one handed out.
+func TestCommandRefsDieWithABufferedDespawn(t *testing.T) {
+	o := spawnCommandRefs(t)
+	e := o.world.Spawn()
+	o.store.Add(e, named{Name: o.refs.New("a")})
+	name := o.store.Get(e).Name
+	o.commands.Despawn(e)
+	o.first.Release(name)
+	if got := o.lookup.Get(name); got == nil || *got != "a" {
+		t.Fatal("a ref recorded for release stopped reading before the commit")
+	}
+	if dropped := o.sink.Commit(); dropped != 0 || o.world.Alive(e) || o.lookup.Get(name) != nil {
+		t.Fatalf("the commit dropped %d records, or left the entity or its ref alive", dropped)
+	}
+	if next := o.refs.New("b"); next.index != name.index {
+		t.Fatalf("New answered slot %d, want the released slot %d", next.index, name.index)
+	}
+	o.first.Release(name)
+	if o.sink.Commit() != 1 {
+		t.Fatal("releasing a stale ref was not dropped")
+	}
+}
+
+func TestCommandRefsAllocateNothingOnceGrown(t *testing.T) {
+	o := spawnCommandRefs(t)
+	handles := make([]Ref[string], 200)
+	round := func() {
+		for i := range handles {
+			handles[i] = o.first.New("a")
+		}
+		o.sink.Commit()
+		for i := range handles {
+			handles[i] = o.second.Set(handles[i], "b")
+		}
+		o.sink.Commit()
+		for _, h := range handles {
+			if *o.lookup.Get(h) != "b" {
+				t.Fatal("a ref did not read what was set")
+			}
+			o.first.Release(h)
+		}
+		o.sink.Commit()
+	}
+	round()
+	if got := testing.AllocsPerRun(10, round); got != 0 {
+		t.Fatalf("recording and committing refs allocated %v times", got)
+	}
+}
+
+func TestCommandRefsCompositionErrors(t *testing.T) {
+	expectPanic(t, "not initialized", func() {
+		spawn(t, func(c *kernel.Configurator) {
+			RegisterCommandBuffer[game, aiCommands](c)
+			declare[CommandRefs[game, aiCommands, string]](c)
+		})
+	})
+	expectPanic(t, "not initialized", func() {
+		spawn(t, func(c *kernel.Configurator) {
+			RegisterRefs[game, string](c)
+			declare[CommandRefs[game, aiCommands, string]](c)
+		})
+	})
+}
+
+// nameArg tells nameProducer which names to make: each holds the round, the
+// producer and a number of its own.
+type nameArg struct{ Producer, Count, Round int }
+
+// nameProducer is a producer system: it despawns, releasing its name, every
+// entity whose name is a multiple of arg.Producer+2 long, and spawns
+// arg.Count entities, each named by a ref made through the buffer.
+func nameProducer(k *kernel.Kernel, arg nameArg, cmds CommandBuffer[game, aiCommands], refs CommandRefs[game, aiCommands, string], lookup RefsLookup[game, string], q Query1[game, named]) kernel.NoResult {
+	for e, row := range q.All() {
+		name := row.Get().Name
+		if len(*lookup.Get(name))%(arg.Producer+2) == 0 {
+			cmds.Despawn(e)
+			refs.Release(name)
+		}
+	}
+	for i := range arg.Count {
+		e := cmds.Reserve()
+		cmds.Spawn(e)
+		cmds.Add(e, named{Name: refs.New(fmt.Sprintf("%d.%d.%d", arg.Round, arg.Producer, i*i))})
+	}
+	return kernel.NoResult{}
+}
+
+// runNameProducers runs rounds of name producers in parallel, each round
+// committed after them, with workers workers, and answers the names left.
+// Every ref alive must be named by an entity.
+func runNameProducers(t *testing.T, workers int) []string {
+	const producers, rounds = 6, 5
+	var producerTasks []*kernel.Task[nameArg, kernel.NoResult]
+	var commitTask *kernel.Task[kernel.NoArg, kernel.NoResult]
+	var names Query1[game, named]
+	var lookup RefsLookup[game, string]
+	h := spawnWorkers(t, workers, func(c *kernel.Configurator) {
+		RegisterComponent[game, named](c)
+		RegisterRefs[game, string](c)
+		RegisterCommandBuffer[game, aiCommands](c)
+		for range producers {
+			producerTasks = append(producerTasks, c.RegisterTask4(nameProducer))
+		}
+		commitTask = c.RegisterTask1(commit)
+		names = declare[Query1[game, named]](c)
+		lookup = declare[RefsLookup[game, string]](c)
+	})
+	for round := range rounds {
+		h.run(func(ex *kernel.Executor) kernel.JobHandle {
+			var produced []kernel.JobHandle
+			for producer, task := range producerTasks {
+				produced = append(produced, ex.Schedule(task, nameArg{Producer: producer, Count: 40, Round: round}).Handle())
+			}
+			return ex.Schedule(commitTask, kernel.NoArg{}, produced...).Handle()
+		})
+	}
+	var left []string
+	for _, row := range names.All() {
+		left = append(left, *lookup.Get(row.Get().Name))
+	}
+	alive := 0
+	for i := range lookup.refs.slots.Len() {
+		if lookup.refs.slots.At(i).generation != 0 {
+			alive++
+		}
+	}
+	if alive != len(left) {
+		t.Fatalf("%d refs are alive for %d named entities", alive, len(left))
+	}
+	slices.Sort(left)
+	return left
+}
+
+func TestCommandRefsGiveTheSameWorldWithOneWorkerAndMany(t *testing.T) {
+	one := runNameProducers(t, 1)
+	many := runNameProducers(t, 8)
+	if len(one) == 0 || len(one) == 6*40*5 || !slices.Equal(one, many) {
+		t.Fatalf("one worker left %d names, eight left %d, or they differ or nothing was despawned", len(one), len(many))
+	}
 }

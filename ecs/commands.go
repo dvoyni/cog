@@ -30,11 +30,26 @@ type CommandSink[W WorldID, Tag any] struct {
 	recorder *commandRecorder[W, Tag]
 }
 
+// CommandRefs records changes to world W's refs of T into command buffer
+// Tag, applied by the buffer's CommandSink with its other records, so a
+// producer can make, set and release refs beside the components holding
+// them: a ref released with a buffered Despawn dies with its entity.
+//
+// It holds a read on the refs, the buffer and the world, so producers run in
+// parallel with each other and with refs lookups, and refs writers wait.
+// Each system taking it gets a lane of its own, as with CommandBuffer.
+type CommandRefs[W WorldID, Tag any, T any] struct {
+	lane *refsLaneOf[W, T]
+}
+
 // commandRecorder is the kernel resource behind command buffer Tag of world
 // W: its lanes, in registration order.
 type commandRecorder[W WorldID, Tag any] struct {
 	world *worldResource[W]
 	lanes []*commandLane
+	// refsLanes holds the lanes of the systems taking CommandRefs, of any
+	// refs type, in registration order.
+	refsLanes []refsLane
 }
 
 // commandLane is one producing system's part of a command buffer. Records
@@ -54,6 +69,30 @@ type commandRecord struct {
 	valueStart int
 }
 
+// refsLane is a lane of ref records, whatever the refs' type, as the sink
+// commits it.
+type refsLane interface {
+	// commit applies the lane's records and empties it, keeping its
+	// capacity, and answers how many were dropped.
+	commit() int
+}
+
+// refsLaneOf is one producing system's part of a command buffer for refs of
+// T: its records in order, and the values of its new refs until the commit.
+type refsLaneOf[W WorldID, T any] struct {
+	mutex   sync.Mutex
+	refs    *refsResource[W, T]
+	records container.Array[refsRecord[T]]
+	// values holds the value of each new-ref record, in record order. It is
+	// typed, so the GC sees the pointers a T holds.
+	values container.Array[T]
+}
+
+type refsRecord[T any] struct {
+	handle    Ref[T]
+	operation commandOperation
+}
+
 type commandOperation uint8
 
 const (
@@ -62,6 +101,8 @@ const (
 	commandAdd
 	commandSet
 	commandRemove
+	commandNewRef
+	commandReleaseRef
 )
 
 // RegisterCommandBuffer registers command buffer Tag of world W, a kernel
@@ -126,6 +167,41 @@ func (c CommandBuffer[W, Tag]) Remove[T any](e Entity) {
 	c.lane.record(commandRemove, e, id, nil)
 }
 
+// Declare declares a read on W's refs of T, on the buffer and on world W,
+// and gives this system a lane of its own.
+func (CommandRefs[W, Tag, T]) Declare(access *kernel.Access) CommandRefs[W, Tag, T] {
+	access.Read[*worldResource[W]]()
+	recorder := access.Read[*commandRecorder[W, Tag]]().Get()
+	lane := &refsLaneOf[W, T]{refs: access.Read[*refsResource[W, T]]().Get()}
+	recorder.refsLanes = append(recorder.refsLanes, lane)
+	return CommandRefs[W, Tag, T]{lane: lane}
+}
+
+// New records storing value in a new ref, and returns its handle at once,
+// to record in a component. The handle reads nothing until the record is
+// committed.
+func (c CommandRefs[W, Tag, T]) New(value T) Ref[T] {
+	h := c.lane.refs.reserve()
+	c.lane.record(commandNewRef, h, value)
+	return h
+}
+
+// Set records replacing ref old with value, and returns the new handle at
+// once, to record in the component holding old in its place. At the commit
+// the new ref comes alive and old is released, so its copies go stale and
+// the component changes, as with Refs.Set.
+func (c CommandRefs[W, Tag, T]) Set(old Ref[T], value T) Ref[T] {
+	h := c.New(value)
+	c.Release(old)
+	return h
+}
+
+// Release records freeing ref h, whatever becomes of the entity holding it.
+func (c CommandRefs[W, Tag, T]) Release(h Ref[T]) {
+	var none T
+	c.lane.record(commandReleaseRef, h, none)
+}
+
 // Declare declares the write on the buffer and on world W, the barrier.
 func (CommandSink[W, Tag]) Declare(access *kernel.Access) CommandSink[W, Tag] {
 	access.Write[*worldResource[W]]()
@@ -134,12 +210,13 @@ func (CommandSink[W, Tag]) Declare(access *kernel.Access) CommandSink[W, Tag] {
 
 // Commit applies every record and empties the lanes, keeping their
 // capacity. Despawns of every lane come first, then the other records in
-// lane order, which is registration order, and in the order recorded.
-// Commits go through the same paths as direct writes, so observers see
-// them.
+// lane order, which is registration order, and in the order recorded; the
+// lanes of CommandRefs come last. Commits go through the same paths as
+// direct writes, so observers see them.
 //
-// A record on an entity not alive, or a Spawn of an entity that is not a
-// reservation still waiting, is dropped; Commit answers how many were.
+// A record on an entity not alive, a Spawn of an entity that is not a
+// reservation still waiting, or a release of a ref not alive, is dropped;
+// Commit answers how many were.
 func (s CommandSink[W, Tag]) Commit() int {
 	w := s.recorder.world
 	dropped := 0
@@ -158,6 +235,9 @@ func (s CommandSink[W, Tag]) Commit() int {
 		}
 		lane.records.Resize(0)
 		lane.values.Resize(0)
+	}
+	for _, lane := range s.recorder.refsLanes {
+		dropped += lane.commit()
 	}
 	return dropped
 }
@@ -213,4 +293,40 @@ func (l *commandLane) copyValue(start int, destination unsafe.Pointer, size uint
 	for word := start; len(to) > 0; word++ {
 		to = to[copy(to, unsafe.Slice((*byte)(unsafe.Pointer(l.values.At(word))), 8)):]
 	}
+}
+
+// record appends a record of h, with value for a new ref.
+func (l *refsLaneOf[W, T]) record(operation commandOperation, h Ref[T], value T) {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	if operation == commandNewRef {
+		l.values.Append(value)
+	}
+	l.records.Append(refsRecord[T]{handle: h, operation: operation})
+}
+
+// commit stores each new ref and releases each released one, in the order
+// recorded. A new ref's value is cleared from the lane as it is stored, so
+// the lane keeps no pointer of a T alive.
+func (l *refsLaneOf[W, T]) commit() int {
+	l.refs.settleReservations()
+	dropped := 0
+	stored := 0
+	var zero T
+	for i := range l.records.Len() {
+		record := l.records.At(i)
+		if record.operation == commandReleaseRef {
+			if !l.refs.release(record.handle) {
+				dropped++
+			}
+			continue
+		}
+		value := l.values.At(stored)
+		l.refs.store(record.handle, *value)
+		*value = zero
+		stored++
+	}
+	l.records.Resize(0)
+	l.values.Resize(0)
+	return dropped
 }

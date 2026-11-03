@@ -3,6 +3,8 @@ package ecs
 import (
 	"fmt"
 	"reflect"
+	"sync/atomic"
+	"unsafe"
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/kernel/container"
@@ -16,6 +18,8 @@ import (
 // A ref belongs to one component field and is never shared: a copy of a
 // handle reads nothing once the ref is set or released through another.
 type Ref[T any] struct {
+	// index is the slot's index plus one, so the zero Ref lies past every
+	// slot.
 	index      uint32
 	generation uint32
 }
@@ -33,21 +37,31 @@ type RefsLookup[W WorldID, T any] struct {
 }
 
 // refsResource is the kernel resource of world W's refs holding T: their
-// values in slots that never move, and the slots freed for reuse.
+// values in slots that never move, and the refs to hand out next.
+//
+// Refs are handed out from the back of the free list, the last freed first,
+// then from fresh slots past the last. A reservation is one atomic count
+// over that order, so command producers reserve in parallel under a read on
+// the refs; every write settles the reservations taken so far first where
+// it needs to.
 type refsResource[W WorldID, T any] struct {
 	// slots holds a value per ref, and may hold pointers: the GC scans refs,
 	// never stores.
 	slots container.Array[refSlot[T]]
-	// freeIndices holds the indices of freed slots, reused from the back.
-	freeIndices container.Array[uint32]
+	// freeRefs holds the refs to hand out next, from the back: each is a
+	// freed slot at its next generation.
+	freeRefs container.Array[Ref[T]]
+	// reservationCount counts the refs handed out since reservations were
+	// last settled: the free refs from the back first, then fresh slots.
+	reservationCount atomic.Int64
 }
 
 // refSlot is one ref's value and generation.
 type refSlot[T any] struct {
 	value T
-	// generation is the generation of the ref in this slot; a freed slot's
-	// is the one its next ref gets. It starts at 1, so the zero Ref matches
-	// no slot.
+	// generation is the generation of the ref alive in this slot, or 0 if
+	// none is: a freed slot, or one reserved and not yet stored. Generations
+	// start at 1, so no handle matches a slot with none.
 	generation uint32
 }
 
@@ -74,15 +88,10 @@ func (Refs[W, T]) Declare(access *kernel.Access) Refs[W, T] {
 
 // New stores value in a new ref and returns its handle.
 func (r Refs[W, T]) New(value T) Ref[T] {
-	if n := r.refs.freeIndices.Len(); n > 0 {
-		index := *r.refs.freeIndices.At(n - 1)
-		r.refs.freeIndices.Resize(n - 1)
-		slot := r.refs.slots.At(int(index))
-		slot.value = value
-		return Ref[T]{index: index, generation: slot.generation}
-	}
-	index := r.refs.slots.Append(refSlot[T]{value: value, generation: 1})
-	return Ref[T]{index: uint32(index), generation: 1}
+	h := r.refs.reserve()
+	r.refs.settleReservations()
+	r.refs.store(h, value)
+	return h
 }
 
 // Get returns the value of ref h, or nil if h is stale or zero. The pointer
@@ -114,20 +123,12 @@ func (r Refs[W, T]) Set(field *Ref[T], value T) bool {
 // Release frees ref h, and reports whether it was alive. Every handle to it
 // goes stale at once, a shadow's included. The ECS cannot find the refs a
 // component holds, so whoever removes the component or despawns its entity
-// releases them first; a ref never released lives as long as its world.
+// releases them first, or records a release with CommandRefs beside a
+// buffered Remove or Despawn; a ref never released lives as long as its
+// world.
 func (r Refs[W, T]) Release(h Ref[T]) bool {
-	slot := r.refs.slot(h)
-	if slot == nil {
-		return false
-	}
-	var zero T
-	slot.value = zero
-	slot.generation++
-	if slot.generation == 0 {
-		slot.generation = 1
-	}
-	r.refs.freeIndices.Append(h.index)
-	return true
+	r.refs.settleReservations()
+	return r.refs.release(h)
 }
 
 // Declare declares a read on W's refs of T and on world W.
@@ -142,23 +143,73 @@ func (l RefsLookup[W, T]) Get(h Ref[T]) *T {
 	return l.refs.get(h)
 }
 
-// get returns the value of ref h, or nil if h is stale or zero.
+// get returns the value of ref h, or nil if h is stale or zero. The value is
+// a slot's first field, so the slot's address is the value's, nil included:
+// converting it keeps the read path within the inlining budget.
 func (r *refsResource[W, T]) get(h Ref[T]) *T {
-	slot := r.slot(h)
-	if slot == nil {
-		return nil
-	}
-	return &slot.value
+	return (*T)(unsafe.Pointer(r.slot(h)))
 }
 
 // slot returns ref h's slot, or nil if h is stale or zero.
 func (r *refsResource[W, T]) slot(h Ref[T]) *refSlot[T] {
-	if int(h.index) >= r.slots.Len() {
+	index := int(h.index - 1)
+	if index >= r.slots.Len() {
 		return nil
 	}
-	slot := r.slots.At(int(h.index))
+	slot := r.slots.At(index)
 	if slot.generation != h.generation {
 		return nil
 	}
 	return slot
+}
+
+// reserve takes the handle of the next ref to hand out, which reads nothing
+// until a value is stored in it. Concurrent reserves take distinct handles;
+// nothing else may change the refs meanwhile.
+func (r *refsResource[W, T]) reserve() Ref[T] {
+	reservation := r.reservationCount.Add(1) - 1
+	freeCount := int64(r.freeRefs.Len())
+	if reservation < freeCount {
+		return *r.freeRefs.At(int(freeCount - 1 - reservation))
+	}
+	return Ref[T]{index: uint32(int64(r.slots.Len())+reservation-freeCount) + 1, generation: 1}
+}
+
+// settleReservations takes the refs reserved so far off the free list, and
+// adds the fresh slots reserved, each reading nothing until it is stored.
+func (r *refsResource[W, T]) settleReservations() {
+	reserved := int(r.reservationCount.Load())
+	if reserved == 0 {
+		return
+	}
+	r.reservationCount.Store(0)
+	free := r.freeRefs.Len()
+	taken := min(reserved, free)
+	r.freeRefs.Resize(free - taken)
+	r.slots.Resize(r.slots.Len() + reserved - taken)
+}
+
+// store stores value in settled reservation h, making it alive.
+func (r *refsResource[W, T]) store(h Ref[T], value T) {
+	slot := r.slots.At(int(h.index - 1))
+	slot.value = value
+	slot.generation = h.generation
+}
+
+// release frees ref h, and reports whether it was alive. Reservations are
+// settled.
+func (r *refsResource[W, T]) release(h Ref[T]) bool {
+	slot := r.slot(h)
+	if slot == nil {
+		return false
+	}
+	var zero T
+	slot.value = zero
+	next := Ref[T]{index: h.index, generation: slot.generation + 1}
+	if next.generation == 0 {
+		next.generation = 1
+	}
+	slot.generation = 0
+	r.freeRefs.Append(next)
+	return true
 }

@@ -78,7 +78,7 @@ _Avoid_: Flush, clear, frame end
 ## Commands
 
 **Command buffer**:
-A resource holding recorded changes to a world, to be applied together later. A world may have several, each a distinct type.
+A resource holding recorded changes to a world, its entities, components and refs, to be applied together later. A world may have several, each a distinct type.
 _Avoid_: Queue, deferred list
 
 **Lane**:

@@ -78,7 +78,7 @@ func TestRefsMatchAReferenceModel(t *testing.T) {
 			}
 		}
 	}
-	past := uint32(o.refs.refs.slots.Len()) // a zeroed slot past the end, if its chunk exists
+	past := uint32(o.refs.refs.slots.Len()) + 1 // the slot past the end, zeroed if its chunk exists
 	stale = append(stale, Ref[string]{}, Ref[string]{index: past}, Ref[string]{index: 1 << 20, generation: 1})
 	for _, h := range stale {
 		field := h

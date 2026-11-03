@@ -292,3 +292,21 @@ func BenchmarkRefsSet(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkCommandRefsNewRelease makes benchEntities refs of strings
+// through a buffer, commits, then releases them all through it and commits
+// again.
+func BenchmarkCommandRefsNewRelease(b *testing.B) {
+	o := spawnCommandRefs(b)
+	handles := make([]Ref[string], benchEntities)
+	measure(b, func() {
+		for i := range handles {
+			handles[i] = o.first.New("name")
+		}
+		o.sink.Commit()
+		for _, h := range handles {
+			o.first.Release(h)
+		}
+		o.sink.Commit()
+	})
+}
