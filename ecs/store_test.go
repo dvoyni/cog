@@ -107,14 +107,25 @@ func TestRegisterComponentCompositionErrors(t *testing.T) {
 }
 
 // storeDeltas answers the delta of every row of s that has one, live or in
-// the tail, by owner, converted to health. A store that does not observe
-// has none.
-func storeDeltas(s *storeResource) map[Entity]observedDelta[health] {
+// the tail, by owner, converted to health, visiting the rows a delta query
+// visits. A store that does not observe has none, and an owner visited
+// twice fails t.
+func storeDeltas(t *testing.T, s *storeResource) map[Entity]observedDelta[health] {
 	got := map[Entity]observedDelta[health]{}
 	if !s.observed() {
 		return got
 	}
-	for row := range s.owners.Len() {
+	visited := map[Entity]bool{}
+	for i := range s.walkedRows() {
+		row := i
+		if !s.changedEntitiesOverflowed {
+			row = s.listedRow(i)
+		}
+		owner := *s.owners.At(row)
+		if visited[owner] {
+			t.Fatalf("entity %#x visited twice", uint64(owner))
+		}
+		visited[owner] = true
 		delta := s.delta(row)
 		if delta == DeltaNone {
 			continue
@@ -123,7 +134,7 @@ func storeDeltas(s *storeResource) map[Entity]observedDelta[health] {
 		if delta != DeltaAdded {
 			converted.Previous = *(*health)(s.shadow(row))
 		}
-		got[*s.owners.At(row)] = converted
+		got[owner] = converted
 	}
 	return got
 }
@@ -149,7 +160,7 @@ func TestStoreChangesMatchAReferenceModel(t *testing.T) {
 		put := func(e Entity, value health) {
 			row, ok := s.row(e)
 			if ok {
-				s.markChanged(row)
+				s.markChanged(row, e)
 			} else {
 				row = s.add(e)
 			}
@@ -180,7 +191,7 @@ func TestStoreChangesMatchAReferenceModel(t *testing.T) {
 			case op < 92:
 				e := pick()
 				if row, ok := s.row(e); ok {
-					s.markChanged(row)
+					s.markChanged(row, e)
 					value := (*health)(s.address(row))
 					value.Points = random.Int32N(4) // often back to what it was
 					m.now[e] = *value
@@ -193,7 +204,7 @@ func TestStoreChangesMatchAReferenceModel(t *testing.T) {
 				}
 				m.last = map[Entity]health{}
 			}
-			got := storeDeltas(s)
+			got := storeDeltas(t, s)
 			want := m.expected()
 			if len(got) != len(want) {
 				t.Fatalf("seed %d step %d: %d changes, want %d:\n got %v\nwant %v", seed, step, len(got), len(want), got, want)
@@ -219,7 +230,7 @@ func TestStoreObservesOnlyWithAnObserver(t *testing.T) {
 	s := &newStoreOf[game, health](0).storeResource
 	s.add(makeEntity(1, 1))
 	s.startObservation()
-	if s.observed() || len(storeDeltas(s)) != 0 {
+	if s.observed() || len(storeDeltas(t, s)) != 0 {
 		t.Fatal("a store nobody observes started observing")
 	}
 	s.registerObserver()
@@ -227,7 +238,7 @@ func TestStoreObservesOnlyWithAnObserver(t *testing.T) {
 		t.Fatal("a store observed before the world's first reset")
 	}
 	s.startObservation()
-	if !s.observed() || storeDeltas(s)[makeEntity(1, 1)].Delta != DeltaAdded {
+	if !s.observed() || storeDeltas(t, s)[makeEntity(1, 1)].Delta != DeltaAdded {
 		t.Fatal("the first reset did not start observing with every row added")
 	}
 }

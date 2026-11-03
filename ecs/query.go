@@ -186,7 +186,7 @@ func (w *queryWalk) matches(terms []term, drivingRow int, e Entity) bool {
 	for marked := w.marked; marked != 0; marked &= marked - 1 {
 		i := bits.TrailingZeros8(marked)
 		if w.addresses[i] != nil {
-			terms[i].store.markChanged(rows[i])
+			terms[i].store.markChanged(rows[i], e)
 		}
 	}
 	return true

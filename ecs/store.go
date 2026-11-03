@@ -13,6 +13,9 @@ const (
 	rowShift     = 8
 	rowsPerChunk = 1 << rowShift
 	rowMask      = rowsPerChunk - 1
+	// changedEntitiesShift bounds a store's changedEntities to its live rows
+	// shifted right by it.
+	changedEntitiesShift = 3
 )
 
 // tagRow is the address of every row of a tag, whose rows have no bytes.
@@ -45,6 +48,13 @@ type storeResource struct {
 	observation  observationState
 	shadowChunks []unsafe.Pointer
 	rowStates    container.Array[rowState]
+	// changedEntities lists, once each, the owners of the rows that left
+	// rowUnchanged this window, so a delta query and the reset visit only
+	// them. Past an eighth of the live rows, or once a row in the tail can no
+	// longer be found by its owner, the listing stops and they visit every
+	// row.
+	changedEntities           []Entity
+	changedEntitiesOverflowed bool
 	// newChunk allocates one chunk of values. It is typed, made where the
 	// component's type is known.
 	newChunk func() unsafe.Pointer
@@ -210,7 +220,7 @@ func (s *storeResource) write(e Entity) unsafe.Pointer {
 	if row >= s.liveRows || *s.owners.At(row) != e {
 		return nil
 	}
-	s.markChanged(row)
+	s.markChanged(row, e)
 	return s.address(row)
 }
 
@@ -255,6 +265,11 @@ func (s *storeResource) add(e Entity) int {
 			s.liveRows++
 			return s.liveRows - 1
 		}
+		// e's index links another owner's row in the tail, which loses its
+		// link: only a walk of every row finds it now.
+		if slot := s.rowByIndex.at(e.index()); slot != nil && *slot != 0 {
+			s.changedEntitiesOverflowed = true
+		}
 	}
 	row := s.owners.Append(e)
 	if s.component.Size != 0 && row>>rowShift == len(s.valueChunks) {
@@ -266,6 +281,7 @@ func (s *storeResource) add(e Entity) int {
 	*s.rowByIndex.atOrCreate(e.index()) = uint32(row) + 1
 	if s.observation == observed {
 		s.rowStates.Append(rowAdded)
+		s.listChanged(e)
 		s.swap(row, s.liveRows)
 	}
 	s.liveRows++
@@ -280,9 +296,13 @@ func (s *storeResource) remove(e Entity, row int) {
 	if s.observation == observed {
 		s.swap(row, last)
 		state := s.rowStates.At(last)
-		if *state == rowAdded {
+		switch *state {
+		case rowAdded:
 			*state = rowDiscarded
-		} else {
+		case rowUnchanged:
+			s.listChanged(e)
+			*state = rowRemoved
+		default:
 			*state = rowRemoved
 		}
 		return
@@ -345,15 +365,42 @@ func (s *storeResource) reportedRow(e Entity) (int, bool) {
 	return row, row < s.liveRows || *s.rowStates.At(row) == rowRemoved
 }
 
-// markChanged marks live row changed, unless it was added this window. It
-// does nothing in a store nobody observes.
-func (s *storeResource) markChanged(row int) {
+// markChanged marks live row, e's, changed, unless it was added this
+// window. It does nothing in a store nobody observes.
+func (s *storeResource) markChanged(row int, e Entity) {
 	if s.observation != observed {
 		return
 	}
 	if state := s.rowStates.At(row); *state == rowUnchanged {
 		*state = rowChanged
+		s.listChanged(e)
 	}
+}
+
+// listChanged lists e, whose row has just left rowUnchanged, or stops the
+// listing once it holds an eighth of the live rows.
+func (s *storeResource) listChanged(e Entity) {
+	if len(s.changedEntities) < s.liveRows>>changedEntitiesShift {
+		s.changedEntities = append(s.changedEntities, e)
+	} else {
+		s.changedEntitiesOverflowed = true
+	}
+}
+
+// walkedRows answers how many rows a delta query driving by the store, and
+// the reset, visit: those of changedEntities, or every row, live and in the
+// tail, once the listing stopped.
+func (s *storeResource) walkedRows() int {
+	if s.changedEntitiesOverflowed {
+		return s.owners.Len()
+	}
+	return len(s.changedEntities)
+}
+
+// listedRow answers the row of changedEntities[i]. The listing has not
+// stopped.
+func (s *storeResource) listedRow(i int) int {
+	return int(*s.rowByIndex.at(s.changedEntities[i].index()) - 1)
 }
 
 // startObservation starts observing if a delta query reads the store,
@@ -364,6 +411,8 @@ func (s *storeResource) startObservation() {
 		return
 	}
 	s.observation = observed
+	// Every row is added, past what the listing holds.
+	s.changedEntitiesOverflowed = true
 	for range s.valueChunks {
 		s.shadowChunks = append(s.shadowChunks, s.newChunk())
 	}
@@ -372,19 +421,28 @@ func (s *storeResource) startObservation() {
 	}
 }
 
-// resetObservation ends the observation window: each live row's shadow
-// takes its value, and the tail is dropped.
+// resetObservation ends the observation window: each changed live row's
+// shadow takes its value, and the tail is dropped.
 func (s *storeResource) resetObservation() {
 	if s.observation != observed {
 		return
 	}
 	size := s.component.Size
-	for row := range s.liveRows {
+	for i := range s.walkedRows() {
+		row := i
+		if !s.changedEntitiesOverflowed {
+			row = s.listedRow(i)
+		}
+		if row >= s.liveRows {
+			continue
+		}
 		if state := s.rowStates.At(row); *state != rowUnchanged {
 			copy(unsafe.Slice((*byte)(s.shadow(row)), size), unsafe.Slice((*byte)(s.address(row)), size))
 			*state = rowUnchanged
 		}
 	}
+	s.changedEntities = s.changedEntities[:0]
+	s.changedEntitiesOverflowed = false
 	for row := s.liveRows; row < s.owners.Len(); row++ {
 		if slot := s.rowByIndex.at(s.owners.At(row).index()); *slot == uint32(row)+1 {
 			*slot = 0
@@ -399,6 +457,7 @@ func (s *storeResource) resetObservation() {
 func (s *storeResource) shrink() {
 	s.owners.Shrink()
 	s.rowStates.Shrink()
+	s.changedEntities = slices.Clip(s.changedEntities)
 	used := min((s.owners.Len()+rowMask)>>rowShift, len(s.valueChunks))
 	s.valueChunks = slices.Clone(s.valueChunks[:used])
 	if s.observed() {

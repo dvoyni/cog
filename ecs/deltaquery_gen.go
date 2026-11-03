@@ -51,10 +51,16 @@ func (q DeltaQuery1[W, T1]) All() iter.Seq2[Entity, DeltaRow1[T1]] {
 				continue
 			}
 			drivingStore := q.terms[drivingTerm].store
-			for row := range drivingStore.owners.Len() {
-				// Most rows are unchanged: skipping them here keeps the call
-				// for the rows that may have a delta.
-				if *drivingStore.rowStates.At(row) == rowUnchanged || !walk.matches(q.terms[:], drivingTerm, row) {
+			for i := range drivingStore.walkedRows() {
+				// Skipping the unchanged rows of a walk of every row here
+				// keeps the call for the rows that may have a delta.
+				row := i
+				if !drivingStore.changedEntitiesOverflowed {
+					row = drivingStore.listedRow(i)
+				} else if *drivingStore.rowStates.At(row) == rowUnchanged {
+					continue
+				}
+				if !walk.matches(q.terms[:], drivingTerm, row) {
 					continue
 				}
 				deltaRow := DeltaRow1[T1]{
@@ -130,10 +136,16 @@ func (q DeltaQuery2[W, T1, T2]) All() iter.Seq2[Entity, DeltaRow2[T1, T2]] {
 				continue
 			}
 			drivingStore := q.terms[drivingTerm].store
-			for row := range drivingStore.owners.Len() {
-				// Most rows are unchanged: skipping them here keeps the call
-				// for the rows that may have a delta.
-				if *drivingStore.rowStates.At(row) == rowUnchanged || !walk.matches(q.terms[:], drivingTerm, row) {
+			for i := range drivingStore.walkedRows() {
+				// Skipping the unchanged rows of a walk of every row here
+				// keeps the call for the rows that may have a delta.
+				row := i
+				if !drivingStore.changedEntitiesOverflowed {
+					row = drivingStore.listedRow(i)
+				} else if *drivingStore.rowStates.At(row) == rowUnchanged {
+					continue
+				}
+				if !walk.matches(q.terms[:], drivingTerm, row) {
 					continue
 				}
 				deltaRow := DeltaRow2[T1, T2]{
@@ -210,10 +222,16 @@ func (q DeltaQuery3[W, T1, T2, T3]) All() iter.Seq2[Entity, DeltaRow3[T1, T2, T3
 				continue
 			}
 			drivingStore := q.terms[drivingTerm].store
-			for row := range drivingStore.owners.Len() {
-				// Most rows are unchanged: skipping them here keeps the call
-				// for the rows that may have a delta.
-				if *drivingStore.rowStates.At(row) == rowUnchanged || !walk.matches(q.terms[:], drivingTerm, row) {
+			for i := range drivingStore.walkedRows() {
+				// Skipping the unchanged rows of a walk of every row here
+				// keeps the call for the rows that may have a delta.
+				row := i
+				if !drivingStore.changedEntitiesOverflowed {
+					row = drivingStore.listedRow(i)
+				} else if *drivingStore.rowStates.At(row) == rowUnchanged {
+					continue
+				}
+				if !walk.matches(q.terms[:], drivingTerm, row) {
 					continue
 				}
 				deltaRow := DeltaRow3[T1, T2, T3]{
@@ -291,10 +309,16 @@ func (q DeltaQuery4[W, T1, T2, T3, T4]) All() iter.Seq2[Entity, DeltaRow4[T1, T2
 				continue
 			}
 			drivingStore := q.terms[drivingTerm].store
-			for row := range drivingStore.owners.Len() {
-				// Most rows are unchanged: skipping them here keeps the call
-				// for the rows that may have a delta.
-				if *drivingStore.rowStates.At(row) == rowUnchanged || !walk.matches(q.terms[:], drivingTerm, row) {
+			for i := range drivingStore.walkedRows() {
+				// Skipping the unchanged rows of a walk of every row here
+				// keeps the call for the rows that may have a delta.
+				row := i
+				if !drivingStore.changedEntitiesOverflowed {
+					row = drivingStore.listedRow(i)
+				} else if *drivingStore.rowStates.At(row) == rowUnchanged {
+					continue
+				}
+				if !walk.matches(q.terms[:], drivingTerm, row) {
 					continue
 				}
 				deltaRow := DeltaRow4[T1, T2, T3, T4]{
@@ -373,10 +397,16 @@ func (q DeltaQuery5[W, T1, T2, T3, T4, T5]) All() iter.Seq2[Entity, DeltaRow5[T1
 				continue
 			}
 			drivingStore := q.terms[drivingTerm].store
-			for row := range drivingStore.owners.Len() {
-				// Most rows are unchanged: skipping them here keeps the call
-				// for the rows that may have a delta.
-				if *drivingStore.rowStates.At(row) == rowUnchanged || !walk.matches(q.terms[:], drivingTerm, row) {
+			for i := range drivingStore.walkedRows() {
+				// Skipping the unchanged rows of a walk of every row here
+				// keeps the call for the rows that may have a delta.
+				row := i
+				if !drivingStore.changedEntitiesOverflowed {
+					row = drivingStore.listedRow(i)
+				} else if *drivingStore.rowStates.At(row) == rowUnchanged {
+					continue
+				}
+				if !walk.matches(q.terms[:], drivingTerm, row) {
 					continue
 				}
 				deltaRow := DeltaRow5[T1, T2, T3, T4, T5]{
@@ -456,10 +486,16 @@ func (q DeltaQuery6[W, T1, T2, T3, T4, T5, T6]) All() iter.Seq2[Entity, DeltaRow
 				continue
 			}
 			drivingStore := q.terms[drivingTerm].store
-			for row := range drivingStore.owners.Len() {
-				// Most rows are unchanged: skipping them here keeps the call
-				// for the rows that may have a delta.
-				if *drivingStore.rowStates.At(row) == rowUnchanged || !walk.matches(q.terms[:], drivingTerm, row) {
+			for i := range drivingStore.walkedRows() {
+				// Skipping the unchanged rows of a walk of every row here
+				// keeps the call for the rows that may have a delta.
+				row := i
+				if !drivingStore.changedEntitiesOverflowed {
+					row = drivingStore.listedRow(i)
+				} else if *drivingStore.rowStates.At(row) == rowUnchanged {
+					continue
+				}
+				if !walk.matches(q.terms[:], drivingTerm, row) {
 					continue
 				}
 				deltaRow := DeltaRow6[T1, T2, T3, T4, T5, T6]{
@@ -540,10 +576,16 @@ func (q DeltaQuery7[W, T1, T2, T3, T4, T5, T6, T7]) All() iter.Seq2[Entity, Delt
 				continue
 			}
 			drivingStore := q.terms[drivingTerm].store
-			for row := range drivingStore.owners.Len() {
-				// Most rows are unchanged: skipping them here keeps the call
-				// for the rows that may have a delta.
-				if *drivingStore.rowStates.At(row) == rowUnchanged || !walk.matches(q.terms[:], drivingTerm, row) {
+			for i := range drivingStore.walkedRows() {
+				// Skipping the unchanged rows of a walk of every row here
+				// keeps the call for the rows that may have a delta.
+				row := i
+				if !drivingStore.changedEntitiesOverflowed {
+					row = drivingStore.listedRow(i)
+				} else if *drivingStore.rowStates.At(row) == rowUnchanged {
+					continue
+				}
+				if !walk.matches(q.terms[:], drivingTerm, row) {
 					continue
 				}
 				deltaRow := DeltaRow7[T1, T2, T3, T4, T5, T6, T7]{
@@ -625,10 +667,16 @@ func (q DeltaQuery8[W, T1, T2, T3, T4, T5, T6, T7, T8]) All() iter.Seq2[Entity, 
 				continue
 			}
 			drivingStore := q.terms[drivingTerm].store
-			for row := range drivingStore.owners.Len() {
-				// Most rows are unchanged: skipping them here keeps the call
-				// for the rows that may have a delta.
-				if *drivingStore.rowStates.At(row) == rowUnchanged || !walk.matches(q.terms[:], drivingTerm, row) {
+			for i := range drivingStore.walkedRows() {
+				// Skipping the unchanged rows of a walk of every row here
+				// keeps the call for the rows that may have a delta.
+				row := i
+				if !drivingStore.changedEntitiesOverflowed {
+					row = drivingStore.listedRow(i)
+				} else if *drivingStore.rowStates.At(row) == rowUnchanged {
+					continue
+				}
+				if !walk.matches(q.terms[:], drivingTerm, row) {
 					continue
 				}
 				deltaRow := DeltaRow8[T1, T2, T3, T4, T5, T6, T7, T8]{

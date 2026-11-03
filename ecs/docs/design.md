@@ -339,12 +339,21 @@ c.move = configurator.RegisterTask2(move)
   `Without[T]` filter on what the entity has now, and their changes are no
   delta. A `*T` term, or a query of filters only, is a composition error:
   an observer that wrote what it observes would see its own marks.
-- **Walk.** Each value term drives in turn, through its store's rows, live
-  and in the tail; the other terms are probed by entity. An entity is
-  yielded at the first term with a delta and skipped at the later ones, so
-  it comes once, in term order and then row order: deterministic. Unchanged
-  rows are skipped inline, so the walk costs a state byte per row of each
-  observed store, O(rows), and the rest only per row with a state.
+- **Walk.** Each value term drives in turn, through the rows of its store
+  with a state, live and in the tail; the other terms are probed by entity.
+  An entity is yielded at the first term with a delta and skipped at the
+  later ones, so it comes once, in term order and then in the order the
+  store visits its rows: deterministic.
+- **An observed store lists its changed entities,** each once, when its row
+  first leaves unchanged in the window, so the walk and the reset visit only
+  them: a window with few changes costs per change, not per row. Past an
+  eighth of the live rows, the listing stops and both visit every row,
+  skipping the unchanged ones inline, at a state byte per row: a level load
+  or a pass that writes every row costs what a walk of every row does, and
+  the list never holds more than an eighth of the rows, one byte per row.
+  An index reused within the window, by `CreateAt` of a new generation
+  while the old one waits in the tail, stops it too: the tail row loses its
+  link to the index, and only a walk of every row finds it.
 - **No field masks.** Which fields changed is the consumer's business: it
   compares value with previous using whatever it knows about the fields.
   Raw-byte masks would report float noise a consumer filters out anyway.
@@ -555,8 +564,9 @@ exists:
   run is the game's decision, made with job dependencies.
 - **`Changes[W, T]` beside delta queries.** A one-term delta query with
   `Previous()` is the same question; two ways to ask it would drift apart.
-  The delta query's row of values, previous values and deltas costs 25 µs
-  over 10,000 rows with a tenth written, against 20 µs for `Changes`.
+  The delta query's row of values, previous values and deltas cost 25 µs
+  over 10,000 rows with a tenth written, against 20 µs for `Changes`, both
+  walking every row.
 - **Created and Destroyed deltas.** A despawn already reads as every term
   removed, and `WorldLookup.Alive` tells it from a removal; that an entity
   is new means little to an observer beyond its terms being added, and
@@ -566,6 +576,11 @@ exists:
   components. The ECS cannot clear those without reading fields, and pairs
   held in an entity's type instead would make every pair a component type,
   where a world's masks have a fixed number of bits.
+- **Optional delta query terms.** They would only yield an entity's deltas
+  in several components in one visit. A delta query per component, with
+  `With` and `Without` filters for the rest, asks the same; a consumer that
+  builds one message per entity groups them itself. An `Optional` term in a
+  delta query panics at registration.
 - **A warning for a forgotten reset.** A world never reset does no harm, and
   catching resets that stopped needs a size check on the remove path.
 
@@ -574,12 +589,6 @@ exists:
 - **Parallel writes to one store.** Two jobs writing disjoint rows of one
   component serialize on its lock. Partitioned write locks can be added
   without changing the system form.
-- **A list of changed rows per store,** so a delta query walk costs
-  O(changes) instead of a state byte per row. It costs every first write in
-  a window; it can come behind the same delta query.
-- **Optional delta query terms,** with a delta when the entity has the
-  component and no part in whether it matches. An `Optional` term in a delta
-  query panics at registration until then.
 - **Introspection** for tools (by-name reads and writes).
 
 ## Performance
@@ -598,8 +607,31 @@ hand-written loops:
   the same walk reading the velocity through a `Lookup`, and a dense
   two-term query 7.4 ns against 5.0 ns. The cost is the walk's probe of a
   term, optional or not.
-- **A delta query** over 10,000 rows with a tenth written, read and reset
-  costs 25 µs.
+- **A delta query** over 10,000 rows with a tenth written through
+  `Store.Write`, read and reset costs 18 µs, 1.8 ns per row of the store.
+  The listing of changed entities makes it cost per change below an eighth
+  of the rows written, and a walk of every row above it:
+
+  | Written per window | Listed | Walked every row |
+  |---|---|---|
+  | none | 12 ns | 9.6 µs |
+  | 1% | 2.0 µs | 12.8 µs |
+  | 5% | 9.3 µs | 17.5 µs |
+  | 10% | 18 µs | 25 µs |
+  | 25% | 49 µs, overflowed | 45 µs |
+  | 50% | 84 µs, overflowed | 78 µs |
+  | 100% | 155 µs, overflowed | 157 µs |
+
+  A listed change costs about 18 ns, and a walk of every row 9.6 µs plus
+  15 ns a change, so they meet near 29%; a cap of a quarter measured no
+  better at 25% and worse at 50%. Past the cap, a window pays the listing up
+  to it, 7 to 10% at a quarter or half written. Writes cost 3 to 5% more:
+  `Store.Write` 5.3 ns against 5.1 ns, a dense two-term query writing an
+  observed store 8.3 ns against 8.0 ns, a committed `Set` to one 33 ns
+  against 32 ns. The list holds at most 1 byte a row, a store of
+  `position`s 93 bytes per entity against 92: loading as many entities
+  again in one window, reading and resetting, then despawning them, costs
+  the same, with the list kept at an eighth of the rows.
 - **A ref** costs 2.4 ns to read by handle and 15 ns to set through its
   component, observed; making one through a command buffer and releasing it
   through another commit, 22 ns.

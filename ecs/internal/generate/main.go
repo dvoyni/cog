@@ -141,10 +141,16 @@ func (q DeltaQuery{{.N}}[W, {{.Types}}]) All() iter.Seq2[Entity, DeltaRow{{.N}}[
 				continue
 			}
 			drivingStore := q.terms[drivingTerm].store
-			for row := range drivingStore.owners.Len() {
-				// Most rows are unchanged: skipping them here keeps the call
-				// for the rows that may have a delta.
-				if *drivingStore.rowStates.At(row) == rowUnchanged || !walk.matches(q.terms[:], drivingTerm, row) {
+			for i := range drivingStore.walkedRows() {
+				// Skipping the unchanged rows of a walk of every row here
+				// keeps the call for the rows that may have a delta.
+				row := i
+				if !drivingStore.changedEntitiesOverflowed {
+					row = drivingStore.listedRow(i)
+				} else if *drivingStore.rowStates.At(row) == rowUnchanged {
+					continue
+				}
+				if !walk.matches(q.terms[:], drivingTerm, row) {
 					continue
 				}
 				deltaRow := DeltaRow{{.N}}[{{.Types}}]{

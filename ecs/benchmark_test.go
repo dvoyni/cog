@@ -1,6 +1,8 @@
 package ecs
 
 import (
+	"fmt"
+	"runtime"
 	"testing"
 
 	"github.com/dvoyni/cog/kernel"
@@ -73,6 +75,21 @@ func measure(b *testing.B, round func()) {
 		round()
 	}
 	b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/benchEntities, "ns/entity")
+}
+
+// heapBytes answers the bytes allocated on the heap and still reachable.
+func heapBytes() uint64 {
+	runtime.GC()
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+	return stats.HeapAlloc
+}
+
+// reportHeap reports the heap reachable since before, per entity of a
+// round, which o keeps reachable.
+func reportHeap(b *testing.B, before uint64, o *benchWorld) {
+	b.ReportMetric(float64(heapBytes()-before)/benchEntities, "heap-B/entity")
+	runtime.KeepAlive(o)
 }
 
 func BenchmarkSliceLoop(b *testing.B) {
@@ -222,6 +239,57 @@ func BenchmarkDeltaQuery(b *testing.B) {
 		}
 		ObservationResetSystem(nil, kernel.NoArg{}, o.world)
 	})
+}
+
+// BenchmarkDeltaQueryShare is BenchmarkDeltaQuery with a share of the store
+// written per window, from none to all of it, spread across its rows. It
+// also reports the heap the world holds once the containers have grown.
+func BenchmarkDeltaQueryShare(b *testing.B) {
+	for _, percent := range []int{0, 1, 5, 10, 25, 50, 100} {
+		b.Run(fmt.Sprintf("percent=%d", percent), func(b *testing.B) {
+			before := heapBytes()
+			o := spawnBench(b, 1, true)
+			written := benchEntities * percent / 100
+			measure(b, func() {
+				for i := range written {
+					o.positions.Write(o.entities[i*benchEntities/written]).X++
+				}
+				for _, row := range o.deltas.All() {
+					benchSum += row.Get().X - row.Previous().X
+				}
+				ObservationResetSystem(nil, kernel.NoArg{}, o.world)
+			})
+			reportHeap(b, before, o)
+		})
+	}
+}
+
+// BenchmarkDeltaQueryLoad loads as many entities again into an observed
+// world in one window, as a level load does, reads their deltas and resets;
+// then it despawns them, reads the removals and resets.
+func BenchmarkDeltaQueryLoad(b *testing.B) {
+	before := heapBytes()
+	o := spawnBench(b, 1, true)
+	loaded := make([]Entity, benchEntities)
+	measure(b, func() {
+		for i := range loaded {
+			e := o.world.Spawn()
+			loaded[i] = e
+			o.positions.Add(e, position{X: float32(i)})
+		}
+		for _, row := range o.deltas.All() {
+			benchSum += row.Get().X
+		}
+		ObservationResetSystem(nil, kernel.NoArg{}, o.world)
+		for _, e := range loaded {
+			o.world.Despawn(e)
+		}
+		for _, row := range o.deltas.All() {
+			benchSum += row.Previous().X
+		}
+		ObservationResetSystem(nil, kernel.NoArg{}, o.world)
+	})
+	reportHeap(b, before, o)
 }
 
 // BenchmarkObservationResetUnchanged resets an observed store nobody wrote.

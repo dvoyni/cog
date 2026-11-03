@@ -103,6 +103,10 @@ func TestDeltasMatchAReferenceModel(t *testing.T) {
 	random := rand.New(rand.NewPCG(1, 2))
 	var alive []Entity
 	pick := func() Entity { return alive[random.IntN(len(alive))] }
+	// listedSteps and overflowedSteps count the steps whose deltas came from
+	// the listing of changed entities and from a walk of every row.
+	listedSteps := 0
+	overflowedSteps := 0
 	for step := range 20000 {
 		switch op := random.IntN(100); {
 		case op < 15 || len(alive) == 0:
@@ -142,6 +146,11 @@ func TestDeltasMatchAReferenceModel(t *testing.T) {
 			}
 			m.last = map[Entity]health{}
 		}
+		if s := o.store.store; s.changedEntitiesOverflowed {
+			overflowedSteps++
+		} else if len(s.changedEntities) != 0 {
+			listedSteps++
+		}
 		got := o.collect()
 		want := m.expected()
 		if len(got) != len(want) {
@@ -160,6 +169,9 @@ func TestDeltasMatchAReferenceModel(t *testing.T) {
 		if o.store.store.len() != len(m.now) {
 			t.Fatalf("step %d: %d live rows, want %d", step, o.store.store.len(), len(m.now))
 		}
+	}
+	if listedSteps < 1000 || overflowedSteps < 1000 {
+		t.Fatalf("%d steps listed and %d walked every row", listedSteps, overflowedSteps)
 	}
 }
 
@@ -222,6 +234,71 @@ func TestDespawnedIndicesOutsideTheRangeAreNotFreed(t *testing.T) {
 	}
 }
 
+// TestIndexReusedInTheWindowReportsBoth despawns a mirrored entity and
+// places the next generation at its index within one window, in a store few
+// enough changes leave listing: the removed row in the tail loses its link to
+// the index, and is still reported.
+func TestIndexReusedInTheWindowReportsBoth(t *testing.T) {
+	o := spawnObserved(t)
+	for range 100 {
+		o.store.Add(o.world.Spawn(), health{})
+	}
+	mirrored := makeEntity(1<<30, 1)
+	o.world.CreateAt(mirrored)
+	o.store.Add(mirrored, health{Points: 1})
+	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
+	o.world.Despawn(mirrored)
+	if o.store.store.changedEntitiesOverflowed {
+		t.Fatal("one removal stopped the listing")
+	}
+	replaced := makeEntity(1<<30, 2)
+	o.world.CreateAt(replaced)
+	o.store.Add(replaced, health{Points: 2})
+	got := o.collect()
+	if len(got) != 2 || got[mirrored] != (observedDelta[health]{Delta: DeltaRemoved, Value: health{1}, Previous: health{1}}) || got[replaced] != (observedDelta[health]{Delta: DeltaAdded, Value: health{2}}) {
+		t.Fatalf("the window reported %+v, want the mirrored entity removed and its successor added", got)
+	}
+	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
+	if got := o.collect(); len(got) != 0 {
+		t.Fatalf("the next window reported %+v", got)
+	}
+}
+
+// TestRowsReaddedInTheWindowAreYieldedOnce removes and adds back, within one
+// window and while the store lists its changes, a row added in the window
+// and a row it began with: each is yielded once, with what it holds last.
+func TestRowsReaddedInTheWindowAreYieldedOnce(t *testing.T) {
+	o := spawnObserved(t)
+	for range 100 {
+		o.store.Add(o.world.Spawn(), health{})
+	}
+	kept := o.world.Spawn()
+	o.store.Add(kept, health{Points: 1})
+	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
+	added := o.world.Spawn()
+	for points := range int32(3) {
+		o.store.Add(added, health{Points: points})
+		o.store.Remove(added)
+		o.store.Remove(kept)
+		o.store.Add(kept, health{Points: points + 2})
+	}
+	o.store.Add(added, health{Points: 5})
+	if o.store.store.changedEntitiesOverflowed {
+		t.Fatal("two entities changed stopped the listing")
+	}
+	yields := map[Entity]int{}
+	for e := range o.deltas.All() {
+		yields[e]++
+	}
+	got := o.collect()
+	if len(yields) != 2 || yields[added] != 1 || yields[kept] != 1 {
+		t.Fatalf("the window yielded %v, want each of two entities once", yields)
+	}
+	if got[added] != (observedDelta[health]{Delta: DeltaAdded, Value: health{5}}) || got[kept] != (observedDelta[health]{Delta: DeltaChanged, Value: health{4}, Previous: health{1}}) {
+		t.Fatalf("the window reported %+v", got)
+	}
+}
+
 func TestDeltasAndResetAllocateNothingOnceGrown(t *testing.T) {
 	o := spawnObserved(t)
 	entities := make([]Entity, 1000)
@@ -246,6 +323,23 @@ func TestDeltasAndResetAllocateNothingOnceGrown(t *testing.T) {
 	window()
 	if got := testing.AllocsPerRun(20, window); got != 0 {
 		t.Fatalf("a window of writes, deltas and a reset allocated %v times", got)
+	}
+	listed := func() {
+		for i := 0; i < len(entities); i += 20 {
+			o.store.Write(entities[i]).Points++
+			o.store.Remove(entities[i+1])
+			o.store.Add(entities[i+1], health{Points: 1})
+		}
+		if o.store.store.changedEntitiesOverflowed {
+			t.Fatal("a tenth of the rows changed stopped the listing")
+		}
+		for range o.deltas.All() {
+		}
+		ObservationResetSystem(nil, kernel.NoArg{}, o.world)
+	}
+	listed()
+	if got := testing.AllocsPerRun(20, listed); got != 0 {
+		t.Fatalf("a window of listed changes, deltas and a reset allocated %v times", got)
 	}
 }
 
@@ -454,6 +548,11 @@ func TestDeltaQueriesMatchAReferenceModel(t *testing.T) {
 	var alive []Entity
 	seen := map[Entity]bool{}
 	pick := func() Entity { return alive[random.IntN(len(alive))] }
+	// listedSteps and overflowedSteps count, per store, the steps whose
+	// deltas came from the listing of changed entities and from a walk of
+	// every row.
+	listedSteps := 0
+	overflowedSteps := 0
 	for step := range 20000 {
 		switch op := random.IntN(100); {
 		case op < 12 || len(alive) == 0:
@@ -511,6 +610,13 @@ func TestDeltaQueriesMatchAReferenceModel(t *testing.T) {
 				}
 			}
 		}
+		for _, s := range []*storeResource{healths.store, positions.store, tags.store} {
+			if s.changedEntitiesOverflowed {
+				overflowedSteps++
+			} else if len(s.changedEntities) != 0 {
+				listedSteps++
+			}
+		}
 		wantAll := map[Entity]deltaRow{}
 		wantThawed := map[Entity]observedDelta[health]{}
 		for e := range seen {
@@ -560,6 +666,9 @@ func TestDeltaQueriesMatchAReferenceModel(t *testing.T) {
 				t.Fatalf("step %d: without frozen, entity %#x yielded %+v, want %+v", step, uint64(e), gotThawed[e], want)
 			}
 		}
+	}
+	if listedSteps < 1000 || overflowedSteps < 1000 {
+		t.Fatalf("%d steps listed and %d walked every row", listedSteps, overflowedSteps)
 	}
 }
 
