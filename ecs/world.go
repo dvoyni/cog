@@ -36,6 +36,14 @@ type World[W WorldID] struct {
 	world *worldResource[W]
 }
 
+// WorldLookup reads world W: whether an entity is alive, and the components
+// the world holds. It holds a read on the world, so it runs alongside every
+// handle of W but the barrier. Stores have locks of their own, so it reaches
+// no component: a Lookup or a query reads them.
+type WorldLookup[W WorldID] struct {
+	world *worldResource[W]
+}
+
 // worldResource is the kernel resource of world W: its entities and its
 // stores.
 type worldResource[W WorldID] struct {
@@ -225,6 +233,34 @@ func (w World[W]) AddRaw(e Entity, id ComponentID, given []byte) bool {
 // RemoveRaw removes e's component id, and reports whether it had one.
 func (w World[W]) RemoveRaw(e Entity, id ComponentID) bool {
 	return w.world.remove(e, w.world.stores[id])
+}
+
+// Declare declares a read on world W.
+func (WorldLookup[W]) Declare(access *kernel.Access) WorldLookup[W] {
+	return WorldLookup[W]{world: access.Read[*worldResource[W]]().Get()}
+}
+
+// Alive reports whether e is alive. An entity held in a component may have
+// died since it was stored: its generation no longer matches, so it reads as
+// dead even once its index is reused.
+func (l WorldLookup[W]) Alive(e Entity) bool {
+	return l.world.entities.alive(e)
+}
+
+// ComponentID answers T's ComponentID in the world, as World.ComponentID
+// does.
+func (l WorldLookup[W]) ComponentID[T any]() ComponentID {
+	return l.world.storeOf(reflect.TypeFor[T]()).component.ID
+}
+
+// ComponentCount answers how many component types the world holds.
+func (l WorldLookup[W]) ComponentCount() int {
+	return len(l.world.stores)
+}
+
+// Component describes component id, which must be below ComponentCount.
+func (l WorldLookup[W]) Component(id ComponentID) ComponentInfo {
+	return l.world.stores[id].component
 }
 
 // despawn removes e and every component it has, and reports whether it was

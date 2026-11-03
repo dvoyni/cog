@@ -197,3 +197,108 @@ func TestWorldAllocatesNothingOnceGrown(t *testing.T) {
 		}
 	}
 }
+
+func TestWorldLookupAgreesWithWorld(t *testing.T) {
+	var w World[game]
+	var lookup WorldLookup[game]
+	var commands CommandBuffer[game, aiCommands]
+	var sink CommandSink[game, aiCommands]
+	var positionID ComponentID
+	spawn(t, func(c *kernel.Configurator) {
+		RegisterComponent[game, health](c)
+		positionID = RegisterComponent[game, position](c)
+		RegisterCommandBuffer[game, aiCommands](c)
+		w = declare[World[game]](c)
+		lookup = declare[WorldLookup[game]](c)
+		commands = declare[CommandBuffer[game, aiCommands]](c)
+		sink = declare[CommandSink[game, aiCommands]](c)
+	})
+	e := w.Spawn()
+	reserved := commands.Reserve()
+	if !lookup.Alive(e) || lookup.Alive(reserved) || lookup.Alive(NoEntity) {
+		t.Fatal("the lookup reads a spawned entity as dead, or a reservation or NoEntity as alive")
+	}
+	w.Despawn(e)
+	reused := w.Spawn()
+	if reused.index() != e.index() || lookup.Alive(e) || !lookup.Alive(reused) {
+		t.Fatalf("%v reused the index of %v, or the lookup reads the dead one alive or the new one dead", reused, e)
+	}
+	commands.Spawn(reserved)
+	sink.Commit()
+	if !lookup.Alive(reserved) {
+		t.Fatal("the lookup reads a committed reservation as dead")
+	}
+	if lookup.ComponentCount() != w.ComponentCount() || lookup.ComponentID[position]() != positionID || lookup.Component(positionID) != w.Component(positionID) {
+		t.Fatal("the lookup describes the components otherwise than the world")
+	}
+}
+
+type target struct{ Entity Entity }
+
+// huntCounts holds what each hunt counted, by the hunt's arg.
+var huntCounts [2]int
+
+// hunt counts the hunters whose target is alive into huntCounts[number].
+func hunt(k *kernel.Kernel, number int, world WorldLookup[game], q Query1[game, target]) kernel.NoResult {
+	huntCounts[number] = 0
+	for _, row := range q.All() {
+		if world.Alive(row.Get().Entity) {
+			huntCounts[number]++
+		}
+	}
+	return kernel.NoResult{}
+}
+
+// reserveSpawns records spawning 50 reserved entities.
+func reserveSpawns(k *kernel.Kernel, _ kernel.NoArg, commands CommandBuffer[game, aiCommands]) kernel.NoResult {
+	for range 50 {
+		commands.Spawn(commands.Reserve())
+	}
+	return kernel.NoResult{}
+}
+
+// TestWorldLookupsRunAlongsideWriters runs two hunts, each checking its
+// targets alive through a WorldLookup, in parallel with a writer toggling a
+// component on the targets and a producer reserving entities, and despawns
+// targets between rounds. Run under -race, it checks that a world read sees
+// nothing those writers change.
+func TestWorldLookupsRunAlongsideWriters(t *testing.T) {
+	var hunts []*kernel.Task[int, kernel.NoResult]
+	var toggleTask, reserveTask, commitTask *kernel.Task[kernel.NoArg, kernel.NoResult]
+	var w World[game]
+	var targets Store[game, target]
+	h, prey := queryWorld(t, 300, func(c *kernel.Configurator) {
+		RegisterComponent[game, target](c)
+		RegisterCommandBuffer[game, aiCommands](c)
+		hunts = append(hunts, c.RegisterTask2(hunt), c.RegisterTask2(hunt))
+		toggleTask = c.RegisterTask2(toggle[velocity])
+		reserveTask = c.RegisterTask1(reserveSpawns)
+		commitTask = c.RegisterTask1(commit)
+		w = declare[World[game]](c)
+		targets = declare[Store[game, target]](c)
+	})
+	for _, e := range prey {
+		targets.Add(w.Spawn(), target{Entity: e})
+	}
+	alive := len(prey)
+	for round := range 5 {
+		h.run(func(ex *kernel.Executor) kernel.JobHandle {
+			var jobs []kernel.JobHandle
+			for i, task := range hunts {
+				jobs = append(jobs, ex.Schedule(task, i).Handle())
+			}
+			jobs = append(jobs, ex.Schedule(toggleTask, kernel.NoArg{}).Handle(), ex.Schedule(reserveTask, kernel.NoArg{}).Handle())
+			return ex.Schedule(commitTask, kernel.NoArg{}, jobs...).Handle()
+		})
+		for i, count := range huntCounts {
+			if count != alive {
+				t.Fatalf("round %d: hunt %d counted %d live targets, want %d", round, i, count, alive)
+			}
+		}
+		for i := round; i < len(prey); i += 7 {
+			if w.Despawn(prey[i]) {
+				alive--
+			}
+		}
+	}
+}

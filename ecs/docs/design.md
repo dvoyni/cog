@@ -40,6 +40,7 @@ Kernel
 |---|---|
 | `WorldID` | Constraint over world IDs: `~[1]uint64 \| ~[2]uint64 \| ~[4]uint64 \| ~[8]uint64`. |
 | `World[W]` | The barrier: write on the world. Spawn, despawn, `CreateAt`, type-erased row access. |
+| `WorldLookup[W]` | Reads the world: `Alive`, and the component registry. No component. |
 | `Store[W, T]` | Writes `T`'s store by entity: `Get` a pointer to read, `Write` a pointer marked changed, `Add`, `Remove`. |
 | `Lookup[W, T]` | Reads `T`'s store by entity: `Has`, and `Get` a copy. |
 | `Query1[W, A]` … `Query8[W, ...]` | Walks the entities holding every term, yielding each entity and its row. `*T` writes, `T` reads a copy. |
@@ -116,7 +117,15 @@ Kernel
   (`W` itself). A store's writer updates its bit atomically when it adds or
   removes, so no global lock is taken; type-erased access and despawn read it
   to visit only the stores an entity has.
-- **Alive check** compares the generation, and costs one load.
+- **Alive check** compares the generation, and costs one load. `World` and
+  `WorldLookup` answer it; every store probe makes it too, since a row's
+  owner is compared whole.
+- **An entity held in a component may be dead.** A stored `Entity` is an
+  id, not a link: nothing clears it or reports when its entity dies. Its
+  generation no longer matches, so it reads as dead even once its index is
+  reused, and every probe through it finds nothing. Whoever reads it checks
+  it, with `WorldLookup.Alive` or by the probe it makes anyway. Clearing it,
+  or despawning along with it, waits for relations or hooks.
 
 ## Components and stores
 
@@ -138,7 +147,7 @@ Kernel
   `Lookup`, `Changes`, `kernel.Read`. `Store[W, T]` writes, `Lookup[W, T]`
   reads; the `*T` / `T` rule is for query terms only. The world and command
   buffers are unexported resources too, reached only through handles:
-  `World`, `CommandBuffer`, `CommandSink`.
+  `World`, `WorldLookup`, `CommandBuffer`, `CommandSink`.
 - **Erased metadata.** The registry keeps each component's `reflect.Type`,
   size and alignment, for consumers that work on rows as bytes. It keeps
   nothing about fields: a consumer that needs a field view (a serializer, the
@@ -148,8 +157,10 @@ Kernel
 ## Locking
 
 - **Every handle of a world declares a read on it,** besides its own locks.
-  No system takes the world for reading alone: what a read allows (alive
-  checks, reservations) is on the handles that need it.
+  `WorldLookup[W]` takes that read alone, for alive checks and the
+  component registry; reservations are on `CommandBuffer`. A world read
+  shuts out only the barrier: store writers run beside it and set mask bits,
+  so it reaches neither a store nor a mask.
 - **`World[W]` is the write.** A system taking it is the barrier: nothing
   else of that world runs alongside it.
 - **Under the barrier,** a system may spawn and despawn at once, place
@@ -170,6 +181,7 @@ Kernel
   - a query's `*T` term writes `T`'s store, a `T` term reads it;
   - `Store[W, T]` writes it, `Lookup[W, T]` reads it;
   - `Changes[W, T]` reads it;
+  - `WorldLookup[W]` reads the world alone;
   - `CommandBuffer[W, Tag]` reads its buffer; `CommandSink[W, Tag]` writes it
     and takes the barrier;
   - `kernel.Read[R]` and `kernel.Write[R]` lock resource `R`.
@@ -576,13 +588,10 @@ Each step ends with its tests passing under `go test -race`.
 
 Gaps in the design:
 
-1. **Entities held in components.** A stored `Entity` only goes stale when
-   its entity dies; nothing clears or reports it. To be decided, or
-   documented as the rule.
-2. **Change filters in queries.** `Changes[W, T]` walks one store; a query
+1. **Change filters in queries.** `Changes[W, T]` walks one store; a query
    cannot ask for changed or added `T` among its terms, so a system walks the
    changes and probes the other stores by hand.
-3. **Optional query terms.** A term that yields the row's `T` when the
+2. **Optional query terms.** A term that yields the row's `T` when the
    entity has one and nil when not, instead of a `Lookup` probed per row.
 
 Major features other ECSs have:
@@ -590,7 +599,8 @@ Major features other ECSs have:
 - **Parallel iteration within a query.** Splitting one walk over several
   workers, with partitioned write locks on a store (see Deferred).
 - **Relations and hierarchy.** Pairs between entities, parent and child,
-  despawning a subtree, propagating along it (see Deferred).
+  despawning a subtree, propagating along it (see Deferred). An entity held
+  in a component is cleared or despawned with its target only here.
 - **Hooks on add, remove and set.** A callback when a component arrives,
   leaves or is set, run where the change is applied. A remove hook could
   release a component's refs without the user recording it.
