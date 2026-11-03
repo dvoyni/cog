@@ -44,7 +44,7 @@ Kernel
 | `Store[W, T]` | Writes `T`'s store by entity: `Get` a pointer to read, `Write` a pointer marked changed, `Add`, `Remove`. |
 | `Lookup[W, T]` | Reads `T`'s store by entity: `Has`, and `Get` a copy. |
 | `Query1[W, A]` … `Query8[W, ...]` | Walks the entities holding every term, yielding each entity and its row. `*T` writes, `T` reads a copy. |
-| `Changes[W, T]` | Reads what changed in `T`'s store this observation window, and turns observation on for it. |
+| `DeltaQuery1[W, A]` … `DeltaQuery8[W, ...]` | Walks the entities with a delta in a term this observation window, among those that have or had every term, yielding each entity and its row: values now, as of the reset, and deltas. Observes each term's store. |
 | `Refs[W, T]` | Writes the refs holding `T`: `New`, `Get` a pointer, `Set`, `Release`. |
 | `RefsLookup[W, T]` | Reads the refs holding `T`: `Get` a pointer, to read only. |
 | `CommandBuffer[W, Tag]` | Records into the command buffer `Tag` of world `W`, holding a read on it. |
@@ -144,7 +144,7 @@ Kernel
 - **Stores are private; parameters are handles.** The store resource is
   unexported. What a system takes is a small struct holding a pointer to it,
   so every system parameter is passed by value alike: `Query2`, `Store`,
-  `Lookup`, `Changes`, `kernel.Read`. `Store[W, T]` writes, `Lookup[W, T]`
+  `Lookup`, `DeltaQuery1`, `kernel.Read`. `Store[W, T]` writes, `Lookup[W, T]`
   reads; the `*T` / `T` rule is for query terms only. The world and command
   buffers are unexported resources too, reached only through handles:
   `World`, `WorldLookup`, `CommandBuffer`, `CommandSink`.
@@ -180,7 +180,7 @@ Kernel
 - **Outside the barrier,** a system holds what its parameters declare:
   - a query's `*T` term writes `T`'s store, a `T` term reads it;
   - `Store[W, T]` writes it, `Lookup[W, T]` reads it;
-  - `Changes[W, T]` reads it;
+  - a delta query's `T` term reads it;
   - `WorldLookup[W]` reads the world alone;
   - `CommandBuffer[W, Tag]` reads its buffer; `CommandSink[W, Tag]` writes it
     and takes the barrier;
@@ -272,12 +272,12 @@ c.move = configurator.RegisterTask2(move)
 
 ## Change detection
 
-- **Opt-in per store.** A system taking `Changes[W, T]` registers an
-  observer of `T`'s store. A store nobody observes keeps no shadow and no
+- **Opt-in per store.** A delta query registers an observer of each of its
+  value terms' stores. A store nobody observes keeps no shadow and no
   states, and pays nothing.
 - **Off until the first reset.** A world observes nothing until its first
   observation reset runs: no store keeps a tail or states, a despawned index
-  is freed at once, and `Changes()` reports nothing. That first reset turns
+  is freed at once, and a delta query yields nothing. That first reset turns
   observation on, and every row present then counts as added in the first
   window, so an observer joining late, such as replication, sees the whole
   world. A world nobody resets therefore keeps nothing it would leak.
@@ -297,12 +297,30 @@ c.move = configurator.RegisterTask2(move)
   | Despawned | removed in every store it had |
 
 - **Removed rows wait in the tail** of the dense part until the reset, so a
-  change can still give the last value. Lookups and queries see only the
-  live part.
-- **`Changes()` yields** the entity, the kind (added, changed, removed), the
-  value and the previous value (from the shadow; none when added). A changed
-  row whose bytes equal its shadow is skipped, so A→B→A is not a change.
-  Changes come in row order, so their order is deterministic.
+  delta query can still give the last value. Lookups and queries see only
+  the live part.
+- **A delta query** `DeltaQuery2[Game, Position, Sprite]` walks the
+  entities that have or had every value term this window, a removed term
+  included and a discarded one not, with a delta in at least one. An entity
+  holding only a `Position` never matches. Its row gives:
+  - `Get()`, the values now, or the last one of a term removed;
+  - `Previous()`, the values as of the reset, zero for a term added;
+  - `Delta()`, one `Delta` per term: `DeltaNone`, `DeltaAdded`,
+    `DeltaChanged` or `DeltaRemoved`.
+
+  A changed row whose bytes equal its shadow has `DeltaNone`, so A→B→A is
+  no delta, and an entity with no other delta is not yielded. A despawn is
+  `DeltaRemoved` on every term; `WorldLookup.Alive` tells it from a removal.
+- **Terms are values.** `T` reads and observes `T`'s store; `With[T]` and
+  `Without[T]` filter on what the entity has now, and their changes are no
+  delta. A `*T` term, or a query of filters only, is a composition error:
+  an observer that wrote what it observes would see its own marks.
+- **Walk.** Each value term drives in turn, through its store's rows, live
+  and in the tail; the other terms are probed by entity. An entity is
+  yielded at the first term with a delta and skipped at the later ones, so
+  it comes once, in term order and then row order: deterministic. Unchanged
+  rows are skipped inline, so the walk costs a state byte per row of each
+  observed store, O(rows), and the rest only per row with a state.
 - **No field masks.** Which fields changed is the consumer's business: it
   compares value with previous using whatever it knows about the fields.
   Raw-byte masks would report float noise a consumer filters out anyway.
@@ -425,7 +443,7 @@ in a ref:
   read. Several lookups run in parallel.
 - **`Set` is the change.** It writes the value into the same slot, advances
   the slot's generation and writes the new handle back into the field, on
-  every call. The component's bytes change, so `Changes` reports the
+  every call. The component's bytes change, so a delta query reports the
   component as changed, provided the component was reached through a pointer
   that marks: a `*T` query term or `Store.Write`. Writing through a `*T` from
   `Get` is not a change.
@@ -471,7 +489,7 @@ exists:
   `CreateAt` and allocates its own from another allocation range, so an
   `Entity` inside a component means the same on both ends and is never
   remapped.
-- **`Changes()` on the replicated stores** narrows what is captured again;
+- **A delta query on the replicated stores** narrows what is captured again;
   field masks, quantization, ownership and interest are the consumer's own
   components and code.
 - **Several worlds per kernel** give a client its simulated and its displayed
@@ -511,6 +529,12 @@ exists:
   them.
 - **An ECS frame or drain of its own.** Where systems, commits and the reset
   run is the game's decision, made with job dependencies.
+- **`Changes[W, T]` beside delta queries.** A one-term delta query with
+  `Previous()` is the same question; two ways to ask it would drift apart.
+- **Created and Destroyed deltas.** A despawn already reads as every term
+  removed, and `WorldLookup.Alive` tells it from a removal; that an entity
+  is new means little to an observer beyond its terms being added, and
+  knowing it would cost a window number per entity.
 - **A warning for a forgotten reset.** A world never reset does no harm, and
   catching resets that stopped needs a size check on the remove path.
 
@@ -520,6 +544,9 @@ exists:
   component serialize on its lock. Partitioned write locks can be added
   without changing the system form.
 - **Relations** between entities.
+- **A list of changed rows per store,** so a delta query walk costs
+  O(changes) instead of a state byte per row. It costs every first write in
+  a window; it can come behind the same delta query.
 - **Shrink.** Giving capacity back, as a system under the barrier.
 - **Introspection** for tools (by-name reads and writes).
 
@@ -540,6 +567,9 @@ Each step ends with its tests passing under `go test -race`.
    queries and system calls.
 4. **Change detection.** Shadows and row states, `Changes[W, T]`,
    `ObservationReset[W]`. A property test against a reference model.
+   `Changes` was later replaced by `DeltaQuery1`…`DeltaQuery8`: a walk of
+   10,000 rows with a tenth written, read and reset costs 25 µs, against
+   20 µs for `Changes`, for the row of values, previous values and deltas.
 5. **Commands.** `RegisterCommandBuffer`, `CommandBuffer[W, Tag]`, lanes,
    `CommandSink[W, Tag]`, type-erased row access under the barrier, spawning from a mask
    and bytes. A property test of buffered changes from several systems, and
@@ -588,10 +618,7 @@ Each step ends with its tests passing under `go test -race`.
 
 Gaps in the design:
 
-1. **Change filters in queries.** `Changes[W, T]` walks one store; a query
-   cannot ask for changed or added `T` among its terms, so a system walks the
-   changes and probes the other stores by hand.
-2. **Optional query terms.** A term that yields the row's `T` when the
+1. **Optional query terms.** A term that yields the row's `T` when the
    entity has one and nil when not, instead of a `Lookup` probed per row.
 
 Major features other ECSs have:

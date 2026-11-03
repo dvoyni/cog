@@ -1,5 +1,6 @@
 // Command generate writes the ECS code that repeats per term count: Query1
-// to Query8 with their rows. Run it with go generate in the ecs directory.
+// to Query8 and DeltaQuery1 to DeltaQuery8, with their rows. Run it with go
+// generate in the ecs directory.
 package main
 
 import (
@@ -91,6 +92,88 @@ func (r Row{{.N}}[{{.Types}}]) Get() ({{.Types}}) {
 }
 `))
 
+var deltaQueryTemplate = template.Must(template.New("deltaQuery").Parse(`
+// DeltaQuery{{.N}} walks the entities of world W that have or had every one
+// of its {{.N}} terms in this observation window, a delta in at least one of
+// them, yielding each once with its row. Its terms are values: T reads T's
+// store and observes it; With[T] and Without[T] filter on what the entity
+// has now, and their changes are no delta. A term removed this window yields
+// its last value. It yields nothing before the world's first observation
+// reset.
+type DeltaQuery{{.N}}[W WorldID, {{.Types}} any] struct {
+	terms [{{.N}}]term
+}
+
+// DeltaRow{{.N}} is one entity's terms, yielded by DeltaQuery{{.N}}.All:
+// their values now, as of the reset, and their deltas.
+type DeltaRow{{.N}}[{{.Types}} any] struct {
+	addresses, previous [{{.N}}]unsafe.Pointer
+	deltas              [{{.N}}]Delta
+}
+
+// Declare declares a read on each term's store and on world W, and
+// registers an observer of each value term's store.
+func (DeltaQuery{{.N}}[W, {{.Types}}]) Declare(access *kernel.Access) DeltaQuery{{.N}}[W, {{.Types}}] {
+	w := access.Read[*worldResource[W]]().Get()
+	var q DeltaQuery{{.N}}[W, {{.Types}}]
+{{- range .Terms}}
+	q.terms[{{.Index}}] = declareTerm[W, {{.Type}}](access, w)
+{{- end}}
+	declareDeltaQuery(q.terms[:])
+	return q
+}
+
+// All walks the entities with a delta, yielding each with its row: those of
+// the first value term in its store's row order, then those of the next not
+// yielded yet, so the order depends only on what was done.
+func (q DeltaQuery{{.N}}[W, {{.Types}}]) All() iter.Seq2[Entity, DeltaRow{{.N}}[{{.Types}}]] {
+	return func(yield func(Entity, DeltaRow{{.N}}[{{.Types}}]) bool) {
+		var walk deltaWalk
+		if !walk.observed(q.terms[:]) {
+			return
+		}
+		for drivingTerm := range q.terms {
+			if q.terms[drivingTerm].mode != termRead {
+				continue
+			}
+			drivingStore := q.terms[drivingTerm].store
+			for row := range drivingStore.owners.Len() {
+				// Most rows are unchanged: skipping them here keeps the call
+				// for the rows that may have a delta.
+				if *drivingStore.rowStates.At(row) == rowUnchanged || !walk.matches(q.terms[:], drivingTerm, row) {
+					continue
+				}
+				deltaRow := DeltaRow{{.N}}[{{.Types}}]{
+					addresses: [{{.N}}]unsafe.Pointer(walk.addresses[:{{.N}}]),
+					previous:  [{{.N}}]unsafe.Pointer(walk.previous[:{{.N}}]),
+					deltas:    [{{.N}}]Delta(walk.deltas[:{{.N}}]),
+				}
+				if !yield(*drivingStore.owners.At(row), deltaRow) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// Get returns the row's terms now, or as last held for a term removed this
+// window.
+func (r DeltaRow{{.N}}[{{.Types}}]) Get() ({{.Types}}) {
+	return {{range $i, $t := .Terms}}{{if $i}}, {{end}}*(*{{$t.Type}})(r.addresses[{{$t.Index}}]){{end}}
+}
+
+// Previous returns the row's terms as of the last observation reset, the
+// zero value for a term added since.
+func (r DeltaRow{{.N}}[{{.Types}}]) Previous() ({{.Types}}) {
+	return {{range $i, $t := .Terms}}{{if $i}}, {{end}}previousValue[{{$t.Type}}](r.previous[{{$t.Index}}]){{end}}
+}
+
+// Delta returns what happened to each of the row's terms this window.
+func (r DeltaRow{{.N}}[{{.Types}}]) Delta() ({{range $i, $t := .Terms}}{{if $i}}, {{end}}Delta{{end}}) {
+	return {{range $i, $t := .Terms}}{{if $i}}, {{end}}r.deltas[{{$t.Index}}]{{end}}
+}
+`))
+
 type termData struct {
 	Index int
 	Type  string
@@ -117,10 +200,16 @@ func makeArity(n int) arityData {
 }
 
 func main() {
+	generate("query_gen.go", queryTemplate)
+	generate("deltaquery_gen.go", deltaQueryTemplate)
+}
+
+// generate writes file: the header, then t executed for every arity.
+func generate(file string, t *template.Template) {
 	var out bytes.Buffer
 	out.WriteString(header)
 	for n := 1; n <= maxArity; n++ {
-		if err := queryTemplate.Execute(&out, makeArity(n)); err != nil {
+		if err := t.Execute(&out, makeArity(n)); err != nil {
 			panic(err)
 		}
 	}
@@ -128,7 +217,7 @@ func main() {
 	if err != nil {
 		panic(fmt.Sprintf("%v\n%s", err, out.Bytes()))
 	}
-	if err := os.WriteFile("query_gen.go", source, 0o644); err != nil {
+	if err := os.WriteFile(file, source, 0o644); err != nil {
 		panic(err)
 	}
 }

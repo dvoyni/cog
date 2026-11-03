@@ -19,7 +19,7 @@ type benchWorld struct {
 	positions  Store[game, position]
 	velocities Store[game, velocity]
 	moving     Query2[game, *position, velocity]
-	changes    Changes[game, position]
+	deltas     DeltaQuery1[game, position]
 	commands   CommandBuffer[game, aiCommands]
 	sink       CommandSink[game, aiCommands]
 	entities   []Entity
@@ -38,7 +38,7 @@ func spawnBench(b *testing.B, velocityEvery int, observed bool) *benchWorld {
 		o.velocities = declare[Store[game, velocity]](c)
 		o.moving = declare[Query2[game, *position, velocity]](c)
 		if observed {
-			o.changes = declare[Changes[game, position]](c)
+			o.deltas = declare[DeltaQuery1[game, position]](c)
 		}
 		o.commands = declare[CommandBuffer[game, aiCommands]](c)
 		o.sink = declare[CommandSink[game, aiCommands]](c)
@@ -175,16 +175,16 @@ func BenchmarkDirtyListChanges(b *testing.B) {
 	})
 }
 
-// BenchmarkChanges writes a tenth of an observed store, reads its changes
+// BenchmarkDeltaQuery writes a tenth of an observed store, reads its deltas
 // and resets the window.
-func BenchmarkChanges(b *testing.B) {
+func BenchmarkDeltaQuery(b *testing.B) {
 	o := spawnBench(b, 1, true)
 	measure(b, func() {
 		for i := 0; i < benchEntities; i += 10 {
 			o.positions.Write(o.entities[i]).X++
 		}
-		for _, change := range o.changes.All() {
-			benchSum += change.Value.X - change.Previous.X
+		for _, row := range o.deltas.All() {
+			benchSum += row.Get().X - row.Previous().X
 		}
 		ObservationReset(nil, kernel.NoArg{}, o.world)
 	})

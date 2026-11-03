@@ -110,7 +110,7 @@ func TestQueryMatchesAReferenceAcrossChunks(t *testing.T) {
 		var positions Store[game, position]
 		var velocities Store[game, velocity]
 		var tags Store[game, frozen]
-		var changes Changes[game, position]
+		var deltas DeltaQuery1[game, position]
 		var move Query3[game, *position, velocity, Without[frozen]]
 		var still Query2[game, *position, With[frozen]]
 		spawn(t, func(c *kernel.Configurator) {
@@ -121,7 +121,7 @@ func TestQueryMatchesAReferenceAcrossChunks(t *testing.T) {
 			positions = declare[Store[game, position]](c)
 			velocities = declare[Store[game, velocity]](c)
 			tags = declare[Store[game, frozen]](c)
-			changes = declare[Changes[game, position]](c)
+			deltas = declare[DeltaQuery1[game, position]](c)
 			move = declare[Query3[game, *position, velocity, Without[frozen]]](c)
 			still = declare[Query2[game, *position, With[frozen]]](c)
 		})
@@ -173,7 +173,7 @@ func TestQueryMatchesAReferenceAcrossChunks(t *testing.T) {
 			}
 		}
 		marked := map[Entity]bool{}
-		for e := range changes.All() {
+		for e := range deltas.All() {
 			marked[e] = true
 		}
 		maps.Copy(stilled, moved)

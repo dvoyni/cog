@@ -13,11 +13,11 @@ type named struct{ Name Ref[string] }
 
 // refsWorld is a world with an observed store of named and refs of strings.
 type refsWorld struct {
-	world   World[game]
-	store   Store[game, named]
-	changes Changes[game, named]
-	refs    Refs[game, string]
-	lookup  RefsLookup[game, string]
+	world  World[game]
+	store  Store[game, named]
+	deltas DeltaQuery1[game, named]
+	refs   Refs[game, string]
+	lookup RefsLookup[game, string]
 }
 
 func spawnRefs(t testing.TB) *refsWorld {
@@ -27,7 +27,7 @@ func spawnRefs(t testing.TB) *refsWorld {
 		RegisterRefs[game, string](c)
 		o.world = declare[World[game]](c)
 		o.store = declare[Store[game, named]](c)
-		o.changes = declare[Changes[game, named]](c)
+		o.deltas = declare[DeltaQuery1[game, named]](c)
 		o.refs = declare[Refs[game, string]](c)
 		o.lookup = declare[RefsLookup[game, string]](c)
 	})
@@ -96,16 +96,13 @@ func TestRefSetIsAComponentChange(t *testing.T) {
 	ObservationReset(nil, kernel.NoArg{}, o.world)
 	first := o.store.Get(e).Name
 	*o.refs.Get(first) = "b"
-	for range o.changes.All() {
+	for range o.deltas.All() {
 		t.Fatal("a write through Get was seen")
 	}
 	o.refs.Set(&o.store.Write(e).Name, "c")
-	got := map[Entity]Change[named]{}
-	for e, change := range o.changes.All() {
-		got[e] = change
-	}
+	got := collectDeltas(o.deltas)
 	change := got[e]
-	if len(got) != 1 || change.Kind != ChangeChanged || change.Previous.Name != first || change.Value.Name == first {
+	if len(got) != 1 || change.Delta != DeltaChanged || change.Previous.Name != first || change.Value.Name == first {
 		t.Fatalf("Set reported %+v, want a change from the old handle to a new one", got)
 	}
 	if o.refs.Get(change.Previous.Name) != nil || *o.refs.Get(change.Value.Name) != "c" {

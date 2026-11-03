@@ -19,7 +19,7 @@ type commandWorld struct {
 	second  CommandBuffer[game, aiCommands]
 	sink    CommandSink[game, aiCommands]
 	healths Store[game, health]
-	changes Changes[game, health]
+	deltas  DeltaQuery1[game, health]
 }
 
 func spawnCommands(t *testing.T) *commandWorld {
@@ -32,7 +32,7 @@ func spawnCommands(t *testing.T) *commandWorld {
 		o.second = declare[CommandBuffer[game, aiCommands]](c)
 		o.sink = declare[CommandSink[game, aiCommands]](c)
 		o.healths = declare[Store[game, health]](c)
-		o.changes = declare[Changes[game, health]](c)
+		o.deltas = declare[DeltaQuery1[game, health]](c)
 	})
 	return o
 }
@@ -118,12 +118,9 @@ func TestObserversSeeCommits(t *testing.T) {
 	o.first.Spawn(spawned)
 	o.first.Add(spawned, health{Points: 7})
 	o.sink.Commit()
-	got := map[Entity]Change[health]{}
-	for e, change := range o.changes.All() {
-		got[e] = change
-	}
-	if got[e] != (Change[health]{Kind: ChangeChanged, Value: health{2}, Previous: health{1}}) ||
-		got[spawned] != (Change[health]{Kind: ChangeAdded, Value: health{7}}) {
+	got := collectDeltas(o.deltas)
+	if got[e] != (observedDelta[health]{Delta: DeltaChanged, Value: health{2}, Previous: health{1}}) ||
+		got[spawned] != (observedDelta[health]{Delta: DeltaAdded, Value: health{7}}) {
 		t.Fatalf("observers saw %+v after the commit", got)
 	}
 }
@@ -269,11 +266,11 @@ func TestTypeErasedAccess(t *testing.T) {
 
 func TestTypedWorldAccess(t *testing.T) {
 	var w World[game]
-	var changes Changes[game, health]
+	var deltas DeltaQuery1[game, health]
 	spawn(t, func(c *kernel.Configurator) {
 		RegisterComponent[game, health](c)
 		w = declare[World[game]](c)
-		changes = declare[Changes[game, health]](c)
+		deltas = declare[DeltaQuery1[game, health]](c)
 	})
 	ObservationReset(nil, kernel.NoArg{}, w)
 	e := w.Spawn()
@@ -283,7 +280,7 @@ func TestTypedWorldAccess(t *testing.T) {
 	ObservationReset(nil, kernel.NoArg{}, w)
 	w.Write[health](e).Points = 4
 	reported := 0
-	for range changes.All() {
+	for range deltas.All() {
 		reported++
 	}
 	if reported != 1 {

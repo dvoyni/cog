@@ -47,11 +47,14 @@ A function of a fixed form (kernel, arg, then parameters, returning a result) th
 _Avoid_: Handler, job, behaviour
 
 **System parameter**:
-A value a system takes whose type declares, at registration, the locks it needs: a query, a store, changes, commands, the world, or a kernel resource handle.
+A value a system takes whose type declares, at registration, the locks it needs: a query, a delta query, a store, commands, the world, or a kernel resource handle.
 
 **Query**:
 A system parameter that walks every entity holding a set of components. A pointer term writes its component, a value term reads a copy.
 _Avoid_: View, filter, iterator
+
+**Delta query**:
+A system parameter that walks the entities with a delta in one of its components this observation window, among those that have or had every one of them, giving each component's value now, its value as of the reset, and its delta.
 
 **Barrier**:
 A write on a world, which excludes every other system of that world while it runs. Structural and type-erased work happens under it.
@@ -59,17 +62,17 @@ A write on a world, which excludes every other system of that world while it run
 ## Change detection
 
 **Observed store**:
-A store some system reads changes from. Only observed stores pay for change detection.
+A store a delta query reads. Only observed stores pay for change detection.
 
-**Change**:
-One entity's component added, changed or removed since the last observation reset, with its current and previous value.
-_Avoid_: Event, diff, dirty mark
+**Delta**:
+What happened to one entity's component since the last observation reset: none, added, changed or removed. A component written back to its value as of the reset has none.
+_Avoid_: Change, event, diff, dirty mark
 
 **Shadow**:
-An observed store's copy of each value as of the last observation reset, which a change's previous value comes from.
+An observed store's copy of each value as of the last observation reset, which a delta query's previous values come from.
 
 **Observation window**:
-What an observer can see: changes made by systems that ran before it since the last observation reset.
+What an observer can see: deltas made by systems that ran before it since the last observation reset.
 
 **Observation reset**:
 The system that ends an observation window: it brings every shadow up to date and frees despawned indices. Its first run turns observation on; a world it never runs in observes nothing. The user decides where it runs.

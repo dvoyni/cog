@@ -106,15 +106,24 @@ func TestRegisterComponentCompositionErrors(t *testing.T) {
 	})
 }
 
-// storeChanges answers s's changes by entity, converted to health.
-func storeChanges(s *storeResource) map[Entity]Change[health] {
-	got := map[Entity]Change[health]{}
-	for row, change, ok := s.nextChange(0); ok; row, change, ok = s.nextChange(row + 1) {
-		converted := Change[health]{Kind: change.kind, Value: *(*health)(change.value)}
-		if change.previous != nil {
-			converted.Previous = *(*health)(change.previous)
+// storeDeltas answers the delta of every row of s that has one, live or in
+// the tail, by owner, converted to health. A store that does not observe
+// has none.
+func storeDeltas(s *storeResource) map[Entity]observedDelta[health] {
+	got := map[Entity]observedDelta[health]{}
+	if !s.observed() {
+		return got
+	}
+	for row := range s.owners.Len() {
+		delta := s.delta(row)
+		if delta == DeltaNone {
+			continue
 		}
-		got[change.owner] = converted
+		converted := observedDelta[health]{Delta: delta, Value: *(*health)(s.address(row))}
+		if delta != DeltaAdded {
+			converted.Previous = *(*health)(s.shadow(row))
+		}
+		got[*s.owners.At(row)] = converted
 	}
 	return got
 }
@@ -184,7 +193,7 @@ func TestStoreChangesMatchAReferenceModel(t *testing.T) {
 				}
 				m.last = map[Entity]health{}
 			}
-			got := storeChanges(s)
+			got := storeDeltas(s)
 			want := m.expected()
 			if len(got) != len(want) {
 				t.Fatalf("seed %d step %d: %d changes, want %d:\n got %v\nwant %v", seed, step, len(got), len(want), got, want)
@@ -210,7 +219,7 @@ func TestStoreObservesOnlyWithAnObserver(t *testing.T) {
 	s := &newStoreOf[game, health](0).storeResource
 	s.add(makeEntity(1, 1))
 	s.startObservation()
-	if s.observed() || len(storeChanges(s)) != 0 {
+	if s.observed() || len(storeDeltas(s)) != 0 {
 		t.Fatal("a store nobody observes started observing")
 	}
 	s.registerObserver()
@@ -218,7 +227,7 @@ func TestStoreObservesOnlyWithAnObserver(t *testing.T) {
 		t.Fatal("a store observed before the world's first reset")
 	}
 	s.startObservation()
-	if !s.observed() || storeChanges(s)[makeEntity(1, 1)].Kind != ChangeAdded {
+	if !s.observed() || storeDeltas(s)[makeEntity(1, 1)].Delta != DeltaAdded {
 		t.Fatal("the first reset did not start observing with every row added")
 	}
 }

@@ -185,7 +185,7 @@ func TestWorldAllocatesNothingOnceGrown(t *testing.T) {
 				w.Despawn(e)
 			}
 			if observing {
-				for range o.changes.All() {
+				for range o.deltas.All() {
 				}
 				ObservationReset(nil, kernel.NoArg{}, w)
 			}

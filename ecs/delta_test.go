@@ -15,7 +15,7 @@ type observedWorld struct {
 	store   Store[game, health]
 	lookup  Lookup[game, health]
 	query   Query1[game, *health]
-	changes Changes[game, health]
+	deltas  DeltaQuery1[game, health]
 	reset   *kernel.Task[kernel.NoArg, kernel.NoResult]
 	harness *harness
 }
@@ -29,7 +29,7 @@ func spawnUnobserved(t *testing.T) *observedWorld {
 		o.store = declare[Store[game, health]](c)
 		o.lookup = declare[Lookup[game, health]](c)
 		o.query = declare[Query1[game, *health]](c)
-		o.changes = declare[Changes[game, health]](c)
+		o.deltas = declare[DeltaQuery1[game, health]](c)
 		o.reset = c.RegisterTask1(ObservationReset[game])
 	})
 	return o
@@ -43,11 +43,24 @@ func spawnObserved(t *testing.T) *observedWorld {
 	return o
 }
 
-// collect answers the window's changes by entity.
-func (o *observedWorld) collect() map[Entity]Change[health] {
-	got := map[Entity]Change[health]{}
-	for e, change := range o.changes.All() {
-		got[e] = change
+// collect answers the window's deltas by entity.
+func (o *observedWorld) collect() map[Entity]observedDelta[health] {
+	return collectDeltas(o.deltas)
+}
+
+// observedDelta is one entity's row of a one-term delta query, as the tests
+// compare it.
+type observedDelta[T any] struct {
+	Delta           Delta
+	Value, Previous T
+}
+
+// collectDeltas answers what q yields, by entity. It fails nothing itself:
+// an entity yielded twice shows as fewer entries than the model expects.
+func collectDeltas[T any](q DeltaQuery1[game, T]) map[Entity]observedDelta[T] {
+	got := map[Entity]observedDelta[T]{}
+	for e, row := range q.All() {
+		got[e] = observedDelta[T]{Delta: row.Delta(), Value: row.Get(), Previous: row.Previous()}
 	}
 	return got
 }
@@ -58,20 +71,20 @@ type changeModel struct {
 	atReset, now, last map[Entity]health
 }
 
-func (m *changeModel) expected() map[Entity]Change[health] {
-	want := map[Entity]Change[health]{}
+func (m *changeModel) expected() map[Entity]observedDelta[health] {
+	want := map[Entity]observedDelta[health]{}
 	for e, value := range m.now {
 		previous, existed := m.atReset[e]
 		switch {
 		case !existed:
-			want[e] = Change[health]{Kind: ChangeAdded, Value: value}
+			want[e] = observedDelta[health]{Delta: DeltaAdded, Value: value}
 		case previous != value:
-			want[e] = Change[health]{Kind: ChangeChanged, Value: value, Previous: previous}
+			want[e] = observedDelta[health]{Delta: DeltaChanged, Value: value, Previous: previous}
 		}
 	}
 	for e, previous := range m.atReset {
 		if _, ok := m.now[e]; !ok {
-			want[e] = Change[health]{Kind: ChangeRemoved, Value: m.last[e], Previous: previous}
+			want[e] = observedDelta[health]{Delta: DeltaRemoved, Value: m.last[e], Previous: previous}
 		}
 	}
 	return want
@@ -84,7 +97,7 @@ func (m *changeModel) remove(e Entity) {
 	}
 }
 
-func TestChangesMatchAReferenceModel(t *testing.T) {
+func TestDeltasMatchAReferenceModel(t *testing.T) {
 	o := spawnObserved(t)
 	m := &changeModel{atReset: map[Entity]health{}, now: map[Entity]health{}, last: map[Entity]health{}}
 	random := rand.New(rand.NewPCG(1, 2))
@@ -160,7 +173,7 @@ func TestWritesThroughGetGoUnseen(t *testing.T) {
 		t.Fatal("a write through Get was seen")
 	}
 	o.store.Write(e).Points = 3
-	if got := o.collect()[e]; got != (Change[health]{Kind: ChangeChanged, Value: health{3}, Previous: health{1}}) {
+	if got := o.collect()[e]; got != (observedDelta[health]{Delta: DeltaChanged, Value: health{3}, Previous: health{1}}) {
 		t.Fatalf("a write through Write reported %+v", got)
 	}
 }
@@ -209,7 +222,7 @@ func TestDespawnedIndicesOutsideTheRangeAreNotFreed(t *testing.T) {
 	}
 }
 
-func TestChangesAndResetAllocateNothingOnceGrown(t *testing.T) {
+func TestDeltasAndResetAllocateNothingOnceGrown(t *testing.T) {
 	o := spawnObserved(t)
 	entities := make([]Entity, 1000)
 	for i := range entities {
@@ -226,13 +239,13 @@ func TestChangesAndResetAllocateNothingOnceGrown(t *testing.T) {
 				o.store.Add(e, health{Points: 1})
 			}
 		}
-		for range o.changes.All() {
+		for range o.deltas.All() {
 		}
 		ObservationReset(nil, kernel.NoArg{}, o.world)
 	}
 	window()
 	if got := testing.AllocsPerRun(20, window); got != 0 {
-		t.Fatalf("a window of writes, changes and a reset allocated %v times", got)
+		t.Fatalf("a window of writes, deltas and a reset allocated %v times", got)
 	}
 }
 
@@ -259,7 +272,7 @@ func TestUnobservedWorldKeepsNothing(t *testing.T) {
 func TestWorldWithoutResetObservesNothing(t *testing.T) {
 	var w World[game]
 	var healths Store[game, health]
-	var changes Changes[game, health]
+	var deltas DeltaQuery1[game, health]
 	var query Query1[game, *health]
 	var commands CommandBuffer[game, aiCommands]
 	var sink CommandSink[game, aiCommands]
@@ -269,7 +282,7 @@ func TestWorldWithoutResetObservesNothing(t *testing.T) {
 		RegisterCommandBuffer[game, aiCommands](c)
 		w = declare[World[game]](c)
 		healths = declare[Store[game, health]](c)
-		changes = declare[Changes[game, health]](c)
+		deltas = declare[DeltaQuery1[game, health]](c)
 		query = declare[Query1[game, *health]](c)
 		commands = declare[CommandBuffer[game, aiCommands]](c)
 		sink = declare[CommandSink[game, aiCommands]](c)
@@ -297,7 +310,7 @@ func TestWorldWithoutResetObservesNothing(t *testing.T) {
 		t.Fatalf("the commit dropped %d records", dropped)
 	}
 	s := healths.store
-	for range changes.All() {
+	for range deltas.All() {
 		t.Fatal("a world never reset reported a change")
 	}
 	if s.observed() || s.rowStates.Len() != 0 || len(s.shadowChunks) != 0 || s.owners.Len() != s.len() || s.len() != 2 {
@@ -316,7 +329,7 @@ func TestFirstResetReportsEveryRowAsAdded(t *testing.T) {
 	a := o.world.Spawn()
 	o.store.Add(a, health{Points: 7})
 	ObservationReset(nil, kernel.NoArg{}, o.world)
-	if got := o.collect()[a]; got != (Change[health]{Kind: ChangeAdded, Value: health{7}}) {
+	if got := o.collect()[a]; got != (observedDelta[health]{Delta: DeltaAdded, Value: health{7}}) {
 		t.Fatalf("the first window reported %+v for a row present before it", got)
 	}
 	ObservationReset(nil, kernel.NoArg{}, o.world)
@@ -357,5 +370,257 @@ func TestUnobservedReservationsNeverRepeat(t *testing.T) {
 			t.Fatalf("entity %#x is dead or shares its index", uint64(e))
 		}
 		indices[e.index()] = true
+	}
+}
+
+// termModel is the reference for one term: what each entity held at the
+// last reset and holds now, and the last value of each removed since.
+type termModel[T comparable] struct {
+	atReset, now, last map[Entity]T
+}
+
+func newTermModel[T comparable]() *termModel[T] {
+	return &termModel[T]{atReset: map[Entity]T{}, now: map[Entity]T{}, last: map[Entity]T{}}
+}
+
+func (m *termModel[T]) remove(e Entity) {
+	if value, ok := m.now[e]; ok {
+		m.last[e] = value
+		delete(m.now, e)
+	}
+}
+
+func (m *termModel[T]) reset() {
+	m.atReset = map[Entity]T{}
+	for e, value := range m.now {
+		m.atReset[e] = value
+	}
+	m.last = map[Entity]T{}
+}
+
+// delta answers what a delta query yields for e's term, or false if e
+// neither has nor had it this window.
+func (m *termModel[T]) delta(e Entity) (observedDelta[T], bool) {
+	previous, existed := m.atReset[e]
+	value, exists := m.now[e]
+	switch {
+	case exists && !existed:
+		return observedDelta[T]{Delta: DeltaAdded, Value: value}, true
+	case existed && !exists:
+		return observedDelta[T]{Delta: DeltaRemoved, Value: m.last[e], Previous: previous}, true
+	case exists && value != previous:
+		return observedDelta[T]{Delta: DeltaChanged, Value: value, Previous: previous}, true
+	case exists:
+		return observedDelta[T]{Delta: DeltaNone, Value: value, Previous: previous}, true
+	}
+	return observedDelta[T]{}, false
+}
+
+// deltaRow is one entity's row of the model test's three-term query.
+type deltaRow struct {
+	health   observedDelta[health]
+	position observedDelta[position]
+	frozen   Delta
+}
+
+// TestDeltaQueriesMatchAReferenceModel runs random spawns, despawns, adds,
+// removes, writes and resets over three components, and checks after every
+// step a query of all three, a tag among them, and a query of health
+// without frozen, against the reference: every entity that has or had each
+// value term, with a delta in one, yielded once.
+func TestDeltaQueriesMatchAReferenceModel(t *testing.T) {
+	var w World[game]
+	var healths Store[game, health]
+	var positions Store[game, position]
+	var tags Store[game, frozen]
+	var all DeltaQuery3[game, health, position, frozen]
+	var thawed DeltaQuery2[game, health, Without[frozen]]
+	spawn(t, func(c *kernel.Configurator) {
+		RegisterComponent[game, health](c)
+		RegisterComponent[game, position](c)
+		RegisterComponent[game, frozen](c)
+		w = declare[World[game]](c)
+		healths = declare[Store[game, health]](c)
+		positions = declare[Store[game, position]](c)
+		tags = declare[Store[game, frozen]](c)
+		all = declare[DeltaQuery3[game, health, position, frozen]](c)
+		thawed = declare[DeltaQuery2[game, health, Without[frozen]]](c)
+	})
+	ObservationReset(nil, kernel.NoArg{}, w)
+	healthModel := newTermModel[health]()
+	positionModel := newTermModel[position]()
+	frozenModel := newTermModel[frozen]()
+	random := rand.New(rand.NewPCG(11, 13))
+	var alive []Entity
+	seen := map[Entity]bool{}
+	pick := func() Entity { return alive[random.IntN(len(alive))] }
+	for step := range 20000 {
+		switch op := random.IntN(100); {
+		case op < 12 || len(alive) == 0:
+			e := w.Spawn()
+			alive = append(alive, e)
+			seen[e] = true
+		case op < 17:
+			i := random.IntN(len(alive))
+			w.Despawn(alive[i])
+			healthModel.remove(alive[i])
+			positionModel.remove(alive[i])
+			frozenModel.remove(alive[i])
+			alive[i] = alive[len(alive)-1]
+			alive = alive[:len(alive)-1]
+		case op < 32:
+			e := pick()
+			value := health{Points: random.Int32N(3)}
+			healths.Add(e, value)
+			healthModel.now[e] = value
+		case op < 40:
+			e := pick()
+			healths.Remove(e)
+			healthModel.remove(e)
+		case op < 50:
+			e := pick()
+			if p := healths.Write(e); p != nil {
+				p.Points = random.Int32N(3) // often back to what it was
+				healthModel.now[e] = *p
+			}
+		case op < 62:
+			e := pick()
+			value := position{X: float32(random.IntN(3))}
+			positions.Add(e, value)
+			positionModel.now[e] = value
+		case op < 70:
+			e := pick()
+			positions.Remove(e)
+			positionModel.remove(e)
+		case op < 80:
+			e := pick()
+			tags.Add(e, frozen{})
+			frozenModel.now[e] = frozen{}
+		case op < 88:
+			e := pick()
+			tags.Remove(e)
+			frozenModel.remove(e)
+		case op < 92:
+			ObservationReset(nil, kernel.NoArg{}, w)
+			healthModel.reset()
+			positionModel.reset()
+			frozenModel.reset()
+			for e := range seen {
+				if !w.Alive(e) {
+					delete(seen, e)
+				}
+			}
+		}
+		wantAll := map[Entity]deltaRow{}
+		wantThawed := map[Entity]observedDelta[health]{}
+		for e := range seen {
+			h, hasHealth := healthModel.delta(e)
+			p, hasPosition := positionModel.delta(e)
+			f, hasFrozen := frozenModel.delta(e)
+			if hasHealth && hasPosition && hasFrozen && (h.Delta != DeltaNone || p.Delta != DeltaNone || f.Delta != DeltaNone) {
+				wantAll[e] = deltaRow{health: h, position: p, frozen: f.Delta}
+			}
+			if _, frozenNow := frozenModel.now[e]; hasHealth && !frozenNow && h.Delta != DeltaNone {
+				wantThawed[e] = h
+			}
+		}
+		gotAll := map[Entity]deltaRow{}
+		yielded := 0
+		for e, row := range all.All() {
+			yielded++
+			h, p, _ := row.Get()
+			previousHealth, previousPosition, _ := row.Previous()
+			healthDelta, positionDelta, frozenDelta := row.Delta()
+			gotAll[e] = deltaRow{
+				health:   observedDelta[health]{Delta: healthDelta, Value: h, Previous: previousHealth},
+				position: observedDelta[position]{Delta: positionDelta, Value: p, Previous: previousPosition},
+				frozen:   frozenDelta,
+			}
+		}
+		if yielded != len(wantAll) || len(gotAll) != len(wantAll) {
+			t.Fatalf("step %d: the query of all three yielded %d rows for %d entities, want %d", step, yielded, len(gotAll), len(wantAll))
+		}
+		for e, want := range wantAll {
+			if gotAll[e] != want {
+				t.Fatalf("step %d: entity %#x yielded %+v, want %+v", step, uint64(e), gotAll[e], want)
+			}
+		}
+		gotThawed := map[Entity]observedDelta[health]{}
+		for e, row := range thawed.All() {
+			healthDelta, _ := row.Delta()
+			h, _ := row.Get()
+			previous, _ := row.Previous()
+			gotThawed[e] = observedDelta[health]{Delta: healthDelta, Value: h, Previous: previous}
+		}
+		if len(gotThawed) != len(wantThawed) {
+			t.Fatalf("step %d: the query without frozen yielded %d entities, want %d", step, len(gotThawed), len(wantThawed))
+		}
+		for e, want := range wantThawed {
+			if gotThawed[e] != want {
+				t.Fatalf("step %d: without frozen, entity %#x yielded %+v, want %+v", step, uint64(e), gotThawed[e], want)
+			}
+		}
+	}
+}
+
+func TestDeltaQueryCompositionErrors(t *testing.T) {
+	expectPanic(t, "delta query terms are values", func() {
+		spawn(t, func(c *kernel.Configurator) {
+			RegisterComponent[game, health](c)
+			declare[DeltaQuery1[game, *health]](c)
+		})
+	})
+	expectPanic(t, "With and Without terms only", func() {
+		spawn(t, func(c *kernel.Configurator) {
+			RegisterComponent[game, health](c)
+			declare[DeltaQuery2[game, With[health], Without[health]]](c)
+		})
+	})
+	expectPanic(t, "not registered", func() {
+		spawn(t, func(c *kernel.Configurator) {
+			declare[DeltaQuery1[game, health]](c)
+		})
+	})
+}
+
+func TestDeltaQueryAllocatesNothing(t *testing.T) {
+	var w World[game]
+	var healths Store[game, health]
+	var positions Store[game, position]
+	var both DeltaQuery3[game, health, position, Without[frozen]]
+	spawn(t, func(c *kernel.Configurator) {
+		RegisterComponent[game, health](c)
+		RegisterComponent[game, position](c)
+		RegisterComponent[game, frozen](c)
+		w = declare[World[game]](c)
+		healths = declare[Store[game, health]](c)
+		positions = declare[Store[game, position]](c)
+		both = declare[DeltaQuery3[game, health, position, Without[frozen]]](c)
+	})
+	ObservationReset(nil, kernel.NoArg{}, w)
+	entities := make([]Entity, 500)
+	for i := range entities {
+		entities[i] = w.Spawn()
+		healths.Add(entities[i], health{})
+		positions.Add(entities[i], position{})
+	}
+	ObservationReset(nil, kernel.NoArg{}, w)
+	for i, e := range entities {
+		if i%3 == 0 {
+			healths.Write(e).Points++
+		}
+		if i%5 == 0 {
+			positions.Remove(e)
+		}
+	}
+	walk := func() {
+		for _, row := range both.All() {
+			h, p, _ := row.Get()
+			benchSum += float32(h.Points) + p.X
+		}
+	}
+	walk()
+	if got := testing.AllocsPerRun(20, walk); got != 0 {
+		t.Fatalf("a delta query walk allocated %v times", got)
 	}
 }

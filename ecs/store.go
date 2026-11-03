@@ -56,23 +56,14 @@ type storeResource struct {
 type observationState uint8
 
 const (
-	// unobserved: no system takes Changes of the store.
+	// unobserved: no delta query reads the store.
 	unobserved observationState = iota
-	// observerWaiting: a system takes Changes of the store, and the store
+	// observerWaiting: a delta query reads the store, and the store
 	// observes from the world's first observation reset.
 	observerWaiting
 	// observed: the store keeps a shadow and a state per row.
 	observed
 )
-
-// rowChange is one row's change in an observation window, as the store
-// reports it without the component's type: its owner, and the addresses of
-// its value and of its value as of the last reset, nil for an addition.
-type rowChange struct {
-	owner           Entity
-	kind            ChangeKind
-	value, previous unsafe.Pointer
-}
 
 // rowState is what happened to an observed row in this observation window.
 type rowState uint8
@@ -306,7 +297,7 @@ func (s *storeResource) remove(e Entity, row int) {
 	*s.rowByIndex.at(e.index()) = 0
 }
 
-// registerObserver records that a system takes Changes of the store, so it
+// registerObserver records that a delta query reads the store, so it
 // observes from the world's first observation reset.
 func (s *storeResource) registerObserver() {
 	if s.observation == unobserved {
@@ -320,38 +311,37 @@ func (s *storeResource) observed() bool {
 	return s.observation == observed
 }
 
-// nextChange answers the first change of the window at row or after it, and
-// the row it is at, or false if there is none: an added, changed or removed
-// row, skipping a changed row whose bytes equal its shadow. Walking from row
-// 0, each next one from the row after the last, yields the window's changes
-// in row order. A store that does not observe has none.
-func (s *storeResource) nextChange(row int) (int, rowChange, bool) {
-	if s.observation != observed {
-		return 0, rowChange{}, false
-	}
-	size := s.component.Size
-	for ; row < s.owners.Len(); row++ {
-		var change rowChange
-		switch *s.rowStates.At(row) {
-		case rowAdded:
-			change.kind = ChangeAdded
-		case rowChanged:
-			change.previous = s.shadow(row)
-			if bytes.Equal(unsafe.Slice((*byte)(s.address(row)), size), unsafe.Slice((*byte)(change.previous), size)) {
-				continue
-			}
-			change.kind = ChangeChanged
-		case rowRemoved:
-			change.kind = ChangeRemoved
-			change.previous = s.shadow(row)
-		default:
-			continue
+// delta answers what happened to row in this window, live or in the tail: a
+// changed row whose bytes equal its shadow is none, and so is a discarded
+// one. The store is observed.
+func (s *storeResource) delta(row int) Delta {
+	switch *s.rowStates.At(row) {
+	case rowAdded:
+		return DeltaAdded
+	case rowChanged:
+		size := s.component.Size
+		if bytes.Equal(unsafe.Slice((*byte)(s.address(row)), size), unsafe.Slice((*byte)(s.shadow(row)), size)) {
+			return DeltaNone
 		}
-		change.owner = *s.owners.At(row)
-		change.value = s.address(row)
-		return row, change, true
+		return DeltaChanged
+	case rowRemoved:
+		return DeltaRemoved
 	}
-	return 0, rowChange{}, false
+	return DeltaNone
+}
+
+// reportedRow answers e's row, live or removed this window, or false if e
+// has none or its row was discarded. The store is observed.
+func (s *storeResource) reportedRow(e Entity) (int, bool) {
+	slot := s.rowByIndex.at(e.index())
+	if slot == nil || *slot == 0 {
+		return 0, false
+	}
+	row := int(*slot - 1)
+	if row >= s.owners.Len() || *s.owners.At(row) != e {
+		return 0, false
+	}
+	return row, row < s.liveRows || *s.rowStates.At(row) == rowRemoved
 }
 
 // markChanged marks live row changed, unless it was added this window. It
@@ -365,7 +355,7 @@ func (s *storeResource) markChanged(row int) {
 	}
 }
 
-// startObservation starts observing if a system takes Changes of the store,
+// startObservation starts observing if a delta query reads the store,
 // every row counting as added. It is the world's first observation reset:
 // the store has no tail yet.
 func (s *storeResource) startObservation() {
