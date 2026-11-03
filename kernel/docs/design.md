@@ -454,7 +454,7 @@ development.
 
 Every method other than a getter (`ID`, `Done`, `Logger`,
 `Configurator.Resource`, `Read.Get`) is named for what it does, starting with
-a verb. Internally, paired verbs follow rules/GO-RULES.md.
+a verb. Internally, paired verbs follow submodules/rules/GO-RULES.md.
 
 ## Implementation
 
