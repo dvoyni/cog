@@ -1,10 +1,6 @@
 package ecs
 
-import (
-	"reflect"
-
-	"github.com/dvoyni/cog/kernel"
-)
+import "github.com/dvoyni/cog/kernel"
 
 // PluginName is the ECS plugin's name.
 const PluginName kernel.PluginName = "ecs"
@@ -13,10 +9,9 @@ const PluginName kernel.PluginName = "ecs"
 // registered by the plugins that use them, given after it.
 type Plugin struct{}
 
-// registry is the ECS's kernel resource listing the worlds registered.
-type registry struct {
-	worlds []reflect.Type
-}
+// registry is the ECS's kernel resource, which RegisterWorld finds to know
+// the ECS plugin is initialized.
+type registry struct{}
 
 // NewPlugin returns the ECS plugin.
 func NewPlugin() *Plugin { return &Plugin{} }
@@ -24,7 +19,7 @@ func NewPlugin() *Plugin { return &Plugin{} }
 // Name returns PluginName.
 func (*Plugin) Name() kernel.PluginName { return PluginName }
 
-// Init installs the registry of worlds.
+// Init installs the registry.
 func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	configurator.InitResource(&registry{})
 	return nil

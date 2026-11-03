@@ -299,6 +299,16 @@ func TestKeyedRefsFindOneRefPerKey(t *testing.T) {
 	}
 }
 
+func TestKeyedRefsUpdateOfAKeyLeftByAMisuseFails(t *testing.T) {
+	o := spawnRefs(t)
+	cave := o.meshes.Put(mesh{Path: "cave"})
+	o.meshes.Get(cave).Path = "hill" // the misuse: cave stays found by "cave"
+	o.meshes.Release(cave)
+	if o.meshes.Update(mesh{Path: "cave"}) {
+		t.Fatal("Update of a key whose ref is released succeeded")
+	}
+}
+
 // TestRefsPlacedAtLieOutsideTheRange places refs where a mirror would, and
 // checks what placing refuses, that placed refs are never handed out again
 // and that New stops at the end of the range.

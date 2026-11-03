@@ -41,6 +41,10 @@ type entityTable[W WorldID] struct {
 	// despawnedIndices holds the indices despawned in this window, freed at
 	// its end. It stays empty while the table does not observe.
 	despawnedIndices container.Array[uint32]
+	// despawnedOutsideRange has a bit per index outside the allocation range
+	// despawned in this window, word index>>6, which place refuses until the
+	// window ends: the stores' tails still hold the old entity's rows there.
+	despawnedOutsideRange indexTable[uint64]
 }
 
 // entitySlot is the entity table's entry for one index.
@@ -161,7 +165,8 @@ func (t *entityTable[W]) spawnReserved(e Entity) bool {
 }
 
 // place makes e alive at its index and generation, for mirrors and saves.
-// e's index must lie outside the allocation range and hold no live entity.
+// e's index must lie outside the allocation range and hold no live entity,
+// nor one despawned in this window.
 func (t *entityTable[W]) place(e Entity) error {
 	if e.generation() == 0 {
 		return fmt.Errorf("ecs: creating entity %#x, whose generation is 0", uint64(e))
@@ -171,6 +176,9 @@ func (t *entityTable[W]) place(e Entity) error {
 	}
 	if slot := t.slots.at(e.index()); slot != nil && slot.liveGeneration != 0 {
 		return fmt.Errorf("ecs: creating entity %#x where one is alive", uint64(e))
+	}
+	if word := t.despawnedOutsideRange.at(e.index() >> 6); word != nil && *word&(1<<(e.index()&63)) != 0 {
+		return fmt.Errorf("ecs: creating entity %#x where one was despawned this window", uint64(e))
 	}
 	t.setAlive(e)
 	return nil
@@ -190,6 +198,9 @@ func (t *entityTable[W]) despawn(e Entity) (W, bool) {
 	slot.liveGeneration = 0
 	if t.observing {
 		t.despawnedIndices.Append(e.index())
+		if index := e.index(); index < t.firstIndex || index > t.lastIndex {
+			*t.despawnedOutsideRange.atOrCreate(index >> 6) |= 1 << (index & 63)
+		}
 	} else {
 		t.settleReservations(false)
 		t.free(e.index())
@@ -209,7 +220,11 @@ func (t *entityTable[W]) endWindow() (started bool) {
 	}
 	t.settleReservations(true)
 	for i := range t.despawnedIndices.Len() {
-		t.free(*t.despawnedIndices.At(i))
+		index := *t.despawnedIndices.At(i)
+		if index < t.firstIndex || index > t.lastIndex {
+			*t.despawnedOutsideRange.at(index >> 6) &^= 1 << (index & 63)
+		}
+		t.free(index)
 	}
 	t.despawnedIndices.Resize(0)
 	return false
@@ -283,9 +298,11 @@ func (t *entityTable[W]) free(index uint32) {
 }
 
 // shrink releases the chunks past the free entities and the window's
-// despawned indices. Slots never shrink: each keeps its index's last
+// despawned indices, and the pages of despawnedOutsideRange left empty.
+// Slots never shrink: each keeps its index's last
 // generation, so a stale entity never comes alive.
 func (t *entityTable[W]) shrink() {
 	t.freeEntities.Shrink()
 	t.despawnedIndices.Shrink()
+	t.despawnedOutsideRange.shrink()
 }

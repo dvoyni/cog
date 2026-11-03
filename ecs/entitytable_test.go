@@ -96,7 +96,7 @@ func (m *entityModel) spawnReserved(e Entity) bool {
 }
 
 func (m *entityModel) place(e Entity) bool {
-	if e.generation() == 0 || (e.index() >= m.firstIndex && e.index() <= m.lastIndex) || m.liveGenerations[e.index()] != 0 {
+	if e.generation() == 0 || (e.index() >= m.firstIndex && e.index() <= m.lastIndex) || m.liveGenerations[e.index()] != 0 || slices.Contains(m.despawned, e.index()) {
 		return false
 	}
 	m.setAlive(e)

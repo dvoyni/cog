@@ -428,13 +428,19 @@ func (r *refsResource[W, T]) resolveKeys(load *refsLoad, options json.Options) e
 // saved, keeping its generation, and points each saved ref taking an
 // earlier one's ref at it.
 func (r *refsResource[W, T]) placeLoad(load *refsLoad) error {
+	stored := 0
+	for i := range load.saved {
+		if load.refOf[i] == i {
+			stored++
+		}
+	}
+	if int64(stored) > int64(r.lastIndex)+1-r.nextFreshIndex {
+		return fmt.Errorf("refs %q: %d refs do not fit the allocation range past index %d", r.name, stored, r.nextFreshIndex)
+	}
 	next := r.nextFreshIndex
 	for i, s := range load.saved {
 		switch first := load.refOf[i]; {
 		case first == i:
-			if next > int64(r.lastIndex) {
-				return fmt.Errorf("refs %q: %d refs do not fit the allocation range past index %d", r.name, len(load.saved), r.nextFreshIndex)
-			}
 			load.remap[s.handle] = Ref[T]{index: uint32(next), generation: uint32(s.handle >> 32)}.serialized()
 			next++
 		case first >= 0:
@@ -510,13 +516,15 @@ func (l *worldLoad[W]) readRefs(decoder *jsontext.Decoder) error {
 		return err
 	}
 	for decoder.PeekKind() != jsontext.KindEndObject {
-		name, err := decoder.ReadToken()
+		token, err := decoder.ReadToken()
 		if err != nil {
 			return err
 		}
-		refs, ok := l.world.refsByName[RefName(name.String())]
+		// The token is void after the next read, so its name is kept.
+		name := token.String()
+		refs, ok := l.world.refsByName[RefName(name)]
 		if !ok {
-			l.warn("refs", name.String())
+			l.warn("refs", name)
 			if err := decoder.SkipValue(); err != nil {
 				return err
 			}
@@ -535,6 +543,7 @@ func (l *worldLoad[W]) readRefs(decoder *jsontext.Decoder) error {
 		for decoder.PeekKind() != jsontext.KindEndArray {
 			var saved savedRef
 			handled := false
+			valued := false
 			err := readMembers(decoder, func(member string) error {
 				switch member {
 				case "ref":
@@ -543,6 +552,7 @@ func (l *worldLoad[W]) readRefs(decoder *jsontext.Decoder) error {
 					saved.handle, err = readUint(decoder)
 					return err
 				case "value":
+					valued = true
 					value, err := decoder.ReadValue()
 					saved.raw = value.Clone()
 					return err
@@ -553,7 +563,10 @@ func (l *worldLoad[W]) readRefs(decoder *jsontext.Decoder) error {
 				return err
 			}
 			if !handled {
-				return fmt.Errorf("a ref of %q has no handle", name.String())
+				return fmt.Errorf("refs %q: a ref has no handle", name)
+			}
+			if !valued {
+				return fmt.Errorf("refs %q: ref %d has no value", name, saved.handle)
 			}
 			load.saved = append(load.saved, saved)
 		}

@@ -185,6 +185,10 @@ func updateKeyed[W WorldID, K comparable, T Keyed[K]](refs *refsResource[W, T], 
 		return false
 	}
 	slot := refs.slot(h)
+	if slot == nil {
+		// The key was changed through Get, and its ref released.
+		return false
+	}
 	slot.value = value
 	refs.markChanged(h, slot)
 	return true

@@ -80,8 +80,7 @@ type shrinker interface {
 // to be empty.
 func RegisterWorld[W WorldID](configurator *kernel.Configurator, options WorldOptions) {
 	t := reflect.TypeFor[W]()
-	registry, ok := configurator.Resource[*registry]()
-	if !ok {
+	if _, ok := configurator.Resource[*registry](); !ok {
 		panic(fmt.Sprintf("ecs: world %v is registered before the ecs plugin", t))
 	}
 	if _, ok := configurator.Resource[*worldResource[W]](); ok {
@@ -101,7 +100,6 @@ func RegisterWorld[W WorldID](configurator *kernel.Configurator, options WorldOp
 	}
 	w.entities.init(options.FirstIndex, last, options.Entities)
 	configurator.InitResource(w)
-	registry.worlds = append(registry.worlds, t)
 }
 
 // Declare declares the write on world W, the barrier.
@@ -122,7 +120,8 @@ func (w World[W]) Spawn() Entity {
 
 // CreateAt makes e alive at its index and generation, for mirrors and for
 // loading a save. e's index must lie outside the allocation range and hold
-// no live entity.
+// no live entity, nor one despawned in this observation window: observers
+// still see the old one's removal there until the reset.
 func (w World[W]) CreateAt(e Entity) error {
 	return w.world.entities.place(e)
 }

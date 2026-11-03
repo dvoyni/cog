@@ -54,7 +54,7 @@ func TestCommitSpawnsReservedEntities(t *testing.T) {
 	}
 }
 
-func TestCommitAppliesDespawnsFirstThenLaneOrder(t *testing.T) {
+func TestCommitAppliesSpawnsThenDespawnsThenLaneOrder(t *testing.T) {
 	o := spawnCommands(t)
 	a := o.world.Spawn()
 	b := o.world.Spawn()
@@ -68,6 +68,23 @@ func TestCommitAppliesDespawnsFirstThenLaneOrder(t *testing.T) {
 	}
 	if got := o.healths.Get(b).Points; got != 3 {
 		t.Fatalf("b holds %d, want the later lane's 3", got)
+	}
+	// A spawn of a later lane comes before an add of an earlier one, and
+	// before a despawn recorded with it.
+	added := o.second.Reserve()
+	o.first.Add(added, health{Points: 4})
+	o.second.Spawn(added)
+	ended := o.first.Reserve()
+	o.first.Spawn(ended)
+	o.first.Despawn(ended)
+	if dropped := o.sink.Commit(); dropped != 0 {
+		t.Fatalf("the commit dropped %d records, want none", dropped)
+	}
+	if got := o.healths.Get(added); got == nil || got.Points != 4 {
+		t.Fatalf("the entity spawned by a later lane holds %v, want the earlier lane's add", got)
+	}
+	if o.world.Alive(ended) {
+		t.Fatal("an entity spawned and despawned in one commit is alive")
 	}
 }
 
@@ -139,7 +156,7 @@ func TestRecordingAndCommittingAllocateNothingOnceGrown(t *testing.T) {
 		for range 50 {
 			e := o.first.Reserve()
 			o.first.Spawn(e)
-			o.second.Despawn(e) // dropped: despawns come first
+			o.second.Despawn(e)
 		}
 		o.sink.Commit()
 	}

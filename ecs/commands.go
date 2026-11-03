@@ -184,6 +184,9 @@ func (c CommandBuffer[W, Tag]) Despawn(e Entity) {
 }
 
 // Add records giving e value as its T, replacing the one it has.
+//
+// Add, Set and Remove find T's store by its type on each call, as World's
+// typed methods do: a map lookup, which allocates nothing.
 func (c CommandBuffer[W, Tag]) Add[T any](e Entity, value T) {
 	id := c.recorder.world.storeOf(reflect.TypeFor[T]()).component.ID
 	c.lane.record(commandAdd, e, id, unsafe.Slice((*byte)(unsafe.Pointer(&value)), unsafe.Sizeof(value)))
@@ -274,9 +277,10 @@ func (CommandSink[W, Tag]) Declare(access *kernel.Access) CommandSink[W, Tag] {
 }
 
 // Commit applies every record and empties the lanes, keeping their
-// capacity. Despawns of every lane come first, then the other records in
-// lane order, which is registration order, and in the order recorded; the
-// lanes of CommandRefs come last. Commits go through the same paths as
+// capacity. Spawns of every lane come first, so a record of another lane
+// finds its entity alive, then despawns, so one recorded with its spawn
+// ends it, then the other records in lane order, which is registration
+// order, and in the order recorded; the lanes of CommandRefs come last. Commits go through the same paths as
 // direct writes, so observers see them.
 //
 // A record on an entity not alive, a Spawn of an entity that is not a
@@ -285,6 +289,13 @@ func (CommandSink[W, Tag]) Declare(access *kernel.Access) CommandSink[W, Tag] {
 func (s CommandSink[W, Tag]) Commit() int {
 	w := s.recorder.world
 	dropped := 0
+	for _, lane := range s.recorder.lanes {
+		for i := range lane.records.Len() {
+			if record := lane.records.At(i); record.operation == commandSpawn && !w.entities.spawnReserved(record.entity) {
+				dropped++
+			}
+		}
+	}
 	for _, lane := range s.recorder.lanes {
 		for i := range lane.records.Len() {
 			if record := lane.records.At(i); record.operation == commandDespawn && !w.despawn(record.entity) {
@@ -307,13 +318,11 @@ func (s CommandSink[W, Tag]) Commit() int {
 	return dropped
 }
 
-// apply applies record, a despawn already applied, and reports whether its
-// entity could take it.
+// apply applies record, spawns and despawns already applied, and reports
+// whether its entity could take it.
 func (s CommandSink[W, Tag]) apply(lane *commandLane, record *commandRecord) bool {
 	w := s.recorder.world
 	switch record.operation {
-	case commandSpawn:
-		return w.entities.spawnReserved(record.entity)
 	case commandAdd:
 		store := w.stores[record.component]
 		value := w.put(record.entity, store)

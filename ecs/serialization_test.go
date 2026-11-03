@@ -448,6 +448,8 @@ func TestLoadFailsChangingNothing(t *testing.T) {
 		"mistyped field":     `{"entities": [{"entity": 4294967296, "position": {"X": "one"}}]}`,
 		"mistyped ref value": `{"refs": {"text": [{"ref": 4294967296, "value": 1}]}}`,
 		"no handle":          `{"entities": [{"position": {}}]}`,
+		"no ref value":       `{"refs": {"text": [{"ref": 4294967296}]}}`,
+		"no ref handle":      `{"refs": {"text": [{"value": "a"}]}}`,
 		"generation 0":       `{"entities": [{"entity": 1}]}`,
 		"two at one index":   `{"entities": [{"entity": 4294967296}, {"entity": 8589934592}]}`,
 		"not an object":      `[]`,
@@ -461,6 +463,12 @@ func TestLoadFailsChangingNothing(t *testing.T) {
 			t.Fatalf("%s: the error %q does not name the entity and its component", name, err)
 		}
 		if name == "mistyped ref value" && !strings.Contains(err.Error(), `refs "text": ref 4294967296`) {
+			t.Fatalf("%s: the error %q does not name the ref", name, err)
+		}
+		if name == "no ref handle" && !strings.Contains(err.Error(), `refs "text": a ref has no handle`) {
+			t.Fatalf("%s: the error %q does not name the refs", name, err)
+		}
+		if name == "no ref value" && !strings.Contains(err.Error(), `refs "text": ref 4294967296 has no value`) {
 			t.Fatalf("%s: the error %q does not name the ref", name, err)
 		}
 		if after := o.save(t); after != before {

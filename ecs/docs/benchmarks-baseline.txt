@@ -2,165 +2,295 @@ goos: windows
 goarch: amd64
 pkg: github.com/dvoyni/cog/ecs
 cpu: AMD Ryzen 9 7950X3D 16-Core Processor          
-BenchmarkSliceLoop-32                    	  221949	      5411 ns/op	         0.5411 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSliceLoop-32                    	  218488	      5504 ns/op	         0.5504 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSliceLoop-32                    	  226815	      5374 ns/op	         0.5374 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSliceLoop-32                    	  226785	      5531 ns/op	         0.5531 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSliceLoop-32                    	  221598	      5383 ns/op	         0.5383 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSliceLoop-32                    	  228411	      5432 ns/op	         0.5432 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSliceLoop-32                    	  196725	      5465 ns/op	         0.5465 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSliceLoop-32                    	  225543	      5356 ns/op	         0.5356 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSliceLoop-32                    	  228051	      5359 ns/op	         0.5359 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSliceLoop-32                    	  219204	      5494 ns/op	         0.5494 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQueryDense-32                   	   18200	     65757 ns/op	         6.576 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQueryDense-32                   	   18194	     66403 ns/op	         6.640 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQueryDense-32                   	   18080	     66118 ns/op	         6.612 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQueryDense-32                   	   17967	     65855 ns/op	         6.586 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQueryDense-32                   	   18330	     65544 ns/op	         6.554 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQueryDense-32                   	   18364	     65631 ns/op	         6.563 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQueryDense-32                   	   17944	     66291 ns/op	         6.629 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQueryDense-32                   	   18070	     65627 ns/op	         6.563 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQueryDense-32                   	   18544	     65479 ns/op	         6.548 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQueryDense-32                   	   17739	     67376 ns/op	         6.738 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQueryDenseObserved-32           	   15866	     77843 ns/op	         7.784 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQueryDenseObserved-32           	   14343	     80103 ns/op	         8.010 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQueryDenseObserved-32           	   16630	     72848 ns/op	         7.285 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQueryDenseObserved-32           	   16422	     72774 ns/op	         7.277 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQueryDenseObserved-32           	   16588	     72288 ns/op	         7.229 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQueryDenseObserved-32           	   16639	     72277 ns/op	         7.228 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQueryDenseObserved-32           	   16618	     72116 ns/op	         7.212 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQueryDenseObserved-32           	   16597	     72289 ns/op	         7.229 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQueryDenseObserved-32           	   16618	     72167 ns/op	         7.217 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQueryDenseObserved-32           	   16592	     72330 ns/op	         7.233 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQuerySparse-32                  	  169455	      6797 ns/op	         0.6797 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQuerySparse-32                  	  176992	      6826 ns/op	         0.6826 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQuerySparse-32                  	  177418	      6813 ns/op	         0.6813 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQuerySparse-32                  	  178011	      6786 ns/op	         0.6786 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQuerySparse-32                  	  177579	      6777 ns/op	         0.6777 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQuerySparse-32                  	  178036	      6749 ns/op	         0.6749 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQuerySparse-32                  	  176136	      6820 ns/op	         0.6820 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQuerySparse-32                  	  174624	      6809 ns/op	         0.6809 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQuerySparse-32                  	  176086	      6812 ns/op	         0.6812 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkQuerySparse-32                  	  176252	      6814 ns/op	         0.6814 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSliceIndexWrite-32              	  238368	      4964 ns/op	         0.4964 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSliceIndexWrite-32              	  241664	      4945 ns/op	         0.4945 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSliceIndexWrite-32              	  243992	      4958 ns/op	         0.4958 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSliceIndexWrite-32              	  241195	      4958 ns/op	         0.4958 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSliceIndexWrite-32              	  242592	      4954 ns/op	         0.4954 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSliceIndexWrite-32              	  240405	      4971 ns/op	         0.4971 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSliceIndexWrite-32              	  235650	      4960 ns/op	         0.4960 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSliceIndexWrite-32              	  244933	      4943 ns/op	         0.4943 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSliceIndexWrite-32              	  244798	      4938 ns/op	         0.4938 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSliceIndexWrite-32              	  243225	      4963 ns/op	         0.4963 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkStoreWrite-32                   	   24208	     49670 ns/op	         4.967 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkStoreWrite-32                   	   24366	     49407 ns/op	         4.941 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkStoreWrite-32                   	   24628	     48735 ns/op	         4.874 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkStoreWrite-32                   	   24298	     49555 ns/op	         4.956 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkStoreWrite-32                   	   24468	     48897 ns/op	         4.890 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkStoreWrite-32                   	   24316	     49405 ns/op	         4.940 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkStoreWrite-32                   	   24187	     49638 ns/op	         4.964 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkStoreWrite-32                   	   24579	     48955 ns/op	         4.896 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkStoreWrite-32                   	   24337	     49199 ns/op	         4.920 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkStoreWrite-32                   	   24394	     49397 ns/op	         4.940 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkLookupGet-32                    	   28226	     42484 ns/op	         4.248 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkLookupGet-32                    	   28843	     41660 ns/op	         4.166 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkLookupGet-32                    	   28833	     41670 ns/op	         4.167 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkLookupGet-32                    	   28197	     42343 ns/op	         4.234 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkLookupGet-32                    	   28820	     41386 ns/op	         4.139 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkLookupGet-32                    	   28177	     42576 ns/op	         4.258 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkLookupGet-32                    	   27991	     42861 ns/op	         4.286 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkLookupGet-32                    	   28695	     41810 ns/op	         4.181 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkLookupGet-32                    	   28220	     42433 ns/op	         4.243 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkLookupGet-32                    	   28383	     42460 ns/op	         4.246 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkDirtyListChanges-32             	  370507	      3244 ns/op	         0.3244 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkDirtyListChanges-32             	  370783	      3209 ns/op	         0.3209 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkDirtyListChanges-32             	  377180	      3213 ns/op	         0.3213 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkDirtyListChanges-32             	  374166	      3209 ns/op	         0.3209 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkDirtyListChanges-32             	  378012	      3217 ns/op	         0.3217 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkDirtyListChanges-32             	  370064	      3217 ns/op	         0.3217 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkDirtyListChanges-32             	  373726	      3206 ns/op	         0.3206 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkDirtyListChanges-32             	  377295	      3236 ns/op	         0.3236 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkDirtyListChanges-32             	  371472	      3209 ns/op	         0.3209 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkDirtyListChanges-32             	  372244	      3217 ns/op	         0.3217 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkChanges-32                      	   58767	     20369 ns/op	         2.037 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkChanges-32                      	   59062	     20328 ns/op	         2.033 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkChanges-32                      	   57763	     20664 ns/op	         2.066 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkChanges-32                      	   58894	     20393 ns/op	         2.039 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkChanges-32                      	   53343	     21319 ns/op	         2.132 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkChanges-32                      	   58249	     20816 ns/op	         2.082 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkChanges-32                      	   58963	     20551 ns/op	         2.055 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkChanges-32                      	   56734	     21078 ns/op	         2.108 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkChanges-32                      	   58382	     20605 ns/op	         2.060 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkChanges-32                      	   59010	     20560 ns/op	         2.056 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkObservationResetUnchanged-32    	  270394	      4362 ns/op	         0.4362 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkObservationResetUnchanged-32    	  284250	      4330 ns/op	         0.4330 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkObservationResetUnchanged-32    	  285243	      4261 ns/op	         0.4261 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkObservationResetUnchanged-32    	  268106	      4279 ns/op	         0.4279 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkObservationResetUnchanged-32    	  278167	      4294 ns/op	         0.4294 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkObservationResetUnchanged-32    	  282651	      4250 ns/op	         0.4250 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkObservationResetUnchanged-32    	  276068	      4261 ns/op	         0.4261 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkObservationResetUnchanged-32    	  283182	      4229 ns/op	         0.4229 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkObservationResetUnchanged-32    	  283899	      4238 ns/op	         0.4238 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkObservationResetUnchanged-32    	  284007	      4241 ns/op	         0.4241 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSet-32                    	    3963	    298758 ns/op	        29.88 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSet-32                    	    4034	    299552 ns/op	        29.96 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSet-32                    	    3919	    299362 ns/op	        29.94 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSet-32                    	    4086	    299459 ns/op	        29.95 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSet-32                    	    4077	    299878 ns/op	        29.99 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSet-32                    	    4069	    298457 ns/op	        29.85 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSet-32                    	    4017	    301279 ns/op	        30.13 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSet-32                    	    3928	    299421 ns/op	        29.94 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSet-32                    	    4064	    298858 ns/op	        29.89 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSet-32                    	    4099	    298244 ns/op	        29.82 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSetObserved-32            	    3602	    335773 ns/op	        33.58 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSetObserved-32            	    3637	    332316 ns/op	        33.23 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSetObserved-32            	    3626	    335322 ns/op	        33.53 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSetObserved-32            	    3650	    332945 ns/op	        33.29 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSetObserved-32            	    3601	    333522 ns/op	        33.35 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSetObserved-32            	    3604	    335985 ns/op	        33.60 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSetObserved-32            	    3616	    333899 ns/op	        33.39 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSetObserved-32            	    3620	    335431 ns/op	        33.54 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSetObserved-32            	    3610	    334167 ns/op	        33.42 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSetObserved-32            	    3510	    334569 ns/op	        33.46 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSpawnDespawn-32           	    1064	   1131106 ns/op	       113.1 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSpawnDespawn-32           	    1065	   1145255 ns/op	       114.5 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSpawnDespawn-32           	    1034	   1165913 ns/op	       116.6 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSpawnDespawn-32           	     991	   1162409 ns/op	       116.2 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSpawnDespawn-32           	    1044	   1166722 ns/op	       116.7 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSpawnDespawn-32           	    1016	   1182797 ns/op	       118.3 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSpawnDespawn-32           	    1041	   1167658 ns/op	       116.8 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSpawnDespawn-32           	    1015	   1150873 ns/op	       115.1 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSpawnDespawn-32           	    1021	   1160925 ns/op	       116.1 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkCommitSpawnDespawn-32           	    1020	   1162965 ns/op	       116.3 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSpawnDespawn-32                 	    2432	    494264 ns/op	        49.43 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSpawnDespawn-32                 	    2426	    501266 ns/op	        50.13 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSpawnDespawn-32                 	    2406	    500823 ns/op	        50.08 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSpawnDespawn-32                 	    2434	    498297 ns/op	        49.83 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSpawnDespawn-32                 	    2437	    493189 ns/op	        49.32 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSpawnDespawn-32                 	    2264	    533757 ns/op	        53.38 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSpawnDespawn-32                 	    2436	    520045 ns/op	        52.00 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSpawnDespawn-32                 	    1832	    720840 ns/op	        72.08 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSpawnDespawn-32                 	    2245	    531247 ns/op	        53.12 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkSpawnDespawn-32                 	    2366	    512538 ns/op	        51.25 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkRefsGet-32                      	   45591	     25289 ns/op	         2.529 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkRefsGet-32                      	   49402	     24134 ns/op	         2.413 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkRefsGet-32                      	   50163	     24645 ns/op	         2.465 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkRefsGet-32                      	   42237	     26363 ns/op	         2.636 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkRefsGet-32                      	   46302	     24998 ns/op	         2.500 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkRefsGet-32                      	   48853	     24469 ns/op	         2.447 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkRefsGet-32                      	   46155	     24960 ns/op	         2.496 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkRefsGet-32                      	   49167	     24203 ns/op	         2.420 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkRefsGet-32                      	   50070	     24133 ns/op	         2.413 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkRefsGet-32                      	   49305	     24128 ns/op	         2.413 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkRefsSet-32                      	    6978	    169421 ns/op	        16.94 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkRefsSet-32                      	    8511	    142358 ns/op	        14.24 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkRefsSet-32                      	    8034	    157406 ns/op	        15.74 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkRefsSet-32                      	    8091	    147498 ns/op	        14.75 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkRefsSet-32                      	    7764	    159474 ns/op	        15.95 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkRefsSet-32                      	    7884	    148858 ns/op	        14.89 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkRefsSet-32                      	    8071	    140253 ns/op	        14.03 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkRefsSet-32                      	    8550	    146959 ns/op	        14.70 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkRefsSet-32                      	    8132	    150151 ns/op	        15.02 ns/entity	       0 B/op	       0 allocs/op
-BenchmarkRefsSet-32                      	    7070	    168515 ns/op	        16.85 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSliceLoop-32                    	  222157	      5426 ns/op	         0.5426 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSliceLoop-32                    	  219590	      5439 ns/op	         0.5439 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSliceLoop-32                    	  226200	      5394 ns/op	         0.5394 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSliceLoop-32                    	  223785	      5391 ns/op	         0.5391 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSliceLoop-32                    	  223990	      5493 ns/op	         0.5493 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSliceLoop-32                    	  224635	      5376 ns/op	         0.5376 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSliceLoop-32                    	  223440	      5395 ns/op	         0.5395 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSliceLoop-32                    	  223716	      5402 ns/op	         0.5402 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSliceLoop-32                    	  222944	      5393 ns/op	         0.5393 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSliceLoop-32                    	  225099	      5381 ns/op	         0.5381 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryDense-32                   	   16212	     74004 ns/op	         7.400 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryDense-32                   	   15775	     75437 ns/op	         7.544 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryDense-32                   	   16172	     74329 ns/op	         7.433 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryDense-32                   	   16146	     74330 ns/op	         7.433 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryDense-32                   	   16239	     73876 ns/op	         7.388 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryDense-32                   	   16222	     73892 ns/op	         7.389 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryDense-32                   	   16176	     74138 ns/op	         7.414 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryDense-32                   	   16143	     74248 ns/op	         7.425 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryDense-32                   	   16155	     74294 ns/op	         7.429 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryDense-32                   	   16251	     73838 ns/op	         7.384 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryDenseObserved-32           	   14626	     81650 ns/op	         8.165 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryDenseObserved-32           	   14810	     81134 ns/op	         8.113 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryDenseObserved-32           	   14772	     81168 ns/op	         8.117 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryDenseObserved-32           	   14781	     81121 ns/op	         8.112 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryDenseObserved-32           	   14805	     81185 ns/op	         8.118 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryDenseObserved-32           	   14782	     81183 ns/op	         8.118 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryDenseObserved-32           	   14678	     81700 ns/op	         8.170 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryDenseObserved-32           	   14763	     81348 ns/op	         8.135 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryDenseObserved-32           	   14758	     81469 ns/op	         8.147 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryDenseObserved-32           	   14797	     80923 ns/op	         8.092 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQuerySparse-32                  	  165852	      7345 ns/op	         0.7345 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQuerySparse-32                  	  164894	      7279 ns/op	         0.7279 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQuerySparse-32                  	  164355	      7318 ns/op	         0.7318 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQuerySparse-32                  	  164260	      7292 ns/op	         0.7292 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQuerySparse-32                  	  165020	      7241 ns/op	         0.7241 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQuerySparse-32                  	  166243	      7260 ns/op	         0.7260 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQuerySparse-32                  	  165297	      7240 ns/op	         0.7240 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQuerySparse-32                  	  165802	      7253 ns/op	         0.7253 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQuerySparse-32                  	  164553	      7295 ns/op	         0.7295 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQuerySparse-32                  	  165037	      7265 ns/op	         0.7265 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryOptional-32                	   19532	     61574 ns/op	         6.157 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryOptional-32                	   19489	     61500 ns/op	         6.150 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryOptional-32                	   19335	     61929 ns/op	         6.193 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryOptional-32                	   19395	     61799 ns/op	         6.180 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryOptional-32                	   19452	     61708 ns/op	         6.171 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryOptional-32                	   19506	     61651 ns/op	         6.165 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryOptional-32                	   19562	     61601 ns/op	         6.160 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryOptional-32                	   19407	     61890 ns/op	         6.189 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryOptional-32                	   19449	     61825 ns/op	         6.183 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryOptional-32                	   19430	     61663 ns/op	         6.166 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryLookup-32                  	   29118	     41126 ns/op	         4.113 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryLookup-32                  	   29145	     41479 ns/op	         4.148 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryLookup-32                  	   29054	     41274 ns/op	         4.127 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryLookup-32                  	   29004	     41210 ns/op	         4.121 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryLookup-32                  	   29182	     41169 ns/op	         4.117 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryLookup-32                  	   28981	     41477 ns/op	         4.148 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryLookup-32                  	   29068	     41164 ns/op	         4.116 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryLookup-32                  	   29328	     41321 ns/op	         4.132 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryLookup-32                  	   28425	     41474 ns/op	         4.147 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkQueryLookup-32                  	   28910	     41412 ns/op	         4.141 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSliceIndexWrite-32              	  235030	      5150 ns/op	         0.5150 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSliceIndexWrite-32              	  242325	      5002 ns/op	         0.5002 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSliceIndexWrite-32              	  241672	      4990 ns/op	         0.4990 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSliceIndexWrite-32              	  241027	      4988 ns/op	         0.4988 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSliceIndexWrite-32              	  239907	      5009 ns/op	         0.5009 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSliceIndexWrite-32              	  240972	      4997 ns/op	         0.4997 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSliceIndexWrite-32              	  240525	      5005 ns/op	         0.5005 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSliceIndexWrite-32              	  230618	      5223 ns/op	         0.5223 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSliceIndexWrite-32              	  242136	      4989 ns/op	         0.4989 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSliceIndexWrite-32              	  241336	      4995 ns/op	         0.4995 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkStoreWrite-32                   	   21745	     55177 ns/op	         5.518 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkStoreWrite-32                   	   22242	     53950 ns/op	         5.395 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkStoreWrite-32                   	   22407	     53490 ns/op	         5.349 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkStoreWrite-32                   	   22479	     53414 ns/op	         5.341 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkStoreWrite-32                   	   22424	     53608 ns/op	         5.361 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkStoreWrite-32                   	   22316	     54827 ns/op	         5.483 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkStoreWrite-32                   	   22062	     55053 ns/op	         5.505 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkStoreWrite-32                   	   22266	     54200 ns/op	         5.420 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkStoreWrite-32                   	   22334	     53762 ns/op	         5.376 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkStoreWrite-32                   	   22438	     53483 ns/op	         5.348 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkLookupGet-32                    	   27996	     42805 ns/op	         4.280 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkLookupGet-32                    	   28064	     42903 ns/op	         4.290 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkLookupGet-32                    	   29023	     41358 ns/op	         4.136 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkLookupGet-32                    	   28561	     42003 ns/op	         4.200 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkLookupGet-32                    	   28350	     42835 ns/op	         4.284 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkLookupGet-32                    	   28353	     42572 ns/op	         4.257 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkLookupGet-32                    	   26433	     45522 ns/op	         4.552 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkLookupGet-32                    	   28014	     43066 ns/op	         4.307 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkLookupGet-32                    	   27834	     43031 ns/op	         4.303 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkLookupGet-32                    	   28146	     42595 ns/op	         4.259 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDirtyListChanges-32             	  370197	      3230 ns/op	         0.3230 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDirtyListChanges-32             	  375356	      3236 ns/op	         0.3236 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDirtyListChanges-32             	  370374	      3234 ns/op	         0.3234 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDirtyListChanges-32             	  371110	      3224 ns/op	         0.3224 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDirtyListChanges-32             	  368935	      3250 ns/op	         0.3250 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDirtyListChanges-32             	  370815	      3223 ns/op	         0.3223 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDirtyListChanges-32             	  373636	      3220 ns/op	         0.3220 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDirtyListChanges-32             	  371241	      3228 ns/op	         0.3228 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDirtyListChanges-32             	  374638	      3238 ns/op	         0.3238 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDirtyListChanges-32             	  372349	      3230 ns/op	         0.3230 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQuery-32                   	   65956	     18280 ns/op	         1.828 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQuery-32                   	   66458	     17983 ns/op	         1.798 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQuery-32                   	   66375	     18102 ns/op	         1.810 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQuery-32                   	   67312	     17952 ns/op	         1.795 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQuery-32                   	   65984	     18181 ns/op	         1.818 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQuery-32                   	   66327	     18226 ns/op	         1.823 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQuery-32                   	   65230	     18409 ns/op	         1.841 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQuery-32                   	   67158	     17964 ns/op	         1.796 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQuery-32                   	   57315	     20913 ns/op	         2.091 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQuery-32                   	   66322	     17873 ns/op	         1.787 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=0-32    	98736988	        12.38 ns/op	        92.42 heap-B/entity	         0.001238 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=0-32    	97696002	        12.37 ns/op	        92.30 heap-B/entity	         0.001237 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=0-32    	97316497	        12.39 ns/op	        92.73 heap-B/entity	         0.001239 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=0-32    	98181996	        12.36 ns/op	        92.42 heap-B/entity	         0.001236 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=0-32    	97269168	        12.38 ns/op	        92.29 heap-B/entity	         0.001238 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=0-32    	97643535	        12.40 ns/op	        92.42 heap-B/entity	         0.001240 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=0-32    	97691229	        12.43 ns/op	        92.42 heap-B/entity	         0.001243 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=0-32    	98393721	        12.39 ns/op	        92.25 heap-B/entity	         0.001239 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=0-32    	98305056	        12.42 ns/op	        92.31 heap-B/entity	         0.001242 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=0-32    	97908830	        12.42 ns/op	        92.42 heap-B/entity	         0.001242 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=1-32    	  622735	      1948 ns/op	        92.33 heap-B/entity	         0.1948 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=1-32    	  600474	      1988 ns/op	        92.33 heap-B/entity	         0.1988 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=1-32    	  615952	      1952 ns/op	        92.33 heap-B/entity	         0.1952 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=1-32    	  601244	      1950 ns/op	        92.33 heap-B/entity	         0.1950 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=1-32    	  622047	      1929 ns/op	        92.33 heap-B/entity	         0.1929 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=1-32    	  631927	      1920 ns/op	        92.33 heap-B/entity	         0.1920 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=1-32    	  616044	      1985 ns/op	        92.52 heap-B/entity	         0.1985 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=1-32    	  580849	      2007 ns/op	        92.52 heap-B/entity	         0.2007 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=1-32    	  607014	      1948 ns/op	        92.33 heap-B/entity	         0.1948 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=1-32    	  624050	      1939 ns/op	        92.52 heap-B/entity	         0.1939 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=5-32    	  129279	      9293 ns/op	        92.63 heap-B/entity	         0.9293 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=5-32    	  124318	      9452 ns/op	        92.63 heap-B/entity	         0.9452 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=5-32    	  129778	      9253 ns/op	        92.69 heap-B/entity	         0.9253 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=5-32    	  127479	      9415 ns/op	        92.64 heap-B/entity	         0.9415 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=5-32    	  128896	      9261 ns/op	        92.63 heap-B/entity	         0.9261 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=5-32    	  128906	      9297 ns/op	        92.64 heap-B/entity	         0.9297 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=5-32    	  129001	      9292 ns/op	        92.63 heap-B/entity	         0.9292 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=5-32    	  129847	      9352 ns/op	        92.63 heap-B/entity	         0.9352 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=5-32    	  128095	      9416 ns/op	        92.63 heap-B/entity	         0.9416 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=5-32    	  129036	      9318 ns/op	        92.63 heap-B/entity	         0.9318 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=10-32   	   65488	     18454 ns/op	        93.44 heap-B/entity	         1.845 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=10-32   	   64094	     18786 ns/op	        93.25 heap-B/entity	         1.879 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=10-32   	   64880	     18470 ns/op	        93.25 heap-B/entity	         1.847 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=10-32   	   65404	     18286 ns/op	        93.25 heap-B/entity	         1.829 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=10-32   	   64798	     18312 ns/op	        93.25 heap-B/entity	         1.831 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=10-32   	   64045	     18723 ns/op	        93.25 heap-B/entity	         1.872 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=10-32   	   65632	     18328 ns/op	        93.25 heap-B/entity	         1.833 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=10-32   	   65821	     18332 ns/op	        93.31 heap-B/entity	         1.833 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=10-32   	   64893	     18503 ns/op	        93.25 heap-B/entity	         1.850 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=10-32   	   65113	     18484 ns/op	        93.27 heap-B/entity	         1.848 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=25-32   	   25196	     47577 ns/op	        93.34 heap-B/entity	         4.758 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=25-32   	   24985	     47926 ns/op	        93.25 heap-B/entity	         4.793 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=25-32   	   24907	     47766 ns/op	        93.25 heap-B/entity	         4.777 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=25-32   	   24994	     47938 ns/op	        93.44 heap-B/entity	         4.794 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=25-32   	   24974	     47934 ns/op	        93.44 heap-B/entity	         4.793 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=25-32   	   25224	     47589 ns/op	        93.25 heap-B/entity	         4.759 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=25-32   	   25075	     47944 ns/op	        93.25 heap-B/entity	         4.794 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=25-32   	   25099	     47995 ns/op	        93.25 heap-B/entity	         4.800 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=25-32   	   25111	     47829 ns/op	        93.25 heap-B/entity	         4.783 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=25-32   	   25020	     48209 ns/op	        93.45 heap-B/entity	         4.821 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=50-32   	   14498	     82806 ns/op	        93.25 heap-B/entity	         8.281 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=50-32   	   14487	     83233 ns/op	        93.25 heap-B/entity	         8.323 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=50-32   	   14451	     83030 ns/op	        93.25 heap-B/entity	         8.303 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=50-32   	   14382	     83577 ns/op	        93.25 heap-B/entity	         8.358 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=50-32   	   14335	     83414 ns/op	        93.25 heap-B/entity	         8.341 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=50-32   	   14478	     82960 ns/op	        93.25 heap-B/entity	         8.296 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=50-32   	   14424	     83267 ns/op	        93.26 heap-B/entity	         8.327 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=50-32   	   14372	     83347 ns/op	        93.25 heap-B/entity	         8.335 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=50-32   	   14510	     83140 ns/op	        93.25 heap-B/entity	         8.314 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=50-32   	   14470	     83084 ns/op	        93.25 heap-B/entity	         8.308 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=100-32  	    7932	    153952 ns/op	        93.25 heap-B/entity	        15.40 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=100-32  	    7923	    154487 ns/op	        93.25 heap-B/entity	        15.45 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=100-32  	    7852	    153972 ns/op	        93.25 heap-B/entity	        15.40 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=100-32  	    7850	    154232 ns/op	        93.25 heap-B/entity	        15.42 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=100-32  	    7729	    155427 ns/op	        93.25 heap-B/entity	        15.54 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=100-32  	    7868	    154923 ns/op	        93.25 heap-B/entity	        15.49 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=100-32  	    7872	    154741 ns/op	        93.25 heap-B/entity	        15.47 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=100-32  	    7869	    154661 ns/op	        93.25 heap-B/entity	        15.47 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=100-32  	    7819	    155925 ns/op	        93.44 heap-B/entity	        15.59 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryShare/percent=100-32  	    7186	    155843 ns/op	        93.25 heap-B/entity	        15.58 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryLoad-32               	    1926	    622116 ns/op	       154.8 heap-B/entity	        62.21 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryLoad-32               	    1843	    659210 ns/op	       154.8 heap-B/entity	        65.92 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryLoad-32               	    1831	    654206 ns/op	       155.1 heap-B/entity	        65.42 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryLoad-32               	    1900	    630259 ns/op	       154.8 heap-B/entity	        63.03 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryLoad-32               	    1843	    652238 ns/op	       154.8 heap-B/entity	        65.22 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryLoad-32               	    1832	    659253 ns/op	       155.0 heap-B/entity	        65.93 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryLoad-32               	    1915	    621619 ns/op	       154.8 heap-B/entity	        62.16 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryLoad-32               	    1946	    625494 ns/op	       154.8 heap-B/entity	        62.55 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryLoad-32               	    1838	    655666 ns/op	       154.9 heap-B/entity	        65.57 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaQueryLoad-32               	    1900	    634729 ns/op	       154.8 heap-B/entity	        63.47 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkObservationResetUnchanged-32    	122221347	         9.820 ns/op	         0.0009820 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkObservationResetUnchanged-32    	121505268	         9.856 ns/op	         0.0009856 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkObservationResetUnchanged-32    	122484849	         9.809 ns/op	         0.0009809 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkObservationResetUnchanged-32    	122477536	         9.805 ns/op	         0.0009805 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkObservationResetUnchanged-32    	122176189	         9.833 ns/op	         0.0009833 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkObservationResetUnchanged-32    	122229327	         9.817 ns/op	         0.0009817 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkObservationResetUnchanged-32    	121740819	         9.848 ns/op	         0.0009848 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkObservationResetUnchanged-32    	122692160	         9.786 ns/op	         0.0009786 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkObservationResetUnchanged-32    	122261881	         9.818 ns/op	         0.0009818 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkObservationResetUnchanged-32    	122352046	         9.803 ns/op	         0.0009803 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSet-32                    	    4177	    284287 ns/op	        28.43 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSet-32                    	    4222	    282624 ns/op	        28.26 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSet-32                    	    4236	    282519 ns/op	        28.25 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSet-32                    	    4255	    282348 ns/op	        28.23 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSet-32                    	    4268	    281314 ns/op	        28.13 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSet-32                    	    4242	    281773 ns/op	        28.18 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSet-32                    	    4260	    284055 ns/op	        28.41 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSet-32                    	    4276	    281753 ns/op	        28.18 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSet-32                    	    4261	    282677 ns/op	        28.27 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSet-32                    	    4228	    282437 ns/op	        28.24 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSetObserved-32            	    3682	    326405 ns/op	        32.64 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSetObserved-32            	    3669	    326863 ns/op	        32.69 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSetObserved-32            	    3666	    328666 ns/op	        32.87 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSetObserved-32            	    3654	    327207 ns/op	        32.72 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSetObserved-32            	    3642	    327337 ns/op	        32.73 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSetObserved-32            	    3709	    327955 ns/op	        32.80 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSetObserved-32            	    3697	    327156 ns/op	        32.72 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSetObserved-32            	    3708	    327677 ns/op	        32.77 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSetObserved-32            	    3584	    329752 ns/op	        32.98 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSetObserved-32            	    3663	    326438 ns/op	        32.64 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSpawnDespawn-32           	    1040	   1160415 ns/op	       116.0 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSpawnDespawn-32           	    1026	   1158708 ns/op	       115.9 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSpawnDespawn-32           	    1030	   1159936 ns/op	       116.0 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSpawnDespawn-32           	    1030	   1169549 ns/op	       117.0 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSpawnDespawn-32           	    1034	   1158227 ns/op	       115.8 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSpawnDespawn-32           	    1040	   1157032 ns/op	       115.7 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSpawnDespawn-32           	    1041	   1161111 ns/op	       116.1 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSpawnDespawn-32           	    1034	   1158673 ns/op	       115.9 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSpawnDespawn-32           	    1022	   1159056 ns/op	       115.9 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommitSpawnDespawn-32           	    1026	   1157531 ns/op	       115.8 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSpawnDespawn-32                 	    2412	    501753 ns/op	        50.18 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSpawnDespawn-32                 	    2427	    499097 ns/op	        49.91 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSpawnDespawn-32                 	    2385	    503987 ns/op	        50.40 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSpawnDespawn-32                 	    2361	    512390 ns/op	        51.24 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSpawnDespawn-32                 	    2401	    500833 ns/op	        50.08 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSpawnDespawn-32                 	    2316	    519439 ns/op	        51.94 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSpawnDespawn-32                 	    2304	    520538 ns/op	        52.05 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSpawnDespawn-32                 	    2421	    500555 ns/op	        50.06 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSpawnDespawn-32                 	    2390	    503715 ns/op	        50.37 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkSpawnDespawn-32                 	    2421	    503057 ns/op	        50.31 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkRefsGet-32                      	   47292	     25368 ns/op	         2.537 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkRefsGet-32                      	   47001	     25385 ns/op	         2.538 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkRefsGet-32                      	   47863	     25016 ns/op	         2.502 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkRefsGet-32                      	   47954	     25094 ns/op	         2.509 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkRefsGet-32                      	   47985	     24967 ns/op	         2.497 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkRefsGet-32                      	   47916	     25095 ns/op	         2.509 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkRefsGet-32                      	   47420	     25218 ns/op	         2.522 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkRefsGet-32                      	   48264	     25068 ns/op	         2.507 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkRefsGet-32                      	   48237	     25093 ns/op	         2.509 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkRefsGet-32                      	   47307	     25259 ns/op	         2.526 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkRefsSet-32                      	   21416	     56157 ns/op	         5.616 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkRefsSet-32                      	   21348	     56176 ns/op	         5.618 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkRefsSet-32                      	   21205	     56553 ns/op	         5.655 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkRefsSet-32                      	   21244	     56910 ns/op	         5.691 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkRefsSet-32                      	   21358	     56366 ns/op	         5.637 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkRefsSet-32                      	   21486	     56121 ns/op	         5.612 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkRefsSet-32                      	   21218	     56569 ns/op	         5.657 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkRefsSet-32                      	   21418	     56201 ns/op	         5.620 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkRefsSet-32                      	   21253	     56711 ns/op	         5.671 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkRefsSet-32                      	   21478	     55827 ns/op	         5.583 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaRefs-32                    	  171679	      7071 ns/op	         0.7071 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaRefs-32                    	  168290	      7027 ns/op	         0.7027 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaRefs-32                    	  171434	      6993 ns/op	         0.6993 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaRefs-32                    	  160147	      7046 ns/op	         0.7046 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaRefs-32                    	  170476	      7047 ns/op	         0.7047 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaRefs-32                    	  172269	      6994 ns/op	         0.6994 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaRefs-32                    	  166328	      7034 ns/op	         0.7034 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaRefs-32                    	  173617	      6983 ns/op	         0.6983 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaRefs-32                    	  171630	      7028 ns/op	         0.7028 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkDeltaRefs-32                    	  171754	      7039 ns/op	         0.7039 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkKeyedRefsPut-32                 	    7096	    171658 ns/op	        17.17 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkKeyedRefsPut-32                 	    6770	    172851 ns/op	        17.29 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkKeyedRefsPut-32                 	    6783	    174028 ns/op	        17.40 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkKeyedRefsPut-32                 	    6882	    176046 ns/op	        17.60 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkKeyedRefsPut-32                 	    6736	    176964 ns/op	        17.70 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkKeyedRefsPut-32                 	    7020	    174057 ns/op	        17.41 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkKeyedRefsPut-32                 	    6921	    174538 ns/op	        17.45 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkKeyedRefsPut-32                 	    7034	    171691 ns/op	        17.17 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkKeyedRefsPut-32                 	    6997	    175590 ns/op	        17.56 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkKeyedRefsPut-32                 	    6796	    174011 ns/op	        17.40 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommandRefsNewRelease-32        	    4656	    254705 ns/op	        25.47 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommandRefsNewRelease-32        	    4737	    258534 ns/op	        25.85 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommandRefsNewRelease-32        	    4726	    258131 ns/op	        25.81 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommandRefsNewRelease-32        	    4641	    257596 ns/op	        25.76 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommandRefsNewRelease-32        	    4706	    255276 ns/op	        25.53 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommandRefsNewRelease-32        	    4681	    259162 ns/op	        25.92 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommandRefsNewRelease-32        	    4663	    258324 ns/op	        25.83 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommandRefsNewRelease-32        	    4636	    256928 ns/op	        25.69 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommandRefsNewRelease-32        	    4718	    254008 ns/op	        25.40 ns/entity	       0 B/op	       0 allocs/op
+BenchmarkCommandRefsNewRelease-32        	    4743	    254050 ns/op	        25.40 ns/entity	       0 B/op	       0 allocs/op
 PASS
-ok  	github.com/dvoyni/cog/ecs	192.680s
+ok  	github.com/dvoyni/cog/ecs	349.779s

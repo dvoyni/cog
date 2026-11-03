@@ -2,6 +2,7 @@ package ecs
 
 import (
 	"math/rand/v2"
+	"strings"
 	"testing"
 
 	"github.com/dvoyni/cog/kernel"
@@ -234,11 +235,10 @@ func TestDespawnedIndicesOutsideTheRangeAreNotFreed(t *testing.T) {
 	}
 }
 
-// TestIndexReusedInTheWindowReportsBoth despawns a mirrored entity and
-// places the next generation at its index within one window, in a store few
-// enough changes leave listing: the removed row in the tail loses its link to
-// the index, and is still reported.
-func TestIndexReusedInTheWindowReportsBoth(t *testing.T) {
+// TestCreateAtWaitsForTheWindowOfADespawn despawns a mirrored entity and
+// places the next generation at its index: CreateAt refuses it until the
+// reset, so the removal is reported, then the successor's add.
+func TestCreateAtWaitsForTheWindowOfADespawn(t *testing.T) {
 	o := spawnObserved(t)
 	for range 100 {
 		o.store.Add(o.world.Spawn(), health{})
@@ -252,15 +252,20 @@ func TestIndexReusedInTheWindowReportsBoth(t *testing.T) {
 		t.Fatal("one removal stopped the listing")
 	}
 	replaced := makeEntity(1<<30, 2)
-	o.world.CreateAt(replaced)
-	o.store.Add(replaced, health{Points: 2})
+	if err := o.world.CreateAt(replaced); err == nil || !strings.Contains(err.Error(), "despawned this window") {
+		t.Fatalf("CreateAt at an index despawned this window answered %v", err)
+	}
 	got := o.collect()
-	if len(got) != 2 || got[mirrored] != (observedDelta[health]{Delta: DeltaRemoved, Value: health{1}, Previous: health{1}}) || got[replaced] != (observedDelta[health]{Delta: DeltaAdded, Value: health{2}}) {
-		t.Fatalf("the window reported %+v, want the mirrored entity removed and its successor added", got)
+	if len(got) != 1 || got[mirrored] != (observedDelta[health]{Delta: DeltaRemoved, Value: health{1}, Previous: health{1}}) {
+		t.Fatalf("the window reported %+v, want the mirrored entity removed", got)
 	}
 	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
-	if got := o.collect(); len(got) != 0 {
-		t.Fatalf("the next window reported %+v", got)
+	if err := o.world.CreateAt(replaced); err != nil {
+		t.Fatalf("CreateAt after the reset failed: %v", err)
+	}
+	o.store.Add(replaced, health{Points: 2})
+	if got := o.collect(); len(got) != 1 || got[replaced] != (observedDelta[health]{Delta: DeltaAdded, Value: health{2}}) {
+		t.Fatalf("the next window reported %+v, want the successor added", got)
 	}
 }
 

@@ -87,7 +87,8 @@ Kernel
 - **The ECS is one plugin, built empty.** `ecs.NewPlugin()` takes nothing, as
   every plugin constructor does; a plugin is configured only through its
   config part, and building worlds is not configuration. Its `Init` installs
-  the ECS's registry of worlds.
+  the ECS's registry, which `RegisterWorld` finds to know the plugin is
+  initialized.
 - **Worlds are registered by the plugins that use them.**
   `ecs.RegisterWorld[Game](configurator, options)` in a plugin's `Init`
   registers the world, with its allocation range and how many entities to
@@ -124,7 +125,11 @@ Kernel
 - **`CreateAt(e)`** makes `e` alive at its index and generation, for mirrors
   and for loading a save. The index must hold no live entity and lie outside
   the allocation range, so it never collides with an index the world hands
-  out or has reserved.
+  out or has reserved. In an observing world it must not hold one despawned
+  in this window either, as `NewAt` refuses a ref released in it: observers
+  still read the old entity's removal there. A mirror applying a server's
+  despawn and its successor in one window places the successor after the
+  reset.
 - **LIFO reuse.** A despawned index goes to the back of the free list, and
   entities are handed out from the back, so reuse order is deterministic,
   live indices stay packed low, and taking entities never moves the rest.
@@ -375,9 +380,9 @@ c.move = configurator.RegisterTask2(move)
   skipping the unchanged ones inline, at a state byte per row: a level load
   or a pass that writes every row costs what a walk of every row does, and
   the list never holds more than an eighth of the rows, one byte per row.
-  An index reused within the window, by `CreateAt` of a new generation
-  while the old one waits in the tail, stops it too: the tail row loses its
-  link to the index, and only a walk of every row finds it.
+  No index is reused within the window, so a row in the tail keeps its link
+  to its index: the free list takes a despawned index at the reset, and
+  `CreateAt` refuses one despawned in the window.
 - **No field masks.** Which fields changed is the consumer's business: it
   compares value with previous using whatever it knows about the fields.
   Raw-byte masks would report float noise a consumer filters out anyway.
@@ -455,13 +460,15 @@ func commitAi(k *kernel.Kernel, _ kernel.NoArg, commit ecs.CommandSink[Game, AiC
   one chunked array, and the value's bytes in another, each value starting
   at a word. Ref records come from `CommandRefs` and `CommandKeyedRefs`
   (see Refs).
-- **Order.** Despawns of every lane first, then the other records in lane
-  order (registration order) and sequence order, the lanes of ref records
-  last: nothing in a commit reads a ref, so their place is free. A record on
-  an entity not alive is dropped, and so is a `Spawn` of an entity that is
-  not a reservation still waiting (its index holds a live entity, or it is
-  not the generation the index hands out next), and a set or release of a ref not
-  alive; `Commit` answers how many were.
+- **Order.** Spawns of every lane first, so a record of another lane finds
+  its entity alive, then despawns, so a despawn recorded with its spawn
+  ends it, then the other records in lane order (registration order) and
+  sequence order, the lanes of ref records last: nothing in a commit reads
+  a ref, so their place is free. A record on an entity not alive is
+  dropped, and so is a `Spawn` of an entity that is not a reservation still
+  waiting (its index holds a live entity, or it is not the generation the
+  index hands out next), and a set or release of a ref not alive; `Commit`
+  answers how many were.
   `Add` adds or replaces, `Set` replaces only, `Remove` of a component the
   entity lacks does nothing.
 - **Commits go through the same row-state path** as direct writes, so
@@ -802,9 +809,13 @@ hand-written loops:
 
 ## Deferred
 
-- **Parallel writes to one store.** Two jobs writing disjoint rows of one
-  component serialize on its lock. Partitioned write locks can be added
-  without changing the system form.
+- **Parallel queries.** A query walks every row in the job that runs it.
+  Two jobs of a read-only system may run at once, but each walks it all;
+  two jobs writing disjoint rows of one component serialize on its lock. A
+  walk of part of the driving store, such as `q.Part(index, count)` over
+  its share of the chunks, would split a read across jobs and allocate
+  nothing; partitioned write locks would do the same for writes. Both can be
+  added without changing the system form.
 - **Hooks on add, remove and set.** A callback when a component arrives,
   leaves or is set, run where the change is applied. A remove hook could
   release a component's refs without the user recording it. Networking does
