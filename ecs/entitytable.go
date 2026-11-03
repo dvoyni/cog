@@ -262,3 +262,11 @@ func (t *entityTable[W]) free(index uint32) {
 		t.freeEntities.Append(makeEntity(index, nextGeneration(t.slots.at(index).lastGeneration)))
 	}
 }
+
+// shrink releases the chunks past the free entities and the window's
+// despawned indices. Slots never shrink: each keeps its index's last
+// generation, so a stale entity never comes alive.
+func (t *entityTable[W]) shrink() {
+	t.freeEntities.Shrink()
+	t.despawnedIndices.Shrink()
+}

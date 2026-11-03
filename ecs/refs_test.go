@@ -90,10 +90,10 @@ func TestRefsMatchAReferenceModel(t *testing.T) {
 
 func TestRefSetIsAComponentChange(t *testing.T) {
 	o := spawnRefs(t)
-	ObservationReset(nil, kernel.NoArg{}, o.world)
+	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
 	e := o.world.Spawn()
 	o.store.Add(e, named{Name: o.refs.New("a")})
-	ObservationReset(nil, kernel.NoArg{}, o.world)
+	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
 	first := o.store.Get(e).Name
 	*o.refs.Get(first) = "b"
 	for range o.deltas.All() {

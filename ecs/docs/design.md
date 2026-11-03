@@ -7,14 +7,14 @@ knows nothing about networking, rendering or any other consumer: those build
 on the generic pieces here (type-erased row access, change detection, command
 buffers).
 
-Status: agreed; steps 1 to 8 of the [Work order](#work-order) are built.
+Status: built; what comes next is under [Todo next](#todo-next).
 
 ## Constraints
 
 - **Alloc-free.** Once a kernel is spawned and the containers have grown to
   their working size, nothing allocates: not a query, a system call, a commit,
   an observation reset. Only pools, chunked arrays and buffers grow, and they
-  keep their capacity.
+  keep their capacity until a shrink gives it back.
 - **Pointer-free storage.** Components contain no pointers at any depth, so
   the GC never scans a store, and a row can be copied and compared as bytes.
   Variable-size data (text, lists, blobs) lives in refs.
@@ -39,7 +39,7 @@ Kernel
 | Type | Role |
 |---|---|
 | `WorldID` | Constraint over world IDs: `~[1]uint64 \| ~[2]uint64 \| ~[4]uint64 \| ~[8]uint64`. |
-| `World[W]` | The barrier: write on the world. Spawn, despawn, `CreateAt`, type-erased row access. |
+| `World[W]` | The barrier: write on the world. Spawn, despawn, `CreateAt`, type-erased row access, `Shrink`. |
 | `WorldLookup[W]` | Reads the world: `Alive`, and the component registry. No component. |
 | `Store[W, T]` | Writes `T`'s store by entity: `Get` a pointer to read, `Write` a pointer marked changed, `Add`, `Remove`. |
 | `Lookup[W, T]` | Reads `T`'s store by entity: `Has`, and `Get` a copy. |
@@ -51,7 +51,8 @@ Kernel
 | `CommandSink[W, Tag]` | Applies that buffer to its world: the write on the buffer and the barrier. |
 | `CommandRefs[W, Tag, T]` | Records making, setting and releasing refs of `T` into that buffer, holding a read on the refs. |
 | `Entity` | 64-bit `{index:32, gen:32}`, layout private; `NoEntity` is 0. |
-| `ObservationReset[W]` | The system that ends an observation window. |
+| `ObservationResetSystem[W]` | The system that ends an observation window. |
+| `ShrinkSystem[W]` | The system that gives back the memory a world holds past what is in use. |
 
 ## Worlds
 
@@ -92,6 +93,19 @@ Kernel
 - **The ECS has no frame.** It subscribes to nothing and publishes nothing.
   The user's handlers schedule systems as jobs, in whatever graph the game
   needs.
+- **A shrink gives memory back,** where the game can afford regrowing, such
+  as after a level unloads. `World.Shrink()`, or the system `ShrinkSystem[W]`,
+  runs under the barrier, which excludes the world's refs and command
+  buffers too, since each of their handles holds a read on the world; they
+  register with the world for it. In a world that observes it ends the
+  window first, as the observation reset does, letting go of removed rows
+  and despawned indices and taking back reservations not spawned yet; a
+  world that never observed starts no observation. It then releases every
+  chunk past what is in use: a store's owners, values, shadows and row
+  states, and its index pages that link no row; the free entities; each
+  refs' free list; each command lane. Entity and ref slots never shrink:
+  each keeps its last generation, so a stale handle never comes alive.
+  Nothing alive or recorded is lost, and growing again allocates anew, once.
 
 ## Entities
 
@@ -125,7 +139,8 @@ Kernel
   generation no longer matches, so it reads as dead even once its index is
   reused, and every probe through it finds nothing. Whoever reads it checks
   it, with `WorldLookup.Alive` or by the probe it makes anyway. Clearing it,
-  or despawning along with it, waits for relations or hooks.
+  or despawning along with it, is for whoever stored it, such as a scene
+  module keeping a hierarchy.
 
 ## Components and stores
 
@@ -343,10 +358,10 @@ c.move = configurator.RegisterTask2(move)
 - **An observer sees changes made since the last observation reset by
   systems that ran before it.** Ordering observers after writers is the
   user's job, by job dependencies.
-- **`ObservationReset[W]`** is a system the ECS provides:
+- **`ObservationResetSystem[W]`** is a system the ECS provides:
 
   ```go
-  c.reset = configurator.RegisterTask1(ecs.ObservationReset[Game])
+  c.reset = configurator.RegisterTask1(ecs.ObservationResetSystem[Game])
   ```
 
   It takes `World[W]`, the barrier. It copies changed and added rows into each observed
@@ -424,8 +439,8 @@ func commitAi(k *kernel.Kernel, _ kernel.NoArg, commit ecs.CommandSink[Game, AiC
   back to the free list under a new generation. In a world that does not
   observe, every barrier operation does it, and such an index is lost:
   reserving without spawning is a bug, and costs one index.
-- **Lanes keep their capacity.** After warm-up, recording and committing
-  allocate nothing.
+- **Lanes keep their capacity** until a shrink. After warm-up, recording and
+  committing allocate nothing.
 
 ## Refs
 
@@ -540,10 +555,17 @@ exists:
   run is the game's decision, made with job dependencies.
 - **`Changes[W, T]` beside delta queries.** A one-term delta query with
   `Previous()` is the same question; two ways to ask it would drift apart.
+  The delta query's row of values, previous values and deltas costs 25 µs
+  over 10,000 rows with a tenth written, against 20 µs for `Changes`.
 - **Created and Destroyed deltas.** A despawn already reads as every term
   removed, and `WorldLookup.Alive` tells it from a removal; that an entity
   is new means little to an observer beyond its terms being added, and
   knowing it would cost a window number per entity.
+- **Relations and hierarchy.** Parents, children, despawning a subtree and
+  propagating along it are a scene module's, built on entities held in
+  components. The ECS cannot clear those without reading fields, and pairs
+  held in an entity's type instead would make every pair a component type,
+  where a world's masks have a fixed number of bits.
 - **A warning for a forgotten reset.** A world never reset does no harm, and
   catching resets that stopped needs a size check on the remove path.
 
@@ -552,94 +574,46 @@ exists:
 - **Parallel writes to one store.** Two jobs writing disjoint rows of one
   component serialize on its lock. Partitioned write locks can be added
   without changing the system form.
-- **Relations** between entities.
 - **A list of changed rows per store,** so a delta query walk costs
   O(changes) instead of a state byte per row. It costs every first write in
   a window; it can come behind the same delta query.
 - **Optional delta query terms,** with a delta when the entity has the
   component and no part in whether it matches. An `Optional` term in a delta
   query panics at registration until then.
-- **Shrink.** Giving capacity back, as a system under the barrier.
 - **Introspection** for tools (by-name reads and writes).
 
-## Work order
+## Performance
 
-Each step ends with its tests passing under `go test -race`.
+Measured per entity over 10,000 entities in `benchmark_test.go`, against
+hand-written loops:
 
-1. **`kernel/container`.** Make `Pool` and `Queue` public there; add an
-   unsynchronized chunked array, chunk bits, and a public `IsPointerFree`.
-   The kernel uses them from there.
-2. **Kernel API.** Rename the declare function type to
-   `TaskConstructorFunc[A, B]`; give `Read[T]` and `Write[T]` an exported
-   `Declare(*Access)`.
-3. **Core.** The `ecs` module; `WorldID`; `Entity` and the entity table
-   (allocation range, `CreateAt`, LIFO reuse, reservations); `World[W]`, the
-   plugin, `RegisterWorld` and the component registry; `Store[W, T]`, tags, `Lookup`; `Query1`…`Query8`
-   with `With` and `Without`; `RegisterTask0`…`RegisterTask8` in the kernel. Alloc tests for
-   queries and system calls.
-4. **Change detection.** Shadows and row states, `Changes[W, T]`,
-   `ObservationReset[W]`. A property test against a reference model.
-   `Changes` was later replaced by `DeltaQuery1`…`DeltaQuery8`: a walk of
-   10,000 rows with a tenth written, read and reset costs 25 µs, against
-   20 µs for `Changes`, for the row of values, previous values and deltas.
-5. **Commands.** `RegisterCommandBuffer`, `CommandBuffer[W, Tag]`, lanes,
-   `CommandSink[W, Tag]`, type-erased row access under the barrier, spawning from a mask
-   and bytes. A property test of buffered changes from several systems, and
-   same results with one worker and many.
-6. **Benchmarks.** Iteration, change detection, commits; measured against
-   hand-written loops. `docs/benchmarks-baseline.txt` holds ten runs from
-   after step 8; a change is checked with
-   `go test -run '^$' -bench . -count 10 > new.txt` and
-   `benchstat docs/benchmarks-baseline.txt new.txt`.
-7. **Deepening.** Each is designed with the user first, then built, and
-   measured against step 6:
-   1. **An entity allocator.** Built as `entityTable`. One module owns allocation, reservations,
-      windowed reuse and the generation burn, which are now split across
-      `Spawn`, despawn, the observation reset and the commit, each branching
-      on whether the world observes. Callers say what happened (reserved,
-      spawned, released, window ended); the allocator decides the
-      settling. The alive check stays one load. The baseline shows why:
-      in a world that does not observe, every `Spawn` and despawn settles,
-      and settling shifts the whole free list, so `BenchmarkSpawnDespawn`
-      costs about 3.7 µs per entity, quadratic in the free entities. Taking
-      from the back (LIFO reuse) makes settling a truncation.
-   2. **Observation behind the store.** Built, with a row cursor. The store yields its own changes
-      (owner, kind, value and shadow addresses, the bytewise skip
-      included) and holds one observation state instead of two flags;
-      `Changes[W, T]` only converts to `T`.
-   3. **One row-access path.** Built: the store answers `get` and `write`
-      (marked) by entity, the world `put` and `remove`; `Store`, `Lookup`,
-      typed and raw `World`, and the commit only declare locks and convert.
-   4. **Walking a mask.** Built as `maskIDs`, an iterator over a mask's
-      component IDs in ascending order, for despawn, checking and spawning
-      from bytes. It inlines whole, loop body included.
-   5. **The query walk.** Built: a walk goes by the driver's chunks, stepping
-      its address, probes only the other terms, once each, and marks the
-      matched rows of observed write terms from those probes. Most of the
-      15 ns a dense two-term query cost per entity was not probing but the
-      row: an array of addresses lives in memory, and copying it to the
-      loop body loaded 16 bytes over two 8-byte stores, which the CPU cannot
-      forward. A row now holds each term's address as a field of its own,
-      in registers for up to three terms. Dense costs 6.4 ns per entity,
-      7.4 ns observed, against 0.5 ns for a slice loop. An `Optional` term
-      is probed like any other: a walk of positions with a velocity on
-      every tenth entity costs 6.3 ns per entity, against 4.1 ns for the
-      same walk reading the velocity through a `Lookup`. The gap is the
-      walk's probe of a term, not the optional: a dense two-term query
-      pays it too, 7.4 ns against 5.0 ns with a `Lookup`.
-8. **Refs.** Built as above. Reading a ref by handle costs 2.4 ns; setting
-   one through its component, observed, 15 ns. Making one through a command
-   buffer and releasing it through another commit, 22 ns.
+- **A dense two-term query** costs 6.4 ns, 7.4 ns with its written store
+  observed, against 0.5 ns for a slice loop. A row holds each term's address
+  as a field of its own, in registers for up to three terms: an array of
+  addresses lives in memory, and copying it to the loop body loaded 16 bytes
+  over two 8-byte stores, which the CPU cannot forward. As an array, a dense
+  query cost 15 ns.
+- **A probed term** costs more than a `Lookup`: a walk of positions with an
+  optional velocity on every tenth entity costs 6.3 ns, against 4.1 ns for
+  the same walk reading the velocity through a `Lookup`, and a dense
+  two-term query 7.4 ns against 5.0 ns. The cost is the walk's probe of a
+  term, optional or not.
+- **A delta query** over 10,000 rows with a tenth written, read and reset
+  costs 25 µs.
+- **A ref** costs 2.4 ns to read by handle and 15 ns to set through its
+  component, observed; making one through a command buffer and releasing it
+  through another commit, 22 ns.
+- **Walking a mask's component IDs,** for despawn, checking and spawning
+  from bytes, inlines whole, loop body included.
+
+`docs/benchmarks-baseline.txt` holds ten runs. A change is checked with
+`go test -run '^$' -bench . -count 10 > new.txt` and
+`benchstat docs/benchmarks-baseline.txt new.txt`.
 
 ## Todo next
 
 Major features other ECSs have:
 
-- **Parallel iteration within a query.** Splitting one walk over several
-  workers, with partitioned write locks on a store (see Deferred).
-- **Relations and hierarchy.** Pairs between entities, parent and child,
-  despawning a subtree, propagating along it (see Deferred). An entity held
-  in a component is cleared or despawned with its target only here.
 - **Hooks on add, remove and set.** A callback when a component arrives,
   leaves or is set, run where the change is applied. A remove hook could
   release a component's refs without the user recording it.
@@ -652,6 +626,5 @@ Major features other ECSs have:
 - **Cached queries and groups.** Keeping a query's matches, or packing
   stores owned together in one order, so walks skip the probes. Weighed
   against the sparse-set choice; low.
-- **Shrink.** Giving capacity back (see Deferred).
 
 Networking comes after, as its own design on top of these pieces.

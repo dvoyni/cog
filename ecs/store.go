@@ -2,6 +2,7 @@ package ecs
 
 import (
 	"bytes"
+	"slices"
 	"unsafe"
 
 	"github.com/dvoyni/cog/kernel"
@@ -391,6 +392,19 @@ func (s *storeResource) resetObservation() {
 	}
 	s.owners.Resize(s.liveRows)
 	s.rowStates.Resize(s.liveRows)
+}
+
+// shrink releases the chunks past the rows, the tail included, and the
+// index pages that link no row. It runs under the barrier.
+func (s *storeResource) shrink() {
+	s.owners.Shrink()
+	s.rowStates.Shrink()
+	used := min((s.owners.Len()+rowMask)>>rowShift, len(s.valueChunks))
+	s.valueChunks = slices.Clone(s.valueChunks[:used])
+	if s.observed() {
+		s.shadowChunks = slices.Clone(s.shadowChunks[:used])
+	}
+	s.rowByIndex.shrink()
 }
 
 // tailRow answers e's row in the tail, or false if it has none.

@@ -1,13 +1,15 @@
 package container
 
+import "slices"
+
 // Array is a growing sequence of T, addressed by position from 0. Items live
 // in fixed-size chunks that never move, so growing copies nothing, and a
 // pointer At returns stays valid until that position is removed or cut off.
 //
 // It is not synchronized: one goroutine at a time may change it, and readers
-// must not overlap a change. Shrinking keeps its chunks, so an Array that has
-// reached its working size allocates nothing. The zero Array is empty and
-// ready to use.
+// must not overlap a change. Resizing down keeps its chunks, so an Array that
+// has reached its working size allocates nothing; Shrink gives back those
+// past Len. The zero Array is empty and ready to use.
 //
 // T should hold no pointers, so the GC never scans the chunks.
 type Array[T any] struct {
@@ -47,6 +49,12 @@ func (a *Array[T]) Resize(length int) {
 		a.chunks[i>>chunkShift][i&chunkMask] = zero
 	}
 	a.length = length
+}
+
+// Shrink releases the chunks past those holding items, so the GC takes them.
+// The array keeps its items; growing again allocates chunks anew.
+func (a *Array[T]) Shrink() {
+	a.chunks = slices.Clone(a.chunks[:a.Chunks()])
 }
 
 // SwapRemove removes the item at i by moving the last item into its place,

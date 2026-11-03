@@ -50,6 +50,16 @@ type worldResource[W WorldID] struct {
 	entities     entityTable[W]
 	stores       []*storeResource
 	storesByType map[reflect.Type]*storeResource
+	// shrinkers holds the world's refs and command buffers, resources of
+	// their own that a shrink reaches under the barrier: each declaration
+	// of them holds a read on the world.
+	shrinkers []shrinker
+}
+
+// shrinker is a resource of a world that gives back the memory it holds past
+// what is in use.
+type shrinker interface {
+	shrink()
 }
 
 // RegisterWorld registers world W, named by its world ID, as a kernel
@@ -107,6 +117,17 @@ func (w World[W]) CreateAt(e Entity) error {
 // alive.
 func (w World[W]) Despawn(e Entity) bool {
 	return w.world.despawn(e)
+}
+
+// Shrink gives back the memory the world holds past what is in use: in its
+// entities, its stores, its refs and its command buffers. In a world that
+// observes it ends the observation window first, as ObservationResetSystem
+// does, so removed rows and despawned indices are let go too, and
+// reservations not spawned yet are taken back; a world that never observed
+// starts no observation. Nothing alive or recorded is lost, and growing
+// again allocates anew.
+func (w World[W]) Shrink() {
+	w.world.shrink()
 }
 
 // ComponentID answers T's ComponentID in the world, for typed code reaching
@@ -341,6 +362,21 @@ func (w *worldResource[W]) resetObservation() {
 	}
 	for _, s := range w.stores {
 		s.resetObservation()
+	}
+}
+
+// shrink ends the window if the world observes, then gives back what its
+// entities, stores, refs and command buffers hold past what is in use.
+func (w *worldResource[W]) shrink() {
+	if w.entities.observing {
+		w.resetObservation()
+	}
+	w.entities.shrink()
+	for _, s := range w.stores {
+		s.shrink()
+	}
+	for _, s := range w.shrinkers {
+		s.shrink()
 	}
 }
 

@@ -125,7 +125,7 @@ func TestQueryMatchesAReferenceAcrossChunks(t *testing.T) {
 			move = declare[Query3[game, *position, velocity, Without[frozen]]](c)
 			still = declare[Query2[game, *position, With[frozen]]](c)
 		})
-		ObservationReset(nil, kernel.NoArg{}, w)
+		ObservationResetSystem(nil, kernel.NoArg{}, w)
 		random := rand.New(rand.NewPCG(seed, 7))
 		entities := make([]Entity, 600)
 		for i := range entities {
@@ -147,7 +147,7 @@ func TestQueryMatchesAReferenceAcrossChunks(t *testing.T) {
 				tags.Add(entities[i], frozen{})
 			}
 		}
-		ObservationReset(nil, kernel.NoArg{}, w)
+		ObservationResetSystem(nil, kernel.NoArg{}, w)
 		moved := map[Entity]bool{}
 		for e, row := range move.All() {
 			pos, vel, _ := row.Get()
@@ -212,7 +212,7 @@ func TestQueryOptionalTermsMatchAReference(t *testing.T) {
 			push = declare[Query3[game, position, Optional[*velocity], Optional[frozen]]](c)
 			peek = declare[Query2[game, With[position], Optional[velocity]]](c)
 		})
-		ObservationReset(nil, kernel.NoArg{}, w)
+		ObservationResetSystem(nil, kernel.NoArg{}, w)
 		random := rand.New(rand.NewPCG(seed, 11))
 		entities := make([]Entity, 600)
 		for i := range entities {
@@ -234,7 +234,7 @@ func TestQueryOptionalTermsMatchAReference(t *testing.T) {
 				tags.Add(entities[i], frozen{})
 			}
 		}
-		ObservationReset(nil, kernel.NoArg{}, w)
+		ObservationResetSystem(nil, kernel.NoArg{}, w)
 		pushed := map[Entity]bool{}
 		for e, row := range push.All() {
 			pos, velocityTerm, tagTerm := row.Get()

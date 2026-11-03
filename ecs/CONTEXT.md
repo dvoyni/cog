@@ -19,6 +19,10 @@ _Avoid_: Object, actor, handle
 **Allocation range**:
 The span of indices a world hands out to new entities. Indices outside it are only ever placed with `CreateAt`.
 
+**Shrink**:
+Giving back the memory a world holds past what is in use, after its working size has dropped. It ends the observation window first in a world that observes.
+_Avoid_: Compact, trim, garbage collect
+
 **Reservation**:
 An entity taken from the world for a later spawn. It is not alive until a commit spawns it.
 

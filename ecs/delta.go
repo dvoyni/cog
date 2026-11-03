@@ -1,10 +1,6 @@
 package ecs
 
-import (
-	"unsafe"
-
-	"github.com/dvoyni/cog/kernel"
-)
+import "unsafe"
 
 // Delta is what happened to one term of an entity in an observation window,
 // since the last observation reset.
@@ -18,22 +14,6 @@ const (
 	DeltaChanged
 	DeltaRemoved
 )
-
-// ObservationReset is the system that ends world W's observation window,
-// registered with RegisterTask1(ecs.ObservationReset[Game]) and scheduled
-// where the frame needs it: first, last, after the network send, after the
-// renderer has read its deltas. It takes the barrier. Every observed
-// store's shadows take their rows' values and its removed rows are dropped;
-// the window's despawned indices, and reservations never spawned, go back
-// to the free list.
-//
-// Its first run turns observation on, and every row present then counts as
-// added in the first window. A world it never runs in observes nothing and
-// keeps nothing for observers: a despawned index is reused at once.
-func ObservationReset[W WorldID](k *kernel.Kernel, _ kernel.NoArg, world World[W]) kernel.NoResult {
-	world.world.resetObservation()
-	return kernel.NoResult{}
-}
 
 // declareDeltaQuery checks that terms can make a delta query, and registers
 // an observer of each value term's store. It is a composition error, and

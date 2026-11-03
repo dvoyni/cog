@@ -385,6 +385,30 @@ func TestArrayChunksCoverEveryItem(t *testing.T) {
 	}
 }
 
+func TestArrayShrinkReleasesChunksPastLen(t *testing.T) {
+	a := &Array[int]{}
+	for i := range 3*chunkSize + 5 {
+		a.Append(i)
+	}
+	a.Resize(chunkSize + 1)
+	kept := a.At(chunkSize)
+	a.Shrink()
+	if len(a.chunks) != 2 || a.Len() != chunkSize+1 || a.At(chunkSize) != kept || *kept != chunkSize {
+		t.Fatalf("Shrink left %d chunks and %d items, want 2 and %d in place", len(a.chunks), a.Len(), chunkSize+1)
+	}
+	a.Resize(0)
+	a.Shrink()
+	if len(a.chunks) != 0 {
+		t.Fatalf("Shrink of an empty array left %d chunks", len(a.chunks))
+	}
+	for i := range chunkSize + 1 {
+		a.Append(i)
+	}
+	if a.Len() != chunkSize+1 || *a.At(chunkSize) != chunkSize {
+		t.Fatal("an array grown again after Shrink lost items")
+	}
+}
+
 func TestArrayAllocatesNothingOnceGrown(t *testing.T) {
 	a := &Array[uint64]{}
 	a.Resize(3 * chunkSize)

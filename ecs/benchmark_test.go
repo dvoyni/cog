@@ -58,8 +58,8 @@ func spawnBench(b *testing.B, velocityEvery int, observed bool) *benchWorld {
 		}
 	}
 	if observed {
-		ObservationReset(nil, kernel.NoArg{}, o.world)
-		ObservationReset(nil, kernel.NoArg{}, o.world)
+		ObservationResetSystem(nil, kernel.NoArg{}, o.world)
+		ObservationResetSystem(nil, kernel.NoArg{}, o.world)
 	}
 	return o
 }
@@ -220,7 +220,7 @@ func BenchmarkDeltaQuery(b *testing.B) {
 		for _, row := range o.deltas.All() {
 			benchSum += row.Get().X - row.Previous().X
 		}
-		ObservationReset(nil, kernel.NoArg{}, o.world)
+		ObservationResetSystem(nil, kernel.NoArg{}, o.world)
 	})
 }
 
@@ -228,7 +228,7 @@ func BenchmarkDeltaQuery(b *testing.B) {
 func BenchmarkObservationResetUnchanged(b *testing.B) {
 	o := spawnBench(b, 1, true)
 	measure(b, func() {
-		ObservationReset(nil, kernel.NoArg{}, o.world)
+		ObservationResetSystem(nil, kernel.NoArg{}, o.world)
 	})
 }
 
@@ -250,7 +250,7 @@ func BenchmarkCommitSetObserved(b *testing.B) {
 			o.commands.Set(e, position{X: float32(i)})
 		}
 		o.sink.Commit()
-		ObservationReset(nil, kernel.NoArg{}, o.world)
+		ObservationResetSystem(nil, kernel.NoArg{}, o.world)
 	})
 }
 
@@ -313,13 +313,13 @@ func BenchmarkRefsGet(b *testing.B) {
 // them, observed, in an order unrelated to the rows.
 func BenchmarkRefsSet(b *testing.B) {
 	o := spawnRefs(b)
-	ObservationReset(nil, kernel.NoArg{}, o.world)
+	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
 	entities := make([]Entity, benchEntities)
 	for i := range entities {
 		entities[i] = o.world.Spawn()
 		o.store.Add(entities[i], named{Name: o.refs.New("name")})
 	}
-	ObservationReset(nil, kernel.NoArg{}, o.world)
+	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
 	measure(b, func() {
 		for i := range benchEntities {
 			o.refs.Set(&o.store.Write(entities[(i*7919)%benchEntities]).Name, "other")

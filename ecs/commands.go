@@ -75,6 +75,8 @@ type refsLane interface {
 	// commit applies the lane's records and empties it, keeping its
 	// capacity, and answers how many were dropped.
 	commit() int
+	// shrink releases the lane's chunks past its records and values.
+	shrink()
 }
 
 // refsLaneOf is one producing system's part of a command buffer for refs of
@@ -118,7 +120,9 @@ func RegisterCommandBuffer[W WorldID, Tag any](configurator *kernel.Configurator
 	if _, ok := configurator.Resource[*commandRecorder[W, Tag]](); ok {
 		panic(fmt.Sprintf("ecs: command buffer %v of world %v is registered twice", reflect.TypeFor[Tag](), reflect.TypeFor[W]()))
 	}
-	configurator.InitResource(&commandRecorder[W, Tag]{world: w})
+	recorder := &commandRecorder[W, Tag]{world: w}
+	w.shrinkers = append(w.shrinkers, recorder)
+	configurator.InitResource(recorder)
 }
 
 // Declare declares a read on the buffer and on world W, and gives this
@@ -329,4 +333,22 @@ func (l *refsLaneOf[W, T]) commit() int {
 	l.records.Resize(0)
 	l.values.Resize(0)
 	return dropped
+}
+
+// shrink releases the chunks past each lane's records and values, which
+// stay. It runs under the barrier.
+func (r *commandRecorder[W, Tag]) shrink() {
+	for _, lane := range r.lanes {
+		lane.records.Shrink()
+		lane.values.Shrink()
+	}
+	for _, lane := range r.refsLanes {
+		lane.shrink()
+	}
+}
+
+// shrink releases the chunks past the lane's records and values.
+func (l *refsLaneOf[W, T]) shrink() {
+	l.records.Shrink()
+	l.values.Shrink()
 }

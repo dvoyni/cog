@@ -1,6 +1,8 @@
 package ecs
 
 import (
+	"fmt"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -145,7 +147,7 @@ func TestWorldAllocatesNothingOnceGrown(t *testing.T) {
 	for _, observing := range []bool{false, true} {
 		o := spawnCommands(t)
 		if observing {
-			ObservationReset(nil, kernel.NoArg{}, o.world)
+			ObservationResetSystem(nil, kernel.NoArg{}, o.world)
 		}
 		w := o.world
 		healthID := w.ComponentID[health]()
@@ -187,7 +189,7 @@ func TestWorldAllocatesNothingOnceGrown(t *testing.T) {
 			if observing {
 				for range o.deltas.All() {
 				}
-				ObservationReset(nil, kernel.NoArg{}, w)
+				ObservationResetSystem(nil, kernel.NoArg{}, w)
 			}
 		}
 		round()
@@ -300,5 +302,274 @@ func TestWorldLookupsRunAlongsideWriters(t *testing.T) {
 				alive--
 			}
 		}
+	}
+}
+
+// shrinkWorld is a world with an observed store, an unobserved one, refs, a
+// command buffer with a lane of each kind, and its sink.
+type shrinkWorld struct {
+	world       World[game]
+	healths     Store[game, health]
+	positions   Store[game, position]
+	deltas      DeltaQuery1[game, health]
+	refs        Refs[game, string]
+	commands    CommandBuffer[game, aiCommands]
+	commandRefs CommandRefs[game, aiCommands, string]
+	sink        CommandSink[game, aiCommands]
+}
+
+func spawnShrink(t testing.TB) *shrinkWorld {
+	o := &shrinkWorld{}
+	spawn(t, func(c *kernel.Configurator) {
+		RegisterComponent[game, health](c)
+		RegisterComponent[game, position](c)
+		RegisterRefs[game, string](c)
+		RegisterCommandBuffer[game, aiCommands](c)
+		o.world = declare[World[game]](c)
+		o.healths = declare[Store[game, health]](c)
+		o.positions = declare[Store[game, position]](c)
+		o.deltas = declare[DeltaQuery1[game, health]](c)
+		o.refs = declare[Refs[game, string]](c)
+		o.commands = declare[CommandBuffer[game, aiCommands]](c)
+		o.commandRefs = declare[CommandRefs[game, aiCommands, string]](c)
+		o.sink = declare[CommandSink[game, aiCommands]](c)
+	})
+	return o
+}
+
+// TestShrinkKeepsWhatIsInUse grows a world's entities, stores, refs and
+// lanes, lets most of it go, leaves records waiting and shrinks, in a world
+// that observes and in one that does not. What is alive and recorded reads
+// the same, the chunks and index pages past it are released, and the world
+// observes as before, its window ended.
+func TestShrinkKeepsWhatIsInUse(t *testing.T) {
+	for _, observing := range []bool{false, true} {
+		o := spawnShrink(t)
+		if observing {
+			ObservationResetSystem(nil, kernel.NoArg{}, o.world)
+		}
+		var entities []Entity
+		var names []Ref[string]
+		for i := range 10_000 {
+			e := o.world.Spawn()
+			entities = append(entities, e)
+			o.healths.Add(e, health{Points: int32(i)})
+			o.positions.Add(e, position{X: float32(i)})
+			names = append(names, o.refs.New(fmt.Sprint(i)))
+			o.commands.Set(e, health{Points: int32(i)})
+		}
+		o.sink.Commit()
+		kept := map[Entity]int{}
+		for i, e := range entities {
+			if (i < indexPageSize && i%6 == 0) || i == len(entities)-1 {
+				kept[e] = i
+				continue
+			}
+			o.world.Despawn(e)
+			o.refs.Release(names[i])
+		}
+		pending := o.commands.Reserve()
+		o.commands.Spawn(pending)
+		o.commands.Add(pending, health{Points: -1})
+		pendingName := o.commandRefs.New("pending")
+		o.world.Shrink()
+		for _, s := range []*storeResource{o.healths.store, o.positions.store} {
+			pages := 0
+			for _, page := range s.rowByIndex.pages {
+				if page != nil {
+					pages++
+				}
+			}
+			chunks := (s.len() + rowMask) >> rowShift
+			if len(s.valueChunks) != chunks || (s.observed() && len(s.shadowChunks) != chunks) || pages != 2 {
+				t.Fatalf("observing %v: a store of %d rows kept %d value chunks, %d shadow chunks and %d index pages, want %d, %d and 2: the first and the last",
+					observing, s.len(), len(s.valueChunks), len(s.shadowChunks), pages, chunks, chunks)
+			}
+		}
+		if o.world.world.entities.observing != observing || o.healths.store.observed() != observing {
+			t.Fatalf("observing %v: Shrink changed whether the world observes", observing)
+		}
+		if deltas := collectDeltas(o.deltas); len(deltas) != 0 {
+			t.Fatalf("observing %v: Shrink left %d deltas in the window", observing, len(deltas))
+		}
+		checkKept := func() {
+			for e, i := range kept {
+				if !o.world.Alive(e) || o.healths.Get(e).Points != int32(i) || o.positions.Get(e).X != float32(i) || *o.refs.Get(names[i]) != fmt.Sprint(i) {
+					t.Fatalf("observing %v: entity %#x lost what it holds", observing, uint64(e))
+				}
+			}
+		}
+		checkKept()
+		// The reset a shrink makes in a world that observes takes back the
+		// reservation, as ObservationResetSystem does: its Spawn and Add drop.
+		wantDropped := 0
+		if observing {
+			wantDropped = 2
+		}
+		if dropped := o.sink.Commit(); dropped != wantDropped || o.world.Alive(pending) == observing {
+			t.Fatalf("observing %v: the commit after Shrink dropped %d records, want %d", observing, dropped, wantDropped)
+		}
+		if name := o.refs.Get(pendingName); name == nil || *name != "pending" {
+			t.Fatalf("observing %v: a ref recorded before Shrink reads %v", observing, name)
+		}
+		for range 10_000 {
+			e := o.world.Spawn()
+			o.healths.Add(e, health{Points: -1})
+			o.positions.Add(e, position{X: -1})
+			o.refs.New("again")
+		}
+		checkKept()
+	}
+}
+
+func TestShrinkAllocatesNothingOnceRegrown(t *testing.T) {
+	o := spawnShrink(t)
+	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
+	entities := make([]Entity, 1000)
+	names := make([]Ref[string], len(entities))
+	round := func() {
+		for i := range entities {
+			entities[i] = o.world.Spawn()
+			o.healths.Add(entities[i], health{Points: int32(i)})
+			o.positions.Add(entities[i], position{X: float32(i)})
+			names[i] = o.refs.New("name")
+			o.commands.Set(entities[i], health{})
+		}
+		o.sink.Commit()
+		for i, e := range entities {
+			o.world.Despawn(e)
+			o.refs.Release(names[i])
+		}
+		ObservationResetSystem(nil, kernel.NoArg{}, o.world)
+	}
+	round()
+	o.world.Shrink()
+	round()
+	if got := testing.AllocsPerRun(20, round); got != 0 {
+		t.Fatalf("a round after Shrink and regrowing allocated %v times", got)
+	}
+}
+
+// TestShrinkReleasesRefsAndLanes grows the free refs, a lane's records and
+// values and a refs lane's records, empties them, and shrinks: growing each
+// again allocates, where it allocated nothing before the shrink. Each is
+// regrown after the ones its cycle also grows.
+func TestShrinkReleasesRefsAndLanes(t *testing.T) {
+	o := spawnShrink(t)
+	e := o.world.Spawn()
+	names := make([]Ref[string], 10_000)
+	for i := range names {
+		names[i] = o.refs.New("name")
+	}
+	cycles := []struct {
+		name  string
+		cycle func()
+	}{
+		{"the free refs", func() {
+			for _, h := range names {
+				o.refs.Release(h)
+			}
+			for i := range names {
+				names[i] = o.refs.New("name")
+			}
+		}},
+		{"a lane's records", func() {
+			for range names {
+				o.commands.Remove[health](e)
+			}
+			o.sink.Commit()
+		}},
+		{"a lane's values", func() {
+			for range names {
+				o.commands.Set(e, health{})
+			}
+			o.sink.Commit()
+		}},
+		{"a refs lane's records", func() {
+			for range names {
+				o.commandRefs.Release(Ref[string]{})
+			}
+			o.sink.Commit()
+		}},
+	}
+	for _, c := range cycles {
+		if got := testing.AllocsPerRun(5, c.cycle); got != 0 {
+			t.Fatalf("growing %s allocated %v times before the shrink", c.name, got)
+		}
+	}
+	o.world.Shrink()
+	for _, c := range cycles {
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		c.cycle()
+		runtime.ReadMemStats(&after)
+		if after.Mallocs == before.Mallocs {
+			t.Fatalf("growing %s after Shrink allocated nothing: its chunks were kept", c.name)
+		}
+	}
+}
+
+// spawnFrozen records spawning 50 entities, each frozen.
+func spawnFrozen(k *kernel.Kernel, _ kernel.NoArg, commands CommandBuffer[game, aiCommands]) kernel.NoResult {
+	for range 50 {
+		e := commands.Reserve()
+		commands.Spawn(e)
+		commands.Add(e, frozen{})
+	}
+	return kernel.NoResult{}
+}
+
+// churnNames makes 50 refs and releases them.
+func churnNames(k *kernel.Kernel, _ kernel.NoArg, refs Refs[game, string]) kernel.NoResult {
+	var handles [50]Ref[string]
+	for i := range handles {
+		handles[i] = refs.New("name")
+	}
+	for _, h := range handles {
+		refs.Release(h)
+	}
+	return kernel.NoResult{}
+}
+
+// recordNames records making 10 refs.
+func recordNames(k *kernel.Kernel, _ kernel.NoArg, commandRefs CommandRefs[game, aiCommands, string]) kernel.NoResult {
+	for range 10 {
+		commandRefs.New("recorded")
+	}
+	return kernel.NoResult{}
+}
+
+// TestShrinkRunsApartFromWorldResources schedules the Shrink system with
+// nothing between it and systems writing refs, recording commands and
+// recording refs, and commits after them all. Run under -race, it checks
+// that the barrier keeps the refs and the lanes a shrink reaches apart from
+// their writers.
+func TestShrinkRunsApartFromWorldResources(t *testing.T) {
+	var shrinkTask, spawnTask, churnTask, recordTask, commitTask *kernel.Task[kernel.NoArg, kernel.NoResult]
+	var tags Store[game, frozen]
+	h, _ := queryWorld(t, 300, func(c *kernel.Configurator) {
+		RegisterRefs[game, string](c)
+		RegisterCommandBuffer[game, aiCommands](c)
+		shrinkTask = c.RegisterTask1(ShrinkSystem[game])
+		spawnTask = c.RegisterTask1(spawnFrozen)
+		churnTask = c.RegisterTask1(churnNames)
+		recordTask = c.RegisterTask1(recordNames)
+		commitTask = c.RegisterTask1(commit)
+		tags = declare[Store[game, frozen]](c)
+	})
+	const rounds = 5
+	for range rounds {
+		h.run(func(ex *kernel.Executor) kernel.JobHandle {
+			jobs := []kernel.JobHandle{
+				ex.Schedule(shrinkTask, kernel.NoArg{}).Handle(),
+				ex.Schedule(spawnTask, kernel.NoArg{}).Handle(),
+				ex.Schedule(churnTask, kernel.NoArg{}).Handle(),
+				ex.Schedule(recordTask, kernel.NoArg{}).Handle(),
+			}
+			return ex.Schedule(commitTask, kernel.NoArg{}, jobs...).Handle()
+		})
+	}
+	if got, want := tags.store.len(), 100+50*rounds; got != want {
+		t.Fatalf("%d entities are frozen, want %d", got, want)
 	}
 }

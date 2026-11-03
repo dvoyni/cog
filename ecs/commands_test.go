@@ -95,9 +95,9 @@ func TestCommitSetAndRemoveOfAMissingComponentDoNothing(t *testing.T) {
 
 func TestStaleReservationIsRefusedAfterTheReset(t *testing.T) {
 	o := spawnCommands(t)
-	ObservationReset(nil, kernel.NoArg{}, o.world) // observing, so the reset reclaims
+	ObservationResetSystem(nil, kernel.NoArg{}, o.world) // observing, so the reset reclaims
 	stale := o.first.Reserve()
-	ObservationReset(nil, kernel.NoArg{}, o.world)
+	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
 	o.first.Spawn(stale)
 	if o.sink.Commit() != 1 || o.world.Alive(stale) {
 		t.Fatal("a reservation spawned after the reset that reclaimed it came alive")
@@ -109,10 +109,10 @@ func TestStaleReservationIsRefusedAfterTheReset(t *testing.T) {
 
 func TestObserversSeeCommits(t *testing.T) {
 	o := spawnCommands(t)
-	ObservationReset(nil, kernel.NoArg{}, o.world)
+	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
 	e := o.world.Spawn()
 	o.healths.Add(e, health{Points: 1})
-	ObservationReset(nil, kernel.NoArg{}, o.world)
+	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
 	o.first.Set(e, health{Points: 2})
 	spawned := o.first.Reserve()
 	o.first.Spawn(spawned)
@@ -272,12 +272,12 @@ func TestTypedWorldAccess(t *testing.T) {
 		w = declare[World[game]](c)
 		deltas = declare[DeltaQuery1[game, health]](c)
 	})
-	ObservationReset(nil, kernel.NoArg{}, w)
+	ObservationResetSystem(nil, kernel.NoArg{}, w)
 	e := w.Spawn()
 	if !w.Add(e, health{Points: 3}) || !w.Has[health](e) || w.Get[health](e).Points != 3 {
 		t.Fatal("Add, Has or Get by type disagree")
 	}
-	ObservationReset(nil, kernel.NoArg{}, w)
+	ObservationResetSystem(nil, kernel.NoArg{}, w)
 	w.Write[health](e).Points = 4
 	reported := 0
 	for range deltas.All() {

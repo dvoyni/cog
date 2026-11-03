@@ -1,5 +1,10 @@
 package ecs
 
+import (
+	"slices"
+	"unsafe"
+)
+
 const (
 	indexPageShift = 12
 	indexPageSize  = 1 << indexPageShift
@@ -37,4 +42,22 @@ func (t *indexTable[T]) atOrCreate(index uint32) *T {
 		t.pages[page] = new([indexPageSize]T)
 	}
 	return &t.pages[page][index&indexPageMask]
+}
+
+// shrink releases the pages whose entries are all zero, which read the same
+// once their page is gone. It scans every page.
+func (t *indexTable[T]) shrink() {
+	used := 0
+	for i, page := range t.pages {
+		if page == nil {
+			continue
+		}
+		raw := unsafe.Slice((*byte)(unsafe.Pointer(page)), unsafe.Sizeof(*page))
+		if slices.ContainsFunc(raw, func(b byte) bool { return b != 0 }) {
+			used = i + 1
+		} else {
+			t.pages[i] = nil
+		}
+	}
+	t.pages = slices.Clone(t.pages[:used])
 }

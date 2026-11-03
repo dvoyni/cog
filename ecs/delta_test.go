@@ -30,7 +30,7 @@ func spawnUnobserved(t *testing.T) *observedWorld {
 		o.lookup = declare[Lookup[game, health]](c)
 		o.query = declare[Query1[game, *health]](c)
 		o.deltas = declare[DeltaQuery1[game, health]](c)
-		o.reset = c.RegisterTask1(ObservationReset[game])
+		o.reset = c.RegisterTask1(ObservationResetSystem[game])
 	})
 	return o
 }
@@ -39,7 +39,7 @@ func spawnUnobserved(t *testing.T) *observedWorld {
 // it observes.
 func spawnObserved(t *testing.T) *observedWorld {
 	o := spawnUnobserved(t)
-	ObservationReset(nil, kernel.NoArg{}, o.world)
+	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
 	return o
 }
 
@@ -135,7 +135,7 @@ func TestDeltasMatchAReferenceModel(t *testing.T) {
 				m.now[e] = *p
 			}
 		case op < 85:
-			ObservationReset(nil, kernel.NoArg{}, o.world)
+			ObservationResetSystem(nil, kernel.NoArg{}, o.world)
 			m.atReset = map[Entity]health{}
 			for e, value := range m.now {
 				m.atReset[e] = value
@@ -167,7 +167,7 @@ func TestWritesThroughGetGoUnseen(t *testing.T) {
 	o := spawnObserved(t)
 	e := o.world.Spawn()
 	o.store.Add(e, health{Points: 1})
-	ObservationReset(nil, kernel.NoArg{}, o.world)
+	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
 	o.store.Get(e).Points = 2
 	if len(o.collect()) != 0 {
 		t.Fatal("a write through Get was seen")
@@ -202,7 +202,7 @@ func TestAbandonedReservationsComeBackBurned(t *testing.T) {
 	o := spawnObserved(t)
 	abandoned := o.world.world.entities.reserve()
 	spawned := o.world.Spawn()
-	ObservationReset(nil, kernel.NoArg{}, o.world)
+	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
 	if !o.world.Alive(spawned) || o.world.Alive(abandoned) {
 		t.Fatal("the reset disturbed a spawned entity or revived an abandoned one")
 	}
@@ -216,7 +216,7 @@ func TestDespawnedIndicesOutsideTheRangeAreNotFreed(t *testing.T) {
 	mirrored := makeEntity(1<<30, 1)
 	o.world.CreateAt(mirrored)
 	o.world.Despawn(mirrored)
-	ObservationReset(nil, kernel.NoArg{}, o.world)
+	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
 	if o.world.world.entities.freeEntities.Len() != 0 {
 		t.Fatal("a mirrored index went onto the free list")
 	}
@@ -241,7 +241,7 @@ func TestDeltasAndResetAllocateNothingOnceGrown(t *testing.T) {
 		}
 		for range o.deltas.All() {
 		}
-		ObservationReset(nil, kernel.NoArg{}, o.world)
+		ObservationResetSystem(nil, kernel.NoArg{}, o.world)
 	}
 	window()
 	if got := testing.AllocsPerRun(20, window); got != 0 {
@@ -328,11 +328,11 @@ func TestFirstResetReportsEveryRowAsAdded(t *testing.T) {
 	o := spawnUnobserved(t)
 	a := o.world.Spawn()
 	o.store.Add(a, health{Points: 7})
-	ObservationReset(nil, kernel.NoArg{}, o.world)
+	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
 	if got := o.collect()[a]; got != (observedDelta[health]{Delta: DeltaAdded, Value: health{7}}) {
 		t.Fatalf("the first window reported %+v for a row present before it", got)
 	}
-	ObservationReset(nil, kernel.NoArg{}, o.world)
+	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
 	if len(o.collect()) != 0 {
 		t.Fatal("the second window reported a row nobody touched")
 	}
@@ -446,7 +446,7 @@ func TestDeltaQueriesMatchAReferenceModel(t *testing.T) {
 		all = declare[DeltaQuery3[game, health, position, frozen]](c)
 		thawed = declare[DeltaQuery2[game, health, Without[frozen]]](c)
 	})
-	ObservationReset(nil, kernel.NoArg{}, w)
+	ObservationResetSystem(nil, kernel.NoArg{}, w)
 	healthModel := newTermModel[health]()
 	positionModel := newTermModel[position]()
 	frozenModel := newTermModel[frozen]()
@@ -501,7 +501,7 @@ func TestDeltaQueriesMatchAReferenceModel(t *testing.T) {
 			tags.Remove(e)
 			frozenModel.remove(e)
 		case op < 92:
-			ObservationReset(nil, kernel.NoArg{}, w)
+			ObservationResetSystem(nil, kernel.NoArg{}, w)
 			healthModel.reset()
 			positionModel.reset()
 			frozenModel.reset()
@@ -604,14 +604,14 @@ func TestDeltaQueryAllocatesNothing(t *testing.T) {
 		positions = declare[Store[game, position]](c)
 		both = declare[DeltaQuery3[game, health, position, Without[frozen]]](c)
 	})
-	ObservationReset(nil, kernel.NoArg{}, w)
+	ObservationResetSystem(nil, kernel.NoArg{}, w)
 	entities := make([]Entity, 500)
 	for i := range entities {
 		entities[i] = w.Spawn()
 		healths.Add(entities[i], health{})
 		positions.Add(entities[i], position{})
 	}
-	ObservationReset(nil, kernel.NoArg{}, w)
+	ObservationResetSystem(nil, kernel.NoArg{}, w)
 	for i, e := range entities {
 		if i%3 == 0 {
 			healths.Write(e).Points++

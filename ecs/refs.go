@@ -73,11 +73,13 @@ type refSlot[T any] struct {
 // refs of T to be registered in W twice. Declaring refs that were never
 // registered panics too.
 func RegisterRefs[W WorldID, T any](configurator *kernel.Configurator) {
-	registeredWorld[W](configurator)
+	w := registeredWorld[W](configurator)
 	if _, ok := configurator.Resource[*refsResource[W, T]](); ok {
 		panic(fmt.Sprintf("ecs: refs of %v are registered in world %v twice", reflect.TypeFor[T](), reflect.TypeFor[W]()))
 	}
-	configurator.InitResource(&refsResource[W, T]{})
+	refs := &refsResource[W, T]{}
+	w.shrinkers = append(w.shrinkers, refs)
+	configurator.InitResource(refs)
 }
 
 // Declare declares the write on W's refs of T and a read on world W.
@@ -212,4 +214,13 @@ func (r *refsResource[W, T]) release(h Ref[T]) bool {
 	slot.generation = 0
 	r.freeRefs.Append(next)
 	return true
+}
+
+// shrink releases the chunks past the slots and the free refs. Slots never
+// shrink: a freed one keeps its place on the free list, at its next
+// generation. It runs under the barrier, where reservations taken but not
+// settled lie within the free refs or past the slots.
+func (r *refsResource[W, T]) shrink() {
+	r.slots.Shrink()
+	r.freeRefs.Shrink()
 }
