@@ -28,7 +28,7 @@ type Row1[T1 any] struct {
 
 // Declare declares a lock on each term's store and a read on world W.
 func (Query1[W, T1]) Declare(access *kernel.Access) Query1[W, T1] {
-	w := access.Read[*world[W]]().Get()
+	w := access.Read[*worldResource[W]]().Get()
 	var q Query1[W, T1]
 	q.terms[0] = declareTerm[W, T1](access, w)
 	q.writes = declareQuery(q.terms[:])
@@ -41,13 +41,13 @@ func (Query1[W, T1]) Declare(access *kernel.Access) Query1[W, T1] {
 func (q Query1[W, T1]) All() iter.Seq2[Entity, Row1[T1]] {
 	return func(yield func(Entity, Row1[T1]) bool) {
 		walk := makeQueryWalk(q.terms[:])
-		driver := q.terms[walk.driver].store
-		size := driver.component.Size
-		for c := (driver.len() - 1) >> rowShift; c >= 0; c-- {
-			owners, values := driver.chunk(c)
+		drivingStore := q.terms[walk.drivingTerm].store
+		size := drivingStore.component.Size
+		for c := (drivingStore.len() - 1) >> rowShift; c >= 0; c-- {
+			owners, values := drivingStore.chunk(c)
 			for r := len(owners) - 1; r >= 0; r-- {
-				walk.addresses[walk.driver] = unsafe.Add(values, uintptr(r)*size)
-				if !walk.match(q.terms[:], c<<rowShift+r, owners[r]) {
+				walk.addresses[walk.drivingTerm] = unsafe.Add(values, uintptr(r)*size)
+				if !walk.matches(q.terms[:], c<<rowShift+r, owners[r]) {
 					continue
 				}
 				row := Row1[T1]{
@@ -87,7 +87,7 @@ type Row2[T1, T2 any] struct {
 
 // Declare declares a lock on each term's store and a read on world W.
 func (Query2[W, T1, T2]) Declare(access *kernel.Access) Query2[W, T1, T2] {
-	w := access.Read[*world[W]]().Get()
+	w := access.Read[*worldResource[W]]().Get()
 	var q Query2[W, T1, T2]
 	q.terms[0] = declareTerm[W, T1](access, w)
 	q.terms[1] = declareTerm[W, T2](access, w)
@@ -101,13 +101,13 @@ func (Query2[W, T1, T2]) Declare(access *kernel.Access) Query2[W, T1, T2] {
 func (q Query2[W, T1, T2]) All() iter.Seq2[Entity, Row2[T1, T2]] {
 	return func(yield func(Entity, Row2[T1, T2]) bool) {
 		walk := makeQueryWalk(q.terms[:])
-		driver := q.terms[walk.driver].store
-		size := driver.component.Size
-		for c := (driver.len() - 1) >> rowShift; c >= 0; c-- {
-			owners, values := driver.chunk(c)
+		drivingStore := q.terms[walk.drivingTerm].store
+		size := drivingStore.component.Size
+		for c := (drivingStore.len() - 1) >> rowShift; c >= 0; c-- {
+			owners, values := drivingStore.chunk(c)
 			for r := len(owners) - 1; r >= 0; r-- {
-				walk.addresses[walk.driver] = unsafe.Add(values, uintptr(r)*size)
-				if !walk.match(q.terms[:], c<<rowShift+r, owners[r]) {
+				walk.addresses[walk.drivingTerm] = unsafe.Add(values, uintptr(r)*size)
+				if !walk.matches(q.terms[:], c<<rowShift+r, owners[r]) {
 					continue
 				}
 				row := Row2[T1, T2]{
@@ -149,7 +149,7 @@ type Row3[T1, T2, T3 any] struct {
 
 // Declare declares a lock on each term's store and a read on world W.
 func (Query3[W, T1, T2, T3]) Declare(access *kernel.Access) Query3[W, T1, T2, T3] {
-	w := access.Read[*world[W]]().Get()
+	w := access.Read[*worldResource[W]]().Get()
 	var q Query3[W, T1, T2, T3]
 	q.terms[0] = declareTerm[W, T1](access, w)
 	q.terms[1] = declareTerm[W, T2](access, w)
@@ -164,13 +164,13 @@ func (Query3[W, T1, T2, T3]) Declare(access *kernel.Access) Query3[W, T1, T2, T3
 func (q Query3[W, T1, T2, T3]) All() iter.Seq2[Entity, Row3[T1, T2, T3]] {
 	return func(yield func(Entity, Row3[T1, T2, T3]) bool) {
 		walk := makeQueryWalk(q.terms[:])
-		driver := q.terms[walk.driver].store
-		size := driver.component.Size
-		for c := (driver.len() - 1) >> rowShift; c >= 0; c-- {
-			owners, values := driver.chunk(c)
+		drivingStore := q.terms[walk.drivingTerm].store
+		size := drivingStore.component.Size
+		for c := (drivingStore.len() - 1) >> rowShift; c >= 0; c-- {
+			owners, values := drivingStore.chunk(c)
 			for r := len(owners) - 1; r >= 0; r-- {
-				walk.addresses[walk.driver] = unsafe.Add(values, uintptr(r)*size)
-				if !walk.match(q.terms[:], c<<rowShift+r, owners[r]) {
+				walk.addresses[walk.drivingTerm] = unsafe.Add(values, uintptr(r)*size)
+				if !walk.matches(q.terms[:], c<<rowShift+r, owners[r]) {
 					continue
 				}
 				row := Row3[T1, T2, T3]{
@@ -214,7 +214,7 @@ type Row4[T1, T2, T3, T4 any] struct {
 
 // Declare declares a lock on each term's store and a read on world W.
 func (Query4[W, T1, T2, T3, T4]) Declare(access *kernel.Access) Query4[W, T1, T2, T3, T4] {
-	w := access.Read[*world[W]]().Get()
+	w := access.Read[*worldResource[W]]().Get()
 	var q Query4[W, T1, T2, T3, T4]
 	q.terms[0] = declareTerm[W, T1](access, w)
 	q.terms[1] = declareTerm[W, T2](access, w)
@@ -230,13 +230,13 @@ func (Query4[W, T1, T2, T3, T4]) Declare(access *kernel.Access) Query4[W, T1, T2
 func (q Query4[W, T1, T2, T3, T4]) All() iter.Seq2[Entity, Row4[T1, T2, T3, T4]] {
 	return func(yield func(Entity, Row4[T1, T2, T3, T4]) bool) {
 		walk := makeQueryWalk(q.terms[:])
-		driver := q.terms[walk.driver].store
-		size := driver.component.Size
-		for c := (driver.len() - 1) >> rowShift; c >= 0; c-- {
-			owners, values := driver.chunk(c)
+		drivingStore := q.terms[walk.drivingTerm].store
+		size := drivingStore.component.Size
+		for c := (drivingStore.len() - 1) >> rowShift; c >= 0; c-- {
+			owners, values := drivingStore.chunk(c)
 			for r := len(owners) - 1; r >= 0; r-- {
-				walk.addresses[walk.driver] = unsafe.Add(values, uintptr(r)*size)
-				if !walk.match(q.terms[:], c<<rowShift+r, owners[r]) {
+				walk.addresses[walk.drivingTerm] = unsafe.Add(values, uintptr(r)*size)
+				if !walk.matches(q.terms[:], c<<rowShift+r, owners[r]) {
 					continue
 				}
 				row := Row4[T1, T2, T3, T4]{
@@ -282,7 +282,7 @@ type Row5[T1, T2, T3, T4, T5 any] struct {
 
 // Declare declares a lock on each term's store and a read on world W.
 func (Query5[W, T1, T2, T3, T4, T5]) Declare(access *kernel.Access) Query5[W, T1, T2, T3, T4, T5] {
-	w := access.Read[*world[W]]().Get()
+	w := access.Read[*worldResource[W]]().Get()
 	var q Query5[W, T1, T2, T3, T4, T5]
 	q.terms[0] = declareTerm[W, T1](access, w)
 	q.terms[1] = declareTerm[W, T2](access, w)
@@ -299,13 +299,13 @@ func (Query5[W, T1, T2, T3, T4, T5]) Declare(access *kernel.Access) Query5[W, T1
 func (q Query5[W, T1, T2, T3, T4, T5]) All() iter.Seq2[Entity, Row5[T1, T2, T3, T4, T5]] {
 	return func(yield func(Entity, Row5[T1, T2, T3, T4, T5]) bool) {
 		walk := makeQueryWalk(q.terms[:])
-		driver := q.terms[walk.driver].store
-		size := driver.component.Size
-		for c := (driver.len() - 1) >> rowShift; c >= 0; c-- {
-			owners, values := driver.chunk(c)
+		drivingStore := q.terms[walk.drivingTerm].store
+		size := drivingStore.component.Size
+		for c := (drivingStore.len() - 1) >> rowShift; c >= 0; c-- {
+			owners, values := drivingStore.chunk(c)
 			for r := len(owners) - 1; r >= 0; r-- {
-				walk.addresses[walk.driver] = unsafe.Add(values, uintptr(r)*size)
-				if !walk.match(q.terms[:], c<<rowShift+r, owners[r]) {
+				walk.addresses[walk.drivingTerm] = unsafe.Add(values, uintptr(r)*size)
+				if !walk.matches(q.terms[:], c<<rowShift+r, owners[r]) {
 					continue
 				}
 				row := Row5[T1, T2, T3, T4, T5]{
@@ -353,7 +353,7 @@ type Row6[T1, T2, T3, T4, T5, T6 any] struct {
 
 // Declare declares a lock on each term's store and a read on world W.
 func (Query6[W, T1, T2, T3, T4, T5, T6]) Declare(access *kernel.Access) Query6[W, T1, T2, T3, T4, T5, T6] {
-	w := access.Read[*world[W]]().Get()
+	w := access.Read[*worldResource[W]]().Get()
 	var q Query6[W, T1, T2, T3, T4, T5, T6]
 	q.terms[0] = declareTerm[W, T1](access, w)
 	q.terms[1] = declareTerm[W, T2](access, w)
@@ -371,13 +371,13 @@ func (Query6[W, T1, T2, T3, T4, T5, T6]) Declare(access *kernel.Access) Query6[W
 func (q Query6[W, T1, T2, T3, T4, T5, T6]) All() iter.Seq2[Entity, Row6[T1, T2, T3, T4, T5, T6]] {
 	return func(yield func(Entity, Row6[T1, T2, T3, T4, T5, T6]) bool) {
 		walk := makeQueryWalk(q.terms[:])
-		driver := q.terms[walk.driver].store
-		size := driver.component.Size
-		for c := (driver.len() - 1) >> rowShift; c >= 0; c-- {
-			owners, values := driver.chunk(c)
+		drivingStore := q.terms[walk.drivingTerm].store
+		size := drivingStore.component.Size
+		for c := (drivingStore.len() - 1) >> rowShift; c >= 0; c-- {
+			owners, values := drivingStore.chunk(c)
 			for r := len(owners) - 1; r >= 0; r-- {
-				walk.addresses[walk.driver] = unsafe.Add(values, uintptr(r)*size)
-				if !walk.match(q.terms[:], c<<rowShift+r, owners[r]) {
+				walk.addresses[walk.drivingTerm] = unsafe.Add(values, uintptr(r)*size)
+				if !walk.matches(q.terms[:], c<<rowShift+r, owners[r]) {
 					continue
 				}
 				row := Row6[T1, T2, T3, T4, T5, T6]{
@@ -427,7 +427,7 @@ type Row7[T1, T2, T3, T4, T5, T6, T7 any] struct {
 
 // Declare declares a lock on each term's store and a read on world W.
 func (Query7[W, T1, T2, T3, T4, T5, T6, T7]) Declare(access *kernel.Access) Query7[W, T1, T2, T3, T4, T5, T6, T7] {
-	w := access.Read[*world[W]]().Get()
+	w := access.Read[*worldResource[W]]().Get()
 	var q Query7[W, T1, T2, T3, T4, T5, T6, T7]
 	q.terms[0] = declareTerm[W, T1](access, w)
 	q.terms[1] = declareTerm[W, T2](access, w)
@@ -446,13 +446,13 @@ func (Query7[W, T1, T2, T3, T4, T5, T6, T7]) Declare(access *kernel.Access) Quer
 func (q Query7[W, T1, T2, T3, T4, T5, T6, T7]) All() iter.Seq2[Entity, Row7[T1, T2, T3, T4, T5, T6, T7]] {
 	return func(yield func(Entity, Row7[T1, T2, T3, T4, T5, T6, T7]) bool) {
 		walk := makeQueryWalk(q.terms[:])
-		driver := q.terms[walk.driver].store
-		size := driver.component.Size
-		for c := (driver.len() - 1) >> rowShift; c >= 0; c-- {
-			owners, values := driver.chunk(c)
+		drivingStore := q.terms[walk.drivingTerm].store
+		size := drivingStore.component.Size
+		for c := (drivingStore.len() - 1) >> rowShift; c >= 0; c-- {
+			owners, values := drivingStore.chunk(c)
 			for r := len(owners) - 1; r >= 0; r-- {
-				walk.addresses[walk.driver] = unsafe.Add(values, uintptr(r)*size)
-				if !walk.match(q.terms[:], c<<rowShift+r, owners[r]) {
+				walk.addresses[walk.drivingTerm] = unsafe.Add(values, uintptr(r)*size)
+				if !walk.matches(q.terms[:], c<<rowShift+r, owners[r]) {
 					continue
 				}
 				row := Row7[T1, T2, T3, T4, T5, T6, T7]{
@@ -504,7 +504,7 @@ type Row8[T1, T2, T3, T4, T5, T6, T7, T8 any] struct {
 
 // Declare declares a lock on each term's store and a read on world W.
 func (Query8[W, T1, T2, T3, T4, T5, T6, T7, T8]) Declare(access *kernel.Access) Query8[W, T1, T2, T3, T4, T5, T6, T7, T8] {
-	w := access.Read[*world[W]]().Get()
+	w := access.Read[*worldResource[W]]().Get()
 	var q Query8[W, T1, T2, T3, T4, T5, T6, T7, T8]
 	q.terms[0] = declareTerm[W, T1](access, w)
 	q.terms[1] = declareTerm[W, T2](access, w)
@@ -524,13 +524,13 @@ func (Query8[W, T1, T2, T3, T4, T5, T6, T7, T8]) Declare(access *kernel.Access) 
 func (q Query8[W, T1, T2, T3, T4, T5, T6, T7, T8]) All() iter.Seq2[Entity, Row8[T1, T2, T3, T4, T5, T6, T7, T8]] {
 	return func(yield func(Entity, Row8[T1, T2, T3, T4, T5, T6, T7, T8]) bool) {
 		walk := makeQueryWalk(q.terms[:])
-		driver := q.terms[walk.driver].store
-		size := driver.component.Size
-		for c := (driver.len() - 1) >> rowShift; c >= 0; c-- {
-			owners, values := driver.chunk(c)
+		drivingStore := q.terms[walk.drivingTerm].store
+		size := drivingStore.component.Size
+		for c := (drivingStore.len() - 1) >> rowShift; c >= 0; c-- {
+			owners, values := drivingStore.chunk(c)
 			for r := len(owners) - 1; r >= 0; r-- {
-				walk.addresses[walk.driver] = unsafe.Add(values, uintptr(r)*size)
-				if !walk.match(q.terms[:], c<<rowShift+r, owners[r]) {
+				walk.addresses[walk.drivingTerm] = unsafe.Add(values, uintptr(r)*size)
+				if !walk.matches(q.terms[:], c<<rowShift+r, owners[r]) {
 					continue
 				}
 				row := Row8[T1, T2, T3, T4, T5, T6, T7, T8]{

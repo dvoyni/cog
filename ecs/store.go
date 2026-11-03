@@ -14,13 +14,13 @@ const (
 	rowMask      = rowsPerChunk - 1
 )
 
-// zeroBase is the address of every row of a tag, whose rows have no bytes.
-var zeroBase byte
+// tagRow is the address of every row of a tag, whose rows have no bytes.
+var tagRow byte
 
-// store holds every value of one component type in one world, as a sparse
-// set: a sparse table maps an entity's index to its dense row, and the dense
-// part holds each row's owner and value. Removing swaps the last live row
-// into the gap.
+// storeResource holds every value of one component type in one world, as a
+// sparse set: a sparse table maps an entity's index to its dense row, and the
+// dense part holds each row's owner and value. Removing swaps the last live
+// row into the gap.
 //
 // It knows its component only by size, so the same code serves every
 // component type; the typed handles convert a row's address. Values live in
@@ -31,7 +31,7 @@ var zeroBase byte
 // observation reset, and a state. A row removed in the observation window
 // moves to the tail, after the live rows, keeping its value and shadow for
 // observers until the reset drops it.
-type store struct {
+type storeResource struct {
 	component ComponentInfo
 	// rowByIndex maps an entity index to its dense row plus 1; 0 is no row.
 	// A row in the tail stays linked, so a re-add finds its shadow.
@@ -90,7 +90,7 @@ const (
 // storeOf is the kernel resource behind T's store in world W. Each W and T
 // make a distinct type, which is what names the resource.
 type storeOf[W WorldID, T any] struct {
-	store
+	storeResource
 }
 
 func newStoreOf[W WorldID, T any](id ComponentID) *storeOf[W, T] {
@@ -105,20 +105,20 @@ func newStoreOf[W WorldID, T any](id ComponentID) *storeOf[W, T] {
 // Store writes T's store in world W by entity. It holds the write on the
 // store and a read on the world.
 type Store[W WorldID, T any] struct {
-	world *world[W]
-	store *store
+	world *worldResource[W]
+	store *storeResource
 }
 
 // Lookup reads T's store in world W by entity. It holds a read on the store
 // and on the world.
 type Lookup[W WorldID, T any] struct {
-	store *store
+	store *storeResource
 }
 
 // Declare declares the write on T's store and a read on world W.
 func (Store[W, T]) Declare(access *kernel.Access) Store[W, T] {
-	w := access.Read[*world[W]]().Get()
-	return Store[W, T]{world: w, store: &access.Write[*storeOf[W, T]]().Get().store}
+	w := access.Read[*worldResource[W]]().Get()
+	return Store[W, T]{world: w, store: &access.Write[*storeOf[W, T]]().Get().storeResource}
 }
 
 // Has reports whether e has a T.
@@ -156,8 +156,8 @@ func (s Store[W, T]) Remove(e Entity) bool {
 
 // Declare declares a read on T's store and on world W.
 func (Lookup[W, T]) Declare(access *kernel.Access) Lookup[W, T] {
-	access.Read[*world[W]]()
-	return Lookup[W, T]{store: &access.Read[*storeOf[W, T]]().Get().store}
+	access.Read[*worldResource[W]]()
+	return Lookup[W, T]{store: &access.Read[*storeOf[W, T]]().Get().storeResource}
 }
 
 // Has reports whether e has a T.
@@ -176,13 +176,13 @@ func (l Lookup[W, T]) Get(e Entity) (T, bool) {
 }
 
 // len answers how many live rows the store holds.
-func (s *store) len() int {
+func (s *storeResource) len() int {
 	return s.liveRows
 }
 
 // row answers e's live row, or false if e has no value here. It is one load
 // and one compare of the whole entity, generation included.
-func (s *store) row(e Entity) (int, bool) {
+func (s *storeResource) row(e Entity) (int, bool) {
 	slot := s.rowByIndex.at(e.index())
 	if slot == nil || *slot == 0 {
 		return 0, false
@@ -195,7 +195,7 @@ func (s *store) row(e Entity) (int, bool) {
 // value has an address too, so nil means only that e has no row. It probes
 // as row does, written out: row is too costly to inline, and every access
 // by entity goes through get or write, so each stays one call.
-func (s *store) get(e Entity) unsafe.Pointer {
+func (s *storeResource) get(e Entity) unsafe.Pointer {
 	slot := s.rowByIndex.at(e.index())
 	if slot == nil || *slot == 0 {
 		return nil
@@ -209,7 +209,7 @@ func (s *store) get(e Entity) unsafe.Pointer {
 
 // write is get for writing in place: it also marks e's row changed for
 // observers.
-func (s *store) write(e Entity) unsafe.Pointer {
+func (s *storeResource) write(e Entity) unsafe.Pointer {
 	slot := s.rowByIndex.at(e.index())
 	if slot == nil || *slot == 0 {
 		return nil
@@ -223,34 +223,34 @@ func (s *store) write(e Entity) unsafe.Pointer {
 }
 
 // address returns the address of row's value.
-func (s *store) address(row int) unsafe.Pointer {
+func (s *storeResource) address(row int) unsafe.Pointer {
 	if s.component.Size == 0 {
-		return unsafe.Pointer(&zeroBase)
+		return unsafe.Pointer(&tagRow)
 	}
 	return unsafe.Add(s.valueChunks[row>>rowShift], uintptr(row&rowMask)*s.component.Size)
 }
 
 // chunk returns the owners of chunk c's live rows, and the address of the
 // chunk's first value; a row's value is Size bytes after the one before.
-func (s *store) chunk(c int) ([]Entity, unsafe.Pointer) {
+func (s *storeResource) chunk(c int) ([]Entity, unsafe.Pointer) {
 	owners := s.owners.Chunk(c)[:min(s.liveRows-c<<rowShift, rowsPerChunk)]
 	if s.component.Size == 0 {
-		return owners, unsafe.Pointer(&zeroBase)
+		return owners, unsafe.Pointer(&tagRow)
 	}
 	return owners, s.valueChunks[c]
 }
 
 // shadow returns the address of row's shadow. The store is observed.
-func (s *store) shadow(row int) unsafe.Pointer {
+func (s *storeResource) shadow(row int) unsafe.Pointer {
 	if s.component.Size == 0 {
-		return unsafe.Pointer(&zeroBase)
+		return unsafe.Pointer(&tagRow)
 	}
 	return unsafe.Add(s.shadowChunks[row>>rowShift], uintptr(row&rowMask)*s.component.Size)
 }
 
 // add gives e a live row, whose value is left as it was, and returns it. e
 // must have none. A row e left in the tail this window is brought back.
-func (s *store) add(e Entity) int {
+func (s *storeResource) add(e Entity) int {
 	if s.observation == observed {
 		if row, ok := s.tailRow(e); ok {
 			s.swap(row, s.liveRows)
@@ -282,7 +282,7 @@ func (s *store) add(e Entity) int {
 
 // remove takes e's live row out, moving the last live row into its place.
 // An observed store keeps it in the tail; any other drops it.
-func (s *store) remove(e Entity, row int) {
+func (s *storeResource) remove(e Entity, row int) {
 	last := s.liveRows - 1
 	s.liveRows = last
 	if s.observation == observed {
@@ -308,7 +308,7 @@ func (s *store) remove(e Entity, row int) {
 
 // registerObserver records that a system takes Changes of the store, so it
 // observes from the world's first observation reset.
-func (s *store) registerObserver() {
+func (s *storeResource) registerObserver() {
 	if s.observation == unobserved {
 		s.observation = observerWaiting
 	}
@@ -316,7 +316,7 @@ func (s *store) registerObserver() {
 
 // observed reports whether the store keeps changes, so writes to it are
 // marked.
-func (s *store) observed() bool {
+func (s *storeResource) observed() bool {
 	return s.observation == observed
 }
 
@@ -325,7 +325,7 @@ func (s *store) observed() bool {
 // row, skipping a changed row whose bytes equal its shadow. Walking from row
 // 0, each next one from the row after the last, yields the window's changes
 // in row order. A store that does not observe has none.
-func (s *store) nextChange(row int) (int, rowChange, bool) {
+func (s *storeResource) nextChange(row int) (int, rowChange, bool) {
 	if s.observation != observed {
 		return 0, rowChange{}, false
 	}
@@ -356,7 +356,7 @@ func (s *store) nextChange(row int) (int, rowChange, bool) {
 
 // markChanged marks live row changed, unless it was added this window. It
 // does nothing in a store nobody observes.
-func (s *store) markChanged(row int) {
+func (s *storeResource) markChanged(row int) {
 	if s.observation != observed {
 		return
 	}
@@ -368,7 +368,7 @@ func (s *store) markChanged(row int) {
 // startObservation starts observing if a system takes Changes of the store,
 // every row counting as added. It is the world's first observation reset:
 // the store has no tail yet.
-func (s *store) startObservation() {
+func (s *storeResource) startObservation() {
 	if s.observation != observerWaiting {
 		return
 	}
@@ -383,7 +383,7 @@ func (s *store) startObservation() {
 
 // resetObservation ends the observation window: each live row's shadow
 // takes its value, and the tail is dropped.
-func (s *store) resetObservation() {
+func (s *storeResource) resetObservation() {
 	if s.observation != observed {
 		return
 	}
@@ -404,7 +404,7 @@ func (s *store) resetObservation() {
 }
 
 // tailRow answers e's row in the tail, or false if it has none.
-func (s *store) tailRow(e Entity) (int, bool) {
+func (s *storeResource) tailRow(e Entity) (int, bool) {
 	slot := s.rowByIndex.at(e.index())
 	if slot == nil || *slot == 0 {
 		return 0, false
@@ -414,22 +414,20 @@ func (s *store) tailRow(e Entity) (int, bool) {
 }
 
 // swap exchanges rows a and b: owners, values, shadows and states, keeping
-// rowByIndex linked to them. The store is observed.
-func (s *store) swap(a, b int) {
+// rowByIndex linked to them. The store is observed, and a is the row its
+// owner's slot links to.
+func (s *storeResource) swap(a, b int) {
 	if a == b {
 		return
 	}
 	ownerA := *s.owners.At(a)
 	ownerB := *s.owners.At(b)
-	// Both are read before either is written: two owners in one store may
-	// share an index, one of them in the tail.
+	// b's link is read before a's slot is written: two owners in one store
+	// may share an index, one of them in the tail.
 	slotA := s.rowByIndex.at(ownerA.index())
 	slotB := s.rowByIndex.at(ownerB.index())
-	linkedA := *slotA == uint32(a)+1
 	linkedB := *slotB == uint32(b)+1
-	if linkedA {
-		*slotA = uint32(b) + 1
-	}
+	*slotA = uint32(b) + 1
 	if linkedB {
 		*slotB = uint32(a) + 1
 	}

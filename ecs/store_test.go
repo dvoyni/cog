@@ -100,14 +100,14 @@ func TestRegisterComponentCompositionErrors(t *testing.T) {
 	expectPanic(t, "no more than 64", func() {
 		spawnWith(func(c *kernel.Configurator) {
 			w := registeredWorld[small](c)
-			w.stores = make([]*store, 64) // as if 64 were registered
+			w.stores = make([]*storeResource, 64) // as if 64 were registered
 			RegisterComponent[small, position](c)
 		})
 	})
 }
 
 // storeChanges answers s's changes by entity, converted to health.
-func storeChanges(s *store) map[Entity]Change[health] {
+func storeChanges(s *storeResource) map[Entity]Change[health] {
 	got := map[Entity]Change[health]{}
 	for row, change, ok := s.nextChange(0); ok; row, change, ok = s.nextChange(row + 1) {
 		converted := Change[health]{Kind: change.kind, Value: *(*health)(change.value)}
@@ -125,7 +125,7 @@ func storeChanges(s *store) map[Entity]Change[health] {
 // index.
 func TestStoreChangesMatchAReferenceModel(t *testing.T) {
 	for seed := range uint64(10) {
-		s := &newStoreOf[game, health](0).store
+		s := &newStoreOf[game, health](0).storeResource
 		s.registerObserver()
 		m := &changeModel{atReset: map[Entity]health{}, now: map[Entity]health{}, last: map[Entity]health{}}
 		random := rand.New(rand.NewPCG(seed, 5))
@@ -207,7 +207,7 @@ func TestStoreChangesMatchAReferenceModel(t *testing.T) {
 }
 
 func TestStoreObservesOnlyWithAnObserver(t *testing.T) {
-	s := &newStoreOf[game, health](0).store
+	s := &newStoreOf[game, health](0).storeResource
 	s.add(makeEntity(1, 1))
 	s.startObservation()
 	if s.observed() || len(storeChanges(s)) != 0 {

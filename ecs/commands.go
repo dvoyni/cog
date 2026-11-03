@@ -33,7 +33,7 @@ type CommandSink[W WorldID, Tag any] struct {
 // commandRecorder is the kernel resource behind command buffer Tag of world
 // W: its lanes, in registration order.
 type commandRecorder[W WorldID, Tag any] struct {
-	world *world[W]
+	world *worldResource[W]
 	lanes []*commandLane
 }
 
@@ -83,7 +83,7 @@ func RegisterCommandBuffer[W WorldID, Tag any](configurator *kernel.Configurator
 // Declare declares a read on the buffer and on world W, and gives this
 // system a lane of its own.
 func (CommandBuffer[W, Tag]) Declare(access *kernel.Access) CommandBuffer[W, Tag] {
-	access.Read[*world[W]]()
+	access.Read[*worldResource[W]]()
 	recorder := access.Read[*commandRecorder[W, Tag]]().Get()
 	lane := &commandLane{}
 	recorder.lanes = append(recorder.lanes, lane)
@@ -128,7 +128,7 @@ func (c CommandBuffer[W, Tag]) Remove[T any](e Entity) {
 
 // Declare declares the write on the buffer and on world W, the barrier.
 func (CommandSink[W, Tag]) Declare(access *kernel.Access) CommandSink[W, Tag] {
-	access.Write[*world[W]]()
+	access.Write[*worldResource[W]]()
 	return CommandSink[W, Tag]{recorder: access.Write[*commandRecorder[W, Tag]]().Get()}
 }
 

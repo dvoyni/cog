@@ -33,14 +33,15 @@ type WorldOptions struct {
 // world, so nothing else of W runs alongside it. Spawning, despawning and
 // placing entities happen through it.
 type World[W WorldID] struct {
-	world *world[W]
+	world *worldResource[W]
 }
 
-// world is the kernel resource of world W: its entities and its stores.
-type world[W WorldID] struct {
+// worldResource is the kernel resource of world W: its entities and its
+// stores.
+type worldResource[W WorldID] struct {
 	entities     entityTable[W]
-	stores       []*store
-	storesByType map[reflect.Type]*store
+	stores       []*storeResource
+	storesByType map[reflect.Type]*storeResource
 }
 
 // RegisterWorld registers world W, named by its world ID, as a kernel
@@ -55,7 +56,7 @@ func RegisterWorld[W WorldID](configurator *kernel.Configurator, options WorldOp
 	if !ok {
 		panic(fmt.Sprintf("ecs: world %v is registered before the ecs plugin", t))
 	}
-	if _, ok := configurator.Resource[*world[W]](); ok {
+	if _, ok := configurator.Resource[*worldResource[W]](); ok {
 		panic(fmt.Sprintf("ecs: world %v is registered twice", t))
 	}
 	last := options.LastIndex
@@ -65,7 +66,7 @@ func RegisterWorld[W WorldID](configurator *kernel.Configurator, options WorldOp
 	if last < options.FirstIndex {
 		panic(fmt.Sprintf("ecs: world %v has an empty allocation range", t))
 	}
-	w := &world[W]{storesByType: map[reflect.Type]*store{}}
+	w := &worldResource[W]{storesByType: map[reflect.Type]*storeResource{}}
 	w.entities.init(options.FirstIndex, last, options.Entities)
 	configurator.InitResource(w)
 	registry.worlds = append(registry.worlds, t)
@@ -73,7 +74,7 @@ func RegisterWorld[W WorldID](configurator *kernel.Configurator, options WorldOp
 
 // Declare declares the write on world W, the barrier.
 func (World[W]) Declare(access *kernel.Access) World[W] {
-	return World[W]{world: access.Write[*world[W]]().Get()}
+	return World[W]{world: access.Write[*worldResource[W]]().Get()}
 }
 
 // Alive reports whether e is alive.
@@ -228,7 +229,7 @@ func (w World[W]) RemoveRaw(e Entity, id ComponentID) bool {
 
 // despawn removes e and every component it has, and reports whether it was
 // alive.
-func (w *world[W]) despawn(e Entity) bool {
+func (w *worldResource[W]) despawn(e Entity) bool {
 	mask, ok := w.entities.despawn(e)
 	if !ok {
 		return false
@@ -243,7 +244,7 @@ func (w *world[W]) despawn(e Entity) bool {
 
 // put gives alive e a row in s, or marks the one it has changed, and
 // returns the address of its value, or nil if e is not alive.
-func (w *world[W]) put(e Entity, s *store) unsafe.Pointer {
+func (w *worldResource[W]) put(e Entity, s *storeResource) unsafe.Pointer {
 	if !w.entities.alive(e) {
 		return nil
 	}
@@ -256,7 +257,7 @@ func (w *world[W]) put(e Entity, s *store) unsafe.Pointer {
 }
 
 // remove removes e's row in s, and reports whether it had one.
-func (w *world[W]) remove(e Entity, s *store) bool {
+func (w *worldResource[W]) remove(e Entity, s *storeResource) bool {
 	row, ok := s.row(e)
 	if !ok {
 		return false
@@ -267,7 +268,7 @@ func (w *world[W]) remove(e Entity, s *store) bool {
 }
 
 // checkValues panics unless values is as long as mask's components need.
-func (w *world[W]) checkValues(mask *W, values []byte) {
+func (w *worldResource[W]) checkValues(mask *W, values []byte) {
 	need := uintptr(0)
 	for id := range maskIDs(mask) {
 		if int(id) >= len(w.stores) {
@@ -282,7 +283,7 @@ func (w *world[W]) checkValues(mask *W, values []byte) {
 
 // addAll gives alive e the components in mask from values, laid out as for
 // SpawnRaw and checked.
-func (w *world[W]) addAll(e Entity, mask *W, values []byte) {
+func (w *worldResource[W]) addAll(e Entity, mask *W, values []byte) {
 	for id := range maskIDs(mask) {
 		s := w.stores[id]
 		size := s.component.Size
@@ -295,7 +296,7 @@ func (w *world[W]) addAll(e Entity, mask *W, values []byte) {
 // shadows take their rows' values and its tail is dropped, and the entity
 // table ends its window. The first reset turns observation on instead: each
 // store with an observer starts observing.
-func (w *world[W]) resetObservation() {
+func (w *worldResource[W]) resetObservation() {
 	if w.entities.endWindow() {
 		for _, s := range w.stores {
 			s.startObservation()
@@ -308,8 +309,8 @@ func (w *world[W]) resetObservation() {
 }
 
 // registeredWorld returns world W, panicking if it is not registered.
-func registeredWorld[W WorldID](configurator *kernel.Configurator) *world[W] {
-	w, ok := configurator.Resource[*world[W]]()
+func registeredWorld[W WorldID](configurator *kernel.Configurator) *worldResource[W] {
+	w, ok := configurator.Resource[*worldResource[W]]()
 	if !ok {
 		panic(fmt.Sprintf("ecs: world %v is not registered", reflect.TypeFor[W]()))
 	}
@@ -318,7 +319,7 @@ func registeredWorld[W WorldID](configurator *kernel.Configurator) *world[W] {
 
 // storeOf returns the store of component type t. A component not registered
 // in the world is a programming error, and panics.
-func (w *world[W]) storeOf(t reflect.Type) *store {
+func (w *worldResource[W]) storeOf(t reflect.Type) *storeResource {
 	s, ok := w.storesByType[t]
 	if !ok {
 		panic(fmt.Sprintf("ecs: component %v is not registered in world %v", t, reflect.TypeFor[W]()))

@@ -7,7 +7,7 @@ knows nothing about networking, rendering or any other consumer: those build
 on the generic pieces here (type-erased row access, change detection, command
 buffers).
 
-Status: agreed; steps 1 to 6 of the [Work order](#work-order) are built.
+Status: agreed; steps 1 to 8 of the [Work order](#work-order) are built.
 
 ## Constraints
 
@@ -29,10 +29,10 @@ Status: agreed; steps 1 to 6 of the [Work order](#work-order) are built.
 
 ```
 Kernel
-  └─ world[Game]          resource: entities, registry, structure
-       ├─ store[Game, Position]   resource per component type
-       ├─ store[Game, Velocity]
-       ├─ refs[Game, string]      resource per ref payload type
+  └─ worldResource[Game]   resource: entities, registry, structure
+       ├─ storeResource[Game, Position]   resource per component type
+       ├─ storeResource[Game, Velocity]
+       ├─ refsResource[Game, string]      resource per ref payload type
        └─ commandBuffer[Game, AiCmds]   resource, registered by the user
 ```
 
@@ -82,8 +82,8 @@ Kernel
   the ECS's registry of worlds.
 - **Worlds are registered by the plugins that use them.**
   `ecs.RegisterWorld[Game](configurator, options)` in a plugin's `Init`
-  registers the world and its refs, with the world's allocation range
-  and how many entities to prepare. The registering plugin is given after the
+  registers the world, with its allocation range and how many entities to
+  prepare. The registering plugin is given after the
   ECS plugin; registering before it, or one world twice, is a composition
   error, and panics. Components, buffers and systems of a world are
   registered after the world.
@@ -318,6 +318,10 @@ c.move = configurator.RegisterTask2(move)
   after the network send, after the renderer has read its changes.
 - **Writes after a store's last observer are reset unseen.** That is the
   window's definition, not an error.
+- **A world reset once is reset for good.** From its first reset on, removed
+  rows wait in the tail and despawned indices stay off the free list until
+  the next one, so a world whose resets stop grows without bound. A world
+  never reset observes nothing and keeps nothing.
 
 ## Commands
 
@@ -470,6 +474,8 @@ exists:
   them.
 - **An ECS frame or drain of its own.** Where systems, commits and the reset
   run is the game's decision, made with job dependencies.
+- **A warning for a forgotten reset.** A world never reset does no harm, and
+  catching resets that stopped needs a size check on the remove path.
 
 ## Deferred
 
@@ -503,7 +509,7 @@ Each step ends with its tests passing under `go test -race`.
    same results with one worker and many.
 6. **Benchmarks.** Iteration, change detection, commits; measured against
    hand-written loops. `docs/benchmarks-baseline.txt` holds ten runs from
-   before step 7; a change is checked with
+   after step 8; a change is checked with
    `go test -run '^$' -bench . -count 10 > new.txt` and
    `benchstat docs/benchmarks-baseline.txt new.txt`.
 7. **Deepening.** Each is designed with the user first, then built, and
@@ -527,8 +533,7 @@ Each step ends with its tests passing under `go test -race`.
       typed and raw `World`, and the commit only declare locks and convert.
    4. **Walking a mask.** Built as `maskIDs`, an iterator over a mask's
       component IDs in ascending order, for despawn, checking and spawning
-      from bytes, and later refs release. It inlines whole, loop body
-      included.
+      from bytes. It inlines whole, loop body included.
    5. **The query walk.** Built: a walk goes by the driver's chunks, stepping
       its address, probes only the other terms, once each, and marks the
       matched rows of observed write terms from those probes. Most of the
@@ -539,6 +544,44 @@ Each step ends with its tests passing under `go test -race`.
       in registers for up to three terms. Dense costs 6.4 ns per entity,
       7.4 ns observed, against 0.5 ns for a slice loop.
 8. **Refs.** Built as above. Reading a ref by handle costs 2.4 ns; setting
-   one through its component, observed, 12 ns.
+   one through its component, observed, 15 ns.
+
+## Todo next
+
+Gaps in the design:
+
+1. **Commands and refs.** A ref is released before its component is
+   removed, but a command buffer's `Remove` and `Despawn` take effect only at
+   commit: releasing at record time leaves a live component reading nil until
+   then, and after the commit the component is gone. An entity holding a ref
+   and despawned through a buffer leaks it.
+2. **Entities held in components.** A stored `Entity` only goes stale when
+   its entity dies; nothing clears or reports it. To be decided, or
+   documented as the rule.
+3. **Change filters in queries.** `Changes[W, T]` walks one store; a query
+   cannot ask for changed or added `T` among its terms, so a system walks the
+   changes and probes the other stores by hand.
+4. **Optional query terms.** A term that yields the row's `T` when the
+   entity has one and nil when not, instead of a `Lookup` probed per row.
+
+Major features other ECSs have:
+
+- **Parallel iteration within a query.** Splitting one walk over several
+  workers, with partitioned write locks on a store (see Deferred).
+- **Relations and hierarchy.** Pairs between entities, parent and child,
+  despawning a subtree, propagating along it (see Deferred).
+- **Hooks on add, remove and set.** A callback when a component arrives,
+  leaves or is set, run where the change is applied. A remove hook would
+  also close item 1.
+- **Prefabs and bundles.** Typed templates of several components spawned
+  together, and instances that share or copy from a prefab. `SpawnRaw` does
+  it untyped.
+- **Serialization and reflection.** A field view of components for saving,
+  loading and the network layer, built on the erased metadata (see
+  Introspection under Deferred).
+- **Cached queries and groups.** Keeping a query's matches, or packing
+  stores owned together in one order, so walks skip the probes. Weighed
+  against the sparse-set choice; low.
+- **Shrink.** Giving capacity back (see Deferred).
 
 Networking comes after, as its own design on top of these pieces.

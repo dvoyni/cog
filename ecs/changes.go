@@ -31,14 +31,14 @@ type Change[T any] struct {
 // nobody observes keeps no shadow and pays nothing. It holds a read on the
 // store and on the world.
 type Changes[W WorldID, T any] struct {
-	store *store
+	store *storeResource
 }
 
 // Declare declares a read on T's store and on world W, and registers an
 // observer of the store.
 func (Changes[W, T]) Declare(access *kernel.Access) Changes[W, T] {
-	access.Read[*world[W]]()
-	s := &access.Read[*storeOf[W, T]]().Get().store
+	access.Read[*worldResource[W]]()
+	s := &access.Read[*storeOf[W, T]]().Get().storeResource
 	s.registerObserver()
 	return Changes[W, T]{store: s}
 }

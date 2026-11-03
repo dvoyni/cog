@@ -252,6 +252,65 @@ func TestUnobservedWorldKeepsNothing(t *testing.T) {
 	}
 }
 
+// TestWorldWithoutResetObservesNothing goes down every write path of a world
+// whose store has an observer but which is never reset: the store keeps no
+// shadow, state or tail, reports nothing, and a despawned index is reused at
+// once.
+func TestWorldWithoutResetObservesNothing(t *testing.T) {
+	var w World[game]
+	var healths Store[game, health]
+	var changes Changes[game, health]
+	var query Query1[game, *health]
+	var commands CommandBuffer[game, aiCommands]
+	var sink CommandSink[game, aiCommands]
+	var healthID ComponentID
+	spawn(t, func(c *kernel.Configurator) {
+		healthID = RegisterComponent[game, health](c)
+		RegisterCommandBuffer[game, aiCommands](c)
+		w = declare[World[game]](c)
+		healths = declare[Store[game, health]](c)
+		changes = declare[Changes[game, health]](c)
+		query = declare[Query1[game, *health]](c)
+		commands = declare[CommandBuffer[game, aiCommands]](c)
+		sink = declare[CommandSink[game, aiCommands]](c)
+	})
+	var mask game
+	maskSet(&mask, healthID)
+	a := w.Spawn()
+	healths.Add(a, health{Points: 1})
+	b := w.SpawnRaw(mask, []byte{2, 0, 0, 0})
+	for _, row := range query.All() {
+		row.Get().Points++
+	}
+	healths.Write(a).Points++
+	w.Write[health](b).Points++
+	w.WriteRaw(a, healthID)[0]++
+	w.AddRaw(b, healthID, []byte{5, 0, 0, 0})
+	healths.Remove(a)
+	healths.Add(a, health{Points: 6})
+	spawned := commands.Reserve()
+	commands.Spawn(spawned)
+	commands.Add(spawned, health{Points: 7})
+	commands.Set(a, health{Points: 8})
+	commands.Despawn(b)
+	if dropped := sink.Commit(); dropped != 0 {
+		t.Fatalf("the commit dropped %d records", dropped)
+	}
+	s := healths.store
+	for range changes.All() {
+		t.Fatal("a world never reset reported a change")
+	}
+	if s.observed() || s.rowStates.Len() != 0 || len(s.shadowChunks) != 0 || s.owners.Len() != s.len() || s.len() != 2 {
+		t.Fatalf("a store never reset keeps %d states, %d shadow chunks and %d rows for %d live", s.rowStates.Len(), len(s.shadowChunks), s.owners.Len(), s.len())
+	}
+	if *healths.Get(a) != (health{Points: 8}) || *healths.Get(spawned) != (health{Points: 7}) {
+		t.Fatal("a write was lost in a world never reset")
+	}
+	if c := w.Spawn(); c.index() != b.index() || c.generation() == b.generation() {
+		t.Fatalf("Spawn answered %#x, want b's index reused at once", uint64(c))
+	}
+}
+
 func TestFirstResetReportsEveryRowAsAdded(t *testing.T) {
 	o := spawnUnobserved(t)
 	a := o.world.Spawn()

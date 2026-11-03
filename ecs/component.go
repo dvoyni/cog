@@ -45,8 +45,8 @@ func RegisterComponent[W WorldID, T any](configurator *kernel.Configurator) Comp
 	}
 	s := newStoreOf[W, T](ComponentID(len(w.stores)))
 	configurator.InitResource(s)
-	w.stores = append(w.stores, &s.store)
-	w.storesByType[t] = &s.store
+	w.stores = append(w.stores, &s.storeResource)
+	w.storesByType[t] = &s.storeResource
 	return s.component.ID
 }
 

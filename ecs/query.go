@@ -21,7 +21,7 @@ type Without[T any] struct{}
 
 // term is one term of a query: the store it walks or probes, and how.
 type term struct {
-	store *store
+	store *storeResource
 	mode  termMode
 }
 
@@ -46,7 +46,7 @@ func (Without[T]) filter() (reflect.Type, termMode) { return reflect.TypeFor[T](
 // declareTerm reads term type T's mode, declares its lock and returns it. It
 // is a composition error, and panics, for its component not to be registered
 // in w.
-func declareTerm[W WorldID, T any](access *kernel.Access, w *world[W]) term {
+func declareTerm[W WorldID, T any](access *kernel.Access, w *worldResource[W]) term {
 	t := reflect.TypeFor[T]()
 	component, mode := t, termRead
 	if f, ok := any(*new(T)).(filter); ok {
@@ -87,27 +87,27 @@ func declareQuery(terms []term) uint8 {
 // queryWalk is one walk of a query's terms. It is driven by the smallest
 // store a walk can be driven by, whose rows it goes through chunk by chunk;
 // every other term is probed by entity. It does not hold the terms: a walk
-// that did would put its query on the heap, since match stores addresses
+// that did would put its query on the heap, since matches stores addresses
 // read through them.
 type queryWalk struct {
-	// driver is the index of the term that drives the walk.
-	driver int
+	// drivingTerm is the index of the term that drives the walk.
+	drivingTerm int
 	// marked has a bit per term whose rows are marked changed when matched:
 	// the terms that write an observed store. Observation cannot start
 	// during a walk, which holds the stores' locks.
 	marked uint8
 	// addresses holds the address of each term's row in the entity last
-	// matched: a filter's is zeroBase.
+	// matched: a filter's is tagRow.
 	addresses [8]unsafe.Pointer
 }
 
 // makeQueryWalk picks the term that drives a walk of terms, and the terms
 // it marks.
 func makeQueryWalk(terms []term) queryWalk {
-	walk := queryWalk{driver: -1}
+	walk := queryWalk{drivingTerm: -1}
 	for i, t := range terms {
-		if t.mode != termWithout && (walk.driver < 0 || t.store.len() < terms[walk.driver].store.len()) {
-			walk.driver = i
+		if t.mode != termWithout && (walk.drivingTerm < 0 || t.store.len() < terms[walk.drivingTerm].store.len()) {
+			walk.drivingTerm = i
 		}
 		if t.mode == termWrite && t.store.observed() {
 			walk.marked |= 1 << i
@@ -116,22 +116,22 @@ func makeQueryWalk(terms []term) queryWalk {
 	return walk
 }
 
-// match reports whether e, at driverRow of the driving store, satisfies
+// matches reports whether e, at drivingRow of the driving store, satisfies
 // every other one of terms, filling addresses with the address of each one's row;
-// the driver's is the caller's to fill. Once e matches, the rows of the
+// the driving term's is the caller's to fill. Once e matches, the rows of the
 // marked terms are marked changed, since they are yielded for writing.
-func (w *queryWalk) match(terms []term, driverRow int, e Entity) bool {
+func (w *queryWalk) matches(terms []term, drivingRow int, e Entity) bool {
 	var rows [8]int // a query has at most 8 terms, one bit each in marked
-	rows[w.driver] = driverRow
+	rows[w.drivingTerm] = drivingRow
 	for i, t := range terms {
-		if i == w.driver {
+		if i == w.drivingTerm {
 			continue
 		}
 		row, ok := t.store.row(e)
 		if ok == (t.mode == termWithout) {
 			return false
 		}
-		w.addresses[i] = unsafe.Pointer(&zeroBase)
+		w.addresses[i] = unsafe.Pointer(&tagRow)
 		if ok {
 			rows[i] = row
 			w.addresses[i] = t.store.address(row)
