@@ -54,6 +54,9 @@ type worldResource[W WorldID] struct {
 	// their own that a shrink reaches under the barrier: each declaration
 	// of them holds a read on the world.
 	shrinkers []shrinker
+	// windowedRefs holds the world's refs, which the observation reset
+	// reaches under the barrier as it does the stores.
+	windowedRefs []windowedRefs
 }
 
 // shrinker is a resource of a world that gives back the memory it holds past
@@ -358,10 +361,16 @@ func (w *worldResource[W]) resetObservation() {
 		for _, s := range w.stores {
 			s.startObservation()
 		}
+		for _, r := range w.windowedRefs {
+			r.startObservation()
+		}
 		return
 	}
 	for _, s := range w.stores {
 		s.resetObservation()
+	}
+	for _, r := range w.windowedRefs {
+		r.resetObservation()
 	}
 }
 

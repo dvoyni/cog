@@ -323,7 +323,7 @@ func spawnShrink(t testing.TB) *shrinkWorld {
 	spawn(t, func(c *kernel.Configurator) {
 		RegisterComponent[game, health](c)
 		RegisterComponent[game, position](c)
-		RegisterRefs[game, string](c)
+		RegisterRefs[game, string](c, RefsOptions{})
 		RegisterCommandBuffer[game, aiCommands](c)
 		o.world = declare[World[game]](c)
 		o.healths = declare[Store[game, health]](c)
@@ -548,7 +548,7 @@ func TestShrinkRunsApartFromWorldResources(t *testing.T) {
 	var shrinkTask, spawnTask, churnTask, recordTask, commitTask *kernel.Task[kernel.NoArg, kernel.NoResult]
 	var tags Store[game, frozen]
 	h, _ := queryWorld(t, 300, func(c *kernel.Configurator) {
-		RegisterRefs[game, string](c)
+		RegisterRefs[game, string](c, RefsOptions{})
 		RegisterCommandBuffer[game, aiCommands](c)
 		shrinkTask = c.RegisterTask1(ShrinkSystem[game])
 		spawnTask = c.RegisterTask1(spawnFrozen)

@@ -377,20 +377,57 @@ func BenchmarkRefsGet(b *testing.B) {
 	})
 }
 
-// BenchmarkRefsSet sets refs of strings through the components holding
-// them, observed, in an order unrelated to the rows.
+// BenchmarkRefsSet sets every ref of strings by handle, observed, in an
+// order unrelated to their slots, then resets.
 func BenchmarkRefsSet(b *testing.B) {
 	o := spawnRefs(b)
 	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
-	entities := make([]Entity, benchEntities)
-	for i := range entities {
-		entities[i] = o.world.Spawn()
-		o.store.Add(entities[i], named{Name: o.refs.New("name")})
+	handles := make([]Ref[string], benchEntities)
+	for i := range handles {
+		handles[i] = o.refs.New("name")
 	}
 	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
 	measure(b, func() {
 		for i := range benchEntities {
-			o.refs.Set(&o.store.Write(entities[(i*7919)%benchEntities]).Name, "other")
+			o.refs.Set(handles[(i*7919)%benchEntities], "other")
+		}
+		ObservationResetSystem(nil, kernel.NoArg{}, o.world)
+	})
+}
+
+// BenchmarkDeltaRefs sets a tenth of benchEntities refs of strings, walks
+// their deltas and resets.
+func BenchmarkDeltaRefs(b *testing.B) {
+	o := spawnRefs(b)
+	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
+	handles := make([]Ref[string], benchEntities)
+	for i := range handles {
+		handles[i] = o.refs.New("name")
+	}
+	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
+	measure(b, func() {
+		for i := 0; i < benchEntities; i += 10 {
+			o.refs.Set(handles[i], "other")
+		}
+		for _, delta := range o.refDeltas.All() {
+			benchSum += float32(len(*delta.Value))
+		}
+		ObservationResetSystem(nil, kernel.NoArg{}, o.world)
+	})
+}
+
+// BenchmarkKeyedRefsPut puts benchEntities meshes whose keys all have refs,
+// as spawning models of loaded meshes does.
+func BenchmarkKeyedRefsPut(b *testing.B) {
+	o := spawnRefs(b)
+	meshes := make([]mesh, benchEntities)
+	for i := range meshes {
+		meshes[i] = mesh{Path: fmt.Sprint("mesh", i)}
+		o.meshes.Put(meshes[i])
+	}
+	measure(b, func() {
+		for i := range benchEntities {
+			benchSum += float32(o.meshes.Put(meshes[(i*7919)%benchEntities]).index)
 		}
 	})
 }

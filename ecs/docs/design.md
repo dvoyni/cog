@@ -32,7 +32,7 @@ Kernel
   └─ worldResource[Game]   resource: entities, registry, structure
        ├─ storeResource[Game, Position]   resource per component type
        ├─ storeResource[Game, Velocity]
-       ├─ refsResource[Game, string]      resource per ref payload type
+       ├─ refsResource[Game, Text]        resource per ref payload type
        └─ commandBuffer[Game, AiCmds]   resource, registered by the user
 ```
 
@@ -45,11 +45,15 @@ Kernel
 | `Lookup[W, T]` | Reads `T`'s store by entity: `Has`, and `Get` a copy. |
 | `Query1[W, A]` … `Query8[W, ...]` | Walks the entities holding every term, yielding each entity and its row. `*T` writes, `T` reads a copy, `Optional[T]` and `Optional[*T]` match with or without one. |
 | `DeltaQuery1[W, A]` … `DeltaQuery8[W, ...]` | Walks the entities with a delta in a term this observation window, among those that have or had every term, yielding each entity and its row: values now, as of the reset, and deltas. Observes each term's store. |
-| `Refs[W, T]` | Writes the refs holding `T`: `New`, `Get` a pointer, `Set`, `Release`. |
-| `RefsLookup[W, T]` | Reads the refs holding `T`: `Get` a pointer, to read only. |
+| `Refs[W, T]` | Writes the refs holding `T`: `New`, `NewAt`, `Get` a pointer, `Set`, `Alive`, `Release`. |
+| `RefsLookup[W, T]` | Reads the refs holding `T`: `Get` a pointer, to read only, and `Alive`. |
+| `KeyedRefs[W, K, T]` | Writes refs found by their value's key, one per key: `Put`, `PutAt`, `Update`, `Find`, `Get`, `Alive`, `Release`, `ReleaseKey`. |
+| `KeyedRefsLookup[W, K, T]` | Reads keyed refs: `Find`, `Get` and `Alive`. |
+| `DeltaRefs[W, T]` | Walks the refs of `T`, plain or keyed, with a delta this observation window: added, changed or released, with the value. Observes them. |
 | `CommandBuffer[W, Tag]` | Records into the command buffer `Tag` of world `W`, holding a read on it. |
 | `CommandSink[W, Tag]` | Applies that buffer to its world: the write on the buffer and the barrier. |
 | `CommandRefs[W, Tag, T]` | Records making, setting and releasing refs of `T` into that buffer, holding a read on the refs. |
+| `CommandKeyedRefs[W, Tag, K, T]` | Records updates and releases of keyed refs of `T` into that buffer. |
 | `Entity` | 64-bit `{index:32, gen:32}`, layout private; `NoEntity` is 0. |
 | `ObservationResetSystem[W]` | The system that ends an observation window. |
 | `ShrinkSystem[W]` | The system that gives back the memory a world holds past what is in use. |
@@ -429,13 +433,14 @@ func commitAi(k *kernel.Kernel, _ kernel.NoArg, commit ecs.CommandSink[Game, AiC
 - **Records:** `Reserve`, `Spawn`, `Despawn`, `Add[T]`, `Set[T]`, `Remove[T]`.
   A record is a header (op, entity, component, where its value starts) in
   one chunked array, and the value's bytes in another, each value starting
-  at a word. Ref records come from `CommandRefs` (see Refs).
+  at a word. Ref records come from `CommandRefs` and `CommandKeyedRefs`
+  (see Refs).
 - **Order.** Despawns of every lane first, then the other records in lane
   order (registration order) and sequence order, the lanes of ref records
   last: nothing in a commit reads a ref, so their place is free. A record on
   an entity not alive is dropped, and so is a `Spawn` of an entity that is
   not a reservation still waiting (its index holds a live entity, or it is
-  not the generation the index hands out next), and a release of a ref not
+  not the generation the index hands out next), and a set or release of a ref not
   alive; `Commit` answers how many were.
   `Add` adds or replaces, `Set` replaces only, `Remove` of a component the
   entity lacks does nothing.
@@ -453,63 +458,110 @@ func commitAi(k *kernel.Kernel, _ kernel.NoArg, commit ecs.CommandSink[Game, AiC
 
 ## Refs
 
-Text, lists, maps and anything else that cannot live in a component lives
+Text, lists, meshes and anything else that cannot live in a component lives
 in a ref:
 
 - **A handle in the component, the value outside it.** A component holds a
   `Ref[T]`: an index and a generation, pointer-free. The value is a `T` in
   its world's refs of that type. Any `T` is allowed, pointers included; the
   GC scans refs, never stores.
-- **One container and one lock per payload type.** `RegisterRefs[W, T](c)`
-  registers world `W`'s refs holding `T`, a resource of its own, so systems
-  on refs of different types run in parallel. Declaring refs that were never
-  registered is a composition error. Each declaration also holds a read on
-  the world, so the barrier excludes it.
-- **Values sit in a chunked array of `T`,** with a generation per slot and
-  freed slots reused last in, first out: the free list holds each freed slot
-  at its next generation, and a free slot's own generation is 0, so nothing
-  reads it. Chunks never move, so the `*T` a `Get` returns stays valid until
-  the ref is released.
+- **A handle is stable and shared.** Setting a ref's value keeps its handle,
+  so any number of components hold one ref, as models hold one mesh. A
+  holder does not change when the value does: `DeltaRefs` sees the change.
+  A component changes only when a handle is written into it.
+- **One container and one lock per payload type.**
+  `RegisterRefs[W, T](c, options)` registers world `W`'s refs holding `T`, a
+  resource of its own, so systems on refs of different types run in
+  parallel. Declaring refs that were never registered is a composition
+  error. Each declaration also holds a read on the world, so the barrier
+  excludes it.
+- **Values sit in slots paged by index,** as entity slots are, with a
+  generation and a state per slot. Pages never move, so the `*T` a `Get`
+  returns stays valid until the ref is released. Freed slots are reused
+  last in, first out: the free list holds each at its next generation.
 - **`Refs[W, T]` writes:** `New(v)` returns a handle, `Get(h)` a `*T`,
-  `Set(&field, v)` stores a value, `Release(h)` frees the slot.
-  **`RefsLookup[W, T]` reads:** `Get(h)` returns a `*T` that must only be
-  read. Several lookups run in parallel.
-- **`Set` is the change.** It writes the value into the same slot, advances
-  the slot's generation and writes the new handle back into the field, on
-  every call. The component's bytes change, so a delta query reports the
-  component as changed, provided the component was reached through a pointer
-  that marks: a `*T` query term or `Store.Write`. Writing through a `*T` from
-  `Get` is not a change.
-- **A stale handle reads as nothing.** `Get` returns nil for the zero handle,
-  a released one, and a copy kept from before a `Set`. A handle holds its
-  slot's index plus one, so the zero handle lies past every slot, and
-  generations start at 1, so no handle matches a free slot. `Set` and
-  `Release` report whether the handle was alive, as `Store.Add` does.
-- **Released by the user.** The ECS knows nothing about a component's
-  fields, so it cannot find the refs a component holds: whoever removes the
-  component or despawns its entity calls `Release` first, or records a
-  release beside a buffered `Remove` or `Despawn` in the same buffer. A ref
-  never released lives as long as its world. `Release` frees the slot at
-  once and advances its generation, so every handle to it, a shadow's
-  included, goes stale.
-- **Refs through a command buffer.** `CommandRefs[W, Tag, T]` records into
-  buffer `Tag`: `New(v)` and `Set(old, v)` return a handle at once, to record
-  in a component, and `Release(h)` frees one, all at the commit. It holds a
-  read on the refs, so producers run in parallel with each other and with
-  lookups, and `Refs` writers wait. Each system taking it gets a lane of its
-  own, holding the values of its new refs typed, so the GC sees them.
+  `Set(h, v)` stores a value, `Release(h)` frees the slot, `Alive(h)` tells
+  a live handle from a dead one. **`RefsLookup[W, T]` reads:** `Get(h)`
+  returns a `*T` that must only be read, and `Alive(h)`. Several lookups
+  run in parallel.
+- **`Set` is the change.** Writing through a `*T` from `Get` is not one.
+- **A released handle reads as nothing.** `Get` returns nil for the zero
+  handle and for a released one, and `Alive` false. Generations start at 1,
+  and a slot holds whether its ref is live, so no copy of a released handle
+  reads the value placed there later. `Set` and `Release` report whether
+  the handle was alive.
+- **Released by the user.** The ECS does not count the components holding a
+  ref. Whoever releases it knows none needs it, as a mesh library does; a
+  holder left behind reads nothing, as a stale `Entity` does. A ref never
+  released lives as long as its world.
+- **Allocation range.** `RefsOptions` bounds the indices `New` hands out,
+  all by default, as `WorldOptions` does for entities. `NewAt(h, v)` places
+  a ref at exactly `h`, outside the range, on a slot holding no live ref nor
+  one released this window: a client mirrors the server's refs where the
+  server has them, and makes its own from another range.
+
+### Keyed refs
+
+- **A ref per key.** `RegisterKeyedRefs[W, K, T](c, options)` registers
+  refs of a `T` that answers `Key() K`, as `Keyed[K]`: a mesh its asset path.
+  `Text`, a string keyed by itself, serves names and labels.
+- **`KeyedRefs[W, K, T]` writes:** `Put(v)` returns the ref of `v.Key()`,
+  or stores `v` in a new one; a ref found keeps its value. `Update(v)`
+  stores `v` in the ref of its key, reported as a change. `Find(k)`,
+  `Get(h)`, `Alive(h)`, `Release(h)` and `ReleaseKey(k)`, which free the key
+  with the ref, so a later `Put` makes a new one. `PutAt(h, v)` places a
+  mirrored ref and its key. There is no `Set`: a value with another key
+  would move the ref to it. **`KeyedRefsLookup[W, K, T]`** reads: `Find`,
+  `Get`, `Alive`.
+- **One kind per type.** Refs of one `T` in one world are plain or keyed,
+  never both: registering both panics, and so does declaring `Refs` or
+  `CommandRefs` of keyed refs, or a keyed handle of plain ones.
+
+### Ref deltas
+
+- **`DeltaRefs[W, T]`** walks the refs of `T`, plain or keyed, with a delta
+  this observation window, each once, with its value:
+
+  | This window | Delta |
+  |---|---|
+  | Made | added |
+  | Set or updated | changed, even to the same value |
+  | Made, then set | added |
+  | Released | released, with the last value |
+  | Made, then released | none |
+
+  There is no shadow and no previous value: a `T` may hold pointers, and a
+  copy would share what it points to.
+- **The world's window.** Refs observe from the world's first observation
+  reset once a `DeltaRefs` of them is declared, every live ref counting as
+  added then. `ObservationResetSystem` ends their window with the stores':
+  it clears the states and frees the window's released slots, values
+  cleared. Until then a released slot keeps its value and stays off the
+  free list, so no index is reused in the window its ref was released in.
+  Refs nobody observes keep no state, and free a slot at once.
+- **The listing.** Observed refs list the refs whose slots changed this
+  window, once each, so `DeltaRefs` and the reset cost per change. Past an
+  eighth of the live refs the listing stops, and they visit every slot, as
+  stores do.
+
+### Refs through a command buffer
+
+- **`CommandRefs[W, Tag, T]`** records into buffer `Tag`: `New(v)` returns
+  a handle at once, to record in a component, `Set(h, v)` and `Release(h)`,
+  all applied at the commit. It holds a read on the refs, so producers run
+  in parallel with each other and with lookups, and `Refs` writers wait.
+  Each system taking it gets a lane of its own, holding its values typed,
+  so the GC sees them.
   - A handle is reserved as an entity is: one atomic cursor over the free
     list, then fresh slots. Every `Refs` write and every commit folds the
     cursor back first. A reserved ref reads nothing until its commit.
-  - A buffered `Set` takes a new slot for the value and releases `old`. A
-    direct `Set` keeps the slot; either way the handle changes, the old one
-    goes stale and the component holding it changes.
-  - A release of a ref not alive is dropped and counted in `Commit`'s
-    answer. A release does not depend on its entity, so it applies even when
-    the despawn beside it is dropped.
-- **A ref belongs to one field and is never shared.** Copying a component
-  that holds one gives two fields one ref; after either is set or released,
-  the other reads nothing. This is documented, not checked.
+  - A set or release of a ref not alive is dropped and counted in
+    `Commit`'s answer. A release does not depend on its entity, so it
+    applies even when the despawn beside it is dropped.
+- **`CommandKeyedRefs[W, Tag, K, T]`** records `Update`, `Release` and
+  `ReleaseKey`. A `Put` is not recorded: two producers putting one key in
+  parallel would take two refs for it. An update or a release by key of a
+  key with no ref is dropped.
 
 ## Fit for networking
 
@@ -522,6 +574,10 @@ exists:
   `CreateAt` and allocates its own from another allocation range, so an
   `Entity` inside a component means the same on both ends and is never
   remapped.
+- **Ref ids are wire ids too.** `DeltaRefs` gives each changed ref once,
+  whatever number of components hold it; the client places it with `NewAt`
+  or `PutAt`, so a handle inside a mirrored component reads the mirrored
+  value unchanged.
 - **A delta query on the replicated stores** narrows what is captured again;
   field masks, quantization, ownership and interest are the consumer's own
   components and code.
@@ -542,8 +598,20 @@ exists:
   scans every store. Refs keep that data out of rows.
 - **Finding refs in components by reflection,** to release them with their
   component. It gives the ECS knowledge of fields; releasing is the user's.
-- **A version per ref.** Advancing the generation on `Set` changes the
-  handle, which makes a set an ordinary component change.
+- **A new handle per set.** It made a set an ordinary component change, seen
+  by delta queries, but a ref could not be shared: every other copy of the
+  handle went stale. Stable handles let models share a mesh, and
+  `DeltaRefs` reports the change once.
+- **Counting a ref's holders.** The ECS would have to find the refs in
+  components, which needs fields it does not know, or the user would keep
+  the count by hand. A released ref leaves dead links, as a despawned
+  entity does.
+- **A shadow per ref.** A `T` may hold pointers, so a copy shares what it
+  points to, and a previous value or an equality check would lie after a
+  change in place.
+- **Recording `Put` in a command buffer.** Two producers putting one key in
+  parallel would reserve two refs for it, and their components would hold
+  different ones.
 - **Ref records as generic methods on `CommandBuffer`.** Nothing would be
   declared on the refs, so a reservation could not touch their free list:
   refs made through buffers would never reuse a freed slot.
@@ -590,6 +658,12 @@ exists:
   component serialize on its lock. Partitioned write locks can be added
   without changing the system form.
 - **Introspection** for tools (by-name reads and writes).
+- **Hooks on add, remove and set.** A callback when a component arrives,
+  leaves or is set, run where the change is applied. A remove hook could
+  release a component's refs without the user recording it. Networking does
+  not need them: a set hook costs an indirect call per write in the writing
+  jobs, where a delta query finds the changes once under the barrier and
+  drops writes that leave a value as it was.
 
 ## Performance
 
@@ -632,9 +706,13 @@ hand-written loops:
   `position`s 93 bytes per entity against 92: loading as many entities
   again in one window, reading and resetting, then despawning them, costs
   the same, with the list kept at an eighth of the rows.
-- **A ref** costs 2.4 ns to read by handle and 15 ns to set through its
-  component, observed; making one through a command buffer and releasing it
-  through another commit, 22 ns.
+- **A ref** costs 2.6 ns to read by handle and 6.2 ns to set by handle,
+  observed, its share of the reset included. Walking `DeltaRefs` with a
+  tenth of the refs set, and resetting, costs 0.8 ns per ref. A `Put` of a
+  key with a ref costs 19 ns, a map lookup. Making one through a command
+  buffer and releasing it through another commit costs 26 ns, up from 22 ns
+  over a dense array: slots are paged by index, so an allocation range far
+  from 0 costs only its pages.
 - **Walking a mask's component IDs,** for despawn, checking and spawning
   from bytes, inlines whole, loop body included.
 
@@ -646,9 +724,6 @@ hand-written loops:
 
 Major features other ECSs have:
 
-- **Hooks on add, remove and set.** A callback when a component arrives,
-  leaves or is set, run where the change is applied. A remove hook could
-  release a component's refs without the user recording it.
 - **Prefabs and bundles.** Typed templates of several components spawned
   together, and instances that share or copy from a prefab. `SpawnRaw` does
   it untyped.

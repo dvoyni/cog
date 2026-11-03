@@ -13,6 +13,8 @@ const (
 	DeltaAdded
 	DeltaChanged
 	DeltaRemoved
+	// DeltaReleased is a ref released, as DeltaRefs reports it.
+	DeltaReleased
 )
 
 // declareDeltaQuery checks that terms can make a delta query, and registers

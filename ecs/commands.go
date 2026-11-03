@@ -42,6 +42,13 @@ type CommandRefs[W WorldID, Tag any, T any] struct {
 	lane *refsLaneOf[W, T]
 }
 
+// CommandKeyedRefs records updates and releases of world W's keyed refs of
+// T into command buffer Tag, as CommandRefs does for plain refs. A Put is
+// not recorded: two producers putting one key would take two refs for it.
+type CommandKeyedRefs[W WorldID, Tag any, K comparable, T Keyed[K]] struct {
+	lane *keyedRefsLaneOf[W, K, T]
+}
+
 // commandRecorder is the kernel resource behind command buffer Tag of world
 // W: its lanes, in registration order.
 type commandRecorder[W WorldID, Tag any] struct {
@@ -95,6 +102,26 @@ type refsRecord[T any] struct {
 	operation commandOperation
 }
 
+// keyedRefsLaneOf is one producing system's part of a command buffer for
+// keyed refs of T: its records in order, and the values of its updates
+// until the commit.
+type keyedRefsLaneOf[W WorldID, K comparable, T Keyed[K]] struct {
+	mutex   sync.Mutex
+	refs    *refsResource[W, T]
+	keys    map[K]Ref[T]
+	records container.Array[keyedRefsRecord[K, T]]
+	// values holds the value of each update record, in record order.
+	values container.Array[T]
+}
+
+// keyedRefsRecord is a record of keyed refs: the handle of a release, or
+// the key of a release by key.
+type keyedRefsRecord[K comparable, T any] struct {
+	handle    Ref[T]
+	key       K
+	operation commandOperation
+}
+
 type commandOperation uint8
 
 const (
@@ -104,7 +131,10 @@ const (
 	commandSet
 	commandRemove
 	commandNewRef
+	commandSetRef
 	commandReleaseRef
+	commandUpdateRef
+	commandReleaseKey
 )
 
 // RegisterCommandBuffer registers command buffer Tag of world W, a kernel
@@ -172,38 +202,69 @@ func (c CommandBuffer[W, Tag]) Remove[T any](e Entity) {
 }
 
 // Declare declares a read on W's refs of T, on the buffer and on world W,
-// and gives this system a lane of its own.
+// and gives this system a lane of its own. It is a composition error, and
+// panics, for the refs to be keyed: CommandKeyedRefs records them.
 func (CommandRefs[W, Tag, T]) Declare(access *kernel.Access) CommandRefs[W, Tag, T] {
 	access.Read[*worldResource[W]]()
 	recorder := access.Read[*commandRecorder[W, Tag]]().Get()
-	lane := &refsLaneOf[W, T]{refs: access.Read[*refsResource[W, T]]().Get()}
+	refs := access.Read[*refsResource[W, T]]().Get()
+	if refs.keys != nil {
+		panic(fmt.Sprintf("ecs: CommandRefs of keyed refs of %v in world %v: CommandKeyedRefs records them", reflect.TypeFor[T](), reflect.TypeFor[W]()))
+	}
+	lane := &refsLaneOf[W, T]{refs: refs}
 	recorder.refsLanes = append(recorder.refsLanes, lane)
 	return CommandRefs[W, Tag, T]{lane: lane}
 }
 
 // New records storing value in a new ref, and returns its handle at once,
 // to record in a component. The handle reads nothing until the record is
-// committed.
+// committed. It answers the zero Ref once the allocation range is used up.
 func (c CommandRefs[W, Tag, T]) New(value T) Ref[T] {
 	h := c.lane.refs.reserve()
 	c.lane.record(commandNewRef, h, value)
 	return h
 }
 
-// Set records replacing ref old with value, and returns the new handle at
-// once, to record in the component holding old in its place. At the commit
-// the new ref comes alive and old is released, so its copies go stale and
-// the component changes, as with Refs.Set.
-func (c CommandRefs[W, Tag, T]) Set(old Ref[T], value T) Ref[T] {
-	h := c.New(value)
-	c.Release(old)
-	return h
+// Set records storing value in ref h, which keeps its handle, as with
+// Refs.Set.
+func (c CommandRefs[W, Tag, T]) Set(h Ref[T], value T) {
+	c.lane.record(commandSetRef, h, value)
 }
 
 // Release records freeing ref h, whatever becomes of the entity holding it.
 func (c CommandRefs[W, Tag, T]) Release(h Ref[T]) {
 	var none T
 	c.lane.record(commandReleaseRef, h, none)
+}
+
+// Declare declares a read on W's keyed refs of T, on the buffer and on
+// world W, and gives this system a lane of its own. It is a composition
+// error, and panics, for the refs not to be keyed by K.
+func (CommandKeyedRefs[W, Tag, K, T]) Declare(access *kernel.Access) CommandKeyedRefs[W, Tag, K, T] {
+	access.Read[*worldResource[W]]()
+	recorder := access.Read[*commandRecorder[W, Tag]]().Get()
+	refs := access.Read[*refsResource[W, T]]().Get()
+	lane := &keyedRefsLaneOf[W, K, T]{refs: refs, keys: keysOf[W, K](refs)}
+	recorder.refsLanes = append(recorder.refsLanes, lane)
+	return CommandKeyedRefs[W, Tag, K, T]{lane: lane}
+}
+
+// Update records storing value in the ref of its key, as with
+// KeyedRefs.Update.
+func (c CommandKeyedRefs[W, Tag, K, T]) Update(value T) {
+	c.lane.record(keyedRefsRecord[K, T]{operation: commandUpdateRef}, value)
+}
+
+// Release records freeing ref h and its key.
+func (c CommandKeyedRefs[W, Tag, K, T]) Release(h Ref[T]) {
+	var none T
+	c.lane.record(keyedRefsRecord[K, T]{handle: h, operation: commandReleaseRef}, none)
+}
+
+// ReleaseKey records freeing the ref of key.
+func (c CommandKeyedRefs[W, Tag, K, T]) ReleaseKey(key K) {
+	var none T
+	c.lane.record(keyedRefsRecord[K, T]{key: key, operation: commandReleaseKey}, none)
 }
 
 // Declare declares the write on the buffer and on world W, the barrier.
@@ -299,19 +360,21 @@ func (l *commandLane) copyValue(start int, destination unsafe.Pointer, size uint
 	}
 }
 
-// record appends a record of h, with value for a new ref.
+// record appends a record of h, with value for a new ref or a set.
 func (l *refsLaneOf[W, T]) record(operation commandOperation, h Ref[T], value T) {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
-	if operation == commandNewRef {
+	if operation != commandReleaseRef {
 		l.values.Append(value)
 	}
 	l.records.Append(refsRecord[T]{handle: h, operation: operation})
 }
 
-// commit stores each new ref and releases each released one, in the order
-// recorded. A new ref's value is cleared from the lane as it is stored, so
-// the lane keeps no pointer of a T alive.
+// commit stores each new ref, sets each set one and releases each released
+// one, in the order recorded, and answers how many were dropped: a new ref
+// past the allocation range, or a set or release of a ref not alive. A
+// value is cleared from the lane as it is stored, so the lane keeps no
+// pointer of a T alive.
 func (l *refsLaneOf[W, T]) commit() int {
 	l.refs.settleReservations()
 	dropped := 0
@@ -326,13 +389,73 @@ func (l *refsLaneOf[W, T]) commit() int {
 			continue
 		}
 		value := l.values.At(stored)
-		l.refs.store(record.handle, *value)
-		*value = zero
 		stored++
+		if record.operation == commandNewRef {
+			if record.handle != (Ref[T]{}) {
+				l.refs.store(record.handle, *value)
+			} else {
+				dropped++
+			}
+		} else if slot := l.refs.slot(record.handle); slot != nil {
+			slot.value = *value
+			l.refs.markChanged(record.handle, slot)
+		} else {
+			dropped++
+		}
+		*value = zero
 	}
 	l.records.Resize(0)
 	l.values.Resize(0)
 	return dropped
+}
+
+// record appends record, with value for an update.
+func (l *keyedRefsLaneOf[W, K, T]) record(record keyedRefsRecord[K, T], value T) {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	if record.operation == commandUpdateRef {
+		l.values.Append(value)
+	}
+	l.records.Append(record)
+}
+
+// commit updates and releases, in the order recorded, and answers how many
+// were dropped: an update or a release by key of a key with no ref, or a
+// release of a ref not alive.
+func (l *keyedRefsLaneOf[W, K, T]) commit() int {
+	dropped := 0
+	updated := 0
+	var zero T
+	var noKey K
+	for i := range l.records.Len() {
+		record := l.records.At(i)
+		applied := false
+		switch record.operation {
+		case commandUpdateRef:
+			value := l.values.At(updated)
+			updated++
+			applied = updateKeyed(l.refs, l.keys, *value)
+			*value = zero
+		case commandReleaseRef:
+			applied = releaseKeyed(l.refs, l.keys, record.handle)
+		case commandReleaseKey:
+			h, ok := l.keys[record.key]
+			applied = ok && releaseKeyed(l.refs, l.keys, h)
+			record.key = noKey
+		}
+		if !applied {
+			dropped++
+		}
+	}
+	l.records.Resize(0)
+	l.values.Resize(0)
+	return dropped
+}
+
+// shrink releases the chunks past the lane's records and values.
+func (l *keyedRefsLaneOf[W, K, T]) shrink() {
+	l.records.Shrink()
+	l.values.Shrink()
 }
 
 // shrink releases the chunks past each lane's records and values, which

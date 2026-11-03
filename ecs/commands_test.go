@@ -305,12 +305,13 @@ func spawnCommandRefs(t testing.TB) *commandRefsWorld {
 	o := &commandRefsWorld{refsWorld: &refsWorld{}}
 	spawn(t, func(c *kernel.Configurator) {
 		RegisterComponent[game, named](c)
-		RegisterRefs[game, string](c)
+		RegisterRefs[game, string](c, RefsOptions{})
 		RegisterCommandBuffer[game, aiCommands](c)
 		o.world = declare[World[game]](c)
 		o.store = declare[Store[game, named]](c)
 		o.refs = declare[Refs[game, string]](c)
 		o.lookup = declare[RefsLookup[game, string]](c)
+		o.refDeltas = declare[DeltaRefs[game, string]](c)
 		o.first = declare[CommandRefs[game, aiCommands, string]](c)
 		o.second = declare[CommandRefs[game, aiCommands, string]](c)
 		o.commands = declare[CommandBuffer[game, aiCommands]](c)
@@ -322,54 +323,60 @@ func spawnCommandRefs(t testing.TB) *commandRefsWorld {
 // TestCommandRefsMatchAReferenceModel mixes refs made, set and released
 // directly and through two lanes of a buffer, committed now and then, and
 // checks after every step that live handles read their values and that
-// handles waiting for the commit or gone stale read nothing.
+// handles waiting for the commit or released read nothing.
 func TestCommandRefsMatchAReferenceModel(t *testing.T) {
 	o := spawnCommandRefs(t)
 	random := rand.New(rand.NewPCG(5, 9))
 	model := map[Ref[string]]string{}
 	waiting := map[Ref[string]]string{}
+	// setting holds the value each lane records for a handle, applied at the
+	// commit in lane order.
+	setting := [2]map[Ref[string]]string{{}, {}}
 	releasing := map[Ref[string]]bool{}
-	var stale []Ref[string]
+	var released []Ref[string]
 	wantDropped := 0
-	// settled picks a live handle no release is recorded for.
+	// settled picks a live handle no set or release is recorded for.
 	settled := func() (Ref[string], bool) {
 		for h := range model {
-			if !releasing[h] {
-				return h, true
+			if _, first := setting[0][h]; !releasing[h] && !first {
+				if _, second := setting[1][h]; !second {
+					return h, true
+				}
 			}
 		}
 		return Ref[string]{}, false
 	}
 	for step := range 5000 {
 		value := fmt.Sprint(step)
+		laneIndex := random.IntN(2)
 		lane := o.first
-		if random.IntN(2) == 0 {
+		if laneIndex == 1 {
 			lane = o.second
 		}
 		h, ok := settled()
-		switch op := random.IntN(9); {
+		switch op := random.IntN(10); {
 		case op == 0 || !ok:
 			model[o.refs.New(value)] = value
 		case op == 1:
-			field := h
-			o.refs.Set(&field, value)
-			delete(model, h)
-			model[field] = value
-			stale = append(stale, h)
+			o.refs.Set(h, value)
+			model[h] = value
 		case op == 2:
 			o.refs.Release(h)
 			delete(model, h)
-			stale = append(stale, h)
+			released = append(released, h)
 		case op == 3:
 			waiting[lane.New(value)] = value
 		case op == 4:
-			waiting[lane.Set(h, value)] = value
-			releasing[h] = true
+			lane.Set(h, value)
+			setting[laneIndex][h] = value
 		case op == 5:
 			lane.Release(h)
 			releasing[h] = true
-		case op == 6 && len(stale) > 0:
-			lane.Release(stale[random.IntN(len(stale))])
+		case op == 6 && len(released) > 0:
+			lane.Release(released[random.IntN(len(released))])
+			wantDropped++
+		case op == 7 && len(released) > 0:
+			lane.Set(released[random.IntN(len(released))], value)
 			wantDropped++
 		default:
 			if dropped := o.sink.Commit(); dropped != wantDropped {
@@ -378,9 +385,15 @@ func TestCommandRefsMatchAReferenceModel(t *testing.T) {
 			wantDropped = 0
 			for h := range releasing {
 				delete(model, h)
-				stale = append(stale, h)
+				released = append(released, h)
 			}
 			clear(releasing)
+			for _, sets := range setting {
+				for h, value := range sets {
+					model[h] = value
+				}
+				clear(sets)
+			}
 			for h, value := range waiting {
 				if _, ok := model[h]; ok {
 					t.Fatalf("step %d: handle %+v was handed out twice", step, h)
@@ -400,9 +413,9 @@ func TestCommandRefsMatchAReferenceModel(t *testing.T) {
 			}
 		}
 	}
-	for _, h := range stale {
+	for _, h := range released {
 		if o.lookup.Get(h) != nil {
-			t.Fatalf("stale handle %+v still reads", h)
+			t.Fatalf("released handle %+v still reads", h)
 		}
 	}
 }
@@ -432,6 +445,23 @@ func TestCommandRefsDieWithABufferedDespawn(t *testing.T) {
 	}
 }
 
+// TestCommandRefsSetKeepsTheHandle sets a ref through a buffer, observed:
+// the handle reads the value from the commit on, and DeltaRefs reports it.
+func TestCommandRefsSetKeepsTheHandle(t *testing.T) {
+	o := spawnCommandRefs(t)
+	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
+	h := o.refs.New("a")
+	ObservationResetSystem(nil, kernel.NoArg{}, o.world)
+	o.first.Set(h, "b")
+	if *o.lookup.Get(h) != "a" {
+		t.Fatal("a buffered set applied before the commit")
+	}
+	o.sink.Commit()
+	if got := collectRefDeltas(t, o.refDeltas); *o.lookup.Get(h) != "b" || len(got) != 1 || got[h] != (refDelta[string]{Delta: DeltaChanged, Value: "b"}) {
+		t.Fatalf("after the commit h reads %q and DeltaRefs answered %+v, want b changed", *o.lookup.Get(h), got)
+	}
+}
+
 func TestCommandRefsAllocateNothingOnceGrown(t *testing.T) {
 	o := spawnCommandRefs(t)
 	handles := make([]Ref[string], 200)
@@ -441,7 +471,7 @@ func TestCommandRefsAllocateNothingOnceGrown(t *testing.T) {
 		}
 		o.sink.Commit()
 		for i := range handles {
-			handles[i] = o.second.Set(handles[i], "b")
+			o.second.Set(handles[i], "b")
 		}
 		o.sink.Commit()
 		for _, h := range handles {
@@ -467,10 +497,78 @@ func TestCommandRefsCompositionErrors(t *testing.T) {
 	})
 	expectPanic(t, "not initialized", func() {
 		spawn(t, func(c *kernel.Configurator) {
-			RegisterRefs[game, string](c)
+			RegisterRefs[game, string](c, RefsOptions{})
 			declare[CommandRefs[game, aiCommands, string]](c)
 		})
 	})
+	expectPanic(t, "CommandKeyedRefs records them", func() {
+		spawn(t, func(c *kernel.Configurator) {
+			RegisterKeyedRefs[game, Text, Text](c, RefsOptions{})
+			RegisterCommandBuffer[game, aiCommands](c)
+			declare[CommandRefs[game, aiCommands, Text]](c)
+		})
+	})
+	expectPanic(t, "not keyed", func() {
+		spawn(t, func(c *kernel.Configurator) {
+			RegisterRefs[game, Text](c, RefsOptions{})
+			RegisterCommandBuffer[game, aiCommands](c)
+			declare[CommandKeyedRefs[game, aiCommands, Text, Text]](c)
+		})
+	})
+}
+
+// TestCommandKeyedRefsUpdateAndRelease records updates and releases of
+// keyed texts on two lanes: they apply at the commit in lane order, and
+// those whose key or ref is gone are dropped.
+func TestCommandKeyedRefsUpdateAndRelease(t *testing.T) {
+	var texts KeyedRefs[game, Text, Text]
+	var first, second CommandKeyedRefs[game, aiCommands, Text, Text]
+	var sink CommandSink[game, aiCommands]
+	var deltas DeltaRefs[game, Text]
+	var w World[game]
+	spawn(t, func(c *kernel.Configurator) {
+		RegisterKeyedRefs[game, Text, Text](c, RefsOptions{})
+		RegisterCommandBuffer[game, aiCommands](c)
+		w = declare[World[game]](c)
+		texts = declare[KeyedRefs[game, Text, Text]](c)
+		first = declare[CommandKeyedRefs[game, aiCommands, Text, Text]](c)
+		second = declare[CommandKeyedRefs[game, aiCommands, Text, Text]](c)
+		sink = declare[CommandSink[game, aiCommands]](c)
+		deltas = declare[DeltaRefs[game, Text]](c)
+	})
+	ObservationResetSystem(nil, kernel.NoArg{}, w)
+	a := texts.Put("a")
+	b := texts.Put("b")
+	c := texts.Put("c")
+	ObservationResetSystem(nil, kernel.NoArg{}, w)
+	first.Update("a")
+	second.ReleaseKey("a") // the later lane releases what the first updated
+	first.Release(b)
+	second.Release(b)    // b is gone by then
+	first.Update("gone") // no ref has this key
+	second.ReleaseKey("gone")
+	if !texts.Alive(a) || !texts.Alive(b) {
+		t.Fatal("a record applied before the commit")
+	}
+	if dropped := sink.Commit(); dropped != 3 {
+		t.Fatalf("the commit dropped %d records, want 3", dropped)
+	}
+	if texts.Alive(a) || texts.Alive(b) || !texts.Alive(c) {
+		t.Fatal("the commit left a or b alive, or released c")
+	}
+	if _, ok := texts.Find("a"); ok {
+		t.Fatal("a released key still finds its ref")
+	}
+	got := collectRefDeltas(t, deltas)
+	if len(got) != 2 || got[a].Delta != DeltaReleased || got[b].Delta != DeltaReleased {
+		t.Fatalf("DeltaRefs answered %+v, want a and b released", got)
+	}
+	ObservationResetSystem(nil, kernel.NoArg{}, w)
+	first.Update("c")
+	sink.Commit()
+	if got := collectRefDeltas(t, deltas); len(got) != 1 || got[c].Delta != DeltaChanged {
+		t.Fatalf("DeltaRefs answered %+v after a buffered update, want c changed", got)
+	}
 }
 
 // nameArg tells nameProducer which names to make: each holds the round, the
@@ -507,7 +605,7 @@ func runNameProducers(t *testing.T, workers int) []string {
 	var lookup RefsLookup[game, string]
 	h := spawnWorkers(t, workers, func(c *kernel.Configurator) {
 		RegisterComponent[game, named](c)
-		RegisterRefs[game, string](c)
+		RegisterRefs[game, string](c, RefsOptions{})
 		RegisterCommandBuffer[game, aiCommands](c)
 		for range producers {
 			producerTasks = append(producerTasks, c.RegisterTask4(nameProducer))
@@ -530,12 +628,14 @@ func runNameProducers(t *testing.T, workers int) []string {
 		left = append(left, *lookup.Get(row.Get().Name))
 	}
 	alive := 0
-	for i := range lookup.refs.slots.Len() {
-		if lookup.refs.slots.At(i).generation != 0 {
-			alive++
+	for _, page := range lookup.refs.slots.pages {
+		for i := range page {
+			if page[i].live {
+				alive++
+			}
 		}
 	}
-	if alive != len(left) {
+	if alive != len(left) || alive != lookup.refs.liveRefs {
 		t.Fatalf("%d refs are alive for %d named entities", alive, len(left))
 	}
 	slices.Sort(left)

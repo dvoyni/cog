@@ -17,7 +17,7 @@ An identity in one world: an index and a generation. It holds no data itself.
 _Avoid_: Object, actor, handle
 
 **Allocation range**:
-The span of indices a world hands out to new entities. Indices outside it are only ever placed with `CreateAt`.
+The span of indices a world hands out to new entities, or refs to new refs. Indices outside it are only ever placed, as a mirror places the server's.
 
 **Shrink**:
 Giving back the memory a world holds past what is in use, after its working size has dropped. It ends the observation window first in a world that observes.
@@ -37,12 +37,16 @@ All values of one component type in one world, and the unit a system locks.
 _Avoid_: Pool, table, column, archetype
 
 **Ref**:
-A pointer-free handle, held in a component, to a value of any type kept outside the stores: text, a list, anything a component cannot hold. Setting its value gives it a new handle, so the component holding it changes.
+A pointer-free, stable handle to a value of any type kept outside the stores: text, a list, a mesh, anything a component cannot hold. Many components may hold one ref; setting its value keeps the handle, so none of them changes. Once released, every copy reads nothing.
 _Avoid_: Pointer, reference, asset
 
 **Refs**:
 All refs to values of one type in one world, and the unit a system locks for them.
 _Avoid_: Arena, heap, blob store
+
+**Keyed refs**:
+Refs found by a key their values give, at most one per key, such as meshes by asset path or texts by themselves. Putting a value returns the ref of its key, or makes one.
+_Avoid_: Interned refs, auto refs, cache
 
 ## Systems
 
@@ -75,6 +79,9 @@ A store a delta query reads. Only observed stores pay for change detection.
 **Delta**:
 What happened to one entity's component since the last observation reset: none, added, changed or removed. A component written back to its value as of the reset has none.
 _Avoid_: Change, event, diff, dirty mark
+
+**Ref delta**:
+What happened to one ref since the last observation reset: added, changed or released, with its value. Refs keep no shadow, so a set to the same value is a change.
 
 **Shadow**:
 An observed store's copy of each value as of the last observation reset, which a delta query's previous values come from.
