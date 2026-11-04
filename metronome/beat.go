@@ -20,6 +20,18 @@ type Beat struct {
 	// the publish time from the epoch. On every track it is the sum of
 	// Delta + Lost over the track's beats.
 	TimeFromStart time.Duration
+	// Alpha is, in [0,1), how far past InterpolatedTick this beat falls, for
+	// blending that tick's predecessor into it: the clock time at this beat's
+	// publish less the tick's deadline, over the reference track's step. While
+	// the
+	// reference track is in debt it is the largest float32 below 1, so the
+	// beat shows the newest state. Zero on a track with no reference track.
+	Alpha float32
+	// InterpolatedTick is the last tick of the reference track published
+	// before this beat, whose state this beat's tasks read: locks order them
+	// after the writes its publication scheduled. Zero on a track with no
+	// reference track, and before the reference track's first tick.
+	InterpolatedTick uint64
 }
 
 // UpdateEvent is the one event metronome ships, for an update track. Any
