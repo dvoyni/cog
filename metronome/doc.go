@@ -25,11 +25,12 @@
 // ex.Join(in, job), so the in-flight limit sees it. Otherwise each beat
 // schedules another such job, and they pile up behind a blocked main thread.
 //
-// metronome reads time only through its Clock, given with WithClock. A
-// ManualClock moves only when told: Advance walks every track deadline by
-// deadline, letting each beat due publish and settle, and Jump moves time at
-// once, as a stall would, so debt builds. Plugin.Wait returns once every track
-// has settled: no beat in flight and no debt.
+// metronome reads time only through its Clock. The default reads monotonic
+// time with the epoch at Start; WithClock gives another. A ManualClock moves
+// only when told: Advance walks every track deadline by deadline, letting
+// each beat due publish and settle, and Jump moves time at once, as a stall
+// would, so debt builds. Plugin.Wait returns once every track has settled: no
+// beat in flight and no debt.
 //
 // metronome knows nothing of rendering, windows, input or the ECS.
 //

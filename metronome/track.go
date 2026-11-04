@@ -75,15 +75,19 @@ func AddTrack[E any, P interface {
 	for i := range signals {
 		signals[i] = kernel.NewSignal()
 	}
+	// event is made once and reused: stamping a local through P would move it
+	// to the heap on every beat.
+	event := new(E)
 	plugin.tracks = append(plugin.tracks, &track{
 		eventType:    eventType,
 		settings:     settings,
 		nextDeadline: settings.Step,
 		signals:      signals,
 		publish: func(k *kernel.Kernel, beat Beat) kernel.JobHandle {
-			var event E
-			P(&event).stamp(beat)
-			_, out := k.Publish(event)
+			var zero E
+			*event = zero
+			P(event).stamp(beat)
+			_, out := k.Publish(*event)
 			return out
 		},
 	})

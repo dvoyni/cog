@@ -72,14 +72,21 @@ func updateBeat(event metronome.UpdateEvent) metronome.Beat { return event.Beat 
 // the test ends.
 func spawn(t *testing.T, clock metronome.Clock, init func(c *kernel.Configurator)) (*metronome.Plugin, *kernel.Kernel) {
 	t.Helper()
+	plugin := metronome.NewPlugin(metronome.WithClock(clock))
+	return plugin, spawnPlugin(t, plugin, init)
+}
+
+// spawnPlugin spawns a kernel of plugin and a test plugin whose Init runs
+// init, and answers the kernel. The supervisor quits when the test ends.
+func spawnPlugin(t *testing.T, plugin *metronome.Plugin, init func(c *kernel.Configurator)) *kernel.Kernel {
+	t.Helper()
 	s := kernel.NewSupervisor(nil)
 	t.Cleanup(s.Quit)
-	plugin := metronome.NewPlugin(metronome.WithClock(clock))
 	id, err := s.Spawn(nil, 4, plugin, testPlugin{init: init})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return plugin, s.GetKernel(id)
+	return s.GetKernel(id)
 }
 
 // fixedBeats answers the beats ticks first to last of a fixed-step track of
@@ -634,5 +641,23 @@ func TestAdvanceSettlesEachBeatWithSeveralInFlight(t *testing.T) {
 	}
 	if got := finished.Load(); got != 20 {
 		t.Fatalf("once Advance returned tick %d had finished, want 20", got)
+	}
+}
+
+func TestBeatPublishAndWaitAllocateNothing(t *testing.T) {
+	clock := metronome.NewManualClock()
+	spawn(t, clock, func(c *kernel.Configurator) {
+		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
+		task := c.RegisterTask(func(access *kernel.Access) kernel.TaskBody[metronome.UpdateEvent, kernel.NoResult] {
+			return func(k *kernel.Kernel, event metronome.UpdateEvent) kernel.NoResult { return kernel.NoResult{} }
+		})
+		c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event metronome.UpdateEvent) (metronome.UpdateEvent, kernel.JobHandle) {
+			return event, ex.Schedule(task, event, in).Handle()
+		})
+	})
+	beat := func() { clock.Advance(100 * time.Millisecond) }
+	beat()
+	if got := testing.AllocsPerRun(1000, beat); got != 0 {
+		t.Fatalf("a beat's publish and wait allocated %v times", got)
 	}
 }
