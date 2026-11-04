@@ -13,10 +13,11 @@
 // dependency finishes, and the track publishes its next beat only after
 // that.
 //
-// metronome reads time only through its Clock, given with WithClock. A
-// ManualClock moves only when told: Advance walks every track deadline by
-// deadline, letting each beat due publish and settle. Plugin.Wait returns
-// once every track has settled.
+// metronome reads time only through its Clock. The default reads monotonic
+// time with the epoch at Start; WithClock gives another. A ManualClock moves
+// only when told: Advance walks every track deadline by deadline, letting
+// each beat due publish and settle. Plugin.Wait returns once every track has
+// settled.
 //
 // metronome knows nothing of rendering, windows, input or the ECS.
 //
