@@ -14,17 +14,31 @@ const defaultMaxDebt = 4
 // Settings is a track's pacing, given to AddTrack.
 type Settings struct {
 	// Step is the time each beat of a fixed-step track stands for: tick n is
-	// due at the epoch + n × Step, plus the steps dropped before it.
+	// due at the epoch + n × Step, plus the steps dropped before it. Zero makes
+	// a variable track, each beat standing for the time since the previous one.
 	Step time.Duration
+	// MinInterval is the least time between two beats of a variable track: its
+	// timer is reset to the previous beat plus MinInterval. Zero is none: the
+	// timer is reset to now.
+	MinInterval time.Duration
+	// MaxDelta clamps the Delta of a variable track's beat, after a stall; the
+	// time clamped away is that beat's Lost. Zero is no clamp.
+	MaxDelta time.Duration
 	// MaxInFlight is how many of the track's beats may be in flight at once:
 	// a new beat starts only while fewer are. A beat is in flight until its
 	// publication's out dependency finishes. Zero is no limit.
 	MaxInFlight int
 	// MaxDebt caps a fixed-step track's debt, the steps it owes but has not
 	// published: a step owed past the cap is dropped, and its time is the next
-	// beat's Lost. Zero is 4.
+	// beat's Lost. Zero is 4. It means nothing on a variable track.
 	MaxDebt int
 }
+
+// Variable answers the settings of a variable track: one beat in flight, as
+// FixedStep keeps, so a beat publishes only once the previous one has
+// finished; no MinInterval and no MaxDelta clamp, each to be set as the track
+// needs.
+func Variable() Settings { return Settings{MaxInFlight: 1} }
 
 // FixedStep answers the settings of a fixed-step track beating hz times a
 // second; hz zero is 60. It keeps one beat in flight, so a step publishes only
@@ -46,8 +60,7 @@ func FixedStep(hz int) Settings {
 //
 // A track's event type is its identity. It is a composition error, and
 // panics, for metronome not to be initialized yet, for a track of E to be
-// declared twice, for settings to have no step, or for MaxInFlight or MaxDebt
-// to be negative.
+// declared twice, or for any of its settings to be negative.
 func AddTrack[E any, P interface {
 	*E
 	beater
@@ -62,11 +75,8 @@ func AddTrack[E any, P interface {
 			panic(fmt.Sprintf("metronome: two tracks of %v", eventType))
 		}
 	}
-	if settings.Step <= 0 {
-		panic(fmt.Sprintf("metronome: track of %v has no step", eventType))
-	}
-	if settings.MaxInFlight < 0 || settings.MaxDebt < 0 {
-		panic(fmt.Sprintf("metronome: track of %v has a negative MaxInFlight or MaxDebt", eventType))
+	if settings.Step < 0 || settings.MinInterval < 0 || settings.MaxDelta < 0 || settings.MaxInFlight < 0 || settings.MaxDebt < 0 {
+		panic(fmt.Sprintf("metronome: track of %v has a negative setting: %+v", eventType, settings))
 	}
 	if settings.MaxDebt == 0 {
 		settings.MaxDebt = defaultMaxDebt
@@ -81,7 +91,7 @@ func AddTrack[E any, P interface {
 	plugin.tracks = append(plugin.tracks, &track{
 		eventType:    eventType,
 		settings:     settings,
-		nextDeadline: settings.Step,
+		nextDeadline: settings.Step + settings.MinInterval,
 		signals:      signals,
 		publish: func(k *kernel.Kernel, beat Beat) kernel.JobHandle {
 			var zero E
@@ -94,7 +104,8 @@ func AddTrack[E any, P interface {
 }
 
 // track is one declared track: its pacing, and the state its goroutine keeps.
-// running, inFlightCount and nextDeadline are guarded by the plugin's mutex.
+// running, inFlightCount, nextDeadline and lastBeat are guarded by the
+// plugin's mutex.
 type track struct {
 	eventType reflect.Type
 	settings  Settings
@@ -109,10 +120,14 @@ type track struct {
 	oldestSignal  int
 	inFlightCount int
 	tick          uint64
-	// stepCount counts the steps behind the track: published or dropped.
+	// stepCount counts the steps behind a fixed-step track: published or
+	// dropped.
 	stepCount    uint64
 	nextDeadline time.Duration
-	running      bool
+	// lastBeat is when a variable track published its last beat, from the
+	// epoch; the epoch itself before the first.
+	lastBeat time.Duration
+	running  bool
 }
 
 // run is the track's goroutine. It waits on its timer for the next deadline,
@@ -145,9 +160,10 @@ func (t *track) run(p *Plugin, k *kernel.Kernel) {
 			return
 		}
 		if deadlineReached && (t.settings.MaxInFlight == 0 || t.inFlightCount < t.settings.MaxInFlight) {
-			t.publishDue(p, k)
+			if !t.publishDue(p, k) {
+				t.timer.Reset(t.nextDeadline)
+			}
 			deadlineReached = false
-			t.timer.Reset(t.nextDeadline)
 		}
 	}
 }
@@ -161,34 +177,50 @@ func (t *track) end(p *Plugin) {
 	p.settleChanged.Broadcast()
 }
 
-// publishDue publishes the beat due, first dropping the steps owed past the
-// debt cap, and arms a signal on its out dependency.
-func (t *track) publishDue(p *Plugin, k *kernel.Kernel) {
-	step := t.settings.Step
-	now := p.clock.Now()
+// publishDue publishes the beat due and arms a signal on its out dependency.
+// A fixed-step track first drops the steps owed past the debt cap; a variable
+// track clamps its Delta to MaxDelta. A variable track on a ManualClock reads
+// the time and rearms its timer in one step, still owing until the beat is
+// in flight, and publishDue answers true; otherwise the caller rearms it.
+func (t *track) publishDue(p *Plugin, k *kernel.Kernel) (rearmed bool) {
 	p.mutex.Lock()
-	var lost time.Duration
-	if owed := int64(now/step) - int64(t.stepCount); owed > int64(t.settings.MaxDebt) {
-		dropped := owed - int64(t.settings.MaxDebt)
-		t.stepCount += uint64(dropped)
-		lost = time.Duration(dropped) * step
+	var now time.Duration
+	if timer, ok := t.timer.(*manualTimer); ok && t.settings.Step == 0 {
+		now = timer.rearm(t.settings.MinInterval)
+		rearmed = true
+	} else {
+		now = p.clock.Now()
 	}
-	t.stepCount++
 	t.tick++
-	t.nextDeadline = time.Duration(t.stepCount+1) * step
+	beat := Beat{Tick: t.tick}
+	if step := t.settings.Step; step > 0 {
+		if owed := int64(now/step) - int64(t.stepCount); owed > int64(t.settings.MaxDebt) {
+			dropped := owed - int64(t.settings.MaxDebt)
+			t.stepCount += uint64(dropped)
+			beat.Lost = time.Duration(dropped) * step
+		}
+		t.stepCount++
+		t.nextDeadline = time.Duration(t.stepCount+1) * step
+		beat.Delta = step
+		beat.TimeFromStart = time.Duration(t.stepCount) * step
+	} else {
+		beat.Delta = now - t.lastBeat
+		if maxDelta := t.settings.MaxDelta; maxDelta > 0 && beat.Delta > maxDelta {
+			beat.Lost = beat.Delta - maxDelta
+			beat.Delta = maxDelta
+		}
+		beat.TimeFromStart = now
+		t.lastBeat = now
+		t.nextDeadline = now + t.settings.MinInterval
+	}
 	if t.inFlightCount == len(t.signals) {
 		t.growSignals()
 	}
 	signal := t.signals[(t.oldestSignal+t.inFlightCount)%len(t.signals)]
 	t.inFlightCount++
 	p.mutex.Unlock()
-	out := t.publish(k, Beat{
-		Tick:          t.tick,
-		Delta:         step,
-		Lost:          lost,
-		TimeFromStart: time.Duration(t.stepCount) * step,
-	})
-	k.Notify(signal, out)
+	k.Notify(signal, t.publish(k, beat))
+	return rearmed
 }
 
 // growSignals doubles the ring of signals of a track with no in-flight limit,
@@ -203,4 +235,19 @@ func (t *track) growSignals() {
 	}
 	t.signals = signals
 	t.oldestSignal = 0
+}
+
+// owes answers whether the track has reached a beat it has not published yet.
+// A fixed-step track owes once now has reached its next deadline. A variable
+// track on a ManualClock owes once its timer has fired, until it rearms it; on
+// any other clock, once now has reached its next deadline and moved on since
+// its last beat. The caller holds the plugin's mutex.
+func (t *track) owes(now time.Duration) bool {
+	if t.settings.Step > 0 {
+		return now >= t.nextDeadline
+	}
+	if timer, ok := t.timer.(*manualTimer); ok {
+		return timer.pending()
+	}
+	return now >= t.nextDeadline && now > t.lastBeat
 }
