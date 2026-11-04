@@ -9,8 +9,13 @@ type Beat struct {
 	Tick uint64
 	// Delta is the time this beat stands for: on a fixed-step track, the step.
 	Delta time.Duration
+	// Lost is the time thrown away just before this beat, by steps dropped
+	// past the debt cap; 0 when on pace. On a fixed-step track it is a whole
+	// multiple of the step.
+	Lost time.Duration
 	// TimeFromStart is, on a fixed-step track, the tick's deadline from the
-	// clock's epoch: Tick × step.
+	// clock's epoch: Tick × step plus the Lost so far. On every track it is
+	// the sum of Delta + Lost over the track's beats.
 	TimeFromStart time.Duration
 }
 

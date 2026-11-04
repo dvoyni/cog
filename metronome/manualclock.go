@@ -1,19 +1,22 @@
 package metronome
 
 import (
+	"context"
+	"slices"
 	"sync"
 	"time"
 )
 
 // ManualClock is a Clock driven by hand, for tests and deterministic runs. It
-// starts at 0 and moves only when told.
+// starts at 0 and moves only when told: Advance walks time deadline by
+// deadline, and Jump moves it at once.
 type ManualClock struct {
-	mutex sync.Mutex
-	// timerChanged is broadcast when a timer is reset or stopped, which is how
-	// Advance learns that a fired track has settled and waits again.
-	timerChanged sync.Cond
-	now          time.Duration
-	timers       []*manualTimer
+	mutex  sync.Mutex
+	now    time.Duration
+	timers []*manualTimer
+	// plugins are the started plugins reading this clock, whose tracks
+	// Advance waits on to settle.
+	plugins []*Plugin
 }
 
 // manualTimer is a ManualClock's Timer.
@@ -23,17 +26,10 @@ type manualTimer struct {
 	// deadline is when the timer fires, while armed.
 	deadline time.Duration
 	armed    bool
-	// fired is set from a fire until the timer is reset or stopped: the track
-	// it belongs to is still at work on the beat the fire let out.
-	fired bool
 }
 
 // NewManualClock makes a ManualClock reading 0.
-func NewManualClock() *ManualClock {
-	clock := &ManualClock{}
-	clock.timerChanged.L = &clock.mutex
-	return clock
-}
+func NewManualClock() *ManualClock { return &ManualClock{} }
 
 // Now answers the time the clock has been moved to.
 func (c *ManualClock) Now() time.Duration {
@@ -52,10 +48,10 @@ func (c *ManualClock) NewTimer() Timer {
 }
 
 // Advance moves the clock forward by d, deadline by deadline across every
-// timer: at each deadline it fires the timers due, and waits until each of
-// their tracks has published its beat, seen it settle, and reset or stopped
-// its timer, before moving on. Work takes no manual time, so no track falls
-// behind.
+// timer: at each deadline it fires the timers due, and waits until every
+// track of the plugins reading the clock has settled, its beats published and
+// finished, before moving on. Work takes no manual time, so no track falls
+// behind and no step is dropped.
 //
 // A negative d panics.
 func (c *ManualClock) Advance(d time.Duration) {
@@ -63,24 +59,37 @@ func (c *ManualClock) Advance(d time.Duration) {
 		panic("metronome: advancing a ManualClock by a negative duration")
 	}
 	c.mutex.Lock()
-	defer c.mutex.Unlock()
 	target := c.now + d
+	c.mutex.Unlock()
 	for {
-		for c.anyFired() {
-			c.timerChanged.Wait()
-		}
+		c.settle()
+		c.mutex.Lock()
 		next, ok := c.nextDeadline(target)
 		if !ok {
-			break
+			c.now = target
+			c.mutex.Unlock()
+			return
 		}
 		c.now = next
-		for _, timer := range c.timers {
-			if timer.armed && timer.deadline <= c.now {
-				timer.fire()
-			}
-		}
+		c.fireDue()
+		c.mutex.Unlock()
 	}
-	c.now = target
+}
+
+// Jump moves the clock forward by d at once, as a stall would, and fires every
+// timer due by then. It does not wait for the beats it lets out: a fixed-step
+// track behind owes the steps passed, up to its debt cap, and catches up
+// back-to-back. Plugin.Wait waits for that.
+//
+// A negative d panics.
+func (c *ManualClock) Jump(d time.Duration) {
+	if d < 0 {
+		panic("metronome: jumping a ManualClock by a negative duration")
+	}
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.now += d
+	c.fireDue()
 }
 
 // Reset arms the timer to fire at at, or fires it at once if the clock has
@@ -88,13 +97,11 @@ func (c *ManualClock) Advance(d time.Duration) {
 func (t *manualTimer) Reset(at time.Duration) {
 	t.clock.mutex.Lock()
 	defer t.clock.mutex.Unlock()
-	t.fired = false
 	t.deadline = at
 	t.armed = true
 	if at <= t.clock.now {
 		t.fire()
 	}
-	t.clock.timerChanged.Broadcast()
 }
 
 // C is the channel a fire is delivered on.
@@ -105,23 +112,36 @@ func (t *manualTimer) Stop() {
 	t.clock.mutex.Lock()
 	defer t.clock.mutex.Unlock()
 	t.armed = false
-	t.fired = false
 	select {
 	case <-t.channel:
 	default:
 	}
-	t.clock.timerChanged.Broadcast()
 }
 
-// anyFired answers whether a timer has fired and not been reset or stopped
-// since. The caller holds the mutex.
-func (c *ManualClock) anyFired() bool {
-	for _, timer := range c.timers {
-		if timer.fired {
-			return true
-		}
+// attach links a started plugin to the clock, for Advance to wait on its
+// tracks.
+func (c *ManualClock) attach(plugin *Plugin) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.plugins = append(c.plugins, plugin)
+}
+
+// detach unlinks a stopping plugin from the clock.
+func (c *ManualClock) detach(plugin *Plugin) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.plugins = slices.DeleteFunc(c.plugins, func(attached *Plugin) bool { return attached == plugin })
+}
+
+// settle waits until every track of the plugins reading the clock has
+// settled. The caller does not hold the mutex: Plugin.Wait reads Now.
+func (c *ManualClock) settle() {
+	c.mutex.Lock()
+	plugins := slices.Clone(c.plugins)
+	c.mutex.Unlock()
+	for _, plugin := range plugins {
+		_ = plugin.Wait(context.Background())
 	}
-	return false
 }
 
 // nextDeadline answers the earliest deadline of an armed timer no later than
@@ -138,10 +158,19 @@ func (c *ManualClock) nextDeadline(target time.Duration) (time.Duration, bool) {
 	return next, found
 }
 
+// fireDue fires every armed timer whose deadline the clock has reached. The
+// caller holds the mutex.
+func (c *ManualClock) fireDue() {
+	for _, timer := range c.timers {
+		if timer.armed && timer.deadline <= c.now {
+			timer.fire()
+		}
+	}
+}
+
 // fire delivers one fire. The caller holds the clock's mutex.
 func (t *manualTimer) fire() {
 	t.armed = false
-	t.fired = true
 	select {
 	case t.channel <- struct{}{}:
 	default:
