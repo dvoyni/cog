@@ -136,10 +136,14 @@ func (c *ManualClock) detach(plugin *Plugin) {
 // settle waits until every track of the plugins reading the clock has
 // settled. The caller does not hold the mutex: Plugin.Wait reads Now.
 func (c *ManualClock) settle() {
-	c.mutex.Lock()
-	plugins := slices.Clone(c.plugins)
-	c.mutex.Unlock()
-	for _, plugin := range plugins {
+	for i := 0; ; i++ {
+		c.mutex.Lock()
+		if i >= len(c.plugins) {
+			c.mutex.Unlock()
+			return
+		}
+		plugin := c.plugins[i]
+		c.mutex.Unlock()
 		_ = plugin.Wait(context.Background())
 	}
 }
