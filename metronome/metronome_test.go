@@ -385,3 +385,254 @@ func TestNothingPublishesAfterStop(t *testing.T) {
 		t.Fatalf("%d beats published after metronome's Stop returned", n)
 	}
 }
+
+// beatAt answers a fixed-step beat of step: tick, its lost steps, and the
+// steps from the epoch to its deadline.
+func beatAt(step time.Duration, tick uint64, lostSteps, deadlineSteps int64) metronome.Beat {
+	return metronome.Beat{
+		Tick:          tick,
+		Delta:         step,
+		Lost:          time.Duration(lostSteps) * step,
+		TimeFromStart: time.Duration(deadlineSteps) * step,
+	}
+}
+
+// checkInvariant fails t unless the beats are ticks 1 onward, each with
+// TimeFromStart the sum of Delta + Lost up to it.
+func checkInvariant(t *testing.T, beats []metronome.Beat) {
+	t.Helper()
+	var sum time.Duration
+	for i, beat := range beats {
+		sum += beat.Delta + beat.Lost
+		if beat.Tick != uint64(i+1) {
+			t.Fatalf("beat %d is %v, want tick %d", i, beat, i+1)
+		}
+		if beat.TimeFromStart != sum {
+			t.Fatalf("beat %v has TimeFromStart %v, want the sum of Delta + Lost %v", beat, beat.TimeFromStart, sum)
+		}
+	}
+}
+
+// heldRecord subscribes a handler to E that records each beat into published
+// as it is published, and hands on as its out dependency a job that waits for
+// gate to close, holding the beat in flight until then.
+func heldRecord[E any](c *kernel.Configurator, published *recorder, header func(E) metronome.Beat, gate <-chan struct{}) {
+	task := c.RegisterTask(func(access *kernel.Access) kernel.TaskBody[E, kernel.NoResult] {
+		return func(k *kernel.Kernel, event E) kernel.NoResult {
+			<-gate
+			return kernel.NoResult{}
+		}
+	})
+	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event E) (E, kernel.JobHandle) {
+		published.add(header(event))
+		return event, ex.Schedule(task, event, in).Handle()
+	})
+}
+
+// waitHeld fails t unless Wait on plugin is still waiting after a while: a
+// track has a beat in flight or owes debt.
+func waitHeld(t *testing.T, plugin *metronome.Plugin) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if err := plugin.Wait(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Wait on a track held back answered %v, want the context's deadline", err)
+	}
+}
+
+// waitPublished waits until r holds count beats, and fails t if it does not
+// in time.
+func waitPublished(t *testing.T, r *recorder, count int) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for len(r.all()) < count {
+		select {
+		case <-deadline:
+			t.Fatalf("the track published %v, want %d beats", r.all(), count)
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
+func TestJumpPublishesDebtWithinTheCap(t *testing.T) {
+	const step = 100 * time.Millisecond
+	clock := metronome.NewManualClock()
+	r := &recorder{}
+	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
+		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
+		record(c, r, updateBeat)
+	})
+
+	clock.Jump(10 * step)
+	if err := plugin.Wait(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	want := []metronome.Beat{
+		beatAt(step, 1, 6, 7),
+		beatAt(step, 2, 0, 8),
+		beatAt(step, 3, 0, 9),
+		beatAt(step, 4, 0, 10),
+	}
+	if got := r.all(); !slices.Equal(got, want) {
+		t.Fatalf("a jump of 10 steps saw %v, want the 4 steps the debt cap keeps, after 6 lost: %v", got, want)
+	}
+}
+
+func TestMaxDebtCapsDebt(t *testing.T) {
+	const step = 100 * time.Millisecond
+	clock := metronome.NewManualClock()
+	r := &recorder{}
+	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
+		metronome.AddTrack[metronome.UpdateEvent](c, metronome.Settings{Step: step, MaxInFlight: 1, MaxDebt: 2})
+		record(c, r, updateBeat)
+	})
+
+	clock.Jump(5 * step)
+	if err := plugin.Wait(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	want := []metronome.Beat{beatAt(step, 1, 3, 4), beatAt(step, 2, 0, 5)}
+	if got := r.all(); !slices.Equal(got, want) {
+		t.Fatalf("a jump of 5 steps with MaxDebt 2 saw %v, want %v", got, want)
+	}
+}
+
+func TestTimeFromStartIsDeltaPlusLostAcrossDrops(t *testing.T) {
+	const step = 100 * time.Millisecond
+	clock := metronome.NewManualClock()
+	r := &recorder{}
+	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
+		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
+		record(c, r, updateBeat)
+	})
+
+	clock.Advance(3 * step)
+	clock.Jump(9 * step)
+	if err := plugin.Wait(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(2*step + step/2)
+	clock.Jump(20 * step)
+	if err := plugin.Wait(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	beats := r.all()
+	checkInvariant(t, beats)
+	// 3 on pace, 4 of 9 owed, 2 on pace, 4 of 20 owed: 13 beats, the last on
+	// the deadline of step 34, with 21 steps lost before it.
+	if got, want := beats[len(beats)-1], beatAt(step, 13, 0, 34); got != want {
+		t.Fatalf("the last beat is %v, want %v", got, want)
+	}
+}
+
+func TestMaxInFlightHoldsBackATrack(t *testing.T) {
+	const step = 100 * time.Millisecond
+	clock := metronome.NewManualClock()
+	published := &recorder{}
+	gate := make(chan struct{})
+	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
+		metronome.AddTrack[metronome.UpdateEvent](c, metronome.Settings{Step: step, MaxInFlight: 2})
+		heldRecord(c, published, updateBeat, gate)
+	})
+
+	clock.Jump(3 * step)
+	waitHeld(t, plugin)
+	if got, want := published.all(), fixedBeats(step, 1, 2); !slices.Equal(got, want) {
+		t.Fatalf("with two beats held in flight the track published %v, want %v", got, want)
+	}
+
+	close(gate)
+	if err := plugin.Wait(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := published.all(), fixedBeats(step, 1, 3); !slices.Equal(got, want) {
+		t.Fatalf("once released the track published %v, want %v", got, want)
+	}
+}
+
+func TestMaxInFlightZeroIsNoLimit(t *testing.T) {
+	const step = 100 * time.Millisecond
+	clock := metronome.NewManualClock()
+	published := &recorder{}
+	gate := make(chan struct{})
+	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
+		metronome.AddTrack[metronome.UpdateEvent](c, metronome.Settings{Step: step})
+		heldRecord(c, published, updateBeat, gate)
+	})
+
+	clock.Jump(4 * step)
+	waitPublished(t, published, 4)
+	waitHeld(t, plugin)
+	close(gate)
+	if err := plugin.Wait(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := published.all(), fixedBeats(step, 1, 4); !slices.Equal(got, want) {
+		t.Fatalf("with no in-flight limit the track published %v, want %v", got, want)
+	}
+}
+
+func TestHeldOutDependencyStallsTheTrackUntilReleased(t *testing.T) {
+	const step = 100 * time.Millisecond
+	clock := metronome.NewManualClock()
+	published := &recorder{}
+	gate := make(chan struct{})
+	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
+		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
+		heldRecord(c, published, updateBeat, gate)
+	})
+
+	clock.Jump(step)
+	waitPublished(t, published, 1)
+	clock.Jump(10 * step)
+	waitHeld(t, plugin)
+	if got, want := published.all(), fixedBeats(step, 1, 1); !slices.Equal(got, want) {
+		t.Fatalf("a stalled track published %v, want %v", got, want)
+	}
+
+	close(gate)
+	if err := plugin.Wait(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	want := []metronome.Beat{
+		beatAt(step, 1, 0, 1),
+		beatAt(step, 2, 6, 8),
+		beatAt(step, 3, 0, 9),
+		beatAt(step, 4, 0, 10),
+		beatAt(step, 5, 0, 11),
+	}
+	if got := published.all(); !slices.Equal(got, want) {
+		t.Fatalf("once released the track published %v, want the catch-up within the cap %v", got, want)
+	}
+}
+
+func TestAdvanceSettlesEachBeatWithSeveralInFlight(t *testing.T) {
+	const step = 100 * time.Millisecond
+	clock := metronome.NewManualClock()
+	finished := &atomic.Uint64{}
+	early := &atomic.Int64{}
+	spawn(t, clock, func(c *kernel.Configurator) {
+		metronome.AddTrack[metronome.UpdateEvent](c, metronome.Settings{Step: step, MaxInFlight: 2})
+		task := c.RegisterTask(func(access *kernel.Access) kernel.TaskBody[metronome.UpdateEvent, kernel.NoResult] {
+			return func(k *kernel.Kernel, event metronome.UpdateEvent) kernel.NoResult {
+				time.Sleep(time.Millisecond)
+				finished.Store(event.Tick)
+				return kernel.NoResult{}
+			}
+		})
+		c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event metronome.UpdateEvent) (metronome.UpdateEvent, kernel.JobHandle) {
+			if finished.Load() != event.Tick-1 {
+				early.Add(1)
+			}
+			return event, ex.Schedule(task, event, in).Handle()
+		})
+	})
+
+	clock.Advance(20 * step)
+	if n := early.Load(); n != 0 {
+		t.Fatalf("%d beats published before the one due before them settled", n)
+	}
+	if got := finished.Load(); got != 20 {
+		t.Fatalf("once Advance returned tick %d had finished, want 20", got)
+	}
+}
