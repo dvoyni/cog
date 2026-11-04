@@ -6,17 +6,17 @@ import (
 	"time"
 )
 
-// wallClock is the default Clock: monotonic time, with the epoch at the
-// plugin's Start.
-type wallClock struct {
+// WallClock is the default Clock: monotonic time, with the epoch at the Start
+// of the plugin it is given to.
+type WallClock struct {
 	// epoch is set by start, before any track reads the clock.
 	epoch time.Time
 }
 
-// wallTimer is a wallClock's Timer, backed by one time.Timer made at NewTimer
+// wallTimer is a WallClock's Timer, backed by one time.Timer made at NewTimer
 // and reused on every Reset.
 type wallTimer struct {
-	clock   *wallClock
+	clock   *WallClock
 	channel chan struct{}
 	timer   *time.Timer
 	// deadline is when the timer fires, or disarmed. A fire takes it with a
@@ -28,11 +28,15 @@ type wallTimer struct {
 // disarmed is a wallTimer's deadline while it is not armed.
 const disarmed = math.MaxInt64
 
+// NewWallClock makes a WallClock. Its epoch is set at the Start of the plugin
+// it is given to, so it reads zero there, however early it was made.
+func NewWallClock() *WallClock { return &WallClock{} }
+
 // Now answers the monotonic time since the epoch.
-func (c *wallClock) Now() time.Duration { return time.Since(c.epoch) }
+func (c *WallClock) Now() time.Duration { return time.Since(c.epoch) }
 
 // NewTimer makes a Timer of this clock.
-func (c *wallClock) NewTimer() Timer {
+func (c *WallClock) NewTimer() Timer {
 	timer := &wallTimer{clock: c, channel: make(chan struct{}, 1)}
 	timer.deadline.Store(disarmed)
 	timer.timer = time.AfterFunc(time.Hour, timer.elapse)
@@ -63,7 +67,7 @@ func (t *wallTimer) Stop() {
 }
 
 // start sets the epoch to now.
-func (c *wallClock) start() { c.epoch = time.Now() }
+func (c *WallClock) start() { c.epoch = time.Now() }
 
 // elapse is the time.Timer's callback. It fires the timer once its deadline is
 // reached, and waits again for a deadline not yet reached, as after a callback

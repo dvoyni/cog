@@ -55,6 +55,25 @@ func TestWallClockIsTheDefault(t *testing.T) {
 	}
 }
 
+func TestWallClockEpochIsAtStart(t *testing.T) {
+	r := &recorder{}
+	clock := metronome.NewWallClock()
+	time.Sleep(100 * time.Millisecond) // an epoch at NewWallClock would make every beat below due at once
+	started := time.Now()
+	spawnPlugin(t, metronome.NewPlugin(metronome.WithClock(clock)), func(c *kernel.Configurator) {
+		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(100))
+		record(c, r, updateBeat)
+	})
+
+	awaitBeats(t, r, 10, 5*time.Second)
+	if elapsed := time.Since(started); elapsed < 100*time.Millisecond {
+		t.Fatalf("ten beats of 10ms published %v after Spawn, want at least 100ms", elapsed)
+	}
+	if now := clock.Now(); now < 100*time.Millisecond || now > time.Since(started) {
+		t.Fatalf("the clock reads %v, %v after Spawn, want the time since Start", now, time.Since(started))
+	}
+}
+
 func TestWallClockFiresAPastDeadlineAtOnce(t *testing.T) {
 	r := &recorder{}
 	stalled := make(chan time.Time, 1)
