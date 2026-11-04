@@ -2,6 +2,7 @@ package metronome
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/dvoyni/cog/kernel"
@@ -57,7 +58,24 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 // publishing its track's beats on it. On a ManualClock it links the plugin to
 // the clock, so Advance waits for its tracks to settle, and gives each
 // variable track a timer that fires only at the end of an Advance or a Jump.
+//
+// It first finds each track's reference track, every track being declared by
+// then. A track interpolating against no fixed-step track is a composition
+// error, and panics.
 func (p *Plugin) Start(kernel *kernel.Kernel) error {
+	for _, t := range p.tracks {
+		if t.settings.InterpolateAgainst == nil {
+			continue
+		}
+		for _, reference := range p.tracks {
+			if reference.eventType == t.settings.InterpolateAgainst && reference.settings.Step > 0 {
+				t.reference = reference
+			}
+		}
+		if t.reference == nil {
+			panic(fmt.Sprintf("metronome: track of %v interpolates against %v, not a fixed-step track", t.eventType, t.settings.InterpolateAgainst))
+		}
+	}
 	if clock, ok := p.clock.(*WallClock); ok {
 		clock.start()
 	}
