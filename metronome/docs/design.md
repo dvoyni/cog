@@ -8,7 +8,7 @@ update track, a client adds a render track carrying gfx's `RenderEvent`, and
 gfx's draw chain hangs off it. Nothing in `main` drives frames (see the
 kernel's *The main thread and pacing*); metronome is what keeps the beat.
 
-Status: designed, not built. The decisions come from the
+Status: built. The decisions come from the
 [metronome map](https://github.com/dvoyni/cog/issues/609); each section links
 the ticket that holds its detail.
 

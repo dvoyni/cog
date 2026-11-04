@@ -3,6 +3,8 @@ package metronome_test
 import (
 	"context"
 	"errors"
+	"math"
+	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -825,5 +827,154 @@ func TestVariableTrackWaitsOnItsTimerResetToNow(t *testing.T) {
 	waitPublished(t, r, 2)
 	if got, want := r.all()[1], variableBeat(2, 15*ms, 0, 25*ms); got != want {
 		t.Fatalf("once its timer fired the variable track published %v, want %v", got, want)
+	}
+}
+
+// interpolation is what a beat says of its reference track.
+type interpolation struct {
+	tick  uint64
+	alpha float32
+}
+
+// interpolations answers what each of beats says of its reference track.
+func interpolations(beats []metronome.Beat) []interpolation {
+	var all []interpolation
+	for _, beat := range beats {
+		all = append(all, interpolation{tick: beat.InterpolatedTick, alpha: beat.Alpha})
+	}
+	return all
+}
+
+// interpolatingDraw answers the settings of a variable track interpolating
+// against the UpdateEvent track.
+func interpolatingDraw() metronome.Settings {
+	settings := metronome.Variable()
+	settings.InterpolateAgainst = reflect.TypeFor[metronome.UpdateEvent]()
+	return settings
+}
+
+func TestUninterpolatedTracksHaveZeroAlphaAndInterpolatedTick(t *testing.T) {
+	const ms = time.Millisecond
+	clock := metronome.NewManualClock()
+	r := &recorder{}
+	spawn(t, clock, func(c *kernel.Configurator) {
+		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
+		metronome.AddTrack[drawEvent](c, metronome.Variable())
+		record(c, r, updateBeat)
+		record(c, r, drawBeat)
+	})
+
+	clock.Advance(150 * ms)
+	clock.Advance(100 * ms)
+	beats := r.all()
+	if len(beats) != 4 {
+		t.Fatalf("the tracks published %v, want 2 update and 2 draw beats", beats)
+	}
+	for _, beat := range beats {
+		if beat.Alpha != 0 || beat.InterpolatedTick != 0 {
+			t.Fatalf("a beat of a track not interpolating is %v, want a zero Alpha and InterpolatedTick", beat)
+		}
+	}
+}
+
+func TestBeatInterpolatesAgainstTheReferenceTrack(t *testing.T) {
+	const ms = time.Millisecond
+	clock := metronome.NewManualClock()
+	r := &recorder{}
+	spawn(t, clock, func(c *kernel.Configurator) {
+		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
+		metronome.AddTrack[drawEvent](c, interpolatingDraw())
+		record(c, r, drawBeat)
+	})
+
+	clock.Advance(50 * ms)
+	clock.Advance(75 * ms)
+	clock.Advance(50 * ms)
+	clock.Advance(75 * ms)
+	// Draw beats at 50, 125, 175 and 250ms, against update ticks due every
+	// 100ms: none yet, then tick 1 twice, then tick 2.
+	want := []interpolation{{0, 0.5}, {1, 0.25}, {1, 0.75}, {2, 0.5}}
+	if got := interpolations(r.all()); !slices.Equal(got, want) {
+		t.Fatalf("the draw track interpolated %v, want %v", got, want)
+	}
+}
+
+func TestAlphaWhileTheReferenceTrackIsInDebt(t *testing.T) {
+	const step = 100 * time.Millisecond
+	clock := metronome.NewManualClock()
+	r := &recorder{}
+	gate := make(chan struct{})
+	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
+		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
+		metronome.AddTrack[drawEvent](c, interpolatingDraw())
+		c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event metronome.UpdateEvent) (metronome.UpdateEvent, kernel.JobHandle) {
+			if event.Tick >= 2 {
+				<-gate // tick 2 does not finish publishing until released
+			}
+			return event, in
+		})
+		record(c, r, drawBeat)
+	})
+
+	clock.Advance(step + step/4)
+	clock.Jump(3 * step)
+	waitPublished(t, r, 2)
+	close(gate)
+	if err := plugin.Wait(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(step / 4)
+	// At 425ms the update track owes ticks 2 to 4 and is still publishing
+	// tick 2, so the draw beat shows tick 1 at the largest Alpha below 1. Once
+	// it has caught up, the beat at 450ms is halfway past tick 4.
+	want := []interpolation{{1, 0.25}, {1, math.Nextafter32(1, 0)}, {4, 0.5}}
+	if got := interpolations(r.all()); !slices.Equal(got, want) {
+		t.Fatalf("the draw track interpolated %v, want %v", got, want)
+	}
+}
+
+func TestInterpolationReadsAReferenceTrackBeatingAlongside(t *testing.T) {
+	r := &recorder{}
+	// Every timer fires at once on every Reset, so both tracks beat as fast as
+	// they can, the update track's ticks published while draw beats read them.
+	spawn(t, &testClock{autoFire: true}, func(c *kernel.Configurator) {
+		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
+		metronome.AddTrack[drawEvent](c, interpolatingDraw())
+		record(c, r, drawBeat)
+	})
+
+	waitPublished(t, r, 200)
+	beats := r.all()
+	for i, beat := range beats {
+		if i > 0 && beat.InterpolatedTick < beats[i-1].InterpolatedTick {
+			t.Fatalf("draw beat %v shows an earlier tick than the beat before it, %v", beat, beats[i-1])
+		}
+		if beat.Alpha < 0 || beat.Alpha >= 1 {
+			t.Fatalf("draw beat %v has an Alpha outside [0,1)", beat)
+		}
+	}
+	if last := beats[len(beats)-1]; last.InterpolatedTick == 0 {
+		t.Fatalf("after %d draw beats the last, %v, shows no update tick", len(beats), last)
+	}
+}
+
+func TestInterpolatingAgainstNoFixedStepTrackPanics(t *testing.T) {
+	for name, reference := range map[string]reflect.Type{
+		"undeclared": reflect.TypeFor[slowEvent](),
+		"variable":   reflect.TypeFor[drawEvent](),
+	} {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("interpolating against the %s track %v did not panic", name, reference)
+				}
+			}()
+			spawn(t, metronome.NewManualClock(), func(c *kernel.Configurator) {
+				metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
+				settings := metronome.Variable()
+				settings.InterpolateAgainst = reference
+				metronome.AddTrack[drawEvent](c, settings)
+			})
+		})
 	}
 }

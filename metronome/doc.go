@@ -39,10 +39,19 @@
 // ex.Join(in, job), so the in-flight limit sees it. Otherwise each beat
 // schedules another such job, and they pile up behind a blocked main thread.
 //
-// metronome reads time only through its Clock. The default, a WallClock,
-// reads monotonic time with the epoch at Start; WithClock gives another. A
-// ManualClock moves only when told: Advance walks every track deadline by
-// deadline, letting each beat due publish and settle, and Jump moves time at
+// A track interpolates against a fixed-step reference track named by
+// Settings.InterpolateAgainst, its event type:
+//
+//	settings := metronome.Variable()
+//	settings.InterpolateAgainst = reflect.TypeFor[metronome.UpdateEvent]()
+//	metronome.AddTrack[RenderEvent](configurator, settings)
+//
+// Each beat's InterpolatedTick is the reference track's last tick published
+// before it, whose state its tasks read, and Alpha is how far past that
+// tick's deadline it falls, in the reference track's steps, in [0,1). While
+// the reference track is in debt, Alpha is the largest float32 below 1, so
+// the beat shows the newest state.
+//
 // metronome reads time only through its Clock. The default, a WallClock,
 // reads monotonic time with the epoch at Start; WithClock gives another. A
 // ManualClock moves only when told: Advance walks every track deadline by

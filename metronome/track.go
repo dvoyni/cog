@@ -3,6 +3,8 @@ package metronome
 import (
 	"fmt"
 	"reflect"
+	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/dvoyni/cog/kernel"
@@ -10,6 +12,10 @@ import (
 
 // defaultMaxDebt is the debt cap of a track whose Settings leave MaxDebt zero.
 const defaultMaxDebt = 4
+
+// alphaInDebt is a beat's Alpha while its reference track is in debt: the
+// largest float32 below 1.
+const alphaInDebt float32 = 1 - 1.0/(1<<24)
 
 // Settings is a track's pacing, given to AddTrack.
 type Settings struct {
@@ -32,6 +38,11 @@ type Settings struct {
 	// published: a step owed past the cap is dropped, and its time is the next
 	// beat's Lost. Zero is 4. It means nothing on a variable track.
 	MaxDebt int
+	// InterpolateAgainst names the reference track by its event type: a
+	// fixed-step track each beat interpolates against, giving its Alpha and
+	// InterpolatedTick. Nil is none, and leaves both zero. Naming no
+	// fixed-step track is a composition error, and panics at Start.
+	InterpolateAgainst reflect.Type
 }
 
 // Variable answers the settings of a variable track: one beat in flight, as
@@ -128,6 +139,23 @@ type track struct {
 	// epoch; the epoch itself before the first.
 	lastBeat time.Duration
 	running  bool
+	// reference is the track this one interpolates against, found at Start;
+	// nil for none.
+	reference *track
+	// published is a fixed-step track's last published tick, for the tracks
+	// interpolating against it.
+	published publishedTick
+}
+
+// publishedTick is a fixed-step track's last published tick and that tick's
+// deadline, shared with the tracks interpolating against it through atomics.
+// Its track's goroutine alone stores it. version is odd while a store is
+// under way, so a load retries rather than read a tick with another tick's
+// deadline: a seqlock, taking no lock and allocating nothing.
+type publishedTick struct {
+	version  atomic.Uint64
+	tick     atomic.Uint64
+	deadline atomic.Int64
 }
 
 // run is the track's goroutine. It waits on its timer for the next deadline,
@@ -184,6 +212,13 @@ func (t *track) end(p *Plugin) {
 // in flight, and publishDue answers true; otherwise the caller rearms it.
 func (t *track) publishDue(p *Plugin, k *kernel.Kernel) (rearmed bool) {
 	p.mutex.Lock()
+	// The reference track is read before the time, so its tick's deadline is
+	// not after now on a clock that fires on time.
+	var interpolatedTick uint64
+	var interpolatedDeadline time.Duration
+	if t.reference != nil {
+		interpolatedTick, interpolatedDeadline = t.reference.published.load()
+	}
 	var now time.Duration
 	if timer, ok := t.timer.(*manualTimer); ok && t.settings.Step == 0 {
 		now = timer.rearm(t.settings.MinInterval)
@@ -213,13 +248,29 @@ func (t *track) publishDue(p *Plugin, k *kernel.Kernel) (rearmed bool) {
 		t.lastBeat = now
 		t.nextDeadline = now + t.settings.MinInterval
 	}
+	if t.reference != nil {
+		// Past the tick's step the reference track owes its next one: in debt,
+		// the beat shows the newest state. A clock that fired the tick early
+		// leaves now before its deadline.
+		beat.InterpolatedTick = interpolatedTick
+		beat.Alpha = float32(max(float64(now-interpolatedDeadline), 0) / float64(t.reference.settings.Step))
+		if beat.Alpha >= 1 {
+			beat.Alpha = alphaInDebt
+		}
+	}
 	if t.inFlightCount == len(t.signals) {
 		t.growSignals()
 	}
 	signal := t.signals[(t.oldestSignal+t.inFlightCount)%len(t.signals)]
 	t.inFlightCount++
 	p.mutex.Unlock()
-	k.Notify(signal, t.publish(k, beat))
+	out := t.publish(k, beat)
+	// Stored once the publication has scheduled its writes, so a beat that
+	// reads this tick has its tasks ordered after them.
+	if t.settings.Step > 0 {
+		t.published.store(beat.Tick, beat.TimeFromStart)
+	}
+	k.Notify(signal, out)
 	return rearmed
 }
 
@@ -250,4 +301,27 @@ func (t *track) owes(now time.Duration) bool {
 		return timer.pending()
 	}
 	return now >= t.nextDeadline && now > t.lastBeat
+}
+
+// store shares tick, just published, and its deadline. Only the track's
+// goroutine calls it.
+func (p *publishedTick) store(tick uint64, deadline time.Duration) {
+	p.version.Add(1)
+	p.tick.Store(tick)
+	p.deadline.Store(int64(deadline))
+	p.version.Add(1)
+}
+
+// load answers the last tick stored and its deadline, as one pair; zero and
+// the epoch before the first.
+func (p *publishedTick) load() (uint64, time.Duration) {
+	for {
+		version := p.version.Load()
+		tick := p.tick.Load()
+		deadline := p.deadline.Load()
+		if version%2 == 0 && p.version.Load() == version {
+			return tick, time.Duration(deadline)
+		}
+		runtime.Gosched()
+	}
 }
