@@ -2,7 +2,6 @@ package metronome
 
 import (
 	"context"
-	"errors"
 	"sync"
 
 	"github.com/dvoyni/cog/kernel"
@@ -28,9 +27,11 @@ type Plugin struct {
 // Option configures a Plugin as NewPlugin builds it.
 type Option func(plugin *Plugin)
 
-// NewPlugin returns metronome, configured by options.
+// NewPlugin returns metronome, configured by options. Without WithClock it
+// reads monotonic time, with the epoch at Start, and each track waits on one
+// reused time.Timer.
 func NewPlugin(options ...Option) *Plugin {
-	plugin := &Plugin{}
+	plugin := &Plugin{clock: &wallClock{}}
 	plugin.settleChanged.L = &plugin.mutex
 	for _, option := range options {
 		option(plugin)
@@ -46,19 +47,18 @@ func WithClock(clock Clock) Option {
 // Name returns PluginName.
 func (*Plugin) Name() kernel.PluginName { return PluginName }
 
-// Init installs the plugin as a resource, for AddTrack to find. It fails if no
-// clock was given.
+// Init installs the plugin as a resource, for AddTrack to find.
 func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
-	if p.clock == nil {
-		return errors.New("metronome: no clock given; pass one with WithClock")
-	}
 	configurator.InitResource(p)
 	return nil
 }
 
-// Start starts one goroutine per track, each publishing its track's beats on
-// it.
+// Start starts the default clock's epoch and one goroutine per track, each
+// publishing its track's beats on it.
 func (p *Plugin) Start(kernel *kernel.Kernel) error {
+	if clock, ok := p.clock.(*wallClock); ok {
+		clock.start()
+	}
 	p.stop = make(chan struct{})
 	for _, t := range p.tracks {
 		t.timer = p.clock.NewTimer()
@@ -108,9 +108,8 @@ func (p *Plugin) Wait(ctx context.Context) error {
 // settled answers whether every track has settled. The caller holds the
 // mutex.
 func (p *Plugin) settled() bool {
-	now := p.clock.Now()
 	for _, t := range p.tracks {
-		if t.running && (t.inFlight || now >= t.nextDeadline) {
+		if t.running && (t.inFlight || p.clock.Now() >= t.nextDeadline) {
 			return false
 		}
 	}
