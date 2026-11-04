@@ -192,8 +192,8 @@ type Timer interface {
 
 - **The epoch belongs to the clock:** it is where `Now` reads zero. Every
   track measures from it.
-- **`WallClock`,** the default, reads monotonic time with the epoch at
-  `Start`, backs each `Timer` with one reused `time.Timer`, and fires a
+- **`WallClock`,** the default and `NewWallClock()`, reads monotonic time
+  with the epoch at the `Start` of the plugin it is given to, backs each `Timer` with one reused `time.Timer`, and fires a
   deadline already past at once. No spin-wait.
 - **`NewPlugin(WithClock(c))`** uses `c` instead. A custom clock may fire on
   time, late, on an outside event such as an agent's MCP call, or never;

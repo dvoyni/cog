@@ -31,7 +31,7 @@ type Option func(plugin *Plugin)
 // reads monotonic time, with the epoch at Start, and each track waits on one
 // reused time.Timer.
 func NewPlugin(options ...Option) *Plugin {
-	plugin := &Plugin{clock: &wallClock{}}
+	plugin := &Plugin{clock: NewWallClock()}
 	plugin.settleChanged.L = &plugin.mutex
 	for _, option := range options {
 		option(plugin)
@@ -57,7 +57,7 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 // publishing its track's beats on it. On a ManualClock it links the plugin to
 // the clock, so Advance waits for its tracks to settle.
 func (p *Plugin) Start(kernel *kernel.Kernel) error {
-	if clock, ok := p.clock.(*wallClock); ok {
+	if clock, ok := p.clock.(*WallClock); ok {
 		clock.start()
 	}
 	p.stop = make(chan struct{})
