@@ -7,15 +7,18 @@ import "time"
 type Beat struct {
 	// Tick is this beat's number on its own track, from 1, never reset.
 	Tick uint64
-	// Delta is the time this beat stands for: on a fixed-step track, the step.
+	// Delta is the time this beat stands for: on a fixed-step track, the step;
+	// on a variable track, the clock time since the previous beat, raw and
+	// unsmoothed, clamped to Settings.MaxDelta when set.
 	Delta time.Duration
 	// Lost is the time thrown away just before this beat, by steps dropped
-	// past the debt cap; 0 when on pace. On a fixed-step track it is a whole
-	// multiple of the step.
+	// past the debt cap or by the MaxDelta clamp; 0 when on pace. On a
+	// fixed-step track it is a whole multiple of the step.
 	Lost time.Duration
 	// TimeFromStart is, on a fixed-step track, the tick's deadline from the
-	// clock's epoch: Tick × step plus the Lost so far. On every track it is
-	// the sum of Delta + Lost over the track's beats.
+	// clock's epoch: Tick × step plus the Lost so far; on a variable track,
+	// the publish time from the epoch. On every track it is the sum of
+	// Delta + Lost over the track's beats.
 	TimeFromStart time.Duration
 }
 
