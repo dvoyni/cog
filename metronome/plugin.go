@@ -58,11 +58,17 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 
 // Start starts one goroutine per track, each publishing its track's beats on
 // it. On a ManualClock it links the plugin to the clock, so Advance waits for
-// its tracks to settle.
+// its tracks to settle, and gives each variable track a timer that fires only
+// at the end of an Advance or a Jump.
 func (p *Plugin) Start(kernel *kernel.Kernel) error {
 	p.stop = make(chan struct{})
+	manual, isManual := p.clock.(*ManualClock)
 	for _, t := range p.tracks {
-		t.timer = p.clock.NewTimer()
+		if isManual && t.settings.Step == 0 {
+			t.timer = manual.newVariableTimer()
+		} else {
+			t.timer = p.clock.NewTimer()
+		}
 		t.timer.Reset(t.nextDeadline)
 		p.mutex.Lock()
 		t.running = true
@@ -70,7 +76,7 @@ func (p *Plugin) Start(kernel *kernel.Kernel) error {
 		p.trackGroup.Add(1)
 		go t.run(p, kernel)
 	}
-	if manual, ok := p.clock.(*ManualClock); ok {
+	if isManual {
 		manual.attach(p)
 	}
 	return nil
@@ -92,7 +98,7 @@ func (p *Plugin) Stop(kernel *kernel.Kernel) error {
 func (*Plugin) Destroy() error { return nil }
 
 // Wait returns once every track has settled: none has a beat in flight, and
-// none owes debt, having reached its next deadline without publishing it. It answers
+// none owes a beat, having reached it without publishing it. It answers
 // ctx.Err() if ctx ends first. A track not running counts as settled.
 func (p *Plugin) Wait(ctx context.Context) error {
 	stopWaking := context.AfterFunc(ctx, func() {
@@ -117,7 +123,7 @@ func (p *Plugin) Wait(ctx context.Context) error {
 func (p *Plugin) settled() bool {
 	now := p.clock.Now()
 	for _, t := range p.tracks {
-		if t.running && (t.inFlightCount > 0 || now >= t.nextDeadline) {
+		if t.running && (t.inFlightCount > 0 || t.owes(now)) {
 			return false
 		}
 	}

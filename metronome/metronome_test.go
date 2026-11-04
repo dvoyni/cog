@@ -203,6 +203,8 @@ type testClock struct {
 type testTimer struct {
 	clock   *testClock
 	channel chan struct{}
+	// resetAt is the time the timer was last reset to.
+	resetAt time.Duration
 }
 
 func (c *testClock) Now() time.Duration {
@@ -233,7 +235,18 @@ func (c *testClock) fire(index int) {
 	timer.fire()
 }
 
+// lastReset answers the time the timer of the track declared index-th was
+// last reset to.
+func (c *testClock) lastReset(index int) time.Duration {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	return c.timers[index].resetAt
+}
+
 func (t *testTimer) Reset(at time.Duration) {
+	t.clock.mutex.Lock()
+	t.resetAt = at
+	t.clock.mutex.Unlock()
 	if t.clock.autoFire {
 		t.fire()
 	}
@@ -634,5 +647,157 @@ func TestAdvanceSettlesEachBeatWithSeveralInFlight(t *testing.T) {
 	}
 	if got := finished.Load(); got != 20 {
 		t.Fatalf("once Advance returned tick %d had finished, want 20", got)
+	}
+}
+
+// drawEvent is the event of a variable track.
+type drawEvent struct {
+	metronome.Beat
+}
+
+func drawBeat(event drawEvent) metronome.Beat { return event.Beat }
+
+// variableBeat answers a variable-track beat: tick, its Delta and Lost, and
+// its publish time from the epoch.
+func variableBeat(tick uint64, delta, lost, timeFromStart time.Duration) metronome.Beat {
+	return metronome.Beat{Tick: tick, Delta: delta, Lost: lost, TimeFromStart: timeFromStart}
+}
+
+func TestVariableTrackBeatsOncePerCallAtTheTarget(t *testing.T) {
+	const ms = time.Millisecond
+	clock := metronome.NewManualClock()
+	r := &recorder{}
+	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
+		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
+		metronome.AddTrack[drawEvent](c, metronome.Variable())
+		record(c, r, drawBeat)
+	})
+	if err := plugin.Wait(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.all(); len(got) != 0 {
+		t.Fatalf("before any call the variable track published %v", got)
+	}
+
+	clock.Advance(350 * ms)
+	if got, want := r.all(), []metronome.Beat{variableBeat(1, 350*ms, 0, 350*ms)}; !slices.Equal(got, want) {
+		t.Fatalf("an Advance across 3 update deadlines saw %v, want one beat at the target %v", got, want)
+	}
+	clock.Jump(50 * ms)
+	if err := plugin.Wait(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	want := []metronome.Beat{variableBeat(1, 350*ms, 0, 350*ms), variableBeat(2, 50*ms, 0, 400*ms)}
+	if got := r.all(); !slices.Equal(got, want) {
+		t.Fatalf("after a Jump the variable track saw %v, want %v", got, want)
+	}
+}
+
+func TestMinIntervalSpacesVariableBeats(t *testing.T) {
+	const ms = time.Millisecond
+	clock := metronome.NewManualClock()
+	r := &recorder{}
+	spawn(t, clock, func(c *kernel.Configurator) {
+		settings := metronome.Variable()
+		settings.MinInterval = 100 * ms
+		metronome.AddTrack[drawEvent](c, settings)
+		record(c, r, drawBeat)
+	})
+
+	for range 4 {
+		clock.Advance(60 * ms)
+	}
+	want := []metronome.Beat{variableBeat(1, 120*ms, 0, 120*ms), variableBeat(2, 120*ms, 0, 240*ms)}
+	if got := r.all(); !slices.Equal(got, want) {
+		t.Fatalf("4 Advances of 60ms with a MinInterval of 100ms saw %v, want %v", got, want)
+	}
+}
+
+func TestMaxDeltaClampsAStall(t *testing.T) {
+	const ms = time.Millisecond
+	clock := metronome.NewManualClock()
+	r := &recorder{}
+	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
+		settings := metronome.Variable()
+		settings.MaxDelta = 50 * ms
+		metronome.AddTrack[drawEvent](c, settings)
+		record(c, r, drawBeat)
+	})
+
+	clock.Advance(20 * ms)
+	clock.Jump(500 * ms)
+	if err := plugin.Wait(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(30 * ms)
+	want := []metronome.Beat{
+		variableBeat(1, 20*ms, 0, 20*ms),
+		variableBeat(2, 50*ms, 450*ms, 520*ms),
+		variableBeat(3, 30*ms, 0, 550*ms),
+	}
+	beats := r.all()
+	if !slices.Equal(beats, want) {
+		t.Fatalf("a stall of 500ms with a MaxDelta of 50ms saw %v, want %v", beats, want)
+	}
+	checkInvariant(t, beats)
+}
+
+func TestVariableTrackHeldInFlightBeatsOnceReleased(t *testing.T) {
+	const ms = time.Millisecond
+	clock := metronome.NewManualClock()
+	published := &recorder{}
+	gate := make(chan struct{})
+	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
+		settings := metronome.Variable()
+		settings.MaxInFlight = 1
+		metronome.AddTrack[drawEvent](c, settings)
+		heldRecord(c, published, drawBeat, gate)
+	})
+
+	clock.Jump(10 * ms)
+	waitPublished(t, published, 1)
+	clock.Jump(10 * ms)
+	clock.Jump(10 * ms)
+	waitHeld(t, plugin)
+	close(gate)
+	if err := plugin.Wait(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	want := []metronome.Beat{variableBeat(1, 10*ms, 0, 10*ms), variableBeat(2, 20*ms, 0, 30*ms)}
+	if got := published.all(); !slices.Equal(got, want) {
+		t.Fatalf("a held variable track published %v, want one beat once released %v", got, want)
+	}
+}
+
+func TestVariableTrackWaitsOnItsTimerResetToNow(t *testing.T) {
+	const ms = time.Millisecond
+	clock := &testClock{}
+	r := &recorder{}
+	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
+		metronome.AddTrack[drawEvent](c, metronome.Variable())
+		record(c, r, drawBeat)
+	})
+
+	if got := clock.lastReset(0); got != 0 {
+		t.Fatalf("at Start the variable track's timer was reset to %v, want now, 0", got)
+	}
+	clock.setNow(10 * ms)
+	clock.fire(0)
+	if err := plugin.Wait(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	clock.setNow(25 * ms)
+	time.Sleep(20 * ms)
+	if got, want := r.all(), []metronome.Beat{variableBeat(1, 10*ms, 0, 10*ms)}; !slices.Equal(got, want) {
+		t.Fatalf("before its timer fired again the variable track published %v, want %v", got, want)
+	}
+	if got := clock.lastReset(0); got != 10*ms {
+		t.Fatalf("after a beat at 10ms the timer was reset to %v, want now, 10ms", got)
+	}
+
+	clock.fire(0)
+	waitPublished(t, r, 2)
+	if got, want := r.all()[1], variableBeat(2, 15*ms, 0, 25*ms); got != want {
+		t.Fatalf("once its timer fired the variable track published %v, want %v", got, want)
 	}
 }
