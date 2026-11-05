@@ -40,6 +40,10 @@ _Avoid_: Swapchain, canvas
 The event gfx publishes inside each frame, once its framebuffers are acquired, for the application's handlers to record the frame.
 _Avoid_: Render event, draw callback
 
+**Standalone encoder**:
+An encoder recorded outside any frame, which its owner finishes and submits itself; a frame's encoders are finished and submitted by gfx.
+_Avoid_: Free encoder, offscreen encoder
+
 **Submit order**:
 The number an encoder is handed under, by which a frame's encoders are submitted, shared by every plugin that records.
 _Avoid_: Priority, layer, pass index
