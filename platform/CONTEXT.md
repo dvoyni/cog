@@ -64,16 +64,16 @@ One raw change an input source reports, which platform folds into the input stat
 _Avoid_: Raw event, input delta
 
 **Cursor request**:
-What the application wants a window's cursor to be: its shape, whether it is visible, its mode, and a pending warp; part of the window request.
+What the application wants a window's cursor to be: its shape, whether it is visible, its mode, and a pending cursor position; part of the window request.
 _Avoid_: Cursor state, cursor settings
 
 **Effective mode**:
 The cursor mode actually in force, which differs from the requested one while the window lacks focus or the platform lacks the mode.
 _Avoid_: Current mode, actual mode
 
-**Warp**:
-Moving the operating system's cursor to a point in a window, which the user did not do and so produces no pointer motion.
-_Avoid_: Set position, move cursor, wrap
+**Cursor position**:
+A point in a window the application moves the operating system's cursor to, which the user did not do and so produces no pointer motion; once applied, the window's pointer position.
+_Avoid_: Warp, move cursor, wrap
 
 ### Files
 
