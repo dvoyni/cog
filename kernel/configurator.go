@@ -92,7 +92,7 @@ func (c *Configurator) DeclareSocket[T any](optional bool) Socket[T] {
 // this one or after declares. A nil value, or a socket no plugin declares, is
 // a composition error, and panics; a typed nil, such as a nil pointer, is not
 // nil. Go infers T from value, so a concrete value for an interface socket
-// names T: BindSocket[platform.Windows](windows).
+// names T: BindSocket[platform.WindowsSocket](windows).
 func (c *Configurator) BindSocket[T any](value T) {
 	t := reflect.TypeFor[T]()
 	if any(value) == nil {

@@ -3,10 +3,10 @@
 `github.com/dvoyni/cog/platform` is what the operating system provides to a
 kernel: **windows**, **input** and **filesystems**. It declares them as
 interfaces, and implementing plugins fill them: the gogpu plugin implements
-windows and input, and the `disk` plugin implements the filesystems and the
-values. platform itself holds no platform code. It owns the logic that is the
-same for every implementation: the window request and window state, folding
-input into state and events, and the overlay of filesystems.
+windows and input, and the `disk` plugin implements the filesystems.
+platform itself holds no platform code. It owns the logic that is the same
+for every implementation: the window request and window state, folding input
+into state and events, the overlay of filesystems, and the values kept in it.
 
 Status: designed, not built. The decisions come from the
 [platform map](https://github.com/dvoyni/cog/issues/610); each section links
@@ -23,8 +23,9 @@ the ticket that holds its detail. The vocabulary is in
   operating system from one pinned task, on every platform
   ([What must run on the main thread on each platform](https://github.com/dvoyni/cog/issues/645)).
   Only file I/O is free of that.
-- **No ECS import, no metronome import.** platform subscribes to nothing; the
-  application wires its pump into whichever tracks it wants.
+- **No ECS import, no metronome import.** platform subscribes only to its own
+  `WindowClosedEvent`, to flush the values; the application wires its pump
+  into whichever tracks it wants.
 
 ## Shape
 
@@ -35,21 +36,23 @@ the ticket that holds its detail. The vocabulary is in
 | `Window` | handle | An opaque, pointer-free handle naming one window, from a counter that is never reused. |
 | `WindowManager` | resource | Every window: its entry in the window request, what the application wants it to be, and its window state, what it currently is. |
 | `InputState` | resource | Input levels as of the last pump run. |
+| `Tasks` | resource | Every task platform offers others to schedule: `ProcessEvents`. |
 | `ProcessEvents` | pinned task | The pump. |
-| `FileSystem`, `WritableFileSystem` | interfaces | Read and write access to files. |
-| `ReadMounts` | resource | The read mounts plugins contribute. |
-| `Files` | resource | The overlay, read as a `FileSystem`, written as a `WritableFileSystem`. |
-| `Values` | interface, resource | The key-value store, installed by the filesystem implementation. |
+| `FS` | alias of `fs.FS`, resource | Read access to files: the overlay, which only reads. |
+| `WriteFS`, `ElevateFileAccess` | interface, function | Write access to files: the overlay that writes, which `ElevateFileAccess` gives from the write handle on `FS` alone. |
+| `WriteFSSocket` | exclusive socket | The writable filesystem an implementation binds. |
+| `ReadMountSocket` | socket | A read mount an implementation binds: any `fs.FS` at a priority. |
+| `Values` | resource | The values, a JSON file in `FS`: `Get` takes the `FS`; `Set`, `Delete` and `Flush` take the `WriteFS`. |
 
 **Finding none or two of a seam panics** as a composition error: `Windows`,
-`InputSource`, the writable filesystem and `Values` each need exactly one
-installer. An input source naming a window the `Windows` implementation does
+`InputSource`, the writable filesystem and the value store each need exactly
+one installer; the kernel reports the sockets' own. An input source naming a window the `Windows` implementation does
 not know panics too
 ([Scripted input for tests and agents](https://github.com/dvoyni/cog/issues/644)).
 
-Implementing plugins are listed before platform in `Spawn`, install their
-implementations in `Init`, and platform's `Init` finds them, as gfx finds its
-backend.
+The window implementations are listed before platform in `Spawn`, install
+`Windows` and `InputSource` in `Init`, and platform's `Init` finds them. The
+storage seams are sockets, bound from anywhere in `Spawn`.
 
 ## Windows
 
@@ -222,34 +225,45 @@ From [Filesystems before Spawn and as a resource](https://github.com/dvoyni/cog/
 
 ### Interfaces
 
-- **`fs.FS` ← `FileSystem` ← `WritableFileSystem`.**
-  - `FileSystem` is `fs.FS` + `fs.ReadDirFS` + `fs.StatFS` + `fs.ReadFileFS`.
-    A read mount implements it, and so does the overlay.
-  - `WritableFileSystem` adds `WriteFile`, `MkdirAll`, `Remove`, `Rename` and
-    `AppendFile`, all required.
-  - A platform helper wraps a plain `fs.FS`, such as an `embed.FS`, into a
-    `FileSystem`.
+- **`FS` ← `WriteFS`.** platform declares only the writing interface.
+  - The resource is `FS`, an alias of the standard `fs.FS`, read with `fs.ReadFile`,
+    `fs.ReadDir`, `fs.Stat`, `fs.Glob` and `fs.WalkDir`. The overlay
+    implements `ReadDirFS`, `StatFS` and `ReadFileFS`, so the helpers take
+    the short path.
+  - A read mount is any `fs.FS`: an `embed.FS` or `os.DirFS` binds as it
+    is, and the overlay reads each layer through the same helpers.
+  - `WriteFS` adds `WriteFile`, `MkdirAll`, `Remove`, `Rename` and
+    `AppendFile`, all required. `WriteFSSocket`, the writable filesystem's
+    socket, is one.
 
 ### The overlay
 
-- **Implementing plugins contribute layers in `Init`.** Any plugin appends
-  read mounts, each with a priority, to `ReadMounts`: the disk plugin mounts
-  the directories its `Config` names, a game's own plugin mounts its
-  `embed.FS`. Exactly one plugin installs the writable filesystem.
+- **Implementing plugins bind layers to platform's sockets in `Init`,**
+  listed anywhere in `Spawn`. Any plugin binds read mounts,
+  `BindSocket(platform.ReadMountSocket{FS, Priority})`: the disk plugin
+  mounts the directories its `Config` names, a game's own plugin mounts its
+  `embed.FS`. Exactly one binds the writable filesystem,
+  `BindSocket[platform.WriteFSSocket](impl)`; none or two is a composition
+  error the kernel reports. Sockets are no resources, so no job reaches a
+  layer but through the `FS` resource, which holds the socket handles and
+  orders the layers on first use. A read mount without an `FS` panics in
+  platform's `Start`.
 - **Where the files are is the implementation's `Config`,** since every
   implementation takes different parameters. platform's own `Config` names no
   paths.
-- **platform stacks them into `Files`.** The writable filesystem is searched
-  first, then the read mounts by priority, equal priorities in registration
+- **platform stacks them into the `FS` resource.** The writable
+  filesystem is searched first, then the read mounts by priority, equal priorities in plugin
   order.
 - **Listings merge.** `ReadDir` returns the union of every layer's names; a
   name in several layers shows the higher layer's entry, file or folder. So
   `Open` and listings agree, and `fs.Glob` and `fs.WalkDir` work over the
   overlay.
-- **The read handle gives a `FileSystem`, the write handle a
-  `WritableFileSystem`** whose writes land in the writable layer. No reader
-  sees a file mid-write.
-- **Several kernels** each have their own `Files`, and nothing is locked
+- **The `FS` resource is read under a read lock and written under a
+  write lock**, the writes landing in the writable layer. The resource only
+  reads, and its value cannot be asserted into writing;
+  `ElevateFileAccess(kernel.Write[FS])` gives the `WriteFS` that writes,
+  so a reader cannot write. No reader sees a file mid-write.
+- **Several kernels** each have their own `FS` resource, and nothing is locked
   across kernels. Two kernels writing the same files are kept apart by the
   application (different folders) or by the implementation.
 - **Blocking I/O.** A job reading a file blocks its worker. Asynchronous
@@ -257,32 +271,33 @@ From [Filesystems before Spawn and as a resource](https://github.com/dvoyni/cog/
 
 ### Values
 
-- **The key-value store carries over from v1.** platform declares `Values`;
-  the filesystem implementation installs it with `InitResource[platform.Values]`.
-  Get works under the read handle; set, delete and flush need the write
-  handle, and set and delete also come without a flush.
-- **The only thing usable before `Spawn`.** A kernel's config is given to
-  `Spawn` and plugins cannot change it, so config kept in a stored file is
-  read in `main`. Each implementing package exports
-
-  ```go
-  func ReadValues(config Config, keys []string, unmarshal bool) ([]any, error)
-  ```
-
-  taking the same `Config` as its plugin, so both find the same file. It
-  returns one value per key, `nil` for a missing key: decoded JSON when
-  `unmarshal` is true, `json.RawMessage` when false. A missing file means a
-  first launch: all `nil`, no error. A corrupt file or a failing backend is an
-  error.
-- **Read-only before `Spawn`.** `main` reads, then passes the same `Config`
-  to `Spawn`; inside the kernel the values exist only as the resource.
+- **The key-value store carries over from v1,** its values JSON, kept in a
+  file in `FS`: `Config.ValuesFile`, `config.json` when empty.
+- **A resource whose methods take the filesystem.** `*Values` keeps the file
+  name and the cache. `Get` takes the `FS`, so it works under the read lock;
+  `Set`, `Delete` and `Flush` take the `WriteFS`, so they need the write
+  lock. The lock on `FS` guards the values, so no reader sees the file
+  mid-write.
+- **Read once, in place.** The first call reads the file through the
+  overlay, so a read mount may ship the defaults, and keeps it in the `FS`
+  resource. A missing file holds no values; a corrupt one is an error from
+  every call. A value that is not JSON is refused.
+- **Written on a flush.** A change stays in the cache until `Flush`,
+  which writes the file to the writable layer when something changed.
+  platform flushes on every `WindowClosedEvent`, from a task holding the
+  `FS` write lock, after the handlers before it.
+- **Before `Spawn`.** A kernel's config is given to `Spawn` and plugins
+  cannot change it, so config kept in the values file is read first: `main`
+  spawns a throwaway kernel of the filesystem implementation and platform,
+  starts it, reads the values with `Values.Get`, and destroys it, then spawns
+  the real kernel with that config. This needs platform to spawn without
+  window implementations.
 
 ## The disk plugin
 
 `github.com/dvoyni/cog/disk` implements the filesystems for desktop
 (`!js`): read mounts from the directories its `Config` names, the writable
-filesystem in a directory its `Config` names, the values file in it, and
-`ReadValues`. A web implementation over browser storage comes later, behind
+filesystem in a directory its `Config` names. A web implementation over browser storage comes later, behind
 `js`.
 
 ## The gogpu fork
@@ -315,9 +330,10 @@ Two seams, both through the interfaces an implementation installs:
   implementation reuses the same seam.
 - **Filesystems.** The overlay over in-memory read mounts and an in-memory
   writable filesystem, checked with `fstest.TestFS` and with tests of merged
-  listings, priority and writes. The disk plugin passes the same tests against
-  a temporary directory, and `ReadValues` is tested on a values file the
-  plugin wrote, including the missing and corrupt cases.
+  listings, priority and writes; values read once through the overlay,
+  flushed to the writable layer, and on a window's close, with the missing
+  and corrupt cases. The disk plugin passes the same tests against a
+  temporary directory.
 
 ## Out of scope
 

@@ -144,7 +144,7 @@ silently.
 - **A plugin is never a resource,** so nothing reaches its lifecycle
   methods. What it offers others is an interface it implements, bound to
   the socket that needs it; such small interfaces live in the declaring
-  plugin package's `resources.go`.
+  plugin package's `sockets.go`, its resources in `resources.go`.
 - **Sockets bind plugins to each other, and are no resources.** v1's Ports
   and Adapters, renamed. A plugin that needs an implementation declares a
   socket of `T` in `Init`, `DeclareExclusiveSocket[T](optional)` for one
@@ -158,8 +158,9 @@ silently.
     the order of plugins in `Spawn` does not matter to them. `Get` in `Init`
     panics; a plugin keeps the handle and reads it from `Start` on, or when
     its resource is used.
-  - A socket is identified by `T`; two sockets of one interface need two
-    named types. Declaring one twice, two bindings of an exclusive socket,
+  - A socket is identified by `T`, named with the suffix `Socket`:
+    `platform.WriteFSSocket`, `platform.ReadMountSocket`. Two
+    sockets of one interface need two named types. Declaring one twice, two bindings of an exclusive socket,
     none of a socket that is not optional, a binding to a socket nobody
     declares and a nil binding are composition errors, and `Spawn` panics
     naming the socket and the plugins.
