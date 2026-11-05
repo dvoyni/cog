@@ -2,12 +2,14 @@ package platform_test
 
 import (
 	"encoding/json"
+	"io/fs"
 	"runtime"
 	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
 
+	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/platform"
 )
 
@@ -107,6 +109,53 @@ func TestAClosedWindowFlushesTheValues(t *testing.T) {
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("closing a window did not flush the values in 5s")
+		}
+		runtime.Gosched()
+	}
+}
+
+func TestAHandlerOrderedBeforeTheValuesFlushIsFlushedWithIt(t *testing.T) {
+	f := newFake()
+	h := &harness{t: t, fake: f}
+	h.supervisor = kernel.NewSupervisor(h)
+	t.Cleanup(h.supervisor.Quit)
+	closing := &secondInstaller{func(c *kernel.Configurator) {
+		handlers, _ := c.Resource[platform.Handlers]()
+		markClosed := c.RegisterTask2(func(k *kernel.Kernel, _ kernel.NoArg, filesystem kernel.Write[platform.FS], values kernel.Write[*platform.Values]) kernel.NoResult {
+			if err := values.Get().Set(platform.ElevateFileAccess(filesystem), "closed", json.RawMessage(`true`)); err != nil {
+				t.Error(err)
+			}
+			return kernel.NoResult{}
+		})
+		markOnClose := c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event platform.WindowClosedEvent) (platform.WindowClosedEvent, kernel.JobHandle) {
+			return event, ex.Schedule(markClosed, kernel.NoArg{}, in).Handle()
+		})
+		c.OrderSubscriptions(markOnClose, handlers.FlushValues)
+	}}
+	id, err := h.supervisor.Spawn(nil, 2, f, platform.NewPlugin(), h, closing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.kernel = h.supervisor.GetKernel(id)
+	window := h.open(platform.WindowEntry{Title: "main"})
+	h.pump()
+	h.change(func(manager *platform.WindowManager) { manager.Close(window) })
+	h.pump()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var flushed json.RawMessage
+		h.reading(func(filesystem platform.FS, _ *platform.Values) {
+			flushed, _ = fs.ReadFile(filesystem, "config.json")
+		})
+		if flushed != nil {
+			var written map[string]json.RawMessage
+			if json.Unmarshal(flushed, &written) != nil || string(written["closed"]) != "true" {
+				t.Errorf("the flush wrote %s, want the value set before it", flushed)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("closing a window did not flush the value set before the flush in 5s")
 		}
 		runtime.Gosched()
 	}

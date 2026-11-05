@@ -38,5 +38,20 @@ Go module (Go 1.27) and depends on nothing but the standard library and
 - **`Settings`** paces a track, with the presets `FixedStep(hz)` and
   `Variable()`.
 
+## Kernel surface
+
+- **Resources it installs:** none; nothing reaches metronome but its
+  `Config`.
+- **Resources it reads from other plugins:** none.
+- **Events it publishes:** each track's event, a beat at a time, on the
+  track's own goroutine: the types declared in `Config.Tracks`, which
+  embed `Beat`. `UpdateEvent` is the one it ships.
+- **Events it subscribes to:** none, so it has no `Handlers`.
+- **Sockets it declares:** none.
+- **Sockets it binds:** none.
+
+metronome is listed first, before the plugins handling its beats, so it
+stops last.
+
 See [docs/README.md](docs/README.md) for the guide with examples, and
 [docs/design.md](docs/design.md) for the design and why it is this way.

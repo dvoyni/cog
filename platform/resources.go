@@ -17,6 +17,18 @@ type Tasks struct {
 	ProcessEvents *kernel.Task[kernel.NoArg, kernel.NoResult]
 }
 
+// Handlers is the resource holding every event handler platform subscribes,
+// so a plugin listed after platform orders its own around them with
+// configurator.OrderSubscriptions:
+//
+//	handlers, _ := configurator.Resource[platform.Handlers]()
+//	configurator.OrderSubscriptions(mine, handlers.FlushValues)
+type Handlers struct {
+	// FlushValues handles WindowClosedEvent: it schedules the flush of the
+	// values, after the jobs of the handlers before it.
+	FlushValues kernel.Sub[WindowClosedEvent]
+}
+
 // FS is the resource of every file: the writable filesystem and the read
 // mounts stacked into one overlay. The writable filesystem is searched first,
 // then the read mounts by priority; a listing merges every layer, a name in

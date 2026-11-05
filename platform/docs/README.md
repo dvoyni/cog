@@ -43,6 +43,7 @@ read mounts ────────────┘  ReadMountSocket     (an emb
 | `*WindowManager` | Every window: what the application wants it to be, and what it currently is. |
 | `*InputState` | The input levels as of the last pump run, and its edges. |
 | `Tasks` | `ProcessEvents`, the pump, a task pinned to the main thread. |
+| `Handlers` | `FlushValues`, platform's one handler, for others to order theirs around. |
 | `FS`, `WriteFS` | The files: `FS` reads the overlay, and `ElevateFileAccess` gives the `WriteFS` that writes. |
 | `*Values` | A key-value store of JSON values, kept in a file in `FS`. |
 | `filesystems` | The writable filesystems: `NewDiskWriteFS`, `NewLocalStorageWriteFS`. |
@@ -479,7 +480,11 @@ write := configurator.RegisterTask2(func(k *kernel.Kernel, _ kernel.NoArg, files
   is refused.
 - **Written on a flush.** A change stays in the cache until `Flush`, which
   writes the file to the writable filesystem when something changed.
-  platform flushes on every `WindowClosedEvent` too.
+  platform flushes on every `WindowClosedEvent` too. A plugin listed after
+  platform orders its own `WindowClosedEvent` handler around that flush
+  with `OrderSubscriptions(mine, handlers.FlushValues)`, `handlers` read
+  with `configurator.Resource[platform.Handlers]()`, so a value it sets on
+  the close is flushed with it.
 - **Config before `Spawn`.** A kernel's config cannot change once spawned, so
   config kept in the values is read first. `main` spawns a throwaway kernel
   of platform and a plugin binding the filesystems, with no window
