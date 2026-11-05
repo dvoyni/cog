@@ -243,3 +243,58 @@ func (m *memoryFileSystem) AppendFile(name string, data []byte, perm fs.FileMode
 	file.Data = append(file.Data, data...)
 	return nil
 }
+
+func TestWithoutAWritableFilesystemReadsSearchTheMountsAndWritesFail(t *testing.T) {
+	f := newFake()
+	f.installWritable = false
+	f.mounts = []platform.ReadMountSocket{{FS: fstest.MapFS{"config.json": {Data: []byte(`{"volume": 0.8}`)}, "readme": {Data: []byte("mounted")}}}}
+	h := spawn(t, f)
+	h.writing(func(filesystem platform.WriteFS, values *platform.Values) {
+		if err := fstest.TestFS(filesystem, "config.json", "readme"); err != nil {
+			t.Error(err)
+		}
+		for operation, err := range map[string]error{
+			"WriteFile":  filesystem.WriteFile("saves/slot1", []byte("save"), 0o644),
+			"MkdirAll":   filesystem.MkdirAll("saves", 0o755),
+			"Remove":     filesystem.Remove("readme"),
+			"Rename":     filesystem.Rename("readme", "moved"),
+			"AppendFile": filesystem.AppendFile("log", []byte("started"), 0o644),
+		} {
+			if err != platform.ErrNoWriteFS {
+				t.Errorf("%s fails with %v, want ErrNoWriteFS", operation, err)
+			}
+		}
+		if value, _, err := values.Get(filesystem, "volume"); err != nil || string(value) != "0.8" {
+			t.Errorf("volume gets %s, %v, want the read mount's 0.8", value, err)
+		}
+		if err := values.Set(filesystem, "volume", []byte("0.5")); err != nil {
+			t.Error(err)
+		}
+		if err := values.Flush(filesystem); !errors.Is(err, platform.ErrNoWriteFS) {
+			t.Errorf("flushing a change fails with %v, want ErrNoWriteFS", err)
+		}
+	})
+	if logged := slices.Clone(h.errors); len(logged) != 0 {
+		t.Errorf("the kernel logged %v", logged)
+	}
+}
+
+func TestWithNoFilesystemBoundEveryNameIsMissing(t *testing.T) {
+	f := newFake()
+	f.installWritable = false
+	h := spawn(t, f)
+	h.reading(func(filesystem platform.FS, values *platform.Values) {
+		if _, err := fs.ReadFile(filesystem, "readme"); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("reading readme fails with %v, want it not to exist", err)
+		}
+		if _, err := fs.ReadDir(filesystem, "."); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("listing the root fails with %v, want it not to exist", err)
+		}
+		if _, found, err := values.Get(filesystem, "volume"); found || err != nil {
+			t.Errorf("volume gets found %v, %v, want no values", found, err)
+		}
+	})
+	if logged := slices.Clone(h.errors); len(logged) != 0 {
+		t.Errorf("the kernel logged %v", logged)
+	}
+}

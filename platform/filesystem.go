@@ -22,10 +22,15 @@ type fileSystem struct {
 	mounts   kernel.Socket[ReadMountSocket]
 	// ordering orders the layers on first use, once the sockets resolved.
 	ordering sync.Once
-	// ordered is the search order: the writable filesystem, then the read
-	// mounts by priority, equal priorities in plugin order.
+	// ordered is the search order: the writable filesystem when one is bound,
+	// then the read mounts by priority, equal priorities in plugin order.
 	ordered []FS
 }
+
+// ErrNoWriteFS is why a write fails when no plugin binds the writable
+// filesystem: the FS resource then reads the read mounts alone, and writes
+// nothing.
+var ErrNoWriteFS = errors.New("no writable filesystem is bound")
 
 // errNotDirectory is why listing a name that is a file fails.
 var errNotDirectory = errors.New("not a directory")
@@ -140,7 +145,9 @@ func (f *fileSystem) layers() []FS {
 	f.ordering.Do(func() {
 		mounts := slices.Clone(f.mounts.GetAll())
 		slices.SortStableFunc(mounts, func(a, b ReadMountSocket) int { return cmp.Compare(b.Priority, a.Priority) })
-		f.ordered = []FS{f.writable.Get()}
+		if writable := f.writable.Get(); writable != nil {
+			f.ordered = append(f.ordered, writable)
+		}
 		for _, mount := range mounts {
 			f.ordered = append(f.ordered, mount.FS)
 		}
@@ -149,33 +156,54 @@ func (f *fileSystem) layers() []FS {
 }
 
 // writableFileSystem is the WriteFS ElevateFileAccess answers:
-// fileSystem with the writes, which land in the writable filesystem.
+// fileSystem with the writes, which land in the writable filesystem, or fail
+// with ErrNoWriteFS when none is bound.
 type writableFileSystem struct{ *fileSystem }
 
 // WriteFile writes data to name in the writable filesystem.
 func (w writableFileSystem) WriteFile(name string, data []byte, perm fs.FileMode) error {
-	return w.fileSystem.writable.Get().WriteFile(name, data, perm)
+	writable := w.fileSystem.writable.Get()
+	if writable == nil {
+		return ErrNoWriteFS
+	}
+	return writable.WriteFile(name, data, perm)
 }
 
 // MkdirAll creates the directory path in the writable filesystem.
 func (w writableFileSystem) MkdirAll(path string, perm fs.FileMode) error {
-	return w.fileSystem.writable.Get().MkdirAll(path, perm)
+	writable := w.fileSystem.writable.Get()
+	if writable == nil {
+		return ErrNoWriteFS
+	}
+	return writable.MkdirAll(path, perm)
 }
 
 // Remove removes name from the writable filesystem; a read mount's file of
 // that name is left, and is then what name reads.
 func (w writableFileSystem) Remove(name string) error {
-	return w.fileSystem.writable.Get().Remove(name)
+	writable := w.fileSystem.writable.Get()
+	if writable == nil {
+		return ErrNoWriteFS
+	}
+	return writable.Remove(name)
 }
 
 // Rename moves oldName to newName within the writable filesystem.
 func (w writableFileSystem) Rename(oldName, newName string) error {
-	return w.fileSystem.writable.Get().Rename(oldName, newName)
+	writable := w.fileSystem.writable.Get()
+	if writable == nil {
+		return ErrNoWriteFS
+	}
+	return writable.Rename(oldName, newName)
 }
 
 // AppendFile appends data to name in the writable filesystem.
 func (w writableFileSystem) AppendFile(name string, data []byte, perm fs.FileMode) error {
-	return w.fileSystem.writable.Get().AppendFile(name, data, perm)
+	writable := w.fileSystem.writable.Get()
+	if writable == nil {
+		return ErrNoWriteFS
+	}
+	return writable.AppendFile(name, data, perm)
 }
 
 // directory is a directory opened in the overlay: the highest layer's,

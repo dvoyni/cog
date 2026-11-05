@@ -550,11 +550,6 @@ func TestSpawnPanicsOnASeamBoundWrongly(t *testing.T) {
 				c.BindSocket[platform.InputSourceSocket](newFake())
 			}}, platform.NewPlugin()}
 		}, "platform.InputSourceSocket, declared by plugin \"platform\", has 2 bindings"},
-		{"no writable filesystem", func() []kernel.Plugin {
-			f := newFake()
-			f.installWritable = false
-			return []kernel.Plugin{f, platform.NewPlugin()}
-		}, `platform.WriteFSSocket, declared by plugin "platform", has no binding`},
 		{"two writable filesystems", func() []kernel.Plugin {
 			return []kernel.Plugin{newFake(), &secondInstaller{func(c *kernel.Configurator) {
 				c.BindSocket[platform.WriteFSSocket](&memoryFileSystem{MapFS: fstest.MapFS{}})

@@ -49,9 +49,11 @@ type InputSourceSocket interface {
 	Label(key Key) rune
 }
 
-// WriteFSSocket is the writable filesystem, which exactly one plugin binds in
-// its Init with configurator.BindSocket[platform.WriteFSSocket]. It is
-// searched before every read mount, and writes land in it. It is no
+// WriteFSSocket is the writable filesystem, which at most one plugin binds in
+// its Init with configurator.BindSocket[platform.WriteFSSocket], made by
+// package filesystems: NewDiskWriteFS or NewLocalStorageWriteFS. It is
+// searched before every read mount, and writes land in it; with none bound,
+// every write fails with ErrNoWriteFS. It is no
 // resource: jobs write through ElevateFileAccess, so the lock on the FS
 // resource keeps readers from seeing a file mid-write.
 type WriteFSSocket interface {

@@ -5,7 +5,8 @@ Cog kernel: windows, input and filesystems. It is its own Go module
 (Go 1.27) and depends on nothing but the standard library and
 [kernel](../kernel). It holds no platform code: it declares interfaces that
 implementing plugins fill, and owns the logic that is the same for every
-implementation.
+implementation. Its [`filesystems`](filesystems) package holds the writable
+filesystems an application binds.
 
 ## Shape
 
@@ -43,10 +44,12 @@ implementation.
   what the pump publishes, in the order the changes happened. A run's
   pointer moves in one window coalesce into one `PointerMoveEvent`. Losing
   focus releases every held key.
-- **`WriteFSSocket`** is the storage seam, needing exactly one binding, the
-  disk plugin's on desktop. Any plugin
-  binds read-only **`ReadMountSocket`**s, each any `fs.FS` at a priority,
-  such as an `embed.FS`.
+- **`WriteFSSocket`** is the storage seam, taking at most one binding: a
+  writable filesystem from [`filesystems`](filesystems),
+  `NewDiskWriteFS(directory)` on desktop or `NewLocalStorageWriteFS(key)` in
+  a browser. Without one, every write fails with **`ErrNoWriteFS`**. Any
+  plugin binds read-only **`ReadMountSocket`**s, each any `fs.FS` at a
+  priority, such as an `embed.FS` or an `os.Root`'s `FS`.
 - **`FS`**, an alias of `fs.FS`, is the overlay resource: the writable
   filesystem first, then the read mounts by priority, listings merged. It
   only reads; under its write lock, **`ElevateFileAccess`** gives the
@@ -59,16 +62,15 @@ implementation.
 ## Wiring
 
 Implementing plugins bind to platform's sockets, so they go anywhere in
-`Spawn`. A plugin that reads `platform.Tasks` in its `Init` comes after
+`Spawn`. The filesystems are adapters, not plugins: the game's own plugin
+binds them. A plugin that reads `platform.Tasks` in its `Init` comes after
 platform:
 
 ```go
 supervisor.Spawn(config, workerCount,
 	gogpu.NewPlugin(),    // binds the window implementation and the input source
-	disk.NewPlugin(),     // binds the writable filesystem
-	assets.NewPlugin(),   // a game's own: binds a platform.ReadMountSocket of its embed.FS
 	platform.NewPlugin(),
-	game.NewPlugin(),     // reads platform.Tasks
+	game.NewPlugin(),     // the game's own: binds its filesystems, reads platform.Tasks
 )
 ```
 
@@ -85,6 +87,24 @@ configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.Job
 ```
 
 `main` keeps ticking the main thread, where the pump runs.
+
+The game's plugin makes its writable filesystem in `Init`, binds it with its
+read mounts, and closes it in `Destroy`:
+
+```go
+func (p *game) Init(c *kernel.Configurator, _ any) error {
+	writable, err := filesystems.NewDiskWriteFS(userDirectory)
+	if err != nil {
+		return err
+	}
+	p.writable = writable
+	c.BindSocket[platform.WriteFSSocket](writable)
+	c.BindSocket(platform.ReadMountSocket{FS: assets}) // its embed.FS
+	// ...
+}
+
+func (p *game) Destroy() error { return p.writable.Close() }
+```
 
 To open a window, a job calls `Open` under the manager's write lock and
 gets its `Window` at once; the next pump run opens it and publishes

@@ -3,13 +3,14 @@
 `github.com/dvoyni/cog/platform` is what the operating system provides to a
 kernel: **windows**, **input** and **filesystems**. It declares them as
 interfaces, and implementing plugins fill them: the gogpu plugin implements
-windows and input, and the `disk` plugin implements the filesystems.
-platform itself holds no platform code. It owns the logic that is the same
+windows and input, and the application's own plugin binds the filesystems,
+through the adapters of `platform/filesystems`. platform itself holds no
+platform code. It owns the logic that is the same
 for every implementation: the window request and window state, folding input
 into state and events, the overlay of filesystems, and the values kept in it.
 
 Status: windows, the pump, the filesystems, keys, text, focus, the pointer,
-scroll, resize, key labels and the cursor are built. The decisions come from the
+scroll, resize, key labels, the cursor and the filesystem adapters are built. The decisions come from the
 [platform map](https://github.com/dvoyni/cog/issues/610); each section links
 the ticket that holds its detail. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md).
@@ -17,7 +18,8 @@ the ticket that holds its detail. The vocabulary is in
 ## Constraints
 
 - **No platform code.** platform imports the kernel and the standard library
-  only. It has no build tags, no cgo, and does no file or OS I/O of its own.
+  only. It has no build tags, no cgo, and does no file or OS I/O of its own;
+  its `filesystems` subpackage holds the adapters that do.
 - **Pointer-free work.** Events, task args and results carry no pointers or
   strings, as the kernel requires. Titles, paths and text live in resources.
 - **Main thread for the OS.** Every window, cursor and event call reaches the
@@ -41,15 +43,15 @@ the ticket that holds its detail. The vocabulary is in
 | `ProcessEvents` | pinned task | The pump. |
 | `FS` | alias of `fs.FS`, resource | Read access to files: the overlay, which only reads. |
 | `WriteFS`, `ElevateFileAccess` | interface, function | Write access to files: the overlay that writes, which `ElevateFileAccess` gives from the write handle on `FS` alone. |
-| `WriteFSSocket` | exclusive socket | The writable filesystem an implementation binds. |
-| `ReadMountSocket` | socket | A read mount an implementation binds: any `fs.FS` at a priority. |
+| `WriteFSSocket` | optional exclusive socket | The writable filesystem the application binds: `filesystems.NewDiskWriteFS` or `filesystems.NewLocalStorageWriteFS`. |
+| `ReadMountSocket` | optional socket | A read mount the application binds: any `fs.FS` at a priority. |
 | `Values` | resource | The values, a JSON file in `FS`: `Get` takes the `FS`; `Set`, `Delete` and `Flush` take the `WriteFS`. |
 
 **A seam bound wrongly panics** as a composition error, which the kernel
-reports at `Spawn`: two bindings of any seam, or none of the writable
-filesystem. The window and input seams are optional: a kernel without them,
-such as one spawned only to read the values, applies no window request and
-reports no input. An input source naming a window the window implementation
+reports at `Spawn`: two bindings of an exclusive seam. Every seam is
+optional: a kernel without the window and input seams, such as one spawned
+only to read the values, applies no window request and reports no input, and
+one without filesystems finds no file and writes none. An input source naming a window the window implementation
 does not know panics too
 ([Scripted input for tests and agents](https://github.com/dvoyni/cog/issues/644)).
 
@@ -298,19 +300,20 @@ From [Filesystems before Spawn and as a resource](https://github.com/dvoyni/cog/
 
 ### The overlay
 
-- **Implementing plugins bind layers to platform's sockets in `Init`,**
-  listed anywhere in `Spawn`. Any plugin binds read mounts,
-  `BindSocket(platform.ReadMountSocket{FS, Priority})`: the disk plugin
-  mounts the directories its `Config` names, a game's own plugin mounts its
-  `embed.FS`. Exactly one binds the writable filesystem,
-  `BindSocket[platform.WriteFSSocket](impl)`; none or two is a composition
-  error the kernel reports. Sockets are no resources, so no job reaches a
+- **The application's plugins bind layers to platform's sockets in `Init`,**
+  listed anywhere in `Spawn`. Filesystems are adapters, not plugins, so one
+  application mixes them freely. Any plugin binds read mounts,
+  `BindSocket(platform.ReadMountSocket{FS, Priority})`: an `embed.FS`, an
+  `os.Root`'s `FS`. At most one binds the writable filesystem,
+  `BindSocket[platform.WriteFSSocket](writable)`; two is a composition error
+  the kernel reports. Without one, the `FS` resource reads the read mounts
+  alone and every write fails with `ErrNoWriteFS`; without any layer, every
+  name is missing. Sockets are no resources, so no job reaches a
   layer but through the `FS` resource, which holds the socket handles and
   orders the layers on first use. A read mount without an `FS` panics in
   platform's `Start`.
-- **Where the files are is the implementation's `Config`,** since every
-  implementation takes different parameters. platform's own `Config` names no
-  paths.
+- **Where the files are is the binding plugin's choice,** given to the
+  adapters it makes. platform's own `Config` names no paths.
 - **platform stacks them into the `FS` resource.** The writable
   filesystem is searched first, then the read mounts by priority, equal priorities in plugin
   order.
@@ -348,17 +351,33 @@ From [Filesystems before Spawn and as a resource](https://github.com/dvoyni/cog/
   `FS` write lock, after the handlers before it.
 - **Before `Spawn`.** A kernel's config is given to `Spawn` and plugins
   cannot change it, so config kept in the values file is read first: `main`
-  spawns a throwaway kernel of the filesystem implementation and platform,
+  spawns a throwaway kernel of platform and a plugin binding the filesystems,
   starts it, reads the values with `Values.Get`, and destroys it, then spawns
   the real kernel with that config. platform spawns without a window or
   input implementation for this.
 
-## The disk plugin
+## The filesystem adapters
 
-`github.com/dvoyni/cog/disk` implements the filesystems for desktop
-(`!js`): read mounts from the directories its `Config` names, the writable
-filesystem in a directory its `Config` names. A web implementation over browser storage comes later, behind
-`js`.
+From [disk: read-mount directories and the writable directory](https://github.com/dvoyni/cog/issues/654).
+`github.com/dvoyni/cog/platform/filesystems` holds the writable
+filesystems, each a constructor the binding plugin calls in its `Init`.
+Read mounts need none: any `fs.FS` binds as it is.
+
+- **`NewDiskWriteFS(directory)`** keeps the files in a directory on disk,
+  created with its parents when missing; a relative directory resolves
+  against the working directory, once. Every name stays inside it, symbolic
+  links included: it is an `os.Root`, open until `Close`, which the binding
+  plugin calls in its `Destroy`. A write refuses a name `fs.ValidPath`
+  rejects, so nothing is written that the overlay could not read back. A
+  directory read mount is an `os.Root`'s `FS`, opened and closed the same
+  way.
+- **`NewLocalStorageWriteFS(key)`** (`js`) keeps the files in the page's
+  `localStorage`, as v1 did: one JSON document under the key, read whole by
+  every call and written whole by every change, so it survives a reload. It
+  follows the disk's rules: a file's directory must exist, nothing is written
+  over a directory, and a directory is removed only empty. `localStorage`
+  keeps a few megabytes per origin, so it suits values and saves; a write
+  over the quota fails and leaves the files as they were.
 
 ## The gogpu fork
 
@@ -396,8 +415,10 @@ Two seams, both through the interfaces an implementation installs:
   writable filesystem, checked with `fstest.TestFS` and with tests of merged
   listings, priority and writes; values read once through the overlay,
   flushed to the writable layer, and on a window's close, with the missing
-  and corrupt cases. The disk plugin passes the same tests against a
-  temporary directory.
+  and corrupt cases, and with no layer bound. Each adapter passes them
+  bound by a test plugin in a kernel of platform: the disk one against
+  temporary directories, the `localStorage` one under Node
+  (`GOOS=js GOARCH=wasm`, `NODE_OPTIONS=--localstorage-file=...`).
 
 ## Out of scope
 
