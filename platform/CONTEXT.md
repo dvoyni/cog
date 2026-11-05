@@ -90,5 +90,5 @@ The single persistent layer that writes land in, searched before every read moun
 _Avoid_: Permanent filesystem, permanent FS, save directory
 
 **Values**:
-The key-value store kept in persistent storage, the only part of Platform readable before a kernel is spawned.
+The key-value store kept in a file among the files, read once and written back when it changed; what a game reads before spawning its real kernel, through a throwaway one.
 _Avoid_: Settings, preferences, config store

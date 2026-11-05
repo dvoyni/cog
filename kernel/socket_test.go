@@ -7,12 +7,15 @@ import (
 	"testing"
 )
 
-// greeter is a socket's interface; greeting implements it.
-type greeter interface{ Greet() string }
+// greeterSocket is a socket's interface; greeting implements it.
+type greeterSocket interface{ Greet() string }
 
 type greeting string
 
 func (g greeting) Greet() string { return string(g) }
+
+// numberSocket is a socket's value type.
+type numberSocket int
 
 // binder is a plugin binding value to the socket of T.
 func binder[T any](name PluginName, value T) hookPlugin {
@@ -22,15 +25,15 @@ func binder[T any](name PluginName, value T) hookPlugin {
 func TestBindingsResolveWhateverThePluginOrder(t *testing.T) {
 	s := NewSupervisor(nil)
 	t.Cleanup(s.Quit)
-	var one ExclusiveSocket[greeter]
-	var many Socket[int]
+	var one ExclusiveSocket[greeterSocket]
+	var many Socket[numberSocket]
 	var gotOne string
-	var gotMany []int
+	var gotMany []numberSocket
 	consumer := hookPlugin{
 		name: "consumer",
 		init: func(c *Configurator) {
-			one = c.DeclareExclusiveSocket[greeter](false)
-			many = c.DeclareSocket[int](false)
+			one = c.DeclareExclusiveSocket[greeterSocket](false)
+			many = c.DeclareSocket[numberSocket](false)
 		},
 		start: func(*Kernel) {
 			gotOne = one.Get().Greet()
@@ -38,10 +41,10 @@ func TestBindingsResolveWhateverThePluginOrder(t *testing.T) {
 		},
 	}
 	_, err := s.Spawn(nil, 1,
-		binder[int]("first", 1),
+		binder[numberSocket]("first", 1),
 		consumer,
-		binder[greeter]("greeter", greeting("hello")),
-		binder[int]("second", 2),
+		binder[greeterSocket]("greeterSocket", greeting("hello")),
+		binder[numberSocket]("second", 2),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +52,7 @@ func TestBindingsResolveWhateverThePluginOrder(t *testing.T) {
 	if gotOne != "hello" {
 		t.Errorf("the exclusive socket answers %q, want hello", gotOne)
 	}
-	if !slices.Equal(gotMany, []int{1, 2}) {
+	if !slices.Equal(gotMany, []numberSocket{1, 2}) {
 		t.Errorf("the socket answers %v, want [1 2] in plugin order", gotMany)
 	}
 }
@@ -57,14 +60,14 @@ func TestBindingsResolveWhateverThePluginOrder(t *testing.T) {
 func TestOptionalSocketsMayStayUnbound(t *testing.T) {
 	s := NewSupervisor(nil)
 	t.Cleanup(s.Quit)
-	var one ExclusiveSocket[greeter]
-	var many Socket[int]
+	var one ExclusiveSocket[greeterSocket]
+	var many Socket[numberSocket]
 	started := false
 	_, err := s.Spawn(nil, 1, hookPlugin{
 		name: "consumer",
 		init: func(c *Configurator) {
-			one = c.DeclareExclusiveSocket[greeter](true)
-			many = c.DeclareSocket[int](true)
+			one = c.DeclareExclusiveSocket[greeterSocket](true)
+			many = c.DeclareSocket[numberSocket](true)
 		},
 		start: func(*Kernel) {
 			started = true
@@ -86,8 +89,8 @@ func TestGetBeforeTheBindingsResolvePanics(t *testing.T) {
 		name string
 		get  func(c *Configurator)
 	}{
-		{"exclusive", func(c *Configurator) { c.DeclareExclusiveSocket[greeter](true).Get() }},
-		{"multiple", func(c *Configurator) { c.DeclareSocket[int](true).GetAll() }},
+		{"exclusive", func(c *Configurator) { c.DeclareExclusiveSocket[greeterSocket](true).Get() }},
+		{"multiple", func(c *Configurator) { c.DeclareSocket[numberSocket](true).GetAll() }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			expectPanicSaying(t, "read in Init", func() {
@@ -102,8 +105,8 @@ func TestGetBeforeTheBindingsResolvePanics(t *testing.T) {
 func TestSocketCompositionErrorsPanic(t *testing.T) {
 	declare := func(name PluginName, optional bool) hookPlugin {
 		return hookPlugin{name: name, init: func(c *Configurator) {
-			c.DeclareExclusiveSocket[greeter](optional)
-			c.DeclareSocket[int](true)
+			c.DeclareExclusiveSocket[greeterSocket](optional)
+			c.DeclareSocket[numberSocket](true)
 		}}
 	}
 	for _, test := range []struct {
@@ -112,19 +115,19 @@ func TestSocketCompositionErrorsPanic(t *testing.T) {
 		want    []string
 	}{
 		{"declared twice", []Plugin{declare("a", true), declare("b", true)},
-			[]string{"kernel.greeter", "declared twice", `"a"`, `"b"`}},
+			[]string{"kernel.greeterSocket", "declared twice", `"a"`, `"b"`}},
 		{"two bindings of an exclusive socket", []Plugin{
-			declare("consumer", false), binder[greeter]("one", greeting("1")), binder[greeter]("two", greeting("2")),
-		}, []string{"kernel.greeter", "2 bindings", `"one"`, `"two"`}},
+			declare("consumer", false), binder[greeterSocket]("one", greeting("1")), binder[greeterSocket]("two", greeting("2")),
+		}, []string{"kernel.greeterSocket", "2 bindings", `"one"`, `"two"`}},
 		{"an exclusive socket unbound", []Plugin{declare("consumer", false)},
-			[]string{"kernel.greeter", `"consumer"`, "no binding"}},
+			[]string{"kernel.greeterSocket", `"consumer"`, "no binding"}},
 		{"a socket unbound", []Plugin{hookPlugin{name: "consumer", init: func(c *Configurator) {
-			c.DeclareSocket[int](false)
-		}}}, []string{"int", `"consumer"`, "no binding"}},
+			c.DeclareSocket[numberSocket](false)
+		}}}, []string{"kernel.numberSocket", `"consumer"`, "no binding"}},
 		{"a binding nobody declares", []Plugin{declare("consumer", true), binder[string]("stray", "x")},
 			[]string{`"stray"`, "string", "no plugin declares"}},
-		{"a nil binding", []Plugin{declare("consumer", true), binder[greeter]("nil", nil)},
-			[]string{`"nil"`, "nil", "kernel.greeter"}},
+		{"a nil binding", []Plugin{declare("consumer", true), binder[greeterSocket]("nil", nil)},
+			[]string{`"nil"`, "nil", "kernel.greeterSocket"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			expectPanicSaying(t, strings.Join(test.want, "\x00"), func() {

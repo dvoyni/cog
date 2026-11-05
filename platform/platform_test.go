@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/dvoyni/cog/kernel"
@@ -14,18 +15,29 @@ import (
 )
 
 // fake is the implementing plugin: it installs itself as Windows and as the
-// InputSource. It opens each window at once, reporting it open from the next
-// Pump, and records every call platform makes.
+// InputSource, an in-memory writable filesystem, an in-memory value store and
+// its read mounts. It opens each window at once, reporting it open from the
+// next Pump, and records every call platform makes.
 type fake struct {
 	installWindows, installInputSource bool
+	installWritable                    bool
 	calls                              []string
+	writable                           *memoryFileSystem
+	mounts                             []platform.ReadMountSocket
 	// windowChanges are what the next Pump reports, inputChanges what the next
 	// AppendChanges does.
 	windowChanges, inputChanges []platform.InputChange
 	nextNative                  uintptr
 }
 
-func newFake() *fake { return &fake{installWindows: true, installInputSource: true} }
+func newFake() *fake {
+	return &fake{
+		installWindows:     true,
+		installInputSource: true,
+		installWritable:    true,
+		writable:           &memoryFileSystem{MapFS: fstest.MapFS{}},
+	}
+}
 
 func (*fake) Name() kernel.PluginName { return "fake" }
 
@@ -35,6 +47,12 @@ func (f *fake) Init(c *kernel.Configurator, config any) error {
 	}
 	if f.installInputSource {
 		c.InitResource[platform.InputSource](f)
+	}
+	if f.installWritable {
+		c.BindSocket[platform.WriteFSSocket](f.writable)
+	}
+	for _, mount := range f.mounts {
+		c.BindSocket(mount)
 	}
 	return nil
 }
@@ -81,12 +99,18 @@ func (f *fake) AppendChanges(changes []platform.InputChange) []platform.InputCha
 	return changes
 }
 
-// pumpEvent asks the test plugin to schedule ProcessEvents; editEvent to run
-// the harness's edit under the manager's write lock.
-type (
-	pumpEvent struct{}
-	editEvent struct{}
-)
+// pumpEvent asks the test plugin to schedule ProcessEvents.
+type pumpEvent struct{}
+
+// editEvent asks it to run the harness's edit under the manager's write lock.
+type editEvent struct{}
+
+// readEvent asks it to run the harness's read under the files' and values'
+// read locks.
+type readEvent struct{}
+
+// writeEvent asks it to run the harness's write under their write locks.
+type writeEvent struct{}
 
 // harness is a kernel of the fake, platform and a test plugin, which
 // schedules ProcessEvents and request edits on demand and records every
@@ -98,6 +122,8 @@ type harness struct {
 	fake       *fake
 	manager    *platform.WindowManager
 	edit       func(manager *platform.WindowManager)
+	read       func(filesystem platform.FS, values *platform.Values)
+	write      func(filesystem platform.WriteFS, values *platform.Values)
 	mutex      sync.Mutex
 	published  []any
 	errors     []error
@@ -106,10 +132,10 @@ type harness struct {
 func (h *harness) Name() kernel.PluginName { return "test" }
 
 func (h *harness) Init(c *kernel.Configurator, config any) error {
-	pump, _ := c.Resource[platform.Pump]()
+	tasks, _ := c.Resource[platform.Tasks]()
 	h.manager, _ = c.Resource[*platform.WindowManager]()
 	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event pumpEvent) (pumpEvent, kernel.JobHandle) {
-		return event, ex.Join(in, ex.Schedule(pump.ProcessEvents, kernel.NoArg{}).Handle())
+		return event, ex.Join(in, ex.Schedule(tasks.ProcessEvents, kernel.NoArg{}).Handle())
 	})
 	edit := c.RegisterTask1(func(k *kernel.Kernel, _ kernel.NoArg, manager kernel.Write[*platform.WindowManager]) kernel.NoResult {
 		h.edit(manager.Get())
@@ -117,6 +143,20 @@ func (h *harness) Init(c *kernel.Configurator, config any) error {
 	})
 	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event editEvent) (editEvent, kernel.JobHandle) {
 		return event, ex.Schedule(edit, kernel.NoArg{}, in).Handle()
+	})
+	read := c.RegisterTask2(func(k *kernel.Kernel, _ kernel.NoArg, filesystem kernel.Read[platform.FS], values kernel.Read[*platform.Values]) kernel.NoResult {
+		h.read(filesystem.Get(), values.Get())
+		return kernel.NoResult{}
+	})
+	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event readEvent) (readEvent, kernel.JobHandle) {
+		return event, ex.Schedule(read, kernel.NoArg{}, in).Handle()
+	})
+	write := c.RegisterTask2(func(k *kernel.Kernel, _ kernel.NoArg, filesystem kernel.Write[platform.FS], values kernel.Write[*platform.Values]) kernel.NoResult {
+		h.write(platform.ElevateFileAccess(filesystem), values.Get())
+		return kernel.NoResult{}
+	})
+	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event writeEvent) (writeEvent, kernel.JobHandle) {
+		return event, ex.Schedule(write, kernel.NoArg{}, in).Handle()
 	})
 	subscribeRecord[platform.WindowOpenedEvent](c, h)
 	subscribeRecord[platform.WindowClosedEvent](c, h)
@@ -154,10 +194,16 @@ func subscribeRecord[E any](c *kernel.Configurator, h *harness) {
 // as an implementation is. The supervisor quits when the test ends.
 func spawn(t *testing.T, f *fake) *harness {
 	t.Helper()
+	return spawnConfigured(t, f, platform.Config{})
+}
+
+// spawnConfigured spawns as spawn does, platform configured with config.
+func spawnConfigured(t *testing.T, f *fake, config platform.Config) *harness {
+	t.Helper()
 	h := &harness{t: t, fake: f}
 	h.supervisor = kernel.NewSupervisor(h)
 	t.Cleanup(h.supervisor.Quit)
-	id, err := h.supervisor.Spawn(nil, 2, f, platform.NewPlugin(), h)
+	id, err := h.supervisor.Spawn(map[kernel.PluginName]any{platform.PluginName: config}, 2, f, platform.NewPlugin(), h)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,6 +224,22 @@ func (h *harness) change(edit func(manager *platform.WindowManager)) {
 	h.t.Helper()
 	h.edit = edit
 	_, out := h.kernel.Publish(editEvent{})
+	h.wait(out)
+}
+
+// reading runs read under the read locks, and waits for it.
+func (h *harness) reading(read func(filesystem platform.FS, values *platform.Values)) {
+	h.t.Helper()
+	h.read = read
+	_, out := h.kernel.Publish(readEvent{})
+	h.wait(out)
+}
+
+// writing runs write under the write locks, and waits for it.
+func (h *harness) writing(write func(filesystem platform.WriteFS, values *platform.Values)) {
+	h.t.Helper()
+	h.write = write
+	_, out := h.kernel.Publish(writeEvent{})
 	h.wait(out)
 }
 
@@ -444,8 +506,25 @@ func TestInitPanicsUnlessEachSeamHasOneInstaller(t *testing.T) {
 			return []kernel.Plugin{platform.NewPlugin(), newFake()}
 		}, "installs platform.Windows"},
 		{"two Windows", func() []kernel.Plugin {
-			return []kernel.Plugin{newFake(), &secondWindows{}, platform.NewPlugin()}
+			return []kernel.Plugin{newFake(), &secondInstaller{func(c *kernel.Configurator) {
+				c.InitResource[platform.Windows](newFake())
+			}}, platform.NewPlugin()}
 		}, "initialized twice"},
+		{"no writable filesystem", func() []kernel.Plugin {
+			f := newFake()
+			f.installWritable = false
+			return []kernel.Plugin{f, platform.NewPlugin()}
+		}, `platform.WriteFSSocket, declared by plugin "platform", has no binding`},
+		{"two writable filesystems", func() []kernel.Plugin {
+			return []kernel.Plugin{newFake(), &secondInstaller{func(c *kernel.Configurator) {
+				c.BindSocket[platform.WriteFSSocket](&memoryFileSystem{MapFS: fstest.MapFS{}})
+			}}, platform.NewPlugin()}
+		}, "has 2 bindings"},
+		{"a read mount without a FileSystem", func() []kernel.Plugin {
+			return []kernel.Plugin{newFake(), platform.NewPlugin(), &secondInstaller{func(c *kernel.Configurator) {
+				c.BindSocket(platform.ReadMountSocket{Priority: 3})
+			}}}
+		}, "priority 3 has no FS"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			s := kernel.NewSupervisor(nil)
@@ -461,12 +540,18 @@ func TestInitPanicsUnlessEachSeamHasOneInstaller(t *testing.T) {
 	}
 }
 
-// secondWindows is a second plugin installing Windows.
-type secondWindows struct{ fake }
+// secondInstaller is a second plugin, which installs in its Init.
+type secondInstaller struct{ install func(c *kernel.Configurator) }
 
-func (*secondWindows) Name() kernel.PluginName { return "second" }
+func (*secondInstaller) Name() kernel.PluginName { return "second" }
 
-func (w *secondWindows) Init(c *kernel.Configurator, config any) error {
-	c.InitResource[platform.Windows](w)
+func (p *secondInstaller) Init(c *kernel.Configurator, config any) error {
+	p.install(c)
 	return nil
 }
+
+func (*secondInstaller) Start(*kernel.Kernel) error { return nil }
+
+func (*secondInstaller) Stop(*kernel.Kernel) error { return nil }
+
+func (*secondInstaller) Destroy() error { return nil }
