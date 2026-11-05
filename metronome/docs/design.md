@@ -15,7 +15,7 @@ the ticket that holds its detail.
 ## Constraints
 
 - **Render-agnostic.** metronome imports the kernel and nothing else of cog.
-  gfx, system and the ECS hang off its events; it never imports them.
+  gfx, platform and the ECS hang off its events; it never imports them.
 - **Alloc-free per beat.** Once started, publishing a beat, waiting for the
   next one and tracking what is in flight allocate nothing: timers and
   signals are made once per track and reused.
@@ -141,7 +141,7 @@ the ticket that holds its detail.
 - **A handler that schedules a pinned job returns it in its out
   dependency** (`ex.Join(in, job)`), so the in-flight limit sees it.
   Otherwise each beat schedules another such job, and they pile up behind a
-  blocked main thread. system's docs say the same of `ProcessEvents`.
+  blocked main thread. platform's docs say the same of `ProcessEvents`.
 
 ### Waiting
 
@@ -234,12 +234,12 @@ type Timer interface {
   kernel finishes the jobs it has, and blocking on a signal there could
   deadlock when `Destroy` is called from a job.
 - **No quit API.** Ending the application is the supervisor's: a window
-  close is a system event, and an application handler calls
+  close is a platform event, and an application handler calls
   `Supervisor.Quit` or `Destroy`.
 - **Teardown belongs in `Destroy`.** metronome is listed before the plugins
   that handle its beats, so it stops last, and up to `MaxInFlight` + 1 beats
   per track may publish while their `Stop`s run. A plugin's `Stop` therefore
-  only halts its own activity; gfx and system release surfaces, the device
+  only halts its own activity; gfx and platform release surfaces, the device
   and windows in `Destroy`, after the kernel's last job.
 - **A stall holds a track in flight.** During a Windows drag the pinned
   `ProcessEvents` job does not finish, so the beat it was joined into stays
