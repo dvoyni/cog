@@ -32,9 +32,8 @@ the ticket that holds its detail. The vocabulary is in
 |---|---|---|
 | `Windows` | interface, resource | The window seam: opens, changes and closes OS windows and pumps their events. Installed by exactly one plugin (gogpu). |
 | `InputSource` | interface, resource | The input seam: reports the input changes since the last pump run. Installed by exactly one plugin (gogpu, later a scripted one). |
-| `Window` | handle | A pointer-free generational handle naming one window. |
-| `WindowRequest` | resource | What the application wants its windows to be. |
-| `WindowState` | resource | What each window currently is. |
+| `Window` | handle | An opaque, pointer-free handle naming one window, from a counter that is never reused. |
+| `WindowManager` | resource | Every window: its entry in the window request, what the application wants it to be, and its window state, what it currently is. |
 | `InputState` | resource | Input levels as of the last pump run. |
 | `ProcessEvents` | pinned task | The pump. |
 | `FileSystem`, `WritableFileSystem` | interfaces | Read and write access to files. |
@@ -56,18 +55,22 @@ backend.
 
 From [Several windows, and which window an event belongs to](https://github.com/dvoyni/cog/issues/643).
 
-- **Several windows from the start.** `Window` is a generational handle like
-  gfx's resources: zero means none, and a handle kept past its window's close
-  names nothing rather than a later window.
+- **Several windows from the start.** `Window` is an opaque handle from a
+  counter that is never reused, as `KernelID` is: zero means none, and a
+  handle kept past its window's close names nothing rather than a later
+  window.
 - **The main window** is the one the implementing plugin opens at start, from
   its own `Config`.
-- **The window request** is one resource holding an entry per desired window:
-  title, size, fullscreen, visibility, and its cursor request. A job writes it
-  under the write lock:
-  - **open:** add an entry and get its `Window` at once; the OS window is
-    created on the next pump run;
-  - **change:** edit the entry;
-  - **close:** remove the entry.
+- **One resource, the `WindowManager`,** holds both the window request and
+  the window state. A job writes it under the write lock; the window state
+  in it is written only by the pump, and read by any job under the read lock.
+- **The window request** holds an entry per desired window: title, size,
+  fullscreen, visibility, and its cursor request.
+  - **open:** `Open` adds an entry and answers its `Window` at once; the OS
+    window is created on the next pump run;
+  - **change:** `Change` replaces the whole entry, and `SetTitle`, `SetSize`,
+    `SetFullscreen` and `SetHidden` set one field;
+  - **close:** `Close` removes the entry.
 
   The pump applies only what changed, so repeated writes in one frame cost
   one OS call. Titles live in the resource.
@@ -96,7 +99,7 @@ From [The os pump and the tracks](https://github.com/dvoyni/cog/issues/632).
   1. apply the window request's changes through `Windows`;
   2. let `Windows` pump the OS's pending events;
   3. collect the batch of input changes from `InputSource`;
-  4. fold them into `WindowState` and `InputState` under their write locks;
+  4. fold them into the `WindowManager` and `InputState` under their write locks;
   5. publish the events, in the order the changes arrived.
 
   Handlers only schedule jobs, and those jobs run after the locks are
@@ -303,8 +306,8 @@ Two seams, both through the interfaces an implementation installs:
 
 - **Windows and input.** A kernel spawned with platform and a fake that
   installs `Windows` and `InputSource` and feeds input changes per pump run.
-  Tests assert only through `InputState`, `WindowState` and the published
-  events: window open and close, coalescing, focus loss, locked deltas, key
+  Tests assert only through `InputState`, the `WindowManager` and the
+  published events: window open and close, coalescing, focus loss, locked deltas, key
   labels and layout changes, warps, window-space coordinates. gogpu's
   implementation reuses the same seam.
 - **Filesystems.** The overlay over in-memory read mounts and an in-memory
