@@ -13,14 +13,23 @@ const (
 	InputChangeWindowClosed
 	// InputChangeCloseRequested reports that the user asked to close a window.
 	InputChangeCloseRequested
+	// InputChangeKey reports a key pressed, repeated or released in the
+	// focused window: Key, Pressed, Repeat, Modifiers, and Position for a
+	// mouse button.
+	InputChangeKey
+	// InputChangeText reports one character typed in the focused window:
+	// Char.
+	InputChangeText
+	// InputChangeFocus reports that a window gained or lost the keyboard
+	// focus: Focused.
+	InputChangeFocus
 )
 
 // InputChange is one raw change the WindowsSocket or the InputSourceSocket
 // reports, which ProcessEvents folds into the state and publishes as an
-// event. It is
-// pointer-free. Every change names a Window the window implementation was
-// asked to open and has not reported closed; one naming any other window
-// panics.
+// event. It is pointer-free. Every change names a Window the window
+// implementation was asked to open and has not reported closed, and a key
+// change one of the Keys; any other panics.
 type InputChange struct {
 	Kind   InputChangeKind
 	Window Window
@@ -30,4 +39,15 @@ type InputChange struct {
 	FramebufferSize Size
 	Scale           float32
 	Native          NativeHandle
+	// Key, Pressed, Repeat, Modifiers and Position are an InputChangeKey's,
+	// as KeyEvent carries them.
+	Key       Key
+	Pressed   bool
+	Repeat    bool
+	Modifiers Modifiers
+	Position  Point
+	// Char is an InputChangeText's character.
+	Char rune
+	// Focused is an InputChangeFocus's: false when the focus is lost.
+	Focused bool
 }

@@ -8,8 +8,8 @@ platform itself holds no platform code. It owns the logic that is the same
 for every implementation: the window request and window state, folding input
 into state and events, the overlay of filesystems, and the values kept in it.
 
-Status: windows, the pump and the filesystems are built; input and the
-cursor are not yet. The decisions come from the
+Status: windows, the pump, the filesystems, keys, text and focus are built;
+the pointer, scroll, resize, key labels and the cursor are not yet. The decisions come from the
 [platform map](https://github.com/dvoyni/cog/issues/610); each section links
 the ticket that holds its detail. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md).
@@ -127,12 +127,16 @@ and [Key codes and text input: physical keys, the layout and the IME](https://gi
 
 ### State and events
 
-- **Both.** `InputState` holds levels; input events carry every change in
-  order. Gameplay polls; UI and text read events.
-- **No edges.** The state has no "just pressed". A game that wants one
-  compares levels or folds events in its own handler, scheduled after
-  `ProcessEvents`; with several tracks and fixed-step catch-up, any edge kept
-  by platform would be seen twice by one reader or missed by another.
+- **Both.** `InputState` holds levels and the last run's edges; input events
+  carry every change in order. Gameplay polls; UI and text read events.
+- **Edges of the last run.** `JustPressed` and `JustReleased` say what went
+  down and up during the last pump run, so a tap pressed and released in one
+  run shows both. A repeat is no press; a release on focus loss is a
+  release. They are correct only for the jobs scheduled after
+  `ProcessEvents` in the same publication, the update that processed the
+  events: with several tracks and fixed-step catch-up, a job of another
+  track or of a beat that ran no pump sees the last run's edges again. Such
+  a reader folds `KeyEvent`s in its own handler instead.
 - **What is global and what is per window:** held keys and key labels are
   global, since there is one keyboard; the pointer position and whether it is
   inside are per window.
@@ -154,7 +158,10 @@ and [Key codes and text input: physical keys, the layout and the IME](https://gi
   states, as a bitmask. Left and right modifier keys are separate `Key`s;
   AltGr is `KeyRightAlt` with no Control.
 - **Focus loss releases every held key** and publishes the releases, so no
-  key stays stuck after Alt-Tab.
+  key stays stuck after Alt-Tab. They come before the `FocusEvent`, in `Key`
+  order, carrying only the lock states for modifiers. A release of a key not
+  held, such as the operating system's for one released that way, is
+  dropped, so every published release follows a published press.
 
 ### Text
 

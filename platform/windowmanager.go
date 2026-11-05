@@ -37,6 +37,7 @@ type windowStateEntry struct {
 	framebufferSize Size
 	scale           float32
 	native          NativeHandle
+	focused         bool
 }
 
 // Open adds entry to the request and answers its Window at once. The window
@@ -122,6 +123,9 @@ func (m *WindowManager) Scale(window Window) float32 { return m.state(window).sc
 
 // Native answers the native handle of window, valid while it is open.
 func (m *WindowManager) Native(window Window) NativeHandle { return m.state(window).native }
+
+// IsFocused answers whether window has the keyboard focus.
+func (m *WindowManager) IsFocused(window Window) bool { return m.state(window).focused }
 
 // edit changes window's entry through change, and answers false, changing
 // nothing, if window names no entry.

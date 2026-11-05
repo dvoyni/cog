@@ -14,6 +14,12 @@ type Size struct {
 	Width, Height int
 }
 
+// Point is a position in window space: a window's logical points, from its
+// top left corner.
+type Point struct {
+	X, Y float32
+}
+
 // WindowEntry is what the application wants one window to be: its entry in
 // the WindowRequest.
 type WindowEntry struct {
