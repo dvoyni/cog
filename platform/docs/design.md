@@ -9,7 +9,7 @@ for every implementation: the window request and window state, folding input
 into state and events, the overlay of filesystems, and the values kept in it.
 
 Status: windows, the pump, the filesystems, keys, text, focus, the pointer,
-scroll, resize and key labels are built; the cursor is not yet. The decisions come from the
+scroll, resize, key labels and the cursor are built. The decisions come from the
 [platform map](https://github.com/dvoyni/cog/issues/610); each section links
 the ticket that holds its detail. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md).
@@ -74,8 +74,8 @@ From [Several windows, and which window an event belongs to](https://github.com/
 - **One resource, the `WindowManager`,** holds both the window request and
   the window state. A job writes it under the write lock; the window state
   in it is written only by the pump, and read by any job under the read lock.
-- **The window request** holds an entry per desired window: title, size,
-  fullscreen, visibility, and its cursor request.
+- **The window request** holds, per desired window, its entry, title, size,
+  fullscreen and visibility, and beside it the window's cursor request.
   - **open:** `Open` adds an entry and answers its `Window` at once; the OS
     window is created on the next pump run;
   - **change:** `Change` replaces the whole entry, and `SetTitle`, `SetSize`,
@@ -248,9 +248,11 @@ From [Scripted input for tests and agents](https://github.com/dvoyni/cog/issues/
 
 From [Cursor control: show, hide, lock and shape](https://github.com/dvoyni/cog/issues/642).
 
-- **The cursor request is part of each window's entry** in the window
-  request: shape, visibility, mode, and a pending cursor position. The pump
-  applies what changed.
+- **The cursor request is its own, beside each window's entry** in the
+  window request: shape, visibility, mode, and a pending cursor position.
+  `SetCursorShape`, `SetCursorHidden`, `SetCursorMode` and
+  `SetCursorPosition` set one each; nothing reads it back, and `Entry` and
+  `Change` do not carry it. The pump applies what changed.
 - **Visibility is a flag of its own,** so hiding does not forget the shape.
 - **Shapes:** default, pointer, text, crosshair, move, the four resizes,
   not-allowed, wait.
@@ -265,7 +267,17 @@ From [Cursor control: show, hide, lock and shape](https://github.com/dvoyni/cog/
   position in window space; the pump moves the OS cursor there on its next
   run and clears it, and several set before one run collapse to the last.
   Setting it produces no `PointerMoveEvent`, and the input state's pointer
-  position becomes it. Setting it while locked is ignored.
+  position becomes it. Setting it while locked is ignored: the run drops it
+  when the requested mode is Locked as it applies the request.
+- **The seam.** The `WindowsSocket` applies the cursor request with
+  `SetCursor(window, CursorRequest)`, apart from `Open` and `Change`: after
+  `Open` when it is not the zero request, when it changes, and on focus
+  return. The pump asks
+  `EffectiveCursorMode(window)` of every window after each `Pump`, and
+  re-applies the cursor on focus return only when the effective mode is not
+  the requested one. `SetCursorPosition(window, position)` moves the cursor;
+  an error is logged and leaves the pointer position as it was. While locked,
+  the source reports the mouse's motion as a pointer move's `PointerDelta`.
 
 ## Filesystems
 

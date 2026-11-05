@@ -135,6 +135,15 @@ func (s *InputState) movePointer(window Window, position Point) Point {
 	return motion
 }
 
+// placePointer puts window's pointer at position, where the cursor was moved,
+// without a motion.
+func (s *InputState) placePointer(window Window, position Point) {
+	if index := s.findPointer(window); index >= 0 {
+		s.pointers[index].position = position
+		s.pointers[index].placed = true
+	}
+}
+
 // forgetPointer forgets window's pointer, as the window closes.
 func (s *InputState) forgetPointer(window Window) {
 	if index := s.findPointer(window); index >= 0 {

@@ -24,8 +24,10 @@ const (
 	// focus: Focused.
 	InputChangeFocus
 	// InputChangePointerMove reports the pointer at Position in the window
-	// under it, or in the one that captured it during a drag. platform takes
-	// the motion from the positions.
+	// under it, or in the one that captured it during a drag, and the mouse's
+	// motion, PointerDelta. platform takes the motion from the positions, but
+	// while the window's effective cursor mode is CursorModeLocked, where it
+	// keeps the position and takes PointerDelta.
 	InputChangePointerMove
 	// InputChangeScroll reports a scroll over the window under the pointer:
 	// ScrollDelta and ScrollLines.
@@ -72,6 +74,9 @@ type InputChange struct {
 	// ScrollEvent's Delta and Lines.
 	ScrollDelta Point
 	ScrollLines bool
+	// PointerDelta is an InputChangePointerMove's motion in window space, as
+	// the mouse reports it, which a locked window moves by.
+	PointerDelta Point
 	// motion is an InputChangePointerMove's, which platform takes from the
 	// positions and sums as it coalesces.
 	motion Point
