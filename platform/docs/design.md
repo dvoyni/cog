@@ -8,8 +8,8 @@ platform itself holds no platform code. It owns the logic that is the same
 for every implementation: the window request and window state, folding input
 into state and events, the overlay of filesystems, and the values kept in it.
 
-Status: windows, the pump, the filesystems, keys, text and focus are built;
-the pointer, scroll, resize, key labels and the cursor are not yet. The decisions come from the
+Status: windows, the pump, the filesystems, keys, text, focus, the pointer,
+scroll and resize are built; key labels and the cursor are not yet. The decisions come from the
 [platform map](https://github.com/dvoyni/cog/issues/610); each section links
 the ticket that holds its detail. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md).
@@ -64,6 +64,11 @@ From [Several windows, and which window an event belongs to](https://github.com/
   counter that is never reused, as `KernelID` is: zero means none, and a
   handle kept past its window's close names nothing rather than a later
   window.
+- **The zero `Window` reads the only window.** The getters of the window
+  state and the input state, given the zero `Window`, answer for the one
+  window the window state knows, and panic unless it knows exactly one. A
+  game of one window reads them without a handle. Edits and input changes
+  still name their window.
 - **The main window** is the one the implementing plugin opens at start, from
   its own `Config`.
 - **One resource, the `WindowManager`,** holds both the window request and
@@ -161,7 +166,8 @@ and [Key codes and text input: physical keys, the layout and the IME](https://gi
   key stays stuck after Alt-Tab. They come before the `FocusEvent`, in `Key`
   order, carrying only the lock states for modifiers. A release of a key not
   held, such as the operating system's for one released that way, is
-  dropped, so every published release follows a published press.
+  dropped, so every published release follows a published press. A mouse
+  button's release carries the window's pointer position.
 
 ### Text
 
@@ -171,6 +177,26 @@ and [Key codes and text input: physical keys, the layout and the IME](https://gi
   dictation all type text no key's label matches, or with no key at all. The
   input state holds no text.
 - **Committed text only.** IME composition is out of scope (below).
+
+### Pointer
+
+- **Each window keeps its pointer:** its last position, and whether the
+  pointer is inside. Entering sets both, from the position the enter
+  carries; leaving keeps the position. A closed window's pointer is
+  forgotten.
+- **Moves coalesce.** A run's moves in one window become one
+  `PointerMoveEvent`, in the place of the last, with the final position and
+  the motions summed. platform takes each motion from the positions, from
+  the last one the window saw; the first move in a window the pointer did
+  not enter has none.
+- **The window named** is the one under the pointer, or the one that
+  captured it during a drag, which the source decides; a captured position
+  may lie outside the window.
+- **Scroll** carries its amounts and whether they count lines, as a wheel's
+  notches, or window-space points, as a touchpad's. Scrolls do not
+  coalesce.
+- **A resize** sets the window state's size, framebuffer size and scale
+  before its `ResizeEvent` is published.
 
 ### Events
 

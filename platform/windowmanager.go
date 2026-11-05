@@ -1,6 +1,9 @@
 package platform
 
-import "slices"
+import (
+	"fmt"
+	"slices"
+)
 
 // WindowManager holds every window: what the application wants it to be, its
 // entry in the window request, and what it currently is, its window state. It
@@ -10,7 +13,9 @@ import "slices"
 // reaches the operating system until the next ProcessEvents run, which applies
 // what changed since its last, so several changes in one frame cost one call.
 // The window state is written only by ProcessEvents; any job reads it under
-// the read lock.
+// the read lock. Its getters given the zero Window read the only window the
+// state knows, and panic unless it knows exactly one, so a game of one window
+// needs no handle.
 type WindowManager struct {
 	// lastID is the id of the last Window Open gave.
 	lastID uint64
@@ -144,8 +149,15 @@ func (m *WindowManager) findEntry(window Window) int {
 }
 
 // state answers what window currently is, or the zero entry if the state does
-// not know it.
+// not know it. The zero Window is the only window the state knows; it panics
+// unless the state knows exactly one.
 func (m *WindowManager) state(window Window) windowStateEntry {
+	if window == (Window{}) {
+		if len(m.states) != 1 {
+			panic(fmt.Sprintf("platform: the zero Window reads the only window, but %d are known", len(m.states)))
+		}
+		return m.states[0]
+	}
 	index := m.findState(window)
 	if index < 0 {
 		return windowStateEntry{}
