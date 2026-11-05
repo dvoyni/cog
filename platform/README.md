@@ -17,7 +17,14 @@ implementation.
   reused. A handle kept past its window's close names nothing.
 - **`*WindowManager`** holds every window: what the application wants it to
   be, set whole with `Change` or a field at a time with `SetTitle`,
-  `SetSize`, `SetFullscreen` and `SetHidden`, and what it currently is.
+  `SetSize`, `SetFullscreen` and `SetHidden`, its cursor, a field at a time
+  with `SetCursorShape`, `SetCursorHidden` and `SetCursorMode`, and what it
+  currently is, the effective cursor mode, `EffectiveCursorMode`, among it.
+  `SetCursorPosition` moves the cursor on the next pump run.
+- **`CursorRequest`** is a window's cursor: a **`CursorShape`**, whether it
+  is hidden, and a **`CursorMode`**, Normal, Confined or Locked. While
+  locked, the pointer position stays and `PointerMoveEvent`'s delta carries
+  the motion.
 - **`Tasks`** holds **`ProcessEvents`**, the pump, a task pinned to the main
   thread.
 - **`*InputState`** holds the input levels as of the last pump: the keys

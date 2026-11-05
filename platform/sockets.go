@@ -13,6 +13,18 @@ type WindowsSocket interface {
 	// Change applies to window what differs between previous and next, its
 	// entry as last applied and as requested now.
 	Change(window Window, previous, next WindowEntry) error
+	// SetCursor applies cursor to window's cursor: after Open when it is not
+	// the zero request, when it changes, and when the window regains the
+	// focus without its requested mode in force.
+	SetCursor(window Window, cursor CursorRequest) error
+	// EffectiveCursorMode answers the cursor mode in force in window, which
+	// differs from the requested one while the window lacks the focus or the
+	// platform lacks the mode. ProcessEvents asks it for every window after
+	// each Pump.
+	EffectiveCursorMode(window Window) CursorMode
+	// SetCursorPosition moves the cursor to position in window's window
+	// space, producing no pointer move, or answers why it cannot.
+	SetCursorPosition(window Window, position Point) error
 	// Close destroys window's operating-system window. platform publishes its
 	// WindowClosedEvent itself; Close reports nothing.
 	Close(window Window) error

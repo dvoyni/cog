@@ -31,6 +31,12 @@ type fake struct {
 	// layout is what Label answers, and labelled every key it was asked for.
 	layout   map[platform.Key]rune
 	labelled []platform.Key
+	// cursorModes is every window's effective cursor mode, which SetCursor
+	// sets to the requested one, but CursorModeNormal for lackedCursorMode.
+	cursorModes      map[platform.Window]platform.CursorMode
+	lackedCursorMode platform.CursorMode
+	// cursorPositionError is what SetCursorPosition answers.
+	cursorPositionError error
 }
 
 func newFake() *fake {
@@ -39,6 +45,7 @@ func newFake() *fake {
 		installInputSource: true,
 		installWritable:    true,
 		writable:           &memoryFileSystem{MapFS: fstest.MapFS{}},
+		cursorModes:        map[platform.Window]platform.CursorMode{},
 	}
 }
 
@@ -83,6 +90,24 @@ func (f *fake) Open(window platform.Window, entry platform.WindowEntry) error {
 func (f *fake) Change(window platform.Window, previous, next platform.WindowEntry) error {
 	f.calls = append(f.calls, fmt.Sprintf("change %v to %v", previous, next))
 	return nil
+}
+
+func (f *fake) SetCursor(window platform.Window, cursor platform.CursorRequest) error {
+	f.calls = append(f.calls, fmt.Sprintf("cursor %v", cursor))
+	f.cursorModes[window] = cursor.Mode
+	if cursor.Mode == f.lackedCursorMode {
+		f.cursorModes[window] = platform.CursorModeNormal
+	}
+	return nil
+}
+
+func (f *fake) EffectiveCursorMode(window platform.Window) platform.CursorMode {
+	return f.cursorModes[window]
+}
+
+func (f *fake) SetCursorPosition(window platform.Window, position platform.Point) error {
+	f.calls = append(f.calls, fmt.Sprintf("cursor position %v", position))
+	return f.cursorPositionError
 }
 
 func (f *fake) Close(window platform.Window) error {

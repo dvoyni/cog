@@ -32,6 +32,11 @@ type WindowManager struct {
 type requestEntry struct {
 	window Window
 	entry  WindowEntry
+	cursor CursorRequest
+	// cursorPosition is the pending cursor position, when
+	// cursorPositionPending.
+	cursorPosition        Point
+	cursorPositionPending bool
 }
 
 // windowStateEntry is what one window currently is.
@@ -43,6 +48,8 @@ type windowStateEntry struct {
 	scale           float32
 	native          NativeHandle
 	focused         bool
+	// cursorMode is the effective cursor mode.
+	cursorMode CursorMode
 }
 
 // Open adds entry to the request and answers its Window at once. The window
@@ -99,6 +106,39 @@ func (m *WindowManager) SetHidden(window Window, hidden bool) bool {
 	return m.edit(window, func(entry *WindowEntry) { entry.Hidden = hidden })
 }
 
+// SetCursorShape requests shape for window's cursor, and answers false if
+// window names no entry.
+func (m *WindowManager) SetCursorShape(window Window, shape CursorShape) bool {
+	return m.editCursor(window, func(cursor *CursorRequest) { cursor.Shape = shape })
+}
+
+// SetCursorHidden requests window's cursor hidden or shown, and answers false
+// if window names no entry. Hiding it keeps its shape.
+func (m *WindowManager) SetCursorHidden(window Window, hidden bool) bool {
+	return m.editCursor(window, func(cursor *CursorRequest) { cursor.Hidden = hidden })
+}
+
+// SetCursorMode requests mode for window's cursor, and answers false if
+// window names no entry. EffectiveCursorMode answers the mode in force.
+func (m *WindowManager) SetCursorMode(window Window, mode CursorMode) bool {
+	return m.editCursor(window, func(cursor *CursorRequest) { cursor.Mode = mode })
+}
+
+// SetCursorPosition moves window's cursor to position, in window space, on the
+// next ProcessEvents run, and answers false if window names no entry. Several
+// set before one run collapse to the last. The move produces no
+// PointerMoveEvent; the input state's pointer position becomes position. The
+// run drops it while the requested cursor mode is CursorModeLocked.
+func (m *WindowManager) SetCursorPosition(window Window, position Point) bool {
+	index := m.findEntry(window)
+	if index < 0 {
+		return false
+	}
+	m.entries[index].cursorPosition = position
+	m.entries[index].cursorPositionPending = true
+	return true
+}
+
 // Close removes window's entry from the request; the window closes on the
 // next ProcessEvents run. A window that names no entry is left alone.
 func (m *WindowManager) Close(window Window) {
@@ -132,6 +172,14 @@ func (m *WindowManager) Native(window Window) NativeHandle { return m.state(wind
 // IsFocused answers whether window has the keyboard focus.
 func (m *WindowManager) IsFocused(window Window) bool { return m.state(window).focused }
 
+// EffectiveCursorMode answers the cursor mode in force in window: its
+// requested one, but CursorModeNormal while the window lacks the focus, or
+// another where the platform lacks the requested mode. ProcessEvents
+// re-applies the requested mode when the focus returns.
+func (m *WindowManager) EffectiveCursorMode(window Window) CursorMode {
+	return m.state(window).cursorMode
+}
+
 // edit changes window's entry through change, and answers false, changing
 // nothing, if window names no entry.
 func (m *WindowManager) edit(window Window, change func(entry *WindowEntry)) bool {
@@ -140,6 +188,17 @@ func (m *WindowManager) edit(window Window, change func(entry *WindowEntry)) boo
 		return false
 	}
 	change(&m.entries[index].entry)
+	return true
+}
+
+// editCursor changes window's cursor request through change, and answers
+// false, changing nothing, if window names no entry.
+func (m *WindowManager) editCursor(window Window, change func(cursor *CursorRequest)) bool {
+	index := m.findEntry(window)
+	if index < 0 {
+		return false
+	}
+	change(&m.entries[index].cursor)
 	return true
 }
 

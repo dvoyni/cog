@@ -21,7 +21,12 @@
 // changes, folds them into the manager's window state under the write lock,
 // then publishes WindowOpenedEvent, WindowClosedEvent and CloseRequestedEvent
 // in the order the changes arrived. A close request closes nothing: the
-// application calls Close.
+// application calls Close. Beside the entry, SetCursorShape, SetCursorHidden
+// and SetCursorMode request the cursor's shape, visibility and mode; the
+// window state answers the mode in force, EffectiveCursorMode, which ProcessEvents re-applies when the focus
+// returns. SetCursorPosition moves the cursor on the next run without a
+// pointer move. While the cursor is locked the pointer position stays and
+// PointerMoveEvent's Delta carries the motion.
 //
 // Input comes both as levels and as events. The *InputState resource holds
 // the keys held, which gameplay polls with IsHeld under the read lock, the

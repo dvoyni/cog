@@ -32,6 +32,7 @@ type eventProcessor struct {
 type appliedWindow struct {
 	window Window
 	entry  WindowEntry
+	cursor CursorRequest
 }
 
 // processEvents is ProcessEvents, the pump task: it applies the request
@@ -45,7 +46,8 @@ func processEvents(k *kernel.Kernel, _ kernel.NoArg, processorHandle kernel.Writ
 	input := inputHandle.Get()
 	processor.changes = processor.changes[:0]
 	processor.events = processor.events[:0]
-	if windows := processor.windows.Get(); windows != nil {
+	windows := processor.windows.Get()
+	if windows != nil {
 		processor.apply(k, windows, manager, input)
 		processor.changes = windows.Pump(processor.changes)
 	}
@@ -54,6 +56,11 @@ func processEvents(k *kernel.Kernel, _ kernel.NoArg, processorHandle kernel.Writ
 		if !processor.labelled {
 			input.rebuildLabels(inputSource)
 			processor.labelled = true
+		}
+	}
+	if windows != nil {
+		for index := range manager.states {
+			manager.states[index].cursorMode = windows.EffectiveCursorMode(manager.states[index].window)
 		}
 	}
 	for _, change := range processor.changes {
@@ -66,7 +73,7 @@ func processEvents(k *kernel.Kernel, _ kernel.NoArg, processorHandle kernel.Writ
 	}
 	input.clearEdges()
 	for _, change := range processor.changes {
-		processor.fold(manager, input, change)
+		processor.fold(k, manager, input, change)
 	}
 	for _, event := range processor.events {
 		switch event.Kind {
@@ -101,9 +108,10 @@ func processEvents(k *kernel.Kernel, _ kernel.NoArg, processorHandle kernel.Writ
 
 // apply applies what changed in manager's request since the last run
 // through windows: it closes every window whose entry is gone, then opens
-// every new one and changes every edited one, in the order they were opened.
-// It keeps input's pointers to the windows the state knows, and adds a closed
-// event for each window it closed to the run's events.
+// every new one and changes every edited one, in the order they were opened,
+// and its cursor apart, then moves its cursor to the pending cursor position unless
+// it is locked. It keeps input's pointers to the windows the state knows, and
+// adds a closed event for each window it closed to the run's events.
 func (processor *eventProcessor) apply(k *kernel.Kernel, windows WindowsSocket, manager *WindowManager, input *InputState) {
 	kept := processor.applied[:0]
 	for _, applied := range processor.applied {
@@ -120,23 +128,42 @@ func (processor *eventProcessor) apply(k *kernel.Kernel, windows WindowsSocket, 
 	}
 	clear(processor.applied[len(kept):])
 	processor.applied = kept
-	for _, requested := range manager.entries {
+	for entryIndex := range manager.entries {
+		requested := &manager.entries[entryIndex]
 		index := processor.find(requested.window)
 		if index < 0 {
-			processor.applied = append(processor.applied, appliedWindow{window: requested.window, entry: requested.entry})
+			processor.applied = append(processor.applied, appliedWindow{window: requested.window, entry: requested.entry, cursor: requested.cursor})
 			manager.addState(requested.window)
 			input.addPointer(requested.window)
 			if err := windows.Open(requested.window, requested.entry); err != nil {
 				k.Logger().LogErr(fmt.Errorf("platform: opening a window: %w", err))
 			}
-			continue
-		}
-		applied := &processor.applied[index]
-		if applied.entry != requested.entry {
-			if err := windows.Change(requested.window, applied.entry, requested.entry); err != nil {
-				k.Logger().LogErr(fmt.Errorf("platform: changing a window: %w", err))
+			if requested.cursor != (CursorRequest{}) {
+				processor.setCursor(k, windows, requested.window, requested.cursor)
 			}
-			applied.entry = requested.entry
+		} else {
+			applied := &processor.applied[index]
+			if applied.entry != requested.entry {
+				if err := windows.Change(requested.window, applied.entry, requested.entry); err != nil {
+					k.Logger().LogErr(fmt.Errorf("platform: changing a window: %w", err))
+				}
+				applied.entry = requested.entry
+			}
+			if applied.cursor != requested.cursor {
+				processor.setCursor(k, windows, requested.window, requested.cursor)
+				applied.cursor = requested.cursor
+			}
+		}
+		if requested.cursorPositionPending {
+			requested.cursorPositionPending = false
+			if requested.cursor.Mode == CursorModeLocked {
+				continue
+			}
+			if err := windows.SetCursorPosition(requested.window, requested.cursorPosition); err != nil {
+				k.Logger().LogErr(fmt.Errorf("platform: setting the cursor position: %w", err))
+				continue
+			}
+			input.placePointer(requested.window, requested.cursorPosition)
 		}
 	}
 }
@@ -147,8 +174,10 @@ func (processor *eventProcessor) apply(k *kernel.Kernel, windows WindowsSocket, 
 // move, which replaces the window's earlier move of the run, its motion
 // added, and focus loss, which it follows with the release of every held key.
 // A key change carries its label as of its place in the run, and a layout
-// change rebuilds the labels.
-func (processor *eventProcessor) fold(manager *WindowManager, input *InputState, change InputChange) {
+// change rebuilds the labels. A pointer move in a locked window keeps the
+// position and moves by its PointerDelta, and focus gained re-applies the
+// requested cursor mode when another is in force.
+func (processor *eventProcessor) fold(k *kernel.Kernel, manager *WindowManager, input *InputState, change InputChange) {
 	switch change.Kind {
 	case InputChangeWindowOpened:
 		index := manager.findState(change.Window)
@@ -181,6 +210,9 @@ func (processor *eventProcessor) fold(manager *WindowManager, input *InputState,
 	case InputChangeFocus:
 		if index := manager.findState(change.Window); index >= 0 {
 			manager.states[index].focused = change.Focused
+			if change.Focused {
+				processor.reapplyCursorMode(k, &manager.states[index])
+			}
 		}
 		if !change.Focused {
 			processor.modifiers &= ModifierCapsLock | ModifierNumLock
@@ -197,7 +229,12 @@ func (processor *eventProcessor) fold(manager *WindowManager, input *InputState,
 			}
 		}
 	case InputChangePointerMove:
-		change.motion = input.movePointer(change.Window, change.Position)
+		if manager.EffectiveCursorMode(change.Window) == CursorModeLocked {
+			change.Position = input.PointerPosition(change.Window)
+			change.motion = change.PointerDelta
+		} else {
+			change.motion = input.movePointer(change.Window, change.Position)
+		}
 		for index := len(processor.events) - 1; index >= 0; index-- {
 			earlier := processor.events[index]
 			if earlier.Kind == InputChangePointerMove && earlier.Window == change.Window {
@@ -231,4 +268,29 @@ func (processor *eventProcessor) fold(manager *WindowManager, input *InputState,
 // find answers the index of window in applied, or -1 if it is not there.
 func (processor *eventProcessor) find(window Window) int {
 	return slices.IndexFunc(processor.applied, func(a appliedWindow) bool { return a.window == window })
+}
+
+// setCursor applies cursor to window's cursor through windows, logging what
+// fails.
+func (processor *eventProcessor) setCursor(k *kernel.Kernel, windows WindowsSocket, window Window, cursor CursorRequest) {
+	if err := windows.SetCursor(window, cursor); err != nil {
+		k.Logger().LogErr(fmt.Errorf("platform: setting a window's cursor: %w", err))
+	}
+}
+
+// reapplyCursorMode applies the cursor as last applied to the window of
+// state again, when its effective mode is not the requested one, and takes
+// the effective mode anew.
+func (processor *eventProcessor) reapplyCursorMode(k *kernel.Kernel, state *windowStateEntry) {
+	windows := processor.windows.Get()
+	index := processor.find(state.window)
+	if windows == nil || index < 0 {
+		return
+	}
+	cursor := processor.applied[index].cursor
+	if state.cursorMode == cursor.Mode {
+		return
+	}
+	processor.setCursor(k, windows, state.window, cursor)
+	state.cursorMode = windows.EffectiveCursorMode(state.window)
 }
