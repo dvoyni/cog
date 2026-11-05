@@ -41,7 +41,7 @@ type UpdateEvent struct {
 	Beat
 }
 
-// beater is what AddTrack needs of a track event: its embedded Beat, which
+// beater is what NewTrack needs of a track event: its embedded Beat, which
 // metronome stamps through the promoted method.
 type beater interface {
 	stamp(beat Beat)

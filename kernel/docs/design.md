@@ -134,6 +134,16 @@ silently.
 - **Config** is a `map[PluginName]any` per kernel, given to `Spawn`. Each
   plugin's `Init` is handed only its own part, the value under its `Name`, or
   nil if there is none.
+- **A plugin's constructor takes no parameters:** `NewPlugin()`. All a
+  plugin can be configured with is a plain `Config` struct of values in its
+  package, given as its config part. `Init` asserts a non-nil part to
+  `Config`, a nil one being the zero `Config` and so the defaults; a part of
+  another type is a composition error and panics. No functional options:
+  nothing outside `Init` reaches into the plugin.
+- **A plugin is never a resource,** so nothing reaches its lifecycle
+  methods. What it offers others is an interface it implements, installed as
+  `InitResource[I](p)`; such small interfaces live in the plugin package's
+  `resources.go`.
 - **Ports and Adapters are gone.** A slot declares what it needs as a resource
   of interface type, and the extension that fills it calls
   `InitResource[gfx.Backend](impl)`. Any number of contributors is a resource

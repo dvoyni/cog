@@ -17,7 +17,7 @@ const defaultMaxDebt = 4
 // largest float32 below 1.
 const alphaInDebt float32 = 1 - 1.0/(1<<24)
 
-// Settings is a track's pacing, given to AddTrack.
+// Settings is a track's pacing, given to NewTrack.
 type Settings struct {
 	// Step is the time each beat of a fixed-step track stands for: tick n is
 	// due at the epoch + n × Step, plus the steps dropped before it. Zero makes
@@ -65,53 +65,51 @@ func FixedStep(hz int) Settings {
 	return Settings{Step: time.Second / time.Duration(hz), MaxInFlight: 1}
 }
 
-// AddTrack declares a track publishing E, paced by settings. It is called in
-// a plugin's Init, listed after metronome. E embeds Beat, which metronome
-// stamps on every beat; the rest of E is the payload, zero as published.
+// Track is a track as declared: its event type, its pacing, and how to
+// publish its event. NewTrack makes it, and Config.Tracks hands it to
+// metronome, which builds the track's state anew in each kernel's Init.
+type Track struct {
+	eventType reflect.Type
+	settings  Settings
+	// newPublish makes the publish func of one kernel's track, with an event
+	// of its own to stamp.
+	newPublish func() func(k *kernel.Kernel, beat Beat) kernel.JobHandle
+}
+
+// NewTrack declares a track publishing E, paced by settings, for
+// Config.Tracks. E embeds Beat, which metronome stamps on every beat; the rest
+// of E is the payload, zero as published.
 //
 // A track's event type is its identity. It is a composition error, and
-// panics, for metronome not to be initialized yet, for a track of E to be
-// declared twice, or for any of its settings to be negative.
-func AddTrack[E any, P interface {
+// panics, for any of its settings to be negative, and for a Config to hold two
+// tracks of one event type.
+func NewTrack[E any, P interface {
 	*E
 	beater
-}](configurator *kernel.Configurator, settings Settings) {
+}](settings Settings) Track {
 	eventType := reflect.TypeFor[E]()
-	plugin, ok := configurator.Resource[*Plugin]()
-	if !ok {
-		panic(fmt.Sprintf("metronome: track of %v is declared before the metronome plugin", eventType))
-	}
-	for _, t := range plugin.tracks {
-		if t.eventType == eventType {
-			panic(fmt.Sprintf("metronome: two tracks of %v", eventType))
-		}
-	}
 	if settings.Step < 0 || settings.MinInterval < 0 || settings.MaxDelta < 0 || settings.MaxInFlight < 0 || settings.MaxDebt < 0 {
 		panic(fmt.Sprintf("metronome: track of %v has a negative setting: %+v", eventType, settings))
 	}
 	if settings.MaxDebt == 0 {
 		settings.MaxDebt = defaultMaxDebt
 	}
-	signals := make([]*kernel.Signal, max(settings.MaxInFlight, 1))
-	for i := range signals {
-		signals[i] = kernel.NewSignal()
-	}
-	// event is made once and reused: stamping a local through P would move it
-	// to the heap on every beat.
-	event := new(E)
-	plugin.tracks = append(plugin.tracks, &track{
-		eventType:    eventType,
-		settings:     settings,
-		nextDeadline: settings.Step + settings.MinInterval,
-		signals:      signals,
-		publish: func(k *kernel.Kernel, beat Beat) kernel.JobHandle {
-			var zero E
-			*event = zero
-			P(event).stamp(beat)
-			_, out := k.Publish(*event)
-			return out
+	return Track{
+		eventType: eventType,
+		settings:  settings,
+		newPublish: func() func(k *kernel.Kernel, beat Beat) kernel.JobHandle {
+			// event is made once per kernel and reused: stamping a local
+			// through P would move it to the heap on every beat.
+			event := new(E)
+			return func(k *kernel.Kernel, beat Beat) kernel.JobHandle {
+				var zero E
+				*event = zero
+				P(event).stamp(beat)
+				_, out := k.Publish(*event)
+				return out
+			}
 		},
-	})
+	}
 }
 
 // track is one declared track: its pacing, and the state its goroutine keeps.

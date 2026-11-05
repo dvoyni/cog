@@ -28,23 +28,25 @@ the ticket that holds its detail.
 
 | Type | Role |
 |---|---|
-| `Plugin` | The kernel plugin, from `NewPlugin(options...)`. Runs one goroutine per declared track between `Start` and `Stop`. `Wait(ctx)` returns once every track has settled. |
-| `AddTrack[E]` | Declares a track publishing `E`, from another plugin's `Init`, with its `Settings`. |
+| `Plugin` | The kernel plugin, from `NewPlugin()`. Runs one goroutine per track between `Start` and `Stop`. It installs no resource: nothing else reaches it. |
+| `Config` | metronome's part of the kernel's config, under `PluginName`: its `Clock` and its `Tracks`. |
+| `NewTrack[E]` | Declares a track publishing `E`, with its `Settings`, for `Config.Tracks`. |
 | `Beat` | The header every track event embeds: `Tick`, `Delta`, `Lost`, `TimeFromStart`, `Alpha`, `InterpolatedTick`. |
 | `Settings` | A track's pacing: step or interval, in-flight limit, debt cap, delta clamp, reference track. Presets `FixedStep(hz)` and `Variable()`. |
 | `UpdateEvent` | The one event metronome ships: a plain `struct{ Beat }` for an update track. |
-| `Clock`, `Timer` | Where time comes from and how a track waits. `WallClock` is the default. |
-| `ManualClock` | A `Clock` driven by hand, for tests and deterministic runs: `Advance`, `Jump`. |
+| `Clock`, `Timer` | Where time comes from, how a track waits, and how a clock waits for the tracks to settle. `WallClock` is the default. |
+| `ManualClock` | A `Clock` driven by hand, for tests and deterministic runs: `Advance`, `Jump`, `Wait`. |
 
 ## Tracks
 
 ([Update and draw event shapes](https://github.com/dvoyni/cog/issues/627))
 
-- **No built-in tracks.** A track exists only when a plugin declares it with
-  `AddTrack[E](configurator, settings)` in its `Init`, so it is listed after
-  metronome. A server declares one track, a client two or more.
-- **Settings are code.** A track's settings are given to `AddTrack`; the
-  config part does not override them.
+- **No built-in tracks.** A track exists only when the application declares
+  it in metronome's `Config`, as `NewTrack[E](settings)` in `Tracks`. A
+  server declares one track, a client two or more.
+- **Tracks are config.** No plugin reaches metronome to add one: the
+  application, which spawns the kernel, decides every track and its
+  settings, as it decides everything else in the config.
 - **The event is the user's.** `E` embeds `metronome.Beat`, and whatever else
   it holds is the payload:
 
@@ -56,7 +58,7 @@ the ticket that holds its detail.
   ```
 
   metronome stamps the header through an unexported method on `*Beat`,
-  promoted through the embedding, so `AddTrack` is constrained to
+  promoted through the embedding, so `NewTrack` is constrained to
   `[E any, P interface{ *E; beater }]`. A track's event type is its identity:
   two tracks of one event type are a composition error and panic.
 - **Tracks are independent.** Each runs on its own goroutine and publishes on
@@ -181,6 +183,9 @@ the ticket that holds its detail.
 type Clock interface {
 	Now() time.Duration // since the epoch
 	NewTimer() Timer    // one per track
+	// metronome sets wait at Start and nil at Stop; wait returns once every
+	// track has settled
+	SetWaitCallback(wait func(ctx context.Context) error)
 }
 
 type Timer interface {
@@ -193,11 +198,12 @@ type Timer interface {
 - **The epoch belongs to the clock:** it is where `Now` reads zero. Every
   track measures from it.
 - **`WallClock`,** the default and `NewWallClock()`, reads monotonic time
-  with the epoch at the `Start` of the plugin it is given to, backs each `Timer` with one reused `time.Timer`, and fires a
-  deadline already past at once. No spin-wait.
-- **`NewPlugin(WithClock(c))`** uses `c` instead. A custom clock may fire on
-  time, late, on an outside event such as an agent's MCP call, or never;
-  the game sees its time and cannot tell.
+  with the epoch at the `Start` of the plugin it is given to, backs each
+  `Timer` with one reused `time.Timer`, and fires a deadline already past at
+  once. No spin-wait.
+- **`Config{Clock: c}`** uses `c` instead. A custom clock may fire on time,
+  late, on an outside event such as an agent's MCP call, or never; the game
+  sees its time and cannot tell.
 - **`ManualClock`** starts at 0 and moves only when told:
   - `Advance(d)` walks deadline by deadline across every track, letting each
     due beat publish and settle before moving on. Work takes no manual time,
@@ -205,8 +211,12 @@ type Timer interface {
   - `Jump(d)` moves to the target at once, as a stall would, so debt,
     `MaxDebt` and `Lost` can be tested.
   - A variable track beats at most once per call, at the target time.
-- **`Plugin.Wait(ctx)`** returns once every track has settled, for a test,
-  a clock or an agent that fired a deadline and wants its work done.
+- **Waiting belongs to the clock.** metronome hands its clock a wait
+  callback at `Start` and takes it back at `Stop`; it returns once every
+  track has settled. Only a clock that moves time when told needs it, to see
+  the work of a deadline it fired done: `ManualClock` waits on it in
+  `Advance` and exposes it as `Wait(ctx)`, a custom clock driven by an agent
+  does the same, and `WallClock` ignores it. A clock serves one metronome.
 - **Replays need nothing from metronome.** A replay is deterministic through
   fixed-step tracks, whose `Delta` is always the step, plus inputs recorded
   per `Tick` outside metronome. It runs on either clock.
@@ -217,7 +227,8 @@ type Timer interface {
 [The os pump and the tracks](https://github.com/dvoyni/cog/issues/632),
 [Quitting](https://github.com/dvoyni/cog/issues/633))
 
-- **`Start`** starts the clock's epoch and one goroutine per track.
+- **`Start`** starts the clock's epoch and one goroutine per track, and
+  hands the clock its wait callback; `Stop` takes it back first.
 - **`Stop`** signals every track goroutine and joins them, so no beat is
   published after it returns. It does not wait on beats in flight: the
   kernel finishes the jobs it has, and blocking on a signal there could
@@ -226,7 +237,7 @@ type Timer interface {
   close is a system event, and an application handler calls
   `Supervisor.Quit` or `Destroy`.
 - **Teardown belongs in `Destroy`.** metronome is listed before the plugins
-  that declare tracks, so it stops last, and up to `MaxInFlight` + 1 beats
+  that handle its beats, so it stops last, and up to `MaxInFlight` + 1 beats
   per track may publish while their `Stop`s run. A plugin's `Stop` therefore
   only halts its own activity; gfx and system release surfaces, the device
   and windows in `Destroy`, after the kernel's last job.

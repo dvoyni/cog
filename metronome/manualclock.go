@@ -2,7 +2,6 @@ package metronome
 
 import (
 	"context"
-	"slices"
 	"sync"
 	"time"
 )
@@ -15,9 +14,9 @@ type ManualClock struct {
 	mutex  sync.Mutex
 	now    time.Duration
 	timers []*manualTimer
-	// plugins are the started plugins reading this clock, whose tracks
-	// Advance waits on to settle.
-	plugins []*Plugin
+	// wait is metronome's wait callback, nil while no metronome reads the
+	// clock.
+	wait func(ctx context.Context) error
 }
 
 // manualTimer is a ManualClock's Timer.
@@ -56,8 +55,8 @@ func (c *ManualClock) NewTimer() Timer {
 
 // Advance moves the clock forward by d, deadline by deadline across every
 // fixed-step track: at each deadline it fires the timers due, and waits until
-// every track of the plugins reading the clock has settled, its beats
-// published and finished, before moving on. Work takes no manual time, so no
+// every track reading the clock has settled, its beats published and
+// finished, before moving on. Work takes no manual time, so no
 // track falls behind and no step is dropped. At the target it fires the
 // variable tracks due, once each, and waits for them to settle too.
 //
@@ -70,14 +69,14 @@ func (c *ManualClock) Advance(d time.Duration) {
 	target := c.now + d
 	c.mutex.Unlock()
 	for {
-		c.settle()
+		_ = c.Wait(context.Background())
 		c.mutex.Lock()
 		next, ok := c.nextDeadline(target)
 		if !ok {
 			c.now = target
 			c.fireVariable()
 			c.mutex.Unlock()
-			c.settle()
+			_ = c.Wait(context.Background())
 			return
 		}
 		c.now = next
@@ -86,11 +85,30 @@ func (c *ManualClock) Advance(d time.Duration) {
 	}
 }
 
+// Wait returns once every track reading the clock has settled, none with a
+// beat in flight or owing one, or with ctx's error if ctx ends first. With no
+// metronome reading the clock, it returns at once.
+func (c *ManualClock) Wait(ctx context.Context) error {
+	c.mutex.Lock()
+	wait := c.wait
+	c.mutex.Unlock()
+	if wait == nil {
+		return nil
+	}
+	return wait(ctx)
+}
+
+// SetWaitCallback keeps wait, for Advance and Wait to wait on.
+func (c *ManualClock) SetWaitCallback(wait func(ctx context.Context) error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.wait = wait
+}
+
 // Jump moves the clock forward by d at once, as a stall would, and fires every
 // timer due by then. It does not wait for the beats it lets out: a fixed-step
 // track behind owes the steps passed, up to its debt cap, and catches up
-// back-to-back, and a variable track due beats once. Plugin.Wait waits for
-// that.
+// back-to-back, and a variable track due beats once. Wait waits for that.
 //
 // A negative d panics.
 func (c *ManualClock) Jump(d time.Duration) {
@@ -153,36 +171,6 @@ func (c *ManualClock) newVariableTimer() Timer {
 	defer c.mutex.Unlock()
 	timer.variable = true
 	return timer
-}
-
-// attach links a started plugin to the clock, for Advance to wait on its
-// tracks.
-func (c *ManualClock) attach(plugin *Plugin) {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	c.plugins = append(c.plugins, plugin)
-}
-
-// detach unlinks a stopping plugin from the clock.
-func (c *ManualClock) detach(plugin *Plugin) {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	c.plugins = slices.DeleteFunc(c.plugins, func(attached *Plugin) bool { return attached == plugin })
-}
-
-// settle waits until every track of the plugins reading the clock has
-// settled. The caller does not hold the mutex: Plugin.Wait reads Now.
-func (c *ManualClock) settle() {
-	for i := 0; ; i++ {
-		c.mutex.Lock()
-		if i >= len(c.plugins) {
-			c.mutex.Unlock()
-			return
-		}
-		plugin := c.plugins[i]
-		c.mutex.Unlock()
-		_ = plugin.Wait(context.Background())
-	}
 }
 
 // nextDeadline answers the earliest deadline of an armed fixed-step timer no
