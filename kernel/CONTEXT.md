@@ -21,6 +21,14 @@ The value under a plugin's name in the config a kernel is spawned with: all of t
 **Composition error**:
 A mistake in how plugins register (an uninitialized resource, a pointer in an arg, a cycle in handler order), caught at spawn rather than at run time.
 
+**Socket**:
+What a plugin declares it needs from other plugins, by type: one binding or any number. It is no resource, so only the declaring plugin reaches what is bound.
+_Avoid_: Port, slot, dependency
+
+**Binding**:
+An implementation a plugin gives a socket.
+_Avoid_: Adapter, provider
+
 ## Work
 
 **Resource**:

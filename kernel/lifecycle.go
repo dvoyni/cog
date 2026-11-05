@@ -30,7 +30,7 @@ func (l *lifecycle) init() error {
 		}
 	}
 	for i, plugin := range l.plugins {
-		if err := plugin.Init(&Configurator{kernel: l.kernel}, l.config[plugin.Name()]); err != nil {
+		if err := plugin.Init(&Configurator{kernel: l.kernel, plugin: plugin.Name()}, l.config[plugin.Name()]); err != nil {
 			l.destroyFrom(i - 1)
 			return fmt.Errorf("kernel: plugin %q failed to init: %w", plugin.Name(), err)
 		}

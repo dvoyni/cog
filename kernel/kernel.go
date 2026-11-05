@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"fmt"
 	"reflect"
 
 	"github.com/dvoyni/cog/kernel/container"
@@ -30,6 +31,11 @@ type Kernel struct {
 	// resources holds every resource by its type. Only Init adds to it, so it
 	// is never changed once the kernel starts.
 	resources map[reflect.Type]*resource
+	// sockets holds every declared socket by its type, and socketBindings
+	// every value bound, in plugin order. Only Init adds to them; the
+	// bindings resolve once every plugin has initialized.
+	sockets        map[reflect.Type]resolvableSocket
+	socketBindings []socketBinding
 	// dispatchers holds the dispatcher of every event type, each as its
 	// *dispatcher[E], its handlers sorted once every plugin has initialized.
 	dispatchers map[reflect.Type]eventDispatcher
@@ -78,6 +84,7 @@ func newKernel(supervisor *Supervisor, id KernelID, config map[PluginName]any, w
 		logger:      &Logger{kernel: id, handler: supervisor.logHandler},
 		workerCount: workerCount,
 		resources:   map[reflect.Type]*resource{},
+		sockets:     map[reflect.Type]resolvableSocket{},
 		dispatchers: map[reflect.Type]eventDispatcher{},
 		tasks:       []runnable{joinTask{}},
 		taskLocks:   []*taskLocks{{}},
@@ -140,7 +147,7 @@ func (k *Kernel) Logger() *Logger {
 }
 
 // init brings k up: it runs every plugin's Init and settles registration
-// (handler order, lock sets), starts k's workerCount workers, then runs every
+// (socket bindings, handler order, lock sets), starts k's workerCount workers, then runs every
 // plugin's Start.
 //
 // It fails at the first failure, and leaves nothing behind: a failed Init has
@@ -152,7 +159,8 @@ func (k *Kernel) init() error {
 	if err := k.lifecycle.init(); err != nil {
 		return err
 	}
-	// No resource or handler can be added from here on.
+	// No resource, socket or handler can be added from here on.
+	k.resolveSockets()
 	for _, d := range k.dispatchers {
 		d.sortHandlers()
 	}
@@ -165,6 +173,20 @@ func (k *Kernel) init() error {
 		return err
 	}
 	return nil
+}
+
+// resolveSockets hands every declared socket its bindings, once every plugin
+// has initialized. A binding to a socket no plugin declares is a composition
+// error, and panics; so is one a socket refuses.
+func (k *Kernel) resolveSockets() {
+	for _, binding := range k.socketBindings {
+		if _, declared := k.sockets[binding.socket]; !declared {
+			panic(fmt.Sprintf("kernel: plugin %q binds socket %v, which no plugin declares", binding.plugin, binding.socket))
+		}
+	}
+	for _, declared := range k.sockets {
+		declared.resolve(k.socketBindings)
+	}
 }
 
 // destroy takes k down: it runs Stop on every plugin in reverse, then makes

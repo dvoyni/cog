@@ -2,8 +2,8 @@
 
 The v1 kernel lives in `_legacy/kernel`. v2 keeps its resource model and lock
 semantics and changes three things: several kernels run under one supervisor,
-Ports and Adapters give way to plain resources, and jobs replace commands and
-resource-holding subscribers.
+Ports and Adapters become sockets, which are no resources, and jobs replace
+commands and resource-holding subscribers.
 
 ## Alloc-free
 
@@ -48,7 +48,8 @@ Supervisor ── lifetime, GetKernel and Broadcast, LogHandler
 | `Logger`     | A kernel's way to the `LogHandler`, from `Kernel.Logger()`: `LogErr`, `LogWarn`, `LogDebug`, their `Once` forms and `ForgetLogOnce`. |
 | `Signal`     | Reusable completion signal for code outside the kernel; armed by `Kernel.Notify`, read through `C()`. |
 | `Executor`   | One publication's work batch, handed to its handlers: `Schedule`, `ScheduleAfter`, `Join`, `Publish`. |
-| `Configurator` | Registration surface given to each plugin once: `InitResource`, `Resource`, `RegisterTask`, `RegisterTask0`…`RegisterTask8`, `PinToMainThread`, `Subscribe`, `OrderSubscriptions`. |
+| `Configurator` | Registration surface given to each plugin once: `InitResource`, `Resource`, `DeclareExclusiveSocket`, `DeclareSocket`, `BindSocket`, `RegisterTask`, `RegisterTask0`…`RegisterTask8`, `PinToMainThread`, `Subscribe`, `OrderSubscriptions`. |
+| `ExclusiveSocket[T]`, `Socket[T]` | Interfaces: the one handle to a socket, from its declaration. `ExclusiveSocket.Get()` answers its binding, `Socket.GetAll()` its bindings in plugin order, from `Start` on. One private socket type implements both. |
 | `Access`     | Handed to a task's constructor: `Read[T]`, `Write[T]` and `Use(task)` declare its locks and return what the body uses. |
 | `*Task[A, B]`| Registered code with pointer-free arg `A` and pointer-free result `B`; returned by `RegisterTask`. |
 | `Job[T]`     | One scheduled run answering `T`; what `ScheduleAfter` feeds from. |
@@ -141,13 +142,27 @@ silently.
   another type is a composition error and panics. No functional options:
   nothing outside `Init` reaches into the plugin.
 - **A plugin is never a resource,** so nothing reaches its lifecycle
-  methods. What it offers others is an interface it implements, installed as
-  `InitResource[I](p)`; such small interfaces live in the plugin package's
-  `resources.go`.
-- **Ports and Adapters are gone.** A slot declares what it needs as a resource
-  of interface type, and the extension that fills it calls
-  `InitResource[gfx.Backend](impl)`. Any number of contributors is a resource
-  holding a slice that each contributor appends to during registration.
+  methods. What it offers others is an interface it implements, bound to
+  the socket that needs it; such small interfaces live in the declaring
+  plugin package's `resources.go`.
+- **Sockets bind plugins to each other, and are no resources.** v1's Ports
+  and Adapters, renamed. A plugin that needs an implementation declares a
+  socket of `T` in `Init`, `DeclareExclusiveSocket[T](optional)` for one
+  binding or `DeclareSocket[T](optional)` for any number, and the plugins
+  that implement it call `BindSocket[T](impl)`.
+  - The handle the declaration answers is the only way to the bindings: a
+    socket takes no lock and has no lookup, so no task reaches an
+    implementation but through what the declaring plugin offers, in the
+    resources it installs.
+  - Bindings resolve after every plugin's `Init` and before any `Start`, so
+    the order of plugins in `Spawn` does not matter to them. `Get` in `Init`
+    panics; a plugin keeps the handle and reads it from `Start` on, or when
+    its resource is used.
+  - A socket is identified by `T`; two sockets of one interface need two
+    named types. Declaring one twice, two bindings of an exclusive socket,
+    none of a socket that is not optional, a binding to a socket nobody
+    declares and a nil binding are composition errors, and `Spawn` panics
+    naming the socket and the plugins.
 
 ## Tasks and jobs
 
