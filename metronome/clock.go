@@ -1,6 +1,9 @@
 package metronome
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // Clock is where metronome reads time from and how its tracks wait. metronome
 // reads time through its Clock alone, so a test or an agent can replace time
@@ -13,6 +16,13 @@ type Clock interface {
 	Now() time.Duration
 	// NewTimer makes a Timer. metronome makes one per track, at Start.
 	NewTimer() Timer
+	// SetWaitCallback hands the clock wait, which returns once every track
+	// reading the clock has settled, none with a beat in flight or owing one,
+	// or with ctx's error if ctx ends first. metronome sets it at Start and
+	// sets nil at Stop. A clock that moves time when told, as a test's or an
+	// agent's does, waits on it for the beats it let out to finish; a clock
+	// whose time runs on by itself ignores it. A clock serves one metronome.
+	SetWaitCallback(wait func(ctx context.Context) error)
 }
 
 // Timer is how a track waits for its next deadline. The clock decides when a

@@ -11,9 +11,9 @@ import (
 // PluginName is metronome's plugin name.
 const PluginName kernel.PluginName = "metronome"
 
-// Plugin is metronome: it runs one goroutine per declared track between Start
-// and Stop, each publishing its track's beats. It is listed before the plugins
-// that declare tracks, so it stops last.
+// Plugin is metronome: it runs one goroutine per track its Config declares,
+// between Start and Stop, each publishing its track's beats. It is listed
+// before the plugins handling those beats, so it stops last.
 type Plugin struct {
 	clock  Clock
 	tracks []*track
@@ -25,39 +25,67 @@ type Plugin struct {
 	trackGroup    sync.WaitGroup
 }
 
-// Option configures a Plugin as NewPlugin builds it.
-type Option func(plugin *Plugin)
-
-// NewPlugin returns metronome, configured by options. Without WithClock it
-// reads monotonic time, with the epoch at Start, and each track waits on one
-// reused time.Timer.
-func NewPlugin(options ...Option) *Plugin {
-	plugin := &Plugin{clock: NewWallClock()}
-	plugin.settleChanged.L = &plugin.mutex
-	for _, option := range options {
-		option(plugin)
-	}
-	return plugin
+// Config is metronome's part of the kernel's config, under PluginName. A
+// kernel spawned without one gets the zero Config.
+type Config struct {
+	// Clock is where metronome reads time and whose timers its tracks wait
+	// on. Nil is a WallClock: monotonic time, with the epoch at Start.
+	Clock Clock
+	// Tracks are the tracks metronome paces, each made by NewTrack.
+	Tracks []Track
 }
 
-// WithClock makes metronome read time from clock and wait on its timers.
-func WithClock(clock Clock) Option {
-	return func(plugin *Plugin) { plugin.clock = clock }
+// NewPlugin returns metronome. It is configured by its Config, given to Init.
+func NewPlugin() *Plugin {
+	plugin := &Plugin{}
+	plugin.settleChanged.L = &plugin.mutex
+	return plugin
 }
 
 // Name returns PluginName.
 func (*Plugin) Name() kernel.PluginName { return PluginName }
 
-// Init installs the plugin as a resource, for AddTrack to find.
+// Init takes the clock and the tracks from config, a Config or nil, and
+// builds each track's state. A config of another type, or two tracks of one
+// event type, is a composition error, and panics.
 func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
-	configurator.InitResource(p)
+	var metronomeConfig Config
+	if config != nil {
+		var ok bool
+		metronomeConfig, ok = config.(Config)
+		if !ok {
+			panic(fmt.Sprintf("metronome: config is a %T, want a metronome.Config", config))
+		}
+	}
+	p.clock = metronomeConfig.Clock
+	if p.clock == nil {
+		p.clock = NewWallClock()
+	}
+	for _, declared := range metronomeConfig.Tracks {
+		for _, t := range p.tracks {
+			if t.eventType == declared.eventType {
+				panic(fmt.Sprintf("metronome: two tracks of %v", declared.eventType))
+			}
+		}
+		signals := make([]*kernel.Signal, max(declared.settings.MaxInFlight, 1))
+		for i := range signals {
+			signals[i] = kernel.NewSignal()
+		}
+		p.tracks = append(p.tracks, &track{
+			eventType:    declared.eventType,
+			settings:     declared.settings,
+			nextDeadline: declared.settings.Step + declared.settings.MinInterval,
+			signals:      signals,
+			publish:      declared.newPublish(),
+		})
+	}
 	return nil
 }
 
 // Start starts the default clock's epoch and one goroutine per track, each
-// publishing its track's beats on it. On a ManualClock it links the plugin to
-// the clock, so Advance waits for its tracks to settle, and gives each
-// variable track a timer that fires only at the end of an Advance or a Jump.
+// publishing its track's beats on it, and hands the clock its wait callback.
+// On a ManualClock it gives each variable track a timer that fires only at
+// the end of an Advance or a Jump.
 //
 // It first finds each track's reference track, every track being declared by
 // then. A track interpolating against no fixed-step track is a composition
@@ -94,19 +122,15 @@ func (p *Plugin) Start(kernel *kernel.Kernel) error {
 		p.trackGroup.Add(1)
 		go t.run(p, kernel)
 	}
-	if isManual {
-		manual.attach(p)
-	}
+	p.clock.SetWaitCallback(p.wait)
 	return nil
 }
 
-// Stop signals every track goroutine and joins them, so no beat is published
-// after it returns, and unlinks the plugin from a ManualClock. It does not
-// wait on beats in flight, which the kernel finishes.
+// Stop takes the wait callback back from the clock, then signals every track
+// goroutine and joins them, so no beat is published after it returns. It does
+// not wait on beats in flight, which the kernel finishes.
 func (p *Plugin) Stop(kernel *kernel.Kernel) error {
-	if manual, ok := p.clock.(*ManualClock); ok {
-		manual.detach(p)
-	}
+	p.clock.SetWaitCallback(nil)
 	close(p.stop)
 	p.trackGroup.Wait()
 	return nil
@@ -115,10 +139,10 @@ func (p *Plugin) Stop(kernel *kernel.Kernel) error {
 // Destroy does nothing.
 func (*Plugin) Destroy() error { return nil }
 
-// Wait returns once every track has settled: none has a beat in flight, and
-// none owes a beat, having reached it without publishing it. It answers
-// ctx.Err() if ctx ends first. A track not running counts as settled.
-func (p *Plugin) Wait(ctx context.Context) error {
+// wait is the clock's wait callback: it returns once every track has settled,
+// none with a beat in flight nor owing one, or with ctx's error if ctx ends
+// first. A track not running counts as settled.
+func (p *Plugin) wait(ctx context.Context) error {
 	// A context that is never done needs no waking, and Advance waits on one
 	// every step: skipping AfterFunc keeps that wait from allocating.
 	if ctx.Done() != nil {

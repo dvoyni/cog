@@ -69,22 +69,27 @@ func record[E any](c *kernel.Configurator, r *recorder, header func(E) metronome
 // updateBeat reads an UpdateEvent's beat header.
 func updateBeat(event metronome.UpdateEvent) metronome.Beat { return event.Beat }
 
-// spawn spawns a kernel of metronome on clock and a test plugin whose Init
-// runs init, and answers the plugin and the kernel. The supervisor quits when
-// the test ends.
-func spawn(t *testing.T, clock metronome.Clock, init func(c *kernel.Configurator)) (*metronome.Plugin, *kernel.Kernel) {
+// spawn spawns a kernel of metronome on clock pacing tracks, and a test
+// plugin whose Init runs init, and answers the kernel. The supervisor quits
+// when the test ends.
+func spawn(t *testing.T, clock metronome.Clock, tracks []metronome.Track, init func(c *kernel.Configurator)) *kernel.Kernel {
 	t.Helper()
-	plugin := metronome.NewPlugin(metronome.WithClock(clock))
-	return plugin, spawnPlugin(t, plugin, init)
+	return spawnPlugin(t, metronome.NewPlugin(), metronomeConfig(clock, tracks...), init)
+}
+
+// metronomeConfig answers a kernel config giving metronome clock and tracks.
+func metronomeConfig(clock metronome.Clock, tracks ...metronome.Track) map[kernel.PluginName]any {
+	return map[kernel.PluginName]any{metronome.PluginName: metronome.Config{Clock: clock, Tracks: tracks}}
 }
 
 // spawnPlugin spawns a kernel of plugin and a test plugin whose Init runs
-// init, and answers the kernel. The supervisor quits when the test ends.
-func spawnPlugin(t *testing.T, plugin *metronome.Plugin, init func(c *kernel.Configurator)) *kernel.Kernel {
+// init, with config, and answers the kernel. The supervisor quits when the
+// test ends.
+func spawnPlugin(t *testing.T, plugin *metronome.Plugin, config map[kernel.PluginName]any, init func(c *kernel.Configurator)) *kernel.Kernel {
 	t.Helper()
 	s := kernel.NewSupervisor(nil)
 	t.Cleanup(s.Quit)
-	id, err := s.Spawn(nil, 4, plugin, testPlugin{init: init})
+	id, err := s.Spawn(config, 4, plugin, testPlugin{init: init})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,8 +109,7 @@ func fixedBeats(step time.Duration, first, last uint64) []metronome.Beat {
 func TestAdvancePublishesEveryBeatDue(t *testing.T) {
 	clock := metronome.NewManualClock()
 	r := &recorder{}
-	spawn(t, clock, func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
+	spawn(t, clock, []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(10))}, func(c *kernel.Configurator) {
 		record(c, r, updateBeat)
 	})
 
@@ -122,8 +126,7 @@ func TestAdvancePublishesEveryBeatDue(t *testing.T) {
 func TestFixedStepZeroIsSixtyHertz(t *testing.T) {
 	clock := metronome.NewManualClock()
 	r := &recorder{}
-	spawn(t, clock, func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(0))
+	spawn(t, clock, []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(0))}, func(c *kernel.Configurator) {
 		record(c, r, updateBeat)
 	})
 
@@ -144,9 +147,7 @@ func slowBeat(event slowEvent) metronome.Beat { return event.Beat }
 func TestAdvanceWalksDeadlineByDeadlineAcrossTracks(t *testing.T) {
 	clock := metronome.NewManualClock()
 	r := &recorder{}
-	spawn(t, clock, func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
-		metronome.AddTrack[slowEvent](c, metronome.FixedStep(4))
+	spawn(t, clock, []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(10)), metronome.NewTrack[slowEvent](metronome.FixedStep(4))}, func(c *kernel.Configurator) {
 		record(c, r, updateBeat)
 		record(c, r, slowBeat)
 	})
@@ -174,8 +175,7 @@ func TestAdvanceWalksDeadlineByDeadlineAcrossTracks(t *testing.T) {
 
 func TestHandPublishedEventHasZeroBeat(t *testing.T) {
 	r := &recorder{}
-	_, k := spawn(t, metronome.NewManualClock(), func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
+	k := spawn(t, metronome.NewManualClock(), []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(10))}, func(c *kernel.Configurator) {
 		record(c, r, updateBeat)
 	})
 
@@ -194,10 +194,17 @@ func TestTwoTracksOfOneEventTypePanic(t *testing.T) {
 			t.Fatal("a second track of UpdateEvent did not panic")
 		}
 	}()
-	spawn(t, metronome.NewManualClock(), func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(20))
-	})
+	spawn(t, metronome.NewManualClock(), []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(10)), metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(20))}, func(c *kernel.Configurator) {})
+}
+
+func TestConfigOfAnotherTypePanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("a config of another type than Config did not panic")
+		}
+	}()
+	config := map[kernel.PluginName]any{metronome.PluginName: metronome.NewManualClock()}
+	spawnPlugin(t, metronome.NewPlugin(), config, func(c *kernel.Configurator) {})
 }
 
 // testClock is a Clock the test drives: Now reads what setNow set, and a timer
@@ -207,6 +214,7 @@ type testClock struct {
 	mutex    sync.Mutex
 	now      time.Duration
 	timers   []*testTimer
+	wait     func(ctx context.Context) error
 }
 
 type testTimer struct {
@@ -228,6 +236,21 @@ func (c *testClock) NewTimer() metronome.Timer {
 	timer := &testTimer{clock: c, channel: make(chan struct{}, 1)}
 	c.timers = append(c.timers, timer)
 	return timer
+}
+
+func (c *testClock) SetWaitCallback(wait func(ctx context.Context) error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.wait = wait
+}
+
+// Wait waits on metronome's wait callback, as a clock moving time when told
+// does.
+func (c *testClock) Wait(ctx context.Context) error {
+	c.mutex.Lock()
+	wait := c.wait
+	c.mutex.Unlock()
+	return wait(ctx)
 }
 
 func (c *testClock) setNow(now time.Duration) {
@@ -291,11 +314,10 @@ func TestWaitReturnsOnceEveryTrackHasSettled(t *testing.T) {
 	clock := &testClock{}
 	r := &recorder{}
 	gate := make(chan struct{})
-	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
+	spawn(t, clock, []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(10))}, func(c *kernel.Configurator) {
 		gatedRecord(c, r, updateBeat, gate)
 	})
-	if err := plugin.Wait(t.Context()); err != nil {
+	if err := clock.Wait(t.Context()); err != nil {
 		t.Fatalf("Wait before any deadline answered %v", err)
 	}
 
@@ -303,12 +325,12 @@ func TestWaitReturnsOnceEveryTrackHasSettled(t *testing.T) {
 	clock.fire(0)
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
-	if err := plugin.Wait(ctx); !errors.Is(err, context.DeadlineExceeded) {
+	if err := clock.Wait(ctx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Wait with a beat held in flight answered %v, want the context's deadline", err)
 	}
 
 	close(gate)
-	if err := plugin.Wait(t.Context()); err != nil {
+	if err := clock.Wait(t.Context()); err != nil {
 		t.Fatalf("Wait answered %v", err)
 	}
 	if got, want := r.all(), fixedBeats(100*time.Millisecond, 1, 1); !slices.Equal(got, want) {
@@ -322,9 +344,7 @@ func TestTracksRunIndependently(t *testing.T) {
 	gate := make(chan struct{})
 	defer close(gate)
 	handled := make(chan struct{}, 1)
-	spawn(t, clock, func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
-		metronome.AddTrack[slowEvent](c, metronome.FixedStep(4))
+	spawn(t, clock, []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(10)), metronome.NewTrack[slowEvent](metronome.FixedStep(4))}, func(c *kernel.Configurator) {
 		c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event metronome.UpdateEvent) (metronome.UpdateEvent, kernel.JobHandle) {
 			handled <- struct{}{}
 			<-gate // a handler that stalls its track's goroutine
@@ -375,10 +395,8 @@ func TestNothingPublishesAfterStop(t *testing.T) {
 	beats := &atomic.Int64{}
 	late := &atomic.Int64{}
 	s := kernel.NewSupervisor(nil)
-	plugin := metronome.NewPlugin(metronome.WithClock(&testClock{autoFire: true}))
-	_, err := s.Spawn(nil, 4, stopObserver{stopped: stopped}, plugin, testPlugin{init: func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
-		metronome.AddTrack[slowEvent](c, metronome.FixedStep(4))
+	plugin := metronome.NewPlugin()
+	_, err := s.Spawn(metronomeConfig(&testClock{autoFire: true}, metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(10)), metronome.NewTrack[slowEvent](metronome.FixedStep(4))), 4, stopObserver{stopped: stopped}, plugin, testPlugin{init: func(c *kernel.Configurator) {
 		count := func() {
 			beats.Add(1)
 			if stopped.Load() {
@@ -451,13 +469,18 @@ func heldRecord[E any](c *kernel.Configurator, published *recorder, header func(
 	})
 }
 
-// waitHeld fails t unless Wait on plugin is still waiting after a while: a
+// waiter is a clock that waits for the tracks reading it to settle.
+type waiter interface {
+	Wait(ctx context.Context) error
+}
+
+// waitHeld fails t unless Wait on clock is still waiting after a while: a
 // track has a beat in flight or owes debt.
-func waitHeld(t *testing.T, plugin *metronome.Plugin) {
+func waitHeld(t *testing.T, clock waiter) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
-	if err := plugin.Wait(ctx); !errors.Is(err, context.DeadlineExceeded) {
+	if err := clock.Wait(ctx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Wait on a track held back answered %v, want the context's deadline", err)
 	}
 }
@@ -480,13 +503,12 @@ func TestJumpPublishesDebtWithinTheCap(t *testing.T) {
 	const step = 100 * time.Millisecond
 	clock := metronome.NewManualClock()
 	r := &recorder{}
-	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
+	spawn(t, clock, []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(10))}, func(c *kernel.Configurator) {
 		record(c, r, updateBeat)
 	})
 
 	clock.Jump(10 * step)
-	if err := plugin.Wait(t.Context()); err != nil {
+	if err := clock.Wait(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	want := []metronome.Beat{
@@ -504,13 +526,12 @@ func TestMaxDebtCapsDebt(t *testing.T) {
 	const step = 100 * time.Millisecond
 	clock := metronome.NewManualClock()
 	r := &recorder{}
-	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.Settings{Step: step, MaxInFlight: 1, MaxDebt: 2})
+	spawn(t, clock, []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.Settings{Step: step, MaxInFlight: 1, MaxDebt: 2})}, func(c *kernel.Configurator) {
 		record(c, r, updateBeat)
 	})
 
 	clock.Jump(5 * step)
-	if err := plugin.Wait(t.Context()); err != nil {
+	if err := clock.Wait(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	want := []metronome.Beat{beatAt(step, 1, 3, 4), beatAt(step, 2, 0, 5)}
@@ -523,19 +544,18 @@ func TestTimeFromStartIsDeltaPlusLostAcrossDrops(t *testing.T) {
 	const step = 100 * time.Millisecond
 	clock := metronome.NewManualClock()
 	r := &recorder{}
-	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
+	spawn(t, clock, []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(10))}, func(c *kernel.Configurator) {
 		record(c, r, updateBeat)
 	})
 
 	clock.Advance(3 * step)
 	clock.Jump(9 * step)
-	if err := plugin.Wait(t.Context()); err != nil {
+	if err := clock.Wait(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	clock.Advance(2*step + step/2)
 	clock.Jump(20 * step)
-	if err := plugin.Wait(t.Context()); err != nil {
+	if err := clock.Wait(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	beats := r.all()
@@ -552,19 +572,18 @@ func TestMaxInFlightHoldsBackATrack(t *testing.T) {
 	clock := metronome.NewManualClock()
 	published := &recorder{}
 	gate := make(chan struct{})
-	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.Settings{Step: step, MaxInFlight: 2})
+	spawn(t, clock, []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.Settings{Step: step, MaxInFlight: 2})}, func(c *kernel.Configurator) {
 		heldRecord(c, published, updateBeat, gate)
 	})
 
 	clock.Jump(3 * step)
-	waitHeld(t, plugin)
+	waitHeld(t, clock)
 	if got, want := published.all(), fixedBeats(step, 1, 2); !slices.Equal(got, want) {
 		t.Fatalf("with two beats held in flight the track published %v, want %v", got, want)
 	}
 
 	close(gate)
-	if err := plugin.Wait(t.Context()); err != nil {
+	if err := clock.Wait(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := published.all(), fixedBeats(step, 1, 3); !slices.Equal(got, want) {
@@ -577,16 +596,15 @@ func TestMaxInFlightZeroIsNoLimit(t *testing.T) {
 	clock := metronome.NewManualClock()
 	published := &recorder{}
 	gate := make(chan struct{})
-	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.Settings{Step: step})
+	spawn(t, clock, []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.Settings{Step: step})}, func(c *kernel.Configurator) {
 		heldRecord(c, published, updateBeat, gate)
 	})
 
 	clock.Jump(4 * step)
 	waitPublished(t, published, 4)
-	waitHeld(t, plugin)
+	waitHeld(t, clock)
 	close(gate)
-	if err := plugin.Wait(t.Context()); err != nil {
+	if err := clock.Wait(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := published.all(), fixedBeats(step, 1, 4); !slices.Equal(got, want) {
@@ -599,21 +617,20 @@ func TestHeldOutDependencyStallsTheTrackUntilReleased(t *testing.T) {
 	clock := metronome.NewManualClock()
 	published := &recorder{}
 	gate := make(chan struct{})
-	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
+	spawn(t, clock, []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(10))}, func(c *kernel.Configurator) {
 		heldRecord(c, published, updateBeat, gate)
 	})
 
 	clock.Jump(step)
 	waitPublished(t, published, 1)
 	clock.Jump(10 * step)
-	waitHeld(t, plugin)
+	waitHeld(t, clock)
 	if got, want := published.all(), fixedBeats(step, 1, 1); !slices.Equal(got, want) {
 		t.Fatalf("a stalled track published %v, want %v", got, want)
 	}
 
 	close(gate)
-	if err := plugin.Wait(t.Context()); err != nil {
+	if err := clock.Wait(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	want := []metronome.Beat{
@@ -633,8 +650,7 @@ func TestAdvanceSettlesEachBeatWithSeveralInFlight(t *testing.T) {
 	clock := metronome.NewManualClock()
 	finished := &atomic.Uint64{}
 	early := &atomic.Int64{}
-	spawn(t, clock, func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.Settings{Step: step, MaxInFlight: 2})
+	spawn(t, clock, []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.Settings{Step: step, MaxInFlight: 2})}, func(c *kernel.Configurator) {
 		task := c.RegisterTask(func(access *kernel.Access) kernel.TaskBody[metronome.UpdateEvent, kernel.NoResult] {
 			return func(k *kernel.Kernel, event metronome.UpdateEvent) kernel.NoResult {
 				time.Sleep(time.Millisecond)
@@ -661,8 +677,7 @@ func TestAdvanceSettlesEachBeatWithSeveralInFlight(t *testing.T) {
 
 func TestBeatPublishAndWaitAllocateNothing(t *testing.T) {
 	clock := metronome.NewManualClock()
-	spawn(t, clock, func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
+	spawn(t, clock, []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(10))}, func(c *kernel.Configurator) {
 		task := c.RegisterTask(func(access *kernel.Access) kernel.TaskBody[metronome.UpdateEvent, kernel.NoResult] {
 			return func(k *kernel.Kernel, event metronome.UpdateEvent) kernel.NoResult { return kernel.NoResult{} }
 		})
@@ -694,12 +709,10 @@ func TestVariableTrackBeatsOncePerCallAtTheTarget(t *testing.T) {
 	const ms = time.Millisecond
 	clock := metronome.NewManualClock()
 	r := &recorder{}
-	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
-		metronome.AddTrack[drawEvent](c, metronome.Variable())
+	spawn(t, clock, []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(10)), metronome.NewTrack[drawEvent](metronome.Variable())}, func(c *kernel.Configurator) {
 		record(c, r, drawBeat)
 	})
-	if err := plugin.Wait(t.Context()); err != nil {
+	if err := clock.Wait(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if got := r.all(); len(got) != 0 {
@@ -711,7 +724,7 @@ func TestVariableTrackBeatsOncePerCallAtTheTarget(t *testing.T) {
 		t.Fatalf("an Advance across 3 update deadlines saw %v, want one beat at the target %v", got, want)
 	}
 	clock.Jump(50 * ms)
-	if err := plugin.Wait(t.Context()); err != nil {
+	if err := clock.Wait(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	want := []metronome.Beat{variableBeat(1, 350*ms, 0, 350*ms), variableBeat(2, 50*ms, 0, 400*ms)}
@@ -724,10 +737,9 @@ func TestMinIntervalSpacesVariableBeats(t *testing.T) {
 	const ms = time.Millisecond
 	clock := metronome.NewManualClock()
 	r := &recorder{}
-	spawn(t, clock, func(c *kernel.Configurator) {
-		settings := metronome.Variable()
-		settings.MinInterval = 100 * ms
-		metronome.AddTrack[drawEvent](c, settings)
+	settings := metronome.Variable()
+	settings.MinInterval = 100 * ms
+	spawn(t, clock, []metronome.Track{metronome.NewTrack[drawEvent](settings)}, func(c *kernel.Configurator) {
 		record(c, r, drawBeat)
 	})
 
@@ -744,16 +756,15 @@ func TestMaxDeltaClampsAStall(t *testing.T) {
 	const ms = time.Millisecond
 	clock := metronome.NewManualClock()
 	r := &recorder{}
-	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
-		settings := metronome.Variable()
-		settings.MaxDelta = 50 * ms
-		metronome.AddTrack[drawEvent](c, settings)
+	settings := metronome.Variable()
+	settings.MaxDelta = 50 * ms
+	spawn(t, clock, []metronome.Track{metronome.NewTrack[drawEvent](settings)}, func(c *kernel.Configurator) {
 		record(c, r, drawBeat)
 	})
 
 	clock.Advance(20 * ms)
 	clock.Jump(500 * ms)
-	if err := plugin.Wait(t.Context()); err != nil {
+	if err := clock.Wait(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	clock.Advance(30 * ms)
@@ -774,8 +785,7 @@ func TestVariableTrackHeldInFlightBeatsOnceReleased(t *testing.T) {
 	clock := metronome.NewManualClock()
 	published := &recorder{}
 	gate := make(chan struct{})
-	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
-		metronome.AddTrack[drawEvent](c, metronome.Variable()) // one beat in flight
+	spawn(t, clock, []metronome.Track{metronome.NewTrack[drawEvent](metronome.Variable())}, func(c *kernel.Configurator) {
 		heldRecord(c, published, drawBeat, gate)
 	})
 
@@ -783,12 +793,12 @@ func TestVariableTrackHeldInFlightBeatsOnceReleased(t *testing.T) {
 	waitPublished(t, published, 1)
 	clock.Jump(10 * ms)
 	clock.Jump(10 * ms)
-	waitHeld(t, plugin)
+	waitHeld(t, clock)
 	if got, want := published.all(), []metronome.Beat{variableBeat(1, 10*ms, 0, 10*ms)}; !slices.Equal(got, want) {
 		t.Fatalf("with its beat held a bare Variable track published %v, want only %v", got, want)
 	}
 	close(gate)
-	if err := plugin.Wait(t.Context()); err != nil {
+	if err := clock.Wait(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	want := []metronome.Beat{variableBeat(1, 10*ms, 0, 10*ms), variableBeat(2, 20*ms, 0, 30*ms)}
@@ -801,8 +811,7 @@ func TestVariableTrackWaitsOnItsTimerResetToNow(t *testing.T) {
 	const ms = time.Millisecond
 	clock := &testClock{}
 	r := &recorder{}
-	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
-		metronome.AddTrack[drawEvent](c, metronome.Variable())
+	spawn(t, clock, []metronome.Track{metronome.NewTrack[drawEvent](metronome.Variable())}, func(c *kernel.Configurator) {
 		record(c, r, drawBeat)
 	})
 
@@ -811,7 +820,7 @@ func TestVariableTrackWaitsOnItsTimerResetToNow(t *testing.T) {
 	}
 	clock.setNow(10 * ms)
 	clock.fire(0)
-	if err := plugin.Wait(t.Context()); err != nil {
+	if err := clock.Wait(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	clock.setNow(25 * ms)
@@ -857,9 +866,7 @@ func TestUninterpolatedTracksHaveZeroAlphaAndInterpolatedTick(t *testing.T) {
 	const ms = time.Millisecond
 	clock := metronome.NewManualClock()
 	r := &recorder{}
-	spawn(t, clock, func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
-		metronome.AddTrack[drawEvent](c, metronome.Variable())
+	spawn(t, clock, []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(10)), metronome.NewTrack[drawEvent](metronome.Variable())}, func(c *kernel.Configurator) {
 		record(c, r, updateBeat)
 		record(c, r, drawBeat)
 	})
@@ -881,9 +888,7 @@ func TestBeatInterpolatesAgainstTheReferenceTrack(t *testing.T) {
 	const ms = time.Millisecond
 	clock := metronome.NewManualClock()
 	r := &recorder{}
-	spawn(t, clock, func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
-		metronome.AddTrack[drawEvent](c, interpolatingDraw())
+	spawn(t, clock, []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(10)), metronome.NewTrack[drawEvent](interpolatingDraw())}, func(c *kernel.Configurator) {
 		record(c, r, drawBeat)
 	})
 
@@ -904,9 +909,7 @@ func TestAlphaWhileTheReferenceTrackIsInDebt(t *testing.T) {
 	clock := metronome.NewManualClock()
 	r := &recorder{}
 	gate := make(chan struct{})
-	plugin, _ := spawn(t, clock, func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
-		metronome.AddTrack[drawEvent](c, interpolatingDraw())
+	spawn(t, clock, []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(10)), metronome.NewTrack[drawEvent](interpolatingDraw())}, func(c *kernel.Configurator) {
 		c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event metronome.UpdateEvent) (metronome.UpdateEvent, kernel.JobHandle) {
 			if event.Tick >= 2 {
 				<-gate // tick 2 does not finish publishing until released
@@ -920,7 +923,7 @@ func TestAlphaWhileTheReferenceTrackIsInDebt(t *testing.T) {
 	clock.Jump(3 * step)
 	waitPublished(t, r, 2)
 	close(gate)
-	if err := plugin.Wait(t.Context()); err != nil {
+	if err := clock.Wait(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	clock.Advance(step / 4)
@@ -937,9 +940,7 @@ func TestInterpolationReadsAReferenceTrackBeatingAlongside(t *testing.T) {
 	r := &recorder{}
 	// Every timer fires at once on every Reset, so both tracks beat as fast as
 	// they can, the update track's ticks published while draw beats read them.
-	spawn(t, &testClock{autoFire: true}, func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
-		metronome.AddTrack[drawEvent](c, interpolatingDraw())
+	spawn(t, &testClock{autoFire: true}, []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(10)), metronome.NewTrack[drawEvent](interpolatingDraw())}, func(c *kernel.Configurator) {
 		record(c, r, drawBeat)
 	})
 
@@ -969,12 +970,9 @@ func TestInterpolatingAgainstNoFixedStepTrackPanics(t *testing.T) {
 					t.Fatalf("interpolating against the %s track %v did not panic", name, reference)
 				}
 			}()
-			spawn(t, metronome.NewManualClock(), func(c *kernel.Configurator) {
-				metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
-				settings := metronome.Variable()
-				settings.InterpolateAgainst = reference
-				metronome.AddTrack[drawEvent](c, settings)
-			})
+			settings := metronome.Variable()
+			settings.InterpolateAgainst = reference
+			spawn(t, metronome.NewManualClock(), []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(10)), metronome.NewTrack[drawEvent](settings)}, func(c *kernel.Configurator) {})
 		})
 	}
 }

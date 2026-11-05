@@ -41,8 +41,7 @@ func TestWallClockIsTheDefault(t *testing.T) {
 	plugin := metronome.NewPlugin()
 	time.Sleep(100 * time.Millisecond) // an epoch at NewPlugin would make every beat below due at once
 	started := time.Now()
-	spawnPlugin(t, plugin, func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(100))
+	spawnPlugin(t, plugin, metronomeConfig(nil, metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(100))), func(c *kernel.Configurator) {
 		record(c, r, updateBeat)
 	})
 
@@ -60,8 +59,7 @@ func TestWallClockEpochIsAtStart(t *testing.T) {
 	clock := metronome.NewWallClock()
 	time.Sleep(100 * time.Millisecond) // an epoch at NewWallClock would make every beat below due at once
 	started := time.Now()
-	spawnPlugin(t, metronome.NewPlugin(metronome.WithClock(clock)), func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(100))
+	spawnPlugin(t, metronome.NewPlugin(), metronomeConfig(clock, metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(100))), func(c *kernel.Configurator) {
 		record(c, r, updateBeat)
 	})
 
@@ -77,8 +75,7 @@ func TestWallClockEpochIsAtStart(t *testing.T) {
 func TestWallClockFiresAPastDeadlineAtOnce(t *testing.T) {
 	r := &recorder{}
 	stalled := make(chan time.Time, 1)
-	spawnPlugin(t, metronome.NewPlugin(), func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(10))
+	spawnPlugin(t, metronome.NewPlugin(), metronomeConfig(nil, metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(10))), func(c *kernel.Configurator) {
 		c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event metronome.UpdateEvent) (metronome.UpdateEvent, kernel.JobHandle) {
 			if event.Tick == 1 {
 				time.Sleep(time.Second) // about ten steps fall due meanwhile
@@ -109,8 +106,7 @@ func TestWallClockFiresAPastDeadlineAtOnce(t *testing.T) {
 
 func TestWallClockBeatAllocatesNothing(t *testing.T) {
 	var beats <-chan metronome.Beat
-	spawnPlugin(t, metronome.NewPlugin(), func(c *kernel.Configurator) {
-		metronome.AddTrack[metronome.UpdateEvent](c, metronome.FixedStep(1000))
+	spawnPlugin(t, metronome.NewPlugin(), metronomeConfig(nil, metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(1000))), func(c *kernel.Configurator) {
 		beats = beatSignal(c)
 	})
 	beat := func() { <-beats }

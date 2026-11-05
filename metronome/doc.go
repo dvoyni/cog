@@ -1,12 +1,14 @@
 // Package metronome paces the work a kernel does over time.
 //
-// An application declares tracks: a plugin listed after metronome calls
-// AddTrack in its Init, naming the track's event type, which embeds Beat, and
-// its Settings. Each track runs on its own goroutine from metronome's Start
-// to its Stop and publishes its event as beats, so its handlers run there and
-// a slow handler delays no other track.
+// An application declares tracks in metronome's Config, given under
+// PluginName in the kernel's config. NewTrack names a track's event type,
+// which embeds Beat, and its Settings. Each track runs on its own goroutine
+// from metronome's Start to its Stop and publishes its event as beats, so its
+// handlers run there and a slow handler delays no other track.
 //
-//	metronome.AddTrack[metronome.UpdateEvent](configurator, metronome.FixedStep(60))
+//	metronome.Config{Tracks: []metronome.Track{
+//		metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(60)),
+//	}}
 //
 // A fixed-step track's deadlines are computed from the clock's epoch, one
 // step apart, never summed from sleeps. Being past the next deadline is debt:
@@ -44,7 +46,7 @@
 //
 //	settings := metronome.Variable()
 //	settings.InterpolateAgainst = reflect.TypeFor[metronome.UpdateEvent]()
-//	metronome.AddTrack[RenderEvent](configurator, settings)
+//	metronome.NewTrack[RenderEvent](settings)
 //
 // Each beat's InterpolatedTick is the reference track's last tick published
 // before it, whose state its tasks read, and Alpha is how far past that
@@ -53,12 +55,13 @@
 // the beat shows the newest state.
 //
 // metronome reads time only through its Clock. The default, a WallClock,
-// reads monotonic time with the epoch at Start; WithClock gives another. A
+// reads monotonic time with the epoch at Start; Config.Clock gives another. A
 // ManualClock moves only when told: Advance walks every track deadline by
 // deadline, letting each beat due publish and settle, and Jump moves time at
 // once, as a stall would, so debt builds. A variable track beats at most once
-// per Advance or Jump, at its target time. Plugin.Wait returns once every
-// track has settled: no beat in flight and no debt.
+// per Advance or Jump, at its target time. metronome hands its clock a wait
+// callback, through which ManualClock.Wait returns once every track has
+// settled: no beat in flight and no debt.
 //
 // metronome knows nothing of rendering, windows, input or the ECS.
 //

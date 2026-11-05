@@ -1,6 +1,7 @@
 package metronome
 
 import (
+	"context"
 	"math"
 	"sync/atomic"
 	"time"
@@ -65,6 +66,10 @@ func (t *wallTimer) Stop() {
 	t.timer.Stop()
 	t.drain()
 }
+
+// SetWaitCallback ignores wait: wall time runs on, so there is nothing to
+// wait for before moving it.
+func (c *WallClock) SetWaitCallback(wait func(ctx context.Context) error) {}
 
 // start sets the epoch to now.
 func (c *WallClock) start() { c.epoch = time.Now() }
