@@ -293,7 +293,10 @@ Three fork changes, each its own build ticket proposed upstream as a PR:
   Windows maps keys from the layout-dependent virtual-key code; every other
   platform already reports positions.
 - [Cursor lock and confine on macOS in the gogpu fork](https://github.com/dvoyni/cog/issues/647):
-  macOS's cursor mode is a no-op today, so its effective mode reads Normal.
+  done in the fork and proposed as [gogpu#519](https://github.com/gogpu/gogpu/pull/519).
+  Both modes detach the cursor from the mouse; Confined moves the visible
+  cursor itself, clamped to the content area. While the window is unfocused
+  the effective mode reads Normal.
 - [Cursor warp in the gogpu fork](https://github.com/dvoyni/cog/issues/648):
   gogpu has no warp.
 
