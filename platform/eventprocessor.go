@@ -15,8 +15,14 @@ type eventProcessor struct {
 	// applied is every window as last applied through the WindowsSocket, in
 	// the order they were opened.
 	applied []appliedWindow
-	// changes is the batch of one run, its capacity kept between runs.
+	// changes is the batch of one run as the sockets report it, and events
+	// what the run publishes, folded from it; their capacity is kept between
+	// runs.
 	changes []InputChange
+	events  []InputChange
+	// modifiers is what the last key change reported, whose lock states the
+	// releases on focus loss carry.
+	modifiers Modifiers
 }
 
 // appliedWindow is one window as last applied through the WindowsSocket.
@@ -27,38 +33,48 @@ type appliedWindow struct {
 
 // processEvents is ProcessEvents, the pump task: it applies the request
 // through the bound WindowsSocket, lets it pump, collects the input changes,
-// folds them into the window state, then publishes them in order. Without a
-// WindowsSocket it applies nothing, and without an InputSourceSocket it
-// collects no input.
-func processEvents(k *kernel.Kernel, _ kernel.NoArg, processorHandle kernel.Write[*eventProcessor], managerHandle kernel.Write[*WindowManager]) kernel.NoResult {
+// folds them into the window and input state, then publishes them in order.
+// Without a WindowsSocket it applies nothing, and without an
+// InputSourceSocket it collects no input.
+func processEvents(k *kernel.Kernel, _ kernel.NoArg, processorHandle kernel.Write[*eventProcessor], managerHandle kernel.Write[*WindowManager], inputHandle kernel.Write[*InputState]) kernel.NoResult {
 	processor := processorHandle.Get()
 	manager := managerHandle.Get()
+	input := inputHandle.Get()
 	processor.changes = processor.changes[:0]
-	sourced := 0
+	processor.events = processor.events[:0]
 	if windows := processor.windows.Get(); windows != nil {
-		processor.changes = processor.apply(k, windows, manager, processor.changes)
-		sourced = len(processor.changes)
+		processor.apply(k, windows, manager)
 		processor.changes = windows.Pump(processor.changes)
 	}
 	if inputSource := processor.inputSource.Get(); inputSource != nil {
 		processor.changes = inputSource.AppendChanges(processor.changes)
 	}
-	for _, change := range processor.changes[sourced:] {
+	for _, change := range processor.changes {
 		if manager.findState(change.Window) < 0 {
 			panic(fmt.Sprintf("platform: an input change names %v, which the window implementation was not asked to open or reported closed", change.Window))
 		}
+		if change.Kind == InputChangeKey && !change.Key.isValid() {
+			panic(fmt.Sprintf("platform: an input change names %v, which is no key", change.Key))
+		}
 	}
-	for _, change := range processor.changes[sourced:] {
-		processor.fold(manager, change)
-	}
+	input.clearEdges()
 	for _, change := range processor.changes {
-		switch change.Kind {
+		processor.fold(manager, input, change)
+	}
+	for _, event := range processor.events {
+		switch event.Kind {
 		case InputChangeWindowOpened:
-			k.Publish(WindowOpenedEvent{Window: change.Window})
+			k.Publish(WindowOpenedEvent{Window: event.Window})
 		case InputChangeWindowClosed:
-			k.Publish(WindowClosedEvent{Window: change.Window})
+			k.Publish(WindowClosedEvent{Window: event.Window})
 		case InputChangeCloseRequested:
-			k.Publish(CloseRequestedEvent{Window: change.Window})
+			k.Publish(CloseRequestedEvent{Window: event.Window})
+		case InputChangeKey:
+			k.Publish(KeyEvent{Window: event.Window, Key: event.Key, Pressed: event.Pressed, Repeat: event.Repeat, Modifiers: event.Modifiers, Position: event.Position})
+		case InputChangeText:
+			k.Publish(TextEvent{Window: event.Window, Char: event.Char})
+		case InputChangeFocus:
+			k.Publish(FocusEvent{Window: event.Window, Focused: event.Focused})
 		}
 	}
 	return kernel.NoResult{}
@@ -67,9 +83,8 @@ func processEvents(k *kernel.Kernel, _ kernel.NoArg, processorHandle kernel.Writ
 // apply applies what changed in manager's request since the last run
 // through windows: it closes every window whose entry is gone, then opens
 // every new one and changes every edited one, in the order they were opened.
-// It appends a closed change for each window it closed to changes, and
-// answers it.
-func (processor *eventProcessor) apply(k *kernel.Kernel, windows WindowsSocket, manager *WindowManager, changes []InputChange) []InputChange {
+// It adds a closed event for each window it closed to the run's events.
+func (processor *eventProcessor) apply(k *kernel.Kernel, windows WindowsSocket, manager *WindowManager) {
 	kept := processor.applied[:0]
 	for _, applied := range processor.applied {
 		if manager.findEntry(applied.window) >= 0 {
@@ -80,7 +95,7 @@ func (processor *eventProcessor) apply(k *kernel.Kernel, windows WindowsSocket, 
 			k.Logger().LogErr(fmt.Errorf("platform: closing a window: %w", err))
 		}
 		manager.removeState(applied.window)
-		changes = append(changes, InputChange{Kind: InputChangeWindowClosed, Window: applied.window})
+		processor.events = append(processor.events, InputChange{Kind: InputChangeWindowClosed, Window: applied.window})
 	}
 	clear(processor.applied[len(kept):])
 	processor.applied = kept
@@ -102,12 +117,13 @@ func (processor *eventProcessor) apply(k *kernel.Kernel, windows WindowsSocket, 
 			applied.entry = requested.entry
 		}
 	}
-	return changes
 }
 
 // fold applies one change from the WindowsSocket or the InputSourceSocket to
-// manager.
-func (processor *eventProcessor) fold(manager *WindowManager, change InputChange) {
+// manager and input, and adds the events it makes to the run's: the change
+// itself, but for the release of a key not held, which it drops, and focus
+// loss, which it follows with the release of every held key.
+func (processor *eventProcessor) fold(manager *WindowManager, input *InputState, change InputChange) {
 	switch change.Kind {
 	case InputChangeWindowOpened:
 		index := manager.findState(change.Window)
@@ -126,7 +142,30 @@ func (processor *eventProcessor) fold(manager *WindowManager, change InputChange
 		if index := processor.find(change.Window); index >= 0 {
 			processor.applied = slices.Delete(processor.applied, index, index+1)
 		}
+	case InputChangeKey:
+		processor.modifiers = change.Modifiers
+		if change.Pressed {
+			input.press(change.Key)
+		} else if input.IsHeld(change.Key) {
+			input.release(change.Key)
+		} else {
+			return
+		}
+	case InputChangeFocus:
+		if index := manager.findState(change.Window); index >= 0 {
+			manager.states[index].focused = change.Focused
+		}
+		if !change.Focused {
+			processor.modifiers &= ModifierCapsLock | ModifierNumLock
+			for key := range keyCount {
+				if input.IsHeld(key) {
+					input.release(key)
+					processor.events = append(processor.events, InputChange{Kind: InputChangeKey, Window: change.Window, Key: key, Modifiers: processor.modifiers})
+				}
+			}
+		}
 	}
+	processor.events = append(processor.events, change)
 }
 
 // find answers the index of window in applied, or -1 if it is not there.

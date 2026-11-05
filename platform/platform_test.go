@@ -121,6 +121,7 @@ type harness struct {
 	kernel     *kernel.Kernel
 	fake       *fake
 	manager    *platform.WindowManager
+	input      *platform.InputState
 	edit       func(manager *platform.WindowManager)
 	read       func(filesystem platform.FS, values *platform.Values)
 	write      func(filesystem platform.WriteFS, values *platform.Values)
@@ -134,6 +135,7 @@ func (h *harness) Name() kernel.PluginName { return "test" }
 func (h *harness) Init(c *kernel.Configurator, config any) error {
 	tasks, _ := c.Resource[platform.Tasks]()
 	h.manager, _ = c.Resource[*platform.WindowManager]()
+	h.input, _ = c.Resource[*platform.InputState]()
 	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event pumpEvent) (pumpEvent, kernel.JobHandle) {
 		return event, ex.Join(in, ex.Schedule(tasks.ProcessEvents, kernel.NoArg{}).Handle())
 	})
@@ -161,6 +163,9 @@ func (h *harness) Init(c *kernel.Configurator, config any) error {
 	subscribeRecord[platform.WindowOpenedEvent](c, h)
 	subscribeRecord[platform.WindowClosedEvent](c, h)
 	subscribeRecord[platform.CloseRequestedEvent](c, h)
+	subscribeRecord[platform.KeyEvent](c, h)
+	subscribeRecord[platform.TextEvent](c, h)
+	subscribeRecord[platform.FocusEvent](c, h)
 	return nil
 }
 

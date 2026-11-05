@@ -11,8 +11,8 @@ const PluginName kernel.PluginName = "platform"
 
 // Plugin is platform: it declares the sockets the window and input
 // implementations, the writable filesystem and the read mounts are bound to,
-// installs the FS resource over the files, Values, the WindowManager and
-// Tasks, registers ProcessEvents, and flushes the values when a window
+// installs the FS resource over the files, Values, the WindowManager, the
+// InputState and Tasks, registers ProcessEvents, and flushes the values when a window
 // closes.
 type Plugin struct {
 	// fileSystem is the FS resource, kept for Start to check its read
@@ -37,7 +37,7 @@ func (*Plugin) Name() kernel.PluginName { return PluginName }
 // Init declares the optional exclusive sockets of the window and input
 // implementations, the exclusive socket of the writable filesystem and the
 // socket of the read mounts, installs the FS resource, *Values,
-// *WindowManager and Tasks, and subscribes to WindowClosedEvent to flush the
+// *WindowManager, *InputState and Tasks, and subscribes to WindowClosedEvent to flush the
 // values. ProcessEvents is registered pinned to the main thread and
 // scheduled nowhere. A config of another type than Config is a composition
 // error, and panics; the kernel reports a socket bound wrongly.
@@ -63,11 +63,12 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 		return event, ex.Schedule(flushOnClose, kernel.NoArg{}, in).Handle()
 	})
 	configurator.InitResource(&WindowManager{})
+	configurator.InitResource(&InputState{})
 	configurator.InitResource(&eventProcessor{
 		windows:     configurator.DeclareExclusiveSocket[WindowsSocket](true),
 		inputSource: configurator.DeclareExclusiveSocket[InputSourceSocket](true),
 	})
-	tasks := Tasks{ProcessEvents: configurator.RegisterTask2(processEvents)}
+	tasks := Tasks{ProcessEvents: configurator.RegisterTask3(processEvents)}
 	configurator.PinToMainThread(tasks.ProcessEvents)
 	configurator.InitResource(tasks)
 	return nil
