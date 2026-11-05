@@ -211,7 +211,7 @@ The usual render modes are combinations of these, not modes of their own:
 
 | Mode | Settings |
 |---|---|
-| vsync | `MaxInFlight: 2`, no `MinInterval`. A FIFO present blocks, the beat's out dependency waits on it, and the display paces the track. |
+| vsync | `MaxInFlight: 2`, no `MinInterval`. A FIFO acquire blocks: the next beat's acquire waits for the display to free an image, holding that beat in flight, and the display paces the track. |
 | limit(fps) | `MinInterval: time.Second / fps`, plus a `MaxInFlight`. |
 | uncapped | A `MaxInFlight` alone. |
 
@@ -226,7 +226,7 @@ vsync.MaxDelta = 250 * time.Millisecond
 A beat is **in flight** until its publication's out dependency finishes: the
 job handle the last handler returns. A track starts a new beat only while
 fewer than `MaxInFlight` of its beats are in flight (zero is no limit). This
-is how the kernel's work paces a track: a render track whose present blocks
+is how the kernel's work paces a track: a render track whose acquire blocks
 holds its beat in flight, and the next waits.
 
 So a handler returns the work a beat started in its out dependency. One that

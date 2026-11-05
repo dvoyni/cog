@@ -1,0 +1,3 @@
+# Plugins declare their dependencies, checked and never sorted
+
+Supersedes [0006](0006-plugin-order-is-the-dependency-order.md) in part: the order plugins are passed to `Spawn` is still the order they run in, but `Plugin` now has `Dependencies() []PluginName`. Before each plugin's `Init`, `Spawn` checks that every plugin it names is already initialized; one listed later or not at all, the plugin itself, or a name given twice is a composition error and panics naming both plugins. Nothing is sorted, so 0006's objection to a sort and its errors stands; the declaration only turns a misordered `Spawn` from a vague "resource not initialized" panic deep in a later `Init` into one that names what is missing. Socket bindings resolve after every `Init` and are not dependencies.

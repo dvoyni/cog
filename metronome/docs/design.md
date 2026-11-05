@@ -51,11 +51,15 @@ the ticket that holds its detail.
   it holds is the payload:
 
   ```go
-  type RenderEvent struct {
+  type HitEvent struct {
   	metronome.Beat
-  	Ready kernel.JobHandle // gfx's first handler sets it
+  	Target EntityID
   }
   ```
+
+  gfx's `RenderEvent` is the beat alone, `struct{ metronome.Beat }`: gfx's
+  handler publishes its own `DrawEvent` inside it
+  ([gfx's shape in today's kernel](https://github.com/dvoyni/cog/issues/659)).
 
   metronome stamps the header through an unexported method on `*Beat`,
   promoted through the embedding, so `NewTrack` is constrained to
@@ -134,7 +138,7 @@ the ticket that holds its detail.
 
   | Mode | Settings |
   |---|---|
-  | vsync | `MaxInFlight: 2`, no `MinInterval`: a FIFO present blocks, the out dependency waits on it, and the display paces the track |
+  | vsync | `MaxInFlight: 2`, no `MinInterval`: a FIFO acquire blocks, so the next beat's acquire waits for the display to free an image and holds that beat in flight, and the display paces the track |
   | limit(fps) | `MinInterval: 1/fps`, plus `MaxInFlight` |
   | uncapped | `MaxInFlight` alone |
 

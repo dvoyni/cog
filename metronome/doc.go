@@ -32,8 +32,9 @@
 // The draw modes of a render track are combinations of a variable track's
 // settings, not modes of their own:
 //
-//   - vsync: MaxInFlight 2 and no MinInterval. A FIFO present blocks, the
-//     beat's out dependency waits on it, and the display paces the track.
+//   - vsync: MaxInFlight 2 and no MinInterval. A FIFO acquire blocks: the
+//     next beat's acquire waits for the display to free an image, holding
+//     that beat in flight, and the display paces the track.
 //   - limit(fps): MinInterval 1/fps, plus a MaxInFlight.
 //   - uncapped: a MaxInFlight alone.
 //
