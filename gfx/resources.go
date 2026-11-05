@@ -1,0 +1,125 @@
+package gfx
+
+import (
+	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/platform"
+)
+
+// Handlers is the resource holding every event handler gfx subscribes, so a
+// plugin listed after gfx orders its own around them with
+// configurator.OrderSubscriptions. gfx offers no tasks: acquire, flush and
+// present are its own.
+type Handlers struct {
+	// Draw handles RenderEvent: it schedules the pinned acquire, publishes
+	// DrawEvent, and schedules the flush and the pinned present after the
+	// nested publication's out dependency, which it returns.
+	Draw kernel.Sub[RenderEvent]
+	// CreateSurface handles platform.WindowOpenedEvent: it schedules the
+	// pinned creation of the window's surface.
+	CreateSurface kernel.Sub[platform.WindowOpenedEvent]
+	// ReleaseSurface handles platform.WindowClosedEvent: it schedules the
+	// pinned release of the window's surface.
+	ReleaseSurface kernel.Sub[platform.WindowClosedEvent]
+}
+
+// Device is the resource of the GPU as every job shares it, read with
+// kernel.Read[gfx.Device]: creating and releasing resources, writing them,
+// recording and submitting. Jobs holding the read lock use it at once.
+// Methods that answer an error answer ErrReleased for a released handle.
+type Device interface {
+	// Features answers the features the device was created with.
+	Features() Features
+	// Limits answers the limits the device was created with.
+	Limits() Limits
+	// AdapterInfo answers what GPU the device runs on.
+	AdapterInfo() AdapterInfo
+
+	CreateBuffer(descriptor BufferDescriptor) (Buffer, error)
+	ReleaseBuffer(buffer Buffer)
+	// BufferDescriptor answers the descriptor buffer was created with.
+	BufferDescriptor(buffer Buffer) BufferDescriptor
+
+	CreateTexture(descriptor TextureDescriptor) (Texture, error)
+	ReleaseTexture(texture Texture)
+	// TextureDescriptor answers the descriptor texture was created with.
+	TextureDescriptor(texture Texture) TextureDescriptor
+
+	CreateTextureView(texture Texture, descriptor TextureViewDescriptor) (TextureView, error)
+	ReleaseTextureView(view TextureView)
+	// TextureViewTexture answers the texture view is of.
+	TextureViewTexture(view TextureView) Texture
+
+	CreateSampler(descriptor SamplerDescriptor) (Sampler, error)
+	ReleaseSampler(sampler Sampler)
+
+	CreateShaderModule(descriptor ShaderModuleDescriptor) (ShaderModule, error)
+	ReleaseShaderModule(module ShaderModule)
+
+	CreateBindGroupLayout(descriptor BindGroupLayoutDescriptor) (BindGroupLayout, error)
+	ReleaseBindGroupLayout(layout BindGroupLayout)
+
+	CreateBindGroup(descriptor BindGroupDescriptor) (BindGroup, error)
+	ReleaseBindGroup(group BindGroup)
+
+	CreatePipelineLayout(descriptor PipelineLayoutDescriptor) (PipelineLayout, error)
+	ReleasePipelineLayout(layout PipelineLayout)
+
+	CreateRenderPipeline(descriptor RenderPipelineDescriptor) (RenderPipeline, error)
+	ReleaseRenderPipeline(pipeline RenderPipeline)
+	// RenderPipelineBindGroupLayout answers the layout of group in
+	// pipeline's layout, the one reflection built when it was created
+	// "auto".
+	RenderPipelineBindGroupLayout(pipeline RenderPipeline, group uint32) BindGroupLayout
+
+	CreateComputePipeline(descriptor ComputePipelineDescriptor) (ComputePipeline, error)
+	ReleaseComputePipeline(pipeline ComputePipeline)
+	// ComputePipelineBindGroupLayout answers the layout of group in
+	// pipeline's layout.
+	ComputePipelineBindGroupLayout(pipeline ComputePipeline, group uint32) BindGroupLayout
+
+	// WriteBuffer writes data into buffer at offset, ordered before the next
+	// submit; offset and length are multiples of 4.
+	WriteBuffer(buffer Buffer, offset uint64, data []byte) error
+	// WriteTexture writes data, laid out as layout, into the size region at
+	// destination, ordered before the next submit.
+	WriteTexture(destination ImageCopyTexture, data []byte, layout ImageDataLayout, size Extent3D) error
+
+	// Encoder answers frame's encoder at order, which gfx's flush finishes
+	// and submits sorted by order. An order already handed out in frame
+	// answers ErrOrderTaken, and a flushed frame ErrFrameFlushed, each with
+	// an encoder that records into nothing.
+	Encoder(frame Frame, order SubmitOrder) (CommandEncoder, error)
+	// Framebuffer answers the view of window's framebuffer in frame, or the
+	// zero view when frame acquired none for it: minimized, hidden, or not
+	// open.
+	Framebuffer(frame Frame, window platform.Window) TextureView
+
+	// CreateCommandEncoder answers an encoder outside any frame, for its
+	// owner to finish and submit.
+	CreateCommandEncoder(descriptor CommandEncoderDescriptor) (StandaloneCommandEncoder, error)
+	// Submit submits command buffers from standalone encoders, in order.
+	Submit(buffers ...CommandBuffer) error
+
+	// Mapping buffers for readback is open:
+	// https://github.com/dvoyni/cog/issues/666
+}
+
+// ElevateDeviceAccess answers the Device a job holds the write lock on as an
+// ExclusiveDevice. Only the write handle gives it, so a job holding the read
+// lock cannot reach the exclusive operations.
+func ElevateDeviceAccess(handle kernel.Write[Device]) ExclusiveDevice {
+	panic("gfx listing: no bodies")
+}
+
+// ExclusiveDevice is the Device as one job alone holds it, for what no other
+// job may overlap. ElevateDeviceAccess gives it; it is no resource.
+type ExclusiveDevice interface {
+	Device
+	// WaitIdle returns once the GPU has finished everything submitted.
+	WaitIdle() error
+
+	// Surface configuration is open:
+	// https://github.com/dvoyni/cog/issues/665
+	// Device-loss recovery is open:
+	// https://github.com/dvoyni/cog/issues/669
+}
