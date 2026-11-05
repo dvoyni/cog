@@ -34,6 +34,9 @@ type Sub[E any] struct {
 // Init. It is invalid after Init returns.
 type Configurator struct {
 	kernel *Kernel
+	// plugin is the plugin whose Init was handed it, which composition errors
+	// name.
+	plugin PluginName
 }
 
 // ID returns the ID of the kernel being configured.
@@ -64,6 +67,38 @@ func (c *Configurator) Resource[T any]() (T, bool) {
 		return zero, false
 	}
 	return *r.value.(*T), true
+}
+
+// DeclareExclusiveSocket declares the socket of T, which takes one binding,
+// and returns the only handle to it: the socket is no resource, so no lock
+// and no lookup reach it, and others reach its binding only through what this
+// plugin offers. The binding resolves once every plugin has initialized, so
+// it may come from a plugin listed before this one or after. Declaring T
+// twice, two bindings, or none when the socket is not optional, is a
+// composition error, and Spawn panics.
+func (c *Configurator) DeclareExclusiveSocket[T any](optional bool) ExclusiveSocket[T] {
+	return c.declareSocket[T](true, optional)
+}
+
+// DeclareSocket declares the socket of T, which takes any number of
+// bindings, and returns the only handle to it, as DeclareExclusiveSocket
+// does. Declaring T twice, or no binding when the socket is not optional, is
+// a composition error, and Spawn panics.
+func (c *Configurator) DeclareSocket[T any](optional bool) Socket[T] {
+	return c.declareSocket[T](false, optional)
+}
+
+// BindSocket binds value to the socket of T, which a plugin listed before
+// this one or after declares. A nil value, or a socket no plugin declares, is
+// a composition error, and panics; a typed nil, such as a nil pointer, is not
+// nil. Go infers T from value, so a concrete value for an interface socket
+// names T: BindSocket[platform.Windows](windows).
+func (c *Configurator) BindSocket[T any](value T) {
+	t := reflect.TypeFor[T]()
+	if any(value) == nil {
+		panic(fmt.Sprintf("kernel: plugin %q binds a nil %v", c.plugin, t))
+	}
+	c.kernel.socketBindings = append(c.kernel.socketBindings, socketBinding{socket: t, plugin: c.plugin, value: value})
 }
 
 //go:generate go run ./internal/generate
@@ -153,4 +188,15 @@ func (c *Configurator) OrderSubscriptions[E any](before, after Sub[E]) {
 		}
 	}
 	d.orders = append(d.orders, [2]int32{before.index - 1, after.index - 1})
+}
+
+// declareSocket declares the socket of T, panicking if one is declared.
+func (c *Configurator) declareSocket[T any](exclusive, optional bool) *socket[T] {
+	t := reflect.TypeFor[T]()
+	if existing, ok := c.kernel.sockets[t]; ok {
+		panic(fmt.Sprintf("kernel: socket %v is declared twice, by plugins %q and %q", t, existing.declaredBy(), c.plugin))
+	}
+	declared := &socket[T]{plugin: c.plugin, exclusive: exclusive, optional: optional}
+	c.kernel.sockets[t] = declared
+	return declared
 }

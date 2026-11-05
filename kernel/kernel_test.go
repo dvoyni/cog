@@ -15,6 +15,7 @@ type hookPlugin struct {
 	name    PluginName
 	init    func(c *Configurator)
 	receive func(config any)
+	start   func(k *Kernel)
 	stop    func(k *Kernel)
 	destroy func()
 }
@@ -31,7 +32,12 @@ func (p hookPlugin) Init(c *Configurator, config any) error {
 	return nil
 }
 
-func (p hookPlugin) Start(kernel *Kernel) error { return nil }
+func (p hookPlugin) Start(kernel *Kernel) error {
+	if p.start != nil {
+		p.start(kernel)
+	}
+	return nil
+}
 
 func (p hookPlugin) Stop(kernel *Kernel) error {
 	if p.stop != nil {
