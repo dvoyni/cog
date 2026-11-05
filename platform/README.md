@@ -28,6 +28,9 @@ filesystems an application binds.
   the motion.
 - **`Tasks`** holds **`ProcessEvents`**, the pump, a task pinned to the main
   thread.
+- **`Handlers`** holds the `kernel.Sub` of every handler platform
+  subscribes, `FlushValues`, so a plugin listed after platform orders its
+  own around it.
 - **`*InputState`** holds the input levels as of the last pump: the keys
   held, read with `IsHeld`, the current layout's key labels, `Label`, each
   window's pointer, `PointerPosition` in window space and `IsPointerInside`,
@@ -58,6 +61,32 @@ filesystems an application binds.
   unless `Config` names another. Its `Get` takes the `FS`; `Set`, `Delete`
   and `Flush` take the `WriteFS`. The file is read once and kept; changes
   are written by `Flush`, and by platform when a window closes.
+
+## Kernel surface
+
+- **Resources it installs:**
+  - `Tasks`: `ProcessEvents`, the pump, for the application to schedule.
+  - `Handlers`: `FlushValues`, to order handlers around.
+  - `FS`: the files, read under its read lock and written through
+    `ElevateFileAccess` under its write lock.
+  - `*Values`: the key-value store kept in a file in `FS`.
+  - `*WindowManager`: the window request and the window state.
+  - `*InputState`: the input levels and the last pump run's edges.
+- **Resources it reads from other plugins:** none.
+- **Events it publishes**, from `ProcessEvents`: `WindowOpenedEvent`,
+  `WindowClosedEvent`, `CloseRequestedEvent`, `KeyEvent`, `TextEvent`,
+  `FocusEvent`, `LayoutChangedEvent`, `PointerMoveEvent`, `ScrollEvent`,
+  `PointerEnterEvent`, `PointerLeaveEvent` and `ResizeEvent`.
+- **Events it subscribes to:** `WindowClosedEvent`, `Handlers.FlushValues`,
+  which flushes the values after the handlers before it.
+- **Sockets it declares:** `WindowsSocket` and `InputSourceSocket`, optional
+  and exclusive, for the window implementation and the input source;
+  `WriteFSSocket`, optional and exclusive, for the writable filesystem;
+  `ReadMountSocket`, optional, for the read mounts.
+- **Sockets it binds:** none.
+
+A plugin that reads `Tasks` or `Handlers` in its `Init` is listed after
+platform. Plugins binding its sockets go anywhere.
 
 ## Wiring
 

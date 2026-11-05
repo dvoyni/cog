@@ -37,11 +37,12 @@ func (*Plugin) Name() kernel.PluginName { return PluginName }
 
 // Init declares the optional exclusive sockets of the window and input
 // implementations and of the writable filesystem and the optional socket of
-// the read mounts, installs the FS resource, *Values,
-// *WindowManager, *InputState and Tasks, and subscribes to WindowClosedEvent to flush the
-// values. ProcessEvents is registered pinned to the main thread and
-// scheduled nowhere. A config of another type than *Config is a composition
-// error, and panics; the kernel reports a socket bound wrongly.
+// the read mounts, installs the FS resource, *Values, *WindowManager,
+// *InputState and Tasks, and subscribes to WindowClosedEvent to flush the
+// values, its Sub kept in the Handlers resource. ProcessEvents is registered
+// pinned to the main thread and scheduled nowhere. A config of another type
+// than *Config is a composition error, and panics; the kernel reports a
+// socket bound wrongly.
 func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	valuesFile := kernel.PluginConfigOrDefault[Config](config).ValuesFile
 	if valuesFile == "" {
@@ -54,8 +55,10 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	configurator.InitResource[FS](p.fileSystem)
 	configurator.InitResource(&Values{file: valuesFile})
 	flushOnClose := configurator.RegisterTask2(flushValues)
-	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event WindowClosedEvent) (WindowClosedEvent, kernel.JobHandle) {
-		return event, ex.Schedule(flushOnClose, kernel.NoArg{}, in).Handle()
+	configurator.InitResource(Handlers{
+		FlushValues: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event WindowClosedEvent) (WindowClosedEvent, kernel.JobHandle) {
+			return event, ex.Schedule(flushOnClose, kernel.NoArg{}, in).Handle()
+		}),
 	})
 	configurator.InitResource(&WindowManager{})
 	configurator.InitResource(&InputState{})

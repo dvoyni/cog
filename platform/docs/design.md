@@ -40,6 +40,7 @@ the ticket that holds its detail. The vocabulary is in
 | `WindowManager` | resource | Every window: its entry in the window request, what the application wants it to be, and its window state, what it currently is. |
 | `InputState` | resource | Input levels as of the last pump run. |
 | `Tasks` | resource | Every task platform offers others to schedule: `ProcessEvents`. |
+| `Handlers` | resource | Every handler platform subscribes, `FlushValues`, for others to order theirs around with `OrderSubscriptions`. |
 | `ProcessEvents` | pinned task | The pump. |
 | `FS` | alias of `fs.FS`, resource | Read access to files: the overlay, which only reads. |
 | `WriteFS`, `ElevateFileAccess` | interface, function | Write access to files: the overlay that writes, which `ElevateFileAccess` gives from the write handle on `FS` alone. |
@@ -348,7 +349,9 @@ From [Filesystems before Spawn and as a resource](https://github.com/dvoyni/cog/
 - **Written on a flush.** A change stays in the cache until `Flush`,
   which writes the file to the writable layer when something changed.
   platform flushes on every `WindowClosedEvent`, from a task holding the
-  `FS` write lock, after the handlers before it.
+  `FS` write lock, after the handlers before it. Its subscription is
+  `Handlers.FlushValues`, so a plugin listed after platform orders its own
+  close handler before or after the flush.
 - **Before `Spawn`.** A kernel's config is given to `Spawn` and plugins
   cannot change it, so config kept in the values file is read first: `main`
   spawns a throwaway kernel of platform and a plugin binding the filesystems,

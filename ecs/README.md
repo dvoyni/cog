@@ -47,5 +47,22 @@ but the standard library and the kernel.
 - **`World[W]`** is the barrier, the write on the whole world; every other
   handle locks only what it touches.
 
+## Kernel surface
+
+- **Resources it installs:** none that another plugin locks by type. The
+  plugin installs a private registry; `RegisterWorld`, `RegisterComponent`,
+  `RegisterRefs`, `RegisterKeyedRefs` and `RegisterCommandBuffer` install
+  private resources for the plugin that calls them, a world's, each store's,
+  each ref table's and each command buffer's, which systems reach through
+  the ECS's parameters, `World[W]`, the queries, stores, lookups and command
+  buffers.
+- **Resources it reads from other plugins:** none.
+- **Events it publishes:** none.
+- **Events it subscribes to:** none, so it has no `Handlers`.
+- **Sockets it declares:** none.
+- **Sockets it binds:** none.
+
+A plugin that registers a world is listed after the ECS.
+
 See [docs/README.md](docs/README.md) for the guide with examples, and
 [docs/design.md](docs/design.md) for the design and why it is this way.
