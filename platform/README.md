@@ -29,21 +29,21 @@ filesystems an application binds.
 - **`Tasks`** holds **`ProcessEvents`**, the pump, a task pinned to the main
   thread.
 - **`*InputState`** holds the input levels as of the last pump: the keys
-  held, read with `IsHeld`, the current layout's key labels, `Label`, each window's pointer, `PointerPosition` in
-  window space and `IsPointerInside`, and the last pump run's edges,
-  `JustPressed` and `JustReleased`, correct only in the update that ran the
-  pump.
+  held, read with `IsHeld`, the current layout's key labels, `Label`, each
+  window's pointer, `PointerPosition` in window space and `IsPointerInside`,
+  and the last pump run's edges, `JustPressed` and `JustReleased`, correct
+  only in the update that ran the pump.
 - **`Key`** names a position on a US keyboard whatever the layout, or a
   mouse button, in one space; it prints as its name (`"KeyW"`) and
   `ParseKey` reads it back. **`Modifiers`** is the bitmask a key change
   carries.
 - **`WindowOpenedEvent`**, **`WindowClosedEvent`**,
   **`CloseRequestedEvent`**, **`KeyEvent`**, **`TextEvent`**,
-  **`FocusEvent`**, **`LayoutChangedEvent`**, **`PointerMoveEvent`**, **`ScrollEvent`**,
-  **`PointerEnterEvent`**, **`PointerLeaveEvent`** and **`ResizeEvent`** are
-  what the pump publishes, in the order the changes happened. A run's
-  pointer moves in one window coalesce into one `PointerMoveEvent`. Losing
-  focus releases every held key.
+  **`FocusEvent`**, **`LayoutChangedEvent`**, **`PointerMoveEvent`**,
+  **`ScrollEvent`**, **`PointerEnterEvent`**, **`PointerLeaveEvent`** and
+  **`ResizeEvent`** are what the pump publishes, in the order the changes
+  happened. A run's pointer moves in one window coalesce into one
+  `PointerMoveEvent`. Losing focus releases every held key.
 - **`WriteFSSocket`** is the storage seam, taking at most one binding: a
   writable filesystem from [`filesystems`](filesystems),
   `NewDiskWriteFS(directory)` on desktop or `NewLocalStorageWriteFS(key)` in
@@ -128,4 +128,5 @@ save := configurator.RegisterTask1(func(k *kernel.Kernel, _ kernel.NoArg, filesy
 })
 ```
 
-See [docs/design.md](docs/design.md) for the design.
+See [docs/README.md](docs/README.md) for the guide with examples, and
+[docs/design.md](docs/design.md) for the design and why it is this way.

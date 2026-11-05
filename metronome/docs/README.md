@@ -74,16 +74,14 @@ type World struct{ Elapsed time.Duration }
 // gamePlugin advances the world on every update beat, and ends the
 // application after the configured number of ticks.
 type gamePlugin struct {
-	config GameConfig
+	config *GameConfig
 	update *kernel.Task[metronome.UpdateEvent, kernel.NoResult]
 }
 
 func (p *gamePlugin) Name() kernel.PluginName { return gameName }
 
 func (p *gamePlugin) Init(c *kernel.Configurator, config any) error {
-	if config != nil {
-		p.config = config.(GameConfig)
-	}
+	p.config = kernel.PluginConfigOrDefault[GameConfig](config)
 	c.InitResource(World{})
 	p.update = c.RegisterTask(func(access *kernel.Access) kernel.TaskBody[metronome.UpdateEvent, kernel.NoResult] {
 		world := access.Write[World]()
@@ -114,12 +112,12 @@ func init() { runtime.LockOSThread() }
 func main() {
 	s := kernel.NewSupervisor(nil)
 	config := map[kernel.PluginName]any{
-		metronome.PluginName: metronome.Config{
+		metronome.PluginName: &metronome.Config{
 			Tracks: []metronome.Track{
 				metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(10)),
 			},
 		},
-		gameName: GameConfig{Supervisor: s, Ticks: 3},
+		gameName: &GameConfig{Supervisor: s, Ticks: 3},
 	}
 	// metronome is listed first, so it stops last.
 	if _, err := s.Spawn(config, runtime.GOMAXPROCS(0), metronome.NewPlugin(), &gamePlugin{}); err != nil {
@@ -153,7 +151,7 @@ type RenderEvent struct {
 	Ready kernel.JobHandle // the first handler sets it
 }
 
-metronome.Config{
+&metronome.Config{
 	Tracks: []metronome.Track{
 		metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(60)),
 		metronome.NewTrack[RenderEvent](metronome.Variable()),
@@ -260,7 +258,7 @@ render := metronome.Variable()
 render.MaxInFlight = 2
 render.InterpolateAgainst = reflect.TypeFor[metronome.UpdateEvent]()
 
-metronome.Config{
+&metronome.Config{
 	Tracks: []metronome.Track{
 		metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(20)),
 		metronome.NewTrack[RenderEvent](render),
@@ -315,7 +313,7 @@ and drive it from the test:
 ```go
 clock := metronome.NewManualClock()
 config := map[kernel.PluginName]any{
-	metronome.PluginName: metronome.Config{
+	metronome.PluginName: &metronome.Config{
 		Clock:  clock,
 		Tracks: []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(10))},
 	},

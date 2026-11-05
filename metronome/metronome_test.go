@@ -3,9 +3,11 @@ package metronome_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -79,7 +81,7 @@ func spawn(t *testing.T, clock metronome.Clock, tracks []metronome.Track, init f
 
 // metronomeConfig answers a kernel config giving metronome clock and tracks.
 func metronomeConfig(clock metronome.Clock, tracks ...metronome.Track) map[kernel.PluginName]any {
-	return map[kernel.PluginName]any{metronome.PluginName: metronome.Config{Clock: clock, Tracks: tracks}}
+	return map[kernel.PluginName]any{metronome.PluginName: &metronome.Config{Clock: clock, Tracks: tracks}}
 }
 
 // spawnPlugin spawns a kernel of plugin and a test plugin whose Init runs
@@ -198,13 +200,16 @@ func TestTwoTracksOfOneEventTypePanic(t *testing.T) {
 }
 
 func TestConfigOfAnotherTypePanics(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("a config of another type than Config did not panic")
-		}
-	}()
-	config := map[kernel.PluginName]any{metronome.PluginName: metronome.NewManualClock()}
-	spawnPlugin(t, metronome.NewPlugin(), config, func(c *kernel.Configurator) {})
+	for _, config := range []any{metronome.NewManualClock(), metronome.Config{}} {
+		t.Run(fmt.Sprintf("%T", config), func(t *testing.T) {
+			defer func() {
+				if message := fmt.Sprint(recover()); !strings.Contains(message, "want a *metronome.Config") {
+					t.Fatalf("a config of another type than *Config panicked with %q", message)
+				}
+			}()
+			spawnPlugin(t, metronome.NewPlugin(), map[kernel.PluginName]any{metronome.PluginName: config}, func(c *kernel.Configurator) {})
+		})
+	}
 }
 
 // testClock is a Clock the test drives: Now reads what setNow set, and a timer

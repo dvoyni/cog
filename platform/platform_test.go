@@ -247,7 +247,7 @@ func spawnConfigured(t *testing.T, f *fake, config platform.Config) *harness {
 	h := &harness{t: t, fake: f}
 	h.supervisor = kernel.NewSupervisor(h)
 	t.Cleanup(h.supervisor.Quit)
-	id, err := h.supervisor.Spawn(map[kernel.PluginName]any{platform.PluginName: config}, 2, f, platform.NewPlugin(), h)
+	id, err := h.supervisor.Spawn(map[kernel.PluginName]any{platform.PluginName: &config}, 2, f, platform.NewPlugin(), h)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -133,14 +133,17 @@ silently.
   `Destroy` releases. `Destroy` runs after the kernel's last job, for every
   plugin whose `Init` succeeded, started or not.
 - **Config** is a `map[PluginName]any` per kernel, given to `Spawn`. Each
-  plugin's `Init` is handed only its own part, the value under its `Name`, or
-  nil if there is none.
+  plugin's `Init` is handed only its own part, the value under its `Name`, a
+  pointer to its `Config`, or nil if there is none.
 - **A plugin's constructor takes no parameters:** `NewPlugin()`. All a
   plugin can be configured with is a plain `Config` struct of values in its
-  package, given as its config part. `Init` asserts a non-nil part to
-  `Config`, a nil one being the zero `Config` and so the defaults; a part of
-  another type is a composition error and panics. No functional options:
-  nothing outside `Init` reaches into the plugin.
+  package, given as a pointer, `&metronome.Config{...}`, its config part.
+  `Init` reads it in one line, `kernel.PluginConfigOrDefault(config,
+  &Config{...})`: the pointer given, or else the default passed, or a zero
+  `Config` when none is. A part of another type, a `Config` by value
+  included, is a composition error and panics. The pointer spares each
+  plugin the nil check; the plugin never writes through it. No functional
+  options: nothing outside `Init` reaches into the plugin.
 - **A plugin is never a resource,** so nothing reaches its lifecycle
   methods. What it offers others is an interface it implements, bound to
   the socket that needs it; such small interfaces live in the declaring

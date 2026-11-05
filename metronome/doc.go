@@ -1,12 +1,12 @@
 // Package metronome paces the work a kernel does over time.
 //
-// An application declares tracks in metronome's Config, given under
-// PluginName in the kernel's config. NewTrack names a track's event type,
+// An application declares tracks in metronome's Config, given as a *Config
+// under PluginName in the kernel's config. NewTrack names a track's event type,
 // which embeds Beat, and its Settings. Each track runs on its own goroutine
 // from metronome's Start to its Stop and publishes its event as beats, so its
 // handlers run there and a slow handler delays no other track.
 //
-//	metronome.Config{Tracks: []metronome.Track{
+//	&metronome.Config{Tracks: []metronome.Track{
 //		metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(60)),
 //	}}
 //

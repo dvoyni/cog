@@ -7,6 +7,7 @@ behind each choice, see [design.md](design.md).
 - [Quick start](#quick-start)
 - [Plugins](#plugins)
 - [Resources](#resources)
+- [Sockets](#sockets)
 - [Tasks](#tasks)
 - [Events and handlers](#events-and-handlers)
 - [Scheduling with the Executor](#scheduling-with-the-executor)
@@ -29,7 +30,8 @@ Supervisor ── lifetime, GetKernel and Broadcast, LogHandler
 | `Supervisor` | Spawns and destroys kernels, runs main-thread jobs, ends the application. Owns the one `LogHandler`. |
 | `Kernel` | Runtime handle passed to handlers and tasks: `ID`, `Publish`, `Notify`, `Logger`. |
 | `Plugin` | Your code: `Init`, `Start`, `Stop`, `Destroy`. |
-| `Configurator` | Handed to `Plugin.Init`: declares resources, tasks and subscriptions. |
+| `Configurator` | Handed to `Plugin.Init`: declares resources, sockets, tasks and subscriptions, and binds to other plugins' sockets. |
+| `ExclusiveSocket[T]` / `Socket[T]` | The one handle to a socket a plugin declared: its binding, or its bindings, from `Start` on. |
 | `Access` | Handed to a task's constructor: `Read[T]`, `Write[T]`, `Use(task)`. |
 | `*Task[A, B]` | Registered code taking arg `A` and answering result `B`. |
 | `Executor` | One publication's batch of work: `Schedule`, `ScheduleAfter`, `Join`, `Publish`. |
@@ -86,14 +88,14 @@ type Total struct{ Points int64 }
 // clockPlugin paces the kernel: it publishes a Hit on every tick of its own
 // timer.
 type clockPlugin struct {
-	config ClockConfig
+	config *ClockConfig
 	stop   chan struct{}
 }
 
 func (p *clockPlugin) Name() kernel.PluginName { return clockName }
 
 func (p *clockPlugin) Init(c *kernel.Configurator, config any) error {
-	p.config = config.(ClockConfig)
+	p.config = kernel.PluginConfigOrDefault[ClockConfig](config)
 	return nil
 }
 
@@ -124,7 +126,7 @@ func (p *clockPlugin) Destroy() error { return nil }
 // scorePlugin adds up hits, logs each total, and ends the application after
 // the configured number of rounds.
 type scorePlugin struct {
-	config ScoreConfig
+	config *ScoreConfig
 	add    *kernel.Task[Hit, Total]
 	report *kernel.Task[Total, kernel.NoResult]
 }
@@ -132,7 +134,7 @@ type scorePlugin struct {
 func (p *scorePlugin) Name() kernel.PluginName { return scoreName }
 
 func (p *scorePlugin) Init(c *kernel.Configurator, config any) error {
-	p.config = config.(ScoreConfig)
+	p.config = kernel.PluginConfigOrDefault[ScoreConfig](config)
 	c.InitResource(Score{})
 
 	// Requesting Write[Score] declares the lock and returns the handle.
@@ -173,8 +175,8 @@ func init() { runtime.LockOSThread() } // keep main on the main thread
 func main() {
 	s := kernel.NewSupervisor(nil)
 	config := map[kernel.PluginName]any{
-		clockName: ClockConfig{Period: 10 * time.Millisecond},
-		scoreName: ScoreConfig{Supervisor: s, Rounds: 3},
+		clockName: &ClockConfig{Period: 10 * time.Millisecond},
+		scoreName: &ScoreConfig{Supervisor: s, Rounds: 3},
 	}
 	if _, err := s.Spawn(config, runtime.GOMAXPROCS(0), &clockPlugin{}, &scorePlugin{}); err != nil {
 		panic(err)
@@ -212,8 +214,9 @@ type Plugin interface {
 - **Order** is the order of the plugins given to `Spawn`. `Init` and `Start`
   run in that order; `Stop` and `Destroy` run in reverse. A plugin that needs
   another's resource while registering is listed after it.
-- **`Init`** declares everything: resources, tasks, subscriptions. The
-  `Configurator` is invalid once `Init` returns.
+- **`Init`** declares everything: resources, sockets, tasks, subscriptions,
+  and the bindings to other plugins' sockets. The `Configurator` is invalid
+  once `Init` returns.
 - **`Start`** runs once every plugin has initialized. The kernel's workers are
   already running, so `Start` may publish.
 - **`Stop`** runs when the kernel is destroyed. Jobs its publications schedule
@@ -221,21 +224,24 @@ type Plugin interface {
 - **`Destroy`** runs after the kernel's last job, for every plugin whose
   `Init` succeeded, and releases whatever `Init` acquired.
 - **Config** is a `map[PluginName]any` given to `Spawn`. Each plugin's `Init`
-  is handed only its own part, the value under its `Name`, or nil if there is
-  none.
+  is handed only its own part, a pointer to its `Config` under its `Name`, or
+  nil if there is none. `Init` reads it with `kernel.PluginConfigOrDefault`,
+  which answers the pointer given, or the default `Init` passes, or a zero
+  `Config`, and panics on any other type, a `Config` by value included. A
+  plugin's constructor takes no parameters, `NewPlugin()`.
 
 ```go
 config := map[kernel.PluginName]any{
-	physics.Name: physics.Config{Gravity: -9.8},
-	render.Name:  render.Config{VSync: true},
+	physics.PluginName: &physics.Config{Gravity: -9.8},
+	render.PluginName:  &render.Config{VSync: true},
 }
-id, err := s.Spawn(config, runtime.GOMAXPROCS(0), &physics.Plugin{}, &render.Plugin{})
+id, err := s.Spawn(config, runtime.GOMAXPROCS(0), physics.NewPlugin(), render.NewPlugin())
 
 // in render.Plugin:
-func (p *Plugin) Name() kernel.PluginName { return Name }
+func (p *Plugin) Name() kernel.PluginName { return PluginName }
 
 func (p *Plugin) Init(c *kernel.Configurator, config any) error {
-	p.config = config.(Config) // render's part only
+	p.config = kernel.PluginConfigOrDefault(config, &Config{VSync: true}) // render's part only
 	// ...
 }
 ```
@@ -256,35 +262,63 @@ c.InitResource(Health{Points: 10})
 c.InitResource(Position{})
 ```
 
-What one plugin offers another is a resource. A slot is a resource of
-interface type, and the plugin that implements it installs the
-implementation:
-
-```go
-c.InitResource[gfx.Backend](vulkanBackend)
-```
+What a plugin offers other plugins' jobs is a resource it installs, such as
+platform's `*WindowManager`. A plugin itself is never a resource, so no job
+reaches its lifecycle methods. An implementation one plugin needs from
+another goes through a [socket](#sockets).
 
 A resource with no value yet is created empty and filled later by a task
 holding its `Write`:
 
 ```go
-c.InitResource[gfx.Backend](nil)
+c.InitResource[*Level](nil)
 ```
 
-Many contributors share a resource holding a slice, each appending to it
-during registration.
-
 A plugin that must register against something an earlier plugin installed
-reads it with `Resource`:
+reads it with `Resource`, and is listed after it:
 
 ```go
-backend, ok := c.Resource[gfx.Backend]()
+tasks, ok := c.Resource[platform.Tasks]()
 if !ok {
-	return errors.New("gfx: no backend plugin before this one")
+	return errors.New("game: platform is not listed before this plugin")
 }
 ```
 
 Initializing the same type twice panics.
+
+## Sockets
+
+A socket binds plugins to each other. The plugin that needs an
+implementation declares the socket of its type in `Init`, and the plugins
+that implement it bind to it in theirs:
+
+```go
+// platform, which needs the windows and the files:
+windows := c.DeclareExclusiveSocket[platform.WindowsSocket](true) // optional, at most one
+mounts := c.DeclareSocket[platform.ReadMountSocket](true)         // optional, any number
+
+// gogpu, which implements the windows:
+c.BindSocket[platform.WindowsSocket](implementation)
+// a game, which ships its assets:
+c.BindSocket(platform.ReadMountSocket{FS: assets})
+```
+
+- **The declaration's handle is the only way to the bindings.**
+  `ExclusiveSocket.Get` answers the binding, or the zero `T` for an optional
+  socket left unbound; `Socket.GetAll` answers the bindings in plugin order.
+  A socket takes no lock and has no lookup, so no task reaches an
+  implementation but through the resources the declaring plugin installs.
+- **Bindings resolve after every `Init` and before any `Start`**, so the
+  order of plugins in `Spawn` does not matter to them. `Get` and `GetAll`
+  panic in `Init`: keep the handle, and read it from `Start` on, or when the
+  resource is used.
+- **A socket is its type**, named with the suffix `Socket`. Two sockets of
+  one interface need two named types. Go infers `T` from the value, so a
+  concrete value bound to an interface socket names `T`:
+  `BindSocket[platform.WindowsSocket](implementation)`.
+- **Composition errors panic** at `Spawn`, naming the socket and the
+  plugins: declaring one twice, two bindings of an exclusive socket, none of
+  one that is not optional, a binding nobody declares, and a nil binding.
 
 ## Tasks
 
@@ -541,11 +575,11 @@ type NetConfig struct {
 }
 
 clientID, _ := s.Spawn(map[kernel.PluginName]any{
-	"net": NetConfig{Supervisor: s, Server: serverID},
+	"net": &NetConfig{Supervisor: s, Server: serverID},
 }, runtime.GOMAXPROCS(0), &netPlugin{})
 
 func (p *netPlugin) Init(c *kernel.Configurator, config any) error {
-	p.config = config.(NetConfig)
+	p.config = kernel.PluginConfigOrDefault[NetConfig](config)
 	// ...
 }
 

@@ -40,25 +40,19 @@ func (*Plugin) Name() kernel.PluginName { return PluginName }
 // the read mounts, installs the FS resource, *Values,
 // *WindowManager, *InputState and Tasks, and subscribes to WindowClosedEvent to flush the
 // values. ProcessEvents is registered pinned to the main thread and
-// scheduled nowhere. A config of another type than Config is a composition
+// scheduled nowhere. A config of another type than *Config is a composition
 // error, and panics; the kernel reports a socket bound wrongly.
 func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
-	var configuration Config
-	if config != nil {
-		var ok bool
-		if configuration, ok = config.(Config); !ok {
-			panic(fmt.Sprintf("platform: config is a %T, want a platform.Config", config))
-		}
-	}
-	if configuration.ValuesFile == "" {
-		configuration.ValuesFile = DefaultValuesFile
+	valuesFile := kernel.PluginConfigOrDefault[Config](config).ValuesFile
+	if valuesFile == "" {
+		valuesFile = DefaultValuesFile
 	}
 	p.fileSystem = &fileSystem{
 		writable: configurator.DeclareExclusiveSocket[WriteFSSocket](true),
 		mounts:   configurator.DeclareSocket[ReadMountSocket](true),
 	}
 	configurator.InitResource[FS](p.fileSystem)
-	configurator.InitResource(&Values{file: configuration.ValuesFile})
+	configurator.InitResource(&Values{file: valuesFile})
 	flushOnClose := configurator.RegisterTask2(flushValues)
 	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event WindowClosedEvent) (WindowClosedEvent, kernel.JobHandle) {
 		return event, ex.Schedule(flushOnClose, kernel.NoArg{}, in).Handle()
