@@ -43,7 +43,7 @@ func processEvents(k *kernel.Kernel, _ kernel.NoArg, processorHandle kernel.Writ
 	processor.changes = processor.changes[:0]
 	processor.events = processor.events[:0]
 	if windows := processor.windows.Get(); windows != nil {
-		processor.apply(k, windows, manager)
+		processor.apply(k, windows, manager, input)
 		processor.changes = windows.Pump(processor.changes)
 	}
 	if inputSource := processor.inputSource.Get(); inputSource != nil {
@@ -75,6 +75,16 @@ func processEvents(k *kernel.Kernel, _ kernel.NoArg, processorHandle kernel.Writ
 			k.Publish(TextEvent{Window: event.Window, Char: event.Char})
 		case InputChangeFocus:
 			k.Publish(FocusEvent{Window: event.Window, Focused: event.Focused})
+		case InputChangePointerMove:
+			k.Publish(PointerMoveEvent{Window: event.Window, Position: event.Position, Delta: event.motion})
+		case InputChangeScroll:
+			k.Publish(ScrollEvent{Window: event.Window, Delta: event.ScrollDelta, Lines: event.ScrollLines})
+		case InputChangePointerEnter:
+			k.Publish(PointerEnterEvent{Window: event.Window})
+		case InputChangePointerLeave:
+			k.Publish(PointerLeaveEvent{Window: event.Window})
+		case InputChangeResize:
+			k.Publish(ResizeEvent{Window: event.Window, Size: event.Size, FramebufferSize: event.FramebufferSize, Scale: event.Scale})
 		}
 	}
 	return kernel.NoResult{}
@@ -83,8 +93,9 @@ func processEvents(k *kernel.Kernel, _ kernel.NoArg, processorHandle kernel.Writ
 // apply applies what changed in manager's request since the last run
 // through windows: it closes every window whose entry is gone, then opens
 // every new one and changes every edited one, in the order they were opened.
-// It adds a closed event for each window it closed to the run's events.
-func (processor *eventProcessor) apply(k *kernel.Kernel, windows WindowsSocket, manager *WindowManager) {
+// It keeps input's pointers to the windows the state knows, and adds a closed
+// event for each window it closed to the run's events.
+func (processor *eventProcessor) apply(k *kernel.Kernel, windows WindowsSocket, manager *WindowManager, input *InputState) {
 	kept := processor.applied[:0]
 	for _, applied := range processor.applied {
 		if manager.findEntry(applied.window) >= 0 {
@@ -95,6 +106,7 @@ func (processor *eventProcessor) apply(k *kernel.Kernel, windows WindowsSocket, 
 			k.Logger().LogErr(fmt.Errorf("platform: closing a window: %w", err))
 		}
 		manager.removeState(applied.window)
+		input.forgetPointer(applied.window)
 		processor.events = append(processor.events, InputChange{Kind: InputChangeWindowClosed, Window: applied.window})
 	}
 	clear(processor.applied[len(kept):])
@@ -104,6 +116,7 @@ func (processor *eventProcessor) apply(k *kernel.Kernel, windows WindowsSocket, 
 		if index < 0 {
 			processor.applied = append(processor.applied, appliedWindow{window: requested.window, entry: requested.entry})
 			manager.addState(requested.window)
+			input.addPointer(requested.window)
 			if err := windows.Open(requested.window, requested.entry); err != nil {
 				k.Logger().LogErr(fmt.Errorf("platform: opening a window: %w", err))
 			}
@@ -121,8 +134,9 @@ func (processor *eventProcessor) apply(k *kernel.Kernel, windows WindowsSocket, 
 
 // fold applies one change from the WindowsSocket or the InputSourceSocket to
 // manager and input, and adds the events it makes to the run's: the change
-// itself, but for the release of a key not held, which it drops, and focus
-// loss, which it follows with the release of every held key.
+// itself, but for the release of a key not held, which it drops, a pointer
+// move, which replaces the window's earlier move of the run, its motion
+// added, and focus loss, which it follows with the release of every held key.
 func (processor *eventProcessor) fold(manager *WindowManager, input *InputState, change InputChange) {
 	switch change.Kind {
 	case InputChangeWindowOpened:
@@ -139,6 +153,7 @@ func (processor *eventProcessor) fold(manager *WindowManager, input *InputState,
 	case InputChangeWindowClosed:
 		manager.removeState(change.Window)
 		manager.Close(change.Window)
+		input.forgetPointer(change.Window)
 		if index := processor.find(change.Window); index >= 0 {
 			processor.applied = slices.Delete(processor.applied, index, index+1)
 		}
@@ -158,12 +173,41 @@ func (processor *eventProcessor) fold(manager *WindowManager, input *InputState,
 		if !change.Focused {
 			processor.modifiers &= ModifierCapsLock | ModifierNumLock
 			for key := range keyCount {
-				if input.IsHeld(key) {
-					input.release(key)
-					processor.events = append(processor.events, InputChange{Kind: InputChangeKey, Window: change.Window, Key: key, Modifiers: processor.modifiers})
+				if !input.IsHeld(key) {
+					continue
 				}
+				input.release(key)
+				release := InputChange{Kind: InputChangeKey, Window: change.Window, Key: key, Modifiers: processor.modifiers}
+				if key.IsMouseButton() {
+					release.Position = input.PointerPosition(change.Window)
+				}
+				processor.events = append(processor.events, release)
 			}
 		}
+	case InputChangePointerMove:
+		change.motion = input.movePointer(change.Window, change.Position)
+		for index := len(processor.events) - 1; index >= 0; index-- {
+			earlier := processor.events[index]
+			if earlier.Kind == InputChangePointerMove && earlier.Window == change.Window {
+				change.motion.X += earlier.motion.X
+				change.motion.Y += earlier.motion.Y
+				processor.events = slices.Delete(processor.events, index, index+1)
+				break
+			}
+		}
+	case InputChangePointerEnter:
+		input.enterPointer(change.Window, change.Position)
+	case InputChangePointerLeave:
+		input.leavePointer(change.Window)
+	case InputChangeResize:
+		index := manager.findState(change.Window)
+		if index < 0 {
+			return
+		}
+		resized := &manager.states[index]
+		resized.size = change.Size
+		resized.framebufferSize = change.FramebufferSize
+		resized.scale = change.Scale
 	}
 	processor.events = append(processor.events, change)
 }

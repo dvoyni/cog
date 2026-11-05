@@ -24,10 +24,15 @@
 // application calls Close.
 //
 // Input comes both as levels and as events. The *InputState resource holds
-// the keys held, which gameplay polls with IsHeld under the read lock, and
-// the keys pressed and released during the last pump run, JustPressed and
-// JustReleased, correct only in the update that ran the pump. KeyEvent, TextEvent and FocusEvent carry every change in the
-// order it happened, for UI and text. A Key names a position on a US
+// the keys held, which gameplay polls with IsHeld under the read lock, each
+// window's pointer, PointerPosition and IsPointerInside, and the keys pressed
+// and released during the last pump run, JustPressed and JustReleased,
+// correct only in the update that ran the pump. KeyEvent, TextEvent,
+// FocusEvent, PointerMoveEvent, ScrollEvent, PointerEnterEvent,
+// PointerLeaveEvent and ResizeEvent carry every change in the order it
+// happened, for UI and text; a run's pointer moves in one window coalesce
+// into one PointerMoveEvent. Positions are in window space, a window's
+// logical points. A Key names a position on a US
 // keyboard whatever the layout, or a mouse button, and prints as its name
 // ("KeyW"), which ParseKey reads back. Text is not keys: TextEvent carries
 // each character typed. Losing focus releases every held key and publishes

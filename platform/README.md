@@ -21,16 +21,21 @@ implementation.
 - **`Tasks`** holds **`ProcessEvents`**, the pump, a task pinned to the main
   thread.
 - **`*InputState`** holds the input levels as of the last pump: the keys
-  held, read with `IsHeld`, and the last pump run's edges, `JustPressed`
-  and `JustReleased`, correct only in the update that ran the pump.
+  held, read with `IsHeld`, each window's pointer, `PointerPosition` in
+  window space and `IsPointerInside`, and the last pump run's edges,
+  `JustPressed` and `JustReleased`, correct only in the update that ran the
+  pump.
 - **`Key`** names a position on a US keyboard whatever the layout, or a
   mouse button, in one space; it prints as its name (`"KeyW"`) and
   `ParseKey` reads it back. **`Modifiers`** is the bitmask a key change
   carries.
 - **`WindowOpenedEvent`**, **`WindowClosedEvent`**,
-  **`CloseRequestedEvent`**, **`KeyEvent`**, **`TextEvent`** and
-  **`FocusEvent`** are what the pump publishes, in the order the changes
-  happened. Losing focus releases every held key.
+  **`CloseRequestedEvent`**, **`KeyEvent`**, **`TextEvent`**,
+  **`FocusEvent`**, **`PointerMoveEvent`**, **`ScrollEvent`**,
+  **`PointerEnterEvent`**, **`PointerLeaveEvent`** and **`ResizeEvent`** are
+  what the pump publishes, in the order the changes happened. A run's
+  pointer moves in one window coalesce into one `PointerMoveEvent`. Losing
+  focus releases every held key.
 - **`WriteFSSocket`** is the storage seam, needing exactly one binding, the
   disk plugin's on desktop. Any plugin
   binds read-only **`ReadMountSocket`**s, each any `fs.FS` at a priority,

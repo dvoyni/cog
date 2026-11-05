@@ -166,6 +166,11 @@ func (h *harness) Init(c *kernel.Configurator, config any) error {
 	subscribeRecord[platform.KeyEvent](c, h)
 	subscribeRecord[platform.TextEvent](c, h)
 	subscribeRecord[platform.FocusEvent](c, h)
+	subscribeRecord[platform.PointerMoveEvent](c, h)
+	subscribeRecord[platform.ScrollEvent](c, h)
+	subscribeRecord[platform.PointerEnterEvent](c, h)
+	subscribeRecord[platform.PointerLeaveEvent](c, h)
+	subscribeRecord[platform.ResizeEvent](c, h)
 	return nil
 }
 

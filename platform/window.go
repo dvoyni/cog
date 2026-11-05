@@ -1,9 +1,11 @@
 package platform
 
 // Window names one window: an opaque, pointer-free handle, given by
-// WindowRequest.Open from a counter that is never reused. The zero Window
-// names none, and a Window kept past its window's close names nothing, never
-// a window opened later.
+// WindowManager.Open from a counter that is never reused. A Window kept past
+// its window's close names nothing, never a window opened later. The zero
+// Window names none, but for the getters of the window state and the input
+// state, where it reads the only window the window state knows, and panics
+// unless it knows exactly one: a game of one window needs no handle.
 type Window struct {
 	id uint64
 }
@@ -14,8 +16,9 @@ type Size struct {
 	Width, Height int
 }
 
-// Point is a position in window space: a window's logical points, from its
-// top left corner.
+// Point is a pair of coordinates, X rightward and Y downward: a position in
+// window space, a window's logical points from its top left corner, or the
+// difference between two, or the amounts of a scroll.
 type Point struct {
 	X, Y float32
 }
