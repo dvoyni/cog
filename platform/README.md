@@ -9,9 +9,10 @@ implementation.
 
 ## Shape
 
-- **`Windows`** and **`InputSource`** are the seams, installed as resources
-  by the implementing plugins, gogpu's among them. Each needs exactly one
-  installer.
+- **`WindowsSocket`** and **`InputSourceSocket`** are the window and input
+  seams, which the implementing plugins bind, gogpu's among them. Each takes
+  at most one binding; a kernel without them applies no window request and
+  reports no input.
 - **`Window`** is an opaque, pointer-free handle from a counter that is never
   reused. A handle kept past its window's close names nothing.
 - **`*WindowManager`** holds every window: what the application wants it to
@@ -36,13 +37,13 @@ implementation.
 
 ## Wiring
 
-List the window and value implementations **before** platform in `Spawn`,
-since they install the resources platform's `Init` finds; file layers are
-bound to sockets, so their plugins go anywhere:
+Implementing plugins bind to platform's sockets, so they go anywhere in
+`Spawn`. A plugin that reads `platform.Tasks` in its `Init` comes after
+platform:
 
 ```go
 supervisor.Spawn(config, workerCount,
-	gogpu.NewPlugin(),    // installs platform.Windows and platform.InputSource
+	gogpu.NewPlugin(),    // binds the window implementation and the input source
 	disk.NewPlugin(),     // binds the writable filesystem
 	assets.NewPlugin(),   // a game's own: binds a platform.ReadMountSocket of its embed.FS
 	platform.NewPlugin(),

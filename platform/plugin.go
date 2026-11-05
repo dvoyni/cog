@@ -9,11 +9,11 @@ import (
 // PluginName is platform's plugin name.
 const PluginName kernel.PluginName = "platform"
 
-// Plugin is platform: it finds the Windows and InputSource the implementing
-// plugins installed, declares the sockets the writable filesystem and the
-// read mounts are bound to, installs the FS resource over them, Values, the
-// WindowManager and Tasks, registers ProcessEvents, and flushes the values
-// when a window closes.
+// Plugin is platform: it declares the sockets the window and input
+// implementations, the writable filesystem and the read mounts are bound to,
+// installs the FS resource over the files, Values, the WindowManager and
+// Tasks, registers ProcessEvents, and flushes the values when a window
+// closes.
 type Plugin struct {
 	// fileSystem is the FS resource, kept for Start to check its read
 	// mounts.
@@ -34,14 +34,13 @@ func NewPlugin() *Plugin { return &Plugin{} }
 // Name returns PluginName.
 func (*Plugin) Name() kernel.PluginName { return PluginName }
 
-// Init finds Windows and InputSource, installed by plugins listed before
-// platform, declares the exclusive socket of the writable filesystem and the
+// Init declares the optional exclusive sockets of the window and input
+// implementations, the exclusive socket of the writable filesystem and the
 // socket of the read mounts, installs the FS resource, *Values,
 // *WindowManager and Tasks, and subscribes to WindowClosedEvent to flush the
 // values. ProcessEvents is registered pinned to the main thread and
-// scheduled nowhere. A config of another type than Config, or a seam no plugin
-// installed, is a composition error, and panics; so is a seam two plugins
-// installed or bound, which the kernel refuses.
+// scheduled nowhere. A config of another type than Config is a composition
+// error, and panics; the kernel reports a socket bound wrongly.
 func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	var configuration Config
 	if config != nil {
@@ -53,37 +52,24 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	if configuration.ValuesFile == "" {
 		configuration.ValuesFile = DefaultValuesFile
 	}
-	windows, ok := configurator.Resource[Windows]()
-	if !ok || windows == nil {
-		panic("platform: no plugin before platform installs platform.Windows")
-	}
-	inputSource, ok := configurator.Resource[InputSource]()
-	if !ok || inputSource == nil {
-		panic("platform: no plugin before platform installs platform.InputSource")
-	}
 	p.fileSystem = &fileSystem{
 		writable: configurator.DeclareExclusiveSocket[WriteFSSocket](false),
 		mounts:   configurator.DeclareSocket[ReadMountSocket](true),
 	}
 	configurator.InitResource[FS](p.fileSystem)
 	configurator.InitResource(&Values{file: configuration.ValuesFile})
-	flushValues := configurator.RegisterTask2(func(k *kernel.Kernel, _ kernel.NoArg, filesystem kernel.Write[FS], values kernel.Write[*Values]) kernel.NoResult {
-		if err := values.Get().Flush(ElevateFileAccess(filesystem)); err != nil {
-			k.Logger().LogErr(err)
-		}
-		return kernel.NoResult{}
-	})
+	flushOnClose := configurator.RegisterTask2(flushValues)
 	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event WindowClosedEvent) (WindowClosedEvent, kernel.JobHandle) {
-		return event, ex.Schedule(flushValues, kernel.NoArg{}, in).Handle()
+		return event, ex.Schedule(flushOnClose, kernel.NoArg{}, in).Handle()
 	})
 	configurator.InitResource(&WindowManager{})
-	pump := &pump{windows: windows, inputSource: inputSource}
-	processEvents := configurator.RegisterTask1(func(k *kernel.Kernel, _ kernel.NoArg, manager kernel.Write[*WindowManager]) kernel.NoResult {
-		pump.run(k, manager.Get())
-		return kernel.NoResult{}
+	configurator.InitResource(&eventProcessor{
+		windows:     configurator.DeclareExclusiveSocket[WindowsSocket](true),
+		inputSource: configurator.DeclareExclusiveSocket[InputSourceSocket](true),
 	})
-	configurator.PinToMainThread(processEvents)
-	configurator.InitResource(Tasks{ProcessEvents: processEvents})
+	tasks := Tasks{ProcessEvents: configurator.RegisterTask2(processEvents)}
+	configurator.PinToMainThread(tasks.ProcessEvents)
+	configurator.InitResource(tasks)
 	return nil
 }
 

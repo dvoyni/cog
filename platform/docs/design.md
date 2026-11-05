@@ -8,7 +8,8 @@ platform itself holds no platform code. It owns the logic that is the same
 for every implementation: the window request and window state, folding input
 into state and events, the overlay of filesystems, and the values kept in it.
 
-Status: designed, not built. The decisions come from the
+Status: windows, the pump and the filesystems are built; input and the
+cursor are not yet. The decisions come from the
 [platform map](https://github.com/dvoyni/cog/issues/610); each section links
 the ticket that holds its detail. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md).
@@ -31,8 +32,8 @@ the ticket that holds its detail. The vocabulary is in
 
 | Type | Kind | What it is |
 |---|---|---|
-| `Windows` | interface, resource | The window seam: opens, changes and closes OS windows and pumps their events. Installed by exactly one plugin (gogpu). |
-| `InputSource` | interface, resource | The input seam: reports the input changes since the last pump run. Installed by exactly one plugin (gogpu, later a scripted one). |
+| `WindowsSocket` | optional exclusive socket | The window seam: opens, changes and closes OS windows and pumps their events. Bound by gogpu. |
+| `InputSourceSocket` | optional exclusive socket | The input seam: reports the input changes since the last pump run. Bound by gogpu, later a scripted plugin. |
 | `Window` | handle | An opaque, pointer-free handle naming one window, from a counter that is never reused. |
 | `WindowManager` | resource | Every window: its entry in the window request, what the application wants it to be, and its window state, what it currently is. |
 | `InputState` | resource | Input levels as of the last pump run. |
@@ -44,15 +45,16 @@ the ticket that holds its detail. The vocabulary is in
 | `ReadMountSocket` | socket | A read mount an implementation binds: any `fs.FS` at a priority. |
 | `Values` | resource | The values, a JSON file in `FS`: `Get` takes the `FS`; `Set`, `Delete` and `Flush` take the `WriteFS`. |
 
-**Finding none or two of a seam panics** as a composition error: `Windows`,
-`InputSource`, the writable filesystem and the value store each need exactly
-one installer; the kernel reports the sockets' own. An input source naming a window the `Windows` implementation does
-not know panics too
+**A seam bound wrongly panics** as a composition error, which the kernel
+reports at `Spawn`: two bindings of any seam, or none of the writable
+filesystem. The window and input seams are optional: a kernel without them,
+such as one spawned only to read the values, applies no window request and
+reports no input. An input source naming a window the window implementation
+does not know panics too
 ([Scripted input for tests and agents](https://github.com/dvoyni/cog/issues/644)).
 
-The window implementations are listed before platform in `Spawn`, install
-`Windows` and `InputSource` in `Init`, and platform's `Init` finds them. The
-storage seams are sockets, bound from anywhere in `Spawn`.
+Every seam is a socket, so implementing plugins are listed anywhere in
+`Spawn`.
 
 ## Windows
 
@@ -95,15 +97,21 @@ From [The os pump and the tracks](https://github.com/dvoyni/cog/issues/632).
 - **platform registers `ProcessEvents`, pinned to the main thread, and
   schedules it nowhere.** The application schedules it from the track handlers
   it chooses: an update track, a render track, or both.
+- **A plain task function over a private resource.** What the pump keeps
+  between runs, the windows as last applied and the batch's buffer, is a
+  resource of an unexported type, so no job but `ProcessEvents` locks it.
 - **A handler that schedules it returns it in the out dependency**
   (`ex.Join(in, processEvents)`), so the track's in-flight limit sees it.
   Otherwise each beat queues another pump behind a blocked main thread.
 - **One run:**
-  1. apply the window request's changes through `Windows`;
-  2. let `Windows` pump the OS's pending events;
-  3. collect the batch of input changes from `InputSource`;
+  1. apply the window request's changes through the `WindowsSocket`;
+  2. let it pump the OS's pending events;
+  3. collect the batch of input changes from the `InputSourceSocket`;
   4. fold them into the `WindowManager` and `InputState` under their write locks;
   5. publish the events, in the order the changes arrived.
+
+  Without a window implementation a run applies and pumps nothing, and
+  without an input source it collects no input.
 
   Handlers only schedule jobs, and those jobs run after the locks are
   released, so they see the state as of the end of the run.
@@ -192,7 +200,7 @@ From [Scripted input for tests and agents](https://github.com/dvoyni/cog/issues/
   batch of pointer-free **input changes** per pump run. platform applies the
   rules above once, for every source: coalescing pointer moves, releasing keys
   on focus loss, state before events, deltas while locked, key labels.
-- **A later scripted input source** installs only `InputSource`, beside
+- **A later scripted input source** binds only `InputSourceSocket`, beside
   gogpu's windows (an agent driving a running game) or a headless window
   implementation.
 
@@ -290,8 +298,8 @@ From [Filesystems before Spawn and as a resource](https://github.com/dvoyni/cog/
   cannot change it, so config kept in the values file is read first: `main`
   spawns a throwaway kernel of the filesystem implementation and platform,
   starts it, reads the values with `Values.Get`, and destroys it, then spawns
-  the real kernel with that config. This needs platform to spawn without
-  window implementations.
+  the real kernel with that config. platform spawns without a window or
+  input implementation for this.
 
 ## The disk plugin
 
@@ -315,7 +323,7 @@ Three fork changes, each its own build ticket proposed upstream as a PR:
 - [Cursor warp in the gogpu fork](https://github.com/dvoyni/cog/issues/648):
   gogpu has no warp.
 
-gogpu's implementation of `Windows` and `InputSource` is built on the
+gogpu's implementation of `WindowsSocket` and `InputSourceSocket` is built on the
 [gogpu](https://github.com/dvoyni/cog/issues/611) map.
 
 ## Testing
@@ -323,7 +331,8 @@ gogpu's implementation of `Windows` and `InputSource` is built on the
 Two seams, both through the interfaces an implementation installs:
 
 - **Windows and input.** A kernel spawned with platform and a fake that
-  installs `Windows` and `InputSource` and feeds input changes per pump run.
+  binds `WindowsSocket` and `InputSourceSocket` and feeds input changes per
+  pump run.
   Tests assert only through `InputState`, the `WindowManager` and the
   published events: window open and close, coalescing, focus loss, locked deltas, key
   labels and layout changes, warps, window-space coordinates. gogpu's
