@@ -28,7 +28,7 @@ _Avoid_: Event loop, message loop, poll
 ### Input
 
 **Input state**:
-The resource holding input levels as of the last pump run: held keys, which are global, and each window's pointer position and whether the pointer is inside it; and the keys pressed and released during that run.
+The resource holding input levels as of the last pump run: held keys and key labels, which are global, and each window's pointer position and whether the pointer is inside it; and the keys pressed and released during that run.
 _Avoid_: Input snapshot, keyboard state
 
 **Input event**:

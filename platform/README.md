@@ -21,7 +21,7 @@ implementation.
 - **`Tasks`** holds **`ProcessEvents`**, the pump, a task pinned to the main
   thread.
 - **`*InputState`** holds the input levels as of the last pump: the keys
-  held, read with `IsHeld`, each window's pointer, `PointerPosition` in
+  held, read with `IsHeld`, the current layout's key labels, `Label`, each window's pointer, `PointerPosition` in
   window space and `IsPointerInside`, and the last pump run's edges,
   `JustPressed` and `JustReleased`, correct only in the update that ran the
   pump.
@@ -31,7 +31,7 @@ implementation.
   carries.
 - **`WindowOpenedEvent`**, **`WindowClosedEvent`**,
   **`CloseRequestedEvent`**, **`KeyEvent`**, **`TextEvent`**,
-  **`FocusEvent`**, **`PointerMoveEvent`**, **`ScrollEvent`**,
+  **`FocusEvent`**, **`LayoutChangedEvent`**, **`PointerMoveEvent`**, **`ScrollEvent`**,
   **`PointerEnterEvent`**, **`PointerLeaveEvent`** and **`ResizeEvent`** are
   what the pump publishes, in the order the changes happened. A run's
   pointer moves in one window coalesce into one `PointerMoveEvent`. Losing

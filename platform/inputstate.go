@@ -6,9 +6,9 @@ import (
 )
 
 // InputState is the resource of the input levels as of the last
-// ProcessEvents run, as a *InputState: the keys held, which are global, each
-// window's pointer position and whether the pointer is inside it, and the
-// keys pressed and released during that run. It is written only by
+// ProcessEvents run, as a *InputState: the keys held and the key labels,
+// which are global, each window's pointer position and whether the pointer is
+// inside it, and the keys pressed and released during that run. It is written only by
 // ProcessEvents; any job reads it under the read lock. Its pointer getters
 // given the zero Window read the only window the window state knows, and
 // panic unless it knows exactly one.
@@ -27,6 +27,8 @@ type InputState struct {
 	// pointers holds the pointer of every window the window state knows, in
 	// the order they were opened.
 	pointers []windowPointer
+	// labels holds each Key's label in the current layout.
+	labels [keyCount]rune
 }
 
 // IsHeld answers whether key is held down.
@@ -42,6 +44,18 @@ func (s *InputState) JustPressed(key Key) bool { return s.pressed.has(key) }
 // run, a release on focus loss included. It is correct only in the update
 // that ran the pump: see InputState.
 func (s *InputState) JustReleased(key Key) bool { return s.released.has(key) }
+
+// Label answers the character the current layout prints on key, unshifted,
+// or 0: for a key that prints none, a mouse button, or with no input source.
+// What a bindings screen shows for KeyQ is 'a' on a French layout. The table
+// is filled on the first ProcessEvents run and rebuilt when the layout
+// changes, as LayoutChangedEvent tells.
+func (s *InputState) Label(key Key) rune {
+	if !key.isValid() {
+		return 0
+	}
+	return s.labels[key]
+}
 
 // PointerPosition answers where the pointer last was in window, in its
 // window space: inside it, or outside while it captured a drag. A window the
@@ -69,6 +83,15 @@ func (s *InputState) press(key Key) {
 func (s *InputState) release(key Key) {
 	s.held.remove(key)
 	s.released.add(key)
+}
+
+// rebuildLabels asks source for the label of every keyboard key.
+func (s *InputState) rebuildLabels(source InputSourceSocket) {
+	for key := KeyUnknown + 1; key < keyCount; key++ {
+		if !key.IsMouseButton() {
+			s.labels[key] = source.Label(key)
+		}
+	}
 }
 
 // addPointer tracks the pointer of window, which the window state now

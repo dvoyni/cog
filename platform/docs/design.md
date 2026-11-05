@@ -9,7 +9,7 @@ for every implementation: the window request and window state, folding input
 into state and events, the overlay of filesystems, and the values kept in it.
 
 Status: windows, the pump, the filesystems, keys, text, focus, the pointer,
-scroll and resize are built; key labels and the cursor are not yet. The decisions come from the
+scroll, resize and key labels are built; the cursor is not yet. The decisions come from the
 [platform map](https://github.com/dvoyni/cog/issues/610); each section links
 the ticket that holds its detail. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md).
@@ -159,6 +159,12 @@ and [Key codes and text input: physical keys, the layout and the IME](https://gi
   and rebuilds it when the layout changes, since the OS layout APIs are bound
   to a thread; any job reads it under the read lock. `KeyEvent.Label` carries
   the same value, so a handler needs no lock.
+- **The input source labels one key at a time,** as every OS layout API
+  does: `InputSourceSocket.Label(key)`. The pump asks it for every keyboard
+  key on its first run and at each layout change, which the source reports
+  as an input change naming no window, since the keyboard is global. Mouse
+  buttons are never asked and label 0. A key event takes its label at its
+  place in the run: before a layout change the old one, after it the new.
 - **Modifiers:** Shift, Control, Alt, Super, and the Caps Lock and Num Lock
   states, as a bitmask. Left and right modifier keys are separate `Key`s;
   AltGr is `KeyRightAlt` with no Control.
@@ -200,7 +206,8 @@ and [Key codes and text input: physical keys, the layout and the IME](https://gi
 
 ### Events
 
-Every event names its `Window`. Key and text events name the focused window;
+Every event names its `Window`, but `LayoutChangedEvent`, since the keyboard
+is global. Key and text events name the focused window;
 pointer events name the window under the pointer, or the captured one during
 a drag.
 

@@ -45,6 +45,9 @@ type KeyEvent struct {
 	// Position is the pointer's, in Window's window space, for a mouse
 	// button.
 	Position Point
+	// Label is the character the layout prints on Key, as InputState.Label
+	// answered it when the change was folded, so a handler needs no lock.
+	Label rune
 }
 
 // TextEvent is published for one character the user typed in Window, after
@@ -55,6 +58,11 @@ type TextEvent struct {
 	Window Window
 	Char   rune
 }
+
+// LayoutChangedEvent is published when the keyboard layout changes, once
+// InputState holds the new key labels. It names no window: the keyboard is
+// global.
+type LayoutChangedEvent struct{}
 
 // FocusEvent is published when Window gains or loses the keyboard focus.
 type FocusEvent struct {

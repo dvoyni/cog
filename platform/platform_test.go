@@ -28,6 +28,9 @@ type fake struct {
 	// AppendChanges does.
 	windowChanges, inputChanges []platform.InputChange
 	nextNative                  uintptr
+	// layout is what Label answers, and labelled every key it was asked for.
+	layout   map[platform.Key]rune
+	labelled []platform.Key
 }
 
 func newFake() *fake {
@@ -99,6 +102,11 @@ func (f *fake) AppendChanges(changes []platform.InputChange) []platform.InputCha
 	return changes
 }
 
+func (f *fake) Label(key platform.Key) rune {
+	f.labelled = append(f.labelled, key)
+	return f.layout[key]
+}
+
 // pumpEvent asks the test plugin to schedule ProcessEvents.
 type pumpEvent struct{}
 
@@ -165,6 +173,7 @@ func (h *harness) Init(c *kernel.Configurator, config any) error {
 	subscribeRecord[platform.CloseRequestedEvent](c, h)
 	subscribeRecord[platform.KeyEvent](c, h)
 	subscribeRecord[platform.TextEvent](c, h)
+	subscribeRecord[platform.LayoutChangedEvent](c, h)
 	subscribeRecord[platform.FocusEvent](c, h)
 	subscribeRecord[platform.PointerMoveEvent](c, h)
 	subscribeRecord[platform.ScrollEvent](c, h)
