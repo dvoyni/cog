@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io/fs"
 	"sync"
+
+	"github.com/dvoyni/cog/kernel"
 )
 
 // DefaultValuesFile is where the values are kept when Config names no
@@ -81,6 +83,15 @@ func (v *Values) Flush(filesystem WriteFS) error {
 	}
 	v.changed = false
 	return nil
+}
+
+// flushValues is the task platform schedules when a window closes: it
+// flushes the values, logging a failure.
+func flushValues(k *kernel.Kernel, _ kernel.NoArg, filesystem kernel.Write[FS], values kernel.Write[*Values]) kernel.NoResult {
+	if err := values.Get().Flush(ElevateFileAccess(filesystem)); err != nil {
+		k.Logger().LogErr(err)
+	}
+	return kernel.NoResult{}
 }
 
 // load reads the values file through filesystem on first use.

@@ -5,19 +5,20 @@ type InputChangeKind uint8
 
 const (
 	// InputChangeWindowOpened reports that a window's operating-system window
-	// exists, with its sizes, its scale and its native handle. Windows
+	// exists, with its sizes, its scale and its native handle. WindowsSocket
 	// reports it from the Pump after Open.
 	InputChangeWindowOpened InputChangeKind = iota + 1
 	// InputChangeWindowClosed reports that a window closed by itself, without
-	// its entry being removed. Windows reports it from the Pump.
+	// its entry being removed. WindowsSocket reports it from the Pump.
 	InputChangeWindowClosed
 	// InputChangeCloseRequested reports that the user asked to close a window.
 	InputChangeCloseRequested
 )
 
-// InputChange is one raw change Windows or an InputSource reports, which
-// ProcessEvents folds into the state and publishes as an event. It is
-// pointer-free. Every change names a Window the Windows implementation was
+// InputChange is one raw change the WindowsSocket or the InputSourceSocket
+// reports, which ProcessEvents folds into the state and publishes as an
+// event. It is
+// pointer-free. Every change names a Window the window implementation was
 // asked to open and has not reported closed; one naming any other window
 // panics.
 type InputChange struct {

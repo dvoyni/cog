@@ -43,10 +43,10 @@ func (*fake) Name() kernel.PluginName { return "fake" }
 
 func (f *fake) Init(c *kernel.Configurator, config any) error {
 	if f.installWindows {
-		c.InitResource[platform.Windows](f)
+		c.BindSocket[platform.WindowsSocket](f)
 	}
 	if f.installInputSource {
-		c.InitResource[platform.InputSource](f)
+		c.BindSocket[platform.InputSourceSocket](f)
 	}
 	if f.installWritable {
 		c.BindSocket[platform.WriteFSSocket](f.writable)
@@ -490,26 +490,22 @@ func TestInputNamingAnUnknownWindowPanics(t *testing.T) {
 	}
 }
 
-func TestInitPanicsUnlessEachSeamHasOneInstaller(t *testing.T) {
+func TestSpawnPanicsOnASeamBoundWrongly(t *testing.T) {
 	for _, test := range []struct {
 		name    string
 		plugins func() []kernel.Plugin
 		want    string
 	}{
-		{"no Windows", func() []kernel.Plugin {
-			return []kernel.Plugin{&fake{installInputSource: true}, platform.NewPlugin()}
-		}, "installs platform.Windows"},
-		{"no InputSource", func() []kernel.Plugin {
-			return []kernel.Plugin{&fake{installWindows: true}, platform.NewPlugin()}
-		}, "installs platform.InputSource"},
-		{"implementation after platform", func() []kernel.Plugin {
-			return []kernel.Plugin{platform.NewPlugin(), newFake()}
-		}, "installs platform.Windows"},
-		{"two Windows", func() []kernel.Plugin {
+		{"two window implementations", func() []kernel.Plugin {
 			return []kernel.Plugin{newFake(), &secondInstaller{func(c *kernel.Configurator) {
-				c.InitResource[platform.Windows](newFake())
+				c.BindSocket[platform.WindowsSocket](newFake())
 			}}, platform.NewPlugin()}
-		}, "initialized twice"},
+		}, "platform.WindowsSocket, declared by plugin \"platform\", has 2 bindings"},
+		{"two input sources", func() []kernel.Plugin {
+			return []kernel.Plugin{newFake(), &secondInstaller{func(c *kernel.Configurator) {
+				c.BindSocket[platform.InputSourceSocket](newFake())
+			}}, platform.NewPlugin()}
+		}, "platform.InputSourceSocket, declared by plugin \"platform\", has 2 bindings"},
 		{"no writable filesystem", func() []kernel.Plugin {
 			f := newFake()
 			f.installWritable = false
@@ -538,6 +534,47 @@ func TestInitPanicsUnlessEachSeamHasOneInstaller(t *testing.T) {
 			s.Spawn(nil, 1, test.plugins()...)
 		})
 	}
+}
+
+func TestWindowsBoundAfterPlatformOpen(t *testing.T) {
+	f := newFake()
+	h := &harness{t: t, fake: f}
+	h.supervisor = kernel.NewSupervisor(h)
+	t.Cleanup(h.supervisor.Quit)
+	id, err := h.supervisor.Spawn(nil, 2, platform.NewPlugin(), h, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.kernel = h.supervisor.GetKernel(id)
+	window := h.open(platform.WindowEntry{Title: "main"})
+	h.pump()
+	if got := h.takePublished(); !slices.Equal(got, []any{platform.WindowOpenedEvent{Window: window}}) {
+		t.Fatalf("the pump published %v, want the window opened", got)
+	}
+}
+
+func TestAKernelWithoutWindowsOrInputPumpsNothingAndReadsValues(t *testing.T) {
+	f := newFake()
+	f.installWindows = false
+	f.installInputSource = false
+	f.writable.MapFS["config.json"] = &fstest.MapFile{Data: []byte(`{"width": 1280}`)}
+	h := spawn(t, f)
+	h.open(platform.WindowEntry{Title: "main"})
+	h.pump()
+	if got := h.takePublished(); len(got) != 0 {
+		t.Fatalf("a kernel without windows published %v", got)
+	}
+	h.mutex.Lock()
+	logged := h.errors
+	h.mutex.Unlock()
+	if len(logged) != 0 {
+		t.Fatalf("a kernel without windows logged %v", logged)
+	}
+	h.reading(func(filesystem platform.FS, values *platform.Values) {
+		if value, found, err := values.Get(filesystem, "width"); err != nil || !found || string(value) != "1280" {
+			t.Errorf("width gets %s, %v, %v", value, found, err)
+		}
+	})
 }
 
 // secondInstaller is a second plugin, which installs in its Init.
