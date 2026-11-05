@@ -209,8 +209,8 @@ From [Scripted input for tests and agents](https://github.com/dvoyni/cog/issues/
 From [Cursor control: show, hide, lock and shape](https://github.com/dvoyni/cog/issues/642).
 
 - **The cursor request is part of each window's entry** in the window
-  request: shape, visibility, mode, and a pending warp. The pump applies what
-  changed.
+  request: shape, visibility, mode, and a pending cursor position. The pump
+  applies what changed.
 - **Visibility is a flag of its own,** so hiding does not forget the shape.
 - **Shapes:** default, pointer, text, crosshair, move, the four resizes,
   not-allowed, wait.
@@ -221,11 +221,11 @@ From [Cursor control: show, hide, lock and shape](https://github.com/dvoyni/cog/
   the requested mode when focus returns. The window state holds the
   **effective mode**, so a game sees when the lock is not in force, on focus
   loss or where a platform lacks the mode.
-- **Warp.** `Warp(position)` sets a pending target in window space; the pump
-  moves the OS cursor there on its next run and clears it, and several warps
-  before one run collapse to the last. A warp produces no `PointerMoveEvent`,
-  and the input state's position becomes the target. A warp while locked is
-  ignored.
+- **Cursor position.** `SetCursorPosition(position)` sets a pending cursor
+  position in window space; the pump moves the OS cursor there on its next
+  run and clears it, and several set before one run collapse to the last.
+  Setting it produces no `PointerMoveEvent`, and the input state's pointer
+  position becomes it. Setting it while locked is ignored.
 
 ## Filesystems
 
@@ -320,8 +320,11 @@ Three fork changes, each its own build ticket proposed upstream as a PR:
   Both modes detach the cursor from the mouse; Confined moves the visible
   cursor itself, clamped to the content area. While the window is unfocused
   the effective mode reads Normal.
-- [Cursor warp in the gogpu fork](https://github.com/dvoyni/cog/issues/648):
-  gogpu has no warp.
+- [Cursor position in the gogpu fork](https://github.com/dvoyni/cog/issues/648):
+  done in the fork as `App.SetCursorPosition` and proposed as
+  [gogpu#521](https://github.com/gogpu/gogpu/pull/521), stacked on gogpu#519.
+  Wayland supports it only while locked, through the locked pointer's position
+  hint; elsewhere it reports unsupported.
 
 gogpu's implementation of `WindowsSocket` and `InputSourceSocket` is built on the
 [gogpu](https://github.com/dvoyni/cog/issues/611) map.
@@ -335,7 +338,7 @@ Two seams, both through the interfaces an implementation installs:
   pump run.
   Tests assert only through `InputState`, the `WindowManager` and the
   published events: window open and close, coalescing, focus loss, locked deltas, key
-  labels and layout changes, warps, window-space coordinates. gogpu's
+  labels and layout changes, cursor positions, window-space coordinates. gogpu's
   implementation reuses the same seam.
 - **Filesystems.** The overlay over in-memory read mounts and an in-memory
   writable filesystem, checked with `fstest.TestFS` and with tests of merged
