@@ -39,13 +39,17 @@ const (
 	// scale: Size, FramebufferSize and Scale. WindowsSocket reports it from the
 	// Pump.
 	InputChangeResize
+	// InputChangeLayout reports that the keyboard layout changed. It names no
+	// Window: the keyboard is global. platform asks the InputSourceSocket for
+	// the new labels as it folds it.
+	InputChangeLayout
 )
 
 // InputChange is one raw change the WindowsSocket or the InputSourceSocket
 // reports, which ProcessEvents folds into the state and publishes as an
-// event. It is pointer-free. Every change names a Window the window
-// implementation was asked to open and has not reported closed, and a key
-// change one of the Keys; any other panics.
+// event. It is pointer-free. Every change but InputChangeLayout names a
+// Window the window implementation was asked to open and has not reported
+// closed, and a key change one of the Keys; any other panics.
 type InputChange struct {
 	Kind   InputChangeKind
 	Window Window
@@ -71,6 +75,9 @@ type InputChange struct {
 	// motion is an InputChangePointerMove's, which platform takes from the
 	// positions and sums as it coalesces.
 	motion Point
+	// label is an InputChangeKey's, which platform takes from the input
+	// state's labels as it folds it.
+	label rune
 	// Char is an InputChangeText's character.
 	Char rune
 	// Focused is an InputChangeFocus's: false when the focus is lost.

@@ -22,14 +22,19 @@ type WindowsSocket interface {
 }
 
 // InputSourceSocket is the input seam: it reports the input changes since
-// the last ProcessEvents run. At most one plugin binds it, in its Init, with
+// the last ProcessEvents run, and the key labels of the current layout. At
+// most one plugin binds it, in its Init, with
 // configurator.BindSocket[platform.InputSourceSocket]; a kernel with none
-// reports no input. Only ProcessEvents calls it, on the main thread, after
-// WindowsSocket.Pump.
+// reports no input and labels no key. Only ProcessEvents calls it, on the
+// main thread, after WindowsSocket.Pump.
 type InputSourceSocket interface {
 	// AppendChanges appends the input changes since its last call to changes,
 	// in the order they happened, and answers it.
 	AppendChanges(changes []InputChange) []InputChange
+	// Label answers the character the current layout prints on key, a
+	// keyboard key, unshifted, or 0. ProcessEvents asks it for every keyboard
+	// key on its first run and at each InputChangeLayout.
+	Label(key Key) rune
 }
 
 // WriteFSSocket is the writable filesystem, which exactly one plugin binds in

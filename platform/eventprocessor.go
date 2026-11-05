@@ -23,6 +23,9 @@ type eventProcessor struct {
 	// modifiers is what the last key change reported, whose lock states the
 	// releases on focus loss carry.
 	modifiers Modifiers
+	// labelled is whether the input state's labels were filled, on the first
+	// run with an input source.
+	labelled bool
 }
 
 // appliedWindow is one window as last applied through the WindowsSocket.
@@ -48,9 +51,13 @@ func processEvents(k *kernel.Kernel, _ kernel.NoArg, processorHandle kernel.Writ
 	}
 	if inputSource := processor.inputSource.Get(); inputSource != nil {
 		processor.changes = inputSource.AppendChanges(processor.changes)
+		if !processor.labelled {
+			input.rebuildLabels(inputSource)
+			processor.labelled = true
+		}
 	}
 	for _, change := range processor.changes {
-		if manager.findState(change.Window) < 0 {
+		if change.Kind != InputChangeLayout && manager.findState(change.Window) < 0 {
 			panic(fmt.Sprintf("platform: an input change names %v, which the window implementation was not asked to open or reported closed", change.Window))
 		}
 		if change.Kind == InputChangeKey && !change.Key.isValid() {
@@ -70,9 +77,11 @@ func processEvents(k *kernel.Kernel, _ kernel.NoArg, processorHandle kernel.Writ
 		case InputChangeCloseRequested:
 			k.Publish(CloseRequestedEvent{Window: event.Window})
 		case InputChangeKey:
-			k.Publish(KeyEvent{Window: event.Window, Key: event.Key, Pressed: event.Pressed, Repeat: event.Repeat, Modifiers: event.Modifiers, Position: event.Position})
+			k.Publish(KeyEvent{Window: event.Window, Key: event.Key, Pressed: event.Pressed, Repeat: event.Repeat, Modifiers: event.Modifiers, Position: event.Position, Label: event.label})
 		case InputChangeText:
 			k.Publish(TextEvent{Window: event.Window, Char: event.Char})
+		case InputChangeLayout:
+			k.Publish(LayoutChangedEvent{})
 		case InputChangeFocus:
 			k.Publish(FocusEvent{Window: event.Window, Focused: event.Focused})
 		case InputChangePointerMove:
@@ -137,6 +146,8 @@ func (processor *eventProcessor) apply(k *kernel.Kernel, windows WindowsSocket, 
 // itself, but for the release of a key not held, which it drops, a pointer
 // move, which replaces the window's earlier move of the run, its motion
 // added, and focus loss, which it follows with the release of every held key.
+// A key change carries its label as of its place in the run, and a layout
+// change rebuilds the labels.
 func (processor *eventProcessor) fold(manager *WindowManager, input *InputState, change InputChange) {
 	switch change.Kind {
 	case InputChangeWindowOpened:
@@ -159,6 +170,7 @@ func (processor *eventProcessor) fold(manager *WindowManager, input *InputState,
 		}
 	case InputChangeKey:
 		processor.modifiers = change.Modifiers
+		change.label = input.Label(change.Key)
 		if change.Pressed {
 			input.press(change.Key)
 		} else if input.IsHeld(change.Key) {
@@ -177,7 +189,7 @@ func (processor *eventProcessor) fold(manager *WindowManager, input *InputState,
 					continue
 				}
 				input.release(key)
-				release := InputChange{Kind: InputChangeKey, Window: change.Window, Key: key, Modifiers: processor.modifiers}
+				release := InputChange{Kind: InputChangeKey, Window: change.Window, Key: key, Modifiers: processor.modifiers, label: input.Label(key)}
 				if key.IsMouseButton() {
 					release.Position = input.PointerPosition(change.Window)
 				}
@@ -194,6 +206,10 @@ func (processor *eventProcessor) fold(manager *WindowManager, input *InputState,
 				processor.events = slices.Delete(processor.events, index, index+1)
 				break
 			}
+		}
+	case InputChangeLayout:
+		if inputSource := processor.inputSource.Get(); inputSource != nil {
+			input.rebuildLabels(inputSource)
 		}
 	case InputChangePointerEnter:
 		input.enterPointer(change.Window, change.Position)
