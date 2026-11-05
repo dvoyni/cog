@@ -9,9 +9,12 @@
 // configurator.BindSocket[platform.WindowsSocket], the input source with
 // configurator.BindSocket[platform.InputSourceSocket], the writable
 // filesystem with configurator.BindSocket[platform.WriteFSSocket] and read
-// mounts with configurator.BindSocket(platform.ReadMountSocket{...}).
-// Windows and input are optional, so a kernel of the files alone can read
-// the values; platform puts the files behind the FS resource.
+// mounts with configurator.BindSocket(platform.ReadMountSocket{...}). The
+// filesystems are adapters the application's own plugin binds: any fs.FS as
+// a read mount, and a writable filesystem from package filesystems. Every
+// socket is optional, so a kernel of the files alone can read the values;
+// platform puts the files behind the FS resource, which without a writable
+// filesystem writes nothing, failing with ErrNoWriteFS.
 //
 // A job opens a window with Open on the *WindowManager under its write lock,
 // and gets the window's Window at once. It changes the window with Change or

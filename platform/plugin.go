@@ -21,7 +21,8 @@ type Plugin struct {
 }
 
 // Config is platform's part of the kernel's config, under PluginName. Where
-// windows and files come from is the implementing plugins' Config.
+// windows come from is the implementing plugins' Config, and where files
+// come from the adapters the application binds.
 type Config struct {
 	// ValuesFile is the file in FS the values are kept in; empty is
 	// DefaultValuesFile.
@@ -35,8 +36,8 @@ func NewPlugin() *Plugin { return &Plugin{} }
 func (*Plugin) Name() kernel.PluginName { return PluginName }
 
 // Init declares the optional exclusive sockets of the window and input
-// implementations, the exclusive socket of the writable filesystem and the
-// socket of the read mounts, installs the FS resource, *Values,
+// implementations and of the writable filesystem and the optional socket of
+// the read mounts, installs the FS resource, *Values,
 // *WindowManager, *InputState and Tasks, and subscribes to WindowClosedEvent to flush the
 // values. ProcessEvents is registered pinned to the main thread and
 // scheduled nowhere. A config of another type than Config is a composition
@@ -53,7 +54,7 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 		configuration.ValuesFile = DefaultValuesFile
 	}
 	p.fileSystem = &fileSystem{
-		writable: configurator.DeclareExclusiveSocket[WriteFSSocket](false),
+		writable: configurator.DeclareExclusiveSocket[WriteFSSocket](true),
 		mounts:   configurator.DeclareSocket[ReadMountSocket](true),
 	}
 	configurator.InitResource[FS](p.fileSystem)

@@ -86,7 +86,7 @@ One read-only layer of the FileSystem, with a priority among the others.
 _Avoid_: Mount point, read FS, layer
 
 **Writable filesystem**:
-The single persistent layer that writes land in, searched before every read mount.
+The one persistent layer writes land in, searched before every read mount; without it, nothing can be written.
 _Avoid_: Permanent filesystem, permanent FS, save directory
 
 **Values**:
