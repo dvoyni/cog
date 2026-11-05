@@ -1,23 +1,30 @@
 package kernel
 
+import (
+	"fmt"
+	"reflect"
+)
+
 // PluginName names a plugin within a kernel, and keys its part of the
 // kernel's config.
 type PluginName string
 
 // Plugin is a statically linked unit of functionality installed into a kernel.
-// What it offers other plugins is a resource: a struct, or an interface
-// another plugin fills.
+// What it offers other plugins' jobs is a resource; what it offers another
+// plugin is an implementation bound to the socket that plugin declares. A
+// plugin is never a resource itself.
 //
 // Init and Destroy are a pair, as Start and Stop are: whatever Init acquires,
-// such as an implementation it installs with InitResource, Destroy releases.
+// such as a file it opens, Destroy releases.
 type Plugin interface {
 	// Name returns the plugin's name, unique among the plugins of one kernel.
 	Name() PluginName
 
 	// Init declares the plugin's resources, tasks and handlers. It runs once,
 	// in the order the plugins were given to Spawn, with the plugin's part of
-	// the config Spawn was given: the value under its Name, or nil if there is
-	// none. A plugin that needs another's resource is given after it. An Init
+	// the config Spawn was given: the value under its Name, a pointer to the
+	// plugin's Config, or nil if there is none, which PluginConfigOrDefault
+	// unwraps. A plugin that needs another's resource is given after it. An Init
 	// that fails destroys the plugins already initialized, in reverse, and the
 	// spawn fails.
 	Init(configurator *Configurator, config any) error
@@ -35,4 +42,27 @@ type Plugin interface {
 	// finished, in reverse plugin order. It runs for every plugin whose Init
 	// succeeded, started or not. A failure is logged through LogErr.
 	Destroy() error
+}
+
+// PluginConfigOrDefault answers config, a plugin's part of the kernel's
+// config as Init is given it, as the *C it must be: the pointer given, or,
+// when there is none or it is a nil *C, defaultConfig, or a new zero C when
+// no default is given. A plugin's Init so reads its config in one line and
+// never sees nil. A config of any other type, a C itself included, or more
+// than one default, is a composition error, and panics.
+func PluginConfigOrDefault[C any](config any, defaultConfig ...*C) *C {
+	if len(defaultConfig) > 1 {
+		panic(fmt.Sprintf("kernel: PluginConfigOrDefault takes at most one default, given %d", len(defaultConfig)))
+	}
+	given, ok := config.(*C)
+	if config != nil && !ok {
+		panic(fmt.Sprintf("kernel: config is a %T, want a %v", config, reflect.TypeFor[*C]()))
+	}
+	if given != nil {
+		return given
+	}
+	if len(defaultConfig) == 1 && defaultConfig[0] != nil {
+		return defaultConfig[0]
+	}
+	return new(C)
 }

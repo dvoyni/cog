@@ -38,6 +38,10 @@ module (Go 1.27) and depends on nothing but the standard library.
   a kernel, and are started and stopped with it. Each has a `Name`, and the
   kernel's config is a `map[PluginName]any` of which each plugin gets only
   its own part.
+- **Sockets** bind plugins to each other: a plugin declares the socket of an
+  implementation it needs, and the plugins implementing it bind to it. A
+  socket is no resource, so no task reaches an implementation but through
+  the declaring plugin's resources.
 - A **task** is the only code that touches resources. Its constructor
   requests resource handles, and those requests are its locks.
 - Handlers schedule **jobs** (runs of tasks) when an event is published.

@@ -10,7 +10,7 @@ Each module has its own `AGENTS.md` for rules that hold only there.
 
 ## Plugins
 
-- A plugin's constructor takes no parameters: `NewPlugin()`. What it can be configured with is a plain `Config` struct of values in its package, given as its part of the kernel's config; `Init` asserts a non-nil part to `Config`, and nil means the defaults. No functional options. (kernel/docs/design.md, *Plugins*)
+- A plugin's constructor takes no parameters: `NewPlugin()`. What it can be configured with is a plain `Config` struct of values in its package, given as a pointer, its part of the kernel's config, as `kernel/AGENTS.md` says. No functional options. (kernel/docs/design.md, *Plugins*)
 - A plugin is never a resource: no one may reach its lifecycle methods. What it offers others is an interface it implements, bound with `configurator.BindSocket[I](p)` to the socket the plugin that needs it declares; such small interfaces live in the declaring plugin package's `sockets.go`, beside nothing else; its resources are in `resources.go`. (kernel/docs/design.md, *Plugins*)
 - The tasks a plugin offers others to schedule are the fields of one `Tasks` resource in its package, the first type in its `resources.go`: `platform.Tasks{ProcessEvents}`, read with `configurator.Resource[platform.Tasks]()`.
 

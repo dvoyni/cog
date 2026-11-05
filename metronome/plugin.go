@@ -45,18 +45,11 @@ func NewPlugin() *Plugin {
 // Name returns PluginName.
 func (*Plugin) Name() kernel.PluginName { return PluginName }
 
-// Init takes the clock and the tracks from config, a Config or nil, and
+// Init takes the clock and the tracks from config, a *Config or nil, and
 // builds each track's state. A config of another type, or two tracks of one
 // event type, is a composition error, and panics.
 func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
-	var metronomeConfig Config
-	if config != nil {
-		var ok bool
-		metronomeConfig, ok = config.(Config)
-		if !ok {
-			panic(fmt.Sprintf("metronome: config is a %T, want a metronome.Config", config))
-		}
-	}
+	metronomeConfig := kernel.PluginConfigOrDefault[Config](config)
 	p.clock = metronomeConfig.Clock
 	if p.clock == nil {
 		p.clock = NewWallClock()
