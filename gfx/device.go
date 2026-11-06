@@ -213,11 +213,17 @@ func (d *device) ComputePipelineBindGroupLayout(pipeline ComputePipeline, group 
 }
 
 func (d *device) WriteBuffer(buffer Buffer, offset uint64, data []byte) error {
-	panic("gfx listing: no bodies")
+	if err := d.buffers.check(buffer); err != nil {
+		return err
+	}
+	return d.backend.WriteBuffer(buffer, offset, data)
 }
 
 func (d *device) WriteTexture(destination ImageCopyTexture, data []byte, layout ImageDataLayout, size Extent3D) error {
-	panic("gfx listing: no bodies")
+	if err := d.textures.check(destination.Texture); err != nil {
+		return err
+	}
+	return d.backend.WriteTexture(destination, data, layout, size)
 }
 
 func (d *device) Encoder(frame Frame, order SubmitOrder) (CommandEncoder, error) {

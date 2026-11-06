@@ -14,12 +14,15 @@ import (
 // gfx.CommandEncoder says, so it needs no mutex of its own.
 //
 // A command naming a handle missing at its index, a resource without the
-// usage the command puts it to, a misaligned copy or clear, or a broken pass
-// sequence is recorded all the same, and Finish answers the first such error,
+// usage the command puts it to, a misaligned copy or clear or one ending past
+// its buffer, or a broken pass sequence is recorded all the same, and Finish answers the first such error,
 // as wgpu does; a zero handle names none.
 type commandEncoder struct {
 	device   *device
 	commands []Command
+	// bufferEffects are what the copies and clears recorded do to buffers'
+	// bytes, applied in order at the submit.
+	bufferEffects []func()
 	// err is the first command's error, for Finish.
 	err error
 	// passOpen is set from a pass's beginning to its End.
@@ -65,16 +68,29 @@ func (encoder *commandEncoder) ResolveQuerySet(querySet gfx.QuerySet, firstQuery
 }
 
 // CopyBufferToBuffer records the copy, from a buffer with CopySrc into one
-// with CopyDst, its offsets and size multiples of copyBufferAlignment.
+// with CopyDst, its offsets and size multiples of copyBufferAlignment and its
+// ranges within the buffers.
 func (encoder *commandEncoder) CopyBufferToBuffer(source gfx.Buffer, sourceOffset uint64, destination gfx.Buffer, destinationOffset uint64, size uint64) {
 	encoder.check(func(d *device) error {
-		return cmp.Or(
+		if err := cmp.Or(
 			d.requireBuffer(source, gfx.BufferUsageFlagCopySrc, "the copy's source"),
 			d.requireBuffer(destination, gfx.BufferUsageFlagCopyDst, "the copy's destination"),
 			requireAligned(sourceOffset, copyBufferAlignment, "the copy's source offset"),
 			requireAligned(destinationOffset, copyBufferAlignment, "the copy's destination offset"),
 			requireAligned(size, copyBufferAlignment, "the copy's size"),
-		)
+		); err != nil {
+			return err
+		}
+		copiedFrom, err := d.requireRange(source, sourceOffset, size, "the copy's source")
+		if err != nil {
+			return err
+		}
+		copiedTo, err := d.requireRange(destination, destinationOffset, size, "the copy's destination")
+		if err != nil {
+			return err
+		}
+		encoder.bufferEffects = append(encoder.bufferEffects, func() { copy(copiedTo, copiedFrom) })
+		return nil
 	})
 	encoder.record(CommandKindCopyBufferToBuffer, CopyBufferToBufferArguments{
 		Source:            source,
@@ -126,14 +142,22 @@ func (encoder *commandEncoder) CopyTextureToTexture(source, destination gfx.Text
 }
 
 // ClearBuffer records the clear, of a buffer with CopyDst, its offset and
-// size multiples of copyBufferAlignment.
+// size multiples of copyBufferAlignment and its range within the buffer.
 func (encoder *commandEncoder) ClearBuffer(buffer gfx.Buffer, offset, size uint64) {
 	encoder.check(func(d *device) error {
-		return cmp.Or(
+		if err := cmp.Or(
 			d.requireBuffer(buffer, gfx.BufferUsageFlagCopyDst, "the cleared buffer"),
 			requireAligned(offset, copyBufferAlignment, "the clear's offset"),
 			requireAligned(size, copyBufferAlignment, "the clear's size"),
-		)
+		); err != nil {
+			return err
+		}
+		cleared, err := d.requireRange(buffer, offset, size, "the clear")
+		if err != nil {
+			return err
+		}
+		encoder.bufferEffects = append(encoder.bufferEffects, func() { clear(cleared) })
+		return nil
 	})
 	encoder.record(CommandKindClearBuffer, ClearBufferArguments{Buffer: buffer, Offset: offset, Size: size})
 }
@@ -156,12 +180,13 @@ func (encoder *commandEncoder) Finish() (gfx.CommandBuffer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &commandBuffer{commands: encoder.commands}, nil
+	return &commandBuffer{commands: encoder.commands, bufferEffects: encoder.bufferEffects}, nil
 }
 
 // DiscardEncoding drops the commands recorded; the encoder is spent.
 func (encoder *commandEncoder) DiscardEncoding() {
 	encoder.commands = nil
+	encoder.bufferEffects = nil
 	encoder.spent = true
 }
 
@@ -214,6 +239,15 @@ func requireAligned(value, alignment uint64, role string) error {
 	return nil
 }
 
+// requireWithin answers an error naming role when the range from offset, size
+// long, ends past length.
+func requireWithin(offset, size, length uint64, role string) error {
+	if offset > length || size > length-offset {
+		return fmt.Errorf("recording: %s's range of %d bytes from %d ends past %d", role, size, offset, length)
+	}
+	return nil
+}
+
 // requireRowsAligned answers an error when a region's buffer rows are not a
 // multiple of copyBytesPerRowAlignment apart.
 func requireRowsAligned(regions []gfx.BufferTextureCopy) error {
@@ -226,9 +260,10 @@ func requireRowsAligned(regions []gfx.BufferTextureCopy) error {
 }
 
 // commandBuffer is a finished commandEncoder's commands, as Submit records
-// them.
+// them, and what they do to buffers' bytes, which Submit applies.
 type commandBuffer struct {
-	commands []Command
+	commands      []Command
+	bufferEffects []func()
 }
 
 // Release does nothing: the adapter holds nothing for a buffer.

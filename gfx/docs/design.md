@@ -24,8 +24,9 @@ again once resized or the request changes, hidden and zero-size windows skipped,
 and the frame chain acquires, handling every acquire status alike, publishes `DrawEvent`, flushes
 the frame's encoders and presents, the recording adapter recording their
 passes and commands with typed arguments and rejecting a handle missing at
-its index, a resource without its usage, a misaligned copy or clear and a
-broken pass sequence. Standalone encoders are finished
+its index, a resource without its usage, a misaligned write, copy or clear
+and a broken pass sequence, its buffers holding the bytes written, copied
+and cleared. Writes reach the backend. Standalone encoders are finished
 and submitted by their owner; every other body panics until its ticket fills
 it. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md); the ADRs are in
 [`adr/`](adr).

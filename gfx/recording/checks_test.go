@@ -288,6 +288,140 @@ func TestACopyOrClearNeedsItsAlignment(t *testing.T) {
 	}
 }
 
+func TestAWriteNeedsItsAlignment(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		write func(device gfx.BackendDevice, live objects, value uint64) error
+	}{
+		{"its offset", func(device gfx.BackendDevice, live objects, value uint64) error {
+			return device.WriteBuffer(live.buffer, value, make([]byte, 4))
+		}},
+		{"its data's length", func(device gfx.BackendDevice, live objects, value uint64) error {
+			return device.WriteBuffer(live.buffer, 0, make([]byte, value))
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, value := range []uint64{4, 2} {
+				_, device := requestDevice(t)
+				live := createObjects(t, device, everyBufferUsage, everyTextureUsage)
+
+				err := test.write(device, live, value)
+
+				if aligned := value == 4; aligned && err != nil {
+					t.Errorf("%d answered %v", value, err)
+				} else if !aligned && err == nil {
+					t.Errorf("%d answered no error", value)
+				}
+			}
+		})
+	}
+}
+
+func TestAWriteOrMapAnswersAnErrorFromTheCall(t *testing.T) {
+	someBytes := []byte{1, 2, 3, 4}
+	oneTexel := gfx.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1}
+	oneRow := gfx.ImageDataLayout{BytesPerRow: 4, RowsPerImage: 1}
+	for _, test := range []struct {
+		name string
+		// call makes the call: live has every usage, lacking none, missing
+		// is at an index holding nothing.
+		call func(device gfx.BackendDevice, live, lacking, missing objects) error
+	}{
+		{"a write to a missing buffer", func(device gfx.BackendDevice, _, _, missing objects) error {
+			return device.WriteBuffer(missing.buffer, 0, someBytes)
+		}},
+		{"a write to a buffer without CopyDst", func(device gfx.BackendDevice, _, lacking, _ objects) error {
+			return device.WriteBuffer(lacking.buffer, 0, someBytes)
+		}},
+		{"a write ending past the buffer", func(device gfx.BackendDevice, live, _, _ objects) error {
+			return device.WriteBuffer(live.buffer, 252, make([]byte, 8))
+		}},
+		{"a write to a missing texture", func(device gfx.BackendDevice, _, _, missing objects) error {
+			return device.WriteTexture(gfx.ImageCopyTexture{Texture: missing.texture}, someBytes, oneRow, oneTexel)
+		}},
+		{"a write to a texture without CopyDst", func(device gfx.BackendDevice, _, lacking, _ objects) error {
+			return device.WriteTexture(gfx.ImageCopyTexture{Texture: lacking.texture}, someBytes, oneRow, oneTexel)
+		}},
+		{"a map of a missing buffer", func(device gfx.BackendDevice, _, _, missing objects) error {
+			return device.MapBuffer(missing.buffer, gfx.MapModeRead, 0, 16)
+		}},
+		{"a read map of a buffer without MapRead", func(device gfx.BackendDevice, _, lacking, _ objects) error {
+			return device.MapBuffer(lacking.buffer, gfx.MapModeRead, 0, 16)
+		}},
+		{"a write map of a buffer without MapWrite", func(device gfx.BackendDevice, _, lacking, _ objects) error {
+			return device.MapBuffer(lacking.buffer, gfx.MapModeWrite, 0, 16)
+		}},
+		{"a map ending past the buffer", func(device gfx.BackendDevice, live, _, _ objects) error {
+			return device.MapBuffer(live.buffer, gfx.MapModeRead, 248, 16)
+		}},
+		{"a map of a mapped buffer", func(device gfx.BackendDevice, live, _, _ objects) error {
+			mustSucceed(t, device.MapBuffer(live.buffer, gfx.MapModeRead, 0, 16))
+			return device.MapBuffer(live.buffer, gfx.MapModeRead, 16, 16)
+		}},
+		{"the status of an unmapped buffer", func(device gfx.BackendDevice, live, _, _ objects) error {
+			_, err := device.MapStatus(live.buffer)
+			return err
+		}},
+		{"the range of an unmapped buffer", func(device gfx.BackendDevice, live, _, _ objects) error {
+			_, err := device.MappedRange(live.buffer, 0, 16)
+			return err
+		}},
+		{"a range before the map", func(device gfx.BackendDevice, live, _, _ objects) error {
+			mustSucceed(t, device.MapBuffer(live.buffer, gfx.MapModeRead, 16, 16))
+			_, err := device.MappedRange(live.buffer, 8, 16)
+			return err
+		}},
+		{"a range ending past the map", func(device gfx.BackendDevice, live, _, _ objects) error {
+			mustSucceed(t, device.MapBuffer(live.buffer, gfx.MapModeRead, 16, 16))
+			_, err := device.MappedRange(live.buffer, 16, 32)
+			return err
+		}},
+		{"an unmap of an unmapped buffer", func(device gfx.BackendDevice, live, _, _ objects) error {
+			return device.UnmapBuffer(live.buffer)
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, device := requestDevice(t)
+			live := createObjects(t, device, everyBufferUsage, everyTextureUsage)
+			lacking := objects{buffer: createBuffer(t, device, 2, gfx.BufferUsageFlagNone), texture: handleAt[gfx.Texture](2)}
+			mustSucceed(t, device.CreateTexture(lacking.texture, gfx.TextureDescriptor{Size: oneTexel, MipLevelCount: 1, SampleCount: 1, Format: gfx.TextureFormatRGBA8Unorm}))
+
+			if err := test.call(device, live, lacking, missingObjects()); err == nil {
+				t.Error("the call answered no error")
+			}
+		})
+	}
+}
+
+func TestACopyOrClearEndingPastItsBufferFailsAtFinish(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		record func(encoder gfx.CommandEncoder, live objects)
+	}{
+		{"a copy's source", func(encoder gfx.CommandEncoder, live objects) {
+			encoder.CopyBufferToBuffer(live.buffer, 248, live.buffer, 0, 16)
+		}},
+		{"a copy's destination", func(encoder gfx.CommandEncoder, live objects) {
+			encoder.CopyBufferToBuffer(live.buffer, 0, live.buffer, 248, 16)
+		}},
+		{"a clear", func(encoder gfx.CommandEncoder, live objects) {
+			encoder.ClearBuffer(live.buffer, 248, 16)
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, device := requestDevice(t)
+			live := createObjects(t, device, everyBufferUsage, everyTextureUsage)
+			encoder := createEncoder(t, device)
+
+			test.record(encoder, live)
+
+			if _, err := encoder.Finish(); err == nil {
+				t.Error("Finish answered no error")
+			}
+		})
+	}
+}
+
 func TestPassesInSequenceDrawingAfterTheirPipelineFinish(t *testing.T) {
 	_, device := requestDevice(t)
 	live := createObjects(t, device, everyBufferUsage, everyTextureUsage)

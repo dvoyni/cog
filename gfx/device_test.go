@@ -500,6 +500,77 @@ func TestDescriptorSlicesAreCopied(t *testing.T) {
 	}
 }
 
+func TestWritesReachTheBackendRecordedWithTheirDataCopied(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+
+	h.readDevice(func(device gfx.Device) {
+		live := createFixture(t, device)
+		data := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+		destination := gfx.ImageCopyTexture{Texture: live.texture, Origin: gfx.Origin3D{X: 1}}
+		layout := gfx.ImageDataLayout{BytesPerRow: 8, RowsPerImage: 1}
+		size := gfx.Extent3D{Width: 2, Height: 1, DepthOrArrayLayers: 1}
+
+		mustSucceed(t, device.WriteBuffer(live.buffer, 16, data))
+		data[0] = 9
+		wantBuffer := recording.Call{Kind: recording.CallKindWriteBuffer, Arguments: recording.WriteBufferArguments{
+			Buffer: live.buffer,
+			Offset: 16,
+			Data:   []byte{1, 2, 3, 4, 5, 6, 7, 8},
+		}}
+		if call := lastCall(h); !reflect.DeepEqual(call, wantBuffer) {
+			t.Errorf("WriteBuffer recorded %+v, want %+v", call, wantBuffer)
+		}
+
+		mustSucceed(t, device.WriteTexture(destination, data, layout, size))
+		data[0] = 1
+		wantTexture := recording.Call{Kind: recording.CallKindWriteTexture, Arguments: recording.WriteTextureArguments{
+			Destination: destination,
+			Data:        []byte{9, 2, 3, 4, 5, 6, 7, 8},
+			Layout:      layout,
+			Size:        size,
+		}}
+		if call := lastCall(h); !reflect.DeepEqual(call, wantTexture) {
+			t.Errorf("WriteTexture recorded %+v, want %+v", call, wantTexture)
+		}
+	})
+}
+
+func TestAWriteToAStaleHandleAnswersErrReleasedBeforeTheBackend(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		write func(device gfx.Device, stale fixture) error
+	}{
+		{"a buffer", func(device gfx.Device, stale fixture) error {
+			return device.WriteBuffer(stale.buffer, 0, []byte{1, 2, 3, 4})
+		}},
+		{"the zero buffer", func(device gfx.Device, _ fixture) error {
+			return device.WriteBuffer(gfx.Buffer{}, 0, []byte{1, 2, 3, 4})
+		}},
+		{"a texture", func(device gfx.Device, stale fixture) error {
+			return device.WriteTexture(gfx.ImageCopyTexture{Texture: stale.texture}, []byte{1, 2, 3, 4}, gfx.ImageDataLayout{BytesPerRow: 4, RowsPerImage: 1}, gfx.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1})
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.mustSpawn(nil)
+
+			h.readDevice(func(device gfx.Device) {
+				stale := createFixture(t, device)
+				releaseFixture(device, stale)
+				before := len(h.instance.Recording().Calls)
+
+				if err := c.write(device, stale); !errors.Is(err, gfx.ErrReleased) {
+					t.Errorf("the write answered %v, want ErrReleased", err)
+				}
+				if after := len(h.instance.Recording().Calls); after != before {
+					t.Errorf("the write reached the backend: %v", h.instance.Recording().Calls[before:])
+				}
+			})
+		})
+	}
+}
+
 // fixture is one live object of each type a descriptor names.
 type fixture struct {
 	buffer         gfx.Buffer

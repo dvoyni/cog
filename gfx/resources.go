@@ -136,7 +136,8 @@ type Device interface {
 	// lock: write a task's whole region once, not once per draw.
 	WriteBuffer(buffer Buffer, offset uint64, data []byte) error
 	// WriteTexture writes data, laid out as layout, into the size region at
-	// destination, as WriteBuffer writes a buffer.
+	// destination. As WriteBuffer's, data is copied out before it returns
+	// and lands before every command buffer of the next submit.
 	WriteTexture(destination ImageCopyTexture, data []byte, layout ImageDataLayout, size Extent3D) error
 
 	// Encoder answers frame's encoder at order, which gfx's flush finishes

@@ -118,6 +118,18 @@ const (
 	// CallKindReleaseComputePipeline is BackendDevice.ReleaseComputePipeline,
 	// its Arguments the gfx.ComputePipeline.
 	CallKindReleaseComputePipeline
+	// CallKindWriteBuffer is BackendDevice.WriteBuffer, its Arguments a
+	// WriteBufferArguments.
+	CallKindWriteBuffer
+	// CallKindWriteTexture is BackendDevice.WriteTexture, its Arguments a
+	// WriteTextureArguments.
+	CallKindWriteTexture
+	// CallKindMapBuffer is BackendDevice.MapBuffer, its Arguments a
+	// MapBufferArguments.
+	CallKindMapBuffer
+	// CallKindUnmapBuffer is BackendDevice.UnmapBuffer, its Arguments the
+	// gfx.Buffer.
+	CallKindUnmapBuffer
 )
 
 // SurfaceCapabilities is what the recording adapter answers for every
@@ -149,7 +161,8 @@ type Answer struct {
 // test looks them up by handle.
 type Recording struct {
 	// Calls are the lifecycle, write, map and surface calls, each with its
-	// handle and a deep copy of its descriptor.
+	// handle and a deep copy of its descriptor or data. MapStatus and
+	// MappedRange only read, and are not recorded.
 	Calls       []Call
 	Submissions []Submission
 	// submittedAfter is, for each submission, how many calls were recorded
@@ -289,6 +302,30 @@ type CreateRenderPipelineArguments struct {
 type CreateComputePipelineArguments struct {
 	Pipeline   gfx.ComputePipeline
 	Descriptor gfx.ComputePipelineDescriptor
+}
+
+// WriteBufferArguments are what WriteBuffer was called with, the data copied.
+type WriteBufferArguments struct {
+	Buffer gfx.Buffer
+	Offset uint64
+	Data   []byte
+}
+
+// WriteTextureArguments are what WriteTexture was called with, the data
+// copied.
+type WriteTextureArguments struct {
+	Destination gfx.ImageCopyTexture
+	Data        []byte
+	Layout      gfx.ImageDataLayout
+	Size        gfx.Extent3D
+}
+
+// MapBufferArguments are what MapBuffer was called with.
+type MapBufferArguments struct {
+	Buffer gfx.Buffer
+	Mode   gfx.MapMode
+	Offset uint64
+	Size   uint64
 }
 
 // Submission is one submit's command buffers, in the order submitted.
