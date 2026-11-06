@@ -2,8 +2,10 @@
 // system, for tests: NewWindows answers windows that open and close as
 // platform asks, with zero native handles, so platform publishes
 // WindowOpenedEvent and WindowClosedEvent and a backend that sees a zero
-// handle draws without a window. It is an adapter, not a plugin: the test's
-// own plugin makes it and binds it in its Init.
+// handle draws without a window. A test resizes a window with Resize, which
+// platform publishes as ResizeEvent, and reads whether the request hid it
+// with IsHidden. It is an adapter, not a plugin: the test's own plugin makes
+// it and binds it in its Init.
 //
 //	func (p *test) Init(c *kernel.Configurator, _ any) error {
 //		c.BindSocket[platform.WindowsSocket](headless.NewWindows())

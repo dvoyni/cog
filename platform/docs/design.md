@@ -391,8 +391,14 @@ built on the [gfx map](https://github.com/dvoyni/cog/issues/608).
 system, for tests: **`NewWindows()`** answers a `WindowsSocket` the test's
 own plugin binds, an adapter, not a plugin. A window opens from the next pump
 at its requested size, at scale 1, with the zero native handle, from which
-gfx's gogpu backend makes a headless surface; closing it reports it gone. It
-has no focus, cursor or input.
+gfx's gogpu backend makes a headless surface; closing it reports it gone.
+**`Resize(window, size, framebufferSize, scale)`**, the test's call, reports
+the window resized from the next pump, so platform publishes `ResizeEvent`; a
+window closed before that pump takes no resize. The rest of the request, the
+size included, is kept as applied and changes nothing:
+**`IsHidden(window)`** answers whether the pump applied `Hidden`. platform
+calls it on the main thread and a test from any goroutine, so it holds a
+mutex. It has no focus, cursor or input.
 
 ## The gogpu fork
 

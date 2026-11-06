@@ -47,7 +47,7 @@ read mounts ────────────┘  ReadMountSocket     (an emb
 | `FS`, `WriteFS` | The files: `FS` reads the overlay, and `ElevateFileAccess` gives the `WriteFS` that writes. |
 | `*Values` | A key-value store of JSON values, kept in a file in `FS`. |
 | `filesystems` | The writable filesystems: `NewDiskWriteFS`, `NewLocalStorageWriteFS`. |
-| `headless` | Windows for tests, without an operating system: `NewWindows`. |
+| `headless` | Windows for tests, without an operating system: `NewWindows`, resized with `Resize`. |
 
 platform holds no platform code. The window implementation and the input
 source are other plugins (gogpu's, on the
