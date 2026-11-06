@@ -525,12 +525,17 @@ const triangleWGSL = "@vertex fn vs() -> @builtin(position) vec4f { return vec4f
 	"@fragment fn fs() -> @location(0) vec4f { return vec4f(1.0); }\n" +
 	"@compute @workgroup_size(1) fn cs() {}\n"
 
-// createFixture creates one object of each type a descriptor names.
+// createFixture creates one object of each type a descriptor names, the
+// buffer and the texture with every usage recordEveryCommand puts them to.
 func createFixture(t *testing.T, device gfx.Device) fixture {
 	t.Helper()
 	var live fixture
 	var err error
-	live.buffer, err = device.CreateBuffer(gfx.BufferDescriptor{Size: 256, Usage: gfx.BufferUsageFlagUniform})
+	live.buffer, err = device.CreateBuffer(gfx.BufferDescriptor{
+		Size: 256,
+		Usage: gfx.BufferUsageFlagUniform | gfx.BufferUsageFlagVertex | gfx.BufferUsageFlagIndex |
+			gfx.BufferUsageFlagIndirect | gfx.BufferUsageFlagCopySrc | gfx.BufferUsageFlagCopyDst,
+	})
 	mustSucceed(t, err)
 	live.texture, err = device.CreateTexture(gfx.TextureDescriptor{
 		Size:          gfx.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1},
@@ -538,7 +543,8 @@ func createFixture(t *testing.T, device gfx.Device) fixture {
 		SampleCount:   1,
 		Dimension:     gfx.TextureDimension2D,
 		Format:        gfx.TextureFormatRGBA8Unorm,
-		Usage:         gfx.TextureUsageFlagTextureBinding,
+		Usage: gfx.TextureUsageFlagTextureBinding | gfx.TextureUsageFlagRenderAttachment |
+			gfx.TextureUsageFlagCopySrc | gfx.TextureUsageFlagCopyDst,
 	})
 	mustSucceed(t, err)
 	live.view, err = device.CreateTextureView(live.texture, gfx.TextureViewDescriptor{})

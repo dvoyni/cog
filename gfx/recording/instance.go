@@ -125,6 +125,17 @@ func (instance *Instance) recordAnswered(kind CallKind, arguments any, apply fun
 	return answer
 }
 
+// holdsFramebuffer answers whether view is a framebuffer acquired and not yet
+// presented; the caller holds the mutex.
+func (instance *Instance) holdsFramebuffer(view gfx.TextureView) bool {
+	for _, windowSurface := range instance.surfaces {
+		if windowSurface.framebuffer == view {
+			return true
+		}
+	}
+	return false
+}
+
 // surface is one window's surface: the native handle it was created from,
 // whether it is configured, and the framebuffer acquired and not yet
 // presented, zero when none is.
