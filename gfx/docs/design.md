@@ -11,12 +11,12 @@ capture, and recovery after a device loss. It knows nothing of materials,
 scenes or the ECS: scene builds forward+, deferred and post effects on it,
 and nothing in gfx knows which.
 
-Status: designed, not built. The decisions come from the
+Status: declared, not built. The decisions come from the
 [gfx map](https://github.com/dvoyni/cog/issues/608); each section links the
-ticket that holds its detail. Every type, method and descriptor is declared,
-without bodies, on the branch
+ticket that holds its detail. Every type, method and descriptor is declared
+in this module, from the listing on
 [`prototype/gfx-listing`](https://github.com/dvoyni/cog/tree/prototype/gfx-listing/gfx),
-and the build starts from it. The vocabulary is in
+and each body panics until its ticket fills it. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md); the ADRs are in [`adr/`](adr).
 
 ## Constraints
@@ -112,7 +112,9 @@ present and recovery itself.
   kinds, exactly one non-zero. Slices stay where the count has no small bound.
   Names and shapes follow gogpu's Go API (`Dispatch`, `DrawArgs`, region
   copies), renamed only where the naming rules require.
-- **Handles** are `struct{ index, generation uint32 }`. A stale one answers
+- **Handles** each embed one private `handle`, `struct{ index, generation
+  uint32 }`, which gives them `Index()`; they stay distinct types, and a
+  table is generic over `~struct{ handle }`. A stale one answers
   `ErrReleased` from calls with an error, is recorded as a deferred error by
   recording calls, and a second release logs `ErrReleased` and does nothing.
 - **Release is immediate,** as in wgpu, which reference-counts resources until
@@ -297,10 +299,10 @@ present and recovery itself.
 
 - **WebGPU's query sets are mirrored and declared, waiting on the wgpu
   fork:** a `QuerySet` handle, `TimestampWrites` on pass descriptors,
-  `CommandEncoder.ResolveQuerySet`, `BufferUsageQueryResolve`,
-  `Device.TimestampPeriod()`, and `FeatureTimestampQuery` reported only where
-  it works. Until the fork exposes them, `CreateQuerySet` answers an error on
-  every backend. Results come back through the asynchronous maps.
+  `CommandEncoder.ResolveQuerySet`, `BufferUsageFlagQueryResolve`,
+  `Device.TimestampPeriod()`, and `FeatureFlagTimestampQuery` reported only
+  where it works. Until the fork exposes them, `CreateQuerySet` answers an
+  error on every backend. Results come back through the asynchronous maps.
 - **gfx collects no timings.** A per-pass profiler is scene's or a profiler
   plugin's.
 

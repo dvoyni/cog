@@ -8,8 +8,9 @@ A backend implements it: the gogpu plugin over our wgpu fork, or the
 recording adapter in its `recording` package for tests. It knows nothing of
 materials, scenes or the ECS.
 
-Status: designed, not built. Every declaration is on the branch
-[`prototype/gfx-listing`](https://github.com/dvoyni/cog/tree/prototype/gfx-listing/gfx).
+Status: declared, not built. Every declaration is in this module, and each
+body panics until its ticket on the
+[gfx map](https://github.com/dvoyni/cog/issues/608) fills it.
 
 ## Shape
 
