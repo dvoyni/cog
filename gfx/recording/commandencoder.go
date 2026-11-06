@@ -1,6 +1,7 @@
 package recording
 
 import (
+	"errors"
 	"slices"
 
 	"github.com/dvoyni/cog/gfx"
@@ -12,6 +13,9 @@ import (
 type commandEncoder struct {
 	instance *Instance
 	commands []Command
+	// spent is set once the encoder is finished or discarded: wgpu answers
+	// ErrReleased for a Finish after either.
+	spent bool
 }
 
 // BeginRenderPass records the pass, its color attachments copied, and
@@ -65,16 +69,27 @@ func (encoder *commandEncoder) ClearBuffer(buffer gfx.Buffer, offset, size uint6
 }
 
 // Finish records the call, and answers the commands recorded, or the error
-// AnswerNext queued for it.
+// AnswerNext queued for it, or an error when the encoder is already finished
+// or discarded. The encoder is spent either way.
 func (encoder *commandEncoder) Finish() (gfx.CommandBuffer, error) {
-	if err := encoder.instance.record(CallKindFinish, nil, nil).Error; err != nil {
+	err := encoder.instance.record(CallKindFinish, nil, func() error {
+		if encoder.spent {
+			return errors.New("recording: finishing an encoder already finished or discarded")
+		}
+		return nil
+	}).Error
+	encoder.spent = true
+	if err != nil {
 		return nil, err
 	}
 	return &commandBuffer{commands: encoder.commands}, nil
 }
 
-// DiscardEncoding drops the commands recorded.
-func (encoder *commandEncoder) DiscardEncoding() { encoder.commands = nil }
+// DiscardEncoding drops the commands recorded; the encoder is spent.
+func (encoder *commandEncoder) DiscardEncoding() {
+	encoder.commands = nil
+	encoder.spent = true
+}
 
 // record appends a command of kind with arguments.
 func (encoder *commandEncoder) record(kind CommandKind, arguments any) {

@@ -186,18 +186,19 @@ func (d *device) CreateCommandEncoder(descriptor gfx.CommandEncoderDescriptor) (
 	return &commandEncoder{instance: d.instance}, nil
 }
 
-// Submit records buffers as one submission, after the calls recorded so far.
-// Every buffer is one the adapter's encoders finished.
+// Submit records the call and buffers as one submission, after the calls
+// recorded before it, or answers the error AnswerNext queued for it and
+// submits nothing. Every buffer is one the adapter's encoders finished.
 func (d *device) Submit(buffers ...gfx.CommandBuffer) error {
 	submission := Submission{Buffers: make([]CommandBuffer, len(buffers))}
 	for index, buffer := range buffers {
 		submission.Buffers[index] = CommandBuffer{Commands: buffer.(*commandBuffer).commands}
 	}
-	d.instance.mutex.Lock()
-	defer d.instance.mutex.Unlock()
-	d.instance.recording.submittedAfter = append(d.instance.recording.submittedAfter, len(d.instance.recording.Calls))
-	d.instance.recording.Submissions = append(d.instance.recording.Submissions, submission)
-	return nil
+	return d.instance.record(CallKindSubmit, nil, func() error {
+		d.instance.recording.submittedAfter = append(d.instance.recording.submittedAfter, len(d.instance.recording.Calls))
+		d.instance.recording.Submissions = append(d.instance.recording.Submissions, submission)
+		return nil
+	}).Error
 }
 
 func (d *device) SurfaceCapabilities(window platform.Window) gfx.SurfaceCapabilities {
