@@ -18,12 +18,12 @@ in this module, from the listing on
 [`prototype/gfx-listing`](https://github.com/dvoyni/cog/tree/prototype/gfx-listing/gfx).
 The device comes up and is released, every resource but query sets is
 created and released, pipelines with explicit layouts only, surfaces
-follow platform's windows, though nothing configures them yet, and the frame
-chain acquires, publishes `DrawEvent`, flushes the frame's encoders and
-presents, the recording adapter recording their passes and commands with
-typed arguments. Standalone encoders are finished and submitted by their
-owner; every other body panics until its ticket fills it. The
-vocabulary is in [`CONTEXT.md`](../CONTEXT.md); the ADRs are in
+follow platform's windows, each configured from `Config.Surface` before its
+first acquire, and the frame chain acquires, publishes `DrawEvent`, flushes
+the frame's encoders and presents, the recording adapter recording their
+passes and commands with typed arguments. Standalone encoders are finished
+and submitted by their owner; every other body panics until its ticket fills
+it. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md); the ADRs are in
 [`adr/`](adr).
 
 ## Constraints
@@ -175,17 +175,22 @@ present and recovery itself.
 [ADR 0002](adr/0002-frames-record-one-at-a-time.md))
 
 - **The draw chain is a nested publish.** gfx has one `RenderEvent` handler,
-  `Handlers.Draw`. It schedules, each after the last present: a pinned
-  configure of any surface marked for it, under the write lock; then the
-  pinned acquire. It publishes `DrawEvent` with `ex.Publish(acquired, …)`,
-  schedules the flush and the pinned present after the out dependency that
-  answers, and returns the present to metronome. Application handlers
-  subscribe to `DrawEvent` with no ordering, schedule their recording tasks
-  after `e.Ready` with the event as their arg, and return `ex.Join(in, own)`.
-- **One frame covers every open window:** an acquire per window in one
-  pinned job, one flush, a present of each. A window with no framebuffer this
-  frame (hidden, a zero framebuffer, outdated, timed out) answers the zero
-  view. `DrawEvent` is published every beat, even when no window has one.
+  `Handlers.Draw`. It schedules, each after the last present: a configure
+  of any surface marked for it, under the write lock; then the acquire. It
+  publishes `DrawEvent` with `ex.Publish(acquired, …)`, schedules the flush
+  and the present after the out dependency that answers, and returns the
+  present to metronome. Application handlers subscribe to `DrawEvent` with no
+  ordering, schedule their recording tasks after `e.Ready` with the event as
+  their arg, and return `ex.Join(in, own)`.
+- **gfx pins none of its jobs**
+  ([gfx: no task pinned for a backend's sake](https://github.com/dvoyni/cog/issues/707)).
+  Which thread a backend call must run on is the backend's, and differs by
+  platform: the `Tasks` resource holds the surface tasks (create, release,
+  configure, acquire, present), and the backend's plugin, listed after gfx,
+  pins those its platform needs to the main thread.
+- **One frame covers every open window:** an acquire per window in one job,
+  one flush, a present of each. A window with no framebuffer this frame
+  (hidden, a zero framebuffer, outdated, timed out) answers the zero view. `DrawEvent` is published every beat, even when no window has one.
 - **Frames record one at a time.** wgpu lets a surface hold one acquired
   framebuffer, so each acquire follows the previous present, and `Ready`
   stays the acquire. Frames overlap on the GPU through wgpu's swapchain, not
@@ -248,15 +253,14 @@ present and recovery itself.
 ([Surface configuration](https://github.com/dvoyni/cog/issues/665))
 
 - **Surfaces follow platform's windows.** `CreateSurface` on
-  `WindowOpenedEvent` creates one from `WindowManager.Native`, in a pinned
-  task; `ReleaseSurface` on `WindowClosedEvent` releases it. Both hold the
+  `WindowOpenedEvent` creates one from `WindowManager.Native`, in a task; `ReleaseSurface` on `WindowClosedEvent` releases it. Both hold the
   write lock. A creation that fails goes to `LogErr` and leaves the window
   without a surface. A surface is named by its `platform.Window`; there is no
   public surface handle.
 - **Configured in the frame chain, between frames.** A surface is marked for
   configuring when it is new, resized (`ResizeSurface` on `ResizeEvent` only
   marks it), reported suboptimal, outdated or lost, or the request changes.
-  `Draw` schedules the configure, pinned, under the write lock, after the last
+  `Draw` schedules the configure under the write lock, after the last
   present and before the acquire. A window that is hidden or has a zero
   framebuffer is neither configured nor acquired.
 - **One surface request for the whole application:**
@@ -327,7 +331,7 @@ present and recovery itself.
   running then answer `ErrDeviceLost` and record nothing; the frame in flight
   skips its submit and present.
 - **Handles survive.** On the next beat, instead of a frame, `Draw` schedules
-  a pinned recovery under the write lock: release the device, request a new
+  a recovery under the write lock: release the device, request a new
   one from the same adapter (a fresh adapter if that fails), recreate every
   object under its old handle from its kept descriptor, in dependency order
   (buffers, textures, samplers, shader modules; views, bind group layouts;

@@ -55,6 +55,9 @@ order and presents; every other body panics until its ticket on the
 - **Resources it installs:**
   - `Device`: the GPU, read under its read lock, elevated under its write
     lock.
+  - `Tasks`: the surface tasks, for a backend's plugin to pin to the main
+    thread where its platform needs that; gfx pins none and schedules them
+    itself.
   - `Handlers`: `Draw`, `CreateSurface`, `ResizeSurface` and
     `ReleaseSurface`, to order handlers around.
 - **Resources it reads from other plugins:** `*platform.WindowManager`, for
@@ -71,9 +74,10 @@ order and presents; every other body panics until its ticket on the
 - **Sockets it binds:** none.
 
 gfx requires platform, listed before it, and checks it with
-`Dependencies`. metronome goes anywhere. The backend binds `InstanceSocket`,
-so it goes anywhere too. A plugin that reads `Handlers` in its `Init` is
-listed after gfx.
+`Dependencies`. metronome goes anywhere. A plugin that reads `Handlers` or
+`Tasks` in its `Init` is listed after gfx: the backend's plugin, which binds
+`InstanceSocket` and pins the surface tasks its platform needs on the main
+thread, goes after gfx for that.
 
 ## Wiring
 
@@ -83,10 +87,10 @@ supervisor.Spawn(map[kernel.PluginName]any{
 		metronome.NewTrack[gfx.RenderEvent](vsync), // MaxInFlight 1, MinInterval 1/240 s
 	}},
 }, workerCount,
-	gogpu.NewPlugin(), // binds gfx.InstanceSocket, platform's window and input seams
 	platform.NewPlugin(),
 	metronome.NewPlugin(),
 	gfx.NewPlugin(),
+	gogpu.NewPlugin(), // binds gfx.InstanceSocket and platform's seams, pins gfx.Tasks
 	game.NewPlugin(), // subscribes to gfx.DrawEvent
 )
 ```

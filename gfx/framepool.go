@@ -28,6 +28,9 @@ type framePool struct {
 	// closingWindows are the windows closed whose surfaces are still to be
 	// released: no acquire takes their framebuffers.
 	closingWindows []platform.Window
+	// unconfiguredWindows are the windows whose surfaces are marked for
+	// configuring before the next acquire.
+	unconfiguredWindows []platform.Window
 }
 
 // frameSlot is one frame's state: the generation of the Frame it holds, a
@@ -198,29 +201,70 @@ func (pool *framePool) unmarkClosing(window platform.Window) {
 	}
 }
 
-// draw is Handlers.Draw: it acquires a frame, schedules the pinned acquire
-// of its framebuffers after in and the last present, publishes DrawEvent
-// with that acquire as Ready, and schedules the flush after the nested
-// publication's out dependency, then the pinned present, which it keeps as
-// the last present and returns.
+// markUnconfigured marks window's surface for configuring before the next
+// acquire.
+func (pool *framePool) markUnconfigured(window platform.Window) {
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+	if !slices.Contains(pool.unconfiguredWindows, window) {
+		pool.unconfiguredWindows = append(pool.unconfiguredWindows, window)
+	}
+}
+
+// hasUnconfigured answers whether any surface is marked for configuring.
+func (pool *framePool) hasUnconfigured() bool {
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+	return len(pool.unconfiguredWindows) > 0
+}
+
+// takeUnconfigured answers the windows marked for configuring, and drops
+// their marks.
+func (pool *framePool) takeUnconfigured() []platform.Window {
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+	windows := pool.unconfiguredWindows
+	pool.unconfiguredWindows = nil
+	return windows
+}
+
+// unmarkUnconfigured drops window's configuring mark, once its surface is
+// released.
+func (pool *framePool) unmarkUnconfigured(window platform.Window) {
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+	if index := slices.Index(pool.unconfiguredWindows, window); index >= 0 {
+		pool.unconfiguredWindows = slices.Delete(pool.unconfiguredWindows, index, index+1)
+	}
+}
+
+// draw is Handlers.Draw: it acquires a frame and, when a surface is marked
+// for it, schedules the configure after in and the last present; then the
+// acquire of its framebuffers after in, the last present and that configure,
+// publishes DrawEvent with that acquire as Ready, and schedules the flush
+// after the nested publication's out dependency, then the present, which it
+// keeps as the last present and returns.
 func (p *Plugin) draw(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event RenderEvent) (RenderEvent, kernel.JobHandle) {
 	frame, lastPresent := p.device.frames.acquire()
-	acquired := ex.Schedule(p.acquireTask, frame, in, lastPresent).Handle()
+	configured := lastPresent
+	if p.device.frames.hasUnconfigured() {
+		configured = ex.Schedule(p.tasks.ConfigureSurfaces, kernel.NoArg{}, in, lastPresent).Handle()
+	}
+	acquired := ex.Schedule(p.tasks.AcquireFramebuffers, frame, in, configured).Handle()
 	_, out := ex.Publish(acquired, DrawEvent{Beat: event.Beat, Frame: frame, Ready: acquired})
 	flushed := ex.Schedule(p.flushTask, frame, out).Handle()
-	present := ex.Schedule(p.presentTask, frame, flushed).Handle()
+	present := ex.Schedule(p.tasks.PresentFramebuffers, frame, flushed).Handle()
 	p.device.frames.setLastPresent(present)
 	return event, present
 }
 
-// acquireFramebuffers acquires the framebuffer of every window with a surface
-// and not closing, pinned to the main thread under the read lock. A window
-// whose acquire answers no framebuffer, or an error, which goes to LogErr,
-// has none this frame.
+// acquireFramebuffers acquires the framebuffer of every window with a
+// configured surface and not closing, under the read lock. A window whose acquire answers no framebuffer, or an error,
+// which goes to LogErr, has none this frame.
 func acquireFramebuffers(k *kernel.Kernel, frame Frame, deviceHandle kernel.Read[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)
 	for _, window := range d.surfaces {
-		if d.frames.isClosing(window) {
+		if _, configured := d.configurations[window]; !configured || d.frames.isClosing(window) {
 			continue
 		}
 		view := d.textureViews.acquire(textureViewSource{})
@@ -262,8 +306,8 @@ func flushFrame(k *kernel.Kernel, frame Frame, deviceHandle kernel.Read[Device])
 	return kernel.NoResult{}
 }
 
-// presentFramebuffers presents each framebuffer frame acquired, pinned to the
-// main thread under the read lock, makes its view stale, and releases the
+// presentFramebuffers presents each framebuffer frame acquired, under the
+// read lock, makes its view stale, and releases the
 // frame. A present that fails goes to LogErr.
 func presentFramebuffers(k *kernel.Kernel, frame Frame, deviceHandle kernel.Read[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)

@@ -5,28 +5,47 @@ import (
 	"github.com/dvoyni/cog/platform"
 )
 
+// Tasks is the resource holding gfx's surface tasks, for a backend's plugin,
+// listed after gfx, to pin to the main thread where its platform needs that:
+//
+//	tasks, _ := configurator.Resource[gfx.Tasks]()
+//	configurator.PinToMainThread(tasks.AcquireFramebuffers)
+//
+// gfx pins none of them, and schedules them itself; no one else may.
+type Tasks struct {
+	// CreateSurface creates an opened window's surface.
+	CreateSurface *kernel.Task[platform.Window, kernel.NoResult]
+	// ReleaseSurface releases a closed window's surface.
+	ReleaseSurface *kernel.Task[platform.Window, kernel.NoResult]
+	// ConfigureSurfaces configures the surfaces marked for it, before an
+	// acquire.
+	ConfigureSurfaces *kernel.Task[kernel.NoArg, kernel.NoResult]
+	// AcquireFramebuffers acquires a frame's framebuffers.
+	AcquireFramebuffers *kernel.Task[Frame, kernel.NoResult]
+	// PresentFramebuffers presents a frame's framebuffers.
+	PresentFramebuffers *kernel.Task[Frame, kernel.NoResult]
+}
+
 // Handlers is the resource holding every event handler gfx subscribes, so a
 // plugin listed after gfx orders its own around them with
-// configurator.OrderSubscriptions. gfx offers no tasks: acquire, flush and
-// present are its own.
+// configurator.OrderSubscriptions.
 type Handlers struct {
-	// Draw handles RenderEvent. After a device loss it schedules the pinned
-	// recovery under the write lock instead of a frame, and returns it.
-	// Otherwise it schedules a pinned configure of the
-	// surfaces marked for it, under the write lock, then the pinned acquire,
-	// each after the last present; publishes DrawEvent; and schedules the
-	// flush and the pinned present after the nested publication's out
-	// dependency, which it returns.
+	// Draw handles RenderEvent. After a device loss it schedules the recovery
+	// under the write lock instead of a frame, and returns it. Otherwise it
+	// schedules a configure of the surfaces marked for it, under the write
+	// lock, then the acquire, each after the last present; publishes
+	// DrawEvent; and schedules the flush and the present after the nested
+	// publication's out dependency, which it returns.
 	Draw kernel.Sub[RenderEvent]
 	// CreateSurface handles platform.WindowOpenedEvent: it schedules the
-	// pinned creation of the window's surface and marks it for configuring.
+	// creation of the window's surface, which marks it for configuring.
 	CreateSurface kernel.Sub[platform.WindowOpenedEvent]
 	// ResizeSurface handles platform.ResizeEvent: it marks the window's
 	// surface for configuring at its new framebuffer size, and schedules
 	// nothing.
 	ResizeSurface kernel.Sub[platform.ResizeEvent]
 	// ReleaseSurface handles platform.WindowClosedEvent: it schedules the
-	// pinned release of the window's surface after the last present.
+	// release of the window's surface after the last present.
 	ReleaseSurface kernel.Sub[platform.WindowClosedEvent]
 }
 

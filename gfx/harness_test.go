@@ -39,12 +39,18 @@ type harness struct {
 	readFrame func(event gfx.DrawEvent, device gfx.Device)
 	// unbound leaves InstanceSocket without a binding.
 	unbound bool
-	read    func(device gfx.Device)
-	write   func(device kernel.Write[gfx.Device])
-	edit    func(manager *platform.WindowManager)
+	// pinSurfaceTasks pins gfx's surface tasks to the main thread in Init, as
+	// a backend whose platform needs it does.
+	pinSurfaceTasks bool
+	read            func(device gfx.Device)
+	write           func(device kernel.Write[gfx.Device])
+	edit            func(manager *platform.WindowManager)
 	// handlers is gfx's Handlers as Init found it, when handlersFound.
 	handlers      gfx.Handlers
 	handlersFound bool
+	// tasks is gfx's Tasks as Init found it, when tasksFound.
+	tasks      gfx.Tasks
+	tasksFound bool
 	// mutex guards logged, the errors kernels logged and the test has not
 	// taken, any left when the test ends failing it, and drawn, every
 	// DrawEvent published.
@@ -99,6 +105,14 @@ func (h *harness) Init(c *kernel.Configurator, config any) error {
 	}
 	c.BindSocket[platform.WindowsSocket](h.windows)
 	h.handlers, h.handlersFound = c.Resource[gfx.Handlers]()
+	h.tasks, h.tasksFound = c.Resource[gfx.Tasks]()
+	if h.pinSurfaceTasks {
+		c.PinToMainThread(h.tasks.CreateSurface)
+		c.PinToMainThread(h.tasks.ReleaseSurface)
+		c.PinToMainThread(h.tasks.ConfigureSurfaces)
+		c.PinToMainThread(h.tasks.AcquireFramebuffers)
+		c.PinToMainThread(h.tasks.PresentFramebuffers)
+	}
 	read := c.RegisterTask1(func(k *kernel.Kernel, _ kernel.NoArg, device kernel.Read[gfx.Device]) kernel.NoResult {
 		h.read(device.Get())
 		return kernel.NoResult{}

@@ -1,6 +1,7 @@
 package gfx
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 
@@ -98,9 +99,9 @@ const (
 	AcquireStatusTimeout
 )
 
-// createSurface creates window's surface from its native handle, pinned to
-// the main thread under the write lock; a failure goes to LogErr, and window
-// stays without a surface.
+// createSurface creates window's surface from its native handle, under the
+// write lock, and marks it for configuring; a failure goes to LogErr, and
+// window stays without a surface.
 func createSurface(k *kernel.Kernel, window platform.Window, manager kernel.Read[*platform.WindowManager], deviceHandle kernel.Write[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)
 	if err := d.instance.CreateSurface(window, manager.Get().Native(window)); err != nil {
@@ -108,21 +109,59 @@ func createSurface(k *kernel.Kernel, window platform.Window, manager kernel.Read
 		return kernel.NoResult{}
 	}
 	d.surfaces = append(d.surfaces, window)
+	d.frames.markUnconfigured(window)
 	return kernel.NoResult{}
 }
 
-// releaseSurface releases window's surface, pinned to the main thread under
-// the write lock, after the last present when its window closed, and drops
-// its closing mark; a window without one, its creation failed, releases
-// nothing.
+// releaseSurface releases window's surface, under the write lock, after the
+// last present when its window closed, and drops its closing and configuring
+// marks and its configuration; a window without one, its creation failed,
+// releases nothing.
 func releaseSurface(k *kernel.Kernel, window platform.Window, deviceHandle kernel.Write[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)
 	d.frames.unmarkClosing(window)
+	d.frames.unmarkUnconfigured(window)
+	delete(d.configurations, window)
 	index := slices.Index(d.surfaces, window)
 	if index < 0 {
 		return kernel.NoResult{}
 	}
 	d.surfaces = slices.Delete(d.surfaces, index, index+1)
 	d.instance.ReleaseSurface(window)
+	return kernel.NoResult{}
+}
+
+// configureSurfaces configures each surface marked for it from the surface
+// request at its window's framebuffer size, under the write lock, between the
+// last present and the next acquire. A part of the request the surface's
+// capabilities lack falls back to the default, with a LogErr; a configure
+// that fails goes to LogErr and leaves the window unconfigured, so it is not
+// acquired. A window closing, or whose surface is gone, is skipped.
+func configureSurfaces(k *kernel.Kernel, _ kernel.NoArg, manager kernel.Read[*platform.WindowManager], deviceHandle kernel.Write[Device]) kernel.NoResult {
+	d := deviceHandle.Get().(*device)
+	for _, window := range d.frames.takeUnconfigured() {
+		if !slices.Contains(d.surfaces, window) || d.frames.isClosing(window) {
+			continue
+		}
+		capabilities := d.backend.SurfaceCapabilities(window)
+		format := cmp.Or(d.surfaceRequest.Format, TextureFormatBGRA8Unorm)
+		if !slices.Contains(capabilities.Formats, format) {
+			k.Logger().LogErr(fmt.Errorf("gfx: the surface of %v lacks format %v, falling back to BGRA8Unorm", window, format))
+			format = TextureFormatBGRA8Unorm
+		}
+		presentMode := cmp.Or(d.surfaceRequest.PresentMode, PresentModeFifo)
+		if !slices.Contains(capabilities.PresentModes, presentMode) {
+			k.Logger().LogErr(fmt.Errorf("gfx: the surface of %v lacks present mode %v, falling back to Fifo", window, presentMode))
+			presentMode = PresentModeFifo
+		}
+		size := manager.Get().FramebufferSize(window)
+		configuration := SurfaceConfiguration{Format: format, PresentMode: presentMode, Width: uint32(size.Width), Height: uint32(size.Height)}
+		if err := d.backend.ConfigureSurface(window, configuration); err != nil {
+			k.Logger().LogErr(fmt.Errorf("gfx: configuring the surface of %v: %w", window, err))
+			delete(d.configurations, window)
+			continue
+		}
+		d.configurations[window] = configuration
+	}
 	return kernel.NoResult{}
 }

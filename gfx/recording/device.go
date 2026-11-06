@@ -201,23 +201,53 @@ func (d *device) Submit(buffers ...gfx.CommandBuffer) error {
 	}).Error
 }
 
+// SurfaceCapabilities records the call and answers the Capabilities
+// AnswerNext queued, or SurfaceCapabilities when none were, its slices
+// copied.
 func (d *device) SurfaceCapabilities(window platform.Window) gfx.SurfaceCapabilities {
-	panic("gfx listing: no bodies")
+	answer := d.instance.record(CallKindSurfaceCapabilities, window, nil)
+	capabilities := answer.Capabilities
+	if capabilities.Formats == nil && capabilities.PresentModes == nil && capabilities.AlphaModes == nil {
+		capabilities = SurfaceCapabilities
+	}
+	return gfx.SurfaceCapabilities{
+		Formats:      slices.Clone(capabilities.Formats),
+		PresentModes: slices.Clone(capabilities.PresentModes),
+		AlphaModes:   slices.Clone(capabilities.AlphaModes),
+	}
 }
 
+// ConfigureSurface records the configure and marks window's surface
+// configured; an error when window has no surface, or holds a framebuffer
+// not yet presented.
 func (d *device) ConfigureSurface(window platform.Window, configuration gfx.SurfaceConfiguration) error {
-	panic("gfx listing: no bodies")
+	return d.instance.record(CallKindConfigureSurface, ConfigureSurfaceArguments{Window: window, Configuration: configuration}, func() error {
+		windowSurface, exists := d.instance.surfaces[window]
+		if !exists {
+			return fmt.Errorf("recording: configuring the surface of %v, which has none", window)
+		}
+		if windowSurface.framebuffer != (gfx.TextureView{}) {
+			return fmt.Errorf("recording: configuring the surface of %v, its framebuffer not presented", window)
+		}
+		windowSurface.configured = true
+		d.instance.surfaces[window] = windowSurface
+		return nil
+	}).Error
 }
 
 // AcquireFramebuffer records the acquire and answers the status AnswerNext
 // queued, Acquired when none is; a status with a framebuffer keeps view as
 // window's until its present. An error when window has no surface, or holds
-// a framebuffer not yet presented, as wgpu answers ErrSurfaceAlreadyAcquired.
+// a framebuffer not yet presented, as wgpu answers ErrSurfaceAlreadyAcquired,
+// or its surface is not configured.
 func (d *device) AcquireFramebuffer(window platform.Window, view gfx.TextureView) (status gfx.AcquireStatus, err error) {
 	answer := d.instance.recordAnswered(CallKindAcquireFramebuffer, AcquireFramebufferArguments{Window: window, View: view}, func(answer Answer) error {
 		windowSurface, exists := d.instance.surfaces[window]
 		if !exists {
 			return fmt.Errorf("recording: acquiring the framebuffer of %v, which has no surface", window)
+		}
+		if !windowSurface.configured {
+			return fmt.Errorf("recording: acquiring the framebuffer of %v, its surface not configured", window)
 		}
 		if windowSurface.framebuffer != (gfx.TextureView{}) {
 			return fmt.Errorf("recording: acquiring the framebuffer of %v, its last not presented", window)

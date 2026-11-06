@@ -126,8 +126,10 @@ func (instance *Instance) recordAnswered(kind CallKind, arguments any, apply fun
 }
 
 // surface is one window's surface: the native handle it was created from,
-// and the framebuffer acquired and not yet presented, zero when none is.
+// whether it is configured, and the framebuffer acquired and not yet
+// presented, zero when none is.
 type surface struct {
 	native      platform.NativeHandle
+	configured  bool
 	framebuffer gfx.TextureView
 }
