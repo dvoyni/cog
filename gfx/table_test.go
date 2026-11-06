@@ -40,6 +40,24 @@ func TestTableZeroHandleIsReleased(t *testing.T) {
 	}
 }
 
+func TestTableChecksWhetherAHandleIsLive(t *testing.T) {
+	var buffers table[Buffer, BufferDescriptor]
+	buffer := buffers.acquire(BufferDescriptor{Size: 16})
+	if err := buffers.check(buffer); err != nil {
+		t.Fatalf("check of a live handle answered %v", err)
+	}
+	if err := buffers.retire(buffer); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := buffers.check(buffer); !errors.Is(err, ErrReleased) {
+		t.Errorf("check of a retired handle answered %v, want ErrReleased", err)
+	}
+	if err := buffers.check(Buffer{}); !errors.Is(err, ErrReleased) {
+		t.Errorf("check of the zero handle answered %v, want ErrReleased", err)
+	}
+}
+
 func TestTableReusesAReleasedIndexUnderANewGeneration(t *testing.T) {
 	var buffers table[Buffer, BufferDescriptor]
 	first := buffers.acquire(BufferDescriptor{Size: 16})

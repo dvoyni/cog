@@ -11,10 +11,18 @@ import (
 // answers it.
 type device struct {
 	instance *Instance
-	// buffers and textures hold each object's descriptor at its index, under
-	// the instance's mutex.
-	buffers  objectTable[gfx.BufferDescriptor]
-	textures objectTable[gfx.TextureDescriptor]
+	// Each table holds its type's objects, as what each was created with,
+	// at their indices, under the instance's mutex.
+	buffers          objectTable[gfx.BufferDescriptor]
+	textures         objectTable[gfx.TextureDescriptor]
+	textureViews     objectTable[CreateTextureViewArguments]
+	samplers         objectTable[gfx.SamplerDescriptor]
+	shaderModules    objectTable[gfx.ShaderModuleDescriptor]
+	bindGroupLayouts objectTable[gfx.BindGroupLayoutDescriptor]
+	bindGroups       objectTable[gfx.BindGroupDescriptor]
+	pipelineLayouts  objectTable[gfx.PipelineLayoutDescriptor]
+	renderPipelines  objectTable[gfx.RenderPipelineDescriptor]
+	computePipelines objectTable[gfx.ComputePipelineDescriptor]
 }
 
 // CreateBuffer records the creation and keeps buffer at its index.
@@ -43,17 +51,30 @@ func (d *device) ReleaseTexture(texture gfx.Texture) {
 	d.instance.record(CallKindReleaseTexture, texture, func() error { return d.textures.remove(texture.Index()) })
 }
 
+// CreateTextureView records the creation and keeps view at its index.
 func (d *device) CreateTextureView(view gfx.TextureView, texture gfx.Texture, descriptor gfx.TextureViewDescriptor) error {
-	panic("gfx listing: no bodies")
+	arguments := CreateTextureViewArguments{View: view, Texture: texture, Descriptor: descriptor}
+	return d.instance.record(CallKindCreateTextureView, arguments, func() error {
+		return d.textureViews.store(view.Index(), arguments)
+	}).Error
 }
 
-func (d *device) ReleaseTextureView(view gfx.TextureView) { panic("gfx listing: no bodies") }
+// ReleaseTextureView records the release and drops view from its index.
+func (d *device) ReleaseTextureView(view gfx.TextureView) {
+	d.instance.record(CallKindReleaseTextureView, view, func() error { return d.textureViews.remove(view.Index()) })
+}
 
+// CreateSampler records the creation and keeps sampler at its index.
 func (d *device) CreateSampler(sampler gfx.Sampler, descriptor gfx.SamplerDescriptor) error {
-	panic("gfx listing: no bodies")
+	return d.instance.record(CallKindCreateSampler, CreateSamplerArguments{Sampler: sampler, Descriptor: descriptor}, func() error {
+		return d.samplers.store(sampler.Index(), descriptor)
+	}).Error
 }
 
-func (d *device) ReleaseSampler(sampler gfx.Sampler) { panic("gfx listing: no bodies") }
+// ReleaseSampler records the release and drops sampler from its index.
+func (d *device) ReleaseSampler(sampler gfx.Sampler) {
+	d.instance.record(CallKindReleaseSampler, sampler, func() error { return d.samplers.remove(sampler.Index()) })
+}
 
 func (d *device) CreateQuerySet(querySet gfx.QuerySet, descriptor gfx.QuerySetDescriptor) error {
 	panic("gfx listing: no bodies")
@@ -63,42 +84,76 @@ func (d *device) ReleaseQuerySet(querySet gfx.QuerySet) { panic("gfx listing: no
 
 func (d *device) TimestampPeriod() float32 { panic("gfx listing: no bodies") }
 
+// CreateShaderModule records the creation and keeps module at its index.
 func (d *device) CreateShaderModule(module gfx.ShaderModule, descriptor gfx.ShaderModuleDescriptor) error {
-	panic("gfx listing: no bodies")
+	return d.instance.record(CallKindCreateShaderModule, CreateShaderModuleArguments{Module: module, Descriptor: descriptor}, func() error {
+		return d.shaderModules.store(module.Index(), descriptor)
+	}).Error
 }
 
-func (d *device) ReleaseShaderModule(module gfx.ShaderModule) { panic("gfx listing: no bodies") }
+// ReleaseShaderModule records the release and drops module from its index.
+func (d *device) ReleaseShaderModule(module gfx.ShaderModule) {
+	d.instance.record(CallKindReleaseShaderModule, module, func() error { return d.shaderModules.remove(module.Index()) })
+}
 
+// CreateBindGroupLayout records the creation and keeps layout at its index.
 func (d *device) CreateBindGroupLayout(layout gfx.BindGroupLayout, descriptor gfx.BindGroupLayoutDescriptor) error {
-	panic("gfx listing: no bodies")
+	return d.instance.record(CallKindCreateBindGroupLayout, CreateBindGroupLayoutArguments{Layout: layout, Descriptor: descriptor}, func() error {
+		return d.bindGroupLayouts.store(layout.Index(), descriptor)
+	}).Error
 }
 
-func (d *device) ReleaseBindGroupLayout(layout gfx.BindGroupLayout) { panic("gfx listing: no bodies") }
+// ReleaseBindGroupLayout records the release and drops layout from its index.
+func (d *device) ReleaseBindGroupLayout(layout gfx.BindGroupLayout) {
+	d.instance.record(CallKindReleaseBindGroupLayout, layout, func() error { return d.bindGroupLayouts.remove(layout.Index()) })
+}
 
+// CreateBindGroup records the creation and keeps group at its index.
 func (d *device) CreateBindGroup(group gfx.BindGroup, descriptor gfx.BindGroupDescriptor) error {
-	panic("gfx listing: no bodies")
+	return d.instance.record(CallKindCreateBindGroup, CreateBindGroupArguments{Group: group, Descriptor: descriptor}, func() error {
+		return d.bindGroups.store(group.Index(), descriptor)
+	}).Error
 }
 
-func (d *device) ReleaseBindGroup(group gfx.BindGroup) { panic("gfx listing: no bodies") }
+// ReleaseBindGroup records the release and drops group from its index.
+func (d *device) ReleaseBindGroup(group gfx.BindGroup) {
+	d.instance.record(CallKindReleaseBindGroup, group, func() error { return d.bindGroups.remove(group.Index()) })
+}
 
+// CreatePipelineLayout records the creation and keeps layout at its index.
 func (d *device) CreatePipelineLayout(layout gfx.PipelineLayout, descriptor gfx.PipelineLayoutDescriptor) error {
-	panic("gfx listing: no bodies")
+	return d.instance.record(CallKindCreatePipelineLayout, CreatePipelineLayoutArguments{Layout: layout, Descriptor: descriptor}, func() error {
+		return d.pipelineLayouts.store(layout.Index(), descriptor)
+	}).Error
 }
 
-func (d *device) ReleasePipelineLayout(layout gfx.PipelineLayout) { panic("gfx listing: no bodies") }
+// ReleasePipelineLayout records the release and drops layout from its index.
+func (d *device) ReleasePipelineLayout(layout gfx.PipelineLayout) {
+	d.instance.record(CallKindReleasePipelineLayout, layout, func() error { return d.pipelineLayouts.remove(layout.Index()) })
+}
 
+// CreateRenderPipeline records the creation and keeps pipeline at its index.
 func (d *device) CreateRenderPipeline(pipeline gfx.RenderPipeline, descriptor gfx.RenderPipelineDescriptor) error {
-	panic("gfx listing: no bodies")
+	return d.instance.record(CallKindCreateRenderPipeline, CreateRenderPipelineArguments{Pipeline: pipeline, Descriptor: descriptor}, func() error {
+		return d.renderPipelines.store(pipeline.Index(), descriptor)
+	}).Error
 }
 
-func (d *device) ReleaseRenderPipeline(pipeline gfx.RenderPipeline) { panic("gfx listing: no bodies") }
+// ReleaseRenderPipeline records the release and drops pipeline from its index.
+func (d *device) ReleaseRenderPipeline(pipeline gfx.RenderPipeline) {
+	d.instance.record(CallKindReleaseRenderPipeline, pipeline, func() error { return d.renderPipelines.remove(pipeline.Index()) })
+}
 
+// CreateComputePipeline records the creation and keeps pipeline at its index.
 func (d *device) CreateComputePipeline(pipeline gfx.ComputePipeline, descriptor gfx.ComputePipelineDescriptor) error {
-	panic("gfx listing: no bodies")
+	return d.instance.record(CallKindCreateComputePipeline, CreateComputePipelineArguments{Pipeline: pipeline, Descriptor: descriptor}, func() error {
+		return d.computePipelines.store(pipeline.Index(), descriptor)
+	}).Error
 }
 
+// ReleaseComputePipeline records the release and drops pipeline from its index.
 func (d *device) ReleaseComputePipeline(pipeline gfx.ComputePipeline) {
-	panic("gfx listing: no bodies")
+	d.instance.record(CallKindReleaseComputePipeline, pipeline, func() error { return d.computePipelines.remove(pipeline.Index()) })
 }
 
 func (d *device) WriteBuffer(buffer gfx.Buffer, offset uint64, data []byte) error {

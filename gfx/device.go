@@ -1,6 +1,8 @@
 package gfx
 
 import (
+	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/dvoyni/cog/kernel"
@@ -16,9 +18,19 @@ type device struct {
 	limits      Limits
 	adapterInfo AdapterInfo
 	// logger is the kernel's, for what a call answers no error for.
-	logger   *kernel.Logger
-	buffers  table[Buffer, BufferDescriptor]
-	textures table[Texture, TextureDescriptor]
+	logger *kernel.Logger
+	// Each table holds its type's handles with what each was created with,
+	// slices copied, which a recovery creates it again from.
+	buffers          table[Buffer, BufferDescriptor]
+	textures         table[Texture, TextureDescriptor]
+	textureViews     table[TextureView, textureViewSource]
+	samplers         table[Sampler, SamplerDescriptor]
+	shaderModules    table[ShaderModule, ShaderModuleDescriptor]
+	bindGroupLayouts table[BindGroupLayout, BindGroupLayoutDescriptor]
+	bindGroups       table[BindGroup, BindGroupDescriptor]
+	pipelineLayouts  table[PipelineLayout, PipelineLayoutDescriptor]
+	renderPipelines  table[RenderPipeline, RenderPipelineDescriptor]
+	computePipelines table[ComputePipeline, ComputePipelineDescriptor]
 }
 
 func (d *device) Features() FeatureFlags { return d.features }
@@ -28,22 +40,11 @@ func (d *device) Limits() Limits { return d.limits }
 func (d *device) AdapterInfo() AdapterInfo { return d.adapterInfo }
 
 func (d *device) CreateBuffer(descriptor BufferDescriptor) (Buffer, error) {
-	buffer := d.buffers.acquire(descriptor)
-	if err := d.backend.CreateBuffer(buffer, descriptor); err != nil {
-		_ = d.buffers.retire(buffer)
-		d.buffers.release(buffer)
-		return Buffer{}, err
-	}
-	return buffer, nil
+	return createResource(&d.buffers, descriptor, d.backend.CreateBuffer)
 }
 
 func (d *device) ReleaseBuffer(buffer Buffer) {
-	if err := d.buffers.retire(buffer); err != nil {
-		d.logger.LogErr(err)
-		return
-	}
-	d.backend.ReleaseBuffer(buffer)
-	d.buffers.release(buffer)
+	releaseResource(d.logger, &d.buffers, buffer, d.backend.ReleaseBuffer)
 }
 
 func (d *device) BufferDescriptor(buffer Buffer) BufferDescriptor {
@@ -53,22 +54,11 @@ func (d *device) BufferDescriptor(buffer Buffer) BufferDescriptor {
 
 func (d *device) CreateTexture(descriptor TextureDescriptor) (Texture, error) {
 	descriptor.ViewFormats = slices.Clone(descriptor.ViewFormats)
-	texture := d.textures.acquire(descriptor)
-	if err := d.backend.CreateTexture(texture, descriptor); err != nil {
-		_ = d.textures.retire(texture)
-		d.textures.release(texture)
-		return Texture{}, err
-	}
-	return texture, nil
+	return createResource(&d.textures, descriptor, d.backend.CreateTexture)
 }
 
 func (d *device) ReleaseTexture(texture Texture) {
-	if err := d.textures.retire(texture); err != nil {
-		d.logger.LogErr(err)
-		return
-	}
-	d.backend.ReleaseTexture(texture)
-	d.textures.release(texture)
+	releaseResource(d.logger, &d.textures, texture, d.backend.ReleaseTexture)
 }
 
 func (d *device) TextureDescriptor(texture Texture) TextureDescriptor {
@@ -78,18 +68,31 @@ func (d *device) TextureDescriptor(texture Texture) TextureDescriptor {
 }
 
 func (d *device) CreateTextureView(texture Texture, descriptor TextureViewDescriptor) (TextureView, error) {
-	panic("gfx listing: no bodies")
+	if err := d.textures.check(texture); err != nil {
+		return TextureView{}, fmt.Errorf("%w: the view's texture", err)
+	}
+	source := textureViewSource{texture: texture, descriptor: descriptor}
+	return createResource(&d.textureViews, source, func(view TextureView, source textureViewSource) error {
+		return d.backend.CreateTextureView(view, source.texture, source.descriptor)
+	})
 }
 
-func (d *device) ReleaseTextureView(view TextureView) { panic("gfx listing: no bodies") }
+func (d *device) ReleaseTextureView(view TextureView) {
+	releaseResource(d.logger, &d.textureViews, view, d.backend.ReleaseTextureView)
+}
 
-func (d *device) TextureViewTexture(view TextureView) Texture { panic("gfx listing: no bodies") }
+func (d *device) TextureViewTexture(view TextureView) Texture {
+	source, _ := d.textureViews.descriptor(view)
+	return source.texture
+}
 
 func (d *device) CreateSampler(descriptor SamplerDescriptor) (Sampler, error) {
-	panic("gfx listing: no bodies")
+	return createResource(&d.samplers, descriptor, d.backend.CreateSampler)
 }
 
-func (d *device) ReleaseSampler(sampler Sampler) { panic("gfx listing: no bodies") }
+func (d *device) ReleaseSampler(sampler Sampler) {
+	releaseResource(d.logger, &d.samplers, sampler, d.backend.ReleaseSampler)
+}
 
 func (d *device) CreateQuerySet(descriptor QuerySetDescriptor) (QuerySet, error) {
 	panic("gfx listing: no bodies")
@@ -100,44 +103,100 @@ func (d *device) ReleaseQuerySet(querySet QuerySet) { panic("gfx listing: no bod
 func (d *device) TimestampPeriod() float32 { panic("gfx listing: no bodies") }
 
 func (d *device) CreateShaderModule(descriptor ShaderModuleDescriptor) (ShaderModule, error) {
-	panic("gfx listing: no bodies")
+	return createResource(&d.shaderModules, descriptor, d.backend.CreateShaderModule)
 }
 
-func (d *device) ReleaseShaderModule(module ShaderModule) { panic("gfx listing: no bodies") }
+func (d *device) ReleaseShaderModule(module ShaderModule) {
+	releaseResource(d.logger, &d.shaderModules, module, d.backend.ReleaseShaderModule)
+}
 
 func (d *device) CreateBindGroupLayout(descriptor BindGroupLayoutDescriptor) (BindGroupLayout, error) {
-	panic("gfx listing: no bodies")
+	descriptor.Entries = slices.Clone(descriptor.Entries)
+	return createResource(&d.bindGroupLayouts, descriptor, d.backend.CreateBindGroupLayout)
 }
 
-func (d *device) ReleaseBindGroupLayout(layout BindGroupLayout) { panic("gfx listing: no bodies") }
+func (d *device) ReleaseBindGroupLayout(layout BindGroupLayout) {
+	releaseResource(d.logger, &d.bindGroupLayouts, layout, d.backend.ReleaseBindGroupLayout)
+}
 
 func (d *device) CreateBindGroup(descriptor BindGroupDescriptor) (BindGroup, error) {
-	panic("gfx listing: no bodies")
+	if err := d.bindGroupLayouts.check(descriptor.Layout); err != nil {
+		return BindGroup{}, fmt.Errorf("%w: the bind group's layout", err)
+	}
+	for _, entry := range descriptor.Entries {
+		if entry.Buffer != (Buffer{}) && d.buffers.check(entry.Buffer) != nil {
+			return BindGroup{}, fmt.Errorf("%w: the buffer at binding %d", ErrReleased, entry.Binding)
+		}
+		if entry.Sampler != (Sampler{}) && d.samplers.check(entry.Sampler) != nil {
+			return BindGroup{}, fmt.Errorf("%w: the sampler at binding %d", ErrReleased, entry.Binding)
+		}
+		if entry.TextureView != (TextureView{}) && d.textureViews.check(entry.TextureView) != nil {
+			return BindGroup{}, fmt.Errorf("%w: the texture view at binding %d", ErrReleased, entry.Binding)
+		}
+	}
+	descriptor.Entries = slices.Clone(descriptor.Entries)
+	return createResource(&d.bindGroups, descriptor, d.backend.CreateBindGroup)
 }
 
-func (d *device) ReleaseBindGroup(group BindGroup) { panic("gfx listing: no bodies") }
+func (d *device) ReleaseBindGroup(group BindGroup) {
+	releaseResource(d.logger, &d.bindGroups, group, d.backend.ReleaseBindGroup)
+}
 
 func (d *device) CreatePipelineLayout(descriptor PipelineLayoutDescriptor) (PipelineLayout, error) {
-	panic("gfx listing: no bodies")
+	for group, layout := range descriptor.BindGroupLayouts {
+		if err := d.bindGroupLayouts.check(layout); err != nil {
+			return PipelineLayout{}, fmt.Errorf("%w: the layout of group %d", err, group)
+		}
+	}
+	descriptor.BindGroupLayouts = slices.Clone(descriptor.BindGroupLayouts)
+	return createResource(&d.pipelineLayouts, descriptor, d.backend.CreatePipelineLayout)
 }
 
-func (d *device) ReleasePipelineLayout(layout PipelineLayout) { panic("gfx listing: no bodies") }
+func (d *device) ReleasePipelineLayout(layout PipelineLayout) {
+	releaseResource(d.logger, &d.pipelineLayouts, layout, d.backend.ReleasePipelineLayout)
+}
 
 func (d *device) CreateRenderPipeline(descriptor RenderPipelineDescriptor) (RenderPipeline, error) {
-	panic("gfx listing: no bodies")
+	if descriptor.Layout == (PipelineLayout{}) {
+		panic("gfx listing: no auto layouts yet")
+	}
+	if err := d.pipelineLayouts.check(descriptor.Layout); err != nil {
+		return RenderPipeline{}, fmt.Errorf("%w: the pipeline's layout", err)
+	}
+	if err := d.shaderModules.check(descriptor.Vertex.Module); err != nil {
+		return RenderPipeline{}, fmt.Errorf("%w: the vertex module", err)
+	}
+	if descriptor.Fragment.Module != (ShaderModule{}) && d.shaderModules.check(descriptor.Fragment.Module) != nil {
+		return RenderPipeline{}, fmt.Errorf("%w: the fragment module", ErrReleased)
+	}
+	return createResource(&d.renderPipelines, descriptor.clone(), d.backend.CreateRenderPipeline)
 }
 
-func (d *device) ReleaseRenderPipeline(pipeline RenderPipeline) { panic("gfx listing: no bodies") }
+func (d *device) ReleaseRenderPipeline(pipeline RenderPipeline) {
+	releaseResource(d.logger, &d.renderPipelines, pipeline, d.backend.ReleaseRenderPipeline)
+}
 
 func (d *device) RenderPipelineBindGroupLayout(pipeline RenderPipeline, group uint32) BindGroupLayout {
 	panic("gfx listing: no bodies")
 }
 
 func (d *device) CreateComputePipeline(descriptor ComputePipelineDescriptor) (ComputePipeline, error) {
-	panic("gfx listing: no bodies")
+	if descriptor.Layout == (PipelineLayout{}) {
+		panic("gfx listing: no auto layouts yet")
+	}
+	if err := d.pipelineLayouts.check(descriptor.Layout); err != nil {
+		return ComputePipeline{}, fmt.Errorf("%w: the pipeline's layout", err)
+	}
+	if err := d.shaderModules.check(descriptor.Module); err != nil {
+		return ComputePipeline{}, fmt.Errorf("%w: the module", err)
+	}
+	descriptor.Constants = maps.Clone(descriptor.Constants)
+	return createResource(&d.computePipelines, descriptor, d.backend.CreateComputePipeline)
 }
 
-func (d *device) ReleaseComputePipeline(pipeline ComputePipeline) { panic("gfx listing: no bodies") }
+func (d *device) ReleaseComputePipeline(pipeline ComputePipeline) {
+	releaseResource(d.logger, &d.computePipelines, pipeline, d.backend.ReleaseComputePipeline)
+}
 
 func (d *device) ComputePipelineBindGroupLayout(pipeline ComputePipeline, group uint32) BindGroupLayout {
 	panic("gfx listing: no bodies")
@@ -192,3 +251,36 @@ type exclusiveDevice struct {
 func (d exclusiveDevice) WaitIdle() error { return d.backend.WaitIdle() }
 
 func (d exclusiveDevice) RequestSurface(request SurfaceRequest) { panic("gfx listing: no bodies") }
+
+// textureViewSource is what a texture view was created from: its texture and
+// its descriptor.
+type textureViewSource struct {
+	texture    Texture
+	descriptor TextureViewDescriptor
+}
+
+// createResource acquires a handle in resources holding descriptor and has
+// the backend create its object with createObject. When that fails, the
+// handle is handed back, and the zero handle answered with the error.
+func createResource[H ~struct{ handle }, D any](resources *table[H, D], descriptor D, createObject func(H, D) error) (H, error) {
+	h := resources.acquire(descriptor)
+	if err := createObject(h, descriptor); err != nil {
+		_ = resources.retire(h)
+		resources.release(h)
+		var zero H
+		return zero, err
+	}
+	return h, nil
+}
+
+// releaseResource makes h stale in resources, has the backend release its
+// object with releaseObject, and hands its index out again; a stale h logs
+// ErrReleased through logger and does nothing.
+func releaseResource[H ~struct{ handle }, D any](logger *kernel.Logger, resources *table[H, D], h H, releaseObject func(H)) {
+	if err := resources.retire(h); err != nil {
+		logger.LogErr(err)
+		return
+	}
+	releaseObject(h)
+	resources.release(h)
+}

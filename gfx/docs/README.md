@@ -5,8 +5,9 @@ see [design.md](design.md). It assumes the
 [kernel guide](../../kernel/docs/README.md), the
 [metronome guide](../../metronome/docs/README.md) and the
 [platform guide](../../platform/docs/README.md). gfx is being built: the
-names below are the module's; the device comes up, buffers and textures are created
-and released, and the other bodies panic until they are filled.
+names below are the module's; the device comes up, every resource but query
+sets is created and released, pipelines with explicit layouts only, and the
+other bodies panic until they are filled.
 
 - [Concepts](#concepts)
 - [The render track](#the-render-track)
