@@ -48,6 +48,14 @@ _Avoid_: Render event, draw callback
 An encoder recorded outside any frame, which its owner finishes and submits itself; a frame's encoders are finished and submitted by gfx.
 _Avoid_: Free encoder, offscreen encoder
 
+**Readback**:
+Copying a buffer or texture off the GPU into CPU memory, by mapping a buffer once the GPU has written it.
+_Avoid_: Download, read pixels
+
+**Capture**:
+One window's framebuffer in one frame, copied off the GPU and delivered a frame later with the beat it shows.
+_Avoid_: Snapshot, screenshot, frame grab
+
 **Submit order**:
 The number an encoder is handed under, by which a frame's encoders are submitted, shared by every plugin that records.
 _Avoid_: Priority, layer, pass index
