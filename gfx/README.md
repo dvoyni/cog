@@ -11,10 +11,11 @@ materials, scenes or the ECS.
 Status: being built. Every declaration is in this module. The device comes
 up in `Start` and is released in `Destroy`, every resource but query sets
 is created and released, pipelines with explicit layouts only, each
-window's surface is created when it opens and released after the last
-present when it closes, and each render beat acquires every window's
-framebuffer, publishes `DrawEvent`, submits the frame's encoders in submit
-order and presents; every other body panics until its ticket on the
+window's surface is created when it opens, configured before its first
+acquire and again once resized, skipped while hidden or zero-size, and
+released after the last present when it closes, and each render beat
+acquires every window's framebuffer, publishes `DrawEvent`, submits the
+frame's encoders in submit order and presents; every other body panics until its ticket on the
 [gfx map](https://github.com/dvoyni/cog/issues/608) fills it.
 
 ## Shape
@@ -61,7 +62,7 @@ order and presents; every other body panics until its ticket on the
   - `Handlers`: `Draw`, `CreateSurface`, `ResizeSurface` and
     `ReleaseSurface`, to order handlers around.
 - **Resources it reads from other plugins:** `*platform.WindowManager`, for
-  windows' native handles and framebuffer sizes.
+  windows' native handles, framebuffer sizes and whether they are hidden.
 - **Events it publishes:** `DrawEvent`, inside its `RenderEvent` handler;
   `BufferMappedEvent` and `CapturedEvent`, from the job that finds them
   resolved; `DeviceLostEvent` and `DeviceRecoveredEvent`.

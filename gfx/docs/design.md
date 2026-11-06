@@ -19,7 +19,8 @@ in this module, from the listing on
 The device comes up and is released, every resource but query sets is
 created and released, pipelines with explicit layouts only, surfaces
 follow platform's windows, each configured from `Config.Surface` before its
-first acquire, and the frame chain acquires, publishes `DrawEvent`, flushes
+first acquire and again once resized, hidden and zero-size windows skipped,
+and the frame chain acquires, publishes `DrawEvent`, flushes
 the frame's encoders and presents, the recording adapter recording their
 passes and commands with typed arguments. Standalone encoders are finished
 and submitted by their owner; every other body panics until its ticket fills
@@ -261,8 +262,9 @@ present and recovery itself.
   configuring when it is new, resized (`ResizeSurface` on `ResizeEvent` only
   marks it), reported suboptimal, outdated or lost, or the request changes.
   `Draw` schedules the configure under the write lock, after the last
-  present and before the acquire. A window that is hidden or has a zero
-  framebuffer is neither configured nor acquired.
+  present and before the acquire. A window that is hidden, as its entry
+  requests, or has a zero framebuffer is neither configured nor acquired; it
+  stays marked, so it is configured on the first frame it is drawable again.
 - **One surface request for the whole application:**
   `SurfaceRequest{Format, PresentMode, Capturable}` in `Config.Surface`,
   replaced at runtime with `ExclusiveDevice.RequestSurface`. Zero means

@@ -3,6 +3,7 @@ package gfx_test
 import (
 	"errors"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -94,6 +95,9 @@ func TestHandlersHoldTheSurfaceSubscriptions(t *testing.T) {
 	}
 	if h.handlers.CreateSurface == (kernel.Sub[platform.WindowOpenedEvent]{}) {
 		t.Error("Handlers.CreateSurface is the zero Sub")
+	}
+	if h.handlers.ResizeSurface == (kernel.Sub[platform.ResizeEvent]{}) {
+		t.Error("Handlers.ResizeSurface is the zero Sub")
 	}
 	if h.handlers.ReleaseSurface == (kernel.Sub[platform.WindowClosedEvent]{}) {
 		t.Error("Handlers.ReleaseSurface is the zero Sub")
@@ -228,6 +232,121 @@ func TestAClosedWindowHasNoSurfaceConfiguration(t *testing.T) {
 			t.Errorf("SurfaceConfiguration = %+v after the close, want none", got)
 		}
 	})
+}
+
+func TestAResizedSurfaceIsConfiguredAtItsNewSizeBeforeTheNextAcquire(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	window := h.openWindow()
+	h.waitForCalls(recording.CallKindCreateSurface, 1)
+	h.advance(time.Millisecond)
+	before := len(surfaceCalls(h.instance.Recording().Calls))
+
+	h.windows.Resize(window, platform.Size{Width: 128, Height: 96}, platform.Size{Width: 256, Height: 192}, 2)
+	h.pump()
+	if calls := surfaceCalls(h.instance.Recording().Calls)[before:]; len(calls) != 0 {
+		t.Errorf("surface calls on the resize = %v, want none: the resize only marks the surface", kinds(calls))
+	}
+	h.advance(time.Millisecond)
+
+	calls := surfaceCalls(h.instance.Recording().Calls)[before:]
+	if got := kinds(calls); !slices.Equal(got, []recording.CallKind{
+		recording.CallKindSurfaceCapabilities, recording.CallKindConfigureSurface,
+		recording.CallKindAcquireFramebuffer, recording.CallKindPresent,
+	}) {
+		t.Fatalf("surface calls after the resize = %v, want the configure before the acquire", got)
+	}
+	want := gfx.SurfaceConfiguration{Format: gfx.TextureFormatBGRA8Unorm, PresentMode: gfx.PresentModeFifo, Width: 256, Height: 192}
+	if configured := calls[1].Arguments; configured != (recording.ConfigureSurfaceArguments{Window: window, Configuration: want}) {
+		t.Errorf("configured %+v, want %v with %+v", configured, window, want)
+	}
+}
+
+func TestAHiddenWindowIsNeitherConfiguredNorAcquiredUntilShown(t *testing.T) {
+	h := newHarness(t)
+	var mutex sync.Mutex
+	var window platform.Window
+	var framebuffers []gfx.TextureView
+	h.readFrame = func(event gfx.DrawEvent, device gfx.Device) {
+		mutex.Lock()
+		defer mutex.Unlock()
+		framebuffers = append(framebuffers, device.Framebuffer(event.Frame, window))
+	}
+	h.mustSpawn(nil)
+	h.editWindows(func(manager *platform.WindowManager) {
+		mutex.Lock()
+		defer mutex.Unlock()
+		window = manager.Open(platform.WindowEntry{Size: platform.Size{Width: 64, Height: 48}, Hidden: true})
+	})
+	h.pump()
+	h.waitForCalls(recording.CallKindCreateSurface, 1)
+
+	h.advance(time.Millisecond)
+
+	if calls := surfaceCalls(h.instance.Recording().Calls); len(calls) != 0 {
+		t.Errorf("surface calls for a hidden window = %v, want none", kinds(calls))
+	}
+	mutex.Lock()
+	if len(framebuffers) != 1 || framebuffers[0] != (gfx.TextureView{}) {
+		t.Errorf("framebuffers = %v, want the zero view for the hidden window", framebuffers)
+	}
+	mutex.Unlock()
+
+	h.editWindows(func(manager *platform.WindowManager) { manager.SetHidden(window, false) })
+	h.pump()
+	h.advance(time.Millisecond)
+
+	if got := kinds(surfaceCalls(h.instance.Recording().Calls)); !slices.Equal(got, []recording.CallKind{
+		recording.CallKindSurfaceCapabilities, recording.CallKindConfigureSurface,
+		recording.CallKindAcquireFramebuffer, recording.CallKindPresent,
+	}) {
+		t.Errorf("surface calls once shown = %v, want the configure and the acquire", got)
+	}
+}
+
+func TestAWindowHiddenAfterItsConfigureIsNotAcquired(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	window := h.openWindow()
+	h.waitForCalls(recording.CallKindCreateSurface, 1)
+	h.advance(time.Millisecond)
+	before := len(surfaceCalls(h.instance.Recording().Calls))
+
+	h.editWindows(func(manager *platform.WindowManager) { manager.SetHidden(window, true) })
+	h.pump()
+	h.advance(time.Millisecond)
+
+	if calls := surfaceCalls(h.instance.Recording().Calls)[before:]; len(calls) != 0 {
+		t.Errorf("surface calls once hidden = %v, want none", kinds(calls))
+	}
+}
+
+func TestAZeroFramebufferIsNeitherConfiguredNorAcquiredUntilResized(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	window := h.openWindow()
+	h.waitForCalls(recording.CallKindCreateSurface, 1)
+	h.advance(time.Millisecond)
+	before := len(surfaceCalls(h.instance.Recording().Calls))
+
+	h.windows.Resize(window, platform.Size{}, platform.Size{}, 1)
+	h.pump()
+	h.advance(time.Millisecond)
+
+	if calls := surfaceCalls(h.instance.Recording().Calls)[before:]; len(calls) != 0 {
+		t.Errorf("surface calls at a zero framebuffer = %v, want none", kinds(calls))
+	}
+
+	h.windows.Resize(window, platform.Size{Width: 64, Height: 48}, platform.Size{Width: 64, Height: 48}, 1)
+	h.pump()
+	h.advance(time.Millisecond)
+
+	if got := kinds(surfaceCalls(h.instance.Recording().Calls)[before:]); !slices.Equal(got, []recording.CallKind{
+		recording.CallKindSurfaceCapabilities, recording.CallKindConfigureSurface,
+		recording.CallKindAcquireFramebuffer, recording.CallKindPresent,
+	}) {
+		t.Errorf("surface calls once resized back = %v, want the configure and the acquire", got)
+	}
 }
 
 // surfaceCalls answers the capabilities, configures, acquires and presents
