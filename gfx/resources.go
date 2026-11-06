@@ -77,11 +77,16 @@ type Device interface {
 	// pipeline's layout.
 	ComputePipelineBindGroupLayout(pipeline ComputePipeline, group uint32) BindGroupLayout
 
-	// WriteBuffer writes data into buffer at offset, ordered before the next
-	// submit; offset and length are multiples of 4.
+	// WriteBuffer writes data into buffer at offset; offset and length are
+	// multiples of 4. It is the upload path: data is copied out before it
+	// returns, so the caller's slice is free at once, and lands before every
+	// command buffer of the next submit, whichever frame or standalone
+	// encoder that submit carries, so two writes to one region in a frame
+	// leave the last for the whole frame. Each call takes the backend's queue
+	// lock: write a task's whole region once, not once per draw.
 	WriteBuffer(buffer Buffer, offset uint64, data []byte) error
 	// WriteTexture writes data, laid out as layout, into the size region at
-	// destination, ordered before the next submit.
+	// destination, as WriteBuffer writes a buffer.
 	WriteTexture(destination ImageCopyTexture, data []byte, layout ImageDataLayout, size Extent3D) error
 
 	// Encoder answers frame's encoder at order, which gfx's flush finishes
