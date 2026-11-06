@@ -136,11 +136,17 @@ func releaseSurface(k *kernel.Kernel, window platform.Window, deviceHandle kerne
 // last present and the next acquire. A part of the request the surface's
 // capabilities lack falls back to the default, with a LogErr; a configure
 // that fails goes to LogErr and leaves the window unconfigured, so it is not
-// acquired. A window closing, or whose surface is gone, is skipped.
+// acquired. A window closing, or whose surface is gone, is skipped; a window
+// hidden, or whose framebuffer is zero, is skipped and stays marked, to be
+// configured once it is drawable.
 func configureSurfaces(k *kernel.Kernel, _ kernel.NoArg, manager kernel.Read[*platform.WindowManager], deviceHandle kernel.Write[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)
 	for _, window := range d.frames.takeUnconfigured() {
 		if !slices.Contains(d.surfaces, window) || d.frames.isClosing(window) {
+			continue
+		}
+		if !isWindowDrawable(manager.Get(), window) {
+			d.frames.markUnconfigured(window)
 			continue
 		}
 		capabilities := d.backend.SurfaceCapabilities(window)
@@ -164,4 +170,12 @@ func configureSurfaces(k *kernel.Kernel, _ kernel.NoArg, manager kernel.Read[*pl
 		d.configurations[window] = configuration
 	}
 	return kernel.NoResult{}
+}
+
+// isWindowDrawable answers whether window is shown, as requested, with a
+// framebuffer of at least one pixel: no other is configured or acquired.
+func isWindowDrawable(manager *platform.WindowManager, window platform.Window) bool {
+	entry, _ := manager.Entry(window)
+	size := manager.FramebufferSize(window)
+	return !entry.Hidden && size.Width > 0 && size.Height > 0
 }

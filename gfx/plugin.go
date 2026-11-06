@@ -72,7 +72,7 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 		CreateSurface:       configurator.RegisterTask2(createSurface),
 		ReleaseSurface:      configurator.RegisterTask1(releaseSurface),
 		ConfigureSurfaces:   configurator.RegisterTask2(configureSurfaces),
-		AcquireFramebuffers: configurator.RegisterTask1(acquireFramebuffers),
+		AcquireFramebuffers: configurator.RegisterTask2(acquireFramebuffers),
 		PresentFramebuffers: configurator.RegisterTask1(presentFramebuffers),
 	}
 	configurator.InitResource(p.tasks)
@@ -81,6 +81,10 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 		Draw: configurator.Subscribe(p.draw),
 		CreateSurface: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event platform.WindowOpenedEvent) (platform.WindowOpenedEvent, kernel.JobHandle) {
 			return event, ex.Schedule(p.tasks.CreateSurface, event.Window, in).Handle()
+		}),
+		ResizeSurface: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event platform.ResizeEvent) (platform.ResizeEvent, kernel.JobHandle) {
+			p.device.frames.markUnconfigured(event.Window)
+			return event, in
 		}),
 		ReleaseSurface: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event platform.WindowClosedEvent) (platform.WindowClosedEvent, kernel.JobHandle) {
 			lastPresent := p.device.frames.markClosing(event.Window)

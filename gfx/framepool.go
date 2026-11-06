@@ -259,12 +259,13 @@ func (p *Plugin) draw(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle
 }
 
 // acquireFramebuffers acquires the framebuffer of every window with a
-// configured surface and not closing, under the read lock. A window whose acquire answers no framebuffer, or an error,
-// which goes to LogErr, has none this frame.
-func acquireFramebuffers(k *kernel.Kernel, frame Frame, deviceHandle kernel.Read[Device]) kernel.NoResult {
+// configured surface, not closing, shown and with a framebuffer of at least
+// one pixel, under the read lock. A window whose acquire answers no
+// framebuffer, or an error, which goes to LogErr, has none this frame.
+func acquireFramebuffers(k *kernel.Kernel, frame Frame, manager kernel.Read[*platform.WindowManager], deviceHandle kernel.Read[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)
 	for _, window := range d.surfaces {
-		if _, configured := d.configurations[window]; !configured || d.frames.isClosing(window) {
+		if _, configured := d.configurations[window]; !configured || d.frames.isClosing(window) || !isWindowDrawable(manager.Get(), window) {
 			continue
 		}
 		view := d.textureViews.acquire(textureViewSource{})
