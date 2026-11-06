@@ -349,6 +349,185 @@ func TestAZeroFramebufferIsNeitherConfiguredNorAcquiredUntilResized(t *testing.T
 	}
 }
 
+func TestASuboptimalFramebufferIsDrawnAndItsSurfaceConfiguredAgain(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	h.openWindow()
+	h.waitForCalls(recording.CallKindCreateSurface, 1)
+	h.advance(time.Millisecond)
+	before := len(surfaceCalls(h.instance.Recording().Calls))
+
+	h.instance.AnswerNext(recording.CallKindAcquireFramebuffer, recording.Answer{Status: uint8(gfx.AcquireStatusSuboptimal)})
+	h.advance(time.Millisecond)
+	h.advance(time.Millisecond)
+
+	if got := kinds(surfaceCalls(h.instance.Recording().Calls)[before:]); !slices.Equal(got, []recording.CallKind{
+		recording.CallKindAcquireFramebuffer, recording.CallKindPresent,
+		recording.CallKindSurfaceCapabilities, recording.CallKindConfigureSurface,
+		recording.CallKindAcquireFramebuffer, recording.CallKindPresent,
+	}) {
+		t.Errorf("surface calls after a suboptimal acquire = %v, want it presented, then a configure before the next acquire", got)
+	}
+	if logged := h.takeLogged(); len(logged) != 0 {
+		t.Errorf("logged %v, want nothing", logged)
+	}
+}
+
+func TestAnOutdatedFramebufferIsNotDrawnAndItsSurfaceConfiguredAgain(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	h.openWindow()
+	h.waitForCalls(recording.CallKindCreateSurface, 1)
+	h.advance(time.Millisecond)
+	before := len(surfaceCalls(h.instance.Recording().Calls))
+
+	h.instance.AnswerNext(recording.CallKindAcquireFramebuffer, recording.Answer{Status: uint8(gfx.AcquireStatusOutdated)})
+	h.advance(time.Millisecond)
+	h.advance(time.Millisecond)
+
+	if got := kinds(surfaceCalls(h.instance.Recording().Calls)[before:]); !slices.Equal(got, []recording.CallKind{
+		recording.CallKindAcquireFramebuffer,
+		recording.CallKindSurfaceCapabilities, recording.CallKindConfigureSurface,
+		recording.CallKindAcquireFramebuffer, recording.CallKindPresent,
+	}) {
+		t.Errorf("surface calls after an outdated acquire = %v, want nothing presented, then a configure before the next acquire", got)
+	}
+	if logged := h.takeLogged(); len(logged) != 0 {
+		t.Errorf("logged %v, want nothing", logged)
+	}
+}
+
+func TestALostSurfaceIsRecreatedFromItsNativeHandleAndConfiguredAgain(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	window := h.openWindow()
+	var native platform.NativeHandle
+	h.editWindows(func(manager *platform.WindowManager) { native = manager.Native(window) })
+	h.waitForCalls(recording.CallKindCreateSurface, 1)
+	h.advance(time.Millisecond)
+	before := len(surfaceLifeCalls(h.instance.Recording().Calls))
+
+	h.instance.AnswerNext(recording.CallKindAcquireFramebuffer, recording.Answer{Status: uint8(gfx.AcquireStatusLost)})
+	h.advance(time.Millisecond)
+	h.advance(time.Millisecond)
+
+	calls := surfaceLifeCalls(h.instance.Recording().Calls)[before:]
+	if got := kinds(calls); !slices.Equal(got, []recording.CallKind{
+		recording.CallKindAcquireFramebuffer,
+		recording.CallKindReleaseSurface, recording.CallKindCreateSurface,
+		recording.CallKindSurfaceCapabilities, recording.CallKindConfigureSurface,
+		recording.CallKindAcquireFramebuffer, recording.CallKindPresent,
+	}) {
+		t.Fatalf("surface calls after a lost acquire = %v, want nothing presented, then the surface recreated and configured before the next acquire", got)
+	}
+	if created := calls[2].Arguments; created != (recording.CreateSurfaceArguments{Window: window, Native: native}) {
+		t.Errorf("recreated %+v, want %v from %+v", created, window, native)
+	}
+	for _, call := range calls {
+		if call.Error != nil {
+			t.Errorf("%v answered %v", call.Kind, call.Error)
+		}
+	}
+	if logged := h.takeLogged(); len(logged) != 0 {
+		t.Errorf("logged %v, want nothing", logged)
+	}
+}
+
+func TestALostSurfaceThatFailsToRecreateIsLoggedAndNeverAcquired(t *testing.T) {
+	failure := errors.New("no surface")
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	window := h.openWindow()
+	h.waitForCalls(recording.CallKindCreateSurface, 1)
+	h.advance(time.Millisecond)
+	before := len(surfaceLifeCalls(h.instance.Recording().Calls))
+
+	h.instance.AnswerNext(recording.CallKindAcquireFramebuffer, recording.Answer{Status: uint8(gfx.AcquireStatusLost)})
+	h.instance.AnswerNext(recording.CallKindCreateSurface, recording.Answer{Error: failure})
+	h.advance(time.Millisecond)
+	h.advance(time.Millisecond)
+	h.closeWindow(window)
+	h.advance(time.Millisecond)
+
+	if got := kinds(surfaceLifeCalls(h.instance.Recording().Calls)[before:]); !slices.Equal(got, []recording.CallKind{
+		recording.CallKindAcquireFramebuffer,
+		recording.CallKindReleaseSurface, recording.CallKindCreateSurface,
+	}) {
+		t.Errorf("surface calls after a failed recreation = %v, want no configure, acquire or second release", got)
+	}
+	if logged := h.takeLogged(); len(logged) != 1 || !errors.Is(logged[0], failure) {
+		t.Errorf("logged %v, want %v", logged, failure)
+	}
+	h.readDevice(func(device gfx.Device) {
+		if got, ok := device.SurfaceConfiguration(window); ok {
+			t.Errorf("SurfaceConfiguration = %+v, want none", got)
+		}
+	})
+}
+
+func TestATimedOutAcquireSkipsTheWindowWithoutAConfigure(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	h.openWindow()
+	h.waitForCalls(recording.CallKindCreateSurface, 1)
+	h.advance(time.Millisecond)
+	before := len(surfaceCalls(h.instance.Recording().Calls))
+
+	h.instance.AnswerNext(recording.CallKindAcquireFramebuffer, recording.Answer{Status: uint8(gfx.AcquireStatusTimeout)})
+	h.advance(time.Millisecond)
+	h.advance(time.Millisecond)
+
+	if got := kinds(surfaceCalls(h.instance.Recording().Calls)[before:]); !slices.Equal(got, []recording.CallKind{
+		recording.CallKindAcquireFramebuffer,
+		recording.CallKindAcquireFramebuffer, recording.CallKindPresent,
+	}) {
+		t.Errorf("surface calls after a timed-out acquire = %v, want nothing presented and no configure", got)
+	}
+	if logged := h.takeLogged(); len(logged) != 0 {
+		t.Errorf("logged %v, want nothing", logged)
+	}
+}
+
+func TestAFailingAcquireIsLoggedAndItsSurfaceConfiguredAgain(t *testing.T) {
+	failure := errors.New("no framebuffer")
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	h.openWindow()
+	h.waitForCalls(recording.CallKindCreateSurface, 1)
+	h.advance(time.Millisecond)
+	before := len(surfaceCalls(h.instance.Recording().Calls))
+
+	h.instance.AnswerNext(recording.CallKindAcquireFramebuffer, recording.Answer{Error: failure})
+	h.advance(time.Millisecond)
+	h.advance(time.Millisecond)
+
+	if got := kinds(surfaceCalls(h.instance.Recording().Calls)[before:]); !slices.Equal(got, []recording.CallKind{
+		recording.CallKindAcquireFramebuffer,
+		recording.CallKindSurfaceCapabilities, recording.CallKindConfigureSurface,
+		recording.CallKindAcquireFramebuffer, recording.CallKindPresent,
+	}) {
+		t.Errorf("surface calls after a failing acquire = %v, want nothing presented, then a configure before the next acquire", got)
+	}
+	if logged := h.takeLogged(); len(logged) != 1 || !errors.Is(logged[0], failure) {
+		t.Errorf("logged %v, want %v", logged, failure)
+	}
+}
+
+// surfaceLifeCalls answers the surface creations and releases among calls,
+// in order with surfaceCalls.
+func surfaceLifeCalls(calls []recording.Call) []recording.Call {
+	var answer []recording.Call
+	for _, call := range calls {
+		switch call.Kind {
+		case recording.CallKindCreateSurface, recording.CallKindReleaseSurface,
+			recording.CallKindSurfaceCapabilities, recording.CallKindConfigureSurface,
+			recording.CallKindAcquireFramebuffer, recording.CallKindPresent:
+			answer = append(answer, call)
+		}
+	}
+	return answer
+}
+
 // surfaceCalls answers the capabilities, configures, acquires and presents
 // among calls, in order.
 func surfaceCalls(calls []recording.Call) []recording.Call {

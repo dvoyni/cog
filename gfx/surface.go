@@ -115,12 +115,13 @@ func createSurface(k *kernel.Kernel, window platform.Window, manager kernel.Read
 
 // releaseSurface releases window's surface, under the write lock, after the
 // last present when its window closed, and drops its closing and configuring
-// marks and its configuration; a window without one, its creation failed,
+// marks, its lost mark and its configuration; a window without one, its creation failed,
 // releases nothing.
 func releaseSurface(k *kernel.Kernel, window platform.Window, deviceHandle kernel.Write[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)
 	d.frames.unmarkClosing(window)
 	d.frames.unmarkUnconfigured(window)
+	d.frames.unmarkLost(window)
 	delete(d.configurations, window)
 	index := slices.Index(d.surfaces, window)
 	if index < 0 {
@@ -136,14 +137,25 @@ func releaseSurface(k *kernel.Kernel, window platform.Window, deviceHandle kerne
 // last present and the next acquire. A part of the request the surface's
 // capabilities lack falls back to the default, with a LogErr; a configure
 // that fails goes to LogErr and leaves the window unconfigured, so it is not
-// acquired. A window closing, or whose surface is gone, is skipped; a window
-// hidden, or whose framebuffer is zero, is skipped and stays marked, to be
-// configured once it is drawable.
+// acquired. A window closing, or whose surface is gone, is skipped. A
+// surface an acquire answered lost is released and created again from its
+// window's native handle first; a creation that fails goes to LogErr, and
+// the window stays without a surface. A window hidden, or whose framebuffer
+// is zero, is skipped and stays marked, to be configured once it is drawable.
 func configureSurfaces(k *kernel.Kernel, _ kernel.NoArg, manager kernel.Read[*platform.WindowManager], deviceHandle kernel.Write[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)
 	for _, window := range d.frames.takeUnconfigured() {
 		if !slices.Contains(d.surfaces, window) || d.frames.isClosing(window) {
 			continue
+		}
+		if d.frames.unmarkLost(window) {
+			delete(d.configurations, window)
+			d.instance.ReleaseSurface(window)
+			if err := d.instance.CreateSurface(window, manager.Get().Native(window)); err != nil {
+				k.Logger().LogErr(fmt.Errorf("gfx: recreating the lost surface of %v: %w", window, err))
+				d.surfaces = slices.DeleteFunc(d.surfaces, func(surface platform.Window) bool { return surface == window })
+				continue
+			}
 		}
 		if !isWindowDrawable(manager.Get(), window) {
 			d.frames.markUnconfigured(window)

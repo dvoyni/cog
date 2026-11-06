@@ -20,7 +20,7 @@ The device comes up and is released, every resource but query sets is
 created and released, pipelines with explicit layouts only, surfaces
 follow platform's windows, each configured from `Config.Surface` before its
 first acquire and again once resized, hidden and zero-size windows skipped,
-and the frame chain acquires, publishes `DrawEvent`, flushes
+and the frame chain acquires, handling every acquire status alike, publishes `DrawEvent`, flushes
 the frame's encoders and presents, the recording adapter recording their
 passes and commands with typed arguments. Standalone encoders are finished
 and submitted by their owner; every other body panics until its ticket fills
@@ -280,7 +280,9 @@ present and recovery itself.
 - **Acquire results** reach gfx as an `AcquireStatus` the backend maps from
   its errors: `Suboptimal` draws and marks; `Outdated` draws nothing in that
   window this frame and marks; `Lost` recreates the surface from its native
-  handle and marks; `Timeout` skips the window, with no reconfigure.
+  handle and marks, its configure recreating it first; `Timeout` skips the
+  window, with no reconfigure. Any other error goes to `LogErr`, draws
+  nothing in that window and marks.
 
 ## Readback and capture
 
