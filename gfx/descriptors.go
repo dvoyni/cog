@@ -141,8 +141,8 @@ type PipelineLayoutDescriptor struct {
 }
 
 // RenderPipelineDescriptor describes a render pipeline. A zero Layout is
-// WebGPU's "auto": gfx builds the layouts by reflecting over both stages, and
-// Device.RenderPipelineBindGroupLayout answers them.
+// WebGPU's "auto": gfx creates the layouts the backend reflects over both
+// stages, and Device.RenderPipelineBindGroupLayout answers them.
 type RenderPipelineDescriptor struct {
 	Label        string
 	Layout       PipelineLayout

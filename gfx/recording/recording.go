@@ -118,6 +118,14 @@ const (
 	// CallKindReleaseComputePipeline is BackendDevice.ReleaseComputePipeline,
 	// its Arguments the gfx.ComputePipeline.
 	CallKindReleaseComputePipeline
+	// CallKindReflectRenderPipelineLayout is
+	// BackendDevice.ReflectRenderPipelineLayout, its Arguments the
+	// gfx.RenderPipelineDescriptor.
+	CallKindReflectRenderPipelineLayout
+	// CallKindReflectComputePipelineLayout is
+	// BackendDevice.ReflectComputePipelineLayout, its Arguments the
+	// gfx.ComputePipelineDescriptor.
+	CallKindReflectComputePipelineLayout
 	// CallKindWriteBuffer is BackendDevice.WriteBuffer, its Arguments a
 	// WriteBufferArguments.
 	CallKindWriteBuffer
@@ -148,11 +156,13 @@ var SurfaceCapabilities = gfx.SurfaceCapabilities{
 
 // Answer is what AnswerNext makes a call answer: Status for an acquire,
 // Capabilities for a surface's capabilities, zero for SurfaceCapabilities,
-// Error for any call.
+// BindGroupLayouts for a pipeline's reflection, none when nil, Error for any
+// call.
 type Answer struct {
-	Status       uint8
-	Capabilities gfx.SurfaceCapabilities
-	Error        error
+	Status           uint8
+	Capabilities     gfx.SurfaceCapabilities
+	BindGroupLayouts []gfx.BindGroupLayoutDescriptor
+	Error            error
 }
 
 // Recording is every call that reached the adapter, as typed values. The

@@ -126,6 +126,26 @@ func TestCreateBufferAnswersTheBackendsError(t *testing.T) {
 	})
 }
 
+func TestCreateShaderModuleAnswersTheBackendsErrorForInvalidWGSL(t *testing.T) {
+	invalid := errors.New("invalid WGSL")
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	h.instance.AnswerNext(recording.CallKindCreateShaderModule, recording.Answer{Error: invalid})
+
+	h.readDevice(func(device gfx.Device) {
+		module, err := device.CreateShaderModule(gfx.ShaderModuleDescriptor{Label: "broken", WGSL: "@vertex fn vs( {"})
+		if !errors.Is(err, invalid) || module != (gfx.ShaderModule{}) {
+			t.Errorf("CreateShaderModule answered %+v, %v, want the zero handle and %v", module, err, invalid)
+			return
+		}
+		created, err := device.CreateShaderModule(gfx.ShaderModuleDescriptor{WGSL: triangleWGSL})
+		mustSucceed(t, err)
+		if created.Index() != 0 {
+			t.Errorf("the next module is at index %d, want the refused one's 0", created.Index())
+		}
+	})
+}
+
 func TestTextureIsCreatedAndReleasedWithItsDescriptor(t *testing.T) {
 	descriptor := gfx.TextureDescriptor{
 		Label:         "albedo",
@@ -591,7 +611,7 @@ type lifecycle struct {
 	released recording.Call
 }
 
-// triangleWGSL is a shader module's source; nothing reflects it yet.
+// triangleWGSL is a valid shader module with an entry point of each stage.
 const triangleWGSL = "@vertex fn vs() -> @builtin(position) vec4f { return vec4f(); }\n" +
 	"@fragment fn fs() -> @location(0) vec4f { return vec4f(1.0); }\n" +
 	"@compute @workgroup_size(1) fn cs() {}\n"
