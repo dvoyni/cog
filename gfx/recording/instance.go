@@ -11,6 +11,7 @@
 package recording
 
 import (
+	"fmt"
 	"slices"
 	"sync"
 
@@ -23,12 +24,17 @@ import (
 type Instance struct {
 	mutex     sync.Mutex
 	recording Recording
+	// surfaces holds each window's surface, as the native handle it was
+	// created from.
+	surfaces map[platform.Window]platform.NativeHandle
 	// answers are the answers AnswerNext queued, by kind, the next first.
 	answers map[CallKind][]Answer
 }
 
 // NewInstance returns an adapter with an empty recording.
-func NewInstance() *Instance { return &Instance{answers: map[CallKind][]Answer{}} }
+func NewInstance() *Instance {
+	return &Instance{surfaces: map[platform.Window]platform.NativeHandle{}, answers: map[CallKind][]Answer{}}
+}
 
 // Recording answers a copy of what was recorded so far; a test reads it once
 // the kernel has settled.
@@ -59,13 +65,29 @@ func (instance *Instance) RequestAdapter(options gfx.RequestAdapterOptions) (gfx
 	return &adapter{instance: instance}, nil
 }
 
-// CreateSurface records window's surface.
+// CreateSurface records the creation and keeps window's surface; an error
+// when window already has one.
 func (instance *Instance) CreateSurface(window platform.Window, native platform.NativeHandle) error {
-	panic("gfx listing: no bodies")
+	return instance.record(CallKindCreateSurface, CreateSurfaceArguments{Window: window, Native: native}, func() error {
+		if _, exists := instance.surfaces[window]; exists {
+			return fmt.Errorf("recording: %v already has a surface", window)
+		}
+		instance.surfaces[window] = native
+		return nil
+	}).Error
 }
 
-// ReleaseSurface records window's surface released.
-func (instance *Instance) ReleaseSurface(window platform.Window) { panic("gfx listing: no bodies") }
+// ReleaseSurface records the release and drops window's surface; the error
+// recorded when window has none.
+func (instance *Instance) ReleaseSurface(window platform.Window) {
+	instance.record(CallKindReleaseSurface, window, func() error {
+		if _, exists := instance.surfaces[window]; !exists {
+			return fmt.Errorf("recording: %v has no surface", window)
+		}
+		delete(instance.surfaces, window)
+		return nil
+	})
+}
 
 // Release records the instance released.
 func (instance *Instance) Release() { instance.record(CallKindReleaseInstance, nil, nil) }

@@ -13,12 +13,16 @@ import (
 // in Start, before any job reads it. It has no exclusive operation, so a job
 // holding the read lock cannot assert it into an ExclusiveDevice.
 type device struct {
+	instance    InstanceSocket
 	backend     BackendDevice
 	features    FeatureFlags
 	limits      Limits
 	adapterInfo AdapterInfo
 	// logger is the kernel's, for what a call answers no error for.
 	logger *kernel.Logger
+	// surfaces are the windows with a surface, in the order they got it;
+	// only jobs holding the write lock change it.
+	surfaces []platform.Window
 	// Each table holds its type's handles with what each was created with,
 	// slices copied, which a recovery creates it again from.
 	buffers          table[Buffer, BufferDescriptor]

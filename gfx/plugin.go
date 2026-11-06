@@ -17,11 +17,10 @@ type Plugin struct {
 	// config is a copy of the Config Init was given.
 	config         Config
 	instanceSocket kernel.ExclusiveSocket[InstanceSocket]
-	// instance, adapter and device.backend are what Start requested, for
-	// Destroy to release; nil where Start got no further.
-	instance InstanceSocket
-	adapter  BackendAdapter
-	device   *device
+	// adapter, device.instance and device.backend are what Start requested,
+	// for Destroy to release; nil where Start got no further.
+	adapter BackendAdapter
+	device  *device
 }
 
 // Config is gfx's part of the kernel's config, under PluginName: what the
@@ -55,14 +54,27 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 	return []kernel.PluginName{platform.PluginName}
 }
 
-// Init declares the required InstanceSocket and installs the Device, empty
-// until Start. A config of another type than *Config is a composition error,
-// and panics.
+// Init declares the required InstanceSocket, installs the Device, empty
+// until Start, and subscribes to platform's window events, the Subs kept in
+// the Handlers resource. A config of another type than *Config is a
+// composition error, and panics.
 func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	p.config = *kernel.PluginConfigOrDefault[Config](config)
 	p.instanceSocket = configurator.DeclareExclusiveSocket[InstanceSocket](false)
 	p.device = &device{}
 	configurator.InitResource[Device](p.device)
+	create := configurator.RegisterTask2(createSurface)
+	configurator.PinToMainThread(create)
+	release := configurator.RegisterTask1(releaseSurface)
+	configurator.PinToMainThread(release)
+	configurator.InitResource(Handlers{
+		CreateSurface: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event platform.WindowOpenedEvent) (platform.WindowOpenedEvent, kernel.JobHandle) {
+			return event, ex.Schedule(create, event.Window, in).Handle()
+		}),
+		ReleaseSurface: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event platform.WindowClosedEvent) (platform.WindowClosedEvent, kernel.JobHandle) {
+			return event, ex.Schedule(release, event.Window, in).Handle()
+		}),
+	})
 	return nil
 }
 
@@ -71,8 +83,8 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 // adapter, or no device, is an error.
 func (p *Plugin) Start(k *kernel.Kernel) error {
 	p.device.logger = k.Logger()
-	p.instance = p.instanceSocket.Get()
-	adapter, err := p.instance.RequestAdapter(RequestAdapterOptions{
+	p.device.instance = p.instanceSocket.Get()
+	adapter, err := p.device.instance.RequestAdapter(RequestAdapterOptions{
 		PowerPreference:      p.config.PowerPreference,
 		ForceFallbackAdapter: p.config.ForceFallbackAdapter,
 	})
@@ -101,18 +113,21 @@ func (p *Plugin) Start(k *kernel.Kernel) error {
 // Stop does nothing: frames still in flight finish.
 func (*Plugin) Stop(*kernel.Kernel) error { return nil }
 
-// Destroy releases the device, the adapter and the instance Start
-// requested, after the kernel's last job; releasing the device cleanly is
-// what saves Vulkan's pipeline cache.
+// Destroy releases the surfaces of the windows still open, then the device,
+// the adapter and the instance Start requested, after the kernel's last job;
+// releasing the device cleanly is what saves Vulkan's pipeline cache.
 func (p *Plugin) Destroy() error {
+	for _, window := range p.device.surfaces {
+		p.device.instance.ReleaseSurface(window)
+	}
 	if p.device.backend != nil {
 		p.device.backend.Release()
 	}
 	if p.adapter != nil {
 		p.adapter.Release()
 	}
-	if p.instance != nil {
-		p.instance.Release()
+	if p.device.instance != nil {
+		p.device.instance.Release()
 	}
 	return nil
 }
