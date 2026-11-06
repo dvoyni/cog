@@ -24,16 +24,14 @@ import (
 type Instance struct {
 	mutex     sync.Mutex
 	recording Recording
-	// surfaces holds each window's surface, as the native handle it was
-	// created from.
-	surfaces map[platform.Window]platform.NativeHandle
+	surfaces  map[platform.Window]surface
 	// answers are the answers AnswerNext queued, by kind, the next first.
 	answers map[CallKind][]Answer
 }
 
 // NewInstance returns an adapter with an empty recording.
 func NewInstance() *Instance {
-	return &Instance{surfaces: map[platform.Window]platform.NativeHandle{}, answers: map[CallKind][]Answer{}}
+	return &Instance{surfaces: map[platform.Window]surface{}, answers: map[CallKind][]Answer{}}
 }
 
 // Recording answers a copy of what was recorded so far; a test reads it once
@@ -72,17 +70,21 @@ func (instance *Instance) CreateSurface(window platform.Window, native platform.
 		if _, exists := instance.surfaces[window]; exists {
 			return fmt.Errorf("recording: %v already has a surface", window)
 		}
-		instance.surfaces[window] = native
+		instance.surfaces[window] = surface{native: native}
 		return nil
 	}).Error
 }
 
 // ReleaseSurface records the release and drops window's surface; the error
-// recorded when window has none.
+// recorded when window has none, or holds a framebuffer not yet presented.
 func (instance *Instance) ReleaseSurface(window platform.Window) {
 	instance.record(CallKindReleaseSurface, window, func() error {
-		if _, exists := instance.surfaces[window]; !exists {
+		windowSurface, exists := instance.surfaces[window]
+		if !exists {
 			return fmt.Errorf("recording: %v has no surface", window)
+		}
+		if windowSurface.framebuffer != (gfx.TextureView{}) {
+			return fmt.Errorf("recording: releasing the surface of %v, its framebuffer not presented", window)
 		}
 		delete(instance.surfaces, window)
 		return nil
@@ -97,6 +99,17 @@ func (instance *Instance) Release() { instance.record(CallKindReleaseInstance, n
 // Unless that answer is an error, apply, when given, makes the call's effect
 // under the mutex, and its error is the one recorded and answered.
 func (instance *Instance) record(kind CallKind, arguments any, apply func() error) Answer {
+	return instance.recordAnswered(kind, arguments, func(Answer) error {
+		if apply == nil {
+			return nil
+		}
+		return apply()
+	})
+}
+
+// recordAnswered records as record does, handing apply the answer queued, so
+// the call's effect can follow its status.
+func (instance *Instance) recordAnswered(kind CallKind, arguments any, apply func(answer Answer) error) Answer {
 	instance.mutex.Lock()
 	defer instance.mutex.Unlock()
 	var answer Answer
@@ -104,9 +117,16 @@ func (instance *Instance) record(kind CallKind, arguments any, apply func() erro
 		answer = queued[0]
 		instance.answers[kind] = queued[1:]
 	}
-	if answer.Error == nil && apply != nil {
-		answer.Error = apply()
+	if answer.Error == nil {
+		answer.Error = apply(answer)
 	}
 	instance.recording.Calls = append(instance.recording.Calls, Call{Kind: kind, Arguments: arguments, Error: answer.Error})
 	return answer
+}
+
+// surface is one window's surface: the native handle it was created from,
+// and the framebuffer acquired and not yet presented, zero when none is.
+type surface struct {
+	native      platform.NativeHandle
+	framebuffer gfx.TextureView
 }

@@ -23,6 +23,7 @@ type device struct {
 	// surfaces are the windows with a surface, in the order they got it;
 	// only jobs holding the write lock change it.
 	surfaces []platform.Window
+	frames   framePool
 	// Each table holds its type's handles with what each was created with,
 	// slices copied, which a recovery creates it again from.
 	buffers          table[Buffer, BufferDescriptor]
@@ -219,7 +220,7 @@ func (d *device) Encoder(frame Frame, order SubmitOrder) (CommandEncoder, error)
 }
 
 func (d *device) Framebuffer(frame Frame, window platform.Window) TextureView {
-	panic("gfx listing: no bodies")
+	return d.frames.framebuffer(frame, window)
 }
 
 func (d *device) SurfaceConfiguration(window platform.Window) (SurfaceConfiguration, bool) {

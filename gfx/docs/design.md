@@ -17,9 +17,10 @@ ticket that holds its detail. Every type, method and descriptor is declared
 in this module, from the listing on
 [`prototype/gfx-listing`](https://github.com/dvoyni/cog/tree/prototype/gfx-listing/gfx).
 The device comes up and is released, every resource but query sets is
-created and released, pipelines with explicit layouts only, and surfaces
-follow platform's windows, though nothing configures them yet; every other
-body panics until its ticket fills it. The vocabulary is in
+created and released, pipelines with explicit layouts only, surfaces
+follow platform's windows, though nothing configures them yet, and the frame
+chain acquires, publishes `DrawEvent` and presents, with no flush yet; every
+other body panics until its ticket fills it. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md); the ADRs are in [`adr/`](adr).
 
 ## Constraints
@@ -221,7 +222,8 @@ present and recovery itself.
   between a beat's time and the display, and the floor keeps a minimized
   application from spinning.
 - **Windows and frames:** `ReleaseSurface` is scheduled after the last
-  present; a window opened mid-frame joins the next frame.
+  present, and the window is marked closing at once, so no acquire still to
+  run takes its framebuffer; a window opened mid-frame joins the next frame.
 
 ## Writes and transient memory
 

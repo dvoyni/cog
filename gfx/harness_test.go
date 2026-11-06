@@ -1,7 +1,9 @@
 package gfx_test
 
 import (
+	"context"
 	"runtime"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -9,6 +11,7 @@ import (
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/gfx/recording"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/metronome"
 	"github.com/dvoyni/cog/platform"
 	"github.com/dvoyni/cog/platform/headless"
 )
@@ -16,13 +19,24 @@ import (
 // harness is the test's plugin and the supervisor's logger: it binds a
 // recording.Instance in its Init, unless told not to, and numberedWindows,
 // and runs a function over the Device under its read or write lock, or over
-// the WindowManager under its write lock, and ProcessEvents, on demand.
+// the WindowManager under its write lock, and ProcessEvents, on demand. It
+// spawns metronome with a render track on a ManualClock, and handles every
+// DrawEvent, keeping each.
 type harness struct {
 	t          *testing.T
 	supervisor *kernel.Supervisor
 	kernel     *kernel.Kernel
 	instance   *recording.Instance
 	windows    *numberedWindows
+	clock      *metronome.ManualClock
+	// render is the render track's pacing, metronome.Variable() unless a test
+	// sets it before spawning.
+	render metronome.Settings
+	// holdFrame, when set, runs after each DrawEvent's Ready holding no lock;
+	// readFrame, when set, runs after Ready under the Device's read lock.
+	// Each is set before spawning.
+	holdFrame func(event gfx.DrawEvent)
+	readFrame func(event gfx.DrawEvent, device gfx.Device)
 	// unbound leaves InstanceSocket without a binding.
 	unbound bool
 	read    func(device gfx.Device)
@@ -32,9 +46,11 @@ type harness struct {
 	handlers      gfx.Handlers
 	handlersFound bool
 	// mutex guards logged, the errors kernels logged and the test has not
-	// taken; any left when the test ends fail it.
+	// taken, any left when the test ends failing it, and drawn, every
+	// DrawEvent published.
 	mutex  sync.Mutex
 	logged []error
+	drawn  []gfx.DrawEvent
 }
 
 // readEvent runs the harness's read under the Device's read lock.
@@ -104,6 +120,26 @@ func (h *harness) Init(c *kernel.Configurator, config any) error {
 	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event editEvent) (editEvent, kernel.JobHandle) {
 		return event, ex.Schedule(edit, kernel.NoArg{}, in).Handle()
 	})
+	hold := c.RegisterTask0(func(k *kernel.Kernel, event gfx.DrawEvent) kernel.NoResult {
+		if h.holdFrame != nil {
+			h.holdFrame(event)
+		}
+		return kernel.NoResult{}
+	})
+	readFrame := c.RegisterTask1(func(k *kernel.Kernel, event gfx.DrawEvent, device kernel.Read[gfx.Device]) kernel.NoResult {
+		if h.readFrame != nil {
+			h.readFrame(event, device.Get())
+		}
+		return kernel.NoResult{}
+	})
+	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.DrawEvent) (gfx.DrawEvent, kernel.JobHandle) {
+		h.mutex.Lock()
+		h.drawn = append(h.drawn, event)
+		h.mutex.Unlock()
+		held := ex.Schedule(hold, event, event.Ready).Handle()
+		read := ex.Schedule(readFrame, event, event.Ready).Handle()
+		return event, ex.Join(in, held, read)
+	})
 	tasks, _ := c.Resource[platform.Tasks]()
 	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event pumpEvent) (pumpEvent, kernel.JobHandle) {
 		return event, ex.Join(in, ex.Schedule(tasks.ProcessEvents, kernel.NoArg{}).Handle())
@@ -132,7 +168,13 @@ func (*harness) LogDebug(source kernel.KernelID, message string, args ...any) {}
 // logged and not taken.
 func newHarness(t *testing.T) *harness {
 	t.Helper()
-	h := &harness{t: t, instance: recording.NewInstance(), windows: &numberedWindows{Windows: headless.NewWindows()}}
+	h := &harness{
+		t:        t,
+		instance: recording.NewInstance(),
+		windows:  &numberedWindows{Windows: headless.NewWindows()},
+		clock:    metronome.NewManualClock(),
+		render:   metronome.Variable(),
+	}
 	h.supervisor = kernel.NewSupervisor(h)
 	t.Cleanup(func() {
 		for _, err := range h.takeLogged() {
@@ -143,12 +185,18 @@ func newHarness(t *testing.T) *harness {
 	return h
 }
 
-// spawn spawns platform, gfx with config, and the harness, and answers
-// Spawn's error.
+// spawn spawns platform, metronome with the render track, gfx with config,
+// and the harness, and answers Spawn's error.
 func (h *harness) spawn(config *gfx.Config) error {
 	h.t.Helper()
-	id, err := h.supervisor.Spawn(map[kernel.PluginName]any{gfx.PluginName: config}, 2,
-		platform.NewPlugin(), gfx.NewPlugin(), h)
+	configs := map[kernel.PluginName]any{
+		gfx.PluginName: config,
+		metronome.PluginName: &metronome.Config{
+			Clock:  h.clock,
+			Tracks: []metronome.Track{metronome.NewTrack[gfx.RenderEvent](h.render)},
+		},
+	}
+	id, err := h.supervisor.Spawn(configs, 2, platform.NewPlugin(), metronome.NewPlugin(), gfx.NewPlugin(), h)
 	if err == nil {
 		h.kernel = h.supervisor.GetKernel(id)
 	}
@@ -236,6 +284,35 @@ func (h *harness) waitForCalls(kind recording.CallKind, count int) []recording.C
 	}
 }
 
+// advance advances the clock by d, ticking the main thread for the pinned
+// jobs of the beats it lets out, until every beat has finished.
+func (h *harness) advance(d time.Duration) {
+	h.t.Helper()
+	h.untilDone(func() { h.clock.Advance(d) })
+}
+
+// settle ticks the main thread until every beat in flight has finished.
+func (h *harness) settle() {
+	h.t.Helper()
+	h.untilDone(func() { _ = h.clock.Wait(context.Background()) })
+}
+
+// waitForDraws waits, without ticking the main thread, until count
+// DrawEvents have been published, and answers them.
+func (h *harness) waitForDraws(count int) []gfx.DrawEvent {
+	h.t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if drawn := h.drawEvents(); len(drawn) >= count {
+			return drawn
+		}
+		if time.Now().After(deadline) {
+			h.t.Fatalf("%d DrawEvents in 5s, want %d", len(h.drawEvents()), count)
+		}
+		runtime.Gosched()
+	}
+}
+
 // quit quits the supervisor and ticks the main thread, for the pinned jobs
 // still to run, until every kernel is destroyed.
 func (h *harness) quit() {
@@ -251,6 +328,30 @@ func (h *harness) quit() {
 		}
 		if time.Now().After(deadline) {
 			h.t.Fatal("the supervisor did not quit in 5s")
+		}
+		runtime.Gosched()
+	}
+}
+
+// untilDone runs work on a goroutine of its own and ticks the main thread
+// until it returns.
+func (h *harness) untilDone(work func()) {
+	h.t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		work()
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		h.supervisor.TickMainThread()
+		select {
+		case <-done:
+			return
+		default:
+		}
+		if time.Now().After(deadline) {
+			h.t.Fatal("the beats did not settle in 5s")
 		}
 		runtime.Gosched()
 	}
@@ -283,6 +384,13 @@ func (h *harness) takeLogged() []error {
 	logged := h.logged
 	h.logged = nil
 	return logged
+}
+
+// drawEvents answers every DrawEvent published so far.
+func (h *harness) drawEvents() []gfx.DrawEvent {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	return slices.Clone(h.drawn)
 }
 
 // kinds answers the kinds of calls, in order.

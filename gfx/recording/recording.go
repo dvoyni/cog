@@ -38,6 +38,12 @@ const (
 	// CallKindReleaseSurface is InstanceSocket.ReleaseSurface, its Arguments
 	// the platform.Window.
 	CallKindReleaseSurface
+	// CallKindAcquireFramebuffer is BackendDevice.AcquireFramebuffer, its
+	// Arguments an AcquireFramebufferArguments.
+	CallKindAcquireFramebuffer
+	// CallKindPresent is BackendDevice.Present, its Arguments the
+	// platform.Window.
+	CallKindPresent
 	// CallKindCreateBuffer is BackendDevice.CreateBuffer, its Arguments a
 	// CreateBufferArguments.
 	CallKindCreateBuffer
@@ -134,6 +140,12 @@ type Call struct {
 type CreateSurfaceArguments struct {
 	Window platform.Window
 	Native platform.NativeHandle
+}
+
+// AcquireFramebufferArguments are what AcquireFramebuffer was called with.
+type AcquireFramebufferArguments struct {
+	Window platform.Window
+	View   gfx.TextureView
 }
 
 // CreateBufferArguments are what CreateBuffer was called with.
