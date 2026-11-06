@@ -1,6 +1,9 @@
 package kernel
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // lifecycle runs a kernel's plugins through Init, Start, Stop and Destroy: up
 // in plugin order, down in reverse. A step that fails rolls back what that
@@ -18,14 +21,31 @@ type lifecycle struct {
 }
 
 // init runs every plugin's Init in order, each with its part of config. Two
-// plugins of one name are a composition error, and panic before any Init
-// runs. If an Init fails, init destroys the plugins already initialized, in
-// reverse, and answers that failure.
+// plugins of one name, or a dependency not given before the plugin naming
+// it, are composition errors, and panic before any Init runs. If an Init
+// fails, init destroys the plugins already initialized, in reverse, and
+// answers that failure.
 func (l *lifecycle) init() error {
 	for i, plugin := range l.plugins {
 		for _, earlier := range l.plugins[:i] {
 			if earlier.Name() == plugin.Name() {
 				panic(fmt.Sprintf("kernel: spawning a kernel with two plugins named %q", plugin.Name()))
+			}
+		}
+	}
+	for i, plugin := range l.plugins {
+		dependencies := plugin.Dependencies()
+		for j, dependency := range dependencies {
+			position := slices.IndexFunc(l.plugins, func(other Plugin) bool { return other.Name() == dependency })
+			switch {
+			case position == i:
+				panic(fmt.Sprintf("kernel: plugin %q depends on itself", plugin.Name()))
+			case slices.Contains(dependencies[:j], dependency):
+				panic(fmt.Sprintf("kernel: plugin %q names its dependency %q twice", plugin.Name(), dependency))
+			case position > i:
+				panic(fmt.Sprintf("kernel: plugin %q depends on %q, which is given to Spawn after it", plugin.Name(), dependency))
+			case position < 0:
+				panic(fmt.Sprintf("kernel: plugin %q depends on %q, which is not given to Spawn", plugin.Name(), dependency))
 			}
 		}
 	}

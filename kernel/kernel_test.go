@@ -10,17 +10,21 @@ import (
 	"time"
 )
 
-// hookPlugin is a Plugin running whichever of its hooks are set.
+// hookPlugin is a Plugin naming dependencies and running whichever of its
+// hooks are set.
 type hookPlugin struct {
-	name    PluginName
-	init    func(c *Configurator)
-	receive func(config any)
-	start   func(k *Kernel)
-	stop    func(k *Kernel)
-	destroy func()
+	name         PluginName
+	dependencies []PluginName
+	init         func(c *Configurator)
+	receive      func(config any)
+	start        func(k *Kernel)
+	stop         func(k *Kernel)
+	destroy      func()
 }
 
 func (p hookPlugin) Name() PluginName { return p.name }
+
+func (p hookPlugin) Dependencies() []PluginName { return p.dependencies }
 
 func (p hookPlugin) Init(c *Configurator, config any) error {
 	if p.receive != nil {

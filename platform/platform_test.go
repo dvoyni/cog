@@ -51,6 +51,8 @@ func newFake() *fake {
 
 func (*fake) Name() kernel.PluginName { return "fake" }
 
+func (*fake) Dependencies() []kernel.PluginName { return nil }
+
 func (f *fake) Init(c *kernel.Configurator, config any) error {
 	if f.installWindows {
 		c.BindSocket[platform.WindowsSocket](f)
@@ -164,6 +166,8 @@ type harness struct {
 }
 
 func (h *harness) Name() kernel.PluginName { return "test" }
+
+func (*harness) Dependencies() []kernel.PluginName { return []kernel.PluginName{platform.PluginName} }
 
 func (h *harness) Init(c *kernel.Configurator, config any) error {
 	tasks, _ := c.Resource[platform.Tasks]()
@@ -620,6 +624,8 @@ func TestAKernelWithoutWindowsOrInputPumpsNothingAndReadsValues(t *testing.T) {
 type secondInstaller struct{ install func(c *kernel.Configurator) }
 
 func (*secondInstaller) Name() kernel.PluginName { return "second" }
+
+func (*secondInstaller) Dependencies() []kernel.PluginName { return nil }
 
 func (p *secondInstaller) Init(c *kernel.Configurator, config any) error {
 	p.install(c)

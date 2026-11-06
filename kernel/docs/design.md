@@ -54,7 +54,7 @@ Supervisor ── lifetime, GetKernel and Broadcast, LogHandler
 | `*Task[A, B]`| Registered code with pointer-free arg `A` and pointer-free result `B`; returned by `RegisterTask`. |
 | `Job[T]`     | One scheduled run answering `T`; what `ScheduleAfter` feeds from. |
 | `JobHandle`  | Untyped job handle, `Job[T].Handle()`; what dependencies are declared with. |
-| `Plugin`     | Interface: `Name()`, `Init(configurator, config)`, `Start(kernel)`, `Stop(kernel)`, `Destroy()`. |
+| `Plugin`     | Interface: `Name()`, `Dependencies()`, `Init(configurator, config)`, `Start(kernel)`, `Stop(kernel)`, `Destroy()`. |
 
 ## Supervisor
 
@@ -119,8 +119,9 @@ silently.
 
 ## Plugins
 
-`Plugin` is an interface with `Name()`, `Init(configurator, config)`,
-`Start(kernel)`, `Stop(kernel)` and `Destroy()`. It has no dependency list:
+`Plugin` is an interface with `Name()`, `Dependencies()`,
+`Init(configurator, config)`, `Start(kernel)`, `Stop(kernel)` and
+`Destroy()`:
 
 - **Name** is a `PluginName`, unique among one kernel's plugins; two plugins
   of one name are a composition error and panic in `Spawn`. It keys the
@@ -128,6 +129,12 @@ silently.
 - **Order** is the order of the plugins passed to `Spawn`. A plugin
   that needs another's resource during registration is listed after it and calls
   `Configurator.Resource[T]`. `Start` runs in that order, `Stop` in reverse.
+- **Dependencies** names the plugins whose resources a plugin's `Init` needs;
+  nil is none. Before any `Init`, `Spawn` checks each is listed before the
+  plugin naming it, and never sorts: one listed later or not at all, the
+  plugin itself, or a name given twice is a composition error and panics,
+  naming both plugins. Socket bindings resolve after every `Init` and are not
+  dependencies. See [ADR 0007](adr/0007-plugins-declare-dependencies-checked-not-sorted.md).
 - **Init and Destroy are a pair,** as Start and Stop are. Whatever `Init`
   acquires, such as an implementation it installs with `InitResource`,
   `Destroy` releases. `Destroy` runs after the kernel's last job, for every

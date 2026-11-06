@@ -8,14 +8,17 @@ import (
 )
 
 // calledPlugin records every lifecycle call it gets in calls, as "name.Step",
-// and fails each step named in failing.
+// and fails each step named in failing. It names dependencies as its own.
 type calledPlugin struct {
-	name    PluginName
-	calls   *[]string
-	failing string
+	name         PluginName
+	dependencies []PluginName
+	calls        *[]string
+	failing      string
 }
 
 func (p calledPlugin) Name() PluginName { return p.name }
+
+func (p calledPlugin) Dependencies() []PluginName { return p.dependencies }
 
 func (p calledPlugin) Init(configurator *Configurator, config any) error {
 	return p.call("Init")

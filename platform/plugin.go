@@ -35,6 +35,10 @@ func NewPlugin() *Plugin { return &Plugin{} }
 // Name returns PluginName.
 func (*Plugin) Name() kernel.PluginName { return PluginName }
 
+// Dependencies answers none: platform reads no other plugin's resource;
+// the implementations it needs come through its sockets.
+func (*Plugin) Dependencies() []kernel.PluginName { return nil }
+
 // Init declares the optional exclusive sockets of the window and input
 // implementations and of the writable filesystem and the optional socket of
 // the read mounts, installs the FS resource, *Values, *WindowManager,

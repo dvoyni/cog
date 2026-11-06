@@ -80,6 +80,8 @@ type gamePlugin struct {
 
 func (p *gamePlugin) Name() kernel.PluginName { return gameName }
 
+func (p *gamePlugin) Dependencies() []kernel.PluginName { return nil }
+
 func (p *gamePlugin) Init(c *kernel.Configurator, config any) error {
 	p.config = kernel.PluginConfigOrDefault[GameConfig](config)
 	c.InitResource(World{})

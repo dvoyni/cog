@@ -181,3 +181,70 @@ func TestSpawnWithTwoPluginsOfOneNamePanics(t *testing.T) {
 		NewSupervisor(nil).Spawn(nil, 2, hookPlugin{name: "physics"}, hookPlugin{name: "physics"})
 	})
 }
+
+func TestSpawnPanicsOnADependencyNotListedBeforeNamingBothPlugins(t *testing.T) {
+	cases := []struct {
+		what    string
+		plugins []Plugin
+		want    string
+	}{
+		{"a dependency listed later", []Plugin{
+			hookPlugin{name: "render", dependencies: []PluginName{"platform"}},
+			hookPlugin{name: "platform"},
+		}, `"render"` + "\x00" + `"platform"` + "\x00" + "after"},
+		{"a missing dependency", []Plugin{
+			hookPlugin{name: "render", dependencies: []PluginName{"platform"}},
+		}, `"render"` + "\x00" + `"platform"` + "\x00" + "not given"},
+		{"a plugin naming itself", []Plugin{
+			hookPlugin{name: "render", dependencies: []PluginName{"render"}},
+		}, `"render"` + "\x00" + "itself"},
+		{"a dependency named twice", []Plugin{
+			hookPlugin{name: "platform"},
+			hookPlugin{name: "render", dependencies: []PluginName{"platform", "platform"}},
+		}, `"render"` + "\x00" + `"platform"` + "\x00" + "twice"},
+	}
+	for _, test := range cases {
+		t.Run(test.what, func(t *testing.T) {
+			expectPanicSaying(t, test.want, func() { NewSupervisor(nil).Spawn(nil, 2, test.plugins...) })
+		})
+	}
+}
+
+func TestSpawnPanicsOnABadDependencyBeforeAnyInit(t *testing.T) {
+	var calls []string
+	expectPanic(t, "a dependency listed later", func() {
+		NewSupervisor(nil).Spawn(nil, 2,
+			calledPlugin{name: "platform", calls: &calls},
+			calledPlugin{name: "render", dependencies: []PluginName{"audio"}, calls: &calls},
+			calledPlugin{name: "audio", calls: &calls},
+		)
+	})
+	if len(calls) != 0 {
+		t.Fatalf("calls are %v, want none before the panic", calls)
+	}
+}
+
+func TestDependenciesLeaveThePluginOrderAsGiven(t *testing.T) {
+	var calls []string
+	s := NewSupervisor(nil)
+	_, err := s.Spawn(nil, 2,
+		calledPlugin{name: "audio", calls: &calls},
+		calledPlugin{name: "platform", calls: &calls},
+		calledPlugin{name: "render", dependencies: []PluginName{"platform"}, calls: &calls},
+		calledPlugin{name: "game", dependencies: []PluginName{"render", "audio"}, calls: &calls},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Quit()
+	<-s.Done()
+	want := []string{
+		"audio.Init", "platform.Init", "render.Init", "game.Init",
+		"audio.Start", "platform.Start", "render.Start", "game.Start",
+		"game.Stop", "render.Stop", "platform.Stop", "audio.Stop",
+		"game.Destroy", "render.Destroy", "platform.Destroy", "audio.Destroy",
+	}
+	if !slices.Equal(calls, want) {
+		t.Fatalf("calls are %v, want %v", calls, want)
+	}
+}
