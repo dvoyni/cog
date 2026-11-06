@@ -241,6 +241,150 @@ func TestAFailedCommandLeavesTheEncoderSpent(t *testing.T) {
 	}
 }
 
+func TestACopyOrClearNeedsItsAlignment(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		alignment uint64
+		record    func(encoder gfx.CommandEncoder, live objects, value uint64)
+	}{
+		{"a buffer copy's source offset", 4, func(encoder gfx.CommandEncoder, live objects, value uint64) {
+			encoder.CopyBufferToBuffer(live.buffer, value, live.buffer, 128, 4)
+		}},
+		{"a buffer copy's destination offset", 4, func(encoder gfx.CommandEncoder, live objects, value uint64) {
+			encoder.CopyBufferToBuffer(live.buffer, 0, live.buffer, 128+value, 4)
+		}},
+		{"a buffer copy's size", 4, func(encoder gfx.CommandEncoder, live objects, value uint64) {
+			encoder.CopyBufferToBuffer(live.buffer, 0, live.buffer, 128, value)
+		}},
+		{"a clear's offset", 4, func(encoder gfx.CommandEncoder, live objects, value uint64) {
+			encoder.ClearBuffer(live.buffer, value, 4)
+		}},
+		{"a clear's size", 4, func(encoder gfx.CommandEncoder, live objects, value uint64) {
+			encoder.ClearBuffer(live.buffer, 0, value)
+		}},
+		{"a buffer-to-texture copy's rows", 256, func(encoder gfx.CommandEncoder, live objects, value uint64) {
+			encoder.CopyBufferToTexture(live.buffer, live.texture, regionsWithRowsOf(live, value))
+		}},
+		{"a texture-to-buffer copy's rows", 256, func(encoder gfx.CommandEncoder, live objects, value uint64) {
+			encoder.CopyTextureToBuffer(live.texture, live.buffer, regionsWithRowsOf(live, value))
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, value := range []uint64{test.alignment, test.alignment / 2} {
+				_, device := requestDevice(t)
+				live := createObjects(t, device, everyBufferUsage, everyTextureUsage)
+				encoder := createEncoder(t, device)
+
+				test.record(encoder, live, value)
+
+				_, err := encoder.Finish()
+				if aligned := value == test.alignment; aligned && err != nil {
+					t.Errorf("%d answered %v at Finish", value, err)
+				} else if !aligned && err == nil {
+					t.Errorf("%d answered no error at Finish", value)
+				}
+			}
+		})
+	}
+}
+
+func TestPassesInSequenceDrawingAfterTheirPipelineFinish(t *testing.T) {
+	_, device := requestDevice(t)
+	live := createObjects(t, device, everyBufferUsage, everyTextureUsage)
+	encoder := createEncoder(t, device)
+
+	inRenderPass(encoder, live, func(pass gfx.RenderPassEncoder) {
+		pass.SetVertexBuffer(0, live.buffer, 0)
+		pass.SetIndexBuffer(live.buffer, gfx.IndexFormatUint16, 0)
+		pass.Draw(gfx.DrawArgs{VertexCount: 3, InstanceCount: 1})
+		pass.DrawIndexed(gfx.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1})
+		pass.DrawIndirect(live.buffer, 0)
+		pass.DrawIndexedIndirect(live.buffer, 0)
+		pass.MultiDrawIndirect(live.buffer, 0, 2)
+		pass.MultiDrawIndexedIndirect(live.buffer, 0, 2)
+	})
+	inComputePass(encoder, live, func(pass gfx.ComputePassEncoder) {
+		pass.Dispatch(1, 1, 1)
+		pass.DispatchIndirect(live.buffer, 0)
+	})
+	inRenderPass(encoder, live, func(pass gfx.RenderPassEncoder) { pass.Draw(gfx.DrawArgs{VertexCount: 3, InstanceCount: 1}) })
+
+	if _, err := encoder.Finish(); err != nil {
+		t.Fatalf("Finish answered %v", err)
+	}
+}
+
+func TestABrokenPassSequenceFailsAtFinish(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		record func(encoder gfx.CommandEncoder, live objects)
+	}{
+		{"a draw with no pipeline", func(encoder gfx.CommandEncoder, live objects) {
+			renderPassOn(encoder, live).Draw(gfx.DrawArgs{VertexCount: 3, InstanceCount: 1})
+		}},
+		{"an indexed draw with no pipeline", func(encoder gfx.CommandEncoder, live objects) {
+			renderPassOn(encoder, live).DrawIndexed(gfx.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1})
+		}},
+		{"an indirect draw with no pipeline", func(encoder gfx.CommandEncoder, live objects) {
+			renderPassOn(encoder, live).DrawIndirect(live.buffer, 0)
+		}},
+		{"an indexed indirect draw with no pipeline", func(encoder gfx.CommandEncoder, live objects) {
+			renderPassOn(encoder, live).DrawIndexedIndirect(live.buffer, 0)
+		}},
+		{"indirect draws with no pipeline", func(encoder gfx.CommandEncoder, live objects) {
+			renderPassOn(encoder, live).MultiDrawIndirect(live.buffer, 0, 2)
+		}},
+		{"indexed indirect draws with no pipeline", func(encoder gfx.CommandEncoder, live objects) {
+			renderPassOn(encoder, live).MultiDrawIndexedIndirect(live.buffer, 0, 2)
+		}},
+		{"a dispatch with no pipeline", func(encoder gfx.CommandEncoder, _ objects) {
+			encoder.BeginComputePass(gfx.ComputePassDescriptor{}).Dispatch(1, 1, 1)
+		}},
+		{"an indirect dispatch with no pipeline", func(encoder gfx.CommandEncoder, live objects) {
+			encoder.BeginComputePass(gfx.ComputePassDescriptor{}).DispatchIndirect(live.buffer, 0)
+		}},
+		{"a draw after the pipeline of an earlier pass", func(encoder gfx.CommandEncoder, live objects) {
+			inRenderPass(encoder, live, func(gfx.RenderPassEncoder) {})
+			pass := renderPassOn(encoder, live)
+			pass.Draw(gfx.DrawArgs{VertexCount: 3, InstanceCount: 1})
+			pass.End()
+		}},
+		{"a render pass open at Finish", func(encoder gfx.CommandEncoder, live objects) {
+			renderPassOn(encoder, live)
+		}},
+		{"a compute pass open at Finish", func(encoder gfx.CommandEncoder, _ objects) {
+			encoder.BeginComputePass(gfx.ComputePassDescriptor{})
+		}},
+		{"a render pass begun inside a render pass", func(encoder gfx.CommandEncoder, live objects) {
+			outer := renderPassOn(encoder, live)
+			inRenderPass(encoder, live, func(gfx.RenderPassEncoder) {})
+			outer.End()
+		}},
+		{"a compute pass begun inside a render pass", func(encoder gfx.CommandEncoder, live objects) {
+			outer := renderPassOn(encoder, live)
+			inComputePass(encoder, live, func(gfx.ComputePassEncoder) {})
+			outer.End()
+		}},
+		{"a render pass begun inside a compute pass", func(encoder gfx.CommandEncoder, live objects) {
+			outer := encoder.BeginComputePass(gfx.ComputePassDescriptor{})
+			inRenderPass(encoder, live, func(gfx.RenderPassEncoder) {})
+			outer.End()
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, device := requestDevice(t)
+			live := createObjects(t, device, everyBufferUsage, everyTextureUsage)
+			encoder := createEncoder(t, device)
+
+			test.record(encoder, live)
+
+			if _, err := encoder.Finish(); err == nil {
+				t.Fatal("Finish answered no error")
+			}
+		})
+	}
+}
+
 // commandTests record, each, one command on the objects under test, other
 // objects it needs from live; bufferUsage and textureUsage are what the
 // objects under test need for it, zero when it needs none.
@@ -263,37 +407,37 @@ var commandTests = []struct {
 		}).End()
 	}},
 	{name: "a render pipeline", record: func(encoder gfx.CommandEncoder, live, tested objects) {
-		renderPass(encoder, live).SetPipeline(tested.renderPipeline)
+		inRenderPass(encoder, live, func(pass gfx.RenderPassEncoder) { pass.SetPipeline(tested.renderPipeline) })
 	}},
 	{name: "a render pass's bind group", record: func(encoder gfx.CommandEncoder, live, tested objects) {
-		renderPass(encoder, live).SetBindGroup(0, tested.group, nil)
+		inRenderPass(encoder, live, func(pass gfx.RenderPassEncoder) { pass.SetBindGroup(0, tested.group, nil) })
 	}},
 	{name: "a vertex buffer", bufferUsage: gfx.BufferUsageFlagVertex, record: func(encoder gfx.CommandEncoder, live, tested objects) {
-		renderPass(encoder, live).SetVertexBuffer(0, tested.buffer, 0)
+		inRenderPass(encoder, live, func(pass gfx.RenderPassEncoder) { pass.SetVertexBuffer(0, tested.buffer, 0) })
 	}},
 	{name: "an index buffer", bufferUsage: gfx.BufferUsageFlagIndex, record: func(encoder gfx.CommandEncoder, live, tested objects) {
-		renderPass(encoder, live).SetIndexBuffer(tested.buffer, gfx.IndexFormatUint16, 0)
+		inRenderPass(encoder, live, func(pass gfx.RenderPassEncoder) { pass.SetIndexBuffer(tested.buffer, gfx.IndexFormatUint16, 0) })
 	}},
 	{name: "an indirect draw", record: func(encoder gfx.CommandEncoder, live, tested objects) {
-		renderPass(encoder, live).DrawIndirect(tested.buffer, 0)
+		inRenderPass(encoder, live, func(pass gfx.RenderPassEncoder) { pass.DrawIndirect(tested.buffer, 0) })
 	}},
 	{name: "an indexed indirect draw", record: func(encoder gfx.CommandEncoder, live, tested objects) {
-		renderPass(encoder, live).DrawIndexedIndirect(tested.buffer, 0)
+		inRenderPass(encoder, live, func(pass gfx.RenderPassEncoder) { pass.DrawIndexedIndirect(tested.buffer, 0) })
 	}},
 	{name: "indirect draws", record: func(encoder gfx.CommandEncoder, live, tested objects) {
-		renderPass(encoder, live).MultiDrawIndirect(tested.buffer, 0, 2)
+		inRenderPass(encoder, live, func(pass gfx.RenderPassEncoder) { pass.MultiDrawIndirect(tested.buffer, 0, 2) })
 	}},
 	{name: "indexed indirect draws", record: func(encoder gfx.CommandEncoder, live, tested objects) {
-		renderPass(encoder, live).MultiDrawIndexedIndirect(tested.buffer, 0, 2)
+		inRenderPass(encoder, live, func(pass gfx.RenderPassEncoder) { pass.MultiDrawIndexedIndirect(tested.buffer, 0, 2) })
 	}},
-	{name: "a compute pipeline", record: func(encoder gfx.CommandEncoder, _, tested objects) {
-		encoder.BeginComputePass(gfx.ComputePassDescriptor{}).SetPipeline(tested.computePipeline)
+	{name: "a compute pipeline", record: func(encoder gfx.CommandEncoder, live, tested objects) {
+		inComputePass(encoder, live, func(pass gfx.ComputePassEncoder) { pass.SetPipeline(tested.computePipeline) })
 	}},
-	{name: "a compute pass's bind group", record: func(encoder gfx.CommandEncoder, _, tested objects) {
-		encoder.BeginComputePass(gfx.ComputePassDescriptor{}).SetBindGroup(0, tested.group, nil)
+	{name: "a compute pass's bind group", record: func(encoder gfx.CommandEncoder, live, tested objects) {
+		inComputePass(encoder, live, func(pass gfx.ComputePassEncoder) { pass.SetBindGroup(0, tested.group, nil) })
 	}},
-	{name: "an indirect dispatch", record: func(encoder gfx.CommandEncoder, _, tested objects) {
-		encoder.BeginComputePass(gfx.ComputePassDescriptor{}).DispatchIndirect(tested.buffer, 0)
+	{name: "an indirect dispatch", record: func(encoder gfx.CommandEncoder, live, tested objects) {
+		inComputePass(encoder, live, func(pass gfx.ComputePassEncoder) { pass.DispatchIndirect(tested.buffer, 0) })
 	}},
 	{name: "a buffer copy's source", bufferUsage: gfx.BufferUsageFlagCopySrc, record: func(encoder gfx.CommandEncoder, live, tested objects) {
 		encoder.CopyBufferToBuffer(tested.buffer, 0, live.buffer, 0, 4)
@@ -418,10 +562,37 @@ func renderPipelineDescriptor(live objects) gfx.RenderPipelineDescriptor {
 	}
 }
 
-// renderPass begins a render pass on live's view, for a command to record
-// into.
-func renderPass(encoder gfx.CommandEncoder, live objects) gfx.RenderPassEncoder {
+// inRenderPass records a render pass on live's view, live's pipeline set,
+// with record's commands, and ends it.
+func inRenderPass(encoder gfx.CommandEncoder, live objects, record func(pass gfx.RenderPassEncoder)) {
+	pass := encoder.BeginRenderPass(gfx.RenderPassDescriptor{ColorAttachments: []gfx.RenderPassColorAttachment{{View: live.view}}})
+	pass.SetPipeline(live.renderPipeline)
+	record(pass)
+	pass.End()
+}
+
+// inComputePass records a compute pass, live's pipeline set, with record's
+// commands, and ends it.
+func inComputePass(encoder gfx.CommandEncoder, live objects, record func(pass gfx.ComputePassEncoder)) {
+	pass := encoder.BeginComputePass(gfx.ComputePassDescriptor{})
+	pass.SetPipeline(live.computePipeline)
+	record(pass)
+	pass.End()
+}
+
+// renderPassOn begins a render pass on live's view, with no pipeline set.
+func renderPassOn(encoder gfx.CommandEncoder, live objects) gfx.RenderPassEncoder {
 	return encoder.BeginRenderPass(gfx.RenderPassDescriptor{ColorAttachments: []gfx.RenderPassColorAttachment{{View: live.view}}})
+}
+
+// regionsWithRowsOf answers one region of live's texture, its buffer rows
+// bytesPerRow apart.
+func regionsWithRowsOf(live objects, bytesPerRow uint64) []gfx.BufferTextureCopy {
+	return []gfx.BufferTextureCopy{{
+		BufferLayout: gfx.ImageDataLayout{BytesPerRow: uint32(bytesPerRow), RowsPerImage: 1},
+		TextureBase:  gfx.ImageCopyTexture{Texture: live.texture},
+		Size:         gfx.Extent3D{Width: 4, Height: 1, DepthOrArrayLayers: 1},
+	}}
 }
 
 // requestDevice answers a recording instance and its device, as gfx's start
