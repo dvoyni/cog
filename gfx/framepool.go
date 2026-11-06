@@ -322,7 +322,8 @@ func acquireFramebuffers(k *kernel.Kernel, frame Frame, manager kernel.Read[*pla
 // flushFrame finishes frame's encoders, under the read lock, and submits
 // them once, sorted by submit order. An encoder whose Finish fails goes to
 // LogErr and is dropped, and so does a failing submit. A frame with no
-// encoder submits nothing.
+// encoder submits nothing. Either way it polls the maps after, publishing
+// BufferMappedEvent from its job for each resolved.
 func flushFrame(k *kernel.Kernel, frame Frame, deviceHandle kernel.Read[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)
 	slot := d.frames.flush(frame)
@@ -340,6 +341,7 @@ func flushFrame(k *kernel.Kernel, frame Frame, deviceHandle kernel.Read[Device])
 			k.Logger().LogErr(fmt.Errorf("gfx: submitting a frame: %w", err))
 		}
 	}
+	d.Poll()
 	return kernel.NoResult{}
 }
 

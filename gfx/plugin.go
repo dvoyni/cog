@@ -98,7 +98,7 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 // with Config's limits or, when they are zero, DefaultLimits(). Finding no
 // adapter, or no device, is an error.
 func (p *Plugin) Start(k *kernel.Kernel) error {
-	p.device.logger = k.Logger()
+	p.device.kernel = k
 	p.device.instance = p.instanceSocket.Get()
 	adapter, err := p.device.instance.RequestAdapter(RequestAdapterOptions{
 		PowerPreference:      p.config.PowerPreference,
