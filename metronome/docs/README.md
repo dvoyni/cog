@@ -213,13 +213,13 @@ The usual render modes are combinations of these, not modes of their own:
 
 | Mode | Settings |
 |---|---|
-| vsync | `MaxInFlight: 2`, no `MinInterval`. A FIFO acquire blocks: the next beat's acquire waits for the display to free an image, holding that beat in flight, and the display paces the track. |
+| vsync | `MaxInFlight: 1` and a 1/240 s `MinInterval`: `Variable()` plus the floor. A FIFO acquire blocks on the display, holding the beat in flight, and the display paces the track. One beat in flight takes about a frame off the gap between a beat's time and the display, since a second would only queue behind the present; the floor keeps a minimized application, whose acquire does not block, from spinning. Acquiring late, after the frame is recorded, would bring two beats in flight back. |
 | limit(fps) | `MinInterval: time.Second / fps`, plus a `MaxInFlight`. |
 | uncapped | A `MaxInFlight` alone. |
 
 ```go
 vsync := metronome.Variable()
-vsync.MaxInFlight = 2
+vsync.MinInterval = time.Second / 240
 vsync.MaxDelta = 250 * time.Millisecond
 ```
 
@@ -257,7 +257,7 @@ its event type in `InterpolateAgainst`. Each beat then carries:
 
 ```go
 render := metronome.Variable()
-render.MaxInFlight = 2
+render.MinInterval = time.Second / 240
 render.InterpolateAgainst = reflect.TypeFor[metronome.UpdateEvent]()
 
 &metronome.Config{

@@ -138,7 +138,7 @@ the ticket that holds its detail.
 
   | Mode | Settings |
   |---|---|
-  | vsync | `MaxInFlight: 2`, no `MinInterval`: a FIFO acquire blocks, so the next beat's acquire waits for the display to free an image and holds that beat in flight, and the display paces the track |
+  | vsync | `MaxInFlight: 1` and a 1/240 s `MinInterval`, `Variable()` plus the floor: a FIFO acquire blocks on the display and holds the beat in flight, so the display paces the track. One beat in flight takes about a frame off the gap between a beat's time and the display, since a second would only queue behind the present; the floor keeps a minimized application, whose acquire does not block, from spinning. Acquiring late, after the frame is recorded, would bring two beats in flight back |
   | limit(fps) | `MinInterval: 1/fps`, plus `MaxInFlight` |
   | uncapped | `MaxInFlight` alone |
 
