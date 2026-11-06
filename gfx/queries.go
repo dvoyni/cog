@@ -10,6 +10,10 @@ package gfx
 // where they work.
 const FeatureTimestampQuery Features = 0x400
 
+// BufferUsageQueryResolve lets a buffer be CommandEncoder.ResolveQuerySet's
+// destination.
+const BufferUsageQueryResolve BufferUsage = 0x200
+
 // QueryType is what a query set's queries record.
 type QueryType uint32
 
