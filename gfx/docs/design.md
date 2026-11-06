@@ -18,8 +18,9 @@ in this module, from the listing on
 [`prototype/gfx-listing`](https://github.com/dvoyni/cog/tree/prototype/gfx-listing/gfx).
 The device comes up and is released, every resource but query sets is
 created and released, pipelines with explicit layouts only, surfaces
-follow platform's windows, each configured from `Config.Surface` before its
-first acquire and again once resized, hidden and zero-size windows skipped,
+follow platform's windows, each configured from `Config.Surface`, or the
+request `RequestSurface` replaced it with, before its first acquire and
+again once resized or the request changes, hidden and zero-size windows skipped,
 and the frame chain acquires, handling every acquire status alike, publishes `DrawEvent`, flushes
 the frame's encoders and presents, the recording adapter recording their
 passes and commands with typed arguments. Standalone encoders are finished

@@ -513,6 +513,63 @@ func TestAFailingAcquireIsLoggedAndItsSurfaceConfiguredAgain(t *testing.T) {
 	}
 }
 
+func TestARequestedPresentModeReachesEverySurfaceBeforeTheNextAcquire(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	first := h.openWindow()
+	second := h.openWindow()
+	h.waitForCalls(recording.CallKindCreateSurface, 2)
+	h.advance(time.Millisecond)
+	before := len(surfaceCalls(h.instance.Recording().Calls))
+
+	h.writeDevice(func(device kernel.Write[gfx.Device]) {
+		gfx.ElevateDeviceAccess(device).RequestSurface(gfx.SurfaceRequest{PresentMode: gfx.PresentModeMailbox})
+	})
+	if calls := surfaceCalls(h.instance.Recording().Calls)[before:]; len(calls) != 0 {
+		t.Errorf("surface calls on the request = %v, want none: the request only marks the surfaces", kinds(calls))
+	}
+	h.advance(time.Millisecond)
+
+	calls := surfaceCalls(h.instance.Recording().Calls)[before:]
+	if got := kinds(calls); !slices.Equal(got, []recording.CallKind{
+		recording.CallKindSurfaceCapabilities, recording.CallKindConfigureSurface,
+		recording.CallKindSurfaceCapabilities, recording.CallKindConfigureSurface,
+		recording.CallKindAcquireFramebuffer, recording.CallKindAcquireFramebuffer,
+		recording.CallKindPresent, recording.CallKindPresent,
+	}) {
+		t.Fatalf("surface calls after the request = %v, want both configures before the acquires", got)
+	}
+	want := gfx.SurfaceConfiguration{Format: gfx.TextureFormatBGRA8Unorm, PresentMode: gfx.PresentModeMailbox, Width: 64, Height: 48}
+	configured := []any{calls[1].Arguments, calls[3].Arguments}
+	for _, window := range []platform.Window{first, second} {
+		if !slices.Contains(configured, any(recording.ConfigureSurfaceArguments{Window: window, Configuration: want})) {
+			t.Errorf("configured %+v, want %v with %+v", configured, window, want)
+		}
+	}
+	h.readDevice(func(device gfx.Device) {
+		if got, _ := device.SurfaceConfiguration(first); got != want {
+			t.Errorf("SurfaceConfiguration = %+v, want %+v", got, want)
+		}
+	})
+}
+
+func TestAWindowOpenedAfterARequestIsConfiguredFromIt(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+
+	h.writeDevice(func(device kernel.Write[gfx.Device]) {
+		gfx.ElevateDeviceAccess(device).RequestSurface(gfx.SurfaceRequest{Format: gfx.TextureFormatBGRA8UnormSrgb, PresentMode: gfx.PresentModeImmediate})
+	})
+	window := h.openWindow()
+	h.waitForCalls(recording.CallKindCreateSurface, 1)
+	h.advance(time.Millisecond)
+
+	want := gfx.SurfaceConfiguration{Format: gfx.TextureFormatBGRA8UnormSrgb, PresentMode: gfx.PresentModeImmediate, Width: 64, Height: 48}
+	if configured := h.waitForCalls(recording.CallKindConfigureSurface, 1)[0]; configured.Arguments != (recording.ConfigureSurfaceArguments{Window: window, Configuration: want}) {
+		t.Errorf("configured %+v, want %v with %+v", configured.Arguments, window, want)
+	}
+}
+
 // surfaceLifeCalls answers the surface creations and releases among calls,
 // in order with surfaceCalls.
 func surfaceLifeCalls(calls []recording.Call) []recording.Call {

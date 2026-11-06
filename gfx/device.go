@@ -269,7 +269,15 @@ type exclusiveDevice struct {
 
 func (d exclusiveDevice) WaitIdle() error { return d.backend.WaitIdle() }
 
-func (d exclusiveDevice) RequestSurface(request SurfaceRequest) { panic("gfx listing: no bodies") }
+// RequestSurface replaces the surface request and marks every surface for
+// configuring, so the next frame's configure reaches the backend before its
+// acquire; a window opened after is configured from it.
+func (d exclusiveDevice) RequestSurface(request SurfaceRequest) {
+	d.surfaceRequest = request
+	for _, window := range d.surfaces {
+		d.frames.markUnconfigured(window)
+	}
+}
 
 // textureViewSource is what a texture view was created from: its texture and
 // its descriptor.
