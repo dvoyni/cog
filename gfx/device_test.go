@@ -401,6 +401,20 @@ func TestStaleHandlesInDescriptorsAnswerErrReleasedBeforeTheBackend(t *testing.T
 			_, err := device.CreateRenderPipeline(descriptor)
 			return err
 		}},
+		{"an auto render pipeline's vertex module", func(device gfx.Device, live, stale fixture) error {
+			descriptor := renderPipelineDescriptor(live)
+			descriptor.Layout = gfx.PipelineLayout{}
+			descriptor.Vertex.Module = stale.module
+			_, err := device.CreateRenderPipeline(descriptor)
+			return err
+		}},
+		{"an auto compute pipeline's module", func(device gfx.Device, live, stale fixture) error {
+			descriptor := computePipelineDescriptor(live)
+			descriptor.Layout = gfx.PipelineLayout{}
+			descriptor.Module = stale.module
+			_, err := device.CreateComputePipeline(descriptor)
+			return err
+		}},
 		{"a compute pipeline's layout", func(device gfx.Device, live, stale fixture) error {
 			descriptor := computePipelineDescriptor(live)
 			descriptor.Layout = stale.pipelineLayout
