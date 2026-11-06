@@ -219,6 +219,39 @@ func (h *harness) readDevice(read func(device gfx.Device)) {
 	h.wait(out)
 }
 
+// readDeviceWithoutTicking runs read over the Device under its read lock,
+// and waits for it without ticking the main thread, so no pinned job runs
+// meanwhile.
+func (h *harness) readDeviceWithoutTicking(read func(device gfx.Device)) {
+	h.t.Helper()
+	h.read = read
+	_, out := h.kernel.Publish(readEvent{})
+	signal := kernel.NewSignal()
+	h.kernel.Notify(signal, out)
+	select {
+	case <-signal.C():
+	case <-time.After(5 * time.Second):
+		h.t.Fatal("a job did not finish in 5s")
+	}
+}
+
+// createBuffers creates count buffers of 4 bytes, for frame encoders to clear,
+// and answers them.
+func (h *harness) createBuffers(count int) []gfx.Buffer {
+	h.t.Helper()
+	buffers := make([]gfx.Buffer, count)
+	h.readDevice(func(device gfx.Device) {
+		for index := range buffers {
+			buffer, err := device.CreateBuffer(gfx.BufferDescriptor{Size: 4, Usage: gfx.BufferUsageFlagCopyDst})
+			if err != nil {
+				h.t.Errorf("CreateBuffer answered %v", err)
+			}
+			buffers[index] = buffer
+		}
+	})
+	return buffers
+}
+
 // writeDevice runs write over the Device's write handle, and waits for it.
 func (h *harness) writeDevice(write func(device kernel.Write[gfx.Device])) {
 	h.t.Helper()
@@ -308,6 +341,19 @@ func (h *harness) waitForDraws(count int) []gfx.DrawEvent {
 		}
 		if time.Now().After(deadline) {
 			h.t.Fatalf("%d DrawEvents in 5s, want %d", len(h.drawEvents()), count)
+		}
+		runtime.Gosched()
+	}
+}
+
+// waitForSubmissions waits, without ticking the main thread, until the
+// recording holds count submissions.
+func (h *harness) waitForSubmissions(count int) {
+	h.t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for len(h.instance.Recording().Submissions) < count {
+		if time.Now().After(deadline) {
+			h.t.Fatalf("%d submissions in 5s, want %d", len(h.instance.Recording().Submissions), count)
 		}
 		runtime.Gosched()
 	}

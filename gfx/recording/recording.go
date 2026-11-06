@@ -44,6 +44,9 @@ const (
 	// CallKindPresent is BackendDevice.Present, its Arguments the
 	// platform.Window.
 	CallKindPresent
+	// CallKindFinish is an encoder's Finish, with no Arguments; an Error
+	// answered fails it.
+	CallKindFinish
 	// CallKindCreateBuffer is BackendDevice.CreateBuffer, its Arguments a
 	// CreateBufferArguments.
 	CallKindCreateBuffer
@@ -122,18 +125,59 @@ type Recording struct {
 	// handle and a deep copy of its descriptor.
 	Calls       []Call
 	Submissions []Submission
+	// submittedAfter is, for each submission, how many calls were recorded
+	// before it.
+	submittedAfter []int
 }
 
-// Frames answers the submissions and surface calls between each acquire and
-// its present.
-func (recording *Recording) Frames() []Frame { panic("gfx listing: no bodies") }
+// Frames answers the frames gfx drew, in order: the acquires, submissions and
+// presents from each frame's first acquire to its last present. A frame with
+// no window acquired is its one submission.
+func (recording *Recording) Frames() []Frame {
+	var frames []Frame
+	// current answers the frame being grouped, a new one when begin says the
+	// last is over.
+	current := func(begin func(last *Frame) bool) *Frame {
+		if count := len(frames); count == 0 || begin(&frames[count-1]) {
+			frames = append(frames, Frame{})
+		}
+		return &frames[len(frames)-1]
+	}
+	submission := 0
+	for index := 0; index <= len(recording.Calls); index++ {
+		for ; submission < len(recording.Submissions) && recording.submittedAfter[submission] == index; submission++ {
+			frame := current(func(last *Frame) bool {
+				return len(last.Presented) > 0 || (len(last.Acquired) == 0 && len(last.Submissions) > 0)
+			})
+			frame.Submissions = append(frame.Submissions, recording.Submissions[submission])
+		}
+		if index == len(recording.Calls) {
+			break
+		}
+		call := recording.Calls[index]
+		switch call.Kind {
+		case CallKindAcquireFramebuffer:
+			frame := current(func(last *Frame) bool { return len(last.Submissions) > 0 || len(last.Presented) > 0 })
+			if frame.Acquired == nil {
+				frame.Acquired = map[platform.Window]uint8{}
+			}
+			frame.Acquired[call.Arguments.(AcquireFramebufferArguments).Window] = call.Status
+		case CallKindPresent:
+			frame := current(func(*Frame) bool { return false })
+			frame.Presented = append(frame.Presented, call.Arguments.(platform.Window))
+		}
+	}
+	return frames
+}
 
 // Call is one recorded call outside command buffers.
 type Call struct {
 	Kind CallKind
 	// Arguments is the call's handle and descriptor, as the gfx types.
 	Arguments any
-	Error     error
+	// Status is the status an acquire answered.
+	Status uint8
+	Error  error
 }
 
 // CreateSurfaceArguments are what CreateSurface was called with.
@@ -146,6 +190,13 @@ type CreateSurfaceArguments struct {
 type AcquireFramebufferArguments struct {
 	Window platform.Window
 	View   gfx.TextureView
+}
+
+// ClearBufferArguments are what CommandEncoder.ClearBuffer was called with.
+type ClearBufferArguments struct {
+	Buffer gfx.Buffer
+	Offset uint64
+	Size   uint64
 }
 
 // CreateBufferArguments are what CreateBuffer was called with.

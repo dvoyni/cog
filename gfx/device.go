@@ -216,7 +216,15 @@ func (d *device) WriteTexture(destination ImageCopyTexture, data []byte, layout 
 }
 
 func (d *device) Encoder(frame Frame, order SubmitOrder) (CommandEncoder, error) {
-	panic("gfx listing: no bodies")
+	encoder, err := d.backend.CreateCommandEncoder(CommandEncoderDescriptor{})
+	if err != nil {
+		return discardEncoder{}, err
+	}
+	if err := d.frames.addEncoder(frame, frameEncoder{order: order, encoder: encoder}); err != nil {
+		encoder.DiscardEncoding()
+		return discardEncoder{}, err
+	}
+	return encoder, nil
 }
 
 func (d *device) Framebuffer(frame Frame, window platform.Window) TextureView {
