@@ -70,6 +70,17 @@ func (t *table[H, D]) descriptor(h H) (D, error) {
 	return t.slots[key.index].descriptor, nil
 }
 
+// check answers ErrReleased when h is stale, the zero handle included.
+func (t *table[H, D]) check(h H) error {
+	key := struct{ handle }(h).handle
+	t.mutex.RLock()
+	defer t.mutex.RUnlock()
+	if !t.holds(key) {
+		return ErrReleased
+	}
+	return nil
+}
+
 // holds answers whether key names a slot under its current generation; the
 // caller holds the mutex.
 func (t *table[H, D]) holds(key handle) bool {

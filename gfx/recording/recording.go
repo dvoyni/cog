@@ -44,6 +44,54 @@ const (
 	// CallKindReleaseTexture is BackendDevice.ReleaseTexture, its Arguments
 	// the gfx.Texture.
 	CallKindReleaseTexture
+	// CallKindCreateTextureView is BackendDevice.CreateTextureView, its
+	// Arguments a CreateTextureViewArguments.
+	CallKindCreateTextureView
+	// CallKindReleaseTextureView is BackendDevice.ReleaseTextureView, its
+	// Arguments the gfx.TextureView.
+	CallKindReleaseTextureView
+	// CallKindCreateSampler is BackendDevice.CreateSampler, its Arguments a
+	// CreateSamplerArguments.
+	CallKindCreateSampler
+	// CallKindReleaseSampler is BackendDevice.ReleaseSampler, its Arguments the
+	// gfx.Sampler.
+	CallKindReleaseSampler
+	// CallKindCreateShaderModule is BackendDevice.CreateShaderModule, its
+	// Arguments a CreateShaderModuleArguments.
+	CallKindCreateShaderModule
+	// CallKindReleaseShaderModule is BackendDevice.ReleaseShaderModule, its
+	// Arguments the gfx.ShaderModule.
+	CallKindReleaseShaderModule
+	// CallKindCreateBindGroupLayout is BackendDevice.CreateBindGroupLayout, its
+	// Arguments a CreateBindGroupLayoutArguments.
+	CallKindCreateBindGroupLayout
+	// CallKindReleaseBindGroupLayout is BackendDevice.ReleaseBindGroupLayout,
+	// its Arguments the gfx.BindGroupLayout.
+	CallKindReleaseBindGroupLayout
+	// CallKindCreateBindGroup is BackendDevice.CreateBindGroup, its Arguments a
+	// CreateBindGroupArguments.
+	CallKindCreateBindGroup
+	// CallKindReleaseBindGroup is BackendDevice.ReleaseBindGroup, its Arguments
+	// the gfx.BindGroup.
+	CallKindReleaseBindGroup
+	// CallKindCreatePipelineLayout is BackendDevice.CreatePipelineLayout, its
+	// Arguments a CreatePipelineLayoutArguments.
+	CallKindCreatePipelineLayout
+	// CallKindReleasePipelineLayout is BackendDevice.ReleasePipelineLayout, its
+	// Arguments the gfx.PipelineLayout.
+	CallKindReleasePipelineLayout
+	// CallKindCreateRenderPipeline is BackendDevice.CreateRenderPipeline, its
+	// Arguments a CreateRenderPipelineArguments.
+	CallKindCreateRenderPipeline
+	// CallKindReleaseRenderPipeline is BackendDevice.ReleaseRenderPipeline, its
+	// Arguments the gfx.RenderPipeline.
+	CallKindReleaseRenderPipeline
+	// CallKindCreateComputePipeline is BackendDevice.CreateComputePipeline, its
+	// Arguments a CreateComputePipelineArguments.
+	CallKindCreateComputePipeline
+	// CallKindReleaseComputePipeline is BackendDevice.ReleaseComputePipeline,
+	// its Arguments the gfx.ComputePipeline.
+	CallKindReleaseComputePipeline
 )
 
 // Answer is what AnswerNext makes a call answer: Status for an acquire,
@@ -87,6 +135,59 @@ type CreateBufferArguments struct {
 type CreateTextureArguments struct {
 	Texture    gfx.Texture
 	Descriptor gfx.TextureDescriptor
+}
+
+// CreateTextureViewArguments are what CreateTextureView was called with.
+type CreateTextureViewArguments struct {
+	View       gfx.TextureView
+	Texture    gfx.Texture
+	Descriptor gfx.TextureViewDescriptor
+}
+
+// CreateSamplerArguments are what CreateSampler was called with.
+type CreateSamplerArguments struct {
+	Sampler    gfx.Sampler
+	Descriptor gfx.SamplerDescriptor
+}
+
+// CreateShaderModuleArguments are what CreateShaderModule was called with.
+type CreateShaderModuleArguments struct {
+	Module     gfx.ShaderModule
+	Descriptor gfx.ShaderModuleDescriptor
+}
+
+// CreateBindGroupLayoutArguments are what CreateBindGroupLayout was called
+// with.
+type CreateBindGroupLayoutArguments struct {
+	Layout     gfx.BindGroupLayout
+	Descriptor gfx.BindGroupLayoutDescriptor
+}
+
+// CreateBindGroupArguments are what CreateBindGroup was called with.
+type CreateBindGroupArguments struct {
+	Group      gfx.BindGroup
+	Descriptor gfx.BindGroupDescriptor
+}
+
+// CreatePipelineLayoutArguments are what CreatePipelineLayout was called
+// with.
+type CreatePipelineLayoutArguments struct {
+	Layout     gfx.PipelineLayout
+	Descriptor gfx.PipelineLayoutDescriptor
+}
+
+// CreateRenderPipelineArguments are what CreateRenderPipeline was called
+// with.
+type CreateRenderPipelineArguments struct {
+	Pipeline   gfx.RenderPipeline
+	Descriptor gfx.RenderPipelineDescriptor
+}
+
+// CreateComputePipelineArguments are what CreateComputePipeline was called
+// with.
+type CreateComputePipelineArguments struct {
+	Pipeline   gfx.ComputePipeline
+	Descriptor gfx.ComputePipelineDescriptor
 }
 
 // Submission is one submit's command buffers, in the order submitted.

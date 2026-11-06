@@ -1,5 +1,7 @@
 package gfx
 
+import "slices"
+
 // Every descriptor mirrors wgpu v0.34.2's, with gfx's handles in place of
 // wgpu's objects. An optional part is a value whose zero means none, never a
 // pointer; slices stay slices where the count has no small bound.
@@ -149,6 +151,16 @@ type RenderPipelineDescriptor struct {
 	DepthStencil DepthStencilState
 	Multisample  MultisampleState
 	Fragment     FragmentState
+}
+
+// clone answers a copy of descriptor that shares no slice with it.
+func (descriptor RenderPipelineDescriptor) clone() RenderPipelineDescriptor {
+	descriptor.Vertex.Buffers = slices.Clone(descriptor.Vertex.Buffers)
+	for i := range descriptor.Vertex.Buffers {
+		descriptor.Vertex.Buffers[i].Attributes = slices.Clone(descriptor.Vertex.Buffers[i].Attributes)
+	}
+	descriptor.Fragment.Targets = slices.Clone(descriptor.Fragment.Targets)
+	return descriptor
 }
 
 // VertexState is a render pipeline's vertex stage.
