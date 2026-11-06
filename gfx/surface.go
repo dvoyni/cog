@@ -48,6 +48,11 @@ type SurfaceRequest struct {
 	// PresentMode is the present mode; zero is PresentModeFifo, the fallback
 	// when the surface lacks the one asked for.
 	PresentMode PresentMode
+	// Capturable lets Device.RequestCapture copy the framebuffer out: CopySrc
+	// on Vulkan, StorageBinding on Metal, which costs it framebufferOnly. DX12
+	// cannot honour it yet. Off by default; development and agent builds set
+	// it.
+	Capturable bool
 }
 
 // SurfaceConfiguration is what one window's surface is configured with.

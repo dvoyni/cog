@@ -64,6 +64,15 @@ type BackendDevice interface {
 	WriteBuffer(buffer Buffer, offset uint64, data []byte) error
 	WriteTexture(destination ImageCopyTexture, data []byte, layout ImageDataLayout, size Extent3D) error
 
+	// MapBuffer starts an asynchronous map; MapStatus answers whether it has
+	// resolved, ready false while it waits on the GPU.
+	MapBuffer(buffer Buffer, mode MapMode, offset, size uint64) error
+	MapStatus(buffer Buffer) (ready bool, err error)
+	MappedRange(buffer Buffer, offset, size uint64) ([]byte, error)
+	UnmapBuffer(buffer Buffer) error
+	// Poll resolves finished maps without waiting.
+	Poll()
+
 	// CreateCommandEncoder answers an encoder; gfx wraps it to check the
 	// handles recorded, and finishes it itself for a frame encoder.
 	CreateCommandEncoder(descriptor CommandEncoderDescriptor) (StandaloneCommandEncoder, error)
@@ -86,7 +95,6 @@ type BackendDevice interface {
 	WaitIdle() error
 	Release()
 
-	// Readback is open: https://github.com/dvoyni/cog/issues/666
 	// Device-loss detection and recovery are open:
 	// https://github.com/dvoyni/cog/issues/669
 }

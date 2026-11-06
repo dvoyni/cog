@@ -11,3 +11,11 @@ var ErrOrderTaken = errors.New("gfx: submit order already taken in this frame")
 
 // ErrFrameFlushed is answered for a Frame whose frame was already flushed.
 var ErrFrameFlushed = errors.New("gfx: frame already flushed")
+
+// ErrCaptureBusy is answered by Device.RequestCapture for a window whose
+// capture is still in flight.
+var ErrCaptureBusy = errors.New("gfx: a capture of this window is in flight")
+
+// ErrCaptureUnsupported is answered by Device.RequestCapture for a window
+// whose surface is not capturable, or whose format is not 8-bit BGRA or RGBA.
+var ErrCaptureUnsupported = errors.New("gfx: this window cannot be captured")

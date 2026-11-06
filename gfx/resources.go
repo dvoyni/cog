@@ -117,8 +117,27 @@ type Device interface {
 	// Submit submits command buffers from standalone encoders, in order.
 	Submit(buffers ...CommandBuffer) error
 
-	// Mapping buffers for readback is open:
-	// https://github.com/dvoyni/cog/issues/666
+	// MapBuffer starts mapping buffer's range for mode, and returns at once;
+	// BufferMappedEvent says when it resolved. There is no blocking map: it
+	// would wait for the whole device to go idle. A kernel with no frames
+	// running calls Poll from the job that maps.
+	MapBuffer(buffer Buffer, mode MapMode, offset, size uint64) error
+	// MappedRange answers the mapped bytes of buffer's range, valid until
+	// UnmapBuffer; offset is a multiple of 8 and size of 4.
+	MappedRange(buffer Buffer, offset, size uint64) ([]byte, error)
+	// UnmapBuffer ends buffer's map.
+	UnmapBuffer(buffer Buffer) error
+	// Poll resolves the maps whose submits have finished, without waiting,
+	// publishing their events; every submit polls too.
+	Poll()
+
+	// RequestCapture asks for window's framebuffer in the next frame: gfx's
+	// flush copies it after every submit order and before the present, and
+	// CapturedEvent delivers it a frame later. A window already being
+	// captured answers ErrCaptureBusy, and one whose surface is not
+	// SurfaceRequest.Capturable, or whose format is not 8-bit BGRA or RGBA,
+	// ErrCaptureUnsupported.
+	RequestCapture(window platform.Window) error
 }
 
 // ElevateDeviceAccess answers the Device a job holds the write lock on as an

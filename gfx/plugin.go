@@ -50,5 +50,6 @@ func (*Plugin) Start(*kernel.Kernel) error { panic("gfx listing: no bodies") }
 func (*Plugin) Stop(*kernel.Kernel) error { panic("gfx listing: no bodies") }
 
 // Destroy releases the surfaces, the device and the adapter, after the
-// kernel's last job.
+// kernel's last job. Maps and captures still pending are dropped without an
+// event, their buffers unmapped and released.
 func (*Plugin) Destroy() error { panic("gfx listing: no bodies") }
