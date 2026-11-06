@@ -416,6 +416,9 @@ func DefaultLimits() Limits {
 // RequestAdapterOptions select the adapter gfx requests in Start.
 type RequestAdapterOptions struct {
 	PowerPreference PowerPreference
+	// ForceFallbackAdapter asks for the software adapter: real rendering on
+	// the CPU, for tests with no GPU.
+	ForceFallbackAdapter bool
 }
 
 // DeviceDescriptor is what gfx requests the device with, from its Config.

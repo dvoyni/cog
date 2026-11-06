@@ -15,8 +15,11 @@ type Plugin struct{}
 // Config is gfx's part of the kernel's config, under PluginName: what the
 // device is requested with in Start.
 type Config struct {
-	PowerPreference  PowerPreference
-	RequiredFeatures Features
+	PowerPreference PowerPreference
+	// ForceFallbackAdapter asks for the software adapter, for pixel tests
+	// with no GPU.
+	ForceFallbackAdapter bool
+	RequiredFeatures     Features
 	// RequiredLimits are the limits to request; zero is DefaultLimits(),
 	// passed explicitly, since wgpu's zero is the adapter's full limits.
 	RequiredLimits Limits
