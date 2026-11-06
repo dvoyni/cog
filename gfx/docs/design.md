@@ -26,7 +26,9 @@ the frame's encoders and presents, the recording adapter recording their
 passes and commands with typed arguments and rejecting a handle missing at
 its index, a resource without its usage, a misaligned write, copy or clear
 and a broken pass sequence, its buffers holding the bytes written, copied
-and cleared. Writes reach the backend. Standalone encoders are finished
+and cleared. Writes reach the backend. `shader.Preprocess`, in `gfx/shader`,
+is v1's preprocessor whole: `#include`, `#define`, `#const`, `#if` and the hoisting
+of WGSL's `enable`, `requires` and `diagnostic`. Standalone encoders are finished
 and submitted by their owner; every other body panics until its ticket fills
 it. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md); the ADRs are in
 [`adr/`](adr).
@@ -151,8 +153,8 @@ present and recovery itself.
 [Pipeline creation off the frame](https://github.com/dvoyni/cog/issues/668))
 
 - **WGSL only.** `CreateShaderModule(ShaderModuleDescriptor{Label, WGSL})`
-  takes final WGSL. `PreprocessShader(files, path, defines)` is v1's
-  preprocessor ported (`#include`, `#define`, `#const`, `#if`); a task calls
+  takes final WGSL. `shader.Preprocess(files, path, defines)`, in `gfx/shader`, is
+  v1's preprocessor ported (`#include`, `#define`, `#const`, `#if`); a task calls
   it under its own `kernel.Read[platform.FS]`. Hot reload is deferred.
 - **gfx reflects a module once, at its creation,** with naga's IR, and keeps
   the result with its handle. A pipeline with a zero `Layout` gets an "auto"

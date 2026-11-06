@@ -87,7 +87,7 @@ immediate; the GPU keeps what in-flight work still uses.
 
 ## Shaders and pipelines
 
-Preprocess WGSL with `PreprocessShader(files, path, defines)` under your own
+Preprocess WGSL with `shader.Preprocess(files, path, defines)`, from `gfx/shader`, under your own
 `kernel.Read[platform.FS]`, then `CreateShaderModule`. Leave a pipeline's
 `Layout` zero for an "auto" layout reflected from its shaders, and read its
 groups back with `RenderPipelineBindGroupLayout`.

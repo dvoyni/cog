@@ -62,7 +62,7 @@ type SamplerDescriptor struct {
 }
 
 // ShaderModuleDescriptor describes a shader module: final WGSL, already
-// through PreprocessShader when it uses directives.
+// through shader.Preprocess when it uses directives.
 type ShaderModuleDescriptor struct {
 	Label string
 	WGSL  string
