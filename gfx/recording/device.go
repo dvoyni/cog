@@ -1,6 +1,8 @@
 package recording
 
 import (
+	"slices"
+
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/platform"
 )
@@ -9,19 +11,37 @@ import (
 // answers it.
 type device struct {
 	instance *Instance
+	// buffers and textures hold each object's descriptor at its index, under
+	// the instance's mutex.
+	buffers  objectTable[gfx.BufferDescriptor]
+	textures objectTable[gfx.TextureDescriptor]
 }
 
+// CreateBuffer records the creation and keeps buffer at its index.
 func (d *device) CreateBuffer(buffer gfx.Buffer, descriptor gfx.BufferDescriptor) error {
-	panic("gfx listing: no bodies")
+	return d.instance.record(CallKindCreateBuffer, CreateBufferArguments{Buffer: buffer, Descriptor: descriptor}, func() error {
+		return d.buffers.store(buffer.Index(), descriptor)
+	}).Error
 }
 
-func (d *device) ReleaseBuffer(buffer gfx.Buffer) { panic("gfx listing: no bodies") }
+// ReleaseBuffer records the release and drops buffer from its index.
+func (d *device) ReleaseBuffer(buffer gfx.Buffer) {
+	d.instance.record(CallKindReleaseBuffer, buffer, func() error { return d.buffers.remove(buffer.Index()) })
+}
 
+// CreateTexture records the creation, ViewFormats copied, and keeps texture
+// at its index.
 func (d *device) CreateTexture(texture gfx.Texture, descriptor gfx.TextureDescriptor) error {
-	panic("gfx listing: no bodies")
+	descriptor.ViewFormats = slices.Clone(descriptor.ViewFormats)
+	return d.instance.record(CallKindCreateTexture, CreateTextureArguments{Texture: texture, Descriptor: descriptor}, func() error {
+		return d.textures.store(texture.Index(), descriptor)
+	}).Error
 }
 
-func (d *device) ReleaseTexture(texture gfx.Texture) { panic("gfx listing: no bodies") }
+// ReleaseTexture records the release and drops texture from its index.
+func (d *device) ReleaseTexture(texture gfx.Texture) {
+	d.instance.record(CallKindReleaseTexture, texture, func() error { return d.textures.remove(texture.Index()) })
+}
 
 func (d *device) CreateTextureView(view gfx.TextureView, texture gfx.Texture, descriptor gfx.TextureViewDescriptor) error {
 	panic("gfx listing: no bodies")
@@ -126,7 +146,7 @@ func (d *device) AcquireFramebuffer(window platform.Window, view gfx.TextureView
 func (d *device) Present(window platform.Window) error { panic("gfx listing: no bodies") }
 
 // WaitIdle records the wait, and answers what AnswerNext queued for it.
-func (d *device) WaitIdle() error { return d.instance.record(CallKindWaitIdle, nil).Error }
+func (d *device) WaitIdle() error { return d.instance.record(CallKindWaitIdle, nil, nil).Error }
 
 // Release records the device released.
-func (d *device) Release() { d.instance.record(CallKindReleaseDevice, nil) }
+func (d *device) Release() { d.instance.record(CallKindReleaseDevice, nil, nil) }

@@ -1,6 +1,11 @@
 package gfx
 
-import "github.com/dvoyni/cog/platform"
+import (
+	"slices"
+
+	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/platform"
+)
 
 // device is the Device resource's value: installed empty in Init and filled
 // in Start, before any job reads it. It has no exclusive operation, so a job
@@ -10,6 +15,10 @@ type device struct {
 	features    FeatureFlags
 	limits      Limits
 	adapterInfo AdapterInfo
+	// logger is the kernel's, for what a call answers no error for.
+	logger   *kernel.Logger
+	buffers  table[Buffer, BufferDescriptor]
+	textures table[Texture, TextureDescriptor]
 }
 
 func (d *device) Features() FeatureFlags { return d.features }
@@ -19,23 +28,53 @@ func (d *device) Limits() Limits { return d.limits }
 func (d *device) AdapterInfo() AdapterInfo { return d.adapterInfo }
 
 func (d *device) CreateBuffer(descriptor BufferDescriptor) (Buffer, error) {
-	panic("gfx listing: no bodies")
+	buffer := d.buffers.acquire(descriptor)
+	if err := d.backend.CreateBuffer(buffer, descriptor); err != nil {
+		_ = d.buffers.retire(buffer)
+		d.buffers.release(buffer)
+		return Buffer{}, err
+	}
+	return buffer, nil
 }
 
-func (d *device) ReleaseBuffer(buffer Buffer) { panic("gfx listing: no bodies") }
+func (d *device) ReleaseBuffer(buffer Buffer) {
+	if err := d.buffers.retire(buffer); err != nil {
+		d.logger.LogErr(err)
+		return
+	}
+	d.backend.ReleaseBuffer(buffer)
+	d.buffers.release(buffer)
+}
 
 func (d *device) BufferDescriptor(buffer Buffer) BufferDescriptor {
-	panic("gfx listing: no bodies")
+	descriptor, _ := d.buffers.descriptor(buffer)
+	return descriptor
 }
 
 func (d *device) CreateTexture(descriptor TextureDescriptor) (Texture, error) {
-	panic("gfx listing: no bodies")
+	descriptor.ViewFormats = slices.Clone(descriptor.ViewFormats)
+	texture := d.textures.acquire(descriptor)
+	if err := d.backend.CreateTexture(texture, descriptor); err != nil {
+		_ = d.textures.retire(texture)
+		d.textures.release(texture)
+		return Texture{}, err
+	}
+	return texture, nil
 }
 
-func (d *device) ReleaseTexture(texture Texture) { panic("gfx listing: no bodies") }
+func (d *device) ReleaseTexture(texture Texture) {
+	if err := d.textures.retire(texture); err != nil {
+		d.logger.LogErr(err)
+		return
+	}
+	d.backend.ReleaseTexture(texture)
+	d.textures.release(texture)
+}
 
 func (d *device) TextureDescriptor(texture Texture) TextureDescriptor {
-	panic("gfx listing: no bodies")
+	descriptor, _ := d.textures.descriptor(texture)
+	descriptor.ViewFormats = slices.Clone(descriptor.ViewFormats)
+	return descriptor
 }
 
 func (d *device) CreateTextureView(texture Texture, descriptor TextureViewDescriptor) (TextureView, error) {

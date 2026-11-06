@@ -32,6 +32,18 @@ const (
 	CallKindReleaseAdapter
 	// CallKindReleaseInstance is InstanceSocket.Release, with no Arguments.
 	CallKindReleaseInstance
+	// CallKindCreateBuffer is BackendDevice.CreateBuffer, its Arguments a
+	// CreateBufferArguments.
+	CallKindCreateBuffer
+	// CallKindReleaseBuffer is BackendDevice.ReleaseBuffer, its Arguments the
+	// gfx.Buffer.
+	CallKindReleaseBuffer
+	// CallKindCreateTexture is BackendDevice.CreateTexture, its Arguments a
+	// CreateTextureArguments.
+	CallKindCreateTexture
+	// CallKindReleaseTexture is BackendDevice.ReleaseTexture, its Arguments
+	// the gfx.Texture.
+	CallKindReleaseTexture
 )
 
 // Answer is what AnswerNext makes a call answer: Status for an acquire,
@@ -62,6 +74,19 @@ type Call struct {
 	// Arguments is the call's handle and descriptor, as the gfx types.
 	Arguments any
 	Error     error
+}
+
+// CreateBufferArguments are what CreateBuffer was called with.
+type CreateBufferArguments struct {
+	Buffer     gfx.Buffer
+	Descriptor gfx.BufferDescriptor
+}
+
+// CreateTextureArguments are what CreateTexture was called with, the
+// descriptor's ViewFormats copied.
+type CreateTextureArguments struct {
+	Texture    gfx.Texture
+	Descriptor gfx.TextureDescriptor
 }
 
 // Submission is one submit's command buffers, in the order submitted.

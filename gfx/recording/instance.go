@@ -53,7 +53,7 @@ func (instance *Instance) AnswerNext(kind CallKind, answer Answer) {
 
 // RequestAdapter answers the recording adapter.
 func (instance *Instance) RequestAdapter(options gfx.RequestAdapterOptions) (gfx.BackendAdapter, error) {
-	if err := instance.record(CallKindRequestAdapter, options).Error; err != nil {
+	if err := instance.record(CallKindRequestAdapter, options, nil).Error; err != nil {
 		return nil, err
 	}
 	return &adapter{instance: instance}, nil
@@ -68,17 +68,22 @@ func (instance *Instance) CreateSurface(window platform.Window, native platform.
 func (instance *Instance) ReleaseSurface(window platform.Window) { panic("gfx listing: no bodies") }
 
 // Release records the instance released.
-func (instance *Instance) Release() { instance.record(CallKindReleaseInstance, nil) }
+func (instance *Instance) Release() { instance.record(CallKindReleaseInstance, nil, nil) }
 
 // record records a call of kind with arguments, and answers the answer
 // AnswerNext queued for it, with the error recorded, or the zero Answer.
-func (instance *Instance) record(kind CallKind, arguments any) Answer {
+// Unless that answer is an error, apply, when given, makes the call's effect
+// under the mutex, and its error is the one recorded and answered.
+func (instance *Instance) record(kind CallKind, arguments any, apply func() error) Answer {
 	instance.mutex.Lock()
 	defer instance.mutex.Unlock()
 	var answer Answer
 	if queued := instance.answers[kind]; len(queued) > 0 {
 		answer = queued[0]
 		instance.answers[kind] = queued[1:]
+	}
+	if answer.Error == nil && apply != nil {
+		answer.Error = apply()
 	}
 	instance.recording.Calls = append(instance.recording.Calls, Call{Kind: kind, Arguments: arguments, Error: answer.Error})
 	return answer

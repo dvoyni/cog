@@ -9,8 +9,8 @@ recording adapter in its `recording` package for tests. It knows nothing of
 materials, scenes or the ECS.
 
 Status: being built. Every declaration is in this module. The device comes
-up in `Start` and is released in `Destroy`; every other body panics until its
-ticket on the [gfx map](https://github.com/dvoyni/cog/issues/608) fills it.
+up in `Start` and is released in `Destroy`, and buffers and textures are
+created and released; every other body panics until its ticket on the [gfx map](https://github.com/dvoyni/cog/issues/608) fills it.
 
 ## Shape
 

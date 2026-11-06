@@ -33,7 +33,8 @@ type Handlers struct {
 // Device is the resource of the GPU as every job shares it, read with
 // kernel.Read[gfx.Device]: creating and releasing resources, writing them,
 // recording and submitting. Jobs holding the read lock use it at once.
-// Methods that answer an error answer ErrReleased for a released handle.
+// Methods that answer an error answer ErrReleased for a released handle, and
+// a second release logs ErrReleased and does nothing.
 type Device interface {
 	// Features answers the features the device was created with.
 	Features() FeatureFlags
@@ -44,12 +45,14 @@ type Device interface {
 
 	CreateBuffer(descriptor BufferDescriptor) (Buffer, error)
 	ReleaseBuffer(buffer Buffer)
-	// BufferDescriptor answers the descriptor buffer was created with.
+	// BufferDescriptor answers the descriptor buffer was created with, or the
+	// zero descriptor once it is released.
 	BufferDescriptor(buffer Buffer) BufferDescriptor
 
 	CreateTexture(descriptor TextureDescriptor) (Texture, error)
 	ReleaseTexture(texture Texture)
-	// TextureDescriptor answers the descriptor texture was created with.
+	// TextureDescriptor answers a copy of the descriptor texture was created
+	// with, or the zero descriptor once it is released.
 	TextureDescriptor(texture Texture) TextureDescriptor
 
 	CreateTextureView(texture Texture, descriptor TextureViewDescriptor) (TextureView, error)
