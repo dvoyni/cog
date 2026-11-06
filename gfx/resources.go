@@ -58,6 +58,11 @@ type Device interface {
 	CreateSampler(descriptor SamplerDescriptor) (Sampler, error)
 	ReleaseSampler(sampler Sampler)
 
+	// CreateShaderModule compiles the module and reflects it once, keeping
+	// the result with its handle for the "auto" layouts of the pipelines
+	// made from it. Like the pipeline creations, it is slow and synchronous:
+	// a game calls it from a task of its own, scheduled anywhere, never
+	// from a frame's recording.
 	CreateShaderModule(descriptor ShaderModuleDescriptor) (ShaderModule, error)
 	ReleaseShaderModule(module ShaderModule)
 
@@ -70,6 +75,13 @@ type Device interface {
 	CreatePipelineLayout(descriptor PipelineLayoutDescriptor) (PipelineLayout, error)
 	ReleasePipelineLayout(layout PipelineLayout)
 
+	// CreateRenderPipeline creates a pipeline, synchronously, from a task
+	// off the frame. Each call answers its own handle; sharing pipelines of
+	// one descriptor is the caller's. A compile holds the read lock, so a
+	// surface configure, and the frame behind it, waits for it; and a burst
+	// of compiles can take every worker from a frame's recording, so a game
+	// bounds how many run at once. The backend caches pipelines on disk where
+	// it can (Vulkan, DX12), outside platform's FS; gfx adds no cache.
 	CreateRenderPipeline(descriptor RenderPipelineDescriptor) (RenderPipeline, error)
 	ReleaseRenderPipeline(pipeline RenderPipeline)
 	// RenderPipelineBindGroupLayout answers the layout of group in
@@ -77,6 +89,7 @@ type Device interface {
 	// "auto".
 	RenderPipelineBindGroupLayout(pipeline RenderPipeline, group uint32) BindGroupLayout
 
+	// CreateComputePipeline creates a pipeline as CreateRenderPipeline does.
 	CreateComputePipeline(descriptor ComputePipelineDescriptor) (ComputePipeline, error)
 	ReleaseComputePipeline(pipeline ComputePipeline)
 	// ComputePipelineBindGroupLayout answers the layout of group in
