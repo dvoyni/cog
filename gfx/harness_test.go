@@ -2,6 +2,7 @@ package gfx_test
 
 import (
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,6 +24,10 @@ type harness struct {
 	unbound bool
 	read    func(device gfx.Device)
 	write   func(device kernel.Write[gfx.Device])
+	// mutex guards logged, the errors kernels logged and the test has not
+	// taken; any left when the test ends fail it.
+	mutex  sync.Mutex
+	logged []error
 }
 
 // readEvent runs the harness's read under the Device's read lock.
@@ -63,7 +68,9 @@ func (*harness) Stop(*kernel.Kernel) error { return nil }
 func (*harness) Destroy() error { return nil }
 
 func (h *harness) LogErr(source kernel.KernelID, err error) {
-	h.t.Errorf("kernel %d logged %v", source, err)
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	h.logged = append(h.logged, err)
 }
 
 func (*harness) LogWarn(source kernel.KernelID, message string, args ...any) {}
@@ -71,11 +78,17 @@ func (*harness) LogWarn(source kernel.KernelID, message string, args ...any) {}
 func (*harness) LogDebug(source kernel.KernelID, message string, args ...any) {}
 
 // newHarness answers a harness with a fresh recording instance and a
-// supervisor that quits when the test ends.
+// supervisor that quits when the test ends, failing the test on every error
+// logged and not taken.
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	h := &harness{t: t, instance: recording.NewInstance()}
 	h.supervisor = kernel.NewSupervisor(h)
+	t.Cleanup(func() {
+		for _, err := range h.takeLogged() {
+			t.Errorf("logged %v", err)
+		}
+	})
 	t.Cleanup(h.supervisor.Quit)
 	return h
 }
@@ -145,6 +158,15 @@ func (h *harness) wait(out kernel.JobHandle) {
 		}
 		runtime.Gosched()
 	}
+}
+
+// takeLogged answers the errors logged since it was last called.
+func (h *harness) takeLogged() []error {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	logged := h.logged
+	h.logged = nil
+	return logged
 }
 
 // kinds answers the kinds of calls, in order.

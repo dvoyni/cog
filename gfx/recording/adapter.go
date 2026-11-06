@@ -18,11 +18,11 @@ func (*adapter) Limits() gfx.Limits { return gfx.DefaultLimits() }
 
 // RequestDevice records the request and answers the recording device.
 func (a *adapter) RequestDevice(descriptor gfx.DeviceDescriptor) (gfx.BackendDevice, error) {
-	if err := a.instance.record(CallKindRequestDevice, descriptor).Error; err != nil {
+	if err := a.instance.record(CallKindRequestDevice, descriptor, nil).Error; err != nil {
 		return nil, err
 	}
 	return &device{instance: a.instance}, nil
 }
 
 // Release records the adapter released.
-func (a *adapter) Release() { a.instance.record(CallKindReleaseAdapter, nil) }
+func (a *adapter) Release() { a.instance.record(CallKindReleaseAdapter, nil, nil) }
