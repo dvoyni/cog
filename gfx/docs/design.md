@@ -16,9 +16,10 @@ Status: being built. The decisions come from the
 ticket that holds its detail. Every type, method and descriptor is declared
 in this module, from the listing on
 [`prototype/gfx-listing`](https://github.com/dvoyni/cog/tree/prototype/gfx-listing/gfx).
-The device comes up and is released, and every resource but query sets is
-created and released, pipelines with explicit layouts only; every other body
-panics until its ticket fills it. The vocabulary is in
+The device comes up and is released, every resource but query sets is
+created and released, pipelines with explicit layouts only, and surfaces
+follow platform's windows, though nothing configures them yet; every other
+body panics until its ticket fills it. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md); the ADRs are in [`adr/`](adr).
 
 ## Constraints
@@ -243,8 +244,10 @@ present and recovery itself.
 
 - **Surfaces follow platform's windows.** `CreateSurface` on
   `WindowOpenedEvent` creates one from `WindowManager.Native`, in a pinned
-  task; `ReleaseSurface` on `WindowClosedEvent` releases it. A surface is
-  named by its `platform.Window`; there is no public surface handle.
+  task; `ReleaseSurface` on `WindowClosedEvent` releases it. Both hold the
+  write lock. A creation that fails goes to `LogErr` and leaves the window
+  without a surface. A surface is named by its `platform.Window`; there is no
+  public surface handle.
 - **Configured in the frame chain, between frames.** A surface is marked for
   configuring when it is new, resized (`ResizeSurface` on `ResizeEvent` only
   marks it), reported suboptimal, outdated or lost, or the request changes.

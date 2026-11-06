@@ -1,5 +1,13 @@
 package gfx
 
+import (
+	"fmt"
+	"slices"
+
+	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/platform"
+)
+
 // PresentMode is how a surface hands its framebuffers to the display,
 // numbered as gputypes numbers it.
 type PresentMode uint32
@@ -89,3 +97,30 @@ const (
 	// AcquireStatusTimeout is no framebuffer this frame, and nothing else.
 	AcquireStatusTimeout
 )
+
+// createSurface creates window's surface from its native handle, pinned to
+// the main thread under the write lock; a failure goes to LogErr, and window
+// stays without a surface.
+func createSurface(k *kernel.Kernel, window platform.Window, manager kernel.Read[*platform.WindowManager], deviceHandle kernel.Write[Device]) kernel.NoResult {
+	d := deviceHandle.Get().(*device)
+	if err := d.instance.CreateSurface(window, manager.Get().Native(window)); err != nil {
+		k.Logger().LogErr(fmt.Errorf("gfx: creating the surface of %v: %w", window, err))
+		return kernel.NoResult{}
+	}
+	d.surfaces = append(d.surfaces, window)
+	return kernel.NoResult{}
+}
+
+// releaseSurface releases window's surface, pinned to the main thread under
+// the write lock; a window without one, its creation failed, releases
+// nothing.
+func releaseSurface(k *kernel.Kernel, window platform.Window, deviceHandle kernel.Write[Device]) kernel.NoResult {
+	d := deviceHandle.Get().(*device)
+	index := slices.Index(d.surfaces, window)
+	if index < 0 {
+		return kernel.NoResult{}
+	}
+	d.surfaces = slices.Delete(d.surfaces, index, index+1)
+	d.instance.ReleaseSurface(window)
+	return kernel.NoResult{}
+}

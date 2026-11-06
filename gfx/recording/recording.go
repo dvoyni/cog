@@ -32,6 +32,12 @@ const (
 	CallKindReleaseAdapter
 	// CallKindReleaseInstance is InstanceSocket.Release, with no Arguments.
 	CallKindReleaseInstance
+	// CallKindCreateSurface is InstanceSocket.CreateSurface, its Arguments a
+	// CreateSurfaceArguments.
+	CallKindCreateSurface
+	// CallKindReleaseSurface is InstanceSocket.ReleaseSurface, its Arguments
+	// the platform.Window.
+	CallKindReleaseSurface
 	// CallKindCreateBuffer is BackendDevice.CreateBuffer, its Arguments a
 	// CreateBufferArguments.
 	CallKindCreateBuffer
@@ -122,6 +128,12 @@ type Call struct {
 	// Arguments is the call's handle and descriptor, as the gfx types.
 	Arguments any
 	Error     error
+}
+
+// CreateSurfaceArguments are what CreateSurface was called with.
+type CreateSurfaceArguments struct {
+	Window platform.Window
+	Native platform.NativeHandle
 }
 
 // CreateBufferArguments are what CreateBuffer was called with.
