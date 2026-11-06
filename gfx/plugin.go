@@ -21,12 +21,11 @@ type Plugin struct {
 	// for Destroy to release; nil where Start got no further.
 	adapter BackendAdapter
 	device  *device
-	// acquireTask and presentTask are the frame chain's pinned ends, and
-	// flushTask what runs between the frame's recording and its present,
-	// which Handlers.Draw schedules.
-	acquireTask *kernel.Task[Frame, kernel.NoResult]
-	flushTask   *kernel.Task[Frame, kernel.NoResult]
-	presentTask *kernel.Task[Frame, kernel.NoResult]
+	// tasks are the surface tasks the Tasks resource holds, and flushTask
+	// what runs between a frame's recording and its present; the handlers
+	// schedule them.
+	tasks     Tasks
+	flushTask *kernel.Task[Frame, kernel.NoResult]
 }
 
 // Config is gfx's part of the kernel's config, under PluginName: what the
@@ -61,31 +60,31 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 }
 
 // Init declares the required InstanceSocket, installs the Device, empty
-// until Start, and subscribes to RenderEvent and platform's window events,
-// the Subs kept in the Handlers resource. A config of another type than *Config is a
-// composition error, and panics.
+// until Start, installs Tasks, and subscribes to RenderEvent and platform's
+// window events, the Subs kept in the Handlers resource. A config of another
+// type than *Config is a composition error, and panics.
 func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	p.config = *kernel.PluginConfigOrDefault[Config](config)
 	p.instanceSocket = configurator.DeclareExclusiveSocket[InstanceSocket](false)
-	p.device = &device{}
+	p.device = &device{surfaceRequest: p.config.Surface, configurations: map[platform.Window]SurfaceConfiguration{}}
 	configurator.InitResource[Device](p.device)
-	create := configurator.RegisterTask2(createSurface)
-	configurator.PinToMainThread(create)
-	release := configurator.RegisterTask1(releaseSurface)
-	configurator.PinToMainThread(release)
-	p.acquireTask = configurator.RegisterTask1(acquireFramebuffers)
-	configurator.PinToMainThread(p.acquireTask)
+	p.tasks = Tasks{
+		CreateSurface:       configurator.RegisterTask2(createSurface),
+		ReleaseSurface:      configurator.RegisterTask1(releaseSurface),
+		ConfigureSurfaces:   configurator.RegisterTask2(configureSurfaces),
+		AcquireFramebuffers: configurator.RegisterTask1(acquireFramebuffers),
+		PresentFramebuffers: configurator.RegisterTask1(presentFramebuffers),
+	}
+	configurator.InitResource(p.tasks)
 	p.flushTask = configurator.RegisterTask1(flushFrame)
-	p.presentTask = configurator.RegisterTask1(presentFramebuffers)
-	configurator.PinToMainThread(p.presentTask)
 	configurator.InitResource(Handlers{
 		Draw: configurator.Subscribe(p.draw),
 		CreateSurface: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event platform.WindowOpenedEvent) (platform.WindowOpenedEvent, kernel.JobHandle) {
-			return event, ex.Schedule(create, event.Window, in).Handle()
+			return event, ex.Schedule(p.tasks.CreateSurface, event.Window, in).Handle()
 		}),
 		ReleaseSurface: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event platform.WindowClosedEvent) (platform.WindowClosedEvent, kernel.JobHandle) {
 			lastPresent := p.device.frames.markClosing(event.Window)
-			return event, ex.Schedule(release, event.Window, in, lastPresent).Handle()
+			return event, ex.Schedule(p.tasks.ReleaseSurface, event.Window, in, lastPresent).Handle()
 		}),
 	})
 	return nil

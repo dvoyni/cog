@@ -38,6 +38,13 @@ const (
 	// CallKindReleaseSurface is InstanceSocket.ReleaseSurface, its Arguments
 	// the platform.Window.
 	CallKindReleaseSurface
+	// CallKindSurfaceCapabilities is BackendDevice.SurfaceCapabilities, its
+	// Arguments the platform.Window; Capabilities answered replace
+	// SurfaceCapabilities.
+	CallKindSurfaceCapabilities
+	// CallKindConfigureSurface is BackendDevice.ConfigureSurface, its
+	// Arguments a ConfigureSurfaceArguments.
+	CallKindConfigureSurface
 	// CallKindAcquireFramebuffer is BackendDevice.AcquireFramebuffer, its
 	// Arguments an AcquireFramebufferArguments.
 	CallKindAcquireFramebuffer
@@ -113,11 +120,27 @@ const (
 	CallKindReleaseComputePipeline
 )
 
+// SurfaceCapabilities is what the recording adapter answers for every
+// surface's capabilities, unless AnswerNext queues others.
+var SurfaceCapabilities = gfx.SurfaceCapabilities{
+	Formats: []gfx.TextureFormat{
+		gfx.TextureFormatBGRA8Unorm, gfx.TextureFormatBGRA8UnormSrgb,
+		gfx.TextureFormatRGBA8Unorm, gfx.TextureFormatRGBA8UnormSrgb,
+	},
+	PresentModes: []gfx.PresentMode{
+		gfx.PresentModeFifo, gfx.PresentModeFifoRelaxed,
+		gfx.PresentModeImmediate, gfx.PresentModeMailbox,
+	},
+	AlphaModes: []gfx.CompositeAlphaMode{gfx.CompositeAlphaModeOpaque},
+}
+
 // Answer is what AnswerNext makes a call answer: Status for an acquire,
+// Capabilities for a surface's capabilities, zero for SurfaceCapabilities,
 // Error for any call.
 type Answer struct {
-	Status uint8
-	Error  error
+	Status       uint8
+	Capabilities gfx.SurfaceCapabilities
+	Error        error
 }
 
 // Recording is every call that reached the adapter, as typed values. The
@@ -188,6 +211,12 @@ type Call struct {
 type CreateSurfaceArguments struct {
 	Window platform.Window
 	Native platform.NativeHandle
+}
+
+// ConfigureSurfaceArguments are what ConfigureSurface was called with.
+type ConfigureSurfaceArguments struct {
+	Window        platform.Window
+	Configuration gfx.SurfaceConfiguration
 }
 
 // AcquireFramebufferArguments are what AcquireFramebuffer was called with.

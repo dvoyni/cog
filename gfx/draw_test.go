@@ -58,6 +58,7 @@ func TestDrawPublishesDrawEventAfterTheAcquire(t *testing.T) {
 
 func TestTheBeatLastsUntilThePresent(t *testing.T) {
 	h := newHarness(t)
+	h.pinSurfaceTasks = true
 	release := make(chan struct{})
 	h.holdFrame = func(gfx.DrawEvent) { <-release }
 	h.mustSpawn(nil)

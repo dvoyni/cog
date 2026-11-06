@@ -5,7 +5,9 @@ import "github.com/dvoyni/cog/platform"
 // InstanceSocket is the backend seam, wgpu's instance mirrored: exactly one
 // plugin binds it in its Init with configurator.BindSocket[gfx.InstanceSocket],
 // gogpu or the headless recording adapter, and a kernel with none panics in
-// Spawn. gfx calls it from Start on.
+// Spawn. gfx calls it from Start on, from whichever worker runs the job: it
+// pins nothing, and a backend whose platform wants the surface calls on the
+// main thread pins the tasks in Tasks.
 //
 // The backend keeps its native objects by gfx's handles: gfx allocates each
 // handle, checks its generation and keeps its descriptor, and hands the
@@ -15,10 +17,11 @@ import "github.com/dvoyni/cog/platform"
 type InstanceSocket interface {
 	// RequestAdapter answers the adapter options select.
 	RequestAdapter(options RequestAdapterOptions) (BackendAdapter, error)
-	// CreateSurface creates window's surface from its native handle; gfx
-	// calls it from a task pinned to the main thread.
+	// CreateSurface creates window's surface from its native handle, from a
+	// job holding the write lock.
 	CreateSurface(window platform.Window, native platform.NativeHandle) error
-	// ReleaseSurface releases window's surface, from a pinned task.
+	// ReleaseSurface releases window's surface, from a job holding the write
+	// lock.
 	ReleaseSurface(window platform.Window)
 	// Release releases the instance, in gfx's Destroy.
 	Release()
@@ -86,15 +89,14 @@ type BackendDevice interface {
 	// SurfaceCapabilities answers what window's surface can be configured
 	// with.
 	SurfaceCapabilities(window platform.Window) SurfaceCapabilities
-	// ConfigureSurface configures window's surface, opaque, from a pinned
-	// task holding the write lock, between a present and the next acquire.
+	// ConfigureSurface configures window's surface, opaque, from a job
+	// holding the write lock, between a present and the next acquire.
 	ConfigureSurface(window platform.Window, configuration SurfaceConfiguration) error
 
 	// AcquireFramebuffer acquires window's next framebuffer and, when status
-	// is Acquired or Suboptimal, stores its view at view's index. gfx calls it
-	// from a task pinned to the main thread.
+	// is Acquired or Suboptimal, stores its view at view's index.
 	AcquireFramebuffer(window platform.Window, view TextureView) (status AcquireStatus, err error)
-	// Present presents window's acquired framebuffer, from a pinned task.
+	// Present presents window's acquired framebuffer.
 	Present(window platform.Window) error
 
 	WaitIdle() error
