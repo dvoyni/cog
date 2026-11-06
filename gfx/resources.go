@@ -89,11 +89,11 @@ type Device interface {
 	// TimestampPeriod answers the nanoseconds of one timestamp tick.
 	TimestampPeriod() float32
 
-	// CreateShaderModule compiles the module and reflects it once, keeping
-	// the result with its handle for the "auto" layouts of the pipelines
-	// made from it. Like the pipeline creations, it is slow and synchronous:
-	// a game calls it from a task of its own, scheduled anywhere, never
-	// from a frame's recording.
+	// CreateShaderModule compiles the module, which the backend reflects
+	// once for the "auto" layouts of the pipelines made from it; invalid
+	// WGSL answers the backend's error. Like the pipeline creations, it is
+	// slow and synchronous: a game calls it from a task of its own,
+	// scheduled anywhere, never from a frame's recording.
 	CreateShaderModule(descriptor ShaderModuleDescriptor) (ShaderModule, error)
 	ReleaseShaderModule(module ShaderModule)
 

@@ -20,7 +20,8 @@ frame's encoders in submit order and presents, and writes reach the
 backend; the recording adapter rejects a handle missing at its index, a
 resource without its usage, a misaligned write, copy or clear and a broken
 pass sequence, and its buffers hold the bytes written, copied and cleared,
-which its own maps read; `shader.Preprocess` is v1's preprocessor whole;
+which its own maps read, and answers a pipeline's reflection with the
+layouts a test queues; `shader.Preprocess` is v1's preprocessor whole;
 every other body panics until its ticket on the
 [gfx map](https://github.com/dvoyni/cog/issues/608) fills it.
 

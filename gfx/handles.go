@@ -27,8 +27,8 @@ type TextureView struct{ handle }
 // names none. Released, it names nothing, and using it answers ErrReleased.
 type Sampler struct{ handle }
 
-// ShaderModule names a WGSL shader module, kept with its naga IR for
-// reflection: a pointer-free, comparable handle whose zero value names none.
+// ShaderModule names a WGSL shader module, reflected once by the backend at
+// its creation: a pointer-free, comparable handle whose zero value names none.
 // Released, it names nothing, and using it answers ErrReleased.
 type ShaderModule struct{ handle }
 

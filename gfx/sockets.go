@@ -54,6 +54,9 @@ type BackendDevice interface {
 	CreateQuerySet(querySet QuerySet, descriptor QuerySetDescriptor) error
 	ReleaseQuerySet(querySet QuerySet)
 	TimestampPeriod() float32
+	// CreateShaderModule parses the module's WGSL and reflects it once,
+	// keeping the result at the module's index for the reflections of the
+	// pipelines made from it; invalid WGSL answers an error.
 	CreateShaderModule(module ShaderModule, descriptor ShaderModuleDescriptor) error
 	ReleaseShaderModule(module ShaderModule)
 	CreateBindGroupLayout(layout BindGroupLayout, descriptor BindGroupLayoutDescriptor) error
@@ -62,8 +65,18 @@ type BackendDevice interface {
 	ReleaseBindGroup(group BindGroup)
 	CreatePipelineLayout(layout PipelineLayout, descriptor PipelineLayoutDescriptor) error
 	ReleasePipelineLayout(layout PipelineLayout)
-	// CreateRenderPipeline gets an explicit layout: gfx builds "auto"
-	// layouts by reflection before calling it.
+	// ReflectRenderPipelineLayout answers the bind-group layouts WebGPU's
+	// "auto" builds for descriptor, whose Layout is zero, from what its
+	// modules' reflections keep: one for each group from 0 to the last its
+	// entry points use, a group they skip answered empty, each binding
+	// visible to the stages that use it. gfx creates them, and a pipeline
+	// layout of them, before CreateRenderPipeline.
+	ReflectRenderPipelineLayout(descriptor RenderPipelineDescriptor) ([]BindGroupLayoutDescriptor, error)
+	// ReflectComputePipelineLayout is ReflectRenderPipelineLayout for a
+	// compute pipeline.
+	ReflectComputePipelineLayout(descriptor ComputePipelineDescriptor) ([]BindGroupLayoutDescriptor, error)
+	// CreateRenderPipeline gets an explicit layout: for an "auto" one, gfx
+	// creates what ReflectRenderPipelineLayout answered before calling it.
 	CreateRenderPipeline(pipeline RenderPipeline, descriptor RenderPipelineDescriptor) error
 	ReleaseRenderPipeline(pipeline RenderPipeline)
 	CreateComputePipeline(pipeline ComputePipeline, descriptor ComputePipelineDescriptor) error

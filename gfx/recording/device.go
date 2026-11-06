@@ -209,6 +209,31 @@ func (d *device) ReleaseRenderPipeline(pipeline gfx.RenderPipeline) {
 	d.instance.record(CallKindReleaseRenderPipeline, pipeline, func() error { return d.renderPipelines.remove(pipeline.Index()) })
 }
 
+// ReflectRenderPipelineLayout records the reflection and answers the
+// BindGroupLayouts AnswerNext queued, copied, or none: the adapter parses no
+// WGSL, so a test queues the layouts a real backend would reflect. An error
+// when a module is missing.
+func (d *device) ReflectRenderPipelineLayout(descriptor gfx.RenderPipelineDescriptor) ([]gfx.BindGroupLayoutDescriptor, error) {
+	answer := d.instance.record(CallKindReflectRenderPipelineLayout, descriptor, func() error {
+		if _, err := requireObject(&d.shaderModules, descriptor.Vertex.Module, "the vertex module"); err != nil {
+			return err
+		}
+		_, err := requireObject(&d.shaderModules, descriptor.Fragment.Module, "the fragment module")
+		return err
+	})
+	return cloneLayouts(answer.BindGroupLayouts), answer.Error
+}
+
+// ReflectComputePipelineLayout records the reflection and answers as
+// ReflectRenderPipelineLayout does; an error when its module is missing.
+func (d *device) ReflectComputePipelineLayout(descriptor gfx.ComputePipelineDescriptor) ([]gfx.BindGroupLayoutDescriptor, error) {
+	answer := d.instance.record(CallKindReflectComputePipelineLayout, descriptor, func() error {
+		_, err := requireObject(&d.shaderModules, descriptor.Module, "the compute module")
+		return err
+	})
+	return cloneLayouts(answer.BindGroupLayouts), answer.Error
+}
+
 // CreateComputePipeline records the creation and keeps pipeline at its
 // index; an error when its layout or module is missing.
 func (d *device) CreateComputePipeline(pipeline gfx.ComputePipeline, descriptor gfx.ComputePipelineDescriptor) error {
@@ -522,6 +547,20 @@ func (d *device) requireView(view gfx.TextureView, usage gfx.TextureUsageFlags, 
 		return fmt.Errorf("recording: %s: the view at index %d lacks usage %#x", role, view.Index(), usage&^viewUsage)
 	}
 	return nil
+}
+
+// cloneLayouts answers a copy of layouts, their entries copied, so a test
+// changing what it queued changes no answer; nil stays nil.
+func cloneLayouts(layouts []gfx.BindGroupLayoutDescriptor) []gfx.BindGroupLayoutDescriptor {
+	if layouts == nil {
+		return nil
+	}
+	clones := make([]gfx.BindGroupLayoutDescriptor, len(layouts))
+	for index, layout := range layouts {
+		layout.Entries = slices.Clone(layout.Entries)
+		clones[index] = layout
+	}
+	return clones
 }
 
 // bufferObject is a buffer as the device keeps it: what it was created with,

@@ -6,7 +6,7 @@ render track. A **backend** implements it: the gogpu plugin over our wgpu
 fork, or the **recording adapter** in `gfx/recording` for tests. gfx owns
 what is the same for every backend: the handle tables and their descriptors,
 the frame chain, submit order, surfaces following platform's windows,
-reflection for "auto" layouts, the shader preprocessor, readback and
+the handles of "auto" layouts, the shader preprocessor, readback and
 capture, and recovery after a device loss. It knows nothing of materials,
 scenes or the ECS: scene builds forward+, deferred and post effects on it,
 and nothing in gfx knows which.
@@ -26,7 +26,10 @@ the frame's encoders and presents, the recording adapter recording their
 passes and commands with typed arguments and rejecting a handle missing at
 its index, a resource without its usage, a misaligned write, copy or clear
 and a broken pass sequence, its buffers holding the bytes written, copied
-and cleared. Writes reach the backend. `shader.Preprocess`, in `gfx/shader`,
+and cleared. Writes reach the backend. The backend reflects shader modules:
+its seam declares `ReflectRenderPipelineLayout` and
+`ReflectComputePipelineLayout`, which the recording adapter answers with the
+layouts a test queues. `shader.Preprocess`, in `gfx/shader`,
 is v1's preprocessor whole: `#include`, `#define`, `#const`, `#if` and the hoisting
 of WGSL's `enable`, `requires` and `diagnostic`. Standalone encoders are finished
 and submitted by their owner; every other body panics until its ticket fills
@@ -156,9 +159,14 @@ present and recovery itself.
   takes final WGSL. `shader.Preprocess(files, path, defines)`, in `gfx/shader`, is
   v1's preprocessor ported (`#include`, `#define`, `#const`, `#if`); a task calls
   it under its own `kernel.Read[platform.FS]`. Hot reload is deferred.
-- **gfx reflects a module once, at its creation,** with naga's IR, and keeps
-  the result with its handle. A pipeline with a zero `Layout` gets an "auto"
-  layout built from it; `RenderPipelineBindGroupLayout` and
+- **The backend reflects a module once, at its creation,** and keeps the
+  result at the module's index; invalid WGSL fails `CreateShaderModule` with
+  its error. gfx parses no WGSL and depends on no shader compiler: the gogpu
+  backend already links naga through wgpu. A pipeline with a zero `Layout`
+  gets an "auto" layout: gfx asks the backend's `ReflectRenderPipelineLayout`
+  or `ReflectComputePipelineLayout` for its groups' descriptors, as WebGPU
+  builds them, and creates them as explicit layouts, the recording adapter
+  answering the ones a test queues; `RenderPipelineBindGroupLayout` and
   `ComputePipelineBindGroupLayout` answer its groups, as WebGPU's
   `getBindGroupLayout`. An explicit layout overrides reflection. The vertex
   interface and the limits are checked at pipeline creation and fail loudly.

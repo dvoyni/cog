@@ -9,10 +9,10 @@ import (
 	"github.com/dvoyni/cog/platform"
 )
 
-func TestACreateNamingAMissingHandleAnswersAnError(t *testing.T) {
+func TestACreateOrReflectionNamingAMissingHandleAnswersAnError(t *testing.T) {
 	for _, test := range []struct {
-		name   string
-		create func(device gfx.BackendDevice, live, missing objects) error
+		name string
+		call func(device gfx.BackendDevice, live, missing objects) error
 	}{
 		{"a view of a missing texture", func(device gfx.BackendDevice, _, missing objects) error {
 			return device.CreateTextureView(missing.view, missing.texture, gfx.TextureViewDescriptor{})
@@ -53,17 +53,35 @@ func TestACreateNamingAMissingHandleAnswersAnError(t *testing.T) {
 		{"a compute pipeline of a missing module", func(device gfx.BackendDevice, live, missing objects) error {
 			return device.CreateComputePipeline(missing.computePipeline, gfx.ComputePipelineDescriptor{Layout: live.pipelineLayout, Module: missing.module, EntryPoint: "cs"})
 		}},
+		{"a reflection of a missing vertex module", func(device gfx.BackendDevice, live, missing objects) error {
+			descriptor := renderPipelineDescriptor(live)
+			descriptor.Layout = gfx.PipelineLayout{}
+			descriptor.Vertex.Module = missing.module
+			_, err := device.ReflectRenderPipelineLayout(descriptor)
+			return err
+		}},
+		{"a reflection of a missing fragment module", func(device gfx.BackendDevice, live, missing objects) error {
+			descriptor := renderPipelineDescriptor(live)
+			descriptor.Layout = gfx.PipelineLayout{}
+			descriptor.Fragment.Module = missing.module
+			_, err := device.ReflectRenderPipelineLayout(descriptor)
+			return err
+		}},
+		{"a reflection of a missing compute module", func(device gfx.BackendDevice, _, missing objects) error {
+			_, err := device.ReflectComputePipelineLayout(gfx.ComputePipelineDescriptor{Module: missing.module, EntryPoint: "cs"})
+			return err
+		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			instance, device := requestDevice(t)
 			live := createObjects(t, device, everyBufferUsage, everyTextureUsage)
 
-			if err := test.create(device, live, missingObjects()); err == nil {
-				t.Fatal("the create answered no error")
+			if err := test.call(device, live, missingObjects()); err == nil {
+				t.Fatal("the call answered no error")
 			}
 			calls := instance.Recording().Calls
 			if last := calls[len(calls)-1]; last.Error == nil {
-				t.Errorf("the create was recorded with no error: %+v", last)
+				t.Errorf("the call was recorded with no error: %+v", last)
 			}
 		})
 	}
