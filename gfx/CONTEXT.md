@@ -10,6 +10,10 @@ Gfx is the GPU as a kernel sees it: a thin mirror of wgpu, implemented by a back
 A plugin that implements gfx over a real or recorded GPU: gogpu, or the headless recording adapter.
 _Avoid_: Driver, renderer, implementation
 
+**Recording adapter**:
+The backend that records every call gfx makes, instead of drawing, for tests to assert on; it draws no pixels, which tests get from the software adapter.
+_Avoid_: Mock, fake, null backend
+
 **Device**:
 The GPU as every job shares it: creating and releasing resources, writing them, recording and submitting.
 _Avoid_: Context, GPU, renderer
