@@ -19,8 +19,16 @@ The device as only one job at a time may hold it, for what no other job may over
 _Avoid_: Device lock, writable device
 
 **Handle**:
-A pointer-free name for one GPU resource, which names nothing once the resource is released.
+A pointer-free name for one GPU resource, which names nothing once the resource is released, and still names it after a recovery.
 _Avoid_: ID, reference, resource pointer
+
+**Device loss**:
+The device, and every object made on it, stopping working at once: a driver reset, a timeout, a removed GPU.
+_Avoid_: Device lost event, crash
+
+**Recovery**:
+gfx making a new device after a device loss and recreating every object on it under the same handles; the objects' contents are their owners' to fill again.
+_Avoid_: Restore, reset, reinit
 
 ### Frames
 
