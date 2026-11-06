@@ -51,6 +51,7 @@ func (h *harness) Init(c *kernel.Configurator, config any) error {
 	})
 	subscribeRecord[platform.WindowOpenedEvent](c, h)
 	subscribeRecord[platform.WindowClosedEvent](c, h)
+	subscribeRecord[platform.ResizeEvent](c, h)
 	return nil
 }
 
