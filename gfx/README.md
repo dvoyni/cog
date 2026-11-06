@@ -12,7 +12,7 @@ Status: being built. Every declaration is in this module. The device comes
 up in `Start` and is released in `Destroy`, every resource but query sets
 is created and released, pipelines with explicit layouts only, each
 window's surface is created when it opens, configured before its first
-acquire and again once resized, skipped while hidden or zero-size, and
+acquire and again once resized or `RequestSurface` changes the request, skipped while hidden or zero-size, and
 released after the last present when it closes, and each render beat
 acquires every window's framebuffer, handling each acquire status as
 the design says, publishes `DrawEvent`, submits the
