@@ -4,9 +4,8 @@ How to use `github.com/dvoyni/cog/gfx`. For the reasons behind each choice,
 see [design.md](design.md). It assumes the
 [kernel guide](../../kernel/docs/README.md), the
 [metronome guide](../../metronome/docs/README.md) and the
-[platform guide](../../platform/docs/README.md). gfx is designed, not built:
-the names below are those of the listing on
-[`prototype/gfx-listing`](https://github.com/dvoyni/cog/tree/prototype/gfx-listing/gfx).
+[platform guide](../../platform/docs/README.md). gfx is declared, not built:
+the names below are the module's, whose bodies panic until they are filled.
 
 - [Concepts](#concepts)
 - [The render track](#the-render-track)
