@@ -16,9 +16,11 @@ acquire and again once resized or `RequestSurface` changes the request, skipped 
 released after the last present when it closes, and each render beat
 acquires every window's framebuffer, handling each acquire status as
 the design says, publishes `DrawEvent`, submits the
-frame's encoders in submit order and presents; the recording adapter
-rejects a handle missing at its index, a resource without its usage, a
-misaligned copy or clear and a broken pass sequence; every other body panics until its ticket on the
+frame's encoders in submit order and presents, and writes reach the
+backend; the recording adapter rejects a handle missing at its index, a
+resource without its usage, a misaligned write, copy or clear and a broken
+pass sequence, and its buffers hold the bytes written, copied and cleared,
+which its own maps read; every other body panics until its ticket on the
 [gfx map](https://github.com/dvoyni/cog/issues/608) fills it.
 
 ## Shape
