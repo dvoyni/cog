@@ -31,6 +31,9 @@ type framePool struct {
 	// unconfiguredWindows are the windows whose surfaces are marked for
 	// configuring before the next acquire.
 	unconfiguredWindows []platform.Window
+	// lostWindows are the windows whose surfaces an acquire answered lost,
+	// to be recreated before they are configured again.
+	lostWindows []platform.Window
 }
 
 // frameSlot is one frame's state: the generation of the Frame it holds, a
@@ -238,6 +241,28 @@ func (pool *framePool) unmarkUnconfigured(window platform.Window) {
 	}
 }
 
+// markLost marks window's surface lost, to be recreated before it is
+// configured again.
+func (pool *framePool) markLost(window platform.Window) {
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+	if !slices.Contains(pool.lostWindows, window) {
+		pool.lostWindows = append(pool.lostWindows, window)
+	}
+}
+
+// unmarkLost drops window's lost mark, and answers whether it had one.
+func (pool *framePool) unmarkLost(window platform.Window) bool {
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+	index := slices.Index(pool.lostWindows, window)
+	if index < 0 {
+		return false
+	}
+	pool.lostWindows = slices.Delete(pool.lostWindows, index, index+1)
+	return true
+}
+
 // draw is Handlers.Draw: it acquires a frame and, when a surface is marked
 // for it, schedules the configure after in and the last present; then the
 // acquire of its framebuffers after in, the last present and that configure,
@@ -260,8 +285,12 @@ func (p *Plugin) draw(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle
 
 // acquireFramebuffers acquires the framebuffer of every window with a
 // configured surface, not closing, shown and with a framebuffer of at least
-// one pixel, under the read lock. A window whose acquire answers no
-// framebuffer, or an error, which goes to LogErr, has none this frame.
+// one pixel, under the read lock, and handles the status the backend answers
+// alike on every backend: Suboptimal is drawn and marks the surface for
+// configuring; Outdated is not drawn and marks it; Lost is not drawn, and
+// marks it lost and for configuring, so the configure recreates it first;
+// Timeout is not drawn and marks nothing. An error goes to LogErr, is not
+// drawn and marks the surface.
 func acquireFramebuffers(k *kernel.Kernel, frame Frame, manager kernel.Read[*platform.WindowManager], deviceHandle kernel.Read[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)
 	for _, window := range d.surfaces {
@@ -270,8 +299,15 @@ func acquireFramebuffers(k *kernel.Kernel, frame Frame, manager kernel.Read[*pla
 		}
 		view := d.textureViews.acquire(textureViewSource{})
 		status, err := d.backend.AcquireFramebuffer(window, view)
-		if err != nil {
+		switch {
+		case err != nil:
 			k.Logger().LogErr(fmt.Errorf("gfx: acquiring the framebuffer of %v: %w", window, err))
+			d.frames.markUnconfigured(window)
+		case status == AcquireStatusSuboptimal || status == AcquireStatusOutdated:
+			d.frames.markUnconfigured(window)
+		case status == AcquireStatusLost:
+			d.frames.markLost(window)
+			d.frames.markUnconfigured(window)
 		}
 		if err != nil || (status != AcquireStatusAcquired && status != AcquireStatusSuboptimal) {
 			_ = d.textureViews.retire(view)

@@ -14,7 +14,8 @@ is created and released, pipelines with explicit layouts only, each
 window's surface is created when it opens, configured before its first
 acquire and again once resized, skipped while hidden or zero-size, and
 released after the last present when it closes, and each render beat
-acquires every window's framebuffer, publishes `DrawEvent`, submits the
+acquires every window's framebuffer, handling each acquire status as
+the design says, publishes `DrawEvent`, submits the
 frame's encoders in submit order and presents; every other body panics until its ticket on the
 [gfx map](https://github.com/dvoyni/cog/issues/608) fills it.
 
