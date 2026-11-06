@@ -1,0 +1,415 @@
+# gfx: design
+
+`github.com/dvoyni/cog/gfx` is the GPU as a kernel sees it: a super-thin
+mirror of wgpu, in its own types, that draws one frame per beat of the
+render track. A **backend** implements it: the gogpu plugin over our wgpu
+fork, or the **recording adapter** in `gfx/recording` for tests. gfx owns
+what is the same for every backend: the handle tables and their descriptors,
+the frame chain, submit order, surfaces following platform's windows,
+reflection for "auto" layouts, the shader preprocessor, readback and
+capture, and recovery after a device loss. It knows nothing of materials,
+scenes or the ECS: scene builds forward+, deferred and post effects on it,
+and nothing in gfx knows which.
+
+Status: designed, not built. The decisions come from the
+[gfx map](https://github.com/dvoyni/cog/issues/608); each section links the
+ticket that holds its detail. Every type, method and descriptor is declared,
+without bodies, on the branch
+[`prototype/gfx-listing`](https://github.com/dvoyni/cog/tree/prototype/gfx-listing/gfx),
+and the build starts from it. The vocabulary is in
+[`CONTEXT.md`](../CONTEXT.md); the ADRs are in [`adr/`](adr).
+
+## Constraints
+
+- **A mirror, not a renderer.** gfx follows wgpu's public API one to one, in
+  its own types; no wgpu type appears in it. It adds only what a kernel
+  needs: handles, the frame, events. Switching implementations is unlikely;
+  the seam exists for tests and to keep wgpu's churn in one place.
+- **Pointer-free work.** Handles, events and task args carry no pointers,
+  slices, strings or interfaces, as the kernel requires.
+- **No ECS import.** gfx works without the ECS. A handle fits a component
+  registered transient; scene saves the asset and recreates the handle on
+  load.
+- **Imports:** kernel, metronome and platform only. gfx requires platform,
+  listed before it, and says so with `Plugin.Dependencies`
+  ([kernel ADR 0007](../../kernel/docs/adr/0007-plugins-declare-dependencies-checked-not-sorted.md)).
+  metronome may be listed anywhere: only types link them.
+- **Targets:** desktop native first, Vulkan, DX12 and Metal. gfx is designed
+  against WebGPU's default limits; features are opt-in. GLES and the web are
+  deferred.
+- **Versions are pinned:** gogpu/wgpu v0.34.2, gputypes v0.8.0, gpucontext
+  v0.31.3. wgpu is pre-1.0 and changes daily.
+
+## Shape
+
+([gfx's shape in today's kernel](https://github.com/dvoyni/cog/issues/659),
+[The interface listing](https://github.com/dvoyni/cog/issues/662))
+
+| Type | Kind | What it is |
+|---|---|---|
+| `InstanceSocket` | required exclusive socket | The backend seam, wgpu's instance mirrored: `RequestAdapter`, `CreateSurface`, `ReleaseSurface`. A kernel with none panics in `Spawn`. `BackendAdapter` and `BackendDevice` are what it answers. |
+| `Device` | interface resource, `kernel.Read[gfx.Device]` | The GPU as every job shares it: creating, releasing, writing, mapping, recording and submitting. |
+| `ExclusiveDevice` | no resource | `Device` plus what no job may overlap: `WaitIdle`, `RequestSurface`. `ElevateDeviceAccess(kernel.Write[Device])` answers it. |
+| `Handlers` | resource | The `kernel.Sub` of each handler: `Draw` on `RenderEvent`, `CreateSurface`, `ResizeSurface` and `ReleaseSurface` on platform's window events. |
+| `Buffer`, `Texture`, `TextureView`, `Sampler`, `ShaderModule`, `BindGroupLayout`, `BindGroup`, `PipelineLayout`, `RenderPipeline`, `ComputePipeline`, `QuerySet` | handles | Generational, comparable, pointer-free; zero is none. |
+| `CommandEncoder`, `StandaloneCommandEncoder`, `RenderPassEncoder`, `ComputePassEncoder`, `CommandBuffer` | interfaces | Transient recording objects. |
+| `RenderEvent` | event | The render track's beat, `struct{ metronome.Beat }`; the application declares the track. |
+| `DrawEvent` | event | Published inside gfx's `RenderEvent` handler: `Beat`, `Frame`, `Ready`, `AcquireWait`, `GPULatency`. |
+| `Frame` | handle | One frame in flight: a slot in gfx's pool of frames. |
+| `SubmitOrder` | `int32` | The number a frame encoder is handed under; one space shared by every plugin. |
+| `SurfaceRequest`, `SurfaceConfiguration` | values | What the application asks every surface for, and what each window got. |
+| `BufferMappedEvent`, `CapturedEvent`, `DeviceLostEvent`, `DeviceRecoveredEvent` | events | Readback, capture and device loss. |
+| `Config` | config | `PowerPreference`, `ForceFallbackAdapter`, `RequiredFeatures`, `RequiredLimits`, `Surface`, `Clock`. |
+
+gfx installs no `Tasks` resource: it schedules acquire, configure, flush,
+present and recovery itself.
+
+## The seam and the device
+
+([gfx's shape in today's kernel](https://github.com/dvoyni/cog/issues/659),
+[The interface listing](https://github.com/dvoyni/cog/issues/662))
+
+- **One socket.** `InstanceSocket` is exclusive and required. gogpu binds
+  it; so does the recording adapter, in a test's plugin.
+- **gfx owns the handle tables.** It allocates each handle, checks its
+  generation, and keeps each object's descriptor, slices deep-copied. It hands
+  the backend the handle, and the backend keeps its native object at
+  `handle.Index()`. Descriptors and recording calls reach the backend as
+  gfx's own, handles included, so nothing is translated and nothing
+  allocates. gfx checks every handle in a call before making it.
+- **Every operation is a `Device` method,** one per type
+  (`CreateBuffer`/`ReleaseBuffer`, …), since a handle cannot reach the device
+  and a `Release(Handle)` would box. The queue folds into `Device`:
+  `WriteBuffer`, `WriteTexture`, `Submit`. gfx answers each resource's
+  descriptor back: `BufferDescriptor`, `TextureDescriptor`,
+  `TextureViewTexture`.
+- **The read lock is the normal case.** Creating, writing, recording,
+  flushing and presenting run under `kernel.Read[Device]`, in parallel; the
+  device, adapter and instance are safe from many goroutines (not under
+  `-tags rust`). What must not overlap runs under the write lock, through
+  `ElevateDeviceAccess`: configuring surfaces, recovering a lost device,
+  `WaitIdle`, `RequestSurface`.
+- **The device comes up in `Start`,** since sockets are read from `Start` on,
+  from `Config`. A zero `RequiredLimits` is `DefaultLimits()`, WebGPU's,
+  passed explicitly, because wgpu's zero is the adapter's full limits. No
+  adapter is a runtime error from `Start`. `Stop` does nothing: frames in
+  flight finish. `Destroy` releases the surfaces, the device and the adapter
+  after the kernel's last job; releasing the device cleanly is what saves
+  Vulkan's pipeline cache.
+
+## Types, descriptors and handles
+
+([The interface listing](https://github.com/dvoyni/cog/issues/662))
+
+- **Enums are gfx's own, numbered as gputypes numbers them,** so gogpu
+  converts by cast, checked by a test in the gogpu plugin. They are generated
+  from gputypes v0.8.0. Ray tracing, push constants, indirect-count and
+  adapter-specific bits are left out.
+- **Descriptors mirror wgpu's,** with handles in place of objects. **An
+  optional part is a value whose zero means none,** never a pointer:
+  `Blend`, `DepthStencil`, `Fragment`, `StripIndexFormat`, `ResolveTarget`,
+  the depth-stencil attachment, `TimestampWrites`, and the layout entry's five
+  kinds, exactly one non-zero. Slices stay where the count has no small bound.
+  Names and shapes follow gogpu's Go API (`Dispatch`, `DrawArgs`, region
+  copies), renamed only where the naming rules require.
+- **Handles** are `struct{ index, generation uint32 }`. A stale one answers
+  `ErrReleased` from calls with an error, is recorded as a deferred error by
+  recording calls, and a second release logs `ErrReleased` and does nothing.
+- **Release is immediate,** as in wgpu, which reference-counts resources until
+  the submits using them finish.
+- **Left out of wgpu:** render bundles and indirect-count draws (absent
+  upstream), error scopes (inert on native), SPIR-V, `TransitionTextures`.
+  Instance, adapter, surface objects, fences, the surface extensions, HAL
+  access and gpucontext are internal to gfx and its backends.
+
+## Errors
+
+- **Errors mirror wgpu.** `Create*`, writes, maps, `StandaloneCommandEncoder.Finish`
+  and `Device.Submit` return them. A pass's `End` returns nothing; its error,
+  a frame submit's error and device loss go to `LogErr`.
+- **Composition mistakes panic,** as the kernel's rule says.
+- Sentinels: `ErrReleased`, `ErrOrderTaken`, `ErrFrameFlushed`,
+  `ErrCaptureBusy`, `ErrCaptureUnsupported`, `ErrDeviceLost`.
+
+## Shaders and pipelines
+
+([The interface listing](https://github.com/dvoyni/cog/issues/662),
+[Pipeline creation off the frame](https://github.com/dvoyni/cog/issues/668))
+
+- **WGSL only.** `CreateShaderModule(ShaderModuleDescriptor{Label, WGSL})`
+  takes final WGSL. `PreprocessShader(files, path, defines)` is v1's
+  preprocessor ported (`#include`, `#define`, `#const`, `#if`); a task calls
+  it under its own `kernel.Read[platform.FS]`. Hot reload is deferred.
+- **gfx reflects a module once, at its creation,** with naga's IR, and keeps
+  the result with its handle. A pipeline with a zero `Layout` gets an "auto"
+  layout built from it; `RenderPipelineBindGroupLayout` and
+  `ComputePipelineBindGroupLayout` answer its groups, as WebGPU's
+  `getBindGroupLayout`. An explicit layout overrides reflection. The vertex
+  interface and the limits are checked at pipeline creation and fail loudly.
+- **Off the frame means a task.** Creation is synchronous on every backend.
+  A game creates shader modules and pipelines from a task of its own under
+  `kernel.Read[Device]`, scheduled anywhere; gfx has no async call and no
+  worker. Two costs are documented: a compile holds the read lock, so a
+  surface configure, and the frame behind it, waits for it; and a burst of
+  compiles can take every worker from a frame's recording, so the game bounds
+  how many run at once.
+- **No pipeline cache of gfx's.** The backend's own disk caches persist on
+  Vulkan and DX12, under `os.UserCacheDir()/gogpu/`, outside platform's `FS`;
+  Metal has none. Each create answers its own handle; sharing pipelines of one
+  descriptor is scene's.
+
+## Frames
+
+([gfx's shape in today's kernel](https://github.com/dvoyni/cog/issues/659),
+[ADR 0001](adr/0001-draw-event-inside-render-event.md),
+[Frames in flight and what gfx keeps per frame](https://github.com/dvoyni/cog/issues/663),
+[ADR 0002](adr/0002-frames-record-one-at-a-time.md))
+
+- **The draw chain is a nested publish.** gfx has one `RenderEvent` handler,
+  `Handlers.Draw`. It schedules, each after the last present: a pinned
+  configure of any surface marked for it, under the write lock; then the
+  pinned acquire. It publishes `DrawEvent` with `ex.Publish(acquired, …)`,
+  schedules the flush and the pinned present after the out dependency that
+  answers, and returns the present to metronome. Application handlers
+  subscribe to `DrawEvent` with no ordering, schedule their recording tasks
+  after `e.Ready` with the event as their arg, and return `ex.Join(in, own)`.
+- **One frame covers every open window:** an acquire per window in one
+  pinned job, one flush, a present of each. A window with no framebuffer this
+  frame (hidden, a zero framebuffer, outdated, timed out) answers the zero
+  view. `DrawEvent` is published every beat, even when no window has one.
+- **Frames record one at a time.** wgpu lets a surface hold one acquired
+  framebuffer, so each acquire follows the previous present, and `Ready`
+  stays the acquire. Frames overlap on the GPU through wgpu's swapchain, not
+  on the CPU. Acquire late is deferred; it can return only under the rule in
+  ADR 0002 and the vsync preset back at two beats in flight.
+- **Frames live in a pool of slots,** acquired in the `RenderEvent` handler
+  and released after the present, the generation advanced. The pool grows
+  only while more beats are in flight than it holds, so it is bounded by the
+  render track's `MaxInFlight`, and a render track needs one. There is no
+  knob, and no reconciliation with wgpu's own bounds: a `MaxInFlight` above
+  them queues beats behind the acquire chain.
+- **A slot keeps** its generation, its `(order, encoder)` pairs in a reused
+  slice sorted at flush, a mutex held only for the duplicate check and the
+  append, one framebuffer `TextureView` handle per window acquired, and a
+  flushed flag. gfx's bookkeeping is allocation-free once warm; wgpu
+  allocates per encoder.
+- **Frame encoders:** `Device.Encoder(frame, order)` answers one per
+  submit order, with no limit; one per task that records in parallel, not one
+  per draw. An order taken twice answers `ErrOrderTaken`, and a flushed or
+  presented frame `ErrFrameFlushed`, each with an encoder that records into
+  nothing. The flush finishes them, sorts by order and submits once; an
+  encoder whose `Finish` fails goes to `LogErr` and is dropped, and the rest
+  are submitted.
+- **A `Frame` is valid until its present.** After the flush `Framebuffer`
+  still answers the view; once the slot is released, the zero view.
+- **Standalone encoders** come from `CreateCommandEncoder`, outside any
+  frame; their owner calls `Finish` and `Device.Submit`.
+- **Timing signals for adaptive quality:** `DrawEvent.AcquireWait`, how long
+  the previous frame's acquire blocked (under Fifo, a long wait is headroom),
+  and `GPULatency`, from the newest finished frame's submit to when gfx first
+  saw it complete by submission index, accurate to one check a frame. gfx
+  reads them from `Config.Clock`, the clock given to metronome, so a manual
+  clock makes them deterministic
+  ([Timestamps and GPU profiling](https://github.com/dvoyni/cog/issues/667)).
+- **metronome's vsync preset** becomes `MaxInFlight: 1` plus a 1/240 s
+  `MinInterval` floor: one beat in flight takes about a frame off the gap
+  between a beat's time and the display, and the floor keeps a minimized
+  application from spinning.
+- **Windows and frames:** `ReleaseSurface` is scheduled after the last
+  present; a window opened mid-frame joins the next frame.
+
+## Writes and transient memory
+
+([Per-frame transient memory](https://github.com/dvoyni/cog/issues/664))
+
+- **`WriteBuffer` and `WriteTexture` are the upload path.** wgpu copies the
+  data into its own staging belt before the call returns and prepends the
+  copy to the next submit, so it lands before every command buffer of that
+  submit, whichever frame or standalone encoder it carries. Two writes to one
+  region in a frame leave the last for the whole frame. Each call takes the
+  queue's lock: write a task's whole region once, not once per draw.
+- **No staging belt, uniform ring or transient-target pool in gfx.** The
+  uniform ring and the pool of transient targets are scene's, on the frame
+  graph's side of the line. gfx guarantees them safe: release is immediate and
+  reference-counted, and reuse across frames is ordered on the queue.
+
+## Surfaces
+
+([Surface configuration](https://github.com/dvoyni/cog/issues/665))
+
+- **Surfaces follow platform's windows.** `CreateSurface` on
+  `WindowOpenedEvent` creates one from `WindowManager.Native`, in a pinned
+  task; `ReleaseSurface` on `WindowClosedEvent` releases it. A surface is
+  named by its `platform.Window`; there is no public surface handle.
+- **Configured in the frame chain, between frames.** A surface is marked for
+  configuring when it is new, resized (`ResizeSurface` on `ResizeEvent` only
+  marks it), reported suboptimal, outdated or lost, or the request changes.
+  `Draw` schedules the configure, pinned, under the write lock, after the last
+  present and before the acquire. A window that is hidden or has a zero
+  framebuffer is neither configured nor acquired.
+- **One surface request for the whole application:**
+  `SurfaceRequest{Format, PresentMode, Capturable}` in `Config.Surface`,
+  replaced at runtime with `ExclusiveDevice.RequestSurface`. Zero means
+  `BGRA8Unorm`, which every backend accepts, and Fifo, which every backend
+  has. sRGB encoding is the last pass's; `BGRA8UnormSrgb` is honoured on
+  Vulkan and Metal. A part a surface cannot honour falls back, with a
+  `LogErr`. `Device.SurfaceConfiguration(window)` answers what each window
+  got, for pipelines to target. Every surface is opaque. HDR is deferred: no
+  backend can present it.
+- **Present modes and metronome's presets** pair without enforcement: vsync
+  with Fifo, limit and uncapped with Mailbox or Immediate. On Metal Immediate
+  and Mailbox are the same, and FifoRelaxed turns vsync off.
+- **Acquire results** reach gfx as an `AcquireStatus` the backend maps from
+  its errors: `Suboptimal` draws and marks; `Outdated` draws nothing in that
+  window this frame and marks; `Lost` recreates the surface from its native
+  handle and marks; `Timeout` skips the window, with no reconfigure.
+
+## Readback and capture
+
+([Readback and capture](https://github.com/dvoyni/cog/issues/666))
+
+- **Maps are asynchronous only.** `Device.MapBuffer` starts one; gfx checks
+  its pending maps after every submit and publishes `BufferMappedEvent{Buffer,
+  Status}` from that job. A handler's task reads `MappedRange` until
+  `UnmapBuffer`. `Device.Poll` resolves finished maps for a kernel with no
+  frames running. There is no blocking map: it would wait for the whole
+  device to go idle.
+- **Capture is gfx's.** `Device.RequestCapture(window)` asks for the next
+  frame's framebuffer. gfx's flush appends its own encoder after every submit
+  order, copying the framebuffer into a fresh staging buffer before the
+  present, and maps it after the submit. `CapturedEvent{Window, Beat, Buffer,
+  Width, Height, Format, BytesPerRow, Status}` delivers it a frame later;
+  `Beat` names the moment shown. gfx unmaps and releases the buffer after the
+  publication's out dependency. `ReadCapture(device, event)` answers an
+  `image.NRGBA`: rows un-strided, BGRA swapped, alpha opaque, no colour
+  conversion. One capture is in flight per window (`ErrCaptureBusy`).
+- **A surface must be capturable:** `SurfaceRequest.Capturable` adds
+  `CopySrc` on Vulkan and `StorageBinding` on Metal. DX12 cannot honour it
+  yet. Otherwise, or for a format other than 8-bit BGRA or RGBA,
+  `RequestCapture` answers `ErrCaptureUnsupported`. A window that acquired
+  nothing that frame gets `CapturedEvent` with `CaptureStatusNotAcquired`.
+- **At shutdown** pending maps and captures are dropped without an event;
+  `Destroy` releases their buffers.
+
+## Timestamps
+
+([Timestamps and GPU profiling](https://github.com/dvoyni/cog/issues/667))
+
+- **WebGPU's query sets are mirrored and declared, waiting on the wgpu
+  fork:** a `QuerySet` handle, `TimestampWrites` on pass descriptors,
+  `CommandEncoder.ResolveQuerySet`, `BufferUsageQueryResolve`,
+  `Device.TimestampPeriod()`, and `FeatureTimestampQuery` reported only where
+  it works. Until the fork exposes them, `CreateQuerySet` answers an error on
+  every backend. Results come back through the asynchronous maps.
+- **gfx collects no timings.** A per-pass profiler is scene's or a profiler
+  plugin's.
+
+## Device loss
+
+([Device loss](https://github.com/dvoyni/cog/issues/669),
+[ADR 0003](adr/0003-handles-survive-device-loss.md))
+
+- **Detection:** the backend maps its errors onto `ErrDeviceLost`, from any
+  call that answers an error. gfx checks every backend call it makes; the
+  first job to see it logs the loss and publishes `DeviceLostEvent`. Tasks
+  running then answer `ErrDeviceLost` and record nothing; the frame in flight
+  skips its submit and present.
+- **Handles survive.** On the next beat, instead of a frame, `Draw` schedules
+  a pinned recovery under the write lock: release the device, request a new
+  one from the same adapter (a fresh adapter if that fails), recreate every
+  object under its old handle from its kept descriptor, in dependency order
+  (buffers, textures, samplers, shader modules; views, bind group layouts;
+  pipeline layouts; pipelines; bind groups), mark every surface, publish
+  `DeviceRecoveredEvent`. It publishes no `DrawEvent` and is the beat's out
+  dependency.
+- **Contents are their owners'.** Buffers and textures come back empty; owners
+  refill them from tasks they schedule on `DeviceRecoveredEvent`.
+- **A failed recovery** is retried on a later beat, at most once a second by
+  `Beat.TimeFromStart`, with `LogErrOnce`, and no limit. Pending maps and
+  captures hear as failures.
+
+## The recording adapter
+
+([The headless recording adapter](https://github.com/dvoyni/cog/issues/670))
+
+- **An adapter, not a plugin:** `recording.NewInstance()` answers an
+  `InstanceSocket` the test's own plugin binds. The test reads
+  `instance.Recording()` once the kernel has settled.
+- **It records what reaches the socket,** as typed values: every create and
+  release with its handle and descriptor, writes and maps, surface calls with
+  the status answered, and each submission as its command buffers, passes and
+  commands with arguments. `Recording.Frames()` groups what lies between an
+  acquire and its present. Submissions and surface calls are in a
+  deterministic order; lifecycle calls from parallel tasks are not, and tests
+  look them up by handle.
+- **It checks a fixed subset of what wgpu rejects:** a handle missing at its
+  index, usage flags, write and copy alignment, pass state. It answers what a
+  real backend would.
+- **Data:** buffers hold bytes, which writes, buffer copies and clears apply
+  to; textures hold no texels; captures complete zero-filled.
+- **Injection:** `instance.AnswerNext(kind, answer)` makes the next call of a
+  kind answer an acquire status, a map failure or an error, `ErrDeviceLost`
+  included.
+- **Real pixels without a GPU** come from gogpu on wgpu's software adapter,
+  through `Config.ForceFallbackAdapter`, not from here.
+
+## Post effects and deferred
+
+gfx fixes only the ends of the frame. Everything between is passes the user
+declares, run on the GPU in submit order, so post effects and deferred need
+nothing from gfx beyond a correct barrier when a target is sampled after it
+was rendered: the Vulkan barrier fix on the
+[gogpu map](https://github.com/dvoyni/cog/issues/611).
+
+## Gaps in the wgpu fork and the gogpu backend
+
+What the backend must do, and what the fork must fix first, are carried by
+the [gogpu map](https://github.com/dvoyni/cog/issues/611):
+
+- binding `InstanceSocket`; mapping its errors onto `ErrDeviceLost` and
+  `AcquireStatus`; honouring `Capturable` and `ForceFallbackAdapter`; a
+  headless surface for a window with a zero native handle; pixel tests on the
+  software adapter; a test that the enums convert by cast;
+- two swapchains in one frame are unsafe in wgpu's Vulkan backend, so several
+  windows wait on a fix;
+- `Release` races recording on textures, views, samplers, shader modules,
+  layouts and pipelines (a plain `bool`);
+- under `-tags rust`, go-webgpu's `Device` is unsafe from several goroutines;
+- DX12's flip model rejects the sRGB formats wgpu advertises, and its back
+  buffers cannot be copied out;
+- no backend presents HDR;
+- DX12 reports a removed device only as an untyped error, and Metal never
+  detects loss;
+- no public query sets or timestamps;
+- whether a minimized or occluded window on macOS holds `nextDrawable`, which
+  has no timeout, is to be checked; if so, platform needs a minimized state.
+
+## Testing
+
+Two seams, through gfx's public interfaces:
+
+- **gfx in a real kernel.** A test plugin binds the recording adapter and
+  platform's headless windows adapter, and metronome paces the render track
+  on a `ManualClock`. Tests assert only through the `Recording`, gfx's events
+  and what `Device` answers: the frame chain and its order, submit order,
+  encoder errors, surface marks and configures, acquire statuses, maps and
+  captures, device-loss recovery through `AnswerNext`, and `DrawEvent`'s
+  durations. As metronome's tests do, they reach the kernel through the
+  `Supervisor`.
+- **The recording adapter's checks,** at its own interface, without a
+  kernel.
+
+Concurrent behaviour, the frame slot's mutex and parallel recording, runs
+under `go test -race` and is checked by breaking the code it guards. Pixel
+tests through the software adapter are the gogpu plugin's.
+
+## Out of scope
+
+- Materials, PBR, forward+, deferred, post effects, and a frame graph with its
+  transient targets and per-frame memory: scene, built on gfx.
+- The agent-facing capture tool (v1's `gfx_capture` and its PNG): a plugin
+  of its own on `CapturedEvent`.
+- A per-pass GPU profiler and its plumbing: scene's or a profiler plugin's.
+- Render bundles, indirect-count draws, bindless and push constants: absent
+  from wgpu.
+- GLES, the web, HDR, hot reload of shaders, acquire late: deferred.
