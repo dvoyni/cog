@@ -34,7 +34,7 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 )
 
-replace github.com/gogpu/gogpu => github.com/dvoyni/gogpu v0.54.1-0.20261103110528-dffe7d7cc23e
+replace github.com/gogpu/gogpu => github.com/dvoyni/gogpu v0.54.1-0.20261106154716-92d976d655fb
 
 replace github.com/jfreymuth/vorbis => github.com/dvoyni/vorbis v1.0.3-0.20260921150454-ab3e6ce988a8
 
