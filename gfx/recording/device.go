@@ -9,14 +9,17 @@ import (
 )
 
 // device is the recording device and its queue, as adapter.RequestDevice
-// answers it.
+// answers it. A create naming a handle missing at its index, or a resource
+// without the usage the descriptor puts it to, answers an error from the
+// call, as wgpu does; the objects a create names are those of descriptors and
+// handles not zero, a zero handle naming none.
 type device struct {
 	instance *Instance
 	// Each table holds its type's objects, as what each was created with,
 	// at their indices, under the instance's mutex.
 	buffers          objectTable[gfx.BufferDescriptor]
 	textures         objectTable[gfx.TextureDescriptor]
-	textureViews     objectTable[CreateTextureViewArguments]
+	textureViews     objectTable[textureView]
 	samplers         objectTable[gfx.SamplerDescriptor]
 	shaderModules    objectTable[gfx.ShaderModuleDescriptor]
 	bindGroupLayouts objectTable[gfx.BindGroupLayoutDescriptor]
@@ -52,11 +55,16 @@ func (d *device) ReleaseTexture(texture gfx.Texture) {
 	d.instance.record(CallKindReleaseTexture, texture, func() error { return d.textures.remove(texture.Index()) })
 }
 
-// CreateTextureView records the creation and keeps view at its index.
+// CreateTextureView records the creation and keeps view at its index, with
+// its texture's usage; an error when texture is missing.
 func (d *device) CreateTextureView(view gfx.TextureView, texture gfx.Texture, descriptor gfx.TextureViewDescriptor) error {
 	arguments := CreateTextureViewArguments{View: view, Texture: texture, Descriptor: descriptor}
 	return d.instance.record(CallKindCreateTextureView, arguments, func() error {
-		return d.textureViews.store(view.Index(), arguments)
+		textureDescriptor, err := requireObject(&d.textures, texture, "the viewed texture")
+		if err != nil {
+			return err
+		}
+		return d.textureViews.store(view.Index(), textureView{arguments: arguments, usage: textureDescriptor.Usage})
 	}).Error
 }
 
@@ -109,9 +117,43 @@ func (d *device) ReleaseBindGroupLayout(layout gfx.BindGroupLayout) {
 	d.instance.record(CallKindReleaseBindGroupLayout, layout, func() error { return d.bindGroupLayouts.remove(layout.Index()) })
 }
 
-// CreateBindGroup records the creation and keeps group at its index.
+// CreateBindGroup records the creation and keeps group at its index; an
+// error when its layout or a resource is missing, or a resource lacks the
+// usage its layout entry binds it for: a uniform buffer Uniform, a storage
+// buffer Storage, a storage texture StorageBinding.
 func (d *device) CreateBindGroup(group gfx.BindGroup, descriptor gfx.BindGroupDescriptor) error {
 	return d.instance.record(CallKindCreateBindGroup, CreateBindGroupArguments{Group: group, Descriptor: descriptor}, func() error {
+		layout, err := requireObject(&d.bindGroupLayouts, descriptor.Layout, "the bind group's layout")
+		if err != nil {
+			return err
+		}
+		for _, entry := range descriptor.Entries {
+			var layoutEntry gfx.BindGroupLayoutEntry
+			if index := slices.IndexFunc(layout.Entries, func(candidate gfx.BindGroupLayoutEntry) bool { return candidate.Binding == entry.Binding }); index >= 0 {
+				layoutEntry = layout.Entries[index]
+			}
+			bufferUsage := gfx.BufferUsageFlagNone
+			switch layoutEntry.Buffer.Type {
+			case gfx.BufferBindingTypeUniform:
+				bufferUsage = gfx.BufferUsageFlagUniform
+			case gfx.BufferBindingTypeStorage, gfx.BufferBindingTypeReadOnlyStorage:
+				bufferUsage = gfx.BufferUsageFlagStorage
+			}
+			textureUsage := gfx.TextureUsageFlagNone
+			if layoutEntry.StorageTexture.Access != gfx.StorageTextureAccessUndefined {
+				textureUsage = gfx.TextureUsageFlagStorageBinding
+			}
+			role := fmt.Sprintf("binding %d", entry.Binding)
+			if err := d.requireBuffer(entry.Buffer, bufferUsage, role); err != nil {
+				return err
+			}
+			if _, err := requireObject(&d.samplers, entry.Sampler, role); err != nil {
+				return err
+			}
+			if err := d.requireView(entry.TextureView, textureUsage, role); err != nil {
+				return err
+			}
+		}
 		return d.bindGroups.store(group.Index(), descriptor)
 	}).Error
 }
@@ -121,9 +163,15 @@ func (d *device) ReleaseBindGroup(group gfx.BindGroup) {
 	d.instance.record(CallKindReleaseBindGroup, group, func() error { return d.bindGroups.remove(group.Index()) })
 }
 
-// CreatePipelineLayout records the creation and keeps layout at its index.
+// CreatePipelineLayout records the creation and keeps layout at its index;
+// an error when a group layout is missing.
 func (d *device) CreatePipelineLayout(layout gfx.PipelineLayout, descriptor gfx.PipelineLayoutDescriptor) error {
 	return d.instance.record(CallKindCreatePipelineLayout, CreatePipelineLayoutArguments{Layout: layout, Descriptor: descriptor}, func() error {
+		for index, groupLayout := range descriptor.BindGroupLayouts {
+			if _, err := requireObject(&d.bindGroupLayouts, groupLayout, fmt.Sprintf("group %d's layout", index)); err != nil {
+				return err
+			}
+		}
 		return d.pipelineLayouts.store(layout.Index(), descriptor)
 	}).Error
 }
@@ -133,9 +181,19 @@ func (d *device) ReleasePipelineLayout(layout gfx.PipelineLayout) {
 	d.instance.record(CallKindReleasePipelineLayout, layout, func() error { return d.pipelineLayouts.remove(layout.Index()) })
 }
 
-// CreateRenderPipeline records the creation and keeps pipeline at its index.
+// CreateRenderPipeline records the creation and keeps pipeline at its index;
+// an error when its layout or a stage's module is missing.
 func (d *device) CreateRenderPipeline(pipeline gfx.RenderPipeline, descriptor gfx.RenderPipelineDescriptor) error {
 	return d.instance.record(CallKindCreateRenderPipeline, CreateRenderPipelineArguments{Pipeline: pipeline, Descriptor: descriptor}, func() error {
+		if _, err := requireObject(&d.pipelineLayouts, descriptor.Layout, "the pipeline's layout"); err != nil {
+			return err
+		}
+		if _, err := requireObject(&d.shaderModules, descriptor.Vertex.Module, "the vertex module"); err != nil {
+			return err
+		}
+		if _, err := requireObject(&d.shaderModules, descriptor.Fragment.Module, "the fragment module"); err != nil {
+			return err
+		}
 		return d.renderPipelines.store(pipeline.Index(), descriptor)
 	}).Error
 }
@@ -145,9 +203,16 @@ func (d *device) ReleaseRenderPipeline(pipeline gfx.RenderPipeline) {
 	d.instance.record(CallKindReleaseRenderPipeline, pipeline, func() error { return d.renderPipelines.remove(pipeline.Index()) })
 }
 
-// CreateComputePipeline records the creation and keeps pipeline at its index.
+// CreateComputePipeline records the creation and keeps pipeline at its
+// index; an error when its layout or module is missing.
 func (d *device) CreateComputePipeline(pipeline gfx.ComputePipeline, descriptor gfx.ComputePipelineDescriptor) error {
 	return d.instance.record(CallKindCreateComputePipeline, CreateComputePipelineArguments{Pipeline: pipeline, Descriptor: descriptor}, func() error {
+		if _, err := requireObject(&d.pipelineLayouts, descriptor.Layout, "the pipeline's layout"); err != nil {
+			return err
+		}
+		if _, err := requireObject(&d.shaderModules, descriptor.Module, "the compute module"); err != nil {
+			return err
+		}
 		return d.computePipelines.store(pipeline.Index(), descriptor)
 	}).Error
 }
@@ -183,7 +248,7 @@ func (d *device) Poll() { panic("gfx listing: no bodies") }
 
 // CreateCommandEncoder answers an encoder recording the commands given it.
 func (d *device) CreateCommandEncoder(descriptor gfx.CommandEncoderDescriptor) (gfx.StandaloneCommandEncoder, error) {
-	return &commandEncoder{instance: d.instance}, nil
+	return &commandEncoder{device: d}, nil
 }
 
 // Submit records the call and buffers as one submission, after the calls
@@ -280,3 +345,60 @@ func (d *device) WaitIdle() error { return d.instance.record(CallKindWaitIdle, n
 
 // Release records the device released.
 func (d *device) Release() { d.instance.record(CallKindReleaseDevice, nil, nil) }
+
+// requireBuffer answers an error when buffer is missing, or lacks usage, for
+// role; nil for the zero buffer.
+func (d *device) requireBuffer(buffer gfx.Buffer, usage gfx.BufferUsageFlags, role string) error {
+	descriptor, err := requireObject(&d.buffers, buffer, role)
+	if err != nil || buffer == (gfx.Buffer{}) {
+		return err
+	}
+	if descriptor.Usage&usage != usage {
+		return fmt.Errorf("recording: %s: the buffer at index %d lacks usage %#x", role, buffer.Index(), usage&^descriptor.Usage)
+	}
+	return nil
+}
+
+// requireTexture answers an error when texture is missing, or lacks usage,
+// for role; nil for the zero texture.
+func (d *device) requireTexture(texture gfx.Texture, usage gfx.TextureUsageFlags, role string) error {
+	descriptor, err := requireObject(&d.textures, texture, role)
+	if err != nil || texture == (gfx.Texture{}) {
+		return err
+	}
+	if descriptor.Usage&usage != usage {
+		return fmt.Errorf("recording: %s: the texture at index %d lacks usage %#x", role, texture.Index(), usage&^descriptor.Usage)
+	}
+	return nil
+}
+
+// requireView answers an error when view is missing, or its texture lacks
+// usage, for role; nil for the zero view. A framebuffer acquired and not yet
+// presented is a view whose usage is RenderAttachment.
+func (d *device) requireView(view gfx.TextureView, usage gfx.TextureUsageFlags, role string) error {
+	if view == (gfx.TextureView{}) {
+		return nil
+	}
+	viewUsage := gfx.TextureUsageFlagNone
+	if d.instance.holdsFramebuffer(view) {
+		viewUsage = gfx.TextureUsageFlagRenderAttachment
+	} else {
+		object, err := requireObject(&d.textureViews, view, role)
+		if err != nil {
+			return err
+		}
+		viewUsage = object.usage
+	}
+	if viewUsage&usage != usage {
+		return fmt.Errorf("recording: %s: the view at index %d lacks usage %#x", role, view.Index(), usage&^viewUsage)
+	}
+	return nil
+}
+
+// textureView is a view as the device keeps it: what it was created with, and
+// its texture's usage, which outlives the texture's release, as a wgpu view
+// keeps its texture.
+type textureView struct {
+	arguments CreateTextureViewArguments
+	usage     gfx.TextureUsageFlags
+}
