@@ -94,6 +94,8 @@ type clockPlugin struct {
 
 func (p *clockPlugin) Name() kernel.PluginName { return clockName }
 
+func (p *clockPlugin) Dependencies() []kernel.PluginName { return nil }
+
 func (p *clockPlugin) Init(c *kernel.Configurator, config any) error {
 	p.config = kernel.PluginConfigOrDefault[ClockConfig](config)
 	return nil
@@ -132,6 +134,8 @@ type scorePlugin struct {
 }
 
 func (p *scorePlugin) Name() kernel.PluginName { return scoreName }
+
+func (p *scorePlugin) Dependencies() []kernel.PluginName { return nil }
 
 func (p *scorePlugin) Init(c *kernel.Configurator, config any) error {
 	p.config = kernel.PluginConfigOrDefault[ScoreConfig](config)
@@ -202,6 +206,7 @@ done
 ```go
 type Plugin interface {
 	Name() PluginName
+	Dependencies() []PluginName
 	Init(configurator *Configurator, config any) error
 	Start(kernel *Kernel) error
 	Stop(kernel *Kernel) error
@@ -214,6 +219,11 @@ type Plugin interface {
 - **Order** is the order of the plugins given to `Spawn`. `Init` and `Start`
   run in that order; `Stop` and `Destroy` run in reverse. A plugin that needs
   another's resource while registering is listed after it.
+- **`Dependencies`** names the plugins whose resources `Init` needs; nil is
+  none. `Spawn` checks, before any `Init`, that each is listed before the
+  plugin, and panics naming both if one is later or missing, or if a plugin
+  names itself or a name twice. It never reorders. A socket is no
+  dependency: bindings resolve after every `Init`, whatever the order.
 - **`Init`** declares everything: resources, sockets, tasks, subscriptions,
   and the bindings to other plugins' sockets. The `Configurator` is invalid
   once `Init` returns.
@@ -275,13 +285,14 @@ c.InitResource[*Level](nil)
 ```
 
 A plugin that must register against something an earlier plugin installed
-reads it with `Resource`, and is listed after it:
+names that plugin among its `Dependencies`, is listed after it, and reads it
+with `Resource`:
 
 ```go
-tasks, ok := c.Resource[platform.Tasks]()
-if !ok {
-	return errors.New("game: platform is not listed before this plugin")
-}
+func (p *game) Dependencies() []kernel.PluginName { return []kernel.PluginName{platform.PluginName} }
+
+// in its Init, once Spawn has checked platform is listed before it:
+tasks, _ := c.Resource[platform.Tasks]()
 ```
 
 Initializing the same type twice panics.

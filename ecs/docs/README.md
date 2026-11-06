@@ -119,6 +119,9 @@ type shipsPlugin struct {
 
 func (p *shipsPlugin) Name() kernel.PluginName { return shipsName }
 
+// Dependencies names the ECS plugin, whose registry RegisterWorld finds.
+func (p *shipsPlugin) Dependencies() []kernel.PluginName { return []kernel.PluginName{ecs.PluginName} }
+
 func (p *shipsPlugin) Init(c *kernel.Configurator, config any) error {
 	ecs.RegisterWorld[Game](c, ecs.WorldOptions{Entities: 1024})
 	ecs.RegisterComponent[Game, Position](c, "position")

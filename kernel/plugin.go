@@ -20,13 +20,21 @@ type Plugin interface {
 	// Name returns the plugin's name, unique among the plugins of one kernel.
 	Name() PluginName
 
+	// Dependencies names the plugins whose resources this plugin's Init needs;
+	// nil is none. Each must be given to Spawn before it: Spawn checks this
+	// before any Init and never reorders the plugins, and a dependency given
+	// after it or not at all, the plugin itself, or a name given twice is a
+	// composition error, and panics naming both plugins. A socket the plugin
+	// binds or declares is no dependency: bindings resolve after every Init.
+	Dependencies() []PluginName
+
 	// Init declares the plugin's resources, tasks and handlers. It runs once,
 	// in the order the plugins were given to Spawn, with the plugin's part of
 	// the config Spawn was given: the value under its Name, a pointer to the
 	// plugin's Config, or nil if there is none, which PluginConfigOrDefault
-	// unwraps. A plugin that needs another's resource is given after it. An Init
-	// that fails destroys the plugins already initialized, in reverse, and the
-	// spawn fails.
+	// unwraps. A plugin that needs another's resource is given after it, and
+	// names it among its Dependencies. An Init that fails destroys the plugins
+	// already initialized, in reverse, and the spawn fails.
 	Init(configurator *Configurator, config any) error
 
 	// Start runs once every plugin of the kernel has initialized, in plugin

@@ -19,6 +19,9 @@ func NewPlugin() *Plugin { return &Plugin{} }
 // Name returns PluginName.
 func (*Plugin) Name() kernel.PluginName { return PluginName }
 
+// Dependencies answers none: the ECS reads no other plugin's resource.
+func (*Plugin) Dependencies() []kernel.PluginName { return nil }
+
 // Init installs the registry.
 func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	configurator.InitResource(&registry{})

@@ -96,6 +96,9 @@ type game struct {
 
 func (p *game) Name() kernel.PluginName { return gameName }
 
+// Dependencies names platform: Init reads its Tasks.
+func (p *game) Dependencies() []kernel.PluginName { return []kernel.PluginName{platform.PluginName} }
+
 func (p *game) Init(c *kernel.Configurator, _ any) error {
 	configDirectory, err := os.UserConfigDir()
 	if err != nil {

@@ -29,6 +29,8 @@ type writeEvent struct{}
 
 func (h *harness) Name() kernel.PluginName { return "test" }
 
+func (*harness) Dependencies() []kernel.PluginName { return []kernel.PluginName{platform.PluginName} }
+
 func (h *harness) Init(c *kernel.Configurator, config any) error {
 	h.bind(c)
 	read := c.RegisterTask2(func(k *kernel.Kernel, _ kernel.NoArg, filesystem kernel.Read[platform.FS], values kernel.Read[*platform.Values]) kernel.NoResult {

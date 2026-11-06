@@ -22,6 +22,8 @@ type testPlugin struct {
 
 func (testPlugin) Name() kernel.PluginName { return "test" }
 
+func (testPlugin) Dependencies() []kernel.PluginName { return nil }
+
 func (p testPlugin) Init(c *kernel.Configurator, config any) error {
 	p.init(c)
 	return nil

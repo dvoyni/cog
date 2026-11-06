@@ -45,6 +45,9 @@ func NewPlugin() *Plugin {
 // Name returns PluginName.
 func (*Plugin) Name() kernel.PluginName { return PluginName }
 
+// Dependencies answers none: metronome reads no other plugin's resource.
+func (*Plugin) Dependencies() []kernel.PluginName { return nil }
+
 // Init takes the clock and the tracks from config, a *Config or nil, and
 // builds each track's state. A config of another type, or two tracks of one
 // event type, is a composition error, and panics.
