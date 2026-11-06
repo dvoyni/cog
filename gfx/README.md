@@ -10,9 +10,10 @@ materials, scenes or the ECS.
 
 Status: being built. Every declaration is in this module. The device comes
 up in `Start` and is released in `Destroy`, every resource but query sets
-is created and released, pipelines with explicit layouts only, and each
-window's surface is created when it opens and released when it closes;
-every other body panics until its ticket on the [gfx map](https://github.com/dvoyni/cog/issues/608) fills it.
+is created and released, pipelines with explicit layouts only, each
+window's surface is created when it opens and released after the last
+present when it closes, and each render beat acquires every window's
+framebuffer, publishes `DrawEvent` and presents; every other body panics until its ticket on the [gfx map](https://github.com/dvoyni/cog/issues/608) fills it.
 
 ## Shape
 

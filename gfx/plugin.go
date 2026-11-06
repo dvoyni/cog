@@ -21,6 +21,10 @@ type Plugin struct {
 	// for Destroy to release; nil where Start got no further.
 	adapter BackendAdapter
 	device  *device
+	// acquireTask and presentTask are the frame chain's pinned ends, which
+	// Handlers.Draw schedules.
+	acquireTask *kernel.Task[Frame, kernel.NoResult]
+	presentTask *kernel.Task[Frame, kernel.NoResult]
 }
 
 // Config is gfx's part of the kernel's config, under PluginName: what the
@@ -55,8 +59,8 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 }
 
 // Init declares the required InstanceSocket, installs the Device, empty
-// until Start, and subscribes to platform's window events, the Subs kept in
-// the Handlers resource. A config of another type than *Config is a
+// until Start, and subscribes to RenderEvent and platform's window events,
+// the Subs kept in the Handlers resource. A config of another type than *Config is a
 // composition error, and panics.
 func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	p.config = *kernel.PluginConfigOrDefault[Config](config)
@@ -67,12 +71,18 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	configurator.PinToMainThread(create)
 	release := configurator.RegisterTask1(releaseSurface)
 	configurator.PinToMainThread(release)
+	p.acquireTask = configurator.RegisterTask1(acquireFramebuffers)
+	configurator.PinToMainThread(p.acquireTask)
+	p.presentTask = configurator.RegisterTask1(presentFramebuffers)
+	configurator.PinToMainThread(p.presentTask)
 	configurator.InitResource(Handlers{
+		Draw: configurator.Subscribe(p.draw),
 		CreateSurface: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event platform.WindowOpenedEvent) (platform.WindowOpenedEvent, kernel.JobHandle) {
 			return event, ex.Schedule(create, event.Window, in).Handle()
 		}),
 		ReleaseSurface: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event platform.WindowClosedEvent) (platform.WindowClosedEvent, kernel.JobHandle) {
-			return event, ex.Schedule(release, event.Window, in).Handle()
+			lastPresent := p.device.frames.markClosing(event.Window)
+			return event, ex.Schedule(release, event.Window, in, lastPresent).Handle()
 		}),
 	})
 	return nil

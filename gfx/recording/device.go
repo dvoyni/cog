@@ -1,6 +1,7 @@
 package recording
 
 import (
+	"fmt"
 	"slices"
 
 	"github.com/dvoyni/cog/gfx"
@@ -194,11 +195,41 @@ func (d *device) ConfigureSurface(window platform.Window, configuration gfx.Surf
 	panic("gfx listing: no bodies")
 }
 
+// AcquireFramebuffer records the acquire and answers the status AnswerNext
+// queued, Acquired when none is; a status with a framebuffer keeps view as
+// window's until its present. An error when window has no surface, or holds
+// a framebuffer not yet presented, as wgpu answers ErrSurfaceAlreadyAcquired.
 func (d *device) AcquireFramebuffer(window platform.Window, view gfx.TextureView) (status gfx.AcquireStatus, err error) {
-	panic("gfx listing: no bodies")
+	answer := d.instance.recordAnswered(CallKindAcquireFramebuffer, AcquireFramebufferArguments{Window: window, View: view}, func(answer Answer) error {
+		windowSurface, exists := d.instance.surfaces[window]
+		if !exists {
+			return fmt.Errorf("recording: acquiring the framebuffer of %v, which has no surface", window)
+		}
+		if windowSurface.framebuffer != (gfx.TextureView{}) {
+			return fmt.Errorf("recording: acquiring the framebuffer of %v, its last not presented", window)
+		}
+		if status := gfx.AcquireStatus(answer.Status); status == gfx.AcquireStatusAcquired || status == gfx.AcquireStatusSuboptimal {
+			windowSurface.framebuffer = view
+			d.instance.surfaces[window] = windowSurface
+		}
+		return nil
+	})
+	return gfx.AcquireStatus(answer.Status), answer.Error
 }
 
-func (d *device) Present(window platform.Window) error { panic("gfx listing: no bodies") }
+// Present records the present and drops window's framebuffer; an error when
+// window has none acquired.
+func (d *device) Present(window platform.Window) error {
+	return d.instance.record(CallKindPresent, window, func() error {
+		windowSurface, exists := d.instance.surfaces[window]
+		if !exists || windowSurface.framebuffer == (gfx.TextureView{}) {
+			return fmt.Errorf("recording: presenting %v, which holds no framebuffer", window)
+		}
+		windowSurface.framebuffer = gfx.TextureView{}
+		d.instance.surfaces[window] = windowSurface
+		return nil
+	}).Error
+}
 
 // WaitIdle records the wait, and answers what AnswerNext queued for it.
 func (d *device) WaitIdle() error { return d.instance.record(CallKindWaitIdle, nil, nil).Error }

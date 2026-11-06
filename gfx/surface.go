@@ -112,10 +112,12 @@ func createSurface(k *kernel.Kernel, window platform.Window, manager kernel.Read
 }
 
 // releaseSurface releases window's surface, pinned to the main thread under
-// the write lock; a window without one, its creation failed, releases
+// the write lock, after the last present when its window closed, and drops
+// its closing mark; a window without one, its creation failed, releases
 // nothing.
 func releaseSurface(k *kernel.Kernel, window platform.Window, deviceHandle kernel.Write[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)
+	d.frames.unmarkClosing(window)
 	index := slices.Index(d.surfaces, window)
 	if index < 0 {
 		return kernel.NoResult{}
