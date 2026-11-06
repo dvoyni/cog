@@ -192,13 +192,6 @@ type AcquireFramebufferArguments struct {
 	View   gfx.TextureView
 }
 
-// ClearBufferArguments are what CommandEncoder.ClearBuffer was called with.
-type ClearBufferArguments struct {
-	Buffer gfx.Buffer
-	Offset uint64
-	Size   uint64
-}
-
 // CreateBufferArguments are what CreateBuffer was called with.
 type CreateBufferArguments struct {
 	Buffer     gfx.Buffer
@@ -274,14 +267,6 @@ type Submission struct {
 // clears recorded outside them, in order.
 type CommandBuffer struct {
 	Commands []Command
-}
-
-// Command is one recorded encoder or pass command with its arguments; a
-// pass's commands are under its BeginRenderPass or BeginComputePass.
-type Command struct {
-	Name      string
-	Arguments any
-	Commands  []Command
 }
 
 // Frame is one frame as the adapter saw it: each window's acquire status, the
