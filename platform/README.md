@@ -6,7 +6,8 @@ Cog kernel: windows, input and filesystems. It is its own Go module
 [kernel](../kernel). It holds no platform code: it declares interfaces that
 implementing plugins fill, and owns the logic that is the same for every
 implementation. Its [`filesystems`](filesystems) package holds the writable
-filesystems an application binds.
+filesystems an application binds, and its [`headless`](headless) package the
+windows a test binds, without an operating system.
 
 ## Shape
 

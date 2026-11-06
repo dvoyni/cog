@@ -10,7 +10,8 @@ for every implementation: the window request and window state, folding input
 into state and events, the overlay of filesystems, and the values kept in it.
 
 Status: windows, the pump, the filesystems, keys, text, focus, the pointer,
-scroll, resize, key labels, the cursor and the filesystem adapters are built. The decisions come from the
+scroll, resize, key labels, the cursor, the filesystem adapters and the
+headless windows adapter are built. The decisions come from the
 [platform map](https://github.com/dvoyni/cog/issues/610); each section links
 the ticket that holds its detail. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md).
@@ -34,7 +35,7 @@ the ticket that holds its detail. The vocabulary is in
 
 | Type | Kind | What it is |
 |---|---|---|
-| `WindowsSocket` | optional exclusive socket | The window seam: opens, changes and closes OS windows and pumps their events. Bound by gogpu. |
+| `WindowsSocket` | optional exclusive socket | The window seam: opens, changes and closes OS windows and pumps their events. Bound by gogpu, or in a test by `headless.NewWindows`. |
 | `InputSourceSocket` | optional exclusive socket | The input seam: reports the input changes since the last pump run. Bound by gogpu, later a scripted plugin. |
 | `Window` | handle | An opaque, pointer-free handle naming one window, from a counter that is never reused. |
 | `WindowManager` | resource | Every window: its entry in the window request, what the application wants it to be, and its window state, what it currently is. |
@@ -244,8 +245,8 @@ From [Scripted input for tests and agents](https://github.com/dvoyni/cog/issues/
   rules above once, for every source: coalescing pointer moves, releasing keys
   on focus loss, state before events, deltas while locked, key labels.
 - **A later scripted input source** binds only `InputSourceSocket`, beside
-  gogpu's windows (an agent driving a running game) or a headless window
-  implementation.
+  gogpu's windows (an agent driving a running game) or the headless windows
+  adapter.
 
 ## Cursor
 
@@ -382,6 +383,17 @@ Read mounts need none: any `fs.FS` binds as it is.
   keeps a few megabytes per origin, so it suits values and saves; a write
   over the quota fails and leaves the files as they were.
 
+## The headless windows adapter
+
+From [The headless recording adapter](https://github.com/dvoyni/cog/issues/670),
+built on the [gfx map](https://github.com/dvoyni/cog/issues/608).
+`github.com/dvoyni/cog/platform/headless` holds windows without an operating
+system, for tests: **`NewWindows()`** answers a `WindowsSocket` the test's
+own plugin binds, an adapter, not a plugin. A window opens from the next pump
+at its requested size, at scale 1, with the zero native handle, from which
+gfx's gogpu backend makes a headless surface; closing it reports it gone. It
+has no focus, cursor or input.
+
 ## The gogpu fork
 
 Three fork changes, each its own build ticket proposed upstream as a PR:
@@ -428,8 +440,8 @@ Two seams, both through the interfaces an implementation installs:
 - **IME composition:** preedit text, its cursor and the candidate window's
   position. Committed text works; composition returns as its own effort once
   the fork implements it, beside `TextEvent`, which does not change.
-- **Scripted input and a headless window implementation:** later plugins on
-  the input seam, an MCP-driven input source among them.
+- **Scripted input:** a later plugin on the input seam, an MCP-driven input
+  source among them.
 - **Custom image cursors:** a game hides the OS cursor and draws its own.
 - **Gamepads and the clipboard:** later.
 - **Audio, and v1's platform slot** (Steam, achievements). If the storefront
