@@ -20,6 +20,8 @@ type Config struct {
 	// RequiredLimits are the limits to request; zero is DefaultLimits(),
 	// passed explicitly, since wgpu's zero is the adapter's full limits.
 	RequiredLimits Limits
+	// Surface is the surface request every window starts with.
+	Surface SurfaceRequest
 }
 
 // NewPlugin returns gfx.

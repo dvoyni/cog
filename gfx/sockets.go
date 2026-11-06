@@ -69,18 +69,23 @@ type BackendDevice interface {
 	CreateCommandEncoder(descriptor CommandEncoderDescriptor) (StandaloneCommandEncoder, error)
 	Submit(buffers ...CommandBuffer) error
 
-	// AcquireFramebuffer acquires window's next framebuffer and stores its
-	// view at view's index; acquired is false when the window has none this
-	// frame. gfx calls it from a task pinned to the main thread.
-	AcquireFramebuffer(window platform.Window, view TextureView) (acquired bool, err error)
+	// SurfaceCapabilities answers what window's surface can be configured
+	// with.
+	SurfaceCapabilities(window platform.Window) SurfaceCapabilities
+	// ConfigureSurface configures window's surface, opaque, from a pinned
+	// task holding the write lock, between a present and the next acquire.
+	ConfigureSurface(window platform.Window, configuration SurfaceConfiguration) error
+
+	// AcquireFramebuffer acquires window's next framebuffer and, when status
+	// is Acquired or Suboptimal, stores its view at view's index. gfx calls it
+	// from a task pinned to the main thread.
+	AcquireFramebuffer(window platform.Window, view TextureView) (status AcquireStatus, err error)
 	// Present presents window's acquired framebuffer, from a pinned task.
 	Present(window platform.Window) error
 
 	WaitIdle() error
 	Release()
 
-	// Surface configuration is open:
-	// https://github.com/dvoyni/cog/issues/665
 	// Readback is open: https://github.com/dvoyni/cog/issues/666
 	// Device-loss detection and recovery are open:
 	// https://github.com/dvoyni/cog/issues/669

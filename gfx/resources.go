@@ -100,6 +100,10 @@ type Device interface {
 	// frame is presented, or the zero view when frame acquired none for it
 	// (minimized, hidden, or not open) or is presented.
 	Framebuffer(frame Frame, window platform.Window) TextureView
+	// SurfaceConfiguration answers what window's surface is configured
+	// with, for pipelines to target its format; false when it has none:
+	// hidden, a zero framebuffer, or not yet configured.
+	SurfaceConfiguration(window platform.Window) (SurfaceConfiguration, bool)
 
 	// CreateCommandEncoder answers an encoder outside any frame, for its
 	// owner to finish and submit.
@@ -125,8 +129,10 @@ type ExclusiveDevice interface {
 	// WaitIdle returns once the GPU has finished everything submitted.
 	WaitIdle() error
 
-	// Surface configuration is open:
-	// https://github.com/dvoyni/cog/issues/665
+	// RequestSurface replaces the surface request and marks every surface to
+	// be configured again, between frames, from the next frame on.
+	RequestSurface(request SurfaceRequest)
+
 	// Device-loss recovery is open:
 	// https://github.com/dvoyni/cog/issues/669
 }
