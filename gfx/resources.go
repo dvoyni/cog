@@ -10,15 +10,21 @@ import (
 // configurator.OrderSubscriptions. gfx offers no tasks: acquire, flush and
 // present are its own.
 type Handlers struct {
-	// Draw handles RenderEvent: it schedules the pinned acquire, publishes
-	// DrawEvent, and schedules the flush and the pinned present after the
-	// nested publication's out dependency, which it returns.
+	// Draw handles RenderEvent: it schedules a pinned configure of the
+	// surfaces marked for it, under the write lock, then the pinned acquire,
+	// each after the last present; publishes DrawEvent; and schedules the
+	// flush and the pinned present after the nested publication's out
+	// dependency, which it returns.
 	Draw kernel.Sub[RenderEvent]
 	// CreateSurface handles platform.WindowOpenedEvent: it schedules the
-	// pinned creation of the window's surface.
+	// pinned creation of the window's surface and marks it for configuring.
 	CreateSurface kernel.Sub[platform.WindowOpenedEvent]
+	// ResizeSurface handles platform.ResizeEvent: it marks the window's
+	// surface for configuring at its new framebuffer size, and schedules
+	// nothing.
+	ResizeSurface kernel.Sub[platform.ResizeEvent]
 	// ReleaseSurface handles platform.WindowClosedEvent: it schedules the
-	// pinned release of the window's surface.
+	// pinned release of the window's surface after the last present.
 	ReleaseSurface kernel.Sub[platform.WindowClosedEvent]
 }
 
