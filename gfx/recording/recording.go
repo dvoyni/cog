@@ -126,6 +126,9 @@ const (
 	// BackendDevice.ReflectComputePipelineLayout, its Arguments the
 	// gfx.ComputePipelineDescriptor.
 	CallKindReflectComputePipelineLayout
+	// CallKindReflectVertexInputs is BackendDevice.ReflectVertexInputs, its
+	// Arguments a ReflectVertexInputsArguments.
+	CallKindReflectVertexInputs
 	// CallKindWriteBuffer is BackendDevice.WriteBuffer, its Arguments a
 	// WriteBufferArguments.
 	CallKindWriteBuffer
@@ -156,12 +159,13 @@ var SurfaceCapabilities = gfx.SurfaceCapabilities{
 
 // Answer is what AnswerNext makes a call answer: Status for an acquire,
 // Capabilities for a surface's capabilities, zero for SurfaceCapabilities,
-// BindGroupLayouts for a pipeline's reflection, none when nil, Error for any
-// call.
+// BindGroupLayouts for a pipeline's reflection and VertexInputs for a vertex
+// entry point's, each none when nil, Error for any call.
 type Answer struct {
 	Status           uint8
 	Capabilities     gfx.SurfaceCapabilities
 	BindGroupLayouts []gfx.BindGroupLayoutDescriptor
+	VertexInputs     []gfx.VertexInput
 	Error            error
 }
 
@@ -312,6 +316,12 @@ type CreateRenderPipelineArguments struct {
 type CreateComputePipelineArguments struct {
 	Pipeline   gfx.ComputePipeline
 	Descriptor gfx.ComputePipelineDescriptor
+}
+
+// ReflectVertexInputsArguments are what ReflectVertexInputs was called with.
+type ReflectVertexInputsArguments struct {
+	Module     gfx.ShaderModule
+	EntryPoint string
 }
 
 // WriteBufferArguments are what WriteBuffer was called with, the data copied.

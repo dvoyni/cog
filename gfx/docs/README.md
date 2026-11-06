@@ -90,7 +90,10 @@ immediate; the GPU keeps what in-flight work still uses.
 Preprocess WGSL with `shader.Preprocess(files, path, defines)`, from `gfx/shader`, under your own
 `kernel.Read[platform.FS]`, then `CreateShaderModule`. Leave a pipeline's
 `Layout` zero for an "auto" layout reflected from its shaders, and read its
-groups back with `RenderPipelineBindGroupLayout`.
+groups back with `RenderPipelineBindGroupLayout`. Creation checks the vertex
+buffers against the shader's inputs, answering `ErrVertexMismatch` naming the
+attribute and the input, and the pipeline against the device's limits,
+answering `ErrLimitExceeded` naming the limit.
 
 Creating modules and pipelines is slow and synchronous. Do it in a task of
 your own, at load or in the background, and bound how many such tasks run at

@@ -23,3 +23,12 @@ var ErrCaptureBusy = errors.New("gfx: a capture of this window is in flight")
 // ErrCaptureUnsupported is answered by Device.RequestCapture for a window
 // whose surface is not capturable, or whose format is not 8-bit BGRA or RGBA.
 var ErrCaptureUnsupported = errors.New("gfx: this window cannot be captured")
+
+// ErrVertexMismatch is answered by Device.CreateRenderPipeline for vertex
+// buffers that do not feed the vertex shader's inputs: an input with no
+// attribute at its location, or one whose format is of another type.
+var ErrVertexMismatch = errors.New("gfx: the vertex buffers do not match the shader's inputs")
+
+// ErrLimitExceeded is answered by the pipeline creations for a pipeline past
+// the device's limits: its layout, or a render pipeline's vertex buffers.
+var ErrLimitExceeded = errors.New("gfx: past the device's limits")

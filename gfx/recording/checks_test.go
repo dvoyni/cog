@@ -71,6 +71,10 @@ func TestACreateOrReflectionNamingAMissingHandleAnswersAnError(t *testing.T) {
 			_, err := device.ReflectComputePipelineLayout(gfx.ComputePipelineDescriptor{Module: missing.module, EntryPoint: "cs"})
 			return err
 		}},
+		{"a vertex reflection of a missing module", func(device gfx.BackendDevice, _, missing objects) error {
+			_, err := device.ReflectVertexInputs(missing.module, "vs")
+			return err
+		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			instance, device := requestDevice(t)
