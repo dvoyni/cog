@@ -18,7 +18,9 @@ in this module, from the listing on
 [`prototype/gfx-listing`](https://github.com/dvoyni/cog/tree/prototype/gfx-listing/gfx).
 The device comes up and is released, every resource but query sets is
 created and released, a pipeline with a zero `Layout` getting the layouts
-the backend reflects created as explicit ones and released with it, surfaces
+the backend reflects created as explicit ones and released with it, and
+pipeline creation checks the vertex buffers against the shader's inputs and
+the pipeline against the device's limits, surfaces
 follow platform's windows, each configured from `Config.Surface`, or the
 request `RequestSurface` replaced it with, before its first acquire and
 again once resized or the request changes, hidden and zero-size windows skipped,
@@ -28,9 +30,9 @@ passes and commands with typed arguments and rejecting a handle missing at
 its index, a resource without its usage, a misaligned write, copy or clear
 and a broken pass sequence, its buffers holding the bytes written, copied
 and cleared. Writes reach the backend. The backend reflects shader modules:
-its seam declares `ReflectRenderPipelineLayout` and
-`ReflectComputePipelineLayout`, which the recording adapter answers with the
-layouts a test queues. `shader.Preprocess`, in `gfx/shader`,
+its seam declares `ReflectRenderPipelineLayout`,
+`ReflectComputePipelineLayout` and `ReflectVertexInputs`, which the recording
+adapter answers with the layouts and inputs a test queues. `shader.Preprocess`, in `gfx/shader`,
 is v1's preprocessor whole: `#include`, `#define`, `#const`, `#if` and the hoisting
 of WGSL's `enable`, `requires` and `diagnostic`. Standalone encoders are finished
 and submitted by their owner; every other body panics until its ticket fills
@@ -170,8 +172,20 @@ present and recovery itself.
   answering the ones a test queues; `RenderPipelineBindGroupLayout` and
   `ComputePipelineBindGroupLayout` answer its groups, as WebGPU's
   `getBindGroupLayout`, the pipeline owning them: they are released with
-  it. An explicit layout overrides reflection: the backend is not asked. The vertex
-  interface and the limits are checked at pipeline creation and fail loudly.
+  it. An explicit layout overrides reflection: the backend is not asked.
+- **gfx checks a pipeline before creating it, from what it can see.** The
+  backend's `ReflectVertexInputs` answers a vertex entry point's inputs, each
+  location's scalar type and component count; an input no attribute feeds,
+  none at its location or one of another type (a `Uint*` format for an `f32`
+  input), is `ErrVertexMismatch` naming both. As in WebGPU, an attribute no
+  input reads, and a component count differing from the input's, are fine.
+  The pipeline's layout, explicit or reflected, and a render pipeline's
+  vertex buffers are checked against the device's limits, the groups, a
+  binding number, each stage's bindings of each kind, the dynamic buffers,
+  the vertex buffers, a stride, an attribute's location and the attributes:
+  `ErrLimitExceeded` names the limit, before any layout is created. What
+  needs more of the shader, a workgroup's size, the inter-stage variables, is
+  the backend's.
 - **Off the frame means a task.** Creation is synchronous on every backend.
   A game creates shader modules and pipelines from a task of its own under
   `kernel.Read[Device]`, scheduled anywhere; gfx has no async call and no

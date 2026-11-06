@@ -75,6 +75,12 @@ type BackendDevice interface {
 	// ReflectComputePipelineLayout is ReflectRenderPipelineLayout for a
 	// compute pipeline.
 	ReflectComputePipelineLayout(descriptor ComputePipelineDescriptor) ([]BindGroupLayoutDescriptor, error)
+	// ReflectVertexInputs answers the inputs entryPoint of module reads at a
+	// location, builtins aside, from what the module's reflection keeps; an
+	// empty entryPoint is the module's one vertex entry point. gfx checks a
+	// render pipeline's vertex buffers against them before
+	// CreateRenderPipeline.
+	ReflectVertexInputs(module ShaderModule, entryPoint string) ([]VertexInput, error)
 	// CreateRenderPipeline gets an explicit layout: for an "auto" one, gfx
 	// creates what ReflectRenderPipelineLayout answered before calling it.
 	CreateRenderPipeline(pipeline RenderPipeline, descriptor RenderPipelineDescriptor) error

@@ -112,7 +112,10 @@ type Device interface {
 	// surface configure, and the frame behind it, waits for it; and a burst
 	// of compiles can take every worker from a frame's recording, so a game
 	// bounds how many run at once. The backend caches pipelines on disk where
-	// it can (Vulkan, DX12), outside platform's FS; gfx adds no cache.
+	// it can (Vulkan, DX12), outside platform's FS; gfx adds no cache. Vertex
+	// buffers that do not feed the vertex shader's inputs answer
+	// ErrVertexMismatch, and a layout or vertex buffers past Limits
+	// ErrLimitExceeded, each naming what failed.
 	CreateRenderPipeline(descriptor RenderPipelineDescriptor) (RenderPipeline, error)
 	ReleaseRenderPipeline(pipeline RenderPipeline)
 	// RenderPipelineBindGroupLayout answers the layout of group in
@@ -122,7 +125,8 @@ type Device interface {
 	// last.
 	RenderPipelineBindGroupLayout(pipeline RenderPipeline, group uint32) BindGroupLayout
 
-	// CreateComputePipeline creates a pipeline as CreateRenderPipeline does.
+	// CreateComputePipeline creates a pipeline as CreateRenderPipeline does,
+	// its layout checked against Limits.
 	CreateComputePipeline(descriptor ComputePipelineDescriptor) (ComputePipeline, error)
 	ReleaseComputePipeline(pipeline ComputePipeline)
 	// ComputePipelineBindGroupLayout answers the layout of group in

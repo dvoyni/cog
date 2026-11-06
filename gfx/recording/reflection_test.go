@@ -70,3 +70,28 @@ func TestAReflectionAnswersTheLayoutsQueuedForItCopiedAndNoneByDefault(t *testin
 		})
 	}
 }
+
+func TestAVertexReflectionAnswersTheInputsQueuedForItCopiedAndNoneByDefault(t *testing.T) {
+	instance, device := requestDevice(t)
+	live := createObjects(t, device, everyBufferUsage, everyTextureUsage)
+	queued := []gfx.VertexInput{{Location: 0, Type: gfx.ScalarTypeFloat32, Components: 3}}
+	want := []gfx.VertexInput{{Location: 0, Type: gfx.ScalarTypeFloat32, Components: 3}}
+	instance.AnswerNext(recording.CallKindReflectVertexInputs, recording.Answer{VertexInputs: queued})
+
+	inputs, err := device.ReflectVertexInputs(live.module, "vs")
+	mustSucceed(t, err)
+	queued[0].Location = 7
+
+	if !reflect.DeepEqual(inputs, want) {
+		t.Errorf("the reflection answered %+v, want %+v", inputs, want)
+	}
+	calls := instance.Recording().Calls
+	wantCall := recording.Call{Kind: recording.CallKindReflectVertexInputs, Arguments: recording.ReflectVertexInputsArguments{Module: live.module, EntryPoint: "vs"}}
+	if last := calls[len(calls)-1]; !reflect.DeepEqual(last, wantCall) {
+		t.Errorf("last call = %+v, want %+v", last, wantCall)
+	}
+	unqueued, err := device.ReflectVertexInputs(live.module, "vs")
+	if err != nil || unqueued != nil {
+		t.Errorf("with nothing queued the reflection answered %+v, %v, want no inputs", unqueued, err)
+	}
+}

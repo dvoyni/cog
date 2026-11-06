@@ -1,6 +1,9 @@
 package gfx
 
-import "slices"
+import (
+	"fmt"
+	"slices"
+)
 
 // Every descriptor mirrors wgpu v0.34.2's, with gfx's handles in place of
 // wgpu's objects. An optional part is a value whose zero means none, never a
@@ -427,6 +430,114 @@ func DefaultLimits() Limits {
 		MaxComputeWorkgroupSizeZ:                  64,
 		MaxComputeWorkgroupsPerDimension:          65535,
 	}
+}
+
+// checkPipelineLayout answers ErrLimitExceeded, naming the limit, for a
+// pipeline layout of groups past limits: its groups, a binding number, the
+// bindings of each kind a stage sees across its groups, or its dynamic
+// buffers.
+func (limits Limits) checkPipelineLayout(groups []BindGroupLayoutDescriptor) error {
+	if err := checkLimit(len(groups), "bind groups", "MaxBindGroups", limits.MaxBindGroups); err != nil {
+		return err
+	}
+	for groupIndex, group := range groups {
+		for _, entry := range group.Entries {
+			if entry.Binding >= limits.MaxBindingsPerBindGroup {
+				return fmt.Errorf("%w: binding %d in group %d, MaxBindingsPerBindGroup is %d", ErrLimitExceeded, entry.Binding, groupIndex, limits.MaxBindingsPerBindGroup)
+			}
+		}
+	}
+	isUniform := func(entry BindGroupLayoutEntry) bool { return entry.Buffer.Type == BufferBindingTypeUniform }
+	isStorage := func(entry BindGroupLayoutEntry) bool {
+		return entry.Buffer.Type == BufferBindingTypeStorage || entry.Buffer.Type == BufferBindingTypeReadOnlyStorage
+	}
+	stageNames := map[ShaderStageFlags]string{
+		ShaderStageFlagVertex:   " in the vertex stage",
+		ShaderStageFlagFragment: " in the fragment stage",
+		ShaderStageFlagCompute:  " in the compute stage",
+	}
+	for _, binding := range []struct {
+		what      string
+		limitName string
+		limit     uint32
+		// perStage counts the bindings each stage sees; otherwise every
+		// binding counts once.
+		perStage bool
+		counts   func(entry BindGroupLayoutEntry) bool
+	}{
+		{"uniform buffers", "MaxUniformBuffersPerShaderStage", limits.MaxUniformBuffersPerShaderStage, true, isUniform},
+		{"storage buffers", "MaxStorageBuffersPerShaderStage", limits.MaxStorageBuffersPerShaderStage, true, isStorage},
+		{"samplers", "MaxSamplersPerShaderStage", limits.MaxSamplersPerShaderStage, true,
+			func(entry BindGroupLayoutEntry) bool { return entry.Sampler.Type != SamplerBindingTypeUndefined }},
+		{"sampled textures", "MaxSampledTexturesPerShaderStage", limits.MaxSampledTexturesPerShaderStage, true,
+			func(entry BindGroupLayoutEntry) bool { return entry.Texture.SampleType != TextureSampleTypeUndefined }},
+		{"storage textures", "MaxStorageTexturesPerShaderStage", limits.MaxStorageTexturesPerShaderStage, true,
+			func(entry BindGroupLayoutEntry) bool {
+				return entry.StorageTexture.Access != StorageTextureAccessUndefined
+			}},
+		{"dynamic uniform buffers", "MaxDynamicUniformBuffersPerPipelineLayout", limits.MaxDynamicUniformBuffersPerPipelineLayout, false,
+			func(entry BindGroupLayoutEntry) bool { return entry.Buffer.HasDynamicOffset && isUniform(entry) }},
+		{"dynamic storage buffers", "MaxDynamicStorageBuffersPerPipelineLayout", limits.MaxDynamicStorageBuffersPerPipelineLayout, false,
+			func(entry BindGroupLayoutEntry) bool { return entry.Buffer.HasDynamicOffset && isStorage(entry) }},
+	} {
+		stages := []ShaderStageFlags{ShaderStageFlagNone}
+		if binding.perStage {
+			stages = []ShaderStageFlags{ShaderStageFlagVertex, ShaderStageFlagFragment, ShaderStageFlagCompute}
+		}
+		for _, stage := range stages {
+			count := 0
+			for _, group := range groups {
+				for _, entry := range group.Entries {
+					if (stage == ShaderStageFlagNone || entry.Visibility&stage != 0) && binding.counts(entry) {
+						count++
+					}
+				}
+			}
+			if err := checkLimit(count, binding.what+stageNames[stage], binding.limitName, binding.limit); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// checkRenderPipeline answers ErrLimitExceeded, naming the limit, for a
+// render pipeline of groups and buffers past limits: its layout, as
+// checkPipelineLayout checks it, its vertex buffers, a stride, an
+// attribute's location, its attributes across its buffers, or its groups
+// and buffers together.
+func (limits Limits) checkRenderPipeline(groups []BindGroupLayoutDescriptor, buffers []VertexBufferLayout) error {
+	if err := limits.checkPipelineLayout(groups); err != nil {
+		return err
+	}
+	if err := checkLimit(len(buffers), "vertex buffers", "MaxVertexBuffers", limits.MaxVertexBuffers); err != nil {
+		return err
+	}
+	if err := checkLimit(len(groups)+len(buffers), "bind groups and vertex buffers", "MaxBindGroupsPlusVertexBuffers", limits.MaxBindGroupsPlusVertexBuffers); err != nil {
+		return err
+	}
+	attributeCount := 0
+	for bufferIndex, buffer := range buffers {
+		if buffer.ArrayStride > uint64(limits.MaxVertexBufferArrayStride) {
+			return fmt.Errorf("%w: vertex buffer %d's stride %d, MaxVertexBufferArrayStride is %d", ErrLimitExceeded, bufferIndex, buffer.ArrayStride, limits.MaxVertexBufferArrayStride)
+		}
+		for _, attribute := range buffer.Attributes {
+			if attribute.ShaderLocation >= limits.MaxVertexAttributes {
+				return fmt.Errorf("%w: vertex buffer %d's attribute at location %d, MaxVertexAttributes is %d", ErrLimitExceeded, bufferIndex, attribute.ShaderLocation, limits.MaxVertexAttributes)
+			}
+		}
+		attributeCount += len(buffer.Attributes)
+	}
+	return checkLimit(attributeCount, "vertex attributes", "MaxVertexAttributes", limits.MaxVertexAttributes)
+}
+
+// checkLimit answers ErrLimitExceeded, naming what is counted and the limit,
+// when count is past limit.
+func checkLimit(count int, what, limitName string, limit uint32) error {
+	if count > int(limit) {
+		return fmt.Errorf("%w: %d %s, %s is %d", ErrLimitExceeded, count, what, limitName, limit)
+	}
+	return nil
 }
 
 // RequestAdapterOptions select the adapter gfx requests in Start.

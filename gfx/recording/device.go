@@ -234,6 +234,17 @@ func (d *device) ReflectComputePipelineLayout(descriptor gfx.ComputePipelineDesc
 	return cloneLayouts(answer.BindGroupLayouts), answer.Error
 }
 
+// ReflectVertexInputs records the reflection and answers the VertexInputs
+// AnswerNext queued, copied, or none, as ReflectRenderPipelineLayout does;
+// an error when module is missing.
+func (d *device) ReflectVertexInputs(module gfx.ShaderModule, entryPoint string) ([]gfx.VertexInput, error) {
+	answer := d.instance.record(CallKindReflectVertexInputs, ReflectVertexInputsArguments{Module: module, EntryPoint: entryPoint}, func() error {
+		_, err := requireObject(&d.shaderModules, module, "the vertex module")
+		return err
+	})
+	return slices.Clone(answer.VertexInputs), answer.Error
+}
+
 // CreateComputePipeline records the creation and keeps pipeline at its
 // index; an error when its layout or module is missing.
 func (d *device) CreateComputePipeline(pipeline gfx.ComputePipeline, descriptor gfx.ComputePipelineDescriptor) error {

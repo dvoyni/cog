@@ -178,12 +178,25 @@ func (d *device) CreateRenderPipeline(descriptor RenderPipelineDescriptor) (Rend
 	if descriptor.Fragment.Module != (ShaderModule{}) && d.shaderModules.check(descriptor.Fragment.Module) != nil {
 		return RenderPipeline{}, fmt.Errorf("%w: the fragment module", ErrReleased)
 	}
+	inputs, err := d.backend.ReflectVertexInputs(descriptor.Vertex.Module, descriptor.Vertex.EntryPoint)
+	if err != nil {
+		return RenderPipeline{}, err
+	}
+	if err := checkVertexInputs(descriptor.Vertex, inputs); err != nil {
+		return RenderPipeline{}, err
+	}
 	source := pipelineSource[RenderPipelineDescriptor]{descriptor: descriptor.clone()}
-	if source.descriptor.Layout == (PipelineLayout{}) {
-		groups, err := d.backend.ReflectRenderPipelineLayout(source.descriptor)
-		if err != nil {
+	autoLayout := source.descriptor.Layout == (PipelineLayout{})
+	groups := d.groupDescriptors(source.descriptor.Layout)
+	if autoLayout {
+		if groups, err = d.backend.ReflectRenderPipelineLayout(source.descriptor); err != nil {
 			return RenderPipeline{}, err
 		}
+	}
+	if err := d.limits.checkRenderPipeline(groups, source.descriptor.Vertex.Buffers); err != nil {
+		return RenderPipeline{}, err
+	}
+	if autoLayout {
 		if source.descriptor.Layout, err = d.createAutoLayout(groups); err != nil {
 			return RenderPipeline{}, err
 		}
@@ -224,11 +237,18 @@ func (d *device) CreateComputePipeline(descriptor ComputePipelineDescriptor) (Co
 	}
 	descriptor.Constants = maps.Clone(descriptor.Constants)
 	source := pipelineSource[ComputePipelineDescriptor]{descriptor: descriptor}
-	if source.descriptor.Layout == (PipelineLayout{}) {
-		groups, err := d.backend.ReflectComputePipelineLayout(source.descriptor)
-		if err != nil {
+	autoLayout := source.descriptor.Layout == (PipelineLayout{})
+	groups := d.groupDescriptors(source.descriptor.Layout)
+	var err error
+	if autoLayout {
+		if groups, err = d.backend.ReflectComputePipelineLayout(source.descriptor); err != nil {
 			return ComputePipeline{}, err
 		}
+	}
+	if err := d.limits.checkPipelineLayout(groups); err != nil {
+		return ComputePipeline{}, err
+	}
+	if autoLayout {
 		if source.descriptor.Layout, err = d.createAutoLayout(groups); err != nil {
 			return ComputePipeline{}, err
 		}
@@ -347,6 +367,17 @@ func (d *device) releaseAutoLayout(layout PipelineLayout) {
 	for _, groupLayout := range descriptor.BindGroupLayouts {
 		d.ReleaseBindGroupLayout(groupLayout)
 	}
+}
+
+// groupDescriptors answers the descriptors of layout's bind-group layouts,
+// none for the zero layout.
+func (d *device) groupDescriptors(layout PipelineLayout) []BindGroupLayoutDescriptor {
+	descriptor, _ := d.pipelineLayouts.descriptor(layout)
+	groups := make([]BindGroupLayoutDescriptor, len(descriptor.BindGroupLayouts))
+	for index, groupLayout := range descriptor.BindGroupLayouts {
+		groups[index], _ = d.bindGroupLayouts.descriptor(groupLayout)
+	}
+	return groups
 }
 
 // groupLayout answers the layout of group in layout, or the zero layout when

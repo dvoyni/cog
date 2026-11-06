@@ -24,8 +24,11 @@ type pipelineKind struct {
 	// createdArguments answers the arguments CreateRenderPipeline or
 	// CreateComputePipeline records for pipeline and descriptor.
 	createdArguments func(pipeline any, descriptor any) any
-	groupLayout      func(device gfx.Device, pipeline any, group uint32) gfx.BindGroupLayout
-	releasePipeline  func(device gfx.Device, pipeline any)
+	// checks answers the calls a creation of descriptor makes before any
+	// other: a render pipeline's vertex reflection, none for compute.
+	checks          func(descriptor any) []recording.Call
+	groupLayout     func(device gfx.Device, pipeline any, group uint32) gfx.BindGroupLayout
+	releasePipeline func(device gfx.Device, pipeline any)
 }
 
 var pipelineKinds = []pipelineKind{
@@ -47,6 +50,10 @@ var pipelineKinds = []pipelineKind{
 		},
 		createdArguments: func(pipeline any, descriptor any) any {
 			return recording.CreateRenderPipelineArguments{Pipeline: pipeline.(gfx.RenderPipeline), Descriptor: descriptor.(gfx.RenderPipelineDescriptor)}
+		},
+		checks: func(descriptor any) []recording.Call {
+			vertex := descriptor.(gfx.RenderPipelineDescriptor).Vertex
+			return []recording.Call{{Kind: recording.CallKindReflectVertexInputs, Arguments: recording.ReflectVertexInputsArguments{Module: vertex.Module, EntryPoint: vertex.EntryPoint}}}
 		},
 		groupLayout: func(device gfx.Device, pipeline any, group uint32) gfx.BindGroupLayout {
 			return device.RenderPipelineBindGroupLayout(pipeline.(gfx.RenderPipeline), group)
@@ -72,6 +79,7 @@ var pipelineKinds = []pipelineKind{
 		createdArguments: func(pipeline any, descriptor any) any {
 			return recording.CreateComputePipelineArguments{Pipeline: pipeline.(gfx.ComputePipeline), Descriptor: descriptor.(gfx.ComputePipelineDescriptor)}
 		},
+		checks: func(any) []recording.Call { return []recording.Call{} },
 		groupLayout: func(device gfx.Device, pipeline any, group uint32) gfx.BindGroupLayout {
 			return device.ComputePipelineBindGroupLayout(pipeline.(gfx.ComputePipeline), group)
 		},
@@ -109,10 +117,12 @@ func TestAnAutoPipelineGetsTheReflectedLayoutsCreatedAsExplicitOnes(t *testing.T
 				}
 
 				calls := h.instance.Recording().Calls[before:]
-				if len(calls) != 5 {
-					t.Errorf("the auto pipeline made %d calls, want the reflection, two group layouts, a pipeline layout and the pipeline: %+v", len(calls), calls)
+				checks := kind.checks(descriptor)
+				if len(calls) != len(checks)+5 || !reflect.DeepEqual(calls[:len(checks)], checks) {
+					t.Errorf("the auto pipeline made calls %+v, want %+v, then the reflection, two group layouts, a pipeline layout and the pipeline", calls, checks)
 					return
 				}
+				calls = calls[len(checks):]
 				if want := (recording.Call{Kind: kind.reflect, Arguments: descriptor}); !reflect.DeepEqual(calls[0], want) {
 					t.Errorf("first call = %+v, want %+v", calls[0], want)
 				}
@@ -162,7 +172,7 @@ func TestAnExplicitLayoutOverridesReflection(t *testing.T) {
 				}
 
 				calls := h.instance.Recording().Calls[before:]
-				want := []recording.Call{{Kind: kind.create, Arguments: kind.createdArguments(pipeline, descriptor)}}
+				want := append(kind.checks(descriptor), recording.Call{Kind: kind.create, Arguments: kind.createdArguments(pipeline, descriptor)})
 				if !reflect.DeepEqual(calls, want) {
 					t.Errorf("the pipeline made calls %+v, want %+v alone", calls, want)
 				}

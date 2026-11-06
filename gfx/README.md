@@ -11,7 +11,9 @@ materials, scenes or the ECS.
 Status: being built. Every declaration is in this module. The device comes
 up in `Start` and is released in `Destroy`, every resource but query sets
 is created and released, a pipeline with a zero layout getting the
-layouts the backend reflects created as explicit ones, each
+layouts the backend reflects created as explicit ones, pipeline
+creation checking the vertex buffers against the shader's inputs and the
+pipeline against the device's limits, each
 window's surface is created when it opens, configured before its first
 acquire and again once resized or `RequestSurface` changes the request, skipped while hidden or zero-size, and
 released after the last present when it closes, and each render beat
@@ -22,7 +24,7 @@ backend; the recording adapter rejects a handle missing at its index, a
 resource without its usage, a misaligned write, copy or clear and a broken
 pass sequence, and its buffers hold the bytes written, copied and cleared,
 which its own maps read, and answers a pipeline's reflection with the
-layouts a test queues; `shader.Preprocess` is v1's preprocessor whole;
+layouts a test queues, and a vertex entry point's with its inputs; `shader.Preprocess` is v1's preprocessor whole;
 every other body panics until its ticket on the
 [gfx map](https://github.com/dvoyni/cog/issues/608) fills it.
 
