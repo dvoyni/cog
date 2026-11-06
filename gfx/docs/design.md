@@ -21,7 +21,8 @@ created and released, pipelines with explicit layouts only, surfaces
 follow platform's windows, though nothing configures them yet, and the frame
 chain acquires, publishes `DrawEvent`, flushes the frame's encoders and
 presents, the recording adapter recording their passes and commands with
-typed arguments; every other body panics until its ticket fills it. The
+typed arguments. Standalone encoders are finished and submitted by their
+owner; every other body panics until its ticket fills it. The
 vocabulary is in [`CONTEXT.md`](../CONTEXT.md); the ADRs are in
 [`adr/`](adr).
 

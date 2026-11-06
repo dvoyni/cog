@@ -47,6 +47,10 @@ const (
 	// CallKindFinish is an encoder's Finish, with no Arguments; an Error
 	// answered fails it.
 	CallKindFinish
+	// CallKindSubmit is BackendDevice.Submit, with no Arguments, its buffers
+	// the Submission recorded; an Error answered fails it, and nothing is
+	// submitted.
+	CallKindSubmit
 	// CallKindCreateBuffer is BackendDevice.CreateBuffer, its Arguments a
 	// CreateBufferArguments.
 	CallKindCreateBuffer

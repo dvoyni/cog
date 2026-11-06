@@ -217,6 +217,110 @@ func TestFramesWithNoWindowEachHoldTheirSubmission(t *testing.T) {
 	}
 }
 
+func TestStandaloneEncodersAreFinishedAndSubmittedInTheOrderGiven(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	buffers := h.createBuffers(2)
+
+	h.readDevice(func(device gfx.Device) {
+		var commandBuffers []gfx.CommandBuffer
+		for _, buffer := range []gfx.Buffer{buffers[1], buffers[0]} {
+			encoder, err := device.CreateCommandEncoder(gfx.CommandEncoderDescriptor{})
+			mustSucceed(t, err)
+			encoder.ClearBuffer(buffer, 0, 4)
+			commandBuffer, err := encoder.Finish()
+			mustSucceed(t, err)
+			commandBuffers = append(commandBuffers, commandBuffer)
+		}
+		if err := device.Submit(commandBuffers...); err != nil {
+			t.Errorf("Submit answered %v", err)
+		}
+	})
+
+	want := []recording.Submission{submissionOf(buffers[1], buffers[0])}
+	if submissions := h.instance.Recording().Submissions; !reflect.DeepEqual(submissions, want) {
+		t.Errorf("submissions = %+v, want %+v", submissions, want)
+	}
+}
+
+func TestAFailingFinishOfAStandaloneEncoderIsAnsweredNotLogged(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	buffers := h.createBuffers(1)
+	failure := errors.New("finish failed")
+	h.instance.AnswerNext(recording.CallKindFinish, recording.Answer{Error: failure})
+
+	h.readDevice(func(device gfx.Device) {
+		encoder, err := device.CreateCommandEncoder(gfx.CommandEncoderDescriptor{})
+		mustSucceed(t, err)
+		encoder.ClearBuffer(buffers[0], 0, 4)
+		if commandBuffer, err := encoder.Finish(); !errors.Is(err, failure) || commandBuffer != nil {
+			t.Errorf("Finish answered %v, %v, want no buffer and %v", commandBuffer, err, failure)
+		}
+	})
+
+	if logged := h.takeLogged(); len(logged) != 0 {
+		t.Errorf("logged %v, want nothing", logged)
+	}
+}
+
+func TestADiscardedStandaloneEncoderCannotBeFinished(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	buffers := h.createBuffers(1)
+
+	h.readDevice(func(device gfx.Device) {
+		encoder, err := device.CreateCommandEncoder(gfx.CommandEncoderDescriptor{})
+		mustSucceed(t, err)
+		encoder.ClearBuffer(buffers[0], 0, 4)
+		encoder.DiscardEncoding()
+		if commandBuffer, err := encoder.Finish(); err == nil || commandBuffer != nil {
+			t.Errorf("Finish after DiscardEncoding answered %v, %v, want no buffer and an error", commandBuffer, err)
+		}
+	})
+}
+
+func TestAStandaloneEncoderFinishedTwiceAnswersAnError(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+
+	h.readDevice(func(device gfx.Device) {
+		encoder, err := device.CreateCommandEncoder(gfx.CommandEncoderDescriptor{})
+		mustSucceed(t, err)
+		_, err = encoder.Finish()
+		mustSucceed(t, err)
+		if commandBuffer, err := encoder.Finish(); err == nil || commandBuffer != nil {
+			t.Errorf("the second Finish answered %v, %v, want no buffer and an error", commandBuffer, err)
+		}
+	})
+}
+
+func TestAFailingSubmitIsAnsweredAndSubmitsNothing(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	buffers := h.createBuffers(1)
+	failure := errors.New("submit failed")
+	h.instance.AnswerNext(recording.CallKindSubmit, recording.Answer{Error: failure})
+
+	h.readDevice(func(device gfx.Device) {
+		encoder, err := device.CreateCommandEncoder(gfx.CommandEncoderDescriptor{})
+		mustSucceed(t, err)
+		encoder.ClearBuffer(buffers[0], 0, 4)
+		commandBuffer, err := encoder.Finish()
+		mustSucceed(t, err)
+		if err := device.Submit(commandBuffer); !errors.Is(err, failure) {
+			t.Errorf("Submit answered %v, want %v", err, failure)
+		}
+	})
+
+	if submissions := h.instance.Recording().Submissions; len(submissions) != 0 {
+		t.Errorf("submissions = %+v after a failing Submit, want none", submissions)
+	}
+	if logged := h.takeLogged(); len(logged) != 0 {
+		t.Errorf("logged %v, want nothing", logged)
+	}
+}
+
 // submissionOf answers the submission of one command buffer per buffer, each
 // clearing its buffer's first 4 bytes.
 func submissionOf(buffers ...gfx.Buffer) recording.Submission {

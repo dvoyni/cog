@@ -236,10 +236,10 @@ func (d *device) SurfaceConfiguration(window platform.Window) (SurfaceConfigurat
 }
 
 func (d *device) CreateCommandEncoder(descriptor CommandEncoderDescriptor) (StandaloneCommandEncoder, error) {
-	panic("gfx listing: no bodies")
+	return d.backend.CreateCommandEncoder(descriptor)
 }
 
-func (d *device) Submit(buffers ...CommandBuffer) error { panic("gfx listing: no bodies") }
+func (d *device) Submit(buffers ...CommandBuffer) error { return d.backend.Submit(buffers...) }
 
 func (d *device) MapBuffer(buffer Buffer, mode MapMode, offset, size uint64) error {
 	panic("gfx listing: no bodies")
