@@ -176,10 +176,12 @@ type Device interface {
 	// MappedRange answers the mapped bytes of buffer's range, valid until
 	// UnmapBuffer; offset is a multiple of 8 and size of 4.
 	MappedRange(buffer Buffer, offset, size uint64) ([]byte, error)
-	// UnmapBuffer ends buffer's map.
+	// UnmapBuffer ends buffer's map. A map ended before it resolves, by
+	// UnmapBuffer or ReleaseBuffer, publishes no BufferMappedEvent.
 	UnmapBuffer(buffer Buffer) error
 	// Poll resolves the maps whose submits have finished, without waiting,
-	// publishing their events; every submit polls too.
+	// publishing their events from the calling job; every submit, and every
+	// frame's flush, polls too.
 	Poll()
 
 	// RequestCapture asks for window's framebuffer in the next frame: gfx's

@@ -29,7 +29,9 @@ the frame's encoders and presents, the recording adapter recording their
 passes and commands with typed arguments and rejecting a handle missing at
 its index, a resource without its usage, a misaligned write, copy or clear
 and a broken pass sequence, its buffers holding the bytes written, copied
-and cleared. Writes reach the backend. The backend reflects shader modules:
+and cleared. Writes reach the backend. Buffers map asynchronously: each
+poll, at `Poll`, every submit and every frame's flush, publishes
+`BufferMappedEvent` for the maps resolved. The backend reflects shader modules:
 its seam declares `ReflectRenderPipelineLayout`,
 `ReflectComputePipelineLayout` and `ReflectVertexInputs`, which the recording
 adapter answers with the layouts and inputs a test queues. `shader.Preprocess`, in `gfx/shader`,
@@ -319,8 +321,10 @@ present and recovery itself.
 ([Readback and capture](https://github.com/dvoyni/cog/issues/666))
 
 - **Maps are asynchronous only.** `Device.MapBuffer` starts one; gfx checks
-  its pending maps after every submit and publishes `BufferMappedEvent{Buffer,
-  Status}` from that job. A handler's task reads `MappedRange` until
+  its pending maps after every submit and every frame's flush, submitting or
+  not, and publishes `BufferMappedEvent{Buffer, Status}` from that job. A map
+  ended before it resolves, by `UnmapBuffer` or `ReleaseBuffer`, publishes
+  nothing. A handler's task reads `MappedRange` until
   `UnmapBuffer`. `Device.Poll` resolves finished maps for a kernel with no
   frames running. There is no blocking map: it would wait for the whole
   device to go idle.

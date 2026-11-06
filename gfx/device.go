@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"sync"
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/platform"
@@ -18,8 +19,9 @@ type device struct {
 	features    FeatureFlags
 	limits      Limits
 	adapterInfo AdapterInfo
-	// logger is the kernel's, for what a call answers no error for.
-	logger *kernel.Logger
+	// kernel is gfx's: BufferMappedEvent is published on it, and what a call
+	// answers no error for goes to its logger.
+	kernel *kernel.Kernel
 	// surfaces are the windows with a surface, in the order they got it;
 	// only jobs holding the write lock change it.
 	surfaces []platform.Window
@@ -29,6 +31,11 @@ type device struct {
 	// only jobs holding the write lock change them.
 	configurations map[platform.Window]SurfaceConfiguration
 	frames         framePool
+	// mapMutex guards pendingMaps, the buffers whose maps MapBuffer started
+	// and no poll has found resolved, and is held across the poll's checks,
+	// so two polls never publish one map twice.
+	mapMutex    sync.Mutex
+	pendingMaps []Buffer
 	// Each table holds its type's handles with what each was created with,
 	// slices copied, which a recovery creates it again from.
 	buffers          table[Buffer, BufferDescriptor]
@@ -54,7 +61,7 @@ func (d *device) CreateBuffer(descriptor BufferDescriptor) (Buffer, error) {
 }
 
 func (d *device) ReleaseBuffer(buffer Buffer) {
-	releaseResource(d.logger, &d.buffers, buffer, d.backend.ReleaseBuffer)
+	releaseResource(d.kernel.Logger(), &d.buffers, buffer, d.backend.ReleaseBuffer)
 }
 
 func (d *device) BufferDescriptor(buffer Buffer) BufferDescriptor {
@@ -68,7 +75,7 @@ func (d *device) CreateTexture(descriptor TextureDescriptor) (Texture, error) {
 }
 
 func (d *device) ReleaseTexture(texture Texture) {
-	releaseResource(d.logger, &d.textures, texture, d.backend.ReleaseTexture)
+	releaseResource(d.kernel.Logger(), &d.textures, texture, d.backend.ReleaseTexture)
 }
 
 func (d *device) TextureDescriptor(texture Texture) TextureDescriptor {
@@ -88,7 +95,7 @@ func (d *device) CreateTextureView(texture Texture, descriptor TextureViewDescri
 }
 
 func (d *device) ReleaseTextureView(view TextureView) {
-	releaseResource(d.logger, &d.textureViews, view, d.backend.ReleaseTextureView)
+	releaseResource(d.kernel.Logger(), &d.textureViews, view, d.backend.ReleaseTextureView)
 }
 
 func (d *device) TextureViewTexture(view TextureView) Texture {
@@ -101,7 +108,7 @@ func (d *device) CreateSampler(descriptor SamplerDescriptor) (Sampler, error) {
 }
 
 func (d *device) ReleaseSampler(sampler Sampler) {
-	releaseResource(d.logger, &d.samplers, sampler, d.backend.ReleaseSampler)
+	releaseResource(d.kernel.Logger(), &d.samplers, sampler, d.backend.ReleaseSampler)
 }
 
 func (d *device) CreateQuerySet(descriptor QuerySetDescriptor) (QuerySet, error) {
@@ -117,7 +124,7 @@ func (d *device) CreateShaderModule(descriptor ShaderModuleDescriptor) (ShaderMo
 }
 
 func (d *device) ReleaseShaderModule(module ShaderModule) {
-	releaseResource(d.logger, &d.shaderModules, module, d.backend.ReleaseShaderModule)
+	releaseResource(d.kernel.Logger(), &d.shaderModules, module, d.backend.ReleaseShaderModule)
 }
 
 func (d *device) CreateBindGroupLayout(descriptor BindGroupLayoutDescriptor) (BindGroupLayout, error) {
@@ -126,7 +133,7 @@ func (d *device) CreateBindGroupLayout(descriptor BindGroupLayoutDescriptor) (Bi
 }
 
 func (d *device) ReleaseBindGroupLayout(layout BindGroupLayout) {
-	releaseResource(d.logger, &d.bindGroupLayouts, layout, d.backend.ReleaseBindGroupLayout)
+	releaseResource(d.kernel.Logger(), &d.bindGroupLayouts, layout, d.backend.ReleaseBindGroupLayout)
 }
 
 func (d *device) CreateBindGroup(descriptor BindGroupDescriptor) (BindGroup, error) {
@@ -149,7 +156,7 @@ func (d *device) CreateBindGroup(descriptor BindGroupDescriptor) (BindGroup, err
 }
 
 func (d *device) ReleaseBindGroup(group BindGroup) {
-	releaseResource(d.logger, &d.bindGroups, group, d.backend.ReleaseBindGroup)
+	releaseResource(d.kernel.Logger(), &d.bindGroups, group, d.backend.ReleaseBindGroup)
 }
 
 func (d *device) CreatePipelineLayout(descriptor PipelineLayoutDescriptor) (PipelineLayout, error) {
@@ -163,7 +170,7 @@ func (d *device) CreatePipelineLayout(descriptor PipelineLayoutDescriptor) (Pipe
 }
 
 func (d *device) ReleasePipelineLayout(layout PipelineLayout) {
-	releaseResource(d.logger, &d.pipelineLayouts, layout, d.backend.ReleasePipelineLayout)
+	releaseResource(d.kernel.Logger(), &d.pipelineLayouts, layout, d.backend.ReleasePipelineLayout)
 }
 
 func (d *device) CreateRenderPipeline(descriptor RenderPipelineDescriptor) (RenderPipeline, error) {
@@ -213,7 +220,7 @@ func (d *device) CreateRenderPipeline(descriptor RenderPipelineDescriptor) (Rend
 
 func (d *device) ReleaseRenderPipeline(pipeline RenderPipeline) {
 	source, _ := d.renderPipelines.descriptor(pipeline)
-	releaseResource(d.logger, &d.renderPipelines, pipeline, func(pipeline RenderPipeline) {
+	releaseResource(d.kernel.Logger(), &d.renderPipelines, pipeline, func(pipeline RenderPipeline) {
 		d.backend.ReleaseRenderPipeline(pipeline)
 		if source.autoLayout {
 			d.releaseAutoLayout(source.descriptor.Layout)
@@ -265,7 +272,7 @@ func (d *device) CreateComputePipeline(descriptor ComputePipelineDescriptor) (Co
 
 func (d *device) ReleaseComputePipeline(pipeline ComputePipeline) {
 	source, _ := d.computePipelines.descriptor(pipeline)
-	releaseResource(d.logger, &d.computePipelines, pipeline, func(pipeline ComputePipeline) {
+	releaseResource(d.kernel.Logger(), &d.computePipelines, pipeline, func(pipeline ComputePipeline) {
 		d.backend.ReleaseComputePipeline(pipeline)
 		if source.autoLayout {
 			d.releaseAutoLayout(source.descriptor.Layout)
@@ -317,19 +324,68 @@ func (d *device) CreateCommandEncoder(descriptor CommandEncoderDescriptor) (Stan
 	return d.backend.CreateCommandEncoder(descriptor)
 }
 
-func (d *device) Submit(buffers ...CommandBuffer) error { return d.backend.Submit(buffers...) }
+// Submit submits buffers, then polls the maps, even when the submit fails.
+func (d *device) Submit(buffers ...CommandBuffer) error {
+	err := d.backend.Submit(buffers...)
+	d.Poll()
+	return err
+}
 
 func (d *device) MapBuffer(buffer Buffer, mode MapMode, offset, size uint64) error {
-	panic("gfx listing: no bodies")
+	if err := d.buffers.check(buffer); err != nil {
+		return err
+	}
+	if err := d.backend.MapBuffer(buffer, mode, offset, size); err != nil {
+		return err
+	}
+	d.mapMutex.Lock()
+	defer d.mapMutex.Unlock()
+	d.pendingMaps = append(d.pendingMaps, buffer)
+	return nil
 }
 
 func (d *device) MappedRange(buffer Buffer, offset, size uint64) ([]byte, error) {
-	panic("gfx listing: no bodies")
+	if err := d.buffers.check(buffer); err != nil {
+		return nil, err
+	}
+	return d.backend.MappedRange(buffer, offset, size)
 }
 
-func (d *device) UnmapBuffer(buffer Buffer) error { panic("gfx listing: no bodies") }
+// UnmapBuffer ends buffer's map; one not yet resolved publishes nothing.
+func (d *device) UnmapBuffer(buffer Buffer) error {
+	if err := d.buffers.check(buffer); err != nil {
+		return err
+	}
+	d.dropPendingMap(buffer)
+	return d.backend.UnmapBuffer(buffer)
+}
 
-func (d *device) Poll() { panic("gfx listing: no bodies") }
+// Poll has the backend resolve its finished maps, then publishes
+// BufferMappedEvent, from this job, for each pending map now resolved. A
+// pending map whose buffer was released, or whose status the backend
+// answers an error for, is dropped and publishes nothing.
+func (d *device) Poll() {
+	d.backend.Poll()
+	d.mapMutex.Lock()
+	var resolved []Buffer
+	d.pendingMaps = slices.DeleteFunc(d.pendingMaps, func(buffer Buffer) bool {
+		if d.buffers.check(buffer) != nil {
+			return true
+		}
+		ready, err := d.backend.MapStatus(buffer)
+		if err != nil {
+			return true
+		}
+		if ready {
+			resolved = append(resolved, buffer)
+		}
+		return ready
+	})
+	d.mapMutex.Unlock()
+	for _, buffer := range resolved {
+		d.kernel.Publish(BufferMappedEvent{Buffer: buffer, Status: MapStatusMapped})
+	}
+}
 
 func (d *device) RequestCapture(window platform.Window) error { panic("gfx listing: no bodies") }
 
@@ -357,6 +413,15 @@ func (d *device) createAutoLayout(groups []BindGroupLayoutDescriptor) (PipelineL
 		return PipelineLayout{}, err
 	}
 	return layout, nil
+}
+
+// dropPendingMap drops buffer's pending map, if it has one.
+func (d *device) dropPendingMap(buffer Buffer) {
+	d.mapMutex.Lock()
+	defer d.mapMutex.Unlock()
+	if index := slices.Index(d.pendingMaps, buffer); index >= 0 {
+		d.pendingMaps = slices.Delete(d.pendingMaps, index, index+1)
+	}
 }
 
 // releaseAutoLayout releases layout, which createAutoLayout created, and the
