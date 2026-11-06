@@ -79,3 +79,11 @@ type ComputePipeline struct{ index, generation uint32 }
 // Index answers the slot computePipeline names in gfx's table, where a backend keeps
 // its native object; it is for backends, not for users.
 func (handle ComputePipeline) Index() uint32 { return handle.index }
+
+// QuerySet names a query set: occlusion or timestamp queries, resolved into a
+// buffer with CommandEncoder.ResolveQuerySet.
+type QuerySet struct{ index, generation uint32 }
+
+// Index answers the slot querySet names in gfx's table, where a backend keeps
+// its native object; it is for backends, not for users.
+func (handle QuerySet) Index() uint32 { return handle.index }

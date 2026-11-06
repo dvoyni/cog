@@ -2,6 +2,7 @@ package gfx
 
 import (
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/metronome"
 	"github.com/dvoyni/cog/platform"
 )
 
@@ -25,6 +26,10 @@ type Config struct {
 	RequiredLimits Limits
 	// Surface is the surface request every window starts with.
 	Surface SurfaceRequest
+	// Clock is what gfx reads DrawEvent's durations from: the clock given to
+	// metronome, so a test's manual clock makes them deterministic. Nil is
+	// metronome's WallClock.
+	Clock metronome.Clock
 }
 
 // NewPlugin returns gfx.

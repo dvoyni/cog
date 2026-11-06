@@ -252,6 +252,8 @@ type RenderPassDescriptor struct {
 	Label                  string
 	ColorAttachments       []RenderPassColorAttachment
 	DepthStencilAttachment RenderPassDepthStencilAttachment
+	// TimestampWrites is where the pass writes its timestamps; zero is none.
+	TimestampWrites PassTimestampWrites
 }
 
 // RenderPassColorAttachment is one color attachment; a zero ResolveTarget is
@@ -280,6 +282,8 @@ type RenderPassDepthStencilAttachment struct {
 // ComputePassDescriptor describes a compute pass.
 type ComputePassDescriptor struct {
 	Label string
+	// TimestampWrites is where the pass writes its timestamps; zero is none.
+	TimestampWrites PassTimestampWrites
 }
 
 // ImageCopyTexture is a texture region's origin, for copies and writes.

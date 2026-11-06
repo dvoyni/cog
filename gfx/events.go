@@ -1,6 +1,8 @@
 package gfx
 
 import (
+	"time"
+
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/metronome"
 )
@@ -25,6 +27,14 @@ type DrawEvent struct {
 	// Ready is the acquire job, after the previous frame's present;
 	// recording starts after it.
 	Ready kernel.JobHandle
+	// AcquireWait is how long the previous frame's acquire blocked: under
+	// Fifo, a long wait is headroom and a short one a frame near its budget.
+	// Zero for the first frame.
+	AcquireWait time.Duration
+	// GPULatency is the time from the newest finished frame's submit to when
+	// gfx first saw it complete, accurate to one check a frame; a signal for
+	// adaptive quality until timestamps exist. Zero until a frame completes.
+	GPULatency time.Duration
 }
 
 // DeviceLostEvent is published once, by the job that first finds the device

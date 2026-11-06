@@ -48,6 +48,9 @@ type BackendDevice interface {
 	ReleaseTextureView(view TextureView)
 	CreateSampler(sampler Sampler, descriptor SamplerDescriptor) error
 	ReleaseSampler(sampler Sampler)
+	CreateQuerySet(querySet QuerySet, descriptor QuerySetDescriptor) error
+	ReleaseQuerySet(querySet QuerySet)
+	TimestampPeriod() float32
 	CreateShaderModule(module ShaderModule, descriptor ShaderModuleDescriptor) error
 	ReleaseShaderModule(module ShaderModule)
 	CreateBindGroupLayout(layout BindGroupLayout, descriptor BindGroupLayoutDescriptor) error

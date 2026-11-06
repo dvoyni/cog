@@ -8,6 +8,11 @@ type CommandEncoder interface {
 	BeginRenderPass(descriptor RenderPassDescriptor) RenderPassEncoder
 	// BeginComputePass begins a compute pass; record into it until its End.
 	BeginComputePass(descriptor ComputePassDescriptor) ComputePassEncoder
+	// ResolveQuerySet writes queryCount results of querySet, from
+	// firstQuery, into destination at destinationOffset, a multiple of 256,
+	// as uint64 values; a QueryResolve buffer copied to a MapRead one is
+	// mapped to read them.
+	ResolveQuerySet(querySet QuerySet, firstQuery, queryCount uint32, destination Buffer, destinationOffset uint64)
 	// CopyBufferToBuffer copies size bytes between two buffers.
 	CopyBufferToBuffer(source Buffer, sourceOffset uint64, destination Buffer, destinationOffset uint64, size uint64)
 	// CopyBufferToTexture copies regions of a buffer into a texture.

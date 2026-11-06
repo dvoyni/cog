@@ -60,6 +60,13 @@ type Device interface {
 	CreateSampler(descriptor SamplerDescriptor) (Sampler, error)
 	ReleaseSampler(sampler Sampler)
 
+	// CreateQuerySet creates a query set; it answers an error until the
+	// wgpu fork exposes query sets.
+	CreateQuerySet(descriptor QuerySetDescriptor) (QuerySet, error)
+	ReleaseQuerySet(querySet QuerySet)
+	// TimestampPeriod answers the nanoseconds of one timestamp tick.
+	TimestampPeriod() float32
+
 	// CreateShaderModule compiles the module and reflects it once, keeping
 	// the result with its handle for the "auto" layouts of the pipelines
 	// made from it. Like the pipeline creations, it is slow and synchronous:
