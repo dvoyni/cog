@@ -1,10 +1,38 @@
 package recording
 
-import "github.com/dvoyni/cog/platform"
+import (
+	"github.com/dvoyni/cog/gfx"
+	"github.com/dvoyni/cog/platform"
+)
+
+// AdapterInfo is what the recording adapter answers for Info.
+var AdapterInfo = gfx.AdapterInfo{
+	Name:       "recording",
+	Vendor:     "cog",
+	DeviceType: gfx.DeviceTypeCPU,
+	Backend:    gfx.BackendEmpty,
+}
 
 // CallKind names a kind of backend call, for AnswerNext and for the calls
 // a Recording holds.
 type CallKind uint16
+
+const (
+	// CallKindRequestAdapter is InstanceSocket.RequestAdapter, its Arguments
+	// the gfx.RequestAdapterOptions.
+	CallKindRequestAdapter CallKind = iota
+	// CallKindRequestDevice is BackendAdapter.RequestDevice, its Arguments
+	// the gfx.DeviceDescriptor.
+	CallKindRequestDevice
+	// CallKindWaitIdle is BackendDevice.WaitIdle, with no Arguments.
+	CallKindWaitIdle
+	// CallKindReleaseDevice is BackendDevice.Release, with no Arguments.
+	CallKindReleaseDevice
+	// CallKindReleaseAdapter is BackendAdapter.Release, with no Arguments.
+	CallKindReleaseAdapter
+	// CallKindReleaseInstance is InstanceSocket.Release, with no Arguments.
+	CallKindReleaseInstance
+)
 
 // Answer is what AnswerNext makes a call answer: Status for an acquire,
 // Error for any call.

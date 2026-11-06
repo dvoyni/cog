@@ -11,12 +11,13 @@ capture, and recovery after a device loss. It knows nothing of materials,
 scenes or the ECS: scene builds forward+, deferred and post effects on it,
 and nothing in gfx knows which.
 
-Status: declared, not built. The decisions come from the
+Status: being built. The decisions come from the
 [gfx map](https://github.com/dvoyni/cog/issues/608); each section links the
 ticket that holds its detail. Every type, method and descriptor is declared
 in this module, from the listing on
-[`prototype/gfx-listing`](https://github.com/dvoyni/cog/tree/prototype/gfx-listing/gfx),
-and each body panics until its ticket fills it. The vocabulary is in
+[`prototype/gfx-listing`](https://github.com/dvoyni/cog/tree/prototype/gfx-listing/gfx).
+The device comes up and is released; every other body panics until its ticket
+fills it. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md); the ADRs are in [`adr/`](adr).
 
 ## Constraints

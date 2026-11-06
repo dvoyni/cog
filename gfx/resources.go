@@ -166,7 +166,7 @@ type Device interface {
 // ExclusiveDevice. Only the write handle gives it, so a job holding the read
 // lock cannot reach the exclusive operations.
 func ElevateDeviceAccess(handle kernel.Write[Device]) ExclusiveDevice {
-	panic("gfx listing: no bodies")
+	return exclusiveDevice{device: handle.Get().(*device)}
 }
 
 // ExclusiveDevice is the Device as one job alone holds it, for what no other
