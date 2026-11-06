@@ -116,15 +116,17 @@ type Device interface {
 	CreateRenderPipeline(descriptor RenderPipelineDescriptor) (RenderPipeline, error)
 	ReleaseRenderPipeline(pipeline RenderPipeline)
 	// RenderPipelineBindGroupLayout answers the layout of group in
-	// pipeline's layout, the one reflection built when it was created
-	// "auto".
+	// pipeline's layout: for a pipeline created "auto", one gfx created
+	// from the backend's reflection, which pipeline owns and its release
+	// releases. The zero layout when pipeline is stale or group past its
+	// last.
 	RenderPipelineBindGroupLayout(pipeline RenderPipeline, group uint32) BindGroupLayout
 
 	// CreateComputePipeline creates a pipeline as CreateRenderPipeline does.
 	CreateComputePipeline(descriptor ComputePipelineDescriptor) (ComputePipeline, error)
 	ReleaseComputePipeline(pipeline ComputePipeline)
 	// ComputePipelineBindGroupLayout answers the layout of group in
-	// pipeline's layout.
+	// pipeline's layout, as RenderPipelineBindGroupLayout does.
 	ComputePipelineBindGroupLayout(pipeline ComputePipeline, group uint32) BindGroupLayout
 
 	// WriteBuffer writes data into buffer at offset; offset and length are

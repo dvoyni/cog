@@ -39,8 +39,8 @@ type device struct {
 	bindGroupLayouts table[BindGroupLayout, BindGroupLayoutDescriptor]
 	bindGroups       table[BindGroup, BindGroupDescriptor]
 	pipelineLayouts  table[PipelineLayout, PipelineLayoutDescriptor]
-	renderPipelines  table[RenderPipeline, RenderPipelineDescriptor]
-	computePipelines table[ComputePipeline, ComputePipelineDescriptor]
+	renderPipelines  table[RenderPipeline, pipelineSource[RenderPipelineDescriptor]]
+	computePipelines table[ComputePipeline, pipelineSource[ComputePipelineDescriptor]]
 }
 
 func (d *device) Features() FeatureFlags { return d.features }
@@ -167,11 +167,10 @@ func (d *device) ReleasePipelineLayout(layout PipelineLayout) {
 }
 
 func (d *device) CreateRenderPipeline(descriptor RenderPipelineDescriptor) (RenderPipeline, error) {
-	if descriptor.Layout == (PipelineLayout{}) {
-		panic("gfx listing: no auto layouts yet")
-	}
-	if err := d.pipelineLayouts.check(descriptor.Layout); err != nil {
-		return RenderPipeline{}, fmt.Errorf("%w: the pipeline's layout", err)
+	if descriptor.Layout != (PipelineLayout{}) {
+		if err := d.pipelineLayouts.check(descriptor.Layout); err != nil {
+			return RenderPipeline{}, fmt.Errorf("%w: the pipeline's layout", err)
+		}
 	}
 	if err := d.shaderModules.check(descriptor.Vertex.Module); err != nil {
 		return RenderPipeline{}, fmt.Errorf("%w: the vertex module", err)
@@ -179,37 +178,84 @@ func (d *device) CreateRenderPipeline(descriptor RenderPipelineDescriptor) (Rend
 	if descriptor.Fragment.Module != (ShaderModule{}) && d.shaderModules.check(descriptor.Fragment.Module) != nil {
 		return RenderPipeline{}, fmt.Errorf("%w: the fragment module", ErrReleased)
 	}
-	return createResource(&d.renderPipelines, descriptor.clone(), d.backend.CreateRenderPipeline)
+	source := pipelineSource[RenderPipelineDescriptor]{descriptor: descriptor.clone()}
+	if source.descriptor.Layout == (PipelineLayout{}) {
+		groups, err := d.backend.ReflectRenderPipelineLayout(source.descriptor)
+		if err != nil {
+			return RenderPipeline{}, err
+		}
+		if source.descriptor.Layout, err = d.createAutoLayout(groups); err != nil {
+			return RenderPipeline{}, err
+		}
+		source.autoLayout = true
+	}
+	pipeline, err := createResource(&d.renderPipelines, source, func(pipeline RenderPipeline, source pipelineSource[RenderPipelineDescriptor]) error {
+		return d.backend.CreateRenderPipeline(pipeline, source.descriptor)
+	})
+	if err != nil && source.autoLayout {
+		d.releaseAutoLayout(source.descriptor.Layout)
+	}
+	return pipeline, err
 }
 
 func (d *device) ReleaseRenderPipeline(pipeline RenderPipeline) {
-	releaseResource(d.logger, &d.renderPipelines, pipeline, d.backend.ReleaseRenderPipeline)
+	source, _ := d.renderPipelines.descriptor(pipeline)
+	releaseResource(d.logger, &d.renderPipelines, pipeline, func(pipeline RenderPipeline) {
+		d.backend.ReleaseRenderPipeline(pipeline)
+		if source.autoLayout {
+			d.releaseAutoLayout(source.descriptor.Layout)
+		}
+	})
 }
 
 func (d *device) RenderPipelineBindGroupLayout(pipeline RenderPipeline, group uint32) BindGroupLayout {
-	panic("gfx listing: no bodies")
+	source, _ := d.renderPipelines.descriptor(pipeline)
+	return d.groupLayout(source.descriptor.Layout, group)
 }
 
 func (d *device) CreateComputePipeline(descriptor ComputePipelineDescriptor) (ComputePipeline, error) {
-	if descriptor.Layout == (PipelineLayout{}) {
-		panic("gfx listing: no auto layouts yet")
-	}
-	if err := d.pipelineLayouts.check(descriptor.Layout); err != nil {
-		return ComputePipeline{}, fmt.Errorf("%w: the pipeline's layout", err)
+	if descriptor.Layout != (PipelineLayout{}) {
+		if err := d.pipelineLayouts.check(descriptor.Layout); err != nil {
+			return ComputePipeline{}, fmt.Errorf("%w: the pipeline's layout", err)
+		}
 	}
 	if err := d.shaderModules.check(descriptor.Module); err != nil {
 		return ComputePipeline{}, fmt.Errorf("%w: the module", err)
 	}
 	descriptor.Constants = maps.Clone(descriptor.Constants)
-	return createResource(&d.computePipelines, descriptor, d.backend.CreateComputePipeline)
+	source := pipelineSource[ComputePipelineDescriptor]{descriptor: descriptor}
+	if source.descriptor.Layout == (PipelineLayout{}) {
+		groups, err := d.backend.ReflectComputePipelineLayout(source.descriptor)
+		if err != nil {
+			return ComputePipeline{}, err
+		}
+		if source.descriptor.Layout, err = d.createAutoLayout(groups); err != nil {
+			return ComputePipeline{}, err
+		}
+		source.autoLayout = true
+	}
+	pipeline, err := createResource(&d.computePipelines, source, func(pipeline ComputePipeline, source pipelineSource[ComputePipelineDescriptor]) error {
+		return d.backend.CreateComputePipeline(pipeline, source.descriptor)
+	})
+	if err != nil && source.autoLayout {
+		d.releaseAutoLayout(source.descriptor.Layout)
+	}
+	return pipeline, err
 }
 
 func (d *device) ReleaseComputePipeline(pipeline ComputePipeline) {
-	releaseResource(d.logger, &d.computePipelines, pipeline, d.backend.ReleaseComputePipeline)
+	source, _ := d.computePipelines.descriptor(pipeline)
+	releaseResource(d.logger, &d.computePipelines, pipeline, func(pipeline ComputePipeline) {
+		d.backend.ReleaseComputePipeline(pipeline)
+		if source.autoLayout {
+			d.releaseAutoLayout(source.descriptor.Layout)
+		}
+	})
 }
 
 func (d *device) ComputePipelineBindGroupLayout(pipeline ComputePipeline, group uint32) BindGroupLayout {
-	panic("gfx listing: no bodies")
+	source, _ := d.computePipelines.descriptor(pipeline)
+	return d.groupLayout(source.descriptor.Layout, group)
 }
 
 func (d *device) WriteBuffer(buffer Buffer, offset uint64, data []byte) error {
@@ -267,6 +313,52 @@ func (d *device) Poll() { panic("gfx listing: no bodies") }
 
 func (d *device) RequestCapture(window platform.Window) error { panic("gfx listing: no bodies") }
 
+// createAutoLayout creates a bind-group layout of each of groups, as the
+// backend reflected them for a pipeline's "auto" layout, and a pipeline
+// layout of them. When a creation fails, it releases what it created and
+// answers the error.
+func (d *device) createAutoLayout(groups []BindGroupLayoutDescriptor) (PipelineLayout, error) {
+	groupLayouts := make([]BindGroupLayout, 0, len(groups))
+	for _, group := range groups {
+		groupLayout, err := d.CreateBindGroupLayout(group)
+		if err != nil {
+			for _, created := range groupLayouts {
+				d.ReleaseBindGroupLayout(created)
+			}
+			return PipelineLayout{}, err
+		}
+		groupLayouts = append(groupLayouts, groupLayout)
+	}
+	layout, err := d.CreatePipelineLayout(PipelineLayoutDescriptor{BindGroupLayouts: groupLayouts})
+	if err != nil {
+		for _, created := range groupLayouts {
+			d.ReleaseBindGroupLayout(created)
+		}
+		return PipelineLayout{}, err
+	}
+	return layout, nil
+}
+
+// releaseAutoLayout releases layout, which createAutoLayout created, and the
+// bind-group layouts it holds.
+func (d *device) releaseAutoLayout(layout PipelineLayout) {
+	descriptor, _ := d.pipelineLayouts.descriptor(layout)
+	d.ReleasePipelineLayout(layout)
+	for _, groupLayout := range descriptor.BindGroupLayouts {
+		d.ReleaseBindGroupLayout(groupLayout)
+	}
+}
+
+// groupLayout answers the layout of group in layout, or the zero layout when
+// layout is stale or group past its last.
+func (d *device) groupLayout(layout PipelineLayout, group uint32) BindGroupLayout {
+	descriptor, _ := d.pipelineLayouts.descriptor(layout)
+	if group >= uint32(len(descriptor.BindGroupLayouts)) {
+		return BindGroupLayout{}
+	}
+	return descriptor.BindGroupLayouts[group]
+}
+
 // exclusiveDevice is the device as ElevateDeviceAccess answers it, with the
 // operations only the write lock may reach.
 type exclusiveDevice struct {
@@ -290,6 +382,14 @@ func (d exclusiveDevice) RequestSurface(request SurfaceRequest) {
 type textureViewSource struct {
 	texture    Texture
 	descriptor TextureViewDescriptor
+}
+
+// pipelineSource is what a pipeline was created with: its descriptor D, its
+// layout always explicit, and whether gfx created that layout from the
+// backend's reflection, an "auto" one released with the pipeline.
+type pipelineSource[D any] struct {
+	descriptor D
+	autoLayout bool
 }
 
 // createResource acquires a handle in resources holding descriptor and has

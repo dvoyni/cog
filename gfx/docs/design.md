@@ -17,7 +17,8 @@ ticket that holds its detail. Every type, method and descriptor is declared
 in this module, from the listing on
 [`prototype/gfx-listing`](https://github.com/dvoyni/cog/tree/prototype/gfx-listing/gfx).
 The device comes up and is released, every resource but query sets is
-created and released, pipelines with explicit layouts only, surfaces
+created and released, a pipeline with a zero `Layout` getting the layouts
+the backend reflects created as explicit ones and released with it, surfaces
 follow platform's windows, each configured from `Config.Surface`, or the
 request `RequestSurface` replaced it with, before its first acquire and
 again once resized or the request changes, hidden and zero-size windows skipped,
@@ -168,7 +169,8 @@ present and recovery itself.
   builds them, and creates them as explicit layouts, the recording adapter
   answering the ones a test queues; `RenderPipelineBindGroupLayout` and
   `ComputePipelineBindGroupLayout` answer its groups, as WebGPU's
-  `getBindGroupLayout`. An explicit layout overrides reflection. The vertex
+  `getBindGroupLayout`, the pipeline owning them: they are released with
+  it. An explicit layout overrides reflection: the backend is not asked. The vertex
   interface and the limits are checked at pipeline creation and fail loudly.
 - **Off the frame means a task.** Creation is synchronous on every backend.
   A game creates shader modules and pipelines from a task of its own under
