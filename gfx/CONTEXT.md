@@ -36,6 +36,10 @@ _Avoid_: Back buffer, swapchain texture, render target
 What a window is drawn through on the GPU; gfx keeps one per open window, named by that window.
 _Avoid_: Swapchain, canvas
 
+**Surface request**:
+What the application asks every surface to be configured with, its format and present mode; one for the whole application, which a surface honours where it can and falls back from where it cannot.
+_Avoid_: Surface settings, swapchain config, window format
+
 **Draw event**:
 The event gfx publishes inside each frame, once its framebuffers are acquired, for the application's handlers to record the frame.
 _Avoid_: Render event, draw callback
