@@ -10,7 +10,9 @@ import (
 // configurator.OrderSubscriptions. gfx offers no tasks: acquire, flush and
 // present are its own.
 type Handlers struct {
-	// Draw handles RenderEvent: it schedules a pinned configure of the
+	// Draw handles RenderEvent. After a device loss it schedules the pinned
+	// recovery under the write lock instead of a frame, and returns it.
+	// Otherwise it schedules a pinned configure of the
 	// surfaces marked for it, under the write lock, then the pinned acquire,
 	// each after the last present; publishes DrawEvent; and schedules the
 	// flush and the pinned present after the nested publication's out
@@ -170,7 +172,4 @@ type ExclusiveDevice interface {
 	// RequestSurface replaces the surface request and marks every surface to
 	// be configured again, between frames, from the next frame on.
 	RequestSurface(request SurfaceRequest)
-
-	// Device-loss recovery is open:
-	// https://github.com/dvoyni/cog/issues/669
 }

@@ -27,6 +27,17 @@ type DrawEvent struct {
 	Ready kernel.JobHandle
 }
 
+// DeviceLostEvent is published once, by the job that first finds the device
+// lost, after the loss goes to LogErr. Until DeviceRecoveredEvent no frame is
+// drawn, and calls answering an error answer ErrDeviceLost.
+type DeviceLostEvent struct{}
+
+// DeviceRecoveredEvent is published once gfx has made a new device and
+// recreated every object on it under its old handle, empty: owners schedule
+// tasks from it to fill their buffers and textures again. A recovery that
+// fails is retried on a later beat, at most once a second, with LogErrOnce.
+type DeviceRecoveredEvent struct{}
+
 // Frame names one frame in flight: a slot in gfx's pool of frames, which
 // grows only while more render beats are in flight than it holds, so a
 // render track needs a MaxInFlight. It is valid from its DrawEvent until the

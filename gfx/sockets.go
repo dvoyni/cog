@@ -36,7 +36,9 @@ type BackendAdapter interface {
 
 // BackendDevice is the backend's device and queue. Its methods are Device's,
 // given the handle gfx allocated; gfx has checked every handle in a call
-// before making it.
+// before making it. Any call answering an error answers ErrDeviceLost, as
+// such, for a device loss, mapped from the backend's own errors: Vulkan's
+// device-lost result, DX12's removed or reset device.
 type BackendDevice interface {
 	CreateBuffer(buffer Buffer, descriptor BufferDescriptor) error
 	ReleaseBuffer(buffer Buffer)
@@ -93,8 +95,8 @@ type BackendDevice interface {
 	Present(window platform.Window) error
 
 	WaitIdle() error
+	// Release releases the device: in gfx's Destroy, and in a recovery,
+	// before the adapter is asked for a new one, which gfx fills again with
+	// every object under its old handle.
 	Release()
-
-	// Device-loss detection and recovery are open:
-	// https://github.com/dvoyni/cog/issues/669
 }
