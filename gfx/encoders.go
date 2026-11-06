@@ -74,3 +74,73 @@ type ComputePassEncoder interface {
 	// End ends the pass. Its error is the encoder's, not returned here.
 	End()
 }
+
+// discardEncoder is the encoder Device.Encoder answers with an error: it
+// records into nothing, and so do the passes it begins.
+type discardEncoder struct{}
+
+func (discardEncoder) BeginRenderPass(RenderPassDescriptor) RenderPassEncoder {
+	return discardRenderPass{}
+}
+
+func (discardEncoder) BeginComputePass(ComputePassDescriptor) ComputePassEncoder {
+	return discardComputePass{}
+}
+
+func (discardEncoder) ResolveQuerySet(QuerySet, uint32, uint32, Buffer, uint64) {}
+
+func (discardEncoder) CopyBufferToBuffer(Buffer, uint64, Buffer, uint64, uint64) {}
+
+func (discardEncoder) CopyBufferToTexture(Buffer, Texture, []BufferTextureCopy) {}
+
+func (discardEncoder) CopyTextureToBuffer(Texture, Buffer, []BufferTextureCopy) {}
+
+func (discardEncoder) CopyTextureToTexture(Texture, Texture, []TextureCopy) {}
+
+func (discardEncoder) ClearBuffer(Buffer, uint64, uint64) {}
+
+// discardRenderPass is a discardEncoder's render pass, recording nothing.
+type discardRenderPass struct{}
+
+func (discardRenderPass) SetPipeline(RenderPipeline) {}
+
+func (discardRenderPass) SetBindGroup(uint32, BindGroup, []uint32) {}
+
+func (discardRenderPass) SetVertexBuffer(uint32, Buffer, uint64) {}
+
+func (discardRenderPass) SetIndexBuffer(Buffer, IndexFormat, uint64) {}
+
+func (discardRenderPass) SetViewport(Viewport) {}
+
+func (discardRenderPass) SetScissorRect(ScissorRect) {}
+
+func (discardRenderPass) SetBlendConstant(Color) {}
+
+func (discardRenderPass) SetStencilReference(uint32) {}
+
+func (discardRenderPass) Draw(DrawArgs) {}
+
+func (discardRenderPass) DrawIndexed(DrawIndexedArgs) {}
+
+func (discardRenderPass) DrawIndirect(Buffer, uint64) {}
+
+func (discardRenderPass) DrawIndexedIndirect(Buffer, uint64) {}
+
+func (discardRenderPass) MultiDrawIndirect(Buffer, uint64, uint32) {}
+
+func (discardRenderPass) MultiDrawIndexedIndirect(Buffer, uint64, uint32) {}
+
+func (discardRenderPass) End() {}
+
+// discardComputePass is a discardEncoder's compute pass, recording nothing.
+type discardComputePass struct{}
+
+func (discardComputePass) SetPipeline(ComputePipeline) {}
+
+func (discardComputePass) SetBindGroup(uint32, BindGroup, []uint32) {}
+
+func (discardComputePass) Dispatch(uint32, uint32, uint32) {}
+
+func (discardComputePass) DispatchIndirect(Buffer, uint64) {}
+
+func (discardComputePass) End() {}

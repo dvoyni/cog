@@ -19,8 +19,9 @@ in this module, from the listing on
 The device comes up and is released, every resource but query sets is
 created and released, pipelines with explicit layouts only, surfaces
 follow platform's windows, though nothing configures them yet, and the frame
-chain acquires, publishes `DrawEvent` and presents, with no flush yet; every
-other body panics until its ticket fills it. The vocabulary is in
+chain acquires, publishes `DrawEvent`, flushes the frame's encoders and
+presents, the recording adapter recording only `ClearBuffer` of their
+commands; every other body panics until its ticket fills it. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md); the ADRs are in [`adr/`](adr).
 
 ## Constraints
@@ -347,8 +348,9 @@ present and recovery itself.
 - **It records what reaches the socket,** as typed values: every create and
   release with its handle and descriptor, writes and maps, surface calls with
   the status answered, and each submission as its command buffers, passes and
-  commands with arguments. `Recording.Frames()` groups what lies between an
-  acquire and its present. Submissions and surface calls are in a
+  commands with arguments. `Recording.Frames()` groups what lies between a
+  frame's first acquire and its last present; a frame with no window
+  acquired is its one submission. Submissions and surface calls are in a
   deterministic order; lifecycle calls from parallel tasks are not, and tests
   look them up by handle.
 - **It checks a fixed subset of what wgpu rejects:** a handle missing at its

@@ -40,8 +40,9 @@ func (instance *Instance) Recording() *Recording {
 	instance.mutex.Lock()
 	defer instance.mutex.Unlock()
 	return &Recording{
-		Calls:       slices.Clone(instance.recording.Calls),
-		Submissions: slices.Clone(instance.recording.Submissions),
+		Calls:          slices.Clone(instance.recording.Calls),
+		Submissions:    slices.Clone(instance.recording.Submissions),
+		submittedAfter: slices.Clone(instance.recording.submittedAfter),
 	}
 }
 
@@ -120,7 +121,7 @@ func (instance *Instance) recordAnswered(kind CallKind, arguments any, apply fun
 	if answer.Error == nil {
 		answer.Error = apply(answer)
 	}
-	instance.recording.Calls = append(instance.recording.Calls, Call{Kind: kind, Arguments: arguments, Error: answer.Error})
+	instance.recording.Calls = append(instance.recording.Calls, Call{Kind: kind, Arguments: arguments, Status: answer.Status, Error: answer.Error})
 	return answer
 }
 

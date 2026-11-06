@@ -1,6 +1,7 @@
 package gfx
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"sync"
@@ -14,10 +15,11 @@ import (
 // framebuffer at a time. Its slots are acquired in the RenderEvent handler
 // and released after the present, so it grows only while more beats are in
 // flight than it holds. Its mutex is held only for bookkeeping, never across
-// a backend call.
+// a backend call, and guards everything but what each slot's own mutex does.
 type framePool struct {
 	mutex sync.Mutex
-	slots []frameSlot
+	// slots are pointers, so the slice grows without copying a slot's mutex.
+	slots []*frameSlot
 	// freeSlots are the released slots, handed out before new ones.
 	freeSlots []uint32
 	// lastPresent is the present of the newest frame, which the next acquire
@@ -28,11 +30,29 @@ type framePool struct {
 	closingWindows []platform.Window
 }
 
-// frameSlot is one frame's state: the generation of the Frame it holds, and
-// a framebuffer per window acquired, its slice reused.
+// frameSlot is one frame's state: the generation of the Frame it holds, a
+// framebuffer per window acquired, and the encoders taken for it, each slice
+// reused. Its mutex guards the encoders and the flushed flag, held only for
+// the check and the append, and is held as well as the pool's to change the
+// generation, so either guards reading it.
 type frameSlot struct {
+	mutex        sync.Mutex
 	generation   uint32
 	framebuffers []framebuffer
+	// encoders are the frame's encoders, in the order taken until the flush
+	// sorts them.
+	encoders []frameEncoder
+	// commandBuffers are the flush's finished encoders, kept only to reuse
+	// the slice.
+	commandBuffers []CommandBuffer
+	// flushed is set by the flush: no encoder is taken after it.
+	flushed bool
+}
+
+// frameEncoder is one encoder a frame took, at its submit order.
+type frameEncoder struct {
+	order   SubmitOrder
+	encoder StandaloneCommandEncoder
 }
 
 // framebuffer is one window's framebuffer in a frame: the view gfx handed the
@@ -53,7 +73,7 @@ func (pool *framePool) acquire() (frame Frame, lastPresent kernel.JobHandle) {
 		pool.freeSlots = pool.freeSlots[:count-1]
 	} else {
 		index = uint32(len(pool.slots))
-		pool.slots = append(pool.slots, frameSlot{generation: nextGeneration(0)})
+		pool.slots = append(pool.slots, &frameSlot{generation: nextGeneration(0)})
 	}
 	return Frame{slot: index, generation: pool.slots[index].generation}, pool.lastPresent
 }
@@ -65,14 +85,21 @@ func (pool *framePool) setLastPresent(present kernel.JobHandle) {
 	pool.lastPresent = present
 }
 
-// release makes frame stale, dropping its framebuffers, and hands its slot
-// out again.
+// release makes frame stale, dropping its framebuffers and encoders, and
+// hands its slot out again.
 func (pool *framePool) release(frame Frame) {
 	pool.mutex.Lock()
 	defer pool.mutex.Unlock()
-	slot := &pool.slots[frame.slot]
+	slot := pool.slots[frame.slot]
+	slot.mutex.Lock()
+	defer slot.mutex.Unlock()
 	slot.generation = nextGeneration(slot.generation)
 	slot.framebuffers = slot.framebuffers[:0]
+	clear(slot.encoders)
+	slot.encoders = slot.encoders[:0]
+	clear(slot.commandBuffers)
+	slot.commandBuffers = slot.commandBuffers[:0]
+	slot.flushed = false
 	pool.freeSlots = append(pool.freeSlots, frame.slot)
 }
 
@@ -80,8 +107,46 @@ func (pool *framePool) release(frame Frame) {
 func (pool *framePool) addFramebuffer(frame Frame, acquired framebuffer) {
 	pool.mutex.Lock()
 	defer pool.mutex.Unlock()
-	slot := &pool.slots[frame.slot]
+	slot := pool.slots[frame.slot]
 	slot.framebuffers = append(slot.framebuffers, acquired)
+}
+
+// addEncoder keeps taken as one of frame's encoders; ErrFrameFlushed when
+// frame is flushed or stale, and ErrOrderTaken when it already has an
+// encoder at taken's order.
+func (pool *framePool) addEncoder(frame Frame, taken frameEncoder) error {
+	pool.mutex.Lock()
+	if frame.slot >= uint32(len(pool.slots)) {
+		pool.mutex.Unlock()
+		return ErrFrameFlushed
+	}
+	slot := pool.slots[frame.slot]
+	pool.mutex.Unlock()
+	slot.mutex.Lock()
+	defer slot.mutex.Unlock()
+	if slot.generation != frame.generation || slot.flushed {
+		return ErrFrameFlushed
+	}
+	for _, encoder := range slot.encoders {
+		if encoder.order == taken.order {
+			return ErrOrderTaken
+		}
+	}
+	slot.encoders = append(slot.encoders, taken)
+	return nil
+}
+
+// flush marks frame flushed, so it takes no more encoders, and answers its
+// slot: nothing but the flush touches the slot's encoders and command
+// buffers until the frame is released.
+func (pool *framePool) flush(frame Frame) *frameSlot {
+	pool.mutex.Lock()
+	slot := pool.slots[frame.slot]
+	pool.mutex.Unlock()
+	slot.mutex.Lock()
+	defer slot.mutex.Unlock()
+	slot.flushed = true
+	return slot
 }
 
 // framebuffers answers frame's framebuffers, for its present: nothing else
@@ -135,14 +200,15 @@ func (pool *framePool) unmarkClosing(window platform.Window) {
 
 // draw is Handlers.Draw: it acquires a frame, schedules the pinned acquire
 // of its framebuffers after in and the last present, publishes DrawEvent
-// with that acquire as Ready, and schedules the pinned present after the
-// nested publication's out dependency, which it keeps as the last present
-// and returns.
+// with that acquire as Ready, and schedules the flush after the nested
+// publication's out dependency, then the pinned present, which it keeps as
+// the last present and returns.
 func (p *Plugin) draw(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event RenderEvent) (RenderEvent, kernel.JobHandle) {
 	frame, lastPresent := p.device.frames.acquire()
 	acquired := ex.Schedule(p.acquireTask, frame, in, lastPresent).Handle()
 	_, out := ex.Publish(acquired, DrawEvent{Beat: event.Beat, Frame: frame, Ready: acquired})
-	present := ex.Schedule(p.presentTask, frame, out).Handle()
+	flushed := ex.Schedule(p.flushTask, frame, out).Handle()
+	present := ex.Schedule(p.presentTask, frame, flushed).Handle()
 	p.device.frames.setLastPresent(present)
 	return event, present
 }
@@ -168,6 +234,30 @@ func acquireFramebuffers(k *kernel.Kernel, frame Frame, deviceHandle kernel.Read
 			continue
 		}
 		d.frames.addFramebuffer(frame, framebuffer{window: window, view: view})
+	}
+	return kernel.NoResult{}
+}
+
+// flushFrame finishes frame's encoders, under the read lock, and submits
+// them once, sorted by submit order. An encoder whose Finish fails goes to
+// LogErr and is dropped, and so does a failing submit. A frame with no
+// encoder submits nothing.
+func flushFrame(k *kernel.Kernel, frame Frame, deviceHandle kernel.Read[Device]) kernel.NoResult {
+	d := deviceHandle.Get().(*device)
+	slot := d.frames.flush(frame)
+	slices.SortFunc(slot.encoders, func(a, b frameEncoder) int { return cmp.Compare(a.order, b.order) })
+	for _, taken := range slot.encoders {
+		buffer, err := taken.encoder.Finish()
+		if err != nil {
+			k.Logger().LogErr(fmt.Errorf("gfx: finishing the encoder at submit order %d: %w", taken.order, err))
+			continue
+		}
+		slot.commandBuffers = append(slot.commandBuffers, buffer)
+	}
+	if len(slot.commandBuffers) > 0 {
+		if err := d.backend.Submit(slot.commandBuffers...); err != nil {
+			k.Logger().LogErr(fmt.Errorf("gfx: submitting a frame: %w", err))
+		}
 	}
 	return kernel.NoResult{}
 }

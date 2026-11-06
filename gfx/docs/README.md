@@ -7,8 +7,9 @@ see [design.md](design.md). It assumes the
 [platform guide](../../platform/docs/README.md). gfx is being built: the
 names below are the module's; the device comes up, every resource but query
 sets is created and released, pipelines with explicit layouts only, surfaces
-follow platform's windows, each render beat acquires, publishes `DrawEvent`
-and presents, and the other bodies panic until they are filled.
+follow platform's windows, each render beat acquires, publishes `DrawEvent`,
+submits the frame's encoders in submit order and presents, and the other
+bodies panic until they are filled.
 
 - [Concepts](#concepts)
 - [The render track](#the-render-track)

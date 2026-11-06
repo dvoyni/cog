@@ -21,9 +21,11 @@ type Plugin struct {
 	// for Destroy to release; nil where Start got no further.
 	adapter BackendAdapter
 	device  *device
-	// acquireTask and presentTask are the frame chain's pinned ends, which
-	// Handlers.Draw schedules.
+	// acquireTask and presentTask are the frame chain's pinned ends, and
+	// flushTask what runs between the frame's recording and its present,
+	// which Handlers.Draw schedules.
 	acquireTask *kernel.Task[Frame, kernel.NoResult]
+	flushTask   *kernel.Task[Frame, kernel.NoResult]
 	presentTask *kernel.Task[Frame, kernel.NoResult]
 }
 
@@ -73,6 +75,7 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	configurator.PinToMainThread(release)
 	p.acquireTask = configurator.RegisterTask1(acquireFramebuffers)
 	configurator.PinToMainThread(p.acquireTask)
+	p.flushTask = configurator.RegisterTask1(flushFrame)
 	p.presentTask = configurator.RegisterTask1(presentFramebuffers)
 	configurator.PinToMainThread(p.presentTask)
 	configurator.InitResource(Handlers{

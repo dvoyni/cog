@@ -1,6 +1,7 @@
 package gfx
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/dvoyni/cog/platform"
@@ -53,3 +54,46 @@ func TestFramePoolAnswersAFramebufferUntilItsFrameIsReleased(t *testing.T) {
 		t.Errorf("framebuffer of the slot's next frame = %v, want the zero view", got)
 	}
 }
+
+func TestFramePoolReusesAFramesEncoderSliceOnceWarm(t *testing.T) {
+	var pool framePool
+	encoder := &finishingEncoder{}
+	drawFrame := func() {
+		frame, _ := pool.acquire()
+		_ = pool.addEncoder(frame, frameEncoder{order: 2, encoder: encoder})
+		_ = pool.addEncoder(frame, frameEncoder{order: 1, encoder: encoder})
+		pool.flush(frame)
+		pool.release(frame)
+	}
+	drawFrame()
+
+	if allocations := testing.AllocsPerRun(100, drawFrame); allocations != 0 {
+		t.Errorf("%v allocations a frame once warm, want none", allocations)
+	}
+}
+
+func TestFramePoolGuardsAFramesEncodersAcrossGoroutines(t *testing.T) {
+	var pool framePool
+	frame, _ := pool.acquire()
+	var wait sync.WaitGroup
+	for order := range 8 {
+		wait.Go(func() {
+			if err := pool.addEncoder(frame, frameEncoder{order: SubmitOrder(order), encoder: &finishingEncoder{}}); err != nil {
+				t.Errorf("order %d answered %v", order, err)
+			}
+		})
+	}
+	wait.Wait()
+
+	if count := len(pool.flush(frame).encoders); count != 8 {
+		t.Errorf("%d encoders flushed, want 8", count)
+	}
+}
+
+// finishingEncoder is a StandaloneCommandEncoder recording nothing, whose
+// Finish answers no buffer.
+type finishingEncoder struct{ discardEncoder }
+
+func (*finishingEncoder) Finish() (CommandBuffer, error) { return nil, nil }
+
+func (*finishingEncoder) DiscardEncoding() {}

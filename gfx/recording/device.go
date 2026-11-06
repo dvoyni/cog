@@ -181,11 +181,24 @@ func (d *device) UnmapBuffer(buffer gfx.Buffer) error { panic("gfx listing: no b
 
 func (d *device) Poll() { panic("gfx listing: no bodies") }
 
+// CreateCommandEncoder answers an encoder recording the commands given it.
 func (d *device) CreateCommandEncoder(descriptor gfx.CommandEncoderDescriptor) (gfx.StandaloneCommandEncoder, error) {
-	panic("gfx listing: no bodies")
+	return &commandEncoder{instance: d.instance}, nil
 }
 
-func (d *device) Submit(buffers ...gfx.CommandBuffer) error { panic("gfx listing: no bodies") }
+// Submit records buffers as one submission, after the calls recorded so far.
+// Every buffer is one the adapter's encoders finished.
+func (d *device) Submit(buffers ...gfx.CommandBuffer) error {
+	submission := Submission{Buffers: make([]CommandBuffer, len(buffers))}
+	for index, buffer := range buffers {
+		submission.Buffers[index] = CommandBuffer{Commands: buffer.(*commandBuffer).commands}
+	}
+	d.instance.mutex.Lock()
+	defer d.instance.mutex.Unlock()
+	d.instance.recording.submittedAfter = append(d.instance.recording.submittedAfter, len(d.instance.recording.Calls))
+	d.instance.recording.Submissions = append(d.instance.recording.Submissions, submission)
+	return nil
+}
 
 func (d *device) SurfaceCapabilities(window platform.Window) gfx.SurfaceCapabilities {
 	panic("gfx listing: no bodies")
