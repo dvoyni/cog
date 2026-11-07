@@ -49,6 +49,32 @@ func TestFrameEncodersAreSubmittedOnceSortedByOrder(t *testing.T) {
 	}
 }
 
+func TestManyTasksTakeEncodersOfOneFrameAtOnce(t *testing.T) {
+	const taskCount = 8
+	h := newHarness(t)
+	h.workerCount = taskCount
+	h.recordingTaskCount = taskCount
+	var buffers []gfx.Buffer
+	h.recordFrame = func(event gfx.DrawEvent, task int, device gfx.Device) {
+		encoder, err := device.Encoder(event.Frame, gfx.SubmitOrder(task))
+		if err != nil {
+			t.Errorf("Encoder at order %d answered %v", task, err)
+		}
+		encoder.ClearBuffer(buffers[task], 0, 4)
+	}
+	h.mustSpawn(nil)
+	h.openWindow()
+	h.waitForCalls(recording.CallKindCreateSurface, 1)
+	buffers = h.createBuffers(taskCount)
+
+	h.advance(time.Millisecond)
+
+	submissions := h.instance.Recording().Submissions
+	if want := []recording.Submission{submissionOf(buffers...)}; !reflect.DeepEqual(submissions, want) {
+		t.Errorf("submissions = %+v, want %+v", submissions, want)
+	}
+}
+
 func TestAnOrderTakenTwiceAnswersErrOrderTakenWithAnEncoderRecordingNothing(t *testing.T) {
 	h := newHarness(t)
 	var buffers []gfx.Buffer

@@ -37,6 +37,14 @@ type harness struct {
 	// Each is set before spawning.
 	holdFrame func(event gfx.DrawEvent)
 	readFrame func(event gfx.DrawEvent, device gfx.Device)
+	// recordFrame, when set, runs after each DrawEvent's Ready under the
+	// Device's read lock in recordingTaskCount tasks at once, each given its
+	// own index. Both are set before spawning, with workerCount.
+	recordFrame        func(event gfx.DrawEvent, task int, device gfx.Device)
+	recordingTaskCount int
+	// workerCount is how many workers the kernel is spawned with, 2 unless a
+	// test sets it before spawning.
+	workerCount int
 	// readCapture, when set, runs under the Device's read lock in a task
 	// joined into each CapturedEvent's out dependency. It is set before
 	// spawning.
@@ -87,6 +95,13 @@ type editEvent struct{}
 
 // pumpEvent schedules platform's ProcessEvents.
 type pumpEvent struct{}
+
+// recordingTask is what one of a DrawEvent's recording tasks is given: the
+// event, and the task's index among them.
+type recordingTask struct {
+	event gfx.DrawEvent
+	index int
+}
 
 // wrappingInstance is the recording instance with each device it answers
 // wrapped by wrapDevice, through the adapter it answers.
@@ -197,13 +212,19 @@ func (h *harness) Init(c *kernel.Configurator, config any) error {
 		}
 		return kernel.NoResult{}
 	})
+	recordFrame := c.RegisterTask1(func(k *kernel.Kernel, task recordingTask, device kernel.Read[gfx.Device]) kernel.NoResult {
+		h.recordFrame(task.event, task.index, device.Get())
+		return kernel.NoResult{}
+	})
 	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.DrawEvent) (gfx.DrawEvent, kernel.JobHandle) {
 		h.mutex.Lock()
 		h.drawn = append(h.drawn, event)
 		h.mutex.Unlock()
-		held := ex.Schedule(hold, event, event.Ready).Handle()
-		read := ex.Schedule(readFrame, event, event.Ready).Handle()
-		return event, ex.Join(in, held, read)
+		handles := []kernel.JobHandle{in, ex.Schedule(hold, event, event.Ready).Handle(), ex.Schedule(readFrame, event, event.Ready).Handle()}
+		for index := range h.recordingTaskCount {
+			handles = append(handles, ex.Schedule(recordFrame, recordingTask{event: event, index: index}, event.Ready).Handle())
+		}
+		return event, ex.Join(handles...)
 	})
 	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.BufferMappedEvent) (gfx.BufferMappedEvent, kernel.JobHandle) {
 		h.mutex.Lock()
@@ -271,11 +292,12 @@ func (*harness) LogDebug(source kernel.KernelID, message string, args ...any) {}
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	h := &harness{
-		t:        t,
-		instance: recording.NewInstance(),
-		windows:  &numberedWindows{Windows: headless.NewWindows()},
-		clock:    metronome.NewManualClock(),
-		render:   metronome.Variable(),
+		t:           t,
+		instance:    recording.NewInstance(),
+		windows:     &numberedWindows{Windows: headless.NewWindows()},
+		clock:       metronome.NewManualClock(),
+		render:      metronome.Variable(),
+		workerCount: 2,
 	}
 	h.supervisor = kernel.NewSupervisor(h)
 	t.Cleanup(func() {
@@ -298,7 +320,7 @@ func (h *harness) spawn(config *gfx.Config) error {
 			Tracks: []metronome.Track{metronome.NewTrack[gfx.RenderEvent](h.render)},
 		},
 	}
-	id, err := h.supervisor.Spawn(configs, 2, platform.NewPlugin(), metronome.NewPlugin(), gfx.NewPlugin(), h)
+	id, err := h.supervisor.Spawn(configs, h.workerCount, platform.NewPlugin(), metronome.NewPlugin(), gfx.NewPlugin(), h)
 	if err == nil {
 		h.kernel = h.supervisor.GetKernel(id)
 	}
