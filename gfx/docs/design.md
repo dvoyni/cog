@@ -16,8 +16,9 @@ Status: being built. The decisions come from the
 ticket that holds its detail. Every type, method and descriptor is declared
 in this module, from the listing on
 [`prototype/gfx-listing`](https://github.com/dvoyni/cog/tree/prototype/gfx-listing/gfx).
-The device comes up and is released, every resource but query sets is
-created and released, a pipeline with a zero `Layout` getting the layouts
+The device comes up and is released, every resource is
+created and released, `CreateQuerySet` answering `ErrQuerySetsUnavailable`
+until the wgpu fork exposes query sets, a pipeline with a zero `Layout` getting the layouts
 the backend reflects created as explicit ones and released with it, and
 pipeline creation checks the vertex buffers against the shader's inputs and
 the pipeline against the device's limits, surfaces
@@ -27,8 +28,8 @@ again once resized or the request changes, hidden and zero-size windows skipped,
 and the frame chain acquires, handling every acquire status alike, publishes `DrawEvent`, flushes
 the frame's encoders and presents, the recording adapter recording their
 passes and commands with typed arguments and rejecting a handle missing at
-its index, a resource without its usage, a misaligned write, copy or clear
-and a broken pass sequence, its buffers holding the bytes written, copied
+its index, a resource without its usage, a misaligned write, copy or clear,
+a broken pass sequence and any query set, its buffers holding the bytes written, copied
 and cleared. Writes reach the backend. Buffers map asynchronously: each
 poll, at `Poll`, every submit and every frame's flush, publishes
 `BufferMappedEvent` for the maps resolved, `MapStatusFailed` with its error
@@ -55,8 +56,7 @@ its seam declares `ReflectRenderPipelineLayout`,
 adapter answers with the layouts and inputs a test queues. `shader.Preprocess`, in `gfx/shader`,
 is v1's preprocessor whole: `#include`, `#define`, `#const`, `#if` and the hoisting
 of WGSL's `enable`, `requires` and `diagnostic`. Standalone encoders are finished
-and submitted by their owner; every other body panics until its ticket fills
-it. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md); the ADRs are in
+and submitted by their owner. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md); the ADRs are in
 [`adr/`](adr).
 
 ## Constraints
@@ -387,8 +387,11 @@ present and recovery itself.
   fork:** a `QuerySet` handle, `TimestampWrites` on pass descriptors,
   `CommandEncoder.ResolveQuerySet`, `BufferUsageFlagQueryResolve`,
   `Device.TimestampPeriod()`, and `FeatureFlagTimestampQuery` reported only
-  where it works. Until the fork exposes them, `CreateQuerySet` answers an
-  error on every backend. Results come back through the asynchronous maps.
+  where it works. Until the fork exposes them, `CreateQuerySet` answers
+  `ErrQuerySetsUnavailable` on every backend, and `ReleaseQuerySet` is
+  handed only the zero query set it answered, logging `ErrReleased`; a
+  pass's `TimestampWrites` naming no query set write nothing. Results come
+  back through the asynchronous maps.
 - **gfx collects no timings.** A per-pass profiler is scene's or a profiler
   plugin's.
 
@@ -441,6 +444,11 @@ present and recovery itself.
 - **It checks a fixed subset of what wgpu rejects:** a handle missing at its
   index, usage flags, write and copy alignment, pass state. It answers what a
   real backend would.
+- **Features:** every feature but `FeatureFlagTimestampQuery`; a device
+  requiring one it lacks is refused, as wgpu refuses it. `CreateQuerySet`
+  answers `ErrQuerySetsUnavailable`, timestamp writes or a resolve naming
+  any query set fail the encoder, and `TimestampPeriod` answers
+  `recording.TimestampPeriod`, one nanosecond.
 - **Submissions** are indexed from one on each device and finish at once,
   so `GPULatency` is zero.
 - **Data:** buffers hold bytes, which writes, buffer copies and clears apply

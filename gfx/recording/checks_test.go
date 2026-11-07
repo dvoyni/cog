@@ -847,7 +847,7 @@ func createEncoder(t *testing.T, device gfx.BackendDevice) gfx.StandaloneCommand
 // with its first generation. Only gfx makes handles, so it writes the index
 // and generation over the handle's two words.
 func handleAt[H gfx.Buffer | gfx.Texture | gfx.TextureView | gfx.Sampler | gfx.ShaderModule | gfx.BindGroupLayout |
-	gfx.BindGroup | gfx.PipelineLayout | gfx.RenderPipeline | gfx.ComputePipeline](index uint32) H {
+	gfx.BindGroup | gfx.PipelineLayout | gfx.RenderPipeline | gfx.ComputePipeline | gfx.QuerySet](index uint32) H {
 	var handle H
 	if unsafe.Sizeof(handle) != unsafe.Sizeof([2]uint32{}) {
 		panic("recording: a gfx handle is no longer an index and a generation")

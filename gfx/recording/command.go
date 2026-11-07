@@ -22,6 +22,9 @@ const (
 	// CommandKindBeginComputePass is CommandEncoder.BeginComputePass, its
 	// Arguments the gfx.ComputePassDescriptor, its Commands the pass's.
 	CommandKindBeginComputePass
+	// CommandKindResolveQuerySet is CommandEncoder.ResolveQuerySet, its
+	// Arguments a ResolveQuerySetArguments.
+	CommandKindResolveQuerySet
 	// CommandKindCopyBufferToBuffer is CommandEncoder.CopyBufferToBuffer, its
 	// Arguments a CopyBufferToBufferArguments.
 	CommandKindCopyBufferToBuffer
@@ -87,6 +90,16 @@ const (
 	// Arguments an IndirectArguments.
 	CommandKindDispatchIndirect
 )
+
+// ResolveQuerySetArguments are what CommandEncoder.ResolveQuerySet was called
+// with.
+type ResolveQuerySetArguments struct {
+	QuerySet          gfx.QuerySet
+	FirstQuery        uint32
+	QueryCount        uint32
+	Destination       gfx.Buffer
+	DestinationOffset uint64
+}
 
 // CopyBufferToBufferArguments are what CommandEncoder.CopyBufferToBuffer was
 // called with.

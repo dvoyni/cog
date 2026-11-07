@@ -82,8 +82,8 @@ type Device interface {
 	CreateSampler(descriptor SamplerDescriptor) (Sampler, error)
 	ReleaseSampler(sampler Sampler)
 
-	// CreateQuerySet creates a query set; it answers an error until the
-	// wgpu fork exposes query sets.
+	// CreateQuerySet creates a query set; it answers ErrQuerySetsUnavailable
+	// and the zero query set until the wgpu fork exposes query sets.
 	CreateQuerySet(descriptor QuerySetDescriptor) (QuerySet, error)
 	ReleaseQuerySet(querySet QuerySet)
 	// TimestampPeriod answers the nanoseconds of one timestamp tick.
