@@ -7,10 +7,16 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/metronome"
 	"github.com/dvoyni/cog/platform"
 )
+
+// recoveryLogKey is the key a failed recovery is logged once under, until a
+// recovery succeeds.
+const recoveryLogKey = "gfx: recovering the lost device"
 
 // device is the Device resource's value: installed empty in Init and filled
 // in Start, before any job reads it. It has no exclusive operation, so a job
@@ -35,6 +41,10 @@ type device struct {
 	// recovery's, its own calls with errors answer ErrDeviceLost, and its
 	// releases release no object, which the lost device's Release does.
 	lost atomic.Bool
+	// nextRecoveryAt is the earliest Beat.TimeFromStart a recovery is tried
+	// at, a second after the last that failed; only the recovery reads and
+	// changes it, under the write lock.
+	nextRecoveryAt time.Duration
 	// surfaces are the windows with a surface, in the order they got it;
 	// only jobs holding the write lock change it.
 	surfaces []platform.Window
@@ -446,7 +456,8 @@ func (d *device) UnmapBuffer(buffer Buffer) error {
 // an error, which goes to LogErr first. A capture's map resolved publishes
 // CapturedEvent instead, CaptureStatusFailed with its buffer released for
 // one that failed. A pending map whose buffer was released is dropped and
-// publishes nothing. A lost device polls nothing, its maps left pending.
+// publishes nothing. A status answering a device loss asks no other, and
+// the loss fails every map pending. A lost device polls nothing.
 func (d *device) Poll() {
 	if d.lost.Load() {
 		return
@@ -456,11 +467,19 @@ func (d *device) Poll() {
 	var resolved []BufferMappedEvent
 	var captures []CapturedEvent
 	var failures []error
+	var loss error
 	d.pendingMaps = slices.DeleteFunc(d.pendingMaps, func(buffer Buffer) bool {
+		if loss != nil {
+			return false
+		}
 		if d.buffers.check(buffer) != nil {
 			return true
 		}
 		ready, err := d.backend.MapStatus(buffer)
+		if errors.Is(err, ErrDeviceLost) {
+			loss = err
+			return false
+		}
 		if err == nil && !ready {
 			return false
 		}
@@ -486,6 +505,7 @@ func (d *device) Poll() {
 	for _, err := range failures {
 		d.logErr(err)
 	}
+	d.checkLoss(loss)
 	for _, event := range resolved {
 		d.kernel.Publish(event)
 	}
@@ -522,12 +542,14 @@ func (d *device) RequestCapture(window platform.Window) error {
 }
 
 // checkLoss answers err. When err is a device loss and the device was not
-// lost yet, it marks the device lost, logs err and publishes
-// DeviceLostEvent, from this job: once, whichever job sees it first.
+// lost yet, it marks the device lost, logs err, publishes DeviceLostEvent
+// and fails the maps pending, from this job: once, whichever job sees it
+// first.
 func (d *device) checkLoss(err error) error {
 	if errors.Is(err, ErrDeviceLost) && d.lost.CompareAndSwap(false, true) {
 		d.kernel.Logger().LogErr(err)
 		d.kernel.Publish(DeviceLostEvent{})
+		d.failPendingMaps()
 	}
 	return err
 }
@@ -691,6 +713,28 @@ func (d *device) dropPendingMap(buffer Buffer) {
 	}
 }
 
+// failPendingMaps ends every map pending at a loss, from this job: a
+// capture's is delivered CaptureStatusFailed, its buffer released, and any
+// other publishes BufferMappedEvent with MapStatusFailed, its buffer kept. A
+// pending map whose buffer was released publishes nothing.
+func (d *device) failPendingMaps() {
+	d.mapMutex.Lock()
+	pending := d.pendingMaps
+	captures := d.pendingCaptures
+	d.pendingMaps = nil
+	d.pendingCaptures = nil
+	d.mapMutex.Unlock()
+	for _, buffer := range pending {
+		if d.buffers.check(buffer) != nil || slices.ContainsFunc(captures, func(capture CapturedEvent) bool { return capture.Buffer == buffer }) {
+			continue
+		}
+		d.kernel.Publish(BufferMappedEvent{Buffer: buffer, Status: MapStatusFailed})
+	}
+	for _, capture := range captures {
+		d.failCapture(capture)
+	}
+}
+
 // releasePendingMaps unmaps and releases the buffer of every map still
 // pending, captures' included, publishing nothing, and answers the unmaps'
 // errors; a buffer released already is left alone, and a lost device unmaps
@@ -820,16 +864,17 @@ func (d *device) recreateObjects() error {
 	return nil
 }
 
-// recoverDevice recovers the lost device in place of a frame, under the
-// write lock: it releases the backend device and requests a new one,
+// recoverDevice recovers the lost device in place of beat's frame, under
+// the write lock: it releases the backend device and requests a new one,
 // creates every object again on it under its old handle, empty, marks every
 // surface for configuring, and publishes DeviceRecoveredEvent from its job.
-// A recovery that fails goes to LogErr and leaves the device lost, for a
-// later beat to recover. A device not lost, recovered by an earlier beat, is
-// left alone.
-func recoverDevice(k *kernel.Kernel, _ kernel.NoArg, deviceHandle kernel.Write[Device]) kernel.NoResult {
+// A recovery that fails leaves the device lost and is tried again by the
+// first beat a second or more later by Beat.TimeFromStart, with no limit;
+// it goes to LogErrOnce, so a loss logs its failed recoveries once. A device
+// not lost, recovered by an earlier beat, is left alone.
+func recoverDevice(k *kernel.Kernel, beat metronome.Beat, deviceHandle kernel.Write[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)
-	if !d.lost.Load() {
+	if !d.lost.Load() || beat.TimeFromStart < d.nextRecoveryAt {
 		return kernel.NoResult{}
 	}
 	err := d.replaceBackend()
@@ -837,9 +882,11 @@ func recoverDevice(k *kernel.Kernel, _ kernel.NoArg, deviceHandle kernel.Write[D
 		err = d.recreateObjects()
 	}
 	if err != nil {
-		k.Logger().LogErr(fmt.Errorf("gfx: recovering the lost device: %w", err))
+		d.nextRecoveryAt = beat.TimeFromStart + time.Second
+		k.Logger().LogErrOnce(recoveryLogKey, fmt.Errorf("gfx: recovering the lost device: %w", err))
 		return kernel.NoResult{}
 	}
+	k.Logger().ForgetLogOnce(recoveryLogKey)
 	d.lost.Store(false)
 	for _, window := range d.surfaces {
 		d.frames.markUnconfigured(window)

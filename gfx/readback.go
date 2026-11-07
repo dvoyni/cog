@@ -50,8 +50,8 @@ const (
 	// framebuffer that frame (hidden, outdated, timed out), and Buffer is
 	// zero.
 	CaptureStatusNotAcquired
-	// CaptureStatusFailed is a copy or map the backend refused; the error
-	// went to LogErr, and Buffer is zero.
+	// CaptureStatusFailed is a copy or map the backend refused, or a capture
+	// pending at a device loss; the error went to LogErr, and Buffer is zero.
 	CaptureStatusFailed
 )
 
