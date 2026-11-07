@@ -486,8 +486,17 @@ func (d *device) Present(window platform.Window) error {
 // WaitIdle records the wait, and answers what AnswerNext queued for it.
 func (d *device) WaitIdle() error { return d.instance.record(CallKindWaitIdle, nil, nil).Error }
 
-// Release records the device released.
-func (d *device) Release() { d.instance.record(CallKindReleaseDevice, nil, nil) }
+// Release records the device released, with every object it holds, and
+// leaves each surface unconfigured, dropping a framebuffer acquired and not
+// presented, as a real device's release does.
+func (d *device) Release() {
+	d.instance.record(CallKindReleaseDevice, nil, func() error {
+		for window, windowSurface := range d.instance.surfaces {
+			d.instance.surfaces[window] = surface{native: windowSurface.native}
+		}
+		return nil
+	})
+}
 
 // requireBuffer answers an error when buffer is missing, or lacks usage, for
 // role; nil for the zero buffer.

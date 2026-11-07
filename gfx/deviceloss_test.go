@@ -87,7 +87,6 @@ func TestADeviceLossFromABackendCallIsLoggedThenPublishedOnce(t *testing.T) {
 					t.Errorf("CreateBuffer after the loss answered %v, want ErrDeviceLost", err)
 				}
 			})
-			h.advance(time.Millisecond)
 
 			if lost := h.lostEvents(); len(lost) != 1 {
 				t.Errorf("DeviceLostEvent published %d times, want once", len(lost))
@@ -102,7 +101,7 @@ func TestADeviceLossFromABackendCallIsLoggedThenPublishedOnce(t *testing.T) {
 	}
 }
 
-func TestOnceTheDeviceIsLostCallsWithErrorsAnswerErrDeviceLostReachingNoBackend(t *testing.T) {
+func TestOnceTheDeviceIsLostNoCallReachesTheBackendAndCallsWithErrorsAnswerErrDeviceLost(t *testing.T) {
 	h := newHarness(t)
 	h.mustSpawn(nil)
 	var buffer gfx.Buffer
@@ -193,6 +192,8 @@ func TestOnceTheDeviceIsLostCallsWithErrorsAnswerErrDeviceLostReachingNoBackend(
 				t.Errorf("%s answered %v, want ErrDeviceLost", name, err)
 			}
 		}
+		device.Poll()
+		device.ReleaseBuffer(buffer)
 	})
 	h.writeDevice(func(device kernel.Write[gfx.Device]) {
 		if err := gfx.ElevateDeviceAccess(device).WaitIdle(); !errors.Is(err, gfx.ErrDeviceLost) {
@@ -281,5 +282,248 @@ func TestALossAnsweredByTwoCallsIsPublishedOnce(t *testing.T) {
 	}
 	if logged := h.takeLogged(); len(logged) != 1 {
 		t.Errorf("logged %v, want the loss once", logged)
+	}
+}
+
+func TestTheBeatAfterALossRecreatesEveryObjectUnderItsOldHandleInsteadOfDrawing(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	window := h.openWindow()
+	h.waitForCalls(recording.CallKindCreateSurface, 1)
+	h.advance(time.Millisecond)
+	h.readDevice(func(device gfx.Device) {
+		sampler, err := device.CreateSampler(gfx.SamplerDescriptor{})
+		mustSucceed(t, err)
+		device.ReleaseSampler(sampler)
+	})
+	before := len(h.instance.Recording().Calls)
+	h.instance.AnswerNext(recording.CallKindReflectRenderPipelineLayout, recording.Answer{BindGroupLayouts: reflectedGroups()})
+	h.readDevice(func(device gfx.Device) {
+		live := createFixture(t, device)
+		_, err := device.CreateRenderPipeline(renderPipelineDescriptor(live))
+		mustSucceed(t, err)
+		auto := renderPipelineDescriptor(live)
+		auto.Layout = gfx.PipelineLayout{}
+		_, err = device.CreateRenderPipeline(auto)
+		mustSucceed(t, err)
+		_, err = device.CreateComputePipeline(computePipelineDescriptor(live))
+		mustSucceed(t, err)
+		_, err = device.CreateBindGroup(gfx.BindGroupDescriptor{
+			Layout:  live.groupLayout,
+			Entries: []gfx.BindGroupEntry{{Binding: 0, Buffer: live.buffer, Size: 16}},
+		})
+		mustSucceed(t, err)
+	})
+	var created []recording.Call
+	for _, call := range h.instance.Recording().Calls[before:] {
+		if slices.Contains(recreationOrder, call.Kind) {
+			created = append(created, call)
+		}
+	}
+	slices.SortStableFunc(created, func(a, b recording.Call) int {
+		return slices.Index(recreationOrder, a.Kind) - slices.Index(recreationOrder, b.Kind)
+	})
+	loseDevice(h)
+	callCount := len(h.instance.Recording().Calls)
+	drawCount := len(h.drawEvents())
+
+	h.advance(time.Millisecond)
+
+	if drawn := h.drawEvents(); len(drawn) != drawCount {
+		t.Errorf("%d DrawEvents published by the recovering beat, want none", len(drawn)-drawCount)
+	}
+	if recovered := h.recoveredEvents(); recovered != 1 {
+		t.Errorf("DeviceRecoveredEvent published %d times, want once", recovered)
+	}
+	want := append([]recording.Call{
+		{Kind: recording.CallKindReleaseDevice},
+		{Kind: recording.CallKindRequestDevice, Arguments: gfx.DeviceDescriptor{RequiredLimits: gfx.DefaultLimits()}},
+	}, created...)
+	if calls := h.instance.Recording().Calls[callCount:]; !reflect.DeepEqual(calls, want) {
+		t.Errorf("the recovery made calls %v, want %v", calls, want)
+	}
+	h.readDevice(func(device gfx.Device) {
+		_, err := device.CreateBuffer(gfx.BufferDescriptor{Size: 4, Usage: gfx.BufferUsageFlagCopyDst})
+		mustSucceed(t, err)
+	})
+	callCount = len(h.instance.Recording().Calls)
+
+	h.advance(time.Millisecond)
+
+	if drawn := h.drawEvents(); len(drawn) != drawCount+1 {
+		t.Errorf("%d DrawEvents published after the recovery, want one", len(drawn)-drawCount)
+	}
+	var surfaceCalls []recording.CallKind
+	for _, call := range h.instance.Recording().Calls[callCount:] {
+		if call.Error != nil {
+			t.Errorf("the frame after the recovery made %v, answered %v", call.Kind, call.Error)
+		}
+		if call.Kind != recording.CallKindSurfaceCapabilities {
+			surfaceCalls = append(surfaceCalls, call.Kind)
+		}
+	}
+	if want := []recording.CallKind{recording.CallKindConfigureSurface, recording.CallKindAcquireFramebuffer, recording.CallKindPresent}; !reflect.DeepEqual(surfaceCalls, want) {
+		t.Errorf("the frame after the recovery made %v for %v, want its surface configured again, then acquired and presented", surfaceCalls, window)
+	}
+}
+
+func TestAFrameLostMidwayIsDrawnAgainAfterTheRecovery(t *testing.T) {
+	h := newHarness(t)
+	var buffer gfx.Buffer
+	h.readFrame = func(event gfx.DrawEvent, device gfx.Device) {
+		encoder, err := device.Encoder(event.Frame, 0)
+		if err == nil {
+			encoder.ClearBuffer(buffer, 0, 4)
+		}
+	}
+	h.mustSpawn(nil)
+	h.openWindow()
+	h.waitForCalls(recording.CallKindCreateSurface, 1)
+	h.readDevice(func(device gfx.Device) { buffer = createReadbackBuffer(t, device, 256) })
+	h.instance.AnswerNext(recording.CallKindFinish, recording.Answer{Error: gfx.ErrDeviceLost})
+	h.advance(time.Millisecond)
+	if logged := h.takeLogged(); len(logged) != 1 || !errors.Is(logged[0], gfx.ErrDeviceLost) {
+		t.Fatalf("logged %v, want the loss once", logged)
+	}
+	h.advance(time.Millisecond)
+	callCount := len(h.instance.Recording().Calls)
+
+	h.advance(time.Millisecond)
+
+	calls := h.instance.Recording().Calls[callCount:]
+	for _, call := range calls {
+		if call.Error != nil {
+			t.Errorf("the frame after the recovery made %v, answered %v", call.Kind, call.Error)
+		}
+	}
+	for _, kind := range []recording.CallKind{recording.CallKindConfigureSurface, recording.CallKindAcquireFramebuffer, recording.CallKindSubmit, recording.CallKindPresent} {
+		if !slices.Contains(kinds(calls), kind) {
+			t.Errorf("the frame after the recovery made %v, want a %v", kinds(calls), kind)
+		}
+	}
+	if drawn := h.drawEvents(); len(drawn) != 2 {
+		t.Errorf("%d DrawEvents published, want the lost frame's and the one after the recovery", len(drawn))
+	}
+}
+
+func TestARecoveryWhoseAdapterRefusesADeviceRequestsOneFromAFreshAdapter(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	loseDevice(h)
+	refusal := errors.New("vulkan: no device")
+	h.instance.AnswerNext(recording.CallKindRequestDevice, recording.Answer{Error: refusal})
+	callCount := len(h.instance.Recording().Calls)
+
+	h.advance(time.Millisecond)
+
+	request := gfx.DeviceDescriptor{RequiredLimits: gfx.DefaultLimits()}
+	want := []recording.Call{
+		{Kind: recording.CallKindReleaseDevice},
+		{Kind: recording.CallKindRequestDevice, Arguments: request, Error: refusal},
+		{Kind: recording.CallKindReleaseAdapter},
+		{Kind: recording.CallKindRequestAdapter, Arguments: gfx.RequestAdapterOptions{}},
+		{Kind: recording.CallKindRequestDevice, Arguments: request},
+	}
+	if calls := h.instance.Recording().Calls[callCount:]; !reflect.DeepEqual(calls, want) {
+		t.Errorf("the recovery made calls %v, want %v", calls, want)
+	}
+	if recovered := h.recoveredEvents(); recovered != 1 {
+		t.Errorf("DeviceRecoveredEvent published %d times, want once", recovered)
+	}
+}
+
+func TestARecoveryThatFailsIsLoggedAndLeavesTheDeviceLost(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	var buffer gfx.Buffer
+	h.readDevice(func(device gfx.Device) { buffer = createReadbackBuffer(t, device, 256) })
+	loseDevice(h)
+	refusal := errors.New("vulkan: no device")
+	h.instance.AnswerNext(recording.CallKindRequestDevice, recording.Answer{Error: refusal})
+	h.instance.AnswerNext(recording.CallKindRequestDevice, recording.Answer{Error: refusal})
+
+	h.advance(time.Millisecond)
+
+	if logged := h.takeLogged(); len(logged) != 1 || !errors.Is(logged[0], refusal) {
+		t.Errorf("logged %v, want the failed recovery once", logged)
+	}
+	if recovered := h.recoveredEvents(); recovered != 0 {
+		t.Errorf("DeviceRecoveredEvent published %d times, want none", recovered)
+	}
+	callCount := len(h.instance.Recording().Calls)
+	h.readDevice(func(device gfx.Device) {
+		if _, err := device.CreateBuffer(gfx.BufferDescriptor{Size: 4, Usage: gfx.BufferUsageFlagCopyDst}); !errors.Is(err, gfx.ErrDeviceLost) {
+			t.Errorf("CreateBuffer answered %v, want ErrDeviceLost", err)
+		}
+		device.Poll()
+		device.ReleaseBuffer(buffer)
+	})
+	if calls := h.instance.Recording().Calls[callCount:]; len(calls) != 0 {
+		t.Errorf("calls %v reached the backend after the failed recovery, want none", kinds(calls))
+	}
+}
+
+// recreationOrder is the order a recovery creates the objects of each type
+// again in: what an object names comes before it.
+var recreationOrder = []recording.CallKind{
+	recording.CallKindCreateBuffer,
+	recording.CallKindCreateTexture,
+	recording.CallKindCreateSampler,
+	recording.CallKindCreateShaderModule,
+	recording.CallKindCreateTextureView,
+	recording.CallKindCreateBindGroupLayout,
+	recording.CallKindCreatePipelineLayout,
+	recording.CallKindCreateRenderPipeline,
+	recording.CallKindCreateComputePipeline,
+	recording.CallKindCreateBindGroup,
+}
+
+// loseDevice loses h's device through a CreateBuffer under the read lock,
+// and takes the loss logged.
+func loseDevice(h *harness) {
+	h.t.Helper()
+	h.instance.AnswerNext(recording.CallKindCreateBuffer, recording.Answer{Error: gfx.ErrDeviceLost})
+	h.readDevice(func(device gfx.Device) {
+		_, _ = device.CreateBuffer(gfx.BufferDescriptor{Size: 4, Usage: gfx.BufferUsageFlagCopyDst})
+	})
+	if logged := h.takeLogged(); len(logged) != 1 || !errors.Is(logged[0], gfx.ErrDeviceLost) {
+		h.t.Fatalf("logged %v, want the loss once", logged)
+	}
+}
+
+func TestBeatsHandledWhileARecoveryWaitsRecoverOnce(t *testing.T) {
+	h := newHarness(t)
+	h.render.MaxInFlight = 2
+	h.mustSpawn(nil)
+	loseDevice(h)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	h.read = func(gfx.Device) {
+		close(started)
+		<-release
+	}
+	_, held := h.kernel.Publish(readEvent{})
+	<-started
+	callCount := len(h.instance.Recording().Calls)
+
+	h.clock.Jump(time.Millisecond)
+	h.waitForRenders(1)
+	h.clock.Jump(time.Millisecond)
+	h.waitForRenders(2)
+	close(release)
+	h.wait(held)
+	h.settle()
+
+	var releases int
+	for _, call := range h.instance.Recording().Calls[callCount:] {
+		if call.Kind == recording.CallKindReleaseDevice {
+			releases++
+		}
+	}
+	if releases != 1 {
+		t.Errorf("the device released %d times, want once: the second beat finds it recovered", releases)
+	}
+	if recovered := h.recoveredEvents(); recovered != 1 {
+		t.Errorf("DeviceRecoveredEvent published %d times, want once", recovered)
 	}
 }

@@ -88,6 +88,14 @@ func (pool *framePool) acquire(beat metronome.Beat) (frame Frame, lastPresent ke
 	return Frame{slot: index, generation: pool.slots[index].generation}, pool.lastPresent
 }
 
+// lastPresentJob answers the present of the newest frame, or what took its
+// place.
+func (pool *framePool) lastPresentJob() kernel.JobHandle {
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+	return pool.lastPresent
+}
+
 // setLastPresent keeps present as the newest frame's.
 func (pool *framePool) setLastPresent(present kernel.JobHandle) {
 	pool.mutex.Lock()
@@ -267,13 +275,21 @@ func (pool *framePool) unmarkLost(window platform.Window) bool {
 	return true
 }
 
-// draw is Handlers.Draw: it acquires a frame and, when a surface is marked
-// for it, schedules the configure after in and the last present; then the
-// acquire of its framebuffers after in, the last present and that configure,
-// publishes DrawEvent with that acquire as Ready, and schedules the flush
-// after the nested publication's out dependency, then the present, which it
-// keeps as the last present and returns.
+// draw is Handlers.Draw. On a lost device it schedules the recovery after in
+// and the last present, in place of a frame, and keeps it as the last
+// present and returns it, publishing no DrawEvent. Otherwise it acquires a
+// frame and, when a surface is marked for it, schedules the configure after
+// in and the last present; then the acquire of its framebuffers after in,
+// the last present and that configure, publishes DrawEvent with that acquire
+// as Ready, and schedules the flush after the nested publication's out
+// dependency, then the present, which it keeps as the last present and
+// returns.
 func (p *Plugin) draw(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event RenderEvent) (RenderEvent, kernel.JobHandle) {
+	if p.device.lost.Load() {
+		recovered := ex.Schedule(p.recoverTask, kernel.NoArg{}, in, p.device.frames.lastPresentJob()).Handle()
+		p.device.frames.setLastPresent(recovered)
+		return event, recovered
+	}
 	frame, lastPresent := p.device.frames.acquire(event.Beat)
 	configured := lastPresent
 	if p.device.frames.hasUnconfigured() {

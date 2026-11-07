@@ -16,17 +16,24 @@ import (
 // in Start, before any job reads it. It has no exclusive operation, so a job
 // holding the read lock cannot assert it into an ExclusiveDevice.
 type device struct {
-	instance    InstanceSocket
-	backend     BackendDevice
-	features    FeatureFlags
-	limits      Limits
-	adapterInfo AdapterInfo
+	instance InstanceSocket
+	// adapter and backend are what Start or the last recovery requested, nil
+	// where a request failed; adapterOptions and deviceDescriptor are what
+	// Start requested them with, and a recovery requests them with again.
+	adapter          BackendAdapter
+	adapterOptions   RequestAdapterOptions
+	deviceDescriptor DeviceDescriptor
+	backend          BackendDevice
+	features         FeatureFlags
+	limits           Limits
+	adapterInfo      AdapterInfo
 	// kernel is gfx's: BufferMappedEvent is published on it, and what a call
 	// answers no error for goes to its logger.
 	kernel *kernel.Kernel
 	// lost is set by the first backend call found answering ErrDeviceLost:
-	// from then on, until a recovery, gfx makes no backend call that could
-	// answer an error, and its own calls with errors answer ErrDeviceLost.
+	// from then on, until a recovery, gfx makes no backend call but the
+	// recovery's, its own calls with errors answer ErrDeviceLost, and its
+	// releases release no object, which the lost device's Release does.
 	lost atomic.Bool
 	// surfaces are the windows with a surface, in the order they got it;
 	// only jobs holding the write lock change it.
@@ -80,7 +87,7 @@ func (d *device) CreateBuffer(descriptor BufferDescriptor) (Buffer, error) {
 }
 
 func (d *device) ReleaseBuffer(buffer Buffer) {
-	releaseResource(d.kernel.Logger(), &d.buffers, buffer, d.backend.ReleaseBuffer)
+	releaseResource(d, &d.buffers, buffer, BackendDevice.ReleaseBuffer)
 }
 
 func (d *device) BufferDescriptor(buffer Buffer) BufferDescriptor {
@@ -98,7 +105,7 @@ func (d *device) CreateTexture(descriptor TextureDescriptor) (Texture, error) {
 }
 
 func (d *device) ReleaseTexture(texture Texture) {
-	releaseResource(d.kernel.Logger(), &d.textures, texture, d.backend.ReleaseTexture)
+	releaseResource(d, &d.textures, texture, BackendDevice.ReleaseTexture)
 }
 
 func (d *device) TextureDescriptor(texture Texture) TextureDescriptor {
@@ -122,7 +129,7 @@ func (d *device) CreateTextureView(texture Texture, descriptor TextureViewDescri
 }
 
 func (d *device) ReleaseTextureView(view TextureView) {
-	releaseResource(d.kernel.Logger(), &d.textureViews, view, d.backend.ReleaseTextureView)
+	releaseResource(d, &d.textureViews, view, BackendDevice.ReleaseTextureView)
 }
 
 func (d *device) TextureViewTexture(view TextureView) Texture {
@@ -139,7 +146,7 @@ func (d *device) CreateSampler(descriptor SamplerDescriptor) (Sampler, error) {
 }
 
 func (d *device) ReleaseSampler(sampler Sampler) {
-	releaseResource(d.kernel.Logger(), &d.samplers, sampler, d.backend.ReleaseSampler)
+	releaseResource(d, &d.samplers, sampler, BackendDevice.ReleaseSampler)
 }
 
 func (d *device) CreateQuerySet(descriptor QuerySetDescriptor) (QuerySet, error) {
@@ -159,7 +166,7 @@ func (d *device) CreateShaderModule(descriptor ShaderModuleDescriptor) (ShaderMo
 }
 
 func (d *device) ReleaseShaderModule(module ShaderModule) {
-	releaseResource(d.kernel.Logger(), &d.shaderModules, module, d.backend.ReleaseShaderModule)
+	releaseResource(d, &d.shaderModules, module, BackendDevice.ReleaseShaderModule)
 }
 
 func (d *device) CreateBindGroupLayout(descriptor BindGroupLayoutDescriptor) (BindGroupLayout, error) {
@@ -172,7 +179,7 @@ func (d *device) CreateBindGroupLayout(descriptor BindGroupLayoutDescriptor) (Bi
 }
 
 func (d *device) ReleaseBindGroupLayout(layout BindGroupLayout) {
-	releaseResource(d.kernel.Logger(), &d.bindGroupLayouts, layout, d.backend.ReleaseBindGroupLayout)
+	releaseResource(d, &d.bindGroupLayouts, layout, BackendDevice.ReleaseBindGroupLayout)
 }
 
 func (d *device) CreateBindGroup(descriptor BindGroupDescriptor) (BindGroup, error) {
@@ -199,7 +206,7 @@ func (d *device) CreateBindGroup(descriptor BindGroupDescriptor) (BindGroup, err
 }
 
 func (d *device) ReleaseBindGroup(group BindGroup) {
-	releaseResource(d.kernel.Logger(), &d.bindGroups, group, d.backend.ReleaseBindGroup)
+	releaseResource(d, &d.bindGroups, group, BackendDevice.ReleaseBindGroup)
 }
 
 func (d *device) CreatePipelineLayout(descriptor PipelineLayoutDescriptor) (PipelineLayout, error) {
@@ -217,7 +224,7 @@ func (d *device) CreatePipelineLayout(descriptor PipelineLayoutDescriptor) (Pipe
 }
 
 func (d *device) ReleasePipelineLayout(layout PipelineLayout) {
-	releaseResource(d.kernel.Logger(), &d.pipelineLayouts, layout, d.backend.ReleasePipelineLayout)
+	releaseResource(d, &d.pipelineLayouts, layout, BackendDevice.ReleasePipelineLayout)
 }
 
 func (d *device) CreateRenderPipeline(descriptor RenderPipelineDescriptor) (RenderPipeline, error) {
@@ -270,12 +277,9 @@ func (d *device) CreateRenderPipeline(descriptor RenderPipelineDescriptor) (Rend
 
 func (d *device) ReleaseRenderPipeline(pipeline RenderPipeline) {
 	source, _ := d.renderPipelines.descriptor(pipeline)
-	releaseResource(d.kernel.Logger(), &d.renderPipelines, pipeline, func(pipeline RenderPipeline) {
-		d.backend.ReleaseRenderPipeline(pipeline)
-		if source.autoLayout {
-			d.releaseAutoLayout(source.descriptor.Layout)
-		}
-	})
+	if releaseResource(d, &d.renderPipelines, pipeline, BackendDevice.ReleaseRenderPipeline) && source.autoLayout {
+		d.releaseAutoLayout(source.descriptor.Layout)
+	}
 }
 
 func (d *device) RenderPipelineBindGroupLayout(pipeline RenderPipeline, group uint32) BindGroupLayout {
@@ -325,12 +329,9 @@ func (d *device) CreateComputePipeline(descriptor ComputePipelineDescriptor) (Co
 
 func (d *device) ReleaseComputePipeline(pipeline ComputePipeline) {
 	source, _ := d.computePipelines.descriptor(pipeline)
-	releaseResource(d.kernel.Logger(), &d.computePipelines, pipeline, func(pipeline ComputePipeline) {
-		d.backend.ReleaseComputePipeline(pipeline)
-		if source.autoLayout {
-			d.releaseAutoLayout(source.descriptor.Layout)
-		}
-	})
+	if releaseResource(d, &d.computePipelines, pipeline, BackendDevice.ReleaseComputePipeline) && source.autoLayout {
+		d.releaseAutoLayout(source.descriptor.Layout)
+	}
 }
 
 func (d *device) ComputePipelineBindGroupLayout(pipeline ComputePipeline, group uint32) BindGroupLayout {
@@ -445,8 +446,11 @@ func (d *device) UnmapBuffer(buffer Buffer) error {
 // an error, which goes to LogErr first. A capture's map resolved publishes
 // CapturedEvent instead, CaptureStatusFailed with its buffer released for
 // one that failed. A pending map whose buffer was released is dropped and
-// publishes nothing.
+// publishes nothing. A lost device polls nothing, its maps left pending.
 func (d *device) Poll() {
+	if d.lost.Load() {
+		return
+	}
 	d.backend.Poll()
 	d.mapMutex.Lock()
 	var resolved []BufferMappedEvent
@@ -689,7 +693,8 @@ func (d *device) dropPendingMap(buffer Buffer) {
 
 // releasePendingMaps unmaps and releases the buffer of every map still
 // pending, captures' included, publishing nothing, and answers the unmaps'
-// errors; a buffer released already is left alone.
+// errors; a buffer released already is left alone, and a lost device unmaps
+// nothing.
 func (d *device) releasePendingMaps() error {
 	d.mapMutex.Lock()
 	pending := d.pendingMaps
@@ -701,7 +706,9 @@ func (d *device) releasePendingMaps() error {
 		if d.buffers.check(buffer) != nil {
 			continue
 		}
-		errs = append(errs, d.backend.UnmapBuffer(buffer))
+		if !d.lost.Load() {
+			errs = append(errs, d.backend.UnmapBuffer(buffer))
+		}
 		d.ReleaseBuffer(buffer)
 	}
 	return errors.Join(errs...)
@@ -736,6 +743,109 @@ func (d *device) groupLayout(layout PipelineLayout, group uint32) BindGroupLayou
 		return BindGroupLayout{}
 	}
 	return descriptor.BindGroupLayouts[group]
+}
+
+// replaceBackend releases the lost backend device and requests a new one
+// from the adapter or, when that fails, from a fresh adapter, as Start
+// requested them. It answers the requests' errors when none answers a
+// device, leaving d without a backend, and without an adapter when the
+// fresh one failed too.
+func (d *device) replaceBackend() error {
+	if d.backend != nil {
+		d.backend.Release()
+		d.backend = nil
+	}
+	var refusal error
+	if d.adapter != nil {
+		backend, err := d.adapter.RequestDevice(d.deviceDescriptor)
+		if err == nil {
+			d.backend = backend
+			return nil
+		}
+		refusal = err
+		d.adapter.Release()
+		d.adapter = nil
+	}
+	adapter, err := d.instance.RequestAdapter(d.adapterOptions)
+	if err != nil {
+		return errors.Join(refusal, err)
+	}
+	d.adapter = adapter
+	d.adapterInfo = adapter.Info()
+	backend, err := adapter.RequestDevice(d.deviceDescriptor)
+	if err != nil {
+		return errors.Join(refusal, err)
+	}
+	d.backend = backend
+	return nil
+}
+
+// recreateObjects has the backend create every object the tables hold again,
+// under its old handle, from what it was created with, in dependency order:
+// buffers, textures, samplers and shader modules; views and bind group
+// layouts; pipeline layouts; pipelines, the layouts gfx created for an
+// "auto" one among those before them; bind groups. A creation that fails
+// goes to LogErr, leaving its handle with no object; a device loss stops it,
+// and is answered.
+func (d *device) recreateObjects() error {
+	logger := d.kernel.Logger()
+	for _, recreate := range []func() error{
+		func() error { return recreateResources(logger, &d.buffers, d.backend.CreateBuffer) },
+		func() error { return recreateResources(logger, &d.textures, d.backend.CreateTexture) },
+		func() error { return recreateResources(logger, &d.samplers, d.backend.CreateSampler) },
+		func() error { return recreateResources(logger, &d.shaderModules, d.backend.CreateShaderModule) },
+		func() error {
+			return recreateResources(logger, &d.textureViews, func(view TextureView, source textureViewSource) error {
+				return d.backend.CreateTextureView(view, source.texture, source.descriptor)
+			})
+		},
+		func() error { return recreateResources(logger, &d.bindGroupLayouts, d.backend.CreateBindGroupLayout) },
+		func() error { return recreateResources(logger, &d.pipelineLayouts, d.backend.CreatePipelineLayout) },
+		func() error {
+			return recreateResources(logger, &d.renderPipelines, func(pipeline RenderPipeline, source pipelineSource[RenderPipelineDescriptor]) error {
+				return d.backend.CreateRenderPipeline(pipeline, source.descriptor)
+			})
+		},
+		func() error {
+			return recreateResources(logger, &d.computePipelines, func(pipeline ComputePipeline, source pipelineSource[ComputePipelineDescriptor]) error {
+				return d.backend.CreateComputePipeline(pipeline, source.descriptor)
+			})
+		},
+		func() error { return recreateResources(logger, &d.bindGroups, d.backend.CreateBindGroup) },
+	} {
+		if err := recreate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// recoverDevice recovers the lost device in place of a frame, under the
+// write lock: it releases the backend device and requests a new one,
+// creates every object again on it under its old handle, empty, marks every
+// surface for configuring, and publishes DeviceRecoveredEvent from its job.
+// A recovery that fails goes to LogErr and leaves the device lost, for a
+// later beat to recover. A device not lost, recovered by an earlier beat, is
+// left alone.
+func recoverDevice(k *kernel.Kernel, _ kernel.NoArg, deviceHandle kernel.Write[Device]) kernel.NoResult {
+	d := deviceHandle.Get().(*device)
+	if !d.lost.Load() {
+		return kernel.NoResult{}
+	}
+	err := d.replaceBackend()
+	if err == nil {
+		err = d.recreateObjects()
+	}
+	if err != nil {
+		k.Logger().LogErr(fmt.Errorf("gfx: recovering the lost device: %w", err))
+		return kernel.NoResult{}
+	}
+	d.lost.Store(false)
+	for _, window := range d.surfaces {
+		d.frames.markUnconfigured(window)
+	}
+	k.Publish(DeviceRecoveredEvent{})
+	return kernel.NoResult{}
 }
 
 // exclusiveDevice is the device as ElevateDeviceAccess answers it, with the
@@ -790,14 +900,36 @@ func createResource[H ~struct{ handle }, D any](resources *table[H, D], descript
 	return h, nil
 }
 
-// releaseResource makes h stale in resources, has the backend release its
-// object with releaseObject, and hands its index out again; a stale h logs
-// ErrReleased through logger and does nothing.
-func releaseResource[H ~struct{ handle }, D any](logger *kernel.Logger, resources *table[H, D], h H, releaseObject func(H)) {
+// releaseResource makes h stale in resources, has d's backend release its
+// object with releaseObject, unless d is lost, and hands its index out
+// again, answering true; a stale h logs ErrReleased through d's logger, does
+// nothing and answers false.
+func releaseResource[H ~struct{ handle }, D any](d *device, resources *table[H, D], h H, releaseObject func(BackendDevice, H)) bool {
 	if err := resources.retire(h); err != nil {
-		logger.LogErr(err)
-		return
+		d.kernel.Logger().LogErr(err)
+		return false
 	}
-	releaseObject(h)
+	if !d.lost.Load() {
+		releaseObject(d.backend, h)
+	}
 	resources.release(h)
+	return true
+}
+
+// recreateResources has the backend create the object of every handle
+// resources holds again with createObject, under that handle, from what it
+// was created with. A creation that fails goes to LogErr through logger,
+// leaving its handle with no object, but for a device loss, which stops it
+// and is answered.
+func recreateResources[H ~struct{ handle }, D any](logger *kernel.Logger, resources *table[H, D], createObject func(H, D) error) error {
+	for h, descriptor := range resources.heldHandles() {
+		err := createObject(h, descriptor)
+		if errors.Is(err, ErrDeviceLost) {
+			return err
+		}
+		if err != nil {
+			logger.LogErr(fmt.Errorf("gfx: recreating %T at %d: %w", h, struct{ handle }(h).index, err))
+		}
+	}
+	return nil
 }
