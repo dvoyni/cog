@@ -114,8 +114,11 @@ type BackendDevice interface {
 	ConfigureSurface(window platform.Window, configuration SurfaceConfiguration) error
 
 	// AcquireFramebuffer acquires window's next framebuffer and, when status
-	// is Acquired or Suboptimal, stores its view at view's index.
-	AcquireFramebuffer(window platform.Window, view TextureView) (status AcquireStatus, err error)
+	// is Acquired or Suboptimal, stores its texture at texture's index and
+	// its view at view's, until the present. The texture is a copy source
+	// when the surface is configured Capturable, for gfx's capture to copy
+	// out of.
+	AcquireFramebuffer(window platform.Window, texture Texture, view TextureView) (status AcquireStatus, err error)
 	// Present presents window's acquired framebuffer.
 	Present(window platform.Window) error
 

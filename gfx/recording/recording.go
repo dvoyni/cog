@@ -148,7 +148,7 @@ const (
 )
 
 // SurfaceCapabilities is what the recording adapter answers for every
-// surface's capabilities, unless AnswerNext queues others.
+// surface's capabilities, capturable, unless AnswerNext queues others.
 var SurfaceCapabilities = gfx.SurfaceCapabilities{
 	Formats: []gfx.TextureFormat{
 		gfx.TextureFormatBGRA8Unorm, gfx.TextureFormatBGRA8UnormSrgb,
@@ -159,6 +159,7 @@ var SurfaceCapabilities = gfx.SurfaceCapabilities{
 		gfx.PresentModeImmediate, gfx.PresentModeMailbox,
 	},
 	AlphaModes: []gfx.CompositeAlphaMode{gfx.CompositeAlphaModeOpaque},
+	Capturable: true,
 }
 
 // Answer is what AnswerNext makes a call answer: Status for an acquire,
@@ -252,8 +253,9 @@ type ConfigureSurfaceArguments struct {
 
 // AcquireFramebufferArguments are what AcquireFramebuffer was called with.
 type AcquireFramebufferArguments struct {
-	Window platform.Window
-	View   gfx.TextureView
+	Window  platform.Window
+	Texture gfx.Texture
+	View    gfx.TextureView
 }
 
 // CreateBufferArguments are what CreateBuffer was called with.

@@ -143,11 +143,30 @@ func (instance *Instance) holdsFramebuffer(view gfx.TextureView) bool {
 	return false
 }
 
+// framebufferUsage answers the usage of texture when it is a framebuffer
+// acquired and not yet presented: RenderAttachment, and CopySrc when its
+// surface is capturable; the caller holds the mutex.
+func (instance *Instance) framebufferUsage(texture gfx.Texture) (usage gfx.TextureUsageFlags, isFramebuffer bool) {
+	for _, windowSurface := range instance.surfaces {
+		if windowSurface.framebufferTexture != texture {
+			continue
+		}
+		usage = gfx.TextureUsageFlagRenderAttachment
+		if windowSurface.capturable {
+			usage |= gfx.TextureUsageFlagCopySrc
+		}
+		return usage, true
+	}
+	return gfx.TextureUsageFlagNone, false
+}
+
 // surface is one window's surface: the native handle it was created from,
-// whether it is configured, and the framebuffer acquired and not yet
-// presented, zero when none is.
+// whether it is configured, and capturable, and the framebuffer acquired and
+// not yet presented, its texture and view, zero when none is.
 type surface struct {
-	native      platform.NativeHandle
-	configured  bool
-	framebuffer gfx.TextureView
+	native             platform.NativeHandle
+	configured         bool
+	capturable         bool
+	framebufferTexture gfx.Texture
+	framebuffer        gfx.TextureView
 }

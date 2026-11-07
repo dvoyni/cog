@@ -21,11 +21,13 @@ type Plugin struct {
 	// for Destroy to release; nil where Start got no further.
 	adapter BackendAdapter
 	device  *device
-	// tasks are the surface tasks the Tasks resource holds, and flushTask
-	// what runs between a frame's recording and its present; the handlers
-	// schedule them.
-	tasks     Tasks
-	flushTask *kernel.Task[Frame, kernel.NoResult]
+	// tasks are the surface tasks the Tasks resource holds, flushTask what
+	// runs between a frame's recording and its present, and
+	// releaseCaptureTask what releases a capture's buffer after its
+	// CapturedEvent; the handlers schedule them.
+	tasks              Tasks
+	flushTask          *kernel.Task[Frame, kernel.NoResult]
+	releaseCaptureTask *kernel.Task[Buffer, kernel.NoResult]
 }
 
 // Config is gfx's part of the kernel's config, under PluginName: what the
@@ -61,7 +63,8 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 
 // Init declares the required InstanceSocket, installs the Device, empty
 // until Start, installs Tasks, and subscribes to RenderEvent and platform's
-// window events, the Subs kept in the Handlers resource. A config of another
+// window events, the Subs kept in the Handlers resource, and to its own
+// private delivery of captures. A config of another
 // type than *Config is a composition error, and panics.
 func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	p.config = *kernel.PluginConfigOrDefault[Config](config)
@@ -77,6 +80,8 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	}
 	configurator.InitResource(p.tasks)
 	p.flushTask = configurator.RegisterTask1(flushFrame)
+	p.releaseCaptureTask = configurator.RegisterTask1(releaseCapture)
+	configurator.Subscribe(p.publishCapture)
 	configurator.InitResource(Handlers{
 		Draw: configurator.Subscribe(p.draw),
 		CreateSurface: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event platform.WindowOpenedEvent) (platform.WindowOpenedEvent, kernel.JobHandle) {
