@@ -37,6 +37,10 @@ type harness struct {
 	// Each is set before spawning.
 	holdFrame func(event gfx.DrawEvent)
 	readFrame func(event gfx.DrawEvent, device gfx.Device)
+	// readCapture, when set, runs under the Device's read lock in a task
+	// joined into each CapturedEvent's out dependency. It is set before
+	// spawning.
+	readCapture func(event gfx.CapturedEvent, device gfx.Device)
 	// unbound leaves InstanceSocket without a binding.
 	unbound bool
 	// pinSurfaceTasks pins gfx's surface tasks to the main thread in Init, as
@@ -53,11 +57,13 @@ type harness struct {
 	tasksFound bool
 	// mutex guards logged, the errors kernels logged and the test has not
 	// taken, any left when the test ends failing it, drawn, every DrawEvent
-	// published, and mapped, every BufferMappedEvent published.
-	mutex  sync.Mutex
-	logged []error
-	drawn  []gfx.DrawEvent
-	mapped []gfx.BufferMappedEvent
+	// published, mapped, every BufferMappedEvent published, and captured,
+	// every CapturedEvent published.
+	mutex    sync.Mutex
+	logged   []error
+	drawn    []gfx.DrawEvent
+	mapped   []gfx.BufferMappedEvent
+	captured []gfx.CapturedEvent
 }
 
 // readEvent runs the harness's read under the Device's read lock.
@@ -160,6 +166,18 @@ func (h *harness) Init(c *kernel.Configurator, config any) error {
 		h.mapped = append(h.mapped, event)
 		h.mutex.Unlock()
 		return event, in
+	})
+	readCapture := c.RegisterTask1(func(k *kernel.Kernel, event gfx.CapturedEvent, device kernel.Read[gfx.Device]) kernel.NoResult {
+		if h.readCapture != nil {
+			h.readCapture(event, device.Get())
+		}
+		return kernel.NoResult{}
+	})
+	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.CapturedEvent) (gfx.CapturedEvent, kernel.JobHandle) {
+		h.mutex.Lock()
+		h.captured = append(h.captured, event)
+		h.mutex.Unlock()
+		return event, ex.Join(in, ex.Schedule(readCapture, event).Handle())
 	})
 	tasks, _ := c.Resource[platform.Tasks]()
 	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event pumpEvent) (pumpEvent, kernel.JobHandle) {
@@ -297,12 +315,18 @@ func (h *harness) pump() {
 	h.wait(out)
 }
 
-// openWindow opens a window and pumps, and answers it.
+// openWindow opens a window of 64 by 48 and pumps, and answers it.
 func (h *harness) openWindow() platform.Window {
+	h.t.Helper()
+	return h.openWindowOfSize(platform.Size{Width: 64, Height: 48})
+}
+
+// openWindowOfSize opens a window of size and pumps, and answers it.
+func (h *harness) openWindowOfSize(size platform.Size) platform.Window {
 	h.t.Helper()
 	var window platform.Window
 	h.editWindows(func(manager *platform.WindowManager) {
-		window = manager.Open(platform.WindowEntry{Size: platform.Size{Width: 64, Height: 48}})
+		window = manager.Open(platform.WindowEntry{Size: size})
 	})
 	h.pump()
 	return window
@@ -465,6 +489,13 @@ func (h *harness) mappedEvents() []gfx.BufferMappedEvent {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 	return slices.Clone(h.mapped)
+}
+
+// capturedEvents answers every CapturedEvent published so far.
+func (h *harness) capturedEvents() []gfx.CapturedEvent {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	return slices.Clone(h.captured)
 }
 
 // kinds answers the kinds of calls, in order.

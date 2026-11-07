@@ -33,7 +33,11 @@ and cleared. Writes reach the backend. Buffers map asynchronously: each
 poll, at `Poll`, every submit and every frame's flush, publishes
 `BufferMappedEvent` for the maps resolved, `MapStatusFailed` with its error
 in `LogErr` for one the backend fails, and `Destroy` unmaps and releases
-the buffers of the maps still pending. The backend reflects shader modules:
+the buffers of the maps still pending. A window's capture, requested on a
+capturable surface, is copied out by gfx's own encoder after every submit
+order and delivered by `CapturedEvent`, its buffer unmapped and released
+after the publication's out dependency; `ReadCapture` waits on its ticket.
+The backend reflects shader modules:
 its seam declares `ReflectRenderPipelineLayout`,
 `ReflectComputePipelineLayout` and `ReflectVertexInputs`, which the recording
 adapter answers with the layouts and inputs a test queues. `shader.Preprocess`, in `gfx/shader`,
@@ -331,19 +335,25 @@ present and recovery itself.
   `UnmapBuffer`. `Device.Poll` resolves finished maps for a kernel with no
   frames running. There is no blocking map: it would wait for the whole
   device to go idle.
-- **Capture is gfx's.** `Device.RequestCapture(window)` asks for the next
-  frame's framebuffer. gfx's flush appends its own encoder after every submit
-  order, copying the framebuffer into a fresh staging buffer before the
-  present, and maps it after the submit. `CapturedEvent{Window, Beat, Buffer,
+- **Capture is gfx's.** `Device.RequestCapture(window)` asks for the
+  framebuffer of the next frame flushed. gfx's flush appends its own encoder
+  after every submit order, copying the framebuffer into a fresh staging
+  buffer before the present, and maps it after the submit. The backend hands
+  each framebuffer over as a texture as well as a view, for that copy; a
+  map, copy or submit that fails delivers `CaptureStatusFailed`, its error in
+  `LogErr`. `CapturedEvent{Window, Beat, Buffer,
   Width, Height, Format, BytesPerRow, Status}` delivers it a frame later;
   `Beat` names the moment shown. gfx unmaps and releases the buffer after the
   publication's out dependency. `ReadCapture(device, event)` answers an
   `image.NRGBA`: rows un-strided, BGRA swapped, alpha opaque, no colour
   conversion. One capture is in flight per window (`ErrCaptureBusy`).
-- **A surface must be capturable:** `SurfaceRequest.Capturable` adds
-  `CopySrc` on Vulkan and `StorageBinding` on Metal. DX12 cannot honour it
-  yet. Otherwise, or for a format other than 8-bit BGRA or RGBA,
-  `RequestCapture` answers `ErrCaptureUnsupported`. A window that acquired
+- **A surface must be capturable:** `SurfaceRequest.Capturable` reaches the
+  backend in `SurfaceConfiguration`, which adds `CopySrc` on Vulkan and
+  `StorageBinding` on Metal. DX12 cannot honour it yet: its
+  `SurfaceCapabilities.Capturable` is false, and the surface falls back with
+  a `LogErr`. A window whose configuration is not capturable, or not yet
+  configured, or whose format is not 8-bit BGRA or RGBA, `RequestCapture`
+  answers `ErrCaptureUnsupported`. A window that acquired
   nothing that frame gets `CapturedEvent` with `CaptureStatusNotAcquired`.
 - **At shutdown** pending maps and captures are dropped without an event;
   `Destroy` unmaps and releases their buffers.

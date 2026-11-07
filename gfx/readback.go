@@ -1,8 +1,10 @@
 package gfx
 
 import (
+	"fmt"
 	"image"
 
+	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/metronome"
 	"github.com/dvoyni/cog/platform"
 )
@@ -76,4 +78,33 @@ type CapturedEvent struct {
 // into the CapturedEvent publication calls it under kernel.Read[Device].
 func ReadCapture(device Device, event CapturedEvent) (*image.NRGBA, error) {
 	panic("gfx listing: no bodies")
+}
+
+// captureDeliveryEvent carries a capture resolved, or ended without one, from
+// the job that found it to gfx's handler, which publishes it as
+// CapturedEvent in its own batch, to release its buffer after.
+type captureDeliveryEvent struct {
+	captured CapturedEvent
+}
+
+// publishCapture handles captureDeliveryEvent: it publishes the
+// CapturedEvent after in and, when it has a buffer, schedules its unmap and
+// release after the publication's out dependency, which it returns.
+func (p *Plugin) publishCapture(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event captureDeliveryEvent) (captureDeliveryEvent, kernel.JobHandle) {
+	_, out := ex.Publish(in, event.captured)
+	if event.captured.Buffer == (Buffer{}) {
+		return event, out
+	}
+	return event, ex.Schedule(p.releaseCaptureTask, event.captured.Buffer, out).Handle()
+}
+
+// releaseCapture unmaps and releases a capture's buffer, under the read
+// lock; an unmap that fails goes to LogErr.
+func releaseCapture(k *kernel.Kernel, buffer Buffer, deviceHandle kernel.Read[Device]) kernel.NoResult {
+	device := deviceHandle.Get()
+	if err := device.UnmapBuffer(buffer); err != nil {
+		k.Logger().LogErr(fmt.Errorf("gfx: unmapping a capture's buffer: %w", err))
+	}
+	device.ReleaseBuffer(buffer)
+	return kernel.NoResult{}
 }

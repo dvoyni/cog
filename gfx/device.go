@@ -32,11 +32,20 @@ type device struct {
 	// only jobs holding the write lock change them.
 	configurations map[platform.Window]SurfaceConfiguration
 	frames         framePool
-	// mapMutex guards pendingMaps, the buffers whose maps MapBuffer started
-	// and no poll has found resolved, and is held across the poll's checks,
-	// so two polls never publish one map twice.
+	// mapMutex guards pendingMaps, the buffers whose maps MapBuffer or a
+	// capture started and no poll has found resolved, and is held across the
+	// poll's checks, so two polls never publish one map twice. It guards the
+	// captures too.
 	mapMutex    sync.Mutex
 	pendingMaps []Buffer
+	// capturingWindows are the windows with a capture in flight, from
+	// RequestCapture until its CapturedEvent is published.
+	capturingWindows []platform.Window
+	// requestedCaptures are the windows whose captures no flush has taken.
+	requestedCaptures []platform.Window
+	// pendingCaptures are the captures whose buffers' maps are pending,
+	// published once the poll finds them resolved.
+	pendingCaptures []CapturedEvent
 	// Each table holds its type's handles with what each was created with,
 	// slices copied, which a recovery creates it again from.
 	buffers          table[Buffer, BufferDescriptor]
@@ -364,27 +373,41 @@ func (d *device) UnmapBuffer(buffer Buffer) error {
 // Poll has the backend resolve its finished maps, then publishes
 // BufferMappedEvent, from this job, for each pending map now resolved:
 // MapStatusMapped, or MapStatusFailed when the backend answers its status
-// an error, which goes to LogErr first. A pending map whose buffer was
-// released is dropped and publishes nothing.
+// an error, which goes to LogErr first. A capture's map resolved publishes
+// CapturedEvent instead, CaptureStatusFailed with its buffer released for
+// one that failed. A pending map whose buffer was released is dropped and
+// publishes nothing.
 func (d *device) Poll() {
 	d.backend.Poll()
 	d.mapMutex.Lock()
 	var resolved []BufferMappedEvent
+	var captures []CapturedEvent
 	var failures []error
 	d.pendingMaps = slices.DeleteFunc(d.pendingMaps, func(buffer Buffer) bool {
 		if d.buffers.check(buffer) != nil {
 			return true
 		}
 		ready, err := d.backend.MapStatus(buffer)
+		if err == nil && !ready {
+			return false
+		}
 		if err != nil {
-			resolved = append(resolved, BufferMappedEvent{Buffer: buffer, Status: MapStatusFailed})
 			failures = append(failures, err)
+		}
+		if index := slices.IndexFunc(d.pendingCaptures, func(capture CapturedEvent) bool { return capture.Buffer == buffer }); index >= 0 {
+			captures = append(captures, d.pendingCaptures[index])
+			d.pendingCaptures = slices.Delete(d.pendingCaptures, index, index+1)
+			if err != nil {
+				captures[len(captures)-1].Status = CaptureStatusFailed
+			}
 			return true
 		}
-		if ready {
-			resolved = append(resolved, BufferMappedEvent{Buffer: buffer, Status: MapStatusMapped})
+		status := MapStatusMapped
+		if err != nil {
+			status = MapStatusFailed
 		}
-		return ready
+		resolved = append(resolved, BufferMappedEvent{Buffer: buffer, Status: status})
+		return true
 	})
 	d.mapMutex.Unlock()
 	for _, err := range failures {
@@ -393,9 +416,34 @@ func (d *device) Poll() {
 	for _, event := range resolved {
 		d.kernel.Publish(event)
 	}
+	for _, capture := range captures {
+		if capture.Status == CaptureStatusFailed {
+			d.failCapture(capture)
+			continue
+		}
+		d.deliverCapture(capture)
+	}
 }
 
-func (d *device) RequestCapture(window platform.Window) error { panic("gfx listing: no bodies") }
+// RequestCapture takes window's capture for the next frame flushed, judged
+// by what its surface is configured with: a window not yet configured
+// answers ErrCaptureUnsupported too.
+func (d *device) RequestCapture(window platform.Window) error {
+	configuration, configured := d.configurations[window]
+	if !configured || !configuration.Capturable || !slices.Contains([]TextureFormat{
+		TextureFormatBGRA8Unorm, TextureFormatBGRA8UnormSrgb, TextureFormatRGBA8Unorm, TextureFormatRGBA8UnormSrgb,
+	}, configuration.Format) {
+		return ErrCaptureUnsupported
+	}
+	d.mapMutex.Lock()
+	defer d.mapMutex.Unlock()
+	if slices.Contains(d.capturingWindows, window) {
+		return ErrCaptureBusy
+	}
+	d.capturingWindows = append(d.capturingWindows, window)
+	d.requestedCaptures = append(d.requestedCaptures, window)
+	return nil
+}
 
 // createAutoLayout creates a bind-group layout of each of groups, as the
 // backend reflected them for a pipeline's "auto" layout, and a pipeline
@@ -423,6 +471,119 @@ func (d *device) createAutoLayout(groups []BindGroupLayoutDescriptor) (PipelineL
 	return layout, nil
 }
 
+// copyCaptures takes the captures requested and, for each window the frame
+// in slot acquired, creates a staging buffer and records the copy of its
+// framebuffer into it on gfx's own encoder, whose command buffer it appends
+// to slot's, after every submit order. It answers the captures copied, for
+// mapCaptures once submitted. A window the frame did not acquire is
+// delivered CaptureStatusNotAcquired; a buffer, encoder or Finish that fails
+// goes to LogErr, and its captures are delivered CaptureStatusFailed.
+func (d *device) copyCaptures(slot *frameSlot) []CapturedEvent {
+	d.mapMutex.Lock()
+	requested := d.requestedCaptures
+	d.requestedCaptures = nil
+	d.mapMutex.Unlock()
+	var copied []CapturedEvent
+	var encoder StandaloneCommandEncoder
+	for _, window := range requested {
+		capture := CapturedEvent{Window: window, Beat: slot.beat, Status: CaptureStatusNotAcquired}
+		index := slices.IndexFunc(slot.framebuffers, func(acquired framebuffer) bool { return acquired.window == window })
+		if index < 0 {
+			d.deliverCapture(capture)
+			continue
+		}
+		texture := slot.framebuffers[index].texture
+		descriptor, _ := d.textures.descriptor(texture)
+		capture.Width = descriptor.Size.Width
+		capture.Height = descriptor.Size.Height
+		capture.Format = descriptor.Format
+		capture.BytesPerRow = (capture.Width*4 + 255) &^ 255
+		capture.Status = CaptureStatusCaptured
+		var err error
+		if encoder == nil {
+			encoder, err = d.backend.CreateCommandEncoder(CommandEncoderDescriptor{Label: "gfx: captures"})
+		}
+		if err == nil {
+			capture.Buffer, err = d.CreateBuffer(BufferDescriptor{
+				Label: "gfx: capture",
+				Size:  uint64(capture.BytesPerRow) * uint64(capture.Height),
+				Usage: BufferUsageFlagCopyDst | BufferUsageFlagMapRead,
+			})
+		}
+		if err != nil {
+			d.kernel.Logger().LogErr(fmt.Errorf("gfx: capturing %v: %w", window, err))
+			d.failCapture(capture)
+			continue
+		}
+		encoder.CopyTextureToBuffer(texture, capture.Buffer, []BufferTextureCopy{{
+			BufferLayout: ImageDataLayout{BytesPerRow: capture.BytesPerRow, RowsPerImage: capture.Height},
+			TextureBase:  ImageCopyTexture{Texture: texture},
+			Size:         Extent3D{Width: capture.Width, Height: capture.Height, DepthOrArrayLayers: 1},
+		}})
+		copied = append(copied, capture)
+	}
+	if len(copied) == 0 {
+		if encoder != nil {
+			encoder.DiscardEncoding()
+		}
+		return nil
+	}
+	commandBuffer, err := encoder.Finish()
+	if err != nil {
+		d.kernel.Logger().LogErr(fmt.Errorf("gfx: finishing the captures' encoder: %w", err))
+		for _, capture := range copied {
+			d.failCapture(capture)
+		}
+		return nil
+	}
+	slot.commandBuffers = append(slot.commandBuffers, commandBuffer)
+	return copied
+}
+
+// mapCaptures starts the map of each copied capture's buffer, its capture
+// pending until a poll finds it resolved. When the submit failed, which went
+// to LogErr, or a map is refused, which goes there, the capture is delivered
+// CaptureStatusFailed.
+func (d *device) mapCaptures(copied []CapturedEvent, submitted bool) {
+	for _, capture := range copied {
+		if submitted {
+			err := d.backend.MapBuffer(capture.Buffer, MapModeRead, 0, uint64(capture.BytesPerRow)*uint64(capture.Height))
+			if err == nil {
+				d.mapMutex.Lock()
+				d.pendingMaps = append(d.pendingMaps, capture.Buffer)
+				d.pendingCaptures = append(d.pendingCaptures, capture)
+				d.mapMutex.Unlock()
+				continue
+			}
+			d.kernel.Logger().LogErr(fmt.Errorf("gfx: mapping the capture of %v: %w", capture.Window, err))
+		}
+		d.failCapture(capture)
+	}
+}
+
+// failCapture releases capture's buffer, if it has one, and delivers it
+// CaptureStatusFailed, with no buffer.
+func (d *device) failCapture(capture CapturedEvent) {
+	if capture.Buffer != (Buffer{}) {
+		d.ReleaseBuffer(capture.Buffer)
+	}
+	capture.Buffer = Buffer{}
+	capture.Status = CaptureStatusFailed
+	d.deliverCapture(capture)
+}
+
+// deliverCapture ends the capture of capture's window, so it can be
+// requested again, and publishes it, from this job, for gfx's handler to
+// publish as CapturedEvent.
+func (d *device) deliverCapture(capture CapturedEvent) {
+	d.mapMutex.Lock()
+	if index := slices.Index(d.capturingWindows, capture.Window); index >= 0 {
+		d.capturingWindows = slices.Delete(d.capturingWindows, index, index+1)
+	}
+	d.mapMutex.Unlock()
+	d.kernel.Publish(captureDeliveryEvent{captured: capture})
+}
+
 // dropPendingMap drops buffer's pending map, if it has one.
 func (d *device) dropPendingMap(buffer Buffer) {
 	d.mapMutex.Lock()
@@ -433,12 +594,13 @@ func (d *device) dropPendingMap(buffer Buffer) {
 }
 
 // releasePendingMaps unmaps and releases the buffer of every map still
-// pending, publishing nothing, and answers the unmaps' errors; a buffer
-// released already is left alone.
+// pending, captures' included, publishing nothing, and answers the unmaps'
+// errors; a buffer released already is left alone.
 func (d *device) releasePendingMaps() error {
 	d.mapMutex.Lock()
 	pending := d.pendingMaps
 	d.pendingMaps = nil
+	d.pendingCaptures = nil
 	d.mapMutex.Unlock()
 	var errs []error
 	for _, buffer := range pending {

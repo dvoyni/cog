@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/metronome"
 	"github.com/dvoyni/cog/platform"
 )
 
@@ -36,14 +37,15 @@ type framePool struct {
 	lostWindows []platform.Window
 }
 
-// frameSlot is one frame's state: the generation of the Frame it holds, a
-// framebuffer per window acquired, and the encoders taken for it, each slice
-// reused. Its mutex guards the encoders and the flushed flag, held only for
+// frameSlot is one frame's state: the generation of the Frame it holds, its
+// beat, a framebuffer per window acquired, and the encoders taken for it,
+// each slice reused. Its mutex guards the encoders and the flushed flag, held only for
 // the check and the append, and is held as well as the pool's to change the
 // generation, so either guards reading it.
 type frameSlot struct {
 	mutex        sync.Mutex
 	generation   uint32
+	beat         metronome.Beat
 	framebuffers []framebuffer
 	// encoders are the frame's encoders, in the order taken until the flush
 	// sorts them.
@@ -61,16 +63,17 @@ type frameEncoder struct {
 	encoder StandaloneCommandEncoder
 }
 
-// framebuffer is one window's framebuffer in a frame: the view gfx handed the
-// backend to store it at.
+// framebuffer is one window's framebuffer in a frame: the texture and the
+// view gfx handed the backend to store it at.
 type framebuffer struct {
-	window platform.Window
-	view   TextureView
+	window  platform.Window
+	texture Texture
+	view    TextureView
 }
 
-// acquire answers a frame in a free slot, or a new one when none is free,
-// and the present it is to be acquired after.
-func (pool *framePool) acquire() (frame Frame, lastPresent kernel.JobHandle) {
+// acquire answers a frame of beat in a free slot, or a new one when none is
+// free, and the present it is to be acquired after.
+func (pool *framePool) acquire(beat metronome.Beat) (frame Frame, lastPresent kernel.JobHandle) {
 	pool.mutex.Lock()
 	defer pool.mutex.Unlock()
 	var index uint32
@@ -81,6 +84,7 @@ func (pool *framePool) acquire() (frame Frame, lastPresent kernel.JobHandle) {
 		index = uint32(len(pool.slots))
 		pool.slots = append(pool.slots, &frameSlot{generation: nextGeneration(0)})
 	}
+	pool.slots[index].beat = beat
 	return Frame{slot: index, generation: pool.slots[index].generation}, pool.lastPresent
 }
 
@@ -270,7 +274,7 @@ func (pool *framePool) unmarkLost(window platform.Window) bool {
 // after the nested publication's out dependency, then the present, which it
 // keeps as the last present and returns.
 func (p *Plugin) draw(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event RenderEvent) (RenderEvent, kernel.JobHandle) {
-	frame, lastPresent := p.device.frames.acquire()
+	frame, lastPresent := p.device.frames.acquire(event.Beat)
 	configured := lastPresent
 	if p.device.frames.hasUnconfigured() {
 		configured = ex.Schedule(p.tasks.ConfigureSurfaces, kernel.NoArg{}, in, lastPresent).Handle()
@@ -285,7 +289,8 @@ func (p *Plugin) draw(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle
 
 // acquireFramebuffers acquires the framebuffer of every window with a
 // configured surface, not closing, shown and with a framebuffer of at least
-// one pixel, under the read lock, and handles the status the backend answers
+// one pixel, under the read lock, as a texture of its configuration, a copy
+// source when it is Capturable, and a view of it; and handles the status the backend answers
 // alike on every backend: Suboptimal is drawn and marks the surface for
 // configuring; Outdated is not drawn and marks it; Lost is not drawn, and
 // marks it lost and for configuring, so the configure recreates it first;
@@ -294,11 +299,24 @@ func (p *Plugin) draw(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle
 func acquireFramebuffers(k *kernel.Kernel, frame Frame, manager kernel.Read[*platform.WindowManager], deviceHandle kernel.Read[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)
 	for _, window := range d.surfaces {
-		if _, configured := d.configurations[window]; !configured || d.frames.isClosing(window) || !isWindowDrawable(manager.Get(), window) {
+		configuration, configured := d.configurations[window]
+		if !configured || d.frames.isClosing(window) || !isWindowDrawable(manager.Get(), window) {
 			continue
 		}
-		view := d.textureViews.acquire(textureViewSource{})
-		status, err := d.backend.AcquireFramebuffer(window, view)
+		usage := TextureUsageFlagRenderAttachment
+		if configuration.Capturable {
+			usage |= TextureUsageFlagCopySrc
+		}
+		texture := d.textures.acquire(TextureDescriptor{
+			Size:          Extent3D{Width: configuration.Width, Height: configuration.Height, DepthOrArrayLayers: 1},
+			MipLevelCount: 1,
+			SampleCount:   1,
+			Dimension:     TextureDimension2D,
+			Format:        configuration.Format,
+			Usage:         usage,
+		})
+		view := d.textureViews.acquire(textureViewSource{texture: texture})
+		status, err := d.backend.AcquireFramebuffer(window, texture, view)
 		switch {
 		case err != nil:
 			k.Logger().LogErr(fmt.Errorf("gfx: acquiring the framebuffer of %v: %w", window, err))
@@ -312,18 +330,22 @@ func acquireFramebuffers(k *kernel.Kernel, frame Frame, manager kernel.Read[*pla
 		if err != nil || (status != AcquireStatusAcquired && status != AcquireStatusSuboptimal) {
 			_ = d.textureViews.retire(view)
 			d.textureViews.release(view)
+			_ = d.textures.retire(texture)
+			d.textures.release(texture)
 			continue
 		}
-		d.frames.addFramebuffer(frame, framebuffer{window: window, view: view})
+		d.frames.addFramebuffer(frame, framebuffer{window: window, texture: texture, view: view})
 	}
 	return kernel.NoResult{}
 }
 
 // flushFrame finishes frame's encoders, under the read lock, and submits
-// them once, sorted by submit order. An encoder whose Finish fails goes to
-// LogErr and is dropped, and so does a failing submit. A frame with no
-// encoder submits nothing. Either way it polls the maps after, publishing
-// BufferMappedEvent from its job for each resolved.
+// them once, sorted by submit order, then gfx's own, which copies out the
+// framebuffers of the captures requested. An encoder whose Finish fails goes
+// to LogErr and is dropped, and so does a failing submit. A frame with no
+// encoder and no capture submits nothing. It then maps each capture's
+// buffer, and either way polls the maps after, publishing BufferMappedEvent
+// and CapturedEvent from its job for each resolved.
 func flushFrame(k *kernel.Kernel, frame Frame, deviceHandle kernel.Read[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)
 	slot := d.frames.flush(frame)
@@ -336,18 +358,22 @@ func flushFrame(k *kernel.Kernel, frame Frame, deviceHandle kernel.Read[Device])
 		}
 		slot.commandBuffers = append(slot.commandBuffers, buffer)
 	}
+	captures := d.copyCaptures(slot)
+	submitted := true
 	if len(slot.commandBuffers) > 0 {
 		if err := d.backend.Submit(slot.commandBuffers...); err != nil {
 			k.Logger().LogErr(fmt.Errorf("gfx: submitting a frame: %w", err))
+			submitted = false
 		}
 	}
+	d.mapCaptures(captures, submitted)
 	d.Poll()
 	return kernel.NoResult{}
 }
 
 // presentFramebuffers presents each framebuffer frame acquired, under the
-// read lock, makes its view stale, and releases the
-// frame. A present that fails goes to LogErr.
+// read lock, makes its view and texture stale, and releases the frame. A
+// present that fails goes to LogErr.
 func presentFramebuffers(k *kernel.Kernel, frame Frame, deviceHandle kernel.Read[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)
 	for _, acquired := range d.frames.framebuffers(frame) {
@@ -356,6 +382,8 @@ func presentFramebuffers(k *kernel.Kernel, frame Frame, deviceHandle kernel.Read
 		}
 		_ = d.textureViews.retire(acquired.view)
 		d.textureViews.release(acquired.view)
+		_ = d.textures.retire(acquired.texture)
+		d.textures.release(acquired.texture)
 	}
 	d.frames.release(frame)
 	return kernel.NoResult{}

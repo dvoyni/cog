@@ -155,7 +155,8 @@ type Device interface {
 	Encoder(frame Frame, order SubmitOrder) (CommandEncoder, error)
 	// Framebuffer answers the view of window's framebuffer in frame, until
 	// frame is presented, or the zero view when frame acquired none for it
-	// (minimized, hidden, or not open) or is presented.
+	// (minimized, hidden, or not open) or is presented. TextureViewTexture
+	// answers its texture, described by the surface's configuration.
 	Framebuffer(frame Frame, window platform.Window) TextureView
 	// SurfaceConfiguration answers what window's surface is configured
 	// with, for pipelines to target its format; false when it has none:
@@ -186,12 +187,12 @@ type Device interface {
 	// nothing: Destroy unmaps and releases their buffers.
 	Poll()
 
-	// RequestCapture asks for window's framebuffer in the next frame: gfx's
-	// flush copies it after every submit order and before the present, and
-	// CapturedEvent delivers it a frame later. A window already being
-	// captured answers ErrCaptureBusy, and one whose surface is not
-	// SurfaceRequest.Capturable, or whose format is not 8-bit BGRA or RGBA,
-	// ErrCaptureUnsupported.
+	// RequestCapture asks for window's framebuffer in the next frame
+	// flushed: gfx's flush copies it after every submit order and before the
+	// present, and CapturedEvent delivers it a frame later. A window already
+	// being captured answers ErrCaptureBusy, and one whose surface is not
+	// configured Capturable, or not yet configured, or whose format is not
+	// 8-bit BGRA or RGBA, ErrCaptureUnsupported.
 	RequestCapture(window platform.Window) error
 }
 

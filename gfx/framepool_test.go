@@ -4,13 +4,14 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/dvoyni/cog/metronome"
 	"github.com/dvoyni/cog/platform"
 )
 
 func TestFramePoolHandsOutASlotPerFrameInFlight(t *testing.T) {
 	var pool framePool
-	first, _ := pool.acquire()
-	second, _ := pool.acquire()
+	first, _ := pool.acquire(metronome.Beat{})
+	second, _ := pool.acquire(metronome.Beat{})
 
 	if first == (Frame{}) || second == (Frame{}) || first.slot == second.slot {
 		t.Fatalf("frames %+v and %+v in flight, want two slots, neither zero", first, second)
@@ -22,10 +23,10 @@ func TestFramePoolHandsOutASlotPerFrameInFlight(t *testing.T) {
 
 func TestFramePoolReusesAReleasedSlotUnderTheNextGeneration(t *testing.T) {
 	var pool framePool
-	first, _ := pool.acquire()
+	first, _ := pool.acquire(metronome.Beat{})
 	pool.release(first)
 
-	next, _ := pool.acquire()
+	next, _ := pool.acquire(metronome.Beat{})
 
 	if next.slot != first.slot || next.generation == first.generation {
 		t.Fatalf("frame %+v after releasing %+v, want its slot under a new generation", next, first)
@@ -39,7 +40,7 @@ func TestFramePoolAnswersAFramebufferUntilItsFrameIsReleased(t *testing.T) {
 	var pool framePool
 	window := platform.Window{}
 	view := TextureView{handle{index: 3, generation: 1}}
-	frame, _ := pool.acquire()
+	frame, _ := pool.acquire(metronome.Beat{})
 	pool.addFramebuffer(frame, framebuffer{window: window, view: view})
 
 	if got := pool.framebuffer(frame, window); got != view {
@@ -49,7 +50,7 @@ func TestFramePoolAnswersAFramebufferUntilItsFrameIsReleased(t *testing.T) {
 	if got := pool.framebuffer(frame, window); got != (TextureView{}) {
 		t.Errorf("framebuffer of a released frame = %v, want the zero view", got)
 	}
-	next, _ := pool.acquire()
+	next, _ := pool.acquire(metronome.Beat{})
 	if got := pool.framebuffer(next, window); got != (TextureView{}) {
 		t.Errorf("framebuffer of the slot's next frame = %v, want the zero view", got)
 	}
@@ -59,7 +60,7 @@ func TestFramePoolReusesAFramesEncoderSliceOnceWarm(t *testing.T) {
 	var pool framePool
 	encoder := &finishingEncoder{}
 	drawFrame := func() {
-		frame, _ := pool.acquire()
+		frame, _ := pool.acquire(metronome.Beat{})
 		_ = pool.addEncoder(frame, frameEncoder{order: 2, encoder: encoder})
 		_ = pool.addEncoder(frame, frameEncoder{order: 1, encoder: encoder})
 		pool.flush(frame)
@@ -74,7 +75,7 @@ func TestFramePoolReusesAFramesEncoderSliceOnceWarm(t *testing.T) {
 
 func TestFramePoolGuardsAFramesEncodersAcrossGoroutines(t *testing.T) {
 	var pool framePool
-	frame, _ := pool.acquire()
+	frame, _ := pool.acquire(metronome.Beat{})
 	var wait sync.WaitGroup
 	for order := range 8 {
 		wait.Go(func() {

@@ -2,6 +2,7 @@ package gfx_test
 
 import (
 	"errors"
+	"reflect"
 	"slices"
 	"sync"
 	"testing"
@@ -486,6 +487,26 @@ func TestATimedOutAcquireSkipsTheWindowWithoutAConfigure(t *testing.T) {
 	if logged := h.takeLogged(); len(logged) != 0 {
 		t.Errorf("logged %v, want nothing", logged)
 	}
+}
+
+func TestAnAcquireWithNoFramebufferLeavesItsTextureAndViewStale(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	h.openWindow()
+	h.waitForCalls(recording.CallKindCreateSurface, 1)
+	h.instance.AnswerNext(recording.CallKindAcquireFramebuffer, recording.Answer{Status: uint8(gfx.AcquireStatusTimeout)})
+
+	h.advance(time.Millisecond)
+
+	acquired := h.waitForCalls(recording.CallKindAcquireFramebuffer, 1)[0].Arguments.(recording.AcquireFramebufferArguments)
+	h.readDevice(func(device gfx.Device) {
+		if described := device.TextureDescriptor(acquired.Texture); !reflect.DeepEqual(described, gfx.TextureDescriptor{}) {
+			t.Errorf("the texture handed to the timed-out acquire is described %+v, want the zero descriptor", described)
+		}
+		if texture := device.TextureViewTexture(acquired.View); texture != (gfx.Texture{}) {
+			t.Errorf("the view handed to the timed-out acquire is of %v, want the zero texture", texture)
+		}
+	})
 }
 
 func TestAFailingAcquireIsLoggedAndItsSurfaceConfiguredAgain(t *testing.T) {

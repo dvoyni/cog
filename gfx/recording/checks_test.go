@@ -220,7 +220,7 @@ func TestAnAcquiredFramebufferIsARenderAttachmentUntilItsPresent(t *testing.T) {
 	framebuffer := handleAt[gfx.TextureView](5)
 	mustSucceed(t, instance.CreateSurface(window, platform.NativeHandle{}))
 	mustSucceed(t, device.ConfigureSurface(window, gfx.SurfaceConfiguration{}))
-	if _, err := device.AcquireFramebuffer(window, framebuffer); err != nil {
+	if _, err := device.AcquireFramebuffer(window, handleAt[gfx.Texture](5), framebuffer); err != nil {
 		t.Fatalf("AcquireFramebuffer answered %v", err)
 	}
 	attachments := []gfx.RenderPassColorAttachment{{View: framebuffer}}
@@ -235,6 +235,47 @@ func TestAnAcquiredFramebufferIsARenderAttachmentUntilItsPresent(t *testing.T) {
 	presented.BeginRenderPass(gfx.RenderPassDescriptor{ColorAttachments: attachments}).End()
 	if _, err := presented.Finish(); err == nil {
 		t.Fatal("a pass on the presented framebuffer answered no error at Finish")
+	}
+}
+
+func TestAnAcquiredFramebufferIsACopySourceWhenItsSurfaceIsCapturableUntilItsPresent(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		capturable bool
+	}{
+		{"capturable", true},
+		{"not capturable", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			instance, device := requestDevice(t)
+			window := platform.Window{}
+			framebuffer := handleAt[gfx.Texture](5)
+			buffer := createBuffer(t, device, 0, gfx.BufferUsageFlagCopyDst|gfx.BufferUsageFlagMapRead)
+			mustSucceed(t, instance.CreateSurface(window, platform.NativeHandle{}))
+			mustSucceed(t, device.ConfigureSurface(window, gfx.SurfaceConfiguration{
+				Format: gfx.TextureFormatBGRA8Unorm, Width: 1, Height: 1, Capturable: test.capturable,
+			}))
+			if _, err := device.AcquireFramebuffer(window, framebuffer, handleAt[gfx.TextureView](5)); err != nil {
+				t.Fatalf("AcquireFramebuffer answered %v", err)
+			}
+			regions := []gfx.BufferTextureCopy{{
+				BufferLayout: gfx.ImageDataLayout{BytesPerRow: 256, RowsPerImage: 1},
+				TextureBase:  gfx.ImageCopyTexture{Texture: framebuffer},
+				Size:         gfx.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1},
+			}}
+
+			acquired := createEncoder(t, device)
+			acquired.CopyTextureToBuffer(framebuffer, buffer, regions)
+			if _, err := acquired.Finish(); (err == nil) != test.capturable {
+				t.Fatalf("a copy out of the acquired framebuffer answered %v at Finish, want an error only when not capturable", err)
+			}
+			mustSucceed(t, device.Present(window))
+			presented := createEncoder(t, device)
+			presented.CopyTextureToBuffer(framebuffer, buffer, regions)
+			if _, err := presented.Finish(); err == nil {
+				t.Fatal("a copy out of the presented framebuffer answered no error at Finish")
+			}
+		})
 	}
 }
 
