@@ -141,6 +141,10 @@ const (
 	// CallKindUnmapBuffer is BackendDevice.UnmapBuffer, its Arguments the
 	// gfx.Buffer.
 	CallKindUnmapBuffer
+	// CallKindMapStatus is BackendDevice.MapStatus, for AnswerNext only: it
+	// only reads, and is never recorded. An Error answered fails the map of
+	// the buffer asked about, which ends it.
+	CallKindMapStatus
 )
 
 // SurfaceCapabilities is what the recording adapter answers for every

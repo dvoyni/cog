@@ -113,16 +113,23 @@ func (instance *Instance) record(kind CallKind, arguments any, apply func() erro
 func (instance *Instance) recordAnswered(kind CallKind, arguments any, apply func(answer Answer) error) Answer {
 	instance.mutex.Lock()
 	defer instance.mutex.Unlock()
-	var answer Answer
-	if queued := instance.answers[kind]; len(queued) > 0 {
-		answer = queued[0]
-		instance.answers[kind] = queued[1:]
-	}
+	answer := instance.takeAnswer(kind)
 	if answer.Error == nil {
 		answer.Error = apply(answer)
 	}
 	instance.recording.Calls = append(instance.recording.Calls, Call{Kind: kind, Arguments: arguments, Status: answer.Status, Error: answer.Error})
 	return answer
+}
+
+// takeAnswer answers the next answer AnswerNext queued for kind, taking it,
+// or the zero Answer; the caller holds the mutex.
+func (instance *Instance) takeAnswer(kind CallKind) Answer {
+	queued := instance.answers[kind]
+	if len(queued) == 0 {
+		return Answer{}
+	}
+	instance.answers[kind] = queued[1:]
+	return queued[0]
 }
 
 // holdsFramebuffer answers whether view is a framebuffer acquired and not yet

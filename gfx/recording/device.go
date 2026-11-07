@@ -323,11 +323,17 @@ func (d *device) MapBuffer(buffer gfx.Buffer, mode gfx.MapMode, offset, size uin
 }
 
 // MapStatus answers ready for a mapped buffer, every map resolving at once;
-// an error when buffer is missing or not mapped.
+// an error when buffer is missing or not mapped, or the error AnswerNext
+// queued for CallKindMapStatus, which ends the map.
 func (d *device) MapStatus(buffer gfx.Buffer) (ready bool, err error) {
 	d.instance.mutex.Lock()
 	defer d.instance.mutex.Unlock()
-	if _, err := d.requireMapState(buffer, true); err != nil {
+	object, err := d.requireMapState(buffer, true)
+	if err != nil {
+		return false, err
+	}
+	if err := d.instance.takeAnswer(CallKindMapStatus).Error; err != nil {
+		object.mapped = false
 		return false, err
 	}
 	return true, nil

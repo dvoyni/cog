@@ -31,7 +31,9 @@ its index, a resource without its usage, a misaligned write, copy or clear
 and a broken pass sequence, its buffers holding the bytes written, copied
 and cleared. Writes reach the backend. Buffers map asynchronously: each
 poll, at `Poll`, every submit and every frame's flush, publishes
-`BufferMappedEvent` for the maps resolved. The backend reflects shader modules:
+`BufferMappedEvent` for the maps resolved, `MapStatusFailed` with its error
+in `LogErr` for one the backend fails, and `Destroy` unmaps and releases
+the buffers of the maps still pending. The backend reflects shader modules:
 its seam declares `ReflectRenderPipelineLayout`,
 `ReflectComputePipelineLayout` and `ReflectVertexInputs`, which the recording
 adapter answers with the layouts and inputs a test queues. `shader.Preprocess`, in `gfx/shader`,
@@ -115,8 +117,8 @@ present and recovery itself.
   from `Config`. A zero `RequiredLimits` is `DefaultLimits()`, WebGPU's,
   passed explicitly, because wgpu's zero is the adapter's full limits. No
   adapter is a runtime error from `Start`. `Stop` does nothing: frames in
-  flight finish. `Destroy` releases the surfaces, the device and the adapter
-  after the kernel's last job; releasing the device cleanly is what saves
+  flight finish. `Destroy` releases the buffers of the maps still pending,
+  the surfaces, the device and the adapter after the kernel's last job; releasing the device cleanly is what saves
   Vulkan's pipeline cache.
 
 ## Types, descriptors and handles
@@ -322,9 +324,10 @@ present and recovery itself.
 
 - **Maps are asynchronous only.** `Device.MapBuffer` starts one; gfx checks
   its pending maps after every submit and every frame's flush, submitting or
-  not, and publishes `BufferMappedEvent{Buffer, Status}` from that job. A map
-  ended before it resolves, by `UnmapBuffer` or `ReleaseBuffer`, publishes
-  nothing. A handler's task reads `MappedRange` until
+  not, and publishes `BufferMappedEvent{Buffer, Status}` from that job:
+  `MapStatusFailed` when the backend fails the map, its error going to
+  `LogErr` first. A map ended before it resolves, by `UnmapBuffer` or
+  `ReleaseBuffer`, publishes nothing. A handler's task reads `MappedRange` until
   `UnmapBuffer`. `Device.Poll` resolves finished maps for a kernel with no
   frames running. There is no blocking map: it would wait for the whole
   device to go idle.
@@ -343,7 +346,7 @@ present and recovery itself.
   `RequestCapture` answers `ErrCaptureUnsupported`. A window that acquired
   nothing that frame gets `CapturedEvent` with `CaptureStatusNotAcquired`.
 - **At shutdown** pending maps and captures are dropped without an event;
-  `Destroy` releases their buffers.
+  `Destroy` unmaps and releases their buffers.
 
 ## Timestamps
 
@@ -403,8 +406,8 @@ present and recovery itself.
 - **Data:** buffers hold bytes, which writes, buffer copies and clears apply
   to; textures hold no texels; captures complete zero-filled.
 - **Injection:** `instance.AnswerNext(kind, answer)` makes the next call of a
-  kind answer an acquire status, a map failure or an error, `ErrDeviceLost`
-  included.
+  kind answer an acquire status, a map failure (`CallKindMapStatus`, never
+  recorded, ending the map) or an error, `ErrDeviceLost` included.
 - **Real pixels without a GPU** come from gogpu on wgpu's software adapter,
   through `Config.ForceFallbackAdapter`, not from here.
 

@@ -21,7 +21,9 @@ acquires every window's framebuffer, handling each acquire status as
 the design says, publishes `DrawEvent`, submits the
 frame's encoders in submit order and presents, writes reach the
 backend, and buffers map asynchronously, `BufferMappedEvent` published
-from the poll that finds a map resolved; the recording adapter rejects a handle missing at its index, a
+from the poll that finds a map resolved or failed, the failure's error
+logged, and `Destroy` unmaps and releases the buffers of the maps still
+pending; the recording adapter rejects a handle missing at its index, a
 resource without its usage, a misaligned write, copy or clear and a broken
 pass sequence, and its buffers hold the bytes written, copied and cleared,
 which its own maps read, and answers a pipeline's reflection with the
