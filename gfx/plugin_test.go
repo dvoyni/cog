@@ -9,6 +9,7 @@ import (
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/gfx/recording"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/metronome"
 	"github.com/dvoyni/cog/platform"
 )
 
@@ -25,10 +26,10 @@ func TestSpawnWithoutInstanceSocketPanics(t *testing.T) {
 	h.spawn(nil)
 }
 
-func TestDependenciesNamePlatform(t *testing.T) {
+func TestDependenciesNamePlatformAndMetronome(t *testing.T) {
 	got := gfx.NewPlugin().Dependencies()
-	if !slices.Equal(got, []kernel.PluginName{platform.PluginName}) {
-		t.Fatalf("Dependencies = %v, want [%v]", got, platform.PluginName)
+	if want := []kernel.PluginName{platform.PluginName, metronome.PluginName}; !slices.Equal(got, want) {
+		t.Fatalf("Dependencies = %v, want %v", got, want)
 	}
 }
 

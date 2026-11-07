@@ -32,6 +32,9 @@ type device struct {
 	// pendingWrites are the buffer writes made since the last submit, which
 	// the next applies before its command buffers.
 	pendingWrites []func()
+	// submissionCount is how many submits this device made, the last one's
+	// index, under the instance's mutex.
+	submissionCount uint64
 }
 
 // CreateBuffer records the creation and keeps buffer at its index, its bytes
@@ -371,8 +374,13 @@ func (d *device) UnmapBuffer(buffer gfx.Buffer) error {
 	}).Error
 }
 
-// Poll does nothing: every map resolves at once.
-func (d *device) Poll() {}
+// Poll answers every submission finished: every map resolves, and every
+// submit finishes, at once.
+func (d *device) Poll() uint64 {
+	d.instance.mutex.Lock()
+	defer d.instance.mutex.Unlock()
+	return d.submissionCount
+}
 
 // CreateCommandEncoder answers an encoder recording the commands given it.
 func (d *device) CreateCommandEncoder(descriptor gfx.CommandEncoderDescriptor) (gfx.StandaloneCommandEncoder, error) {
@@ -382,14 +390,15 @@ func (d *device) CreateCommandEncoder(descriptor gfx.CommandEncoderDescriptor) (
 // Submit records the call and buffers as one submission, after the calls
 // recorded before it, and applies the writes pending, then each buffer's
 // copies and clears, in order; or it answers the error AnswerNext queued for
-// it and submits nothing. Every buffer is one the adapter's encoders
-// finished.
-func (d *device) Submit(buffers ...gfx.CommandBuffer) error {
+// it and submits nothing, answering index zero. Every buffer is one the
+// adapter's encoders finished. Its index counts from one on each device.
+func (d *device) Submit(buffers ...gfx.CommandBuffer) (uint64, error) {
 	submission := Submission{Buffers: make([]CommandBuffer, len(buffers))}
 	for index, buffer := range buffers {
 		submission.Buffers[index] = CommandBuffer{Commands: buffer.(*commandBuffer).commands}
 	}
-	return d.instance.record(CallKindSubmit, nil, func() error {
+	var index uint64
+	err := d.instance.record(CallKindSubmit, nil, func() error {
 		for _, write := range d.pendingWrites {
 			write()
 		}
@@ -401,8 +410,11 @@ func (d *device) Submit(buffers ...gfx.CommandBuffer) error {
 		}
 		d.instance.recording.submittedAfter = append(d.instance.recording.submittedAfter, len(d.instance.recording.Calls))
 		d.instance.recording.Submissions = append(d.instance.recording.Submissions, submission)
+		d.submissionCount++
+		index = d.submissionCount
 		return nil
 	}).Error
+	return index, err
 }
 
 // SurfaceCapabilities records the call and answers the Capabilities

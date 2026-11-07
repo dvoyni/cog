@@ -43,6 +43,10 @@ type harness struct {
 	readCapture func(event gfx.CapturedEvent, device gfx.Device)
 	// unbound leaves InstanceSocket without a binding.
 	unbound bool
+	// wrapDevice, when set, wraps each device the recording adapter answers,
+	// for a test to change how calls behave around it. It is set before
+	// spawning.
+	wrapDevice func(device gfx.BackendDevice) gfx.BackendDevice
 	// pinSurfaceTasks pins gfx's surface tasks to the main thread in Init, as
 	// a backend whose platform needs it does.
 	pinSurfaceTasks bool
@@ -84,6 +88,36 @@ type editEvent struct{}
 // pumpEvent schedules platform's ProcessEvents.
 type pumpEvent struct{}
 
+// wrappingInstance is the recording instance with each device it answers
+// wrapped by wrapDevice, through the adapter it answers.
+type wrappingInstance struct {
+	gfx.InstanceSocket
+	wrapDevice func(device gfx.BackendDevice) gfx.BackendDevice
+}
+
+func (instance wrappingInstance) RequestAdapter(options gfx.RequestAdapterOptions) (gfx.BackendAdapter, error) {
+	adapter, err := instance.InstanceSocket.RequestAdapter(options)
+	if err != nil {
+		return nil, err
+	}
+	return wrappingAdapter{BackendAdapter: adapter, wrapDevice: instance.wrapDevice}, nil
+}
+
+// wrappingAdapter is a recording adapter with each device it answers wrapped
+// by wrapDevice.
+type wrappingAdapter struct {
+	gfx.BackendAdapter
+	wrapDevice func(device gfx.BackendDevice) gfx.BackendDevice
+}
+
+func (adapter wrappingAdapter) RequestDevice(descriptor gfx.DeviceDescriptor) (gfx.BackendDevice, error) {
+	device, err := adapter.BackendAdapter.RequestDevice(descriptor)
+	if err != nil {
+		return nil, err
+	}
+	return adapter.wrapDevice(device), nil
+}
+
 // numberedWindows are headless windows whose native handles are not zero:
 // each opened window's is its number, counted from 1, so a test tells them
 // apart.
@@ -113,7 +147,11 @@ func (*harness) Name() kernel.PluginName { return "test" }
 func (*harness) Dependencies() []kernel.PluginName { return []kernel.PluginName{gfx.PluginName} }
 
 func (h *harness) Init(c *kernel.Configurator, config any) error {
-	if !h.unbound {
+	switch {
+	case h.unbound:
+	case h.wrapDevice != nil:
+		c.BindSocket[gfx.InstanceSocket](wrappingInstance{InstanceSocket: h.instance, wrapDevice: h.wrapDevice})
+	default:
 		c.BindSocket[gfx.InstanceSocket](h.instance)
 	}
 	c.BindSocket[platform.WindowsSocket](h.windows)

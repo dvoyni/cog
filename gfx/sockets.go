@@ -98,13 +98,17 @@ type BackendDevice interface {
 	MapStatus(buffer Buffer) (ready bool, err error)
 	MappedRange(buffer Buffer, offset, size uint64) ([]byte, error)
 	UnmapBuffer(buffer Buffer) error
-	// Poll resolves finished maps without waiting.
-	Poll()
+	// Poll resolves finished maps without waiting, and answers the newest
+	// submission index the GPU has finished, every one at or before it
+	// finished too; zero when none has.
+	Poll() (completedIndex uint64)
 
 	// CreateCommandEncoder answers an encoder; gfx wraps it to check the
 	// handles recorded, and finishes it itself for a frame encoder.
 	CreateCommandEncoder(descriptor CommandEncoderDescriptor) (StandaloneCommandEncoder, error)
-	Submit(buffers ...CommandBuffer) error
+	// Submit answers the submission's index, counting from one on each
+	// device, for Poll to say when it has finished.
+	Submit(buffers ...CommandBuffer) (index uint64, err error)
 
 	// SurfaceCapabilities answers what window's surface can be configured
 	// with.

@@ -828,6 +828,13 @@ func requestDevice(t *testing.T) (*recording.Instance, gfx.BackendDevice) {
 	return instance, device
 }
 
+// submit submits buffers to device, failing the test on an error.
+func submit(t *testing.T, device gfx.BackendDevice, buffers ...gfx.CommandBuffer) {
+	t.Helper()
+	_, err := device.Submit(buffers...)
+	mustSucceed(t, err)
+}
+
 // createEncoder answers an encoder of device.
 func createEncoder(t *testing.T, device gfx.BackendDevice) gfx.StandaloneCommandEncoder {
 	t.Helper()

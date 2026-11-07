@@ -46,7 +46,9 @@ new device, from a fresh adapter when the old one refuses, every object
 recreated on it under its old handle in dependency order, every surface
 marked, and `DeviceRecoveredEvent` published; a recovery that fails is
 logged once and retried at most once a second, and the maps and captures
-pending at the loss hear as failures.
+pending at the loss hear as failures. `DrawEvent` carries `AcquireWait`,
+timed around the backend's acquires, and `GPULatency`, from the frames'
+submission indices, both measured by stopwatches of metronome's clock.
 The backend reflects shader modules:
 its seam declares `ReflectRenderPipelineLayout`,
 `ReflectComputePipelineLayout` and `ReflectVertexInputs`, which the recording
@@ -68,10 +70,10 @@ it. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md); the ADRs are in
 - **No ECS import.** gfx works without the ECS. A handle fits a component
   registered transient; scene saves the asset and recreates the handle on
   load.
-- **Imports:** kernel, metronome and platform only. gfx requires platform,
-  listed before it, and says so with `Plugin.Dependencies`
-  ([kernel ADR 0007](../../kernel/docs/adr/0007-plugins-declare-dependencies-checked-not-sorted.md)).
-  metronome may be listed anywhere: only types link them.
+- **Imports:** kernel, metronome and platform only. gfx requires platform
+  and metronome, listed before it, and says so with `Plugin.Dependencies`
+  ([kernel ADR 0007](../../kernel/docs/adr/0007-plugins-declare-dependencies-checked-not-sorted.md)):
+  it makes its stopwatches from metronome's `Clock` resource in its `Init`.
 - **Targets:** desktop native first, Vulkan, DX12 and Metal. gfx is designed
   against WebGPU's default limits; features are opt-in. GLES and the web are
   deferred.
@@ -97,7 +99,7 @@ it. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md); the ADRs are in
 | `SubmitOrder` | `int32` | The number a frame encoder is handed under; one space shared by every plugin. |
 | `SurfaceRequest`, `SurfaceConfiguration` | values | What the application asks every surface for, and what each window got. |
 | `BufferMappedEvent`, `CapturedEvent`, `DeviceLostEvent`, `DeviceRecoveredEvent` | events | Readback, capture and device loss. |
-| `Config` | config | `PowerPreference`, `ForceFallbackAdapter`, `RequiredFeatures`, `RequiredLimits`, `Surface`, `Clock`. |
+| `Config` | config | `PowerPreference`, `ForceFallbackAdapter`, `RequiredFeatures`, `RequiredLimits`, `Surface`. |
 
 gfx installs no `Tasks` resource: it schedules acquire, configure, flush,
 present and recovery itself.
@@ -271,9 +273,17 @@ present and recovery itself.
   the previous frame's acquire blocked (under Fifo, a long wait is headroom),
   and `GPULatency`, from the newest finished frame's submit to when gfx first
   saw it complete by submission index, accurate to one check a frame. gfx
-  reads them from `Config.Clock`, the clock given to metronome, so a manual
-  clock makes them deterministic
+  measures them by two stopwatches it makes from metronome's `Clock`
+  resource in `Init`, keeping the stopwatches, never the clock:
+  `AcquireStopwatchName`, started at each backend acquire, and
+  `SubmissionStopwatchName`, running since `Init`, whose readings stamp each
+  frame's submit and the poll that sees it finished. On a `ManualClock` they
+  are deterministic, and a test lengthens an acquire with `LengthenNext`
   ([Timestamps and GPU profiling](https://github.com/dvoyni/cog/issues/667)).
+  The seam mirrors wgpu's queue: `Submit` answers the submission's index and
+  `Poll` the newest one finished. Every poll checks the frames' submits,
+  and a recovery forgets the ones the lost device had not finished, since
+  the new device counts from one again.
 - **metronome's vsync preset** becomes `MaxInFlight: 1` plus a 1/240 s
   `MinInterval` floor: one beat in flight takes about a frame off the gap
   between a beat's time and the display, and the floor keeps a minimized
@@ -431,6 +441,8 @@ present and recovery itself.
 - **It checks a fixed subset of what wgpu rejects:** a handle missing at its
   index, usage flags, write and copy alignment, pass state. It answers what a
   real backend would.
+- **Submissions** are indexed from one on each device and finish at once,
+  so `GPULatency` is zero.
 - **Data:** buffers hold bytes, which writes, buffer copies and clears apply
   to; textures hold no texels; captures complete zero-filled.
 - **Injection:** `instance.AnswerNext(kind, answer)` makes the next call of a

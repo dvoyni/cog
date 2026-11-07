@@ -3,6 +3,7 @@ package metronome
 import (
 	"context"
 	"math"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -24,6 +25,14 @@ type wallTimer struct {
 	// compare-and-swap, so a time.Timer callback left over from an earlier
 	// arm never fires a later one early.
 	deadline atomic.Int64
+}
+
+// wallStopwatch is a WallClock's Stopwatch, reading monotonic time.
+type wallStopwatch struct {
+	mutex sync.Mutex
+	// startedAt is when the last Start was, while started.
+	startedAt time.Time
+	started   bool
 }
 
 // disarmed is a wallTimer's deadline while it is not armed.
@@ -65,6 +74,28 @@ func (t *wallTimer) Stop() {
 	t.deadline.Store(disarmed)
 	t.timer.Stop()
 	t.drain()
+}
+
+// NewStopwatch makes a Stopwatch reading monotonic time, apart from the
+// epoch; name is not read.
+func (c *WallClock) NewStopwatch(name string) Stopwatch { return &wallStopwatch{} }
+
+// Start starts a measurement at now.
+func (s *wallStopwatch) Start() {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.startedAt = time.Now()
+	s.started = true
+}
+
+// Elapsed answers the monotonic time since the last Start.
+func (s *wallStopwatch) Elapsed() time.Duration {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	if !s.started {
+		return 0
+	}
+	return time.Since(s.startedAt)
 }
 
 // SetWaitCallback ignores wait: wall time runs on, so there is nothing to

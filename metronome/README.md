@@ -23,13 +23,15 @@ Go module (Go 1.27) and depends on nothing but the standard library and
 - **Replaceable time.** metronome reads time only through its `Clock`. The
   default is wall time; `ManualClock` moves only when told, for tests and
   deterministic runs, and a custom clock can be driven by anything, such as
-  an agent.
+  an agent. Other plugins read the same time through stopwatches they make
+  from the `Clock` resource, which a test lengthens with
+  `ManualClock.LengthenNext`.
 - **Zero allocations per beat**, which the tests assert.
 
 ## Shape
 
-- **`Plugin`** is the kernel plugin, from `NewPlugin()`. It installs no
-  resource.
+- **`Plugin`** is the kernel plugin, from `NewPlugin()`. It installs its
+  `Clock` as a resource.
 - **`Config`** is its part of the kernel's config: the `Clock` and the
   `Tracks`, each made by `NewTrack[E](settings)`.
 - **`Beat`** is the header every track event embeds: `Tick`, `Delta`, `Lost`,
@@ -40,8 +42,9 @@ Go module (Go 1.27) and depends on nothing but the standard library and
 
 ## Kernel surface
 
-- **Resources it installs:** none; nothing reaches metronome but its
-  `Config`.
+- **Resources it installs:** `Clock`, `Config.Clock` or the `WallClock`
+  metronome made, read in a later plugin's `Init` with
+  `configurator.Resource[metronome.Clock]()` to make its stopwatches.
 - **Resources it reads from other plugins:** none.
 - **Events it publishes:** each track's event, a beat at a time, on the
   track's own goroutine: the types declared in `Config.Tracks`, which

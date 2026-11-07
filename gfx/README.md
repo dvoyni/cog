@@ -32,7 +32,9 @@ call reaching the backend after it, every call with an error answering
 the maps and captures pending at it publishing failures, and the next
 beat recovers instead of drawing, every object recreated under its old
 handle, every surface marked and `DeviceRecoveredEvent` published, a
-recovery that fails logged once and retried at most once a second;
+recovery that fails logged once and retried at most once a second, and
+`DrawEvent` carries `AcquireWait` and `GPULatency`, read from
+metronome's clock;
 the recording adapter rejects a handle missing at its index, a
 resource without its usage, a misaligned write, copy or clear and a broken
 pass sequence, and its buffers hold the bytes written, copied and cleared,
@@ -85,7 +87,9 @@ every other body panics until its ticket on the
   - `Handlers`: `Draw`, `CreateSurface`, `ResizeSurface` and
     `ReleaseSurface`, to order handlers around.
 - **Resources it reads from other plugins:** `*platform.WindowManager`, for
-  windows' native handles, framebuffer sizes and whether they are hidden.
+  windows' native handles, framebuffer sizes and whether they are hidden;
+  `metronome.Clock`, in its `Init`, to make the stopwatches `DrawEvent`'s
+  timing signals are measured by.
 - **Events it publishes:** `DrawEvent`, inside its `RenderEvent` handler;
   `BufferMappedEvent` and `CapturedEvent`, from the job that finds them
   resolved; `DeviceLostEvent` and `DeviceRecoveredEvent`.
@@ -97,8 +101,8 @@ every other body panics until its ticket on the
   backend.
 - **Sockets it binds:** none.
 
-gfx requires platform, listed before it, and checks it with
-`Dependencies`. metronome goes anywhere. A plugin that reads `Handlers` or
+gfx requires platform and metronome, listed before it, and checks them
+with `Dependencies`: it makes its stopwatches from metronome's `Clock`. A plugin that reads `Handlers` or
 `Tasks` in its `Init` is listed after gfx: the backend's plugin, which binds
 `InstanceSocket` and pins the surface tasks its platform needs on the main
 thread, goes after gfx for that.

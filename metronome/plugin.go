@@ -48,15 +48,17 @@ func (*Plugin) Name() kernel.PluginName { return PluginName }
 // Dependencies answers none: metronome reads no other plugin's resource.
 func (*Plugin) Dependencies() []kernel.PluginName { return nil }
 
-// Init takes the clock and the tracks from config, a *Config or nil, and
-// builds each track's state. A config of another type, or two tracks of one
-// event type, is a composition error, and panics.
+// Init takes the clock and the tracks from config, a *Config or nil, installs
+// the clock as the Clock resource, and builds each track's state. A config of
+// another type, or two tracks of one event type, is a composition error, and
+// panics.
 func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	metronomeConfig := kernel.PluginConfigOrDefault[Config](config)
 	p.clock = metronomeConfig.Clock
 	if p.clock == nil {
 		p.clock = NewWallClock()
 	}
+	configurator.InitResource[Clock](p.clock)
 	for _, declared := range metronomeConfig.Tracks {
 		for _, t := range p.tracks {
 			if t.eventType == declared.eventType {

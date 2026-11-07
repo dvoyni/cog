@@ -25,7 +25,7 @@ func TestAWriteLandsAtTheNextSubmitBeforeItsCommandBuffers(t *testing.T) {
 	if got := readBuffer(t, device, source); !bytes.Equal(got, make([]byte, 16)) {
 		t.Errorf("before a submit the source holds %v, want zeros", got)
 	}
-	mustSucceed(t, device.Submit(copied))
+	submit(t, device, copied)
 	if got, want := readBuffer(t, device, destination), sequence(1, 16); !bytes.Equal(got, want) {
 		t.Errorf("the copy encoded before the write copied %v, want %v", got, want)
 	}
@@ -37,7 +37,7 @@ func TestTheLastOfTwoWritesToARegionLands(t *testing.T) {
 
 	mustSucceed(t, device.WriteBuffer(buffer, 4, []byte{1, 2, 3, 4}))
 	mustSucceed(t, device.WriteBuffer(buffer, 4, []byte{5, 6, 7, 8}))
-	mustSucceed(t, device.Submit())
+	submit(t, device)
 
 	want := []byte{0, 0, 0, 0, 5, 6, 7, 8, 0, 0, 0, 0, 0, 0, 0, 0}
 	if got := readBuffer(t, device, buffer); !bytes.Equal(got, want) {
@@ -51,7 +51,7 @@ func TestCopiesAndClearsApplyInTheOrderSubmitted(t *testing.T) {
 	destination := createBuffer(t, device, 2, gfx.BufferUsageFlagCopyDst|gfx.BufferUsageFlagMapRead)
 	mustSucceed(t, device.WriteBuffer(source, 0, sequence(1, 16)))
 	mustSucceed(t, device.WriteBuffer(destination, 0, sequence(17, 16)))
-	mustSucceed(t, device.Submit())
+	submit(t, device)
 
 	copying := createEncoder(t, device)
 	copying.CopyBufferToBuffer(source, 0, destination, 4, 8)
@@ -65,7 +65,7 @@ func TestCopiesAndClearsApplyInTheOrderSubmitted(t *testing.T) {
 	unsubmitted.ClearBuffer(destination, 0, 16)
 	_, err = unsubmitted.Finish()
 	mustSucceed(t, err)
-	mustSucceed(t, device.Submit(copied, cleared))
+	submit(t, device, copied, cleared)
 
 	want := []byte{17, 18, 19, 20, 0, 0, 0, 0, 5, 6, 7, 8, 29, 30, 31, 32}
 	if got := readBuffer(t, device, destination); !bytes.Equal(got, want) {
@@ -90,7 +90,7 @@ func TestAWriteMappedRangeIsWhatTheBufferHolds(t *testing.T) {
 	encoder.CopyBufferToBuffer(mapped, 0, destination, 0, 16)
 	copied, err := encoder.Finish()
 	mustSucceed(t, err)
-	mustSucceed(t, device.Submit(copied))
+	submit(t, device, copied)
 
 	want := append(make([]byte, 8), sequence(1, 8)...)
 	if got := readBuffer(t, device, destination); !bytes.Equal(got, want) {
@@ -152,4 +152,37 @@ func sequence(first byte, count int) []byte {
 		contents[index] = first + byte(index)
 	}
 	return contents
+}
+
+func TestSubmitsAreIndexedFromOneOnEachDeviceAndFinishAtOnce(t *testing.T) {
+	instance, device := requestDevice(t)
+	if completed := device.Poll(); completed != 0 {
+		t.Errorf("Poll before any submit answered %d, want 0", completed)
+	}
+	for want := uint64(1); want <= 2; want++ {
+		index, err := device.Submit()
+		mustSucceed(t, err)
+		if index != want {
+			t.Errorf("submit %d answered index %d", want, index)
+		}
+		if completed := device.Poll(); completed != want {
+			t.Errorf("Poll after submit %d answered %d, want it finished", want, completed)
+		}
+	}
+	failure := errors.New("vulkan: submit refused")
+	instance.AnswerNext(recording.CallKindSubmit, recording.Answer{Error: failure})
+	if index, err := device.Submit(); index != 0 || !errors.Is(err, failure) {
+		t.Errorf("a refused submit answered %d, %v, want 0, %v", index, err, failure)
+	}
+	if completed := device.Poll(); completed != 2 {
+		t.Errorf("Poll after a refused submit answered %d, want 2", completed)
+	}
+
+	adapter, err := instance.RequestAdapter(gfx.RequestAdapterOptions{})
+	mustSucceed(t, err)
+	second, err := adapter.RequestDevice(gfx.DeviceDescriptor{})
+	mustSucceed(t, err)
+	if index, err := second.Submit(); index != 1 || err != nil {
+		t.Errorf("a second device's first submit answered %d, %v, want 1", index, err)
+	}
 }

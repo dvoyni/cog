@@ -28,14 +28,15 @@ the ticket that holds its detail.
 
 | Type | Role |
 |---|---|
-| `Plugin` | The kernel plugin, from `NewPlugin()`. Runs one goroutine per track between `Start` and `Stop`. It installs no resource: nothing else reaches it. |
+| `Plugin` | The kernel plugin, from `NewPlugin()`. Runs one goroutine per track between `Start` and `Stop`. It installs its `Clock` as a resource, for a plugin listed after it, such as gfx, to make stopwatches from. |
 | `Config` | metronome's part of the kernel's config, under `PluginName`: its `Clock` and its `Tracks`. |
 | `NewTrack[E]` | Declares a track publishing `E`, with its `Settings`, for `Config.Tracks`. |
 | `Beat` | The header every track event embeds: `Tick`, `Delta`, `Lost`, `TimeFromStart`, `Alpha`, `InterpolatedTick`. |
 | `Settings` | A track's pacing: step or interval, in-flight limit, debt cap, delta clamp, reference track. Presets `FixedStep(hz)` and `Variable()`. |
 | `UpdateEvent` | The one event metronome ships: a plain `struct{ Beat }` for an update track. |
 | `Clock`, `Timer` | Where time comes from, how a track waits, and how a clock waits for the tracks to settle. `WallClock` is the default. |
-| `ManualClock` | A `Clock` driven by hand, for tests and deterministic runs: `Advance`, `Jump`, `Wait`. |
+| `Stopwatch` | A named measure of the time since its `Start`, by the clock that made it, for a plugin that reads time without keeping the clock. |
+| `ManualClock` | A `Clock` driven by hand, for tests and deterministic runs: `Advance`, `Jump`, `Wait`, `LengthenNext`. |
 
 ## Tracks
 
@@ -187,6 +188,8 @@ the ticket that holds its detail.
 type Clock interface {
 	Now() time.Duration // since the epoch
 	NewTimer() Timer    // one per track
+	// a plugin listed after metronome makes its stopwatches in its Init
+	NewStopwatch(name string) Stopwatch
 	// metronome sets wait at Start and nil at Stop; wait returns once every
 	// track has settled
 	SetWaitCallback(wait func(ctx context.Context) error)
@@ -196,6 +199,11 @@ type Timer interface {
 	Reset(at time.Duration) // fire once Now has reached at; the clock decides when that is
 	C() <-chan struct{}
 	Stop()
+}
+
+type Stopwatch interface {
+	Start()                 // start a measurement, or start it again
+	Elapsed() time.Duration // since the last Start; zero before the first
 }
 ```
 
@@ -215,6 +223,14 @@ type Timer interface {
   - `Jump(d)` moves to the target at once, as a stall would, so debt,
     `MaxDebt` and `Lost` can be tested.
   - A variable track beats at most once per call, at the target time.
+  - `LengthenNext(name, d)` lengthens the next measurement of a stopwatch
+    named `name` by `d`, as work that takes time would, without moving the
+    clock under a track. Calls queue, one per `Start`.
+- **Stopwatches are how other plugins read time.** metronome installs its
+  clock as the `Clock` resource; a plugin listed after it makes the
+  stopwatches it needs from it in its `Init`, and keeps those, never the
+  clock. A `WallClock`'s stopwatch reads monotonic time apart from the
+  epoch; a `ManualClock`'s reads the time it is moved by.
 - **Waiting belongs to the clock.** metronome hands its clock a wait
   callback at `Start` and takes it back at `Stop`; it returns once every
   track has settled. Only a clock that moves time when told needs it, to see

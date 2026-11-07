@@ -17,6 +17,21 @@ type ManualClock struct {
 	// wait is metronome's wait callback, nil while no metronome reads the
 	// clock.
 	wait func(ctx context.Context) error
+	// lengthenings are, by stopwatch name, what LengthenNext queued for the
+	// next Starts of stopwatches of that name, oldest first.
+	lengthenings map[string][]time.Duration
+}
+
+// manualStopwatch is a ManualClock's Stopwatch. Its state is guarded by the
+// clock's mutex.
+type manualStopwatch struct {
+	clock *ManualClock
+	name  string
+	// startedAt is the clock's time at the last Start, and lengthening what
+	// LengthenNext added to the measurement it started, while started.
+	startedAt   time.Duration
+	lengthening time.Duration
+	started     bool
 }
 
 // manualTimer is a ManualClock's Timer.
@@ -51,6 +66,31 @@ func (c *ManualClock) NewTimer() Timer {
 	timer := &manualTimer{clock: c, channel: make(chan struct{}, 1)}
 	c.timers = append(c.timers, timer)
 	return timer
+}
+
+// NewStopwatch makes a Stopwatch reading the time the clock is moved by,
+// lengthened by LengthenNext for name.
+func (c *ManualClock) NewStopwatch(name string) Stopwatch {
+	return &manualStopwatch{clock: c, name: name}
+}
+
+// LengthenNext lengthens the next measurement of a stopwatch named name by d:
+// the next Start of one adds d to what its Elapsed answers, over the time the
+// clock is moved by, as work that takes time would. Calls queue, one for each
+// Start to come, so a test makes the next acquire of a renderer take 3ms
+// without moving the clock under a track.
+//
+// A negative d panics.
+func (c *ManualClock) LengthenNext(name string, d time.Duration) {
+	if d < 0 {
+		panic("metronome: lengthening a stopwatch's measurement by a negative duration")
+	}
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	if c.lengthenings == nil {
+		c.lengthenings = map[string][]time.Duration{}
+	}
+	c.lengthenings[name] = append(c.lengthenings[name], d)
 }
 
 // Advance moves the clock forward by d, deadline by deadline across every
@@ -120,6 +160,31 @@ func (c *ManualClock) Jump(d time.Duration) {
 	c.now += d
 	c.fireDue()
 	c.fireVariable()
+}
+
+// Start starts a measurement at the clock's time, taking the next lengthening
+// LengthenNext queued for the stopwatch's name.
+func (s *manualStopwatch) Start() {
+	s.clock.mutex.Lock()
+	defer s.clock.mutex.Unlock()
+	s.startedAt = s.clock.now
+	s.lengthening = 0
+	if queued := s.clock.lengthenings[s.name]; len(queued) > 0 {
+		s.lengthening = queued[0]
+		s.clock.lengthenings[s.name] = queued[1:]
+	}
+	s.started = true
+}
+
+// Elapsed answers the time the clock was moved by since the last Start, plus
+// the lengthening it took.
+func (s *manualStopwatch) Elapsed() time.Duration {
+	s.clock.mutex.Lock()
+	defer s.clock.mutex.Unlock()
+	if !s.started {
+		return 0
+	}
+	return s.clock.now - s.startedAt + s.lengthening
 }
 
 // Reset arms the timer to fire at at. A fixed-step track's timer fires at once
