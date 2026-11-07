@@ -75,9 +75,31 @@ type CapturedEvent struct {
 // ReadCapture answers event's framebuffer as straight-alpha pixels: the rows
 // un-strided, BGRA swapped to RGBA and alpha set opaque, with no colour
 // conversion, since the bytes are what the window displayed. A task joined
-// into the CapturedEvent publication calls it under kernel.Read[Device].
+// into the CapturedEvent publication calls it under kernel.Read[Device]. An
+// event whose Status is not CaptureStatusCaptured answers an error.
 func ReadCapture(device Device, event CapturedEvent) (*image.NRGBA, error) {
-	panic("gfx listing: no bodies")
+	if event.Status != CaptureStatusCaptured {
+		return nil, fmt.Errorf("gfx: reading a capture of %v that holds no picture, status %d", event.Window, event.Status)
+	}
+	mapped, err := device.MappedRange(event.Buffer, 0, uint64(event.BytesPerRow)*uint64(event.Height))
+	if err != nil {
+		return nil, fmt.Errorf("gfx: reading a capture of %v: %w", event.Window, err)
+	}
+	swapped := event.Format == TextureFormatBGRA8Unorm || event.Format == TextureFormatBGRA8UnormSrgb
+	picture := image.NewNRGBA(image.Rect(0, 0, int(event.Width), int(event.Height)))
+	for y := range int(event.Height) {
+		row := mapped[y*int(event.BytesPerRow) : y*int(event.BytesPerRow)+int(event.Width)*4]
+		pixels := picture.Pix[y*picture.Stride : y*picture.Stride+int(event.Width)*4]
+		copy(pixels, row)
+		for x := 0; x < len(pixels); x += 4 {
+			if swapped {
+				pixels[x] = row[x+2]
+				pixels[x+2] = row[x]
+			}
+			pixels[x+3] = 0xFF
+		}
+	}
+	return picture, nil
 }
 
 // captureDeliveryEvent carries a capture resolved, or ended without one, from

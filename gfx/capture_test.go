@@ -2,6 +2,8 @@ package gfx_test
 
 import (
 	"errors"
+	"image"
+	"image/color"
 	"reflect"
 	"slices"
 	"sync"
@@ -357,4 +359,100 @@ func callsOf(h *harness, buffer gfx.Buffer) []recording.CallKind {
 		}
 	}
 	return answer
+}
+
+func TestReadCaptureAnswersTheFramebufferUnstridedWithAlphaOpaqueAndBGRASwapped(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		format  gfx.TextureFormat
+		swapped bool
+	}{
+		{"BGRA8Unorm", gfx.TextureFormatBGRA8Unorm, true},
+		{"BGRA8UnormSrgb", gfx.TextureFormatBGRA8UnormSrgb, true},
+		{"RGBA8Unorm", gfx.TextureFormatRGBA8Unorm, false},
+		{"RGBA8UnormSrgb", gfx.TextureFormatRGBA8UnormSrgb, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newHarness(t)
+			texel := func(x, y int) []byte { return []byte{byte(x), byte(10 + y), byte(20 + x + y), 0x40} }
+			var mutex sync.Mutex
+			var read *image.NRGBA
+			var readErr error
+			h.readCapture = func(event gfx.CapturedEvent, device gfx.Device) {
+				// The recording's copy holds no texels, so the test writes what
+				// the GPU would have, the row padding included.
+				mapped, err := device.MappedRange(event.Buffer, 0, uint64(event.BytesPerRow*event.Height))
+				if err != nil {
+					t.Errorf("MappedRange answered %v", err)
+					return
+				}
+				for i := range mapped {
+					mapped[i] = 0xEE
+				}
+				for y := range int(event.Height) {
+					for x := range int(event.Width) {
+						copy(mapped[y*int(event.BytesPerRow)+x*4:], texel(x, y))
+					}
+				}
+				mutex.Lock()
+				defer mutex.Unlock()
+				read, readErr = gfx.ReadCapture(device, event)
+			}
+			h.mustSpawn(&gfx.Config{Surface: gfx.SurfaceRequest{Format: test.format, Capturable: true}})
+			window := h.openWindowOfSize(platform.Size{Width: 3, Height: 2})
+			h.waitForCalls(recording.CallKindCreateSurface, 1)
+			h.advance(time.Millisecond)
+			h.readDevice(func(device gfx.Device) { mustSucceed(t, device.RequestCapture(window)) })
+
+			h.advance(time.Millisecond)
+			h.waitForCalls(recording.CallKindReleaseBuffer, 1)
+
+			want := image.NewNRGBA(image.Rect(0, 0, 3, 2))
+			for y := range 2 {
+				for x := range 3 {
+					written := texel(x, y)
+					if test.swapped {
+						want.SetNRGBA(x, y, color.NRGBA{R: written[2], G: written[1], B: written[0], A: 0xFF})
+					} else {
+						want.SetNRGBA(x, y, color.NRGBA{R: written[0], G: written[1], B: written[2], A: 0xFF})
+					}
+				}
+			}
+			mutex.Lock()
+			defer mutex.Unlock()
+			if readErr != nil || !reflect.DeepEqual(read, want) {
+				t.Errorf("ReadCapture answered %+v, %v, want %+v", read, readErr, want)
+			}
+		})
+	}
+}
+
+func TestReadCaptureOfAnEventWithNoPictureAnswersAnError(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		status gfx.CaptureStatus
+		mapped bool
+	}{
+		{"not acquired", gfx.CaptureStatusNotAcquired, true},
+		{"failed", gfx.CaptureStatusFailed, true},
+		{"captured into no mapped buffer", gfx.CaptureStatusCaptured, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.mustSpawn(nil)
+
+			h.readDevice(func(device gfx.Device) {
+				event := gfx.CapturedEvent{Width: 3, Height: 2, Format: gfx.TextureFormatBGRA8Unorm, BytesPerRow: 256, Status: test.status}
+				if test.mapped {
+					// A buffer mapped and big enough, so only the status refuses it.
+					event.Buffer = createReadbackBuffer(t, device, 512)
+					mustSucceed(t, device.MapBuffer(event.Buffer, gfx.MapModeRead, 0, 512))
+					device.Poll()
+				}
+				if read, err := gfx.ReadCapture(device, event); read != nil || err == nil {
+					t.Errorf("ReadCapture answered %+v, %v, want an error", read, err)
+				}
+			})
+		})
+	}
 }
