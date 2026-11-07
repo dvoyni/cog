@@ -37,7 +37,11 @@ the buffers of the maps still pending. A window's capture, requested on a
 capturable surface, is copied out by gfx's own encoder after every submit
 order and delivered by `CapturedEvent`, its buffer unmapped and released
 after the publication's out dependency, and `ReadCapture` answers its
-picture un-strided, BGRA swapped and alpha opaque.
+picture un-strided, BGRA swapped and alpha opaque. A device loss the
+backend answers from any call is logged and published as `DeviceLostEvent`
+once; from then on every call with an error answers `ErrDeviceLost`
+without reaching the backend, and the frame in flight skips its submit and
+present.
 The backend reflects shader modules:
 its seam declares `ReflectRenderPipelineLayout`,
 `ReflectComputePipelineLayout` and `ReflectVertexInputs`, which the recording

@@ -295,12 +295,13 @@ func (p *Plugin) draw(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle
 // configuring; Outdated is not drawn and marks it; Lost is not drawn, and
 // marks it lost and for configuring, so the configure recreates it first;
 // Timeout is not drawn and marks nothing. An error goes to LogErr, is not
-// drawn and marks the surface.
+// drawn and marks the surface. A lost device acquires nothing, and a loss
+// ends the acquires.
 func acquireFramebuffers(k *kernel.Kernel, frame Frame, manager kernel.Read[*platform.WindowManager], deviceHandle kernel.Read[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)
 	for _, window := range d.surfaces {
 		configuration, configured := d.configurations[window]
-		if !configured || d.frames.isClosing(window) || !isWindowDrawable(manager.Get(), window) {
+		if d.lost.Load() || !configured || d.frames.isClosing(window) || !isWindowDrawable(manager.Get(), window) {
 			continue
 		}
 		usage := TextureUsageFlagRenderAttachment
@@ -319,7 +320,7 @@ func acquireFramebuffers(k *kernel.Kernel, frame Frame, manager kernel.Read[*pla
 		status, err := d.backend.AcquireFramebuffer(window, texture, view)
 		switch {
 		case err != nil:
-			k.Logger().LogErr(fmt.Errorf("gfx: acquiring the framebuffer of %v: %w", window, err))
+			d.logErr(fmt.Errorf("gfx: acquiring the framebuffer of %v: %w", window, err))
 			d.frames.markUnconfigured(window)
 		case status == AcquireStatusSuboptimal || status == AcquireStatusOutdated:
 			d.frames.markUnconfigured(window)
@@ -345,24 +346,39 @@ func acquireFramebuffers(k *kernel.Kernel, frame Frame, manager kernel.Read[*pla
 // to LogErr and is dropped, and so does a failing submit. A frame with no
 // encoder and no capture submits nothing. It then maps each capture's
 // buffer, and either way polls the maps after, publishing BufferMappedEvent
-// and CapturedEvent from its job for each resolved.
+// and CapturedEvent from its job for each resolved. On a lost device, or
+// once one is found lost, the frame skips its submit: the encoders left are
+// discarded, the command buffers released, and the captures not yet copied
+// stay requested.
 func flushFrame(k *kernel.Kernel, frame Frame, deviceHandle kernel.Read[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)
 	slot := d.frames.flush(frame)
 	slices.SortFunc(slot.encoders, func(a, b frameEncoder) int { return cmp.Compare(a.order, b.order) })
 	for _, taken := range slot.encoders {
+		if d.lost.Load() {
+			taken.encoder.DiscardEncoding()
+			continue
+		}
 		buffer, err := taken.encoder.Finish()
 		if err != nil {
-			k.Logger().LogErr(fmt.Errorf("gfx: finishing the encoder at submit order %d: %w", taken.order, err))
+			d.logErr(fmt.Errorf("gfx: finishing the encoder at submit order %d: %w", taken.order, err))
 			continue
 		}
 		slot.commandBuffers = append(slot.commandBuffers, buffer)
 	}
-	captures := d.copyCaptures(slot)
-	submitted := true
-	if len(slot.commandBuffers) > 0 {
+	var captures []CapturedEvent
+	if !d.lost.Load() {
+		captures = d.copyCaptures(slot)
+	}
+	submitted := !d.lost.Load()
+	switch {
+	case !submitted:
+		for _, buffer := range slot.commandBuffers {
+			buffer.Release()
+		}
+	case len(slot.commandBuffers) > 0:
 		if err := d.backend.Submit(slot.commandBuffers...); err != nil {
-			k.Logger().LogErr(fmt.Errorf("gfx: submitting a frame: %w", err))
+			d.logErr(fmt.Errorf("gfx: submitting a frame: %w", err))
 			submitted = false
 		}
 	}
@@ -373,12 +389,14 @@ func flushFrame(k *kernel.Kernel, frame Frame, deviceHandle kernel.Read[Device])
 
 // presentFramebuffers presents each framebuffer frame acquired, under the
 // read lock, makes its view and texture stale, and releases the frame. A
-// present that fails goes to LogErr.
+// present that fails goes to LogErr. A lost device presents nothing.
 func presentFramebuffers(k *kernel.Kernel, frame Frame, deviceHandle kernel.Read[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)
 	for _, acquired := range d.frames.framebuffers(frame) {
-		if err := d.backend.Present(acquired.window); err != nil {
-			k.Logger().LogErr(fmt.Errorf("gfx: presenting %v: %w", acquired.window, err))
+		if !d.lost.Load() {
+			if err := d.backend.Present(acquired.window); err != nil {
+				d.logErr(fmt.Errorf("gfx: presenting %v: %w", acquired.window, err))
+			}
 		}
 		_ = d.textureViews.retire(acquired.view)
 		d.textureViews.release(acquired.view)

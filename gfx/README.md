@@ -25,7 +25,10 @@ from the poll that finds a map resolved or failed, the failure's error
 logged, and `Destroy` unmaps and releases the buffers of the maps still
 pending, and a capture requested on a capturable surface is copied out
 after every submit order and delivered by `CapturedEvent`, its buffer
-released after the publication, and `ReadCapture` answers its picture;
+released after the publication, and `ReadCapture` answers its picture,
+and a device loss from any backend call is logged and published once,
+every call with an error answering `ErrDeviceLost` after it and the frame
+in flight skipping its submit and present;
 the recording adapter rejects a handle missing at its index, a
 resource without its usage, a misaligned write, copy or clear and a broken
 pass sequence, and its buffers hold the bytes written, copied and cleared,
