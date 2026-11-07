@@ -238,6 +238,30 @@ func TestAnAcquiredFramebufferIsARenderAttachmentUntilItsPresent(t *testing.T) {
 	}
 }
 
+func TestReleasingTheDeviceDropsItsFramebufferAndLeavesItsSurfaceToConfigureAgain(t *testing.T) {
+	instance, device := requestDevice(t)
+	window := platform.Window{}
+	mustSucceed(t, instance.CreateSurface(window, platform.NativeHandle{}))
+	mustSucceed(t, device.ConfigureSurface(window, gfx.SurfaceConfiguration{}))
+	if _, err := device.AcquireFramebuffer(window, handleAt[gfx.Texture](5), handleAt[gfx.TextureView](5)); err != nil {
+		t.Fatalf("AcquireFramebuffer answered %v", err)
+	}
+
+	device.Release()
+	adapter, err := instance.RequestAdapter(gfx.RequestAdapterOptions{})
+	mustSucceed(t, err)
+	recovered, err := adapter.RequestDevice(gfx.DeviceDescriptor{})
+	mustSucceed(t, err)
+
+	if _, err := recovered.AcquireFramebuffer(window, handleAt[gfx.Texture](6), handleAt[gfx.TextureView](6)); err == nil {
+		t.Error("AcquireFramebuffer on a surface configured with the released device answered no error")
+	}
+	mustSucceed(t, recovered.ConfigureSurface(window, gfx.SurfaceConfiguration{}))
+	if _, err := recovered.AcquireFramebuffer(window, handleAt[gfx.Texture](6), handleAt[gfx.TextureView](6)); err != nil {
+		t.Errorf("AcquireFramebuffer once configured again answered %v", err)
+	}
+}
+
 func TestAnAcquiredFramebufferIsACopySourceWhenItsSurfaceIsCapturableUntilItsPresent(t *testing.T) {
 	for _, test := range []struct {
 		name       string

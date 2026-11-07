@@ -58,14 +58,18 @@ type harness struct {
 	// mutex guards logged, the errors kernels logged and the test has not
 	// taken, any left when the test ends failing it, drawn, every DrawEvent
 	// published, mapped, every BufferMappedEvent published, captured, every
-	// CapturedEvent published, and lost, for every DeviceLostEvent published,
-	// how many errors were logged and not taken then.
-	mutex    sync.Mutex
-	logged   []error
-	drawn    []gfx.DrawEvent
-	mapped   []gfx.BufferMappedEvent
-	captured []gfx.CapturedEvent
-	lost     []int
+	// CapturedEvent published, lost, for every DeviceLostEvent published,
+	// how many errors were logged and not taken then, and recoveredCount, how
+	// many DeviceRecoveredEvents were published, and renderedCount, how many
+	// RenderEvents gfx's Draw has handled.
+	mutex          sync.Mutex
+	logged         []error
+	drawn          []gfx.DrawEvent
+	mapped         []gfx.BufferMappedEvent
+	captured       []gfx.CapturedEvent
+	lost           []int
+	recoveredCount int
+	renderedCount  int
 }
 
 // readEvent runs the harness's read under the Device's read lock.
@@ -184,6 +188,19 @@ func (h *harness) Init(c *kernel.Configurator, config any) error {
 	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.DeviceLostEvent) (gfx.DeviceLostEvent, kernel.JobHandle) {
 		h.mutex.Lock()
 		h.lost = append(h.lost, len(h.logged))
+		h.mutex.Unlock()
+		return event, in
+	})
+	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.DeviceRecoveredEvent) (gfx.DeviceRecoveredEvent, kernel.JobHandle) {
+		h.mutex.Lock()
+		h.recoveredCount++
+		h.mutex.Unlock()
+		return event, in
+	})
+	// The harness is listed after gfx, so this runs after Draw.
+	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.RenderEvent) (gfx.RenderEvent, kernel.JobHandle) {
+		h.mutex.Lock()
+		h.renderedCount++
 		h.mutex.Unlock()
 		return event, in
 	})
@@ -399,6 +416,25 @@ func (h *harness) waitForDraws(count int) []gfx.DrawEvent {
 	}
 }
 
+// waitForRenders waits, without ticking the main thread, until gfx's Draw
+// has handled count RenderEvents.
+func (h *harness) waitForRenders(count int) {
+	h.t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		h.mutex.Lock()
+		rendered := h.renderedCount
+		h.mutex.Unlock()
+		if rendered >= count {
+			return
+		}
+		if time.Now().After(deadline) {
+			h.t.Fatalf("%d RenderEvents handled in 5s, want %d", rendered, count)
+		}
+		runtime.Gosched()
+	}
+}
+
 // waitForSubmissions waits, without ticking the main thread, until the
 // recording holds count submissions.
 func (h *harness) waitForSubmissions(count int) {
@@ -512,6 +548,14 @@ func (h *harness) lostEvents() []int {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 	return slices.Clone(h.lost)
+}
+
+// recoveredEvents answers how many DeviceRecoveredEvents were published so
+// far.
+func (h *harness) recoveredEvents() int {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	return h.recoveredCount
 }
 
 // kinds answers the kinds of calls, in order.

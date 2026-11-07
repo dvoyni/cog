@@ -17,17 +17,18 @@ type Plugin struct {
 	// config is a copy of the Config Init was given.
 	config         Config
 	instanceSocket kernel.ExclusiveSocket[InstanceSocket]
-	// adapter, device.instance and device.backend are what Start requested,
-	// for Destroy to release; nil where Start got no further.
-	adapter BackendAdapter
-	device  *device
+	// device holds the instance, the adapter and the backend device Start
+	// requested, for Destroy to release; nil where Start got no further.
+	device *device
 	// tasks are the surface tasks the Tasks resource holds, flushTask what
-	// runs between a frame's recording and its present, and
-	// releaseCaptureTask what releases a capture's buffer after its
-	// CapturedEvent; the handlers schedule them.
+	// runs between a frame's recording and its present, releaseCaptureTask
+	// what releases a capture's buffer after its CapturedEvent, and
+	// recoverTask what recovers a lost device in place of a frame; the
+	// handlers schedule them.
 	tasks              Tasks
 	flushTask          *kernel.Task[Frame, kernel.NoResult]
 	releaseCaptureTask *kernel.Task[Buffer, kernel.NoResult]
+	recoverTask        *kernel.Task[kernel.NoArg, kernel.NoResult]
 }
 
 // Config is gfx's part of the kernel's config, under PluginName: what the
@@ -81,6 +82,7 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	configurator.InitResource(p.tasks)
 	p.flushTask = configurator.RegisterTask1(flushFrame)
 	p.releaseCaptureTask = configurator.RegisterTask1(releaseCapture)
+	p.recoverTask = configurator.RegisterTask1(recoverDevice)
 	configurator.Subscribe(p.publishCapture)
 	configurator.InitResource(Handlers{
 		Draw: configurator.Subscribe(p.draw),
@@ -100,27 +102,30 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 }
 
 // Start requests the adapter and the device from the bound InstanceSocket,
-// with Config's limits or, when they are zero, DefaultLimits(). Finding no
-// adapter, or no device, is an error.
+// with Config's limits or, when they are zero, DefaultLimits(), and keeps
+// both requests for a recovery to make again. Finding no adapter, or no
+// device, is an error.
 func (p *Plugin) Start(k *kernel.Kernel) error {
 	p.device.kernel = k
 	p.device.instance = p.instanceSocket.Get()
-	adapter, err := p.device.instance.RequestAdapter(RequestAdapterOptions{
+	p.device.adapterOptions = RequestAdapterOptions{
 		PowerPreference:      p.config.PowerPreference,
 		ForceFallbackAdapter: p.config.ForceFallbackAdapter,
-	})
+	}
+	adapter, err := p.device.instance.RequestAdapter(p.device.adapterOptions)
 	if err != nil {
 		return fmt.Errorf("gfx: requesting an adapter: %w", err)
 	}
-	p.adapter = adapter
+	p.device.adapter = adapter
 	limits := p.config.RequiredLimits
 	if limits == (Limits{}) {
 		limits = DefaultLimits()
 	}
-	backend, err := adapter.RequestDevice(DeviceDescriptor{
+	p.device.deviceDescriptor = DeviceDescriptor{
 		RequiredFeatures: p.config.RequiredFeatures,
 		RequiredLimits:   limits,
-	})
+	}
+	backend, err := adapter.RequestDevice(p.device.deviceDescriptor)
 	if err != nil {
 		return fmt.Errorf("gfx: requesting a device: %w", err)
 	}
@@ -137,8 +142,9 @@ func (*Plugin) Stop(*kernel.Kernel) error { return nil }
 // Destroy, after the kernel's last job, unmaps and releases the buffers of
 // the maps still pending, publishing nothing, and answers the unmaps'
 // errors; it releases the surfaces of the windows still open, then the
-// device, the adapter and the instance Start requested. Releasing the device
-// cleanly is what saves Vulkan's pipeline cache.
+// device, the adapter and the instance Start or the last recovery
+// requested. Releasing the device cleanly is what saves Vulkan's pipeline
+// cache.
 func (p *Plugin) Destroy() error {
 	var err error
 	if p.device.backend != nil {
@@ -150,8 +156,8 @@ func (p *Plugin) Destroy() error {
 	if p.device.backend != nil {
 		p.device.backend.Release()
 	}
-	if p.adapter != nil {
-		p.adapter.Release()
+	if p.device.adapter != nil {
+		p.device.adapter.Release()
 	}
 	if p.device.instance != nil {
 		p.device.instance.Release()

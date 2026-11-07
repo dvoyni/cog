@@ -123,8 +123,12 @@ type BackendDevice interface {
 	Present(window platform.Window) error
 
 	WaitIdle() error
-	// Release releases the device: in gfx's Destroy, and in a recovery,
-	// before the adapter is asked for a new one, which gfx fills again with
-	// every object under its old handle.
+	// Release releases the device with every object it still holds, since
+	// gfx releases none on a lost device, and leaves each surface
+	// unconfigured, dropping a framebuffer acquired and not presented, since
+	// a lost device's frame skips its present: in gfx's Destroy, and in a
+	// recovery, before the adapter is asked for a new one, which gfx fills
+	// again with every object under its old handle and configures the
+	// surfaces with.
 	Release()
 }

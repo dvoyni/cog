@@ -1,6 +1,9 @@
 package gfx
 
-import "sync"
+import (
+	"iter"
+	"sync"
+)
 
 // table is gfx's table of one handle type H: the slots its handles index,
 // each with the generation of the handle it holds and the descriptor D it was
@@ -32,6 +35,7 @@ func (t *table[H, D]) acquire(descriptor D) H {
 		t.slots = append(t.slots, slot[D]{generation: nextGeneration(0)})
 	}
 	t.slots[index].descriptor = descriptor
+	t.slots[index].held = true
 	return H{handle{index: index, generation: t.slots[index].generation}}
 }
 
@@ -48,6 +52,7 @@ func (t *table[H, D]) retire(h H) error {
 	entry.generation = nextGeneration(entry.generation)
 	var zero D
 	entry.descriptor = zero
+	entry.held = false
 	return nil
 }
 
@@ -81,17 +86,41 @@ func (t *table[H, D]) check(h H) error {
 	return nil
 }
 
+// heldHandles answers every handle t holds, in index order, with what it
+// was acquired with, as they were when it was called.
+func (t *table[H, D]) heldHandles() iter.Seq2[H, D] {
+	t.mutex.RLock()
+	var handles []H
+	var descriptors []D
+	for index, entry := range t.slots {
+		if entry.held {
+			handles = append(handles, H{handle{index: uint32(index), generation: entry.generation}})
+			descriptors = append(descriptors, entry.descriptor)
+		}
+	}
+	t.mutex.RUnlock()
+	return func(yield func(H, D) bool) {
+		for index, h := range handles {
+			if !yield(h, descriptors[index]) {
+				return
+			}
+		}
+	}
+}
+
 // holds answers whether key names a slot under its current generation; the
 // caller holds the mutex.
 func (t *table[H, D]) holds(key handle) bool {
 	return key.index < uint32(len(t.slots)) && t.slots[key.index].generation == key.generation
 }
 
-// slot is one entry of a table: the generation of the handle it holds, and
-// that handle's descriptor.
+// slot is one entry of a table: the generation of the handle it holds or
+// last held, that handle's descriptor, and whether it is held, from its
+// acquire until its retire.
 type slot[D any] struct {
 	generation uint32
 	descriptor D
+	held       bool
 }
 
 // nextGeneration answers the generation after generation, skipping 0, which

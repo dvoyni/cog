@@ -39,9 +39,13 @@ order and delivered by `CapturedEvent`, its buffer unmapped and released
 after the publication's out dependency, and `ReadCapture` answers its
 picture un-strided, BGRA swapped and alpha opaque. A device loss the
 backend answers from any call is logged and published as `DeviceLostEvent`
-once; from then on every call with an error answers `ErrDeviceLost`
-without reaching the backend, and the frame in flight skips its submit and
-present.
+once; from then on no call reaches the backend, every call with an error
+answering `ErrDeviceLost`, and the frame in flight skips its submit and
+present. The next beat recovers instead of drawing, under the write lock: a
+new device, from a fresh adapter when the old one refuses, every object
+recreated on it under its old handle in dependency order, every surface
+marked, and `DeviceRecoveredEvent` published; a recovery that fails is
+logged and leaves the device lost.
 The backend reflects shader modules:
 its seam declares `ReflectRenderPipelineLayout`,
 `ReflectComputePipelineLayout` and `ReflectVertexInputs`, which the recording
@@ -386,7 +390,10 @@ present and recovery itself.
   call that answers an error. gfx checks every backend call it makes; the
   first job to see it logs the loss and publishes `DeviceLostEvent`. Tasks
   running then answer `ErrDeviceLost` and record nothing; the frame in flight
-  skips its submit and present.
+  skips its submit and present. No call reaches the lost device: a release
+  only retires its handle, since the device's own `Release` releases every
+  object it holds, and drops the framebuffer the skipped present left
+  acquired.
 - **Handles survive.** On the next beat, instead of a frame, `Draw` schedules
   a recovery under the write lock: release the device, request a new
   one from the same adapter (a fresh adapter if that fails), recreate every
@@ -441,7 +448,8 @@ What the backend must do, and what the fork must fix first, are carried by
 the [gogpu map](https://github.com/dvoyni/cog/issues/611):
 
 - binding `InstanceSocket`; mapping its errors onto `ErrDeviceLost` and
-  `AcquireStatus`; honouring `Capturable` and `ForceFallbackAdapter`; a
+  `AcquireStatus`; a device `Release` that releases every object it still
+  holds and drops a framebuffer acquired and not presented; honouring `Capturable` and `ForceFallbackAdapter`; a
   headless surface for a window with a zero native handle; pixel tests on the
   software adapter; a test that the enums convert by cast;
 - two swapchains in one frame are unsafe in wgpu's Vulkan backend, so several
