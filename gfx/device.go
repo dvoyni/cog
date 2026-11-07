@@ -79,6 +79,7 @@ type device struct {
 	textures         table[Texture, TextureDescriptor]
 	textureViews     table[TextureView, textureViewSource]
 	samplers         table[Sampler, SamplerDescriptor]
+	querySets        table[QuerySet, QuerySetDescriptor]
 	shaderModules    table[ShaderModule, ShaderModuleDescriptor]
 	bindGroupLayouts table[BindGroupLayout, BindGroupLayoutDescriptor]
 	bindGroups       table[BindGroup, BindGroupDescriptor]
@@ -165,12 +166,18 @@ func (d *device) ReleaseSampler(sampler Sampler) {
 }
 
 func (d *device) CreateQuerySet(descriptor QuerySetDescriptor) (QuerySet, error) {
-	panic("gfx listing: no bodies")
+	if d.lost.Load() {
+		return QuerySet{}, ErrDeviceLost
+	}
+	querySet, err := createResource(&d.querySets, descriptor, d.backend.CreateQuerySet)
+	return querySet, d.checkLoss(err)
 }
 
-func (d *device) ReleaseQuerySet(querySet QuerySet) { panic("gfx listing: no bodies") }
+func (d *device) ReleaseQuerySet(querySet QuerySet) {
+	releaseResource(d, &d.querySets, querySet, BackendDevice.ReleaseQuerySet)
+}
 
-func (d *device) TimestampPeriod() float32 { panic("gfx listing: no bodies") }
+func (d *device) TimestampPeriod() float32 { return d.backend.TimestampPeriod() }
 
 func (d *device) CreateShaderModule(descriptor ShaderModuleDescriptor) (ShaderModule, error) {
 	if d.lost.Load() {
@@ -845,6 +852,7 @@ func (d *device) recreateObjects() error {
 		func() error { return recreateResources(logger, &d.buffers, d.backend.CreateBuffer) },
 		func() error { return recreateResources(logger, &d.textures, d.backend.CreateTexture) },
 		func() error { return recreateResources(logger, &d.samplers, d.backend.CreateSampler) },
+		func() error { return recreateResources(logger, &d.querySets, d.backend.CreateQuerySet) },
 		func() error { return recreateResources(logger, &d.shaderModules, d.backend.CreateShaderModule) },
 		func() error {
 			return recreateResources(logger, &d.textureViews, func(view TextureView, source textureViewSource) error {

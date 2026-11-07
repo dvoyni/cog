@@ -145,6 +145,10 @@ func TestOnceTheDeviceIsLostNoCallReachesTheBackendAndCallsWithErrorsAnswerErrDe
 				_, err := device.CreateSampler(gfx.SamplerDescriptor{})
 				return err
 			},
+			"CreateQuerySet": func() error {
+				_, err := device.CreateQuerySet(gfx.QuerySetDescriptor{Type: gfx.QueryTypeTimestamp, Count: 2})
+				return err
+			},
 			"CreateShaderModule": func() error {
 				_, err := device.CreateShaderModule(gfx.ShaderModuleDescriptor{WGSL: triangleWGSL})
 				return err

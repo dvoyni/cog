@@ -94,13 +94,22 @@ func (d *device) ReleaseSampler(sampler gfx.Sampler) {
 	d.instance.record(CallKindReleaseSampler, sampler, func() error { return d.samplers.remove(sampler.Index()) })
 }
 
+// CreateQuerySet records the creation and answers gfx.ErrQuerySetsUnavailable:
+// query sets wait on the wgpu fork, so the device keeps none.
 func (d *device) CreateQuerySet(querySet gfx.QuerySet, descriptor gfx.QuerySetDescriptor) error {
-	panic("gfx listing: no bodies")
+	return d.instance.record(CallKindCreateQuerySet, CreateQuerySetArguments{QuerySet: querySet, Descriptor: descriptor}, func() error {
+		return gfx.ErrQuerySetsUnavailable
+	}).Error
 }
 
-func (d *device) ReleaseQuerySet(querySet gfx.QuerySet) { panic("gfx listing: no bodies") }
+// ReleaseQuerySet records the release, with an error, since no query set is
+// kept.
+func (d *device) ReleaseQuerySet(querySet gfx.QuerySet) {
+	d.instance.record(CallKindReleaseQuerySet, querySet, func() error { return requireQuerySet(querySet, "the released query set") })
+}
 
-func (d *device) TimestampPeriod() float32 { panic("gfx listing: no bodies") }
+// TimestampPeriod answers TimestampPeriod.
+func (*device) TimestampPeriod() float32 { return TimestampPeriod }
 
 // CreateShaderModule records the creation and keeps module at its index.
 func (d *device) CreateShaderModule(module gfx.ShaderModule, descriptor gfx.ShaderModuleDescriptor) error {

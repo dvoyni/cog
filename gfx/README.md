@@ -9,8 +9,9 @@ recording adapter in its `recording` package for tests. It knows nothing of
 materials, scenes or the ECS.
 
 Status: being built. Every declaration is in this module. The device comes
-up in `Start` and is released in `Destroy`, every resource but query sets
-is created and released, a pipeline with a zero layout getting the
+up in `Start` and is released in `Destroy`, every resource
+is created and released, `CreateQuerySet` answering
+`ErrQuerySetsUnavailable` until the wgpu fork exposes query sets, a pipeline with a zero layout getting the
 layouts the backend reflects created as explicit ones, pipeline
 creation checking the vertex buffers against the shader's inputs and the
 pipeline against the device's limits, each
@@ -36,12 +37,12 @@ recovery that fails logged once and retried at most once a second, and
 `DrawEvent` carries `AcquireWait` and `GPULatency`, read from
 metronome's clock;
 the recording adapter rejects a handle missing at its index, a
-resource without its usage, a misaligned write, copy or clear and a broken
-pass sequence, and its buffers hold the bytes written, copied and cleared,
+resource without its usage, a misaligned write, copy or clear, a broken
+pass sequence and any query set, reports every feature but timestamp
+queries, and its buffers hold the bytes written, copied and cleared,
 which its own maps read, and answers a pipeline's reflection with the
-layouts a test queues, and a vertex entry point's with its inputs; `shader.Preprocess` is v1's preprocessor whole;
-every other body panics until its ticket on the
-[gfx map](https://github.com/dvoyni/cog/issues/608) fills it.
+layouts a test queues, and a vertex entry point's with its inputs; `shader.Preprocess` is v1's preprocessor whole.
+What remains is on the [gfx map](https://github.com/dvoyni/cog/issues/608).
 
 ## Shape
 

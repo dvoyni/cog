@@ -32,3 +32,7 @@ var ErrVertexMismatch = errors.New("gfx: the vertex buffers do not match the sha
 // ErrLimitExceeded is answered by the pipeline creations for a pipeline past
 // the device's limits: its layout, or a render pipeline's vertex buffers.
 var ErrLimitExceeded = errors.New("gfx: past the device's limits")
+
+// ErrQuerySetsUnavailable is answered by Device.CreateQuerySet on every
+// backend until the wgpu fork exposes query sets.
+var ErrQuerySetsUnavailable = errors.New("gfx: query sets are unavailable until the wgpu fork exposes them")

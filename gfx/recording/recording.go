@@ -13,6 +13,10 @@ var AdapterInfo = gfx.AdapterInfo{
 	Backend:    gfx.BackendEmpty,
 }
 
+// TimestampPeriod is what the recording device answers for TimestampPeriod:
+// one nanosecond a tick.
+const TimestampPeriod float32 = 1
+
 // CallKind names a kind of backend call, for AnswerNext and for the calls
 // a Recording holds.
 type CallKind uint16
@@ -82,6 +86,12 @@ const (
 	// CallKindReleaseSampler is BackendDevice.ReleaseSampler, its Arguments the
 	// gfx.Sampler.
 	CallKindReleaseSampler
+	// CallKindCreateQuerySet is BackendDevice.CreateQuerySet, its Arguments a
+	// CreateQuerySetArguments; it answers gfx.ErrQuerySetsUnavailable.
+	CallKindCreateQuerySet
+	// CallKindReleaseQuerySet is BackendDevice.ReleaseQuerySet, its Arguments
+	// the gfx.QuerySet.
+	CallKindReleaseQuerySet
 	// CallKindCreateShaderModule is BackendDevice.CreateShaderModule, its
 	// Arguments a CreateShaderModuleArguments.
 	CallKindCreateShaderModule
@@ -282,6 +292,12 @@ type CreateTextureViewArguments struct {
 type CreateSamplerArguments struct {
 	Sampler    gfx.Sampler
 	Descriptor gfx.SamplerDescriptor
+}
+
+// CreateQuerySetArguments are what CreateQuerySet was called with.
+type CreateQuerySetArguments struct {
+	QuerySet   gfx.QuerySet
+	Descriptor gfx.QuerySetDescriptor
 }
 
 // CreateShaderModuleArguments are what CreateShaderModule was called with.

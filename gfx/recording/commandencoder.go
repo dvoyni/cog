@@ -35,8 +35,9 @@ type commandEncoder struct {
 }
 
 // BeginRenderPass records the pass, its color attachments copied, and
-// answers its encoder, which records under it. No other pass may be open, and
-// each attachment's view needs RenderAttachment.
+// answers its encoder, which records under it. No other pass may be open,
+// each attachment's view needs RenderAttachment, and its timestamp writes
+// name no query set.
 func (encoder *commandEncoder) BeginRenderPass(descriptor gfx.RenderPassDescriptor) gfx.RenderPassEncoder {
 	descriptor.ColorAttachments = slices.Clone(descriptor.ColorAttachments)
 	encoder.beginPass()
@@ -49,22 +50,39 @@ func (encoder *commandEncoder) BeginRenderPass(descriptor gfx.RenderPassDescript
 				return err
 			}
 		}
-		return d.requireView(descriptor.DepthStencilAttachment.View, gfx.TextureUsageFlagRenderAttachment, "the depth-stencil attachment")
+		return cmp.Or(
+			d.requireView(descriptor.DepthStencilAttachment.View, gfx.TextureUsageFlagRenderAttachment, "the depth-stencil attachment"),
+			requireQuerySet(descriptor.TimestampWrites.QuerySet, "the pass's timestamp writes"),
+		)
 	})
 	encoder.record(CommandKindBeginRenderPass, descriptor)
 	return renderPassEncoder{pass{encoder: encoder, index: len(encoder.commands) - 1}}
 }
 
 // BeginComputePass records the pass and answers its encoder, which records
-// under it. No other pass may be open.
+// under it. No other pass may be open, and its timestamp writes name no query
+// set.
 func (encoder *commandEncoder) BeginComputePass(descriptor gfx.ComputePassDescriptor) gfx.ComputePassEncoder {
 	encoder.beginPass()
+	encoder.fail(requireQuerySet(descriptor.TimestampWrites.QuerySet, "the pass's timestamp writes"))
 	encoder.record(CommandKindBeginComputePass, descriptor)
 	return computePassEncoder{pass{encoder: encoder, index: len(encoder.commands) - 1}}
 }
 
+// ResolveQuerySet records the resolve, which always fails: there is no query
+// set to resolve, none kept and the zero one naming none.
 func (encoder *commandEncoder) ResolveQuerySet(querySet gfx.QuerySet, firstQuery, queryCount uint32, destination gfx.Buffer, destinationOffset uint64) {
-	panic("gfx listing: no bodies")
+	if querySet == (gfx.QuerySet{}) {
+		encoder.fail(errors.New("recording: a resolve of no query set"))
+	}
+	encoder.fail(requireQuerySet(querySet, "the resolved query set"))
+	encoder.record(CommandKindResolveQuerySet, ResolveQuerySetArguments{
+		QuerySet:          querySet,
+		FirstQuery:        firstQuery,
+		QueryCount:        queryCount,
+		Destination:       destination,
+		DestinationOffset: destinationOffset,
+	})
 }
 
 // CopyBufferToBuffer records the copy, from a buffer with CopySrc into one
@@ -427,4 +445,13 @@ func (p computePassEncoder) DispatchIndirect(buffer gfx.Buffer, offset uint64) {
 	p.requirePipeline("an indirect dispatch")
 	p.requireIndirectBuffer(buffer)
 	p.record(CommandKindDispatchIndirect, IndirectArguments{Buffer: buffer, Offset: offset})
+}
+
+// requireQuerySet answers an error naming role for any query set but the
+// zero one, which names none: none is kept until the wgpu fork exposes them.
+func requireQuerySet(querySet gfx.QuerySet, role string) error {
+	if querySet == (gfx.QuerySet{}) {
+		return nil
+	}
+	return fmt.Errorf("recording: %s: no query set at index %d: %w", role, querySet.Index(), gfx.ErrQuerySetsUnavailable)
 }
