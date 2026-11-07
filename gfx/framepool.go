@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/metronome"
@@ -35,6 +36,14 @@ type framePool struct {
 	// lostWindows are the windows whose surfaces an acquire answered lost,
 	// to be recreated before they are configured again.
 	lostWindows []platform.Window
+	// acquireWait is how long the newest acquire blocked, and gpuLatency
+	// the newest finished frame's time from submit to the poll that saw it
+	// finished: the timing signals the next DrawEvent carries.
+	acquireWait time.Duration
+	gpuLatency  time.Duration
+	// submissions are the frames' submits no poll has seen finished yet,
+	// oldest first.
+	submissions []frameSubmission
 }
 
 // frameSlot is one frame's state: the generation of the Frame it holds, its
@@ -69,6 +78,13 @@ type framebuffer struct {
 	window  platform.Window
 	texture Texture
 	view    TextureView
+}
+
+// frameSubmission is a frame's submit: its submission index and when it was
+// submitted, by the device's submission stopwatch.
+type frameSubmission struct {
+	index       uint64
+	submittedAt time.Duration
 }
 
 // acquire answers a frame of beat in a free slot, or a new one when none is
@@ -253,6 +269,53 @@ func (pool *framePool) unmarkUnconfigured(window platform.Window) {
 	}
 }
 
+// timing answers the timing signals for the next DrawEvent.
+func (pool *framePool) timing() (acquireWait, gpuLatency time.Duration) {
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+	return pool.acquireWait, pool.gpuLatency
+}
+
+// setAcquireWait keeps wait as how long the newest acquire blocked.
+func (pool *framePool) setAcquireWait(wait time.Duration) {
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+	pool.acquireWait = wait
+}
+
+// addSubmission keeps a frame's submit at index, made at submittedAt, until
+// a poll sees it finished.
+func (pool *framePool) addSubmission(index uint64, submittedAt time.Duration) {
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+	pool.submissions = append(pool.submissions, frameSubmission{index: index, submittedAt: submittedAt})
+}
+
+// completeSubmissions drops the frames' submits at or before
+// completedIndex, finished, and takes the GPU latency from the newest of
+// them: seenAt, when the poll saw them finished, less when it was submitted.
+func (pool *framePool) completeSubmissions(completedIndex uint64, seenAt time.Duration) {
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+	finishedCount := 0
+	for finishedCount < len(pool.submissions) && pool.submissions[finishedCount].index <= completedIndex {
+		finishedCount++
+	}
+	if finishedCount == 0 {
+		return
+	}
+	pool.gpuLatency = seenAt - pool.submissions[finishedCount-1].submittedAt
+	pool.submissions = slices.Delete(pool.submissions, 0, finishedCount)
+}
+
+// forgetSubmissions drops the frames' submits not seen finished, whose
+// indices belonged to a device since lost.
+func (pool *framePool) forgetSubmissions() {
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+	pool.submissions = pool.submissions[:0]
+}
+
 // markLost marks window's surface lost, to be recreated before it is
 // configured again.
 func (pool *framePool) markLost(window platform.Window) {
@@ -283,7 +346,9 @@ func (pool *framePool) unmarkLost(window platform.Window) bool {
 // the last present and that configure, publishes DrawEvent with that acquire
 // as Ready, and schedules the flush after the nested publication's out
 // dependency, then the present, which it keeps as the last present and
-// returns.
+// returns. DrawEvent carries the timing signals as they stand when it is
+// published: the acquire wait of the newest acquire finished, the previous
+// frame's under MaxInFlight 1.
 func (p *Plugin) draw(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event RenderEvent) (RenderEvent, kernel.JobHandle) {
 	if p.device.lost.Load() {
 		recovered := ex.Schedule(p.recoverTask, event.Beat, in, p.device.frames.lastPresentJob()).Handle()
@@ -296,7 +361,8 @@ func (p *Plugin) draw(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle
 		configured = ex.Schedule(p.tasks.ConfigureSurfaces, kernel.NoArg{}, in, lastPresent).Handle()
 	}
 	acquired := ex.Schedule(p.tasks.AcquireFramebuffers, frame, in, configured).Handle()
-	_, out := ex.Publish(acquired, DrawEvent{Beat: event.Beat, Frame: frame, Ready: acquired})
+	acquireWait, gpuLatency := p.device.frames.timing()
+	_, out := ex.Publish(acquired, DrawEvent{Beat: event.Beat, Frame: frame, Ready: acquired, AcquireWait: acquireWait, GPULatency: gpuLatency})
 	flushed := ex.Schedule(p.flushTask, frame, out).Handle()
 	present := ex.Schedule(p.tasks.PresentFramebuffers, frame, flushed).Handle()
 	p.device.frames.setLastPresent(present)
@@ -312,9 +378,12 @@ func (p *Plugin) draw(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle
 // marks it lost and for configuring, so the configure recreates it first;
 // Timeout is not drawn and marks nothing. An error goes to LogErr, is not
 // drawn and marks the surface. A lost device acquires nothing, and a loss
-// ends the acquires.
+// ends the acquires. How long the backend's acquires blocked, by the
+// device's acquire stopwatch, is kept for the next DrawEvent, zero when none was made.
 func acquireFramebuffers(k *kernel.Kernel, frame Frame, manager kernel.Read[*platform.WindowManager], deviceHandle kernel.Read[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)
+	var wait time.Duration
+	defer func() { d.frames.setAcquireWait(wait) }()
 	for _, window := range d.surfaces {
 		configuration, configured := d.configurations[window]
 		if d.lost.Load() || !configured || d.frames.isClosing(window) || !isWindowDrawable(manager.Get(), window) {
@@ -333,7 +402,9 @@ func acquireFramebuffers(k *kernel.Kernel, frame Frame, manager kernel.Read[*pla
 			Usage:         usage,
 		})
 		view := d.textureViews.acquire(textureViewSource{texture: texture})
+		d.acquireStopwatch.Start()
 		status, err := d.backend.AcquireFramebuffer(window, texture, view)
+		wait += d.acquireStopwatch.Elapsed()
 		switch {
 		case err != nil:
 			d.logErr(fmt.Errorf("gfx: acquiring the framebuffer of %v: %w", window, err))
@@ -365,7 +436,8 @@ func acquireFramebuffers(k *kernel.Kernel, frame Frame, manager kernel.Read[*pla
 // and CapturedEvent from its job for each resolved. On a lost device, or
 // once one is found lost, the frame skips its submit: the encoders left are
 // discarded, the command buffers released, and the captures not yet copied
-// stay requested.
+// stay requested. A submit made is kept, with when it was made by the
+// device's submission stopwatch, until a poll sees it finished.
 func flushFrame(k *kernel.Kernel, frame Frame, deviceHandle kernel.Read[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)
 	slot := d.frames.flush(frame)
@@ -393,10 +465,13 @@ func flushFrame(k *kernel.Kernel, frame Frame, deviceHandle kernel.Read[Device])
 			buffer.Release()
 		}
 	case len(slot.commandBuffers) > 0:
-		if err := d.backend.Submit(slot.commandBuffers...); err != nil {
+		index, err := d.backend.Submit(slot.commandBuffers...)
+		if err != nil {
 			d.logErr(fmt.Errorf("gfx: submitting a frame: %w", err))
 			submitted = false
+			break
 		}
+		d.frames.addSubmission(index, d.submissionStopwatch.Elapsed())
 	}
 	d.mapCaptures(captures, submitted)
 	d.Poll()

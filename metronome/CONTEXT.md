@@ -26,6 +26,10 @@ A track whose beats each stand for the time since the previous beat.
 What metronome reads time from and waits on, deciding when each deadline is reached.
 _Avoid_: Time provider, time source
 
+**Stopwatch**:
+A named measure of the time since it was started, by the clock that made it, through which a plugin other than metronome reads time.
+_Avoid_: Timer, clock
+
 **Epoch**:
 The moment a clock reads as zero, from which every track measures its time.
 _Avoid_: Start time, origin

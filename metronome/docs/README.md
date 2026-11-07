@@ -27,13 +27,14 @@ Clock ── Now, a Timer per track, the wait callback
 
 | Type | What it is |
 |---|---|
-| `Plugin` | The kernel plugin, from `NewPlugin()`. It installs no resource: nothing else reaches it. |
+| `Plugin` | The kernel plugin, from `NewPlugin()`. It installs its `Clock` as a resource. |
 | `Config` | metronome's part of the kernel's config, under `PluginName`: its `Clock` and its `Tracks`. |
 | `Track` | A declared track, from `NewTrack[E](settings)`: its event type and its pacing. |
 | `Settings` | A track's pacing. Presets `FixedStep(hz)` and `Variable()`. |
 | `Beat` | The header every track event embeds, stamped by metronome on each beat. |
 | `UpdateEvent` | The one event metronome ships: `struct{ Beat }`, for an update track. |
 | `Clock` / `Timer` | Where time comes from, and how a track waits for its next deadline. |
+| `Stopwatch` | A named measure of the time since its `Start`, made by a clock, for a plugin that reads time without keeping the clock. |
 | `WallClock` | The default clock: monotonic time, with the epoch at `Start`. |
 | `ManualClock` | A clock that moves only when told: `Advance`, `Jump`, `Wait`. |
 

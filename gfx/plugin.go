@@ -8,9 +8,6 @@ import (
 	"github.com/dvoyni/cog/platform"
 )
 
-// PluginName is gfx's plugin name.
-const PluginName kernel.PluginName = "gfx"
-
 // Plugin is gfx: it declares the InstanceSocket a backend binds, installs
 // the Device and Handlers, and draws one frame per RenderEvent.
 type Plugin struct {
@@ -44,10 +41,6 @@ type Config struct {
 	RequiredLimits Limits
 	// Surface is the surface request every window starts with.
 	Surface SurfaceRequest
-	// Clock is what gfx reads DrawEvent's durations from: the clock given to
-	// metronome, so a test's manual clock makes them deterministic. Nil is
-	// metronome's WallClock.
-	Clock metronome.Clock
 }
 
 // NewPlugin returns gfx.
@@ -56,21 +49,29 @@ func NewPlugin() *Plugin { return &Plugin{} }
 // Name returns PluginName.
 func (*Plugin) Name() kernel.PluginName { return PluginName }
 
-// Dependencies names platform, which gfx reads windows from and so is listed
-// after.
+// Dependencies names platform, which gfx reads windows from, and metronome,
+// whose Clock DrawEvent's durations are timed by; gfx is listed after both.
 func (*Plugin) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{platform.PluginName}
+	return []kernel.PluginName{platform.PluginName, metronome.PluginName}
 }
 
 // Init declares the required InstanceSocket, installs the Device, empty
-// until Start, installs Tasks, and subscribes to RenderEvent and platform's
+// until Start, with its stopwatches made from metronome's Clock, installs
+// Tasks, and subscribes to RenderEvent and platform's
 // window events, the Subs kept in the Handlers resource, and to its own
 // private delivery of captures. A config of another
 // type than *Config is a composition error, and panics.
 func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	p.config = *kernel.PluginConfigOrDefault[Config](config)
 	p.instanceSocket = configurator.DeclareExclusiveSocket[InstanceSocket](false)
-	p.device = &device{surfaceRequest: p.config.Surface, configurations: map[platform.Window]SurfaceConfiguration{}}
+	clock, _ := configurator.Resource[metronome.Clock]()
+	p.device = &device{
+		surfaceRequest:      p.config.Surface,
+		configurations:      map[platform.Window]SurfaceConfiguration{},
+		acquireStopwatch:    clock.NewStopwatch(AcquireStopwatchName),
+		submissionStopwatch: clock.NewStopwatch(SubmissionStopwatchName),
+	}
+	p.device.submissionStopwatch.Start()
 	configurator.InitResource[Device](p.device)
 	p.tasks = Tasks{
 		CreateSurface:       configurator.RegisterTask2(createSurface),

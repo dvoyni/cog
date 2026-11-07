@@ -54,6 +54,11 @@ type device struct {
 	// only jobs holding the write lock change them.
 	configurations map[platform.Window]SurfaceConfiguration
 	frames         framePool
+	// acquireStopwatch times each backend acquire, and submissionStopwatch,
+	// running since Init, stamps the frames' submits and the polls that see
+	// them finished: the frame timing signals, by metronome's clock.
+	acquireStopwatch    metronome.Stopwatch
+	submissionStopwatch metronome.Stopwatch
 	// mapMutex guards pendingMaps, the buffers whose maps MapBuffer or a
 	// capture started and no poll has found resolved, and is held across the
 	// poll's checks, so two polls never publish one map twice. It guards the
@@ -406,7 +411,8 @@ func (d *device) Submit(buffers ...CommandBuffer) error {
 	if d.lost.Load() {
 		return ErrDeviceLost
 	}
-	err := d.checkLoss(d.backend.Submit(buffers...))
+	_, err := d.backend.Submit(buffers...)
+	err = d.checkLoss(err)
 	d.Poll()
 	return err
 }
@@ -457,12 +463,14 @@ func (d *device) UnmapBuffer(buffer Buffer) error {
 // CapturedEvent instead, CaptureStatusFailed with its buffer released for
 // one that failed. A pending map whose buffer was released is dropped and
 // publishes nothing. A status answering a device loss asks no other, and
-// the loss fails every map pending. A lost device polls nothing.
+// the loss fails every map pending. It checks, too, which frames' submits
+// the GPU has finished, for DrawEvent.GPULatency. A lost device polls
+// nothing.
 func (d *device) Poll() {
 	if d.lost.Load() {
 		return
 	}
-	d.backend.Poll()
+	d.frames.completeSubmissions(d.backend.Poll(), d.submissionStopwatch.Elapsed())
 	d.mapMutex.Lock()
 	var resolved []BufferMappedEvent
 	var captures []CapturedEvent
@@ -867,7 +875,8 @@ func (d *device) recreateObjects() error {
 // recoverDevice recovers the lost device in place of beat's frame, under
 // the write lock: it releases the backend device and requests a new one,
 // creates every object again on it under its old handle, empty, marks every
-// surface for configuring, and publishes DeviceRecoveredEvent from its job.
+// surface for configuring, forgets the frames' submits the lost device had
+// not finished, and publishes DeviceRecoveredEvent from its job.
 // A recovery that fails leaves the device lost and is tried again by the
 // first beat a second or more later by Beat.TimeFromStart, with no limit;
 // it goes to LogErrOnce, so a loss logs its failed recoveries once. A device
@@ -891,6 +900,7 @@ func recoverDevice(k *kernel.Kernel, beat metronome.Beat, deviceHandle kernel.Wr
 	for _, window := range d.surfaces {
 		d.frames.markUnconfigured(window)
 	}
+	d.frames.forgetSubmissions()
 	k.Publish(DeviceRecoveredEvent{})
 	return kernel.NoResult{}
 }

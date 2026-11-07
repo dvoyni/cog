@@ -245,6 +245,9 @@ func (c *testClock) NewTimer() metronome.Timer {
 	return timer
 }
 
+// NewStopwatch answers nil: metronome measures nothing with stopwatches.
+func (c *testClock) NewStopwatch(name string) metronome.Stopwatch { return nil }
+
 func (c *testClock) SetWaitCallback(wait func(ctx context.Context) error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -982,6 +985,41 @@ func TestInterpolatingAgainstNoFixedStepTrackPanics(t *testing.T) {
 			settings := metronome.Variable()
 			settings.InterpolateAgainst = reference
 			spawn(t, metronome.NewManualClock(), []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(10)), metronome.NewTrack[drawEvent](settings)}, func(c *kernel.Configurator) {})
+		})
+	}
+}
+
+func TestTheClockResourceIsTheClockMetronomeReadsTimeFrom(t *testing.T) {
+	manual := metronome.NewManualClock()
+	for _, test := range []struct {
+		name  string
+		clock metronome.Clock
+	}{
+		{"the clock configured", manual},
+		{"a WallClock when none is", nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var resource metronome.Clock
+			var found bool
+			spawnPlugin(t, metronome.NewPlugin(), metronomeConfig(test.clock), func(c *kernel.Configurator) {
+				resource, found = c.Resource[metronome.Clock]()
+			})
+
+			if !found {
+				t.Fatal("no Clock resource for a plugin listed after metronome")
+			}
+			switch clock := resource.(type) {
+			case *metronome.ManualClock:
+				if test.clock == nil || clock != manual {
+					t.Errorf("the Clock resource is %v, want %v", clock, test.clock)
+				}
+			case *metronome.WallClock:
+				if test.clock != nil {
+					t.Errorf("the Clock resource is a WallClock, want %v", test.clock)
+				}
+			default:
+				t.Errorf("the Clock resource is %v", clock)
+			}
 		})
 	}
 }
