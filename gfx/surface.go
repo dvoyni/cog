@@ -147,8 +147,12 @@ func releaseSurface(k *kernel.Kernel, window platform.Window, deviceHandle kerne
 // window's native handle first; a creation that fails goes to LogErr, and
 // the window stays without a surface. A window hidden, or whose framebuffer
 // is zero, is skipped and stays marked, to be configured once it is drawable.
+// A lost device configures nothing, and its surfaces stay marked.
 func configureSurfaces(k *kernel.Kernel, _ kernel.NoArg, manager kernel.Read[*platform.WindowManager], deviceHandle kernel.Write[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)
+	if d.lost.Load() {
+		return kernel.NoResult{}
+	}
 	for _, window := range d.frames.takeUnconfigured() {
 		if !slices.Contains(d.surfaces, window) || d.frames.isClosing(window) {
 			continue
@@ -191,7 +195,7 @@ func configureSurfaces(k *kernel.Kernel, _ kernel.NoArg, manager kernel.Read[*pl
 			Capturable:  capturable,
 		}
 		if err := d.backend.ConfigureSurface(window, configuration); err != nil {
-			k.Logger().LogErr(fmt.Errorf("gfx: configuring the surface of %v: %w", window, err))
+			d.logErr(fmt.Errorf("gfx: configuring the surface of %v: %w", window, err))
 			delete(d.configurations, window)
 			continue
 		}

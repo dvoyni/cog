@@ -121,12 +121,13 @@ func (p *Plugin) publishCapture(k *kernel.Kernel, ex *kernel.Executor, in kernel
 }
 
 // releaseCapture unmaps and releases a capture's buffer, under the read
-// lock; an unmap that fails goes to LogErr.
+// lock; an unmap that fails goes to LogErr, but for a device loss, logged
+// once already.
 func releaseCapture(k *kernel.Kernel, buffer Buffer, deviceHandle kernel.Read[Device]) kernel.NoResult {
-	device := deviceHandle.Get()
-	if err := device.UnmapBuffer(buffer); err != nil {
-		k.Logger().LogErr(fmt.Errorf("gfx: unmapping a capture's buffer: %w", err))
+	d := deviceHandle.Get().(*device)
+	if err := d.UnmapBuffer(buffer); err != nil {
+		d.logErr(fmt.Errorf("gfx: unmapping a capture's buffer: %w", err))
 	}
-	device.ReleaseBuffer(buffer)
+	d.ReleaseBuffer(buffer)
 	return kernel.NoResult{}
 }

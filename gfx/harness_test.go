@@ -57,13 +57,15 @@ type harness struct {
 	tasksFound bool
 	// mutex guards logged, the errors kernels logged and the test has not
 	// taken, any left when the test ends failing it, drawn, every DrawEvent
-	// published, mapped, every BufferMappedEvent published, and captured,
-	// every CapturedEvent published.
+	// published, mapped, every BufferMappedEvent published, captured, every
+	// CapturedEvent published, and lost, for every DeviceLostEvent published,
+	// how many errors were logged and not taken then.
 	mutex    sync.Mutex
 	logged   []error
 	drawn    []gfx.DrawEvent
 	mapped   []gfx.BufferMappedEvent
 	captured []gfx.CapturedEvent
+	lost     []int
 }
 
 // readEvent runs the harness's read under the Device's read lock.
@@ -178,6 +180,12 @@ func (h *harness) Init(c *kernel.Configurator, config any) error {
 		h.captured = append(h.captured, event)
 		h.mutex.Unlock()
 		return event, ex.Join(in, ex.Schedule(readCapture, event).Handle())
+	})
+	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.DeviceLostEvent) (gfx.DeviceLostEvent, kernel.JobHandle) {
+		h.mutex.Lock()
+		h.lost = append(h.lost, len(h.logged))
+		h.mutex.Unlock()
+		return event, in
 	})
 	tasks, _ := c.Resource[platform.Tasks]()
 	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event pumpEvent) (pumpEvent, kernel.JobHandle) {
@@ -496,6 +504,14 @@ func (h *harness) capturedEvents() []gfx.CapturedEvent {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 	return slices.Clone(h.captured)
+}
+
+// lostEvents answers, for every DeviceLostEvent published so far, how many
+// errors were logged and not taken when it was.
+func (h *harness) lostEvents() []int {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	return slices.Clone(h.lost)
 }
 
 // kinds answers the kinds of calls, in order.

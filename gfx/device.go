@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/platform"
@@ -23,6 +24,10 @@ type device struct {
 	// kernel is gfx's: BufferMappedEvent is published on it, and what a call
 	// answers no error for goes to its logger.
 	kernel *kernel.Kernel
+	// lost is set by the first backend call found answering ErrDeviceLost:
+	// from then on, until a recovery, gfx makes no backend call that could
+	// answer an error, and its own calls with errors answer ErrDeviceLost.
+	lost atomic.Bool
 	// surfaces are the windows with a surface, in the order they got it;
 	// only jobs holding the write lock change it.
 	surfaces []platform.Window
@@ -67,7 +72,11 @@ func (d *device) Limits() Limits { return d.limits }
 func (d *device) AdapterInfo() AdapterInfo { return d.adapterInfo }
 
 func (d *device) CreateBuffer(descriptor BufferDescriptor) (Buffer, error) {
-	return createResource(&d.buffers, descriptor, d.backend.CreateBuffer)
+	if d.lost.Load() {
+		return Buffer{}, ErrDeviceLost
+	}
+	buffer, err := createResource(&d.buffers, descriptor, d.backend.CreateBuffer)
+	return buffer, d.checkLoss(err)
 }
 
 func (d *device) ReleaseBuffer(buffer Buffer) {
@@ -80,8 +89,12 @@ func (d *device) BufferDescriptor(buffer Buffer) BufferDescriptor {
 }
 
 func (d *device) CreateTexture(descriptor TextureDescriptor) (Texture, error) {
+	if d.lost.Load() {
+		return Texture{}, ErrDeviceLost
+	}
 	descriptor.ViewFormats = slices.Clone(descriptor.ViewFormats)
-	return createResource(&d.textures, descriptor, d.backend.CreateTexture)
+	texture, err := createResource(&d.textures, descriptor, d.backend.CreateTexture)
+	return texture, d.checkLoss(err)
 }
 
 func (d *device) ReleaseTexture(texture Texture) {
@@ -95,13 +108,17 @@ func (d *device) TextureDescriptor(texture Texture) TextureDescriptor {
 }
 
 func (d *device) CreateTextureView(texture Texture, descriptor TextureViewDescriptor) (TextureView, error) {
+	if d.lost.Load() {
+		return TextureView{}, ErrDeviceLost
+	}
 	if err := d.textures.check(texture); err != nil {
 		return TextureView{}, fmt.Errorf("%w: the view's texture", err)
 	}
 	source := textureViewSource{texture: texture, descriptor: descriptor}
-	return createResource(&d.textureViews, source, func(view TextureView, source textureViewSource) error {
+	view, err := createResource(&d.textureViews, source, func(view TextureView, source textureViewSource) error {
 		return d.backend.CreateTextureView(view, source.texture, source.descriptor)
 	})
+	return view, d.checkLoss(err)
 }
 
 func (d *device) ReleaseTextureView(view TextureView) {
@@ -114,7 +131,11 @@ func (d *device) TextureViewTexture(view TextureView) Texture {
 }
 
 func (d *device) CreateSampler(descriptor SamplerDescriptor) (Sampler, error) {
-	return createResource(&d.samplers, descriptor, d.backend.CreateSampler)
+	if d.lost.Load() {
+		return Sampler{}, ErrDeviceLost
+	}
+	sampler, err := createResource(&d.samplers, descriptor, d.backend.CreateSampler)
+	return sampler, d.checkLoss(err)
 }
 
 func (d *device) ReleaseSampler(sampler Sampler) {
@@ -130,7 +151,11 @@ func (d *device) ReleaseQuerySet(querySet QuerySet) { panic("gfx listing: no bod
 func (d *device) TimestampPeriod() float32 { panic("gfx listing: no bodies") }
 
 func (d *device) CreateShaderModule(descriptor ShaderModuleDescriptor) (ShaderModule, error) {
-	return createResource(&d.shaderModules, descriptor, d.backend.CreateShaderModule)
+	if d.lost.Load() {
+		return ShaderModule{}, ErrDeviceLost
+	}
+	module, err := createResource(&d.shaderModules, descriptor, d.backend.CreateShaderModule)
+	return module, d.checkLoss(err)
 }
 
 func (d *device) ReleaseShaderModule(module ShaderModule) {
@@ -138,8 +163,12 @@ func (d *device) ReleaseShaderModule(module ShaderModule) {
 }
 
 func (d *device) CreateBindGroupLayout(descriptor BindGroupLayoutDescriptor) (BindGroupLayout, error) {
+	if d.lost.Load() {
+		return BindGroupLayout{}, ErrDeviceLost
+	}
 	descriptor.Entries = slices.Clone(descriptor.Entries)
-	return createResource(&d.bindGroupLayouts, descriptor, d.backend.CreateBindGroupLayout)
+	layout, err := createResource(&d.bindGroupLayouts, descriptor, d.backend.CreateBindGroupLayout)
+	return layout, d.checkLoss(err)
 }
 
 func (d *device) ReleaseBindGroupLayout(layout BindGroupLayout) {
@@ -147,6 +176,9 @@ func (d *device) ReleaseBindGroupLayout(layout BindGroupLayout) {
 }
 
 func (d *device) CreateBindGroup(descriptor BindGroupDescriptor) (BindGroup, error) {
+	if d.lost.Load() {
+		return BindGroup{}, ErrDeviceLost
+	}
 	if err := d.bindGroupLayouts.check(descriptor.Layout); err != nil {
 		return BindGroup{}, fmt.Errorf("%w: the bind group's layout", err)
 	}
@@ -162,7 +194,8 @@ func (d *device) CreateBindGroup(descriptor BindGroupDescriptor) (BindGroup, err
 		}
 	}
 	descriptor.Entries = slices.Clone(descriptor.Entries)
-	return createResource(&d.bindGroups, descriptor, d.backend.CreateBindGroup)
+	group, err := createResource(&d.bindGroups, descriptor, d.backend.CreateBindGroup)
+	return group, d.checkLoss(err)
 }
 
 func (d *device) ReleaseBindGroup(group BindGroup) {
@@ -170,13 +203,17 @@ func (d *device) ReleaseBindGroup(group BindGroup) {
 }
 
 func (d *device) CreatePipelineLayout(descriptor PipelineLayoutDescriptor) (PipelineLayout, error) {
+	if d.lost.Load() {
+		return PipelineLayout{}, ErrDeviceLost
+	}
 	for group, layout := range descriptor.BindGroupLayouts {
 		if err := d.bindGroupLayouts.check(layout); err != nil {
 			return PipelineLayout{}, fmt.Errorf("%w: the layout of group %d", err, group)
 		}
 	}
 	descriptor.BindGroupLayouts = slices.Clone(descriptor.BindGroupLayouts)
-	return createResource(&d.pipelineLayouts, descriptor, d.backend.CreatePipelineLayout)
+	layout, err := createResource(&d.pipelineLayouts, descriptor, d.backend.CreatePipelineLayout)
+	return layout, d.checkLoss(err)
 }
 
 func (d *device) ReleasePipelineLayout(layout PipelineLayout) {
@@ -184,6 +221,9 @@ func (d *device) ReleasePipelineLayout(layout PipelineLayout) {
 }
 
 func (d *device) CreateRenderPipeline(descriptor RenderPipelineDescriptor) (RenderPipeline, error) {
+	if d.lost.Load() {
+		return RenderPipeline{}, ErrDeviceLost
+	}
 	if descriptor.Layout != (PipelineLayout{}) {
 		if err := d.pipelineLayouts.check(descriptor.Layout); err != nil {
 			return RenderPipeline{}, fmt.Errorf("%w: the pipeline's layout", err)
@@ -197,7 +237,7 @@ func (d *device) CreateRenderPipeline(descriptor RenderPipelineDescriptor) (Rend
 	}
 	inputs, err := d.backend.ReflectVertexInputs(descriptor.Vertex.Module, descriptor.Vertex.EntryPoint)
 	if err != nil {
-		return RenderPipeline{}, err
+		return RenderPipeline{}, d.checkLoss(err)
 	}
 	if err := checkVertexInputs(descriptor.Vertex, inputs); err != nil {
 		return RenderPipeline{}, err
@@ -207,7 +247,7 @@ func (d *device) CreateRenderPipeline(descriptor RenderPipelineDescriptor) (Rend
 	groups := d.groupDescriptors(source.descriptor.Layout)
 	if autoLayout {
 		if groups, err = d.backend.ReflectRenderPipelineLayout(source.descriptor); err != nil {
-			return RenderPipeline{}, err
+			return RenderPipeline{}, d.checkLoss(err)
 		}
 	}
 	if err := d.limits.checkRenderPipeline(groups, source.descriptor.Vertex.Buffers); err != nil {
@@ -225,7 +265,7 @@ func (d *device) CreateRenderPipeline(descriptor RenderPipelineDescriptor) (Rend
 	if err != nil && source.autoLayout {
 		d.releaseAutoLayout(source.descriptor.Layout)
 	}
-	return pipeline, err
+	return pipeline, d.checkLoss(err)
 }
 
 func (d *device) ReleaseRenderPipeline(pipeline RenderPipeline) {
@@ -244,6 +284,9 @@ func (d *device) RenderPipelineBindGroupLayout(pipeline RenderPipeline, group ui
 }
 
 func (d *device) CreateComputePipeline(descriptor ComputePipelineDescriptor) (ComputePipeline, error) {
+	if d.lost.Load() {
+		return ComputePipeline{}, ErrDeviceLost
+	}
 	if descriptor.Layout != (PipelineLayout{}) {
 		if err := d.pipelineLayouts.check(descriptor.Layout); err != nil {
 			return ComputePipeline{}, fmt.Errorf("%w: the pipeline's layout", err)
@@ -259,7 +302,7 @@ func (d *device) CreateComputePipeline(descriptor ComputePipelineDescriptor) (Co
 	var err error
 	if autoLayout {
 		if groups, err = d.backend.ReflectComputePipelineLayout(source.descriptor); err != nil {
-			return ComputePipeline{}, err
+			return ComputePipeline{}, d.checkLoss(err)
 		}
 	}
 	if err := d.limits.checkPipelineLayout(groups); err != nil {
@@ -277,7 +320,7 @@ func (d *device) CreateComputePipeline(descriptor ComputePipelineDescriptor) (Co
 	if err != nil && source.autoLayout {
 		d.releaseAutoLayout(source.descriptor.Layout)
 	}
-	return pipeline, err
+	return pipeline, d.checkLoss(err)
 }
 
 func (d *device) ReleaseComputePipeline(pipeline ComputePipeline) {
@@ -296,23 +339,32 @@ func (d *device) ComputePipelineBindGroupLayout(pipeline ComputePipeline, group 
 }
 
 func (d *device) WriteBuffer(buffer Buffer, offset uint64, data []byte) error {
+	if d.lost.Load() {
+		return ErrDeviceLost
+	}
 	if err := d.buffers.check(buffer); err != nil {
 		return err
 	}
-	return d.backend.WriteBuffer(buffer, offset, data)
+	return d.checkLoss(d.backend.WriteBuffer(buffer, offset, data))
 }
 
 func (d *device) WriteTexture(destination ImageCopyTexture, data []byte, layout ImageDataLayout, size Extent3D) error {
+	if d.lost.Load() {
+		return ErrDeviceLost
+	}
 	if err := d.textures.check(destination.Texture); err != nil {
 		return err
 	}
-	return d.backend.WriteTexture(destination, data, layout, size)
+	return d.checkLoss(d.backend.WriteTexture(destination, data, layout, size))
 }
 
 func (d *device) Encoder(frame Frame, order SubmitOrder) (CommandEncoder, error) {
+	if d.lost.Load() {
+		return discardEncoder{}, ErrDeviceLost
+	}
 	encoder, err := d.backend.CreateCommandEncoder(CommandEncoderDescriptor{})
 	if err != nil {
-		return discardEncoder{}, err
+		return discardEncoder{}, d.checkLoss(err)
 	}
 	if err := d.frames.addEncoder(frame, frameEncoder{order: order, encoder: encoder}); err != nil {
 		encoder.DiscardEncoding()
@@ -331,22 +383,32 @@ func (d *device) SurfaceConfiguration(window platform.Window) (SurfaceConfigurat
 }
 
 func (d *device) CreateCommandEncoder(descriptor CommandEncoderDescriptor) (StandaloneCommandEncoder, error) {
-	return d.backend.CreateCommandEncoder(descriptor)
+	if d.lost.Load() {
+		return nil, ErrDeviceLost
+	}
+	encoder, err := d.backend.CreateCommandEncoder(descriptor)
+	return encoder, d.checkLoss(err)
 }
 
 // Submit submits buffers, then polls the maps, even when the submit fails.
 func (d *device) Submit(buffers ...CommandBuffer) error {
-	err := d.backend.Submit(buffers...)
+	if d.lost.Load() {
+		return ErrDeviceLost
+	}
+	err := d.checkLoss(d.backend.Submit(buffers...))
 	d.Poll()
 	return err
 }
 
 func (d *device) MapBuffer(buffer Buffer, mode MapMode, offset, size uint64) error {
+	if d.lost.Load() {
+		return ErrDeviceLost
+	}
 	if err := d.buffers.check(buffer); err != nil {
 		return err
 	}
 	if err := d.backend.MapBuffer(buffer, mode, offset, size); err != nil {
-		return err
+		return d.checkLoss(err)
 	}
 	d.mapMutex.Lock()
 	defer d.mapMutex.Unlock()
@@ -355,19 +417,26 @@ func (d *device) MapBuffer(buffer Buffer, mode MapMode, offset, size uint64) err
 }
 
 func (d *device) MappedRange(buffer Buffer, offset, size uint64) ([]byte, error) {
+	if d.lost.Load() {
+		return nil, ErrDeviceLost
+	}
 	if err := d.buffers.check(buffer); err != nil {
 		return nil, err
 	}
-	return d.backend.MappedRange(buffer, offset, size)
+	mapped, err := d.backend.MappedRange(buffer, offset, size)
+	return mapped, d.checkLoss(err)
 }
 
 // UnmapBuffer ends buffer's map; one not yet resolved publishes nothing.
 func (d *device) UnmapBuffer(buffer Buffer) error {
+	if d.lost.Load() {
+		return ErrDeviceLost
+	}
 	if err := d.buffers.check(buffer); err != nil {
 		return err
 	}
 	d.dropPendingMap(buffer)
-	return d.backend.UnmapBuffer(buffer)
+	return d.checkLoss(d.backend.UnmapBuffer(buffer))
 }
 
 // Poll has the backend resolve its finished maps, then publishes
@@ -411,7 +480,7 @@ func (d *device) Poll() {
 	})
 	d.mapMutex.Unlock()
 	for _, err := range failures {
-		d.kernel.Logger().LogErr(err)
+		d.logErr(err)
 	}
 	for _, event := range resolved {
 		d.kernel.Publish(event)
@@ -429,6 +498,9 @@ func (d *device) Poll() {
 // by what its surface is configured with: a window not yet configured
 // answers ErrCaptureUnsupported too.
 func (d *device) RequestCapture(window platform.Window) error {
+	if d.lost.Load() {
+		return ErrDeviceLost
+	}
 	configuration, configured := d.configurations[window]
 	if !configured || !configuration.Capturable || !slices.Contains([]TextureFormat{
 		TextureFormatBGRA8Unorm, TextureFormatBGRA8UnormSrgb, TextureFormatRGBA8Unorm, TextureFormatRGBA8UnormSrgb,
@@ -443,6 +515,27 @@ func (d *device) RequestCapture(window platform.Window) error {
 	d.capturingWindows = append(d.capturingWindows, window)
 	d.requestedCaptures = append(d.requestedCaptures, window)
 	return nil
+}
+
+// checkLoss answers err. When err is a device loss and the device was not
+// lost yet, it marks the device lost, logs err and publishes
+// DeviceLostEvent, from this job: once, whichever job sees it first.
+func (d *device) checkLoss(err error) error {
+	if errors.Is(err, ErrDeviceLost) && d.lost.CompareAndSwap(false, true) {
+		d.kernel.Logger().LogErr(err)
+		d.kernel.Publish(DeviceLostEvent{})
+	}
+	return err
+}
+
+// logErr logs err, an error a backend call answered, through gfx's logger;
+// a device loss goes through checkLoss, so it is logged once.
+func (d *device) logErr(err error) {
+	if errors.Is(err, ErrDeviceLost) {
+		d.checkLoss(err)
+		return
+	}
+	d.kernel.Logger().LogErr(err)
 }
 
 // createAutoLayout creates a bind-group layout of each of groups, as the
@@ -502,6 +595,7 @@ func (d *device) copyCaptures(slot *frameSlot) []CapturedEvent {
 		var err error
 		if encoder == nil {
 			encoder, err = d.backend.CreateCommandEncoder(CommandEncoderDescriptor{Label: "gfx: captures"})
+			err = d.checkLoss(err)
 		}
 		if err == nil {
 			capture.Buffer, err = d.CreateBuffer(BufferDescriptor{
@@ -511,7 +605,7 @@ func (d *device) copyCaptures(slot *frameSlot) []CapturedEvent {
 			})
 		}
 		if err != nil {
-			d.kernel.Logger().LogErr(fmt.Errorf("gfx: capturing %v: %w", window, err))
+			d.logErr(fmt.Errorf("gfx: capturing %v: %w", window, err))
 			d.failCapture(capture)
 			continue
 		}
@@ -530,7 +624,7 @@ func (d *device) copyCaptures(slot *frameSlot) []CapturedEvent {
 	}
 	commandBuffer, err := encoder.Finish()
 	if err != nil {
-		d.kernel.Logger().LogErr(fmt.Errorf("gfx: finishing the captures' encoder: %w", err))
+		d.logErr(fmt.Errorf("gfx: finishing the captures' encoder: %w", err))
 		for _, capture := range copied {
 			d.failCapture(capture)
 		}
@@ -555,7 +649,7 @@ func (d *device) mapCaptures(copied []CapturedEvent, submitted bool) {
 				d.mapMutex.Unlock()
 				continue
 			}
-			d.kernel.Logger().LogErr(fmt.Errorf("gfx: mapping the capture of %v: %w", capture.Window, err))
+			d.logErr(fmt.Errorf("gfx: mapping the capture of %v: %w", capture.Window, err))
 		}
 		d.failCapture(capture)
 	}
@@ -650,7 +744,12 @@ type exclusiveDevice struct {
 	*device
 }
 
-func (d exclusiveDevice) WaitIdle() error { return d.backend.WaitIdle() }
+func (d exclusiveDevice) WaitIdle() error {
+	if d.lost.Load() {
+		return ErrDeviceLost
+	}
+	return d.checkLoss(d.backend.WaitIdle())
+}
 
 // RequestSurface replaces the surface request and marks every surface for
 // configuring, so the next frame's configure reaches the backend before its
