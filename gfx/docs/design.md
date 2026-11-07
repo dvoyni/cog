@@ -36,7 +36,8 @@ in `LogErr` for one the backend fails, and `Destroy` unmaps and releases
 the buffers of the maps still pending. A window's capture, requested on a
 capturable surface, is copied out by gfx's own encoder after every submit
 order and delivered by `CapturedEvent`, its buffer unmapped and released
-after the publication's out dependency; `ReadCapture` waits on its ticket.
+after the publication's out dependency, and `ReadCapture` answers its
+picture un-strided, BGRA swapped and alpha opaque.
 The backend reflects shader modules:
 its seam declares `ReflectRenderPipelineLayout`,
 `ReflectComputePipelineLayout` and `ReflectVertexInputs`, which the recording
@@ -346,7 +347,8 @@ present and recovery itself.
   `Beat` names the moment shown. gfx unmaps and releases the buffer after the
   publication's out dependency. `ReadCapture(device, event)` answers an
   `image.NRGBA`: rows un-strided, BGRA swapped, alpha opaque, no colour
-  conversion. One capture is in flight per window (`ErrCaptureBusy`).
+  conversion. An event that is not `CaptureStatusCaptured` answers an
+  error. One capture is in flight per window (`ErrCaptureBusy`).
 - **A surface must be capturable:** `SurfaceRequest.Capturable` reaches the
   backend in `SurfaceConfiguration`, which adds `CopySrc` on Vulkan and
   `StorageBinding` on Metal. DX12 cannot honour it yet: its
