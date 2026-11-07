@@ -180,8 +180,10 @@ type Device interface {
 	// UnmapBuffer or ReleaseBuffer, publishes no BufferMappedEvent.
 	UnmapBuffer(buffer Buffer) error
 	// Poll resolves the maps whose submits have finished, without waiting,
-	// publishing their events from the calling job; every submit, and every
-	// frame's flush, polls too.
+	// publishing their events from the calling job, MapStatusFailed for one
+	// the backend fails, its error going to LogErr; every submit, and every
+	// frame's flush, polls too. Maps still pending at shutdown publish
+	// nothing: Destroy unmaps and releases their buffers.
 	Poll()
 
 	// RequestCapture asks for window's framebuffer in the next frame: gfx's

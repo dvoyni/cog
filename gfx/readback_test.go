@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dvoyni/cog/gfx"
+	"github.com/dvoyni/cog/gfx/recording"
 )
 
 func TestAMapResolvesAtPollPublishedFromItsJobAndReadsTheBytesWritten(t *testing.T) {
@@ -242,6 +243,63 @@ func TestMapsOfAStaleBufferAnswerErrReleasedBeforeTheBackend(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+func TestAMapTheBackendFailsPublishesMapStatusFailedWithItsErrorInLogErr(t *testing.T) {
+	failure := errors.New("map failed")
+	h := newHarness(t)
+	h.instance.AnswerNext(recording.CallKindMapStatus, recording.Answer{Error: failure})
+	h.mustSpawn(nil)
+	var buffer gfx.Buffer
+
+	h.readDevice(func(device gfx.Device) {
+		buffer = createReadbackBuffer(t, device, 4)
+		mustSucceed(t, device.MapBuffer(buffer, gfx.MapModeRead, 0, 4))
+		device.Poll()
+		device.Poll()
+	})
+
+	want := []gfx.BufferMappedEvent{{Buffer: buffer, Status: gfx.MapStatusFailed}}
+	if mapped := h.mappedEvents(); !reflect.DeepEqual(mapped, want) {
+		t.Errorf("published %+v after two Polls, want %+v", mapped, want)
+	}
+	if logged := h.takeLogged(); len(logged) != 1 || !errors.Is(logged[0], failure) {
+		t.Errorf("logged %v, want %v", logged, failure)
+	}
+}
+
+func TestDestroyUnmapsAndReleasesOnlyPendingMapsBuffersPublishingNothing(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	var pending gfx.Buffer
+	h.readDevice(func(device gfx.Device) {
+		resolved := createReadbackBuffer(t, device, 4)
+		mustSucceed(t, device.MapBuffer(resolved, gfx.MapModeRead, 0, 4))
+		device.Poll()
+		released := createReadbackBuffer(t, device, 4)
+		mustSucceed(t, device.MapBuffer(released, gfx.MapModeRead, 0, 4))
+		device.ReleaseBuffer(released)
+		pending = createReadbackBuffer(t, device, 4)
+		mustSucceed(t, device.MapBuffer(pending, gfx.MapModeRead, 0, 4))
+	})
+	published := len(h.mappedEvents())
+
+	h.quit()
+
+	calls := h.instance.Recording().Calls
+	want := []recording.Call{
+		{Kind: recording.CallKindUnmapBuffer, Arguments: pending},
+		{Kind: recording.CallKindReleaseBuffer, Arguments: pending},
+		{Kind: recording.CallKindReleaseDevice},
+		{Kind: recording.CallKindReleaseAdapter},
+		{Kind: recording.CallKindReleaseInstance},
+	}
+	if count := len(calls); count < len(want) || !reflect.DeepEqual(calls[count-len(want):], want) {
+		t.Errorf("last calls = %+v, want %+v", calls, want)
+	}
+	if mapped := h.mappedEvents(); len(mapped) != published {
+		t.Errorf("published %+v by the end of Destroy, want nothing after the first %d", mapped, published)
 	}
 }
 

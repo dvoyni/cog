@@ -92,7 +92,8 @@ type BackendDevice interface {
 	WriteTexture(destination ImageCopyTexture, data []byte, layout ImageDataLayout, size Extent3D) error
 
 	// MapBuffer starts an asynchronous map; MapStatus answers whether it has
-	// resolved, ready false while it waits on the GPU.
+	// resolved, ready false while it waits on the GPU, or the error that
+	// failed it, which ends it.
 	MapBuffer(buffer Buffer, mode MapMode, offset, size uint64) error
 	MapStatus(buffer Buffer) (ready bool, err error)
 	MappedRange(buffer Buffer, offset, size uint64) ([]byte, error)

@@ -2,9 +2,11 @@ package recording_test
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/dvoyni/cog/gfx"
+	"github.com/dvoyni/cog/gfx/recording"
 )
 
 func TestAWriteLandsAtTheNextSubmitBeforeItsCommandBuffers(t *testing.T) {
@@ -93,6 +95,30 @@ func TestAWriteMappedRangeIsWhatTheBufferHolds(t *testing.T) {
 	want := append(make([]byte, 8), sequence(1, 8)...)
 	if got := readBuffer(t, device, destination); !bytes.Equal(got, want) {
 		t.Errorf("the destination holds %v, want %v", got, want)
+	}
+}
+
+func TestAMapStatusAnsweredAnErrorEndsTheMap(t *testing.T) {
+	instance, device := requestDevice(t)
+	buffer := createBuffer(t, device, 1, gfx.BufferUsageFlagMapRead)
+	failure := errors.New("map failed")
+	instance.AnswerNext(recording.CallKindMapStatus, recording.Answer{Error: failure})
+	mustSucceed(t, device.MapBuffer(buffer, gfx.MapModeRead, 0, 16))
+
+	if ready, err := device.MapStatus(buffer); ready || !errors.Is(err, failure) {
+		t.Fatalf("MapStatus answered %v, %v, want the error queued", ready, err)
+	}
+	if _, err := device.MappedRange(buffer, 0, 16); err == nil {
+		t.Errorf("MappedRange answered no error after the map failed")
+	}
+	mustSucceed(t, device.MapBuffer(buffer, gfx.MapModeRead, 0, 16))
+	if ready, err := device.MapStatus(buffer); !ready || err != nil {
+		t.Errorf("MapStatus of the next map answered %v, %v, want a resolved map", ready, err)
+	}
+	for _, call := range instance.Recording().Calls {
+		if call.Kind == recording.CallKindMapStatus {
+			t.Errorf("MapStatus was recorded: %+v", call)
+		}
 	}
 }
 

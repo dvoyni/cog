@@ -129,10 +129,16 @@ func (p *Plugin) Start(k *kernel.Kernel) error {
 // Stop does nothing: frames still in flight finish.
 func (*Plugin) Stop(*kernel.Kernel) error { return nil }
 
-// Destroy releases the surfaces of the windows still open, then the device,
-// the adapter and the instance Start requested, after the kernel's last job;
-// releasing the device cleanly is what saves Vulkan's pipeline cache.
+// Destroy, after the kernel's last job, unmaps and releases the buffers of
+// the maps still pending, publishing nothing, and answers the unmaps'
+// errors; it releases the surfaces of the windows still open, then the
+// device, the adapter and the instance Start requested. Releasing the device
+// cleanly is what saves Vulkan's pipeline cache.
 func (p *Plugin) Destroy() error {
+	var err error
+	if p.device.backend != nil {
+		err = p.device.releasePendingMaps()
+	}
 	for _, window := range p.device.surfaces {
 		p.device.instance.ReleaseSurface(window)
 	}
@@ -145,5 +151,5 @@ func (p *Plugin) Destroy() error {
 	if p.device.instance != nil {
 		p.device.instance.Release()
 	}
-	return nil
+	return err
 }

@@ -1,6 +1,7 @@
 package gfx
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -361,29 +362,36 @@ func (d *device) UnmapBuffer(buffer Buffer) error {
 }
 
 // Poll has the backend resolve its finished maps, then publishes
-// BufferMappedEvent, from this job, for each pending map now resolved. A
-// pending map whose buffer was released, or whose status the backend
-// answers an error for, is dropped and publishes nothing.
+// BufferMappedEvent, from this job, for each pending map now resolved:
+// MapStatusMapped, or MapStatusFailed when the backend answers its status
+// an error, which goes to LogErr first. A pending map whose buffer was
+// released is dropped and publishes nothing.
 func (d *device) Poll() {
 	d.backend.Poll()
 	d.mapMutex.Lock()
-	var resolved []Buffer
+	var resolved []BufferMappedEvent
+	var failures []error
 	d.pendingMaps = slices.DeleteFunc(d.pendingMaps, func(buffer Buffer) bool {
 		if d.buffers.check(buffer) != nil {
 			return true
 		}
 		ready, err := d.backend.MapStatus(buffer)
 		if err != nil {
+			resolved = append(resolved, BufferMappedEvent{Buffer: buffer, Status: MapStatusFailed})
+			failures = append(failures, err)
 			return true
 		}
 		if ready {
-			resolved = append(resolved, buffer)
+			resolved = append(resolved, BufferMappedEvent{Buffer: buffer, Status: MapStatusMapped})
 		}
 		return ready
 	})
 	d.mapMutex.Unlock()
-	for _, buffer := range resolved {
-		d.kernel.Publish(BufferMappedEvent{Buffer: buffer, Status: MapStatusMapped})
+	for _, err := range failures {
+		d.kernel.Logger().LogErr(err)
+	}
+	for _, event := range resolved {
+		d.kernel.Publish(event)
 	}
 }
 
@@ -422,6 +430,25 @@ func (d *device) dropPendingMap(buffer Buffer) {
 	if index := slices.Index(d.pendingMaps, buffer); index >= 0 {
 		d.pendingMaps = slices.Delete(d.pendingMaps, index, index+1)
 	}
+}
+
+// releasePendingMaps unmaps and releases the buffer of every map still
+// pending, publishing nothing, and answers the unmaps' errors; a buffer
+// released already is left alone.
+func (d *device) releasePendingMaps() error {
+	d.mapMutex.Lock()
+	pending := d.pendingMaps
+	d.pendingMaps = nil
+	d.mapMutex.Unlock()
+	var errs []error
+	for _, buffer := range pending {
+		if d.buffers.check(buffer) != nil {
+			continue
+		}
+		errs = append(errs, d.backend.UnmapBuffer(buffer))
+		d.ReleaseBuffer(buffer)
+	}
+	return errors.Join(errs...)
 }
 
 // releaseAutoLayout releases layout, which createAutoLayout created, and the
