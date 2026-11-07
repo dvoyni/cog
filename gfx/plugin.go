@@ -28,7 +28,7 @@ type Plugin struct {
 	tasks              Tasks
 	flushTask          *kernel.Task[Frame, kernel.NoResult]
 	releaseCaptureTask *kernel.Task[Buffer, kernel.NoResult]
-	recoverTask        *kernel.Task[kernel.NoArg, kernel.NoResult]
+	recoverTask        *kernel.Task[metronome.Beat, kernel.NoResult]
 }
 
 // Config is gfx's part of the kernel's config, under PluginName: what the

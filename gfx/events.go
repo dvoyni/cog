@@ -38,14 +38,17 @@ type DrawEvent struct {
 }
 
 // DeviceLostEvent is published once, by the job that first finds the device
-// lost, after the loss goes to LogErr. Until DeviceRecoveredEvent no frame is
-// drawn, and calls answering an error answer ErrDeviceLost.
+// lost, after the loss goes to LogErr; that job then publishes every map
+// pending MapStatusFailed and every capture pending CaptureStatusFailed.
+// Until DeviceRecoveredEvent no frame is drawn, and calls answering an error
+// answer ErrDeviceLost.
 type DeviceLostEvent struct{}
 
 // DeviceRecoveredEvent is published once gfx has made a new device and
 // recreated every object on it under its old handle, empty: owners schedule
 // tasks from it to fill their buffers and textures again. A recovery that
-// fails is retried on a later beat, at most once a second, with LogErrOnce.
+// fails is retried on a later beat, at most once a second by
+// Beat.TimeFromStart, with no limit, and logged once a loss.
 type DeviceRecoveredEvent struct{}
 
 // Frame names one frame in flight: a slot in gfx's pool of frames, which

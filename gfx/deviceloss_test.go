@@ -527,3 +527,113 @@ func TestBeatsHandledWhileARecoveryWaitsRecoverOnce(t *testing.T) {
 		t.Errorf("DeviceRecoveredEvent published %d times, want once", recovered)
 	}
 }
+
+func TestAFailedRecoveryIsRetriedAtMostOnceASecondAndLoggedOnce(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	loseDevice(h)
+	refusal := errors.New("vulkan: no device")
+	for range 4 {
+		h.instance.AnswerNext(recording.CallKindRequestDevice, recording.Answer{Error: refusal})
+	}
+
+	for _, step := range []struct {
+		name     string
+		advance  time.Duration
+		requests int
+		logged   int
+	}{
+		{"the beat after the loss", time.Millisecond, 2, 1},
+		{"a beat under a second later", time.Second - time.Millisecond, 0, 0},
+		{"a beat a second later", time.Millisecond, 2, 0},
+		{"a beat another second later", time.Second, 1, 0},
+	} {
+		callCount := len(h.instance.Recording().Calls)
+		h.advance(step.advance)
+		var requests int
+		for _, call := range h.instance.Recording().Calls[callCount:] {
+			if call.Kind == recording.CallKindRequestDevice {
+				requests++
+			}
+		}
+		if requests != step.requests {
+			t.Errorf("%s requested %d devices, want %d", step.name, requests, step.requests)
+		}
+		if logged := h.takeLogged(); len(logged) != step.logged || (step.logged > 0 && !errors.Is(logged[0], refusal)) {
+			t.Errorf("%s logged %v, want the failed recovery %d times", step.name, logged, step.logged)
+		}
+	}
+	if recovered := h.recoveredEvents(); recovered != 1 {
+		t.Errorf("DeviceRecoveredEvent published %d times, want once, by the third attempt", recovered)
+	}
+}
+
+func TestARecoveryFailingAfterAnEarlierRecoveryIsLoggedAgain(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	refusal := errors.New("vulkan: no device")
+	loseDevice(h)
+	h.instance.AnswerNext(recording.CallKindRequestDevice, recording.Answer{Error: refusal})
+	h.instance.AnswerNext(recording.CallKindRequestDevice, recording.Answer{Error: refusal})
+	h.advance(time.Millisecond)
+	_ = h.takeLogged()
+	h.advance(time.Second)
+	loseDevice(h)
+	h.instance.AnswerNext(recording.CallKindRequestDevice, recording.Answer{Error: refusal})
+	h.instance.AnswerNext(recording.CallKindRequestDevice, recording.Answer{Error: refusal})
+
+	h.advance(time.Second)
+
+	if logged := h.takeLogged(); len(logged) != 1 || !errors.Is(logged[0], refusal) {
+		t.Errorf("logged %v, want the second loss's failed recovery once", logged)
+	}
+}
+
+func TestAMapPendingAtALossPublishesMapStatusFailedUnlessItsBufferWasReleased(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	var buffer gfx.Buffer
+	h.readDevice(func(device gfx.Device) {
+		buffer = createReadbackBuffer(t, device, 4)
+		mustSucceed(t, device.MapBuffer(buffer, gfx.MapModeRead, 0, 4))
+		released := createReadbackBuffer(t, device, 4)
+		mustSucceed(t, device.MapBuffer(released, gfx.MapModeRead, 0, 4))
+		device.ReleaseBuffer(released)
+	})
+
+	loseDevice(h)
+
+	want := []gfx.BufferMappedEvent{{Buffer: buffer, Status: gfx.MapStatusFailed}}
+	if mapped := h.mappedEvents(); !reflect.DeepEqual(mapped, want) {
+		t.Errorf("published %+v at the loss, want %+v", mapped, want)
+	}
+}
+
+func TestMapsAndCapturesPendingWhenAPollFindsALossHearAsFailures(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(&gfx.Config{Surface: gfx.SurfaceRequest{Capturable: true}})
+	window := h.openWindow()
+	h.waitForCalls(recording.CallKindCreateSurface, 1)
+	h.advance(time.Millisecond)
+	var buffer gfx.Buffer
+	h.readDevice(func(device gfx.Device) {
+		buffer = createReadbackBuffer(t, device, 4)
+		mustSucceed(t, device.MapBuffer(buffer, gfx.MapModeRead, 0, 4))
+		mustSucceed(t, device.RequestCapture(window))
+	})
+	h.instance.AnswerNext(recording.CallKindMapStatus, recording.Answer{Error: gfx.ErrDeviceLost})
+
+	h.advance(time.Millisecond)
+
+	if logged := h.takeLogged(); len(logged) != 1 || !errors.Is(logged[0], gfx.ErrDeviceLost) {
+		t.Errorf("logged %v, want the loss once", logged)
+	}
+	want := []gfx.BufferMappedEvent{{Buffer: buffer, Status: gfx.MapStatusFailed}}
+	if mapped := h.mappedEvents(); !reflect.DeepEqual(mapped, want) {
+		t.Errorf("published %+v, want %+v", mapped, want)
+	}
+	captured := h.capturedEvents()
+	if len(captured) != 1 || captured[0].Status != gfx.CaptureStatusFailed || captured[0].Buffer != (gfx.Buffer{}) || captured[0].Window != window {
+		t.Errorf("published %+v, want one CaptureStatusFailed of %v with no buffer", captured, window)
+	}
+}

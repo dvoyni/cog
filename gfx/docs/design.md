@@ -45,7 +45,8 @@ present. The next beat recovers instead of drawing, under the write lock: a
 new device, from a fresh adapter when the old one refuses, every object
 recreated on it under its old handle in dependency order, every surface
 marked, and `DeviceRecoveredEvent` published; a recovery that fails is
-logged and leaves the device lost.
+logged once and retried at most once a second, and the maps and captures
+pending at the loss hear as failures.
 The backend reflects shader modules:
 its seam declares `ReflectRenderPipelineLayout`,
 `ReflectComputePipelineLayout` and `ReflectVertexInputs`, which the recording
@@ -405,8 +406,12 @@ present and recovery itself.
 - **Contents are their owners'.** Buffers and textures come back empty; owners
   refill them from tasks they schedule on `DeviceRecoveredEvent`.
 - **A failed recovery** is retried on a later beat, at most once a second by
-  `Beat.TimeFromStart`, with `LogErrOnce`, and no limit. Pending maps and
-  captures hear as failures.
+  `Beat.TimeFromStart`, with `LogErrOnce`, and no limit; a recovery that
+  succeeds forgets the key, so the next loss's failures are logged again.
+  The job that finds the loss publishes every pending map `MapStatusFailed`
+  and every pending capture `CaptureStatusFailed`, its buffer released; a
+  poll stops at the first status that answers the loss. Captures requested
+  and not yet copied stay requested for the frames after the recovery.
 
 ## The recording adapter
 

@@ -275,8 +275,8 @@ func (pool *framePool) unmarkLost(window platform.Window) bool {
 	return true
 }
 
-// draw is Handlers.Draw. On a lost device it schedules the recovery after in
-// and the last present, in place of a frame, and keeps it as the last
+// draw is Handlers.Draw. On a lost device it schedules the recovery of the
+// beat after in and the last present, in place of a frame, and keeps it as the last
 // present and returns it, publishing no DrawEvent. Otherwise it acquires a
 // frame and, when a surface is marked for it, schedules the configure after
 // in and the last present; then the acquire of its framebuffers after in,
@@ -286,7 +286,7 @@ func (pool *framePool) unmarkLost(window platform.Window) bool {
 // returns.
 func (p *Plugin) draw(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event RenderEvent) (RenderEvent, kernel.JobHandle) {
 	if p.device.lost.Load() {
-		recovered := ex.Schedule(p.recoverTask, kernel.NoArg{}, in, p.device.frames.lastPresentJob()).Handle()
+		recovered := ex.Schedule(p.recoverTask, event.Beat, in, p.device.frames.lastPresentJob()).Handle()
 		p.device.frames.setLastPresent(recovered)
 		return event, recovered
 	}

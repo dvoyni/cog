@@ -29,9 +29,10 @@ released after the publication, and `ReadCapture` answers its picture,
 and a device loss from any backend call is logged and published once, no
 call reaching the backend after it, every call with an error answering
 `ErrDeviceLost` and the frame in flight skipping its submit and present,
-and the next beat recovers instead of drawing, every object recreated
-under its old handle, every surface marked and `DeviceRecoveredEvent`
-published;
+the maps and captures pending at it publishing failures, and the next
+beat recovers instead of drawing, every object recreated under its old
+handle, every surface marked and `DeviceRecoveredEvent` published, a
+recovery that fails logged once and retried at most once a second;
 the recording adapter rejects a handle missing at its index, a
 resource without its usage, a misaligned write, copy or clear and a broken
 pass sequence, and its buffers hold the bytes written, copied and cleared,
