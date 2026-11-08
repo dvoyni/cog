@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"slices"
 	"testing"
+	"testing/fstest"
 
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/gfx/recording"
@@ -144,6 +145,31 @@ func TestCreateShaderModuleAnswersTheBackendsErrorForInvalidWGSL(t *testing.T) {
 			t.Errorf("the next module is at index %d, want the refused one's 0", created.Index())
 		}
 	})
+}
+
+func TestPreprocessShaderReachesTheBackendAndAnswersItsText(t *testing.T) {
+	source := "//#include \"common.wgsl\"\n" + triangleWGSL
+	files := fstest.MapFS{"shaders/lit.wgsl": {Data: []byte(source)}}
+	defines := []gfx.ShaderDefine{{Name: "SKIN"}, {Name: "N", Value: "8"}}
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	callCount := len(h.instance.Recording().Calls)
+
+	h.readDevice(func(device gfx.Device) {
+		text, err := device.PreprocessShader(files, "shaders/lit.wgsl", defines)
+		mustSucceed(t, err)
+		if text != source {
+			t.Errorf("PreprocessShader answered %q, want the recording adapter's %q", text, source)
+		}
+	})
+
+	want := []recording.Call{{
+		Kind:      recording.CallKindPreprocessShader,
+		Arguments: recording.PreprocessShaderArguments{Path: "shaders/lit.wgsl", Defines: defines},
+	}}
+	if calls := h.instance.Recording().Calls[callCount:]; !reflect.DeepEqual(calls, want) {
+		t.Errorf("recorded %+v, want %+v", calls, want)
+	}
 }
 
 func TestTextureIsCreatedAndReleasedWithItsDescriptor(t *testing.T) {

@@ -7,7 +7,8 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/dvoyni/cog/gfx/shader"
+	"github.com/dvoyni/cog/gfx"
+	"github.com/dvoyni/cog/gogpu/shader"
 )
 
 // Ported from v1's preprocessor, _legacy/slots/gfx/internal/shader, with the
@@ -81,7 +82,7 @@ func TestAnUnknownDirectiveNamesTheWord(t *testing.T) {
 		if !strings.Contains(err.Message, want) {
 			t.Errorf("%q: message %q does not name %q", source, err.Message, want)
 		}
-		if len(err.At) != 1 || err.At[0] != (shader.Location{Source: "s.wgsl", Line: 1}) {
+		if len(err.At) != 1 || err.At[0] != (gfx.ShaderSourceLocation{Source: "s.wgsl", Line: 1}) {
 			t.Errorf("%q: At = %v, want one location at s.wgsl:1", source, err.At)
 		}
 	}
@@ -96,31 +97,12 @@ func TestCommentedOutDirectivesAreInert(t *testing.T) {
 	}
 }
 
-// Nothing recovers from a preprocessor error, so it reads as one printed line
-// naming the shader and every location.
-func TestErrShaderSourceReadsAsOneLine(t *testing.T) {
-	err := shader.ErrSource{
-		Shader:  "scene.wgsl [SKIN]",
-		At:      []shader.Location{{Source: "a.wgsl", Line: 4}, {Source: "b.wgsl", Line: 9}},
-		Message: "#const \"N\" is declared twice",
-	}
-	got := err.Error()
-	if strings.Contains(got, "\n") {
-		t.Fatalf("Error() spans lines: %q", got)
-	}
-	for _, want := range []string{"scene.wgsl [SKIN]", "a.wgsl:4", "b.wgsl:9", "declared twice"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("Error() = %q, missing %q", got, want)
-		}
-	}
-}
-
 // The error names the shader by its path and its defines, sorted by name, a
 // duplicate name resolved last-wins: one path under two sets of defines is two
 // shaders.
 func TestTheErrorNamesTheShaderWithItsDefines(t *testing.T) {
 	err := preprocessErr(t, map[string]string{"s.wgsl": "#pragma once\n"}, "s.wgsl",
-		shader.Define{Name: "SKIN"}, shader.Define{Name: "N", Value: "4"}, shader.Define{Name: "N", Value: "8"})
+		gfx.ShaderDefine{Name: "SKIN"}, gfx.ShaderDefine{Name: "N", Value: "4"}, gfx.ShaderDefine{Name: "N", Value: "8"})
 	if got, want := err.Shader, "s.wgsl [N=8 SKIN]"; got != want {
 		t.Errorf("Shader = %q, want %q", got, want)
 	}
@@ -134,7 +116,7 @@ func TestTheErrorNamesTheShaderWithItsDefines(t *testing.T) {
 // that: Shader already carries the defines.
 func TestAMalformedDefineIsReportedWithNoLocation(t *testing.T) {
 	files := map[string]string{"s.wgsl": "fn a() {}\n"}
-	for _, define := range []shader.Define{{Name: ""}, {Name: "A", Value: "x\ny"}} {
+	for _, define := range []gfx.ShaderDefine{{Name: ""}, {Name: "A", Value: "x\ny"}} {
 		err := preprocessErr(t, files, "s.wgsl", define)
 		if len(err.At) != 0 {
 			t.Errorf("%+v: At = %v, want empty", define, err.At)
@@ -239,7 +221,7 @@ func TestACycleIsAnErrorCarryingTheChain(t *testing.T) {
 		"b.wgsl":    "#include ./a.wgsl\n",
 	}
 	err := preprocessErr(t, files, "root.wgsl")
-	want := []shader.Location{{Source: "root.wgsl", Line: 1}, {Source: "a.wgsl", Line: 1}, {Source: "b.wgsl", Line: 1}}
+	want := []gfx.ShaderSourceLocation{{Source: "root.wgsl", Line: 1}, {Source: "a.wgsl", Line: 1}, {Source: "b.wgsl", Line: 1}}
 	assertLocations(t, err.At, want)
 }
 
@@ -249,7 +231,7 @@ func TestAMissingIncludeCarriesTheChain(t *testing.T) {
 		"a.wgsl":    "#include ./gone.wgsl\n",
 	}
 	err := preprocessErr(t, files, "root.wgsl")
-	want := []shader.Location{{Source: "root.wgsl", Line: 1}, {Source: "a.wgsl", Line: 1}}
+	want := []gfx.ShaderSourceLocation{{Source: "root.wgsl", Line: 1}, {Source: "a.wgsl", Line: 1}}
 	assertLocations(t, err.At, want)
 }
 
@@ -318,7 +300,7 @@ func TestAConstDeclaredTwiceIsAnErrorAtBothLines(t *testing.T) {
 		"a.wgsl":    "\n#const N=4\n",
 	}
 	err := preprocessErr(t, files, "root.wgsl")
-	assertLocations(t, err.At, []shader.Location{{Source: "a.wgsl", Line: 2}, {Source: "root.wgsl", Line: 1}})
+	assertLocations(t, err.At, []gfx.ShaderSourceLocation{{Source: "a.wgsl", Line: 2}, {Source: "root.wgsl", Line: 1}})
 }
 
 func TestAMalformedConstIsAnError(t *testing.T) {
@@ -338,12 +320,12 @@ func TestDefinesAndConstsShareOneNamespace(t *testing.T) {
 		t.Fatalf("At = %v, want two locations", err.At)
 	}
 	declared := map[string]string{"s.wgsl": "#const N=16\nfn a() {}\n"}
-	err = preprocessErr(t, declared, "s.wgsl", shader.Define{Name: "N"})
+	err = preprocessErr(t, declared, "s.wgsl", gfx.ShaderDefine{Name: "N"})
 	if len(err.At) != 2 {
 		t.Fatalf("At = %v, want two locations, the defines given as one", err.At)
 	}
 	flagged := map[string]string{"s.wgsl": "#define N\nfn a() {}\n"}
-	err = preprocessErr(t, flagged, "s.wgsl", shader.Define{Name: "N", Value: "4"})
+	err = preprocessErr(t, flagged, "s.wgsl", gfx.ShaderDefine{Name: "N", Value: "4"})
 	if len(err.At) != 2 {
 		t.Fatalf("At = %v, want two locations, the defines given as one", err.At)
 	}
@@ -370,7 +352,7 @@ func TestAConstBecomesAWGSLConstInPlace(t *testing.T) {
 func TestAValueOverridesTheConstAndNeverIntroducesAName(t *testing.T) {
 	files := map[string]string{"s.wgsl": "//#const N=16\nfn a() {}\n"}
 	text := preprocess(t, files, "s.wgsl",
-		shader.Define{Name: "N", Value: "4"}, shader.Define{Name: "NOBODY_DECLARES_THIS", Value: "1"})
+		gfx.ShaderDefine{Name: "N", Value: "4"}, gfx.ShaderDefine{Name: "NOBODY_DECLARES_THIS", Value: "1"})
 	if !strings.Contains(text, "const N = 4;") {
 		t.Errorf("the value given did not override the declaration:\n%s", text)
 	}
@@ -406,7 +388,7 @@ func TestAConditionalCutsWhereverItIsAsked(t *testing.T) {
 	files := map[string]string{"s.wgsl": source}
 
 	off := preprocess(t, files, "s.wgsl")
-	on := preprocess(t, files, "s.wgsl", shader.Define{Name: "SKIN"})
+	on := preprocess(t, files, "s.wgsl", gfx.ShaderDefine{Name: "SKIN"})
 
 	if lineCount(off) != lineCount(on) || lineCount(on) != lineCount(source) {
 		t.Fatalf("line counts diverged: %d, %d, source %d", lineCount(off), lineCount(on), lineCount(source))
@@ -455,9 +437,9 @@ func TestConditionsEvaluateOverTheDefines(t *testing.T) {
 		{"(A | B) & C", []string{"A"}, false},
 	}
 	for _, test := range tests {
-		defines := make([]shader.Define, 0, len(test.defines))
+		defines := make([]gfx.ShaderDefine, 0, len(test.defines))
 		for _, name := range test.defines {
-			defines = append(defines, shader.Define{Name: name})
+			defines = append(defines, gfx.ShaderDefine{Name: name})
 		}
 		files := map[string]string{"s.wgsl": "//#if " + test.condition + "\nfn kept() {}\n//#endif\n"}
 		text := preprocess(t, files, "s.wgsl", defines...)
@@ -485,7 +467,7 @@ func TestConditionalsNestWithNoDepthLimit(t *testing.T) {
 		builder.WriteString("//#endif\n")
 	}
 	files := map[string]string{"s.wgsl": builder.String()}
-	if on := preprocess(t, files, "s.wgsl", shader.Define{Name: "A"}); !strings.Contains(on, "fn deep()") {
+	if on := preprocess(t, files, "s.wgsl", gfx.ShaderDefine{Name: "A"}); !strings.Contains(on, "fn deep()") {
 		t.Error("a deeply nested live branch was cut")
 	}
 	if off := preprocess(t, files, "s.wgsl"); strings.Contains(off, "fn deep()") {
@@ -509,17 +491,17 @@ func TestSkippedBranchesStillTrackNestingAndReserveSigils(t *testing.T) {
 func TestConditionalStructureErrorsNameTheirLines(t *testing.T) {
 	tests := map[string]struct {
 		source string
-		want   []shader.Location
+		want   []gfx.ShaderSourceLocation
 	}{
-		"#endif with no open #if": {"//#endif\n", []shader.Location{{Source: "s.wgsl", Line: 1}}},
-		"#else with no open #if":  {"//#else\n", []shader.Location{{Source: "s.wgsl", Line: 1}}},
-		"#elif with no open #if":  {"//#elif A\n", []shader.Location{{Source: "s.wgsl", Line: 1}}},
+		"#endif with no open #if": {"//#endif\n", []gfx.ShaderSourceLocation{{Source: "s.wgsl", Line: 1}}},
+		"#else with no open #if":  {"//#else\n", []gfx.ShaderSourceLocation{{Source: "s.wgsl", Line: 1}}},
+		"#elif with no open #if":  {"//#elif A\n", []gfx.ShaderSourceLocation{{Source: "s.wgsl", Line: 1}}},
 		"#else after #else": {"//#if A\n//#else\n//#else\n//#endif\n",
-			[]shader.Location{{Source: "s.wgsl", Line: 3}, {Source: "s.wgsl", Line: 2}}},
+			[]gfx.ShaderSourceLocation{{Source: "s.wgsl", Line: 3}, {Source: "s.wgsl", Line: 2}}},
 		"#elif after #else": {"//#if A\n//#else\n//#elif B\n//#endif\n",
-			[]shader.Location{{Source: "s.wgsl", Line: 3}, {Source: "s.wgsl", Line: 2}}},
+			[]gfx.ShaderSourceLocation{{Source: "s.wgsl", Line: 3}, {Source: "s.wgsl", Line: 2}}},
 		"unclosed #if": {"//#if A\nfn a() {}\n",
-			[]shader.Location{{Source: "s.wgsl", Line: 2}, {Source: "s.wgsl", Line: 1}}},
+			[]gfx.ShaderSourceLocation{{Source: "s.wgsl", Line: 2}, {Source: "s.wgsl", Line: 1}}},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -538,7 +520,7 @@ func TestDeclarationsMayNotSitInsideAConditional(t *testing.T) {
 			"a.wgsl": "fn a() {}\n",
 		}
 		err := preprocessErr(t, files, "s.wgsl")
-		assertLocations(t, err.At, []shader.Location{{Source: "s.wgsl", Line: 2}, {Source: "s.wgsl", Line: 1}})
+		assertLocations(t, err.At, []gfx.ShaderSourceLocation{{Source: "s.wgsl", Line: 2}, {Source: "s.wgsl", Line: 1}})
 	}
 }
 
@@ -605,7 +587,7 @@ func TestConflictingDiagnosticSeveritiesAreAnError(t *testing.T) {
 		"x.wgsl":    "diagnostic(error, derivative_uniformity);\n",
 	}
 	err := preprocessErr(t, files, "root.wgsl")
-	assertLocations(t, err.At, []shader.Location{{Source: "x.wgsl", Line: 1}, {Source: "root.wgsl", Line: 1}})
+	assertLocations(t, err.At, []gfx.ShaderSourceLocation{{Source: "x.wgsl", Line: 1}, {Source: "root.wgsl", Line: 1}})
 	if !strings.Contains(err.Message, "derivative_uniformity") {
 		t.Errorf("message = %q, want it to name the rule", err.Message)
 	}
@@ -622,7 +604,7 @@ func TestRequiresIsHoistedWithNoSpecialCase(t *testing.T) {
 
 // preprocess answers the preprocessed text of path in files, failing the test
 // on an error.
-func preprocess(t *testing.T, files map[string]string, path string, defines ...shader.Define) string {
+func preprocess(t *testing.T, files map[string]string, path string, defines ...gfx.ShaderDefine) string {
 	t.Helper()
 	text, err := shader.Preprocess(sourceFiles(files), path, defines)
 	if err != nil {
@@ -632,22 +614,22 @@ func preprocess(t *testing.T, files map[string]string, path string, defines ...s
 }
 
 // preprocessLines answers the preprocessed text of path in files as its lines.
-func preprocessLines(t *testing.T, files map[string]string, path string, defines ...shader.Define) []string {
+func preprocessLines(t *testing.T, files map[string]string, path string, defines ...gfx.ShaderDefine) []string {
 	t.Helper()
 	return strings.Split(strings.TrimSuffix(preprocess(t, files, path, defines...), "\n"), "\n")
 }
 
-// preprocessErr answers the ErrSource preprocessing path in files fails
-// with, failing the test on success or on another error.
-func preprocessErr(t *testing.T, files map[string]string, path string, defines ...shader.Define) shader.ErrSource {
+// preprocessErr answers the gfx.ErrShaderSource preprocessing path in files
+// fails with, failing the test on success or on another error.
+func preprocessErr(t *testing.T, files map[string]string, path string, defines ...gfx.ShaderDefine) gfx.ErrShaderSource {
 	t.Helper()
 	_, err := shader.Preprocess(sourceFiles(files), path, defines)
 	if err == nil {
 		t.Fatal("Preprocess succeeded, want an error")
 	}
-	var refused shader.ErrSource
+	var refused gfx.ErrShaderSource
 	if !errors.As(err, &refused) {
-		t.Fatalf("Preprocess: %v, want an ErrSource", err)
+		t.Fatalf("Preprocess: %v, want a gfx.ErrShaderSource", err)
 	}
 	return refused
 }
@@ -677,7 +659,7 @@ func assertTrimmedLines(t *testing.T, lines, want []string) {
 	}
 }
 
-func assertLocations(t *testing.T, got, want []shader.Location) {
+func assertLocations(t *testing.T, got, want []gfx.ShaderSourceLocation) {
 	t.Helper()
 	if len(got) != len(want) {
 		t.Fatalf("At = %v, want %v", got, want)

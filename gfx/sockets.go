@@ -1,6 +1,10 @@
 package gfx
 
-import "github.com/dvoyni/cog/platform"
+import (
+	"io/fs"
+
+	"github.com/dvoyni/cog/platform"
+)
 
 // InstanceSocket is the backend seam, wgpu's instance mirrored: exactly one
 // plugin binds it in its Init with configurator.BindSocket[gfx.InstanceSocket],
@@ -23,6 +27,10 @@ type InstanceSocket interface {
 	// ReleaseSurface releases window's surface, from a job holding the write
 	// lock.
 	ReleaseSurface(window platform.Window)
+	// PreprocessShader answers the final WGSL of the shader at path in
+	// files, after the directives the backend handles, defined with defines.
+	// A shader the backend refuses answers an ErrShaderSource.
+	PreprocessShader(files fs.FS, path string, defines []ShaderDefine) (string, error)
 	// Release releases the instance, in gfx's Destroy.
 	Release()
 }

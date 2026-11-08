@@ -9,7 +9,7 @@ its `OnDraw` never run. gfx keeps its handle tables, frame chain, surfaces,
 capture and recovery; the plugin passes each call through to gogpu's own
 windows, surfaces and device.
 
-Status: designed, not yet built. The decisions come from the
+Status: designed; of it, only `gogpu/shader` is built. The decisions come from the
 [gogpu map](https://github.com/dvoyni/cog/issues/611); each section links
 the ticket that holds its detail. The loop API it rests on, `HostLoop`, was
 built on the [loop map](https://github.com/dvoyni/cog/issues/612) and is in
