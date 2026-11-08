@@ -35,6 +35,7 @@ const (
 	ChangeKindGamepadDisconnect                   // a gamepad disconnected
 	ChangeKindGamepadButton                       // gamepad button up or down
 	ChangeKindGamepadAxis                         // gamepad axis moved
+	ChangeKindPointerHidden                       // pointer hidden from Pointer, or shown again
 )
 
 // Change is a single input delta. Build it with the KeyChange/PointerChange/
@@ -63,6 +64,19 @@ func KeyChange(k Key, mods Mods, down bool) Change {
 
 // PointerChange builds a pointer-move change.
 func PointerChange(p Pos) Change { return Change{kind: ChangeKindPointer, pos: p} }
+
+// PointerHiddenChange builds a change hiding the pointer from State.Pointer,
+// or showing it again. While it is hidden, Pointer reports HiddenPointer, off
+// the window, so nothing is under it; the pointer itself still follows the
+// mouse, and State.RealPointer reads it. It is no input of the player's, so
+// no event is published for it.
+func PointerHiddenChange(hidden bool) Change {
+	return Change{kind: ChangeKindPointerHidden, down: hidden}
+}
+
+// HiddenPointer is what State.Pointer reports while the pointer is hidden: a
+// position off the window.
+var HiddenPointer = Pos{X: -1, Y: -1}
 
 // ScrollChange builds a scroll-delta change.
 func ScrollChange(dx, dy float64) Change { return Change{kind: ChangeKindScroll, dx: dx, dy: dy} }

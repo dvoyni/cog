@@ -11,6 +11,16 @@ func KeyChange(k Key, mods Mods, down bool) Change { return internal.KeyChange(k
 // PointerChange builds a pointer-move change.
 func PointerChange(p Pos) Change { return internal.PointerChange(p) }
 
+// PointerHiddenChange builds a change hiding the pointer from State.Pointer,
+// or showing it again. While it is hidden, Pointer reports HiddenPointer, off
+// the window, so nothing is under it, while State.RealPointer still follows
+// the mouse. No event is published for it.
+func PointerHiddenChange(hidden bool) Change { return internal.PointerHiddenChange(hidden) }
+
+// HiddenPointer is what State.Pointer reports while the pointer is hidden: a
+// position off the window.
+var HiddenPointer = internal.HiddenPointer
+
 // ScrollChange builds a scroll-delta change.
 func ScrollChange(dx, dy float64) Change { return internal.ScrollChange(dx, dy) }
 

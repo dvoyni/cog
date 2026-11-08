@@ -84,6 +84,25 @@ func TestStatePointerLive(t *testing.T) {
 	}
 }
 
+// A hidden pointer reads as HiddenPointer while the real one keeps following
+// the mouse, and reads as that again once shown.
+func TestStatePointerHidden(t *testing.T) {
+	s := NewState()
+	s.apply(PointerChange(Pos{X: 3, Y: 4}))
+	s.apply(PointerHiddenChange(true))
+	if s.Pointer() != HiddenPointer {
+		t.Fatalf("hidden pointer = %+v want %+v", s.Pointer(), HiddenPointer)
+	}
+	s.apply(PointerChange(Pos{X: 5, Y: 6}))
+	if s.RealPointer() != (Pos{X: 5, Y: 6}) {
+		t.Fatalf("real pointer = %+v want {5 6}", s.RealPointer())
+	}
+	s.apply(PointerHiddenChange(false))
+	if s.Pointer() != (Pos{X: 5, Y: 6}) {
+		t.Fatalf("shown pointer = %+v want {5 6}", s.Pointer())
+	}
+}
+
 // A press+release within one tick gap surfaces both edges on the next advance.
 func TestStateTransientPressAndRelease(t *testing.T) {
 	s := NewState()

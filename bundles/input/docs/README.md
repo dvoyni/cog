@@ -73,6 +73,10 @@ Drivers construct changes with:
 
 - `KeyChange(key, mods, down)`
 - `PointerChange(pos)`
+- `PointerHiddenChange(hidden)`, which is no player input: while the pointer is
+  hidden, `Pointer()` reports `HiddenPointer`, off the window, and no event is
+  published for it. A game hides it while the cursor is hidden, so nothing is
+  hovered under a cursor the player cannot see.
 - `ScrollChange(dx, dy)`
 - `TextChange(rune)`
 - `ClipboardPasteChange(text)`
@@ -200,7 +204,10 @@ root; only the plugin folds changes into it and advances it. Subscribers should 
 - `Pressed(Key) bool`: whether the key or button is currently held.
 - `JustPressed(Key) bool`: transitioned down during this tick.
 - `JustReleased(Key) bool`: transitioned up during this tick.
-- `Pointer() Pos`: current logical-window pointer position.
+- `Pointer() Pos`: current logical-window pointer position, or `HiddenPointer`
+  while the pointer is hidden.
+- `RealPointer() Pos`: where the pointer is, hidden or not. Synthetic input and
+  the state snapshot use it.
 - `Scroll() (dx, dy float64)`: accumulated scroll for this tick.
 - `Text() []rune`: text entered during this tick.
 - `ClipboardPaste() (string, bool)`: text pasted from the clipboard during this

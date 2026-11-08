@@ -86,7 +86,7 @@ func changeFor(s *State, action Action) (Change, bool) {
 	case ActionMove:
 		return PointerChange(Pos{X: action.X, Y: action.Y}), true
 	case ActionMoveBy:
-		at := s.Pointer()
+		at := s.RealPointer()
 		return PointerChange(Pos{X: at.X + action.Dx, Y: at.Y + action.Dy}), true
 	case ActionScroll:
 		return ScrollChange(action.Dx, action.Dy), true
@@ -122,7 +122,7 @@ func stateCmdImpl() (kernel.Lock, kernel.Execute[StateRequest, StateResponse]) {
 // slice is always non-nil, so "nothing is held" reads as an empty list rather
 // than as a missing answer.
 func snapshot(s *State) StateResponse {
-	return StateResponse{Down: StateHeld(s), Pointer: s.Pointer(), Gamepads: StateGamepads(s)}
+	return StateResponse{Down: StateHeld(s), Pointer: s.RealPointer(), Gamepads: StateGamepads(s)}
 }
 
 // SynthesizeCmd folds one batch of a synthetic input sequence into the State

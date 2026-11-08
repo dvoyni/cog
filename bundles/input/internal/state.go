@@ -29,6 +29,9 @@ type State struct {
 	pendPasted   bool
 
 	pointer Pos
+	// pointerHidden is whether Pointer reports HiddenPointer instead of
+	// pointer.
+	pointerHidden bool
 
 	// gamepads is every connected gamepad, and gamepadOrder their slots
 	// sorted: the slice Gamepads hands out, rebuilt on connect and disconnect
@@ -76,6 +79,8 @@ func (s *State) apply(c Change) {
 		}
 	case ChangeKindPointer:
 		s.pointer = c.pos
+	case ChangeKindPointerHidden:
+		s.pointerHidden = c.down
 	case ChangeKindScroll:
 		s.pendScrollDx += c.dx
 		s.pendScrollDy += c.dy
@@ -169,8 +174,18 @@ func (s *State) JustPressed(k Key) bool { _, ok := s.justPressed[k]; return ok }
 // JustReleased reports whether k transitioned to up during the current tick.
 func (s *State) JustReleased(k Key) bool { _, ok := s.justReleased[k]; return ok }
 
-// Pointer returns the current pointer position (live).
-func (s *State) Pointer() Pos { return s.pointer }
+// Pointer returns the current pointer position (live), or HiddenPointer while
+// the pointer is hidden.
+func (s *State) Pointer() Pos {
+	if s.pointerHidden {
+		return HiddenPointer
+	}
+	return s.pointer
+}
+
+// RealPointer returns where the pointer is (live), whether or not it is
+// hidden.
+func (s *State) RealPointer() Pos { return s.pointer }
 
 // Scroll returns the scroll delta accumulated for the current tick.
 func (s *State) Scroll() (dx, dy float64) { return s.scrollDx, s.scrollDy }
