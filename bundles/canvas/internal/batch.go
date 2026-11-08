@@ -34,6 +34,10 @@ type spriteBatch struct {
 	pass      gfx.PassId
 	texture   gfx.TextureDescr
 	textureID gfx.TextureID
+	// distance is texture's distance-field companion, bound for the halo
+	// material. It is not a key field: an atlas array has exactly one, so the
+	// texture already decides it.
+	distance  gfx.TextureDescr
 	layer     m.Mat4
 	clip      m.Rect
 	hasClip   bool
@@ -96,7 +100,7 @@ func (b *spriteBatch) keyMatches(texture gfx.TextureDescr, layer m.Mat4, clip m.
 	return true
 }
 
-func (b *spriteBatch) add(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr, texture gfx.TextureDescr, layer m.Mat4, clip m.Rect, hasClip bool, filter gfx.FilterMode, viewport m.Vec2, shading *spriteShading, t0, t1, frame, tint, misc m.Vec4) {
+func (b *spriteBatch) add(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr, texture, distance gfx.TextureDescr, layer m.Mat4, clip m.Rect, hasClip bool, filter gfx.FilterMode, viewport m.Vec2, shading *spriteShading, t0, t1, frame, tint, misc m.Vec4) {
 	if b.active && !b.keyMatches(texture, layer, clip, hasClip, filter, shading) {
 		b.flush(gfxWrite, quad)
 	}
@@ -104,6 +108,7 @@ func (b *spriteBatch) add(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr, texture gfx
 		b.active = true
 		b.texture = texture
 		b.textureID = texture.Params.ID
+		b.distance = distance
 		b.layer = layer
 		b.clip = clip
 		b.hasClip = hasClip
@@ -154,6 +159,7 @@ func (b *spriteBatch) flush(gfxWrite *gfx.OpQueue, quad gfx.MeshDescr) {
 		}
 		d.add(gfx.ShaderParameterBuffer(instancesSlot, gfx.BufferDescrWithBlob(assets.NewBlob(spriteInstanceBytes(b.instances)), true)))
 		d.add(gfx.ShaderParameterTexture(TextureSlot, b.texture))
+		d.add(gfx.ShaderParameterTexture(HaloDistanceSlot, b.distance))
 		d.add(gfx.ShaderParameterSampler(SamplerSlot, canvasSampler(gfx.AddressClamp, gfx.AddressClamp, b.filter)))
 		d.draw(gfxWrite, b.pass, quad, len(b.instances), b.viewport, b.layer, b.clip, b.hasClip)
 	}
@@ -179,7 +185,7 @@ func (p *plugin) batchEntry(gfxWrite *gfx.OpQueue, surf surface, entry AtlasEntr
 	t1 := m.Vec4{X: transform.Origin.X, Y: transform.Origin.Y, Z: sine, W: cosine}
 	repeat := tiledRepeat(entry, transform, size)
 	misc := m.Vec4{X: float32(entry.Layer), Y: repeat.X, Z: repeat.Y}
-	p.batch.add(gfxWrite, p.quad, entry.Texture, layerTransform, clip, hasClip, transform.Filter,
+	p.batch.add(gfxWrite, p.quad, entry.Texture, entry.Distance, layerTransform, clip, hasClip, transform.Filter,
 		surf.size, shading, t0, t1, uv, colorVec(tint), misc)
 }
 

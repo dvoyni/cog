@@ -12,7 +12,7 @@ import (
 // targetTestConfig is the smallest atlas the harness will accept. None of these
 // tests put anything in it: a render target is not an atlas entry.
 func targetTestConfig() Config {
-	return Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	return Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 }
 
 // quadVertices finds the six-vertex upload one texture draw produced and

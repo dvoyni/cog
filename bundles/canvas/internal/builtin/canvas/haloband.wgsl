@@ -1,9 +1,10 @@
 // The halo's band: everything the halo material is except its fs_main.
 //
-// DECLARES: struct HaloProfile; @group(0) @binding(1) var<uniform> halo; struct
-// HaloVertexOut; const haloTau; fn haloFalloff; vs_main; fn haloBand. It
-// includes uniforms.wgsl, spritebindings.wgsl, clip.wgsl and tint.wgsl, so it
-// also brings everything those declare.
+// DECLARES: struct HaloProfile; @group(0) @binding(1) var<uniform> halo;
+// @group(1) @binding(2) var canvasHaloDistance; struct HaloVertexOut; fn
+// haloFalloff; vs_main; fn haloBand. It includes uniforms.wgsl,
+// spritebindings.wgsl, clip.wgsl and tint.wgsl, so it also brings everything
+// those declare.
 //
 // It is published for one reason: a material that has to do something to the
 // band AFTER it is computed - burn it away with the rest of a frame, say -
@@ -32,11 +33,18 @@
 //
 // Two mechanisms, branched per instance on the frame rect:
 //
-//   - A sprite or a glyph carries its silhouette in the texture, so the band is
-//     a ring kernel over alpha. Taps that leave s.frame are rejected outright,
-//     because the sampler clamps to the 4096 page and not to this sprite: an
-//     out-of-frame tap reads a NEIGHBOUR's art. A sprite's own 2px pad is no help
-//     either, since the atlas extrudes its edge in alpha as well as colour.
+//   - A sprite or a glyph carries its silhouette in the texture, and the atlas
+//     carries the silhouette's distance field beside it: canvasHaloDistance, the
+//     same array texel for texel, holding each texel's distance in texels to the
+//     nearest ink of its own slot (alpha at least half). The band is the falloff
+//     of that distance - the falloff never rises with distance, so the nearest ink
+//     is the only ink that matters - read in one sample where a ring kernel over
+//     alpha once searched a disc of up to 192. Outside the frame the distance is
+//     the way to the frame's nearest point plus the field there, which is exact
+//     where the nearest ink lies straight across the frame edge and slightly long
+//     where it lies diagonally. It never samples past the frame, because the
+//     sampler clamps to the 4096 page and not to this sprite: an out-of-frame
+//     sample reads a NEIGHBOUR's field.
 //   - A FillRect, a Line or a StrokeRect segment is one white texel stretched
 //     over a rectangle. Its frame is a degenerate point, so there is nothing to
 //     sample and the texel-to-world conversion collapses to zero. Its silhouette
@@ -64,6 +72,13 @@ struct HaloProfile {
 //#include builtin/canvas/clip.wgsl
 //#include builtin/canvas/tint.wgsl
 
+// The distance field the band is read from. It is in group 1 because it is a
+// texture a draw samples, beside canvasTexture and through canvasSampler, and
+// canvas binds it on every sprite draw the way it binds canvasTexture - a
+// material that does not declare it leaves it unbound. Half floats, in texels
+// of the atlas page, zero on ink; see distanceField in distancefield.go.
+@group(1) @binding(2) var canvasHaloDistance: texture_2d_array<f32>;
+
 // The published VertexOut is not frozen and is named nowhere in Go, so a
 // material declares its own beside it under its own name. This one adds two
 // things: the instance index, flat, and the position within the sprite's own
@@ -88,8 +103,6 @@ struct HaloVertexOut {
     @location(4) @interpolate(flat) index: u32,
     @location(5) quad: vec2<f32>,
 };
-
-const haloTau: f32 = 6.2831853;
 
 // haloFalloff maps a distance, as a fraction of the reach, to coverage.
 //
@@ -145,16 +158,9 @@ fn vs_main(@location(0) quad: vec2<f32>, @builtin(instance_index) instance: u32)
 }
 
 // haloBand is the whole fragment stage: the band's colour and coverage at one
-// fragment, clip test included. It discards and takes derivatives, so it is
-// called from fs_main in uniform control flow and from nowhere else.
+// fragment, clip test included. It discards, so it is called from fs_main and
+// from nowhere else.
 fn haloBand(in: HaloVertexOut) -> vec4<f32> {
-    // How many layer-local world units one screen pixel covers, taken from the
-    // derivative of the interpolated local position rather than from the layer
-    // matrix, because that also picks up the framebuffer scale - the one
-    // quantity CanvasUniforms never carries. Taken before the clip test, so it
-    // is read in uniform control flow whatever the discard does.
-    let localPerPixel = max(length(dpdx(in.canvasPosition)), length(dpdy(in.canvasPosition)));
-
     if canvasClipped(in.canvasPosition) { discard; }
 
     let s = instances.data[in.index];
@@ -172,47 +178,10 @@ fn haloBand(in: HaloVertexOut) -> vec4<f32> {
         let outside = length(max(abs(p) - size * 0.5, vec2<f32>(0.0)));
         coverage = haloFalloff(outside / reach);
     } else {
-        // A sprite or a glyph. The reach in uv, per instance, from the frozen
-        // record alone: how much uv one world unit spans is exactly the frame's
-        // span over the sprite's size.
-        let duv = reach * span / size;
-
-        // The tap count is derived here and published nowhere: a count right at
-        // reach 6 bands at reach 30, and one right at 30 wastes taps at 6.
-        //
-        // The spacings are the prototype's accepted setting, halved. The
-        // prototype judged 4 rings and 12 spokes right against painted art at a
-        // reach of about 6 screen pixels - one ring every 1.5 px, neighbouring
-        // taps about 3 px apart around the outermost ring - but localPerPixel
-        // comes from dpdx, so it is a DEVICE pixel, and that spacing therefore
-        // bought twice the angular and radial resolution on a HiDPI display
-        // than it did on the display it was judged on. The band is a smooth
-        // falloff with a plateau; the extra resolution was not visible, and it
-        // was not cheap. Paid for at reach 8.75 on a 128-unit mark at dpr 2, it
-        // was 444 taps a fragment over a quad grown by the reach on every side,
-        // on every one of a campaign map's ~50 always-visible landmarks: enough
-        // to put Safari at 40 fps where a 4-tap kernel over the same geometry
-        // held 60. Doubling both spacings quarters the taps and leaves the band
-        // indistinguishable.
-        //
-        // The caps halve with them, which keeps the reach they bite at: rings
-        // still caps at pixels 24 and spokes at about 23, so past a reach of
-        // roughly 24 px the band still softens rather than costing more.
-        //
-        // The honest fix is to divide pixels by the framebuffer scale, so the
-        // density is per logical pixel and a dpr-1 display is not quietly
-        // halved along with a dpr-2 one - but CanvasUniforms does not carry
-        // that scale and HaloProfile would have to grow a field to pass it.
-        let pixels = max(reach / max(localPerPixel, 0.0001), 1.0);
-        let rings = clamp(i32(ceil(pixels / 3.0)), 1, 8);
-        let spokes = clamp(i32(ceil(haloTau * pixels / 6.0)), 4, 24);
-
-        // Under the ink the band is already at full strength and no tap can beat
-        // it: every tap is an alpha in [0,1] scaled by a weight in [0,1], so
-        // best never exceeds 1. A fragment inside the frame whose own texel is
-        // opaque has its answer before the kernel runs. That is a third of a
-        // haloed quad on feuds' art, and the sample is needed after the loop
-        // anyway, so it costs nothing to take it first.
+        // Under the ink the band is already at full strength and nothing can
+        // beat it. A fragment inside the frame whose own texel is opaque has its
+        // answer before the field is read, and the sample is needed below
+        // anyway.
         var own = 0.0;
         if all(in.uv >= lo) && all(in.uv <= hi) {
             own = textureSampleLevel(canvasTexture, canvasSampler, in.uv, in.atlasLayer, 0.0).a;
@@ -221,30 +190,28 @@ fn haloBand(in: HaloVertexOut) -> vec4<f32> {
             }
         }
 
-        var best = 0.0;
-        for (var ring = 1; ring <= rings; ring = ring + 1) {
-            let t = f32(ring) / f32(rings);
-            let weight = haloFalloff(t);
-            for (var spoke = 0; spoke < spokes; spoke = spoke + 1) {
-                // Half a step of rotation on alternate rings, so the taps do not
-                // line up into spokes of their own.
-                let angle = haloTau * (f32(spoke) + 0.5 * f32(ring % 2)) / f32(spokes);
-                let tap = in.uv + vec2<f32>(cos(angle), sin(angle)) * duv * t;
-                // The rejection that makes this safe at any reach, and it is
-                // mandatory rather than an optimisation: without it a tap past
-                // the frame reads whatever the atlas packed next door, or this
-                // sprite's own edge extruded into its padding.
-                if any(tap < lo) || any(tap > hi) {
-                    continue;
-                }
-                best = max(best, textureSampleLevel(canvasTexture, canvasSampler, tap, in.atlasLayer, 0.0).a * weight);
-            }
-        }
+        // World units per uv, per axis, from the frozen record alone: the
+        // sprite's size over the frame's span. The uv extrapolates past the
+        // frame at the same rate, so a fragment outside it is this far from the
+        // frame's nearest point.
+        let localPerUV = size / span;
+        let nearest = clamp(in.uv, lo, hi);
+        let beyond = length((in.uv - nearest) * localPerUV);
+
+        // The field is in texels, isotropic in the atlas. A sprite drawn at
+        // different scales on its two axes has no single texel size in world
+        // units, and the geometric mean is the one that is exact for every
+        // uniform scale.
+        let atlas = vec2<f32>(textureDimensions(canvasHaloDistance).xy);
+        let localPerTexel = localPerUV / atlas;
+        let texels = textureSampleLevel(canvasHaloDistance, canvasSampler, nearest, in.atlasLayer, 0.0).r;
+        let distance = texels * sqrt(localPerTexel.x * localPerTexel.y) + beyond;
+
         // Under the silhouette the band is at full strength, not only outside
         // it - otherwise an antialiased glyph edge blends against the backdrop
-        // through the gap between the ink and the band. own is that texel,
-        // already sampled above.
-        coverage = max(best, own);
+        // through the gap between the ink and the band. The field is zero on
+        // ink, and own covers a fringe below the threshold.
+        coverage = max(haloFalloff(distance / reach), own);
     }
 
     // The band, and nothing else. The atlas was sampled for alpha only and the

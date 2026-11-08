@@ -18,7 +18,7 @@ import (
 // ask the table rather than the disk.
 func TestAMissingSpriteIsOpenedOnceReportedOnceAndNotReopened(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{}}
-	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * atlasTexelBytes * 2}
 	k, errs, _ := testKernelCapturing(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "gone.png", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
 	})
@@ -41,7 +41,7 @@ func TestAMissingSpriteIsOpenedOnceReportedOnceAndNotReopened(t *testing.T) {
 // file. The loudness belongs in the report.
 func TestAMissingSpriteIsSkippedRatherThanSubstituted(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{}}
-	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * atlasTexelBytes * 2}
 	k, _, backend := testKernelCapturing(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "gone.png", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
 		write.Sprite(0, "gone-tiled.png", SpriteTransform{
@@ -67,7 +67,7 @@ func TestAMissingSpriteIsSkippedRatherThanSubstituted(t *testing.T) {
 // from every sprite it draws with. A frame that records nothing at all still
 // reserves it, which is what "before any layer's ops" means.
 func TestTheWhiteTexelIsReservedBeforeAnyLayersOps(t *testing.T) {
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(*OpQueue) {})
 	runFrame(k)
 
@@ -91,7 +91,7 @@ func TestTheWhiteTexelIsReservedBeforeAnyLayersOps(t *testing.T) {
 // resident - the residual this leaves, and what UnloadAll answers.
 func TestUnloadSpriteCannotNameTheGeneratedTexel(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{}}
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, errs, backend := testKernelCapturing(t, filesystem, config, func(write *OpQueue) {
 		write.FillRect(0, m.Rect{Width: 4, Height: 4}, ShapeDraw{Color: m.Color{R: 1, A: 1}})
 	})
@@ -116,7 +116,7 @@ func TestUnloadSpriteCannotNameTheGeneratedTexel(t *testing.T) {
 // identity is an address, and two constructor calls compared in one expression
 // can share a stack slot and report an equality the heap does not have.
 func TestTheWhiteTexelIsOneEntryAcrossFrames(t *testing.T) {
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
 		write.FillRect(0, m.Rect{Width: 4, Height: 4}, ShapeDraw{Color: m.Color{R: 1, A: 1}})
 	})
@@ -135,7 +135,7 @@ func TestTheWhiteTexelIsOneEntryAcrossFrames(t *testing.T) {
 // cache. The empty path keeps meaning the white texel.
 func TestADotPathIsInvalidRatherThanASilentWhiteQuad(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{}}
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, errs, backend := testKernelCapturing(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, ".", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
 		write.Sprite(0, "../escape.png", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
@@ -166,7 +166,7 @@ func TestADotPathIsInvalidRatherThanASilentWhiteQuad(t *testing.T) {
 // so the largest that can pack is AtlasSize-4.
 func TestASpriteLargerThanAPageIsRefusedOnceAndTerminally(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"huge.png": &fstest.MapFile{Data: pngBytes(t, 14, 14)}}}
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, errs, backend := testKernelCapturing(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "huge.png", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
 	})
@@ -197,7 +197,7 @@ func TestASpriteOverTheAtlasByteBudgetIsRefusedOnceAndTerminally(t *testing.T) {
 	// A budget for exactly one array of two 16-texel pages. The white texel and
 	// two padded 14x14 sprites fill both pages, and the third sprite would need
 	// an array the budget cannot pay for.
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, errs, backend := testKernelCapturing(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "first.png", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
 		write.Sprite(0, "second.png", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
@@ -225,7 +225,7 @@ func TestASpriteOverTheAtlasByteBudgetIsRefusedOnceAndTerminally(t *testing.T) {
 // atlas is still measured by reading its header.
 func TestSpriteSizeAnswersFromTheHeaderTierEvenWhenTheSpriteIsResident(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 6, 4)}}}
-	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * atlasTexelBytes * 2}
 	k, _, _ := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "sprite.png", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
 	})
@@ -252,7 +252,7 @@ func TestSpriteSizeAnswersFromTheHeaderTierEvenWhenTheSpriteIsResident(t *testin
 // one - eventually releasing an array still full of sprites.
 func TestFreeingASpriteThatNeverPackedReclaimsNothing(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}}
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, _, backend := testKernelCapturing(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "gone.png", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
 		write.Sprite(0, "also-gone.png", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
@@ -286,7 +286,7 @@ func TestFreeingASpriteThatNeverPackedReclaimsNothing(t *testing.T) {
 // another would share its namespace.
 func TestOneMissingPathIsOneReportPerTier(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{}}
-	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * atlasTexelBytes * 2}
 	k, errs, _ := testKernelCapturing(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "gone.png", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
 		write.Sprite(0, "gone.png", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}, TileX: true}, nil)
@@ -311,7 +311,7 @@ func TestOneMissingPathIsOneReportPerTier(t *testing.T) {
 // was fixed and was asked for again can speak.
 func TestUnloadingASpriteFreesEveryTierAndLetsItSpeakAgain(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{}}
-	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * atlasTexelBytes * 2}
 	k, errs, _ := testKernelCapturing(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "gone.png", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
 	})

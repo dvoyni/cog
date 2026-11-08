@@ -15,7 +15,7 @@ import (
 // merge them; sharing an atlas page they are two instances of one draw.
 func TestATiledAndAnUntiledSpriteOverOnePathMerge(t *testing.T) {
 	filesystem := fstest.MapFS{"edge.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}
-	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "edge.png", SpriteTransform{Size: m.Vec2{X: 12, Y: 4}, TileX: true}, nil)
 		write.Sprite(0, "edge.png", SpriteTransform{Position: m.Vec2{Y: 8}, Size: m.Vec2{X: 4, Y: 4}}, nil)
@@ -35,7 +35,7 @@ func TestANineSliceWithTiledEdgesIsOneDraw(t *testing.T) {
 		"corner.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)},
 		"side.png":   &fstest.MapFile{Data: pngBytes(t, 4, 4)},
 	}
-	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		corner := func(x, y float32) {
 			write.Sprite(0, "corner.png", SpriteTransform{
@@ -73,7 +73,7 @@ func TestANineSliceWithTiledEdgesAndALabelAreTwoDraws(t *testing.T) {
 		"side.png":   &fstest.MapFile{Data: pngBytes(t, 4, 4)},
 		testFontPath: &fstest.MapFile{Data: goregular.TTF},
 	}
-	config := Config{AtlasSize: 128, LayersPerArray: 2, MaxAtlasBytes: 128 * 128 * 4 * 2}
+	config := Config{AtlasSize: 128, LayersPerArray: 2, MaxAtlasBytes: 128 * 128 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "side.png", SpriteTransform{
 			Position: m.Vec2{X: 4}, Size: m.Vec2{X: 32, Y: 4}, TileX: true,
@@ -101,7 +101,7 @@ func TestAnUntiledInstanceRepeatsOnce(t *testing.T) {
 		"sprite.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)},
 		testFontPath: &fstest.MapFile{Data: goregular.TTF},
 	}
-	config := Config{AtlasSize: 128, LayersPerArray: 2, MaxAtlasBytes: 128 * 128 * 4 * 2}
+	config := Config{AtlasSize: 128, LayersPerArray: 2, MaxAtlasBytes: 128 * 128 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "sprite.png", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil)
 		write.FillRect(0, m.Rect{Width: 8, Height: 8}, ShapeDraw{Color: m.Color{R: 1, G: 1, B: 1, A: 1}})
@@ -137,7 +137,7 @@ func TestAnUntiledInstanceRepeatsOnce(t *testing.T) {
 // before anything could fall back.
 func TestATiledSpriteTooLargeForTheAtlasStaysStandalone(t *testing.T) {
 	filesystem := fstest.MapFS{"wide.png": &fstest.MapFile{Data: pngBytes(t, 64, 8)}}
-	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * atlasTexelBytes * 2}
 	k, errs, backend := testKernelCapturing(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "wide.png", SpriteTransform{Size: m.Vec2{X: 128, Y: 8}, TileX: true}, nil)
 	})
@@ -155,7 +155,7 @@ func TestATiledSpriteTooLargeForTheAtlasStaysStandalone(t *testing.T) {
 // at the file, and the two entries land at different places in the page.
 func TestOnePathDrawnBothWaysPacksTwice(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"edge.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}}
-	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "edge.png", SpriteTransform{Size: m.Vec2{X: 12, Y: 4}, TileX: true}, nil)
 		write.Sprite(0, "edge.png", SpriteTransform{Position: m.Vec2{Y: 8}, Size: m.Vec2{X: 4, Y: 4}}, nil)
@@ -179,7 +179,7 @@ func TestOnePathDrawnBothWaysPacksTwice(t *testing.T) {
 // route a tiled draw takes is decided from the header, so that is read again too.
 func TestUnloadSpriteFreesEveryGutterFill(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"edge.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}}
-	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * atlasTexelBytes * 2}
 	k, _, _ := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "edge.png", SpriteTransform{Size: m.Vec2{X: 12, Y: 4}, TileX: true}, nil)
 		write.Sprite(0, "edge.png", SpriteTransform{Position: m.Vec2{Y: 8}, Size: m.Vec2{X: 4, Y: 4}}, nil)
@@ -197,7 +197,7 @@ func TestUnloadSpriteFreesEveryGutterFill(t *testing.T) {
 // the one piece of per-draw sampler state tiling used to carry that survives it.
 func TestTiledSpritesDifferingInFilterSplit(t *testing.T) {
 	filesystem := fstest.MapFS{"edge.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}
-	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "edge.png", SpriteTransform{
 			Size: m.Vec2{X: 12, Y: 4}, TileX: true, Filter: gfx.FilterNearest,
@@ -217,7 +217,7 @@ func TestTiledSpritesDifferingInFilterSplit(t *testing.T) {
 // something a caller can mean, so a tiled axis with no Size records nothing.
 func TestATiledAxisWithNoSizeDrawsNothing(t *testing.T) {
 	filesystem := fstest.MapFS{"edge.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}
-	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "edge.png", SpriteTransform{TileX: true}, nil)
 	})
@@ -235,7 +235,7 @@ func TestATiledAxisWithNoSizeDrawsNothing(t *testing.T) {
 func TestATiledSpriteNamesTheSameSpriteMaterialAndMerges(t *testing.T) {
 	custom := MaterialWithState(gfx.ShaderWithText("fn tiledSpriteMark() {}"), gfx.StateOverlay2D())
 	filesystem := fstest.MapFS{"edge.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}
-	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "edge.png", SpriteTransform{Size: m.Vec2{X: 12, Y: 4}, TileX: true}, &custom)
 		write.Sprite(0, "edge.png", SpriteTransform{Position: m.Vec2{Y: 8}, Size: m.Vec2{X: 4, Y: 4}}, &custom)
@@ -253,7 +253,7 @@ func TestATiledSpriteNamesTheSameSpriteMaterialAndMerges(t *testing.T) {
 // flip says which way the tile faces, not how many of it there are.
 func TestAFlippedTiledSpriteSwapsItsBoundsAndKeepsItsRepeat(t *testing.T) {
 	filesystem := fstest.MapFS{"edge.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}
-	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "edge.png", SpriteTransform{Size: m.Vec2{X: 12, Y: 4}, TileX: true}, nil)
 		write.Sprite(0, "edge.png", SpriteTransform{

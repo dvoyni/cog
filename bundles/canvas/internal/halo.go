@@ -31,6 +31,14 @@ const (
 // canvas.HaloProfile, never by spelling it.
 const HaloSlot = "halo"
 
+// HaloDistanceSlot is the texture the halo band reads its distances from:
+// the atlas's distance-field companion, which the sprite batch binds beside
+// canvasTexture on every draw, the same way and for the same reason - the
+// batch is keyed on the atlas array, and the array owns exactly one of each.
+// It is reserved, like canvasTexture: a caller never names it, and a material
+// that does not declare it simply leaves it unbound.
+const HaloDistanceSlot = "canvasHaloDistance"
+
 // haloSpriteMaterial is the fourth sprite material canvas ships: it paints a
 // soft outward band and no mark at all, so a caller records the same marks twice
 // - once on a halo layer under this material, once on the ink layer above it

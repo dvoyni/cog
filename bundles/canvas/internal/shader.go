@@ -24,7 +24,7 @@ func canvasSampler(u, v gfx.AddressMode, filter gfx.FilterMode) gfx.SamplerDesc 
 // path exists to make.
 func reservedName(name string) bool {
 	switch name {
-	case TextureSlot, SamplerSlot, TintSlot:
+	case TextureSlot, SamplerSlot, TintSlot, HaloDistanceSlot:
 		return true
 	}
 	return false

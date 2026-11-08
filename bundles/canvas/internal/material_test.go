@@ -18,7 +18,7 @@ func triangle(x float32) [3]Vertex {
 }
 
 func trianglesConfig() Config {
-	return Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	return Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 }
 
 // flatTexture is what marks a stub shader as a triangles material for the test

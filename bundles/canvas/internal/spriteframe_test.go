@@ -27,7 +27,7 @@ import (
 // where the frames are not uniform it draws all of them at the sheet's size,
 // which is no authoring intent at all.
 func TestAFramedSpriteTakesItsNaturalSizeFromTheFrame(t *testing.T) {
-	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * atlasTexelBytes * 2}
 	files := fstest.MapFS{"sheet.png": &fstest.MapFile{Data: pngBytes(t, 16, 16)}}
 	k, _, backend := testKernel(t, files, config, func(write *OpQueue) {
 		write.Sprite(0, "sheet.png", SpriteTransform{
@@ -50,7 +50,7 @@ func TestAFramedSpriteTakesItsNaturalSizeFromTheFrame(t *testing.T) {
 // Size names the destination outright, so a frame never overrides it. Sizing
 // from the frame changes what an unset size means and nothing else.
 func TestAnExplicitSizeStillWinsOverAFrame(t *testing.T) {
-	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * atlasTexelBytes * 2}
 	files := fstest.MapFS{"sheet.png": &fstest.MapFile{Data: pngBytes(t, 16, 16)}}
 	k, _, backend := testKernel(t, files, config, func(write *OpQueue) {
 		write.Sprite(0, "sheet.png", SpriteTransform{
@@ -74,7 +74,7 @@ func TestAnExplicitSizeStillWinsOverAFrame(t *testing.T) {
 // frame selects is the frame. A 12x4 window of a square sheet is 3:1, so a
 // height of 2 is a width of 6 - where the whole sheet's 1:1 would have said 2.
 func TestASingleAxisSizeDerivesTheOtherFromTheFramesAspect(t *testing.T) {
-	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * atlasTexelBytes * 2}
 	files := fstest.MapFS{"sheet.png": &fstest.MapFile{Data: pngBytes(t, 16, 16)}}
 	k, _, backend := testKernel(t, files, config, func(write *OpQueue) {
 		write.Sprite(0, "sheet.png", SpriteTransform{
@@ -126,7 +126,7 @@ func TestAFramedTextureSpriteTakesItsNaturalSizeFromTheFrame(t *testing.T) {
 // no report. A nine-sliced panel packed into a UI sheet, which is the normal
 // authoring case, was undrawable and said nothing about why.
 func TestANineSliceOverAFrameSlicesTheFrame(t *testing.T) {
-	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * atlasTexelBytes * 2}
 	files := fstest.MapFS{"sheet.png": &fstest.MapFile{Data: pngBytes(t, 16, 16)}}
 	k, _, backend := testKernel(t, files, config, func(write *OpQueue) {
 		write.Sprite(0, "sheet.png", SpriteTransform{
@@ -175,7 +175,7 @@ func TestANineSliceOverAFrameSlicesTheFrame(t *testing.T) {
 // as the sprite is recorded; the key is the path and the frame together, which
 // is canvas's own type and so shares a namespace with nothing.
 func TestAFrameThatDoesNotFitItsSourceDrawsNothingAndIsReportedOnce(t *testing.T) {
-	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * atlasTexelBytes * 2}
 	files := fstest.MapFS{"sheet.png": &fstest.MapFile{Data: pngBytes(t, 16, 16)}}
 	k, errs, backend := testKernelCapturing(t, files, config, func(write *OpQueue) {
 		write.Sprite(0, "sheet.png", SpriteTransform{
@@ -248,7 +248,7 @@ func TestAFrameThatDoesNotFitATextureIsReportedOnce(t *testing.T) {
 // texels of border on each side of a 4x4 window leave no middle, even though
 // they would sit comfortably inside the 16x16 sheet the window is cut from.
 func TestNineSliceInsetsThatFitTheSheetButNotTheFrameAreReported(t *testing.T) {
-	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * atlasTexelBytes * 2}
 	files := fstest.MapFS{"sheet.png": &fstest.MapFile{Data: pngBytes(t, 16, 16)}}
 	k, errs, backend := testKernelCapturing(t, files, config, func(write *OpQueue) {
 		write.Sprite(0, "sheet.png", SpriteTransform{
@@ -276,7 +276,7 @@ func TestNineSliceInsetsThatFitTheSheetButNotTheFrameAreReported(t *testing.T) {
 // does not fit their verdict is derived from a number that means nothing: a
 // second report would name an error that disappears when the first is fixed.
 func TestABadFrameUnderANineSliceReportsOnlyTheFrame(t *testing.T) {
-	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * atlasTexelBytes * 2}
 	files := fstest.MapFS{"sheet.png": &fstest.MapFile{Data: pngBytes(t, 16, 16)}}
 	k, errs, _ := testKernelCapturing(t, files, config, func(write *OpQueue) {
 		write.Sprite(0, "sheet.png", SpriteTransform{
@@ -303,7 +303,7 @@ func TestABadFrameUnderANineSliceReportsOnlyTheFrame(t *testing.T) {
 // The non-tiled axis therefore falls back to the framed height, 4 rather than
 // the sheet's 16, and the repeat count divides by the framed width.
 func TestATiledSpriteRepeatsItsFramedTile(t *testing.T) {
-	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * atlasTexelBytes * 2}
 	files := fstest.MapFS{"sheet.png": &fstest.MapFile{Data: pngBytes(t, 16, 16)}}
 	k, errs, backend := testKernelCapturing(t, files, config, func(write *OpQueue) {
 		write.Sprite(0, "sheet.png", SpriteTransform{
@@ -331,7 +331,7 @@ func TestATiledSpriteRepeatsItsFramedTile(t *testing.T) {
 // path used to drop it in silence - the same report an untiled sprite has always
 // raised, from the same guard, because a tiled sprite reaches it now.
 func TestATiledSpriteReportsAFrameThatDoesNotFit(t *testing.T) {
-	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * atlasTexelBytes * 2}
 	files := fstest.MapFS{"sheet.png": &fstest.MapFile{Data: pngBytes(t, 16, 16)}}
 	k, errs, _ := testKernelCapturing(t, files, config, func(write *OpQueue) {
 		write.Sprite(0, "sheet.png", SpriteTransform{

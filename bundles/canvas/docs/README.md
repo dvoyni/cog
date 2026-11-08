@@ -82,10 +82,12 @@ kernel.New(map[kernel.PluginName]any{
 `Config` has `AtlasSize`, `LayersPerArray` and `MaxAtlasBytes`, and the
 optional `FallbackFonts` and `FallbackLanguage` of
 [Fallback fonts](#fallback-fonts). A zero atlas field
-takes its default — 4096, 2 and 256 MiB — so the zero `Config`, or giving no
+takes its default — 4096, 2 and 384 MiB — so the zero `Config`, or giving no
 configuration at all, takes all three. `LayersPerArray` must be at least two.
 Atlas dimensions and the memory budget must be positive, and one array must fit
-within `MaxAtlasBytes`.
+within `MaxAtlasBytes`. An array is counted at six bytes a texel: four of sRGB
+colour and two of the half-float distance field the halo material reads (see
+[The halo](#the-halo)), so the default budget holds two arrays.
 
 ### Fallback fonts
 
@@ -351,6 +353,27 @@ becoming a coloured ghost.
 `TextDraw.Color` and a sprite's `tint` parameter all land in the instance
 record's frozen `Tint` field, so each mark's band is its own colour and `tint.a`
 is the band's peak alpha — fading a cluster fades its halo with it.
+
+**The band is read from a distance field, in one sample.** Every atlas array
+has a half-float companion, laid out texel for texel, that holds each texel's
+distance to the nearest ink of its own slot. Canvas computes it on the CPU when
+it packs a sprite or a glyph (an exact Euclidean transform, a few milliseconds
+for a 512-square sprite) and binds it beside `canvasTexture` as
+`canvasHaloDistance`. The band is `falloff(distance / reach)`, so its cost no
+longer grows with the reach or the display's resolution: the disc of up to 192
+alpha taps it replaced cost a 5K window most of its frame rate. What follows from
+it:
+
+- Ink is alpha at or above half. A mark fainter than that throws no band; the
+  fragment's own alpha still covers an anti-aliased fringe.
+- Outside the drawn frame, the distance is the way to the frame's nearest point
+  plus the field there: exact where the nearest ink lies straight across the
+  frame edge, a little long where it lies diagonally.
+- The field is per slot, so a sprite drawn through a sub-frame measures to its
+  whole image's ink, including the parts the frame leaves out.
+- A sprite scaled differently on its two axes takes the geometric mean of its
+  two texel sizes, which is exact for every uniform scale.
+- It costs two bytes a texel of GPU memory, which `MaxAtlasBytes` counts.
 
 **Dedicate the layer.** `Triangles` and `Texture` stay nil, so a `DrawTriangles`
 or `DrawTexture` recorded on the halo layer paints as itself rather than as a

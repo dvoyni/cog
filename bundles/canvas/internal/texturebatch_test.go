@@ -75,7 +75,7 @@ func TestATiledAndAPlainTextureSpriteSplit(t *testing.T) {
 // untiled sprite can join.
 func TestTiledSpritesOverOneAtlasEntryMerge(t *testing.T) {
 	filesystem := fstest.MapFS{"wave.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "wave.png", SpriteTransform{Size: m.Vec2{X: 12, Y: 4}, TileX: true}, nil)
 		write.Sprite(0, "wave.png", SpriteTransform{Position: m.Vec2{Y: 8}, Size: m.Vec2{X: 12, Y: 4}, TileX: true}, nil)
@@ -91,7 +91,7 @@ func TestTiledSpritesOverOneAtlasEntryMerge(t *testing.T) {
 // it - three draws, in the order they were recorded.
 func TestAnAtlasSpriteBetweenTwoTextureSpritesSplitsThem(t *testing.T) {
 	filesystem := fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, _, backend := testKernelGfx(t, filesystem, config, func(write *OpQueue, gfxWrite *gfx.OpQueue) {
 		_, texture := gfxWrite.NewTemporaryTarget(8, 8, gfx.FormatRGBA8Srgb)
 		write.SpriteTexture(0, texture, SpriteTransform{}, nil)

@@ -21,7 +21,7 @@ func resolveConfig(value any) (Config, error) {
 	if err := validateFallbacks(config.FallbackFonts, config.FallbackLanguage); err != nil {
 		return Config{}, err
 	}
-	arrayBytes := int64(config.AtlasSize) * int64(config.AtlasSize) * 4 * int64(config.LayersPerArray)
+	arrayBytes := atlasArrayBytes(config)
 	if arrayBytes > int64(config.MaxAtlasBytes) {
 		return Config{}, fmt.Errorf("canvas: atlas array requires %d bytes, budget is %d", arrayBytes, config.MaxAtlasBytes)
 	}
@@ -36,8 +36,9 @@ type Config struct {
 	// LayersPerArray is how many pages one atlas texture array holds. It must be
 	// at least two.
 	LayersPerArray int
-	// MaxAtlasBytes bounds the GPU memory one atlas may allocate; one whole
-	// array must fit within it.
+	// MaxAtlasBytes bounds the GPU memory one atlas may allocate, counting
+	// each array's colour and its halo distance field together (six bytes a
+	// texel); one whole array must fit within it.
 	MaxAtlasBytes int
 	// FallbackFonts are the fonts a character is looked up in when neither the
 	// text's own font nor the built-in default has it, each named by the
@@ -93,7 +94,9 @@ func WithDefaults(config Config) Config {
 		config.LayersPerArray = 2
 	}
 	if config.MaxAtlasBytes == 0 {
-		config.MaxAtlasBytes = 256 << 20
+		// Two arrays at the default page size and layer count: 4096^2 texels
+		// times two layers times six bytes is 192 MiB an array.
+		config.MaxAtlasBytes = 384 << 20
 	}
 	return config
 }

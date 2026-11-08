@@ -63,6 +63,24 @@ type testBackend struct {
 	// shaderSources maps each shader the backend was handed to its source, so a
 	// test can tell which built-in shader a pipeline was built from.
 	shaderSources map[gfx.ShaderID]string
+	// distance holds the atlas's distance-field companions apart from
+	// everything above: every array allocates one beside its colour texture
+	// and every slot uploads one beside its colour, so counting them in
+	// allocations, updates and releasedTextures would double each atlas count
+	// a test makes. They are checked on their own, by distancefield tests.
+	distance distanceTraffic
+}
+
+// distanceTraffic is the R16F companion textures' share of a backend's
+// traffic, recorded as the colour atlas's is.
+type distanceTraffic struct {
+	ids         map[gfx.TextureID]bool
+	allocations []textureAllocation
+	updates     []textureUpdate
+	releases    []gfx.TextureID
+	// bound is, per draw, the texture bound at group 1 binding 2 -
+	// canvasHaloDistance in the halo band.
+	bound []boundTexture
 }
 
 // pipelineShader returns the source of the shader pipeline i was built from.
@@ -199,6 +217,7 @@ func testUnionLayout() gfx.ShaderLayout {
 			{Name: "base", Kind: gfx.ResourceUniformBuffer, Group: 0, Binding: 6, Size: 4},
 			{Name: "canvasSampler", Kind: gfx.ResourceSampler, Group: 1, Binding: 0},
 			{Name: "canvasTexture", TextureView: gfx.TextureView2DArray, Group: 1, Binding: 1},
+			{Name: HaloDistanceSlot, TextureView: gfx.TextureView2DArray, Group: 1, Binding: 2},
 			{Name: "instances", Kind: gfx.ResourceStorageBuffer, Group: 2, Binding: 0},
 			{Name: "wobble", Kind: gfx.ResourceStorageBuffer, Group: 2, Binding: 1},
 		},
@@ -273,10 +292,23 @@ func (b *testBackend) BakeBuffer(_ gfx.BufferID, kind gfx.BufferKind, _ int, dat
 func (b *testBackend) BakeTexture(gfx.TextureID, int, int, gfx.TextureFormat, []byte, bool) {
 }
 func (b *testBackend) AllocateTexture(id gfx.TextureID, desc gfx.TextureDesc) {
+	if desc.Format == gfx.FormatR16F {
+		if b.distance.ids == nil {
+			b.distance.ids = map[gfx.TextureID]bool{}
+		}
+		b.distance.ids[id] = true
+		b.distance.allocations = append(b.distance.allocations, textureAllocation{id: id, desc: desc})
+		return
+	}
 	b.allocations = append(b.allocations, textureAllocation{id: id, desc: desc})
 }
 func (b *testBackend) UpdateTexture(id gfx.TextureID, layer int, region m.Recti, pixels []byte) {
-	b.updates = append(b.updates, textureUpdate{id: id, layer: layer, region: region, pixels: append([]byte(nil), pixels...)})
+	update := textureUpdate{id: id, layer: layer, region: region, pixels: append([]byte(nil), pixels...)}
+	if b.distance.ids[id] {
+		b.distance.updates = append(b.distance.updates, update)
+		return
+	}
+	b.updates = append(b.updates, update)
 }
 func (b *testBackend) SetPipeline(gfx.PipelineID) {}
 func (b *testBackend) BakeUniforms(arena []byte)  { b.uniforms = arena }
@@ -322,6 +354,9 @@ func (b *testBackend) SetTexture(id gfx.TextureID, group, binding int) {
 	if b.capture && group == 1 && binding == 1 {
 		b.textures = append(b.textures, boundTexture{draw: b.draws, id: id})
 	}
+	if b.capture && group == 1 && binding == 2 {
+		b.distance.bound = append(b.distance.bound, boundTexture{draw: b.draws, id: id})
+	}
 }
 
 // boundTexture is one canvasTexture a draw bound.
@@ -339,6 +374,10 @@ func (b *testBackend) ReleaseBuffer(id gfx.BufferID) {
 	b.releasedBuffers = append(b.releasedBuffers, id)
 }
 func (b *testBackend) ReleaseTexture(id gfx.TextureID) {
+	if b.distance.ids[id] {
+		b.distance.releases = append(b.distance.releases, id)
+		return
+	}
 	b.releasedTextures = append(b.releasedTextures, id)
 }
 
@@ -602,7 +641,7 @@ func BenchmarkCanvasRecordTriangles(b *testing.B) {
 }
 
 func BenchmarkCanvasFlushSprites(b *testing.B) {
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(b, fstest.MapFS{}, config, func(write *OpQueue) {
 		for i := range 100 {
 			write.Sprite(Layer(i%4), "", SpriteTransform{
@@ -625,7 +664,7 @@ func BenchmarkCanvasFlushTexturedTriangles(b *testing.B) {
 	for _, p := range paths {
 		filesystem[p] = &fstest.MapFile{Data: pngBytes(b, 8, 8)}
 	}
-	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * atlasTexelBytes * 2}
 	white := m.Color{R: 1, G: 1, B: 1, A: 1}
 	verts := []Vertex{
 		{Position: m.Vec2{X: 0, Y: 0}, Color: white}, {Position: m.Vec2{X: 8, Y: 0}, UV: m.Vec2{X: 1}, Color: white}, {Position: m.Vec2{X: 8, Y: 8}, UV: m.Vec2{X: 1, Y: 1}, Color: white},
@@ -663,7 +702,7 @@ func TestPrimitiveHelpersUseWhiteSpriteAndNormalizePaths(t *testing.T) {
 
 func TestEmptyPathUsesWhiteAtlasAndLayersAreOrdered(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{}}
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(5, "", SpriteTransform{Position: m.Vec2{X: 50}, Size: m.Vec2{X: 10, Y: 10}}, nil)
 		write.Sprite(1, "", SpriteTransform{Position: m.Vec2{X: 10}, Size: m.Vec2{X: 10, Y: 10}}, nil)
@@ -706,7 +745,7 @@ func TestLogicalAtlasPagesShareOneTextureArrayAndBatch(t *testing.T) {
 		"a.png": &fstest.MapFile{Data: pngBytes(t, 10, 10)},
 		"b.png": &fstest.MapFile{Data: pngBytes(t, 10, 10)},
 	}}
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "a.png", SpriteTransform{}, nil)
 		write.Sprite(0, "b.png", SpriteTransform{}, nil)
@@ -736,7 +775,7 @@ func TestLogicalAtlasPagesShareOneTextureArrayAndBatch(t *testing.T) {
 }
 
 func TestLayerTransformFinalStateAndActiveClipSnapshot(t *testing.T) {
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
 		write.SetClip(m.Rect{X: 1, Y: 2, Width: 3, Height: 4})
 		write.Sprite(1, "", SpriteTransform{Size: m.Vec2{X: 10, Y: 10}}, nil)
@@ -764,7 +803,7 @@ func TestLayerTransformFinalStateAndActiveClipSnapshot(t *testing.T) {
 }
 
 func TestClipSnapshotIsPerOperation(t *testing.T) {
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
 		write.Sprite(0, "", SpriteTransform{Size: m.Vec2{X: 10, Y: 10}}, nil)
 		write.SetClip(m.Rect{X: 1, Y: 2, Width: 3, Height: 4})
@@ -840,7 +879,7 @@ func TestDrawTrianglesSnapshotsStandardVerticesAndUsesLayerTransform(t *testing.
 		{Position: m.Vec2{X: 11, Y: 2}, Color: m.Color{G: 1, A: 1}, UV: m.Vec2{X: 1}},
 		{Position: m.Vec2{X: 1, Y: 12}, Color: m.Color{B: 1, A: 1}, UV: m.Vec2{Y: 1}},
 	}
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
 		write.DrawTriangles(1, vertices, nil)
 		vertices[0].Position.X = 99
@@ -873,7 +912,7 @@ func TestDrawTrianglesSnapshotsStandardVerticesAndUsesLayerTransform(t *testing.
 }
 
 func TestDrawTrianglesBindsTextureViaSlotParams(t *testing.T) {
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	white := m.Color{R: 1, G: 1, B: 1, A: 1}
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
 		write.DrawTriangles(0, []Vertex{
@@ -901,7 +940,7 @@ func TestDrawTrianglesSupportsCustomVertexLayout(t *testing.T) {
 		gfx.ShaderWithText("var canvasTexture: texture_2d<f32>;"),
 		gfx.DrawState{Blend: gfx.BlendOpaque},
 	)
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
 		write.DrawTriangles(1, vertices, &material)
 		vertices[0].Position.X = 99
@@ -936,7 +975,7 @@ func TestDrawTrianglesSupportsCustomVertexLayout(t *testing.T) {
 // the record is where tint lives and a shader reads it from the shared
 // VertexOut.
 func TestCustomMaterialKeepsItsStateAndCannotReclaimTint(t *testing.T) {
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	custom := MaterialWithState(
 		gfx.ShaderWithText("// custom canvas shader"),
 		gfx.DrawState{Blend: gfx.BlendOpaque},
@@ -982,7 +1021,7 @@ func TestCustomMaterialKeepsItsStateAndCannotReclaimTint(t *testing.T) {
 // is the same as saying nothing: the key takes the material's fingerprint, not
 // the fact that one was named.
 func TestSpritesSharingAMaterialBatchAndDefaultMaterialBatchesWithNil(t *testing.T) {
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	custom := MaterialWithState(gfx.ShaderWithText("// custom"), gfx.StateOverlay2D())
 	other := MaterialWithState(gfx.ShaderWithText("// other"), gfx.StateOverlay2D())
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
@@ -1013,7 +1052,7 @@ func TestSpritesSharingAMaterialBatchAndDefaultMaterialBatchesWithNil(t *testing
 // exists to make - because the reserved names are stripped before the ordered
 // name key is taken.
 func TestSpritesDifferingOnlyInTintStillMerge(t *testing.T) {
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
 		write.Sprite(0, "", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}}, nil,
 			gfx.ShaderParameterColor(TintSlot, m.Color{R: 1, A: 1}))
@@ -1034,7 +1073,7 @@ func TestSpritesDifferingOnlyInTintStillMerge(t *testing.T) {
 // zero-filled - for a multiplier, zero is the opposite of absent: the shader
 // has no array for that batch, and gfx drops its draw and says why.
 func TestAPerSpriteParameterBecomesOneArrayAndItsNameSplitsTheBatch(t *testing.T) {
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	wobbly := MaterialWithState(gfx.ShaderWithText("@group(2) @binding(1) var<storage, read> wobble: array<f32>;"), gfx.StateOverlay2D())
 	k, errs, backend := testKernelCapturing(t, fstest.MapFS{}, config, func(write *OpQueue) {
 		at := func(x float32) SpriteTransform {
@@ -1068,7 +1107,7 @@ func TestAPerSpriteParameterBecomesOneArrayAndItsNameSplitsTheBatch(t *testing.T
 // Both shape helpers and text can carry a material, and both are sprite draws,
 // so they batch with each other exactly as any other sprite does.
 func TestAFillAndAGlyphCarryingAMaterialAreSpriteDraws(t *testing.T) {
-	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * atlasTexelBytes * 2}
 	custom := MaterialWithState(gfx.ShaderWithText("// custom"), gfx.StateOverlay2D())
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
 		write.FillRect(0, m.Rect{Width: 4, Height: 4}, ShapeDraw{Color: m.Color{R: 1, A: 1}, Material: &custom})
@@ -1120,7 +1159,7 @@ func namedStorageBuffer(b *testBackend, size int) []byte {
 
 func TestSpriteLoadsOnceAndAppliesFramePadding(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 4, 3)}}}
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "sprite.png", SpriteTransform{
 			Size: m.Vec2{X: 10, Y: 10}, Frame: SpriteFrame{Left: 1, Top: 1, Right: 1},
@@ -1144,7 +1183,7 @@ func TestSpriteLoadsOnceAndAppliesFramePadding(t *testing.T) {
 
 func TestSpriteNineSliceExpandsAfterTextureDimensionsResolve(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}}
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "sprite.png", SpriteTransform{
 			Size: m.Vec2{X: 12, Y: 12}, NineSlice: SpriteFrame{Left: 1, Top: 1, Right: 1, Bottom: 1},
@@ -1159,7 +1198,7 @@ func TestSpriteNineSliceExpandsAfterTextureDimensionsResolve(t *testing.T) {
 
 func TestUnloadSpriteReloadsOnNextFrame(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 2, 2)}}}
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "sprite.png", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
 	})
@@ -1193,7 +1232,7 @@ func TestSpriteSnapshotsMaterialAndParametersWhileLayerTransformIsFinal(t *testi
 
 func TestSpriteSizeReturnsPixelDimensions(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 6, 4)}}}
-	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * atlasTexelBytes * 2}
 	k, _, _ := testKernel(t, filesystem, config, func(*OpQueue) {})
 
 	var size, again m.Vec2
@@ -1217,7 +1256,7 @@ func TestSpriteSizeReturnsPixelDimensions(t *testing.T) {
 
 func TestSpriteScaleRendersTextureSizeTimesScale(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 6, 4)}}}
-	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "sprite.png", SpriteTransform{Scale: 2}, nil)
 	})
@@ -1233,7 +1272,7 @@ func TestSpriteScaleRendersTextureSizeTimesScale(t *testing.T) {
 
 func TestSpriteSizeAspectFitAndDefault(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 6, 4)}}}
-	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "sprite.png", SpriteTransform{Size: m.Vec2{X: 12}}, nil)
 		write.Sprite(0, "sprite.png", SpriteTransform{Size: m.Vec2{Y: 8}}, nil)
@@ -1257,7 +1296,7 @@ func TestSpriteSizeAspectFitAndDefault(t *testing.T) {
 
 func TestSpriteFlipSwapsUV(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 6, 4)}}}
-	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "sprite.png", SpriteTransform{Size: m.Vec2{X: 6, Y: 4}}, nil)
 		write.Sprite(0, "sprite.png", SpriteTransform{Size: m.Vec2{X: 6, Y: 4}, FlipX: true}, nil)
@@ -1290,7 +1329,7 @@ func TestSpriteFlipSwapsUV(t *testing.T) {
 // the atlas packs. Both are cached, so a second frame opens nothing.
 func TestTiledSpriteRepeatsInsideItsAtlasEntry(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"wave.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}}
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	tint := m.Color{R: 1, G: 0, B: 0, A: 1}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "wave.png", SpriteTransform{Size: m.Vec2{X: 12, Y: 4}, TileX: true}, nil,
@@ -1330,7 +1369,7 @@ func TestTiledSpriteRepeatsInsideItsAtlasEntry(t *testing.T) {
 // too. What a tiled draw still carries to the sampler is its Filter.
 func TestATiledSpriteSamplesTheAtlasClamped(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"wave.png": &fstest.MapFile{Data: pngBytes(t, 4, 4)}}}
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "wave.png", SpriteTransform{Size: m.Vec2{X: 12, Y: 4}, TileX: true, Filter: gfx.FilterNearest}, nil)
 	})
@@ -1528,7 +1567,7 @@ func uniformVariable(t *testing.T, module *ir.Module, name string) ir.GlobalVari
 // and nothing else fails.
 func TestAtlasArrayIsAllocatedSrgb(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"a.png": &fstest.MapFile{Data: pngBytes(t, 10, 10)}}}
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "a.png", SpriteTransform{}, nil)
 	})
@@ -1598,7 +1637,7 @@ func TestTrianglesShaderParses(t *testing.T) {
 // built from a module missing canvasTint.
 func TestASpriteDrawReachesTheBackendWithTheRampIncluded(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 2, 2)}}}
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "sprite.png", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil)
 	})
@@ -1643,7 +1682,7 @@ fn fs_main() -> @location(0) vec4<f32> {
 }
 `
 	filesystem := fstest.MapFS{"app.wgsl": &fstest.MapFile{Data: []byte(appShader)}}
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	material := MaterialWithState(gfx.ShaderWithResource("app.wgsl"), gfx.StateOverlay2D())
 	k, _, backend := testKernel(t, filesystem, config, func(write *OpQueue) {
 		write.Sprite(0, "", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, &material)
@@ -1678,7 +1717,7 @@ func TestTheTintRampIsIncludedRatherThanCopied(t *testing.T) {
 
 func TestSpriteSizeReadsHeaderWithoutGPUUpload(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 6, 4)}}}
-	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, filesystem, config, func(*OpQueue) {})
 	var size m.Vec2
 	probeLookup(k, func(la LookupAccess) { size = la.SpriteSize("sprite.png") })
@@ -1692,7 +1731,7 @@ func TestSpriteSizeReadsHeaderWithoutGPUUpload(t *testing.T) {
 
 func TestLookupReportsMissingAndInvalidPathsOncePerEpisode(t *testing.T) {
 	filesystem := &testFS{FS: fstest.MapFS{}}
-	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * 4 * 2}
+	config := Config{AtlasSize: 32, LayersPerArray: 2, MaxAtlasBytes: 32 * 32 * atlasTexelBytes * 2}
 	k, errs, _ := testKernelCapturing(t, filesystem, config, func(*OpQueue) {})
 	var missing, invalid m.Vec2
 	probeLookup(k, func(la LookupAccess) {
@@ -1758,7 +1797,7 @@ func instanceAt(buffer []byte, i int) []byte {
 // the check gfx would bind a buffer descriptor into a uniform slot and draw
 // garbage with no diagnostic anywhere.
 func TestASpriteDrawParameterNamingAUniformIsReported(t *testing.T) {
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, errs, _ := testKernelCapturing(t, fstest.MapFS{}, config, func(write *OpQueue) {
 		write.Sprite(0, "", SpriteTransform{Size: m.Vec2{X: 8, Y: 8}}, nil,
 			gfx.ShaderParameterFloat("customValue", 7))
@@ -1778,7 +1817,7 @@ func TestASpriteDrawParameterNamingAUniformIsReported(t *testing.T) {
 // the batch key - which is what lets a roster of units in different player
 // colours cost one draw rather than one per player.
 func TestDifferingTintsShareOneBatch(t *testing.T) {
-	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * 4 * 2}
+	config := Config{AtlasSize: 64, LayersPerArray: 2, MaxAtlasBytes: 64 * 64 * atlasTexelBytes * 2}
 	files := fstest.MapFS{"sprite.png": &fstest.MapFile{Data: pngBytes(t, 4, 3)}}
 	k, _, backend := testKernel(t, files, config, func(write *OpQueue) {
 		write.Sprite(0, "sprite.png", SpriteTransform{Size: m.Vec2{X: 4, Y: 4}},

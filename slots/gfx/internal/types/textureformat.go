@@ -18,6 +18,11 @@ const (
 	// FormatDepth32F is the one depth format, renderable and sampleable. There
 	// is no stencil aspect anywhere in the engine.
 	FormatDepth32F
+	// FormatR16F is one 16-bit float channel: a scalar field that has to filter,
+	// such as a distance in texels, where eight bits run out of either range or
+	// precision. Uploads are little-endian IEEE half floats, two bytes a texel.
+	// It has no mip chain: box-filtering it is not the engine's to define.
+	FormatR16F
 	// FrameBufferFormat is what every TargetDescrScreen pass renders into: the frame
 	// buffer gfx owns, which the implicit present pass then puts on the swapchain.
 	// The swapchain itself is unreachable as an sRGB surface - gogpu hardcodes
@@ -45,6 +50,8 @@ func (f TextureFormat) String() string {
 		return "RGBA8 sRGB"
 	case FormatDepth32F:
 		return "depth"
+	case FormatR16F:
+		return "R16 float"
 	default:
 		return fmt.Sprintf("texture format %d", f)
 	}

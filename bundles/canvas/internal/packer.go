@@ -13,7 +13,11 @@ import (
 // holds for a missing file and for either packer refusal alike. A draw handed
 // one draws nothing.
 type AtlasEntry struct {
-	Texture   gfx.TextureDescr
+	Texture gfx.TextureDescr
+	// Distance is the companion of Texture that the halo material reads: the
+	// same array laid out texel for texel, holding each texel's distance to
+	// the nearest ink of its own slot. See distanceField.
+	Distance  gfx.TextureDescr
 	UV        m.Vec4
 	TexelSize float32
 	Layer     int
@@ -124,6 +128,7 @@ func (s *atlasShelf) place(pageSize, width, height int) (x, y int, ok bool) {
 
 type atlasArray struct {
 	texture  gfx.TextureDescr
+	distance gfx.TextureDescr // texture's distance-field companion; see AtlasEntry.Distance
 	layers   []atlasShelf
 	live     int  // occupied slots; when it reaches zero the array is released
 	released bool // texture freed, index reusable
@@ -160,7 +165,7 @@ func newPacker(config Config) *packer {
 }
 
 func (p *packer) arrayBytes() int64 {
-	return int64(p.config.AtlasSize) * int64(p.config.AtlasSize) * 4 * int64(p.config.LayersPerArray)
+	return atlasArrayBytes(p.config)
 }
 
 // insert packs one image and uploads it, or says why it would not.
@@ -172,11 +177,14 @@ func (p *packer) insert(source insertion, resources *gfx.ResourceQueue) (AtlasEn
 	}
 	upload := paddedRGBA(source.pixels, source.width, source.height, source.padding, source.fill)
 	array := &p.arrays[arrayIndex]
-	resources.UploadTexture(array.texture, layer, m.Recti{
-		X: x, Y: y, Width: slotWidth, Height: slotHeight,
-	}, upload, false)
+	slot := m.Recti{X: x, Y: y, Width: slotWidth, Height: slotHeight}
+	// The field is measured over the padded upload, the texels the shader can
+	// actually sample, so the gutter's ink is measured as the colour samples it.
+	resources.UploadTexture(array.distance, layer, slot, distanceField(upload, slotWidth, slotHeight), false)
+	resources.UploadTexture(array.texture, layer, slot, upload, false)
 	entry := AtlasEntry{
-		Texture: array.texture,
+		Texture:  array.texture,
+		Distance: array.distance,
 		UV: m.Vec4{
 			X: float32(x+source.padding) / float32(p.config.AtlasSize),
 			Y: float32(y+source.padding) / float32(p.config.AtlasSize),
@@ -245,11 +253,13 @@ func (p *packer) place(width, height int, resources *gfx.ResourceQueue) (arrayIn
 	// alpha, and 1.0 is a fixed point of the transfer function), and correct
 	// for the white texel for the same reason.
 	texture := resources.NewTexture(p.config.AtlasSize, p.config.AtlasSize, p.config.LayersPerArray, gfx.FormatRGBA8Srgb, false)
+	distance := resources.NewTexture(p.config.AtlasSize, p.config.AtlasSize, p.config.LayersPerArray, gfx.FormatR16F, false)
+	array := atlasArray{texture: texture, distance: distance, layers: make([]atlasShelf, p.config.LayersPerArray)}
 	if index < 0 {
-		p.arrays = append(p.arrays, atlasArray{texture: texture, layers: make([]atlasShelf, p.config.LayersPerArray)})
+		p.arrays = append(p.arrays, array)
 		index = len(p.arrays) - 1
 	} else {
-		p.arrays[index] = atlasArray{texture: texture, layers: make([]atlasShelf, p.config.LayersPerArray)}
+		p.arrays[index] = array
 	}
 	p.bytes += p.arrayBytes()
 	x, y, _ = p.arrays[index].layers[0].place(p.config.AtlasSize, width, height)
@@ -290,8 +300,10 @@ func (p *packer) releaseArray(index int, resources *gfx.ResourceQueue) {
 		return
 	}
 	resources.ReleaseTexture(array.texture)
+	resources.ReleaseTexture(array.distance)
 	array.released = true
 	array.texture = gfx.TextureDescr{}
+	array.distance = gfx.TextureDescr{}
 	array.layers = nil
 	array.live = 0
 	p.bytes -= p.arrayBytes()
@@ -317,11 +329,22 @@ func (p *packer) releaseAll(resources *gfx.ResourceQueue) {
 	for i := range p.arrays {
 		if !p.arrays[i].released {
 			resources.ReleaseTexture(p.arrays[i].texture)
+			resources.ReleaseTexture(p.arrays[i].distance)
 		}
 	}
 	clear(p.free)
 	p.arrays = nil
 	p.bytes = 0
+}
+
+// atlasTexelBytes is what one atlas texel costs on the GPU: four bytes of
+// sRGB colour and the half float of its distance-field companion.
+const atlasTexelBytes = 4 + distanceTexelBytes
+
+// atlasArrayBytes is what one whole atlas array costs, colour and distance
+// together - the unit MaxAtlasBytes is weighed in.
+func atlasArrayBytes(config Config) int64 {
+	return int64(config.AtlasSize) * int64(config.AtlasSize) * atlasTexelBytes * int64(config.LayersPerArray)
 }
 
 func paddedRGBA(source []byte, width, height, padding int, fill gutterFill) []byte {

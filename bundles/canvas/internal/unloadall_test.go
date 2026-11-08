@@ -20,7 +20,7 @@ import (
 // levelConfig is a budget for exactly one texture array of two 16-texel pages.
 // The white texel and two sprites padded to 14x14 fill both pages, so a third
 // sprite needs an array the budget cannot pay for.
-var levelConfig = Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+var levelConfig = Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 
 // levelRig draws two level-one sprites, until levelOne is cleared, and a
 // level-two sprite in every frame. It is the streaming shape: what the game

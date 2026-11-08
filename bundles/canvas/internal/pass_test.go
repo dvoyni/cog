@@ -12,7 +12,7 @@ import (
 // own, and gfx's merge rule collapses them because every pass but the first
 // preserves both attachments and every pass but the last keeps both.
 func TestCanvasLayersCollapseToOneGpuPass(t *testing.T) {
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
 		write.Clear(0, m.Color{A: 1})
 		write.FillRect(0, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{R: 1, A: 1}})
@@ -45,7 +45,7 @@ func TestCanvasLayersCollapseToOneGpuPass(t *testing.T) {
 // Clear is positioned: it stays on the layer it names even when that layer
 // draws nothing, instead of migrating to whichever layer happens to draw.
 func TestClearStaysOnItsLayerWhenThatLayerIsEmpty(t *testing.T) {
-	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	config := Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 	k, _, backend := testKernel(t, fstest.MapFS{}, config, func(write *OpQueue) {
 		write.Clear(-5, m.Color{R: 1, A: 1})
 		write.FillRect(3, m.Rect{Width: 10, Height: 10}, ShapeDraw{Color: m.Color{A: 1}})

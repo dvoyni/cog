@@ -13,6 +13,8 @@ func textureFormat(format gfx.TextureFormat) gputypes.TextureFormat {
 		return gputypes.TextureFormatRGBA8UnormSrgb
 	case gfx.FormatDepth32F:
 		return gputypes.TextureFormatDepth32Float
+	case gfx.FormatR16F:
+		return gputypes.TextureFormatR16Float
 	default:
 		return gputypes.TextureFormatRGBA8Unorm
 	}
@@ -49,9 +51,11 @@ func textureUsage(desc gfx.TextureDesc) gputypes.TextureUsage {
 }
 
 // mipmapsSupported reports whether a mip chain can be generated for a format.
-// Box-filtering depth is meaningless, so it is refused rather than approximated.
+// Box-filtering depth is meaningless, so it is refused rather than approximated;
+// the half-float field is refused because the box filter below reads four
+// eight-bit channels, and a field's right reduction is the field's to say.
 func mipmapsSupported(format gfx.TextureFormat) bool {
-	return format != gfx.FormatDepth32F
+	return format != gfx.FormatDepth32F && format != gfx.FormatR16F
 }
 
 // downsampleTexels halves an image for the next mip level, filtering in the

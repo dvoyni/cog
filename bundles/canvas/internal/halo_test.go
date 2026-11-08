@@ -269,7 +269,7 @@ func TestTheHaloInterStageStructFitsTheWebGPUFloor(t *testing.T) {
 	}
 }
 
-// The halo's frame rejection is a vector comparison - any(tap < lo) - and that
+// The halo's frame test is a vector comparison - all(in.uv >= lo) - and that
 // is the form naga's SPIR-V backend used to refuse: it lowered cleanly to IR and
 // then died at pipeline creation with "unsupported expression kind:
 // ir.ExprRelational". Writing it the natural way is safe only because go.mod
@@ -284,12 +284,14 @@ func TestTheHaloVectorComparisonsReachTheSPIRVBinary(t *testing.T) {
 		t.Fatalf("compile %q to SPIR-V: %v", HaloShaderPath, err)
 	}
 
-	// OpAny reduces the frame rejection, OpAll the silhouette test underneath it.
-	const opAny, opAll = 154, 155
+	// OpAll reduces the frame test that guards the fragment's own texel. The
+	// band once rejected kernel taps with any() as well; the distance field
+	// takes no taps, so all() is the vector comparison left to carry the check.
+	const opAll = 155
 	for _, op := range []struct {
 		name string
 		code uint32
-	}{{"OpAny", opAny}, {"OpAll", opAll}} {
+	}{{"OpAll", opAll}} {
 		if !spirvCarriesOpcode(blob, op.code) {
 			t.Errorf("the halo's SPIR-V carries no %s, so its vector comparisons are no longer "+
 				"vector comparisons - if the shader was spelled out component-wise again, that "+
@@ -350,11 +352,13 @@ func TestTheHaloDeclaresItsOwnVertexStage(t *testing.T) {
 }
 
 // Groups are numbered by what a binding is, and the halo binds what the
-// built-in sprite material binds plus its own profile in group 0: it declares no
+// built-in sprite material binds plus its own profile in group 0 and the
+// atlas's distance field beside canvasTexture in group 1: it declares no
 // parameter array of its own and claims nothing in group 3.
 func TestTheHaloNumbersItsGroupsByKind(t *testing.T) {
 	want := map[string][2]uint32{
-		"u": {0, 0}, "halo": {0, 1}, "canvasSampler": {1, 0}, "canvasTexture": {1, 1}, "instances": {2, 0},
+		"u": {0, 0}, "halo": {0, 1}, "canvasSampler": {1, 0}, "canvasTexture": {1, 1},
+		"canvasHaloDistance": {1, 2}, "instances": {2, 0},
 	}
 	seen := map[string][2]uint32{}
 	for _, variable := range lowerBuiltinShader(t, HaloShaderPath).GlobalVariables {
@@ -433,7 +437,8 @@ fn fs_main(in: HaloVertexOut) -> @location(0) vec4<f32> {
 		t.Fatalf("lower a material built on %s: %v", HaloBandPath, err)
 	}
 	want := map[string][2]uint32{
-		"u": {0, 0}, "halo": {0, 1}, "fade": {0, 2}, "canvasSampler": {1, 0}, "canvasTexture": {1, 1}, "instances": {2, 0},
+		"u": {0, 0}, "halo": {0, 1}, "fade": {0, 2}, "canvasSampler": {1, 0}, "canvasTexture": {1, 1},
+		"canvasHaloDistance": {1, 2}, "instances": {2, 0},
 	}
 	seen := map[string][2]uint32{}
 	for _, variable := range module.GlobalVariables {
@@ -450,7 +455,7 @@ fn fs_main(in: HaloVertexOut) -> @location(0) vec4<f32> {
 // haloConfig is the small atlas the shape tests draw into: no artwork, so the
 // generated white texel is all the atlas ever holds.
 func haloConfig() Config {
-	return Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * 4 * 2}
+	return Config{AtlasSize: 16, LayersPerArray: 2, MaxAtlasBytes: 16 * 16 * atlasTexelBytes * 2}
 }
 
 // readBuiltinSource reads one embedded source as it ships, before the
