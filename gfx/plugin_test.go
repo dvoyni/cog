@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/gfx/recording"
@@ -158,7 +159,7 @@ func TestDeviceAccessIsNotElevatedByAssertion(t *testing.T) {
 	})
 }
 
-func TestDestroyReleasesTheDeviceAdapterAndInstance(t *testing.T) {
+func TestTeardownReleasesTheDeviceAdapterAndInstance(t *testing.T) {
 	h := newHarness(t)
 	h.mustSpawn(nil)
 	h.quit()
@@ -169,5 +170,57 @@ func TestDestroyReleasesTheDeviceAdapterAndInstance(t *testing.T) {
 	}
 	if got := kinds(h.instance.Recording().Calls); !slices.Equal(got, want) {
 		t.Fatalf("calls = %v, want %v", got, want)
+	}
+}
+
+func TestTeardownReleasesTheDeviceInAJobBeforeAnyDestroy(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+
+	h.quit()
+
+	assertDeviceReleasedBeforeAnyDestroy(t, h)
+}
+
+func TestAPinnedDeviceReleaseWaitsForTheMainThread(t *testing.T) {
+	h := newHarness(t)
+	h.pinTasks = true
+	h.mustSpawn(nil)
+	callCount := len(h.instance.Recording().Calls)
+
+	h.supervisor.Quit()
+	select {
+	case <-h.supervisor.Done():
+		t.Error("the supervisor quit with the main thread never ticked, want the pinned release still waiting for it")
+	case <-time.After(50 * time.Millisecond):
+	}
+	if calls := h.instance.Recording().Calls[callCount:]; len(calls) != 0 {
+		t.Errorf("the teardown made calls %v before the main thread ticked, want none", kinds(calls))
+	}
+	h.quit()
+
+	assertDeviceReleasedBeforeAnyDestroy(t, h)
+}
+
+func TestABeatAfterTheDeviceIsReleasedDrawsNothing(t *testing.T) {
+	h := newHarness(t)
+	h.beatAtStop = true
+	h.mustSpawn(nil)
+
+	h.quit()
+
+	if calls := h.instance.Recording().Calls; calls[len(calls)-1].Kind != recording.CallKindReleaseInstance {
+		t.Errorf("calls = %v, want none after the instance's release", kinds(calls))
+	}
+}
+
+// assertDeviceReleasedBeforeAnyDestroy fails t unless the last calls h's
+// instance had recorded when the harness's Destroy ran, before gfx's, are the
+// device's, the adapter's and the instance's releases.
+func assertDeviceReleasedBeforeAnyDestroy(t *testing.T, h *harness) {
+	t.Helper()
+	want := []recording.CallKind{recording.CallKindReleaseDevice, recording.CallKindReleaseAdapter, recording.CallKindReleaseInstance}
+	if got := kinds(h.callsAtDestroy); len(got) < len(want) || !slices.Equal(got[len(got)-len(want):], want) {
+		t.Errorf("calls when the first Destroy ran = %v, want them ending with %v", got, want)
 	}
 }

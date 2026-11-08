@@ -7,4 +7,17 @@ use (
 	./kernel
 	./metronome
 	./platform
+	./submodules/gogpu
+)
+
+// The modules others require at v0.0.0 are replaced by their directories as
+// well as used: once a module from outside the workspace is in the build,
+// Go reads the requirement graph, and fetches a used module's v0.0.0
+// otherwise.
+replace (
+	github.com/dvoyni/cog/gfx v0.0.0 => ./gfx
+	github.com/dvoyni/cog/kernel v0.0.0 => ./kernel
+	github.com/dvoyni/cog/metronome v0.0.0 => ./metronome
+	github.com/dvoyni/cog/platform v0.0.0 => ./platform
+	github.com/gogpu/gogpu v0.0.0 => ./submodules/gogpu
 )

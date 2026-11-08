@@ -269,7 +269,7 @@ func TestAMapTheBackendFailsPublishesMapStatusFailedWithItsErrorInLogErr(t *test
 	}
 }
 
-func TestDestroyUnmapsAndReleasesOnlyPendingMapsBuffersPublishingNothing(t *testing.T) {
+func TestTeardownUnmapsAndReleasesOnlyPendingMapsBuffersPublishingNothing(t *testing.T) {
 	h := newHarness(t)
 	h.mustSpawn(nil)
 	var pending gfx.Buffer

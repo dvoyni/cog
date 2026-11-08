@@ -32,10 +32,11 @@ func main() {
 }
 ```
 
-- **Main thread.** gogpu starts its platform and device at gfx's first call,
-  inside `Spawn`, and every window and frame call runs on the thread that
-  started it. Spawning from another goroutine is not checked and fails on
-  macOS.
+- **Main thread.** gogpu starts its platform and adapter at gfx's first
+  call, and requests its device at the next, both inside `Spawn`, and every
+  window and frame call runs on the thread that started it, as does its stop
+  at the kernel's teardown. Spawning from another goroutine is not checked
+  and fails on macOS.
 - **Order.** gogpu reads `gfx.Tasks` in its `Init` to pin them, so it comes
   after gfx and platform.
 

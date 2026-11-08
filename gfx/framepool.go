@@ -361,6 +361,9 @@ func (pool *framePool) unmarkLost(window platform.Window) bool {
 // published: the acquire wait of the newest acquire finished, the previous
 // frame's under MaxInFlight 1.
 func (p *Plugin) draw(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event RenderEvent) (RenderEvent, kernel.JobHandle) {
+	if p.device.released.Load() {
+		return event, in
+	}
 	if p.device.lost.Load() {
 		recovered := ex.Schedule(p.tasks.RecoverDevice, event.Beat, in, p.device.frames.lastPresentJob()).Handle()
 		p.device.frames.setLastPresent(recovered)

@@ -640,7 +640,7 @@ func surfaceCalls(calls []recording.Call) []recording.Call {
 	return answer
 }
 
-func TestTasksHoldTheSurfaceJobsAndTheRecoveryForABackendToPin(t *testing.T) {
+func TestTasksHoldTheSurfaceJobsTheReleaseAndTheRecoveryForABackendToPin(t *testing.T) {
 	h := newHarness(t)
 	h.pinTasks = true
 	h.mustSpawn(nil)
@@ -650,7 +650,7 @@ func TestTasksHoldTheSurfaceJobsAndTheRecoveryForABackendToPin(t *testing.T) {
 	}
 	if h.tasks.CreateSurface == nil || h.tasks.ReleaseSurface == nil || h.tasks.ConfigureSurfaces == nil ||
 		h.tasks.AcquireFramebuffers == nil || h.tasks.PresentFramebuffers == nil || h.tasks.ReleaseOpenSurfaces == nil ||
-		h.tasks.RecoverDevice == nil {
-		t.Errorf("Tasks = %+v, want every surface job and the recovery", h.tasks)
+		h.tasks.ReleaseDevice == nil || h.tasks.RecoverDevice == nil {
+		t.Errorf("Tasks = %+v, want every surface job, the device's release and the recovery", h.tasks)
 	}
 }
