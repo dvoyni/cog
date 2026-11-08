@@ -17,15 +17,13 @@ type Plugin struct {
 	// device holds the instance, the adapter and the backend device Start
 	// requested, for Destroy to release; nil where Start got no further.
 	device *device
-	// tasks are the surface tasks the Tasks resource holds, flushTask what
-	// runs between a frame's recording and its present, releaseCaptureTask
-	// what releases a capture's buffer after its CapturedEvent, and
-	// recoverTask what recovers a lost device in place of a frame; the
-	// handlers schedule them.
+	// tasks are the surface tasks and the recovery the Tasks resource holds,
+	// flushTask what runs between a frame's recording and its present, and
+	// releaseCaptureTask what releases a capture's buffer after its
+	// CapturedEvent; the handlers schedule them.
 	tasks              Tasks
 	flushTask          *kernel.Task[Frame, kernel.NoResult]
 	releaseCaptureTask *kernel.Task[Buffer, kernel.NoResult]
-	recoverTask        *kernel.Task[metronome.Beat, kernel.NoResult]
 }
 
 // Config is gfx's part of the kernel's config, under PluginName: what the
@@ -80,11 +78,11 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 		AcquireFramebuffers: configurator.RegisterTask2(acquireFramebuffers),
 		PresentFramebuffers: configurator.RegisterTask1(presentFramebuffers),
 		ReleaseOpenSurfaces: configurator.RegisterTask1(releaseOpenSurfaces),
+		RecoverDevice:       configurator.RegisterTask1(recoverDevice),
 	}
 	configurator.InitResource(p.tasks)
 	p.flushTask = configurator.RegisterTask1(flushFrame)
 	p.releaseCaptureTask = configurator.RegisterTask1(releaseCapture)
-	p.recoverTask = configurator.RegisterTask1(recoverDevice)
 	configurator.Subscribe(p.publishCapture)
 	configurator.Subscribe(p.scheduleOpenSurfacesRelease)
 	configurator.InitResource(Handlers{

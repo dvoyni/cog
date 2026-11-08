@@ -58,7 +58,7 @@ func TestTeardownReleasesTheSurfacesOfOpenWindowsBeforeTheDevice(t *testing.T) {
 
 func TestAPinnedReleaseOfOpenSurfacesRunsOnTheMainThreadAtTeardown(t *testing.T) {
 	h := newHarness(t)
-	h.pinSurfaceTasks = true
+	h.pinTasks = true
 	h.mustSpawn(nil)
 	window := h.openWindow()
 	h.waitForCalls(recording.CallKindCreateSurface, 1)
@@ -640,16 +640,17 @@ func surfaceCalls(calls []recording.Call) []recording.Call {
 	return answer
 }
 
-func TestTasksHoldTheSurfaceJobsForABackendToPin(t *testing.T) {
+func TestTasksHoldTheSurfaceJobsAndTheRecoveryForABackendToPin(t *testing.T) {
 	h := newHarness(t)
-	h.pinSurfaceTasks = true
+	h.pinTasks = true
 	h.mustSpawn(nil)
 
 	if !h.tasksFound {
 		t.Fatal("gfx installed no Tasks")
 	}
 	if h.tasks.CreateSurface == nil || h.tasks.ReleaseSurface == nil || h.tasks.ConfigureSurfaces == nil ||
-		h.tasks.AcquireFramebuffers == nil || h.tasks.PresentFramebuffers == nil || h.tasks.ReleaseOpenSurfaces == nil {
-		t.Errorf("Tasks = %+v, want every surface job", h.tasks)
+		h.tasks.AcquireFramebuffers == nil || h.tasks.PresentFramebuffers == nil || h.tasks.ReleaseOpenSurfaces == nil ||
+		h.tasks.RecoverDevice == nil {
+		t.Errorf("Tasks = %+v, want every surface job and the recovery", h.tasks)
 	}
 }

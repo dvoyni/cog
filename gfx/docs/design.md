@@ -102,7 +102,8 @@ and submitted by their owner. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md)
 | `Config` | config | `PowerPreference`, `ForceFallbackAdapter`, `RequiredFeatures`, `RequiredLimits`, `Surface`. |
 
 gfx schedules acquire, configure, flush, present and recovery itself; the
-`Tasks` resource holds the surface tasks among them, for a backend to pin.
+`Tasks` resource holds the surface tasks and the recovery among them, for a
+backend to pin.
 
 ## The seam and the device
 
@@ -243,8 +244,8 @@ gfx schedules acquire, configure, flush, present and recovery itself; the
   Which thread a backend call must run on is the backend's, and differs by
   platform: the `Tasks` resource holds the surface tasks (create, release,
   configure, acquire, present, and the release of the surfaces still open at
-  teardown), and the backend's plugin, listed after gfx, pins those its
-  platform needs to the main thread.
+  teardown) and the device recovery, and the backend's plugin, listed after
+  gfx, pins those its platform needs to the main thread.
 - **One frame covers every open window:** an acquire per window in one job,
   one flush, a present of each. A window with no framebuffer this frame
   (hidden, a zero framebuffer, outdated, timed out) answers the zero view. `DrawEvent` is published every beat, even when no window has one.
@@ -404,7 +405,8 @@ gfx schedules acquire, configure, flush, present and recovery itself; the
 ## Device loss
 
 ([Device loss](https://github.com/dvoyni/cog/issues/669),
-[ADR 0003](adr/0003-handles-survive-device-loss.md))
+[ADR 0003](adr/0003-handles-survive-device-loss.md),
+[gfx: device recovery is a task in gfx.Tasks, for a backend to pin](https://github.com/dvoyni/cog/issues/716))
 
 - **Detection:** the backend maps its errors onto `ErrDeviceLost`, from any
   call that answers an error. gfx checks every backend call it makes; the
@@ -415,9 +417,11 @@ gfx schedules acquire, configure, flush, present and recovery itself; the
   object it holds, and drops the framebuffer the skipped present left
   acquired.
 - **Handles survive.** On the next beat, instead of a frame, `Draw` schedules
-  a recovery under the write lock: release the device, request a new
-  one from the same adapter (a fresh adapter if that fails), recreate every
-  object under its old handle from its kept descriptor, in dependency order
+  the recovery, `Tasks.RecoverDevice`, under the write lock. A backend pins
+  it when its device replacement touches state its platform keeps on the
+  main thread, as gogpu's does. The recovery: release the device, request a
+  new one from the same adapter (a fresh adapter if that fails), recreate
+  every object under its old handle from its kept descriptor, in dependency order
   (buffers, textures, samplers, shader modules; views, bind group layouts;
   pipeline layouts; pipelines; bind groups), mark every surface, publish
   `DeviceRecoveredEvent`. It publishes no `DrawEvent` and is the beat's out

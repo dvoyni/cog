@@ -6,8 +6,8 @@ import "github.com/dvoyni/cog/platform"
 // plugin binds it in its Init with configurator.BindSocket[gfx.InstanceSocket],
 // gogpu or the headless recording adapter, and a kernel with none panics in
 // Spawn. gfx calls it from Start on, from whichever worker runs the job: it
-// pins nothing, and a backend whose platform wants the surface calls on the
-// main thread pins the tasks in Tasks.
+// pins nothing, and a backend whose platform wants the surface calls, or the
+// device's replacement, on the main thread pins the tasks in Tasks.
 //
 // The backend keeps its native objects by gfx's handles: gfx allocates each
 // handle, checks its generation and keeps its descriptor, and hands the
