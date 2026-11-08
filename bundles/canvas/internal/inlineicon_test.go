@@ -131,3 +131,56 @@ func TestAnInlineIconHaloesWhiteAtTheRunsAlpha(t *testing.T) {
 		t.Fatalf("haloed icon tint = %+v, want %+v - a neutral band at the run's presence", got, want)
 	}
 }
+
+// ${path|scale} grows the icon by scale on both axes about the middle of the
+// cap height, so it stays centred on the letters it sits among.
+func TestAScaledInlineIconGrowsAboutTheCapHeightsMiddle(t *testing.T) {
+	filesystem := fstest.MapFS{"icon.png": &fstest.MapFile{Data: pngBytes(t, 8, 4)}}
+	k, _, backend := testKernel(t, filesystem, Config{}, func(write *OpQueue) {
+		write.Text(0, "", "${icon.png}", TextDraw{Position: m.Vec2{X: 10, Y: 40}, Size: 16, Color: m.Color{R: 1, G: 1, B: 1, A: 1}})
+		write.Text(1, "", "${icon.png|1.5}", TextDraw{Position: m.Vec2{X: 10, Y: 40}, Size: 16, Color: m.Color{R: 1, G: 1, B: 1, A: 1}})
+	})
+	runFrame(k)
+
+	instances := spriteInstances(backend)
+	if len(instances) != 2 {
+		t.Fatalf("instance buffers = %d, want one per layer", len(instances))
+	}
+	plain, scaled := instanceAt(instances[0], 0), instanceAt(instances[1], 0)
+	pw, ph := floatAt(plain, 8), floatAt(plain, 12)
+	sw, sh := floatAt(scaled, 8), floatAt(scaled, 12)
+	if pw != 2*ph {
+		t.Fatalf("plain icon %vx%v, want the source's 2:1 aspect", pw, ph)
+	}
+	if !nearly(sw, pw*1.5) || !nearly(sh, ph*1.5) {
+		t.Fatalf("scaled icon %vx%v, want 1.5 x %vx%v", sw, sh, pw, ph)
+	}
+	if px, sx := floatAt(plain, 0), floatAt(scaled, 0); !nearly(px, sx) {
+		t.Fatalf("scaled icon starts at x %v, want the pen's %v", sx, px)
+	}
+	if pc, sc := floatAt(plain, 4)+ph/2, floatAt(scaled, 4)+sh/2; !nearly(pc, sc) {
+		t.Fatalf("scaled icon centred at y %v, want the plain icon's %v", sc, pc)
+	}
+}
+
+func nearly(a, b float32) bool {
+	d := a - b
+	return d < 1e-3 && d > -1e-3
+}
+
+// Layout measures a scaled icon as wide as it draws, so a label sized from the
+// measurement holds it and wrapping breaks where the drawn line would.
+func TestAScaledInlineIconMeasuresAsWideAsItDraws(t *testing.T) {
+	filesystem := fstest.MapFS{"icon.png": &fstest.MapFile{Data: pngBytes(t, 8, 4)}}
+	k, _, _ := testKernel(t, filesystem, Config{}, func(*OpQueue) {})
+	probeLookup(k, func(lookup LookupAccess) {
+		plain := lookup.MeasureTextSize("", 16, "${icon.png}")
+		scaled := lookup.MeasureTextSize("", 16, "${icon.png|1.5}")
+		if plain.X <= 0 || !nearly(scaled.X, plain.X*1.5) {
+			t.Errorf("scaled icon measures %v wide, want 1.5 x %v", scaled.X, plain.X)
+		}
+		if scaled.Y != plain.Y {
+			t.Errorf("scaled icon line is %v tall, want the line height %v it may overlap", scaled.Y, plain.Y)
+		}
+	})
+}

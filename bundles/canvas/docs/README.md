@@ -178,7 +178,10 @@ and call:
   and `Line(Layer, start, end m.Vec2, ShapeDraw)` for primitives.
 - `Text(Layer, fontPath, text, TextDraw)` for text with multiline, `${path}`
   inline-image and `$[language]{text}` language-span support (see
-  [Fallback fonts](#fallback-fonts)). A backslash escapes a literal `${` or `\`. An inline
+  [Fallback fonts](#fallback-fonts)). An inline image is as tall as the font's
+  cap height; `${path|scale}` multiplies that by a positive `scale` on both axes,
+  centred on the cap height, so `${path|1.5}` may reach into the lines above and
+  below. A backslash escapes a literal `${` or `\`. An inline
   icon takes the run's alpha and not its colour: `TextDraw.Color` colours a
   glyph, whose atlas entry is white plus coverage, and would modulate an icon,
   whose texel is already the artwork.
@@ -735,7 +738,7 @@ in the handler's `Lock`, then use:
 | --- | --- | --- |
 | `SpriteSize(path) m.Vec2` | intrinsic pixel size | Reads the image header; no GPU upload. It is the header and only the header: a sprite already packed into the atlas is still measured by what its file said. |
 | `FontMetrics(path, size int) FontMetrics` | `Ascent, Descent, LineHeight, XHeight, CapHeight` | Logical pixels. |
-| `MeasureTextSize(path, size int, text string) m.Vec2` | measured size | Multi-line; width is the widest line. `${path}` tokens size to cap height. |
+| `MeasureTextSize(path, size int, text string) m.Vec2` | measured size | Multi-line; width is the widest line. `${path}` tokens size to cap height, `${path|scale}` to cap height times scale. |
 | `MeasureWrappedTextSize(path, size int, text string, width float32) m.Vec2` | wrapped size | Wraps words at width and splits oversized words between runes. |
 
 Bind `access.GetWrite[*canvas.Lookup]()` and `access.GetWrite[*gfx.ResourceQueue]()`

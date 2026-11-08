@@ -288,7 +288,8 @@ Single-image nine-slices use one framed texture; tiled nine-slices use separate
 images for their corners, edges, and center.
 
 `ui.Font` is a `{Path, Size}` descriptor. Text measurement and drawing parse
-`${path}` inline-image tokens; a backslash escapes a literal `${` or `\`.
+`${path}` inline-image tokens, cap-height tall, or `${path|scale}` for scale
+times that; a backslash escapes a literal `${` or `\`.
 `TextParams.WordWrapping` wraps drawing at the arranged element width.
 `WrapWidth` optionally provides the width used for intrinsic measurement.
 

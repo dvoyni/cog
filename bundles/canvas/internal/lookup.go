@@ -334,7 +334,7 @@ func (la LookupAccess) measureInlineLine(face *Font, line []InlineSegment, capHe
 	var width float32
 	for _, segment := range line {
 		if segment.Icon {
-			width += la.iconWidth(segment.Text, capHeight)
+			width += la.iconWidth(segment.Text, capHeight*segment.IconScale())
 			continue
 		}
 		width += MeasureLine(fonts, face, segment.Text, segment.Language)

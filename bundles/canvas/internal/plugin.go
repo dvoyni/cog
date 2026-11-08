@@ -1004,7 +1004,7 @@ func (p *plugin) drawText(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerT
 		var width float32
 		for _, segment := range line {
 			if segment.Icon {
-				width += p.iconWidth(fr, segment.Text, capHeight)
+				width += p.iconWidth(fr, segment.Text, capHeight*segment.IconScale())
 				continue
 			}
 			width += GlyphLineWidth(fonts, face, segment.Text, segment.Language, fr.resources) * toLogical
@@ -1034,10 +1034,14 @@ func (p *plugin) drawText(gfxWrite *gfx.OpQueue, fr *frame, surf surface, layerT
 				if entry.Width <= 0 || entry.Height <= 0 {
 					continue
 				}
-				width := capHeight * float32(entry.Width) / float32(entry.Height)
+				// A scaled icon grows about the middle of the cap height, so it
+				// stays centred on the letters beside it and may reach into the
+				// lines above and below.
+				height := capHeight * segment.IconScale()
+				width := height * float32(entry.Width) / float32(entry.Height)
 				transform := SpriteTransform{
-					Position: m.Vec2{X: x, Y: y + ascent - capHeight},
-					Size:     m.Vec2{X: width, Y: capHeight},
+					Position: m.Vec2{X: x, Y: y + ascent - capHeight/2 - height/2},
+					Size:     m.Vec2{X: width, Y: height},
 				}
 				// The run's alpha and not its colour. Rgb is what colour the ink
 				// is, which a glyph needs because its atlas entry is RGB=255
@@ -1080,7 +1084,7 @@ func (p *plugin) wrapMeasure(fr *frame, fontPath string, size float32, fallback 
 		var width float32
 		for _, segment := range line {
 			if segment.Icon {
-				width += p.iconWidth(fr, segment.Text, capHeight)
+				width += p.iconWidth(fr, segment.Text, capHeight*segment.IconScale())
 				continue
 			}
 			width += MeasureLine(fonts, face, segment.Text, segment.Language) * scale

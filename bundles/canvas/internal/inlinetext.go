@@ -2,16 +2,20 @@ package internal
 
 import (
 	"math"
+	"strconv"
 	"strings"
 	"unicode"
 )
 
 // InlineSegment is one piece of a parsed text line: either a literal text run or
-// an inline icon referenced by ${path}.
+// an inline icon referenced by ${path} or ${path|scale}.
 type InlineSegment struct {
 	Icon bool
 	// Text is the literal run (with escapes resolved) or the icon path.
 	Text string
+	// Scale multiplies an icon's cap-height size, from a ${path|scale} token.
+	// Zero is 1, which a plain ${path} and every literal run carry.
+	Scale float32
 	// Language is the language a $[language]{...} span set the run in, which
 	// picks the fallback font its characters are looked up in first. It is
 	// empty outside a span, and on an icon.
@@ -24,6 +28,11 @@ type InlineSegment struct {
 // closing brace before end of line) stays literal; an empty "${}" token is
 // reported by callers and omitted. Newlines split lines so measurement and
 // drawing stay in lockstep.
+//
+// An icon token may end in "|scale", a positive number the icon's size is
+// multiplied by: ${path|1.5} is half as tall again as ${path}, and as much wider.
+// A suffix that is not a positive finite number stays part of the path, so the
+// lookup reports the token rather than it drawing at a size nobody asked for.
 //
 // A span's text is literal up to its first unescaped "}": it holds no icons and
 // no nested span, and "\}" puts a brace inside one. A span that is malformed -
@@ -85,7 +94,8 @@ func ParseInlineText(text string) [][]InlineSegment {
 				continue
 			}
 			flushLiteral()
-			current = append(current, InlineSegment{Icon: true, Text: text[i+2 : closeIndex]})
+			path, scale := splitIconScale(text[i+2 : closeIndex])
+			current = append(current, InlineSegment{Icon: true, Text: path, Scale: scale})
 			i = closeIndex + 1
 		default:
 			literal.WriteByte(c)
@@ -94,6 +104,28 @@ func ParseInlineText(text string) [][]InlineSegment {
 	}
 	endLine()
 	return lines
+}
+
+// splitIconScale splits an icon token's "path|scale" into the path and the
+// scale, which is 0 (meaning 1) when the token has no valid suffix.
+func splitIconScale(token string) (path string, scale float32) {
+	bar := strings.LastIndexByte(token, '|')
+	if bar < 0 {
+		return token, 0
+	}
+	value, err := strconv.ParseFloat(token[bar+1:], 32)
+	if err != nil || !(value > 0) || math.IsInf(value, 0) {
+		return token, 0
+	}
+	return token[:bar], float32(value)
+}
+
+// IconScale is the factor an icon segment's cap-height size is multiplied by.
+func (s InlineSegment) IconScale() float32 {
+	if s.Scale <= 0 {
+		return 1
+	}
+	return s.Scale
 }
 
 // parseLanguageSpan reads the $[language]{text} span starting at text[start],

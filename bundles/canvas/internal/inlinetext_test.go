@@ -82,3 +82,37 @@ func assertInlineLines(t *testing.T, lines [][]InlineSegment, want ...string) {
 		}
 	}
 }
+
+func TestParseInlineTextReadsAnIconScaleSuffix(t *testing.T) {
+	lines := ParseInlineText("a${icon.png|1.5}b${icon.png}")
+	if len(lines) != 1 || len(lines[0]) != 4 {
+		t.Fatalf("segments = %+v, want a, icon, b, icon", lines)
+	}
+	scaled, plain := lines[0][1], lines[0][3]
+	if !scaled.Icon || scaled.Text != "icon.png" || scaled.IconScale() != 1.5 {
+		t.Fatalf("scaled icon = %+v, want icon.png at 1.5", scaled)
+	}
+	if !plain.Icon || plain.Text != "icon.png" || plain.IconScale() != 1 {
+		t.Fatalf("plain icon = %+v, want icon.png at 1", plain)
+	}
+}
+
+// A suffix that is no positive number is left on the path, so the lookup
+// reports the token as a missing sprite instead of it drawing at some size.
+func TestParseInlineTextKeepsAnInvalidScaleOnThePath(t *testing.T) {
+	for _, token := range []string{"icon.png|", "icon.png|big", "icon.png|0", "icon.png|-2", "icon.png|NaN", "icon.png|Inf"} {
+		lines := ParseInlineText("${" + token + "}")
+		segment := lines[0][0]
+		if segment.Text != token || segment.IconScale() != 1 {
+			t.Fatalf("%q parsed as %+v, want the whole token as the path at scale 1", token, segment)
+		}
+	}
+}
+
+func TestWrapInlineTextKeepsAnIconsScale(t *testing.T) {
+	lines := WrapInlineText(ParseInlineText("one ${icon.png|2}two"), 4, measuredInlineRunes)
+	segment := lines[1][0]
+	if !segment.Icon || segment.IconScale() != 2 {
+		t.Fatalf("wrapped icon = %+v, want its scale of 2 kept", segment)
+	}
+}
