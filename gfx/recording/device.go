@@ -439,7 +439,6 @@ func (d *device) SurfaceCapabilities(window platform.Window) gfx.SurfaceCapabili
 		Formats:      slices.Clone(capabilities.Formats),
 		PresentModes: slices.Clone(capabilities.PresentModes),
 		AlphaModes:   slices.Clone(capabilities.AlphaModes),
-		Capturable:   capabilities.Capturable,
 	}
 }
 

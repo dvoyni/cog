@@ -34,9 +34,9 @@ and cleared. Writes reach the backend. Buffers map asynchronously: each
 poll, at `Poll`, every submit and every frame's flush, publishes
 `BufferMappedEvent` for the maps resolved, `MapStatusFailed` with its error
 in `LogErr` for one the backend fails, and `Destroy` unmaps and releases
-the buffers of the maps still pending. A window's capture, requested on a
-capturable surface, is taken from the first frame acquired after the
-request, which tells the backend at the acquire, copied out by gfx's own
+the buffers of the maps still pending. A window's capture, requested on
+any configured window of an 8-bit format, is taken from the first frame
+acquired after the request, which tells the backend at the acquire, copied out by gfx's own
 encoder after every submit order and delivered by `CapturedEvent`, its buffer unmapped and released
 after the publication's out dependency, and `ReadCapture` answers its
 picture un-strided, BGRA swapped and alpha opaque. A device loss the
@@ -342,7 +342,7 @@ backend to pin.
   requests, or has a zero framebuffer is neither configured nor acquired; it
   stays marked, so it is configured on the first frame it is drawable again.
 - **One surface request for the whole application:**
-  `SurfaceRequest{Format, PresentMode, Capturable}` in `Config.Surface`,
+  `SurfaceRequest{Format, PresentMode}` in `Config.Surface`,
   replaced at runtime with `ExclusiveDevice.RequestSurface`. Zero means
   `BGRA8Unorm`, which every backend accepts, and Fifo, which every backend
   has. sRGB encoding is the last pass's; `BGRA8UnormSrgb` is honoured on
@@ -393,14 +393,12 @@ backend to pin.
   `image.NRGBA`: rows un-strided, BGRA swapped, alpha opaque, no colour
   conversion. An event that is not `CaptureStatusCaptured` answers an
   error. One capture is in flight per window (`ErrCaptureBusy`).
-- **A surface must be capturable:** `SurfaceRequest.Capturable` reaches the
-  backend in `SurfaceConfiguration`, which adds `CopySrc` on Vulkan and
-  `StorageBinding` on Metal. DX12 cannot honour it yet: its
-  `SurfaceCapabilities.Capturable` is false, and the surface falls back with
-  a `LogErr`. A window whose configuration is not capturable, or not yet
-  configured, or whose format is not 8-bit BGRA or RGBA, `RequestCapture`
-  answers `ErrCaptureUnsupported`. A window that acquired
-  nothing that frame gets `CapturedEvent` with `CaptureStatusNotAcquired`.
+- **Every configured window of an 8-bit format can be captured:** no
+  surface is configured for it, so every backend captures, DX12 and the
+  software adapter included. A window not yet configured, or whose format
+  is not 8-bit BGRA or RGBA, `RequestCapture` answers
+  `ErrCaptureUnsupported`. A window that acquired nothing that frame gets
+  `CapturedEvent` with `CaptureStatusNotAcquired`.
 - **At shutdown** pending maps and captures are dropped without an event;
   `Destroy` unmaps and releases their buffers.
 
@@ -514,7 +512,8 @@ the [gogpu map](https://github.com/dvoyni/cog/issues/611):
   layouts and pipelines (a plain `bool`);
 - under `-tags rust`, go-webgpu's `Device` is unsafe from several goroutines;
 - DX12's flip model rejects the sRGB formats wgpu advertises, and its back
-  buffers cannot be copied out;
+  buffers cannot be copied out, so the backend draws a captured frame
+  offscreen;
 - no backend presents HDR;
 - DX12 reports a removed device only as an untyped error, and Metal never
   detects loss;

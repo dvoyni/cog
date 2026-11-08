@@ -131,10 +131,11 @@ Copy what you want into a `MapRead` buffer, call `Device.MapBuffer`, and wait
 for `BufferMappedEvent`. Read `MappedRange` in a task, then `UnmapBuffer`.
 Nothing blocks.
 
-To capture a window, set `SurfaceRequest.Capturable` (not on DX12 yet), call
-`Device.RequestCapture(window)`, and read the frame a frame later from
-`CapturedEvent` with `gfx.ReadCapture`, in a task joined into the handler's
-out dependency. The frame captured is the first acquired after the call, so
+To capture a window of an 8-bit BGRA or RGBA format, call
+`Device.RequestCapture(window)` once its surface is configured, on any
+backend, and read the frame a frame later from `CapturedEvent` with
+`gfx.ReadCapture`, in a task joined into the handler's out dependency. The
+frame captured is the first acquired after the call, so
 a request made while a frame draws captures the next one. `event.Beat` says
 which moment it shows.
 

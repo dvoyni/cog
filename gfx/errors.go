@@ -25,7 +25,8 @@ var ErrDeviceLost = errors.New("gfx: device lost")
 var ErrCaptureBusy = errors.New("gfx: a capture of this window is in flight")
 
 // ErrCaptureUnsupported is answered by Device.RequestCapture for a window
-// whose surface is not capturable, or whose format is not 8-bit BGRA or RGBA.
+// whose surface is not yet configured, or whose format is not 8-bit BGRA or
+// RGBA.
 var ErrCaptureUnsupported = errors.New("gfx: this window cannot be captured")
 
 // ErrVertexMismatch is answered by Device.CreateRenderPipeline for vertex

@@ -15,23 +15,32 @@ import (
 	"github.com/dvoyni/cog/platform"
 )
 
-func TestACapturableRequestConfiguresEverySurfaceCapturable(t *testing.T) {
-	h := newHarness(t)
-	h.mustSpawn(&gfx.Config{Surface: gfx.SurfaceRequest{Capturable: true}})
-	window := h.openWindow()
-	h.waitForCalls(recording.CallKindCreateSurface, 1)
+func TestEveryConfiguredWindowOfAn8BitFormatCanBeCaptured(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		format gfx.TextureFormat
+	}{
+		{"BGRA8Unorm", gfx.TextureFormatBGRA8Unorm},
+		{"BGRA8UnormSrgb", gfx.TextureFormatBGRA8UnormSrgb},
+		{"RGBA8Unorm", gfx.TextureFormatRGBA8Unorm},
+		{"RGBA8UnormSrgb", gfx.TextureFormatRGBA8UnormSrgb},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.mustSpawn(&gfx.Config{Surface: gfx.SurfaceRequest{Format: test.format}})
+			window := h.openWindow()
+			h.waitForCalls(recording.CallKindCreateSurface, 1)
+			h.advance(time.Millisecond)
 
-	h.advance(time.Millisecond)
+			h.readDevice(func(device gfx.Device) { mustSucceed(t, device.RequestCapture(window)) })
+			h.advance(time.Millisecond)
+			h.waitForCalls(recording.CallKindReleaseBuffer, 1)
 
-	want := gfx.SurfaceConfiguration{Format: gfx.TextureFormatBGRA8Unorm, PresentMode: gfx.PresentModeFifo, Width: 64, Height: 48, Capturable: true}
-	if configured := h.waitForCalls(recording.CallKindConfigureSurface, 1)[0]; configured.Arguments != (recording.ConfigureSurfaceArguments{Window: window, Configuration: want}) {
-		t.Errorf("configured %+v, want %v with %+v", configured.Arguments, window, want)
+			if captured := h.capturedEvents(); len(captured) != 1 || captured[0].Status != gfx.CaptureStatusCaptured {
+				t.Errorf("published %+v, want one capture of %v", captured, window)
+			}
+		})
 	}
-	h.readDevice(func(device gfx.Device) {
-		if got, ok := device.SurfaceConfiguration(window); !ok || got != want {
-			t.Errorf("SurfaceConfiguration = %+v, %v, want %+v", got, ok, want)
-		}
-	})
 }
 
 func TestAFramebuffersTextureIsDescribedByItsConfigurationUntilThePresent(t *testing.T) {
@@ -46,7 +55,7 @@ func TestAFramebuffersTextureIsDescribedByItsConfigurationUntilThePresent(t *tes
 		texture = device.TextureViewTexture(device.Framebuffer(event.Frame, window))
 		described = device.TextureDescriptor(texture)
 	}
-	h.mustSpawn(&gfx.Config{Surface: gfx.SurfaceRequest{Capturable: true}})
+	h.mustSpawn(nil)
 	window = h.openWindow()
 	h.waitForCalls(recording.CallKindCreateSurface, 1)
 
@@ -72,26 +81,6 @@ func TestAFramebuffersTextureIsDescribedByItsConfigurationUntilThePresent(t *tes
 	})
 }
 
-func TestCapturableTheSurfaceLacksFallsBackWithALogErr(t *testing.T) {
-	h := newHarness(t)
-	capabilities := recording.SurfaceCapabilities
-	capabilities.Capturable = false
-	h.instance.AnswerNext(recording.CallKindSurfaceCapabilities, recording.Answer{Capabilities: capabilities})
-	h.mustSpawn(&gfx.Config{Surface: gfx.SurfaceRequest{Capturable: true}})
-	window := h.openWindow()
-	h.waitForCalls(recording.CallKindCreateSurface, 1)
-
-	h.advance(time.Millisecond)
-
-	want := gfx.SurfaceConfiguration{Format: gfx.TextureFormatBGRA8Unorm, PresentMode: gfx.PresentModeFifo, Width: 64, Height: 48}
-	if configured := h.waitForCalls(recording.CallKindConfigureSurface, 1)[0]; configured.Arguments != (recording.ConfigureSurfaceArguments{Window: window, Configuration: want}) {
-		t.Errorf("configured %+v, want %v with %+v", configured.Arguments, window, want)
-	}
-	if logged := h.takeLogged(); len(logged) != 1 {
-		t.Errorf("logged %v, want the fallback", logged)
-	}
-}
-
 func TestAWindowThatCannotBeCapturedAnswersErrCaptureUnsupported(t *testing.T) {
 	for _, test := range []struct {
 		name    string
@@ -100,9 +89,8 @@ func TestAWindowThatCannotBeCapturedAnswersErrCaptureUnsupported(t *testing.T) {
 		// request.
 		configured bool
 	}{
-		{"not capturable", gfx.SurfaceRequest{}, true},
-		{"not 8-bit BGRA or RGBA", gfx.SurfaceRequest{Format: gfx.TextureFormatRGBA16Float, Capturable: true}, true},
-		{"not yet configured", gfx.SurfaceRequest{Capturable: true}, false},
+		{"not 8-bit BGRA or RGBA", gfx.SurfaceRequest{Format: gfx.TextureFormatRGBA16Float}, true},
+		{"not yet configured", gfx.SurfaceRequest{}, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := newHarness(t)
@@ -145,7 +133,7 @@ func TestACaptureIsCopiedAfterEverySubmitOrderAndDeliveredWithItsFramesBeat(t *t
 		read, readErr = device.MappedRange(event.Buffer, 0, uint64(event.BytesPerRow*event.Height))
 		read = slices.Clone(read)
 	}
-	h.mustSpawn(&gfx.Config{Surface: gfx.SurfaceRequest{Capturable: true}})
+	h.mustSpawn(nil)
 	window := h.openWindowOfSize(platform.Size{Width: 50, Height: 30})
 	h.waitForCalls(recording.CallKindCreateSurface, 1)
 	buffers = h.createBuffers(1)
@@ -211,7 +199,7 @@ func TestACaptureRequestedAfterAFramesAcquireIsTakenFromTheNextFrameAcquired(t *
 			mustSucceed(t, device.RequestCapture(window))
 		}
 	}
-	h.mustSpawn(&gfx.Config{Surface: gfx.SurfaceRequest{Capturable: true}})
+	h.mustSpawn(nil)
 	window = h.openWindow()
 	h.waitForCalls(recording.CallKindCreateSurface, 1)
 
@@ -247,7 +235,7 @@ func TestAFramebuffersTextureIsACopySourceOnlyOnACapturedFrame(t *testing.T) {
 		defer mutex.Unlock()
 		usages = append(usages, device.TextureDescriptor(device.TextureViewTexture(device.Framebuffer(event.Frame, window))).Usage)
 	}
-	h.mustSpawn(&gfx.Config{Surface: gfx.SurfaceRequest{Capturable: true}})
+	h.mustSpawn(nil)
 	window = h.openWindow()
 	h.waitForCalls(recording.CallKindCreateSurface, 1)
 	h.advance(time.Millisecond)
@@ -276,7 +264,7 @@ func TestACaptureTakenByAFrameLostBeforeItsFlushIsTakenAfterTheRecovery(t *testi
 			_, _ = device.CreateBuffer(gfx.BufferDescriptor{Size: 4, Usage: gfx.BufferUsageFlagCopyDst})
 		}
 	}
-	h.mustSpawn(&gfx.Config{Surface: gfx.SurfaceRequest{Capturable: true}})
+	h.mustSpawn(nil)
 	window := h.openWindow()
 	h.waitForCalls(recording.CallKindCreateSurface, 1)
 	h.advance(time.Millisecond)
@@ -322,7 +310,7 @@ func TestACapturesBufferIsUnmappedAndReleasedAfterThePublicationsOutDependency(t
 			}
 		}
 	}
-	h.mustSpawn(&gfx.Config{Surface: gfx.SurfaceRequest{Capturable: true}})
+	h.mustSpawn(nil)
 	window := h.openWindow()
 	h.waitForCalls(recording.CallKindCreateSurface, 1)
 	h.advance(time.Millisecond)
@@ -350,7 +338,7 @@ func TestACapturesBufferIsUnmappedAndReleasedAfterThePublicationsOutDependency(t
 
 func TestASecondCaptureInFlightAnswersErrCaptureBusyUntilTheFirstIsDelivered(t *testing.T) {
 	h := newHarness(t)
-	h.mustSpawn(&gfx.Config{Surface: gfx.SurfaceRequest{Capturable: true}})
+	h.mustSpawn(nil)
 	window := h.openWindow()
 	h.waitForCalls(recording.CallKindCreateSurface, 1)
 	h.advance(time.Millisecond)
@@ -376,7 +364,7 @@ func TestASecondCaptureInFlightAnswersErrCaptureBusyUntilTheFirstIsDelivered(t *
 
 func TestAWindowAcquiringNothingInTheFrameIsDeliveredNotAcquired(t *testing.T) {
 	h := newHarness(t)
-	h.mustSpawn(&gfx.Config{Surface: gfx.SurfaceRequest{Capturable: true}})
+	h.mustSpawn(nil)
 	window := h.openWindow()
 	h.waitForCalls(recording.CallKindCreateSurface, 1)
 	h.advance(time.Millisecond)
@@ -409,7 +397,7 @@ func TestACaptureTheBackendFailsIsDeliveredFailedWithItsErrorInLogErr(t *testing
 		t.Run(test.name, func(t *testing.T) {
 			failure := errors.New("refused")
 			h := newHarness(t)
-			h.mustSpawn(&gfx.Config{Surface: gfx.SurfaceRequest{Capturable: true}})
+			h.mustSpawn(nil)
 			window := h.openWindow()
 			h.waitForCalls(recording.CallKindCreateSurface, 1)
 			h.advance(time.Millisecond)
@@ -521,7 +509,7 @@ func TestReadCaptureAnswersTheFramebufferUnstridedWithAlphaOpaqueAndBGRASwapped(
 				defer mutex.Unlock()
 				read, readErr = gfx.ReadCapture(device, event)
 			}
-			h.mustSpawn(&gfx.Config{Surface: gfx.SurfaceRequest{Format: test.format, Capturable: true}})
+			h.mustSpawn(&gfx.Config{Surface: gfx.SurfaceRequest{Format: test.format}})
 			window := h.openWindowOfSize(platform.Size{Width: 3, Height: 2})
 			h.waitForCalls(recording.CallKindCreateSurface, 1)
 			h.advance(time.Millisecond)

@@ -57,11 +57,6 @@ type SurfaceRequest struct {
 	// PresentMode is the present mode; zero is PresentModeFifo, the fallback
 	// when the surface lacks the one asked for.
 	PresentMode PresentMode
-	// Capturable lets Device.RequestCapture copy the framebuffer out: CopySrc
-	// on Vulkan, StorageBinding on Metal, which costs it framebufferOnly. DX12
-	// cannot honour it yet. Off by default; development and agent builds set
-	// it.
-	Capturable bool
 }
 
 // SurfaceConfiguration is what one window's surface is configured with.
@@ -69,8 +64,6 @@ type SurfaceConfiguration struct {
 	Format        TextureFormat
 	PresentMode   PresentMode
 	Width, Height uint32
-	// Capturable is SurfaceRequest.Capturable, where the surface honours it.
-	Capturable bool
 }
 
 // SurfaceCapabilities is what one window's surface can be configured with,
@@ -79,9 +72,6 @@ type SurfaceCapabilities struct {
 	Formats      []TextureFormat
 	PresentModes []PresentMode
 	AlphaModes   []CompositeAlphaMode
-	// Capturable is whether the surface can be configured Capturable: false
-	// on DX12.
-	Capturable bool
 }
 
 // AcquireStatus is what acquiring a window's framebuffer answered, mapped by
@@ -205,18 +195,12 @@ func configureSurfaces(k *kernel.Kernel, _ kernel.NoArg, manager kernel.Read[*pl
 			k.Logger().LogErr(fmt.Errorf("gfx: the surface of %v lacks present mode %v, falling back to Fifo", window, presentMode))
 			presentMode = PresentModeFifo
 		}
-		capturable := d.surfaceRequest.Capturable
-		if capturable && !capabilities.Capturable {
-			k.Logger().LogErr(fmt.Errorf("gfx: the surface of %v cannot be capturable, falling back to not", window))
-			capturable = false
-		}
 		size := manager.Get().FramebufferSize(window)
 		configuration := SurfaceConfiguration{
 			Format:      format,
 			PresentMode: presentMode,
 			Width:       uint32(size.Width),
 			Height:      uint32(size.Height),
-			Capturable:  capturable,
 		}
 		if err := d.backend.ConfigureSurface(window, configuration); err != nil {
 			d.logErr(fmt.Errorf("gfx: configuring the surface of %v: %w", window, err))
