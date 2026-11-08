@@ -134,7 +134,9 @@ Nothing blocks.
 To capture a window, set `SurfaceRequest.Capturable` (not on DX12 yet), call
 `Device.RequestCapture(window)`, and read the frame a frame later from
 `CapturedEvent` with `gfx.ReadCapture`, in a task joined into the handler's
-out dependency. `event.Beat` says which moment it shows.
+out dependency. The frame captured is the first acquired after the call, so
+a request made while a frame draws captures the next one. `event.Beat` says
+which moment it shows.
 
 ## Device loss
 

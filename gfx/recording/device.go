@@ -444,7 +444,7 @@ func (d *device) SurfaceCapabilities(window platform.Window) gfx.SurfaceCapabili
 }
 
 // ConfigureSurface records the configure and marks window's surface
-// configured, capturable as configuration says; an error when window has no surface, or holds a framebuffer
+// configured; an error when window has no surface, or holds a framebuffer
 // not yet presented.
 func (d *device) ConfigureSurface(window platform.Window, configuration gfx.SurfaceConfiguration) error {
 	return d.instance.record(CallKindConfigureSurface, ConfigureSurfaceArguments{Window: window, Configuration: configuration}, func() error {
@@ -456,19 +456,20 @@ func (d *device) ConfigureSurface(window platform.Window, configuration gfx.Surf
 			return fmt.Errorf("recording: configuring the surface of %v, its framebuffer not presented", window)
 		}
 		windowSurface.configured = true
-		windowSurface.capturable = configuration.Capturable
 		d.instance.surfaces[window] = windowSurface
 		return nil
 	}).Error
 }
 
 // AcquireFramebuffer records the acquire and answers the status AnswerNext
-// queued, Acquired when none is; a status with a framebuffer keeps texture
-// and view as window's until its present. An error when window has no surface, or holds
-// a framebuffer not yet presented, as wgpu answers ErrSurfaceAlreadyAcquired,
-// or its surface is not configured.
-func (d *device) AcquireFramebuffer(window platform.Window, texture gfx.Texture, view gfx.TextureView) (status gfx.AcquireStatus, err error) {
-	answer := d.instance.recordAnswered(CallKindAcquireFramebuffer, AcquireFramebufferArguments{Window: window, Texture: texture, View: view}, func(answer Answer) error {
+// queued, Acquired when none is; a status with a framebuffer keeps texture,
+// a copy source when captured, and view as window's until its present. An
+// error when window has no surface, or holds a framebuffer not yet
+// presented, as wgpu answers ErrSurfaceAlreadyAcquired, or its surface is
+// not configured.
+func (d *device) AcquireFramebuffer(window platform.Window, texture gfx.Texture, view gfx.TextureView, captured bool) (status gfx.AcquireStatus, err error) {
+	arguments := AcquireFramebufferArguments{Window: window, Texture: texture, View: view, Captured: captured}
+	answer := d.instance.recordAnswered(CallKindAcquireFramebuffer, arguments, func(answer Answer) error {
 		windowSurface, exists := d.instance.surfaces[window]
 		if !exists {
 			return fmt.Errorf("recording: acquiring the framebuffer of %v, which has no surface", window)
@@ -482,6 +483,7 @@ func (d *device) AcquireFramebuffer(window platform.Window, texture gfx.Texture,
 		if status := gfx.AcquireStatus(answer.Status); status == gfx.AcquireStatusAcquired || status == gfx.AcquireStatusSuboptimal {
 			windowSurface.framebufferTexture = texture
 			windowSurface.framebuffer = view
+			windowSurface.captured = captured
 			d.instance.surfaces[window] = windowSurface
 		}
 		return nil
@@ -499,6 +501,7 @@ func (d *device) Present(window platform.Window) error {
 		}
 		windowSurface.framebufferTexture = gfx.Texture{}
 		windowSurface.framebuffer = gfx.TextureView{}
+		windowSurface.captured = false
 		d.instance.surfaces[window] = windowSurface
 		return nil
 	}).Error
@@ -567,7 +570,7 @@ func (d *device) requireMapState(buffer gfx.Buffer, mapped bool) (*bufferObject,
 // requireTexture answers an error when texture is missing, or lacks usage,
 // for role; nil for the zero texture. A framebuffer acquired and not yet
 // presented is a texture whose usage is RenderAttachment, and CopySrc when
-// its surface is configured capturable.
+// its acquire was captured.
 func (d *device) requireTexture(texture gfx.Texture, usage gfx.TextureUsageFlags, role string) error {
 	if texture == (gfx.Texture{}) {
 		return nil

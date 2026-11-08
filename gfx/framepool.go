@@ -47,15 +47,18 @@ type framePool struct {
 }
 
 // frameSlot is one frame's state: the generation of the Frame it holds, its
-// beat, a framebuffer per window acquired, and the encoders taken for it,
-// each slice reused. Its mutex guards the encoders and the flushed flag, held only for
-// the check and the append, and is held as well as the pool's to change the
-// generation, so either guards reading it.
+// beat, a framebuffer per window acquired, the captures its acquire took, and
+// the encoders taken for it, each slice reused. Its mutex guards the encoders
+// and the flushed flag, held only for the check and the append, and is held as
+// well as the pool's to change the generation, so either guards reading it.
 type frameSlot struct {
 	mutex        sync.Mutex
 	generation   uint32
 	beat         metronome.Beat
 	framebuffers []framebuffer
+	// captures are the windows whose captures the frame's acquire took from
+	// the requested ones, for its flush to copy.
+	captures []platform.Window
 	// encoders are the frame's encoders, in the order taken until the flush
 	// sorts them.
 	encoders []frameEncoder
@@ -129,6 +132,7 @@ func (pool *framePool) release(frame Frame) {
 	defer slot.mutex.Unlock()
 	slot.generation = nextGeneration(slot.generation)
 	slot.framebuffers = slot.framebuffers[:0]
+	slot.captures = nil
 	clear(slot.encoders)
 	slot.encoders = slot.encoders[:0]
 	clear(slot.commandBuffers)
@@ -143,6 +147,13 @@ func (pool *framePool) addFramebuffer(frame Frame, acquired framebuffer) {
 	defer pool.mutex.Unlock()
 	slot := pool.slots[frame.slot]
 	slot.framebuffers = append(slot.framebuffers, acquired)
+}
+
+// setCaptures keeps windows as the captures frame's acquire took.
+func (pool *framePool) setCaptures(frame Frame, windows []platform.Window) {
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+	pool.slots[frame.slot].captures = windows
 }
 
 // addEncoder keeps taken as one of frame's encoders; ErrFrameFlushed when
@@ -369,28 +380,35 @@ func (p *Plugin) draw(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle
 	return event, present
 }
 
-// acquireFramebuffers acquires the framebuffer of every window with a
-// configured surface, not closing, shown and with a framebuffer of at least
-// one pixel, under the read lock, as a texture of its configuration, a copy
-// source when it is Capturable, and a view of it; and handles the status the backend answers
-// alike on every backend: Suboptimal is drawn and marks the surface for
-// configuring; Outdated is not drawn and marks it; Lost is not drawn, and
-// marks it lost and for configuring, so the configure recreates it first;
-// Timeout is not drawn and marks nothing. An error goes to LogErr, is not
-// drawn and marks the surface. A lost device acquires nothing, and a loss
-// ends the acquires. How long the backend's acquires blocked, by the
-// device's acquire stopwatch, is kept for the next DrawEvent, zero when none was made.
+// acquireFramebuffers takes the captures requested into frame, and acquires the
+// framebuffer of every window with a configured surface, not closing, shown and
+// with a framebuffer of at least one pixel, under the read lock, as a texture
+// of its configuration, a copy source when the window is captured, and a view
+// of it, telling the backend which are captured; and handles the status the
+// backend answers alike on every backend: Suboptimal is drawn and marks the
+// surface for configuring; Outdated is not drawn and marks it; Lost is not
+// drawn, and marks it lost and for configuring, so the configure recreates it
+// first; Timeout is not drawn and marks nothing. An error goes to LogErr, is
+// not drawn and marks the surface. A lost device acquires nothing, and a loss
+// ends the acquires. How long the backend's acquires blocked, by the device's
+// acquire stopwatch, is kept for the next DrawEvent, zero when none was made.
 func acquireFramebuffers(k *kernel.Kernel, frame Frame, manager kernel.Read[*platform.WindowManager], deviceHandle kernel.Read[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)
 	var wait time.Duration
 	defer func() { d.frames.setAcquireWait(wait) }()
+	d.mapMutex.Lock()
+	captures := d.requestedCaptures
+	d.requestedCaptures = nil
+	d.mapMutex.Unlock()
+	d.frames.setCaptures(frame, captures)
 	for _, window := range d.surfaces {
 		configuration, configured := d.configurations[window]
 		if d.lost.Load() || !configured || d.frames.isClosing(window) || !isWindowDrawable(manager.Get(), window) {
 			continue
 		}
+		captured := slices.Contains(captures, window)
 		usage := TextureUsageFlagRenderAttachment
-		if configuration.Capturable {
+		if captured {
 			usage |= TextureUsageFlagCopySrc
 		}
 		texture := d.textures.acquire(TextureDescriptor{
@@ -403,7 +421,7 @@ func acquireFramebuffers(k *kernel.Kernel, frame Frame, manager kernel.Read[*pla
 		})
 		view := d.textureViews.acquire(textureViewSource{texture: texture})
 		d.acquireStopwatch.Start()
-		status, err := d.backend.AcquireFramebuffer(window, texture, view)
+		status, err := d.backend.AcquireFramebuffer(window, texture, view, captured)
 		wait += d.acquireStopwatch.Elapsed()
 		switch {
 		case err != nil:
@@ -427,17 +445,17 @@ func acquireFramebuffers(k *kernel.Kernel, frame Frame, manager kernel.Read[*pla
 	return kernel.NoResult{}
 }
 
-// flushFrame finishes frame's encoders, under the read lock, and submits
-// them once, sorted by submit order, then gfx's own, which copies out the
-// framebuffers of the captures requested. An encoder whose Finish fails goes
-// to LogErr and is dropped, and so does a failing submit. A frame with no
-// encoder and no capture submits nothing. It then maps each capture's
-// buffer, and either way polls the maps after, publishing BufferMappedEvent
-// and CapturedEvent from its job for each resolved. On a lost device, or
-// once one is found lost, the frame skips its submit: the encoders left are
-// discarded, the command buffers released, and the captures not yet copied
-// stay requested. A submit made is kept, with when it was made by the
-// device's submission stopwatch, until a poll sees it finished.
+// flushFrame finishes frame's encoders, under the read lock, and submits them
+// once, sorted by submit order, then gfx's own, which copies out the
+// framebuffers of the captures its acquire took. An encoder whose Finish fails
+// goes to LogErr and is dropped, and so does a failing submit. A frame with no
+// encoder and no capture submits nothing. It then maps each capture's buffer,
+// and either way polls the maps after, publishing BufferMappedEvent and
+// CapturedEvent from its job for each resolved. On a lost device, or once one
+// is found lost, the frame skips its submit: the encoders left are discarded,
+// the command buffers released, and the captures its acquire took are requested
+// again, for a frame after the recovery. A submit made is kept, with when it
+// was made by the device's submission stopwatch, until a poll sees it finished.
 func flushFrame(k *kernel.Kernel, frame Frame, deviceHandle kernel.Read[Device]) kernel.NoResult {
 	d := deviceHandle.Get().(*device)
 	slot := d.frames.flush(frame)
@@ -455,7 +473,11 @@ func flushFrame(k *kernel.Kernel, frame Frame, deviceHandle kernel.Read[Device])
 		slot.commandBuffers = append(slot.commandBuffers, buffer)
 	}
 	var captures []CapturedEvent
-	if !d.lost.Load() {
+	if d.lost.Load() {
+		d.mapMutex.Lock()
+		d.requestedCaptures = slices.Concat(slot.captures, d.requestedCaptures)
+		d.mapMutex.Unlock()
+	} else {
 		captures = d.copyCaptures(slot)
 	}
 	submitted := !d.lost.Load()

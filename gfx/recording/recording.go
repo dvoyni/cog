@@ -266,9 +266,10 @@ type ConfigureSurfaceArguments struct {
 
 // AcquireFramebufferArguments are what AcquireFramebuffer was called with.
 type AcquireFramebufferArguments struct {
-	Window  platform.Window
-	Texture gfx.Texture
-	View    gfx.TextureView
+	Window   platform.Window
+	Texture  gfx.Texture
+	View     gfx.TextureView
+	Captured bool
 }
 
 // CreateBufferArguments are what CreateBuffer was called with.

@@ -24,9 +24,10 @@ frame's encoders in submit order and presents, writes reach the
 backend, and buffers map asynchronously, `BufferMappedEvent` published
 from the poll that finds a map resolved or failed, the failure's error
 logged, and `Destroy` unmaps and releases the buffers of the maps still
-pending, and a capture requested on a capturable surface is copied out
-after every submit order and delivered by `CapturedEvent`, its buffer
-released after the publication, and `ReadCapture` answers its picture,
+pending, and a capture requested on a capturable surface is taken from the
+frame acquired after the request, copied out after every submit order
+and delivered by `CapturedEvent`, its buffer released after the
+publication, and `ReadCapture` answers its picture,
 and a device loss from any backend call is logged and published once, no
 call reaching the backend after it, every call with an error answering
 `ErrDeviceLost`, `PreprocessShader` aside, and the frame in flight skipping its submit and present,
