@@ -17,7 +17,8 @@ import "time"
 type Config struct {
 	// BufferSize is how much audio the device buffers, and so how long a block
 	// the Mixer produces and how long the declick ramp is.
-	//   0 means 10ms, the default, which the spike ran for 12s with no underrun
+	//   0 means the platform default: 10ms, which the spike ran for 12s with no
+	//   underrun, and 40ms on macOS, whose AudioQueue plays 10ms as noise
 	BufferSize time.Duration
 	// SampleRate is the rate the Mixer produces and the device consumes. A Clip
 	// is converted to it once, in Prepare, so the device thread never resamples

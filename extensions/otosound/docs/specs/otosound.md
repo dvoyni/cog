@@ -87,6 +87,7 @@ assumptions.
 |---|---|
 | Builds at `CGO_ENABLED=0` | `windows/amd64`, `darwin/arm64`, `linux/amd64`, `js/wasm` |
 | Desktop latency | **10 ms with zero underruns** over 12 s — 1200 reads, exactly 12.000 s produced |
+| macOS latency (2026-11) | **10 ms plays as noise** on an M2 Pro: oto's AudioQueue splits it into four 120-frame buffers. 20, 40 and 60 ms are clean; the darwin default is 40 ms |
 | The pull path allocates per unit time, not per read | 41 reads and 400 reads in a fixed 4 s window both produced ~458 allocations (~114/s) |
 | Context open | ~15 ms |
 | Contexts per process | **one**, but a context mints several players |
@@ -241,7 +242,8 @@ force rather than the ones it asked for.
 ```go
 type Config struct {
 	// BufferSize is how much audio the device buffers.
-	//   0 means 10ms, the default, which the spike ran for 12s with no underrun
+	//   0 means the platform default: 10ms, which the spike ran for 12s with no
+	//   underrun, and 40ms on macOS, whose AudioQueue plays 10ms as noise
 	BufferSize time.Duration
 	// SampleRate is the rate the Mixer produces and the device consumes.
 	//   0 means 48000

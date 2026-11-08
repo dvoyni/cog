@@ -1,5 +1,5 @@
-github.com/dvoyni/gogpu v0.54.1-0.20261106154716-92d976d655fb h1:DrA4+CM3s8GOSYDL8SGsWV5nGkvR6pfJLBflJ0/A9DU=
-github.com/dvoyni/gogpu v0.54.1-0.20261106154716-92d976d655fb/go.mod h1:V6+0B+iXxgiQkdlRJvUyjiYrGRDoooxYNgw9qTCZN8w=
+github.com/dvoyni/gogpu v0.54.1-0.20261108054339-fbafb1fe1215 h1:YT5Vv1WXq1sX3fqLUvKs0rABZsoBICKA9RqgCITNDNU=
+github.com/dvoyni/gogpu v0.54.1-0.20261108054339-fbafb1fe1215/go.mod h1:V6+0B+iXxgiQkdlRJvUyjiYrGRDoooxYNgw9qTCZN8w=
 github.com/dvoyni/oggvorbis v1.0.6-0.20260921150857-546236badfd4 h1:RTOwvoccqx04hPNmpmHxeYcYZ4URluwekaKF0x7H7xc=
 github.com/dvoyni/oggvorbis v1.0.6-0.20260921150857-546236badfd4/go.mod h1:MEig/1Sbh2CUGcPHBehQY/m5VNjtkUe/y+u6mmf6mmM=
 github.com/dvoyni/vorbis v1.0.3-0.20260921150454-ab3e6ce988a8 h1:fqJbeqdCXYaQphvLTkxI4CTQUKjt+b30KLE00xzQuaA=

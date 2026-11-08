@@ -11,15 +11,8 @@ import (
 	"github.com/ebitengine/oto/v3"
 )
 
-const (
-	// defaultSampleRate is the rate the Mixer produces when Config names none.
-	defaultSampleRate = 48000
-	// defaultBufferSize is how much audio the device buffers when Config names
-	// none. The spike ran 10ms for 12s with zero underruns - 1200 reads,
-	// exactly 12.000s produced - and it is also the declick ramp's length,
-	// because the ramp is one block.
-	defaultBufferSize = 10 * time.Millisecond
-)
+// defaultSampleRate is the rate the Mixer produces when Config names none.
+const defaultSampleRate = 48000
 
 // errNoContext is a play attempted before any context exists, which only
 // happens if the open that should have created one was lost to a shutdown.
