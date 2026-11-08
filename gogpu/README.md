@@ -5,7 +5,9 @@ GPU and real windows. It implements [gfx](../gfx) and [platform](../platform)
 over our gogpu fork in `submodules/gogpu`, driving it through `HostLoop` from
 the kernel's main-thread tick. Its `shader` package is the WGSL preprocessor.
 
-Status: designed; of it, only `gogpu/shader` is built. The design is in
+Status: being built: gfx gets gogpu's adapter and device, with every other
+device call answering an error naming it, and `gogpu/shader` preprocesses
+shaders. The design is in
 [`docs/design.md`](docs/design.md), the guide in
 [`docs/README.md`](docs/README.md), and the build on the
 [gogpu map](https://github.com/dvoyni/cog/issues/611).
@@ -21,6 +23,20 @@ Status: designed; of it, only `gogpu/shader` is built. The design is in
 - **`gogpu/shader`:** `Preprocess` over an `fs.FS`, with `#include`,
   `#define`, `#const` and `#if`. gfx reaches it through
   `Device.PreprocessShader`; a tool with no GPU imports it directly.
+
+## Kernel surface
+
+- **Resources it installs:** none.
+- **Resources it reads from other plugins:** `gfx.Tasks`, in its `Init`, to
+  pin `ReleaseDevice` to the main thread, where the `HostLoop` stops.
+- **Events it publishes:** none.
+- **Events it subscribes to:** none.
+- **Sockets it declares:** none.
+- **Sockets it binds:** `gfx.InstanceSocket`, with the plugin itself: its
+  `RequestAdapter` starts the `HostLoop`, and its `Release` stops it.
+
+The plugin is listed after gfx, and checks it with `Dependencies`: it reads
+`gfx.Tasks` in its `Init`.
 
 ## Runs on
 

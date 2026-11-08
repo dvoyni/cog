@@ -9,7 +9,7 @@ recording adapter in its `recording` package for tests. It knows nothing of
 materials, scenes or the ECS.
 
 Status: being built. Every declaration is in this module. The device comes
-up in `Start` and is released in `Destroy`, every resource
+up in `Start` and is released by a task `Stop` schedules, every resource
 is created and released, `CreateQuerySet` answering
 `ErrQuerySetsUnavailable` until the wgpu fork exposes query sets, a pipeline with a zero layout getting the
 layouts the backend reflects created as explicit ones, pipeline
@@ -23,8 +23,8 @@ the design says, publishes `DrawEvent`, submits the
 frame's encoders in submit order and presents, writes reach the
 backend, and buffers map asynchronously, `BufferMappedEvent` published
 from the poll that finds a map resolved or failed, the failure's error
-logged, and `Destroy` unmaps and releases the buffers of the maps still
-pending, and a capture requested on a configured window of an 8-bit
+logged, and the device's release unmaps and releases the buffers of the
+maps still pending, and a capture requested on a configured window of an 8-bit
 format is taken from the frame acquired after the request, copied out
 after every submit order
 and delivered by `CapturedEvent`, its buffer released after the
@@ -87,13 +87,14 @@ What remains is on the [gfx map](https://github.com/dvoyni/cog/issues/608).
 - **Resources it installs:**
   - `Device`: the GPU, read under its read lock, elevated under its write
     lock.
-  - `Tasks`: the surface tasks and the device recovery, for a backend's
-    plugin to pin to the main thread where its platform needs that; gfx pins
-    none and schedules them itself. `ReleaseOpenSurfaces` among them is what
-    `Stop` schedules, to release the surfaces of the windows still open
-    before any `Destroy`; `RecoverDevice` is what `Draw` schedules in place
-    of a frame after a loss, pinned by a backend whose device replacement
-    touches main-thread state.
+  - `Tasks`: the surface tasks, the device's release and its recovery, for
+    a backend's plugin to pin to the main thread where its platform needs
+    that; gfx pins none and schedules them itself. `ReleaseOpenSurfaces`
+    and then `ReleaseDevice` among them are what `Stop` schedules, to
+    release the surfaces of the windows still open, then the device, the
+    adapter and the instance, before any `Destroy`; `RecoverDevice` is what
+    `Draw` schedules in place of a frame after a loss, pinned by a backend
+    whose device replacement touches main-thread state.
   - `Handlers`: `Draw`, `CreateSurface`, `ResizeSurface` and
     `ReleaseSurface`, to order handlers around.
 - **Resources it reads from other plugins:** `*platform.WindowManager`, for
@@ -102,7 +103,7 @@ What remains is on the [gfx map](https://github.com/dvoyni/cog/issues/608).
   timing signals are measured by.
 - **Events it publishes:** `DrawEvent`, inside its `RenderEvent` handler;
   a private stop event, from `Stop`, whose handler schedules
-  `Tasks.ReleaseOpenSurfaces`;
+  `Tasks.ReleaseOpenSurfaces` and `Tasks.ReleaseDevice`;
   `BufferMappedEvent` and `CapturedEvent`, from the job that finds them
   resolved; `DeviceLostEvent` and `DeviceRecoveredEvent`.
 - **Events it subscribes to:** `RenderEvent` (`Handlers.Draw`), which draws

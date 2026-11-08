@@ -78,13 +78,14 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 		AcquireFramebuffers: configurator.RegisterTask2(acquireFramebuffers),
 		PresentFramebuffers: configurator.RegisterTask1(presentFramebuffers),
 		ReleaseOpenSurfaces: configurator.RegisterTask1(releaseOpenSurfaces),
+		ReleaseDevice:       configurator.RegisterTask1(releaseDevice),
 		RecoverDevice:       configurator.RegisterTask1(recoverDevice),
 	}
 	configurator.InitResource(p.tasks)
 	p.flushTask = configurator.RegisterTask1(flushFrame)
 	p.releaseCaptureTask = configurator.RegisterTask1(releaseCapture)
 	configurator.Subscribe(p.publishCapture)
-	configurator.Subscribe(p.scheduleOpenSurfacesRelease)
+	configurator.Subscribe(p.scheduleRelease)
 	configurator.InitResource(Handlers{
 		Draw: configurator.Subscribe(p.draw),
 		CreateSurface: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event platform.WindowOpenedEvent) (platform.WindowOpenedEvent, kernel.JobHandle) {
@@ -137,34 +138,21 @@ func (p *Plugin) Start(k *kernel.Kernel) error {
 	return nil
 }
 
-// Stop schedules Tasks.ReleaseOpenSurfaces after the last present, under
-// the write lock, so the surfaces of the windows still open are released on
-// the thread a backend pins it to, before any Destroy runs. Frames still in
-// flight finish first.
+// Stop schedules Tasks.ReleaseOpenSurfaces after the last present, then
+// Tasks.ReleaseDevice, each under the write lock, so the surfaces of the
+// windows still open and then the device are released on the thread a
+// backend pins them to, before any Destroy runs. Frames still in flight
+// finish first, and a beat after the release draws nothing.
 func (*Plugin) Stop(k *kernel.Kernel) error {
 	k.Publish(stopEvent{})
 	return nil
 }
 
-// Destroy, after the kernel's last job, unmaps and releases the buffers of
-// the maps still pending, publishing nothing, and answers the unmaps'
-// errors; it then releases the device, the adapter and the instance Start
-// or the last recovery requested. The surfaces were released by the job
-// Stop scheduled. Releasing the device cleanly is what saves Vulkan's
-// pipeline cache.
+// Destroy, after the kernel's last job, releases what Tasks.ReleaseDevice
+// did not, as it does, answering the unmaps' errors: the adapter and the
+// instance a Start that failed at the device requested, since no Stop runs
+// for it. Releasing the device cleanly is what saves Vulkan's pipeline
+// cache.
 func (p *Plugin) Destroy() error {
-	var err error
-	if p.device.backend != nil {
-		err = p.device.releasePendingMaps()
-	}
-	if p.device.backend != nil {
-		p.device.backend.Release()
-	}
-	if p.device.adapter != nil {
-		p.device.adapter.Release()
-	}
-	if p.device.instance != nil {
-		p.device.instance.Release()
-	}
-	return err
+	return p.device.release()
 }

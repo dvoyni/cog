@@ -42,6 +42,9 @@ type device struct {
 	// recovery's, its own calls with errors answer ErrDeviceLost, and its
 	// releases release no object, which the lost device's Release does.
 	lost atomic.Bool
+	// released is set by the teardown's release of the device, which sets
+	// lost too: from then on a beat draws nothing and recovers nothing.
+	released atomic.Bool
 	// nextRecoveryAt is the earliest Beat.TimeFromStart a recovery is tried
 	// at, a second after the last that failed; only the recovery reads and
 	// changes it, under the write lock.
@@ -774,6 +777,31 @@ func (d *device) releasePendingMaps() error {
 	return errors.Join(errs...)
 }
 
+// release unmaps and releases the buffers of the maps still pending,
+// publishing nothing, then releases the backend device, the adapter and the
+// instance, those still held, and answers the unmaps' errors. From then on
+// the device is lost and released: its calls with errors answer
+// ErrDeviceLost, and a beat draws nothing.
+func (d *device) release() error {
+	var err error
+	if d.backend != nil {
+		err = d.releasePendingMaps()
+		d.backend.Release()
+		d.backend = nil
+	}
+	d.lost.Store(true)
+	d.released.Store(true)
+	if d.adapter != nil {
+		d.adapter.Release()
+		d.adapter = nil
+	}
+	if d.instance != nil {
+		d.instance.Release()
+		d.instance = nil
+	}
+	return err
+}
+
 // releaseAutoLayout releases layout, which createAutoLayout created, and the
 // bind-group layouts it holds.
 func (d *device) releaseAutoLayout(layout PipelineLayout) {
@@ -879,6 +907,15 @@ func (d *device) recreateObjects() error {
 		}
 	}
 	return nil
+}
+
+// releaseDevice releases the device at teardown, under the write lock, the
+// unmaps' errors going to LogErr.
+func releaseDevice(k *kernel.Kernel, _ kernel.NoArg, deviceHandle kernel.Write[Device]) kernel.NoResult {
+	if err := deviceHandle.Get().(*device).release(); err != nil {
+		k.Logger().LogErr(err)
+	}
+	return kernel.NoResult{}
 }
 
 // recoverDevice recovers the lost device in place of beat's frame, under

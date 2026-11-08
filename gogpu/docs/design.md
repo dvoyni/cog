@@ -9,7 +9,9 @@ its `OnDraw` never run. gfx keeps its handle tables, frame chain, surfaces,
 capture and recovery; the plugin passes each call through to gogpu's own
 windows, surfaces and device.
 
-Status: designed; of it, only `gogpu/shader` is built. The decisions come from the
+Status: being built: gfx gets gogpu's adapter and device, with every other
+device call answering an error naming it, and `gogpu/shader` preprocesses
+shaders. The decisions come from the
 [gogpu map](https://github.com/dvoyni/cog/issues/611); each section links
 the ticket that holds its detail. The loop API it rests on, `HostLoop`, was
 built on the [loop map](https://github.com/dvoyni/cog/issues/612) and is in
@@ -55,20 +57,24 @@ The module is `cog/gogpu`, its own Go module in `go.work`, beside
 - **`HostLoop.Start` runs lazily,** at the first backend call: gfx's
   `RequestAdapter`, from gfx's `Start`, on the goroutine that called `Spawn`,
   which is main.
-- **It starts with no window.** The fork's `Start` brings up the platform
-  manager and the instance, adapter and device with no surface; on Vulkan,
-  DX12 and Metal the device needs none. Windows come later, from platform's
-  `Open`.
-- **The adapter options reach gogpu's `Config`:**
-  - `PowerPreference` and `RequiredFeatures` by cast; gogpu's feature bits
-    are gfx's `FeatureFlags`.
+- **It starts with no window and no device.** The fork's `Start` brings up
+  the platform manager, the instance and the adapter with no surface. gfx's
+  `RequestDevice`, right after, calls the fork's `HostLoop.RequestDevice`,
+  which requests the device; on Vulkan, DX12 and Metal it needs no surface.
+  Windows come later, from platform's `Open`
+  ([gogpu plugin: gfx gets gogpu's adapter and device](https://github.com/dvoyni/cog/issues/743)).
+- **The adapter's options reach gogpu's `Config`** at `Start`:
+  `PowerPreference` by cast, and `ForceFallbackAdapter`, for wgpu's software
+  adapter.
+- **The device's reach `HostLoop.RequestDevice`:**
+  - `RequiredFeatures` by cast; gogpu's feature bits are gfx's
+    `FeatureFlags`.
   - `RequiredLimits` field by field, the fields gfx's `Limits` lacks taken
     from `gputypes.DefaultLimits()`. gfx passes WebGPU's defaults explicitly,
     since wgpu's zero means the adapter's full limits.
-  - `ForceFallbackAdapter`, for wgpu's software adapter.
   - The fork checks the required features and limits against the adapter
-    before `RequestDevice`, since Vulkan and Metal ignore them and DX12
-    checks only features.
+    before it requests the device, since Vulkan and Metal ignore them and
+    DX12 checks only features.
 - **The backend** is gogpu's default on each OS, GL excluded. `Config.Backend`
   overrides it; there is no environment variable, and tests set the field.
 - **The adapter answers** gogpu's `Info`, `Features` and `Limits`; the device
@@ -99,6 +105,7 @@ what `HostLoop` or the OS requires:
 | `ReleaseSurface`, and the release `Stop` schedules | — | pinned | — | — |
 | `CreateSurface` | — | — | — | — |
 | `RecoverDevice` | pinned | pinned | pinned | pinned |
+| `ReleaseDevice` | pinned | pinned | pinned | pinned |
 
 - **Acquire and present are pinned everywhere** because they go through
   `HostLoop.BeginFrame` and `EndFrame`, which run on the thread that called
@@ -113,6 +120,12 @@ what `HostLoop` or the OS requires:
   ([gfx: the surfaces of windows still open are released by a task Stop schedules](https://github.com/dvoyni/cog/issues/711)).
 - **Device recovery** is a task in `gfx.Tasks` too, pinned on every OS
   ([gfx: device recovery is a task in gfx.Tasks, for a backend to pin](https://github.com/dvoyni/cog/issues/716)).
+- **The device's release** is a task gfx's `Stop` schedules after the
+  surfaces', pinned on every OS: it releases the instance, whose `Release`
+  stops the `HostLoop`, which must run on the main thread, and macOS crashes
+  when it does not. A `Start` that fails at the device is released by gfx's
+  `Destroy`, which then runs on `Spawn`'s goroutine, main
+  ([gogpu plugin: gfx gets gogpu's adapter and device](https://github.com/dvoyni/cog/issues/743)).
 
 ## Windows
 
@@ -235,6 +248,9 @@ described in the PR, not in the fork's `CHANGELOG.md`.
   surface.
 - **Device options:** `RequiredLimits` and `ForceFallbackAdapter` in `Config`,
   the features and limits checked against the adapter.
+- **The device requested apart:** `Start` brings up the adapter alone, and
+  `HostLoop.RequestDevice` the device, with the features and limits gfx asks
+  for once it has the adapter.
 - **Frame errors:** `BeginFrame` and `EndFrame` answer them.
 - **Device replacement** that keeps the windows.
 - **Resizes applied at `BeginFrame`** for every window.

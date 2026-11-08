@@ -33,8 +33,8 @@ a broken pass sequence and any query set, its buffers holding the bytes written,
 and cleared. Writes reach the backend. Buffers map asynchronously: each
 poll, at `Poll`, every submit and every frame's flush, publishes
 `BufferMappedEvent` for the maps resolved, `MapStatusFailed` with its error
-in `LogErr` for one the backend fails, and `Destroy` unmaps and releases
-the buffers of the maps still pending. A window's capture, requested on
+in `LogErr` for one the backend fails, and the device's release at teardown
+unmaps and releases the buffers of the maps still pending. A window's capture, requested on
 any configured window of an 8-bit format, is taken from the first frame
 acquired after the request, which tells the backend at the acquire, copied out by gfx's own
 encoder after every submit order and delivered by `CapturedEvent`, its buffer unmapped and released
@@ -102,9 +102,9 @@ and submitted by their owner. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md)
 | `BufferMappedEvent`, `CapturedEvent`, `DeviceLostEvent`, `DeviceRecoveredEvent` | events | Readback, capture and device loss. |
 | `Config` | config | `PowerPreference`, `ForceFallbackAdapter`, `RequiredFeatures`, `RequiredLimits`, `Surface`. |
 
-gfx schedules acquire, configure, flush, present and recovery itself; the
-`Tasks` resource holds the surface tasks and the recovery among them, for a
-backend to pin.
+gfx schedules acquire, configure, flush, present, recovery and the release
+at teardown itself; the `Tasks` resource holds the surface tasks, the
+device's release and the recovery among them, for a backend to pin.
 
 ## The seam and the device
 
@@ -135,14 +135,19 @@ backend to pin.
   from `Config`. A zero `RequiredLimits` is `DefaultLimits()`, WebGPU's,
   passed explicitly, because wgpu's zero is the adapter's full limits. No
   adapter is a runtime error from `Start`. `Stop` schedules
-  `Tasks.ReleaseOpenSurfaces` after the last present, under the write lock:
-  it releases the surfaces of the windows still open, on the thread the
-  backend pins it to, since `Destroy` runs on the kernel's destroy
-  goroutine. The kernel finishes it before any `Destroy`, and main keeps
-  ticking pinned jobs until `Done`. Frames in flight finish first.
-  `Destroy` releases the buffers of the maps still pending, the device and
-  the adapter after the kernel's last job; releasing the device cleanly is
-  what saves Vulkan's pipeline cache.
+  `Tasks.ReleaseOpenSurfaces` after the last present, then
+  `Tasks.ReleaseDevice`, each under the write lock: they release the
+  surfaces of the windows still open, then the buffers of the maps still
+  pending, the device, the adapter and the instance, on the thread the
+  backend pins them to, since `Destroy` runs on the kernel's destroy
+  goroutine and gogpu's `HostLoop` stops on the main thread
+  ([gogpu plugin: gfx gets gogpu's adapter and device](https://github.com/dvoyni/cog/issues/743)).
+  The kernel finishes them before any `Destroy`, and main keeps ticking
+  pinned jobs until `Done`. Frames in flight finish first, and a beat after
+  the release draws nothing. `Destroy` releases only what a `Start` that
+  failed at the device had requested, on `Spawn`'s goroutine, since no
+  `Stop` runs for it. Releasing the device cleanly is what saves Vulkan's
+  pipeline cache.
 
 ## Types, descriptors and handles
 
@@ -255,8 +260,9 @@ backend to pin.
   Which thread a backend call must run on is the backend's, and differs by
   platform: the `Tasks` resource holds the surface tasks (create, release,
   configure, acquire, present, and the release of the surfaces still open at
-  teardown) and the device recovery, and the backend's plugin, listed after
-  gfx, pins those its platform needs to the main thread.
+  teardown), the device's release at teardown and its recovery, and the
+  backend's plugin, listed after gfx, pins those its platform needs to the
+  main thread.
 - **One frame covers every open window:** an acquire per window in one job,
   one flush, a present of each. A window with no framebuffer this frame
   (hidden, a zero framebuffer, outdated, timed out) answers the zero view. `DrawEvent` is published every beat, even when no window has one.
@@ -400,7 +406,7 @@ backend to pin.
   `ErrCaptureUnsupported`. A window that acquired nothing that frame gets
   `CapturedEvent` with `CaptureStatusNotAcquired`.
 - **At shutdown** pending maps and captures are dropped without an event;
-  `Destroy` unmaps and releases their buffers.
+  the device's release unmaps and releases their buffers.
 
 ## Timestamps
 

@@ -8,9 +8,9 @@ import (
 	"github.com/dvoyni/cog/platform"
 )
 
-// Tasks is the resource holding gfx's surface tasks and its device recovery,
-// for a backend's plugin, listed after gfx, to pin to the main thread where
-// its platform needs that:
+// Tasks is the resource holding gfx's surface tasks, its device's release
+// and its recovery, for a backend's plugin, listed after gfx, to pin to the
+// main thread where its platform needs that:
 //
 //	tasks, _ := configurator.Resource[gfx.Tasks]()
 //	configurator.PinToMainThread(tasks.AcquireFramebuffers)
@@ -32,6 +32,13 @@ type Tasks struct {
 	// at teardown, after the last present: Stop schedules it, and the
 	// kernel runs it before any Destroy.
 	ReleaseOpenSurfaces *kernel.Task[kernel.NoArg, kernel.NoResult]
+	// ReleaseDevice releases the device at teardown, after
+	// ReleaseOpenSurfaces: the buffers of the maps still pending, unmapped,
+	// then the backend device, the adapter and the instance. Stop schedules
+	// it under the write lock, and the kernel runs it before any Destroy, so
+	// a backend pins it when its instance must be released on the main
+	// thread, as gogpu's HostLoop must.
+	ReleaseDevice *kernel.Task[kernel.NoArg, kernel.NoResult]
 	// RecoverDevice recovers a lost device in place of a beat's frame: Draw
 	// schedules it under the write lock after the last present. It replaces
 	// the backend device and creates every object again on it, so a backend

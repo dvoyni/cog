@@ -2,6 +2,7 @@ package gfx_test
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"slices"
 	"sync"
@@ -58,9 +59,17 @@ type harness struct {
 	// pinTasks pins every task in gfx's Tasks to the main thread in Init,
 	// as a backend whose platform needs it does.
 	pinTasks bool
-	read     func(device gfx.Device)
-	write    func(device kernel.Write[gfx.Device])
-	edit     func(manager *platform.WindowManager)
+	// beatAtStop lists a plugin before gfx whose Stop, which runs after
+	// gfx's, publishes a RenderEvent once the instance is released, as a
+	// render track's last beat may land after the teardown's release. It is
+	// set before spawning.
+	beatAtStop bool
+	// callsAtDestroy are the calls the instance had recorded when the
+	// harness's Destroy ran, before gfx's.
+	callsAtDestroy []recording.Call
+	read           func(device gfx.Device)
+	write          func(device kernel.Write[gfx.Device])
+	edit           func(manager *platform.WindowManager)
 	// handlers is gfx's Handlers as Init found it, when handlersFound.
 	handlers      gfx.Handlers
 	handlersFound bool
@@ -179,6 +188,7 @@ func (h *harness) Init(c *kernel.Configurator, config any) error {
 		c.PinToMainThread(h.tasks.AcquireFramebuffers)
 		c.PinToMainThread(h.tasks.PresentFramebuffers)
 		c.PinToMainThread(h.tasks.ReleaseOpenSurfaces)
+		c.PinToMainThread(h.tasks.ReleaseDevice)
 		c.PinToMainThread(h.tasks.RecoverDevice)
 	}
 	read := c.RegisterTask1(func(k *kernel.Kernel, _ kernel.NoArg, device kernel.Read[gfx.Device]) kernel.NoResult {
@@ -276,7 +286,38 @@ func (*harness) Start(*kernel.Kernel) error { return nil }
 
 func (*harness) Stop(*kernel.Kernel) error { return nil }
 
-func (*harness) Destroy() error { return nil }
+func (h *harness) Destroy() error {
+	h.callsAtDestroy = h.instance.Recording().Calls
+	return nil
+}
+
+// beatAtStop is the plugin harness.beatAtStop lists before gfx: its Stop
+// waits for instance to record its release, then publishes a RenderEvent.
+type beatAtStop struct {
+	instance *recording.Instance
+}
+
+func (beatAtStop) Name() kernel.PluginName { return "beat at stop" }
+
+func (beatAtStop) Dependencies() []kernel.PluginName { return nil }
+
+func (beatAtStop) Init(*kernel.Configurator, any) error { return nil }
+
+func (beatAtStop) Start(*kernel.Kernel) error { return nil }
+
+func (b beatAtStop) Stop(k *kernel.Kernel) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for !slices.ContainsFunc(b.instance.Recording().Calls, func(call recording.Call) bool { return call.Kind == recording.CallKindReleaseInstance }) {
+		if time.Now().After(deadline) {
+			return errors.New("the instance was not released in 5s")
+		}
+		runtime.Gosched()
+	}
+	k.Publish(gfx.RenderEvent{})
+	return nil
+}
+
+func (beatAtStop) Destroy() error { return nil }
 
 func (h *harness) LogErr(source kernel.KernelID, err error) {
 	h.mutex.Lock()
@@ -322,7 +363,11 @@ func (h *harness) spawn(config *gfx.Config) error {
 			Tracks: []metronome.Track{metronome.NewTrack[gfx.RenderEvent](h.render)},
 		},
 	}
-	id, err := h.supervisor.Spawn(configs, h.workerCount, platform.NewPlugin(), metronome.NewPlugin(), gfx.NewPlugin(), h)
+	plugins := []kernel.Plugin{platform.NewPlugin(), metronome.NewPlugin(), gfx.NewPlugin(), h}
+	if h.beatAtStop {
+		plugins = slices.Insert(plugins, 0, kernel.Plugin(beatAtStop{instance: h.instance}))
+	}
+	id, err := h.supervisor.Spawn(configs, h.workerCount, plugins...)
 	if err == nil {
 		h.kernel = h.supervisor.GetKernel(id)
 	}

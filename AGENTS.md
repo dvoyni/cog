@@ -17,7 +17,7 @@ Each module has its own `AGENTS.md` for rules that hold only there.
 
 ## Upstream forks
 
-- A change in a forked upstream repository (gogpu, naga, wgpu and the rest under `submodules/`) leaves its `CHANGELOG.md` alone: the maintainers write it when they merge the PR. What a changelog entry would say, such as a behaviour change, goes in the PR description.
+- A change in a forked upstream repository (gogpu, naga, wgpu and the rest under `submodules/`) that changes its public API adds an entry to its `CHANGELOG.md`, under `[Unreleased]`, in the form the file already uses.
 
 ## Potential rules
 
