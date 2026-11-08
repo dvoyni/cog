@@ -69,7 +69,7 @@ type device struct {
 	// capturingWindows are the windows with a capture in flight, from
 	// RequestCapture until its CapturedEvent is published.
 	capturingWindows []platform.Window
-	// requestedCaptures are the windows whose captures no flush has taken.
+	// requestedCaptures are the windows whose captures no acquire has taken.
 	requestedCaptures []platform.Window
 	// pendingCaptures are the captures whose buffers' maps are pending,
 	// published once the poll finds them resolved.
@@ -538,9 +538,9 @@ func (d *device) Poll() {
 	}
 }
 
-// RequestCapture takes window's capture for the next frame flushed, judged
-// by what its surface is configured with: a window not yet configured
-// answers ErrCaptureUnsupported too.
+// RequestCapture takes window's capture from the first frame whose acquire
+// runs after it, judged by what its surface is configured with: a window not
+// yet configured answers ErrCaptureUnsupported too.
 func (d *device) RequestCapture(window platform.Window) error {
 	if d.lost.Load() {
 		return ErrDeviceLost
@@ -610,21 +610,17 @@ func (d *device) createAutoLayout(groups []BindGroupLayoutDescriptor) (PipelineL
 	return layout, nil
 }
 
-// copyCaptures takes the captures requested and, for each window the frame
-// in slot acquired, creates a staging buffer and records the copy of its
+// copyCaptures takes the captures slot's acquire took and, for each window
+// the frame acquired, creates a staging buffer and records the copy of its
 // framebuffer into it on gfx's own encoder, whose command buffer it appends
 // to slot's, after every submit order. It answers the captures copied, for
 // mapCaptures once submitted. A window the frame did not acquire is
 // delivered CaptureStatusNotAcquired; a buffer, encoder or Finish that fails
 // goes to LogErr, and its captures are delivered CaptureStatusFailed.
 func (d *device) copyCaptures(slot *frameSlot) []CapturedEvent {
-	d.mapMutex.Lock()
-	requested := d.requestedCaptures
-	d.requestedCaptures = nil
-	d.mapMutex.Unlock()
 	var copied []CapturedEvent
 	var encoder StandaloneCommandEncoder
-	for _, window := range requested {
+	for _, window := range slot.captures {
 		capture := CapturedEvent{Window: window, Beat: slot.beat, Status: CaptureStatusNotAcquired}
 		index := slices.IndexFunc(slot.framebuffers, func(acquired framebuffer) bool { return acquired.window == window })
 		if index < 0 {

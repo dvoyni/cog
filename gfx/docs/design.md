@@ -35,8 +35,9 @@ poll, at `Poll`, every submit and every frame's flush, publishes
 `BufferMappedEvent` for the maps resolved, `MapStatusFailed` with its error
 in `LogErr` for one the backend fails, and `Destroy` unmaps and releases
 the buffers of the maps still pending. A window's capture, requested on a
-capturable surface, is copied out by gfx's own encoder after every submit
-order and delivered by `CapturedEvent`, its buffer unmapped and released
+capturable surface, is taken from the first frame acquired after the
+request, which tells the backend at the acquire, copied out by gfx's own
+encoder after every submit order and delivered by `CapturedEvent`, its buffer unmapped and released
 after the publication's out dependency, and `ReadCapture` answers its
 picture un-strided, BGRA swapped and alpha opaque. A device loss the
 backend answers from any call is logged and published as `DeviceLostEvent`
@@ -373,11 +374,18 @@ backend to pin.
   frames running. There is no blocking map: it would wait for the whole
   device to go idle.
 - **Capture is gfx's.** `Device.RequestCapture(window)` asks for the
-  framebuffer of the next frame flushed. gfx's flush appends its own encoder
-  after every submit order, copying the framebuffer into a fresh staging
-  buffer before the present, and maps it after the submit. The backend hands
-  each framebuffer over as a texture as well as a view, for that copy; a
-  map, copy or submit that fails delivers `CaptureStatusFailed`, its error in
+  framebuffer of the first frame whose acquire runs after the request, so a
+  capture requested while a frame draws is taken from the next one
+  ([gfx: automatic visual checks from frame captures](https://github.com/dvoyni/cog/issues/717)).
+  That acquire tells the backend the window is captured, and only then is
+  the framebuffer's texture a copy source. A backend whose surface textures
+  cannot be copied hands an offscreen texture of the surface's format and
+  draws it onto the surface at the present, as v1 did, so the cost falls
+  only on frames captured. gfx's flush appends its own encoder after every
+  submit order, copying the framebuffer into a fresh staging buffer before
+  the present, and maps it after the submit. The backend hands each
+  framebuffer over as a texture as well as a view, for that copy; a map,
+  copy or submit that fails delivers `CaptureStatusFailed`, its error in
   `LogErr`. `CapturedEvent{Window, Beat, Buffer,
   Width, Height, Format, BytesPerRow, Status}` delivers it a frame later;
   `Beat` names the moment shown. gfx unmaps and releases the buffer after the
@@ -444,7 +452,8 @@ backend to pin.
   The job that finds the loss publishes every pending map `MapStatusFailed`
   and every pending capture `CaptureStatusFailed`, its buffer released; a
   poll stops at the first status that answers the loss. Captures requested
-  and not yet copied stay requested for the frames after the recovery.
+  and not yet copied, a lost frame's included, stay requested for the frames
+  after the recovery.
 
 ## The recording adapter
 
@@ -494,7 +503,9 @@ the [gogpu map](https://github.com/dvoyni/cog/issues/611):
 
 - binding `InstanceSocket`; mapping its errors onto `ErrDeviceLost` and
   `AcquireStatus`; a device `Release` that releases every object it still
-  holds and drops a framebuffer acquired and not presented; honouring `Capturable` and `ForceFallbackAdapter`; a
+  holds and drops a framebuffer acquired and not presented; a captured
+  acquire's framebuffer a copy source, drawn offscreen where the surface's
+  cannot be; honouring `ForceFallbackAdapter`; a
   headless surface for a window with a zero native handle; pixel tests on the
   software adapter; a test that the enums convert by cast;
 - two swapchains in one frame are unsafe in wgpu's Vulkan backend, so several

@@ -65,7 +65,7 @@ Copying a buffer or texture off the GPU into CPU memory, by mapping a buffer onc
 _Avoid_: Download, read pixels
 
 **Capture**:
-One window's framebuffer in one frame, copied off the GPU and delivered a frame later with the beat it shows.
+One window's framebuffer in the first frame acquired after it is requested, copied off the GPU and delivered a frame later with the beat it shows.
 _Avoid_: Snapshot, screenshot, frame grab
 
 **Submit order**:

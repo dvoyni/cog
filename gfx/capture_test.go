@@ -60,7 +60,7 @@ func TestAFramebuffersTextureIsDescribedByItsConfigurationUntilThePresent(t *tes
 		SampleCount:   1,
 		Dimension:     gfx.TextureDimension2D,
 		Format:        gfx.TextureFormatBGRA8Unorm,
-		Usage:         gfx.TextureUsageFlagRenderAttachment | gfx.TextureUsageFlagCopySrc,
+		Usage:         gfx.TextureUsageFlagRenderAttachment,
 	}
 	if acquired := frameCalls(h.instance.Recording().Calls)[0].Arguments.(recording.AcquireFramebufferArguments); texture != acquired.Texture || !reflect.DeepEqual(described, want) {
 		t.Errorf("the framebuffer's texture %v is described %+v, want %v described %+v", texture, described, acquired.Texture, want)
@@ -188,10 +188,121 @@ func TestACaptureIsCopiedAfterEverySubmitOrderAndDeliveredWithItsFramesBeat(t *t
 	if acquired.Texture == (gfx.Texture{}) || !reflect.DeepEqual(frames[1].Submissions[0], wantSubmission) {
 		t.Errorf("submitted %+v, want %+v", frames[1].Submissions[0], wantSubmission)
 	}
+	if !acquired.Captured {
+		t.Errorf("the frame after the request acquired %+v, want it captured", acquired)
+	}
 	mutex.Lock()
 	defer mutex.Unlock()
 	if readErr != nil || len(read) != 256*30 || slices.ContainsFunc(read, func(b byte) bool { return b != 0 }) {
 		t.Errorf("MappedRange answered %d bytes, %v, want 7680 zeros", len(read), readErr)
+	}
+}
+
+func TestACaptureRequestedAfterAFramesAcquireIsTakenFromTheNextFrameAcquired(t *testing.T) {
+	h := newHarness(t)
+	var mutex sync.Mutex
+	var requested bool
+	var window platform.Window
+	h.readFrame = func(event gfx.DrawEvent, device gfx.Device) {
+		mutex.Lock()
+		defer mutex.Unlock()
+		if !requested {
+			requested = true
+			mustSucceed(t, device.RequestCapture(window))
+		}
+	}
+	h.mustSpawn(&gfx.Config{Surface: gfx.SurfaceRequest{Capturable: true}})
+	window = h.openWindow()
+	h.waitForCalls(recording.CallKindCreateSurface, 1)
+
+	for range 3 {
+		h.advance(time.Millisecond)
+	}
+
+	captured := h.capturedEvents()
+	if len(captured) != 1 || captured[0].Status != gfx.CaptureStatusCaptured || captured[0].Beat != h.drawEvents()[1].Beat {
+		t.Fatalf("published %+v, want one capture of the second frame", captured)
+	}
+	acquires := acquireArguments(h)
+	if len(acquires) != 3 || acquires[0].Captured || !acquires[1].Captured || acquires[2].Captured {
+		t.Errorf("acquired %+v, want only the second frame captured", acquires)
+	}
+	frames := h.instance.Recording().Frames()
+	if len(frames) != 3 || len(frames[0].Submissions) != 0 || len(frames[1].Submissions) != 1 || len(frames[2].Submissions) != 0 {
+		t.Fatalf("Frames() = %+v, want the second frame's one submission alone", frames)
+	}
+	copied := frames[1].Submissions[0].Buffers[0].Commands[0].Arguments.(recording.CopyTextureToBufferArguments)
+	if copied.Source != acquires[1].Texture || copied.Destination != captured[0].Buffer {
+		t.Errorf("copied %+v, want the second frame's framebuffer into the capture's buffer", copied)
+	}
+}
+
+func TestAFramebuffersTextureIsACopySourceOnlyOnACapturedFrame(t *testing.T) {
+	h := newHarness(t)
+	var mutex sync.Mutex
+	var usages []gfx.TextureUsageFlags
+	var window platform.Window
+	h.readFrame = func(event gfx.DrawEvent, device gfx.Device) {
+		mutex.Lock()
+		defer mutex.Unlock()
+		usages = append(usages, device.TextureDescriptor(device.TextureViewTexture(device.Framebuffer(event.Frame, window))).Usage)
+	}
+	h.mustSpawn(&gfx.Config{Surface: gfx.SurfaceRequest{Capturable: true}})
+	window = h.openWindow()
+	h.waitForCalls(recording.CallKindCreateSurface, 1)
+	h.advance(time.Millisecond)
+	h.readDevice(func(device gfx.Device) { mustSucceed(t, device.RequestCapture(window)) })
+
+	h.advance(time.Millisecond)
+	h.advance(time.Millisecond)
+
+	mutex.Lock()
+	defer mutex.Unlock()
+	attachment := gfx.TextureUsageFlagRenderAttachment
+	if want := []gfx.TextureUsageFlags{attachment, attachment | gfx.TextureUsageFlagCopySrc, attachment}; !slices.Equal(usages, want) {
+		t.Errorf("the framebuffers' usages are %v, want %v", usages, want)
+	}
+}
+
+func TestACaptureTakenByAFrameLostBeforeItsFlushIsTakenAfterTheRecovery(t *testing.T) {
+	h := newHarness(t)
+	var mutex sync.Mutex
+	var lose bool
+	h.readFrame = func(event gfx.DrawEvent, device gfx.Device) {
+		mutex.Lock()
+		defer mutex.Unlock()
+		if lose {
+			lose = false
+			_, _ = device.CreateBuffer(gfx.BufferDescriptor{Size: 4, Usage: gfx.BufferUsageFlagCopyDst})
+		}
+	}
+	h.mustSpawn(&gfx.Config{Surface: gfx.SurfaceRequest{Capturable: true}})
+	window := h.openWindow()
+	h.waitForCalls(recording.CallKindCreateSurface, 1)
+	h.advance(time.Millisecond)
+	h.readDevice(func(device gfx.Device) { mustSucceed(t, device.RequestCapture(window)) })
+	mutex.Lock()
+	lose = true
+	mutex.Unlock()
+	h.instance.AnswerNext(recording.CallKindCreateBuffer, recording.Answer{Error: gfx.ErrDeviceLost})
+	h.advance(time.Millisecond)
+	if logged := h.takeLogged(); len(logged) != 1 || !errors.Is(logged[0], gfx.ErrDeviceLost) {
+		t.Fatalf("logged %v, want the loss once", logged)
+	}
+	if captured := h.capturedEvents(); len(captured) != 0 {
+		t.Fatalf("published %+v from the lost frame, want none", captured)
+	}
+
+	h.advance(time.Millisecond)
+	h.advance(time.Millisecond)
+
+	captured := h.capturedEvents()
+	if len(captured) != 1 || captured[0].Status != gfx.CaptureStatusCaptured || captured[0].Beat != h.drawEvents()[2].Beat {
+		t.Errorf("published %+v, want one capture of the frame after the recovery", captured)
+	}
+	acquires := acquireArguments(h)
+	if len(acquires) != 3 || acquires[0].Captured || !acquires[1].Captured || !acquires[2].Captured {
+		t.Errorf("acquired %+v, want the lost frame and the one after the recovery captured", acquires)
 	}
 }
 
@@ -325,6 +436,18 @@ func TestACaptureTheBackendFailsIsDeliveredFailedWithItsErrorInLogErr(t *testing
 			}
 		})
 	}
+}
+
+// acquireArguments answers the arguments of every acquire h's instance
+// recorded, in order.
+func acquireArguments(h *harness) []recording.AcquireFramebufferArguments {
+	var answer []recording.AcquireFramebufferArguments
+	for _, call := range h.instance.Recording().Calls {
+		if arguments, ok := call.Arguments.(recording.AcquireFramebufferArguments); ok {
+			answer = append(answer, arguments)
+		}
+	}
+	return answer
 }
 
 // createdBuffer answers the descriptor buffer was created with, as h's

@@ -127,10 +127,11 @@ type BackendDevice interface {
 
 	// AcquireFramebuffer acquires window's next framebuffer and, when status
 	// is Acquired or Suboptimal, stores its texture at texture's index and
-	// its view at view's, until the present. The texture is a copy source
-	// when the surface is configured Capturable, for gfx's capture to copy
-	// out of.
-	AcquireFramebuffer(window platform.Window, texture Texture, view TextureView) (status AcquireStatus, err error)
+	// its view at view's, until the present. When captured, gfx copies the
+	// frame out of the texture, so it is a copy source: a backend whose
+	// surface textures cannot be stores an offscreen texture of the
+	// surface's format, and draws it onto the surface at the present.
+	AcquireFramebuffer(window platform.Window, texture Texture, view TextureView, captured bool) (status AcquireStatus, err error)
 	// Present presents window's acquired framebuffer.
 	Present(window platform.Window) error
 

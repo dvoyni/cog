@@ -220,7 +220,7 @@ func TestAnAcquiredFramebufferIsARenderAttachmentUntilItsPresent(t *testing.T) {
 	framebuffer := handleAt[gfx.TextureView](5)
 	mustSucceed(t, instance.CreateSurface(window, platform.NativeHandle{}))
 	mustSucceed(t, device.ConfigureSurface(window, gfx.SurfaceConfiguration{}))
-	if _, err := device.AcquireFramebuffer(window, handleAt[gfx.Texture](5), framebuffer); err != nil {
+	if _, err := device.AcquireFramebuffer(window, handleAt[gfx.Texture](5), framebuffer, false); err != nil {
 		t.Fatalf("AcquireFramebuffer answered %v", err)
 	}
 	attachments := []gfx.RenderPassColorAttachment{{View: framebuffer}}
@@ -243,7 +243,7 @@ func TestReleasingTheDeviceDropsItsFramebufferAndLeavesItsSurfaceToConfigureAgai
 	window := platform.Window{}
 	mustSucceed(t, instance.CreateSurface(window, platform.NativeHandle{}))
 	mustSucceed(t, device.ConfigureSurface(window, gfx.SurfaceConfiguration{}))
-	if _, err := device.AcquireFramebuffer(window, handleAt[gfx.Texture](5), handleAt[gfx.TextureView](5)); err != nil {
+	if _, err := device.AcquireFramebuffer(window, handleAt[gfx.Texture](5), handleAt[gfx.TextureView](5), false); err != nil {
 		t.Fatalf("AcquireFramebuffer answered %v", err)
 	}
 
@@ -253,22 +253,22 @@ func TestReleasingTheDeviceDropsItsFramebufferAndLeavesItsSurfaceToConfigureAgai
 	recovered, err := adapter.RequestDevice(gfx.DeviceDescriptor{})
 	mustSucceed(t, err)
 
-	if _, err := recovered.AcquireFramebuffer(window, handleAt[gfx.Texture](6), handleAt[gfx.TextureView](6)); err == nil {
+	if _, err := recovered.AcquireFramebuffer(window, handleAt[gfx.Texture](6), handleAt[gfx.TextureView](6), false); err == nil {
 		t.Error("AcquireFramebuffer on a surface configured with the released device answered no error")
 	}
 	mustSucceed(t, recovered.ConfigureSurface(window, gfx.SurfaceConfiguration{}))
-	if _, err := recovered.AcquireFramebuffer(window, handleAt[gfx.Texture](6), handleAt[gfx.TextureView](6)); err != nil {
+	if _, err := recovered.AcquireFramebuffer(window, handleAt[gfx.Texture](6), handleAt[gfx.TextureView](6), false); err != nil {
 		t.Errorf("AcquireFramebuffer once configured again answered %v", err)
 	}
 }
 
-func TestAnAcquiredFramebufferIsACopySourceWhenItsSurfaceIsCapturableUntilItsPresent(t *testing.T) {
+func TestAnAcquiredFramebufferIsACopySourceWhenItsAcquireIsCapturedUntilItsPresent(t *testing.T) {
 	for _, test := range []struct {
-		name       string
-		capturable bool
+		name     string
+		captured bool
 	}{
-		{"capturable", true},
-		{"not capturable", false},
+		{"captured", true},
+		{"not captured", false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			instance, device := requestDevice(t)
@@ -277,9 +277,9 @@ func TestAnAcquiredFramebufferIsACopySourceWhenItsSurfaceIsCapturableUntilItsPre
 			buffer := createBuffer(t, device, 0, gfx.BufferUsageFlagCopyDst|gfx.BufferUsageFlagMapRead)
 			mustSucceed(t, instance.CreateSurface(window, platform.NativeHandle{}))
 			mustSucceed(t, device.ConfigureSurface(window, gfx.SurfaceConfiguration{
-				Format: gfx.TextureFormatBGRA8Unorm, Width: 1, Height: 1, Capturable: test.capturable,
+				Format: gfx.TextureFormatBGRA8Unorm, Width: 1, Height: 1,
 			}))
-			if _, err := device.AcquireFramebuffer(window, framebuffer, handleAt[gfx.TextureView](5)); err != nil {
+			if _, err := device.AcquireFramebuffer(window, framebuffer, handleAt[gfx.TextureView](5), test.captured); err != nil {
 				t.Fatalf("AcquireFramebuffer answered %v", err)
 			}
 			regions := []gfx.BufferTextureCopy{{
@@ -290,8 +290,8 @@ func TestAnAcquiredFramebufferIsACopySourceWhenItsSurfaceIsCapturableUntilItsPre
 
 			acquired := createEncoder(t, device)
 			acquired.CopyTextureToBuffer(framebuffer, buffer, regions)
-			if _, err := acquired.Finish(); (err == nil) != test.capturable {
-				t.Fatalf("a copy out of the acquired framebuffer answered %v at Finish, want an error only when not capturable", err)
+			if _, err := acquired.Finish(); (err == nil) != test.captured {
+				t.Fatalf("a copy out of the acquired framebuffer answered %v at Finish, want an error only when not captured", err)
 			}
 			mustSucceed(t, device.Present(window))
 			presented := createEncoder(t, device)
