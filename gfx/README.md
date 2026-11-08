@@ -84,7 +84,8 @@ What remains is on the [gfx map](https://github.com/dvoyni/cog/issues/608).
     lock.
   - `Tasks`: the surface tasks, for a backend's plugin to pin to the main
     thread where its platform needs that; gfx pins none and schedules them
-    itself.
+    itself. `ReleaseOpenSurfaces` among them is what `Stop` schedules, to
+    release the surfaces of the windows still open before any `Destroy`.
   - `Handlers`: `Draw`, `CreateSurface`, `ResizeSurface` and
     `ReleaseSurface`, to order handlers around.
 - **Resources it reads from other plugins:** `*platform.WindowManager`, for
@@ -92,6 +93,8 @@ What remains is on the [gfx map](https://github.com/dvoyni/cog/issues/608).
   `metronome.Clock`, in its `Init`, to make the stopwatches `DrawEvent`'s
   timing signals are measured by.
 - **Events it publishes:** `DrawEvent`, inside its `RenderEvent` handler;
+  a private stop event, from `Stop`, whose handler schedules
+  `Tasks.ReleaseOpenSurfaces`;
   `BufferMappedEvent` and `CapturedEvent`, from the job that finds them
   resolved; `DeviceLostEvent` and `DeviceRecoveredEvent`.
 - **Events it subscribes to:** `RenderEvent` (`Handlers.Draw`), which draws

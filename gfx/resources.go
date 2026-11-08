@@ -24,6 +24,10 @@ type Tasks struct {
 	AcquireFramebuffers *kernel.Task[Frame, kernel.NoResult]
 	// PresentFramebuffers presents a frame's framebuffers.
 	PresentFramebuffers *kernel.Task[Frame, kernel.NoResult]
+	// ReleaseOpenSurfaces releases the surfaces of the windows still open
+	// at teardown, after the last present: Stop schedules it, and the
+	// kernel runs it before any Destroy.
+	ReleaseOpenSurfaces *kernel.Task[kernel.NoArg, kernel.NoResult]
 }
 
 // Handlers is the resource holding every event handler gfx subscribes, so a

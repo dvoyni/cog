@@ -137,6 +137,30 @@ func releaseSurface(k *kernel.Kernel, window platform.Window, deviceHandle kerne
 	return kernel.NoResult{}
 }
 
+// stopEvent is published by Stop, for gfx's handler to schedule the
+// release of the surfaces still open.
+type stopEvent struct{}
+
+// scheduleOpenSurfacesRelease handles stopEvent: it schedules
+// Tasks.ReleaseOpenSurfaces after in and the last present, keeps it as the
+// last present, so a frame published after it acquires nothing, and returns
+// it.
+func (p *Plugin) scheduleOpenSurfacesRelease(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event stopEvent) (stopEvent, kernel.JobHandle) {
+	released := ex.Schedule(p.tasks.ReleaseOpenSurfaces, kernel.NoArg{}, in, p.device.frames.lastPresentJob()).Handle()
+	p.device.frames.setLastPresent(released)
+	return event, released
+}
+
+// releaseOpenSurfaces releases the surface of every window still open, as
+// releaseSurface releases a closed window's, under the write lock.
+func releaseOpenSurfaces(k *kernel.Kernel, _ kernel.NoArg, deviceHandle kernel.Write[Device]) kernel.NoResult {
+	d := deviceHandle.Get().(*device)
+	for _, window := range slices.Clone(d.surfaces) {
+		releaseSurface(k, window, deviceHandle)
+	}
+	return kernel.NoResult{}
+}
+
 // configureSurfaces configures each surface marked for it from the surface
 // request at its window's framebuffer size, under the write lock, between the
 // last present and the next acquire. A part of the request the surface's

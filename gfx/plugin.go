@@ -79,12 +79,14 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 		ConfigureSurfaces:   configurator.RegisterTask2(configureSurfaces),
 		AcquireFramebuffers: configurator.RegisterTask2(acquireFramebuffers),
 		PresentFramebuffers: configurator.RegisterTask1(presentFramebuffers),
+		ReleaseOpenSurfaces: configurator.RegisterTask1(releaseOpenSurfaces),
 	}
 	configurator.InitResource(p.tasks)
 	p.flushTask = configurator.RegisterTask1(flushFrame)
 	p.releaseCaptureTask = configurator.RegisterTask1(releaseCapture)
 	p.recoverTask = configurator.RegisterTask1(recoverDevice)
 	configurator.Subscribe(p.publishCapture)
+	configurator.Subscribe(p.scheduleOpenSurfacesRelease)
 	configurator.InitResource(Handlers{
 		Draw: configurator.Subscribe(p.draw),
 		CreateSurface: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event platform.WindowOpenedEvent) (platform.WindowOpenedEvent, kernel.JobHandle) {
@@ -137,22 +139,25 @@ func (p *Plugin) Start(k *kernel.Kernel) error {
 	return nil
 }
 
-// Stop does nothing: frames still in flight finish.
-func (*Plugin) Stop(*kernel.Kernel) error { return nil }
+// Stop schedules Tasks.ReleaseOpenSurfaces after the last present, under
+// the write lock, so the surfaces of the windows still open are released on
+// the thread a backend pins it to, before any Destroy runs. Frames still in
+// flight finish first.
+func (*Plugin) Stop(k *kernel.Kernel) error {
+	k.Publish(stopEvent{})
+	return nil
+}
 
 // Destroy, after the kernel's last job, unmaps and releases the buffers of
 // the maps still pending, publishing nothing, and answers the unmaps'
-// errors; it releases the surfaces of the windows still open, then the
-// device, the adapter and the instance Start or the last recovery
-// requested. Releasing the device cleanly is what saves Vulkan's pipeline
-// cache.
+// errors; it then releases the device, the adapter and the instance Start
+// or the last recovery requested. The surfaces were released by the job
+// Stop scheduled. Releasing the device cleanly is what saves Vulkan's
+// pipeline cache.
 func (p *Plugin) Destroy() error {
 	var err error
 	if p.device.backend != nil {
 		err = p.device.releasePendingMaps()
-	}
-	for _, window := range p.device.surfaces {
-		p.device.instance.ReleaseSurface(window)
 	}
 	if p.device.backend != nil {
 		p.device.backend.Release()

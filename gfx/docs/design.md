@@ -101,8 +101,8 @@ and submitted by their owner. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md)
 | `BufferMappedEvent`, `CapturedEvent`, `DeviceLostEvent`, `DeviceRecoveredEvent` | events | Readback, capture and device loss. |
 | `Config` | config | `PowerPreference`, `ForceFallbackAdapter`, `RequiredFeatures`, `RequiredLimits`, `Surface`. |
 
-gfx installs no `Tasks` resource: it schedules acquire, configure, flush,
-present and recovery itself.
+gfx schedules acquire, configure, flush, present and recovery itself; the
+`Tasks` resource holds the surface tasks among them, for a backend to pin.
 
 ## The seam and the device
 
@@ -132,10 +132,15 @@ present and recovery itself.
 - **The device comes up in `Start`,** since sockets are read from `Start` on,
   from `Config`. A zero `RequiredLimits` is `DefaultLimits()`, WebGPU's,
   passed explicitly, because wgpu's zero is the adapter's full limits. No
-  adapter is a runtime error from `Start`. `Stop` does nothing: frames in
-  flight finish. `Destroy` releases the buffers of the maps still pending,
-  the surfaces, the device and the adapter after the kernel's last job; releasing the device cleanly is what saves
-  Vulkan's pipeline cache.
+  adapter is a runtime error from `Start`. `Stop` schedules
+  `Tasks.ReleaseOpenSurfaces` after the last present, under the write lock:
+  it releases the surfaces of the windows still open, on the thread the
+  backend pins it to, since `Destroy` runs on the kernel's destroy
+  goroutine. The kernel finishes it before any `Destroy`, and main keeps
+  ticking pinned jobs until `Done`. Frames in flight finish first.
+  `Destroy` releases the buffers of the maps still pending, the device and
+  the adapter after the kernel's last job; releasing the device cleanly is
+  what saves Vulkan's pipeline cache.
 
 ## Types, descriptors and handles
 
@@ -237,8 +242,9 @@ present and recovery itself.
   ([gfx: no task pinned for a backend's sake](https://github.com/dvoyni/cog/issues/707)).
   Which thread a backend call must run on is the backend's, and differs by
   platform: the `Tasks` resource holds the surface tasks (create, release,
-  configure, acquire, present), and the backend's plugin, listed after gfx,
-  pins those its platform needs to the main thread.
+  configure, acquire, present, and the release of the surfaces still open at
+  teardown), and the backend's plugin, listed after gfx, pins those its
+  platform needs to the main thread.
 - **One frame covers every open window:** an acquire per window in one job,
   one flush, a present of each. A window with no framebuffer this frame
   (hidden, a zero framebuffer, outdated, timed out) answers the zero view. `DrawEvent` is published every beat, even when no window has one.
