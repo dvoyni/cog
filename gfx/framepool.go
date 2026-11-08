@@ -351,7 +351,7 @@ func (pool *framePool) unmarkLost(window platform.Window) bool {
 // frame's under MaxInFlight 1.
 func (p *Plugin) draw(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event RenderEvent) (RenderEvent, kernel.JobHandle) {
 	if p.device.lost.Load() {
-		recovered := ex.Schedule(p.recoverTask, event.Beat, in, p.device.frames.lastPresentJob()).Handle()
+		recovered := ex.Schedule(p.tasks.RecoverDevice, event.Beat, in, p.device.frames.lastPresentJob()).Handle()
 		p.device.frames.setLastPresent(recovered)
 		return event, recovered
 	}

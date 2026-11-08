@@ -1,6 +1,7 @@
 package gfx_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -368,6 +369,40 @@ func TestTheBeatAfterALossRecreatesEveryObjectUnderItsOldHandleInsteadOfDrawing(
 	}
 	if want := []recording.CallKind{recording.CallKindConfigureSurface, recording.CallKindAcquireFramebuffer, recording.CallKindPresent}; !reflect.DeepEqual(surfaceCalls, want) {
 		t.Errorf("the frame after the recovery made %v for %v, want its surface configured again, then acquired and presented", surfaceCalls, window)
+	}
+}
+
+func TestAPinnedRecoveryWaitsForTheMainThreadThenRecoversAsItWould(t *testing.T) {
+	h := newHarness(t)
+	h.pinTasks = true
+	h.mustSpawn(nil)
+	loseDevice(h)
+	callCount := len(h.instance.Recording().Calls)
+
+	h.clock.Jump(time.Millisecond)
+	h.waitForRenders(1)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err := h.clock.Wait(ctx)
+
+	if err == nil {
+		t.Error("the beat settled with the main thread never ticked, want the pinned recovery still waiting for it")
+	}
+	if calls := h.instance.Recording().Calls[callCount:]; len(calls) != 0 {
+		t.Errorf("the recovery made calls %v before the main thread ticked, want none", kinds(calls))
+	}
+
+	h.settle()
+
+	want := []recording.Call{
+		{Kind: recording.CallKindReleaseDevice},
+		{Kind: recording.CallKindRequestDevice, Arguments: gfx.DeviceDescriptor{RequiredLimits: gfx.DefaultLimits()}},
+	}
+	if calls := h.instance.Recording().Calls[callCount:]; !reflect.DeepEqual(calls, want) {
+		t.Errorf("the recovery made calls %v, want %v", calls, want)
+	}
+	if recovered := h.recoveredEvents(); recovered != 1 {
+		t.Errorf("DeviceRecoveredEvent published %d times, want once", recovered)
 	}
 }
 

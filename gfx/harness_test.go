@@ -55,12 +55,12 @@ type harness struct {
 	// for a test to change how calls behave around it. It is set before
 	// spawning.
 	wrapDevice func(device gfx.BackendDevice) gfx.BackendDevice
-	// pinSurfaceTasks pins gfx's surface tasks to the main thread in Init, as
-	// a backend whose platform needs it does.
-	pinSurfaceTasks bool
-	read            func(device gfx.Device)
-	write           func(device kernel.Write[gfx.Device])
-	edit            func(manager *platform.WindowManager)
+	// pinTasks pins every task in gfx's Tasks to the main thread in Init,
+	// as a backend whose platform needs it does.
+	pinTasks bool
+	read     func(device gfx.Device)
+	write    func(device kernel.Write[gfx.Device])
+	edit     func(manager *platform.WindowManager)
 	// handlers is gfx's Handlers as Init found it, when handlersFound.
 	handlers      gfx.Handlers
 	handlersFound bool
@@ -172,13 +172,14 @@ func (h *harness) Init(c *kernel.Configurator, config any) error {
 	c.BindSocket[platform.WindowsSocket](h.windows)
 	h.handlers, h.handlersFound = c.Resource[gfx.Handlers]()
 	h.tasks, h.tasksFound = c.Resource[gfx.Tasks]()
-	if h.pinSurfaceTasks {
+	if h.pinTasks {
 		c.PinToMainThread(h.tasks.CreateSurface)
 		c.PinToMainThread(h.tasks.ReleaseSurface)
 		c.PinToMainThread(h.tasks.ConfigureSurfaces)
 		c.PinToMainThread(h.tasks.AcquireFramebuffers)
 		c.PinToMainThread(h.tasks.PresentFramebuffers)
 		c.PinToMainThread(h.tasks.ReleaseOpenSurfaces)
+		c.PinToMainThread(h.tasks.RecoverDevice)
 	}
 	read := c.RegisterTask1(func(k *kernel.Kernel, _ kernel.NoArg, device kernel.Read[gfx.Device]) kernel.NoResult {
 		h.read(device.Get())

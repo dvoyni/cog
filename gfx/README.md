@@ -82,10 +82,13 @@ What remains is on the [gfx map](https://github.com/dvoyni/cog/issues/608).
 - **Resources it installs:**
   - `Device`: the GPU, read under its read lock, elevated under its write
     lock.
-  - `Tasks`: the surface tasks, for a backend's plugin to pin to the main
-    thread where its platform needs that; gfx pins none and schedules them
-    itself. `ReleaseOpenSurfaces` among them is what `Stop` schedules, to
-    release the surfaces of the windows still open before any `Destroy`.
+  - `Tasks`: the surface tasks and the device recovery, for a backend's
+    plugin to pin to the main thread where its platform needs that; gfx pins
+    none and schedules them itself. `ReleaseOpenSurfaces` among them is what
+    `Stop` schedules, to release the surfaces of the windows still open
+    before any `Destroy`; `RecoverDevice` is what `Draw` schedules in place
+    of a frame after a loss, pinned by a backend whose device replacement
+    touches main-thread state.
   - `Handlers`: `Draw`, `CreateSurface`, `ResizeSurface` and
     `ReleaseSurface`, to order handlers around.
 - **Resources it reads from other plugins:** `*platform.WindowManager`, for
@@ -108,8 +111,8 @@ What remains is on the [gfx map](https://github.com/dvoyni/cog/issues/608).
 gfx requires platform and metronome, listed before it, and checks them
 with `Dependencies`: it makes its stopwatches from metronome's `Clock`. A plugin that reads `Handlers` or
 `Tasks` in its `Init` is listed after gfx: the backend's plugin, which binds
-`InstanceSocket` and pins the surface tasks its platform needs on the main
-thread, goes after gfx for that.
+`InstanceSocket` and pins the tasks its platform needs on the main thread,
+goes after gfx for that.
 
 ## Wiring
 
