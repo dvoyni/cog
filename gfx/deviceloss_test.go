@@ -650,7 +650,7 @@ func TestAMapPendingAtALossPublishesMapStatusFailedUnlessItsBufferWasReleased(t 
 
 func TestMapsAndCapturesPendingWhenAPollFindsALossHearAsFailures(t *testing.T) {
 	h := newHarness(t)
-	h.mustSpawn(&gfx.Config{Surface: gfx.SurfaceRequest{Capturable: true}})
+	h.mustSpawn(nil)
 	window := h.openWindow()
 	h.waitForCalls(recording.CallKindCreateSurface, 1)
 	h.advance(time.Millisecond)

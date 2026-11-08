@@ -212,9 +212,9 @@ type Device interface {
 	// acquire runs after it, the next one when a frame is drawing: gfx's flush
 	// copies it after every submit order and before the present, and
 	// CapturedEvent delivers it a frame later. A window already being
-	// captured answers ErrCaptureBusy, and one whose surface is not configured
-	// Capturable, or not yet configured, or whose format is not 8-bit BGRA or
-	// RGBA, ErrCaptureUnsupported.
+	// captured answers ErrCaptureBusy, and one whose surface is not yet
+	// configured, or whose format is not 8-bit BGRA or RGBA,
+	// ErrCaptureUnsupported.
 	RequestCapture(window platform.Window) error
 }
 

@@ -546,7 +546,7 @@ func (d *device) RequestCapture(window platform.Window) error {
 		return ErrDeviceLost
 	}
 	configuration, configured := d.configurations[window]
-	if !configured || !configuration.Capturable || !slices.Contains([]TextureFormat{
+	if !configured || !slices.Contains([]TextureFormat{
 		TextureFormatBGRA8Unorm, TextureFormatBGRA8UnormSrgb, TextureFormatRGBA8Unorm, TextureFormatRGBA8UnormSrgb,
 	}, configuration.Format) {
 		return ErrCaptureUnsupported
