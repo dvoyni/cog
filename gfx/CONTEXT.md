@@ -71,3 +71,9 @@ _Avoid_: Snapshot, screenshot, frame grab
 **Submit order**:
 The number an encoder is handed under, by which a frame's encoders are submitted, shared by every plugin that records.
 _Avoid_: Priority, layer, pass index
+
+### Shaders
+
+**Shader preprocessing**:
+Turning a WGSL file with directives (`#include`, `#define`, `#const`, `#if`) into the final WGSL a shader module is created from. It is the backend's work, which gfx exposes through the device.
+_Avoid_: Shader compilation, templating
