@@ -29,7 +29,7 @@ after every submit order and delivered by `CapturedEvent`, its buffer
 released after the publication, and `ReadCapture` answers its picture,
 and a device loss from any backend call is logged and published once, no
 call reaching the backend after it, every call with an error answering
-`ErrDeviceLost` and the frame in flight skipping its submit and present,
+`ErrDeviceLost`, `PreprocessShader` aside, and the frame in flight skipping its submit and present,
 the maps and captures pending at it publishing failures, and the next
 beat recovers instead of drawing, every object recreated under its old
 handle, every surface marked and `DeviceRecoveredEvent` published, a
@@ -41,7 +41,8 @@ resource without its usage, a misaligned write, copy or clear, a broken
 pass sequence and any query set, reports every feature but timestamp
 queries, and its buffers hold the bytes written, copied and cleared,
 which its own maps read, and answers a pipeline's reflection with the
-layouts a test queues, and a vertex entry point's with its inputs; `shader.Preprocess` is v1's preprocessor whole.
+layouts a test queues, a vertex entry point's with its inputs, and a
+shader's preprocessing with the file's text as it is.
 What remains is on the [gfx map](https://github.com/dvoyni/cog/issues/608).
 
 ## Shape
@@ -75,7 +76,9 @@ What remains is on the [gfx map](https://github.com/dvoyni/cog/issues/608).
   asynchronous, delivered by events.
 - **`DeviceLostEvent`** and **`DeviceRecoveredEvent`** frame a device loss:
   gfx recreates every object in place, and owners refill their contents.
-- **`shader.Preprocess`**, in `gfx/shader`, is v1's WGSL preprocessor.
+- **`PreprocessShader`** has the backend handle a WGSL file's directives,
+  defined with `ShaderDefine`s; a shader it refuses answers an
+  `ErrShaderSource`. The gogpu plugin's preprocessor is `gogpu/shader`.
 
 ## Kernel surface
 

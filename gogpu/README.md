@@ -5,7 +5,7 @@ GPU and real windows. It implements [gfx](../gfx) and [platform](../platform)
 over our gogpu fork in `submodules/gogpu`, driving it through `HostLoop` from
 the kernel's main-thread tick. Its `shader` package is the WGSL preprocessor.
 
-Status: designed, not yet built. The design is in
+Status: designed; of it, only `gogpu/shader` is built. The design is in
 [`docs/design.md`](docs/design.md), the guide in
 [`docs/README.md`](docs/README.md), and the build on the
 [gogpu map](https://github.com/dvoyni/cog/issues/611).

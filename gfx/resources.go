@@ -1,6 +1,8 @@
 package gfx
 
 import (
+	"io/fs"
+
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/metronome"
 	"github.com/dvoyni/cog/platform"
@@ -101,6 +103,13 @@ type Device interface {
 	// TimestampPeriod answers the nanoseconds of one timestamp tick.
 	TimestampPeriod() float32
 
+	// PreprocessShader answers the final WGSL of the shader at path in files,
+	// defined with defines, for CreateShaderModule: the backend handles its
+	// directives (#include, #define, #const and #if) and answers an
+	// ErrShaderSource for a shader it refuses. A task calls it holding the
+	// read locks of Device and of the platform.FS it hands it. It is the
+	// instance's work, so it goes on through a device loss.
+	PreprocessShader(files fs.FS, path string, defines []ShaderDefine) (string, error)
 	// CreateShaderModule compiles the module, which the backend reflects
 	// once for the "auto" layouts of the pipelines made from it; invalid
 	// WGSL answers the backend's error. Like the pipeline creations, it is

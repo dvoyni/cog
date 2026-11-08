@@ -87,8 +87,10 @@ immediate; the GPU keeps what in-flight work still uses.
 
 ## Shaders and pipelines
 
-Preprocess WGSL with `shader.Preprocess(files, path, defines)`, from `gfx/shader`, under your own
-`kernel.Read[platform.FS]`, then `CreateShaderModule`. Leave a pipeline's
+Preprocess WGSL with `device.PreprocessShader(files, path, defines)`, from a
+task holding `kernel.Read[gfx.Device]` and `kernel.Read[platform.FS]`, then
+`CreateShaderModule`. The backend handles the directives, and a shader it
+refuses answers an `ErrShaderSource` naming the file and line. Leave a pipeline's
 `Layout` zero for an "auto" layout reflected from its shaders, and read its
 groups back with `RenderPipelineBindGroupLayout`. Creation checks the vertex
 buffers against the shader's inputs, answering `ErrVertexMismatch` naming the

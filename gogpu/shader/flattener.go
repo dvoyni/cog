@@ -7,6 +7,8 @@ import (
 	"path"
 	"slices"
 	"strings"
+
+	"github.com/dvoyni/cog/gfx"
 )
 
 // hoistedKeywords are WGSL's directives that must precede every declaration
@@ -46,12 +48,12 @@ type flattener struct {
 	// #include lines that opened them, which an error in one names.
 	included map[string]bool
 	stack    []string
-	chain    []Location
+	chain    []gfx.ShaderSourceLocation
 
 	// The declarations are collected from every source before any branch is
 	// chosen, so a #define holds for its whole shader, wherever it stands.
-	defines map[string]Location
-	consts  map[string]Location
+	defines map[string]gfx.ShaderSourceLocation
+	consts  map[string]gfx.ShaderSourceLocation
 
 	enables     map[string]bool
 	requires    map[string]bool
@@ -75,10 +77,10 @@ type scannedLine struct {
 // two naming one rule with different severities are found.
 type hoistedDiagnostic struct {
 	text string // spaces normalised, for comparing and emitting
-	at   Location
+	at   gfx.ShaderSourceLocation
 }
 
-func newFlattener(files fs.FS, root string, defines []Define) *flattener {
+func newFlattener(files fs.FS, root string, defines []gfx.ShaderDefine) *flattener {
 	label, kept, malformed := labelShader(root, defines)
 	flattener := &flattener{
 		files:       files,
@@ -88,8 +90,8 @@ func newFlattener(files fs.FS, root string, defines []Define) *flattener {
 		givenFlags:  map[string]bool{},
 		givenValues: map[string]string{},
 		included:    map[string]bool{},
-		defines:     map[string]Location{},
-		consts:      map[string]Location{},
+		defines:     map[string]gfx.ShaderSourceLocation{},
+		consts:      map[string]gfx.ShaderSourceLocation{},
 		enables:     map[string]bool{},
 		requires:    map[string]bool{},
 		diagnostics: map[string]hoistedDiagnostic{},
@@ -113,7 +115,7 @@ func (f *flattener) run() (string, error) {
 	if err != nil {
 		return "", f.refuse(fmt.Sprintf("%q not found", f.root))
 	}
-	if err := f.emitSource(f.root, string(text), Location{}); err != nil {
+	if err := f.emitSource(f.root, string(text), gfx.ShaderSourceLocation{}); err != nil {
 		return "", err
 	}
 	if err := f.checkGivenKinds(); err != nil {
@@ -133,7 +135,7 @@ func (f *flattener) run() (string, error) {
 // emitSource splices one source into the output: it checks the source's
 // conditional structure, hoists WGSL's directives from its prologue, collects
 // its declarations, and splices its includes.
-func (f *flattener) emitSource(name, text string, from Location) error {
+func (f *flattener) emitSource(name, text string, from gfx.ShaderSourceLocation) error {
 	f.included[name] = true
 	f.stack = append(f.stack, name)
 	defer func() { f.stack = f.stack[:len(f.stack)-1] }()
@@ -149,7 +151,7 @@ func (f *flattener) emitSource(name, text string, from Location) error {
 	}
 
 	for index, line := range lines {
-		at := Location{Source: name, Line: index + 1}
+		at := gfx.ShaderSourceLocation{Source: name, Line: index + 1}
 		if hoisted[index] {
 			f.appendLine(blankLine(line), conditionalLine{})
 			continue
@@ -186,13 +188,13 @@ func (f *flattener) emitSource(name, text string, from Location) error {
 // selectBranches only evaluates.
 func (f *flattener) scanSource(name string, lines []string) ([]scannedLine, error) {
 	type openConditional struct {
-		ifAt   Location
-		elseAt Location
+		ifAt   gfx.ShaderSourceLocation
+		elseAt gfx.ShaderSourceLocation
 	}
 	scanned := make([]scannedLine, len(lines))
 	var open []openConditional
 	for index, line := range lines {
-		at := Location{Source: name, Line: index + 1}
+		at := gfx.ShaderSourceLocation{Source: name, Line: index + 1}
 		parsed := parseDirective(line)
 		if !parsed.sigil {
 			continue
@@ -224,7 +226,7 @@ func (f *flattener) scanSource(name string, lines []string) ([]scannedLine, erro
 				return nil, f.refuse(fmt.Sprintf("%s with no open #if", parsed.kind), at)
 			}
 			innermost := &open[len(open)-1]
-			if innermost.elseAt != (Location{}) {
+			if innermost.elseAt != (gfx.ShaderSourceLocation{}) {
 				return nil, f.refuse(fmt.Sprintf("%s after #else", parsed.kind), at, innermost.elseAt)
 			}
 			if parsed.kind == directiveElse {
@@ -247,13 +249,13 @@ func (f *flattener) scanSource(name string, lines []string) ([]scannedLine, erro
 		// The opening line is named too: an unclosed #if reported only at the
 		// end of its source is the least useful message there is.
 		return nil, f.refuse("#if is never closed",
-			Location{Source: name, Line: len(lines)}, open[len(open)-1].ifAt)
+			gfx.ShaderSourceLocation{Source: name, Line: len(lines)}, open[len(open)-1].ifAt)
 	}
 	return scanned, nil
 }
 
 // include resolves one #include and splices the source it names.
-func (f *flattener) include(argument, includer string, at Location) error {
+func (f *flattener) include(argument, includer string, at gfx.ShaderSourceLocation) error {
 	if argument == "" {
 		return f.refuse("#include with an empty path", at)
 	}
@@ -284,7 +286,7 @@ func (f *flattener) include(argument, includer string, at Location) error {
 // resolveInclude turns a written path into the clean path to open. One
 // starting "./" or "../" is relative to the including source's directory;
 // anything else is a path in the filesystem, used as it is.
-func (f *flattener) resolveInclude(argument, includer string, at Location) (string, error) {
+func (f *flattener) resolveInclude(argument, includer string, at gfx.ShaderSourceLocation) (string, error) {
 	if !strings.HasPrefix(argument, "./") && !strings.HasPrefix(argument, "../") {
 		return argument, nil
 	}
@@ -305,7 +307,7 @@ func (f *flattener) resolveInclude(argument, includer string, at Location) (stri
 
 // declareDefine records a flag. A define never carries a value, so text after
 // its name is an error rather than a value silently dropped.
-func (f *flattener) declareDefine(argument string, at Location) error {
+func (f *flattener) declareDefine(argument string, at gfx.ShaderSourceLocation) error {
 	if argument == "" {
 		return f.refuse("#define with no name", at)
 	}
@@ -325,7 +327,7 @@ func (f *flattener) declareDefine(argument string, at Location) error {
 
 // declareConst records a named value and answers the WGSL const it becomes,
 // on the directive's own line, so the line count holds.
-func (f *flattener) declareConst(line, argument string, at Location) (string, error) {
+func (f *flattener) declareConst(line, argument string, at gfx.ShaderSourceLocation) (string, error) {
 	name, value, ok := strings.Cut(argument, "=")
 	name = strings.TrimSpace(name)
 	value = strings.TrimSpace(value)
@@ -361,12 +363,12 @@ func (f *flattener) declareConst(line, argument string, at Location) (string, er
 func (f *flattener) checkGivenKinds() error {
 	for _, name := range slices.Sorted(maps.Keys(f.givenValues)) {
 		if at, ok := f.defines[name]; ok {
-			return f.refuse(fmt.Sprintf("%q is given a value but declared as a define", name), Location{}, at)
+			return f.refuse(fmt.Sprintf("%q is given a value but declared as a define", name), gfx.ShaderSourceLocation{}, at)
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(f.givenFlags)) {
 		if at, ok := f.consts[name]; ok {
-			return f.refuse(fmt.Sprintf("%q is given as a flag but declared as a const", name), Location{}, at)
+			return f.refuse(fmt.Sprintf("%q is given as a flag but declared as a const", name), gfx.ShaderSourceLocation{}, at)
 		}
 	}
 	return nil
@@ -443,7 +445,7 @@ func (f *flattener) hoistPrologue(name string, lines []string, scanned []scanned
 		if !ok {
 			return hoisted, nil
 		}
-		at := Location{Source: name, Line: index + 1}
+		at := gfx.ShaderSourceLocation{Source: name, Line: index + 1}
 		if err := f.collectHoisted(keyword, body, at); err != nil {
 			return nil, err
 		}
@@ -456,7 +458,7 @@ func (f *flattener) hoistPrologue(name string, lines []string, scanned []scanned
 }
 
 // collectHoisted keeps one WGSL directive for the top of the module.
-func (f *flattener) collectHoisted(keyword, body string, at Location) error {
+func (f *flattener) collectHoisted(keyword, body string, at gfx.ShaderSourceLocation) error {
 	switch keyword {
 	case "enable", "requires":
 		// Each takes a list, and the names are unioned across the sources,
@@ -510,14 +512,14 @@ func (f *flattener) appendLine(text string, conditional conditionalLine) {
 	f.conditionals = append(f.conditionals, conditional)
 }
 
-func (f *flattener) refuse(message string, at ...Location) error {
-	return ErrSource{Shader: f.label, Message: message, At: at}
+func (f *flattener) refuse(message string, at ...gfx.ShaderSourceLocation) error {
+	return gfx.ErrShaderSource{Shader: f.label, Message: message, At: at}
 }
 
 // refuseWithChain refuses with the chain of #include lines down to the
 // failing one at.
-func (f *flattener) refuseWithChain(message string, at Location) error {
-	return ErrSource{Shader: f.label, Message: message, At: append(slices.Clone(f.chain), at)}
+func (f *flattener) refuseWithChain(message string, at gfx.ShaderSourceLocation) error {
+	return gfx.ErrShaderSource{Shader: f.label, Message: message, At: append(slices.Clone(f.chain), at)}
 }
 
 // splitLeadingWord splits a line's first bare word from the rest. An

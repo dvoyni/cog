@@ -12,6 +12,7 @@ package recording
 
 import (
 	"fmt"
+	"io/fs"
 	"slices"
 	"sync"
 
@@ -90,6 +91,21 @@ func (instance *Instance) ReleaseSurface(window platform.Window) {
 		delete(instance.surfaces, window)
 		return nil
 	})
+}
+
+// PreprocessShader records the call and answers the text of path in files
+// as it is, no directive handled, or the error reading it: the recording
+// adapter preprocesses nothing, and a test that needs real preprocessing
+// calls gogpu/shader itself.
+func (instance *Instance) PreprocessShader(files fs.FS, path string, defines []gfx.ShaderDefine) (string, error) {
+	var text []byte
+	arguments := PreprocessShaderArguments{Path: path, Defines: slices.Clone(defines)}
+	err := instance.record(CallKindPreprocessShader, arguments, func() error {
+		var err error
+		text, err = fs.ReadFile(files, path)
+		return err
+	}).Error
+	return string(text), err
 }
 
 // Release records the instance released.

@@ -3,6 +3,7 @@ package gfx
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"slices"
 	"sync"
@@ -178,6 +179,10 @@ func (d *device) ReleaseQuerySet(querySet QuerySet) {
 }
 
 func (d *device) TimestampPeriod() float32 { return d.backend.TimestampPeriod() }
+
+func (d *device) PreprocessShader(files fs.FS, path string, defines []ShaderDefine) (string, error) {
+	return d.instance.PreprocessShader(files, path, defines)
+}
 
 func (d *device) CreateShaderModule(descriptor ShaderModuleDescriptor) (ShaderModule, error) {
 	if d.lost.Load() {

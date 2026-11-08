@@ -92,6 +92,9 @@ const (
 	// CallKindReleaseQuerySet is BackendDevice.ReleaseQuerySet, its Arguments
 	// the gfx.QuerySet.
 	CallKindReleaseQuerySet
+	// CallKindPreprocessShader is InstanceSocket.PreprocessShader, its
+	// Arguments a PreprocessShaderArguments.
+	CallKindPreprocessShader
 	// CallKindCreateShaderModule is BackendDevice.CreateShaderModule, its
 	// Arguments a CreateShaderModuleArguments.
 	CallKindCreateShaderModule
@@ -189,9 +192,9 @@ type Answer struct {
 // sorts and chains them; the order of Calls from parallel tasks is not, so a
 // test looks them up by handle.
 type Recording struct {
-	// Calls are the lifecycle, write, map and surface calls, each with its
-	// handle and a deep copy of its descriptor or data. MapStatus and
-	// MappedRange only read, and are not recorded.
+	// Calls are the lifecycle, write, map, surface and preprocessing calls,
+	// each with its handle and a deep copy of its descriptor or data.
+	// MapStatus and MappedRange only read, and are not recorded.
 	Calls       []Call
 	Submissions []Submission
 	// submittedAfter is, for each submission, how many calls were recorded
@@ -298,6 +301,13 @@ type CreateSamplerArguments struct {
 type CreateQuerySetArguments struct {
 	QuerySet   gfx.QuerySet
 	Descriptor gfx.QuerySetDescriptor
+}
+
+// PreprocessShaderArguments are what PreprocessShader was called with, the
+// defines copied; the filesystem is left out.
+type PreprocessShaderArguments struct {
+	Path    string
+	Defines []gfx.ShaderDefine
 }
 
 // CreateShaderModuleArguments are what CreateShaderModule was called with.

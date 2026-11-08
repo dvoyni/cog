@@ -64,8 +64,18 @@ type SamplerDescriptor struct {
 	Anisotropy                               uint16
 }
 
+// ShaderDefine is one name a shader is preprocessed with. With no Value it
+// is a flag, read by the source's #if conditionals and never reaching WGSL;
+// defining a name no source mentions is harmless. With a Value it overrides
+// the #const of that name, and is ignored where no source declares one. The
+// Value is WGSL text, never interpreted: "16" and "16u" differ. A name given
+// twice keeps its last entry.
+type ShaderDefine struct {
+	Name, Value string
+}
+
 // ShaderModuleDescriptor describes a shader module: final WGSL, already
-// through shader.Preprocess when it uses directives.
+// through Device.PreprocessShader when it uses directives.
 type ShaderModuleDescriptor struct {
 	Label string
 	WGSL  string

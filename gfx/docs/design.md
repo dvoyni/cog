@@ -6,7 +6,7 @@ render track. A **backend** implements it: the gogpu plugin over our wgpu
 fork, or the **recording adapter** in `gfx/recording` for tests. gfx owns
 what is the same for every backend: the handle tables and their descriptors,
 the frame chain, submit order, surfaces following platform's windows,
-the handles of "auto" layouts, the shader preprocessor, readback and
+the handles of "auto" layouts, readback and
 capture, and recovery after a device loss. It knows nothing of materials,
 scenes or the ECS: scene builds forward+, deferred and post effects on it,
 and nothing in gfx knows which.
@@ -53,9 +53,9 @@ submission indices, both measured by stopwatches of metronome's clock.
 The backend reflects shader modules:
 its seam declares `ReflectRenderPipelineLayout`,
 `ReflectComputePipelineLayout` and `ReflectVertexInputs`, which the recording
-adapter answers with the layouts and inputs a test queues. `shader.Preprocess`, in `gfx/shader`,
-is v1's preprocessor whole: `#include`, `#define`, `#const`, `#if` and the hoisting
-of WGSL's `enable`, `requires` and `diagnostic`. Standalone encoders are finished
+adapter answers with the layouts and inputs a test queues. The backend
+preprocesses shaders too, through `Device.PreprocessShader`, which the
+recording adapter answers with the file's text as it is. Standalone encoders are finished
 and submitted by their owner. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md); the ADRs are in
 [`adr/`](adr).
 
@@ -182,12 +182,22 @@ backend to pin.
 ## Shaders and pipelines
 
 ([The interface listing](https://github.com/dvoyni/cog/issues/662),
-[Pipeline creation off the frame](https://github.com/dvoyni/cog/issues/668))
+[Pipeline creation off the frame](https://github.com/dvoyni/cog/issues/668),
+[Shader preprocessing moved to the backend](https://github.com/dvoyni/cog/issues/709))
 
 - **WGSL only.** `CreateShaderModule(ShaderModuleDescriptor{Label, WGSL})`
-  takes final WGSL. `shader.Preprocess(files, path, defines)`, in `gfx/shader`, is
-  v1's preprocessor ported (`#include`, `#define`, `#const`, `#if`); a task calls
-  it under its own `kernel.Read[platform.FS]`. Hot reload is deferred.
+  takes final WGSL. Hot reload is deferred.
+- **Preprocessing is the backend's,** since the backend owns the WGSL it
+  accepts. `Device.PreprocessShader(files, path, defines)` passes the call to
+  `InstanceSocket.PreprocessShader`; the gogpu plugin runs v1's preprocessor,
+  `gogpu/shader` (`#include`, `#define`, `#const`, `#if`), and the recording
+  adapter answers the file's text as it is. A task calls it holding
+  `kernel.Read[Device]` and `kernel.Read[platform.FS]`, then
+  `CreateShaderModule`. A refusal is an `ErrShaderSource`, matched with
+  `errors.As`, naming the shader and its lines. gfx keeps the seam types,
+  `ShaderDefine`, `ShaderSourceLocation` and `ErrShaderSource`, and handles
+  no directive. It is the instance's work, so it goes on through a device
+  loss.
 - **The backend reflects a module once, at its creation,** and keeps the
   result at the module's index; invalid WGSL fails `CreateShaderModule` with
   its error. gfx parses no WGSL and depends on no shader compiler: the gogpu
