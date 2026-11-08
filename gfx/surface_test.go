@@ -45,7 +45,7 @@ func TestAClosedWindowsSurfaceIsReleased(t *testing.T) {
 	}
 }
 
-func TestDestroyReleasesTheSurfacesOfOpenWindowsFirst(t *testing.T) {
+func TestTeardownReleasesTheSurfacesOfOpenWindowsBeforeTheDevice(t *testing.T) {
 	h := newHarness(t)
 	h.mustSpawn(nil)
 	window := h.openWindow()
@@ -53,6 +53,26 @@ func TestDestroyReleasesTheSurfacesOfOpenWindowsFirst(t *testing.T) {
 
 	h.quit()
 
+	assertSurfaceReleasedBeforeTheDevice(t, h, window)
+}
+
+func TestAPinnedReleaseOfOpenSurfacesRunsOnTheMainThreadAtTeardown(t *testing.T) {
+	h := newHarness(t)
+	h.pinSurfaceTasks = true
+	h.mustSpawn(nil)
+	window := h.openWindow()
+	h.waitForCalls(recording.CallKindCreateSurface, 1)
+
+	h.quit()
+
+	assertSurfaceReleasedBeforeTheDevice(t, h, window)
+}
+
+// assertSurfaceReleasedBeforeTheDevice fails t unless the last calls h's
+// instance recorded are window's surface release, then the device's, the
+// adapter's and the instance's.
+func assertSurfaceReleasedBeforeTheDevice(t *testing.T, h *harness, window platform.Window) {
+	t.Helper()
 	calls := h.instance.Recording().Calls
 	want := []recording.CallKind{
 		recording.CallKindReleaseSurface, recording.CallKindReleaseDevice,
@@ -629,7 +649,7 @@ func TestTasksHoldTheSurfaceJobsForABackendToPin(t *testing.T) {
 		t.Fatal("gfx installed no Tasks")
 	}
 	if h.tasks.CreateSurface == nil || h.tasks.ReleaseSurface == nil || h.tasks.ConfigureSurfaces == nil ||
-		h.tasks.AcquireFramebuffers == nil || h.tasks.PresentFramebuffers == nil {
+		h.tasks.AcquireFramebuffers == nil || h.tasks.PresentFramebuffers == nil || h.tasks.ReleaseOpenSurfaces == nil {
 		t.Errorf("Tasks = %+v, want every surface job", h.tasks)
 	}
 }

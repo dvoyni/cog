@@ -178,6 +178,7 @@ func (h *harness) Init(c *kernel.Configurator, config any) error {
 		c.PinToMainThread(h.tasks.ConfigureSurfaces)
 		c.PinToMainThread(h.tasks.AcquireFramebuffers)
 		c.PinToMainThread(h.tasks.PresentFramebuffers)
+		c.PinToMainThread(h.tasks.ReleaseOpenSurfaces)
 	}
 	read := c.RegisterTask1(func(k *kernel.Kernel, _ kernel.NoArg, device kernel.Read[gfx.Device]) kernel.NoResult {
 		h.read(device.Get())
