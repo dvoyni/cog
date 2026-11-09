@@ -10,12 +10,13 @@ capture and recovery; the plugin passes each call through to gogpu's own
 windows, surfaces and device.
 
 Status: being built: gfx gets gogpu's adapter and device, with the features
-and limits it asks for or the software adapter, every other device call
-answering an error naming it, windows open and close through platform, the
-user's close reported and the main window opened at start, each beat
-acquires and presents every shown window's framebuffer, encoders record
-render passes that clear, finish and submit, every other command answering
-an error naming it, and `gogpu/shader` preprocesses shaders. The decisions come from the
+and limits it asks for or the software adapter, windows open and close
+through platform, the user's close reported and the main window opened at
+start, each beat acquires and presents every shown window's framebuffer,
+encoders record render passes that clear, finish and submit, buffers are
+created, written and mapped, with every other device call or command
+answering an error naming it, and `gogpu/shader` preprocesses shaders. The
+decisions come from the
 [gogpu map](https://github.com/dvoyni/cog/issues/611); each section links
 the ticket that holds its detail. The loop API it rests on, `HostLoop`, was
 built on the [loop map](https://github.com/dvoyni/cog/issues/612) and is in
@@ -230,6 +231,22 @@ what `HostLoop` or the OS requires:
   index, and `Poll` the newest one finished. gogpu's own submits share the
   queue, so the indices rise from one with gaps; gfx needs them only to
   rise.
+
+## Buffers
+
+([gogpu plugin: buffers, writes and asynchronous maps](https://github.com/dvoyni/cog/issues/747))
+
+- **Buffers are wgpu's,** stored at gfx's index. A released one is
+  released to wgpu, which keeps it until the submits using it finish, and
+  its index holds the next buffer gfx creates there.
+- **A write lands at the next submit,** as gfx says: wgpu's queue copies
+  the data into its pending writes, which its next submit, gogpu's own
+  included, carries first.
+- **A map waits on the submits made before it,** not on a write still
+  pending: a buffer written and then mapped needs a submit in between.
+  `Poll` drives wgpu's device poll, so a map resolves at gfx's next poll,
+  with or without a submit, and `MapStatus` answers the error that failed
+  it.
 
 ## Shaders
 

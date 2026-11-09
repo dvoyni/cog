@@ -1,6 +1,7 @@
 package gogpu_test
 
 import (
+	"bytes"
 	"os"
 	"runtime"
 	"slices"
@@ -56,7 +57,8 @@ type pumpEvent struct{}
 
 // harness spawns a kernel of metronome, platform, gfx, gogpu and itself from
 // the main thread, reads its Device, edits its WindowManager and pumps,
-// draws, records the window events platform publishes, and quits it, failing
+// draws, records the window events platform publishes and gfx's
+// BufferMappedEvent, and quits it, failing
 // the test on every error logged.
 type harness struct {
 	t          *testing.T
@@ -167,7 +169,39 @@ func (h *harness) openShownWindow() platform.Window {
 	return window
 }
 
-// takePublished answers the window events published since its last call.
+// readBack draws beats until buffer's map is published resolved, failing the
+// test when 10 beats publish none or it failed, and answers a copy of its
+// first size bytes, unmapping it.
+func (h *harness) readBack(buffer gfx.Buffer, size uint64) []byte {
+	h.t.Helper()
+	for range 10 {
+		h.draw(nil)
+		for _, event := range h.takePublished() {
+			if mapped, ok := event.(gfx.BufferMappedEvent); !ok || mapped.Buffer != buffer {
+				continue
+			} else if mapped.Status != gfx.MapStatusMapped {
+				h.t.Fatalf("%v's map was published %v", buffer, mapped.Status)
+			}
+			var read []byte
+			h.readDevice(func(device gfx.Device) {
+				mappedRange, err := device.MappedRange(buffer, 0, size)
+				if err != nil {
+					h.t.Errorf("MappedRange answered %v", err)
+					return
+				}
+				read = bytes.Clone(mappedRange)
+				if err := device.UnmapBuffer(buffer); err != nil {
+					h.t.Errorf("UnmapBuffer answered %v", err)
+				}
+			})
+			return read
+		}
+	}
+	h.t.Fatalf("no beat of 10 published %v's map", buffer)
+	return nil
+}
+
+// takePublished answers the events recorded since its last call.
 func (h *harness) takePublished() []any {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
@@ -192,7 +226,7 @@ func publishAndWait[E any](h *harness, event E) {
 	}
 }
 
-// subscribeRecord records every E platform publishes.
+// subscribeRecord records every E published.
 func subscribeRecord[E any](c *kernel.Configurator, h *harness) {
 	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event E) (E, kernel.JobHandle) {
 		h.mutex.Lock()
@@ -266,6 +300,7 @@ func (h *harness) Init(c *kernel.Configurator, _ any) error {
 	subscribeRecord[platform.WindowOpenedEvent](c, h)
 	subscribeRecord[platform.WindowClosedEvent](c, h)
 	subscribeRecord[platform.CloseRequestedEvent](c, h)
+	subscribeRecord[gfx.BufferMappedEvent](c, h)
 	return nil
 }
 
@@ -565,6 +600,37 @@ func TestARenderPassOnAViewHoldingNothingFailsFinish(t *testing.T) {
 	})
 }
 
+func TestBytesWrittenToABufferAreReadBackThroughItsMap(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+
+	written := []byte("sixteen bytes in")
+	var buffer gfx.Buffer
+	h.readDevice(func(device gfx.Device) { buffer = mapWrittenBuffer(t, device, written) })
+	if read := h.readBack(buffer, uint64(len(written))); !bytes.Equal(read, written) {
+		t.Errorf("the map read %q, want %q", read, written)
+	}
+}
+
+func TestAReleasedBuffersIndexHoldsTheNextBuffer(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+
+	written := []byte("the second write")
+	var released, buffer gfx.Buffer
+	h.readDevice(func(device gfx.Device) {
+		released = mapWrittenBuffer(t, device, []byte("the first write!"))
+		device.ReleaseBuffer(released)
+		buffer = mapWrittenBuffer(t, device, written)
+	})
+	if buffer.Index() != released.Index() {
+		t.Fatalf("the second buffer is at %d, want the released one's %d", buffer.Index(), released.Index())
+	}
+	if read := h.readBack(buffer, uint64(len(written))); !bytes.Equal(read, written) {
+		t.Errorf("the map read %q, want %q", read, written)
+	}
+}
+
 // clearFramebuffer records, in frame's encoder at order 0, a render pass
 // clearing window's framebuffer to color, and answers whether the frame had
 // one.
@@ -582,4 +648,26 @@ func clearFramebuffer(t *testing.T, event gfx.DrawEvent, device gfx.Device, wind
 		View: view, LoadOp: gfx.LoadOpClear, StoreOp: gfx.StoreOpStore, ClearValue: color,
 	}}}).End()
 	return true
+}
+
+// mapWrittenBuffer creates a MapRead buffer, writes written into it, lands the
+// write with an empty submit, as gfx's writes land at the next submit, and
+// maps it for reading.
+func mapWrittenBuffer(t *testing.T, device gfx.Device, written []byte) gfx.Buffer {
+	size := uint64(len(written))
+	buffer, err := device.CreateBuffer(gfx.BufferDescriptor{Size: size, Usage: gfx.BufferUsageFlagMapRead | gfx.BufferUsageFlagCopyDst})
+	if err != nil {
+		t.Errorf("CreateBuffer answered %v", err)
+		return buffer
+	}
+	if err := device.WriteBuffer(buffer, 0, written); err != nil {
+		t.Errorf("WriteBuffer answered %v", err)
+	}
+	if err := device.Submit(); err != nil {
+		t.Errorf("Submit answered %v", err)
+	}
+	if err := device.MapBuffer(buffer, gfx.MapModeRead, 0, size); err != nil {
+		t.Errorf("MapBuffer answered %v", err)
+	}
+	return buffer
 }
