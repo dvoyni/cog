@@ -9,9 +9,9 @@ its `OnDraw` never run. gfx keeps its handle tables, frame chain, surfaces,
 capture and recovery; the plugin passes each call through to gogpu's own
 windows, surfaces and device.
 
-Status: being built: gfx gets gogpu's adapter and device, with every other
-device call answering an error naming it, and `gogpu/shader` preprocesses
-shaders. The decisions come from the
+Status: being built: gfx gets gogpu's adapter and device, with the features
+and limits it asks for or the software adapter, every other device call
+answering an error naming it, and `gogpu/shader` preprocesses shaders. The decisions come from the
 [gogpu map](https://github.com/dvoyni/cog/issues/611); each section links
 the ticket that holds its detail. The loop API it rests on, `HostLoop`, was
 built on the [loop map](https://github.com/dvoyni/cog/issues/612) and is in
@@ -70,8 +70,10 @@ The module is `cog/gogpu`, its own Go module in `go.work`, beside
   - `RequiredFeatures` by cast; gogpu's feature bits are gfx's
     `FeatureFlags`.
   - `RequiredLimits` field by field, the fields gfx's `Limits` lacks taken
-    from `gputypes.DefaultLimits()`. gfx passes WebGPU's defaults explicitly,
-    since wgpu's zero means the adapter's full limits.
+    from the adapter's own: ray tracing's, push constants' and the like,
+    which gfx never uses, and which Metal reports as zero, below WebGPU's
+    defaults. gfx passes WebGPU's defaults explicitly, since wgpu's zero
+    means the adapter's full limits.
   - The fork checks the required features and limits against the adapter
     before it requests the device, since Vulkan and Metal ignore them and
     DX12 checks only features.

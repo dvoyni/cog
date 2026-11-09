@@ -73,8 +73,9 @@ func (*Plugin) Destroy() error { return nil }
 
 // RequestAdapter starts the HostLoop, with no device and no window, on the
 // thread gfx's Start runs on, which is main, and answers gogpu's adapter on
-// Config's backend with options' power preference. A device replacement is
-// not built yet: a second request answers an error.
+// Config's backend with options' power preference, or wgpu's software adapter
+// when options force the fallback. A device replacement is not built yet: a
+// second request answers an error.
 func (p *Plugin) RequestAdapter(options gfx.RequestAdapterOptions) (gfx.BackendAdapter, error) {
 	if p.loop != nil {
 		return nil, errors.New("gogpu: a device replacement is not built yet")
@@ -93,7 +94,11 @@ func (p *Plugin) RequestAdapter(options gfx.RequestAdapterOptions) (gfx.BackendA
 	default:
 		return nil, fmt.Errorf("gogpu: backend %d is GL or the browser's WebGPU, which the plugin never chooses", p.config.Backend)
 	}
-	app := fork.NewApp(fork.Config{GraphicsAPI: graphicsAPI, PowerPreference: gputypes.PowerPreference(options.PowerPreference)})
+	app := fork.NewApp(fork.Config{
+		GraphicsAPI:          graphicsAPI,
+		PowerPreference:      gputypes.PowerPreference(options.PowerPreference),
+		ForceFallbackAdapter: options.ForceFallbackAdapter,
+	})
 	loop := fork.NewHostLoop(app)
 	if err := loop.Start(); err != nil {
 		return nil, err

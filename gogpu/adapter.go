@@ -72,9 +72,45 @@ func (a *adapter) Limits() gfx.Limits {
 }
 
 // RequestDevice has the HostLoop request gogpu's device with descriptor's
-// features, and answers it. Its limits are the adapter's own.
+// features and limits, and answers it. The limits gfx's Limits lacks are the
+// adapter's own: they are ray tracing's, push constants' and the like, which
+// gfx never uses, and Metal reports some as zero, below WebGPU's defaults. A
+// feature or limit the adapter lacks answers the fork's error naming it.
 func (a *adapter) RequestDevice(descriptor gfx.DeviceDescriptor) (gfx.BackendDevice, error) {
-	if err := a.loop.RequestDevice(gputypes.Features(descriptor.RequiredFeatures), nil); err != nil {
+	required := descriptor.RequiredLimits
+	limits := a.adapter.Limits()
+	limits.MaxTextureDimension1D = required.MaxTextureDimension1D
+	limits.MaxTextureDimension2D = required.MaxTextureDimension2D
+	limits.MaxTextureDimension3D = required.MaxTextureDimension3D
+	limits.MaxTextureArrayLayers = required.MaxTextureArrayLayers
+	limits.MaxBindGroups = required.MaxBindGroups
+	limits.MaxBindGroupsPlusVertexBuffers = required.MaxBindGroupsPlusVertexBuffers
+	limits.MaxBindingsPerBindGroup = required.MaxBindingsPerBindGroup
+	limits.MaxDynamicUniformBuffersPerPipelineLayout = required.MaxDynamicUniformBuffersPerPipelineLayout
+	limits.MaxDynamicStorageBuffersPerPipelineLayout = required.MaxDynamicStorageBuffersPerPipelineLayout
+	limits.MaxSampledTexturesPerShaderStage = required.MaxSampledTexturesPerShaderStage
+	limits.MaxSamplersPerShaderStage = required.MaxSamplersPerShaderStage
+	limits.MaxStorageBuffersPerShaderStage = required.MaxStorageBuffersPerShaderStage
+	limits.MaxStorageTexturesPerShaderStage = required.MaxStorageTexturesPerShaderStage
+	limits.MaxUniformBuffersPerShaderStage = required.MaxUniformBuffersPerShaderStage
+	limits.MaxUniformBufferBindingSize = required.MaxUniformBufferBindingSize
+	limits.MaxStorageBufferBindingSize = required.MaxStorageBufferBindingSize
+	limits.MinUniformBufferOffsetAlignment = required.MinUniformBufferOffsetAlignment
+	limits.MinStorageBufferOffsetAlignment = required.MinStorageBufferOffsetAlignment
+	limits.MaxVertexBuffers = required.MaxVertexBuffers
+	limits.MaxBufferSize = required.MaxBufferSize
+	limits.MaxVertexAttributes = required.MaxVertexAttributes
+	limits.MaxVertexBufferArrayStride = required.MaxVertexBufferArrayStride
+	limits.MaxInterStageShaderVariables = required.MaxInterStageShaderVariables
+	limits.MaxColorAttachments = required.MaxColorAttachments
+	limits.MaxColorAttachmentBytesPerSample = required.MaxColorAttachmentBytesPerSample
+	limits.MaxComputeWorkgroupStorageSize = required.MaxComputeWorkgroupStorageSize
+	limits.MaxComputeInvocationsPerWorkgroup = required.MaxComputeInvocationsPerWorkgroup
+	limits.MaxComputeWorkgroupSizeX = required.MaxComputeWorkgroupSizeX
+	limits.MaxComputeWorkgroupSizeY = required.MaxComputeWorkgroupSizeY
+	limits.MaxComputeWorkgroupSizeZ = required.MaxComputeWorkgroupSizeZ
+	limits.MaxComputeWorkgroupsPerDimension = required.MaxComputeWorkgroupsPerDimension
+	if err := a.loop.RequestDevice(gputypes.Features(descriptor.RequiredFeatures), &limits); err != nil {
 		return nil, err
 	}
 	return &device{device: wgpu.DeviceFromHandle(a.app.GPUContextProvider().Device())}, nil
