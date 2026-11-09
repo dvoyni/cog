@@ -28,8 +28,14 @@ type device struct {
 	frames map[platform.Window]acquiredFrame
 	// buffers holds each buffer, and its latest map, at its gfx index.
 	buffers container.ObjectTable[bufferSlot]
-	// textureViews holds each texture view at its gfx index.
+	// textures holds each texture at its gfx index. A framebuffer's index
+	// holds none: gogpu offers no surface texture.
+	textures container.ObjectTable[atomic.Pointer[wgpu.Texture]]
+	// textureViews holds each texture view at its gfx index, a framebuffer's
+	// from its acquire to its present.
 	textureViews container.ObjectTable[atomic.Pointer[wgpu.TextureView]]
+	// samplers holds each sampler at its gfx index.
+	samplers container.ObjectTable[atomic.Pointer[wgpu.Sampler]]
 }
 
 // CreateBuffer creates wgpu's buffer and stores it at buffer's index.
@@ -57,18 +63,90 @@ func (d *device) ReleaseBuffer(buffer gfx.Buffer) {
 	}
 }
 
-func (*device) CreateTexture(gfx.Texture, gfx.TextureDescriptor) error {
-	return unbuilt("CreateTexture")
+// CreateTexture creates wgpu's texture and stores it at texture's index.
+func (d *device) CreateTexture(texture gfx.Texture, descriptor gfx.TextureDescriptor) error {
+	viewFormats := make([]gputypes.TextureFormat, len(descriptor.ViewFormats))
+	for index, format := range descriptor.ViewFormats {
+		viewFormats[index] = gputypes.TextureFormat(format)
+	}
+	created, err := d.device.CreateTexture(&wgpu.TextureDescriptor{
+		Label:         descriptor.Label,
+		Size:          wgpu.Extent3D(descriptor.Size),
+		MipLevelCount: descriptor.MipLevelCount,
+		SampleCount:   descriptor.SampleCount,
+		Dimension:     gputypes.TextureDimension(descriptor.Dimension),
+		Format:        gputypes.TextureFormat(descriptor.Format),
+		Usage:         gputypes.TextureUsage(descriptor.Usage),
+		ViewFormats:   viewFormats,
+	})
+	if err != nil {
+		return err
+	}
+	d.textures.Grow(texture.Index()).Store(created)
+	return nil
 }
-func (*device) ReleaseTexture(gfx.Texture) {}
-func (*device) CreateTextureView(gfx.TextureView, gfx.Texture, gfx.TextureViewDescriptor) error {
-	return unbuilt("CreateTextureView")
+
+// ReleaseTexture drops the texture stored at texture's index and releases
+// it; wgpu keeps it while a view of it or a submit using it lives.
+func (d *device) ReleaseTexture(texture gfx.Texture) { releaseStored(&d.textures, texture.Index()) }
+
+// CreateTextureView creates wgpu's view of the texture stored at texture's
+// index, and stores it at view's index.
+func (d *device) CreateTextureView(view gfx.TextureView, texture gfx.Texture, descriptor gfx.TextureViewDescriptor) error {
+	viewed, err := d.storedTexture(texture)
+	if err != nil {
+		return err
+	}
+	created, err := d.device.CreateTextureView(viewed, &wgpu.TextureViewDescriptor{
+		Label:           descriptor.Label,
+		Format:          gputypes.TextureFormat(descriptor.Format),
+		Dimension:       gputypes.TextureViewDimension(descriptor.Dimension),
+		Aspect:          gputypes.TextureAspect(descriptor.Aspect),
+		BaseMipLevel:    descriptor.BaseMipLevel,
+		MipLevelCount:   descriptor.MipLevelCount,
+		BaseArrayLayer:  descriptor.BaseArrayLayer,
+		ArrayLayerCount: descriptor.ArrayLayerCount,
+	})
+	if err != nil {
+		return err
+	}
+	d.textureViews.Grow(view.Index()).Store(created)
+	return nil
 }
-func (*device) ReleaseTextureView(gfx.TextureView) {}
-func (*device) CreateSampler(gfx.Sampler, gfx.SamplerDescriptor) error {
-	return unbuilt("CreateSampler")
+
+// ReleaseTextureView drops the view stored at view's index and releases it;
+// wgpu keeps it while a submit using it lives.
+func (d *device) ReleaseTextureView(view gfx.TextureView) {
+	releaseStored(&d.textureViews, view.Index())
 }
-func (*device) ReleaseSampler(gfx.Sampler) {}
+
+// CreateSampler creates wgpu's sampler and stores it at sampler's index. A
+// zero LodMaxClamp clamps nothing, as wgpu takes it.
+func (d *device) CreateSampler(sampler gfx.Sampler, descriptor gfx.SamplerDescriptor) error {
+	created, err := d.device.CreateSampler(&wgpu.SamplerDescriptor{
+		Label:        descriptor.Label,
+		AddressModeU: gputypes.AddressMode(descriptor.AddressModeU),
+		AddressModeV: gputypes.AddressMode(descriptor.AddressModeV),
+		AddressModeW: gputypes.AddressMode(descriptor.AddressModeW),
+		MagFilter:    gputypes.FilterMode(descriptor.MagFilter),
+		MinFilter:    gputypes.FilterMode(descriptor.MinFilter),
+		MipmapFilter: gputypes.FilterMode(descriptor.MipmapFilter),
+		LodMinClamp:  descriptor.LodMinClamp,
+		LodMaxClamp:  descriptor.LodMaxClamp,
+		Compare:      gputypes.CompareFunction(descriptor.Compare),
+		Anisotropy:   descriptor.Anisotropy,
+	})
+	if err != nil {
+		return err
+	}
+	d.samplers.Grow(sampler.Index()).Store(created)
+	return nil
+}
+
+// ReleaseSampler drops the sampler stored at sampler's index and releases it;
+// wgpu keeps it while a bind group or a submit using it lives.
+func (d *device) ReleaseSampler(sampler gfx.Sampler) { releaseStored(&d.samplers, sampler.Index()) }
+
 func (*device) CreateQuerySet(gfx.QuerySet, gfx.QuerySetDescriptor) error {
 	return unbuilt("CreateQuerySet")
 }
@@ -118,8 +196,21 @@ func (d *device) WriteBuffer(buffer gfx.Buffer, offset uint64, data []byte) erro
 	return d.device.Queue().WriteBuffer(written, offset, data)
 }
 
-func (*device) WriteTexture(gfx.ImageCopyTexture, []byte, gfx.ImageDataLayout, gfx.Extent3D) error {
-	return unbuilt("WriteTexture")
+// WriteTexture writes data through wgpu's queue into the texture stored at
+// destination's index, landing at its next submit as a buffer's write does.
+func (d *device) WriteTexture(destination gfx.ImageCopyTexture, data []byte, layout gfx.ImageDataLayout, size gfx.Extent3D) error {
+	written, err := d.storedTexture(destination.Texture)
+	if err != nil {
+		return err
+	}
+	dataLayout := wgpu.ImageDataLayout(layout)
+	extent := wgpu.Extent3D(size)
+	return d.device.Queue().WriteTexture(&wgpu.ImageCopyTexture{
+		Texture:  written,
+		MipLevel: destination.MipLevel,
+		Origin:   wgpu.Origin3D(destination.Origin),
+		Aspect:   gputypes.TextureAspect(destination.Aspect),
+	}, data, &dataLayout, &extent)
 }
 
 // MapBuffer begins wgpu's map, which resolves once the submits made before it
@@ -277,6 +368,31 @@ func (d *device) storedBuffer(buffer gfx.Buffer) (*wgpu.Buffer, error) {
 		return nil, fmt.Errorf("gogpu: %v holds no buffer", buffer)
 	}
 	return stored, nil
+}
+
+// storedTexture answers the texture stored at texture's index, or an error
+// when it holds none, as a framebuffer's does.
+func (d *device) storedTexture(texture gfx.Texture) (*wgpu.Texture, error) {
+	var stored *wgpu.Texture
+	if slot := d.textures.At(texture.Index()); slot != nil {
+		stored = slot.Load()
+	}
+	if stored == nil {
+		return nil, fmt.Errorf("gogpu: %v holds no texture", texture)
+	}
+	return stored, nil
+}
+
+// releaseStored drops the object stored at index in objects, and releases it.
+func releaseStored[T any, P interface {
+	*T
+	Release()
+}](objects *container.ObjectTable[atomic.Pointer[T]], index uint32) {
+	if slot := objects.At(index); slot != nil {
+		if released := P(slot.Swap(nil)); released != nil {
+			released.Release()
+		}
+	}
 }
 
 // unbuilt answers the error of a backend method not built yet, naming it.
