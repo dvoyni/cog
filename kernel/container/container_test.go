@@ -102,6 +102,46 @@ func TestPoolConcurrentAcquireRelease(t *testing.T) {
 	wait.Wait()
 }
 
+func TestObjectTableGrowsToHoldAnIndex(t *testing.T) {
+	table := &ObjectTable[slot]{}
+	if held := table.At(0); held != nil {
+		t.Fatalf("an empty table holds slot 0 at %p", held)
+	}
+	far := uint32(3*chunkSize + 7)
+	held := table.Grow(far)
+	held.value = 42
+	if table.At(far) != held || table.At(0) == nil {
+		t.Fatalf("after Grow(%d), At answered %p and slot 0 %p, want %p and a slot", far, table.At(far), table.At(0), held)
+	}
+	if past := table.At(4 * chunkSize); past != nil {
+		t.Errorf("slot %d past the chunks grown is held at %p", 4*chunkSize, past)
+	}
+	table.Grow(10 * chunkSize)
+	if table.At(far) != held || held.value != 42 {
+		t.Errorf("growing further moved slot %d", far)
+	}
+}
+
+func TestObjectTableConcurrentGrowLosesNoSlot(t *testing.T) {
+	table := &ObjectTable[slot]{}
+	const writerCount = 8
+	const indexCount = writerCount * 4 * chunkSize
+	var wait sync.WaitGroup
+	for writer := range writerCount {
+		wait.Go(func() {
+			for index := writer; index < indexCount; index += writerCount {
+				table.Grow(uint32(index)).value = uint64(index) + 1
+			}
+		})
+	}
+	wait.Wait()
+	for index := range indexCount {
+		if held := table.At(uint32(index)); held == nil || held.value != uint64(index)+1 {
+			t.Fatalf("slot %d lost its value", index)
+		}
+	}
+}
+
 func TestQueueIsFIFOAcrossGrowth(t *testing.T) {
 	q := &Queue[uint32]{}
 	next := uint32(1)

@@ -17,18 +17,18 @@ import (
 // handles not zero, a zero handle naming none. Every map resolves at once.
 type device struct {
 	instance *Instance
-	// Each table holds its type's objects, as what each was created with,
+	// Each registry holds its type's objects, as what each was created with,
 	// at their indices, under the instance's mutex.
-	buffers          objectTable[*bufferObject]
-	textures         objectTable[gfx.TextureDescriptor]
-	textureViews     objectTable[textureView]
-	samplers         objectTable[gfx.SamplerDescriptor]
-	shaderModules    objectTable[gfx.ShaderModuleDescriptor]
-	bindGroupLayouts objectTable[gfx.BindGroupLayoutDescriptor]
-	bindGroups       objectTable[gfx.BindGroupDescriptor]
-	pipelineLayouts  objectTable[gfx.PipelineLayoutDescriptor]
-	renderPipelines  objectTable[gfx.RenderPipelineDescriptor]
-	computePipelines objectTable[gfx.ComputePipelineDescriptor]
+	buffers          objectRegistry[*bufferObject]
+	textures         objectRegistry[gfx.TextureDescriptor]
+	textureViews     objectRegistry[textureView]
+	samplers         objectRegistry[gfx.SamplerDescriptor]
+	shaderModules    objectRegistry[gfx.ShaderModuleDescriptor]
+	bindGroupLayouts objectRegistry[gfx.BindGroupLayoutDescriptor]
+	bindGroups       objectRegistry[gfx.BindGroupDescriptor]
+	pipelineLayouts  objectRegistry[gfx.PipelineLayoutDescriptor]
+	renderPipelines  objectRegistry[gfx.RenderPipelineDescriptor]
+	computePipelines objectRegistry[gfx.ComputePipelineDescriptor]
 	// pendingWrites are the buffer writes made since the last submit, which
 	// the next applies before its command buffers.
 	pendingWrites []func()
