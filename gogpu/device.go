@@ -10,6 +10,7 @@ import (
 	"github.com/dvoyni/cog/kernel/container"
 	"github.com/dvoyni/cog/platform"
 	host "github.com/gogpu/gogpu"
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
 
@@ -25,12 +26,37 @@ type device struct {
 	// frames holds each window's frame acquired and not yet presented, on
 	// the main thread alone.
 	frames map[platform.Window]acquiredFrame
+	// buffers holds each buffer, and its latest map, at its gfx index.
+	buffers container.ObjectTable[bufferSlot]
 	// textureViews holds each texture view at its gfx index.
 	textureViews container.ObjectTable[atomic.Pointer[wgpu.TextureView]]
 }
 
-func (*device) CreateBuffer(gfx.Buffer, gfx.BufferDescriptor) error { return unbuilt("CreateBuffer") }
-func (*device) ReleaseBuffer(gfx.Buffer)                            {}
+// CreateBuffer creates wgpu's buffer and stores it at buffer's index.
+func (d *device) CreateBuffer(buffer gfx.Buffer, descriptor gfx.BufferDescriptor) error {
+	created, err := d.device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label:            descriptor.Label,
+		Size:             descriptor.Size,
+		Usage:            gputypes.BufferUsage(descriptor.Usage),
+		MappedAtCreation: descriptor.MappedAtCreation,
+	})
+	if err != nil {
+		return err
+	}
+	d.buffers.Grow(buffer.Index()).buffer.Store(created)
+	return nil
+}
+
+// ReleaseBuffer drops the buffer stored at buffer's index and releases it;
+// wgpu keeps it until the submits using it finish.
+func (d *device) ReleaseBuffer(buffer gfx.Buffer) {
+	if slot := d.buffers.At(buffer.Index()); slot != nil {
+		if released := slot.buffer.Swap(nil); released != nil {
+			released.Release()
+		}
+	}
+}
+
 func (*device) CreateTexture(gfx.Texture, gfx.TextureDescriptor) error {
 	return unbuilt("CreateTexture")
 }
@@ -80,20 +106,77 @@ func (*device) ReleaseRenderPipeline(gfx.RenderPipeline) {}
 func (*device) CreateComputePipeline(gfx.ComputePipeline, gfx.ComputePipelineDescriptor) error {
 	return unbuilt("CreateComputePipeline")
 }
-func (*device) ReleaseComputePipeline(gfx.ComputePipeline)   {}
-func (*device) WriteBuffer(gfx.Buffer, uint64, []byte) error { return unbuilt("WriteBuffer") }
+func (*device) ReleaseComputePipeline(gfx.ComputePipeline) {}
+
+// WriteBuffer writes data through wgpu's queue, which copies it out and
+// lands it at its next submit.
+func (d *device) WriteBuffer(buffer gfx.Buffer, offset uint64, data []byte) error {
+	written, err := d.storedBuffer(buffer)
+	if err != nil {
+		return err
+	}
+	return d.device.Queue().WriteBuffer(written, offset, data)
+}
+
 func (*device) WriteTexture(gfx.ImageCopyTexture, []byte, gfx.ImageDataLayout, gfx.Extent3D) error {
 	return unbuilt("WriteTexture")
 }
-func (*device) MapBuffer(gfx.Buffer, gfx.MapMode, uint64, uint64) error { return unbuilt("MapBuffer") }
-func (*device) MapStatus(gfx.Buffer) (bool, error)                      { return false, unbuilt("MapStatus") }
-func (*device) MappedRange(gfx.Buffer, uint64, uint64) ([]byte, error) {
-	return nil, unbuilt("MappedRange")
-}
-func (*device) UnmapBuffer(gfx.Buffer) error { return unbuilt("UnmapBuffer") }
 
-// Poll answers the newest submission wgpu's queue has finished.
-func (d *device) Poll() uint64 { return d.device.Queue().Poll() }
+// MapBuffer begins wgpu's map, which resolves once the submits made before it
+// finish, and keeps it at buffer's index for MapStatus.
+func (d *device) MapBuffer(buffer gfx.Buffer, mode gfx.MapMode, offset, size uint64) error {
+	mapped, err := d.storedBuffer(buffer)
+	if err != nil {
+		return err
+	}
+	pendingMap, err := mapped.MapAsync(wgpu.MapMode(mode), offset, size)
+	if err != nil {
+		return err
+	}
+	d.buffers.At(buffer.Index()).pendingMap.Store(pendingMap)
+	return nil
+}
+
+// MapStatus answers the status of the latest map begun on buffer, as wgpu's
+// Poll left it.
+func (d *device) MapStatus(buffer gfx.Buffer) (ready bool, err error) {
+	slot := d.buffers.At(buffer.Index())
+	if slot == nil {
+		return false, fmt.Errorf("gogpu: %v holds no buffer", buffer)
+	}
+	return slot.pendingMap.Load().Status()
+}
+
+// MappedRange answers the bytes of wgpu's mapped range. wgpu forbids ranges
+// that overlap one already answered in the same map.
+func (d *device) MappedRange(buffer gfx.Buffer, offset, size uint64) ([]byte, error) {
+	mapped, err := d.storedBuffer(buffer)
+	if err != nil {
+		return nil, err
+	}
+	mappedRange, err := mapped.MappedRange(offset, size)
+	if err != nil {
+		return nil, err
+	}
+	defer mappedRange.Release()
+	return mappedRange.Bytes(), nil
+}
+
+// UnmapBuffer ends wgpu's map, a pending one canceled.
+func (d *device) UnmapBuffer(buffer gfx.Buffer) error {
+	mapped, err := d.storedBuffer(buffer)
+	if err != nil {
+		return err
+	}
+	return mapped.Unmap()
+}
+
+// Poll resolves the maps whose submits wgpu has seen finish, and answers the
+// newest submission its queue has finished.
+func (d *device) Poll() uint64 {
+	d.device.Poll(wgpu.PollPoll)
+	return d.device.Queue().Poll()
+}
 
 func (d *device) CreateCommandEncoder(descriptor gfx.CommandEncoderDescriptor) (gfx.StandaloneCommandEncoder, error) {
 	encoder, err := d.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{Label: descriptor.Label})
@@ -183,6 +266,19 @@ func (*device) WaitIdle() error { return unbuilt("WaitIdle") }
 // Release does nothing: gogpu's device goes with the HostLoop.
 func (*device) Release() {}
 
+// storedBuffer answers the buffer stored at buffer's index, or an error when
+// it holds none.
+func (d *device) storedBuffer(buffer gfx.Buffer) (*wgpu.Buffer, error) {
+	var stored *wgpu.Buffer
+	if slot := d.buffers.At(buffer.Index()); slot != nil {
+		stored = slot.buffer.Load()
+	}
+	if stored == nil {
+		return nil, fmt.Errorf("gogpu: %v holds no buffer", buffer)
+	}
+	return stored, nil
+}
+
 // unbuilt answers the error of a backend method not built yet, naming it.
 func unbuilt(method string) error { return fmt.Errorf("gogpu: %s is not built yet", method) }
 
@@ -191,4 +287,13 @@ type acquiredFrame struct {
 	context *host.Context
 	// view is the gfx view its surface view is stored at.
 	view gfx.TextureView
+}
+
+// bufferSlot is the buffer at a gfx index and the latest map begun on it,
+// each read and written atomically, as gfx's jobs reach a slot from any
+// goroutine. A map is never handed back to wgpu's pool, where another map
+// could take it while gfx still asks its status: it goes with the garbage.
+type bufferSlot struct {
+	buffer     atomic.Pointer[wgpu.Buffer]
+	pendingMap atomic.Pointer[wgpu.MapPending]
 }
