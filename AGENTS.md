@@ -17,7 +17,7 @@ Each module has its own `AGENTS.md` for rules that hold only there.
 
 ## Upstream forks
 
-- A change in a forked upstream repository (gogpu, naga, wgpu and the rest under `submodules/`) that changes its public API adds an entry to its `CHANGELOG.md`, under `[Unreleased]`, in the form the file already uses.
+- A change in a forked upstream repository (gogpu, naga, wgpu and the rest under `submodules/`) that changes its public API adds an entry to its `CHANGELOG.md`, under `[Unreleased]`, in the form the file already uses. A bug fix or an improvement that leaves the public API as it is adds none; its PR describes it.
 
 ## Potential rules
 

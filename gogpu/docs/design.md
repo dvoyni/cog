@@ -246,8 +246,9 @@ what `HostLoop` or the OS requires:
 [the platform changes](https://github.com/dvoyni/cog/issues/719))
 
 Each is its own upstream PR, stacked on the window-less start, its title and
-description approved by the owner before it is opened. A behaviour change is
-described in the PR, not in the fork's `CHANGELOG.md`.
+description approved by the owner before it is opened. A change to the
+fork's public API adds an entry to its `CHANGELOG.md`; a fix or improvement
+that leaves the public API as it is adds none, and its PR describes it.
 
 - **Start with no window**, and one method that opens any window with its
   surface.
