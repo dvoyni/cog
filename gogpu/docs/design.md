@@ -14,8 +14,9 @@ and limits it asks for or the software adapter, windows open and close
 through platform, the user's close reported and the main window opened at
 start, each beat acquires and presents every shown window's framebuffer,
 encoders record render passes that clear, finish and submit, buffers are
-created, written and mapped, with every other device call or command
-answering an error naming it, and `gogpu/shader` preprocesses shaders. The
+created, written and mapped, textures are created and written, with views
+and samplers, with every other device call or command answering an error
+naming it, and `gogpu/shader` preprocesses shaders. The
 decisions come from the
 [gogpu map](https://github.com/dvoyni/cog/issues/611); each section links
 the ticket that holds its detail. The loop API it rests on, `HostLoop`, was
@@ -247,6 +248,20 @@ what `HostLoop` or the OS requires:
   `Poll` drives wgpu's device poll, so a map resolves at gfx's next poll,
   with or without a submit, and `MapStatus` answers the error that failed
   it.
+
+## Textures
+
+([gogpu plugin: textures, views, samplers and texture writes](https://github.com/dvoyni/cog/issues/748))
+
+- **Textures, views and samplers are wgpu's,** stored at gfx's index as
+  buffers are. wgpu keeps a released texture while a view of it lives.
+- **A texture write lands at the next submit,** as a buffer's does.
+- **A framebuffer's texture holds nothing:** gogpu offers no surface
+  texture, so a view of it or a write to it answers an error. gfx draws to
+  the framebuffer's view.
+- **A zero `LodMaxClamp` clamps nothing:** wgpu takes it as 32, where WebGPU
+  samples the base level alone. A view with `MipLevelCount` 1 samples the
+  base level alone.
 
 ## Shaders
 

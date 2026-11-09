@@ -631,6 +631,82 @@ func TestAReleasedBuffersIndexHoldsTheNextBuffer(t *testing.T) {
 	}
 }
 
+func TestATextureWrittenAndClearedThroughItsViewSubmits(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+
+	h.readDevice(func(device gfx.Device) {
+		texture := createTexture(t, device, 4)
+		if err := writeWholeTexture(device, texture, 4); err != nil {
+			t.Errorf("WriteTexture answered %v", err)
+		}
+		view, err := device.CreateTextureView(texture, gfx.TextureViewDescriptor{})
+		if err != nil {
+			t.Errorf("CreateTextureView answered %v", err)
+			return
+		}
+		encoder, err := device.CreateCommandEncoder(gfx.CommandEncoderDescriptor{})
+		if err != nil {
+			t.Errorf("CreateCommandEncoder answered %v", err)
+			return
+		}
+		encoder.BeginRenderPass(gfx.RenderPassDescriptor{ColorAttachments: []gfx.RenderPassColorAttachment{{
+			View: view, LoadOp: gfx.LoadOpClear, StoreOp: gfx.StoreOpStore,
+		}}}).End()
+		buffer, err := encoder.Finish()
+		if err != nil {
+			t.Errorf("Finish answered %v", err)
+			return
+		}
+		if err := device.Submit(buffer); err != nil {
+			t.Errorf("Submit answered %v", err)
+		}
+		device.ReleaseTextureView(view)
+		device.ReleaseTexture(texture)
+	})
+}
+
+func TestAReleasedTexturesIndexHoldsTheNextTexture(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+
+	h.readDevice(func(device gfx.Device) {
+		released := createTexture(t, device, 4)
+		device.ReleaseTexture(released)
+		texture := createTexture(t, device, 8)
+		if texture.Index() != released.Index() {
+			t.Errorf("the second texture is at %d, want the released one's %d", texture.Index(), released.Index())
+			return
+		}
+		if err := writeWholeTexture(device, texture, 8); err != nil {
+			t.Errorf("writing the whole second texture answered %v", err)
+		}
+	})
+}
+
+func TestASamplerIsCreatedAsDescribed(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+
+	h.readDevice(func(device gfx.Device) {
+		linear := gfx.SamplerDescriptor{
+			MagFilter: gfx.FilterModeLinear, MinFilter: gfx.FilterModeLinear, MipmapFilter: gfx.FilterModeLinear,
+			Anisotropy: 16,
+		}
+		sampler, err := device.CreateSampler(linear)
+		if err != nil {
+			t.Errorf("CreateSampler answered %v for an anisotropic linear sampler", err)
+		} else {
+			device.ReleaseSampler(sampler)
+		}
+		nearest := linear
+		nearest.MagFilter = gfx.FilterModeNearest
+		if _, err := device.CreateSampler(nearest); err == nil {
+			t.Error("CreateSampler answered no error for an anisotropic sampler magnifying the nearest texel, which WebGPU forbids")
+		}
+	})
+}
+
 // clearFramebuffer records, in frame's encoder at order 0, a render pass
 // clearing window's framebuffer to color, and answers whether the frame had
 // one.
@@ -670,4 +746,26 @@ func mapWrittenBuffer(t *testing.T, device gfx.Device, written []byte) gfx.Buffe
 		t.Errorf("MapBuffer answered %v", err)
 	}
 	return buffer
+}
+
+// createTexture creates an RGBA8Unorm texture side texels square, which can
+// be written, sampled and drawn to.
+func createTexture(t *testing.T, device gfx.Device, side uint32) gfx.Texture {
+	texture, err := device.CreateTexture(gfx.TextureDescriptor{
+		Size:   gfx.Extent3D{Width: side, Height: side, DepthOrArrayLayers: 1},
+		Format: gfx.TextureFormatRGBA8Unorm,
+		Usage:  gfx.TextureUsageFlagCopyDst | gfx.TextureUsageFlagTextureBinding | gfx.TextureUsageFlagRenderAttachment,
+	})
+	if err != nil {
+		t.Errorf("CreateTexture answered %v", err)
+	}
+	return texture
+}
+
+// writeWholeTexture writes every texel of an RGBA8 texture side texels
+// square, and answers WriteTexture's error.
+func writeWholeTexture(device gfx.Device, texture gfx.Texture, side uint32) error {
+	texels := bytes.Repeat([]byte{0xff, 0, 0xff, 0xff}, int(side*side))
+	layout := gfx.ImageDataLayout{BytesPerRow: 4 * side, RowsPerImage: side}
+	return device.WriteTexture(gfx.ImageCopyTexture{Texture: texture}, texels, layout, gfx.Extent3D{Width: side, Height: side, DepthOrArrayLayers: 1})
 }
