@@ -56,8 +56,8 @@ type pumpEvent struct{}
 
 // harness spawns a kernel of metronome, platform, gfx, gogpu and itself from
 // the main thread, reads its Device, edits its WindowManager and pumps,
-// records the window events platform publishes, and quits it, failing the
-// test on every error logged but a backend method's not built yet.
+// draws, records the window events platform publishes, and quits it, failing
+// the test on every error logged.
 type harness struct {
 	t          *testing.T
 	supervisor *kernel.Supervisor
@@ -65,6 +65,7 @@ type harness struct {
 	plugin     *gogpu.Plugin
 	read       func(device gfx.Device)
 	edit       func(manager *platform.WindowManager)
+	readFrame  func(event gfx.DrawEvent, device gfx.Device)
 	mutex      sync.Mutex
 	logged     []error
 	published  []any
@@ -82,11 +83,7 @@ func newHarness(t *testing.T) *harness {
 		h.mutex.Lock()
 		defer h.mutex.Unlock()
 		for _, err := range h.logged {
-			// gfx's calls to backend methods not built yet, such as the surface
-			// it creates for each window opened, are expected until they are.
-			if !strings.Contains(err.Error(), "is not built yet") {
-				t.Errorf("logged %v", err)
-			}
+			t.Errorf("logged %v", err)
 		}
 	})
 	return h
@@ -136,6 +133,15 @@ func (h *harness) pump(edit func(manager *platform.WindowManager)) {
 	h.t.Helper()
 	h.edit = edit
 	publishAndWait(h, pumpEvent{})
+}
+
+// draw publishes a beat of the render track, ticking the main thread until
+// its frame has presented, with readFrame run over the Device after the
+// frame's acquire.
+func (h *harness) draw(readFrame func(event gfx.DrawEvent, device gfx.Device)) {
+	h.t.Helper()
+	h.readFrame = readFrame
+	publishAndWait(h, gfx.RenderEvent{})
 }
 
 // takePublished answers the window events published since its last call.
@@ -224,6 +230,15 @@ func (h *harness) Init(c *kernel.Configurator, _ any) error {
 	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event pumpEvent) (pumpEvent, kernel.JobHandle) {
 		edited := ex.Schedule(edit, kernel.NoArg{}, in)
 		return event, ex.Schedule(tasks.ProcessEvents, kernel.NoArg{}, edited.Handle()).Handle()
+	})
+	readFrame := c.RegisterTask1(func(k *kernel.Kernel, event gfx.DrawEvent, device kernel.Read[gfx.Device]) kernel.NoResult {
+		if h.readFrame != nil {
+			h.readFrame(event, device.Get())
+		}
+		return kernel.NoResult{}
+	})
+	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.DrawEvent) (gfx.DrawEvent, kernel.JobHandle) {
+		return event, ex.Join(in, ex.Schedule(readFrame, event, event.Ready).Handle())
 	})
 	subscribeRecord[platform.WindowOpenedEvent](c, h)
 	subscribeRecord[platform.WindowClosedEvent](c, h)
@@ -410,4 +425,36 @@ func TestConfigMainWindowOpensAtStart(t *testing.T) {
 	if _, ok := published[0].(platform.WindowOpenedEvent); !ok {
 		t.Errorf("the first pump published %v, want the main window opened", published)
 	}
+}
+
+func TestEachBeatDrawsAShownWindowAndPresents(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+	shown := testWindow
+	shown.Hidden = false
+	var window platform.Window
+	h.pump(func(manager *platform.WindowManager) { window = manager.Open(shown) })
+
+	for beat := range 3 {
+		drawn := false
+		h.draw(func(event gfx.DrawEvent, device gfx.Device) {
+			drawn = device.Framebuffer(event.Frame, window) != gfx.TextureView{}
+		})
+		if !drawn {
+			t.Errorf("beat %d had no framebuffer for the shown window", beat)
+		}
+	}
+}
+
+func TestAHiddenWindowIsSkipped(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+	var window platform.Window
+	h.pump(func(manager *platform.WindowManager) { window = manager.Open(testWindow) })
+
+	h.draw(func(event gfx.DrawEvent, device gfx.Device) {
+		if view := device.Framebuffer(event.Frame, window); view != (gfx.TextureView{}) {
+			t.Errorf("the hidden window had framebuffer %v, want none", view)
+		}
+	})
 }

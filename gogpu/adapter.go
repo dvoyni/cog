@@ -2,6 +2,7 @@ package gogpu
 
 import (
 	"github.com/dvoyni/cog/gfx"
+	"github.com/dvoyni/cog/platform"
 	host "github.com/gogpu/gogpu"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
@@ -10,8 +11,10 @@ import (
 // adapter is gogpu's adapter, which the started HostLoop brought up with no
 // device.
 type adapter struct {
-	loop    *host.HostLoop
-	app     *host.App
+	loop *host.HostLoop
+	app  *host.App
+	// windows is the plugin's map of the windows open to gogpu's.
+	windows map[platform.Window]*host.Window
 	adapter *wgpu.Adapter
 }
 
@@ -113,7 +116,12 @@ func (a *adapter) RequestDevice(descriptor gfx.DeviceDescriptor) (gfx.BackendDev
 	if err := a.loop.RequestDevice(gputypes.Features(descriptor.RequiredFeatures), &limits); err != nil {
 		return nil, err
 	}
-	return &device{device: wgpu.DeviceFromHandle(a.app.GPUContextProvider().Device())}, nil
+	return &device{
+		device:  wgpu.DeviceFromHandle(a.app.GPUContextProvider().Device()),
+		loop:    a.loop,
+		windows: a.windows,
+		frames:  map[platform.Window]acquiredFrame{},
+	}, nil
 }
 
 // Release does nothing: gogpu's adapter goes with the HostLoop.

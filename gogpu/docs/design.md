@@ -12,7 +12,8 @@ windows, surfaces and device.
 Status: being built: gfx gets gogpu's adapter and device, with the features
 and limits it asks for or the software adapter, every other device call
 answering an error naming it, windows open and close through platform, the
-user's close reported and the main window opened at start, and
+user's close reported and the main window opened at start, each beat
+acquires and presents every shown window's framebuffer, and
 `gogpu/shader` preprocesses shaders. The decisions come from the
 [gogpu map](https://github.com/dvoyni/cog/issues/611); each section links
 the ticket that holds its detail. The loop API it rests on, `HostLoop`, was
@@ -186,11 +187,16 @@ what `HostLoop` or the OS requires:
 
 - **`CreateSurface`** attaches to the surface gogpu made for the window;
   `ReleaseSurface` lets it go with the window.
-- **`SurfaceCapabilities`** and **`ConfigureSurface`** are gogpu's, applied to
-  that window's surface.
+- **`SurfaceCapabilities`** are what gogpu configures every surface with:
+  BGRA8Unorm, Fifo and Opaque, which are gfx's defaults. gogpu exposes no
+  window's surface, so it cannot be given another format or present mode;
+  gfx falls back to these, with a `LogErr`, when asked for others. gogpu's
+  vsync picks FifoRelaxed where Vulkan offers it. **`ConfigureSurface`**
+  accepts them, and gogpu applies the window's size when its frame begins.
 - **`AcquireFramebuffer`** is `HostLoop.BeginFrame`: it applies the window's
-  latest size, observes Wayland's frame gate, and stores the surface texture
-  and its view at gfx's indices. Nothing to draw to is gfx's `Timeout`, an
+  latest size, observes Wayland's frame gate, and stores the surface's view
+  at gfx's index. gogpu offers no surface texture, so the texture's index
+  stays empty. Nothing to draw to is gfx's `Timeout`, an
   outdated or lost surface its `Outdated` or `Lost`, and an error is answered,
   not logged.
 - **`Present`** is `HostLoop.EndFrame`, its error answered.

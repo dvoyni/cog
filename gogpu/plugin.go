@@ -64,8 +64,10 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 }
 
 // Init binds the plugin to gfx.InstanceSocket and platform.WindowsSocket,
-// pins gfx's Tasks.ReleaseDevice to the main thread, where the HostLoop
-// stops, and opens Config.MainWindow in platform's WindowManager, which the
+// pins to the main thread gfx's tasks the HostLoop or the OS requires there:
+// acquire and present, which begin and end frames through the HostLoop, the
+// device's recovery and release, and on Windows the surfaces' configure, and
+// on Vulkan their release. It then opens Config.MainWindow in platform's WindowManager, which the
 // first ProcessEvents run applies. A config of another type than *Config is a
 // composition error, and panics.
 func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
@@ -73,7 +75,17 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	configurator.BindSocket[gfx.InstanceSocket](p)
 	configurator.BindSocket[platform.WindowsSocket](p)
 	tasks, _ := configurator.Resource[gfx.Tasks]()
+	configurator.PinToMainThread(tasks.AcquireFramebuffers)
+	configurator.PinToMainThread(tasks.PresentFramebuffers)
+	configurator.PinToMainThread(tasks.RecoverDevice)
 	configurator.PinToMainThread(tasks.ReleaseDevice)
+	if runtime.GOOS == "windows" {
+		configurator.PinToMainThread(tasks.ConfigureSurfaces)
+		if p.config.Backend != gfx.BackendDX12 {
+			configurator.PinToMainThread(tasks.ReleaseSurface)
+			configurator.PinToMainThread(tasks.ReleaseOpenSurfaces)
+		}
+	}
 	if p.config.MainWindow != (platform.WindowEntry{}) {
 		manager, _ := configurator.Resource[*platform.WindowManager]()
 		manager.Open(p.config.MainWindow)
@@ -125,15 +137,14 @@ func (p *Plugin) RequestAdapter(options gfx.RequestAdapterOptions) (gfx.BackendA
 	}
 	p.loop = loop
 	p.windows = map[platform.Window]*host.Window{}
-	return &adapter{loop: loop, app: app, adapter: wgpu.AdapterFromHandle(app.GPUContextProvider().Adapter())}, nil
+	return &adapter{loop: loop, app: app, windows: p.windows, adapter: wgpu.AdapterFromHandle(app.GPUContextProvider().Adapter())}, nil
 }
 
-// CreateSurface answers an error naming it: surfaces are not built yet.
-func (*Plugin) CreateSurface(platform.Window, platform.NativeHandle) error {
-	return unbuilt("CreateSurface")
-}
+// CreateSurface does nothing: gogpu made the window's surface when it opened
+// it.
+func (*Plugin) CreateSurface(platform.Window, platform.NativeHandle) error { return nil }
 
-// ReleaseSurface does nothing: surfaces are not built yet.
+// ReleaseSurface does nothing: the window's surface goes with it.
 func (*Plugin) ReleaseSurface(platform.Window) {}
 
 // PreprocessShader answers gogpu/shader's Preprocess of the shader at path in

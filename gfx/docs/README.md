@@ -121,6 +121,10 @@ your last pass. Change it at runtime under the write lock:
 gfx.ElevateDeviceAccess(device).RequestSurface(gfx.SurfaceRequest{PresentMode: gfx.PresentModeMailbox})
 ```
 
+A format or present mode the backend's surfaces lack falls back to the
+default, with a `LogErr`: gogpu's offer `BGRA8Unorm` and Fifo alone, so on it
+sRGB is always your last pass's and every frame waits for the display.
+
 Every surface is reconfigured between frames. Read what a window got with
 `Device.SurfaceConfiguration(window)`, and build its pipelines against that
 format.
