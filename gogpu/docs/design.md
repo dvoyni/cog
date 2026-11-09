@@ -11,7 +11,9 @@ windows, surfaces and device.
 
 Status: being built: gfx gets gogpu's adapter and device, with the features
 and limits it asks for or the software adapter, every other device call
-answering an error naming it, and `gogpu/shader` preprocesses shaders. The decisions come from the
+answering an error naming it, windows open and close through platform, the
+user's close reported and the main window opened at start, and
+`gogpu/shader` preprocesses shaders. The decisions come from the
 [gogpu map](https://github.com/dvoyni/cog/issues/611); each section links
 the ticket that holds its detail. The loop API it rests on, `HostLoop`, was
 built on the [loop map](https://github.com/dvoyni/cog/issues/612) and is in
@@ -27,7 +29,8 @@ the fork's `main`. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md).
   round ([where the seam between gfx and gogpu sits](https://github.com/dvoyni/cog/issues/712)).
 - **Imports:** kernel, gfx, platform, our gogpu fork, and gogpu/wgpu at the
   version the fork pins (v0.34.2, naga v0.19.0). Its own files import the
-  fork's `gogpu` package under an alias.
+  fork's `gogpu` package as `host`, for what hosts the windows and the
+  device.
 - **Targets:** macOS on Metal, Windows on Vulkan and DX12, Linux on Vulkan
   over X11 and Wayland. Never GL: its context is bound to one thread.
 - **The application spawns from the main thread,** as the kernel's documented

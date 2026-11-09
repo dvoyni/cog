@@ -3,6 +3,7 @@ package gogpu_test
 import (
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -49,16 +50,24 @@ func onMainThread(run func()) {
 // readEvent runs the harness's read under the Device's read lock.
 type readEvent struct{}
 
+// pumpEvent runs the harness's edit under the WindowManager's write lock,
+// then ProcessEvents.
+type pumpEvent struct{}
+
 // harness spawns a kernel of metronome, platform, gfx, gogpu and itself from
-// the main thread, reads its Device, and quits it, failing the test on every
-// error logged.
+// the main thread, reads its Device, edits its WindowManager and pumps,
+// records the window events platform publishes, and quits it, failing the
+// test on every error logged but a backend method's not built yet.
 type harness struct {
 	t          *testing.T
 	supervisor *kernel.Supervisor
 	kernel     *kernel.Kernel
+	plugin     *gogpu.Plugin
 	read       func(device gfx.Device)
+	edit       func(manager *platform.WindowManager)
 	mutex      sync.Mutex
 	logged     []error
+	published  []any
 	quitted    bool
 }
 
@@ -73,7 +82,11 @@ func newHarness(t *testing.T) *harness {
 		h.mutex.Lock()
 		defer h.mutex.Unlock()
 		for _, err := range h.logged {
-			t.Errorf("logged %v", err)
+			// gfx's calls to backend methods not built yet, such as the surface
+			// it creates for each window opened, are expected until they are.
+			if !strings.Contains(err.Error(), "is not built yet") {
+				t.Errorf("logged %v", err)
+			}
 		}
 	})
 	return h
@@ -91,7 +104,8 @@ func (h *harness) spawn(gfxConfig *gfx.Config, config *gogpu.Config) error {
 	onMainThread(func() {
 		configs := map[kernel.PluginName]any{gfx.PluginName: gfxConfig, gogpu.PluginName: config}
 		var id kernel.KernelID
-		id, err = h.supervisor.Spawn(configs, 2, metronome.NewPlugin(), platform.NewPlugin(), gfx.NewPlugin(), gogpu.NewPlugin(), h)
+		h.plugin = gogpu.NewPlugin()
+		id, err = h.supervisor.Spawn(configs, 2, metronome.NewPlugin(), platform.NewPlugin(), gfx.NewPlugin(), h.plugin, h)
 		h.kernel = h.supervisor.GetKernel(id)
 	})
 	if err != nil && strings.Contains(err.Error(), "failed to request adapter") {
@@ -113,16 +127,50 @@ func (h *harness) mustSpawn(gfxConfig *gfx.Config, config *gogpu.Config) {
 func (h *harness) readDevice(read func(device gfx.Device)) {
 	h.t.Helper()
 	h.read = read
+	publishAndWait(h, readEvent{})
+}
+
+// pump runs edit, unless nil, over the WindowManager under its write lock,
+// then ProcessEvents, ticking the main thread until both have run.
+func (h *harness) pump(edit func(manager *platform.WindowManager)) {
+	h.t.Helper()
+	h.edit = edit
+	publishAndWait(h, pumpEvent{})
+}
+
+// takePublished answers the window events published since its last call.
+func (h *harness) takePublished() []any {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	published := h.published
+	h.published = nil
+	return published
+}
+
+// publishAndWait publishes event on the main thread, and ticks it until the
+// jobs event scheduled have run, failing the test when that takes over 5s.
+func publishAndWait[E any](h *harness, event E) {
+	h.t.Helper()
 	finished := false
 	onMainThread(func() {
-		_, out := h.kernel.Publish(readEvent{})
+		_, out := h.kernel.Publish(event)
 		signal := kernel.NewSignal()
 		h.kernel.Notify(signal, out)
 		finished = h.tickUntil(signal.C())
 	})
 	if !finished {
-		h.t.Fatal("reading the device did not finish in 5s")
+		h.t.Fatalf("the jobs of %T did not finish in 5s", event)
 	}
+}
+
+// subscribeRecord records every E platform publishes.
+func subscribeRecord[E any](c *kernel.Configurator, h *harness) {
+	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event E) (E, kernel.JobHandle) {
+		h.mutex.Lock()
+		h.published = append(h.published, event)
+		h.mutex.Unlock()
+		return event, in
+	})
 }
 
 // quit quits the supervisor, ticking the main thread until it is done, and
@@ -154,7 +202,9 @@ func (h *harness) tickUntil(done <-chan struct{}) bool {
 
 func (*harness) Name() kernel.PluginName { return "harness" }
 
-func (*harness) Dependencies() []kernel.PluginName { return []kernel.PluginName{gfx.PluginName} }
+func (*harness) Dependencies() []kernel.PluginName {
+	return []kernel.PluginName{gfx.PluginName, platform.PluginName}
+}
 
 func (h *harness) Init(c *kernel.Configurator, _ any) error {
 	read := c.RegisterTask1(func(k *kernel.Kernel, _ kernel.NoArg, device kernel.Read[gfx.Device]) kernel.NoResult {
@@ -164,6 +214,20 @@ func (h *harness) Init(c *kernel.Configurator, _ any) error {
 	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event readEvent) (readEvent, kernel.JobHandle) {
 		return event, ex.Schedule(read, kernel.NoArg{}, in).Handle()
 	})
+	tasks, _ := c.Resource[platform.Tasks]()
+	edit := c.RegisterTask1(func(k *kernel.Kernel, _ kernel.NoArg, manager kernel.Write[*platform.WindowManager]) kernel.NoResult {
+		if h.edit != nil {
+			h.edit(manager.Get())
+		}
+		return kernel.NoResult{}
+	})
+	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event pumpEvent) (pumpEvent, kernel.JobHandle) {
+		edited := ex.Schedule(edit, kernel.NoArg{}, in)
+		return event, ex.Schedule(tasks.ProcessEvents, kernel.NoArg{}, edited.Handle()).Handle()
+	})
+	subscribeRecord[platform.WindowOpenedEvent](c, h)
+	subscribeRecord[platform.WindowClosedEvent](c, h)
+	subscribeRecord[platform.CloseRequestedEvent](c, h)
 	return nil
 }
 
@@ -283,5 +347,67 @@ func TestALimitBeyondTheAdaptersFailsSpawnNamingIt(t *testing.T) {
 	err := h.spawn(&gfx.Config{RequiredLimits: limits}, nil)
 	if err == nil || !strings.Contains(err.Error(), "MaxTextureDimension2D") {
 		t.Errorf("Spawn answered %v, want an error naming MaxTextureDimension2D", err)
+	}
+}
+
+// testWindow is a small hidden window, so a run steals no focus.
+var testWindow = platform.WindowEntry{Title: "gogpu test", Size: platform.Size{Width: 320, Height: 240}, Hidden: true}
+
+func TestWindowsOpenAndCloseThroughTheWindowManager(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+	var window platform.Window
+
+	h.pump(func(manager *platform.WindowManager) { window = manager.Open(testWindow) })
+	if published := h.takePublished(); !slices.Equal(published, []any{platform.WindowOpenedEvent{Window: window}}) {
+		t.Errorf("opening published %v, want the window opened", published)
+	}
+	h.pump(func(manager *platform.WindowManager) {
+		if !manager.IsOpen(window) || manager.Size(window) != testWindow.Size {
+			t.Errorf("the opened window is open %v at %v, want open at %v", manager.IsOpen(window), manager.Size(window), testWindow.Size)
+		}
+		manager.Close(window)
+	})
+	if published := h.takePublished(); !slices.Equal(published, []any{platform.WindowClosedEvent{Window: window}}) {
+		t.Errorf("closing published %v, want the window closed", published)
+	}
+}
+
+func TestTheUsersCloseIsReportedAndKeepsTheWindow(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+	var window platform.Window
+	h.pump(func(manager *platform.WindowManager) { window = manager.Open(testWindow) })
+	h.takePublished()
+
+	var kept bool
+	onMainThread(func() { kept = !gogpu.RequestClose(h.plugin, window) })
+	h.pump(nil)
+
+	if !kept {
+		t.Error("the close callback answered true, which closes the window")
+	}
+	if published := h.takePublished(); !slices.Equal(published, []any{platform.CloseRequestedEvent{Window: window}}) {
+		t.Errorf("the user's close published %v, want the close requested", published)
+	}
+	h.pump(func(manager *platform.WindowManager) {
+		if !manager.IsOpen(window) {
+			t.Error("the window closed at the user's close")
+		}
+	})
+}
+
+func TestConfigMainWindowOpensAtStart(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, &gogpu.Config{MainWindow: testWindow})
+
+	h.pump(nil)
+
+	published := h.takePublished()
+	if len(published) != 1 {
+		t.Fatalf("the first pump published %v, want the main window opened", published)
+	}
+	if _, ok := published[0].(platform.WindowOpenedEvent); !ok {
+		t.Errorf("the first pump published %v, want the main window opened", published)
 	}
 }
