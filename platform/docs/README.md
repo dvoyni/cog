@@ -59,8 +59,9 @@ adapters the application's own plugin binds.
 A game plugin binds its files, schedules the pump on every update beat, opens
 its window on the first, moves a player while W or S is held, and quits once
 its window closes. gogpu's plugin, the window implementation and input
-source, is not built yet: without it the pump applies nothing and reports no
-input, so no window opens and none closes.
+source, is listed after platform and gfx. It opens and closes windows and
+reports the user's close; its input is not built yet, so the pump reports no
+keys.
 
 ```go
 package main
@@ -72,6 +73,8 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"github.com/dvoyni/cog/gfx"
+	"github.com/dvoyni/cog/gogpu"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/metronome"
 	"github.com/dvoyni/cog/platform"
@@ -171,8 +174,9 @@ func main() {
 	game := &game{supervisor: s}
 	if _, err := s.Spawn(config, runtime.GOMAXPROCS(0),
 		metronome.NewPlugin(),
-		// gogpu.NewPlugin(), the window implementation and input source
 		platform.NewPlugin(),
+		gfx.NewPlugin(),
+		gogpu.NewPlugin(), // the window implementation and input source
 		game,
 	); err != nil {
 		panic(err)

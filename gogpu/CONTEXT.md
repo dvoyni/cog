@@ -7,7 +7,7 @@ The gogpu plugin implements gfx and platform over our fork of gogpu, driven from
 ### The loop
 
 **Host loop**:
-gogpu's loop driven by its host, one call at a time from the kernel's main thread: start, pump the events, begin a frame, end it, stop.
+gogpu's loop, driven one call at a time from the kernel's main thread: start, pump the events, begin a frame, end it, stop.
 _Avoid_: Run loop, render loop, game loop
 
 **Pass-through**:

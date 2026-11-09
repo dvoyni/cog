@@ -2,7 +2,7 @@ package gogpu
 
 import (
 	"github.com/dvoyni/cog/gfx"
-	fork "github.com/gogpu/gogpu"
+	host "github.com/gogpu/gogpu"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
@@ -10,8 +10,8 @@ import (
 // adapter is gogpu's adapter, which the started HostLoop brought up with no
 // device.
 type adapter struct {
-	loop    *fork.HostLoop
-	app     *fork.App
+	loop    *host.HostLoop
+	app     *host.App
 	adapter *wgpu.Adapter
 }
 
