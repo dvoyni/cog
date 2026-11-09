@@ -263,3 +263,25 @@ func TestShadersArePreprocessedByGogpuShader(t *testing.T) {
 		}
 	})
 }
+
+func TestForceFallbackAdapterSpawnsOnTheSoftwareAdapter(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(&gfx.Config{ForceFallbackAdapter: true}, nil)
+
+	h.readDevice(func(device gfx.Device) {
+		if info := device.AdapterInfo(); info.DeviceType != gfx.DeviceTypeCPU {
+			t.Errorf("AdapterInfo answered %+v, want wgpu's software adapter", info)
+		}
+	})
+}
+
+func TestALimitBeyondTheAdaptersFailsSpawnNamingIt(t *testing.T) {
+	h := newHarness(t)
+	limits := gfx.DefaultLimits()
+	limits.MaxTextureDimension2D = 1 << 30
+
+	err := h.spawn(&gfx.Config{RequiredLimits: limits}, nil)
+	if err == nil || !strings.Contains(err.Error(), "MaxTextureDimension2D") {
+		t.Errorf("Spawn answered %v, want an error naming MaxTextureDimension2D", err)
+	}
+}
