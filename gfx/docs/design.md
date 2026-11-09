@@ -351,14 +351,17 @@ device's release and the recovery among them, for a backend to pin.
   `SurfaceRequest{Format, PresentMode}` in `Config.Surface`,
   replaced at runtime with `ExclusiveDevice.RequestSurface`. Zero means
   `BGRA8Unorm`, which every backend accepts, and Fifo, which every backend
-  has. sRGB encoding is the last pass's; `BGRA8UnormSrgb` is honoured on
-  Vulkan and Metal. A part a surface cannot honour falls back, with a
-  `LogErr`. `Device.SurfaceConfiguration(window)` answers what each window
+  has. sRGB encoding is the last pass's; `BGRA8UnormSrgb` and the present
+  modes beyond Fifo are honoured where the backend's surface capabilities
+  offer them, and gogpu's offer `BGRA8Unorm` and Fifo alone. A part a
+  surface cannot honour falls back, with a `LogErr` at each configure. `Device.SurfaceConfiguration(window)` answers what each window
   got, for pipelines to target. Every surface is opaque. HDR is deferred: no
   backend can present it.
 - **Present modes and metronome's presets** pair without enforcement: vsync
-  with Fifo, limit and uncapped with Mailbox or Immediate. On Metal Immediate
-  and Mailbox are the same, and FifoRelaxed turns vsync off.
+  with Fifo, limit and uncapped with Mailbox or Immediate, where the backend
+  offers them: on gogpu, which offers Fifo alone, every preset is held to
+  the display's refresh. On Metal Immediate and Mailbox are the same, and
+  FifoRelaxed turns vsync off.
 - **Acquire results** reach gfx as an `AcquireStatus` the backend maps from
   its errors: `Suboptimal` draws and marks; `Outdated` draws nothing in that
   window this frame and marks; `Lost` recreates the surface from its native

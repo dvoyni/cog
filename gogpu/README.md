@@ -5,9 +5,10 @@ GPU and real windows. It implements [gfx](../gfx) and [platform](../platform)
 over our gogpu fork in `submodules/gogpu`, driving it through `HostLoop` from
 the kernel's main-thread tick. Its `shader` package is the WGSL preprocessor.
 
-Status: being built: gfx gets gogpu's adapter and device, with every other
-device call answering an error naming it, windows open and close through
-platform, and `gogpu/shader` preprocesses shaders. The design is in
+Status: being built: gfx gets gogpu's adapter and device, windows open and
+close through platform, each beat acquires and presents every shown window's
+framebuffer, with every other device call answering an error naming it, and
+`gogpu/shader` preprocesses shaders. The design is in
 [`docs/design.md`](docs/design.md), the guide in
 [`docs/README.md`](docs/README.md), and the build on the
 [gogpu map](https://github.com/dvoyni/cog/issues/611).
@@ -28,13 +29,16 @@ platform, and `gogpu/shader` preprocesses shaders. The design is in
 
 - **Resources it installs:** none.
 - **Resources it reads from other plugins:** `gfx.Tasks`, in its `Init`, to
-  pin `ReleaseDevice` to the main thread, where the `HostLoop` stops; and
+  pin to the main thread the tasks the `HostLoop` or the OS requires there,
+  as the design's table says; and
   `*platform.WindowManager`, in its `Init`, to open `Config.MainWindow`.
 - **Events it publishes:** none.
 - **Events it subscribes to:** none.
 - **Sockets it declares:** none.
 - **Sockets it binds:** `gfx.InstanceSocket`, with the plugin itself: its
-  `RequestAdapter` starts the `HostLoop`, and its `Release` stops it.
+  `RequestAdapter` starts the `HostLoop`, and its `Release` stops it; its
+  device's acquire and present begin and end each window's frame through
+  the `HostLoop`.
   `platform.WindowsSocket`, with the plugin itself: its `Open` opens a gogpu
   window with its surface, its `Close` destroys it, and its `Pump` pumps the
   `HostLoop` and reports a window opened, closed by gogpu, or asked to close
