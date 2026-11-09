@@ -4,9 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sync"
+	"sync/atomic"
 
 	"github.com/dvoyni/cog/gfx"
+	"github.com/dvoyni/cog/kernel/container"
 	"github.com/dvoyni/cog/platform"
 	host "github.com/gogpu/gogpu"
 	"github.com/gogpu/wgpu"
@@ -24,10 +25,8 @@ type device struct {
 	// frames holds each window's frame acquired and not yet presented, on
 	// the main thread alone.
 	frames map[platform.Window]acquiredFrame
-	// mutex guards textureViews.
-	mutex sync.Mutex
 	// textureViews holds each texture view at its gfx index.
-	textureViews []*wgpu.TextureView
+	textureViews container.ObjectTable[atomic.Pointer[wgpu.TextureView]]
 }
 
 func (*device) CreateBuffer(gfx.Buffer, gfx.BufferDescriptor) error { return unbuilt("CreateBuffer") }
@@ -92,11 +91,28 @@ func (*device) MappedRange(gfx.Buffer, uint64, uint64) ([]byte, error) {
 	return nil, unbuilt("MappedRange")
 }
 func (*device) UnmapBuffer(gfx.Buffer) error { return unbuilt("UnmapBuffer") }
-func (*device) Poll() uint64                 { return 0 }
-func (*device) CreateCommandEncoder(gfx.CommandEncoderDescriptor) (gfx.StandaloneCommandEncoder, error) {
-	return nil, unbuilt("CreateCommandEncoder")
+
+// Poll answers the newest submission wgpu's queue has finished.
+func (d *device) Poll() uint64 { return d.device.Queue().Poll() }
+
+func (d *device) CreateCommandEncoder(descriptor gfx.CommandEncoderDescriptor) (gfx.StandaloneCommandEncoder, error) {
+	encoder, err := d.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{Label: descriptor.Label})
+	if err != nil {
+		return nil, err
+	}
+	return &commandEncoder{device: d, encoder: encoder}, nil
 }
-func (*device) Submit(...gfx.CommandBuffer) (uint64, error) { return 0, unbuilt("Submit") }
+
+// Submit submits buffers, the command buffers the encoders' Finish answered,
+// on wgpu's queue, and answers its submission index. gogpu's own submits
+// share the queue, so the indices rise from one with gaps.
+func (d *device) Submit(buffers ...gfx.CommandBuffer) (uint64, error) {
+	commandBuffers := make([]*wgpu.CommandBuffer, len(buffers))
+	for index, buffer := range buffers {
+		commandBuffers[index] = buffer.(*wgpu.CommandBuffer)
+	}
+	return d.device.Queue().Submit(commandBuffers...)
+}
 
 // SurfaceCapabilities answers what gogpu configures every surface with:
 // BGRA8Unorm, Fifo and Opaque. gogpu's vsync picks FifoRelaxed where Vulkan
@@ -145,7 +161,7 @@ func (d *device) AcquireFramebuffer(window platform.Window, _ gfx.Texture, view 
 		return gfx.AcquireStatusTimeout, nil
 	}
 	d.frames[window] = acquiredFrame{context: context, view: view}
-	d.storeTextureView(view, context.SurfaceView())
+	d.textureViews.Grow(view.Index()).Store(context.SurfaceView())
 	return gfx.AcquireStatusAcquired, nil
 }
 
@@ -158,7 +174,7 @@ func (d *device) Present(window platform.Window) error {
 		return fmt.Errorf("gogpu: presenting %v, whose frame was not acquired", window)
 	}
 	delete(d.frames, window)
-	d.storeTextureView(frame.view, nil)
+	d.textureViews.At(frame.view.Index()).Store(nil)
 	return d.loop.EndFrame(frame.context)
 }
 
@@ -166,16 +182,6 @@ func (*device) WaitIdle() error { return unbuilt("WaitIdle") }
 
 // Release does nothing: gogpu's device goes with the HostLoop.
 func (*device) Release() {}
-
-// storeTextureView stores textureView at view's index.
-func (d *device) storeTextureView(view gfx.TextureView, textureView *wgpu.TextureView) {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
-	if index := int(view.Index()); index >= len(d.textureViews) {
-		d.textureViews = slices.Grow(d.textureViews, index+1-len(d.textureViews))[:index+1]
-	}
-	d.textureViews[view.Index()] = textureView
-}
 
 // unbuilt answers the error of a backend method not built yet, naming it.
 func unbuilt(method string) error { return fmt.Errorf("gogpu: %s is not built yet", method) }

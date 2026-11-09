@@ -144,6 +144,29 @@ func (h *harness) draw(readFrame func(event gfx.DrawEvent, device gfx.Device)) {
 	publishAndWait(h, gfx.RenderEvent{})
 }
 
+// openShownWindow opens testWindow shown, and draws beats until it has a
+// framebuffer: its surface is created by a job the pump does not wait for,
+// so the first beat may come before it. It fails the test when 10 beats have
+// none.
+func (h *harness) openShownWindow() platform.Window {
+	h.t.Helper()
+	shown := testWindow
+	shown.Hidden = false
+	var window platform.Window
+	h.pump(func(manager *platform.WindowManager) { window = manager.Open(shown) })
+	for range 10 {
+		drawn := false
+		h.draw(func(event gfx.DrawEvent, device gfx.Device) {
+			drawn = device.Framebuffer(event.Frame, window) != gfx.TextureView{}
+		})
+		if drawn {
+			return window
+		}
+	}
+	h.t.Fatal("the shown window had no framebuffer in 10 beats")
+	return window
+}
+
 // takePublished answers the window events published since its last call.
 func (h *harness) takePublished() []any {
 	h.mutex.Lock()
@@ -430,10 +453,7 @@ func TestConfigMainWindowOpensAtStart(t *testing.T) {
 func TestEachBeatDrawsAShownWindowAndPresents(t *testing.T) {
 	h := newHarness(t)
 	h.mustSpawn(nil, nil)
-	shown := testWindow
-	shown.Hidden = false
-	var window platform.Window
-	h.pump(func(manager *platform.WindowManager) { window = manager.Open(shown) })
+	window := h.openShownWindow()
 
 	for beat := range 3 {
 		drawn := false
@@ -457,4 +477,109 @@ func TestAHiddenWindowIsSkipped(t *testing.T) {
 			t.Errorf("the hidden window had framebuffer %v, want none", view)
 		}
 	})
+}
+
+func TestEachBeatClearsAShownWindowToThePassColor(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+	window := h.openShownWindow()
+
+	for beat := range 30 {
+		h.draw(func(event gfx.DrawEvent, device gfx.Device) {
+			if !clearFramebuffer(t, event, device, window, gfx.Color{R: 1, B: 1, A: 1}) {
+				t.Errorf("beat %d had no framebuffer to clear", beat)
+			}
+		})
+	}
+}
+
+func TestAFramesSubmitIsSeenFinishedByALaterPoll(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+	window := h.openShownWindow()
+
+	var latency time.Duration
+	for beat := 0; beat < 10 && latency == 0; beat++ {
+		h.draw(func(event gfx.DrawEvent, device gfx.Device) {
+			latency = event.GPULatency
+			clearFramebuffer(t, event, device, window, gfx.Color{A: 1})
+		})
+	}
+	if latency <= 0 {
+		t.Error("no DrawEvent in 10 beats carried a GPU latency, want a frame's submit seen finished")
+	}
+}
+
+func TestTheSoftwareAdapterClearsAWindow(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(&gfx.Config{ForceFallbackAdapter: true}, nil)
+	window := h.openShownWindow()
+
+	for beat := range 3 {
+		h.draw(func(event gfx.DrawEvent, device gfx.Device) {
+			if !clearFramebuffer(t, event, device, window, gfx.Color{G: 1, A: 1}) {
+				t.Errorf("beat %d had no framebuffer to clear", beat)
+			}
+		})
+	}
+}
+
+func TestAStandaloneEncoderFinishesAndSubmits(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+
+	h.readDevice(func(device gfx.Device) {
+		encoder, err := device.CreateCommandEncoder(gfx.CommandEncoderDescriptor{Label: "standalone"})
+		if err != nil {
+			t.Errorf("CreateCommandEncoder answered %v", err)
+			return
+		}
+		buffer, err := encoder.Finish()
+		if err != nil {
+			t.Errorf("Finish answered %v", err)
+			return
+		}
+		if err := device.Submit(buffer); err != nil {
+			t.Errorf("Submit answered %v", err)
+		}
+	})
+}
+
+func TestARenderPassOnAViewHoldingNothingFailsFinish(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+
+	h.readDevice(func(device gfx.Device) {
+		encoder, err := device.CreateCommandEncoder(gfx.CommandEncoderDescriptor{})
+		if err != nil {
+			t.Errorf("CreateCommandEncoder answered %v", err)
+			return
+		}
+		encoder.BeginRenderPass(gfx.RenderPassDescriptor{ColorAttachments: []gfx.RenderPassColorAttachment{{
+			LoadOp: gfx.LoadOpClear, StoreOp: gfx.StoreOpStore,
+		}}}).End()
+		if buffer, err := encoder.Finish(); err == nil {
+			buffer.Release()
+			t.Error("Finish answered no error for a pass on the zero view")
+		}
+	})
+}
+
+// clearFramebuffer records, in frame's encoder at order 0, a render pass
+// clearing window's framebuffer to color, and answers whether the frame had
+// one.
+func clearFramebuffer(t *testing.T, event gfx.DrawEvent, device gfx.Device, window platform.Window, color gfx.Color) bool {
+	view := device.Framebuffer(event.Frame, window)
+	if view == (gfx.TextureView{}) {
+		return false
+	}
+	encoder, err := device.Encoder(event.Frame, 0)
+	if err != nil {
+		t.Errorf("Encoder answered %v", err)
+		return true
+	}
+	encoder.BeginRenderPass(gfx.RenderPassDescriptor{ColorAttachments: []gfx.RenderPassColorAttachment{{
+		View: view, LoadOp: gfx.LoadOpClear, StoreOp: gfx.StoreOpStore, ClearValue: color,
+	}}}).End()
+	return true
 }

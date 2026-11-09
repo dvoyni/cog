@@ -13,8 +13,9 @@ Status: being built: gfx gets gogpu's adapter and device, with the features
 and limits it asks for or the software adapter, every other device call
 answering an error naming it, windows open and close through platform, the
 user's close reported and the main window opened at start, each beat
-acquires and presents every shown window's framebuffer, and
-`gogpu/shader` preprocesses shaders. The decisions come from the
+acquires and presents every shown window's framebuffer, encoders record
+render passes that clear, finish and submit, every other command answering
+an error naming it, and `gogpu/shader` preprocesses shaders. The decisions come from the
 [gogpu map](https://github.com/dvoyni/cog/issues/611); each section links
 the ticket that holds its detail. The loop API it rests on, `HostLoop`, was
 built on the [loop map](https://github.com/dvoyni/cog/issues/612) and is in
@@ -212,6 +213,23 @@ what `HostLoop` or the OS requires:
 - **FIFO blocks at acquire,** up to about one refresh, never longer: on Metal
   the longest `BeginFrame` measured 18 to 27 ms at 60 frames a second
   ([run the v0.34.x Metal changes on a Mac](https://github.com/dvoyni/cog/issues/723)).
+
+## Commands
+
+([gogpu plugin: command encoders, render pass clears, finish and submit](https://github.com/dvoyni/cog/issues/746))
+
+- **Encoders are wgpu's.** `CreateCommandEncoder` answers wgpu's encoder as
+  gfx's, for a frame's encoders and standalone ones alike. A render pass
+  takes the views stored at its attachments' indices, a window's
+  framebuffer among them.
+- **Errors wait for `Finish`.** A pass's errors, wgpu's or an attachment
+  whose view holds nothing, and a command not built yet are kept by the
+  encoder, which then begins no pass on wgpu. `Finish` answers the first and
+  discards the encoding.
+- **Submits go to wgpu's queue.** `Submit` answers the queue's submission
+  index, and `Poll` the newest one finished. gogpu's own submits share the
+  queue, so the indices rise from one with gaps; gfx needs them only to
+  rise.
 
 ## Shaders
 
