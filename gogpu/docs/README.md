@@ -71,7 +71,10 @@ A failed directive answers a `gfx.ErrShaderSource`, naming the file and line.
 `RequestCapture(window)` captures the first frame acquired after the
 request, on every backend. `CapturedEvent` arrives a frame later, and
 `ReadCapture` answers its `image.NRGBA`. Comparing it with anything is the
-caller's work.
+caller's work. The plugin draws a captured frame into a texture of its own,
+made for that frame, then onto the window, so the window shows what was
+captured. A capture is a one-off request: one a frame works, but makes and
+frees a window-sized texture each time.
 
 ## Limits
 

@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
 	"os"
 	"runtime"
 	"slices"
@@ -67,8 +69,8 @@ type readInputEvent struct{}
 // harness spawns a kernel of metronome, platform, gfx, gogpu and itself from
 // the main thread, reads its Device and InputState, edits its WindowManager
 // and pumps, draws, records the window, pointer and key events platform
-// publishes and gfx's BufferMappedEvent, and quits it, failing the test on
-// every error logged.
+// publishes, gfx's BufferMappedEvent and each capture's picture, and quits
+// it, failing the test on every error logged.
 type harness struct {
 	t          *testing.T
 	supervisor *kernel.Supervisor
@@ -220,6 +222,31 @@ func (h *harness) readBack(buffer gfx.Buffer, size uint64) []byte {
 	return nil
 }
 
+// capture requests window's capture and draws beats clearing it to color
+// until its picture is read, failing the test when none is in 5s, or the
+// capture holds none.
+func (h *harness) capture(window platform.Window, color gfx.Color) *image.NRGBA {
+	h.t.Helper()
+	h.readDevice(func(device gfx.Device) {
+		if err := device.RequestCapture(window); err != nil {
+			h.t.Errorf("RequestCapture answered %v", err)
+		}
+	})
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+		h.draw(func(event gfx.DrawEvent, device gfx.Device) { clearFramebuffer(h.t, event, device, window, color) })
+		for _, event := range h.takePublished() {
+			if captured, ok := event.(capturedPicture); ok {
+				if captured.err != nil {
+					h.t.Fatalf("reading %v's capture answered %v", window, captured.err)
+				}
+				return captured.picture
+			}
+		}
+	}
+	h.t.Fatalf("no beat in 5s published %v's capture", window)
+	return nil
+}
+
 // takePublished answers the events recorded since its last call.
 func (h *harness) takePublished() []any {
 	h.mutex.Lock()
@@ -331,6 +358,16 @@ func (h *harness) Init(c *kernel.Configurator, _ any) error {
 	subscribeRecord[platform.PointerLeaveEvent](c, h)
 	subscribeRecord[platform.KeyEvent](c, h)
 	subscribeRecord[gfx.BufferMappedEvent](c, h)
+	readCapture := c.RegisterTask1(func(k *kernel.Kernel, event gfx.CapturedEvent, device kernel.Read[gfx.Device]) kernel.NoResult {
+		picture, err := gfx.ReadCapture(device.Get(), event)
+		h.mutex.Lock()
+		h.published = append(h.published, capturedPicture{picture: picture, err: err})
+		h.mutex.Unlock()
+		return kernel.NoResult{}
+	})
+	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.CapturedEvent) (gfx.CapturedEvent, kernel.JobHandle) {
+		return event, ex.Schedule(readCapture, event, in).Handle()
+	})
 	return nil
 }
 
@@ -349,6 +386,13 @@ func (h *harness) LogErr(source kernel.KernelID, err error) {
 func (*harness) LogWarn(source kernel.KernelID, message string, args ...any) {}
 
 func (*harness) LogDebug(source kernel.KernelID, message string, args ...any) {}
+
+// capturedPicture is what ReadCapture answered for a CapturedEvent, read in
+// a task its publication joins, before gfx releases its buffer.
+type capturedPicture struct {
+	picture *image.NRGBA
+	err     error
+}
 
 // defaultBackend is gogpu's backend on this system, GL excluded.
 func defaultBackend() gfx.Backend {
@@ -649,6 +693,40 @@ func TestTheSoftwareAdapterClearsAWindow(t *testing.T) {
 		h.draw(func(event gfx.DrawEvent, device gfx.Device) {
 			if !clearFramebuffer(t, event, device, window, gfx.Color{G: 1, A: 1}) {
 				t.Errorf("beat %d had no framebuffer to clear", beat)
+			}
+		})
+	}
+}
+
+func TestEachCaptureHoldsTheColourItsFrameClearedTo(t *testing.T) {
+	for _, adapter := range []struct {
+		name   string
+		config *gfx.Config
+	}{{"default", nil}, {"software", &gfx.Config{ForceFallbackAdapter: true}}} {
+		t.Run(adapter.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.mustSpawn(adapter.config, nil)
+			window := h.openShownWindow()
+			var framebuffer platform.Size
+			h.pump(func(manager *platform.WindowManager) { framebuffer = manager.FramebufferSize(window) })
+
+			for _, want := range []color.NRGBA{{R: 0xFF, A: 0xFF}, {B: 0xFF, A: 0xFF}} {
+				picture := h.capture(window, gfx.Color{R: float64(want.R) / 0xFF, B: float64(want.B) / 0xFF, A: 1})
+				if size := picture.Bounds().Size(); size != image.Pt(framebuffer.Width, framebuffer.Height) {
+					t.Errorf("the capture is %v, want the window's framebuffer, %v", size, framebuffer)
+				}
+				for y := range picture.Bounds().Dy() {
+					for x := range picture.Bounds().Dx() {
+						if got := picture.NRGBAAt(x, y); got != want {
+							t.Fatalf("the capture's pixel at %d,%d is %v, want %v", x, y, got, want)
+						}
+					}
+				}
+			}
+			for range 3 {
+				h.draw(func(event gfx.DrawEvent, device gfx.Device) {
+					clearFramebuffer(t, event, device, window, gfx.Color{G: 1, A: 1})
+				})
 			}
 		})
 	}

@@ -27,13 +27,25 @@ type device struct {
 	// frames holds each window's frame acquired and not yet presented, on
 	// the main thread alone.
 	frames map[platform.Window]acquiredFrame
+	// surfaceSizes holds the size each window's surface is configured with,
+	// which a captured frame's offscreen texture takes, set by its configure
+	// under gfx's write lock and read by its acquires on the main thread. A
+	// closed window's size is left in it.
+	surfaceSizes map[platform.Window]wgpu.Extent3D
+	// offscreenGroupLayout and offscreenPipeline draw an offscreen texture
+	// onto a window, made at the first captured acquire.
+	offscreenGroupLayout *wgpu.BindGroupLayout
+	offscreenPipeline    *wgpu.RenderPipeline
 	// buffers holds each buffer, and its latest map, at its gfx index.
 	buffers container.ObjectTable[bufferSlot]
-	// textures holds each texture at its gfx index. A framebuffer's index
-	// holds none: gogpu offers no surface texture.
+	// textures holds each texture at its gfx index, and a captured frame's
+	// offscreen texture at its framebuffer's from its acquire to its present.
+	// Another framebuffer's index holds none: gogpu offers no surface
+	// texture.
 	textures container.ObjectTable[atomic.Pointer[wgpu.Texture]]
 	// textureViews holds each texture view at its gfx index, a framebuffer's
-	// from its acquire to its present.
+	// from its acquire to its present: the surface's, or a captured frame's
+	// offscreen view.
 	textureViews container.ObjectTable[atomic.Pointer[wgpu.TextureView]]
 	// samplers holds each sampler at its gfx index.
 	samplers container.ObjectTable[atomic.Pointer[wgpu.Sampler]]
@@ -565,26 +577,29 @@ func (*device) SurfaceCapabilities(platform.Window) gfx.SurfaceCapabilities {
 
 // ConfigureSurface accepts what SurfaceCapabilities answers, and answers an
 // error for any other format or present mode: gogpu configures the surface
-// itself, at the window's size, when its frame begins.
+// itself, at the window's size, when its frame begins. A captured frame's
+// offscreen texture takes configuration's size.
 func (d *device) ConfigureSurface(window platform.Window, configuration gfx.SurfaceConfiguration) error {
 	capabilities := d.SurfaceCapabilities(window)
 	if !slices.Contains(capabilities.Formats, configuration.Format) || !slices.Contains(capabilities.PresentModes, configuration.PresentMode) {
 		return fmt.Errorf("gogpu: a surface is %v with %v, not %v with %v", capabilities.Formats[0], capabilities.PresentModes[0], configuration.Format, configuration.PresentMode)
 	}
+	d.surfaceSizes[window] = wgpu.Extent3D{Width: configuration.Width, Height: configuration.Height, DepthOrArrayLayers: 1}
 	return nil
 }
 
 // AcquireFramebuffer begins window's frame through the HostLoop, on the main
 // thread, and stores its surface view at view's index. gogpu offers no
-// surface texture, so texture's index stays empty. A window hidden,
-// minimized, closed by gogpu or whose compositor holds its frame is
+// surface texture, so texture's index stays empty. A captured frame stores
+// an offscreen texture made for it and its view instead, and keeps the
+// surface view for the present; when that texture fails to be made, the
+// frame ends with nothing presented, since gogpu begins the surface's frame
+// only when its view is asked for, and the error is answered. A window
+// hidden, minimized, closed by gogpu or whose compositor holds its frame is
 // AcquireStatusTimeout, as are gogpu's timeout; its outdated and lost surface
 // are AcquireStatusOutdated and AcquireStatusLost, and a device lost is
-// gfx's ErrDeviceLost. A captured frame is not built yet.
-func (d *device) AcquireFramebuffer(window platform.Window, _ gfx.Texture, view gfx.TextureView, captured bool) (gfx.AcquireStatus, error) {
-	if captured {
-		return 0, unbuilt("a captured AcquireFramebuffer")
-	}
+// gfx's ErrDeviceLost.
+func (d *device) AcquireFramebuffer(window platform.Window, texture gfx.Texture, view gfx.TextureView, captured bool) (gfx.AcquireStatus, error) {
 	context, ok, err := d.loop.BeginFrame(d.windows[window])
 	switch {
 	case errors.Is(err, wgpu.ErrSurfaceOutdated):
@@ -598,15 +613,28 @@ func (d *device) AcquireFramebuffer(window platform.Window, _ gfx.Texture, view 
 	case !ok:
 		return gfx.AcquireStatusTimeout, nil
 	}
-	d.frames[window] = acquiredFrame{context: context, view: view}
-	d.textureViews.Grow(view.Index()).Store(context.SurfaceView())
+	var offscreen *offscreenTexture
+	if captured {
+		if offscreen, err = d.newOffscreenTexture(d.surfaceSizes[window]); err != nil {
+			return 0, markDeviceLoss(errors.Join(err, d.loop.EndFrame(context)))
+		}
+	}
+	surfaceView := context.SurfaceView()
+	d.frames[window] = acquiredFrame{context: context, surfaceView: surfaceView, texture: texture, view: view, offscreen: offscreen}
+	stored := surfaceView
+	if offscreen != nil {
+		d.textures.Grow(texture.Index()).Store(offscreen.texture)
+		stored = offscreen.view
+	}
+	d.textureViews.Grow(view.Index()).Store(stored)
 	return gfx.AcquireStatusAcquired, nil
 }
 
 // Present ends window's frame through the HostLoop, on the main thread,
 // which submits gogpu's own work and presents, and answers its error, a
-// device lost as gfx's ErrDeviceLost. The surface view stored at the acquire
-// is dropped.
+// device lost as gfx's ErrDeviceLost. A captured frame's offscreen texture is
+// drawn onto the surface first, then released, and the frame still ends when
+// that draw fails. The views and texture stored at the acquire are dropped.
 func (d *device) Present(window platform.Window) error {
 	frame, ok := d.frames[window]
 	if !ok {
@@ -614,7 +642,13 @@ func (d *device) Present(window platform.Window) error {
 	}
 	delete(d.frames, window)
 	d.textureViews.At(frame.view.Index()).Store(nil)
-	return markDeviceLoss(d.loop.EndFrame(frame.context))
+	if frame.offscreen == nil {
+		return markDeviceLoss(d.loop.EndFrame(frame.context))
+	}
+	d.textures.At(frame.texture.Index()).Store(nil)
+	err := d.drawOffscreenTexture(frame.offscreen, frame.surfaceView)
+	frame.offscreen.destroy()
+	return markDeviceLoss(errors.Join(err, d.loop.EndFrame(frame.context)))
 }
 
 func (*device) WaitIdle() error { return unbuilt("WaitIdle") }
@@ -712,9 +746,15 @@ type shaderModule struct {
 
 // acquiredFrame is a window's frame begun and not yet ended.
 type acquiredFrame struct {
-	context *host.Context
-	// view is the gfx view its surface view is stored at.
-	view gfx.TextureView
+	context     *host.Context
+	surfaceView *wgpu.TextureView
+	// texture and view are the gfx texture and view its framebuffer is
+	// stored at.
+	texture gfx.Texture
+	view    gfx.TextureView
+	// offscreen is the offscreen texture made for the frame when it is
+	// captured, and nil otherwise.
+	offscreen *offscreenTexture
 }
 
 // bufferSlot is the buffer at a gfx index and the latest map begun on it,
