@@ -11,9 +11,9 @@ import (
 )
 
 // windowSystem is the plugin's platform.WindowsSocket: it opens, changes and
-// closes the HostLoop's windows, pumps their events, and reports their
-// pointers through the input source. platform calls it on the main thread
-// alone.
+// closes the HostLoop's windows, pumps their events, reports their sizes and
+// focus, and their pointers through the input source. platform calls it on
+// the main thread alone.
 type windowSystem struct {
 	// plugin holds the HostLoop, the windows open and what the next Pump
 	// reports.
@@ -23,7 +23,8 @@ type windowSystem struct {
 // Open opens window with its surface through the HostLoop, at entry's title,
 // size and fullscreen, gogpu's default size for a zero width or height, and
 // shows it unless entry hides it. It reports the window open from the next
-// Pump, at the scale its framebuffer's width gives. The user's close of the
+// Pump, at its sizes, and from later Pumps each resize, a scale change
+// included, and each gain and loss of the focus. The user's close of the
 // window is reported, and keeps it open, and its pointer from the input
 // source's next AppendChanges. It answers an error before gfx's adapter
 // request, which starts the HostLoop.
@@ -43,24 +44,14 @@ func (w windowSystem) Open(window platform.Window, entry platform.WindowEntry) e
 		return err
 	}
 	opened.SetOnClose(func() bool { return w.requestClose(window) })
+	opened.SetOnResize(func(int, int) { w.reportSizes(platform.InputChangeResize, window, opened) })
+	opened.SetOnFocus(func(focused bool) { w.reportFocus(window, focused) })
 	opened.SetOnPointer(func(event gpucontext.PointerEvent) { inputSource(w).reportPointer(window, event) })
 	if !entry.Hidden {
 		opened.Show()
 	}
 	w.plugin.windows[window] = opened
-	width, height := opened.Size()
-	framebufferWidth, framebufferHeight := opened.PhysicalSize()
-	scale := float32(1)
-	if width > 0 && framebufferWidth > 0 {
-		scale = float32(framebufferWidth) / float32(width)
-	}
-	w.plugin.changes = append(w.plugin.changes, platform.InputChange{
-		Kind:            platform.InputChangeWindowOpened,
-		Window:          window,
-		Size:            platform.Size{Width: width, Height: height},
-		FramebufferSize: platform.Size{Width: framebufferWidth, Height: framebufferHeight},
-		Scale:           scale,
-	})
+	w.reportSizes(platform.InputChangeWindowOpened, window, opened)
 	return nil
 }
 
@@ -144,6 +135,27 @@ func (w windowSystem) Pump(changes []platform.InputChange) []platform.InputChang
 func (w windowSystem) requestClose(window platform.Window) bool {
 	w.plugin.changes = append(w.plugin.changes, platform.InputChange{Kind: platform.InputChangeCloseRequested, Window: window})
 	return false
+}
+
+// reportSizes reports from the next Pump a change of kind for window, at
+// opened's size, framebuffer size and scale, the system's own for the screen
+// it is on.
+func (w windowSystem) reportSizes(kind platform.InputChangeKind, window platform.Window, opened *host.Window) {
+	width, height := opened.Size()
+	framebufferWidth, framebufferHeight := opened.PhysicalSize()
+	w.plugin.changes = append(w.plugin.changes, platform.InputChange{
+		Kind:            kind,
+		Window:          window,
+		Size:            platform.Size{Width: width, Height: height},
+		FramebufferSize: platform.Size{Width: framebufferWidth, Height: framebufferHeight},
+		Scale:           float32(opened.ScaleFactor()),
+	})
+}
+
+// reportFocus reports from the next Pump window's gain of the focus, or its
+// loss when focused is false.
+func (w windowSystem) reportFocus(window platform.Window, focused bool) {
+	w.plugin.changes = append(w.plugin.changes, platform.InputChange{Kind: platform.InputChangeFocus, Window: window, Focused: focused})
 }
 
 // reportClosed reports from the next Pump the window gogpu closed by itself,

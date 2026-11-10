@@ -18,6 +18,13 @@ func ReportPointer(p *Plugin, window platform.Window, event gpucontext.PointerEv
 	inputSource{plugin: p}.reportPointer(window, event)
 }
 
+// ReportFocus reports window's gain of the focus, or its loss when focused is
+// false, as the plugin's focus callback on window's gogpu window does when
+// the operating system calls it.
+func ReportFocus(p *Plugin, window platform.Window, focused bool) {
+	windowSystem{plugin: p}.reportFocus(window, focused)
+}
+
 // MarkDeviceLoss answers err as the device's acquire, present and submit
 // answer it.
 func MarkDeviceLoss(err error) error { return markDeviceLoss(err) }
