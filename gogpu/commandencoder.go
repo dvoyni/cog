@@ -2,8 +2,10 @@ package gogpu
 
 import (
 	"fmt"
+	"sync/atomic"
 
 	"github.com/dvoyni/cog/gfx"
+	"github.com/dvoyni/cog/kernel/container"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
@@ -62,25 +64,61 @@ func (e *commandEncoder) BeginRenderPass(descriptor gfx.RenderPassDescriptor) gf
 	return renderPassEncoder{encoder: e, pass: pass}
 }
 
-func (e *commandEncoder) BeginComputePass(gfx.ComputePassDescriptor) gfx.ComputePassEncoder {
-	e.fail(unbuilt("BeginComputePass"))
-	return computePassEncoder{}
+// BeginComputePass begins wgpu's compute pass. Timestamp writes are an
+// error, not built yet.
+func (e *commandEncoder) BeginComputePass(descriptor gfx.ComputePassDescriptor) gfx.ComputePassEncoder {
+	if descriptor.TimestampWrites != (gfx.PassTimestampWrites{}) {
+		e.fail(unbuilt("a compute pass's TimestampWrites"))
+	}
+	if e.err != nil {
+		return computePassEncoder{encoder: e}
+	}
+	pass, err := e.encoder.BeginComputePass(&wgpu.ComputePassDescriptor{Label: descriptor.Label})
+	e.fail(err)
+	return computePassEncoder{encoder: e, pass: pass}
 }
 
 func (e *commandEncoder) ResolveQuerySet(gfx.QuerySet, uint32, uint32, gfx.Buffer, uint64) {
 	e.fail(unbuilt("ResolveQuerySet"))
 }
 
-func (e *commandEncoder) CopyBufferToBuffer(gfx.Buffer, uint64, gfx.Buffer, uint64, uint64) {
-	e.fail(unbuilt("CopyBufferToBuffer"))
+// CopyBufferToBuffer records wgpu's copy between the buffers stored at
+// source's and destination's indexes.
+func (e *commandEncoder) CopyBufferToBuffer(source gfx.Buffer, sourceOffset uint64, destination gfx.Buffer, destinationOffset uint64, size uint64) {
+	copied := e.recordedBuffer(source)
+	written := e.recordedBuffer(destination)
+	if e.err == nil {
+		e.encoder.CopyBufferToBuffer(copied, sourceOffset, written, destinationOffset, size)
+	}
 }
 
 func (e *commandEncoder) CopyBufferToTexture(gfx.Buffer, gfx.Texture, []gfx.BufferTextureCopy) {
 	e.fail(unbuilt("CopyBufferToTexture"))
 }
 
-func (e *commandEncoder) CopyTextureToBuffer(gfx.Texture, gfx.Buffer, []gfx.BufferTextureCopy) {
-	e.fail(unbuilt("CopyTextureToBuffer"))
+// CopyTextureToBuffer records wgpu's copy of regions of the texture stored
+// at source's index into the buffer at destination's. Each region copies
+// from source, whatever texture its TextureBase names.
+func (e *commandEncoder) CopyTextureToBuffer(source gfx.Texture, destination gfx.Buffer, regions []gfx.BufferTextureCopy) {
+	copied := recordedObject(e, &e.device.textures, source, "texture")
+	written := e.recordedBuffer(destination)
+	if e.err != nil {
+		return
+	}
+	copies := make([]wgpu.BufferTextureCopy, len(regions))
+	for index, region := range regions {
+		copies[index] = wgpu.BufferTextureCopy{
+			BufferLayout: wgpu.ImageDataLayout(region.BufferLayout),
+			TextureBase: wgpu.ImageCopyTexture{
+				Texture:  copied,
+				MipLevel: region.TextureBase.MipLevel,
+				Origin:   wgpu.Origin3D(region.TextureBase.Origin),
+				Aspect:   gputypes.TextureAspect(region.TextureBase.Aspect),
+			},
+			Size: wgpu.Extent3D(region.Size),
+		}
+	}
+	e.encoder.CopyTextureToBuffer(copied, written, copies)
 }
 
 func (e *commandEncoder) CopyTextureToTexture(gfx.Texture, gfx.Texture, []gfx.TextureCopy) {
@@ -118,6 +156,17 @@ func (e *commandEncoder) attachmentView(view gfx.TextureView, role string) *wgpu
 	return textureView
 }
 
+// recordedBuffer answers the buffer stored at buffer's index for a command,
+// or nil once the encoder has an error, recording one when it holds none.
+func (e *commandEncoder) recordedBuffer(buffer gfx.Buffer) *wgpu.Buffer {
+	stored, err := e.device.storedBuffer(buffer)
+	e.fail(err)
+	if e.err != nil {
+		return nil
+	}
+	return stored
+}
+
 // fail keeps err, unless nil, as the encoder's error when it has none yet.
 func (e *commandEncoder) fail(err error) {
 	if e.err == nil {
@@ -126,23 +175,42 @@ func (e *commandEncoder) fail(err error) {
 }
 
 // renderPassEncoder is wgpu's render pass as gfx's; pass is nil when its
-// encoder had an error at its begin. Its commands are not built yet: each
+// encoder had an error at its begin. The pass state that is not built yet
 // records an error naming it.
 type renderPassEncoder struct {
 	encoder *commandEncoder
 	pass    *wgpu.RenderPassEncoder
 }
 
-func (p renderPassEncoder) SetPipeline(gfx.RenderPipeline) { p.encoder.fail(unbuilt("SetPipeline")) }
-func (p renderPassEncoder) SetBindGroup(uint32, gfx.BindGroup, []uint32) {
-	p.encoder.fail(unbuilt("SetBindGroup"))
+// SetPipeline sets the pipeline stored at pipeline's index.
+func (p renderPassEncoder) SetPipeline(pipeline gfx.RenderPipeline) {
+	if stored := recordedObject(p.encoder, &p.encoder.device.renderPipelines, pipeline, "render pipeline"); stored != nil {
+		p.pass.SetPipeline(stored)
+	}
 }
-func (p renderPassEncoder) SetVertexBuffer(uint32, gfx.Buffer, uint64) {
-	p.encoder.fail(unbuilt("SetVertexBuffer"))
+
+// SetBindGroup sets the bind group stored at group's index.
+func (p renderPassEncoder) SetBindGroup(index uint32, group gfx.BindGroup, dynamicOffsets []uint32) {
+	if stored := recordedObject(p.encoder, &p.encoder.device.bindGroups, group, "bind group"); stored != nil {
+		p.pass.SetBindGroup(index, stored, dynamicOffsets)
+	}
 }
-func (p renderPassEncoder) SetIndexBuffer(gfx.Buffer, gfx.IndexFormat, uint64) {
-	p.encoder.fail(unbuilt("SetIndexBuffer"))
+
+// SetVertexBuffer sets the buffer stored at buffer's index in slot.
+func (p renderPassEncoder) SetVertexBuffer(slot uint32, buffer gfx.Buffer, offset uint64) {
+	if stored := p.encoder.recordedBuffer(buffer); stored != nil {
+		p.pass.SetVertexBuffer(slot, stored, offset)
+	}
 }
+
+// SetIndexBuffer sets the buffer stored at buffer's index as the index
+// buffer.
+func (p renderPassEncoder) SetIndexBuffer(buffer gfx.Buffer, format gfx.IndexFormat, offset uint64) {
+	if stored := p.encoder.recordedBuffer(buffer); stored != nil {
+		p.pass.SetIndexBuffer(stored, gputypes.IndexFormat(format), offset)
+	}
+}
+
 func (p renderPassEncoder) SetViewport(gfx.Viewport) { p.encoder.fail(unbuilt("SetViewport")) }
 func (p renderPassEncoder) SetScissorRect(gfx.ScissorRect) {
 	p.encoder.fail(unbuilt("SetScissorRect"))
@@ -151,19 +219,43 @@ func (p renderPassEncoder) SetBlendConstant(gfx.Color) { p.encoder.fail(unbuilt(
 func (p renderPassEncoder) SetStencilReference(uint32) {
 	p.encoder.fail(unbuilt("SetStencilReference"))
 }
-func (p renderPassEncoder) Draw(gfx.DrawArgs)               { p.encoder.fail(unbuilt("Draw")) }
-func (p renderPassEncoder) DrawIndexed(gfx.DrawIndexedArgs) { p.encoder.fail(unbuilt("DrawIndexed")) }
-func (p renderPassEncoder) DrawIndirect(gfx.Buffer, uint64) {
-	p.encoder.fail(unbuilt("DrawIndirect"))
+
+func (p renderPassEncoder) Draw(arguments gfx.DrawArgs) {
+	if p.encoder.err == nil {
+		p.pass.Draw(gputypes.DrawArgs(arguments))
+	}
 }
-func (p renderPassEncoder) DrawIndexedIndirect(gfx.Buffer, uint64) {
-	p.encoder.fail(unbuilt("DrawIndexedIndirect"))
+
+func (p renderPassEncoder) DrawIndexed(arguments gfx.DrawIndexedArgs) {
+	if p.encoder.err == nil {
+		p.pass.DrawIndexed(gputypes.DrawIndexedArgs(arguments))
+	}
 }
-func (p renderPassEncoder) MultiDrawIndirect(gfx.Buffer, uint64, uint32) {
-	p.encoder.fail(unbuilt("MultiDrawIndirect"))
+
+// DrawIndirect draws with the arguments at offset in the buffer stored at
+// buffer's index, as the other indirect draws do.
+func (p renderPassEncoder) DrawIndirect(buffer gfx.Buffer, offset uint64) {
+	if stored := p.encoder.recordedBuffer(buffer); stored != nil {
+		p.pass.DrawIndirect(stored, offset)
+	}
 }
-func (p renderPassEncoder) MultiDrawIndexedIndirect(gfx.Buffer, uint64, uint32) {
-	p.encoder.fail(unbuilt("MultiDrawIndexedIndirect"))
+
+func (p renderPassEncoder) DrawIndexedIndirect(buffer gfx.Buffer, offset uint64) {
+	if stored := p.encoder.recordedBuffer(buffer); stored != nil {
+		p.pass.DrawIndexedIndirect(stored, offset)
+	}
+}
+
+func (p renderPassEncoder) MultiDrawIndirect(buffer gfx.Buffer, offset uint64, drawCount uint32) {
+	if stored := p.encoder.recordedBuffer(buffer); stored != nil {
+		p.pass.MultiDrawIndirect(stored, offset, drawCount)
+	}
+}
+
+func (p renderPassEncoder) MultiDrawIndexedIndirect(buffer gfx.Buffer, offset uint64, drawCount uint32) {
+	if stored := p.encoder.recordedBuffer(buffer); stored != nil {
+		p.pass.MultiDrawIndexedIndirect(stored, offset, drawCount)
+	}
 }
 
 // End ends wgpu's pass, when it began, keeping its error as the encoder's.
@@ -173,12 +265,57 @@ func (p renderPassEncoder) End() {
 	}
 }
 
-// computePassEncoder is a compute pass, not built yet: its encoder has the
-// error, and it records nothing.
-type computePassEncoder struct{}
+// computePassEncoder is wgpu's compute pass as gfx's; pass is nil when its
+// encoder had an error at its begin.
+type computePassEncoder struct {
+	encoder *commandEncoder
+	pass    *wgpu.ComputePassEncoder
+}
 
-func (computePassEncoder) SetPipeline(gfx.ComputePipeline)              {}
-func (computePassEncoder) SetBindGroup(uint32, gfx.BindGroup, []uint32) {}
-func (computePassEncoder) Dispatch(uint32, uint32, uint32)              {}
-func (computePassEncoder) DispatchIndirect(gfx.Buffer, uint64)          {}
-func (computePassEncoder) End()                                         {}
+// SetPipeline sets the pipeline stored at pipeline's index.
+func (p computePassEncoder) SetPipeline(pipeline gfx.ComputePipeline) {
+	if stored := recordedObject(p.encoder, &p.encoder.device.computePipelines, pipeline, "compute pipeline"); stored != nil {
+		p.pass.SetPipeline(stored)
+	}
+}
+
+// SetBindGroup sets the bind group stored at group's index.
+func (p computePassEncoder) SetBindGroup(index uint32, group gfx.BindGroup, dynamicOffsets []uint32) {
+	if stored := recordedObject(p.encoder, &p.encoder.device.bindGroups, group, "bind group"); stored != nil {
+		p.pass.SetBindGroup(index, stored, dynamicOffsets)
+	}
+}
+
+func (p computePassEncoder) Dispatch(x, y, z uint32) {
+	if p.encoder.err == nil {
+		p.pass.Dispatch(x, y, z)
+	}
+}
+
+// DispatchIndirect dispatches with the workgroup counts at offset in the
+// buffer stored at buffer's index.
+func (p computePassEncoder) DispatchIndirect(buffer gfx.Buffer, offset uint64) {
+	if stored := p.encoder.recordedBuffer(buffer); stored != nil {
+		p.pass.DispatchIndirect(stored, offset)
+	}
+}
+
+// End ends wgpu's pass, when it began, keeping its error as the encoder's.
+func (p computePassEncoder) End() {
+	if p.pass != nil {
+		p.encoder.fail(p.pass.End())
+	}
+}
+
+// recordedObject answers the object stored in objects at handle's index for
+// a command, or nil once the encoder has an error, recording one naming the
+// object when it holds none. A command records nothing once its encoder has
+// an error, its pass not begun among them.
+func recordedObject[T any](e *commandEncoder, objects *container.ObjectTable[atomic.Pointer[T]], handle interface{ Index() uint32 }, object string) *T {
+	stored, err := storedObject(objects, handle, object)
+	e.fail(err)
+	if e.err != nil {
+		return nil
+	}
+	return stored
+}

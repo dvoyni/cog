@@ -10,8 +10,10 @@ close through platform, each beat acquires and presents every shown window's
 framebuffer, encoders record render passes that clear, finish and submit,
 buffers are created, written and mapped, textures are created and written,
 with views and samplers, shader modules, bind group layouts, bind groups and
-pipeline layouts are created, with every other device call or command
-answering an error naming it, and
+pipeline layouts are created, render and compute pipelines with explicit
+layouts draw and dispatch, buffers and textures are copied into buffers,
+vertex inputs are not reflected yet, with every other device call or
+command answering an error naming it, and
 `gogpu/shader` preprocesses shaders. The design is in
 [`docs/design.md`](docs/design.md), the guide in
 [`docs/README.md`](docs/README.md), and the build on the
