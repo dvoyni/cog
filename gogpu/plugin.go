@@ -15,6 +15,7 @@ import (
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/platform"
 	host "github.com/gogpu/gogpu"
+	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
@@ -22,10 +23,11 @@ import (
 // PluginName is the gogpu plugin's name.
 const PluginName kernel.PluginName = "gogpu"
 
-// Plugin is the gogpu plugin: it binds itself to gfx.InstanceSocket and
-// platform.WindowsSocket, starts the fork's HostLoop at gfx's adapter request
-// and stops it at gfx's release of the instance, which it pins to the main
-// thread. platform calls its window methods on the main thread alone.
+// Plugin is the gogpu plugin: it binds itself to gfx.InstanceSocket,
+// platform.WindowsSocket and platform.InputSourceSocket, starts the fork's
+// HostLoop at gfx's adapter request and stops it at gfx's release of the
+// instance, which it pins to the main thread. platform calls its window and
+// input methods on the main thread alone.
 type Plugin struct {
 	// config is a copy of the Config Init was given.
 	config Config
@@ -36,6 +38,9 @@ type Plugin struct {
 	windows map[platform.Window]*host.Window
 	// changes is what the next Pump reports, in the order it happened.
 	changes []platform.InputChange
+	// inputChanges is what the next AppendChanges reports, in the order it
+	// happened.
+	inputChanges []platform.InputChange
 }
 
 // Config is the gogpu plugin's part of the kernel's config, under
@@ -63,8 +68,8 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 	return []kernel.PluginName{gfx.PluginName, platform.PluginName}
 }
 
-// Init binds the plugin to gfx.InstanceSocket and platform.WindowsSocket,
-// pins to the main thread gfx's tasks the HostLoop or the OS requires there:
+// Init binds the plugin to gfx.InstanceSocket, platform.WindowsSocket and
+// platform.InputSourceSocket, pins to the main thread gfx's tasks the HostLoop or the OS requires there:
 // acquire and present, which begin and end frames through the HostLoop, the
 // device's recovery and release, and on Windows the surfaces' configure, and
 // on Vulkan their release. It then opens Config.MainWindow in platform's WindowManager, which the
@@ -74,6 +79,7 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	p.config = *kernel.PluginConfigOrDefault[Config](config)
 	configurator.BindSocket[gfx.InstanceSocket](p)
 	configurator.BindSocket[platform.WindowsSocket](p)
+	configurator.BindSocket[platform.InputSourceSocket](p)
 	tasks, _ := configurator.Resource[gfx.Tasks]()
 	configurator.PinToMainThread(tasks.AcquireFramebuffers)
 	configurator.PinToMainThread(tasks.PresentFramebuffers)
@@ -157,8 +163,9 @@ func (*Plugin) PreprocessShader(files fs.FS, path string, defines []gfx.ShaderDe
 // size and fullscreen, gogpu's default size for a zero width or height, and
 // shows it unless entry hides it. It reports the window open from the next
 // Pump, at the scale its framebuffer's width gives. The user's close of the
-// window is reported, and keeps it open. It answers an error before gfx's
-// adapter request, which starts the HostLoop.
+// window is reported, and keeps it open, and its pointer from the next
+// AppendChanges. It answers an error before gfx's adapter request, which
+// starts the HostLoop.
 func (p *Plugin) Open(window platform.Window, entry platform.WindowEntry) error {
 	if p.loop == nil {
 		return errors.New("gogpu: a window opens only once gfx has requested the adapter")
@@ -175,6 +182,7 @@ func (p *Plugin) Open(window platform.Window, entry platform.WindowEntry) error 
 		return err
 	}
 	opened.SetOnClose(func() bool { return p.requestClose(window) })
+	opened.SetOnPointer(func(event gpucontext.PointerEvent) { p.reportPointer(window, event) })
 	if !entry.Hidden {
 		opened.Show()
 	}
@@ -242,6 +250,17 @@ func (p *Plugin) Pump(changes []platform.InputChange) []platform.InputChange {
 	return changes
 }
 
+// AppendChanges appends to changes the input the windows reported since its
+// last call, in the order it happened, and answers it.
+func (p *Plugin) AppendChanges(changes []platform.InputChange) []platform.InputChange {
+	changes = append(changes, p.inputChanges...)
+	p.inputChanges = p.inputChanges[:0]
+	return changes
+}
+
+// Label answers 0: key labels are not built yet.
+func (*Plugin) Label(platform.Key) rune { return 0 }
+
 // Release stops the HostLoop, which closes every window still open and
 // releases gogpu's device, adapter and platform, from gfx's
 // Tasks.ReleaseDevice, pinned to the main thread, or from gfx's Destroy after
@@ -253,6 +272,7 @@ func (p *Plugin) Release() {
 	}
 	p.windows = nil
 	p.changes = nil
+	p.inputChanges = nil
 }
 
 // requestClose reports the user's close of window from the next Pump, and
@@ -260,6 +280,33 @@ func (p *Plugin) Release() {
 func (p *Plugin) requestClose(window platform.Window) bool {
 	p.changes = append(p.changes, platform.InputChange{Kind: platform.InputChangeCloseRequested, Window: window})
 	return false
+}
+
+// reportPointer reports event in window from the next AppendChanges. A
+// cancel, and a button no Key names, report nothing.
+func (p *Plugin) reportPointer(window platform.Window, event gpucontext.PointerEvent) {
+	change := platform.InputChange{Window: window, Position: platform.Point{X: float32(event.X), Y: float32(event.Y)}}
+	switch event.Type {
+	case gpucontext.PointerMove:
+		change.Kind = platform.InputChangePointerMove
+		change.PointerDelta = platform.Point{X: float32(event.DeltaX), Y: float32(event.DeltaY)}
+	case gpucontext.PointerEnter:
+		change.Kind = platform.InputChangePointerEnter
+	case gpucontext.PointerLeave:
+		change.Kind = platform.InputChangePointerLeave
+	case gpucontext.PointerDown, gpucontext.PointerUp:
+		key, ok := mouseButtonKeys[event.Button]
+		if !ok {
+			return
+		}
+		change.Kind = platform.InputChangeKey
+		change.Key = key
+		change.Pressed = event.Type == gpucontext.PointerDown
+		change.Modifiers = platform.Modifiers(event.Modifiers)
+	default:
+		return
+	}
+	p.inputChanges = append(p.inputChanges, change)
 }
 
 // reportClosed reports from the next Pump the window gogpu closed by itself,
@@ -273,4 +320,13 @@ func (p *Plugin) reportClosed(closed host.WindowID) {
 			return
 		}
 	}
+}
+
+// mouseButtonKeys is the Key of each gogpu button.
+var mouseButtonKeys = map[gpucontext.Button]platform.Key{
+	gpucontext.ButtonLeft:   platform.KeyMouseLeft,
+	gpucontext.ButtonMiddle: platform.KeyMouseMiddle,
+	gpucontext.ButtonRight:  platform.KeyMouseRight,
+	gpucontext.ButtonX1:     platform.KeyMouse4,
+	gpucontext.ButtonX2:     platform.KeyMouse5,
 }
