@@ -176,17 +176,26 @@ func (h *harness) openShownWindow() platform.Window {
 	shown.Hidden = false
 	var window platform.Window
 	h.pump(func(manager *platform.WindowManager) { window = manager.Open(shown) })
+	h.drawUntilFramed(window)
+	return window
+}
+
+// drawUntilFramed draws beats until window has a framebuffer, and fails the
+// test when 10 beats have none: a window shown gets its first one from a
+// later beat.
+func (h *harness) drawUntilFramed(window platform.Window) {
+	h.t.Helper()
+	framed := false
+	draw := func(event gfx.DrawEvent, device gfx.Device) {
+		framed = device.Framebuffer(event.Frame, window) != gfx.TextureView{}
+	}
 	for range 10 {
-		drawn := false
-		h.draw(func(event gfx.DrawEvent, device gfx.Device) {
-			drawn = device.Framebuffer(event.Frame, window) != gfx.TextureView{}
-		})
-		if drawn {
-			return window
+		h.draw(draw)
+		if framed {
+			return
 		}
 	}
-	h.t.Fatal("the shown window had no framebuffer in 10 beats")
-	return window
+	h.t.Fatalf("%v had no framebuffer in 10 beats", window)
 }
 
 // readBack draws beats until buffer's map is published resolved, failing the
@@ -651,6 +660,21 @@ func TestAHiddenWindowIsSkipped(t *testing.T) {
 			t.Errorf("the hidden window had framebuffer %v, want none", view)
 		}
 	})
+}
+
+func TestShowingAWindowReachesTheOneItNames(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+	var first, second platform.Window
+	h.pump(func(manager *platform.WindowManager) {
+		first = manager.Open(testWindow)
+		second = manager.Open(testWindow)
+	})
+
+	h.pump(func(manager *platform.WindowManager) { manager.SetHidden(second, false) })
+	h.drawUntilFramed(second)
+	h.pump(func(manager *platform.WindowManager) { manager.SetHidden(first, false) })
+	h.drawUntilFramed(first)
 }
 
 func TestEachBeatClearsAShownWindowToThePassColor(t *testing.T) {
