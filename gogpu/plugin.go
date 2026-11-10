@@ -8,6 +8,7 @@ import (
 
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/kernel/container"
 	"github.com/dvoyni/cog/platform"
 	host "github.com/gogpu/gogpu"
 )
@@ -34,6 +35,10 @@ type Plugin struct {
 	// inputChanges is what the input source's next AppendChanges reports, in
 	// the order it happened.
 	inputChanges []platform.InputChange
+	// heldKeys holds each Key the input source reported pressed and not since
+	// released, or forgotten at a focus loss, as platform holds and forgets
+	// it.
+	heldKeys container.Bits
 }
 
 // Config is the gogpu plugin's part of the kernel's config, under

@@ -192,7 +192,9 @@ what `HostLoop` or the OS requires:
 - **Keys** map from gogpu's physical keys by a table, dense on cog's side.
   Modifiers convert by cast, Caps and Num Lock included.
 - **Repeats** arrive as further key-downs on every OS. The plugin flags a press
-  of a key it already holds.
+  of a key it already holds, and forgets the keys held at a focus loss, as
+  platform releases them
+  ([gogpu plugin: keys, modifiers and repeats](https://github.com/dvoyni/cog/issues/758)).
 - **Key labels** come from the fork's label call, and a layout change from its
   layout-change report, on all four systems.
 - **Text** is what the layout, dead keys and Compose type, on every system.
