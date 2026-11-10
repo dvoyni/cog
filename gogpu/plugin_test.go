@@ -707,6 +707,135 @@ func TestASamplerIsCreatedAsDescribed(t *testing.T) {
 	})
 }
 
+func TestAShaderModuleIsCreatedFromValidWGSL(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+
+	h.readDevice(func(device gfx.Device) {
+		module, err := device.CreateShaderModule(gfx.ShaderModuleDescriptor{WGSL: sampledWGSL})
+		if err != nil {
+			t.Errorf("CreateShaderModule answered %v for valid WGSL", err)
+			return
+		}
+		device.ReleaseShaderModule(module)
+	})
+}
+
+func TestInvalidWGSLAnswersAnErrorNamingTheProblem(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+
+	h.readDevice(func(device gfx.Device) {
+		_, err := device.CreateShaderModule(gfx.ShaderModuleDescriptor{WGSL: "fn value() -> f32 { return undeclared; }"})
+		if err == nil || !strings.Contains(err.Error(), "undeclared") {
+			t.Errorf("CreateShaderModule answered %v for WGSL returning an undeclared identifier, not an error naming it", err)
+		}
+	})
+}
+
+func TestABindGroupIsCreatedOverItsLayoutAndThePipelineLayoutHoldingIt(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+
+	h.readDevice(func(device gfx.Device) {
+		layout, err := device.CreateBindGroupLayout(sampledLayout)
+		if err != nil {
+			t.Errorf("CreateBindGroupLayout answered %v", err)
+			return
+		}
+		defer device.ReleaseBindGroupLayout(layout)
+		pipelineLayout, err := device.CreatePipelineLayout(gfx.PipelineLayoutDescriptor{BindGroupLayouts: []gfx.BindGroupLayout{layout}})
+		if err != nil {
+			t.Errorf("CreatePipelineLayout answered %v", err)
+		} else {
+			device.ReleasePipelineLayout(pipelineLayout)
+		}
+		entries, release := createSampledResources(t, device)
+		defer release()
+		group, err := device.CreateBindGroup(gfx.BindGroupDescriptor{Layout: layout, Entries: entries})
+		if err != nil {
+			t.Errorf("CreateBindGroup answered %v for the resources its layout describes", err)
+		} else {
+			device.ReleaseBindGroup(group)
+		}
+	})
+}
+
+func TestABufferBoundWithoutTheUsageItsLayoutNeedsAnswersAnError(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+
+	h.readDevice(func(device gfx.Device) {
+		layout, err := device.CreateBindGroupLayout(sampledLayout)
+		if err != nil {
+			t.Errorf("CreateBindGroupLayout answered %v", err)
+			return
+		}
+		defer device.ReleaseBindGroupLayout(layout)
+		entries, release := createSampledResources(t, device)
+		defer release()
+		storage, err := device.CreateBuffer(gfx.BufferDescriptor{Size: 16, Usage: gfx.BufferUsageFlagStorage})
+		if err != nil {
+			t.Errorf("CreateBuffer answered %v", err)
+			return
+		}
+		defer device.ReleaseBuffer(storage)
+		entries[0].Buffer = storage
+		if _, err := device.CreateBindGroup(gfx.BindGroupDescriptor{Layout: layout, Entries: entries}); err == nil {
+			t.Error("CreateBindGroup answered no error for a storage buffer bound where its layout holds a uniform buffer")
+		}
+	})
+}
+
+// sampledWGSL samples binding 1 with binding 2, tinted by binding 0, as
+// sampledLayout lays them out.
+const sampledWGSL = `
+@group(0) @binding(0) var<uniform> tint: vec4f;
+@group(0) @binding(1) var picture: texture_2d<f32>;
+@group(0) @binding(2) var picker: sampler;
+
+@fragment
+fn shade(@location(0) coordinates: vec2f) -> @location(0) vec4f {
+	return tint * textureSample(picture, picker, coordinates);
+}
+`
+
+// sampledLayout lays out sampledWGSL's group: a uniform buffer, a float
+// texture and a filtering sampler.
+var sampledLayout = gfx.BindGroupLayoutDescriptor{Entries: []gfx.BindGroupLayoutEntry{
+	{Binding: 0, Visibility: gfx.ShaderStageFlagFragment, Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform}},
+	{Binding: 1, Visibility: gfx.ShaderStageFlagFragment, Texture: gfx.TextureBindingLayout{
+		SampleType: gfx.TextureSampleTypeFloat, ViewDimension: gfx.TextureViewDimension2D,
+	}},
+	{Binding: 2, Visibility: gfx.ShaderStageFlagFragment, Sampler: gfx.SamplerBindingLayout{Type: gfx.SamplerBindingTypeFiltering}},
+}}
+
+// createSampledResources creates the buffer, texture view and sampler
+// sampledLayout lays out, and answers their bind group entries and the
+// function releasing them.
+func createSampledResources(t *testing.T, device gfx.Device) ([]gfx.BindGroupEntry, func()) {
+	buffer, err := device.CreateBuffer(gfx.BufferDescriptor{Size: 16, Usage: gfx.BufferUsageFlagUniform})
+	if err != nil {
+		t.Errorf("CreateBuffer answered %v", err)
+	}
+	texture := createTexture(t, device, 4)
+	view, err := device.CreateTextureView(texture, gfx.TextureViewDescriptor{})
+	if err != nil {
+		t.Errorf("CreateTextureView answered %v", err)
+	}
+	sampler, err := device.CreateSampler(gfx.SamplerDescriptor{})
+	if err != nil {
+		t.Errorf("CreateSampler answered %v", err)
+	}
+	entries := []gfx.BindGroupEntry{{Binding: 0, Buffer: buffer}, {Binding: 1, TextureView: view}, {Binding: 2, Sampler: sampler}}
+	return entries, func() {
+		device.ReleaseSampler(sampler)
+		device.ReleaseTextureView(view)
+		device.ReleaseTexture(texture)
+		device.ReleaseBuffer(buffer)
+	}
+}
+
 // clearFramebuffer records, in frame's encoder at order 0, a render pass
 // clearing window's framebuffer to color, and answers whether the frame had
 // one.
