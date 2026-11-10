@@ -9,5 +9,6 @@ require (
 	github.com/dvoyni/cog/platform v0.0.0
 	github.com/gogpu/gogpu v0.0.0
 	github.com/gogpu/gputypes v0.8.0
+	github.com/gogpu/naga v0.21.5
 	github.com/gogpu/wgpu v0.34.2
 )

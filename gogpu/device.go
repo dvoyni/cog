@@ -11,6 +11,7 @@ import (
 	"github.com/dvoyni/cog/platform"
 	host "github.com/gogpu/gogpu"
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu"
 )
 
@@ -36,8 +37,9 @@ type device struct {
 	textureViews container.ObjectTable[atomic.Pointer[wgpu.TextureView]]
 	// samplers holds each sampler at its gfx index.
 	samplers container.ObjectTable[atomic.Pointer[wgpu.Sampler]]
-	// shaderModules holds each shader module at its gfx index.
-	shaderModules container.ObjectTable[atomic.Pointer[wgpu.ShaderModule]]
+	// shaderModules holds each shader module, with its reflection, at its
+	// gfx index.
+	shaderModules container.ObjectTable[atomic.Pointer[shaderModule]]
 	// bindGroupLayouts holds each bind group layout at its gfx index.
 	bindGroupLayouts container.ObjectTable[atomic.Pointer[wgpu.BindGroupLayout]]
 	// bindGroups holds each bind group at its gfx index.
@@ -167,18 +169,24 @@ func (*device) TimestampPeriod() float32     { return 0 }
 
 // CreateShaderModule creates wgpu's module, whose WGSL naga parses and
 // validates, answering its error naming the problem, and stores it at
-// module's index.
+// module's index, with its reflection, which naga parses again for.
 func (d *device) CreateShaderModule(module gfx.ShaderModule, descriptor gfx.ShaderModuleDescriptor) error {
 	created, err := d.device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{Label: descriptor.Label, WGSL: descriptor.WGSL})
 	if err != nil {
 		return err
 	}
-	d.shaderModules.Grow(module.Index()).Store(created)
+	reflection, err := reflectModule(descriptor.WGSL)
+	if err != nil {
+		created.Release()
+		return err
+	}
+	d.shaderModules.Grow(module.Index()).Store(&shaderModule{ShaderModule: created, reflection: reflection})
 	return nil
 }
 
-// ReleaseShaderModule drops the module stored at module's index and releases
-// it; wgpu destroys it once the submits made before finish.
+// ReleaseShaderModule drops the module stored at module's index, with its
+// reflection, and releases it; wgpu destroys it once the submits made before
+// finish.
 func (d *device) ReleaseShaderModule(module gfx.ShaderModule) {
 	releaseStored(&d.shaderModules, module.Index())
 }
@@ -291,11 +299,33 @@ func (d *device) CreatePipelineLayout(layout gfx.PipelineLayout, descriptor gfx.
 func (d *device) ReleasePipelineLayout(layout gfx.PipelineLayout) {
 	releaseStored(&d.pipelineLayouts, layout.Index())
 }
-func (*device) ReflectRenderPipelineLayout(gfx.RenderPipelineDescriptor) ([]gfx.BindGroupLayoutDescriptor, error) {
-	return nil, unbuilt("ReflectRenderPipelineLayout")
+
+// ReflectRenderPipelineLayout answers the layouts WebGPU's "auto" builds of
+// the bindings the vertex entry point and the fragment one, when there is a
+// fragment module, use, from their modules' reflections.
+func (d *device) ReflectRenderPipelineLayout(descriptor gfx.RenderPipelineDescriptor) ([]gfx.BindGroupLayoutDescriptor, error) {
+	vertex, err := d.reflectedEntryPoint(descriptor.Vertex.Module, ir.StageVertex, descriptor.Vertex.EntryPoint)
+	if err != nil {
+		return nil, err
+	}
+	if descriptor.Fragment.Module == (gfx.ShaderModule{}) {
+		return reflectedGroupLayouts(vertex), nil
+	}
+	fragment, err := d.reflectedEntryPoint(descriptor.Fragment.Module, ir.StageFragment, descriptor.Fragment.EntryPoint)
+	if err != nil {
+		return nil, err
+	}
+	return reflectedGroupLayouts(vertex, fragment), nil
 }
-func (*device) ReflectComputePipelineLayout(gfx.ComputePipelineDescriptor) ([]gfx.BindGroupLayoutDescriptor, error) {
-	return nil, unbuilt("ReflectComputePipelineLayout")
+
+// ReflectComputePipelineLayout answers the layouts WebGPU's "auto" builds of
+// the bindings the compute entry point uses, from its module's reflection.
+func (d *device) ReflectComputePipelineLayout(descriptor gfx.ComputePipelineDescriptor) ([]gfx.BindGroupLayoutDescriptor, error) {
+	compute, err := d.reflectedEntryPoint(descriptor.Module, ir.StageCompute, descriptor.EntryPoint)
+	if err != nil {
+		return nil, err
+	}
+	return reflectedGroupLayouts(compute), nil
 }
 
 // ReflectVertexInputs answers no inputs until the plugin reflects its
@@ -332,7 +362,7 @@ func (d *device) CreateRenderPipeline(pipeline gfx.RenderPipeline, descriptor gf
 	created := &wgpu.RenderPipelineDescriptor{
 		Label:  descriptor.Label,
 		Layout: layout,
-		Vertex: wgpu.VertexState{Module: vertexModule, EntryPoint: descriptor.Vertex.EntryPoint, Buffers: buffers},
+		Vertex: wgpu.VertexState{Module: vertexModule.ShaderModule, EntryPoint: descriptor.Vertex.EntryPoint, Buffers: buffers},
 		Primitive: gputypes.PrimitiveState{
 			Topology:       gputypes.PrimitiveTopology(primitive.Topology),
 			FrontFace:      gputypes.FrontFace(primitive.FrontFace),
@@ -371,7 +401,7 @@ func (d *device) CreateRenderPipeline(pipeline gfx.RenderPipeline, descriptor gf
 				targets[index].Blend = &gputypes.BlendState{Color: blendComponent(target.Blend.Color), Alpha: blendComponent(target.Blend.Alpha)}
 			}
 		}
-		created.Fragment = &wgpu.FragmentState{Module: fragmentModule, EntryPoint: fragment.EntryPoint, Targets: targets}
+		created.Fragment = &wgpu.FragmentState{Module: fragmentModule.ShaderModule, EntryPoint: fragment.EntryPoint, Targets: targets}
 	}
 	renderPipeline, err := d.device.CreateRenderPipeline(created)
 	if err != nil {
@@ -401,7 +431,7 @@ func (d *device) CreateComputePipeline(pipeline gfx.ComputePipeline, descriptor 
 	created, err := d.device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
 		Label:      descriptor.Label,
 		Layout:     layout,
-		Module:     module,
+		Module:     module.ShaderModule,
 		EntryPoint: descriptor.EntryPoint,
 		Constants:  descriptor.Constants,
 	})
@@ -602,6 +632,16 @@ func (d *device) storedBuffer(buffer gfx.Buffer) (*wgpu.Buffer, error) {
 	return stored, nil
 }
 
+// reflectedEntryPoint answers the reflection of module's entry point of stage
+// named name, or of its one entry point of stage when name is empty.
+func (d *device) reflectedEntryPoint(module gfx.ShaderModule, stage ir.ShaderStage, name string) (*entryPointReflection, error) {
+	stored, err := storedObject(&d.shaderModules, module, "shader module")
+	if err != nil {
+		return nil, err
+	}
+	return stored.reflection.entryPoint(stage, name)
+}
+
 // storedObject answers the object stored in objects at handle's index, or an
 // error naming the object when it holds none, as a framebuffer's texture
 // index does.
@@ -649,6 +689,13 @@ func blendComponent(component gfx.BlendComponent) gputypes.BlendComponent {
 
 // unbuilt answers the error of a backend method not built yet, naming it.
 func unbuilt(method string) error { return fmt.Errorf("gogpu: %s is not built yet", method) }
+
+// shaderModule is wgpu's shader module and its reflection, stored together at
+// the module's gfx index.
+type shaderModule struct {
+	*wgpu.ShaderModule
+	reflection moduleReflection
+}
 
 // acquiredFrame is a window's frame begun and not yet ended.
 type acquiredFrame struct {
