@@ -677,6 +677,69 @@ func TestShowingAWindowReachesTheOneItNames(t *testing.T) {
 	h.drawUntilFramed(first)
 }
 
+func TestResizingOneOfTwoWindowsChangesItsSizesAloneAndItsSurfaceAtItsNextFrame(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+	resized := h.openShownWindow()
+	other := h.openShownWindow()
+	var framebufferBefore, otherFramebuffer platform.Size
+	want := platform.Size{Width: 400, Height: 300}
+	h.pump(func(manager *platform.WindowManager) {
+		framebufferBefore = manager.FramebufferSize(resized)
+		otherFramebuffer = manager.FramebufferSize(other)
+		manager.SetSize(resized, want)
+	})
+
+	reported := false
+	for deadline := time.Now().Add(5 * time.Second); !reported && time.Now().Before(deadline); {
+		h.pump(func(manager *platform.WindowManager) { reported = manager.Size(resized) == want })
+	}
+	if !reported {
+		t.Fatalf("no pump in 5s reported %v resized to %v", resized, want)
+	}
+	var framebuffer platform.Size
+	h.pump(func(manager *platform.WindowManager) {
+		framebuffer = manager.FramebufferSize(resized)
+		if framebuffer == framebufferBefore {
+			t.Errorf("the resized window's framebuffer stayed %v", framebuffer)
+		}
+		if manager.Size(other) != testWindow.Size || manager.FramebufferSize(other) != otherFramebuffer {
+			t.Errorf("the other window is %v with a framebuffer of %v, want %v and %v as before", manager.Size(other), manager.FramebufferSize(other), testWindow.Size, otherFramebuffer)
+		}
+	})
+	if size := h.capture(resized, gfx.Color{G: 1, A: 1}).Bounds().Size(); size != image.Pt(framebuffer.Width, framebuffer.Height) {
+		t.Errorf("the capture after the resize is %v, want the resized framebuffer, %v", size, framebuffer)
+	}
+}
+
+func TestFocusMovesBetweenTwoWindows(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+	var first, second platform.Window
+	h.pump(func(manager *platform.WindowManager) {
+		first = manager.Open(testWindow)
+		second = manager.Open(testWindow)
+	})
+
+	checkFocusedAlone := func(focused, unfocused platform.Window) {
+		t.Helper()
+		h.pump(nil)
+		h.pump(func(manager *platform.WindowManager) {
+			if !manager.IsFocused(focused) || manager.IsFocused(unfocused) {
+				t.Errorf("%v is focused %v and %v %v, want %v alone", focused, manager.IsFocused(focused), unfocused, manager.IsFocused(unfocused), focused)
+			}
+		})
+	}
+
+	onMainThread(func() { gogpu.ReportFocus(h.plugin, first, true) })
+	checkFocusedAlone(first, second)
+	onMainThread(func() {
+		gogpu.ReportFocus(h.plugin, first, false)
+		gogpu.ReportFocus(h.plugin, second, true)
+	})
+	checkFocusedAlone(second, first)
+}
+
 func TestEachBeatClearsAShownWindowToThePassColor(t *testing.T) {
 	h := newHarness(t)
 	h.mustSpawn(nil, nil)

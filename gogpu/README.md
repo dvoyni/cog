@@ -7,8 +7,9 @@ the kernel's main-thread tick. Its `shader` package is the WGSL preprocessor.
 
 Status: being built: gfx gets gogpu's adapter and device, windows open and
 close through platform, their title, size, fullscreen and visibility
-change, the pointer's moves, enter and leave and buttons are reported, each
-beat acquires and presents every shown window's framebuffer,
+change, their resizes, scale and focus and the pointer's moves, enter and
+leave and buttons are reported, each beat acquires and presents every shown
+window's framebuffer,
 encoders record render passes that clear, finish and submit, buffers are
 created, written and mapped, textures are created and written,
 with views and samplers, shader modules, bind group layouts, bind groups and
@@ -52,10 +53,10 @@ device call or command answering an error naming it, and
   the `HostLoop`.
   `platform.WindowsSocket`, with its window system: its `Open` opens a gogpu
   window with its surface, its `Close` destroys it, and its `Pump` pumps the
-  `HostLoop` and reports a window opened, closed by gogpu, or asked to close
-  by the user, which keeps it open. Its `Change` applies a window's new
-  title, size, fullscreen and visibility. The cursor answers an error naming
-  it until it is built.
+  `HostLoop` and reports a window opened, resized, focused or not, closed by
+  gogpu, or asked to close by the user, which keeps it open. Its `Change`
+  applies a window's new title, size, fullscreen and visibility. The cursor
+  answers an error naming it until it is built.
   `platform.InputSourceSocket`, with its input source, which reports the
   pointer of each window.
 

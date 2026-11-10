@@ -12,8 +12,9 @@ windows, surfaces and device.
 Status: being built: gfx gets gogpu's adapter and device, with the features
 and limits it asks for or the software adapter, windows open and close
 through platform, the user's close reported and the main window opened at
-start, the pointer's moves, enter and leave and buttons reported, its locked
-motion passed on but unused until the cursor locks, each beat acquires and
+start, each window's resizes, scale and focus reported, the pointer's moves,
+enter and leave and buttons reported, its locked motion passed on but unused
+until the cursor locks, each beat acquires and
 presents every shown window's framebuffer, encoders record render passes that clear, finish and submit, buffers are
 created, written and mapped, textures are created and written, with views
 and samplers, shader modules, bind group layouts, bind groups and pipeline
@@ -170,7 +171,10 @@ what `HostLoop` or the OS requires:
   `Window.Destroy`.
 - **`Pump`** is `HostLoop.PumpEvents`, on the main thread inside platform's
   `ProcessEvents`. Each window's resize is recorded there and applied at its
-  `BeginFrame`, so no surface is reconfigured outside gfx's lock.
+  `BeginFrame`, so no surface is reconfigured outside gfx's lock. It reports
+  each resize, a scale change included, at the window's sizes and the
+  system's scale, as `Open` reports them, and each gain and loss of the focus
+  ([gogpu plugin: resizes, scale and focus reported, for several windows](https://github.com/dvoyni/cog/issues/757)).
 - **The user's close** is reported and the window kept: closing is the
   application's, and gogpu's quit on the last window closed is off.
 - **The main window** is `Config.MainWindow`, opened at start through
@@ -182,9 +186,9 @@ what `HostLoop` or the OS requires:
 [which platform gaps are closed now](https://github.com/dvoyni/cog/issues/719))
 
 - **Every `InputChange` is built from the per-window callbacks** on gogpu's
-  `Window`: close, key press and release, text, pointer, scroll, resize, and
-  the focus and scale reports the fork adds. gogpu's input queue names no
-  window, so it is not used.
+  `Window`: close, key press and release, text, pointer, scroll, resize, a
+  scale change included, and the focus report the fork adds. gogpu's input
+  queue names no window, so it is not used.
 - **Keys** map from gogpu's physical keys by a table, dense on cog's side.
   Modifiers convert by cast, Caps and Num Lock included.
 - **Repeats** arrive as further key-downs on every OS. The plugin flags a press
