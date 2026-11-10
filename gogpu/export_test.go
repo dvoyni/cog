@@ -15,3 +15,7 @@ func RequestClose(p *Plugin, window platform.Window) bool { return p.requestClos
 func ReportPointer(p *Plugin, window platform.Window, event gpucontext.PointerEvent) {
 	p.reportPointer(window, event)
 }
+
+// MarkDeviceLoss answers err as the device's acquire, present and submit
+// answer it.
+func MarkDeviceLoss(err error) error { return markDeviceLoss(err) }

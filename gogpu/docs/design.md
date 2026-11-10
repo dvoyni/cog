@@ -19,7 +19,8 @@ created, written and mapped, textures are created and written, with views
 and samplers, shader modules, bind group layouts, bind groups and pipeline
 layouts are created, render and compute pipelines draw and dispatch, over
 explicit layouts or ones reflected, buffers and textures are copied into
-buffers, vertex inputs are not reflected yet, with every other device call
+buffers, vertex inputs are not reflected yet, a device lost at acquire,
+present or submit answers gfx's `ErrDeviceLost`, with every other device call
 or command answering an error naming it, and `gogpu/shader` preprocesses shaders. The
 decisions come from the
 [gogpu map](https://github.com/dvoyni/cog/issues/611); each section links
@@ -352,7 +353,12 @@ what `HostLoop` or the OS requires:
 
 - **Detection:** on Vulkan, wgpu's typed `ErrDeviceLost` at acquire, present
   and fence waits; on DX12, a removed, hung or reset device found in the
-  wrapped HRESULT. Both answer gfx's `ErrDeviceLost`.
+  wrapped HRESULT, as wgpu's `dxgi.IsDeviceRemovedError` judges it, a driver
+  error that removed the device included, until wgpu types it as it does
+  Vulkan's. At acquire, present and submit, both answer gfx's
+  `ErrDeviceLost`, wrapping wgpu's error. A loss `vkQueueSubmit` itself
+  reports wgpu leaves untyped, and the plugin does not read its text
+  ([gogpu plugin: device loss detected on Vulkan and DX12](https://github.com/dvoyni/cog/issues/762)).
 - **Replacement keeps the windows.** The fork releases gogpu's device-level
   objects and the device, requests a device from the same or a fresh adapter
   with the same descriptor, and marks every surface unconfigured. gfx's

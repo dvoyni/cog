@@ -13,7 +13,8 @@ created, written and mapped, textures are created and written,
 with views and samplers, shader modules, bind group layouts, bind groups and
 pipeline layouts are created, render and compute pipelines draw and
 dispatch, over explicit layouts or ones reflected, buffers and textures are
-copied into buffers, vertex inputs are not reflected yet, with every other
+copied into buffers, vertex inputs are not reflected yet, a device lost at
+acquire, present or submit answers gfx's `ErrDeviceLost`, with every other
 device call or command answering an error naming it, and
 `gogpu/shader` preprocesses shaders. The design is in
 [`docs/design.md`](docs/design.md), the guide in
