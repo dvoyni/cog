@@ -44,6 +44,10 @@ type device struct {
 	bindGroups container.ObjectTable[atomic.Pointer[wgpu.BindGroup]]
 	// pipelineLayouts holds each pipeline layout at its gfx index.
 	pipelineLayouts container.ObjectTable[atomic.Pointer[wgpu.PipelineLayout]]
+	// renderPipelines holds each render pipeline at its gfx index.
+	renderPipelines container.ObjectTable[atomic.Pointer[wgpu.RenderPipeline]]
+	// computePipelines holds each compute pipeline at its gfx index.
+	computePipelines container.ObjectTable[atomic.Pointer[wgpu.ComputePipeline]]
 }
 
 // CreateBuffer creates wgpu's buffer and stores it at buffer's index.
@@ -293,17 +297,126 @@ func (*device) ReflectRenderPipelineLayout(gfx.RenderPipelineDescriptor) ([]gfx.
 func (*device) ReflectComputePipelineLayout(gfx.ComputePipelineDescriptor) ([]gfx.BindGroupLayoutDescriptor, error) {
 	return nil, unbuilt("ReflectComputePipelineLayout")
 }
+
+// ReflectVertexInputs answers no inputs until the plugin reflects its
+// modules, so gfx's check at pipeline creation passes every vertex buffer,
+// and wgpu checks none against the shader either.
 func (*device) ReflectVertexInputs(gfx.ShaderModule, string) ([]gfx.VertexInput, error) {
-	return nil, unbuilt("ReflectVertexInputs")
+	return nil, nil
 }
-func (*device) CreateRenderPipeline(gfx.RenderPipeline, gfx.RenderPipelineDescriptor) error {
-	return unbuilt("CreateRenderPipeline")
+
+// CreateRenderPipeline creates wgpu's pipeline over the layout and modules
+// stored at the descriptor's indexes, and stores it at pipeline's index. A
+// zero DepthStencil format, fragment module, strip index format or blend is
+// none; wgpu takes the WebGPU defaults for zero stencil faces, blend
+// components and sample mask.
+func (d *device) CreateRenderPipeline(pipeline gfx.RenderPipeline, descriptor gfx.RenderPipelineDescriptor) error {
+	layout, err := storedObject(&d.pipelineLayouts, descriptor.Layout, "pipeline layout")
+	if err != nil {
+		return err
+	}
+	vertexModule, err := storedObject(&d.shaderModules, descriptor.Vertex.Module, "shader module")
+	if err != nil {
+		return err
+	}
+	buffers := make([]gputypes.VertexBufferLayout, len(descriptor.Vertex.Buffers))
+	for index, buffer := range descriptor.Vertex.Buffers {
+		buffers[index] = gputypes.VertexBufferLayout{ArrayStride: buffer.ArrayStride, StepMode: gputypes.VertexStepMode(buffer.StepMode)}
+		for _, attribute := range buffer.Attributes {
+			buffers[index].Attributes = append(buffers[index].Attributes, gputypes.VertexAttribute{
+				Format: gputypes.VertexFormat(attribute.Format), Offset: attribute.Offset, ShaderLocation: attribute.ShaderLocation,
+			})
+		}
+	}
+	primitive := descriptor.Primitive
+	created := &wgpu.RenderPipelineDescriptor{
+		Label:  descriptor.Label,
+		Layout: layout,
+		Vertex: wgpu.VertexState{Module: vertexModule, EntryPoint: descriptor.Vertex.EntryPoint, Buffers: buffers},
+		Primitive: gputypes.PrimitiveState{
+			Topology:       gputypes.PrimitiveTopology(primitive.Topology),
+			FrontFace:      gputypes.FrontFace(primitive.FrontFace),
+			CullMode:       gputypes.CullMode(primitive.CullMode),
+			UnclippedDepth: primitive.UnclippedDepth,
+		},
+		Multisample: gputypes.MultisampleState(descriptor.Multisample),
+	}
+	if primitive.StripIndexFormat != gfx.IndexFormatUndefined {
+		stripIndexFormat := gputypes.IndexFormat(primitive.StripIndexFormat)
+		created.Primitive.StripIndexFormat = &stripIndexFormat
+	}
+	if depthStencil := descriptor.DepthStencil; depthStencil.Format != gfx.TextureFormatUndefined {
+		created.DepthStencil = &wgpu.DepthStencilState{
+			Format:              gputypes.TextureFormat(depthStencil.Format),
+			DepthWriteEnabled:   depthStencil.DepthWriteEnabled,
+			DepthCompare:        gputypes.CompareFunction(depthStencil.DepthCompare),
+			StencilFront:        stencilFaceState(depthStencil.StencilFront),
+			StencilBack:         stencilFaceState(depthStencil.StencilBack),
+			StencilReadMask:     depthStencil.StencilReadMask,
+			StencilWriteMask:    depthStencil.StencilWriteMask,
+			DepthBias:           depthStencil.DepthBias,
+			DepthBiasSlopeScale: depthStencil.DepthBiasSlopeScale,
+			DepthBiasClamp:      depthStencil.DepthBiasClamp,
+		}
+	}
+	if fragment := descriptor.Fragment; fragment.Module != (gfx.ShaderModule{}) {
+		fragmentModule, err := storedObject(&d.shaderModules, fragment.Module, "shader module")
+		if err != nil {
+			return err
+		}
+		targets := make([]gputypes.ColorTargetState, len(fragment.Targets))
+		for index, target := range fragment.Targets {
+			targets[index] = gputypes.ColorTargetState{Format: gputypes.TextureFormat(target.Format), WriteMask: gputypes.ColorWriteMask(target.WriteMask)}
+			if target.Blend != (gfx.BlendState{}) {
+				targets[index].Blend = &gputypes.BlendState{Color: blendComponent(target.Blend.Color), Alpha: blendComponent(target.Blend.Alpha)}
+			}
+		}
+		created.Fragment = &wgpu.FragmentState{Module: fragmentModule, EntryPoint: fragment.EntryPoint, Targets: targets}
+	}
+	renderPipeline, err := d.device.CreateRenderPipeline(created)
+	if err != nil {
+		return err
+	}
+	d.renderPipelines.Grow(pipeline.Index()).Store(renderPipeline)
+	return nil
 }
-func (*device) ReleaseRenderPipeline(gfx.RenderPipeline) {}
-func (*device) CreateComputePipeline(gfx.ComputePipeline, gfx.ComputePipelineDescriptor) error {
-	return unbuilt("CreateComputePipeline")
+
+// ReleaseRenderPipeline drops the pipeline stored at pipeline's index and
+// releases it; wgpu keeps it while a submit using it lives.
+func (d *device) ReleaseRenderPipeline(pipeline gfx.RenderPipeline) {
+	releaseStored(&d.renderPipelines, pipeline.Index())
 }
-func (*device) ReleaseComputePipeline(gfx.ComputePipeline) {}
+
+// CreateComputePipeline creates wgpu's pipeline over the layout and module
+// stored at the descriptor's indexes, and stores it at pipeline's index.
+func (d *device) CreateComputePipeline(pipeline gfx.ComputePipeline, descriptor gfx.ComputePipelineDescriptor) error {
+	layout, err := storedObject(&d.pipelineLayouts, descriptor.Layout, "pipeline layout")
+	if err != nil {
+		return err
+	}
+	module, err := storedObject(&d.shaderModules, descriptor.Module, "shader module")
+	if err != nil {
+		return err
+	}
+	created, err := d.device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
+		Label:      descriptor.Label,
+		Layout:     layout,
+		Module:     module,
+		EntryPoint: descriptor.EntryPoint,
+		Constants:  descriptor.Constants,
+	})
+	if err != nil {
+		return err
+	}
+	d.computePipelines.Grow(pipeline.Index()).Store(created)
+	return nil
+}
+
+// ReleaseComputePipeline drops the pipeline stored at pipeline's index and
+// releases it; wgpu keeps it while a submit using it lives.
+func (d *device) ReleaseComputePipeline(pipeline gfx.ComputePipeline) {
+	releaseStored(&d.computePipelines, pipeline.Index())
+}
 
 // WriteBuffer writes data through wgpu's queue, which copies it out and
 // lands it at its next submit.
@@ -512,6 +625,25 @@ func releaseStored[T any, P interface {
 		if released := P(slot.Swap(nil)); released != nil {
 			released.Release()
 		}
+	}
+}
+
+// stencilFaceState answers gfx's stencil face as wgpu's.
+func stencilFaceState(face gfx.StencilFaceState) wgpu.StencilFaceState {
+	return wgpu.StencilFaceState{
+		Compare:     gputypes.CompareFunction(face.Compare),
+		FailOp:      gputypes.StencilOperation(face.FailOp),
+		DepthFailOp: gputypes.StencilOperation(face.DepthFailOp),
+		PassOp:      gputypes.StencilOperation(face.PassOp),
+	}
+}
+
+// blendComponent answers gfx's blend component as gputypes'.
+func blendComponent(component gfx.BlendComponent) gputypes.BlendComponent {
+	return gputypes.BlendComponent{
+		SrcFactor: gputypes.BlendFactor(component.SrcFactor),
+		DstFactor: gputypes.BlendFactor(component.DstFactor),
+		Operation: gputypes.BlendOperation(component.Operation),
 	}
 }
 

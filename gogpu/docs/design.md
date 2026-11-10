@@ -16,8 +16,10 @@ start, each beat acquires and presents every shown window's framebuffer,
 encoders record render passes that clear, finish and submit, buffers are
 created, written and mapped, textures are created and written, with views
 and samplers, shader modules, bind group layouts, bind groups and pipeline
-layouts are created, with every other device call or command answering an
-error naming it, and `gogpu/shader` preprocesses shaders. The
+layouts are created, render and compute pipelines with explicit layouts
+draw and dispatch, buffers and textures are copied into buffers, vertex
+inputs are not reflected yet, with every other device call or command
+answering an error naming it, and `gogpu/shader` preprocesses shaders. The
 decisions come from the
 [gogpu map](https://github.com/dvoyni/cog/issues/611); each section links
 the ticket that holds its detail. The loop API it rests on, `HostLoop`, was
@@ -279,6 +281,29 @@ what `HostLoop` or the OS requires:
 - **wgpu checks a bound buffer's usage against its layout entry, not a
   binding's kind:** a sampler bound where the layout holds a buffer answers
   no error at creation, where Rust's wgpu-core answers one.
+
+## Pipelines, draws and dispatches
+
+([gogpu plugin: render and compute pipelines, draws and dispatches](https://github.com/dvoyni/cog/issues/750))
+
+- **Render and compute pipelines are wgpu's,** stored at gfx's index as
+  buffers are, over the layout and modules stored at the descriptor's
+  indices. A zero depth-stencil format, fragment module, strip index
+  format or blend is none, as gfx's descriptors say; wgpu takes WebGPU's
+  defaults for a zero stencil face, blend component and sample mask.
+- **A pass command takes the objects stored at its handles' indices.** One
+  holding nothing is the encoder's error, which `Finish` answers naming
+  it; once the encoder has an error, its commands record nothing.
+- **Vertex inputs are not reflected yet.** `ReflectVertexInputs` answers
+  none until
+  [gogpu plugin: vertex inputs reflected at module creation](https://github.com/dvoyni/cog/issues/753)
+  builds it, so gfx's check at pipeline creation passes every vertex
+  buffer. wgpu checks none against the shader either, so an input no
+  buffer feeds reaches the driver unchecked.
+- **Buffers and textures are copied into buffers,** for readback: each
+  region of a texture's copy copies from that texture, whatever its
+  `TextureBase` names. The other copies and `ClearBuffer` are
+  [gogpu plugin: copy and clear commands, and the remaining pass state](https://github.com/dvoyni/cog/issues/751)'s.
 
 ## Shaders
 
