@@ -1,3 +1,4 @@
 github.com/gogpu/gpucontext v0.31.3/go.mod h1:pnyWQA9lpvESPAKoqzKlsg3pDMFSkxdjonu4gWvnNtA=
 github.com/gogpu/gputypes v0.8.0/go.mod h1:cnXrDMwTpWTvJLW1Vreop3PcT6a2YP/i3s91rPaOavw=
+github.com/gogpu/naga v0.21.5/go.mod h1:15sQaHKkbqXcwTN+hHYGLsA0WBBnkmYzne/eF5p5WEg=
 github.com/gogpu/wgpu v0.34.2/go.mod h1:erhaIjD9psJKjHqAhn5MWdJETcACR1NGoqLhkTAHkFM=
