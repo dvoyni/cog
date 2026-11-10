@@ -17,6 +17,7 @@ import (
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/metronome"
 	"github.com/dvoyni/cog/platform"
+	"github.com/gogpu/gpucontext"
 )
 
 // init keeps the main goroutine on the main thread, where TestMain runs what
@@ -56,17 +57,22 @@ type readEvent struct{}
 // then ProcessEvents.
 type pumpEvent struct{}
 
+// readInputEvent runs the harness's readInput under the InputState's read
+// lock.
+type readInputEvent struct{}
+
 // harness spawns a kernel of metronome, platform, gfx, gogpu and itself from
-// the main thread, reads its Device, edits its WindowManager and pumps,
-// draws, records the window events platform publishes and gfx's
-// BufferMappedEvent, and quits it, failing
-// the test on every error logged.
+// the main thread, reads its Device and InputState, edits its WindowManager
+// and pumps, draws, records the window, pointer and key events platform
+// publishes and gfx's BufferMappedEvent, and quits it, failing the test on
+// every error logged.
 type harness struct {
 	t          *testing.T
 	supervisor *kernel.Supervisor
 	kernel     *kernel.Kernel
 	plugin     *gogpu.Plugin
 	read       func(device gfx.Device)
+	readInput  func(input *platform.InputState)
 	edit       func(manager *platform.WindowManager)
 	readFrame  func(event gfx.DrawEvent, device gfx.Device)
 	mutex      sync.Mutex
@@ -128,6 +134,14 @@ func (h *harness) readDevice(read func(device gfx.Device)) {
 	h.t.Helper()
 	h.read = read
 	publishAndWait(h, readEvent{})
+}
+
+// readInputState runs read over the InputState under its read lock, ticking
+// the main thread until it has run.
+func (h *harness) readInputState(read func(input *platform.InputState)) {
+	h.t.Helper()
+	h.readInput = read
+	publishAndWait(h, readInputEvent{})
 }
 
 // pump runs edit, unless nil, over the WindowManager under its write lock,
@@ -279,6 +293,13 @@ func (h *harness) Init(c *kernel.Configurator, _ any) error {
 	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event readEvent) (readEvent, kernel.JobHandle) {
 		return event, ex.Schedule(read, kernel.NoArg{}, in).Handle()
 	})
+	readInput := c.RegisterTask1(func(k *kernel.Kernel, _ kernel.NoArg, input kernel.Read[*platform.InputState]) kernel.NoResult {
+		h.readInput(input.Get())
+		return kernel.NoResult{}
+	})
+	c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event readInputEvent) (readInputEvent, kernel.JobHandle) {
+		return event, ex.Schedule(readInput, kernel.NoArg{}, in).Handle()
+	})
 	tasks, _ := c.Resource[platform.Tasks]()
 	edit := c.RegisterTask1(func(k *kernel.Kernel, _ kernel.NoArg, manager kernel.Write[*platform.WindowManager]) kernel.NoResult {
 		if h.edit != nil {
@@ -302,6 +323,10 @@ func (h *harness) Init(c *kernel.Configurator, _ any) error {
 	subscribeRecord[platform.WindowOpenedEvent](c, h)
 	subscribeRecord[platform.WindowClosedEvent](c, h)
 	subscribeRecord[platform.CloseRequestedEvent](c, h)
+	subscribeRecord[platform.PointerEnterEvent](c, h)
+	subscribeRecord[platform.PointerMoveEvent](c, h)
+	subscribeRecord[platform.PointerLeaveEvent](c, h)
+	subscribeRecord[platform.KeyEvent](c, h)
 	subscribeRecord[gfx.BufferMappedEvent](c, h)
 	return nil
 }
@@ -470,6 +495,71 @@ func TestTheUsersCloseIsReportedAndKeepsTheWindow(t *testing.T) {
 			t.Error("the window closed at the user's close")
 		}
 	})
+}
+
+func TestThePointerIsFollowedAcrossTwoWindows(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+	var first, second platform.Window
+	h.pump(func(manager *platform.WindowManager) {
+		first = manager.Open(testWindow)
+		second = manager.Open(testWindow)
+	})
+	h.takePublished()
+
+	onMainThread(func() {
+		gogpu.ReportPointer(h.plugin, first, gpucontext.PointerEvent{Type: gpucontext.PointerEnter, X: 10, Y: 20})
+		gogpu.ReportPointer(h.plugin, first, gpucontext.PointerEvent{Type: gpucontext.PointerMove, X: 30, Y: 40})
+		gogpu.ReportPointer(h.plugin, first, gpucontext.PointerEvent{Type: gpucontext.PointerLeave, X: 320, Y: 40})
+		gogpu.ReportPointer(h.plugin, second, gpucontext.PointerEvent{Type: gpucontext.PointerEnter, X: 5, Y: 6})
+		gogpu.ReportPointer(h.plugin, second, gpucontext.PointerEvent{Type: gpucontext.PointerMove, X: 7, Y: 8})
+	})
+	h.pump(nil)
+
+	want := []any{
+		platform.PointerEnterEvent{Window: first},
+		platform.PointerMoveEvent{Window: first, Position: platform.Point{X: 30, Y: 40}, Delta: platform.Point{X: 20, Y: 20}},
+		platform.PointerLeaveEvent{Window: first},
+		platform.PointerEnterEvent{Window: second},
+		platform.PointerMoveEvent{Window: second, Position: platform.Point{X: 7, Y: 8}, Delta: platform.Point{X: 2, Y: 2}},
+	}
+	if published := h.takePublished(); !slices.Equal(published, want) {
+		t.Errorf("the pointer's crossing published %v, want %v", published, want)
+	}
+	h.readInputState(func(input *platform.InputState) {
+		if input.IsPointerInside(first) || input.PointerPosition(first) != (platform.Point{X: 30, Y: 40}) {
+			t.Errorf("the first window's pointer is inside %v at %v, want outside at its last move", input.IsPointerInside(first), input.PointerPosition(first))
+		}
+		if !input.IsPointerInside(second) || input.PointerPosition(second) != (platform.Point{X: 7, Y: 8}) {
+			t.Errorf("the second window's pointer is inside %v at %v, want inside at its last move", input.IsPointerInside(second), input.PointerPosition(second))
+		}
+	})
+}
+
+func TestAButtonIsPressedAndReleasedWhereThePointerIs(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+	var window platform.Window
+	h.pump(func(manager *platform.WindowManager) { window = manager.Open(testWindow) })
+	h.takePublished()
+
+	onMainThread(func() {
+		gogpu.ReportPointer(h.plugin, window, gpucontext.PointerEvent{Type: gpucontext.PointerDown, X: 10, Y: 20, Button: gpucontext.ButtonRight, Modifiers: gpucontext.ModShift})
+		gogpu.ReportPointer(h.plugin, window, gpucontext.PointerEvent{Type: gpucontext.PointerUp, X: 30, Y: 40, Button: gpucontext.ButtonRight})
+	})
+	h.pump(nil)
+
+	want := []any{
+		platform.KeyEvent{Window: window, Key: platform.KeyMouseRight, Pressed: true, Modifiers: platform.ModifierShift, Position: platform.Point{X: 10, Y: 20}},
+		platform.KeyEvent{Window: window, Key: platform.KeyMouseRight, Position: platform.Point{X: 30, Y: 40}},
+	}
+	if published := h.takePublished(); !slices.Equal(published, want) {
+		t.Errorf("the click published %v, want %v", published, want)
+	}
+	h.pump(nil)
+	if published := h.takePublished(); len(published) != 0 {
+		t.Errorf("a later pump published %v, want nothing", published)
+	}
 }
 
 func TestConfigMainWindowOpensAtStart(t *testing.T) {

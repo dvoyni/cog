@@ -12,8 +12,9 @@ windows, surfaces and device.
 Status: being built: gfx gets gogpu's adapter and device, with the features
 and limits it asks for or the software adapter, windows open and close
 through platform, the user's close reported and the main window opened at
-start, each beat acquires and presents every shown window's framebuffer,
-encoders record render passes that clear, finish and submit, buffers are
+start, the pointer's moves, enter and leave and buttons reported, its locked
+motion passed on but unused until the cursor locks, each beat acquires and
+presents every shown window's framebuffer, encoders record render passes that clear, finish and submit, buffers are
 created, written and mapped, textures are created and written, with views
 and samplers, shader modules, bind group layouts, bind groups and pipeline
 layouts are created, render and compute pipelines draw and dispatch, over
@@ -183,7 +184,9 @@ what `HostLoop` or the OS requires:
   Committed text from the IME, the emoji picker and dictation arrives on
   Windows only.
 - **The pointer:** moves, enter and leave, buttons, the implicit capture in a
-  drag, and locked motion as `PointerDelta`.
+  drag, and locked motion as `PointerDelta`, from `AppendChanges`. A cancel,
+  and a button no `Key` names, the pen's eraser, report nothing
+  ([gogpu plugin: pointer moves, enter and leave, buttons, and locked motion](https://github.com/dvoyni/cog/issues/759)).
 - **Scroll** arrives in lines or points, Wayland's wheel notches as lines.
 
 ## Surfaces and frames

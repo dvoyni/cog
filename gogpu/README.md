@@ -6,9 +6,10 @@ over our gogpu fork in `submodules/gogpu`, driving it through `HostLoop` from
 the kernel's main-thread tick. Its `shader` package is the WGSL preprocessor.
 
 Status: being built: gfx gets gogpu's adapter and device, windows open and
-close through platform, each beat acquires and presents every shown window's
-framebuffer, encoders record render passes that clear, finish and submit,
-buffers are created, written and mapped, textures are created and written,
+close through platform, the pointer's moves, enter and leave and buttons are
+reported, each beat acquires and presents every shown window's framebuffer,
+encoders record render passes that clear, finish and submit, buffers are
+created, written and mapped, textures are created and written,
 with views and samplers, shader modules, bind group layouts, bind groups and
 pipeline layouts are created, render and compute pipelines draw and
 dispatch, over explicit layouts or ones reflected, buffers and textures are
