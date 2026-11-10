@@ -6,8 +6,9 @@ over our gogpu fork in `submodules/gogpu`, driving it through `HostLoop` from
 the kernel's main-thread tick. Its `shader` package is the WGSL preprocessor.
 
 Status: being built: gfx gets gogpu's adapter and device, windows open and
-close through platform, the pointer's moves, enter and leave and buttons are
-reported, each beat acquires and presents every shown window's framebuffer,
+close through platform, their title, size, fullscreen and visibility
+change, the pointer's moves, enter and leave and buttons are reported, each
+beat acquires and presents every shown window's framebuffer,
 encoders record render passes that clear, finish and submit, buffers are
 created, written and mapped, textures are created and written,
 with views and samplers, shader modules, bind group layouts, bind groups and
@@ -44,15 +45,19 @@ device call or command answering an error naming it, and
 - **Events it publishes:** none.
 - **Events it subscribes to:** none.
 - **Sockets it declares:** none.
-- **Sockets it binds:** `gfx.InstanceSocket`, with the plugin itself: its
+- **Sockets it binds:** each with a private type of its own over the plugin,
+  never the plugin itself. `gfx.InstanceSocket`, with its instance: its
   `RequestAdapter` starts the `HostLoop`, and its `Release` stops it; its
   device's acquire and present begin and end each window's frame through
   the `HostLoop`.
-  `platform.WindowsSocket`, with the plugin itself: its `Open` opens a gogpu
+  `platform.WindowsSocket`, with its window system: its `Open` opens a gogpu
   window with its surface, its `Close` destroys it, and its `Pump` pumps the
   `HostLoop` and reports a window opened, closed by gogpu, or asked to close
-  by the user, which keeps it open. Window changes and the cursor answer an
-  error naming them until they are built.
+  by the user, which keeps it open. Its `Change` applies a window's new
+  title, size, fullscreen and visibility. The cursor answers an error naming
+  it until it is built.
+  `platform.InputSourceSocket`, with its input source, which reports the
+  pointer of each window.
 
 The plugin is listed after gfx and platform, and checks them with
 `Dependencies`: it reads their resources in its `Init`.

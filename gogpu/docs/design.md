@@ -55,7 +55,10 @@ the fork's `main`. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md).
 
 | Type | Kind | What it is |
 |---|---|---|
-| `Plugin` | plugin, `gogpu.NewPlugin()` | Listed after gfx and platform. Binds the three sockets and pins gfx's surface tasks. |
+| `Plugin` | plugin, `gogpu.NewPlugin()` | Listed after gfx and platform. Implements `kernel.Plugin` alone, and holds what its sockets share: the `HostLoop`, the windows open, and what the next `Pump` and `AppendChanges` report. Its `Init` binds the three sockets to the types below, each over the plugin, and pins gfx's surface tasks. |
+| `instance` | `gfx.InstanceSocket` | Starts the `HostLoop` at gfx's adapter request and stops it at its release. |
+| `windowSystem` | `platform.WindowsSocket` | Opens, changes and closes the `HostLoop`'s windows, and pumps their events. |
+| `inputSource` | `platform.InputSourceSocket` | Reports the input the window system's windows report to it. |
 | `Config` | config, `*gogpu.Config` | `Backend`, overriding gogpu's choice per OS; `MainWindow`, the window platform opens at start. |
 | `shader` | package `gogpu/shader` | The WGSL preprocessor: `#include`, `#define`, `#const`, `#if`, and the hoisting of `enable`, `requires` and `diagnostic`. |
 
@@ -153,7 +156,13 @@ what `HostLoop` or the OS requires:
   at creation. It reports the window open from the next `Pump`. The
   window's `NativeHandle` is not needed: gfx's surface is gogpu's own.
 - **`Change`** applies what differs between two entries through the fork's
-  per-window setters: title, size, fullscreen and visibility.
+  per-window setters: title, size, fullscreen and visibility. It shows the
+  window first and hides it last, and leaves fullscreen before resizing and
+  enters it after, since gogpu ignores a size while the window is fullscreen.
+  The size reaches a window only while it is not fullscreen, and again as it
+  leaves fullscreen, so a size asked while fullscreen applies then. A zero
+  width or height leaves the size as it is
+  ([gogpu plugin: window changes: title, size, fullscreen and visibility](https://github.com/dvoyni/cog/issues/755)).
 - **The cursor:** `SetCursor`, `SetCursorPosition` and `EffectiveCursorMode`
   through the per-window cursor shape, mode and position, the mode answered
   as the one in force.
