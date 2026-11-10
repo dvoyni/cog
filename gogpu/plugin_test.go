@@ -3,6 +3,8 @@ package gogpu_test
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"os"
 	"runtime"
 	"slices"
@@ -18,6 +20,7 @@ import (
 	"github.com/dvoyni/cog/metronome"
 	"github.com/dvoyni/cog/platform"
 	"github.com/gogpu/gpucontext"
+	"github.com/gogpu/wgpu"
 )
 
 // init keeps the main goroutine on the main thread, where TestMain runs what
@@ -1050,6 +1053,18 @@ func TestAPassCommandOnAHandleHoldingNothingFailsFinishNamingIt(t *testing.T) {
 			t.Errorf("Finish answered %v for a dispatch on the zero pipeline, not an error naming it", err)
 		}
 	})
+}
+
+func TestADeviceLossIsGfxsAndAnotherErrorIsAnsweredAsItIs(t *testing.T) {
+	loss := fmt.Errorf("wgpu: submit failed: %w", wgpu.ErrDeviceLost)
+	if err := gogpu.MarkDeviceLoss(loss); !errors.Is(err, gfx.ErrDeviceLost) || !errors.Is(err, loss) {
+		t.Errorf("%v is answered as %v, not as gfx's ErrDeviceLost wrapping it", loss, err)
+	}
+	for _, other := range []error{nil, wgpu.ErrSurfaceLost, errors.New("gogpu: not a loss")} {
+		if err := gogpu.MarkDeviceLoss(other); err != other {
+			t.Errorf("%v is answered as %v, not as it is", other, err)
+		}
+	}
 }
 
 // triangleWGSL draws an orange triangle over a black window, from its vertex

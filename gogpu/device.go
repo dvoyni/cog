@@ -541,13 +541,15 @@ func (d *device) CreateCommandEncoder(descriptor gfx.CommandEncoderDescriptor) (
 
 // Submit submits buffers, the command buffers the encoders' Finish answered,
 // on wgpu's queue, and answers its submission index. gogpu's own submits
-// share the queue, so the indices rise from one with gaps.
+// share the queue, so the indices rise from one with gaps. A device lost is
+// gfx's ErrDeviceLost.
 func (d *device) Submit(buffers ...gfx.CommandBuffer) (uint64, error) {
 	commandBuffers := make([]*wgpu.CommandBuffer, len(buffers))
 	for index, buffer := range buffers {
 		commandBuffers[index] = buffer.(*wgpu.CommandBuffer)
 	}
-	return d.device.Queue().Submit(commandBuffers...)
+	submission, err := d.device.Queue().Submit(commandBuffers...)
+	return submission, markDeviceLoss(err)
 }
 
 // SurfaceCapabilities answers what gogpu configures every surface with:
@@ -577,8 +579,8 @@ func (d *device) ConfigureSurface(window platform.Window, configuration gfx.Surf
 // surface texture, so texture's index stays empty. A window hidden,
 // minimized, closed by gogpu or whose compositor holds its frame is
 // AcquireStatusTimeout, as are gogpu's timeout; its outdated and lost surface
-// are AcquireStatusOutdated and AcquireStatusLost. A captured frame is not
-// built yet.
+// are AcquireStatusOutdated and AcquireStatusLost, and a device lost is
+// gfx's ErrDeviceLost. A captured frame is not built yet.
 func (d *device) AcquireFramebuffer(window platform.Window, _ gfx.Texture, view gfx.TextureView, captured bool) (gfx.AcquireStatus, error) {
 	if captured {
 		return 0, unbuilt("a captured AcquireFramebuffer")
@@ -592,7 +594,7 @@ func (d *device) AcquireFramebuffer(window platform.Window, _ gfx.Texture, view 
 	case errors.Is(err, wgpu.ErrTimeout):
 		return gfx.AcquireStatusTimeout, nil
 	case err != nil:
-		return 0, err
+		return 0, markDeviceLoss(err)
 	case !ok:
 		return gfx.AcquireStatusTimeout, nil
 	}
@@ -602,8 +604,9 @@ func (d *device) AcquireFramebuffer(window platform.Window, _ gfx.Texture, view 
 }
 
 // Present ends window's frame through the HostLoop, on the main thread,
-// which submits gogpu's own work and presents, and answers its error. The
-// surface view stored at the acquire is dropped.
+// which submits gogpu's own work and presents, and answers its error, a
+// device lost as gfx's ErrDeviceLost. The surface view stored at the acquire
+// is dropped.
 func (d *device) Present(window platform.Window) error {
 	frame, ok := d.frames[window]
 	if !ok {
@@ -611,7 +614,7 @@ func (d *device) Present(window platform.Window) error {
 	}
 	delete(d.frames, window)
 	d.textureViews.At(frame.view.Index()).Store(nil)
-	return d.loop.EndFrame(frame.context)
+	return markDeviceLoss(d.loop.EndFrame(frame.context))
 }
 
 func (*device) WaitIdle() error { return unbuilt("WaitIdle") }
@@ -689,6 +692,16 @@ func blendComponent(component gfx.BlendComponent) gputypes.BlendComponent {
 
 // unbuilt answers the error of a backend method not built yet, naming it.
 func unbuilt(method string) error { return fmt.Errorf("gogpu: %s is not built yet", method) }
+
+// markDeviceLoss answers err as gfx's ErrDeviceLost, wrapping it, when it is
+// a device loss: wgpu's typed one, which Vulkan answers, or DX12's removed
+// device. Any other err is answered as it is.
+func markDeviceLoss(err error) error {
+	if err != nil && (errors.Is(err, wgpu.ErrDeviceLost) || isDeviceRemoved(err)) {
+		return fmt.Errorf("%w: %w", gfx.ErrDeviceLost, err)
+	}
+	return err
+}
 
 // shaderModule is wgpu's shader module and its reflection, stored together at
 // the module's gfx index.
