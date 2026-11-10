@@ -602,6 +602,8 @@ func TestAButtonIsPressedAndReleasedWhereThePointerIs(t *testing.T) {
 	onMainThread(func() {
 		gogpu.ReportPointer(h.plugin, window, gpucontext.PointerEvent{Type: gpucontext.PointerDown, X: 10, Y: 20, Button: gpucontext.ButtonRight, Modifiers: gpucontext.ModShift})
 		gogpu.ReportPointer(h.plugin, window, gpucontext.PointerEvent{Type: gpucontext.PointerUp, X: 30, Y: 40, Button: gpucontext.ButtonRight})
+		gogpu.ReportPointer(h.plugin, window, gpucontext.PointerEvent{Type: gpucontext.PointerDown, Button: gpucontext.ButtonEraser})
+		gogpu.ReportPointer(h.plugin, window, gpucontext.PointerEvent{Type: gpucontext.PointerDown, Button: gpucontext.ButtonNone})
 	})
 	h.pump(nil)
 
@@ -615,6 +617,99 @@ func TestAButtonIsPressedAndReleasedWhereThePointerIs(t *testing.T) {
 	h.pump(nil)
 	if published := h.takePublished(); len(published) != 0 {
 		t.Errorf("a later pump published %v, want nothing", published)
+	}
+}
+
+func TestEachKeyIsReportedAsCogsKeyOfTheSameName(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+	var window platform.Window
+	h.pump(func(manager *platform.WindowManager) { window = manager.Open(testWindow) })
+	h.takePublished()
+
+	var reported []gpucontext.Key
+	var want []any
+	onMainThread(func() {
+		for key := range gpucontext.Key(512) {
+			wantKey, _ := platform.ParseKey("Key" + key.String())
+			gogpu.ReportKey(h.plugin, window, key, 0, true)
+			gogpu.ReportKey(h.plugin, window, key, 0, false)
+			reported = append(reported, key)
+			want = append(want, platform.KeyEvent{Window: window, Key: wantKey, Pressed: true}, platform.KeyEvent{Window: window, Key: wantKey})
+		}
+	})
+	h.pump(nil)
+
+	published := h.takePublished()
+	if len(published) != len(want) {
+		t.Fatalf("%d keys pressed and released published %d events, want %d", len(reported), len(published), len(want))
+	}
+	for index := range want {
+		if published[index] != want[index] {
+			t.Errorf("gogpu's %v published %v, want %v", reported[index/2], published[index], want[index])
+		}
+	}
+}
+
+func TestAKeyPressedAgainWhileHeldIsARepeat(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+	var window platform.Window
+	h.pump(func(manager *platform.WindowManager) { window = manager.Open(testWindow) })
+	h.takePublished()
+	modifiers := gpucontext.ModShift | gpucontext.ModCapsLock
+	pressed := platform.KeyEvent{Window: window, Key: platform.KeyW, Pressed: true, Modifiers: platform.ModifierShift | platform.ModifierCapsLock}
+	repeated := pressed
+	repeated.Repeat = true
+	released := pressed
+	released.Pressed = false
+
+	onMainThread(func() {
+		gogpu.ReportKey(h.plugin, window, gpucontext.KeyW, modifiers, true)
+		gogpu.ReportKey(h.plugin, window, gpucontext.KeyW, modifiers, true)
+	})
+	h.pump(nil)
+
+	want := []any{pressed, repeated}
+	if published := h.takePublished(); !slices.Equal(published, want) {
+		t.Errorf("a press and a repeat published %v, want %v", published, want)
+	}
+	h.readInputState(func(input *platform.InputState) {
+		if !input.IsHeld(platform.KeyW) || !input.JustPressed(platform.KeyW) {
+			t.Errorf("KeyW is held %v and just pressed %v, want both", input.IsHeld(platform.KeyW), input.JustPressed(platform.KeyW))
+		}
+	})
+
+	onMainThread(func() {
+		gogpu.ReportKey(h.plugin, window, gpucontext.KeyW, modifiers, true)
+		gogpu.ReportKey(h.plugin, window, gpucontext.KeyW, modifiers, false)
+		gogpu.ReportKey(h.plugin, window, gpucontext.KeyW, modifiers, true)
+	})
+	h.pump(nil)
+
+	want = []any{repeated, released, pressed}
+	if published := h.takePublished(); !slices.Equal(published, want) {
+		t.Errorf("a repeat, a release and a press published %v, want %v", published, want)
+	}
+}
+
+func TestAKeyHeldAtAFocusLossIsPressedAfreshAfterIt(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+	var window platform.Window
+	h.pump(func(manager *platform.WindowManager) { window = manager.Open(testWindow) })
+	onMainThread(func() { gogpu.ReportKey(h.plugin, window, gpucontext.KeyW, 0, true) })
+	h.pump(nil)
+	onMainThread(func() { gogpu.ReportFocus(h.plugin, window, false) })
+	h.pump(nil)
+	h.takePublished()
+
+	onMainThread(func() { gogpu.ReportKey(h.plugin, window, gpucontext.KeyW, 0, true) })
+	h.pump(nil)
+
+	want := []any{platform.KeyEvent{Window: window, Key: platform.KeyW, Pressed: true}}
+	if published := h.takePublished(); !slices.Equal(published, want) {
+		t.Errorf("the press after the focus loss published %v, want %v", published, want)
 	}
 }
 

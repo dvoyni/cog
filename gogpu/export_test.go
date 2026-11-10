@@ -18,6 +18,13 @@ func ReportPointer(p *Plugin, window platform.Window, event gpucontext.PointerEv
 	inputSource{plugin: p}.reportPointer(window, event)
 }
 
+// ReportKey reports key pressed in window, or released when pressed is false,
+// with modifiers, as the plugin's key callbacks on window's gogpu window do
+// when the operating system calls them.
+func ReportKey(p *Plugin, window platform.Window, key gpucontext.Key, modifiers gpucontext.Modifiers, pressed bool) {
+	inputSource{plugin: p}.reportKey(window, key, modifiers, pressed)
+}
+
 // ReportFocus reports window's gain of the focus, or its loss when focused is
 // false, as the plugin's focus callback on window's gogpu window does when
 // the operating system calls it.

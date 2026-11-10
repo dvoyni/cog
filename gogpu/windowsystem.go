@@ -25,8 +25,8 @@ type windowSystem struct {
 // shows it unless entry hides it. It reports the window open from the next
 // Pump, at its sizes, and from later Pumps each resize, a scale change
 // included, and each gain and loss of the focus. The user's close of the
-// window is reported, and keeps it open, and its pointer from the input
-// source's next AppendChanges. It answers an error before gfx's adapter
+// window is reported, and keeps it open, and its keys and pointer from the
+// input source's next AppendChanges. It answers an error before gfx's adapter
 // request, which starts the HostLoop.
 func (w windowSystem) Open(window platform.Window, entry platform.WindowEntry) error {
 	if w.plugin.loop == nil {
@@ -46,6 +46,12 @@ func (w windowSystem) Open(window platform.Window, entry platform.WindowEntry) e
 	opened.SetOnClose(func() bool { return w.requestClose(window) })
 	opened.SetOnResize(func(int, int) { w.reportSizes(platform.InputChangeResize, window, opened) })
 	opened.SetOnFocus(func(focused bool) { w.reportFocus(window, focused) })
+	opened.SetOnKeyPress(func(key gpucontext.Key, modifiers gpucontext.Modifiers) {
+		inputSource(w).reportKey(window, key, modifiers, true)
+	})
+	opened.SetOnKeyRelease(func(key gpucontext.Key, modifiers gpucontext.Modifiers) {
+		inputSource(w).reportKey(window, key, modifiers, false)
+	})
 	opened.SetOnPointer(func(event gpucontext.PointerEvent) { inputSource(w).reportPointer(window, event) })
 	if !entry.Hidden {
 		opened.Show()
@@ -153,9 +159,13 @@ func (w windowSystem) reportSizes(kind platform.InputChangeKind, window platform
 }
 
 // reportFocus reports from the next Pump window's gain of the focus, or its
-// loss when focused is false.
+// loss when focused is false, which forgets the keys held: platform releases
+// them, so the next press of one is no repeat.
 func (w windowSystem) reportFocus(window platform.Window, focused bool) {
 	w.plugin.changes = append(w.plugin.changes, platform.InputChange{Kind: platform.InputChangeFocus, Window: window, Focused: focused})
+	if !focused {
+		w.plugin.heldKeys.Clear()
+	}
 }
 
 // reportClosed reports from the next Pump the window gogpu closed by itself,

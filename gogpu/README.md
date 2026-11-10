@@ -7,8 +7,9 @@ the kernel's main-thread tick. Its `shader` package is the WGSL preprocessor.
 
 Status: being built: gfx gets gogpu's adapter and device, windows open and
 close through platform, their title, size, fullscreen and visibility
-change, their resizes, scale and focus and the pointer's moves, enter and
-leave and buttons are reported, each beat acquires and presents every shown
+change, their resizes, scale and focus, keys with their modifiers and
+repeats, and the pointer's moves, enter and leave and buttons are reported,
+each beat acquires and presents every shown
 window's framebuffer,
 encoders record render passes that clear, finish and submit, buffers are
 created, written and mapped, textures are created and written,
@@ -58,7 +59,7 @@ device call or command answering an error naming it, and
   applies a window's new title, size, fullscreen and visibility. The cursor
   answers an error naming it until it is built.
   `platform.InputSourceSocket`, with its input source, which reports the
-  pointer of each window.
+  keys and the pointer of each window.
 
 The plugin is listed after gfx and platform, and checks them with
 `Dependencies`: it reads their resources in its `Init`.
