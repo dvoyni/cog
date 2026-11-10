@@ -16,10 +16,10 @@ start, each beat acquires and presents every shown window's framebuffer,
 encoders record render passes that clear, finish and submit, buffers are
 created, written and mapped, textures are created and written, with views
 and samplers, shader modules, bind group layouts, bind groups and pipeline
-layouts are created, render and compute pipelines with explicit layouts
-draw and dispatch, buffers and textures are copied into buffers, vertex
-inputs are not reflected yet, with every other device call or command
-answering an error naming it, and `gogpu/shader` preprocesses shaders. The
+layouts are created, render and compute pipelines draw and dispatch, over
+explicit layouts or ones reflected, buffers and textures are copied into
+buffers, vertex inputs are not reflected yet, with every other device call
+or command answering an error naming it, and `gogpu/shader` preprocesses shaders. The
 decisions come from the
 [gogpu map](https://github.com/dvoyni/cog/issues/611); each section links
 the ticket that holds its detail. The loop API it rests on, `HostLoop`, was
@@ -34,8 +34,8 @@ the fork's `main`. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md).
 - **gfx is not reworked for it.** gfx stays a mirror of wgpu with its own
   frame chain. The plugin adapts gogpu to gfx's seam, not the other way
   round ([where the seam between gfx and gogpu sits](https://github.com/dvoyni/cog/issues/712)).
-- **Imports:** kernel, gfx, platform, our gogpu fork, and gogpu/wgpu at the
-  version the fork pins (v0.34.2, naga v0.19.0). Its own files import the
+- **Imports:** kernel, gfx, platform, our gogpu fork, and gogpu/wgpu and
+  gogpu/naga at the versions the fork pins (v0.34.2, naga v0.19.0). Its own files import the
   fork's `gogpu` package as `host`, for what hosts the windows and the
   device.
 - **Targets:** macOS on Metal, Windows on Vulkan and DX12, Linux on Vulkan
@@ -304,6 +304,26 @@ what `HostLoop` or the OS requires:
   region of a texture's copy copies from that texture, whatever its
   `TextureBase` names. The other copies and `ClearBuffer` are
   [gogpu plugin: copy and clear commands, and the remaining pass state](https://github.com/dvoyni/cog/issues/751)'s.
+
+## Reflected layouts
+
+([gogpu plugin: pipeline layouts reflected at module creation](https://github.com/dvoyni/cog/issues/752))
+
+- **A module is reflected once, at its creation:** naga parses and
+  validates its WGSL a second time, as wgpu keeps its own parse private, with
+  every capability allowed, wgpu having checked the device's. The
+  reflection keeps each entry point's bindings at the module's index, and
+  goes with it.
+- **A zero layout is WebGPU's "auto":** a group for each from 0 to the last
+  the pipeline's entry points use, one they skip empty, each binding
+  visible to the stages that use it. A buffer's minimum size is its type's,
+  a runtime-sized array counting one element; a sampler is filtering unless
+  it compares; an f32 texture is filterable only when the entry point, or a
+  function it calls, samples it with a sampler. wgpu refuses a 32-bit float
+  view where a layout says filterable, unless the device has
+  Float32Filterable.
+- **An empty entry point name is the module's one entry point of the
+  stage;** none, or several, answer an error naming the stage.
 
 ## Shaders
 
