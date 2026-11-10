@@ -15,8 +15,9 @@ through platform, the user's close reported and the main window opened at
 start, each beat acquires and presents every shown window's framebuffer,
 encoders record render passes that clear, finish and submit, buffers are
 created, written and mapped, textures are created and written, with views
-and samplers, with every other device call or command answering an error
-naming it, and `gogpu/shader` preprocesses shaders. The
+and samplers, shader modules, bind group layouts, bind groups and pipeline
+layouts are created, with every other device call or command answering an
+error naming it, and `gogpu/shader` preprocesses shaders. The
 decisions come from the
 [gogpu map](https://github.com/dvoyni/cog/issues/611); each section links
 the ticket that holds its detail. The loop API it rests on, `HostLoop`, was
@@ -262,6 +263,22 @@ what `HostLoop` or the OS requires:
 - **A zero `LodMaxClamp` clamps nothing:** wgpu takes it as 32, where WebGPU
   samples the base level alone. A view with `MipLevelCount` 1 samples the
   base level alone.
+
+## Modules, layouts and bind groups
+
+([gogpu plugin: shader modules, bind group layouts, bind groups and pipeline layouts](https://github.com/dvoyni/cog/issues/749))
+
+- **Shader modules, bind group layouts, bind groups and pipeline layouts
+  are wgpu's,** stored at gfx's index as buffers are. wgpu destroys a
+  released one once the submits made before finish; a bind group keeps the
+  views and samplers it binds.
+- **Invalid WGSL answers naga's error,** which names the problem:
+  `parse error: function value body: unresolved identifier: undeclared`.
+- **A layout entry's binding of a zero type is none,** and a bind group
+  entry's zero handle binds none, as gfx's descriptors say.
+- **wgpu checks a bound buffer's usage against its layout entry, not a
+  binding's kind:** a sampler bound where the layout holds a buffer answers
+  no error at creation, where Rust's wgpu-core answers one.
 
 ## Shaders
 

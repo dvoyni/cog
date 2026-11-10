@@ -36,6 +36,14 @@ type device struct {
 	textureViews container.ObjectTable[atomic.Pointer[wgpu.TextureView]]
 	// samplers holds each sampler at its gfx index.
 	samplers container.ObjectTable[atomic.Pointer[wgpu.Sampler]]
+	// shaderModules holds each shader module at its gfx index.
+	shaderModules container.ObjectTable[atomic.Pointer[wgpu.ShaderModule]]
+	// bindGroupLayouts holds each bind group layout at its gfx index.
+	bindGroupLayouts container.ObjectTable[atomic.Pointer[wgpu.BindGroupLayout]]
+	// bindGroups holds each bind group at its gfx index.
+	bindGroups container.ObjectTable[atomic.Pointer[wgpu.BindGroup]]
+	// pipelineLayouts holds each pipeline layout at its gfx index.
+	pipelineLayouts container.ObjectTable[atomic.Pointer[wgpu.PipelineLayout]]
 }
 
 // CreateBuffer creates wgpu's buffer and stores it at buffer's index.
@@ -93,7 +101,7 @@ func (d *device) ReleaseTexture(texture gfx.Texture) { releaseStored(&d.textures
 // CreateTextureView creates wgpu's view of the texture stored at texture's
 // index, and stores it at view's index.
 func (d *device) CreateTextureView(view gfx.TextureView, texture gfx.Texture, descriptor gfx.TextureViewDescriptor) error {
-	viewed, err := d.storedTexture(texture)
+	viewed, err := storedObject(&d.textures, texture, "texture")
 	if err != nil {
 		return err
 	}
@@ -152,22 +160,133 @@ func (*device) CreateQuerySet(gfx.QuerySet, gfx.QuerySetDescriptor) error {
 }
 func (*device) ReleaseQuerySet(gfx.QuerySet) {}
 func (*device) TimestampPeriod() float32     { return 0 }
-func (*device) CreateShaderModule(gfx.ShaderModule, gfx.ShaderModuleDescriptor) error {
-	return unbuilt("CreateShaderModule")
+
+// CreateShaderModule creates wgpu's module, whose WGSL naga parses and
+// validates, answering its error naming the problem, and stores it at
+// module's index.
+func (d *device) CreateShaderModule(module gfx.ShaderModule, descriptor gfx.ShaderModuleDescriptor) error {
+	created, err := d.device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{Label: descriptor.Label, WGSL: descriptor.WGSL})
+	if err != nil {
+		return err
+	}
+	d.shaderModules.Grow(module.Index()).Store(created)
+	return nil
 }
-func (*device) ReleaseShaderModule(gfx.ShaderModule) {}
-func (*device) CreateBindGroupLayout(gfx.BindGroupLayout, gfx.BindGroupLayoutDescriptor) error {
-	return unbuilt("CreateBindGroupLayout")
+
+// ReleaseShaderModule drops the module stored at module's index and releases
+// it; wgpu destroys it once the submits made before finish.
+func (d *device) ReleaseShaderModule(module gfx.ShaderModule) {
+	releaseStored(&d.shaderModules, module.Index())
 }
-func (*device) ReleaseBindGroupLayout(gfx.BindGroupLayout) {}
-func (*device) CreateBindGroup(gfx.BindGroup, gfx.BindGroupDescriptor) error {
-	return unbuilt("CreateBindGroup")
+
+// CreateBindGroupLayout creates wgpu's layout and stores it at layout's
+// index. An entry's bindings of a zero type are none.
+func (d *device) CreateBindGroupLayout(layout gfx.BindGroupLayout, descriptor gfx.BindGroupLayoutDescriptor) error {
+	entries := make([]gputypes.BindGroupLayoutEntry, len(descriptor.Entries))
+	for index, entry := range descriptor.Entries {
+		entries[index] = gputypes.BindGroupLayoutEntry{Binding: entry.Binding, Visibility: gputypes.ShaderStages(entry.Visibility)}
+		if entry.Buffer.Type != gfx.BufferBindingTypeUndefined {
+			entries[index].Buffer = &gputypes.BufferBindingLayout{
+				Type:             gputypes.BufferBindingType(entry.Buffer.Type),
+				HasDynamicOffset: entry.Buffer.HasDynamicOffset,
+				MinBindingSize:   entry.Buffer.MinBindingSize,
+			}
+		}
+		if entry.Sampler.Type != gfx.SamplerBindingTypeUndefined {
+			entries[index].Sampler = &gputypes.SamplerBindingLayout{Type: gputypes.SamplerBindingType(entry.Sampler.Type)}
+		}
+		if entry.Texture.SampleType != gfx.TextureSampleTypeUndefined {
+			entries[index].Texture = &gputypes.TextureBindingLayout{
+				SampleType:    gputypes.TextureSampleType(entry.Texture.SampleType),
+				ViewDimension: gputypes.TextureViewDimension(entry.Texture.ViewDimension),
+				Multisampled:  entry.Texture.Multisampled,
+			}
+		}
+		if entry.StorageTexture.Access != gfx.StorageTextureAccessUndefined {
+			entries[index].StorageTexture = &gputypes.StorageTextureBindingLayout{
+				Access:        gputypes.StorageTextureAccess(entry.StorageTexture.Access),
+				Format:        gputypes.TextureFormat(entry.StorageTexture.Format),
+				ViewDimension: gputypes.TextureViewDimension(entry.StorageTexture.ViewDimension),
+			}
+		}
+	}
+	created, err := d.device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{Label: descriptor.Label, Entries: entries})
+	if err != nil {
+		return err
+	}
+	d.bindGroupLayouts.Grow(layout.Index()).Store(created)
+	return nil
 }
-func (*device) ReleaseBindGroup(gfx.BindGroup) {}
-func (*device) CreatePipelineLayout(gfx.PipelineLayout, gfx.PipelineLayoutDescriptor) error {
-	return unbuilt("CreatePipelineLayout")
+
+// ReleaseBindGroupLayout drops the layout stored at layout's index and
+// releases it; wgpu destroys it once the submits made before finish.
+func (d *device) ReleaseBindGroupLayout(layout gfx.BindGroupLayout) {
+	releaseStored(&d.bindGroupLayouts, layout.Index())
 }
-func (*device) ReleasePipelineLayout(gfx.PipelineLayout) {}
+
+// CreateBindGroup creates wgpu's bind group, over the layout and of the
+// objects stored at the descriptor's indexes, and stores it at group's index.
+// An entry's zero handles bind none.
+func (d *device) CreateBindGroup(group gfx.BindGroup, descriptor gfx.BindGroupDescriptor) error {
+	layout, err := storedObject(&d.bindGroupLayouts, descriptor.Layout, "bind group layout")
+	if err != nil {
+		return err
+	}
+	entries := make([]wgpu.BindGroupEntry, len(descriptor.Entries))
+	for index, entry := range descriptor.Entries {
+		entries[index] = wgpu.BindGroupEntry{Binding: entry.Binding, Offset: entry.Offset, Size: entry.Size}
+		if entry.Buffer != (gfx.Buffer{}) {
+			if entries[index].Buffer, err = d.storedBuffer(entry.Buffer); err != nil {
+				return err
+			}
+		}
+		if entry.Sampler != (gfx.Sampler{}) {
+			if entries[index].Sampler, err = storedObject(&d.samplers, entry.Sampler, "sampler"); err != nil {
+				return err
+			}
+		}
+		if entry.TextureView != (gfx.TextureView{}) {
+			if entries[index].TextureView, err = storedObject(&d.textureViews, entry.TextureView, "texture view"); err != nil {
+				return err
+			}
+		}
+	}
+	created, err := d.device.CreateBindGroup(&wgpu.BindGroupDescriptor{Label: descriptor.Label, Layout: layout, Entries: entries})
+	if err != nil {
+		return err
+	}
+	d.bindGroups.Grow(group.Index()).Store(created)
+	return nil
+}
+
+// ReleaseBindGroup drops the bind group stored at group's index and releases
+// it; wgpu keeps it while a submit using it lives.
+func (d *device) ReleaseBindGroup(group gfx.BindGroup) { releaseStored(&d.bindGroups, group.Index()) }
+
+// CreatePipelineLayout creates wgpu's layout of the bind group layouts stored
+// at the descriptor's indexes, and stores it at layout's index.
+func (d *device) CreatePipelineLayout(layout gfx.PipelineLayout, descriptor gfx.PipelineLayoutDescriptor) error {
+	groupLayouts := make([]*wgpu.BindGroupLayout, len(descriptor.BindGroupLayouts))
+	for group, groupLayout := range descriptor.BindGroupLayouts {
+		stored, err := storedObject(&d.bindGroupLayouts, groupLayout, "bind group layout")
+		if err != nil {
+			return err
+		}
+		groupLayouts[group] = stored
+	}
+	created, err := d.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{Label: descriptor.Label, BindGroupLayouts: groupLayouts})
+	if err != nil {
+		return err
+	}
+	d.pipelineLayouts.Grow(layout.Index()).Store(created)
+	return nil
+}
+
+// ReleasePipelineLayout drops the layout stored at layout's index and
+// releases it; wgpu destroys it once the submits made before finish.
+func (d *device) ReleasePipelineLayout(layout gfx.PipelineLayout) {
+	releaseStored(&d.pipelineLayouts, layout.Index())
+}
 func (*device) ReflectRenderPipelineLayout(gfx.RenderPipelineDescriptor) ([]gfx.BindGroupLayoutDescriptor, error) {
 	return nil, unbuilt("ReflectRenderPipelineLayout")
 }
@@ -199,7 +318,7 @@ func (d *device) WriteBuffer(buffer gfx.Buffer, offset uint64, data []byte) erro
 // WriteTexture writes data through wgpu's queue into the texture stored at
 // destination's index, landing at its next submit as a buffer's write does.
 func (d *device) WriteTexture(destination gfx.ImageCopyTexture, data []byte, layout gfx.ImageDataLayout, size gfx.Extent3D) error {
-	written, err := d.storedTexture(destination.Texture)
+	written, err := storedObject(&d.textures, destination.Texture, "texture")
 	if err != nil {
 		return err
 	}
@@ -370,15 +489,16 @@ func (d *device) storedBuffer(buffer gfx.Buffer) (*wgpu.Buffer, error) {
 	return stored, nil
 }
 
-// storedTexture answers the texture stored at texture's index, or an error
-// when it holds none, as a framebuffer's does.
-func (d *device) storedTexture(texture gfx.Texture) (*wgpu.Texture, error) {
-	var stored *wgpu.Texture
-	if slot := d.textures.At(texture.Index()); slot != nil {
+// storedObject answers the object stored in objects at handle's index, or an
+// error naming the object when it holds none, as a framebuffer's texture
+// index does.
+func storedObject[T any](objects *container.ObjectTable[atomic.Pointer[T]], handle interface{ Index() uint32 }, object string) (*T, error) {
+	var stored *T
+	if slot := objects.At(handle.Index()); slot != nil {
 		stored = slot.Load()
 	}
 	if stored == nil {
-		return nil, fmt.Errorf("gogpu: %v holds no texture", texture)
+		return nil, fmt.Errorf("gogpu: %v holds no %s", handle, object)
 	}
 	return stored, nil
 }
