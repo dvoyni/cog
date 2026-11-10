@@ -19,7 +19,8 @@ created, written and mapped, textures are created and written, with views
 and samplers, shader modules, bind group layouts, bind groups and pipeline
 layouts are created, render and compute pipelines draw and dispatch, over
 explicit layouts or ones reflected, buffers and textures are copied into
-buffers, vertex inputs are not reflected yet, a device lost at acquire,
+buffers, vertex inputs are not reflected yet, a captured frame is drawn
+offscreen, then onto the window, a device lost at acquire,
 present or submit answers gfx's `ErrDeviceLost`, with every other device call
 or command answering an error naming it, and `gogpu/shader` preprocesses shaders. The
 decisions come from the
@@ -211,11 +212,18 @@ what `HostLoop` or the OS requires:
   not logged.
 - **`Present`** is `HostLoop.EndFrame`, its error answered.
 - **A captured frame is drawn offscreen.** When gfx's acquire says the window
-  is captured that frame, the plugin hands gfx an offscreen texture of the
-  surface's format and size instead, which gfx draws into and copies out. At
-  present the plugin draws it onto the surface with a full-screen pass, then
-  calls `EndFrame`. The texture is made at the window's first capture and
-  kept until it resizes or closes. A frame not captured costs nothing extra,
+  is captured that frame, the plugin still begins it and keeps the surface's
+  view, but hands gfx an offscreen texture of the surface's format and size
+  instead, which gfx draws into and copies out. At present the plugin draws
+  it onto the surface's view, texel for texel, with one triangle covering
+  it, submits that after gfx's submit, then calls `EndFrame`, which it calls
+  even when that draw fails. The barrier between gfx's copy and that sample
+  is wgpu's, from the texture's last use. The texture, its view and its bind
+  group are made at each captured acquire, after `BeginFrame`, at the size
+  the surface is configured with, which gfx copies at, and released at its
+  present: captures are one-off requests, never every frame, so keeping a
+  window-sized texture between them would hold memory for nothing. The
+  pipeline drawing them is made once. A frame not captured costs nothing extra,
   and every backend can capture, DX12 and the software adapter included
   ([gfx: a capture is taken from the frame acquired after the request](https://github.com/dvoyni/cog/issues/721),
   [gogpu plugin: a captured frame is drawn offscreen, then onto the window](https://github.com/dvoyni/cog/issues/722)).

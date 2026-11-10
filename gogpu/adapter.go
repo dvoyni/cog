@@ -117,10 +117,11 @@ func (a *adapter) RequestDevice(descriptor gfx.DeviceDescriptor) (gfx.BackendDev
 		return nil, err
 	}
 	return &device{
-		device:  wgpu.DeviceFromHandle(a.app.GPUContextProvider().Device()),
-		loop:    a.loop,
-		windows: a.windows,
-		frames:  map[platform.Window]acquiredFrame{},
+		device:       wgpu.DeviceFromHandle(a.app.GPUContextProvider().Device()),
+		loop:         a.loop,
+		windows:      a.windows,
+		frames:       map[platform.Window]acquiredFrame{},
+		surfaceSizes: map[platform.Window]wgpu.Extent3D{},
 	}, nil
 }
 
