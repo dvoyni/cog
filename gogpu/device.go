@@ -351,13 +351,18 @@ func (*device) ReflectVertexInputs(gfx.ShaderModule, string) ([]gfx.VertexInput,
 // stored at the descriptor's indexes, and stores it at pipeline's index. A
 // zero DepthStencil format, fragment module, strip index format or blend is
 // none; wgpu takes the WebGPU defaults for zero stencil faces, blend
-// components and sample mask.
+// components and sample mask. An empty entry point is its module's one of
+// its stage, named to wgpu.
 func (d *device) CreateRenderPipeline(pipeline gfx.RenderPipeline, descriptor gfx.RenderPipelineDescriptor) error {
 	layout, err := storedObject(&d.pipelineLayouts, descriptor.Layout, "pipeline layout")
 	if err != nil {
 		return err
 	}
 	vertexModule, err := storedObject(&d.shaderModules, descriptor.Vertex.Module, "shader module")
+	if err != nil {
+		return err
+	}
+	vertexEntryPoint, err := vertexModule.reflection.entryPoint(ir.StageVertex, descriptor.Vertex.EntryPoint)
 	if err != nil {
 		return err
 	}
@@ -374,7 +379,7 @@ func (d *device) CreateRenderPipeline(pipeline gfx.RenderPipeline, descriptor gf
 	created := &wgpu.RenderPipelineDescriptor{
 		Label:  descriptor.Label,
 		Layout: layout,
-		Vertex: wgpu.VertexState{Module: vertexModule.ShaderModule, EntryPoint: descriptor.Vertex.EntryPoint, Buffers: buffers},
+		Vertex: wgpu.VertexState{Module: vertexModule.ShaderModule, EntryPoint: vertexEntryPoint.name, Buffers: buffers},
 		Primitive: gputypes.PrimitiveState{
 			Topology:       gputypes.PrimitiveTopology(primitive.Topology),
 			FrontFace:      gputypes.FrontFace(primitive.FrontFace),
@@ -406,6 +411,10 @@ func (d *device) CreateRenderPipeline(pipeline gfx.RenderPipeline, descriptor gf
 		if err != nil {
 			return err
 		}
+		fragmentEntryPoint, err := fragmentModule.reflection.entryPoint(ir.StageFragment, fragment.EntryPoint)
+		if err != nil {
+			return err
+		}
 		targets := make([]gputypes.ColorTargetState, len(fragment.Targets))
 		for index, target := range fragment.Targets {
 			targets[index] = gputypes.ColorTargetState{Format: gputypes.TextureFormat(target.Format), WriteMask: gputypes.ColorWriteMask(target.WriteMask)}
@@ -413,7 +422,7 @@ func (d *device) CreateRenderPipeline(pipeline gfx.RenderPipeline, descriptor gf
 				targets[index].Blend = &gputypes.BlendState{Color: blendComponent(target.Blend.Color), Alpha: blendComponent(target.Blend.Alpha)}
 			}
 		}
-		created.Fragment = &wgpu.FragmentState{Module: fragmentModule.ShaderModule, EntryPoint: fragment.EntryPoint, Targets: targets}
+		created.Fragment = &wgpu.FragmentState{Module: fragmentModule.ShaderModule, EntryPoint: fragmentEntryPoint.name, Targets: targets}
 	}
 	renderPipeline, err := d.device.CreateRenderPipeline(created)
 	if err != nil {
@@ -430,7 +439,8 @@ func (d *device) ReleaseRenderPipeline(pipeline gfx.RenderPipeline) {
 }
 
 // CreateComputePipeline creates wgpu's pipeline over the layout and module
-// stored at the descriptor's indexes, and stores it at pipeline's index.
+// stored at the descriptor's indexes, and stores it at pipeline's index. An
+// empty entry point is the module's one compute entry point, named to wgpu.
 func (d *device) CreateComputePipeline(pipeline gfx.ComputePipeline, descriptor gfx.ComputePipelineDescriptor) error {
 	layout, err := storedObject(&d.pipelineLayouts, descriptor.Layout, "pipeline layout")
 	if err != nil {
@@ -440,11 +450,15 @@ func (d *device) CreateComputePipeline(pipeline gfx.ComputePipeline, descriptor 
 	if err != nil {
 		return err
 	}
+	entryPoint, err := module.reflection.entryPoint(ir.StageCompute, descriptor.EntryPoint)
+	if err != nil {
+		return err
+	}
 	created, err := d.device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
 		Label:      descriptor.Label,
 		Layout:     layout,
 		Module:     module.ShaderModule,
-		EntryPoint: descriptor.EntryPoint,
+		EntryPoint: entryPoint.name,
 		Constants:  descriptor.Constants,
 	})
 	if err != nil {

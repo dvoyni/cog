@@ -10,6 +10,6 @@ require (
 	github.com/gogpu/gogpu v0.0.0
 	github.com/gogpu/gpucontext v0.32.0
 	github.com/gogpu/gputypes v0.8.0
-	github.com/gogpu/naga v0.21.5
-	github.com/gogpu/wgpu v0.34.2
+	github.com/gogpu/naga v0.21.10
+	github.com/gogpu/wgpu v0.34.13
 )
