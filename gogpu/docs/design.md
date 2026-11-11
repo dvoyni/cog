@@ -39,7 +39,7 @@ the fork's `main`. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md).
   frame chain. The plugin adapts gogpu to gfx's seam, not the other way
   round ([where the seam between gfx and gogpu sits](https://github.com/dvoyni/cog/issues/712)).
 - **Imports:** kernel, gfx, platform, our gogpu fork, and gogpu/wgpu and
-  gogpu/naga at the versions the fork pins (v0.34.2, naga v0.19.0). Its own files import the
+  gogpu/naga at the versions the fork pins (v0.34.13, naga v0.21.10). Its own files import the
   fork's `gogpu` package as `host`, for what hosts the windows and the
   device.
 - **Targets:** macOS on Metal, Windows on Vulkan and DX12, Linux on Vulkan
@@ -357,7 +357,9 @@ what `HostLoop` or the OS requires:
   view where a layout says filterable, unless the device has
   Float32Filterable.
 - **An empty entry point name is the module's one entry point of the
-  stage;** none, or several, answer an error naming the stage.
+  stage,** at the pipeline's creation as at its reflection: wgpu is handed
+  the name reflected, as it refuses an empty one. None, or several, answer
+  an error naming the stage.
 
 ## Shaders
 

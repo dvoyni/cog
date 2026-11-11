@@ -1426,6 +1426,123 @@ func TestAnF32TextureIsReflectedFilterableOnlyWhenSampled(t *testing.T) {
 	}
 }
 
+func TestEachBindingIsReflectedAsTheEntryWebGPUsAutoLayoutHolds(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+
+	h.readDevice(func(device gfx.Device) {
+		module, err := device.CreateShaderModule(gfx.ShaderModuleDescriptor{WGSL: bindingsWGSL})
+		if err != nil {
+			t.Errorf("CreateShaderModule answered %v", err)
+		}
+		pipeline, err := device.CreateComputePipeline(gfx.ComputePipelineDescriptor{Module: module, EntryPoint: "mix"})
+		if err != nil {
+			t.Errorf("CreateComputePipeline answered %v", err)
+		}
+		createView := func(format gfx.TextureFormat, usage gfx.TextureUsageFlags) gfx.TextureView {
+			texture, err := device.CreateTexture(gfx.TextureDescriptor{Size: gfx.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1}, Format: format, Usage: usage})
+			if err != nil {
+				t.Errorf("CreateTexture answered %v for %v", err, format)
+			}
+			view, err := device.CreateTextureView(texture, gfx.TextureViewDescriptor{})
+			if err != nil {
+				t.Errorf("CreateTextureView answered %v for %v", err, format)
+			}
+			return view
+		}
+		comparing, err := device.CreateSampler(gfx.SamplerDescriptor{Compare: gfx.CompareFunctionLess})
+		if err != nil {
+			t.Errorf("CreateSampler answered %v", err)
+		}
+		skipped := createBindGroup(t, device, nil, nil)
+		used := createBindGroup(t, device, bindingsLayout, []gfx.BindGroupEntry{
+			{Binding: 0, Buffer: createWrittenBuffer(t, device, gfx.BufferUsageFlagUniform, []float32{2, 0, 0, 0})},
+			{Binding: 1, Buffer: createWrittenBuffer(t, device, gfx.BufferUsageFlagStorage, []float32{3})},
+			{Binding: 2, Buffer: createWrittenBuffer(t, device, gfx.BufferUsageFlagStorage, []float32{0})},
+			{Binding: 3, TextureView: createView(gfx.TextureFormatDepth32Float, gfx.TextureUsageFlagTextureBinding)},
+			{Binding: 4, Sampler: comparing},
+			{Binding: 5, TextureView: createView(gfx.TextureFormatR32Float, gfx.TextureUsageFlagStorageBinding)},
+		})
+
+		encoder, err := device.CreateCommandEncoder(gfx.CommandEncoderDescriptor{})
+		if err != nil {
+			t.Errorf("CreateCommandEncoder answered %v", err)
+			return
+		}
+		pass := encoder.BeginComputePass(gfx.ComputePassDescriptor{})
+		pass.SetPipeline(pipeline)
+		pass.SetBindGroup(0, skipped, nil)
+		pass.SetBindGroup(1, used, nil)
+		pass.Dispatch(1, 1, 1)
+		pass.End()
+		if _, err := encoder.Finish(); err != nil {
+			t.Errorf("Finish answered %v for a dispatch whose groups are of an empty layout and of bindingsLayout", err)
+		}
+	})
+}
+
+func TestABindingBothStagesUseIsVisibleToBoth(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+
+	h.readDevice(func(device gfx.Device) {
+		pipeline := createRenderPipeline(t, device, sharedWGSL, nil, nil, gfx.TextureFormatRGBA8Unorm)
+		group := createBindGroup(t, device, []gfx.BindGroupLayoutEntry{{
+			Binding:    0,
+			Visibility: gfx.ShaderStageFlagVertex | gfx.ShaderStageFlagFragment,
+			Buffer:     gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform, MinBindingSize: 16},
+		}}, []gfx.BindGroupEntry{{Binding: 0, Buffer: createWrittenBuffer(t, device, gfx.BufferUsageFlagUniform, []float32{1, 0.5, 0, 1})}})
+		target, err := device.CreateTextureView(createTexture(t, device, 1), gfx.TextureViewDescriptor{})
+		if err != nil {
+			t.Errorf("CreateTextureView answered %v", err)
+		}
+
+		encoder, err := device.CreateCommandEncoder(gfx.CommandEncoderDescriptor{})
+		if err != nil {
+			t.Errorf("CreateCommandEncoder answered %v", err)
+			return
+		}
+		pass := encoder.BeginRenderPass(gfx.RenderPassDescriptor{ColorAttachments: []gfx.RenderPassColorAttachment{{
+			View: target, LoadOp: gfx.LoadOpClear, StoreOp: gfx.StoreOpStore,
+		}}})
+		pass.SetPipeline(pipeline)
+		pass.SetBindGroup(0, group, nil)
+		pass.Draw(gfx.DrawArgs{VertexCount: 3, InstanceCount: 1})
+		pass.End()
+		if _, err := encoder.Finish(); err != nil {
+			t.Errorf("Finish answered %v for a draw whose group is visible to the vertex and fragment stages", err)
+		}
+	})
+}
+
+func TestAnEmptyEntryPointIsTheModulesOneOfItsStage(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+
+	h.readDevice(func(device gfx.Device) {
+		triangle, err := device.CreateShaderModule(gfx.ShaderModuleDescriptor{WGSL: triangleWGSL})
+		if err != nil {
+			t.Errorf("CreateShaderModule answered %v", err)
+		}
+		_, err = device.CreateRenderPipeline(gfx.RenderPipelineDescriptor{
+			Vertex: gfx.VertexState{Module: triangle},
+			Fragment: gfx.FragmentState{Module: triangle, Targets: []gfx.ColorTargetState{{
+				Format: gfx.TextureFormatRGBA8Unorm, WriteMask: gfx.ColorWriteFlagAll,
+			}}},
+		})
+		if err != nil {
+			t.Errorf("CreateRenderPipeline answered %v for empty entry points of a module of one vertex and one fragment entry point", err)
+		}
+		squares, err := device.CreateShaderModule(gfx.ShaderModuleDescriptor{WGSL: squaresWGSL})
+		if err != nil {
+			t.Errorf("CreateShaderModule answered %v", err)
+		}
+		if _, err := device.CreateComputePipeline(gfx.ComputePipelineDescriptor{Module: squares}); err != nil {
+			t.Errorf("CreateComputePipeline answered %v for an empty entry point of a module of one compute entry point", err)
+		}
+	})
+}
+
 func TestAPassCommandOnAHandleHoldingNothingFailsFinishNamingIt(t *testing.T) {
 	h := newHarness(t)
 	h.mustSpawn(nil, nil)
@@ -1514,6 +1631,53 @@ fn load() {
 @compute @workgroup_size(1)
 fn sample() {
 	picked = pick(picture, picker);
+}
+`
+
+// bindingsWGSL uses a binding of each kind WebGPU's "auto" layout tells
+// apart, all in group 1, group 0 skipped.
+const bindingsWGSL = `
+@group(1) @binding(0) var<uniform> scale: vec4f;
+@group(1) @binding(1) var<storage, read> source: array<f32>;
+@group(1) @binding(2) var<storage, read_write> destination: array<f32>;
+@group(1) @binding(3) var depth: texture_depth_2d;
+@group(1) @binding(4) var comparing: sampler_comparison;
+@group(1) @binding(5) var written: texture_storage_2d<r32float, write>;
+
+@compute @workgroup_size(1)
+fn mix() {
+	let compared = textureSampleCompareLevel(depth, comparing, vec2f(0.5), 0.5);
+	destination[0] = source[0] * scale.x + compared;
+	textureStore(written, vec2u(0), vec4f(compared));
+}
+`
+
+// bindingsLayout is the layout WebGPU's "auto" builds of bindingsWGSL's
+// group 1, each binding at its type's minimum size.
+var bindingsLayout = []gfx.BindGroupLayoutEntry{
+	{Binding: 0, Visibility: gfx.ShaderStageFlagCompute, Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform, MinBindingSize: 16}},
+	{Binding: 1, Visibility: gfx.ShaderStageFlagCompute, Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeReadOnlyStorage, MinBindingSize: 4}},
+	{Binding: 2, Visibility: gfx.ShaderStageFlagCompute, Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeStorage, MinBindingSize: 4}},
+	{Binding: 3, Visibility: gfx.ShaderStageFlagCompute, Texture: gfx.TextureBindingLayout{SampleType: gfx.TextureSampleTypeDepth, ViewDimension: gfx.TextureViewDimension2D}},
+	{Binding: 4, Visibility: gfx.ShaderStageFlagCompute, Sampler: gfx.SamplerBindingLayout{Type: gfx.SamplerBindingTypeComparison}},
+	{Binding: 5, Visibility: gfx.ShaderStageFlagCompute, StorageTexture: gfx.StorageTextureBindingLayout{
+		Access: gfx.StorageTextureAccessWriteOnly, Format: gfx.TextureFormatR32Float, ViewDimension: gfx.TextureViewDimension2D,
+	}},
+}
+
+// sharedWGSL reads binding 0 from both its stages.
+const sharedWGSL = `
+@group(0) @binding(0) var<uniform> tint: vec4f;
+
+@vertex
+fn corner(@builtin(vertex_index) index: u32) -> @builtin(position) vec4f {
+	let corners = array(vec2f(-1, -1), vec2f(3, -1), vec2f(-1, 3));
+	return vec4f(corners[index] * tint.a, 0, 1);
+}
+
+@fragment
+fn paint() -> @location(0) vec4f {
+	return tint;
 }
 `
 
@@ -1849,6 +2013,20 @@ func mapWrittenBuffer(t *testing.T, device gfx.Device, written []byte) gfx.Buffe
 		t.Errorf("MapBuffer answered %v", err)
 	}
 	return buffer
+}
+
+// createBindGroup creates a bind group of entries over a layout of
+// layoutEntries.
+func createBindGroup(t *testing.T, device gfx.Device, layoutEntries []gfx.BindGroupLayoutEntry, entries []gfx.BindGroupEntry) gfx.BindGroup {
+	layout, err := device.CreateBindGroupLayout(gfx.BindGroupLayoutDescriptor{Entries: layoutEntries})
+	if err != nil {
+		t.Errorf("CreateBindGroupLayout answered %v", err)
+	}
+	group, err := device.CreateBindGroup(gfx.BindGroupDescriptor{Layout: layout, Entries: entries})
+	if err != nil {
+		t.Errorf("CreateBindGroup answered %v", err)
+	}
+	return group
 }
 
 // createTexture creates an RGBA8Unorm texture side texels square, which can
