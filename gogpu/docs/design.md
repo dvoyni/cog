@@ -166,7 +166,14 @@ what `HostLoop` or the OS requires:
   ([gogpu plugin: window changes: title, size, fullscreen and visibility](https://github.com/dvoyni/cog/issues/755)).
 - **The cursor:** `SetCursor`, `SetCursorPosition` and `EffectiveCursorMode`
   through the per-window cursor shape, mode and position, the mode answered
-  as the one in force.
+  as the one in force: Normal while the window lacks the focus or the system
+  refused the mode. `SetCursor` sets the mode first and the shape after,
+  since X11 gives a window its parent's cursor when a lock is released. A
+  shape converts by cast, a hidden cursor is gogpu's `CursorNone`, and a mode
+  maps by a table, since gogpu orders Locked before Confined.
+  `SetCursorPosition` answers gogpu's error where the system refuses, as
+  Wayland does unless the cursor is locked
+  ([gogpu plugin: the cursor: shape, mode, position and the mode in force](https://github.com/dvoyni/cog/issues/756)).
 - **`Close`** destroys the window at once through the fork's public
   `Window.Destroy`.
 - **`Pump`** is `HostLoop.PumpEvents`, on the main thread inside platform's
