@@ -13,8 +13,8 @@ Status: being built: gfx gets gogpu's adapter and device, with the features
 and limits it asks for or the software adapter, windows open and close
 through platform, the user's close reported and the main window opened at
 start, each window's resizes, scale and focus reported, the pointer's moves,
-enter and leave and buttons reported, its locked motion passed on but unused
-until the cursor locks, each beat acquires and
+enter and leave and buttons reported, a locked cursor's motion as its delta,
+each window's cursor shape, mode and position set, each beat acquires and
 presents every shown window's framebuffer, encoders record render passes that clear, finish and submit, buffers are
 created, written and mapped, textures are created and written, with views
 and samplers, shader modules, bind group layouts, bind groups and pipeline

@@ -618,6 +618,39 @@ func TestThePointerIsFollowedAcrossTwoWindows(t *testing.T) {
 	})
 }
 
+func TestALockedCursorsMoveKeepsThePointerInPlaceAndGivesItsDelta(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+	window := h.openShownWindow()
+	h.pump(func(manager *platform.WindowManager) { manager.SetCursorMode(window, platform.CursorModeLocked) })
+	if !h.pumpUntil(func(manager *platform.WindowManager) bool { return manager.IsFocused(window) }) {
+		t.Skip("the shown window never took the focus")
+	}
+	if !h.pumpUntil(func(manager *platform.WindowManager) bool {
+		return manager.EffectiveCursorMode(window) == platform.CursorModeLocked
+	}) {
+		t.Fatal("the focused window's lock never came in force")
+	}
+	h.takePublished()
+
+	// gogpu reports a locked move at the window's centre, the mouse's
+	// motion in its delta.
+	onMainThread(func() {
+		gogpu.ReportPointer(h.plugin, window, gpucontext.PointerEvent{Type: gpucontext.PointerEnter, X: 50, Y: 60})
+		gogpu.ReportPointer(h.plugin, window, gpucontext.PointerEvent{Type: gpucontext.PointerMove, X: 160, Y: 120, DeltaX: 3, DeltaY: -4})
+	})
+	h.pump(nil)
+
+	want := []any{platform.PointerMoveEvent{Window: window, Position: platform.Point{X: 50, Y: 60}, Delta: platform.Point{X: 3, Y: -4}}}
+	moves := slices.DeleteFunc(h.takePublished(), func(event any) bool {
+		_, isMove := event.(platform.PointerMoveEvent)
+		return !isMove
+	})
+	if !slices.Equal(moves, want) {
+		t.Errorf("the locked move published %v, want %v", moves, want)
+	}
+}
+
 func TestAButtonIsPressedAndReleasedWhereThePointerIs(t *testing.T) {
 	h := newHarness(t)
 	h.mustSpawn(nil, nil)
