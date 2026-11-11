@@ -8,6 +8,7 @@ use (
 	./metronome
 	./platform
 	./submodules/gogpu
+	./submodules/wgpu
 )
 
 // The modules others require at v0.0.0 are replaced by their directories as
