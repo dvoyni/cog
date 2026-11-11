@@ -21,6 +21,7 @@ import (
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/metronome"
 	"github.com/dvoyni/cog/platform"
+	host "github.com/gogpu/gogpu"
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/wgpu"
 )
@@ -263,6 +264,31 @@ func (h *harness) takePublished() []any {
 	published := h.published
 	h.published = nil
 	return published
+}
+
+// takeLogged answers the errors logged since its last call, which then fail
+// the test no more.
+func (h *harness) takeLogged() []error {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	logged := h.logged
+	h.logged = nil
+	return logged
+}
+
+// pumpUntil pumps until done, run over the WindowManager as each pump's
+// edit, answers true, which it then answers, and answers false when it has
+// not in 2s. Each check sees what the pumps before it reported: the system
+// reports a focus change, and so the cursor mode in force, a pump or more
+// after it.
+func (h *harness) pumpUntil(done func(manager *platform.WindowManager) bool) bool {
+	h.t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	reached := false
+	for !reached && time.Now().Before(deadline) {
+		h.pump(func(manager *platform.WindowManager) { reached = done(manager) })
+	}
+	return reached
 }
 
 // publishAndWait publishes event on the main thread, and ticks it until the
@@ -833,6 +859,82 @@ func TestFocusMovesBetweenTwoWindows(t *testing.T) {
 		gogpu.ReportFocus(h.plugin, second, true)
 	})
 	checkFocusedAlone(second, first)
+}
+
+func TestALockedCursorReadsNormalWhileItsWindowLacksTheFocusAndLockedAfter(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+	locked := h.openShownWindow()
+	h.pump(func(manager *platform.WindowManager) { manager.SetCursorMode(locked, platform.CursorModeLocked) })
+	if !h.pumpUntil(func(manager *platform.WindowManager) bool { return manager.IsFocused(locked) }) {
+		t.Skip("the shown window never took the focus")
+	}
+
+	checkCursorMode := func(want platform.CursorMode, while string) {
+		t.Helper()
+		var mode platform.CursorMode
+		if !h.pumpUntil(func(manager *platform.WindowManager) bool {
+			mode = manager.EffectiveCursorMode(locked)
+			return mode == want
+		}) {
+			t.Errorf("the locked window's cursor mode in force is %v %s, want %v", mode, while, want)
+		}
+	}
+	checkCursorMode(platform.CursorModeLocked, "while it has the focus")
+	h.openShownWindow()
+	checkCursorMode(platform.CursorModeNormal, "while another window has the focus")
+	h.pump(func(manager *platform.WindowManager) { manager.SetHidden(locked, true) })
+	h.pump(func(manager *platform.WindowManager) { manager.SetHidden(locked, false) })
+	checkCursorMode(platform.CursorModeLocked, "once shown again, which gives it the focus")
+}
+
+func TestTheCursorsShapeAndHidingReachAWindowWithoutAnError(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+	var window platform.Window
+	h.pump(func(manager *platform.WindowManager) { window = manager.Open(testWindow) })
+
+	h.pump(func(manager *platform.WindowManager) {
+		manager.SetCursorShape(window, platform.CursorShapeText)
+		manager.SetCursorHidden(window, true)
+	})
+	h.pump(func(manager *platform.WindowManager) { manager.SetCursorHidden(window, false) })
+}
+
+func TestTheCursorMovesWhereAskedOrTheSystemsRefusalIsLogged(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+	window := h.openShownWindow()
+	position := platform.Point{X: 10, Y: 20}
+	// A cursor moved in from outside the window enters it, and macOS reports
+	// the enter a pump or more later, a few points off. So the cursor is
+	// moved in first, and the pointer waited for inside.
+	inside := platform.Point{X: 100, Y: 100}
+	h.pump(func(manager *platform.WindowManager) { manager.SetCursorPosition(window, inside) })
+	entered := false
+	for deadline := time.Now().Add(2 * time.Second); !entered && time.Now().Before(deadline); {
+		h.pump(nil)
+		h.readInputState(func(input *platform.InputState) { entered = input.IsPointerInside(window) })
+	}
+	h.takePublished()
+
+	h.pump(func(manager *platform.WindowManager) { manager.SetCursorPosition(window, position) })
+
+	logged := h.takeLogged()
+	h.readInputState(func(input *platform.InputState) {
+		placed := input.PointerPosition(window) == position
+		if len(logged) == 0 && !placed {
+			t.Errorf("the pointer is at %v after the cursor moved to %v, want there", input.PointerPosition(window), position)
+		}
+		if len(logged) > 0 && placed {
+			t.Errorf("the pointer was placed at %v although moving the cursor logged %v", position, logged)
+		}
+	})
+	for _, err := range logged {
+		if !errors.Is(err, host.ErrCursorPositionUnsupported) {
+			t.Errorf("moving the cursor logged %v, want the system's refusal, %v", err, host.ErrCursorPositionUnsupported)
+		}
+	}
 }
 
 func TestEachBeatClearsAShownWindowToThePassColor(t *testing.T) {

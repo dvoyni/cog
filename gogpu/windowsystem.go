@@ -11,9 +11,9 @@ import (
 )
 
 // windowSystem is the plugin's platform.WindowsSocket: it opens, changes and
-// closes the HostLoop's windows, pumps their events, reports their sizes and
-// focus, and their pointers through the input source. platform calls it on
-// the main thread alone.
+// closes the HostLoop's windows, sets their cursors, pumps their events,
+// reports their sizes and focus, and their pointers through the input
+// source. platform calls it on the main thread alone.
 type windowSystem struct {
 	// plugin holds the HostLoop, the windows open and what the next Pump
 	// reports.
@@ -94,20 +94,44 @@ func (w windowSystem) Change(window platform.Window, previous, next platform.Win
 	return nil
 }
 
-// SetCursor answers an error naming it: the cursor is not built yet.
-func (windowSystem) SetCursor(platform.Window, platform.CursorRequest) error {
-	return unbuilt("SetCursor")
+// SetCursor applies cursor to window's gogpu window: its mode, then its
+// shape, which converts by cast, or gogpu's CursorNone while it is hidden.
+// The shape comes last because X11 gives the window its parent's cursor when
+// a lock is released. It answers an error for a window not open.
+func (w windowSystem) SetCursor(window platform.Window, cursor platform.CursorRequest) error {
+	changed, ok := w.plugin.windows[window]
+	if !ok {
+		return fmt.Errorf("gogpu: setting the cursor of %v, which is not open", window)
+	}
+	changed.SetCursorMode(cursorModes[cursor.Mode])
+	shape := gpucontext.CursorShape(cursor.Shape)
+	if cursor.Hidden {
+		shape = gpucontext.CursorNone
+	}
+	changed.SetCursor(shape)
+	return nil
 }
 
-// EffectiveCursorMode answers platform.CursorModeNormal: the cursor is not
-// built yet.
-func (windowSystem) EffectiveCursorMode(platform.Window) platform.CursorMode {
-	return platform.CursorModeNormal
+// EffectiveCursorMode answers the cursor mode gogpu has in force in window:
+// Normal while it lacks the focus or the system refused the mode, and for a
+// window not open.
+func (w windowSystem) EffectiveCursorMode(window platform.Window) platform.CursorMode {
+	opened, ok := w.plugin.windows[window]
+	if !ok {
+		return platform.CursorModeNormal
+	}
+	return platform.CursorMode(slices.Index(cursorModes[:], opened.CursorMode()))
 }
 
-// SetCursorPosition answers an error naming it: the cursor is not built yet.
-func (windowSystem) SetCursorPosition(platform.Window, platform.Point) error {
-	return unbuilt("SetCursorPosition")
+// SetCursorPosition moves the cursor to position in window through gogpu,
+// and answers gogpu's error where the system refuses, as Wayland does with
+// gogpu's ErrCursorPositionUnsupported, and an error for a window not open.
+func (w windowSystem) SetCursorPosition(window platform.Window, position platform.Point) error {
+	moved, ok := w.plugin.windows[window]
+	if !ok {
+		return fmt.Errorf("gogpu: moving the cursor in %v, which is not open", window)
+	}
+	return moved.SetCursorPosition(float64(position.X), float64(position.Y))
 }
 
 // Close destroys window's gogpu window at once, with its surface, and drops
@@ -179,4 +203,12 @@ func (w windowSystem) reportClosed(closed host.WindowID) {
 			return
 		}
 	}
+}
+
+// cursorModes is gogpu's cursor mode for each of cog's, which orders
+// Confined before Locked where gogpu orders it after.
+var cursorModes = [...]gpucontext.CursorMode{
+	platform.CursorModeNormal:   gpucontext.CursorModeNormal,
+	platform.CursorModeConfined: gpucontext.CursorModeConfined,
+	platform.CursorModeLocked:   gpucontext.CursorModeLocked,
 }

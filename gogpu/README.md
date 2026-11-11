@@ -56,8 +56,9 @@ device call or command answering an error naming it, and
   window with its surface, its `Close` destroys it, and its `Pump` pumps the
   `HostLoop` and reports a window opened, resized, focused or not, closed by
   gogpu, or asked to close by the user, which keeps it open. Its `Change`
-  applies a window's new title, size, fullscreen and visibility. The cursor
-  answers an error naming it until it is built.
+  applies a window's new title, size, fullscreen and visibility. Its cursor
+  calls set a window's cursor shape, visibility and mode, answer the mode in
+  force, and move the cursor, answering why not where the system refuses.
   `platform.InputSourceSocket`, with its input source, which reports the
   keys and the pointer of each window.
 
