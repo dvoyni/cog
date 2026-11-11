@@ -7,3 +7,6 @@
 [submodule "wgpu"]
 	path = submodules/wgpu
 	url = git@github.com:dvoyni/wgpu.git
+[submodule "goffi"]
+	path = submodules/goffi
+	url = git@github.com:dvoyni/goffi.git
