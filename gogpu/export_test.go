@@ -25,6 +25,18 @@ func ReportKey(p *Plugin, window platform.Window, key gpucontext.Key, modifiers 
 	inputSource{plugin: p}.reportKey(window, key, modifiers, pressed)
 }
 
+// ReportText reports text typed in window, as the plugin's text callback on
+// window's gogpu window does when the operating system calls it.
+func ReportText(p *Plugin, window platform.Window, text string) {
+	inputSource{plugin: p}.reportText(window, text)
+}
+
+// ReportScroll reports event's scroll over window, as the plugin's scroll
+// callback on window's gogpu window does when the operating system calls it.
+func ReportScroll(p *Plugin, window platform.Window, event gpucontext.ScrollEvent) {
+	inputSource{plugin: p}.reportScroll(window, event)
+}
+
 // ReportFocus reports window's gain of the focus, or its loss when focused is
 // false, as the plugin's focus callback on window's gogpu window does when
 // the operating system calls it.

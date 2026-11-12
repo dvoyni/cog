@@ -437,6 +437,8 @@ func (h *harness) Init(c *kernel.Configurator, _ any) error {
 	subscribeRecord[platform.PointerMoveEvent](c, h)
 	subscribeRecord[platform.PointerLeaveEvent](c, h)
 	subscribeRecord[platform.KeyEvent](c, h)
+	subscribeRecord[platform.TextEvent](c, h)
+	subscribeRecord[platform.ScrollEvent](c, h)
 	subscribeRecord[gfx.BufferMappedEvent](c, h)
 	readCapture := c.RegisterTask1(func(k *kernel.Kernel, event gfx.CapturedEvent, device kernel.Read[gfx.Device]) kernel.NoResult {
 		picture, err := gfx.ReadCapture(device.Get(), event)
@@ -812,6 +814,55 @@ func TestAKeyHeldAtAFocusLossIsPressedAfreshAfterIt(t *testing.T) {
 	want := []any{platform.KeyEvent{Window: window, Key: platform.KeyW, Pressed: true}}
 	if published := h.takePublished(); !slices.Equal(published, want) {
 		t.Errorf("the press after the focus loss published %v, want %v", published, want)
+	}
+}
+
+func TestTypedTextIsReportedACharacterAtATimeInOrderWithTheKeys(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+	var window platform.Window
+	h.pump(func(manager *platform.WindowManager) { window = manager.Open(testWindow) })
+	h.takePublished()
+
+	onMainThread(func() {
+		gogpu.ReportKey(h.plugin, window, gpucontext.KeyE, 0, true)
+		gogpu.ReportText(h.plugin, window, "é")
+		gogpu.ReportKey(h.plugin, window, gpucontext.KeyE, 0, false)
+		gogpu.ReportText(h.plugin, window, "a😀")
+	})
+	h.pump(nil)
+
+	want := []any{
+		platform.KeyEvent{Window: window, Key: platform.KeyE, Pressed: true},
+		platform.TextEvent{Window: window, Char: 'é'},
+		platform.KeyEvent{Window: window, Key: platform.KeyE},
+		platform.TextEvent{Window: window, Char: 'a'},
+		platform.TextEvent{Window: window, Char: '😀'},
+	}
+	if published := h.takePublished(); !slices.Equal(published, want) {
+		t.Errorf("the typing published %v, want %v", published, want)
+	}
+}
+
+func TestAWheelScrollsInLinesAndATouchpadInPoints(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+	var window platform.Window
+	h.pump(func(manager *platform.WindowManager) { window = manager.Open(testWindow) })
+	h.takePublished()
+
+	onMainThread(func() {
+		gogpu.ReportScroll(h.plugin, window, gpucontext.ScrollEvent{DeltaY: 1, DeltaMode: gpucontext.ScrollDeltaLine})
+		gogpu.ReportScroll(h.plugin, window, gpucontext.ScrollEvent{DeltaX: 2.5, DeltaY: -4, DeltaMode: gpucontext.ScrollDeltaPixel})
+	})
+	h.pump(nil)
+
+	want := []any{
+		platform.ScrollEvent{Window: window, Delta: platform.Point{Y: 1}, Lines: true},
+		platform.ScrollEvent{Window: window, Delta: platform.Point{X: 2.5, Y: -4}},
+	}
+	if published := h.takePublished(); !slices.Equal(published, want) {
+		t.Errorf("the scrolls published %v, want %v", published, want)
 	}
 }
 

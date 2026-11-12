@@ -13,7 +13,8 @@ Status: being built: gfx gets gogpu's adapter and device, with the features
 and limits it asks for or the software adapter, windows open and close
 through platform, the user's close reported and the main window opened at
 start, each window's resizes, scale and focus reported, the pointer's moves,
-enter and leave and buttons reported, a locked cursor's motion as its delta,
+enter and leave and buttons, scroll and typed text reported, a locked
+cursor's motion as its delta,
 each window's cursor shape, mode and position set, each beat acquires and
 presents every shown window's framebuffer, encoders record render passes that clear, finish and submit, buffers are
 created, written and mapped, textures are created and written, with views
@@ -206,14 +207,20 @@ what `HostLoop` or the OS requires:
   ([gogpu plugin: keys, modifiers and repeats](https://github.com/dvoyni/cog/issues/758)).
 - **Key labels** come from the fork's label call, and a layout change from its
   layout-change report, on all four systems.
-- **Text** is what the layout, dead keys and Compose type, on every system.
+- **Text** is what the layout, dead keys and Compose type, on every system,
+  from the window's text callback, one `InputChangeText` per character, in
+  order with the keys
+  ([gogpu plugin: scroll and text](https://github.com/dvoyni/cog/issues/760)).
   Committed text from the IME, the emoji picker and dictation arrives on
   Windows only.
 - **The pointer:** moves, enter and leave, buttons, the implicit capture in a
   drag, and locked motion as `PointerDelta`, from `AppendChanges`. A cancel,
   and a button no `Key` names, the pen's eraser, report nothing
   ([gogpu plugin: pointer moves, enter and leave, buttons, and locked motion](https://github.com/dvoyni/cog/issues/759)).
-- **Scroll** arrives in lines or points, Wayland's wheel notches as lines.
+- **Scroll** arrives over the window under the pointer, in lines where gogpu
+  counts lines, as a wheel's notches on every system, Wayland's included, and
+  in points otherwise, as a touchpad's. No system reports pages
+  ([gogpu plugin: scroll and text](https://github.com/dvoyni/cog/issues/760)).
 
 ## Surfaces and frames
 
