@@ -105,7 +105,8 @@ The module is `cog/gogpu`, its own Go module in `go.work`, beside
   touch only gogpu's own objects.
 - **The adapter's queue can present.** A surface-less Vulkan adapter picks
   its graphics queue without checking presentation, so the first surface
-  configured confirms it.
+  configured confirms it: Vulkan's configure fails with wgpu's
+  `ErrSurfaceDeviceMismatch` when the queue cannot present to it.
 
 ## The main thread
 
@@ -466,6 +467,9 @@ Beside the gogpu fork:
 - **goffi:** cgo builds on Linux call `dlopen` through cgo, so the fork links
   under `-race`
   ([goffi fork: cgo builds on Linux call dlopen through cgo, so gogpu links under -race](https://github.com/dvoyni/cog/issues/725)).
+- **wgpu:** Vulkan's surface configure asks whether the device's queue
+  family presents to the surface
+  ([wgpu fork: Vulkan's surface configure fails when the device's queue cannot present](https://github.com/dvoyni/cog/issues/765)).
 
 ## Documented limits
 
