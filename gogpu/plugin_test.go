@@ -151,11 +151,22 @@ func (h *harness) readInputState(read func(input *platform.InputState)) {
 }
 
 // pump runs edit, unless nil, over the WindowManager under its write lock,
-// then ProcessEvents, ticking the main thread until both have run.
+// then ProcessEvents, ticking the main thread until both have run. It skips
+// the test where the system refused a window because it opens one, as
+// Wayland does, dropping that error.
 func (h *harness) pump(edit func(manager *platform.WindowManager)) {
 	h.t.Helper()
 	h.edit = edit
 	publishAndWait(h, pumpEvent{})
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	loggedBefore := len(h.logged)
+	h.logged = slices.DeleteFunc(h.logged, func(err error) bool {
+		return strings.Contains(err.Error(), "one window is supported")
+	})
+	if len(h.logged) < loggedBefore {
+		h.t.Skip("the system opens one window, and a second was asked for")
+	}
 }
 
 // draw publishes a beat of the render track, ticking the main thread until
