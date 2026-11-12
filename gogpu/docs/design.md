@@ -338,10 +338,21 @@ what `HostLoop` or the OS requires:
   builds it, so gfx's check at pipeline creation passes every vertex
   buffer. wgpu checks none against the shader either, so an input no
   buffer feeds reaches the driver unchecked.
-- **Buffers and textures are copied into buffers,** for readback: each
-  region of a texture's copy copies from that texture, whatever its
-  `TextureBase` names. The other copies and `ClearBuffer` are
-  [gogpu plugin: copy and clear commands, and the remaining pass state](https://github.com/dvoyni/cog/issues/751)'s.
+
+## Copies, clears and pass state
+
+([gogpu plugin: copy and clear commands, and the remaining pass state](https://github.com/dvoyni/cog/issues/751))
+
+- **Copies and clears are wgpu's,** on the buffers and textures stored at
+  their handles' indices. Each region of a copy copies from the source
+  and into the destination the call names, whatever textures the region
+  names.
+- **`ClearBuffer` clears nothing on DX12:** wgpu's DX12 command encoder
+  records no clear, until
+  [wgpu fork: ClearBuffer zeroes its range on DX12](https://github.com/dvoyni/cog/issues/781)
+  fixes it. Vulkan and Metal clear.
+- **Viewport, scissor, blend constant and stencil reference are set on
+  wgpu's pass as gfx gives them.**
 
 ## Reflected layouts
 

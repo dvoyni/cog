@@ -526,6 +526,7 @@ the [gogpu map](https://github.com/dvoyni/cog/issues/611):
 - no backend presents HDR;
 - DX12 reports a removed device only as an untyped error, and Metal never
   detects loss;
+- DX12's `ClearBuffer` records nothing, so a clear zeroes nothing there;
 - no public query sets or timestamps;
 - whether a minimized or occluded window on macOS holds `nextDrawable`, which
   has no timeout, is to be checked; if so, platform needs a minimized state.
