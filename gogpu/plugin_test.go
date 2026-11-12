@@ -1413,6 +1413,30 @@ func TestEachDrawSamplesATextureAsWritten(t *testing.T) {
 	}
 }
 
+func TestATextureDrawnIntoIsSampledAsDrawnByTheNextPass(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+
+	var readback gfx.Buffer
+	h.readDevice(func(device gfx.Device) {
+		encoder, err := device.CreateCommandEncoder(gfx.CommandEncoderDescriptor{})
+		if err != nil {
+			t.Errorf("CreateCommandEncoder answered %v", err)
+			return
+		}
+		drawn := createTexture(t, device, sampledSide)
+		target := createTexture(t, device, sampledSide)
+		coverTarget(t, device, encoder, false, createSampledTexture(t, device), drawn, func(pass gfx.RenderPassEncoder) {
+			pass.Draw(gfx.DrawArgs{VertexCount: 3, InstanceCount: 1})
+		})
+		coverTarget(t, device, encoder, false, drawn, target, func(pass gfx.RenderPassEncoder) {
+			pass.Draw(gfx.DrawArgs{VertexCount: 3, InstanceCount: 1})
+		})
+		readback = readTexture(t, device, encoder, target)
+	})
+	checkTexture(h, readback, sampledTexels)
+}
+
 func TestEachDispatchWritesABufferReadBackThroughACopy(t *testing.T) {
 	dispatches := map[string]func(pass gfx.ComputePassEncoder, indirect gfx.Buffer){
 		"Dispatch":         func(pass gfx.ComputePassEncoder, _ gfx.Buffer) { pass.Dispatch(2, 1, 1) },
@@ -1964,13 +1988,33 @@ func createSampledTexture(t *testing.T, device gfx.Device) gfx.Texture {
 }
 
 // drawSampledTexture writes sampledTexels into a texture, covers a target of
-// the same size with it through coveringWGSL with draw, given an indirect
+// the same size with it through coverTarget with draw, given an indirect
 // buffer of a draw's arguments at 0 and an indexed draw's at 16, submits,
 // copies the target into a buffer of 256-byte rows, and maps that for
 // reading. The pipeline's layout is reflected when reflected is true,
 // sampledLayout's otherwise.
 func drawSampledTexture(t *testing.T, device gfx.Device, reflected bool, draw func(pass gfx.RenderPassEncoder, indirect gfx.Buffer)) gfx.Buffer {
-	pictureView, err := device.CreateTextureView(createSampledTexture(t, device), gfx.TextureViewDescriptor{})
+	indices := createWrittenBuffer(t, device, gfx.BufferUsageFlagIndex, []uint32{0, 1, 2})
+	indirect := createWrittenBuffer(t, device, gfx.BufferUsageFlagIndirect, []uint32{3, 1, 0, 0, 3, 1, 0, 0, 0})
+	target := createTexture(t, device, sampledSide)
+	encoder, err := device.CreateCommandEncoder(gfx.CommandEncoderDescriptor{})
+	if err != nil {
+		t.Errorf("CreateCommandEncoder answered %v", err)
+		return gfx.Buffer{}
+	}
+	coverTarget(t, device, encoder, reflected, createSampledTexture(t, device), target, func(pass gfx.RenderPassEncoder) {
+		pass.SetIndexBuffer(indices, gfx.IndexFormatUint32, 0)
+		draw(pass, indirect)
+	})
+	return readTexture(t, device, encoder, target)
+}
+
+// coverTarget records into encoder a render pass covering target, sampledSide
+// texels square and cleared to transparent black, with picture through
+// coveringWGSL, from a vertex buffer of corners, with draw. The pipeline's
+// layout is reflected when reflected is true, sampledLayout's otherwise.
+func coverTarget(t *testing.T, device gfx.Device, encoder gfx.CommandEncoder, reflected bool, picture, target gfx.Texture, draw func(pass gfx.RenderPassEncoder)) {
+	pictureView, err := device.CreateTextureView(picture, gfx.TextureViewDescriptor{})
 	if err != nil {
 		t.Errorf("CreateTextureView answered %v", err)
 	}
@@ -1998,14 +2042,11 @@ func drawSampledTexture(t *testing.T, device gfx.Device, reflected bool, draw fu
 		t.Errorf("CreateBindGroup answered %v", err)
 	}
 	corners := createWrittenBuffer(t, device, gfx.BufferUsageFlagVertex, []float32{-1, -1, 3, -1, -1, 3})
-	indices := createWrittenBuffer(t, device, gfx.BufferUsageFlagIndex, []uint32{0, 1, 2})
-	indirect := createWrittenBuffer(t, device, gfx.BufferUsageFlagIndirect, []uint32{3, 1, 0, 0, 3, 1, 0, 0, 0})
-	return drawIntoTarget(t, device, gfx.RenderPassDepthStencilAttachment{}, func(pass gfx.RenderPassEncoder) {
+	recordIntoTarget(t, device, encoder, target, gfx.RenderPassDepthStencilAttachment{}, func(pass gfx.RenderPassEncoder) {
 		pass.SetPipeline(pipeline)
 		pass.SetBindGroup(0, group, nil)
 		pass.SetVertexBuffer(0, corners, 0)
-		pass.SetIndexBuffer(indices, gfx.IndexFormatUint32, 0)
-		draw(pass, indirect)
+		draw(pass)
 	})
 }
 
@@ -2051,14 +2092,21 @@ func paintTarget(t *testing.T, device gfx.Device, blend gfx.BlendState, depthSte
 // reading.
 func drawIntoTarget(t *testing.T, device gfx.Device, depthStencil gfx.RenderPassDepthStencilAttachment, draw func(pass gfx.RenderPassEncoder)) gfx.Buffer {
 	target := createTexture(t, device, sampledSide)
-	targetView, err := device.CreateTextureView(target, gfx.TextureViewDescriptor{})
-	if err != nil {
-		t.Errorf("CreateTextureView answered %v", err)
-	}
 	encoder, err := device.CreateCommandEncoder(gfx.CommandEncoderDescriptor{})
 	if err != nil {
 		t.Errorf("CreateCommandEncoder answered %v", err)
 		return gfx.Buffer{}
+	}
+	recordIntoTarget(t, device, encoder, target, depthStencil, draw)
+	return readTexture(t, device, encoder, target)
+}
+
+// recordIntoTarget records into encoder draw in a render pass on target,
+// cleared to transparent black, and depthStencil.
+func recordIntoTarget(t *testing.T, device gfx.Device, encoder gfx.CommandEncoder, target gfx.Texture, depthStencil gfx.RenderPassDepthStencilAttachment, draw func(pass gfx.RenderPassEncoder)) {
+	targetView, err := device.CreateTextureView(target, gfx.TextureViewDescriptor{})
+	if err != nil {
+		t.Errorf("CreateTextureView answered %v", err)
 	}
 	pass := encoder.BeginRenderPass(gfx.RenderPassDescriptor{
 		ColorAttachments:       []gfx.RenderPassColorAttachment{{View: targetView, LoadOp: gfx.LoadOpClear, StoreOp: gfx.StoreOpStore}},
@@ -2066,7 +2114,6 @@ func drawIntoTarget(t *testing.T, device gfx.Device, depthStencil gfx.RenderPass
 	})
 	draw(pass)
 	pass.End()
-	return readTexture(t, device, encoder, target)
 }
 
 // readTexture copies texture, sampledSide texels square, after encoder's

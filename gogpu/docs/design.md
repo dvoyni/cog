@@ -280,6 +280,10 @@ what `HostLoop` or the OS requires:
   index, and `Poll` the newest one finished. gogpu's own submits share the
   queue, so the indices rise from one with gaps; gfx needs them only to
   rise.
+- **Barriers are wgpu's,** from each resource's last use; the plugin
+  records none. A texture one pass draws into reads as drawn when the next
+  pass samples it
+  ([wgpu fork: a texture sampled after its use as an attachment gets its barrier on Vulkan](https://github.com/dvoyni/cog/issues/764)).
 
 ## Buffers
 
@@ -462,11 +466,6 @@ Beside the gogpu fork:
 - **goffi:** cgo builds on Linux call `dlopen` through cgo, so the fork links
   under `-race`
   ([goffi fork: cgo builds on Linux call dlopen through cgo, so gogpu links under -race](https://github.com/dvoyni/cog/issues/725)).
-- **wgpu:** a texture sampled through a bind group gets no barrier from its
-  previous use on Vulkan. The fix starts from the first failing
-  render-to-texture-then-sample test, in `dvoyni/wgpu` joined as a submodule,
-  and must land before scene starts shadows or post effects. The offscreen
-  pass of a captured frame depends on it too.
 
 ## Documented limits
 

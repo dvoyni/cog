@@ -500,8 +500,8 @@ device's release and the recovery among them, for a backend to pin.
 gfx fixes only the ends of the frame. Everything between is passes the user
 declares, run on the GPU in submit order, so post effects and deferred need
 nothing from gfx beyond a correct barrier when a target is sampled after it
-was rendered: the Vulkan barrier fix on the
-[gogpu map](https://github.com/dvoyni/cog/issues/611).
+was rendered, which the backend records
+([wgpu fork: a texture sampled after its use as an attachment gets its barrier on Vulkan](https://github.com/dvoyni/cog/issues/764)).
 
 ## Gaps in the wgpu fork and the gogpu backend
 
