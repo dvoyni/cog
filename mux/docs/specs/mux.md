@@ -223,7 +223,7 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
   - `Tween`, `Hold` and `Call` start after everything placed so far;
   - `With` starts a tween alongside the previous one;
   - `Wait(d)` adds a gap.
-- `End(path, holes...)` answers the end of an address's last override.
+- `End(path, holes...)` answers when an address is next free: the end of its last override, or `Now` when none is left or the last has ended. `Sequence(End(path, holes...))` therefore queues after whatever plays and never starts in the past.
 - `Cancel(path, holes...)` removes every override on an address, running or yet to start. The current value is then the model's, which may jump.
 
 ### Blending and leaving
@@ -259,7 +259,7 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
 - `Timeline.Current(path, model *M, holes...) (T, bool)` answers the blend of the address's overrides in the sample, or `path.Get`'s value when none is active. A count of active overrides per path skips the lookup on a path with none.
 - `Timeline.All(path, model *M, fixedHoles...) iter.Seq2[int64, T]` walks the path's last hole, with the holes before it passed fixed:
   - over a slice or array, in index order, merged with the sample's sorted overrides;
-  - over a map, in Go's map order, with a lookup per entry, yielding interned indices.
+  - over a map, in Go's map order, with a lookup per entry, yielding interned indices. An element whose key was never interned is skipped: no path reaches it, since a key's hole is its index. An update interns each key when it adds the element, and a game interns every key after loading, since indices live one run.
 - `All` stays a one-line wrapper over a walk that is never inlined, so the iterator never escapes and allocates nothing, also on `break`. A view ranges over it directly.
 
 ### Stepping, sampling and time
