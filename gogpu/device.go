@@ -66,6 +66,19 @@ type device struct {
 	computePipelines container.ObjectTable[atomic.Pointer[wgpu.ComputePipeline]]
 }
 
+// newDevice answers a device over gogpu's, which loop has just requested or
+// replaced, its frames beginning and ending through loop, and windows the
+// plugin's map of the windows open.
+func newDevice(loop *host.HostLoop, app *host.App, windows map[platform.Window]*host.Window) *device {
+	return &device{
+		device:       wgpu.DeviceFromHandle(app.GPUContextProvider().Device()),
+		loop:         loop,
+		windows:      windows,
+		frames:       map[platform.Window]acquiredFrame{},
+		surfaceSizes: map[platform.Window]wgpu.Extent3D{},
+	}
+}
+
 // CreateBuffer creates wgpu's buffer and stores it at buffer's index.
 func (d *device) CreateBuffer(buffer gfx.Buffer, descriptor gfx.BufferDescriptor) error {
 	created, err := d.device.CreateBuffer(&wgpu.BufferDescriptor{
@@ -85,9 +98,7 @@ func (d *device) CreateBuffer(buffer gfx.Buffer, descriptor gfx.BufferDescriptor
 // wgpu keeps it until the submits using it finish.
 func (d *device) ReleaseBuffer(buffer gfx.Buffer) {
 	if slot := d.buffers.At(buffer.Index()); slot != nil {
-		if released := slot.buffer.Swap(nil); released != nil {
-			released.Release()
-		}
+		releaseSlot(&slot.buffer)
 	}
 }
 
@@ -669,10 +680,29 @@ func (d *device) Present(window platform.Window) error {
 
 func (*device) WaitIdle() error { return unbuilt("WaitIdle") }
 
-// Release releases the pipeline drawing captured frames onto windows, and its
-// layouts, when a capture made them. gogpu's device itself goes with the
-// HostLoop.
+// Release presents each frame still acquired, which a lost device's skipped
+// present leaves begun, its error dropped, so the HostLoop is outside a
+// frame. It then releases every object the device holds, since gfx releases
+// none on a lost device, those using others first, and the pipeline drawing
+// captured frames onto windows, and its layouts, when a capture made them.
+// gogpu's device itself goes with the HostLoop, or with the replacement the
+// adapter's next RequestDevice makes.
 func (d *device) Release() {
+	for window := range d.frames {
+		_ = d.Present(window)
+	}
+	releaseEvery(&d.bindGroups)
+	releaseEvery(&d.renderPipelines)
+	releaseEvery(&d.computePipelines)
+	releaseEvery(&d.pipelineLayouts)
+	releaseEvery(&d.bindGroupLayouts)
+	releaseEvery(&d.shaderModules)
+	releaseEvery(&d.samplers)
+	releaseEvery(&d.textureViews)
+	releaseEvery(&d.textures)
+	for slot := range d.buffers.Slots() {
+		releaseSlot(&slot.buffer)
+	}
 	if d.offscreenPipeline != nil {
 		d.offscreenPipeline.Release()
 		d.offscreenPipelineLayout.Release()
@@ -723,9 +753,27 @@ func releaseStored[T any, P interface {
 	Release()
 }](objects *container.ObjectTable[atomic.Pointer[T]], index uint32) {
 	if slot := objects.At(index); slot != nil {
-		if released := P(slot.Swap(nil)); released != nil {
-			released.Release()
-		}
+		releaseSlot[T, P](slot)
+	}
+}
+
+// releaseEvery drops every object stored in objects, and releases it.
+func releaseEvery[T any, P interface {
+	*T
+	Release()
+}](objects *container.ObjectTable[atomic.Pointer[T]]) {
+	for slot := range objects.Slots() {
+		releaseSlot[T, P](slot)
+	}
+}
+
+// releaseSlot drops the object stored in slot, and releases it.
+func releaseSlot[T any, P interface {
+	*T
+	Release()
+}](slot *atomic.Pointer[T]) {
+	if released := P(slot.Swap(nil)); released != nil {
+		released.Release()
 	}
 }
 

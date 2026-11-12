@@ -29,6 +29,9 @@ type Plugin struct {
 	// app is the fork's App the loop drives, which labels the keys; nil while
 	// loop is.
 	app *host.App
+	// adapter is the adapter the instance answered when it started the loop,
+	// which it answers again to a recovery's request; nil while loop is.
+	adapter *adapter
 	// windows maps each window the window system opened to gogpu's; the
 	// instance makes it with the loop, and the device reads it.
 	windows map[platform.Window]*host.Window

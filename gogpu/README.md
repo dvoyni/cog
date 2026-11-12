@@ -20,7 +20,8 @@ pipeline layouts are created, render and compute pipelines draw and
 dispatch, over explicit layouts or ones reflected, their vertex buffers
 checked against the inputs reflected, buffers and textures are copied into
 buffers, a captured frame is drawn offscreen, then onto the window, a device
-lost at acquire, present or submit answers gfx's `ErrDeviceLost`, with every
+lost at acquire, present or submit answers gfx's `ErrDeviceLost` and is
+replaced, its windows kept, with every
 other device call or command answering an error naming it, and
 `gogpu/shader` preprocesses shaders. The design is in
 [`docs/design.md`](docs/design.md), the guide in
@@ -71,4 +72,5 @@ The plugin is listed after gfx and platform, and checks them with
 
 macOS on Metal, Windows on Vulkan and DX12, Linux on Vulkan over X11 and
 Wayland, and wgpu's software adapter anywhere. Wayland supports one window,
-and committed IME text works on Windows only.
+and committed IME text works on Windows only. Metal never detects a lost
+device, so a device on Metal is never replaced.
