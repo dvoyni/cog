@@ -12,7 +12,8 @@ windows, surfaces and device.
 Status: being built: gfx gets gogpu's adapter and device, with the features
 and limits it asks for or the software adapter, windows open and close
 through platform, the user's close reported and the main window opened at
-start, each window's resizes, scale and focus reported, the pointer's moves,
+start, each window's resizes, scale and focus reported, keys labelled in the
+current layout, and its changes reported, the pointer's moves,
 enter and leave and buttons, scroll and typed text reported, a locked
 cursor's motion as its delta,
 each window's cursor shape, mode and position set, each beat acquires and
@@ -207,7 +208,10 @@ what `HostLoop` or the OS requires:
   platform releases them
   ([gogpu plugin: keys, modifiers and repeats](https://github.com/dvoyni/cog/issues/758)).
 - **Key labels** come from the fork's label call, and a layout change from its
-  layout-change report, on all four systems.
+  layout-change report, on all four systems. Linux learns the layout with
+  its first window, so its labels are 0 until then, and their arrival is
+  published as a layout change
+  ([gogpu plugin: key labels and layout changes](https://github.com/dvoyni/cog/issues/761)).
 - **Text** is what the layout, dead keys and Compose type, on every system,
   from the window's text callback, one `InputChangeText` per character, in
   order with the keys

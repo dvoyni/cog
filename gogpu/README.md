@@ -7,9 +7,9 @@ the kernel's main-thread tick. Its `shader` package is the WGSL preprocessor.
 
 Status: being built: gfx gets gogpu's adapter and device, windows open and
 close through platform, their title, size, fullscreen and visibility
-change, their resizes, scale and focus, keys with their modifiers and
-repeats, typed text, the pointer's moves, enter and leave and buttons, and
-scroll are reported,
+change, their resizes, scale and focus, keys with their modifiers, repeats
+and labels in the current layout, the layout's changes, typed text, the
+pointer's moves, enter and leave and buttons, and scroll are reported,
 a locked cursor's motion as its delta, each window's cursor shape, mode and
 position are set, each beat acquires and presents every shown
 window's framebuffer,
