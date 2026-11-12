@@ -32,10 +32,12 @@ type device struct {
 	// under gfx's write lock and read by its acquires on the main thread. A
 	// closed window's size is left in it.
 	surfaceSizes map[platform.Window]wgpu.Extent3D
-	// offscreenGroupLayout and offscreenPipeline draw an offscreen texture
-	// onto a window, made at the first captured acquire.
-	offscreenGroupLayout *wgpu.BindGroupLayout
-	offscreenPipeline    *wgpu.RenderPipeline
+	// offscreenGroupLayout, offscreenPipelineLayout and offscreenPipeline
+	// draw an offscreen texture onto a window, made at the first captured
+	// acquire and released at Release.
+	offscreenGroupLayout    *wgpu.BindGroupLayout
+	offscreenPipelineLayout *wgpu.PipelineLayout
+	offscreenPipeline       *wgpu.RenderPipeline
 	// buffers holds each buffer, and its latest map, at its gfx index.
 	buffers container.ObjectTable[bufferSlot]
 	// textures holds each texture at its gfx index, and a captured frame's
@@ -663,8 +665,16 @@ func (d *device) Present(window platform.Window) error {
 
 func (*device) WaitIdle() error { return unbuilt("WaitIdle") }
 
-// Release does nothing: gogpu's device goes with the HostLoop.
-func (*device) Release() {}
+// Release releases the pipeline drawing captured frames onto windows, and its
+// layouts, when a capture made them. gogpu's device itself goes with the
+// HostLoop.
+func (d *device) Release() {
+	if d.offscreenPipeline != nil {
+		d.offscreenPipeline.Release()
+		d.offscreenPipelineLayout.Release()
+		d.offscreenGroupLayout.Release()
+	}
+}
 
 // storedBuffer answers the buffer stored at buffer's index, or an error when
 // it holds none.

@@ -100,8 +100,9 @@ func (d *device) drawOffscreenTexture(offscreen *offscreenTexture, surfaceView *
 // createOffscreenPipeline creates the pipeline drawing an offscreen texture
 // onto a window's surface, and the layout of the bind groups it samples one
 // through. Its pipeline layout is kept for the pipeline, which binds through
-// it, and its shader module is released once the pipeline is made. A
-// failure releases what it created, and answers wgpu's error.
+// it, and all three go at the device's Release; its shader module is released
+// once the pipeline is made. A failure releases what it created, and answers
+// wgpu's error.
 func (d *device) createOffscreenPipeline() error {
 	module, err := d.device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{Label: offscreenLabel, WGSL: offscreenWGSL})
 	if err != nil {
@@ -143,6 +144,7 @@ func (d *device) createOffscreenPipeline() error {
 		return err
 	}
 	d.offscreenGroupLayout = groupLayout
+	d.offscreenPipelineLayout = layout
 	d.offscreenPipeline = pipeline
 	return nil
 }
