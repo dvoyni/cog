@@ -24,7 +24,8 @@ layouts are created, render and compute pipelines draw and dispatch, over
 explicit layouts or ones reflected, their vertex buffers checked against
 the inputs reflected, buffers and textures are copied into buffers, a
 captured frame is drawn offscreen, then onto the window, a device lost at acquire,
-present or submit answers gfx's `ErrDeviceLost`, with every other device call
+present or submit answers gfx's `ErrDeviceLost` and is replaced, its windows
+kept, with every other device call
 or command answering an error naming it, and `gogpu/shader` preprocesses shaders. The
 decisions come from the
 [gogpu map](https://github.com/dvoyni/cog/issues/611); each section links
@@ -434,9 +435,22 @@ what `HostLoop` or the OS requires:
   objects and the device, requests a device from the same or a fresh adapter
   with the same descriptor, and marks every surface unconfigured. gfx's
   recovery task, pinned to the main thread, calls it under the write lock on
-  `gfx.Device`, then recreates its objects on the device gogpu now provides.
-- **Metal never detects a loss,** so recovery never runs there. It is a
-  backend gap, recorded in gfx's design.
+  `gfx.Device`, then recreates its objects on the device gogpu now provides
+  ([gogpu plugin: a lost device replaced, windows kept](https://github.com/dvoyni/cog/issues/763)):
+  - The lost device's `Release` presents each frame still acquired, which
+    gfx skipped, so `HostLoop` is outside a frame, then releases every object
+    it holds: gfx releases none on a lost device, and the fork's replacement
+    releases only gogpu's own.
+  - The adapter's next `RequestDevice` is `HostLoop.ReplaceDevice`, which
+    keeps the first request's features and limits.
+  - When the replacement fails, gfx releases the adapter and requests another:
+    the instance answers the same one, whose `RequestDevice` tries the
+    replacement again at once. A recovery that still fails is tried again a
+    second later.
+  - After a replacement from a fresh adapter, the adapter still answers the
+    first one's information, features and limits.
+- **Metal never detects a loss,** so a device on Metal is never replaced. It
+  is a backend gap, recorded in gfx's design.
 
 ## The fork changes
 

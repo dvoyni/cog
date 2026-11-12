@@ -9,13 +9,17 @@ import (
 )
 
 // adapter is gogpu's adapter, which the started HostLoop brought up with no
-// device.
+// device. A replacement from a fresh adapter leaves it answering the first
+// one's information, features and limits.
 type adapter struct {
 	loop *host.HostLoop
 	app  *host.App
 	// windows is the plugin's map of the windows open to gogpu's.
 	windows map[platform.Window]*host.Window
 	adapter *wgpu.Adapter
+	// deviceRequested is whether RequestDevice has requested gogpu's device,
+	// so that its next request, a recovery's, replaces it.
+	deviceRequested bool
 }
 
 // Info answers gogpu's adapter's information.
@@ -79,7 +83,18 @@ func (a *adapter) Limits() gfx.Limits {
 // adapter's own: they are ray tracing's, push constants' and the like, which
 // gfx never uses, and Metal reports some as zero, below WebGPU's defaults. A
 // feature or limit the adapter lacks answers the fork's error naming it.
+// Every later request, a recovery's after a loss, has the HostLoop replace
+// the device instead, keeping every window: from the same adapter or, when
+// it refuses, a fresh one, with the first request's features and limits,
+// which gfx asks for again. A replacement that fails leaves gogpu no device,
+// and the next request tries again.
 func (a *adapter) RequestDevice(descriptor gfx.DeviceDescriptor) (gfx.BackendDevice, error) {
+	if a.deviceRequested {
+		if err := a.loop.ReplaceDevice(); err != nil {
+			return nil, err
+		}
+		return newDevice(a.loop, a.app, a.windows), nil
+	}
 	required := descriptor.RequiredLimits
 	limits := a.adapter.Limits()
 	limits.MaxTextureDimension1D = required.MaxTextureDimension1D
@@ -116,14 +131,10 @@ func (a *adapter) RequestDevice(descriptor gfx.DeviceDescriptor) (gfx.BackendDev
 	if err := a.loop.RequestDevice(gputypes.Features(descriptor.RequiredFeatures), &limits); err != nil {
 		return nil, err
 	}
-	return &device{
-		device:       wgpu.DeviceFromHandle(a.app.GPUContextProvider().Device()),
-		loop:         a.loop,
-		windows:      a.windows,
-		frames:       map[platform.Window]acquiredFrame{},
-		surfaceSizes: map[platform.Window]wgpu.Extent3D{},
-	}, nil
+	a.deviceRequested = true
+	return newDevice(a.loop, a.app, a.windows), nil
 }
 
-// Release does nothing: gogpu's adapter goes with the HostLoop.
+// Release does nothing: gogpu's adapter goes with the HostLoop, and the
+// instance answers it again to a recovery's request.
 func (*adapter) Release() {}

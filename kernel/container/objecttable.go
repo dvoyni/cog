@@ -1,6 +1,7 @@
 package container
 
 import (
+	"iter"
 	"sync"
 	"sync/atomic"
 )
@@ -50,4 +51,23 @@ func (table *ObjectTable[T]) Grow(index uint32) *T {
 	}
 	table.chunks.Store(&grown)
 	return &grown[index>>chunkShift][index&chunkMask]
+}
+
+// Slots yields every slot of the chunks the table has grown, in index order,
+// those its owner left empty too. It reads the chunks once, so it is safe from
+// any goroutine, and yields none a Grow adds meanwhile.
+func (table *ObjectTable[T]) Slots() iter.Seq[*T] {
+	return func(yield func(*T) bool) {
+		chunks := table.chunks.Load()
+		if chunks == nil {
+			return
+		}
+		for _, chunk := range *chunks {
+			for index := range chunk {
+				if !yield(&chunk[index]) {
+					return
+				}
+			}
+		}
+	}
 }

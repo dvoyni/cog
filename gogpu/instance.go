@@ -1,7 +1,6 @@
 package gogpu
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
 	"runtime"
@@ -27,13 +26,14 @@ type instance struct {
 // RequestAdapter starts the HostLoop, with no device and no window, on the
 // thread gfx's Start runs on, which is main, and answers gogpu's adapter on
 // Config's backend with options' power preference, or wgpu's software adapter
-// when options force the fallback. A device replacement is not built yet: a
-// second request answers an error. gogpu keeps running with no window open,
-// and reports to the window system a window it closes by itself, and to the
-// input source each change of the keyboard layout.
+// when options force the fallback. A later request, a recovery's after the
+// adapter's RequestDevice failed, answers the same adapter, whose next
+// RequestDevice tries the replacement again. gogpu keeps running with no
+// window open, and reports to the window system a window it closes by
+// itself, and to the input source each change of the keyboard layout.
 func (i instance) RequestAdapter(options gfx.RequestAdapterOptions) (gfx.BackendAdapter, error) {
-	if i.plugin.loop != nil {
-		return nil, errors.New("gogpu: a device replacement is not built yet")
+	if i.plugin.adapter != nil {
+		return i.plugin.adapter, nil
 	}
 	graphicsAPI := host.GraphicsAPIVulkan
 	switch i.backend {
@@ -63,7 +63,8 @@ func (i instance) RequestAdapter(options gfx.RequestAdapterOptions) (gfx.Backend
 	i.plugin.loop = loop
 	i.plugin.app = app
 	i.plugin.windows = map[platform.Window]*host.Window{}
-	return &adapter{loop: loop, app: app, windows: i.plugin.windows, adapter: wgpu.AdapterFromHandle(app.GPUContextProvider().Adapter())}, nil
+	i.plugin.adapter = &adapter{loop: loop, app: app, windows: i.plugin.windows, adapter: wgpu.AdapterFromHandle(app.GPUContextProvider().Adapter())}
+	return i.plugin.adapter, nil
 }
 
 // CreateSurface does nothing: gogpu made the window's surface when it opened
@@ -81,14 +82,15 @@ func (instance) PreprocessShader(files fs.FS, path string, defines []gfx.ShaderD
 
 // Release stops the HostLoop, which closes every window still open and
 // releases gogpu's device, adapter and platform, and forgets the App, the
-// windows and what they had left to report, from gfx's Tasks.ReleaseDevice,
-// pinned to the main thread, or from gfx's Destroy after a Start that failed,
-// which runs on Spawn's thread.
+// adapter, the windows and what they had left to report, from gfx's
+// Tasks.ReleaseDevice, pinned to the main thread, or from gfx's Destroy after
+// a Start that failed, which runs on Spawn's thread.
 func (i instance) Release() {
 	if i.plugin.loop != nil {
 		i.plugin.loop.Stop()
 		i.plugin.loop = nil
 		i.plugin.app = nil
+		i.plugin.adapter = nil
 	}
 	i.plugin.windows = nil
 	i.plugin.changes = nil

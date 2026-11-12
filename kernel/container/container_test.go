@@ -122,6 +122,29 @@ func TestObjectTableGrowsToHoldAnIndex(t *testing.T) {
 	}
 }
 
+func TestObjectTableSlotsYieldsEverySlotGrownInIndexOrder(t *testing.T) {
+	table := &ObjectTable[slot]{}
+	for range table.Slots() {
+		t.Fatal("an empty table yields a slot")
+	}
+	table.Grow(chunkSize + 1).value = 7
+	var yielded []*slot
+	for held := range table.Slots() {
+		yielded = append(yielded, held)
+	}
+	if len(yielded) != 2*chunkSize {
+		t.Fatalf("Slots yielded %d slots, want the %d of the two chunks grown", len(yielded), 2*chunkSize)
+	}
+	for index, held := range yielded {
+		if held != table.At(uint32(index)) {
+			t.Fatalf("Slots' slot %d is %p, not At's %p", index, held, table.At(uint32(index)))
+		}
+	}
+	for range table.Slots() {
+		break
+	}
+}
+
 func TestObjectTableConcurrentGrowLosesNoSlot(t *testing.T) {
 	table := &ObjectTable[slot]{}
 	const writerCount = 8
