@@ -20,9 +20,9 @@ presents every shown window's framebuffer, encoders record render passes that cl
 created, written and mapped, textures are created and written, with views
 and samplers, shader modules, bind group layouts, bind groups and pipeline
 layouts are created, render and compute pipelines draw and dispatch, over
-explicit layouts or ones reflected, buffers and textures are copied into
-buffers, vertex inputs are not reflected yet, a captured frame is drawn
-offscreen, then onto the window, a device lost at acquire,
+explicit layouts or ones reflected, their vertex buffers checked against
+the inputs reflected, buffers and textures are copied into buffers, a
+captured frame is drawn offscreen, then onto the window, a device lost at acquire,
 present or submit answers gfx's `ErrDeviceLost`, with every other device call
 or command answering an error naming it, and `gogpu/shader` preprocesses shaders. The
 decisions come from the
@@ -345,12 +345,6 @@ what `HostLoop` or the OS requires:
 - **A pass command takes the objects stored at its handles' indices.** One
   holding nothing is the encoder's error, which `Finish` answers naming
   it; once the encoder has an error, its commands record nothing.
-- **Vertex inputs are not reflected yet.** `ReflectVertexInputs` answers
-  none until
-  [gogpu plugin: vertex inputs reflected at module creation](https://github.com/dvoyni/cog/issues/753)
-  builds it, so gfx's check at pipeline creation passes every vertex
-  buffer. wgpu checks none against the shader either, so an input no
-  buffer feeds reaches the driver unchecked.
 
 ## Copies, clears and pass state
 
@@ -388,6 +382,19 @@ what `HostLoop` or the OS requires:
   stage,** at the pipeline's creation as at its reflection: wgpu is handed
   the name reflected, as it refuses an empty one. None, or several, answer
   an error naming the stage.
+
+## Reflected vertex inputs
+
+([gogpu plugin: vertex inputs reflected at module creation](https://github.com/dvoyni/cog/issues/753))
+
+- **A vertex entry point's inputs are reflected with its bindings:** each
+  argument at a location, and each member at a location of a structure
+  argument, builtins aside, of its scalar type and component count, an f16
+  one as `ScalarTypeFloat16`.
+- **gfx's check at pipeline creation is the only one.** wgpu checks no
+  vertex buffer against the shader, so an input no attribute feeds, or one
+  fed by a format of another type, is gfx's `ErrVertexMismatch`, where it
+  would otherwise reach the driver unchecked.
 
 ## Shaders
 

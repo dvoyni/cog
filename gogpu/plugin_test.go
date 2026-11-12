@@ -1764,6 +1764,50 @@ func TestAnEmptyEntryPointIsTheModulesOneOfItsStage(t *testing.T) {
 	})
 }
 
+func TestAPipelinesVertexBuffersAreCheckedAgainstTheInputsReflected(t *testing.T) {
+	position := gfx.VertexAttribute{Format: gfx.VertexFormatFloat32x2, ShaderLocation: 0}
+	shade := gfx.VertexAttribute{Format: gfx.VertexFormatFloat32, Offset: 8, ShaderLocation: 1}
+	layer := gfx.VertexAttribute{Format: gfx.VertexFormatSint32, Offset: 12, ShaderLocation: 2}
+	tests := map[string]struct {
+		attributes []gfx.VertexAttribute
+		// named is what the error names, empty when there is none.
+		named string
+	}{
+		"every input fed":                 {[]gfx.VertexAttribute{position, shade, layer}, ""},
+		"a member's vector unfed":         {[]gfx.VertexAttribute{shade, layer}, "location 0 feeds the shader's input vec2<f32>"},
+		"a member's scalar unfed":         {[]gfx.VertexAttribute{position, layer}, "location 1 feeds the shader's input f32"},
+		"an argument's integer fed float": {[]gfx.VertexAttribute{position, shade, {Format: gfx.VertexFormatFloat32, Offset: 12, ShaderLocation: 2}}, "cannot feed the shader's input i32"},
+	}
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+
+	h.readDevice(func(device gfx.Device) {
+		module, err := device.CreateShaderModule(gfx.ShaderModuleDescriptor{WGSL: vertexInputsWGSL})
+		if err != nil {
+			t.Errorf("CreateShaderModule answered %v", err)
+			return
+		}
+		defer device.ReleaseShaderModule(module)
+		for name, test := range tests {
+			pipeline, err := device.CreateRenderPipeline(gfx.RenderPipelineDescriptor{
+				Vertex: gfx.VertexState{Module: module, Buffers: []gfx.VertexBufferLayout{{ArrayStride: 16, Attributes: test.attributes}}},
+				Fragment: gfx.FragmentState{Module: module, Targets: []gfx.ColorTargetState{{
+					Format: gfx.TextureFormatRGBA8Unorm, WriteMask: gfx.ColorWriteFlagAll,
+				}}},
+			})
+			switch {
+			case test.named == "" && err != nil:
+				t.Errorf("%s: CreateRenderPipeline answered %v", name, err)
+			case test.named != "" && (!errors.Is(err, gfx.ErrVertexMismatch) || !strings.Contains(err.Error(), test.named)):
+				t.Errorf("%s: CreateRenderPipeline answered %v, want ErrVertexMismatch naming %q", name, err, test.named)
+			}
+			if err == nil {
+				device.ReleaseRenderPipeline(pipeline)
+			}
+		}
+	})
+}
+
 func TestAPassCommandOnAHandleHoldingNothingFailsFinishNamingIt(t *testing.T) {
 	h := newHarness(t)
 	h.mustSpawn(nil, nil)
@@ -1913,6 +1957,27 @@ fn corner(@builtin(vertex_index) index: u32) -> @builtin(position) vec4f {
 @fragment
 fn paint() -> @location(0) vec4f {
 	return tint;
+}
+`
+
+// vertexInputsWGSL's one vertex entry point reads a structure of a vec2f at
+// location 0, an f32 at location 1 and the vertex index, an i32 at location
+// 2, and the instance index.
+const vertexInputsWGSL = `
+struct Corner {
+	@location(0) position: vec2f,
+	@location(1) shade: f32,
+	@builtin(vertex_index) index: u32,
+}
+
+@vertex
+fn corner(corner: Corner, @location(2) layer: i32, @builtin(instance_index) instance: u32) -> @builtin(position) vec4f {
+	return vec4f(corner.position * corner.shade, f32(layer) + f32(corner.index + instance), 1);
+}
+
+@fragment
+fn paint() -> @location(0) vec4f {
+	return vec4f(1);
 }
 `
 

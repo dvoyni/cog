@@ -17,11 +17,11 @@ encoders record render passes that clear, finish and submit, buffers are
 created, written and mapped, textures are created and written,
 with views and samplers, shader modules, bind group layouts, bind groups and
 pipeline layouts are created, render and compute pipelines draw and
-dispatch, over explicit layouts or ones reflected, buffers and textures are
-copied into buffers, vertex inputs are not reflected yet, a captured frame
-is drawn offscreen, then onto the window, a device lost at
-acquire, present or submit answers gfx's `ErrDeviceLost`, with every other
-device call or command answering an error naming it, and
+dispatch, over explicit layouts or ones reflected, their vertex buffers
+checked against the inputs reflected, buffers and textures are copied into
+buffers, a captured frame is drawn offscreen, then onto the window, a device
+lost at acquire, present or submit answers gfx's `ErrDeviceLost`, with every
+other device call or command answering an error naming it, and
 `gogpu/shader` preprocesses shaders. The design is in
 [`docs/design.md`](docs/design.md), the guide in
 [`docs/README.md`](docs/README.md), and the build on the

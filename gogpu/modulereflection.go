@@ -11,7 +11,8 @@ import (
 )
 
 // moduleReflection is what naga reflects of a shader module once, at its
-// creation: each entry point and the bindings it uses.
+// creation: each entry point, the bindings it uses and, a vertex entry
+// point's, its inputs.
 type moduleReflection []entryPointReflection
 
 // reflectModule parses and validates source with naga, every capability
@@ -36,6 +37,9 @@ func reflectModule(source string) (moduleReflection, error) {
 		sampled := make([]bool, len(module.GlobalVariables))
 		markSampled(module, &entryPoint.Function, nil, sampled)
 		reflected := entryPointReflection{name: entryPoint.Name, stage: entryPoint.Stage}
+		if entryPoint.Stage == ir.StageVertex {
+			reflected.vertexInputs = reflectVertexInputs(module, &entryPoint.Function)
+		}
 		for global, use := range info.EntryPoints[index].GlobalUses {
 			variable := &module.GlobalVariables[global]
 			if use != 0 && variable.Binding != nil {
@@ -69,12 +73,14 @@ func (r moduleReflection) entryPoint(stage ir.ShaderStage, name string) (*entryP
 	return found, nil
 }
 
-// entryPointReflection is an entry point's name and stage, and the bindings
-// it uses statically, its callees' included.
+// entryPointReflection is an entry point's name and stage, the bindings it
+// uses statically, its callees' included, and, a vertex entry point's, the
+// inputs it reads at a location.
 type entryPointReflection struct {
-	name     string
-	stage    ir.ShaderStage
-	bindings []reflectedBinding
+	name         string
+	stage        ir.ShaderStage
+	bindings     []reflectedBinding
+	vertexInputs []gfx.VertexInput
 }
 
 // reflectedBinding is a binding's group, and its entry as WebGPU's "auto"
@@ -160,6 +166,40 @@ func layoutEntry(module *ir.Module, layouter *ir.Layouter, global *ir.GlobalVari
 	return entry
 }
 
+// reflectVertexInputs answers the inputs function, a vertex entry point,
+// reads at a location: its arguments' and its structure arguments' members',
+// builtins aside, each of its scalar type and component count.
+func reflectVertexInputs(module *ir.Module, function *ir.Function) []gfx.VertexInput {
+	var inputs []gfx.VertexInput
+	for _, argument := range function.Arguments {
+		members := []ir.StructMember{{Type: argument.Type, Binding: argument.Binding}}
+		if structure, ok := module.Types[argument.Type].Inner.(ir.StructType); ok {
+			members = structure.Members
+		}
+		for _, member := range members {
+			if member.Binding == nil {
+				continue
+			}
+			location, ok := (*member.Binding).(ir.LocationBinding)
+			if !ok {
+				continue
+			}
+			input := gfx.VertexInput{Location: location.Location, Components: 1}
+			var scalar ir.ScalarType
+			switch inner := module.Types[member.Type].Inner.(type) {
+			case ir.ScalarType:
+				scalar = inner
+			case ir.VectorType:
+				scalar = inner.Scalar
+				input.Components = uint32(inner.Size)
+			}
+			input.Type = vertexScalarTypes[scalar]
+			inputs = append(inputs, input)
+		}
+	}
+	return inputs
+}
+
 // viewDimension answers the view dimension image is bound as.
 func viewDimension(image ir.ImageType) gfx.TextureViewDimension {
 	switch {
@@ -237,6 +277,15 @@ var sampleTypes = map[ir.ScalarKind]gfx.TextureSampleType{
 	ir.ScalarFloat: gfx.TextureSampleTypeUnfilterableFloat,
 	ir.ScalarSint:  gfx.TextureSampleTypeSint,
 	ir.ScalarUint:  gfx.TextureSampleTypeUint,
+}
+
+// vertexScalarTypes is gfx's scalar type of a vertex input of each of naga's
+// scalars.
+var vertexScalarTypes = map[ir.ScalarType]gfx.ScalarType{
+	{Kind: ir.ScalarFloat, Width: 4}: gfx.ScalarTypeFloat32,
+	{Kind: ir.ScalarFloat, Width: 2}: gfx.ScalarTypeFloat16,
+	{Kind: ir.ScalarSint, Width: 4}:  gfx.ScalarTypeSint32,
+	{Kind: ir.ScalarUint, Width: 4}:  gfx.ScalarTypeUint32,
 }
 
 // storageTextureAccesses is gfx's access of each of naga's, atomics aside.
