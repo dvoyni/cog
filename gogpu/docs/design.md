@@ -257,7 +257,8 @@ what `HostLoop` or the OS requires:
   the surface is configured with, which gfx copies at, and released at its
   present: captures are one-off requests, never every frame, so keeping a
   window-sized texture between them would hold memory for nothing. The
-  pipeline drawing them is made once. A frame not captured costs nothing extra,
+  pipeline drawing them is made at the first capture and released, with its
+  layouts, at the device's `Release`. A frame not captured costs nothing extra,
   and every backend can capture, DX12 and the software adapter included
   ([gfx: a capture is taken from the frame acquired after the request](https://github.com/dvoyni/cog/issues/721),
   [gogpu plugin: a captured frame is drawn offscreen, then onto the window](https://github.com/dvoyni/cog/issues/722)).
