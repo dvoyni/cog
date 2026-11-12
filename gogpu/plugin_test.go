@@ -178,36 +178,41 @@ func (h *harness) draw(readFrame func(event gfx.DrawEvent, device gfx.Device)) {
 	publishAndWait(h, gfx.RenderEvent{})
 }
 
-// openShownWindow opens testWindow shown, and draws beats until it has a
-// framebuffer: its surface is created by a job the pump does not wait for,
-// so the first beat may come before it. It fails the test when 10 beats have
-// none.
+// openShownWindow opens testWindow shown, and draws a frame of it.
 func (h *harness) openShownWindow() platform.Window {
 	h.t.Helper()
 	shown := testWindow
 	shown.Hidden = false
 	var window platform.Window
 	h.pump(func(manager *platform.WindowManager) { window = manager.Open(shown) })
-	h.drawUntilFramed(window)
+	h.drawFrame(window, nil)
 	return window
 }
 
-// drawUntilFramed draws beats until window has a framebuffer, and fails the
-// test when 10 beats have none: a window shown gets its first one from a
-// later beat.
-func (h *harness) drawUntilFramed(window platform.Window) {
+// drawFrame pumps and draws beats, as an application's beats do, until one
+// has window's framebuffer, runs readFrame, unless nil, over that beat
+// alone, and fails the test when none has in 2s. A window shown gets its
+// first framebuffer from a later beat, since its surface is created by a job
+// the pump does not wait for, and a Wayland window gets none until a pump
+// has read the compositor's frame callback for its last present, which
+// comes a beat or more after it.
+func (h *harness) drawFrame(window platform.Window, readFrame func(event gfx.DrawEvent, device gfx.Device)) {
 	h.t.Helper()
 	framed := false
 	draw := func(event gfx.DrawEvent, device gfx.Device) {
 		framed = device.Framebuffer(event.Frame, window) != gfx.TextureView{}
-	}
-	for range 10 {
-		h.draw(draw)
-		if framed {
-			return
+		if framed && readFrame != nil {
+			readFrame(event, device)
 		}
 	}
-	h.t.Fatalf("%v had no framebuffer in 10 beats", window)
+	deadline := time.Now().Add(2 * time.Second)
+	for !framed && time.Now().Before(deadline) {
+		h.pump(nil)
+		h.draw(draw)
+	}
+	if !framed {
+		h.t.Fatalf("%v had no framebuffer in 2s", window)
+	}
 }
 
 // readBack draws beats until buffer's map is published resolved, failing the
@@ -245,23 +250,32 @@ func (h *harness) readBack(buffer gfx.Buffer, size uint64) []byte {
 
 // capture requests window's capture and draws beats clearing it to color
 // until its picture is read, failing the test when none is in 5s, or the
-// capture holds none.
+// capture holds none. A capture whose beat did not acquire the window, as
+// Wayland's beats waiting on the compositor do not, is requested again.
 func (h *harness) capture(window platform.Window, color gfx.Color) *image.NRGBA {
 	h.t.Helper()
-	h.readDevice(func(device gfx.Device) {
+	request := func(device gfx.Device) {
 		if err := device.RequestCapture(window); err != nil {
 			h.t.Errorf("RequestCapture answered %v", err)
 		}
-	})
+	}
+	h.readDevice(request)
 	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+		h.pump(nil)
 		h.draw(func(event gfx.DrawEvent, device gfx.Device) { clearFramebuffer(h.t, event, device, window, color) })
 		for _, event := range h.takePublished() {
-			if captured, ok := event.(capturedPicture); ok {
-				if captured.err != nil {
-					h.t.Fatalf("reading %v's capture answered %v", window, captured.err)
-				}
-				return captured.picture
+			captured, ok := event.(capturedPicture)
+			if !ok {
+				continue
 			}
+			if captured.status == gfx.CaptureStatusNotAcquired {
+				h.readDevice(request)
+				continue
+			}
+			if captured.err != nil {
+				h.t.Fatalf("reading %v's capture answered %v", window, captured.err)
+			}
+			return captured.picture
 		}
 	}
 	h.t.Fatalf("no beat in 5s published %v's capture", window)
@@ -275,6 +289,26 @@ func (h *harness) takePublished() []any {
 	published := h.published
 	h.published = nil
 	return published
+}
+
+// awaitCursorLock pumps until window's cursor mode in force is Locked, and
+// fails the test when it is not in 2s. On Wayland, whose compositor puts a
+// lock in force only while the pointer is over the window, where a test
+// cannot move it, it skips the test when the pointer is not there.
+func (h *harness) awaitCursorLock(window platform.Window) {
+	h.t.Helper()
+	if runtime.GOOS == "linux" && os.Getenv("WAYLAND_DISPLAY") != "" {
+		pointerInside := false
+		h.readInputState(func(input *platform.InputState) { pointerInside = input.IsPointerInside(window) })
+		if !pointerInside {
+			h.t.Skip("Wayland puts a lock in force only while the pointer is over the window, and it is not")
+		}
+	}
+	if !h.pumpUntil(func(manager *platform.WindowManager) bool {
+		return manager.EffectiveCursorMode(window) == platform.CursorModeLocked
+	}) {
+		h.t.Fatalf("%v's lock never came in force while it has the focus", window)
+	}
 }
 
 // takeLogged answers the errors logged since its last call, which then fail
@@ -407,7 +441,7 @@ func (h *harness) Init(c *kernel.Configurator, _ any) error {
 	readCapture := c.RegisterTask1(func(k *kernel.Kernel, event gfx.CapturedEvent, device kernel.Read[gfx.Device]) kernel.NoResult {
 		picture, err := gfx.ReadCapture(device.Get(), event)
 		h.mutex.Lock()
-		h.published = append(h.published, capturedPicture{picture: picture, err: err})
+		h.published = append(h.published, capturedPicture{status: event.Status, picture: picture, err: err})
 		h.mutex.Unlock()
 		return kernel.NoResult{}
 	})
@@ -433,9 +467,11 @@ func (*harness) LogWarn(source kernel.KernelID, message string, args ...any) {}
 
 func (*harness) LogDebug(source kernel.KernelID, message string, args ...any) {}
 
-// capturedPicture is what ReadCapture answered for a CapturedEvent, read in
-// a task its publication joins, before gfx releases its buffer.
+// capturedPicture is a CapturedEvent's status and what ReadCapture answered
+// for it, read in a task its publication joins, before gfx releases its
+// buffer.
 type capturedPicture struct {
+	status  gfx.CaptureStatus
 	picture *image.NRGBA
 	err     error
 }
@@ -637,11 +673,7 @@ func TestALockedCursorsMoveKeepsThePointerInPlaceAndGivesItsDelta(t *testing.T) 
 	if !h.pumpUntil(func(manager *platform.WindowManager) bool { return manager.IsFocused(window) }) {
 		t.Skip("the shown window never took the focus")
 	}
-	if !h.pumpUntil(func(manager *platform.WindowManager) bool {
-		return manager.EffectiveCursorMode(window) == platform.CursorModeLocked
-	}) {
-		t.Fatal("the focused window's lock never came in force")
-	}
+	h.awaitCursorLock(window)
 	h.takePublished()
 
 	// gogpu reports a locked move at the window's centre, the mouse's
@@ -798,19 +830,13 @@ func TestConfigMainWindowOpensAtStart(t *testing.T) {
 	}
 }
 
-func TestEachBeatDrawsAShownWindowAndPresents(t *testing.T) {
+func TestAShownWindowGetsAFramebufferAgainAfterEachPresent(t *testing.T) {
 	h := newHarness(t)
 	h.mustSpawn(nil, nil)
 	window := h.openShownWindow()
 
-	for beat := range 3 {
-		drawn := false
-		h.draw(func(event gfx.DrawEvent, device gfx.Device) {
-			drawn = device.Framebuffer(event.Frame, window) != gfx.TextureView{}
-		})
-		if !drawn {
-			t.Errorf("beat %d had no framebuffer for the shown window", beat)
-		}
+	for range 3 {
+		h.drawFrame(window, nil)
 	}
 }
 
@@ -837,9 +863,9 @@ func TestShowingAWindowReachesTheOneItNames(t *testing.T) {
 	})
 
 	h.pump(func(manager *platform.WindowManager) { manager.SetHidden(second, false) })
-	h.drawUntilFramed(second)
+	h.drawFrame(second, nil)
 	h.pump(func(manager *platform.WindowManager) { manager.SetHidden(first, false) })
-	h.drawUntilFramed(first)
+	h.drawFrame(first, nil)
 }
 
 func TestResizingOneOfTwoWindowsChangesItsSizesAloneAndItsSurfaceAtItsNextFrame(t *testing.T) {
@@ -924,7 +950,7 @@ func TestALockedCursorReadsNormalWhileItsWindowLacksTheFocusAndLockedAfter(t *te
 			t.Errorf("the locked window's cursor mode in force is %v %s, want %v", mode, while, want)
 		}
 	}
-	checkCursorMode(platform.CursorModeLocked, "while it has the focus")
+	h.awaitCursorLock(locked)
 	h.openShownWindow()
 	checkCursorMode(platform.CursorModeNormal, "while another window has the focus")
 	h.pump(func(manager *platform.WindowManager) { manager.SetHidden(locked, true) })
@@ -981,16 +1007,14 @@ func TestTheCursorMovesWhereAskedOrTheSystemsRefusalIsLogged(t *testing.T) {
 	}
 }
 
-func TestEachBeatClearsAShownWindowToThePassColor(t *testing.T) {
+func TestEachFrameClearsAShownWindowToThePassColor(t *testing.T) {
 	h := newHarness(t)
 	h.mustSpawn(nil, nil)
 	window := h.openShownWindow()
 
-	for beat := range 30 {
-		h.draw(func(event gfx.DrawEvent, device gfx.Device) {
-			if !clearFramebuffer(t, event, device, window, gfx.Color{R: 1, B: 1, A: 1}) {
-				t.Errorf("beat %d had no framebuffer to clear", beat)
-			}
+	for range 30 {
+		h.drawFrame(window, func(event gfx.DrawEvent, device gfx.Device) {
+			clearFramebuffer(t, event, device, window, gfx.Color{R: 1, B: 1, A: 1})
 		})
 	}
 }
@@ -1001,14 +1025,14 @@ func TestAFramesSubmitIsSeenFinishedByALaterPoll(t *testing.T) {
 	window := h.openShownWindow()
 
 	var latency time.Duration
-	for beat := 0; beat < 10 && latency == 0; beat++ {
-		h.draw(func(event gfx.DrawEvent, device gfx.Device) {
+	for frame := 0; frame < 10 && latency == 0; frame++ {
+		h.drawFrame(window, func(event gfx.DrawEvent, device gfx.Device) {
 			latency = event.GPULatency
 			clearFramebuffer(t, event, device, window, gfx.Color{A: 1})
 		})
 	}
 	if latency <= 0 {
-		t.Error("no DrawEvent in 10 beats carried a GPU latency, want a frame's submit seen finished")
+		t.Error("no DrawEvent in 10 frames carried a GPU latency, want a frame's submit seen finished")
 	}
 }
 
@@ -1017,11 +1041,9 @@ func TestTheSoftwareAdapterClearsAWindow(t *testing.T) {
 	h.mustSpawn(&gfx.Config{ForceFallbackAdapter: true}, nil)
 	window := h.openShownWindow()
 
-	for beat := range 3 {
-		h.draw(func(event gfx.DrawEvent, device gfx.Device) {
-			if !clearFramebuffer(t, event, device, window, gfx.Color{G: 1, A: 1}) {
-				t.Errorf("beat %d had no framebuffer to clear", beat)
-			}
+	for range 3 {
+		h.drawFrame(window, func(event gfx.DrawEvent, device gfx.Device) {
+			clearFramebuffer(t, event, device, window, gfx.Color{G: 1, A: 1})
 		})
 	}
 }
@@ -1052,7 +1074,7 @@ func TestEachCaptureHoldsTheColourItsFrameClearedTo(t *testing.T) {
 				}
 			}
 			for range 3 {
-				h.draw(func(event gfx.DrawEvent, device gfx.Device) {
+				h.drawFrame(window, func(event gfx.DrawEvent, device gfx.Device) {
 					clearFramebuffer(t, event, device, window, gfx.Color{G: 1, A: 1})
 				})
 			}
@@ -1297,13 +1319,9 @@ func TestATriangleIsDrawnIntoAShownWindow(t *testing.T) {
 		pipeline = createRenderPipeline(t, device, triangleWGSL, []gfx.BindGroupLayout{}, nil, gfx.TextureFormatBGRA8Unorm)
 	})
 
-	for beat := range 30 {
-		h.draw(func(event gfx.DrawEvent, device gfx.Device) {
+	for range 30 {
+		h.drawFrame(window, func(event gfx.DrawEvent, device gfx.Device) {
 			view := device.Framebuffer(event.Frame, window)
-			if view == (gfx.TextureView{}) {
-				t.Errorf("beat %d had no framebuffer to draw to", beat)
-				return
-			}
 			encoder, err := device.Encoder(event.Frame, 0)
 			if err != nil {
 				t.Errorf("Encoder answered %v", err)
@@ -1986,22 +2004,20 @@ func createSampledResources(t *testing.T, device gfx.Device) ([]gfx.BindGroupEnt
 }
 
 // clearFramebuffer records, in frame's encoder at order 0, a render pass
-// clearing window's framebuffer to color, and answers whether the frame had
-// one.
-func clearFramebuffer(t *testing.T, event gfx.DrawEvent, device gfx.Device, window platform.Window, color gfx.Color) bool {
+// clearing window's framebuffer to color, unless the frame has none.
+func clearFramebuffer(t *testing.T, event gfx.DrawEvent, device gfx.Device, window platform.Window, color gfx.Color) {
 	view := device.Framebuffer(event.Frame, window)
 	if view == (gfx.TextureView{}) {
-		return false
+		return
 	}
 	encoder, err := device.Encoder(event.Frame, 0)
 	if err != nil {
 		t.Errorf("Encoder answered %v", err)
-		return true
+		return
 	}
 	encoder.BeginRenderPass(gfx.RenderPassDescriptor{ColorAttachments: []gfx.RenderPassColorAttachment{{
 		View: view, LoadOp: gfx.LoadOpClear, StoreOp: gfx.StoreOpStore, ClearValue: color,
 	}}}).End()
-	return true
 }
 
 // mapWrittenBuffer creates a MapRead buffer, writes written into it, lands the
