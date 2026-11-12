@@ -8,6 +8,7 @@
 - [Gfx](./gfx/CONTEXT.md): the GPU as a kernel sees it, a thin mirror of wgpu that draws one frame per beat of the render track
 - [Platform](./platform/CONTEXT.md): what the operating system provides, windows, input and filesystems, declared as interfaces an implementing plugin fills
 - [Gogpu](./gogpu/CONTEXT.md): the plugin that implements gfx and platform over our gogpu fork, driven from the kernel's main-thread tick
+- [Mux](./mux/CONTEXT.md): a game's true state as plain data, shown through timed overrides that catch what is drawn up to it
 
 ## Relationships
 
