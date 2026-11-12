@@ -27,7 +27,7 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
 5. As a game developer, I want a path checked when it is registered, so that a typo or a wrong type fails at startup, not in the middle of a game.
 6. As a game developer, I want paths through nested structs, arrays, slices and maps in any order, so that my model can have the shape the game needs.
 7. As a game developer, I want a literal index in a path (`"Players[0].Gold"`), so that a fixed element needs no hole.
-8. As a game developer, I want a path through a map with string keys, or any comparable key, so that I can key units by name or by my own id type.
+8. As a game developer, I want a path through a map with string keys, or any comparable key, with nothing registered for the map, so that I can key units by name or by my own id type and write only the path.
 9. As a game developer, I want a path rejected at registration when it crosses a pointer or an interface, so that my model stays plain data.
 10. As a game developer, I want two paths of one model that overlap rejected at registration, so that two overrides never fight over one field.
 11. As a game developer, I want to choose how deep a model's holes can nest by declaring a depth type of any length, so that a deep model is possible and a shallow one pays nothing for depth it does not use.
@@ -121,6 +121,11 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
 
 - mux is its own Go module (Go 1.27) in the workspace, depending on the kernel alone: not on metronome, gfx or ecs. Its context is already in the context map.
 - It has the shared Go rules and the project's plugin rules: `NewPlugin()` with no parameters, a README with a **Kernel surface** section, `resources.go` and the rest.
+- It depends on two parts of the runtime outside Go's compatibility promise:
+  - the map access `reflect.mapaccess`, reached through `//go:linkname` and declared `//go:noescape`. The runtime keeps that function for outside packages and pledges its signature unchanged ([go.dev/issue/67401](https://go.dev/issue/67401)); it kept it through the map rewrite of Go 1.24;
+  - a `reflect.Type`'s type descriptor, read out of its interface.
+
+  A test checks every map step against a typed lookup over the same map, so a change in either fails a test.
 
 ### The plugin and its registry
 
@@ -153,7 +158,7 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
   - a **field** adds its offset;
   - an **array** checks the index against its length and adds index times element size;
   - a **slice** reads its header, checks the index against its length, and jumps into its backing array;
-  - a **map** looks the key up through a lookup typed at registration, copies the value out, and walks the remaining steps inside the copy.
+  - a **map** looks the key up through the runtime's own map access, which answers a pointer into the map's slot or nil, and walks the remaining steps from that pointer, copying only the property out. No map type is registered: reflection finds each map along a path, with its key and element types.
 
   Steps mix in any order. A literal index compiles into the path and leaves no hole.
 - Steps keep offsets and sizes, never pointers, and every read starts from the model's base. A reallocated slice or a copy of the model therefore reads correctly.
@@ -175,6 +180,7 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
   - `WriteTimeline.Intern(k)` gives it the timeline's next index; only timeline writers call it.
   - `Timeline.Index(k) (int64, bool)` only looks a key up, so views call it under the read lock. A key never interned cannot have an override.
 - Key tables are per timeline, per key type: a forward map, and a back slice that a map step reads to turn an index back into its key. They never shrink.
+- Compiling a path makes, through reflection, the tables for the key type of each map it crosses whose keys are not integers; `Intern` and `Index` read them back typed. A key type no path's map uses panics in `Intern` and `Index`, as `Intern("bob")` does when the map is `map[UnitName]Unit`.
 - An address is `{path id, holes D}` inside the timeline: comparable, a Go map key, no allocation. User code holds paths and hole values, never addresses.
 - Path ids and interned indices live only within one run. Saving writes path strings and keys.
 
@@ -303,7 +309,8 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
   - an override leaving without a jump;
   - a skipped callback still called once, in order;
   - a missed hole answering `false`;
-  - a path registered through a pointer panicking.
+  - a path registered through a pointer panicking;
+  - a map step answering as a typed lookup does, for string, integer and struct keys, present, absent, deleted and in a nil map.
 - **The zero-allocation gate**: `testing.AllocsPerRun(...) == 0`, in plain `go test`, once each store has grown to working size.
   - Per frame: `Step` (advancing, sampling and blending, retiring, calling due callbacks whose own bodies allocate nothing); `Current` (an active override, a path with overrides but not this address, a path with none); `All` over a slice and over a map; `Index` (hit and miss); `Get` through a slice step and a map step.
   - Steady state: 0 for `Tween`, `Hold`, a `Sequence`, `Cancel`, `CancelCall`, and `Intern` of a known key. `Intern` of a new key allocates only while its tables grow. `Call` allocates exactly its closure's own allocation.
@@ -333,10 +340,10 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
 - **Measurements behind the decisions**:
   - an unsafe offset path reads in 2.7 to 3.5 ns, against 0.6 ns direct;
   - a Go map lookup by address costs 13 to 20 ns, against 2 to 5 ns for the merge walk;
-  - a map step through a typed lookup costs 8 to 11 ns;
+  - a map step costs 8 to 11 ns through a typed lookup, and 9 to 12 ns through the runtime's map access found by reflection, with no allocation; `reflect.Value.MapIndex` costs 47 ns and two allocations, which rules it out;
   - variadic holes do not allocate, and neither does an `iter.Seq2` returned by a one-line wrapper.
 
-  ([findings](https://github.com/dvoyni/cog/blob/research/mux-binding-cost/mux/docs/research/binding-cost.md); the iterator and variadic shapes were measured while resolving the reading and addressing tickets.)
+  ([findings](https://github.com/dvoyni/cog/blob/research/mux-binding-cost/mux/docs/research/binding-cost.md); the iterator and variadic shapes were measured while resolving the reading and addressing tickets, and the runtime's map access while breaking this spec into tickets.)
 - **Prior art for the timeline**: [findings](https://github.com/dvoyni/cog/blob/research/mux-prior-art/mux/docs/research/prior-art.md) from Godot, DOTween, elm-animator and the Go tween libraries. None measures zero allocation.
 - **The blend is the simplest for now.** While a long override is mid-flight, a short newer one is diluted: a 0.4 s dodge over a 2 s walk shows about halfway. Crossfades and additive offsets were weighed and set aside.
 - **The model's read lock is a convention.** A view holding `kernel.Read[*M]` could write through the pointer, as it could through any slice of a copy. The timeline's read side, by contrast, cannot write.
