@@ -67,6 +67,25 @@ func (s inputSource) reportKey(window platform.Window, key gpucontext.Key, modif
 	s.plugin.inputChanges = append(s.plugin.inputChanges, change)
 }
 
+// reportScroll reports event's scroll over window from the next
+// AppendChanges, in lines where gogpu counts lines and in points otherwise.
+func (s inputSource) reportScroll(window platform.Window, event gpucontext.ScrollEvent) {
+	s.plugin.inputChanges = append(s.plugin.inputChanges, platform.InputChange{
+		Kind:        platform.InputChangeScroll,
+		Window:      window,
+		ScrollDelta: platform.Point{X: float32(event.DeltaX), Y: float32(event.DeltaY)},
+		ScrollLines: event.DeltaMode == gpucontext.ScrollDeltaLine,
+	})
+}
+
+// reportText reports each character of text typed in window from the next
+// AppendChanges, in order.
+func (s inputSource) reportText(window platform.Window, text string) {
+	for _, character := range text {
+		s.plugin.inputChanges = append(s.plugin.inputChanges, platform.InputChange{Kind: platform.InputChangeText, Window: window, Char: character})
+	}
+}
+
 // keyboardKeys is the Key of each gogpu key cog names, indexed by gogpu's
 // key; a key between them, or past the last, is KeyUnknown.
 var keyboardKeys = [...]platform.Key{

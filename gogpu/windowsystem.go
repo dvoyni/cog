@@ -12,8 +12,8 @@ import (
 
 // windowSystem is the plugin's platform.WindowsSocket: it opens, changes and
 // closes the HostLoop's windows, sets their cursors, pumps their events,
-// reports their sizes and focus, and their pointers through the input
-// source. platform calls it on the main thread alone.
+// reports their sizes and focus, and their input through the input source.
+// platform calls it on the main thread alone.
 type windowSystem struct {
 	// plugin holds the HostLoop, the windows open and what the next Pump
 	// reports.
@@ -25,9 +25,9 @@ type windowSystem struct {
 // shows it unless entry hides it. It reports the window open from the next
 // Pump, at its sizes, and from later Pumps each resize, a scale change
 // included, and each gain and loss of the focus. The user's close of the
-// window is reported, and keeps it open, and its keys and pointer from the
-// input source's next AppendChanges. It answers an error before gfx's adapter
-// request, which starts the HostLoop.
+// window is reported, and keeps it open, and its keys, text, pointer and
+// scroll from the input source's next AppendChanges. It answers an error
+// before gfx's adapter request, which starts the HostLoop.
 func (w windowSystem) Open(window platform.Window, entry platform.WindowEntry) error {
 	if w.plugin.loop == nil {
 		return errors.New("gogpu: a window opens only once gfx has requested the adapter")
@@ -52,7 +52,9 @@ func (w windowSystem) Open(window platform.Window, entry platform.WindowEntry) e
 	opened.SetOnKeyRelease(func(key gpucontext.Key, modifiers gpucontext.Modifiers) {
 		inputSource(w).reportKey(window, key, modifiers, false)
 	})
+	opened.SetOnTextInput(func(text string) { inputSource(w).reportText(window, text) })
 	opened.SetOnPointer(func(event gpucontext.PointerEvent) { inputSource(w).reportPointer(window, event) })
+	opened.SetOnScroll(func(event gpucontext.ScrollEvent) { inputSource(w).reportScroll(window, event) })
 	if !entry.Hidden {
 		opened.Show()
 	}
