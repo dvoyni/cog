@@ -342,11 +342,15 @@ func (d *device) ReflectComputePipelineLayout(descriptor gfx.ComputePipelineDesc
 	return reflectedGroupLayouts(compute), nil
 }
 
-// ReflectVertexInputs answers no inputs until the plugin reflects its
-// modules, so gfx's check at pipeline creation passes every vertex buffer,
-// and wgpu checks none against the shader either.
-func (*device) ReflectVertexInputs(gfx.ShaderModule, string) ([]gfx.VertexInput, error) {
-	return nil, nil
+// ReflectVertexInputs answers the inputs module's vertex entry point named
+// entryPoint, or its one vertex entry point when entryPoint is empty, reads
+// at a location, from its reflection.
+func (d *device) ReflectVertexInputs(module gfx.ShaderModule, entryPoint string) ([]gfx.VertexInput, error) {
+	vertex, err := d.reflectedEntryPoint(module, ir.StageVertex, entryPoint)
+	if err != nil {
+		return nil, err
+	}
+	return vertex.vertexInputs, nil
 }
 
 // CreateRenderPipeline creates wgpu's pipeline over the layout and modules
