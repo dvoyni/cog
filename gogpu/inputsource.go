@@ -1,13 +1,15 @@
 package gogpu
 
 import (
+	"slices"
+
 	"github.com/dvoyni/cog/platform"
 	"github.com/gogpu/gpucontext"
 )
 
 // inputSource is the plugin's platform.InputSourceSocket: it reports the
-// input the window system's windows report to it. platform calls it on the
-// main thread alone.
+// input the window system's windows report to it, and labels the keys as
+// gogpu's App does. platform calls it on the main thread alone.
 type inputSource struct {
 	// plugin holds what the next AppendChanges reports.
 	plugin *Plugin
@@ -21,8 +23,17 @@ func (s inputSource) AppendChanges(changes []platform.InputChange) []platform.In
 	return changes
 }
 
-// Label answers 0: key labels are not built yet.
-func (inputSource) Label(platform.Key) rune { return 0 }
+// Label answers the character the current layout prints on key, unshifted,
+// as gogpu's App labels the key of the same name, or 0: for a key gogpu does
+// not name, and before the adapter's request or after the instance's
+// release.
+func (s inputSource) Label(key platform.Key) rune {
+	gogpuKey := slices.Index(keyboardKeys[:], key)
+	if s.plugin.app == nil || gogpuKey < 0 {
+		return 0
+	}
+	return s.plugin.app.KeyLabel(gpucontext.Key(gogpuKey))
+}
 
 // reportPointer reports event in window from the next AppendChanges. A
 // cancel, and a button no Key names, report nothing.
@@ -65,6 +76,12 @@ func (s inputSource) reportKey(window platform.Window, key gpucontext.Key, modif
 		s.plugin.heldKeys.Unset(int(change.Key))
 	}
 	s.plugin.inputChanges = append(s.plugin.inputChanges, change)
+}
+
+// reportLayoutChanged reports from the next AppendChanges that the keyboard
+// layout changed, so platform asks for the new labels.
+func (s inputSource) reportLayoutChanged() {
+	s.plugin.inputChanges = append(s.plugin.inputChanges, platform.InputChange{Kind: platform.InputChangeLayout})
 }
 
 // reportScroll reports event's scroll over window from the next

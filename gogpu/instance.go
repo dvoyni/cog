@@ -29,7 +29,8 @@ type instance struct {
 // Config's backend with options' power preference, or wgpu's software adapter
 // when options force the fallback. A device replacement is not built yet: a
 // second request answers an error. gogpu keeps running with no window open,
-// and reports to the window system a window it closes by itself.
+// and reports to the window system a window it closes by itself, and to the
+// input source each change of the keyboard layout.
 func (i instance) RequestAdapter(options gfx.RequestAdapterOptions) (gfx.BackendAdapter, error) {
 	if i.plugin.loop != nil {
 		return nil, errors.New("gogpu: a device replacement is not built yet")
@@ -52,12 +53,15 @@ func (i instance) RequestAdapter(options gfx.RequestAdapterOptions) (gfx.Backend
 		GraphicsAPI:          graphicsAPI,
 		PowerPreference:      gputypes.PowerPreference(options.PowerPreference),
 		ForceFallbackAdapter: options.ForceFallbackAdapter,
-	}).SetQuitOnLastWindowClosed(false).OnAnyWindowClosed(windowSystem{plugin: i.plugin}.reportClosed)
+	}).SetQuitOnLastWindowClosed(false).
+		OnAnyWindowClosed(windowSystem{plugin: i.plugin}.reportClosed).
+		OnKeyboardLayoutChanged(inputSource{plugin: i.plugin}.reportLayoutChanged)
 	loop := host.NewHostLoop(app)
 	if err := loop.Start(); err != nil {
 		return nil, err
 	}
 	i.plugin.loop = loop
+	i.plugin.app = app
 	i.plugin.windows = map[platform.Window]*host.Window{}
 	return &adapter{loop: loop, app: app, windows: i.plugin.windows, adapter: wgpu.AdapterFromHandle(app.GPUContextProvider().Adapter())}, nil
 }
@@ -76,14 +80,15 @@ func (instance) PreprocessShader(files fs.FS, path string, defines []gfx.ShaderD
 }
 
 // Release stops the HostLoop, which closes every window still open and
-// releases gogpu's device, adapter and platform, and forgets the windows and
-// what they had left to report, from gfx's Tasks.ReleaseDevice, pinned to the
-// main thread, or from gfx's Destroy after a Start that failed, which runs on
-// Spawn's thread.
+// releases gogpu's device, adapter and platform, and forgets the App, the
+// windows and what they had left to report, from gfx's Tasks.ReleaseDevice,
+// pinned to the main thread, or from gfx's Destroy after a Start that failed,
+// which runs on Spawn's thread.
 func (i instance) Release() {
 	if i.plugin.loop != nil {
 		i.plugin.loop.Stop()
 		i.plugin.loop = nil
+		i.plugin.app = nil
 	}
 	i.plugin.windows = nil
 	i.plugin.changes = nil

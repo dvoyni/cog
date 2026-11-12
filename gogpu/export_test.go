@@ -25,6 +25,13 @@ func ReportKey(p *Plugin, window platform.Window, key gpucontext.Key, modifiers 
 	inputSource{plugin: p}.reportKey(window, key, modifiers, pressed)
 }
 
+// ReportLayoutChanged reports a change of the keyboard layout, as the
+// plugin's layout callback on gogpu's App does when the operating system
+// calls it.
+func ReportLayoutChanged(p *Plugin) {
+	inputSource{plugin: p}.reportLayoutChanged()
+}
+
 // ReportText reports text typed in window, as the plugin's text callback on
 // window's gogpu window does when the operating system calls it.
 func ReportText(p *Plugin, window platform.Window, text string) {

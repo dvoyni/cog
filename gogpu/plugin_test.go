@@ -69,9 +69,9 @@ type readInputEvent struct{}
 
 // harness spawns a kernel of metronome, platform, gfx, gogpu and itself from
 // the main thread, reads its Device and InputState, edits its WindowManager
-// and pumps, draws, records the window, pointer and key events platform
-// publishes, gfx's BufferMappedEvent and each capture's picture, and quits
-// it, failing the test on every error logged.
+// and pumps, draws, records the window, pointer, key and layout events
+// platform publishes, gfx's BufferMappedEvent and each capture's picture,
+// and quits it, failing the test on every error logged.
 type harness struct {
 	t          *testing.T
 	supervisor *kernel.Supervisor
@@ -148,6 +148,14 @@ func (h *harness) readInputState(read func(input *platform.InputState)) {
 	h.t.Helper()
 	h.readInput = read
 	publishAndWait(h, readInputEvent{})
+}
+
+// label answers the InputState's label of key, read under its read lock.
+func (h *harness) label(key platform.Key) rune {
+	h.t.Helper()
+	var label rune
+	h.readInputState(func(input *platform.InputState) { label = input.Label(key) })
+	return label
 }
 
 // pump runs edit, unless nil, over the WindowManager under its write lock,
@@ -438,6 +446,7 @@ func (h *harness) Init(c *kernel.Configurator, _ any) error {
 	subscribeRecord[platform.PointerLeaveEvent](c, h)
 	subscribeRecord[platform.KeyEvent](c, h)
 	subscribeRecord[platform.TextEvent](c, h)
+	subscribeRecord[platform.LayoutChangedEvent](c, h)
 	subscribeRecord[platform.ScrollEvent](c, h)
 	subscribeRecord[gfx.BufferMappedEvent](c, h)
 	readCapture := c.RegisterTask1(func(k *kernel.Kernel, event gfx.CapturedEvent, device kernel.Read[gfx.Device]) kernel.NoResult {
@@ -590,7 +599,10 @@ func TestWindowsOpenAndCloseThroughTheWindowManager(t *testing.T) {
 	var window platform.Window
 
 	h.pump(func(manager *platform.WindowManager) { window = manager.Open(testWindow) })
-	if published := h.takePublished(); !slices.Equal(published, []any{platform.WindowOpenedEvent{Window: window}}) {
+	// Linux learns the keyboard layout with its first window, as a layout
+	// change.
+	published := slices.DeleteFunc(h.takePublished(), func(event any) bool { return event == platform.LayoutChangedEvent{} })
+	if !slices.Equal(published, []any{platform.WindowOpenedEvent{Window: window}}) {
 		t.Errorf("opening published %v, want the window opened", published)
 	}
 	h.pump(func(manager *platform.WindowManager) {
@@ -731,26 +743,30 @@ func TestEachKeyIsReportedAsCogsKeyOfTheSameName(t *testing.T) {
 	h.pump(func(manager *platform.WindowManager) { window = manager.Open(testWindow) })
 	h.takePublished()
 
-	var reported []gpucontext.Key
-	var want []any
+	const reportedCount = 512
 	onMainThread(func() {
-		for key := range gpucontext.Key(512) {
-			wantKey, _ := platform.ParseKey("Key" + key.String())
+		for key := range gpucontext.Key(reportedCount) {
 			gogpu.ReportKey(h.plugin, window, key, 0, true)
 			gogpu.ReportKey(h.plugin, window, key, 0, false)
-			reported = append(reported, key)
-			want = append(want, platform.KeyEvent{Window: window, Key: wantKey, Pressed: true}, platform.KeyEvent{Window: window, Key: wantKey})
 		}
 	})
 	h.pump(nil)
 
+	var want []any
+	h.readInputState(func(input *platform.InputState) {
+		for key := range gpucontext.Key(reportedCount) {
+			wantKey, _ := platform.ParseKey("Key" + key.String())
+			label := input.Label(wantKey)
+			want = append(want, platform.KeyEvent{Window: window, Key: wantKey, Pressed: true, Label: label}, platform.KeyEvent{Window: window, Key: wantKey, Label: label})
+		}
+	})
 	published := h.takePublished()
 	if len(published) != len(want) {
-		t.Fatalf("%d keys pressed and released published %d events, want %d", len(reported), len(published), len(want))
+		t.Fatalf("%d keys pressed and released published %d events, want %d", reportedCount, len(published), len(want))
 	}
 	for index := range want {
 		if published[index] != want[index] {
-			t.Errorf("gogpu's %v published %v, want %v", reported[index/2], published[index], want[index])
+			t.Errorf("gogpu's %v published %v, want %v", gpucontext.Key(index/2), published[index], want[index])
 		}
 	}
 }
@@ -762,7 +778,7 @@ func TestAKeyPressedAgainWhileHeldIsARepeat(t *testing.T) {
 	h.pump(func(manager *platform.WindowManager) { window = manager.Open(testWindow) })
 	h.takePublished()
 	modifiers := gpucontext.ModShift | gpucontext.ModCapsLock
-	pressed := platform.KeyEvent{Window: window, Key: platform.KeyW, Pressed: true, Modifiers: platform.ModifierShift | platform.ModifierCapsLock}
+	pressed := platform.KeyEvent{Window: window, Key: platform.KeyW, Pressed: true, Modifiers: platform.ModifierShift | platform.ModifierCapsLock, Label: h.label(platform.KeyW)}
 	repeated := pressed
 	repeated.Repeat = true
 	released := pressed
@@ -811,9 +827,53 @@ func TestAKeyHeldAtAFocusLossIsPressedAfreshAfterIt(t *testing.T) {
 	onMainThread(func() { gogpu.ReportKey(h.plugin, window, gpucontext.KeyW, 0, true) })
 	h.pump(nil)
 
-	want := []any{platform.KeyEvent{Window: window, Key: platform.KeyW, Pressed: true}}
+	want := []any{platform.KeyEvent{Window: window, Key: platform.KeyW, Pressed: true, Label: h.label(platform.KeyW)}}
 	if published := h.takePublished(); !slices.Equal(published, want) {
 		t.Errorf("the press after the focus loss published %v, want %v", published, want)
+	}
+}
+
+func TestEveryLetterKeyIsLabelledByTheLayoutAndEnterAndTheMouseAreNot(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+	h.pump(func(manager *platform.WindowManager) { manager.Open(testWindow) })
+
+	h.readInputState(func(input *platform.InputState) {
+		for key := platform.KeyA; key <= platform.KeyZ; key++ {
+			if input.Label(key) == 0 {
+				t.Errorf("%v has no label, want the character the layout prints on it", key)
+			}
+		}
+		for _, key := range []platform.Key{platform.KeyEnter, platform.KeyF1, platform.KeyLeftShift, platform.KeyMouseLeft} {
+			if label := input.Label(key); label != 0 {
+				t.Errorf("%v is labelled %q, want none", key, label)
+			}
+		}
+	})
+}
+
+func TestALayoutChangeIsPublishedInOrderWithTheKeys(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+	var window platform.Window
+	h.pump(func(manager *platform.WindowManager) { window = manager.Open(testWindow) })
+	h.takePublished()
+	label := h.label(platform.KeyQ)
+
+	onMainThread(func() {
+		gogpu.ReportKey(h.plugin, window, gpucontext.KeyQ, 0, true)
+		gogpu.ReportLayoutChanged(h.plugin)
+		gogpu.ReportKey(h.plugin, window, gpucontext.KeyQ, 0, false)
+	})
+	h.pump(nil)
+
+	want := []any{
+		platform.KeyEvent{Window: window, Key: platform.KeyQ, Pressed: true, Label: label},
+		platform.LayoutChangedEvent{},
+		platform.KeyEvent{Window: window, Key: platform.KeyQ, Label: label},
+	}
+	if published := h.takePublished(); !slices.Equal(published, want) {
+		t.Errorf("a press, a layout change and a release published %v, want %v", published, want)
 	}
 }
 
@@ -823,6 +883,7 @@ func TestTypedTextIsReportedACharacterAtATimeInOrderWithTheKeys(t *testing.T) {
 	var window platform.Window
 	h.pump(func(manager *platform.WindowManager) { window = manager.Open(testWindow) })
 	h.takePublished()
+	label := h.label(platform.KeyE)
 
 	onMainThread(func() {
 		gogpu.ReportKey(h.plugin, window, gpucontext.KeyE, 0, true)
@@ -833,9 +894,9 @@ func TestTypedTextIsReportedACharacterAtATimeInOrderWithTheKeys(t *testing.T) {
 	h.pump(nil)
 
 	want := []any{
-		platform.KeyEvent{Window: window, Key: platform.KeyE, Pressed: true},
+		platform.KeyEvent{Window: window, Key: platform.KeyE, Pressed: true, Label: label},
 		platform.TextEvent{Window: window, Char: 'é'},
-		platform.KeyEvent{Window: window, Key: platform.KeyE},
+		platform.KeyEvent{Window: window, Key: platform.KeyE, Label: label},
 		platform.TextEvent{Window: window, Char: 'a'},
 		platform.TextEvent{Window: window, Char: '😀'},
 	}
@@ -872,7 +933,9 @@ func TestConfigMainWindowOpensAtStart(t *testing.T) {
 
 	h.pump(nil)
 
-	published := h.takePublished()
+	// Linux learns the keyboard layout with its first window, as a layout
+	// change.
+	published := slices.DeleteFunc(h.takePublished(), func(event any) bool { return event == platform.LayoutChangedEvent{} })
 	if len(published) != 1 {
 		t.Fatalf("the first pump published %v, want the main window opened", published)
 	}
