@@ -167,10 +167,12 @@ what `HostLoop` or the OS requires:
 - **The cursor:** `SetCursor`, `SetCursorPosition` and `EffectiveCursorMode`
   through the per-window cursor shape, mode and position, the mode answered
   as the one in force: Normal while the window lacks the focus or the system
-  refused the mode. `SetCursor` sets the mode first and the shape after,
-  since X11 gives a window its parent's cursor when a lock is released. A
-  shape converts by cast, a hidden cursor is gogpu's `CursorNone`, and a mode
-  maps by a table, since gogpu orders Locked before Confined.
+  refused the mode, and on Wayland until the pointer is over the window,
+  where the compositor puts a lock in force. `SetCursor` sets the mode first
+  and the shape after, since X11 gives a window its parent's cursor when a
+  lock is released. A shape converts by cast, a hidden cursor is gogpu's
+  `CursorNone`, and a mode maps by a table, since gogpu orders Locked before
+  Confined.
   `SetCursorPosition` answers gogpu's error where the system refuses, as
   Wayland does unless the cursor is locked
   ([gogpu plugin: the cursor: shape, mode, position and the mode in force](https://github.com/dvoyni/cog/issues/756)).
@@ -228,10 +230,12 @@ what `HostLoop` or the OS requires:
   accepts them, and gogpu applies the window's size when its frame begins.
 - **`AcquireFramebuffer`** is `HostLoop.BeginFrame`: it applies the window's
   latest size, observes Wayland's frame gate, and stores the surface's view
-  at gfx's index. gogpu offers no surface texture, so the texture's index
-  stays empty. Nothing to draw to is gfx's `Timeout`, an
-  outdated or lost surface its `Outdated` or `Lost`, and an error is answered,
-  not logged.
+  at gfx's index. The gate opens once a pump has read the compositor's frame
+  callback for the window's last present, so a Wayland window is acquired at
+  most once per pump, and its frames come no faster than the track that
+  pumps. gogpu offers no surface texture, so the texture's index stays
+  empty. Nothing to draw to is gfx's `Timeout`, an outdated or lost surface
+  its `Outdated` or `Lost`, and an error is answered, not logged.
 - **`Present`** is `HostLoop.EndFrame`, its error answered.
 - **A captured frame is drawn offscreen.** When gfx's acquire says the window
   is captured that frame, the plugin still begins it and keeps the surface's
