@@ -92,8 +92,15 @@ func (e *commandEncoder) CopyBufferToBuffer(source gfx.Buffer, sourceOffset uint
 	}
 }
 
-func (e *commandEncoder) CopyBufferToTexture(gfx.Buffer, gfx.Texture, []gfx.BufferTextureCopy) {
-	e.fail(unbuilt("CopyBufferToTexture"))
+// CopyBufferToTexture records wgpu's copy of regions of the buffer stored at
+// source's index into the texture at destination's. Each region copies into
+// destination, whatever texture its TextureBase names.
+func (e *commandEncoder) CopyBufferToTexture(source gfx.Buffer, destination gfx.Texture, regions []gfx.BufferTextureCopy) {
+	copied := e.recordedBuffer(source)
+	written := recordedObject(e, &e.device.textures, destination, "texture")
+	if e.err == nil {
+		e.encoder.CopyBufferToTexture(copied, written, makeBufferTextureCopies(written, regions))
+	}
 }
 
 // CopyTextureToBuffer records wgpu's copy of regions of the texture stored
@@ -102,30 +109,37 @@ func (e *commandEncoder) CopyBufferToTexture(gfx.Buffer, gfx.Texture, []gfx.Buff
 func (e *commandEncoder) CopyTextureToBuffer(source gfx.Texture, destination gfx.Buffer, regions []gfx.BufferTextureCopy) {
 	copied := recordedObject(e, &e.device.textures, source, "texture")
 	written := e.recordedBuffer(destination)
+	if e.err == nil {
+		e.encoder.CopyTextureToBuffer(copied, written, makeBufferTextureCopies(copied, regions))
+	}
+}
+
+// CopyTextureToTexture records wgpu's copy of regions between the textures
+// stored at source's and destination's indexes. Each region copies from
+// source into destination, whatever textures it names.
+func (e *commandEncoder) CopyTextureToTexture(source, destination gfx.Texture, regions []gfx.TextureCopy) {
+	copied := recordedObject(e, &e.device.textures, source, "texture")
+	written := recordedObject(e, &e.device.textures, destination, "texture")
 	if e.err != nil {
 		return
 	}
-	copies := make([]wgpu.BufferTextureCopy, len(regions))
+	copies := make([]wgpu.TextureCopy, len(regions))
 	for index, region := range regions {
-		copies[index] = wgpu.BufferTextureCopy{
-			BufferLayout: wgpu.ImageDataLayout(region.BufferLayout),
-			TextureBase: wgpu.ImageCopyTexture{
-				Texture:  copied,
-				MipLevel: region.TextureBase.MipLevel,
-				Origin:   wgpu.Origin3D(region.TextureBase.Origin),
-				Aspect:   gputypes.TextureAspect(region.TextureBase.Aspect),
-			},
-			Size: wgpu.Extent3D(region.Size),
+		copies[index] = wgpu.TextureCopy{
+			Source:      makeImageCopyTexture(copied, region.Source),
+			Destination: makeImageCopyTexture(written, region.Destination),
+			Size:        wgpu.Extent3D(region.Size),
 		}
 	}
-	e.encoder.CopyTextureToBuffer(copied, written, copies)
+	e.encoder.CopyTextureToTexture(copied, written, copies)
 }
 
-func (e *commandEncoder) CopyTextureToTexture(gfx.Texture, gfx.Texture, []gfx.TextureCopy) {
-	e.fail(unbuilt("CopyTextureToTexture"))
+// ClearBuffer records wgpu's clear of the buffer stored at buffer's index.
+func (e *commandEncoder) ClearBuffer(buffer gfx.Buffer, offset, size uint64) {
+	if cleared := e.recordedBuffer(buffer); cleared != nil {
+		e.encoder.ClearBuffer(cleared, offset, size)
+	}
 }
-
-func (e *commandEncoder) ClearBuffer(gfx.Buffer, uint64, uint64) { e.fail(unbuilt("ClearBuffer")) }
 
 // Finish answers wgpu's command buffer, or the first error recorded, after
 // discarding the encoding.
@@ -175,8 +189,7 @@ func (e *commandEncoder) fail(err error) {
 }
 
 // renderPassEncoder is wgpu's render pass as gfx's; pass is nil when its
-// encoder had an error at its begin. The pass state that is not built yet
-// records an error naming it.
+// encoder had an error at its begin.
 type renderPassEncoder struct {
 	encoder *commandEncoder
 	pass    *wgpu.RenderPassEncoder
@@ -211,13 +224,29 @@ func (p renderPassEncoder) SetIndexBuffer(buffer gfx.Buffer, format gfx.IndexFor
 	}
 }
 
-func (p renderPassEncoder) SetViewport(gfx.Viewport) { p.encoder.fail(unbuilt("SetViewport")) }
-func (p renderPassEncoder) SetScissorRect(gfx.ScissorRect) {
-	p.encoder.fail(unbuilt("SetScissorRect"))
+func (p renderPassEncoder) SetViewport(viewport gfx.Viewport) {
+	if p.encoder.err == nil {
+		p.pass.SetViewport(gputypes.Viewport(viewport))
+	}
 }
-func (p renderPassEncoder) SetBlendConstant(gfx.Color) { p.encoder.fail(unbuilt("SetBlendConstant")) }
-func (p renderPassEncoder) SetStencilReference(uint32) {
-	p.encoder.fail(unbuilt("SetStencilReference"))
+
+func (p renderPassEncoder) SetScissorRect(rectangle gfx.ScissorRect) {
+	if p.encoder.err == nil {
+		p.pass.SetScissorRect(gputypes.ScissorRect(rectangle))
+	}
+}
+
+func (p renderPassEncoder) SetBlendConstant(color gfx.Color) {
+	if p.encoder.err == nil {
+		constant := gputypes.Color(color)
+		p.pass.SetBlendConstant(&constant)
+	}
+}
+
+func (p renderPassEncoder) SetStencilReference(reference uint32) {
+	if p.encoder.err == nil {
+		p.pass.SetStencilReference(reference)
+	}
 }
 
 func (p renderPassEncoder) Draw(arguments gfx.DrawArgs) {
@@ -318,4 +347,27 @@ func recordedObject[T any](e *commandEncoder, objects *container.ObjectTable[ato
 		return nil
 	}
 	return stored
+}
+
+// makeBufferTextureCopies answers regions as wgpu's, each copying texture.
+func makeBufferTextureCopies(texture *wgpu.Texture, regions []gfx.BufferTextureCopy) []wgpu.BufferTextureCopy {
+	copies := make([]wgpu.BufferTextureCopy, len(regions))
+	for index, region := range regions {
+		copies[index] = wgpu.BufferTextureCopy{
+			BufferLayout: wgpu.ImageDataLayout(region.BufferLayout),
+			TextureBase:  makeImageCopyTexture(texture, region.TextureBase),
+			Size:         wgpu.Extent3D(region.Size),
+		}
+	}
+	return copies
+}
+
+// makeImageCopyTexture answers location as wgpu's, in texture.
+func makeImageCopyTexture(texture *wgpu.Texture, location gfx.ImageCopyTexture) wgpu.ImageCopyTexture {
+	return wgpu.ImageCopyTexture{
+		Texture:  texture,
+		MipLevel: location.MipLevel,
+		Origin:   wgpu.Origin3D(location.Origin),
+		Aspect:   gputypes.TextureAspect(location.Aspect),
+	}
 }

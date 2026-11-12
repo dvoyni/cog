@@ -1316,7 +1316,7 @@ func TestATriangleIsDrawnIntoAShownWindow(t *testing.T) {
 	window := h.openShownWindow()
 	var pipeline gfx.RenderPipeline
 	h.readDevice(func(device gfx.Device) {
-		pipeline = createRenderPipeline(t, device, triangleWGSL, []gfx.BindGroupLayout{}, nil, gfx.TextureFormatBGRA8Unorm)
+		pipeline = createRenderPipeline(t, device, triangleWGSL, []gfx.BindGroupLayout{}, nil, gfx.TextureFormatBGRA8Unorm, nil)
 	})
 
 	for range 30 {
@@ -1357,7 +1357,7 @@ func TestEachDrawSamplesATextureAsWritten(t *testing.T) {
 
 			var readback gfx.Buffer
 			h.readDevice(func(device gfx.Device) { readback = drawSampledTexture(t, device, false, draw) })
-			checkSampledTexture(h, readback)
+			checkTexture(h, readback, sampledTexels)
 		})
 	}
 }
@@ -1379,6 +1379,123 @@ func TestEachDispatchWritesABufferReadBackThroughACopy(t *testing.T) {
 	}
 }
 
+func TestEachCopyIntoATextureReadsBackTheTexelsCopied(t *testing.T) {
+	copies := map[string]func(t *testing.T, device gfx.Device, encoder gfx.CommandEncoder, destination gfx.Texture){
+		"CopyBufferToTexture": func(t *testing.T, device gfx.Device, encoder gfx.CommandEncoder, destination gfx.Texture) {
+			rows := make([]byte, 256*sampledSide)
+			for row := range sampledSide {
+				copy(rows[256*row:], sampledTexels[4*sampledSide*row:4*sampledSide*(row+1)])
+			}
+			source := createWrittenBuffer(t, device, gfx.BufferUsageFlagCopySrc, rows)
+			encoder.CopyBufferToTexture(source, destination, []gfx.BufferTextureCopy{{
+				BufferLayout: gfx.ImageDataLayout{BytesPerRow: 256, RowsPerImage: sampledSide},
+				TextureBase:  gfx.ImageCopyTexture{Texture: destination},
+				Size:         sampledSize,
+			}})
+		},
+		"CopyTextureToTexture": func(t *testing.T, device gfx.Device, encoder gfx.CommandEncoder, destination gfx.Texture) {
+			source := createSampledTexture(t, device)
+			encoder.CopyTextureToTexture(source, destination, []gfx.TextureCopy{{
+				Source: gfx.ImageCopyTexture{Texture: source}, Destination: gfx.ImageCopyTexture{Texture: destination}, Size: sampledSize,
+			}})
+		},
+	}
+	for name, copyInto := range copies {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			h.mustSpawn(nil, nil)
+
+			var readback gfx.Buffer
+			h.readDevice(func(device gfx.Device) {
+				destination := createTexture(t, device, sampledSide)
+				encoder, err := device.CreateCommandEncoder(gfx.CommandEncoderDescriptor{})
+				if err != nil {
+					t.Errorf("CreateCommandEncoder answered %v", err)
+					return
+				}
+				copyInto(t, device, encoder, destination)
+				readback = readTexture(t, device, encoder, destination)
+			})
+			checkTexture(h, readback, sampledTexels)
+		})
+	}
+}
+
+func TestAClearedRangeOfABufferReadsBackAsZeroes(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil, nil)
+
+	var readback gfx.Buffer
+	h.readDevice(func(device gfx.Device) {
+		cleared := createWrittenBuffer(t, device, gfx.BufferUsageFlagCopySrc, []byte("sixteen bytes in"))
+		encoder, err := device.CreateCommandEncoder(gfx.CommandEncoderDescriptor{})
+		if err != nil {
+			t.Errorf("CreateCommandEncoder answered %v", err)
+			return
+		}
+		encoder.ClearBuffer(cleared, 4, 8)
+		readback = readBuffer(t, device, encoder, cleared, 16)
+	})
+	if read, want := h.readBack(readback, 16), []byte("sixt\x00\x00\x00\x00\x00\x00\x00\x00s in"); !bytes.Equal(read, want) {
+		t.Errorf("the buffer read %q, want %q", read, want)
+	}
+}
+
+func TestEachPassStateReachesTheDrawAfterIt(t *testing.T) {
+	whiteTexel := []byte{255, 255, 255, 255}
+	equalStencilFace := gfx.StencilFaceState{Compare: gfx.CompareFunctionEqual}
+	states := map[string]struct {
+		blend                       gfx.BlendState
+		depthStencil                gfx.DepthStencilState
+		set                         func(pass gfx.RenderPassEncoder)
+		paintedTexel                []byte
+		paintedWidth, paintedHeight int
+	}{
+		"SetViewport": {
+			set: func(pass gfx.RenderPassEncoder) {
+				pass.SetViewport(gfx.Viewport{Width: 2, Height: sampledSide, MaxDepth: 1})
+			},
+			paintedTexel: whiteTexel, paintedWidth: 2, paintedHeight: sampledSide,
+		},
+		"SetScissorRect": {
+			set:          func(pass gfx.RenderPassEncoder) { pass.SetScissorRect(gfx.ScissorRect{Width: sampledSide, Height: 2}) },
+			paintedTexel: whiteTexel, paintedWidth: sampledSide, paintedHeight: 2,
+		},
+		"SetBlendConstant": {
+			blend: gfx.BlendState{
+				Color: gfx.BlendComponent{SrcFactor: gfx.BlendFactorConstant, DstFactor: gfx.BlendFactorZero, Operation: gfx.BlendOperationAdd},
+				Alpha: gfx.BlendComponent{SrcFactor: gfx.BlendFactorOne, DstFactor: gfx.BlendFactorZero, Operation: gfx.BlendOperationAdd},
+			},
+			set:          func(pass gfx.RenderPassEncoder) { pass.SetBlendConstant(gfx.Color{R: 0.2, G: 0.4, B: 0.6, A: 1}) },
+			paintedTexel: []byte{51, 102, 153, 255}, paintedWidth: sampledSide, paintedHeight: sampledSide,
+		},
+		"SetStencilReference": {
+			depthStencil: gfx.DepthStencilState{
+				Format: gfx.TextureFormatDepth24PlusStencil8, DepthCompare: gfx.CompareFunctionAlways,
+				StencilFront: equalStencilFace, StencilBack: equalStencilFace, StencilReadMask: 0xff,
+			},
+			set:          func(pass gfx.RenderPassEncoder) { pass.SetStencilReference(clearedStencil) },
+			paintedTexel: whiteTexel, paintedWidth: sampledSide, paintedHeight: sampledSide,
+		},
+	}
+	for name, state := range states {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			h.mustSpawn(nil, nil)
+
+			var readback gfx.Buffer
+			h.readDevice(func(device gfx.Device) { readback = paintTarget(t, device, state.blend, state.depthStencil, state.set) })
+			texels := make([]byte, 4*sampledSide*sampledSide)
+			for y := range state.paintedHeight {
+				for x := range state.paintedWidth {
+					copy(texels[4*(sampledSide*y+x):], state.paintedTexel)
+				}
+			}
+			checkTexture(h, readback, texels)
+		})
+	}
+}
+
 func TestAPipelineOfAZeroLayoutRunsOverTheLayoutsReflected(t *testing.T) {
 	t.Run("render", func(t *testing.T) {
 		h := newHarness(t)
@@ -1390,7 +1507,7 @@ func TestAPipelineOfAZeroLayoutRunsOverTheLayoutsReflected(t *testing.T) {
 				pass.Draw(gfx.DrawArgs{VertexCount: 3, InstanceCount: 1})
 			})
 		})
-		checkSampledTexture(h, readback)
+		checkTexture(h, readback, sampledTexels)
 	})
 	t.Run("compute", func(t *testing.T) {
 		h := newHarness(t)
@@ -1515,7 +1632,7 @@ func TestABindingBothStagesUseIsVisibleToBoth(t *testing.T) {
 	h.mustSpawn(nil, nil)
 
 	h.readDevice(func(device gfx.Device) {
-		pipeline := createRenderPipeline(t, device, sharedWGSL, nil, nil, gfx.TextureFormatRGBA8Unorm)
+		pipeline := createRenderPipeline(t, device, sharedWGSL, nil, nil, gfx.TextureFormatRGBA8Unorm, nil)
 		group := createBindGroup(t, device, []gfx.BindGroupLayoutEntry{{
 			Binding:    0,
 			Visibility: gfx.ShaderStageFlagVertex | gfx.ShaderStageFlagFragment,
@@ -1641,6 +1758,20 @@ fn paint(@builtin(position) position: vec4f) -> @location(0) vec4f {
 }
 `
 
+// paintingWGSL paints white over every pixel of its target.
+const paintingWGSL = `
+@vertex
+fn corner(@builtin(vertex_index) index: u32) -> @builtin(position) vec4f {
+	let corners = array(vec2f(-1, -1), vec2f(3, -1), vec2f(-1, 3));
+	return vec4f(corners[index], 0, 1);
+}
+
+@fragment
+fn paint() -> @location(0) vec4f {
+	return vec4f(1);
+}
+`
+
 // pickingWGSL picks a texel of binding 0 into binding 1: load loads it,
 // and sample samples it with binding 2 through a function.
 const pickingWGSL = `
@@ -1722,8 +1853,9 @@ fn square(@builtin(global_invocation_id) id: vec3u) {
 
 // createRenderPipeline creates a pipeline of wgsl's corner and paint, over a
 // layout of groups, or the zero layout, reflected, when groups is nil,
-// drawing triangles from buffers to a target of format.
-func createRenderPipeline(t *testing.T, device gfx.Device, wgsl string, groups []gfx.BindGroupLayout, buffers []gfx.VertexBufferLayout, format gfx.TextureFormat) gfx.RenderPipeline {
+// drawing triangles from buffers to a target of format, its descriptor
+// adjusted by adjust unless nil.
+func createRenderPipeline(t *testing.T, device gfx.Device, wgsl string, groups []gfx.BindGroupLayout, buffers []gfx.VertexBufferLayout, format gfx.TextureFormat, adjust func(descriptor *gfx.RenderPipelineDescriptor)) gfx.RenderPipeline {
 	module, err := device.CreateShaderModule(gfx.ShaderModuleDescriptor{WGSL: wgsl})
 	if err != nil {
 		t.Errorf("CreateShaderModule answered %v", err)
@@ -1736,13 +1868,17 @@ func createRenderPipeline(t *testing.T, device gfx.Device, wgsl string, groups [
 		}
 		defer device.ReleasePipelineLayout(layout)
 	}
-	pipeline, err := device.CreateRenderPipeline(gfx.RenderPipelineDescriptor{
+	descriptor := gfx.RenderPipelineDescriptor{
 		Layout: layout,
 		Vertex: gfx.VertexState{Module: module, EntryPoint: "corner", Buffers: buffers},
 		Fragment: gfx.FragmentState{Module: module, EntryPoint: "paint", Targets: []gfx.ColorTargetState{{
 			Format: format, WriteMask: gfx.ColorWriteFlagAll,
 		}}},
-	})
+	}
+	if adjust != nil {
+		adjust(&descriptor)
+	}
+	pipeline, err := device.CreateRenderPipeline(descriptor)
 	if err != nil {
 		t.Errorf("CreateRenderPipeline answered %v", err)
 	}
@@ -1753,7 +1889,10 @@ func createRenderPipeline(t *testing.T, device gfx.Device, wgsl string, groups [
 // samples and of the target it draws.
 const sampledSide = 4
 
-// sampledTexels are the texels drawSampledTexture writes, each different.
+// sampledSize is the size of a texture sampledSide texels square.
+var sampledSize = gfx.Extent3D{Width: sampledSide, Height: sampledSide, DepthOrArrayLayers: 1}
+
+// sampledTexels are the texels createSampledTexture writes, each different.
 var sampledTexels = func() []byte {
 	texels := make([]byte, 4*sampledSide*sampledSide)
 	for texel := range sampledSide * sampledSide {
@@ -1762,6 +1901,17 @@ var sampledTexels = func() []byte {
 	return texels
 }()
 
+// createSampledTexture creates a texture sampledSide texels square holding
+// sampledTexels, written at the next submit.
+func createSampledTexture(t *testing.T, device gfx.Device) gfx.Texture {
+	texture := createTexture(t, device, sampledSide)
+	layout := gfx.ImageDataLayout{BytesPerRow: 4 * sampledSide, RowsPerImage: sampledSide}
+	if err := device.WriteTexture(gfx.ImageCopyTexture{Texture: texture}, sampledTexels, layout, sampledSize); err != nil {
+		t.Errorf("WriteTexture answered %v", err)
+	}
+	return texture
+}
+
 // drawSampledTexture writes sampledTexels into a texture, covers a target of
 // the same size with it through coveringWGSL with draw, given an indirect
 // buffer of a draw's arguments at 0 and an indexed draw's at 16, submits,
@@ -1769,13 +1919,7 @@ var sampledTexels = func() []byte {
 // reading. The pipeline's layout is reflected when reflected is true,
 // sampledLayout's otherwise.
 func drawSampledTexture(t *testing.T, device gfx.Device, reflected bool, draw func(pass gfx.RenderPassEncoder, indirect gfx.Buffer)) gfx.Buffer {
-	picture := createTexture(t, device, sampledSide)
-	layout := gfx.ImageDataLayout{BytesPerRow: 4 * sampledSide, RowsPerImage: sampledSide}
-	size := gfx.Extent3D{Width: sampledSide, Height: sampledSide, DepthOrArrayLayers: 1}
-	if err := device.WriteTexture(gfx.ImageCopyTexture{Texture: picture}, sampledTexels, layout, size); err != nil {
-		t.Errorf("WriteTexture answered %v", err)
-	}
-	pictureView, err := device.CreateTextureView(picture, gfx.TextureViewDescriptor{})
+	pictureView, err := device.CreateTextureView(createSampledTexture(t, device), gfx.TextureViewDescriptor{})
 	if err != nil {
 		t.Errorf("CreateTextureView answered %v", err)
 	}
@@ -1792,7 +1936,7 @@ func drawSampledTexture(t *testing.T, device gfx.Device, reflected bool, draw fu
 		groups = []gfx.BindGroupLayout{groupLayout}
 	}
 	corner := gfx.VertexBufferLayout{ArrayStride: 8, Attributes: []gfx.VertexAttribute{{Format: gfx.VertexFormatFloat32x2}}}
-	pipeline := createRenderPipeline(t, device, coveringWGSL, groups, []gfx.VertexBufferLayout{corner}, gfx.TextureFormatRGBA8Unorm)
+	pipeline := createRenderPipeline(t, device, coveringWGSL, groups, []gfx.VertexBufferLayout{corner}, gfx.TextureFormatRGBA8Unorm, nil)
 	if reflected {
 		groups = []gfx.BindGroupLayout{device.RenderPipelineBindGroupLayout(pipeline, 0)}
 	}
@@ -1805,36 +1949,101 @@ func drawSampledTexture(t *testing.T, device gfx.Device, reflected bool, draw fu
 	corners := createWrittenBuffer(t, device, gfx.BufferUsageFlagVertex, []float32{-1, -1, 3, -1, -1, 3})
 	indices := createWrittenBuffer(t, device, gfx.BufferUsageFlagIndex, []uint32{0, 1, 2})
 	indirect := createWrittenBuffer(t, device, gfx.BufferUsageFlagIndirect, []uint32{3, 1, 0, 0, 3, 1, 0, 0, 0})
+	return drawIntoTarget(t, device, gfx.RenderPassDepthStencilAttachment{}, func(pass gfx.RenderPassEncoder) {
+		pass.SetPipeline(pipeline)
+		pass.SetBindGroup(0, group, nil)
+		pass.SetVertexBuffer(0, corners, 0)
+		pass.SetIndexBuffer(indices, gfx.IndexFormatUint32, 0)
+		draw(pass, indirect)
+	})
+}
+
+// clearedStencil is the stencil value paintTarget clears its depth-stencil
+// attachment to.
+const clearedStencil = 1
+
+// paintTarget paints paintingWGSL over a target sampledSide texels square,
+// cleared to transparent black, with set's pass state, through a pipeline of
+// blend and depthStencil. A depth-stencil format draws with an attachment of
+// it, its stencil cleared to clearedStencil. It submits, copies the target
+// into a buffer of 256-byte rows, and maps that for reading.
+func paintTarget(t *testing.T, device gfx.Device, blend gfx.BlendState, depthStencil gfx.DepthStencilState, set func(pass gfx.RenderPassEncoder)) gfx.Buffer {
+	pipeline := createRenderPipeline(t, device, paintingWGSL, nil, nil, gfx.TextureFormatRGBA8Unorm, func(descriptor *gfx.RenderPipelineDescriptor) {
+		descriptor.Fragment.Targets[0].Blend = blend
+		descriptor.DepthStencil = depthStencil
+	})
+	var attachment gfx.RenderPassDepthStencilAttachment
+	if depthStencil.Format != 0 {
+		texture, err := device.CreateTexture(gfx.TextureDescriptor{Size: sampledSize, Format: depthStencil.Format, Usage: gfx.TextureUsageFlagRenderAttachment})
+		if err != nil {
+			t.Errorf("CreateTexture answered %v", err)
+		}
+		view, err := device.CreateTextureView(texture, gfx.TextureViewDescriptor{})
+		if err != nil {
+			t.Errorf("CreateTextureView answered %v", err)
+		}
+		attachment = gfx.RenderPassDepthStencilAttachment{
+			View: view, DepthLoadOp: gfx.LoadOpClear, DepthStoreOp: gfx.StoreOpDiscard, DepthClearValue: 1,
+			StencilLoadOp: gfx.LoadOpClear, StencilStoreOp: gfx.StoreOpDiscard, StencilClearValue: clearedStencil,
+		}
+	}
+	return drawIntoTarget(t, device, attachment, func(pass gfx.RenderPassEncoder) {
+		pass.SetPipeline(pipeline)
+		set(pass)
+		pass.Draw(gfx.DrawArgs{VertexCount: 3, InstanceCount: 1})
+	})
+}
+
+// drawIntoTarget records draw into a render pass on a target sampledSide
+// texels square, cleared to transparent black, and depthStencil, submits,
+// copies the target into a buffer of 256-byte rows, and maps that for
+// reading.
+func drawIntoTarget(t *testing.T, device gfx.Device, depthStencil gfx.RenderPassDepthStencilAttachment, draw func(pass gfx.RenderPassEncoder)) gfx.Buffer {
 	target := createTexture(t, device, sampledSide)
 	targetView, err := device.CreateTextureView(target, gfx.TextureViewDescriptor{})
 	if err != nil {
 		t.Errorf("CreateTextureView answered %v", err)
 	}
-	readback, err := device.CreateBuffer(gfx.BufferDescriptor{Size: uint64(256 * sampledSide), Usage: gfx.BufferUsageFlagMapRead | gfx.BufferUsageFlagCopyDst})
-	if err != nil {
-		t.Errorf("CreateBuffer answered %v", err)
-	}
-
 	encoder, err := device.CreateCommandEncoder(gfx.CommandEncoderDescriptor{})
 	if err != nil {
 		t.Errorf("CreateCommandEncoder answered %v", err)
-		return readback
+		return gfx.Buffer{}
 	}
-	pass := encoder.BeginRenderPass(gfx.RenderPassDescriptor{ColorAttachments: []gfx.RenderPassColorAttachment{{
-		View: targetView, LoadOp: gfx.LoadOpClear, StoreOp: gfx.StoreOpStore,
-	}}})
-	pass.SetPipeline(pipeline)
-	pass.SetBindGroup(0, group, nil)
-	pass.SetVertexBuffer(0, corners, 0)
-	pass.SetIndexBuffer(indices, gfx.IndexFormatUint32, 0)
-	draw(pass, indirect)
+	pass := encoder.BeginRenderPass(gfx.RenderPassDescriptor{
+		ColorAttachments:       []gfx.RenderPassColorAttachment{{View: targetView, LoadOp: gfx.LoadOpClear, StoreOp: gfx.StoreOpStore}},
+		DepthStencilAttachment: depthStencil,
+	})
+	draw(pass)
 	pass.End()
-	encoder.CopyTextureToBuffer(target, readback, []gfx.BufferTextureCopy{{
+	return readTexture(t, device, encoder, target)
+}
+
+// readTexture copies texture, sampledSide texels square, after encoder's
+// commands into a buffer of 256-byte rows, submits, and maps that for
+// reading.
+func readTexture(t *testing.T, device gfx.Device, encoder gfx.StandaloneCommandEncoder, texture gfx.Texture) gfx.Buffer {
+	readback, err := device.CreateBuffer(gfx.BufferDescriptor{Size: 256 * sampledSide, Usage: gfx.BufferUsageFlagMapRead | gfx.BufferUsageFlagCopyDst})
+	if err != nil {
+		t.Errorf("CreateBuffer answered %v", err)
+	}
+	encoder.CopyTextureToBuffer(texture, readback, []gfx.BufferTextureCopy{{
 		BufferLayout: gfx.ImageDataLayout{BytesPerRow: 256, RowsPerImage: sampledSide},
-		TextureBase:  gfx.ImageCopyTexture{Texture: target},
-		Size:         size,
+		TextureBase:  gfx.ImageCopyTexture{Texture: texture},
+		Size:         sampledSize,
 	}})
-	submitAndMap(t, device, encoder, readback, uint64(256*sampledSide))
+	submitAndMap(t, device, encoder, readback, 256*sampledSide)
+	return readback
+}
+
+// readBuffer copies size bytes of buffer after encoder's commands into a
+// buffer, submits, and maps that for reading.
+func readBuffer(t *testing.T, device gfx.Device, encoder gfx.StandaloneCommandEncoder, buffer gfx.Buffer, size uint64) gfx.Buffer {
+	readback, err := device.CreateBuffer(gfx.BufferDescriptor{Size: size, Usage: gfx.BufferUsageFlagMapRead | gfx.BufferUsageFlagCopyDst})
+	if err != nil {
+		t.Errorf("CreateBuffer answered %v", err)
+	}
+	encoder.CopyBufferToBuffer(buffer, 0, readback, 0, size)
+	submitAndMap(t, device, encoder, readback, size)
 	return readback
 }
 
@@ -1872,36 +2081,30 @@ func dispatchSquares(t *testing.T, device gfx.Device, reflected bool, dispatch f
 		t.Errorf("CreateBindGroup answered %v", err)
 	}
 	indirect := createWrittenBuffer(t, device, gfx.BufferUsageFlagIndirect, []uint32{2, 1, 1})
-	readback, err := device.CreateBuffer(gfx.BufferDescriptor{Size: 32, Usage: gfx.BufferUsageFlagMapRead | gfx.BufferUsageFlagCopyDst})
-	if err != nil {
-		t.Errorf("CreateBuffer answered %v", err)
-	}
 
 	encoder, err := device.CreateCommandEncoder(gfx.CommandEncoderDescriptor{})
 	if err != nil {
 		t.Errorf("CreateCommandEncoder answered %v", err)
-		return readback
+		return gfx.Buffer{}
 	}
 	pass := encoder.BeginComputePass(gfx.ComputePassDescriptor{})
 	pass.SetPipeline(pipeline)
 	pass.SetBindGroup(0, group, nil)
 	dispatch(pass, indirect)
 	pass.End()
-	encoder.CopyBufferToBuffer(squares, 0, readback, 0, 32)
-	submitAndMap(t, device, encoder, readback, 32)
-	return readback
+	return readBuffer(t, device, encoder, squares, 32)
 }
 
-// checkSampledTexture reads back readback, drawSampledTexture's, and checks
-// that it holds sampledTexels row by row.
-func checkSampledTexture(h *harness, readback gfx.Buffer) {
+// checkTexture reads back readback, a texture sampledSide texels square
+// copied into 256-byte rows, and checks that it holds texels row by row.
+func checkTexture(h *harness, readback gfx.Buffer, texels []byte) {
 	h.t.Helper()
 	read := h.readBack(readback, 256*sampledSide)
 	for row := range sampledSide {
-		drawn := read[256*row : 256*row+4*sampledSide]
-		written := sampledTexels[4*sampledSide*row : 4*sampledSide*(row+1)]
-		if !bytes.Equal(drawn, written) {
-			h.t.Errorf("row %d was drawn % x, want the texels written, % x", row, drawn, written)
+		rowRead := read[256*row : 256*row+4*sampledSide]
+		rowWanted := texels[4*sampledSide*row : 4*sampledSide*(row+1)]
+		if !bytes.Equal(rowRead, rowWanted) {
+			h.t.Errorf("row %d read % x, want % x", row, rowRead, rowWanted)
 		}
 	}
 }

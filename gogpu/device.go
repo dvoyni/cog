@@ -491,14 +491,10 @@ func (d *device) WriteTexture(destination gfx.ImageCopyTexture, data []byte, lay
 	if err != nil {
 		return err
 	}
+	location := makeImageCopyTexture(written, destination)
 	dataLayout := wgpu.ImageDataLayout(layout)
 	extent := wgpu.Extent3D(size)
-	return d.device.Queue().WriteTexture(&wgpu.ImageCopyTexture{
-		Texture:  written,
-		MipLevel: destination.MipLevel,
-		Origin:   wgpu.Origin3D(destination.Origin),
-		Aspect:   gputypes.TextureAspect(destination.Aspect),
-	}, data, &dataLayout, &extent)
+	return d.device.Queue().WriteTexture(&location, data, &dataLayout, &extent)
 }
 
 // MapBuffer begins wgpu's map, which resolves once the submits made before it
