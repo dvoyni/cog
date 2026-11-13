@@ -108,10 +108,18 @@
 //	})
 //
 // The timeline's time is its own: only its Step task moves it, by the delta
-// it is given, so it is deterministic under any clock. Step samples every
-// active override at the new time, which Current then reads, and then calls
-// the callbacks that came due. The game
-// schedules Step once per rendered frame, before its views.
+// it is given times the timeline's speed, and Skip, so it depends on nothing
+// but the deltas and the controls applied, whatever the clock. Step samples every active override at the new time, which Current
+// then reads, and then calls the callbacks that came due. The game schedules
+// Step once per rendered frame, before its views. Each timeline is paused,
+// sped up and skipped on its own, so the game's stops behind a menu while the
+// menu's plays:
+//
+//	timeline.Pause()
+//	// ...
+//	timeline.Resume()
+//	timeline.SetSpeed(4) // the AI's turn
+//	timeline.Skip()      // "skip animations"
 //
 // See docs/specs/mux.md.
 package mux

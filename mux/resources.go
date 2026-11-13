@@ -3,6 +3,8 @@ package mux
 import (
 	"fmt"
 	"iter"
+	"math"
+	"reflect"
 	"slices"
 	"sort"
 	"time"
@@ -14,12 +16,12 @@ import (
 // RegisterModel[M, D] and read in a later plugin's Init with
 // configurator.Resource[mux.Tasks[M, D]]().
 type Tasks[M any, D comparable] struct {
-	// Step advances the timeline by the delta it is given, samples every
-	// active override at the new time, and then calls each callback that
-	// came due, in time order, holding the write locks on *M and
-	// Timeline[M, D]. mux schedules it nowhere: its user does, before the
-	// jobs that read the timeline, as a game steps once per rendered frame
-	// with the frame's delta, before its views.
+	// Step advances the timeline by the delta it is given times its speed,
+	// unless it is paused, samples every active override at the new time,
+	// and then calls each callback that came due, in time order, holding
+	// the write locks on *M and Timeline[M, D]. mux schedules it nowhere: its
+	// user does, before the jobs that read the timeline, as a game steps once
+	// per rendered frame with the frame's delta, before its views.
 	Step *kernel.Task[time.Duration, kernel.NoResult]
 }
 
@@ -249,4 +251,54 @@ func (w WriteTimeline[M, D]) CancelCall(index int) {
 	state.callbacks = slices.Delete(state.callbacks, callbackIndex, callbackIndex+1)
 	state.callbackCache[index] = nil
 	state.freeCallbackIndices = append(state.freeCallbackIndices, index)
+}
+
+// Pause stops the timeline's time: Step leaves Now where it is until Resume,
+// whatever its delta, so current values hold and no callback comes due, as
+// when a menu is shown over the game. A paused Step still samples, so an
+// override scheduled or cancelled while paused shows from the next Step, and
+// a callback scheduled at or before Now is called there. Pausing a paused
+// timeline changes nothing.
+func (w WriteTimeline[M, D]) Pause() { w.state.isPaused = true }
+
+// Resume lets Step advance the timeline's time again after Pause, at the
+// speed last set. Resuming a running timeline changes nothing.
+func (w WriteTimeline[M, D]) Resume() { w.state.isPaused = false }
+
+// SetSpeed sets what Step multiplies its delta by before it advances the
+// timeline's time: 4 plays an AI's turn four times faster, and 0 stops time as
+// Pause does. The speed is 1 until set, and a paused timeline keeps the one
+// set for its resume.
+//
+// A speed that is negative, infinite or not a number panics.
+func (w WriteTimeline[M, D]) SetSpeed(speed float64) {
+	var reason string
+	switch {
+	case math.IsNaN(speed):
+		reason = "not a number"
+	case speed < 0:
+		reason = "negative"
+	case math.IsInf(speed, 1):
+		reason = "infinite"
+	}
+	if reason != "" {
+		panic(fmt.Sprintf("mux: model %v's timeline is set to speed %v, which is %s", reflect.TypeFor[M](), speed, reason))
+	}
+	w.state.speed = speed
+}
+
+// Skip moves Now to the end of the timeline's last override to end, or leaves
+// it where it is when none ends later, as a game's "skip animations" does.
+// The next Step samples there, so every override has finished and the
+// model's own values show, and calls each callback Skip passed, in time
+// order, as it calls any that came due: a unit whose fade was skipped is
+// purged all the same. A callback after the last end stays to come, and one
+// called schedules from the new Now, so overrides it schedules play on.
+func (w WriteTimeline[M, D]) Skip() {
+	state := w.state
+	for _, path := range state.pathStates {
+		if path != nil {
+			state.now = path.findLastEnd(state.now)
+		}
+	}
 }

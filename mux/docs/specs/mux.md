@@ -283,11 +283,11 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
   - so the sample comes out sorted in one pass, an address's overrides lie side by side for blending, and `Cancel` keeps the order as it removes.
 - mux subscribes to nothing. The game steps on `gfx.RenderEvent`, in a handler ordered before gfx's `Draw` with `OrderSubscriptions`, returning `ex.Join(in, step.Handle())`. gfx schedules its acquire after `in`, and `DrawEvent.Ready` is that acquire, so every `DrawEvent` handler's views, in any plugin, come after `Step`.
 - `RenderEvent` beats on while gfx recovers a lost device, so time goes on.
-- A timeline's time is its own, moved only by `Step`. It is deterministic under any clock, and every frame's sample matches the beat it draws.
+- A timeline's time is its own, moved only by `Step` and `Skip`. It depends on nothing but the deltas and the time controls applied, so it is deterministic under any clock, and every frame's sample matches the beat it draws.
 - Time controls:
   - `Now()` is on both sides;
-  - `Pause()`, `Resume()` and `SetSpeed(f)` are per timeline;
-  - `Skip()` jumps to the timeline's last end, finishing every override and calling every callback it passes, in order.
+  - `Pause()`, `Resume()` and `SetSpeed(f)` are per timeline. A paused `Step` leaves `Now` where it is but still samples, so an override scheduled or cancelled while paused shows from the next `Step`, and a callback scheduled at or before `Now` is called there. A paused timeline keeps the speed set for its resume. A speed of 0 stops time as a pause does; a negative, infinite or NaN speed panics.
+  - `Skip()` moves `Now` to the end of the timeline's last override to end, or leaves it when none ends later. `WriteTimeline` holds no model, so the next `Step` does the rest: it samples there, finishing every override, and calls every callback `Skip` passed, in order, those they schedule along the way included. A callback after the last end stays to come, and overrides a callback schedules from the new `Now` play on.
 
 ### Locks
 

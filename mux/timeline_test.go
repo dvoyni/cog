@@ -1322,3 +1322,167 @@ func TestCallCancelCallAndCallingAllocateNothing(t *testing.T) {
 		t.Fatalf("Call of a capturing closure allocated %v times, want its closure's 1", allocations)
 	}
 }
+
+func TestPauseHoldsTheTimelineAndResumeGoesOn(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	recorder := &callRecorder{probe: probe}
+	timeline := ElevateTimeline(probe.timeline)
+	timeline.Tween(probe.cameraY, 0, 0, 10, time.Second, EasingLinear)
+	recorder.call(600*time.Millisecond, "a")
+	probe.runStep(250 * time.Millisecond)
+	probe.expectCurrent(t, probe.cameraY, 2.5)
+	timeline.Pause()
+	probe.runStep(500 * time.Millisecond)
+	if now := timeline.Now(); now != 250*time.Millisecond {
+		t.Errorf("a paused Step moved Now to %v, want it held at 250ms", now)
+	}
+	probe.expectCurrent(t, probe.cameraY, 2.5)
+	recorder.expectCalled(t)
+	// A paused Step still samples, so a cancel shows, and still calls a
+	// callback scheduled at Now, as it does one scheduled in the past.
+	timeline.Cancel(probe.cameraY)
+	recorder.call(timeline.Now(), "now")
+	probe.runStep(500 * time.Millisecond)
+	probe.expectCurrent(t, probe.cameraY, 0)
+	recorder.expectCalled(t, "now at 250ms")
+	timeline.Tween(probe.cameraY, 0, 0, 10, time.Second, EasingLinear)
+	timeline.Resume()
+	probe.runStep(500 * time.Millisecond)
+	probe.expectCurrent(t, probe.cameraY, 7.5)
+	recorder.expectCalled(t, "a at 750ms")
+	// Pausing twice, or resuming a running timeline, changes nothing more.
+	timeline.Pause()
+	timeline.Pause()
+	timeline.Resume()
+	timeline.Resume()
+	probe.runStep(100 * time.Millisecond)
+	probe.expectCurrent(t, probe.cameraY, 8.5)
+}
+
+func TestSetSpeedScalesEachStepsDelta(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	timeline := ElevateTimeline(probe.timeline)
+	timeline.Tween(probe.cameraY, 0, 0, 10, time.Second, EasingLinear)
+	timeline.SetSpeed(4)
+	probe.runStep(100 * time.Millisecond)
+	probe.expectCurrent(t, probe.cameraY, 4)
+	timeline.SetSpeed(0.5)
+	probe.runStep(200 * time.Millisecond)
+	probe.expectCurrent(t, probe.cameraY, 5)
+	// A speed of zero stops time as a pause does.
+	timeline.SetSpeed(0)
+	probe.runStep(time.Second)
+	probe.expectCurrent(t, probe.cameraY, 5)
+	// A paused timeline keeps the speed set while paused for its resume.
+	timeline.Pause()
+	timeline.SetSpeed(2)
+	probe.runStep(time.Second)
+	probe.expectCurrent(t, probe.cameraY, 5)
+	timeline.Resume()
+	probe.runStep(100 * time.Millisecond)
+	probe.expectCurrent(t, probe.cameraY, 7)
+	if now := timeline.Now(); now != 700*time.Millisecond {
+		t.Errorf("Now is %v, want 700ms", now)
+	}
+	expectPanic(t, "speed -1, which is negative", func() { timeline.SetSpeed(-1) })
+	expectPanic(t, "speed NaN, which is not a number", func() { timeline.SetSpeed(math.NaN()) })
+	expectPanic(t, "speed +Inf, which is infinite", func() { timeline.SetSpeed(math.Inf(1)) })
+}
+
+func TestSkipFinishesEveryOverrideAndCallsEachCallbackItPasses(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	recorder := &callRecorder{probe: probe}
+	timeline := ElevateTimeline(probe.timeline)
+	probe.model.Get().Camera.Y = 10
+	probe.model.Get().Turn = 4
+	timeline.Tween(probe.cameraY, 0, 0, 10, time.Second, EasingLinear)
+	timeline.Tween(probe.turn, 500*time.Millisecond, 0, 4, 2*time.Second, EasingLinear)
+	timeline.Hold(probe.visible, time.Second, true, time.Second)
+	timeline.Call(time.Second, func(_ *game, timeline WriteTimeline[game, depth]) {
+		recorder.called = append(recorder.called, fmt.Sprintf("a at %v", timeline.Now()))
+		// A callback scheduled along the way is called in its turn.
+		recorder.call(2*time.Second, "inner")
+	})
+	recorder.call(2500*time.Millisecond, "end")
+	recorder.call(2*time.Second, "b")
+	recorder.call(3*time.Second, "after")
+	probe.runStep(250 * time.Millisecond)
+	// Skip jumps to the end of the last override, the turn's.
+	timeline.Skip()
+	if now := timeline.Now(); now != 2500*time.Millisecond {
+		t.Errorf("Skip moved Now to %v, want the last end, 2.5s", now)
+	}
+	probe.runStep(0)
+	probe.expectCurrent(t, probe.cameraY, 10)
+	probe.expectCurrent(t, probe.turn, 4)
+	probe.expectCurrent(t, probe.visible, false)
+	recorder.expectCalled(t, "a at 2.5s", "b at 2.5s", "inner at 2.5s", "end at 2.5s")
+	// A callback after the last end is still to come.
+	probe.runStep(500 * time.Millisecond)
+	recorder.expectCalled(t, "after at 3s")
+	// With nothing left to play, Skip leaves Now where it is.
+	timeline.Skip()
+	if now := timeline.Now(); now != 3*time.Second {
+		t.Errorf("Skip with nothing scheduled moved Now to %v, want it held at 3s", now)
+	}
+}
+
+func TestEachTimelinesTimeControlsAreItsOwn(t *testing.T) {
+	var (
+		menuOpacity  Path[menu, float32]
+		menuTimeline kernel.Write[Timeline[menu, depth]]
+		menuTasks    Tasks[menu, depth]
+	)
+	probe := spawnTimelineProbe(t, func(configurator *kernel.Configurator) {
+		RegisterModel[menu, depth](configurator)
+		menuOpacity = MakePath[menu, float32](configurator, "Opacity")
+		menuTimeline = declare[kernel.Write[Timeline[menu, depth]]](configurator)
+		menuTasks, _ = configurator.Resource[Tasks[menu, depth]]()
+	})
+	gameTimeline := ElevateTimeline(probe.timeline)
+	writeMenuTimeline := ElevateTimeline(menuTimeline)
+	gameTimeline.Tween(probe.cameraY, 0, 0, 10, 10*time.Second, EasingLinear)
+	writeMenuTimeline.Tween(menuOpacity, 0, 0, 1, time.Second, EasingLinear)
+	stepBoth := func(delta time.Duration) {
+		probe.harness.run(func(executor *kernel.Executor) kernel.JobHandle {
+			return executor.Join(executor.Schedule(probe.muxTasks.Step, delta).Handle(), executor.Schedule(menuTasks.Step, delta).Handle())
+		})
+	}
+	gameTimeline.Pause()
+	writeMenuTimeline.SetSpeed(2)
+	stepBoth(250 * time.Millisecond)
+	if gameNow, menuNow := gameTimeline.Now(), writeMenuTimeline.Now(); gameNow != 0 || menuNow != 500*time.Millisecond {
+		t.Errorf("the game's paused timeline is at %v and the menu's, at double speed, at %v, want 0s and 500ms", gameNow, menuNow)
+	}
+	gameTimeline.Resume()
+	writeMenuTimeline.Skip()
+	stepBoth(time.Second)
+	if gameNow, menuNow := gameTimeline.Now(), writeMenuTimeline.Now(); gameNow != time.Second || menuNow != 3*time.Second {
+		t.Errorf("after the menu's skip, the game's timeline is at %v and the menu's at %v, want 1s and 3s", gameNow, menuNow)
+	}
+	probe.expectCurrent(t, probe.cameraY, 1)
+}
+
+func TestTimeControlsAllocateNothing(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	timeline := ElevateTimeline(probe.timeline)
+	// Each round tweens, pauses and steps, resumes at double speed, skips
+	// and steps past the tween's end, so the timeline stays at the size the
+	// first round grew it to.
+	round := func() {
+		timeline.Tween(probe.cameraY, timeline.Now(), 0, 10, time.Second, EasingLinear)
+		timeline.Call(timeline.Now()+time.Second, countCall)
+		timeline.Pause()
+		step(nil, time.Millisecond, probe.model, probe.timeline)
+		timeline.Resume()
+		timeline.SetSpeed(2)
+		step(nil, time.Millisecond, probe.model, probe.timeline)
+		timeline.Skip()
+		step(nil, time.Millisecond, probe.model, probe.timeline)
+		timeline.SetSpeed(1)
+	}
+	round()
+	if allocations := testing.AllocsPerRun(100, round); allocations != 0 {
+		t.Fatalf("Pause, Resume, SetSpeed, Skip and Step allocated %v times per round", allocations)
+	}
+}
