@@ -160,8 +160,8 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
   - a **slice** reads its header, checks the index against its length, and jumps into its backing array;
   - a **map** looks the key up through the runtime's own map access, which answers a pointer into the map's slot or nil, and walks the remaining steps from that pointer, copying only the property out. No map type is registered: reflection finds each map along a path, with its key and element types.
 
-  Steps mix in any order. A literal index compiles into the path and leaves no hole.
-- Steps keep offsets and sizes, never pointers, and every read starts from the model's base. A reallocated slice or a copy of the model therefore reads correctly.
+  Steps mix in any order. A literal index compiles into the path and leaves no hole. A map's literal index is its key, so only a map of integer keys takes one: an interned index lives one run.
+- Steps keep offsets, sizes, and the runtime's type descriptor and key table of each map they cross, never a pointer into the model, and every read starts from the model's base. A reallocated slice, a replaced map or a copy of the model therefore reads correctly.
 - Registration rejects:
   - a pointer or an interface anywhere along a path;
   - two paths of one model where one is a prefix of the other;
@@ -179,6 +179,7 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
 - An integer map key goes in as it is. Any other comparable key is interned in the model's timeline:
   - `WriteTimeline.Intern(k)` gives it the timeline's next index; only timeline writers call it.
   - `Timeline.Index(k) (int64, bool)` only looks a key up, so views call it under the read lock. A key never interned cannot have an override.
+  - `path.Get` reads the interned keys holding only the model's read lock, as the AI does, so `Intern` is called holding the model's write lock too, as updates and callbacks do.
 - Key tables are per timeline, per key type: a forward map, and a back slice that a map step reads to turn an index back into its key. They never shrink.
 - Compiling a path makes, through reflection, the tables for the key type of each map it crosses whose keys are not integers; `Intern` and `Index` read them back typed. A key type no path's map uses panics in `Intern` and `Index`, as `Intern("bob")` does when the map is `map[UnitName]Unit`.
 - An address is `{path id, holes D}` inside the timeline: comparable, a Go map key, no allocation. User code holds paths and hole values, never addresses.

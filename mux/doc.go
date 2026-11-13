@@ -11,17 +11,31 @@
 //
 //	mux.RegisterModel[Game, GameDepth](configurator)
 //
-// A Path names one property of a model through its struct fields, arrays and
-// slices, compiled once by MakePath, by reflection. Each [] in it is a hole,
-// which every read and override fills with an int64, and a literal index
-// leaves none; a path with its holes filled is an address. Get reads the
-// model's own value at an address, allocating nothing, or answers false for
-// an index outside its array or slice. The game moves no element of a slice
-// while an override addresses it, freeing elements rather than closing the
-// gaps:
+// A Path names one property of a model through its struct fields, arrays,
+// slices and maps, compiled once by MakePath, by reflection. Each [] in it is
+// a hole, which every read and override fills with an int64, and a literal
+// index leaves none; a path with its holes filled is an address. Get reads
+// the model's own value at an address, allocating nothing, or answers false
+// for an index outside its array or slice, or a key its map lacks. The game
+// moves no element of a slice while an override addresses it, freeing
+// elements rather than closing the gaps:
 //
 //	position := mux.MakePath[Game, Vec2](configurator, "Squads[].Members[].Position")
 //	value, ok := position.Get(model.Get(), squad, member)
+//
+// A map's integer key is its own hole. Any other key is interned in the
+// model's timeline by the update that adds its element, and a view looks its
+// index up without writing:
+//
+//	health := mux.MakePath[Game, int32](configurator, "UnitsByName[].Health")
+//
+//	// An update adds a unit, and interns its name:
+//	model.Get().UnitsByName["ada"] = Unit{Health: 30}
+//	mux.ElevateTimeline(timeline).Intern(UnitName("ada"))
+//
+//	// A view looks the name's index up, and reads through it:
+//	ada, found := timeline.Get().Index(UnitName("ada"))
+//	value, ok := health.Get(model.Get(), ada)
 //
 // A view reads the timeline under kernel.Read[mux.Timeline[M, D]], and a job
 // holding kernel.Write[mux.Timeline[M, D]] reaches its writing side through

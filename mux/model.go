@@ -25,9 +25,10 @@ func RegisterModel[M any, D comparable](configurator *kernel.Configurator) {
 	if depthType.Kind() != reflect.Array || depthType.Elem() != reflect.TypeFor[int64]() {
 		panic(fmt.Sprintf("mux: model %v is registered with depth %v, which is not an array of int64", modelType, depthType))
 	}
-	registry.models[modelType] = &modelRegistration{depthType: depthType}
+	keyTables := &[]*keyTable{}
+	registry.models[modelType] = &modelRegistration{depthType: depthType, keyTables: keyTables}
 	configurator.InitResource(new(M))
-	configurator.InitResource(Timeline[M, D]{timelineSide[M, D]{state: &timelineState[M, D]{easings: registry.easings}}})
+	configurator.InitResource(Timeline[M, D]{timelineSide[M, D]{state: &timelineState[M, D]{easings: registry.easings, keyTables: keyTables}}})
 	configurator.InitResource(Tasks[M, D]{Step: configurator.RegisterTask2(step[M, D])})
 }
 
@@ -38,4 +39,6 @@ type modelRegistration struct {
 	depthType reflect.Type
 	// paths holds every path made for the model, in the order made.
 	paths []*compiledPath
+	// keyTables is the model's timeline's key tables, which MakePath fills.
+	keyTables *[]*keyTable
 }
