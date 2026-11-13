@@ -122,7 +122,7 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
 - mux is its own Go module (Go 1.27) in the workspace, depending on the kernel alone: not on metronome, gfx or ecs. Its context is already in the context map.
 - It has the shared Go rules and the project's plugin rules: `NewPlugin()` with no parameters, a README with a **Kernel surface** section, `resources.go` and the rest.
 - It depends on three parts of the runtime outside Go's compatibility promise:
-  - the map access `reflect.mapaccess`, reached through `//go:linkname` and declared `//go:noescape`. The runtime keeps that function for outside packages and pledges its signature unchanged ([go.dev/issue/67401](https://go.dev/issue/67401)); it kept it through the map rewrite of Go 1.24;
+  - four map accesses, each reached through `//go:linkname` and declared `//go:noescape`: `runtime.mapaccess2_fast32`, `runtime.mapaccess2_fast64` and `runtime.mapaccess2_faststr`, which a typed lookup takes for a map whose keys compare as 4 or 8 bytes of plain memory or as a string and whose elements are 128 bytes or less, and `reflect.mapaccess` for every other map. The runtime keeps each for outside packages and pledges its signature unchanged: "Do not remove or change the type signature. See [go.dev/issue/67401](https://go.dev/issue/67401)." It kept them through the map rewrite of Go 1.24;
   - a `reflect.Type`'s type descriptor, read out of its interface;
   - the layout of a `reflect.MapIter`, which `All` holds on the stack to walk a map: the runtime's iterator follows the map's `Value` in it, and the iterator's first two fields point at the entry's key and element, as the compiler's own range over a map reads them. The public routes do not do: `MapIter.Key` and `Value`, and `SetIterKey` and `SetIterValue`, copy every entry, and the iterator the runtime keeps for outside packages, `reflect.mapiterinit`, allocates on every start.
 
@@ -159,7 +159,7 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
   - a **field** adds its offset;
   - an **array** checks the index against its length and adds index times element size;
   - a **slice** reads its header, checks the index against its length, and jumps into its backing array;
-  - a **map** looks the key up through the runtime's own map access, which answers a pointer into the map's slot or nil, and walks the remaining steps from that pointer, copying only the property out. No map type is registered: reflection finds each map along a path, with its key and element types.
+  - a **map** looks the key up through the runtime's own map access, the one the compiler picks for a typed lookup of the same map, which answers a pointer into the map's slot or nil, and walks the remaining steps from that pointer, copying only the property out. No map type is registered: reflection finds each map along a path, with its key and element types.
 
   Steps mix in any order. A literal index compiles into the path and leaves no hole. A map's literal index is its key, so only a map of integer keys takes one: an interned index lives one run.
 - Steps keep offsets, sizes, and the runtime's type descriptor and key table of each map they cross, never a pointer into the model, and every read starts from the model's base. A reallocated slice, a replaced map or a copy of the model therefore reads correctly.
@@ -322,7 +322,7 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
   - a skipped callback still called once, in order;
   - a missed hole answering `false`;
   - a path registered through a pointer panicking;
-  - a map step answering as a typed lookup does, for string, integer and struct keys, present, absent, deleted and in a nil map.
+  - a map step reading through the access a typed lookup of its map takes, and answering as that lookup does, through each access: for string keys, 4- and 8-byte integer and struct keys, padded struct keys, and keys or elements too large for a fast access, present, absent, deleted and in a nil map.
 - **The zero-allocation gate**: `testing.AllocsPerRun(...) == 0`, in plain `go test`, once each store has grown to working size.
   - Per frame: `Step` (advancing, sampling and blending, retiring, calling due callbacks whose own bodies allocate nothing); `Current` (an active override, a path with overrides but not this address, a path with none); `All` over a slice and over a map; `Index` (hit and miss); `Get` through a slice step and a map step.
   - Steady state: 0 for `Tween`, `Hold`, building a `Sequence`, `Cancel`, `CancelCall`, and `Intern` of a known key. `Intern` of a new key allocates only while its tables grow. `Call` allocates exactly its closure's own allocation.

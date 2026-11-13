@@ -32,13 +32,19 @@ nothing but the standard library and the [kernel](../kernel).
   its index, the hole that reaches its element; a view looks the index up
   with `timeline.Index(key)`, which writes nothing. Indices live one run, so
   a game interns every key again after loading.
-- A map step reaches the runtime's own map access, `reflect.mapaccess`,
-  through `//go:linkname`, and reads a map type's runtime descriptor out of
-  its `reflect.Type`; `All` walks a map through a `reflect.MapIter`, reading
-  each entry's key and element in place out of its layout. All three lie
-  outside Go's compatibility promise. Tests hold every map step to a typed
-  lookup over the same map, and `All` to each map's entries, so a change in
-  any fails them.
+- A map step reads its map through the runtime's own access that a typed
+  lookup of the same map takes, reached through `//go:linkname`:
+  `runtime.mapaccess2_fast32` or `runtime.mapaccess2_fast64` for keys that
+  compare as 4 or 8 bytes of plain memory, `runtime.mapaccess2_faststr` for
+  keys that compare as a string, where the map's elements are 128 bytes or
+  less, and `reflect.mapaccess` for every other map. The runtime pledges
+  each one's signature unchanged: "Do not remove or change the type
+  signature. See go.dev/issue/67401." A map step reads a map type's runtime
+  descriptor out of its `reflect.Type`, and `All` walks a map through a
+  `reflect.MapIter`, reading each entry's key and element in place out of
+  its layout. All three lie outside Go's compatibility promise. Tests hold
+  every map step to a typed lookup over the same map, and `All` to each
+  map's entries, so a change in any fails them.
 - **`Timeline[M, D]`** is the reading side of the model's timeline, and
   **`WriteTimeline[M, D]`**, from `ElevateTimeline`, its writing side. Both
   answer `Now`, the timeline's own time.

@@ -32,6 +32,11 @@ type pathStep struct {
 	// which a walk iterates the map by.
 	mapType        unsafe.Pointer
 	mapReflectType reflect.Type
+	// mapAccess is the access the step reads the map through, and
+	// keyIndicesAccess the one a walk reads keyIndices through: each the
+	// one a typed lookup of its map takes.
+	mapAccess        mapAccess
+	keyIndicesAccess mapAccess
 	// keys points at the []K holding each key of the map's type K that the
 	// timeline interned, at its index; nil when the map's keys are integers,
 	// each its own index.
@@ -53,25 +58,24 @@ type pathStep struct {
 	keyOffset uintptr
 }
 
-// findMapElement answers where the element lies that the map at mapField
-// holds under the key index names, or nil when it holds none, the map being
-// nil included. The element is read in place: nothing is copied out of the
-// map.
-func (s *pathStep) findMapElement(mapField unsafe.Pointer, index int64) unsafe.Pointer {
-	mapPointer := *(*unsafe.Pointer)(mapField)
+// findKey answers where the key lies that the hole or literal index at
+// index names, and true, or false when no key of the map's type has that
+// index: one past its integer type, or one the timeline never interned. A
+// key of an integer type is index's own bits, read in place.
+func (s *pathStep) findKey(index *int64) (unsafe.Pointer, bool) {
 	if s.keys == nil {
-		if index < s.keyMinimum || s.keyMaximum < index {
-			return nil
+		if *index < s.keyMinimum || s.keyMaximum < *index {
+			return nil, false
 		}
-		return accessMap(s.mapType, mapPointer, unsafe.Add(unsafe.Pointer(&index), s.keyOffset))
+		return unsafe.Add(unsafe.Pointer(index), s.keyOffset), true
 	}
 	// Every slice's header is laid out alike, so the keys read as a []byte's:
 	// its length counts the keys, and its data is where they lie.
 	keys := *(*[]byte)(s.keys)
-	if uint64(index) >= uint64(len(keys)) {
-		return nil
+	if uint64(*index) >= uint64(len(keys)) {
+		return nil, false
 	}
-	return accessMap(s.mapType, mapPointer, unsafe.Add(unsafe.Pointer(unsafe.SliceData(keys)), uintptr(index)*s.elementSize))
+	return unsafe.Add(unsafe.Pointer(unsafe.SliceData(keys)), uintptr(*index)*s.elementSize), true
 }
 
 // findKeyHole answers the hole that reaches the map's element under the key
@@ -80,8 +84,23 @@ func (s *pathStep) findMapElement(mapField unsafe.Pointer, index int64) unsafe.P
 // whose element no hole reaches.
 func (s *pathStep) findKeyHole(key unsafe.Pointer) (int64, bool) {
 	if s.keys != nil {
-		index := accessMap(s.keyIndicesType, s.keyIndices, key)
-		if index == nil {
+		// The access is dispatched here, as compiledPath.findProperty
+		// dispatches a map step's, so a walk makes no call between this and
+		// the runtime for each entry.
+		var index unsafe.Pointer
+		ok := true
+		switch s.keyIndicesAccess {
+		case mapAccessFast32:
+			index, ok = accessMapFast32(s.keyIndicesType, s.keyIndices, *(*uint32)(key))
+		case mapAccessFast64:
+			index, ok = accessMapFast64(s.keyIndicesType, s.keyIndices, *(*uint64)(key))
+		case mapAccessFastString:
+			index, ok = accessMapFastString(s.keyIndicesType, s.keyIndices, *(*string)(key))
+		default:
+			index = accessMap(s.keyIndicesType, s.keyIndices, key)
+			ok = index != nil
+		}
+		if !ok {
 			return 0, false
 		}
 		return *(*int64)(index), true
@@ -104,13 +123,3 @@ func (s *pathStep) findKeyHole(key unsafe.Pointer) (int64, bool) {
 	}
 	return hole, true
 }
-
-// accessMap answers where the element lies that the map at mapPointer, of
-// the type whose runtime descriptor is mapType, holds under the key at key,
-// or nil when it holds none, a nil map included. It is the runtime's own
-// map access, which the runtime keeps for packages outside it, its
-// signature pledged unchanged (go.dev/issue/67401).
-//
-//go:linkname accessMap reflect.mapaccess
-//go:noescape
-func accessMap(mapType, mapPointer, key unsafe.Pointer) unsafe.Pointer
