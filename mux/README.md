@@ -64,6 +64,14 @@ nothing but the standard library and the [kernel](../kernel).
   overrides there queues them after whatever plays. `Cancel(path, holes...)`
   removes every override on an address, running or yet to start, and its
   current value is the model's own from the next `Step`.
+- A **sequence**, `MakeSequence(start)`, places overrides and callbacks
+  without their starts, which it works out: its `Tween`, `Hold` and `Call`
+  start after everything placed so far, `With` tweens alongside what was
+  placed last, and `Wait(length)` leaves a gap. It is a builder held on the
+  stack, and what it places are ordinary overrides and callbacks, so a unit
+  walks, turns as it sets off, waits and attacks with no start worked out by
+  hand. A sequence started at `End(path, holes...)` queues after whatever
+  plays on an address.
 - A **callback**, `Call(start, function)`, is a function the timeline calls
   once at a moment of its own, given the model and the timeline's writing
   side, such as purging a dead unit when its fade ends: a removed unit stays

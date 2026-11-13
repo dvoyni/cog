@@ -204,7 +204,7 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
 
 - `Timeline[M, D]`, the resource, is a struct holding one private pointer, with reads only: `Current`, `All`, `Index`, `Now`. `Get()` copies the pointer, and nothing can be asserted into writing.
 - `ElevateTimeline(kernel.Write[Timeline[M, D]]) WriteTimeline[M, D]` gives the writing side, which is no resource:
-  - scheduling: `Tween`, `Hold`, `Call`, `Sequence`, `End`;
+  - scheduling: `Tween`, `Hold`, `Call`, `MakeSequence`, `End`;
   - removal: `Intern`, `Cancel`, `CancelCall`;
   - time: `Pause`, `Resume`, `SetSpeed`, `Skip`, and `Now`.
 
@@ -221,11 +221,13 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
   - `Hold(path, start, value, length, holes...)`: a tween whose two ends are one value, with Linear easing. It calls no interpolator to make its value, so it works on any type.
 
   These are the only kinds of override.
-- `Sequence(start)` is a builder held on the stack, storing nothing of its own. Its methods take the same arguments without the start, which it fills in:
-  - `Tween`, `Hold` and `Call` start after everything placed so far;
-  - `With` starts a tween alongside the previous one;
-  - `Wait(d)` adds a gap.
-- `End(path, holes...)` answers when an address is next free: the end of its last override, or `Now` when none is left or the last has ended. `Sequence(End(path, holes...))` therefore queues after whatever plays and never starts in the past.
+- `MakeSequence(start)` answers a `Sequence[M, D]`, a builder held on the stack, storing nothing of its own: what it places are ordinary overrides and callbacks, scheduled as it places them. Its methods take the same arguments without the start, which it fills in:
+  - `Tween`, `Hold` and `Call` start after everything placed so far, and `Call` answers the callback's index;
+  - `With` starts a tween alongside what was placed last, or at the sequence's start when nothing was;
+  - `Wait(length)` adds a gap, and a negative length panics. A `With` after it still starts alongside what was placed last.
+
+  What is placed next starts when everything placed so far has ended, the waits after it included. A callback has no length, so a tween placed with `With` after it starts with it.
+- `End(path, holes...)` answers when an address is next free: the end of its last override, or `Now` when none is left or the last has ended. `MakeSequence(End(path, holes...))` therefore queues after whatever plays and never starts in the past.
 - `Cancel(path, holes...)` removes every override on an address, running or yet to start. From the next `Step` on, the current value is the model's, which may jump: `Current` reads only the sample, as it does for an override just scheduled.
 
 ### Blending and leaving
@@ -323,7 +325,7 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
   - a map step answering as a typed lookup does, for string, integer and struct keys, present, absent, deleted and in a nil map.
 - **The zero-allocation gate**: `testing.AllocsPerRun(...) == 0`, in plain `go test`, once each store has grown to working size.
   - Per frame: `Step` (advancing, sampling and blending, retiring, calling due callbacks whose own bodies allocate nothing); `Current` (an active override, a path with overrides but not this address, a path with none); `All` over a slice and over a map; `Index` (hit and miss); `Get` through a slice step and a map step.
-  - Steady state: 0 for `Tween`, `Hold`, a `Sequence`, `Cancel`, `CancelCall`, and `Intern` of a known key. `Intern` of a new key allocates only while its tables grow. `Call` allocates exactly its closure's own allocation.
+  - Steady state: 0 for `Tween`, `Hold`, building a `Sequence`, `Cancel`, `CancelCall`, and `Intern` of a known key. `Intern` of a new key allocates only while its tables grow. `Call` allocates exactly its closure's own allocation.
 - **Benchmarks** time each per element, against a hand-written equivalent where one exists (a direct field read, a plain loop). The cases:
   - counts of 16, 256 and 4096 overrides and elements, with the view case at 4096 units, a quarter of them overridden;
   - depths `[1]`, `[4]` and `[12]int64`;

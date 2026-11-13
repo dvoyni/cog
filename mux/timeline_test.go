@@ -118,6 +118,22 @@ func (p *timelineProbe) expectSteps(t *testing.T, steps []timedValue) {
 	}
 }
 
+// expectSpans fails t unless the overrides on the address holes fill on
+// path span want, a start and an end for each, in the order scheduled.
+func (p *timelineProbe) expectSpans[T any](t *testing.T, path Path[game, T], want []time.Duration, holes ...int64) {
+	t.Helper()
+	filledHoles := path.compiled.makeHoles[depth](holes)
+	var got []time.Duration
+	for _, scheduled := range p.timeline.Get().state.findPathState(path).overrides {
+		if scheduled.holes == filledHoles {
+			got = append(got, scheduled.start, scheduled.start+scheduled.length)
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("%q%v's overrides start and end at %v, want %v", path.compiled.text, holes, got, want)
+	}
+}
+
 // timedValue is a Step's delta and the current value a view should read
 // after it.
 type timedValue struct {
@@ -1100,9 +1116,15 @@ type callRecorder struct {
 // call schedules a callback named name at start, which records its name and
 // the time it is called at, and answers its index.
 func (r *callRecorder) call(start time.Duration, name string) int {
-	return ElevateTimeline(r.probe.timeline).Call(start, func(_ *game, timeline WriteTimeline[game, depth]) {
+	return ElevateTimeline(r.probe.timeline).Call(start, r.makeRecording(name))
+}
+
+// makeRecording answers a callback named name, which records its name and
+// the time it is called at.
+func (r *callRecorder) makeRecording(name string) func(*game, WriteTimeline[game, depth]) {
+	return func(_ *game, timeline WriteTimeline[game, depth]) {
 		r.called = append(r.called, fmt.Sprintf("%s at %v", name, timeline.Now()))
-	})
+	}
 }
 
 // expectCalled fails t unless the callbacks called since the last check are
@@ -1484,5 +1506,100 @@ func TestTimeControlsAllocateNothing(t *testing.T) {
 	round()
 	if allocations := testing.AllocsPerRun(100, round); allocations != 0 {
 		t.Fatalf("Pause, Resume, SetSpeed, Skip and Step allocated %v times per round", allocations)
+	}
+}
+
+func TestSequencePlacesEachOverrideAfterEverythingPlacedSoFar(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	recorder := &callRecorder{probe: probe}
+	timeline := ElevateTimeline(probe.timeline)
+	// A unit walks, turning as it sets off, shows itself as its walk ends,
+	// waits, and attacks, raising its banner for longer than the attack
+	// lasts; a callback then purges its target, and the camera pans after.
+	recorder.call(0, "before")
+	sequence := timeline.MakeSequence(time.Second)
+	sequence.Tween(probe.cameraY, 0, 10, time.Second, EasingLinear)
+	sequence.With(probe.terrain, 0, 1, 300*time.Millisecond, EasingLinear, 0, 0)
+	sequence.With(probe.terrain, 0, 1, 200*time.Millisecond, EasingLinear, 0, 2)
+	sequence.Hold(probe.visible, true, 500*time.Millisecond)
+	sequence.With(probe.terrain, 0, 1, 100*time.Millisecond, EasingLinear, 1, 1)
+	sequence.Wait(250 * time.Millisecond)
+	sequence.Tween(probe.unitHealth, 10, 7, 400*time.Millisecond, EasingLinear, 0)
+	sequence.With(probe.terrain, 0, 1, time.Second, EasingLinear, 0, 1)
+	index := sequence.Call(recorder.makeRecording("purge"))
+	// A callback has no length, so a tween with it starts with it, and the
+	// pan after that tween.
+	sequence.With(probe.terrain, 0, 1, 100*time.Millisecond, EasingLinear, 1, 2)
+	sequence.Tween(probe.cameraY, 10, 0, time.Second, EasingLinear)
+	sequence.Wait(time.Second)
+	sequence.With(probe.terrain, 1, 0, time.Second, EasingLinear, 1, 0)
+	probe.expectSpans(t, probe.cameraY, []time.Duration{time.Second, 2 * time.Second, 3850 * time.Millisecond, 4850 * time.Millisecond})
+	probe.expectSpans(t, probe.terrain, []time.Duration{time.Second, 1300 * time.Millisecond}, 0, 0)
+	probe.expectSpans(t, probe.terrain, []time.Duration{time.Second, 1200 * time.Millisecond}, 0, 2)
+	probe.expectSpans(t, probe.terrain, []time.Duration{2 * time.Second, 2100 * time.Millisecond}, 1, 1)
+	probe.expectSpans(t, probe.terrain, []time.Duration{3750 * time.Millisecond, 3850 * time.Millisecond}, 1, 2)
+	probe.expectSpans(t, probe.visible, []time.Duration{2 * time.Second, 2500 * time.Millisecond})
+	probe.expectSpans(t, probe.unitHealth, []time.Duration{2750 * time.Millisecond, 3150 * time.Millisecond}, 0)
+	probe.expectSpans(t, probe.terrain, []time.Duration{2750 * time.Millisecond, 3750 * time.Millisecond}, 0, 1)
+	// With goes alongside the pan, the last override placed, not after the
+	// wait.
+	probe.expectSpans(t, probe.terrain, []time.Duration{3850 * time.Millisecond, 4850 * time.Millisecond}, 1, 0)
+	if index != 1 {
+		t.Errorf("the sequence's Call answered index %d, want 1, the second", index)
+	}
+	probe.runStep(3700 * time.Millisecond)
+	recorder.expectCalled(t, "before at 3.7s")
+	probe.runStep(50 * time.Millisecond)
+	recorder.expectCalled(t, "purge at 3.75s")
+}
+
+func TestSequenceFirstWithStartsAtTheSequencesStart(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	sequence := ElevateTimeline(probe.timeline).MakeSequence(time.Second)
+	sequence.With(probe.cameraY, 0, 10, time.Second, EasingLinear)
+	sequence.Wait(time.Second)
+	sequence.Tween(probe.cameraY, 10, 0, time.Second, EasingLinear)
+	probe.expectSpans(t, probe.cameraY, []time.Duration{time.Second, 2 * time.Second, 3 * time.Second, 4 * time.Second})
+}
+
+func TestSequenceStartedAtEndQueuesAfterWhatPlays(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	timeline := ElevateTimeline(probe.timeline)
+	timeline.Tween(probe.cameraY, 0, 0, 10, 2*time.Second, EasingLinear)
+	probe.runStep(500 * time.Millisecond)
+	sequence := timeline.MakeSequence(timeline.End(probe.cameraY))
+	sequence.Tween(probe.cameraY, 10, 20, time.Second, EasingLinear)
+	probe.expectSpans(t, probe.cameraY, []time.Duration{0, 2 * time.Second, 2 * time.Second, 3 * time.Second})
+}
+
+func TestSequencePanicsNamingWhatIsWrong(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	sequence := ElevateTimeline(probe.timeline).MakeSequence(0)
+	expectPanic(t, "-1s, which is no gap", func() { sequence.Wait(-time.Second) })
+	expectPanic(t, "which is no positive length", func() { sequence.Tween(probe.cameraY, 0, 1, 0, EasingLinear) })
+	expectPanic(t, "which is no positive length", func() { sequence.With(probe.cameraY, 0, 1, 0, EasingLinear) })
+	expectPanic(t, "which is no positive length", func() { sequence.Hold(probe.cameraY, 0, 0) })
+	expectPanic(t, "nil function", func() { sequence.Call(nil) })
+}
+
+func TestBuildingASequenceAllocatesNothing(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	timeline := ElevateTimeline(probe.timeline)
+	// Each round builds a sequence over two Steps and steps past its end, so
+	// the timeline stays at the size the first rounds grew it to.
+	round := func() {
+		sequence := timeline.MakeSequence(timeline.Now())
+		sequence.Tween(probe.cameraY, 0, 10, time.Millisecond, EasingLinear)
+		sequence.With(probe.terrain, 0, 1, time.Millisecond, EasingLinear, 0, 1)
+		sequence.Hold(probe.visible, true, time.Millisecond)
+		sequence.Wait(0)
+		sequence.Call(countCall)
+		step(nil, time.Millisecond, probe.model, probe.timeline)
+		step(nil, time.Millisecond, probe.model, probe.timeline)
+	}
+	round()
+	round()
+	if allocations := testing.AllocsPerRun(100, round); allocations != 0 {
+		t.Fatalf("building a sequence and stepping past it allocated %v times per round", allocations)
 	}
 }
