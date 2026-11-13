@@ -2,7 +2,6 @@ package mux
 
 import (
 	"fmt"
-	"reflect"
 	"time"
 
 	"github.com/dvoyni/cog/kernel"
@@ -74,6 +73,10 @@ func (w WriteTimeline[M, D]) Tween[T any](path Path[M, T], start time.Duration, 
 	if w.state.easings.function(easing) == nil {
 		panic(fmt.Sprintf("mux: path %q is tweened by easing %d, which is not registered", path.compiled.text, easing))
 	}
+	interpolate, ok := path.compiled.interpolator.(interpolator[T])
+	if !ok {
+		panic(fmt.Sprintf("mux: path %q is tweened, but no interpolator tweens its %v", path.compiled.text, path.compiled.propertyType))
+	}
 	filledHoles := path.compiled.makeHoles[D](holes)
 	id := path.compiled.id
 	for len(w.state.pathStates) <= id {
@@ -81,11 +84,6 @@ func (w WriteTimeline[M, D]) Tween[T any](path Path[M, T], start time.Duration, 
 	}
 	state, ok := w.state.pathStates[id].(*pathState[D, T])
 	if !ok {
-		// Only float32 has an interpolator yet.
-		interpolate, ok := any(interpolator[float32](interpolateFloat32)).(interpolator[T])
-		if !ok {
-			panic(fmt.Sprintf("mux: path %q is tweened, but no interpolator tweens its %v", path.compiled.text, reflect.TypeFor[T]()))
-		}
 		state = &pathState[D, T]{interpolate: interpolate}
 		w.state.pathStates[id] = state
 	}

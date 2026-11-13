@@ -36,7 +36,13 @@
 //
 // A tween eases by an Easing, a curve named by its number: EasingLinear or
 // one of Robert Penner's curves mux registers below 256, or a game's own,
-// registered from 256 with RegisterEasing.
+// registered from 256 with RegisterEasing. It moves through the interpolator
+// of its property's type: every float and integer kind has one built in, and
+// a game registers one for its own types with RegisterInterpolator:
+//
+//	mux.RegisterInterpolator(configurator, func(a, b Vec2, t float32, ease func(a, b, t float32) float32) Vec2 {
+//		return Vec2{X: ease(a.X, b.X, t), Y: ease(a.Y, b.Y, t)}
+//	})
 //
 // The timeline's time is its own: only its Step task moves it, by the delta
 // it is given, so it is deterministic under any clock. Step samples every
