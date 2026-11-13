@@ -13,17 +13,21 @@ nothing but the standard library and the [kernel](../kernel).
   registered with `RegisterModel[M, D](configurator)`. `D` is its depth, an
   `[N]int64` the game declares: `type GameDepth [12]int64`. A kernel holds
   any number of models, such as the menu's and the game's.
-- A **path**, `MakePath[M, T](configurator, "Hero.Position")`, names one
-  property through the model's struct fields. It is compiled once, by
-  reflection, and `path.Get(model)` reads the model's own value through it,
-  allocating nothing.
+- A **path**, `MakePath[M, T](configurator, "Squads[].Members[2].Position")`,
+  names one property through the model's struct fields and arrays. Each `[]`
+  is a **hole**, which every read and override fills with an `int64`; a
+  literal index leaves none. A path is compiled once, by reflection, and
+  `path.Get(model, holes...)` reads the model's own value through it,
+  allocating nothing, or answers `false` for an index outside its array. A
+  path holds no more holes than the model's depth.
 - **`Timeline[M, D]`** is the reading side of the model's timeline, and
   **`WriteTimeline[M, D]`**, from `ElevateTimeline`, its writing side. Both
   answer `Now`, the timeline's own time.
 - An update changes the model and schedules a **tween** on the writing side,
-  `Tween(path, start, from, to, length, easing)`, at an absolute start on the
-  timeline's clock. A view reads `Current(path, model)` on the reading side:
-  the active tween's value, or the model's own when none is.
+  `Tween(path, start, from, to, length, easing, holes...)`, at an absolute
+  start on the timeline's clock. A view reads `Current(path, model, holes...)`
+  on the reading side: the value of the tween active at that address, or the
+  model's own when none is. Each address of a path is tweened on its own.
 - An **interpolator** eases two values of a type, component by component.
   Every float and integer kind has one built in, named types of those kinds
   included. A game registers one for its own value types, such as a vector,

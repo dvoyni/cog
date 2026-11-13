@@ -1,6 +1,7 @@
 package mux
 
 import (
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -61,14 +62,24 @@ type gauge struct {
 	Heading  heading
 }
 
+// squad is a fixed band of units under a banner.
+type squad struct {
+	Members [3]unit
+	Banner  float32
+}
+
 type game struct {
-	Turn   int32
-	Hero   unit
-	Camera vec2
-	Leader *unit
-	Escort escort
-	Plan   any
-	Gauge  gauge
+	Turn    int32
+	Hero    unit
+	Camera  vec2
+	Leader  *unit
+	Escort  escort
+	Plan    any
+	Gauge   gauge
+	Squads  [2]squad
+	Terrain [2][3]float32
+	// Guards holds pointers, which no path may cross.
+	Guards [2]*unit
 }
 
 // newTestGame returns a game whose fields hold values no zero game does.
@@ -77,6 +88,11 @@ func newTestGame() *game {
 		Turn:   7,
 		Hero:   unit{vitality: vitality{Health: 30}, Position: vec2{X: 1, Y: 2}, Name: "ada"},
 		Camera: vec2{X: 5, Y: 6},
+		Squads: [2]squad{{Banner: 0.25}, {
+			Members: [3]unit{2: {vitality: vitality{Health: 40}, Position: vec2{X: 3, Y: 4}}},
+			Banner:  0.5,
+		}},
+		Terrain: [2][3]float32{{1, 2, 3}, {4, 5, 6}},
 	}
 }
 
@@ -160,7 +176,7 @@ func expectPanic(t *testing.T, want string, function func()) {
 	t.Helper()
 	defer func() {
 		t.Helper()
-		got, _ := recover().(string)
+		got := fmt.Sprint(recover())
 		if !strings.Contains(got, want) {
 			t.Fatalf("panicked with %q, want one mentioning %q", got, want)
 		}
