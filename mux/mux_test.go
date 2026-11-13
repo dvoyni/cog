@@ -105,6 +105,17 @@ func spawnPlugins(t testing.TB, plugins ...kernel.Plugin) *kernel.Kernel {
 	return supervisor.GetKernel(id)
 }
 
+// declare declares P through a task registered for it, as a job's handles
+// are declared, and answers it.
+func declare[P kernel.Parameter[P]](configurator *kernel.Configurator) P {
+	var parameter P
+	configurator.RegisterTask(func(access *kernel.Access) kernel.TaskBody[kernel.NoArg, kernel.NoResult] {
+		parameter = parameter.Declare(access)
+		return func(_ *kernel.Kernel, _ kernel.NoArg) kernel.NoResult { return kernel.NoResult{} }
+	})
+	return parameter
+}
+
 func expectPanic(t *testing.T, want string, function func()) {
 	t.Helper()
 	defer func() {

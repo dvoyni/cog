@@ -20,8 +20,14 @@ nothing but the standard library and the [kernel](../kernel).
 - **`Timeline[M, D]`** is the reading side of the model's timeline, and
   **`WriteTimeline[M, D]`**, from `ElevateTimeline`, its writing side. Both
   answer `Now`, the timeline's own time.
+- An update changes the model and schedules a **tween** on the writing side,
+  `Tween(path, start, from, to, length, easing)`, at an absolute start on the
+  timeline's clock. A view reads `Current(path, model)` on the reading side:
+  the active tween's value, or the model's own when none is. Only `float32`
+  properties tween yet, and only by `EasingLinear`.
 - **`Tasks[M, D]`** holds `Step`, which advances the timeline's time by the
-  delta it is given.
+  delta it is given, then samples every active override at the new time for
+  `Current` to read.
 
 ## Kernel surface
 

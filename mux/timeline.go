@@ -20,12 +20,21 @@ func (s timelineSide[M, D]) Now() time.Duration { return s.state.now }
 // to.
 type timelineState[M any, D comparable] struct {
 	now time.Duration
+	// pathStates holds each path's state by the path's id, nil for a path
+	// never tweened. It grows as paths are first tweened.
+	pathStates []sampler
 }
 
-// step is the body of Tasks.Step: it advances the timeline's time by delta.
-// modelHandle reads nothing yet; it declares the write lock on the model that
-// Step holds.
+// step is the body of Tasks.Step: it advances the timeline's time by delta,
+// then samples every path's overrides at the new time. modelHandle reads
+// nothing yet; it declares the write lock on the model that Step holds.
 func step[M any, D comparable](_ *kernel.Kernel, delta time.Duration, modelHandle kernel.Write[*M], timelineHandle kernel.Write[Timeline[M, D]]) kernel.NoResult {
-	timelineHandle.Get().state.now += delta
+	state := timelineHandle.Get().state
+	state.now += delta
+	for _, path := range state.pathStates {
+		if path != nil {
+			path.takeSample(state.now)
+		}
+	}
 	return kernel.NoResult{}
 }
