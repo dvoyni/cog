@@ -25,22 +25,48 @@ type gamePathSet struct {
 	secondBanner Path[game, float32]
 	// terrain crosses an array of arrays, at a hole each.
 	terrain Path[game, float32]
+	// unitPosition crosses a slice at a hole.
+	unitPosition Path[game, vec2]
+	// firstUnitName and secondUnitName cross a slice at literal indices, so
+	// they have no hole, and do not overlap.
+	firstUnitName  Path[game, string]
+	secondUnitName Path[game, string]
+	// platoonMemberPosition crosses two slices, each at a hole.
+	platoonMemberPosition Path[game, vec2]
+	// platoonLeaderHealth crosses a slice at a hole, then one at a literal
+	// index, then a promoted field.
+	platoonLeaderHealth Path[game, int32]
+	// platoonFlag crosses a slice, then an array, each at a hole.
+	platoonFlag Path[game, float32]
+	// reserveHealth crosses an array, then a slice, each at a hole.
+	reserveHealth Path[game, int32]
+	// secondRowHeight crosses a slice of slices at a literal index, then at
+	// a hole.
+	secondRowHeight Path[game, float32]
 }
 
 // makeGamePathSet registers game and makes a gamePathSet over it.
 func makeGamePathSet(configurator *kernel.Configurator) gamePathSet {
 	RegisterModel[game, depth](configurator)
 	return gamePathSet{
-		turn:             MakePath[game, int32](configurator, "Turn"),
-		position:         MakePath[game, vec2](configurator, "Hero.Position"),
-		health:           MakePath[game, int32](configurator, "Hero.Health"),
-		name:             MakePath[game, string](configurator, "Hero.Name"),
-		cameraY:          MakePath[game, float32](configurator, "Camera.Y"),
-		memberPosition:   MakePath[game, vec2](configurator, "Squads[].Members[].Position"),
-		lastMemberHealth: MakePath[game, int32](configurator, "Squads[].Members[2].Health"),
-		firstBanner:      MakePath[game, float32](configurator, "Squads[0].Banner"),
-		secondBanner:     MakePath[game, float32](configurator, "Squads[1].Banner"),
-		terrain:          MakePath[game, float32](configurator, "Terrain[][]"),
+		turn:                  MakePath[game, int32](configurator, "Turn"),
+		position:              MakePath[game, vec2](configurator, "Hero.Position"),
+		health:                MakePath[game, int32](configurator, "Hero.Health"),
+		name:                  MakePath[game, string](configurator, "Hero.Name"),
+		cameraY:               MakePath[game, float32](configurator, "Camera.Y"),
+		memberPosition:        MakePath[game, vec2](configurator, "Squads[].Members[].Position"),
+		lastMemberHealth:      MakePath[game, int32](configurator, "Squads[].Members[2].Health"),
+		firstBanner:           MakePath[game, float32](configurator, "Squads[0].Banner"),
+		secondBanner:          MakePath[game, float32](configurator, "Squads[1].Banner"),
+		terrain:               MakePath[game, float32](configurator, "Terrain[][]"),
+		unitPosition:          MakePath[game, vec2](configurator, "Units[].Position"),
+		firstUnitName:         MakePath[game, string](configurator, "Units[0].Name"),
+		secondUnitName:        MakePath[game, string](configurator, "Units[1].Name"),
+		platoonMemberPosition: MakePath[game, vec2](configurator, "Platoons[].Members[].Position"),
+		platoonLeaderHealth:   MakePath[game, int32](configurator, "Platoons[].Members[0].Health"),
+		platoonFlag:           MakePath[game, float32](configurator, "Platoons[].Flags[]"),
+		reserveHealth:         MakePath[game, int32](configurator, "Squads[].Reserves[].Health"),
+		secondRowHeight:       MakePath[game, float32](configurator, "Heights[1][]"),
 	}
 }
 
@@ -60,25 +86,48 @@ func TestPathGetAnswersTheModelsOwnValue(t *testing.T) {
 	expectGet(t, "Squads[1].Banner", paths.secondBanner, model, 0.5)
 	expectGet(t, "Terrain[0][2]", paths.terrain, model, 3, 0, 2)
 	expectGet(t, "Terrain[1][0]", paths.terrain, model, 4, 1, 0)
+	expectGet(t, "Units[1].Position", paths.unitPosition, model, vec2{X: 9, Y: 10}, 1)
+	expectGet(t, "Units[0].Name", paths.firstUnitName, model, "bo")
+	expectGet(t, "Units[1].Name", paths.secondUnitName, model, "cy")
+	expectGet(t, "Platoons[0].Members[0].Position", paths.platoonMemberPosition, model, vec2{X: 11, Y: 12}, 0, 0)
+	expectGet(t, "Platoons[0].Members[0].Health", paths.platoonLeaderHealth, model, 80, 0)
+	expectGet(t, "Platoons[0].Flags[0]", paths.platoonFlag, model, 0.75, 0, 0)
+	expectGet(t, "Platoons[1].Flags[1]", paths.platoonFlag, model, 1.5, 1, 1)
+	expectGet(t, "Squads[1].Reserves[1].Health", paths.reserveHealth, model, 70, 1, 1)
+	expectGet(t, "Heights[1][2]", paths.secondRowHeight, model, 5, 2)
 	copied := *model
 	copied.Hero.Position.Y = 8
 	copied.Terrain[1][0] = 9
+	copied.Units = []unit{{Name: "di"}}
 	expectGet(t, "Hero.Position of a copy", paths.position, &copied, vec2{X: 1, Y: 8})
 	expectGet(t, "Terrain[1][0] of a copy", paths.terrain, &copied, 9, 1, 0)
+	expectGet(t, "Units[0].Name of a copy given its own slice", paths.firstUnitName, &copied, "di")
+	expectGet(t, "Units[0].Name of the model the copy was made from", paths.firstUnitName, model, "bo")
 }
 
-func TestPathGetAnswersFalseForAnIndexOutsideItsArray(t *testing.T) {
+func TestPathGetAnswersFalseForAnIndexOutsideItsArrayOrSlice(t *testing.T) {
 	var paths gamePathSet
 	spawn(t, func(configurator *kernel.Configurator) { paths = makeGamePathSet(configurator) })
 	model := newTestGame()
 	for _, holes := range [][]int64{{2, 0}, {0, 3}, {-1, 0}, {0, -1}, {1 << 40, 0}, {2, 3}} {
-		if got, ok := paths.terrain.Get(model, holes...); got != 0 || ok {
-			t.Errorf("Terrain%v answered %v, %v, want 0, false", holes, got, ok)
-		}
+		expectMiss(t, "Terrain[][]", paths.terrain, model, holes...)
 	}
-	if got, ok := paths.lastMemberHealth.Get(model, 2); got != 0 || ok {
-		t.Errorf("Squads[2].Members[2].Health answered %v, %v, want 0, false", got, ok)
+	expectMiss(t, "Squads[].Members[2].Health", paths.lastMemberHealth, model, 2)
+	for _, holes := range [][]int64{{2}, {-1}, {1 << 40}, {-1 << 63}} {
+		expectMiss(t, "Units[].Position", paths.unitPosition, model, holes...)
 	}
+	// The second platoon's members are a nil slice.
+	for _, holes := range [][]int64{{1, 0}, {0, 1}, {2, 0}, {0, -1}} {
+		expectMiss(t, "Platoons[].Members[].Position", paths.platoonMemberPosition, model, holes...)
+	}
+	expectMiss(t, "Platoons[].Members[0].Health, past the end of a nil slice,", paths.platoonLeaderHealth, model, 1)
+	for _, holes := range [][]int64{{0, 2}, {2, 0}} {
+		expectMiss(t, "Platoons[].Flags[]", paths.platoonFlag, model, holes...)
+	}
+	expectMiss(t, "Squads[].Reserves[].Health, in a nil slice,", paths.reserveHealth, model, 0, 0)
+	expectMiss(t, "Heights[1][]", paths.secondRowHeight, model, 3)
+	expectMiss(t, "Heights[1][], past the end of one row,", paths.secondRowHeight, &game{Heights: [][]float32{{1}}}, 0)
+	expectMiss(t, "Units[0].Name of a game with no units", paths.firstUnitName, &game{})
 }
 
 func TestPathGetPanicsOnAWrongNumberOfHoles(t *testing.T) {
@@ -90,6 +139,9 @@ func TestPathGetPanicsOnAWrongNumberOfHoles(t *testing.T) {
 	expectPanic(t, `path "Squads[].Members[2].Health" has 1 hole, but is given 0`, func() { paths.lastMemberHealth.Get(model) })
 	expectPanic(t, `path "Squads[1].Banner" has 0 holes, but is given 1`, func() { paths.secondBanner.Get(model, 1) })
 	expectPanic(t, `path "Turn" has 0 holes, but is given 2`, func() { paths.turn.Get(model, 0, 0) })
+	expectPanic(t, `path "Units[0].Name" has 0 holes, but is given 1`, func() { paths.firstUnitName.Get(model, 0) })
+	expectPanic(t, `path "Platoons[].Members[0].Health" has 1 hole, but is given 2`, func() { paths.platoonLeaderHealth.Get(model, 0, 0) })
+	expectPanic(t, `path "Heights[1][]" has 1 hole, but is given 0`, func() { paths.secondRowHeight.Get(model) })
 }
 
 // positionSink, nameSink, memberPositionSink and terrainSink keep what
@@ -111,6 +163,10 @@ func TestPathGetAllocatesNothing(t *testing.T) {
 		nameSink, _ = paths.name.Get(model)
 		memberPositionSink, _ = paths.memberPosition.Get(model, 1, 2)
 		terrainSink, _ = paths.terrain.Get(model, 2, 0)
+		positionSink, _ = paths.unitPosition.Get(model, 1)
+		nameSink, _ = paths.firstUnitName.Get(model)
+		memberPositionSink, _ = paths.platoonMemberPosition.Get(model, 0, 0)
+		terrainSink, _ = paths.secondRowHeight.Get(model, 2)
 	})
 	if allocations != 0 {
 		t.Fatalf("Get allocated %v times per run", allocations)
@@ -174,8 +230,19 @@ func TestMakePathPanicsNamingWhatIsWrong(t *testing.T) {
 				MakePath[game, float32](configurator, "Terrain[][2]")
 				MakePath[game, [3]float32](configurator, "Terrain[1]")
 			}},
-		{"an index of a number", `path "Turn[]" of model mux.game reaches int32, which is no array to index`,
+		{"a hole over a literal slice index", `paths "Units[0].Name" and "Units[].Name" of model mux.game overlap`,
+			func(configurator *kernel.Configurator) {
+				MakePath[game, string](configurator, "Units[0].Name")
+				MakePath[game, string](configurator, "Units[].Name")
+			}},
+		{"an index of a number", `path "Turn[]" of model mux.game reaches int32, which is no array or slice to index`,
 			func(configurator *kernel.Configurator) { MakePath[game, int32](configurator, "Turn[]") }},
+		{"a literal slice index past any int", `path "Units[9223372036854775808].Name" of model mux.game indexes []mux.unit with "9223372036854775808", which is no index`,
+			func(configurator *kernel.Configurator) {
+				MakePath[game, string](configurator, "Units[9223372036854775808].Name")
+			}},
+		{"a pointer element of a slice", `path "Scouts[].Name" of model mux.game crosses an element of []*mux.unit, a pointer *mux.unit`,
+			func(configurator *kernel.Configurator) { MakePath[game, string](configurator, "Scouts[].Name") }},
 		{"a literal index past the array's end", `path "Squads[2].Banner" of model mux.game indexes [2]mux.squad at 2, past its length 2`,
 			func(configurator *kernel.Configurator) { MakePath[game, float32](configurator, "Squads[2].Banner") }},
 		{"an index that is no number", `path "Squads[x].Banner" of model mux.game indexes [2]mux.squad with "x", which is no index`,
@@ -204,6 +271,8 @@ func TestMakePathPanicsNamingWhatIsWrong(t *testing.T) {
 			spawn(t, func(configurator *kernel.Configurator) {
 				RegisterModel[game, [1]int64](configurator)
 				MakePath[game, float32](configurator, "Squads[].Banner")
+				// A literal slice index takes a step, but no hole.
+				MakePath[game, float32](configurator, "Heights[1][]")
 				MakePath[game, float32](configurator, "Terrain[][]")
 			})
 		})
@@ -216,5 +285,15 @@ func expectGet[T comparable](t *testing.T, name string, path Path[game, T], mode
 	t.Helper()
 	if got, ok := path.Get(model, holes...); got != want || !ok {
 		t.Fatalf("%s answered %v, %v, want %v", name, got, ok, want)
+	}
+}
+
+// expectMiss fails t unless path answers T's zero value, and false, over
+// model at the address holes fill.
+func expectMiss[T comparable](t *testing.T, name string, path Path[game, T], model *game, holes ...int64) {
+	t.Helper()
+	var zero T
+	if got, ok := path.Get(model, holes...); got != zero || ok {
+		t.Errorf("%s at %v answered %v, %v, want %v, false", name, holes, got, ok, zero)
 	}
 }

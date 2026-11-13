@@ -14,12 +14,17 @@ nothing but the standard library and the [kernel](../kernel).
   `[N]int64` the game declares: `type GameDepth [12]int64`. A kernel holds
   any number of models, such as the menu's and the game's.
 - A **path**, `MakePath[M, T](configurator, "Squads[].Members[2].Position")`,
-  names one property through the model's struct fields and arrays. Each `[]`
-  is a **hole**, which every read and override fills with an `int64`; a
-  literal index leaves none. A path is compiled once, by reflection, and
-  `path.Get(model, holes...)` reads the model's own value through it,
-  allocating nothing, or answers `false` for an index outside its array. A
-  path holds no more holes than the model's depth.
+  names one property through the model's struct fields, arrays and slices,
+  in any order. Each `[]` is a **hole**, which every read and override fills
+  with an `int64`; a literal index leaves none. A path is compiled once, by
+  reflection, and `path.Get(model, holes...)` reads the model's own value
+  through it, allocating nothing, or answers `false` for an index outside its
+  array or slice. A path holds no more holes than the model's depth.
+- A path keeps no pointer into the model, so it reads a slice the model
+  moved to a new array, and a copy of the model. A hole picks a slice's element by
+  its index, so the game moves no element of a slice while an override
+  addresses it: it frees elements into a free list, or marks them dead,
+  rather than closing the gaps.
 - **`Timeline[M, D]`** is the reading side of the model's timeline, and
   **`WriteTimeline[M, D]`**, from `ElevateTimeline`, its writing side. Both
   answer `Now`, the timeline's own time.

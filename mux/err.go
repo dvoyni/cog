@@ -17,8 +17,8 @@ type holeMismatchError struct {
 // is given.
 func (e holeMismatchError) Error() string {
 	holes := "holes"
-	if len(e.path.arraySteps) == 1 {
+	if e.path.holeCount == 1 {
 		holes = "hole"
 	}
-	return fmt.Sprintf("mux: path %q has %d %s, but is given %d", e.path.text, len(e.path.arraySteps), holes, e.givenCount)
+	return fmt.Sprintf("mux: path %q has %d %s, but is given %d", e.path.text, e.path.holeCount, holes, e.givenCount)
 }

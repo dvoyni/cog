@@ -11,12 +11,14 @@
 //
 //	mux.RegisterModel[Game, GameDepth](configurator)
 //
-// A Path names one property of a model through its struct fields and arrays,
-// compiled once by MakePath, by reflection. Each [] in it is a hole, which
-// every read and override fills with an int64, and a literal index leaves
-// none; a path with its holes filled is an address. Get reads the model's own
-// value at an address, allocating nothing, or answers false for an index
-// outside its array:
+// A Path names one property of a model through its struct fields, arrays and
+// slices, compiled once by MakePath, by reflection. Each [] in it is a hole,
+// which every read and override fills with an int64, and a literal index
+// leaves none; a path with its holes filled is an address. Get reads the
+// model's own value at an address, allocating nothing, or answers false for
+// an index outside its array or slice. The game moves no element of a slice
+// while an override addresses it, freeing elements rather than closing the
+// gaps:
 //
 //	position := mux.MakePath[Game, Vec2](configurator, "Squads[].Members[].Position")
 //	value, ok := position.Get(model.Get(), squad, member)

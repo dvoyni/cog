@@ -12,28 +12,37 @@ import (
 )
 
 // Path names a property of type T in model M: a path string compiled once, by
-// MakePath, into the offsets and array steps that reach it. It holds a pointer
-// to its compiled form, which nothing changes once the kernel starts, so a
-// path may live in a plugin's field or a package variable. Paths only read:
-// nothing writes the model through one.
+// MakePath, into the offsets and the steps through arrays and slices that
+// reach it. It holds a pointer to its compiled form, which nothing changes
+// once the kernel starts, so a path may live in a plugin's field or a package
+// variable. A path keeps no pointer into the model: every read starts from the
+// model it is given, so it reads a slice the model moved to a new array, and a
+// copy of the model, as it reads the model. Paths only read: nothing writes
+// the model through one.
 type Path[M, T any] struct {
 	compiled *compiledPath
 }
 
 // MakePath compiles path, a route through M to a property of type T, written
 // as the names of the fields it crosses joined by dots, each followed by an
-// index for every array it then crosses: "Squads[].Members[2].Position". An
-// empty index, [], is a hole, which every read and override of the path fills
-// with an int64; a literal index compiles into the path and leaves no hole. It
-// is called from the Init of a plugin listed after mux's, once M is
-// registered; reflection runs here, and nowhere a path is read.
+// index for every array or slice it then crosses:
+// "Squads[].Members[2].Position". An empty index, [], is a hole, which every
+// read and override of the path fills with an int64; a literal index compiles
+// into the path and leaves no hole. It is called from the Init of a plugin
+// listed after mux's, once M is registered; reflection runs here, and nowhere
+// a path is read.
+//
+// A hole in a slice picks an element by its index, so the game moves no
+// element of a slice while an override addresses it: it frees elements into
+// a free list, or marks them dead, rather than closing the gaps.
 //
 // It is a composition error, and panics, to make a path before mux's plugin
 // or after Init, for a model that is not registered, that is malformed,
-// through a field that does not exist, indexing what is no array or past its
-// length, through or to a pointer or an interface, with more holes than M's
-// depth holds, to a property that is not a T, or overlapping a path of M made
-// before, one reaching a property the other reaches or contains.
+// through a field that does not exist, indexing what is no array or slice, or
+// an array past its length, through or to a pointer or an interface, with
+// more holes than M's depth holds, to a property that is not a T, or
+// overlapping a path of M made before, one reaching a property the other
+// reaches or contains.
 func MakePath[M, T any](configurator *kernel.Configurator, path string) Path[M, T] {
 	modelType := reflect.TypeFor[M]()
 	registry := findRegistry(configurator, "path %q of model %v is made", path, modelType)
@@ -43,8 +52,8 @@ func MakePath[M, T any](configurator *kernel.Configurator, path string) Path[M, 
 	}
 	compiled := compilePath(modelType, path)
 	compiled.id = len(registration.paths)
-	if len(compiled.arraySteps) > registration.depthType.Len() {
-		panic(fmt.Sprintf("mux: path %q of model %v has more holes, %d, than its depth %v holds", path, modelType, len(compiled.arraySteps), registration.depthType))
+	if compiled.holeCount > registration.depthType.Len() {
+		panic(fmt.Sprintf("mux: path %q of model %v has more holes, %d, than its depth %v holds", path, modelType, compiled.holeCount, registration.depthType))
 	}
 	if want := reflect.TypeFor[T](); compiled.propertyType != want {
 		panic(fmt.Sprintf("mux: path %q of model %v reaches %v, not %v", path, modelType, compiled.propertyType, want))
@@ -52,7 +61,7 @@ func MakePath[M, T any](configurator *kernel.Configurator, path string) Path[M, 
 	compiled.interpolator = makeBuiltInInterpolator[T]()
 	for _, earlier := range registration.paths {
 		sharedLength := min(len(earlier.crossedIndices), len(compiled.crossedIndices))
-		// A hole may pick any element, so it meets every index of its array.
+		// A hole may pick any element, so it meets every index at its place.
 		if slices.EqualFunc(earlier.crossedIndices[:sharedLength], compiled.crossedIndices[:sharedLength], func(earlierIndex, index int) bool {
 			return earlierIndex == index || earlierIndex == holeIndex || index == holeIndex
 		}) {
@@ -64,8 +73,8 @@ func MakePath[M, T any](configurator *kernel.Configurator, path string) Path[M, 
 }
 
 // Get answers the model's own value of the property p names, at the address
-// holes fill, and true, or false when a hole misses: an index outside its
-// array.
+// holes fill, and true, or false when an index misses: a hole outside its
+// array or slice, or a literal index past its slice's end.
 //
 // Holes the path does not take panic, naming the path and their count.
 func (p Path[M, T]) Get(model *M, holes ...int64) (T, bool) {
@@ -87,12 +96,16 @@ type compiledPath struct {
 	// crossedIndices is the index of each field the path crosses within its
 	// struct, embedded fields a promoted name passes through included, so two
 	// spellings of one field compile alike, and of each element it crosses
-	// within its array, holeIndex at a hole.
+	// within its array or slice, holeIndex at a hole.
 	crossedIndices []int
-	// arraySteps holds the step of each hole, in the path's order.
-	arraySteps []arrayStep
-	// offset is where the property lies from the element the last hole
-	// picks, or from the model's base when the path has no hole.
+	// steps holds the path's step through each slice it crosses, and through
+	// each array it crosses at a hole, in the path's order.
+	steps []pathStep
+	// holeCount is how many holes the path has: how many of its steps are at
+	// a hole.
+	holeCount int
+	// offset is where the property lies from the element the last step
+	// picks, or from the model's base when the path has no step.
 	offset uintptr
 	// propertyType is the type of the property the path reaches.
 	propertyType reflect.Type
@@ -103,8 +116,8 @@ type compiledPath struct {
 	interpolator any
 }
 
-// holeIndex stands in a path's crossed indices for the index of the element
-// a hole picks, which may be any.
+// holeIndex stands in a path's crossed indices, and in the index of its
+// steps, for the index of the element a hole picks, which may be any.
 const holeIndex = -1
 
 // compilePath compiles text over modelType. It panics naming what is wrong.
@@ -145,27 +158,44 @@ func compilePath(modelType reflect.Type, text string) *compiledPath {
 			if indices[0] != '[' || !closed {
 				panic(fmt.Sprintf("mux: path %q of model %v is malformed at %q", text, modelType, indices))
 			}
-			if current.Kind() != reflect.Array {
-				panic(fmt.Sprintf("mux: path %q of model %v reaches %v, which is no array to index", text, modelType, current))
-			}
-			arrayType := current
-			cross("an element of "+arrayType.String(), arrayType.Elem())
-			if index == "" {
-				compiled.crossedIndices = append(compiled.crossedIndices, holeIndex)
-				compiled.arraySteps = append(compiled.arraySteps, arrayStep{offset: compiled.offset, length: int64(arrayType.Len()), elementSize: current.Size()})
-				compiled.offset = 0
-			} else {
-				literal, err := strconv.ParseUint(index, 10, 64)
-				if err != nil {
-					panic(fmt.Sprintf("mux: path %q of model %v indexes %v with %q, which is no index", text, modelType, arrayType, index))
-				}
-				if literal >= uint64(arrayType.Len()) {
-					panic(fmt.Sprintf("mux: path %q of model %v indexes %v at %d, past its length %d", text, modelType, arrayType, literal, arrayType.Len()))
-				}
-				compiled.crossedIndices = append(compiled.crossedIndices, int(literal))
-				compiled.offset += uintptr(literal) * current.Size()
-			}
 			indices = rest
+			indexedType := current
+			step := pathStep{kind: indexedType.Kind(), offset: compiled.offset, index: holeIndex}
+			switch step.kind {
+			case reflect.Array:
+				step.length = int64(indexedType.Len())
+			case reflect.Slice:
+				// A slice's length is read from its header, on every read.
+			default:
+				panic(fmt.Sprintf("mux: path %q of model %v reaches %v, which is no array or slice to index", text, modelType, indexedType))
+			}
+			cross("an element of "+indexedType.String(), indexedType.Elem())
+			step.elementSize = current.Size()
+			if index == "" {
+				compiled.holeCount++
+			} else {
+				// One bit short of an int, so a literal index fits an int, as
+				// Go's own indices do.
+				literal, err := strconv.ParseUint(index, 10, strconv.IntSize-1)
+				if err != nil {
+					panic(fmt.Sprintf("mux: path %q of model %v indexes %v with %q, which is no index", text, modelType, indexedType, index))
+				}
+				step.index = int64(literal)
+			}
+			compiled.crossedIndices = append(compiled.crossedIndices, int(step.index))
+			if step.kind == reflect.Array && step.index != holeIndex {
+				if step.index >= step.length {
+					panic(fmt.Sprintf("mux: path %q of model %v indexes %v at %d, past its length %d", text, modelType, indexedType, step.index, step.length))
+				}
+				// An array lies within its element, so a literal index of one
+				// compiles into the offset and takes no step. A slice's elements
+				// lie wherever its header points, so even a literal index of one
+				// takes a step.
+				compiled.offset += uintptr(step.index) * step.elementSize
+				continue
+			}
+			compiled.steps = append(compiled.steps, step)
+			compiled.offset = 0
 		}
 	}
 	compiled.propertyType = current
@@ -173,20 +203,37 @@ func compilePath(modelType reflect.Type, text string) *compiledPath {
 }
 
 // findProperty answers where the property p names lies in the model at
-// model, at the address holes fill, and true, or false when a hole misses:
-// an index outside its array. Holes p does not take panic with a
-// holeMismatchError.
+// model, at the address holes fill, and true, or false when an index misses:
+// a hole outside its array or slice, or a literal index past its slice's end.
+// Holes p does not take panic with a holeMismatchError.
 func (p *compiledPath) findProperty(model unsafe.Pointer, holes []int64) (unsafe.Pointer, bool) {
-	if len(holes) != len(p.arraySteps) {
+	if len(holes) != p.holeCount {
 		panic(holeMismatchError{path: p, givenCount: len(holes)})
 	}
 	reached := model
-	for stepIndex, step := range p.arraySteps {
-		hole := holes[stepIndex]
-		if hole < 0 || hole >= step.length {
+	nextHoleIndex := 0
+	for _, step := range p.steps {
+		index := step.index
+		if index == holeIndex {
+			index = holes[nextHoleIndex]
+			nextHoleIndex++
+		}
+		elements := unsafe.Add(reached, step.offset)
+		length := step.length
+		if step.kind == reflect.Slice {
+			// Every slice's header is laid out alike, so it reads as a
+			// []byte's: its length counts its elements, and its data is
+			// where they lie.
+			slice := *(*[]byte)(elements)
+			elements = unsafe.Pointer(unsafe.SliceData(slice))
+			length = int64(len(slice))
+		}
+		// No length is negative, so one unsigned compare misses a negative
+		// index too.
+		if uint64(index) >= uint64(length) {
 			return nil, false
 		}
-		reached = unsafe.Add(reached, step.offset+uintptr(hole)*step.elementSize)
+		reached = unsafe.Add(elements, uintptr(index)*step.elementSize)
 	}
 	return unsafe.Add(reached, p.offset), true
 }
@@ -196,7 +243,7 @@ func (p *compiledPath) findProperty(model unsafe.Pointer, holes []int64) (unsafe
 // which MakePath checked holds every hole of p. Holes p does not take panic
 // with a holeMismatchError.
 func (p *compiledPath) makeHoles[D comparable](holes []int64) D {
-	if len(holes) != len(p.arraySteps) {
+	if len(holes) != p.holeCount {
 		panic(holeMismatchError{path: p, givenCount: len(holes)})
 	}
 	var filledHoles D
@@ -207,13 +254,22 @@ func (p *compiledPath) makeHoles[D comparable](holes []int64) D {
 	return filledHoles
 }
 
-// arrayStep is a path's step through an array at a hole.
-type arrayStep struct {
-	// offset is where the array lies from the element the hole before picks,
-	// or from the model's base at the first hole.
+// pathStep is a path's step through a slice, or through an array at a hole:
+// a literal index of an array compiles into the offset instead.
+type pathStep struct {
+	// kind is the kind of what the step crosses: reflect.Array, at a hole, or
+	// reflect.Slice, at a hole or a literal index.
+	kind reflect.Kind
+	// offset is where the array, or the slice's header, lies from the
+	// element the step before picks, or from the model's base at the first
+	// step.
 	offset uintptr
-	// length is the array's length: a hole outside it misses.
+	// index is the index of the element the step picks: a literal one, or
+	// holeIndex at a hole, which the next of the holes given fills.
+	index int64
+	// length is the array's length, past which an index misses. A slice's
+	// is read from its header.
 	length int64
-	// elementSize is the size of the array's elements.
+	// elementSize is the size of the elements.
 	elementSize uintptr
 }
