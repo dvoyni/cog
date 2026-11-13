@@ -12,9 +12,9 @@ import (
 
 // Path names a property of type T in model M: a path string compiled once, by
 // MakePath, into the offset that reaches it. It holds a pointer to its
-// compiled form, which nothing changes once Init is over, so a path may live
-// in a plugin's field or a package variable. Paths only read: nothing writes
-// the model through one.
+// compiled form, which nothing changes once the kernel starts, so a path may
+// live in a plugin's field or a package variable. Paths only read: nothing
+// writes the model through one.
 type Path[M, T any] struct {
 	compiled *compiledPath
 }
@@ -36,11 +36,12 @@ func MakePath[M, T any](configurator *kernel.Configurator, path string) Path[M, 
 	if !ok {
 		panic(fmt.Sprintf("mux: path %q is made for %v, which is not a registered model", path, modelType))
 	}
-	compiled, propertyType := compilePath(modelType, path)
+	compiled := compilePath(modelType, path)
 	compiled.id = len(registration.paths)
-	if want := reflect.TypeFor[T](); propertyType != want {
-		panic(fmt.Sprintf("mux: path %q of model %v reaches %v, not %v", path, modelType, propertyType, want))
+	if want := reflect.TypeFor[T](); compiled.propertyType != want {
+		panic(fmt.Sprintf("mux: path %q of model %v reaches %v, not %v", path, modelType, compiled.propertyType, want))
 	}
+	compiled.interpolator = makeBuiltInInterpolator[T]()
 	for _, earlier := range registration.paths {
 		sharedLength := min(len(earlier.fieldIndices), len(compiled.fieldIndices))
 		if slices.Equal(earlier.fieldIndices[:sharedLength], compiled.fieldIndices[:sharedLength]) {
@@ -70,11 +71,17 @@ type compiledPath struct {
 	fieldIndices []int
 	// offset is where the property lies from the model's base.
 	offset uintptr
+	// propertyType is the type of the property the path reaches.
+	propertyType reflect.Type
+	// interpolator is the interpolator[T] that tweens the property, nil when
+	// none does. MakePath sets the one built in for the property's kind, and
+	// the registry, once Init is over, the one a game registered for its
+	// type, if any.
+	interpolator any
 }
 
-// compilePath compiles text over modelType, and answers it with the type of
-// the property it reaches. It panics naming what is wrong.
-func compilePath(modelType reflect.Type, text string) (*compiledPath, reflect.Type) {
+// compilePath compiles text over modelType. It panics naming what is wrong.
+func compilePath(modelType reflect.Type, text string) *compiledPath {
 	compiled := &compiledPath{text: text}
 	current := modelType
 	for name := range strings.SplitSeq(text, ".") {
@@ -98,7 +105,8 @@ func compilePath(modelType reflect.Type, text string) (*compiledPath, reflect.Ty
 			}
 		}
 	}
-	return compiled, current
+	compiled.propertyType = current
+	return compiled
 }
 
 // makeHoles answers the holes of the address p names with holes, as a depth

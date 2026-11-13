@@ -166,7 +166,7 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
   - a pointer or an interface anywhere along a path;
   - two paths of one model where one is a prefix of the other;
   - a path with more holes than the depth.
-- A path is a typed value, `Path[M, T]`, holding a pointer to its compiled steps. They are immutable once `Init` is over, so a path may live in a plugin's field or a package variable.
+- A path is a typed value, `Path[M, T]`, holding a pointer to its compiled steps. They are immutable once the kernel starts, so a path may live in a plugin's field or a package variable.
 - `path.Get(model *M, holes ...int64) (T, bool)` answers the model's own value. It answers `false` when a hole misses: an index past a slice's end, or a key absent from a map.
 - Paths are read-only. Nothing writes the model through a path; only updates and callbacks change the model.
 

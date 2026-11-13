@@ -1,6 +1,7 @@
 package mux
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -22,6 +23,44 @@ type unit struct {
 // escort reaches its vitality through a pointer, which no path may cross.
 type escort struct{ *vitality }
 
+// distance is a named number type of a float kind.
+type distance float64
+
+// level is a named number type of an integer kind.
+type level uint8
+
+// heading is a named number type that turns the shortest way round, by the
+// interpolator turnShortestWay, which a test registers.
+type heading float32
+
+// turnShortestWay is heading's interpolator: it turns the shortest way
+// round, so 350° eases to 10° through 360°, not back through 180°.
+func turnShortestWay(a, b heading, t float32, ease func(a, b, t float32) float32) heading {
+	turn := heading(math.Mod(float64(b-a)+540, 360)) - 180
+	return heading(ease(float32(a), float32(a+turn), t))
+}
+
+// gauge holds a property of every float and integer kind, and of named
+// number types.
+type gauge struct {
+	Int      int
+	Int8     int8
+	Int16    int16
+	Int32    int32
+	Int64    int64
+	Uint     uint
+	Uint8    uint8
+	Uint16   uint16
+	Uint32   uint32
+	Uint64   uint64
+	Uintptr  uintptr
+	Float32  float32
+	Float64  float64
+	Distance distance
+	Level    level
+	Heading  heading
+}
+
 type game struct {
 	Turn   int32
 	Hero   unit
@@ -29,6 +68,7 @@ type game struct {
 	Leader *unit
 	Escort escort
 	Plan   any
+	Gauge  gauge
 }
 
 // newTestGame returns a game whose fields hold values no zero game does.

@@ -15,6 +15,9 @@ type registry struct {
 	// easings holds the kernel's easings, mux's and the game's, which every
 	// timeline of the kernel eases by.
 	easings *easingTable
+	// interpolators holds each interpolator a game registered, as an
+	// interpolator[T], by T.
+	interpolators map[reflect.Type]any
 	// sealed is set once every plugin has initialized.
 	sealed bool
 }
@@ -31,4 +34,18 @@ func findRegistry(configurator *kernel.Configurator, format string, args ...any)
 		panic("mux: " + fmt.Sprintf(format, args...) + " after Init")
 	}
 	return found
+}
+
+// seal ends registration, once every plugin has initialized: each path of a
+// property whose type a game registered an interpolator for takes that one,
+// in place of the one built in, and a registration from here on panics.
+func (r *registry) seal() {
+	for _, registration := range r.models {
+		for _, path := range registration.paths {
+			if registeredInterpolator, ok := r.interpolators[path.propertyType]; ok {
+				path.interpolator = registeredInterpolator
+			}
+		}
+	}
+	r.sealed = true
 }

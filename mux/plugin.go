@@ -25,18 +25,23 @@ func (*Plugin) Name() kernel.PluginName { return PluginName }
 // Dependencies answers none: mux reads no other plugin's resource.
 func (*Plugin) Dependencies() []kernel.PluginName { return nil }
 
-// Init installs the registry, holding mux's easings, which every
-// registration finds.
+// Init installs the registry, holding mux's easings and, as plugins register
+// them, the game's easings and interpolators, which every registration finds.
 func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
-	p.registry = &registry{models: map[reflect.Type]*modelRegistration{}, easings: newEasingTable()}
+	p.registry = &registry{
+		models:        map[reflect.Type]*modelRegistration{},
+		easings:       newEasingTable(),
+		interpolators: map[reflect.Type]any{},
+	}
 	configurator.InitResource(p.registry)
 	return nil
 }
 
-// Start seals the registry: every plugin has initialized, so a registration
-// from here on panics.
+// Start seals the registry: every plugin has initialized, so each path takes
+// the interpolator a game registered for its type, and a registration from
+// here on panics.
 func (p *Plugin) Start(kernel *kernel.Kernel) error {
-	p.registry.sealed = true
+	p.registry.seal()
 	return nil
 }
 
