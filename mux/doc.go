@@ -81,6 +81,22 @@
 //	// A unit's plan changed, so nothing of the old one shows:
 //	writeTimeline.Cancel(unitPosition, unit)
 //
+// A callback is a function the timeline calls once, at a moment of its own,
+// given the model and the timeline's writing side. A unit that dies stays in
+// the model, marked dead, while its fade plays, and a callback purges it when
+// the fade ends:
+//
+//	unitOpacity := mux.MakePath[Game, float32](configurator, "Units[].Opacity")
+//
+//	model.Get().Units[unit] = Unit{Dead: true}
+//	writeTimeline.Tween(unitOpacity, writeTimeline.Now(), 1, 0, time.Second, mux.EasingLinear, unit)
+//	purge := writeTimeline.Call(writeTimeline.End(unitOpacity, unit), func(game *Game, _ mux.WriteTimeline[Game, GameDepth]) {
+//		game.FreeUnits = append(game.FreeUnits, unit)
+//	})
+//
+// Step calls the callbacks that came due after sampling, in time order, and
+// CancelCall(purge) drops one still to come.
+//
 // A tween eases by an Easing, a curve named by its number: EasingLinear or
 // one of Robert Penner's curves mux registers below 256, or a game's own,
 // registered from 256 with RegisterEasing. It moves through the interpolator
@@ -93,7 +109,8 @@
 //
 // The timeline's time is its own: only its Step task moves it, by the delta
 // it is given, so it is deterministic under any clock. Step samples every
-// active override at the new time, which Current then reads. The game
+// active override at the new time, which Current then reads, and then calls
+// the callbacks that came due. The game
 // schedules Step once per rendered frame, before its views.
 //
 // See docs/specs/mux.md.

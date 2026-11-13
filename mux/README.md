@@ -64,6 +64,16 @@ nothing but the standard library and the [kernel](../kernel).
   overrides there queues them after whatever plays. `Cancel(path, holes...)`
   removes every override on an address, running or yet to start, and its
   current value is the model's own from the next `Step`.
+- A **callback**, `Call(start, function)`, is a function the timeline calls
+  once at a moment of its own, given the model and the timeline's writing
+  side, such as purging a dead unit when its fade ends: a removed unit stays
+  in the model, marked dead by the game's own flag, while its fade plays.
+  `Step` calls the callbacks that came due after sampling, in time order,
+  those that start together in the order scheduled. `Call` answers an index,
+  which `CancelCall(index)` takes to drop a callback still to come; once its
+  callback is called or cancelled, the index is free for the next `Call`. The
+  timeline keeps each function in a cache, so it stays plain data, and
+  callbacks are not saved with it.
 - An **interpolator** eases two values of a type, component by component.
   Every float and integer kind has one built in, named types of those kinds
   included. A game registers one for its own value types, such as a vector,
@@ -76,8 +86,8 @@ nothing but the standard library and the [kernel](../kernel).
   under numbers below 256. A game registers its own from 256, in any order,
   with `RegisterEasing(configurator, easing, function)`.
 - **`Tasks[M, D]`** holds `Step`, which advances the timeline's time by the
-  delta it is given, then samples every active override at the new time for
-  `Current` to read.
+  delta it is given, samples every active override at the new time for
+  `Current` to read, and then calls the callbacks that came due.
 
 ## Kernel surface
 

@@ -244,7 +244,10 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
 - `Call(start, func(model *M, timeline WriteTimeline[M, D])) int` stores the closure in the timeline's cache and returns its index. The timeline stores only `{start, index}`.
 - The closure allocates once, when it is scheduled. It may capture anything; what it reaches beyond its arguments is the game's.
 - `CancelCall(index)` drops a callback still to come. A callback leaves the cache when it is called, and its index is reused.
+  - Once its callback is called or cancelled, an index is free, so `CancelCall` there drops nothing, unless the next `Call` has answered it for another callback, which it then drops. A game cancels only a callback it knows is still to come; `Call`'s and `CancelCall`'s docs say so.
+  - An index `Call` never answered panics, as does a nil function given to `Call`.
 - Each callback is called exactly once, in time order, with ties in the order scheduled. That includes callbacks a skip or fast-forward passes; one scheduled in the past is called at the next step.
+- A callback leaves the schedule before it is called. One it schedules at or before `Now` is called in the same `Step`, in its turn, so a skip calls every callback it passes, those scheduled along the way included. A callback that keeps scheduling another at `Now` therefore never lets `Step` end, which `Call`'s doc says.
 - Callbacks do not survive saving. A loaded timeline has none pending.
 
 ### Removal and appearance
