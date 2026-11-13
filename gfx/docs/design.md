@@ -8,8 +8,10 @@ what is the same for every backend: the handle tables and their descriptors,
 the frame chain, submit order, surfaces following platform's windows,
 the handles of "auto" layouts, readback and
 capture, and recovery after a device loss. It knows nothing of materials,
-scenes or the ECS: scene builds forward+, deferred and post effects on it,
-and nothing in gfx knows which.
+scenes or the ECS: [render](../../render/docs/design.md) builds materials,
+meshes, shared pipelines and per-frame memory on it, drawbridge builds
+forward+, deferred and post effects on render, and nothing in gfx knows
+which.
 
 Status: being built. The decisions come from the
 [gfx map](https://github.com/dvoyni/cog/issues/608); each section links the
@@ -58,7 +60,9 @@ its seam declares `ReflectRenderPipelineLayout`,
 adapter answers with the layouts and inputs a test queues. The backend
 preprocesses shaders too, through `Device.PreprocessShader`, which the
 recording adapter answers with the file's text as it is. Standalone encoders are finished
-and submitted by their owner. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md); the ADRs are in
+and submitted by their owner. Designed for render and not yet built: the
+named reflection of a module's bindings, and a mode of the recording adapter
+that records nothing. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md); the ADRs are in
 [`adr/`](adr).
 
 ## Constraints
@@ -238,6 +242,16 @@ device's release and the recovery among them, for a backend to pin.
   `ErrLimitExceeded` names the limit, before any layout is created. What
   needs more of the shader, a workgroup's size, the inter-stage variables, is
   the backend's.
+- **Named reflection** ([render: how a material binds its parameters, its variants, and the pipelines it shares](https://github.com/dvoyni/cog/issues/808)).
+  `Device` answers a shader module's bindings, declared ones included, for
+  render to build explicit layouts and bind values by name:
+  - each binding's name, group, number and kind, with its view dimension,
+    sample type, and storage access and format;
+  - a buffer struct's size and its members' names, offsets and sizes.
+
+  The backend seam's reflection carries the same. gogpu fills it from
+  naga's IR, which already holds names and offsets, and the recording
+  adapter answers what a test queues, as for the other reflection calls.
 - **Off the frame means a task.** Creation is synchronous on every backend.
   A game creates shader modules and pipelines from a task of its own under
   `kernel.Read[Device]`, scheduled anywhere; gfx has no async call and no
@@ -248,7 +262,7 @@ device's release and the recovery among them, for a backend to pin.
 - **No pipeline cache of gfx's.** The backend's own disk caches persist on
   Vulkan and DX12, under `os.UserCacheDir()/gogpu/`, outside platform's `FS`;
   Metal has none. Each create answers its own handle; sharing pipelines of one
-  descriptor is scene's.
+  descriptor is render's.
 
 ## Frames
 
@@ -336,10 +350,10 @@ device's release and the recovery among them, for a backend to pin.
   submit, whichever frame or standalone encoder it carries. Two writes to one
   region in a frame leave the last for the whole frame. Each call takes the
   queue's lock: write a task's whole region once, not once per draw.
-- **No staging belt, uniform ring or transient-target pool in gfx.** The
-  uniform ring and the pool of transient targets are scene's, on the frame
-  graph's side of the line. gfx guarantees them safe: release is immediate and
-  reference-counted, and reuse across frames is ordered on the queue.
+- **No staging belt, uniform ring or transient-target pool in gfx.** They
+  are render's: its temporary-buffer arena, bound at dynamic offsets, and its
+  pool of temporary textures. gfx guarantees them safe: release is immediate
+  and reference-counted, and reuse across frames is ordered on the queue.
 
 ## Surfaces
 
@@ -434,8 +448,9 @@ device's release and the recovery among them, for a backend to pin.
   handed only the zero query set it answered, logging `ErrReleased`; a
   pass's `TimestampWrites` naming no query set write nothing. Results come
   back through the asynchronous maps.
-- **gfx collects no timings.** A per-pass profiler is scene's or a profiler
-  plugin's.
+- **gfx collects no timings.** The per-pass profiler is render's: its pass
+  timings put a query set's timestamps on every pass
+  ([render: a frame inspection for agents, and per-pass GPU timings](https://github.com/dvoyni/cog/issues/820)).
 
 ## Device loss
 
@@ -504,6 +519,11 @@ device's release and the recovery among them, for a backend to pin.
   recorded, ending the map) or an error, `ErrDeviceLost` included.
 - **Real pixels without a GPU** come from gogpu on wgpu's software adapter,
   through `Config.ForceFallbackAdapter`, not from here.
+- **A mode that records nothing**
+  ([render: the per-frame bar](https://github.com/dvoyni/cog/issues/819)):
+  the adapter answers and checks as before and keeps no calls, so a
+  benchmark or an allocation gate measures gfx and its users, not the
+  recording.
 
 ## Post effects and deferred
 
@@ -562,11 +582,12 @@ tests through the software adapter are the gogpu plugin's.
 
 ## Out of scope
 
-- Materials, PBR, forward+, deferred, post effects, and a frame graph with its
-  transient targets and per-frame memory: scene, built on gfx.
+- Materials, shared pipelines, transient targets and per-frame memory:
+  render, built on gfx. PBR, forward+, deferred and post effects: drawbridge,
+  built on render. There is no frame graph.
 - The agent-facing capture tool (v1's `gfx_capture` and its PNG): a plugin
-  of its own on `CapturedEvent`.
-- A per-pass GPU profiler and its plumbing: scene's or a profiler plugin's.
+  of its own on render's events.
+- A per-pass GPU profiler: render's pass timings.
 - Render bundles, indirect-count draws, bindless and push constants: absent
   from wgpu.
 - GLES, the web, HDR, hot reload of shaders, acquire late: deferred.

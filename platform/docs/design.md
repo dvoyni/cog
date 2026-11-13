@@ -364,8 +364,9 @@ From [Filesystems before Spawn and as a resource](https://github.com/dvoyni/cog/
 
 From [disk: read-mount directories and the writable directory](https://github.com/dvoyni/cog/issues/654).
 `github.com/dvoyni/cog/platform/filesystems` holds the writable
-filesystems, each a constructor the binding plugin calls in its `Init`.
-Read mounts need none: any `fs.FS` binds as it is.
+filesystems and the memory mount, each a constructor the binding plugin
+calls in its `Init`. Other read mounts need none: any `fs.FS` binds as it
+is.
 
 - **`NewDiskWriteFS(directory)`** keeps the files in a directory on disk,
   created with its parents when missing; a relative directory resolves
@@ -382,6 +383,21 @@ Read mounts need none: any `fs.FS` binds as it is.
   over a directory, and a directory is removed only empty. `localStorage`
   keeps a few megabytes per origin, so it suits values and saves; a write
   over the quota fails and leaves the files as they were.
+- **`NewMemoryFS()`**, a **memory mount**, keeps files in memory, for bytes
+  that are not files, such as a glTF's embedded images, which render then
+  loads by path ([render: what render loads, how a second load shares the first, and when an asset is freed](https://github.com/dvoyni/cog/issues/806)).
+  Designed for render and not yet built.
+  - It is a read mount: its owner binds it with a priority and keeps it as a
+    resource of its own. It is not a layer inside the overlay, so filling it
+    takes no `FS` write lock that would shut out every job reading files.
+  - Its owner puts files in and removes them through the adapter, under the
+    adapter's own lock. Every plugin reads them through the `FS` resource.
+  - Its `Stat` answers a file's size and a modification time stamped when
+    the owner put it, strictly later at every put, even within one clock
+    tick, so a reload of a changed file notices
+    ([render: hot reload of shaders and loaded assets](https://github.com/dvoyni/cog/issues/821)).
+  - Nothing in it is persisted. The overlay and the `FS` API stay as they
+    are.
 
 ## The headless windows adapter
 
