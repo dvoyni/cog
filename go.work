@@ -6,6 +6,7 @@ use (
 	./gogpu
 	./kernel
 	./metronome
+	./mux
 	./platform
 	./submodules/gogpu
 	./submodules/wgpu
