@@ -502,6 +502,182 @@ func TestARecoveryThatFailsIsLoggedAndLeavesTheDeviceLost(t *testing.T) {
 	}
 }
 
+func TestPipelinesWhoseModuleAndLayoutWereReleasedAreRecreatedFromThemThenDrawAndDispatch(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	var objects commandObjects
+	h.readDevice(func(device gfx.Device) {
+		objects = createCommandObjects(t, device)
+		device.ReleaseShaderModule(objects.module)
+		device.ReleasePipelineLayout(objects.pipelineLayout)
+	})
+	loseDevice(h)
+	callCount := len(h.instance.Recording().Calls)
+
+	h.advance(time.Millisecond)
+
+	want := []recording.Call{
+		{Kind: recording.CallKindCreateShaderModule, Arguments: recording.CreateShaderModuleArguments{Module: objects.module, Descriptor: gfx.ShaderModuleDescriptor{WGSL: triangleWGSL}}},
+		{Kind: recording.CallKindCreatePipelineLayout, Arguments: recording.CreatePipelineLayoutArguments{Layout: objects.pipelineLayout, Descriptor: gfx.PipelineLayoutDescriptor{BindGroupLayouts: []gfx.BindGroupLayout{objects.groupLayout}}}},
+		{Kind: recording.CallKindCreateRenderPipeline, Arguments: recording.CreateRenderPipelineArguments{Pipeline: objects.renderPipeline, Descriptor: renderPipelineDescriptor(objects.fixture)}},
+		{Kind: recording.CallKindCreateComputePipeline, Arguments: recording.CreateComputePipelineArguments{Pipeline: objects.computePipeline, Descriptor: computePipelineDescriptor(objects.fixture)}},
+		{Kind: recording.CallKindReleasePipelineLayout, Arguments: objects.pipelineLayout},
+		{Kind: recording.CallKindReleaseShaderModule, Arguments: objects.module},
+	}
+	var calls []recording.Call
+	for _, call := range h.instance.Recording().Calls[callCount:] {
+		if slices.ContainsFunc(want, func(wanted recording.Call) bool { return wanted.Kind == call.Kind }) {
+			calls = append(calls, call)
+		}
+	}
+	if !reflect.DeepEqual(calls, want) {
+		t.Errorf("the recovery made calls %+v, want %+v", calls, want)
+	}
+	if logged := h.takeLogged(); len(logged) != 0 {
+		t.Errorf("the recovery logged %v, want nothing", logged)
+	}
+
+	h.readDevice(func(device gfx.Device) {
+		encoder, err := device.CreateCommandEncoder(gfx.CommandEncoderDescriptor{})
+		mustSucceed(t, err)
+		recordEveryCommand(encoder, objects, nil)
+		commandBuffer, err := encoder.Finish()
+		mustSucceed(t, err)
+		mustSucceed(t, device.Submit(commandBuffer))
+	})
+}
+
+func TestARecoveryRecreatesWhatAnObjectIsMadeFromThoughItWasReleased(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		// make creates an object, then another made from it, then releases
+		// the first: one backend call each.
+		make func(t *testing.T, device gfx.Device, live fixture)
+	}{
+		{"a pipeline layout's bind group layout", func(t *testing.T, device gfx.Device, live fixture) {
+			groupLayout, err := device.CreateBindGroupLayout(uniformLayoutDescriptor())
+			mustSucceed(t, err)
+			_, err = device.CreatePipelineLayout(gfx.PipelineLayoutDescriptor{BindGroupLayouts: []gfx.BindGroupLayout{groupLayout}})
+			mustSucceed(t, err)
+			device.ReleaseBindGroupLayout(groupLayout)
+		}},
+		{"a bind group's layout", func(t *testing.T, device gfx.Device, live fixture) {
+			groupLayout, err := device.CreateBindGroupLayout(uniformLayoutDescriptor())
+			mustSucceed(t, err)
+			_, err = device.CreateBindGroup(gfx.BindGroupDescriptor{Layout: groupLayout, Entries: []gfx.BindGroupEntry{{Binding: 0, Buffer: live.buffer}}})
+			mustSucceed(t, err)
+			device.ReleaseBindGroupLayout(groupLayout)
+		}},
+		{"a bind group's buffer", func(t *testing.T, device gfx.Device, live fixture) {
+			buffer, err := device.CreateBuffer(gfx.BufferDescriptor{Label: "camera", Size: 64, Usage: gfx.BufferUsageFlagUniform})
+			mustSucceed(t, err)
+			_, err = device.CreateBindGroup(gfx.BindGroupDescriptor{Layout: live.groupLayout, Entries: []gfx.BindGroupEntry{{Binding: 0, Buffer: buffer}}})
+			mustSucceed(t, err)
+			device.ReleaseBuffer(buffer)
+		}},
+		{"a bind group's sampler", func(t *testing.T, device gfx.Device, live fixture) {
+			sampler, err := device.CreateSampler(gfx.SamplerDescriptor{Label: "nearest"})
+			mustSucceed(t, err)
+			_, err = device.CreateBindGroup(gfx.BindGroupDescriptor{Layout: live.groupLayout, Entries: []gfx.BindGroupEntry{{Binding: 0, Buffer: live.buffer}, {Binding: 1, Sampler: sampler}}})
+			mustSucceed(t, err)
+			device.ReleaseSampler(sampler)
+		}},
+		{"a bind group's texture view", func(t *testing.T, device gfx.Device, live fixture) {
+			view, err := device.CreateTextureView(live.texture, gfx.TextureViewDescriptor{Label: "albedo"})
+			mustSucceed(t, err)
+			_, err = device.CreateBindGroup(gfx.BindGroupDescriptor{Layout: live.groupLayout, Entries: []gfx.BindGroupEntry{{Binding: 0, Buffer: live.buffer}, {Binding: 2, TextureView: view}}})
+			mustSucceed(t, err)
+			device.ReleaseTextureView(view)
+		}},
+		{"a texture view's texture", func(t *testing.T, device gfx.Device, live fixture) {
+			texture, err := device.CreateTexture(gfx.TextureDescriptor{
+				Label:         "albedo",
+				Size:          gfx.Extent3D{Width: 2, Height: 2, DepthOrArrayLayers: 1},
+				MipLevelCount: 1,
+				SampleCount:   1,
+				Dimension:     gfx.TextureDimension2D,
+				Format:        gfx.TextureFormatRGBA8Unorm,
+				Usage:         gfx.TextureUsageFlagTextureBinding,
+			})
+			mustSucceed(t, err)
+			_, err = device.CreateTextureView(texture, gfx.TextureViewDescriptor{})
+			mustSucceed(t, err)
+			device.ReleaseTexture(texture)
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.mustSpawn(nil)
+			var caseCalls []recording.Call
+			h.readDevice(func(device gfx.Device) {
+				live := createFixture(t, device)
+				before := len(h.instance.Recording().Calls)
+				c.make(t, device, live)
+				caseCalls = h.instance.Recording().Calls[before:]
+			})
+			if len(caseCalls) != 3 {
+				t.Fatalf("the case made calls %v, want a creation, a creation and a release", kinds(caseCalls))
+			}
+			loseDevice(h)
+			callCount := len(h.instance.Recording().Calls)
+
+			h.advance(time.Millisecond)
+
+			calls := h.instance.Recording().Calls[callCount:]
+			for _, call := range calls {
+				if call.Error != nil {
+					t.Errorf("the recovery made %v, answered %v", call.Kind, call.Error)
+				}
+			}
+			dependencyIndex := slices.IndexFunc(calls, func(call recording.Call) bool { return reflect.DeepEqual(call, caseCalls[0]) })
+			dependentIndex := slices.IndexFunc(calls, func(call recording.Call) bool { return reflect.DeepEqual(call, caseCalls[1]) })
+			releaseIndex := slices.Index(calls, caseCalls[2])
+			if dependencyIndex < 0 || dependentIndex < dependencyIndex || releaseIndex < dependentIndex {
+				t.Errorf("the recovery made calls %v, want %+v, then %+v, then %+v", kinds(calls), caseCalls[0], caseCalls[1], caseCalls[2])
+			}
+			if logged := h.takeLogged(); len(logged) != 0 {
+				t.Errorf("the recovery logged %v, want nothing", logged)
+			}
+		})
+	}
+}
+
+func TestAnObjectCreatedAfterAReleaseNeverStandsInForTheReleasedOne(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	var live fixture
+	var pipeline gfx.ComputePipeline
+	var laterModule gfx.ShaderModule
+	laterDescriptor := gfx.ShaderModuleDescriptor{Label: "later", WGSL: triangleWGSL}
+	h.readDevice(func(device gfx.Device) {
+		live = createFixture(t, device)
+		var err error
+		pipeline, err = device.CreateComputePipeline(computePipelineDescriptor(live))
+		mustSucceed(t, err)
+		device.ReleaseShaderModule(live.module)
+		laterModule, err = device.CreateShaderModule(laterDescriptor)
+		mustSucceed(t, err)
+	})
+	if laterModule.Index() == live.module.Index() {
+		t.Fatalf("the module created after the release got index %d, the released one's, while a pipeline made from it is held", laterModule.Index())
+	}
+	loseDevice(h)
+	callCount := len(h.instance.Recording().Calls)
+
+	h.advance(time.Millisecond)
+
+	calls := h.instance.Recording().Calls[callCount:]
+	for _, want := range []recording.Call{
+		{Kind: recording.CallKindCreateShaderModule, Arguments: recording.CreateShaderModuleArguments{Module: live.module, Descriptor: gfx.ShaderModuleDescriptor{WGSL: triangleWGSL}}},
+		{Kind: recording.CallKindCreateShaderModule, Arguments: recording.CreateShaderModuleArguments{Module: laterModule, Descriptor: laterDescriptor}},
+		{Kind: recording.CallKindCreateComputePipeline, Arguments: recording.CreateComputePipelineArguments{Pipeline: pipeline, Descriptor: computePipelineDescriptor(live)}},
+	} {
+		if !slices.ContainsFunc(calls, func(call recording.Call) bool { return reflect.DeepEqual(call, want) }) {
+			t.Errorf("the recovery made calls %+v, want %+v among them", calls, want)
+		}
+	}
+}
+
 // recreationOrder is the order a recovery creates the objects of each type
 // again in: what an object names comes before it.
 var recreationOrder = []recording.CallKind{

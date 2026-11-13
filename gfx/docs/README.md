@@ -83,7 +83,11 @@ finish it and pass its buffer to `Device.Submit`.
 Create and release them with `Device`: `CreateBuffer`/`ReleaseBuffer`,
 `CreateTexture`, `CreateTextureView`, and the rest, one pair per type. An
 optional part of a descriptor is a value whose zero means none. Release is
-immediate; the GPU keeps what in-flight work still uses.
+immediate; the GPU keeps what in-flight work still uses. Releasing what a
+live object is made from, such as a pipeline's shader module and layout once
+the pipeline exists, leaves that object working, through a device loss too.
+A buffer a bind group binds is the exception: release it after the bind
+group, since gogpu's wgpu does not keep it for the group.
 
 ## Shaders and pipelines
 

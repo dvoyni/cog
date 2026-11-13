@@ -34,7 +34,8 @@ call reaching the backend after it, every call with an error answering
 `ErrDeviceLost`, `PreprocessShader` aside, and the frame in flight skipping its submit and present,
 the maps and captures pending at it publishing failures, and the next
 beat recovers instead of drawing, every object recreated under its old
-handle, every surface marked and `DeviceRecoveredEvent` published, a
+handle, those released while an object made from them is held too, every
+surface marked and `DeviceRecoveredEvent` published, a
 recovery that fails logged once and retried at most once a second, and
 `DrawEvent` carries `AcquireWait` and `GPULatency`, read from
 metronome's clock;

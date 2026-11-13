@@ -414,7 +414,10 @@ func createCommandObjects(t *testing.T, device gfx.Device) commandObjects {
 	t.Helper()
 	objects := commandObjects{fixture: createFixture(t, device)}
 	var err error
-	objects.group, err = device.CreateBindGroup(gfx.BindGroupDescriptor{Layout: objects.groupLayout, Entries: []gfx.BindGroupEntry{{Binding: 0, Buffer: objects.buffer}}})
+	objects.group, err = device.CreateBindGroup(gfx.BindGroupDescriptor{
+		Layout:  objects.groupLayout,
+		Entries: []gfx.BindGroupEntry{{Binding: 0, Buffer: objects.buffer}, {Binding: 1, Sampler: objects.sampler}, {Binding: 2, TextureView: objects.view}},
+	})
 	mustSucceed(t, err)
 	objects.renderPipeline, err = device.CreateRenderPipeline(renderPipelineDescriptor(objects.fixture))
 	mustSucceed(t, err)

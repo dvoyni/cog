@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/gfx/recording"
@@ -455,24 +456,25 @@ func TestStaleHandlesInDescriptorsAnswerErrReleasedBeforeTheBackend(t *testing.T
 		}},
 	}
 	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			h := newHarness(t)
-			h.mustSpawn(nil)
+		for _, staleFixture := range staleFixtures {
+			t.Run(c.name+"/"+staleFixture.name, func(t *testing.T) {
+				h := newHarness(t)
+				h.mustSpawn(nil)
+				stale := staleFixture.make(t, h)
 
-			h.readDevice(func(device gfx.Device) {
-				stale := createFixture(t, device)
-				releaseFixture(device, stale)
-				live := createFixture(t, device)
-				before := len(h.instance.Recording().Calls)
+				h.readDevice(func(device gfx.Device) {
+					live := createFixture(t, device)
+					before := len(h.instance.Recording().Calls)
 
-				if err := c.create(device, live, stale); !errors.Is(err, gfx.ErrReleased) {
-					t.Errorf("the create answered %v, want ErrReleased", err)
-				}
-				if after := len(h.instance.Recording().Calls); after != before {
-					t.Errorf("the create reached the backend: %v", h.instance.Recording().Calls[before:])
-				}
+					if err := c.create(device, live, stale); !errors.Is(err, gfx.ErrReleased) {
+						t.Errorf("the create answered %v, want ErrReleased", err)
+					}
+					if after := len(h.instance.Recording().Calls); after != before {
+						t.Errorf("the create reached the backend: %v", h.instance.Recording().Calls[before:])
+					}
+				})
 			})
-		})
+		}
 	}
 }
 
@@ -611,24 +613,72 @@ func TestAWriteToAStaleHandleAnswersErrReleasedBeforeTheBackend(t *testing.T) {
 			return device.WriteTexture(gfx.ImageCopyTexture{Texture: stale.texture}, []byte{1, 2, 3, 4}, gfx.ImageDataLayout{BytesPerRow: 4, RowsPerImage: 1}, gfx.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1})
 		}},
 	} {
-		t.Run(c.name, func(t *testing.T) {
+		for _, staleFixture := range staleFixtures {
+			t.Run(c.name+"/"+staleFixture.name, func(t *testing.T) {
+				h := newHarness(t)
+				h.mustSpawn(nil)
+				stale := staleFixture.make(t, h)
+
+				h.readDevice(func(device gfx.Device) {
+					before := len(h.instance.Recording().Calls)
+
+					if err := c.write(device, stale); !errors.Is(err, gfx.ErrReleased) {
+						t.Errorf("the write answered %v, want ErrReleased", err)
+					}
+					if after := len(h.instance.Recording().Calls); after != before {
+						t.Errorf("the write reached the backend: %v", h.instance.Recording().Calls[before:])
+					}
+				})
+			})
+		}
+	}
+}
+
+func TestASecondReleaseOfAHandleAnObjectIsMadeFromLogsErrReleasedAndDoesNothing(t *testing.T) {
+	for _, staleFixture := range staleFixtures[1:] {
+		t.Run(staleFixture.name, func(t *testing.T) {
 			h := newHarness(t)
 			h.mustSpawn(nil)
+			stale := staleFixture.make(t, h)
+			before := len(h.instance.Recording().Calls)
 
-			h.readDevice(func(device gfx.Device) {
-				stale := createFixture(t, device)
-				releaseFixture(device, stale)
-				before := len(h.instance.Recording().Calls)
+			h.readDevice(func(device gfx.Device) { releaseFixture(device, stale) })
 
-				if err := c.write(device, stale); !errors.Is(err, gfx.ErrReleased) {
-					t.Errorf("the write answered %v, want ErrReleased", err)
-				}
-				if after := len(h.instance.Recording().Calls); after != before {
-					t.Errorf("the write reached the backend: %v", h.instance.Recording().Calls[before:])
-				}
-			})
+			if calls := h.instance.Recording().Calls[before:]; len(calls) != 0 {
+				t.Errorf("the second releases reached the backend: %v", kinds(calls))
+			}
+			logged := h.takeLogged()
+			if len(logged) != 7 || slices.ContainsFunc(logged, func(err error) bool { return !errors.Is(err, gfx.ErrReleased) }) {
+				t.Errorf("logged %v, want ErrReleased for each of the fixture's 7 handles", logged)
+			}
 		})
 	}
+}
+
+func TestAReleasedHandlesIndexIsHandedOutAgainOnceTheLastObjectMadeFromItIsReleased(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+
+	h.readDevice(func(device gfx.Device) {
+		live := createFixture(t, device)
+		firstPipeline, err := device.CreateComputePipeline(computePipelineDescriptor(live))
+		mustSucceed(t, err)
+		secondPipeline, err := device.CreateComputePipeline(computePipelineDescriptor(live))
+		mustSucceed(t, err)
+		device.ReleaseShaderModule(live.module)
+		device.ReleaseComputePipeline(firstPipeline)
+		module, err := device.CreateShaderModule(gfx.ShaderModuleDescriptor{WGSL: triangleWGSL})
+		mustSucceed(t, err)
+		if module.Index() == live.module.Index() {
+			t.Errorf("index %d was handed out again while the second pipeline made from it is held", module.Index())
+		}
+		device.ReleaseComputePipeline(secondPipeline)
+		module, err = device.CreateShaderModule(gfx.ShaderModuleDescriptor{WGSL: triangleWGSL})
+		mustSucceed(t, err)
+		if module.Index() != live.module.Index() {
+			t.Errorf("a module created once the last pipeline was released got index %d, want the released module's %d", module.Index(), live.module.Index())
+		}
+	})
 }
 
 // fixture is one live object of each type a descriptor names.
@@ -689,6 +739,46 @@ func createFixture(t *testing.T, device gfx.Device) fixture {
 	live.pipelineLayout, err = device.CreatePipelineLayout(gfx.PipelineLayoutDescriptor{BindGroupLayouts: []gfx.BindGroupLayout{live.groupLayout}})
 	mustSucceed(t, err)
 	return live
+}
+
+// staleFixtures are the ways a test makes a fixture's handles stale: released
+// alone; released while objects made from them are held, which keeps them for
+// a recovery; and that, then recovered.
+var staleFixtures = []struct {
+	name string
+	make func(t *testing.T, h *harness) fixture
+}{
+	{"released", func(t *testing.T, h *harness) fixture {
+		var stale fixture
+		h.readDevice(func(device gfx.Device) {
+			stale = createFixture(t, device)
+			releaseFixture(device, stale)
+		})
+		return stale
+	}},
+	{"released while objects made from it are held", createKeptFixture},
+	{"released while objects made from it are held, then recovered", func(t *testing.T, h *harness) fixture {
+		stale := createKeptFixture(t, h)
+		loseDevice(h)
+		h.advance(time.Millisecond)
+		if recovered := h.recoveredEvents(); recovered != 1 {
+			t.Fatalf("DeviceRecoveredEvent published %d times, want once", recovered)
+		}
+		return stale
+	}},
+}
+
+// createKeptFixture creates the objects recordEveryCommand records with, then
+// releases their fixture, whose handles gfx keeps for the objects made from
+// them.
+func createKeptFixture(t *testing.T, h *harness) fixture {
+	t.Helper()
+	var objects commandObjects
+	h.readDevice(func(device gfx.Device) {
+		objects = createCommandObjects(t, device)
+		releaseFixture(device, objects.fixture)
+	})
+	return objects.fixture
 }
 
 // releaseFixture releases every object of f, leaving its handles stale.
