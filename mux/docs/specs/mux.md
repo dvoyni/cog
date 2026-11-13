@@ -337,6 +337,19 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
   - ecs's benchmark baseline and its *Performance* section;
   - the measurements of [mux research: what binding a property costs in Go](https://github.com/dvoyni/cog/issues/775).
 
+## Performance
+
+Measured per element in `benchmark_test.go`, against hand-written equivalents, on an AMD Ryzen 9 7950X3D. Units' positions are tweened as `Vec2`s, eased linearly, at depth `[4]int64` unless another is named. No benchmark allocates: each fails if a round allocates once the stores have grown.
+
+- **`Get`** costs 3.4 ns through a slice step, against 0.3 ns indexing the slice by hand. Through a map step it costs 7.8 to 10 ns with `uint32` keys, against 4.6 to 6.2 ns for a typed lookup, and 9.3 to 12 ns with interned string keys, against 6.3 to 8.0 ns, from 16 to 4096 elements.
+- **`Current`** costs 4.6 ns on a path with nothing sampled, whatever the count or depth: the model read beside the check for a sample. With a quarter of the units overridden, it costs 9.1 to 14 ns at an overridden address and 10 to 16 ns at another, from 16 to 4096 units: a binary search of the path's sample, whose compares the depth weighs on, 11.5 ns at `[1]` and 18.6 ns at `[12]` at an overridden address of 4096.
+- **`All`**, the view case of 4096 units with a quarter overridden, costs 2.4 ns a unit over a slice, against 0.3 ns for a plain loop: the sample is merged in index order. Over a map it costs 29 ns a unit with `uint32` keys and 47 ns with interned strings, against 5.3 ns for a plain range: a binary search of the sample for each entry takes about a third of it, the lookup of an interned key's index another third, and the iteration a sixth.
+- **`Step`** costs 7.7 ns an override, whatever their count, against 1.3 ns for a tween written by hand: each override is eased and interpolated through function values, compared with its neighbour's address, and appended to the sample with its address. The depth moves it from 5.0 ns at `[1]` to 9.0 ns at `[12]`; 2 and 4 overrides blending at each address cost 9.3 and 9.5 ns an override.
+- **Scheduling** costs 35 ns a `Tween` and 33 ns a `Hold`, with its sample and its retirement, and 29 ns an override a sequence places. `Intern` of a known key costs 10 ns, and `Index` 10 ns on a hit and 8.6 ns on a miss, against 6.9 ns for a typed lookup: the key's table is found before its map is read.
+- **Three calls scale with what is pending.** `Cancel` walks every override on its path, so cancelling each of a path's addresses costs 39 ns at 16, 188 ns at 256 and 2.9 µs at 4096. `Call` keeps the callbacks sorted, the latest first, moving each one that comes due before the new one: 11 ns with 16 pending, 24 ns with 256 and 237 ns with 4096. `CancelCall` searches the pending callbacks for its index: 18 ns, 72 ns and 675 ns.
+
+`docs/benchmarks-baseline.txt` holds ten runs. A change is checked with `go test -run '^$' -bench . -count 10 > new.txt` and `benchstat docs/benchmarks-baseline.txt new.txt`. There is no numeric time bar.
+
 ## Out of Scope
 
 - Continuous real-time simulation, client prediction and rollback: mux targets turn-based and strategy games.

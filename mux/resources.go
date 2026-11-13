@@ -163,6 +163,10 @@ func (w WriteTimeline[M, D]) Hold[T any](path Path[M, T], start time.Duration, v
 // Once its callback is called or cancelled, an index is free, and the next
 // Call may answer it for another callback.
 //
+// The callbacks still to come are kept sorted, so Call moves each one that
+// comes due no later than start: it costs in proportion to them, little with
+// tens pending and more with thousands.
+//
 // A nil function panics.
 func (w WriteTimeline[M, D]) Call(start time.Duration, function func(model *M, timeline WriteTimeline[M, D])) int {
 	if function == nil {
@@ -233,6 +237,10 @@ func (w WriteTimeline[M, D]) Intern[K comparable](key K) int64 {
 // or yet to start. From the next Step on, the address's current value is the
 // model's own, which may jump.
 //
+// Cancel walks every override on path, so it costs in proportion to them, and
+// cancelling each address of a path with thousands of overrides, one call
+// each, costs their count squared.
+//
 // Holes the path does not take panic, naming the path and their count.
 func (w WriteTimeline[M, D]) Cancel[T any](path Path[M, T], holes ...int64) {
 	filledHoles := path.compiled.makeHoles[D](holes)
@@ -247,6 +255,9 @@ func (w WriteTimeline[M, D]) Cancel[T any](path Path[M, T], holes ...int64) {
 // CancelCall drops nothing there, unless Call has since answered it for
 // another callback, which it then drops: a game cancels only a callback it
 // knows is still to come.
+//
+// CancelCall searches the callbacks still to come for index, so it costs in
+// proportion to them.
 //
 // An index Call never answered panics.
 func (w WriteTimeline[M, D]) CancelCall(index int) {

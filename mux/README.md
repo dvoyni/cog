@@ -130,5 +130,7 @@ nothing but the standard library and the [kernel](../kernel).
 
 A plugin that registers a model is listed after mux.
 
-See [docs/specs/mux.md](docs/specs/mux.md) for the design mux is built to,
-and [CONTEXT.md](CONTEXT.md) for its language.
+See [docs/README.md](docs/README.md) for the guide, a game wired end to
+end, [docs/specs/mux.md](docs/specs/mux.md) for the design mux is built to,
+its costs per element in its *Performance* section, and
+[CONTEXT.md](CONTEXT.md) for its language.
