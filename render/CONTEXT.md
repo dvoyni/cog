@@ -16,9 +16,17 @@ _Avoid_: Draw state, pipeline state
 A shader loaded with one set of defines. Each variant is its own loaded asset, and a material names one.
 _Avoid_: Keyword, permutation, specialization
 
+**Entry point**:
+A function of a shader that one stage runs: a material names its vertex and fragment ones and a dispatch its compute one, an empty name meaning the shader's only one of that stage.
+_Avoid_: Main, kernel, stage function
+
 **Parameter**:
 A value bound by name to one of a shader's bindings: a texture, a sampler, a buffer or a block of constants.
 _Avoid_: Uniform, property, param, binding
+
+**Texture view**:
+Part of a texture, or a texture seen another way: a range of mip levels or layers, another view dimension, or one aspect of a depth-stencil texture, bound wherever a texture is.
+_Avoid_: View (mux's), subresource, slice
 
 **Pass**:
 A run of draws into the same targets, with a load or clear for each target. Its viewport and scissor rectangle start as the whole target and may change between draws.
@@ -67,6 +75,10 @@ _Avoid_: Instance stream, per-instance mesh, instance attributes
 **Temporary buffer**:
 A buffer taken from render's pool for one frame, which goes back to the pool when that frame ends.
 _Avoid_: Dynamic buffer, transient buffer, scratch buffer
+
+**Temporary mesh**:
+A mesh taken from render's pool for one frame, over buffer ranges made or written that frame, which goes back to the pool when that frame ends.
+_Avoid_: Dynamic mesh, transient mesh, immediate geometry
 
 **Temporary texture**:
 A texture taken from render's pool for one frame, which goes back to the pool when that frame ends. A texture kept across frames, such as a history, is an ordinary texture.

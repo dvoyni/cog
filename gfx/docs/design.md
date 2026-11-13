@@ -247,7 +247,8 @@ device's release and the recovery among them, for a backend to pin.
   render to build explicit layouts and bind values by name:
   - each binding's name, group, number and kind, with its view dimension,
     sample type, and storage access and format;
-  - a buffer struct's size and its members' names, offsets and sizes.
+  - a buffer struct's size and its members' names, offsets and sizes;
+  - the entry points that use each binding.
 
   The backend seam's reflection carries the same. gogpu fills it from
   naga's IR, which already holds names and offsets, and the recording
