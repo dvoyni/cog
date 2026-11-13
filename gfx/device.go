@@ -102,7 +102,7 @@ func (d *device) CreateBuffer(descriptor BufferDescriptor) (Buffer, error) {
 	if d.lost.Load() {
 		return Buffer{}, ErrDeviceLost
 	}
-	buffer, err := createResource(&d.buffers, descriptor, d.backend.CreateBuffer)
+	buffer, err := createResource(&d.buffers, descriptor, nil, d.backend.CreateBuffer)
 	return buffer, d.checkLoss(err)
 }
 
@@ -120,7 +120,7 @@ func (d *device) CreateTexture(descriptor TextureDescriptor) (Texture, error) {
 		return Texture{}, ErrDeviceLost
 	}
 	descriptor.ViewFormats = slices.Clone(descriptor.ViewFormats)
-	texture, err := createResource(&d.textures, descriptor, d.backend.CreateTexture)
+	texture, err := createResource(&d.textures, descriptor, nil, d.backend.CreateTexture)
 	return texture, d.checkLoss(err)
 }
 
@@ -138,11 +138,12 @@ func (d *device) CreateTextureView(texture Texture, descriptor TextureViewDescri
 	if d.lost.Load() {
 		return TextureView{}, ErrDeviceLost
 	}
-	if err := d.textures.check(texture); err != nil {
+	dependencies, err := d.textures.appendDependency(nil, texture)
+	if err != nil {
 		return TextureView{}, fmt.Errorf("%w: the view's texture", err)
 	}
 	source := textureViewSource{texture: texture, descriptor: descriptor}
-	view, err := createResource(&d.textureViews, source, func(view TextureView, source textureViewSource) error {
+	view, err := createResource(&d.textureViews, source, dependencies, func(view TextureView, source textureViewSource) error {
 		return d.backend.CreateTextureView(view, source.texture, source.descriptor)
 	})
 	return view, d.checkLoss(err)
@@ -161,7 +162,7 @@ func (d *device) CreateSampler(descriptor SamplerDescriptor) (Sampler, error) {
 	if d.lost.Load() {
 		return Sampler{}, ErrDeviceLost
 	}
-	sampler, err := createResource(&d.samplers, descriptor, d.backend.CreateSampler)
+	sampler, err := createResource(&d.samplers, descriptor, nil, d.backend.CreateSampler)
 	return sampler, d.checkLoss(err)
 }
 
@@ -173,7 +174,7 @@ func (d *device) CreateQuerySet(descriptor QuerySetDescriptor) (QuerySet, error)
 	if d.lost.Load() {
 		return QuerySet{}, ErrDeviceLost
 	}
-	querySet, err := createResource(&d.querySets, descriptor, d.backend.CreateQuerySet)
+	querySet, err := createResource(&d.querySets, descriptor, nil, d.backend.CreateQuerySet)
 	return querySet, d.checkLoss(err)
 }
 
@@ -191,7 +192,7 @@ func (d *device) CreateShaderModule(descriptor ShaderModuleDescriptor) (ShaderMo
 	if d.lost.Load() {
 		return ShaderModule{}, ErrDeviceLost
 	}
-	module, err := createResource(&d.shaderModules, descriptor, d.backend.CreateShaderModule)
+	module, err := createResource(&d.shaderModules, descriptor, nil, d.backend.CreateShaderModule)
 	return module, d.checkLoss(err)
 }
 
@@ -204,7 +205,7 @@ func (d *device) CreateBindGroupLayout(descriptor BindGroupLayoutDescriptor) (Bi
 		return BindGroupLayout{}, ErrDeviceLost
 	}
 	descriptor.Entries = slices.Clone(descriptor.Entries)
-	layout, err := createResource(&d.bindGroupLayouts, descriptor, d.backend.CreateBindGroupLayout)
+	layout, err := createResource(&d.bindGroupLayouts, descriptor, nil, d.backend.CreateBindGroupLayout)
 	return layout, d.checkLoss(err)
 }
 
@@ -216,22 +217,29 @@ func (d *device) CreateBindGroup(descriptor BindGroupDescriptor) (BindGroup, err
 	if d.lost.Load() {
 		return BindGroup{}, ErrDeviceLost
 	}
-	if err := d.bindGroupLayouts.check(descriptor.Layout); err != nil {
+	dependencies, err := d.bindGroupLayouts.appendDependency(make([]dependency, 0, 1+len(descriptor.Entries)), descriptor.Layout)
+	if err != nil {
 		return BindGroup{}, fmt.Errorf("%w: the bind group's layout", err)
 	}
 	for _, entry := range descriptor.Entries {
-		if entry.Buffer != (Buffer{}) && d.buffers.check(entry.Buffer) != nil {
-			return BindGroup{}, fmt.Errorf("%w: the buffer at binding %d", ErrReleased, entry.Binding)
+		if entry.Buffer != (Buffer{}) {
+			if dependencies, err = d.buffers.appendDependency(dependencies, entry.Buffer); err != nil {
+				return BindGroup{}, fmt.Errorf("%w: the buffer at binding %d", err, entry.Binding)
+			}
 		}
-		if entry.Sampler != (Sampler{}) && d.samplers.check(entry.Sampler) != nil {
-			return BindGroup{}, fmt.Errorf("%w: the sampler at binding %d", ErrReleased, entry.Binding)
+		if entry.Sampler != (Sampler{}) {
+			if dependencies, err = d.samplers.appendDependency(dependencies, entry.Sampler); err != nil {
+				return BindGroup{}, fmt.Errorf("%w: the sampler at binding %d", err, entry.Binding)
+			}
 		}
-		if entry.TextureView != (TextureView{}) && d.textureViews.check(entry.TextureView) != nil {
-			return BindGroup{}, fmt.Errorf("%w: the texture view at binding %d", ErrReleased, entry.Binding)
+		if entry.TextureView != (TextureView{}) {
+			if dependencies, err = d.textureViews.appendDependency(dependencies, entry.TextureView); err != nil {
+				return BindGroup{}, fmt.Errorf("%w: the texture view at binding %d", err, entry.Binding)
+			}
 		}
 	}
 	descriptor.Entries = slices.Clone(descriptor.Entries)
-	group, err := createResource(&d.bindGroups, descriptor, d.backend.CreateBindGroup)
+	group, err := createResource(&d.bindGroups, descriptor, dependencies, d.backend.CreateBindGroup)
 	return group, d.checkLoss(err)
 }
 
@@ -243,13 +251,15 @@ func (d *device) CreatePipelineLayout(descriptor PipelineLayoutDescriptor) (Pipe
 	if d.lost.Load() {
 		return PipelineLayout{}, ErrDeviceLost
 	}
+	dependencies := make([]dependency, 0, len(descriptor.BindGroupLayouts))
+	var err error
 	for group, layout := range descriptor.BindGroupLayouts {
-		if err := d.bindGroupLayouts.check(layout); err != nil {
+		if dependencies, err = d.bindGroupLayouts.appendDependency(dependencies, layout); err != nil {
 			return PipelineLayout{}, fmt.Errorf("%w: the layout of group %d", err, group)
 		}
 	}
 	descriptor.BindGroupLayouts = slices.Clone(descriptor.BindGroupLayouts)
-	layout, err := createResource(&d.pipelineLayouts, descriptor, d.backend.CreatePipelineLayout)
+	layout, err := createResource(&d.pipelineLayouts, descriptor, dependencies, d.backend.CreatePipelineLayout)
 	return layout, d.checkLoss(err)
 }
 
@@ -261,16 +271,20 @@ func (d *device) CreateRenderPipeline(descriptor RenderPipelineDescriptor) (Rend
 	if d.lost.Load() {
 		return RenderPipeline{}, ErrDeviceLost
 	}
+	dependencies := make([]dependency, 0, 3)
+	var err error
 	if descriptor.Layout != (PipelineLayout{}) {
-		if err := d.pipelineLayouts.check(descriptor.Layout); err != nil {
+		if dependencies, err = d.pipelineLayouts.appendDependency(dependencies, descriptor.Layout); err != nil {
 			return RenderPipeline{}, fmt.Errorf("%w: the pipeline's layout", err)
 		}
 	}
-	if err := d.shaderModules.check(descriptor.Vertex.Module); err != nil {
+	if dependencies, err = d.shaderModules.appendDependency(dependencies, descriptor.Vertex.Module); err != nil {
 		return RenderPipeline{}, fmt.Errorf("%w: the vertex module", err)
 	}
-	if descriptor.Fragment.Module != (ShaderModule{}) && d.shaderModules.check(descriptor.Fragment.Module) != nil {
-		return RenderPipeline{}, fmt.Errorf("%w: the fragment module", ErrReleased)
+	if descriptor.Fragment.Module != (ShaderModule{}) {
+		if dependencies, err = d.shaderModules.appendDependency(dependencies, descriptor.Fragment.Module); err != nil {
+			return RenderPipeline{}, fmt.Errorf("%w: the fragment module", err)
+		}
 	}
 	inputs, err := d.backend.ReflectVertexInputs(descriptor.Vertex.Module, descriptor.Vertex.EntryPoint)
 	if err != nil {
@@ -295,8 +309,9 @@ func (d *device) CreateRenderPipeline(descriptor RenderPipelineDescriptor) (Rend
 			return RenderPipeline{}, err
 		}
 		source.autoLayout = true
+		dependencies = append(dependencies, dependency{&d.pipelineLayouts, source.descriptor.Layout.handle})
 	}
-	pipeline, err := createResource(&d.renderPipelines, source, func(pipeline RenderPipeline, source pipelineSource[RenderPipelineDescriptor]) error {
+	pipeline, err := createResource(&d.renderPipelines, source, dependencies, func(pipeline RenderPipeline, source pipelineSource[RenderPipelineDescriptor]) error {
 		return d.backend.CreateRenderPipeline(pipeline, source.descriptor)
 	})
 	if err != nil && source.autoLayout {
@@ -321,19 +336,20 @@ func (d *device) CreateComputePipeline(descriptor ComputePipelineDescriptor) (Co
 	if d.lost.Load() {
 		return ComputePipeline{}, ErrDeviceLost
 	}
+	dependencies := make([]dependency, 0, 2)
+	var err error
 	if descriptor.Layout != (PipelineLayout{}) {
-		if err := d.pipelineLayouts.check(descriptor.Layout); err != nil {
+		if dependencies, err = d.pipelineLayouts.appendDependency(dependencies, descriptor.Layout); err != nil {
 			return ComputePipeline{}, fmt.Errorf("%w: the pipeline's layout", err)
 		}
 	}
-	if err := d.shaderModules.check(descriptor.Module); err != nil {
+	if dependencies, err = d.shaderModules.appendDependency(dependencies, descriptor.Module); err != nil {
 		return ComputePipeline{}, fmt.Errorf("%w: the module", err)
 	}
 	descriptor.Constants = maps.Clone(descriptor.Constants)
 	source := pipelineSource[ComputePipelineDescriptor]{descriptor: descriptor}
 	autoLayout := source.descriptor.Layout == (PipelineLayout{})
 	groups := d.groupDescriptors(source.descriptor.Layout)
-	var err error
 	if autoLayout {
 		if groups, err = d.backend.ReflectComputePipelineLayout(source.descriptor); err != nil {
 			return ComputePipeline{}, d.checkLoss(err)
@@ -347,8 +363,9 @@ func (d *device) CreateComputePipeline(descriptor ComputePipelineDescriptor) (Co
 			return ComputePipeline{}, err
 		}
 		source.autoLayout = true
+		dependencies = append(dependencies, dependency{&d.pipelineLayouts, source.descriptor.Layout.handle})
 	}
-	pipeline, err := createResource(&d.computePipelines, source, func(pipeline ComputePipeline, source pipelineSource[ComputePipelineDescriptor]) error {
+	pipeline, err := createResource(&d.computePipelines, source, dependencies, func(pipeline ComputePipeline, source pipelineSource[ComputePipelineDescriptor]) error {
 		return d.backend.CreateComputePipeline(pipeline, source.descriptor)
 	})
 	if err != nil && source.autoLayout {
@@ -868,43 +885,64 @@ func (d *device) replaceBackend() error {
 	return nil
 }
 
-// recreateObjects has the backend create every object the tables hold again,
-// under its old handle, from what it was created with, in dependency order:
-// buffers, textures, samplers and shader modules; views and bind group
-// layouts; pipeline layouts; pipelines, the layouts gfx created for an
-// "auto" one among those before them; bind groups. A creation that fails
-// goes to LogErr, leaving its handle with no object; a device loss stops it,
-// and is answered.
+// recreateObjects has the backend create every object the tables hold or
+// keep again, under its old handle, from what it was created with, in
+// dependency order: buffers, textures, samplers and shader modules; views and
+// bind group layouts; pipeline layouts; pipelines, the layouts gfx created
+// for an "auto" one among those before them; bind groups. It then releases
+// the kept ones again, in the reverse order, now that the objects made from
+// them are created. A creation that fails goes to LogErr, leaving its handle
+// with no object; a device loss stops it, and is answered.
 func (d *device) recreateObjects() error {
 	logger := d.kernel.Logger()
+	var keptReleases []func()
 	for _, recreate := range []func() error{
-		func() error { return recreateResources(logger, &d.buffers, d.backend.CreateBuffer) },
-		func() error { return recreateResources(logger, &d.textures, d.backend.CreateTexture) },
-		func() error { return recreateResources(logger, &d.samplers, d.backend.CreateSampler) },
-		func() error { return recreateResources(logger, &d.querySets, d.backend.CreateQuerySet) },
-		func() error { return recreateResources(logger, &d.shaderModules, d.backend.CreateShaderModule) },
+		func() error {
+			return recreateResources(logger, &d.buffers, d.backend.CreateBuffer, d.backend.ReleaseBuffer, &keptReleases)
+		},
+		func() error {
+			return recreateResources(logger, &d.textures, d.backend.CreateTexture, d.backend.ReleaseTexture, &keptReleases)
+		},
+		func() error {
+			return recreateResources(logger, &d.samplers, d.backend.CreateSampler, d.backend.ReleaseSampler, &keptReleases)
+		},
+		func() error {
+			return recreateResources(logger, &d.querySets, d.backend.CreateQuerySet, d.backend.ReleaseQuerySet, &keptReleases)
+		},
+		func() error {
+			return recreateResources(logger, &d.shaderModules, d.backend.CreateShaderModule, d.backend.ReleaseShaderModule, &keptReleases)
+		},
 		func() error {
 			return recreateResources(logger, &d.textureViews, func(view TextureView, source textureViewSource) error {
 				return d.backend.CreateTextureView(view, source.texture, source.descriptor)
-			})
+			}, d.backend.ReleaseTextureView, &keptReleases)
 		},
-		func() error { return recreateResources(logger, &d.bindGroupLayouts, d.backend.CreateBindGroupLayout) },
-		func() error { return recreateResources(logger, &d.pipelineLayouts, d.backend.CreatePipelineLayout) },
+		func() error {
+			return recreateResources(logger, &d.bindGroupLayouts, d.backend.CreateBindGroupLayout, d.backend.ReleaseBindGroupLayout, &keptReleases)
+		},
+		func() error {
+			return recreateResources(logger, &d.pipelineLayouts, d.backend.CreatePipelineLayout, d.backend.ReleasePipelineLayout, &keptReleases)
+		},
 		func() error {
 			return recreateResources(logger, &d.renderPipelines, func(pipeline RenderPipeline, source pipelineSource[RenderPipelineDescriptor]) error {
 				return d.backend.CreateRenderPipeline(pipeline, source.descriptor)
-			})
+			}, d.backend.ReleaseRenderPipeline, &keptReleases)
 		},
 		func() error {
 			return recreateResources(logger, &d.computePipelines, func(pipeline ComputePipeline, source pipelineSource[ComputePipelineDescriptor]) error {
 				return d.backend.CreateComputePipeline(pipeline, source.descriptor)
-			})
+			}, d.backend.ReleaseComputePipeline, &keptReleases)
 		},
-		func() error { return recreateResources(logger, &d.bindGroups, d.backend.CreateBindGroup) },
+		func() error {
+			return recreateResources(logger, &d.bindGroups, d.backend.CreateBindGroup, d.backend.ReleaseBindGroup, &keptReleases)
+		},
 	} {
 		if err := recreate(); err != nil {
 			return err
 		}
+	}
+	for _, release := range slices.Backward(keptReleases) {
+		release()
 	}
 	return nil
 }
@@ -989,24 +1027,29 @@ type pipelineSource[D any] struct {
 	autoLayout bool
 }
 
-// createResource acquires a handle in resources holding descriptor and has
-// the backend create its object with createObject. When that fails, the
-// handle is handed back, and the zero handle answered with the error.
-func createResource[H ~struct{ handle }, D any](resources *table[H, D], descriptor D, createObject func(H, D) error) (H, error) {
-	h := resources.acquire(descriptor)
+// createResource acquires a handle in resources holding descriptor, made from
+// dependencies, whose slots are kept while the handle is held, and has the
+// backend create its object with createObject. A dependency released since
+// its caller checked it answers ErrReleased; when the backend's creation
+// fails, the handle is handed back. Either answers the zero handle.
+func createResource[H ~struct{ handle }, D any](resources *table[H, D], descriptor D, dependencies []dependency, createObject func(H, D) error) (H, error) {
+	var zero H
+	if err := addDependents(dependencies); err != nil {
+		return zero, err
+	}
+	h := resources.acquire(descriptor, dependencies...)
 	if err := createObject(h, descriptor); err != nil {
 		_ = resources.retire(h)
 		resources.release(h)
-		var zero H
 		return zero, err
 	}
 	return h, nil
 }
 
 // releaseResource makes h stale in resources, has d's backend release its
-// object with releaseObject, unless d is lost, and hands its index out
-// again, answering true; a stale h logs ErrReleased through d's logger, does
-// nothing and answers false.
+// object with releaseObject, unless d is lost, and hands its index out again,
+// or keeps it while an object made from h is held, answering true; a stale h
+// logs ErrReleased through d's logger, does nothing and answers false.
 func releaseResource[H ~struct{ handle }, D any](d *device, resources *table[H, D], h H, releaseObject func(BackendDevice, H)) bool {
 	if err := resources.retire(h); err != nil {
 		d.kernel.Logger().LogErr(err)
@@ -1020,18 +1063,25 @@ func releaseResource[H ~struct{ handle }, D any](d *device, resources *table[H, 
 }
 
 // recreateResources has the backend create the object of every handle
-// resources holds again with createObject, under that handle, from what it
-// was created with. A creation that fails goes to LogErr through logger,
-// leaving its handle with no object, but for a device loss, which stops it
-// and is answered.
-func recreateResources[H ~struct{ handle }, D any](logger *kernel.Logger, resources *table[H, D], createObject func(H, D) error) error {
-	for h, descriptor := range resources.heldHandles() {
-		err := createObject(h, descriptor)
-		if errors.Is(err, ErrDeviceLost) {
-			return err
-		}
-		if err != nil {
-			logger.LogErr(fmt.Errorf("gfx: recreating %T at %d: %w", h, struct{ handle }(h).index, err))
+// resources holds or keeps again with createObject, under that handle, from
+// what it was created with, and appends to keptReleases the release, with
+// releaseObject, of the kept ones created. A creation that fails goes to
+// LogErr through logger, leaving its handle with no object, but for a device
+// loss, which stops it and is answered.
+func recreateResources[H ~struct{ handle }, D any](logger *kernel.Logger, resources *table[H, D], createObject func(H, D) error, releaseObject func(H), keptReleases *[]func()) error {
+	for _, state := range []slotState{slotStateHeld, slotStateKept} {
+		for h, descriptor := range resources.handles(state) {
+			err := createObject(h, descriptor)
+			if errors.Is(err, ErrDeviceLost) {
+				return err
+			}
+			if err != nil {
+				logger.LogErr(fmt.Errorf("gfx: recreating %T at %d: %w", h, struct{ handle }(h).index, err))
+				continue
+			}
+			if state == slotStateKept {
+				*keptReleases = append(*keptReleases, func() { releaseObject(h) })
+			}
 		}
 	}
 	return nil

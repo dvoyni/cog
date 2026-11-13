@@ -45,8 +45,9 @@ once; from then on no call reaches the backend, every call with an error
 answering `ErrDeviceLost`, and the frame in flight skips its submit and
 present. The next beat recovers instead of drawing, under the write lock: a
 new device, from a fresh adapter when the old one refuses, every object
-recreated on it under its old handle in dependency order, every surface
-marked, and `DeviceRecoveredEvent` published; a recovery that fails is
+recreated on it under its old handle in dependency order, one released
+while an object made from it is held among them and released again after,
+every surface marked, and `DeviceRecoveredEvent` published; a recovery that fails is
 logged once and retried at most once a second, and the maps and captures
 pending at the loss hear as failures. `DrawEvent` carries `AcquireWait`,
 timed around the backend's acquires, and `GPULatency`, from the frames'
@@ -171,6 +172,15 @@ device's release and the recovery among them, for a backend to pin.
   recording calls, and a second release logs `ErrReleased` and does nothing.
 - **Release is immediate,** as in wgpu, which reference-counts resources until
   the submits using them finish.
+- **A handle released while an object made from it is held is kept**
+  ([gfx: a recovery recreates an object from what it was made with](https://github.com/dvoyni/cog/issues/812)):
+  a pipeline's shader modules and layout, a pipeline layout's bind group
+  layouts, a bind group's layout and resources, a view's texture. It is stale
+  to its caller at once and its backend object is released, as wgpu-core
+  keeps a pipeline's module and layout by reference; gfx keeps its
+  descriptor and its index, so no object created since stands in for it, and
+  a recovery creates it again before the objects made from it and releases
+  it again after. Its index is handed out once the last of them is released.
 - **Left out of wgpu:** render bundles and indirect-count draws (absent
   upstream), error scopes (inert on native), SPIR-V, `TransitionTextures`.
   Instance, adapter, surface objects, fences, the surface extensions, HAL
