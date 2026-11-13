@@ -7,8 +7,9 @@ import (
 
 // sampler is a path's state as Step reaches it, whatever its property's type.
 type sampler interface {
-	// takeSample samples the path's overrides at now.
-	takeSample(now time.Duration)
+	// takeSample samples the path's overrides at now, each eased by its
+	// function in easings.
+	takeSample(now time.Duration, easings *easingTable)
 }
 
 // pathState is what a timeline keeps of one path whose property is a T: the
@@ -25,11 +26,11 @@ type pathState[D comparable, T any] struct {
 	interpolate interpolator[T]
 }
 
-// takeSample evaluates every override active at now into the sample, and
-// retires those that have ended: an override leaves at the first sample at
-// or past its end. Of two active at one address, the one scheduled last is
-// sampled.
-func (s *pathState[D, T]) takeSample(now time.Duration) {
+// takeSample evaluates every override active at now into the sample, eased
+// by its easing's function in easings, and retires those that have ended:
+// an override leaves at the first sample at or past its end. Of two active
+// at one address, the one scheduled last is sampled.
+func (s *pathState[D, T]) takeSample(now time.Duration, easings *easingTable) {
 	s.sample = s.sample[:0]
 	keptCount := 0
 	for overrideIndex := range s.overrides {
@@ -45,7 +46,7 @@ func (s *pathState[D, T]) takeSample(now time.Duration) {
 			continue
 		}
 		progress := float32(float64(now-scheduled.start) / float64(scheduled.length))
-		value := s.interpolate(scheduled.from, scheduled.to, progress, easeLinear)
+		value := s.interpolate(scheduled.from, scheduled.to, progress, easings.function(scheduled.easing))
 		sampleIndex := slices.IndexFunc(s.sample, func(sampled sampledValue[D, T]) bool { return sampled.holes == scheduled.holes })
 		if sampleIndex >= 0 {
 			s.sample[sampleIndex].value = value

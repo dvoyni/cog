@@ -20,8 +20,9 @@ type timelineProbe struct {
 	name     Path[game, string]
 }
 
-// spawnTimelineProbe spawns a kernel of mux's plugin and a timelineProbe.
-func spawnTimelineProbe(t *testing.T) *timelineProbe {
+// spawnTimelineProbe spawns a kernel of mux's plugin and a timelineProbe,
+// whose Init then runs init unless it is nil.
+func spawnTimelineProbe(t *testing.T, init func(configurator *kernel.Configurator)) *timelineProbe {
 	probe := &timelineProbe{}
 	probe.harness = spawn(t, func(configurator *kernel.Configurator) {
 		RegisterModel[game, depth](configurator)
@@ -31,6 +32,9 @@ func spawnTimelineProbe(t *testing.T) *timelineProbe {
 		probe.model = declare[kernel.Write[*game]](configurator)
 		probe.timeline = declare[kernel.Write[Timeline[game, depth]]](configurator)
 		probe.muxTasks, _ = configurator.Resource[Tasks[game, depth]]()
+		if init != nil {
+			init(configurator)
+		}
 	})
 	return probe
 }
@@ -42,23 +46,33 @@ type timedValue struct {
 	want  float32
 }
 
-// expectSteps runs Step with each delta in turn, as a job, and reads the
-// camera's Y after each as a view does, failing t unless Current answers the
-// value wanted, and true.
+// stepAndRead runs Step with delta as a job, then reads the camera's Y as a
+// view does, failing t unless Current answers true.
+func (p *timelineProbe) stepAndRead(t *testing.T, delta time.Duration) float32 {
+	t.Helper()
+	p.harness.run(func(executor *kernel.Executor) kernel.JobHandle {
+		return executor.Schedule(p.muxTasks.Step, delta).Handle()
+	})
+	value, ok := p.timeline.Get().Current(p.cameraY, p.model.Get())
+	if !ok {
+		t.Fatalf("Current answered %v, false for the camera's Y at %v, want true", value, p.timeline.Get().Now())
+	}
+	return value
+}
+
+// expectSteps runs Step with each delta in turn, failing t unless the
+// camera's Y is then current at the value wanted.
 func (p *timelineProbe) expectSteps(t *testing.T, steps []timedValue) {
 	t.Helper()
 	for _, step := range steps {
-		p.harness.run(func(executor *kernel.Executor) kernel.JobHandle {
-			return executor.Schedule(p.muxTasks.Step, step.delta).Handle()
-		})
-		if got, ok := p.timeline.Get().Current(p.cameraY, p.model.Get()); got != step.want || !ok {
-			t.Fatalf("Current answered %v, %v for the camera's Y at %v, want %v, true", got, ok, p.timeline.Get().Now(), step.want)
+		if got := p.stepAndRead(t, step.delta); got != step.want {
+			t.Fatalf("the camera's Y is current at %v at %v, want %v", got, p.timeline.Get().Now(), step.want)
 		}
 	}
 }
 
 func TestTweenCatchesTheModelUpWithNoJump(t *testing.T) {
-	probe := spawnTimelineProbe(t)
+	probe := spawnTimelineProbe(t, nil)
 	probe.model.Get().Camera.Y = 10
 	probe.model.Get().Turn = 7
 	ElevateTimeline(probe.timeline).Tween(probe.cameraY, 0, 0, 10, time.Second, EasingLinear)
@@ -75,7 +89,7 @@ func TestTweenCatchesTheModelUpWithNoJump(t *testing.T) {
 }
 
 func TestTweenShowsOnlyWithinItsSpan(t *testing.T) {
-	probe := spawnTimelineProbe(t)
+	probe := spawnTimelineProbe(t, nil)
 	// The model holds neither end of the tween, so each read tells whose value
 	// it is.
 	probe.model.Get().Camera.Y = 10
@@ -91,7 +105,7 @@ func TestTweenShowsOnlyWithinItsSpan(t *testing.T) {
 }
 
 func TestTweenStartedInThePastBeginsPartway(t *testing.T) {
-	probe := spawnTimelineProbe(t)
+	probe := spawnTimelineProbe(t, nil)
 	probe.expectSteps(t, []timedValue{{time.Second, 0}})
 	timeline := ElevateTimeline(probe.timeline)
 	timeline.Tween(probe.cameraY, timeline.Now()-500*time.Millisecond, 0, 10, time.Second, EasingLinear)
@@ -99,7 +113,7 @@ func TestTweenStartedInThePastBeginsPartway(t *testing.T) {
 }
 
 func TestTweenPanicsNamingWhatIsWrong(t *testing.T) {
-	probe := spawnTimelineProbe(t)
+	probe := spawnTimelineProbe(t, nil)
 	timeline := ElevateTimeline(probe.timeline)
 	expectPanic(t, `path "Camera.Y" is tweened over 0s, which is no positive length`, func() {
 		timeline.Tween(probe.cameraY, 0, 0, 1, 0, EasingLinear)
@@ -107,8 +121,8 @@ func TestTweenPanicsNamingWhatIsWrong(t *testing.T) {
 	expectPanic(t, `path "Camera.Y" is tweened over -1s, which is no positive length`, func() {
 		timeline.Tween(probe.cameraY, 0, 0, 1, -time.Second, EasingLinear)
 	})
-	expectPanic(t, `path "Camera.Y" is tweened by easing 1, which is not registered`, func() {
-		timeline.Tween(probe.cameraY, 0, 0, 1, time.Second, Easing(1))
+	expectPanic(t, `path "Camera.Y" is tweened by easing 31, which is not registered`, func() {
+		timeline.Tween(probe.cameraY, 0, 0, 1, time.Second, Easing(31))
 	})
 	expectPanic(t, `path "Hero.Name" is tweened, but no interpolator tweens its string`, func() {
 		timeline.Tween(probe.name, 0, "ada", "bob", time.Second, EasingLinear)
@@ -129,13 +143,14 @@ var (
 )
 
 func TestTweenStepAndCurrentAllocateNothing(t *testing.T) {
-	probe := spawnTimelineProbe(t)
+	probe := spawnTimelineProbe(t, nil)
 	timeline := ElevateTimeline(probe.timeline)
 	// Each round tweens over two Steps, so the round before's tween ends at
 	// this round's Step and the timeline stays at the size the first rounds
-	// grew it to. Current reads the active tween and a path with none.
+	// grew it to. Its easing is one of Penner's, so the sample eases by a
+	// registered curve. Current reads the active tween and a path with none.
 	round := func() {
-		timeline.Tween(probe.cameraY, timeline.Now(), 0, 10, 2*time.Millisecond, EasingLinear)
+		timeline.Tween(probe.cameraY, timeline.Now(), 0, 10, 2*time.Millisecond, EasingQuadInOut)
 		step(nil, time.Millisecond, probe.model, probe.timeline)
 		cameraYSink, _ = probe.timeline.Get().Current(probe.cameraY, probe.model.Get())
 		turnSink, _ = probe.timeline.Get().Current(probe.turn, probe.model.Get())
@@ -143,7 +158,7 @@ func TestTweenStepAndCurrentAllocateNothing(t *testing.T) {
 	round()
 	round()
 	if cameraYSink != 5 {
-		t.Fatalf("the camera's Y is current at %v, want 5, the tween halfway", cameraYSink)
+		t.Fatalf("the camera's Y is current at %v, want 5, the InOut tween halfway", cameraYSink)
 	}
 	if allocations := testing.AllocsPerRun(100, round); allocations != 0 {
 		t.Fatalf("Tween, Step and Current allocated %v times per round", allocations)

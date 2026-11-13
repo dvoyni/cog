@@ -25,9 +25,10 @@ func (*Plugin) Name() kernel.PluginName { return PluginName }
 // Dependencies answers none: mux reads no other plugin's resource.
 func (*Plugin) Dependencies() []kernel.PluginName { return nil }
 
-// Init installs the registry, which every registration finds.
+// Init installs the registry, holding mux's easings, which every
+// registration finds.
 func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
-	p.registry = &registry{models: map[reflect.Type]*modelRegistration{}}
+	p.registry = &registry{models: map[reflect.Type]*modelRegistration{}, easings: newEasingTable()}
 	configurator.InitResource(p.registry)
 	return nil
 }

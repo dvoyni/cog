@@ -27,7 +27,7 @@ func RegisterModel[M any, D comparable](configurator *kernel.Configurator) {
 	}
 	registry.models[modelType] = &modelRegistration{}
 	configurator.InitResource(new(M))
-	configurator.InitResource(Timeline[M, D]{timelineSide[M, D]{state: &timelineState[M, D]{}}})
+	configurator.InitResource(Timeline[M, D]{timelineSide[M, D]{state: &timelineState[M, D]{easings: registry.easings}}})
 	configurator.InitResource(Tasks[M, D]{Step: configurator.RegisterTask2(step[M, D])})
 }
 

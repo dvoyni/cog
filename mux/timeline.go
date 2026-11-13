@@ -20,6 +20,8 @@ func (s timelineSide[M, D]) Now() time.Duration { return s.state.now }
 // to.
 type timelineState[M any, D comparable] struct {
 	now time.Duration
+	// easings is the kernel's easings, which Step eases each override by.
+	easings *easingTable
 	// pathStates holds each path's state by the path's id, nil for a path
 	// never tweened. It grows as paths are first tweened.
 	pathStates []sampler
@@ -33,7 +35,7 @@ func step[M any, D comparable](_ *kernel.Kernel, delta time.Duration, modelHandl
 	state.now += delta
 	for _, path := range state.pathStates {
 		if path != nil {
-			path.takeSample(state.now)
+			path.takeSample(state.now, state.easings)
 		}
 	}
 	return kernel.NoResult{}

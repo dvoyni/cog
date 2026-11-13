@@ -24,15 +24,21 @@ nothing but the standard library and the [kernel](../kernel).
   `Tween(path, start, from, to, length, easing)`, at an absolute start on the
   timeline's clock. A view reads `Current(path, model)` on the reading side:
   the active tween's value, or the model's own when none is. Only `float32`
-  properties tween yet, and only by `EasingLinear`.
+  properties tween yet.
+- An **easing** is a curve named by its number, an `Easing`, so a tween
+  stores only the number. mux registers `EasingLinear`, the zero `Easing`,
+  and Robert Penner's curves, from `EasingQuadIn` to `EasingBounceInOut`,
+  under numbers below 256. A game registers its own from 256, in any order,
+  with `RegisterEasing(configurator, easing, function)`.
 - **`Tasks[M, D]`** holds `Step`, which advances the timeline's time by the
   delta it is given, then samples every active override at the new time for
   `Current` to read.
 
 ## Kernel surface
 
-- **Resources it installs:** a private registry, and for each model a later
-  plugin registers with `RegisterModel[M, D]`:
+- **Resources it installs:** a private registry, holding the kernel's
+  easings, and for each model a later plugin registers with
+  `RegisterModel[M, D]`:
   - `*M`, the model: updates and `Step` write it, views and the AI read it;
   - `Timeline[M, D]`, its timeline: views read it, and updates reach its
     writing side with `ElevateTimeline` under its write lock;
