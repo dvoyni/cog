@@ -62,10 +62,18 @@ type gauge struct {
 	Heading  heading
 }
 
-// squad is a fixed band of units under a banner.
+// squad is a fixed band of units under a banner, with reserves of any
+// number.
 type squad struct {
-	Members [3]unit
-	Banner  float32
+	Members  [3]unit
+	Reserves []unit
+	Banner   float32
+}
+
+// platoon is a band of any number of units, under two flags.
+type platoon struct {
+	Members []unit
+	Flags   [2]float32
 }
 
 type game struct {
@@ -79,7 +87,12 @@ type game struct {
 	Squads  [2]squad
 	Terrain [2][3]float32
 	// Guards holds pointers, which no path may cross.
-	Guards [2]*unit
+	Guards   [2]*unit
+	Units    []unit
+	Platoons []platoon
+	Heights  [][]float32
+	// Scouts holds pointers, which no path may cross.
+	Scouts []*unit
 }
 
 // newTestGame returns a game whose fields hold values no zero game does.
@@ -89,10 +102,18 @@ func newTestGame() *game {
 		Hero:   unit{vitality: vitality{Health: 30}, Position: vec2{X: 1, Y: 2}, Name: "ada"},
 		Camera: vec2{X: 5, Y: 6},
 		Squads: [2]squad{{Banner: 0.25}, {
-			Members: [3]unit{2: {vitality: vitality{Health: 40}, Position: vec2{X: 3, Y: 4}}},
-			Banner:  0.5,
+			Members:  [3]unit{2: {vitality: vitality{Health: 40}, Position: vec2{X: 3, Y: 4}}},
+			Reserves: []unit{{vitality: vitality{Health: 60}}, {vitality: vitality{Health: 70}}},
+			Banner:   0.5,
 		}},
 		Terrain: [2][3]float32{{1, 2, 3}, {4, 5, 6}},
+		Units:   []unit{{Position: vec2{X: 7, Y: 8}, Name: "bo"}, {Position: vec2{X: 9, Y: 10}, Name: "cy"}},
+		Platoons: []platoon{
+			{Members: []unit{{vitality: vitality{Health: 80}, Position: vec2{X: 11, Y: 12}}}, Flags: [2]float32{0.75, 1}},
+			// This platoon has no members: its slice is nil.
+			{Flags: [2]float32{1.25, 1.5}},
+		},
+		Heights: [][]float32{{1, 2}, {3, 4, 5}},
 	}
 }
 

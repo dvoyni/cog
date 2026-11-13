@@ -19,6 +19,8 @@ type timelineProbe struct {
 	turn     Path[game, int32]
 	name     Path[game, string]
 	terrain  Path[game, float32]
+	// unitHealth crosses a slice at a hole.
+	unitHealth Path[game, int32]
 }
 
 // spawnTimelineProbe spawns a kernel of mux's plugin and a timelineProbe,
@@ -31,6 +33,7 @@ func spawnTimelineProbe(t *testing.T, init func(configurator *kernel.Configurato
 		probe.turn = MakePath[game, int32](configurator, "Turn")
 		probe.name = MakePath[game, string](configurator, "Hero.Name")
 		probe.terrain = MakePath[game, float32](configurator, "Terrain[][]")
+		probe.unitHealth = MakePath[game, int32](configurator, "Units[].Health")
 		probe.model = declare[kernel.Write[*game]](configurator)
 		probe.timeline = declare[kernel.Write[Timeline[game, depth]]](configurator)
 		probe.muxTasks, _ = configurator.Resource[Tasks[game, depth]]()
@@ -162,6 +165,43 @@ func TestTweensOnElementsOfOnePathKeepSeparateCurrentValues(t *testing.T) {
 	}
 }
 
+func TestGetAndCurrentReadTheArrayASliceMovedTo(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	model := probe.model.Get()
+	model.Units = []unit{{vitality: vitality{Health: 10}}, {vitality: vitality{Health: 20}}}
+	timeline := ElevateTimeline(probe.timeline)
+	timeline.Tween(probe.unitHealth, 0, 0, 100, time.Second, EasingLinear, 0)
+	probe.runStep(500 * time.Millisecond)
+	// The slice is full, so appending moves it to a new array, and the
+	// element changed there is not changed in the old one.
+	oldArray := &model.Units[0]
+	model.Units = append(model.Units, unit{vitality: vitality{Health: 30}})
+	if &model.Units[0] == oldArray {
+		t.Fatal("appending to a full slice kept its array, so nothing moved")
+	}
+	model.Units[1].Health = 25
+	testCases := []struct {
+		hole   int64
+		want   int32
+		wantOK bool
+	}{
+		{0, 50, true},
+		{1, 25, true},
+		{2, 30, true},
+		{3, 0, false},
+	}
+	for _, testCase := range testCases {
+		if got, ok := probe.timeline.Get().Current(probe.unitHealth, model, testCase.hole); got != testCase.want || ok != testCase.wantOK {
+			t.Errorf("Units[%d].Health is current at %v, %v, want %v, %v", testCase.hole, got, ok, testCase.want, testCase.wantOK)
+		}
+	}
+	for _, testCase := range testCases[1:] {
+		if got, ok := probe.unitHealth.Get(model, testCase.hole); got != testCase.want || ok != testCase.wantOK {
+			t.Errorf("Units[%d].Health answered %v, %v, want %v, %v", testCase.hole, got, ok, testCase.want, testCase.wantOK)
+		}
+	}
+}
+
 func TestTweenPanicsNamingWhatIsWrong(t *testing.T) {
 	probe := spawnTimelineProbe(t, nil)
 	timeline := ElevateTimeline(probe.timeline)
@@ -197,8 +237,8 @@ func TestTweenPanicsNamingWhatIsWrong(t *testing.T) {
 	})
 }
 
-// cameraYSink, headingSink, gaugeSink, turnSink, tweenedTerrainSink,
-// untweenedTerrainSink and bannerSink keep what
+// cameraYSink, headingSink, gaugeSink, turnSink, the terrain, unit and
+// reserve sinks and bannerSink keep what
 // TestTweenStepAndCurrentAllocateNothing reads, so the compiler cannot drop
 // the reads it measures.
 var (
@@ -209,16 +249,21 @@ var (
 	tweenedTerrainSink   float32
 	untweenedTerrainSink float32
 	bannerSink           float32
+	tweenedUnitSink      int32
+	untweenedUnitSink    int32
+	reserveSink          int32
 )
 
 func TestTweenStepAndCurrentAllocateNothing(t *testing.T) {
 	var headingPath Path[game, heading]
 	var gaugePath Path[game, int32]
 	var bannerPath Path[game, float32]
+	var reservePath Path[game, int32]
 	probe := spawnTimelineProbe(t, func(configurator *kernel.Configurator) {
 		headingPath = MakePath[game, heading](configurator, "Gauge.Heading")
 		gaugePath = MakePath[game, int32](configurator, "Gauge.Int32")
 		bannerPath = MakePath[game, float32](configurator, "Squads[].Banner")
+		reservePath = MakePath[game, int32](configurator, "Squads[].Reserves[].Health")
 		RegisterInterpolator(configurator, turnShortestWay)
 	})
 	timeline := ElevateTimeline(probe.timeline)
@@ -228,13 +273,16 @@ func TestTweenStepAndCurrentAllocateNothing(t *testing.T) {
 	// registered curve, and the paths' interpolators are float32's and int32's
 	// built in and heading's registered. Current reads the active tweens, an
 	// element of a tweened path with none, and paths with none, with and
-	// without holes.
+	// without holes, through arrays and slices.
 	probe.model.Get().Terrain[0][0] = 7
+	probe.model.Get().Units = []unit{{vitality: vitality{Health: 6}}, {}}
+	probe.model.Get().Squads[1].Reserves = []unit{{vitality: vitality{Health: 9}}}
 	round := func() {
 		timeline.Tween(probe.cameraY, timeline.Now(), 0, 10, 2*time.Millisecond, EasingQuadInOut)
 		timeline.Tween(headingPath, timeline.Now(), 0, 10, 2*time.Millisecond, EasingQuadInOut)
 		timeline.Tween(gaugePath, timeline.Now(), 0, 10, 2*time.Millisecond, EasingQuadInOut)
 		timeline.Tween(probe.terrain, timeline.Now(), 0, 10, 2*time.Millisecond, EasingQuadInOut, 1, 2)
+		timeline.Tween(probe.unitHealth, timeline.Now(), 0, 10, 2*time.Millisecond, EasingQuadInOut, 1)
 		step(nil, time.Millisecond, probe.model, probe.timeline)
 		cameraYSink, _ = probe.timeline.Get().Current(probe.cameraY, probe.model.Get())
 		headingSink, _ = probe.timeline.Get().Current(headingPath, probe.model.Get())
@@ -243,14 +291,17 @@ func TestTweenStepAndCurrentAllocateNothing(t *testing.T) {
 		tweenedTerrainSink, _ = probe.timeline.Get().Current(probe.terrain, probe.model.Get(), 1, 2)
 		untweenedTerrainSink, _ = probe.timeline.Get().Current(probe.terrain, probe.model.Get(), 0, 0)
 		bannerSink, _ = probe.timeline.Get().Current(bannerPath, probe.model.Get(), 1)
+		tweenedUnitSink, _ = probe.timeline.Get().Current(probe.unitHealth, probe.model.Get(), 1)
+		untweenedUnitSink, _ = probe.timeline.Get().Current(probe.unitHealth, probe.model.Get(), 0)
+		reserveSink, _ = probe.timeline.Get().Current(reservePath, probe.model.Get(), 1, 0)
 	}
 	round()
 	round()
-	if cameraYSink != 5 || headingSink != 5 || gaugeSink != 5 || tweenedTerrainSink != 5 {
-		t.Fatalf("the tweens are current at %v, %v, %v and %v, want 5, each InOut tween halfway", cameraYSink, headingSink, gaugeSink, tweenedTerrainSink)
+	if cameraYSink != 5 || headingSink != 5 || gaugeSink != 5 || tweenedTerrainSink != 5 || tweenedUnitSink != 5 {
+		t.Fatalf("the tweens are current at %v, %v, %v, %v and %v, want 5, each InOut tween halfway", cameraYSink, headingSink, gaugeSink, tweenedTerrainSink, tweenedUnitSink)
 	}
-	if untweenedTerrainSink != 7 {
-		t.Fatalf("Terrain[0][0] is current at %v, want the model's 7", untweenedTerrainSink)
+	if untweenedTerrainSink != 7 || untweenedUnitSink != 6 || reserveSink != 9 {
+		t.Fatalf("Terrain[0][0], Units[0].Health and Squads[1].Reserves[0].Health are current at %v, %v and %v, want the model's 7, 6 and 9", untweenedTerrainSink, untweenedUnitSink, reserveSink)
 	}
 	if allocations := testing.AllocsPerRun(100, round); allocations != 0 {
 		t.Fatalf("Tween, Step and Current allocated %v times per round", allocations)

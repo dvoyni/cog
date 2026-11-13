@@ -1,6 +1,7 @@
 package mux
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -45,7 +46,7 @@ func TestRegisterModelInstallsTheModelItsTimelineAndItsTasks(t *testing.T) {
 	spawn(t, func(configurator *kernel.Configurator) {
 		RegisterModel[game, depth](configurator)
 		model, ok := configurator.Resource[*game]()
-		if !ok || model == nil || *model != (game{}) {
+		if !ok || model == nil || !reflect.ValueOf(*model).IsZero() {
 			t.Fatalf("the model resource is %v, %v, want a pointer to the zero game", model, ok)
 		}
 		if _, ok := configurator.Resource[Timeline[game, depth]](); !ok {
