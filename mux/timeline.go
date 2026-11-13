@@ -25,7 +25,8 @@ type timelineState[M any, D comparable] struct {
 	// easings is the kernel's easings, which Step eases each override by.
 	easings *easingTable
 	// pathStates holds each path's state by the path's id, nil for a path
-	// never tweened. It grows as paths are first tweened.
+	// nothing was ever scheduled on. It grows as paths are first scheduled
+	// on.
 	pathStates []sampler
 	// keyTables holds the table of each type of key that a map a path of
 	// the model crosses is keyed by, other than an integer type. MakePath
@@ -60,4 +61,31 @@ func (s *timelineState[M, D]) findKeyTable[K comparable](operation string) *keyT
 	}
 	keyType := reflect.TypeFor[K]()
 	panic(fmt.Sprintf("mux: a %v key is %s, but no path of model %v crosses a map interning %v keys", keyType, operation, reflect.TypeFor[M](), keyType))
+}
+
+// findPathState answers path's state, or nil when nothing was ever scheduled
+// on path.
+func (s *timelineState[M, D]) findPathState[T any](path Path[M, T]) *pathState[D, T] {
+	if path.compiled.id >= len(s.pathStates) {
+		return nil
+	}
+	state, _ := s.pathStates[path.compiled.id].(*pathState[D, T])
+	return state
+}
+
+// scheduleOverride adds scheduled to the overrides on path, making the path's
+// state when it is the first.
+func (s *timelineState[M, D]) scheduleOverride[T any](path Path[M, T], scheduled override[D, T]) {
+	state := s.findPathState(path)
+	if state == nil {
+		for len(s.pathStates) <= path.compiled.id {
+			s.pathStates = append(s.pathStates, nil)
+		}
+		// A path whose property no interpolator tweens takes only holds, which
+		// call none.
+		interpolate, _ := path.compiled.interpolator.(interpolator[T])
+		state = &pathState[D, T]{interpolate: interpolate}
+		s.pathStates[path.compiled.id] = state
+	}
+	state.overrides = append(state.overrides, scheduled)
 }

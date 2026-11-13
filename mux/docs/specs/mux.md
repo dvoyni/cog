@@ -225,7 +225,7 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
   - `With` starts a tween alongside the previous one;
   - `Wait(d)` adds a gap.
 - `End(path, holes...)` answers when an address is next free: the end of its last override, or `Now` when none is left or the last has ended. `Sequence(End(path, holes...))` therefore queues after whatever plays and never starts in the past.
-- `Cancel(path, holes...)` removes every override on an address, running or yet to start. The current value is then the model's, which may jump.
+- `Cancel(path, holes...)` removes every override on an address, running or yet to start. From the next `Step` on, the current value is the model's, which may jump: `Current` reads only the sample, as it does for an override just scheduled.
 
 ### Blending and leaving
 

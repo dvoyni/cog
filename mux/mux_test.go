@@ -19,6 +19,9 @@ type unit struct {
 	vitality
 	Position vec2
 	Name     string
+	// Visible is whether the unit is drawn, which a hold keeps false until a
+	// new unit's entrance.
+	Visible bool
 }
 
 // escort reaches its vitality through a pointer, which no path may cross.

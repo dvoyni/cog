@@ -53,6 +53,23 @@
 //
 //	shown, ok := timeline.Get().Current(zoom, model.Get())
 //
+// A hold keeps a property at one value over a span. It calls no
+// interpolator, so it holds a property of any type, such as a bool. End
+// answers when an address is next free, so an update can queue after
+// whatever plays there, and Cancel removes every override on an address:
+//
+//	unitPosition := mux.MakePath[Game, Vec2](configurator, "Units[].Position")
+//	unitVisible := mux.MakePath[Game, bool](configurator, "Units[].Visible")
+//
+//	// A unit just added stays hidden for a second, until its entrance:
+//	writeTimeline.Hold(unitVisible, writeTimeline.Now(), false, time.Second, unit)
+//
+//	// A unit's next walk queues after the one playing:
+//	writeTimeline.Tween(unitPosition, writeTimeline.End(unitPosition, unit), from, to, time.Second, mux.EasingLinear, unit)
+//
+//	// A unit's plan changed, so nothing of the old one shows:
+//	writeTimeline.Cancel(unitPosition, unit)
+//
 // A tween eases by an Easing, a curve named by its number: EasingLinear or
 // one of Robert Penner's curves mux registers below 256, or a game's own,
 // registered from 256 with RegisterEasing. It moves through the interpolator
