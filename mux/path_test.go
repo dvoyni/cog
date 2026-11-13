@@ -1,6 +1,8 @@
 package mux
 
 import (
+	"reflect"
+	"slices"
 	"strconv"
 	"testing"
 
@@ -66,6 +68,14 @@ type gamePathSet struct {
 	chronicleEntry Path[game, float32]
 	// platoonDrill crosses a slice, then a map keyed by an int.
 	platoonDrill Path[game, float32]
+	// sector, post and callsign cross maps of struct keys, which are
+	// interned: of plain memory, padded, and of a lone string.
+	sector   Path[game, float32]
+	post     Path[game, float32]
+	callsign Path[game, float32]
+	// archiveEntry crosses a map of struct keys, which are interned, that
+	// keeps its elements through pointers, then an array.
+	archiveEntry Path[game, float32]
 }
 
 // makeGamePathSet registers game and makes a gamePathSet over it.
@@ -100,6 +110,10 @@ func makeGamePathSet(configurator *kernel.Configurator) gamePathSet {
 		regionElevation:       MakePath[game, float32](configurator, "Regions[][]"),
 		chronicleEntry:        MakePath[game, float32](configurator, "Chronicles[][]"),
 		platoonDrill:          MakePath[game, float32](configurator, "Platoons[].Drills[]"),
+		sector:                MakePath[game, float32](configurator, "Sectors[]"),
+		post:                  MakePath[game, float32](configurator, "Posts[]"),
+		callsign:              MakePath[game, float32](configurator, "Callsigns[]"),
+		archiveEntry:          MakePath[game, float32](configurator, "Archives[][]"),
 	}
 }
 
@@ -244,9 +258,12 @@ func TestPathGetAnswersFalseForAKeyItsMapLacks(t *testing.T) {
 }
 
 // TestMapStepsAnswerAsATypedLookupDoes holds every map step to a typed
-// lookup over the same map, for string, integer and struct keys, each
-// present, deleted or never there. A map step reaches the runtime's own map
-// access, outside Go's compatibility promise, so a change in it fails here.
+// lookup over the same map, through each of the runtime's map accesses: for
+// string keys and a struct of one, for 4- and 8-byte integer and struct
+// keys, for a padded struct key and an integer key too narrow for a fast
+// access, and for a key and an element too large for one, each present,
+// deleted or never there. A map step reaches the runtime's own map accesses,
+// outside Go's compatibility promise, so a change in one fails here.
 func TestMapStepsAnswerAsATypedLookupDoes(t *testing.T) {
 	paths, _, timeline := spawnGamePathSet(t)
 	model := &game{
@@ -256,6 +273,10 @@ func TestMapStepsAnswerAsATypedLookupDoes(t *testing.T) {
 		Morale:      map[int8]float32{},
 		Bounties:    map[uint64]float32{},
 		Chronicles:  map[chronicle]annal{},
+		Sectors:     map[sector]float32{},
+		Posts:       map[post]float32{},
+		Callsigns:   map[callsign]float32{},
+		Archives:    map[sector]annal{},
 	}
 	// Enough keys that each map spreads over several tables; every third is
 	// deleted again, and keys from keyCount on were never there.
@@ -264,12 +285,19 @@ func TestMapStepsAnswerAsATypedLookupDoes(t *testing.T) {
 	makeBounty := func(index int) uint64 { return uint64(index) * 0x9E3779B97F4A7C15 }
 	makeCell := func(index int) cell { return cell{Column: int16(index), Row: int16(-index)} }
 	makeChronicle := func(index int) chronicle { return chronicle{Era: int64(index), Notes: [16]int64{15: int64(-index)}} }
+	makeSector := func(index int) sector { return sector{X: int32(index) * 7919, Y: -int32(index)} }
+	makePost := func(index int) post { return post{Rank: int8(index), Number: int16(index >> 8)} }
+	makeCallsign := func(index int) callsign { return callsign{Name: "c" + strconv.Itoa(index)} }
 	for index := range keyCount {
 		model.UnitsByName[unitName(strconv.Itoa(index))] = unit{Position: vec2{X: float32(index)}}
 		model.UnitsByID[makeID(index)] = unit{Position: vec2{Y: float32(index)}}
 		model.Elevations[makeCell(index)] = float32(index)
 		model.Bounties[makeBounty(index)] = float32(index)
 		model.Chronicles[makeChronicle(index)] = annal{35: float32(index)}
+		model.Sectors[makeSector(index)] = float32(index)
+		model.Posts[makePost(index)] = float32(index)
+		model.Callsigns[makeCallsign(index)] = float32(index)
+		model.Archives[makeSector(index)] = annal{35: float32(index)}
 	}
 	for index := 0; index < keyCount; index += 3 {
 		delete(model.UnitsByName, unitName(strconv.Itoa(index)))
@@ -277,6 +305,10 @@ func TestMapStepsAnswerAsATypedLookupDoes(t *testing.T) {
 		delete(model.Elevations, makeCell(index))
 		delete(model.Bounties, makeBounty(index))
 		delete(model.Chronicles, makeChronicle(index))
+		delete(model.Sectors, makeSector(index))
+		delete(model.Posts, makePost(index))
+		delete(model.Callsigns, makeCallsign(index))
+		delete(model.Archives, makeSector(index))
 	}
 	for key := range 256 {
 		model.Morale[int8(key)] = float32(key)
@@ -296,6 +328,14 @@ func TestMapStepsAnswerAsATypedLookupDoes(t *testing.T) {
 		expectLookup(t, "Bounties", makeBounty(index), paths.bounty, model, bounty, bountyOK, int64(makeBounty(index)))
 		entries, entriesOK := model.Chronicles[makeChronicle(index)]
 		expectLookup(t, "Chronicles", makeChronicle(index), paths.chronicleEntry, model, entries[35], entriesOK, timeline.Intern(makeChronicle(index)), 35)
+		sectorValue, sectorOK := model.Sectors[makeSector(index)]
+		expectLookup(t, "Sectors", makeSector(index), paths.sector, model, sectorValue, sectorOK, timeline.Intern(makeSector(index)))
+		postValue, postOK := model.Posts[makePost(index)]
+		expectLookup(t, "Posts", makePost(index), paths.post, model, postValue, postOK, timeline.Intern(makePost(index)))
+		callsignValue, callsignOK := model.Callsigns[makeCallsign(index)]
+		expectLookup(t, "Callsigns", makeCallsign(index), paths.callsign, model, callsignValue, callsignOK, timeline.Intern(makeCallsign(index)))
+		archive, archiveOK := model.Archives[makeSector(index)]
+		expectLookup(t, "Archives", makeSector(index), paths.archiveEntry, model, archive[35], archiveOK, timeline.Intern(makeSector(index)), 35)
 	}
 	for hole := int64(-300); hole <= 300; hole++ {
 		morale, moraleOK := model.Morale[int8(hole)]
@@ -303,6 +343,38 @@ func TestMapStepsAnswerAsATypedLookupDoes(t *testing.T) {
 			morale, moraleOK = 0, false
 		}
 		expectLookup(t, "Morale", hole, paths.morale, model, morale, moraleOK, hole)
+	}
+}
+
+// TestMapStepsReadThroughTheAccessATypedLookupTakes holds each map step, and
+// the lookup of an interned key's index a walk makes, to the runtime's map
+// access a typed lookup of the same map takes.
+func TestMapStepsReadThroughTheAccessATypedLookupTakes(t *testing.T) {
+	paths, _, _ := spawnGamePathSet(t)
+	for _, test := range []struct {
+		path *compiledPath
+		// wantKeyIndices is the generic access where the keys are integers,
+		// which have no key indices.
+		want, wantKeyIndices mapAccess
+	}{
+		{paths.unitByNamePosition.compiled, mapAccessFastString, mapAccessFastString},
+		{paths.callsign.compiled, mapAccessFastString, mapAccessFastString},
+		{paths.unitByIDPosition.compiled, mapAccessFast32, mapAccessGeneric},
+		{paths.elevation.compiled, mapAccessFast32, mapAccessFast32},
+		{paths.bounty.compiled, mapAccessFast64, mapAccessGeneric},
+		{paths.platoonDrill.compiled, mapAccessFast64, mapAccessGeneric},
+		{paths.sector.compiled, mapAccessFast64, mapAccessFast64},
+		{paths.morale.compiled, mapAccessGeneric, mapAccessGeneric},
+		{paths.post.compiled, mapAccessGeneric, mapAccessGeneric},
+		{paths.archiveEntry.compiled, mapAccessGeneric, mapAccessFast64},
+		{paths.chronicleEntry.compiled, mapAccessGeneric, mapAccessGeneric},
+	} {
+		// Each path crosses one map, which a slice or an array may surround.
+		stepIndex := slices.IndexFunc(test.path.steps, func(step pathStep) bool { return step.kind == reflect.Map })
+		step := test.path.steps[stepIndex]
+		if step.mapAccess != test.want || step.keyIndicesAccess != test.wantKeyIndices {
+			t.Errorf("%q reads its map through access %d and its key indices through %d, want %d and %d", test.path.text, step.mapAccess, step.keyIndicesAccess, test.want, test.wantKeyIndices)
+		}
 	}
 }
 
@@ -359,6 +431,56 @@ func TestPathGetAllocatesNothing(t *testing.T) {
 	})
 	if allocations != 0 {
 		t.Fatalf("Get allocated %v times per run", allocations)
+	}
+}
+
+func TestGetAndCurrentThroughEveryMapAccessAllocateNothing(t *testing.T) {
+	paths, view, timeline := spawnGamePathSet(t)
+	model := newTestGame()
+	model.Sectors = map[sector]float32{{X: 1, Y: 2}: 0.5}
+	model.Posts = map[post]float32{{Rank: 1, Number: 2}: 0.5}
+	model.Callsigns = map[callsign]float32{{Name: "ace"}: 0.5}
+	model.Archives = map[sector]annal{{X: 1, Y: 2}: {35: 0.5}}
+	bo := timeline.Intern(unitName("bo"))
+	plateau := timeline.Intern(cell{Column: 3, Row: 4})
+	sectorIndex := timeline.Intern(sector{X: 1, Y: 2})
+	postIndex := timeline.Intern(post{Rank: 1, Number: 2})
+	callsignIndex := timeline.Intern(callsign{Name: "ace"})
+	chronicleIndex := timeline.Intern(chronicle{Era: 1, Notes: [16]int64{15: 9}})
+	// Each map is read at a key it holds and at one it lacks, through Get
+	// and through Current, which reads the model's own value where nothing
+	// is sampled.
+	floatReads := []struct {
+		path      Path[game, float32]
+		hit, miss []int64
+	}{
+		{paths.callsign, []int64{callsignIndex}, []int64{callsignIndex + 100}},
+		{paths.regionElevation, []int64{2, plateau}, []int64{2, plateau + 100}},
+		{paths.bounty, []int64{4}, []int64{5}},
+		{paths.sector, []int64{sectorIndex}, []int64{sectorIndex + 100}},
+		{paths.morale, []int64{-128}, []int64{300}},
+		{paths.post, []int64{postIndex}, []int64{postIndex + 100}},
+		{paths.archiveEntry, []int64{sectorIndex, 35}, []int64{sectorIndex + 100, 35}},
+		{paths.chronicleEntry, []int64{chronicleIndex, 35}, []int64{chronicleIndex + 100, 35}},
+	}
+	read := func() {
+		for _, hole := range [2]int64{bo, bo + 100} {
+			positionSink, _ = paths.unitByNamePosition.Get(model, hole)
+			positionSink, _ = view.Current(paths.unitByNamePosition, model, hole)
+		}
+		for _, hole := range [2]int64{7, 8} {
+			positionSink, _ = paths.unitByIDPosition.Get(model, hole)
+			positionSink, _ = view.Current(paths.unitByIDPosition, model, hole)
+		}
+		for _, floatRead := range floatReads {
+			for _, holes := range [2][]int64{floatRead.hit, floatRead.miss} {
+				terrainSink, _ = floatRead.path.Get(model, holes...)
+				terrainSink, _ = view.Current(floatRead.path, model, holes...)
+			}
+		}
+	}
+	if allocations := testing.AllocsPerRun(100, read); allocations != 0 {
+		t.Fatalf("Get and Current through every map access allocated %v times per run", allocations)
 	}
 }
 

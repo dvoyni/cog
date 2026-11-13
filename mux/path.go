@@ -215,6 +215,7 @@ func compilePath(modelType reflect.Type, text string, keyTables *[]*keyTable) *c
 				// signed ones up to reflect.Int64. A key of any other kind is
 				// interned.
 				step.mapReflectType = indexedType
+				step.mapAccess = makeMapAccess(indexedType)
 				step.elementSize = keyType.Size()
 				keyKind := keyType.Kind()
 				if reflect.Int <= keyKind && keyKind <= reflect.Uintptr {
@@ -253,8 +254,10 @@ func compilePath(modelType reflect.Type, text string, keyTables *[]*keyTable) *c
 					}
 					table := (*keyTables)[tableIndex]
 					step.keys = reflect.ValueOf(table.keys).UnsafePointer()
-					step.keyIndicesType = reflect.ValueOf(reflect.TypeOf(table.indices)).UnsafePointer()
+					keyIndicesType := reflect.TypeOf(table.indices)
+					step.keyIndicesType = reflect.ValueOf(keyIndicesType).UnsafePointer()
 					step.keyIndices = reflect.ValueOf(table.indices).UnsafePointer()
+					step.keyIndicesAccess = makeMapAccess(keyIndicesType)
 				}
 			default:
 				panic(fmt.Sprintf("mux: path %q of model %v reaches %v, which is no array, slice or map to index", text, modelType, indexedType))
@@ -317,8 +320,29 @@ func (p *compiledPath) findProperty(model unsafe.Pointer, holes []int64) (unsafe
 			elements = unsafe.Pointer(unsafe.SliceData(slice))
 			length = int64(len(slice))
 		case reflect.Map:
-			reached = step.findMapElement(elements, index)
-			if reached == nil {
+			// The element is read in place, nothing copied out of the map,
+			// through the access a typed lookup of the map takes. It is
+			// dispatched here, not in a function of its own, which would not
+			// inline: the call saved is a tenth of a map step.
+			key, ok := step.findKey(&index)
+			if !ok {
+				return nil, false
+			}
+			mapPointer := *(*unsafe.Pointer)(elements)
+			// A fast access answers a pointer to a zero value for a key the
+			// map lacks, and false.
+			switch step.mapAccess {
+			case mapAccessFast32:
+				reached, ok = accessMapFast32(step.mapType, mapPointer, *(*uint32)(key))
+			case mapAccessFast64:
+				reached, ok = accessMapFast64(step.mapType, mapPointer, *(*uint64)(key))
+			case mapAccessFastString:
+				reached, ok = accessMapFastString(step.mapType, mapPointer, *(*string)(key))
+			default:
+				reached = accessMap(step.mapType, mapPointer, key)
+				ok = reached != nil
+			}
+			if !ok {
 				return nil, false
 			}
 			continue

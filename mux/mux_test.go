@@ -99,6 +99,21 @@ type chronicle struct {
 // holds each through a pointer.
 type annal [36]float32
 
+// sector is a struct key of 8 bytes of plain memory, every map keyed by it
+// interns.
+type sector struct{ X, Y int32 }
+
+// post is a struct key of 4 bytes with a byte of padding, every map keyed by
+// it interns.
+type post struct {
+	Rank   int8
+	Number int16
+}
+
+// callsign is a struct key holding only a string, which compares as one,
+// every map keyed by it interns.
+type callsign struct{ Name string }
+
 type game struct {
 	Turn    int32
 	Hero    unit
@@ -137,6 +152,14 @@ type game struct {
 	Regions map[int16]map[cell]float32
 	// Chronicles holds keys and elements a map keeps through pointers.
 	Chronicles map[chronicle]annal
+	// Sectors, Posts and Callsigns are keyed by structs: of plain memory,
+	// padded, and of a lone string.
+	Sectors   map[sector]float32
+	Posts     map[post]float32
+	Callsigns map[callsign]float32
+	// Archives is keyed by sectors, which a fast access would read, but
+	// holds its elements through pointers, which none follows.
+	Archives map[sector]annal
 	// Wards is keyed by pointers, and Rumours by interfaces, which no path
 	// may cross.
 	Wards   map[*unit]float32

@@ -967,7 +967,7 @@ func TestAllWalksAnArrayOrASliceInIndexOrder(t *testing.T) {
 
 func TestAllWalksAMapAtItsIntegerKeysOrInternedIndices(t *testing.T) {
 	var healthByID, healthByName Path[game, int32]
-	var morale, elevation, drill, chronicleNote Path[game, float32]
+	var morale, elevation, drill, chronicleNote, sectorValue, postValue, callsignValue Path[game, float32]
 	var grade Path[game, int8]
 	var medal Path[game, int16]
 	var rank Path[game, int32]
@@ -978,6 +978,9 @@ func TestAllWalksAMapAtItsIntegerKeysOrInternedIndices(t *testing.T) {
 		elevation = MakePath[game, float32](configurator, "Elevations[]")
 		drill = MakePath[game, float32](configurator, "Platoons[].Drills[]")
 		chronicleNote = MakePath[game, float32](configurator, "Chronicles[][35]")
+		sectorValue = MakePath[game, float32](configurator, "Sectors[]")
+		postValue = MakePath[game, float32](configurator, "Posts[]")
+		callsignValue = MakePath[game, float32](configurator, "Callsigns[]")
 		grade = MakePath[game, int8](configurator, "Grades[]")
 		medal = MakePath[game, int16](configurator, "Medals[]")
 		rank = MakePath[game, int32](configurator, "Ranks[]")
@@ -992,13 +995,20 @@ func TestAllWalksAMapAtItsIntegerKeysOrInternedIndices(t *testing.T) {
 	model.Grades = map[int8]int8{-2: 9, 4: -1}
 	model.Medals = map[int16]int16{-300: 9, 300: -1}
 	model.Ranks = map[uint32]int32{5: 7, 1<<32 - 1: -3}
+	model.Sectors = map[sector]float32{{X: 1, Y: 2}: 0.5, {X: 3}: 1.5}
+	model.Posts = map[post]float32{{Rank: 1, Number: 2}: 0.5, {Rank: 3}: 1.5}
+	model.Callsigns = map[callsign]float32{{Name: "ace"}: 0.5, {Name: "bee"}: 1.5}
 	timeline := ElevateTimeline(probe.timeline)
-	// "cy", Elevations' {-1, 0} and the second era are never interned, so
-	// no path reaches them, and the walks skip them.
+	// "cy", Elevations' {-1, 0}, the second era, sector {3, 0}, post {3, 0}
+	// and "bee" are never interned, so no path reaches them, and the walks
+	// skip them.
 	diIndex := timeline.Intern(unitName("di"))
 	boIndex := timeline.Intern(unitName("bo"))
 	timeline.Intern(cell{Column: 1, Row: 2})
 	timeline.Intern(chronicle{Era: 1})
+	sectorIndex := timeline.Intern(sector{X: 1, Y: 2})
+	postIndex := timeline.Intern(post{Rank: 1, Number: 2})
+	callsignIndex := timeline.Intern(callsign{Name: "ace"})
 	timeline.Tween(healthByID, 0, 100, 200, time.Second, EasingLinear, 7)
 	timeline.Tween(healthByName, 0, 100, 200, time.Second, EasingLinear, boIndex)
 	timeline.Tween(morale, 0, 0, 1, time.Second, EasingLinear, -128)
@@ -1017,6 +1027,9 @@ func TestAllWalksAMapAtItsIntegerKeysOrInternedIndices(t *testing.T) {
 	expectWalk(t, "Grades[]", view.All(grade, model), map[int64]int8{-2: 9, 4: -1})
 	expectWalk(t, "Medals[]", view.All(medal, model), map[int64]int16{-300: 9, 300: -1})
 	expectWalk(t, "Ranks[]", view.All(rank, model), map[int64]int32{5: 7, 1<<32 - 1: -3})
+	expectWalk(t, "Sectors[]", view.All(sectorValue, model), map[int64]float32{sectorIndex: 0.5})
+	expectWalk(t, "Posts[]", view.All(postValue, model), map[int64]float32{postIndex: 0.5})
+	expectWalk(t, "Callsigns[]", view.All(callsignValue, model), map[int64]float32{callsignIndex: 0.5})
 	// Platoon 1's drills are a nil map.
 	expectWalk(t, "Platoons[1].Drills[]", view.All(drill, model, 1), map[int64]float32{})
 }
