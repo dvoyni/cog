@@ -28,7 +28,7 @@ func RegisterModel[M any, D comparable](configurator *kernel.Configurator) {
 	keyTables := &[]*keyTable{}
 	registry.models[modelType] = &modelRegistration{depthType: depthType, keyTables: keyTables}
 	configurator.InitResource(new(M))
-	configurator.InitResource(Timeline[M, D]{timelineSide[M, D]{state: &timelineState[M, D]{easings: registry.easings, keyTables: keyTables}}})
+	configurator.InitResource(Timeline[M, D]{timelineSide[M, D]{state: &timelineState[M, D]{speed: 1, easings: registry.easings, keyTables: keyTables}}})
 	configurator.InitResource(Tasks[M, D]{Step: configurator.RegisterTask2(step[M, D])})
 }
 

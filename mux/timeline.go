@@ -17,13 +17,18 @@ type timelineSide[M any, D comparable] struct {
 }
 
 // Now answers the timeline's current time, on its own clock: the sum of the
-// deltas Step has advanced it by.
+// deltas Step has advanced it by, each times the speed then set, and of the
+// jumps Skip has made.
 func (s timelineSide[M, D]) Now() time.Duration { return s.state.now }
 
 // timelineState is what a model's timeline keeps, which both its sides point
 // to.
 type timelineState[M any, D comparable] struct {
 	now time.Duration
+	// isPaused is whether Step leaves now where it is.
+	isPaused bool
+	// speed is what Step multiplies its delta by: 1 at first, never negative.
+	speed float64
 	// easings is the kernel's easings, which Step eases each override by.
 	easings *easingTable
 	// pathStates holds each path's state by the path's id, nil for a path
@@ -45,12 +50,15 @@ type timelineState[M any, D comparable] struct {
 	freeCallbackIndices []int
 }
 
-// step is the body of Tasks.Step: it advances the timeline's time by delta,
-// samples every path's overrides at the new time, and then calls each
-// callback that came due, in time order, given the model.
+// step is the body of Tasks.Step: it advances the timeline's time by delta
+// times its speed, unless it is paused, samples every path's overrides at the
+// new time, and then calls each callback that came due, in time order, given
+// the model.
 func step[M any, D comparable](_ *kernel.Kernel, delta time.Duration, modelHandle kernel.Write[*M], timelineHandle kernel.Write[Timeline[M, D]]) kernel.NoResult {
 	state := timelineHandle.Get().state
-	state.now += delta
+	if !state.isPaused {
+		state.now += time.Duration(float64(delta) * state.speed)
+	}
 	for _, path := range state.pathStates {
 		if path != nil {
 			path.takeSample(state.now, state.easings)

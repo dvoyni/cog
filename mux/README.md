@@ -74,6 +74,12 @@ nothing but the standard library and the [kernel](../kernel).
   callback is called or cancelled, the index is free for the next `Call`. The
   timeline keeps each function in a cache, so it stays plain data, and
   callbacks are not saved with it.
+- A timeline's **time controls** are its own: `Pause()` holds its time,
+  whatever `Step`'s delta, while the menu's timeline plays on; `Resume()`
+  lets it go on; `SetSpeed(f)` multiplies each delta by `f`, so an AI's turn
+  plays four times faster. `Skip()` moves `Now` to the end of the last
+  override, and the next `Step` shows every override finished and calls each
+  callback skipped, in time order.
 - An **interpolator** eases two values of a type, component by component.
   Every float and integer kind has one built in, named types of those kinds
   included. A game registers one for its own value types, such as a vector,
@@ -86,8 +92,9 @@ nothing but the standard library and the [kernel](../kernel).
   under numbers below 256. A game registers its own from 256, in any order,
   with `RegisterEasing(configurator, easing, function)`.
 - **`Tasks[M, D]`** holds `Step`, which advances the timeline's time by the
-  delta it is given, samples every active override at the new time for
-  `Current` to read, and then calls the callbacks that came due.
+  delta it is given times its speed, unless it is paused, samples every
+  active override at the new time for `Current` to read, and then calls the
+  callbacks that came due.
 
 ## Kernel surface
 

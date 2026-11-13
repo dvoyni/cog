@@ -11,6 +11,9 @@ type sampler interface {
 	// takeSample samples the path's overrides at now, each eased by its
 	// function in easings.
 	takeSample(now time.Duration, easings *easingTable)
+	// findLastEnd answers the end of the path's last override to end, or
+	// end when that is later.
+	findLastEnd(end time.Duration) time.Duration
 }
 
 // pathState is what a timeline keeps of one path whose property is a T: the
@@ -123,6 +126,16 @@ func (s *pathState[D, T]) takeSample(now time.Duration, easings *easingTable) {
 		s.sample = append(s.sample, sampledValue[D, T]{holes: holes, value: value})
 	}
 	s.overrides = s.overrides[:keptCount]
+}
+
+// findLastEnd answers the end of the last of the path's overrides to end, or
+// end when that is later.
+func (s *pathState[D, T]) findLastEnd(end time.Duration) time.Duration {
+	for overrideIndex := range s.overrides {
+		scheduled := &s.overrides[overrideIndex]
+		end = max(end, scheduled.start+scheduled.length)
+	}
+	return end
 }
 
 // addOverride adds scheduled after the path's overrides, marking them for
