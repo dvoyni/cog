@@ -37,6 +37,7 @@ func MakePath[M, T any](configurator *kernel.Configurator, path string) Path[M, 
 		panic(fmt.Sprintf("mux: path %q is made for %v, which is not a registered model", path, modelType))
 	}
 	compiled, propertyType := compilePath(modelType, path)
+	compiled.id = len(registration.paths)
 	if want := reflect.TypeFor[T](); propertyType != want {
 		panic(fmt.Sprintf("mux: path %q of model %v reaches %v, not %v", path, modelType, propertyType, want))
 	}
@@ -60,6 +61,9 @@ func (p Path[M, T]) Get(model *M) (T, bool) {
 type compiledPath struct {
 	// text is the path as it was made.
 	text string
+	// id is the path's index among its model's paths, in the order made: the
+	// timeline keeps the path's overrides under it.
+	id int
 	// fieldIndices is the index of each field the path crosses within its
 	// struct, embedded fields a promoted name passes through included, so two
 	// spellings of one field compile alike.
@@ -95,4 +99,23 @@ func compilePath(modelType reflect.Type, text string) (*compiledPath, reflect.Ty
 		}
 	}
 	return compiled, current
+}
+
+// makeHoles answers the holes of the address p names with holes, as a depth
+// D. A path of fields has none, so any holes given panic, naming the path
+// and their count.
+func (p *compiledPath) makeHoles[D comparable](holes []int64) D {
+	if len(holes) != 0 {
+		p.panicHoleCount(len(holes))
+	}
+	var filledHoles D
+	return filledHoles
+}
+
+// panicHoleCount panics that p is given count holes. It is never inlined, so
+// makeHoles, which every Current and Tween calls, stays small enough to be.
+//
+//go:noinline
+func (p *compiledPath) panicHoleCount(count int) {
+	panic(fmt.Sprintf("mux: path %q takes no holes, but is given %d", p.text, count))
 }

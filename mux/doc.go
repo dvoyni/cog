@@ -20,9 +20,24 @@
 //
 // A view reads the timeline under kernel.Read[mux.Timeline[M, D]], and a job
 // holding kernel.Write[mux.Timeline[M, D]] reaches its writing side through
-// ElevateTimeline. The timeline's time is its own: only its Step task moves
-// it, by the delta it is given, so it is deterministic under any clock. The
-// game schedules Step once per rendered frame, before its views.
+// ElevateTimeline. An update changes the model at once, and tweens the
+// property it changed from the value shown to the model's new one:
+//
+//	zoom := mux.MakePath[Game, float32](configurator, "Camera.Zoom")
+//
+//	model.Get().Camera.Zoom = 2
+//	writeTimeline := mux.ElevateTimeline(timeline)
+//	writeTimeline.Tween(zoom, writeTimeline.Now(), 1, 2, time.Second, mux.EasingLinear)
+//
+// A view reads each property's current value: the active tween's, or the
+// model's own when none is:
+//
+//	shown, ok := timeline.Get().Current(zoom, model.Get())
+//
+// The timeline's time is its own: only its Step task moves it, by the delta
+// it is given, so it is deterministic under any clock. Step samples every
+// active override at the new time, which Current then reads. The game
+// schedules Step once per rendered frame, before its views.
 //
 // See docs/specs/mux.md.
 package mux
