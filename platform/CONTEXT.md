@@ -85,6 +85,10 @@ _Avoid_: Storage, VFS, disk
 One read-only layer of the FileSystem, with a priority among the others.
 _Avoid_: Mount point, read FS, layer
 
+**Memory mount**:
+A read mount held in memory, into which its owner puts files and from which it removes them at run time; nothing in it is persisted.
+_Avoid_: Blob, VFS, memory filesystem, in-memory FS
+
 **Writable filesystem**:
 The one persistent layer writes land in, searched before every read mount; without it, nothing can be written.
 _Avoid_: Permanent filesystem, permanent FS, save directory
