@@ -185,10 +185,20 @@ func (w WriteTimeline[M, D]) Call(start time.Duration, function func(model *M, t
 	return index
 }
 
+// MakeSequence answers a sequence starting at start on the timeline's clock,
+// which places overrides and callbacks one after another, or alongside each
+// other, working out their starts, as an update shows a unit walk, wait and
+// attack. A sequence started at End queues after whatever plays on an
+// address.
+func (w WriteTimeline[M, D]) MakeSequence(start time.Duration) Sequence[M, D] {
+	return Sequence[M, D]{timeline: w, previousStart: start, end: start}
+}
+
 // End answers when the address holes fill on path is next free: the end of
 // the last of its overrides to end, or Now when it has none left or the last
 // has ended. An override started at End therefore follows whatever plays at
-// the address, and never starts in the past.
+// the address, and never starts in the past, and so does a sequence that
+// MakeSequence starts there.
 //
 // Holes the path does not take panic, naming the path and their count.
 func (w WriteTimeline[M, D]) End[T any](path Path[M, T], holes ...int64) time.Duration {

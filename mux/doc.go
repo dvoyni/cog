@@ -81,6 +81,21 @@
 //	// A unit's plan changed, so nothing of the old one shows:
 //	writeTimeline.Cancel(unitPosition, unit)
 //
+// A Sequence, which MakeSequence starts, works out the starts of what it
+// places: its Tween, Hold and Call start after everything placed so far,
+// With tweens alongside what was placed last, and Wait leaves a gap. It is
+// held on the stack, and places ordinary overrides and callbacks:
+//
+//	unitFacing := mux.MakePath[Game, float32](configurator, "Units[].Facing")
+//	unitLunge := mux.MakePath[Game, float32](configurator, "Units[].Lunge")
+//
+//	// A unit walks, turning as it sets off, waits, and attacks:
+//	sequence := writeTimeline.MakeSequence(writeTimeline.End(unitPosition, unit))
+//	sequence.Tween(unitPosition, from, to, time.Second, mux.EasingQuadOut, unit)
+//	sequence.With(unitFacing, fromFacing, toFacing, 300*time.Millisecond, mux.EasingLinear, unit)
+//	sequence.Wait(100 * time.Millisecond)
+//	sequence.Tween(unitLunge, 0, 1, 400*time.Millisecond, mux.EasingLinear, unit)
+//
 // A callback is a function the timeline calls once, at a moment of its own,
 // given the model and the timeline's writing side. A unit that dies stays in
 // the model, marked dead, while its fade plays, and a callback purges it when
