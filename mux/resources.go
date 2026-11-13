@@ -71,7 +71,7 @@ func (w WriteTimeline[M, D]) Tween[T any](path Path[M, T], start time.Duration, 
 	if length <= 0 {
 		panic(fmt.Sprintf("mux: path %q is tweened over %v, which is no positive length", path.compiled.text, length))
 	}
-	if easing != EasingLinear {
+	if w.state.easings.function(easing) == nil {
 		panic(fmt.Sprintf("mux: path %q is tweened by easing %d, which is not registered", path.compiled.text, easing))
 	}
 	filledHoles := path.compiled.makeHoles[D](holes)

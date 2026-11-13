@@ -34,6 +34,10 @@
 //
 //	shown, ok := timeline.Get().Current(zoom, model.Get())
 //
+// A tween eases by an Easing, a curve named by its number: EasingLinear or
+// one of Robert Penner's curves mux registers below 256, or a game's own,
+// registered from 256 with RegisterEasing.
+//
 // The timeline's time is its own: only its Step task moves it, by the delta
 // it is given, so it is deterministic under any clock. Step samples every
 // active override at the new time, which Current then reads. The game

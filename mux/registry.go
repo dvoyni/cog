@@ -12,6 +12,9 @@ import (
 type registry struct {
 	// models holds each registered model by its type.
 	models map[reflect.Type]*modelRegistration
+	// easings holds the kernel's easings, mux's and the game's, which every
+	// timeline of the kernel eases by.
+	easings *easingTable
 	// sealed is set once every plugin has initialized.
 	sealed bool
 }
