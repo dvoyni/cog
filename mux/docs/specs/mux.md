@@ -121,11 +121,12 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
 
 - mux is its own Go module (Go 1.27) in the workspace, depending on the kernel alone: not on metronome, gfx or ecs. Its context is already in the context map.
 - It has the shared Go rules and the project's plugin rules: `NewPlugin()` with no parameters, a README with a **Kernel surface** section, `resources.go` and the rest.
-- It depends on two parts of the runtime outside Go's compatibility promise:
+- It depends on three parts of the runtime outside Go's compatibility promise:
   - the map access `reflect.mapaccess`, reached through `//go:linkname` and declared `//go:noescape`. The runtime keeps that function for outside packages and pledges its signature unchanged ([go.dev/issue/67401](https://go.dev/issue/67401)); it kept it through the map rewrite of Go 1.24;
-  - a `reflect.Type`'s type descriptor, read out of its interface.
+  - a `reflect.Type`'s type descriptor, read out of its interface;
+  - the layout of a `reflect.MapIter`, which `All` holds on the stack to walk a map: the runtime's iterator follows the map's `Value` in it, and the iterator's first two fields point at the entry's key and element, as the compiler's own range over a map reads them. The public routes do not do: `MapIter.Key` and `Value`, and `SetIterKey` and `SetIterValue`, copy every entry, and the iterator the runtime keeps for outside packages, `reflect.mapiterinit`, allocates on every start.
 
-  A test checks every map step against a typed lookup over the same map, so a change in either fails a test.
+  A test checks every map step against a typed lookup over the same map, and `All` over maps of every kind of key against their entries, so a change in any of them fails a test.
 
 ### The plugin and its registry
 
@@ -260,7 +261,8 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
 - `Timeline.Current(path, model *M, holes...) (T, bool)` answers the blend of the address's overrides in the sample, found by a binary search over its holes, or `path.Get`'s value when none is active. A count of active overrides per path skips the lookup on a path with none.
 - `Timeline.All(path, model *M, fixedHoles...) iter.Seq2[int64, T]` walks the path's last hole, with the holes before it passed fixed:
   - over a slice or array, in index order, merged with the sample's sorted overrides;
-  - over a map, in Go's map order, with a lookup per entry, yielding interned indices. An element whose key was never interned is skipped: no path reaches it, since a key's hole is its index. An update interns each key when it adds the element, and a game interns every key after loading, since indices live one run.
+  - over a map, in Go's map order, with a lookup per entry, yielding interned indices, or the keys themselves when they are integers. An element whose key was never interned is skipped: no path reaches it, since a key's hole is its index. An update interns each key when it adds the element, and a game interns every key after loading, since indices live one run.
+  - Each element yields its current value as `Current` answers it. One with none, where an index after the last hole misses and nothing is sampled there, is skipped.
 - `All` stays a one-line wrapper over a walk that is never inlined, so the iterator never escapes and allocates nothing, also on `break`. A view ranges over it directly.
 
 ### Stepping, sampling and time

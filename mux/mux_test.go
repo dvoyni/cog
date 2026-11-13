@@ -126,6 +126,11 @@ type game struct {
 	Morale map[int8]float32
 	// Bounties is keyed by an integer as wide as a hole, but unsigned.
 	Bounties map[uint64]float32
+	// Grades, Medals and Ranks are keyed by integers of each width narrower
+	// than a hole, each element lying right after its key in the map.
+	Grades map[int8]int8
+	Medals map[int16]int16
+	Ranks  map[uint32]int32
 	// Garrisons keys bands of any number of units by name: a map of slices.
 	Garrisons map[unitName][]unit
 	// Regions keys each region's heights by its number: a map of maps.

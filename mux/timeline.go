@@ -2,8 +2,10 @@ package mux
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"time"
+	"unsafe"
 
 	"github.com/dvoyni/cog/kernel"
 )
@@ -88,4 +90,114 @@ func (s *timelineState[M, D]) scheduleOverride[T any](path Path[M, T], scheduled
 		s.pathStates[path.compiled.id] = state
 	}
 	state.addOverride(scheduled)
+}
+
+// walk yields each element of the last hole of path in model, the holes
+// before it fixed by fixedHoles, with its hole and current value, as
+// Timeline.All describes, until yield answers false. It is never inlined, so
+// the walk All answers stays small enough to inline into a range over it.
+//
+//go:noinline
+func (s *timelineState[M, D]) walk[T any](path Path[M, T], model *M, fixedHoles []int64, yield func(int64, T) bool) {
+	compiled := path.compiled
+	if compiled.holeCount == 0 {
+		panic(fmt.Sprintf("mux: path %q has no hole for All to walk", compiled.text))
+	}
+	if len(fixedHoles) != compiled.holeCount-1 {
+		holes := "holes"
+		if compiled.holeCount == 1 {
+			holes = "hole"
+		}
+		panic(fmt.Sprintf("mux: path %q has %d %s, so All takes %d fixed, but is given %d", compiled.text, compiled.holeCount, holes, compiled.holeCount-1, len(fixedHoles)))
+	}
+	beforeLastHole := compiled.beforeLastHole
+	container, ok := beforeLastHole.findProperty(unsafe.Pointer(model), fixedHoles)
+	if !ok {
+		return
+	}
+	step := &compiled.steps[len(beforeLastHole.steps)]
+	elements := unsafe.Add(container, step.offset)
+	// Any key of a map may be a hole; an array's or a slice's holes run from
+	// 0 to its length.
+	firstHole := int64(math.MinInt64)
+	lastHole := int64(math.MaxInt64)
+	length := step.length
+	if step.kind != reflect.Map {
+		if step.kind == reflect.Slice {
+			// Every slice's header is laid out alike, so it reads as a
+			// []byte's.
+			slice := *(*[]byte)(elements)
+			elements = unsafe.Pointer(unsafe.SliceData(slice))
+			length = int64(len(slice))
+		}
+		firstHole = 0
+		lastHole = length - 1
+	}
+	// sampledRun is what the sample holds at the walked elements, sorted by
+	// the last hole, which lies lastHoleOffset into an address.
+	var sampledRun []sampledValue[D, T]
+	lastHoleOffset := uintptr(len(fixedHoles)) * unsafe.Sizeof(int64(0))
+	if state := s.findPathState(path); state != nil && len(state.sample) != 0 {
+		sampledRun = state.findSampledRun(beforeLastHole.makeHoles[D](fixedHoles), lastHoleOffset, firstHole, lastHole)
+	}
+	// A path that ends at its last hole, as most do, reads each element's
+	// property in place, with no steps to follow.
+	afterLastHole := compiled.afterLastHole
+	isPropertyInElement := len(afterLastHole.steps) == 0
+	if step.kind == reflect.Map {
+		// A MapIter held here stays on the stack, and so allocates nothing.
+		var iterator reflect.MapIter
+		iterator.Reset(reflect.NewAt(step.mapReflectType, elements).Elem())
+		for iterator.Next() {
+			// The entry is read in place, out of the MapIter's layout: the
+			// runtime's iterator follows the map's Value in it, and the
+			// iterator's first two fields point at the entry's key and
+			// element, as the compiler's own range over a map reads them.
+			// The layout lies outside Go's compatibility promise, but
+			// MapIter's Key and Value copy each entry, and the iterator the
+			// runtime keeps for packages outside it allocates on every start
+			// (go.dev/issue/67401).
+			entry := (*[2]unsafe.Pointer)(unsafe.Add(unsafe.Pointer(&iterator), unsafe.Sizeof(reflect.Value{})))
+			hole, ok := step.findKeyHole(entry[0])
+			if !ok {
+				continue
+			}
+			value, ok := findSampledHole(sampledRun, lastHoleOffset, hole)
+			if !ok {
+				if isPropertyInElement {
+					value = *(*T)(unsafe.Add(entry[1], afterLastHole.offset))
+				} else if property, found := afterLastHole.findProperty(entry[1], nil); found {
+					value = *(*T)(property)
+				} else {
+					continue
+				}
+			}
+			if !yield(hole, value) {
+				return
+			}
+		}
+		return
+	}
+	// The run holds one entry for each of its holes, so the walk merges it
+	// in index order, comparing the last hole alone.
+	runIndex := 0
+	for index := range length {
+		var value T
+		if runIndex < len(sampledRun) && *(*int64)(unsafe.Add(unsafe.Pointer(&sampledRun[runIndex].holes), lastHoleOffset)) == index {
+			value = sampledRun[runIndex].value
+			runIndex++
+		} else {
+			element := unsafe.Add(elements, uintptr(index)*step.elementSize)
+			if isPropertyInElement {
+				value = *(*T)(unsafe.Add(element, afterLastHole.offset))
+			} else if property, found := afterLastHole.findProperty(element, nil); found {
+				value = *(*T)(property)
+			} else {
+				continue
+			}
+		}
+		if !yield(index, value) {
+			return
+		}
+	}
 }

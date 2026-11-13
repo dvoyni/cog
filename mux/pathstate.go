@@ -176,6 +176,19 @@ func (s *pathState[D, T]) keepOverrides(isKept func(scheduled *override[D, T]) b
 	s.overrides = s.overrides[:keptCount]
 }
 
+// findSampledRun answers the run of the sample whose addresses are
+// fixedAddress but for their hole at lastHoleOffset, which lies from
+// firstHole to lastHole: the sample is sorted by holes, so All walks the run
+// sorted by that hole.
+func (s *pathState[D, T]) findSampledRun(fixedAddress D, lastHoleOffset uintptr, firstHole, lastHole int64) []sampledValue[D, T] {
+	sample := s.sample
+	lastHolePlace := (*int64)(unsafe.Add(unsafe.Pointer(&fixedAddress), lastHoleOffset))
+	*lastHolePlace = firstHole
+	run := sample[sort.Search(len(sample), func(index int) bool { return compareHoles(&sample[index].holes, &fixedAddress) >= 0 }):]
+	*lastHolePlace = lastHole
+	return run[:sort.Search(len(run), func(index int) bool { return compareHoles(&run[index].holes, &fixedAddress) > 0 })]
+}
+
 // override is one override on a path, as the timeline keeps it: plain data,
 // with no func value in it.
 type override[D comparable, T any] struct {
@@ -229,4 +242,27 @@ func compareHoles[D comparable](firstHoles, secondHoles *D) int {
 		}
 	}
 	return 0
+}
+
+// findSampledHole answers the value sampled in sampledRun, a run
+// pathState.findSampledRun answered, at the address whose hole at
+// lastHoleOffset is hole, and true, or false when sampledRun holds none.
+func findSampledHole[D comparable, T any](sampledRun []sampledValue[D, T], lastHoleOffset uintptr, hole int64) (T, bool) {
+	// A binary search comparing the last hole alone, which tells the run's
+	// addresses apart, and stopping at hole's.
+	lowIndex := 0
+	highIndex := len(sampledRun)
+	for lowIndex < highIndex {
+		middleIndex := int(uint(lowIndex+highIndex) >> 1)
+		middleHole := *(*int64)(unsafe.Add(unsafe.Pointer(&sampledRun[middleIndex].holes), lastHoleOffset))
+		if middleHole < hole {
+			lowIndex = middleIndex + 1
+		} else if middleHole > hole {
+			highIndex = middleIndex
+		} else {
+			return sampledRun[middleIndex].value, true
+		}
+	}
+	var zero T
+	return zero, false
 }
