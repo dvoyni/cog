@@ -37,10 +37,8 @@ func (t Timeline[M, D]) Current[T any](path Path[M, T], model *M, holes ...int64
 	// with a sample makes them into an address.
 	if state := t.state.findPathState(path); state != nil && len(state.sample) != 0 {
 		filledHoles := path.compiled.makeHoles[D](holes)
-		for _, sampled := range state.sample {
-			if sampled.holes == filledHoles {
-				return sampled.value, true
-			}
+		if value, ok := state.findSampledValue(&filledHoles); ok {
+			return value, true
 		}
 	}
 	return path.Get(model, holes...)
@@ -149,6 +147,6 @@ func (w WriteTimeline[M, D]) Intern[K comparable](key K) int64 {
 func (w WriteTimeline[M, D]) Cancel[T any](path Path[M, T], holes ...int64) {
 	filledHoles := path.compiled.makeHoles[D](holes)
 	if state := w.state.findPathState(path); state != nil {
-		state.removeOverrides(filledHoles)
+		state.keepOverrides(func(scheduled *override[D, T]) bool { return scheduled.holes != filledHoles })
 	}
 }

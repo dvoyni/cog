@@ -87,5 +87,5 @@ func (s *timelineState[M, D]) scheduleOverride[T any](path Path[M, T], scheduled
 		state = &pathState[D, T]{interpolate: interpolate}
 		s.pathStates[path.compiled.id] = state
 	}
-	state.overrides = append(state.overrides, scheduled)
+	state.addOverride(scheduled)
 }
