@@ -34,9 +34,11 @@ nothing but the standard library and the [kernel](../kernel).
   a game interns every key again after loading.
 - A map step reaches the runtime's own map access, `reflect.mapaccess`,
   through `//go:linkname`, and reads a map type's runtime descriptor out of
-  its `reflect.Type`: both lie outside Go's compatibility promise. A test
-  holds every map step to a typed lookup over the same map, so a change in
-  either fails it.
+  its `reflect.Type`; `All` walks a map through a `reflect.MapIter`, reading
+  each entry's key and element in place out of its layout. All three lie
+  outside Go's compatibility promise. Tests hold every map step to a typed
+  lookup over the same map, and `All` to each map's entries, so a change in
+  any fails them.
 - **`Timeline[M, D]`** is the reading side of the model's timeline, and
   **`WriteTimeline[M, D]`**, from `ElevateTimeline`, its writing side. Both
   answer `Now`, the timeline's own time.
@@ -45,6 +47,10 @@ nothing but the standard library and the [kernel](../kernel).
   start on the timeline's clock. A view reads `Current(path, model, holes...)`
   on the reading side: the blend of the overrides active at that address, or
   the model's own when none is. Each address of a path is tweened on its own.
+  `All(path, model, fixedHoles...)` walks every element of a path's last
+  hole at once, the holes before it fixed, yielding each element's hole and
+  current value: an array or a slice in index order, a map in Go's map
+  order. Ranging over it allocates nothing.
 - Overrides that overlap at one address **blend by weight**: each weighs
   nothing at its start and end and fully at its midpoint, and the current
   value is their weighted average, through the type's interpolator, so a new

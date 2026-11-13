@@ -1,6 +1,9 @@
 package mux
 
 import (
+	"fmt"
+	"iter"
+	"maps"
 	"math"
 	"slices"
 	"testing"
@@ -878,5 +881,211 @@ func TestTwoOverlappingTweensBlendWithNoJump(t *testing.T) {
 			t.Fatalf("the camera's Y jumped from %v to %v at %v", previous, current, probe.timeline.Get().Now())
 		}
 		previous = current
+	}
+}
+
+// expectWalk fails t unless walk yields want, each hole once, in any order.
+func expectWalk[T comparable](t *testing.T, name string, walk iter.Seq2[int64, T], want map[int64]T) {
+	t.Helper()
+	got := map[int64]T{}
+	for hole, value := range walk {
+		if _, ok := got[hole]; ok {
+			t.Errorf("All of %s yielded hole %d twice", name, hole)
+		}
+		got[hole] = value
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("All of %s yielded %v, want %v", name, got, want)
+	}
+}
+
+// expectWalkInIndexOrder fails t unless walk yields want, each hole once, in
+// rising order.
+func expectWalkInIndexOrder[T comparable](t *testing.T, name string, walk iter.Seq2[int64, T], want map[int64]T) {
+	t.Helper()
+	previousHole := int64(-1)
+	for hole := range walk {
+		if hole <= previousHole {
+			t.Errorf("All of %s yielded hole %d after %d", name, hole, previousHole)
+		}
+		previousHole = hole
+	}
+	expectWalk(t, name, walk, want)
+}
+
+func TestAllWalksAnArrayOrASliceInIndexOrder(t *testing.T) {
+	var heightsPath Path[game, float32]
+	var memberHealth Path[game, int32]
+	probe := spawnTimelineProbe(t, func(configurator *kernel.Configurator) {
+		heightsPath = MakePath[game, float32](configurator, "Heights[][0]")
+		memberHealth = MakePath[game, int32](configurator, "Platoons[].Members[].Health")
+	})
+	model := probe.model.Get()
+	model.Terrain = [2][3]float32{{1, 2, 3}, {4, 7, 6}}
+	model.Units = []unit{{}, {vitality: vitality{Health: 10}}, {vitality: vitality{Health: 20}}, {vitality: vitality{Health: 30}}, {vitality: vitality{Health: 40}}}
+	model.Heights = [][]float32{{1, 2}, {}, {3, 4}, {}}
+	model.Platoons = []platoon{{Members: []unit{{vitality: vitality{Health: 80}}, {vitality: vitality{Health: 85}}}}, {}}
+	timeline := ElevateTimeline(probe.timeline)
+	// Terrain[1][1] is tweened, and Terrain[0][2], another row's, which the
+	// walk of row 1 leaves out. Units 3, 1 and 0 are tweened, out of order.
+	timeline.Tween(probe.terrain, 0, 0, 10, time.Second, EasingLinear, 1, 1)
+	timeline.Tween(probe.terrain, 0, 0, 100, time.Second, EasingLinear, 0, 2)
+	timeline.Tween(probe.unitHealth, 0, 100, 200, time.Second, EasingLinear, 3)
+	timeline.Tween(probe.unitHealth, 0, 100, 200, time.Second, EasingLinear, 1)
+	timeline.Tween(probe.unitHealth, 0, 100, 200, time.Second, EasingLinear, 0)
+	// Heights[1] and Heights[3] are empty, so their first heights miss: the
+	// walk skips Heights[3][0], but a hold shows at Heights[1][0], as Current
+	// shows it. Heights[2][0] is held too.
+	timeline.Hold(heightsPath, 0, 8, time.Second, 1)
+	timeline.Hold(heightsPath, 0, 9, time.Second, 2)
+	probe.runStep(500 * time.Millisecond)
+	view := probe.timeline.Get()
+	expectWalkInIndexOrder(t, "Terrain[1][]", view.All(probe.terrain, model, 1), map[int64]float32{0: 4, 1: 5, 2: 6})
+	expectWalkInIndexOrder(t, "Units[].Health", view.All(probe.unitHealth, model), map[int64]int32{0: 150, 1: 150, 2: 20, 3: 150, 4: 40})
+	expectWalkInIndexOrder(t, "Heights[][0]", view.All(heightsPath, model), map[int64]float32{0: 1, 1: 8, 2: 9})
+	expectWalkInIndexOrder(t, "Platoons[0].Members[].Health", view.All(memberHealth, model, 0), map[int64]int32{0: 80, 1: 85})
+	// Platoon 1 has no members, and there is no platoon 5.
+	expectWalk(t, "Platoons[1].Members[].Health", view.All(memberHealth, model, 1), map[int64]int32{})
+	expectWalk(t, "Platoons[5].Members[].Health", view.All(memberHealth, model, 5), map[int64]int32{})
+}
+
+func TestAllWalksAMapAtItsIntegerKeysOrInternedIndices(t *testing.T) {
+	var healthByID, healthByName Path[game, int32]
+	var morale, elevation, drill, chronicleNote Path[game, float32]
+	var grade Path[game, int8]
+	var medal Path[game, int16]
+	var rank Path[game, int32]
+	probe := spawnTimelineProbe(t, func(configurator *kernel.Configurator) {
+		healthByID = MakePath[game, int32](configurator, "UnitsByID[].Health")
+		healthByName = MakePath[game, int32](configurator, "UnitsByName[].Health")
+		morale = MakePath[game, float32](configurator, "Morale[]")
+		elevation = MakePath[game, float32](configurator, "Elevations[]")
+		drill = MakePath[game, float32](configurator, "Platoons[].Drills[]")
+		chronicleNote = MakePath[game, float32](configurator, "Chronicles[][35]")
+		grade = MakePath[game, int8](configurator, "Grades[]")
+		medal = MakePath[game, int16](configurator, "Medals[]")
+		rank = MakePath[game, int32](configurator, "Ranks[]")
+	})
+	model := probe.model.Get()
+	model.UnitsByID = map[uint32]unit{7: {vitality: vitality{Health: 70}}, 1<<32 - 1: {vitality: vitality{Health: 90}}}
+	model.UnitsByName = map[unitName]unit{"bo": {vitality: vitality{Health: 30}}, "cy": {vitality: vitality{Health: 40}}, "di": {vitality: vitality{Health: 50}}}
+	model.Morale = map[int8]float32{-128: 0.25, 3: 0.75}
+	model.Elevations = map[cell]float32{{Column: 1, Row: 2}: 0.5, {Column: -1}: 1.5}
+	model.Platoons = []platoon{{Drills: map[int]float32{-5: 0.125, 6: 0.5}}, {}}
+	model.Chronicles = map[chronicle]annal{{Era: 1}: {35: 7.5}, {Era: 2}: {35: 8.5}}
+	model.Grades = map[int8]int8{-2: 9, 4: -1}
+	model.Medals = map[int16]int16{-300: 9, 300: -1}
+	model.Ranks = map[uint32]int32{5: 7, 1<<32 - 1: -3}
+	timeline := ElevateTimeline(probe.timeline)
+	// "cy", Elevations' {-1, 0} and the second era are never interned, so
+	// no path reaches them, and the walks skip them.
+	diIndex := timeline.Intern(unitName("di"))
+	boIndex := timeline.Intern(unitName("bo"))
+	timeline.Intern(cell{Column: 1, Row: 2})
+	timeline.Intern(chronicle{Era: 1})
+	timeline.Tween(healthByID, 0, 100, 200, time.Second, EasingLinear, 7)
+	timeline.Tween(healthByName, 0, 100, 200, time.Second, EasingLinear, boIndex)
+	timeline.Tween(morale, 0, 0, 1, time.Second, EasingLinear, -128)
+	timeline.Tween(morale, 0, 2, 4, time.Second, EasingLinear, 3)
+	// Platoon 1's drill 6 is tweened, though platoon 1 has no drills: the
+	// walk of platoon 0's drills leaves it out.
+	timeline.Tween(drill, 0, 8, 10, time.Second, EasingLinear, 1, 6)
+	probe.runStep(500 * time.Millisecond)
+	view := probe.timeline.Get()
+	expectWalk(t, "UnitsByID[].Health", view.All(healthByID, model), map[int64]int32{7: 150, 1<<32 - 1: 90})
+	expectWalk(t, "UnitsByName[].Health", view.All(healthByName, model), map[int64]int32{diIndex: 50, boIndex: 150})
+	expectWalk(t, "Morale[]", view.All(morale, model), map[int64]float32{-128: 0.5, 3: 3})
+	expectWalk(t, "Elevations[]", view.All(elevation, model), map[int64]float32{0: 0.5})
+	expectWalk(t, "Platoons[0].Drills[]", view.All(drill, model, 0), map[int64]float32{-5: 0.125, 6: 0.5})
+	expectWalk(t, "Chronicles[][35]", view.All(chronicleNote, model), map[int64]float32{0: 7.5})
+	expectWalk(t, "Grades[]", view.All(grade, model), map[int64]int8{-2: 9, 4: -1})
+	expectWalk(t, "Medals[]", view.All(medal, model), map[int64]int16{-300: 9, 300: -1})
+	expectWalk(t, "Ranks[]", view.All(rank, model), map[int64]int32{5: 7, 1<<32 - 1: -3})
+	// Platoon 1's drills are a nil map.
+	expectWalk(t, "Platoons[1].Drills[]", view.All(drill, model, 1), map[int64]float32{})
+}
+
+func TestAllStopsWhereTheViewBreaks(t *testing.T) {
+	var healthByID Path[game, int32]
+	probe := spawnTimelineProbe(t, func(configurator *kernel.Configurator) {
+		healthByID = MakePath[game, int32](configurator, "UnitsByID[].Health")
+	})
+	model := probe.model.Get()
+	model.Units = make([]unit, 4)
+	model.UnitsByID = map[uint32]unit{1: {}, 2: {}, 3: {}}
+	view := probe.timeline.Get()
+	walkCount := 0
+	for range view.All(probe.unitHealth, model) {
+		walkCount++
+		break
+	}
+	for range view.All(healthByID, model) {
+		walkCount++
+		break
+	}
+	if walkCount != 2 {
+		t.Fatalf("two walks broken at their first element yielded %d times, want 2", walkCount)
+	}
+}
+
+func TestAllPanicsNamingWhatIsWrong(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	view := probe.timeline.Get()
+	model := probe.model.Get()
+	expectPanic(t, `path "Camera.Y" has no hole for All to walk`, func() {
+		for range view.All(probe.cameraY, model) {
+		}
+	})
+	expectPanic(t, `path "Terrain[][]" has 2 holes, so All takes 1 fixed, but is given 2`, func() {
+		for range view.All(probe.terrain, model, 1, 1) {
+		}
+	})
+	expectPanic(t, `path "Units[].Health" has 1 hole, so All takes 0 fixed, but is given 1`, func() {
+		for range view.All(probe.unitHealth, model, 1) {
+		}
+	})
+}
+
+func TestRangingOverAllAllocatesNothing(t *testing.T) {
+	var healthByName Path[game, int32]
+	probe := spawnTimelineProbe(t, func(configurator *kernel.Configurator) {
+		healthByName = MakePath[game, int32](configurator, "UnitsByName[].Health")
+	})
+	model := probe.model.Get()
+	model.Units = make([]unit, 64)
+	model.UnitsByName = map[unitName]unit{}
+	timeline := ElevateTimeline(probe.timeline)
+	for index := range 64 {
+		name := unitName(fmt.Sprint("unit", index))
+		model.UnitsByName[name] = unit{}
+		timeline.Intern(name)
+	}
+	// Every other unit is tweened, in the slice and in the map, so each walk
+	// merges or looks up a sample; the tweens outlast the measurement.
+	for index := 0; index < 64; index += 2 {
+		timeline.Tween(probe.unitHealth, 0, 0, 10, time.Hour, EasingLinear, int64(index))
+		timeline.Tween(healthByName, 0, 0, 10, time.Hour, EasingLinear, int64(index))
+	}
+	probe.runStep(time.Minute)
+	view := probe.timeline.Get()
+	walk := func() {
+		for _, health := range view.All(probe.unitHealth, model) {
+			healthSink += health
+		}
+		for _, health := range view.All(healthByName, model) {
+			healthSink += health
+		}
+		for _, health := range view.All(probe.unitHealth, model) {
+			healthSink += health
+			break
+		}
+		for _, health := range view.All(healthByName, model) {
+			healthSink += health
+			break
+		}
+	}
+	walk()
+	if allocations := testing.AllocsPerRun(100, walk); allocations != 0 {
+		t.Fatalf("ranging over All, to the end and to a break, over a slice and a map allocated %v times per walk", allocations)
 	}
 }

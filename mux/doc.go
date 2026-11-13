@@ -55,13 +55,21 @@
 //
 //	shown, ok := timeline.Get().Current(zoom, model.Get())
 //
+// All walks every element of a path's last hole at once, yielding each
+// element's hole and current value, and allocates nothing:
+//
+//	unitPosition := mux.MakePath[Game, Vec2](configurator, "Units[].Position")
+//
+//	for unit, position := range timeline.Get().All(unitPosition, model.Get()) {
+//		drawUnit(unit, position)
+//	}
+//
 // A hold keeps a property at one value over a span. It calls no
 // interpolator to make its value, so it holds a property of any type, such
 // as a bool, where overlapping overrides show the one that weighs most. End
 // answers when an address is next free, so an update can queue after
 // whatever plays there, and Cancel removes every override on an address:
 //
-//	unitPosition := mux.MakePath[Game, Vec2](configurator, "Units[].Position")
 //	unitVisible := mux.MakePath[Game, bool](configurator, "Units[].Visible")
 //
 //	// A unit just added stays hidden for a second, until its entrance:

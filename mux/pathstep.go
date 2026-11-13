@@ -25,16 +25,23 @@ type pathStep struct {
 	// is read from its header.
 	length int64
 	// elementSize is the size of what the step's index picks among, by which
-	// the index is scaled: an array's or a slice's elements, or the interned
-	// keys of a map whose keys are interned.
+	// the index is scaled: an array's or a slice's elements, or a map's keys.
 	elementSize uintptr
 	// mapType is the runtime's descriptor of the map's type, which its map
-	// access takes.
-	mapType unsafe.Pointer
+	// access takes, and mapReflectType the same type as reflection holds it,
+	// which a walk iterates the map by.
+	mapType        unsafe.Pointer
+	mapReflectType reflect.Type
 	// keys points at the []K holding each key of the map's type K that the
 	// timeline interned, at its index; nil when the map's keys are integers,
 	// each its own index.
 	keys unsafe.Pointer
+	// keyIndices is the map[K]int64 from each key the timeline interned to
+	// its index, and keyIndicesType the runtime's descriptor of its type,
+	// which a walk looks a key's index up through; nil when the map's keys
+	// are integers.
+	keyIndices     unsafe.Pointer
+	keyIndicesType unsafe.Pointer
 	// keyMinimum and keyMaximum are the least and the greatest key of the
 	// map's integer key type, as the int64 each is: an index outside them is
 	// no key of the type.
@@ -65,6 +72,37 @@ func (s *pathStep) findMapElement(mapField unsafe.Pointer, index int64) unsafe.P
 		return nil
 	}
 	return accessMap(s.mapType, mapPointer, unsafe.Add(unsafe.Pointer(unsafe.SliceData(keys)), uintptr(index)*s.elementSize))
+}
+
+// findKeyHole answers the hole that reaches the map's element under the key
+// at key, and true: the key itself, for a map of integer keys, or the index
+// the timeline interned it at. It answers false for a key never interned,
+// whose element no hole reaches.
+func (s *pathStep) findKeyHole(key unsafe.Pointer) (int64, bool) {
+	if s.keys != nil {
+		index := accessMap(s.keyIndicesType, s.keyIndices, key)
+		if index == nil {
+			return 0, false
+		}
+		return *(*int64)(index), true
+	}
+	var hole int64
+	switch s.elementSize {
+	case 1:
+		hole = int64(*(*uint8)(key))
+	case 2:
+		hole = int64(*(*uint16)(key))
+	case 4:
+		hole = int64(*(*uint32)(key))
+	default:
+		return *(*int64)(key), true
+	}
+	// A narrower key's bits read unsigned, so a signed key past its
+	// greatest is a negative one, wrapped round its type's range.
+	if hole > s.keyMaximum {
+		hole -= s.keyMaximum - s.keyMinimum + 1
+	}
+	return hole, true
 }
 
 // accessMap answers where the element lies that the map at mapPointer, of

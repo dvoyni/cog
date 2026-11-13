@@ -20,8 +20,9 @@ func newEasingTable() *easingTable {
 	}
 	elasticIn := makeElasticIn(elasticPeriod)
 	bounceIn := flipCurve(easeBounceOut)
+	// EasingLinear has no curve: its function is registered on its own
+	// below.
 	curves := [...]func(t float64) float64{
-		EasingLinear:       func(t float64) float64 { return t },
 		EasingQuadIn:       easeQuadIn,
 		EasingQuadOut:      flipCurve(easeQuadIn),
 		EasingQuadInOut:    makeInOut(easeQuadIn),
@@ -54,8 +55,14 @@ func newEasingTable() *easingTable {
 		EasingBounceInOut:  makeInOut(bounceIn),
 	}
 	table := &easingTable{}
+	// Linear's function is a plain one, not a closure calling its curve:
+	// blending overlapping overrides calls it once per override. It answers
+	// what the curve t would, as a float32 survives a float64 and back.
+	table.register(EasingLinear, func(a, b, t float32) float32 { return a + (b-a)*t })
 	for easing, curve := range curves {
-		table.register(Easing(easing), func(a, b, t float32) float32 { return a + (b-a)*float32(curve(float64(t))) })
+		if Easing(easing) != EasingLinear {
+			table.register(Easing(easing), func(a, b, t float32) float32 { return a + (b-a)*float32(curve(float64(t))) })
+		}
 	}
 	return table
 }

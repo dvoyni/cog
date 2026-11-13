@@ -116,6 +116,12 @@ type compiledPath struct {
 	// holeCount is how many holes the path has: how many of its steps are at
 	// a hole.
 	holeCount int
+	// beforeLastHole and afterLastHole are the path's steps before the step
+	// at its last hole and after it, as paths of their own, which All follows
+	// to what the last hole walks, and from each element it walks to the
+	// property. Both are nil when the path has no hole.
+	beforeLastHole *compiledPath
+	afterLastHole  *compiledPath
 	// offset is where the property lies from the element the last step
 	// picks, or from the model's base when the path has no step.
 	offset uintptr
@@ -137,6 +143,9 @@ const holeIndex = -1
 // one is there. It panics naming what is wrong.
 func compilePath(modelType reflect.Type, text string, keyTables *[]*keyTable) *compiledPath {
 	compiled := &compiledPath{text: text}
+	// lastHoleStepIndex is the index among the steps of the step at the
+	// last hole, -1 until a hole is met.
+	lastHoleStepIndex := -1
 	current := modelType
 	checkCrossed := func(crossed string, crossedType reflect.Type) {
 		switch crossedType.Kind() {
@@ -205,6 +214,8 @@ func compilePath(modelType reflect.Type, text string, keyTables *[]*keyTable) *c
 				// The integer kinds run from reflect.Int to reflect.Uintptr, the
 				// signed ones up to reflect.Int64. A key of any other kind is
 				// interned.
+				step.mapReflectType = indexedType
+				step.elementSize = keyType.Size()
 				keyKind := keyType.Kind()
 				if reflect.Int <= keyKind && keyKind <= reflect.Uintptr {
 					// A key as wide as an int64 is any index, as the int64
@@ -240,8 +251,10 @@ func compilePath(modelType reflect.Type, text string, keyTables *[]*keyTable) *c
 						tableIndex = len(*keyTables)
 						*keyTables = append(*keyTables, newKeyTable(keyType))
 					}
-					step.keys = reflect.ValueOf((*keyTables)[tableIndex].keys).UnsafePointer()
-					step.elementSize = keyType.Size()
+					table := (*keyTables)[tableIndex]
+					step.keys = reflect.ValueOf(table.keys).UnsafePointer()
+					step.keyIndicesType = reflect.ValueOf(reflect.TypeOf(table.indices)).UnsafePointer()
+					step.keyIndices = reflect.ValueOf(table.indices).UnsafePointer()
 				}
 			default:
 				panic(fmt.Sprintf("mux: path %q of model %v reaches %v, which is no array, slice or map to index", text, modelType, indexedType))
@@ -257,11 +270,18 @@ func compilePath(modelType reflect.Type, text string, keyTables *[]*keyTable) *c
 				compiled.offset += uintptr(step.index) * step.elementSize
 				continue
 			}
+			if step.index == holeIndex {
+				lastHoleStepIndex = len(compiled.steps)
+			}
 			compiled.steps = append(compiled.steps, step)
 			compiled.offset = 0
 		}
 	}
 	compiled.propertyType = current
+	if lastHoleStepIndex >= 0 {
+		compiled.beforeLastHole = &compiledPath{text: text, steps: compiled.steps[:lastHoleStepIndex], holeCount: compiled.holeCount - 1}
+		compiled.afterLastHole = &compiledPath{text: text, steps: compiled.steps[lastHoleStepIndex+1:], offset: compiled.offset}
+	}
 	return compiled
 }
 

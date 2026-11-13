@@ -2,6 +2,7 @@ package mux
 
 import (
 	"fmt"
+	"iter"
 	"time"
 
 	"github.com/dvoyni/cog/kernel"
@@ -42,6 +43,25 @@ func (t Timeline[M, D]) Current[T any](path Path[M, T], model *M, holes ...int64
 		}
 	}
 	return path.Get(model, holes...)
+}
+
+// All answers a walk over the elements of the last hole of the path in
+// model, the holes before it fixed by fixedHoles: for each element, its hole
+// and its current value, as Current answers it. A view ranges over it to read
+// every element at once, rather than calling Current for each.
+//
+// Over an array or a slice, the walk goes in index order. Over a map, it goes
+// in Go's map order, and yields each key's hole: the key itself, for a map
+// keyed by an integer type, or the index the timeline interned it at, so a
+// key never interned is skipped, as no hole reaches its element. An element
+// with no current value, where an index after the last hole misses, is
+// skipped too. Ranging over the walk allocates nothing, to its end or to a
+// break.
+//
+// A path with no hole, or fixed holes other than one fewer than the path's,
+// panics, naming the path and their count.
+func (t Timeline[M, D]) All[T any](path Path[M, T], model *M, fixedHoles ...int64) iter.Seq2[int64, T] {
+	return func(yield func(int64, T) bool) { t.state.walk(path, model, fixedHoles, yield) }
 }
 
 // Index answers the index the timeline interned key at, which is the hole
