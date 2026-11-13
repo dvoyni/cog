@@ -257,7 +257,7 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
 
 ([mux: how a view reads current values](https://github.com/dvoyni/cog/issues/777))
 
-- `Timeline.Current(path, model *M, holes...) (T, bool)` answers the blend of the address's overrides in the sample, or `path.Get`'s value when none is active. A count of active overrides per path skips the lookup on a path with none.
+- `Timeline.Current(path, model *M, holes...) (T, bool)` answers the blend of the address's overrides in the sample, found by a binary search over its holes, or `path.Get`'s value when none is active. A count of active overrides per path skips the lookup on a path with none.
 - `Timeline.All(path, model *M, fixedHoles...) iter.Seq2[int64, T]` walks the path's last hole, with the holes before it passed fixed:
   - over a slice or array, in index order, merged with the sample's sorted overrides;
   - over a map, in Go's map order, with a lookup per entry, yielding interned indices. An element whose key was never interned is skipped: no path reaches it, since a key's hole is its index. An update interns each key when it adds the element, and a game interns every key after loading, since indices live one run.
@@ -272,6 +272,10 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
   2. evaluates every active override into the sample, kept per path and sorted by holes;
   3. retires ended overrides;
   4. calls the callbacks that came due, in time order.
+- A path's overrides are kept sorted by holes, comparing the first hole before the second, and at one address in the order scheduled ([mux: the sample sorted by holes, so many addresses on one path stay cheap to step and read](https://github.com/dvoyni/cog/issues/816)):
+  - `Tween` and `Hold` append, and mark the path when the new override's address sorts before the last one's;
+  - `Step` first retires a marked path's ended overrides, then stable-sorts the rest in place, before it samples them;
+  - so the sample comes out sorted in one pass, an address's overrides lie side by side for blending, and `Cancel` keeps the order as it removes.
 - mux subscribes to nothing. The game steps on `gfx.RenderEvent`, in a handler ordered before gfx's `Draw` with `OrderSubscriptions`, returning `ex.Join(in, step.Handle())`. gfx schedules its acquire after `in`, and `DrawEvent.Ready` is that acquire, so every `DrawEvent` handler's views, in any plugin, come after `Step`.
 - `RenderEvent` beats on while gfx recovers a lost device, so time goes on.
 - A timeline's time is its own, moved only by `Step`. It is deterministic under any clock, and every frame's sample matches the beat it draws.

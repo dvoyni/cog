@@ -1,6 +1,7 @@
 package mux
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -85,6 +86,20 @@ func (p *timelineProbe) expectCurrent[T comparable](t *testing.T, path Path[game
 	t.Helper()
 	if got, ok := p.timeline.Get().Current(path, p.model.Get(), holes...); got != want || !ok {
 		t.Errorf("%q%v is current at %v, %v at %v, want %v, true", path.compiled.text, holes, got, ok, p.timeline.Get().Now(), want)
+	}
+}
+
+// expectSampledHoles fails t unless path's sample holds the addresses holes
+// fill, and in that order.
+func (p *timelineProbe) expectSampledHoles[T any](t *testing.T, path Path[game, T], want ...depth) {
+	t.Helper()
+	sample := p.timeline.Get().state.findPathState(path).sample
+	got := make([]depth, 0, len(sample))
+	for _, sampled := range sample {
+		got = append(got, sampled.holes)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("%q's sample holds %v at %v, want %v", path.compiled.text, got, p.timeline.Get().Now(), want)
 	}
 }
 
@@ -680,5 +695,77 @@ func TestHoldEndAndCancelAllocateNothing(t *testing.T) {
 	}
 	if allocations := testing.AllocsPerRun(100, round); allocations != 0 {
 		t.Fatalf("Hold, End, Cancel, Step and Current allocated %v times per round", allocations)
+	}
+}
+
+func TestStepSamplesAPathInHoleOrder(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	timeline := ElevateTimeline(probe.timeline)
+	// Scheduled out of hole order, a hold among the tweens, and a tween yet
+	// to start, which the sample leaves out. The order compares the first
+	// hole before the second: Terrain[0][2] comes before Terrain[1][0].
+	timeline.Tween(probe.terrain, 0, 0, 10, time.Second, EasingLinear, 1, 2)
+	timeline.Tween(probe.terrain, 0, 0, 10, time.Second, EasingLinear, 0, 2)
+	timeline.Hold(probe.terrain, 0, 5, time.Second, 1, 0)
+	timeline.Tween(probe.terrain, time.Hour, 0, 10, time.Second, EasingLinear, 0, 0)
+	timeline.Tween(probe.terrain, 0, 0, 10, time.Second, EasingLinear, 0, 1)
+	probe.runStep(time.Millisecond)
+	probe.expectSampledHoles(t, probe.terrain, depth{0, 1}, depth{0, 2}, depth{1, 0}, depth{1, 2})
+	// Scheduled again out of order, with an address cancelled since.
+	timeline.Tween(probe.terrain, 0, 0, 10, time.Second, EasingLinear, 1, 1)
+	timeline.Hold(probe.terrain, 0, 5, time.Second, 0, 0)
+	timeline.Cancel(probe.terrain, 0, 2)
+	probe.runStep(time.Millisecond)
+	probe.expectSampledHoles(t, probe.terrain, depth{0, 0}, depth{0, 1}, depth{1, 0}, depth{1, 1}, depth{1, 2})
+}
+
+func TestCurrentFindsEachOfManyAddressesAtItsOverrideScheduledLast(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	probe.model.Get().Units = make([]unit, 64)
+	for index := range probe.model.Get().Units {
+		probe.model.Get().Units[index].Health = int32(index)
+	}
+	timeline := ElevateTimeline(probe.timeline)
+	// Every odd unit is tweened twice, its units in falling order each
+	// time, so Step moves every override as it sorts them. Of the two at one
+	// address, the one scheduled last, from 200, is sampled.
+	for _, from := range []int32{100, 200} {
+		for index := 63; index > 0; index -= 2 {
+			timeline.Tween(probe.unitHealth, 0, from, from+10, time.Second, EasingLinear, int64(index))
+		}
+	}
+	probe.runStep(500 * time.Millisecond)
+	for index := range 64 {
+		want := int32(index)
+		if index%2 == 1 {
+			want = 205
+		}
+		probe.expectCurrent(t, probe.unitHealth, want, int64(index))
+	}
+}
+
+func TestTweenStepAndCurrentOfManyAddressesOnOnePathAllocateNothing(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	probe.model.Get().Units = make([]unit, 256)
+	timeline := ElevateTimeline(probe.timeline)
+	// Each round tweens every unit, in falling order, so Step sorts the
+	// path, over two Steps, so the round before's tweens end at this round's
+	// Step and the timeline stays at the size the first rounds grew it to.
+	round := func() {
+		for index := 255; index >= 0; index-- {
+			timeline.Tween(probe.unitHealth, timeline.Now(), 0, 10, 2*time.Millisecond, EasingLinear, int64(index))
+		}
+		step(nil, time.Millisecond, probe.model, probe.timeline)
+		for index := range 256 {
+			tweenedUnitSink, _ = probe.timeline.Get().Current(probe.unitHealth, probe.model.Get(), int64(index))
+		}
+	}
+	round()
+	round()
+	if tweenedUnitSink != 5 {
+		t.Fatalf("the last unit is current at %v, want 5, its tween halfway", tweenedUnitSink)
+	}
+	if allocations := testing.AllocsPerRun(100, round); allocations != 0 {
+		t.Fatalf("Tween, Step and Current of 256 addresses on one path allocated %v times per round", allocations)
 	}
 }
