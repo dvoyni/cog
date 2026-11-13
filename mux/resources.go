@@ -26,21 +26,20 @@ type Tasks[M any, D comparable] struct {
 type Timeline[M any, D comparable] struct{ timelineSide[M, D] }
 
 // Current answers the current value of the property path names in model, at
-// the address holes fill: the value of the tween active there in the sample
-// the last Step took, and true, or path.Get's answer when none is. It reads
-// that sample alone, so a tween scheduled since shows from the next Step.
+// the address holes fill: the value of the override active there in the
+// sample the last Step took, and true, or path.Get's answer when none is. It
+// reads that sample alone, so an override scheduled or cancelled since shows
+// from the next Step.
 //
 // Holes the path does not take panic, naming the path and their count.
 func (t Timeline[M, D]) Current[T any](path Path[M, T], model *M, holes ...int64) (T, bool) {
-	if path.compiled.id < len(t.state.pathStates) {
-		// Get checks the holes on a path with nothing sampled, so only a path
-		// with a sample makes them into an address.
-		if state, ok := t.state.pathStates[path.compiled.id].(*pathState[D, T]); ok && len(state.sample) != 0 {
-			filledHoles := path.compiled.makeHoles[D](holes)
-			for _, sampled := range state.sample {
-				if sampled.holes == filledHoles {
-					return sampled.value, true
-				}
+	// Get checks the holes on a path with nothing sampled, so only a path
+	// with a sample makes them into an address.
+	if state := t.state.findPathState(path); state != nil && len(state.sample) != 0 {
+		filledHoles := path.compiled.makeHoles[D](holes)
+		for _, sampled := range state.sample {
+			if sampled.holes == filledHoles {
+				return sampled.value, true
 			}
 		}
 	}
@@ -87,21 +86,45 @@ func (w WriteTimeline[M, D]) Tween[T any](path Path[M, T], start time.Duration, 
 	if w.state.easings.function(easing) == nil {
 		panic(fmt.Sprintf("mux: path %q is tweened by easing %d, which is not registered", path.compiled.text, easing))
 	}
-	interpolate, ok := path.compiled.interpolator.(interpolator[T])
-	if !ok {
+	if _, ok := path.compiled.interpolator.(interpolator[T]); !ok {
 		panic(fmt.Sprintf("mux: path %q is tweened, but no interpolator tweens its %v", path.compiled.text, path.compiled.propertyType))
 	}
+	w.state.scheduleOverride(path, override[D, T]{holes: path.compiled.makeHoles[D](holes), start: start, length: length, from: from, to: to, easing: easing})
+}
+
+// Hold schedules a hold of the property path names, at the address holes
+// fill: its current value is value over length from start on the timeline's
+// clock, as a tween from value to value eased by EasingLinear would show. A
+// hold never calls an interpolator, so a property of any type is held, a
+// bool or a struct included. Step samples it from its next run on, and it
+// leaves at the first sample at or past its end, as a tween does.
+//
+// A length that is not positive, or holes the path does not take, panics.
+func (w WriteTimeline[M, D]) Hold[T any](path Path[M, T], start time.Duration, value T, length time.Duration, holes ...int64) {
+	if length <= 0 {
+		panic(fmt.Sprintf("mux: path %q is held over %v, which is no positive length", path.compiled.text, length))
+	}
+	w.state.scheduleOverride(path, override[D, T]{holes: path.compiled.makeHoles[D](holes), start: start, length: length, from: value, to: value, easing: EasingLinear, isHold: true})
+}
+
+// End answers when the address holes fill on path is next free: the end of
+// the last of its overrides to end, or Now when it has none left or the last
+// has ended. An override started at End therefore follows whatever plays at
+// the address, and never starts in the past.
+//
+// Holes the path does not take panic, naming the path and their count.
+func (w WriteTimeline[M, D]) End[T any](path Path[M, T], holes ...int64) time.Duration {
 	filledHoles := path.compiled.makeHoles[D](holes)
-	id := path.compiled.id
-	for len(w.state.pathStates) <= id {
-		w.state.pathStates = append(w.state.pathStates, nil)
+	end := w.state.now
+	if state := w.state.findPathState(path); state != nil {
+		for overrideIndex := range state.overrides {
+			scheduled := &state.overrides[overrideIndex]
+			if scheduled.holes == filledHoles {
+				end = max(end, scheduled.start+scheduled.length)
+			}
+		}
 	}
-	state, ok := w.state.pathStates[id].(*pathState[D, T])
-	if !ok {
-		state = &pathState[D, T]{interpolate: interpolate}
-		w.state.pathStates[id] = state
-	}
-	state.overrides = append(state.overrides, override[D, T]{holes: filledHoles, start: start, length: length, from: from, to: to, easing: easing})
+	return end
 }
 
 // Intern answers key's index in the timeline, which is the hole that reaches
@@ -116,4 +139,16 @@ func (w WriteTimeline[M, D]) Tween[T any](path Path[M, T], start time.Duration, 
 // keys are their own holes, panics.
 func (w WriteTimeline[M, D]) Intern[K comparable](key K) int64 {
 	return w.state.findKeyTable[K]("interned").intern(key)
+}
+
+// Cancel removes every override on the address holes fill on path, running
+// or yet to start. From the next Step on, the address's current value is the
+// model's own, which may jump.
+//
+// Holes the path does not take panic, naming the path and their count.
+func (w WriteTimeline[M, D]) Cancel[T any](path Path[M, T], holes ...int64) {
+	filledHoles := path.compiled.makeHoles[D](holes)
+	if state := w.state.findPathState(path); state != nil {
+		state.removeOverrides(filledHoles)
+	}
 }

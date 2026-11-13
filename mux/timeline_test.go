@@ -18,6 +18,7 @@ type timelineProbe struct {
 	cameraY  Path[game, float32]
 	turn     Path[game, int32]
 	name     Path[game, string]
+	visible  Path[game, bool]
 	terrain  Path[game, float32]
 	// unitHealth crosses a slice at a hole.
 	unitHealth Path[game, int32]
@@ -32,6 +33,7 @@ func spawnTimelineProbe(t *testing.T, init func(configurator *kernel.Configurato
 		probe.cameraY = MakePath[game, float32](configurator, "Camera.Y")
 		probe.turn = MakePath[game, int32](configurator, "Turn")
 		probe.name = MakePath[game, string](configurator, "Hero.Name")
+		probe.visible = MakePath[game, bool](configurator, "Hero.Visible")
 		probe.terrain = MakePath[game, float32](configurator, "Terrain[][]")
 		probe.unitHealth = MakePath[game, int32](configurator, "Units[].Health")
 		probe.model = declare[kernel.Write[*game]](configurator)
@@ -75,6 +77,15 @@ func (p *timelineProbe) expectTween[T comparable](t *testing.T, path Path[game, 
 		t.Errorf("%q tweened from %v to %v by easing %d is current at %v after %v, want %v", path.compiled.text, from, to, easing, got, at, want)
 	}
 	p.runStep(time.Second - at)
+}
+
+// expectCurrent fails t unless path's current value at the address holes
+// fill is want, and true.
+func (p *timelineProbe) expectCurrent[T comparable](t *testing.T, path Path[game, T], want T, holes ...int64) {
+	t.Helper()
+	if got, ok := p.timeline.Get().Current(path, p.model.Get(), holes...); got != want || !ok {
+		t.Errorf("%q%v is current at %v, %v at %v, want %v, true", path.compiled.text, holes, got, ok, p.timeline.Get().Now(), want)
+	}
 }
 
 // expectSteps runs Step with each delta in turn, failing t unless the
@@ -465,5 +476,209 @@ func TestInternOfANewKeyAllocatesOnlyWhileItsTablesGrow(t *testing.T) {
 	})
 	if allocations >= keyCount/64 {
 		t.Fatalf("interning %d new keys allocated %v times, want fewer than one for every 64 keys: only while the tables grow", keyCount, allocations)
+	}
+}
+
+func TestHoldKeepsItsValueOverItsSpan(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	probe.model.Get().Camera.Y = 10
+	ElevateTimeline(probe.timeline).Hold(probe.cameraY, time.Second, 3, 2*time.Second)
+	probe.expectSteps(t, []timedValue{
+		{500 * time.Millisecond, 10},
+		{500 * time.Millisecond, 3},
+		{time.Second, 3},
+		{999 * time.Millisecond, 3},
+		{time.Millisecond, 10},
+	})
+}
+
+func TestHoldWorksOnATypeNoInterpolatorTweens(t *testing.T) {
+	var position Path[game, vec2]
+	probe := spawnTimelineProbe(t, func(configurator *kernel.Configurator) {
+		position = MakePath[game, vec2](configurator, "Hero.Position")
+	})
+	hero := &probe.model.Get().Hero
+	hero.Visible = true
+	hero.Name = "ada"
+	hero.Position = vec2{X: 1, Y: 2}
+	// A bool, a string and a struct, none of which an interpolator tweens,
+	// are each held at a value the model does not hold.
+	timeline := ElevateTimeline(probe.timeline)
+	timeline.Hold(probe.visible, 0, false, time.Second)
+	timeline.Hold(probe.name, 0, "bo", time.Second)
+	timeline.Hold(position, 0, vec2{X: 3, Y: 4}, time.Second)
+	probe.runStep(500 * time.Millisecond)
+	probe.expectCurrent(t, probe.visible, false)
+	probe.expectCurrent(t, probe.name, "bo")
+	probe.expectCurrent(t, position, vec2{X: 3, Y: 4})
+	probe.runStep(500 * time.Millisecond)
+	probe.expectCurrent(t, probe.visible, true)
+	probe.expectCurrent(t, probe.name, "ada")
+	probe.expectCurrent(t, position, vec2{X: 1, Y: 2})
+}
+
+func TestHoldNeverCallsItsTypesInterpolator(t *testing.T) {
+	var position Path[game, vec2]
+	interpolatorCalls := 0
+	probe := spawnTimelineProbe(t, func(configurator *kernel.Configurator) {
+		position = MakePath[game, vec2](configurator, "Hero.Position")
+		RegisterInterpolator(configurator, func(a, b vec2, t float32, ease func(a, b, t float32) float32) vec2 {
+			interpolatorCalls++
+			return vec2{X: ease(a.X, b.X, t), Y: ease(a.Y, b.Y, t)}
+		})
+	})
+	timeline := ElevateTimeline(probe.timeline)
+	timeline.Hold(position, 0, vec2{X: 3, Y: 4}, time.Second)
+	probe.runStep(500 * time.Millisecond)
+	probe.expectCurrent(t, position, vec2{X: 3, Y: 4})
+	if interpolatorCalls != 0 {
+		t.Fatalf("holding a vec2 called its interpolator %d times, want none", interpolatorCalls)
+	}
+	// A tween of the path calls the interpolator, so the hold had one to
+	// call.
+	timeline.Tween(position, timeline.Now(), vec2{}, vec2{X: 2}, time.Second, EasingLinear)
+	probe.runStep(500 * time.Millisecond)
+	probe.expectCurrent(t, position, vec2{X: 1})
+	if interpolatorCalls == 0 {
+		t.Fatal("tweening a vec2 never called its interpolator")
+	}
+}
+
+func TestEndAnswersWhenAnAddressIsNextFree(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	timeline := ElevateTimeline(probe.timeline)
+	probe.runStep(time.Second)
+	// Terrain[0][1]'s tween ends last, though the hold is scheduled after
+	// it and starts sooner.
+	timeline.Tween(probe.terrain, 2*time.Second, 0, 1, time.Second, EasingLinear, 0, 1)
+	timeline.Hold(probe.terrain, time.Second, 5, 500*time.Millisecond, 0, 1)
+	timeline.Tween(probe.terrain, 0, 0, 1, 5*time.Second, EasingLinear, 1, 2)
+	timeline.Tween(probe.cameraY, 0, 0, 1, 9*time.Second, EasingLinear)
+	// Terrain[1][1]'s hold has ended, though no Step has retired it yet.
+	timeline.Hold(probe.terrain, 0, 5, 500*time.Millisecond, 1, 1)
+	expectEnds := func(wantFirst time.Duration) {
+		t.Helper()
+		testCases := []struct {
+			name string
+			got  time.Duration
+			want time.Duration
+		}{
+			{"Terrain[0][1]", timeline.End(probe.terrain, 0, 1), wantFirst},
+			{"Terrain[1][2]", timeline.End(probe.terrain, 1, 2), 5 * time.Second},
+			{"Terrain[1][1], whose last override has ended", timeline.End(probe.terrain, 1, 1), timeline.Now()},
+			{"Terrain[0][0], which has no override", timeline.End(probe.terrain, 0, 0), timeline.Now()},
+			{"Turn, never scheduled on", timeline.End(probe.turn), timeline.Now()},
+			{"Camera.Y", timeline.End(probe.cameraY), 9 * time.Second},
+		}
+		for _, testCase := range testCases {
+			if testCase.got != testCase.want {
+				t.Errorf("End of %s answered %v at %v, want %v", testCase.name, testCase.got, timeline.Now(), testCase.want)
+			}
+		}
+	}
+	expectEnds(3 * time.Second)
+	probe.runStep(time.Second)
+	expectEnds(3 * time.Second)
+	// Terrain[0][1]'s overrides have all ended, and Step retired them.
+	probe.runStep(1500 * time.Millisecond)
+	expectEnds(3500 * time.Millisecond)
+}
+
+func TestCancelRemovesEveryOverrideOnTheAddress(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	probe.model.Get().Terrain = [2][3]float32{{1, 2, 3}, {4, 5, 6}}
+	timeline := ElevateTimeline(probe.timeline)
+	// Terrain[0][1] has a tween running and a hold and a tween yet to start;
+	// Terrain[1][2] has a tween running.
+	timeline.Tween(probe.terrain, 0, 0, 10, 2*time.Second, EasingLinear, 0, 1)
+	timeline.Hold(probe.terrain, 2*time.Second, 20, time.Second, 0, 1)
+	timeline.Tween(probe.terrain, 3*time.Second, 0, 10, time.Second, EasingLinear, 0, 1)
+	timeline.Tween(probe.terrain, 0, 0, 40, 4*time.Second, EasingLinear, 1, 2)
+	probe.runStep(time.Second)
+	probe.expectCurrent(t, probe.terrain, 5, 0, 1)
+	timeline.Cancel(probe.terrain, 0, 1)
+	if end := timeline.End(probe.terrain, 0, 1); end != time.Second {
+		t.Errorf("End of Terrain[0][1] answered %v after Cancel, want Now, 1s", end)
+	}
+	// Current reads the sample the last Step took, so the model's own value
+	// shows from the next.
+	probe.expectCurrent(t, probe.terrain, 5, 0, 1)
+	probe.runStep(0)
+	probe.expectCurrent(t, probe.terrain, 2, 0, 1)
+	probe.expectCurrent(t, probe.terrain, 10, 1, 2)
+	// Neither the hold nor the last tween starts.
+	probe.runStep(1500 * time.Millisecond)
+	probe.expectCurrent(t, probe.terrain, 2, 0, 1)
+	probe.expectCurrent(t, probe.terrain, 25, 1, 2)
+	probe.runStep(time.Second)
+	probe.expectCurrent(t, probe.terrain, 2, 0, 1)
+	probe.expectCurrent(t, probe.terrain, 35, 1, 2)
+	// An address with no override, and a path never scheduled on, are left
+	// as they are.
+	timeline.Cancel(probe.terrain, 0, 0)
+	timeline.Cancel(probe.turn)
+	probe.expectCurrent(t, probe.terrain, 35, 1, 2)
+	probe.expectCurrent(t, probe.terrain, 1, 0, 0)
+}
+
+func TestHoldEndAndCancelPanicNamingWhatIsWrong(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	timeline := ElevateTimeline(probe.timeline)
+	expectPanic(t, `path "Hero.Name" is held over 0s, which is no positive length`, func() {
+		timeline.Hold(probe.name, 0, "bo", 0)
+	})
+	expectPanic(t, `path "Hero.Name" is held over -1s, which is no positive length`, func() {
+		timeline.Hold(probe.name, 0, "bo", -time.Second)
+	})
+	expectPanic(t, `path "Terrain[][]" has 2 holes, but is given 1`, func() {
+		timeline.Hold(probe.terrain, 0, 1, time.Second, 1)
+	})
+	expectPanic(t, `path "Terrain[][]" has 2 holes, but is given 3`, func() {
+		timeline.End(probe.terrain, 1, 1, 1)
+	})
+	expectPanic(t, `path "Terrain[][]" has 2 holes, but is given 0`, func() {
+		timeline.Cancel(probe.terrain)
+	})
+}
+
+// visibleSink and endSink keep what TestHoldEndAndCancelAllocateNothing
+// reads, beside nameSink and terrainSink, so the compiler cannot drop the
+// reads it measures.
+var (
+	visibleSink bool
+	endSink     time.Duration
+)
+
+func TestHoldEndAndCancelAllocateNothing(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	timeline := ElevateTimeline(probe.timeline)
+	// Each round holds and tweens over two Steps, so the round before's
+	// overrides end at this round's Step and the timeline stays at the size
+	// the first rounds grew it to. It holds a string, a bool and a float32,
+	// cancels a tween yet to be sampled and one running, and asks End of an
+	// address with overrides, one with none and a path never scheduled on.
+	round := func() {
+		timeline.Hold(probe.name, timeline.Now(), "bo", 2*time.Millisecond)
+		timeline.Hold(probe.visible, timeline.Now(), true, 2*time.Millisecond)
+		timeline.Hold(probe.terrain, timeline.Now(), 5, 2*time.Millisecond, 0, 1)
+		timeline.Tween(probe.terrain, timeline.Now(), 0, 10, 2*time.Millisecond, EasingLinear, 0, 2)
+		timeline.Tween(probe.terrain, timeline.Now(), 0, 10, 2*time.Millisecond, EasingLinear, 1, 2)
+		timeline.Cancel(probe.terrain, 0, 2)
+		endSink = timeline.End(probe.terrain, 0, 1)
+		endSink = timeline.End(probe.terrain, 1, 1)
+		endSink = timeline.End(probe.turn)
+		step(nil, time.Millisecond, probe.model, probe.timeline)
+		timeline.Cancel(probe.terrain, 1, 2)
+		nameSink, _ = probe.timeline.Get().Current(probe.name, probe.model.Get())
+		visibleSink, _ = probe.timeline.Get().Current(probe.visible, probe.model.Get())
+		terrainSink, _ = probe.timeline.Get().Current(probe.terrain, probe.model.Get(), 0, 1)
+	}
+	round()
+	round()
+	if nameSink != "bo" || !visibleSink || terrainSink != 5 {
+		t.Fatalf("the holds are current at %q, %v and %v, want bo, true and 5", nameSink, visibleSink, terrainSink)
+	}
+	if allocations := testing.AllocsPerRun(100, round); allocations != 0 {
+		t.Fatalf("Hold, End, Cancel, Step and Current allocated %v times per round", allocations)
 	}
 }

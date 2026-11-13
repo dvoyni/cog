@@ -22,7 +22,8 @@ type pathState[D comparable, T any] struct {
 	// last Step evaluated it. It is empty on a path with none, so Current
 	// skips the lookup there.
 	sample []sampledValue[D, T]
-	// interpolate is T's interpolator.
+	// interpolate is T's interpolator, nil when T has none, so the path takes
+	// only holds.
 	interpolate interpolator[T]
 }
 
@@ -45,8 +46,11 @@ func (s *pathState[D, T]) takeSample(now time.Duration, easings *easingTable) {
 		if now < scheduled.start {
 			continue
 		}
-		progress := float32(float64(now-scheduled.start) / float64(scheduled.length))
-		value := s.interpolate(scheduled.from, scheduled.to, progress, easings.function(scheduled.easing))
+		value := scheduled.from
+		if !scheduled.isHold {
+			progress := float32(float64(now-scheduled.start) / float64(scheduled.length))
+			value = s.interpolate(scheduled.from, scheduled.to, progress, easings.function(scheduled.easing))
+		}
 		sampleIndex := slices.IndexFunc(s.sample, func(sampled sampledValue[D, T]) bool { return sampled.holes == scheduled.holes })
 		if sampleIndex >= 0 {
 			s.sample[sampleIndex].value = value
@@ -54,6 +58,26 @@ func (s *pathState[D, T]) takeSample(now time.Duration, easings *easingTable) {
 			s.sample = append(s.sample, sampledValue[D, T]{holes: scheduled.holes, value: value})
 		}
 	}
+	s.overrides = s.overrides[:keptCount]
+}
+
+// removeOverrides removes every override at the address holes fill, keeping
+// the others in the order scheduled.
+func (s *pathState[D, T]) removeOverrides(holes D) {
+	keptCount := 0
+	for overrideIndex := range s.overrides {
+		scheduled := &s.overrides[overrideIndex]
+		if scheduled.holes == holes {
+			continue
+		}
+		if keptCount != overrideIndex {
+			s.overrides[keptCount] = *scheduled
+		}
+		keptCount++
+	}
+	// The overrides removed are cleared, so the values they hold are not
+	// kept alive.
+	clear(s.overrides[keptCount:])
 	s.overrides = s.overrides[:keptCount]
 }
 
@@ -72,6 +96,9 @@ type override[D comparable, T any] struct {
 	to   T
 	// easing is the number of the curve it moves by.
 	easing Easing
+	// isHold is whether the override is a hold, whose value is from
+	// throughout: it calls no interpolator.
+	isHold bool
 }
 
 // sampledValue is one address's value in its path's sample.
