@@ -43,16 +43,21 @@ nothing but the standard library and the [kernel](../kernel).
 - An update changes the model and schedules a **tween** on the writing side,
   `Tween(path, start, from, to, length, easing, holes...)`, at an absolute
   start on the timeline's clock. A view reads `Current(path, model, holes...)`
-  on the reading side: the value of the override active at that address, or
+  on the reading side: the blend of the overrides active at that address, or
   the model's own when none is. Each address of a path is tweened on its own.
+- Overrides that overlap at one address **blend by weight**: each weighs
+  nothing at its start and end and fully at its midpoint, and the current
+  value is their weighted average, through the type's interpolator, so a new
+  tween over a running one takes over with no jump. A type with no
+  interpolator shows the override that weighs most.
 - A **hold**, `Hold(path, start, value, length, holes...)`, keeps a
   property's current value at one value over its span. It calls no
-  interpolator, so it holds a property of any type, such as a `bool` or a
-  struct. `End(path, holes...)` answers when an address is next free: the end
-  of its last override, or `Now`. An update that starts its overrides there
-  queues them after whatever plays. `Cancel(path, holes...)` removes every
-  override on an address, running or yet to start, and its current value is
-  the model's own from the next `Step`.
+  interpolator to make its value, so it holds a property of any type, such as
+  a `bool` or a struct. `End(path, holes...)` answers when an address is next
+  free: the end of its last override, or `Now`. An update that starts its
+  overrides there queues them after whatever plays. `Cancel(path, holes...)`
+  removes every override on an address, running or yet to start, and its
+  current value is the model's own from the next `Step`.
 - An **interpolator** eases two values of a type, component by component.
   Every float and integer kind has one built in, named types of those kinds
   included. A game registers one for its own value types, such as a vector,

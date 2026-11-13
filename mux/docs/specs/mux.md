@@ -217,7 +217,7 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
 - Every override stores an absolute start and a length, in `time.Duration` on the timeline's own clock. A length must be positive, and a zero length panics. A start may lie in the past, so the override begins partway through. Nothing links overrides to each other.
 - Positional arguments throughout, the value type checked at compile time through `Path[M, T]` (Go 1.27 generic methods):
   - `Tween(path, start, from, to, length, easing, holes...)`: both ends are explicit.
-  - `Hold(path, start, value, length, holes...)`: a tween whose two ends are one value, with Linear easing. It never calls an interpolator, so it works on any type.
+  - `Hold(path, start, value, length, holes...)`: a tween whose two ends are one value, with Linear easing. It calls no interpolator to make its value, so it works on any type.
 
   These are the only kinds of override.
 - `Sequence(start)` is a builder held on the stack, storing nothing of its own. Its methods take the same arguments without the start, which it fills in:
@@ -233,7 +233,7 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
 
 - Every active override on an address has the weight `w = 1 − |2p − 1|`, where `p` is its progress through its span.
 - The current value is their normalized weighted average, folded through the type's interpolator with Linear easing. Starting from the first override's value, each next one gives `W += wₖ` and then `current = interpolator(current, vₖ, wₖ/W, Linear)`. A lone override normalizes to full weight.
-- When every weight is 0, the latest start wins. A type with no interpolator takes the override of the highest weight, ties going to the latest start.
+- When every weight is 0, the latest start wins. A type with no interpolator takes the override of the highest weight, ties going to the latest start. Of overrides that start together, the one scheduled last wins.
 - An override leaves at the first sample at or past its end, where its weight is 0.
 
 ### Callbacks

@@ -23,8 +23,8 @@ type pathState[D comparable, T any] struct {
 	// isUnsorted is whether an override was scheduled out of hole order
 	// since the last Step, which then sorts the overrides.
 	isUnsorted bool
-	// sample holds the value of each address with an active override, sorted
-	// by holes, as the last Step evaluated it. It is empty on a path with
+	// sample holds the blend of each address's active overrides, sorted by
+	// holes, as the last Step evaluated it. It is empty on a path with
 	// none, so Current skips the lookup there.
 	sample []sampledValue[D, T]
 	// interpolate is T's interpolator, nil when T has none, so the path takes
@@ -34,8 +34,12 @@ type pathState[D comparable, T any] struct {
 
 // takeSample evaluates every override active at now into the sample, eased
 // by its easing's function in easings, and retires those that have ended:
-// an override leaves at the first sample at or past its end. Of two active
-// at one address, the one scheduled last is sampled.
+// an override leaves at the first sample at or past its end, where it weighs
+// nothing. The overrides active at one address blend by weight, through the
+// path's interpolator eased by EasingLinear's function. Where they cannot
+// blend, because the path has no interpolator or none of them weighs
+// anything yet, the one that weighs most shows; where weights tie, the one
+// started last; where starts tie too, the one scheduled last.
 func (s *pathState[D, T]) takeSample(now time.Duration, easings *easingTable) {
 	if s.isUnsorted {
 		// The overrides that have ended retire first, so the sort moves
@@ -47,7 +51,7 @@ func (s *pathState[D, T]) takeSample(now time.Duration, easings *easingTable) {
 	}
 	s.sample = s.sample[:0]
 	keptCount := 0
-	for overrideIndex := range s.overrides {
+	for overrideIndex := 0; overrideIndex < len(s.overrides); overrideIndex++ {
 		scheduled := &s.overrides[overrideIndex]
 		if now >= scheduled.start+scheduled.length {
 			continue
@@ -59,19 +63,64 @@ func (s *pathState[D, T]) takeSample(now time.Duration, easings *easingTable) {
 		if now < scheduled.start {
 			continue
 		}
+		progress := float32(float64(now-scheduled.start) / float64(scheduled.length))
+		// The overrides at one address lie side by side, in the order
+		// scheduled, so the sample comes out sorted by holes. An override
+		// alone at its address, as most are, is sampled as it is: nothing of
+		// a blend is kept live across its interpolator's call.
+		if overrideIndex+1 == len(s.overrides) || compareHoles(&s.overrides[overrideIndex+1].holes, &scheduled.holes) != 0 {
+			value := scheduled.from
+			if !scheduled.isHold {
+				value = s.interpolate(scheduled.from, scheduled.to, progress, easings.function(scheduled.easing))
+			}
+			s.sample = append(s.sample, sampledValue[D, T]{holes: scheduled.holes, value: value})
+			continue
+		}
+		// Others follow at the address: they retire, wait or blend in here.
+		// addressWeight is what the address's overrides weigh so far: their
+		// sum where they blend, or the most any weighs. shownStart is the
+		// start of the one whose value shows, unread once they blend. A
+		// weight, 1 − |2p − 1| at progress p, is written so that it keeps its
+		// precision near the start.
+		holes := scheduled.holes
+		addressWeight := 2 * min(progress, 1-progress)
+		shownStart := scheduled.start
 		value := scheduled.from
 		if !scheduled.isHold {
-			progress := float32(float64(now-scheduled.start) / float64(scheduled.length))
 			value = s.interpolate(scheduled.from, scheduled.to, progress, easings.function(scheduled.easing))
 		}
-		// The overrides at one address lie side by side, in the order
-		// scheduled, so one at the address sampled last replaces its value,
-		// and the sample comes out sorted by holes.
-		if lastIndex := len(s.sample) - 1; lastIndex >= 0 && compareHoles(&s.sample[lastIndex].holes, &scheduled.holes) == 0 {
-			s.sample[lastIndex].value = value
-		} else {
-			s.sample = append(s.sample, sampledValue[D, T]{holes: scheduled.holes, value: value})
+		for overrideIndex+1 < len(s.overrides) && compareHoles(&s.overrides[overrideIndex+1].holes, &holes) == 0 {
+			overrideIndex++
+			otherOverride := &s.overrides[overrideIndex]
+			if now >= otherOverride.start+otherOverride.length {
+				continue
+			}
+			if keptCount != overrideIndex {
+				s.overrides[keptCount] = *otherOverride
+			}
+			keptCount++
+			if now < otherOverride.start {
+				continue
+			}
+			otherProgress := float32(float64(now-otherOverride.start) / float64(otherOverride.length))
+			weight := 2 * min(otherProgress, 1-otherProgress)
+			otherValue := otherOverride.from
+			if !otherOverride.isHold {
+				otherValue = s.interpolate(otherOverride.from, otherOverride.to, otherProgress, easings.function(otherOverride.easing))
+			}
+			if s.interpolate != nil && addressWeight != 0 {
+				// The fold of a normalized weighted average: each override
+				// moves the value its share of the weight so far towards its
+				// own.
+				addressWeight += weight
+				value = s.interpolate(value, otherValue, weight/addressWeight, easings.function(EasingLinear))
+			} else if weight > addressWeight || weight == addressWeight && otherOverride.start >= shownStart {
+				value = otherValue
+				addressWeight = weight
+				shownStart = otherOverride.start
+			}
 		}
+		s.sample = append(s.sample, sampledValue[D, T]{holes: holes, value: value})
 	}
 	s.overrides = s.overrides[:keptCount]
 }
@@ -143,7 +192,7 @@ type override[D comparable, T any] struct {
 	// easing is the number of the curve it moves by.
 	easing Easing
 	// isHold is whether the override is a hold, whose value is from
-	// throughout: it calls no interpolator.
+	// throughout, with no interpolator called to make it.
 	isHold bool
 }
 

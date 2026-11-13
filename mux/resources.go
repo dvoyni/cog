@@ -26,7 +26,7 @@ type Tasks[M any, D comparable] struct {
 type Timeline[M any, D comparable] struct{ timelineSide[M, D] }
 
 // Current answers the current value of the property path names in model, at
-// the address holes fill: the value of the override active there in the
+// the address holes fill: the blend of the overrides active there in the
 // sample the last Step took, and true, or path.Get's answer when none is. It
 // reads that sample alone, so an override scheduled or cancelled since shows
 // from the next Step.
@@ -74,6 +74,14 @@ type WriteTimeline[M any, D comparable] struct{ timelineSide[M, D] }
 // past its end, where the model's own value shows again, so an update tweens
 // to the value it set in the model.
 //
+// Overrides that overlap at one address blend, so a tween over a running one
+// takes over with no jump. Each weighs nothing at its start and end, and
+// fully at its midpoint, and the current value is their average by weight,
+// moved through the property type's interpolator by EasingLinear. A short
+// tween over a long one near its midpoint therefore shows about halfway
+// between the two. Where every override weighs nothing, the one started last
+// shows, and of those that start together, the one scheduled last.
+//
 // A length that is not positive, an easing that is not registered, a
 // property type no interpolator tweens, or holes the path does not take,
 // panics.
@@ -93,9 +101,14 @@ func (w WriteTimeline[M, D]) Tween[T any](path Path[M, T], start time.Duration, 
 // Hold schedules a hold of the property path names, at the address holes
 // fill: its current value is value over length from start on the timeline's
 // clock, as a tween from value to value eased by EasingLinear would show. A
-// hold never calls an interpolator, so a property of any type is held, a
-// bool or a struct included. Step samples it from its next run on, and it
-// leaves at the first sample at or past its end, as a tween does.
+// hold calls no interpolator to make its value, so a property of any type is
+// held, a bool or a struct included. Step samples it from its next run on,
+// and it leaves at the first sample at or past its end, as a tween does.
+//
+// A hold overlapping other overrides at the address blends with them as a
+// tween does. On a type no interpolator tweens, the override that weighs most
+// shows instead: the one nearest its midpoint; where they tie, the one
+// started last; where they start together too, the one scheduled last.
 //
 // A length that is not positive, or holes the path does not take, panics.
 func (w WriteTimeline[M, D]) Hold[T any](path Path[M, T], start time.Duration, value T, length time.Duration, holes ...int64) {
