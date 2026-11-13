@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"testing/fstest"
 
@@ -17,7 +18,11 @@ import (
 )
 
 // makeDirectory makes a temporary directory holding files, each name a
-// slash-separated path, and answers its path.
+// slash-separated path, and answers its path. It then sets each directory's
+// times to the ones it stats with, so its entry in its parent's listing
+// agrees with them: Windows updates that entry lazily after a write inside
+// the directory, and setting the times updates it at once, as Go's own os
+// tests do (golang.org/issues/42637).
 func makeDirectory(t *testing.T, files map[string]string) string {
 	t.Helper()
 	directory := t.TempDir()
@@ -29,6 +34,19 @@ func makeDirectory(t *testing.T, files map[string]string) string {
 		if err := os.WriteFile(file, []byte(data), 0o644); err != nil {
 			t.Fatal(err)
 		}
+	}
+	err := filepath.WalkDir(directory, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || !entry.IsDir() {
+			return err
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		return os.Chtimes(path, info.ModTime(), info.ModTime())
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	return directory
 }
@@ -134,8 +152,11 @@ func TestWritesLandInTheDirectoryAndReadBack(t *testing.T) {
 			t.Errorf("the directory's %s holds %q, %v, want %q", name, data, err, want)
 		}
 	}
-	if info, err := os.Stat(filepath.Join(directory, "saves", "log")); err != nil || info.Mode().Perm() != 0o600 {
-		t.Errorf("saves/log, created by an append, stats %v, %v, want mode 0600", info, err)
+	// Windows keeps no permission bits, only whether a file is read-only.
+	if runtime.GOOS != "windows" {
+		if info, err := os.Stat(filepath.Join(directory, "saves", "log")); err != nil || info.Mode().Perm() != 0o600 {
+			t.Errorf("saves/log, created by an append, stats %v, %v, want mode 0600", info, err)
+		}
 	}
 	for _, name := range []string{"saves/old", "saves/temporary"} {
 		if _, err := os.Stat(filepath.Join(directory, filepath.FromSlash(name))); !errors.Is(err, fs.ErrNotExist) {
