@@ -1089,3 +1089,236 @@ func TestRangingOverAllAllocatesNothing(t *testing.T) {
 		t.Fatalf("ranging over All, to the end and to a break, over a slice and a map allocated %v times per walk", allocations)
 	}
 }
+
+// callRecorder schedules callbacks on probe's timeline that record their
+// names, in the order called, with the time each was called at.
+type callRecorder struct {
+	probe  *timelineProbe
+	called []string
+}
+
+// call schedules a callback named name at start, which records its name and
+// the time it is called at, and answers its index.
+func (r *callRecorder) call(start time.Duration, name string) int {
+	return ElevateTimeline(r.probe.timeline).Call(start, func(_ *game, timeline WriteTimeline[game, depth]) {
+		r.called = append(r.called, fmt.Sprintf("%s at %v", name, timeline.Now()))
+	})
+}
+
+// expectCalled fails t unless the callbacks called since the last check are
+// want, in order.
+func (r *callRecorder) expectCalled(t *testing.T, want ...string) {
+	t.Helper()
+	if !slices.Equal(r.called, want) {
+		t.Errorf("the callbacks called by %v are %q, want %q", r.probe.timeline.Get().Now(), r.called, want)
+	}
+	r.called = nil
+}
+
+func TestStepCallsEachCallbackOnceInTimeOrder(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	recorder := &callRecorder{probe: probe}
+	recorder.call(3*time.Second, "c")
+	recorder.call(time.Second, "a")
+	recorder.call(2*time.Second, "b1")
+	recorder.call(2*time.Second, "b2")
+	recorder.call(-time.Second, "past")
+	probe.runStep(0)
+	recorder.expectCalled(t, "past at 0s")
+	probe.runStep(500 * time.Millisecond)
+	recorder.expectCalled(t)
+	probe.runStep(time.Second)
+	recorder.expectCalled(t, "a at 1.5s")
+	// Callbacks that start together are called in the order scheduled.
+	probe.runStep(time.Second)
+	recorder.expectCalled(t, "b1 at 2.5s", "b2 at 2.5s")
+	// A callback scheduled before Now is called at the next Step, before one
+	// that comes due later.
+	recorder.call(2*time.Second, "late")
+	probe.runStep(time.Second)
+	recorder.expectCalled(t, "late at 3.5s", "c at 3.5s")
+	// A Step that passes several starts calls each callback in time order.
+	recorder.call(6*time.Second, "f")
+	recorder.call(4*time.Second, "d")
+	recorder.call(5*time.Second, "e")
+	probe.runStep(3 * time.Second)
+	recorder.expectCalled(t, "d at 6.5s", "e at 6.5s", "f at 6.5s")
+	// Each was called once.
+	probe.runStep(time.Second)
+	recorder.expectCalled(t)
+}
+
+func TestACallbackChangesTheModelAndSchedulesOnTheTimeline(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	recorder := &callRecorder{probe: probe}
+	timeline := ElevateTimeline(probe.timeline)
+	timeline.Call(time.Second, func(model *game, timeline WriteTimeline[game, depth]) {
+		recorder.called = append(recorder.called, fmt.Sprintf("first at %v", timeline.Now()))
+		if model != probe.model.Get() {
+			t.Errorf("a callback is given %p, want the model, %p", model, probe.model.Get())
+		}
+		model.Camera.Y = 10
+		timeline.Tween(probe.cameraY, timeline.Now(), 0, 10, time.Second, EasingLinear)
+		// A callback scheduled at or before Now is called in this Step, in
+		// time order: this one before second, which starts after it.
+		recorder.call(timeline.Now()-time.Second, "inner")
+		recorder.call(timeline.Now()+time.Second, "later")
+	})
+	recorder.call(1250*time.Millisecond, "second")
+	probe.model.Get().Camera.Y = 0
+	probe.runStep(1500 * time.Millisecond)
+	recorder.expectCalled(t, "first at 1.5s", "inner at 1.5s", "second at 1.5s")
+	// The tween the callback scheduled shows from the next Step on; until
+	// then, the model's new value does.
+	probe.expectCurrent(t, probe.cameraY, 10)
+	probe.runStep(250 * time.Millisecond)
+	probe.expectCurrent(t, probe.cameraY, 2.5)
+	probe.runStep(time.Second)
+	recorder.expectCalled(t, "later at 2.75s")
+}
+
+func TestAFighterFadedOutIsPurgedByACallbackAtTheFadesEnd(t *testing.T) {
+	var (
+		fighterOpacity Path[battle, float32]
+		reserveOpacity Path[battle, float32]
+		model          kernel.Write[*battle]
+		timeline       kernel.Write[Timeline[battle, depth]]
+		muxTasks       Tasks[battle, depth]
+	)
+	harness := spawn(t, func(configurator *kernel.Configurator) {
+		RegisterModel[battle, depth](configurator)
+		fighterOpacity = MakePath[battle, float32](configurator, "Fighters[].Opacity")
+		reserveOpacity = MakePath[battle, float32](configurator, "Reserves[].Opacity")
+		model = declare[kernel.Write[*battle]](configurator)
+		timeline = declare[kernel.Write[Timeline[battle, depth]]](configurator)
+		muxTasks, _ = configurator.Resource[Tasks[battle, depth]]()
+	})
+	runStep := func(delta time.Duration) {
+		harness.run(func(executor *kernel.Executor) kernel.JobHandle {
+			return executor.Schedule(muxTasks.Step, delta).Handle()
+		})
+	}
+	field := model.Get()
+	field.Fighters = []fighter{{Opacity: 1}, {Opacity: 1}, {Opacity: 1}}
+	field.Reserves = map[unitName]fighter{"north": {Opacity: 1}, "south": {Opacity: 1}}
+	writeTimeline := ElevateTimeline(timeline)
+	north := writeTimeline.Intern(unitName("north"))
+	south := writeTimeline.Intern(unitName("south"))
+	// The update kills fighter 1 and the north reserve: the model holds them
+	// dead and transparent at once, and their fades play out.
+	field.Fighters[1] = fighter{Dead: true}
+	field.Reserves["north"] = fighter{Dead: true}
+	writeTimeline.Tween(fighterOpacity, writeTimeline.Now(), 1, 0, time.Second, EasingLinear, 1)
+	writeTimeline.Tween(reserveOpacity, writeTimeline.Now(), 1, 0, time.Second, EasingLinear, north)
+	writeTimeline.Call(writeTimeline.End(fighterOpacity, 1), func(field *battle, _ WriteTimeline[battle, depth]) {
+		field.Fighters[1] = fighter{}
+		field.FreeSlots = append(field.FreeSlots, 1)
+		delete(field.Reserves, "north")
+	})
+	runStep(500 * time.Millisecond)
+	expectWalkInIndexOrder(t, "the fighters' opacities mid-fade", timeline.Get().All(fighterOpacity, field), map[int64]float32{0: 1, 1: 0.5, 2: 1})
+	expectWalk(t, "the reserves' opacities mid-fade", timeline.Get().All(reserveOpacity, field), map[int64]float32{north: 0.5, south: 1})
+	if !field.Fighters[1].Dead || len(field.FreeSlots) != 0 {
+		t.Errorf("mid-fade, fighter 1 is %+v and the free slots %v, want it dead and none free", field.Fighters[1], field.FreeSlots)
+	}
+	runStep(500 * time.Millisecond)
+	expectWalkInIndexOrder(t, "the fighters' opacities once faded", timeline.Get().All(fighterOpacity, field), map[int64]float32{0: 1, 1: 0, 2: 1})
+	expectWalk(t, "the reserves' opacities once faded", timeline.Get().All(reserveOpacity, field), map[int64]float32{south: 1})
+	if field.Fighters[1] != (fighter{}) || !slices.Equal(field.FreeSlots, []int64{1}) {
+		t.Errorf("once faded, fighter 1 is %+v and the free slots %v, want it purged and slot 1 free", field.Fighters[1], field.FreeSlots)
+	}
+	if _, ok := field.Reserves["north"]; ok {
+		t.Error("once faded, the north reserve is still in the model, want it purged")
+	}
+}
+
+func TestCancelCallDropsACallbackStillToCome(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	recorder := &callRecorder{probe: probe}
+	timeline := ElevateTimeline(probe.timeline)
+	calledIndex := recorder.call(time.Second, "a")
+	cancelledIndex := recorder.call(time.Second, "b")
+	pendingIndex := recorder.call(2*time.Second, "c")
+	// A callback cancels one that comes due in the same Step, after it.
+	var cancelledByCallbackIndex int
+	timeline.Call(3*time.Second, func(_ *game, timeline WriteTimeline[game, depth]) {
+		recorder.called = append(recorder.called, fmt.Sprintf("canceller at %v", timeline.Now()))
+		timeline.CancelCall(cancelledByCallbackIndex)
+	})
+	cancelledByCallbackIndex = recorder.call(3*time.Second, "d")
+	timeline.CancelCall(cancelledIndex)
+	probe.runStep(time.Second)
+	recorder.expectCalled(t, "a at 1s")
+	// a's and b's indices are free, so cancelling them drops nothing, and the
+	// next callbacks take them.
+	timeline.CancelCall(calledIndex)
+	timeline.CancelCall(cancelledIndex)
+	freedIndices := []int{recorder.call(2*time.Second, "e"), recorder.call(2*time.Second, "f")}
+	slices.Sort(freedIndices)
+	if want := []int{min(calledIndex, cancelledIndex), max(calledIndex, cancelledIndex)}; !slices.Equal(freedIndices, want) {
+		t.Errorf("the next two Calls answered indices %v, want the ones freed, %v", freedIndices, want)
+	}
+	if index := recorder.call(2*time.Second, "g"); index == pendingIndex || index == cancelledByCallbackIndex || slices.Contains(freedIndices, index) {
+		t.Errorf("Call answered index %d, which a callback still to come holds", index)
+	}
+	probe.runStep(time.Second)
+	recorder.expectCalled(t, "c at 2s", "e at 2s", "f at 2s", "g at 2s")
+	probe.runStep(time.Second)
+	recorder.expectCalled(t, "canceller at 3s")
+	// A callback has left the schedule once called, so cancelling its own
+	// index drops nothing, not even a callback it schedules after.
+	var selfIndex int
+	selfIndex = timeline.Call(4*time.Second, func(_ *game, timeline WriteTimeline[game, depth]) {
+		recorder.called = append(recorder.called, "self")
+		timeline.CancelCall(selfIndex)
+		recorder.call(timeline.Now(), "h")
+		recorder.call(timeline.Now(), "i")
+	})
+	probe.runStep(time.Second)
+	recorder.expectCalled(t, "self", "h at 4s", "i at 4s")
+	expectPanic(t, "callback -1 is cancelled, but Call never answered it", func() { timeline.CancelCall(-1) })
+	expectPanic(t, "callback 99 is cancelled, but Call never answered it", func() { timeline.CancelCall(99) })
+	expectPanic(t, "a nil function is called back at 4s", func() { timeline.Call(4*time.Second, nil) })
+}
+
+// calledCount counts the callbacks TestCallCancelCallAndCallingAllocateNothing
+// schedules as they are called.
+var calledCount int
+
+// countCall is a callback that captures nothing, so scheduling it allocates
+// nothing.
+func countCall(*game, WriteTimeline[game, depth]) { calledCount++ }
+
+func TestCallCancelCallAndCallingAllocateNothing(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	timeline := ElevateTimeline(probe.timeline)
+	// Each round schedules three callbacks, one in the past, cancels one,
+	// and steps past the other two, so the timeline stays at the size the
+	// first round grew it to.
+	round := func() {
+		timeline.Call(timeline.Now()+time.Millisecond, countCall)
+		cancelledIndex := timeline.Call(timeline.Now()+time.Millisecond, countCall)
+		timeline.Call(timeline.Now()-time.Millisecond, countCall)
+		timeline.CancelCall(cancelledIndex)
+		step(nil, time.Millisecond, probe.model, probe.timeline)
+	}
+	round()
+	if calledCount != 2 {
+		t.Fatalf("a round called %d callbacks, want 2", calledCount)
+	}
+	if allocations := testing.AllocsPerRun(100, round); allocations != 0 {
+		t.Fatalf("Call, CancelCall and Step allocated %v times per round", allocations)
+	}
+	// A closure that captures a value allocates once, as it is made, and
+	// Call nothing more.
+	captured := 0
+	callCapturing := func() {
+		timeline.Call(timeline.Now(), func(*game, WriteTimeline[game, depth]) { calledCount += captured })
+		step(nil, 0, probe.model, probe.timeline)
+		captured++
+	}
+	callCapturing()
+	if allocations := testing.AllocsPerRun(100, callCapturing); allocations != 1 {
+		t.Fatalf("Call of a capturing closure allocated %v times, want its closure's 1", allocations)
+	}
+}

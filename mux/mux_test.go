@@ -182,6 +182,23 @@ func newTestGame() *game {
 
 type menu struct{ Opacity float32 }
 
+// battle is a model whose fighters die: a dead fighter stays in it, marked,
+// while it fades out, and a callback purges it at the fade's end.
+type battle struct {
+	Fighters []fighter
+	// FreeSlots holds the slots of Fighters purged, which a new fighter
+	// takes.
+	FreeSlots []int64
+	// Reserves keys fighters by their names, which are interned.
+	Reserves map[unitName]fighter
+}
+
+// fighter is a battle's unit, whose opacity fades when it dies.
+type fighter struct {
+	Opacity float32
+	Dead    bool
+}
+
 // testPlugin runs init as its Init.
 type testPlugin struct {
 	init func(configurator *kernel.Configurator)

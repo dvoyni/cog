@@ -34,11 +34,20 @@ type timelineState[M any, D comparable] struct {
 	// the model crosses is keyed by, other than an integer type. MakePath
 	// fills it, and the model's registration holds it too.
 	keyTables *[]*keyTable
+	// callbacks holds each callback still to come, the latest start first,
+	// and of those that start together, the one scheduled last first, so the
+	// next to come due lies at its end.
+	callbacks []scheduledCallback
+	// callbackCache holds each callback's function by its index, nil at an
+	// index free for the next Call.
+	callbackCache []func(model *M, timeline WriteTimeline[M, D])
+	// freeCallbackIndices holds the indices free in callbackCache.
+	freeCallbackIndices []int
 }
 
 // step is the body of Tasks.Step: it advances the timeline's time by delta,
-// then samples every path's overrides at the new time. modelHandle reads
-// nothing yet; it declares the write lock on the model that Step holds.
+// samples every path's overrides at the new time, and then calls each
+// callback that came due, in time order, given the model.
 func step[M any, D comparable](_ *kernel.Kernel, delta time.Duration, modelHandle kernel.Write[*M], timelineHandle kernel.Write[Timeline[M, D]]) kernel.NoResult {
 	state := timelineHandle.Get().state
 	state.now += delta
@@ -46,6 +55,18 @@ func step[M any, D comparable](_ *kernel.Kernel, delta time.Duration, modelHandl
 		if path != nil {
 			path.takeSample(state.now, state.easings)
 		}
+	}
+	// The callback leaves the schedule and the cache before it is called, so
+	// the callbacks it schedules or cancels find both as they stand, and one
+	// it schedules at or before now is called in turn.
+	model := modelHandle.Get()
+	for lastIndex := len(state.callbacks) - 1; lastIndex >= 0 && state.callbacks[lastIndex].start <= state.now; lastIndex = len(state.callbacks) - 1 {
+		index := state.callbacks[lastIndex].index
+		function := state.callbackCache[index]
+		state.callbacks = state.callbacks[:lastIndex]
+		state.callbackCache[index] = nil
+		state.freeCallbackIndices = append(state.freeCallbackIndices, index)
+		function(model, WriteTimeline[M, D]{timelineSide[M, D]{state}})
 	}
 	return kernel.NoResult{}
 }
@@ -200,4 +221,12 @@ func (s *timelineState[M, D]) walk[T any](path Path[M, T], model *M, fixedHoles 
 			return
 		}
 	}
+}
+
+// scheduledCallback is a callback still to come, as the timeline keeps it:
+// its start and the index of its function in the timeline's cache, so the
+// timeline holds no func value.
+type scheduledCallback struct {
+	start time.Duration
+	index int
 }

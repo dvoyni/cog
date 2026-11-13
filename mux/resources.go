@@ -3,6 +3,8 @@ package mux
 import (
 	"fmt"
 	"iter"
+	"slices"
+	"sort"
 	"time"
 
 	"github.com/dvoyni/cog/kernel"
@@ -12,8 +14,9 @@ import (
 // RegisterModel[M, D] and read in a later plugin's Init with
 // configurator.Resource[mux.Tasks[M, D]]().
 type Tasks[M any, D comparable] struct {
-	// Step advances the timeline by the delta it is given and samples every
-	// active override at the new time, holding the write locks on *M and
+	// Step advances the timeline by the delta it is given, samples every
+	// active override at the new time, and then calls each callback that
+	// came due, in time order, holding the write locks on *M and
 	// Timeline[M, D]. mux schedules it nowhere: its user does, before the
 	// jobs that read the timeline, as a game steps once per rendered frame
 	// with the frame's delta, before its views.
@@ -138,6 +141,48 @@ func (w WriteTimeline[M, D]) Hold[T any](path Path[M, T], start time.Duration, v
 	w.state.scheduleOverride(path, override[D, T]{holes: path.compiled.makeHoles[D](holes), start: start, length: length, from: value, to: value, easing: EasingLinear, isHold: true})
 }
 
+// Call schedules function to be called back at start on the timeline's
+// clock, given the model and the timeline's writing side, and answers the
+// callback's index, which CancelCall takes. The timeline keeps function in
+// its cache, and of the callback only start and the index, so it stays plain
+// data: callbacks are not saved with it. function may capture anything,
+// which is its own allocation; Call allocates nothing more once the timeline
+// has grown.
+//
+// Step calls each callback once, after it samples and retires the
+// overrides, at the first Step at or past its start, so one scheduled before
+// Now is called at the next. Callbacks are called in time order, and those
+// that start together in the order scheduled. A callback changes the model
+// and schedules on the timeline as an update does, such as purging a unit
+// whose fade has ended. Overrides it schedules show from the next Step, but a
+// callback it schedules at or before Now is called in the same Step, in turn,
+// so a callback that keeps scheduling another at Now never lets Step end.
+//
+// Once its callback is called or cancelled, an index is free, and the next
+// Call may answer it for another callback.
+//
+// A nil function panics.
+func (w WriteTimeline[M, D]) Call(start time.Duration, function func(model *M, timeline WriteTimeline[M, D])) int {
+	if function == nil {
+		panic(fmt.Sprintf("mux: a nil function is called back at %v", start))
+	}
+	state := w.state
+	var index int
+	if lastIndex := len(state.freeCallbackIndices) - 1; lastIndex >= 0 {
+		index = state.freeCallbackIndices[lastIndex]
+		state.freeCallbackIndices = state.freeCallbackIndices[:lastIndex]
+	} else {
+		index = len(state.callbackCache)
+		state.callbackCache = append(state.callbackCache, nil)
+	}
+	state.callbackCache[index] = function
+	// The callbacks are kept latest first, so this one goes before every one
+	// starting with it or earlier, which come due before it.
+	insertionIndex := sort.Search(len(state.callbacks), func(callbackIndex int) bool { return state.callbacks[callbackIndex].start <= start })
+	state.callbacks = slices.Insert(state.callbacks, insertionIndex, scheduledCallback{start: start, index: index})
+	return index
+}
+
 // End answers when the address holes fill on path is next free: the end of
 // the last of its overrides to end, or Now when it has none left or the last
 // has ended. An override started at End therefore follows whatever plays at
@@ -182,4 +227,26 @@ func (w WriteTimeline[M, D]) Cancel[T any](path Path[M, T], holes ...int64) {
 	if state := w.state.findPathState(path); state != nil {
 		state.keepOverrides(func(scheduled *override[D, T]) bool { return scheduled.holes != filledHoles })
 	}
+}
+
+// CancelCall drops the callback at index, an index Call answered, if it is
+// still to come: Step never calls it, and its index is free for the next
+// Call. An index whose callback was called or cancelled is free, so
+// CancelCall drops nothing there, unless Call has since answered it for
+// another callback, which it then drops: a game cancels only a callback it
+// knows is still to come.
+//
+// An index Call never answered panics.
+func (w WriteTimeline[M, D]) CancelCall(index int) {
+	state := w.state
+	if index < 0 || index >= len(state.callbackCache) {
+		panic(fmt.Sprintf("mux: callback %d is cancelled, but Call never answered it", index))
+	}
+	if state.callbackCache[index] == nil {
+		return
+	}
+	callbackIndex := slices.IndexFunc(state.callbacks, func(scheduled scheduledCallback) bool { return scheduled.index == index })
+	state.callbacks = slices.Delete(state.callbacks, callbackIndex, callbackIndex+1)
+	state.callbackCache[index] = nil
+	state.freeCallbackIndices = append(state.freeCallbackIndices, index)
 }
