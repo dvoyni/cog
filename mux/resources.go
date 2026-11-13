@@ -32,9 +32,11 @@ type Timeline[M any, D comparable] struct{ timelineSide[M, D] }
 //
 // Holes the path does not take panic, naming the path and their count.
 func (t Timeline[M, D]) Current[T any](path Path[M, T], model *M, holes ...int64) (T, bool) {
-	filledHoles := path.compiled.makeHoles[D](holes)
 	if path.compiled.id < len(t.state.pathStates) {
-		if state, ok := t.state.pathStates[path.compiled.id].(*pathState[D, T]); ok {
+		// Get checks the holes on a path with nothing sampled, so only a path
+		// with a sample makes them into an address.
+		if state, ok := t.state.pathStates[path.compiled.id].(*pathState[D, T]); ok && len(state.sample) != 0 {
+			filledHoles := path.compiled.makeHoles[D](holes)
 			for _, sampled := range state.sample {
 				if sampled.holes == filledHoles {
 					return sampled.value, true
@@ -42,7 +44,7 @@ func (t Timeline[M, D]) Current[T any](path Path[M, T], model *M, holes ...int64
 			}
 		}
 	}
-	return path.Get(model)
+	return path.Get(model, holes...)
 }
 
 // ElevateTimeline answers the timeline a job holds the write lock on as its

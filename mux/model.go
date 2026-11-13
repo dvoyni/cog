@@ -25,7 +25,7 @@ func RegisterModel[M any, D comparable](configurator *kernel.Configurator) {
 	if depthType.Kind() != reflect.Array || depthType.Elem() != reflect.TypeFor[int64]() {
 		panic(fmt.Sprintf("mux: model %v is registered with depth %v, which is not an array of int64", modelType, depthType))
 	}
-	registry.models[modelType] = &modelRegistration{}
+	registry.models[modelType] = &modelRegistration{depthType: depthType}
 	configurator.InitResource(new(M))
 	configurator.InitResource(Timeline[M, D]{timelineSide[M, D]{state: &timelineState[M, D]{easings: registry.easings}}})
 	configurator.InitResource(Tasks[M, D]{Step: configurator.RegisterTask2(step[M, D])})
@@ -33,6 +33,9 @@ func RegisterModel[M any, D comparable](configurator *kernel.Configurator) {
 
 // modelRegistration is what the registry keeps of one registered model.
 type modelRegistration struct {
+	// depthType is the model's depth, an [N]int64: an address of the model
+	// holds up to N holes.
+	depthType reflect.Type
 	// paths holds every path made for the model, in the order made.
 	paths []*compiledPath
 }
