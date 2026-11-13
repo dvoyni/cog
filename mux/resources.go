@@ -47,6 +47,18 @@ func (t Timeline[M, D]) Current[T any](path Path[M, T], model *M, holes ...int64
 	return path.Get(model, holes...)
 }
 
+// Index answers the index the timeline interned key at, which is the hole
+// that reaches key's element through a map keyed by K, and true. It answers
+// false for a key never interned, whose element no path reaches. It writes
+// nothing, so a view looks keys up under the read lock.
+//
+// A K that keys no map a path of M crosses, or that is an integer type, whose
+// keys are their own holes, panics.
+func (t Timeline[M, D]) Index[K comparable](key K) (int64, bool) {
+	index, ok := t.state.findKeyTable[K]("looked up").indices.(map[K]int64)[key]
+	return index, ok
+}
+
 // ElevateTimeline answers the timeline a job holds the write lock on as its
 // writing side. Only the write handle gives it, so a job holding the read
 // lock cannot write.
@@ -90,4 +102,18 @@ func (w WriteTimeline[M, D]) Tween[T any](path Path[M, T], start time.Duration, 
 		w.state.pathStates[id] = state
 	}
 	state.overrides = append(state.overrides, override[D, T]{holes: filledHoles, start: start, length: length, from: from, to: to, easing: easing})
+}
+
+// Intern answers key's index in the timeline, which is the hole that reaches
+// key's element through a map keyed by K: the index key was given first, or,
+// for a key new to the timeline, the next of K's. An update interns the key
+// of each element it adds to such a map, and a game every key after loading,
+// since indices live one run. Path.Get reads the keys interned holding only
+// the model's read lock, so a job interns holding the model's write lock too,
+// as updates and callbacks do.
+//
+// A K that keys no map a path of M crosses, or that is an integer type, whose
+// keys are their own holes, panics.
+func (w WriteTimeline[M, D]) Intern[K comparable](key K) int64 {
+	return w.state.findKeyTable[K]("interned").intern(key)
 }

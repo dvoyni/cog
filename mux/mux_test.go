@@ -70,11 +70,31 @@ type squad struct {
 	Banner   float32
 }
 
-// platoon is a band of any number of units, under two flags.
+// platoon is a band of any number of units, under two flags, drilled in
+// formations numbered by a platform-wide int.
 type platoon struct {
 	Members []unit
 	Flags   [2]float32
+	Drills  map[int]float32
 }
+
+// unitName is a unit's name, a key every map keyed by it interns.
+type unitName string
+
+// cell is a tile of the battlefield, a struct key every map keyed by it
+// interns.
+type cell struct{ Column, Row int16 }
+
+// chronicle is a struct key larger than a map keeps in its slots, so a map
+// keyed by it holds each key through a pointer.
+type chronicle struct {
+	Era   int64
+	Notes [16]int64
+}
+
+// annal is an element larger than a map keeps in its slots, so a map of them
+// holds each through a pointer.
+type annal [36]float32
 
 type game struct {
 	Turn    int32
@@ -93,6 +113,28 @@ type game struct {
 	Heights  [][]float32
 	// Scouts holds pointers, which no path may cross.
 	Scouts []*unit
+	// UnitsByName keys units by their names, which are interned.
+	UnitsByName map[unitName]unit
+	// UnitsByID keys units by their ids, each its own hole.
+	UnitsByID map[uint32]unit
+	// Elevations keys each cell's height by the cell, which is interned.
+	Elevations map[cell]float32
+	// Morale is keyed by a signed integer narrower than a hole.
+	Morale map[int8]float32
+	// Bounties is keyed by an integer as wide as a hole, but unsigned.
+	Bounties map[uint64]float32
+	// Garrisons keys bands of any number of units by name: a map of slices.
+	Garrisons map[unitName][]unit
+	// Regions keys each region's heights by its number: a map of maps.
+	Regions map[int16]map[cell]float32
+	// Chronicles holds keys and elements a map keeps through pointers.
+	Chronicles map[chronicle]annal
+	// Wards is keyed by pointers, and Rumours by interfaces, which no path
+	// may cross.
+	Wards   map[*unit]float32
+	Rumours map[any]float32
+	// Captains holds pointers, which no path may cross.
+	Captains map[unitName]*unit
 }
 
 // newTestGame returns a game whose fields hold values no zero game does.
@@ -109,11 +151,24 @@ func newTestGame() *game {
 		Terrain: [2][3]float32{{1, 2, 3}, {4, 5, 6}},
 		Units:   []unit{{Position: vec2{X: 7, Y: 8}, Name: "bo"}, {Position: vec2{X: 9, Y: 10}, Name: "cy"}},
 		Platoons: []platoon{
-			{Members: []unit{{vitality: vitality{Health: 80}, Position: vec2{X: 11, Y: 12}}}, Flags: [2]float32{0.75, 1}},
-			// This platoon has no members: its slice is nil.
+			{
+				Members: []unit{{vitality: vitality{Health: 80}, Position: vec2{X: 11, Y: 12}}},
+				Flags:   [2]float32{0.75, 1},
+				Drills:  map[int]float32{-5: 0.125},
+			},
+			// This platoon has no members and no drills: its slice and its
+			// map are nil.
 			{Flags: [2]float32{1.25, 1.5}},
 		},
-		Heights: [][]float32{{1, 2}, {3, 4, 5}},
+		Heights:     [][]float32{{1, 2}, {3, 4, 5}},
+		UnitsByName: map[unitName]unit{"bo": {Position: vec2{X: 13, Y: 14}}, "cy": {vitality: vitality{Health: 90}}},
+		UnitsByID:   map[uint32]unit{7: {Name: "di", Position: vec2{X: 15, Y: 16}}, 1<<32 - 1: {Name: "ed"}},
+		Elevations:  map[cell]float32{{Column: 1, Row: 2}: 0.5, {Column: -1}: 1.5},
+		Morale:      map[int8]float32{-128: 0.25, 3: 0.75},
+		Bounties:    map[uint64]float32{1<<64 - 1: 2.5, 4: 3.5},
+		Garrisons:   map[unitName][]unit{"north": {{vitality: vitality{Health: 15}}, {vitality: vitality{Health: 25}}}},
+		Regions:     map[int16]map[cell]float32{2: {{Column: 3, Row: 4}: 6.5}},
+		Chronicles:  map[chronicle]annal{{Era: 1, Notes: [16]int64{15: 9}}: {35: 7.5}},
 	}
 }
 

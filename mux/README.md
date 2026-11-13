@@ -14,17 +14,29 @@ nothing but the standard library and the [kernel](../kernel).
   `[N]int64` the game declares: `type GameDepth [12]int64`. A kernel holds
   any number of models, such as the menu's and the game's.
 - A **path**, `MakePath[M, T](configurator, "Squads[].Members[2].Position")`,
-  names one property through the model's struct fields, arrays and slices,
-  in any order. Each `[]` is a **hole**, which every read and override fills
-  with an `int64`; a literal index leaves none. A path is compiled once, by
-  reflection, and `path.Get(model, holes...)` reads the model's own value
-  through it, allocating nothing, or answers `false` for an index outside its
-  array or slice. A path holds no more holes than the model's depth.
+  names one property through the model's struct fields, arrays, slices and
+  maps, in any order. Each `[]` is a **hole**, which every read and override
+  fills with an `int64`; a literal index leaves none. A path is compiled
+  once, by reflection, and `path.Get(model, holes...)` reads the model's own
+  value through it, allocating nothing, or answers `false` for an index
+  outside its array or slice, or a key its map lacks. A path holds no more
+  holes than the model's depth.
 - A path keeps no pointer into the model, so it reads a slice the model
-  moved to a new array, and a copy of the model. A hole picks a slice's element by
-  its index, so the game moves no element of a slice while an override
-  addresses it: it frees elements into a free list, or marks them dead,
-  rather than closing the gaps.
+  moved to a new array, a map the model replaced, and a copy of the model. A
+  hole picks a slice's element by its index, so the game moves no element of
+  a slice while an override addresses it: it frees elements into a free
+  list, or marks them dead, rather than closing the gaps.
+- A map may be keyed by any comparable type, with nothing registered for it.
+  An integer key is its own hole. Any other key is **interned** in the
+  model's timeline by an update, `writeTimeline.Intern(key)`, which answers
+  its index, the hole that reaches its element; a view looks the index up
+  with `timeline.Index(key)`, which writes nothing. Indices live one run, so
+  a game interns every key again after loading.
+- A map step reaches the runtime's own map access, `reflect.mapaccess`,
+  through `//go:linkname`, and reads a map type's runtime descriptor out of
+  its `reflect.Type`: both lie outside Go's compatibility promise. A test
+  holds every map step to a typed lookup over the same map, so a change in
+  either fails it.
 - **`Timeline[M, D]`** is the reading side of the model's timeline, and
   **`WriteTimeline[M, D]`**, from `ElevateTimeline`, its writing side. Both
   answer `Now`, the timeline's own time.

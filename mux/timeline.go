@@ -1,6 +1,8 @@
 package mux
 
 import (
+	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/dvoyni/cog/kernel"
@@ -25,6 +27,10 @@ type timelineState[M any, D comparable] struct {
 	// pathStates holds each path's state by the path's id, nil for a path
 	// never tweened. It grows as paths are first tweened.
 	pathStates []sampler
+	// keyTables holds the table of each type of key that a map a path of
+	// the model crosses is keyed by, other than an integer type. MakePath
+	// fills it, and the model's registration holds it too.
+	keyTables *[]*keyTable
 }
 
 // step is the body of Tasks.Step: it advances the timeline's time by delta,
@@ -39,4 +45,19 @@ func step[M any, D comparable](_ *kernel.Kernel, delta time.Duration, modelHandl
 		}
 	}
 	return kernel.NoResult{}
+}
+
+// findKeyTable answers the table of keys of type K, for a key that is the
+// subject of operation. A K that no map a path of the model crosses is keyed
+// by, or that is an integer type, has none, and panics.
+func (s *timelineState[M, D]) findKeyTable[K comparable](operation string) *keyTable {
+	// Only K's table holds a map[K]int64, so asserting each table's finds
+	// it, with no type hashed.
+	for _, table := range *s.keyTables {
+		if _, ok := table.indices.(map[K]int64); ok {
+			return table
+		}
+	}
+	keyType := reflect.TypeFor[K]()
+	panic(fmt.Sprintf("mux: a %v key is %s, but no path of model %v crosses a map interning %v keys", keyType, operation, reflect.TypeFor[M](), keyType))
 }

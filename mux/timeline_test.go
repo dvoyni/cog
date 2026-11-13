@@ -307,3 +307,163 @@ func TestTweenStepAndCurrentAllocateNothing(t *testing.T) {
 		t.Fatalf("Tween, Step and Current allocated %v times per round", allocations)
 	}
 }
+
+func TestInternGivesEachKeyOneIndexThatIndexFinds(t *testing.T) {
+	_, timeline, writeTimeline := spawnGamePathSet(t)
+	testCases := []struct {
+		name string
+		got  int64
+		want int64
+	}{
+		{`Intern(unitName("bo"))`, writeTimeline.Intern(unitName("bo")), 0},
+		{`Intern(unitName("cy"))`, writeTimeline.Intern(unitName("cy")), 1},
+		{`Intern(unitName("bo")) again`, writeTimeline.Intern(unitName("bo")), 0},
+		// Each key type numbers its own keys.
+		{"Intern(cell{})", writeTimeline.Intern(cell{}), 0},
+		{"Intern(chronicle{})", writeTimeline.Intern(chronicle{}), 0},
+		{"Intern(cell{Row: 1})", writeTimeline.Intern(cell{Row: 1}), 1},
+		{`Intern(unitName("di"))`, writeTimeline.Intern(unitName("di")), 2},
+	}
+	for _, testCase := range testCases {
+		if testCase.got != testCase.want {
+			t.Errorf("%s answered %d, want %d", testCase.name, testCase.got, testCase.want)
+		}
+	}
+	expectIndex(t, timeline, unitName("cy"), 1, true)
+	expectIndex(t, timeline, unitName("di"), 2, true)
+	expectIndex(t, timeline, unitName("zed"), 0, false)
+	expectIndex(t, timeline, cell{Row: 1}, 1, true)
+	expectIndex(t, timeline, cell{Column: 1}, 0, false)
+}
+
+// expectIndex fails t unless timeline answers want and wantOK for key's
+// index.
+func expectIndex[K comparable](t *testing.T, timeline Timeline[game, depth], key K, want int64, wantOK bool) {
+	t.Helper()
+	if got, ok := timeline.Index(key); got != want || ok != wantOK {
+		t.Errorf("Index(%#v) answered %d, %v, want %d, %v", key, got, ok, want, wantOK)
+	}
+}
+
+func TestInternAndIndexPanicForAKeyTypeNoPathsMapInterns(t *testing.T) {
+	_, timeline, writeTimeline := spawnGamePathSet(t)
+	// game's maps key units by unitName, never by a plain string.
+	expectPanic(t, "a string key is interned, but no path of model mux.game crosses a map interning string keys", func() {
+		writeTimeline.Intern("bob")
+	})
+	expectPanic(t, "a string key is looked up, but no path of model mux.game crosses a map interning string keys", func() {
+		timeline.Index("bob")
+	})
+	// An integer key is its own hole, so no map interns one.
+	expectPanic(t, "a uint32 key is interned, but no path of model mux.game crosses a map interning uint32 keys", func() {
+		writeTimeline.Intern(uint32(7))
+	})
+	// Only a map a path crosses interns keys.
+	expectPanic(t, "a *mux.unit key is looked up, but no path of model mux.game crosses a map interning *mux.unit keys", func() {
+		timeline.Index(&unit{})
+	})
+}
+
+func TestTweenOnAMapElementShowsAtItsKeysIndex(t *testing.T) {
+	var elevation Path[game, float32]
+	var morale Path[game, float32]
+	probe := spawnTimelineProbe(t, func(configurator *kernel.Configurator) {
+		elevation = MakePath[game, float32](configurator, "Elevations[]")
+		morale = MakePath[game, float32](configurator, "Morale[]")
+	})
+	model := probe.model.Get()
+	model.Elevations = map[cell]float32{{Column: 1}: 3, {Column: 2}: 4}
+	model.Morale = map[int8]float32{-1: 5}
+	timeline := ElevateTimeline(probe.timeline)
+	east := timeline.Intern(cell{Column: 1})
+	west := timeline.Intern(cell{Column: 2})
+	timeline.Tween(elevation, 0, 0, 10, time.Second, EasingLinear, east)
+	timeline.Tween(morale, 0, 0, 10, time.Second, EasingLinear, -1)
+	probe.runStep(250 * time.Millisecond)
+	testCases := []struct {
+		name   string
+		path   Path[game, float32]
+		hole   int64
+		want   float32
+		wantOK bool
+	}{
+		{"Elevations[{1 0}]", elevation, east, 2.5, true},
+		{"Elevations[{2 0}]", elevation, west, 4, true},
+		{"Elevations[] at a hole no key was interned for", elevation, west + 1, 0, false},
+		{"Morale[-1]", morale, -1, 2.5, true},
+		{"Morale[255], which no int8 holds", morale, 255, 0, false},
+	}
+	for _, testCase := range testCases {
+		if got, ok := probe.timeline.Get().Current(testCase.path, model, testCase.hole); got != testCase.want || ok != testCase.wantOK {
+			t.Errorf("%s is current at %v, %v, want %v, %v", testCase.name, got, ok, testCase.want, testCase.wantOK)
+		}
+	}
+}
+
+// elevationSink, indexSink and foundSink keep what
+// TestMapStepsInternAndIndexAllocateNothing reads, so the compiler cannot
+// drop the reads it measures.
+var (
+	elevationSink float32
+	indexSink     int64
+	foundSink     bool
+)
+
+func TestMapStepsInternAndIndexAllocateNothing(t *testing.T) {
+	var elevation Path[game, float32]
+	var unitPosition Path[game, vec2]
+	probe := spawnTimelineProbe(t, func(configurator *kernel.Configurator) {
+		elevation = MakePath[game, float32](configurator, "Elevations[]")
+		unitPosition = MakePath[game, vec2](configurator, "UnitsByName[].Position")
+	})
+	model := probe.model.Get()
+	model.Elevations = map[cell]float32{{Column: 1}: 3, {Column: 2}: 4}
+	timeline := ElevateTimeline(probe.timeline)
+	east := timeline.Intern(cell{Column: 1})
+	west := timeline.Intern(cell{Column: 2})
+	timeline.Intern(unitName("bo"))
+	// Each round tweens over two Steps, so the round before's tween ends at
+	// this round's Step and the timeline stays at the size the first rounds
+	// grew it to. Current reads the active tween, an element of the tweened
+	// path with none, and a key never interned; Intern and Index take keys
+	// known, and Index one never interned.
+	round := func() {
+		timeline.Tween(elevation, timeline.Now(), 0, 10, 2*time.Millisecond, EasingQuadInOut, east)
+		step(nil, time.Millisecond, probe.model, probe.timeline)
+		elevationSink, _ = probe.timeline.Get().Current(elevation, model, east)
+		elevationSink, _ = probe.timeline.Get().Current(elevation, model, west)
+		elevationSink, _ = probe.timeline.Get().Current(elevation, model, west+1)
+		indexSink = timeline.Intern(cell{Column: 2})
+		indexSink = timeline.Intern(unitName("bo"))
+		indexSink, foundSink = probe.timeline.Get().Index(unitName("bo"))
+		indexSink, foundSink = probe.timeline.Get().Index(unitName("zed"))
+		indexSink, foundSink = probe.timeline.Get().Index(cell{Column: 3})
+		positionSink, _ = unitPosition.Get(model, 0)
+	}
+	round()
+	round()
+	if got, _ := probe.timeline.Get().Current(elevation, model, east); got != 5 {
+		t.Fatalf("Elevations[{1 0}] is current at %v, want 5, the InOut tween halfway", got)
+	}
+	if allocations := testing.AllocsPerRun(100, round); allocations != 0 {
+		t.Fatalf("Tween, Step, Current, Intern and Index allocated %v times per round", allocations)
+	}
+}
+
+func TestInternOfANewKeyAllocatesOnlyWhileItsTablesGrow(t *testing.T) {
+	_, _, timeline := spawnGamePathSet(t)
+	const keyCount = 4096
+	var nextColumn int16
+	// AllocsPerRun interns keyCount new keys once before it counts, and
+	// once while it counts, so the tables grow from keyCount keys to twice
+	// that.
+	allocations := testing.AllocsPerRun(1, func() {
+		for range keyCount {
+			timeline.Intern(cell{Column: nextColumn, Row: 1})
+			nextColumn++
+		}
+	})
+	if allocations >= keyCount/64 {
+		t.Fatalf("interning %d new keys allocated %v times, want fewer than one for every 64 keys: only while the tables grow", keyCount, allocations)
+	}
+}
