@@ -201,7 +201,7 @@ and a **test author** testing a plugin that draws.
   - `AcquireBuffer(path)`.
 
   Each is given back with its `Release…`. Acquire and release are the Go rules' pool pair: a load hands out the shared asset or a fresh one.
-- **Made assets** are made from memory or from other assets: `MakeMesh`, `MakeMaterial`, and buffers and textures filled from a slice. Each is given back with its `Release…`. A made asset has no key, and its maker releases it once.
+- **Made assets** are made from memory or from other assets: `MakeMesh`, `MakeMaterial`, and buffers and textures filled from a slice. Each is given back with its `Release…`. A made asset has no key, and its maker releases it once. A made texture carries every usage its format allows, as a temporary texture does, so it can be a pass target kept across frames, such as a history or a render-to-texture layer.
 - **A load is ready in the frame that asks for it.** The GPU object exists when the call returns, and there is no loading state, no ready event and no callback:
   - **Texture:** `image.DecodeConfig` reads only the header, which with the colour space and mipmaps option fixes the descriptor.
   - **Buffer:** `fs.Stat` gives the size, and the buffer is made with every usage, the indirect one included.
@@ -228,9 +228,15 @@ and a **test author** testing a plugin that draws.
 ([render: how a material binds its parameters, its variants, and the pipelines it shares](https://github.com/dvoyni/cog/issues/808))
 
 - **WGSL only,** through gfx's `PreprocessShader`, which is v1's preprocessor in the backend. A variant is a shader acquired with its defines; WGSL `override` constants are not used.
+- **Entry points follow WebGPU's rule** ([render: shader entry points](https://github.com/dvoyni/cog/issues/852)):
+  - A material names its vertex and fragment functions; a compute pass names its compute function with `SetShader(shader, entryPoint)`.
+  - An empty name means the shader's only function of that stage. A file with one of each names nothing; a file with several, such as a depth-only path beside a colour path or a culling file's kernels, names the one it wants.
+  - Entry points are not part of a variant's asset key: one module serves every function in it. They are part of the pipeline key.
+  - A missing name, or several functions of a stage with none named, is refused and reported once: at `MakeMaterial` for a material, whose draws are then skipped, and at a dispatch's first pipeline for a compute function, the dispatch then skipped.
 - **Named reflection from gfx** (see *Delta to gfx*):
   - each binding's name, group, number and kind;
-  - a buffer struct's size and members.
+  - a buffer struct's size and members;
+  - the entry points that use each binding.
 - **A parameter's level is its group:**
 
   | Group | Holds |
@@ -241,9 +247,13 @@ and a **test author** testing a plugin that draws.
   | `@group(3)` | reserved: a shader declaring it is refused and reported once |
 
 - **render builds every pipeline layout itself,** never WebGPU's "auto". A group's layout holds every binding the shader declares, used or not. Identical layouts are interned, so shaders sharing an include share one `@group(0)` layout and a pass's parameters are one bind group. Unused groups below the highest get an empty layout.
-- **Dynamic offsets:** each uniform block and storage buffer in `@group(0)` and `@group(2)` is bound at a dynamic offset. A pipeline may have at most 8 such uniform blocks and 4 such storage buffers, WebGPU's defaults; a shader over that is refused by gfx's limit check and reported once.
+- **Dynamic offsets, by group and kind** ([render: the dynamic storage-buffer budget](https://github.com/dvoyni/cog/issues/853)):
+  - Uniform blocks in `@group(0)` and `@group(2)` bind at a dynamic offset, at most 8 per pipeline, WebGPU's default.
+  - Storage buffers bind at a dynamic offset in `@group(2)` only, at most 4 per pipeline, which is also all the fork's Metal backend offers.
+  - Storage buffers in `@group(0)` bind statically. A pass's parameters are one bind group per pass, cached by their resources, so a made or loaded buffer there costs nothing per frame, and a forward+ shader's lights, clusters, light indices, per-object data and shadow data fit under the limit of 8 storage buffers per stage.
+  - A shader over any of these limits is refused by gfx's limit check and reported once.
 - **The pipeline cache:**
-  - The key is the variant, render state, the mesh's vertex layout and instance buffers' layouts, the pass's target formats, depth format and sample count, the topology and the strip index format.
+  - The key is the variant and its vertex and fragment entry points, render state, the mesh's vertex layout and instance buffers' layouts, the pass's target formats, depth format and sample count, the topology and the strip index format. A compute pipeline's key is its variant and its compute entry point.
   - A pipeline is freed with its shader and never evicted otherwise.
   - A failure stays under its key and is reported once, and its draws are skipped.
 - **The first draw of a new key** makes its pipeline and bind groups synchronously in the recording job. render's design and the draw calls document that hitch.
@@ -259,11 +269,22 @@ and a **test author** testing a plugin that draws.
 
 ([render: how a material binds its parameters, its variants, and the pipelines it shares](https://github.com/dvoyni/cog/issues/808), changed by [render on the kernel](https://github.com/dvoyni/cog/issues/811))
 
+- **A material is made from a descriptor,** `MakeMaterial(MaterialDescriptor{Label, Shader, State, VertexEntryPoint, FragmentEntryPoint})`, as a mesh is.
+  - A shader with no `@fragment` makes a material with no fragment stage. It draws only in passes without colour targets, such as shadow maps and depth prepasses. Drawn into a pass with colour targets, it is refused and reported once, and its draws are skipped.
+  - A material with a fragment function drawn into a pass with no colour targets keeps its fragment function with no targets, so alpha-tested shadows still discard.
 - **A parameter is a whole binding:** a texture, a sampler, a buffer, or a uniform block given as a Go struct. The struct is checked once for each Go type and binding: its size, and each member's offset in order, ignoring names.
 - **Setters, one for each kind, by name:**
   - a material's: `SetMaterialTexture`, `SetMaterialSampler`, `SetMaterialBuffer`, and `SetMaterialUniform[T]` as a generic method;
   - pass parameters: `SetPassTexture`, `SetPassSampler`, `SetPassBuffer` and `SetPassUniform[T]`, set right after a pass begins;
   - draw parameters: `SetTexture`, `SetSampler`, `SetBuffer` and `SetUniform[T]`.
+- **Texture views** ([render: texture views as parameter values](https://github.com/dvoyni/cog/issues/854)):
+  - A texture view is a value, `TextureView{Texture, BaseMipLevel, MipLevelCount, BaseLayer, LayerCount, Dimension, Aspect}`: zero counts mean the rest, and a zero dimension or aspect means the binding's. It is bound with `SetMaterialTextureView`, `SetPassTextureView`, `SetTextureView` for draw parameters and the compute pass's `SetTextureView`, each beside its `…Texture` neighbour; a texture handle alone is the whole texture.
+  - A view names a range of mips and layers, a view dimension (a cube seen as a 2D array, one layer of an array seen as 2D) and an aspect. An aspect left zero comes from the binding: a depth binding over a depth-stencil texture gets the depth aspect.
+  - A storage-texture binding given a whole texture binds its first mip level; given a view, the view names exactly one.
+  - Reading a texture's bytes as another format, such as sRGB as linear, is designed for later: WebGPU needs it listed when the texture is made.
+  - render interns gfx views by texture and view, made at first bind and freed with their texture. A pooled temporary keeps its handle across frames, so views over it are reused, allocation-free once warm.
+  - A view that doesn't fit its binding (dimension, sample type, aspect, more than one mip for a storage binding) or names mips or layers its texture lacks is refused, reported once per shader and name, and the binding draws its default.
+  - A sampled texture or view overlapping a target of the pass it is bound in is caught when bound, reported once, and the binding draws its default, so the list's encoder survives the mistake a bloom chain without views would make.
 - **A draw uses the values its material holds when the draw is recorded.**
   - A material changed after it was drawn in the frame gets a new version: its uniform blocks copied into the arena and a new bind group. Each version allocates a fixed count, which the per-frame gate checks.
   - Values that change between most draws belong in draw parameters, which bind at dynamic offsets and make no bind group.
@@ -280,7 +301,7 @@ and a **test author** testing a plugin that draws.
   | sampler | linear, clamp to edge |
   | comparison sampler | less-equal |
   | uniform block | zeros of its size |
-  | storage buffer or texture | the draw is skipped, reported once |
+  | storage buffer or texture | a shared placeholder when no running entry point reads it; otherwise the draw is skipped, reported once |
 
 - **Mismatches:**
   - A name the shader lacks is ignored silently.
@@ -296,8 +317,9 @@ and a **test author** testing a plugin that draws.
 
 ([render: per-draw and per-instance data without push constants](https://github.com/dvoyni/cog/issues/810))
 
-- **Uniform blocks and storage buffers of pass and draw parameters** live in the temporary-buffer arena.
-  - Setting one copies its bytes there, and a draw rebinds the same bind group at a new offset.
+- **Uniform blocks of pass and draw parameters, and storage buffers given as temporaries,** live in the temporary-buffer arena.
+  - Setting a block copies its bytes there, and a draw rebinds the same bind group at a new offset.
+  - A temporary range given as a `@group(0)` storage parameter binds statically, so it costs a new bind group for its pass every frame, which allocates a fixed count the per-frame gate checks. Data a whole pass reads goes in a made buffer written with `WriteBuffer` each frame, which allocates nothing; data that varies per draw goes in a draw parameter.
   - Each block takes at least 256 bytes. A user drawing thousands of small values puts them in one storage array read at `instance_index`.
 - **Each command list takes arena chunks of its own,** so concurrent lists never contend.
   - A list's chunks go to the GPU in one `WriteBuffer` each when the list ends.
@@ -335,7 +357,7 @@ and a **test author** testing a plugin that draws.
   - `SetMaterial(material)` selects the material for the draws after it and resets every draw parameter and instance buffer.
   - `Draw(mesh, DrawArgs{InstanceCount, FirstInstance})` draws the whole mesh. A part of a mesh that shares its buffers with others is a mesh of its own, over ranges of those buffers.
   - `DrawVertices(topology, vertexCount, DrawArgs{…})` draws with no mesh. It binds no per-vertex buffer, and its topology's zero is a triangle list. A shader whose vertex stage declares a per-vertex input is refused and reported once, as the call's doc comment says.
-- **Writes land before the whole frame:** a write fills a buffer or texture for the whole frame, and two writes to one region leave the last. To change data between passes, a user writes a temporary buffer and copies it at that point in a command list.
+- **Writes land before the whole frame:** a write fills a buffer or texture for the whole frame, and two writes to one region leave the last. `WriteTexture` writes a region of one mip level and one layer, so an atlas page lands in a layer of a 2D-array texture. To change data between passes, a user writes a temporary buffer and copies it at that point in a command list.
 - **The clear-after-draw check:** after the users' recording, render reports once each pass that clears a target an earlier pass of the frame drew into, in submit order.
 
 How a plugin's recording task reads, from the prototype with its verdicts applied:
@@ -362,15 +384,20 @@ func drawScene(k *kernel.Kernel, e render.FrameEvent, frame render.Frame, scene 
 
 ([render: what a pass declares, temporary buffers and textures, and how passes from several users are ordered](https://github.com/dvoyni/cog/issues/809))
 
-- **A compute pass is a run of dispatches** recorded in a command list among its passes. `SetShader` names the compute shader and resets its parameters, which are set by name in any group, with no levels. `Dispatch(x, y, z)` runs it. There is no compute material.
+- **A compute pass is a run of dispatches** recorded in a command list among its passes. `SetShader(shader, entryPoint)` names the compute shader and its function, an empty name meaning its only one, and resets its parameters, which are set by name in any group, with no levels. `Dispatch(x, y, z)` runs it. There is no compute material.
 - **Copies** (buffer to buffer, texture to texture, and between buffers and textures) **and buffer clears** are recorded between passes. gfx's backend inserts the barrier when a later pass samples what an earlier one wrote.
 - **Temporary textures:**
   - `frame.AcquireTemporaryTexture(descriptor)` pools them by descriptor, with every usage the format allows.
   - Each is held until the frame ends, with no reuse within the frame, and its contents are undefined when taken.
   - Its user hands it between its tasks through state of its own, acquired in a task the kernel orders before the tasks that draw into or sample it. Temporaries are not named.
 - **Temporary buffers:**
-  - `list.AcquireTemporaryBuffer(data)` answers a 256-byte-aligned range of the list's arena chunk, valid until the frame ends.
+  - `list.AcquireTemporaryBuffer[T](data []T)` answers a 256-byte-aligned range of the list's arena chunk holding `data`, valid until the frame ends. It is generic, as `SetUniform[T]` is, so a vertex slice or an index slice goes in as it is.
   - Taking one makes no gfx object.
+- **Temporary meshes** ([render: per-frame geometry in a vertex layout of its own](https://github.com/dvoyni/cog/issues/855)):
+  - `list.AcquireTemporaryMesh(MeshDescriptor{...})` answers a mesh valid until the frame ends, over buffer ranges: usually temporary buffers of the same list, or ranges of made buffers. It draws with `Draw`, as any mesh does.
+  - It is how per-frame geometry in a vertex layout of its own is drawn, such as canvas's triangles or a Dear ImGui-style UI. Each of ImGui's commands is one temporary mesh over sub-ranges of the frame's vertex and index buffers: the index range's offset is its first index, and the vertex range's offset is its base vertex. A draw still covers its whole mesh.
+  - Its vertex layout joins the pipeline key, compared by value, as a made mesh's does.
+  - Entries are pooled with their own arrays of vertex buffers, copied from the descriptor, so acquiring one allocates nothing once warm. It returns to the pool when the frame ends, and a draw of its handle after that is skipped and reported once.
 - **Arena chunks, temporary textures and draw-parameter bind groups** are freed after `TemporaryIdleFrames` unused.
 
 ### The frame on the kernel
@@ -479,6 +506,7 @@ render republishes gfx's events as its own, each nested inside gfx's publication
 - **Nothing render does per frame allocates once its pools have grown.** This is a rule in render's `AGENTS.md`, enforced by an allocation gate (see *Testing Decisions*).
 - **Allowed to allocate:**
   - each material version, a fixed count that the gate checks;
+  - each pass given a temporary range as a `@group(0)` storage parameter, a fixed count that the gate checks;
   - outside the frame: loads, first pipelines and bind groups, `MakeMaterial`, and the first temporary of a new descriptor.
 - **Gated at zero:**
   - a second acquire of a held key;
@@ -489,7 +517,7 @@ render republishes gfx's events as its own, each nested inside gfx's publication
 ### Delta to gfx
 
 - **Named reflection** ([render: how a material binds its parameters](https://github.com/dvoyni/cog/issues/808)):
-  - `Device` answers a shader module's bindings: each one's name, group, number and kind (view dimension, sample type, storage access and format), and a buffer struct's size and members (name, offset, size), declared bindings included.
+  - `Device` answers a shader module's bindings: each one's name, group, number and kind (view dimension, sample type, storage access and format), a buffer struct's size and members (name, offset, size), and the entry points that use it, declared bindings included.
   - The backend seam's reflection carries the same.
   - gogpu fills it from naga's IR, which it drops today.
   - The recording adapter answers it from queued answers, as it answers gfx's other reflection calls.
@@ -528,7 +556,7 @@ render republishes gfx's events as its own, each nested inside gfx's publication
 
 **Binding declarations.** The recording adapter parses no WGSL, and gfx gains no WGSL parsing.
 - **Where:** each test shader has a JSON file beside it, `<shader>.wgsl.json`.
-- **What:** each binding's group, number, name and kind (a texture with its sample type and view dimension, a sampler, a uniform block with its size and member offsets, a storage buffer), and a vertex entry point's inputs. A variant whose defines change its bindings has a section of its own.
+- **What:** each binding's group, number, name and kind (a texture with its sample type and view dimension, a sampler, a uniform block with its size and member offsets, a storage buffer) and the entry points that use it, and a vertex entry point's inputs. A variant whose defines change its bindings has a section of its own.
 - **Missing:** a shader compiled with no declaration fails the test, naming its path.
 - **Generated by `render/cmd/declarebindings`,** a small kernel app:
   - **Its plugins:** platform with a disk read mount, metronome, gfx, gogpu on the software adapter, render, and its own plugin.
