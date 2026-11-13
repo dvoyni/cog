@@ -1,6 +1,7 @@
 package mux
 
 import (
+	"math"
 	"slices"
 	"testing"
 	"time"
@@ -299,13 +300,17 @@ func TestTweenStepAndCurrentAllocateNothing(t *testing.T) {
 	// registered curve, and the paths' interpolators are float32's and int32's
 	// built in and heading's registered. Current reads the active tweens, an
 	// element of a tweened path with none, and paths with none, with and
-	// without holes, through arrays and slices.
+	// without holes, through arrays and slices. The camera's Y overlaps four
+	// tweens, and the heading a tween and a hold, which Step blends.
 	probe.model.Get().Terrain[0][0] = 7
 	probe.model.Get().Units = []unit{{vitality: vitality{Health: 6}}, {}}
 	probe.model.Get().Squads[1].Reserves = []unit{{vitality: vitality{Health: 9}}}
 	round := func() {
-		timeline.Tween(probe.cameraY, timeline.Now(), 0, 10, 2*time.Millisecond, EasingQuadInOut)
+		for range 4 {
+			timeline.Tween(probe.cameraY, timeline.Now(), 0, 10, 2*time.Millisecond, EasingQuadInOut)
+		}
 		timeline.Tween(headingPath, timeline.Now(), 0, 10, 2*time.Millisecond, EasingQuadInOut)
+		timeline.Hold(headingPath, timeline.Now(), 5, 2*time.Millisecond)
 		timeline.Tween(gaugePath, timeline.Now(), 0, 10, 2*time.Millisecond, EasingQuadInOut)
 		timeline.Tween(probe.terrain, timeline.Now(), 0, 10, 2*time.Millisecond, EasingQuadInOut, 1, 2)
 		timeline.Tween(probe.unitHealth, timeline.Now(), 0, 10, 2*time.Millisecond, EasingQuadInOut, 1)
@@ -532,7 +537,7 @@ func TestHoldWorksOnATypeNoInterpolatorTweens(t *testing.T) {
 	probe.expectCurrent(t, position, vec2{X: 1, Y: 2})
 }
 
-func TestHoldNeverCallsItsTypesInterpolator(t *testing.T) {
+func TestHoldCallsNoInterpolatorToMakeItsValue(t *testing.T) {
 	var position Path[game, vec2]
 	interpolatorCalls := 0
 	probe := spawnTimelineProbe(t, func(configurator *kernel.Configurator) {
@@ -671,8 +676,11 @@ func TestHoldEndAndCancelAllocateNothing(t *testing.T) {
 	// overrides end at this round's Step and the timeline stays at the size
 	// the first rounds grew it to. It holds a string, a bool and a float32,
 	// cancels a tween yet to be sampled and one running, and asks End of an
-	// address with overrides, one with none and a path never scheduled on.
+	// address with overrides, one with none and a path never scheduled on. The
+	// string is held twice, so Step shows the hold that weighs most, as on a
+	// type no interpolator blends.
 	round := func() {
+		timeline.Hold(probe.name, timeline.Now(), "bo", 2*time.Millisecond)
 		timeline.Hold(probe.name, timeline.Now(), "bo", 2*time.Millisecond)
 		timeline.Hold(probe.visible, timeline.Now(), true, 2*time.Millisecond)
 		timeline.Hold(probe.terrain, timeline.Now(), 5, 2*time.Millisecond, 0, 1)
@@ -719,28 +727,42 @@ func TestStepSamplesAPathInHoleOrder(t *testing.T) {
 	probe.expectSampledHoles(t, probe.terrain, depth{0, 0}, depth{0, 1}, depth{1, 0}, depth{1, 1}, depth{1, 2})
 }
 
-func TestCurrentFindsEachOfManyAddressesAtItsOverrideScheduledLast(t *testing.T) {
-	probe := spawnTimelineProbe(t, nil)
+func TestCurrentFindsEachOfManyAddressesOnOnePath(t *testing.T) {
+	var unitNamePath Path[game, string]
+	probe := spawnTimelineProbe(t, func(configurator *kernel.Configurator) {
+		unitNamePath = MakePath[game, string](configurator, "Units[].Name")
+	})
 	probe.model.Get().Units = make([]unit, 64)
 	for index := range probe.model.Get().Units {
 		probe.model.Get().Units[index].Health = int32(index)
+		probe.model.Get().Units[index].Name = "model"
 	}
 	timeline := ElevateTimeline(probe.timeline)
-	// Every odd unit is tweened twice, its units in falling order each
-	// time, so Step moves every override as it sorts them. Of the two at one
-	// address, the one scheduled last, from 200, is sampled.
-	for _, from := range []int32{100, 200} {
+	// Every odd unit is tweened and held twice, its units in falling order
+	// each time, so Step moves every override as it sorts them. The two at
+	// one address weigh the same and start together: the tweens blend
+	// halfway, and of the holds, on a type no interpolator tweens, the one
+	// scheduled last shows.
+	passes := []struct {
+		from int32
+		name string
+	}{{100, "first"}, {200, "second"}}
+	for _, pass := range passes {
 		for index := 63; index > 0; index -= 2 {
-			timeline.Tween(probe.unitHealth, 0, from, from+10, time.Second, EasingLinear, int64(index))
+			timeline.Tween(probe.unitHealth, 0, pass.from, pass.from+10, time.Second, EasingLinear, int64(index))
+			timeline.Hold(unitNamePath, 0, pass.name, time.Second, int64(index))
 		}
 	}
 	probe.runStep(500 * time.Millisecond)
 	for index := range 64 {
-		want := int32(index)
+		wantHealth := int32(index)
+		wantName := "model"
 		if index%2 == 1 {
-			want = 205
+			wantHealth = 155
+			wantName = "second"
 		}
-		probe.expectCurrent(t, probe.unitHealth, want, int64(index))
+		probe.expectCurrent(t, probe.unitHealth, wantHealth, int64(index))
+		probe.expectCurrent(t, unitNamePath, wantName, int64(index))
 	}
 }
 
@@ -767,5 +789,94 @@ func TestTweenStepAndCurrentOfManyAddressesOnOnePathAllocateNothing(t *testing.T
 	}
 	if allocations := testing.AllocsPerRun(100, round); allocations != 0 {
 		t.Fatalf("Tween, Step and Current of 256 addresses on one path allocated %v times per round", allocations)
+	}
+}
+
+func TestOverlappingOverridesBlendByTriangleWeight(t *testing.T) {
+	var headingPath Path[game, heading]
+	probe := spawnTimelineProbe(t, func(configurator *kernel.Configurator) {
+		headingPath = MakePath[game, heading](configurator, "Gauge.Heading")
+		RegisterInterpolator(configurator, turnShortestWay)
+	})
+	timeline := ElevateTimeline(probe.timeline)
+	// At 1s the first tween is a quarter through, weighing 0.5, at 2; the
+	// second, eased by QuadIn, a quarter through too, weighing 0.5, at 1; the
+	// hold halfway, weighing 1, at 20. Their average by weight is 10.75,
+	// which the fold reaches only by Linear easing, whatever theirs.
+	timeline.Tween(probe.cameraY, 0, 0, 8, 4*time.Second, EasingLinear)
+	timeline.Tween(probe.cameraY, 750*time.Millisecond, 0, 16, time.Second, EasingQuadIn)
+	timeline.Hold(probe.cameraY, 500*time.Millisecond, 20, time.Second)
+	// Before the others start and after they end, the first tween is alone,
+	// and shows its own value, though it weighs less than 1.
+	probe.expectSteps(t, []timedValue{
+		{250 * time.Millisecond, 0.5},
+		{750 * time.Millisecond, 10.75},
+		{750 * time.Millisecond, 3.5},
+	})
+	// Two headings of equal weight blend through heading's interpolator, the
+	// shortest way round from 350°, not back through 180°.
+	timeline.Hold(headingPath, timeline.Now(), 350, 2*time.Second)
+	timeline.Hold(headingPath, timeline.Now(), 10, 2*time.Second)
+	probe.runStep(time.Second)
+	probe.expectCurrent(t, headingPath, 360)
+}
+
+func TestOverridesThatAllWeighNothingShowTheOneStartedLast(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	timeline := ElevateTimeline(probe.timeline)
+	probe.runStep(time.Second)
+	// A tween so near its end that its progress rounds to 1 weighs nothing,
+	// as do a tween and a hold scheduled after it, which start now. Of those
+	// two, started last, the hold was scheduled last.
+	timeline.Tween(probe.cameraY, 0, 30, 9, time.Second+time.Nanosecond, EasingLinear)
+	timeline.Tween(probe.cameraY, time.Second, 5, 50, time.Second, EasingLinear)
+	timeline.Hold(probe.cameraY, time.Second, 7, time.Second)
+	probe.expectSteps(t, []timedValue{
+		{0, 7},
+		// Once they weigh something, the two left blend, the first tween
+		// having ended, and go on blending in the Steps that follow.
+		{250 * time.Millisecond, 11.625},
+		{250 * time.Millisecond, 17.25},
+	})
+}
+
+func TestATypeWithNoInterpolatorShowsTheOverrideThatWeighsMost(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	probe.model.Get().Hero.Name = "ada"
+	probe.model.Get().Hero.Visible = true
+	timeline := ElevateTimeline(probe.timeline)
+	// At 1s the first name hold is a quarter through, and the second and
+	// the fourth are halfway, weighing the same and more: of those two, the
+	// second started last, though the fourth was scheduled after it.
+	timeline.Hold(probe.name, 0, "bo", 4*time.Second)
+	timeline.Hold(probe.name, 500*time.Millisecond, "cy", time.Second)
+	timeline.Hold(probe.name, 750*time.Millisecond, "di", time.Second)
+	timeline.Hold(probe.name, 250*time.Millisecond, "ed", 1500*time.Millisecond)
+	// Both visibility holds are halfway at 1s: the first started last.
+	timeline.Hold(probe.visible, 500*time.Millisecond, false, time.Second)
+	timeline.Hold(probe.visible, 250*time.Millisecond, true, 1500*time.Millisecond)
+	probe.runStep(time.Second)
+	probe.expectCurrent(t, probe.name, "cy")
+	probe.expectCurrent(t, probe.visible, false)
+	probe.runStep(250 * time.Millisecond)
+	probe.expectCurrent(t, probe.name, "di")
+	probe.runStep(500 * time.Millisecond)
+	probe.expectCurrent(t, probe.name, "bo")
+}
+
+func TestTwoOverlappingTweensBlendWithNoJump(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	timeline := ElevateTimeline(probe.timeline)
+	// The second tween starts at 1s, halfway through the first, which ends
+	// at 2s. Alone, each moves 0.005 a millisecond; blended, they move 0.02.
+	timeline.Tween(probe.cameraY, 0, 0, 10, 2*time.Second, EasingLinear)
+	timeline.Tween(probe.cameraY, time.Second, 20, 30, 2*time.Second, EasingLinear)
+	previous := probe.stepAndRead(t, 990*time.Millisecond)
+	for probe.timeline.Get().Now() < 2010*time.Millisecond {
+		current := probe.stepAndRead(t, time.Millisecond)
+		if math.Abs(float64(current-previous)) > 0.025 {
+			t.Fatalf("the camera's Y jumped from %v to %v at %v", previous, current, probe.timeline.Get().Now())
+		}
+		previous = current
 	}
 }

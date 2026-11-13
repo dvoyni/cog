@@ -48,13 +48,16 @@
 //	writeTimeline := mux.ElevateTimeline(timeline)
 //	writeTimeline.Tween(zoom, writeTimeline.Now(), 1, 2, time.Second, mux.EasingLinear)
 //
-// A view reads each property's current value: the active tween's, or the
-// model's own when none is:
+// A view reads each property's current value: the blend of the active
+// overrides by weight, or the model's own when none is. Each weighs nothing
+// at its start and end, so a tween over a running one takes over with no
+// jump:
 //
 //	shown, ok := timeline.Get().Current(zoom, model.Get())
 //
 // A hold keeps a property at one value over a span. It calls no
-// interpolator, so it holds a property of any type, such as a bool. End
+// interpolator to make its value, so it holds a property of any type, such
+// as a bool, where overlapping overrides show the one that weighs most. End
 // answers when an address is next free, so an update can queue after
 // whatever plays there, and Cancel removes every override on an address:
 //
