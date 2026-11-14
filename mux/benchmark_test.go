@@ -451,6 +451,24 @@ func BenchmarkCancel(b *testing.B) {
 	})
 }
 
+// BenchmarkEnd times End per address: every unit is tweened, and Step has
+// sorted the path, so each round asks End of each unit, in index order.
+func BenchmarkEnd(b *testing.B) {
+	runAtEachCount(b, "overrides", func(b *testing.B, count int) {
+		spawned := spawnBenchmarkModel[depth](b, count)
+		timeline := ElevateTimeline(spawned.timeline)
+		for index := range int64(count) {
+			timeline.Tween(spawned.unitPosition, 0, vec2{}, vec2{X: 1, Y: 1}, time.Hour, EasingLinear, index)
+		}
+		spawned.runStepBody(time.Minute)
+		measure(b, count, "address", func() {
+			for index := range int64(count) {
+				endSink = timeline.End(spawned.unitPosition, index)
+			}
+		})
+	})
+}
+
 // BenchmarkCall times Call per callback, with its call: each round schedules
 // its callbacks at Now, and steps once to call them.
 func BenchmarkCall(b *testing.B) {

@@ -42,7 +42,8 @@ func (t Timeline[M, D]) Current[T any](path Path[M, T], model *M, holes ...int64
 	// Get checks the holes on a path with nothing sampled, so only a path
 	// with a sample makes them into an address.
 	if state := t.state.findPathState(path); state != nil && len(state.sample) != 0 {
-		filledHoles := path.compiled.makeHoles[D](holes)
+		var filledHoles D
+		path.compiled.fillHoles(&filledHoles, holes)
 		if value, ok := state.findSampledValue(&filledHoles); ok {
 			return value, true
 		}
@@ -120,7 +121,9 @@ func (w WriteTimeline[M, D]) Tween[T any](path Path[M, T], start time.Duration, 
 	if _, ok := path.compiled.interpolator.(interpolator[T]); !ok {
 		panic(fmt.Sprintf("mux: path %q is tweened, but no interpolator tweens its %v", path.compiled.text, path.compiled.propertyType))
 	}
-	w.state.scheduleOverride(path, override[D, T]{holes: path.compiled.makeHoles[D](holes), start: start, length: length, from: from, to: to, easing: easing})
+	scheduled := override[D, T]{start: start, length: length, from: from, to: to, easing: easing}
+	path.compiled.fillHoles(&scheduled.holes, holes)
+	w.state.scheduleOverride(path, scheduled)
 }
 
 // Hold schedules a hold of the property path names, at the address holes
@@ -140,7 +143,9 @@ func (w WriteTimeline[M, D]) Hold[T any](path Path[M, T], start time.Duration, v
 	if length <= 0 {
 		panic(fmt.Sprintf("mux: path %q is held over %v, which is no positive length", path.compiled.text, length))
 	}
-	w.state.scheduleOverride(path, override[D, T]{holes: path.compiled.makeHoles[D](holes), start: start, length: length, from: value, to: value, easing: EasingLinear, isHold: true})
+	scheduled := override[D, T]{start: start, length: length, from: value, to: value, easing: EasingLinear, isHold: true}
+	path.compiled.fillHoles(&scheduled.holes, holes)
+	w.state.scheduleOverride(path, scheduled)
 }
 
 // Call schedules function to be called back at start on the timeline's
@@ -204,17 +209,20 @@ func (w WriteTimeline[M, D]) MakeSequence(start time.Duration) Sequence[M, D] {
 // the address, and never starts in the past, and so does a sequence that
 // MakeSequence starts there.
 //
+// End finds the address's overrides by binary search, so it costs in
+// proportion to the log of the overrides on path. Those scheduled since the
+// last Step it searches too, while they were scheduled in hole order, as an
+// update moving units in index order schedules them; once one was scheduled
+// out of order, it walks them, and costs in proportion to them until the next
+// Step.
+//
 // Holes the path does not take panic, naming the path and their count.
 func (w WriteTimeline[M, D]) End[T any](path Path[M, T], holes ...int64) time.Duration {
-	filledHoles := path.compiled.makeHoles[D](holes)
+	var filledHoles D
+	path.compiled.fillHoles(&filledHoles, holes)
 	end := w.state.now
 	if state := w.state.findPathState(path); state != nil {
-		for overrideIndex := range state.overrides {
-			scheduled := &state.overrides[overrideIndex]
-			if scheduled.holes == filledHoles {
-				end = max(end, scheduled.start+scheduled.length)
-			}
-		}
+		state.visitOverrides(&filledHoles, func(scheduled *override[D, T]) { end = max(end, scheduled.start+scheduled.length) })
 	}
 	return end
 }
@@ -237,15 +245,15 @@ func (w WriteTimeline[M, D]) Intern[K comparable](key K) int64 {
 // or yet to start. From the next Step on, the address's current value is the
 // model's own, which may jump.
 //
-// Cancel walks every override on path, so it costs in proportion to them, and
-// cancelling each address of a path with thousands of overrides, one call
-// each, costs their count squared.
+// Cancel finds the address's overrides as End does, so it costs what End
+// costs, and moves no other override: Step retires those it cancelled.
 //
 // Holes the path does not take panic, naming the path and their count.
 func (w WriteTimeline[M, D]) Cancel[T any](path Path[M, T], holes ...int64) {
-	filledHoles := path.compiled.makeHoles[D](holes)
+	var filledHoles D
+	path.compiled.fillHoles(&filledHoles, holes)
 	if state := w.state.findPathState(path); state != nil {
-		state.keepOverrides(func(scheduled *override[D, T]) bool { return scheduled.holes != filledHoles })
+		state.cancelOverrides(&filledHoles, w.state.now)
 	}
 }
 

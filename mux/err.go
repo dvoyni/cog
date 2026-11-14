@@ -4,7 +4,7 @@ import "fmt"
 
 // holeMismatchError is the panic of a path given a number of holes other than
 // its own. It is a value, its message formatted only when read, so that the
-// checks raising it stay cheap enough to inline, as makeHoles is into every
+// checks raising it stay cheap enough to inline, as fillHoles is into every
 // Current and Tween.
 type holeMismatchError struct {
 	// path is the path given the holes.
