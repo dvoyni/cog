@@ -6,7 +6,7 @@ API between gfx and the plugins that draw. It was mapped in
 each section links the ticket that holds its detail. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md).
 
-Status: designed, not yet built.
+Status: being built. The plugin, its `Config`, `Handlers.RecordFrame` publishing `FrameEvent` inside gfx's `DrawEvent`, reports with their kind, and `rendertest`'s harness are built, from [render: the plugin, its frame event and rendertest's harness](https://github.com/dvoyni/cog/issues/826); the rest is designed, not yet built.
 
 ## Problem Statement
 

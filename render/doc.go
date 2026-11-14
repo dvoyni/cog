@@ -1,0 +1,16 @@
+// Package render is the immediate-mode rendering API between gfx and the
+// plugins that draw.
+//
+// An application lists render's plugin after gfx and platform, and each
+// plugin that draws after render. Such a plugin subscribes to FrameEvent,
+// schedules its recording tasks after the event's Ready, and joins them into
+// the out dependency it returns, so gfx flushes the frame only after them:
+//
+//	func recordScene(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event render.FrameEvent) (render.FrameEvent, kernel.JobHandle) {
+//		return event, ex.Join(in, ex.Schedule(drawScene, event, event.Ready).Handle())
+//	}
+//
+// A mistake render finds at run time is a Report, logged once and carried
+// past; its kind names it, so a test built on render/rendertest fails on a
+// report it did not expect.
+package render
