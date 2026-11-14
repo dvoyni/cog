@@ -14,3 +14,8 @@ type Texture = handle.Texture
 // pointer-free, comparable handle an ECS component can hold, its zero value
 // naming none. It lives only while the program runs.
 type Buffer = handle.Buffer
+
+// Shader names one of render's shaders, a variant loaded with its defines: a
+// pointer-free, comparable handle an ECS component can hold, its zero value
+// naming none. It lives only while the program runs.
+type Shader = handle.Shader

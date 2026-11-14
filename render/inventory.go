@@ -68,6 +68,29 @@ func (i Inventory) AcquireBuffer(path string, usage BufferUsageFlags) Buffer {
 	return table.loadedBuffers.acquire(table, i.device.Get(), i.files.Get(), bufferKey{path: path, usage: usage})
 }
 
+// AcquireShader hands out the variant of the shader at path in platform's FS
+// with defines, counting one more holder of it: every acquire of the same
+// path and defines, in any order, shares one variant until the last of them
+// is released. It is compiled when the call returns, in the caller's job:
+// read and preprocessed with defines, sorted by name, made a gfx module, and
+// given a layout for each group up to the highest its bindings declare, of
+// every binding it declares, used or not, an unused group's empty. Uniform
+// blocks of @group(0) and @group(2), and storage buffers of @group(2), bind
+// at dynamic offsets, and every binding is seen by each stage that may see
+// it. Identical layouts are shared between shaders, so shaders sharing an
+// include share its group's layout. Compiling is slow: a variant acquired
+// first while a frame records stalls that recording. A file that fails to
+// preprocess or compile is reported once, and one declaring @group(3), which
+// render reserves, or past the device's limits, such as more than 8 uniform
+// blocks or 4 storage buffers at dynamic offsets, or 8 storage buffers a
+// stage sees, is refused and reported once; either answers a shader whose
+// draws are skipped.
+func (i Inventory) AcquireShader(path string, defines ...ShaderDefine) Shader {
+	table := i.table.Get()
+	key, sortedDefines := makeShaderKey(path, defines)
+	return table.loadedShaders.acquire(table, i.device.Get(), i.files.Get(), key, sortedDefines)
+}
+
 // MakeBuffer makes a buffer filled from data, labelled label, with usage,
 // which exists, filled, when the call returns: the bytes of data's elements
 // as Go lays them out, padding included, so T is plain data with no
@@ -183,6 +206,18 @@ func (i Inventory) ReleaseBuffer(buffer Buffer) {
 	table := i.table.Get()
 	if !table.loadedBuffers.release(buffer) && !table.madeBuffers.release(buffer) {
 		table.report(ReportKindReleaseRefused, fmt.Errorf("render: releasing buffer %v, which no acquire or make holds", buffer))
+	}
+}
+
+// ReleaseShader gives back one acquire of shader, freeing the shader as
+// ReleaseTexture frees a texture: at the end of that frame, after gfx's
+// present, with the layouts no other shader shares. A shader no acquire
+// holds, such as one released as often as it was acquired, or the zero
+// Shader, is refused and reported.
+func (i Inventory) ReleaseShader(shader Shader) {
+	table := i.table.Get()
+	if !table.loadedShaders.release(shader) {
+		table.report(ReportKindReleaseRefused, fmt.Errorf("render: releasing shader %v, which no acquire holds", shader))
 	}
 }
 

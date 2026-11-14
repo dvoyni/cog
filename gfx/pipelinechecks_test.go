@@ -3,6 +3,7 @@ package gfx_test
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -135,15 +136,14 @@ func TestALayoutPastTheDevicesLimitsIsAnError(t *testing.T) {
 		limit string
 		set   func(limits *gfx.Limits, value uint32)
 		used  uint32
-		// groups are the layout reflected for the pipeline; nil keeps the
-		// fixture's explicit layout.
+		// groups are the layout reflected for the pipeline, and the groups of
+		// an explicit pipeline layout; nil keeps the fixture's explicit
+		// layout.
 		groups []gfx.BindGroupLayoutDescriptor
 		// buffers replace a render pipeline's vertex buffers; a case with
 		// buffers is a render pipeline's alone.
 		buffers []gfx.VertexBufferLayout
 	}{
-		{name: "an explicit layout's groups", limit: "MaxBindGroups",
-			set: func(limits *gfx.Limits, value uint32) { limits.MaxBindGroups = value }, used: 1},
 		{name: "a reflected layout's groups", limit: "MaxBindGroups",
 			set: func(limits *gfx.Limits, value uint32) { limits.MaxBindGroups = value }, used: 2,
 			groups: []gfx.BindGroupLayoutDescriptor{group(), group()}},
@@ -154,10 +154,11 @@ func TestALayoutPastTheDevicesLimitsIsAnError(t *testing.T) {
 			set: func(limits *gfx.Limits, value uint32) { limits.MaxUniformBuffersPerShaderStage = value }, used: 2,
 			groups: []gfx.BindGroupLayoutDescriptor{group(buffer(0, gfx.BufferBindingTypeUniform, false)), group(buffer(0, gfx.BufferBindingTypeUniform, false))}},
 		{name: "uniform buffers each in their own stage", limit: "MaxUniformBuffersPerShaderStage",
-			set: func(limits *gfx.Limits, value uint32) { limits.MaxUniformBuffersPerShaderStage = value }, used: 1,
+			set: func(limits *gfx.Limits, value uint32) { limits.MaxUniformBuffersPerShaderStage = value }, used: 2,
 			groups: []gfx.BindGroupLayoutDescriptor{group(
 				gfx.BindGroupLayoutEntry{Binding: 0, Visibility: gfx.ShaderStageFlagVertex | gfx.ShaderStageFlagCompute, Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform}},
-				gfx.BindGroupLayoutEntry{Binding: 1, Visibility: gfx.ShaderStageFlagFragment, Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform}},
+				gfx.BindGroupLayoutEntry{Binding: 1, Visibility: gfx.ShaderStageFlagVertex | gfx.ShaderStageFlagCompute, Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform}},
+				gfx.BindGroupLayoutEntry{Binding: 2, Visibility: gfx.ShaderStageFlagFragment, Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform}},
 			)}},
 		{name: "storage buffers in a stage", limit: "MaxStorageBuffersPerShaderStage",
 			set: func(limits *gfx.Limits, value uint32) { limits.MaxStorageBuffersPerShaderStage = value }, used: 2,
@@ -194,62 +195,89 @@ func TestALayoutPastTheDevicesLimitsIsAnError(t *testing.T) {
 			groups:  []gfx.BindGroupLayoutDescriptor{group(), group()},
 			buffers: []gfx.VertexBufferLayout{vertexBuffer(4, attribute(0)), vertexBuffer(4, attribute(1))}},
 	} {
+		// creations are the ways the case makes what the limit refuses: each
+		// kind of pipeline, and, for a layout with no vertex buffers, a
+		// pipeline layout of it, which CreatePipelineLayout checks as WebGPU's
+		// createPipelineLayout does. Past the limit a creation makes only the
+		// calls of madeKinds.
+		type creation struct {
+			name      string
+			reflect   recording.CallKind
+			create    func(device gfx.Device, live fixture) (any, error)
+			madeKinds []recording.CallKind
+		}
+		var creations []creation
 		for _, kind := range pipelineKinds {
 			if test.buffers != nil && kind.name != "render" {
 				continue
 			}
+			creations = append(creations, creation{name: kind.name + " pipeline", reflect: kind.reflect, madeKinds: []recording.CallKind{recording.CallKindReflectVertexInputs, kind.reflect},
+				create: func(device gfx.Device, live fixture) (any, error) {
+					if test.buffers == nil {
+						_, pipeline, err := kind.createPipeline(device, live, gfx.PipelineLayout{})
+						return pipeline, err
+					}
+					descriptor := renderPipelineDescriptor(live)
+					descriptor.Layout = gfx.PipelineLayout{}
+					if test.groups == nil {
+						descriptor.Layout = live.pipelineLayout
+					}
+					descriptor.Vertex.Buffers = test.buffers
+					return device.CreateRenderPipeline(descriptor)
+				}})
+		}
+		if test.groups != nil && test.buffers == nil {
+			creations = append(creations, creation{name: "explicit pipeline layout", madeKinds: []recording.CallKind{recording.CallKindCreateBindGroupLayout},
+				create: func(device gfx.Device, _ fixture) (any, error) {
+					var groupLayouts []gfx.BindGroupLayout
+					for _, group := range test.groups {
+						groupLayout, err := device.CreateBindGroupLayout(group)
+						if err != nil {
+							return nil, err
+						}
+						groupLayouts = append(groupLayouts, groupLayout)
+					}
+					return device.CreatePipelineLayout(gfx.PipelineLayoutDescriptor{BindGroupLayouts: groupLayouts})
+				}})
+		}
+		for _, creation := range creations {
 			for _, past := range []bool{false, true} {
 				value := test.used
-				name := kind.name + " pipeline, " + test.name + " at " + test.limit
+				name := creation.name + ", " + test.name + " at " + test.limit
 				if past {
 					value--
-					name = kind.name + " pipeline, " + test.name + " past " + test.limit
+					name = creation.name + ", " + test.name + " past " + test.limit
 				}
 				t.Run(name, func(t *testing.T) {
 					h := newHarness(t)
 					limits := gfx.DefaultLimits()
 					test.set(&limits, value)
 					h.mustSpawn(&gfx.Config{RequiredLimits: limits})
-					if test.groups != nil {
-						h.instance.AnswerNext(kind.reflect, recording.Answer{BindGroupLayouts: test.groups})
+					if test.groups != nil && creation.reflect != 0 {
+						h.instance.AnswerNext(creation.reflect, recording.Answer{BindGroupLayouts: test.groups})
 					}
 
 					h.readDevice(func(device gfx.Device) {
 						live := createFixture(t, device)
-						layout := live.pipelineLayout
-						if test.groups != nil {
-							layout = gfx.PipelineLayout{}
-						}
 						before := len(h.instance.Recording().Calls)
-						var pipeline any
-						var err error
-						if test.buffers != nil {
-							descriptor := renderPipelineDescriptor(live)
-							descriptor.Layout = layout
-							descriptor.Vertex.Buffers = test.buffers
-							pipeline, err = device.CreateRenderPipeline(descriptor)
-						} else {
-							_, pipeline, err = kind.createPipeline(device, live, layout)
-						}
+						createdObject, err := creation.create(device, live)
 
 						if !past {
 							if err != nil {
-								t.Errorf("at the limit the pipeline answered %v", err)
+								t.Errorf("at the limit the %s answered %v", creation.name, err)
 							}
 							return
 						}
-						if !errors.Is(err, gfx.ErrLimitExceeded) || !reflect.ValueOf(pipeline).IsZero() {
-							t.Errorf("the pipeline answered %+v, %v, want the zero handle and %v", pipeline, err, gfx.ErrLimitExceeded)
+						if !errors.Is(err, gfx.ErrLimitExceeded) || !reflect.ValueOf(createdObject).IsZero() {
+							t.Errorf("the %s answered %+v, %v, want the zero handle and %v", creation.name, createdObject, err, gfx.ErrLimitExceeded)
 							return
 						}
 						if !strings.Contains(err.Error(), test.limit) {
 							t.Errorf("the error %q does not name %s", err, test.limit)
 						}
 						for _, call := range h.instance.Recording().Calls[before:] {
-							switch call.Kind {
-							case recording.CallKindReflectVertexInputs, kind.reflect:
-							default:
-								t.Errorf("past the limit the pipeline made %+v, want only its reflections", call)
+							if !slices.Contains(creation.madeKinds, call.Kind) {
+								t.Errorf("past the limit the %s made %+v, want only %v", creation.name, call, creation.madeKinds)
 							}
 						}
 					})

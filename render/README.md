@@ -63,7 +63,16 @@ that frame. `WriteBuffer[T](buffer, offset, data)` and
 `WriteTexture[T](texture, TextureRegion, data)`, the latter a region of one
 mip level and one layer, land before every command list of gfx's next
 submit, so two writes to one region in a frame leave the last; a write that
-does not fit is refused and reported.
+does not fit is refused and reported. `AcquireShader(path, defines...)`
+compiles a variant in the caller's job, shared and counted by path and its
+`ShaderDefine`s sorted by name, and gives it a layout for each group up to
+the highest its bindings declare, every declared binding in it, an unused
+group's empty, uniform blocks of `@group(0)` and `@group(2)` and storage
+buffers of `@group(2)` at dynamic offsets; identical layouts are shared
+between shaders. A file that fails to preprocess or compile is reported
+once, and one declaring `@group(3)` or past the device's limits is refused
+and reported once; `ReleaseShader` frees it as `ReleaseTexture` frees a
+texture.
 What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
 
 ## Shape
@@ -85,7 +94,8 @@ What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
 - **`Inventory`** is the task parameter a task reaches render's assets
   through: it acquires textures and **`Buffer`**s from files, makes them
   from slices, writes them, a texture by **`TextureRegion`**, and releases
-  them.
+  them, and acquires and releases **`Shader`**s, each a variant of a file
+  with its **`ShaderDefine`**s.
 - **`Inspection`** is a frame written down in render's terms: its command
   lists by order, their passes with their targets.
 - **`Report`** is a mistake render finds at run time, logged once and
@@ -107,7 +117,8 @@ What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
     `Config`'s counts, the gfx frame being recorded and the pool of
     temporary textures.
   - a private asset table, every asset render holds: so far, its textures,
-    each with the views passes drew into, and its buffers.
+    each with the views passes drew into, its buffers, and its shaders,
+    with the layouts they share.
 - **Resources it reads from other plugins:** `gfx.Device`, for read, in
   render's own jobs and through its `Frame` parameter.
 - **Events it publishes:** `FrameEvent`, inside its `gfx.DrawEvent`

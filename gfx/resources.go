@@ -139,6 +139,10 @@ type Device interface {
 	CreateBindGroup(descriptor BindGroupDescriptor) (BindGroup, error)
 	ReleaseBindGroup(group BindGroup)
 
+	// CreatePipelineLayout creates a pipeline layout of its groups' layouts,
+	// checked first against the device's limits as a pipeline's layout is: a
+	// layout past one answers ErrLimitExceeded, naming the limit, and creates
+	// nothing, as WebGPU's createPipelineLayout refuses it.
 	CreatePipelineLayout(descriptor PipelineLayoutDescriptor) (PipelineLayout, error)
 	ReleasePipelineLayout(layout PipelineLayout)
 

@@ -551,19 +551,16 @@ func (limits Limits) checkPipelineLayout(groups []BindGroupLayoutDescriptor) err
 	return nil
 }
 
-// checkRenderPipeline answers ErrLimitExceeded, naming the limit, for a
-// render pipeline of groups and buffers past limits: its layout, as
-// checkPipelineLayout checks it, its vertex buffers, a stride, an
-// attribute's location, its attributes across its buffers, or its groups
-// and buffers together.
-func (limits Limits) checkRenderPipeline(groups []BindGroupLayoutDescriptor, buffers []VertexBufferLayout) error {
-	if err := limits.checkPipelineLayout(groups); err != nil {
-		return err
-	}
+// checkVertexBuffers answers ErrLimitExceeded, naming the limit, for a
+// render pipeline of groupCount groups and buffers past limits: its vertex
+// buffers, a stride, an attribute's location, its attributes across its
+// buffers, or its groups and buffers together. Its layout is checked by
+// checkPipelineLayout.
+func (limits Limits) checkVertexBuffers(groupCount int, buffers []VertexBufferLayout) error {
 	if err := checkLimit(len(buffers), "vertex buffers", "MaxVertexBuffers", limits.MaxVertexBuffers); err != nil {
 		return err
 	}
-	if err := checkLimit(len(groups)+len(buffers), "bind groups and vertex buffers", "MaxBindGroupsPlusVertexBuffers", limits.MaxBindGroupsPlusVertexBuffers); err != nil {
+	if err := checkLimit(groupCount+len(buffers), "bind groups and vertex buffers", "MaxBindGroupsPlusVertexBuffers", limits.MaxBindGroupsPlusVertexBuffers); err != nil {
 		return err
 	}
 	attributeCount := 0

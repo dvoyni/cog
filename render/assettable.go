@@ -20,10 +20,14 @@ type assetTable struct {
 	// its handle.
 	textures handle.SlotMap[Texture, textureSlot]
 	buffers  handle.SlotMap[Buffer, bufferSlot]
-	// loadedTextures and loadedBuffers share, count and free the textures
-	// and buffers loaded from files.
+	shaders  handle.SlotMap[Shader, shaderSlot]
+	// loadedTextures, loadedBuffers and loadedShaders share, count and free
+	// the textures, buffers and shaders loaded from files.
 	loadedTextures textureLoader
 	loadedBuffers  bufferLoader
+	loadedShaders  shaderLoader
+	// layouts shares the layouts of the shaders' bindings among them.
+	layouts layoutInterner
 	// madeTextures and madeBuffers hold the made textures and buffers, each
 	// by its own handle, once, until its maker releases it.
 	madeTextures assetCounter[Texture, Texture]
@@ -72,6 +76,27 @@ func (t *assetTable) addBuffer(device gfx.Device, label string, size uint64, usa
 		slot.size = size
 	}
 	return buffer, slot.buffer, nil
+}
+
+// addEmptyShader hands out the handle of a shader yet to be compiled, its
+// slot empty until fillShader fills it.
+func (t *assetTable) addEmptyShader() Shader {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	shader, _ := t.shaders.Acquire()
+	return shader
+}
+
+// fillShader fills the slot of shader, which addEmptyShader handed out and
+// nothing has removed; it panics for another.
+func (t *assetTable) fillShader(shader Shader, slot shaderSlot) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	emptySlot, ok := t.shaders.Find(shader)
+	if !ok {
+		panic(fmt.Sprintf("render: filling shader %v, which no addEmptyShader handed out or which was removed", shader))
+	}
+	*emptySlot = slot
 }
 
 // findTexture answers the gfx texture behind texture; false when render holds
@@ -181,14 +206,15 @@ func (t *assetTable) writeTexture(device gfx.Device, texture Texture, region Tex
 		data, texelSize, gfx.Extent3D{Width: width, Height: height, DepthOrArrayLayers: 1})
 }
 
-// freeReleased removes every loaded texture and buffer whose last acquire was
-// released since the last frame ended and is not acquired again, and every
-// made one released since then.
+// freeReleased removes every loaded texture, buffer and shader whose last
+// acquire was released since the last frame ended and is not acquired again,
+// and every made texture and buffer released since then.
 func (t *assetTable) freeReleased(device gfx.Device) {
 	removeTexture := func(texture Texture) { t.removeTexture(device, texture) }
 	removeBuffer := func(buffer Buffer) { t.removeBuffer(device, buffer) }
 	t.loadedTextures.freeReleased(removeTexture)
 	t.loadedBuffers.freeReleased(removeBuffer)
+	t.loadedShaders.freeReleased(func(shader Shader) { t.removeShader(device, shader) })
 	t.madeTextures.freeReleased(removeTexture)
 	t.madeBuffers.freeReleased(removeBuffer)
 }
@@ -226,6 +252,23 @@ func (t *assetTable) removeBuffer(device gfx.Device, buffer Buffer) {
 	t.buffers.Release(buffer)
 }
 
+// removeShader releases the module behind shader and its holding of its
+// layout, and frees its slot for a handle of the next generation.
+func (t *assetTable) removeShader(device gfx.Device, shader Shader) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	slot, ok := t.shaders.Find(shader)
+	if !ok {
+		return
+	}
+	if slot.module != (gfx.ShaderModule{}) {
+		device.ReleaseShaderModule(slot.module)
+		t.layouts.release(device, slot.layout)
+	}
+	*slot = shaderSlot{}
+	t.shaders.Release(shader)
+}
+
 // textureSlot is the slot of one texture: the gfx texture behind its handle,
 // with the views of single levels and layers passes drew into or sampled,
 // made as first needed.
@@ -239,6 +282,14 @@ type textureSlot struct {
 type bufferSlot struct {
 	buffer gfx.Buffer
 	size   uint64
+}
+
+// shaderSlot is the slot of one shader: the gfx module behind its handle and
+// the pipeline layout of its bindings, which it holds in the layout
+// interner, both none for a shader that failed or was refused.
+type shaderSlot struct {
+	module gfx.ShaderModule
+	layout *internedPipelineLayout
 }
 
 // levelView is a view of one mip level and one layer of a texture, which a

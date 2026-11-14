@@ -263,11 +263,16 @@ func (d *device) CreatePipelineLayout(descriptor PipelineLayoutDescriptor) (Pipe
 		return PipelineLayout{}, ErrDeviceLost
 	}
 	dependencies := make([]dependency, 0, len(descriptor.BindGroupLayouts))
+	groups := make([]BindGroupLayoutDescriptor, len(descriptor.BindGroupLayouts))
 	var err error
 	for group, layout := range descriptor.BindGroupLayouts {
 		if dependencies, err = d.bindGroupLayouts.appendDependency(dependencies, layout); err != nil {
 			return PipelineLayout{}, fmt.Errorf("%w: the layout of group %d", err, group)
 		}
+		groups[group], _ = d.bindGroupLayouts.descriptor(layout)
+	}
+	if err := d.limits.checkPipelineLayout(groups); err != nil {
+		return PipelineLayout{}, err
 	}
 	descriptor.BindGroupLayouts = slices.Clone(descriptor.BindGroupLayouts)
 	layout, err := createResource(&d.pipelineLayouts, descriptor, dependencies, d.backend.CreatePipelineLayout)
@@ -311,8 +316,11 @@ func (d *device) CreateRenderPipeline(descriptor RenderPipelineDescriptor) (Rend
 		if groups, err = d.backend.ReflectRenderPipelineLayout(source.descriptor); err != nil {
 			return RenderPipeline{}, d.checkLoss(err)
 		}
+		if err := d.limits.checkPipelineLayout(groups); err != nil {
+			return RenderPipeline{}, err
+		}
 	}
-	if err := d.limits.checkRenderPipeline(groups, source.descriptor.Vertex.Buffers); err != nil {
+	if err := d.limits.checkVertexBuffers(len(groups), source.descriptor.Vertex.Buffers); err != nil {
 		return RenderPipeline{}, err
 	}
 	if autoLayout {
@@ -360,16 +368,14 @@ func (d *device) CreateComputePipeline(descriptor ComputePipelineDescriptor) (Co
 	descriptor.Constants = maps.Clone(descriptor.Constants)
 	source := pipelineSource[ComputePipelineDescriptor]{descriptor: descriptor}
 	autoLayout := source.descriptor.Layout == (PipelineLayout{})
-	groups := d.groupDescriptors(source.descriptor.Layout)
 	if autoLayout {
-		if groups, err = d.backend.ReflectComputePipelineLayout(source.descriptor); err != nil {
+		groups, err := d.backend.ReflectComputePipelineLayout(source.descriptor)
+		if err != nil {
 			return ComputePipeline{}, d.checkLoss(err)
 		}
-	}
-	if err := d.limits.checkPipelineLayout(groups); err != nil {
-		return ComputePipeline{}, err
-	}
-	if autoLayout {
+		if err := d.limits.checkPipelineLayout(groups); err != nil {
+			return ComputePipeline{}, err
+		}
 		if source.descriptor.Layout, err = d.createAutoLayout(groups); err != nil {
 			return ComputePipeline{}, err
 		}

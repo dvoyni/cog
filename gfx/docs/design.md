@@ -236,11 +236,14 @@ device's release and the recovery among them, for a backend to pin.
   none at its location or one of another type (a `Uint*` format for an `f32`
   input), is `ErrVertexMismatch` naming both. As in WebGPU, an attribute no
   input reads, and a component count differing from the input's, are fine.
-  The pipeline's layout, explicit or reflected, and a render pipeline's
-  vertex buffers are checked against the device's limits, the groups, a
-  binding number, each stage's bindings of each kind, the dynamic buffers,
-  the vertex buffers, a stride, an attribute's location and the attributes:
-  `ErrLimitExceeded` names the limit, before any layout is created. What
+  A pipeline layout is checked against the device's limits, the groups, a
+  binding number, each stage's bindings of each kind and the dynamic
+  buffers, by `CreatePipelineLayout`, as WebGPU's `createPipelineLayout`
+  checks it, so render refuses a shader past the limits when it is
+  acquired; a reflected one is checked before any of its layouts is
+  created. A render pipeline's vertex buffers are checked too, the vertex
+  buffers, a stride, an attribute's location, the attributes, and the
+  groups and buffers together: `ErrLimitExceeded` names the limit. What
   needs more of the shader, a workgroup's size, the inter-stage variables, is
   the backend's.
 - **Named reflection** ([render: how a material binds its parameters, its variants, and the pipelines it shares](https://github.com/dvoyni/cog/issues/808)).

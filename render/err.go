@@ -29,6 +29,10 @@ const (
 	// fit it: into an asset render does not hold, past its end or its
 	// level's edges, unaligned, or of data not as long as the region.
 	ReportKindWriteRefused
+	// ReportKindShaderRefused is a shader refused for its bindings: one in
+	// @group(3), which render reserves, or more than the device's limits
+	// allow, such as more than 8 uniform blocks at dynamic offsets.
+	ReportKindShaderRefused
 )
 
 // Report is a mistake render finds at run time, such as a refused shader, a

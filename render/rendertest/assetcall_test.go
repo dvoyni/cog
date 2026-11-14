@@ -64,6 +64,22 @@ func readBufferCalls(calls []recording.Call) assetCallSequence[render.Buffer] {
 	}, recording.CallKindReleaseBuffer)
 }
 
+// readShaderCalls answers every call among calls that made or released the
+// module of a shader render loaded, in order, each naming the handle the
+// module's label named.
+func readShaderCalls(calls []recording.Call) assetCallSequence[render.Shader] {
+	return readAssetCalls[render.Shader](calls, func(call recording.Call) (any, string, bool) {
+		switch call.Kind {
+		case recording.CallKindCreateShaderModule:
+			arguments := call.Arguments.(recording.CreateShaderModuleArguments)
+			return arguments.Module, arguments.Descriptor.Label, true
+		case recording.CallKindReleaseShaderModule:
+			return call.Arguments.(gfx.ShaderModule), "", true
+		}
+		return nil, "", false
+	}, recording.CallKindReleaseShaderModule)
+}
+
 // readAssetCalls answers every call among calls on a gfx object render made
 // for an H, in order, each naming the handle the object's label named:
 // readObject answers the object a call is on, with its label for its make,

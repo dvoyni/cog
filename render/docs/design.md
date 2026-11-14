@@ -207,7 +207,7 @@ and a **test author** testing a plugin that draws.
 - **A load is ready in the frame that asks for it.** The GPU object exists when the call returns, and there is no loading state, no ready event and no callback:
   - **Texture:** `image.DecodeConfig` reads only the header, which with the colour space and mipmaps option fixes the descriptor: 8 bits per channel, an sRGB format for `ColorSpaceSRGB`, and every mip level down to one texel with `Mipmaps`. PNG and JPEG files load.
   - **Buffer:** `fs.Stat` gives the size, rounded up to a multiple of 4, the alignment of gfx's writes. The buffer is made with the usage its caller declares, `BufferUsageFlags` of vertex, index, uniform, storage, indirect and copy source, since only the layer above knows how it will use the buffer, and gfx refuses any other use. render adds the copy destination itself: it is how render fills a buffer, and costs nothing. Mapping at creation would fill one without it, but the wgpu fork keeps such a buffer in host memory for its life. Maps are not offered, since render maps no buffer.
-  - **Shader:** read, preprocessed and compiled in the caller's job.
+  - **Shader:** read, preprocessed with its `ShaderDefine`s (gfx's, mirrored) and compiled in the caller's job, and its layouts built.
 
   render's jobs decode texture bodies, write contents and generate mips before gfx submits the frame, so a draw recorded right after its acquire reads the data. CPU-side bytes are dropped once uploaded.
 - **Sharing is a count per asset key.** Each kind has a comparable key type and its own map:
@@ -217,7 +217,7 @@ and a **test author** testing a plugin that draws.
 - **Freeing:** an asset is freed at the end of the frame in which its count reached zero. An acquire of its key before then revives it. A release no acquire holds (a temporary, one released as often as it was acquired, the zero handle) is refused and reported.
 - **Failure:**
   - a failed texture draws magenta (1×1 for a header failure, its own size for a body failure);
-  - a failed buffer or shader skips every draw that uses it. A buffer whose file `fs.Stat` fails on, is a folder or has no bytes gets a buffer of no bytes, with no gfx buffer behind it; one whose file cannot be read when its bytes are written, or whose size changed since the acquire, keeps zeros.
+  - a failed buffer or shader skips every draw that uses it. A buffer whose file `fs.Stat` fails on, is a folder or has no bytes gets a buffer of no bytes, with no gfx buffer behind it; one whose file cannot be read when its bytes are written, or whose size changed since the acquire, keeps zeros. A shader that fails to preprocess or compile, or is refused for its bindings, keeps no gfx module.
 
   Each failure is reported once per key and forgotten when the asset is freed.
 - **No cascade:** a material or mesh owns nothing it names. A freed texture it names draws as unbound; a freed buffer or shader skips the draw. Each case is reported once.
@@ -248,12 +248,13 @@ and a **test author** testing a plugin that draws.
   | `@group(2)` | draw parameters |
   | `@group(3)` | reserved: a shader declaring it is refused and reported once |
 
-- **render builds every pipeline layout itself,** never WebGPU's "auto". A group's layout holds every binding the shader declares, used or not. Identical layouts are interned, so shaders sharing an include share one `@group(0)` layout and a pass's parameters are one bind group. Unused groups below the highest get an empty layout.
+- **render builds every pipeline layout itself,** never WebGPU's "auto", when the shader is acquired. A group's layout holds every binding the shader declares, used or not, sorted by number. Identical layouts are interned, counted by the shaders holding them and freed with the last, so shaders sharing an include share one `@group(0)` layout and a pass's parameters are one bind group. Unused groups below the highest get an empty layout.
+- **Every binding is seen by every stage that may see it,** not only by the entry points that use it, so a layout does not depend on which functions a shader has and stays shareable: vertex, fragment and compute, but the vertex stage for a storage buffer or storage texture a shader may write, which WebGPU keeps from it. Each stage's limits therefore count every binding of its kind the shader declares.
 - **Dynamic offsets, by group and kind** ([render: the dynamic storage-buffer budget](https://github.com/dvoyni/cog/issues/853)):
   - Uniform blocks in `@group(0)` and `@group(2)` bind at a dynamic offset, at most 8 per pipeline, WebGPU's default.
   - Storage buffers bind at a dynamic offset in `@group(2)` only, at most 4 per pipeline, which is also all the fork's Metal backend offers.
   - Storage buffers in `@group(0)` bind statically. A pass's parameters are one bind group per pass, cached by their resources, so a made or loaded buffer there costs nothing per frame, and a forward+ shader's lights, clusters, light indices, per-object data and shadow data fit under the limit of 8 storage buffers per stage.
-  - A shader over any of these limits is refused by gfx's limit check and reported once.
+  - A shader over any of these limits is refused by gfx's limit check, which `CreatePipelineLayout` runs, when it is acquired, and reported once with `ReportKindShaderRefused`, as is a shader declaring `@group(3)`. Either draws nothing.
 - **The pipeline cache:**
   - The key is the variant and its vertex and fragment entry points, render state, the mesh's vertex layout and instance buffers' layouts, the pass's target formats, depth format and sample count, the topology and the strip index format. A compute pipeline's key is its variant and its compute entry point.
   - A pipeline is freed with its shader and never evicted otherwise.
@@ -539,6 +540,7 @@ render republishes gfx's events as its own, each nested inside gfx's publication
   - The backend seam's reflection carries the same.
   - gogpu fills it from naga's IR, which it drops today.
   - The recording adapter answers it from queued answers, as it answers gfx's other reflection calls.
+- **`CreatePipelineLayout` checks the layout against the device's limits,** as WebGPU's `createPipelineLayout` does and as gfx's pipeline creations check theirs, so render refuses a shader past them when it is acquired, before any pipeline.
 - **The recording adapter gains a mode that records nothing,** answering and checking as before, for benchmarks and allocation gates ([render: the per-frame bar](https://github.com/dvoyni/cog/issues/819)).
 - **What gfx left to scene is render's:**
   - sharing pipelines of one descriptor;

@@ -38,6 +38,13 @@ type Buffer struct{ handle }
 // labelKind answers "buffer", the kind its gfx buffers' labels name.
 func (Buffer) labelKind() string { return "buffer" }
 
+// Shader names one of render's shaders: pointer-free and comparable, its
+// zero value naming none.
+type Shader struct{ handle }
+
+// labelKind answers "shader", the kind its gfx shader modules' labels name.
+func (Shader) labelKind() string { return "shader" }
+
 // MakeLabel answers the label of the gfx object behind h, naming h and then
 // label, the one its user gave.
 func MakeLabel[H Handle](h H, label string) string {
