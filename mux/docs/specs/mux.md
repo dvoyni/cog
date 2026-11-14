@@ -202,13 +202,14 @@ mux is a kernel plugin with a registry per kernel. Each registered model is two 
 
 ([mux: how a task reaches a model and its timeline](https://github.com/dvoyni/cog/issues/784))
 
-- `Timeline[M, D]`, the resource, is a struct holding one private pointer, with reads only: `Current`, `All`, `Index`, `Now`. `Get()` copies the pointer, and nothing can be asserted into writing.
+- `Timeline[M, D]`, the resource, names a private struct holding one private pointer, with reads only: `Current`, `All`, `Index`, `Now`. `Get()` copies the pointer, and nothing can be asserted into writing.
 - `ElevateTimeline(kernel.Write[Timeline[M, D]]) WriteTimeline[M, D]` gives the writing side, which is no resource:
   - scheduling: `Tween`, `Hold`, `Call`, `MakeSequence`, `End`;
   - removal: `Intern`, `Cancel`, `CancelCall`;
   - time: `Pause`, `Resume`, `SetSpeed`, `Skip`, and `Now`.
 
   It sits in `resources.go` between the two types.
+- Each side is a private type in a file named after it, `timeline.go` and `writetimeline.go`, and `resources.go` names it with a public alias.
 - The reading side is a struct, not the interface that the potential rule on read-only resources asks for, because Go 1.27 interfaces cannot declare generic methods and `Current`, `All` and `Index` are generic.
 
 ### Scheduling
