@@ -36,4 +36,4 @@ func (a *adapter) RequestDevice(descriptor gfx.DeviceDescriptor) (gfx.BackendDev
 }
 
 // Release records the adapter released.
-func (a *adapter) Release() { a.instance.record(CallKindReleaseAdapter, nil, nil) }
+func (a *adapter) Release() { a.instance.record[any](CallKindReleaseAdapter, nil, nil) }

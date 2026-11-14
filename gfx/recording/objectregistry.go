@@ -44,13 +44,13 @@ func (registry *objectRegistry[T]) remove(index uint32) error {
 	return nil
 }
 
-// requireObject answers the object handle names in registry, the zero object
-// for the zero handle, which names none; an error, for role, when handle's
-// index holds none.
-func requireObject[H interface {
+// require answers the object handle names, the zero object for the zero
+// handle, which names none; an error, for role, when handle's index holds
+// none.
+func (registry *objectRegistry[T]) require[H interface {
 	comparable
 	Index() uint32
-}, T any](registry *objectRegistry[T], handle H, role string) (T, error) {
+}, R role](handle H, role R) (T, error) {
 	var none H
 	if handle == none {
 		var zero T

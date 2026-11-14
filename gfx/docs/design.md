@@ -62,8 +62,8 @@ answers, which the recording adapter answers with the layouts, inputs and
 bindings a test queues. The backend
 preprocesses shaders too, through `Device.PreprocessShader`, which the
 recording adapter answers with the file's text as it is. Standalone encoders are finished
-and submitted by their owner. Designed for render and not yet built: a
-mode of the recording adapter that records nothing. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md); the ADRs are in
+and submitted by their owner. The recording adapter has a mode that
+records nothing, for benchmarks and allocation gates. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md); the ADRs are in
 [`adr/`](adr).
 
 ## Constraints
@@ -530,9 +530,13 @@ device's release and the recovery among them, for a backend to pin.
   through `Config.ForceFallbackAdapter`, not from here.
 - **A mode that records nothing**
   ([render: the per-frame bar](https://github.com/dvoyni/cog/issues/819)):
-  the adapter answers and checks as before and keeps no calls, so a
-  benchmark or an allocation gate measures gfx and its users, not the
-  recording.
+  after `instance.DisableRecording()` the adapter answers and checks as
+  before and keeps no calls, so a benchmark or an allocation gate measures
+  gfx and its users, not the recording. Once warm, a frame of writes, bind
+  groups, passes and draws allocates nothing in it: arguments become
+  interfaces only when kept, an error's role is formatted only when a check
+  fails, writes are staged in a reused buffer, and an encoder is answered
+  again once its command buffer is submitted.
 
 ## Post effects and deferred
 

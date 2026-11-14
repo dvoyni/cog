@@ -7,7 +7,8 @@
 // a real backend would. Buffers hold bytes, which writes, buffer copies and
 // clears apply to; textures hold no texels, and captures complete
 // zero-filled. Real pixels without a GPU come from gogpu on wgpu's software
-// adapter, not from here.
+// adapter, not from here. Instance.DisableRecording keeps no call, for
+// benchmarks and allocation gates.
 package recording
 
 import (
@@ -15,6 +16,7 @@ import (
 	"io/fs"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/platform"
@@ -25,7 +27,10 @@ import (
 type Instance struct {
 	mutex     sync.Mutex
 	recording Recording
-	surfaces  map[platform.Window]surface
+	// recordingDisabled is set by DisableRecording; read without the mutex
+	// by what decides whether to copy what it would keep.
+	recordingDisabled atomic.Bool
+	surfaces          map[platform.Window]surface
 	// answers are the answers AnswerNext queued, by kind, the next first.
 	answers map[CallKind][]Answer
 }
@@ -46,6 +51,13 @@ func (instance *Instance) Recording() *Recording {
 		submittedAfter: slices.Clone(instance.recording.submittedAfter),
 	}
 }
+
+// DisableRecording makes the adapter keep no call from now on, each still
+// answered and checked as before, so a benchmark or an allocation gate
+// measures gfx and its users, not the recording: once warm, a frame of
+// writes, bind groups, passes and draws allocates nothing in the adapter.
+// Recording answers what was recorded before.
+func (instance *Instance) DisableRecording() { instance.recordingDisabled.Store(true) }
 
 // AnswerNext makes the next call of kind answer answer instead of what it
 // would: an AcquireStatus for an acquire, a failure for a map, an error,
@@ -109,13 +121,14 @@ func (instance *Instance) PreprocessShader(files fs.FS, path string, defines []g
 }
 
 // Release records the instance released.
-func (instance *Instance) Release() { instance.record(CallKindReleaseInstance, nil, nil) }
+func (instance *Instance) Release() { instance.record[any](CallKindReleaseInstance, nil, nil) }
 
-// record records a call of kind with arguments, and answers the answer
+// record records a call of kind with arguments, unless recording is
+// disabled, and answers the answer
 // AnswerNext queued for it, with the error recorded, or the zero Answer.
 // Unless that answer is an error, apply, when given, makes the call's effect
 // under the mutex, and its error is the one recorded and answered.
-func (instance *Instance) record(kind CallKind, arguments any, apply func() error) Answer {
+func (instance *Instance) record[A any](kind CallKind, arguments A, apply func() error) Answer {
 	return instance.recordAnswered(kind, arguments, func(Answer) error {
 		if apply == nil {
 			return nil
@@ -125,16 +138,32 @@ func (instance *Instance) record(kind CallKind, arguments any, apply func() erro
 }
 
 // recordAnswered records as record does, handing apply the answer queued, so
-// the call's effect can follow its status.
-func (instance *Instance) recordAnswered(kind CallKind, arguments any, apply func(answer Answer) error) Answer {
+// the call's effect can follow its status. arguments are made an interface
+// only when kept, so a call recording nothing allocates nothing.
+func (instance *Instance) recordAnswered[A any](kind CallKind, arguments A, apply func(answer Answer) error) Answer {
 	instance.mutex.Lock()
 	defer instance.mutex.Unlock()
 	answer := instance.takeAnswer(kind)
 	if answer.Error == nil {
 		answer.Error = apply(answer)
 	}
-	instance.recording.Calls = append(instance.recording.Calls, Call{Kind: kind, Arguments: arguments, Status: answer.Status, Error: answer.Error})
+	if instance.keepsCalls() {
+		instance.recording.Calls = append(instance.recording.Calls, Call{Kind: kind, Arguments: arguments, Status: answer.Status, Error: answer.Error})
+	}
 	return answer
+}
+
+// keepsCalls answers whether calls and commands are kept: recording is not
+// disabled.
+func (instance *Instance) keepsCalls() bool { return !instance.recordingDisabled.Load() }
+
+// cloneKept answers a copy of values, which a kept call or command owns,
+// when calls are kept, and values itself, which nothing keeps, otherwise.
+func (instance *Instance) cloneKept[E any](values []E) []E {
+	if !instance.keepsCalls() {
+		return values
+	}
+	return slices.Clone(values)
 }
 
 // takeAnswer answers the next answer AnswerNext queued for kind, taking it,

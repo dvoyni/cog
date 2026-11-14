@@ -183,38 +183,42 @@ func TestEveryCommandOnLiveObjectsWithTheirUsageFinishes(t *testing.T) {
 }
 
 func TestACommandNamingAMissingHandleFailsAtFinish(t *testing.T) {
-	for _, test := range commandTests {
-		t.Run(test.name, func(t *testing.T) {
-			_, device := requestDevice(t)
-			live := createObjects(t, device, everyBufferUsage, everyTextureUsage)
-			encoder := createEncoder(t, device)
+	for _, mode := range modes {
+		for _, test := range commandTests {
+			t.Run(mode.name+"/"+test.name, func(t *testing.T) {
+				_, device := mode.requestDevice(t)
+				live := createObjects(t, device, everyBufferUsage, everyTextureUsage)
+				encoder := createEncoder(t, device)
 
-			test.record(encoder, live, missingObjects())
+				test.record(encoder, live, missingObjects())
 
-			if _, err := encoder.Finish(); err == nil {
-				t.Fatal("Finish answered no error")
-			}
-		})
+				if _, err := encoder.Finish(); err == nil {
+					t.Fatal("Finish answered no error")
+				}
+			})
+		}
 	}
 }
 
 func TestACommandOnAResourceLackingItsUsageFailsAtFinish(t *testing.T) {
-	for _, test := range commandTests {
-		if test.bufferUsage == 0 && test.textureUsage == 0 {
-			continue
-		}
-		t.Run(test.name, func(t *testing.T) {
-			_, device := requestDevice(t)
-			live := createObjects(t, device, everyBufferUsage, everyTextureUsage)
-			lacking := createObjects(t, device, everyBufferUsage&^test.bufferUsage, everyTextureUsage&^test.textureUsage, 2)
-			encoder := createEncoder(t, device)
-
-			test.record(encoder, live, lacking)
-
-			if _, err := encoder.Finish(); err == nil {
-				t.Fatal("Finish answered no error")
+	for _, mode := range modes {
+		for _, test := range commandTests {
+			if test.bufferUsage == 0 && test.textureUsage == 0 {
+				continue
 			}
-		})
+			t.Run(mode.name+"/"+test.name, func(t *testing.T) {
+				_, device := mode.requestDevice(t)
+				live := createObjects(t, device, everyBufferUsage, everyTextureUsage)
+				lacking := createObjects(t, device, everyBufferUsage&^test.bufferUsage, everyTextureUsage&^test.textureUsage, 2)
+				encoder := createEncoder(t, device)
+
+				test.record(encoder, live, lacking)
+
+				if _, err := encoder.Finish(); err == nil {
+					t.Fatal("Finish answered no error")
+				}
+			})
+		}
 	}
 }
 
@@ -392,16 +396,18 @@ func TestAWriteNeedsItsAlignment(t *testing.T) {
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			for _, value := range []uint64{4, 2} {
-				_, device := requestDevice(t)
-				live := createObjects(t, device, everyBufferUsage, everyTextureUsage)
+			for _, mode := range modes {
+				for _, value := range []uint64{4, 2} {
+					_, device := mode.requestDevice(t)
+					live := createObjects(t, device, everyBufferUsage, everyTextureUsage)
 
-				err := test.write(device, live, value)
+					err := test.write(device, live, value)
 
-				if aligned := value == 4; aligned && err != nil {
-					t.Errorf("%d answered %v", value, err)
-				} else if !aligned && err == nil {
-					t.Errorf("%d answered no error", value)
+					if aligned := value == 4; aligned && err != nil {
+						t.Errorf("%s: %d answered %v", mode.name, value, err)
+					} else if !aligned && err == nil {
+						t.Errorf("%s: %d answered no error", mode.name, value)
+					}
 				}
 			}
 		})
@@ -596,17 +602,19 @@ func TestABrokenPassSequenceFailsAtFinish(t *testing.T) {
 			outer.End()
 		}},
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			_, device := requestDevice(t)
-			live := createObjects(t, device, everyBufferUsage, everyTextureUsage)
-			encoder := createEncoder(t, device)
+		for _, mode := range modes {
+			t.Run(mode.name+"/"+test.name, func(t *testing.T) {
+				_, device := mode.requestDevice(t)
+				live := createObjects(t, device, everyBufferUsage, everyTextureUsage)
+				encoder := createEncoder(t, device)
 
-			test.record(encoder, live)
+				test.record(encoder, live)
 
-			if _, err := encoder.Finish(); err == nil {
-				t.Fatal("Finish answered no error")
-			}
-		})
+				if _, err := encoder.Finish(); err == nil {
+					t.Fatal("Finish answered no error")
+				}
+			})
+		}
 	}
 }
 
@@ -702,6 +710,16 @@ const (
 	everyTextureUsage = gfx.TextureUsageFlagCopySrc | gfx.TextureUsageFlagCopyDst | gfx.TextureUsageFlagTextureBinding |
 		gfx.TextureUsageFlagStorageBinding | gfx.TextureUsageFlagRenderAttachment
 )
+
+// modes are the adapter's two modes, recording and recording nothing, each
+// with how a test requests its device, for the checks shown to fail in both.
+var modes = []struct {
+	name          string
+	requestDevice func(t *testing.T) (*recording.Instance, gfx.BackendDevice)
+}{
+	{"recording", requestDevice},
+	{"recording nothing", requestDeviceRecordingNothing},
+}
 
 // missingIndex is the index of missingObjects' handles, where no test creates
 // anything.
@@ -825,11 +843,17 @@ func regionsWithRowsOf(live objects, bytesPerRow uint64) []gfx.BufferTextureCopy
 func requestDevice(t *testing.T) (*recording.Instance, gfx.BackendDevice) {
 	t.Helper()
 	instance := recording.NewInstance()
+	return instance, requestDeviceOf(t, instance)
+}
+
+// requestDeviceOf answers instance's device, as gfx's start requests it.
+func requestDeviceOf(t *testing.T, instance *recording.Instance) gfx.BackendDevice {
+	t.Helper()
 	adapter, err := instance.RequestAdapter(gfx.RequestAdapterOptions{})
 	mustSucceed(t, err)
 	device, err := adapter.RequestDevice(gfx.DeviceDescriptor{})
 	mustSucceed(t, err)
-	return instance, device
+	return device
 }
 
 // submit submits buffers to device, failing the test on an error.

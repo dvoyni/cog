@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/dvoyni/cog/gfx"
 )
@@ -16,17 +15,21 @@ import (
 // A command naming a handle missing at its index, a resource without the
 // usage the command puts it to, a misaligned copy or clear or one ending past
 // its buffer, or a broken pass sequence is recorded all the same, and Finish answers the first such error,
-// as wgpu does; a zero handle names none.
+// as wgpu does; a zero handle names none. Once its command buffer is
+// submitted, the device answers it again from CreateCommandEncoder.
 type commandEncoder struct {
 	device   *device
 	commands []Command
 	// bufferEffects are what the copies and clears recorded do to buffers'
 	// bytes, applied in order at the submit.
-	bufferEffects []func()
+	bufferEffects []bufferEffect
 	// err is the first command's error, for Finish.
 	err error
 	// passOpen is set from a pass's beginning to its End.
 	passOpen bool
+	// passCommandIndex is the index of the command that began the last pass, which
+	// holds its commands when they are kept.
+	passCommandIndex int
 	// pipelineSet is set once the open pass sets its pipeline.
 	pipelineSet bool
 	// spent is set once the encoder is finished or discarded: wgpu answers
@@ -39,14 +42,13 @@ type commandEncoder struct {
 // each attachment's view needs RenderAttachment, and its timestamp writes
 // name no query set.
 func (encoder *commandEncoder) BeginRenderPass(descriptor gfx.RenderPassDescriptor) gfx.RenderPassEncoder {
-	descriptor.ColorAttachments = slices.Clone(descriptor.ColorAttachments)
 	encoder.beginPass()
 	encoder.check(func(d *device) error {
 		for index, attachment := range descriptor.ColorAttachments {
-			if err := d.requireView(attachment.View, gfx.TextureUsageFlagRenderAttachment, fmt.Sprintf("color attachment %d", index)); err != nil {
+			if err := d.requireView(attachment.View, gfx.TextureUsageFlagRenderAttachment, indexedRole{"color attachment %d", index}); err != nil {
 				return err
 			}
-			if err := d.requireView(attachment.ResolveTarget, gfx.TextureUsageFlagRenderAttachment, fmt.Sprintf("color attachment %d's resolve target", index)); err != nil {
+			if err := d.requireView(attachment.ResolveTarget, gfx.TextureUsageFlagRenderAttachment, indexedRole{"color attachment %d's resolve target", index}); err != nil {
 				return err
 			}
 		}
@@ -55,8 +57,9 @@ func (encoder *commandEncoder) BeginRenderPass(descriptor gfx.RenderPassDescript
 			requireQuerySet(descriptor.TimestampWrites.QuerySet, "the pass's timestamp writes"),
 		)
 	})
+	descriptor.ColorAttachments = encoder.device.instance.cloneKept(descriptor.ColorAttachments)
 	encoder.record(CommandKindBeginRenderPass, descriptor)
-	return renderPassEncoder{pass{encoder: encoder, index: len(encoder.commands) - 1}}
+	return renderPassEncoder{pass{encoder: encoder}}
 }
 
 // BeginComputePass records the pass and answers its encoder, which records
@@ -66,7 +69,7 @@ func (encoder *commandEncoder) BeginComputePass(descriptor gfx.ComputePassDescri
 	encoder.beginPass()
 	encoder.fail(requireQuerySet(descriptor.TimestampWrites.QuerySet, "the pass's timestamp writes"))
 	encoder.record(CommandKindBeginComputePass, descriptor)
-	return computePassEncoder{pass{encoder: encoder, index: len(encoder.commands) - 1}}
+	return computePassEncoder{pass{encoder: encoder}}
 }
 
 // ResolveQuerySet records the resolve, which always fails: there is no query
@@ -107,7 +110,7 @@ func (encoder *commandEncoder) CopyBufferToBuffer(source gfx.Buffer, sourceOffse
 		if err != nil {
 			return err
 		}
-		encoder.bufferEffects = append(encoder.bufferEffects, func() { copy(copiedTo, copiedFrom) })
+		encoder.bufferEffects = append(encoder.bufferEffects, bufferEffect{destination: copiedTo, source: copiedFrom})
 		return nil
 	})
 	encoder.record(CommandKindCopyBufferToBuffer, CopyBufferToBufferArguments{
@@ -130,7 +133,7 @@ func (encoder *commandEncoder) CopyBufferToTexture(source gfx.Buffer, destinatio
 			requireRowsAligned(regions),
 		)
 	})
-	encoder.record(CommandKindCopyBufferToTexture, CopyBufferToTextureArguments{Source: source, Destination: destination, Regions: slices.Clone(regions)})
+	encoder.record(CommandKindCopyBufferToTexture, CopyBufferToTextureArguments{Source: source, Destination: destination, Regions: encoder.device.instance.cloneKept(regions)})
 }
 
 // CopyTextureToBuffer records the copy, its regions copied, from a texture
@@ -144,7 +147,7 @@ func (encoder *commandEncoder) CopyTextureToBuffer(source gfx.Texture, destinati
 			requireRowsAligned(regions),
 		)
 	})
-	encoder.record(CommandKindCopyTextureToBuffer, CopyTextureToBufferArguments{Source: source, Destination: destination, Regions: slices.Clone(regions)})
+	encoder.record(CommandKindCopyTextureToBuffer, CopyTextureToBufferArguments{Source: source, Destination: destination, Regions: encoder.device.instance.cloneKept(regions)})
 }
 
 // CopyTextureToTexture records the copy, its regions copied, from a texture
@@ -156,7 +159,7 @@ func (encoder *commandEncoder) CopyTextureToTexture(source, destination gfx.Text
 		}
 		return d.requireTexture(destination, gfx.TextureUsageFlagCopyDst, "the copy's destination")
 	})
-	encoder.record(CommandKindCopyTextureToTexture, CopyTextureToTextureArguments{Source: source, Destination: destination, Regions: slices.Clone(regions)})
+	encoder.record(CommandKindCopyTextureToTexture, CopyTextureToTextureArguments{Source: source, Destination: destination, Regions: encoder.device.instance.cloneKept(regions)})
 }
 
 // ClearBuffer records the clear, of a buffer with CopyDst, its offset and
@@ -174,7 +177,7 @@ func (encoder *commandEncoder) ClearBuffer(buffer gfx.Buffer, offset, size uint6
 		if err != nil {
 			return err
 		}
-		encoder.bufferEffects = append(encoder.bufferEffects, func() { clear(cleared) })
+		encoder.bufferEffects = append(encoder.bufferEffects, bufferEffect{destination: cleared, cleared: true})
 		return nil
 	})
 	encoder.record(CommandKindClearBuffer, ClearBufferArguments{Buffer: buffer, Offset: offset, Size: size})
@@ -185,7 +188,7 @@ func (encoder *commandEncoder) ClearBuffer(buffer gfx.Buffer, offset, size uint6
 // or discarded, or a command's error, or an error when a pass is still open.
 // The encoder is spent either way.
 func (encoder *commandEncoder) Finish() (gfx.CommandBuffer, error) {
-	err := encoder.device.instance.record(CallKindFinish, nil, func() error {
+	err := encoder.device.instance.record[any](CallKindFinish, nil, func() error {
 		if encoder.spent {
 			return errors.New("recording: finishing an encoder already finished or discarded")
 		}
@@ -198,7 +201,7 @@ func (encoder *commandEncoder) Finish() (gfx.CommandBuffer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &commandBuffer{commands: encoder.commands, bufferEffects: encoder.bufferEffects}, nil
+	return commandBuffer{encoder: encoder}, nil
 }
 
 // DiscardEncoding drops the commands recorded; the encoder is spent.
@@ -216,6 +219,7 @@ func (encoder *commandEncoder) beginPass() {
 	}
 	encoder.passOpen = true
 	encoder.pipelineSet = false
+	encoder.passCommandIndex = len(encoder.commands)
 }
 
 // check runs check over the device under the instance's mutex, and fails the
@@ -234,9 +238,12 @@ func (encoder *commandEncoder) fail(err error) {
 	}
 }
 
-// record appends a command of kind with arguments.
-func (encoder *commandEncoder) record(kind CommandKind, arguments any) {
-	encoder.commands = append(encoder.commands, Command{Kind: kind, Arguments: arguments})
+// record appends a command of kind with arguments, unless recording is
+// disabled; arguments are made an interface only when kept.
+func (encoder *commandEncoder) record[A any](kind CommandKind, arguments A) {
+	if encoder.device.instance.keepsCalls() {
+		encoder.commands = append(encoder.commands, Command{Kind: kind, Arguments: arguments})
+	}
 }
 
 // copyBufferAlignment is what a buffer copy's offsets and size, and a clear's
@@ -250,7 +257,7 @@ const copyBytesPerRowAlignment = 256
 
 // requireAligned answers an error naming role when value is not a multiple of
 // alignment.
-func requireAligned(value, alignment uint64, role string) error {
+func requireAligned[R role](value, alignment uint64, role R) error {
 	if value%alignment != 0 {
 		return fmt.Errorf("recording: %s %d is not a multiple of %d", role, value, alignment)
 	}
@@ -259,7 +266,7 @@ func requireAligned(value, alignment uint64, role string) error {
 
 // requireWithin answers an error naming role when the range from offset, size
 // long, ends past length.
-func requireWithin(offset, size, length uint64, role string) error {
+func requireWithin[R role](offset, size, length uint64, role R) error {
 	if offset > length || size > length-offset {
 		return fmt.Errorf("recording: %s's range of %d bytes from %d ends past %d", role, size, offset, length)
 	}
@@ -270,38 +277,37 @@ func requireWithin(offset, size, length uint64, role string) error {
 // multiple of copyBytesPerRowAlignment apart.
 func requireRowsAligned(regions []gfx.BufferTextureCopy) error {
 	for index, region := range regions {
-		if err := requireAligned(uint64(region.BufferLayout.BytesPerRow), copyBytesPerRowAlignment, fmt.Sprintf("region %d's bytes per row", index)); err != nil {
+		if err := requireAligned(uint64(region.BufferLayout.BytesPerRow), copyBytesPerRowAlignment, indexedRole{"region %d's bytes per row", index}); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// commandBuffer is a finished commandEncoder's commands, as Submit records
-// them, and what they do to buffers' bytes, which Submit applies.
+// commandBuffer is a finished commandEncoder, whose commands Submit records
+// and whose buffer effects it applies. It holds the encoder alone, so it is
+// made an interface without allocating.
 type commandBuffer struct {
-	commands      []Command
-	bufferEffects []func()
+	encoder *commandEncoder
 }
 
 // Release does nothing: the adapter holds nothing for a buffer.
-func (*commandBuffer) Release() {}
+func (commandBuffer) Release() {}
 
 // pass is what a render and a compute pass share: the encoder they record
-// into, and the index of the command that began them, which holds their
-// commands.
+// into, under the command that began the last pass. It holds the encoder
+// alone, so a pass encoder is made an interface without allocating.
 type pass struct {
 	encoder *commandEncoder
-	index   int
 }
 
 // SetBindGroup records the bind group, its dynamic offsets copied.
 func (p pass) SetBindGroup(index uint32, group gfx.BindGroup, dynamicOffsets []uint32) {
 	p.encoder.check(func(d *device) error {
-		_, err := requireObject(&d.bindGroups, group, fmt.Sprintf("bind group %d", index))
+		_, err := d.bindGroups.require(group, indexedRole{"bind group %d", int(index)})
 		return err
 	})
-	p.record(CommandKindSetBindGroup, SetBindGroupArguments{Index: index, Group: group, DynamicOffsets: slices.Clone(dynamicOffsets)})
+	p.record(CommandKindSetBindGroup, SetBindGroupArguments{Index: index, Group: group, DynamicOffsets: p.encoder.device.instance.cloneKept(dynamicOffsets)})
 }
 
 // End records nothing, the pass's commands being those under its beginning,
@@ -324,9 +330,14 @@ func (p pass) requireIndirectBuffer(buffer gfx.Buffer) {
 	p.encoder.check(func(d *device) error { return d.requireBuffer(buffer, gfx.BufferUsageFlagNone, "the indirect buffer") })
 }
 
-// record appends a command of kind with arguments under the pass's beginning.
-func (p pass) record(kind CommandKind, arguments any) {
-	begun := &p.encoder.commands[p.index]
+// record appends a command of kind with arguments under the pass's
+// beginning, when the encoder keeps its commands; arguments are made an
+// interface only then.
+func (p pass) record[A any](kind CommandKind, arguments A) {
+	if !p.encoder.device.instance.keepsCalls() {
+		return
+	}
+	begun := &p.encoder.commands[p.encoder.passCommandIndex]
 	begun.Commands = append(begun.Commands, Command{Kind: kind, Arguments: arguments})
 }
 
@@ -338,7 +349,7 @@ type renderPassEncoder struct {
 // SetPipeline records the pipeline, set for the pass's draws or dispatches.
 func (p renderPassEncoder) SetPipeline(pipeline gfx.RenderPipeline) {
 	p.encoder.check(func(d *device) error {
-		_, err := requireObject(&d.renderPipelines, pipeline, "the pipeline")
+		_, err := d.renderPipelines.require(pipeline, "the pipeline")
 		return err
 	})
 	p.record(CommandKindSetPipeline, pipeline)
@@ -348,7 +359,7 @@ func (p renderPassEncoder) SetPipeline(pipeline gfx.RenderPipeline) {
 // SetVertexBuffer records the vertex buffer, which needs Vertex.
 func (p renderPassEncoder) SetVertexBuffer(slot uint32, buffer gfx.Buffer, offset uint64) {
 	p.encoder.check(func(d *device) error {
-		return d.requireBuffer(buffer, gfx.BufferUsageFlagVertex, fmt.Sprintf("vertex buffer %d", slot))
+		return d.requireBuffer(buffer, gfx.BufferUsageFlagVertex, indexedRole{"vertex buffer %d", int(slot)})
 	})
 	p.record(CommandKindSetVertexBuffer, SetVertexBufferArguments{Slot: slot, Buffer: buffer, Offset: offset})
 }
@@ -427,7 +438,7 @@ type computePassEncoder struct {
 // SetPipeline records the pipeline, set for the pass's draws or dispatches.
 func (p computePassEncoder) SetPipeline(pipeline gfx.ComputePipeline) {
 	p.encoder.check(func(d *device) error {
-		_, err := requireObject(&d.computePipelines, pipeline, "the pipeline")
+		_, err := d.computePipelines.require(pipeline, "the pipeline")
 		return err
 	})
 	p.record(CommandKindSetPipeline, pipeline)

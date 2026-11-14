@@ -191,7 +191,8 @@ type Answer struct {
 	Error            error
 }
 
-// Recording is every call that reached the adapter, as typed values. The
+// Recording is every call that reached the adapter while it recorded, as
+// typed values, none after Instance.DisableRecording. The
 // order of Submissions and of the surface calls is deterministic, since gfx
 // sorts and chains them; the order of Calls from parallel tasks is not, so a
 // test looks them up by handle.

@@ -1457,6 +1457,22 @@ instance.AnswerNext(recording.CallKindReflectBindings, recording.Answer{Bindings
 }}})
 ```
 
+**Recording nothing.** `instance.DisableRecording()` makes the adapter keep
+no call from then on, while every call answers and checks as before,
+`AnswerNext` included; `Recording()` answers what was recorded before. A
+benchmark or an allocation gate uses it to measure gfx and its own code, not
+the recording: once warm, a frame of writes, bind groups, passes and draws
+allocates nothing in the adapter.
+
+```go
+instance := recording.NewInstance()
+instance.DisableRecording()
+// Spawn against it, and draw a frame to warm up; then:
+if allocations := testing.AllocsPerRun(100, drawFrame); allocations != 0 {
+	t.Errorf("a warm frame allocated %v times", allocations)
+}
+```
+
 **Real pixels** come from gogpu on wgpu's software adapter, with
 `gfx.Config{ForceFallbackAdapter: true}`, not from the recording adapter.
 Test what records in parallel under `go test -race`.

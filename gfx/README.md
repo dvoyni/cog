@@ -47,7 +47,8 @@ queries, and its buffers hold the bytes written, copied and cleared,
 which its own maps read, and answers a pipeline's reflection with the
 layouts a test queues, a vertex entry point's with its inputs, a
 module's named reflection with the bindings a test queues, and a
-shader's preprocessing with the file's text as it is.
+shader's preprocessing with the file's text as it is, and, its recording
+disabled, keeps no call and allocates nothing in a warm frame.
 What remains is on the [gfx map](https://github.com/dvoyni/cog/issues/608).
 
 ## Shape

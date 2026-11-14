@@ -30,8 +30,13 @@ type device struct {
 	renderPipelines  objectRegistry[gfx.RenderPipelineDescriptor]
 	computePipelines objectRegistry[gfx.ComputePipelineDescriptor]
 	// pendingWrites are the buffer writes made since the last submit, which
-	// the next applies before its command buffers.
-	pendingWrites []func()
+	// the next applies before its command buffers: each copies from the data
+	// its call kept, or, recording disabled, from what pendingData staged.
+	pendingWrites []bufferEffect
+	pendingData   []byte
+	// idleEncoders are the encoders whose command buffers were submitted,
+	// for CreateCommandEncoder to answer again.
+	idleEncoders []*commandEncoder
 	// submissionCount is how many submits this device made, the last one's
 	// index, under the instance's mutex.
 	submissionCount uint64
@@ -69,7 +74,7 @@ func (d *device) ReleaseTexture(texture gfx.Texture) {
 func (d *device) CreateTextureView(view gfx.TextureView, texture gfx.Texture, descriptor gfx.TextureViewDescriptor) error {
 	arguments := CreateTextureViewArguments{View: view, Texture: texture, Descriptor: descriptor}
 	return d.instance.record(CallKindCreateTextureView, arguments, func() error {
-		textureDescriptor, err := requireObject(&d.textures, texture, "the viewed texture")
+		textureDescriptor, err := d.textures.require(texture, "the viewed texture")
 		if err != nil {
 			return err
 		}
@@ -141,7 +146,7 @@ func (d *device) ReleaseBindGroupLayout(layout gfx.BindGroupLayout) {
 // buffer Storage, a storage texture StorageBinding.
 func (d *device) CreateBindGroup(group gfx.BindGroup, descriptor gfx.BindGroupDescriptor) error {
 	return d.instance.record(CallKindCreateBindGroup, CreateBindGroupArguments{Group: group, Descriptor: descriptor}, func() error {
-		layout, err := requireObject(&d.bindGroupLayouts, descriptor.Layout, "the bind group's layout")
+		layout, err := d.bindGroupLayouts.require(descriptor.Layout, "the bind group's layout")
 		if err != nil {
 			return err
 		}
@@ -161,11 +166,11 @@ func (d *device) CreateBindGroup(group gfx.BindGroup, descriptor gfx.BindGroupDe
 			if layoutEntry.StorageTexture.Access != gfx.StorageTextureAccessUndefined {
 				textureUsage = gfx.TextureUsageFlagStorageBinding
 			}
-			role := fmt.Sprintf("binding %d", entry.Binding)
+			role := indexedRole{"binding %d", int(entry.Binding)}
 			if err := d.requireBuffer(entry.Buffer, bufferUsage, role); err != nil {
 				return err
 			}
-			if _, err := requireObject(&d.samplers, entry.Sampler, role); err != nil {
+			if _, err := d.samplers.require(entry.Sampler, role); err != nil {
 				return err
 			}
 			if err := d.requireView(entry.TextureView, textureUsage, role); err != nil {
@@ -186,7 +191,7 @@ func (d *device) ReleaseBindGroup(group gfx.BindGroup) {
 func (d *device) CreatePipelineLayout(layout gfx.PipelineLayout, descriptor gfx.PipelineLayoutDescriptor) error {
 	return d.instance.record(CallKindCreatePipelineLayout, CreatePipelineLayoutArguments{Layout: layout, Descriptor: descriptor}, func() error {
 		for index, groupLayout := range descriptor.BindGroupLayouts {
-			if _, err := requireObject(&d.bindGroupLayouts, groupLayout, fmt.Sprintf("group %d's layout", index)); err != nil {
+			if _, err := d.bindGroupLayouts.require(groupLayout, indexedRole{"group %d's layout", index}); err != nil {
 				return err
 			}
 		}
@@ -203,13 +208,13 @@ func (d *device) ReleasePipelineLayout(layout gfx.PipelineLayout) {
 // an error when its layout or a stage's module is missing.
 func (d *device) CreateRenderPipeline(pipeline gfx.RenderPipeline, descriptor gfx.RenderPipelineDescriptor) error {
 	return d.instance.record(CallKindCreateRenderPipeline, CreateRenderPipelineArguments{Pipeline: pipeline, Descriptor: descriptor}, func() error {
-		if _, err := requireObject(&d.pipelineLayouts, descriptor.Layout, "the pipeline's layout"); err != nil {
+		if _, err := d.pipelineLayouts.require(descriptor.Layout, "the pipeline's layout"); err != nil {
 			return err
 		}
-		if _, err := requireObject(&d.shaderModules, descriptor.Vertex.Module, "the vertex module"); err != nil {
+		if _, err := d.shaderModules.require(descriptor.Vertex.Module, "the vertex module"); err != nil {
 			return err
 		}
-		if _, err := requireObject(&d.shaderModules, descriptor.Fragment.Module, "the fragment module"); err != nil {
+		if _, err := d.shaderModules.require(descriptor.Fragment.Module, "the fragment module"); err != nil {
 			return err
 		}
 		return d.renderPipelines.store(pipeline.Index(), descriptor)
@@ -227,10 +232,10 @@ func (d *device) ReleaseRenderPipeline(pipeline gfx.RenderPipeline) {
 // when a module is missing.
 func (d *device) ReflectRenderPipelineLayout(descriptor gfx.RenderPipelineDescriptor) ([]gfx.BindGroupLayoutDescriptor, error) {
 	answer := d.instance.record(CallKindReflectRenderPipelineLayout, descriptor, func() error {
-		if _, err := requireObject(&d.shaderModules, descriptor.Vertex.Module, "the vertex module"); err != nil {
+		if _, err := d.shaderModules.require(descriptor.Vertex.Module, "the vertex module"); err != nil {
 			return err
 		}
-		_, err := requireObject(&d.shaderModules, descriptor.Fragment.Module, "the fragment module")
+		_, err := d.shaderModules.require(descriptor.Fragment.Module, "the fragment module")
 		return err
 	})
 	return cloneLayouts(answer.BindGroupLayouts), answer.Error
@@ -240,7 +245,7 @@ func (d *device) ReflectRenderPipelineLayout(descriptor gfx.RenderPipelineDescri
 // ReflectRenderPipelineLayout does; an error when its module is missing.
 func (d *device) ReflectComputePipelineLayout(descriptor gfx.ComputePipelineDescriptor) ([]gfx.BindGroupLayoutDescriptor, error) {
 	answer := d.instance.record(CallKindReflectComputePipelineLayout, descriptor, func() error {
-		_, err := requireObject(&d.shaderModules, descriptor.Module, "the compute module")
+		_, err := d.shaderModules.require(descriptor.Module, "the compute module")
 		return err
 	})
 	return cloneLayouts(answer.BindGroupLayouts), answer.Error
@@ -251,7 +256,7 @@ func (d *device) ReflectComputePipelineLayout(descriptor gfx.ComputePipelineDesc
 // an error when module is missing.
 func (d *device) ReflectVertexInputs(module gfx.ShaderModule, entryPoint string) ([]gfx.VertexInput, error) {
 	answer := d.instance.record(CallKindReflectVertexInputs, ReflectVertexInputsArguments{Module: module, EntryPoint: entryPoint}, func() error {
-		_, err := requireObject(&d.shaderModules, module, "the vertex module")
+		_, err := d.shaderModules.require(module, "the vertex module")
 		return err
 	})
 	return slices.Clone(answer.VertexInputs), answer.Error
@@ -262,7 +267,7 @@ func (d *device) ReflectVertexInputs(module gfx.ShaderModule, entryPoint string)
 // when module is missing.
 func (d *device) ReflectBindings(module gfx.ShaderModule) ([]gfx.ShaderBinding, error) {
 	answer := d.instance.record(CallKindReflectBindings, module, func() error {
-		_, err := requireObject(&d.shaderModules, module, "the reflected module")
+		_, err := d.shaderModules.require(module, "the reflected module")
 		return err
 	})
 	return cloneBindings(answer.Bindings), answer.Error
@@ -272,10 +277,10 @@ func (d *device) ReflectBindings(module gfx.ShaderModule) ([]gfx.ShaderBinding, 
 // index; an error when its layout or module is missing.
 func (d *device) CreateComputePipeline(pipeline gfx.ComputePipeline, descriptor gfx.ComputePipelineDescriptor) error {
 	return d.instance.record(CallKindCreateComputePipeline, CreateComputePipelineArguments{Pipeline: pipeline, Descriptor: descriptor}, func() error {
-		if _, err := requireObject(&d.pipelineLayouts, descriptor.Layout, "the pipeline's layout"); err != nil {
+		if _, err := d.pipelineLayouts.require(descriptor.Layout, "the pipeline's layout"); err != nil {
 			return err
 		}
-		if _, err := requireObject(&d.shaderModules, descriptor.Module, "the compute module"); err != nil {
+		if _, err := d.shaderModules.require(descriptor.Module, "the compute module"); err != nil {
 			return err
 		}
 		return d.computePipelines.store(pipeline.Index(), descriptor)
@@ -292,8 +297,12 @@ func (d *device) ReleaseComputePipeline(pipeline gfx.ComputePipeline) {
 // lacks CopyDst, offset or data's length is not a multiple of
 // copyBufferAlignment, or the write ends past the buffer.
 func (d *device) WriteBuffer(buffer gfx.Buffer, offset uint64, data []byte) error {
-	data = slices.Clone(data)
-	return d.instance.record(CallKindWriteBuffer, WriteBufferArguments{Buffer: buffer, Offset: offset, Data: data}, func() error {
+	kept := d.instance.keepsCalls()
+	arguments := WriteBufferArguments{Buffer: buffer, Offset: offset, Data: data}
+	if kept {
+		arguments.Data = slices.Clone(data)
+	}
+	return d.instance.record(CallKindWriteBuffer, arguments, func() error {
 		if err := cmp.Or(
 			d.requireBuffer(buffer, gfx.BufferUsageFlagCopyDst, "the written buffer"),
 			requireAligned(offset, copyBufferAlignment, "the write's offset"),
@@ -305,7 +314,13 @@ func (d *device) WriteBuffer(buffer gfx.Buffer, offset uint64, data []byte) erro
 		if err != nil {
 			return err
 		}
-		d.pendingWrites = append(d.pendingWrites, func() { copy(written, data) })
+		source := arguments.Data
+		if !kept {
+			start := len(d.pendingData)
+			d.pendingData = append(d.pendingData, data...)
+			source = d.pendingData[start:]
+		}
+		d.pendingWrites = append(d.pendingWrites, bufferEffect{destination: written, source: source})
 		return nil
 	}).Error
 }
@@ -313,7 +328,7 @@ func (d *device) WriteBuffer(buffer gfx.Buffer, offset uint64, data []byte) erro
 // WriteTexture records the write, data copied; an error when the texture is
 // missing or lacks CopyDst. Textures hold no texels, so it lands nowhere.
 func (d *device) WriteTexture(destination gfx.ImageCopyTexture, data []byte, layout gfx.ImageDataLayout, size gfx.Extent3D) error {
-	arguments := WriteTextureArguments{Destination: destination, Data: slices.Clone(data), Layout: layout, Size: size}
+	arguments := WriteTextureArguments{Destination: destination, Data: d.instance.cloneKept(data), Layout: layout, Size: size}
 	return d.instance.record(CallKindWriteTexture, arguments, func() error {
 		return d.requireTexture(destination.Texture, gfx.TextureUsageFlagCopyDst, "the written texture")
 	}).Error
@@ -402,34 +417,51 @@ func (d *device) Poll() uint64 {
 	return d.submissionCount
 }
 
-// CreateCommandEncoder answers an encoder recording the commands given it.
+// CreateCommandEncoder answers an encoder recording the commands given it,
+// keeping them unless recording is disabled: one whose command buffer was
+// submitted when there is one, so a warm frame makes none.
 func (d *device) CreateCommandEncoder(descriptor gfx.CommandEncoderDescriptor) (gfx.StandaloneCommandEncoder, error) {
-	return &commandEncoder{device: d}, nil
+	d.instance.mutex.Lock()
+	defer d.instance.mutex.Unlock()
+	var encoder *commandEncoder
+	if count := len(d.idleEncoders); count > 0 {
+		encoder = d.idleEncoders[count-1]
+		d.idleEncoders = d.idleEncoders[:count-1]
+	} else {
+		encoder = &commandEncoder{}
+	}
+	*encoder = commandEncoder{device: d, bufferEffects: encoder.bufferEffects}
+	return encoder, nil
 }
 
 // Submit records the call and buffers as one submission, after the calls
 // recorded before it, and applies the writes pending, then each buffer's
 // copies and clears, in order; or it answers the error AnswerNext queued for
 // it and submits nothing, answering index zero. Every buffer is one the
-// adapter's encoders finished. Its index counts from one on each device.
+// adapter's encoders finished, and its encoder is answered again by a later
+// CreateCommandEncoder. Its index counts from one on each device.
 func (d *device) Submit(buffers ...gfx.CommandBuffer) (uint64, error) {
-	submission := Submission{Buffers: make([]CommandBuffer, len(buffers))}
-	for index, buffer := range buffers {
-		submission.Buffers[index] = CommandBuffer{Commands: buffer.(*commandBuffer).commands}
-	}
 	var index uint64
-	err := d.instance.record(CallKindSubmit, nil, func() error {
-		for _, write := range d.pendingWrites {
-			write()
+	err := d.instance.record[any](CallKindSubmit, nil, func() error {
+		d.pendingWrites = applyBufferEffects(d.pendingWrites)
+		d.pendingData = d.pendingData[:0]
+		kept := d.instance.keepsCalls()
+		var submission Submission
+		if kept {
+			submission.Buffers = make([]CommandBuffer, len(buffers))
 		}
-		d.pendingWrites = nil
-		for _, buffer := range buffers {
-			for _, effect := range buffer.(*commandBuffer).bufferEffects {
-				effect()
+		for index, buffer := range buffers {
+			encoder := buffer.(commandBuffer).encoder
+			encoder.bufferEffects = applyBufferEffects(encoder.bufferEffects)
+			if kept {
+				submission.Buffers[index] = CommandBuffer{Commands: encoder.commands}
 			}
+			d.idleEncoders = append(d.idleEncoders, encoder)
 		}
-		d.instance.recording.submittedAfter = append(d.instance.recording.submittedAfter, len(d.instance.recording.Calls))
-		d.instance.recording.Submissions = append(d.instance.recording.Submissions, submission)
+		if kept {
+			d.instance.recording.submittedAfter = append(d.instance.recording.submittedAfter, len(d.instance.recording.Calls))
+			d.instance.recording.Submissions = append(d.instance.recording.Submissions, submission)
+		}
 		d.submissionCount++
 		index = d.submissionCount
 		return nil
@@ -518,13 +550,13 @@ func (d *device) Present(window platform.Window) error {
 }
 
 // WaitIdle records the wait, and answers what AnswerNext queued for it.
-func (d *device) WaitIdle() error { return d.instance.record(CallKindWaitIdle, nil, nil).Error }
+func (d *device) WaitIdle() error { return d.instance.record[any](CallKindWaitIdle, nil, nil).Error }
 
 // Release records the device released, with every object it holds, and
 // leaves each surface unconfigured, dropping a framebuffer acquired and not
 // presented, as a real device's release does.
 func (d *device) Release() {
-	d.instance.record(CallKindReleaseDevice, nil, func() error {
+	d.instance.record[any](CallKindReleaseDevice, nil, func() error {
 		for window, windowSurface := range d.instance.surfaces {
 			d.instance.surfaces[window] = surface{native: windowSurface.native}
 		}
@@ -534,8 +566,8 @@ func (d *device) Release() {
 
 // requireBuffer answers an error when buffer is missing, or lacks usage, for
 // role; nil for the zero buffer.
-func (d *device) requireBuffer(buffer gfx.Buffer, usage gfx.BufferUsageFlags, role string) error {
-	object, err := requireObject(&d.buffers, buffer, role)
+func (d *device) requireBuffer[R role](buffer gfx.Buffer, usage gfx.BufferUsageFlags, role R) error {
+	object, err := d.buffers.require(buffer, role)
 	if err != nil || buffer == (gfx.Buffer{}) {
 		return err
 	}
@@ -548,8 +580,8 @@ func (d *device) requireBuffer(buffer gfx.Buffer, usage gfx.BufferUsageFlags, ro
 // requireRange answers the bytes of buffer from offset, size long, for role;
 // an error when buffer is missing or the range ends past it, nil bytes for
 // the zero buffer.
-func (d *device) requireRange(buffer gfx.Buffer, offset, size uint64, role string) ([]byte, error) {
-	object, err := requireObject(&d.buffers, buffer, role)
+func (d *device) requireRange[R role](buffer gfx.Buffer, offset, size uint64, role R) ([]byte, error) {
+	object, err := d.buffers.require(buffer, role)
 	if err != nil || buffer == (gfx.Buffer{}) {
 		return nil, err
 	}
@@ -563,7 +595,7 @@ func (d *device) requireRange(buffer gfx.Buffer, offset, size uint64, role strin
 // mapped; an error when buffer is zero or missing, or its map state is the
 // other.
 func (d *device) requireMapState(buffer gfx.Buffer, mapped bool) (*bufferObject, error) {
-	object, err := requireObject(&d.buffers, buffer, "the mapped buffer")
+	object, err := d.buffers.require(buffer, "the mapped buffer")
 	switch {
 	case err != nil:
 		return nil, err
@@ -581,13 +613,13 @@ func (d *device) requireMapState(buffer gfx.Buffer, mapped bool) (*bufferObject,
 // for role; nil for the zero texture. A framebuffer acquired and not yet
 // presented is a texture whose usage is RenderAttachment, and CopySrc when
 // its acquire was captured.
-func (d *device) requireTexture(texture gfx.Texture, usage gfx.TextureUsageFlags, role string) error {
+func (d *device) requireTexture[R role](texture gfx.Texture, usage gfx.TextureUsageFlags, role R) error {
 	if texture == (gfx.Texture{}) {
 		return nil
 	}
 	textureUsage, isFramebuffer := d.instance.framebufferUsage(texture)
 	if !isFramebuffer {
-		descriptor, err := requireObject(&d.textures, texture, role)
+		descriptor, err := d.textures.require(texture, role)
 		if err != nil {
 			return err
 		}
@@ -602,7 +634,7 @@ func (d *device) requireTexture(texture gfx.Texture, usage gfx.TextureUsageFlags
 // requireView answers an error when view is missing, or its texture lacks
 // usage, for role; nil for the zero view. A framebuffer acquired and not yet
 // presented is a view whose usage is RenderAttachment.
-func (d *device) requireView(view gfx.TextureView, usage gfx.TextureUsageFlags, role string) error {
+func (d *device) requireView[R role](view gfx.TextureView, usage gfx.TextureUsageFlags, role R) error {
 	if view == (gfx.TextureView{}) {
 		return nil
 	}
@@ -610,7 +642,7 @@ func (d *device) requireView(view gfx.TextureView, usage gfx.TextureUsageFlags, 
 	if d.instance.holdsFramebuffer(view) {
 		viewUsage = gfx.TextureUsageFlagRenderAttachment
 	} else {
-		object, err := requireObject(&d.textureViews, view, role)
+		object, err := d.textureViews.require(view, role)
 		if err != nil {
 			return err
 		}
