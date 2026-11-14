@@ -11,7 +11,7 @@ import (
 // storing nothing of its own: what it places are ordinary overrides and
 // callbacks, with absolute starts, scheduled as it places them.
 type Sequence[M any, D comparable] struct {
-	timeline WriteTimeline[M, D]
+	timeline writeTimeline[M, D]
 	// previousStart is the start of what was placed last, or the
 	// sequence's start before anything is.
 	previousStart time.Duration
