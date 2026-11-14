@@ -170,9 +170,12 @@ func (p *gamePlugin) move(k *kernel.Kernel, order MoveOrder, game kernel.Write[*
   places: `Tween`, `Hold` and `Call` after everything placed so far, `With`
   alongside what was placed last, `Wait` a gap.
 - **`Cancel(path, holes...)`** removes every override at an address, and the
-  model's own value shows from the next `Step`. It walks every override on
-  the path, so cancelling each of thousands of addresses one by one costs
-  their count squared.
+  model's own value shows from the next `Step`. It finds them, as `End`
+  does, by binary search, so it costs the log of the overrides on the path.
+  The overrides scheduled since the last `Step` are searched too while they
+  were scheduled in hole order, as an update moving its units in index
+  order schedules them; once one was scheduled out of order, they are
+  walked until the next `Step`.
 
 ## Views and the AI
 

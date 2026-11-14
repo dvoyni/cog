@@ -357,18 +357,21 @@ func (p *compiledPath) findProperty(model unsafe.Pointer, holes []int64) (unsafe
 	return unsafe.Add(reached, p.offset), true
 }
 
-// makeHoles answers the holes of the address p names with holes, as a depth
-// D, whose places past p's holes stay zero. D is the depth of p's model,
-// which MakePath checked holds every hole of p. Holes p does not take panic
-// with a holeMismatchError.
-func (p *compiledPath) makeHoles[D comparable](holes []int64) D {
+// fillHoles writes holes, the holes of the address p names, into the first
+// places of filledHoles, a depth D, and leaves its places past them as they
+// are: a depth declared fresh, as every caller's is, holds zero there. D is
+// the depth of p's model, which MakePath checked holds every hole of p. Holes
+// p does not take panic with a holeMismatchError.
+//
+// It fills the caller's depth in place, rather than answering one: a depth
+// built aside is copied in wider moves than the hole's own, each of which
+// would wait for the writes it spans to land.
+func (p *compiledPath) fillHoles[D comparable](filledHoles *D, holes []int64) {
 	if len(holes) != p.holeCount {
 		panic(holeMismatchError{path: p, givenCount: len(holes)})
 	}
-	var filledHoles D
 	// A loop, not copy: copy calls memmove, which is slower over a few holes.
 	for index, hole := range holes {
-		*(*int64)(unsafe.Add(unsafe.Pointer(&filledHoles), uintptr(index)*unsafe.Sizeof(hole))) = hole
+		*(*int64)(unsafe.Add(unsafe.Pointer(filledHoles), uintptr(index)*unsafe.Sizeof(hole))) = hole
 	}
-	return filledHoles
 }

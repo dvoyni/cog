@@ -122,7 +122,8 @@ func (p *timelineProbe) expectSteps(t *testing.T, steps []timedValue) {
 // path span want, a start and an end for each, in the order scheduled.
 func (p *timelineProbe) expectSpans[T any](t *testing.T, path Path[game, T], want []time.Duration, holes ...int64) {
 	t.Helper()
-	filledHoles := path.compiled.makeHoles[depth](holes)
+	var filledHoles depth
+	path.compiled.fillHoles(&filledHoles, holes)
 	var got []time.Duration
 	for _, scheduled := range p.timeline.Get().state.findPathState(path).overrides {
 		if scheduled.holes == filledHoles {
@@ -660,6 +661,94 @@ func TestCancelRemovesEveryOverrideOnTheAddress(t *testing.T) {
 	probe.expectCurrent(t, probe.terrain, 1, 0, 0)
 }
 
+func TestEndAndCancelFindTheOverridesScheduledSinceTheLastStep(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	probe.model.Get().Units = make([]unit, 16)
+	for unitIndex := range probe.model.Get().Units {
+		probe.model.Get().Units[unitIndex].Health = 1000
+	}
+	timeline := ElevateTimeline(probe.timeline)
+	expectEnds := func(want map[int64]time.Duration) {
+		t.Helper()
+		for unitIndex := range int64(16) {
+			wantEnd, ok := want[unitIndex]
+			if !ok {
+				wantEnd = timeline.Now()
+			}
+			if end := timeline.End(probe.unitHealth, unitIndex); end != wantEnd {
+				t.Errorf("End of Units[%d].Health answered %v, want %v", unitIndex, end, wantEnd)
+			}
+		}
+	}
+	// Units 0 to 9 are tweened, unit 5 twice, and Step sorts them.
+	want := map[int64]time.Duration{}
+	for unitIndex := range int64(10) {
+		want[unitIndex] = time.Duration(unitIndex+1) * time.Second
+		timeline.Tween(probe.unitHealth, 0, 0, 10, want[unitIndex], EasingLinear, unitIndex)
+	}
+	want[5] = 20 * time.Second
+	timeline.Tween(probe.unitHealth, 0, 0, 10, want[5], EasingLinear, 5)
+	probe.runStep(0)
+	expectEnds(want)
+	// Since that Step, units 10 to 12 are tweened in hole order, and End
+	// searches them too.
+	for unitIndex := int64(10); unitIndex <= 12; unitIndex++ {
+		want[unitIndex] = 30 * time.Second
+		timeline.Tween(probe.unitHealth, 0, 0, 10, want[unitIndex], EasingLinear, unitIndex)
+	}
+	expectEnds(want)
+	// Then units 3, 8 and 5, out of hole order, and End walks them.
+	for _, unitIndex := range []int64{3, 8, 5} {
+		want[unitIndex] = 40 * time.Second
+		timeline.Tween(probe.unitHealth, 0, 0, 10, want[unitIndex], EasingLinear, unitIndex)
+	}
+	expectEnds(want)
+	// Unit 5 has overrides both before and since the Step, unit 11 only
+	// since, and unit 14 none.
+	for _, unitIndex := range []int64{5, 11, 14} {
+		timeline.Cancel(probe.unitHealth, unitIndex)
+		delete(want, unitIndex)
+	}
+	expectEnds(want)
+	probe.runStep(time.Second)
+	expectEnds(want)
+	probe.expectCurrent(t, probe.unitHealth, 1000, 5)
+	probe.expectCurrent(t, probe.unitHealth, 1000, 11)
+	if health, _ := probe.timeline.Get().Current(probe.unitHealth, probe.model.Get(), 3); health >= 1000 {
+		t.Errorf("Units[3].Health is current at %v, its model's, want its tweens' blend", health)
+	}
+}
+
+func TestCancellingBetweenStepsKeepsTheTimelineItsSize(t *testing.T) {
+	probe := spawnTimelineProbe(t, nil)
+	probe.model.Get().Units = make([]unit, 256)
+	timeline := ElevateTimeline(probe.timeline)
+	// Each round tweens every unit and cancels each, with no Step between
+	// rounds to retire what was cancelled.
+	round := func() {
+		for unitIndex := range int64(256) {
+			timeline.Tween(probe.unitHealth, timeline.Now(), 0, 10, time.Hour, EasingLinear, unitIndex)
+		}
+		for unitIndex := range int64(256) {
+			timeline.Cancel(probe.unitHealth, unitIndex)
+		}
+	}
+	round()
+	round()
+	if allocations := testing.AllocsPerRun(100, round); allocations != 0 {
+		t.Fatalf("Tween and Cancel of 256 addresses with no Step between allocated %v times per round", allocations)
+	}
+	// The overrides cancelled retire once they outnumber the rest, so the
+	// path never holds more than a round's.
+	if overrideCount := len(probe.timeline.Get().state.findPathState(probe.unitHealth).overrides); overrideCount > 256 {
+		t.Fatalf("after 102 rounds, Units[].Health holds %d overrides, want at most a round's 256", overrideCount)
+	}
+	probe.runStep(time.Minute)
+	for unitIndex := range int64(256) {
+		probe.expectCurrent(t, probe.unitHealth, 0, unitIndex)
+	}
+}
+
 func TestHoldEndAndCancelPanicNamingWhatIsWrong(t *testing.T) {
 	probe := spawnTimelineProbe(t, nil)
 	timeline := ElevateTimeline(probe.timeline)
@@ -783,6 +872,108 @@ func TestCurrentFindsEachOfManyAddressesOnOnePath(t *testing.T) {
 		probe.expectCurrent(t, probe.unitHealth, wantHealth, int64(index))
 		probe.expectCurrent(t, unitNamePath, wantName, int64(index))
 	}
+}
+
+func TestCurrentFindsEachAddressHoweverTheSampledHolesSpread(t *testing.T) {
+	// Current guesses where an address lies in the sample from where its
+	// hole falls between the first and the last sampled, so each spread
+	// lands the guesses differently. Some holes lie past the slice's ends,
+	// where Get misses but a hold still shows.
+	testCases := []struct {
+		name  string
+		holes []int64
+	}{
+		{"one hole", []int64{500}},
+		{"a run", makeHoleRange(0, 64, 1)},
+		{"every seventh", makeHoleRange(0, 1100, 7)},
+		{"two clusters", append(makeHoleRange(0, 10, 1), makeHoleRange(1090, 1100, 1)...)},
+		{"far apart, past both ends", []int64{math.MinInt64, -1000, 3, 4, 5, 1 << 40, math.MaxInt64}},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			probe := spawnTimelineProbe(t, nil)
+			model := probe.model.Get()
+			model.Units = make([]unit, 1100)
+			for unitIndex := range model.Units {
+				model.Units[unitIndex].Health = int32(unitIndex)
+			}
+			timeline := ElevateTimeline(probe.timeline)
+			held := map[int64]int32{}
+			for position, hole := range testCase.holes {
+				held[hole] = int32(-1 - position)
+				timeline.Hold(probe.unitHealth, 0, held[hole], time.Second, hole)
+			}
+			probe.runStep(0)
+			// Every hole of the slice is read, and each hole held with its
+			// neighbours, which wrap round at the ends of an int64.
+			readHoles := makeHoleRange(-2, 1102, 1)
+			for _, hole := range testCase.holes {
+				readHoles = append(readHoles, hole-1, hole, hole+1)
+			}
+			for _, hole := range readHoles {
+				want, wantOK := held[hole]
+				if !wantOK {
+					want, wantOK = probe.unitHealth.Get(model, hole)
+				}
+				if got, ok := probe.timeline.Get().Current(probe.unitHealth, model, hole); got != want || ok != wantOK {
+					t.Errorf("Units[%d].Health is current at %v, %v, want %v, %v", hole, got, ok, want, wantOK)
+				}
+			}
+		})
+	}
+}
+
+func TestCurrentFindsEachAddressOfAPathOfTwoHoles(t *testing.T) {
+	var memberHealth Path[game, int32]
+	probe := spawnTimelineProbe(t, func(configurator *kernel.Configurator) {
+		memberHealth = MakePath[game, int32](configurator, "Platoons[].Members[].Health")
+	})
+	model := probe.model.Get()
+	model.Platoons = make([]platoon, 8)
+	for platoonIndex := range model.Platoons {
+		model.Platoons[platoonIndex].Members = make([]unit, 50)
+		for memberIndex := range model.Platoons[platoonIndex].Members {
+			model.Platoons[platoonIndex].Members[memberIndex].Health = int32(100*platoonIndex + memberIndex)
+		}
+	}
+	timeline := ElevateTimeline(probe.timeline)
+	// Platoon 0's every third member is held, all of platoon 3's, and
+	// platoon 7's last: the platoon, the first hole, rises unevenly along
+	// the sample.
+	held := map[[2]int64]int32{}
+	hold := func(platoonIndex, memberIndex int64) {
+		held[[2]int64{platoonIndex, memberIndex}] = int32(-1 - len(held))
+		timeline.Hold(memberHealth, 0, held[[2]int64{platoonIndex, memberIndex}], time.Second, platoonIndex, memberIndex)
+	}
+	for _, memberIndex := range makeHoleRange(0, 50, 3) {
+		hold(0, memberIndex)
+	}
+	for _, memberIndex := range makeHoleRange(0, 50, 1) {
+		hold(3, memberIndex)
+	}
+	hold(7, 49)
+	probe.runStep(0)
+	for platoonIndex := int64(-1); platoonIndex <= 8; platoonIndex++ {
+		for memberIndex := int64(-1); memberIndex <= 50; memberIndex++ {
+			want, wantOK := held[[2]int64{platoonIndex, memberIndex}]
+			if !wantOK {
+				want, wantOK = memberHealth.Get(model, platoonIndex, memberIndex)
+			}
+			if got, ok := probe.timeline.Get().Current(memberHealth, model, platoonIndex, memberIndex); got != want || ok != wantOK {
+				t.Errorf("Platoons[%d].Members[%d].Health is current at %v, %v, want %v, %v", platoonIndex, memberIndex, got, ok, want, wantOK)
+			}
+		}
+	}
+}
+
+// makeHoleRange answers the holes from first, every stride, up to but not
+// including end.
+func makeHoleRange(first, end, stride int64) []int64 {
+	var holes []int64
+	for hole := first; hole < end; hole += stride {
+		holes = append(holes, hole)
+	}
+	return holes
 }
 
 func TestTweenStepAndCurrentOfManyAddressesOnOnePathAllocateNothing(t *testing.T) {
@@ -1032,6 +1223,32 @@ func TestAllWalksAMapAtItsIntegerKeysOrInternedIndices(t *testing.T) {
 	expectWalk(t, "Callsigns[]", view.All(callsignValue, model), map[int64]float32{callsignIndex: 0.5})
 	// Platoon 1's drills are a nil map.
 	expectWalk(t, "Platoons[1].Drills[]", view.All(drill, model, 1), map[int64]float32{})
+}
+
+func TestAllFindsEachKeyHeldHoweverTheKeysSpread(t *testing.T) {
+	var bounty Path[game, float32]
+	probe := spawnTimelineProbe(t, func(configurator *kernel.Configurator) {
+		bounty = MakePath[game, float32](configurator, "Bounties[]")
+	})
+	model := probe.model.Get()
+	// A uint64 key past an int64's greatest is a negative hole, so the holes
+	// run from the least an int64 holds to the greatest.
+	keys := []uint64{0, 1, 2, 3, 1 << 20, 1 << 40, 1 << 62, 1 << 63, 1<<64 - 1}
+	model.Bounties = map[uint64]float32{}
+	want := map[int64]float32{}
+	for position, key := range keys {
+		model.Bounties[key] = float32(position)
+		want[int64(key)] = float32(position)
+	}
+	timeline := ElevateTimeline(probe.timeline)
+	for position, key := range keys {
+		if position%2 == 1 || key == 1<<63 {
+			want[int64(key)] = float32(100 + position)
+			timeline.Hold(bounty, 0, want[int64(key)], time.Second, int64(key))
+		}
+	}
+	probe.runStep(0)
+	expectWalk(t, "Bounties[]", probe.timeline.Get().All(bounty, model), want)
 }
 
 func TestAllStopsWhereTheViewBreaks(t *testing.T) {

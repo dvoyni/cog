@@ -166,14 +166,20 @@ func (s *timelineState[M, D]) walk[T any](path Path[M, T], model *M, fixedHoles 
 	// the last hole, which lies lastHoleOffset into an address.
 	var sampledRun []sampledValue[D, T]
 	lastHoleOffset := uintptr(len(fixedHoles)) * unsafe.Sizeof(int64(0))
+	// address is an element's address, its last hole filled for each element
+	// a map walk reads.
+	var address D
+	beforeLastHole.fillHoles(&address, fixedHoles)
 	if state := s.findPathState(path); state != nil && len(state.sample) != 0 {
-		sampledRun = state.findSampledRun(beforeLastHole.makeHoles[D](fixedHoles), lastHoleOffset, firstHole, lastHole)
+		sampledRun = state.findSampledRun(address, lastHoleOffset, firstHole, lastHole)
 	}
+	lastHolePlace := (*int64)(unsafe.Add(unsafe.Pointer(&address), lastHoleOffset))
 	// A path that ends at its last hole, as most do, reads each element's
 	// property in place, with no steps to follow.
 	afterLastHole := compiled.afterLastHole
 	isPropertyInElement := len(afterLastHole.steps) == 0
 	if step.kind == reflect.Map {
+		sampledRunScale := measureSampleScale(sampledRun, lastHoleOffset)
 		// A MapIter held here stays on the stack, and so allocates nothing.
 		var iterator reflect.MapIter
 		iterator.Reset(reflect.NewAt(step.mapReflectType, elements).Elem())
@@ -191,15 +197,16 @@ func (s *timelineState[M, D]) walk[T any](path Path[M, T], model *M, fixedHoles 
 			if !ok {
 				continue
 			}
-			value, ok := findSampledHole(sampledRun, lastHoleOffset, hole)
-			if !ok {
-				if isPropertyInElement {
-					value = *(*T)(unsafe.Add(entry[1], afterLastHole.offset))
-				} else if property, found := afterLastHole.findProperty(entry[1], nil); found {
-					value = *(*T)(property)
-				} else {
-					continue
-				}
+			*lastHolePlace = hole
+			var value T
+			if entryIndex, isSampled := searchSample(sampledRun, &address, lastHoleOffset, sampledRunScale); isSampled {
+				value = sampledRun[entryIndex].value
+			} else if isPropertyInElement {
+				value = *(*T)(unsafe.Add(entry[1], afterLastHole.offset))
+			} else if property, found := afterLastHole.findProperty(entry[1], nil); found {
+				value = *(*T)(property)
+			} else {
+				continue
 			}
 			if !yield(hole, value) {
 				return
