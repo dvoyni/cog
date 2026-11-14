@@ -7,8 +7,8 @@ import (
 )
 
 // overlappingFS is files whose first two opens of name each wait, up to a
-// second, for the other to begin, so two first acquires of its texture read
-// its header at once.
+// second, for the other to begin, so two first acquires of its texture or
+// buffer read its header or size at once.
 type overlappingFS struct {
 	fs.FS
 	name        string

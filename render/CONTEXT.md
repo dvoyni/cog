@@ -96,8 +96,12 @@ _Avoid_: File asset, imported asset
 An asset its maker builds from memory or from other assets, such as a mesh, a material or a buffer filled from a slice. It has no asset key, owns nothing it names, and its maker releases it once.
 _Avoid_: Dynamic asset, runtime asset, procedural asset
 
+**Write**:
+Filling a region of a buffer or texture from memory, which lands before every command list of the next submit, so it fills the asset for the whole frame; two writes to one region in a frame leave the last.
+_Avoid_: Upload, update
+
 **Asset key**:
-What identifies a loaded asset: its path, and the load options that make one file several assets, such as a shader's defines or a texture's colour space and mipmaps.
+What identifies a loaded asset: its path, and the load options that make one file several assets, such as a shader's defines, a texture's colour space and mipmaps, or a buffer's usage.
 _Avoid_: Descriptor, asset ID, path
 
 **Reload**:

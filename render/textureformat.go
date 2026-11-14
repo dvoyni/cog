@@ -78,63 +78,84 @@ const (
 	textureFormatFlagStencil
 )
 
-// textureFormatFlagsByFormat is what each format allows; a format missing
-// from it allows nothing beyond being sampled and copied.
-var textureFormatFlagsByFormat = [...]textureFormatFlags{
-	TextureFormatR8Unorm:              textureFormatFlagColor,
-	TextureFormatR8Uint:               textureFormatFlagColor,
-	TextureFormatR8Sint:               textureFormatFlagColor,
-	TextureFormatR16Uint:              textureFormatFlagColor,
-	TextureFormatR16Sint:              textureFormatFlagColor,
-	TextureFormatR16Float:             textureFormatFlagColor,
-	TextureFormatRG8Unorm:             textureFormatFlagColor,
-	TextureFormatRG8Uint:              textureFormatFlagColor,
-	TextureFormatRG8Sint:              textureFormatFlagColor,
-	TextureFormatR32Float:             textureFormatFlagColor | textureFormatFlagStorage,
-	TextureFormatR32Uint:              textureFormatFlagColor | textureFormatFlagStorage,
-	TextureFormatR32Sint:              textureFormatFlagColor | textureFormatFlagStorage,
-	TextureFormatRG16Uint:             textureFormatFlagColor,
-	TextureFormatRG16Sint:             textureFormatFlagColor,
-	TextureFormatRG16Float:            textureFormatFlagColor,
-	TextureFormatRGBA8Unorm:           textureFormatFlagColor | textureFormatFlagStorage,
-	TextureFormatRGBA8UnormSrgb:       textureFormatFlagColor,
-	TextureFormatRGBA8Snorm:           textureFormatFlagStorage,
-	TextureFormatRGBA8Uint:            textureFormatFlagColor | textureFormatFlagStorage,
-	TextureFormatRGBA8Sint:            textureFormatFlagColor | textureFormatFlagStorage,
-	TextureFormatBGRA8Unorm:           textureFormatFlagColor,
-	TextureFormatBGRA8UnormSrgb:       textureFormatFlagColor,
-	TextureFormatRGB10A2Uint:          textureFormatFlagColor,
-	TextureFormatRGB10A2Unorm:         textureFormatFlagColor,
-	TextureFormatRG32Float:            textureFormatFlagColor | textureFormatFlagStorage,
-	TextureFormatRG32Uint:             textureFormatFlagColor | textureFormatFlagStorage,
-	TextureFormatRG32Sint:             textureFormatFlagColor | textureFormatFlagStorage,
-	TextureFormatRGBA16Uint:           textureFormatFlagColor | textureFormatFlagStorage,
-	TextureFormatRGBA16Sint:           textureFormatFlagColor | textureFormatFlagStorage,
-	TextureFormatRGBA16Float:          textureFormatFlagColor | textureFormatFlagStorage,
-	TextureFormatRGBA32Float:          textureFormatFlagColor | textureFormatFlagStorage,
-	TextureFormatRGBA32Uint:           textureFormatFlagColor | textureFormatFlagStorage,
-	TextureFormatRGBA32Sint:           textureFormatFlagColor | textureFormatFlagStorage,
-	TextureFormatStencil8:             textureFormatFlagStencil,
-	TextureFormatDepth16Unorm:         textureFormatFlagDepth,
-	TextureFormatDepth24Plus:          textureFormatFlagDepth,
-	TextureFormatDepth24PlusStencil8:  textureFormatFlagDepth | textureFormatFlagStencil,
-	TextureFormatDepth32Float:         textureFormatFlagDepth,
-	TextureFormatDepth32FloatStencil8: textureFormatFlagDepth | textureFormatFlagStencil,
+// textureFormatInfo is what render knows of one texture format: what it
+// allows beyond being sampled and copied, on WebGPU's core with no feature
+// asked for, and the size in bytes of one of its texels as a write lays it
+// out, zero for a format gfx's writes cannot fill, as a depth format beyond
+// Depth16Unorm cannot be.
+type textureFormatInfo struct {
+	flags     textureFormatFlags
+	texelSize uint32
 }
 
-// flags answers what f allows beyond being sampled and copied.
-func (f TextureFormat) flags() textureFormatFlags {
-	if int(f) >= len(textureFormatFlagsByFormat) {
-		return 0
+// textureFormatInfoByFormat is what render knows of each format; a format
+// missing from it allows nothing beyond being sampled and copied, and cannot
+// be written.
+var textureFormatInfoByFormat = [...]textureFormatInfo{
+	TextureFormatR8Unorm:              {flags: textureFormatFlagColor, texelSize: 1},
+	TextureFormatR8Snorm:              {texelSize: 1},
+	TextureFormatR8Uint:               {flags: textureFormatFlagColor, texelSize: 1},
+	TextureFormatR8Sint:               {flags: textureFormatFlagColor, texelSize: 1},
+	TextureFormatR16Unorm:             {texelSize: 2},
+	TextureFormatR16Snorm:             {texelSize: 2},
+	TextureFormatR16Uint:              {flags: textureFormatFlagColor, texelSize: 2},
+	TextureFormatR16Sint:              {flags: textureFormatFlagColor, texelSize: 2},
+	TextureFormatR16Float:             {flags: textureFormatFlagColor, texelSize: 2},
+	TextureFormatRG8Unorm:             {flags: textureFormatFlagColor, texelSize: 2},
+	TextureFormatRG8Snorm:             {texelSize: 2},
+	TextureFormatRG8Uint:              {flags: textureFormatFlagColor, texelSize: 2},
+	TextureFormatRG8Sint:              {flags: textureFormatFlagColor, texelSize: 2},
+	TextureFormatR32Float:             {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 4},
+	TextureFormatR32Uint:              {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 4},
+	TextureFormatR32Sint:              {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 4},
+	TextureFormatRG16Unorm:            {texelSize: 4},
+	TextureFormatRG16Snorm:            {texelSize: 4},
+	TextureFormatRG16Uint:             {flags: textureFormatFlagColor, texelSize: 4},
+	TextureFormatRG16Sint:             {flags: textureFormatFlagColor, texelSize: 4},
+	TextureFormatRG16Float:            {flags: textureFormatFlagColor, texelSize: 4},
+	TextureFormatRGBA8Unorm:           {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 4},
+	TextureFormatRGBA8UnormSrgb:       {flags: textureFormatFlagColor, texelSize: 4},
+	TextureFormatRGBA8Snorm:           {flags: textureFormatFlagStorage, texelSize: 4},
+	TextureFormatRGBA8Uint:            {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 4},
+	TextureFormatRGBA8Sint:            {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 4},
+	TextureFormatBGRA8Unorm:           {flags: textureFormatFlagColor, texelSize: 4},
+	TextureFormatBGRA8UnormSrgb:       {flags: textureFormatFlagColor, texelSize: 4},
+	TextureFormatRGB10A2Uint:          {flags: textureFormatFlagColor, texelSize: 4},
+	TextureFormatRGB10A2Unorm:         {flags: textureFormatFlagColor, texelSize: 4},
+	TextureFormatRG11B10Ufloat:        {texelSize: 4},
+	TextureFormatRGB9E5Ufloat:         {texelSize: 4},
+	TextureFormatRG32Float:            {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 8},
+	TextureFormatRG32Uint:             {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 8},
+	TextureFormatRG32Sint:             {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 8},
+	TextureFormatRGBA16Unorm:          {texelSize: 8},
+	TextureFormatRGBA16Snorm:          {texelSize: 8},
+	TextureFormatRGBA16Uint:           {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 8},
+	TextureFormatRGBA16Sint:           {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 8},
+	TextureFormatRGBA16Float:          {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 8},
+	TextureFormatRGBA32Float:          {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 16},
+	TextureFormatRGBA32Uint:           {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 16},
+	TextureFormatRGBA32Sint:           {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 16},
+	TextureFormatStencil8:             {flags: textureFormatFlagStencil, texelSize: 1},
+	TextureFormatDepth16Unorm:         {flags: textureFormatFlagDepth, texelSize: 2},
+	TextureFormatDepth24Plus:          {flags: textureFormatFlagDepth},
+	TextureFormatDepth24PlusStencil8:  {flags: textureFormatFlagDepth | textureFormatFlagStencil},
+	TextureFormatDepth32Float:         {flags: textureFormatFlagDepth},
+	TextureFormatDepth32FloatStencil8: {flags: textureFormatFlagDepth | textureFormatFlagStencil},
+}
+
+// info answers what render knows of f.
+func (f TextureFormat) info() textureFormatInfo {
+	if int(f) >= len(textureFormatInfoByFormat) {
+		return textureFormatInfo{}
 	}
-	return textureFormatFlagsByFormat[f]
+	return textureFormatInfoByFormat[f]
 }
 
 // makeTextureUsage answers every usage a texture of f with sampleCount
 // samples may carry.
 func (f TextureFormat) makeTextureUsage(sampleCount uint32) gfx.TextureUsageFlags {
 	usage := gfx.TextureUsageFlagCopySrc | gfx.TextureUsageFlagCopyDst | gfx.TextureUsageFlagTextureBinding
-	flags := f.flags()
+	flags := f.info().flags
 	if flags&(textureFormatFlagColor|textureFormatFlagDepth|textureFormatFlagStencil) != 0 {
 		usage |= gfx.TextureUsageFlagRenderAttachment
 	}

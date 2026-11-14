@@ -37,9 +37,9 @@ func TestAnAcquiredTextureIsMadeFromItsHeaderAtOnceAndItsBodyWrittenBeforeTheSub
 			switch frameIndex {
 			case 0:
 				acquired[0] = inventory.AcquireTexture("albedo.png", render.TextureOptions{ColorSpace: render.ColorSpaceSRGB})
-				_, createdAtOnce[0] = findCreatedTexture(readTextureCalls(h.Calls()), acquired[0])
+				_, createdAtOnce[0] = readTextureCalls(h.Calls()).findCreated[recording.CreateTextureArguments](acquired[0])
 				acquired[2] = inventory.AcquireTexture("palette.png", render.TextureOptions{ColorSpace: render.ColorSpaceLinear})
-				_, createdAtOnce[2] = findCreatedTexture(readTextureCalls(h.Calls()), acquired[2])
+				_, createdAtOnce[2] = readTextureCalls(h.Calls()).findCreated[recording.CreateTextureArguments](acquired[2])
 			case 1:
 				writtenWhileRecording = awaitTextureWrite(h, acquired[1])
 			}
@@ -47,7 +47,7 @@ func TestAnAcquiredTextureIsMadeFromItsHeaderAtOnceAndItsBodyWrittenBeforeTheSub
 		afterFrame: func(frameIndex int, inventory render.Inventory) {
 			if frameIndex == 0 {
 				acquired[1] = inventory.AcquireTexture("textures/mask.png", render.TextureOptions{ColorSpace: render.ColorSpaceLinear, Mipmaps: true})
-				_, createdAtOnce[1] = findCreatedTexture(readTextureCalls(h.Calls()), acquired[1])
+				_, createdAtOnce[1] = readTextureCalls(h.Calls()).findCreated[recording.CreateTextureArguments](acquired[1])
 			}
 		},
 	})
@@ -74,7 +74,7 @@ func TestAnAcquiredTextureIsMadeFromItsHeaderAtOnceAndItsBodyWrittenBeforeTheSub
 		if !createdAtOnce[index] {
 			t.Errorf("texture %d was not made when its acquire returned", index)
 		}
-		created, ok := findCreatedTexture(textureCalls, acquired[index])
+		created, ok := textureCalls.findCreated[recording.CreateTextureArguments](acquired[index])
 		if !ok {
 			t.Errorf("texture %d, %v, was not made once", index, acquired[index])
 			continue
@@ -82,7 +82,7 @@ func TestAnAcquiredTextureIsMadeFromItsHeaderAtOnceAndItsBodyWrittenBeforeTheSub
 		if got := created.Descriptor; got.Size != want.descriptor.Size || got.MipLevelCount != want.descriptor.MipLevelCount || got.Format != want.descriptor.Format {
 			t.Errorf("texture %d was made %+v with %d mip levels in format %d, want %+v with %d in format %d", index, got.Size, got.MipLevelCount, got.Format, want.descriptor.Size, want.descriptor.MipLevelCount, want.descriptor.Format)
 		}
-		writes := findTextureCalls(textureCalls, recording.CallKindWriteTexture, acquired[index])
+		writes := textureCalls.find(recording.CallKindWriteTexture, acquired[index])
 		if len(writes) != 1 {
 			t.Errorf("texture %d was written %d times, want once", index, len(writes))
 			continue
@@ -154,11 +154,11 @@ func TestASecondAcquireOfAKeySharesItsTextureAndTheLastReleaseFreesItAtTheEndOfT
 		{texture: mipmapped, frameIndex: 0, what: "a texture released once, in the first frame,"},
 		{texture: first, frameIndex: 2, what: "a texture acquired twice, released in the first and second frames, acquired again in the second and released in the third,"},
 	} {
-		if frameIndex, ok := findFreeingFrame(textureCalls, want.texture); !ok || frameIndex != want.frameIndex {
+		if frameIndex, ok := textureCalls.findFreeingFrame(want.texture); !ok || frameIndex != want.frameIndex {
 			t.Errorf("%s was freed: %v, after the present of frame %d, want freed between the present of frame %d and the next frame's acquire", want.what, ok, frameIndex, want.frameIndex)
 		}
 	}
-	if _, ok := findCreatedTexture(textureCalls, reacquired); !ok {
+	if _, ok := textureCalls.findCreated[recording.CreateTextureArguments](reacquired); !ok {
 		t.Errorf("the texture acquired after the first was freed, %v, was not made once", reacquired)
 	}
 }
@@ -205,7 +205,7 @@ func TestParallelAcquiresOfOneKeyShareOneTextureFreedOnceByTheirReleases(t *test
 	if created := findCallIndices(calls, recording.CallKindCreateTexture); len(created) != 1 {
 		t.Fatalf("render made %d textures, want one", len(created))
 	}
-	if frameIndex, ok := findFreeingFrame(readTextureCalls(calls), acquired[0]); !ok || frameIndex != 1 {
+	if frameIndex, ok := readTextureCalls(calls).findFreeingFrame(acquired[0]); !ok || frameIndex != 1 {
 		t.Errorf("the texture was freed: %v, after the present of frame %d, want freed at the end of the frame of its last release, 1", ok, frameIndex)
 	}
 }
@@ -268,7 +268,7 @@ func TestAHeaderFailureGetsAOneByOneMagentaTextureAndABodyFailureMagentaAtItsSiz
 		{texture: brokenTexture, size: gfx.Extent3D{Width: 4, Height: 2, DepthOrArrayLayers: 1}, format: gfx.TextureFormatRGBA8Unorm, what: "the file with a broken body"},
 		{texture: resizedTexture, size: gfx.Extent3D{Width: 4, Height: 2, DepthOrArrayLayers: 1}, format: gfx.TextureFormatRGBA8UnormSrgb, what: "the file resized after its header was read"},
 	} {
-		created, ok := findCreatedTexture(textureCalls, want.texture)
+		created, ok := textureCalls.findCreated[recording.CreateTextureArguments](want.texture)
 		if !ok {
 			t.Errorf("the texture of %s, %v, was not made once", want.what, want.texture)
 			continue
@@ -277,7 +277,7 @@ func TestAHeaderFailureGetsAOneByOneMagentaTextureAndABodyFailureMagentaAtItsSiz
 			t.Errorf("the texture of %s was made %+v in format %d with %d mip levels, want %+v in format %d with 1", want.what, created.Descriptor.Size, created.Descriptor.Format, created.Descriptor.MipLevelCount, want.size, want.format)
 		}
 		magenta := slices.Repeat([]byte{255, 0, 255, 255}, int(want.size.Width*want.size.Height))
-		writes := findTextureCalls(textureCalls, recording.CallKindWriteTexture, want.texture)
+		writes := textureCalls.find(recording.CallKindWriteTexture, want.texture)
 		if len(writes) != 1 {
 			t.Errorf("the texture of %s was written %d times, want once", want.what, len(writes))
 			continue
@@ -326,7 +326,7 @@ func putFile(t *testing.T, files *filesystems.MemoryFS, name string, data []byte
 // behind texture, and answers whether it has.
 func awaitTextureWrite(h *rendertest.Harness, texture render.Texture) bool {
 	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
-		if len(findTextureCalls(readTextureCalls(h.Calls()), recording.CallKindWriteTexture, texture)) > 0 {
+		if len(readTextureCalls(h.Calls()).find(recording.CallKindWriteTexture, texture)) > 0 {
 			return true
 		}
 	}
@@ -365,16 +365,6 @@ func makePalettedPNG(t *testing.T) ([]byte, []byte) {
 		t.Fatal(err)
 	}
 	return encoded.Bytes(), []byte{200, 100, 50, 255, 0, 0, 0, 0, 0, 0, 0, 0, 200, 100, 50, 255}
-}
-
-// findCreatedTexture answers the arguments the texture behind texture was
-// made with; false when it was not made once.
-func findCreatedTexture(textureCalls []textureCall, texture render.Texture) (recording.CreateTextureArguments, bool) {
-	created := findTextureCalls(textureCalls, recording.CallKindCreateTexture, texture)
-	if len(created) != 1 {
-		return recording.CreateTextureArguments{}, false
-	}
-	return created[0].arguments.(recording.CreateTextureArguments), true
 }
 
 // findCallIndices answers the index of every call of kind among calls.

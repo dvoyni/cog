@@ -112,37 +112,3 @@ func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event gfx.DrawEvent, 
 	mipsGenerated := ex.Schedule(generateMipsTask, event.Frame, recordedWritten).Handle()
 	return event, ex.Join(mipsGenerated, beginFrameJob)
 }
-
-// beginFrame keeps frame as the one being recorded, for Frame's calls.
-func beginFrame(k *kernel.Kernel, frame gfx.Frame, state kernel.Read[*frameState]) kernel.NoResult {
-	state.Get().setRecordingFrame(frame)
-	return kernel.NoResult{}
-}
-
-// writeLoads decodes the body of each texture loaded and not yet written, one
-// after another, and writes it, so gfx's next submit carries it, and requests
-// the mips of those loaded with Mipmaps.
-func writeLoads(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*frameState], table kernel.Read[*assetTable], device kernel.Read[gfx.Device], files kernel.Read[platform.FS]) kernel.NoResult {
-	state.Get().mips.request(table.Get().loadedTextures.writePending(table.Get(), device.Get(), files.Get())...)
-	return kernel.NoResult{}
-}
-
-// generateMips generates, in render's own command list of frame, the mips of
-// every texture requested since it last ran, so gfx's submit carries them
-// before every user's list.
-func generateMips(k *kernel.Kernel, frame gfx.Frame, state kernel.Read[*frameState], table kernel.Read[*assetTable], device kernel.Read[gfx.Device], files kernel.Read[platform.FS]) kernel.NoResult {
-	state.Get().mips.generate(table.Get(), device.Get(), files.Get(), frame)
-	return kernel.NoResult{}
-}
-
-// endFrame ends the frame gfx has presented: it frees the loaded textures
-// whose last acquire was released, releases the bind groups its mips drew
-// with, takes back the temporary textures held, and frees those gone unused
-// for Config's TemporaryIdleFrames frames.
-func endFrame(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*frameState], table kernel.Read[*assetTable], device kernel.Read[gfx.Device]) kernel.NoResult {
-	frameState := state.Get()
-	table.Get().loadedTextures.freeReleased(table.Get(), device.Get())
-	frameState.mips.endFrame(device.Get())
-	frameState.temporaryTextures.endFrame(frameState.temporaryIdleFrames, table.Get(), device.Get())
-	return kernel.NoResult{}
-}

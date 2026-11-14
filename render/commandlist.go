@@ -115,7 +115,7 @@ func (l *CommandList) makeRenderPassDescriptor(descriptor PassDescriptor) (gfx.R
 // frame, and an error saying why it is refused.
 func (l *CommandList) makeColorAttachment(target ColorTarget, firstTarget passTarget) (gfx.RenderPassColorAttachment, passTarget, bool, error) {
 	foundTarget, ok, err := l.findTarget(target.Window, target.Texture, target.MipLevel, target.Layer)
-	if err == nil && ok && foundTarget.format.flags()&textureFormatFlagColor == 0 {
+	if err == nil && ok && foundTarget.format.info().flags&textureFormatFlagColor == 0 {
 		err = fmt.Errorf("is of format %d, no colour format a pass draws into", foundTarget.format)
 	}
 	if err == nil && ok {
@@ -150,7 +150,7 @@ func (l *CommandList) makeColorAttachment(target ColorTarget, firstTarget passTa
 // saying why it is refused.
 func (l *CommandList) makeDepthStencilAttachment(target DepthStencilTarget, firstTarget passTarget) (gfx.RenderPassDepthStencilAttachment, error) {
 	foundTarget, _, err := l.findTarget(platform.Window{}, target.Texture, target.MipLevel, target.Layer)
-	formatFlags := foundTarget.format.flags()
+	formatFlags := foundTarget.format.info().flags
 	switch {
 	case err != nil:
 	case formatFlags&(textureFormatFlagDepth|textureFormatFlagStencil) == 0:

@@ -1,13 +1,16 @@
 package render
 
 import (
+	"fmt"
+	"unsafe"
+
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/platform"
 )
 
 // Inventory is the task parameter a task reaches render's assets through, to
-// acquire and release them, declared in its signature as kernel.Read is:
+// acquire, make, write and release them, declared in its signature as kernel.Read is:
 //
 //	func loadLevel(k *kernel.Kernel, level Level, inventory render.Inventory) kernel.NoResult
 //
@@ -46,13 +49,148 @@ func (i Inventory) AcquireTexture(path string, options TextureOptions) Texture {
 	return table.loadedTextures.acquire(table, i.device.Get(), i.files.Get(), textureKey{path: path, options: options})
 }
 
-// ReleaseTexture gives back one acquire of texture. When the last is given
-// back, the texture is freed at the end of that frame, after gfx's present,
-// so the frame's draws still read it; an acquire of its path and options
-// before then holds it again. A texture no acquire holds, such as a
-// temporary, one already released as often as it was acquired, or the zero
-// Texture, is refused and reported.
+// AcquireBuffer hands out the buffer of path in platform's FS with usage,
+// counting one more holder of it: every acquire of the same path and usage
+// shares one buffer until the last of them is released, and one of another
+// usage gets a buffer of its own. The buffer exists when the call returns,
+// of the file's size as fs.Stat answers it, rounded up to a multiple of 4,
+// with usage and the copy destination render's writes need; gfx refuses any
+// other use of it. render's jobs write the
+// file's bytes into it, zeros after them, before gfx submits the frame, at
+// the points AcquireTexture's bodies are written at, so a draw recorded
+// after the acquire reads them. A file fs.Stat fails on, a folder or a file
+// of no bytes is reported once, and gets a buffer of no bytes; one that
+// cannot be read when its bytes are written, or whose size changed since the
+// acquire, is reported once, and its buffer keeps zeros. A buffer gfx
+// refuses to make is logged, and the zero Buffer answered.
+func (i Inventory) AcquireBuffer(path string, usage BufferUsageFlags) Buffer {
+	table := i.table.Get()
+	return table.loadedBuffers.acquire(table, i.device.Get(), i.files.Get(), bufferKey{path: path, usage: usage})
+}
+
+// MakeBuffer makes a buffer filled from data, labelled label, with usage,
+// which exists, filled, when the call returns: the bytes of data's elements
+// as Go lays them out, padding included, so T is plain data with no
+// pointers, laid out as the shader reads it, such as a number, or an array
+// or struct of them. Its size is data's, rounded up to a multiple of 4 with
+// zeros, and it carries usage and the copy destination, as AcquireBuffer's
+// does. Its maker gives it back once, with ReleaseBuffer. A buffer of no
+// bytes gets no gfx buffer, so nothing writes or binds it. A buffer gfx
+// refuses to make is logged, and the zero Buffer answered.
+func (i Inventory) MakeBuffer[T any](label string, usage BufferUsageFlags, data []T) Buffer {
+	table := i.table.Get()
+	device := i.device.Get()
+	bytes := castToBytes(data)
+	buffer, gfxBuffer, err := table.addBuffer(device, label, uint64(len(bytes)), usage)
+	if err != nil {
+		table.logUnlessLost(fmt.Errorf("render: making buffer %q: %w", label, err))
+		return Buffer{}
+	}
+	table.madeBuffers.mutex.Lock()
+	table.madeBuffers.add(buffer, buffer)
+	table.madeBuffers.mutex.Unlock()
+	if len(bytes) > 0 {
+		writeBytes(table, device, gfxBuffer, 0, padBytes(bytes))
+	}
+	return buffer
+}
+
+// MakeTexture makes a texture of descriptor, whose zero counts mean one,
+// which exists when the call returns, with every usage its format allows, as
+// a temporary texture has: a pass target kept across frames, sampled, bound
+// for storage where its format allows, and copied from and to. data fills its
+// mip level 0, layer after layer, each layer's rows of texels packed tight,
+// as WriteTexture lays out a region, T as MakeBuffer's; no data leaves it
+// zero, and data of another length is refused and reported, leaving it zero.
+// Levels below the first stay zero until written. Its maker gives it back
+// once, with ReleaseTexture. A texture gfx refuses to make is logged, and the
+// zero Texture answered.
+func (i Inventory) MakeTexture[T any](descriptor TextureDescriptor, data []T) Texture {
+	table := i.table.Get()
+	device := i.device.Get()
+	descriptor = descriptor.fillDefaults()
+	texture, err := table.addTexture(device, descriptor)
+	if err != nil {
+		table.logUnlessLost(fmt.Errorf("render: making texture %q: %w", descriptor.Label, err))
+		return Texture{}
+	}
+	table.madeTextures.mutex.Lock()
+	table.madeTextures.add(texture, texture)
+	table.madeTextures.mutex.Unlock()
+	texels := castToBytes(data)
+	if len(texels) == 0 {
+		return texture
+	}
+	texelSize := descriptor.Format.info().texelSize
+	levelSize := uint64(descriptor.Width) * uint64(descriptor.Height) * uint64(texelSize) * uint64(descriptor.LayerCount)
+	if levelSize == 0 || descriptor.SampleCount > 1 || uint64(len(texels)) != levelSize {
+		table.report(ReportKindWriteRefused, fmt.Errorf("render: making texture %q of %d samples from %d bytes, where it has one sample and its mip level 0 of %d layers holds %d", descriptor.Label, descriptor.SampleCount, len(texels), descriptor.LayerCount, levelSize))
+		return texture
+	}
+	gfxTexture, _ := table.findTexture(texture)
+	writeTexels(table, device, gfx.ImageCopyTexture{Texture: gfxTexture, Aspect: gfx.TextureAspectAll}, texels, texelSize,
+		gfx.Extent3D{Width: descriptor.Width, Height: descriptor.Height, DepthOrArrayLayers: descriptor.LayerCount})
+	return texture
+}
+
+// WriteBuffer writes data into buffer at offset, T as MakeBuffer's: a
+// loaded, made or other buffer render holds. The write lands before every
+// command list of gfx's next submit, so it fills the buffer for the whole
+// frame being recorded, or, once that frame is flushed, the next one; two
+// writes to one region in a frame leave the last. To change data between
+// passes, write a temporary buffer and copy it at that point in a command
+// list. A write that does not fit is refused and reported: into a buffer
+// render does not hold or of no bytes, at an offset or of a length that is
+// not a multiple of 4, or ending past the buffer.
+func (i Inventory) WriteBuffer[T any](buffer Buffer, offset uint64, data []T) {
+	i.table.Get().writeBuffer(i.device.Get(), buffer, offset, castToBytes(data))
+}
+
+// WriteTexture writes data into region of texture, one mip level and one
+// layer, so an atlas page lands in a layer of a 2D-array texture: rows of
+// texels packed tight, each texel of its format's size, T as MakeBuffer's.
+// It lands, as WriteBuffer's does, before every command list of gfx's next
+// submit, two writes to one region in a frame leaving the last. A write that
+// does not fit is refused and reported: into a texture render does not
+// hold, of several samples, or of a depth or depth-stencil format beyond
+// Depth16Unorm, which writes cannot fill; at a mip level or layer it lacks;
+// into a region past its level's edges; or of data not as long as the
+// region.
+func (i Inventory) WriteTexture[T any](texture Texture, region TextureRegion, data []T) {
+	i.table.Get().writeTexture(i.device.Get(), texture, region, castToBytes(data))
+}
+
+// ReleaseTexture gives back one acquire of texture, or the make of a made
+// one. When a loaded texture's last acquire is given back, or a made texture
+// is, the texture is freed at the end of that frame, after gfx's present, so
+// the frame's draws still read it; an acquire of a loaded texture's path and
+// options before then holds it again. A texture no acquire or make holds,
+// such as a temporary, one released as often as it was acquired, a made one
+// released already, or the zero Texture, is refused and reported.
 func (i Inventory) ReleaseTexture(texture Texture) {
 	table := i.table.Get()
-	table.loadedTextures.release(table, texture)
+	if !table.loadedTextures.release(texture) && !table.madeTextures.release(texture) {
+		table.report(ReportKindReleaseRefused, fmt.Errorf("render: releasing texture %v, which no acquire or make holds", texture))
+	}
+}
+
+// ReleaseBuffer gives back one acquire of buffer, or the make of a made one,
+// freeing the buffer as ReleaseTexture frees a texture: at the end of that
+// frame, after gfx's present. A buffer no acquire or make holds, such as one
+// released as often as it was acquired, a made one released already, or the
+// zero Buffer, is refused and reported.
+func (i Inventory) ReleaseBuffer(buffer Buffer) {
+	table := i.table.Get()
+	if !table.loadedBuffers.release(buffer) && !table.madeBuffers.release(buffer) {
+		table.report(ReportKindReleaseRefused, fmt.Errorf("render: releasing buffer %v, which no acquire or make holds", buffer))
+	}
+}
+
+// castToBytes answers the bytes data's elements are laid out in, in data's
+// own array.
+func castToBytes[T any](data []T) []byte {
+	if len(data) == 0 {
+		return nil
+	}
+	return unsafe.Slice((*byte)(unsafe.Pointer(unsafe.SliceData(data))), len(data)*int(unsafe.Sizeof(data[0])))
 }

@@ -31,6 +31,13 @@ type Texture struct{ handle }
 // labelKind answers "texture", the kind its gfx textures' labels name.
 func (Texture) labelKind() string { return "texture" }
 
+// Buffer names one of render's buffers: pointer-free and comparable, its
+// zero value naming none.
+type Buffer struct{ handle }
+
+// labelKind answers "buffer", the kind its gfx buffers' labels name.
+func (Buffer) labelKind() string { return "buffer" }
+
 // MakeLabel answers the label of the gfx object behind h, naming h and then
 // label, the one its user gave.
 func MakeLabel[H Handle](h H, label string) string {

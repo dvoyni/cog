@@ -51,7 +51,19 @@ is written. `ReleaseTexture`
 uncounts it, and the last release frees it at the end of that frame unless
 it is acquired again by then. A file that fails to load is reported once and
 draws magenta, one texel for a failed header and at its size for a failed
-body.
+body. `AcquireBuffer(path, usage)` makes a buffer of the file's size,
+rounded up to a multiple of 4, with the `BufferUsageFlags` its caller
+declares and the copy destination render fills it through, shared and
+counted by path and usage, its bytes written by the same jobs; a file that
+fails to load is reported once. `MakeBuffer[T](label, usage, data)` and
+`MakeTexture[T](descriptor, data)` make a buffer or texture filled from a
+slice at once, a made texture with every usage its format allows, each given
+back once with `ReleaseBuffer` or `ReleaseTexture` and freed at the end of
+that frame. `WriteBuffer[T](buffer, offset, data)` and
+`WriteTexture[T](texture, TextureRegion, data)`, the latter a region of one
+mip level and one layer, land before every command list of gfx's next
+submit, so two writes to one region in a frame leave the last; a write that
+does not fit is refused and reported.
 What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
 
 ## Shape
@@ -70,6 +82,10 @@ What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
   to 8 **`ColorTarget`**s, each a window or a texture at a mip level and
   layer with an optional **`ResolveTarget`**, and a
   **`DepthStencilTarget`**.
+- **`Inventory`** is the task parameter a task reaches render's assets
+  through: it acquires textures and **`Buffer`**s from files, makes them
+  from slices, writes them, a texture by **`TextureRegion`**, and releases
+  them.
 - **`Inspection`** is a frame written down in render's terms: its command
   lists by order, their passes with their targets.
 - **`Report`** is a mistake render finds at run time, logged once and
@@ -91,7 +107,7 @@ What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
     `Config`'s counts, the gfx frame being recorded and the pool of
     temporary textures.
   - a private asset table, every asset render holds: so far, its textures,
-    each with the views passes drew into.
+    each with the views passes drew into, and its buffers.
 - **Resources it reads from other plugins:** `gfx.Device`, for read, in
   render's own jobs and through its `Frame` parameter.
 - **Events it publishes:** `FrameEvent`, inside its `gfx.DrawEvent`
@@ -105,9 +121,11 @@ What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
   frees those gone unused, and is the beat's out dependency, so the next
   beat starts after it.
 - **Task parameters it offers:** `Frame`, locking the frame state, the
-  asset table and `gfx.Device`, all for read.
+  asset table and `gfx.Device`, all for read; and `Inventory`, locking the
+  asset table, `gfx.Device` and `platform.FS`, all for read.
 - **Sockets it declares:** none.
-- **Sockets it binds:** none.
+- **Sockets it binds:** `platform.ReadMountSocket`, its built-in assets
+  under the prefix `cog.render`, at the lowest priority.
 
 render is listed after gfx and platform, and a plugin that draws is listed
 after render.

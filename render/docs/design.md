@@ -6,7 +6,7 @@ API between gfx and the plugins that draw. It was mapped in
 each section links the ticket that holds its detail. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md).
 
-Status: being built. The plugin, its `Config`, `Handlers.RecordFrame` publishing `FrameEvent` inside gfx's `DrawEvent`, reports with their kind, and `rendertest`'s harness are built, from [render: the plugin, its frame event and rendertest's harness](https://github.com/dvoyni/cog/issues/826); the `Frame` parameter, command lists at their orders, passes into windows and `rendertest`'s reader of lists and passes, from [render: command lists and passes](https://github.com/dvoyni/cog/issues/827); temporary textures, passes into textures at a mip level and layer with depth-stencil and resolve targets, and `EndFrame`, from [render: temporary textures](https://github.com/dvoyni/cog/issues/828); the `Inventory` parameter, `AcquireTexture` and `ReleaseTexture`, shared by key, counted and freed at the frame's end, their bodies written by the decode-and-write job at both pickup points, and magenta for a failed load, from [render: loaded textures](https://github.com/dvoyni/cog/issues/829); the mips of textures loaded with `Mipmaps`, generated in render's own command list in the frame their bodies are written, from [render: mips at render's own order](https://github.com/dvoyni/cog/issues/830); the rest is designed, not yet built.
+Status: being built. The plugin, its `Config`, `Handlers.RecordFrame` publishing `FrameEvent` inside gfx's `DrawEvent`, reports with their kind, and `rendertest`'s harness are built, from [render: the plugin, its frame event and rendertest's harness](https://github.com/dvoyni/cog/issues/826); the `Frame` parameter, command lists at their orders, passes into windows and `rendertest`'s reader of lists and passes, from [render: command lists and passes](https://github.com/dvoyni/cog/issues/827); temporary textures, passes into textures at a mip level and layer with depth-stencil and resolve targets, and `EndFrame`, from [render: temporary textures](https://github.com/dvoyni/cog/issues/828); the `Inventory` parameter, `AcquireTexture` and `ReleaseTexture`, shared by key, counted and freed at the frame's end, their bodies written by the decode-and-write job at both pickup points, and magenta for a failed load, from [render: loaded textures](https://github.com/dvoyni/cog/issues/829); the mips of textures loaded with `Mipmaps`, generated in render's own command list in the frame their bodies are written, from [render: mips at render's own order](https://github.com/dvoyni/cog/issues/830); `AcquireBuffer` and `ReleaseBuffer`, buffers and textures made from a slice and released once by their maker, and `WriteBuffer` and `WriteTexture`, from [render: loaded and made buffers and textures, and writes](https://github.com/dvoyni/cog/issues/831); the rest is designed, not yet built.
 
 ## Problem Statement
 
@@ -198,24 +198,26 @@ and a **test author** testing a plugin that draws.
 - **Loaded assets** are shaders, textures and buffers read from a path in platform's FileSystem:
   - `AcquireShader(path, defines…)`;
   - `AcquireTexture(path, TextureOptions{ColorSpace, Mipmaps})`;
-  - `AcquireBuffer(path)`.
+  - `AcquireBuffer(path, usage)`.
 
   Each is given back with its `Release…`. Acquire and release are the Go rules' pool pair: a load hands out the shared asset or a fresh one.
-- **Made assets** are made from memory or from other assets: `MakeMesh`, `MakeMaterial`, and buffers and textures filled from a slice. Each is given back with its `Release…`. A made asset has no key, and its maker releases it once. A made texture carries every usage its format allows, as a temporary texture does, so it can be a pass target kept across frames, such as a history or a render-to-texture layer.
+- **Made assets** are made from memory or from other assets: `MakeMesh`, `MakeMaterial`, and buffers and textures filled from a slice. Each is given back with its `Release…`. A made asset has no key, and its maker releases it once; a second release is refused and reported.
+  - `MakeBuffer[T](label, usage, data []T)` makes a buffer of `data`'s bytes, rounded up to a multiple of 4 with zeros, with `usage` and the copy destination, as a loaded buffer has. `T` is plain data with no pointers, its bytes as Go lays them out, as `AcquireTemporaryBuffer[T]`'s are. A buffer of no bytes gets no gfx buffer.
+  - `MakeTexture[T](descriptor, data []T)` makes a texture whose mip level 0 `data` fills, layer after layer, each layer's rows of texels packed tight; no data leaves it zero, and data of another length is refused and reported. A made texture carries every usage its format allows, as a temporary texture does, so it can be a pass target kept across frames, such as a history or a render-to-texture layer.
 - **A load is ready in the frame that asks for it.** The GPU object exists when the call returns, and there is no loading state, no ready event and no callback:
   - **Texture:** `image.DecodeConfig` reads only the header, which with the colour space and mipmaps option fixes the descriptor: 8 bits per channel, an sRGB format for `ColorSpaceSRGB`, and every mip level down to one texel with `Mipmaps`. PNG and JPEG files load.
-  - **Buffer:** `fs.Stat` gives the size, and the buffer is made with every usage, the indirect one included.
+  - **Buffer:** `fs.Stat` gives the size, rounded up to a multiple of 4, the alignment of gfx's writes. The buffer is made with the usage its caller declares, `BufferUsageFlags` of vertex, index, uniform, storage, indirect and copy source, since only the layer above knows how it will use the buffer, and gfx refuses any other use. render adds the copy destination itself: it is how render fills a buffer, and costs nothing. Mapping at creation would fill one without it, but the wgpu fork keeps such a buffer in host memory for its life. Maps are not offered, since render maps no buffer.
   - **Shader:** read, preprocessed and compiled in the caller's job.
 
   render's jobs decode texture bodies, write contents and generate mips before gfx submits the frame, so a draw recorded right after its acquire reads the data. CPU-side bytes are dropped once uploaded.
 - **Sharing is a count per asset key.** Each kind has a comparable key type and its own map:
   - a texture's key is its path, colour space and mipmaps;
   - a shader's key is its path and its defines, sorted by name and joined into one string;
-  - a buffer's key is its path.
+  - a buffer's key is its path and its usage, so an acquire of one file with another usage gets a buffer of its own.
 - **Freeing:** an asset is freed at the end of the frame in which its count reached zero. An acquire of its key before then revives it. A release no acquire holds (a temporary, one released as often as it was acquired, the zero handle) is refused and reported.
 - **Failure:**
   - a failed texture draws magenta (1×1 for a header failure, its own size for a body failure);
-  - a failed buffer or shader skips every draw that uses it.
+  - a failed buffer or shader skips every draw that uses it. A buffer whose file `fs.Stat` fails on, is a folder or has no bytes gets a buffer of no bytes, with no gfx buffer behind it; one whose file cannot be read when its bytes are written, or whose size changed since the acquire, keeps zeros.
 
   Each failure is reported once per key and forgotten when the asset is freed.
 - **No cascade:** a material or mesh owns nothing it names. A freed texture it names draws as unbound; a freed buffer or shader skips the draw. Each case is reported once.
@@ -327,7 +329,7 @@ and a **test author** testing a plugin that draws.
 - **Per-instance data comes two ways:**
   - **A storage buffer read at `instance_index`:** a draw's first instance selects a batch's rows, on every backend for direct draws.
   - **Instance buffers:** vertex buffers stepped per instance, each a buffer range with its layout, set with `SetInstanceBuffer(slot, InstanceBuffer{Range, Layout})`. Their layouts join the pipeline key.
-- **Room for indirect draws:** every buffer render makes carries the indirect usage. render's first version offers no indirect call.
+- **Room for indirect draws:** a buffer acquired or made with `BufferUsageFlagIndirect` can hold indirect arguments. It is not on every buffer: the wgpu fork adds storage to an indirect buffer, keeps a validation cache for it, and refuses to make one on devices without indirect execution, such as GLES below 3.1. render's first version offers no indirect call.
 
 ### Passes, command lists and draws
 
@@ -357,7 +359,11 @@ and a **test author** testing a plugin that draws.
   - `SetMaterial(material)` selects the material for the draws after it and resets every draw parameter and instance buffer.
   - `Draw(mesh, DrawArgs{InstanceCount, FirstInstance})` draws the whole mesh. A part of a mesh that shares its buffers with others is a mesh of its own, over ranges of those buffers.
   - `DrawVertices(topology, vertexCount, DrawArgs{…})` draws with no mesh. It binds no per-vertex buffer, and its topology's zero is a triangle list. A shader whose vertex stage declares a per-vertex input is refused and reported once, as the call's doc comment says.
-- **Writes land before the whole frame:** a write fills a buffer or texture for the whole frame, and two writes to one region leave the last. `WriteTexture` writes a region of one mip level and one layer, so an atlas page lands in a layer of a 2D-array texture. To change data between passes, a user writes a temporary buffer and copies it at that point in a command list.
+- **Writes land before the whole frame:** a write fills a buffer or texture for the whole frame, and two writes to one region leave the last. To change data between passes, a user writes a temporary buffer and copies it at that point in a command list.
+  - `inventory.WriteBuffer[T](buffer, offset, data)` writes into any buffer render holds, at an offset and of a length that are multiples of 4.
+  - `inventory.WriteTexture[T](texture, TextureRegion{MipLevel, Layer, X, Y, Width, Height}, data)` writes a region of one mip level and one layer, so an atlas page lands in a layer of a 2D-array texture; a zero width or height means the rest of the level. Its rows of texels are packed tight, each texel of its format's size. A multisampled texture, and a depth format beyond `Depth16Unorm`, cannot be written.
+  - Each is gfx's write, landing before every command list of gfx's next submit: a write after the frame's flush fills the next frame.
+  - A write that does not fit its buffer or texture is refused and reported, with `ReportKindWriteRefused`.
 - **The clear-after-draw check:** after the users' recording, render reports once each pass that clears a target an earlier pass of the frame drew into, in submit order.
 
 How a plugin's recording task reads, from the prototype with its verdicts applied:

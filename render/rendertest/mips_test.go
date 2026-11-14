@@ -73,7 +73,7 @@ func TestATextureLoadedWithMipmapsGetsEveryLevelDrawnFromTheOneAboveInRendersOwn
 			t.Errorf("frame %d's last list, the loader's, drew %v, want nothing", frameIndex, got)
 		}
 	}
-	if created, ok := findCreatedTexture(readTextureCalls(calls), plain); !ok || created.Descriptor.MipLevelCount != 1 {
+	if created, ok := readTextureCalls(calls).findCreated[recording.CreateTextureArguments](plain); !ok || created.Descriptor.MipLevelCount != 1 {
 		t.Errorf("the texture acquired without Mipmaps was made %+v, want it made once with one mip level", created.Descriptor)
 	}
 	checkMipBindGroupsReleasedAfterTheirSubmit(t, calls, groupLevels)

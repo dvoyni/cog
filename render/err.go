@@ -25,6 +25,10 @@ const (
 	// temporary, one released as often as it was acquired, or the zero
 	// handle.
 	ReportKindReleaseRefused
+	// ReportKindWriteRefused is a write of a buffer or texture that does not
+	// fit it: into an asset render does not hold, past its end or its
+	// level's edges, unaligned, or of data not as long as the region.
+	ReportKindWriteRefused
 )
 
 // Report is a mistake render finds at run time, such as a refused shader, a
