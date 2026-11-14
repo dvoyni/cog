@@ -364,6 +364,12 @@ func (d *device) ReflectVertexInputs(module gfx.ShaderModule, entryPoint string)
 	return vertex.vertexInputs, nil
 }
 
+// ReflectBindings answers an error naming it, not built yet: naga's names
+// and struct members are not kept.
+func (*device) ReflectBindings(gfx.ShaderModule) ([]gfx.ShaderBinding, error) {
+	return nil, unbuilt("ReflectBindings")
+}
+
 // CreateRenderPipeline creates wgpu's pipeline over the layout and modules
 // stored at the descriptor's indexes, and stores it at pipeline's index. A
 // zero DepthStencil format, fragment module, strip index format or blend is

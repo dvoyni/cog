@@ -257,6 +257,17 @@ func (d *device) ReflectVertexInputs(module gfx.ShaderModule, entryPoint string)
 	return slices.Clone(answer.VertexInputs), answer.Error
 }
 
+// ReflectBindings records the reflection and answers the Bindings AnswerNext
+// queued, copied, or none, as ReflectRenderPipelineLayout does; an error
+// when module is missing.
+func (d *device) ReflectBindings(module gfx.ShaderModule) ([]gfx.ShaderBinding, error) {
+	answer := d.instance.record(CallKindReflectBindings, module, func() error {
+		_, err := requireObject(&d.shaderModules, module, "the reflected module")
+		return err
+	})
+	return cloneBindings(answer.Bindings), answer.Error
+}
+
 // CreateComputePipeline records the creation and keeps pipeline at its
 // index; an error when its layout or module is missing.
 func (d *device) CreateComputePipeline(pipeline gfx.ComputePipeline, descriptor gfx.ComputePipelineDescriptor) error {
@@ -621,6 +632,21 @@ func cloneLayouts(layouts []gfx.BindGroupLayoutDescriptor) []gfx.BindGroupLayout
 	for index, layout := range layouts {
 		layout.Entries = slices.Clone(layout.Entries)
 		clones[index] = layout
+	}
+	return clones
+}
+
+// cloneBindings answers a copy of bindings, their members and entry points
+// copied, so a test changing what it queued changes no answer; nil stays nil.
+func cloneBindings(bindings []gfx.ShaderBinding) []gfx.ShaderBinding {
+	if bindings == nil {
+		return nil
+	}
+	clones := make([]gfx.ShaderBinding, len(bindings))
+	for index, binding := range bindings {
+		binding.Members = slices.Clone(binding.Members)
+		binding.EntryPoints = slices.Clone(binding.EntryPoints)
+		clones[index] = binding
 	}
 	return clones
 }

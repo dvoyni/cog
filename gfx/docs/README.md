@@ -62,6 +62,7 @@ parallel jobs.
 | `DrawEvent` | Published inside each render beat once the frame's framebuffers are acquired: `Frame`, `Ready`, `AcquireWait`, `GPULatency`. |
 | `Frame` | One frame in flight, until its present. |
 | `SubmitOrder` | The number a frame encoder is handed under; a frame's encoders are submitted sorted by it. |
+| `ShaderBinding` | One binding a shader module declares, by name, as `Device.ShaderModuleBindings` answers it. |
 | `CommandEncoder`, `StandaloneCommandEncoder`, `RenderPassEncoder`, `ComputePassEncoder`, `CommandBuffer` | The recording objects, wgpu's. |
 | `SurfaceRequest`, `SurfaceConfiguration` | What every window's surface is asked for, and what one window got. |
 | `BufferMappedEvent`, `CapturedEvent`, `ReadCapture` | Readback and capture, asynchronous, delivered by events. |
@@ -766,6 +767,45 @@ module once for the pipelines made from it. Invalid WGSL answers the
 backend's error. WGSL is the only language; there is no SPIR-V. Hot reload
 is not built yet.
 
+**`ShaderModuleBindings`** answers every binding a module declares, by name,
+for code that builds its own layouts and binds values by name:
+
+```wgsl
+struct Camera {
+	viewProjection: mat4x4<f32>,
+	position: vec3<f32>,
+}
+@group(0) @binding(0) var<uniform> camera: Camera;
+@group(1) @binding(0) var albedo: texture_2d<f32>;
+```
+
+```go
+bindings, err := device.ShaderModuleBindings(module)
+// bindings[0]: Name "camera", Group 0, Binding 0,
+//   Buffer{Type: BufferBindingTypeUniform, MinBindingSize: 80},
+//   Members viewProjection at 0 of 64 bytes and position at 64 of 12,
+//   EntryPoints ["vertexMain"], the entry points that read it.
+// bindings[1]: Name "albedo", Group 1, Binding 0,
+//   Texture{SampleType: TextureSampleTypeFloat, ViewDimension: TextureViewDimension2D},
+//   EntryPoints none when no entry point samples it.
+```
+
+- **Every declared binding** is answered, in the order the module declares
+  them, one no entry point uses included, with no entry points.
+- **Its kind** is in exactly one of `Buffer`, `Sampler`, `Texture` and
+  `StorageTexture`, as a `BindGroupLayoutEntry` holds it, so a layout entry
+  is the binding's kind with a visibility. A buffer's `MinBindingSize` is
+  its type's size, a runtime-sized array counting one element, and
+  `HasDynamicOffset` is false, left to the layout. An f32 texture is
+  `TextureSampleTypeFloat`, a depth one `TextureSampleTypeDepth`.
+- **`Members`** are a buffer struct's members, each with its name, offset
+  and size as WGSL lays them out.
+- **`EntryPoints`** name the entry points that use the binding, directly or
+  through the functions they call.
+
+The slices are yours to keep. A released module answers `ErrReleased`. On
+gogpu the call answers an error until its named reflection is built.
+
 ## Pipelines
 
 A render pipeline takes its stages, vertex buffers, primitive, depth-stencil
@@ -1380,8 +1420,9 @@ flags, write, copy and clear alignment, and the pass sequence.
   A device requiring a feature it lacks is refused.
 - **Surfaces** offer `recording.SurfaceCapabilities`: the 8-bit BGRA and
   RGBA formats, sRGB or not, and every present mode, more than gogpu's.
-- **Reflection** answers no layouts and no vertex inputs, unless a test
-  queues them, so an "auto" layout is empty and no vertex check fails.
+- **Reflection** answers no layouts, no vertex inputs and no bindings,
+  unless a test queues them, so an "auto" layout is empty, no vertex check
+  fails and a module declares no binding.
 - **Submissions** are indexed from one on each device and finish at once,
   so `GPULatency` is zero.
 - **Preprocessing** answers the file's text as it is.
@@ -1405,6 +1446,13 @@ instance.AnswerNext(recording.CallKindSurfaceCapabilities, recording.Answer{Capa
 // The next "auto" layout reflects one group of one uniform buffer.
 instance.AnswerNext(recording.CallKindReflectRenderPipelineLayout, recording.Answer{BindGroupLayouts: []gfx.BindGroupLayoutDescriptor{{
 	Entries: []gfx.BindGroupLayoutEntry{{Binding: 0, Visibility: gfx.ShaderStageFlagVertex, Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform}}},
+}}})
+// The next module's named reflection is one uniform block.
+instance.AnswerNext(recording.CallKindReflectBindings, recording.Answer{Bindings: []gfx.ShaderBinding{{
+	Name:        "camera",
+	Buffer:      gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform, MinBindingSize: 64},
+	Members:     []gfx.ShaderStructMember{{Name: "viewProjection", Offset: 0, Size: 64}},
+	EntryPoints: []string{"vertexMain"},
 }}})
 ```
 
@@ -1453,8 +1501,11 @@ What a backend owes gfx:
   `AcquireStatus`.
 - **Reflection at module creation.** `CreateShaderModule` parses and
   reflects the WGSL once, keeping the result at the module's index for
-  `ReflectRenderPipelineLayout`, `ReflectComputePipelineLayout` and
-  `ReflectVertexInputs`. `CreateRenderPipeline` and `CreateComputePipeline`
+  `ReflectRenderPipelineLayout`, `ReflectComputePipelineLayout`,
+  `ReflectVertexInputs` and `ReflectBindings`. `ReflectBindings` answers
+  every binding the module declares, used or not, with its name, its
+  struct's members and the entry points that use it, in slices the backend
+  keeps no part of. `CreateRenderPipeline` and `CreateComputePipeline`
   always get an explicit layout.
 - **Submissions are counted.** `Submit` answers the submission's index,
   from one on each device; `Poll` resolves finished maps without waiting and

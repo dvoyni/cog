@@ -14,7 +14,8 @@ is created and released, `CreateQuerySet` answering
 `ErrQuerySetsUnavailable` until the wgpu fork exposes query sets, a pipeline with a zero layout getting the
 layouts the backend reflects created as explicit ones, pipeline
 creation checking the vertex buffers against the shader's inputs and the
-pipeline against the device's limits, each
+pipeline against the device's limits, `ShaderModuleBindings` answering a
+module's bindings by name as the backend reflects them, each
 window's surface is created when it opens, configured before its first
 acquire and again once resized or `RequestSurface` changes the request, skipped while hidden or zero-size, and
 released after the last present when it closes, and each render beat
@@ -44,7 +45,8 @@ resource without its usage, a misaligned write, copy or clear, a broken
 pass sequence and any query set, reports every feature but timestamp
 queries, and its buffers hold the bytes written, copied and cleared,
 which its own maps read, and answers a pipeline's reflection with the
-layouts a test queues, a vertex entry point's with its inputs, and a
+layouts a test queues, a vertex entry point's with its inputs, a
+module's named reflection with the bindings a test queues, and a
 shader's preprocessing with the file's text as it is.
 What remains is on the [gfx map](https://github.com/dvoyni/cog/issues/608).
 

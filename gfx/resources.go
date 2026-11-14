@@ -124,6 +124,14 @@ type Device interface {
 	// scheduled anywhere, never from a frame's recording.
 	CreateShaderModule(descriptor ShaderModuleDescriptor) (ShaderModule, error)
 	ReleaseShaderModule(module ShaderModule)
+	// ShaderModuleBindings answers every binding module declares, those no
+	// entry point uses included, in the order it declares them, as the
+	// backend reflected them at the module's creation: each one's name,
+	// group, number and kind, a buffer struct's members, and the entry
+	// points that use it. It is for a caller that builds explicit layouts
+	// and binds values by name, as render does. The slices answered are the
+	// caller's to keep.
+	ShaderModuleBindings(module ShaderModule) ([]ShaderBinding, error)
 
 	CreateBindGroupLayout(descriptor BindGroupLayoutDescriptor) (BindGroupLayout, error)
 	ReleaseBindGroupLayout(layout BindGroupLayout)

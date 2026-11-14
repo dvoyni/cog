@@ -2,6 +2,7 @@ package gfx_test
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"testing"
@@ -598,10 +599,10 @@ func TestWritesReachTheBackendRecordedWithTheirDataCopied(t *testing.T) {
 	})
 }
 
-func TestAWriteToAStaleHandleAnswersErrReleasedBeforeTheBackend(t *testing.T) {
+func TestAWriteOrReflectionOfAStaleHandleAnswersErrReleasedBeforeTheBackend(t *testing.T) {
 	for _, c := range []struct {
-		name  string
-		write func(device gfx.Device, stale fixture) error
+		name string
+		call func(device gfx.Device, stale fixture) error
 	}{
 		{"a buffer", func(device gfx.Device, stale fixture) error {
 			return device.WriteBuffer(stale.buffer, 0, []byte{1, 2, 3, 4})
@@ -611,6 +612,12 @@ func TestAWriteToAStaleHandleAnswersErrReleasedBeforeTheBackend(t *testing.T) {
 		}},
 		{"a texture", func(device gfx.Device, stale fixture) error {
 			return device.WriteTexture(gfx.ImageCopyTexture{Texture: stale.texture}, []byte{1, 2, 3, 4}, gfx.ImageDataLayout{BytesPerRow: 4, RowsPerImage: 1}, gfx.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1})
+		}},
+		{"a module's bindings", func(device gfx.Device, stale fixture) error {
+			return answerNoBindings(device.ShaderModuleBindings(stale.module))
+		}},
+		{"the zero module's bindings", func(device gfx.Device, _ fixture) error {
+			return answerNoBindings(device.ShaderModuleBindings(gfx.ShaderModule{}))
 		}},
 	} {
 		for _, staleFixture := range staleFixtures {
@@ -622,11 +629,11 @@ func TestAWriteToAStaleHandleAnswersErrReleasedBeforeTheBackend(t *testing.T) {
 				h.readDevice(func(device gfx.Device) {
 					before := len(h.instance.Recording().Calls)
 
-					if err := c.write(device, stale); !errors.Is(err, gfx.ErrReleased) {
-						t.Errorf("the write answered %v, want ErrReleased", err)
+					if err := c.call(device, stale); !errors.Is(err, gfx.ErrReleased) {
+						t.Errorf("the call answered %v, want ErrReleased", err)
 					}
 					if after := len(h.instance.Recording().Calls); after != before {
-						t.Errorf("the write reached the backend: %v", h.instance.Recording().Calls[before:])
+						t.Errorf("the call reached the backend: %v", h.instance.Recording().Calls[before:])
 					}
 				})
 			})
@@ -845,6 +852,15 @@ func mustSucceed(t *testing.T, err error) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+// answerNoBindings answers err, or an error when bindings were answered with
+// it.
+func answerNoBindings(bindings []gfx.ShaderBinding, err error) error {
+	if bindings != nil {
+		return fmt.Errorf("bindings %+v answered with %w", bindings, err)
+	}
+	return err
 }
 
 // lastCall answers the last call h's instance recorded.

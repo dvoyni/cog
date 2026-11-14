@@ -33,6 +33,14 @@ func TestADeviceLossFromABackendCallIsLoggedThenPublishedOnce(t *testing.T) {
 		{"MapBuffer", recording.CallKindMapBuffer, func(device gfx.Device, buffer gfx.Buffer) error {
 			return device.MapBuffer(buffer, gfx.MapModeRead, 0, 4)
 		}},
+		{"ShaderModuleBindings", recording.CallKindReflectBindings, func(device gfx.Device, _ gfx.Buffer) error {
+			module, err := device.CreateShaderModule(gfx.ShaderModuleDescriptor{WGSL: triangleWGSL})
+			if err != nil {
+				return err
+			}
+			_, err = device.ShaderModuleBindings(module)
+			return err
+		}},
 		{"a standalone Submit", recording.CallKindSubmit, func(device gfx.Device, buffer gfx.Buffer) error {
 			encoder, err := device.CreateCommandEncoder(gfx.CommandEncoderDescriptor{})
 			if err != nil {
@@ -152,6 +160,10 @@ func TestOnceTheDeviceIsLostNoCallReachesTheBackendAndCallsWithErrorsAnswerErrDe
 			},
 			"CreateShaderModule": func() error {
 				_, err := device.CreateShaderModule(gfx.ShaderModuleDescriptor{WGSL: triangleWGSL})
+				return err
+			},
+			"ShaderModuleBindings": func() error {
+				_, err := device.ShaderModuleBindings(gfx.ShaderModule{})
 				return err
 			},
 			"CreateBindGroupLayout": func() error {
