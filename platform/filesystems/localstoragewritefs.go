@@ -7,14 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"maps"
 	"path"
 	"slices"
 	"strings"
 	"syscall/js"
-	"time"
 )
 
 // LocalStorageWriteFS is a writable filesystem in the page's localStorage,
@@ -49,12 +47,12 @@ func (l *LocalStorageWriteFS) Open(name string) (fs.File, error) {
 		return nil, err
 	}
 	if file, found := document.Files[name]; found {
-		info := localStorageFileInfo{name: path.Base(name), size: int64(len(file.Data)), mode: file.Mode}
-		return &localStorageOpenFile{Reader: bytes.NewReader(file.Data), info: info}, nil
+		info := fileInfo{name: path.Base(name), size: int64(len(file.Data)), mode: file.Mode}
+		return &openFile{Reader: bytes.NewReader(file.Data), info: info}, nil
 	}
 	if document.isDirectory(name) {
-		info := localStorageFileInfo{name: path.Base(name), mode: document.directoryMode(name)}
-		return &localStorageOpenDirectory{info: info, entries: document.entries(name)}, nil
+		info := fileInfo{name: path.Base(name), mode: document.directoryMode(name)}
+		return &openDirectory{info: info, entries: document.entries(name)}, nil
 	}
 	return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
 }
@@ -234,12 +232,12 @@ func (d localStorageDocument) entries(name string) []fs.DirEntry {
 	children := map[string]fs.FileInfo{}
 	for file, data := range d.Files {
 		if child, found := childOf(file, prefix); found {
-			children[child] = localStorageFileInfo{name: child, size: int64(len(data.Data)), mode: data.Mode}
+			children[child] = fileInfo{name: child, size: int64(len(data.Data)), mode: data.Mode}
 		}
 	}
 	for directory := range d.Directories {
 		if child, found := childOf(directory, prefix); found {
-			children[child] = localStorageFileInfo{name: child, mode: d.directoryMode(prefix + child)}
+			children[child] = fileInfo{name: child, mode: d.directoryMode(prefix + child)}
 		}
 	}
 	entries := make([]fs.DirEntry, 0, len(children))
@@ -290,80 +288,6 @@ type localStorageFile struct {
 	Data []byte      `json:"data"`
 	Mode fs.FileMode `json:"mode"`
 }
-
-// localStorageOpenFile is a file of a LocalStorageWriteFS opened for
-// reading.
-type localStorageOpenFile struct {
-	*bytes.Reader
-	info localStorageFileInfo
-}
-
-// Stat describes the file.
-func (f *localStorageOpenFile) Stat() (fs.FileInfo, error) { return f.info, nil }
-
-// Close does nothing.
-func (f *localStorageOpenFile) Close() error { return nil }
-
-// localStorageOpenDirectory is a directory of a LocalStorageWriteFS opened
-// for reading: its entries as of the open.
-type localStorageOpenDirectory struct {
-	info    localStorageFileInfo
-	entries []fs.DirEntry
-}
-
-// Stat describes the directory.
-func (d *localStorageOpenDirectory) Stat() (fs.FileInfo, error) { return d.info, nil }
-
-// Read fails: a directory has no bytes.
-func (d *localStorageOpenDirectory) Read([]byte) (int, error) {
-	return 0, &fs.PathError{Op: "read", Path: d.info.name, Err: errors.New("is a directory")}
-}
-
-// ReadDir answers the next count entries, or every remaining one when count
-// is not positive, as fs.ReadDirFile does.
-func (d *localStorageOpenDirectory) ReadDir(count int) ([]fs.DirEntry, error) {
-	if count <= 0 {
-		entries := d.entries
-		d.entries = nil
-		return entries, nil
-	}
-	if len(d.entries) == 0 {
-		return nil, io.EOF
-	}
-	count = min(count, len(d.entries))
-	entries := d.entries[:count]
-	d.entries = d.entries[count:]
-	return entries, nil
-}
-
-// Close does nothing.
-func (d *localStorageOpenDirectory) Close() error { return nil }
-
-// localStorageFileInfo describes a file or directory of a
-// LocalStorageWriteFS, which keeps no times.
-type localStorageFileInfo struct {
-	name string
-	size int64
-	mode fs.FileMode
-}
-
-// Name answers the base name.
-func (i localStorageFileInfo) Name() string { return i.name }
-
-// Size answers the length in bytes, 0 for a directory.
-func (i localStorageFileInfo) Size() int64 { return i.size }
-
-// Mode answers the mode.
-func (i localStorageFileInfo) Mode() fs.FileMode { return i.mode }
-
-// ModTime answers the zero time.
-func (i localStorageFileInfo) ModTime() time.Time { return time.Time{} }
-
-// IsDir answers whether it is a directory.
-func (i localStorageFileInfo) IsDir() bool { return i.mode.IsDir() }
-
-// Sys answers nil.
-func (i localStorageFileInfo) Sys() any { return nil }
 
 // childOf answers name with prefix cut, when what remains is a direct child.
 func childOf(name, prefix string) (string, bool) {

@@ -80,9 +80,7 @@ func openMount(t *testing.T, directory string) fs.FS {
 func bindDisk(writable *filesystems.DiskWriteFS, mounts ...fs.FS) func(c *kernel.Configurator) {
 	return func(c *kernel.Configurator) {
 		c.BindSocket[platform.WriteFSSocket](writable)
-		for priority, mount := range mounts {
-			c.BindSocket(platform.ReadMountSocket{FS: mount, Priority: priority})
-		}
+		bindMounts(mounts...)(c)
 	}
 }
 

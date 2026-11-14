@@ -23,7 +23,7 @@ with [metronome](../../metronome/docs/README.md).
 window implementation ──┐  WindowsSocket       (gogpu)
 input source ───────────┤  InputSourceSocket   (gogpu, later a scripted one)
 writable filesystem ────┤  WriteFSSocket       (filesystems.NewDiskWriteFS, …)
-read mounts ────────────┘  ReadMountSocket     (an embed.FS, an os.Root's FS)
+read mounts ────────────┘  ReadMountSocket     (an embed.FS, an os.Root's FS, a memory mount)
                               │
                          platform
           ┌───────────────────┼──────────────────────┐
@@ -46,7 +46,7 @@ read mounts ────────────┘  ReadMountSocket     (an emb
 | `Handlers` | `FlushValues`, platform's one handler, for others to order theirs around. |
 | `FS`, `WriteFS` | The files: `FS` reads the overlay, and `ElevateFileAccess` gives the `WriteFS` that writes. |
 | `*Values` | A key-value store of JSON values, kept in a file in `FS`. |
-| `filesystems` | The writable filesystems: `NewDiskWriteFS`, `NewLocalStorageWriteFS`. |
+| `filesystems` | The writable filesystems, `NewDiskWriteFS` and `NewLocalStorageWriteFS`, and the memory mount, `NewMemoryFS`. |
 | `headless` | Windows for tests, without an operating system: `NewWindows`, resized with `Resize`. |
 
 platform holds no platform code. The window implementation and the input
@@ -370,8 +370,9 @@ save := configurator.RegisterTask1(func(k *kernel.Kernel, _ kernel.NoArg, filesy
 
 `github.com/dvoyni/cog/platform/filesystems` holds the writable filesystems,
 each a `platform.WriteFSSocket` the application's own plugin makes in its
-`Init`, binds, and closes when it holds something open. Read mounts need no
-adapter: any `fs.FS` binds as it is.
+`Init`, binds, and closes when it holds something open, and the memory
+mount, a read mount whose files are put in at run time. Other read mounts
+need no adapter: any `fs.FS` binds as it is.
 
 | Constructor | Where the files are | Builds | Close |
 |---|---|---|---|
@@ -449,6 +450,34 @@ func newWriteFS() (platform.WriteFSSocket, func() error, error) {
   overwritten.
 - **The constructor fails** for an empty key, or a page without
   `localStorage`.
+
+### MemoryFS
+
+A **memory mount** holds files in memory, for bytes that are not files, such
+as a model's embedded images, so that they load by path like any other. Its
+owner makes it in `Init`, binds it as a read mount at a priority, and keeps
+it as a resource of its own:
+
+```go
+memory := filesystems.NewMemoryFS()
+c.BindSocket(platform.ReadMountSocket{FS: memory, Priority: 2})
+c.InitResource(memory)
+```
+
+- **Its owner puts files in and removes them**, `Put(name, data)` and
+  `Remove(name)`, from any job, under the mount's own lock: filling it takes
+  no `FS` write lock, which would shut out every job reading files. Every
+  plugin reads the files through the `FS` resource, at the mount's priority.
+- **A put keeps a copy** of the bytes, and replaces the file there; a read
+  answers bytes of the reader's own.
+- **`Stat` answers** a file's size, and the time it was put as its
+  modification time, strictly later at every put, even within one tick of
+  the clock, so a reload that compares times sees each put.
+- **A directory is there while a file is beneath it**, and goes with its
+  last file. A put fails for a name `fs.ValidPath` rejects, over a
+  directory or beneath a file; a remove fails for a name that is no file
+  put.
+- **Nothing in it is persisted**, and nothing needs closing.
 
 ### Testing with them
 

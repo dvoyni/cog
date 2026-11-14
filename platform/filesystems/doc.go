@@ -4,7 +4,8 @@
 // localStorage. They are adapters, not plugins: the application's own plugin
 // makes the one it wants, binds it in its Init and closes it in its Destroy,
 // beside the read mounts it binds, any fs.FS, such as an embed.FS or an
-// os.Root's FS.
+// os.Root's FS. NewMemoryFS makes a memory mount, a read mount whose owner
+// puts files into it at run time.
 //
 //	func (p *game) Init(c *kernel.Configurator, _ any) error {
 //		writable, err := filesystems.NewDiskWriteFS(userDirectory)

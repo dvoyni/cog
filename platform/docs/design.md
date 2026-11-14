@@ -10,8 +10,8 @@ for every implementation: the window request and window state, folding input
 into state and events, the overlay of filesystems, and the values kept in it.
 
 Status: windows, the pump, the filesystems, keys, text, focus, the pointer,
-scroll, resize, key labels, the cursor, the filesystem adapters and the
-headless windows adapter are built. The decisions come from the
+scroll, resize, key labels, the cursor, the filesystem adapters, the memory
+mount and the headless windows adapter are built. The decisions come from the
 [platform map](https://github.com/dvoyni/cog/issues/610); each section links
 the ticket that holds its detail. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md).
@@ -46,7 +46,7 @@ the ticket that holds its detail. The vocabulary is in
 | `FS` | alias of `fs.FS`, resource | Read access to files: the overlay, which only reads. |
 | `WriteFS`, `ElevateFileAccess` | interface, function | Write access to files: the overlay that writes, which `ElevateFileAccess` gives from the write handle on `FS` alone. |
 | `WriteFSSocket` | optional exclusive socket | The writable filesystem the application binds: `filesystems.NewDiskWriteFS` or `filesystems.NewLocalStorageWriteFS`. |
-| `ReadMountSocket` | optional socket | A read mount the application binds: any `fs.FS` at a priority. |
+| `ReadMountSocket` | optional socket | A read mount the application binds: any `fs.FS` at a priority, `filesystems.NewMemoryFS` among them. |
 | `Values` | resource | The values, a JSON file in `FS`: `Get` takes the `FS`; `Set`, `Delete` and `Flush` take the `WriteFS`. |
 
 **A seam bound wrongly panics** as a composition error, which the kernel
@@ -386,12 +386,17 @@ is.
 - **`NewMemoryFS()`**, a **memory mount**, keeps files in memory, for bytes
   that are not files, such as a glTF's embedded images, which render then
   loads by path ([render: what render loads, how a second load shares the first, and when an asset is freed](https://github.com/dvoyni/cog/issues/806)).
-  Designed for render and not yet built.
+  Built from [platform: the memory mount](https://github.com/dvoyni/cog/issues/825).
   - It is a read mount: its owner binds it with a priority and keeps it as a
     resource of its own. It is not a layer inside the overlay, so filling it
     takes no `FS` write lock that would shut out every job reading files.
-  - Its owner puts files in and removes them through the adapter, under the
-    adapter's own lock. Every plugin reads them through the `FS` resource.
+  - Its owner puts files in and removes them through the adapter,
+    `Put(name, data)` and `Remove(name)`, under the adapter's own lock.
+    Every plugin reads them through the `FS` resource.
+  - A put keeps a copy of the bytes, and a read answers one. A directory is
+    there while a file is beneath it, and goes with its last file. A put
+    fails over a directory or beneath a file, and a remove fails for a name
+    that is no file put.
   - Its `Stat` answers a file's size and a modification time stamped when
     the owner put it, strictly later at every put, even within one clock
     tick, so a reload of a changed file notices

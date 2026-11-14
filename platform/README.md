@@ -6,8 +6,9 @@ Cog kernel: windows, input and filesystems. It is its own Go module
 [kernel](../kernel). It holds no platform code: it declares interfaces that
 implementing plugins fill, and owns the logic that is the same for every
 implementation. Its [`filesystems`](filesystems) package holds the writable
-filesystems an application binds, and its [`headless`](headless) package the
-windows a test binds, without an operating system.
+filesystems an application binds and the memory mount, and its
+[`headless`](headless) package the windows a test binds, without an
+operating system.
 
 ## Shape
 
@@ -53,7 +54,11 @@ windows a test binds, without an operating system.
   `NewDiskWriteFS(directory)` on desktop or `NewLocalStorageWriteFS(key)` in
   a browser. Without one, every write fails with **`ErrNoWriteFS`**. Any
   plugin binds read-only **`ReadMountSocket`**s, each any `fs.FS` at a
-  priority, such as an `embed.FS` or an `os.Root`'s `FS`.
+  priority, such as an `embed.FS` or an `os.Root`'s `FS`. A memory mount,
+  `filesystems.NewMemoryFS()`, is one held in memory, for bytes that are not
+  files: its owner keeps it as a resource of its own, and puts files in and
+  removes them at run time under the mount's own lock, with no `FS` write
+  lock.
 - **`FS`**, an alias of `fs.FS`, is the overlay resource: the writable
   filesystem first, then the read mounts by priority, listings merged. It
   only reads; under its write lock, **`ElevateFileAccess`** gives the
