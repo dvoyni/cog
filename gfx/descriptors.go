@@ -130,6 +130,45 @@ type StorageTextureBindingLayout struct {
 	ViewDimension TextureViewDimension
 }
 
+// ShaderBinding is one binding a shader module declares, as the backend
+// reflects it: its name, group and number, its kind as the module declares
+// it, in exactly one of Buffer, Sampler, Texture and StorageTexture as a
+// BindGroupLayoutEntry holds it, and the entry points that use it.
+type ShaderBinding struct {
+	Name    string
+	Group   uint32
+	Binding uint32
+	// Buffer is a uniform or storage buffer's type, read-only or not, its
+	// MinBindingSize the size of the buffer's type as WGSL lays it out, a
+	// runtime-sized array's counting one element, and HasDynamicOffset
+	// false: a layout chooses that.
+	Buffer BufferBindingLayout
+	// Sampler is Filtering for a sampler, Comparison for a comparison one.
+	Sampler SamplerBindingLayout
+	// Texture is a sampled texture's sample type, Float for an f32 texture
+	// and Depth for a depth one, its view dimension and whether it is
+	// multisampled.
+	Texture TextureBindingLayout
+	// StorageTexture is a storage texture's access, format and view
+	// dimension.
+	StorageTexture StorageTextureBindingLayout
+	// Members are the members of a buffer's struct, in order; none for a
+	// buffer of another type.
+	Members []ShaderStructMember
+	// EntryPoints are the names of the entry points that use the binding,
+	// directly or through the functions they call; none for a binding only
+	// declared.
+	EntryPoints []string
+}
+
+// ShaderStructMember is one member of a buffer's struct: its name, and its
+// offset and size in bytes as WGSL lays them out.
+type ShaderStructMember struct {
+	Name   string
+	Offset uint64
+	Size   uint64
+}
+
 // BindGroupDescriptor describes a bind group.
 type BindGroupDescriptor struct {
 	Label   string

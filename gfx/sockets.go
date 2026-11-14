@@ -89,6 +89,13 @@ type BackendDevice interface {
 	// render pipeline's vertex buffers against them before
 	// CreateRenderPipeline.
 	ReflectVertexInputs(module ShaderModule, entryPoint string) ([]VertexInput, error)
+	// ReflectBindings answers every binding module declares, those no entry
+	// point uses included, in the order it declares them, from what the
+	// module's reflection keeps: each with its name, and the entry points
+	// that use it, through their callees too. The slices answered are the
+	// caller's, shared with nothing the backend keeps. gfx answers them from
+	// Device.ShaderModuleBindings.
+	ReflectBindings(module ShaderModule) ([]ShaderBinding, error)
 	// CreateRenderPipeline gets an explicit layout: for an "auto" one, gfx
 	// creates what ReflectRenderPipelineLayout answered before calling it.
 	CreateRenderPipeline(pipeline RenderPipeline, descriptor RenderPipelineDescriptor) error

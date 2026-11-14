@@ -56,13 +56,14 @@ timed around the backend's acquires, and `GPULatency`, from the frames'
 submission indices, both measured by stopwatches of metronome's clock.
 The backend reflects shader modules:
 its seam declares `ReflectRenderPipelineLayout`,
-`ReflectComputePipelineLayout` and `ReflectVertexInputs`, which the recording
-adapter answers with the layouts and inputs a test queues. The backend
+`ReflectComputePipelineLayout`, `ReflectVertexInputs` and
+`ReflectBindings`, the named reflection `Device.ShaderModuleBindings`
+answers, which the recording adapter answers with the layouts, inputs and
+bindings a test queues. The backend
 preprocesses shaders too, through `Device.PreprocessShader`, which the
 recording adapter answers with the file's text as it is. Standalone encoders are finished
-and submitted by their owner. Designed for render and not yet built: the
-named reflection of a module's bindings, and a mode of the recording adapter
-that records nothing. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md); the ADRs are in
+and submitted by their owner. Designed for render and not yet built: a
+mode of the recording adapter that records nothing. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md); the ADRs are in
 [`adr/`](adr).
 
 ## Constraints
@@ -243,15 +244,20 @@ device's release and the recovery among them, for a backend to pin.
   needs more of the shader, a workgroup's size, the inter-stage variables, is
   the backend's.
 - **Named reflection** ([render: how a material binds its parameters, its variants, and the pipelines it shares](https://github.com/dvoyni/cog/issues/808)).
-  `Device` answers a shader module's bindings, declared ones included, for
-  render to build explicit layouts and bind values by name:
+  `Device.ShaderModuleBindings(module)` answers a shader module's bindings
+  as `ShaderBinding`s, in the order the module declares them, declared ones
+  no entry point uses included, for render to build explicit layouts and
+  bind values by name:
   - each binding's name, group, number and kind, with its view dimension,
-    sample type, and storage access and format;
-  - a buffer struct's size and its members' names, offsets and sizes;
+    sample type, and storage access and format, the kind in exactly one of
+    the binding layouts a `BindGroupLayoutEntry` holds, so a layout entry is
+    the binding's kind with a visibility;
+  - a buffer struct's size, as its buffer layout's `MinBindingSize`, and its
+    members' names, offsets and sizes;
   - the entry points that use each binding.
 
-  The backend seam's reflection carries the same. gogpu fills it from
-  naga's IR, which already holds names and offsets, and the recording
+  The backend seam's `ReflectBindings` carries the same. gogpu fills it
+  from naga's IR, which already holds names and offsets, and the recording
   adapter answers what a test queues, as for the other reflection calls.
 - **Off the frame means a task.** Creation is synchronous on every backend.
   A game creates shader modules and pipelines from a task of its own under

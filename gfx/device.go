@@ -200,6 +200,17 @@ func (d *device) ReleaseShaderModule(module ShaderModule) {
 	releaseResource(d, &d.shaderModules, module, BackendDevice.ReleaseShaderModule)
 }
 
+func (d *device) ShaderModuleBindings(module ShaderModule) ([]ShaderBinding, error) {
+	if d.lost.Load() {
+		return nil, ErrDeviceLost
+	}
+	if err := d.shaderModules.check(module); err != nil {
+		return nil, err
+	}
+	bindings, err := d.backend.ReflectBindings(module)
+	return bindings, d.checkLoss(err)
+}
+
 func (d *device) CreateBindGroupLayout(descriptor BindGroupLayoutDescriptor) (BindGroupLayout, error) {
 	if d.lost.Load() {
 		return BindGroupLayout{}, ErrDeviceLost
