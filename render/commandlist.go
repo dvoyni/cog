@@ -200,7 +200,7 @@ func (l *CommandList) findTarget(window platform.Window, texture Texture, mipLev
 		}
 		return makePassTarget(view, device.TextureDescriptor(device.TextureViewTexture(view)), 0), true, nil
 	case texture != (Texture{}):
-		view, descriptor, err := l.frame.table.Get().findTargetView(device, texture, mipLevel, layer)
+		view, descriptor, err := l.frame.table.Get().findLevelView(device, texture, mipLevel, layer)
 		if err != nil {
 			return passTarget{}, false, fmt.Errorf("names %w", err)
 		}

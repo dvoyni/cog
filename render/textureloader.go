@@ -1,7 +1,6 @@
 package render
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
 	"slices"
@@ -51,9 +50,7 @@ func (l *textureLoader) acquire(table *assetTable, device gfx.Device, files fs.F
 	}
 	texture, err := table.addTexture(device, descriptor)
 	if err != nil {
-		if !errors.Is(err, gfx.ErrDeviceLost) {
-			table.logger.LogErr(fmt.Errorf("render: acquiring texture %q: %w", key.path, err))
-		}
+		table.logUnlessLost(fmt.Errorf("render: acquiring texture %q: %w", key.path, err))
 		return Texture{}
 	}
 	if l.textures == nil {
@@ -93,12 +90,15 @@ func (l *textureLoader) release(table *assetTable, texture Texture) {
 
 // writePending decodes the body of each texture pending and still held in
 // table, one after another, holding no mutex, and writes it into mip level
-// 0. A body that fails is reported, and magenta written in its place.
-func (l *textureLoader) writePending(table *assetTable, device gfx.Device, files fs.FS) {
+// 0, and answers those of them acquired with Mipmaps, whose mips are yet to
+// be generated. A body that fails is reported, and magenta written in its
+// place.
+func (l *textureLoader) writePending(table *assetTable, device gfx.Device, files fs.FS) []Texture {
 	l.mutex.Lock()
 	loads := l.pendingLoads
 	l.pendingLoads = nil
 	l.mutex.Unlock()
+	var unmippedTextures []Texture
 	for _, load := range loads {
 		gfxTexture, ok := table.findTexture(load.texture)
 		if !ok {
@@ -110,7 +110,11 @@ func (l *textureLoader) writePending(table *assetTable, device gfx.Device, files
 			texels = slices.Repeat([]byte{255, 0, 255, 255}, int(load.size.Width*load.size.Height))
 		}
 		writeTexels(table, device, gfxTexture, load.size, texels)
+		if load.key.options.Mipmaps {
+			unmippedTextures = append(unmippedTextures, load.texture)
+		}
 	}
+	return unmippedTextures
 }
 
 // freeReleased removes from table each texture whose count reached zero
@@ -167,7 +171,7 @@ func writeTexels(table *assetTable, device gfx.Device, texture gfx.Texture, size
 		gfx.ImageDataLayout{BytesPerRow: 4 * size.Width, RowsPerImage: size.Height},
 		size,
 	)
-	if err != nil && !errors.Is(err, gfx.ErrDeviceLost) {
-		table.logger.LogErr(fmt.Errorf("render: writing texture %q: %w", device.TextureDescriptor(texture).Label, err))
+	if err != nil {
+		table.logUnlessLost(fmt.Errorf("render: writing texture %q: %w", device.TextureDescriptor(texture).Label, err))
 	}
 }

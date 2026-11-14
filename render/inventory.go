@@ -33,9 +33,11 @@ func (Inventory) Declare(access *kernel.Access) Inventory {
 // with its size, the format of its colour space, 8 bits per channel, and
 // with Mipmaps every mip level; render's jobs write its body before gfx
 // submits the frame, whether it was acquired before the frame or while it
-// records, so a draw recorded after the acquire reads it. One acquired by a
-// task the frame does not wait for, after its recording has ended, is
-// written before the next frame's submit instead. A file render
+// records, so a draw recorded after the acquire reads it, and with Mipmaps
+// draws every level below the first from it in render's own command list,
+// which gfx submits before every user's. One acquired by a task the frame
+// does not wait for, after its recording has ended, is written, and its mips
+// drawn, before the next frame's submit instead. A file render
 // cannot read or decode is reported once, and draws magenta: one texel when
 // its header fails, its own size when its body does. A texture gfx refuses
 // to make is logged, and the zero Texture answered. PNG and JPEG files load.

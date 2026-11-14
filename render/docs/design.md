@@ -6,7 +6,7 @@ API between gfx and the plugins that draw. It was mapped in
 each section links the ticket that holds its detail. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md).
 
-Status: being built. The plugin, its `Config`, `Handlers.RecordFrame` publishing `FrameEvent` inside gfx's `DrawEvent`, reports with their kind, and `rendertest`'s harness are built, from [render: the plugin, its frame event and rendertest's harness](https://github.com/dvoyni/cog/issues/826); the `Frame` parameter, command lists at their orders, passes into windows and `rendertest`'s reader of lists and passes, from [render: command lists and passes](https://github.com/dvoyni/cog/issues/827); temporary textures, passes into textures at a mip level and layer with depth-stencil and resolve targets, and `EndFrame`, from [render: temporary textures](https://github.com/dvoyni/cog/issues/828); the `Inventory` parameter, `AcquireTexture` and `ReleaseTexture`, shared by key, counted and freed at the frame's end, their bodies written by the decode-and-write job at both pickup points, and magenta for a failed load, from [render: loaded textures](https://github.com/dvoyni/cog/issues/829); the rest is designed, not yet built.
+Status: being built. The plugin, its `Config`, `Handlers.RecordFrame` publishing `FrameEvent` inside gfx's `DrawEvent`, reports with their kind, and `rendertest`'s harness are built, from [render: the plugin, its frame event and rendertest's harness](https://github.com/dvoyni/cog/issues/826); the `Frame` parameter, command lists at their orders, passes into windows and `rendertest`'s reader of lists and passes, from [render: command lists and passes](https://github.com/dvoyni/cog/issues/827); temporary textures, passes into textures at a mip level and layer with depth-stencil and resolve targets, and `EndFrame`, from [render: temporary textures](https://github.com/dvoyni/cog/issues/828); the `Inventory` parameter, `AcquireTexture` and `ReleaseTexture`, shared by key, counted and freed at the frame's end, their bodies written by the decode-and-write job at both pickup points, and magenta for a failed load, from [render: loaded textures](https://github.com/dvoyni/cog/issues/829); the mips of textures loaded with `Mipmaps`, generated in render's own command list in the frame their bodies are written, from [render: mips at render's own order](https://github.com/dvoyni/cog/issues/830); the rest is designed, not yet built.
 
 ## Problem Statement
 
@@ -430,6 +430,15 @@ render's EndFrame, on gfx.RenderEvent, after the present:
   A load acquired by a task the frame does not wait for, after the second point, is picked up at the next frame's first, so that frame's submit carries its body; `AcquireTexture` says so.
 
   Each pickup point has one decode-and-write job, which decodes and writes its loads one after another: the kernel adds no job to a frame once its handler has returned, and the handler cannot see how many loads are pending. The second waits for the first. One job then generates the mips of every texture loaded in the frame in render's encoder.
+
+  **The mips** are render's own command list, at `math.MinInt32`, so gfx submits them after the frame's writes land and before every user's list:
+  - The job after the second pickup point generates every texture either point wrote with `Mipmaps`, a late acquire's in the frame that writes its body.
+  - Each level below the first, of each layer, is a pass of its own that draws one triangle over it, sampling the level above, of the same layer, through a linear filter, so a 2D-array or cube texture gets every layer's levels.
+  - An sRGB texture is sampled and drawn through sRGB views, so its levels are filtered in linear colour.
+  - The mip shader is one of render's built-in assets: `render/assets/` is embedded and bound as a read mount under the prefix `cog.render`, at the lowest priority, and the shader is read from `cog.render/mipshader.wgsl` through gfx's `PreprocessShader`, as every shader is. A mount holding that name overrides it.
+  - The mip shader, its layouts and its sampler are made at the first generation, and a pipeline for each format at the first texture of that format: a one-time compile in the frame, not in a loader's job.
+  - Each pass's bind group is released when the frame ends; the views each pass samples and draws into are the texture's own, released with it.
+  - A texture of one level, such as a failed header's texel, takes no list.
 - **The frame's end:** nothing a frame used is freed before gfx's flush, because the fork fails a submit whose bind group names a freed buffer.
   - `EndFrame` runs after the present: it frees the assets whose count reached zero, the made assets released and the material versions made that frame; it returns temporaries to their pools, freeing those idle for `TemporaryIdleFrames`; and it resets the arena.
   - It is joined into the beat's out dependency, so the next beat starts after it.

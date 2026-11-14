@@ -73,8 +73,8 @@ func (f Frame) BeginCommandList(label string, order Order) CommandList {
 func (f Frame) AcquireTemporaryTexture(descriptor TextureDescriptor) Texture {
 	state := f.state.Get()
 	texture, err := state.temporaryTextures.acquire(descriptor.fillDefaults(), f.table.Get(), f.device.Get())
-	if err != nil && !errors.Is(err, gfx.ErrDeviceLost) {
-		state.logger.LogErr(fmt.Errorf("render: acquiring temporary texture %q: %w", descriptor.Label, err))
+	if err != nil {
+		state.logUnlessLost(fmt.Errorf("render: acquiring temporary texture %q: %w", descriptor.Label, err))
 	}
 	return texture
 }

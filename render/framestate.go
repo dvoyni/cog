@@ -17,6 +17,9 @@ type frameState struct {
 	reporter
 	// temporaryTextures is the pool AcquireTemporaryTexture hands out from.
 	temporaryTextures texturePool
+	// mips generates the mip levels of textures in render's own command
+	// list.
+	mips mipGenerator
 	// mutex guards frame, gfx's frame being recorded, or the last one
 	// recorded once gfx has flushed it, which gfx then refuses encoders for.
 	mutex sync.Mutex

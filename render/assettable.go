@@ -23,15 +23,16 @@ type assetTable struct {
 }
 
 // textureSlot is the slot of one texture: the gfx texture behind its handle,
-// with the views passes drew into, made as first needed.
+// with the views of single levels and layers passes drew into or sampled,
+// made as first needed.
 type textureSlot struct {
-	texture     gfx.Texture
-	targetViews []targetView
+	texture    gfx.Texture
+	levelViews []levelView
 }
 
-// targetView is a view of one mip level and one layer of a texture, which a
-// pass draws into.
-type targetView struct {
+// levelView is a view of one mip level and one layer of a texture, which a
+// pass draws into or render's mip shader samples.
+type levelView struct {
 	mipLevel, layer uint32
 	view            gfx.TextureView
 }
@@ -72,11 +73,11 @@ func (t *assetTable) findTexture(texture Texture) (gfx.Texture, bool) {
 	return slot.texture, true
 }
 
-// findTargetView answers the view of texture's mip level and layer, made the
-// first time a pass draws into it, with the descriptor gfx made the texture
+// findLevelView answers the view of texture's mip level and layer, made the
+// first time a pass draws into or samples it, with the descriptor gfx made the texture
 // from; an error naming what it lacks when render holds no such texture, or
 // it has no such mip level or layer.
-func (t *assetTable) findTargetView(device gfx.Device, texture Texture, mipLevel, layer uint32) (gfx.TextureView, gfx.TextureDescriptor, error) {
+func (t *assetTable) findLevelView(device gfx.Device, texture Texture, mipLevel, layer uint32) (gfx.TextureView, gfx.TextureDescriptor, error) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	slot, ok := t.textures.Find(texture)
@@ -87,7 +88,7 @@ func (t *assetTable) findTargetView(device gfx.Device, texture Texture, mipLevel
 	if mipLevel >= descriptor.MipLevelCount || layer >= descriptor.Size.DepthOrArrayLayers {
 		return gfx.TextureView{}, gfx.TextureDescriptor{}, fmt.Errorf("%q at mip level %d and layer %d, of %d mip levels and %d layers", descriptor.Label, mipLevel, layer, descriptor.MipLevelCount, descriptor.Size.DepthOrArrayLayers)
 	}
-	for _, target := range slot.targetViews {
+	for _, target := range slot.levelViews {
 		if target.mipLevel == mipLevel && target.layer == layer {
 			return target.view, descriptor, nil
 		}
@@ -103,7 +104,7 @@ func (t *assetTable) findTargetView(device gfx.Device, texture Texture, mipLevel
 	if err != nil {
 		return gfx.TextureView{}, gfx.TextureDescriptor{}, err
 	}
-	slot.targetViews = append(slot.targetViews, targetView{mipLevel: mipLevel, layer: layer, view: view})
+	slot.levelViews = append(slot.levelViews, levelView{mipLevel: mipLevel, layer: layer, view: view})
 	return view, descriptor, nil
 }
 
@@ -116,10 +117,10 @@ func (t *assetTable) removeTexture(device gfx.Device, texture Texture) {
 	if !ok {
 		return
 	}
-	for _, target := range slot.targetViews {
+	for _, target := range slot.levelViews {
 		device.ReleaseTextureView(target.view)
 	}
 	device.ReleaseTexture(slot.texture)
-	slot.targetViews = slot.targetViews[:0]
+	slot.levelViews = slot.levelViews[:0]
 	t.textures.Release(texture)
 }
