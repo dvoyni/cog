@@ -4,11 +4,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/gfx/recording"
 	"github.com/dvoyni/cog/platform"
 	"github.com/dvoyni/cog/render"
-	"github.com/dvoyni/cog/render/internal/handle"
 	"github.com/dvoyni/cog/render/rendertest"
 )
 
@@ -45,24 +43,12 @@ func TestRenderFreesIdleTemporariesAfterTheFramesPresentBeforeTheOutOfItsHandler
 // release, and whether each release follows a present, with no acquire of a
 // framebuffer between them.
 func countReleasedTemporaries(calls []recording.Call) (int, bool) {
-	// renderTextures are the gfx textures render made, and lastFrameCallKind
-	// the kind of the newest acquire or present before each call.
-	renderTextures := map[gfx.Texture]bool{}
-	var lastFrameCallKind recording.CallKind
 	releasedCount := 0
 	releasedAfterPresent := true
-	for _, call := range calls {
-		switch call.Kind {
-		case recording.CallKindCreateTexture:
-			arguments := call.Arguments.(recording.CreateTextureArguments)
-			_, renderTextures[arguments.Texture] = handle.ParseLabel[render.Texture](arguments.Descriptor.Label)
-		case recording.CallKindAcquireFramebuffer, recording.CallKindPresent:
-			lastFrameCallKind = call.Kind
-		case recording.CallKindReleaseTexture:
-			if renderTextures[call.Arguments.(gfx.Texture)] {
-				releasedCount++
-				releasedAfterPresent = releasedAfterPresent && lastFrameCallKind == recording.CallKindPresent
-			}
+	for _, call := range readTextureCalls(calls) {
+		if call.kind == recording.CallKindReleaseTexture {
+			releasedCount++
+			releasedAfterPresent = releasedAfterPresent && call.betweenFrames
 		}
 	}
 	return releasedCount, releasedAfterPresent

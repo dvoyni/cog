@@ -34,6 +34,17 @@ texture render does not hold or a mip level or layer it lacks, are of the
 wrong kind of format, or disagree in size, sample count or resolve. The
 harness's `Frames` reads each frame back as a `render.Inspection`: its lists
 by order and their passes with labels, targets, loads, stores and resolves.
+A task reaches render's assets through the `Inventory` parameter, which locks
+render's asset table, gfx's `Device` and platform's `FS`, all for read.
+`AcquireTexture(path, TextureOptions{ColorSpace, Mipmaps})` makes a PNG or
+JPEG texture from its file's header in the caller's job, shared and counted
+by path and options; render's decode-and-write job writes its body before
+gfx submits the frame, beside the recording for loads pending since the last
+frame and after it for loads acquired while it recorded. `ReleaseTexture`
+uncounts it, and the last release frees it at the end of that frame unless
+it is acquired again by then. A file that fails to load is reported once and
+draws magenta, one texel for a failed header and at its size for a failed
+body.
 What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
 
 ## Shape

@@ -4,7 +4,6 @@ import (
 	"sync"
 
 	"github.com/dvoyni/cog/gfx"
-	"github.com/dvoyni/cog/kernel"
 )
 
 // frameState is the private resource of the frames in flight: what render
@@ -15,8 +14,7 @@ type frameState struct {
 	// arena chunk: Config's, or their defaults.
 	temporaryIdleFrames int
 	temporaryChunkSize  uint64
-	// logger is the kernel's, where reports go.
-	logger *kernel.Logger
+	reporter
 	// temporaryTextures is the pool AcquireTemporaryTexture hands out from.
 	temporaryTextures texturePool
 	// mutex guards frame, gfx's frame being recorded, or the last one
@@ -37,9 +35,4 @@ func (s *frameState) recordingFrame() gfx.Frame {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	return s.frame
-}
-
-// report logs a Report of kind, saying err.
-func (s *frameState) report(kind ReportKind, err error) {
-	s.logger.LogErr(Report{Kind: kind, Err: err})
 }

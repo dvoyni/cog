@@ -18,6 +18,13 @@ const (
 	// none, more than the device allows, one naming no window, or targets of
 	// different sizes.
 	ReportKindPassTargetsRefused
+	// ReportKindLoadFailed is a loaded asset whose file could not be read or
+	// decoded, such as a texture that draws magenta in its place.
+	ReportKindLoadFailed
+	// ReportKindReleaseRefused is a release of an asset no acquire holds: a
+	// temporary, one released as often as it was acquired, or the zero
+	// handle.
+	ReportKindReleaseRefused
 )
 
 // Report is a mistake render finds at run time, such as a refused shader, a

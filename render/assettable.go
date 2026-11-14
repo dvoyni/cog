@@ -10,11 +10,16 @@ import (
 )
 
 // assetTable is the private resource of every asset render holds, behind the
-// handles its users keep. Every job reads it; its mutex guards what it holds.
+// handles its users keep. Every job reads it; its mutex guards the slots, and
+// loadedTextures guards itself.
 type assetTable struct {
+	reporter
 	mutex sync.Mutex
 	// textures is every texture render holds, by its handle.
 	textures handle.SlotMap[Texture, textureSlot]
+	// loadedTextures shares, counts and frees the textures loaded from
+	// files.
+	loadedTextures textureLoader
 }
 
 // textureSlot is the slot of one texture: the gfx texture behind its handle,
@@ -53,6 +58,18 @@ func (t *assetTable) addTexture(device gfx.Device, descriptor TextureDescriptor)
 	}
 	slot.texture = gfxTexture
 	return texture, nil
+}
+
+// findTexture answers the gfx texture behind texture; false when render holds
+// no such texture.
+func (t *assetTable) findTexture(texture Texture) (gfx.Texture, bool) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	slot, ok := t.textures.Find(texture)
+	if !ok {
+		return gfx.Texture{}, false
+	}
+	return slot.texture, true
 }
 
 // findTargetView answers the view of texture's mip level and layer, made the

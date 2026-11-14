@@ -29,6 +29,15 @@
 //		return kernel.NoResult{}
 //	}
 //
+// A task reaches render's assets through its Inventory parameter, which it
+// declares beside Frame when it records too. A texture acquired from a path
+// in platform's files is ready in the frame that acquires it, shared with
+// every other acquire of its path and options, and freed at the end of the
+// frame its last acquire is released in:
+//
+//	crate := inventory.AcquireTexture("textures/crate.png", render.TextureOptions{ColorSpace: render.ColorSpaceSRGB, Mipmaps: true})
+//	inventory.ReleaseTexture(crate)
+//
 // A mistake render finds at run time is a Report, logged once and carried
 // past; its kind names it, so a test built on render/rendertest fails on a
 // report it did not expect.

@@ -6,7 +6,7 @@ API between gfx and the plugins that draw. It was mapped in
 each section links the ticket that holds its detail. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md).
 
-Status: being built. The plugin, its `Config`, `Handlers.RecordFrame` publishing `FrameEvent` inside gfx's `DrawEvent`, reports with their kind, and `rendertest`'s harness are built, from [render: the plugin, its frame event and rendertest's harness](https://github.com/dvoyni/cog/issues/826); the `Frame` parameter, command lists at their orders, passes into windows and `rendertest`'s reader of lists and passes, from [render: command lists and passes](https://github.com/dvoyni/cog/issues/827); temporary textures, passes into textures at a mip level and layer with depth-stencil and resolve targets, and `EndFrame`, from [render: temporary textures](https://github.com/dvoyni/cog/issues/828); the rest is designed, not yet built.
+Status: being built. The plugin, its `Config`, `Handlers.RecordFrame` publishing `FrameEvent` inside gfx's `DrawEvent`, reports with their kind, and `rendertest`'s harness are built, from [render: the plugin, its frame event and rendertest's harness](https://github.com/dvoyni/cog/issues/826); the `Frame` parameter, command lists at their orders, passes into windows and `rendertest`'s reader of lists and passes, from [render: command lists and passes](https://github.com/dvoyni/cog/issues/827); temporary textures, passes into textures at a mip level and layer with depth-stencil and resolve targets, and `EndFrame`, from [render: temporary textures](https://github.com/dvoyni/cog/issues/828); the `Inventory` parameter, `AcquireTexture` and `ReleaseTexture`, shared by key, counted and freed at the frame's end, their bodies written by the decode-and-write job at both pickup points, and magenta for a failed load, from [render: loaded textures](https://github.com/dvoyni/cog/issues/829); the rest is designed, not yet built.
 
 ## Problem Statement
 
@@ -203,7 +203,7 @@ and a **test author** testing a plugin that draws.
   Each is given back with its `Release…`. Acquire and release are the Go rules' pool pair: a load hands out the shared asset or a fresh one.
 - **Made assets** are made from memory or from other assets: `MakeMesh`, `MakeMaterial`, and buffers and textures filled from a slice. Each is given back with its `Release…`. A made asset has no key, and its maker releases it once. A made texture carries every usage its format allows, as a temporary texture does, so it can be a pass target kept across frames, such as a history or a render-to-texture layer.
 - **A load is ready in the frame that asks for it.** The GPU object exists when the call returns, and there is no loading state, no ready event and no callback:
-  - **Texture:** `image.DecodeConfig` reads only the header, which with the colour space and mipmaps option fixes the descriptor.
+  - **Texture:** `image.DecodeConfig` reads only the header, which with the colour space and mipmaps option fixes the descriptor: 8 bits per channel, an sRGB format for `ColorSpaceSRGB`, and every mip level down to one texel with `Mipmaps`. PNG and JPEG files load.
   - **Buffer:** `fs.Stat` gives the size, and the buffer is made with every usage, the indirect one included.
   - **Shader:** read, preprocessed and compiled in the caller's job.
 
@@ -212,7 +212,7 @@ and a **test author** testing a plugin that draws.
   - a texture's key is its path, colour space and mipmaps;
   - a shader's key is its path and its defines, sorted by name and joined into one string;
   - a buffer's key is its path.
-- **Freeing:** an asset is freed at the end of the frame in which its count reached zero. An acquire of its key before then revives it.
+- **Freeing:** an asset is freed at the end of the frame in which its count reached zero. An acquire of its key before then revives it. A release no acquire holds (a temporary, one released as often as it was acquired, the zero handle) is refused and reported.
 - **Failure:**
   - a failed texture draws magenta (1×1 for a header failure, its own size for a body failure);
   - a failed buffer or shader skips every draw that uses it.
@@ -408,12 +408,12 @@ func drawScene(k *kernel.Kernel, e render.FrameEvent, frame render.Frame, scene 
 ```
 gfx.RenderEvent ─ gfx's Draw: configure, acquire ─ gfx.DrawEvent
   render's RecordFrame:
-    decode-and-write jobs for loads pending since the last frame
+    the decode-and-write job for loads pending since the last frame
     reloads swapped in
     publishes render.FrameEvent{Beat, Ready, AcquireWait, GPULatency}
       users' recording tasks, after e.Ready, joined into the out dependency
     after that out dependency:
-      decode-and-write jobs for loads requested during recording
+      the decode-and-write job for loads requested during recording
       the mips of every texture loaded this frame, at math.MinInt32
       the clear-after-draw check
     returns them all, so gfx's flush waits
@@ -427,7 +427,9 @@ render's EndFrame, on gfx.RenderEvent, after the present:
   1. in `RecordFrame`, for loads pending since the last frame, decoded in parallel with the recording;
   2. after the recording, for loads requested during it.
 
-  Each loaded texture and buffer gets one decode-and-write job, and one job then generates their mips in render's encoder.
+  A load acquired by a task the frame does not wait for, after the second point, is picked up at the next frame's first, so that frame's submit carries its body; `AcquireTexture` says so.
+
+  Each pickup point has one decode-and-write job, which decodes and writes its loads one after another: the kernel adds no job to a frame once its handler has returned, and the handler cannot see how many loads are pending. The second waits for the first. One job then generates the mips of every texture loaded in the frame in render's encoder.
 - **The frame's end:** nothing a frame used is freed before gfx's flush, because the fork fails a submit whose bind group names a freed buffer.
   - `EndFrame` runs after the present: it frees the assets whose count reached zero, the made assets released and the material versions made that frame; it returns temporaries to their pools, freeing those idle for `TemporaryIdleFrames`; and it resets the arena.
   - It is joined into the beat's out dependency, so the next beat starts after it.
