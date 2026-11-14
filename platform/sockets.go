@@ -64,8 +64,12 @@ type WriteFSSocket interface {
 // plugin binds in its Init with
 // configurator.BindSocket(platform.ReadMountSocket{...}): an embed.FS, an
 // os.DirFS, any fs.FS. Higher priorities are searched first, equal ones in
-// plugin order, all after the writable filesystem.
+// plugin order, all after the writable filesystem. With a Prefix, a valid
+// path such as "cog.render", the mount's files appear under that folder
+// alone: its "mip.wgsl" is read as "cog.render/mip.wgsl", and a higher layer
+// holding that name overrides it.
 type ReadMountSocket struct {
 	FS       FS
 	Priority int
+	Prefix   string
 }

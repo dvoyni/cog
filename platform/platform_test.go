@@ -564,6 +564,16 @@ func TestSpawnPanicsOnASeamBoundWrongly(t *testing.T) {
 				c.BindSocket(platform.ReadMountSocket{Priority: 3})
 			}}}
 		}, "priority 3 has no FS"},
+		{"a read mount with an invalid prefix", func() []kernel.Plugin {
+			return []kernel.Plugin{newFake(), platform.NewPlugin(), &secondInstaller{func(c *kernel.Configurator) {
+				c.BindSocket(platform.ReadMountSocket{FS: fstest.MapFS{}, Prefix: "cog.render/"})
+			}}}
+		}, `prefix "cog.render/" is no valid path`},
+		{"a read mount prefixed with the root", func() []kernel.Plugin {
+			return []kernel.Plugin{newFake(), platform.NewPlugin(), &secondInstaller{func(c *kernel.Configurator) {
+				c.BindSocket(platform.ReadMountSocket{FS: fstest.MapFS{}, Prefix: "."})
+			}}}
+		}, `prefix "." is no valid path`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			s := kernel.NewSupervisor(nil)

@@ -17,8 +17,8 @@ func TestOverlayPassesTestFS(t *testing.T) {
 	f := newFake()
 	f.writable.MapFS["saves/slot1"] = &fstest.MapFile{Data: []byte("save")}
 	f.mounts = []platform.ReadMountSocket{
-		{fstest.MapFS{"textures/grass.png": {Data: []byte("grass")}, "readme": {Data: []byte("low")}}, 0},
-		{fstest.MapFS{"textures/stone.png": {Data: []byte("stone")}, "readme": {Data: []byte("high")}}, 1},
+		{FS: fstest.MapFS{"textures/grass.png": {Data: []byte("grass")}, "readme": {Data: []byte("low")}}, Priority: 0},
+		{FS: fstest.MapFS{"textures/stone.png": {Data: []byte("stone")}, "readme": {Data: []byte("high")}}, Priority: 1},
 	}
 	h := spawn(t, f)
 	h.reading(func(filesystem platform.FS, _ *platform.Values) {
@@ -33,16 +33,16 @@ func TestReadDirMergesLayersAndTheHigherLayerWinsAName(t *testing.T) {
 	f.writable.MapFS["levels/3.json"] = &fstest.MapFile{Data: []byte("written")}
 	f.writable.MapFS["docs"] = &fstest.MapFile{Data: []byte("a file over a folder")}
 	f.mounts = []platform.ReadMountSocket{
-		{fstest.MapFS{
+		{FS: fstest.MapFS{
 			"levels/1.json": {Data: []byte("low")},
 			"levels/2.json": {Data: []byte("low")},
 			"levels/extra":  {Data: []byte("a file under a folder")},
 			"docs/hidden":   {Data: []byte("under a file")},
-		}, 0},
-		{fstest.MapFS{
+		}, Priority: 0},
+		{FS: fstest.MapFS{
 			"levels/2.json":  {Data: []byte("high")},
 			"levels/extra/a": {Data: []byte("high")},
-		}, 1},
+		}, Priority: 1},
 	}
 	h := spawn(t, f)
 	h.reading(func(filesystem platform.FS, _ *platform.Values) {
@@ -85,9 +85,9 @@ func TestReadDirMergesLayersAndTheHigherLayerWinsAName(t *testing.T) {
 func TestWritableLayerThenMountsByPriorityInRegistrationOrder(t *testing.T) {
 	f := newFake()
 	f.mounts = []platform.ReadMountSocket{
-		{fstest.MapFS{"a": {Data: []byte("first at 5")}, "b": {Data: []byte("zero")}}, 5},
-		{fstest.MapFS{"a": {Data: []byte("zero")}, "b": {Data: []byte("zero")}, "c": {Data: []byte("zero")}}, 0},
-		{fstest.MapFS{"a": {Data: []byte("second at 5")}, "b": {Data: []byte("second at 5")}}, 5},
+		{FS: fstest.MapFS{"a": {Data: []byte("first at 5")}, "b": {Data: []byte("zero")}}, Priority: 5},
+		{FS: fstest.MapFS{"a": {Data: []byte("zero")}, "b": {Data: []byte("zero")}, "c": {Data: []byte("zero")}}, Priority: 0},
+		{FS: fstest.MapFS{"a": {Data: []byte("second at 5")}, "b": {Data: []byte("second at 5")}}, Priority: 5},
 	}
 	f.writable.MapFS["b"] = &fstest.MapFile{Data: []byte("written")}
 	h := spawn(t, f)
@@ -141,7 +141,7 @@ func TestLayersBoundAfterPlatformAreSearched(t *testing.T) {
 func TestWritesLandInTheWritableLayerAndReadBack(t *testing.T) {
 	f := newFake()
 	mount := fstest.MapFS{"readme": {Data: []byte("mounted")}}
-	f.mounts = []platform.ReadMountSocket{{mount, 0}}
+	f.mounts = []platform.ReadMountSocket{{FS: mount}}
 	h := spawn(t, f)
 	h.writing(func(filesystem platform.WriteFS, _ *platform.Values) {
 		for _, err := range []error{
@@ -297,4 +297,55 @@ func TestWithNoFilesystemBoundEveryNameIsMissing(t *testing.T) {
 	if logged := slices.Clone(h.errors); len(logged) != 0 {
 		t.Errorf("the kernel logged %v", logged)
 	}
+}
+
+func TestAPrefixedMountAppearsUnderItsPrefixAndAHigherMountOverridesItsFiles(t *testing.T) {
+	f := newFake()
+	f.writable.MapFS["saves/slot1"] = &fstest.MapFile{Data: []byte("save")}
+	f.mounts = []platform.ReadMountSocket{
+		{FS: fstest.MapFS{"mip.wgsl": {Data: []byte("built in")}, "shaders/blur.wgsl": {Data: []byte("built in")}, "readme": {Data: []byte("inside")}}, Prefix: "cog.render", Priority: -1},
+		{FS: fstest.MapFS{"bundled/sky.png": {Data: []byte("sky")}}, Prefix: "content/packs"},
+		{FS: fstest.MapFS{"cog.render/shaders/blur.wgsl": {Data: []byte("overridden")}, "readme": {Data: []byte("outside")}}},
+	}
+	h := spawn(t, f)
+	h.reading(func(filesystem platform.FS, _ *platform.Values) {
+		if err := fstest.TestFS(filesystem, "saves/slot1", "cog.render/mip.wgsl", "cog.render/shaders/blur.wgsl", "cog.render/readme", "content/packs/bundled/sky.png", "readme"); err != nil {
+			t.Error(err)
+		}
+		for name, want := range map[string]string{
+			"cog.render/mip.wgsl":           "built in",
+			"cog.render/shaders/blur.wgsl":  "overridden",
+			"cog.render/readme":             "inside",
+			"readme":                        "outside",
+			"content/packs/bundled/sky.png": "sky",
+		} {
+			if data, err := fs.ReadFile(filesystem, name); err != nil || string(data) != want {
+				t.Errorf("%s reads %q, %v, want %q", name, data, err, want)
+			}
+		}
+		for _, name := range []string{"mip.wgsl", "bundled/sky.png", "content/bundled/sky.png", "cog.render/cog.render/mip.wgsl"} {
+			if _, err := fs.Stat(filesystem, name); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("%s stats with %v, want it not to exist, its mount's files being under its prefix alone", name, err)
+			}
+		}
+		for directory, want := range map[string][]string{
+			".":             {"cog.render/", "content/", "readme", "saves/"},
+			"content":       {"packs/"},
+			"content/packs": {"bundled/"},
+			"cog.render":    {"mip.wgsl", "readme", "shaders/"},
+		} {
+			entries, err := fs.ReadDir(filesystem, directory)
+			if err != nil {
+				t.Errorf("listing %s fails with %v", directory, err)
+				continue
+			}
+			var listing []string
+			for _, entry := range entries {
+				listing = append(listing, entry.Name()+map[bool]string{true: "/"}[entry.IsDir()])
+			}
+			if !slices.Equal(listing, want) {
+				t.Errorf("%s lists %v, want %v", directory, listing, want)
+			}
+		}
+	})
 }

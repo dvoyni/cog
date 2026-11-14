@@ -149,6 +149,10 @@ func (f *fileSystem) layers() []FS {
 			f.ordered = append(f.ordered, writable)
 		}
 		for _, mount := range mounts {
+			if mount.Prefix != "" {
+				f.ordered = append(f.ordered, prefixedFS{prefix: mount.Prefix, files: mount.FS})
+				continue
+			}
 			f.ordered = append(f.ordered, mount.FS)
 		}
 	})

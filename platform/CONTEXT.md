@@ -82,7 +82,7 @@ The one overlay of every read mount and the writable filesystem, through which a
 _Avoid_: Storage, VFS, disk
 
 **Read mount**:
-One read-only layer of the FileSystem, with a priority among the others.
+One read-only layer of the FileSystem, with a priority among the others, and optionally a prefix: the folder its files appear under, such as `cog.render` for render's built-in assets.
 _Avoid_: Mount point, read FS, layer
 
 **Memory mount**:

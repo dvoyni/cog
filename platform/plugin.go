@@ -2,6 +2,7 @@ package platform
 
 import (
 	"fmt"
+	"io/fs"
 
 	"github.com/dvoyni/cog/kernel"
 )
@@ -76,12 +77,15 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	return nil
 }
 
-// Start checks the read mounts bound: one without an FS is a
-// composition error, and panics.
+// Start checks the read mounts bound: one without an FS, or with a prefix
+// that is no valid path or is the root, is a composition error, and panics.
 func (p *Plugin) Start(*kernel.Kernel) error {
 	for _, mount := range p.fileSystem.mounts.GetAll() {
-		if mount.FS == nil {
+		switch {
+		case mount.FS == nil:
 			panic(fmt.Sprintf("platform: a read mount at priority %d has no FS", mount.Priority))
+		case mount.Prefix != "" && (!fs.ValidPath(mount.Prefix) || mount.Prefix == "."):
+			panic(fmt.Sprintf("platform: a read mount's prefix %q is no valid path below the root", mount.Prefix))
 		}
 	}
 	return nil

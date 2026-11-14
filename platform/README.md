@@ -54,7 +54,9 @@ operating system.
   `NewDiskWriteFS(directory)` on desktop or `NewLocalStorageWriteFS(key)` in
   a browser. Without one, every write fails with **`ErrNoWriteFS`**. Any
   plugin binds read-only **`ReadMountSocket`**s, each any `fs.FS` at a
-  priority, such as an `embed.FS` or an `os.Root`'s `FS`. A memory mount,
+  priority, such as an `embed.FS` or an `os.Root`'s `FS`, and optionally
+  under a prefix, a folder its files appear in alone: render's built-in
+  assets are bound under `cog.render`. A memory mount,
   `filesystems.NewMemoryFS()`, is one held in memory, for bytes that are not
   files: its owner keeps it as a resource of its own, and puts files in and
   removes them at run time under the mount's own lock, with no `FS` write

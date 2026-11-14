@@ -46,7 +46,7 @@ the ticket that holds its detail. The vocabulary is in
 | `FS` | alias of `fs.FS`, resource | Read access to files: the overlay, which only reads. |
 | `WriteFS`, `ElevateFileAccess` | interface, function | Write access to files: the overlay that writes, which `ElevateFileAccess` gives from the write handle on `FS` alone. |
 | `WriteFSSocket` | optional exclusive socket | The writable filesystem the application binds: `filesystems.NewDiskWriteFS` or `filesystems.NewLocalStorageWriteFS`. |
-| `ReadMountSocket` | optional socket | A read mount the application binds: any `fs.FS` at a priority, `filesystems.NewMemoryFS` among them. |
+| `ReadMountSocket` | optional socket | A read mount the application binds: any `fs.FS` at a priority, optionally under a prefix, `filesystems.NewMemoryFS` among them. |
 | `Values` | resource | The values, a JSON file in `FS`: `Get` takes the `FS`; `Set`, `Delete` and `Flush` take the `WriteFS`. |
 
 **A seam bound wrongly panics** as a composition error, which the kernel
@@ -305,15 +305,25 @@ From [Filesystems before Spawn and as a resource](https://github.com/dvoyni/cog/
 - **The application's plugins bind layers to platform's sockets in `Init`,**
   listed anywhere in `Spawn`. Filesystems are adapters, not plugins, so one
   application mixes them freely. Any plugin binds read mounts,
-  `BindSocket(platform.ReadMountSocket{FS, Priority})`: an `embed.FS`, an
+  `BindSocket(platform.ReadMountSocket{FS, Priority, Prefix})`: an `embed.FS`, an
   `os.Root`'s `FS`. At most one binds the writable filesystem,
   `BindSocket[platform.WriteFSSocket](writable)`; two is a composition error
   the kernel reports. Without one, the `FS` resource reads the read mounts
   alone and every write fails with `ErrNoWriteFS`; without any layer, every
   name is missing. Sockets are no resources, so no job reaches a
   layer but through the `FS` resource, which holds the socket handles and
-  orders the layers on first use. A read mount without an `FS` panics in
-  platform's `Start`.
+  orders the layers on first use. A read mount without an `FS`, or with a
+  prefix that is no valid path below the root, panics in platform's `Start`.
+- **A prefix puts a mount's files under one folder,** so a plugin's
+  built-in assets keep a namespace of their own: render binds its embedded
+  shaders under `cog.render`, and its `mipshader.wgsl` is read as
+  `cog.render/mipshader.wgsl`. The prefix is a valid path, not a scheme
+  such as `cog.render://`: the overlay asks every layer for every name, a
+  disk layer on Windows refuses a colon as invalid rather than missing, and
+  `fs.WalkDir`, `fs.Glob` and `fs.Sub` expect valid paths. The prefixed
+  mount is one layer like any other: a higher layer holding a name under
+  the prefix overrides its file, and each folder above the prefix lists the
+  next one down, so walks reach it.
 - **Where the files are is the binding plugin's choice,** given to the
   adapters it makes. platform's own `Config` names no paths.
 - **platform stacks them into the `FS` resource.** The writable
