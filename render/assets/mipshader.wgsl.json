@@ -1,0 +1,7 @@
+{
+  "bindings": [
+    {"group": 0, "binding": 0, "name": "source", "texture": {"sampleType": "float", "viewDimension": "2d"}, "entryPoints": ["fragment_main"]},
+    {"group": 0, "binding": 1, "name": "source_sampler", "sampler": {"type": "filtering"}, "entryPoints": ["fragment_main"]}
+  ],
+  "vertexInputs": {"vertex_main": []}
+}

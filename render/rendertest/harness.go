@@ -48,6 +48,9 @@ type Harness struct {
 	clock      *metronome.ManualClock
 	instance   *recording.Instance
 	windows    *headless.Windows
+	// declarations is the catalog of the binding declarations answering the
+	// reflection of the shaders compiled on instance.
+	declarations *declarationCatalog
 	// expectedReports are the kinds ExpectReport named; only the test's
 	// goroutine reads and writes them.
 	expectedReports []render.ReportKind
@@ -78,6 +81,7 @@ func NewHarness(t testing.TB) *Harness {
 		instance: recording.NewInstance(),
 		windows:  headless.NewWindows(),
 	}
+	h.declarations = newDeclarationCatalog(h)
 	h.supervisor = kernel.NewSupervisor(logHandler{harness: h})
 	t.Cleanup(h.checkLogged)
 	t.Cleanup(h.quit)

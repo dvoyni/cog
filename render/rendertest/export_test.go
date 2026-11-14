@@ -15,8 +15,8 @@ func (h *Harness) RecordedFrames() []recording.Frame {
 }
 
 // AnswerNext makes the next call of kind gfx's recording adapter takes
-// answer answer, for rendertest's tests to give a shader the bindings its
-// reflection answers.
+// answer answer, for rendertest's tests to give a shader's reflection an
+// answer of their own, or an error, in place of its declaration's.
 func (h *Harness) AnswerNext(kind recording.CallKind, answer recording.Answer) {
-	h.instance.AnswerNext(kind, answer)
+	h.declarations.queueAnswer(kind, answer)
 }

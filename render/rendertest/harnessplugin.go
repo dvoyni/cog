@@ -13,8 +13,8 @@ type openWindowEvent struct {
 }
 
 // harnessPlugin is the harness's own plugin, listed after render: it binds
-// the harness's recording instance, lagging, and its headless windows, opens windows for
-// it, and keeps the job making each opened window's surface.
+// the harness's recording instance, wrapped, and its headless windows, opens
+// windows for it, and keeps the job making each opened window's surface.
 type harnessPlugin struct {
 	harness *Harness
 }
@@ -28,11 +28,12 @@ func (harnessPlugin) Dependencies() []kernel.PluginName {
 }
 
 // Init binds gfx's InstanceSocket to the recording instance, its devices a
-// frame behind, and platform's WindowsSocket to the headless windows, and
-// subscribes to openWindowEvent and to platform.WindowOpenedEvent, whose in,
-// the plugin being listed after gfx, is the job making the window's surface.
+// frame behind and answering reflection from binding declarations, and
+// platform's WindowsSocket to the headless windows, and subscribes to
+// openWindowEvent and to platform.WindowOpenedEvent, whose in, the plugin
+// being listed after gfx, is the job making the window's surface.
 func (p harnessPlugin) Init(configurator *kernel.Configurator, _ any) error {
-	configurator.BindSocket[gfx.InstanceSocket](laggingInstance{InstanceSocket: p.harness.instance, harness: p.harness})
+	configurator.BindSocket[gfx.InstanceSocket](harnessInstance{InstanceSocket: p.harness.instance, harness: p.harness})
 	configurator.BindSocket[platform.WindowsSocket](p.harness.windows)
 	openWindow := configurator.RegisterTask1(func(k *kernel.Kernel, size platform.Size, manager kernel.Write[*platform.WindowManager]) kernel.NoResult {
 		p.harness.opened = manager.Get().Open(platform.WindowEntry{Size: size})

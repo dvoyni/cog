@@ -28,6 +28,7 @@ func TestAcquiresOfOnePathWithTheSameDefinesInAnyOrderShareOneVariantCompiledAtO
 	h := rendertest.NewHarness(t)
 	files := filesystems.NewMemoryFS()
 	putFile(t, files, "shaders/lit.wgsl", []byte("// lit"))
+	putFile(t, files, "shaders/lit.wgsl.json", []byte("{}"))
 	// shadowed is the first frame's acquire of the lit shader with shadows
 	// and instancing, reordered one of the same defines in another order, a
 	// name given twice keeping its last value, instanced the acquire with
@@ -85,26 +86,25 @@ func TestAcquiresOfOnePathWithTheSameDefinesInAnyOrderShareOneVariantCompiledAtO
 func TestAShadersGroupLayoutsHoldEveryBindingItDeclaresSharedWithOtherShadersAndFreedWithTheLast(t *testing.T) {
 	h := rendertest.NewHarness(t)
 	files := filesystems.NewMemoryFS()
-	for _, name := range []string{"lit", "unlit", "flat", "plain"} {
+	// unlit and flat declare the same bindings as lit's groups 0 and 2 do,
+	// out of their numbers' order, and none in group 1; plain declares none.
+	litGroupsDeclaration := `{"bindings": [
+		{"group": 0, "binding": 0, "name": "camera", "buffer": {"type": "uniform", "size": 64}},
+		{"group": 0, "binding": 1, "name": "lights", "buffer": {"type": "read-only-storage", "size": 32}},
+		{"group": 1, "binding": 0, "name": "albedo", "texture": {"sampleType": "float", "viewDimension": "2d"}},
+		{"group": 1, "binding": 1, "name": "linear", "sampler": {"type": "filtering"}},
+		{"group": 2, "binding": 0, "name": "object", "buffer": {"type": "uniform", "size": 64}},
+		{"group": 2, "binding": 1, "name": "instances", "buffer": {"type": "storage", "size": 16}},
+		{"group": 2, "binding": 2, "name": "output", "storageTexture": {"access": "write-only", "format": "rgba8unorm", "viewDimension": "2d"}}
+	]}`
+	unlitGroupsDeclaration := `{"bindings": [
+		{"group": 2, "binding": 0, "name": "object", "buffer": {"type": "uniform", "size": 64}},
+		{"group": 0, "binding": 1, "name": "lights", "buffer": {"type": "read-only-storage", "size": 32}},
+		{"group": 0, "binding": 0, "name": "camera", "buffer": {"type": "uniform", "size": 64}}
+	]}`
+	for name, declaration := range map[string]string{"lit": litGroupsDeclaration, "unlit": unlitGroupsDeclaration, "flat": unlitGroupsDeclaration, "plain": "{}"} {
 		putFile(t, files, "shaders/"+name+".wgsl", []byte("// "+name))
-	}
-	camera := gfx.ShaderBinding{Name: "camera", Group: 0, Binding: 0, Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform, MinBindingSize: 64}}
-	lights := gfx.ShaderBinding{Name: "lights", Group: 0, Binding: 1, Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeReadOnlyStorage, MinBindingSize: 32}}
-	object := gfx.ShaderBinding{Name: "object", Group: 2, Binding: 0, Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform, MinBindingSize: 64}}
-	litBindings := []gfx.ShaderBinding{
-		camera,
-		lights,
-		{Name: "albedo", Group: 1, Binding: 0, Texture: gfx.TextureBindingLayout{SampleType: gfx.TextureSampleTypeFloat, ViewDimension: gfx.TextureViewDimension2D}},
-		{Name: "linear", Group: 1, Binding: 1, Sampler: gfx.SamplerBindingLayout{Type: gfx.SamplerBindingTypeFiltering}},
-		object,
-		{Name: "instances", Group: 2, Binding: 1, Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeStorage, MinBindingSize: 16}},
-		{Name: "output", Group: 2, Binding: 2, StorageTexture: gfx.StorageTextureBindingLayout{Access: gfx.StorageTextureAccessWriteOnly, Format: gfx.TextureFormatRGBA8Unorm, ViewDimension: gfx.TextureViewDimension2D}},
-	}
-	// unlit and flat declare the same bindings, out of their numbers' order,
-	// and none in group 1; plain declares none.
-	unlitBindings := []gfx.ShaderBinding{object, lights, camera}
-	for _, bindings := range [][]gfx.ShaderBinding{litBindings, unlitBindings, unlitBindings, nil} {
-		h.AnswerNext(recording.CallKindReflectBindings, recording.Answer{Bindings: bindings})
+		putFile(t, files, "shaders/"+name+".wgsl.json", []byte(declaration))
 	}
 	var lit, unlit, flat, plain render.Shader
 	h.Spawn(nil, &loaderPlugin{
@@ -213,6 +213,8 @@ func TestAShaderDeclaringGroup3OrPastTheDevicesLimitsIsRefusedAndReportedOncePer
 	files := filesystems.NewMemoryFS()
 	for _, shader := range shaders {
 		putFile(t, files, shader.name+".wgsl", []byte("// "+shader.name))
+		// The declaration declares nothing: the answer queued wins over it.
+		putFile(t, files, shader.name+".wgsl.json", []byte("{}"))
 		h.AnswerNext(recording.CallKindReflectBindings, recording.Answer{Bindings: shader.bindings})
 	}
 	acquiredShaders := make([][2]render.Shader, len(shaders))
@@ -305,7 +307,7 @@ func TestParallelAcquiresOfOneVariantShareOneShaderReleasingEveryOtherModuleComp
 	var mutex sync.Mutex
 	var acquiredShaders []render.Shader
 	h.Spawn(nil, &loaderPlugin{
-		files:              &overlappingFS{FS: fstest.MapFS{"lit.wgsl": {Data: []byte("// lit")}}, name: "lit.wgsl"},
+		files:              &overlappingFS{FS: fstest.MapFS{"lit.wgsl": {Data: []byte("// lit")}, "lit.wgsl.json": {Data: []byte("{}")}}, name: "lit.wgsl"},
 		recordingTaskCount: 2,
 		duringFrame: func(frameIndex int, inventory render.Inventory, _ render.Frame) {
 			for range acquireCount {
@@ -353,7 +355,7 @@ func TestAReleaseOfAShaderNoAcquireHoldsIsRefusedAndReported(t *testing.T) {
 	h := rendertest.NewHarness(t)
 	h.ExpectReport(render.ReportKindReleaseRefused)
 	h.Spawn(nil, &loaderPlugin{
-		files: fstest.MapFS{"lit.wgsl": {Data: []byte("// lit")}},
+		files: fstest.MapFS{"lit.wgsl": {Data: []byte("// lit")}, "lit.wgsl.json": {Data: []byte("{}")}},
 		duringFrame: func(frameIndex int, inventory render.Inventory, _ render.Frame) {
 			if frameIndex > 0 {
 				return
