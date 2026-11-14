@@ -10,6 +10,20 @@
 //		return event, ex.Join(in, ex.Schedule(drawScene, event, event.Ready).Handle())
 //	}
 //
+// The recording task reaches the frame through its Frame parameter, and
+// records its passes into a command list at an order of its own:
+//
+//	func drawScene(k *kernel.Kernel, event render.FrameEvent, frame render.Frame) kernel.NoResult {
+//		list := frame.BeginCommandList("scene", sceneOrder)
+//		pass := list.BeginPass(render.PassDescriptor{
+//			Label:        "scene",
+//			ColorTargets: []render.ColorTarget{{Window: window, Clear: true}},
+//		})
+//		pass.End()
+//		list.End()
+//		return kernel.NoResult{}
+//	}
+//
 // A mistake render finds at run time is a Report, logged once and carried
 // past; its kind names it, so a test built on render/rendertest fails on a
 // report it did not expect.

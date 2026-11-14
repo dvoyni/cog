@@ -1,5 +1,12 @@
 package render
 
+import (
+	"sync"
+
+	"github.com/dvoyni/cog/gfx"
+	"github.com/dvoyni/cog/kernel"
+)
+
 // frameState is the private resource of the frames in flight: what render
 // keeps from one frame to the next. Every job reads it.
 type frameState struct {
@@ -8,4 +15,29 @@ type frameState struct {
 	// arena chunk: Config's, or their defaults.
 	temporaryIdleFrames int
 	temporaryChunkSize  uint64
+	// logger is the kernel's, where reports go.
+	logger *kernel.Logger
+	// mutex guards frame, gfx's frame being recorded, or the last one
+	// recorded once gfx has flushed it, which gfx then refuses encoders for.
+	mutex sync.Mutex
+	frame gfx.Frame
+}
+
+// setRecordingFrame keeps frame as the frame being recorded.
+func (s *frameState) setRecordingFrame(frame gfx.Frame) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.frame = frame
+}
+
+// recordingFrame answers the frame being recorded, or the last one recorded.
+func (s *frameState) recordingFrame() gfx.Frame {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.frame
+}
+
+// report logs a Report of kind, saying err.
+func (s *frameState) report(kind ReportKind, err error) {
+	s.logger.LogErr(Report{Kind: kind, Err: err})
 }

@@ -42,6 +42,11 @@ type Configurator struct {
 // ID returns the ID of the kernel being configured.
 func (c *Configurator) ID() KernelID { return c.kernel.id }
 
+// Logger returns the Logger of the kernel being configured, the one
+// Kernel.Logger returns, for a plugin's own values to keep from Init: it stays
+// valid after Init returns, while the kernel is alive.
+func (c *Configurator) Logger() *Logger { return c.kernel.logger }
+
 // InitResource initializes resource T. Initializing T twice is a composition
 // error, and panics.
 //

@@ -31,8 +31,8 @@ const (
 	defaultTemporaryChunkSize uint64 = 1 << 20
 )
 
-// Plugin is render: it installs Handlers and the state of the frames in
-// flight, and publishes FrameEvent inside each gfx.DrawEvent.
+// Plugin is render: it installs Handlers, the state of the frames in flight
+// and the asset table, and publishes FrameEvent inside each gfx.DrawEvent.
 type Plugin struct{}
 
 // NewPlugin returns render.
@@ -48,17 +48,22 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 }
 
 // Init installs the frame state, with Config's counts or their defaults where
-// they are zero, and subscribes to gfx.DrawEvent, the Sub kept in the
-// Handlers resource. A config of another type than *Config is a composition
-// error, and panics.
+// they are zero and the kernel's logger for reports, and the asset table, and subscribes to gfx.DrawEvent, the
+// Sub kept in the Handlers resource. A config of another type than *Config
+// is a composition error, and panics.
 func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	pluginConfig := kernel.PluginConfigOrDefault[Config](config)
 	configurator.InitResource(&frameState{
 		temporaryIdleFrames: cmp.Or(pluginConfig.TemporaryIdleFrames, defaultTemporaryIdleFrames),
 		temporaryChunkSize:  cmp.Or(pluginConfig.TemporaryChunkSize, defaultTemporaryChunkSize),
+		logger:              configurator.Logger(),
 	})
+	configurator.InitResource(&assetTable{})
+	beginFrameTask := configurator.RegisterTask1(beginFrame)
 	configurator.InitResource(Handlers{
-		RecordFrame: configurator.Subscribe(recordFrame),
+		RecordFrame: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.DrawEvent) (gfx.DrawEvent, kernel.JobHandle) {
+			return recordFrame(ex, in, event, beginFrameTask)
+		}),
 	})
 	return nil
 }
@@ -72,16 +77,25 @@ func (*Plugin) Stop(*kernel.Kernel) error { return nil }
 // Destroy does nothing.
 func (*Plugin) Destroy() error { return nil }
 
-// recordFrame is Handlers.RecordFrame: it publishes FrameEvent inside
-// gfx.DrawEvent, with the draw event's beat, Ready and timing signals, and
-// returns the nested publication's out dependency, so gfx's flush waits for
-// every recording task the users joined into it.
-func recordFrame(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.DrawEvent) (gfx.DrawEvent, kernel.JobHandle) {
+// recordFrame is Handlers.RecordFrame: after gfx's acquire, it schedules
+// beginFrameTask, which keeps the draw event's frame as the one being
+// recorded, and publishes FrameEvent inside gfx.DrawEvent, with the draw
+// event's beat and timing signals and that job as its Ready. It returns the
+// nested publication's out dependency joined with that job, so gfx's flush
+// waits for every recording task the users joined into it.
+func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event gfx.DrawEvent, beginFrameTask *kernel.Task[gfx.Frame, kernel.NoResult]) (gfx.DrawEvent, kernel.JobHandle) {
+	beginFrameJob := ex.Schedule(beginFrameTask, event.Frame, event.Ready).Handle()
 	_, out := ex.Publish(in, FrameEvent{
 		Beat:        event.Beat,
-		Ready:       event.Ready,
+		Ready:       beginFrameJob,
 		AcquireWait: event.AcquireWait,
 		GPULatency:  event.GPULatency,
 	})
-	return event, out
+	return event, ex.Join(out, beginFrameJob)
+}
+
+// beginFrame keeps frame as the one being recorded, for Frame's calls.
+func beginFrame(k *kernel.Kernel, frame gfx.Frame, state kernel.Read[*frameState]) kernel.NoResult {
+	state.Get().setRecordingFrame(frame)
+	return kernel.NoResult{}
 }

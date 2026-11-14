@@ -6,7 +6,7 @@ API between gfx and the plugins that draw. It was mapped in
 each section links the ticket that holds its detail. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md).
 
-Status: being built. The plugin, its `Config`, `Handlers.RecordFrame` publishing `FrameEvent` inside gfx's `DrawEvent`, reports with their kind, and `rendertest`'s harness are built, from [render: the plugin, its frame event and rendertest's harness](https://github.com/dvoyni/cog/issues/826); the rest is designed, not yet built.
+Status: being built. The plugin, its `Config`, `Handlers.RecordFrame` publishing `FrameEvent` inside gfx's `DrawEvent`, reports with their kind, and `rendertest`'s harness are built, from [render: the plugin, its frame event and rendertest's harness](https://github.com/dvoyni/cog/issues/826); the `Frame` parameter, command lists at their orders, passes into windows and `rendertest`'s reader of lists and passes, from [render: command lists and passes](https://github.com/dvoyni/cog/issues/827); the rest is designed, not yet built.
 
 ## Problem Statement
 
@@ -421,7 +421,7 @@ render's EndFrame, on gfx.RenderEvent, after the present:
   frees, material versions, temporaries, the arena
 ```
 
-- **Users subscribe to `FrameEvent`** with no ordering, schedule their recording tasks after `e.Ready` (gfx's acquire), and join them into the out dependency, as gfx's guide says for its own event. `AcquireWait` and `GPULatency` are copied from gfx's event. Users never subscribe to gfx's events.
+- **Users subscribe to `FrameEvent`** with no ordering, schedule their recording tasks after `e.Ready` (render's job after gfx's acquire, which keeps the frame being recorded), and join them into the out dependency, as gfx's guide says for its own event. `AcquireWait` and `GPULatency` are copied from gfx's event. Users never subscribe to gfx's events.
 - **Loads are picked up at two points:**
   1. in `RecordFrame`, for loads pending since the last frame, decoded in parallel with the recording;
   2. after the recording, for loads requested during it.

@@ -15,8 +15,8 @@ import (
 // for the previous frame's present.
 type FrameEvent struct {
 	metronome.Beat
-	// Ready is the job acquiring the frame's framebuffers; recording starts
-	// after it.
+	// Ready is the job readying the frame for recording, after gfx has
+	// acquired its framebuffers; recording starts after it.
 	Ready kernel.JobHandle
 	// AcquireWait is how long the previous frame's acquire blocked, by
 	// metronome's clock: under Fifo, a long wait is headroom and a short one

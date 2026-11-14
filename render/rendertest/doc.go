@@ -7,6 +7,10 @@
 //	h := rendertest.NewHarness(t)
 //	h.Spawn(nil, myplugin.NewPlugin())
 //	h.Step()
+//	frames := h.Frames()
+//
+// Frames reads back each frame gfx drew in render's terms, as a
+// render.Inspection, and Reports answers the reports render logged.
 //
 // The harness fails the test on any error the kernel logs, a render.Report
 // among them, unless it is a report of a kind the test named with

@@ -45,10 +45,10 @@ Supervisor ── lifetime, GetKernel and Broadcast, LogHandler
 |--------------|-------------------------------------------------------------------|
 | `Supervisor` | Spawns and destroys kernels, runs pinned jobs on the main thread, ends the application (`Spawn`, `GetKernel`, `Destroy`, `Broadcast`, `TickMainThread`, `WaitMainThread`, `Quit`, `Done`); owns the one `LogHandler`. |
 | `Kernel`     | Runtime handle given to handlers, tasks and the main loop: `ID`, `Publish`, `Notify`, `Logger`. It manages no kernels and schedules nothing directly. |
-| `Logger`     | A kernel's way to the `LogHandler`, from `Kernel.Logger()`: `LogErr`, `LogWarn`, `LogDebug`, their `Once` forms and `ForgetLogOnce`. |
+| `Logger`     | A kernel's way to the `LogHandler`, from `Kernel.Logger()`, or `Configurator.Logger()` for a value a plugin makes in `Init`: `LogErr`, `LogWarn`, `LogDebug`, their `Once` forms and `ForgetLogOnce`. |
 | `Signal`     | Reusable completion signal for code outside the kernel; armed by `Kernel.Notify`, read through `C()`. |
 | `Executor`   | One publication's work batch, handed to its handlers: `Schedule`, `ScheduleAfter`, `Join`, `Publish`. |
-| `Configurator` | Registration surface given to each plugin once: `InitResource`, `Resource`, `DeclareExclusiveSocket`, `DeclareSocket`, `BindSocket`, `RegisterTask`, `RegisterTask0`…`RegisterTask8`, `PinToMainThread`, `Subscribe`, `OrderSubscriptions`. |
+| `Configurator` | Registration surface given to each plugin once: `ID`, `Logger`, `InitResource`, `Resource`, `DeclareExclusiveSocket`, `DeclareSocket`, `BindSocket`, `RegisterTask`, `RegisterTask0`…`RegisterTask8`, `PinToMainThread`, `Subscribe`, `OrderSubscriptions`. |
 | `ExclusiveSocket[T]`, `Socket[T]` | Interfaces: the one handle to a socket, from its declaration. `ExclusiveSocket.Get()` answers its binding, `Socket.GetAll()` its bindings in plugin order, from `Start` on. One private socket type implements both. |
 | `Access`     | Handed to a task's constructor: `Read[T]`, `Write[T]` and `Use(task)` declare its locks and return what the body uses. |
 | `*Task[A, B]`| Registered code with pointer-free arg `A` and pointer-free result `B`; returned by `RegisterTask`. |

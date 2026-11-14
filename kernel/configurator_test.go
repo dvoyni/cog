@@ -20,6 +20,14 @@ func TestConfiguratorID(t *testing.T) {
 	}
 }
 
+func TestConfiguratorLoggerIsTheKernelsLogger(t *testing.T) {
+	var initLogger *Logger
+	k, _ := spawnTestKernel(t, func(c *Configurator) { initLogger = c.Logger() })
+	if initLogger == nil || initLogger != k.Logger() {
+		t.Fatalf("Configurator.Logger answered %p in Init, want the kernel's, %p", initLogger, k.Logger())
+	}
+}
+
 func TestResourceAnswersInitializedValue(t *testing.T) {
 	c := newTestConfigurator()
 	c.InitResource(position{X: 1, Y: 2})

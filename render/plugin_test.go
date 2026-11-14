@@ -10,7 +10,7 @@ import (
 	"github.com/dvoyni/cog/render/rendertest"
 )
 
-func TestAPluginOnFrameEventGetsOneEachBeatCarryingGfxsReadyAndTimingSignals(t *testing.T) {
+func TestAPluginOnFrameEventGetsOneEachBeatCarryingGfxsBeatAndTimingSignals(t *testing.T) {
 	h := rendertest.NewHarness(t)
 	watcher := &frameWatcher{}
 	h.Spawn(nil, watcher)
@@ -28,9 +28,9 @@ func TestAPluginOnFrameEventGetsOneEachBeatCarryingGfxsReadyAndTimingSignals(t *
 	}
 	var waits, latencies []time.Duration
 	for index, drawEvent := range drawEvents {
-		want := render.FrameEvent{Beat: drawEvent.Beat, Ready: drawEvent.Ready, AcquireWait: drawEvent.AcquireWait, GPULatency: drawEvent.GPULatency}
-		if frameEvents[index] != want {
-			t.Errorf("beat %d's FrameEvent is %+v, want gfx's %+v", index+1, frameEvents[index], want)
+		got := frameEvents[index]
+		if got.Beat != drawEvent.Beat || got.AcquireWait != drawEvent.AcquireWait || got.GPULatency != drawEvent.GPULatency {
+			t.Errorf("beat %d's FrameEvent is %+v, want gfx's beat and timing signals, %+v", index+1, got, drawEvent)
 		}
 		waits = append(waits, frameEvents[index].AcquireWait)
 		latencies = append(latencies, frameEvents[index].GPULatency)

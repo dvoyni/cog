@@ -10,3 +10,6 @@ func (s *frameState) TemporaryIdleFrames() int { return s.temporaryIdleFrames }
 
 // TemporaryChunkSize answers the size in bytes of an arena chunk.
 func (s *frameState) TemporaryChunkSize() uint64 { return s.temporaryChunkSize }
+
+// AssetTable is the private asset table, for render's tests to lock.
+type AssetTable = assetTable

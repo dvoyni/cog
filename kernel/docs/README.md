@@ -655,7 +655,8 @@ handler.supervisor = s
 ```
 
 From inside a kernel, log through `k.Logger()`, which fills in the kernel's
-ID. Args are slog-style key/value pairs:
+ID. A value a plugin makes in `Init` that logs later, such as a resource of
+its own, keeps `c.Logger()`, the same Logger. Args are slog-style key/value pairs:
 
 ```go
 k.Logger().LogWarn("sprite missing", "id", spriteID)

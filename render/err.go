@@ -4,6 +4,22 @@ package render
 // reports it expects.
 type ReportKind uint8
 
+const (
+	// ReportKindOrderTaken is a command list begun at an order another list
+	// of the frame has.
+	ReportKindOrderTaken ReportKind = iota + 1
+	// ReportKindOrderReserved is a command list begun at render's own order,
+	// math.MinInt32.
+	ReportKindOrderReserved
+	// ReportKindListOutsideFrame is a command list begun while no frame is
+	// recording.
+	ReportKindListOutsideFrame
+	// ReportKindPassTargetsRefused is a pass refused for its colour targets:
+	// none, more than the device allows, one naming no window, or targets of
+	// different sizes.
+	ReportKindPassTargetsRefused
+)
+
 // Report is a mistake render finds at run time, such as a refused shader, a
 // duplicate order or a draw skipped for a missing binding: logged once through
 // the kernel's LogErr, and carried past. Its kind names the mistake, and its

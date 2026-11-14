@@ -60,9 +60,11 @@ type Harness struct {
 	// last Step began.
 	submittedIndex atomic.Uint64
 	finishedIndex  atomic.Uint64
-	// mutex guards logged, the errors logged and not yet checked.
-	mutex  sync.Mutex
-	logged []error
+	// mutex guards logged, the errors logged and not yet checked, and
+	// reports, every render.Report logged.
+	mutex   sync.Mutex
+	logged  []error
+	reports []render.Report
 }
 
 // NewHarness answers a harness whose kernel is not yet spawned. When the test
@@ -141,6 +143,27 @@ func (h *Harness) LengthenNextAcquire(d time.Duration) {
 // any other error, fails it.
 func (h *Harness) ExpectReport(kind render.ReportKind) {
 	h.expectedReports = append(h.expectedReports, kind)
+}
+
+// Frames answers each frame gfx has drawn so far, read back from its
+// recording adapter in render's terms. Its command lists are every encoder
+// gfx submitted, by order, those of plugins drawing on gfx alone included.
+func (h *Harness) Frames() []render.Inspection {
+	recorded := h.instance.Recording()
+	framebufferWindows := makeFramebufferWindows(recorded.Calls)
+	var inspections []render.Inspection
+	for _, frame := range recorded.Frames() {
+		inspections = append(inspections, makeInspection(frame, framebufferWindows))
+	}
+	return inspections
+}
+
+// Reports answers every render.Report the kernel has logged so far, expected
+// or not, in the order logged.
+func (h *Harness) Reports() []render.Report {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	return slices.Clone(h.reports)
 }
 
 // checkLogged fails the test on each error logged since the last check, but a
