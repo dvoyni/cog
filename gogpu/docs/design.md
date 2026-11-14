@@ -22,7 +22,8 @@ created, written and mapped, textures are created and written, with views
 and samplers, shader modules, bind group layouts, bind groups and pipeline
 layouts are created, render and compute pipelines draw and dispatch, over
 explicit layouts or ones reflected, their vertex buffers checked against
-the inputs reflected, buffers and textures are copied into buffers, a
+the inputs reflected, a module's bindings are reflected by name, buffers
+and textures are copied into buffers, a
 captured frame is drawn offscreen, then onto the window, a device lost at acquire,
 present or submit answers gfx's `ErrDeviceLost` and is replaced, its windows
 kept, with every other device call
@@ -401,6 +402,22 @@ what `HostLoop` or the OS requires:
   fed by a format of another type, is gfx's `ErrVertexMismatch`, where it
   would otherwise reach the driver unchecked.
 
+## Named reflection
+
+([gogpu: named reflection from naga's IR](https://github.com/dvoyni/cog/issues/823))
+
+- **A module's bindings are reflected by name with its entry points:** every
+  global naga holds a binding for, in the order the module declares it,
+  with its name, its kind as the "auto" layout's entry of a sampled one,
+  each member of a struct buffer at the offset naga gives and the size its
+  layouter gives its type, and the entry points naga's analysis finds using
+  it, their callees included. naga keeps a global no entry point uses, so a
+  binding only declared is answered with no entry points.
+- **An f32 texture is filterable,** as no entry point's use narrows it,
+  unless multisampled, as WebGPU refuses a filterable multisampled one.
+- **`ReflectBindings` answers a copy** of what the module's reflection
+  keeps, its slices the caller's.
+
 ## Shaders
 
 ([gfx: move shader preprocessor to implementation](https://github.com/dvoyni/cog/issues/709))
@@ -413,8 +430,9 @@ what `HostLoop` or the OS requires:
 - **Reflection happens once, at `CreateShaderModule`,** with naga: the plugin
   keeps the result at the module's index, answers an error for invalid WGSL,
   and answers `ReflectRenderPipelineLayout` and `ReflectComputePipelineLayout`
-  with the layouts WebGPU's "auto" builds, and `ReflectVertexInputs` with a
-  vertex entry point's location inputs
+  with the layouts WebGPU's "auto" builds, `ReflectVertexInputs` with a
+  vertex entry point's location inputs, and `ReflectBindings` with every
+  binding the module declares, by name
   ([gfx: shader reflection at module creation](https://github.com/dvoyni/cog/issues/694),
   [gfx: checks at pipeline creation](https://github.com/dvoyni/cog/issues/696)).
 

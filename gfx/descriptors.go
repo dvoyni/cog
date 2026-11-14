@@ -145,9 +145,10 @@ type ShaderBinding struct {
 	Buffer BufferBindingLayout
 	// Sampler is Filtering for a sampler, Comparison for a comparison one.
 	Sampler SamplerBindingLayout
-	// Texture is a sampled texture's sample type, Float for an f32 texture
-	// and Depth for a depth one, its view dimension and whether it is
-	// multisampled.
+	// Texture is a sampled texture's sample type, Float for an f32 texture,
+	// UnfilterableFloat for a multisampled one, as WebGPU refuses a
+	// filterable multisampled texture, and Depth for a depth one, its view
+	// dimension and whether it is multisampled.
 	Texture TextureBindingLayout
 	// StorageTexture is a storage texture's access, format and view
 	// dimension.

@@ -364,10 +364,19 @@ func (d *device) ReflectVertexInputs(module gfx.ShaderModule, entryPoint string)
 	return vertex.vertexInputs, nil
 }
 
-// ReflectBindings answers an error naming it, not built yet: naga's names
-// and struct members are not kept.
-func (*device) ReflectBindings(gfx.ShaderModule) ([]gfx.ShaderBinding, error) {
-	return nil, unbuilt("ReflectBindings")
+// ReflectBindings answers a copy of the bindings module's reflection keeps,
+// so the caller's changes reach no later answer.
+func (d *device) ReflectBindings(module gfx.ShaderModule) ([]gfx.ShaderBinding, error) {
+	stored, err := storedObject(&d.shaderModules, module, "shader module")
+	if err != nil {
+		return nil, err
+	}
+	bindings := slices.Clone(stored.reflection.bindings)
+	for index := range bindings {
+		bindings[index].Members = slices.Clone(bindings[index].Members)
+		bindings[index].EntryPoints = slices.Clone(bindings[index].EntryPoints)
+	}
+	return bindings, nil
 }
 
 // CreateRenderPipeline creates wgpu's pipeline over the layout and modules
