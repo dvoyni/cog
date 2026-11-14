@@ -150,10 +150,10 @@ func (h *Harness) ExpectReport(kind render.ReportKind) {
 // gfx submitted, by order, those of plugins drawing on gfx alone included.
 func (h *Harness) Frames() []render.Inspection {
 	recorded := h.instance.Recording()
-	framebufferWindows := makeFramebufferWindows(recorded.Calls)
+	viewTargets := makeViewTargets(recorded.Calls)
 	var inspections []render.Inspection
 	for _, frame := range recorded.Frames() {
-		inspections = append(inspections, makeInspection(frame, framebufferWindows))
+		inspections = append(inspections, makeInspection(frame, viewTargets))
 	}
 	return inspections
 }

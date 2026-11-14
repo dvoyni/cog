@@ -17,6 +17,8 @@ type frameState struct {
 	temporaryChunkSize  uint64
 	// logger is the kernel's, where reports go.
 	logger *kernel.Logger
+	// temporaryTextures is the pool AcquireTemporaryTexture hands out from.
+	temporaryTextures texturePool
 	// mutex guards frame, gfx's frame being recorded, or the last one
 	// recorded once gfx has flushed it, which gfx then refuses encoders for.
 	mutex sync.Mutex

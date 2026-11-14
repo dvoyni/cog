@@ -14,8 +14,10 @@ type InspectedCommandList struct {
 }
 
 // InspectedPass is one pass of an inspected command list: its label, and its
-// colour targets with their loads and stores.
+// colour targets and depth-stencil target with their loads, stores and
+// resolves.
 type InspectedPass struct {
 	Label        string
 	ColorTargets []ColorTarget
+	DepthStencil DepthStencilTarget
 }

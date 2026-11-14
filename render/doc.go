@@ -10,14 +10,19 @@
 //		return event, ex.Join(in, ex.Schedule(drawScene, event, event.Ready).Handle())
 //	}
 //
-// The recording task reaches the frame through its Frame parameter, and
-// records its passes into a command list at an order of its own:
+// The recording task reaches the frame through its Frame parameter, takes
+// the temporary textures it draws into from render's pool, and records its
+// passes into a command list at an order of its own:
 //
 //	func drawScene(k *kernel.Kernel, event render.FrameEvent, frame render.Frame) kernel.NoResult {
+//		depth := frame.AcquireTemporaryTexture(render.TextureDescriptor{
+//			Label: "scene depth", Width: width, Height: height, Format: render.TextureFormatDepth32Float,
+//		})
 //		list := frame.BeginCommandList("scene", sceneOrder)
 //		pass := list.BeginPass(render.PassDescriptor{
 //			Label:        "scene",
 //			ColorTargets: []render.ColorTarget{{Window: window, Clear: true}},
+//			DepthStencil: render.DepthStencilTarget{Texture: depth, Clear: true, ClearDepth: 1},
 //		})
 //		pass.End()
 //		list.End()

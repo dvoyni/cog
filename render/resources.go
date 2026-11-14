@@ -13,4 +13,9 @@ type Handlers struct {
 	// and returns the nested publication's out dependency, so gfx flushes
 	// the frame only after every recording task joined into it.
 	RecordFrame kernel.Sub[gfx.DrawEvent]
+	// EndFrame handles gfx.RenderEvent: after gfx's present, which is the
+	// out dependency of gfx's own handler before it, it ends the frame,
+	// taking back the temporaries and freeing those gone unused, and returns
+	// that job, so the next beat starts after it.
+	EndFrame kernel.Sub[gfx.RenderEvent]
 }

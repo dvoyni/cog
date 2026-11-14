@@ -48,8 +48,9 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 }
 
 // Init installs the frame state, with Config's counts or their defaults where
-// they are zero and the kernel's logger for reports, and the asset table, and subscribes to gfx.DrawEvent, the
-// Sub kept in the Handlers resource. A config of another type than *Config
+// they are zero and the kernel's logger for reports, and the asset table, and
+// subscribes to gfx.DrawEvent and gfx.RenderEvent, the Subs kept in the
+// Handlers resource. A config of another type than *Config
 // is a composition error, and panics.
 func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	pluginConfig := kernel.PluginConfigOrDefault[Config](config)
@@ -60,9 +61,13 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	})
 	configurator.InitResource(&assetTable{})
 	beginFrameTask := configurator.RegisterTask1(beginFrame)
+	endFrameTask := configurator.RegisterTask3(endFrame)
 	configurator.InitResource(Handlers{
 		RecordFrame: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.DrawEvent) (gfx.DrawEvent, kernel.JobHandle) {
 			return recordFrame(ex, in, event, beginFrameTask)
+		}),
+		EndFrame: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.RenderEvent) (gfx.RenderEvent, kernel.JobHandle) {
+			return event, ex.Schedule(endFrameTask, kernel.NoArg{}, in).Handle()
 		}),
 	})
 	return nil
@@ -97,5 +102,14 @@ func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event gfx.DrawEvent, 
 // beginFrame keeps frame as the one being recorded, for Frame's calls.
 func beginFrame(k *kernel.Kernel, frame gfx.Frame, state kernel.Read[*frameState]) kernel.NoResult {
 	state.Get().setRecordingFrame(frame)
+	return kernel.NoResult{}
+}
+
+// endFrame ends the frame gfx has presented: it takes back the temporary
+// textures held, and frees those gone unused for Config's
+// TemporaryIdleFrames frames.
+func endFrame(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*frameState], table kernel.Read[*assetTable], device kernel.Read[gfx.Device]) kernel.NoResult {
+	frameState := state.Get()
+	frameState.temporaryTextures.endFrame(frameState.temporaryIdleFrames, table.Get(), device.Get())
 	return kernel.NoResult{}
 }

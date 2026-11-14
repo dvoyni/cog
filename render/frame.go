@@ -18,15 +18,13 @@ import (
 // its locks. It is valid only while the task's job runs.
 type Frame struct {
 	state  kernel.Read[*frameState]
+	table  kernel.Read[*assetTable]
 	device kernel.Read[gfx.Device]
 }
 
-// Declare declares Frame's locks and answers it bound to what they guard. The
-// asset table is locked for the assets the frame's calls name.
+// Declare declares Frame's locks and answers it bound to what they guard.
 func (Frame) Declare(access *kernel.Access) Frame {
-	frame := Frame{state: access.Read[*frameState](), device: access.Read[gfx.Device]()}
-	access.Read[*assetTable]()
-	return frame
+	return Frame{state: access.Read[*frameState](), table: access.Read[*assetTable](), device: access.Read[gfx.Device]()}
 }
 
 // BeginCommandList begins a command list of the frame being recorded, at
@@ -57,4 +55,26 @@ func (f Frame) BeginCommandList(label string, order Order) CommandList {
 		list.encoder = encoder
 	}
 	return list
+}
+
+// AcquireTemporaryTexture hands out a temporary texture of descriptor from
+// render's pool, made the first time the pool has none of descriptor free,
+// its label included, with every usage its format allows: a pass target and
+// a texture to sample. The texture is held until the frame ends, with no
+// reuse within the frame, and its contents are undefined when taken. Its
+// handle names it only until then: a later frame may hand the same texture,
+// under the same handle, to another user, so a handle kept past its frame
+// silently draws into or samples theirs. The pool frees the texture at the
+// end of the frame that leaves it unused for Config's TemporaryIdleFrames
+// frames. A user hands it between its tasks through
+// state of its own, acquired in a task the kernel orders before those that
+// draw into or sample it. A texture gfx refuses to make is logged, and the
+// zero Texture answered.
+func (f Frame) AcquireTemporaryTexture(descriptor TextureDescriptor) Texture {
+	state := f.state.Get()
+	texture, err := state.temporaryTextures.acquire(descriptor.fillDefaults(), f.table.Get(), f.device.Get())
+	if err != nil && !errors.Is(err, gfx.ErrDeviceLost) {
+		state.logger.LogErr(fmt.Errorf("render: acquiring temporary texture %q: %w", descriptor.Label, err))
+	}
+	return texture
 }

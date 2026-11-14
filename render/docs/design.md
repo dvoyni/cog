@@ -6,7 +6,7 @@ API between gfx and the plugins that draw. It was mapped in
 each section links the ticket that holds its detail. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md).
 
-Status: being built. The plugin, its `Config`, `Handlers.RecordFrame` publishing `FrameEvent` inside gfx's `DrawEvent`, reports with their kind, and `rendertest`'s harness are built, from [render: the plugin, its frame event and rendertest's harness](https://github.com/dvoyni/cog/issues/826); the `Frame` parameter, command lists at their orders, passes into windows and `rendertest`'s reader of lists and passes, from [render: command lists and passes](https://github.com/dvoyni/cog/issues/827); the rest is designed, not yet built.
+Status: being built. The plugin, its `Config`, `Handlers.RecordFrame` publishing `FrameEvent` inside gfx's `DrawEvent`, reports with their kind, and `rendertest`'s harness are built, from [render: the plugin, its frame event and rendertest's harness](https://github.com/dvoyni/cog/issues/826); the `Frame` parameter, command lists at their orders, passes into windows and `rendertest`'s reader of lists and passes, from [render: command lists and passes](https://github.com/dvoyni/cog/issues/827); temporary textures, passes into textures at a mip level and layer with depth-stencil and resolve targets, and `EndFrame`, from [render: temporary textures](https://github.com/dvoyni/cog/issues/828); the rest is designed, not yet built.
 
 ## Problem Statement
 
@@ -345,7 +345,7 @@ and a **test author** testing a plugin that draws.
 - **Command lists fill concurrently,** each from one task. A heavy pass is recorded in parallel as split passes: consecutive passes into the same targets in lists at consecutive orders, each after the first keeping its targets. Render bundles are not used.
 - **`BeginPass(PassDescriptor)` declares:**
   - up to 8 colour targets, each a window or a texture at one mip level and one layer or cube face, with clear or keep, store or discard, and an optional resolve target;
-  - an optional depth-stencil target, which may be read-only.
+  - an optional depth-stencil target, which may be read-only, and is then neither cleared nor discarded.
 
   The sample count and formats follow from the targets. A pass whose targets disagree, or that has none, is refused and reported once, and its draws are skipped.
 - **Pass state:** the viewport and scissor rectangle start as the whole target. They, the stencil reference and the blend constant may change between draws and last until set again or until the pass ends.
@@ -387,8 +387,9 @@ func drawScene(k *kernel.Kernel, e render.FrameEvent, frame render.Frame, scene 
 - **A compute pass is a run of dispatches** recorded in a command list among its passes. `SetShader(shader, entryPoint)` names the compute shader and its function, an empty name meaning its only one, and resets its parameters, which are set by name in any group, with no levels. `Dispatch(x, y, z)` runs it. There is no compute material.
 - **Copies** (buffer to buffer, texture to texture, and between buffers and textures) **and buffer clears** are recorded between passes. gfx's backend inserts the barrier when a later pass samples what an earlier one wrote.
 - **Temporary textures:**
-  - `frame.AcquireTemporaryTexture(descriptor)` pools them by descriptor, with every usage the format allows.
+  - `frame.AcquireTemporaryTexture(descriptor)` pools them by descriptor, its label included, with every usage the format allows.
   - Each is held until the frame ends, with no reuse within the frame, and its contents are undefined when taken.
+  - Its handle names it only until the frame ends: a later frame may hand the same texture, under the same handle, to another user, so a handle kept past its frame silently draws into or samples theirs.
   - Its user hands it between its tasks through state of its own, acquired in a task the kernel orders before the tasks that draw into or sample it. Temporaries are not named.
 - **Temporary buffers:**
   - `list.AcquireTemporaryBuffer[T](data []T)` answers a 256-byte-aligned range of the list's arena chunk holding `data`, valid until the frame ends. It is generic, as `SetUniform[T]` is, so a vertex slice or an index slice goes in as it is.
