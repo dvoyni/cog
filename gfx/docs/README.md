@@ -797,14 +797,15 @@ bindings, err := device.ShaderModuleBindings(module)
   is the binding's kind with a visibility. A buffer's `MinBindingSize` is
   its type's size, a runtime-sized array counting one element, and
   `HasDynamicOffset` is false, left to the layout. An f32 texture is
-  `TextureSampleTypeFloat`, a depth one `TextureSampleTypeDepth`.
+  `TextureSampleTypeFloat`, a multisampled one
+  `TextureSampleTypeUnfilterableFloat`, as WebGPU refuses a filterable
+  multisampled texture, and a depth one `TextureSampleTypeDepth`.
 - **`Members`** are a buffer struct's members, each with its name, offset
   and size as WGSL lays them out.
 - **`EntryPoints`** name the entry points that use the binding, directly or
   through the functions they call.
 
-The slices are yours to keep. A released module answers `ErrReleased`. On
-gogpu the call answers an error until its named reflection is built.
+The slices are yours to keep. A released module answers `ErrReleased`.
 
 ## Pipelines
 

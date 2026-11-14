@@ -251,13 +251,15 @@ device's release and the recovery among them, for a backend to pin.
   - each binding's name, group, number and kind, with its view dimension,
     sample type, and storage access and format, the kind in exactly one of
     the binding layouts a `BindGroupLayoutEntry` holds, so a layout entry is
-    the binding's kind with a visibility;
+    the binding's kind with a visibility; an f32 texture's sample type is
+    `Float`, a multisampled one's `UnfilterableFloat`, as WebGPU refuses a
+    filterable multisampled texture;
   - a buffer struct's size, as its buffer layout's `MinBindingSize`, and its
     members' names, offsets and sizes;
   - the entry points that use each binding.
 
   The backend seam's `ReflectBindings` carries the same. gogpu fills it
-  from naga's IR, which already holds names and offsets, and the recording
+  from naga's IR, which holds names and offsets, and the recording
   adapter answers what a test queues, as for the other reflection calls.
 - **Off the frame means a task.** Creation is synchronous on every backend.
   A game creates shader modules and pipelines from a task of its own under

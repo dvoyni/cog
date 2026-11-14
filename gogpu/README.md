@@ -18,7 +18,8 @@ created, written and mapped, textures are created and written,
 with views and samplers, shader modules, bind group layouts, bind groups and
 pipeline layouts are created, render and compute pipelines draw and
 dispatch, over explicit layouts or ones reflected, their vertex buffers
-checked against the inputs reflected, buffers and textures are copied into
+checked against the inputs reflected, a module's bindings are reflected by
+name, buffers and textures are copied into
 buffers, a captured frame is drawn offscreen, then onto the window, a device
 lost at acquire, present or submit answers gfx's `ErrDeviceLost` and is
 replaced, its windows kept, with every

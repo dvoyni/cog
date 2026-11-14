@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/color"
 	"os"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -1765,6 +1766,32 @@ func TestEachBindingIsReflectedAsTheEntryWebGPUsAutoLayoutHolds(t *testing.T) {
 	})
 }
 
+func TestEveryBindingAModuleDeclaresIsAnsweredByNameWithTheEntryPointsThatUseIt(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(&gfx.Config{ForceFallbackAdapter: true}, nil)
+
+	h.readDevice(func(device gfx.Device) {
+		module, err := device.CreateShaderModule(gfx.ShaderModuleDescriptor{WGSL: namedBindingsWGSL})
+		if err != nil {
+			t.Errorf("CreateShaderModule answered %v", err)
+		}
+
+		bindings, err := device.ShaderModuleBindings(module)
+
+		if err != nil {
+			t.Errorf("ShaderModuleBindings answered %v", err)
+		}
+		if !reflect.DeepEqual(bindings, namedBindings) {
+			t.Errorf("the bindings are\n%+v\nwant\n%+v", bindings, namedBindings)
+		}
+		bindings[0].Members[0].Name = "changed"
+		bindings[0].EntryPoints[0] = "changed"
+		if again, _ := device.ShaderModuleBindings(module); !reflect.DeepEqual(again, namedBindings) {
+			t.Errorf("after the first answer's slices changed, the bindings are\n%+v\nwant\n%+v", again, namedBindings)
+		}
+	})
+}
+
 func TestABindingBothStagesUseIsVisibleToBoth(t *testing.T) {
 	h := newHarness(t)
 	h.mustSpawn(nil, nil)
@@ -2005,6 +2032,131 @@ var bindingsLayout = []gfx.BindGroupLayoutEntry{
 	{Binding: 5, Visibility: gfx.ShaderStageFlagCompute, StorageTexture: gfx.StorageTextureBindingLayout{
 		Access: gfx.StorageTextureAccessWriteOnly, Format: gfx.TextureFormatR32Float, ViewDimension: gfx.TextureViewDimension2D,
 	}},
+}
+
+// namedBindingsWGSL declares a binding of each kind and view dimension,
+// several used by no entry point, and a uniform block its fragment entry
+// point uses only through the function it calls.
+const namedBindingsWGSL = `
+struct Camera {
+	viewProjection: mat4x4f,
+	position: vec3f,
+	exposure: f32,
+}
+
+struct Lights {
+	count: u32,
+	colors: array<vec4f>,
+}
+
+@group(0) @binding(0) var<uniform> camera: Camera;
+@group(0) @binding(1) var<storage, read> lights: Lights;
+@group(0) @binding(2) var<storage, read_write> counts: array<u32>;
+@group(1) @binding(0) var line: texture_1d<f32>;
+@group(1) @binding(1) var picture: texture_2d<f32>;
+@group(1) @binding(2) var layers: texture_2d_array<i32>;
+@group(1) @binding(3) var sky: texture_cube<f32>;
+@group(1) @binding(4) var skies: texture_cube_array<f32>;
+@group(1) @binding(5) var volume: texture_3d<u32>;
+@group(1) @binding(6) var samples: texture_multisampled_2d<f32>;
+@group(1) @binding(7) var shadow: texture_depth_2d;
+@group(1) @binding(8) var filtering: sampler;
+@group(1) @binding(9) var comparing: sampler_comparison;
+@group(2) @binding(0) var written: texture_storage_2d<rgba8unorm, write>;
+
+fn expose(color: vec4f) -> vec4f {
+	return color * camera.exposure;
+}
+
+@vertex
+fn vs(@location(0) position: vec3f) -> @builtin(position) vec4f {
+	return camera.viewProjection * vec4f(position, 1);
+}
+
+@fragment
+fn fs() -> @location(0) vec4f {
+	let lit = textureSampleCompare(shadow, comparing, vec2f(0.5), 0.5);
+	return expose(textureSample(picture, filtering, vec2f(0.5)) * lit);
+}
+
+@compute @workgroup_size(1)
+fn tally() {
+	counts[0] = lights.count + u32(textureLoad(layers, vec2u(0), 0, 0).r);
+	textureStore(written, vec2u(0), lights.colors[0]);
+}
+`
+
+// namedBindings are namedBindingsWGSL's bindings as named reflection answers
+// them, a struct's members as WGSL lays them out, a runtime-sized array
+// counting one element.
+var namedBindings = []gfx.ShaderBinding{
+	{
+		Name:   "camera",
+		Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform, MinBindingSize: 80},
+		Members: []gfx.ShaderStructMember{
+			{Name: "viewProjection", Offset: 0, Size: 64},
+			{Name: "position", Offset: 64, Size: 12},
+			{Name: "exposure", Offset: 76, Size: 4},
+		},
+		EntryPoints: []string{"vs", "fs"},
+	},
+	{
+		Name:    "lights",
+		Binding: 1,
+		Buffer:  gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeReadOnlyStorage, MinBindingSize: 32},
+		Members: []gfx.ShaderStructMember{
+			{Name: "count", Offset: 0, Size: 4},
+			{Name: "colors", Offset: 16, Size: 16},
+		},
+		EntryPoints: []string{"tally"},
+	},
+	{
+		Name:        "counts",
+		Binding:     2,
+		Buffer:      gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeStorage, MinBindingSize: 4},
+		EntryPoints: []string{"tally"},
+	},
+	{Name: "line", Group: 1, Texture: gfx.TextureBindingLayout{SampleType: gfx.TextureSampleTypeFloat, ViewDimension: gfx.TextureViewDimension1D}},
+	{
+		Name:        "picture",
+		Group:       1,
+		Binding:     1,
+		Texture:     gfx.TextureBindingLayout{SampleType: gfx.TextureSampleTypeFloat, ViewDimension: gfx.TextureViewDimension2D},
+		EntryPoints: []string{"fs"},
+	},
+	{
+		Name:        "layers",
+		Group:       1,
+		Binding:     2,
+		Texture:     gfx.TextureBindingLayout{SampleType: gfx.TextureSampleTypeSint, ViewDimension: gfx.TextureViewDimension2DArray},
+		EntryPoints: []string{"tally"},
+	},
+	{Name: "sky", Group: 1, Binding: 3, Texture: gfx.TextureBindingLayout{SampleType: gfx.TextureSampleTypeFloat, ViewDimension: gfx.TextureViewDimensionCube}},
+	{Name: "skies", Group: 1, Binding: 4, Texture: gfx.TextureBindingLayout{SampleType: gfx.TextureSampleTypeFloat, ViewDimension: gfx.TextureViewDimensionCubeArray}},
+	{Name: "volume", Group: 1, Binding: 5, Texture: gfx.TextureBindingLayout{SampleType: gfx.TextureSampleTypeUint, ViewDimension: gfx.TextureViewDimension3D}},
+	{
+		Name:    "samples",
+		Group:   1,
+		Binding: 6,
+		Texture: gfx.TextureBindingLayout{SampleType: gfx.TextureSampleTypeUnfilterableFloat, ViewDimension: gfx.TextureViewDimension2D, Multisampled: true},
+	},
+	{
+		Name:        "shadow",
+		Group:       1,
+		Binding:     7,
+		Texture:     gfx.TextureBindingLayout{SampleType: gfx.TextureSampleTypeDepth, ViewDimension: gfx.TextureViewDimension2D},
+		EntryPoints: []string{"fs"},
+	},
+	{Name: "filtering", Group: 1, Binding: 8, Sampler: gfx.SamplerBindingLayout{Type: gfx.SamplerBindingTypeFiltering}, EntryPoints: []string{"fs"}},
+	{Name: "comparing", Group: 1, Binding: 9, Sampler: gfx.SamplerBindingLayout{Type: gfx.SamplerBindingTypeComparison}, EntryPoints: []string{"fs"}},
+	{
+		Name:  "written",
+		Group: 2,
+		StorageTexture: gfx.StorageTextureBindingLayout{
+			Access: gfx.StorageTextureAccessWriteOnly, Format: gfx.TextureFormatRGBA8Unorm, ViewDimension: gfx.TextureViewDimension2D,
+		},
+		EntryPoints: []string{"tally"},
+	},
 }
 
 // sharedWGSL reads binding 0 from both its stages.

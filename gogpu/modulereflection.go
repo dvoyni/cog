@@ -11,9 +11,15 @@ import (
 )
 
 // moduleReflection is what naga reflects of a shader module once, at its
-// creation: each entry point, the bindings it uses and, a vertex entry
-// point's, its inputs.
-type moduleReflection []entryPointReflection
+// creation.
+type moduleReflection struct {
+	// entryPoints are each entry point, the bindings it uses and, a vertex
+	// entry point's, its inputs.
+	entryPoints []entryPointReflection
+	// bindings are every binding the module declares, in the order it
+	// declares them, as gfx's named reflection answers them.
+	bindings []gfx.ShaderBinding
+}
 
 // reflectModule parses and validates source with naga, every capability
 // allowed, as wgpu has already checked the device's, and answers its
@@ -21,17 +27,17 @@ type moduleReflection []entryPointReflection
 func reflectModule(source string) (moduleReflection, error) {
 	module, _, err := wgsl.Parse(source, wgsl.ParseOptions{})
 	if err != nil {
-		return nil, err
+		return moduleReflection{}, err
 	}
 	info, err := valid.Validate(module, valid.Options{Capabilities: valid.CapAll})
 	if err != nil {
-		return nil, err
+		return moduleReflection{}, err
 	}
 	var layouter ir.Layouter
 	if err := layouter.Update(module); err != nil {
-		return nil, err
+		return moduleReflection{}, err
 	}
-	reflection := make(moduleReflection, len(module.EntryPoints))
+	reflection := moduleReflection{entryPoints: make([]entryPointReflection, len(module.EntryPoints))}
 	for index := range module.EntryPoints {
 		entryPoint := &module.EntryPoints[index]
 		sampled := make([]bool, len(module.GlobalVariables))
@@ -48,7 +54,12 @@ func reflectModule(source string) (moduleReflection, error) {
 				reflected.bindings = append(reflected.bindings, reflectedBinding{group: variable.Binding.Group, entry: entry})
 			}
 		}
-		reflection[index] = reflected
+		reflection.entryPoints[index] = reflected
+	}
+	for global := range module.GlobalVariables {
+		if module.GlobalVariables[global].Binding != nil {
+			reflection.bindings = append(reflection.bindings, reflectBinding(module, &layouter, &info, global))
+		}
 	}
 	return reflection, nil
 }
@@ -57,8 +68,8 @@ func reflectModule(source string) (moduleReflection, error) {
 // or of the module's one entry point of stage when name is empty.
 func (r moduleReflection) entryPoint(stage ir.ShaderStage, name string) (*entryPointReflection, error) {
 	var found *entryPointReflection
-	for index := range r {
-		entryPoint := &r[index]
+	for index := range r.entryPoints {
+		entryPoint := &r.entryPoints[index]
 		if entryPoint.stage != stage || (name != "" && entryPoint.name != name) {
 			continue
 		}
@@ -128,9 +139,10 @@ func reflectedGroupLayouts(entryPoints ...*entryPointReflection) []gfx.BindGroup
 
 // layoutEntry answers the entry WebGPU's "auto" layout holds for global, of
 // no visibility: a buffer at its type's size, a filtering sampler unless it
-// compares, and an f32 texture filterable only when sampled, as the entry
-// point samples it with a sampler.
-func layoutEntry(module *ir.Module, layouter *ir.Layouter, global *ir.GlobalVariable, sampled bool) gfx.BindGroupLayoutEntry {
+// compares, and an f32 texture filterable only when filterable says, as the
+// "auto" layout's is when the entry point samples it with a sampler, and
+// never when multisampled, as WebGPU refuses a filterable multisampled one.
+func layoutEntry(module *ir.Module, layouter *ir.Layouter, global *ir.GlobalVariable, filterable bool) gfx.BindGroupLayoutEntry {
 	entry := gfx.BindGroupLayoutEntry{Binding: global.Binding.Binding}
 	switch inner := module.Types[global.Type].Inner.(type) {
 	case ir.SamplerType:
@@ -151,7 +163,7 @@ func layoutEntry(module *ir.Module, layouter *ir.Layouter, global *ir.GlobalVari
 		switch {
 		case inner.Class == ir.ImageClassDepth:
 			entry.Texture.SampleType = gfx.TextureSampleTypeDepth
-		case sampled && entry.Texture.SampleType == gfx.TextureSampleTypeUnfilterableFloat:
+		case filterable && !inner.Multisampled && entry.Texture.SampleType == gfx.TextureSampleTypeUnfilterableFloat:
 			entry.Texture.SampleType = gfx.TextureSampleTypeFloat
 		}
 	default:
@@ -164,6 +176,41 @@ func layoutEntry(module *ir.Module, layouter *ir.Layouter, global *ir.GlobalVari
 		}
 	}
 	return entry
+}
+
+// reflectBinding answers global's binding as gfx's named reflection answers
+// it: its kind as layoutEntry's, an f32 texture filterable since the
+// binding holds no entry point's use, a struct buffer's members
+// as naga lays them out, and the entry points info says use it, their
+// callees included.
+func reflectBinding(module *ir.Module, layouter *ir.Layouter, info *valid.ModuleInfo, global int) gfx.ShaderBinding {
+	variable := &module.GlobalVariables[global]
+	entry := layoutEntry(module, layouter, variable, true)
+	binding := gfx.ShaderBinding{
+		Name:           variable.Name,
+		Group:          variable.Binding.Group,
+		Binding:        variable.Binding.Binding,
+		Buffer:         entry.Buffer,
+		Sampler:        entry.Sampler,
+		Texture:        entry.Texture,
+		StorageTexture: entry.StorageTexture,
+	}
+	if structure, ok := module.Types[variable.Type].Inner.(ir.StructType); ok {
+		binding.Members = make([]gfx.ShaderStructMember, 0, len(structure.Members))
+		for _, member := range structure.Members {
+			binding.Members = append(binding.Members, gfx.ShaderStructMember{
+				Name:   member.Name,
+				Offset: uint64(member.Offset),
+				Size:   uint64(layouter.Layout(member.Type).Size),
+			})
+		}
+	}
+	for index := range module.EntryPoints {
+		if info.EntryPoints[index].GlobalUses[global] != 0 {
+			binding.EntryPoints = append(binding.EntryPoints, module.EntryPoints[index].Name)
+		}
+	}
+	return binding
 }
 
 // reflectVertexInputs answers the inputs function, a vertex entry point,
