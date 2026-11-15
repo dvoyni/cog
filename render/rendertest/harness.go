@@ -155,9 +155,10 @@ func (h *Harness) ExpectReport(kind render.ReportKind) {
 func (h *Harness) Frames() []render.Inspection {
 	recorded := h.instance.Recording()
 	viewTargets := makeViewTargets(recorded.Calls)
+	materials := makePipelineMaterials(recorded.Calls)
 	var inspections []render.Inspection
 	for _, frame := range recorded.Frames() {
-		inspections = append(inspections, makeInspection(frame, viewTargets))
+		inspections = append(inspections, makeInspection(frame, viewTargets, materials))
 	}
 	return inspections
 }

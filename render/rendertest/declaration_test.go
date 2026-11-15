@@ -23,19 +23,25 @@ const litDeclaration = `{
 		{"group": 1, "binding": 1, "name": "shadow_sampler", "sampler": {"type": "comparison"}},
 		{"group": 2, "binding": 0, "name": "output", "storageTexture": {"access": "read-write", "format": "r32float", "viewDimension": "3d"}, "entryPoints": ["fragment_main"]}
 	],
+	"entryPoints": [{"name": "vertex_main", "stage": "vertex"}, {"name": "fragment_main", "stage": "fragment"}],
 	"vertexInputs": {"vertex_main": [{"location": 0, "type": "vec3<f32>"}]},
 	"variants": [
 		{
 			"defines": {"INSTANCED": "", "SKINNED": "4"},
 			"bindings": [{"group": 2, "binding": 1, "name": "joints", "buffer": {"type": "read-only-storage", "size": 64}, "entryPoints": ["vertex_main"]}],
+			"entryPoints": [{"name": "vertex_main", "stage": "vertex"}],
 			"vertexInputs": {"vertex_main": [{"location": 0, "type": "vec3<f32>"}, {"location": 1, "type": "vec4<u32>"}]}
 		}
 	]
 }`
 
-// litBindings are the bindings litDeclaration declares, and
-// skinnedBindings those of its variant.
+// litBindings and litEntryPoints are the bindings and entry points
+// litDeclaration declares, and skinnedBindings and skinnedEntryPoints those of
+// its variant.
 var (
+	litEntryPoints     = []gfx.ShaderEntryPoint{{Name: "vertex_main", Stage: gfx.ShaderStageFlagVertex}, {Name: "fragment_main", Stage: gfx.ShaderStageFlagFragment}}
+	skinnedEntryPoints = []gfx.ShaderEntryPoint{{Name: "vertex_main", Stage: gfx.ShaderStageFlagVertex}}
+
 	litBindings = []gfx.ShaderBinding{
 		{Name: "camera", Group: 0, Binding: 0, Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform, MinBindingSize: 80}, Members: []gfx.ShaderStructMember{{Name: "view", Offset: 0, Size: 64}, {Name: "time", Offset: 64, Size: 4}}, EntryPoints: []string{"vertex_main", "fragment_main"}},
 		{Name: "shadows", Group: 1, Binding: 0, Texture: gfx.TextureBindingLayout{SampleType: gfx.TextureSampleTypeDepth, ViewDimension: gfx.TextureViewDimension2DArray, Multisampled: true}, EntryPoints: []string{"fragment_main"}},
@@ -50,22 +56,24 @@ var (
 func TestAShadersReflectionIsAnsweredFromTheDeclarationBesideItForTheVariantOfItsDefines(t *testing.T) {
 	files := fstest.MapFS{"lit.wgsl": {Data: []byte("// lit")}, "lit.wgsl.json": {Data: []byte(litDeclaration)}}
 	tests := []struct {
-		name         string
-		defines      []gfx.ShaderDefine
-		entryPoint   string
-		wantBindings []gfx.ShaderBinding
+		name            string
+		defines         []gfx.ShaderDefine
+		entryPoint      string
+		wantBindings    []gfx.ShaderBinding
+		wantEntryPoints []gfx.ShaderEntryPoint
 		// wantPipelineError is what the error of a pipeline feeding
 		// location 0 alone holds, empty for none.
 		wantPipelineError string
 	}{
-		{name: "no defines", wantBindings: litBindings},
-		{name: "no defines, the entry point named", entryPoint: "vertex_main", wantBindings: litBindings},
-		{name: "the variant's defines in another order", defines: []gfx.ShaderDefine{{Name: "SKINNED", Value: "4"}, {Name: "INSTANCED"}}, wantBindings: skinnedBindings, wantPipelineError: "location 1 feeds the shader's input vec4<u32>"},
-		{name: "a define set with no variant of its own", defines: []gfx.ShaderDefine{{Name: "INSTANCED"}}, wantBindings: litBindings},
-		{name: "an entry point the declaration lacks", entryPoint: "vertex_skinned", wantBindings: litBindings, wantPipelineError: `lit.wgsl declares no vertex entry point "vertex_skinned"`},
+		{name: "no defines", wantBindings: litBindings, wantEntryPoints: litEntryPoints},
+		{name: "no defines, the entry point named", entryPoint: "vertex_main", wantBindings: litBindings, wantEntryPoints: litEntryPoints},
+		{name: "the variant's defines in another order", defines: []gfx.ShaderDefine{{Name: "SKINNED", Value: "4"}, {Name: "INSTANCED"}}, wantBindings: skinnedBindings, wantEntryPoints: skinnedEntryPoints, wantPipelineError: "location 1 feeds the shader's input vec4<u32>"},
+		{name: "a define set with no variant of its own", defines: []gfx.ShaderDefine{{Name: "INSTANCED"}}, wantBindings: litBindings, wantEntryPoints: litEntryPoints},
+		{name: "an entry point the declaration lacks", entryPoint: "vertex_skinned", wantBindings: litBindings, wantEntryPoints: litEntryPoints, wantPipelineError: `lit.wgsl declares no vertex entry point "vertex_skinned"`},
 	}
 	h := rendertest.NewHarness(t)
 	bindings := make([][]gfx.ShaderBinding, len(tests))
+	entryPoints := make([][]gfx.ShaderEntryPoint, len(tests))
 	pipelineErrors := make([]error, len(tests))
 	h.Spawn(nil, &firstFramePlugin{onFirstFrame: func(_ *kernel.Kernel, device gfx.Device) {
 		// Every variant is preprocessed before any is compiled, as parallel
@@ -85,6 +93,9 @@ func TestAShadersReflectionIsAnsweredFromTheDeclarationBesideItForTheVariantOfIt
 			if bindings[index], err = device.ShaderModuleBindings(module); err != nil {
 				t.Errorf("%s: %v", test.name, err)
 			}
+			if entryPoints[index], err = device.ShaderModuleEntryPoints(module); err != nil {
+				t.Errorf("%s: %v", test.name, err)
+			}
 			_, pipelineErrors[index] = createPipeline(device, module, test.entryPoint)
 		}
 	}})
@@ -94,6 +105,9 @@ func TestAShadersReflectionIsAnsweredFromTheDeclarationBesideItForTheVariantOfIt
 	for index, test := range tests {
 		if fmt.Sprint(bindings[index]) != fmt.Sprint(test.wantBindings) {
 			t.Errorf("%s: the reflection answered bindings\n%+v\nwant\n%+v", test.name, bindings[index], test.wantBindings)
+		}
+		if fmt.Sprint(entryPoints[index]) != fmt.Sprint(test.wantEntryPoints) {
+			t.Errorf("%s: the reflection answered entry points %+v, want %+v", test.name, entryPoints[index], test.wantEntryPoints)
 		}
 		if test.wantPipelineError == "" && pipelineErrors[index] != nil || test.wantPipelineError != "" && (pipelineErrors[index] == nil || !strings.Contains(pipelineErrors[index].Error(), test.wantPipelineError)) {
 			t.Errorf("%s: a pipeline feeding location 0 alone answered %v, want an error holding %q, empty for none", test.name, pipelineErrors[index], test.wantPipelineError)

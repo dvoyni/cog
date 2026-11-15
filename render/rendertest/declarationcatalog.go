@@ -104,6 +104,14 @@ func (d *declarationCatalog) answerBindings(module gfx.ShaderModule, reflect fun
 	})
 }
 
+// answerEntryPoints answers as answerBindings does, for module's entry
+// points.
+func (d *declarationCatalog) answerEntryPoints(module gfx.ShaderModule, reflect func() ([]gfx.ShaderEntryPoint, error)) ([]gfx.ShaderEntryPoint, error) {
+	return d.answer(recording.CallKindReflectEntryPoints, module, reflect, func(shader preprocessedShader) ([]gfx.ShaderEntryPoint, error) {
+		return slices.Clone(shader.declaration.EntryPoints), nil
+	})
+}
+
 // answerVertexInputs answers as answerBindings does, for the inputs of
 // module's vertex entry point named entryPoint, an empty name its only one.
 func (d *declarationCatalog) answerVertexInputs(module gfx.ShaderModule, entryPoint string, reflect func() ([]gfx.VertexInput, error)) ([]gfx.VertexInput, error) {

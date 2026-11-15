@@ -161,5 +161,9 @@ func makeLitReflection(joints *gfx.ShaderBinding, inputs ...gfx.VertexInput) bin
 	if joints != nil {
 		bindings = append(bindings, *joints)
 	}
-	return bindingdeclaration.Reflection{Bindings: bindings, VertexInputs: map[string][]gfx.VertexInput{"vertex_main": inputs}}
+	return bindingdeclaration.Reflection{
+		Bindings:     bindings,
+		EntryPoints:  []gfx.ShaderEntryPoint{{Name: "vertex_main", Stage: gfx.ShaderStageFlagVertex}, {Name: "fragment_main", Stage: gfx.ShaderStageFlagFragment}},
+		VertexInputs: map[string][]gfx.VertexInput{"vertex_main": inputs},
+	}
 }

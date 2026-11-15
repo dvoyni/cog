@@ -78,11 +78,10 @@ func reflectShader(device gfx.Device, files fs.FS, path string, defines []gfx.Sh
 	if reflection.Bindings, err = device.ShaderModuleBindings(module); err != nil {
 		return bindingdeclaration.Reflection{}, err
 	}
-	entryPoints, err := device.ShaderModuleEntryPoints(module)
-	if err != nil {
+	if reflection.EntryPoints, err = device.ShaderModuleEntryPoints(module); err != nil {
 		return bindingdeclaration.Reflection{}, err
 	}
-	for _, entryPoint := range entryPoints {
+	for _, entryPoint := range reflection.EntryPoints {
 		if entryPoint.Stage != gfx.ShaderStageFlagVertex {
 			continue
 		}

@@ -33,6 +33,24 @@ const (
 	// @group(3), which render reserves, or more than the device's limits
 	// allow, such as more than 8 uniform blocks at dynamic offsets.
 	ReportKindShaderRefused
+	// ReportKindMeshRefused is a mesh refused when made: more vertex buffers
+	// than the device allows, a vertex buffer, stride or attribute
+	// misaligned, an index buffer of no index format or misaligned, or a
+	// topology gfx has none of.
+	ReportKindMeshRefused
+	// ReportKindMaterialRefused is a material refused when made for its entry
+	// points: a name its shader has no function of that stage of, or none
+	// named where the shader has several.
+	ReportKindMaterialRefused
+	// ReportKindPipelineFailed is a pipeline a draw needs that could not be
+	// made, such as one whose mesh's vertex buffers do not feed its shader's
+	// inputs, or one with no fragment stage drawn into colour targets.
+	ReportKindPipelineFailed
+	// ReportKindDrawSkipped is a draw skipped for what it names: a mesh or
+	// material render does not hold, no material set, a shader that failed
+	// or was freed, or a buffer that failed, was freed or is too small for
+	// its range.
+	ReportKindDrawSkipped
 )
 
 // Report is a mistake render finds at run time, such as a refused shader, a

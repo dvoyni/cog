@@ -203,6 +203,8 @@ and a **test author** testing a plugin that draws.
   Each is given back with its `Release…`. Acquire and release are the Go rules' pool pair: a load hands out the shared asset or a fresh one.
 - **Made assets** are made from memory or from other assets: `MakeMesh`, `MakeMaterial`, and buffers and textures filled from a slice. Each is given back with its `Release…`. A made asset has no key, and its maker releases it once; a second release is refused and reported.
   - `MakeBuffer[T](label, usage, data []T)` makes a buffer of `data`'s bytes, rounded up to a multiple of 4 with zeros, with `usage` and the copy destination, as a loaded buffer has. `T` is plain data with no pointers, its bytes as Go lays them out, as `AcquireTemporaryBuffer[T]`'s are. A buffer of no bytes gets no gfx buffer.
+  - `MakeMesh(MeshDescriptor{Label, VertexBuffers, Indices, Topology})` makes a mesh: vertex buffers, each a `VertexBuffer{Range, Layout}` of a `BufferRange{Buffer, Offset, Size}`, a zero size the rest of the buffer, and a `VertexLayout{Stride, Attributes}`; an `IndexBuffer{Range, Format}`, a zero buffer none; and a `PrimitiveTopology`, whose zero is a triangle list. A draw covers it all: as many vertices as the fewest its vertex ranges hold by their strides, or as many indices as its index range holds. A mesh of more vertex buffers than the device allows, a vertex range at an offset or of a stride no multiple of 4, an attribute at an offset no multiple of 4, or of 2 for a format of two 8-bit components, an index buffer of no format or at an offset no multiple of its index's size, or an unknown topology is refused and reported with `ReportKindMeshRefused`, answering the zero `Mesh`. Its vertex layouts are numbered, compared by value, for the pipeline key, each number kept for the program's life.
+  - `MakeMaterial(MaterialDescriptor{Label, Shader, State, VertexEntryPoint, FragmentEntryPoint})` makes a material, whose entry points are resolved against its shader's when the shader is compiled.
   - `MakeTexture[T](descriptor, data []T)` makes a texture whose mip level 0 `data` fills, layer after layer, each layer's rows of texels packed tight; no data leaves it zero, and data of another length is refused and reported. A made texture carries every usage its format allows, as a temporary texture does, so it can be a pass target kept across frames, such as a history or a render-to-texture layer.
 - **A load is ready in the frame that asks for it.** The GPU object exists when the call returns, and there is no loading state, no ready event and no callback:
   - **Texture:** `image.DecodeConfig` reads only the header, which with the colour space and mipmaps option fixes the descriptor: 8 bits per channel, an sRGB format for `ColorSpaceSRGB`, and every mip level down to one texel with `Mipmaps`. PNG and JPEG files load.
@@ -234,7 +236,7 @@ and a **test author** testing a plugin that draws.
   - A material names its vertex and fragment functions; a compute pass names its compute function with `SetShader(shader, entryPoint)`.
   - An empty name means the shader's only function of that stage. A file with one of each names nothing; a file with several, such as a depth-only path beside a colour path or a culling file's kernels, names the one it wants.
   - Entry points are not part of a variant's asset key: one module serves every function in it. They are part of the pipeline key.
-  - A missing name, or several functions of a stage with none named, is refused and reported once: at `MakeMaterial` for a material, whose draws are then skipped, and at a dispatch's first pipeline for a compute function, the dispatch then skipped.
+  - A missing name, or several functions of a stage with none named, is refused and reported once: at `MakeMaterial` for a material, with `ReportKindMaterialRefused`, whose draws are then skipped, and at a dispatch's first pipeline for a compute function, the dispatch then skipped.
 - **Named reflection from gfx** (see *Delta to gfx*):
   - each binding's name, group, number and kind;
   - a buffer struct's size and members;
@@ -256,11 +258,11 @@ and a **test author** testing a plugin that draws.
   - Storage buffers in `@group(0)` bind statically. A pass's parameters are one bind group per pass, cached by their resources, so a made or loaded buffer there costs nothing per frame, and a forward+ shader's lights, clusters, light indices, per-object data and shadow data fit under the limit of 8 storage buffers per stage.
   - A shader over any of these limits is refused by gfx's limit check, which `CreatePipelineLayout` runs, when it is acquired, and reported once with `ReportKindShaderRefused`, as is a shader declaring `@group(3)`. Either draws nothing.
 - **The pipeline cache:**
-  - The key is the variant and its vertex and fragment entry points, render state, the mesh's vertex layout and instance buffers' layouts, the pass's target formats, depth format and sample count, the topology and the strip index format. A compute pipeline's key is its variant and its compute entry point.
+  - The key is the variant and its vertex and fragment entry points, render state in one form for every state that draws alike in the pass (the colour targets it lacks and, with no depth-stencil target, depth and stencil left out, and each default spelt zero), the mesh's vertex layout and instance buffers' layouts, the pass's target formats, depth format and sample count, the topology and the strip index format. A compute pipeline's key is its variant and its compute entry point.
   - A pipeline is freed with its shader and never evicted otherwise.
-  - A failure stays under its key and is reported once, and its draws are skipped.
+  - A failure stays under its key and is reported once, with `ReportKindPipelineFailed`, and its draws are skipped until its shader is freed. A shader with no fragment stage drawn into colour targets is such a failure.
 - **The first draw of a new key** makes its pipeline and bind groups synchronously in the recording job. render's design and the draw calls document that hitch.
-- **Render state is the whole pipeline state by value,** one comparable struct whose zero value is WebGPU's defaults:
+- **Render state is the whole pipeline state by value,** one comparable struct, `render.State`, whose zero value is WebGPU's defaults:
   - for each colour target, blend and write mask;
   - depth compare, write and bias;
   - stencil for each face, with masks;
@@ -358,7 +360,8 @@ and a **test author** testing a plugin that draws.
   - The framebuffer is `BGRA8Unorm` on gogpu's surfaces, so the last pass into a window encodes sRGB in its shader.
 - **Draws:**
   - `SetMaterial(material)` selects the material for the draws after it and resets every draw parameter and instance buffer.
-  - `Draw(mesh, DrawArgs{InstanceCount, FirstInstance})` draws the whole mesh. A part of a mesh that shares its buffers with others is a mesh of its own, over ranges of those buffers.
+  - A draw is skipped and reported once, with `ReportKindDrawSkipped`, for what it names: a mesh or material render does not hold, no material selected, a shader that failed or was freed, or a buffer that failed, was freed or ends before its range. Each is reported once for the asset named, its handle never handed out again.
+  - `Draw(mesh, DrawArgs{InstanceCount, FirstInstance})` draws the whole mesh, a zero instance count drawing one. A part of a mesh that shares its buffers with others is a mesh of its own, over ranges of those buffers.
   - `DrawVertices(topology, vertexCount, DrawArgs{…})` draws with no mesh. It binds no per-vertex buffer, and its topology's zero is a triangle list. A shader whose vertex stage declares a per-vertex input is refused and reported once, as the call's doc comment says.
 - **Writes land before the whole frame:** a write fills a buffer or texture for the whole frame, and two writes to one region leave the last. To change data between passes, a user writes a temporary buffer and copies it at that point in a command list.
   - `inventory.WriteBuffer[T](buffer, offset, data)` writes into any buffer render holds, at an offset and of a length that are multiples of 4.
@@ -571,13 +574,13 @@ render republishes gfx's events as its own, each nested inside gfx's publication
 - **A reader.** It turns each frame gfx recorded into the inspection's types:
   - command lists by order;
   - passes with label and targets as render's textures and windows;
-  - draws with material and counts;
+  - draws with material and counts, a draw's material as its pipeline shows it: its shader, entry points and render state, each default spelt zero, since materials of one key share a pipeline;
   - each parameter by binding name with its value, the dynamic offsets resolved from the arena bytes written.
 - **Strict reports.** A test fails on any report it didn't name with `ExpectReport(kind)`.
 
 **Binding declarations.** The recording adapter parses no WGSL, and gfx gains no WGSL parsing.
 - **Where:** each test shader has a JSON file beside it, `<shader>.wgsl.json`.
-- **What:** each binding's group, number, name and kind (a texture with its sample type and view dimension, a sampler, a uniform block with its size and member offsets, a storage buffer) and the entry points that use it, and a vertex entry point's inputs. A variant whose defines change its bindings has a section of its own.
+- **What:** each binding's group, number, name and kind (a texture with its sample type and view dimension, a sampler, a uniform block with its size and member offsets, a storage buffer) and the entry points that use it, the shader's entry points with their stages, and a vertex entry point's inputs. A variant whose defines change its bindings has a section of its own.
 - **Missing:** a shader compiled with no declaration fails the test, naming its path.
 - **Render's own shaders** have theirs beside them in `render/assets`, embedded with them, so they are found under `cog.render` as a test shader's are beside it.
 - **Variants:** the harness appends a comment naming the shader and its defines to each text it answers preprocessing with, so a module made from it finds its declaration whichever variants share their text; the recording adapter compiles the text without it.

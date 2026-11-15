@@ -6,9 +6,9 @@ import "github.com/dvoyni/cog/gfx"
 // finishes the work submitted to it only when the harness's next Step
 // begins, as a GPU a frame behind would: a frame submitted in one beat is
 // seen complete in the next, so FrameEvent's GPULatency reads
-// FrameInterval. It answers a module's named and vertex-input reflection
-// from the binding declaration beside its shader, unless an answer queued
-// for the call waits.
+// FrameInterval. It answers a module's named, entry-point and vertex-input
+// reflection from the binding declaration beside its shader, unless an
+// answer queued for the call waits.
 type harnessDevice struct {
 	gfx.BackendDevice
 	harness *Harness
@@ -58,5 +58,12 @@ func (d harnessDevice) ReflectBindings(module gfx.ShaderModule) ([]gfx.ShaderBin
 func (d harnessDevice) ReflectVertexInputs(module gfx.ShaderModule, entryPoint string) ([]gfx.VertexInput, error) {
 	return d.harness.declarations.answerVertexInputs(module, entryPoint, func() ([]gfx.VertexInput, error) {
 		return d.BackendDevice.ReflectVertexInputs(module, entryPoint)
+	})
+}
+
+// ReflectEntryPoints answers the entry points module's declaration declares.
+func (d harnessDevice) ReflectEntryPoints(module gfx.ShaderModule) ([]gfx.ShaderEntryPoint, error) {
+	return d.harness.declarations.answerEntryPoints(module, func() ([]gfx.ShaderEntryPoint, error) {
+		return d.BackendDevice.ReflectEntryPoints(module)
 	})
 }

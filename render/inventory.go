@@ -156,6 +156,57 @@ func (i Inventory) MakeTexture[T any](descriptor TextureDescriptor, data []T) Te
 	return texture
 }
 
+// MakeMesh makes a mesh of descriptor: its vertex buffers, ranges of buffers
+// render holds with their layouts, its index buffer, and its topology. A
+// draw of it covers all of it: as many vertices as the fewest its vertex
+// ranges hold, by their strides, or, with an index buffer, as many indices
+// as its range holds. The mesh owns none of the buffers it names: a draw of
+// it after one of them is freed, or one that failed, is skipped and
+// reported once. Its maker gives it back once, with ReleaseMesh. A mesh is
+// refused and reported, answering the zero Mesh, for more vertex buffers
+// than the device allows (8 by WebGPU's default limits), a vertex buffer at
+// an offset or of a stride no multiple of 4, an attribute at an offset no
+// multiple of 4, or of 2 for a format of two 8-bit components, an index
+// buffer of no index format or at an offset no multiple of its index's size,
+// or a topology gfx has none of.
+// Once render's tables have grown, a mesh of vertex layouts drawn before
+// allocates nothing.
+func (i Inventory) MakeMesh(descriptor MeshDescriptor) Mesh {
+	table := i.table.Get()
+	mesh, err := table.addMesh(i.device.Get(), descriptor)
+	if err != nil {
+		table.report(ReportKindMeshRefused, fmt.Errorf("render: making mesh %q: %w", descriptor.Label, err))
+		return Mesh{}
+	}
+	table.madeMeshes.mutex.Lock()
+	table.madeMeshes.add(mesh, mesh)
+	table.madeMeshes.mutex.Unlock()
+	return mesh
+}
+
+// MakeMaterial makes a material of descriptor: its shader, render state and
+// entry points. A material owns nothing it names: a draw of it after its
+// shader is freed, or of one whose shader failed, is skipped and reported
+// once. An empty entry point names the shader's only function of its stage,
+// and a shader with no @fragment function makes a material with no fragment
+// stage, drawn only into passes with no colour target, such as a shadow map
+// or a depth prepass; a material with a fragment function drawn into such a
+// pass runs it with no targets, so alpha-tested shadows still discard. A
+// material naming a function its shader lacks, or none of a stage where its
+// shader has several, is refused and reported once, and its draws are
+// skipped. Its maker gives it back once, with ReleaseMaterial.
+func (i Inventory) MakeMaterial(descriptor MaterialDescriptor) Material {
+	table := i.table.Get()
+	material, err := table.addMaterial(descriptor)
+	if err != nil {
+		table.report(ReportKindMaterialRefused, fmt.Errorf("render: making material %q of shader %v: %w", descriptor.Label, descriptor.Shader, err))
+	}
+	table.madeMaterials.mutex.Lock()
+	table.madeMaterials.add(material, material)
+	table.madeMaterials.mutex.Unlock()
+	return material
+}
+
 // WriteBuffer writes data into buffer at offset, T as MakeBuffer's: a
 // loaded, made or other buffer render holds. The write lands before every
 // command list of gfx's next submit, so it fills the buffer for the whole
@@ -218,6 +269,28 @@ func (i Inventory) ReleaseShader(shader Shader) {
 	table := i.table.Get()
 	if !table.loadedShaders.release(shader) {
 		table.report(ReportKindReleaseRefused, fmt.Errorf("render: releasing shader %v, which no acquire holds", shader))
+	}
+}
+
+// ReleaseMesh gives back the make of mesh, freeing it at the end of that
+// frame, after gfx's present, so the frame's draws still draw it. A mesh no
+// make holds, such as one released already or the zero Mesh, is refused and
+// reported.
+func (i Inventory) ReleaseMesh(mesh Mesh) {
+	table := i.table.Get()
+	if !table.madeMeshes.release(mesh) {
+		table.report(ReportKindReleaseRefused, fmt.Errorf("render: releasing mesh %v, which no make holds", mesh))
+	}
+}
+
+// ReleaseMaterial gives back the make of material, freeing it as ReleaseMesh
+// frees a mesh: at the end of that frame, after gfx's present. A material no
+// make holds, such as one released already or the zero Material, is refused
+// and reported.
+func (i Inventory) ReleaseMaterial(material Material) {
+	table := i.table.Get()
+	if !table.madeMaterials.release(material) {
+		table.report(ReportKindReleaseRefused, fmt.Errorf("render: releasing material %v, which no make holds", material))
 	}
 }
 

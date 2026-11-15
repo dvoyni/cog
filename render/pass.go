@@ -1,6 +1,9 @@
 package render
 
 import (
+	"cmp"
+	"fmt"
+
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/platform"
 )
@@ -72,12 +75,119 @@ type Color struct {
 	R, G, B, A float64
 }
 
+// DrawArgs are a draw's instances: InstanceCount of them, a zero count
+// drawing one, from FirstInstance, which a shader reads as instance_index.
+type DrawArgs struct {
+	InstanceCount, FirstInstance uint32
+}
+
 // Pass is one pass of a command list, from CommandList.BeginPass to its End.
 // A skipped or refused pass records nothing.
 type Pass struct {
+	// frame is the parameter the pass's list was begun from.
+	frame Frame
 	// encoder is the pass's gfx encoder; nil when the pass records nothing,
 	// skipped, refused or ended.
 	encoder gfx.RenderPassEncoder
+	// formats are the formats and sample count of the pass's targets.
+	formats passFormat
+	// material is the material SetMaterial selected, and pipeline the
+	// pipeline last set on encoder.
+	material Material
+	pipeline gfx.RenderPipeline
+}
+
+// SetMaterial selects material for the draws recorded after it, until it is
+// set again or the pass ends.
+func (p *Pass) SetMaterial(material Material) {
+	p.material = material
+}
+
+// Draw draws mesh whole with the material SetMaterial selected: as many
+// vertices as its vertex buffers hold, or with an index buffer as many
+// indices as it holds, as many instances as arguments ask for. It draws with
+// a pipeline of the material's shader, entry points and render state, the
+// mesh's vertex layouts and topology, and the pass's target formats and
+// sample count, shared by every draw of the same, render states that draw
+// alike in the pass sharing one. The first draw of such a
+// pipeline makes it, synchronously, in the recording job, which stalls that
+// recording: a game warms its pipelines by drawing each early, such as
+// behind a loading screen. A draw is skipped and reported once for what it
+// names: a mesh or material render does not hold, no material selected, a
+// shader that failed or was freed, or a buffer that failed, was freed, or
+// ends before its range. A draw of a material refused when made is skipped,
+// as reported then. A pipeline that cannot be made, such as one whose mesh's
+// vertex buffers do not feed its shader's inputs, or one with no fragment
+// stage drawn into a pass with colour targets, is reported once, and every
+// draw of it is skipped until its shader is freed.
+func (p *Pass) Draw(mesh Mesh, arguments DrawArgs) {
+	if p.encoder == nil {
+		return
+	}
+	table := p.frame.table.Get()
+	material, ok := table.findSlot(&table.materials, p.material)
+	switch {
+	case !ok:
+		if table.claimMaterialReport(p.material) {
+			table.report(ReportKindDrawSkipped, fmt.Errorf("render: a draw of mesh %v with material %v, which render does not hold, or with no material selected", mesh, p.material))
+		}
+		return
+	case material.refused:
+		return
+	}
+	shader, ok := table.findSlot(&table.shaders, material.shader)
+	if !ok || material.vertexEntryPoint == "" {
+		if table.claimMaterialReport(p.material) {
+			table.report(ReportKindDrawSkipped, fmt.Errorf("render: a draw of material %q, whose shader %v failed or was freed", material.label, material.shader))
+		}
+		return
+	}
+	meshSlot, ok := table.findSlot(&table.meshes, mesh)
+	if !ok {
+		if table.claimMeshReport(mesh) {
+			table.report(ReportKindDrawSkipped, fmt.Errorf("render: a draw of mesh %v, which render does not hold", mesh))
+		}
+		return
+	}
+	var buffers meshBinding
+	vertexCount, indexCount, err := meshSlot.findElements(table, &buffers)
+	if err != nil {
+		if table.claimMeshReport(mesh) {
+			table.report(ReportKindDrawSkipped, fmt.Errorf("render: a draw of mesh %q, whose %w", meshSlot.label, err))
+		}
+		return
+	}
+	indexed := meshSlot.indices.Range.Buffer != (Buffer{})
+	key := pipelineKey{
+		shader:             material.shader,
+		vertexEntryPoint:   material.vertexEntryPoint,
+		fragmentEntryPoint: material.fragmentEntryPoint,
+		state:              material.state.makeKeyState(p.formats),
+		vertexLayout:       meshSlot.vertexLayout,
+		formats:            p.formats,
+		topology:           meshSlot.topology,
+	}
+	if indexed && (meshSlot.topology == PrimitiveTopologyLineStrip || meshSlot.topology == PrimitiveTopologyTriangleStrip) {
+		key.stripIndexFormat = meshSlot.indices.Format
+	}
+	pipeline, ok := table.pipelines.find(table, p.frame.device.Get(), key, shader)
+	if !ok {
+		return
+	}
+	if pipeline != p.pipeline {
+		p.encoder.SetPipeline(pipeline)
+		p.pipeline = pipeline
+	}
+	for slot, vertexBuffer := range meshSlot.vertexBuffers {
+		p.encoder.SetVertexBuffer(uint32(slot), buffers.vertexBuffers[slot], vertexBuffer.bufferRange.Offset)
+	}
+	instanceCount := cmp.Or(arguments.InstanceCount, 1)
+	if !indexed {
+		p.encoder.Draw(gfx.DrawArgs{VertexCount: vertexCount, InstanceCount: instanceCount, FirstInstance: arguments.FirstInstance})
+		return
+	}
+	p.encoder.SetIndexBuffer(buffers.indexBuffer, gfx.IndexFormat(meshSlot.indices.Format), meshSlot.indices.Range.Offset)
+	p.encoder.DrawIndexed(gfx.DrawIndexedArgs{IndexCount: indexCount, InstanceCount: instanceCount, FirstInstance: arguments.FirstInstance})
 }
 
 // End ends the pass: nothing more is recorded into it.

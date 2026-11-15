@@ -51,7 +51,7 @@ func (l *CommandList) BeginPass(descriptor PassDescriptor) Pass {
 	if l.encoder == nil {
 		return Pass{}
 	}
-	passDescriptor, skipped, err := l.makeRenderPassDescriptor(descriptor)
+	passDescriptor, formats, skipped, err := l.makeRenderPassDescriptor(descriptor)
 	switch {
 	case err != nil:
 		l.frame.state.Get().report(ReportKindPassTargetsRefused, fmt.Errorf("render: pass %q: %w", descriptor.Label, err))
@@ -59,7 +59,7 @@ func (l *CommandList) BeginPass(descriptor PassDescriptor) Pass {
 	case skipped:
 		return Pass{}
 	}
-	return Pass{encoder: l.encoder.BeginRenderPass(passDescriptor)}
+	return Pass{frame: l.frame, encoder: l.encoder.BeginRenderPass(passDescriptor), formats: formats}
 }
 
 // End ends the list: nothing more is recorded into it.
@@ -68,17 +68,19 @@ func (l *CommandList) End() {
 }
 
 // makeRenderPassDescriptor answers gfx's descriptor of the pass descriptor
-// declares, and true when the pass is skipped for a window with no
-// framebuffer this frame; an error saying why it is refused.
-func (l *CommandList) makeRenderPassDescriptor(descriptor PassDescriptor) (gfx.RenderPassDescriptor, bool, error) {
+// declares, the formats and sample count of its targets, and true when the
+// pass is skipped for a window with no framebuffer this frame; an error
+// saying why it is refused.
+func (l *CommandList) makeRenderPassDescriptor(descriptor PassDescriptor) (gfx.RenderPassDescriptor, passFormat, bool, error) {
 	colorCount := len(descriptor.ColorTargets)
-	maxColorCount := l.frame.device.Get().Limits().MaxColorAttachments
+	maxColorCount := min(int(l.frame.device.Get().Limits().MaxColorAttachments), maxColorTargetCount)
 	switch {
 	case colorCount == 0 && descriptor.DepthStencil.Texture == (Texture{}):
-		return gfx.RenderPassDescriptor{}, false, errors.New("it has neither a colour target nor a depth-stencil target")
-	case colorCount > int(maxColorCount):
-		return gfx.RenderPassDescriptor{}, false, fmt.Errorf("it has %d colour targets, more than %d", colorCount, maxColorCount)
+		return gfx.RenderPassDescriptor{}, passFormat{}, false, errors.New("it has neither a colour target nor a depth-stencil target")
+	case colorCount > maxColorCount:
+		return gfx.RenderPassDescriptor{}, passFormat{}, false, fmt.Errorf("it has %d colour targets, more than %d", colorCount, maxColorCount)
 	}
+	formats := passFormat{colorCount: colorCount}
 	passDescriptor := gfx.RenderPassDescriptor{Label: descriptor.Label}
 	if colorCount > 0 {
 		passDescriptor.ColorAttachments = make([]gfx.RenderPassColorAttachment, colorCount)
@@ -91,22 +93,28 @@ func (l *CommandList) makeRenderPassDescriptor(descriptor PassDescriptor) (gfx.R
 		attachment, foundTarget, ok, err := l.makeColorAttachment(target, firstTarget)
 		switch {
 		case err != nil:
-			return gfx.RenderPassDescriptor{}, false, fmt.Errorf("colour target %d %w", index, err)
+			return gfx.RenderPassDescriptor{}, passFormat{}, false, fmt.Errorf("colour target %d %w", index, err)
 		case !ok:
 			skipped = true
 		case firstTarget.view == (gfx.TextureView{}):
 			firstTarget = foundTarget
 		}
 		passDescriptor.ColorAttachments[index] = attachment
+		formats.colorFormats[index] = foundTarget.format
 	}
 	if target := descriptor.DepthStencil; target.Texture != (Texture{}) {
-		attachment, err := l.makeDepthStencilAttachment(target, firstTarget)
+		attachment, foundTarget, err := l.makeDepthStencilAttachment(target, firstTarget)
 		if err != nil {
-			return gfx.RenderPassDescriptor{}, false, fmt.Errorf("depth-stencil target %w", err)
+			return gfx.RenderPassDescriptor{}, passFormat{}, false, fmt.Errorf("depth-stencil target %w", err)
 		}
 		passDescriptor.DepthStencilAttachment = attachment
+		formats.depthStencilFormat = foundTarget.format
+		if firstTarget.view == (gfx.TextureView{}) {
+			firstTarget = foundTarget
+		}
 	}
-	return passDescriptor, skipped, nil
+	formats.sampleCount = firstTarget.sampleCount
+	return passDescriptor, formats, skipped, nil
 }
 
 // makeColorAttachment answers gfx's attachment of the colour target, and the
@@ -146,9 +154,9 @@ func (l *CommandList) makeColorAttachment(target ColorTarget, firstTarget passTa
 
 // makeDepthStencilAttachment answers gfx's attachment of the depth-stencil
 // target, which agrees with firstTarget, the first target found of its pass:
-// loaded and stored, or read-only, in each aspect its format has; an error
-// saying why it is refused.
-func (l *CommandList) makeDepthStencilAttachment(target DepthStencilTarget, firstTarget passTarget) (gfx.RenderPassDepthStencilAttachment, error) {
+// loaded and stored, or read-only, in each aspect its format has; and the
+// target found; an error saying why it is refused.
+func (l *CommandList) makeDepthStencilAttachment(target DepthStencilTarget, firstTarget passTarget) (gfx.RenderPassDepthStencilAttachment, passTarget, error) {
 	foundTarget, _, err := l.findTarget(platform.Window{}, target.Texture, target.MipLevel, target.Layer)
 	formatFlags := foundTarget.format.info().flags
 	switch {
@@ -161,7 +169,7 @@ func (l *CommandList) makeDepthStencilAttachment(target DepthStencilTarget, firs
 		err = foundTarget.checkAgreement(firstTarget)
 	}
 	if err != nil {
-		return gfx.RenderPassDepthStencilAttachment{}, err
+		return gfx.RenderPassDepthStencilAttachment{}, passTarget{}, err
 	}
 	attachment := gfx.RenderPassDepthStencilAttachment{View: foundTarget.view, DepthClearValue: target.ClearDepth, StencilClearValue: target.ClearStencil}
 	loadOp, storeOp := makeLoadStoreOps(target.Clear, target.Discard)
@@ -181,7 +189,7 @@ func (l *CommandList) makeDepthStencilAttachment(target DepthStencilTarget, firs
 		attachment.StencilLoadOp = loadOp
 		attachment.StencilStoreOp = storeOp
 	}
-	return attachment, nil
+	return attachment, foundTarget, nil
 }
 
 // findTarget answers the target of a pass naming window, or texture at

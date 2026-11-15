@@ -16,11 +16,12 @@ import (
 	"github.com/dvoyni/cog/gfx"
 )
 
-// Reflection is what gfx reflects of one variant of a shader: its bindings,
-// in the order it declares them, and the inputs of each vertex entry point,
-// by name.
+// Reflection is what gfx reflects of one variant of a shader: its bindings
+// and its entry points, each in the order it declares them, and the inputs
+// of each vertex entry point, by name.
 type Reflection struct {
 	Bindings     []gfx.ShaderBinding
+	EntryPoints  []gfx.ShaderEntryPoint
 	VertexInputs map[string][]gfx.VertexInput
 }
 

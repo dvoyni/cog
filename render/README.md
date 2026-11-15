@@ -72,7 +72,22 @@ buffers of `@group(2)` at dynamic offsets; identical layouts are shared
 between shaders. A file that fails to preprocess or compile is reported
 once, and one declaring `@group(3)` or past the device's limits is refused
 and reported once; `ReleaseShader` frees it as `ReleaseTexture` frees a
-texture.
+texture. `MakeMesh(MeshDescriptor)` makes a mesh of vertex buffers, each a
+`BufferRange` with its `VertexLayout`, an optional `IndexBuffer` and a
+`PrimitiveTopology`; `MakeMaterial(MaterialDescriptor{Label, Shader, State,
+VertexEntryPoint, FragmentEntryPoint})` a material of a shader, its
+`State`, whose zero value is WebGPU's default pipeline state, and its
+entry points, an empty one naming the shader's only function of its stage,
+a missing or ambiguous one refused and reported once. A pass's
+`SetMaterial` selects a material, and `Draw(mesh, DrawArgs{InstanceCount,
+FirstInstance})` draws the whole mesh with a pipeline shared by the
+variant, entry points, render state, vertex layouts, the pass's formats and
+sample count, and the topology, made by its first draw in the recording
+job and freed with its shader; a pipeline that fails is reported once and
+its draws skipped until then, and a draw naming a failed or freed buffer,
+shader, mesh or material is skipped and reported once. A shader with no
+`@fragment` draws only into passes without colour targets. Each mesh and
+material is given back once with `ReleaseMesh` or `ReleaseMaterial`.
 What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
 
 ## Shape
@@ -96,8 +111,13 @@ What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
   from slices, writes them, a texture by **`TextureRegion`**, and releases
   them, and acquires and releases **`Shader`**s, each a variant of a file
   with its **`ShaderDefine`**s.
+- **`Mesh`** and **`Material`** are made from a **`MeshDescriptor`** and a
+  **`MaterialDescriptor`**, its **`State`** blending, masking,
+  testing and culling as WebGPU's defaults when zero; a pass's
+  **`SetMaterial`** and **`Draw`** draw a mesh with a material.
 - **`Inspection`** is a frame written down in render's terms: its command
-  lists by order, their passes with their targets.
+  lists by order, their passes with their targets and their draws, each an
+  **`InspectedDraw`** with its **`InspectedMaterial`** and counts.
 - **`Report`** is a mistake render finds at run time, logged once and
   carried past; its `ReportKind` names it for tests.
 - **`rendertest.Harness`** spawns platform on headless windows, metronome
@@ -110,7 +130,9 @@ What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
   `cmd/declarebindings` generates a declaration from the shader on wgpu's
   software adapter, with a section for each `-variant`, run from
   `//go:generate`; render's mip shader has its own beside it in `assets`,
-  generated so from `assets.go`. `Step` draws one beat, `OpenWindow` opens a window,
+  generated so from `assets.go`. A declaration holds the shader's bindings,
+its entry points with their stages, and each vertex entry point's inputs.
+`Step` draws one beat, `OpenWindow` opens a window,
   `LengthenNextAcquire` makes an acquire take longer, `ExpectReport`
   names a report kind the test expects, `Reports` answers the reports
   logged, and `Frames` reads each frame back as an `Inspection`.

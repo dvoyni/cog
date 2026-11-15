@@ -24,6 +24,11 @@ func TestAMarshalledDeclarationReadsBackEachVariantsReflection(t *testing.T) {
 			{Name: "shadow", Group: 1, Binding: 1, Sampler: gfx.SamplerBindingLayout{Type: gfx.SamplerBindingTypeComparison}},
 			{Name: "written", Group: 2, StorageTexture: gfx.StorageTextureBindingLayout{Access: gfx.StorageTextureAccessReadWrite, Format: gfx.TextureFormatR32Float, ViewDimension: gfx.TextureViewDimension2DArray}},
 		},
+		EntryPoints: []gfx.ShaderEntryPoint{
+			{Name: "vertex_main", Stage: gfx.ShaderStageFlagVertex},
+			{Name: "fragment_main", Stage: gfx.ShaderStageFlagFragment},
+			{Name: "cull", Stage: gfx.ShaderStageFlagCompute},
+		},
 		VertexInputs: map[string][]gfx.VertexInput{
 			"vertex_main": {{Location: 0, Type: gfx.ScalarTypeFloat32, Components: 3}, {Location: 1, Type: gfx.ScalarTypeUint32, Components: 1}},
 		},
@@ -32,6 +37,7 @@ func TestAMarshalledDeclarationReadsBackEachVariantsReflection(t *testing.T) {
 		Defines: []gfx.ShaderDefine{{Name: "SKINNED"}, {Name: "JOINTS", Value: "4"}},
 		Reflection: bindingdeclaration.Reflection{
 			Bindings:     []gfx.ShaderBinding{{Name: "joints", Group: 2, Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeStorage, MinBindingSize: 64}}},
+			EntryPoints:  []gfx.ShaderEntryPoint{{Name: "vertex_main", Stage: gfx.ShaderStageFlagVertex}},
 			VertexInputs: map[string][]gfx.VertexInput{"vertex_main": {{Location: 0, Type: gfx.ScalarTypeSint32, Components: 4}}},
 		},
 	}
@@ -62,6 +68,10 @@ func TestAValueTheFormatCannotNameFailsMarshalNamingIt(t *testing.T) {
 		"a storage format WebGPU refuses a storage texture": {
 			bindingdeclaration.Reflection{Bindings: []gfx.ShaderBinding{{Name: "written", StorageTexture: gfx.StorageTextureBindingLayout{Access: gfx.StorageTextureAccessWriteOnly, Format: gfx.TextureFormatDepth32Float, ViewDimension: gfx.TextureViewDimension2D}}}},
 			"storage format",
+		},
+		"an entry point of several stages": {
+			bindingdeclaration.Reflection{EntryPoints: []gfx.ShaderEntryPoint{{Name: "both", Stage: gfx.ShaderStageFlagVertex | gfx.ShaderStageFlagFragment}}},
+			`entry point "both"`,
 		},
 		"a vector of five": {
 			bindingdeclaration.Reflection{VertexInputs: map[string][]gfx.VertexInput{"vertex_main": {{Location: 2, Type: gfx.ScalarTypeFloat32, Components: 5}}}},

@@ -19,21 +19,24 @@
 // # Binding declarations
 //
 // gfx's recording adapter parses no WGSL, so the harness answers a shader's
-// reflection, its bindings and its vertex entry points' inputs, from a binding
+// reflection, its bindings, its entry points and its vertex entry points'
+// inputs, from a binding
 // declaration: a JSON file beside the shader, named for it with .json
 // appended, lit.wgsl.json beside lit.wgsl, read from the files the shader is
 // preprocessed from. render's cmd/declarebindings generates it from the
 // shader on wgpu's software adapter, with a variant for each define set
 // named with -variant, run from a //go:generate line beside the shaders:
 //
-//	//go:generate go run github.com/dvoyni/cog/render/cmd/declarebindings -variant SKINNED,JOINTS=4 lit.wgsl A shader compiled with no declaration, or with one that
-// fails to parse, fails the test, naming its path. An answer a test of
+//	//go:generate go run github.com/dvoyni/cog/render/cmd/declarebindings -variant SKINNED,JOINTS=4 lit.wgsl
+//
+// A shader compiled with no declaration, or with one that fails to parse,
+// fails the test, naming its path. An answer a test of
 // rendertest's own queues on the recording adapter wins over the
 // declaration's.
 //
-// A declaration holds the shader's bindings, the inputs of each vertex entry
-// point by name, and a variant for each define set whose bindings or inputs
-// differ:
+// A declaration holds the shader's bindings, its entry points with their
+// stages, the inputs of each vertex entry point by name, and a variant for
+// each define set whose bindings, entry points or inputs differ:
 //
 //	{
 //		"bindings": [
@@ -45,6 +48,7 @@
 //			{"group": 1, "binding": 1, "name": "albedo_sampler", "sampler": {"type": "filtering"},
 //				"entryPoints": ["fragment_main"]}
 //		],
+//		"entryPoints": [{"name": "vertex_main", "stage": "vertex"}, {"name": "fragment_main", "stage": "fragment"}],
 //		"vertexInputs": {"vertex_main": [{"location": 0, "type": "vec3<f32>"}]},
 //		"variants": [
 //			{"defines": {"SKINNED": "", "JOINTS": "4"}, "bindings": [...], "vertexInputs": {...}}
@@ -67,11 +71,16 @@
 //     "format", one WebGPU allows a storage texture, such as rgba8unorm, and
 //     its "viewDimension".
 //
+// An entry point has its name and its stage, vertex, fragment or compute, in
+// the order the shader declares them; a declaration with none declares a
+// shader with no function a material or dispatch can name.
+//
 // A vertex input has its location and its type as WGSL spells it, f32, f16,
 // i32 or u32, or a vector of two to four of them, vec3<f32>; builtins are no
 // inputs. A variant applies when its "defines", each name with its value,
 // empty for none, are exactly those the shader is preprocessed with, in any
-// order; its bindings and inputs then replace the declaration's whole. Any
+// order; its bindings, entry points and inputs then replace the
+// declaration's whole. Any
 // other define set takes the declaration's own.
 //
 // The harness appends a comment naming the shader and its defines to the text

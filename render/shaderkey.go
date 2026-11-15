@@ -55,10 +55,10 @@ func makeShaderKey(path string, defines []ShaderDefine) (shaderKey, []gfx.Shader
 }
 
 // compile preprocesses k's file with defines, its own sorted, makes its module,
-// labelled with shader, and acquires from layouts the layout of the module's
-// bindings, answering them in a slot. A failure answers the slot with
-// nothing, what it made released, and its error, with the kind it is
-// reported as: ReportKindLoadFailed for a file that fails to preprocess or
+// labelled with shader, reflects its entry points, and acquires from layouts
+// the layout of the module's bindings, answering them in a slot. A failure
+// answers the slot with nothing, what it made released, and its error, with
+// the kind it is reported as: ReportKindLoadFailed for a file that fails to preprocess or
 // compile, ReportKindShaderRefused for one refused for its bindings, and none
 // for an error of gfx's to log.
 func (k shaderKey) compile(device gfx.Device, layouts *layoutInterner, files fs.FS, shader Shader, defines []gfx.ShaderDefine) (slot shaderSlot, reportKind ReportKind, err error) {
@@ -82,6 +82,10 @@ func (k shaderKey) compile(device gfx.Device, layouts *layoutInterner, files fs.
 	if err != nil {
 		return shaderSlot{}, 0, err
 	}
+	entryPoints, err := device.ShaderModuleEntryPoints(module)
+	if err != nil {
+		return shaderSlot{}, 0, err
+	}
 	groups, err := makeGroupLayouts(bindings)
 	if err != nil {
 		return shaderSlot{}, ReportKindShaderRefused, err
@@ -93,7 +97,7 @@ func (k shaderKey) compile(device gfx.Device, layouts *layoutInterner, files fs.
 		}
 		return shaderSlot{}, 0, err
 	}
-	return shaderSlot{module: module, layout: layout}, 0, nil
+	return shaderSlot{module: module, layout: layout, entryPoints: entryPoints}, 0, nil
 }
 
 // makeGroupLayouts answers the layout of each group up to the highest

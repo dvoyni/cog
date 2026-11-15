@@ -24,6 +24,16 @@
       ]
     }
   ],
+  "entryPoints": [
+    {
+      "name": "vertex_main",
+      "stage": "vertex"
+    },
+    {
+      "name": "fragment_main",
+      "stage": "fragment"
+    }
+  ],
   "vertexInputs": {
     "vertex_main": []
   }

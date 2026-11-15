@@ -45,6 +45,20 @@ type Shader struct{ handle }
 // labelKind answers "shader", the kind its gfx shader modules' labels name.
 func (Shader) labelKind() string { return "shader" }
 
+// Mesh names one of render's meshes: pointer-free and comparable, its zero
+// value naming none.
+type Mesh struct{ handle }
+
+// labelKind answers "mesh", the kind a mesh's reports name.
+func (Mesh) labelKind() string { return "mesh" }
+
+// Material names one of render's materials: pointer-free and comparable, its
+// zero value naming none.
+type Material struct{ handle }
+
+// labelKind answers "material", the kind a material's reports name.
+func (Material) labelKind() string { return "material" }
+
 // MakeLabel answers the label of the gfx object behind h, naming h and then
 // label, the one its user gave.
 func MakeLabel[H Handle](h H, label string) string {

@@ -21,6 +21,10 @@ type assetTable struct {
 	textures handle.SlotMap[Texture, textureSlot]
 	buffers  handle.SlotMap[Buffer, bufferSlot]
 	shaders  handle.SlotMap[Shader, shaderSlot]
+	// meshes is every mesh render holds, and materials every material, by its
+	// handle.
+	meshes    handle.SlotMap[Mesh, meshSlot]
+	materials handle.SlotMap[Material, materialSlot]
 	// loadedTextures, loadedBuffers and loadedShaders share, count and free
 	// the textures, buffers and shaders loaded from files.
 	loadedTextures textureLoader
@@ -32,6 +36,21 @@ type assetTable struct {
 	// by its own handle, once, until its maker releases it.
 	madeTextures assetCounter[Texture, Texture]
 	madeBuffers  assetCounter[Buffer, Buffer]
+	// madeMeshes and madeMaterials hold the meshes and materials, as
+	// madeTextures holds the made textures.
+	madeMeshes    assetCounter[Mesh, Mesh]
+	madeMaterials assetCounter[Material, Material]
+	// vertexLayouts numbers the meshes' vertex layouts, for pipelines'
+	// keys, and pipelines holds the pipelines draws made.
+	vertexLayouts vertexLayoutInterner
+	pipelines     pipelineCache
+	// unheldReportedMeshes and unheldReportedMaterials are the meshes and
+	// materials render does not hold whose skipped draws were reported, so
+	// each is reported once; a held one's slot notes it, and forgets it
+	// when freed. A handle is never handed out again, so an entry names no
+	// asset made later.
+	unheldReportedMeshes    map[Mesh]struct{}
+	unheldReportedMaterials map[Material]struct{}
 }
 
 // addTexture makes a gfx texture of descriptor, whose counts are filled in,
@@ -97,6 +116,122 @@ func (t *assetTable) fillShader(shader Shader, slot shaderSlot) {
 		panic(fmt.Sprintf("render: filling shader %v, which no addEmptyShader handed out or which was removed", shader))
 	}
 	*emptySlot = slot
+}
+
+// addMesh holds a mesh of descriptor and answers its handle, its vertex
+// layouts numbered by the vertex layout interner. A mesh is refused, with
+// an error saying why, for more vertex buffers than device allows, a vertex
+// buffer at an offset or of a stride no multiple of 4, an attribute at an
+// offset no multiple of its format's alignment, an index buffer of no index
+// format or at an offset no multiple of its index's size, or a topology gfx
+// has none of.
+func (t *assetTable) addMesh(device gfx.Device, descriptor MeshDescriptor) (Mesh, error) {
+	if maxCount := min(device.Limits().MaxVertexBuffers, maxVertexBufferCount); uint64(len(descriptor.VertexBuffers)) > uint64(maxCount) {
+		return Mesh{}, fmt.Errorf("it has %d vertex buffers, more than %d", len(descriptor.VertexBuffers), maxCount)
+	}
+	for index, vertexBuffer := range descriptor.VertexBuffers {
+		if vertexBuffer.Range.Offset%4 != 0 || vertexBuffer.Layout.Stride%4 != 0 {
+			return Mesh{}, fmt.Errorf("vertex buffer %d is at offset %d with a stride of %d, where both are multiples of 4", index, vertexBuffer.Range.Offset, vertexBuffer.Layout.Stride)
+		}
+		for _, attribute := range vertexBuffer.Layout.Attributes {
+			if alignment := attribute.Format.alignment(); attribute.Offset%alignment != 0 {
+				return Mesh{}, fmt.Errorf("vertex buffer %d's attribute at location %d is at offset %d, no multiple of %d, its format's alignment", index, attribute.Location, attribute.Offset, alignment)
+			}
+		}
+	}
+	if indices := descriptor.Indices; indices.Range.Buffer != (Buffer{}) && (indices.Format.size() == 0 || indices.Range.Offset%indices.Format.size() != 0) {
+		return Mesh{}, fmt.Errorf("its index buffer is of index format %d at offset %d, where it is of a format with indices of 2 or 4 bytes at a multiple of their size", indices.Format, indices.Range.Offset)
+	}
+	if descriptor.Topology > PrimitiveTopologyTriangleStrip {
+		return Mesh{}, fmt.Errorf("its topology is %d, which gfx has none of", descriptor.Topology)
+	}
+	vertexLayout := t.vertexLayouts.intern(descriptor.VertexBuffers)
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	mesh, slot := t.meshes.Acquire()
+	slot.label = descriptor.Label
+	slot.vertexBuffers = slot.vertexBuffers[:0]
+	for _, vertexBuffer := range descriptor.VertexBuffers {
+		slot.vertexBuffers = append(slot.vertexBuffers, meshVertexBuffer{bufferRange: vertexBuffer.Range, stride: vertexBuffer.Layout.Stride})
+	}
+	slot.indices = descriptor.Indices
+	slot.topology = descriptor.Topology
+	slot.vertexLayout = vertexLayout
+	slot.reported = false
+	return mesh, nil
+}
+
+// addMaterial holds a material of descriptor and answers its handle, with
+// the entry points of its shader it names, when render holds the shader
+// compiled; one of a shader render does not hold, or that failed, keeps
+// them unresolved, no vertex entry point, and its draws are skipped. A material whose entry points
+// its shader cannot resolve is held refused, its draws skipped, and the
+// error says why.
+func (t *assetTable) addMaterial(descriptor MaterialDescriptor) (Material, error) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	material, slot := t.materials.Acquire()
+	*slot = materialSlot{label: descriptor.Label, shader: descriptor.Shader, state: descriptor.State}
+	shader, ok := t.shaders.Find(descriptor.Shader)
+	if !ok || shader.module == (gfx.ShaderModule{}) {
+		return material, nil
+	}
+	vertexEntryPoint, err := shader.findEntryPoint(gfx.ShaderStageFlagVertex, descriptor.VertexEntryPoint)
+	if err == nil && vertexEntryPoint == "" {
+		err = errors.New("names no function, and its shader has none of the vertex stage")
+	}
+	if err != nil {
+		slot.refused = true
+		return material, fmt.Errorf("its vertex entry point %w", err)
+	}
+	fragmentEntryPoint, err := shader.findEntryPoint(gfx.ShaderStageFlagFragment, descriptor.FragmentEntryPoint)
+	if err != nil {
+		slot.refused = true
+		return material, fmt.Errorf("its fragment entry point %w", err)
+	}
+	slot.vertexEntryPoint = vertexEntryPoint
+	slot.fragmentEntryPoint = fragmentEntryPoint
+	return material, nil
+}
+
+// findSlot answers a copy of h's slot among slots, a shader's the zero slot
+// for one that failed; false when render holds no such asset.
+func (t *assetTable) findSlot[H handle.Handle, S any](slots *handle.SlotMap[H, S], h H) (S, bool) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	slot, ok := slots.Find(h)
+	if !ok {
+		var none S
+		return none, false
+	}
+	return *slot, true
+}
+
+// claimMeshReport answers whether a skipped draw of mesh is to be reported,
+// noting that it is, so later draws of mesh are not: true the first time
+// for each mesh, held or not.
+func (t *assetTable) claimMeshReport(mesh Mesh) bool {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	if slot, ok := t.meshes.Find(mesh); ok {
+		claimed := !slot.reported
+		slot.reported = true
+		return claimed
+	}
+	return claimUnheldReport(&t.unheldReportedMeshes, mesh)
+}
+
+// claimMaterialReport answers whether a skipped draw of material is to be
+// reported, as claimMeshReport does for a mesh.
+func (t *assetTable) claimMaterialReport(material Material) bool {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	if slot, ok := t.materials.Find(material); ok {
+		claimed := !slot.reported
+		slot.reported = true
+		return claimed
+	}
+	return claimUnheldReport(&t.unheldReportedMaterials, material)
 }
 
 // findTexture answers the gfx texture behind texture; false when render holds
@@ -208,7 +343,7 @@ func (t *assetTable) writeTexture(device gfx.Device, texture Texture, region Tex
 
 // freeReleased removes every loaded texture, buffer and shader whose last
 // acquire was released since the last frame ended and is not acquired again,
-// and every made texture and buffer released since then.
+// and every made texture, buffer, mesh and material released since then.
 func (t *assetTable) freeReleased(device gfx.Device) {
 	removeTexture := func(texture Texture) { t.removeTexture(device, texture) }
 	removeBuffer := func(buffer Buffer) { t.removeBuffer(device, buffer) }
@@ -217,6 +352,8 @@ func (t *assetTable) freeReleased(device gfx.Device) {
 	t.loadedShaders.freeReleased(func(shader Shader) { t.removeShader(device, shader) })
 	t.madeTextures.freeReleased(removeTexture)
 	t.madeBuffers.freeReleased(removeBuffer)
+	t.madeMeshes.freeReleased(t.removeMesh)
+	t.madeMaterials.freeReleased(t.removeMaterial)
 }
 
 // removeTexture releases the gfx texture behind texture and its views, and
@@ -252,8 +389,23 @@ func (t *assetTable) removeBuffer(device gfx.Device, buffer Buffer) {
 	t.buffers.Release(buffer)
 }
 
-// removeShader releases the module behind shader and its holding of its
-// layout, and frees its slot for a handle of the next generation.
+// removeMesh frees mesh's slot for a handle of the next generation, keeping
+// its arrays for the next mesh made.
+func (t *assetTable) removeMesh(mesh Mesh) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	t.meshes.Release(mesh)
+}
+
+// removeMaterial frees material's slot for a handle of the next generation.
+func (t *assetTable) removeMaterial(material Material) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	t.materials.Release(material)
+}
+
+// removeShader releases the module behind shader, its holding of its layout
+// and its pipelines, and frees its slot for a handle of the next generation.
 func (t *assetTable) removeShader(device gfx.Device, shader Shader) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
@@ -261,6 +413,7 @@ func (t *assetTable) removeShader(device gfx.Device, shader Shader) {
 	if !ok {
 		return
 	}
+	t.pipelines.removeShader(device, shader)
 	if slot.module != (gfx.ShaderModule{}) {
 		device.ReleaseShaderModule(slot.module)
 		t.layouts.release(device, slot.layout)
@@ -284,12 +437,16 @@ type bufferSlot struct {
 	size   uint64
 }
 
-// shaderSlot is the slot of one shader: the gfx module behind its handle and
-// the pipeline layout of its bindings, which it holds in the layout
-// interner, both none for a shader that failed or was refused.
-type shaderSlot struct {
-	module gfx.ShaderModule
-	layout *internedPipelineLayout
+// materialSlot is the slot of one material: what it was made of, with the
+// entry points of its shader it runs once resolved, an empty vertex one
+// meaning unresolved and an empty fragment one none; whether it was refused
+// for them; and whether a draw of it was skipped and reported.
+type materialSlot struct {
+	label                                string
+	shader                               Shader
+	state                                State
+	vertexEntryPoint, fragmentEntryPoint string
+	refused, reported                    bool
 }
 
 // levelView is a view of one mip level and one layer of a texture, which a
@@ -325,4 +482,18 @@ func padBytes(data []byte) []byte {
 		return append(data[:len(data):len(data)], make([]byte, size-uint64(len(data)))...)
 	}
 	return data
+}
+
+// claimUnheldReport answers whether a skipped draw of h, which render does
+// not hold, is to be reported: true unless reported holds it, which it then
+// does.
+func claimUnheldReport[H comparable](reported *map[H]struct{}, h H) bool {
+	if _, ok := (*reported)[h]; ok {
+		return false
+	}
+	if *reported == nil {
+		*reported = map[H]struct{}{}
+	}
+	(*reported)[h] = struct{}{}
+	return true
 }

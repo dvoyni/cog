@@ -19,3 +19,13 @@ type Buffer = handle.Buffer
 // pointer-free, comparable handle an ECS component can hold, its zero value
 // naming none. It lives only while the program runs.
 type Shader = handle.Shader
+
+// Mesh names one of render's meshes, made with Inventory.MakeMesh: a
+// pointer-free, comparable handle an ECS component can hold, its zero value
+// naming none. It lives only while the program runs.
+type Mesh = handle.Mesh
+
+// Material names one of render's materials, made with Inventory.MakeMaterial:
+// a pointer-free, comparable handle an ECS component can hold, its zero value
+// naming none. It lives only while the program runs.
+type Material = handle.Material
