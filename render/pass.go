@@ -372,7 +372,7 @@ func (p *Pass) setUniform(group int, name string, uniformType reflect.Type, data
 	}
 	state := p.frame.state.Get()
 	setting := parameterSetting{name: name}
-	bufferRange, err := p.listState.allocate(data, state.temporaryChunkSize, &state.arena, p.frame.table.Get(), p.frame.device.Get())
+	bufferRange, err := p.frame.table.Get().allocateTemporary(p.listState, data, p.frame.device.Get())
 	if err != nil {
 		state.logUnlessLost(fmt.Errorf("render: setting uniform block %q: %w", name, err))
 	} else {

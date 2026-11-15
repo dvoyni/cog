@@ -101,7 +101,12 @@ comparison sampler and zeros of a block's size, but for a storage binding
 a running function reads, which skips the draw; a texture a pass writes,
 bound in it, draws its default, reported once; a texture or buffer freed
 under a material unbinds at the end of that frame. Gfx views are interned
-by texture and view, and samplers shared by value. A pass's
+by texture and view, and samplers shared by value. A draw uses the values
+its material holds when it is recorded: a change after the material's
+first draw in the frame makes a version, a new bind group with its uniform
+blocks copied into the arena, freed at the frame's end, while one before
+it makes none; a change made by one task while another records may not
+show in that task's draws. A pass's
 `SetPassTexture`, `SetPassTextureView`, `SetPassSampler`, `SetPassBuffer`
 and `SetPassUniform[T]` bind its parameters of `@group(0)`, read by every
 draw after them in the pass, and `SetTexture`, `SetTextureView`,

@@ -97,7 +97,7 @@ func (p *bindingValue) fillUniform(device gfx.Device, binding gfx.ShaderBinding,
 		}
 		*uniformBuffer = buffer
 	}
-	p.kind = parameterKindUniform
+	*p = bindingValue{kind: parameterKindUniform}
 	return nil
 }
 

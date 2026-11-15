@@ -20,8 +20,9 @@ const ownOrder Order = math.MinInt32
 
 // CommandList is one task's run of passes for a frame, kept in the order they
 // were recorded, from Frame.BeginCommandList to its End, with the chunks of
-// the temporary arena its temporary buffers and pass and draw uniform blocks
-// are blocks of. One task fills it; lists fill concurrently, each into
+// the temporary arena its temporary buffers, its pass and draw uniform
+// blocks and those of the material versions its draws make are blocks of.
+// One task fills it; lists fill concurrently, each into
 // chunks of its own. A refused list records into nothing.
 type CommandList struct {
 	// frame is the parameter the list was begun from, and gfxFrame gfx's
@@ -93,7 +94,7 @@ func (l *CommandList) AcquireTemporaryBuffer[T any](data []T) BufferRange {
 		return BufferRange{}
 	}
 	state := l.frame.state.Get()
-	bufferRange, err := l.listState.allocate(castToBytes(data), state.temporaryChunkSize, &state.arena, l.frame.table.Get(), l.frame.device.Get())
+	bufferRange, err := l.frame.table.Get().allocateTemporary(l.listState, castToBytes(data), l.frame.device.Get())
 	if err != nil {
 		state.logUnlessLost(fmt.Errorf("render: acquiring a temporary buffer: %w", err))
 	}
@@ -101,8 +102,9 @@ func (l *CommandList) AcquireTemporaryBuffer[T any](data []T) BufferRange {
 }
 
 // End ends the list: nothing more is recorded into it, and the chunks of
-// its temporary buffers and pass and draw uniform blocks go to gfx, one
-// write each, landing before every command list of the frame's submit.
+// its temporary buffers, its pass and draw uniform blocks and its material
+// versions' go to gfx, one write each, landing before every command list of
+// the frame's submit.
 func (l *CommandList) End() {
 	if l.encoder != nil {
 		l.listState.writeChunks(l.frame.table.Get(), l.frame.device.Get())

@@ -14,15 +14,17 @@ type commandListStatePool struct {
 	heldCount int
 }
 
-// acquire hands out a state no list holds this frame, empty, making one
-// when the pool has none.
-func (p *commandListStatePool) acquire() *commandListState {
+// acquire hands out a state no list holds this frame, empty, taking chunks
+// of chunkSize bytes from arena, making one when the pool has none.
+func (p *commandListStatePool) acquire(arena *temporaryArena, chunkSize uint64) *commandListState {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	if p.heldCount == len(p.states) {
 		p.states = append(p.states, &commandListState{})
 	}
 	state := p.states[p.heldCount]
+	state.arena = arena
+	state.chunkSize = chunkSize
 	p.heldCount++
 	return state
 }

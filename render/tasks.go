@@ -32,7 +32,8 @@ func generateMips(k *kernel.Kernel, frame gfx.Frame, state kernel.Read[*frameSta
 
 // endFrame ends the frame gfx has presented: it frees the loaded textures
 // and buffers whose last acquire was released and the made ones released,
-// releases the bind groups its mips drew with, takes back the temporary
+// frees the material versions the frame made, its materials' buffers taking
+// their latest uniform blocks, releases the bind groups its mips drew with, takes back the temporary
 // textures, the arena's chunks and the lists' states held, frees the
 // temporaries gone unused for Config's TemporaryIdleFrames frames, then
 // unbinds every material value, and releases every bind group of pass or
@@ -41,6 +42,7 @@ func generateMips(k *kernel.Kernel, frame gfx.Frame, state kernel.Read[*frameSta
 func endFrame(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*frameState], table kernel.Read[*assetTable], device kernel.Read[gfx.Device]) kernel.NoResult {
 	frameState := state.Get()
 	table.Get().freeReleased(device.Get())
+	table.Get().endMaterialVersions(device.Get())
 	frameState.mips.endFrame(device.Get())
 	frameState.temporaryTextures.endFrame(frameState.temporaryIdleFrames, table.Get(), device.Get())
 	frameState.arena.endFrame(frameState.temporaryIdleFrames, table.Get(), device.Get())

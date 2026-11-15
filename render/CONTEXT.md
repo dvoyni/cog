@@ -8,6 +8,10 @@ Render is the immediate-mode rendering API between gfx and the plugins that draw
 A shader with its render state and the values bound to its parameters. Each user of render writes its own; render ships none. A draw uses the values its material holds when the draw is recorded, so a material may change between its draws; values that change between most draws are draw parameters.
 _Avoid_: Draw params, set, effect
 
+**Material version**:
+A material's values as a change after its draw in the frame leaves them: the draws recorded after the change bind them, while those before keep the old. It lasts until the frame ends.
+_Avoid_: Material instance, snapshot, material copy
+
 **Render state**:
 How a material's draws blend and mask each target, test, write and bias depth, test stencil, and cull faces.
 _Avoid_: Draw state, pipeline state
@@ -77,7 +81,7 @@ A range of the temporary arena holding data for one frame, taken from a command 
 _Avoid_: Dynamic buffer, transient buffer, scratch buffer
 
 **Temporary arena**:
-The chunks that temporary buffers and the uniform blocks of pass and draw parameters are ranges of. Each command list takes chunks of its own and hands them to the GPU when it ends; they go back to the arena when the frame ends.
+The chunks that temporary buffers, the uniform blocks of pass and draw parameters, and those of material versions are ranges of. Each command list takes chunks of its own and hands them to the GPU when it ends; they go back to the arena when the frame ends.
 _Avoid_: Ring buffer, staging buffer, uniform ring
 
 **Temporary mesh**:

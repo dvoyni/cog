@@ -19,15 +19,18 @@ const temporaryAlignment = 256
 // storage buffer and a copy's source.
 const temporaryChunkUsage = BufferUsageFlagVertex | BufferUsageFlagIndex | BufferUsageFlagUniform | BufferUsageFlagStorage | BufferUsageFlagCopySrc
 
-// temporaryArena is the pool of chunks that temporary buffers, and the
-// uniform blocks of pass and draw parameters, are blocks of. Each chunk is
-// held by one command list from its first block until the frame ends, and
-// freed once it has gone unused for as many frames as render is configured
-// to wait.
+// temporaryArena is the pool of chunks that temporary buffers, the uniform
+// blocks of pass and draw parameters, and those of material versions, are
+// blocks of. Each chunk is held by one command list from its first block
+// until the frame ends, and freed once it has gone unused for as many frames
+// as render is configured to wait.
 type temporaryArena struct {
-	// mutex guards pooledChunks, every chunk the arena has made and not freed.
+	// mutex guards pooledChunks, every chunk the arena has made and not
+	// freed. It is taken under the asset table's, so freedBuffers, endFrame's
+	// own, holds the buffers it frees until it has let go of mutex.
 	mutex        sync.Mutex
 	pooledChunks []*arenaChunk
+	freedBuffers []Buffer
 }
 
 // arenaChunk is one chunk of the arena: whether a list holds it this frame;
@@ -43,12 +46,13 @@ type arenaChunk struct {
 }
 
 // acquireChunk hands out a chunk of size bytes, a multiple of 4, that no
-// list holds this frame, making one in table when the pool has none. The
-// error is gfx's, when it cannot be made.
+// list holds this frame, making one in table when the pool has none. table's
+// mutex is held. The error is gfx's, when it cannot be made.
 func (a *temporaryArena) acquireChunk(size uint64, table *assetTable, device gfx.Device) (*arenaChunk, error) {
 	if size%4 != 0 {
 		panic(fmt.Sprintf("render: acquiring a chunk of %d bytes, no multiple of 4", size))
 	}
+	table.requireLocked("acquireChunk")
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 	for _, chunk := range a.pooledChunks {
@@ -57,7 +61,7 @@ func (a *temporaryArena) acquireChunk(size uint64, table *assetTable, device gfx
 			return chunk, nil
 		}
 	}
-	buffer, gfxBuffer, err := table.addBuffer(device, handle.TemporaryChunkLabel, size, temporaryChunkUsage)
+	buffer, gfxBuffer, err := table.insertBuffer(device, handle.TemporaryChunkLabel, size, temporaryChunkUsage)
 	if err != nil {
 		return nil, err
 	}
@@ -71,15 +75,19 @@ func (a *temporaryArena) acquireChunk(size uint64, table *assetTable, device gfx
 // is filled from its start.
 func (a *temporaryArena) endFrame(idleFrames int, table *assetTable, device gfx.Device) {
 	a.mutex.Lock()
-	defer a.mutex.Unlock()
 	keptChunks := a.pooledChunks[:0]
 	for _, chunk := range a.pooledChunks {
 		if chunk.endFrame(idleFrames) {
-			table.removeBuffer(device, chunk.buffer)
+			a.freedBuffers = append(a.freedBuffers, chunk.buffer)
 			continue
 		}
 		keptChunks = append(keptChunks, chunk)
 	}
 	clear(a.pooledChunks[len(keptChunks):])
 	a.pooledChunks = keptChunks
+	a.mutex.Unlock()
+	for _, buffer := range a.freedBuffers {
+		table.removeBuffer(device, buffer)
+	}
+	a.freedBuffers = a.freedBuffers[:0]
 }

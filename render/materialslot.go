@@ -11,9 +11,10 @@ import (
 // meaning unresolved and an empty fragment one none; whether it was refused
 // for them; whether a draw of it was skipped and reported; the values bound
 // to its shader's @group(1) bindings, each at its binding's index among
-// them, made once its entry points are resolved, with the buffer holding
-// each uniform block set as a value, made at its first set and kept for the
-// next; and the bind groups its draws bound, until a value changes.
+// them, made once its entry points are resolved, with what it keeps for
+// each uniform block set as a value; the bind groups its draws bound, until
+// a value changes; and the frame a draw of it was last recorded in, as one
+// more than the count of frames ended before it, zero for none.
 type materialSlot struct {
 	label                                string
 	shader                               Shader
@@ -21,8 +22,9 @@ type materialSlot struct {
 	vertexEntryPoint, fragmentEntryPoint string
 	refused, reported                    bool
 	parameters                           []bindingValue
-	uniformBuffers                       []gfx.Buffer
+	uniformBlocks                        []materialUniformBlock
 	bindGroups                           []materialBindGroup
+	drawnFrame                           uint64
 }
 
 // usesBinding answers whether binding is used by a function s runs, its
@@ -73,6 +75,26 @@ func (s *materialSlot) dropBindGroups(drop func(gfx.BindGroup)) {
 	s.bindGroups = s.bindGroups[:0]
 }
 
+// placeLatestUniforms copies into the arena, through listState, the latest
+// bytes of each uniform block of s set after a draw of the frame and not yet
+// copied, and binds the block to them, for the bind group made next. table's
+// mutex is held. The error is gfx's, when an arena chunk cannot be made.
+func (s *materialSlot) placeLatestUniforms(listState *commandListState, table *assetTable, device gfx.Device) error {
+	table.requireLocked("placeLatestUniforms")
+	for index, block := range s.uniformBlocks {
+		parameter := &s.parameters[index]
+		if !block.bufferBehind || parameter.kind != parameterKindUniform || parameter.bufferRange.Buffer != (Buffer{}) {
+			continue
+		}
+		bufferRange, err := listState.allocate(block.latestBytes, table, device)
+		if err != nil {
+			return err
+		}
+		parameter.bufferRange = bufferRange
+	}
+	return nil
+}
+
 // materialBindGroup is a material's own bind group of @group(1), for passes
 // whose targets leave the textures of defaultedMask at their defaults, none
 // when its shader's @group(1) is empty and the layout's default stands in;
@@ -82,4 +104,15 @@ type materialBindGroup struct {
 	defaultedMask uint64
 	group         gfx.BindGroup
 	unboundRead   string
+}
+
+// materialUniformBlock is what a material keeps for one uniform block of its
+// shader's @group(1) set as a value: the buffer holding it, made at its
+// first set; its latest bytes; and whether the buffer is behind them, as
+// they were set after a draw of the frame being recorded, until the frame
+// ends.
+type materialUniformBlock struct {
+	buffer       gfx.Buffer
+	latestBytes  []byte
+	bufferBehind bool
 }

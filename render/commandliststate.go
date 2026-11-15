@@ -7,12 +7,15 @@ import (
 )
 
 // commandListState is what a command list keeps while it records, pooled
-// from frame to frame so recording allocates nothing once warm: the arena
-// chunks it took this frame, blocks going into the current one until it
+// from frame to frame so recording allocates nothing once warm: the arena it
+// takes chunks from, of chunkSize bytes, a multiple of 4; the arena chunks
+// it took this frame, blocks going into the current one until it
 // lacks room; the pass and draw parameters set in its open pass, by their
 // group; and the draft its draws build bind groups in, and hand the dynamic
 // offsets of each they set.
 type commandListState struct {
+	arena             *temporaryArena
+	chunkSize         uint64
 	takenChunks       []*arenaChunk
 	currentChunk      *arenaChunk
 	parameterSettings [reservedGroup][]parameterSetting
@@ -21,40 +24,56 @@ type commandListState struct {
 }
 
 // allocate answers a range of a chunk s holds holding data, at a multiple of
-// temporaryAlignment, taking from arena a chunk of chunkSize bytes, a
-// multiple of 4, when the current one lacks room, or one of data's size
-// rounded up to a multiple of chunkSize when data is larger, so a large
-// block whose size varies from frame to frame reuses its chunk; the zero
-// BufferRange for no data. The error is gfx's, when a chunk cannot be made.
-func (s *commandListState) allocate(data []byte, chunkSize uint64, arena *temporaryArena, table *assetTable, device gfx.Device) (BufferRange, error) {
+// temporaryAlignment, taking from s's arena a chunk of s's chunk size when
+// the current one lacks room, or one of data's size rounded up to a multiple
+// of it when data is larger, so a large block whose size varies from frame
+// to frame reuses its chunk; the zero BufferRange for no data. table's mutex
+// is held, as a chunk made is a buffer of table's. The error is gfx's, when
+// a chunk cannot be made.
+func (s *commandListState) allocate(data []byte, table *assetTable, device gfx.Device) (BufferRange, error) {
+	table.requireLocked("allocate")
+	if bufferRange, ok := s.placeInCurrentChunk(data); ok {
+		return bufferRange, nil
+	}
+	chunkSize := s.chunkSize
 	if chunkSize%4 != 0 {
 		panic(fmt.Sprintf("render: allocating from chunks of %d bytes, no multiple of 4", chunkSize))
 	}
 	size := uint64(len(data))
-	if size == 0 {
-		return BufferRange{}, nil
-	}
 	paddedSize := (size + 3) &^ 3
-	chunk := s.currentChunk
-	var offset uint64
-	if chunk != nil {
-		offset = (chunk.end + temporaryAlignment - 1) &^ (temporaryAlignment - 1)
+	chunk, err := s.arena.acquireChunk((paddedSize+chunkSize-1)/chunkSize*chunkSize, table, device)
+	if err != nil {
+		return BufferRange{}, err
 	}
-	if chunk == nil || offset+paddedSize > uint64(len(chunk.bytes)) {
-		newChunk, err := arena.acquireChunk((paddedSize+chunkSize-1)/chunkSize*chunkSize, table, device)
-		if err != nil {
-			return BufferRange{}, err
-		}
-		s.takenChunks = append(s.takenChunks, newChunk)
-		if paddedSize <= chunkSize {
-			s.currentChunk = newChunk
-		}
-		chunk = newChunk
-		offset = 0
+	s.takenChunks = append(s.takenChunks, chunk)
+	if paddedSize <= chunkSize {
+		s.currentChunk = chunk
+	}
+	copy(chunk.bytes, data)
+	chunk.end = size
+	return BufferRange{Buffer: chunk.buffer, Size: size}, nil
+}
+
+// placeInCurrentChunk answers a range of s's current chunk holding data, at
+// a multiple of temporaryAlignment, and whether the chunk has room for it;
+// the zero BufferRange, and true, for no data. It takes no lock, as only
+// s's list touches s.
+func (s *commandListState) placeInCurrentChunk(data []byte) (BufferRange, bool) {
+	size := uint64(len(data))
+	if size == 0 {
+		return BufferRange{}, true
+	}
+	chunk := s.currentChunk
+	if chunk == nil {
+		return BufferRange{}, false
+	}
+	offset := (chunk.end + temporaryAlignment - 1) &^ (temporaryAlignment - 1)
+	if offset+(size+3)&^3 > uint64(len(chunk.bytes)) {
+		return BufferRange{}, false
 	}
 	copy(chunk.bytes[offset:], data)
 	chunk.end = offset + size
-	return BufferRange{Buffer: chunk.buffer, Offset: offset, Size: size}, nil
+	return BufferRange{Buffer: chunk.buffer, Offset: offset, Size: size}, true
 }
 
 // writeChunks hands gfx the bytes of each chunk s took, in one write each,

@@ -291,7 +291,10 @@ and a **test author** testing a plugin that draws.
   - A view that doesn't fit its binding (dimension, sample type, aspect, more than one mip for a storage binding) or names mips or layers its texture lacks is refused, reported once per shader and name, and the binding draws its default.
   - A sampled texture or view overlapping a target of the pass it is bound in is caught when bound, reported once, and the binding draws its default, so the list's encoder survives the mistake a bloom chain without views would make.
 - **A draw uses the values its material holds when the draw is recorded.**
-  - A material changed after it was drawn in the frame gets a new version: its uniform blocks copied into the arena and a new bind group. Each version allocates a fixed count, which the per-frame gate checks.
+  - A material changed after it was drawn in the frame gets a new version: a new bind group, its uniform blocks copied into the arena chunks of the list whose draw first binds it. Each version allocates a fixed count, which the per-frame gate checks.
+  - Versions are freed at the frame's end, after the present, when the material's own buffers take its latest uniform blocks for the next frame.
+  - A change before the material's first draw in the frame makes no version: a uniform block goes into the material's own buffer, and the bind groups the change replaces are released at once.
+  - A version's blocks go to gfx with its list's chunks, so one first drawn by a list that never ends holds nothing.
   - Values that change between most draws belong in draw parameters, which bind at dynamic offsets and make no bind group.
   - A change made by one task while another records draws of the material may not show in those draws. It shows for certain only in draws recorded by the task that made it, or after a task the kernel orders before the frame's recording.
   - The setters' doc comments and this design state the rule.
@@ -329,7 +332,7 @@ and a **test author** testing a plugin that draws.
   - A pass's bind group naming a temporary range is kept as any other, by what it binds: it is shared while the range stays where it is, and freed once unused for `TemporaryIdleFrames` frames.
   - A storage buffer given as a draw parameter binds at a dynamic offset, so ranges of one buffer and one size share a bind group. A range of another size, which a runtime-sized array reads as its length, takes a bind group of its own.
   - Each block takes at least 256 bytes. A user drawing thousands of small values puts them in one storage array read at `instance_index`.
-- **Each command list takes arena chunks of its own,** so concurrent lists never contend.
+- **Each command list takes arena chunks of its own,** so concurrent lists contend only when one takes a chunk.
   - A list's chunks go to the GPU in one `WriteBuffer` each when the list ends.
   - A list that outgrows its chunk takes another, and a block larger than a chunk gets a chunk of its own, its size rounded up to a multiple of the chunk size, so a large block whose size varies from frame to frame keeps reusing one.
 - **Per-instance data comes two ways:**

@@ -559,3 +559,24 @@ func TestListsSettingAndDrawingOneMaterialAtOnceBindItsValues(t *testing.T) {
 		}
 	}
 }
+
+func TestAUniformBlockSetAfterABufferBindsTheMaterialsOwnBuffer(t *testing.T) {
+	h := rendertest.NewHarness(t)
+	var scene parameterScene
+	spawnParameterHarness(t, h, 1, func(frameIndex int, inventory render.Inventory, frame render.Frame) {
+		scene = makeParameterScene(inventory)
+		block := inventory.MakeBuffer("block", render.BufferUsageFlagUniform, make([]byte, 256))
+		inventory.SetMaterialUniform(scene.material, "tint", tint{Strength: 5})
+		inventory.SetMaterialBuffer(scene.material, "tint", render.BufferRange{Buffer: block})
+		inventory.SetMaterialUniform(scene.material, "tint", tint{Strength: 5})
+		recordPass(frame, scene.colorPass("scene"), func(pass *render.Pass) {
+			pass.SetMaterial(scene.material)
+			pass.Draw(scene.indexedMesh, render.DrawArgs{})
+		})
+	})
+
+	tint, _ := findParameter(findOnlyDraw(t, h, "scene")[0], "tint")
+	if len(tint.Uniform) < 20 || readFloat32(tint.Uniform[16:]) != 5 {
+		t.Errorf("tint bound %+v, want the block set last, of strength 5", tint)
+	}
+}

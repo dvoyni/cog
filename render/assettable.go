@@ -1,6 +1,7 @@
 package render
 
 import (
+	"bytes"
 	"cmp"
 	"errors"
 	"fmt"
@@ -69,6 +70,12 @@ type assetTable struct {
 	// were last unbound from the freed.
 	retiredBindGroups []gfx.BindGroup
 	assetsFreed       bool
+	// endedFrameCount is how many frames have ended, which tells a
+	// material's drawnFrame of the frame being recorded, and
+	// versionedMaterials the materials whose uniform blocks were set after
+	// a draw of it, whose buffers take their latest bytes when it ends.
+	endedFrameCount    uint64
+	versionedMaterials []Material
 }
 
 // addTexture makes a gfx texture of descriptor, whose counts are filled in,
@@ -102,6 +109,12 @@ func (t *assetTable) addTexture(device gfx.Device, descriptor TextureDescriptor)
 func (t *assetTable) addBuffer(device gfx.Device, label string, size uint64, usage BufferUsageFlags) (Buffer, gfx.Buffer, error) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
+	return t.insertBuffer(device, label, size, usage)
+}
+
+// insertBuffer makes a buffer as addBuffer does. t's mutex is held.
+func (t *assetTable) insertBuffer(device gfx.Device, label string, size uint64, usage BufferUsageFlags) (Buffer, gfx.Buffer, error) {
+	t.requireLocked("insertBuffer")
 	buffer, slot := t.buffers.Acquire()
 	if size = (size + 3) &^ 3; size > 0 {
 		gfxBuffer, err := device.CreateBuffer(gfx.BufferDescriptor{Label: handle.MakeLabel(buffer, label), Size: size, Usage: gfx.BufferUsageFlags(usage) | gfx.BufferUsageFlagCopyDst})
@@ -210,21 +223,27 @@ func (t *assetTable) addMaterial(descriptor MaterialDescriptor) (Material, error
 	slot.vertexEntryPoint = vertexEntryPoint
 	slot.fragmentEntryPoint = fragmentEntryPoint
 	slot.parameters = make([]bindingValue, len(shader.findGroupBindings(materialGroup)))
-	slot.uniformBuffers = make([]gfx.Buffer, len(slot.parameters))
+	slot.uniformBlocks = make([]materialUniformBlock, len(slot.parameters))
 	return material, nil
 }
 
 // setMaterialParameter binds a value to material's binding named name, which
-// fill checks against the binding and writes into its parameter. A name the
-// material's shader lacks is ignored, as is a material whose shader failed,
-// was freed or is not resolved, whose draws are skipped; a material render
-// does not hold is reported once. A value fill refuses, or one naming a
-// binding of another group, is reported once for the shader and name, and
-// leaves the binding unbound. A value that changes what the binding binds
-// drops the material's bind groups, those the frame may still bind released
-// at its end. fill runs with t's mutex held, given the buffer the material
-// keeps for the binding's uniform block, none until one is set.
-func (t *assetTable) setMaterialParameter(material Material, name string, fill func(shader Shader, binding gfx.ShaderBinding, parameter *bindingValue, uniformBuffer *gfx.Buffer) error) {
+// fill checks against the binding and writes into its parameter, a uniform
+// block's bytes being uniformBytes. A name the material's shader lacks is
+// ignored, as is a material whose shader failed, was freed or is not
+// resolved, whose draws are skipped; a material render does not hold is
+// reported once. A value fill refuses, or one naming a binding of another
+// group, is reported once for the shader and name, and leaves the binding
+// unbound. A uniform block set to the bytes it holds changes nothing. Before
+// the material's first draw in the frame being recorded, a uniform block's
+// bytes go into the buffer the material keeps for it, and a
+// value that changes what the binding binds releases the material's bind
+// groups. After that draw, the change makes a version: a uniform block's
+// bytes are kept for the next draw to copy into the arena, and the bind
+// groups, which the frame's draws may still bind, are released at its end.
+// fill runs with t's mutex held, given the buffer the material keeps for the
+// binding's uniform block, none until one is set.
+func (t *assetTable) setMaterialParameter(device gfx.Device, material Material, name string, uniformBytes []byte, fill func(shader Shader, binding gfx.ShaderBinding, parameter *bindingValue, uniformBuffer *gfx.Buffer) error) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	slot, ok := t.materials.Find(material)
@@ -252,16 +271,50 @@ func (t *assetTable) setMaterialParameter(material Material, name string, fill f
 	}
 	index -= shader.groupStarts[materialGroup]
 	parameter := &slot.parameters[index]
+	block := &slot.uniformBlocks[index]
 	previous := *parameter
-	if err := fill(slot.shader, binding, parameter, &slot.uniformBuffers[index]); err != nil {
+	drawn := slot.drawnFrame == t.endedFrameCount+1
+	changed := false
+	switch err := fill(slot.shader, binding, parameter, &block.buffer); {
+	case err != nil:
 		*parameter = bindingValue{}
 		if claimReport(&t.reportedParameters, reportKey) {
 			t.report(ReportKindParameterRefused, fmt.Errorf("render: setting %q of material %q: the value %w; its binding draws its default", name, slot.label, err))
 		}
+	case parameter.kind != parameterKindUniform:
+	case previous.kind == parameterKindUniform && bytes.Equal(block.latestBytes, uniformBytes):
+		*parameter = previous
+	case !drawn:
+		block.latestBytes = append(block.latestBytes[:0], uniformBytes...)
+		writeBytes(t, device, block.buffer, 0, uniformBytes)
+	default:
+		if !slices.ContainsFunc(slot.uniformBlocks, func(other materialUniformBlock) bool { return other.bufferBehind }) {
+			t.versionedMaterials = append(t.versionedMaterials, material)
+		}
+		block.latestBytes = append(block.latestBytes[:0], uniformBytes...)
+		block.bufferBehind = true
+		changed = true
 	}
-	if *parameter != previous {
-		slot.dropBindGroups(func(group gfx.BindGroup) { t.retiredBindGroups = append(t.retiredBindGroups, group) })
+	if changed || *parameter != previous {
+		if drawn {
+			slot.dropBindGroups(func(group gfx.BindGroup) { t.retiredBindGroups = append(t.retiredBindGroups, group) })
+		} else {
+			slot.dropBindGroups(device.ReleaseBindGroup)
+		}
 	}
+}
+
+// allocateTemporary answers a range of listState's arena chunks holding
+// data, as commandListState.allocate does, taking t's mutex only when the
+// list's current chunk lacks room, so concurrent lists contend only when one
+// takes a chunk.
+func (t *assetTable) allocateTemporary(listState *commandListState, data []byte, device gfx.Device) (BufferRange, error) {
+	if bufferRange, ok := listState.placeInCurrentChunk(data); ok {
+		return bufferRange, nil
+	}
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return listState.allocate(data, t, device)
 }
 
 // findSlot answers a copy of h's slot among slots, a shader's the zero slot
@@ -279,9 +332,10 @@ func (t *assetTable) findSlot[H handle.Handle, S any](slots *handle.SlotMap[H, S
 
 // findDrawBindGroups fills bindGroups with what a draw of material, of
 // shader, binds for each group of its layout into a pass writing targets,
-// whose pass and draw parameters listState holds: the material's own bind
-// group of @group(1), made the first time for the textures the targets leave
-// at their defaults; and of @group(0) and @group(2), unless bindGroups holds
+// whose pass and draw parameters listState holds, and notes material drawn
+// in the frame: the material's own bind group of @group(1), made the first
+// time for the textures the targets leave at their defaults, a version's
+// uniform blocks copied into listState's arena; and of @group(0) and @group(2), unless bindGroups holds
 // them resolved for its shader and functions, a bind group of the pass's or the draw's parameters with
 // their dynamic offsets, shared by every draw binding the same, or the
 // layout's default where none is set. With each goes the name of a storage
@@ -298,13 +352,14 @@ func (t *assetTable) findDrawBindGroups(device gfx.Device, material Material, sh
 	if !ok {
 		return fmt.Errorf("render: material %v is no longer held", material)
 	}
+	slot.drawnFrame = t.endedFrameCount + 1
 	functions := shaderSelection{shader: slot.shader, vertexEntryPoint: slot.vertexEntryPoint, fragmentEntryPoint: slot.fragmentEntryPoint}
 	for group, groupLayout := range shader.layout.groups {
 		var err error
 		switch {
 		case group == materialGroup:
 			var materialBindGroup materialBindGroup
-			materialBindGroup, err = t.findMaterialBindGroup(device, slot, shader, targets)
+			materialBindGroup, err = t.findMaterialBindGroup(device, slot, shader, targets, listState)
 			binding := groupBinding{bindGroup: materialBindGroup.group}
 			if binding.bindGroup == (gfx.BindGroup{}) && err == nil {
 				binding.bindGroup, err = t.layouts.findDefaultBindGroup(device, &t.bindingResources, groupLayout)
@@ -367,6 +422,37 @@ func (t *assetTable) unbindFreed(device gfx.Device) {
 			return !held
 		})
 	})
+}
+
+// endMaterialVersions ends the frame for materials: each uniform block set
+// after a draw of the frame has its latest bytes written into the buffer its
+// material keeps for it, landing before gfx's next submit, and binds that
+// buffer again, its material's bind groups, which name the arena, released;
+// and no material is drawn in the next frame yet. It runs at the end of
+// each frame, after the present.
+func (t *assetTable) endMaterialVersions(device gfx.Device) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	for _, material := range t.versionedMaterials {
+		slot, ok := t.materials.Find(material)
+		if !ok {
+			continue
+		}
+		for index := range slot.uniformBlocks {
+			block := &slot.uniformBlocks[index]
+			if !block.bufferBehind {
+				continue
+			}
+			writeBytes(t, device, block.buffer, 0, block.latestBytes)
+			block.bufferBehind = false
+			if parameter := &slot.parameters[index]; parameter.kind == parameterKindUniform {
+				parameter.bufferRange = BufferRange{}
+			}
+		}
+		slot.dropBindGroups(device.ReleaseBindGroup)
+	}
+	t.versionedMaterials = t.versionedMaterials[:0]
+	t.endedFrameCount++
 }
 
 // claimMeshReport answers whether a skipped draw of mesh is to be reported,
@@ -571,9 +657,9 @@ func (t *assetTable) removeMaterial(device gfx.Device, material Material) {
 		return
 	}
 	slot.dropBindGroups(device.ReleaseBindGroup)
-	for _, buffer := range slot.uniformBuffers {
-		if buffer != (gfx.Buffer{}) {
-			device.ReleaseBuffer(buffer)
+	for _, block := range slot.uniformBlocks {
+		if block.buffer != (gfx.Buffer{}) {
+			device.ReleaseBuffer(block.buffer)
 		}
 	}
 	t.materials.Release(material)
@@ -640,7 +726,7 @@ func (t *assetTable) makeMaterialBindGroup(device gfx.Device, slot *materialSlot
 		if overlapMask&(1<<index) != 0 {
 			value = bindingValue{}
 		}
-		entry, defaulted, err := t.makeValueEntry(device, value, binding, layout.entries[index], slot.uniformBuffers[index])
+		entry, defaulted, err := t.makeValueEntry(device, value, binding, layout.entries[index], slot.uniformBlocks[index].buffer)
 		if err != nil {
 			return materialBindGroup{}, err
 		}
@@ -657,8 +743,9 @@ func (t *assetTable) makeMaterialBindGroup(device gfx.Device, slot *materialSlot
 // findMaterialBindGroup answers slot's bind group of its shader's @group(1)
 // for a pass writing targets, made the first time for the textures the
 // targets leave at their defaults, each such texture reported once for its
-// shader and name. t's mutex is held.
-func (t *assetTable) findMaterialBindGroup(device gfx.Device, slot *materialSlot, shader shaderSlot, targets []drawnTarget) (materialBindGroup, error) {
+// shader and name, with the latest bytes of each uniform block set after a
+// draw of the frame first copied into listState's arena. t's mutex is held.
+func (t *assetTable) findMaterialBindGroup(device gfx.Device, slot *materialSlot, shader shaderSlot, targets []drawnTarget, listState *commandListState) (materialBindGroup, error) {
 	t.requireLocked("findMaterialBindGroup")
 	bindings := shader.findGroupBindings(materialGroup)
 	overlapMask := slot.findOverlapMask(bindings, targets)
@@ -669,6 +756,9 @@ func (t *assetTable) findMaterialBindGroup(device gfx.Device, slot *materialSlot
 		if overlapMask&(1<<index) != 0 && claimReport(&t.reportedParameters, parameterReportKey{shader: slot.shader, name: binding.Name}) {
 			t.report(ReportKindParameterRefused, fmt.Errorf("render: %q of material %q is a texture a target of its pass overlaps; its binding draws its default", binding.Name, slot.label))
 		}
+	}
+	if err := slot.placeLatestUniforms(listState, t, device); err != nil {
+		return materialBindGroup{}, err
 	}
 	bindGroup, err := t.makeMaterialBindGroup(device, slot, shader, overlapMask)
 	if err != nil {
@@ -753,8 +843,8 @@ func (t *assetTable) makeParameterGroupBinding(device gfx.Device, group uint32, 
 
 // makeValueEntry answers the entry binding value to binding, of layout entry
 // layoutEntry: a texture's view, a sampler, a range of a buffer, or a uniform
-// block, in uniformBuffer, a material's, or else in value's range of the
-// arena, its offset in the entry; or, when value is unbound or names an asset
+// block, in value's range of the arena, its offset in the entry, or with no
+// range in uniformBuffer, a material's; or, when value is unbound or names an asset
 // render no longer holds or one of no bytes, the entry the binding draws
 // unbound with, and true. t's mutex is held.
 func (t *assetTable) makeValueEntry(device gfx.Device, value bindingValue, binding gfx.ShaderBinding, layoutEntry gfx.BindGroupLayoutEntry, uniformBuffer gfx.Buffer) (gfx.BindGroupEntry, bool, error) {
@@ -768,7 +858,7 @@ func (t *assetTable) makeValueEntry(device gfx.Device, value bindingValue, bindi
 		}
 	case value.kind == parameterKindSampler:
 		entry.Sampler, err = t.bindingResources.findSampler(device, value.sampler)
-	case value.kind == parameterKindUniform && uniformBuffer != (gfx.Buffer{}):
+	case value.kind == parameterKindUniform && value.bufferRange.Buffer == (Buffer{}):
 		entry.Buffer = uniformBuffer
 		entry.Size = binding.Buffer.MinBindingSize
 	case value.kind == parameterKindBuffer || value.kind == parameterKindUniform:

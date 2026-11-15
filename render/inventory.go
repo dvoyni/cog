@@ -215,6 +215,13 @@ func (i Inventory) MakeMaterial(descriptor MaterialDescriptor) Material {
 // A name its shader lacks is ignored, so one set of values serves every
 // variant, and the name of a binding outside @group(1) is refused and
 // reported once.
+// A draw uses the values its material holds when it is recorded: a change
+// after the material's first draw in the frame shows only in the draws
+// recorded after it, the material taking a new bind group, freed at the
+// frame's end. A change made by one task while another records draws of the
+// material may not show in those draws: it shows for certain in the draws
+// the task that made it records after it, and in those recorded after a
+// task the kernel orders before the frame's recording.
 func (i Inventory) SetMaterialTexture(material Material, name string, texture Texture) {
 	i.setMaterialTextureView(material, name, TextureView{Texture: texture}, true)
 }
@@ -235,6 +242,13 @@ func (i Inventory) SetMaterialTexture(material Material, name string, texture Te
 // A name its shader lacks is ignored, so one set of values serves every
 // variant, and the name of a binding outside @group(1) is refused and
 // reported once.
+// A draw uses the values its material holds when it is recorded: a change
+// after the material's first draw in the frame shows only in the draws
+// recorded after it, the material taking a new bind group, freed at the
+// frame's end. A change made by one task while another records draws of the
+// material may not show in those draws: it shows for certain in the draws
+// the task that made it records after it, and in those recorded after a
+// task the kernel orders before the frame's recording.
 func (i Inventory) SetMaterialTextureView(material Material, name string, view TextureView) {
 	i.setMaterialTextureView(material, name, view, false)
 }
@@ -248,9 +262,16 @@ func (i Inventory) SetMaterialTextureView(material Material, name string, view T
 // A name its shader lacks is ignored, so one set of values serves every
 // variant, and the name of a binding outside @group(1) is refused and
 // reported once.
+// A draw uses the values its material holds when it is recorded: a change
+// after the material's first draw in the frame shows only in the draws
+// recorded after it, the material taking a new bind group, freed at the
+// frame's end. A change made by one task while another records draws of the
+// material may not show in those draws: it shows for certain in the draws
+// the task that made it records after it, and in those recorded after a
+// task the kernel orders before the frame's recording.
 func (i Inventory) SetMaterialSampler(material Material, name string, sampler SamplerDescriptor) {
 	table := i.table.Get()
-	table.setMaterialParameter(material, name, func(_ Shader, binding gfx.ShaderBinding, parameter *bindingValue, _ *gfx.Buffer) error {
+	table.setMaterialParameter(i.device.Get(), material, name, nil, func(_ Shader, binding gfx.ShaderBinding, parameter *bindingValue, _ *gfx.Buffer) error {
 		return parameter.fillSampler(sampler, binding)
 	})
 }
@@ -266,18 +287,28 @@ func (i Inventory) SetMaterialSampler(material Material, name string, sampler Sa
 // A name its shader lacks is ignored, so one set of values serves every
 // variant, and the name of a binding outside @group(1) is refused and
 // reported once.
+// A draw uses the values its material holds when it is recorded: a change
+// after the material's first draw in the frame shows only in the draws
+// recorded after it, the material taking a new bind group, freed at the
+// frame's end. A change made by one task while another records draws of the
+// material may not show in those draws: it shows for certain in the draws
+// the task that made it records after it, and in those recorded after a
+// task the kernel orders before the frame's recording.
 func (i Inventory) SetMaterialBuffer(material Material, name string, bufferRange BufferRange) {
 	table := i.table.Get()
 	device := i.device.Get()
-	table.setMaterialParameter(material, name, func(_ Shader, binding gfx.ShaderBinding, parameter *bindingValue, _ *gfx.Buffer) error {
+	table.setMaterialParameter(device, material, name, nil, func(_ Shader, binding gfx.ShaderBinding, parameter *bindingValue, _ *gfx.Buffer) error {
 		return table.fillBufferValue(device, parameter, binding, bufferRange)
 	})
 }
 
 // SetMaterialUniform binds value, plain data with no pointers mirroring a
 // WGSL struct, to material's uniform block named name, of its shader's
-// @group(1). Its bytes, as Go lays them out, go into a buffer the material
-// holds, landing, as WriteBuffer's do, before gfx's next submit. T is
+// @group(1). Before the material's first draw in the frame, its bytes, as
+// Go lays them out, go into a buffer the material holds, landing, as
+// WriteBuffer's do, before gfx's next submit; after it, they are copied
+// into the temporary arena at the material's next draw, and the material's
+// buffer takes them when the frame ends. T is
 // checked once for each shader and binding: its size, and each field's
 // offset against the block's members in order, names ignored and fields
 // named _ left out as padding; a type that is no struct, such as
@@ -287,25 +318,22 @@ func (i Inventory) SetMaterialBuffer(material Material, name string, bufferRange
 // A name its shader lacks is ignored, so one set of values serves every
 // variant, and the name of a binding outside @group(1) is refused and
 // reported once.
+// A draw uses the values its material holds when it is recorded: a change
+// after the material's first draw in the frame shows only in the draws
+// recorded after it, the material taking a new bind group, freed at the
+// frame's end. A change made by one task while another records draws of the
+// material may not show in those draws: it shows for certain in the draws
+// the task that made it records after it, and in those recorded after a
+// task the kernel orders before the frame's recording.
 func (i Inventory) SetMaterialUniform[T any](material Material, name string, value T) {
 	table := i.table.Get()
 	device := i.device.Get()
-	// writtenBuffer is the buffer the block's bytes go into, none for a
-	// value refused.
-	var writtenBuffer gfx.Buffer
-	table.setMaterialParameter(material, name, func(shader Shader, binding gfx.ShaderBinding, parameter *bindingValue, uniformBuffer *gfx.Buffer) error {
+	table.setMaterialParameter(device, material, name, castToBytes(unsafe.Slice(&value, 1)), func(shader Shader, binding gfx.ShaderBinding, parameter *bindingValue, uniformBuffer *gfx.Buffer) error {
 		if err := table.checkUniform(reflect.TypeFor[T](), shader, binding); err != nil {
 			return err
 		}
-		if err := parameter.fillUniform(device, binding, uniformBuffer, material, name); err != nil {
-			return err
-		}
-		writtenBuffer = *uniformBuffer
-		return nil
+		return parameter.fillUniform(device, binding, uniformBuffer, material, name)
 	})
-	if writtenBuffer != (gfx.Buffer{}) {
-		writeBytes(table, device, writtenBuffer, 0, castToBytes([]T{value}))
-	}
 }
 
 // WriteBuffer writes data into buffer at offset, T as MakeBuffer's: a
@@ -401,7 +429,7 @@ func (i Inventory) ReleaseMaterial(material Material) {
 func (i Inventory) setMaterialTextureView(material Material, name string, view TextureView, wholeTexture bool) {
 	table := i.table.Get()
 	device := i.device.Get()
-	table.setMaterialParameter(material, name, func(_ Shader, binding gfx.ShaderBinding, parameter *bindingValue, _ *gfx.Buffer) error {
+	table.setMaterialParameter(device, material, name, nil, func(_ Shader, binding gfx.ShaderBinding, parameter *bindingValue, _ *gfx.Buffer) error {
 		return table.fillTextureValue(device, parameter, binding, view, wholeTexture)
 	})
 }
