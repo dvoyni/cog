@@ -3,9 +3,11 @@ package render
 import (
 	"errors"
 	"fmt"
+	"image"
 
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/platform"
 )
 
 // Frame is the task parameter a recording task reaches the frame through,
@@ -78,4 +80,43 @@ func (f Frame) AcquireTemporaryTexture(descriptor TextureDescriptor) Texture {
 		state.logUnlessLost(fmt.Errorf("render: acquiring temporary texture %q: %w", descriptor.Label, err))
 	}
 	return texture
+}
+
+// RequestCapture asks for window's picture as the first frame acquired after
+// the call draws it: the next frame when one is recording, this call
+// included. CapturedEvent delivers it a frame after that frame. A window
+// already being captured answers ErrCaptureBusy until its CapturedEvent is
+// published, one that cannot be captured ErrCaptureUnsupported, and any
+// window ErrDeviceLost while the device is lost.
+func (f Frame) RequestCapture(window platform.Window) error {
+	err := f.device.Get().RequestCapture(window)
+	switch {
+	case errors.Is(err, gfx.ErrCaptureBusy):
+		return ErrCaptureBusy
+	case errors.Is(err, gfx.ErrCaptureUnsupported):
+		return ErrCaptureUnsupported
+	case errors.Is(err, gfx.ErrDeviceLost):
+		return ErrDeviceLost
+	case err != nil:
+		return fmt.Errorf("render: requesting a capture of %v: %w", window, err)
+	}
+	return nil
+}
+
+// ReadCapture answers event's picture as straight-alpha pixels, the window's
+// texels as it displayed them, with no colour conversion, in RGBA order and
+// alpha opaque. It answers it only while the jobs of event's publication
+// run, so a handler of CapturedEvent calls it in a task it joins into the
+// out dependency it returns; later, and for an event whose Status is not
+// CaptureStatusCaptured, it answers an error, ErrDeviceLost while the device
+// is lost.
+func (f Frame) ReadCapture(event CapturedEvent) (*image.NRGBA, error) {
+	picture, err := gfx.ReadCapture(f.device.Get(), event.captured)
+	switch {
+	case errors.Is(err, gfx.ErrDeviceLost):
+		return nil, ErrDeviceLost
+	case err != nil:
+		return nil, fmt.Errorf("render: reading a capture of %v: %w", event.Window, err)
+	}
+	return picture, nil
 }

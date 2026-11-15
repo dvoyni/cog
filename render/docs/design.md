@@ -488,7 +488,9 @@ render republishes gfx's events as its own, each nested inside gfx's publication
 - **Capture:**
   1. `frame.RequestCapture(window)` can be called at any time, and is taken from the first frame acquired after it.
   2. render publishes `CapturedEvent`.
-  3. `frame.ReadCapture(event)` answers the picture while that publication's jobs run.
+  3. `frame.ReadCapture(event)` answers the picture while that publication's jobs run: the window's texels as it displayed them, in RGBA order with alpha opaque and no colour conversion.
+
+  A window already being captured answers `ErrCaptureBusy` until its event is published, and one that cannot be captured, with no surface yet or not 8-bit BGRA or RGBA, `ErrCaptureUnsupported`, as gfx answers. While the device is lost, both calls answer `ErrDeviceLost`. render's errors are its own, so its users name no gfx: every call of render's answering an error answers render's `ErrDeviceLost` for gfx's.
 - **Readback:**
   1. `list.ReadBuffer(range)` and `list.ReadTexture(texture, mipLevel, region)` record a copy at that point in the list, into a staging buffer from render's pool, and answer a `Readback` handle.
   2. render maps the buffer after the submit and publishes `ReadbackEvent`.

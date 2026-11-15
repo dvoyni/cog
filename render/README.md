@@ -155,6 +155,12 @@ reported once and its dispatches skipped. A list's `CopyBuffer`,
 `ClearBuffer` record at their point among its passes, rows between a
 buffer and a texture 256 bytes apart; one that does not fit is refused and
 reported, recording nothing.
+`Frame`'s `RequestCapture(window)` asks for a window's picture as the
+first frame acquired after it draws it, answering `ErrCaptureBusy` while
+one is in flight, `ErrCaptureUnsupported` for a window that cannot be
+captured and `ErrDeviceLost` while the device is lost; render publishes `CapturedEvent{Window, Beat, Status}` inside
+gfx's, and `ReadCapture(event)` answers the picture while that
+publication's jobs run.
 What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
 
 ## Shape
@@ -203,6 +209,9 @@ What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
   shader, function, parameters and workgroup counts; and their copies, each
   an **`InspectedCopy`**; each pass, compute pass and copy with its
   position in its list.
+- **`CapturedEvent`** delivers a window's capture with its
+  **`CaptureStatus`**, its picture read with `Frame.ReadCapture` in the
+  tasks its handler joins.
 - **`Report`** is a mistake render finds at run time, logged once and
   carried past; its `ReportKind` names it for tests.
 - **`rendertest.Harness`** spawns platform on headless windows, metronome
@@ -225,7 +234,8 @@ its entry points with their stages, and each vertex entry point's inputs.
 ## Kernel surface
 
 - **Resources it installs:**
-  - `Handlers`: `RecordFrame` and `EndFrame`, to order handlers around.
+  - `Handlers`: `RecordFrame`, `EndFrame` and `DeliverCapture`, to order
+    handlers around.
   - a private frame state, the state of the frames in flight, holding
     `Config`'s counts, the gfx frame being recorded, the pool of
     temporary textures, the temporary arena's chunks and what each command
@@ -236,7 +246,7 @@ its entry points with their stages, and each vertex entry point's inputs.
 - **Resources it reads from other plugins:** `gfx.Device`, for read, in
   render's own jobs and through its `Frame` parameter.
 - **Events it publishes:** `FrameEvent`, inside its `gfx.DrawEvent`
-  handler.
+  handler, and `CapturedEvent`, inside its `gfx.CapturedEvent` handler.
 - **Events it subscribes to:** `gfx.DrawEvent` (`Handlers.RecordFrame`),
   which, after gfx's acquire, keeps the draw event's frame as the one being
   recorded in a job that is `FrameEvent`'s `Ready`, publishes `FrameEvent`,
@@ -245,7 +255,10 @@ its entry points with their stages, and each vertex entry point's inputs.
   whose job, after gfx's present, takes back the temporary textures and the
   arena's chunks and frees those gone unused, with the bind groups of pass
   and draw parameters gone unused, and is the beat's out dependency, so the
-  next beat starts after it.
+  next beat starts after it; and `gfx.CapturedEvent`
+  (`Handlers.DeliverCapture`), which publishes `CapturedEvent` and returns
+  its out dependency, so gfx frees the picture after the tasks its users
+  join into it.
 - **Task parameters it offers:** `Frame`, locking the frame state, the
   asset table and `gfx.Device`, all for read; and `Inventory`, locking the
   asset table, `gfx.Device` and `platform.FS`, all for read.

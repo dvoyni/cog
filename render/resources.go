@@ -18,4 +18,8 @@ type Handlers struct {
 	// taking back the temporaries and freeing those gone unused, and returns
 	// that job, so the next beat starts after it.
 	EndFrame kernel.Sub[gfx.RenderEvent]
+	// DeliverCapture handles gfx.CapturedEvent: it publishes CapturedEvent
+	// inside it, and returns the nested publication's out dependency, so gfx
+	// frees the capture's picture only after every task joined into it.
+	DeliverCapture kernel.Sub[gfx.CapturedEvent]
 }

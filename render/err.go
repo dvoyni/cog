@@ -1,5 +1,20 @@
 package render
 
+import "errors"
+
+// ErrCaptureBusy is answered by Frame.RequestCapture for a window whose
+// capture is in flight, until its CapturedEvent is published.
+var ErrCaptureBusy = errors.New("render: a capture of this window is in flight")
+
+// ErrCaptureUnsupported is answered by Frame.RequestCapture for a window that
+// cannot be captured: one with no surface yet, or whose format is not 8-bit
+// BGRA or RGBA.
+var ErrCaptureUnsupported = errors.New("render: this window cannot be captured")
+
+// ErrDeviceLost is answered by a call answering an error while the GPU
+// device is lost, until gfx has recovered it.
+var ErrDeviceLost = errors.New("render: the device is lost")
+
 // ReportKind names what kind of mistake a Report is, for a test to name the
 // reports it expects.
 type ReportKind uint8

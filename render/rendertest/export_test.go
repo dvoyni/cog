@@ -20,3 +20,24 @@ func (h *Harness) RecordedFrames() []recording.Frame {
 func (h *Harness) AnswerNext(kind recording.CallKind, answer recording.Answer) {
 	h.declarations.queueAnswer(kind, answer)
 }
+
+// ExpectDeviceLoss makes a device loss gfx logs fail no test, for
+// rendertest's tests to lose the device with an answer of AnswerNext.
+func (h *Harness) ExpectDeviceLoss() {
+	h.deviceLossExpected = true
+}
+
+// WaitUntil ticks the main thread until done answers true, failing the test
+// naming what after the harness's timeout, for rendertest's tests to wait
+// for what gfx publishes outside a beat.
+func (h *Harness) WaitUntil(what string, done func() bool) {
+	h.t.Helper()
+	h.tickUntil(what, done)
+}
+
+// WaitForReceive waits, as WaitUntil does, until a value is sent on channel
+// or it is closed.
+func (h *Harness) WaitForReceive(what string, channel <-chan struct{}) {
+	h.t.Helper()
+	h.tickUntil(what, makeReceiveCheck(channel))
+}

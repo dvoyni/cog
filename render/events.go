@@ -3,8 +3,10 @@ package render
 import (
 	"time"
 
+	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/metronome"
+	"github.com/dvoyni/cog/platform"
 )
 
 // FrameEvent is the frame render's users record, published inside gfx's
@@ -27,4 +29,18 @@ type FrameEvent struct {
 	// metronome's clock: a signal for adaptive quality. Zero until a frame
 	// completes.
 	GPULatency time.Duration
+}
+
+// CapturedEvent delivers a capture Frame.RequestCapture asked for, published
+// a frame after the frame it was taken from, once its picture can be read.
+// A handler reads it with Frame.ReadCapture in tasks it joins into the out
+// dependency it returns; after that, the picture is gone.
+type CapturedEvent struct {
+	Window platform.Window
+	// Beat is the captured frame's: Tick and InterpolatedTick are the moment
+	// it shows.
+	Beat   metronome.Beat
+	Status CaptureStatus
+	// captured is gfx's event, naming the buffer the picture is in.
+	captured gfx.CapturedEvent
 }
