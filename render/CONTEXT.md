@@ -147,3 +147,7 @@ _Avoid_: Reflection file, shader manifest, metadata
 **Readback**:
 A copy of part of a buffer or texture, taken at a point in a command list and delivered to the CPU after the frame is submitted.
 _Avoid_: Download, map, fetch
+
+**Staging pool**:
+The buffers readbacks are copied into, each held by one readback until the jobs its delivery's handlers joined have run, and freed after going unused for as many frames as render waits.
+_Avoid_: Readback buffer, download pool, temporary arena

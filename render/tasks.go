@@ -1,6 +1,8 @@
 package render
 
 import (
+	"fmt"
+
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/platform"
@@ -42,6 +44,14 @@ func deliverCapture(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, 
 	return event, out
 }
 
+// publishReadback handles readbackDeliveryEvent: it publishes ReadbackEvent
+// inside it, schedules releaseReadbackTask for the readback after the nested
+// publication's out dependency, and returns that job.
+func publishReadback(ex *kernel.Executor, in kernel.JobHandle, event readbackDeliveryEvent, releaseReadbackTask *kernel.Task[Readback, kernel.NoResult]) (readbackDeliveryEvent, kernel.JobHandle) {
+	_, out := ex.Publish(in, event.delivered)
+	return event, ex.Schedule(releaseReadbackTask, event.delivered.Readback, out).Handle()
+}
+
 // beginFrame keeps frame as the one being recorded, for Frame's calls.
 func beginFrame(k *kernel.Kernel, frame gfx.Frame, state kernel.Read[*frameState]) kernel.NoResult {
 	state.Get().setRecordingFrame(frame)
@@ -74,6 +84,28 @@ func checkClears(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*frameState
 	return kernel.NoResult{}
 }
 
+// findReadback publishes readbackDeliveryEvent, in a publication of its own,
+// for the readback whose staging buffer event says gfx has mapped or failed
+// to map; nothing for a buffer that is no staging buffer of render's.
+func findReadback(k *kernel.Kernel, event gfx.BufferMappedEvent, state kernel.Read[*frameState]) kernel.NoResult {
+	status := ReadbackStatus(event.Status)
+	if readback, ok := state.Get().staging.resolveMap(event.Buffer, status); ok {
+		k.Publish(readbackDeliveryEvent{delivered: ReadbackEvent{Readback: readback, Status: status}})
+	}
+	return kernel.NoResult{}
+}
+
+// releaseReadback ends readback once its publication's jobs have run: its
+// staging buffer is unmapped and goes back to the pool. An unmap that fails
+// is logged, but for a device loss, which gfx has logged.
+func releaseReadback(k *kernel.Kernel, readback Readback, state kernel.Read[*frameState], device kernel.Read[gfx.Device]) kernel.NoResult {
+	frameState := state.Get()
+	if err := frameState.staging.release(readback, device.Get()); err != nil {
+		frameState.logUnlessLost(fmt.Errorf("render: unmapping the staging buffer of readback %v: %w", readback, err))
+	}
+	return kernel.NoResult{}
+}
+
 // endFrame ends the frame gfx has presented: it frees the loaded textures
 // and buffers whose last acquire was released and the made ones released,
 // frees the material versions the frame made, its materials' buffers taking
@@ -83,14 +115,22 @@ func checkClears(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*frameState
 // temporaries gone unused for Config's TemporaryIdleFrames frames, then
 // unbinds every material value, and releases every bind group of pass or
 // draw parameters, naming an asset it freed, and releases those bind groups
-// gone unused as long.
+// gone unused as long. First, gfx having submitted the frame, it starts the
+// map of the staging buffer of each readback the frame recorded, publishing
+// readbackDeliveryEvent, failed, for each whose map fails to start; and with
+// the temporaries it frees the staging buffers no readback has held for as
+// long.
 func endFrame(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*frameState], table kernel.Read[*assetTable], device kernel.Read[gfx.Device]) kernel.NoResult {
 	frameState := state.Get()
+	for _, readback := range frameState.staging.mapRecorded(device.Get(), frameState.reporter) {
+		k.Publish(readbackDeliveryEvent{delivered: ReadbackEvent{Readback: readback, Status: ReadbackStatusFailed}})
+	}
 	table.Get().freeReleased(device.Get())
 	table.Get().endMaterialVersions(device.Get())
 	frameState.mips.endFrame(device.Get())
 	frameState.temporaryTextures.endFrame(frameState.temporaryIdleFrames, table.Get(), device.Get())
 	frameState.arena.endFrame(frameState.temporaryIdleFrames, table.Get(), device.Get())
+	frameState.staging.endFrame(frameState.temporaryIdleFrames, device.Get())
 	frameState.listStates.endFrame(table.Get())
 	table.Get().unbindFreed(device.Get())
 	table.Get().layouts.freeIdleBindGroups(device.Get(), frameState.temporaryIdleFrames)

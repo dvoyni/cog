@@ -120,3 +120,24 @@ func (f Frame) ReadCapture(event CapturedEvent) (*image.NRGBA, error) {
 	}
 	return picture, nil
 }
+
+// ReadbackData answers event's bytes: a buffer's range as it was where
+// CommandList.ReadBuffer recorded it, or the rows of a texture's region as
+// they were where ReadTexture recorded it, laid out as
+// CommandList.CopyBufferToTexture lays them, each row starting a multiple of
+// 256 bytes after the one before. They are the staging buffer's own, so a
+// task copies what it keeps. It answers them only while the jobs of event's
+// publication run, so a handler of ReadbackEvent calls it in a task it joins
+// into the out dependency it returns; later, the staging buffer goes back to
+// render's pool, and it answers an error, as it does for an event whose
+// Status is not ReadbackStatusReady, ErrDeviceLost while the device is lost.
+func (f Frame) ReadbackData(event ReadbackEvent) ([]byte, error) {
+	data, err := f.state.Get().staging.read(event.Readback, f.device.Get())
+	switch {
+	case errors.Is(err, gfx.ErrDeviceLost):
+		return nil, ErrDeviceLost
+	case err != nil:
+		return nil, fmt.Errorf("render: reading readback %v: %w", event.Readback, err)
+	}
+	return data, nil
+}

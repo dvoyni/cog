@@ -21,10 +21,11 @@ func (h *Harness) AnswerNext(kind recording.CallKind, answer recording.Answer) {
 	h.declarations.queueAnswer(kind, answer)
 }
 
-// ExpectDeviceLoss makes a device loss gfx logs fail no test, for
-// rendertest's tests to lose the device with an answer of AnswerNext.
-func (h *Harness) ExpectDeviceLoss() {
-	h.deviceLossExpected = true
+// ExpectLoggedError makes err, logged wrapped or not, fail no test, for
+// rendertest's tests to fail a call with an answer of AnswerNext, such as
+// gfx.ErrDeviceLost to lose the device.
+func (h *Harness) ExpectLoggedError(err error) {
+	h.expectedErrors = append(h.expectedErrors, err)
 }
 
 // WaitUntil ticks the main thread until done answers true, failing the test

@@ -29,3 +29,10 @@ type Mesh = handle.Mesh
 // a pointer-free, comparable handle an ECS component can hold, its zero value
 // naming none. It lives only while the program runs.
 type Material = handle.Material
+
+// Readback names one of render's readbacks, recorded with
+// CommandList.ReadBuffer or ReadTexture: a pointer-free, comparable handle,
+// its zero value naming none, that ReadbackEvent delivers. It names the
+// readback until the out dependency of that publication; a later readback
+// may then be handed the same handle.
+type Readback = handle.Readback

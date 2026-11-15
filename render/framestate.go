@@ -16,11 +16,13 @@ type frameState struct {
 	temporaryChunkSize  uint64
 	reporter
 	// temporaryTextures is the pool AcquireTemporaryTexture hands out from,
-	// arena the chunks temporary buffers are blocks of, and listStates what
-	// command lists keep while they record.
+	// arena the chunks temporary buffers are blocks of, listStates what
+	// command lists keep while they record, and staging the buffers
+	// readbacks are copied into.
 	temporaryTextures texturePool
 	arena             temporaryArena
 	listStates        commandListStatePool
+	staging           stagingPool
 	// mips generates the mip levels of textures in render's own command
 	// list.
 	mips mipGenerator

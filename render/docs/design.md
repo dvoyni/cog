@@ -492,9 +492,10 @@ render republishes gfx's events as its own, each nested inside gfx's publication
 
   A window already being captured answers `ErrCaptureBusy` until its event is published, and one that cannot be captured, with no surface yet or not 8-bit BGRA or RGBA, `ErrCaptureUnsupported`, as gfx answers. While the device is lost, both calls answer `ErrDeviceLost`. render's errors are its own, so its users name no gfx: every call of render's answering an error answers render's `ErrDeviceLost` for gfx's.
 - **Readback:**
-  1. `list.ReadBuffer(range)` and `list.ReadTexture(texture, mipLevel, region)` record a copy at that point in the list, into a staging buffer from render's pool, and answer a `Readback` handle.
-  2. render maps the buffer after the submit and publishes `ReadbackEvent`.
-  3. `frame.ReadbackData(event)` answers the bytes until that publication's out dependency, after which the buffer goes back to the pool.
+  1. `list.ReadBuffer(range)` and `list.ReadTexture(texture, region)`, the region naming its mip level and layer, record a copy at that point in the list, into a staging buffer from render's pool, and answer a `Readback` handle. One that does not fit is refused and reported as a copy is.
+  2. At the frame's end, after gfx's submit, render maps the buffer. gfx publishes `BufferMappedEvent` once the GPU has run the submit, and render's `DeliverReadback` handler schedules a job that finds the readback whose staging buffer it names and publishes it on a private event, as gfx delivers a capture: a handler cannot reach render's state to find it. render's handler of that event publishes `ReadbackEvent{Readback, Status}` inside it, `ReadbackStatusFailed` for a map gfx or render failed to start or end.
+  3. `frame.ReadbackData(event)` answers the bytes until that publication's out dependency, after which render unmaps the buffer and it goes back to the pool. A texture's rows are laid out as a copy lays them, 256 bytes apart, so nothing is copied to answer them.
+  4. **The staging pool:** each buffer, its size rounded up to a quarter of the power of two below it and at least 256 bytes, so readbacks of near sizes share one and none wastes more than a quarter of itself, is leased by one readback from its recording until it goes back, and freed after going unused for `TemporaryIdleFrames` frames, never while a readback holds it.
 
 ### Inspection and pass timings
 

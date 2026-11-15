@@ -54,9 +54,10 @@ type Harness struct {
 	// expectedReports are the kinds ExpectReport named; only the test's
 	// goroutine reads and writes them.
 	expectedReports []render.ReportKind
-	// deviceLossExpected is whether a device loss gfx logs fails no test;
-	// only the test's goroutine reads and writes it.
-	deviceLossExpected bool
+	// expectedErrors are the errors whose logging, wrapped or not, fails no
+	// test, for rendertest's own tests; only the test's goroutine reads and
+	// writes them.
+	expectedErrors []error
 	// opened is the window OpenWindow's open job opened, and surfaceMade the
 	// job making its surface, each set by the jobs OpenWindow waits for.
 	opened      platform.Window
@@ -174,7 +175,7 @@ func (h *Harness) Reports() []render.Report {
 }
 
 // checkLogged fails the test on each error logged since the last check, but a
-// report of an expected kind, and a device loss once one is expected.
+// report of an expected kind, and an expected error.
 func (h *Harness) checkLogged() {
 	h.t.Helper()
 	h.mutex.Lock()
@@ -184,7 +185,7 @@ func (h *Harness) checkLogged() {
 	for _, err := range logged {
 		var report render.Report
 		switch {
-		case h.deviceLossExpected && errors.Is(err, gfx.ErrDeviceLost):
+		case slices.ContainsFunc(h.expectedErrors, func(expected error) bool { return errors.Is(err, expected) }):
 		case !errors.As(err, &report):
 			h.t.Errorf("the kernel logged %v", err)
 		case !slices.Contains(h.expectedReports, report.Kind):

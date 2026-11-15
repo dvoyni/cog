@@ -282,6 +282,63 @@ func (l *CommandList) CopyTextureToBuffer(source Texture, region TextureRegion, 
 	l.encoder.CopyTextureToBuffer(texture, buffer, l.listState.bufferTextureCopies[:])
 }
 
+// ReadBuffer reads source's bytes back, a zero Size meaning the rest of its
+// buffer, as they are at this point of the list: it records a copy of them,
+// as CopyBuffer does, into a staging buffer from render's pool, and answers
+// the Readback that ReadbackEvent delivers once the frame has run on the
+// GPU. A readback that does not fit is refused and reported as a copy is,
+// with ReportKindCopyRefused, recording nothing and answering the zero
+// Readback: of a buffer render does not hold or of no bytes, made without
+// BufferUsageFlagCopySrc, of a range past its buffer's end or of no bytes,
+// or at an offset or of a size no multiple of 4. A staging buffer gfx
+// refuses to make is logged, and the zero Readback answered, as it is by a
+// list recording into nothing.
+func (l *CommandList) ReadBuffer(source BufferRange) Readback {
+	if l.encoder == nil {
+		return Readback{}
+	}
+	table := l.frame.table.Get()
+	buffer, size, err := source.findCopiedBuffer(table, l.frame.device.Get(), gfx.BufferUsageFlagCopySrc)
+	if err == nil && (size == 0 || source.Offset%4 != 0 || size%4 != 0) {
+		err = fmt.Errorf("is %d bytes at offset %d, where it holds some and both are multiples of 4", size, source.Offset)
+	}
+	if err != nil {
+		table.report(ReportKindCopyRefused, fmt.Errorf("render: a readback of %+v %w", source, err))
+		return Readback{}
+	}
+	readback, staging := l.acquireReadback(size)
+	if readback != (Readback{}) {
+		l.encoder.CopyBufferToBuffer(buffer, source.Offset, staging, 0, size)
+	}
+	return readback
+}
+
+// ReadTexture reads region of texture back, a zero width or height meaning
+// the rest of its level, as it is at this point of the list: it records a
+// copy of it, as CopyTextureToBuffer does, into a staging buffer from
+// render's pool, its rows laid out as CopyBufferToTexture lays them, and
+// answers the Readback that ReadbackEvent delivers, as ReadBuffer does. A
+// readback that does not fit is refused and reported as
+// CopyTextureToBuffer's is, recording nothing and answering the zero
+// Readback, as are a staging buffer gfx refuses to make and a list
+// recording into nothing.
+func (l *CommandList) ReadTexture(texture Texture, region TextureRegion) Readback {
+	if l.encoder == nil {
+		return Readback{}
+	}
+	layout, err := l.findRegionLayout(texture, region)
+	if err != nil {
+		l.frame.table.Get().report(ReportKindCopyRefused, fmt.Errorf("render: a readback of %+v of texture %v %w", region, texture, err))
+		return Readback{}
+	}
+	readback, staging := l.acquireReadback(layout.bytesPerRow*uint64(layout.height-1) + layout.rowSize)
+	if readback != (Readback{}) {
+		l.listState.bufferTextureCopies[0] = layout.makeCopy(0)
+		l.encoder.CopyTextureToBuffer(layout.origin.Texture, staging, l.listState.bufferTextureCopies[:])
+	}
+	return readback
+}
+
 // ClearBuffer zeroes bufferRange's bytes, a zero Size meaning the rest of
 // its buffer, at this point of the list, as CopyBuffer does. A clear that
 // does not fit is refused and reported, recording nothing: of a buffer
@@ -488,29 +545,58 @@ func (l *CommandList) findCopiedTexture(texture Texture, region TextureRegion) (
 // bufferTextureCopies with the copy's one region, its rows laid out as
 // CopyBufferToTexture says; an error saying why the copy does not fit.
 func (l *CommandList) findBufferTextureCopy(bufferRange BufferRange, usage gfx.BufferUsageFlags, texture Texture, region TextureRegion) (gfx.Buffer, gfx.Texture, error) {
-	gfxTexture, descriptor, width, height, err := l.findCopiedTexture(texture, region)
+	layout, err := l.findRegionLayout(texture, region)
 	if err != nil {
 		return gfx.Buffer{}, gfx.Texture{}, err
-	}
-	texelSize := uint64(TextureFormat(descriptor.Format).info().texelSize)
-	if texelSize == 0 || descriptor.SampleCount > 1 {
-		return gfx.Buffer{}, gfx.Texture{}, fmt.Errorf("names texture %q, of %d samples in format %d, where it has one sample and a format gfx's copies fill", descriptor.Label, descriptor.SampleCount, descriptor.Format)
 	}
 	buffer, size, err := bufferRange.findCopiedBuffer(l.frame.table.Get(), l.frame.device.Get(), usage)
 	if err != nil {
 		return gfx.Buffer{}, gfx.Texture{}, err
 	}
+	if rowsSize := layout.bytesPerRow*uint64(layout.height-1) + layout.rowSize; bufferRange.Offset%4 != 0 || bufferRange.Offset%layout.texelSize != 0 || size < rowsSize {
+		return gfx.Buffer{}, gfx.Texture{}, fmt.Errorf("is %d rows of %d bytes, %d apart, from %d bytes at offset %d, where the offset is a multiple of 4 and of the texel size and the bytes hold the rows", layout.height, layout.rowSize, layout.bytesPerRow, size, bufferRange.Offset)
+	}
+	l.listState.bufferTextureCopies[0] = layout.makeCopy(bufferRange.Offset)
+	return buffer, layout.origin.Texture, nil
+}
+
+// findRegionLayout answers how region of texture lies in a buffer's bytes,
+// for a copy between them; an error saying why it cannot be copied, as
+// findCopiedTexture's does, naming a texture of several samples or of a
+// format gfx's copies cannot fill, or a region of no texels.
+func (l *CommandList) findRegionLayout(texture Texture, region TextureRegion) (regionLayout, error) {
+	gfxTexture, descriptor, width, height, err := l.findCopiedTexture(texture, region)
+	if err != nil {
+		return regionLayout{}, err
+	}
+	texelSize := uint64(TextureFormat(descriptor.Format).info().texelSize)
+	switch {
+	case texelSize == 0 || descriptor.SampleCount > 1:
+		return regionLayout{}, fmt.Errorf("names texture %q, of %d samples in format %d, where it has one sample and a format gfx's copies fill", descriptor.Label, descriptor.SampleCount, descriptor.Format)
+	case width == 0 || height == 0:
+		return regionLayout{}, fmt.Errorf("is %d×%d texels, of none", width, height)
+	}
 	rowSize := uint64(width) * texelSize
-	bytesPerRow := (rowSize + copyRowAlignment - 1) &^ (copyRowAlignment - 1)
-	if rowsSize := bytesPerRow*uint64(height-1) + rowSize; bufferRange.Offset%4 != 0 || bufferRange.Offset%texelSize != 0 || size < rowsSize {
-		return gfx.Buffer{}, gfx.Texture{}, fmt.Errorf("is %d rows of %d bytes, %d apart, from %d bytes at offset %d, where the offset is a multiple of 4 and of the texel size and the bytes hold the rows", height, rowSize, bytesPerRow, size, bufferRange.Offset)
+	return regionLayout{
+		origin:      makeImageCopyTexture(gfxTexture, region),
+		width:       width,
+		height:      height,
+		texelSize:   texelSize,
+		rowSize:     rowSize,
+		bytesPerRow: (rowSize + copyRowAlignment - 1) &^ (copyRowAlignment - 1),
+	}, nil
+}
+
+// acquireReadback answers a readback of size bytes from the frame's staging
+// pool and the gfx buffer to copy them into from its start; the zero
+// Readback when gfx refuses to make a staging buffer, which is logged.
+func (l *CommandList) acquireReadback(size uint64) (Readback, gfx.Buffer) {
+	state := l.frame.state.Get()
+	readback, buffer, err := state.staging.acquire(size, l.frame.device.Get())
+	if err != nil {
+		state.logUnlessLost(fmt.Errorf("render: acquiring a staging buffer of %d bytes for a readback: %w", size, err))
 	}
-	l.listState.bufferTextureCopies[0] = gfx.BufferTextureCopy{
-		BufferLayout: gfx.ImageDataLayout{Offset: bufferRange.Offset, BytesPerRow: uint32(bytesPerRow), RowsPerImage: height},
-		TextureBase:  makeImageCopyTexture(gfxTexture, region),
-		Size:         gfx.Extent3D{Width: width, Height: height, DepthOrArrayLayers: 1},
-	}
-	return buffer, gfxTexture, nil
+	return readback, buffer
 }
 
 // makeLoadStoreOps answers the load and store of a target cleared or kept,

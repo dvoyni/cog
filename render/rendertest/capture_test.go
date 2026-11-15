@@ -292,7 +292,7 @@ func TestAWindowThatCannotBeCapturedOrIsCapturingAnswersAsGfxDoes(t *testing.T) 
 
 func TestCaptureCallsAnswerErrDeviceLostWhileTheDeviceIsLost(t *testing.T) {
 	h := rendertest.NewHarness(t)
-	h.ExpectDeviceLoss()
+	h.ExpectLoggedError(gfx.ErrDeviceLost)
 	plugin := newCapturePlugin()
 	var window platform.Window
 	var requestErr, readErr error

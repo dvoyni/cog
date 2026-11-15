@@ -53,10 +53,10 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 // they are zero, and the asset table, each with the kernel's logger for
 // reports; binds render's built-in assets as a read mount under the prefix
 // cog.render, at the lowest priority, so any other mount holding one of
-// their names overrides it; and subscribes to gfx.DrawEvent and
-// gfx.RenderEvent and gfx.CapturedEvent, the Subs kept in the Handlers
-// resource. A config of another type than *Config is a composition error,
-// and panics.
+// their names overrides it; subscribes to gfx.DrawEvent, gfx.RenderEvent,
+// gfx.CapturedEvent and gfx.BufferMappedEvent, the Subs kept in the Handlers
+// resource; and subscribes to its own private event delivering readbacks. A
+// config of another type than *Config is a composition error, and panics.
 func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	pluginConfig := kernel.PluginConfigOrDefault[Config](config)
 	configurator.InitResource(&frameState{
@@ -71,6 +71,8 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	generateMipsTask := configurator.RegisterTask4(generateMips)
 	checkClearsTask := configurator.RegisterTask1(checkClears)
 	endFrameTask := configurator.RegisterTask3(endFrame)
+	findReadbackTask := configurator.RegisterTask1(findReadback)
+	releaseReadbackTask := configurator.RegisterTask2(releaseReadback)
 	configurator.InitResource(Handlers{
 		RecordFrame: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.DrawEvent) (gfx.DrawEvent, kernel.JobHandle) {
 			return recordFrame(ex, in, event, beginFrameTask, writeLoadsTask, generateMipsTask, checkClearsTask)
@@ -79,6 +81,12 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 			return event, ex.Schedule(endFrameTask, kernel.NoArg{}, in).Handle()
 		}),
 		DeliverCapture: configurator.Subscribe(deliverCapture),
+		DeliverReadback: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.BufferMappedEvent) (gfx.BufferMappedEvent, kernel.JobHandle) {
+			return event, ex.Schedule(findReadbackTask, event, in).Handle()
+		}),
+	})
+	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event readbackDeliveryEvent) (readbackDeliveryEvent, kernel.JobHandle) {
+		return publishReadback(ex, in, event, releaseReadbackTask)
 	})
 	return nil
 }

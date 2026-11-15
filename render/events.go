@@ -44,3 +44,21 @@ type CapturedEvent struct {
 	// captured is gfx's event, naming the buffer the picture is in.
 	captured gfx.CapturedEvent
 }
+
+// ReadbackEvent delivers a readback CommandList.ReadBuffer or ReadTexture
+// recorded, published once the frame it was recorded in has run on the GPU
+// and its bytes can be read: a frame or more after that frame. A handler
+// reads them with Frame.ReadbackData in tasks it joins into the out
+// dependency it returns; after that, they are gone.
+type ReadbackEvent struct {
+	Readback Readback
+	Status   ReadbackStatus
+}
+
+// readbackDeliveryEvent carries a readback whose map has ended, or failed to
+// start, from the job that found it to render's handler, which publishes it
+// as ReadbackEvent in its own batch, to release the readback's staging
+// buffer after.
+type readbackDeliveryEvent struct {
+	delivered ReadbackEvent
+}

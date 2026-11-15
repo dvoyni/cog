@@ -59,10 +59,22 @@ type Material struct{ handle }
 // labelKind answers "material", the kind a material's reports name.
 func (Material) labelKind() string { return "material" }
 
+// Readback names one of render's readbacks in flight: pointer-free and
+// comparable, its zero value naming none.
+type Readback struct{ handle }
+
+// labelKind answers "readback", the kind a readback's reports name.
+func (Readback) labelKind() string { return "readback" }
+
 // TemporaryChunkLabel is the label render gives each chunk of its temporary
 // arena, after the buffer handle MakeLabel names, so a reader of gfx's calls
 // tells a chunk from a buffer a user made.
 const TemporaryChunkLabel = "render: a chunk of the temporary arena"
+
+// StagingBufferLabel is the label render gives each buffer of its staging
+// pool, which readbacks are copied into, so a reader of gfx's calls tells
+// one from a buffer a user made.
+const StagingBufferLabel = "render: a staging buffer of readbacks"
 
 // MakeLabel answers the label of the gfx object behind h, naming h and then
 // label, the one its user gave.

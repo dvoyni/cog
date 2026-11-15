@@ -22,4 +22,9 @@ type Handlers struct {
 	// inside it, and returns the nested publication's out dependency, so gfx
 	// frees the capture's picture only after every task joined into it.
 	DeliverCapture kernel.Sub[gfx.CapturedEvent]
+	// DeliverReadback handles gfx.BufferMappedEvent: it schedules the job
+	// that finds the readback whose staging buffer the event names, which
+	// publishes ReadbackEvent in a publication of its own, and returns that
+	// job.
+	DeliverReadback kernel.Sub[gfx.BufferMappedEvent]
 }

@@ -161,6 +161,15 @@ one is in flight, `ErrCaptureUnsupported` for a window that cannot be
 captured and `ErrDeviceLost` while the device is lost; render publishes `CapturedEvent{Window, Beat, Status}` inside
 gfx's, and `ReadCapture(event)` answers the picture while that
 publication's jobs run.
+A list's `ReadBuffer(range)` and `ReadTexture(texture, region)` record a
+copy at their point among its passes into a staging buffer from render's
+pool, its size rounded up to a quarter of a power of two and at least 256
+bytes, and answer a `Readback`; at the
+frame's end render maps the buffer, and once gfx has mapped it publishes
+`ReadbackEvent{Readback, Status}`, and `Frame`'s `ReadbackData(event)`
+answers the bytes, a texture's rows 256 bytes apart, while that
+publication's jobs run, after which the buffer goes back to the pool;
+staging buffers unused for `TemporaryIdleFrames` frames are freed.
 What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
 
 ## Shape
@@ -180,8 +189,9 @@ What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
   layer with an optional **`ResolveTarget`**, and a
   **`DepthStencilTarget`**; its **`AcquireTemporaryBuffer[T]`** answers a
   **`BufferRange`** of the temporary arena; its **`BeginComputePass`** a
-  **`ComputePass`** of dispatches; and its copies copy buffer ranges and
-  texture regions.
+  **`ComputePass`** of dispatches; its copies copy buffer ranges and
+  texture regions; and its readbacks read them back, each answering a
+  **`Readback`**.
 - **`Inventory`** is the task parameter a task reaches render's assets
   through: it acquires textures and **`Buffer`**s from files, makes them
   from slices, writes them, a texture by **`TextureRegion`**, and releases
@@ -212,6 +222,8 @@ What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
 - **`CapturedEvent`** delivers a window's capture with its
   **`CaptureStatus`**, its picture read with `Frame.ReadCapture` in the
   tasks its handler joins.
+- **`ReadbackEvent`** delivers a readback with its **`ReadbackStatus`**,
+  its bytes read with `Frame.ReadbackData` in the tasks its handler joins.
 - **`Report`** is a mistake render finds at run time, logged once and
   carried past; its `ReportKind` names it for tests.
 - **`rendertest.Harness`** spawns platform on headless windows, metronome
@@ -234,19 +246,22 @@ its entry points with their stages, and each vertex entry point's inputs.
 ## Kernel surface
 
 - **Resources it installs:**
-  - `Handlers`: `RecordFrame`, `EndFrame` and `DeliverCapture`, to order
-    handlers around.
+  - `Handlers`: `RecordFrame`, `EndFrame`, `DeliverCapture` and
+    `DeliverReadback`, to order handlers around.
   - a private frame state, the state of the frames in flight, holding
     `Config`'s counts, the gfx frame being recorded, the pool of
-    temporary textures, the temporary arena's chunks and what each command
-    list keeps while it records.
+    temporary textures, the temporary arena's chunks, what each command
+    list keeps while it records, and the staging pool with the readbacks
+    in flight.
   - a private asset table, every asset render holds: so far, its textures,
     each with the views passes drew into, its buffers, and its shaders,
     with the layouts they share.
 - **Resources it reads from other plugins:** `gfx.Device`, for read, in
   render's own jobs and through its `Frame` parameter.
 - **Events it publishes:** `FrameEvent`, inside its `gfx.DrawEvent`
-  handler, and `CapturedEvent`, inside its `gfx.CapturedEvent` handler.
+  handler; `CapturedEvent`, inside its `gfx.CapturedEvent` handler; and
+  `ReadbackEvent`, inside its handler of a private event the job its
+  `gfx.BufferMappedEvent` handler schedules publishes.
 - **Events it subscribes to:** `gfx.DrawEvent` (`Handlers.RecordFrame`),
   which, after gfx's acquire, keeps the draw event's frame as the one being
   recorded in a job that is `FrameEvent`'s `Ready`, publishes `FrameEvent`,
@@ -254,11 +269,16 @@ its entry points with their stages, and each vertex entry point's inputs.
   for the users' recording; and `gfx.RenderEvent` (`Handlers.EndFrame`),
   whose job, after gfx's present, takes back the temporary textures and the
   arena's chunks and frees those gone unused, with the bind groups of pass
-  and draw parameters gone unused, and is the beat's out dependency, so the
-  next beat starts after it; and `gfx.CapturedEvent`
+  and draw parameters gone unused, and the staging buffers, after mapping
+  those of the frame's readbacks, and is the beat's out dependency, so the
+  next beat starts after it; `gfx.CapturedEvent`
   (`Handlers.DeliverCapture`), which publishes `CapturedEvent` and returns
   its out dependency, so gfx frees the picture after the tasks its users
-  join into it.
+  join into it; and `gfx.BufferMappedEvent` (`Handlers.DeliverReadback`),
+  whose job finds the readback whose staging buffer gfx mapped and
+  publishes it on a private event, whose handler publishes `ReadbackEvent`
+  and unmaps the buffer after its out dependency, so it goes back to the
+  pool after the tasks its users join into it.
 - **Task parameters it offers:** `Frame`, locking the frame state, the
   asset table and `gfx.Device`, all for read; and `Inventory`, locking the
   asset table, `gfx.Device` and `platform.FS`, all for read.
