@@ -15,11 +15,12 @@ import (
 // a while for the other to be running, and keeps whether it ever found it so.
 type lockProbe struct {
 	registerProbed, registerOther func(p *lockProbe, configurator *kernel.Configurator) *kernel.Task[kernel.NoArg, kernel.NoResult]
-	// running counts the probe's tasks running, and ranTogether is set by a
-	// task that found both running.
-	running     atomic.Int32
-	ranTogether atomic.Bool
-	scheduled   atomic.Bool
+	// running counts the probe's tasks running, finishedCount those that
+	// have finished, and ranTogether is set by a task that found both running.
+	running       atomic.Int32
+	finishedCount atomic.Int32
+	ranTogether   atomic.Bool
+	scheduled     atomic.Bool
 }
 
 func (*lockProbe) Name() kernel.PluginName { return "lock probe" }
@@ -58,12 +59,14 @@ func (p *lockProbe) registerHolder[P kernel.Parameter[P]](configurator *kernel.C
 }
 
 // awaitTheOther counts its task running for up to 100ms, and sets ranTogether
-// when the other task is running too in that time.
+// when the other task is running too in that time; it stops waiting once
+// the other has finished, which it can no longer run beside.
 func (p *lockProbe) awaitTheOther() {
 	p.running.Add(1)
+	defer p.finishedCount.Add(1)
 	defer p.running.Add(-1)
 	deadline := time.Now().Add(100 * time.Millisecond)
-	for time.Now().Before(deadline) {
+	for time.Now().Before(deadline) && p.finishedCount.Load() == 0 {
 		if p.running.Load() == 2 {
 			p.ranTogether.Store(true)
 			return

@@ -13,9 +13,10 @@ import (
 // registerTask registers a lockProbe's task, such as one of registerHolder.
 type registerTask = func(p *lockProbe, configurator *kernel.Configurator) *kernel.Task[kernel.NoArg, kernel.NoResult]
 
-func TestFrameAndInventoryLockWhatTheyDeclareAllForRead(t *testing.T) {
+func TestParametersLockWhatTheyDeclare(t *testing.T) {
 	frame := (*lockProbe).registerHolder[render.Frame]
 	inventory := (*lockProbe).registerHolder[render.Inventory]
+	surface := (*lockProbe).registerHolder[render.Surface]
 	for _, test := range []struct {
 		name            string
 		registerProbed  registerTask
@@ -32,6 +33,12 @@ func TestFrameAndInventoryLockWhatTheyDeclareAllForRead(t *testing.T) {
 		{name: "Inventory beside a writer of render's frame state", registerProbed: inventory, registerOther: (*lockProbe).registerHolder[kernel.Write[*render.FrameState]], wantRanTogether: true},
 		{name: "Inventory beside a Frame task", registerProbed: inventory, registerOther: frame, wantRanTogether: true},
 		{name: "Inventory beside another Inventory task", registerProbed: inventory, registerOther: inventory, wantRanTogether: true},
+		{name: "Surface beside a reader of gfx's Device", registerProbed: surface, registerOther: (*lockProbe).registerHolder[kernel.Read[gfx.Device]], wantRanTogether: false},
+		{name: "Surface beside a Frame task", registerProbed: surface, registerOther: frame, wantRanTogether: false},
+		{name: "Surface beside an Inventory task", registerProbed: surface, registerOther: inventory, wantRanTogether: false},
+		{name: "Surface beside a writer of render's frame state", registerProbed: surface, registerOther: (*lockProbe).registerHolder[kernel.Write[*render.FrameState]], wantRanTogether: true},
+		{name: "Surface beside a writer of render's asset table", registerProbed: surface, registerOther: (*lockProbe).registerHolder[kernel.Write[*render.AssetTable]], wantRanTogether: true},
+		{name: "Surface beside a writer of platform's FS", registerProbed: surface, registerOther: (*lockProbe).registerHolder[kernel.Write[platform.FS]], wantRanTogether: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := rendertest.NewHarness(t)

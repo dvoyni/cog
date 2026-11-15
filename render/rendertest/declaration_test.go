@@ -75,7 +75,8 @@ func TestAShadersReflectionIsAnsweredFromTheDeclarationBesideItForTheVariantOfIt
 	bindings := make([][]gfx.ShaderBinding, len(tests))
 	entryPoints := make([][]gfx.ShaderEntryPoint, len(tests))
 	pipelineErrors := make([]error, len(tests))
-	h.Spawn(nil, &firstFramePlugin{onFirstFrame: func(_ *kernel.Kernel, device gfx.Device) {
+	h.Spawn(nil, &firstFramePlugin[kernel.Read[gfx.Device]]{onFirstFrame: func(_ *kernel.Kernel, deviceHandle kernel.Read[gfx.Device]) {
+		device := deviceHandle.Get()
 		// Every variant is preprocessed before any is compiled, as parallel
 		// jobs may, their texts the same.
 		texts := make([]string, len(tests))
@@ -123,7 +124,8 @@ func TestAReflectionAnswerQueuedWithAnswerNextWinsOverTheDeclarationOnce(t *test
 	h.AnswerNext(recording.CallKindReflectVertexInputs, recording.Answer{VertexInputs: []gfx.VertexInput{{Location: 3, Type: gfx.ScalarTypeUint32, Components: 1}}})
 	var bindings [2][]gfx.ShaderBinding
 	var pipelineErrors [2]error
-	h.Spawn(nil, &firstFramePlugin{onFirstFrame: func(_ *kernel.Kernel, device gfx.Device) {
+	h.Spawn(nil, &firstFramePlugin[kernel.Read[gfx.Device]]{onFirstFrame: func(_ *kernel.Kernel, deviceHandle kernel.Read[gfx.Device]) {
+		device := deviceHandle.Get()
 		module := compileShader(t, device, files)
 		for index := range 2 {
 			bindings[index], _ = device.ShaderModuleBindings(module)
@@ -164,7 +166,8 @@ func TestAShaderCompiledWithNoDeclarationOrOneThatFailsToParseFailsTheTestNaming
 			}
 			fake := &fakeTest{TB: t}
 			h := rendertest.NewHarness(fake)
-			h.Spawn(nil, &firstFramePlugin{onFirstFrame: func(_ *kernel.Kernel, device gfx.Device) {
+			h.Spawn(nil, &firstFramePlugin[kernel.Read[gfx.Device]]{onFirstFrame: func(_ *kernel.Kernel, deviceHandle kernel.Read[gfx.Device]) {
+				device := deviceHandle.Get()
 				if test.preprocessed {
 					compileShader(t, device, files)
 				} else if _, err := device.CreateShaderModule(gfx.ShaderModuleDescriptor{Label: "raw", WGSL: "// lit"}); err != nil {

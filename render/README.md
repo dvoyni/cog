@@ -170,6 +170,10 @@ frame's end render maps the buffer, and once gfx has mapped it publishes
 answers the bytes, a texture's rows 256 bytes apart, while that
 publication's jobs run, after which the buffer goes back to the pool;
 staging buffers unused for `TemporaryIdleFrames` frames are freed.
+A task holding the `Surface` parameter, which locks gfx's `Device` for
+write alone, changes every window's surface with
+`Request(SurfaceRequest{Format, PresentMode})`, configured before the next
+frame acquires; the request at start stays gfx's `Config.Surface`.
 What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
 
 ## Shape
@@ -197,6 +201,9 @@ What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
   from slices, writes them, a texture by **`TextureRegion`**, and releases
   them, and acquires and releases **`Shader`**s, each a variant of a file
   with its **`ShaderDefine`**s.
+- **`Surface`** is the task parameter a task changes the windows' surfaces
+  through, with a **`SurfaceRequest`** of a `TextureFormat` and a
+  **`PresentMode`**.
 - **`Mesh`** and **`Material`** are made from a **`MeshDescriptor`** and a
   **`MaterialDescriptor`**, its **`State`** blending, masking,
   testing and culling as WebGPU's defaults when zero; a pass's
@@ -257,7 +264,9 @@ its entry points with their stages, and each vertex entry point's inputs.
     each with the views passes drew into, its buffers, and its shaders,
     with the layouts they share.
 - **Resources it reads from other plugins:** `gfx.Device`, for read, in
-  render's own jobs and through its `Frame` parameter.
+  render's own jobs and through its `Frame` and `Inventory` parameters, and
+  for write through its `Surface` parameter; `platform.FS`, for read,
+  through `Inventory`.
 - **Events it publishes:** `FrameEvent`, inside its `gfx.DrawEvent`
   handler; `CapturedEvent`, inside its `gfx.CapturedEvent` handler; and
   `ReadbackEvent`, inside its handler of a private event the job its
@@ -281,7 +290,8 @@ its entry points with their stages, and each vertex entry point's inputs.
   pool after the tasks its users join into it.
 - **Task parameters it offers:** `Frame`, locking the frame state, the
   asset table and `gfx.Device`, all for read; and `Inventory`, locking the
-  asset table, `gfx.Device` and `platform.FS`, all for read.
+  asset table, `gfx.Device` and `platform.FS`, all for read; and `Surface`,
+  locking `gfx.Device` alone, for write.
 - **Sockets it declares:** none.
 - **Sockets it binds:** `platform.ReadMountSocket`, its built-in assets
   under the prefix `cog.render`, at the lowest priority.
