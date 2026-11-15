@@ -166,6 +166,14 @@ func TestOnceTheDeviceIsLostNoCallReachesTheBackendAndCallsWithErrorsAnswerErrDe
 				_, err := device.ShaderModuleBindings(gfx.ShaderModule{})
 				return err
 			},
+			"ShaderModuleEntryPoints": func() error {
+				_, err := device.ShaderModuleEntryPoints(gfx.ShaderModule{})
+				return err
+			},
+			"ShaderModuleVertexInputs": func() error {
+				_, err := device.ShaderModuleVertexInputs(gfx.ShaderModule{}, "")
+				return err
+			},
 			"CreateBindGroupLayout": func() error {
 				_, err := device.CreateBindGroupLayout(gfx.BindGroupLayoutDescriptor{})
 				return err

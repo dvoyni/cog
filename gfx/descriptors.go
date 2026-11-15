@@ -170,6 +170,14 @@ type ShaderStructMember struct {
 	Size   uint64
 }
 
+// ShaderEntryPoint is one entry point a shader module declares, as the
+// backend reflects it: its name, and its stage, one of
+// ShaderStageFlagVertex, ShaderStageFlagFragment and ShaderStageFlagCompute.
+type ShaderEntryPoint struct {
+	Name  string
+	Stage ShaderStageFlags
+}
+
 // BindGroupDescriptor describes a bind group.
 type BindGroupDescriptor struct {
 	Label   string

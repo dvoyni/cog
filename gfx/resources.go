@@ -132,6 +132,19 @@ type Device interface {
 	// and binds values by name, as render does. The slices answered are the
 	// caller's to keep.
 	ShaderModuleBindings(module ShaderModule) ([]ShaderBinding, error)
+	// ShaderModuleEntryPoints answers every entry point module declares, in
+	// the order it declares them, as the backend reflected them at the
+	// module's creation: each one's name and stage. It is for a caller that
+	// describes a module whole, as render's cmd/declarebindings does. The
+	// slice answered is the caller's to keep.
+	ShaderModuleEntryPoints(module ShaderModule) ([]ShaderEntryPoint, error)
+	// ShaderModuleVertexInputs answers the inputs module's vertex entry point
+	// named entryPoint reads at a location, builtins aside, as the backend
+	// reflected them at the module's creation; an empty entryPoint is the
+	// module's one vertex entry point. They are what CreateRenderPipeline
+	// checks a pipeline's vertex buffers against. The slice answered is the
+	// caller's to keep.
+	ShaderModuleVertexInputs(module ShaderModule, entryPoint string) ([]VertexInput, error)
 
 	CreateBindGroupLayout(descriptor BindGroupLayoutDescriptor) (BindGroupLayout, error)
 	ReleaseBindGroupLayout(layout BindGroupLayout)

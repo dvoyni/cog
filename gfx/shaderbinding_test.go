@@ -51,3 +51,48 @@ func reflectedBindings() []gfx.ShaderBinding {
 		},
 	}
 }
+
+func TestShaderModuleEntryPointsAnswersEachEntryPointTheBackendReflects(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	reflected := []gfx.ShaderEntryPoint{{Name: "vs", Stage: gfx.ShaderStageFlagVertex}, {Name: "fs", Stage: gfx.ShaderStageFlagFragment}}
+	h.instance.AnswerNext(recording.CallKindReflectEntryPoints, recording.Answer{EntryPoints: reflected})
+
+	h.readDevice(func(device gfx.Device) {
+		module, err := device.CreateShaderModule(gfx.ShaderModuleDescriptor{WGSL: triangleWGSL})
+		mustSucceed(t, err)
+
+		entryPoints, err := device.ShaderModuleEntryPoints(module)
+
+		mustSucceed(t, err)
+		if !reflect.DeepEqual(entryPoints, reflected) {
+			t.Errorf("the entry points are %+v, want %+v", entryPoints, reflected)
+		}
+		if call, want := lastCall(h), (recording.Call{Kind: recording.CallKindReflectEntryPoints, Arguments: module}); !reflect.DeepEqual(call, want) {
+			t.Errorf("the last call is %+v, want %+v", call, want)
+		}
+	})
+}
+
+func TestShaderModuleVertexInputsAnswersTheInputsTheBackendReflectsForTheEntryPoint(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	reflected := []gfx.VertexInput{{Location: 0, Type: gfx.ScalarTypeFloat32, Components: 3}}
+	h.instance.AnswerNext(recording.CallKindReflectVertexInputs, recording.Answer{VertexInputs: reflected})
+
+	h.readDevice(func(device gfx.Device) {
+		module, err := device.CreateShaderModule(gfx.ShaderModuleDescriptor{WGSL: triangleWGSL})
+		mustSucceed(t, err)
+
+		inputs, err := device.ShaderModuleVertexInputs(module, "vs")
+
+		mustSucceed(t, err)
+		if !reflect.DeepEqual(inputs, reflected) {
+			t.Errorf("the inputs are %+v, want %+v", inputs, reflected)
+		}
+		want := recording.Call{Kind: recording.CallKindReflectVertexInputs, Arguments: recording.ReflectVertexInputsArguments{Module: module, EntryPoint: "vs"}}
+		if call := lastCall(h); !reflect.DeepEqual(call, want) {
+			t.Errorf("the last call is %+v, want %+v", call, want)
+		}
+	})
+}

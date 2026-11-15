@@ -264,6 +264,17 @@ device's release and the recovery among them, for a backend to pin.
   The backend seam's `ReflectBindings` carries the same. gogpu fills it
   from naga's IR, which holds names and offsets, and the recording
   adapter answers what a test queues, as for the other reflection calls.
+
+  A caller that describes a module whole, as render's
+  `cmd/declarebindings` writes its binding declarations, also reads
+  `Device.ShaderModuleEntryPoints(module)`, each entry point's name and
+  stage as a `ShaderEntryPoint`, its stage one `ShaderStageFlags` flag, in
+  the order the module declares them, and
+  `Device.ShaderModuleVertexInputs(module, entryPoint)`, the inputs a
+  vertex entry point reads, which pipeline creation checks the vertex
+  buffers against, an empty name the module's one vertex entry point. The
+  seam's `ReflectEntryPoints` carries the first, `ReflectVertexInputs` the
+  second.
 - **Off the frame means a task.** Creation is synchronous on every backend.
   A game creates shader modules and pipelines from a task of its own under
   `kernel.Read[Device]`, scheduled anywhere; gfx has no async call and no

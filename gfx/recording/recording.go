@@ -145,6 +145,9 @@ const (
 	// CallKindReflectBindings is BackendDevice.ReflectBindings, its
 	// Arguments the gfx.ShaderModule.
 	CallKindReflectBindings
+	// CallKindReflectEntryPoints is BackendDevice.ReflectEntryPoints, its
+	// Arguments the gfx.ShaderModule.
+	CallKindReflectEntryPoints
 	// CallKindWriteBuffer is BackendDevice.WriteBuffer, its Arguments a
 	// WriteBufferArguments.
 	CallKindWriteBuffer
@@ -180,14 +183,15 @@ var SurfaceCapabilities = gfx.SurfaceCapabilities{
 // Answer is what AnswerNext makes a call answer: Status for an acquire,
 // Capabilities for a surface's capabilities, zero for SurfaceCapabilities,
 // BindGroupLayouts for a pipeline's reflection, VertexInputs for a vertex
-// entry point's and Bindings for a module's, each none when nil, Error for
-// any call.
+// entry point's, Bindings and EntryPoints for a module's, each none when
+// nil, Error for any call.
 type Answer struct {
 	Status           uint8
 	Capabilities     gfx.SurfaceCapabilities
 	BindGroupLayouts []gfx.BindGroupLayoutDescriptor
 	VertexInputs     []gfx.VertexInput
 	Bindings         []gfx.ShaderBinding
+	EntryPoints      []gfx.ShaderEntryPoint
 	Error            error
 }
 

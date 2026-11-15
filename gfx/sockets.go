@@ -96,6 +96,11 @@ type BackendDevice interface {
 	// caller's, shared with nothing the backend keeps. gfx answers them from
 	// Device.ShaderModuleBindings.
 	ReflectBindings(module ShaderModule) ([]ShaderBinding, error)
+	// ReflectEntryPoints answers every entry point module declares, in the
+	// order it declares them, each with its name and stage, from what the
+	// module's reflection keeps. gfx answers them from
+	// Device.ShaderModuleEntryPoints.
+	ReflectEntryPoints(module ShaderModule) ([]ShaderEntryPoint, error)
 	// CreateRenderPipeline gets an explicit layout: for an "auto" one, gfx
 	// creates what ReflectRenderPipelineLayout answered before calling it.
 	CreateRenderPipeline(pipeline RenderPipeline, descriptor RenderPipelineDescriptor) error

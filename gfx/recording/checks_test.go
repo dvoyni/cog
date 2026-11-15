@@ -79,6 +79,10 @@ func TestACreateOrReflectionNamingAMissingHandleAnswersAnError(t *testing.T) {
 			_, err := device.ReflectBindings(missing.module)
 			return err
 		}},
+		{"an entry-point reflection of a missing module", func(device gfx.BackendDevice, _, missing objects) error {
+			_, err := device.ReflectEntryPoints(missing.module)
+			return err
+		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			instance, device := requestDevice(t)

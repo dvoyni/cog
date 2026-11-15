@@ -9,6 +9,7 @@ import (
 
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/gfx/recording"
+	"github.com/dvoyni/cog/render/internal/bindingdeclaration"
 )
 
 // declarationCatalog holds the binding declarations of the shaders the
@@ -54,7 +55,7 @@ func (d *declarationCatalog) queueAnswer(kind recording.CallKind, answer recordi
 // shader: a module made from the text answered is the shader's, whichever
 // variants of it share their text.
 func (d *declarationCatalog) notePreprocessed(files fs.FS, path string, defines []gfx.ShaderDefine, text string) string {
-	declaration, err := readShaderDeclaration(files, path, defines)
+	declaration, err := bindingdeclaration.Read(files, path, defines)
 	notedText := fmt.Sprintf("%s\n// rendertest: preprocessed %q with defines %q\n", text, path, defines)
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
@@ -94,7 +95,7 @@ func (d *declarationCatalog) noteCompiled(module gfx.ShaderModule, label string,
 // and the bindings module's declaration says otherwise.
 func (d *declarationCatalog) answerBindings(module gfx.ShaderModule, reflect func() ([]gfx.ShaderBinding, error)) ([]gfx.ShaderBinding, error) {
 	return d.answer(recording.CallKindReflectBindings, module, reflect, func(shader preprocessedShader) ([]gfx.ShaderBinding, error) {
-		bindings := slices.Clone(shader.declaration.bindings)
+		bindings := slices.Clone(shader.declaration.Bindings)
 		for index := range bindings {
 			bindings[index].Members = slices.Clone(bindings[index].Members)
 			bindings[index].EntryPoints = slices.Clone(bindings[index].EntryPoints)
@@ -107,7 +108,7 @@ func (d *declarationCatalog) answerBindings(module gfx.ShaderModule, reflect fun
 // module's vertex entry point named entryPoint, an empty name its only one.
 func (d *declarationCatalog) answerVertexInputs(module gfx.ShaderModule, entryPoint string, reflect func() ([]gfx.VertexInput, error)) ([]gfx.VertexInput, error) {
 	return d.answer(recording.CallKindReflectVertexInputs, module, reflect, func(shader preprocessedShader) ([]gfx.VertexInput, error) {
-		vertexInputs := shader.declaration.vertexInputs
+		vertexInputs := shader.declaration.VertexInputs
 		if entryPoint == "" {
 			if len(vertexInputs) != 1 {
 				return nil, fmt.Errorf("rendertest: %s declares %d vertex entry points, so no name picks none: want one", shader.path, len(vertexInputs))
@@ -149,6 +150,6 @@ func (d *declarationCatalog) answer[T any](kind recording.CallKind, module gfx.S
 type preprocessedShader struct {
 	path        string
 	text        string
-	declaration shaderDeclaration
+	declaration bindingdeclaration.Reflection
 	err         error
 }

@@ -417,6 +417,9 @@ what `HostLoop` or the OS requires:
   unless multisampled, as WebGPU refuses a filterable multisampled one.
 - **`ReflectBindings` answers a copy** of what the module's reflection
   keeps, its slices the caller's.
+- **`ReflectEntryPoints` answers each entry point naga holds,** in the order
+  the module declares them, with its name and its stage as gfx's
+  `ShaderStageFlags` flag.
 
 ## Shaders
 

@@ -121,3 +121,28 @@ func TestABindingReflectionAnswersTheBindingsQueuedForItCopiedAndNoneByDefault(t
 		t.Errorf("with nothing queued the reflection answered %+v, %v, want no bindings", unqueued, err)
 	}
 }
+
+func TestAnEntryPointReflectionAnswersTheEntryPointsQueuedForItCopiedAndNoneByDefault(t *testing.T) {
+	instance, device := requestDevice(t)
+	live := createObjects(t, device, everyBufferUsage, everyTextureUsage)
+	queued := []gfx.ShaderEntryPoint{{Name: "vs", Stage: gfx.ShaderStageFlagVertex}}
+	want := []gfx.ShaderEntryPoint{{Name: "vs", Stage: gfx.ShaderStageFlagVertex}}
+	instance.AnswerNext(recording.CallKindReflectEntryPoints, recording.Answer{EntryPoints: queued})
+
+	entryPoints, err := device.ReflectEntryPoints(live.module)
+	mustSucceed(t, err)
+	queued[0].Name = "changed"
+
+	if !reflect.DeepEqual(entryPoints, want) {
+		t.Errorf("the reflection answered %+v, want %+v", entryPoints, want)
+	}
+	calls := instance.Recording().Calls
+	wantCall := recording.Call{Kind: recording.CallKindReflectEntryPoints, Arguments: live.module}
+	if last := calls[len(calls)-1]; !reflect.DeepEqual(last, wantCall) {
+		t.Errorf("last call = %+v, want %+v", last, wantCall)
+	}
+	unqueued, err := device.ReflectEntryPoints(live.module)
+	if err != nil || unqueued != nil {
+		t.Errorf("with nothing queued the reflection answered %+v, %v, want no entry points", unqueued, err)
+	}
+}

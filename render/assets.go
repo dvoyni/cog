@@ -14,8 +14,10 @@ const (
 )
 
 // embeddedAssets are render's built-in assets, its shaders among them, in
-// its assets folder.
+// its assets folder, each shader's binding declaration beside it, which
+// cmd/declarebindings generates.
 //
+//go:generate go run ./cmd/declarebindings assets/mipshader.wgsl
 //go:embed assets
 var embeddedAssets embed.FS
 

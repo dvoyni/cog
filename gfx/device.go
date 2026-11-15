@@ -201,14 +201,15 @@ func (d *device) ReleaseShaderModule(module ShaderModule) {
 }
 
 func (d *device) ShaderModuleBindings(module ShaderModule) ([]ShaderBinding, error) {
-	if d.lost.Load() {
-		return nil, ErrDeviceLost
-	}
-	if err := d.shaderModules.check(module); err != nil {
-		return nil, err
-	}
-	bindings, err := d.backend.ReflectBindings(module)
-	return bindings, d.checkLoss(err)
+	return d.reflectModule(module, func() ([]ShaderBinding, error) { return d.backend.ReflectBindings(module) })
+}
+
+func (d *device) ShaderModuleEntryPoints(module ShaderModule) ([]ShaderEntryPoint, error) {
+	return d.reflectModule(module, func() ([]ShaderEntryPoint, error) { return d.backend.ReflectEntryPoints(module) })
+}
+
+func (d *device) ShaderModuleVertexInputs(module ShaderModule, entryPoint string) ([]VertexInput, error) {
+	return d.reflectModule(module, func() ([]VertexInput, error) { return d.backend.ReflectVertexInputs(module, entryPoint) })
 }
 
 func (d *device) CreateBindGroupLayout(descriptor BindGroupLayoutDescriptor) (BindGroupLayout, error) {
@@ -609,6 +610,20 @@ func (d *device) checkLoss(err error) error {
 		d.failPendingMaps()
 	}
 	return err
+}
+
+// reflectModule answers what reflect, a backend reflection of module,
+// answers: ErrDeviceLost once the device is lost and ErrReleased for a module
+// released, without reaching the backend.
+func (d *device) reflectModule[T any](module ShaderModule, reflect func() ([]T, error)) ([]T, error) {
+	if d.lost.Load() {
+		return nil, ErrDeviceLost
+	}
+	if err := d.shaderModules.check(module); err != nil {
+		return nil, err
+	}
+	reflected, err := reflect()
+	return reflected, d.checkLoss(err)
 }
 
 // logErr logs err, an error a backend call answered, through gfx's logger;

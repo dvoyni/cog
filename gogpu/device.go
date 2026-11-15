@@ -379,6 +379,20 @@ func (d *device) ReflectBindings(module gfx.ShaderModule) ([]gfx.ShaderBinding, 
 	return bindings, nil
 }
 
+// ReflectEntryPoints answers the name and stage of each entry point module's
+// reflection keeps, in the order the module declares them.
+func (d *device) ReflectEntryPoints(module gfx.ShaderModule) ([]gfx.ShaderEntryPoint, error) {
+	stored, err := storedObject(&d.shaderModules, module, "shader module")
+	if err != nil {
+		return nil, err
+	}
+	entryPoints := make([]gfx.ShaderEntryPoint, len(stored.reflection.entryPoints))
+	for index, entryPoint := range stored.reflection.entryPoints {
+		entryPoints[index] = gfx.ShaderEntryPoint{Name: entryPoint.name, Stage: stageVisibilities[entryPoint.stage]}
+	}
+	return entryPoints, nil
+}
+
 // CreateRenderPipeline creates wgpu's pipeline over the layout and modules
 // stored at the descriptor's indexes, and stores it at pipeline's index. A
 // zero DepthStencil format, fragment module, strip index format or blend is

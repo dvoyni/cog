@@ -1792,6 +1792,56 @@ func TestEveryBindingAModuleDeclaresIsAnsweredByNameWithTheEntryPointsThatUseIt(
 	})
 }
 
+func TestEveryEntryPointAModuleDeclaresIsAnsweredWithItsStage(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(&gfx.Config{ForceFallbackAdapter: true}, nil)
+
+	h.readDevice(func(device gfx.Device) {
+		module, err := device.CreateShaderModule(gfx.ShaderModuleDescriptor{WGSL: namedBindingsWGSL})
+		if err != nil {
+			t.Errorf("CreateShaderModule answered %v", err)
+		}
+
+		entryPoints, err := device.ShaderModuleEntryPoints(module)
+
+		want := []gfx.ShaderEntryPoint{
+			{Name: "vs", Stage: gfx.ShaderStageFlagVertex},
+			{Name: "fs", Stage: gfx.ShaderStageFlagFragment},
+			{Name: "tally", Stage: gfx.ShaderStageFlagCompute},
+		}
+		if err != nil || !reflect.DeepEqual(entryPoints, want) {
+			t.Errorf("ShaderModuleEntryPoints answered %+v, %v, want %+v", entryPoints, err, want)
+		}
+	})
+}
+
+func TestAVertexEntryPointsInputsAreAnsweredByNameOrAsTheOnlyOne(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(&gfx.Config{ForceFallbackAdapter: true}, nil)
+
+	h.readDevice(func(device gfx.Device) {
+		module, err := device.CreateShaderModule(gfx.ShaderModuleDescriptor{WGSL: vertexInputsWGSL})
+		if err != nil {
+			t.Errorf("CreateShaderModule answered %v", err)
+		}
+		want := []gfx.VertexInput{
+			{Location: 0, Type: gfx.ScalarTypeFloat32, Components: 2},
+			{Location: 1, Type: gfx.ScalarTypeFloat32, Components: 1},
+			{Location: 2, Type: gfx.ScalarTypeSint32, Components: 1},
+		}
+
+		for _, entryPoint := range []string{"corner", ""} {
+			inputs, err := device.ShaderModuleVertexInputs(module, entryPoint)
+			if err != nil || !reflect.DeepEqual(inputs, want) {
+				t.Errorf("ShaderModuleVertexInputs(%q) answered %+v, %v, want %+v", entryPoint, inputs, err, want)
+			}
+		}
+		if _, err := device.ShaderModuleVertexInputs(module, "paint"); err == nil {
+			t.Error("ShaderModuleVertexInputs answered no error for the fragment entry point paint")
+		}
+	})
+}
+
 func TestABindingBothStagesUseIsVisibleToBoth(t *testing.T) {
 	h := newHarness(t)
 	h.mustSpawn(nil, nil)

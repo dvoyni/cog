@@ -107,7 +107,10 @@ What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
   would, and it answers a shader's reflection from the binding declaration
   beside it, `lit.wgsl.json` beside `lit.wgsl`, failing the test for a
   shader compiled with none; its package documentation gives the format.
-  render's mip shader has its own beside it in `assets`. `Step` draws one beat, `OpenWindow` opens a window,
+  `cmd/declarebindings` generates a declaration from the shader on wgpu's
+  software adapter, with a section for each `-variant`, run from
+  `//go:generate`; render's mip shader has its own beside it in `assets`,
+  generated so from `assets.go`. `Step` draws one beat, `OpenWindow` opens a window,
   `LengthenNextAcquire` makes an acquire take longer, `ExpectReport`
   names a report kind the test expects, `Reports` answers the reports
   logged, and `Frames` reads each frame back as an `Inspection`.

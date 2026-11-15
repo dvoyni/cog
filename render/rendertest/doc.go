@@ -22,7 +22,11 @@
 // reflection, its bindings and its vertex entry points' inputs, from a binding
 // declaration: a JSON file beside the shader, named for it with .json
 // appended, lit.wgsl.json beside lit.wgsl, read from the files the shader is
-// preprocessed from. A shader compiled with no declaration, or with one that
+// preprocessed from. render's cmd/declarebindings generates it from the
+// shader on wgpu's software adapter, with a variant for each define set
+// named with -variant, run from a //go:generate line beside the shaders:
+//
+//	//go:generate go run github.com/dvoyni/cog/render/cmd/declarebindings -variant SKINNED,JOINTS=4 lit.wgsl A shader compiled with no declaration, or with one that
 // fails to parse, fails the test, naming its path. An answer a test of
 // rendertest's own queues on the recording adapter wins over the
 // declaration's.
@@ -58,7 +62,7 @@
 //   - "sampler": its "type", filtering, non-filtering or comparison;
 //   - "texture": its "sampleType", float, unfilterable-float, depth, sint or
 //     uint, its "viewDimension", 1d, 2d, 2d-array, cube, cube-array or 3d,
-//     and whether it is "multisampled";
+//     and whether it is "multisampled", false when left out;
 //   - "storageTexture": its "access", write-only, read-only or read-write, its
 //     "format", one WebGPU allows a storage texture, such as rgba8unorm, and
 //     its "viewDimension".

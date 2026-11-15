@@ -614,10 +614,16 @@ func TestAWriteOrReflectionOfAStaleHandleAnswersErrReleasedBeforeTheBackend(t *t
 			return device.WriteTexture(gfx.ImageCopyTexture{Texture: stale.texture}, []byte{1, 2, 3, 4}, gfx.ImageDataLayout{BytesPerRow: 4, RowsPerImage: 1}, gfx.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1})
 		}},
 		{"a module's bindings", func(device gfx.Device, stale fixture) error {
-			return answerNoBindings(device.ShaderModuleBindings(stale.module))
+			return answerNone(device.ShaderModuleBindings(stale.module))
 		}},
 		{"the zero module's bindings", func(device gfx.Device, _ fixture) error {
-			return answerNoBindings(device.ShaderModuleBindings(gfx.ShaderModule{}))
+			return answerNone(device.ShaderModuleBindings(gfx.ShaderModule{}))
+		}},
+		{"a module's entry points", func(device gfx.Device, stale fixture) error {
+			return answerNone(device.ShaderModuleEntryPoints(stale.module))
+		}},
+		{"a module's vertex inputs", func(device gfx.Device, stale fixture) error {
+			return answerNone(device.ShaderModuleVertexInputs(stale.module, ""))
 		}},
 	} {
 		for _, staleFixture := range staleFixtures {
@@ -854,11 +860,10 @@ func mustSucceed(t *testing.T, err error) {
 	}
 }
 
-// answerNoBindings answers err, or an error when bindings were answered with
-// it.
-func answerNoBindings(bindings []gfx.ShaderBinding, err error) error {
-	if bindings != nil {
-		return fmt.Errorf("bindings %+v answered with %w", bindings, err)
+// answerNone answers err, or an error when values were answered with it.
+func answerNone[T any](values []T, err error) error {
+	if values != nil {
+		return fmt.Errorf("%+v answered with %w", values, err)
 	}
 	return err
 }

@@ -273,6 +273,17 @@ func (d *device) ReflectBindings(module gfx.ShaderModule) ([]gfx.ShaderBinding, 
 	return cloneBindings(answer.Bindings), answer.Error
 }
 
+// ReflectEntryPoints records the reflection and answers the EntryPoints
+// AnswerNext queued, copied, or none, as ReflectRenderPipelineLayout does;
+// an error when module is missing.
+func (d *device) ReflectEntryPoints(module gfx.ShaderModule) ([]gfx.ShaderEntryPoint, error) {
+	answer := d.instance.record(CallKindReflectEntryPoints, module, func() error {
+		_, err := d.shaderModules.require(module, "the reflected module")
+		return err
+	})
+	return slices.Clone(answer.EntryPoints), answer.Error
+}
+
 // CreateComputePipeline records the creation and keeps pipeline at its
 // index; an error when its layout or module is missing.
 func (d *device) CreateComputePipeline(pipeline gfx.ComputePipeline, descriptor gfx.ComputePipelineDescriptor) error {

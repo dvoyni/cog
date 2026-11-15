@@ -15,7 +15,9 @@ is created and released, `CreateQuerySet` answering
 layouts the backend reflects created as explicit ones, pipeline
 creation checking the vertex buffers against the shader's inputs and the
 pipeline against the device's limits, `ShaderModuleBindings` answering a
-module's bindings by name as the backend reflects them, each
+module's bindings by name as the backend reflects them,
+`ShaderModuleEntryPoints` its entry points with their stages and
+`ShaderModuleVertexInputs` a vertex entry point's inputs, each
 window's surface is created when it opens, configured before its first
 acquire and again once resized or `RequestSurface` changes the request, skipped while hidden or zero-size, and
 released after the last present when it closes, and each render beat
@@ -46,7 +48,8 @@ pass sequence and any query set, reports every feature but timestamp
 queries, and its buffers hold the bytes written, copied and cleared,
 which its own maps read, and answers a pipeline's reflection with the
 layouts a test queues, a vertex entry point's with its inputs, a
-module's named reflection with the bindings a test queues, and a
+module's named reflection with the bindings and entry points a test
+queues, and a
 shader's preprocessing with the file's text as it is, and, its recording
 disabled, keeps no call and allocates nothing in a warm frame.
 What remains is on the [gfx map](https://github.com/dvoyni/cog/issues/608).
