@@ -102,16 +102,25 @@ func makeParameterScene(inventory render.Inventory) parameterScene {
 	return scene
 }
 
-// spawnParameterHarness spawns h as spawnDrawHarness does, with the
-// parameter tests' shaders mounted beside the draw tests'.
+// spawnParameterHarness spawns h as spawnDeclaredHarness does, with the
+// parameter tests' shaders and no config.
 func spawnParameterHarness(t *testing.T, h *rendertest.Harness, frameCount int, duringFrame func(frameIndex int, inventory render.Inventory, frame render.Frame)) {
 	t.Helper()
+	spawnDeclaredHarness(t, h, nil, map[string]string{"material.wgsl": materialDeclaration, "reading.wgsl": readingDeclaration, "passreading.wgsl": passReadingDeclaration}, frameCount, duringFrame)
+}
+
+// spawnDeclaredHarness spawns h with config, the draw tests' shaders and
+// each shader of declarations mounted beside its binding declaration,
+// running duringFrame in each frame's recording task, and steps frameCount
+// frames.
+func spawnDeclaredHarness(t *testing.T, h *rendertest.Harness, config *render.Config, declarations map[string]string, frameCount int, duringFrame func(frameIndex int, inventory render.Inventory, frame render.Frame)) {
+	t.Helper()
 	files := makeDrawFiles(t)
-	for name, declaration := range map[string]string{"material.wgsl": materialDeclaration, "reading.wgsl": readingDeclaration, "passreading.wgsl": passReadingDeclaration} {
+	for name, declaration := range declarations {
 		putFile(t, files, name, []byte("// "+name))
 		putFile(t, files, name+".json", []byte(declaration))
 	}
-	h.Spawn(nil, &loaderPlugin{files: files, duringFrame: duringFrame})
+	h.Spawn(config, &loaderPlugin{files: files, duringFrame: duringFrame})
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	for range frameCount {
 		h.Step()
@@ -121,11 +130,7 @@ func spawnParameterHarness(t *testing.T, h *rendertest.Harness, frameCount int, 
 // findParameter answers the parameter named name of draw's material, and
 // whether it has one.
 func findParameter(draw render.InspectedDraw, name string) (render.InspectedParameter, bool) {
-	index := slices.IndexFunc(draw.Material.Parameters, func(parameter render.InspectedParameter) bool { return parameter.Name == name })
-	if index < 0 {
-		return render.InspectedParameter{}, false
-	}
-	return draw.Material.Parameters[index], true
+	return findParameterIn(draw.Material.Parameters, name)
 }
 
 // findOnlyDraw answers the one draw of each frame's pass labelled label,

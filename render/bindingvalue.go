@@ -7,11 +7,13 @@ import (
 	"github.com/dvoyni/cog/render/internal/handle"
 )
 
-// materialParameter is the value bound to one of a material's bindings, of
-// its kind: a texture seen through view; a sampler; a range of a buffer, its
-// size filled in; or a uniform block, held in a buffer its material keeps. A
-// parameter of no kind is unbound, and its binding draws its default.
-type materialParameter struct {
+// bindingValue is the value bound to one binding, a material's, a pass's or
+// a draw's, of its kind: a texture seen through view; a sampler; a range of a
+// buffer, its size filled in; or a uniform block, held in a buffer its
+// material keeps, or for a pass or draw parameter in bufferRange, a block of
+// its list's arena. A value of no kind is unbound, and its binding draws its
+// default.
+type bindingValue struct {
 	kind        parameterKind
 	texture     Texture
 	view        gfx.TextureViewDescriptor
@@ -21,7 +23,7 @@ type materialParameter struct {
 
 // fillTexture binds view of texture, which gfx made from descriptor, as p,
 // or answers why it does not fit binding.
-func (p *materialParameter) fillTexture(view TextureView, descriptor gfx.TextureDescriptor, binding gfx.ShaderBinding) error {
+func (p *bindingValue) fillTexture(view TextureView, descriptor gfx.TextureDescriptor, binding gfx.ShaderBinding) error {
 	if binding.Texture.SampleType == gfx.TextureSampleTypeUndefined && binding.StorageTexture.Access == gfx.StorageTextureAccessUndefined {
 		return fmt.Errorf("is a texture, where its binding is a %s", describeBindingKind(binding))
 	}
@@ -36,7 +38,7 @@ func (p *materialParameter) fillTexture(view TextureView, descriptor gfx.Texture
 }
 
 // fillSampler binds sampler as p, or answers why it does not fit binding.
-func (p *materialParameter) fillSampler(sampler SamplerDescriptor, binding gfx.ShaderBinding) error {
+func (p *bindingValue) fillSampler(sampler SamplerDescriptor, binding gfx.ShaderBinding) error {
 	if binding.Sampler.Type == gfx.SamplerBindingTypeUndefined {
 		return fmt.Errorf("is a sampler, where its binding is a %s", describeBindingKind(binding))
 	}
@@ -54,7 +56,7 @@ func (p *materialParameter) fillSampler(sampler SamplerDescriptor, binding gfx.S
 // a buffer without the binding's usage, a range at an offset no multiple of
 // the binding's alignment, past the buffer's end, smaller than the binding's
 // type or, for a uniform block, larger than a uniform binding may be.
-func (p *materialParameter) fillBuffer(bufferRange BufferRange, descriptor gfx.BufferDescriptor, binding gfx.ShaderBinding, limits gfx.Limits) error {
+func (p *bindingValue) fillBuffer(bufferRange BufferRange, descriptor gfx.BufferDescriptor, binding gfx.ShaderBinding, limits gfx.Limits) error {
 	usage := gfx.BufferUsageFlagStorage
 	alignment := uint64(limits.MinStorageBufferOffsetAlignment)
 	maxSize := limits.MaxStorageBufferBindingSize
@@ -87,7 +89,7 @@ func (p *materialParameter) fillBuffer(bufferRange BufferRange, descriptor gfx.B
 // fillUniform binds a uniform block as p, binding, of material's named
 // name, held in uniformBuffer, which it makes, labelled with material's
 // handle, when it holds none; an error when gfx cannot make it.
-func (p *materialParameter) fillUniform(device gfx.Device, binding gfx.ShaderBinding, uniformBuffer *gfx.Buffer, material Material, name string) error {
+func (p *bindingValue) fillUniform(device gfx.Device, binding gfx.ShaderBinding, uniformBuffer *gfx.Buffer, material Material, name string) error {
 	if *uniformBuffer == (gfx.Buffer{}) {
 		buffer, err := device.CreateBuffer(gfx.BufferDescriptor{Label: handle.MakeLabel(material, "uniform block "+name), Size: binding.Buffer.MinBindingSize, Usage: gfx.BufferUsageFlagUniform | gfx.BufferUsageFlagCopyDst})
 		if err != nil {
@@ -99,7 +101,26 @@ func (p *materialParameter) fillUniform(device gfx.Device, binding gfx.ShaderBin
 	return nil
 }
 
-// parameterKind is the kind of value a materialParameter binds.
+// overlapsTargets answers whether v is a texture overlapping one of targets,
+// a pass's, where a binding may not read it: sampled, a binding sampling it,
+// overlapping a target the pass writes, or, not sampled, a storage binding,
+// overlapping any.
+func (v bindingValue) overlapsTargets(sampled bool, targets []drawnTarget) bool {
+	if v.kind != parameterKindTexture {
+		return false
+	}
+	for _, target := range targets {
+		if target.texture == v.texture && (!target.readOnly || !sampled) &&
+			target.mipLevel-v.view.BaseMipLevel < v.view.MipLevelCount &&
+			target.layer-v.view.BaseArrayLayer < v.view.ArrayLayerCount {
+			return true
+		}
+	}
+	return false
+}
+
+// parameterKind is the kind of value a bindingValue binds, or a
+// parameterSetting sets.
 type parameterKind uint8
 
 const (

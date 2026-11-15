@@ -20,7 +20,7 @@ type materialSlot struct {
 	state                                State
 	vertexEntryPoint, fragmentEntryPoint string
 	refused, reported                    bool
-	parameters                           []materialParameter
+	parameters                           []bindingValue
 	uniformBuffers                       []gfx.Buffer
 	bindGroups                           []materialBindGroup
 }
@@ -35,25 +35,17 @@ func (s *materialSlot) usesBinding(binding gfx.ShaderBinding) bool {
 
 // findOverlapMask answers the bit of each of s's textures, by its index
 // among s's parameters, that overlaps one of targets, a pass's, where
-// bindings, its shader's of @group(1), may not read it: a sampled texture
-// overlapping a target the pass writes, or a storage texture overlapping
-// any. A parameter past the 64th is never masked.
+// bindings, its shader's of @group(1), may not read it, as
+// bindingValue.overlapsTargets says. A parameter past the 64th is never
+// masked.
 func (s *materialSlot) findOverlapMask(bindings []gfx.ShaderBinding, targets []drawnTarget) uint64 {
 	var mask uint64
 	if len(targets) == 0 {
 		return mask
 	}
 	for index, parameter := range s.parameters {
-		if parameter.kind != parameterKindTexture {
-			continue
-		}
-		sampled := bindings[index].Texture.SampleType != gfx.TextureSampleTypeUndefined
-		for _, target := range targets {
-			if target.texture == parameter.texture && (!target.readOnly || !sampled) &&
-				target.mipLevel-parameter.view.BaseMipLevel < parameter.view.MipLevelCount &&
-				target.layer-parameter.view.BaseArrayLayer < parameter.view.ArrayLayerCount {
-				mask |= 1 << index
-			}
+		if parameter.overlapsTargets(bindings[index].Texture.SampleType != gfx.TextureSampleTypeUndefined, targets) {
+			mask |= 1 << index
 		}
 	}
 	return mask
@@ -84,19 +76,10 @@ func (s *materialSlot) dropBindGroups(drop func(gfx.BindGroup)) {
 // materialBindGroup is a material's own bind group of @group(1), for passes
 // whose targets leave the textures of defaultedMask at their defaults, none
 // when its shader's @group(1) is empty and the layout's default stands in;
-// and the name of a storage binding of any group left unbound that a
-// function the material runs reads, for which its draws are skipped, empty
-// for none.
+// and the name of a storage binding of it left unbound that a function the
+// material runs reads, for which its draws are skipped, empty for none.
 type materialBindGroup struct {
 	defaultedMask uint64
 	group         gfx.BindGroup
 	unboundRead   string
-}
-
-// drawBindGroupSet are the bind groups a draw binds, one for each group of its
-// shader's layout, and the name of a storage binding left unbound that a
-// function it runs reads, for which it is skipped, empty for none.
-type drawBindGroupSet struct {
-	groups      [reservedGroup]gfx.BindGroup
-	unboundRead string
 }

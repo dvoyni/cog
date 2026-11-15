@@ -209,7 +209,7 @@ func (t *assetTable) addMaterial(descriptor MaterialDescriptor) (Material, error
 	}
 	slot.vertexEntryPoint = vertexEntryPoint
 	slot.fragmentEntryPoint = fragmentEntryPoint
-	slot.parameters = make([]materialParameter, len(shader.findGroupBindings(materialGroup)))
+	slot.parameters = make([]bindingValue, len(shader.findGroupBindings(materialGroup)))
 	slot.uniformBuffers = make([]gfx.Buffer, len(slot.parameters))
 	return material, nil
 }
@@ -224,7 +224,7 @@ func (t *assetTable) addMaterial(descriptor MaterialDescriptor) (Material, error
 // drops the material's bind groups, those the frame may still bind released
 // at its end. fill runs with t's mutex held, given the buffer the material
 // keeps for the binding's uniform block, none until one is set.
-func (t *assetTable) setMaterialParameter(material Material, name string, fill func(shader Shader, binding gfx.ShaderBinding, parameter *materialParameter, uniformBuffer *gfx.Buffer) error) {
+func (t *assetTable) setMaterialParameter(material Material, name string, fill func(shader Shader, binding gfx.ShaderBinding, parameter *bindingValue, uniformBuffer *gfx.Buffer) error) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	slot, ok := t.materials.Find(material)
@@ -254,7 +254,7 @@ func (t *assetTable) setMaterialParameter(material Material, name string, fill f
 	parameter := &slot.parameters[index]
 	previous := *parameter
 	if err := fill(slot.shader, binding, parameter, &slot.uniformBuffers[index]); err != nil {
-		*parameter = materialParameter{}
+		*parameter = bindingValue{}
 		if claimReport(&t.reportedParameters, reportKey) {
 			t.report(ReportKindParameterRefused, fmt.Errorf("render: setting %q of material %q: the value %w; its binding draws its default", name, slot.label, err))
 		}
@@ -277,57 +277,58 @@ func (t *assetTable) findSlot[H handle.Handle, S any](slots *handle.SlotMap[H, S
 	return *slot, true
 }
 
-// findDrawBindGroups answers the bind groups a draw of material, of shader,
-// binds into a pass writing targets: the material's own of @group(1), made
-// the first time for the textures the targets leave at their defaults, and
-// the default of every other group; and the name of a storage binding left
-// unbound that a function material runs reads, for which the draw is
-// skipped. A material texture overlapping one of targets draws its default,
-// reported once for its shader and name. The error is gfx's, when a bind
-// group or what it binds cannot be made, or says material is no longer
-// held.
-func (t *assetTable) findDrawBindGroups(device gfx.Device, material Material, shader shaderSlot, targets []drawnTarget) (drawBindGroupSet, error) {
+// findDrawBindGroups fills bindGroups with what a draw of material, of
+// shader, binds for each group of its layout into a pass writing targets,
+// whose pass and draw parameters listState holds: the material's own bind
+// group of @group(1), made the first time for the textures the targets leave
+// at their defaults; and of @group(0) and @group(2), unless bindGroups holds
+// them resolved for its shader and functions, a bind group of the pass's or the draw's parameters with
+// their dynamic offsets, shared by every draw binding the same, or the
+// layout's default where none is set. With each goes the name of a storage
+// binding of its group left unbound that a function material runs reads,
+// for which the draw is skipped. A value that cannot fill its binding, names
+// a binding of another group, or is a texture overlapping one of targets,
+// draws its default, reported once for its shader and name. The error is
+// gfx's, when a bind group or what it binds cannot be made, or says
+// material is no longer held.
+func (t *assetTable) findDrawBindGroups(device gfx.Device, material Material, shader shaderSlot, targets []drawnTarget, listState *commandListState, bindGroups *drawBindGroupSet) error {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	slot, ok := t.materials.Find(material)
 	if !ok {
-		return drawBindGroupSet{}, fmt.Errorf("render: material %v is no longer held", material)
+		return fmt.Errorf("render: material %v is no longer held", material)
 	}
-	materialBindings := shader.findGroupBindings(materialGroup)
-	overlapMask := slot.findOverlapMask(materialBindings, targets)
-	materialBindGroup, ok := slot.findBindGroup(overlapMask)
-	if !ok {
-		for index, binding := range materialBindings {
-			if overlapMask&(1<<index) != 0 && claimReport(&t.reportedParameters, parameterReportKey{shader: slot.shader, name: binding.Name}) {
-				t.report(ReportKindParameterRefused, fmt.Errorf("render: %q of material %q is a texture a target of its pass overlaps; its binding draws its default", binding.Name, slot.label))
+	functions := shaderSelection{shader: slot.shader, vertexEntryPoint: slot.vertexEntryPoint, fragmentEntryPoint: slot.fragmentEntryPoint}
+	for group, groupLayout := range shader.layout.groups {
+		var err error
+		switch {
+		case group == materialGroup:
+			var materialBindGroup materialBindGroup
+			materialBindGroup, err = t.findMaterialBindGroup(device, slot, shader, targets)
+			binding := groupBinding{bindGroup: materialBindGroup.group}
+			if binding.bindGroup == (gfx.BindGroup{}) && err == nil {
+				binding.bindGroup, err = t.layouts.findDefaultBindGroup(device, &t.bindingResources, groupLayout)
+			}
+			bindGroups.groupBindings[group] = binding
+			bindGroups.unboundReads[group] = materialBindGroup.unboundRead
+		case bindGroups.resolvedFor[group] != functions:
+			bindGroups.groupBindings[group], bindGroups.unboundReads[group], err = t.makeParameterGroupBinding(device, uint32(group), listState.parameterSettings[group], slot, shader, targets, &listState.bindGroupDraft)
+			if err == nil {
+				bindGroups.resolvedFor[group] = functions
 			}
 		}
-		var err error
-		if materialBindGroup, err = t.makeMaterialBindGroup(device, slot, shader, overlapMask); err != nil {
-			return drawBindGroupSet{}, err
-		}
-		slot.bindGroups = append(slot.bindGroups, materialBindGroup)
-	}
-	bindGroups := drawBindGroupSet{unboundRead: materialBindGroup.unboundRead}
-	for group, groupLayout := range shader.layout.groups {
-		if uint32(group) == materialGroup && materialBindGroup.group != (gfx.BindGroup{}) {
-			bindGroups.groups[group] = materialBindGroup.group
-			continue
-		}
-		defaultGroup, err := t.layouts.findDefaultBindGroup(device, &t.bindingResources, groupLayout)
 		if err != nil {
-			return drawBindGroupSet{}, err
+			return err
 		}
-		bindGroups.groups[group] = defaultGroup
 	}
-	return bindGroups, nil
+	return nil
 }
 
 // unbindFreed unbinds, when a texture or buffer was freed since it last ran,
 // every material value naming one render no longer holds, releasing its
-// material's bind groups, so the binding draws its default and render keeps
-// no handle it released. It runs at the end of each frame, after every
-// free.
+// material's bind groups, so the binding draws its default, and releases
+// every bind group of pass or draw parameters naming one, so render keeps no
+// handle it released. It runs at the end of each frame, after every free.
 func (t *assetTable) unbindFreed(device gfx.Device) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
@@ -349,7 +350,7 @@ func (t *assetTable) unbindFreed(device gfx.Device) {
 				continue
 			}
 			if !held {
-				*parameter = materialParameter{}
+				*parameter = bindingValue{}
 				changed = true
 			}
 		}
@@ -357,6 +358,15 @@ func (t *assetTable) unbindFreed(device gfx.Device) {
 			slot.dropBindGroups(device.ReleaseBindGroup)
 		}
 	}
+	t.layouts.releaseBindGroups(device, func(cached *parameterBindGroup) bool {
+		return slices.ContainsFunc(cached.namedTextures, func(texture Texture) bool {
+			_, held := t.textures.Find(texture)
+			return !held
+		}) || slices.ContainsFunc(cached.namedBuffers, func(buffer Buffer) bool {
+			_, held := t.buffers.Find(buffer)
+			return !held
+		})
+	})
 }
 
 // claimMeshReport answers whether a skipped draw of mesh is to be reported,
@@ -613,17 +623,12 @@ func (t *assetTable) checkUniform(goType reflect.Type, shader Shader, binding gf
 // makeMaterialBindGroup answers slot's bind group of its shader's
 // @group(1), binding each binding to its value, or to its default when it is
 // unbound, names an asset render no longer holds or one of no bytes, or is a
-// texture of overlapMask; none when the group is empty. With it goes the name of a
-// storage binding of any group left at its default that a function slot
+// texture of overlapMask; none when the group is empty. With it goes the
+// name of a storage binding of it left at its default that a function slot
 // runs reads, empty for none. t's mutex is held.
 func (t *assetTable) makeMaterialBindGroup(device gfx.Device, slot *materialSlot, shader shaderSlot, overlapMask uint64) (materialBindGroup, error) {
 	t.requireLocked("makeMaterialBindGroup")
 	bindGroup := materialBindGroup{defaultedMask: overlapMask}
-	for _, binding := range shader.bindings {
-		if binding.Group != materialGroup && bindGroup.unboundRead == "" && isStorage(binding) && slot.usesBinding(binding) {
-			bindGroup.unboundRead = binding.Name
-		}
-	}
 	bindings := shader.findGroupBindings(materialGroup)
 	if len(bindings) == 0 {
 		return bindGroup, nil
@@ -631,40 +636,202 @@ func (t *assetTable) makeMaterialBindGroup(device gfx.Device, slot *materialSlot
 	layout := shader.layout.groups[materialGroup]
 	entries := make([]gfx.BindGroupEntry, len(bindings))
 	for index, binding := range bindings {
-		parameter := slot.parameters[index]
-		entry := gfx.BindGroupEntry{Binding: binding.Binding}
-		var err error
-		switch parameter.kind {
-		case parameterKindTexture:
-			if textureSlot, ok := t.textures.Find(parameter.texture); ok && overlapMask&(1<<index) == 0 {
-				entry.TextureView, err = textureSlot.findTextureView(device, parameter.view)
-			}
-		case parameterKindSampler:
-			entry.Sampler, err = t.bindingResources.findSampler(device, parameter.sampler)
-		case parameterKindBuffer:
-			if bufferSlot, ok := t.buffers.Find(parameter.bufferRange.Buffer); ok {
-				entry.Buffer = bufferSlot.buffer
-				entry.Offset = parameter.bufferRange.Offset
-				entry.Size = parameter.bufferRange.Size
-			}
-		case parameterKindUniform:
-			entry.Buffer = slot.uniformBuffers[index]
-			entry.Size = binding.Buffer.MinBindingSize
+		value := slot.parameters[index]
+		if overlapMask&(1<<index) != 0 {
+			value = bindingValue{}
 		}
-		if err == nil && entry.TextureView == (gfx.TextureView{}) && entry.Sampler == (gfx.Sampler{}) && entry.Buffer == (gfx.Buffer{}) {
-			if bindGroup.unboundRead == "" && isStorage(binding) && slot.usesBinding(binding) {
-				bindGroup.unboundRead = binding.Name
-			}
-			entry, err = t.bindingResources.makeEntry(device, layout.entries[index])
-		}
+		entry, defaulted, err := t.makeValueEntry(device, value, binding, layout.entries[index], slot.uniformBuffers[index])
 		if err != nil {
 			return materialBindGroup{}, err
+		}
+		if defaulted && bindGroup.unboundRead == "" && isStorage(binding) && slot.usesBinding(binding) {
+			bindGroup.unboundRead = binding.Name
 		}
 		entries[index] = entry
 	}
 	group, err := device.CreateBindGroup(gfx.BindGroupDescriptor{Label: "render: a material's bind group", Layout: layout.layout, Entries: entries})
 	bindGroup.group = group
 	return bindGroup, err
+}
+
+// findMaterialBindGroup answers slot's bind group of its shader's @group(1)
+// for a pass writing targets, made the first time for the textures the
+// targets leave at their defaults, each such texture reported once for its
+// shader and name. t's mutex is held.
+func (t *assetTable) findMaterialBindGroup(device gfx.Device, slot *materialSlot, shader shaderSlot, targets []drawnTarget) (materialBindGroup, error) {
+	t.requireLocked("findMaterialBindGroup")
+	bindings := shader.findGroupBindings(materialGroup)
+	overlapMask := slot.findOverlapMask(bindings, targets)
+	if bindGroup, ok := slot.findBindGroup(overlapMask); ok {
+		return bindGroup, nil
+	}
+	for index, binding := range bindings {
+		if overlapMask&(1<<index) != 0 && claimReport(&t.reportedParameters, parameterReportKey{shader: slot.shader, name: binding.Name}) {
+			t.report(ReportKindParameterRefused, fmt.Errorf("render: %q of material %q is a texture a target of its pass overlaps; its binding draws its default", binding.Name, slot.label))
+		}
+	}
+	bindGroup, err := t.makeMaterialBindGroup(device, slot, shader, overlapMask)
+	if err != nil {
+		return materialBindGroup{}, err
+	}
+	slot.bindGroups = append(slot.bindGroups, bindGroup)
+	return bindGroup, nil
+}
+
+// makeParameterGroupBinding answers the bind group of group, @group(0) or
+// @group(2), of a draw of slot, of shader, into a pass writing targets, with
+// its dynamic offsets: each binding bound to the value of settings, the
+// pass's or the draw's parameters, by its name, or to its default when none
+// is set, it is refused, or it is a texture overlapping one of targets, the
+// last two reported once for shader and the name, as is a setting naming a
+// binding of another group. It is built in draft and shared by every draw
+// binding the same; the layout's default when nothing is set. With it goes
+// the name of a storage binding of the group left at its default that a
+// function slot runs reads, empty for none. t's mutex is held.
+func (t *assetTable) makeParameterGroupBinding(device gfx.Device, group uint32, settings []parameterSetting, slot *materialSlot, shader shaderSlot, targets []drawnTarget, draft *bindGroupDraft) (groupBinding, string, error) {
+	t.requireLocked("makeParameterGroupBinding")
+	level := "pass parameter"
+	if group == drawGroup {
+		level = "draw parameter"
+	}
+	for _, setting := range settings {
+		index := slices.IndexFunc(shader.bindings, func(binding gfx.ShaderBinding) bool { return binding.Name == setting.name })
+		if index >= 0 && shader.bindings[index].Group != group && claimReport(&t.reportedParameters, parameterReportKey{shader: slot.shader, name: setting.name}) {
+			t.report(ReportKindParameterRefused, fmt.Errorf("render: %s %q names a binding of shader %v in @group(%d), and %ss are in @group(%d)", level, setting.name, slot.shader, shader.bindings[index].Group, level, group))
+		}
+	}
+	layout := shader.layout.groups[group]
+	binding := groupBinding{dynamicOffsetCount: layout.dynamicOffsetCount}
+	var unboundRead string
+	draft.entries = draft.entries[:0]
+	draft.namedTextures = draft.namedTextures[:0]
+	draft.namedBuffers = draft.namedBuffers[:0]
+	dynamicOffsetCount := 0
+	for index, shaderBinding := range shader.findGroupBindings(group) {
+		var value bindingValue
+		if settingIndex := slices.IndexFunc(settings, func(setting parameterSetting) bool { return setting.name == shaderBinding.Name }); settingIndex >= 0 {
+			err := t.fillSettingValue(device, slot.shader, shaderBinding, settings[settingIndex], &value)
+			if err == nil && value.overlapsTargets(shaderBinding.Texture.SampleType != gfx.TextureSampleTypeUndefined, targets) {
+				err = errors.New("is a texture a target of its pass overlaps")
+			}
+			if err != nil {
+				value = bindingValue{}
+				if claimReport(&t.reportedParameters, parameterReportKey{shader: slot.shader, name: shaderBinding.Name}) {
+					t.report(ReportKindParameterRefused, fmt.Errorf("render: %s %q under shader %v: the value %w; its binding draws its default", level, shaderBinding.Name, slot.shader, err))
+				}
+			}
+		}
+		entry, defaulted, err := t.makeValueEntry(device, value, shaderBinding, layout.entries[index], gfx.Buffer{})
+		if err != nil {
+			return groupBinding{}, "", err
+		}
+		switch {
+		case defaulted:
+			if unboundRead == "" && isStorage(shaderBinding) && slot.usesBinding(shaderBinding) {
+				unboundRead = shaderBinding.Name
+			}
+		case value.kind == parameterKindTexture:
+			draft.namedTextures = append(draft.namedTextures, value.texture)
+		case value.kind == parameterKindBuffer || value.kind == parameterKindUniform:
+			draft.namedBuffers = append(draft.namedBuffers, value.bufferRange.Buffer)
+		}
+		if layout.entries[index].Buffer.HasDynamicOffset {
+			binding.dynamicOffsets[dynamicOffsetCount] = uint32(entry.Offset)
+			dynamicOffsetCount++
+			entry.Offset = 0
+		}
+		draft.entries = append(draft.entries, entry)
+	}
+	var err error
+	if len(settings) == 0 {
+		binding.bindGroup, err = t.layouts.findDefaultBindGroup(device, &t.bindingResources, layout)
+	} else {
+		binding.bindGroup, err = t.layouts.findParameterBindGroup(device, layout, draft)
+	}
+	return binding, unboundRead, err
+}
+
+// makeValueEntry answers the entry binding value to binding, of layout entry
+// layoutEntry: a texture's view, a sampler, a range of a buffer, or a uniform
+// block, in uniformBuffer, a material's, or else in value's range of the
+// arena, its offset in the entry; or, when value is unbound or names an asset
+// render no longer holds or one of no bytes, the entry the binding draws
+// unbound with, and true. t's mutex is held.
+func (t *assetTable) makeValueEntry(device gfx.Device, value bindingValue, binding gfx.ShaderBinding, layoutEntry gfx.BindGroupLayoutEntry, uniformBuffer gfx.Buffer) (gfx.BindGroupEntry, bool, error) {
+	t.requireLocked("makeValueEntry")
+	entry := gfx.BindGroupEntry{Binding: binding.Binding}
+	var err error
+	switch {
+	case value.kind == parameterKindTexture:
+		if textureSlot, ok := t.textures.Find(value.texture); ok {
+			entry.TextureView, err = textureSlot.findTextureView(device, value.view)
+		}
+	case value.kind == parameterKindSampler:
+		entry.Sampler, err = t.bindingResources.findSampler(device, value.sampler)
+	case value.kind == parameterKindUniform && uniformBuffer != (gfx.Buffer{}):
+		entry.Buffer = uniformBuffer
+		entry.Size = binding.Buffer.MinBindingSize
+	case value.kind == parameterKindBuffer || value.kind == parameterKindUniform:
+		if bufferSlot, ok := t.buffers.Find(value.bufferRange.Buffer); ok {
+			entry.Buffer = bufferSlot.buffer
+			entry.Offset = value.bufferRange.Offset
+			entry.Size = value.bufferRange.Size
+		}
+	}
+	if err != nil || entry.TextureView != (gfx.TextureView{}) || entry.Sampler != (gfx.Sampler{}) || entry.Buffer != (gfx.Buffer{}) {
+		return entry, false, err
+	}
+	entry, err = t.bindingResources.makeEntry(device, layoutEntry)
+	return entry, true, err
+}
+
+// fillTextureValue binds view, of a texture render holds, to value, of
+// binding, or answers why it does not fit, wholeTexture saying view names its
+// texture alone, which a storage binding sees at its first mip level. t's
+// mutex is held.
+func (t *assetTable) fillTextureValue(device gfx.Device, value *bindingValue, binding gfx.ShaderBinding, view TextureView, wholeTexture bool) error {
+	t.requireLocked("fillTextureValue")
+	textureSlot, ok := t.textures.Find(view.Texture)
+	if !ok {
+		return fmt.Errorf("names texture %v, which render does not hold", view.Texture)
+	}
+	if wholeTexture && binding.StorageTexture.Access != gfx.StorageTextureAccessUndefined {
+		view.MipLevelCount = 1
+	}
+	return value.fillTexture(view, device.TextureDescriptor(textureSlot.texture), binding)
+}
+
+// fillBufferValue binds bufferRange, of a buffer render holds, to value, of
+// binding, or answers why it does not fit. t's mutex is held.
+func (t *assetTable) fillBufferValue(device gfx.Device, value *bindingValue, binding gfx.ShaderBinding, bufferRange BufferRange) error {
+	t.requireLocked("fillBufferValue")
+	bufferSlot, ok := t.buffers.Find(bufferRange.Buffer)
+	if !ok || bufferSlot.buffer == (gfx.Buffer{}) {
+		return fmt.Errorf("names buffer %v, which render does not hold, or which has no bytes", bufferRange.Buffer)
+	}
+	return value.fillBuffer(bufferRange, device.BufferDescriptor(bufferSlot.buffer), binding, device.Limits())
+}
+
+// fillSettingValue binds setting, a pass or draw parameter, to value, of
+// binding, of shader, or answers why it does not fit; a setting of no kind
+// leaves value unbound. t's mutex is held.
+func (t *assetTable) fillSettingValue(device gfx.Device, shader Shader, binding gfx.ShaderBinding, setting parameterSetting, value *bindingValue) error {
+	t.requireLocked("fillSettingValue")
+	switch setting.kind {
+	case parameterKindTexture:
+		return t.fillTextureValue(device, value, binding, setting.view, setting.wholeTexture)
+	case parameterKindSampler:
+		return value.fillSampler(setting.sampler, binding)
+	case parameterKindBuffer:
+		return t.fillBufferValue(device, value, binding, setting.bufferRange)
+	case parameterKindUniform:
+		if err := t.checkUniform(setting.uniformType, shader, binding); err != nil {
+			return err
+		}
+		value.kind = parameterKindUniform
+		value.bufferRange = setting.bufferRange
+	}
+	return nil
 }
 
 // requireLocked panics, naming operation, when t's mutex is free: a call

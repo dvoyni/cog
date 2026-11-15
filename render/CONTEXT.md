@@ -73,8 +73,12 @@ A vertex buffer read once per instance, with its layout, set between draws besid
 _Avoid_: Instance stream, per-instance mesh, instance attributes
 
 **Temporary buffer**:
-A buffer taken from render's pool for one frame, which goes back to the pool when that frame ends.
+A range of the temporary arena holding data for one frame, taken from a command list, which the frame's draws and copies read until it ends.
 _Avoid_: Dynamic buffer, transient buffer, scratch buffer
+
+**Temporary arena**:
+The chunks that temporary buffers and the uniform blocks of pass and draw parameters are ranges of. Each command list takes chunks of its own and hands them to the GPU when it ends; they go back to the arena when the frame ends.
+_Avoid_: Ring buffer, staging buffer, uniform ring
 
 **Temporary mesh**:
 A mesh taken from render's pool for one frame, over buffer ranges made or written that frame, which goes back to the pool when that frame ends.

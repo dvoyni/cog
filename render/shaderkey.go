@@ -13,8 +13,14 @@ import (
 	"github.com/dvoyni/cog/render/internal/handle"
 )
 
+// passGroup is the bind group of a pass's parameters.
+const passGroup = 0
+
 // materialGroup is the bind group of a material's parameters.
 const materialGroup = 1
+
+// drawGroup is the bind group of draw parameters.
+const drawGroup = 2
 
 // reservedGroup is the first bind group render reserves: a shader declaring a
 // binding in it is refused.
@@ -131,7 +137,7 @@ func makeGroupLayouts(bindings []gfx.ShaderBinding) ([]gfx.BindGroupLayoutDescri
 		if entry.Buffer.Type == gfx.BufferBindingTypeStorage || (entry.StorageTexture.Access != gfx.StorageTextureAccessUndefined && entry.StorageTexture.Access != gfx.StorageTextureAccessReadOnly) {
 			entry.Visibility &^= gfx.ShaderStageFlagVertex
 		}
-		entry.Buffer.HasDynamicOffset = (entry.Buffer.Type == gfx.BufferBindingTypeUniform && binding.Group != 1) || (storageBuffer && binding.Group == 2)
+		entry.Buffer.HasDynamicOffset = (entry.Buffer.Type == gfx.BufferBindingTypeUniform && binding.Group != materialGroup) || (storageBuffer && binding.Group == drawGroup)
 		groups[binding.Group].Entries = append(groups[binding.Group].Entries, entry)
 	}
 	for _, group := range groups {

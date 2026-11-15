@@ -16,13 +16,11 @@ type texturePool struct {
 }
 
 // pooledTexture is one texture of the pool: the descriptor it was made from,
-// with its counts filled in, whether a user holds it this frame, and for how
-// many frames since the last that held it it has gone unused.
+// with its counts filled in, and whether a user holds it this frame.
 type pooledTexture struct {
+	poolHold
 	descriptor TextureDescriptor
 	texture    Texture
-	held       bool
-	idleFrames int
 }
 
 // acquire hands out a texture of descriptor, whose counts are filled in, that
@@ -40,7 +38,7 @@ func (p *texturePool) acquire(descriptor TextureDescriptor, table *assetTable, d
 	if err != nil {
 		return Texture{}, err
 	}
-	p.entries = append(p.entries, pooledTexture{descriptor: descriptor, texture: texture, held: true})
+	p.entries = append(p.entries, pooledTexture{poolHold: poolHold{held: true}, descriptor: descriptor, texture: texture})
 	return texture, nil
 }
 
@@ -51,13 +49,7 @@ func (p *texturePool) endFrame(idleFrames int, table *assetTable, device gfx.Dev
 	defer p.mutex.Unlock()
 	keptEntries := p.entries[:0]
 	for _, entry := range p.entries {
-		if entry.held {
-			entry.held = false
-			entry.idleFrames = 0
-		} else {
-			entry.idleFrames++
-		}
-		if entry.idleFrames >= idleFrames {
+		if entry.endFrame(idleFrames) {
 			table.removeTexture(device, entry.texture)
 			continue
 		}

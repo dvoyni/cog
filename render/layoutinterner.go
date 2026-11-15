@@ -2,16 +2,13 @@ package render
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 
 	"github.com/dvoyni/cog/gfx"
 )
-
-// zeroDynamicOffsets are the dynamic offsets a bind group binds at while
-// nothing fills its blocks, as many as a group may have by WebGPU's default
-// limits and more.
-var zeroDynamicOffsets [16]uint32
 
 // layoutInterner shares the layouts render builds for its shaders: one gfx
 // bind-group layout for each set of entries, and one pipeline layout for each
@@ -112,6 +109,59 @@ func (i *layoutInterner) findDefaultBindGroup(device gfx.Device, bindingResource
 	return bindGroup, nil
 }
 
+// findParameterBindGroup answers the bind group of group, a layout a held
+// pipeline layout holds, binding draft's entries, made the first time and
+// shared by every pass and draw binding the same until it goes unused or
+// names an asset since freed, and notes it used this frame.
+func (i *layoutInterner) findParameterBindGroup(device gfx.Device, group *internedGroupLayout, draft *bindGroupDraft) (gfx.BindGroup, error) {
+	draft.keyEntries = draft.keyEntries[:0]
+	for _, entry := range draft.entries {
+		draft.keyEntries = append(draft.keyEntries, bindGroupKeyEntry{buffer: entry.Buffer, sampler: entry.Sampler, textureView: entry.TextureView, offset: entry.Offset, size: entry.Size})
+	}
+	key := castToBytes(draft.keyEntries)
+	i.mutex.Lock()
+	defer i.mutex.Unlock()
+	if cached, ok := group.parameterBindGroups[string(key)]; ok {
+		cached.idleFrames = 0
+		return cached.bindGroup, nil
+	}
+	bindGroup, err := device.CreateBindGroup(gfx.BindGroupDescriptor{Label: "render: a bind group of pass or draw parameters", Layout: group.layout, Entries: draft.entries})
+	if err != nil {
+		return gfx.BindGroup{}, err
+	}
+	if group.parameterBindGroups == nil {
+		group.parameterBindGroups = map[string]*parameterBindGroup{}
+	}
+	group.parameterBindGroups[string(key)] = &parameterBindGroup{bindGroup: bindGroup, namedTextures: slices.Clone(draft.namedTextures), namedBuffers: slices.Clone(draft.namedBuffers)}
+	return bindGroup, nil
+}
+
+// freeIdleBindGroups releases each bind group of pass or draw parameters
+// that has now gone unused for idleFrames frames. It runs at the end of each
+// frame.
+func (i *layoutInterner) freeIdleBindGroups(device gfx.Device, idleFrames int) {
+	i.releaseBindGroups(device, func(cached *parameterBindGroup) bool {
+		cached.idleFrames++
+		return cached.idleFrames > idleFrames
+	})
+}
+
+// releaseBindGroups releases each bind group of pass or draw parameters
+// that drop answers true for.
+func (i *layoutInterner) releaseBindGroups(device gfx.Device, drop func(*parameterBindGroup) bool) {
+	i.mutex.Lock()
+	defer i.mutex.Unlock()
+	for _, group := range i.groupLayouts {
+		maps.DeleteFunc(group.parameterBindGroups, func(_ string, cached *parameterBindGroup) bool {
+			if !drop(cached) {
+				return false
+			}
+			device.ReleaseBindGroup(cached.bindGroup)
+			return true
+		})
+	}
+}
+
 // acquireGroupLayout hands out the bind-group layout of group, whose entries
 // make key, counting one more holder of it, and makes it when none is held.
 // i's mutex is held, and it panics when it is not.
@@ -145,6 +195,9 @@ func (i *layoutInterner) releaseGroupLayouts(device gfx.Device, groups []*intern
 			if internedLayout.defaultBindGroup != (gfx.BindGroup{}) {
 				device.ReleaseBindGroup(internedLayout.defaultBindGroup)
 			}
+			for _, cached := range internedLayout.parameterBindGroups {
+				device.ReleaseBindGroup(cached.bindGroup)
+			}
 			device.ReleaseBindGroupLayout(internedLayout.layout)
 			delete(i.groupLayouts, internedLayout.key)
 		}
@@ -163,14 +216,17 @@ func (i *layoutInterner) requireLocked(operation string) {
 // internedGroupLayout is a bind-group layout layoutInterner holds: the
 // layout, the key its entries make, its entries, how many of them bind at a
 // dynamic offset, the bind group of its entries as they draw unbound, none
-// until first bound, and how many shaders' pipeline layouts hold it.
+// until first bound, the bind groups of pass or draw parameters made of it,
+// by the bytes of their entries' keys, and how many shaders' pipeline
+// layouts hold it.
 type internedGroupLayout struct {
-	layout             gfx.BindGroupLayout
-	key                string
-	entries            []gfx.BindGroupLayoutEntry
-	dynamicOffsetCount int
-	defaultBindGroup   gfx.BindGroup
-	holderCount        int
+	layout              gfx.BindGroupLayout
+	key                 string
+	entries             []gfx.BindGroupLayoutEntry
+	dynamicOffsetCount  int
+	defaultBindGroup    gfx.BindGroup
+	parameterBindGroups map[string]*parameterBindGroup
+	holderCount         int
 }
 
 // internedPipelineLayout is a pipeline layout layoutInterner holds, its key,

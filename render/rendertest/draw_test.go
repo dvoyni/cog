@@ -127,14 +127,8 @@ func findPassDraws(h *rendertest.Harness, label string) [][]render.InspectedDraw
 // findPassCommands answers the commands of the first pass labelled label gfx
 // recorded.
 func findPassCommands(h *rendertest.Harness, label string) []recording.Command {
-	for _, frame := range h.RecordedFrames() {
-		for _, buffer := range readSubmittedBuffers(frame) {
-			for _, command := range buffer.Commands {
-				if descriptor, ok := command.Arguments.(gfx.RenderPassDescriptor); ok && descriptor.Label == label {
-					return command.Commands
-				}
-			}
-		}
+	if passes := findEveryPassCommands(h, label); len(passes) > 0 {
+		return passes[0]
 	}
 	return nil
 }

@@ -87,16 +87,22 @@ func (r *frameReader) makeInspectedPass(command recording.Command) render.Inspec
 }
 
 // makeInspectedDraws answers the draws of a pass's commands, each with the
-// material the pipeline set before it draws with, its parameters those the
-// @group(1) bind group set before it binds.
+// material the pipeline set before it draws with, and the values the bind
+// groups set before it bind: its pass parameters those of @group(0), its
+// material's those of @group(1) and its draw parameters those of @group(2),
+// each at its dynamic offsets.
 func (r *frameReader) makeInspectedDraws(commands []recording.Command) []render.InspectedDraw {
 	var draws []render.InspectedDraw
 	var material pipelineMaterial
-	var materialGroup gfx.BindGroup
-	makeMaterial := func() render.InspectedMaterial {
-		inspected := material.material
-		inspected.Parameters = r.bindGroups.makeParameters(material.module, materialGroup, r.submission)
-		return inspected
+	// groups are the bind groups set, by their index.
+	var groups [3]recording.SetBindGroupArguments
+	makeParameters := func(group uint32) []render.InspectedParameter {
+		return r.bindGroups.makeParameters(material.module, group, groups[group].Group, groups[group].DynamicOffsets, r.submission)
+	}
+	makeDraw := func() render.InspectedDraw {
+		draw := render.InspectedDraw{Material: material.material, PassParameters: makeParameters(0), DrawParameters: makeParameters(2)}
+		draw.Material.Parameters = makeParameters(1)
+		return draw
 	}
 	for _, command := range commands {
 		switch command.Kind {
@@ -105,15 +111,23 @@ func (r *frameReader) makeInspectedDraws(commands []recording.Command) []render.
 				material = r.materials[pipeline]
 			}
 		case recording.CommandKindSetBindGroup:
-			if arguments := command.Arguments.(recording.SetBindGroupArguments); arguments.Index == 1 {
-				materialGroup = arguments.Group
+			if arguments := command.Arguments.(recording.SetBindGroupArguments); arguments.Index < uint32(len(groups)) {
+				groups[arguments.Index] = arguments
 			}
 		case recording.CommandKindDraw:
 			arguments := command.Arguments.(gfx.DrawArgs)
-			draws = append(draws, render.InspectedDraw{Material: makeMaterial(), VertexCount: arguments.VertexCount, InstanceCount: arguments.InstanceCount, FirstInstance: arguments.FirstInstance})
+			draw := makeDraw()
+			draw.VertexCount = arguments.VertexCount
+			draw.InstanceCount = arguments.InstanceCount
+			draw.FirstInstance = arguments.FirstInstance
+			draws = append(draws, draw)
 		case recording.CommandKindDrawIndexed:
 			arguments := command.Arguments.(gfx.DrawIndexedArgs)
-			draws = append(draws, render.InspectedDraw{Material: makeMaterial(), IndexCount: arguments.IndexCount, InstanceCount: arguments.InstanceCount, FirstInstance: arguments.FirstInstance})
+			draw := makeDraw()
+			draw.IndexCount = arguments.IndexCount
+			draw.InstanceCount = arguments.InstanceCount
+			draw.FirstInstance = arguments.FirstInstance
+			draws = append(draws, draw)
 		}
 	}
 	return draws

@@ -280,7 +280,7 @@ and a **test author** testing a plugin that draws.
 - **A parameter is a whole binding:** a texture, a sampler, a buffer, or a uniform block given as a Go struct. The struct is checked once for each Go type and binding: its size, and each member's offset in order, ignoring names.
 - **Setters, one for each kind, by name:**
   - a material's: `SetMaterialTexture`, `SetMaterialSampler`, `SetMaterialBuffer`, and `SetMaterialUniform[T]` as a generic method;
-  - pass parameters: `SetPassTexture`, `SetPassSampler`, `SetPassBuffer` and `SetPassUniform[T]`, set right after a pass begins;
+  - pass parameters: `SetPassTexture`, `SetPassSampler`, `SetPassBuffer` and `SetPassUniform[T]`, set right after a pass begins, and read by every draw after them in the pass, whatever its material;
   - draw parameters: `SetTexture`, `SetSampler`, `SetBuffer` and `SetUniform[T]`.
 - **Texture views** ([render: texture views as parameter values](https://github.com/dvoyni/cog/issues/854)):
   - A texture view is a value, `TextureView{Texture, BaseMipLevel, MipLevelCount, BaseLayer, LayerCount, Dimension, Aspect}`: zero counts mean the rest, as WebGPU's defaults have it (one layer for a 2D view, six for a cube), and a zero dimension or aspect means the binding's. It is bound with `SetMaterialTextureView`, `SetPassTextureView`, `SetTextureView` for draw parameters and the compute pass's `SetTextureView`, each beside its `…Texture` neighbour; a texture handle alone is the whole texture.
@@ -312,7 +312,7 @@ and a **test author** testing a plugin that draws.
 - **Mismatches:**
   - A name the shader lacks is ignored silently.
   - A value that can't fill its binding (the wrong kind, a struct of the wrong layout, the wrong view dimension or sample type, a storage buffer that's too small) is refused, reported once per shader and name, and the binding draws its default.
-  - A material's values are checked when set; pass and draw parameters are checked at the first draw under each shader, and the result is cached. A material value set by a name its shader declares in another group is refused as a mismatch.
+  - A material's values are checked when set; pass and draw parameters are checked at the first draw after they are set, against the binding of their name in the draw's shader, and the bind group they make is kept for every draw binding the same. A value set by a name its shader declares in another group than its level's is refused as a mismatch.
   - Nothing panics.
 - **Bind groups:**
   - A bind group naming an asset is dropped at the end of the frame the asset is freed.
@@ -326,10 +326,12 @@ and a **test author** testing a plugin that draws.
 - **Uniform blocks of pass and draw parameters, and storage buffers given as temporaries,** live in the temporary-buffer arena.
   - Setting a block copies its bytes there, and a draw rebinds the same bind group at a new offset.
   - A temporary range given as a `@group(0)` storage parameter binds statically, so it costs a new bind group for its pass every frame, which allocates a fixed count the per-frame gate checks. Data a whole pass reads goes in a made buffer written with `WriteBuffer` each frame, which allocates nothing; data that varies per draw goes in a draw parameter.
+  - A pass's bind group naming a temporary range is kept as any other, by what it binds: it is shared while the range stays where it is, and freed once unused for `TemporaryIdleFrames` frames.
+  - A storage buffer given as a draw parameter binds at a dynamic offset, so ranges of one buffer and one size share a bind group. A range of another size, which a runtime-sized array reads as its length, takes a bind group of its own.
   - Each block takes at least 256 bytes. A user drawing thousands of small values puts them in one storage array read at `instance_index`.
 - **Each command list takes arena chunks of its own,** so concurrent lists never contend.
   - A list's chunks go to the GPU in one `WriteBuffer` each when the list ends.
-  - A list that outgrows its chunk takes another, and a block larger than a chunk gets a chunk of its own size.
+  - A list that outgrows its chunk takes another, and a block larger than a chunk gets a chunk of its own, its size rounded up to a multiple of the chunk size, so a large block whose size varies from frame to frame keeps reusing one.
 - **Per-instance data comes two ways:**
   - **A storage buffer read at `instance_index`:** a draw's first instance selects a batch's rows, on every backend for direct draws.
   - **Instance buffers:** vertex buffers stepped per instance, each a buffer range with its layout, set with `SetInstanceBuffer(slot, InstanceBuffer{Range, Layout})`. Their layouts join the pipeline key.
@@ -405,6 +407,7 @@ func drawScene(k *kernel.Kernel, e render.FrameEvent, frame render.Frame, scene 
 - **Temporary buffers:**
   - `list.AcquireTemporaryBuffer[T](data []T)` answers a 256-byte-aligned range of the list's arena chunk holding `data`, valid until the frame ends. It is generic, as `SetUniform[T]` is, so a vertex slice or an index slice goes in as it is.
   - Taking one makes no gfx object.
+  - No data, or a list recording into nothing, answers the zero range. A range taken from a list that never ends holds nothing, since its chunk is written only at the list's `End`.
 - **Temporary meshes** ([render: per-frame geometry in a vertex layout of its own](https://github.com/dvoyni/cog/issues/855)):
   - `list.AcquireTemporaryMesh(MeshDescriptor{...})` answers a mesh valid until the frame ends, over buffer ranges: usually temporary buffers of the same list, or ranges of made buffers. It draws with `Draw`, as any mesh does.
   - It is how per-frame geometry in a vertex layout of its own is drawn, such as canvas's triangles or a Dear ImGui-style UI. Each of ImGui's commands is one temporary mesh over sub-ranges of the frame's vertex and index buffers: the index range's offset is its first index, and the vertex range's offset is its base vertex. A draw still covers its whole mesh.
@@ -576,7 +579,7 @@ render republishes gfx's events as its own, each nested inside gfx's publication
   - command lists by order;
   - passes with label and targets as render's textures and windows;
   - draws with material and counts, a draw's material as its pipeline shows it: its shader, entry points and render state, each default spelt zero, since materials of one key share a pipeline;
-  - each parameter by binding name with its value, the dynamic offsets resolved from the arena bytes written.
+  - each parameter of the pass, the material and the draw by binding name with its value, the dynamic offsets resolved from the arena bytes written.
 - **Strict reports.** A test fails on any report it didn't name with `ExpectReport(kind)`.
 
 **Binding declarations.** The recording adapter parses no WGSL, and gfx gains no WGSL parsing.

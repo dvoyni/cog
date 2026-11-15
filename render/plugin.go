@@ -19,7 +19,8 @@ type Config struct {
 	// before render frees it; zero means 10.
 	TemporaryIdleFrames int
 	// TemporaryChunkSize is the size in bytes of each chunk of the arena
-	// temporary buffers are ranges of; zero means 1 MiB.
+	// temporary buffers are ranges of, rounded up to a multiple of 4; zero
+	// means 1 MiB.
 	TemporaryChunkSize uint64
 }
 
@@ -59,7 +60,7 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	pluginConfig := kernel.PluginConfigOrDefault[Config](config)
 	configurator.InitResource(&frameState{
 		temporaryIdleFrames: cmp.Or(pluginConfig.TemporaryIdleFrames, defaultTemporaryIdleFrames),
-		temporaryChunkSize:  cmp.Or(pluginConfig.TemporaryChunkSize, defaultTemporaryChunkSize),
+		temporaryChunkSize:  (cmp.Or(pluginConfig.TemporaryChunkSize, defaultTemporaryChunkSize) + 3) &^ 3,
 		reporter:            reporter{logger: configurator.Logger()},
 	})
 	configurator.InitResource(&assetTable{reporter: reporter{logger: configurator.Logger()}})

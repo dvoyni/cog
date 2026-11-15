@@ -23,11 +23,14 @@ type InspectedPass struct {
 	Draws        []InspectedDraw
 }
 
-// InspectedDraw is one draw of an inspected pass: the material it drew with,
-// and its counts, an indexed draw's IndexCount and any other's VertexCount,
-// with its instances.
+// InspectedDraw is one draw of an inspected pass: the material it drew with;
+// its pass parameters, one for each binding of its shader's @group(0), and
+// its draw parameters, one for each of @group(2), by binding number; and its
+// counts, an indexed draw's IndexCount and any other's VertexCount, with its
+// instances.
 type InspectedDraw struct {
 	Material                                              InspectedMaterial
+	PassParameters, DrawParameters                        []InspectedParameter
 	VertexCount, IndexCount, InstanceCount, FirstInstance uint32
 }
 
@@ -43,13 +46,15 @@ type InspectedMaterial struct {
 	Parameters                           []InspectedParameter
 }
 
-// InspectedParameter is the value a draw bound to one binding of its
-// material, by the binding's name: a texture as the view the binding saw of
-// it, its counts, dimension and aspect filled in; a sampler, each field at
-// its default spelt zero; a range of a buffer, its size filled in; or the
-// bytes of a uniform block set as a value. Default says the binding drew
-// render's default, unbound, refused or naming an asset since freed, and
-// holds nothing else.
+// InspectedParameter is the value a draw bound to one binding, a pass's, its
+// material's or its own, by the binding's name: a texture as the view the
+// binding saw of it, its counts, dimension and aspect filled in; a sampler,
+// each field at its default spelt zero; a range of a buffer, its size filled
+// in, at the offset it bound, a dynamic offset included; or the bytes of a
+// uniform block set as a value, or bound to a temporary buffer, as the
+// frame's submit found them. Default says the binding drew render's
+// default, unbound, refused or naming an asset since freed, and holds
+// nothing else.
 type InspectedParameter struct {
 	Name        string
 	Default     bool

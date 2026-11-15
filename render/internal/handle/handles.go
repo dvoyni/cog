@@ -59,6 +59,11 @@ type Material struct{ handle }
 // labelKind answers "material", the kind a material's reports name.
 func (Material) labelKind() string { return "material" }
 
+// TemporaryChunkLabel is the label render gives each chunk of its temporary
+// arena, after the buffer handle MakeLabel names, so a reader of gfx's calls
+// tells a chunk from a buffer a user made.
+const TemporaryChunkLabel = "render: a chunk of the temporary arena"
+
 // MakeLabel answers the label of the gfx object behind h, naming h and then
 // label, the one its user gave.
 func MakeLabel[H Handle](h H, label string) string {

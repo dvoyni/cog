@@ -250,7 +250,7 @@ func (i Inventory) SetMaterialTextureView(material Material, name string, view T
 // reported once.
 func (i Inventory) SetMaterialSampler(material Material, name string, sampler SamplerDescriptor) {
 	table := i.table.Get()
-	table.setMaterialParameter(material, name, func(_ Shader, binding gfx.ShaderBinding, parameter *materialParameter, _ *gfx.Buffer) error {
+	table.setMaterialParameter(material, name, func(_ Shader, binding gfx.ShaderBinding, parameter *bindingValue, _ *gfx.Buffer) error {
 		return parameter.fillSampler(sampler, binding)
 	})
 }
@@ -269,12 +269,8 @@ func (i Inventory) SetMaterialSampler(material Material, name string, sampler Sa
 func (i Inventory) SetMaterialBuffer(material Material, name string, bufferRange BufferRange) {
 	table := i.table.Get()
 	device := i.device.Get()
-	table.setMaterialParameter(material, name, func(_ Shader, binding gfx.ShaderBinding, parameter *materialParameter, _ *gfx.Buffer) error {
-		bufferSlot, ok := table.buffers.Find(bufferRange.Buffer)
-		if !ok || bufferSlot.buffer == (gfx.Buffer{}) {
-			return fmt.Errorf("names buffer %v, which render does not hold, or which has no bytes", bufferRange.Buffer)
-		}
-		return parameter.fillBuffer(bufferRange, device.BufferDescriptor(bufferSlot.buffer), binding, device.Limits())
+	table.setMaterialParameter(material, name, func(_ Shader, binding gfx.ShaderBinding, parameter *bindingValue, _ *gfx.Buffer) error {
+		return table.fillBufferValue(device, parameter, binding, bufferRange)
 	})
 }
 
@@ -297,7 +293,7 @@ func (i Inventory) SetMaterialUniform[T any](material Material, name string, val
 	// writtenBuffer is the buffer the block's bytes go into, none for a
 	// value refused.
 	var writtenBuffer gfx.Buffer
-	table.setMaterialParameter(material, name, func(shader Shader, binding gfx.ShaderBinding, parameter *materialParameter, uniformBuffer *gfx.Buffer) error {
+	table.setMaterialParameter(material, name, func(shader Shader, binding gfx.ShaderBinding, parameter *bindingValue, uniformBuffer *gfx.Buffer) error {
 		if err := table.checkUniform(reflect.TypeFor[T](), shader, binding); err != nil {
 			return err
 		}
@@ -405,15 +401,8 @@ func (i Inventory) ReleaseMaterial(material Material) {
 func (i Inventory) setMaterialTextureView(material Material, name string, view TextureView, wholeTexture bool) {
 	table := i.table.Get()
 	device := i.device.Get()
-	table.setMaterialParameter(material, name, func(_ Shader, binding gfx.ShaderBinding, parameter *materialParameter, _ *gfx.Buffer) error {
-		textureSlot, ok := table.textures.Find(view.Texture)
-		if !ok {
-			return fmt.Errorf("names texture %v, which render does not hold", view.Texture)
-		}
-		if wholeTexture && binding.StorageTexture.Access != gfx.StorageTextureAccessUndefined {
-			view.MipLevelCount = 1
-		}
-		return parameter.fillTexture(view, device.TextureDescriptor(textureSlot.texture), binding)
+	table.setMaterialParameter(material, name, func(_ Shader, binding gfx.ShaderBinding, parameter *bindingValue, _ *gfx.Buffer) error {
+		return table.fillTextureValue(device, parameter, binding, view, wholeTexture)
 	})
 }
 

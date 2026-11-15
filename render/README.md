@@ -101,7 +101,25 @@ comparison sampler and zeros of a block's size, but for a storage binding
 a running function reads, which skips the draw; a texture a pass writes,
 bound in it, draws its default, reported once; a texture or buffer freed
 under a material unbinds at the end of that frame. Gfx views are interned
-by texture and view, and samplers shared by value.
+by texture and view, and samplers shared by value. A pass's
+`SetPassTexture`, `SetPassTextureView`, `SetPassSampler`, `SetPassBuffer`
+and `SetPassUniform[T]` bind its parameters of `@group(0)`, read by every
+draw after them in the pass, and `SetTexture`, `SetTextureView`,
+`SetSampler`, `SetBuffer` and `SetUniform[T]` its draw parameters of
+`@group(2)`, read by the draws after them until set again, `SetMaterial` or
+the pass's end; each is checked against the draw's shader at its next draw,
+refused and caught as a material's values are. Their uniform blocks, and
+draw parameters' storage buffers, bind at dynamic offsets, so draws rebind
+one bind group at new offsets; bind groups are shared by what they bind and
+freed after `TemporaryIdleFrames` unused or at the end of the frame an asset
+they name is freed, but for a temporary buffer as a pass's storage
+parameter, which costs the pass a bind group in each frame its range moves. A list's
+`AcquireTemporaryBuffer[T](data)` answers a 256-byte-aligned range of the
+temporary arena holding `data`, valid until the frame ends: each list takes
+chunks of `TemporaryChunkSize` of its own, or one of a block's size rounded
+up to a multiple of it where the block is larger, hands each to gfx in one
+write at its `End`, and chunks unused for `TemporaryIdleFrames` frames are
+freed.
 What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
 
 ## Shape
@@ -119,7 +137,8 @@ What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
   **`Order`**, and its **`BeginPass(PassDescriptor)`** a **`Pass`** into up
   to 8 **`ColorTarget`**s, each a window or a texture at a mip level and
   layer with an optional **`ResolveTarget`**, and a
-  **`DepthStencilTarget`**.
+  **`DepthStencilTarget`**; its **`AcquireTemporaryBuffer[T]`** answers a
+  **`BufferRange`** of the temporary arena.
 - **`Inventory`** is the task parameter a task reaches render's assets
   through: it acquires textures and **`Buffer`**s from files, makes them
   from slices, writes them, a texture by **`TextureRegion`**, and releases
@@ -128,15 +147,17 @@ What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
 - **`Mesh`** and **`Material`** are made from a **`MeshDescriptor`** and a
   **`MaterialDescriptor`**, its **`State`** blending, masking,
   testing and culling as WebGPU's defaults when zero; a pass's
-  **`SetMaterial`** and **`Draw`** draw a mesh with a material. A
-  material's parameters are a texture or a **`TextureView`** of one, seen
+  **`SetMaterial`** and **`Draw`** draw a mesh with a material, its
+  `SetPass…` setters bind pass parameters and its `Set…` setters draw
+  parameters. A material's, a pass's or a draw's parameters are a texture or a **`TextureView`** of one, seen
   in a **`TextureViewDimension`** through a **`TextureAspect`**, a
   **`SamplerDescriptor`** of **`AddressMode`**s and **`FilterMode`**s, a
   **`BufferRange`**, or a Go value of a uniform block.
 - **`Inspection`** is a frame written down in render's terms: its command
   lists by order, their passes with their targets and their draws, each an
-  **`InspectedDraw`** with its **`InspectedMaterial`**, whose
-  **`InspectedParameter`**s are its values by name, and counts.
+  **`InspectedDraw`** with its pass parameters, its
+  **`InspectedMaterial`** and its draw parameters, each an
+  **`InspectedParameter`** by name, and counts.
 - **`Report`** is a mistake render finds at run time, logged once and
   carried past; its `ReportKind` names it for tests.
 - **`rendertest.Harness`** spawns platform on headless windows, metronome
@@ -161,8 +182,9 @@ its entry points with their stages, and each vertex entry point's inputs.
 - **Resources it installs:**
   - `Handlers`: `RecordFrame` and `EndFrame`, to order handlers around.
   - a private frame state, the state of the frames in flight, holding
-    `Config`'s counts, the gfx frame being recorded and the pool of
-    temporary textures.
+    `Config`'s counts, the gfx frame being recorded, the pool of
+    temporary textures, the temporary arena's chunks and what each command
+    list keeps while it records.
   - a private asset table, every asset render holds: so far, its textures,
     each with the views passes drew into, its buffers, and its shaders,
     with the layouts they share.
@@ -175,9 +197,10 @@ its entry points with their stages, and each vertex entry point's inputs.
   recorded in a job that is `FrameEvent`'s `Ready`, publishes `FrameEvent`,
   and returns its out dependency joined with that job, so gfx's flush waits
   for the users' recording; and `gfx.RenderEvent` (`Handlers.EndFrame`),
-  whose job, after gfx's present, takes back the temporary textures and
-  frees those gone unused, and is the beat's out dependency, so the next
-  beat starts after it.
+  whose job, after gfx's present, takes back the temporary textures and the
+  arena's chunks and frees those gone unused, with the bind groups of pass
+  and draw parameters gone unused, and is the beat's out dependency, so the
+  next beat starts after it.
 - **Task parameters it offers:** `Frame`, locking the frame state, the
   asset table and `gfx.Device`, all for read; and `Inventory`, locking the
   asset table, `gfx.Device` and `platform.FS`, all for read.

@@ -11,12 +11,16 @@ import (
 type frameState struct {
 	// temporaryIdleFrames is how many frames something pooled may go unused
 	// before render frees it, and temporaryChunkSize the size in bytes of an
-	// arena chunk: Config's, or their defaults.
+	// arena chunk, a multiple of 4: Config's, or their defaults.
 	temporaryIdleFrames int
 	temporaryChunkSize  uint64
 	reporter
-	// temporaryTextures is the pool AcquireTemporaryTexture hands out from.
+	// temporaryTextures is the pool AcquireTemporaryTexture hands out from,
+	// arena the chunks temporary buffers are blocks of, and listStates what
+	// command lists keep while they record.
 	temporaryTextures texturePool
+	arena             temporaryArena
+	listStates        commandListStatePool
 	// mips generates the mip levels of textures in render's own command
 	// list.
 	mips mipGenerator

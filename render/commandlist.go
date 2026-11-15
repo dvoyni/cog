@@ -19,16 +19,20 @@ type Order int32
 const ownOrder Order = math.MinInt32
 
 // CommandList is one task's run of passes for a frame, kept in the order they
-// were recorded, from Frame.BeginCommandList to its End. One task fills it;
-// lists fill concurrently. A refused list records into nothing.
+// were recorded, from Frame.BeginCommandList to its End, with the chunks of
+// the temporary arena its temporary buffers and pass and draw uniform blocks
+// are blocks of. One task fills it; lists fill concurrently, each into
+// chunks of its own. A refused list records into nothing.
 type CommandList struct {
 	// frame is the parameter the list was begun from, and gfxFrame gfx's
 	// frame it records into.
 	frame    Frame
 	gfxFrame gfx.Frame
-	// encoder is the list's gfx frame encoder; nil when the list records into
-	// nothing, refused or ended.
-	encoder gfx.CommandEncoder
+	// encoder is the list's gfx frame encoder, and listState what it keeps
+	// while it records; nil when the list records into nothing, refused or
+	// ended.
+	encoder   gfx.CommandEncoder
+	listState *commandListState
 }
 
 // BeginPass begins a pass into the targets descriptor declares, to record
@@ -59,7 +63,8 @@ func (l *CommandList) BeginPass(descriptor PassDescriptor) Pass {
 	case skipped:
 		return Pass{}
 	}
-	pass := Pass{frame: l.frame, encoder: l.encoder.BeginRenderPass(passDescriptor), formats: formats}
+	l.listState.clearParameterSettings()
+	pass := Pass{frame: l.frame, listState: l.listState, encoder: l.encoder.BeginRenderPass(passDescriptor), formats: formats}
 	for _, target := range descriptor.ColorTargets {
 		pass.addTarget(drawnTarget{texture: target.Texture, mipLevel: target.MipLevel, layer: target.Layer})
 		pass.addTarget(drawnTarget{texture: target.Resolve.Texture, mipLevel: target.Resolve.MipLevel, layer: target.Resolve.Layer})
@@ -69,9 +74,41 @@ func (l *CommandList) BeginPass(descriptor PassDescriptor) Pass {
 	return pass
 }
 
-// End ends the list: nothing more is recorded into it.
+// AcquireTemporaryBuffer answers a range of the temporary arena holding
+// data, its bytes as Go lays them out, T as MakeBuffer's, at an offset that
+// is a multiple of 256, which binds at any offset alignment WebGPU allows:
+// vertices, indices or rows, for a mesh, a pass or draw parameter or a
+// copy, in any of the frame's lists. Taking one makes no gfx object: the
+// list copies data into an arena chunk of its own, of Config's
+// TemporaryChunkSize, or of data's size rounded up to a multiple of it where
+// it is larger, and hands each
+// chunk to gfx in one write at its End, so a range taken from a list never
+// ended holds nothing. The range is valid until the frame ends: a later
+// frame hands the same bytes to another user, so a range kept past its frame
+// silently reads theirs. No data, or a list recording into nothing, answers
+// the zero BufferRange; a chunk gfx refuses to make is logged, and the zero
+// BufferRange answered.
+func (l *CommandList) AcquireTemporaryBuffer[T any](data []T) BufferRange {
+	if l.encoder == nil {
+		return BufferRange{}
+	}
+	state := l.frame.state.Get()
+	bufferRange, err := l.listState.allocate(castToBytes(data), state.temporaryChunkSize, &state.arena, l.frame.table.Get(), l.frame.device.Get())
+	if err != nil {
+		state.logUnlessLost(fmt.Errorf("render: acquiring a temporary buffer: %w", err))
+	}
+	return bufferRange
+}
+
+// End ends the list: nothing more is recorded into it, and the chunks of
+// its temporary buffers and pass and draw uniform blocks go to gfx, one
+// write each, landing before every command list of the frame's submit.
 func (l *CommandList) End() {
+	if l.encoder != nil {
+		l.listState.writeChunks(l.frame.table.Get(), l.frame.device.Get())
+	}
 	l.encoder = nil
+	l.listState = nil
 }
 
 // makeRenderPassDescriptor answers gfx's descriptor of the pass descriptor
