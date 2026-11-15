@@ -1,7 +1,9 @@
 package render
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/dvoyni/cog/gfx"
@@ -9,12 +11,40 @@ import (
 
 // shaderSlot is the slot of one shader: the gfx module behind its handle,
 // the pipeline layout of its bindings, which it holds in the layout
-// interner, and the entry points the module declares, each none for a
-// shader that failed or was refused.
+// interner, the entry points the module declares, and its bindings, sorted
+// by group and number as its layout's entries are, with the index of each
+// group's first, each none for a shader that failed or was refused.
 type shaderSlot struct {
 	module      gfx.ShaderModule
 	layout      *internedPipelineLayout
 	entryPoints []gfx.ShaderEntryPoint
+	bindings    []gfx.ShaderBinding
+	groupStarts [reservedGroup + 1]int
+}
+
+// makeShaderSlot answers the slot of module, its layout, its entry points
+// and bindings, which it sorts by group and number.
+func makeShaderSlot(module gfx.ShaderModule, layout *internedPipelineLayout, entryPoints []gfx.ShaderEntryPoint, bindings []gfx.ShaderBinding) shaderSlot {
+	slices.SortFunc(bindings, func(a, b gfx.ShaderBinding) int {
+		return cmp.Or(cmp.Compare(a.Group, b.Group), cmp.Compare(a.Binding, b.Binding))
+	})
+	slot := shaderSlot{module: module, layout: layout, entryPoints: entryPoints, bindings: bindings}
+	for group := range slot.groupStarts {
+		slot.groupStarts[group] = len(bindings)
+		if index := slices.IndexFunc(bindings, func(binding gfx.ShaderBinding) bool { return binding.Group >= uint32(group) }); index >= 0 {
+			slot.groupStarts[group] = index
+		}
+	}
+	return slot
+}
+
+// findGroupBindings answers s's bindings of group, below the reserved one,
+// sorted by number, each at the index of its entry in the group's layout.
+func (s shaderSlot) findGroupBindings(group uint32) []gfx.ShaderBinding {
+	if group >= reservedGroup {
+		panic(fmt.Sprintf("render: finding a shader's bindings of @group(%d), which render reserves", group))
+	}
+	return s.bindings[s.groupStarts[group]:s.groupStarts[group+1]]
 }
 
 // findEntryPoint answers the name of s's function of stage named name, an

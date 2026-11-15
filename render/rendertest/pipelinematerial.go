@@ -7,14 +7,22 @@ import (
 	"github.com/dvoyni/cog/render/internal/handle"
 )
 
+// pipelineMaterial is the material a render pipeline draws with, in
+// render's terms but for its parameters, which each draw binds, and the
+// module of its vertex stage, whose bindings name them.
+type pipelineMaterial struct {
+	material render.InspectedMaterial
+	module   gfx.ShaderModule
+}
+
 // makePipelineMaterials answers the material each render pipeline the
 // recording's calls made draws with, in render's terms: its shader, by the
 // handle its module's label names, its entry points and its render state. A
 // pipeline of a module render labelled with no shader's handle, such as its
 // mip shader's, draws with the zero Shader.
-func makePipelineMaterials(calls []recording.Call) map[gfx.RenderPipeline]render.InspectedMaterial {
+func makePipelineMaterials(calls []recording.Call) map[gfx.RenderPipeline]pipelineMaterial {
 	shaders := map[gfx.ShaderModule]render.Shader{}
-	materials := map[gfx.RenderPipeline]render.InspectedMaterial{}
+	materials := map[gfx.RenderPipeline]pipelineMaterial{}
 	for _, call := range calls {
 		switch call.Kind {
 		case recording.CallKindCreateShaderModule:
@@ -25,11 +33,14 @@ func makePipelineMaterials(calls []recording.Call) map[gfx.RenderPipeline]render
 		case recording.CallKindCreateRenderPipeline:
 			arguments := call.Arguments.(recording.CreateRenderPipelineArguments)
 			descriptor := arguments.Descriptor
-			materials[arguments.Pipeline] = render.InspectedMaterial{
-				Shader:             shaders[descriptor.Vertex.Module],
-				VertexEntryPoint:   descriptor.Vertex.EntryPoint,
-				FragmentEntryPoint: descriptor.Fragment.EntryPoint,
-				State:              makeState(descriptor),
+			materials[arguments.Pipeline] = pipelineMaterial{
+				material: render.InspectedMaterial{
+					Shader:             shaders[descriptor.Vertex.Module],
+					VertexEntryPoint:   descriptor.Vertex.EntryPoint,
+					FragmentEntryPoint: descriptor.Fragment.EntryPoint,
+					State:              makeState(descriptor),
+				},
+				module: descriptor.Vertex.Module,
 			}
 		}
 	}

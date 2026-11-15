@@ -1,0 +1,134 @@
+package render
+
+import (
+	"fmt"
+
+	"github.com/dvoyni/cog/gfx"
+	"github.com/dvoyni/cog/render/internal/handle"
+)
+
+// materialParameter is the value bound to one of a material's bindings, of
+// its kind: a texture seen through view; a sampler; a range of a buffer, its
+// size filled in; or a uniform block, held in a buffer its material keeps. A
+// parameter of no kind is unbound, and its binding draws its default.
+type materialParameter struct {
+	kind        parameterKind
+	texture     Texture
+	view        gfx.TextureViewDescriptor
+	sampler     gfx.SamplerDescriptor
+	bufferRange BufferRange
+}
+
+// fillTexture binds view of texture, which gfx made from descriptor, as p,
+// or answers why it does not fit binding.
+func (p *materialParameter) fillTexture(view TextureView, descriptor gfx.TextureDescriptor, binding gfx.ShaderBinding) error {
+	if binding.Texture.SampleType == gfx.TextureSampleTypeUndefined && binding.StorageTexture.Access == gfx.StorageTextureAccessUndefined {
+		return fmt.Errorf("is a texture, where its binding is a %s", describeBindingKind(binding))
+	}
+	viewDescriptor, err := view.makeViewDescriptor(descriptor, binding)
+	if err != nil {
+		return err
+	}
+	p.kind = parameterKindTexture
+	p.texture = view.Texture
+	p.view = viewDescriptor
+	return nil
+}
+
+// fillSampler binds sampler as p, or answers why it does not fit binding.
+func (p *materialParameter) fillSampler(sampler SamplerDescriptor, binding gfx.ShaderBinding) error {
+	if binding.Sampler.Type == gfx.SamplerBindingTypeUndefined {
+		return fmt.Errorf("is a sampler, where its binding is a %s", describeBindingKind(binding))
+	}
+	descriptor, err := sampler.makeGfxSamplerDescriptor(binding)
+	if err != nil {
+		return err
+	}
+	p.kind = parameterKindSampler
+	p.sampler = descriptor
+	return nil
+}
+
+// fillBuffer binds bufferRange of a buffer gfx made from descriptor as p, or
+// answers why it does not fit binding under limits: a binding of no buffer,
+// a buffer without the binding's usage, a range at an offset no multiple of
+// the binding's alignment, past the buffer's end, smaller than the binding's
+// type or, for a uniform block, larger than a uniform binding may be.
+func (p *materialParameter) fillBuffer(bufferRange BufferRange, descriptor gfx.BufferDescriptor, binding gfx.ShaderBinding, limits gfx.Limits) error {
+	usage := gfx.BufferUsageFlagStorage
+	alignment := uint64(limits.MinStorageBufferOffsetAlignment)
+	maxSize := limits.MaxStorageBufferBindingSize
+	switch binding.Buffer.Type {
+	case gfx.BufferBindingTypeUndefined:
+		return fmt.Errorf("is a buffer, where its binding is a %s", describeBindingKind(binding))
+	case gfx.BufferBindingTypeUniform:
+		usage = gfx.BufferUsageFlagUniform
+		alignment = uint64(limits.MinUniformBufferOffsetAlignment)
+		maxSize = limits.MaxUniformBufferBindingSize
+	}
+	size, err := bufferRange.findSize(descriptor.Size)
+	switch {
+	case err != nil:
+		return err
+	case descriptor.Usage&usage == 0:
+		return fmt.Errorf("is buffer %v, made without the usage of its binding, a %s", bufferRange.Buffer, describeBindingKind(binding))
+	case bufferRange.Offset%max(alignment, 1) != 0:
+		return fmt.Errorf("is at offset %d, no multiple of %d, its binding's alignment", bufferRange.Offset, alignment)
+	case size < binding.Buffer.MinBindingSize:
+		return fmt.Errorf("is %d bytes, where its binding's type takes %d", size, binding.Buffer.MinBindingSize)
+	case size > maxSize:
+		return fmt.Errorf("is %d bytes, more than %d, the most its binding may take", size, maxSize)
+	}
+	p.kind = parameterKindBuffer
+	p.bufferRange = BufferRange{Buffer: bufferRange.Buffer, Offset: bufferRange.Offset, Size: size}
+	return nil
+}
+
+// fillUniform binds a uniform block as p, binding, of material's named
+// name, held in uniformBuffer, which it makes, labelled with material's
+// handle, when it holds none; an error when gfx cannot make it.
+func (p *materialParameter) fillUniform(device gfx.Device, binding gfx.ShaderBinding, uniformBuffer *gfx.Buffer, material Material, name string) error {
+	if *uniformBuffer == (gfx.Buffer{}) {
+		buffer, err := device.CreateBuffer(gfx.BufferDescriptor{Label: handle.MakeLabel(material, "uniform block "+name), Size: binding.Buffer.MinBindingSize, Usage: gfx.BufferUsageFlagUniform | gfx.BufferUsageFlagCopyDst})
+		if err != nil {
+			return fmt.Errorf("could not be held: %w", err)
+		}
+		*uniformBuffer = buffer
+	}
+	p.kind = parameterKindUniform
+	return nil
+}
+
+// parameterKind is the kind of value a materialParameter binds.
+type parameterKind uint8
+
+const (
+	// parameterKindUnbound is no value: the binding draws its default.
+	parameterKindUnbound parameterKind = iota
+	parameterKindTexture
+	parameterKindSampler
+	parameterKindBuffer
+	parameterKindUniform
+)
+
+// describeBindingKind answers what binding holds, as a report names it.
+func describeBindingKind(binding gfx.ShaderBinding) string {
+	switch {
+	case binding.Buffer.Type == gfx.BufferBindingTypeUniform:
+		return "uniform block"
+	case binding.Buffer.Type != gfx.BufferBindingTypeUndefined:
+		return "storage buffer"
+	case binding.Sampler.Type != gfx.SamplerBindingTypeUndefined:
+		return "sampler"
+	case binding.Texture.SampleType != gfx.TextureSampleTypeUndefined:
+		return "texture"
+	}
+	return "storage texture"
+}
+
+// isStorage answers whether binding is a storage buffer or a storage
+// texture, which no default fills for a function that reads it.
+func isStorage(binding gfx.ShaderBinding) bool {
+	return (binding.Buffer.Type != gfx.BufferBindingTypeUndefined && binding.Buffer.Type != gfx.BufferBindingTypeUniform) ||
+		binding.StorageTexture.Access != gfx.StorageTextureAccessUndefined
+}

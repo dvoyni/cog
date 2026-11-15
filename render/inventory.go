@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"reflect"
 	"unsafe"
 
 	"github.com/dvoyni/cog/gfx"
@@ -207,6 +208,110 @@ func (i Inventory) MakeMaterial(descriptor MaterialDescriptor) Material {
 	return material
 }
 
+// SetMaterialTexture binds texture whole to material's binding named name, a
+// texture or storage texture of its shader's @group(1), as
+// SetMaterialTextureView binds the zero view of it, but that a storage
+// binding sees its first mip level.
+// A name its shader lacks is ignored, so one set of values serves every
+// variant, and the name of a binding outside @group(1) is refused and
+// reported once.
+func (i Inventory) SetMaterialTexture(material Material, name string, texture Texture) {
+	i.setMaterialTextureView(material, name, TextureView{Texture: texture}, true)
+}
+
+// SetMaterialTextureView binds view, part of a texture or the texture seen
+// another way, to material's binding named name, a texture or storage
+// texture of its shader's @group(1). render makes the gfx view at its first
+// draw and frees it with its texture; a texture freed while bound unbinds
+// at the end of that frame. A view is refused, reported once for its shader
+// and name, when it does not fit its binding: a texture render does not
+// hold, another view dimension, sample type, aspect or storage format, one
+// sample where the binding is multisampled or several where it is not, mips
+// or layers its texture lacks, or more than one mip level for a storage
+// binding. A texture a draw's pass writes, unless it is the pass's read-only
+// depth-stencil target sampled, is caught at the draw and reported once, so
+// the list's encoder survives. Each draws the binding's default in its
+// place.
+// A name its shader lacks is ignored, so one set of values serves every
+// variant, and the name of a binding outside @group(1) is refused and
+// reported once.
+func (i Inventory) SetMaterialTextureView(material Material, name string, view TextureView) {
+	i.setMaterialTextureView(material, name, view, false)
+}
+
+// SetMaterialSampler binds sampler, by value, to material's binding named
+// name, a sampler of its shader's @group(1); samplers equal by value share
+// one. A comparison sampler for another binding, another for a comparison
+// binding, or a filtering one for a binding that does not filter is
+// refused, reported once for its shader and name, and the binding draws its
+// default.
+// A name its shader lacks is ignored, so one set of values serves every
+// variant, and the name of a binding outside @group(1) is refused and
+// reported once.
+func (i Inventory) SetMaterialSampler(material Material, name string, sampler SamplerDescriptor) {
+	table := i.table.Get()
+	table.setMaterialParameter(material, name, func(_ Shader, binding gfx.ShaderBinding, parameter *materialParameter, _ *gfx.Buffer) error {
+		return parameter.fillSampler(sampler, binding)
+	})
+}
+
+// SetMaterialBuffer binds bufferRange, a zero size the rest of its buffer,
+// to material's binding named name, a uniform block or storage buffer of
+// its shader's @group(1). A buffer freed while bound unbinds at the end of
+// that frame. A range is refused, reported once for its shader and name,
+// when it does not fit its binding: a buffer render does not hold or of no
+// bytes, made without the binding's usage, a range past its end, at an
+// offset no multiple of 256 (WebGPU's default alignment), or smaller than
+// the binding's type. The binding then draws its default.
+// A name its shader lacks is ignored, so one set of values serves every
+// variant, and the name of a binding outside @group(1) is refused and
+// reported once.
+func (i Inventory) SetMaterialBuffer(material Material, name string, bufferRange BufferRange) {
+	table := i.table.Get()
+	device := i.device.Get()
+	table.setMaterialParameter(material, name, func(_ Shader, binding gfx.ShaderBinding, parameter *materialParameter, _ *gfx.Buffer) error {
+		bufferSlot, ok := table.buffers.Find(bufferRange.Buffer)
+		if !ok || bufferSlot.buffer == (gfx.Buffer{}) {
+			return fmt.Errorf("names buffer %v, which render does not hold, or which has no bytes", bufferRange.Buffer)
+		}
+		return parameter.fillBuffer(bufferRange, device.BufferDescriptor(bufferSlot.buffer), binding, device.Limits())
+	})
+}
+
+// SetMaterialUniform binds value, plain data with no pointers mirroring a
+// WGSL struct, to material's uniform block named name, of its shader's
+// @group(1). Its bytes, as Go lays them out, go into a buffer the material
+// holds, landing, as WriteBuffer's do, before gfx's next submit. T is
+// checked once for each shader and binding: its size, and each field's
+// offset against the block's members in order, names ignored and fields
+// named _ left out as padding; a type that is no struct, such as
+// [4]float32, fills a block that is no struct of its size. A value of the
+// wrong layout, or for a binding of another kind, is refused, reported once
+// for its shader and name, and the block draws zeros.
+// A name its shader lacks is ignored, so one set of values serves every
+// variant, and the name of a binding outside @group(1) is refused and
+// reported once.
+func (i Inventory) SetMaterialUniform[T any](material Material, name string, value T) {
+	table := i.table.Get()
+	device := i.device.Get()
+	// writtenBuffer is the buffer the block's bytes go into, none for a
+	// value refused.
+	var writtenBuffer gfx.Buffer
+	table.setMaterialParameter(material, name, func(shader Shader, binding gfx.ShaderBinding, parameter *materialParameter, uniformBuffer *gfx.Buffer) error {
+		if err := table.checkUniform(reflect.TypeFor[T](), shader, binding); err != nil {
+			return err
+		}
+		if err := parameter.fillUniform(device, binding, uniformBuffer, material, name); err != nil {
+			return err
+		}
+		writtenBuffer = *uniformBuffer
+		return nil
+	})
+	if writtenBuffer != (gfx.Buffer{}) {
+		writeBytes(table, device, writtenBuffer, 0, castToBytes([]T{value}))
+	}
+}
+
 // WriteBuffer writes data into buffer at offset, T as MakeBuffer's: a
 // loaded, made or other buffer render holds. The write lands before every
 // command list of gfx's next submit, so it fills the buffer for the whole
@@ -292,6 +397,24 @@ func (i Inventory) ReleaseMaterial(material Material) {
 	if !table.madeMaterials.release(material) {
 		table.report(ReportKindReleaseRefused, fmt.Errorf("render: releasing material %v, which no make holds", material))
 	}
+}
+
+// setMaterialTextureView binds view to material's binding named name, as
+// SetMaterialTextureView does, wholeTexture saying it names its texture
+// alone, which a storage binding sees at its first mip level.
+func (i Inventory) setMaterialTextureView(material Material, name string, view TextureView, wholeTexture bool) {
+	table := i.table.Get()
+	device := i.device.Get()
+	table.setMaterialParameter(material, name, func(_ Shader, binding gfx.ShaderBinding, parameter *materialParameter, _ *gfx.Buffer) error {
+		textureSlot, ok := table.textures.Find(view.Texture)
+		if !ok {
+			return fmt.Errorf("names texture %v, which render does not hold", view.Texture)
+		}
+		if wholeTexture && binding.StorageTexture.Access != gfx.StorageTextureAccessUndefined {
+			view.MipLevelCount = 1
+		}
+		return parameter.fillTexture(view, device.TextureDescriptor(textureSlot.texture), binding)
+	})
 }
 
 // castToBytes answers the bytes data's elements are laid out in, in data's

@@ -4,6 +4,9 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"maps"
+	"reflect"
+	"slices"
 	"sync"
 
 	"github.com/dvoyni/cog/gfx"
@@ -51,6 +54,21 @@ type assetTable struct {
 	// asset made later.
 	unheldReportedMeshes    map[Mesh]struct{}
 	unheldReportedMaterials map[Material]struct{}
+	// bindingResources are the samplers parameters bind, shared by value,
+	// and what bindings left unbound draw with, kept for the program's life.
+	bindingResources bindingResourceCache
+	// uniformLayouts are the checks of Go types against uniform blocks, each
+	// the error saying why the type does not fit, none for one that does,
+	// and reportedParameters the shaders' bindings whose refused values were
+	// reported; both forget a shader when it is freed.
+	uniformLayouts     map[uniformLayoutKey]error
+	reportedParameters map[parameterReportKey]struct{}
+	// retiredBindGroups are the material bind groups a changed value
+	// replaced, which the frame's draws may still bind, released at its end,
+	// and assetsFreed says a texture or buffer was freed since materials
+	// were last unbound from the freed.
+	retiredBindGroups []gfx.BindGroup
+	assetsFreed       bool
 }
 
 // addTexture makes a gfx texture of descriptor, whose counts are filled in,
@@ -191,7 +209,59 @@ func (t *assetTable) addMaterial(descriptor MaterialDescriptor) (Material, error
 	}
 	slot.vertexEntryPoint = vertexEntryPoint
 	slot.fragmentEntryPoint = fragmentEntryPoint
+	slot.parameters = make([]materialParameter, len(shader.findGroupBindings(materialGroup)))
+	slot.uniformBuffers = make([]gfx.Buffer, len(slot.parameters))
 	return material, nil
+}
+
+// setMaterialParameter binds a value to material's binding named name, which
+// fill checks against the binding and writes into its parameter. A name the
+// material's shader lacks is ignored, as is a material whose shader failed,
+// was freed or is not resolved, whose draws are skipped; a material render
+// does not hold is reported once. A value fill refuses, or one naming a
+// binding of another group, is reported once for the shader and name, and
+// leaves the binding unbound. A value that changes what the binding binds
+// drops the material's bind groups, those the frame may still bind released
+// at its end. fill runs with t's mutex held, given the buffer the material
+// keeps for the binding's uniform block, none until one is set.
+func (t *assetTable) setMaterialParameter(material Material, name string, fill func(shader Shader, binding gfx.ShaderBinding, parameter *materialParameter, uniformBuffer *gfx.Buffer) error) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	slot, ok := t.materials.Find(material)
+	if !ok {
+		if claimReport(&t.unheldReportedMaterials, material) {
+			t.report(ReportKindParameterRefused, fmt.Errorf("render: setting %q of material %v, which render does not hold", name, material))
+		}
+		return
+	}
+	shader, ok := t.shaders.Find(slot.shader)
+	if !ok || shader.module == (gfx.ShaderModule{}) || slot.vertexEntryPoint == "" {
+		return
+	}
+	index := slices.IndexFunc(shader.bindings, func(binding gfx.ShaderBinding) bool { return binding.Name == name })
+	if index < 0 {
+		return
+	}
+	binding := shader.bindings[index]
+	reportKey := parameterReportKey{shader: slot.shader, name: name}
+	if binding.Group != materialGroup {
+		if claimReport(&t.reportedParameters, reportKey) {
+			t.report(ReportKindParameterRefused, fmt.Errorf("render: setting %q of material %q: its binding is in @group(%d), and a material's parameters are in @group(%d)", name, slot.label, binding.Group, materialGroup))
+		}
+		return
+	}
+	index -= shader.groupStarts[materialGroup]
+	parameter := &slot.parameters[index]
+	previous := *parameter
+	if err := fill(slot.shader, binding, parameter, &slot.uniformBuffers[index]); err != nil {
+		*parameter = materialParameter{}
+		if claimReport(&t.reportedParameters, reportKey) {
+			t.report(ReportKindParameterRefused, fmt.Errorf("render: setting %q of material %q: the value %w; its binding draws its default", name, slot.label, err))
+		}
+	}
+	if *parameter != previous {
+		slot.dropBindGroups(func(group gfx.BindGroup) { t.retiredBindGroups = append(t.retiredBindGroups, group) })
+	}
 }
 
 // findSlot answers a copy of h's slot among slots, a shader's the zero slot
@@ -207,6 +277,88 @@ func (t *assetTable) findSlot[H handle.Handle, S any](slots *handle.SlotMap[H, S
 	return *slot, true
 }
 
+// findDrawBindGroups answers the bind groups a draw of material, of shader,
+// binds into a pass writing targets: the material's own of @group(1), made
+// the first time for the textures the targets leave at their defaults, and
+// the default of every other group; and the name of a storage binding left
+// unbound that a function material runs reads, for which the draw is
+// skipped. A material texture overlapping one of targets draws its default,
+// reported once for its shader and name. The error is gfx's, when a bind
+// group or what it binds cannot be made, or says material is no longer
+// held.
+func (t *assetTable) findDrawBindGroups(device gfx.Device, material Material, shader shaderSlot, targets []drawnTarget) (drawBindGroupSet, error) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	slot, ok := t.materials.Find(material)
+	if !ok {
+		return drawBindGroupSet{}, fmt.Errorf("render: material %v is no longer held", material)
+	}
+	materialBindings := shader.findGroupBindings(materialGroup)
+	overlapMask := slot.findOverlapMask(materialBindings, targets)
+	materialBindGroup, ok := slot.findBindGroup(overlapMask)
+	if !ok {
+		for index, binding := range materialBindings {
+			if overlapMask&(1<<index) != 0 && claimReport(&t.reportedParameters, parameterReportKey{shader: slot.shader, name: binding.Name}) {
+				t.report(ReportKindParameterRefused, fmt.Errorf("render: %q of material %q is a texture a target of its pass overlaps; its binding draws its default", binding.Name, slot.label))
+			}
+		}
+		var err error
+		if materialBindGroup, err = t.makeMaterialBindGroup(device, slot, shader, overlapMask); err != nil {
+			return drawBindGroupSet{}, err
+		}
+		slot.bindGroups = append(slot.bindGroups, materialBindGroup)
+	}
+	bindGroups := drawBindGroupSet{unboundRead: materialBindGroup.unboundRead}
+	for group, groupLayout := range shader.layout.groups {
+		if uint32(group) == materialGroup && materialBindGroup.group != (gfx.BindGroup{}) {
+			bindGroups.groups[group] = materialBindGroup.group
+			continue
+		}
+		defaultGroup, err := t.layouts.findDefaultBindGroup(device, &t.bindingResources, groupLayout)
+		if err != nil {
+			return drawBindGroupSet{}, err
+		}
+		bindGroups.groups[group] = defaultGroup
+	}
+	return bindGroups, nil
+}
+
+// unbindFreed unbinds, when a texture or buffer was freed since it last ran,
+// every material value naming one render no longer holds, releasing its
+// material's bind groups, so the binding draws its default and render keeps
+// no handle it released. It runs at the end of each frame, after every
+// free.
+func (t *assetTable) unbindFreed(device gfx.Device) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	if !t.assetsFreed {
+		return
+	}
+	t.assetsFreed = false
+	for _, slot := range t.materials.All() {
+		changed := false
+		for index := range slot.parameters {
+			parameter := &slot.parameters[index]
+			var held bool
+			switch parameter.kind {
+			case parameterKindTexture:
+				_, held = t.textures.Find(parameter.texture)
+			case parameterKindBuffer:
+				_, held = t.buffers.Find(parameter.bufferRange.Buffer)
+			default:
+				continue
+			}
+			if !held {
+				*parameter = materialParameter{}
+				changed = true
+			}
+		}
+		if changed {
+			slot.dropBindGroups(device.ReleaseBindGroup)
+		}
+	}
+}
+
 // claimMeshReport answers whether a skipped draw of mesh is to be reported,
 // noting that it is, so later draws of mesh are not: true the first time
 // for each mesh, held or not.
@@ -218,7 +370,7 @@ func (t *assetTable) claimMeshReport(mesh Mesh) bool {
 		slot.reported = true
 		return claimed
 	}
-	return claimUnheldReport(&t.unheldReportedMeshes, mesh)
+	return claimReport(&t.unheldReportedMeshes, mesh)
 }
 
 // claimMaterialReport answers whether a skipped draw of material is to be
@@ -231,7 +383,7 @@ func (t *assetTable) claimMaterialReport(material Material) bool {
 		slot.reported = true
 		return claimed
 	}
-	return claimUnheldReport(&t.unheldReportedMaterials, material)
+	return claimReport(&t.unheldReportedMaterials, material)
 }
 
 // findTexture answers the gfx texture behind texture; false when render holds
@@ -273,12 +425,7 @@ func (t *assetTable) findLevelView(device gfx.Device, texture Texture, mipLevel,
 	if mipLevel >= descriptor.MipLevelCount || layer >= descriptor.Size.DepthOrArrayLayers {
 		return gfx.TextureView{}, gfx.TextureDescriptor{}, fmt.Errorf("%q at mip level %d and layer %d, of %d mip levels and %d layers", descriptor.Label, mipLevel, layer, descriptor.MipLevelCount, descriptor.Size.DepthOrArrayLayers)
 	}
-	for _, target := range slot.levelViews {
-		if target.mipLevel == mipLevel && target.layer == layer {
-			return target.view, descriptor, nil
-		}
-	}
-	view, err := device.CreateTextureView(slot.texture, gfx.TextureViewDescriptor{
+	view, err := slot.findTextureView(device, gfx.TextureViewDescriptor{
 		Dimension:       gfx.TextureViewDimension2D,
 		Aspect:          gfx.TextureAspectAll,
 		BaseMipLevel:    mipLevel,
@@ -289,7 +436,6 @@ func (t *assetTable) findLevelView(device gfx.Device, texture Texture, mipLevel,
 	if err != nil {
 		return gfx.TextureView{}, gfx.TextureDescriptor{}, err
 	}
-	slot.levelViews = append(slot.levelViews, levelView{mipLevel: mipLevel, layer: layer, view: view})
 	return view, descriptor, nil
 }
 
@@ -353,7 +499,13 @@ func (t *assetTable) freeReleased(device gfx.Device) {
 	t.madeTextures.freeReleased(removeTexture)
 	t.madeBuffers.freeReleased(removeBuffer)
 	t.madeMeshes.freeReleased(t.removeMesh)
-	t.madeMaterials.freeReleased(t.removeMaterial)
+	t.madeMaterials.freeReleased(func(material Material) { t.removeMaterial(device, material) })
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	for _, group := range t.retiredBindGroups {
+		device.ReleaseBindGroup(group)
+	}
+	t.retiredBindGroups = t.retiredBindGroups[:0]
 }
 
 // removeTexture releases the gfx texture behind texture and its views, and
@@ -365,12 +517,13 @@ func (t *assetTable) removeTexture(device gfx.Device, texture Texture) {
 	if !ok {
 		return
 	}
-	for _, target := range slot.levelViews {
-		device.ReleaseTextureView(target.view)
+	for _, view := range slot.textureViews {
+		device.ReleaseTextureView(view.view)
 	}
 	device.ReleaseTexture(slot.texture)
-	slot.levelViews = slot.levelViews[:0]
+	slot.textureViews = slot.textureViews[:0]
 	t.textures.Release(texture)
+	t.assetsFreed = true
 }
 
 // removeBuffer releases the gfx buffer behind buffer, and frees its slot for
@@ -387,6 +540,7 @@ func (t *assetTable) removeBuffer(device gfx.Device, buffer Buffer) {
 	}
 	*slot = bufferSlot{}
 	t.buffers.Release(buffer)
+	t.assetsFreed = true
 }
 
 // removeMesh frees mesh's slot for a handle of the next generation, keeping
@@ -397,10 +551,21 @@ func (t *assetTable) removeMesh(mesh Mesh) {
 	t.meshes.Release(mesh)
 }
 
-// removeMaterial frees material's slot for a handle of the next generation.
-func (t *assetTable) removeMaterial(material Material) {
+// removeMaterial releases material's bind groups and the buffers of its
+// uniform blocks, and frees its slot for a handle of the next generation.
+func (t *assetTable) removeMaterial(device gfx.Device, material Material) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
+	slot, ok := t.materials.Find(material)
+	if !ok {
+		return
+	}
+	slot.dropBindGroups(device.ReleaseBindGroup)
+	for _, buffer := range slot.uniformBuffers {
+		if buffer != (gfx.Buffer{}) {
+			device.ReleaseBuffer(buffer)
+		}
+	}
 	t.materials.Release(material)
 }
 
@@ -414,6 +579,8 @@ func (t *assetTable) removeShader(device gfx.Device, shader Shader) {
 		return
 	}
 	t.pipelines.removeShader(device, shader)
+	maps.DeleteFunc(t.uniformLayouts, func(key uniformLayoutKey, _ error) bool { return key.shader == shader })
+	maps.DeleteFunc(t.reportedParameters, func(key parameterReportKey, _ struct{}) bool { return key.shader == shader })
 	if slot.module != (gfx.ShaderModule{}) {
 		device.ReleaseShaderModule(slot.module)
 		t.layouts.release(device, slot.layout)
@@ -422,12 +589,91 @@ func (t *assetTable) removeShader(device gfx.Device, shader Shader) {
 	t.shaders.Release(shader)
 }
 
-// textureSlot is the slot of one texture: the gfx texture behind its handle,
-// with the views of single levels and layers passes drew into or sampled,
-// made as first needed.
-type textureSlot struct {
-	texture    gfx.Texture
-	levelViews []levelView
+// checkUniform answers why a value of goType cannot fill binding, of
+// shader: a binding of no uniform block, or a layout checkUniformLayout
+// refuses, checked once for each type, shader and binding. t's mutex is
+// held.
+func (t *assetTable) checkUniform(goType reflect.Type, shader Shader, binding gfx.ShaderBinding) error {
+	t.requireLocked("checkUniform")
+	if binding.Buffer.Type != gfx.BufferBindingTypeUniform {
+		return fmt.Errorf("is a uniform block, where its binding is a %s", describeBindingKind(binding))
+	}
+	key := uniformLayoutKey{goType: goType, shader: shader, name: binding.Name}
+	err, checked := t.uniformLayouts[key]
+	if !checked {
+		err = checkUniformLayout(goType, binding)
+		if t.uniformLayouts == nil {
+			t.uniformLayouts = map[uniformLayoutKey]error{}
+		}
+		t.uniformLayouts[key] = err
+	}
+	return err
+}
+
+// makeMaterialBindGroup answers slot's bind group of its shader's
+// @group(1), binding each binding to its value, or to its default when it is
+// unbound, names an asset render no longer holds or one of no bytes, or is a
+// texture of overlapMask; none when the group is empty. With it goes the name of a
+// storage binding of any group left at its default that a function slot
+// runs reads, empty for none. t's mutex is held.
+func (t *assetTable) makeMaterialBindGroup(device gfx.Device, slot *materialSlot, shader shaderSlot, overlapMask uint64) (materialBindGroup, error) {
+	t.requireLocked("makeMaterialBindGroup")
+	bindGroup := materialBindGroup{defaultedMask: overlapMask}
+	for _, binding := range shader.bindings {
+		if binding.Group != materialGroup && bindGroup.unboundRead == "" && isStorage(binding) && slot.usesBinding(binding) {
+			bindGroup.unboundRead = binding.Name
+		}
+	}
+	bindings := shader.findGroupBindings(materialGroup)
+	if len(bindings) == 0 {
+		return bindGroup, nil
+	}
+	layout := shader.layout.groups[materialGroup]
+	entries := make([]gfx.BindGroupEntry, len(bindings))
+	for index, binding := range bindings {
+		parameter := slot.parameters[index]
+		entry := gfx.BindGroupEntry{Binding: binding.Binding}
+		var err error
+		switch parameter.kind {
+		case parameterKindTexture:
+			if textureSlot, ok := t.textures.Find(parameter.texture); ok && overlapMask&(1<<index) == 0 {
+				entry.TextureView, err = textureSlot.findTextureView(device, parameter.view)
+			}
+		case parameterKindSampler:
+			entry.Sampler, err = t.bindingResources.findSampler(device, parameter.sampler)
+		case parameterKindBuffer:
+			if bufferSlot, ok := t.buffers.Find(parameter.bufferRange.Buffer); ok {
+				entry.Buffer = bufferSlot.buffer
+				entry.Offset = parameter.bufferRange.Offset
+				entry.Size = parameter.bufferRange.Size
+			}
+		case parameterKindUniform:
+			entry.Buffer = slot.uniformBuffers[index]
+			entry.Size = binding.Buffer.MinBindingSize
+		}
+		if err == nil && entry.TextureView == (gfx.TextureView{}) && entry.Sampler == (gfx.Sampler{}) && entry.Buffer == (gfx.Buffer{}) {
+			if bindGroup.unboundRead == "" && isStorage(binding) && slot.usesBinding(binding) {
+				bindGroup.unboundRead = binding.Name
+			}
+			entry, err = t.bindingResources.makeEntry(device, layout.entries[index])
+		}
+		if err != nil {
+			return materialBindGroup{}, err
+		}
+		entries[index] = entry
+	}
+	group, err := device.CreateBindGroup(gfx.BindGroupDescriptor{Label: "render: a material's bind group", Layout: layout.layout, Entries: entries})
+	bindGroup.group = group
+	return bindGroup, err
+}
+
+// requireLocked panics, naming operation, when t's mutex is free: a call
+// that must hold it does not.
+func (t *assetTable) requireLocked(operation string) {
+	if t.mutex.TryLock() {
+		t.mutex.Unlock()
+		panic("render: the asset table's " + operation + " is called without its mutex held")
+	}
 }
 
 // bufferSlot is the slot of one buffer: the gfx buffer behind its handle,
@@ -437,23 +683,11 @@ type bufferSlot struct {
 	size   uint64
 }
 
-// materialSlot is the slot of one material: what it was made of, with the
-// entry points of its shader it runs once resolved, an empty vertex one
-// meaning unresolved and an empty fragment one none; whether it was refused
-// for them; and whether a draw of it was skipped and reported.
-type materialSlot struct {
-	label                                string
-	shader                               Shader
-	state                                State
-	vertexEntryPoint, fragmentEntryPoint string
-	refused, reported                    bool
-}
-
-// levelView is a view of one mip level and one layer of a texture, which a
-// pass draws into or render's mip shader samples.
-type levelView struct {
-	mipLevel, layer uint32
-	view            gfx.TextureView
+// parameterReportKey is a binding of one shader, by its name, whose refused
+// values were reported.
+type parameterReportKey struct {
+	shader Shader
+	name   string
 }
 
 // writeTexels writes texels, rows of texels of texelSize bytes each packed
@@ -484,10 +718,10 @@ func padBytes(data []byte) []byte {
 	return data
 }
 
-// claimUnheldReport answers whether a skipped draw of h, which render does
-// not hold, is to be reported: true unless reported holds it, which it then
-// does.
-func claimUnheldReport[H comparable](reported *map[H]struct{}, h H) bool {
+// claimReport answers whether a mistake about key, such as a skipped draw of
+// a handle render does not hold, is to be reported: true unless reported
+// holds key, which it then does.
+func claimReport[H comparable](reported *map[H]struct{}, h H) bool {
 	if _, ok := (*reported)[h]; ok {
 		return false
 	}

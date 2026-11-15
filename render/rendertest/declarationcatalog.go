@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"slices"
 	"sync"
 
@@ -27,6 +28,9 @@ type declarationCatalog struct {
 	// queuedAnswerCounts are how many answers queued with queueAnswer, by
 	// kind, no call has taken yet.
 	queuedAnswerCounts map[recording.CallKind]int
+	// answeredBindings are the bindings each module's reflection answered,
+	// its declaration's or a queued answer's.
+	answeredBindings map[gfx.ShaderModule][]gfx.ShaderBinding
 }
 
 // newDeclarationCatalog answers the catalog of the shaders compiled on
@@ -37,6 +41,7 @@ func newDeclarationCatalog(harness *Harness) *declarationCatalog {
 		preprocessed:       map[string]preprocessedShader{},
 		compiled:           map[gfx.ShaderModule]preprocessedShader{},
 		queuedAnswerCounts: map[recording.CallKind]int{},
+		answeredBindings:   map[gfx.ShaderModule][]gfx.ShaderBinding{},
 	}
 }
 
@@ -92,16 +97,25 @@ func (d *declarationCatalog) noteCompiled(module gfx.ShaderModule, label string,
 
 // answerBindings answers what reflect, the recording device's reflection of
 // module's bindings, answers when an answer queued for it waits or it fails,
-// and the bindings module's declaration says otherwise.
+// and the bindings module's declaration says otherwise, noting the answer.
 func (d *declarationCatalog) answerBindings(module gfx.ShaderModule, reflect func() ([]gfx.ShaderBinding, error)) ([]gfx.ShaderBinding, error) {
-	return d.answer(recording.CallKindReflectBindings, module, reflect, func(shader preprocessedShader) ([]gfx.ShaderBinding, error) {
-		bindings := slices.Clone(shader.declaration.Bindings)
-		for index := range bindings {
-			bindings[index].Members = slices.Clone(bindings[index].Members)
-			bindings[index].EntryPoints = slices.Clone(bindings[index].EntryPoints)
-		}
-		return bindings, nil
+	bindings, err := d.answer(recording.CallKindReflectBindings, module, reflect, func(shader preprocessedShader) ([]gfx.ShaderBinding, error) {
+		return cloneBindings(shader.declaration.Bindings), nil
 	})
+	if err == nil {
+		d.mutex.Lock()
+		d.answeredBindings[module] = cloneBindings(bindings)
+		d.mutex.Unlock()
+	}
+	return bindings, err
+}
+
+// findAnsweredBindings answers a copy of the bindings each module's
+// reflection answered.
+func (d *declarationCatalog) findAnsweredBindings() map[gfx.ShaderModule][]gfx.ShaderBinding {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	return maps.Clone(d.answeredBindings)
 }
 
 // answerEntryPoints answers as answerBindings does, for module's entry
@@ -160,4 +174,14 @@ type preprocessedShader struct {
 	text        string
 	declaration bindingdeclaration.Reflection
 	err         error
+}
+
+// cloneBindings answers a copy of bindings that shares no slice with it.
+func cloneBindings(bindings []gfx.ShaderBinding) []gfx.ShaderBinding {
+	bindings = slices.Clone(bindings)
+	for index := range bindings {
+		bindings[index].Members = slices.Clone(bindings[index].Members)
+		bindings[index].EntryPoints = slices.Clone(bindings[index].EntryPoints)
+	}
+	return bindings
 }

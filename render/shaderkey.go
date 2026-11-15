@@ -13,6 +13,9 @@ import (
 	"github.com/dvoyni/cog/render/internal/handle"
 )
 
+// materialGroup is the bind group of a material's parameters.
+const materialGroup = 1
+
 // reservedGroup is the first bind group render reserves: a shader declaring a
 // binding in it is refused.
 const reservedGroup = 3
@@ -55,7 +58,7 @@ func makeShaderKey(path string, defines []ShaderDefine) (shaderKey, []gfx.Shader
 }
 
 // compile preprocesses k's file with defines, its own sorted, makes its module,
-// labelled with shader, reflects its entry points, and acquires from layouts
+// labelled with shader, reflects its entry points and bindings, and acquires from layouts
 // the layout of the module's bindings, answering them in a slot. A failure
 // answers the slot with nothing, what it made released, and its error, with
 // the kind it is reported as: ReportKindLoadFailed for a file that fails to preprocess or
@@ -97,7 +100,7 @@ func (k shaderKey) compile(device gfx.Device, layouts *layoutInterner, files fs.
 		}
 		return shaderSlot{}, 0, err
 	}
-	return shaderSlot{module: module, layout: layout, entryPoints: entryPoints}, 0, nil
+	return makeShaderSlot(module, layout, entryPoints, bindings), 0, nil
 }
 
 // makeGroupLayouts answers the layout of each group up to the highest

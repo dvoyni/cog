@@ -1,5 +1,7 @@
 package handle
 
+import "iter"
+
 // SlotMap is the slots of one handle type H, each holding an S. It hands a
 // slot out under a handle, finds the slot by that handle while it is held,
 // and once the slot is released hands it out again under a handle of the
@@ -62,4 +64,17 @@ func (m *SlotMap[H, S]) Release(h H) {
 	index := struct{ handle }(h).index
 	m.entries[index].held = false
 	m.freeIndices = append(m.freeIndices, index)
+}
+
+// All yields each held slot with its handle, in index order. The yielded
+// slots stay where they are until the next Acquire.
+func (m *SlotMap[H, S]) All() iter.Seq2[H, *S] {
+	return func(yield func(H, *S) bool) {
+		for index := range m.entries {
+			entry := &m.entries[index]
+			if entry.held && !yield(H{handle{index: uint32(index), generation: entry.generation}}, &entry.slot) {
+				return
+			}
+		}
+	}
 }

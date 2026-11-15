@@ -8,6 +8,11 @@ import (
 	"github.com/dvoyni/cog/gfx"
 )
 
+// zeroDynamicOffsets are the dynamic offsets a bind group binds at while
+// nothing fills its blocks, as many as a group may have by WebGPU's default
+// limits and more.
+var zeroDynamicOffsets [16]uint32
+
 // layoutInterner shares the layouts render builds for its shaders: one gfx
 // bind-group layout for each set of entries, and one pipeline layout for each
 // list of groups, each counted by its holders, the shaders and pipeline
@@ -45,20 +50,22 @@ func (i *layoutInterner) acquire(device gfx.Device, groups []gfx.BindGroupLayout
 		i.pipelineLayouts = map[string]*internedPipelineLayout{}
 	}
 	groupLayouts := make([]gfx.BindGroupLayout, 0, len(groups))
+	internedGroups := make([]*internedGroupLayout, 0, len(groups))
 	for index, group := range groups {
 		groupLayout, err := i.acquireGroupLayout(device, groupKeys[index], group)
 		if err != nil {
-			i.releaseGroupLayouts(device, groupKeys[:index])
+			i.releaseGroupLayouts(device, internedGroups)
 			return nil, err
 		}
-		groupLayouts = append(groupLayouts, groupLayout)
+		groupLayouts = append(groupLayouts, groupLayout.layout)
+		internedGroups = append(internedGroups, groupLayout)
 	}
 	layout, err := device.CreatePipelineLayout(gfx.PipelineLayoutDescriptor{Label: "render: a shader's layout", BindGroupLayouts: groupLayouts})
 	if err != nil {
-		i.releaseGroupLayouts(device, groupKeys)
+		i.releaseGroupLayouts(device, internedGroups)
 		return nil, err
 	}
-	internedLayout := &internedPipelineLayout{layout: layout, key: key, groupKeys: groupKeys, holderCount: 1}
+	internedLayout := &internedPipelineLayout{layout: layout, key: key, groups: internedGroups, holderCount: 1}
 	i.pipelineLayouts[key] = internedLayout
 	return internedLayout, nil
 }
@@ -77,36 +84,69 @@ func (i *layoutInterner) release(device gfx.Device, layout *internedPipelineLayo
 	}
 	device.ReleasePipelineLayout(layout.layout)
 	delete(i.pipelineLayouts, layout.key)
-	i.releaseGroupLayouts(device, layout.groupKeys)
+	i.releaseGroupLayouts(device, layout.groups)
+}
+
+// findDefaultBindGroup answers the bind group of group, a layout a held
+// pipeline layout holds, binding each of its entries as it draws unbound,
+// made from bindingResources the first time.
+func (i *layoutInterner) findDefaultBindGroup(device gfx.Device, bindingResources *bindingResourceCache, group *internedGroupLayout) (gfx.BindGroup, error) {
+	i.mutex.Lock()
+	defer i.mutex.Unlock()
+	if group.defaultBindGroup != (gfx.BindGroup{}) {
+		return group.defaultBindGroup, nil
+	}
+	entries := make([]gfx.BindGroupEntry, len(group.entries))
+	for index, layoutEntry := range group.entries {
+		entry, err := bindingResources.makeEntry(device, layoutEntry)
+		if err != nil {
+			return gfx.BindGroup{}, err
+		}
+		entries[index] = entry
+	}
+	bindGroup, err := device.CreateBindGroup(gfx.BindGroupDescriptor{Label: "render: the default bind group", Layout: group.layout, Entries: entries})
+	if err != nil {
+		return gfx.BindGroup{}, err
+	}
+	group.defaultBindGroup = bindGroup
+	return bindGroup, nil
 }
 
 // acquireGroupLayout hands out the bind-group layout of group, whose entries
 // make key, counting one more holder of it, and makes it when none is held.
 // i's mutex is held, and it panics when it is not.
-func (i *layoutInterner) acquireGroupLayout(device gfx.Device, key string, group gfx.BindGroupLayoutDescriptor) (gfx.BindGroupLayout, error) {
+func (i *layoutInterner) acquireGroupLayout(device gfx.Device, key string, group gfx.BindGroupLayoutDescriptor) (*internedGroupLayout, error) {
 	i.requireLocked("acquireGroupLayout")
 	if internedLayout, ok := i.groupLayouts[key]; ok {
 		internedLayout.holderCount++
-		return internedLayout.layout, nil
+		return internedLayout, nil
 	}
 	layout, err := device.CreateBindGroupLayout(group)
 	if err != nil {
-		return gfx.BindGroupLayout{}, err
+		return nil, err
 	}
-	i.groupLayouts[key] = &internedGroupLayout{layout: layout, holderCount: 1}
-	return layout, nil
+	internedLayout := &internedGroupLayout{layout: layout, key: key, entries: group.Entries, holderCount: 1}
+	for _, entry := range group.Entries {
+		if entry.Buffer.HasDynamicOffset {
+			internedLayout.dynamicOffsetCount++
+		}
+	}
+	i.groupLayouts[key] = internedLayout
+	return internedLayout, nil
 }
 
-// releaseGroupLayouts counts one holder fewer of the bind-group layout of
-// each of keys, and releases each at its last. i's mutex is held, and it
-// panics when it is not.
-func (i *layoutInterner) releaseGroupLayouts(device gfx.Device, keys []string) {
+// releaseGroupLayouts counts one holder fewer of each of groups, and
+// releases each at its last. i's mutex is held, and it panics when it is
+// not.
+func (i *layoutInterner) releaseGroupLayouts(device gfx.Device, groups []*internedGroupLayout) {
 	i.requireLocked("releaseGroupLayouts")
-	for _, key := range keys {
-		internedLayout := i.groupLayouts[key]
+	for _, internedLayout := range groups {
 		if internedLayout.holderCount--; internedLayout.holderCount == 0 {
+			if internedLayout.defaultBindGroup != (gfx.BindGroup{}) {
+				device.ReleaseBindGroup(internedLayout.defaultBindGroup)
+			}
 			device.ReleaseBindGroupLayout(internedLayout.layout)
-			delete(i.groupLayouts, key)
+			delete(i.groupLayouts, internedLayout.key)
 		}
 	}
 }
@@ -120,18 +160,24 @@ func (i *layoutInterner) requireLocked(operation string) {
 	}
 }
 
-// internedGroupLayout is a bind-group layout layoutInterner holds, and how
-// many shaders' pipeline layouts hold it.
+// internedGroupLayout is a bind-group layout layoutInterner holds: the
+// layout, the key its entries make, its entries, how many of them bind at a
+// dynamic offset, the bind group of its entries as they draw unbound, none
+// until first bound, and how many shaders' pipeline layouts hold it.
 type internedGroupLayout struct {
-	layout      gfx.BindGroupLayout
-	holderCount int
+	layout             gfx.BindGroupLayout
+	key                string
+	entries            []gfx.BindGroupLayoutEntry
+	dynamicOffsetCount int
+	defaultBindGroup   gfx.BindGroup
+	holderCount        int
 }
 
-// internedPipelineLayout is a pipeline layout layoutInterner holds, its key
-// and the keys of its groups' layouts, and how many shaders hold it.
+// internedPipelineLayout is a pipeline layout layoutInterner holds, its key,
+// its groups' layouts, and how many shaders hold it.
 type internedPipelineLayout struct {
 	layout      gfx.PipelineLayout
 	key         string
-	groupKeys   []string
+	groups      []*internedGroupLayout
 	holderCount int
 }

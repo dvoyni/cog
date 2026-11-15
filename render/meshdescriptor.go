@@ -30,13 +30,20 @@ type BufferRange struct {
 // freed or has no bytes, or r ends past it.
 func (r BufferRange) findBuffer(table *assetTable) (gfx.Buffer, uint64, error) {
 	buffer, bufferSize, ok := table.findBuffer(r.Buffer)
-	switch {
-	case !ok:
+	if !ok {
 		return gfx.Buffer{}, 0, fmt.Errorf("names buffer %v, which failed, was freed or has no bytes", r.Buffer)
-	case r.Offset > bufferSize || r.Size > bufferSize-r.Offset:
-		return gfx.Buffer{}, 0, fmt.Errorf("is %d bytes at offset %d of buffer %v, of %d bytes, past its end", r.Size, r.Offset, r.Buffer, bufferSize)
 	}
-	return buffer, cmp.Or(r.Size, bufferSize-r.Offset), nil
+	size, err := r.findSize(bufferSize)
+	return buffer, size, err
+}
+
+// findSize answers r's size in a buffer of bufferSize bytes, a zero Size the
+// rest of the buffer; an error when r ends past it.
+func (r BufferRange) findSize(bufferSize uint64) (uint64, error) {
+	if r.Offset > bufferSize || r.Size > bufferSize-r.Offset {
+		return 0, fmt.Errorf("is %d bytes at offset %d of buffer %v, of %d bytes, past its end", r.Size, r.Offset, r.Buffer, bufferSize)
+	}
+	return cmp.Or(r.Size, bufferSize-r.Offset), nil
 }
 
 // VertexBuffer is one vertex buffer of a mesh: a range of a buffer, its

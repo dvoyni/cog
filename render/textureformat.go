@@ -76,6 +76,13 @@ const (
 	// either as its depth-stencil target.
 	textureFormatFlagDepth
 	textureFormatFlagStencil
+	// textureFormatFlagUint is a colour format a binding reads as unsigned
+	// integers, textureFormatFlagSint one it reads as signed integers, and
+	// textureFormatFlagUnfilterable one of floats no sampler may filter;
+	// any other colour format is read as floats a sampler filters.
+	textureFormatFlagUint
+	textureFormatFlagSint
+	textureFormatFlagUnfilterable
 )
 
 // textureFormatInfo is what render knows of one texture format: what it
@@ -94,47 +101,47 @@ type textureFormatInfo struct {
 var textureFormatInfoByFormat = [...]textureFormatInfo{
 	TextureFormatR8Unorm:              {flags: textureFormatFlagColor, texelSize: 1},
 	TextureFormatR8Snorm:              {texelSize: 1},
-	TextureFormatR8Uint:               {flags: textureFormatFlagColor, texelSize: 1},
-	TextureFormatR8Sint:               {flags: textureFormatFlagColor, texelSize: 1},
+	TextureFormatR8Uint:               {flags: textureFormatFlagColor | textureFormatFlagUint, texelSize: 1},
+	TextureFormatR8Sint:               {flags: textureFormatFlagColor | textureFormatFlagSint, texelSize: 1},
 	TextureFormatR16Unorm:             {texelSize: 2},
 	TextureFormatR16Snorm:             {texelSize: 2},
-	TextureFormatR16Uint:              {flags: textureFormatFlagColor, texelSize: 2},
-	TextureFormatR16Sint:              {flags: textureFormatFlagColor, texelSize: 2},
+	TextureFormatR16Uint:              {flags: textureFormatFlagColor | textureFormatFlagUint, texelSize: 2},
+	TextureFormatR16Sint:              {flags: textureFormatFlagColor | textureFormatFlagSint, texelSize: 2},
 	TextureFormatR16Float:             {flags: textureFormatFlagColor, texelSize: 2},
 	TextureFormatRG8Unorm:             {flags: textureFormatFlagColor, texelSize: 2},
 	TextureFormatRG8Snorm:             {texelSize: 2},
-	TextureFormatRG8Uint:              {flags: textureFormatFlagColor, texelSize: 2},
-	TextureFormatRG8Sint:              {flags: textureFormatFlagColor, texelSize: 2},
-	TextureFormatR32Float:             {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 4},
-	TextureFormatR32Uint:              {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 4},
-	TextureFormatR32Sint:              {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 4},
+	TextureFormatRG8Uint:              {flags: textureFormatFlagColor | textureFormatFlagUint, texelSize: 2},
+	TextureFormatRG8Sint:              {flags: textureFormatFlagColor | textureFormatFlagSint, texelSize: 2},
+	TextureFormatR32Float:             {flags: textureFormatFlagColor | textureFormatFlagStorage | textureFormatFlagUnfilterable, texelSize: 4},
+	TextureFormatR32Uint:              {flags: textureFormatFlagColor | textureFormatFlagStorage | textureFormatFlagUint, texelSize: 4},
+	TextureFormatR32Sint:              {flags: textureFormatFlagColor | textureFormatFlagStorage | textureFormatFlagSint, texelSize: 4},
 	TextureFormatRG16Unorm:            {texelSize: 4},
 	TextureFormatRG16Snorm:            {texelSize: 4},
-	TextureFormatRG16Uint:             {flags: textureFormatFlagColor, texelSize: 4},
-	TextureFormatRG16Sint:             {flags: textureFormatFlagColor, texelSize: 4},
+	TextureFormatRG16Uint:             {flags: textureFormatFlagColor | textureFormatFlagUint, texelSize: 4},
+	TextureFormatRG16Sint:             {flags: textureFormatFlagColor | textureFormatFlagSint, texelSize: 4},
 	TextureFormatRG16Float:            {flags: textureFormatFlagColor, texelSize: 4},
 	TextureFormatRGBA8Unorm:           {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 4},
 	TextureFormatRGBA8UnormSrgb:       {flags: textureFormatFlagColor, texelSize: 4},
 	TextureFormatRGBA8Snorm:           {flags: textureFormatFlagStorage, texelSize: 4},
-	TextureFormatRGBA8Uint:            {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 4},
-	TextureFormatRGBA8Sint:            {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 4},
+	TextureFormatRGBA8Uint:            {flags: textureFormatFlagColor | textureFormatFlagStorage | textureFormatFlagUint, texelSize: 4},
+	TextureFormatRGBA8Sint:            {flags: textureFormatFlagColor | textureFormatFlagStorage | textureFormatFlagSint, texelSize: 4},
 	TextureFormatBGRA8Unorm:           {flags: textureFormatFlagColor, texelSize: 4},
 	TextureFormatBGRA8UnormSrgb:       {flags: textureFormatFlagColor, texelSize: 4},
-	TextureFormatRGB10A2Uint:          {flags: textureFormatFlagColor, texelSize: 4},
+	TextureFormatRGB10A2Uint:          {flags: textureFormatFlagColor | textureFormatFlagUint, texelSize: 4},
 	TextureFormatRGB10A2Unorm:         {flags: textureFormatFlagColor, texelSize: 4},
 	TextureFormatRG11B10Ufloat:        {texelSize: 4},
 	TextureFormatRGB9E5Ufloat:         {texelSize: 4},
-	TextureFormatRG32Float:            {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 8},
-	TextureFormatRG32Uint:             {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 8},
-	TextureFormatRG32Sint:             {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 8},
+	TextureFormatRG32Float:            {flags: textureFormatFlagColor | textureFormatFlagStorage | textureFormatFlagUnfilterable, texelSize: 8},
+	TextureFormatRG32Uint:             {flags: textureFormatFlagColor | textureFormatFlagStorage | textureFormatFlagUint, texelSize: 8},
+	TextureFormatRG32Sint:             {flags: textureFormatFlagColor | textureFormatFlagStorage | textureFormatFlagSint, texelSize: 8},
 	TextureFormatRGBA16Unorm:          {texelSize: 8},
 	TextureFormatRGBA16Snorm:          {texelSize: 8},
-	TextureFormatRGBA16Uint:           {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 8},
-	TextureFormatRGBA16Sint:           {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 8},
+	TextureFormatRGBA16Uint:           {flags: textureFormatFlagColor | textureFormatFlagStorage | textureFormatFlagUint, texelSize: 8},
+	TextureFormatRGBA16Sint:           {flags: textureFormatFlagColor | textureFormatFlagStorage | textureFormatFlagSint, texelSize: 8},
 	TextureFormatRGBA16Float:          {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 8},
-	TextureFormatRGBA32Float:          {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 16},
-	TextureFormatRGBA32Uint:           {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 16},
-	TextureFormatRGBA32Sint:           {flags: textureFormatFlagColor | textureFormatFlagStorage, texelSize: 16},
+	TextureFormatRGBA32Float:          {flags: textureFormatFlagColor | textureFormatFlagStorage | textureFormatFlagUnfilterable, texelSize: 16},
+	TextureFormatRGBA32Uint:           {flags: textureFormatFlagColor | textureFormatFlagStorage | textureFormatFlagUint, texelSize: 16},
+	TextureFormatRGBA32Sint:           {flags: textureFormatFlagColor | textureFormatFlagStorage | textureFormatFlagSint, texelSize: 16},
 	TextureFormatStencil8:             {flags: textureFormatFlagStencil, texelSize: 1},
 	TextureFormatDepth16Unorm:         {flags: textureFormatFlagDepth, texelSize: 2},
 	TextureFormatDepth24Plus:          {flags: textureFormatFlagDepth},
@@ -163,4 +170,22 @@ func (f TextureFormat) makeTextureUsage(sampleCount uint32) gfx.TextureUsageFlag
 		usage |= gfx.TextureUsageFlagStorageBinding
 	}
 	return usage
+}
+
+// findSampleType answers the sample type a binding reads a texture of f
+// through aspect as: depth for its depth aspect, unsigned integers for its
+// stencil aspect, and its colour's otherwise.
+func (f TextureFormat) findSampleType(aspect gfx.TextureAspect) gfx.TextureSampleType {
+	flags := f.info().flags
+	switch {
+	case aspect == gfx.TextureAspectDepthOnly || (aspect == gfx.TextureAspectAll && flags&textureFormatFlagDepth != 0):
+		return gfx.TextureSampleTypeDepth
+	case aspect == gfx.TextureAspectStencilOnly || flags&(textureFormatFlagStencil|textureFormatFlagUint) != 0:
+		return gfx.TextureSampleTypeUint
+	case flags&textureFormatFlagSint != 0:
+		return gfx.TextureSampleTypeSint
+	case flags&textureFormatFlagUnfilterable != 0:
+		return gfx.TextureSampleTypeUnfilterableFloat
+	}
+	return gfx.TextureSampleTypeFloat
 }

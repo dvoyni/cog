@@ -32,11 +32,29 @@ type InspectedDraw struct {
 }
 
 // InspectedMaterial is a material as a draw drew with it: its shader, the
-// functions its stages ran, an empty fragment one meaning none, and its
-// render state, of the colour targets the pass has, each value its field's
-// default spelt zero, as a State's zero value spells it.
+// functions its stages ran, an empty fragment one meaning none, its render
+// state, of the colour targets the pass has, each value its field's default
+// spelt zero, as a State's zero value spells it, and its parameters, one for
+// each binding of its shader's @group(1), by binding number.
 type InspectedMaterial struct {
 	Shader                               Shader
 	VertexEntryPoint, FragmentEntryPoint string
 	State                                State
+	Parameters                           []InspectedParameter
+}
+
+// InspectedParameter is the value a draw bound to one binding of its
+// material, by the binding's name: a texture as the view the binding saw of
+// it, its counts, dimension and aspect filled in; a sampler, each field at
+// its default spelt zero; a range of a buffer, its size filled in; or the
+// bytes of a uniform block set as a value. Default says the binding drew
+// render's default, unbound, refused or naming an asset since freed, and
+// holds nothing else.
+type InspectedParameter struct {
+	Name        string
+	Default     bool
+	TextureView TextureView
+	Sampler     SamplerDescriptor
+	Buffer      BufferRange
+	Uniform     []byte
 }

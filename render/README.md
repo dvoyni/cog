@@ -88,6 +88,20 @@ its draws skipped until then, and a draw naming a failed or freed buffer,
 shader, mesh or material is skipped and reported once. A shader with no
 `@fragment` draws only into passes without colour targets. Each mesh and
 material is given back once with `ReleaseMesh` or `ReleaseMaterial`.
+`SetMaterialTexture`, `SetMaterialTextureView`, `SetMaterialSampler`,
+`SetMaterialBuffer` and `SetMaterialUniform[T]` bind a material's values to
+its shader's `@group(1)` bindings by name, checked when set: a name the
+shader lacks is ignored, and a value that cannot fill its binding (another
+kind, a Go struct of another size or member offsets, a view of another
+dimension or sample type, mips or layers its texture lacks, a buffer too
+small) is reported once per shader and name and draws the binding's
+default. Unbound bindings draw render's defaults, white, depth 1.0,
+integer zeros, a linear sampler clamping to the edge, a less-equal
+comparison sampler and zeros of a block's size, but for a storage binding
+a running function reads, which skips the draw; a texture a pass writes,
+bound in it, draws its default, reported once; a texture or buffer freed
+under a material unbinds at the end of that frame. Gfx views are interned
+by texture and view, and samplers shared by value.
 What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
 
 ## Shape
@@ -114,10 +128,15 @@ What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
 - **`Mesh`** and **`Material`** are made from a **`MeshDescriptor`** and a
   **`MaterialDescriptor`**, its **`State`** blending, masking,
   testing and culling as WebGPU's defaults when zero; a pass's
-  **`SetMaterial`** and **`Draw`** draw a mesh with a material.
+  **`SetMaterial`** and **`Draw`** draw a mesh with a material. A
+  material's parameters are a texture or a **`TextureView`** of one, seen
+  in a **`TextureViewDimension`** through a **`TextureAspect`**, a
+  **`SamplerDescriptor`** of **`AddressMode`**s and **`FilterMode`**s, a
+  **`BufferRange`**, or a Go value of a uniform block.
 - **`Inspection`** is a frame written down in render's terms: its command
   lists by order, their passes with their targets and their draws, each an
-  **`InspectedDraw`** with its **`InspectedMaterial`** and counts.
+  **`InspectedDraw`** with its **`InspectedMaterial`**, whose
+  **`InspectedParameter`**s are its values by name, and counts.
 - **`Report`** is a mistake render finds at run time, logged once and
   carried past; its `ReportKind` names it for tests.
 - **`rendertest.Harness`** spawns platform on headless windows, metronome

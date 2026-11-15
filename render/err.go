@@ -48,9 +48,17 @@ const (
 	ReportKindPipelineFailed
 	// ReportKindDrawSkipped is a draw skipped for what it names: a mesh or
 	// material render does not hold, no material set, a shader that failed
-	// or was freed, or a buffer that failed, was freed or is too small for
-	// its range.
+	// or was freed, a buffer that failed, was freed or is too small for its
+	// range, or a storage binding left unbound that a function the draw runs
+	// reads.
 	ReportKindDrawSkipped
+	// ReportKindParameterRefused is a value a parameter of a material cannot
+	// bind, whose binding draws its default: of the wrong kind, a struct of
+	// the wrong layout, a texture of the wrong view dimension, sample type
+	// or aspect, or naming mips or layers it lacks, or overlapping a target
+	// of the pass it is drawn in, or a buffer too small; or a value set on a
+	// material render does not hold.
+	ReportKindParameterRefused
 )
 
 // Report is a mistake render finds at run time, such as a refused shader, a

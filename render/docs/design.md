@@ -222,10 +222,10 @@ and a **test author** testing a plugin that draws.
   - a failed buffer or shader skips every draw that uses it. A buffer whose file `fs.Stat` fails on, is a folder or has no bytes gets a buffer of no bytes, with no gfx buffer behind it; one whose file cannot be read when its bytes are written, or whose size changed since the acquire, keeps zeros. A shader that fails to preprocess or compile, or is refused for its bindings, keeps no gfx module.
 
   Each failure is reported once per key and forgotten when the asset is freed.
-- **No cascade:** a material or mesh owns nothing it names. A freed texture it names draws as unbound; a freed buffer or shader skips the draw. Each case is reported once.
+- **No cascade:** a material or mesh owns nothing it names. A freed texture or buffer a material binds draws as unbound; a freed buffer a mesh names, or a freed shader, skips the draw. Each case is reported once.
 - **Handles are transient,** valid only while the program runs. A user saves what it loaded from and acquires again after a restore.
 - **Bytes that aren't files** go into a memory mount, a platform adapter (see *Delta to platform*), and load from there by path. There are no blobs.
-- **Samplers are given by value** and shared when equal.
+- **Samplers are given by value** and shared when equal. A `SamplerDescriptor`'s zero value is WebGPU's default sampler, a zero `LodMaxClamp` meaning every level: a parameter reading one level binds a view of it.
 
 ### Shaders, variants, layouts and pipelines
 
@@ -283,7 +283,7 @@ and a **test author** testing a plugin that draws.
   - pass parameters: `SetPassTexture`, `SetPassSampler`, `SetPassBuffer` and `SetPassUniform[T]`, set right after a pass begins;
   - draw parameters: `SetTexture`, `SetSampler`, `SetBuffer` and `SetUniform[T]`.
 - **Texture views** ([render: texture views as parameter values](https://github.com/dvoyni/cog/issues/854)):
-  - A texture view is a value, `TextureView{Texture, BaseMipLevel, MipLevelCount, BaseLayer, LayerCount, Dimension, Aspect}`: zero counts mean the rest, and a zero dimension or aspect means the binding's. It is bound with `SetMaterialTextureView`, `SetPassTextureView`, `SetTextureView` for draw parameters and the compute pass's `SetTextureView`, each beside its `…Texture` neighbour; a texture handle alone is the whole texture.
+  - A texture view is a value, `TextureView{Texture, BaseMipLevel, MipLevelCount, BaseLayer, LayerCount, Dimension, Aspect}`: zero counts mean the rest, as WebGPU's defaults have it (one layer for a 2D view, six for a cube), and a zero dimension or aspect means the binding's. It is bound with `SetMaterialTextureView`, `SetPassTextureView`, `SetTextureView` for draw parameters and the compute pass's `SetTextureView`, each beside its `…Texture` neighbour; a texture handle alone is the whole texture.
   - A view names a range of mips and layers, a view dimension (a cube seen as a 2D array, one layer of an array seen as 2D) and an aspect. An aspect left zero comes from the binding: a depth binding over a depth-stencil texture gets the depth aspect.
   - A storage-texture binding given a whole texture binds its first mip level; given a view, the view names exactly one.
   - Reading a texture's bytes as another format, such as sRGB as linear, is designed for later: WebGPU needs it listed when the texture is made.
@@ -307,11 +307,12 @@ and a **test author** testing a plugin that draws.
   | comparison sampler | less-equal |
   | uniform block | zeros of its size |
   | storage buffer or texture | a shared placeholder when no running entry point reads it; otherwise the draw is skipped, reported once |
+  | multisampled texture | zeros, since no write fills one |
 
 - **Mismatches:**
   - A name the shader lacks is ignored silently.
   - A value that can't fill its binding (the wrong kind, a struct of the wrong layout, the wrong view dimension or sample type, a storage buffer that's too small) is refused, reported once per shader and name, and the binding draws its default.
-  - A material's values are checked when set; pass and draw parameters are checked at the first draw under each shader, and the result is cached.
+  - A material's values are checked when set; pass and draw parameters are checked at the first draw under each shader, and the result is cached. A material value set by a name its shader declares in another group is refused as a mismatch.
   - Nothing panics.
 - **Bind groups:**
   - A bind group naming an asset is dropped at the end of the frame the asset is freed.

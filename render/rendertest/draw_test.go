@@ -2,6 +2,7 @@ package rendertest_test
 
 import (
 	"errors"
+	"reflect"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -228,7 +229,7 @@ func TestADrawRecordsItsPipelineBuffersAndCountsAndADrawOfTheSameKeyReusesThePip
 		{Material: material, IndexCount: 6, InstanceCount: 1},
 	}
 	for frameIndex, draws := range findPassDraws(h, "scene") {
-		if !slices.Equal(draws, want) {
+		if !reflect.DeepEqual(draws, want) {
 			t.Errorf("frame %d: the reader read draws\n%+v\nwant\n%+v", frameIndex, draws, want)
 		}
 	}
@@ -260,7 +261,7 @@ func TestADrawOfAMeshWithNoIndicesDrawsTheVerticesItsRangesHoldAndOnlyAnIndexedS
 
 	material := makePlainMaterial(shader)
 	want := [][]render.InspectedDraw{{{Material: material, VertexCount: 4, InstanceCount: 1}, {Material: material, VertexCount: 2, InstanceCount: 1}, {Material: material, IndexCount: 6, InstanceCount: 1}}}
-	if draws := findPassDraws(h, "scene"); !slices.EqualFunc(draws, want, slices.Equal) {
+	if draws := findPassDraws(h, "scene"); !reflect.DeepEqual(draws, want) {
 		t.Errorf("the reader read draws %+v, want %+v", draws, want)
 	}
 	vertices, _ := readBufferCalls(h.Calls()).findCreated[recording.CreateBufferArguments](scene.vertices)
@@ -474,7 +475,7 @@ func TestAnEmptyEntryPointPicksTheShadersOnlyFunctionAndAMissingOrAmbiguousOneIs
 		{Material: render.InspectedMaterial{Shader: choice, VertexEntryPoint: "vertex_main", FragmentEntryPoint: "fragment_outline"}, IndexCount: 6, InstanceCount: 1},
 	}
 	for frameIndex, draws := range findPassDraws(h, "scene") {
-		if !slices.Equal(draws, want) {
+		if !reflect.DeepEqual(draws, want) {
 			t.Errorf("frame %d drew\n%+v\nwant\n%+v", frameIndex, draws, want)
 		}
 	}

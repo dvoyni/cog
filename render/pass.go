@@ -91,10 +91,16 @@ type Pass struct {
 	encoder gfx.RenderPassEncoder
 	// formats are the formats and sample count of the pass's targets.
 	formats passFormat
-	// material is the material SetMaterial selected, and pipeline the
-	// pipeline last set on encoder.
-	material Material
-	pipeline gfx.RenderPipeline
+	// targets are the textures the pass writes, the first targetCount of
+	// them, which its draws' materials may not read.
+	targets     [2*maxColorTargetCount + 1]drawnTarget
+	targetCount int
+	// material is the material SetMaterial selected, and pipeline and
+	// bindGroups the pipeline and the bind group of each group last set on
+	// encoder.
+	material   Material
+	pipeline   gfx.RenderPipeline
+	bindGroups [reservedGroup]gfx.BindGroup
 }
 
 // SetMaterial selects material for the draws recorded after it, until it is
@@ -170,13 +176,31 @@ func (p *Pass) Draw(mesh Mesh, arguments DrawArgs) {
 	if indexed && (meshSlot.topology == PrimitiveTopologyLineStrip || meshSlot.topology == PrimitiveTopologyTriangleStrip) {
 		key.stripIndexFormat = meshSlot.indices.Format
 	}
-	pipeline, ok := table.pipelines.find(table, p.frame.device.Get(), key, shader)
+	device := p.frame.device.Get()
+	pipeline, ok := table.pipelines.find(table, device, key, shader)
 	if !ok {
+		return
+	}
+	bindGroups, err := table.findDrawBindGroups(device, p.material, shader, p.targets[:p.targetCount])
+	switch {
+	case err != nil:
+		table.logUnlessLost(fmt.Errorf("render: binding material %q: %w", material.label, err))
+		return
+	case bindGroups.unboundRead != "":
+		if table.claimMaterialReport(p.material) {
+			table.report(ReportKindDrawSkipped, fmt.Errorf("render: a draw of material %q, whose storage binding %q, which a function it runs reads, is unbound", material.label, bindGroups.unboundRead))
+		}
 		return
 	}
 	if pipeline != p.pipeline {
 		p.encoder.SetPipeline(pipeline)
 		p.pipeline = pipeline
+	}
+	for group, bindGroup := range bindGroups.groups[:len(shader.layout.groups)] {
+		if bindGroup != p.bindGroups[group] {
+			p.encoder.SetBindGroup(uint32(group), bindGroup, zeroDynamicOffsets[:shader.layout.groups[group].dynamicOffsetCount])
+			p.bindGroups[group] = bindGroup
+		}
 	}
 	for slot, vertexBuffer := range meshSlot.vertexBuffers {
 		p.encoder.SetVertexBuffer(uint32(slot), buffers.vertexBuffers[slot], vertexBuffer.bufferRange.Offset)
@@ -196,4 +220,21 @@ func (p *Pass) End() {
 		p.encoder.End()
 		p.encoder = nil
 	}
+}
+
+// addTarget notes target among those p writes; one naming no texture, a
+// window's, is left out.
+func (p *Pass) addTarget(target drawnTarget) {
+	if target.texture != (Texture{}) {
+		p.targets[p.targetCount] = target
+		p.targetCount++
+	}
+}
+
+// drawnTarget is a texture a pass writes, at one mip level and layer; a
+// read-only one is its depth-stencil target, which its draws may sample.
+type drawnTarget struct {
+	texture         Texture
+	mipLevel, layer uint32
+	readOnly        bool
 }

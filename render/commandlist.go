@@ -59,7 +59,14 @@ func (l *CommandList) BeginPass(descriptor PassDescriptor) Pass {
 	case skipped:
 		return Pass{}
 	}
-	return Pass{frame: l.frame, encoder: l.encoder.BeginRenderPass(passDescriptor), formats: formats}
+	pass := Pass{frame: l.frame, encoder: l.encoder.BeginRenderPass(passDescriptor), formats: formats}
+	for _, target := range descriptor.ColorTargets {
+		pass.addTarget(drawnTarget{texture: target.Texture, mipLevel: target.MipLevel, layer: target.Layer})
+		pass.addTarget(drawnTarget{texture: target.Resolve.Texture, mipLevel: target.Resolve.MipLevel, layer: target.Resolve.Layer})
+	}
+	target := descriptor.DepthStencil
+	pass.addTarget(drawnTarget{texture: target.Texture, mipLevel: target.MipLevel, layer: target.Layer, readOnly: target.ReadOnly})
+	return pass
 }
 
 // End ends the list: nothing more is recorded into it.
