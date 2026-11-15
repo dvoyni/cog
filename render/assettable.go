@@ -2,7 +2,6 @@ package render
 
 import (
 	"bytes"
-	"cmp"
 	"errors"
 	"fmt"
 	"maps"
@@ -46,8 +45,9 @@ type assetTable struct {
 	madeMaterials assetCounter[Material, Material]
 	// vertexLayouts numbers the meshes' vertex layouts, for pipelines'
 	// keys, and pipelines holds the pipelines draws made.
-	vertexLayouts vertexLayoutInterner
-	pipelines     pipelineCache
+	vertexLayouts    vertexLayoutInterner
+	pipelines        pipelineCache[pipelineKey, gfx.RenderPipeline]
+	computePipelines pipelineCache[computePipelineKey, computePipeline]
 	// unheldReportedMeshes and unheldReportedMaterials are the meshes and
 	// materials render does not hold whose skipped draws were reported, so
 	// each is reported once; a held one's slot notes it, and forgets it
@@ -55,6 +55,11 @@ type assetTable struct {
 	// asset made later.
 	unheldReportedMeshes    map[Mesh]struct{}
 	unheldReportedMaterials map[Material]struct{}
+	// reportedDispatches are the shaders, each with the compute function
+	// run, or none for a shader whose dispatches were skipped for the
+	// shader itself, whose skipped dispatches were reported, so each is
+	// reported once; a held shader's are forgotten when it is freed.
+	reportedDispatches map[shaderSelection]struct{}
 	// bindingResources are the samplers parameters bind, shared by value,
 	// and what bindings left unbound draw with, kept for the program's life.
 	bindingResources bindingResourceCache
@@ -340,7 +345,7 @@ func (t *assetTable) findSlot[H handle.Handle, S any](slots *handle.SlotMap[H, S
 // draws its default, reported once for its shader and name. The error is
 // gfx's, when a bind group or what it binds cannot be made, or says
 // material is no longer held.
-func (t *assetTable) findDrawBindGroups(device gfx.Device, material Material, shader shaderSlot, targets []drawnTarget, listState *commandListState, bindGroups *drawBindGroupSet) error {
+func (t *assetTable) findDrawBindGroups(device gfx.Device, material Material, shader shaderSlot, targets []drawnTarget, listState *commandListState, bindGroups *bindGroupSet) error {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	slot, ok := t.materials.Find(material)
@@ -348,7 +353,7 @@ func (t *assetTable) findDrawBindGroups(device gfx.Device, material Material, sh
 		return fmt.Errorf("render: material %v is no longer held", material)
 	}
 	slot.drawnFrame = t.endedFrameCount + 1
-	functions := shaderSelection{shader: slot.shader, vertexEntryPoint: slot.vertexEntryPoint, fragmentEntryPoint: slot.fragmentEntryPoint}
+	functions := slot.makeShaderSelection()
 	for group, groupLayout := range shader.layout.groups {
 		var err error
 		switch {
@@ -362,7 +367,18 @@ func (t *assetTable) findDrawBindGroups(device gfx.Device, material Material, sh
 			bindGroups.groupBindings[group] = binding
 			bindGroups.unboundReads[group] = materialBindGroup.unboundRead
 		case bindGroups.resolvedFor[group] != functions:
-			bindGroups.groupBindings[group], bindGroups.unboundReads[group], err = t.makeParameterGroupBinding(device, uint32(group), listState.parameterSettings[group], slot, shader, targets, &listState.bindGroupDraft)
+			level := "pass parameter"
+			if group == drawGroup {
+				level = "draw parameter"
+			}
+			settings := listState.parameterSettings[group]
+			for _, setting := range settings {
+				index := slices.IndexFunc(shader.bindings, func(binding gfx.ShaderBinding) bool { return binding.Name == setting.name })
+				if index >= 0 && shader.bindings[index].Group != uint32(group) && claimReport(&t.reportedParameters, parameterReportKey{shader: slot.shader, name: setting.name}) {
+					t.report(ReportKindParameterRefused, fmt.Errorf("render: %s %q names a binding of shader %v in @group(%d), and %ss are in @group(%d)", level, setting.name, slot.shader, shader.bindings[index].Group, level, group))
+				}
+			}
+			bindGroups.groupBindings[group], bindGroups.unboundReads[group], err = t.makeParameterGroupBinding(device, uint32(group), settings, level, functions, shader, targets, &listState.bindGroupDraft)
 			if err == nil {
 				bindGroups.resolvedFor[group] = functions
 			}
@@ -370,6 +386,37 @@ func (t *assetTable) findDrawBindGroups(device gfx.Device, material Material, sh
 		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// findDispatchBindGroups fills bindGroups with what a dispatch running
+// selection, of shader, binds for each group of its layout, unless
+// bindGroups holds it resolved for selection: a bind group of the compute
+// pass's parameters, which listState holds, with their dynamic offsets,
+// shared by every dispatch or draw binding the same, or the layout's
+// default where none is set. With each goes the name of a storage binding
+// of its group left unbound that selection's function reads, for which the
+// dispatch is skipped. A value that cannot fill its binding draws its
+// default, reported once for its shader and name. t's mutex is taken only
+// when a group is not resolved. The error is gfx's, when a bind group or
+// what it binds cannot be made.
+func (t *assetTable) findDispatchBindGroups(device gfx.Device, selection shaderSelection, shader shaderSlot, listState *commandListState, bindGroups *bindGroupSet) error {
+	if !slices.ContainsFunc(bindGroups.resolvedFor[:len(shader.layout.groups)], func(resolved shaderSelection) bool { return resolved != selection }) {
+		return nil
+	}
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	for group := range shader.layout.groups {
+		if bindGroups.resolvedFor[group] == selection {
+			continue
+		}
+		var err error
+		bindGroups.groupBindings[group], bindGroups.unboundReads[group], err = t.makeParameterGroupBinding(device, uint32(group), listState.computeSettings, "compute parameter", selection, shader, nil, &listState.bindGroupDraft)
+		if err != nil {
+			return err
+		}
+		bindGroups.resolvedFor[group] = selection
 	}
 	return nil
 }
@@ -477,6 +524,14 @@ func (t *assetTable) claimMaterialReport(material Material) bool {
 	return claimReport(&t.unheldReportedMaterials, material)
 }
 
+// claimDispatchReport answers whether a skipped dispatch of selection is to
+// be reported, noting that it is, so later dispatches of selection are not.
+func (t *assetTable) claimDispatchReport(selection shaderSelection) bool {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return claimReport(&t.reportedDispatches, selection)
+}
+
 // findTexture answers the gfx texture behind texture; false when render holds
 // no such texture.
 func (t *assetTable) findTexture(texture Texture) (gfx.Texture, bool) {
@@ -561,21 +616,19 @@ func (t *assetTable) writeTexture(device gfx.Device, texture Texture, region Tex
 	}
 	descriptor := device.TextureDescriptor(gfxTexture)
 	texelSize := TextureFormat(descriptor.Format).info().texelSize
-	if texelSize == 0 || descriptor.SampleCount > 1 || region.MipLevel >= descriptor.MipLevelCount || region.Layer >= descriptor.Size.DepthOrArrayLayers {
-		t.report(ReportKindWriteRefused, fmt.Errorf("render: writing texture %q at mip level %d and layer %d, of %d mip levels, %d layers and %d samples in format %d, where it has the level and the layer, one sample, and a format gfx's writes fill", descriptor.Label, region.MipLevel, region.Layer, descriptor.MipLevelCount, descriptor.Size.DepthOrArrayLayers, descriptor.SampleCount, descriptor.Format))
+	if texelSize == 0 || descriptor.SampleCount > 1 {
+		t.report(ReportKindWriteRefused, fmt.Errorf("render: writing texture %q, of %d samples in format %d, where it has one sample and a format gfx's writes fill", descriptor.Label, descriptor.SampleCount, descriptor.Format))
 		return
 	}
-	levelWidth := max(descriptor.Size.Width>>region.MipLevel, 1)
-	levelHeight := max(descriptor.Size.Height>>region.MipLevel, 1)
-	width := cmp.Or(region.Width, levelWidth-min(region.X, levelWidth))
-	height := cmp.Or(region.Height, levelHeight-min(region.Y, levelHeight))
-	if region.X > levelWidth || width > levelWidth-region.X || region.Y > levelHeight || height > levelHeight-region.Y || uint64(len(data)) != uint64(width)*uint64(height)*uint64(texelSize) {
-		t.report(ReportKindWriteRefused, fmt.Errorf("render: writing %d bytes into %d×%d texels at %d,%d of texture %q at mip level %d, of %d×%d texels of %d bytes each, where the region is within the level and the bytes fill it", len(data), width, height, region.X, region.Y, descriptor.Label, region.MipLevel, levelWidth, levelHeight, texelSize))
+	width, height, err := region.findSize(descriptor)
+	if err == nil && uint64(len(data)) != uint64(width)*uint64(height)*uint64(texelSize) {
+		err = fmt.Errorf("is %d×%d texels of %d bytes each, which %d bytes do not fill", width, height, texelSize, len(data))
+	}
+	if err != nil {
+		t.report(ReportKindWriteRefused, fmt.Errorf("render: writing a region that %w", err))
 		return
 	}
-	writeTexels(t, device,
-		gfx.ImageCopyTexture{Texture: gfxTexture, MipLevel: region.MipLevel, Origin: gfx.Origin3D{X: region.X, Y: region.Y, Z: region.Layer}, Aspect: gfx.TextureAspectAll},
-		data, texelSize, gfx.Extent3D{Width: width, Height: height, DepthOrArrayLayers: 1})
+	writeTexels(t, device, makeImageCopyTexture(gfxTexture, region), data, texelSize, gfx.Extent3D{Width: width, Height: height, DepthOrArrayLayers: 1})
 }
 
 // freeReleased removes every loaded texture, buffer and shader whose last
@@ -669,7 +722,9 @@ func (t *assetTable) removeShader(device gfx.Device, shader Shader) {
 	if !ok {
 		return
 	}
-	t.pipelines.removeShader(device, shader)
+	t.pipelines.removeShader(shader, device.ReleaseRenderPipeline)
+	t.computePipelines.removeShader(shader, func(pipeline computePipeline) { device.ReleaseComputePipeline(pipeline.pipeline) })
+	maps.DeleteFunc(t.reportedDispatches, func(key shaderSelection, _ struct{}) bool { return key.shader == shader })
 	maps.DeleteFunc(t.uniformLayouts, func(key uniformLayoutKey, _ error) bool { return key.shader == shader })
 	maps.DeleteFunc(t.reportedParameters, func(key parameterReportKey, _ struct{}) bool { return key.shader == shader })
 	if slot.module != (gfx.ShaderModule{}) {
@@ -725,7 +780,7 @@ func (t *assetTable) makeMaterialBindGroup(device gfx.Device, slot *materialSlot
 		if err != nil {
 			return materialBindGroup{}, err
 		}
-		if defaulted && bindGroup.unboundRead == "" && isStorage(binding) && slot.usesBinding(binding) {
+		if defaulted && bindGroup.unboundRead == "" && isStorage(binding) && slot.makeShaderSelection().usesBinding(binding) {
 			bindGroup.unboundRead = binding.Name
 		}
 		entries[index] = entry
@@ -763,28 +818,19 @@ func (t *assetTable) findMaterialBindGroup(device gfx.Device, slot *materialSlot
 	return bindGroup, nil
 }
 
-// makeParameterGroupBinding answers the bind group of group, @group(0) or
-// @group(2), of a draw of slot, of shader, into a pass writing targets, with
+// makeParameterGroupBinding answers the bind group of group of a draw or
+// dispatch running selection, of shader, into a pass writing targets, with
 // its dynamic offsets: each binding bound to the value of settings, the
-// pass's or the draw's parameters, by its name, or to its default when none
-// is set, it is refused, or it is a texture overlapping one of targets, the
-// last two reported once for shader and the name, as is a setting naming a
-// binding of another group. It is built in draft and shared by every draw
-// binding the same; the layout's default when nothing is set. With it goes
-// the name of a storage binding of the group left at its default that a
-// function slot runs reads, empty for none. t's mutex is held.
-func (t *assetTable) makeParameterGroupBinding(device gfx.Device, group uint32, settings []parameterSetting, slot *materialSlot, shader shaderSlot, targets []drawnTarget, draft *bindGroupDraft) (groupBinding, string, error) {
+// pass's, the draw's or the dispatch's parameters, by its name, or to its
+// default when none is set, it is refused, or it is a texture overlapping
+// one of targets, the last two reported once for the shader and the name,
+// as values of level, such as "pass parameter".
+// It is built in draft and shared by every draw or dispatch binding the
+// same; the layout's default when nothing is set. With it goes the name of a
+// storage binding of the group left at its default that a function
+// selection runs reads, empty for none. t's mutex is held.
+func (t *assetTable) makeParameterGroupBinding(device gfx.Device, group uint32, settings []parameterSetting, level string, selection shaderSelection, shader shaderSlot, targets []drawnTarget, draft *bindGroupDraft) (groupBinding, string, error) {
 	t.requireLocked("makeParameterGroupBinding")
-	level := "pass parameter"
-	if group == drawGroup {
-		level = "draw parameter"
-	}
-	for _, setting := range settings {
-		index := slices.IndexFunc(shader.bindings, func(binding gfx.ShaderBinding) bool { return binding.Name == setting.name })
-		if index >= 0 && shader.bindings[index].Group != group && claimReport(&t.reportedParameters, parameterReportKey{shader: slot.shader, name: setting.name}) {
-			t.report(ReportKindParameterRefused, fmt.Errorf("render: %s %q names a binding of shader %v in @group(%d), and %ss are in @group(%d)", level, setting.name, slot.shader, shader.bindings[index].Group, level, group))
-		}
-	}
 	layout := shader.layout.groups[group]
 	binding := groupBinding{dynamicOffsetCount: layout.dynamicOffsetCount}
 	var unboundRead string
@@ -795,14 +841,14 @@ func (t *assetTable) makeParameterGroupBinding(device gfx.Device, group uint32, 
 	for index, shaderBinding := range shader.findGroupBindings(group) {
 		var value bindingValue
 		if settingIndex := slices.IndexFunc(settings, func(setting parameterSetting) bool { return setting.name == shaderBinding.Name }); settingIndex >= 0 {
-			err := t.fillSettingValue(device, slot.shader, shaderBinding, settings[settingIndex], &value)
+			err := t.fillSettingValue(device, selection.shader, shaderBinding, settings[settingIndex], &value)
 			if err == nil && value.overlapsTargets(shaderBinding.Texture.SampleType != gfx.TextureSampleTypeUndefined, targets) {
 				err = errors.New("is a texture a target of its pass overlaps")
 			}
 			if err != nil {
 				value = bindingValue{}
-				if claimReport(&t.reportedParameters, parameterReportKey{shader: slot.shader, name: shaderBinding.Name}) {
-					t.report(ReportKindParameterRefused, fmt.Errorf("render: %s %q under shader %v: the value %w; its binding draws its default", level, shaderBinding.Name, slot.shader, err))
+				if claimReport(&t.reportedParameters, parameterReportKey{shader: selection.shader, name: shaderBinding.Name}) {
+					t.report(ReportKindParameterRefused, fmt.Errorf("render: %s %q under shader %v: the value %w; its binding draws its default", level, shaderBinding.Name, selection.shader, err))
 				}
 			}
 		}
@@ -812,7 +858,7 @@ func (t *assetTable) makeParameterGroupBinding(device gfx.Device, group uint32, 
 		}
 		switch {
 		case defaulted:
-			if unboundRead == "" && isStorage(shaderBinding) && slot.usesBinding(shaderBinding) {
+			if unboundRead == "" && isStorage(shaderBinding) && selection.usesBinding(shaderBinding) {
 				unboundRead = shaderBinding.Name
 			}
 		case value.kind == parameterKindTexture:

@@ -1,6 +1,9 @@
 package render
 
-import "reflect"
+import (
+	"fmt"
+	"reflect"
+)
 
 // parameterSetting is a pass or draw parameter as its setter gave it, by its
 // binding's name, resolved against each shader drawn with it: a texture
@@ -28,4 +31,21 @@ func putSetting(settings []parameterSetting, setting parameterSetting) []paramet
 		}
 	}
 	return append(settings, setting)
+}
+
+// makeUniformSetting answers the setting of a uniform block of uniformType
+// named name, its bytes data copied into the arena chunks listState, of a
+// list of frame, takes; one of no kind, leaving its binding unbound, when
+// gfx refuses a chunk, which is logged.
+func makeUniformSetting(frame Frame, listState *commandListState, name string, uniformType reflect.Type, data []byte) parameterSetting {
+	setting := parameterSetting{name: name}
+	bufferRange, err := frame.table.Get().allocateTemporary(listState, data, frame.device.Get())
+	if err != nil {
+		frame.state.Get().logUnlessLost(fmt.Errorf("render: setting uniform block %q: %w", name, err))
+		return setting
+	}
+	setting.kind = parameterKindUniform
+	setting.bufferRange = bufferRange
+	setting.uniformType = uniformType
+	return setting
 }

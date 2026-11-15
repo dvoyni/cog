@@ -67,6 +67,16 @@ const (
 	// negative or past the device's largest texture, its position past the
 	// range WebGPU allows, or its depth range outside 0 to 1 or reversed.
 	ReportKindPassStateRefused
+	// ReportKindCopyRefused is a copy or buffer clear that does not fit what
+	// it names: an asset render does not hold, a buffer without the copy
+	// source usage, an offset or size misaligned, a range or region past
+	// its buffer's end or its level's edges, or textures of different
+	// formats.
+	ReportKindCopyRefused
+	// ReportKindDispatchSkipped is a dispatch skipped for what it names: no
+	// shader selected, one render does not hold, failed or was freed, or a
+	// storage binding left unbound that its compute function reads.
+	ReportKindDispatchSkipped
 )
 
 // Report is a mistake render finds at run time, such as a refused shader, a

@@ -37,6 +37,18 @@ func (r BufferRange) findBuffer(table *assetTable) (gfx.Buffer, uint64, error) {
 	return buffer, size, err
 }
 
+// findCopiedBuffer answers the gfx buffer behind r's buffer in table and
+// r's size, a zero Size the rest of the buffer, for a copy or clear whose
+// buffer needs usage; an error when the buffer failed, was freed or has no
+// bytes, r ends past it, or the buffer, made by device, lacks usage.
+func (r BufferRange) findCopiedBuffer(table *assetTable, device gfx.Device, usage gfx.BufferUsageFlags) (gfx.Buffer, uint64, error) {
+	buffer, size, err := r.findBuffer(table)
+	if err == nil && device.BufferDescriptor(buffer).Usage&usage == 0 {
+		err = fmt.Errorf("names buffer %v, made without the usage %d a copy needs of it", r.Buffer, usage)
+	}
+	return buffer, size, err
+}
+
 // findSize answers r's size in a buffer of bufferSize bytes, a zero Size the
 // rest of the buffer; an error when r ends past it.
 func (r BufferRange) findSize(bufferSize uint64) (uint64, error) {

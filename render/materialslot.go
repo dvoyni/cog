@@ -1,10 +1,6 @@
 package render
 
-import (
-	"slices"
-
-	"github.com/dvoyni/cog/gfx"
-)
+import "github.com/dvoyni/cog/gfx"
 
 // materialSlot is the slot of one material: what it was made of, with the
 // entry points of its shader it runs once resolved, an empty vertex one
@@ -27,12 +23,10 @@ type materialSlot struct {
 	drawnFrame                           uint64
 }
 
-// usesBinding answers whether binding is used by a function s runs, its
-// vertex or its fragment entry point.
-func (s *materialSlot) usesBinding(binding gfx.ShaderBinding) bool {
-	return slices.ContainsFunc(binding.EntryPoints, func(name string) bool {
-		return name == s.vertexEntryPoint || (name != "" && name == s.fragmentEntryPoint)
-	})
+// makeShaderSelection answers s's shader and the functions of it s runs,
+// its vertex and its fragment entry point.
+func (s *materialSlot) makeShaderSelection() shaderSelection {
+	return shaderSelection{shader: s.shader, entryPoints: [2]string{s.vertexEntryPoint, s.fragmentEntryPoint}}
 }
 
 // findOverlapMask answers the bit of each of s's textures, by its index

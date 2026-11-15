@@ -8,15 +8,21 @@ type Inspection struct {
 }
 
 // InspectedCommandList is one command list of an inspected frame: its passes,
-// in the order recorded.
+// its compute passes and its copies and buffer clears, each in the order
+// recorded, its Position saying where it stands among all three.
 type InspectedCommandList struct {
-	Passes []InspectedPass
+	Passes        []InspectedPass
+	ComputePasses []InspectedComputePass
+	Copies        []InspectedCopy
 }
 
-// InspectedPass is one pass of an inspected command list: its label; its
-// colour targets and depth-stencil target with their loads, stores and
-// resolves; and its draws, in the order recorded.
+// InspectedPass is one pass of an inspected command list: its position,
+// its index among the list's passes, compute passes and copies, in the
+// order recorded; its label; its colour targets and depth-stencil target
+// with their loads, stores and resolves; and its draws, in the order
+// recorded.
 type InspectedPass struct {
+	Position     int
 	Label        string
 	ColorTargets []ColorTarget
 	DepthStencil DepthStencilTarget
@@ -32,6 +38,38 @@ type InspectedDraw struct {
 	Material                                              InspectedMaterial
 	PassParameters, DrawParameters                        []InspectedParameter
 	VertexCount, IndexCount, InstanceCount, FirstInstance uint32
+}
+
+// InspectedComputePass is one compute pass of an inspected command list: its
+// position, as an InspectedPass's; its label; and its dispatches, in the
+// order recorded.
+type InspectedComputePass struct {
+	Position   int
+	Label      string
+	Dispatches []InspectedDispatch
+}
+
+// InspectedDispatch is one dispatch of an inspected compute pass: its
+// shader, the compute function it ran, its parameters, one for each binding
+// of its shader, by group and binding number, and its workgroup counts.
+type InspectedDispatch struct {
+	Shader     Shader
+	EntryPoint string
+	Parameters []InspectedParameter
+	X, Y, Z    uint32
+}
+
+// InspectedCopy is one copy or buffer clear of an inspected command list:
+// its position, as an InspectedPass's; and its source and its destination,
+// each a range of a buffer or a region of a texture, sizes filled in. A
+// clear has no source, and zeroes its destination buffer's range. Of a copy
+// between a buffer and a texture, the buffer's range gives its offset alone,
+// its rows laid out as CommandList.CopyBufferToTexture says.
+type InspectedCopy struct {
+	Position                          int
+	SourceBuffer, DestinationBuffer   BufferRange
+	SourceTexture, DestinationTexture Texture
+	SourceRegion, DestinationRegion   TextureRegion
 }
 
 // InspectedMaterial is a material as a draw drew with it: its shader, the

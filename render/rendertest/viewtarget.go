@@ -5,7 +5,6 @@ import (
 	"github.com/dvoyni/cog/gfx/recording"
 	"github.com/dvoyni/cog/platform"
 	"github.com/dvoyni/cog/render"
-	"github.com/dvoyni/cog/render/internal/handle"
 )
 
 // viewTarget is what a gfx view drawn into or bound is in render's terms: a
@@ -20,22 +19,16 @@ type viewTarget struct {
 
 // makeViewTargets answers what each view the recording's calls made or were
 // given is in render's terms: the framebuffer views its acquires were given,
-// by window, and the views of the textures render made, by the handle each
-// texture's label names, with the mip level and layer each view starts at
-// and its descriptor.
-func makeViewTargets(calls []recording.Call) map[gfx.TextureView]viewTarget {
-	textures := map[gfx.Texture]render.Texture{}
+// by window, and the views of the textures render made, by each texture's
+// handle in textures, with the mip level and layer each view starts at and
+// its descriptor.
+func makeViewTargets(calls []recording.Call, textures map[gfx.Texture]render.Texture) map[gfx.TextureView]viewTarget {
 	viewTargets := map[gfx.TextureView]viewTarget{}
 	for _, call := range calls {
 		switch call.Kind {
 		case recording.CallKindAcquireFramebuffer:
 			arguments := call.Arguments.(recording.AcquireFramebufferArguments)
 			viewTargets[arguments.View] = viewTarget{window: arguments.Window}
-		case recording.CallKindCreateTexture:
-			arguments := call.Arguments.(recording.CreateTextureArguments)
-			if texture, ok := handle.ParseLabel[render.Texture](arguments.Descriptor.Label); ok {
-				textures[arguments.Texture] = texture
-			}
 		case recording.CallKindCreateTextureView:
 			arguments := call.Arguments.(recording.CreateTextureViewArguments)
 			if texture, ok := textures[arguments.Texture]; ok {

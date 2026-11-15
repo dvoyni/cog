@@ -4,45 +4,85 @@ import (
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/gfx/recording"
 	"github.com/dvoyni/cog/render"
+	"github.com/dvoyni/cog/render/internal/handle"
 )
 
 // frameReader reads the frames gfx's recording adapter recorded back in
 // render's terms, from what the recording's calls made: what each view drawn
-// into is, the material each pipeline draws with, and what each bind group
-// binds.
+// into is, the material each pipeline draws with, what each compute
+// pipeline runs, what each bind group binds, and the handle of each texture
+// and buffer render made.
 type frameReader struct {
-	viewTargets map[gfx.TextureView]viewTarget
-	materials   map[gfx.RenderPipeline]pipelineMaterial
-	bindGroups  *bindGroupReader
+	viewTargets      map[gfx.TextureView]viewTarget
+	materials        map[gfx.RenderPipeline]pipelineMaterial
+	computePipelines map[gfx.ComputePipeline]computePipelineShader
+	bindGroups       *bindGroupReader
+	textures         map[gfx.Texture]render.Texture
+	buffers          map[gfx.Buffer]render.Buffer
 	// submission is the index of the next submission read, among every
 	// frame's.
 	submission int
 }
 
-// newFrameReader answers the reader of the frames recorded with calls, its
+// newFrameReader answers the reader of the frames recorded with calls, the
+// handles of render's textures, buffers and shaders read from the labels of
+// the objects behind them, a module render labelled with no shader's
+// handle, such as its mip shader's, the zero Shader's; its
 // shaders' modules answering their bindings' reflection with
 // shaderBindings.
 func newFrameReader(calls []recording.Call, shaderBindings map[gfx.ShaderModule][]gfx.ShaderBinding) *frameReader {
-	viewTargets := makeViewTargets(calls)
+	textures := map[gfx.Texture]render.Texture{}
+	buffers := map[gfx.Buffer]render.Buffer{}
+	shaders := map[gfx.ShaderModule]render.Shader{}
+	for _, call := range calls {
+		switch arguments := call.Arguments.(type) {
+		case recording.CreateTextureArguments:
+			if texture, ok := handle.ParseLabel[render.Texture](arguments.Descriptor.Label); ok {
+				textures[arguments.Texture] = texture
+			}
+		case recording.CreateBufferArguments:
+			if buffer, ok := handle.ParseLabel[render.Buffer](arguments.Descriptor.Label); ok {
+				buffers[arguments.Buffer] = buffer
+			}
+		case recording.CreateShaderModuleArguments:
+			if shader, ok := handle.ParseLabel[render.Shader](arguments.Descriptor.Label); ok {
+				shaders[arguments.Module] = shader
+			}
+		}
+	}
+	viewTargets := makeViewTargets(calls, textures)
 	return &frameReader{
-		viewTargets: viewTargets,
-		materials:   makePipelineMaterials(calls),
-		bindGroups:  newBindGroupReader(calls, viewTargets, shaderBindings),
+		viewTargets:      viewTargets,
+		materials:        makePipelineMaterials(calls, shaders),
+		computePipelines: makeComputePipelineShaders(calls, shaders),
+		bindGroups:       newBindGroupReader(calls, viewTargets, shaderBindings),
+		textures:         textures,
+		buffers:          buffers,
 	}
 }
 
 // makeInspection answers frame, the next frame recorded, in render's terms:
 // each command buffer a command list, in the order gfx submitted them, which
-// is their order, with its passes.
+// is their order, with its passes, compute passes and copies.
 func (r *frameReader) makeInspection(frame recording.Frame) render.Inspection {
 	var inspection render.Inspection
 	for _, submission := range frame.Submissions {
 		for _, buffer := range submission.Buffers {
 			var list render.InspectedCommandList
+			// position is the position of the next pass, compute pass or copy.
+			position := 0
 			for _, command := range buffer.Commands {
-				if command.Kind == recording.CommandKindBeginRenderPass {
-					list.Passes = append(list.Passes, r.makeInspectedPass(command))
+				switch command.Kind {
+				case recording.CommandKindBeginRenderPass:
+					list.Passes = append(list.Passes, r.makeInspectedPass(command, position))
+				case recording.CommandKindBeginComputePass:
+					list.ComputePasses = append(list.ComputePasses, r.makeInspectedComputePass(command, position))
+				case recording.CommandKindCopyBufferToBuffer, recording.CommandKindCopyBufferToTexture, recording.CommandKindCopyTextureToBuffer, recording.CommandKindCopyTextureToTexture, recording.CommandKindClearBuffer:
+					list.Copies = append(list.Copies, r.makeInspectedCopy(command, position))
+				default:
+					continue
 				}
+				position++
 			}
 			inspection.CommandLists = append(inspection.CommandLists, list)
 		}
@@ -51,11 +91,12 @@ func (r *frameReader) makeInspection(frame recording.Frame) render.Inspection {
 	return inspection
 }
 
-// makeInspectedPass answers the pass command begins, in render's terms, the
-// views it draws into named by what they are, with its draws.
-func (r *frameReader) makeInspectedPass(command recording.Command) render.InspectedPass {
+// makeInspectedPass answers the pass command begins, at position in its
+// list, in render's terms, the views it draws into named by what they are,
+// with its draws.
+func (r *frameReader) makeInspectedPass(command recording.Command, position int) render.InspectedPass {
 	descriptor := command.Arguments.(gfx.RenderPassDescriptor)
-	pass := render.InspectedPass{Label: descriptor.Label, Draws: r.makeInspectedDraws(command.Commands)}
+	pass := render.InspectedPass{Position: position, Label: descriptor.Label, Draws: r.makeInspectedDraws(command.Commands)}
 	for _, attachment := range descriptor.ColorAttachments {
 		target := r.viewTargets[attachment.View]
 		resolve := r.viewTargets[attachment.ResolveTarget]
@@ -131,4 +172,70 @@ func (r *frameReader) makeInspectedDraws(commands []recording.Command) []render.
 		}
 	}
 	return draws
+}
+
+// makeInspectedComputePass answers the compute pass command begins, at
+// position in its list, in render's terms, with its dispatches, each with
+// the shader and function the pipeline set before it runs, and the values
+// the bind groups set before it bind to each binding of the shader, by
+// group and number, at their dynamic offsets.
+func (r *frameReader) makeInspectedComputePass(command recording.Command, position int) render.InspectedComputePass {
+	pass := render.InspectedComputePass{Position: position, Label: command.Arguments.(gfx.ComputePassDescriptor).Label}
+	var pipeline computePipelineShader
+	// groups are the bind groups set, by their index.
+	var groups [3]recording.SetBindGroupArguments
+	for _, passCommand := range command.Commands {
+		switch arguments := passCommand.Arguments.(type) {
+		case gfx.ComputePipeline:
+			pipeline = r.computePipelines[arguments]
+		case recording.SetBindGroupArguments:
+			if arguments.Index < uint32(len(groups)) {
+				groups[arguments.Index] = arguments
+			}
+		case recording.DispatchArguments:
+			dispatch := render.InspectedDispatch{Shader: pipeline.shader, EntryPoint: pipeline.entryPoint, X: arguments.X, Y: arguments.Y, Z: arguments.Z}
+			for index, group := range groups {
+				dispatch.Parameters = append(dispatch.Parameters, r.bindGroups.makeParameters(pipeline.module, uint32(index), group.Group, group.DynamicOffsets, r.submission)...)
+			}
+			pass.Dispatches = append(pass.Dispatches, dispatch)
+		}
+	}
+	return pass
+}
+
+// makeInspectedCopy answers the copy or buffer clear command records, at
+// position in its list, in render's terms, its buffers and textures by the
+// handles their labels name, a buffer's range between a buffer and a
+// texture by its offset alone.
+func (r *frameReader) makeInspectedCopy(command recording.Command, position int) render.InspectedCopy {
+	copied := render.InspectedCopy{Position: position}
+	switch arguments := command.Arguments.(type) {
+	case recording.CopyBufferToBufferArguments:
+		copied.SourceBuffer = render.BufferRange{Buffer: r.buffers[arguments.Source], Offset: arguments.SourceOffset, Size: arguments.Size}
+		copied.DestinationBuffer = render.BufferRange{Buffer: r.buffers[arguments.Destination], Offset: arguments.DestinationOffset, Size: arguments.Size}
+	case recording.CopyBufferToTextureArguments:
+		region := arguments.Regions[0]
+		copied.SourceBuffer = render.BufferRange{Buffer: r.buffers[arguments.Source], Offset: region.BufferLayout.Offset}
+		copied.DestinationTexture = r.textures[arguments.Destination]
+		copied.DestinationRegion = makeTextureRegion(region.TextureBase, region.Size)
+	case recording.CopyTextureToBufferArguments:
+		region := arguments.Regions[0]
+		copied.SourceTexture = r.textures[arguments.Source]
+		copied.SourceRegion = makeTextureRegion(region.TextureBase, region.Size)
+		copied.DestinationBuffer = render.BufferRange{Buffer: r.buffers[arguments.Destination], Offset: region.BufferLayout.Offset}
+	case recording.CopyTextureToTextureArguments:
+		region := arguments.Regions[0]
+		copied.SourceTexture = r.textures[arguments.Source]
+		copied.SourceRegion = makeTextureRegion(region.Source, region.Size)
+		copied.DestinationTexture = r.textures[arguments.Destination]
+		copied.DestinationRegion = makeTextureRegion(region.Destination, region.Size)
+	case recording.ClearBufferArguments:
+		copied.DestinationBuffer = render.BufferRange{Buffer: r.buffers[arguments.Buffer], Offset: arguments.Offset, Size: arguments.Size}
+	}
+	return copied
+}
+
+// makeTextureRegion answers the region of size at origin in render's terms.
+func makeTextureRegion(origin gfx.ImageCopyTexture, size gfx.Extent3D) render.TextureRegion {
+	return render.TextureRegion{MipLevel: origin.MipLevel, Layer: origin.Origin.Z, X: origin.Origin.X, Y: origin.Origin.Y, Width: size.Width, Height: size.Height}
 }

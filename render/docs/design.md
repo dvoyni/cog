@@ -405,8 +405,15 @@ func drawScene(k *kernel.Kernel, e render.FrameEvent, frame render.Frame, scene 
 
 ([render: what a pass declares, temporary buffers and textures, and how passes from several users are ordered](https://github.com/dvoyni/cog/issues/809))
 
-- **A compute pass is a run of dispatches** recorded in a command list among its passes. `SetShader(shader, entryPoint)` names the compute shader and its function, an empty name meaning its only one, and resets its parameters, which are set by name in any group, with no levels. `Dispatch(x, y, z)` runs it. There is no compute material.
-- **Copies** (buffer to buffer, texture to texture, and between buffers and textures) **and buffer clears** are recorded between passes. gfx's backend inserts the barrier when a later pass samples what an earlier one wrote.
+- **A compute pass is a run of dispatches** recorded in a command list among its passes, begun with `list.BeginComputePass(label)`. There is no compute material.
+  - `SetShader(shader, entryPoint)` names the compute shader and its function, an empty name meaning its only one, and resets its parameters.
+  - `SetTexture`, `SetTextureView`, `SetSampler`, `SetBuffer` and `SetUniform[T]` set parameters by name in any group, with no levels, each checked at the next dispatch against the binding of its name. A group binds as it does for draws: uniform blocks of `@group(0)` and `@group(2)` and storage buffers of `@group(2)` at dynamic offsets, the rest statically, so a uniform block or temporary range in `@group(1)` costs a bind group each frame it moves. Uniform blocks come from the list's arena, and bind groups are kept by what they bind, as a pass's are.
+  - `Dispatch(x, y, z)` runs it. A dispatch with no shader selected, of one render does not hold, failed or was freed, or whose function reads a storage binding left unbound is skipped and reported once, with `ReportKindDispatchSkipped`, for the shader and its function.
+  - A compute pipeline's first dispatch makes it, as a draw's first pipeline is made. A missing or ambiguous entry point is that pipeline's failure.
+- **Copies** (`CopyBuffer`, `CopyTexture`, `CopyBufferToTexture` and `CopyTextureToBuffer`) **and buffer clears** (`ClearBuffer`) are recorded between passes. gfx's backend inserts the barrier when a later pass samples what an earlier one wrote.
+  - A buffer range's zero size, and a texture region's zero width or height, mean the rest, as they do for writes. A copy fills its destination from its start: the destination range or region holds at least what is copied.
+  - Between a buffer and a texture, the buffer holds the region's rows from its offset, each starting a multiple of 256 bytes after the one before, which WebGPU asks of a copy; render lays them out so, and the caller sizes the range for it.
+  - A copy that does not fit is refused and reported with `ReportKindCopyRefused`, recording nothing, so the list's encoder survives it: an asset render does not hold, a buffer made without `BufferUsageFlagCopySrc` copied from, a range or region past its buffer's end or its level's edges, an offset or size misaligned, one buffer copied into itself, one mip level and layer of a texture copied into itself, textures of different formats or sample counts, part of a level of a depth, stencil or multisampled texture, or a buffer copy of a texture of several samples or of a format whose texels have no size gfx's copies know.
 - **Temporary textures:**
   - `frame.AcquireTemporaryTexture(descriptor)` pools them by descriptor, its label included, with every usage the format allows.
   - Each is held until the frame ends, with no reuse within the frame, and its contents are undefined when taken.
@@ -491,7 +498,7 @@ render republishes gfx's events as its own, each nested inside gfx's publication
 - **An inspection** is one frame in render's terms:
   - the beat;
   - command lists by order, with labels;
-  - each list's passes with their targets and pass parameters, its compute passes with their dispatches, and its copies and readbacks;
+  - each list's passes with their targets and pass parameters, its compute passes with their dispatches, and its copies and readbacks, each with its position in the list;
   - every draw with its material and version (variant, render state with enums named, each parameter's binding name, kind, group, number and value), its draw parameters, instance buffers and counts;
   - what the frame loaded, wrote, took from the pools and versioned;
   - the pipelines and bind groups made that frame;

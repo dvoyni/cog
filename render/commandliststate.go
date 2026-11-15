@@ -11,18 +11,22 @@ import (
 // takes chunks from, of chunkSize bytes, a multiple of 4; the arena chunks
 // it took this frame, blocks going into the current one until it
 // lacks room; the temporary meshes it acquired this frame; the pass and
-// draw parameters set in its open pass, by their group; and the draft its
+// draw parameters set in its open pass, by their group, or the parameters
+// set in its open compute pass, of any group; and the draft its
 // draws build bind groups in, and hand the dynamic offsets of each they
-// set.
+// set; and the regions its copies hand gfx.
 type commandListState struct {
-	arena             *temporaryArena
-	chunkSize         uint64
-	takenChunks       []*arenaChunk
-	currentChunk      *arenaChunk
-	temporaryMeshes   []Mesh
-	parameterSettings [reservedGroup][]parameterSetting
-	bindGroupDraft    bindGroupDraft
-	dynamicOffsets    [maxGroupDynamicOffsetCount]uint32
+	arena               *temporaryArena
+	chunkSize           uint64
+	takenChunks         []*arenaChunk
+	currentChunk        *arenaChunk
+	temporaryMeshes     []Mesh
+	parameterSettings   [reservedGroup][]parameterSetting
+	computeSettings     []parameterSetting
+	bindGroupDraft      bindGroupDraft
+	dynamicOffsets      [maxGroupDynamicOffsetCount]uint32
+	textureCopies       [1]gfx.TextureCopy
+	bufferTextureCopies [1]gfx.BufferTextureCopy
 }
 
 // allocate answers a range of a chunk s holds holding data, at a multiple of
@@ -86,12 +90,13 @@ func (s *commandListState) writeChunks(table *assetTable, device gfx.Device) {
 	}
 }
 
-// clearParameterSettings forgets every pass and draw parameter set, for the next
-// pass, keeping their arrays.
+// clearParameterSettings forgets every pass, draw and compute parameter
+// set, for the next pass, keeping their arrays.
 func (s *commandListState) clearParameterSettings() {
 	for group := range s.parameterSettings {
 		s.parameterSettings[group] = s.parameterSettings[group][:0]
 	}
+	s.computeSettings = s.computeSettings[:0]
 }
 
 // reset empties s for the list that takes it next, keeping its arrays.

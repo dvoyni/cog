@@ -121,12 +121,11 @@ type Pass struct {
 	targets     [2*maxColorTargetCount + 1]drawnTarget
 	targetCount int
 	// material is the material SetMaterial selected; bindGroups what the
-	// draws bind for each group, kept between them; and pipeline and
-	// boundGroups the pipeline and each group as last set on encoder.
-	material    Material
-	bindGroups  drawBindGroupSet
-	pipeline    gfx.RenderPipeline
-	boundGroups [reservedGroup]groupBinding
+	// draws bind for each group, kept between them; and pipeline the
+	// pipeline as last set on encoder.
+	material   Material
+	bindGroups bindGroupSet
+	pipeline   gfx.RenderPipeline
 	// instanceBuffers are the instance buffers set, by slot, a zero Buffer
 	// meaning none; instanceSlots the slots set, in order, the first
 	// instanceCount of them, the order a draw binds them in; and
@@ -467,20 +466,9 @@ func (p *Pass) setParameter(group int, setting parameterSetting) {
 // one gfx refuses an arena chunk for is logged, and leaves the block
 // unbound.
 func (p *Pass) setUniform(group int, name string, uniformType reflect.Type, data []byte) {
-	if p.encoder == nil {
-		return
+	if p.encoder != nil {
+		p.setParameter(group, makeUniformSetting(p.frame, p.listState, name, uniformType, data))
 	}
-	state := p.frame.state.Get()
-	setting := parameterSetting{name: name}
-	bufferRange, err := p.frame.table.Get().allocateTemporary(p.listState, data, p.frame.device.Get())
-	if err != nil {
-		state.logUnlessLost(fmt.Errorf("render: setting uniform block %q: %w", name, err))
-	} else {
-		setting.kind = parameterKindUniform
-		setting.bufferRange = bufferRange
-		setting.uniformType = uniformType
-	}
-	p.setParameter(group, setting)
 }
 
 // findMaterial answers the slot of the material SetMaterial selected and
@@ -557,9 +545,9 @@ func (p *Pass) bindDraw(table *assetTable, material materialSlot, shader shaderS
 		return false
 	}
 	groupCount := len(shader.layout.groups)
-	if index := slices.IndexFunc(p.bindGroups.unboundReads[:groupCount], func(name string) bool { return name != "" }); index >= 0 {
+	if name := p.bindGroups.findUnboundRead(groupCount); name != "" {
 		if table.claimMaterialReport(p.material) {
-			table.report(ReportKindDrawSkipped, fmt.Errorf("render: a draw of material %q, whose storage binding %q, which a function it runs reads, is unbound", material.label, p.bindGroups.unboundReads[index]))
+			table.report(ReportKindDrawSkipped, fmt.Errorf("render: a draw of material %q, whose storage binding %q, which a function it runs reads, is unbound", material.label, name))
 		}
 		return false
 	}
@@ -567,15 +555,7 @@ func (p *Pass) bindDraw(table *assetTable, material materialSlot, shader shaderS
 		p.encoder.SetPipeline(pipeline)
 		p.pipeline = pipeline
 	}
-	for group := range groupCount {
-		binding := &p.bindGroups.groupBindings[group]
-		if *binding != p.boundGroups[group] {
-			dynamicOffsets := p.listState.dynamicOffsets[:binding.dynamicOffsetCount]
-			copy(dynamicOffsets, binding.dynamicOffsets[:])
-			p.encoder.SetBindGroup(uint32(group), binding.bindGroup, dynamicOffsets)
-			p.boundGroups[group] = *binding
-		}
-	}
+	p.bindGroups.setChangedGroups(p.encoder, groupCount, &p.listState.dynamicOffsets)
 	return true
 }
 

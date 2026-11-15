@@ -18,6 +18,10 @@ type Order int32
 // ownOrder is the order of render's own command list, below every user's.
 const ownOrder Order = math.MinInt32
 
+// copyRowAlignment is what the distance between the rows of a copy between a
+// buffer and a texture is a multiple of, as WebGPU asks.
+const copyRowAlignment = 256
+
 // CommandList is one task's run of passes for a frame, kept in the order they
 // were recorded, from Frame.BeginCommandList to its End, with the chunks of
 // the temporary arena its temporary buffers, its pass and draw uniform
@@ -134,6 +138,165 @@ func (l *CommandList) AcquireTemporaryMesh(descriptor MeshDescriptor) Mesh {
 	}
 	l.listState.temporaryMeshes = append(l.listState.temporaryMeshes, mesh)
 	return mesh
+}
+
+// BeginComputePass begins a compute pass labelled label, its label for
+// reports and inspections, to record dispatches into until its End. A list
+// recording into nothing answers a compute pass recording nothing.
+func (l *CommandList) BeginComputePass(label string) ComputePass {
+	if l.encoder == nil {
+		return ComputePass{}
+	}
+	l.listState.clearParameterSettings()
+	return ComputePass{frame: l.frame, listState: l.listState, encoder: l.encoder.BeginComputePass(gfx.ComputePassDescriptor{Label: label})}
+}
+
+// CopyBuffer copies source's bytes, a zero Size meaning the rest of its
+// buffer, to destination's offset, at this point of the list: after what the
+// list recorded before it and before what it records after. A copy that
+// does not fit is refused and reported, recording nothing: from or into a
+// buffer render does not hold or of no bytes, from a buffer made without
+// BufferUsageFlagCopySrc, within one buffer, at an offset or of a size no
+// multiple of 4, or from or into a range past its buffer's end, a
+// destination with a Size holding fewer bytes than the copy.
+func (l *CommandList) CopyBuffer(source, destination BufferRange) {
+	if l.encoder == nil {
+		return
+	}
+	table := l.frame.table.Get()
+	device := l.frame.device.Get()
+	sourceBuffer, size, err := source.findCopiedBuffer(table, device, gfx.BufferUsageFlagCopySrc)
+	var destinationBuffer gfx.Buffer
+	var destinationSize uint64
+	if err == nil {
+		destinationBuffer, destinationSize, err = destination.findCopiedBuffer(table, device, gfx.BufferUsageFlagCopyDst)
+	}
+	switch {
+	case err != nil:
+	case source.Buffer == destination.Buffer:
+		err = errors.New("is within one buffer")
+	case source.Offset%4 != 0 || destination.Offset%4 != 0 || size%4 != 0:
+		err = fmt.Errorf("is %d bytes from offset %d to offset %d, where the offsets and the size are multiples of 4", size, source.Offset, destination.Offset)
+	case size > destinationSize:
+		err = fmt.Errorf("is %d bytes, into a destination of %d", size, destinationSize)
+	}
+	if err != nil {
+		table.report(ReportKindCopyRefused, fmt.Errorf("render: a copy from %+v to %+v %w", source, destination, err))
+		return
+	}
+	l.encoder.CopyBufferToBuffer(sourceBuffer, source.Offset, destinationBuffer, destination.Offset, size)
+}
+
+// CopyTexture copies sourceRegion of source, a zero width or height
+// meaning the rest of its level, into destinationRegion of destination,
+// from its top-left texel, at this point of the list, as CopyBuffer does. A
+// copy that does not fit is refused and reported, recording nothing: from
+// or into a texture render does not hold, of a mip level or layer it lacks,
+// or a region past its level's edges; between textures of different formats
+// or sample counts; into a destination region smaller than the copy; within
+// one mip level and layer of one texture; or of part of a level of a
+// texture of a depth or stencil format or of several samples, which copies
+// whole levels alone.
+func (l *CommandList) CopyTexture(source Texture, sourceRegion TextureRegion, destination Texture, destinationRegion TextureRegion) {
+	if l.encoder == nil {
+		return
+	}
+	sourceTexture, sourceDescriptor, width, height, err := l.findCopiedTexture(source, sourceRegion)
+	var destinationTexture gfx.Texture
+	var destinationDescriptor gfx.TextureDescriptor
+	var destinationWidth, destinationHeight uint32
+	if err == nil {
+		destinationTexture, destinationDescriptor, destinationWidth, destinationHeight, err = l.findCopiedTexture(destination, destinationRegion)
+	}
+	isWholeLevel := func(descriptor gfx.TextureDescriptor, region TextureRegion) bool {
+		levelWidth, levelHeight, _ := TextureRegion{MipLevel: region.MipLevel}.findSize(descriptor)
+		return region.X == 0 && region.Y == 0 && width == levelWidth && height == levelHeight
+	}
+	switch {
+	case err != nil:
+	case sourceDescriptor.Format != destinationDescriptor.Format || sourceDescriptor.SampleCount != destinationDescriptor.SampleCount:
+		err = fmt.Errorf("is between textures of formats %d and %d, of %d and %d samples, where they are the same", sourceDescriptor.Format, destinationDescriptor.Format, sourceDescriptor.SampleCount, destinationDescriptor.SampleCount)
+	case width > destinationWidth || height > destinationHeight:
+		err = fmt.Errorf("is %d×%d texels, into a destination region of %d×%d", width, height, destinationWidth, destinationHeight)
+	case source == destination && sourceRegion.MipLevel == destinationRegion.MipLevel && sourceRegion.Layer == destinationRegion.Layer:
+		err = errors.New("is within one mip level and layer of one texture")
+	case (sourceDescriptor.SampleCount > 1 || TextureFormat(sourceDescriptor.Format).info().flags&(textureFormatFlagDepth|textureFormatFlagStencil) != 0) &&
+		(!isWholeLevel(sourceDescriptor, sourceRegion) || !isWholeLevel(destinationDescriptor, destinationRegion)):
+		err = errors.New("copies part of a level of a texture of a depth or stencil format or of several samples, which copies whole levels alone")
+	}
+	if err != nil {
+		l.frame.table.Get().report(ReportKindCopyRefused, fmt.Errorf("render: a copy from %+v of texture %v to %+v of texture %v %w", sourceRegion, source, destinationRegion, destination, err))
+		return
+	}
+	l.listState.textureCopies[0] = gfx.TextureCopy{
+		Source:      makeImageCopyTexture(sourceTexture, sourceRegion),
+		Destination: makeImageCopyTexture(destinationTexture, destinationRegion),
+		Size:        gfx.Extent3D{Width: width, Height: height, DepthOrArrayLayers: 1},
+	}
+	l.encoder.CopyTextureToTexture(sourceTexture, destinationTexture, l.listState.textureCopies[:])
+}
+
+// CopyBufferToTexture copies source's bytes into region of destination, a
+// zero width or height meaning the rest of its level, at this point of the
+// list, as CopyBuffer does. The bytes are the region's rows of texels from
+// source's offset, each texel of the format's size and each row starting a
+// multiple of 256 bytes after the one before, which a copy needs: the range
+// holds at least 256 bytes for each row but the last, and the last row
+// whole. A copy that does not fit is refused and reported, recording
+// nothing: from a buffer render does not hold, of no bytes or made without
+// BufferUsageFlagCopySrc, at an offset no multiple of 4 and of the texel
+// size, or of a range shorter than the rows; into a texture render does
+// not hold, of several samples or of a format gfx's copies cannot fill, of
+// a mip level or layer it lacks, or a region past its level's edges.
+func (l *CommandList) CopyBufferToTexture(source BufferRange, destination Texture, region TextureRegion) {
+	if l.encoder == nil {
+		return
+	}
+	buffer, texture, err := l.findBufferTextureCopy(source, gfx.BufferUsageFlagCopySrc, destination, region)
+	if err != nil {
+		l.frame.table.Get().report(ReportKindCopyRefused, fmt.Errorf("render: a copy from %+v to %+v of texture %v %w", source, region, destination, err))
+		return
+	}
+	l.encoder.CopyBufferToTexture(buffer, texture, l.listState.bufferTextureCopies[:])
+}
+
+// CopyTextureToBuffer copies region of source, a zero width or height
+// meaning the rest of its level, into destination's bytes at this point of
+// the list, as CopyBuffer does, its rows laid out as CopyBufferToTexture
+// lays them. A copy that does not fit is refused and reported, recording
+// nothing, as CopyBufferToTexture's is, a buffer needing no usage but its
+// own.
+func (l *CommandList) CopyTextureToBuffer(source Texture, region TextureRegion, destination BufferRange) {
+	if l.encoder == nil {
+		return
+	}
+	buffer, texture, err := l.findBufferTextureCopy(destination, gfx.BufferUsageFlagCopyDst, source, region)
+	if err != nil {
+		l.frame.table.Get().report(ReportKindCopyRefused, fmt.Errorf("render: a copy from %+v of texture %v to %+v %w", region, source, destination, err))
+		return
+	}
+	l.encoder.CopyTextureToBuffer(texture, buffer, l.listState.bufferTextureCopies[:])
+}
+
+// ClearBuffer zeroes bufferRange's bytes, a zero Size meaning the rest of
+// its buffer, at this point of the list, as CopyBuffer does. A clear that
+// does not fit is refused and reported, recording nothing: of a buffer
+// render does not hold or of no bytes, of a range past its buffer's end, or
+// at an offset or of a size no multiple of 4.
+func (l *CommandList) ClearBuffer(bufferRange BufferRange) {
+	if l.encoder == nil {
+		return
+	}
+	table := l.frame.table.Get()
+	buffer, size, err := bufferRange.findCopiedBuffer(table, l.frame.device.Get(), gfx.BufferUsageFlagCopyDst)
+	if err == nil && (bufferRange.Offset%4 != 0 || size%4 != 0) {
+		err = fmt.Errorf("is %d bytes at offset %d, where both are multiples of 4", size, bufferRange.Offset)
+	}
+	if err != nil {
+		table.report(ReportKindCopyRefused, fmt.Errorf("render: a clear of %+v %w", bufferRange, err))
+		return
+	}
+	l.encoder.ClearBuffer(buffer, bufferRange.Offset, size)
 }
 
 // End ends the list: nothing more is recorded into it, and the chunks of
@@ -298,6 +461,52 @@ func (l *CommandList) findTarget(window platform.Window, texture Texture, mipLev
 	default:
 		return passTarget{}, false, errors.New("names neither a window nor a texture")
 	}
+}
+
+// findCopiedTexture answers the gfx texture behind texture, the descriptor
+// gfx made it from, and the width and height of region of it, a zero width
+// or height filled in; an error saying why region cannot be copied: a
+// texture render does not hold, a mip level or layer it lacks, or a region
+// past its level's edges.
+func (l *CommandList) findCopiedTexture(texture Texture, region TextureRegion) (gfx.Texture, gfx.TextureDescriptor, uint32, uint32, error) {
+	gfxTexture, ok := l.frame.table.Get().findTexture(texture)
+	if !ok {
+		return gfx.Texture{}, gfx.TextureDescriptor{}, 0, 0, fmt.Errorf("names texture %v, which render does not hold", texture)
+	}
+	descriptor := l.frame.device.Get().TextureDescriptor(gfxTexture)
+	width, height, err := region.findSize(descriptor)
+	return gfxTexture, descriptor, width, height, err
+}
+
+// findBufferTextureCopy answers the gfx buffer behind bufferRange and the
+// gfx texture behind texture, for a copy between the range and region of
+// the texture, whose buffer needs usage, and fills the list's state's
+// bufferTextureCopies with the copy's one region, its rows laid out as
+// CopyBufferToTexture says; an error saying why the copy does not fit.
+func (l *CommandList) findBufferTextureCopy(bufferRange BufferRange, usage gfx.BufferUsageFlags, texture Texture, region TextureRegion) (gfx.Buffer, gfx.Texture, error) {
+	gfxTexture, descriptor, width, height, err := l.findCopiedTexture(texture, region)
+	if err != nil {
+		return gfx.Buffer{}, gfx.Texture{}, err
+	}
+	texelSize := uint64(TextureFormat(descriptor.Format).info().texelSize)
+	if texelSize == 0 || descriptor.SampleCount > 1 {
+		return gfx.Buffer{}, gfx.Texture{}, fmt.Errorf("names texture %q, of %d samples in format %d, where it has one sample and a format gfx's copies fill", descriptor.Label, descriptor.SampleCount, descriptor.Format)
+	}
+	buffer, size, err := bufferRange.findCopiedBuffer(l.frame.table.Get(), l.frame.device.Get(), usage)
+	if err != nil {
+		return gfx.Buffer{}, gfx.Texture{}, err
+	}
+	rowSize := uint64(width) * texelSize
+	bytesPerRow := (rowSize + copyRowAlignment - 1) &^ (copyRowAlignment - 1)
+	if rowsSize := bytesPerRow*uint64(height-1) + rowSize; bufferRange.Offset%4 != 0 || bufferRange.Offset%texelSize != 0 || size < rowsSize {
+		return gfx.Buffer{}, gfx.Texture{}, fmt.Errorf("is %d rows of %d bytes, %d apart, from %d bytes at offset %d, where the offset is a multiple of 4 and of the texel size and the bytes hold the rows", height, rowSize, bytesPerRow, size, bufferRange.Offset)
+	}
+	l.listState.bufferTextureCopies[0] = gfx.BufferTextureCopy{
+		BufferLayout: gfx.ImageDataLayout{Offset: bufferRange.Offset, BytesPerRow: uint32(bytesPerRow), RowsPerImage: height},
+		TextureBase:  makeImageCopyTexture(gfxTexture, region),
+		Size:         gfx.Extent3D{Width: width, Height: height, DepthOrArrayLayers: 1},
+	}
+	return buffer, gfxTexture, nil
 }
 
 // makeLoadStoreOps answers the load and store of a target cleared or kept,

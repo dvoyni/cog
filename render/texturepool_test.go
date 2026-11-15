@@ -114,6 +114,9 @@ func TestPassesIntoTemporaryTexturesAtAMipLevelAndLayerWithADepthTargetAndWithRe
 
 	got := stepAndReadFrame(t, h)
 
+	for index := range passes {
+		passes[index].Position = index
+	}
 	want := render.Inspection{CommandLists: []render.InspectedCommandList{{Passes: passes}}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("the frame reads back as %+v, want %+v", got, want)

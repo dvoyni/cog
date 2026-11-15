@@ -140,6 +140,18 @@ chunks of `TemporaryChunkSize` of its own, or one of a block's size rounded
 up to a multiple of it where the block is larger, hands each to gfx in one
 write at its `End`, and chunks unused for `TemporaryIdleFrames` frames are
 freed.
+A list's `BeginComputePass(label)` begins a compute pass, whose
+`SetShader(shader, entryPoint)` selects a compute function, an empty name
+its only one, and resets its parameters; its `SetTexture`,
+`SetTextureView`, `SetSampler`, `SetBuffer` and `SetUniform[T]` bind
+parameters by name in any group, uniform blocks from the arena, bind groups
+shared by what they bind; and `Dispatch(x, y, z)` runs it, with a pipeline
+keyed by variant and entry point, a missing or ambiguous entry point
+reported once and its dispatches skipped. A list's `CopyBuffer`,
+`CopyTexture`, `CopyBufferToTexture`, `CopyTextureToBuffer` and
+`ClearBuffer` record at their point among its passes, rows between a
+buffer and a texture 256 bytes apart; one that does not fit is refused and
+reported, recording nothing.
 What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
 
 ## Shape
@@ -158,7 +170,9 @@ What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
   to 8 **`ColorTarget`**s, each a window or a texture at a mip level and
   layer with an optional **`ResolveTarget`**, and a
   **`DepthStencilTarget`**; its **`AcquireTemporaryBuffer[T]`** answers a
-  **`BufferRange`** of the temporary arena.
+  **`BufferRange`** of the temporary arena; its **`BeginComputePass`** a
+  **`ComputePass`** of dispatches; and its copies copy buffer ranges and
+  texture regions.
 - **`Inventory`** is the task parameter a task reaches render's assets
   through: it acquires textures and **`Buffer`**s from files, makes them
   from slices, writes them, a texture by **`TextureRegion`**, and releases
@@ -181,7 +195,11 @@ What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
   lists by order, their passes with their targets and their draws, each an
   **`InspectedDraw`** with its pass parameters, its
   **`InspectedMaterial`** and its draw parameters, each an
-  **`InspectedParameter`** by name, and counts.
+  **`InspectedParameter`** by name, and counts; their compute passes, each
+  an **`InspectedComputePass`** of **`InspectedDispatch`**es with their
+  shader, function, parameters and workgroup counts; and their copies, each
+  an **`InspectedCopy`**; each pass, compute pass and copy with its
+  position in its list.
 - **`Report`** is a mistake render finds at run time, logged once and
   carried past; its `ReportKind` names it for tests.
 - **`rendertest.Harness`** spawns platform on headless windows, metronome

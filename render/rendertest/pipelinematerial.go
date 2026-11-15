@@ -4,7 +4,6 @@ import (
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/gfx/recording"
 	"github.com/dvoyni/cog/render"
-	"github.com/dvoyni/cog/render/internal/handle"
 )
 
 // pipelineMaterial is the material a render pipeline draws with, in
@@ -20,18 +19,10 @@ type pipelineMaterial struct {
 // handle its module's label names, its entry points and its render state. A
 // pipeline of a module render labelled with no shader's handle, such as its
 // mip shader's, draws with the zero Shader.
-func makePipelineMaterials(calls []recording.Call) map[gfx.RenderPipeline]pipelineMaterial {
-	shaders := map[gfx.ShaderModule]render.Shader{}
+func makePipelineMaterials(calls []recording.Call, shaders map[gfx.ShaderModule]render.Shader) map[gfx.RenderPipeline]pipelineMaterial {
 	materials := map[gfx.RenderPipeline]pipelineMaterial{}
 	for _, call := range calls {
-		switch call.Kind {
-		case recording.CallKindCreateShaderModule:
-			arguments := call.Arguments.(recording.CreateShaderModuleArguments)
-			if shader, ok := handle.ParseLabel[render.Shader](arguments.Descriptor.Label); ok {
-				shaders[arguments.Module] = shader
-			}
-		case recording.CallKindCreateRenderPipeline:
-			arguments := call.Arguments.(recording.CreateRenderPipelineArguments)
+		if arguments, ok := call.Arguments.(recording.CreateRenderPipelineArguments); ok {
 			descriptor := arguments.Descriptor
 			materials[arguments.Pipeline] = pipelineMaterial{
 				material: render.InspectedMaterial{

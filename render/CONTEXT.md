@@ -37,7 +37,7 @@ A run of draws into the same targets, with a load or clear for each target. Its 
 _Avoid_: Camera, layer, render pass
 
 **Compute pass**:
-A run of dispatches, recorded among passes in the order they were recorded.
+A run of dispatches, recorded among passes in the order they were recorded. Its parameters are set by name in any group of the shader its dispatches run, and reset when the shader changes.
 _Avoid_: Compute list, compute stage
 
 **Frame**:
@@ -61,8 +61,12 @@ A parameter set between draws, which the draws after it read until it is set aga
 _Avoid_: Property block, per-draw uniform, instance property
 
 **Dispatch**:
-A run of a compute shader with its parameters given by name. It has no material.
+A run of a compute shader's function with its parameters given by name, over a count of workgroups. It has no material.
 _Avoid_: Compute call, kernel launch, compute material
+
+**Copy**:
+A command list's move of bytes from a buffer range or texture region into another, or its clear of a buffer range to zeros, recorded among its passes in the order recorded.
+_Avoid_: Blit, transfer
 
 **Draw**:
 One mesh drawn whole with the current material and parameters, as many instances as it asks for; or, with no mesh, a count of vertices in a topology, which its shader places from their indices alone.

@@ -66,7 +66,7 @@ func TestTheReaderShowsListsFilledConcurrentlyByOrderAndPassesWithTheirLabelsTar
 				{Window: first, Clear: true, ClearColor: red},
 				{Window: second, Discard: true},
 			}},
-			{Label: "interface", ColorTargets: []render.ColorTarget{{Window: second}}},
+			{Position: 1, Label: "interface", ColorTargets: []render.ColorTarget{{Window: second}}},
 		}},
 		{Passes: []render.InspectedPass{
 			{Label: "overlay", ColorTargets: []render.ColorTarget{{Window: first}}},
