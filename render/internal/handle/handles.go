@@ -72,9 +72,15 @@ func (Readback) labelKind() string { return "readback" }
 const TemporaryChunkLabel = "render: a chunk of the temporary arena"
 
 // StagingBufferLabel is the label render gives each buffer of its staging
-// pool, which readbacks are copied into, so a reader of gfx's calls tells
-// one from a buffer a user made.
-const StagingBufferLabel = "render: a staging buffer of readbacks"
+// pool, which readbacks and pass timings are copied into, so a reader of
+// gfx's calls tells one from a buffer a user made.
+const StagingBufferLabel = "render: a staging buffer"
+
+// PassTimingsLabel is the label render gives what it reads pass timings back
+// with: its closing command list, each timed frame's query set, and the
+// buffer that query set is resolved into, so a reader of gfx's calls leaves
+// them out.
+const PassTimingsLabel = "render: pass timings"
 
 // The labels render gives its bind groups, by what they bind, so a reader of
 // gfx's calls tells one kind from another: a material's own, one of pass,

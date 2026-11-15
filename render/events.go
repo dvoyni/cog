@@ -66,7 +66,8 @@ type ReadbackEvent struct {
 }
 
 // InspectedEvent delivers the inspection Frame.RequestInspection asked for,
-// published once the frame of Beat, the frame inspected, is presented. A
+// published once the frame of Beat, the frame inspected, is presented, or,
+// for a frame timed, once its pass timings are read back. A
 // handler reads it with Frame.ReadInspection in tasks it joins into the out
 // dependency it returns; after that, it is gone, and a request asks for
 // another.
@@ -74,10 +75,28 @@ type InspectedEvent struct {
 	Beat metronome.Beat
 }
 
+// PassTimingsEvent delivers the pass timings of the frame of Beat, timed
+// while Frame.SetPassTimings(true) held, published once the GPU has run the
+// frame and its timestamps are read back: a frame or more after that
+// frame, for each frame with a pass. A handler reads them with
+// Frame.ReadPassTimings in tasks it joins into the out dependency it
+// returns; after that, they are gone.
+type PassTimingsEvent struct {
+	Beat metronome.Beat
+}
+
 // inspectionDeliveryEvent carries the inspection of the frame of beat, once
-// the frame ends, from its end's job to render's handler, which publishes it
-// as InspectedEvent in its own batch, to release the inspection after.
+// the frame ends, or once its pass timings are read back when the frame was
+// timed, from that job to render's handler, which publishes it as
+// InspectedEvent in its own batch, to release the inspection after.
 type inspectionDeliveryEvent struct {
+	beat metronome.Beat
+}
+
+// passTimingsDeliveryEvent carries the pass timings of the frame of beat,
+// once read back, from the job that read them to render's handler, which
+// publishes them as PassTimingsEvent in its own batch, to free them after.
+type passTimingsDeliveryEvent struct {
 	beat metronome.Beat
 }
 

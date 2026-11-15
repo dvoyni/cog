@@ -17,6 +17,8 @@ import (
 // handles not zero, a zero handle naming none. Every map resolves at once.
 type device struct {
 	instance *Instance
+	// features are the features the device was requested with.
+	features gfx.FeatureFlags
 	// Each registry holds its type's objects, as what each was created with,
 	// at their indices, under the instance's mutex.
 	buffers          objectRegistry[*bufferObject]
@@ -29,6 +31,7 @@ type device struct {
 	pipelineLayouts  objectRegistry[gfx.PipelineLayoutDescriptor]
 	renderPipelines  objectRegistry[gfx.RenderPipelineDescriptor]
 	computePipelines objectRegistry[gfx.ComputePipelineDescriptor]
+	querySets        objectRegistry[*querySetObject]
 	// pendingWrites are the buffer writes made since the last submit, which
 	// the next applies before its command buffers: each copies from the data
 	// its call kept, or, recording disabled, from what pendingData staged.
@@ -38,8 +41,10 @@ type device struct {
 	// for CreateCommandEncoder to answer again.
 	idleEncoders []*commandEncoder
 	// submissionCount is how many submits this device made, the last one's
-	// index, under the instance's mutex.
+	// index, and timestampClock the tick the next command buffer submitted
+	// starts at, both under the instance's mutex.
 	submissionCount uint64
+	timestampClock  uint64
 }
 
 // CreateBuffer records the creation and keeps buffer at its index, its bytes
@@ -100,17 +105,33 @@ func (d *device) ReleaseSampler(sampler gfx.Sampler) {
 }
 
 // CreateQuerySet records the creation and answers gfx.ErrQuerySetsUnavailable:
-// query sets wait on the wgpu fork, so the device keeps none.
+// query sets wait on the wgpu fork, so the device keeps none, unless
+// Instance.EnableTimestamps has enabled timestamps, when it keeps a set of
+// timestamp queries at its index, its results zeroed, of no more queries
+// than WebGPU allows, on a device requested with
+// gfx.FeatureFlagTimestampQuery, as wgpu requires.
 func (d *device) CreateQuerySet(querySet gfx.QuerySet, descriptor gfx.QuerySetDescriptor) error {
 	return d.instance.record(CallKindCreateQuerySet, CreateQuerySetArguments{QuerySet: querySet, Descriptor: descriptor}, func() error {
-		return gfx.ErrQuerySetsUnavailable
+		switch {
+		case !d.instance.timestampsEnabled.Load() || descriptor.Type != gfx.QueryTypeTimestamp:
+			return gfx.ErrQuerySetsUnavailable
+		case d.features&gfx.FeatureFlagTimestampQuery == 0:
+			return errors.New("recording: a timestamp query set on a device requested without FeatureFlagTimestampQuery")
+		case descriptor.Count == 0 || descriptor.Count > maxQueryCount:
+			return fmt.Errorf("recording: a query set of %d queries, where WebGPU allows from 1 to %d", descriptor.Count, maxQueryCount)
+		}
+		return d.querySets.store(querySet.Index(), &querySetObject{queryCount: descriptor.Count, queryResults: make([]byte, queryResultSize*uint64(descriptor.Count))})
 	}).Error
 }
 
-// ReleaseQuerySet records the release, with an error, since no query set is
-// kept.
+// ReleaseQuerySet records the release and drops querySet from its index.
 func (d *device) ReleaseQuerySet(querySet gfx.QuerySet) {
-	d.instance.record(CallKindReleaseQuerySet, querySet, func() error { return requireQuerySet(querySet, "the released query set") })
+	d.instance.record(CallKindReleaseQuerySet, querySet, func() error {
+		if _, err := d.requireQuerySet(querySet, "the released query set"); err != nil {
+			return err
+		}
+		return d.querySets.remove(querySet.Index())
+	})
 }
 
 // TimestampPeriod answers TimestampPeriod.
@@ -454,7 +475,7 @@ func (d *device) CreateCommandEncoder(descriptor gfx.CommandEncoderDescriptor) (
 func (d *device) Submit(buffers ...gfx.CommandBuffer) (uint64, error) {
 	var index uint64
 	err := d.instance.record[any](CallKindSubmit, nil, func() error {
-		d.pendingWrites = applyBufferEffects(d.pendingWrites)
+		d.pendingWrites = applyBufferEffects(d.pendingWrites, d.timestampClock)
 		d.pendingData = d.pendingData[:0]
 		kept := d.instance.keepsCalls()
 		var submission Submission
@@ -463,7 +484,8 @@ func (d *device) Submit(buffers ...gfx.CommandBuffer) (uint64, error) {
 		}
 		for index, buffer := range buffers {
 			encoder := buffer.(commandBuffer).encoder
-			encoder.bufferEffects = applyBufferEffects(encoder.bufferEffects)
+			encoder.bufferEffects = applyBufferEffects(encoder.bufferEffects, d.timestampClock)
+			d.timestampClock += encoder.tickCount
 			if kept {
 				submission.Buffers[index] = CommandBuffer{Label: encoder.label, Commands: encoder.commands}
 			}
@@ -602,6 +624,20 @@ func (d *device) requireRange[R role](buffer gfx.Buffer, offset, size uint64, ro
 	return object.data[offset : offset+size : offset+size], nil
 }
 
+// requireQuerySet answers the query set querySet names, for role; an error
+// for the zero query set, and for one missing at its index, wrapping
+// gfx.ErrQuerySetsUnavailable unless Instance.EnableTimestamps has enabled
+// them.
+func (d *device) requireQuerySet(querySet gfx.QuerySet, role string) (*querySetObject, error) {
+	if querySet == (gfx.QuerySet{}) {
+		return nil, fmt.Errorf("recording: %s: no query set", role)
+	}
+	if !d.instance.timestampsEnabled.Load() {
+		return nil, fmt.Errorf("recording: %s: no query set at index %d: %w", role, querySet.Index(), gfx.ErrQuerySetsUnavailable)
+	}
+	return d.querySets.require(querySet, role)
+}
+
 // requireMapState answers buffer's object when whether it is mapped is
 // mapped; an error when buffer is zero or missing, or its map state is the
 // other.
@@ -703,6 +739,22 @@ type bufferObject struct {
 	// mapOffset and mapSize are the range mapped.
 	mapOffset, mapSize uint64
 }
+
+// querySetObject is a query set as the device keeps it: how many queries it
+// has, and their results, queryResultSize bytes each, as a resolve copies
+// them.
+type querySetObject struct {
+	queryCount   uint32
+	queryResults []byte
+}
+
+// The layout of a query set: maxQueryCount is the most queries it may have,
+// as WebGPU's maximum, and queryResultSize the size in bytes of one query's
+// result, a uint64.
+const (
+	maxQueryCount   = 4096
+	queryResultSize = 8
+)
 
 // textureView is a view as the device keeps it: what it was created with, and
 // its texture's usage, which outlives the texture's release, as a wgpu view

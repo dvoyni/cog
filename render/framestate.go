@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/dvoyni/cog/gfx"
+	"github.com/dvoyni/cog/kernel"
 )
 
 // frameState is the private resource of the frames in flight: what render
@@ -26,6 +27,9 @@ type frameState struct {
 	// mips generates the mip levels of textures in render's own command
 	// list.
 	mips mipGenerator
+	// passTimer times the passes of the frames recorded while pass timings
+	// are on.
+	passTimer passTimer
 	// mutex guards frame, gfx's frame being recorded, or the last one
 	// recorded once gfx has flushed it, which gfx then refuses encoders for.
 	mutex sync.Mutex
@@ -37,6 +41,26 @@ func (s *frameState) setRecordingFrame(frame gfx.Frame) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	s.frame = frame
+}
+
+// deliverReadback delivers readback, which gfx has mapped or failed to map,
+// as status says, each delivery in a publication of its own through k: a
+// timed frame's pass timings, read from device, publishing
+// passTimingsDeliveryEvent, and inspectionDeliveryEvent when the frame's
+// inspection waits for them, which timings not read deliver too, without
+// them; or a user's readback, publishing readbackDeliveryEvent.
+func (s *frameState) deliverReadback(k *kernel.Kernel, readback Readback, status ReadbackStatus, device gfx.Device) {
+	beat, timings, timed := s.passTimer.deliver(readback, status, device, &s.staging, s.reporter)
+	if !timed {
+		k.Publish(readbackDeliveryEvent{delivered: ReadbackEvent{Readback: readback, Status: status}})
+		return
+	}
+	if timings != nil {
+		k.Publish(passTimingsDeliveryEvent{beat: beat})
+	}
+	if s.inspector.addPassTimings(beat, timings) {
+		k.Publish(inspectionDeliveryEvent{beat: beat})
+	}
 }
 
 // recordingFrame answers the frame being recorded, or the last one recorded.

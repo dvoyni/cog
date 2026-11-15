@@ -45,7 +45,9 @@ metronome's clock;
 the recording adapter rejects a handle missing at its index, a
 resource without its usage, a misaligned write, copy or clear, a broken
 pass sequence and any query set, reports every feature but timestamp
-queries, and its buffers hold the bytes written, copied and cleared,
+queries, which `EnableTimestamps` gives it, keeping timestamp query sets
+and writing each pass's timestamps a tick apart for each of its commands,
+and its buffers hold the bytes written, copied and cleared,
 which its own maps read, and answers a pipeline's reflection with the
 layouts a test queues, a vertex entry point's with its inputs, a
 module's named reflection with the bindings and entry points a test

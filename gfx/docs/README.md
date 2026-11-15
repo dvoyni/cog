@@ -1219,8 +1219,10 @@ none yet:
 
 Until then `CreateQuerySet` answers `ErrQuerySetsUnavailable` and the zero
 query set on every backend, and no backend reports
-`FeatureFlagTimestampQuery`. gfx collects no timings itself: a per-pass
-profiler is a plugin's.
+`FeatureFlagTimestampQuery`, but the recording adapter once a test calls
+`EnableTimestamps`, so the code that reads timestamps is tested before the
+fork has them. gfx collects no timings itself: a per-pass profiler is a
+plugin's, render's pass timings.
 
 ## Device loss
 
@@ -1418,7 +1420,9 @@ flags, write, copy and clear alignment, and the pass sequence.
   which its own maps read. Textures hold no texels, and captures complete
   zero-filled.
 - **Every feature but `FeatureFlagTimestampQuery`**, and `DefaultLimits()`.
-  A device requiring a feature it lacks is refused.
+  A device requiring a feature it lacks is refused. `CreateQuerySet`
+  answers `ErrQuerySetsUnavailable`, and timestamp writes or a resolve
+  naming a query set fail the encoder, until the test enables timestamps.
 - **Surfaces** offer `recording.SurfaceCapabilities`: the 8-bit BGRA and
   RGBA formats, sRGB or not, and every present mode, more than gogpu's.
 - **Reflection** answers no layouts, no vertex inputs and no bindings,
@@ -1471,6 +1475,25 @@ instance.DisableRecording()
 if allocations := testing.AllocsPerRun(100, drawFrame); allocations != 0 {
 	t.Errorf("a warm frame allocated %v times", allocations)
 }
+```
+
+**Timestamps.** `instance.EnableTimestamps()`, called before gfx requests
+the adapter, gives it timestamp queries, which no other backend has until
+the wgpu fork exposes them: the adapter reports
+`FeatureFlagTimestampQuery`, so a `Config` may require it, the device keeps
+timestamp query sets of up to 4096 queries, and a pass's `TimestampWrites`
+and a `ResolveQuerySet` apply at the submit, in order with its copies and
+clears, checked as wgpu checks them. The ticks are made up, a nanosecond
+each by `TimestampPeriod`: a command buffer's commands are one tick apart,
+counting on from where the buffer submitted before it ended, so a pass's
+timestamps are as many ticks apart as the commands it recorded, its
+beginning among them.
+
+```go
+instance := recording.NewInstance()
+instance.EnableTimestamps()
+config := map[kernel.PluginName]any{gfx.PluginName: &gfx.Config{RequiredFeatures: gfx.FeatureFlagTimestampQuery}}
+// A compute pass with two bind groups set writes timestamps 3 ticks apart.
 ```
 
 **Real pixels** come from gogpu on wgpu's software adapter, with

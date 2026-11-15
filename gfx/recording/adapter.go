@@ -15,8 +15,13 @@ type adapter struct {
 func (*adapter) Info() gfx.AdapterInfo { return AdapterInfo }
 
 // Features answers every feature but timestamp queries, which wait on the
-// wgpu fork.
-func (*adapter) Features() gfx.FeatureFlags { return ^gfx.FeatureFlagTimestampQuery }
+// wgpu fork, unless Instance.EnableTimestamps has enabled them.
+func (a *adapter) Features() gfx.FeatureFlags {
+	if a.instance.timestampsEnabled.Load() {
+		return ^gfx.FeatureFlags(0)
+	}
+	return ^gfx.FeatureFlagTimestampQuery
+}
 
 // Limits answers WebGPU's default limits.
 func (*adapter) Limits() gfx.Limits { return gfx.DefaultLimits() }
@@ -32,7 +37,7 @@ func (a *adapter) RequestDevice(descriptor gfx.DeviceDescriptor) (gfx.BackendDev
 	}).Error; err != nil {
 		return nil, err
 	}
-	return &device{instance: a.instance}, nil
+	return &device{instance: a.instance, features: descriptor.RequiredFeatures}, nil
 }
 
 // Release records the adapter released.

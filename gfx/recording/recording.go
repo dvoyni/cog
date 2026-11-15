@@ -87,7 +87,8 @@ const (
 	// gfx.Sampler.
 	CallKindReleaseSampler
 	// CallKindCreateQuerySet is BackendDevice.CreateQuerySet, its Arguments a
-	// CreateQuerySetArguments; it answers gfx.ErrQuerySetsUnavailable.
+	// CreateQuerySetArguments; it answers gfx.ErrQuerySetsUnavailable unless
+	// Instance.EnableTimestamps has enabled timestamps.
 	CallKindCreateQuerySet
 	// CallKindReleaseQuerySet is BackendDevice.ReleaseQuerySet, its Arguments
 	// the gfx.QuerySet.

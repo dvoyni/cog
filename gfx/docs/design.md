@@ -537,6 +537,19 @@ device's release and the recovery among them, for a backend to pin.
   answers `ErrQuerySetsUnavailable`, timestamp writes or a resolve naming
   any query set fail the encoder, and `TimestampPeriod` answers
   `recording.TimestampPeriod`, one nanosecond.
+- **Timestamps on request**
+  ([render: pass timings](https://github.com/dvoyni/cog/issues/847)):
+  `instance.EnableTimestamps()`, before the adapter is requested, gives it
+  `FeatureFlagTimestampQuery`, so render's pass timings are tested before
+  the fork exposes query sets. The device keeps timestamp query sets of up
+  to 4096 queries; a pass's timestamp writes and a resolve apply at the
+  submit, in order with its copies and clears, checked as wgpu checks them:
+  a kept timestamp set, indices below its count and different, a resolve
+  within the set into a `QueryResolve` buffer at a multiple of 256. Its
+  ticks are made up and deterministic: a command buffer's commands are one
+  tick apart, from the tick the buffer submitted before it ended at, so a
+  pass's timestamps are as many ticks apart as the commands it
+  recorded.
 - **Submissions** are indexed from one on each device and finish at once,
   so `GPULatency` is zero.
 - **Data:** buffers hold bytes, which writes, buffer copies and clears apply

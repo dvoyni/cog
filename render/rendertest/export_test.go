@@ -43,6 +43,13 @@ func (h *Harness) WaitForReceive(what string, channel <-chan struct{}) {
 	h.tickUntil(what, makeReceiveCheck(channel))
 }
 
+// EnableBackendTimestamps gives gfx's recording adapter timestamp queries
+// without gfx requiring them, for rendertest's tests to turn pass timings on
+// where gfx's device lacks them.
+func (h *Harness) EnableBackendTimestamps() {
+	h.instance.EnableTimestamps()
+}
+
 // DisableRecording makes gfx's recording adapter keep no call from now on,
 // for rendertest's tests to count what render allocates without the
 // commands the adapter would keep.

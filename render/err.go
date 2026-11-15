@@ -96,6 +96,13 @@ const (
 	// a texture, that an earlier pass of the frame drew into, in submit
 	// order.
 	ReportKindClearAfterDraw
+	// ReportKindPassTimingsUnavailable is pass timings turned on where they
+	// are unavailable: gfx's device has no timestamp queries, or its backend
+	// makes no query sets. It is reported once, and the timings stay off.
+	ReportKindPassTimingsUnavailable
+	// ReportKindPassUntimed is the passes of a timed frame that began after
+	// its 2048th, which get no timings, reported once a frame.
+	ReportKindPassUntimed
 )
 
 // Report is a mistake render finds at run time, such as a refused shader, a

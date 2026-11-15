@@ -28,7 +28,8 @@ type Handlers struct {
 	DeliverCapture kernel.Sub[gfx.CapturedEvent]
 	// DeliverReadback handles gfx.BufferMappedEvent: it schedules the job
 	// that finds the readback whose staging buffer the event names, which
-	// publishes ReadbackEvent in a publication of its own, and returns that
-	// job.
+	// publishes ReadbackEvent, or PassTimingsEvent for the readback of a
+	// timed frame's timestamps, in a publication of its own, and returns
+	// that job.
 	DeliverReadback kernel.Sub[gfx.BufferMappedEvent]
 }

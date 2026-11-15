@@ -161,8 +161,9 @@ func receiveInspection(t *testing.T, inspections <-chan render.Inspection) rende
 
 // eraseRendersOwn answers inspection without what render/rendertest's
 // reader cannot read from gfx's recording: the temporaries, the versioned
-// materials and each draw's Material.
+// materials, each draw's Material and the pass timings.
 func eraseRendersOwn(inspection render.Inspection) render.Inspection {
+	inspection.PassTimings = nil
 	inspection.TemporaryTextures = nil
 	inspection.TemporaryBuffers = nil
 	inspection.TemporaryMeshes = nil

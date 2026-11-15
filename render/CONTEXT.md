@@ -133,7 +133,10 @@ One frame written down in render's terms, asked for ahead of it: its command lis
 _Avoid_: Snapshot, frame dump, trace
 
 **Pass timing**:
-How long one pass took on the GPU, from timestamps at its begin and end, delivered a few frames after it ran.
+How long one pass took on the GPU, from timestamps at its begin and end, delivered a frame or more after it ran, for each frame while timings are on.
+
+**Closing list**:
+render's own command list at the highest order, `math.MaxInt32`, which gfx submits after every user's, where it reads a timed frame's timestamps back.
 _Avoid_: Profile, GPU time, query
 
 **Report**:

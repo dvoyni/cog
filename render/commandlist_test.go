@@ -88,7 +88,7 @@ func TestListsAtATakenOrderOrRendersOwnAreRefusedAndReportedOnce(t *testing.T) {
 		for _, list := range []struct {
 			label string
 			order render.Order
-		}{{"first", 1}, {"second", 1}, {"own", math.MinInt32}} {
+		}{{"first", 1}, {"second", 1}, {"own", math.MinInt32}, {"closing", math.MaxInt32}} {
 			commandList := frame.BeginCommandList(list.label, list.order)
 			recordPass(&commandList, render.PassDescriptor{Label: list.label, ColorTargets: target})
 			commandList.End()
@@ -98,7 +98,7 @@ func TestListsAtATakenOrderOrRendersOwnAreRefusedAndReportedOnce(t *testing.T) {
 
 	got := stepAndReadFrame(t, h)
 
-	if kinds, want := makeReportKinds(h), []render.ReportKind{render.ReportKindOrderTaken, render.ReportKindOrderReserved}; !slices.Equal(kinds, want) {
+	if kinds, want := makeReportKinds(h), []render.ReportKind{render.ReportKindOrderTaken, render.ReportKindOrderReserved, render.ReportKindOrderReserved}; !slices.Equal(kinds, want) {
 		t.Errorf("render reported kinds %v, want %v", kinds, want)
 	}
 	want := render.Inspection{CommandLists: []render.InspectedCommandList{

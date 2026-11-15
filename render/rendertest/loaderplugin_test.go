@@ -16,8 +16,9 @@ import (
 // afterFrame in a task after the out of render's handler of gfx.RenderEvent,
 // once the frame has ended. Each is given the index of the frame, counted
 // from zero, and skipped when nil. onRecovered, when set, runs in a task
-// after the in dependency of each render.RecoveredEvent, and onInspected in
-// one after that of each render.InspectedEvent.
+// after the in dependency of each render.RecoveredEvent, onInspected in one
+// after that of each render.InspectedEvent, and onPassTimings in one after
+// that of each render.PassTimingsEvent.
 type loaderPlugin struct {
 	files              fs.FS
 	recordingTaskCount int
@@ -25,6 +26,7 @@ type loaderPlugin struct {
 	afterFrame         func(frameIndex int, inventory render.Inventory)
 	onRecovered        func()
 	onInspected        func(event render.InspectedEvent, frame render.Frame)
+	onPassTimings      func(event render.PassTimingsEvent, frame render.Frame)
 	// recordedCount is how many frames the handler of render.FrameEvent has
 	// scheduled duringFrame for, and endedCount how many the handler of
 	// gfx.RenderEvent has scheduled afterFrame for.
@@ -85,6 +87,15 @@ func (p *loaderPlugin) Init(configurator *kernel.Configurator, _ any) error {
 		})
 		configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event render.InspectedEvent) (render.InspectedEvent, kernel.JobHandle) {
 			return event, ex.Schedule(inspected, event, in).Handle()
+		})
+	}
+	if p.onPassTimings != nil {
+		timed := configurator.RegisterTask1(func(k *kernel.Kernel, event render.PassTimingsEvent, frame render.Frame) kernel.NoResult {
+			p.onPassTimings(event, frame)
+			return kernel.NoResult{}
+		})
+		configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event render.PassTimingsEvent) (render.PassTimingsEvent, kernel.JobHandle) {
+			return event, ex.Schedule(timed, event, in).Handle()
 		})
 	}
 	return nil

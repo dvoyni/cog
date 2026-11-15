@@ -351,7 +351,7 @@ and a **test author** testing a plugin that draws.
   - A command list is one task's run of passes, compute passes, copies and readbacks, kept in the order it was recorded.
   - `frame.BeginCommandList(label, order)` takes the list's gfx frame encoder at its order, and the list's `End` writes its arena chunks.
   - Two lists at one order are refused and reported once.
-  - render's own list sits at the lowest order, `math.MinInt32`, and a user's list there is refused.
+  - render's own lists sit at the ends: its mip list at the lowest order, `math.MinInt32`, and its closing list, which resolves a timed frame's timestamps, at the highest, `math.MaxInt32`. A user's list at either is refused.
   - Called while no frame is recording, `BeginCommandList` answers a list that records into nothing, reported once.
 - **Recording is immediate:** each call on a pass goes straight into the list's gfx encoder in the task that records it.
   - Recording waits for gfx's acquire, because a pass into a window needs its framebuffer when it begins.
@@ -519,11 +519,14 @@ render republishes gfx's events as its own, each nested inside gfx's publication
 - **Asking and delivering:**
   - `frame.RequestInspection()` inspects the first frame whose `FrameEvent` is published after it, one at a time: a request while one is pending, asked for and not yet delivered, joins it. The inspection begins in the job that readies the frame and ends at the frame's end, after the present.
   - While that frame records, render's calls also append to the inspection; every other frame pays one flag check per call and allocates nothing.
-  - After the present, render publishes `InspectedEvent{Beat}`, and `frame.ReadInspection(event)` answers it while the publication's jobs run.
+  - After the present, render publishes `InspectedEvent{Beat}`, and `frame.ReadInspection(event)` answers it while the publication's jobs run. A frame timed waits for its pass timings, and its inspection holds them; one whose timings are lost is delivered without them.
 - **Pass timings are opt-in and continuous.**
-  - While `frame.SetPassTimings(true)` holds, every pass and compute pass gets begin and end timestamps through gfx's `TimestampWrites`, resolved and mapped through render's staging pool, allocation-free once warm.
-  - A few frames later, render publishes `PassTimingsEvent{Beat}`, and `frame.ReadPassTimings(event)` answers each pass's order, label and GPU duration.
-  - Until the fork exposes query sets, gfx answers `ErrQuerySetsUnavailable`, so turning timings on is reported once and no events come.
+  - While `frame.SetPassTimings(true)` holds, from the next frame to begin, every pass and compute pass, render's mip passes among them, gets begin and end timestamps through gfx's `TimestampWrites`, allocation-free once warm.
+  - **Each timed frame has its own query set** of 4096 timestamps, WebGPU's most, two a pass in the order passes begin, and a buffer it resolves into, made once, reused by the frames after it, and freed after going unused for `TemporaryIdleFrames` frames, as the pools' entries are; a frame's passes after its 2048th get no timings, and are reported with `ReportKindPassUntimed`, once a frame.
+  - **The resolve rides in the frame.** Once the users' recording and the mips are done, render records the resolve and its copy into a readback of its own, from the staging pool, in its closing list at `math.MaxInt32`, which gfx submits after every user's; a submission of its own after the present would be a frame of its own to gfx. The staging pool maps it at the frame's end as it maps every readback, and hands it to the timings, not to `ReadbackEvent`, once mapped.
+  - A frame or more later, once gfx has mapped it, render publishes `PassTimingsEvent{Beat}` for each frame with a pass, and `frame.ReadPassTimings(event)` answers, while the publication's jobs run, each pass's list order, label and GPU duration, by order and, within a list, in the order the passes began. A map that fails delivers nothing.
+  - Until the fork exposes query sets, gfx answers `ErrQuerySetsUnavailable`, and no backend reports `FeatureFlagTimestampQuery`, so turning timings on is reported once, with `ReportKindPassTimingsUnavailable`, and they stay off, as they do on a device without the feature. gfx's recording adapter writes made-up timestamps once `rendertest`'s `Harness.EnableTimestamps` asks for them (a delta to gfx), so the path is tested before the fork has them.
+  - The closing list is render's own, as the mip list is, but neither inspections nor `rendertest`'s reader show it.
 - **Not render's:** the agent-facing tool, which summarizes, filters, steps a paused game and writes JSON, is a plugin of its own on these events.
 
 ### Reloads

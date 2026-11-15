@@ -73,14 +73,18 @@ func newFrameReader(calls []recording.Call, shaderBindings map[gfx.ShaderModule]
 // makeInspection answers frame, the next frame recorded, whose calls are
 // calls, in render's terms: each command buffer a command list, under its
 // label, in the order gfx submitted them, which is their order, with its
-// passes, compute passes, copies and readbacks; and what calls made and
-// wrote of render's. Its beat, its reports, its temporaries, its versioned
+// passes, compute passes, copies and readbacks, but render's closing list,
+// which reads pass timings back; and what calls made and wrote of
+// render's. Its beat, its reports, its temporaries, its versioned
 // materials and its draws' Material are left empty: gfx's recording does
 // not show them.
 func (r *frameReader) makeInspection(frame recording.Frame, calls []recording.Call) render.Inspection {
 	var inspection render.Inspection
 	for _, submission := range frame.Submissions {
 		for _, buffer := range submission.Buffers {
+			if buffer.Label == handle.PassTimingsLabel {
+				continue
+			}
 			list := render.InspectedCommandList{Label: buffer.Label}
 			// position is the position of the next pass, compute pass, copy
 			// or readback.

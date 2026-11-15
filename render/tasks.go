@@ -5,6 +5,7 @@ import (
 
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/metronome"
 	"github.com/dvoyni/cog/platform"
 )
 
@@ -12,17 +13,20 @@ import (
 // loads pending since the last frame, to run beside the recording; after
 // gfx's acquire, it schedules beginFrameTask, which keeps the draw event's
 // frame as the one being recorded and begins its inspection when one is
-// requested, and publishes FrameEvent inside
+// requested and its timing while pass timings are on, and publishes
+// FrameEvent inside
 // gfx.DrawEvent, with the draw event's beat and timing signals and that job
 // as its Ready; and after the nested publication's out dependency and the
 // first writeLoadsTask, it schedules writeLoadsTask again, for the loads
 // acquired while the frame recorded, and after that generateMipsTask, for
-// the mips of every texture the two wrote; and after the out dependency
-// alone, checkClearsTask, the clear-after-draw check. It returns those jobs
-// joined with beginFrameTask's, so gfx's flush waits for every recording
-// task the users joined into the out dependency, for every load's body and
-// its mips, and for the check.
-func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event gfx.DrawEvent, beginFrameTask *kernel.Task[gfx.DrawEvent, kernel.NoResult], writeLoadsTask *kernel.Task[kernel.NoArg, kernel.NoResult], generateMipsTask *kernel.Task[gfx.Frame, kernel.NoResult], checkClearsTask *kernel.Task[kernel.NoArg, kernel.NoResult]) (gfx.DrawEvent, kernel.JobHandle) {
+// the mips of every texture the two wrote, and after the mips
+// readTimestampsBackTask, for the timestamps of the frame's passes when it
+// is timed; and after the out dependency alone, checkClearsTask, the
+// clear-after-draw check. It returns those jobs joined with beginFrameTask's,
+// so gfx's flush waits for every recording task the users joined into the
+// out dependency, for every load's body and its mips, for the commands
+// reading the timestamps back, and for the check.
+func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event gfx.DrawEvent, beginFrameTask *kernel.Task[gfx.DrawEvent, kernel.NoResult], writeLoadsTask *kernel.Task[kernel.NoArg, kernel.NoResult], generateMipsTask *kernel.Task[gfx.Frame, kernel.NoResult], readTimestampsBackTask *kernel.Task[gfx.Frame, kernel.NoResult], checkClearsTask *kernel.Task[kernel.NoArg, kernel.NoResult]) (gfx.DrawEvent, kernel.JobHandle) {
 	pendingWritten := ex.Schedule(writeLoadsTask, kernel.NoArg{}).Handle()
 	beginFrameJob := ex.Schedule(beginFrameTask, event, event.Ready).Handle()
 	_, out := ex.Publish(in, FrameEvent{
@@ -33,8 +37,9 @@ func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event gfx.DrawEvent, 
 	})
 	recordedWritten := ex.Schedule(writeLoadsTask, kernel.NoArg{}, out, pendingWritten).Handle()
 	mipsGenerated := ex.Schedule(generateMipsTask, event.Frame, recordedWritten).Handle()
+	timestampsRead := ex.Schedule(readTimestampsBackTask, event.Frame, mipsGenerated).Handle()
 	clearsChecked := ex.Schedule(checkClearsTask, kernel.NoArg{}, out).Handle()
-	return event, ex.Join(mipsGenerated, beginFrameJob, clearsChecked)
+	return event, ex.Join(timestampsRead, beginFrameJob, clearsChecked)
 }
 
 // reloadAssets is Handlers.ReloadAssets: it schedules rewriteAssetsTask, and
@@ -63,6 +68,14 @@ func publishInspection(ex *kernel.Executor, in kernel.JobHandle, event inspectio
 	return event, ex.Schedule(dropInspectionTask, kernel.NoArg{}, out).Handle()
 }
 
+// publishPassTimings handles passTimingsDeliveryEvent: it publishes
+// PassTimingsEvent inside it, schedules dropPassTimingsTask for its beat
+// after the nested publication's out dependency, and returns that job.
+func publishPassTimings(ex *kernel.Executor, in kernel.JobHandle, event passTimingsDeliveryEvent, dropPassTimingsTask *kernel.Task[metronome.Beat, kernel.NoResult]) (passTimingsDeliveryEvent, kernel.JobHandle) {
+	_, out := ex.Publish(in, PassTimingsEvent{Beat: event.beat})
+	return event, ex.Schedule(dropPassTimingsTask, event.beat, out).Handle()
+}
+
 // publishReadback handles readbackDeliveryEvent: it publishes ReadbackEvent
 // inside it, schedules releaseReadbackTask for the readback after the nested
 // publication's out dependency, and returns that job.
@@ -72,10 +85,13 @@ func publishReadback(ex *kernel.Executor, in kernel.JobHandle, event readbackDel
 }
 
 // beginFrame keeps event's frame as the one being recorded, for Frame's
-// calls, and begins its inspection, of event's beat, when one is requested.
-func beginFrame(k *kernel.Kernel, event gfx.DrawEvent, state kernel.Read[*frameState]) kernel.NoResult {
-	state.Get().setRecordingFrame(event.Frame)
-	state.Get().inspector.begin(event.Beat)
+// calls, begins its inspection, of event's beat, when one is requested, and
+// its timing while pass timings are on.
+func beginFrame(k *kernel.Kernel, event gfx.DrawEvent, state kernel.Read[*frameState], device kernel.Read[gfx.Device]) kernel.NoResult {
+	frameState := state.Get()
+	frameState.setRecordingFrame(event.Frame)
+	frameState.inspector.begin(event.Beat)
+	frameState.passTimer.begin(event.Beat, device.Get(), frameState.reporter)
 	return kernel.NoResult{}
 }
 
@@ -107,7 +123,18 @@ func rewriteAssets(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*frameSta
 // every texture requested since it last ran, so gfx's submit carries them
 // before every user's list.
 func generateMips(k *kernel.Kernel, frame gfx.Frame, state kernel.Read[*frameState], table kernel.Read[*assetTable], device kernel.Read[gfx.Device], files kernel.Read[platform.FS]) kernel.NoResult {
-	state.Get().mips.generate(table.Get(), device.Get(), files.Get(), frame)
+	state.Get().mips.generate(table.Get(), device.Get(), files.Get(), frame, &state.Get().passTimer)
+	return kernel.NoResult{}
+}
+
+// readTimestampsBack records, in render's closing command list of frame,
+// the commands reading the timestamps of the frame's passes back, when it is
+// timed, and has the frame's inspection, if any, wait for them.
+func readTimestampsBack(k *kernel.Kernel, frame gfx.Frame, state kernel.Read[*frameState], device kernel.Read[gfx.Device]) kernel.NoResult {
+	frameState := state.Get()
+	if frameState.passTimer.readBack(device.Get(), frame, &frameState.staging, frameState.reporter) {
+		frameState.inspector.awaitPassTimings()
+	}
 	return kernel.NoResult{}
 }
 
@@ -119,13 +146,13 @@ func checkClears(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*frameState
 	return kernel.NoResult{}
 }
 
-// findReadback publishes readbackDeliveryEvent, in a publication of its own,
-// for the readback whose staging buffer event says gfx has mapped or failed
-// to map; nothing for a buffer that is no staging buffer of render's.
-func findReadback(k *kernel.Kernel, event gfx.BufferMappedEvent, state kernel.Read[*frameState]) kernel.NoResult {
+// findReadback delivers, as frameState.deliverReadback does, the readback
+// whose staging buffer event says gfx has mapped or failed to map; nothing
+// for a buffer that is no staging buffer of render's.
+func findReadback(k *kernel.Kernel, event gfx.BufferMappedEvent, state kernel.Read[*frameState], device kernel.Read[gfx.Device]) kernel.NoResult {
 	status := ReadbackStatus(event.Status)
 	if readback, ok := state.Get().staging.resolveMap(event.Buffer, status); ok {
-		k.Publish(readbackDeliveryEvent{delivered: ReadbackEvent{Readback: readback, Status: status}})
+		state.Get().deliverReadback(k, readback, status, device.Get())
 	}
 	return kernel.NoResult{}
 }
@@ -134,6 +161,13 @@ func findReadback(k *kernel.Kernel, event gfx.BufferMappedEvent, state kernel.Re
 // jobs have run.
 func dropInspection(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*frameState]) kernel.NoResult {
 	state.Get().inspector.drop()
+	return kernel.NoResult{}
+}
+
+// dropPassTimings frees the pass timings of the frame of beat, once
+// PassTimingsEvent's jobs have run.
+func dropPassTimings(k *kernel.Kernel, beat metronome.Beat, state kernel.Read[*frameState]) kernel.NoResult {
+	state.Get().passTimer.drop(beat)
 	return kernel.NoResult{}
 }
 
@@ -161,24 +195,28 @@ func releaseReadback(k *kernel.Kernel, readback Readback, state kernel.Read[*fra
 // map of the staging buffer of each readback the frame recorded, publishing
 // readbackDeliveryEvent, failed, for each whose map fails to start; and with
 // the temporaries it frees the staging buffers no readback has held for as
-// long. Last, it finishes the frame's inspection, if any, publishing
-// inspectionDeliveryEvent for it.
+// long, as it does the timed frames of pass timings. Last, it finishes the
+// frame's inspection, if any, publishing inspectionDeliveryEvent for it,
+// unless it waits for the frame's pass timings; and then delivers, failed,
+// each readback whose map failed to start.
 func endFrame(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*frameState], table kernel.Read[*assetTable], device kernel.Read[gfx.Device]) kernel.NoResult {
 	frameState := state.Get()
-	for _, readback := range frameState.staging.mapRecorded(device.Get(), frameState.reporter) {
-		k.Publish(readbackDeliveryEvent{delivered: ReadbackEvent{Readback: readback, Status: ReadbackStatusFailed}})
-	}
+	failedReadbacks := frameState.staging.mapRecorded(device.Get(), frameState.reporter)
 	table.Get().freeReleased(device.Get())
 	table.Get().endMaterialVersions(device.Get())
 	frameState.mips.endFrame(device.Get())
 	frameState.temporaryTextures.endFrame(frameState.temporaryIdleFrames, table.Get(), device.Get())
 	frameState.arena.endFrame(frameState.temporaryIdleFrames, table.Get(), device.Get())
 	frameState.staging.endFrame(frameState.temporaryIdleFrames, device.Get())
+	frameState.passTimer.endFrame(frameState.temporaryIdleFrames, device.Get())
 	frameState.listStates.endFrame(table.Get())
 	table.Get().unbindFreed(device.Get())
 	table.Get().layouts.freeIdleBindGroups(device.Get(), frameState.temporaryIdleFrames)
 	if beat, ok := frameState.inspector.finish(); ok {
 		k.Publish(inspectionDeliveryEvent{beat: beat})
+	}
+	for _, readback := range failedReadbacks {
+		frameState.deliverReadback(k, readback, ReadbackStatusFailed, device.Get())
 	}
 	return kernel.NoResult{}
 }

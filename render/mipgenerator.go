@@ -53,8 +53,9 @@ func (g *mipGenerator) request(textures ...Texture) {
 // failure to make what it draws with, or to take the encoder, is logged
 // through table, unless the device is lost, and generates no texture's mips,
 // as a texture's own failure generates none of its. While the frame is
-// inspected, the list and what it draws go into the inspection.
-func (g *mipGenerator) generate(table *assetTable, device gfx.Device, files fs.FS, frame gfx.Frame) {
+// inspected, the list and what it draws go into the inspection, and while it
+// is timed, timer times each pass.
+func (g *mipGenerator) generate(table *assetTable, device gfx.Device, files fs.FS, frame gfx.Frame, timer *passTimer) {
 	g.mutex.Lock()
 	defer g.mutex.Unlock()
 	textures := g.requestedTextures
@@ -78,7 +79,7 @@ func (g *mipGenerator) generate(table *assetTable, device gfx.Device, files fs.F
 			}
 			inspectedList = table.inspector.addList(ownOrder, mipListLabel)
 		}
-		if err := g.generateTexture(table, device, encoder, inspectedList, texture, descriptor); err != nil {
+		if err := g.generateTexture(table, device, encoder, inspectedList, timer, texture, descriptor); err != nil {
 			table.logUnlessLost(fmt.Errorf("render: generating the mips of texture %q: %w", descriptor.Label, err))
 		}
 	}
@@ -176,9 +177,9 @@ func (g *mipGenerator) init(device gfx.Device, files fs.FS) (err error) {
 
 // generateTexture records into encoder the mip levels below the first of
 // texture, of descriptor, each from the level above it at the same layer,
-// and writes each pass down in inspectedList, unless it is nil. g's mutex is
-// held.
-func (g *mipGenerator) generateTexture(table *assetTable, device gfx.Device, encoder gfx.CommandEncoder, inspectedList *InspectedCommandList, texture Texture, descriptor gfx.TextureDescriptor) error {
+// each pass timed by timer and written down in inspectedList, unless it is
+// nil. g's mutex is held.
+func (g *mipGenerator) generateTexture(table *assetTable, device gfx.Device, encoder gfx.CommandEncoder, inspectedList *InspectedCommandList, timer *passTimer, texture Texture, descriptor gfx.TextureDescriptor) error {
 	pipeline, ok := g.pipelines[descriptor.Format]
 	if !ok {
 		var err error
@@ -226,6 +227,7 @@ func (g *mipGenerator) generateTexture(table *assetTable, device gfx.Device, enc
 			pass := encoder.BeginRenderPass(gfx.RenderPassDescriptor{
 				Label:            label,
 				ColorAttachments: []gfx.RenderPassColorAttachment{{View: target, LoadOp: gfx.LoadOpClear, StoreOp: gfx.StoreOpStore}},
+				TimestampWrites:  timer.addPass(ownOrder, label),
 			})
 			if inspectedList != nil {
 				inspectedList.Passes = append(inspectedList.Passes, g.makeInspectedPass(texture, mipLevel, uint32(layer), label, len(inspectedList.Passes)))

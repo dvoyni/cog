@@ -15,8 +15,13 @@ import (
 // is render's own.
 type Order int32
 
-// ownOrder is the order of render's own command list, below every user's.
+// ownOrder is the order of render's own command list, below every user's,
+// where it generates mips.
 const ownOrder Order = math.MinInt32
+
+// closingOrder is the order of render's closing command list, above every
+// user's, where it reads a timed frame's timestamps back.
+const closingOrder Order = math.MaxInt32
 
 // copyRowAlignment is what the distance between the rows of a copy between a
 // buffer and a texture is a multiple of, as WebGPU asks.
@@ -72,6 +77,7 @@ func (l *CommandList) BeginPass(descriptor PassDescriptor) Pass {
 		return Pass{}
 	}
 	l.listState.clearParameterSettings()
+	passDescriptor.TimestampWrites = l.frame.state.Get().passTimer.addPass(l.listState.order, descriptor.Label)
 	pass := Pass{
 		frame:     l.frame,
 		listState: l.listState,
@@ -164,7 +170,10 @@ func (l *CommandList) BeginComputePass(label string) ComputePass {
 		return ComputePass{}
 	}
 	l.listState.clearParameterSettings()
-	pass := ComputePass{frame: l.frame, listState: l.listState, encoder: l.encoder.BeginComputePass(gfx.ComputePassDescriptor{Label: label})}
+	pass := ComputePass{frame: l.frame, listState: l.listState, encoder: l.encoder.BeginComputePass(gfx.ComputePassDescriptor{
+		Label:           label,
+		TimestampWrites: l.frame.state.Get().passTimer.addPass(l.listState.order, label),
+	})}
 	if inspectedList := l.listState.inspectedList; inspectedList != nil {
 		pass.inspectedPass = len(inspectedList.ComputePasses)
 		inspectedList.ComputePasses = append(inspectedList.ComputePasses, InspectedComputePass{Position: l.listState.nextInspectedPosition(), Label: label})

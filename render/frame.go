@@ -31,14 +31,15 @@ func (Frame) Declare(access *kernel.Access) Frame {
 
 // BeginCommandList begins a command list of the frame being recorded, at
 // order among the frame's other lists, for one task to fill. A list at an
-// order another list of the frame has, or at render's own, math.MinInt32, is
-// refused and reported once; so is a list begun while no frame is recording.
-// A refused list records into nothing.
+// order another list of the frame has, or at one of render's own,
+// math.MinInt32 and math.MaxInt32, is refused and reported once; so is a
+// list begun while no frame is recording. A refused list records into
+// nothing.
 func (f Frame) BeginCommandList(label string, order Order) CommandList {
 	state := f.state.Get()
 	list := CommandList{frame: f}
-	if order == ownOrder {
-		state.report(ReportKindOrderReserved, fmt.Errorf("render: command list %q is at order %d, render's own", label, order))
+	if order == ownOrder || order == closingOrder {
+		state.report(ReportKindOrderReserved, fmt.Errorf("render: command list %q is at order %d, one of render's own", label, order))
 		return list
 	}
 	gfxFrame := state.recordingFrame()
@@ -130,7 +131,8 @@ func (f Frame) ReadCapture(event CapturedEvent) (*image.NRGBA, error) {
 // FrameEvent is published after the call, one at a time: a request while
 // one is pending, asked for and not yet delivered, joins it. While that
 // frame records, render's calls also write it down, and InspectedEvent
-// delivers it once the frame is presented; every other frame pays one
+// delivers it once the frame is presented, or, while pass timings are on,
+// once its pass timings are read back; every other frame pays one
 // check a call, and allocates nothing for it.
 func (f Frame) RequestInspection() {
 	f.state.Get().inspector.request()
@@ -146,6 +148,37 @@ func (f Frame) ReadInspection(event InspectedEvent) (Inspection, error) {
 		return Inspection{}, fmt.Errorf("render: reading the inspection of beat %d, which is read only while InspectedEvent's jobs run", event.Beat.Tick)
 	}
 	return inspection, nil
+}
+
+// SetPassTimings turns pass timings on or off from the next frame to
+// begin. While they are on, the GPU writes when each pass and compute pass
+// of a frame, render's own included, begins and ends, and PassTimingsEvent
+// delivers the frame's timings once the GPU has run it, a frame or more
+// later, for each frame with a pass; an inspection of a timed frame waits
+// for them, and holds them. A frame's passes after its 2048th get no
+// timings, and are reported with ReportKindPassUntimed. Timings need
+// timestamp queries: gfx's Config requiring FeatureFlagTimestampQuery, on a
+// backend that has them, which none but render/rendertest's fake GPU has
+// until the wgpu fork exposes them. Turning them on without is reported
+// once, with ReportKindPassTimingsUnavailable, and leaves them off.
+func (f Frame) SetPassTimings(on bool) {
+	state := f.state.Get()
+	state.passTimer.setEnabled(on, f.device.Get(), state.reporter)
+}
+
+// ReadPassTimings answers event's pass timings: each pass and compute pass
+// of the frame of event's beat, by the order of its command list, those of
+// one list in the order they began, with that order, its label and how long
+// the GPU took to run it. They are render's own, so a task copies what it
+// keeps. It answers them only while the jobs of event's publication run, so
+// a handler of PassTimingsEvent calls it in a task it joins into the out
+// dependency it returns; later, it answers an error.
+func (f Frame) ReadPassTimings(event PassTimingsEvent) ([]PassTiming, error) {
+	timings, ok := f.state.Get().passTimer.read(event.Beat)
+	if !ok {
+		return nil, fmt.Errorf("render: reading the pass timings of beat %d, which are read only while PassTimingsEvent's jobs run", event.Beat.Tick)
+	}
+	return timings, nil
 }
 
 // ReadbackData answers event's bytes: a buffer's range as it was where

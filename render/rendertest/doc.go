@@ -18,6 +18,11 @@
 // among them, unless it is a report of a kind the test named with
 // ExpectReport.
 //
+// A test of pass timings calls EnableTimestamps before Spawn: the fake GPU
+// then has timestamp queries, which no real backend has until the wgpu fork
+// exposes them, and a pass's timings are a nanosecond for each command it
+// recorded, its beginning among them.
+//
 // # Binding declarations
 //
 // gfx's recording adapter parses no WGSL, so the harness answers a shader's

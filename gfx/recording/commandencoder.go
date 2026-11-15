@@ -22,9 +22,16 @@ type commandEncoder struct {
 	// label is the label the encoder was made with, for its command buffer.
 	label    string
 	commands []Command
-	// bufferEffects are what the copies and clears recorded do to buffers'
-	// bytes, applied in order at the submit.
+	// bufferEffects are what the copies, clears, resolves and timestamp
+	// writes recorded do to buffers' and query sets' bytes, applied in order
+	// at the submit.
 	bufferEffects []bufferEffect
+	// tickCount is how many commands were recorded, kept or not: the tick,
+	// from the encoder's first, of the next.
+	tickCount uint64
+	// endTimestamp is where the open pass writes its end's timestamp, nil
+	// for none.
+	endTimestamp []byte
 	// err is the first command's error, for Finish.
 	err error
 	// passOpen is set from a pass's beginning to its End.
@@ -42,9 +49,9 @@ type commandEncoder struct {
 // BeginRenderPass records the pass, its color attachments copied, and
 // answers its encoder, which records under it. No other pass may be open,
 // each attachment's view needs RenderAttachment, and its timestamp writes
-// name no query set.
+// name no query set, or a timestamp one, as beginPass checks.
 func (encoder *commandEncoder) BeginRenderPass(descriptor gfx.RenderPassDescriptor) gfx.RenderPassEncoder {
-	encoder.beginPass()
+	encoder.beginPass(descriptor.TimestampWrites)
 	encoder.check(func(d *device) error {
 		for index, attachment := range descriptor.ColorAttachments {
 			if err := d.requireView(attachment.View, gfx.TextureUsageFlagRenderAttachment, indexedRole{"color attachment %d", index}); err != nil {
@@ -54,10 +61,7 @@ func (encoder *commandEncoder) BeginRenderPass(descriptor gfx.RenderPassDescript
 				return err
 			}
 		}
-		return cmp.Or(
-			d.requireView(descriptor.DepthStencilAttachment.View, gfx.TextureUsageFlagRenderAttachment, "the depth-stencil attachment"),
-			requireQuerySet(descriptor.TimestampWrites.QuerySet, "the pass's timestamp writes"),
-		)
+		return d.requireView(descriptor.DepthStencilAttachment.View, gfx.TextureUsageFlagRenderAttachment, "the depth-stencil attachment")
 	})
 	descriptor.ColorAttachments = encoder.device.instance.cloneKept(descriptor.ColorAttachments)
 	encoder.record(CommandKindBeginRenderPass, descriptor)
@@ -66,21 +70,39 @@ func (encoder *commandEncoder) BeginRenderPass(descriptor gfx.RenderPassDescript
 
 // BeginComputePass records the pass and answers its encoder, which records
 // under it. No other pass may be open, and its timestamp writes name no query
-// set.
+// set, or a timestamp one, as beginPass checks.
 func (encoder *commandEncoder) BeginComputePass(descriptor gfx.ComputePassDescriptor) gfx.ComputePassEncoder {
-	encoder.beginPass()
-	encoder.fail(requireQuerySet(descriptor.TimestampWrites.QuerySet, "the pass's timestamp writes"))
+	encoder.beginPass(descriptor.TimestampWrites)
 	encoder.record(CommandKindBeginComputePass, descriptor)
 	return computePassEncoder{pass{encoder: encoder}}
 }
 
-// ResolveQuerySet records the resolve, which always fails: there is no query
-// set to resolve, none kept and the zero one naming none.
+// ResolveQuerySet records the resolve of queryCount queries of a query set
+// kept, from firstQuery, within its count, into a buffer with QueryResolve,
+// at an offset that is a multiple of queryResolveAlignment, within the
+// buffer. Unless Instance.EnableTimestamps has enabled timestamps, it always
+// fails: no query set is kept, and the zero one names none.
 func (encoder *commandEncoder) ResolveQuerySet(querySet gfx.QuerySet, firstQuery, queryCount uint32, destination gfx.Buffer, destinationOffset uint64) {
-	if querySet == (gfx.QuerySet{}) {
-		encoder.fail(errors.New("recording: a resolve of no query set"))
-	}
-	encoder.fail(requireQuerySet(querySet, "the resolved query set"))
+	encoder.check(func(d *device) error {
+		object, err := d.requireQuerySet(querySet, "the resolved query set")
+		if err != nil {
+			return err
+		}
+		if err := cmp.Or(
+			requireWithin(uint64(firstQuery), uint64(queryCount), uint64(object.queryCount), "the resolved queries"),
+			d.requireBuffer(destination, gfx.BufferUsageFlagQueryResolve, "the resolve's destination"),
+			requireAligned(destinationOffset, queryResolveAlignment, "the resolve's destination offset"),
+		); err != nil {
+			return err
+		}
+		resolvedTo, err := d.requireRange(destination, destinationOffset, queryResultSize*uint64(queryCount), "the resolve's destination")
+		if err != nil {
+			return err
+		}
+		resolvedFrom := object.queryResults[queryResultSize*uint64(firstQuery) : queryResultSize*uint64(firstQuery+queryCount)]
+		encoder.bufferEffects = append(encoder.bufferEffects, bufferEffect{destination: resolvedTo, source: resolvedFrom})
+		return nil
+	})
 	encoder.record(CommandKindResolveQuerySet, ResolveQuerySetArguments{
 		QuerySet:          querySet,
 		FirstQuery:        firstQuery,
@@ -179,7 +201,7 @@ func (encoder *commandEncoder) ClearBuffer(buffer gfx.Buffer, offset, size uint6
 		if err != nil {
 			return err
 		}
-		encoder.bufferEffects = append(encoder.bufferEffects, bufferEffect{destination: cleared, cleared: true})
+		encoder.bufferEffects = append(encoder.bufferEffects, bufferEffect{kind: bufferEffectKindClear, destination: cleared})
 		return nil
 	})
 	encoder.record(CommandKindClearBuffer, ClearBufferArguments{Buffer: buffer, Offset: offset, Size: size})
@@ -214,14 +236,38 @@ func (encoder *commandEncoder) DiscardEncoding() {
 }
 
 // beginPass opens a pass, its pipeline not yet set, failing the encoder when
-// one is open already.
-func (encoder *commandEncoder) beginPass() {
+// one is open already, and writes its beginning's timestamp where
+// timestampWrites says, its end's to be written at its End. A zero query set
+// writes none; any other is a timestamp query set kept, both indices below
+// its count and different.
+func (encoder *commandEncoder) beginPass(timestampWrites gfx.PassTimestampWrites) {
 	if encoder.passOpen {
 		encoder.fail(errors.New("recording: a pass begun inside another"))
 	}
 	encoder.passOpen = true
 	encoder.pipelineSet = false
 	encoder.passCommandIndex = len(encoder.commands)
+	encoder.endTimestamp = nil
+	if timestampWrites.QuerySet == (gfx.QuerySet{}) {
+		return
+	}
+	encoder.check(func(d *device) error {
+		object, err := d.requireQuerySet(timestampWrites.QuerySet, "the pass's timestamp writes")
+		if err != nil {
+			return err
+		}
+		begin := timestampWrites.BeginningOfPassWriteIndex
+		end := timestampWrites.EndOfPassWriteIndex
+		switch {
+		case begin >= object.queryCount || end >= object.queryCount:
+			return fmt.Errorf("recording: the pass's timestamp writes at %d and %d, past a query set of %d queries", begin, end, object.queryCount)
+		case begin == end:
+			return fmt.Errorf("recording: the pass's timestamp writes both at %d", begin)
+		}
+		encoder.bufferEffects = append(encoder.bufferEffects, bufferEffect{kind: bufferEffectKindTimestamp, destination: object.queryResults[queryResultSize*begin:][:queryResultSize], ticks: encoder.tickCount})
+		encoder.endTimestamp = object.queryResults[queryResultSize*end:][:queryResultSize]
+		return nil
+	})
 }
 
 // check runs check over the device under the instance's mutex, and fails the
@@ -243,6 +289,7 @@ func (encoder *commandEncoder) fail(err error) {
 // record appends a command of kind with arguments, unless recording is
 // disabled; arguments are made an interface only when kept.
 func (encoder *commandEncoder) record[A any](kind CommandKind, arguments A) {
+	encoder.tickCount++
 	if encoder.device.instance.keepsCalls() {
 		encoder.commands = append(encoder.commands, Command{Kind: kind, Arguments: arguments})
 	}
@@ -251,6 +298,10 @@ func (encoder *commandEncoder) record[A any](kind CommandKind, arguments A) {
 // copyBufferAlignment is what a buffer copy's offsets and size, and a clear's
 // offset and size, are multiples of, as wgpu's COPY_BUFFER_ALIGNMENT.
 const copyBufferAlignment = 4
+
+// queryResolveAlignment is what a resolve's destination offset is a
+// multiple of, as wgpu's QUERY_RESOLVE_BUFFER_ALIGNMENT.
+const queryResolveAlignment = 256
 
 // copyBytesPerRowAlignment is what the buffer rows of a copy between a buffer
 // and a texture are a multiple of apart, as wgpu's
@@ -313,9 +364,14 @@ func (p pass) SetBindGroup(index uint32, group gfx.BindGroup, dynamicOffsets []u
 }
 
 // End records nothing, the pass's commands being those under its beginning,
-// and closes the pass, for the next to begin.
+// and closes the pass, for the next to begin, writing its end's timestamp
+// where its beginning said.
 func (p pass) End() {
 	p.encoder.passOpen = false
+	if p.encoder.endTimestamp != nil {
+		p.encoder.bufferEffects = append(p.encoder.bufferEffects, bufferEffect{kind: bufferEffectKindTimestamp, destination: p.encoder.endTimestamp, ticks: p.encoder.tickCount})
+		p.encoder.endTimestamp = nil
+	}
 }
 
 // requirePipeline fails the encoder when the pass has no pipeline set for
@@ -336,6 +392,7 @@ func (p pass) requireIndirectBuffer(buffer gfx.Buffer) {
 // beginning, when the encoder keeps its commands; arguments are made an
 // interface only then.
 func (p pass) record[A any](kind CommandKind, arguments A) {
+	p.encoder.tickCount++
 	if !p.encoder.device.instance.keepsCalls() {
 		return
 	}
@@ -458,13 +515,4 @@ func (p computePassEncoder) DispatchIndirect(buffer gfx.Buffer, offset uint64) {
 	p.requirePipeline("an indirect dispatch")
 	p.requireIndirectBuffer(buffer)
 	p.record(CommandKindDispatchIndirect, IndirectArguments{Buffer: buffer, Offset: offset})
-}
-
-// requireQuerySet answers an error naming role for any query set but the
-// zero one, which names none: none is kept until the wgpu fork exposes them.
-func requireQuerySet(querySet gfx.QuerySet, role string) error {
-	if querySet == (gfx.QuerySet{}) {
-		return nil
-	}
-	return fmt.Errorf("recording: %s: no query set at index %d: %w", role, querySet.Index(), gfx.ErrQuerySetsUnavailable)
 }

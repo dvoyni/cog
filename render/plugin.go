@@ -56,8 +56,8 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 // their names overrides it; subscribes to gfx.DrawEvent, gfx.RenderEvent,
 // gfx.DeviceRecoveredEvent, gfx.CapturedEvent and gfx.BufferMappedEvent,
 // the Subs kept in the Handlers
-// resource; and subscribes to its own private events delivering readbacks
-// and inspections. A
+// resource; and subscribes to its own private events delivering readbacks,
+// inspections and pass timings. A
 // config of another type than *Config is a composition error, and panics.
 func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	pluginConfig := kernel.PluginConfigOrDefault[Config](config)
@@ -69,18 +69,20 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	})
 	configurator.InitResource(&assetTable{reporter: resourceReporter})
 	configurator.BindSocket(platform.ReadMountSocket{FS: makeAssetFS(), Priority: math.MinInt, Prefix: assetPrefix})
-	beginFrameTask := configurator.RegisterTask1(beginFrame)
+	beginFrameTask := configurator.RegisterTask2(beginFrame)
 	writeLoadsTask := configurator.RegisterTask4(writeLoads)
 	generateMipsTask := configurator.RegisterTask4(generateMips)
+	readTimestampsBackTask := configurator.RegisterTask2(readTimestampsBack)
 	checkClearsTask := configurator.RegisterTask1(checkClears)
 	endFrameTask := configurator.RegisterTask3(endFrame)
 	rewriteAssetsTask := configurator.RegisterTask4(rewriteAssets)
-	findReadbackTask := configurator.RegisterTask1(findReadback)
+	findReadbackTask := configurator.RegisterTask2(findReadback)
 	releaseReadbackTask := configurator.RegisterTask2(releaseReadback)
 	dropInspectionTask := configurator.RegisterTask1(dropInspection)
+	dropPassTimingsTask := configurator.RegisterTask1(dropPassTimings)
 	configurator.InitResource(Handlers{
 		RecordFrame: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.DrawEvent) (gfx.DrawEvent, kernel.JobHandle) {
-			return recordFrame(ex, in, event, beginFrameTask, writeLoadsTask, generateMipsTask, checkClearsTask)
+			return recordFrame(ex, in, event, beginFrameTask, writeLoadsTask, generateMipsTask, readTimestampsBackTask, checkClearsTask)
 		}),
 		EndFrame: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.RenderEvent) (gfx.RenderEvent, kernel.JobHandle) {
 			return event, ex.Schedule(endFrameTask, kernel.NoArg{}, in).Handle()
@@ -98,6 +100,9 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	})
 	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event inspectionDeliveryEvent) (inspectionDeliveryEvent, kernel.JobHandle) {
 		return publishInspection(ex, in, event, dropInspectionTask)
+	})
+	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event passTimingsDeliveryEvent) (passTimingsDeliveryEvent, kernel.JobHandle) {
+		return publishPassTimings(ex, in, event, dropPassTimingsTask)
 	})
 	return nil
 }

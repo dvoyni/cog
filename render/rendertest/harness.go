@@ -51,6 +51,9 @@ type Harness struct {
 	// declarations is the catalog of the binding declarations answering the
 	// reflection of the shaders compiled on instance.
 	declarations *declarationCatalog
+	// timestampsEnabled is set by EnableTimestamps, for Spawn to have gfx
+	// require them.
+	timestampsEnabled bool
 	// expectedReports are the kinds ExpectReport named; only the test's
 	// goroutine reads and writes them.
 	expectedReports []render.ReportKind
@@ -111,6 +114,9 @@ func (h *Harness) Spawn(config *render.Config, plugins ...kernel.Plugin) {
 			Tracks: []metronome.Track{metronome.NewTrack[gfx.RenderEvent](metronome.Variable())},
 		},
 	}
+	if h.timestampsEnabled {
+		configs[gfx.PluginName] = &gfx.Config{RequiredFeatures: gfx.FeatureFlagTimestampQuery}
+	}
 	renderStack := []kernel.Plugin{platform.NewPlugin(), metronome.NewPlugin(), gfx.NewPlugin(), render.NewPlugin(), harnessPlugin{harness: h}}
 	id, err := h.supervisor.Spawn(configs, workerCount, append(renderStack, plugins...)...)
 	if err != nil {
@@ -153,6 +159,21 @@ func (h *Harness) OpenWindow(size platform.Size) platform.Window {
 	h.wait("the window's open", out)
 	h.wait("the window's surface", h.surfaceMade)
 	return h.opened
+}
+
+// EnableTimestamps gives the fake GPU timestamp queries, which no real
+// backend has until the wgpu fork exposes them, so a test turns render's
+// pass timings on: gfx requires FeatureFlagTimestampQuery, and gfx's
+// recording adapter writes each pass's timestamps a nanosecond apart for
+// each command the pass records, its beginning among them. It is called
+// before Spawn, and fails the test after.
+func (h *Harness) EnableTimestamps() {
+	h.t.Helper()
+	if h.kernel != nil {
+		h.t.Fatal("rendertest: enabling timestamps after Spawn")
+	}
+	h.instance.EnableTimestamps()
+	h.timestampsEnabled = true
 }
 
 // LengthenNextAcquire makes the next acquire of a window's framebuffer take d

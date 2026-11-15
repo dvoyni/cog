@@ -5,13 +5,14 @@ import "github.com/dvoyni/cog/metronome"
 // Inspection is one frame written down in render's terms: its beat; its
 // command lists by order; the textures, buffers and shaders it made and the
 // writes into them; the temporaries it took from render's pools and the
-// materials it versioned; the pipelines and bind groups it made; and its
-// reports. Frame.ReadInspection answers the one Frame.RequestInspection
-// asked for, and render/rendertest's reader one for each frame gfx's
-// recording adapter recorded, which gfx's recording cannot show all of:
-// the reader leaves the temporaries, the versioned materials and each
-// draw's Material empty, and its harness fills the beat and the reports
-// from what it saw of the frame's beat.
+// materials it versioned; the pipelines and bind groups it made; its
+// reports; and its pass timings, when they were on. Frame.ReadInspection
+// answers the one Frame.RequestInspection asked for, and
+// render/rendertest's reader one for each frame gfx's recording adapter
+// recorded, which gfx's recording cannot show all of: the reader leaves the
+// temporaries, the versioned materials, each draw's Material and the pass
+// timings empty, and its harness fills the beat and the reports from what
+// it saw of the frame's beat.
 type Inspection struct {
 	Beat         metronome.Beat
 	CommandLists []InspectedCommandList
@@ -39,6 +40,9 @@ type Inspection struct {
 	// Reports are the reports render logged while the frame recorded, in
 	// the order logged.
 	Reports []Report
+	// PassTimings are the timings of the frame's passes and compute passes,
+	// as Frame.ReadPassTimings answers them, when the frame was timed.
+	PassTimings []PassTiming
 }
 
 // InspectedCommandList is one command list of an inspected frame: its

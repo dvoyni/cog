@@ -8,7 +8,8 @@
 // clears apply to; textures hold no texels, and captures complete
 // zero-filled. Real pixels without a GPU come from gogpu on wgpu's software
 // adapter, not from here. Instance.DisableRecording keeps no call, for
-// benchmarks and allocation gates.
+// benchmarks and allocation gates, and Instance.EnableTimestamps writes
+// timestamps, which wait on the wgpu fork for every other backend.
 package recording
 
 import (
@@ -30,6 +31,10 @@ type Instance struct {
 	// recordingDisabled is set by DisableRecording; read without the mutex
 	// by what decides whether to copy what it would keep.
 	recordingDisabled atomic.Bool
+	// timestampsEnabled is set by EnableTimestamps, and adapterRequested
+	// by the first RequestAdapter, after which timestamps are fixed.
+	timestampsEnabled atomic.Bool
+	adapterRequested  atomic.Bool
 	surfaces          map[platform.Window]surface
 	// answers are the answers AnswerNext queued, by kind, the next first.
 	answers map[CallKind][]Answer
@@ -59,6 +64,22 @@ func (instance *Instance) Recording() *Recording {
 // Recording answers what was recorded before.
 func (instance *Instance) DisableRecording() { instance.recordingDisabled.Store(true) }
 
+// EnableTimestamps makes the adapter work timestamps as a backend whose
+// device has them: its adapter reports gfx.FeatureFlagTimestampQuery, its
+// device keeps timestamp query sets, and a pass's timestamp writes and a
+// resolve of a query set apply at the submit, in order with its copies and
+// clears. The ticks are made up: a command buffer's commands are one tick
+// apart, from the tick the buffer submitted before it ended at, so a pass's
+// timestamps are as many ticks apart as the commands it recorded, its
+// beginning among them. It is called before the adapter is requested, and
+// panics after.
+func (instance *Instance) EnableTimestamps() {
+	if instance.adapterRequested.Load() {
+		panic("recording: enabling timestamps after the adapter was requested")
+	}
+	instance.timestampsEnabled.Store(true)
+}
+
 // AnswerNext makes the next call of kind answer answer instead of what it
 // would: an AcquireStatus for an acquire, a failure for a map, an error,
 // gfx.ErrDeviceLost included, for any call. Answers given for one kind are
@@ -71,6 +92,7 @@ func (instance *Instance) AnswerNext(kind CallKind, answer Answer) {
 
 // RequestAdapter answers the recording adapter.
 func (instance *Instance) RequestAdapter(options gfx.RequestAdapterOptions) (gfx.BackendAdapter, error) {
+	instance.adapterRequested.Store(true)
 	if err := instance.record(CallKindRequestAdapter, options, nil).Error; err != nil {
 		return nil, err
 	}
