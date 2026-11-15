@@ -170,8 +170,10 @@ func TestATemporaryMeshReturnsToThePoolWhenTheFrameEndsAndADrawOfItAfterIsSkippe
 
 func TestAcquiringATemporaryMeshAllocatesNothingOnceWarm(t *testing.T) {
 	h := rendertest.NewHarness(t)
-	// Each warm frame acquires meshCount meshes twice, AllocsPerRun's
-	// warm-up and its one run, which the first frame acquires at once.
+	// Each warm frame acquires meshCount+1 meshes, AllocsPerRun's warm-up
+	// and its meshCount runs, which the first frame acquires at once. A
+	// count per acquire, rounded down, leaves out what the kernel's other
+	// jobs or the runtime allocate meanwhile.
 	const meshCount = 100
 	const frameCount = 4
 	var allocations [frameCount]float64
@@ -179,16 +181,13 @@ func TestAcquiringATemporaryMeshAllocatesNothingOnceWarm(t *testing.T) {
 		vertices := inventory.MakeBuffer("vertices", render.BufferUsageFlagVertex, make([]float32, 12))
 		descriptor := render.MeshDescriptor{Label: "temporary", VertexBuffers: []render.VertexBuffer{{Range: render.BufferRange{Buffer: vertices}, Layout: positionLayout}}}
 		list := frame.BeginCommandList("draws", drawOrder)
-		acquire := func() {
-			for range meshCount {
-				list.AcquireTemporaryMesh(descriptor)
-			}
-		}
+		acquire := func() { list.AcquireTemporaryMesh(descriptor) }
 		if frameIndex == 0 {
-			acquire()
-			acquire()
+			for range meshCount + 1 {
+				acquire()
+			}
 		} else {
-			allocations[frameIndex] = testing.AllocsPerRun(1, acquire)
+			allocations[frameIndex] = testing.AllocsPerRun(meshCount, acquire)
 		}
 		list.End()
 		inventory.ReleaseBuffer(vertices)
@@ -196,7 +195,7 @@ func TestAcquiringATemporaryMeshAllocatesNothingOnceWarm(t *testing.T) {
 
 	for frameIndex, count := range allocations[1:] {
 		if count != 0 {
-			t.Errorf("frame %d: acquiring %d temporary meshes allocated %v times once warm, want none", frameIndex+1, meshCount, count)
+			t.Errorf("frame %d: acquiring a temporary mesh allocated %v times once warm, want none", frameIndex+1, count)
 		}
 	}
 }

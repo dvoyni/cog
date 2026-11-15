@@ -379,7 +379,10 @@ and a **test author** testing a plugin that draws.
   - `inventory.WriteTexture[T](texture, TextureRegion{MipLevel, Layer, X, Y, Width, Height}, data)` writes a region of one mip level and one layer, so an atlas page lands in a layer of a 2D-array texture; a zero width or height means the rest of the level. Its rows of texels are packed tight, each texel of its format's size. A multisampled texture, and a depth format beyond `Depth16Unorm`, cannot be written.
   - Each is gfx's write, landing before every command list of gfx's next submit: a write after the frame's flush fills the next frame.
   - A write that does not fit its buffer or texture is refused and reported, with `ReportKindWriteRefused`.
-- **The clear-after-draw check:** after the users' recording, render reports once each pass that clears a target an earlier pass of the frame drew into, in submit order.
+- **The clear-after-draw check:** after the users' recording, before gfx's flush, render reports each pass that clears a target an earlier pass of the frame drew into, in submit order, with `ReportKindClearAfterDraw`, once for each pair of passes, naming their labels and their lists' orders.
+  - A pass drew into a target when one of its draws reached its encoder. Its colour targets, their resolve targets and its depth-stencil target count, each a window or a texture at its mip level and layer; a read-only depth-stencil target is never drawn into.
+  - A clear wipes the drawing: a second clear with nothing drawn between is not reported.
+  - A depth-stencil target counts as a colour target does: a pass that clears depth to draw over what an earlier pass drew, as a weapon over the scene, clears a depth-stencil target of its own instead, or is reported.
 
 How a plugin's recording task reads, from the prototype with its verdicts applied:
 

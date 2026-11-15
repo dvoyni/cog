@@ -12,11 +12,14 @@ type commandListStatePool struct {
 	mutex     sync.Mutex
 	states    []*commandListState
 	heldCount int
+	// clears checks the passes of the states held.
+	clears clearChecker
 }
 
-// acquire hands out a state no list holds this frame, empty, taking chunks
-// of chunkSize bytes from arena, making one when the pool has none.
-func (p *commandListStatePool) acquire(arena *temporaryArena, chunkSize uint64) *commandListState {
+// acquire hands out a state no list holds this frame, empty, for a list at
+// order, taking chunks of chunkSize bytes from arena, making one when the
+// pool has none.
+func (p *commandListStatePool) acquire(arena *temporaryArena, chunkSize uint64, order Order) *commandListState {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	if p.heldCount == len(p.states) {
@@ -25,8 +28,18 @@ func (p *commandListStatePool) acquire(arena *temporaryArena, chunkSize uint64) 
 	state := p.states[p.heldCount]
 	state.arena = arena
 	state.chunkSize = chunkSize
+	state.order = order
 	p.heldCount++
 	return state
+}
+
+// checkClears reports, with reporter, each pass of the lists holding a
+// state this frame that clears a target an earlier pass of the frame
+// drew into, in submit order, once for the two passes.
+func (p *commandListStatePool) checkClears(reporter reporter) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	p.clears.check(p.states[:p.heldCount], reporter)
 }
 
 // endFrame takes back every state held this frame, emptied, freeing in

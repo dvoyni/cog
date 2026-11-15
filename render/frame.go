@@ -53,7 +53,7 @@ func (f Frame) BeginCommandList(label string, order Order) CommandList {
 	default:
 		list.gfxFrame = gfxFrame
 		list.encoder = encoder
-		list.listState = state.listStates.acquire(&state.arena, state.temporaryChunkSize)
+		list.listState = state.listStates.acquire(&state.arena, state.temporaryChunkSize, order)
 	}
 	return list
 }

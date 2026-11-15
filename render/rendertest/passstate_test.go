@@ -42,7 +42,7 @@ func TestPassStateSetBetweenDrawsReachesTheGPUAndANewPassStartsWithTheWholeTarge
 		pass.Draw(scene.indexedMesh, render.DrawArgs{})
 		pass.Draw(scene.indexedMesh, render.DrawArgs{})
 		pass.End()
-		pass = list.BeginPass(scene.colorPass("second"))
+		pass = list.BeginPass(scene.makeKeptPass("second"))
 		pass.SetMaterial(material)
 		pass.Draw(scene.indexedMesh, render.DrawArgs{})
 		pass.End()

@@ -31,7 +31,8 @@ type ColorTarget struct {
 	Texture         Texture
 	MipLevel, Layer uint32
 	// Clear clears the target to ClearColor as the pass begins, in place of
-	// keeping what it holds.
+	// keeping what it holds; clearing what an earlier pass of the frame drew
+	// into is reported, as BeginPass says.
 	Clear      bool
 	ClearColor Color
 	// Discard throws away what the pass draws into the target as it ends, in
@@ -120,6 +121,9 @@ type Pass struct {
 	// them, which its draws' materials may not read.
 	targets     [2*maxColorTargetCount + 1]drawnTarget
 	targetCount int
+	// noteIndex is the index of the pass's note among its list's, which
+	// says whether it drew.
+	noteIndex int
 	// material is the material SetMaterial selected; bindGroups what the
 	// draws bind for each group, kept between them; and pipeline the
 	// pipeline as last set on encoder.
@@ -408,6 +412,7 @@ func (p *Pass) Draw(mesh Mesh, arguments DrawArgs) {
 		return
 	}
 	p.setVertexBuffers(&buffers)
+	p.listState.passes[p.noteIndex].drew = true
 	instanceCount := cmp.Or(arguments.InstanceCount, 1)
 	if !indexed {
 		p.encoder.Draw(gfx.DrawArgs{VertexCount: vertexCount, InstanceCount: instanceCount, FirstInstance: arguments.FirstInstance})
@@ -440,6 +445,7 @@ func (p *Pass) DrawVertices(topology PrimitiveTopology, vertexCount uint32, argu
 		return
 	}
 	p.setVertexBuffers(&buffers)
+	p.listState.passes[p.noteIndex].drew = true
 	p.encoder.Draw(gfx.DrawArgs{VertexCount: vertexCount, InstanceCount: cmp.Or(arguments.InstanceCount, 1), FirstInstance: arguments.FirstInstance})
 }
 

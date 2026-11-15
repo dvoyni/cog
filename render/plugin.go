@@ -68,10 +68,11 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	beginFrameTask := configurator.RegisterTask1(beginFrame)
 	writeLoadsTask := configurator.RegisterTask4(writeLoads)
 	generateMipsTask := configurator.RegisterTask4(generateMips)
+	checkClearsTask := configurator.RegisterTask1(checkClears)
 	endFrameTask := configurator.RegisterTask3(endFrame)
 	configurator.InitResource(Handlers{
 		RecordFrame: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.DrawEvent) (gfx.DrawEvent, kernel.JobHandle) {
-			return recordFrame(ex, in, event, beginFrameTask, writeLoadsTask, generateMipsTask)
+			return recordFrame(ex, in, event, beginFrameTask, writeLoadsTask, generateMipsTask, checkClearsTask)
 		}),
 		EndFrame: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.RenderEvent) (gfx.RenderEvent, kernel.JobHandle) {
 			return event, ex.Schedule(endFrameTask, kernel.NoArg{}, in).Handle()
@@ -97,10 +98,12 @@ func (*Plugin) Destroy() error { return nil }
 // as its Ready; and after the nested publication's out dependency and the
 // first writeLoadsTask, it schedules writeLoadsTask again, for the loads
 // acquired while the frame recorded, and after that generateMipsTask, for
-// the mips of every texture the two wrote. It returns that job joined with
-// beginFrameTask's, so gfx's flush waits for every recording task the users
-// joined into the out dependency, for every load's body and for its mips.
-func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event gfx.DrawEvent, beginFrameTask *kernel.Task[gfx.Frame, kernel.NoResult], writeLoadsTask *kernel.Task[kernel.NoArg, kernel.NoResult], generateMipsTask *kernel.Task[gfx.Frame, kernel.NoResult]) (gfx.DrawEvent, kernel.JobHandle) {
+// the mips of every texture the two wrote; and after the out dependency
+// alone, checkClearsTask, the clear-after-draw check. It returns those jobs
+// joined with beginFrameTask's, so gfx's flush waits for every recording
+// task the users joined into the out dependency, for every load's body and
+// its mips, and for the check.
+func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event gfx.DrawEvent, beginFrameTask *kernel.Task[gfx.Frame, kernel.NoResult], writeLoadsTask *kernel.Task[kernel.NoArg, kernel.NoResult], generateMipsTask *kernel.Task[gfx.Frame, kernel.NoResult], checkClearsTask *kernel.Task[kernel.NoArg, kernel.NoResult]) (gfx.DrawEvent, kernel.JobHandle) {
 	pendingWritten := ex.Schedule(writeLoadsTask, kernel.NoArg{}).Handle()
 	beginFrameJob := ex.Schedule(beginFrameTask, event.Frame, event.Ready).Handle()
 	_, out := ex.Publish(in, FrameEvent{
@@ -111,5 +114,6 @@ func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event gfx.DrawEvent, 
 	})
 	recordedWritten := ex.Schedule(writeLoadsTask, kernel.NoArg{}, out, pendingWritten).Handle()
 	mipsGenerated := ex.Schedule(generateMipsTask, event.Frame, recordedWritten).Handle()
-	return event, ex.Join(mipsGenerated, beginFrameJob)
+	clearsChecked := ex.Schedule(checkClearsTask, kernel.NoArg{}, out).Handle()
+	return event, ex.Join(mipsGenerated, beginFrameJob, clearsChecked)
 }

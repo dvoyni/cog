@@ -30,6 +30,14 @@ func generateMips(k *kernel.Kernel, frame gfx.Frame, state kernel.Read[*frameSta
 	return kernel.NoResult{}
 }
 
+// checkClears reports each pass of the frame recorded that clears a
+// target an earlier pass of the frame drew into, once for the two passes.
+func checkClears(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*frameState]) kernel.NoResult {
+	frameState := state.Get()
+	frameState.listStates.checkClears(frameState.reporter)
+	return kernel.NoResult{}
+}
+
 // endFrame ends the frame gfx has presented: it frees the loaded textures
 // and buffers whose last acquire was released and the made ones released,
 // frees the material versions the frame made, its materials' buffers taking

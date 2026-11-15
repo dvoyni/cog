@@ -120,7 +120,7 @@ func TestInstanceBuffersLastUntilThePassEndsAndJoinThePipelineKeyByValue(t *test
 		pass.SetInstanceBuffer(1, render.InstanceBuffer{Range: render.BufferRange{Buffer: weights}, Layout: render.VertexLayout{Stride: 8, Attributes: weightsLayout.Attributes}})
 		pass.Draw(scene.indexedMesh, render.DrawArgs{})
 		pass.End()
-		pass = list.BeginPass(scene.colorPass("second"))
+		pass = list.BeginPass(scene.makeKeptPass("second"))
 		pass.SetMaterial(plain)
 		pass.Draw(scene.indexedMesh, render.DrawArgs{})
 		pass.End()

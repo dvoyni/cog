@@ -55,7 +55,10 @@ type CommandList struct {
 //     size or format or of several samples;
 //   - a read-only depth-stencil target cleared or discarded.
 //
-// A skipped or refused pass records nothing, so its draws are skipped.
+// A skipped or refused pass records nothing, so its draws are skipped. A
+// pass that clears a target an earlier pass of the frame drew into,
+// in gfx's submit order, wipes that drawing: after the users' recording,
+// render reports it once for the two passes, with ReportKindClearAfterDraw.
 func (l *CommandList) BeginPass(descriptor PassDescriptor) Pass {
 	if l.encoder == nil {
 		return Pass{}
@@ -77,6 +80,7 @@ func (l *CommandList) BeginPass(descriptor PassDescriptor) Pass {
 		width:     firstTarget.width,
 		height:    firstTarget.height,
 	}
+	pass.noteIndex = l.listState.notePass(descriptor)
 	for _, target := range descriptor.ColorTargets {
 		pass.addTarget(drawnTarget{texture: target.Texture, mipLevel: target.MipLevel, layer: target.Layer})
 		pass.addTarget(drawnTarget{texture: target.Resolve.Texture, mipLevel: target.Resolve.MipLevel, layer: target.Resolve.Layer})

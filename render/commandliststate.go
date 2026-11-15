@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/dvoyni/cog/gfx"
+	"github.com/dvoyni/cog/platform"
 )
 
 // commandListState is what a command list keeps while it records, pooled
@@ -14,7 +15,10 @@ import (
 // draw parameters set in its open pass, by their group, or the parameters
 // set in its open compute pass, of any group; and the draft its
 // draws build bind groups in, and hand the dynamic offsets of each they
-// set; and the regions its copies hand gfx.
+// set; the regions its copies hand gfx; and, for the clear-after-draw
+// check, its list's order and the passes it began, in order, with the
+// targets they write, passes[i]'s the passTargets from its
+// targetStart to its targetEnd.
 type commandListState struct {
 	arena               *temporaryArena
 	chunkSize           uint64
@@ -27,6 +31,9 @@ type commandListState struct {
 	dynamicOffsets      [maxGroupDynamicOffsetCount]uint32
 	textureCopies       [1]gfx.TextureCopy
 	bufferTextureCopies [1]gfx.BufferTextureCopy
+	order               Order
+	passes              []notedPass
+	passTargets         []notedTarget
 }
 
 // allocate answers a range of a chunk s holds holding data, at a multiple of
@@ -90,6 +97,24 @@ func (s *commandListState) writeChunks(table *assetTable, device gfx.Device) {
 	}
 }
 
+// notePass notes a pass of descriptor begun, with its colour targets, their
+// resolve targets and its depth-stencil target unless it is read-only, and
+// answers the index of its note in s's passes.
+func (s *commandListState) notePass(descriptor PassDescriptor) int {
+	targetStart := len(s.passTargets)
+	for _, target := range descriptor.ColorTargets {
+		s.passTargets = append(s.passTargets, notedTarget{key: passTargetKey{window: target.Window, texture: target.Texture, mipLevel: target.MipLevel, layer: target.Layer}, cleared: target.Clear})
+		if resolve := target.Resolve; resolve != (ResolveTarget{}) {
+			s.passTargets = append(s.passTargets, notedTarget{key: passTargetKey{window: resolve.Window, texture: resolve.Texture, mipLevel: resolve.MipLevel, layer: resolve.Layer}})
+		}
+	}
+	if target := descriptor.DepthStencil; target.Texture != (Texture{}) && !target.ReadOnly {
+		s.passTargets = append(s.passTargets, notedTarget{key: passTargetKey{texture: target.Texture, mipLevel: target.MipLevel, layer: target.Layer}, cleared: target.Clear})
+	}
+	s.passes = append(s.passes, notedPass{label: descriptor.Label, targetStart: targetStart, targetEnd: len(s.passTargets)})
+	return len(s.passes) - 1
+}
+
 // clearParameterSettings forgets every pass, draw and compute parameter
 // set, for the next pass, keeping their arrays.
 func (s *commandListState) clearParameterSettings() {
@@ -106,4 +131,30 @@ func (s *commandListState) reset() {
 	s.currentChunk = nil
 	s.temporaryMeshes = s.temporaryMeshes[:0]
 	s.clearParameterSettings()
+	s.passes = s.passes[:0]
+	s.passTargets = s.passTargets[:0]
+}
+
+// notedPass is a pass a command list began, for the clear-after-draw
+// check: its label, where its targets are among its list's, and whether a
+// draw of it reached its encoder.
+type notedPass struct {
+	label                  string
+	targetStart, targetEnd int
+	drew                   bool
+}
+
+// notedTarget is a target a noted pass writes, and
+// whether the pass clears it; a resolve target is never cleared.
+type notedTarget struct {
+	key     passTargetKey
+	cleared bool
+}
+
+// passTargetKey names what a pass draws into: a window, or a texture at one
+// mip level and one layer.
+type passTargetKey struct {
+	window          platform.Window
+	texture         Texture
+	mipLevel, layer uint32
 }

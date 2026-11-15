@@ -77,6 +77,10 @@ const (
 	// shader selected, one render does not hold, failed or was freed, or a
 	// storage binding left unbound that its compute function reads.
 	ReportKindDispatchSkipped
+	// ReportKindClearAfterDraw is a pass that clears a target, a window or
+	// a texture, that an earlier pass of the frame drew into, in submit
+	// order.
+	ReportKindClearAfterDraw
 )
 
 // Report is a mistake render finds at run time, such as a refused shader, a

@@ -31,7 +31,10 @@ read-only. A pass is skipped silently when a window has no framebuffer, and
 refused and reported when its targets are none, more than the device allows
 (8 by default), name neither or both of a window and a texture, name a
 texture render does not hold or a mip level or layer it lacks, are of the
-wrong kind of format, or disagree in size, sample count or resolve. The
+wrong kind of format, or disagree in size, sample count or resolve. After
+the users' recording, before gfx's flush, render reports once each pass
+that clears a target an earlier pass of the frame drew into, in
+submit order, naming both passes' labels and their lists' orders. The
 harness's `Frames` reads each frame back as a `render.Inspection`: its lists
 by order and their passes with labels, targets, loads, stores and resolves.
 A task reaches render's assets through the `Inventory` parameter, which locks

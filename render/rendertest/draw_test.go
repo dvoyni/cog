@@ -102,6 +102,13 @@ func (s drawScene) colorPass(label string) render.PassDescriptor {
 	return render.PassDescriptor{Label: label, ColorTargets: []render.ColorTarget{{Texture: s.color, Clear: true}}, DepthStencil: render.DepthStencilTarget{Texture: s.depth, Clear: true, ClearDepth: 1}}
 }
 
+// makeKeptPass answers the descriptor of a pass labelled label into scene's
+// colour and depth textures that keeps what they hold, as a pass after
+// one that drew into them does.
+func (s drawScene) makeKeptPass(label string) render.PassDescriptor {
+	return render.PassDescriptor{Label: label, ColorTargets: []render.ColorTarget{{Texture: s.color}}, DepthStencil: render.DepthStencilTarget{Texture: s.depth}}
+}
+
 // depthPass answers the descriptor of a pass labelled label into scene's
 // depth texture alone.
 func (s drawScene) depthPass(label string) render.PassDescriptor {
@@ -545,7 +552,7 @@ func TestAShaderWithNoFragmentStageDrawsOnlyIntoPassesWithoutColourTargets(t *te
 			pass.Draw(scene.indexedMesh, render.DrawArgs{})
 		})
 		list := frame.BeginCommandList("colour", drawOrder+1)
-		pass := list.BeginPass(scene.colorPass("colour"))
+		pass := list.BeginPass(scene.makeKeptPass("colour"))
 		pass.SetMaterial(depthOnly)
 		pass.Draw(scene.indexedMesh, render.DrawArgs{})
 		pass.Draw(scene.indexedMesh, render.DrawArgs{})
