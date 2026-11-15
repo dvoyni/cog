@@ -98,7 +98,9 @@ func (i Inventory) AcquireShader(path string, defines ...ShaderDefine) Shader {
 // pointers, laid out as the shader reads it, such as a number, or an array
 // or struct of them. Its size is data's, rounded up to a multiple of 4 with
 // zeros, and it carries usage and the copy destination, as AcquireBuffer's
-// does. Its maker gives it back once, with ReleaseBuffer. A buffer of no
+// does. After a device loss it holds nothing, under the same handle,
+// until its maker fills it again on RecoveredEvent. Its maker gives it
+// back once, with ReleaseBuffer. A buffer of no
 // bytes gets no gfx buffer, so nothing writes or binds it. A buffer gfx
 // refuses to make is logged, and the zero Buffer answered.
 func (i Inventory) MakeBuffer[T any](label string, usage BufferUsageFlags, data []T) Buffer {
@@ -126,7 +128,9 @@ func (i Inventory) MakeBuffer[T any](label string, usage BufferUsageFlags, data 
 // mip level 0, layer after layer, each layer's rows of texels packed tight,
 // as WriteTexture lays out a region, T as MakeBuffer's; no data leaves it
 // zero, and data of another length is refused and reported, leaving it zero.
-// Levels below the first stay zero until written. Its maker gives it back
+// Levels below the first stay zero until written. After a device loss it
+// holds nothing, under the same handle, until its maker fills it again on
+// RecoveredEvent. Its maker gives it back
 // once, with ReleaseTexture. A texture gfx refuses to make is logged, and the
 // zero Texture answered.
 func (i Inventory) MakeTexture[T any](descriptor TextureDescriptor, data []T) Texture {

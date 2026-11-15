@@ -15,12 +15,14 @@ import (
 // begins and ends an empty command list so the frame is submitted, and
 // afterFrame in a task after the out of render's handler of gfx.RenderEvent,
 // once the frame has ended. Each is given the index of the frame, counted
-// from zero, and skipped when nil.
+// from zero, and skipped when nil. onRecovered, when set, runs in a task
+// after the in dependency of each render.RecoveredEvent.
 type loaderPlugin struct {
 	files              fs.FS
 	recordingTaskCount int
 	duringFrame        func(frameIndex int, inventory render.Inventory, frame render.Frame)
 	afterFrame         func(frameIndex int, inventory render.Inventory)
+	onRecovered        func()
 	// recordedCount is how many frames the handler of render.FrameEvent has
 	// scheduled duringFrame for, and endedCount how many the handler of
 	// gfx.RenderEvent has scheduled afterFrame for.
@@ -63,6 +65,15 @@ func (p *loaderPlugin) Init(configurator *kernel.Configurator, _ any) error {
 			frameIndex := p.endedCount
 			p.endedCount++
 			return event, ex.Schedule(end, frameIndex, in).Handle()
+		})
+	}
+	if p.onRecovered != nil {
+		recovered := configurator.RegisterTask0(func(k *kernel.Kernel, _ kernel.NoArg) kernel.NoResult {
+			p.onRecovered()
+			return kernel.NoResult{}
+		})
+		configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event render.RecoveredEvent) (render.RecoveredEvent, kernel.JobHandle) {
+			return event, ex.Schedule(recovered, kernel.NoArg{}, in).Handle()
 		})
 	}
 	return nil

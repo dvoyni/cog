@@ -481,10 +481,10 @@ render's EndFrame, on gfx.RenderEvent, after the present:
 
 render republishes gfx's events as its own, each nested inside gfx's publication, so gfx frees what an event names only after render's handlers' jobs.
 - **Recovery:**
-  1. On `gfx.DeviceRecoveredEvent`, render reloads every loaded texture and buffer (bodies read and written again, mips regenerated) and refills its default textures.
+  1. On `gfx.DeviceRecoveredEvent`, render reloads every loaded texture and buffer under its handle (bodies read and written again, mips regenerated in the next frame) and refills its default textures and each material's uniform blocks with their latest bytes, which a maker cannot write again, as setting the same bytes changes nothing.
   2. Then it publishes `RecoveredEvent`, on which makers refill their made buffers and textures.
 
-  Shaders, pipelines and bind groups come back from gfx under their old handles. An asset loaded from memory-mount bytes since removed can't come back, and that is reported.
+  Shaders, pipelines and bind groups come back from gfx under their old handles. An asset loaded from memory-mount bytes since removed can't come back, and that is reported. A load that failed before the loss is not reported again: its texture is written magenta again, and its buffer left as it is.
 - **Capture:**
   1. `frame.RequestCapture(window)` can be called at any time, and is taken from the first frame acquired after it.
   2. render publishes `CapturedEvent`.

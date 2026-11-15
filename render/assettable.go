@@ -497,6 +497,26 @@ func (t *assetTable) endMaterialVersions(device gfx.Device) {
 	t.endedFrameCount++
 }
 
+// refillDefaultTexturesAndUniforms fills again what render fills itself, after a device loss left it
+// empty: the default textures, and the buffer of each uniform block a
+// material keeps with the block's latest bytes, which its maker cannot
+// write again, as setting the same bytes changes nothing. A write that
+// fails is logged, unless the device is lost again.
+func (t *assetTable) refillDefaultTexturesAndUniforms(device gfx.Device) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	if err := t.bindingResources.refillTextures(device); err != nil {
+		t.logUnlessLost(fmt.Errorf("render: refilling the default textures: %w", err))
+	}
+	for _, slot := range t.materials.All() {
+		for _, block := range slot.uniformBlocks {
+			if block.buffer != (gfx.Buffer{}) {
+				writeBytes(t, device, block.buffer, 0, block.latestBytes)
+			}
+		}
+	}
+}
+
 // claimMeshReport answers whether a skipped draw of mesh is to be reported,
 // noting that it is, so later draws of mesh are not: true the first time
 // for each mesh, held or not.

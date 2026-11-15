@@ -131,66 +131,39 @@ func (r *bindingResourceCache) findTextureView(device gfx.Device, key defaultTex
 	return view, nil
 }
 
-// findTexture answers the texture key names, made the first time: of one
-// texel, with six layers in 2D for every view of 2D, arrays and cubes, and
-// four samples when multisampled; white, at depth 1.0, or, for integers, a
-// storage format or several samples, zeros.
+// findTexture answers the texture key names, made the first time, as
+// key.makeDescriptor describes it, and filled with its texel.
 func (r *bindingResourceCache) findTexture(device gfx.Device, key defaultTextureKey) (gfx.Texture, error) {
 	if texture, ok := r.textures[key]; ok {
 		return texture, nil
 	}
-	descriptor := gfx.TextureDescriptor{
-		Label:         defaultLabel + " texture",
-		Size:          gfx.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1},
-		MipLevelCount: 1,
-		SampleCount:   1,
-		Dimension:     key.dimension,
-		Usage:         gfx.TextureUsageFlagTextureBinding | gfx.TextureUsageFlagCopyDst,
-	}
-	if key.dimension == gfx.TextureDimension2D && !key.multisampled {
-		descriptor.Size.DepthOrArrayLayers = 6
-	}
-	// texel is the bytes of one texel the texture is filled with, none for
-	// zeros.
-	var texel []byte
-	switch key.sampleType {
-	case gfx.TextureSampleTypeFloat:
-		descriptor.Format = gfx.TextureFormatRGBA8Unorm
-		texel = []byte{0xff, 0xff, 0xff, 0xff}
-	case gfx.TextureSampleTypeDepth:
-		descriptor.Format = gfx.TextureFormatDepth16Unorm
-		texel = []byte{0xff, 0xff}
-	case gfx.TextureSampleTypeSint:
-		descriptor.Format = gfx.TextureFormatRGBA8Sint
-	case gfx.TextureSampleTypeUint:
-		descriptor.Format = gfx.TextureFormatRGBA8Uint
-	default:
-		descriptor.Format = key.storageFormat
-		descriptor.Usage = gfx.TextureUsageFlagStorageBinding
-	}
-	if key.multisampled {
-		descriptor.SampleCount = multisampledDefaultSampleCount
-		descriptor.Usage = gfx.TextureUsageFlagTextureBinding | gfx.TextureUsageFlagRenderAttachment
-		texel = nil
-	}
+	descriptor, texel := key.makeDescriptor()
 	texture, err := device.CreateTexture(descriptor)
 	if err != nil {
 		return gfx.Texture{}, err
 	}
-	if texel != nil {
-		layers := descriptor.Size.DepthOrArrayLayers
-		err = device.WriteTexture(gfx.ImageCopyTexture{Texture: texture, Aspect: gfx.TextureAspectAll}, bytes.Repeat(texel, int(layers)),
-			gfx.ImageDataLayout{BytesPerRow: uint32(len(texel)), RowsPerImage: 1}, descriptor.Size)
-		if err != nil {
-			device.ReleaseTexture(texture)
-			return gfx.Texture{}, fmt.Errorf("writing the default texture: %w", err)
-		}
+	if err := writeDefaultTexture(device, texture, descriptor, texel); err != nil {
+		device.ReleaseTexture(texture)
+		return gfx.Texture{}, err
 	}
 	if r.textures == nil {
 		r.textures = map[defaultTextureKey]gfx.Texture{}
 	}
 	r.textures[key] = texture
 	return texture, nil
+}
+
+// refillTextures fills every default texture made so far with its texel
+// again, after a device loss left it empty. The error is gfx's, the first
+// a write answers.
+func (r *bindingResourceCache) refillTextures(device gfx.Device) error {
+	for key, texture := range r.textures {
+		descriptor, texel := key.makeDescriptor()
+		if err := writeDefaultTexture(device, texture, descriptor, texel); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // defaultTextureKind is the kind of default texture a binding left unbound
@@ -209,11 +182,19 @@ type defaultTextureViewKey struct {
 	dimension gfx.TextureViewDimension
 }
 
-// defaultTextureKey is which default texture a default texture view is of:
-// the view's kind, and the texture's dimension.
-type defaultTextureKey struct {
-	defaultTextureKind
-	dimension gfx.TextureDimension
+// writeDefaultTexture fills every layer of texture, a default texture of
+// descriptor, with texel; nothing for no texel, as a new texture holds zeros.
+func writeDefaultTexture(device gfx.Device, texture gfx.Texture, descriptor gfx.TextureDescriptor, texel []byte) error {
+	if texel == nil {
+		return nil
+	}
+	layers := descriptor.Size.DepthOrArrayLayers
+	err := device.WriteTexture(gfx.ImageCopyTexture{Texture: texture, Aspect: gfx.TextureAspectAll}, bytes.Repeat(texel, int(layers)),
+		gfx.ImageDataLayout{BytesPerRow: uint32(len(texel)), RowsPerImage: 1}, descriptor.Size)
+	if err != nil {
+		return fmt.Errorf("writing the default texture: %w", err)
+	}
+	return nil
 }
 
 // makeDefaultSamplerDescriptor answers the sampler a binding of samplerType

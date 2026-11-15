@@ -58,34 +58,63 @@ func (l *bufferLoader) acquire(table *assetTable, device gfx.Device, files fs.FS
 	if statErr != nil {
 		table.report(ReportKindLoadFailed, fmt.Errorf("render: buffer %q failed to load: %w", key.path, statErr))
 	} else {
-		l.pendingLoads = append(l.pendingLoads, pendingBufferLoad{buffer: buffer, path: key.path, size: size})
+		l.pendingLoads = append(l.pendingLoads, pendingBufferLoad{buffer: buffer, path: key.path})
 	}
 	return buffer
 }
 
 // writePending reads the file of each buffer pending and still held in
 // table, one after another, holding no mutex, and writes it into the buffer,
-// padded with zeros to its size. A file that cannot be read, or is no longer
-// of the size its acquire found, is reported, and the buffer keeps zeros.
+// padded with zeros to its size. A file that cannot be read, or whose bytes
+// padded no longer fill the buffer made at its acquire, is reported, and the
+// buffer keeps what it held.
 func (l *bufferLoader) writePending(table *assetTable, device gfx.Device, files fs.FS) {
 	l.mutex.Lock()
 	loads := l.pendingLoads
 	l.pendingLoads = nil
 	l.mutex.Unlock()
+	l.write(table, device, files, loads)
+}
+
+// writeHeld writes the bytes of every buffer l holds again, as writePending
+// writes those pending, taking the loads pending, which it holds too: after
+// a device loss, which left them empty. A buffer whose bytes failed to load
+// keeps zeros, its failure not reported again, and one of no bytes, whose
+// file failed at its acquire, has none to write.
+func (l *bufferLoader) writeHeld(table *assetTable, device gfx.Device, files fs.FS) {
+	l.mutex.Lock()
+	l.pendingLoads = nil
+	var loads []pendingBufferLoad
+	for buffer, entry := range l.entries {
+		if !entry.failed {
+			loads = append(loads, pendingBufferLoad{buffer: buffer, path: entry.key.path})
+		}
+	}
+	l.mutex.Unlock()
+	l.write(table, device, files, loads)
+}
+
+// write reads and writes the file of each of loads still held in table, as
+// writePending says, holding no mutex but to mark a failed load.
+func (l *bufferLoader) write(table *assetTable, device gfx.Device, files fs.FS, loads []pendingBufferLoad) {
 	for _, load := range loads {
-		gfxBuffer, _, ok := table.findBuffer(load.buffer)
+		gfxBuffer, size, ok := table.findBuffer(load.buffer)
 		if !ok {
 			continue
 		}
 		data, err := fs.ReadFile(files, load.path)
-		if err == nil && uint64(len(data)) != load.size {
-			err = fmt.Errorf("a file of %d bytes, where it was of %d when acquired", len(data), load.size)
+		paddedData := padBytes(data)
+		if err == nil && uint64(len(paddedData)) != size {
+			err = fmt.Errorf("a file of %d bytes, where its buffer, made when acquired, holds %d", len(data), size)
 		}
 		if err != nil {
 			table.report(ReportKindLoadFailed, fmt.Errorf("render: buffer %q failed to load: %w", load.path, err))
+			l.mutex.Lock()
+			l.markFailed(load.buffer)
+			l.mutex.Unlock()
 			continue
 		}
-		writeBytes(table, device, gfxBuffer, 0, padBytes(data))
+		writeBytes(table, device, gfxBuffer, 0, paddedData)
 	}
 }
 
@@ -97,9 +126,8 @@ type bufferKey struct {
 }
 
 // pendingBufferLoad is a buffer whose bytes the decode-and-write job has yet
-// to write: its handle, the path of its file and the file's size.
+// to write: its handle and the path of its file.
 type pendingBufferLoad struct {
 	buffer Buffer
 	path   string
-	size   uint64
 }

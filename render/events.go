@@ -31,6 +31,16 @@ type FrameEvent struct {
 	GPULatency time.Duration
 }
 
+// RecoveredEvent is published once gfx has recovered a lost device and
+// render has written its own assets again under their handles: every loaded
+// texture and buffer read from its file again, the mips of those loaded with
+// Mipmaps requested for the next frame, and what render fills itself. Every
+// asset made from a slice is back under its handle, holding nothing: its
+// maker schedules tasks from this event to fill it again. A loaded asset
+// whose file is gone, such as one loaded from memory-mount bytes since
+// removed, is reported, as a failed load is.
+type RecoveredEvent struct{}
+
 // CapturedEvent delivers a capture Frame.RequestCapture asked for, published
 // a frame after the frame it was taken from, once its picture can be read.
 // A handler reads it with Frame.ReadCapture in tasks it joins into the out

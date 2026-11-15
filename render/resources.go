@@ -18,6 +18,10 @@ type Handlers struct {
 	// taking back the temporaries and freeing those gone unused, and returns
 	// that job, so the next beat starts after it.
 	EndFrame kernel.Sub[gfx.RenderEvent]
+	// ReloadAssets handles gfx.DeviceRecoveredEvent: it schedules the job
+	// writing render's assets again, publishes RecoveredEvent inside it after
+	// that job, and returns the nested publication's out dependency.
+	ReloadAssets kernel.Sub[gfx.DeviceRecoveredEvent]
 	// DeliverCapture handles gfx.CapturedEvent: it publishes CapturedEvent
 	// inside it, and returns the nested publication's out dependency, so gfx
 	// frees the capture's picture only after every task joined into it.

@@ -174,6 +174,12 @@ A task holding the `Surface` parameter, which locks gfx's `Device` for
 write alone, changes every window's surface with
 `Request(SurfaceRequest{Format, PresentMode})`, configured before the next
 frame acquires; the request at start stays gfx's `Config.Surface`.
+Once gfx has recovered a lost device, render writes every loaded texture
+and buffer again from its file under the same handle, requesting the
+textures' mips for the next frame, fills its default textures and every
+material's uniform blocks again, and then publishes `RecoveredEvent`, on
+which makers fill what they made from a slice again; a loaded asset whose
+file is gone, as memory-mount bytes since removed, is reported.
 What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
 
 ## Shape
@@ -226,6 +232,9 @@ What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
   shader, function, parameters and workgroup counts; and their copies, each
   an **`InspectedCopy`**; each pass, compute pass and copy with its
   position in its list.
+- **`RecoveredEvent`** says gfx has recovered a lost device and render
+  has written its own assets again: its handler's tasks fill the buffers
+  and textures their plugin made from a slice again.
 - **`CapturedEvent`** delivers a window's capture with its
   **`CaptureStatus`**, its picture read with `Frame.ReadCapture` in the
   tasks its handler joins.
@@ -253,8 +262,8 @@ its entry points with their stages, and each vertex entry point's inputs.
 ## Kernel surface
 
 - **Resources it installs:**
-  - `Handlers`: `RecordFrame`, `EndFrame`, `DeliverCapture` and
-    `DeliverReadback`, to order handlers around.
+  - `Handlers`: `RecordFrame`, `EndFrame`, `ReloadAssets`,
+    `DeliverCapture` and `DeliverReadback`, to order handlers around.
   - a private frame state, the state of the frames in flight, holding
     `Config`'s counts, the gfx frame being recorded, the pool of
     temporary textures, the temporary arena's chunks, what each command
@@ -268,6 +277,7 @@ its entry points with their stages, and each vertex entry point's inputs.
   for write through its `Surface` parameter; `platform.FS`, for read,
   through `Inventory`.
 - **Events it publishes:** `FrameEvent`, inside its `gfx.DrawEvent`
+  handler; `RecoveredEvent`, inside its `gfx.DeviceRecoveredEvent`
   handler; `CapturedEvent`, inside its `gfx.CapturedEvent` handler; and
   `ReadbackEvent`, inside its handler of a private event the job its
   `gfx.BufferMappedEvent` handler schedules publishes.
@@ -280,7 +290,11 @@ its entry points with their stages, and each vertex entry point's inputs.
   arena's chunks and frees those gone unused, with the bind groups of pass
   and draw parameters gone unused, and the staging buffers, after mapping
   those of the frame's readbacks, and is the beat's out dependency, so the
-  next beat starts after it; `gfx.CapturedEvent`
+  next beat starts after it; `gfx.DeviceRecoveredEvent`
+  (`Handlers.ReloadAssets`), whose job writes the loaded textures and
+  buffers, the default textures and the materials' uniform blocks again,
+  and which publishes `RecoveredEvent` after that job and returns its out
+  dependency; `gfx.CapturedEvent`
   (`Handlers.DeliverCapture`), which publishes `CapturedEvent` and returns
   its out dependency, so gfx frees the picture after the tasks its users
   join into it; and `gfx.BufferMappedEvent` (`Handlers.DeliverReadback`),

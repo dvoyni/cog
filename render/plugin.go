@@ -54,7 +54,8 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 // reports; binds render's built-in assets as a read mount under the prefix
 // cog.render, at the lowest priority, so any other mount holding one of
 // their names overrides it; subscribes to gfx.DrawEvent, gfx.RenderEvent,
-// gfx.CapturedEvent and gfx.BufferMappedEvent, the Subs kept in the Handlers
+// gfx.DeviceRecoveredEvent, gfx.CapturedEvent and gfx.BufferMappedEvent,
+// the Subs kept in the Handlers
 // resource; and subscribes to its own private event delivering readbacks. A
 // config of another type than *Config is a composition error, and panics.
 func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
@@ -71,6 +72,7 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	generateMipsTask := configurator.RegisterTask4(generateMips)
 	checkClearsTask := configurator.RegisterTask1(checkClears)
 	endFrameTask := configurator.RegisterTask3(endFrame)
+	rewriteAssetsTask := configurator.RegisterTask4(rewriteAssets)
 	findReadbackTask := configurator.RegisterTask1(findReadback)
 	releaseReadbackTask := configurator.RegisterTask2(releaseReadback)
 	configurator.InitResource(Handlers{
@@ -79,6 +81,9 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 		}),
 		EndFrame: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.RenderEvent) (gfx.RenderEvent, kernel.JobHandle) {
 			return event, ex.Schedule(endFrameTask, kernel.NoArg{}, in).Handle()
+		}),
+		ReloadAssets: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.DeviceRecoveredEvent) (gfx.DeviceRecoveredEvent, kernel.JobHandle) {
+			return reloadAssets(ex, in, event, rewriteAssetsTask)
 		}),
 		DeliverCapture: configurator.Subscribe(deliverCapture),
 		DeliverReadback: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.BufferMappedEvent) (gfx.BufferMappedEvent, kernel.JobHandle) {

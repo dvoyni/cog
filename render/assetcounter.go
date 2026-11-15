@@ -47,6 +47,17 @@ func (s *assetCounter[K, H]) add(key K, h H) {
 	s.entries[h] = countedAsset[K]{key: key, holderCount: 1}
 }
 
+// markFailed notes that h's load failed and was reported, so writing it
+// again, after a device loss, reports it no more. s's mutex is held, and
+// markFailed panics when it is not.
+func (s *assetCounter[K, H]) markFailed(h H) {
+	s.requireLocked("markFailed")
+	if entry, ok := s.entries[h]; ok {
+		entry.failed = true
+		s.entries[h] = entry
+	}
+}
+
 // release counts one holder of h fewer, and at the last has it freed when
 // the frame ends, unless held again by then; false, counting nothing, when
 // no holder holds h.
@@ -90,9 +101,10 @@ func (s *assetCounter[K, H]) requireLocked(operation string) {
 	}
 }
 
-// countedAsset is what assetCounter keeps of one asset: its key, and how many
-// holders hold it.
+// countedAsset is what assetCounter keeps of one asset: its key, how many
+// holders hold it, and whether its load failed and was reported.
 type countedAsset[K comparable] struct {
 	key         K
 	holderCount int
+	failed      bool
 }

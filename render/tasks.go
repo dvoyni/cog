@@ -36,6 +36,16 @@ func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event gfx.DrawEvent, 
 	return event, ex.Join(mipsGenerated, beginFrameJob, clearsChecked)
 }
 
+// reloadAssets is Handlers.ReloadAssets: it schedules rewriteAssetsTask, and
+// publishes RecoveredEvent inside event after that job, so the makers'
+// tasks run after render's own assets are written again; it returns the
+// nested publication's out dependency.
+func reloadAssets(ex *kernel.Executor, in kernel.JobHandle, event gfx.DeviceRecoveredEvent, rewriteAssetsTask *kernel.Task[kernel.NoArg, kernel.NoResult]) (gfx.DeviceRecoveredEvent, kernel.JobHandle) {
+	rewritten := ex.Schedule(rewriteAssetsTask, kernel.NoArg{}, in).Handle()
+	_, out := ex.Publish(rewritten, RecoveredEvent{})
+	return event, out
+}
+
 // deliverCapture is Handlers.DeliverCapture: it publishes event as render's
 // CapturedEvent, keeping gfx's in it for Frame.ReadCapture, and returns the
 // nested publication's out dependency, after which gfx frees the picture.
@@ -65,6 +75,20 @@ func beginFrame(k *kernel.Kernel, frame gfx.Frame, state kernel.Read[*frameState
 func writeLoads(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*frameState], table kernel.Read[*assetTable], device kernel.Read[gfx.Device], files kernel.Read[platform.FS]) kernel.NoResult {
 	table.Get().loadedBuffers.writePending(table.Get(), device.Get(), files.Get())
 	state.Get().mips.request(table.Get().loadedTextures.writePending(table.Get(), device.Get(), files.Get())...)
+	return kernel.NoResult{}
+}
+
+// rewriteAssets writes render's assets again after gfx recovered a lost
+// device, which made every object again under its handle, empty: it reads
+// the file of each loaded buffer and decodes the body of each loaded
+// texture again, and writes them, as writeLoads writes a load, taking the
+// loads pending with them, and requests the mips of the textures loaded
+// with Mipmaps for the next frame; and it fills the default textures and
+// every material's uniform blocks again.
+func rewriteAssets(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*frameState], table kernel.Read[*assetTable], device kernel.Read[gfx.Device], files kernel.Read[platform.FS]) kernel.NoResult {
+	table.Get().loadedBuffers.writeHeld(table.Get(), device.Get(), files.Get())
+	state.Get().mips.request(table.Get().loadedTextures.writeHeld(table.Get(), device.Get(), files.Get())...)
+	table.Get().refillDefaultTexturesAndUniforms(device.Get())
 	return kernel.NoResult{}
 }
 

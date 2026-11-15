@@ -44,14 +44,15 @@ func (l *textureLoader) acquire(table *assetTable, device gfx.Device, files fs.F
 		return Texture{}
 	}
 	l.add(key, texture)
-	size := gfx.Extent3D{Width: descriptor.Width, Height: descriptor.Height, DepthOrArrayLayers: 1}
 	if headerErr != nil {
 		table.report(ReportKindLoadFailed, fmt.Errorf("render: texture %q failed to load, drawing magenta: %w", key.path, headerErr))
+		l.markFailed(texture)
 		gfxTexture, _ := table.findTexture(texture)
+		size := gfx.Extent3D{Width: descriptor.Width, Height: descriptor.Height, DepthOrArrayLayers: 1}
 		writeTexels(table, device, gfx.ImageCopyTexture{Texture: gfxTexture, Aspect: gfx.TextureAspectAll}, slices.Repeat([]byte{255, 0, 255, 255}, int(size.Width*size.Height)), 4, size)
 		return texture
 	}
-	l.pendingLoads = append(l.pendingLoads, pendingTextureLoad{texture: texture, key: key, size: size})
+	l.pendingLoads = append(l.pendingLoads, pendingTextureLoad{texture: texture, key: key})
 	return texture
 }
 
@@ -65,18 +66,50 @@ func (l *textureLoader) writePending(table *assetTable, device gfx.Device, files
 	loads := l.pendingLoads
 	l.pendingLoads = nil
 	l.mutex.Unlock()
+	return l.write(table, device, files, loads)
+}
+
+// writeHeld writes the body of every texture l holds again, as writePending
+// writes those pending, taking the loads pending, which it holds too: after
+// a device loss, which left them empty. A texture whose load failed is
+// written magenta again, its failure not reported again.
+func (l *textureLoader) writeHeld(table *assetTable, device gfx.Device, files fs.FS) []Texture {
+	l.mutex.Lock()
+	l.pendingLoads = nil
+	var loads []pendingTextureLoad
+	for texture, entry := range l.entries {
+		loads = append(loads, pendingTextureLoad{texture: texture, key: entry.key, failed: entry.failed})
+	}
+	l.mutex.Unlock()
+	return l.write(table, device, files, loads)
+}
+
+// write decodes and writes the body of each of loads still held in table, at
+// the size its texture was made, as writePending says, holding no mutex but
+// to mark a failed load.
+func (l *textureLoader) write(table *assetTable, device gfx.Device, files fs.FS, loads []pendingTextureLoad) []Texture {
 	var unmippedTextures []Texture
 	for _, load := range loads {
 		gfxTexture, ok := table.findTexture(load.texture)
 		if !ok {
 			continue
 		}
-		texels, err := load.key.decodeBody(files, load.size.Width, load.size.Height)
+		size := device.TextureDescriptor(gfxTexture).Size
+		var texels []byte
+		var err error
+		if !load.failed {
+			texels, err = load.key.decodeBody(files, size.Width, size.Height)
+		}
 		if err != nil {
 			table.report(ReportKindLoadFailed, fmt.Errorf("render: texture %q failed to load, drawing magenta: %w", load.key.path, err))
-			texels = slices.Repeat([]byte{255, 0, 255, 255}, int(load.size.Width*load.size.Height))
+			l.mutex.Lock()
+			l.markFailed(load.texture)
+			l.mutex.Unlock()
 		}
-		writeTexels(table, device, gfx.ImageCopyTexture{Texture: gfxTexture, Aspect: gfx.TextureAspectAll}, texels, 4, load.size)
+		if load.failed || err != nil {
+			texels = slices.Repeat([]byte{255, 0, 255, 255}, int(size.Width*size.Height))
+		}
+		writeTexels(table, device, gfx.ImageCopyTexture{Texture: gfxTexture, Aspect: gfx.TextureAspectAll}, texels, 4, size)
 		if load.key.options.Mipmaps {
 			unmippedTextures = append(unmippedTextures, load.texture)
 		}
@@ -85,9 +118,10 @@ func (l *textureLoader) writePending(table *assetTable, device gfx.Device, files
 }
 
 // pendingTextureLoad is a texture whose body the decode job has yet to
-// write: its handle, its key and its size.
+// write: its handle, its key, and whether its load failed, to be written
+// magenta.
 type pendingTextureLoad struct {
 	texture Texture
 	key     textureKey
-	size    gfx.Extent3D
+	failed  bool
 }
