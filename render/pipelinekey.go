@@ -67,6 +67,12 @@ func (k pipelineKey) makePipeline(table *assetTable, device gfx.Device, shader s
 	return device.CreateRenderPipeline(descriptor)
 }
 
+// makeInspectedPipeline answers k's pipeline as an inspection writes it
+// down: its shader, entry points and render state.
+func (k pipelineKey) makeInspectedPipeline(gfx.RenderPipeline) InspectedPipeline {
+	return InspectedPipeline{Shader: k.shader, VertexEntryPoint: k.vertexEntryPoint, FragmentEntryPoint: k.fragmentEntryPoint, State: k.state}
+}
+
 // passFormat is what a pass's targets fix of the pipelines drawn in it: the
 // format of each colour target, the first colorCount of colorFormats, that
 // of its depth-stencil target, none for none, and their sample count.

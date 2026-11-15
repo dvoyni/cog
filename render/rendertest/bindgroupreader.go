@@ -3,7 +3,6 @@ package rendertest
 import (
 	"cmp"
 	"slices"
-	"strings"
 
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/gfx/recording"
@@ -62,8 +61,8 @@ func newBindGroupReader(calls []recording.Call, textureViews map[gfx.TextureView
 		case recording.CreateBufferArguments:
 			r.buffers[arguments.Buffer] = arguments.Descriptor
 			_, uniform := handle.ParseLabel[render.Material](arguments.Descriptor.Label)
-			_, held := handle.ParseLabel[render.Buffer](arguments.Descriptor.Label)
-			if uniform || (held && strings.HasSuffix(arguments.Descriptor.Label, handle.TemporaryChunkLabel)) {
+			_, label, held := handle.SplitLabel[render.Buffer](arguments.Descriptor.Label)
+			if uniform || (held && label == handle.TemporaryChunkLabel) {
 				r.contents[arguments.Buffer] = []bufferVersion{{submission: submission, bytes: make([]byte, arguments.Descriptor.Size)}}
 			}
 		case recording.CreateBindGroupLayoutArguments:
@@ -122,7 +121,7 @@ func (r *bindGroupReader) makeParameters(module gfx.ShaderModule, groupIndex uin
 // binding, a uniform block of a material's or of the arena as the
 // submission of that index found it.
 func (r *bindGroupReader) makeParameter(binding gfx.ShaderBinding, entry gfx.BindGroupEntry, dynamicOffset uint64, submission int) render.InspectedParameter {
-	parameter := render.InspectedParameter{Name: binding.Name}
+	parameter := render.InspectedParameter{Name: binding.Name, Group: binding.Group, Binding: binding.Binding}
 	switch {
 	case entry.TextureView != (gfx.TextureView{}):
 		view, ok := r.textureViews[entry.TextureView]

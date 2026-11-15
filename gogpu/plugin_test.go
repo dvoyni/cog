@@ -1437,7 +1437,7 @@ func TestATriangleIsDrawnIntoAShownWindow(t *testing.T) {
 	for range 30 {
 		h.drawFrame(window, func(event gfx.DrawEvent, device gfx.Device) {
 			view := device.Framebuffer(event.Frame, window)
-			encoder, err := device.Encoder(event.Frame, 0)
+			encoder, err := device.Encoder(event.Frame, 0, "")
 			if err != nil {
 				t.Errorf("Encoder answered %v", err)
 				return
@@ -2641,7 +2641,7 @@ func clearFramebuffer(t *testing.T, event gfx.DrawEvent, device gfx.Device, wind
 	if view == (gfx.TextureView{}) {
 		return
 	}
-	encoder, err := device.Encoder(event.Frame, 0)
+	encoder, err := device.Encoder(event.Frame, 0, "")
 	if err != nil {
 		t.Errorf("Encoder answered %v", err)
 		return

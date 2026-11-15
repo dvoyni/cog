@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/dvoyni/cog/gfx"
@@ -68,6 +69,19 @@ func (a *temporaryArena) acquireChunk(size uint64, table *assetTable, device gfx
 	chunk := &arenaChunk{poolHold: poolHold{held: true}, buffer: buffer, gfxBuffer: gfxBuffer, bytes: make([]byte, size)}
 	a.pooledChunks = append(a.pooledChunks, chunk)
 	return chunk, nil
+}
+
+// findBytes answers a copy of bufferRange's bytes, of a chunk of a's, as its
+// list placed them; false for a range of no chunk's.
+func (a *temporaryArena) findBytes(bufferRange BufferRange) ([]byte, bool) {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	for _, chunk := range a.pooledChunks {
+		if chunk.buffer == bufferRange.Buffer {
+			return slices.Clone(chunk.bytes[bufferRange.Offset : bufferRange.Offset+bufferRange.Size]), true
+		}
+	}
+	return nil, false
 }
 
 // endFrame takes back every chunk held this frame, and removes from table

@@ -122,8 +122,10 @@ type Pass struct {
 	targets     [2*maxColorTargetCount + 1]drawnTarget
 	targetCount int
 	// noteIndex is the index of the pass's note among its list's, which
-	// says whether it drew.
-	noteIndex int
+	// says whether it drew, and inspectedPass that of its inspection among
+	// its list's inspected passes, while the list is inspected.
+	noteIndex     int
+	inspectedPass int
 	// material is the material SetMaterial selected; bindGroups what the
 	// draws bind for each group, kept between them; and pipeline the
 	// pipeline as last set on encoder.
@@ -408,7 +410,10 @@ func (p *Pass) Draw(mesh Mesh, arguments DrawArgs) {
 	if indexed && (meshSlot.topology == PrimitiveTopologyLineStrip || meshSlot.topology == PrimitiveTopologyTriangleStrip) {
 		key.stripIndexFormat = meshSlot.indices.Format
 	}
-	if !p.findInstanceBuffers(table, material.label, &buffers) || !p.bindDraw(table, material, shader, key) {
+	if !p.findInstanceBuffers(table, material.label, &buffers) {
+		return
+	}
+	if !p.bindDraw(table, material, shader, &key) {
 		return
 	}
 	p.setVertexBuffers(&buffers)
@@ -416,10 +421,16 @@ func (p *Pass) Draw(mesh Mesh, arguments DrawArgs) {
 	instanceCount := cmp.Or(arguments.InstanceCount, 1)
 	if !indexed {
 		p.encoder.Draw(gfx.DrawArgs{VertexCount: vertexCount, InstanceCount: instanceCount, FirstInstance: arguments.FirstInstance})
+		if p.listState.inspectedList != nil {
+			p.addInspectedDraw(&key, &shader, InspectedDraw{VertexCount: vertexCount, InstanceCount: instanceCount, FirstInstance: arguments.FirstInstance})
+		}
 		return
 	}
 	p.encoder.SetIndexBuffer(buffers.indexBuffer, gfx.IndexFormat(meshSlot.indices.Format), meshSlot.indices.Range.Offset)
 	p.encoder.DrawIndexed(gfx.DrawIndexedArgs{IndexCount: indexCount, InstanceCount: instanceCount, FirstInstance: arguments.FirstInstance})
+	if p.listState.inspectedList != nil {
+		p.addInspectedDraw(&key, &shader, InspectedDraw{IndexCount: indexCount, InstanceCount: instanceCount, FirstInstance: arguments.FirstInstance})
+	}
 }
 
 // DrawVertices draws vertexCount vertices in topology, its zero a triangle
@@ -441,12 +452,20 @@ func (p *Pass) DrawVertices(topology PrimitiveTopology, vertexCount uint32, argu
 		return
 	}
 	var buffers drawBufferSet
-	if !p.findInstanceBuffers(table, material.label, &buffers) || !p.bindDraw(table, material, shader, pipelineKey{topology: topology}) {
+	if !p.findInstanceBuffers(table, material.label, &buffers) {
+		return
+	}
+	key := pipelineKey{topology: topology}
+	if !p.bindDraw(table, material, shader, &key) {
 		return
 	}
 	p.setVertexBuffers(&buffers)
 	p.listState.passes[p.noteIndex].drew = true
-	p.encoder.Draw(gfx.DrawArgs{VertexCount: vertexCount, InstanceCount: cmp.Or(arguments.InstanceCount, 1), FirstInstance: arguments.FirstInstance})
+	instanceCount := cmp.Or(arguments.InstanceCount, 1)
+	p.encoder.Draw(gfx.DrawArgs{VertexCount: vertexCount, InstanceCount: instanceCount, FirstInstance: arguments.FirstInstance})
+	if p.listState.inspectedList != nil {
+		p.addInspectedDraw(&key, &shader, InspectedDraw{VertexCount: vertexCount, InstanceCount: instanceCount, FirstInstance: arguments.FirstInstance})
+	}
 }
 
 // End ends the pass: nothing more is recorded into it.
@@ -532,9 +551,10 @@ func (p *Pass) findInstanceBuffers(table *assetTable, label string, buffers *dra
 
 // bindDraw sets on p's encoder the pipeline of key, its mesh's part filled
 // in, the rest filled in from material, of shader, p's instance buffers and
-// its targets, and the bind groups the draw binds; false when the draw is
-// skipped, reported once for the material, or once for its pipeline.
-func (p *Pass) bindDraw(table *assetTable, material materialSlot, shader shaderSlot, key pipelineKey) bool {
+// its targets, and the bind groups the draw binds, key filled in as it
+// goes; false when the draw is skipped, reported once for the material, or
+// once for its pipeline.
+func (p *Pass) bindDraw(table *assetTable, material materialSlot, shader shaderSlot, key *pipelineKey) bool {
 	key.shader = material.shader
 	key.vertexEntryPoint = material.vertexEntryPoint
 	key.fragmentEntryPoint = material.fragmentEntryPoint
@@ -542,7 +562,7 @@ func (p *Pass) bindDraw(table *assetTable, material materialSlot, shader shaderS
 	key.instanceLayout = p.instanceLayout
 	key.formats = p.formats
 	device := p.frame.device.Get()
-	pipeline, ok := table.pipelines.find(table, device, key, shader)
+	pipeline, ok := table.pipelines.find(table, device, *key, shader)
 	if !ok {
 		return false
 	}
@@ -565,6 +585,36 @@ func (p *Pass) bindDraw(table *assetTable, material materialSlot, shader shaderS
 	return true
 }
 
+// addInspectedDraw writes draw, recorded with key's pipeline, of shader,
+// its counts filled in, down in the inspection of p's list, with its
+// material, its parameters and its instance buffers; nothing when the list
+// is not inspected, which its callers check first, so a draw of a frame not
+// inspected builds nothing for it.
+func (p *Pass) addInspectedDraw(key *pipelineKey, shader *shaderSlot, draw InspectedDraw) {
+	inspectedList := p.listState.inspectedList
+	if inspectedList == nil {
+		return
+	}
+	groupParameters := p.bindGroups.inspectedParameters
+	clear(groupParameters[len(shader.layout.groups):])
+	draw.Material = InspectedMaterial{
+		Material:           p.material,
+		Shader:             key.shader,
+		VertexEntryPoint:   key.vertexEntryPoint,
+		FragmentEntryPoint: key.fragmentEntryPoint,
+		State:              key.state,
+		Parameters:         groupParameters[materialGroup],
+	}
+	draw.PassParameters = groupParameters[passGroup]
+	draw.DrawParameters = groupParameters[drawGroup]
+	for _, slot := range p.instanceSlots[:p.instanceCount] {
+		instanceRange := p.instanceBuffers[slot].Range
+		draw.InstanceBuffers = append(draw.InstanceBuffers, BufferRange{Buffer: instanceRange.Buffer, Offset: instanceRange.Offset})
+	}
+	inspectedPass := &inspectedList.Passes[p.inspectedPass]
+	inspectedPass.Draws = append(inspectedPass.Draws, draw)
+}
+
 // setVertexBuffers sets on p's encoder each vertex buffer of buffers, at its
 // slot and offset.
 func (p *Pass) setVertexBuffers(buffers *drawBufferSet) {
@@ -580,6 +630,48 @@ func (p *Pass) addTarget(target drawnTarget) {
 		p.targets[p.targetCount] = target
 		p.targetCount++
 	}
+}
+
+// makeInspectedPass answers the pass descriptor declares, begun with
+// gfxDescriptor, at position in its list, as an inspection writes it down:
+// its loads and stores as gfx's attachments have them, a window's target at
+// mip level and layer zero.
+func makeInspectedPass(descriptor PassDescriptor, gfxDescriptor gfx.RenderPassDescriptor, position int) InspectedPass {
+	pass := InspectedPass{Position: position, Label: descriptor.Label}
+	for index, target := range descriptor.ColorTargets {
+		attachment := gfxDescriptor.ColorAttachments[index]
+		colorTarget := ColorTarget{
+			Window:     target.Window,
+			Texture:    target.Texture,
+			Clear:      attachment.LoadOp == gfx.LoadOpClear,
+			ClearColor: Color(attachment.ClearValue),
+			Discard:    attachment.StoreOp == gfx.StoreOpDiscard,
+			Resolve:    ResolveTarget{Window: target.Resolve.Window, Texture: target.Resolve.Texture},
+		}
+		if target.Texture != (Texture{}) {
+			colorTarget.MipLevel = target.MipLevel
+			colorTarget.Layer = target.Layer
+		}
+		if target.Resolve.Texture != (Texture{}) {
+			colorTarget.Resolve.MipLevel = target.Resolve.MipLevel
+			colorTarget.Resolve.Layer = target.Resolve.Layer
+		}
+		pass.ColorTargets = append(pass.ColorTargets, colorTarget)
+	}
+	if target := descriptor.DepthStencil; target.Texture != (Texture{}) {
+		attachment := gfxDescriptor.DepthStencilAttachment
+		pass.DepthStencil = DepthStencilTarget{
+			Texture:      target.Texture,
+			MipLevel:     target.MipLevel,
+			Layer:        target.Layer,
+			Clear:        attachment.DepthLoadOp == gfx.LoadOpClear || attachment.StencilLoadOp == gfx.LoadOpClear,
+			ClearDepth:   attachment.DepthClearValue,
+			ClearStencil: attachment.StencilClearValue,
+			Discard:      attachment.DepthStoreOp == gfx.StoreOpDiscard || attachment.StencilStoreOp == gfx.StoreOpDiscard,
+			ReadOnly:     attachment.DepthReadOnly || attachment.StencilReadOnly,
+		}
+	}
+	return pass
 }
 
 // drawnTarget is a texture a pass writes, at one mip level and layer; a

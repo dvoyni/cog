@@ -56,16 +56,18 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 // their names overrides it; subscribes to gfx.DrawEvent, gfx.RenderEvent,
 // gfx.DeviceRecoveredEvent, gfx.CapturedEvent and gfx.BufferMappedEvent,
 // the Subs kept in the Handlers
-// resource; and subscribes to its own private event delivering readbacks. A
+// resource; and subscribes to its own private events delivering readbacks
+// and inspections. A
 // config of another type than *Config is a composition error, and panics.
 func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	pluginConfig := kernel.PluginConfigOrDefault[Config](config)
+	resourceReporter := reporter{logger: configurator.Logger(), inspector: &inspector{}}
 	configurator.InitResource(&frameState{
 		temporaryIdleFrames: cmp.Or(pluginConfig.TemporaryIdleFrames, defaultTemporaryIdleFrames),
 		temporaryChunkSize:  (cmp.Or(pluginConfig.TemporaryChunkSize, defaultTemporaryChunkSize) + 3) &^ 3,
-		reporter:            reporter{logger: configurator.Logger()},
+		reporter:            resourceReporter,
 	})
-	configurator.InitResource(&assetTable{reporter: reporter{logger: configurator.Logger()}})
+	configurator.InitResource(&assetTable{reporter: resourceReporter})
 	configurator.BindSocket(platform.ReadMountSocket{FS: makeAssetFS(), Priority: math.MinInt, Prefix: assetPrefix})
 	beginFrameTask := configurator.RegisterTask1(beginFrame)
 	writeLoadsTask := configurator.RegisterTask4(writeLoads)
@@ -75,6 +77,7 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	rewriteAssetsTask := configurator.RegisterTask4(rewriteAssets)
 	findReadbackTask := configurator.RegisterTask1(findReadback)
 	releaseReadbackTask := configurator.RegisterTask2(releaseReadback)
+	dropInspectionTask := configurator.RegisterTask1(dropInspection)
 	configurator.InitResource(Handlers{
 		RecordFrame: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.DrawEvent) (gfx.DrawEvent, kernel.JobHandle) {
 			return recordFrame(ex, in, event, beginFrameTask, writeLoadsTask, generateMipsTask, checkClearsTask)
@@ -92,6 +95,9 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	})
 	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event readbackDeliveryEvent) (readbackDeliveryEvent, kernel.JobHandle) {
 		return publishReadback(ex, in, event, releaseReadbackTask)
+	})
+	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event inspectionDeliveryEvent) (inspectionDeliveryEvent, kernel.JobHandle) {
+		return publishInspection(ex, in, event, dropInspectionTask)
 	})
 	return nil
 }

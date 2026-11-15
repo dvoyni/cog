@@ -63,6 +63,24 @@ func (d SamplerDescriptor) makeGfxSamplerDescriptor(binding gfx.ShaderBinding) (
 	return descriptor, nil
 }
 
+// makeInspectedSamplerDescriptor answers descriptor, gfx's, in render's
+// terms as an inspection writes it down: each field at its default spelt
+// zero.
+func makeInspectedSamplerDescriptor(descriptor gfx.SamplerDescriptor) SamplerDescriptor {
+	return SamplerDescriptor{
+		AddressModeU:  AddressMode(spellDefaultZero(descriptor.AddressModeU, gfx.AddressModeClampToEdge)),
+		AddressModeV:  AddressMode(spellDefaultZero(descriptor.AddressModeV, gfx.AddressModeClampToEdge)),
+		AddressModeW:  AddressMode(spellDefaultZero(descriptor.AddressModeW, gfx.AddressModeClampToEdge)),
+		MagFilter:     FilterMode(spellDefaultZero(descriptor.MagFilter, gfx.FilterModeNearest)),
+		MinFilter:     FilterMode(spellDefaultZero(descriptor.MinFilter, gfx.FilterModeNearest)),
+		MipmapFilter:  FilterMode(spellDefaultZero(descriptor.MipmapFilter, gfx.FilterModeNearest)),
+		LodMinClamp:   descriptor.LodMinClamp,
+		LodMaxClamp:   spellDefaultZero(descriptor.LodMaxClamp, maxLodClamp),
+		Compare:       CompareFunction(descriptor.Compare),
+		MaxAnisotropy: spellDefaultZero(descriptor.Anisotropy, 1),
+	}
+}
+
 // AddressMode is how a sampler reads coordinates outside a texture, each
 // mode gfx's of the same name; its zero value is clamping to the edge.
 type AddressMode uint32

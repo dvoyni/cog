@@ -45,6 +45,12 @@ func (k computePipelineKey) makePipeline(_ *assetTable, device gfx.Device, shade
 	return computePipeline{pipeline: pipeline, entryPoint: entryPoint}, nil
 }
 
+// makeInspectedPipeline answers pipeline, k's, as an inspection writes it
+// down: its shader and the compute function it runs.
+func (k computePipelineKey) makeInspectedPipeline(pipeline computePipeline) InspectedPipeline {
+	return InspectedPipeline{Shader: k.shader, ComputeEntryPoint: pipeline.entryPoint}
+}
+
 // computePipeline is a compute pipeline a cache holds, with the name of the
 // compute function it runs, its key's entry point resolved.
 type computePipeline struct {

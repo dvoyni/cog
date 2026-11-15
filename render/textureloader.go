@@ -49,7 +49,7 @@ func (l *textureLoader) acquire(table *assetTable, device gfx.Device, files fs.F
 		l.markFailed(texture)
 		gfxTexture, _ := table.findTexture(texture)
 		size := gfx.Extent3D{Width: descriptor.Width, Height: descriptor.Height, DepthOrArrayLayers: 1}
-		writeTexels(table, device, gfx.ImageCopyTexture{Texture: gfxTexture, Aspect: gfx.TextureAspectAll}, slices.Repeat([]byte{255, 0, 255, 255}, int(size.Width*size.Height)), 4, size)
+		writeTexels(table, device, texture, gfx.ImageCopyTexture{Texture: gfxTexture, Aspect: gfx.TextureAspectAll}, slices.Repeat([]byte{255, 0, 255, 255}, int(size.Width*size.Height)), 4, size)
 		return texture
 	}
 	l.pendingLoads = append(l.pendingLoads, pendingTextureLoad{texture: texture, key: key})
@@ -109,7 +109,7 @@ func (l *textureLoader) write(table *assetTable, device gfx.Device, files fs.FS,
 		if load.failed || err != nil {
 			texels = slices.Repeat([]byte{255, 0, 255, 255}, int(size.Width*size.Height))
 		}
-		writeTexels(table, device, gfx.ImageCopyTexture{Texture: gfxTexture, Aspect: gfx.TextureAspectAll}, texels, 4, size)
+		writeTexels(table, device, load.texture, gfx.ImageCopyTexture{Texture: gfxTexture, Aspect: gfx.TextureAspectAll}, texels, 4, size)
 		if load.key.options.Mipmaps {
 			unmippedTextures = append(unmippedTextures, load.texture)
 		}

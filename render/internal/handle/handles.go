@@ -76,6 +76,17 @@ const TemporaryChunkLabel = "render: a chunk of the temporary arena"
 // one from a buffer a user made.
 const StagingBufferLabel = "render: a staging buffer of readbacks"
 
+// The labels render gives its bind groups, by what they bind, so a reader of
+// gfx's calls tells one kind from another: a material's own, one of pass,
+// draw or compute parameters, the default of a group nothing is set to, and
+// one of render's mip generation.
+const (
+	MaterialBindGroupLabel  = "render: a material's bind group"
+	ParameterBindGroupLabel = "render: a bind group of pass or draw parameters"
+	DefaultBindGroupLabel   = "render: the default bind group"
+	MipBindGroupLabel       = "render: a bind group of mips"
+)
+
 // MakeLabel answers the label of the gfx object behind h, naming h and then
 // label, the one its user gave.
 func MakeLabel[H Handle](h H, label string) string {
@@ -86,14 +97,23 @@ func MakeLabel[H Handle](h H, label string) string {
 // ParseLabel answers the handle a gfx object's label names, and false for a
 // label MakeLabel did not make for an H.
 func ParseLabel[H Handle](label string) (H, bool) {
+	h, _, ok := SplitLabel[H](label)
+	return h, ok
+}
+
+// SplitLabel answers the handle a gfx object's label names and the label its
+// user gave, which MakeLabel joined, and false for a label MakeLabel did not
+// make for an H.
+func SplitLabel[H Handle](label string) (H, string, bool) {
 	var h H
 	rest, found := strings.CutPrefix(label, "render "+h.labelKind()+" ")
 	if !found {
-		return h, false
+		return h, "", false
 	}
 	var key handle
 	if _, err := fmt.Sscanf(rest, "%d.%d", &key.index, &key.generation); err != nil {
-		return h, false
+		return h, "", false
 	}
-	return H{key}, true
+	_, userLabel, _ := strings.Cut(rest, ": ")
+	return H{key}, userLabel, true
 }

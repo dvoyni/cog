@@ -7,11 +7,13 @@ import (
 )
 
 // pipelineMaterial is the material a render pipeline draws with, in
-// render's terms but for its parameters, which each draw binds, and the
-// module of its vertex stage, whose bindings name them.
+// render's terms but for its parameters, which each draw binds; the module
+// of its vertex stage, whose bindings name them; and the slots of its
+// vertex buffers read per instance, in order.
 type pipelineMaterial struct {
-	material render.InspectedMaterial
-	module   gfx.ShaderModule
+	material      render.InspectedMaterial
+	module        gfx.ShaderModule
+	instanceSlots []uint32
 }
 
 // makePipelineMaterials answers the material each render pipeline the
@@ -24,7 +26,7 @@ func makePipelineMaterials(calls []recording.Call, shaders map[gfx.ShaderModule]
 	for _, call := range calls {
 		if arguments, ok := call.Arguments.(recording.CreateRenderPipelineArguments); ok {
 			descriptor := arguments.Descriptor
-			materials[arguments.Pipeline] = pipelineMaterial{
+			material := pipelineMaterial{
 				material: render.InspectedMaterial{
 					Shader:             shaders[descriptor.Vertex.Module],
 					VertexEntryPoint:   descriptor.Vertex.EntryPoint,
@@ -33,6 +35,12 @@ func makePipelineMaterials(calls []recording.Call, shaders map[gfx.ShaderModule]
 				},
 				module: descriptor.Vertex.Module,
 			}
+			for slot, layout := range descriptor.Vertex.Buffers {
+				if layout.StepMode == gfx.VertexStepModeInstance {
+					material.instanceSlots = append(material.instanceSlots, uint32(slot))
+				}
+			}
+			materials[arguments.Pipeline] = material
 		}
 	}
 	return materials

@@ -69,8 +69,9 @@ func makeShaderKey(path string, defines []ShaderDefine) (shaderKey, []gfx.Shader
 // answers the slot with nothing, what it made released, and its error, with
 // the kind it is reported as: ReportKindLoadFailed for a file that fails to preprocess or
 // compile, ReportKindShaderRefused for one refused for its bindings, and none
-// for an error of gfx's to log.
-func (k shaderKey) compile(device gfx.Device, layouts *layoutInterner, files fs.FS, shader Shader, defines []gfx.ShaderDefine) (slot shaderSlot, reportKind ReportKind, err error) {
+// for an error of gfx's to log. A module made goes into inspector's
+// inspection.
+func (k shaderKey) compile(device gfx.Device, layouts *layoutInterner, inspector *inspector, files fs.FS, shader Shader, defines []gfx.ShaderDefine) (slot shaderSlot, reportKind ReportKind, err error) {
 	source, err := device.PreprocessShader(files, k.path, defines)
 	if err != nil {
 		return shaderSlot{}, ReportKindLoadFailed, fmt.Errorf("failed to load: %w", err)
@@ -82,6 +83,9 @@ func (k shaderKey) compile(device gfx.Device, layouts *layoutInterner, files fs.
 	if err != nil {
 		return shaderSlot{}, ReportKindLoadFailed, fmt.Errorf("failed to compile: %w", err)
 	}
+	inspector.add(func(inspection *Inspection) {
+		inspection.MadeAssets = append(inspection.MadeAssets, InspectedAsset{Shader: shader, Label: k.path})
+	})
 	defer func() {
 		if err != nil {
 			device.ReleaseShaderModule(module)

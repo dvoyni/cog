@@ -22,6 +22,9 @@ type ComputePass struct {
 	// encoder is the pass's gfx encoder; nil when the pass records nothing
 	// or ended.
 	encoder gfx.ComputePassEncoder
+	// inspectedPass is the index of the pass's inspection among its list's
+	// inspected compute passes, while the list is inspected.
+	inspectedPass int
 	// shader and entryPoint are what SetShader selected; bindGroups what
 	// the dispatches bind for each group, kept between them; and pipeline
 	// the pipeline as last set on encoder.
@@ -150,6 +153,14 @@ func (c *ComputePass) Dispatch(x, y, z uint32) {
 	}
 	c.bindGroups.setChangedGroups(c.encoder, groupCount, &c.listState.dynamicOffsets)
 	c.encoder.Dispatch(x, y, z)
+	if inspectedList := c.listState.inspectedList; inspectedList != nil {
+		dispatch := InspectedDispatch{Shader: c.shader, EntryPoint: pipeline.entryPoint, X: x, Y: y, Z: z}
+		for _, parameters := range c.bindGroups.inspectedParameters[:groupCount] {
+			dispatch.Parameters = append(dispatch.Parameters, parameters...)
+		}
+		inspectedPass := &inspectedList.ComputePasses[c.inspectedPass]
+		inspectedPass.Dispatches = append(inspectedPass.Dispatches, dispatch)
+	}
 }
 
 // End ends the compute pass: nothing more is recorded into it.

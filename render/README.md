@@ -180,6 +180,13 @@ textures' mips for the next frame, fills its default textures and every
 material's uniform blocks again, and then publishes `RecoveredEvent`, on
 which makers fill what they made from a slice again; a loaded asset whose
 file is gone, as memory-mount bytes since removed, is reported.
+`Frame.RequestInspection()` asks for an inspection of the next frame, one
+at a time, a request while one is pending joining it: while that frame
+records, render's calls write it down as `rendertest`'s reader reads a
+frame back, with what only render knows beside it, and `InspectedEvent`
+delivers it after the present, read with `Frame.ReadInspection` while its
+jobs run; every other frame pays one check a call and allocates nothing for
+it. Each command list's gfx encoder is labelled with the list's label.
 What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
 
 ## Shape
@@ -223,15 +230,24 @@ What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
   in a **`TextureViewDimension`** through a **`TextureAspect`**, a
   **`SamplerDescriptor`** of **`AddressMode`**s and **`FilterMode`**s, a
   **`BufferRange`**, or a Go value of a uniform block.
-- **`Inspection`** is a frame written down in render's terms: its command
-  lists by order, their passes with their targets and their draws, each an
-  **`InspectedDraw`** with its pass parameters, its
-  **`InspectedMaterial`** and its draw parameters, each an
-  **`InspectedParameter`** by name, and counts; their compute passes, each
-  an **`InspectedComputePass`** of **`InspectedDispatch`**es with their
-  shader, function, parameters and workgroup counts; and their copies, each
-  an **`InspectedCopy`**; each pass, compute pass and copy with its
-  position in its list.
+- **`Inspection`** is a frame written down in render's terms: its beat; its
+  command lists by order, each with its label, their passes with their
+  targets and their draws, each an **`InspectedDraw`** with its pass
+  parameters, its **`InspectedMaterial`** and its draw parameters, each an
+  **`InspectedParameter`** by name, group and binding number, its instance
+  buffers and counts; their compute passes, each an
+  **`InspectedComputePass`** of **`InspectedDispatch`**es with their
+  shader, function, parameters and workgroup counts; their copies, each an
+  **`InspectedCopy`**, and their readbacks, each an
+  **`InspectedReadback`**; each pass, compute pass, copy and readback with
+  its position in its list. Beside them: the textures, buffers and shaders
+  the frame made, each an **`InspectedAsset`**, and the writes into them,
+  each an **`InspectedWrite`**; the temporaries it took from the pools and
+  the materials it versioned; the pipelines it made, each an
+  **`InspectedPipeline`**, and the bind groups, each an
+  **`InspectedBindGroup`** of a **`BindGroupKind`**; and its reports.
+  `Frame.RequestInspection` asks for one and **`InspectedEvent`** delivers
+  it, read with `Frame.ReadInspection` in the tasks its handler joins.
 - **`RecoveredEvent`** says gfx has recovered a lost device and render
   has written its own assets again: its handler's tasks fill the buffers
   and textures their plugin made from a slice again.
@@ -257,7 +273,10 @@ its entry points with their stages, and each vertex entry point's inputs.
 `Step` draws one beat, `OpenWindow` opens a window,
   `LengthenNextAcquire` makes an acquire take longer, `ExpectReport`
   names a report kind the test expects, `Reports` answers the reports
-  logged, and `Frames` reads each frame back as an `Inspection`.
+  logged, and `Frames` reads each frame back as an `Inspection`, with the
+  beat of the `Step` that drew it and the reports logged during that `Step`;
+  what gfx's recording does not show, the temporaries, the versioned
+  materials and each draw's material handle, it leaves empty.
 
 ## Kernel surface
 
@@ -267,8 +286,9 @@ its entry points with their stages, and each vertex entry point's inputs.
   - a private frame state, the state of the frames in flight, holding
     `Config`'s counts, the gfx frame being recorded, the pool of
     temporary textures, the temporary arena's chunks, what each command
-    list keeps while it records, and the staging pool with the readbacks
-    in flight.
+    list keeps while it records, the staging pool with the readbacks in
+    flight, and the inspection asked for, from its request to its
+    delivery.
   - a private asset table, every asset render holds: so far, its textures,
     each with the views passes drew into, its buffers, and its shaders,
     with the layouts they share.
@@ -278,19 +298,23 @@ its entry points with their stages, and each vertex entry point's inputs.
   through `Inventory`.
 - **Events it publishes:** `FrameEvent`, inside its `gfx.DrawEvent`
   handler; `RecoveredEvent`, inside its `gfx.DeviceRecoveredEvent`
-  handler; `CapturedEvent`, inside its `gfx.CapturedEvent` handler; and
+  handler; `CapturedEvent`, inside its `gfx.CapturedEvent` handler;
   `ReadbackEvent`, inside its handler of a private event the job its
-  `gfx.BufferMappedEvent` handler schedules publishes.
+  `gfx.BufferMappedEvent` handler schedules publishes; and
+  `InspectedEvent`, inside its handler of a private event its
+  `gfx.RenderEvent` handler's job publishes once the frame inspected ends.
 - **Events it subscribes to:** `gfx.DrawEvent` (`Handlers.RecordFrame`),
   which, after gfx's acquire, keeps the draw event's frame as the one being
-  recorded in a job that is `FrameEvent`'s `Ready`, publishes `FrameEvent`,
+  recorded, beginning its inspection when one is requested, in a job that
+  is `FrameEvent`'s `Ready`, publishes `FrameEvent`,
   and returns its out dependency joined with that job, so gfx's flush waits
   for the users' recording; and `gfx.RenderEvent` (`Handlers.EndFrame`),
   whose job, after gfx's present, takes back the temporary textures and the
   arena's chunks and frees those gone unused, with the bind groups of pass
   and draw parameters gone unused, and the staging buffers, after mapping
-  those of the frame's readbacks, and is the beat's out dependency, so the
-  next beat starts after it; `gfx.DeviceRecoveredEvent`
+  those of the frame's readbacks, finishes the frame's inspection, if any,
+  and is the beat's out dependency, so the next beat starts after it;
+  `gfx.DeviceRecoveredEvent`
   (`Handlers.ReloadAssets`), whose job writes the loaded textures and
   buffers, the default textures and the materials' uniform blocks again,
   and which publishes `RecoveredEvent` after that job and returns its out
@@ -301,7 +325,9 @@ its entry points with their stages, and each vertex entry point's inputs.
   whose job finds the readback whose staging buffer gfx mapped and
   publishes it on a private event, whose handler publishes `ReadbackEvent`
   and unmaps the buffer after its out dependency, so it goes back to the
-  pool after the tasks its users join into it.
+  pool after the tasks its users join into it. Its handler of the private
+  event delivering an inspection publishes `InspectedEvent` and drops the
+  inspection after its out dependency.
 - **Task parameters it offers:** `Frame`, locking the frame state, the
   asset table and `gfx.Device`, all for read; and `Inventory`, locking the
   asset table, `gfx.Device` and `platform.FS`, all for read; and `Surface`,

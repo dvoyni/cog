@@ -10,7 +10,9 @@
 //	frames := h.Frames()
 //
 // Frames reads back each frame gfx drew in render's terms, as a
-// render.Inspection, and Reports answers the reports render logged.
+// render.Inspection, the one render.Frame's RequestInspection asks of
+// render, so a test compares the two; and Reports answers the reports render
+// logged.
 //
 // The harness fails the test on any error the kernel logs, a render.Report
 // among them, unless it is a report of a kind the test named with

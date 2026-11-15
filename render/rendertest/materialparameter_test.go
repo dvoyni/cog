@@ -179,15 +179,15 @@ func TestAMaterialsValuesLandInTheirBindingsByNameAndANameTheShaderLacksIsIgnore
 	}
 	draw := findPassDraws(h, "scene")[0][1]
 	want := []render.InspectedParameter{
-		{Name: "albedo", TextureView: render.TextureView{Texture: scene.albedo, MipLevelCount: 1, LayerCount: 1, Dimension: render.TextureViewDimension2D, Aspect: render.TextureAspectAll}},
-		{Name: "albedo_sampler", Sampler: render.SamplerDescriptor{MagFilter: render.FilterModeLinear, AddressModeU: render.AddressModeRepeat}},
-		{Name: "tint", Uniform: unsafe.Slice((*byte)(unsafe.Pointer(&value)), unsafe.Sizeof(value))},
-		{Name: "lights", Buffer: render.BufferRange{Buffer: scene.lights, Size: 32}},
-		{Name: "shadow", Default: true},
-		{Name: "shadow_sampler", Default: true},
-		{Name: "layers", TextureView: render.TextureView{Texture: scene.layers, BaseMipLevel: 1, MipLevelCount: 1, BaseLayer: 1, LayerCount: 2, Dimension: render.TextureViewDimension2DArray, Aspect: render.TextureAspectAll}},
-		{Name: "indices", Default: true},
-		{Name: "output", TextureView: render.TextureView{Texture: scene.layers, MipLevelCount: 1, LayerCount: 1, Dimension: render.TextureViewDimension2D, Aspect: render.TextureAspectAll}},
+		{Name: "albedo", Group: 1, Binding: 0, TextureView: render.TextureView{Texture: scene.albedo, MipLevelCount: 1, LayerCount: 1, Dimension: render.TextureViewDimension2D, Aspect: render.TextureAspectAll}},
+		{Name: "albedo_sampler", Group: 1, Binding: 1, Sampler: render.SamplerDescriptor{MagFilter: render.FilterModeLinear, AddressModeU: render.AddressModeRepeat}},
+		{Name: "tint", Group: 1, Binding: 2, Uniform: unsafe.Slice((*byte)(unsafe.Pointer(&value)), unsafe.Sizeof(value))},
+		{Name: "lights", Group: 1, Binding: 3, Buffer: render.BufferRange{Buffer: scene.lights, Size: 32}},
+		{Name: "shadow", Group: 1, Binding: 4, Default: true},
+		{Name: "shadow_sampler", Group: 1, Binding: 5, Default: true},
+		{Name: "layers", Group: 1, Binding: 6, TextureView: render.TextureView{Texture: scene.layers, BaseMipLevel: 1, MipLevelCount: 1, BaseLayer: 1, LayerCount: 2, Dimension: render.TextureViewDimension2DArray, Aspect: render.TextureAspectAll}},
+		{Name: "indices", Group: 1, Binding: 7, Default: true},
+		{Name: "output", Group: 1, Binding: 8, TextureView: render.TextureView{Texture: scene.layers, MipLevelCount: 1, LayerCount: 1, Dimension: render.TextureViewDimension2D, Aspect: render.TextureAspectAll}},
 	}
 	if !reflect.DeepEqual(draw.Material.Parameters, want) {
 		t.Errorf("the draw bound\n%+v\nwant\n%+v", draw.Material.Parameters, want)

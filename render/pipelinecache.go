@@ -21,6 +21,9 @@ type cachedPipelineKey[P comparable] interface {
 	// shader, and table's vertex layouts; an error saying why it cannot be
 	// made.
 	makePipeline(table *assetTable, device gfx.Device, shader shaderSlot) (P, error)
+	// makeInspectedPipeline answers pipeline, the key's, as an inspection
+	// writes it down.
+	makeInspectedPipeline(pipeline P) InspectedPipeline
 }
 
 // pipelineCache holds the pipelines of type P render made, one for each key
@@ -86,7 +89,8 @@ type cachedPipeline[P comparable] struct {
 
 // make makes c's pipeline of key from shader, the slot of key's shader,
 // unless another draw made it while this one waited, and reports a failure
-// through table, unless the device was lost.
+// through table, unless the device was lost; one made goes into the
+// inspection.
 func (c *cachedPipeline[P]) make[K cachedPipelineKey[P]](table *assetTable, device gfx.Device, key K, shader shaderSlot) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -94,7 +98,13 @@ func (c *cachedPipeline[P]) make[K cachedPipelineKey[P]](table *assetTable, devi
 		return
 	}
 	var err error
-	if c.pipeline, err = key.makePipeline(table, device, shader); err != nil && !errors.Is(err, gfx.ErrDeviceLost) {
+	c.pipeline, err = key.makePipeline(table, device, shader)
+	switch {
+	case err == nil:
+		table.inspector.add(func(inspection *Inspection) {
+			inspection.MadePipelines = append(inspection.MadePipelines, key.makeInspectedPipeline(c.pipeline))
+		})
+	case !errors.Is(err, gfx.ErrDeviceLost):
 		table.report(ReportKindPipelineFailed, fmt.Errorf("render: %v: %w", key, err))
 	}
 	c.made.Store(true)

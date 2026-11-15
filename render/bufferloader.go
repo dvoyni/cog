@@ -114,7 +114,7 @@ func (l *bufferLoader) write(table *assetTable, device gfx.Device, files fs.FS, 
 			l.mutex.Unlock()
 			continue
 		}
-		writeBytes(table, device, gfxBuffer, 0, paddedData)
+		writeBytes(table, device, load.buffer, gfxBuffer, 0, paddedData)
 	}
 }
 

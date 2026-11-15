@@ -441,7 +441,7 @@ func (d *device) CreateCommandEncoder(descriptor gfx.CommandEncoderDescriptor) (
 	} else {
 		encoder = &commandEncoder{}
 	}
-	*encoder = commandEncoder{device: d, bufferEffects: encoder.bufferEffects}
+	*encoder = commandEncoder{device: d, label: descriptor.Label, bufferEffects: encoder.bufferEffects}
 	return encoder, nil
 }
 
@@ -465,7 +465,7 @@ func (d *device) Submit(buffers ...gfx.CommandBuffer) (uint64, error) {
 			encoder := buffer.(commandBuffer).encoder
 			encoder.bufferEffects = applyBufferEffects(encoder.bufferEffects)
 			if kept {
-				submission.Buffers[index] = CommandBuffer{Commands: encoder.commands}
+				submission.Buffers[index] = CommandBuffer{Label: encoder.label, Commands: encoder.commands}
 			}
 			d.idleEncoders = append(d.idleEncoders, encoder)
 		}

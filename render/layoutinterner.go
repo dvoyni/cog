@@ -86,8 +86,9 @@ func (i *layoutInterner) release(device gfx.Device, layout *internedPipelineLayo
 
 // findDefaultBindGroup answers the bind group of group, a layout a held
 // pipeline layout holds, binding each of its entries as it draws unbound,
-// made from bindingResources the first time.
-func (i *layoutInterner) findDefaultBindGroup(device gfx.Device, bindingResources *bindingResourceCache, group *internedGroupLayout) (gfx.BindGroup, error) {
+// made from bindingResources the first time, which goes into inspector's
+// inspection.
+func (i *layoutInterner) findDefaultBindGroup(device gfx.Device, bindingResources *bindingResourceCache, group *internedGroupLayout, inspector *inspector) (gfx.BindGroup, error) {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
 	if group.defaultBindGroup != (gfx.BindGroup{}) {
@@ -101,7 +102,7 @@ func (i *layoutInterner) findDefaultBindGroup(device gfx.Device, bindingResource
 		}
 		entries[index] = entry
 	}
-	bindGroup, err := device.CreateBindGroup(gfx.BindGroupDescriptor{Label: "render: the default bind group", Layout: group.layout, Entries: entries})
+	bindGroup, err := BindGroupKindDefault.createBindGroup(device, inspector, group.layout, entries)
 	if err != nil {
 		return gfx.BindGroup{}, err
 	}
@@ -112,8 +113,9 @@ func (i *layoutInterner) findDefaultBindGroup(device gfx.Device, bindingResource
 // findParameterBindGroup answers the bind group of group, a layout a held
 // pipeline layout holds, binding draft's entries, made the first time and
 // shared by every pass and draw binding the same until it goes unused or
-// names an asset since freed, and notes it used this frame.
-func (i *layoutInterner) findParameterBindGroup(device gfx.Device, group *internedGroupLayout, draft *bindGroupDraft) (gfx.BindGroup, error) {
+// names an asset since freed, and notes it used this frame. One made goes
+// into inspector's inspection.
+func (i *layoutInterner) findParameterBindGroup(device gfx.Device, group *internedGroupLayout, draft *bindGroupDraft, inspector *inspector) (gfx.BindGroup, error) {
 	draft.keyEntries = draft.keyEntries[:0]
 	for _, entry := range draft.entries {
 		draft.keyEntries = append(draft.keyEntries, bindGroupKeyEntry{buffer: entry.Buffer, sampler: entry.Sampler, textureView: entry.TextureView, offset: entry.Offset, size: entry.Size})
@@ -125,7 +127,7 @@ func (i *layoutInterner) findParameterBindGroup(device gfx.Device, group *intern
 		cached.idleFrames = 0
 		return cached.bindGroup, nil
 	}
-	bindGroup, err := device.CreateBindGroup(gfx.BindGroupDescriptor{Label: "render: a bind group of pass or draw parameters", Layout: group.layout, Entries: draft.entries})
+	bindGroup, err := BindGroupKindParameters.createBindGroup(device, inspector, group.layout, draft.entries)
 	if err != nil {
 		return gfx.BindGroup{}, err
 	}

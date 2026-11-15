@@ -18,7 +18,9 @@ import (
 // as wgpu does; a zero handle names none. Once its command buffer is
 // submitted, the device answers it again from CreateCommandEncoder.
 type commandEncoder struct {
-	device   *device
+	device *device
+	// label is the label the encoder was made with, for its command buffer.
+	label    string
 	commands []Command
 	// bufferEffects are what the copies and clears recorded do to buffers'
 	// bytes, applied in order at the submit.

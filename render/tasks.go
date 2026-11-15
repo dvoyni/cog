@@ -11,7 +11,8 @@ import (
 // recordFrame is Handlers.RecordFrame: it schedules writeLoadsTask for the
 // loads pending since the last frame, to run beside the recording; after
 // gfx's acquire, it schedules beginFrameTask, which keeps the draw event's
-// frame as the one being recorded, and publishes FrameEvent inside
+// frame as the one being recorded and begins its inspection when one is
+// requested, and publishes FrameEvent inside
 // gfx.DrawEvent, with the draw event's beat and timing signals and that job
 // as its Ready; and after the nested publication's out dependency and the
 // first writeLoadsTask, it schedules writeLoadsTask again, for the loads
@@ -21,9 +22,9 @@ import (
 // joined with beginFrameTask's, so gfx's flush waits for every recording
 // task the users joined into the out dependency, for every load's body and
 // its mips, and for the check.
-func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event gfx.DrawEvent, beginFrameTask *kernel.Task[gfx.Frame, kernel.NoResult], writeLoadsTask *kernel.Task[kernel.NoArg, kernel.NoResult], generateMipsTask *kernel.Task[gfx.Frame, kernel.NoResult], checkClearsTask *kernel.Task[kernel.NoArg, kernel.NoResult]) (gfx.DrawEvent, kernel.JobHandle) {
+func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event gfx.DrawEvent, beginFrameTask *kernel.Task[gfx.DrawEvent, kernel.NoResult], writeLoadsTask *kernel.Task[kernel.NoArg, kernel.NoResult], generateMipsTask *kernel.Task[gfx.Frame, kernel.NoResult], checkClearsTask *kernel.Task[kernel.NoArg, kernel.NoResult]) (gfx.DrawEvent, kernel.JobHandle) {
 	pendingWritten := ex.Schedule(writeLoadsTask, kernel.NoArg{}).Handle()
-	beginFrameJob := ex.Schedule(beginFrameTask, event.Frame, event.Ready).Handle()
+	beginFrameJob := ex.Schedule(beginFrameTask, event, event.Ready).Handle()
 	_, out := ex.Publish(in, FrameEvent{
 		Beat:        event.Beat,
 		Ready:       beginFrameJob,
@@ -54,6 +55,14 @@ func deliverCapture(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, 
 	return event, out
 }
 
+// publishInspection handles inspectionDeliveryEvent: it publishes
+// InspectedEvent inside it, schedules dropInspectionTask after the nested
+// publication's out dependency, and returns that job.
+func publishInspection(ex *kernel.Executor, in kernel.JobHandle, event inspectionDeliveryEvent, dropInspectionTask *kernel.Task[kernel.NoArg, kernel.NoResult]) (inspectionDeliveryEvent, kernel.JobHandle) {
+	_, out := ex.Publish(in, InspectedEvent{Beat: event.beat})
+	return event, ex.Schedule(dropInspectionTask, kernel.NoArg{}, out).Handle()
+}
+
 // publishReadback handles readbackDeliveryEvent: it publishes ReadbackEvent
 // inside it, schedules releaseReadbackTask for the readback after the nested
 // publication's out dependency, and returns that job.
@@ -62,9 +71,11 @@ func publishReadback(ex *kernel.Executor, in kernel.JobHandle, event readbackDel
 	return event, ex.Schedule(releaseReadbackTask, event.delivered.Readback, out).Handle()
 }
 
-// beginFrame keeps frame as the one being recorded, for Frame's calls.
-func beginFrame(k *kernel.Kernel, frame gfx.Frame, state kernel.Read[*frameState]) kernel.NoResult {
-	state.Get().setRecordingFrame(frame)
+// beginFrame keeps event's frame as the one being recorded, for Frame's
+// calls, and begins its inspection, of event's beat, when one is requested.
+func beginFrame(k *kernel.Kernel, event gfx.DrawEvent, state kernel.Read[*frameState]) kernel.NoResult {
+	state.Get().setRecordingFrame(event.Frame)
+	state.Get().inspector.begin(event.Beat)
 	return kernel.NoResult{}
 }
 
@@ -119,6 +130,13 @@ func findReadback(k *kernel.Kernel, event gfx.BufferMappedEvent, state kernel.Re
 	return kernel.NoResult{}
 }
 
+// dropInspection drops the inspection delivered, once InspectedEvent's
+// jobs have run.
+func dropInspection(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*frameState]) kernel.NoResult {
+	state.Get().inspector.drop()
+	return kernel.NoResult{}
+}
+
 // releaseReadback ends readback once its publication's jobs have run: its
 // staging buffer is unmapped and goes back to the pool. An unmap that fails
 // is logged, but for a device loss, which gfx has logged.
@@ -143,7 +161,8 @@ func releaseReadback(k *kernel.Kernel, readback Readback, state kernel.Read[*fra
 // map of the staging buffer of each readback the frame recorded, publishing
 // readbackDeliveryEvent, failed, for each whose map fails to start; and with
 // the temporaries it frees the staging buffers no readback has held for as
-// long.
+// long. Last, it finishes the frame's inspection, if any, publishing
+// inspectionDeliveryEvent for it.
 func endFrame(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*frameState], table kernel.Read[*assetTable], device kernel.Read[gfx.Device]) kernel.NoResult {
 	frameState := state.Get()
 	for _, readback := range frameState.staging.mapRecorded(device.Get(), frameState.reporter) {
@@ -158,5 +177,8 @@ func endFrame(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*frameState], 
 	frameState.listStates.endFrame(table.Get())
 	table.Get().unbindFreed(device.Get())
 	table.Get().layouts.freeIdleBindGroups(device.Get(), frameState.temporaryIdleFrames)
+	if beat, ok := frameState.inspector.finish(); ok {
+		k.Publish(inspectionDeliveryEvent{beat: beat})
+	}
 	return kernel.NoResult{}
 }

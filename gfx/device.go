@@ -424,11 +424,11 @@ func (d *device) WriteTexture(destination ImageCopyTexture, data []byte, layout 
 	return d.checkLoss(d.backend.WriteTexture(destination, data, layout, size))
 }
 
-func (d *device) Encoder(frame Frame, order SubmitOrder) (CommandEncoder, error) {
+func (d *device) Encoder(frame Frame, order SubmitOrder, label string) (CommandEncoder, error) {
 	if d.lost.Load() {
 		return discardEncoder{}, ErrDeviceLost
 	}
-	encoder, err := d.backend.CreateCommandEncoder(CommandEncoderDescriptor{})
+	encoder, err := d.backend.CreateCommandEncoder(CommandEncoderDescriptor{Label: label})
 	if err != nil {
 		return discardEncoder{}, d.checkLoss(err)
 	}

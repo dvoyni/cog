@@ -32,7 +32,7 @@ func (l *shaderLoader) acquire(table *assetTable, device gfx.Device, files fs.FS
 		return shader
 	}
 	shader = table.addEmptyShader()
-	slot, reportKind, err := key.compile(device, &table.layouts, files, shader, defines)
+	slot, reportKind, err := key.compile(device, &table.layouts, table.inspector, files, shader, defines)
 	table.fillShader(shader, slot)
 	l.mutex.Lock()
 	heldShader, ok := l.hold(key)

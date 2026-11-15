@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/render/internal/handle"
@@ -99,6 +100,37 @@ func (p *bindingValue) fillUniform(device gfx.Device, binding gfx.ShaderBinding,
 	}
 	*p = bindingValue{kind: parameterKindUniform}
 	return nil
+}
+
+// makeInspectedParameter answers v, bound to binding, as an inspection
+// writes it down: Default when defaulted, the binding drawing its default;
+// a uniform block as its bytes, materialBytes for one a material holds in a
+// buffer of its own, and arena's for one in a temporary buffer, as a
+// buffer bound to a uniform block in a temporary buffer is.
+func (v bindingValue) makeInspectedParameter(binding gfx.ShaderBinding, defaulted bool, materialBytes []byte, arena *temporaryArena) InspectedParameter {
+	parameter := InspectedParameter{Name: binding.Name, Group: binding.Group, Binding: binding.Binding, Default: defaulted}
+	if defaulted {
+		return parameter
+	}
+	switch v.kind {
+	case parameterKindTexture:
+		parameter.TextureView = makeInspectedTextureView(v.texture, v.view)
+	case parameterKindSampler:
+		parameter.Sampler = makeInspectedSamplerDescriptor(v.sampler)
+	case parameterKindUniform, parameterKindBuffer:
+		if v.kind == parameterKindUniform && v.bufferRange.Buffer == (Buffer{}) {
+			parameter.Uniform = slices.Clone(materialBytes)
+			break
+		}
+		if binding.Buffer.Type == gfx.BufferBindingTypeUniform {
+			if uniform, ok := arena.findBytes(v.bufferRange); ok {
+				parameter.Uniform = uniform
+				break
+			}
+		}
+		parameter.Buffer = v.bufferRange
+	}
+	return parameter
 }
 
 // overlapsTargets answers whether v is a texture overlapping one of targets,

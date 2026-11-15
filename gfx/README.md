@@ -73,8 +73,8 @@ What remains is on the [gfx map](https://github.com/dvoyni/cog/issues/608).
   it once the frame's framebuffers are acquired, carrying the **`Frame`** to
   record into, `Ready`, and two timing signals, `AcquireWait` and
   `GPULatency`.
-- **`Device.Encoder(frame, order)`** answers a frame's encoder at a
-  **`SubmitOrder`**; gfx finishes them and submits them sorted by order.
+- **`Device.Encoder(frame, order, label)`** answers a frame's encoder at a
+  **`SubmitOrder`**, labelled; gfx finishes them and submits them sorted by order.
   **`Device.Framebuffer(frame, window)`** answers a window's framebuffer
   view. **`CreateCommandEncoder`** answers a standalone encoder its owner
   finishes and submits.
@@ -156,7 +156,7 @@ func (p *game) Init(c *kernel.Configurator, _ any) error {
 }
 
 func recordScene(k *kernel.Kernel, e gfx.DrawEvent, device kernel.Read[gfx.Device], scene kernel.Read[*Scene]) kernel.NoResult {
-	encoder, err := device.Get().Encoder(e.Frame, orderScene)
+	encoder, err := device.Get().Encoder(e.Frame, orderScene, "scene")
 	if err != nil {
 		k.Logger().LogErr(err)
 		return kernel.NoResult{}

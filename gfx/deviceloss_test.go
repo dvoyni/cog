@@ -63,7 +63,7 @@ func TestADeviceLossFromABackendCallIsLoggedThenPublishedOnce(t *testing.T) {
 			h := newHarness(t)
 			var buffer gfx.Buffer
 			h.readFrame = func(event gfx.DrawEvent, device gfx.Device) {
-				encoder, _ := device.Encoder(event.Frame, 0)
+				encoder, _ := device.Encoder(event.Frame, 0, "")
 				encoder.ClearBuffer(buffer, 0, 4)
 			}
 			h.mustSpawn(nil)
@@ -199,7 +199,7 @@ func TestOnceTheDeviceIsLostNoCallReachesTheBackendAndCallsWithErrorsAnswerErrDe
 				return device.WriteTexture(gfx.ImageCopyTexture{}, nil, gfx.ImageDataLayout{}, gfx.Extent3D{})
 			},
 			"Encoder": func() error {
-				encoder, err := device.Encoder(gfx.Frame{}, 0)
+				encoder, err := device.Encoder(gfx.Frame{}, 0, "")
 				encoder.ClearBuffer(buffer, 0, 4)
 				return err
 			},
@@ -259,7 +259,7 @@ func TestTheFrameInFlightAtALossSkipsItsSubmitAndPresent(t *testing.T) {
 			var buffer gfx.Buffer
 			h.readFrame = func(event gfx.DrawEvent, device gfx.Device) {
 				for order := range gfx.SubmitOrder(2) {
-					encoder, err := device.Encoder(event.Frame, order)
+					encoder, err := device.Encoder(event.Frame, order, "")
 					mustSucceed(t, err)
 					encoder.ClearBuffer(buffer, 0, 4)
 				}
@@ -430,7 +430,7 @@ func TestAFrameLostMidwayIsDrawnAgainAfterTheRecovery(t *testing.T) {
 	h := newHarness(t)
 	var buffer gfx.Buffer
 	h.readFrame = func(event gfx.DrawEvent, device gfx.Device) {
-		encoder, err := device.Encoder(event.Frame, 0)
+		encoder, err := device.Encoder(event.Frame, 0, "")
 		if err == nil {
 			encoder.ClearBuffer(buffer, 0, 4)
 		}

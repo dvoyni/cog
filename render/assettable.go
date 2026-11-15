@@ -104,6 +104,9 @@ func (t *assetTable) addTexture(device gfx.Device, descriptor TextureDescriptor)
 		return Texture{}, err
 	}
 	slot.texture = gfxTexture
+	t.inspector.add(func(inspection *Inspection) {
+		inspection.MadeAssets = append(inspection.MadeAssets, InspectedAsset{Texture: texture, Label: descriptor.Label})
+	})
 	return texture, nil
 }
 
@@ -114,7 +117,13 @@ func (t *assetTable) addTexture(device gfx.Device, descriptor TextureDescriptor)
 func (t *assetTable) addBuffer(device gfx.Device, label string, size uint64, usage BufferUsageFlags) (Buffer, gfx.Buffer, error) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-	return t.insertBuffer(device, label, size, usage)
+	buffer, gfxBuffer, err := t.insertBuffer(device, label, size, usage)
+	if gfxBuffer != (gfx.Buffer{}) {
+		t.inspector.add(func(inspection *Inspection) {
+			inspection.MadeAssets = append(inspection.MadeAssets, InspectedAsset{Buffer: buffer, Label: label})
+		})
+	}
+	return buffer, gfxBuffer, err
 }
 
 // insertBuffer makes a buffer as addBuffer does. t's mutex is held.
@@ -286,10 +295,13 @@ func (t *assetTable) setMaterialParameter(device gfx.Device, material Material, 
 		*parameter = previous
 	case !drawn:
 		block.latestBytes = append(block.latestBytes[:0], uniformBytes...)
-		writeBytes(t, device, block.buffer, 0, uniformBytes)
+		writeBytes(t, device, Buffer{}, block.buffer, 0, uniformBytes)
 	default:
 		if !slices.ContainsFunc(slot.uniformBlocks, func(other materialUniformBlock) bool { return other.bufferBehind }) {
 			t.versionedMaterials = append(t.versionedMaterials, material)
+			t.inspector.add(func(inspection *Inspection) {
+				inspection.VersionedMaterials = append(inspection.VersionedMaterials, material)
+			})
 		}
 		block.latestBytes = append(block.latestBytes[:0], uniformBytes...)
 		block.bufferBehind = true
@@ -362,10 +374,13 @@ func (t *assetTable) findDrawBindGroups(device gfx.Device, material Material, sh
 			materialBindGroup, err = t.findMaterialBindGroup(device, slot, shader, targets, listState)
 			binding := groupBinding{bindGroup: materialBindGroup.group}
 			if binding.bindGroup == (gfx.BindGroup{}) && err == nil {
-				binding.bindGroup, err = t.layouts.findDefaultBindGroup(device, &t.bindingResources, groupLayout)
+				binding.bindGroup, err = t.layouts.findDefaultBindGroup(device, &t.bindingResources, groupLayout, t.inspector)
 			}
 			bindGroups.groupBindings[group] = binding
 			bindGroups.unboundReads[group] = materialBindGroup.unboundRead
+			if listState.inspectedList != nil {
+				bindGroups.inspectedParameters[group] = t.makeInspectedMaterialParameters(slot, shader, materialBindGroup, listState.arena)
+			}
 		case bindGroups.resolvedFor[group] != functions:
 			level := "pass parameter"
 			if group == drawGroup {
@@ -378,7 +393,7 @@ func (t *assetTable) findDrawBindGroups(device gfx.Device, material Material, sh
 					t.report(ReportKindParameterRefused, fmt.Errorf("render: %s %q names a binding of shader %v in @group(%d), and %ss are in @group(%d)", level, setting.name, slot.shader, shader.bindings[index].Group, level, group))
 				}
 			}
-			bindGroups.groupBindings[group], bindGroups.unboundReads[group], err = t.makeParameterGroupBinding(device, uint32(group), settings, level, functions, shader, targets, &listState.bindGroupDraft)
+			bindGroups.groupBindings[group], bindGroups.unboundReads[group], bindGroups.inspectedParameters[group], err = t.makeParameterGroupBinding(device, uint32(group), settings, level, functions, shader, targets, listState)
 			if err == nil {
 				bindGroups.resolvedFor[group] = functions
 			}
@@ -412,7 +427,7 @@ func (t *assetTable) findDispatchBindGroups(device gfx.Device, selection shaderS
 			continue
 		}
 		var err error
-		bindGroups.groupBindings[group], bindGroups.unboundReads[group], err = t.makeParameterGroupBinding(device, uint32(group), listState.computeSettings, "compute parameter", selection, shader, nil, &listState.bindGroupDraft)
+		bindGroups.groupBindings[group], bindGroups.unboundReads[group], bindGroups.inspectedParameters[group], err = t.makeParameterGroupBinding(device, uint32(group), listState.computeSettings, "compute parameter", selection, shader, nil, listState)
 		if err != nil {
 			return err
 		}
@@ -485,7 +500,7 @@ func (t *assetTable) endMaterialVersions(device gfx.Device) {
 			if !block.bufferBehind {
 				continue
 			}
-			writeBytes(t, device, block.buffer, 0, block.latestBytes)
+			writeBytes(t, device, Buffer{}, block.buffer, 0, block.latestBytes)
 			block.bufferBehind = false
 			if parameter := &slot.parameters[index]; parameter.kind == parameterKindUniform {
 				parameter.bufferRange = BufferRange{}
@@ -511,7 +526,7 @@ func (t *assetTable) refillDefaultTexturesAndUniforms(device gfx.Device) {
 	for _, slot := range t.materials.All() {
 		for _, block := range slot.uniformBlocks {
 			if block.buffer != (gfx.Buffer{}) {
-				writeBytes(t, device, block.buffer, 0, block.latestBytes)
+				writeBytes(t, device, Buffer{}, block.buffer, 0, block.latestBytes)
 			}
 		}
 	}
@@ -591,14 +606,7 @@ func (t *assetTable) findLevelView(device gfx.Device, texture Texture, mipLevel,
 	if mipLevel >= descriptor.MipLevelCount || layer >= descriptor.Size.DepthOrArrayLayers {
 		return gfx.TextureView{}, gfx.TextureDescriptor{}, fmt.Errorf("%q at mip level %d and layer %d, of %d mip levels and %d layers", descriptor.Label, mipLevel, layer, descriptor.MipLevelCount, descriptor.Size.DepthOrArrayLayers)
 	}
-	view, err := slot.findTextureView(device, gfx.TextureViewDescriptor{
-		Dimension:       gfx.TextureViewDimension2D,
-		Aspect:          gfx.TextureAspectAll,
-		BaseMipLevel:    mipLevel,
-		MipLevelCount:   1,
-		BaseArrayLayer:  layer,
-		ArrayLayerCount: 1,
-	})
+	view, err := slot.findTextureView(device, makeLevelViewDescriptor(mipLevel, layer))
 	if err != nil {
 		return gfx.TextureView{}, gfx.TextureDescriptor{}, err
 	}
@@ -620,7 +628,7 @@ func (t *assetTable) writeBuffer(device gfx.Device, buffer Buffer, offset uint64
 		t.report(ReportKindWriteRefused, fmt.Errorf("render: writing %d bytes at offset %d into buffer %v, of %d bytes, where the offset and the length are multiples of 4 and the write ends within the buffer", length, offset, buffer, size))
 		return
 	}
-	writeBytes(t, device, gfxBuffer, offset, data)
+	writeBytes(t, device, buffer, gfxBuffer, offset, data)
 }
 
 // writeTexture writes data, rows of texels packed tight, into region of
@@ -648,7 +656,7 @@ func (t *assetTable) writeTexture(device gfx.Device, texture Texture, region Tex
 		t.report(ReportKindWriteRefused, fmt.Errorf("render: writing a region that %w", err))
 		return
 	}
-	writeTexels(t, device, makeImageCopyTexture(gfxTexture, region), data, texelSize, gfx.Extent3D{Width: width, Height: height, DepthOrArrayLayers: 1})
+	writeTexels(t, device, texture, makeImageCopyTexture(gfxTexture, region), data, texelSize, gfx.Extent3D{Width: width, Height: height, DepthOrArrayLayers: 1})
 }
 
 // freeReleased removes every loaded texture, buffer and shader whose last
@@ -800,14 +808,31 @@ func (t *assetTable) makeMaterialBindGroup(device gfx.Device, slot *materialSlot
 		if err != nil {
 			return materialBindGroup{}, err
 		}
+		if defaulted && index < 64 {
+			bindGroup.drawnDefaultMask |= 1 << index
+		}
 		if defaulted && bindGroup.unboundRead == "" && isStorage(binding) && slot.makeShaderSelection().usesBinding(binding) {
 			bindGroup.unboundRead = binding.Name
 		}
 		entries[index] = entry
 	}
-	group, err := device.CreateBindGroup(gfx.BindGroupDescriptor{Label: "render: a material's bind group", Layout: layout.layout, Entries: entries})
+	group, err := BindGroupKindMaterial.createBindGroup(device, t.inspector, layout.layout, entries)
 	bindGroup.group = group
 	return bindGroup, err
+}
+
+// makeInspectedMaterialParameters answers the values slot binds to its
+// shader's @group(1) through bindGroup, as an inspection writes them down,
+// those bindGroup draws the defaults of as defaults, its uniform blocks'
+// bytes in arena or its own buffers. t's mutex is held.
+func (t *assetTable) makeInspectedMaterialParameters(slot *materialSlot, shader shaderSlot, bindGroup materialBindGroup, arena *temporaryArena) []InspectedParameter {
+	t.requireLocked("makeInspectedMaterialParameters")
+	var parameters []InspectedParameter
+	for index, binding := range shader.findGroupBindings(materialGroup) {
+		block := slot.uniformBlocks[index]
+		parameters = append(parameters, slot.parameters[index].makeInspectedParameter(binding, bindGroup.drawnDefaultMask&(1<<index) != 0, block.latestBytes, arena))
+	}
+	return parameters
 }
 
 // findMaterialBindGroup answers slot's bind group of its shader's @group(1)
@@ -848,9 +873,13 @@ func (t *assetTable) findMaterialBindGroup(device gfx.Device, slot *materialSlot
 // It is built in draft and shared by every draw or dispatch binding the
 // same; the layout's default when nothing is set. With it goes the name of a
 // storage binding of the group left at its default that a function
-// selection runs reads, empty for none. t's mutex is held.
-func (t *assetTable) makeParameterGroupBinding(device gfx.Device, group uint32, settings []parameterSetting, level string, selection shaderSelection, shader shaderSlot, targets []drawnTarget, draft *bindGroupDraft) (groupBinding, string, error) {
+// selection runs reads, empty for none, and, while listState's list is
+// inspected, the value bound to each binding as the inspection writes it
+// down. t's mutex is held.
+func (t *assetTable) makeParameterGroupBinding(device gfx.Device, group uint32, settings []parameterSetting, level string, selection shaderSelection, shader shaderSlot, targets []drawnTarget, listState *commandListState) (groupBinding, string, []InspectedParameter, error) {
 	t.requireLocked("makeParameterGroupBinding")
+	draft := &listState.bindGroupDraft
+	var inspectedParameters []InspectedParameter
 	layout := shader.layout.groups[group]
 	binding := groupBinding{dynamicOffsetCount: layout.dynamicOffsetCount}
 	var unboundRead string
@@ -874,7 +903,10 @@ func (t *assetTable) makeParameterGroupBinding(device gfx.Device, group uint32, 
 		}
 		entry, defaulted, err := t.makeValueEntry(device, value, shaderBinding, layout.entries[index], gfx.Buffer{})
 		if err != nil {
-			return groupBinding{}, "", err
+			return groupBinding{}, "", nil, err
+		}
+		if listState.inspectedList != nil {
+			inspectedParameters = append(inspectedParameters, value.makeInspectedParameter(shaderBinding, defaulted, nil, listState.arena))
 		}
 		switch {
 		case defaulted:
@@ -895,11 +927,11 @@ func (t *assetTable) makeParameterGroupBinding(device gfx.Device, group uint32, 
 	}
 	var err error
 	if len(settings) == 0 {
-		binding.bindGroup, err = t.layouts.findDefaultBindGroup(device, &t.bindingResources, layout)
+		binding.bindGroup, err = t.layouts.findDefaultBindGroup(device, &t.bindingResources, layout, t.inspector)
 	} else {
-		binding.bindGroup, err = t.layouts.findParameterBindGroup(device, layout, draft)
+		binding.bindGroup, err = t.layouts.findParameterBindGroup(device, layout, draft, t.inspector)
 	}
-	return binding, unboundRead, err
+	return binding, unboundRead, inspectedParameters, err
 }
 
 // makeValueEntry answers the entry binding value to binding, of layout entry
@@ -1009,21 +1041,49 @@ type parameterReportKey struct {
 }
 
 // writeTexels writes texels, rows of texels of texelSize bytes each packed
-// tight, layer after layer, into the size region at destination. A write gfx
-// refuses is logged through table, unless the device is lost.
-func writeTexels(table *assetTable, device gfx.Device, destination gfx.ImageCopyTexture, texels []byte, texelSize uint32, size gfx.Extent3D) {
+// tight, layer after layer, into the size region at destination, of
+// texture, which the write goes into the inspection under, the zero Texture
+// for one of render's own. A write gfx refuses is logged through table,
+// unless the device is lost.
+func writeTexels(table *assetTable, device gfx.Device, texture Texture, destination gfx.ImageCopyTexture, texels []byte, texelSize uint32, size gfx.Extent3D) {
 	err := device.WriteTexture(destination, texels, gfx.ImageDataLayout{BytesPerRow: texelSize * size.Width, RowsPerImage: size.Height}, size)
-	if err != nil {
+	switch {
+	case err != nil:
 		table.logUnlessLost(fmt.Errorf("render: writing texture %q: %w", device.TextureDescriptor(destination.Texture).Label, err))
+	case texture != (Texture{}):
+		table.inspector.add(func(inspection *Inspection) {
+			inspection.Writes = append(inspection.Writes, InspectedWrite{Texture: texture, Region: makeInspectedTextureRegion(destination, size), LayerCount: size.DepthOrArrayLayers})
+		})
 	}
 }
 
-// writeBytes writes data, whose length is a multiple of 4, into buffer at
-// offset, a multiple of 4. A write gfx refuses is logged through table,
-// unless the device is lost.
-func writeBytes(table *assetTable, device gfx.Device, buffer gfx.Buffer, offset uint64, data []byte) {
-	if err := device.WriteBuffer(buffer, offset, data); err != nil {
-		table.logUnlessLost(fmt.Errorf("render: writing buffer %q: %w", device.BufferDescriptor(buffer).Label, err))
+// writeBytes writes data, whose length is a multiple of 4, into gfxBuffer at
+// offset, a multiple of 4, the gfx buffer behind buffer, which the write
+// goes into the inspection under, the zero Buffer for one of render's own.
+// A write gfx refuses is logged through table, unless the device is lost.
+func writeBytes(table *assetTable, device gfx.Device, buffer Buffer, gfxBuffer gfx.Buffer, offset uint64, data []byte) {
+	err := device.WriteBuffer(gfxBuffer, offset, data)
+	switch {
+	case err != nil:
+		table.logUnlessLost(fmt.Errorf("render: writing buffer %q: %w", device.BufferDescriptor(gfxBuffer).Label, err))
+	case buffer != (Buffer{}):
+		table.inspector.add(func(inspection *Inspection) {
+			inspection.Writes = append(inspection.Writes, InspectedWrite{Buffer: BufferRange{Buffer: buffer, Offset: offset, Size: uint64(len(data))}})
+		})
+	}
+}
+
+// makeLevelViewDescriptor answers the descriptor of the view of one mip
+// level and one layer of a texture, as a pass draws into it or the mips
+// draw from it.
+func makeLevelViewDescriptor(mipLevel, layer uint32) gfx.TextureViewDescriptor {
+	return gfx.TextureViewDescriptor{
+		Dimension:       gfx.TextureViewDimension2D,
+		Aspect:          gfx.TextureAspectAll,
+		BaseMipLevel:    mipLevel,
+		MipLevelCount:   1,
+		BaseArrayLayer:  layer,
+		ArrayLayerCount: 1,
 	}
 }
 

@@ -42,7 +42,7 @@ func (f Frame) BeginCommandList(label string, order Order) CommandList {
 		return list
 	}
 	gfxFrame := state.recordingFrame()
-	encoder, err := f.device.Get().Encoder(gfxFrame, gfx.SubmitOrder(order))
+	encoder, err := f.device.Get().Encoder(gfxFrame, gfx.SubmitOrder(order), label)
 	switch {
 	case errors.Is(err, gfx.ErrOrderTaken):
 		state.report(ReportKindOrderTaken, fmt.Errorf("render: command list %q is at order %d, which another list of the frame has", label, order))
@@ -56,6 +56,7 @@ func (f Frame) BeginCommandList(label string, order Order) CommandList {
 		list.gfxFrame = gfxFrame
 		list.encoder = encoder
 		list.listState = state.listStates.acquire(&state.arena, state.temporaryChunkSize, order)
+		list.listState.inspectedList = state.inspector.addList(order, label)
 	}
 	return list
 }
@@ -78,7 +79,11 @@ func (f Frame) AcquireTemporaryTexture(descriptor TextureDescriptor) Texture {
 	texture, err := state.temporaryTextures.acquire(descriptor.fillDefaults(), f.table.Get(), f.device.Get())
 	if err != nil {
 		state.logUnlessLost(fmt.Errorf("render: acquiring temporary texture %q: %w", descriptor.Label, err))
+		return texture
 	}
+	state.inspector.add(func(inspection *Inspection) {
+		inspection.TemporaryTextures = append(inspection.TemporaryTextures, texture)
+	})
 	return texture
 }
 
@@ -119,6 +124,28 @@ func (f Frame) ReadCapture(event CapturedEvent) (*image.NRGBA, error) {
 		return nil, fmt.Errorf("render: reading a capture of %v: %w", event.Window, err)
 	}
 	return picture, nil
+}
+
+// RequestInspection asks for an inspection of the first frame whose
+// FrameEvent is published after the call, one at a time: a request while
+// one is pending, asked for and not yet delivered, joins it. While that
+// frame records, render's calls also write it down, and InspectedEvent
+// delivers it once the frame is presented; every other frame pays one
+// check a call, and allocates nothing for it.
+func (f Frame) RequestInspection() {
+	f.state.Get().inspector.request()
+}
+
+// ReadInspection answers event's inspection. It answers it only while the
+// jobs of event's publication run, so a handler of InspectedEvent calls it
+// in a task it joins into the out dependency it returns; later, it answers
+// an error.
+func (f Frame) ReadInspection(event InspectedEvent) (Inspection, error) {
+	inspection, ok := f.state.Get().inspector.read(event.Beat)
+	if !ok {
+		return Inspection{}, fmt.Errorf("render: reading the inspection of beat %d, which is read only while InspectedEvent's jobs run", event.Beat.Tick)
+	}
+	return inspection, nil
 }
 
 // ReadbackData answers event's bytes: a buffer's range as it was where

@@ -81,6 +81,10 @@ func (l *CommandList) BeginPass(descriptor PassDescriptor) Pass {
 		height:    firstTarget.height,
 	}
 	pass.noteIndex = l.listState.notePass(descriptor)
+	if inspectedList := l.listState.inspectedList; inspectedList != nil {
+		pass.inspectedPass = len(inspectedList.Passes)
+		inspectedList.Passes = append(inspectedList.Passes, makeInspectedPass(descriptor, passDescriptor, l.listState.nextInspectedPosition()))
+	}
 	for _, target := range descriptor.ColorTargets {
 		pass.addTarget(drawnTarget{texture: target.Texture, mipLevel: target.MipLevel, layer: target.Layer})
 		pass.addTarget(drawnTarget{texture: target.Resolve.Texture, mipLevel: target.Resolve.MipLevel, layer: target.Resolve.Layer})
@@ -110,8 +114,13 @@ func (l *CommandList) AcquireTemporaryBuffer[T any](data []T) BufferRange {
 	}
 	state := l.frame.state.Get()
 	bufferRange, err := l.frame.table.Get().allocateTemporary(l.listState, castToBytes(data), l.frame.device.Get())
-	if err != nil {
+	switch {
+	case err != nil:
 		state.logUnlessLost(fmt.Errorf("render: acquiring a temporary buffer: %w", err))
+	case bufferRange != (BufferRange{}):
+		state.inspector.add(func(inspection *Inspection) {
+			inspection.TemporaryBuffers = append(inspection.TemporaryBuffers, bufferRange)
+		})
 	}
 	return bufferRange
 }
@@ -141,6 +150,9 @@ func (l *CommandList) AcquireTemporaryMesh(descriptor MeshDescriptor) Mesh {
 		return Mesh{}
 	}
 	l.listState.temporaryMeshes = append(l.listState.temporaryMeshes, mesh)
+	table.inspector.add(func(inspection *Inspection) {
+		inspection.TemporaryMeshes = append(inspection.TemporaryMeshes, mesh)
+	})
 	return mesh
 }
 
@@ -152,7 +164,12 @@ func (l *CommandList) BeginComputePass(label string) ComputePass {
 		return ComputePass{}
 	}
 	l.listState.clearParameterSettings()
-	return ComputePass{frame: l.frame, listState: l.listState, encoder: l.encoder.BeginComputePass(gfx.ComputePassDescriptor{Label: label})}
+	pass := ComputePass{frame: l.frame, listState: l.listState, encoder: l.encoder.BeginComputePass(gfx.ComputePassDescriptor{Label: label})}
+	if inspectedList := l.listState.inspectedList; inspectedList != nil {
+		pass.inspectedPass = len(inspectedList.ComputePasses)
+		inspectedList.ComputePasses = append(inspectedList.ComputePasses, InspectedComputePass{Position: l.listState.nextInspectedPosition(), Label: label})
+	}
+	return pass
 }
 
 // CopyBuffer copies source's bytes, a zero Size meaning the rest of its
@@ -189,6 +206,10 @@ func (l *CommandList) CopyBuffer(source, destination BufferRange) {
 		return
 	}
 	l.encoder.CopyBufferToBuffer(sourceBuffer, source.Offset, destinationBuffer, destination.Offset, size)
+	l.addInspectedCopy(InspectedCopy{
+		SourceBuffer:      BufferRange{Buffer: source.Buffer, Offset: source.Offset, Size: size},
+		DestinationBuffer: BufferRange{Buffer: destination.Buffer, Offset: destination.Offset, Size: size},
+	})
 }
 
 // CopyTexture copies sourceRegion of source, a zero width or height
@@ -238,6 +259,13 @@ func (l *CommandList) CopyTexture(source Texture, sourceRegion TextureRegion, de
 		Size:        gfx.Extent3D{Width: width, Height: height, DepthOrArrayLayers: 1},
 	}
 	l.encoder.CopyTextureToTexture(sourceTexture, destinationTexture, l.listState.textureCopies[:])
+	copied := l.listState.textureCopies[0]
+	l.addInspectedCopy(InspectedCopy{
+		SourceTexture:      source,
+		SourceRegion:       makeInspectedTextureRegion(copied.Source, copied.Size),
+		DestinationTexture: destination,
+		DestinationRegion:  makeInspectedTextureRegion(copied.Destination, copied.Size),
+	})
 }
 
 // CopyBufferToTexture copies source's bytes into region of destination, a
@@ -262,6 +290,12 @@ func (l *CommandList) CopyBufferToTexture(source BufferRange, destination Textur
 		return
 	}
 	l.encoder.CopyBufferToTexture(buffer, texture, l.listState.bufferTextureCopies[:])
+	copied := l.listState.bufferTextureCopies[0]
+	l.addInspectedCopy(InspectedCopy{
+		SourceBuffer:       BufferRange{Buffer: source.Buffer, Offset: copied.BufferLayout.Offset},
+		DestinationTexture: destination,
+		DestinationRegion:  makeInspectedTextureRegion(copied.TextureBase, copied.Size),
+	})
 }
 
 // CopyTextureToBuffer copies region of source, a zero width or height
@@ -280,6 +314,12 @@ func (l *CommandList) CopyTextureToBuffer(source Texture, region TextureRegion, 
 		return
 	}
 	l.encoder.CopyTextureToBuffer(texture, buffer, l.listState.bufferTextureCopies[:])
+	copied := l.listState.bufferTextureCopies[0]
+	l.addInspectedCopy(InspectedCopy{
+		SourceTexture:     source,
+		SourceRegion:      makeInspectedTextureRegion(copied.TextureBase, copied.Size),
+		DestinationBuffer: BufferRange{Buffer: destination.Buffer, Offset: copied.BufferLayout.Offset},
+	})
 }
 
 // ReadBuffer reads source's bytes back, a zero Size meaning the rest of its
@@ -309,6 +349,7 @@ func (l *CommandList) ReadBuffer(source BufferRange) Readback {
 	readback, staging := l.acquireReadback(size)
 	if readback != (Readback{}) {
 		l.encoder.CopyBufferToBuffer(buffer, source.Offset, staging, 0, size)
+		l.addInspectedReadback(InspectedReadback{SourceBuffer: BufferRange{Buffer: source.Buffer, Offset: source.Offset, Size: size}})
 	}
 	return readback
 }
@@ -335,6 +376,8 @@ func (l *CommandList) ReadTexture(texture Texture, region TextureRegion) Readbac
 	if readback != (Readback{}) {
 		l.listState.bufferTextureCopies[0] = layout.makeCopy(0)
 		l.encoder.CopyTextureToBuffer(layout.origin.Texture, staging, l.listState.bufferTextureCopies[:])
+		copied := l.listState.bufferTextureCopies[0]
+		l.addInspectedReadback(InspectedReadback{SourceTexture: texture, SourceRegion: makeInspectedTextureRegion(copied.TextureBase, copied.Size)})
 	}
 	return readback
 }
@@ -358,6 +401,7 @@ func (l *CommandList) ClearBuffer(bufferRange BufferRange) {
 		return
 	}
 	l.encoder.ClearBuffer(buffer, bufferRange.Offset, size)
+	l.addInspectedCopy(InspectedCopy{DestinationBuffer: BufferRange{Buffer: bufferRange.Buffer, Offset: bufferRange.Offset, Size: size}})
 }
 
 // End ends the list: nothing more is recorded into it, and the chunks of
@@ -370,6 +414,24 @@ func (l *CommandList) End() {
 	}
 	l.encoder = nil
 	l.listState = nil
+}
+
+// addInspectedCopy writes copied, a copy or buffer clear recorded, down in
+// the list's inspection, at its position, while the list is inspected.
+func (l *CommandList) addInspectedCopy(copied InspectedCopy) {
+	if inspectedList := l.listState.inspectedList; inspectedList != nil {
+		copied.Position = l.listState.nextInspectedPosition()
+		inspectedList.Copies = append(inspectedList.Copies, copied)
+	}
+}
+
+// addInspectedReadback writes readback, recorded, down in the list's
+// inspection, at its position, while the list is inspected.
+func (l *CommandList) addInspectedReadback(readback InspectedReadback) {
+	if inspectedList := l.listState.inspectedList; inspectedList != nil {
+		readback.Position = l.listState.nextInspectedPosition()
+		inspectedList.Readbacks = append(inspectedList.Readbacks, readback)
+	}
 }
 
 // makeRenderPassDescriptor answers gfx's descriptor of the pass descriptor

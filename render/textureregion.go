@@ -40,3 +40,9 @@ func (r TextureRegion) findSize(descriptor gfx.TextureDescriptor) (uint32, uint3
 func makeImageCopyTexture(texture gfx.Texture, r TextureRegion) gfx.ImageCopyTexture {
 	return gfx.ImageCopyTexture{Texture: texture, MipLevel: r.MipLevel, Origin: gfx.Origin3D{X: r.X, Y: r.Y, Z: r.Layer}, Aspect: gfx.TextureAspectAll}
 }
+
+// makeInspectedTextureRegion answers the region of size at origin, gfx's,
+// as an inspection writes it down, at origin's first layer.
+func makeInspectedTextureRegion(origin gfx.ImageCopyTexture, size gfx.Extent3D) TextureRegion {
+	return TextureRegion{MipLevel: origin.MipLevel, Layer: origin.Origin.Z, X: origin.Origin.X, Y: origin.Origin.Y, Width: size.Width, Height: size.Height}
+}

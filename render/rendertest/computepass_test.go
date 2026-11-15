@@ -149,20 +149,20 @@ func TestADispatchBindsItsParametersByNameInAnyGroupWithUniformBlocksFromTheAren
 	makeCameraBytes := func(camera *cameraBlock) []byte { return unsafe.Slice((*byte)(unsafe.Pointer(camera)), 16) }
 	want := []render.InspectedDispatch{
 		{Shader: cull, EntryPoint: "cull", Parameters: []render.InspectedParameter{
-			{Name: "camera", Uniform: makeCameraBytes(&cameras[0])},
-			{Name: "objects", Buffer: render.BufferRange{Buffer: objects, Size: 32}},
-			{Name: "visible", Buffer: render.BufferRange{Buffer: visible, Size: 8}},
-			{Name: "limits", Default: true},
+			{Name: "camera", Group: 0, Binding: 0, Uniform: makeCameraBytes(&cameras[0])},
+			{Name: "objects", Group: 1, Binding: 0, Buffer: render.BufferRange{Buffer: objects, Size: 32}},
+			{Name: "visible", Group: 2, Binding: 0, Buffer: render.BufferRange{Buffer: visible, Size: 8}},
+			{Name: "limits", Group: 2, Binding: 1, Default: true},
 		}, X: 4, Y: 1, Z: 1},
 		{Shader: cull, EntryPoint: "cull", Parameters: []render.InspectedParameter{
-			{Name: "camera", Uniform: makeCameraBytes(&cameras[1])},
-			{Name: "objects", Buffer: render.BufferRange{Buffer: objects, Size: 32}},
-			{Name: "visible", Buffer: render.BufferRange{Buffer: visible, Offset: 256, Size: 8}},
-			{Name: "limits", Default: true},
+			{Name: "camera", Group: 0, Binding: 0, Uniform: makeCameraBytes(&cameras[1])},
+			{Name: "objects", Group: 1, Binding: 0, Buffer: render.BufferRange{Buffer: objects, Size: 32}},
+			{Name: "visible", Group: 2, Binding: 0, Buffer: render.BufferRange{Buffer: visible, Offset: 256, Size: 8}},
+			{Name: "limits", Group: 2, Binding: 1, Default: true},
 		}, X: 8, Y: 2, Z: 1},
 		{Shader: kernels, EntryPoint: "count", Parameters: []render.InspectedParameter{
-			{Name: "camera", Default: true},
-			{Name: "counts", Buffer: render.BufferRange{Buffer: visible, Size: 16}},
+			{Name: "camera", Group: 0, Binding: 0, Default: true},
+			{Name: "counts", Group: 0, Binding: 1, Buffer: render.BufferRange{Buffer: visible, Size: 16}},
 		}, X: 1, Y: 1, Z: 1},
 	}
 	for frameIndex, dispatches := range findDispatches(h, "cull") {
@@ -299,8 +299,8 @@ func TestAComputePassBindsTextureViewsAndAStorageTextureBindingSeesOneMipLevel(t
 		return render.TextureView{Texture: texture, BaseMipLevel: baseMipLevel, MipLevelCount: mipLevelCount, LayerCount: 1, Dimension: render.TextureViewDimension2D, Aspect: render.TextureAspectAll}
 	}
 	want := []render.InspectedDispatch{
-		{Shader: blur, EntryPoint: "blur", Parameters: []render.InspectedParameter{{Name: "source", TextureView: makeView(source, 1, 2)}, {Name: "output", TextureView: makeView(image, 0, 1)}}, X: 1, Y: 1, Z: 1},
-		{Shader: blur, EntryPoint: "blur", Parameters: []render.InspectedParameter{{Name: "source", TextureView: makeView(source, 1, 2)}, {Name: "output", TextureView: makeView(image, 2, 1)}}, X: 3, Y: 1, Z: 1},
+		{Shader: blur, EntryPoint: "blur", Parameters: []render.InspectedParameter{{Name: "source", Group: 0, Binding: 0, TextureView: makeView(source, 1, 2)}, {Name: "output", Group: 0, Binding: 1, TextureView: makeView(image, 0, 1)}}, X: 1, Y: 1, Z: 1},
+		{Shader: blur, EntryPoint: "blur", Parameters: []render.InspectedParameter{{Name: "source", Group: 0, Binding: 0, TextureView: makeView(source, 1, 2)}, {Name: "output", Group: 0, Binding: 1, TextureView: makeView(image, 2, 1)}}, X: 3, Y: 1, Z: 1},
 	}
 	for frameIndex, dispatches := range findDispatches(h, "blur") {
 		if !reflect.DeepEqual(dispatches, want) {

@@ -3,6 +3,7 @@ package gfx_test
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -20,7 +21,7 @@ func TestFrameEncodersAreSubmittedOnceSortedByOrder(t *testing.T) {
 			order  gfx.SubmitOrder
 			buffer gfx.Buffer
 		}{{30, buffers[2]}, {10, buffers[0]}, {20, buffers[1]}} {
-			encoder, err := device.Encoder(event.Frame, taken.order)
+			encoder, err := device.Encoder(event.Frame, taken.order, "")
 			if err != nil {
 				t.Errorf("Encoder at order %d answered %v", taken.order, err)
 			}
@@ -49,6 +50,57 @@ func TestFrameEncodersAreSubmittedOnceSortedByOrder(t *testing.T) {
 	}
 }
 
+func TestEachFramesCallsRunFromItsFirstAcquireToTheNextFramesAndTheFirstFrameHasTheCallsBeforeIt(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(nil)
+	h.openWindow()
+	h.waitForCalls(recording.CallKindCreateSurface, 1)
+
+	h.advance(time.Millisecond)
+	h.advance(time.Millisecond)
+
+	recorded := h.instance.Recording()
+	frameCalls := recorded.FrameCalls()
+	if len(frameCalls) != len(recorded.Frames()) || len(frameCalls) != 2 {
+		t.Fatalf("FrameCalls() answered %d frames, where Frames() answers %d, want 2", len(frameCalls), len(recorded.Frames()))
+	}
+	if second := frameCalls[1]; len(second) == 0 || second[0].Kind != recording.CallKindAcquireFramebuffer {
+		t.Errorf("the second frame's calls begin with %+v, want its acquire", second)
+	}
+	if joined := slices.Concat(frameCalls...); !reflect.DeepEqual(joined, recorded.Calls) {
+		t.Errorf("the frames' calls joined are %d calls, want every call recorded, %d", len(joined), len(recorded.Calls))
+	}
+}
+
+func TestAFrameEncoderIsSubmittedUnderItsLabel(t *testing.T) {
+	h := newHarness(t)
+	h.readFrame = func(event gfx.DrawEvent, device gfx.Device) {
+		for _, taken := range []struct {
+			order gfx.SubmitOrder
+			label string
+		}{{2, "lights"}, {1, "shadows"}} {
+			if _, err := device.Encoder(event.Frame, taken.order, taken.label); err != nil {
+				t.Errorf("Encoder at order %d answered %v", taken.order, err)
+			}
+		}
+	}
+	h.mustSpawn(nil)
+	h.openWindow()
+	h.waitForCalls(recording.CallKindCreateSurface, 1)
+
+	h.advance(time.Millisecond)
+
+	var labels []string
+	for _, submission := range h.instance.Recording().Submissions {
+		for _, buffer := range submission.Buffers {
+			labels = append(labels, buffer.Label)
+		}
+	}
+	if want := []string{"shadows", "lights"}; !reflect.DeepEqual(labels, want) {
+		t.Errorf("the submitted command buffers are labelled %q, want %q", labels, want)
+	}
+}
+
 func TestManyTasksTakeEncodersOfOneFrameAtOnce(t *testing.T) {
 	const taskCount = 8
 	h := newHarness(t)
@@ -56,7 +108,7 @@ func TestManyTasksTakeEncodersOfOneFrameAtOnce(t *testing.T) {
 	h.recordingTaskCount = taskCount
 	var buffers []gfx.Buffer
 	h.recordFrame = func(event gfx.DrawEvent, task int, device gfx.Device) {
-		encoder, err := device.Encoder(event.Frame, gfx.SubmitOrder(task))
+		encoder, err := device.Encoder(event.Frame, gfx.SubmitOrder(task), "")
 		if err != nil {
 			t.Errorf("Encoder at order %d answered %v", task, err)
 		}
@@ -81,9 +133,9 @@ func TestAnOrderTakenTwiceAnswersErrOrderTakenWithAnEncoderRecordingNothing(t *t
 	var mutex sync.Mutex
 	var taken error
 	h.readFrame = func(event gfx.DrawEvent, device gfx.Device) {
-		first, _ := device.Encoder(event.Frame, 1)
+		first, _ := device.Encoder(event.Frame, 1, "")
 		first.ClearBuffer(buffers[0], 0, 4)
-		second, err := device.Encoder(event.Frame, 1)
+		second, err := device.Encoder(event.Frame, 1, "")
 		second.ClearBuffer(buffers[1], 0, 4)
 		pass := second.BeginRenderPass(gfx.RenderPassDescriptor{})
 		pass.Draw(gfx.DrawArgs{VertexCount: 3, InstanceCount: 1})
@@ -112,7 +164,7 @@ func TestAFlushedFrameAnswersErrFrameFlushedWithAnEncoderRecordingNothing(t *tes
 	release := make(chan struct{})
 	h.holdFrame = func(gfx.DrawEvent) { <-release }
 	h.readFrame = func(event gfx.DrawEvent, device gfx.Device) {
-		encoder, _ := device.Encoder(event.Frame, 1)
+		encoder, _ := device.Encoder(event.Frame, 1, "")
 		encoder.ClearBuffer(buffers[0], 0, 4)
 	}
 	h.mustSpawn(nil)
@@ -128,13 +180,13 @@ func TestAFlushedFrameAnswersErrFrameFlushedWithAnEncoderRecordingNothing(t *tes
 	var flushed, presented error
 	h.readDeviceWithoutTicking(func(device gfx.Device) {
 		var encoder gfx.CommandEncoder
-		encoder, flushed = device.Encoder(frame, 2)
+		encoder, flushed = device.Encoder(frame, 2, "")
 		encoder.ClearBuffer(buffers[1], 0, 4)
 	})
 	h.settle()
 	h.readDevice(func(device gfx.Device) {
 		var encoder gfx.CommandEncoder
-		encoder, presented = device.Encoder(frame, 3)
+		encoder, presented = device.Encoder(frame, 3, "")
 		encoder.ClearBuffer(buffers[2], 0, 4)
 	})
 	h.advance(time.Millisecond)
@@ -153,7 +205,7 @@ func TestAFailingFinishIsLoggedAndTheRestAreSubmitted(t *testing.T) {
 	var buffers []gfx.Buffer
 	h.readFrame = func(event gfx.DrawEvent, device gfx.Device) {
 		for order, buffer := range buffers {
-			encoder, _ := device.Encoder(event.Frame, gfx.SubmitOrder(order))
+			encoder, _ := device.Encoder(event.Frame, gfx.SubmitOrder(order), "")
 			encoder.ClearBuffer(buffer, 0, 4)
 		}
 	}
@@ -191,7 +243,7 @@ func TestFramesGroupEachFramesSubmissionWithItsAcquiresAndPresents(t *testing.T)
 	h := newHarness(t)
 	var buffers []gfx.Buffer
 	h.readFrame = func(event gfx.DrawEvent, device gfx.Device) {
-		encoder, _ := device.Encoder(event.Frame, 1)
+		encoder, _ := device.Encoder(event.Frame, 1, "")
 		encoder.ClearBuffer(buffers[event.Tick-1], 0, 4)
 	}
 	h.instance.AnswerNext(recording.CallKindAcquireFramebuffer, recording.Answer{Status: uint8(gfx.AcquireStatusOutdated)})
@@ -225,7 +277,7 @@ func TestFramesWithNoWindowEachHoldTheirSubmission(t *testing.T) {
 	h := newHarness(t)
 	var buffers []gfx.Buffer
 	h.readFrame = func(event gfx.DrawEvent, device gfx.Device) {
-		encoder, _ := device.Encoder(event.Frame, 1)
+		encoder, _ := device.Encoder(event.Frame, 1, "")
 		encoder.ClearBuffer(buffers[event.Tick-1], 0, 4)
 	}
 	h.mustSpawn(nil)
@@ -364,7 +416,7 @@ func TestPassesAndCommandsAreRecordedWithTheirArguments(t *testing.T) {
 	h := newHarness(t)
 	var objects commandObjects
 	h.readFrame = func(event gfx.DrawEvent, device gfx.Device) {
-		encoder, _ := device.Encoder(event.Frame, 1)
+		encoder, _ := device.Encoder(event.Frame, 1, "")
 		recordEveryCommand(encoder, objects, nil)
 	}
 	h.mustSpawn(nil)
@@ -382,7 +434,7 @@ func TestRecordedCommandsKeepTheirSlicesWhenTheCallerReusesThem(t *testing.T) {
 	h := newHarness(t)
 	var objects commandObjects
 	h.readFrame = func(event gfx.DrawEvent, device gfx.Device) {
-		encoder, _ := device.Encoder(event.Frame, 1)
+		encoder, _ := device.Encoder(event.Frame, 1, "")
 		recordEveryCommand(encoder, objects, func(attachments []gfx.RenderPassColorAttachment, offsets []uint32, bufferRegions []gfx.BufferTextureCopy, textureRegions []gfx.TextureCopy) {
 			attachments[0].LoadOp = gfx.LoadOpLoad
 			offsets[0] = 512

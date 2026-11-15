@@ -42,3 +42,10 @@ func (h *Harness) WaitForReceive(what string, channel <-chan struct{}) {
 	h.t.Helper()
 	h.tickUntil(what, makeReceiveCheck(channel))
 }
+
+// DisableRecording makes gfx's recording adapter keep no call from now on,
+// for rendertest's tests to count what render allocates without the
+// commands the adapter would keep.
+func (h *Harness) DisableRecording() {
+	h.instance.DisableRecording()
+}

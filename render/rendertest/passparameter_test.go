@@ -187,19 +187,19 @@ func TestAPassesParametersAreOneBindGroupAndDrawParametersRebindAtNewOffsetsWith
 	for frameIndex, draws := range findPassDraws(h, "scene") {
 		for index, draw := range draws {
 			want := []render.InspectedParameter{
-				{Name: "object", Uniform: unsafe.Slice((*byte)(unsafe.Pointer(&objects[index])), 16)},
-				{Name: "rows", Default: true},
-				{Name: "mask", Default: true},
-				{Name: "mask_sampler", Default: true},
+				{Name: "object", Group: 2, Binding: 0, Uniform: unsafe.Slice((*byte)(unsafe.Pointer(&objects[index])), 16)},
+				{Name: "rows", Group: 2, Binding: 1, Default: true},
+				{Name: "mask", Group: 2, Binding: 2, Default: true},
+				{Name: "mask_sampler", Group: 2, Binding: 3, Default: true},
 			}
 			if !reflect.DeepEqual(draw.DrawParameters, want) {
 				t.Errorf("frame %d: draw %d bound draw parameters\n%+v\nwant\n%+v", frameIndex, index, draw.DrawParameters, want)
 			}
 			wantPass := []render.InspectedParameter{
-				{Name: "camera", Uniform: unsafe.Slice((*byte)(unsafe.Pointer(&cameras[frameIndex])), 64)},
-				{Name: "light_grid", Default: true},
-				{Name: "environment", TextureView: render.TextureView{Texture: scene.albedo, MipLevelCount: 1, LayerCount: 1, Dimension: render.TextureViewDimension2D, Aspect: render.TextureAspectAll}},
-				{Name: "environment_sampler", Sampler: render.SamplerDescriptor{MagFilter: render.FilterModeLinear}},
+				{Name: "camera", Group: 0, Binding: 0, Uniform: unsafe.Slice((*byte)(unsafe.Pointer(&cameras[frameIndex])), 64)},
+				{Name: "light_grid", Group: 0, Binding: 1, Default: true},
+				{Name: "environment", Group: 0, Binding: 2, TextureView: render.TextureView{Texture: scene.albedo, MipLevelCount: 1, LayerCount: 1, Dimension: render.TextureViewDimension2D, Aspect: render.TextureAspectAll}},
+				{Name: "environment_sampler", Group: 0, Binding: 3, Sampler: render.SamplerDescriptor{MagFilter: render.FilterModeLinear}},
 			}
 			if !reflect.DeepEqual(draw.PassParameters, wantPass) {
 				t.Errorf("frame %d: draw %d bound pass parameters\n%+v\nwant\n%+v", frameIndex, index, draw.PassParameters, wantPass)
@@ -239,11 +239,11 @@ func TestADrawParameterLastsUntilSetAgainTheMaterialChangesOrThePassEnds(t *test
 	objectBytes := func(value [4]float32) []byte { return unsafe.Slice((*byte)(unsafe.Pointer(&value)), 16) }
 	draws := slices.Concat(findPassDraws(h, "scene")[0], findPassDraws(h, "next")[0])
 	want := []render.InspectedParameter{
-		{Name: "object", Uniform: objectBytes(first)},
-		{Name: "object", Uniform: objectBytes(first)},
-		{Name: "object", Uniform: objectBytes(second)},
-		{Name: "object", Default: true},
-		{Name: "object", Default: true},
+		{Name: "object", Group: 2, Binding: 0, Uniform: objectBytes(first)},
+		{Name: "object", Group: 2, Binding: 0, Uniform: objectBytes(first)},
+		{Name: "object", Group: 2, Binding: 0, Uniform: objectBytes(second)},
+		{Name: "object", Group: 2, Binding: 0, Default: true},
+		{Name: "object", Group: 2, Binding: 0, Default: true},
 	}
 	if len(draws) != len(want) {
 		t.Fatalf("the passes drew %d times, want %d", len(draws), len(want))

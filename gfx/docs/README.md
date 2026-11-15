@@ -239,7 +239,7 @@ func drawScene(k *kernel.Kernel, e gfx.DrawEvent, device kernel.Read[gfx.Device]
 	if view == (gfx.TextureView{}) {
 		return kernel.NoResult{} // not open yet, hidden or minimized
 	}
-	encoder, err := device.Get().Encoder(e.Frame, orderScene)
+	encoder, err := device.Get().Encoder(e.Frame, orderScene, "scene")
 	if err != nil {
 		if !errors.Is(err, gfx.ErrDeviceLost) { // gfx logs a loss itself
 			k.Logger().LogErr(err)
@@ -461,7 +461,7 @@ c.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, e g
   the present: its encoder may be finished while it records, or refused with
   `ErrFrameFlushed`. Never leave one out.
 
-In each task, take an encoder with `Device.Encoder(e.Frame, order)`, and
+In each task, take an encoder with `Device.Encoder(e.Frame, order, label)`, and
 each window's view with `Device.Framebuffer(e.Frame, window)`:
 
 ```go
@@ -470,7 +470,7 @@ func recordMain(k *kernel.Kernel, e gfx.DrawEvent, device kernel.Read[gfx.Device
 	if view == (gfx.TextureView{}) {
 		return kernel.NoResult{}
 	}
-	encoder, err := device.Get().Encoder(e.Frame, orderMain)
+	encoder, err := device.Get().Encoder(e.Frame, orderMain, "main")
 	if err != nil {
 		// ErrOrderTaken, ErrFrameFlushed or ErrDeviceLost; the encoder
 		// records into nothing, so recording on is harmless.

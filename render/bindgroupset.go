@@ -13,12 +13,15 @@ const maxGroupDynamicOffsetCount = 16
 // left unbound that a function the draw or dispatch runs reads, for which it
 // is skipped, empty for none; the shader and functions the group's
 // parameters set on the pass were resolved for, none since they last
-// changed; and the binding last set on the pass's encoder.
+// changed; the binding last set on the pass's encoder; and, while its
+// list is inspected, the parameters each group binds as the inspection
+// writes them down.
 type bindGroupSet struct {
-	groupBindings [reservedGroup]groupBinding
-	unboundReads  [reservedGroup]string
-	resolvedFor   [reservedGroup]shaderSelection
-	boundGroups   [reservedGroup]groupBinding
+	groupBindings       [reservedGroup]groupBinding
+	unboundReads        [reservedGroup]string
+	resolvedFor         [reservedGroup]shaderSelection
+	boundGroups         [reservedGroup]groupBinding
+	inspectedParameters [reservedGroup][]InspectedParameter
 }
 
 // findUnboundRead answers the name of the first storage binding of s's

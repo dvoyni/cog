@@ -30,7 +30,7 @@ func clearEachFrame(h *harness, bufferOf func() gfx.Buffer, drawsTick func(tick 
 		if !drawsTick(event.Tick) {
 			return
 		}
-		encoder, err := device.Encoder(event.Frame, 0)
+		encoder, err := device.Encoder(event.Frame, 0, "")
 		if err != nil {
 			h.t.Errorf("Encoder answered %v", err)
 			return

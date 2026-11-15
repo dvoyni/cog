@@ -215,17 +215,44 @@ type Recording struct {
 // presents from each frame's first acquire to its last present. A frame with
 // no window acquired is its one submission.
 func (recording *Recording) Frames() []Frame {
+	frames, _ := recording.groupFrames()
+	return frames
+}
+
+// FrameCalls answers the calls of each frame Frames answers, in the same
+// order: those from the call that begins the frame to the one that begins
+// the next, the calls before the first frame's among its.
+func (recording *Recording) FrameCalls() [][]Call {
+	frames, firstCalls := recording.groupFrames()
+	frameCalls := make([][]Call, len(frames))
+	for index, firstCall := range firstCalls {
+		end := len(recording.Calls)
+		if index+1 < len(firstCalls) {
+			end = firstCalls[index+1]
+		}
+		frameCalls[index] = recording.Calls[firstCall:end]
+	}
+	return frameCalls
+}
+
+// groupFrames answers the frames Frames answers, and the index of the call
+// each begins at, the first frame's zero.
+func (recording *Recording) groupFrames() ([]Frame, []int) {
 	var frames []Frame
-	// current answers the frame being grouped, a new one when begin says the
+	var firstCalls []int
+	// index is the index of the call being grouped, and current answers the
+	// frame being grouped, a new one, beginning at index, when begin says the
 	// last is over.
+	index := 0
 	current := func(begin func(last *Frame) bool) *Frame {
 		if count := len(frames); count == 0 || begin(&frames[count-1]) {
 			frames = append(frames, Frame{})
+			firstCalls = append(firstCalls, index)
 		}
 		return &frames[len(frames)-1]
 	}
 	submission := 0
-	for index := 0; index <= len(recording.Calls); index++ {
+	for ; index <= len(recording.Calls); index++ {
 		for ; submission < len(recording.Submissions) && recording.submittedAfter[submission] == index; submission++ {
 			frame := current(func(last *Frame) bool {
 				return len(last.Presented) > 0 || (len(last.Acquired) == 0 && len(last.Submissions) > 0)
@@ -248,7 +275,10 @@ func (recording *Recording) Frames() []Frame {
 			frame.Presented = append(frame.Presented, call.Arguments.(platform.Window))
 		}
 	}
-	return frames
+	if len(firstCalls) > 0 {
+		firstCalls[0] = 0
+	}
+	return frames, firstCalls
 }
 
 // Call is one recorded call outside command buffers.
@@ -395,9 +425,10 @@ type Submission struct {
 	Buffers []CommandBuffer
 }
 
-// CommandBuffer is one finished encoder: its passes, and the copies and
-// clears recorded outside them, in order.
+// CommandBuffer is one finished encoder: the label it was made with, and its
+// passes, and the copies and clears recorded outside them, in order.
 type CommandBuffer struct {
+	Label    string
 	Commands []Command
 }
 

@@ -505,16 +505,19 @@ render republishes gfx's events as its own, each nested inside gfx's publication
   - the beat;
   - command lists by order, with labels;
   - each list's passes with their targets and pass parameters, its compute passes with their dispatches, and its copies and readbacks, each with its position in the list;
-  - every draw with its material and version (variant, render state with enums named, each parameter's binding name, kind, group, number and value), its draw parameters, instance buffers and counts;
-  - what the frame loaded, wrote, took from the pools and versioned;
-  - the pipelines and bind groups made that frame;
+  - every draw with its material and version (variant, render state with enums named, each parameter's binding name, kind, group, number and value), its draw parameters, instance buffers and counts; a parameter's kind is the value it holds, and one that drew its default says so and holds none;
+  - what the frame loaded, made and wrote, the textures, buffers and shaders whose gfx objects it made and the writes into them, a load's body among them; what it took from the pools; and the materials it versioned;
+  - the pipelines and bind groups made that frame, a bind group by what it binds: parameters, a material's own, a group's default, or render's mips;
   - the reports;
   - the pass timings when they are on.
 
   A uniform block's value is its bytes.
 - **Shared types:** the inspection's types are exported and are the same ones `rendertest`'s reader produces from gfx's recording.
+  - Each list's gfx frame encoder carries the list's label, so the reader reads it.
+  - What gfx's recording cannot show, the reader leaves empty: the temporaries, a reused one making no gfx call; the versioned materials; and each draw's material handle. The harness gives each frame the beat of the `Step` that drew it and the reports logged during that `Step`.
+  - render's own mip list is written down as the reader reads it.
 - **Asking and delivering:**
-  - `frame.RequestInspection()` inspects the first frame whose `FrameEvent` is published after it, one at a time.
+  - `frame.RequestInspection()` inspects the first frame whose `FrameEvent` is published after it, one at a time: a request while one is pending, asked for and not yet delivered, joins it. The inspection begins in the job that readies the frame and ends at the frame's end, after the present.
   - While that frame records, render's calls also append to the inspection; every other frame pays one flag check per call and allocates nothing.
   - After the present, render publishes `InspectedEvent{Beat}`, and `frame.ReadInspection(event)` answers it while the publication's jobs run.
 - **Pass timings are opt-in and continuous.**
@@ -571,6 +574,7 @@ render republishes gfx's events as its own, each nested inside gfx's publication
   - For `cmd/declarebindings`, `Device` also answers a module's entry points, each with its stage, and a vertex entry point's inputs, which only pipeline creation read before; the seam gains `ReflectEntryPoints`.
 - **`CreatePipelineLayout` checks the layout against the device's limits,** as WebGPU's `createPipelineLayout` does and as gfx's pipeline creations check theirs, so render refuses a shader past them when it is acquired, before any pipeline.
 - **The recording adapter gains a mode that records nothing,** answering and checking as before, for benchmarks and allocation gates ([render: the per-frame bar](https://github.com/dvoyni/cog/issues/819)).
+- **`Device.Encoder(frame, order, label)` labels a frame encoder,** and the recording adapter keeps each command buffer's label, so an inspection's lists carry their labels as the reader reads them ([render: inspections](https://github.com/dvoyni/cog/issues/846)).
 - **What gfx left to scene is render's:**
   - sharing pipelines of one descriptor;
   - the uniform ring and the pool of transient targets;
@@ -597,10 +601,12 @@ render republishes gfx's events as its own, each nested inside gfx's publication
 **`render/rendertest`**, exported, serves render's own tests and its users' alike:
 - **A harness.** Its test plugin binds platform's headless windows and gfx's recording adapter, the device wrapped to answer shader bindings from binding declarations. It paces metronome on a `ManualClock`, through the `Supervisor`. The test lists its own plugin after render and steps one beat at a time.
 - **A reader.** It turns each frame gfx recorded into the inspection's types:
-  - command lists by order;
+  - command lists by order, with the labels their encoders were made with;
   - passes with label and targets as render's textures and windows;
   - draws with material and counts, a draw's material as its pipeline shows it: its shader, entry points and render state, each default spelt zero, since materials of one key share a pipeline;
-  - each parameter of the pass, the material and the draw by binding name with its value, the dynamic offsets resolved from the arena bytes written.
+  - each parameter of the pass, the material and the draw by binding name with its value, the dynamic offsets resolved from the arena bytes written;
+  - a copy into a staging buffer as a readback;
+  - what render made and wrote between a frame's first acquire and the next frame's: its textures, buffers and shaders by the handles their labels name, the writes into them, its pipelines, and its bind groups by the kind their labels name.
 - **Strict reports.** A test fails on any report it didn't name with `ExpectReport(kind)`.
 
 **Binding declarations.** The recording adapter parses no WGSL, and gfx gains no WGSL parsing.

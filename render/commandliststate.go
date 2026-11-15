@@ -34,6 +34,9 @@ type commandListState struct {
 	order               Order
 	passes              []notedPass
 	passTargets         []notedTarget
+	// inspectedList is the list's inspection, nil when its frame is not
+	// inspected.
+	inspectedList *InspectedCommandList
 }
 
 // allocate answers a range of a chunk s holds holding data, at a multiple of
@@ -93,7 +96,7 @@ func (s *commandListState) placeInCurrentChunk(data []byte) (BufferRange, bool) 
 // up to the end of its last block, so gfx's next submit carries them.
 func (s *commandListState) writeChunks(table *assetTable, device gfx.Device) {
 	for _, chunk := range s.takenChunks {
-		writeBytes(table, device, chunk.gfxBuffer, 0, chunk.bytes[:(chunk.end+3)&^3])
+		writeBytes(table, device, Buffer{}, chunk.gfxBuffer, 0, chunk.bytes[:(chunk.end+3)&^3])
 	}
 }
 
@@ -115,6 +118,13 @@ func (s *commandListState) notePass(descriptor PassDescriptor) int {
 	return len(s.passes) - 1
 }
 
+// nextInspectedPosition answers the position in s's inspected list of the
+// pass, compute pass, copy or readback recorded next: how many it holds.
+func (s *commandListState) nextInspectedPosition() int {
+	list := s.inspectedList
+	return len(list.Passes) + len(list.ComputePasses) + len(list.Copies) + len(list.Readbacks)
+}
+
 // clearParameterSettings forgets every pass, draw and compute parameter
 // set, for the next pass, keeping their arrays.
 func (s *commandListState) clearParameterSettings() {
@@ -133,6 +143,7 @@ func (s *commandListState) reset() {
 	s.clearParameterSettings()
 	s.passes = s.passes[:0]
 	s.passTargets = s.passTargets[:0]
+	s.inspectedList = nil
 }
 
 // notedPass is a pass a command list began, for the clear-after-draw

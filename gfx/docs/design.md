@@ -329,8 +329,9 @@ device's release and the recovery among them, for a backend to pin.
   append, one framebuffer `TextureView` handle per window acquired, and a
   flushed flag. gfx's bookkeeping is allocation-free once warm; wgpu
   allocates per encoder.
-- **Frame encoders:** `Device.Encoder(frame, order)` answers one per
-  submit order, with no limit; one per task that records in parallel, not one
+- **Frame encoders:** `Device.Encoder(frame, order, label)` answers one per
+  submit order, with no limit, labelled for the backend's tools and the
+  recording adapter; one per task that records in parallel, not one
   per draw. An order taken twice answers `ErrOrderTaken`, and a flushed or
   presented frame `ErrFrameFlushed`, each with an encoder that records into
   nothing. The flush finishes them, sorts by order and submits once; an
@@ -519,10 +520,13 @@ device's release and the recovery among them, for a backend to pin.
   `instance.Recording()` once the kernel has settled.
 - **It records what reaches the socket,** as typed values: every create and
   release with its handle and descriptor, writes and maps, surface calls with
-  the status answered, and each submission as its command buffers, passes and
-  commands with arguments. `Recording.Frames()` groups what lies between a
+  the status answered, and each submission as its command buffers, each
+  under the label its encoder was made with, passes and commands with
+  arguments. `Recording.Frames()` groups what lies between a
   frame's first acquire and its last present; a frame with no window
-  acquired is its one submission. Submissions and surface calls are in a
+  acquired is its one submission. `Recording.FrameCalls()` answers each
+  frame's calls by the same grouping, from the call that begins it to the
+  next frame's. Submissions and surface calls are in a
   deterministic order; lifecycle calls from parallel tasks are not, and tests
   look them up by handle.
 - **It checks a fixed subset of what wgpu rejects:** a handle missing at its

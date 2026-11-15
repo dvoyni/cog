@@ -24,6 +24,21 @@ type TextureView struct {
 	Aspect                      TextureAspect
 }
 
+// makeInspectedTextureView answers the view of texture descriptor, gfx's,
+// describes, its counts, dimension and aspect filled in, as an inspection
+// writes it down.
+func makeInspectedTextureView(texture Texture, descriptor gfx.TextureViewDescriptor) TextureView {
+	return TextureView{
+		Texture:       texture,
+		BaseMipLevel:  descriptor.BaseMipLevel,
+		MipLevelCount: descriptor.MipLevelCount,
+		BaseLayer:     descriptor.BaseArrayLayer,
+		LayerCount:    descriptor.ArrayLayerCount,
+		Dimension:     TextureViewDimension(descriptor.Dimension),
+		Aspect:        TextureAspect(descriptor.Aspect),
+	}
+}
+
 // makeViewDescriptor answers the gfx view binding sees of v's texture, which
 // gfx made from descriptor, its counts, dimension and aspect filled in. An
 // error says why the view does not fit binding:

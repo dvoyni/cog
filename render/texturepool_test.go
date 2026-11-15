@@ -117,7 +117,7 @@ func TestPassesIntoTemporaryTexturesAtAMipLevelAndLayerWithADepthTargetAndWithRe
 	for index := range passes {
 		passes[index].Position = index
 	}
-	want := render.Inspection{CommandLists: []render.InspectedCommandList{{Passes: passes}}}
+	want := render.Inspection{CommandLists: []render.InspectedCommandList{{Label: "offscreen", Passes: passes}}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("the frame reads back as %+v, want %+v", got, want)
 	}
@@ -163,7 +163,7 @@ func TestAPassWhoseTextureTargetsAreMissingOfTheWrongKindOrDisagreeIsRefusedRepo
 		t.Errorf("render reported kinds %v, want %v", kinds, want)
 	}
 	want := render.Inspection{CommandLists: []render.InspectedCommandList{
-		{Passes: []render.InspectedPass{{Label: "kept", ColorTargets: []render.ColorTarget{{Texture: kept}}}}},
+		{Label: "offscreen", Passes: []render.InspectedPass{{Label: "kept", ColorTargets: []render.ColorTarget{{Texture: kept}}}}},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("the frame reads back as %+v, want only the pass kept, %+v", got, want)

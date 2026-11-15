@@ -30,8 +30,9 @@ func (harnessPlugin) Dependencies() []kernel.PluginName {
 // Init binds gfx's InstanceSocket to the recording instance, its devices a
 // frame behind and answering reflection from binding declarations, and
 // platform's WindowsSocket to the headless windows, and subscribes to
-// openWindowEvent and to platform.WindowOpenedEvent, whose in, the plugin
-// being listed after gfx, is the job making the window's surface.
+// openWindowEvent; to platform.WindowOpenedEvent, whose in, the plugin
+// being listed after gfx, is the job making the window's surface; and to
+// render.FrameEvent, to note each frame's beat for Frames.
 func (p harnessPlugin) Init(configurator *kernel.Configurator, _ any) error {
 	configurator.BindSocket[gfx.InstanceSocket](harnessInstance{InstanceSocket: p.harness.instance, harness: p.harness})
 	configurator.BindSocket[platform.WindowsSocket](p.harness.windows)
@@ -47,6 +48,10 @@ func (p harnessPlugin) Init(configurator *kernel.Configurator, _ any) error {
 	})
 	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event platform.WindowOpenedEvent) (platform.WindowOpenedEvent, kernel.JobHandle) {
 		p.harness.surfaceMade = in
+		return event, in
+	})
+	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event render.FrameEvent) (render.FrameEvent, kernel.JobHandle) {
+		p.harness.noteBeat(event.Beat)
 		return event, in
 	})
 	return nil

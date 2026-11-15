@@ -44,7 +44,7 @@ func (w *frameWatcher) Init(configurator *kernel.Configurator, _ any) error {
 		drawIndex := slices.IndexFunc(w.drawEvents, func(drawEvent gfx.DrawEvent) bool { return drawEvent.Tick == event.Tick })
 		frame := w.drawEvents[drawIndex].Frame
 		w.mutex.Unlock()
-		_, err := device.Get().Encoder(frame, 0)
+		_, err := device.Get().Encoder(frame, 0, "")
 		w.mutex.Lock()
 		w.encoderErrors = append(w.encoderErrors, err)
 		w.mutex.Unlock()

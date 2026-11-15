@@ -116,7 +116,7 @@ func (i Inventory) MakeBuffer[T any](label string, usage BufferUsageFlags, data 
 	table.madeBuffers.add(buffer, buffer)
 	table.madeBuffers.mutex.Unlock()
 	if len(bytes) > 0 {
-		writeBytes(table, device, gfxBuffer, 0, padBytes(bytes))
+		writeBytes(table, device, buffer, gfxBuffer, 0, padBytes(bytes))
 	}
 	return buffer
 }
@@ -156,7 +156,7 @@ func (i Inventory) MakeTexture[T any](descriptor TextureDescriptor, data []T) Te
 		return texture
 	}
 	gfxTexture, _ := table.findTexture(texture)
-	writeTexels(table, device, gfx.ImageCopyTexture{Texture: gfxTexture, Aspect: gfx.TextureAspectAll}, texels, texelSize,
+	writeTexels(table, device, texture, gfx.ImageCopyTexture{Texture: gfxTexture, Aspect: gfx.TextureAspectAll}, texels, texelSize,
 		gfx.Extent3D{Width: descriptor.Width, Height: descriptor.Height, DepthOrArrayLayers: descriptor.LayerCount})
 	return texture
 }

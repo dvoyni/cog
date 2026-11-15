@@ -65,6 +65,22 @@ type ReadbackEvent struct {
 	Status   ReadbackStatus
 }
 
+// InspectedEvent delivers the inspection Frame.RequestInspection asked for,
+// published once the frame of Beat, the frame inspected, is presented. A
+// handler reads it with Frame.ReadInspection in tasks it joins into the out
+// dependency it returns; after that, it is gone, and a request asks for
+// another.
+type InspectedEvent struct {
+	Beat metronome.Beat
+}
+
+// inspectionDeliveryEvent carries the inspection of the frame of beat, once
+// the frame ends, from its end's job to render's handler, which publishes it
+// as InspectedEvent in its own batch, to release the inspection after.
+type inspectionDeliveryEvent struct {
+	beat metronome.Beat
+}
+
 // readbackDeliveryEvent carries a readback whose map has ended, or failed to
 // start, from the job that found it to render's handler, which publishes it
 // as ReadbackEvent in its own batch, to release the readback's staging

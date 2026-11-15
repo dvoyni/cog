@@ -10,8 +10,9 @@ import (
 // frameReader reads the frames gfx's recording adapter recorded back in
 // render's terms, from what the recording's calls made: what each view drawn
 // into is, the material each pipeline draws with, what each compute
-// pipeline runs, what each bind group binds, and the handle of each texture
-// and buffer render made.
+// pipeline runs, what each bind group binds, the handle of each texture and
+// buffer render made, which buffers are chunks of render's temporary arena
+// and which are staging buffers of readbacks.
 type frameReader struct {
 	viewTargets      map[gfx.TextureView]viewTarget
 	materials        map[gfx.RenderPipeline]pipelineMaterial
@@ -19,6 +20,8 @@ type frameReader struct {
 	bindGroups       *bindGroupReader
 	textures         map[gfx.Texture]render.Texture
 	buffers          map[gfx.Buffer]render.Buffer
+	chunkBuffers     map[gfx.Buffer]bool
+	stagingBuffers   map[gfx.Buffer]bool
 	// submission is the index of the next submission read, among every
 	// frame's.
 	submission int
@@ -33,6 +36,8 @@ type frameReader struct {
 func newFrameReader(calls []recording.Call, shaderBindings map[gfx.ShaderModule][]gfx.ShaderBinding) *frameReader {
 	textures := map[gfx.Texture]render.Texture{}
 	buffers := map[gfx.Buffer]render.Buffer{}
+	chunkBuffers := map[gfx.Buffer]bool{}
+	stagingBuffers := map[gfx.Buffer]bool{}
 	shaders := map[gfx.ShaderModule]render.Shader{}
 	for _, call := range calls {
 		switch arguments := call.Arguments.(type) {
@@ -41,9 +46,11 @@ func newFrameReader(calls []recording.Call, shaderBindings map[gfx.ShaderModule]
 				textures[arguments.Texture] = texture
 			}
 		case recording.CreateBufferArguments:
-			if buffer, ok := handle.ParseLabel[render.Buffer](arguments.Descriptor.Label); ok {
+			if buffer, label, ok := handle.SplitLabel[render.Buffer](arguments.Descriptor.Label); ok {
 				buffers[arguments.Buffer] = buffer
+				chunkBuffers[arguments.Buffer] = label == handle.TemporaryChunkLabel
 			}
+			stagingBuffers[arguments.Buffer] = arguments.Descriptor.Label == handle.StagingBufferLabel
 		case recording.CreateShaderModuleArguments:
 			if shader, ok := handle.ParseLabel[render.Shader](arguments.Descriptor.Label); ok {
 				shaders[arguments.Module] = shader
@@ -58,18 +65,25 @@ func newFrameReader(calls []recording.Call, shaderBindings map[gfx.ShaderModule]
 		bindGroups:       newBindGroupReader(calls, viewTargets, shaderBindings),
 		textures:         textures,
 		buffers:          buffers,
+		chunkBuffers:     chunkBuffers,
+		stagingBuffers:   stagingBuffers,
 	}
 }
 
-// makeInspection answers frame, the next frame recorded, in render's terms:
-// each command buffer a command list, in the order gfx submitted them, which
-// is their order, with its passes, compute passes and copies.
-func (r *frameReader) makeInspection(frame recording.Frame) render.Inspection {
+// makeInspection answers frame, the next frame recorded, whose calls are
+// calls, in render's terms: each command buffer a command list, under its
+// label, in the order gfx submitted them, which is their order, with its
+// passes, compute passes, copies and readbacks; and what calls made and
+// wrote of render's. Its beat, its reports, its temporaries, its versioned
+// materials and its draws' Material are left empty: gfx's recording does
+// not show them.
+func (r *frameReader) makeInspection(frame recording.Frame, calls []recording.Call) render.Inspection {
 	var inspection render.Inspection
 	for _, submission := range frame.Submissions {
 		for _, buffer := range submission.Buffers {
-			var list render.InspectedCommandList
-			// position is the position of the next pass, compute pass or copy.
+			list := render.InspectedCommandList{Label: buffer.Label}
+			// position is the position of the next pass, compute pass, copy
+			// or readback.
 			position := 0
 			for _, command := range buffer.Commands {
 				switch command.Kind {
@@ -78,7 +92,12 @@ func (r *frameReader) makeInspection(frame recording.Frame) render.Inspection {
 				case recording.CommandKindBeginComputePass:
 					list.ComputePasses = append(list.ComputePasses, r.makeInspectedComputePass(command, position))
 				case recording.CommandKindCopyBufferToBuffer, recording.CommandKindCopyBufferToTexture, recording.CommandKindCopyTextureToBuffer, recording.CommandKindCopyTextureToTexture, recording.CommandKindClearBuffer:
-					list.Copies = append(list.Copies, r.makeInspectedCopy(command, position))
+					copied := r.makeInspectedCopy(command, position)
+					if r.isReadback(command) {
+						list.Readbacks = append(list.Readbacks, render.InspectedReadback{Position: position, SourceBuffer: copied.SourceBuffer, SourceTexture: copied.SourceTexture, SourceRegion: copied.SourceRegion})
+					} else {
+						list.Copies = append(list.Copies, copied)
+					}
 				default:
 					continue
 				}
@@ -88,7 +107,64 @@ func (r *frameReader) makeInspection(frame recording.Frame) render.Inspection {
 		}
 		r.submission++
 	}
+	r.addMade(&inspection, calls)
 	return inspection
+}
+
+// addMade adds to inspection what calls made and wrote of render's: the
+// textures, buffers and shaders, but the arena's chunks; the writes into
+// them; the pipelines; and the bind groups, by the kind their labels name.
+// A call that failed made nothing.
+func (r *frameReader) addMade(inspection *render.Inspection, calls []recording.Call) {
+	for _, call := range calls {
+		if call.Error != nil {
+			continue
+		}
+		switch arguments := call.Arguments.(type) {
+		case recording.CreateTextureArguments:
+			if texture, label, ok := handle.SplitLabel[render.Texture](arguments.Descriptor.Label); ok {
+				inspection.MadeAssets = append(inspection.MadeAssets, render.InspectedAsset{Texture: texture, Label: label})
+			}
+		case recording.CreateBufferArguments:
+			if buffer, label, ok := handle.SplitLabel[render.Buffer](arguments.Descriptor.Label); ok && !r.chunkBuffers[arguments.Buffer] {
+				inspection.MadeAssets = append(inspection.MadeAssets, render.InspectedAsset{Buffer: buffer, Label: label})
+			}
+		case recording.CreateShaderModuleArguments:
+			if shader, label, ok := handle.SplitLabel[render.Shader](arguments.Descriptor.Label); ok {
+				inspection.MadeAssets = append(inspection.MadeAssets, render.InspectedAsset{Shader: shader, Label: label})
+			}
+		case recording.WriteBufferArguments:
+			if buffer, ok := r.buffers[arguments.Buffer]; ok && !r.chunkBuffers[arguments.Buffer] {
+				inspection.Writes = append(inspection.Writes, render.InspectedWrite{Buffer: render.BufferRange{Buffer: buffer, Offset: arguments.Offset, Size: uint64(len(arguments.Data))}})
+			}
+		case recording.WriteTextureArguments:
+			if texture, ok := r.textures[arguments.Destination.Texture]; ok {
+				inspection.Writes = append(inspection.Writes, render.InspectedWrite{Texture: texture, Region: makeTextureRegion(arguments.Destination, arguments.Size), LayerCount: arguments.Size.DepthOrArrayLayers})
+			}
+		case recording.CreateRenderPipelineArguments:
+			material := r.materials[arguments.Pipeline].material
+			inspection.MadePipelines = append(inspection.MadePipelines, render.InspectedPipeline{Shader: material.Shader, VertexEntryPoint: material.VertexEntryPoint, FragmentEntryPoint: material.FragmentEntryPoint, State: material.State})
+		case recording.CreateComputePipelineArguments:
+			pipeline := r.computePipelines[arguments.Pipeline]
+			inspection.MadePipelines = append(inspection.MadePipelines, render.InspectedPipeline{Shader: pipeline.shader, ComputeEntryPoint: pipeline.entryPoint})
+		case recording.CreateBindGroupArguments:
+			if kind, ok := bindGroupKinds[arguments.Descriptor.Label]; ok {
+				inspection.MadeBindGroups = append(inspection.MadeBindGroups, render.InspectedBindGroup{Kind: kind})
+			}
+		}
+	}
+}
+
+// isReadback answers whether command, a copy, copies into a staging buffer
+// of render's: a readback.
+func (r *frameReader) isReadback(command recording.Command) bool {
+	switch arguments := command.Arguments.(type) {
+	case recording.CopyBufferToBufferArguments:
+		return r.stagingBuffers[arguments.Destination]
+	case recording.CopyTextureToBufferArguments:
+		return r.stagingBuffers[arguments.Destination]
+	}
+	return false
 }
 
 // makeInspectedPass answers the pass command begins, at position in its
@@ -135,14 +211,19 @@ func (r *frameReader) makeInspectedPass(command recording.Command, position int)
 func (r *frameReader) makeInspectedDraws(commands []recording.Command) []render.InspectedDraw {
 	var draws []render.InspectedDraw
 	var material pipelineMaterial
-	// groups are the bind groups set, by their index.
+	// groups are the bind groups set, by their index, and vertexBuffers the
+	// vertex buffers, by their slot.
 	var groups [3]recording.SetBindGroupArguments
+	var vertexBuffers [8]recording.SetVertexBufferArguments
 	makeParameters := func(group uint32) []render.InspectedParameter {
 		return r.bindGroups.makeParameters(material.module, group, groups[group].Group, groups[group].DynamicOffsets, r.submission)
 	}
 	makeDraw := func() render.InspectedDraw {
 		draw := render.InspectedDraw{Material: material.material, PassParameters: makeParameters(0), DrawParameters: makeParameters(2)}
 		draw.Material.Parameters = makeParameters(1)
+		for _, slot := range material.instanceSlots {
+			draw.InstanceBuffers = append(draw.InstanceBuffers, render.BufferRange{Buffer: r.buffers[vertexBuffers[slot].Buffer], Offset: vertexBuffers[slot].Offset})
+		}
 		return draw
 	}
 	for _, command := range commands {
@@ -154,6 +235,10 @@ func (r *frameReader) makeInspectedDraws(commands []recording.Command) []render.
 		case recording.CommandKindSetBindGroup:
 			if arguments := command.Arguments.(recording.SetBindGroupArguments); arguments.Index < uint32(len(groups)) {
 				groups[arguments.Index] = arguments
+			}
+		case recording.CommandKindSetVertexBuffer:
+			if arguments := command.Arguments.(recording.SetVertexBufferArguments); arguments.Slot < uint32(len(vertexBuffers)) {
+				vertexBuffers[arguments.Slot] = arguments
 			}
 		case recording.CommandKindDraw:
 			arguments := command.Arguments.(gfx.DrawArgs)
@@ -233,6 +318,15 @@ func (r *frameReader) makeInspectedCopy(command recording.Command, position int)
 		copied.DestinationBuffer = render.BufferRange{Buffer: r.buffers[arguments.Buffer], Offset: arguments.Offset, Size: arguments.Size}
 	}
 	return copied
+}
+
+// bindGroupKinds are the kinds of bind group render makes, by the labels it
+// gives them.
+var bindGroupKinds = map[string]render.BindGroupKind{
+	handle.MaterialBindGroupLabel:  render.BindGroupKindMaterial,
+	handle.ParameterBindGroupLabel: render.BindGroupKindParameters,
+	handle.DefaultBindGroupLabel:   render.BindGroupKindDefault,
+	handle.MipBindGroupLabel:       render.BindGroupKindMips,
 }
 
 // makeTextureRegion answers the region of size at origin in render's terms.

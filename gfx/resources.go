@@ -199,13 +199,14 @@ type Device interface {
 	// and lands before every command buffer of the next submit.
 	WriteTexture(destination ImageCopyTexture, data []byte, layout ImageDataLayout, size Extent3D) error
 
-	// Encoder answers frame's encoder at order, which gfx's flush finishes
-	// and submits sorted by order; an encoder whose Finish fails goes to
-	// LogErr and is dropped, and the rest are submitted. Take one per task
-	// that records in parallel, not one per draw. An order already handed out
-	// in frame answers ErrOrderTaken, and a frame flushed or presented
-	// ErrFrameFlushed, each with an encoder that records into nothing.
-	Encoder(frame Frame, order SubmitOrder) (CommandEncoder, error)
+	// Encoder answers frame's encoder at order, labelled label for the
+	// backend's tools, which gfx's flush finishes and submits sorted by
+	// order; an encoder whose Finish fails goes to LogErr and is dropped, and
+	// the rest are submitted. Take one per task that records in parallel,
+	// not one per draw. An order already handed out in frame answers
+	// ErrOrderTaken, and a frame flushed or presented ErrFrameFlushed, each
+	// with an encoder that records into nothing.
+	Encoder(frame Frame, order SubmitOrder, label string) (CommandEncoder, error)
 	// Framebuffer answers the view of window's framebuffer in frame, until
 	// frame is presented, or the zero view when frame acquired none for it
 	// (minimized, hidden, or not open) or is presented. TextureViewTexture

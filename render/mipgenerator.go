@@ -8,18 +8,30 @@ import (
 	"github.com/dvoyni/cog/gfx"
 )
 
+// mipListLabel labels render's own command list, the one mips are
+// generated in.
+const mipListLabel = "render: mips"
+
+// The functions of the mip shader each mip level is drawn with.
+const (
+	mipVertexEntryPoint   = "vertex_main"
+	mipFragmentEntryPoint = "fragment_main"
+)
+
 // mipGenerator generates the mip levels of textures in render's own command
 // list: each level of each layer drawn from the level above it, of the same
 // layer, by the mip shader through a linear filter. Its mutex guards what it
 // holds: the textures whose mips are requested; the shader, read from
-// mipShaderPath in platform's FS, and the layouts and sampler, made at its
-// first generation; a pipeline for each format it has
+// mipShaderPath in platform's FS, its bindings as gfx reflects them, and the
+// layouts and sampler, made at its first generation; a pipeline for each
+// format it has
 // drawn into; and the bind groups of the frame being recorded, released when
 // the frame ends. It takes the asset table's mutex inside its own.
 type mipGenerator struct {
 	mutex             sync.Mutex
 	requestedTextures []Texture
 	module            gfx.ShaderModule
+	bindings          []gfx.ShaderBinding
 	bindGroupLayout   gfx.BindGroupLayout
 	pipelineLayout    gfx.PipelineLayout
 	sampler           gfx.Sampler
@@ -40,13 +52,15 @@ func (g *mipGenerator) request(textures ...Texture) {
 // and makes what it draws with, only for a texture of more than one level. A
 // failure to make what it draws with, or to take the encoder, is logged
 // through table, unless the device is lost, and generates no texture's mips,
-// as a texture's own failure generates none of its.
+// as a texture's own failure generates none of its. While the frame is
+// inspected, the list and what it draws go into the inspection.
 func (g *mipGenerator) generate(table *assetTable, device gfx.Device, files fs.FS, frame gfx.Frame) {
 	g.mutex.Lock()
 	defer g.mutex.Unlock()
 	textures := g.requestedTextures
 	g.requestedTextures = g.requestedTextures[:0]
 	var encoder gfx.CommandEncoder
+	var inspectedList *InspectedCommandList
 	for _, texture := range textures {
 		gfxTexture, ok := table.findTexture(texture)
 		if !ok {
@@ -62,8 +76,9 @@ func (g *mipGenerator) generate(table *assetTable, device gfx.Device, files fs.F
 				table.logUnlessLost(err)
 				return
 			}
+			inspectedList = table.inspector.addList(ownOrder, mipListLabel)
 		}
-		if err := g.generateTexture(table, device, encoder, texture, descriptor); err != nil {
+		if err := g.generateTexture(table, device, encoder, inspectedList, texture, descriptor); err != nil {
 			table.logUnlessLost(fmt.Errorf("render: generating the mips of texture %q: %w", descriptor.Label, err))
 		}
 	}
@@ -86,7 +101,7 @@ func (g *mipGenerator) takeEncoder(device gfx.Device, files fs.FS, frame gfx.Fra
 	if err := g.init(device, files); err != nil {
 		return nil, fmt.Errorf("render: making the mip shader: %w", err)
 	}
-	encoder, err := device.Encoder(frame, gfx.SubmitOrder(ownOrder))
+	encoder, err := device.Encoder(frame, gfx.SubmitOrder(ownOrder), mipListLabel)
 	if err != nil {
 		return nil, fmt.Errorf("render: taking render's own command list: %w", err)
 	}
@@ -124,6 +139,10 @@ func (g *mipGenerator) init(device gfx.Device, files fs.FS) (err error) {
 	if module, err = device.CreateShaderModule(gfx.ShaderModuleDescriptor{Label: mipShaderPath, WGSL: source}); err != nil {
 		return err
 	}
+	bindings, err := device.ShaderModuleBindings(module)
+	if err != nil {
+		return err
+	}
 	if bindGroupLayout, err = device.CreateBindGroupLayout(gfx.BindGroupLayoutDescriptor{Label: "render: mips", Entries: []gfx.BindGroupLayoutEntry{
 		{Binding: 0, Visibility: gfx.ShaderStageFlagFragment, Texture: gfx.TextureBindingLayout{SampleType: gfx.TextureSampleTypeFloat, ViewDimension: gfx.TextureViewDimension2D}},
 		{Binding: 1, Visibility: gfx.ShaderStageFlagFragment, Sampler: gfx.SamplerBindingLayout{Type: gfx.SamplerBindingTypeFiltering}},
@@ -147,6 +166,7 @@ func (g *mipGenerator) init(device gfx.Device, files fs.FS) (err error) {
 		return err
 	}
 	g.module = module
+	g.bindings = bindings
 	g.bindGroupLayout = bindGroupLayout
 	g.pipelineLayout = pipelineLayout
 	g.sampler = sampler
@@ -155,18 +175,19 @@ func (g *mipGenerator) init(device gfx.Device, files fs.FS) (err error) {
 }
 
 // generateTexture records into encoder the mip levels below the first of
-// texture, of descriptor, each from the level above it at the same layer. g's
-// mutex is held.
-func (g *mipGenerator) generateTexture(table *assetTable, device gfx.Device, encoder gfx.CommandEncoder, texture Texture, descriptor gfx.TextureDescriptor) error {
+// texture, of descriptor, each from the level above it at the same layer,
+// and writes each pass down in inspectedList, unless it is nil. g's mutex is
+// held.
+func (g *mipGenerator) generateTexture(table *assetTable, device gfx.Device, encoder gfx.CommandEncoder, inspectedList *InspectedCommandList, texture Texture, descriptor gfx.TextureDescriptor) error {
 	pipeline, ok := g.pipelines[descriptor.Format]
 	if !ok {
 		var err error
 		pipeline, err = device.CreateRenderPipeline(gfx.RenderPipelineDescriptor{
 			Label:       "render: mips",
 			Layout:      g.pipelineLayout,
-			Vertex:      gfx.VertexState{Module: g.module, EntryPoint: "vertex_main"},
+			Vertex:      gfx.VertexState{Module: g.module, EntryPoint: mipVertexEntryPoint},
 			Multisample: gfx.MultisampleState{Count: 1, Mask: ^uint64(0)},
-			Fragment: gfx.FragmentState{Module: g.module, EntryPoint: "fragment_main", Targets: []gfx.ColorTargetState{
+			Fragment: gfx.FragmentState{Module: g.module, EntryPoint: mipFragmentEntryPoint, Targets: []gfx.ColorTargetState{
 				{Format: descriptor.Format, WriteMask: gfx.ColorWriteFlagAll},
 			}},
 		})
@@ -174,6 +195,9 @@ func (g *mipGenerator) generateTexture(table *assetTable, device gfx.Device, enc
 			return err
 		}
 		g.pipelines[descriptor.Format] = pipeline
+		table.inspector.add(func(inspection *Inspection) {
+			inspection.MadePipelines = append(inspection.MadePipelines, InspectedPipeline{VertexEntryPoint: mipVertexEntryPoint, FragmentEntryPoint: mipFragmentEntryPoint})
+		})
 	}
 	// sources are the views of the level above, by layer: each pass's target
 	// is its next level's source.
@@ -190,18 +214,22 @@ func (g *mipGenerator) generateTexture(table *assetTable, device gfx.Device, enc
 			if err != nil {
 				return err
 			}
-			group, err := device.CreateBindGroup(gfx.BindGroupDescriptor{Label: "render: mips", Layout: g.bindGroupLayout, Entries: []gfx.BindGroupEntry{
+			group, err := BindGroupKindMips.createBindGroup(device, table.inspector, g.bindGroupLayout, []gfx.BindGroupEntry{
 				{Binding: 0, TextureView: source},
 				{Binding: 1, Sampler: g.sampler},
-			}})
+			})
 			if err != nil {
 				return err
 			}
 			g.frameBindGroups = append(g.frameBindGroups, group)
+			label := fmt.Sprintf("render: mip level %d, layer %d, of %s", mipLevel, layer, descriptor.Label)
 			pass := encoder.BeginRenderPass(gfx.RenderPassDescriptor{
-				Label:            fmt.Sprintf("render: mip level %d, layer %d, of %s", mipLevel, layer, descriptor.Label),
+				Label:            label,
 				ColorAttachments: []gfx.RenderPassColorAttachment{{View: target, LoadOp: gfx.LoadOpClear, StoreOp: gfx.StoreOpStore}},
 			})
+			if inspectedList != nil {
+				inspectedList.Passes = append(inspectedList.Passes, g.makeInspectedPass(texture, mipLevel, uint32(layer), label, len(inspectedList.Passes)))
+			}
 			pass.SetPipeline(pipeline)
 			pass.SetBindGroup(0, group, nil)
 			pass.Draw(gfx.DrawArgs{VertexCount: 3, InstanceCount: 1})
@@ -210,4 +238,27 @@ func (g *mipGenerator) generateTexture(table *assetTable, device gfx.Device, enc
 		}
 	}
 	return nil
+}
+
+// makeInspectedPass answers the pass labelled label, at position in
+// render's own list, drawing mipLevel of texture at layer from the level
+// above, as an inspection writes it down: its target cleared, and its one
+// draw of the mip shader, the level above bound to the shader's texture and
+// its sampler, render's own, written down as a default.
+func (g *mipGenerator) makeInspectedPass(texture Texture, mipLevel, layer uint32, label string, position int) InspectedPass {
+	draw := InspectedDraw{Material: InspectedMaterial{VertexEntryPoint: mipVertexEntryPoint, FragmentEntryPoint: mipFragmentEntryPoint}, VertexCount: 3, InstanceCount: 1}
+	for _, binding := range g.bindings {
+		parameter := InspectedParameter{Name: binding.Name, Group: binding.Group, Binding: binding.Binding, Default: true}
+		if binding.Texture.SampleType != gfx.TextureSampleTypeUndefined {
+			parameter.Default = false
+			parameter.TextureView = makeInspectedTextureView(texture, makeLevelViewDescriptor(mipLevel-1, layer))
+		}
+		draw.PassParameters = append(draw.PassParameters, parameter)
+	}
+	return InspectedPass{
+		Position:     position,
+		Label:        label,
+		ColorTargets: []ColorTarget{{Texture: texture, MipLevel: mipLevel, Layer: layer, Clear: true}},
+		Draws:        []InspectedDraw{draw},
+	}
 }

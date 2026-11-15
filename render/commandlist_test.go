@@ -12,7 +12,8 @@ import (
 	"github.com/dvoyni/cog/render/rendertest"
 )
 
-// stepAndReadFrame steps h once and answers the frame the beat drew, read back.
+// stepAndReadFrame steps h once and answers the command lists of the frame
+// the beat drew, read back, alone.
 func stepAndReadFrame(t *testing.T, h *rendertest.Harness) render.Inspection {
 	t.Helper()
 	h.Step()
@@ -20,7 +21,7 @@ func stepAndReadFrame(t *testing.T, h *rendertest.Harness) render.Inspection {
 	if len(frames) == 0 {
 		t.Fatal("the harness read back no frame")
 	}
-	return frames[len(frames)-1]
+	return render.Inspection{CommandLists: frames[len(frames)-1].CommandLists}
 }
 
 // makeReportKinds answers the kind of each report h's kernel logged so far.
@@ -61,14 +62,14 @@ func TestTheReaderShowsListsFilledConcurrentlyByOrderAndPassesWithTheirLabelsTar
 	got := stepAndReadFrame(t, h)
 
 	want := render.Inspection{CommandLists: []render.InspectedCommandList{
-		{Passes: []render.InspectedPass{
+		{Label: "early", Passes: []render.InspectedPass{
 			{Label: "scene", ColorTargets: []render.ColorTarget{
 				{Window: first, Clear: true, ClearColor: red},
 				{Window: second, Discard: true},
 			}},
 			{Position: 1, Label: "interface", ColorTargets: []render.ColorTarget{{Window: second}}},
 		}},
-		{Passes: []render.InspectedPass{
+		{Label: "late", Passes: []render.InspectedPass{
 			{Label: "overlay", ColorTargets: []render.ColorTarget{{Window: first}}},
 		}},
 	}}
@@ -101,7 +102,7 @@ func TestListsAtATakenOrderOrRendersOwnAreRefusedAndReportedOnce(t *testing.T) {
 		t.Errorf("render reported kinds %v, want %v", kinds, want)
 	}
 	want := render.Inspection{CommandLists: []render.InspectedCommandList{
-		{Passes: []render.InspectedPass{{Label: "first", ColorTargets: []render.ColorTarget{{Window: window}}}}},
+		{Label: "first", Passes: []render.InspectedPass{{Label: "first", ColorTargets: []render.ColorTarget{{Window: window}}}}},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("the frame reads back as %+v, want only the first list's pass, %+v", got, want)
@@ -162,7 +163,7 @@ func TestAPassIntoAWindowWithNoFramebufferIsSkippedSilently(t *testing.T) {
 	got := stepAndReadFrame(t, h)
 
 	want := render.Inspection{CommandLists: []render.InspectedCommandList{
-		{Passes: []render.InspectedPass{{Label: "shown", ColorTargets: []render.ColorTarget{{Window: shown}}}}},
+		{Label: "scene", Passes: []render.InspectedPass{{Label: "shown", ColorTargets: []render.ColorTarget{{Window: shown}}}}},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("the frame reads back as %+v, want only the pass into the window shown, %+v", got, want)
@@ -191,7 +192,7 @@ func TestAPassWhoseTargetsAreNoneTooManyNamelessOrDisagreeIsRefusedReportedOnceA
 		t.Errorf("render reported kinds %v, want %v", kinds, want)
 	}
 	want := render.Inspection{CommandLists: []render.InspectedCommandList{
-		{Passes: []render.InspectedPass{{Label: "kept", ColorTargets: []render.ColorTarget{{Window: small}}}}},
+		{Label: "scene", Passes: []render.InspectedPass{{Label: "kept", ColorTargets: []render.ColorTarget{{Window: small}}}}},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("the frame reads back as %+v, want only the pass kept, %+v", got, want)

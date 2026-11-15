@@ -92,12 +92,15 @@ func (s *materialSlot) placeLatestUniforms(listState *commandListState, table *a
 // materialBindGroup is a material's own bind group of @group(1), for passes
 // whose targets leave the textures of defaultedMask at their defaults, none
 // when its shader's @group(1) is empty and the layout's default stands in;
-// and the name of a storage binding of it left unbound that a function the
-// material runs reads, for which its draws are skipped, empty for none.
+// the bit of each binding, by its index, that draws its default, for
+// whatever reason, a binding past the 64th never noted; and the name of a
+// storage binding of it left unbound that a function the material runs
+// reads, for which its draws are skipped, empty for none.
 type materialBindGroup struct {
-	defaultedMask uint64
-	group         gfx.BindGroup
-	unboundRead   string
+	defaultedMask    uint64
+	group            gfx.BindGroup
+	drawnDefaultMask uint64
+	unboundRead      string
 }
 
 // materialUniformBlock is what a material keeps for one uniform block of its

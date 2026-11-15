@@ -67,11 +67,17 @@ type Harness struct {
 	// last Step began.
 	submittedIndex atomic.Uint64
 	finishedIndex  atomic.Uint64
-	// mutex guards logged, the errors logged and not yet checked, and
-	// reports, every render.Report logged.
+	// frameNotes are what each Step saw of the frames it drew, by the index
+	// of each frame recorded; only the test's goroutine reads and writes
+	// them.
+	frameNotes []frameNote
+	// mutex guards logged, the errors logged and not yet checked; reports,
+	// every render.Report logged; and beat, the beat of the last FrameEvent
+	// published.
 	mutex   sync.Mutex
 	logged  []error
 	reports []render.Report
+	beat    metronome.Beat
 }
 
 // NewHarness answers a harness whose kernel is not yet spawned. When the test
@@ -116,16 +122,26 @@ func (h *Harness) Spawn(config *render.Config, plugins ...kernel.Plugin) {
 // Step draws one beat: it has the GPU finish the work submitted so far,
 // advances the clock by FrameInterval, and returns once the beat has
 // finished, its frame presented and every job of its publication done. It
-// then checks the errors logged.
+// notes the beat and the reports of the frame it drew, for Frames, and then
+// checks the errors logged.
 func (h *Harness) Step() {
 	h.t.Helper()
 	h.finishedIndex.Store(h.submittedIndex.Load())
+	h.mutex.Lock()
+	firstReport := len(h.reports)
+	h.mutex.Unlock()
 	advanced := make(chan struct{})
 	go func() {
 		defer close(advanced)
 		h.clock.Advance(FrameInterval)
 	}()
 	h.tickUntil("the beat", makeReceiveCheck(advanced))
+	h.mutex.Lock()
+	note := frameNote{beat: h.beat, reports: slices.Clone(h.reports[firstReport:])}
+	h.mutex.Unlock()
+	for range len(h.instance.Recording().Frames()) - len(h.frameNotes) {
+		h.frameNotes = append(h.frameNotes, note)
+	}
 	h.checkLogged()
 }
 
@@ -154,14 +170,24 @@ func (h *Harness) ExpectReport(kind render.ReportKind) {
 }
 
 // Frames answers each frame gfx has drawn so far, read back from its
-// recording adapter in render's terms. Its command lists are every encoder
-// gfx submitted, by order, those of plugins drawing on gfx alone included.
+// recording adapter in render's terms, as render.Inspection says, with the
+// beat of the Step that drew it and the reports logged during that Step.
+// Its command lists are every encoder gfx submitted, by order, those of
+// plugins drawing on gfx alone included. What render made and wrote between
+// two frames goes into the earlier, as recording.Recording.FrameCalls groups
+// calls.
 func (h *Harness) Frames() []render.Inspection {
 	recorded := h.instance.Recording()
 	reader := newFrameReader(recorded.Calls, h.declarations.findAnsweredBindings())
+	frameCalls := recorded.FrameCalls()
 	var inspections []render.Inspection
-	for _, frame := range recorded.Frames() {
-		inspections = append(inspections, reader.makeInspection(frame))
+	for index, frame := range recorded.Frames() {
+		inspection := reader.makeInspection(frame, frameCalls[index])
+		if index < len(h.frameNotes) {
+			inspection.Beat = h.frameNotes[index].beat
+			inspection.Reports = h.frameNotes[index].reports
+		}
+		inspections = append(inspections, inspection)
 	}
 	return inspections
 }
@@ -172,6 +198,13 @@ func (h *Harness) Reports() []render.Report {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 	return slices.Clone(h.reports)
+}
+
+// noteBeat keeps beat as the beat of the last FrameEvent published.
+func (h *Harness) noteBeat(beat metronome.Beat) {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	h.beat = beat
 }
 
 // checkLogged fails the test on each error logged since the last check, but a
@@ -239,4 +272,11 @@ func makeReceiveCheck(channel <-chan struct{}) func() bool {
 			return false
 		}
 	}
+}
+
+// frameNote is what a Step saw of a frame it drew: the beat of its
+// FrameEvent, and the reports logged while it drew.
+type frameNote struct {
+	beat    metronome.Beat
+	reports []render.Report
 }

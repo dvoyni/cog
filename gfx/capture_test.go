@@ -118,7 +118,7 @@ func TestACaptureIsCopiedAfterEverySubmitOrderAndDeliveredWithItsFramesBeat(t *t
 	h := newHarness(t)
 	var buffers []gfx.Buffer
 	h.readFrame = func(event gfx.DrawEvent, device gfx.Device) {
-		encoder, err := device.Encoder(event.Frame, 1000)
+		encoder, err := device.Encoder(event.Frame, 1000, "")
 		if err != nil {
 			t.Errorf("Encoder answered %v", err)
 		}
@@ -164,7 +164,7 @@ func TestACaptureIsCopiedAfterEverySubmitOrderAndDeliveredWithItsFramesBeat(t *t
 		t.Fatalf("Frames() = %+v, want the second frame's one submission before its present", frames)
 	}
 	acquired := frameCalls(h.instance.Recording().Calls)[2].Arguments.(recording.AcquireFramebufferArguments)
-	copied := recording.CommandBuffer{Commands: []recording.Command{{
+	copied := recording.CommandBuffer{Label: "gfx: captures", Commands: []recording.Command{{
 		Kind: recording.CommandKindCopyTextureToBuffer,
 		Arguments: recording.CopyTextureToBufferArguments{Source: acquired.Texture, Destination: staging, Regions: []gfx.BufferTextureCopy{{
 			BufferLayout: gfx.ImageDataLayout{BytesPerRow: 256, RowsPerImage: 30},
