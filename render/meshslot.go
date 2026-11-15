@@ -1,10 +1,6 @@
 package render
 
-import (
-	"fmt"
-
-	"github.com/dvoyni/cog/gfx"
-)
+import "fmt"
 
 // maxVertexBufferCount is how many vertex buffers a mesh may have by WebGPU's
 // default limits.
@@ -28,13 +24,14 @@ type meshSlot struct {
 // with no index buffer; and fills buffers with the gfx buffers behind them.
 // A buffer that failed, was freed or has no bytes, or whose range ends past
 // it, answers an error naming it.
-func (s meshSlot) findElements(table *assetTable, buffers *meshBinding) (vertexCount, indexCount uint32, err error) {
+func (s meshSlot) findElements(table *assetTable, buffers *drawBufferSet) (vertexCount, indexCount uint32, err error) {
 	vertexCount = ^uint32(0)
 	for index, vertexBuffer := range s.vertexBuffers {
-		var size uint64
-		if buffers.vertexBuffers[index], size, err = vertexBuffer.bufferRange.findBuffer(table); err != nil {
+		gfxBuffer, size, err := vertexBuffer.bufferRange.findBuffer(table)
+		if err != nil {
 			return 0, 0, fmt.Errorf("vertex buffer %d %w", index, err)
 		}
+		buffers.addVertexBuffer(gfxBuffer, vertexBuffer.bufferRange.Offset)
 		if vertexBuffer.stride > 0 {
 			vertexCount = min(vertexCount, uint32(min(size/vertexBuffer.stride, uint64(^uint32(0)))))
 		}
@@ -57,11 +54,4 @@ func (s meshSlot) findElements(table *assetTable, buffers *meshBinding) (vertexC
 type meshVertexBuffer struct {
 	bufferRange BufferRange
 	stride      uint64
-}
-
-// meshBinding are the gfx buffers a draw of a mesh binds: those behind its
-// vertex buffers, by slot, and the one behind its index buffer.
-type meshBinding struct {
-	vertexBuffers [maxVertexBufferCount]gfx.Buffer
-	indexBuffer   gfx.Buffer
 }

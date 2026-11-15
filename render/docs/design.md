@@ -338,6 +338,9 @@ and a **test author** testing a plugin that draws.
 - **Per-instance data comes two ways:**
   - **A storage buffer read at `instance_index`:** a draw's first instance selects a batch's rows, on every backend for direct draws.
   - **Instance buffers:** vertex buffers stepped per instance, each a buffer range with its layout, set with `SetInstanceBuffer(slot, InstanceBuffer{Range, Layout})`. Their layouts join the pipeline key.
+    - A slot, 0 to 7, names an instance buffer, not a vertex buffer slot of gfx's: a draw binds those set after its mesh's vertex buffers, in slot order with no gaps, since gfx offers no unused slot. A shader reads them by `@location` alone, so one set of instance buffers serves meshes of any number of vertex buffers.
+    - One past slot 7, or misaligned as a mesh's vertex buffer would be refused, is refused and reported with `ReportKindInstanceBufferRefused`, leaving the slot as it was. A draw whose instance buffer failed or was freed is skipped and reported once for its material, and one whose vertex and instance buffers are more than 8 likewise.
+    - Mesh layouts and instance layouts are interned apart, by their step, so a layout read per vertex and the same read per instance key different pipelines.
 - **Room for indirect draws:** a buffer acquired or made with `BufferUsageFlagIndirect` can hold indirect arguments. It is not on every buffer: the wgpu fork adds storage to an indirect buffer, keeps a validation cache for it, and refuses to make one on devices without indirect execution, such as GLES below 3.1. render's first version offers no indirect call.
 
 ### Passes, command lists and draws
@@ -360,6 +363,8 @@ and a **test author** testing a plugin that draws.
 
   The sample count and formats follow from the targets. A pass whose targets disagree, or that has none, is refused and reported once, and its draws are skipped.
 - **Pass state:** the viewport and scissor rectangle start as the whole target. They, the stencil reference and the blend constant may change between draws and last until set again or until the pass ends.
+  - A scissor rectangle is clamped to the target, so a UI's clip rectangle reaching past a window draws its part inside, and one wholly outside draws nothing. Metal refuses a rectangle past its target.
+  - A viewport may reach past the target, as WebGPU allows. One WebGPU refuses (a negative size or one past the device's largest texture, reaching past twice that, or a depth range outside 0 to 1 or reversed) is refused and reported with `ReportKindPassStateRefused`, and the pass keeps the viewport before it, so the list's encoder survives the mistake.
 - **The window:**
   - It is drawn into, never sampled or copied from; what reaches it is drawn into it, with no implicit blit.
   - A pass into a window with no framebuffer this frame is skipped silently.
@@ -368,7 +373,7 @@ and a **test author** testing a plugin that draws.
   - `SetMaterial(material)` selects the material for the draws after it and resets every draw parameter and instance buffer.
   - A draw is skipped and reported once, with `ReportKindDrawSkipped`, for what it names: a mesh or material render does not hold, no material selected, a shader that failed or was freed, or a buffer that failed, was freed or ends before its range. Each is reported once for the asset named, its handle never handed out again.
   - `Draw(mesh, DrawArgs{InstanceCount, FirstInstance})` draws the whole mesh, a zero instance count drawing one. A part of a mesh that shares its buffers with others is a mesh of its own, over ranges of those buffers.
-  - `DrawVertices(topology, vertexCount, DrawArgs{…})` draws with no mesh. It binds no per-vertex buffer, and its topology's zero is a triangle list. A shader whose vertex stage declares a per-vertex input is refused and reported once, as the call's doc comment says.
+  - `DrawVertices(topology, vertexCount, DrawArgs{…})` draws with no mesh. It binds no per-vertex buffer, and its topology's zero is a triangle list. A shader whose vertex stage declares a per-vertex input is refused and reported once, as the call's doc comment says: gfx refuses its pipeline, which is reported as a failed pipeline, and its draws are skipped until its shader is freed.
 - **Writes land before the whole frame:** a write fills a buffer or texture for the whole frame, and two writes to one region leave the last. To change data between passes, a user writes a temporary buffer and copies it at that point in a command list.
   - `inventory.WriteBuffer[T](buffer, offset, data)` writes into any buffer render holds, at an offset and of a length that are multiples of 4.
   - `inventory.WriteTexture[T](texture, TextureRegion{MipLevel, Layer, X, Y, Width, Height}, data)` writes a region of one mip level and one layer, so an atlas page lands in a layer of a 2D-array texture; a zero width or height means the rest of the level. Its rows of texels are packed tight, each texel of its format's size. A multisampled texture, and a depth format beyond `Depth16Unorm`, cannot be written.

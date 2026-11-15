@@ -56,7 +56,7 @@ func (l *CommandList) BeginPass(descriptor PassDescriptor) Pass {
 	if l.encoder == nil {
 		return Pass{}
 	}
-	passDescriptor, formats, skipped, err := l.makeRenderPassDescriptor(descriptor)
+	passDescriptor, formats, firstTarget, skipped, err := l.makeRenderPassDescriptor(descriptor)
 	switch {
 	case err != nil:
 		l.frame.state.Get().report(ReportKindPassTargetsRefused, fmt.Errorf("render: pass %q: %w", descriptor.Label, err))
@@ -65,7 +65,14 @@ func (l *CommandList) BeginPass(descriptor PassDescriptor) Pass {
 		return Pass{}
 	}
 	l.listState.clearParameterSettings()
-	pass := Pass{frame: l.frame, listState: l.listState, encoder: l.encoder.BeginRenderPass(passDescriptor), formats: formats}
+	pass := Pass{
+		frame:     l.frame,
+		listState: l.listState,
+		encoder:   l.encoder.BeginRenderPass(passDescriptor),
+		formats:   formats,
+		width:     firstTarget.width,
+		height:    firstTarget.height,
+	}
 	for _, target := range descriptor.ColorTargets {
 		pass.addTarget(drawnTarget{texture: target.Texture, mipLevel: target.MipLevel, layer: target.Layer})
 		pass.addTarget(drawnTarget{texture: target.Resolve.Texture, mipLevel: target.Resolve.MipLevel, layer: target.Resolve.Layer})
@@ -101,6 +108,34 @@ func (l *CommandList) AcquireTemporaryBuffer[T any](data []T) BufferRange {
 	return bufferRange
 }
 
+// AcquireTemporaryMesh answers a mesh of descriptor valid until the frame
+// ends, drawn with Pass.Draw as a made mesh is, over buffer ranges valid
+// that long: usually temporary buffers of the frame's lists, or ranges of
+// made buffers. It draws per-frame geometry in a vertex layout of its own,
+// such as a Dear ImGui-style UI's: each of its commands is a temporary mesh
+// over sub-ranges of the frame's vertices and indices, its first index the
+// index range's offset and its base vertex the vertex range's. Its vertex
+// layouts join a pipeline's key by value, as a made mesh's do, so it draws
+// with the pipelines of any mesh of the same layouts. It is refused and
+// reported as MakeMesh's is, answering the zero Mesh, as does a list
+// recording into nothing. Nothing gives it back: the frame's end takes it,
+// and a draw of its handle after that is skipped and reported once. Once
+// render's tables have grown, acquiring one of vertex layouts drawn before
+// allocates nothing.
+func (l *CommandList) AcquireTemporaryMesh(descriptor MeshDescriptor) Mesh {
+	if l.encoder == nil {
+		return Mesh{}
+	}
+	table := l.frame.table.Get()
+	mesh, err := table.addMesh(l.frame.device.Get(), descriptor)
+	if err != nil {
+		table.report(ReportKindMeshRefused, fmt.Errorf("render: acquiring temporary mesh %q: %w", descriptor.Label, err))
+		return Mesh{}
+	}
+	l.listState.temporaryMeshes = append(l.listState.temporaryMeshes, mesh)
+	return mesh
+}
+
 // End ends the list: nothing more is recorded into it, and the chunks of
 // its temporary buffers, its pass and draw uniform blocks and its material
 // versions' go to gfx, one write each, landing before every command list of
@@ -114,17 +149,18 @@ func (l *CommandList) End() {
 }
 
 // makeRenderPassDescriptor answers gfx's descriptor of the pass descriptor
-// declares, the formats and sample count of its targets, and true when the
-// pass is skipped for a window with no framebuffer this frame; an error
-// saying why it is refused.
-func (l *CommandList) makeRenderPassDescriptor(descriptor PassDescriptor) (gfx.RenderPassDescriptor, passFormat, bool, error) {
+// declares, the formats and sample count of its targets, its first target
+// found, whose size every target has, and true when the pass is skipped for
+// a window with no framebuffer this frame; an error saying why it is
+// refused.
+func (l *CommandList) makeRenderPassDescriptor(descriptor PassDescriptor) (gfx.RenderPassDescriptor, passFormat, passTarget, bool, error) {
 	colorCount := len(descriptor.ColorTargets)
 	maxColorCount := min(int(l.frame.device.Get().Limits().MaxColorAttachments), maxColorTargetCount)
 	switch {
 	case colorCount == 0 && descriptor.DepthStencil.Texture == (Texture{}):
-		return gfx.RenderPassDescriptor{}, passFormat{}, false, errors.New("it has neither a colour target nor a depth-stencil target")
+		return gfx.RenderPassDescriptor{}, passFormat{}, passTarget{}, false, errors.New("it has neither a colour target nor a depth-stencil target")
 	case colorCount > maxColorCount:
-		return gfx.RenderPassDescriptor{}, passFormat{}, false, fmt.Errorf("it has %d colour targets, more than %d", colorCount, maxColorCount)
+		return gfx.RenderPassDescriptor{}, passFormat{}, passTarget{}, false, fmt.Errorf("it has %d colour targets, more than %d", colorCount, maxColorCount)
 	}
 	formats := passFormat{colorCount: colorCount}
 	passDescriptor := gfx.RenderPassDescriptor{Label: descriptor.Label}
@@ -139,7 +175,7 @@ func (l *CommandList) makeRenderPassDescriptor(descriptor PassDescriptor) (gfx.R
 		attachment, foundTarget, ok, err := l.makeColorAttachment(target, firstTarget)
 		switch {
 		case err != nil:
-			return gfx.RenderPassDescriptor{}, passFormat{}, false, fmt.Errorf("colour target %d %w", index, err)
+			return gfx.RenderPassDescriptor{}, passFormat{}, passTarget{}, false, fmt.Errorf("colour target %d %w", index, err)
 		case !ok:
 			skipped = true
 		case firstTarget.view == (gfx.TextureView{}):
@@ -151,7 +187,7 @@ func (l *CommandList) makeRenderPassDescriptor(descriptor PassDescriptor) (gfx.R
 	if target := descriptor.DepthStencil; target.Texture != (Texture{}) {
 		attachment, foundTarget, err := l.makeDepthStencilAttachment(target, firstTarget)
 		if err != nil {
-			return gfx.RenderPassDescriptor{}, passFormat{}, false, fmt.Errorf("depth-stencil target %w", err)
+			return gfx.RenderPassDescriptor{}, passFormat{}, passTarget{}, false, fmt.Errorf("depth-stencil target %w", err)
 		}
 		passDescriptor.DepthStencilAttachment = attachment
 		formats.depthStencilFormat = foundTarget.format
@@ -160,7 +196,7 @@ func (l *CommandList) makeRenderPassDescriptor(descriptor PassDescriptor) (gfx.R
 		}
 	}
 	formats.sampleCount = firstTarget.sampleCount
-	return passDescriptor, formats, skipped, nil
+	return passDescriptor, formats, firstTarget, skipped, nil
 }
 
 // makeColorAttachment answers gfx's attachment of the colour target, and the

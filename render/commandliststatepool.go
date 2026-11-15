@@ -29,11 +29,15 @@ func (p *commandListStatePool) acquire(arena *temporaryArena, chunkSize uint64) 
 	return state
 }
 
-// endFrame takes back every state held this frame, emptied.
-func (p *commandListStatePool) endFrame() {
+// endFrame takes back every state held this frame, emptied, freeing in
+// table the temporary meshes each acquired.
+func (p *commandListStatePool) endFrame(table *assetTable) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	for _, state := range p.states[:p.heldCount] {
+		for _, mesh := range state.temporaryMeshes {
+			table.removeMesh(mesh)
+		}
 		state.reset()
 	}
 	p.heldCount = 0

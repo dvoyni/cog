@@ -46,14 +46,6 @@ func (r BufferRange) findSize(bufferSize uint64) (uint64, error) {
 	return cmp.Or(r.Size, bufferSize-r.Offset), nil
 }
 
-// VertexBuffer is one vertex buffer of a mesh: a range of a buffer, its
-// offset where the mesh's first vertex is, and the layout its vertices are
-// read in.
-type VertexBuffer struct {
-	Range  BufferRange
-	Layout VertexLayout
-}
-
 // VertexLayout is how a vertex buffer's vertices are laid out: Stride bytes
 // apart, a multiple of 4, each holding Attributes.
 type VertexLayout struct {

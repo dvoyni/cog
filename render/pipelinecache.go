@@ -3,6 +3,7 @@ package render
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -12,15 +13,16 @@ import (
 // pipelineKey is what a render pipeline is shared by: the variant and the
 // vertex and fragment entry points its material names, an empty fragment
 // entry point meaning no fragment stage; the material's render state, in
-// the form makeKeyState gives every state that draws the same; the number of
-// its mesh's vertex layouts in the vertex layout interner; the formats and
-// sample count of the pass drawn into; and the mesh's topology, with the
+// the form makeKeyState gives every state that draws the same; the numbers
+// of its mesh's vertex layouts and of its instance buffers' in the vertex
+// layout interner, zero for none, as a draw with no mesh has; the formats
+// and sample count of the pass drawn into; and the topology, with the
 // format of its indices when it is a strip drawn indexed.
 type pipelineKey struct {
 	shader                               Shader
 	vertexEntryPoint, fragmentEntryPoint string
 	state                                State
-	vertexLayout                         uint32
+	vertexLayout, instanceLayout         uint32
 	formats                              passFormat
 	topology                             PrimitiveTopology
 	stripIndexFormat                     IndexFormat
@@ -113,13 +115,18 @@ func (c *cachedPipeline) make(table *assetTable, device gfx.Device, key pipeline
 
 // makeRenderPipeline makes key's pipeline from shader, the slot of key's
 // shader, with the layout of the shader's bindings and key's vertex layouts
-// from table. A shader with no fragment stage drawn into colour targets is
-// refused; gfx's refusal, such as ErrVertexMismatch, answers its error.
+// from table, its mesh's before its instance buffers'. A shader with no
+// fragment stage drawn into colour targets is refused; gfx's refusal, such
+// as ErrVertexMismatch, answers its error.
 func makeRenderPipeline(table *assetTable, device gfx.Device, key pipelineKey, shader shaderSlot) (gfx.RenderPipeline, error) {
 	descriptor := gfx.RenderPipelineDescriptor{
 		Label:  "render: a material's pipeline",
 		Layout: shader.layout.layout,
-		Vertex: gfx.VertexState{Module: shader.module, EntryPoint: key.vertexEntryPoint, Buffers: table.vertexLayouts.findGfxLayouts(key.vertexLayout)},
+		Vertex: gfx.VertexState{
+			Module:     shader.module,
+			EntryPoint: key.vertexEntryPoint,
+			Buffers:    slices.Concat(table.vertexLayouts.findGfxLayouts(key.vertexLayout), table.vertexLayouts.findGfxLayouts(key.instanceLayout)),
+		},
 		Primitive: gfx.PrimitiveState{
 			Topology:         gfx.PrimitiveTopology(key.topology),
 			StripIndexFormat: gfx.IndexFormat(key.stripIndexFormat),

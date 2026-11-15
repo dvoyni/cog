@@ -10,14 +10,16 @@ import (
 // from frame to frame so recording allocates nothing once warm: the arena it
 // takes chunks from, of chunkSize bytes, a multiple of 4; the arena chunks
 // it took this frame, blocks going into the current one until it
-// lacks room; the pass and draw parameters set in its open pass, by their
-// group; and the draft its draws build bind groups in, and hand the dynamic
-// offsets of each they set.
+// lacks room; the temporary meshes it acquired this frame; the pass and
+// draw parameters set in its open pass, by their group; and the draft its
+// draws build bind groups in, and hand the dynamic offsets of each they
+// set.
 type commandListState struct {
 	arena             *temporaryArena
 	chunkSize         uint64
 	takenChunks       []*arenaChunk
 	currentChunk      *arenaChunk
+	temporaryMeshes   []Mesh
 	parameterSettings [reservedGroup][]parameterSetting
 	bindGroupDraft    bindGroupDraft
 	dynamicOffsets    [maxGroupDynamicOffsetCount]uint32
@@ -97,5 +99,6 @@ func (s *commandListState) reset() {
 	clear(s.takenChunks)
 	s.takenChunks = s.takenChunks[:0]
 	s.currentChunk = nil
+	s.temporaryMeshes = s.temporaryMeshes[:0]
 	s.clearParameterSettings()
 }

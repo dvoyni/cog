@@ -33,7 +33,7 @@ Part of a texture, or a texture seen another way: a range of mip levels or layer
 _Avoid_: View (mux's), subresource, slice
 
 **Pass**:
-A run of draws into the same targets, with a load or clear for each target. Its viewport and scissor rectangle start as the whole target and may change between draws.
+A run of draws into the same targets, with a load or clear for each target. Its viewport and scissor rectangle start as the whole target and, with its stencil reference and blend constant, may change between draws.
 _Avoid_: Camera, layer, render pass
 
 **Compute pass**:

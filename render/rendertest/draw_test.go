@@ -20,8 +20,10 @@ const drawOrder render.Order = 10
 
 // The draw tests' shaders: plain.wgsl has one vertex and one fragment
 // function, its vertex one reading a vec3<f32> at location 0; choice.wgsl
-// has a second fragment function beside them; and depth.wgsl a vertex
-// function alone.
+// has a second fragment function beside them; depth.wgsl a vertex function
+// alone; instanced.wgsl reads a vec4<f32> at location 1 and an f32 at
+// location 2 beside plain.wgsl's input; fullscreen.wgsl reads no input; and
+// sprites.wgsl reads a vec4<f32> at location 0 alone.
 const (
 	plainDeclaration = `{
 		"entryPoints": [{"name": "vertex_main", "stage": "vertex"}, {"name": "fragment_main", "stage": "fragment"}],
@@ -34,6 +36,18 @@ const (
 	depthDeclaration = `{
 		"entryPoints": [{"name": "vertex_main", "stage": "vertex"}],
 		"vertexInputs": {"vertex_main": [{"location": 0, "type": "vec3<f32>"}]}
+	}`
+	instancedDeclaration = `{
+		"entryPoints": [{"name": "vertex_main", "stage": "vertex"}, {"name": "fragment_main", "stage": "fragment"}],
+		"vertexInputs": {"vertex_main": [{"location": 0, "type": "vec3<f32>"}, {"location": 1, "type": "vec4<f32>"}, {"location": 2, "type": "f32"}]}
+	}`
+	fullscreenDeclaration = `{
+		"entryPoints": [{"name": "vertex_main", "stage": "vertex"}, {"name": "fragment_main", "stage": "fragment"}],
+		"vertexInputs": {"vertex_main": []}
+	}`
+	spritesDeclaration = `{
+		"entryPoints": [{"name": "vertex_main", "stage": "vertex"}, {"name": "fragment_main", "stage": "fragment"}],
+		"vertexInputs": {"vertex_main": [{"location": 0, "type": "vec4<f32>"}]}
 	}`
 )
 
@@ -54,7 +68,14 @@ type drawScene struct {
 // its declaration.
 func makeDrawFiles(t *testing.T) *filesystems.MemoryFS {
 	files := filesystems.NewMemoryFS()
-	for name, declaration := range map[string]string{"plain.wgsl": plainDeclaration, "choice.wgsl": choiceDeclaration, "depth.wgsl": depthDeclaration} {
+	for name, declaration := range map[string]string{
+		"plain.wgsl":      plainDeclaration,
+		"choice.wgsl":     choiceDeclaration,
+		"depth.wgsl":      depthDeclaration,
+		"instanced.wgsl":  instancedDeclaration,
+		"fullscreen.wgsl": fullscreenDeclaration,
+		"sprites.wgsl":    spritesDeclaration,
+	} {
 		putFile(t, files, name, []byte("// "+name))
 		putFile(t, files, name+".json", []byte(declaration))
 	}

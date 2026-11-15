@@ -87,7 +87,22 @@ job and freed with its shader; a pipeline that fails is reported once and
 its draws skipped until then, and a draw naming a failed or freed buffer,
 shader, mesh or material is skipped and reported once. A shader with no
 `@fragment` draws only into passes without colour targets. Each mesh and
-material is given back once with `ReleaseMesh` or `ReleaseMaterial`.
+material is given back once with `ReleaseMesh` or `ReleaseMaterial`. A
+pass's `SetInstanceBuffer(slot, InstanceBuffer{Range, Layout})` sets a
+vertex buffer stepped per instance, bound after the mesh's in slot order
+until set again, `SetMaterial` or the pass's end, its layout joining the
+pipeline's key; one past slot 7 or misaligned is refused and reported.
+`DrawVertices(topology, vertexCount, DrawArgs)` draws with no mesh, binding
+no per-vertex buffer, a shader reading a per-vertex input refused as a
+failed pipeline. `SetViewport`, `SetScissorRectangle`, clamped to the
+targets, `SetStencilReference` and `SetBlendConstant` last until set again
+or the pass's end, a pass beginning with the whole target; a viewport
+WebGPU refuses is refused and reported. A list's
+`AcquireTemporaryMesh(MeshDescriptor)` answers a mesh valid until the frame
+ends, as a Dear ImGui-style UI's commands need, over sub-ranges of the
+frame's vertices and indices, its layouts keying pipelines by value as a
+made mesh's do, allocating nothing once warm; a draw of it after its frame
+is skipped and reported once.
 `SetMaterialTexture`, `SetMaterialTextureView`, `SetMaterialSampler`,
 `SetMaterialBuffer` and `SetMaterialUniform[T]` bind a material's values to
 its shader's `@group(1)` bindings by name, checked when set: a name the
@@ -152,9 +167,13 @@ What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
 - **`Mesh`** and **`Material`** are made from a **`MeshDescriptor`** and a
   **`MaterialDescriptor`**, its **`State`** blending, masking,
   testing and culling as WebGPU's defaults when zero; a pass's
-  **`SetMaterial`** and **`Draw`** draw a mesh with a material, its
-  `SetPass…` setters bind pass parameters and its `Set…` setters draw
-  parameters. A material's, a pass's or a draw's parameters are a texture or a **`TextureView`** of one, seen
+  **`SetMaterial`** and **`Draw`** draw a mesh with a material, or
+  **`DrawVertices`** a count of vertices with none, reading the
+  **`InstanceBuffer`**s set; its `SetPass…` setters bind pass parameters,
+  its `Set…` setters draw parameters, and its **`Viewport`**,
+  **`ScissorRectangle`**, stencil reference and blend constant change
+  between draws. A list's **`AcquireTemporaryMesh`** answers a mesh for one
+  frame. A material's, a pass's or a draw's parameters are a texture or a **`TextureView`** of one, seen
   in a **`TextureViewDimension`** through a **`TextureAspect`**, a
   **`SamplerDescriptor`** of **`AddressMode`**s and **`FilterMode`**s, a
   **`BufferRange`**, or a Go value of a uniform block.

@@ -161,13 +161,8 @@ func (t *assetTable) addMesh(device gfx.Device, descriptor MeshDescriptor) (Mesh
 		return Mesh{}, fmt.Errorf("it has %d vertex buffers, more than %d", len(descriptor.VertexBuffers), maxCount)
 	}
 	for index, vertexBuffer := range descriptor.VertexBuffers {
-		if vertexBuffer.Range.Offset%4 != 0 || vertexBuffer.Layout.Stride%4 != 0 {
-			return Mesh{}, fmt.Errorf("vertex buffer %d is at offset %d with a stride of %d, where both are multiples of 4", index, vertexBuffer.Range.Offset, vertexBuffer.Layout.Stride)
-		}
-		for _, attribute := range vertexBuffer.Layout.Attributes {
-			if alignment := attribute.Format.alignment(); attribute.Offset%alignment != 0 {
-				return Mesh{}, fmt.Errorf("vertex buffer %d's attribute at location %d is at offset %d, no multiple of %d, its format's alignment", index, attribute.Location, attribute.Offset, alignment)
-			}
+		if err := vertexBuffer.check(); err != nil {
+			return Mesh{}, fmt.Errorf("vertex buffer %d %w", index, err)
 		}
 	}
 	if indices := descriptor.Indices; indices.Range.Buffer != (Buffer{}) && (indices.Format.size() == 0 || indices.Range.Offset%indices.Format.size() != 0) {
@@ -176,7 +171,7 @@ func (t *assetTable) addMesh(device gfx.Device, descriptor MeshDescriptor) (Mesh
 	if descriptor.Topology > PrimitiveTopologyTriangleStrip {
 		return Mesh{}, fmt.Errorf("its topology is %d, which gfx has none of", descriptor.Topology)
 	}
-	vertexLayout := t.vertexLayouts.intern(descriptor.VertexBuffers)
+	vertexLayout := t.vertexLayouts.intern(descriptor.VertexBuffers, gfx.VertexStepModeVertex)
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	mesh, slot := t.meshes.Acquire()

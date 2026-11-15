@@ -84,10 +84,26 @@ type DrawArgs struct {
 	InstanceCount, FirstInstance uint32
 }
 
+// InstanceBuffer is a vertex buffer read once per instance: a range of a
+// buffer, its offset where instance 0 is, and the layout its instances are
+// read in. A zero Buffer is none.
+type InstanceBuffer struct {
+	Range  BufferRange
+	Layout VertexLayout
+}
+
+// ScissorRectangle is the part of a pass's targets its draws may write, in
+// pixels from the targets' top left.
+type ScissorRectangle struct {
+	X, Y, Width, Height uint32
+}
+
 // Pass is one pass of a command list, from CommandList.BeginPass to its End,
 // with the material its draws draw with, its pass parameters, of @group(0),
-// read by all its draws, and the draw parameters, of @group(2), read by the
-// draws after them. A skipped or refused pass records nothing.
+// read by all its draws, the draw parameters, of @group(2), and the instance
+// buffers, read by the draws after them, and its viewport, scissor
+// rectangle, stencil reference and blend constant. A skipped or refused pass
+// records nothing.
 type Pass struct {
 	// frame is the parameter the pass's list was begun from, and listState
 	// what the list keeps, its arena chunks and the pass's parameters.
@@ -96,8 +112,10 @@ type Pass struct {
 	// encoder is the pass's gfx encoder; nil when the pass records nothing,
 	// skipped, refused or ended.
 	encoder gfx.RenderPassEncoder
-	// formats are the formats and sample count of the pass's targets.
-	formats passFormat
+	// formats are the formats and sample count of the pass's targets, and
+	// width and height their size.
+	formats       passFormat
+	width, height uint32
 	// targets are the textures the pass writes, the first targetCount of
 	// them, which its draws' materials may not read.
 	targets     [2*maxColorTargetCount + 1]drawnTarget
@@ -109,17 +127,122 @@ type Pass struct {
 	bindGroups  drawBindGroupSet
 	pipeline    gfx.RenderPipeline
 	boundGroups [reservedGroup]groupBinding
+	// instanceBuffers are the instance buffers set, by slot, a zero Buffer
+	// meaning none; instanceSlots the slots set, in order, the first
+	// instanceCount of them, the order a draw binds them in; and
+	// instanceLayout the number of their layouts, in that order, in the
+	// vertex layout interner.
+	instanceBuffers [maxVertexBufferCount]VertexBuffer
+	instanceSlots   [maxVertexBufferCount]uint8
+	instanceCount   int
+	instanceLayout  uint32
 }
 
 // SetMaterial selects material for the draws recorded after it, until it is
-// set again or the pass ends, and resets every draw parameter: the draws
-// after it read their defaults until they are set again.
+// set again or the pass ends, and resets every draw parameter and instance
+// buffer: the draws after it read their defaults, and no instance buffer,
+// until they are set again.
 func (p *Pass) SetMaterial(material Material) {
 	p.material = material
 	if p.listState != nil {
 		p.listState.parameterSettings[drawGroup] = p.listState.parameterSettings[drawGroup][:0]
 	}
 	p.bindGroups.resolvedFor[drawGroup] = shaderSelection{}
+	p.instanceBuffers = [maxVertexBufferCount]VertexBuffer{}
+	p.instanceCount = 0
+	p.instanceLayout = 0
+}
+
+// SetInstanceBuffer sets instanceBuffer at slot, from 0 to 7, for the draws
+// recorded after it, until it is set again, SetMaterial is called or the
+// pass ends; one with no buffer clears the slot. A draw binds the instance
+// buffers set after its mesh's vertex buffers, in slot order, each stepped
+// once per instance, so its shader reads them by @location alone; their
+// layouts join its pipeline's key, so a draw of new layouts makes a
+// pipeline, as Draw says. One at a slot past 7, or at an offset or of a
+// stride no multiple of 4, or with an attribute misaligned as MakeMesh
+// refuses one, is refused and reported, leaving the slot as it was. A draw
+// whose instance buffer failed, was freed or ends before its range is
+// skipped and reported once for its material.
+func (p *Pass) SetInstanceBuffer(slot uint32, instanceBuffer InstanceBuffer) {
+	if p.encoder == nil {
+		return
+	}
+	table := p.frame.table.Get()
+	vertexBuffer := VertexBuffer(instanceBuffer)
+	if slot >= maxVertexBufferCount {
+		table.report(ReportKindInstanceBufferRefused, fmt.Errorf("render: an instance buffer at slot %d, past the last, %d", slot, maxVertexBufferCount-1))
+		return
+	}
+	if err := vertexBuffer.check(); err != nil {
+		table.report(ReportKindInstanceBufferRefused, fmt.Errorf("render: the instance buffer at slot %d %w", slot, err))
+		return
+	}
+	replacedBuffer := p.instanceBuffers[slot]
+	p.instanceBuffers[slot] = vertexBuffer
+	if (replacedBuffer.Range.Buffer == (Buffer{})) == (vertexBuffer.Range.Buffer == (Buffer{})) &&
+		replacedBuffer.Layout.Stride == vertexBuffer.Layout.Stride && slices.Equal(replacedBuffer.Layout.Attributes, vertexBuffer.Layout.Attributes) {
+		// The same slots are set, in the same layouts, so the draws' key stands.
+		return
+	}
+	var orderedBuffers [maxVertexBufferCount]VertexBuffer
+	p.instanceCount = 0
+	for index, instanceBuffer := range p.instanceBuffers {
+		if instanceBuffer.Range.Buffer != (Buffer{}) {
+			orderedBuffers[p.instanceCount] = instanceBuffer
+			p.instanceSlots[p.instanceCount] = uint8(index)
+			p.instanceCount++
+		}
+	}
+	p.instanceLayout = table.vertexLayouts.intern(orderedBuffers[:p.instanceCount], gfx.VertexStepModeInstance)
+}
+
+// SetViewport sets viewport for the draws recorded after it, until it is
+// set again or the pass ends; a pass begins with the whole of its targets,
+// at depths 0 to 1. One WebGPU refuses, of a negative size or one past the
+// device's largest texture, reaching past twice that from the targets, or
+// with a depth range outside 0 to 1 or reversed, is refused and reported,
+// keeping the viewport before it.
+func (p *Pass) SetViewport(viewport Viewport) {
+	if p.encoder == nil {
+		return
+	}
+	if err := viewport.check(float32(p.frame.device.Get().Limits().MaxTextureDimension2D)); err != nil {
+		p.frame.state.Get().report(ReportKindPassStateRefused, fmt.Errorf("render: a viewport of %+v %w", viewport, err))
+		return
+	}
+	p.encoder.SetViewport(gfx.Viewport(viewport))
+}
+
+// SetScissorRectangle sets rectangle, clamped to the pass's targets, as the
+// part of them the draws recorded after it may write, until it is set again
+// or the pass ends; a pass begins with the whole of its targets. A
+// rectangle wholly past them clamps to an empty one, which writes nothing.
+func (p *Pass) SetScissorRectangle(rectangle ScissorRectangle) {
+	if p.encoder == nil {
+		return
+	}
+	x := min(rectangle.X, p.width)
+	y := min(rectangle.Y, p.height)
+	p.encoder.SetScissorRect(gfx.ScissorRect{X: x, Y: y, Width: min(rectangle.Width, p.width-x), Height: min(rectangle.Height, p.height-y)})
+}
+
+// SetStencilReference sets reference as the value the stencil tests and
+// writes of the draws recorded after it compare with and write, until it is
+// set again or the pass ends; a pass begins with zero.
+func (p *Pass) SetStencilReference(reference uint32) {
+	if p.encoder != nil {
+		p.encoder.SetStencilReference(reference)
+	}
+}
+
+// SetBlendConstant sets color as the constant the blending of the draws
+// recorded after it reads, until it is set again or the pass ends; a pass
+// begins with transparent black.
+func (p *Pass) SetBlendConstant(color Color) {
+	if p.encoder != nil {
+		p.encoder.SetBlendConstant(gfx.Color(color))
+	}
 }
 
 // SetPassTexture binds texture whole to the pass parameter named name, a
@@ -258,21 +381,8 @@ func (p *Pass) Draw(mesh Mesh, arguments DrawArgs) {
 		return
 	}
 	table := p.frame.table.Get()
-	material, ok := table.findSlot(&table.materials, p.material)
-	switch {
-	case !ok:
-		if table.claimMaterialReport(p.material) {
-			table.report(ReportKindDrawSkipped, fmt.Errorf("render: a draw of mesh %v with material %v, which render does not hold, or with no material selected", mesh, p.material))
-		}
-		return
-	case material.refused:
-		return
-	}
-	shader, ok := table.findSlot(&table.shaders, material.shader)
-	if !ok || material.vertexEntryPoint == "" {
-		if table.claimMaterialReport(p.material) {
-			table.report(ReportKindDrawSkipped, fmt.Errorf("render: a draw of material %q, whose shader %v failed or was freed", material.label, material.shader))
-		}
+	material, shader, ok := p.findMaterial(table)
+	if !ok {
 		return
 	}
 	meshSlot, ok := table.findSlot(&table.meshes, mesh)
@@ -282,7 +392,7 @@ func (p *Pass) Draw(mesh Mesh, arguments DrawArgs) {
 		}
 		return
 	}
-	var buffers meshBinding
+	var buffers drawBufferSet
 	vertexCount, indexCount, err := meshSlot.findElements(table, &buffers)
 	if err != nil {
 		if table.claimMeshReport(mesh) {
@@ -291,50 +401,14 @@ func (p *Pass) Draw(mesh Mesh, arguments DrawArgs) {
 		return
 	}
 	indexed := meshSlot.indices.Range.Buffer != (Buffer{})
-	key := pipelineKey{
-		shader:             material.shader,
-		vertexEntryPoint:   material.vertexEntryPoint,
-		fragmentEntryPoint: material.fragmentEntryPoint,
-		state:              material.state.makeKeyState(p.formats),
-		vertexLayout:       meshSlot.vertexLayout,
-		formats:            p.formats,
-		topology:           meshSlot.topology,
-	}
+	key := pipelineKey{vertexLayout: meshSlot.vertexLayout, topology: meshSlot.topology}
 	if indexed && (meshSlot.topology == PrimitiveTopologyLineStrip || meshSlot.topology == PrimitiveTopologyTriangleStrip) {
 		key.stripIndexFormat = meshSlot.indices.Format
 	}
-	device := p.frame.device.Get()
-	pipeline, ok := table.pipelines.find(table, device, key, shader)
-	if !ok {
+	if !p.findInstanceBuffers(table, material.label, &buffers) || !p.bindDraw(table, material, shader, key) {
 		return
 	}
-	if err := table.findDrawBindGroups(device, p.material, shader, p.targets[:p.targetCount], p.listState, &p.bindGroups); err != nil {
-		table.logUnlessLost(fmt.Errorf("render: binding material %q: %w", material.label, err))
-		return
-	}
-	groupCount := len(shader.layout.groups)
-	if index := slices.IndexFunc(p.bindGroups.unboundReads[:groupCount], func(name string) bool { return name != "" }); index >= 0 {
-		if table.claimMaterialReport(p.material) {
-			table.report(ReportKindDrawSkipped, fmt.Errorf("render: a draw of material %q, whose storage binding %q, which a function it runs reads, is unbound", material.label, p.bindGroups.unboundReads[index]))
-		}
-		return
-	}
-	if pipeline != p.pipeline {
-		p.encoder.SetPipeline(pipeline)
-		p.pipeline = pipeline
-	}
-	for group := range groupCount {
-		binding := &p.bindGroups.groupBindings[group]
-		if *binding != p.boundGroups[group] {
-			dynamicOffsets := p.listState.dynamicOffsets[:binding.dynamicOffsetCount]
-			copy(dynamicOffsets, binding.dynamicOffsets[:])
-			p.encoder.SetBindGroup(uint32(group), binding.bindGroup, dynamicOffsets)
-			p.boundGroups[group] = *binding
-		}
-	}
-	for slot, vertexBuffer := range meshSlot.vertexBuffers {
-		p.encoder.SetVertexBuffer(uint32(slot), buffers.vertexBuffers[slot], vertexBuffer.bufferRange.Offset)
-	}
+	p.setVertexBuffers(&buffers)
 	instanceCount := cmp.Or(arguments.InstanceCount, 1)
 	if !indexed {
 		p.encoder.Draw(gfx.DrawArgs{VertexCount: vertexCount, InstanceCount: instanceCount, FirstInstance: arguments.FirstInstance})
@@ -342,6 +416,32 @@ func (p *Pass) Draw(mesh Mesh, arguments DrawArgs) {
 	}
 	p.encoder.SetIndexBuffer(buffers.indexBuffer, gfx.IndexFormat(meshSlot.indices.Format), meshSlot.indices.Range.Offset)
 	p.encoder.DrawIndexed(gfx.DrawIndexedArgs{IndexCount: indexCount, InstanceCount: instanceCount, FirstInstance: arguments.FirstInstance})
+}
+
+// DrawVertices draws vertexCount vertices in topology, its zero a triangle
+// list, with no mesh, with the material SetMaterial selected: its shader
+// places each from its vertex_index alone, as a full-screen triangle, a UI
+// quad or a debug line does, and reads the instance buffers set, as many
+// instances as arguments ask for. It binds no per-vertex buffer, so a
+// shader whose vertex stage reads an input no instance buffer feeds is
+// refused: its pipeline is reported once, and every draw of it skipped
+// until its shader is freed. It draws, binds and is skipped otherwise as
+// Draw does.
+func (p *Pass) DrawVertices(topology PrimitiveTopology, vertexCount uint32, arguments DrawArgs) {
+	if p.encoder == nil {
+		return
+	}
+	table := p.frame.table.Get()
+	material, shader, ok := p.findMaterial(table)
+	if !ok {
+		return
+	}
+	var buffers drawBufferSet
+	if !p.findInstanceBuffers(table, material.label, &buffers) || !p.bindDraw(table, material, shader, pipelineKey{topology: topology}) {
+		return
+	}
+	p.setVertexBuffers(&buffers)
+	p.encoder.Draw(gfx.DrawArgs{VertexCount: vertexCount, InstanceCount: cmp.Or(arguments.InstanceCount, 1), FirstInstance: arguments.FirstInstance})
 }
 
 // End ends the pass: nothing more is recorded into it.
@@ -381,6 +481,110 @@ func (p *Pass) setUniform(group int, name string, uniformType reflect.Type, data
 		setting.uniformType = uniformType
 	}
 	p.setParameter(group, setting)
+}
+
+// findMaterial answers the slot of the material SetMaterial selected and
+// that of its shader; false when a draw of it is skipped: one render does
+// not hold, or none selected, or whose shader failed or was freed, reported
+// once for the material, or one refused when made, reported then.
+func (p *Pass) findMaterial(table *assetTable) (materialSlot, shaderSlot, bool) {
+	material, ok := table.findSlot(&table.materials, p.material)
+	switch {
+	case !ok:
+		if table.claimMaterialReport(p.material) {
+			table.report(ReportKindDrawSkipped, fmt.Errorf("render: a draw with material %v, which render does not hold, or with no material selected", p.material))
+		}
+		return materialSlot{}, shaderSlot{}, false
+	case material.refused:
+		return materialSlot{}, shaderSlot{}, false
+	}
+	shader, ok := table.findSlot(&table.shaders, material.shader)
+	if !ok || material.vertexEntryPoint == "" {
+		if table.claimMaterialReport(p.material) {
+			table.report(ReportKindDrawSkipped, fmt.Errorf("render: a draw of material %q, whose shader %v failed or was freed", material.label, material.shader))
+		}
+		return materialSlot{}, shaderSlot{}, false
+	}
+	return material, shader, true
+}
+
+// findInstanceBuffers adds to buffers, after the draw's per-vertex buffers,
+// the gfx buffers behind p's instance buffers, in the order a draw binds
+// them; false when the draw, of a material labelled label, is skipped,
+// reported once for the material: an instance buffer failed or was freed,
+// or the vertex and instance buffers are more than a draw binds.
+func (p *Pass) findInstanceBuffers(table *assetTable, label string, buffers *drawBufferSet) bool {
+	var err error
+	if buffers.vertexBufferCount+p.instanceCount > maxVertexBufferCount {
+		err = fmt.Errorf("its vertex and instance buffers are more than %d", maxVertexBufferCount)
+	}
+	for _, slot := range p.instanceSlots[:p.instanceCount] {
+		if err != nil {
+			break
+		}
+		instanceBuffer := p.instanceBuffers[slot]
+		var gfxBuffer gfx.Buffer
+		if gfxBuffer, _, err = instanceBuffer.Range.findBuffer(table); err != nil {
+			err = fmt.Errorf("its instance buffer at slot %d %w", slot, err)
+		} else {
+			buffers.addVertexBuffer(gfxBuffer, instanceBuffer.Range.Offset)
+		}
+	}
+	if err != nil && table.claimMaterialReport(p.material) {
+		table.report(ReportKindDrawSkipped, fmt.Errorf("render: a draw of material %q, where %w", label, err))
+	}
+	return err == nil
+}
+
+// bindDraw sets on p's encoder the pipeline of key, its mesh's part filled
+// in, the rest filled in from material, of shader, p's instance buffers and
+// its targets, and the bind groups the draw binds; false when the draw is
+// skipped, reported once for the material, or once for its pipeline.
+func (p *Pass) bindDraw(table *assetTable, material materialSlot, shader shaderSlot, key pipelineKey) bool {
+	key.shader = material.shader
+	key.vertexEntryPoint = material.vertexEntryPoint
+	key.fragmentEntryPoint = material.fragmentEntryPoint
+	key.state = material.state.makeKeyState(p.formats)
+	key.instanceLayout = p.instanceLayout
+	key.formats = p.formats
+	device := p.frame.device.Get()
+	pipeline, ok := table.pipelines.find(table, device, key, shader)
+	if !ok {
+		return false
+	}
+	if err := table.findDrawBindGroups(device, p.material, shader, p.targets[:p.targetCount], p.listState, &p.bindGroups); err != nil {
+		table.logUnlessLost(fmt.Errorf("render: binding material %q: %w", material.label, err))
+		return false
+	}
+	groupCount := len(shader.layout.groups)
+	if index := slices.IndexFunc(p.bindGroups.unboundReads[:groupCount], func(name string) bool { return name != "" }); index >= 0 {
+		if table.claimMaterialReport(p.material) {
+			table.report(ReportKindDrawSkipped, fmt.Errorf("render: a draw of material %q, whose storage binding %q, which a function it runs reads, is unbound", material.label, p.bindGroups.unboundReads[index]))
+		}
+		return false
+	}
+	if pipeline != p.pipeline {
+		p.encoder.SetPipeline(pipeline)
+		p.pipeline = pipeline
+	}
+	for group := range groupCount {
+		binding := &p.bindGroups.groupBindings[group]
+		if *binding != p.boundGroups[group] {
+			dynamicOffsets := p.listState.dynamicOffsets[:binding.dynamicOffsetCount]
+			copy(dynamicOffsets, binding.dynamicOffsets[:])
+			p.encoder.SetBindGroup(uint32(group), binding.bindGroup, dynamicOffsets)
+			p.boundGroups[group] = *binding
+		}
+	}
+	return true
+}
+
+// setVertexBuffers sets on p's encoder each vertex buffer of buffers, at its
+// slot and offset.
+func (p *Pass) setVertexBuffers(buffers *drawBufferSet) {
+	for slot := range buffers.vertexBufferCount {
+		p.encoder.SetVertexBuffer(uint32(slot), buffers.vertexBuffers[slot], buffers.vertexOffsets[slot])
+	}
 }
 
 // addTarget notes target among those p writes; one naming no texture, a

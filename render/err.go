@@ -59,6 +59,14 @@ const (
 	// of the pass it is drawn in, or a buffer too small; or a value set on a
 	// material render does not hold.
 	ReportKindParameterRefused
+	// ReportKindInstanceBufferRefused is an instance buffer refused when
+	// set: at a slot past the last, or at an offset or of a stride or
+	// attribute misaligned as a mesh's vertex buffer would be refused.
+	ReportKindInstanceBufferRefused
+	// ReportKindPassStateRefused is a viewport a pass cannot take: its size
+	// negative or past the device's largest texture, its position past the
+	// range WebGPU allows, or its depth range outside 0 to 1 or reversed.
+	ReportKindPassStateRefused
 )
 
 // Report is a mistake render finds at run time, such as a refused shader, a
