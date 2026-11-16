@@ -74,20 +74,11 @@ func reflectShader(device gfx.Device, files fs.FS, path string, defines []gfx.Sh
 		return bindingdeclaration.Reflection{}, err
 	}
 	defer device.ReleaseShaderModule(module)
-	reflection := bindingdeclaration.Reflection{VertexInputs: map[string][]gfx.VertexInput{}}
-	if reflection.Bindings, err = device.ShaderModuleBindings(module); err != nil {
-		return bindingdeclaration.Reflection{}, err
-	}
-	if reflection.EntryPoints, err = device.ShaderModuleEntryPoints(module); err != nil {
-		return bindingdeclaration.Reflection{}, err
-	}
-	for _, entryPoint := range reflection.EntryPoints {
-		if entryPoint.Stage != gfx.ShaderStageFlagVertex {
-			continue
-		}
-		if reflection.VertexInputs[entryPoint.Name], err = device.ShaderModuleVertexInputs(module, entryPoint.Name); err != nil {
-			return bindingdeclaration.Reflection{}, err
-		}
-	}
-	return reflection, nil
+	return bindingdeclaration.Reflect(
+		func() ([]gfx.ShaderBinding, error) { return device.ShaderModuleBindings(module) },
+		func() ([]gfx.ShaderEntryPoint, error) { return device.ShaderModuleEntryPoints(module) },
+		func(entryPoint string) ([]gfx.VertexInput, error) {
+			return device.ShaderModuleVertexInputs(module, entryPoint)
+		},
+	)
 }

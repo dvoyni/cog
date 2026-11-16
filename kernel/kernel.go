@@ -31,11 +31,14 @@ type Kernel struct {
 	// resources holds every resource by its type. Only Init adds to it, so it
 	// is never changed once the kernel starts.
 	resources map[reflect.Type]*resource
-	// sockets holds every declared socket by its type, and socketBindings
-	// every value bound, in plugin order. Only Init adds to them; the
-	// bindings resolve once every plugin has initialized.
+	// sockets holds every declared socket by its type, socketBindings
+	// every value bound, and socketWraps every wrap, its func(T) T as its
+	// value, each in plugin order.
+	// Only Init adds to them; the bindings resolve, wrapped, once every
+	// plugin has initialized.
 	sockets        map[reflect.Type]resolvableSocket
 	socketBindings []socketBinding
+	socketWraps    []socketBinding
 	// dispatchers holds the dispatcher of every event type, each as its
 	// *dispatcher[E], its handlers sorted once every plugin has initialized.
 	dispatchers map[reflect.Type]eventDispatcher
@@ -175,17 +178,23 @@ func (k *Kernel) init() error {
 	return nil
 }
 
-// resolveSockets hands every declared socket its bindings, once every plugin
-// has initialized. A binding to a socket no plugin declares is a composition
-// error, and panics; so is one a socket refuses.
+// resolveSockets hands every declared socket its bindings, wrapped, once
+// every plugin has initialized. A binding or a wrap of a socket no plugin
+// declares is a composition error, and panics; so is a binding a socket
+// refuses, and a wrap answering nil.
 func (k *Kernel) resolveSockets() {
-	for _, binding := range k.socketBindings {
-		if _, declared := k.sockets[binding.socket]; !declared {
-			panic(fmt.Sprintf("kernel: plugin %q binds socket %v, which no plugin declares", binding.plugin, binding.socket))
+	for _, entries := range []struct {
+		verb     string
+		bindings []socketBinding
+	}{{"binds", k.socketBindings}, {"wraps", k.socketWraps}} {
+		for _, binding := range entries.bindings {
+			if _, declared := k.sockets[binding.socket]; !declared {
+				panic(fmt.Sprintf("kernel: plugin %q %s socket %v, which no plugin declares", binding.plugin, entries.verb, binding.socket))
+			}
 		}
 	}
 	for _, declared := range k.sockets {
-		declared.resolve(k.socketBindings)
+		declared.resolve(k.socketBindings, k.socketWraps)
 	}
 }
 

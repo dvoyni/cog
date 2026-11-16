@@ -331,6 +331,29 @@ c.BindSocket(platform.ReadMountSocket{FS: assets})
   plugins: declaring one twice, two bindings of an exclusive socket, none of
   one that is not optional, a binding nobody declares, and a nil binding.
 
+### Wraps
+
+A test or a tool that must see what a plugin is handed puts a wrap in front
+of a socket's bindings. The declaring plugin gets the wrap's answer, which
+holds the bound value and delegates to it:
+
+```go
+// rendertest's harness, which checks every shader gfx compiles:
+c.WrapSocket[gfx.InstanceSocket](func(bound gfx.InstanceSocket) gfx.InstanceSocket {
+	return checkingInstance{InstanceSocket: bound}
+})
+```
+
+- **Every binding of the socket is wrapped**, whichever plugin bound it and
+  wherever it is listed. Several wraps apply in plugin order, the first
+  listed innermost. A wrap adds and removes no binding, so an exclusive or
+  optional socket keeps its checks.
+- **A wrap reaches the implementation**, which a socket otherwise keeps to
+  its declarer. It is for tests and tools, not for an application to build
+  on.
+- **Composition errors panic** at `Spawn`: a nil wrap, a wrap of a socket
+  nobody declares, and a wrap answering nil.
+
 ## Tasks
 
 A task is the only code that touches resources. `RegisterTask` runs its

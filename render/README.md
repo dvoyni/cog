@@ -301,7 +301,13 @@ What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
 its entry points with their stages, and each vertex entry point's inputs.
 `Step` draws one beat, `OpenWindow` opens a window,
   `LengthenNextAcquire` makes an acquire take longer, `EnableTimestamps`
-  gives the fake GPU timestamp queries, `ExpectReport`
+  gives the fake GPU timestamp queries, `UseSoftwareAdapter` draws on
+  wgpu's software adapter through gogpu's plugin for pixel tests, read back
+  through render's readback, skipped under `-short`, each shader compiled
+  there checked against its declaration so a stale one fails the test, its
+  kernel's main thread the process's when the test package's `TestMain`
+  calls `rendertest.RunMain`, as macOS requires,
+  `ExpectReport`
   names a report kind the test expects, `Reports` answers the reports
   logged, and `Frames` reads each frame back as an `Inspection`, with the
   beat of the `Step` that drew it and the reports logged during that `Step`;

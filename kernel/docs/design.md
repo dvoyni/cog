@@ -48,7 +48,7 @@ Supervisor ── lifetime, GetKernel and Broadcast, LogHandler
 | `Logger`     | A kernel's way to the `LogHandler`, from `Kernel.Logger()`, or `Configurator.Logger()` for a value a plugin makes in `Init`: `LogErr`, `LogWarn`, `LogDebug`, their `Once` forms and `ForgetLogOnce`. |
 | `Signal`     | Reusable completion signal for code outside the kernel; armed by `Kernel.Notify`, read through `C()`. |
 | `Executor`   | One publication's work batch, handed to its handlers: `Schedule`, `ScheduleAfter`, `Join`, `Publish`. |
-| `Configurator` | Registration surface given to each plugin once: `ID`, `Logger`, `InitResource`, `Resource`, `DeclareExclusiveSocket`, `DeclareSocket`, `BindSocket`, `RegisterTask`, `RegisterTask0`…`RegisterTask8`, `PinToMainThread`, `Subscribe`, `OrderSubscriptions`. |
+| `Configurator` | Registration surface given to each plugin once: `ID`, `Logger`, `InitResource`, `Resource`, `DeclareExclusiveSocket`, `DeclareSocket`, `BindSocket`, `WrapSocket`, `RegisterTask`, `RegisterTask0`…`RegisterTask8`, `PinToMainThread`, `Subscribe`, `OrderSubscriptions`. |
 | `ExclusiveSocket[T]`, `Socket[T]` | Interfaces: the one handle to a socket, from its declaration. `ExclusiveSocket.Get()` answers its binding, `Socket.GetAll()` its bindings in plugin order, from `Start` on. One private socket type implements both. |
 | `Access`     | Handed to a task's constructor: `Read[T]`, `Write[T]` and `Use(task)` declare its locks and return what the body uses. |
 | `*Task[A, B]`| Registered code with pointer-free arg `A` and pointer-free result `B`; returned by `RegisterTask`. |
@@ -174,6 +174,14 @@ silently.
     none of a socket that is not optional, a binding to a socket nobody
     declares and a nil binding are composition errors, and `Spawn` panics
     naming the socket and the plugins.
+  - A plugin may put a wrap in front of a socket's bindings,
+    `WrapSocket[T](func(T) T)`: the declarer gets each binding as the wraps
+    answer it, in plugin order, the first listed innermost. A wrap reaches
+    the implementation, which the socket otherwise keeps to its declarer, so
+    it is for tests and tools: rendertest's harness wraps gfx's instance,
+    the recording one or gogpu's, to answer and check what each shader
+    reflects. A nil wrap, a wrap of a socket nobody declares, and a wrap
+    answering nil are composition errors.
 
 ## Tasks and jobs
 

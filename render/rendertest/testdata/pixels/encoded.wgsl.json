@@ -1,0 +1,29 @@
+{
+  "bindings": [
+    {
+      "group": 1,
+      "binding": 0,
+      "name": "picture",
+      "texture": {
+        "sampleType": "float",
+        "viewDimension": "2d"
+      },
+      "entryPoints": [
+        "fragment_main"
+      ]
+    }
+  ],
+  "entryPoints": [
+    {
+      "name": "vertex_main",
+      "stage": "vertex"
+    },
+    {
+      "name": "fragment_main",
+      "stage": "fragment"
+    }
+  ],
+  "vertexInputs": {
+    "vertex_main": []
+  }
+}

@@ -2,6 +2,7 @@ package rendertest
 
 import (
 	"errors"
+	"os"
 	"runtime"
 	"slices"
 	"sync"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/gfx/recording"
+	"github.com/dvoyni/cog/gogpu"
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/metronome"
 	"github.com/dvoyni/cog/platform"
@@ -54,6 +56,15 @@ type Harness struct {
 	// timestampsEnabled is set by EnableTimestamps, for Spawn to have gfx
 	// require them.
 	timestampsEnabled bool
+	// softwareAdapter is set by UseSoftwareAdapter, for Spawn to list
+	// gogpu's plugin on wgpu's software adapter in place of the recording
+	// instance and the headless windows.
+	softwareAdapter bool
+	// mainThread is RunMain's, which UseSoftwareAdapter takes for the
+	// harness to run the kernel's main thread on the process's; nil without
+	// RunMain, or on the recording adapter, where the test's goroutine runs
+	// it.
+	mainThread chan func()
 	// expectedReports are the kinds ExpectReport named; only the test's
 	// goroutine reads and writes them.
 	expectedReports []render.ReportKind
@@ -114,11 +125,27 @@ func (h *Harness) Spawn(config *render.Config, plugins ...kernel.Plugin) {
 			Tracks: []metronome.Track{metronome.NewTrack[gfx.RenderEvent](metronome.Variable())},
 		},
 	}
+	gfxConfig := &gfx.Config{ForceFallbackAdapter: h.softwareAdapter}
 	if h.timestampsEnabled {
-		configs[gfx.PluginName] = &gfx.Config{RequiredFeatures: gfx.FeatureFlagTimestampQuery}
+		gfxConfig.RequiredFeatures = gfx.FeatureFlagTimestampQuery
 	}
-	renderStack := []kernel.Plugin{platform.NewPlugin(), metronome.NewPlugin(), gfx.NewPlugin(), render.NewPlugin(), harnessPlugin{harness: h}}
-	id, err := h.supervisor.Spawn(configs, workerCount, append(renderStack, plugins...)...)
+	configs[gfx.PluginName] = gfxConfig
+	renderStack := []kernel.Plugin{platform.NewPlugin(), metronome.NewPlugin(), gfx.NewPlugin()}
+	if h.softwareAdapter {
+		if h.mainThread == nil {
+			// gogpu's HostLoop runs every call on the thread that started
+			// it: gfx's Start, in Spawn, and the pinned jobs, which the
+			// harness ticks, each on this goroutine without RunMain.
+			runtime.LockOSThread()
+		}
+		renderStack = append(renderStack, gogpu.NewPlugin())
+	}
+	renderStack = append(renderStack, render.NewPlugin(), harnessPlugin{harness: h})
+	var id kernel.KernelID
+	var err error
+	h.runOnMainThread(func() {
+		id, err = h.supervisor.Spawn(configs, workerCount, append(renderStack, plugins...)...)
+	})
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -166,14 +193,59 @@ func (h *Harness) OpenWindow(size platform.Size) platform.Window {
 // pass timings on: gfx requires FeatureFlagTimestampQuery, and gfx's
 // recording adapter writes each pass's timestamps a nanosecond apart for
 // each command the pass records, its beginning among them. It is called
-// before Spawn, and fails the test after.
+// before Spawn, and fails the test after, or on the software adapter.
 func (h *Harness) EnableTimestamps() {
 	h.t.Helper()
-	if h.kernel != nil {
+	switch {
+	case h.kernel != nil:
 		h.t.Fatal("rendertest: enabling timestamps after Spawn")
+	case h.softwareAdapter:
+		h.t.Fatal("rendertest: enabling the fake GPU's timestamps on the software adapter")
 	}
 	h.instance.EnableTimestamps()
 	h.timestampsEnabled = true
+}
+
+// UseSoftwareAdapter has Spawn run render on wgpu's software adapter, real
+// rendering on the CPU, in place of gfx's recording adapter, for pixel
+// tests: it lists gogpu's plugin after gfx, with gfx's
+// ForceFallbackAdapter, and binds neither the recording instance nor the
+// headless windows, which gogpu's instance and window system replace. A
+// test draws into textures and reads them back through render's readback;
+// nothing is recorded, so Frames answers no frame.
+//
+// The harness still wraps gfx's instance: a shader compiled answers what
+// the adapter reflects of it, and a binding declaration that differs from
+// that fails the test, naming the shader and the first binding that
+// differs, so a stale declaration is caught. A shader compiled with no
+// declaration fails the test as on the recording adapter.
+//
+// gogpu's HostLoop runs every call on one thread, the kernel's main thread.
+// When the test binary's TestMain calls RunMain, that is the process's main
+// thread, which runs the harness's Spawn, each tick and its quit. Without
+// it, it is the test's goroutine, which Spawn locks to its OS thread until
+// the harness quits, which serves on Windows and Linux.
+//
+// It is called before Spawn, and fails the test after, or with timestamps
+// enabled. It skips the test under -short; on macOS without RunMain, whose
+// HostLoop must run on the process's main thread; and on Linux with no
+// display.
+func (h *Harness) UseSoftwareAdapter() {
+	h.t.Helper()
+	switch {
+	case testing.Short():
+		h.t.Skip("rendertest: a test on the software adapter is skipped under -short")
+	case runtime.GOOS == "darwin" && mainThreadWork == nil:
+		h.t.Skip("rendertest: gogpu's HostLoop must run on the process's main thread on macOS: call rendertest.RunMain from TestMain")
+	case runtime.GOOS == "linux" && os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "":
+		h.t.Skip("rendertest: no display for gogpu")
+	case h.kernel != nil:
+		h.t.Fatal("rendertest: choosing the software adapter after Spawn")
+	case h.timestampsEnabled:
+		h.t.Fatal("rendertest: choosing the software adapter with the fake GPU's timestamps enabled")
+	}
+	h.softwareAdapter = true
+	h.mainThread = mainThreadWork
 }
 
 // LengthenNextAcquire makes the next acquire of a window's framebuffer take d
@@ -196,7 +268,8 @@ func (h *Harness) ExpectReport(kind render.ReportKind) {
 // Its command lists are every encoder gfx submitted, by order, those of
 // plugins drawing on gfx alone included. What render made and wrote between
 // two frames goes into the earlier, as recording.Recording.FrameCalls groups
-// calls.
+// calls. On the software adapter nothing is recorded, so it answers no
+// frame: a pixel test reads its texels back through render's readback.
 func (h *Harness) Frames() []render.Inspection {
 	recorded := h.instance.Recording()
 	reader := newFrameReader(recorded.Calls, h.declarations.findAnsweredBindings())
@@ -249,11 +322,15 @@ func (h *Harness) checkLogged() {
 }
 
 // quit quits the supervisor and ticks the main thread, for the pinned jobs
-// still to run, until every kernel is destroyed.
+// still to run, until every kernel is destroyed, and then unlocks the
+// goroutine from the OS thread Spawn locked it to.
 func (h *Harness) quit() {
 	h.t.Helper()
 	h.supervisor.Quit()
 	h.tickUntil("the supervisor's quit", makeReceiveCheck(h.supervisor.Done()))
+	if h.softwareAdapter && h.mainThread == nil {
+		runtime.UnlockOSThread()
+	}
 }
 
 // wait ticks the main thread until out, the job of what, has finished.
@@ -271,7 +348,7 @@ func (h *Harness) tickUntil(what string, done func() bool) {
 	h.t.Helper()
 	deadline := time.Now().Add(timeout)
 	for {
-		h.supervisor.TickMainThread()
+		h.runOnMainThread(h.supervisor.TickMainThread)
 		if done() {
 			return
 		}
@@ -279,6 +356,28 @@ func (h *Harness) tickUntil(what string, done func() bool) {
 			h.t.Fatalf("%s did not finish in %v", what, timeout)
 		}
 		runtime.Gosched()
+	}
+}
+
+// runOnMainThread runs run on the kernel's main thread and waits for it: on
+// the process's main thread, through RunMain, when the harness took it, a
+// panic of run panicking again on the caller's goroutine, and on the
+// caller's otherwise.
+func (h *Harness) runOnMainThread(run func()) {
+	if h.mainThread == nil {
+		run()
+		return
+	}
+	var recovered any
+	finished := make(chan struct{})
+	h.mainThread <- func() {
+		defer close(finished)
+		defer func() { recovered = recover() }()
+		run()
+	}
+	<-finished
+	if recovered != nil {
+		panic(recovered)
 	}
 }
 

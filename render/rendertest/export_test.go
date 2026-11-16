@@ -50,6 +50,13 @@ func (h *Harness) EnableBackendTimestamps() {
 	h.instance.EnableTimestamps()
 }
 
+// RunOnMainThread runs run on the kernel's main thread as the harness runs
+// its Spawn and ticks, for rendertest's tests to check which goroutine that
+// is.
+func (h *Harness) RunOnMainThread(run func()) {
+	h.runOnMainThread(run)
+}
+
 // DisableRecording makes gfx's recording adapter keep no call from now on,
 // for rendertest's tests to count what render allocates without the
 // commands the adapter would keep.

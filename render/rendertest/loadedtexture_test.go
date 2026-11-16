@@ -338,17 +338,9 @@ func awaitTextureWrite(h *rendertest.Harness, texture render.Texture) bool {
 // render writes them.
 func makePNG(t *testing.T, width, height int, alpha uint8) ([]byte, []byte) {
 	t.Helper()
-	picture := image.NewNRGBA(image.Rect(0, 0, width, height))
-	for y := range height {
-		for x := range width {
-			picture.SetNRGBA(x, y, color.NRGBA{R: uint8(40 * x), G: uint8(60 * y), B: uint8(x + y), A: alpha})
-		}
-	}
-	var encoded bytes.Buffer
-	if err := png.Encode(&encoded, picture); err != nil {
-		t.Fatal(err)
-	}
-	return encoded.Bytes(), picture.Pix
+	return encodePNG(t, width, height, func(x, y int) color.NRGBA {
+		return color.NRGBA{R: uint8(40 * x), G: uint8(60 * y), B: uint8(x + y), A: alpha}
+	})
 }
 
 // makePalettedPNG answers a paletted PNG of 2 by 2 texels, opaque orange and

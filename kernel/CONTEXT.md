@@ -29,6 +29,10 @@ _Avoid_: Port, slot, dependency
 An implementation a plugin gives a socket.
 _Avoid_: Adapter, provider
 
+**Wrap**:
+What a plugin puts in front of each binding of a socket, holding the binding and handed to the declarer in its place; for tests and tools that must see what a plugin is handed.
+_Avoid_: Decorator, interceptor, middleware
+
 ## Work
 
 **Resource**:

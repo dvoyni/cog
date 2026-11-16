@@ -1,0 +1,95 @@
+{
+  "bindings": [
+    {
+      "group": 1,
+      "binding": 0,
+      "name": "white",
+      "texture": {
+        "sampleType": "float",
+        "viewDimension": "2d"
+      },
+      "entryPoints": [
+        "fragment_main"
+      ]
+    },
+    {
+      "group": 1,
+      "binding": 1,
+      "name": "depth",
+      "texture": {
+        "sampleType": "depth",
+        "viewDimension": "2d"
+      },
+      "entryPoints": [
+        "fragment_main"
+      ]
+    },
+    {
+      "group": 1,
+      "binding": 2,
+      "name": "integers",
+      "texture": {
+        "sampleType": "uint",
+        "viewDimension": "2d"
+      },
+      "entryPoints": [
+        "fragment_main"
+      ]
+    },
+    {
+      "group": 1,
+      "binding": 3,
+      "name": "block",
+      "buffer": {
+        "type": "uniform",
+        "size": 16,
+        "members": [
+          {
+            "name": "value",
+            "offset": 0,
+            "size": 16
+          }
+        ]
+      },
+      "entryPoints": [
+        "fragment_main"
+      ]
+    },
+    {
+      "group": 1,
+      "binding": 4,
+      "name": "ramp",
+      "texture": {
+        "sampleType": "float",
+        "viewDimension": "2d"
+      },
+      "entryPoints": [
+        "fragment_main"
+      ]
+    },
+    {
+      "group": 1,
+      "binding": 5,
+      "name": "ramp_sampler",
+      "sampler": {
+        "type": "filtering"
+      },
+      "entryPoints": [
+        "fragment_main"
+      ]
+    }
+  ],
+  "entryPoints": [
+    {
+      "name": "vertex_main",
+      "stage": "vertex"
+    },
+    {
+      "name": "fragment_main",
+      "stage": "fragment"
+    }
+  ],
+  "vertexInputs": {
+    "vertex_main": []
+  }
+}

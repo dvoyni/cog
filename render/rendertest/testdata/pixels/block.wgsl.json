@@ -1,0 +1,56 @@
+{
+  "bindings": [
+    {
+      "group": 1,
+      "binding": 0,
+      "name": "block",
+      "buffer": {
+        "type": "uniform",
+        "size": 48,
+        "members": [
+          {
+            "name": "color",
+            "offset": 0,
+            "size": 12
+          },
+          {
+            "name": "scale",
+            "offset": 12,
+            "size": 4
+          },
+          {
+            "name": "offset",
+            "offset": 16,
+            "size": 8
+          },
+          {
+            "name": "count",
+            "offset": 24,
+            "size": 4
+          },
+          {
+            "name": "tint",
+            "offset": 32,
+            "size": 16
+          }
+        ]
+      },
+      "entryPoints": [
+        "fragment_main"
+      ]
+    }
+  ],
+  "entryPoints": [
+    {
+      "name": "vertex_main",
+      "stage": "vertex"
+    },
+    {
+      "name": "fragment_main",
+      "stage": "fragment"
+    }
+  ],
+  "vertexInputs": {
+    "vertex_main": []
+  }
+}

@@ -54,9 +54,10 @@ func (s *socket[T]) GetAll() []T {
 // declaredBy answers the plugin that declared s.
 func (s *socket[T]) declaredBy() PluginName { return s.plugin }
 
-// resolve takes the bindings of T, panicking on two of an exclusive socket or
-// none of one that is not optional.
-func (s *socket[T]) resolve(bindings []socketBinding) {
+// resolve takes the bindings of T, each wrapped by the wraps of T in plugin
+// order, panicking on two bindings of an exclusive socket, none of one that
+// is not optional, or a wrap answering nil.
+func (s *socket[T]) resolve(bindings, wraps []socketBinding) {
 	t := reflect.TypeFor[T]()
 	values := []T{}
 	var plugins []string
@@ -73,6 +74,18 @@ func (s *socket[T]) resolve(bindings []socketBinding) {
 	if !s.optional && len(values) == 0 {
 		panic(fmt.Sprintf("kernel: socket %v, declared by plugin %q, has no binding", t, s.plugin))
 	}
+	for _, wrap := range wraps {
+		if wrap.socket != t {
+			continue
+		}
+		wrapValue := wrap.value.(func(T) T)
+		for index, value := range values {
+			values[index] = wrapValue(value)
+			if any(values[index]) == nil {
+				panic(fmt.Sprintf("kernel: plugin %q wraps socket %v, bound by plugin %s, in nil", wrap.plugin, t, plugins[index]))
+			}
+		}
+	}
 	s.values = values
 }
 
@@ -82,11 +95,15 @@ type resolvableSocket interface {
 	// declaredBy answers the plugin that declared the socket.
 	declaredBy() PluginName
 	// resolve takes the socket's own from bindings, every binding in plugin
-	// order, panicking if they break its exclusive or optional.
-	resolve(bindings []socketBinding)
+	// order, each wrapped by its own of wraps, every wrap in plugin order,
+	// panicking if they break its exclusive or optional or a wrap answers
+	// nil.
+	resolve(bindings, wraps []socketBinding)
 }
 
-// socketBinding is one value a plugin binds to the socket of a type.
+// socketBinding is one value a plugin binds to the socket of a type, or one
+// wrap it puts in front of each binding of it, whose value is a func(T) T of
+// the socket's T.
 type socketBinding struct {
 	socket reflect.Type
 	plugin PluginName

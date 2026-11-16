@@ -15,7 +15,8 @@ import (
 
 // declarationCatalog holds the binding declarations of the shaders the
 // harness's device preprocessed and compiled, which answer their modules'
-// reflection: gfx's recording adapter parses no WGSL.
+// reflection, gfx's recording adapter parsing no WGSL, or are checked
+// against it on the software adapter.
 type declarationCatalog struct {
 	harness *Harness
 	// mutex guards the maps, and is held across each reflection, so an
@@ -64,7 +65,11 @@ func (d *declarationCatalog) notePreprocessed(files fs.FS, path string, defines 
 	notedText := fmt.Sprintf("%s\n// rendertest: preprocessed %q with defines %q\n", text, path, defines)
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
-	d.preprocessed[notedText] = preprocessedShader{path: path, text: text, declaration: declaration, err: err}
+	name := path
+	if len(defines) > 0 {
+		name = fmt.Sprintf("%s with defines %q", path, defines)
+	}
+	d.preprocessed[notedText] = preprocessedShader{path: path, name: name, text: text, declaration: declaration, err: err}
 	return notedText
 }
 
@@ -147,16 +152,18 @@ func (d *declarationCatalog) answerVertexInputs(module gfx.ShaderModule, entryPo
 	})
 }
 
-// answer answers a reflection of kind of module: what reflect, the recording
-// device's, answers when an answer queued for kind waits, when it fails, or
-// when module has no declaration, and what answerDeclared answers of
-// module's shader otherwise.
+// answer answers a reflection of kind of module: what reflect, the wrapped
+// device's, answers on the software adapter, when an answer queued for kind
+// waits, when it fails, or when module has no declaration, and what
+// answerDeclared answers of module's shader otherwise.
 func (d *declarationCatalog) answer[T any](kind recording.CallKind, module gfx.ShaderModule, reflect func() (T, error), answerDeclared func(preprocessedShader) (T, error)) (T, error) {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 	reflectedAnswer, err := reflect()
 	shader, ok := d.compiled[module]
-	if d.queuedAnswerCounts[kind] > 0 {
+	if d.harness.softwareAdapter {
+		ok = false
+	} else if d.queuedAnswerCounts[kind] > 0 {
 		d.queuedAnswerCounts[kind]--
 		ok = false
 	}
@@ -166,11 +173,13 @@ func (d *declarationCatalog) answer[T any](kind recording.CallKind, module gfx.S
 	return answerDeclared(shader)
 }
 
-// preprocessedShader is a shader the harness preprocessed: its path, the
-// text the recording instance answered for it, and what its declaration says
-// of its variant, or why that is not known.
+// preprocessedShader is a shader the harness preprocessed: its path, its
+// name, the path with its defines when it has some, as a failure names the
+// variant, the text preprocessing answered for it, and what its declaration
+// says of its variant, or why that is not known.
 type preprocessedShader struct {
 	path        string
+	name        string
 	text        string
 	declaration bindingdeclaration.Reflection
 	err         error

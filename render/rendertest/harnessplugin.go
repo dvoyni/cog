@@ -13,7 +13,8 @@ type openWindowEvent struct {
 }
 
 // harnessPlugin is the harness's own plugin, listed after render: it binds
-// the harness's recording instance, wrapped, and its headless windows, opens
+// the harness's recording instance and its headless windows, unless gogpu's
+// plugin binds its own on the software adapter, wraps gfx's instance, opens
 // windows for it, and keeps the job making each opened window's surface.
 type harnessPlugin struct {
 	harness *Harness
@@ -27,15 +28,22 @@ func (harnessPlugin) Dependencies() []kernel.PluginName {
 	return []kernel.PluginName{render.PluginName}
 }
 
-// Init binds gfx's InstanceSocket to the recording instance, its devices a
-// frame behind and answering reflection from binding declarations, and
-// platform's WindowsSocket to the headless windows, and subscribes to
+// Init binds gfx's InstanceSocket to the recording instance and platform's
+// WindowsSocket to the headless windows, but on the software adapter, where
+// gogpu's plugin binds its own; wraps gfx's InstanceSocket, whichever binds
+// it, so its devices are a frame behind and answer reflection from binding
+// declarations, or check them against the adapter's; and subscribes to
 // openWindowEvent; to platform.WindowOpenedEvent, whose in, the plugin
 // being listed after gfx, is the job making the window's surface; and to
 // render.FrameEvent, to note each frame's beat for Frames.
 func (p harnessPlugin) Init(configurator *kernel.Configurator, _ any) error {
-	configurator.BindSocket[gfx.InstanceSocket](harnessInstance{InstanceSocket: p.harness.instance, harness: p.harness})
-	configurator.BindSocket[platform.WindowsSocket](p.harness.windows)
+	if !p.harness.softwareAdapter {
+		configurator.BindSocket[gfx.InstanceSocket](p.harness.instance)
+		configurator.BindSocket[platform.WindowsSocket](p.harness.windows)
+	}
+	configurator.WrapSocket[gfx.InstanceSocket](func(bound gfx.InstanceSocket) gfx.InstanceSocket {
+		return harnessInstance{InstanceSocket: bound, harness: p.harness}
+	})
 	openWindow := configurator.RegisterTask1(func(k *kernel.Kernel, size platform.Size, manager kernel.Write[*platform.WindowManager]) kernel.NoResult {
 		p.harness.opened = manager.Get().Open(platform.WindowEntry{Size: size})
 		return kernel.NoResult{}

@@ -106,6 +106,23 @@ func (c *Configurator) BindSocket[T any](value T) {
 	c.kernel.socketBindings = append(c.kernel.socketBindings, socketBinding{socket: t, plugin: c.plugin, value: value})
 }
 
+// WrapSocket puts what wrap answers in front of each value bound to the
+// socket of T, whichever plugin bound it, as the socket resolves: the
+// declaring plugin gets wrap's answer, which holds the bound value and
+// delegates to it, changes its calls or watches them. Wraps apply in plugin
+// order, the first listed innermost. A wrap reaches the implementation a
+// socket otherwise keeps to its declarer, so it is for tests and tools, a
+// harness checking or recording what a plugin is handed, not for an
+// application to build on. A nil wrap, a socket no plugin declares, or a wrap
+// answering nil, is a composition error, and panics.
+func (c *Configurator) WrapSocket[T any](wrap func(T) T) {
+	t := reflect.TypeFor[T]()
+	if wrap == nil {
+		panic(fmt.Sprintf("kernel: plugin %q wraps %v with a nil wrap", c.plugin, t))
+	}
+	c.kernel.socketWraps = append(c.kernel.socketWraps, socketBinding{socket: t, plugin: c.plugin, value: wrap})
+}
+
 //go:generate go run ./internal/generate
 
 // RegisterTask registers a task of this kernel and returns it for

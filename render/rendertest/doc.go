@@ -18,6 +18,26 @@
 // among them, unless it is a report of a kind the test named with
 // ExpectReport.
 //
+// A pixel test calls UseSoftwareAdapter before Spawn: render then draws on
+// wgpu's software adapter, through gogpu's plugin in place of the recording
+// adapter, real rendering on the CPU with no window and no GPU. The test
+// draws into textures and reads them back through render's readback, with
+// exact expected texels; it is skipped under -short. The harness wraps
+// gogpu's instance, as it wraps the recording one, with kernel's
+// WrapSocket, and checks each shader compiled there against its binding
+// declaration, failing the test on a stale one, naming the shader and the
+// first binding that differs.
+//
+// gogpu's HostLoop runs every call on the kernel's main thread, which on
+// macOS must be the process's. A test package with pixel tests runs its
+// tests through RunMain, which keeps the process's main thread for the
+// harness:
+//
+//	func TestMain(m *testing.M) { rendertest.RunMain(m) }
+//
+// Without it, the harness locks the test's goroutine to an OS thread in its
+// place, which serves on Windows and Linux, and skips a pixel test on macOS.
+//
 // A test of pass timings calls EnableTimestamps before Spawn: the fake GPU
 // then has timestamp queries, which no real backend has until the wgpu fork
 // exposes them, and a pass's timings are a nanosecond for each command it

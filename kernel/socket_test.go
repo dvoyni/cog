@@ -139,6 +139,117 @@ func TestSocketCompositionErrorsPanic(t *testing.T) {
 	}
 }
 
+// wrappedGreeting is a greeting a wrap put in front of another, which it
+// delegates to.
+type wrappedGreeting struct {
+	inner greeterSocket
+	by    string
+}
+
+func (g wrappedGreeting) Greet() string { return g.by + "(" + g.inner.Greet() + ")" }
+
+// wrapper is a plugin wrapping each binding of greeterSocket in a
+// wrappedGreeting by name.
+func wrapper(name PluginName) hookPlugin {
+	return hookPlugin{name: name, init: func(c *Configurator) {
+		c.WrapSocket[greeterSocket](func(bound greeterSocket) greeterSocket {
+			return wrappedGreeting{inner: bound, by: string(name)}
+		})
+	}}
+}
+
+func TestEachBindingIsWrappedByEveryWrapInPluginOrderWhateverWhereTheBinderIsListed(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		exclusive bool
+		want      []string
+	}{
+		{"exclusive", true, []string{"outer(inner(hello))"}},
+		{"multiple", false, []string{"outer(inner(hello))", "outer(inner(again))"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s := NewSupervisor(nil)
+			t.Cleanup(s.Quit)
+			var got []string
+			var one ExclusiveSocket[greeterSocket]
+			var many Socket[greeterSocket]
+			consumer := hookPlugin{
+				name: "consumer",
+				init: func(c *Configurator) {
+					if test.exclusive {
+						one = c.DeclareExclusiveSocket[greeterSocket](false)
+					} else {
+						many = c.DeclareSocket[greeterSocket](false)
+					}
+				},
+				start: func(*Kernel) {
+					if test.exclusive {
+						got = append(got, one.Get().Greet())
+						return
+					}
+					for _, greeter := range many.GetAll() {
+						got = append(got, greeter.Greet())
+					}
+				},
+			}
+			plugins := []Plugin{wrapper("inner"), consumer, binder[greeterSocket]("first", greeting("hello")), wrapper("outer")}
+			if !test.exclusive {
+				plugins = append(plugins, binder[greeterSocket]("second", greeting("again")))
+			}
+			if _, err := s.Spawn(nil, 1, plugins...); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, test.want) {
+				t.Errorf("the socket answers %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestWrapCompositionErrorsPanic(t *testing.T) {
+	declare := hookPlugin{name: "consumer", init: func(c *Configurator) { c.DeclareExclusiveSocket[greeterSocket](true) }}
+	for _, test := range []struct {
+		name    string
+		plugins []Plugin
+		want    []string
+	}{
+		{"a nil wrap", []Plugin{declare, hookPlugin{name: "nil", init: func(c *Configurator) { c.WrapSocket[greeterSocket](nil) }}},
+			[]string{`"nil"`, "kernel.greeterSocket", "nil wrap"}},
+		{"a wrap of a socket nobody declares", []Plugin{declare, hookPlugin{name: "stray", init: func(c *Configurator) {
+			c.WrapSocket[numberSocket](func(n numberSocket) numberSocket { return n })
+		}}}, []string{`"stray"`, "kernel.numberSocket", "no plugin declares"}},
+		{"a wrap answering nil", []Plugin{declare, binder[greeterSocket]("binder", greeting("hello")), hookPlugin{name: "emptying", init: func(c *Configurator) {
+			c.WrapSocket[greeterSocket](func(greeterSocket) greeterSocket { return nil })
+		}}}, []string{`"emptying"`, "kernel.greeterSocket", `"binder"`, "in nil"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			expectPanicSaying(t, strings.Join(test.want, "\x00"), func() {
+				s := NewSupervisor(nil)
+				t.Cleanup(s.Quit)
+				s.Spawn(nil, 1, test.plugins...)
+			})
+		})
+	}
+}
+
+func TestAWrapOfAnUnboundOptionalSocketLeavesItUnbound(t *testing.T) {
+	s := NewSupervisor(nil)
+	t.Cleanup(s.Quit)
+	var one ExclusiveSocket[greeterSocket]
+	_, err := s.Spawn(nil, 1, wrapper("wrapper"), hookPlugin{
+		name: "consumer",
+		init: func(c *Configurator) { one = c.DeclareExclusiveSocket[greeterSocket](true) },
+		start: func(*Kernel) {
+			if one.Get() != nil {
+				t.Errorf("the wrapped unbound socket answers %v, want nil", one.Get())
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 // expectPanicSaying runs f and fails unless it panics with a message
 // containing every part of want, the parts split by NUL.
 func expectPanicSaying(t *testing.T, want string, f func()) {
