@@ -1,6 +1,8 @@
 package rendertest_test
 
 import (
+	"bytes"
+	"fmt"
 	"reflect"
 	"slices"
 	"sync"
@@ -260,6 +262,77 @@ func TestADrawParameterLastsUntilSetAgainTheMaterialChangesOrThePassEnds(t *test
 	}
 	if camera, _ := findParameterIn(draws[4].PassParameters, "camera"); !camera.Default {
 		t.Errorf("the next pass's draw bound camera %+v, want its default: a pass parameter ends with its pass", camera)
+	}
+}
+
+func TestAfterSetMaterialADrawParameterSetAgainBindsItsNewValueAndOneNotSetAgainItsDefault(t *testing.T) {
+	h := rendertest.NewHarness(t)
+	var scene passParameterScene
+	first := [4]float32{1}
+	second := [4]float32{2}
+	spawnPassParameterHarness(t, h, nil, 1, func(frameIndex int, inventory render.Inventory, frame render.Frame) {
+		scene = makePassParameterScene(inventory)
+		list := frame.BeginCommandList("draws", drawOrder)
+		pass := list.BeginPass(scene.colorPass("scene"))
+		for _, material := range []render.Material{scene.material, scene.other, scene.material} {
+			pass.SetMaterial(material)
+			if material == scene.other {
+				pass.SetUniform("object", second)
+			} else {
+				pass.SetUniform("object", first)
+				pass.SetTexture("mask", scene.layers)
+			}
+			pass.Draw(scene.indexedMesh, render.DrawArgs{})
+		}
+		pass.End()
+		list.End()
+	})
+
+	objectBytes := func(value [4]float32) []byte { return unsafe.Slice((*byte)(unsafe.Pointer(&value)), 16) }
+	draws := findPassDraws(h, "scene")[0]
+	wantObjects := [][]byte{objectBytes(first), objectBytes(second), objectBytes(first)}
+	wantMaskDefaults := []bool{false, true, false}
+	if len(draws) != len(wantObjects) {
+		t.Fatalf("the pass drew %d times, want %d", len(draws), len(wantObjects))
+	}
+	for index, draw := range draws {
+		if object, _ := findParameterIn(draw.DrawParameters, "object"); !bytes.Equal(object.Uniform, wantObjects[index]) {
+			t.Errorf("draw %d bound object %+v, want the bytes %v, set again after SetMaterial", index, object, wantObjects[index])
+		}
+		if mask, _ := findParameterIn(draw.DrawParameters, "mask"); mask.Default != wantMaskDefaults[index] {
+			t.Errorf("draw %d bound mask %+v, want it default %v: set again after SetMaterial, or not", index, mask, wantMaskDefaults[index])
+		}
+	}
+}
+
+func TestSetMaterialResetsMoreThan64DrawParameters(t *testing.T) {
+	h := rendertest.NewHarness(t)
+	var scene passParameterScene
+	spawnPassParameterHarness(t, h, nil, 1, func(frameIndex int, inventory render.Inventory, frame render.Frame) {
+		scene = makePassParameterScene(inventory)
+		list := frame.BeginCommandList("draws", drawOrder)
+		pass := list.BeginPass(scene.colorPass("scene"))
+		pass.SetMaterial(scene.material)
+		pass.SetUniform("object", [4]float32{1})
+		for index := range 64 {
+			// Names the shader lacks, ignored by its draws.
+			pass.SetSampler(fmt.Sprintf("unused %d", index), render.SamplerDescriptor{})
+		}
+		pass.Draw(scene.indexedMesh, render.DrawArgs{})
+		pass.SetMaterial(scene.material)
+		pass.Draw(scene.indexedMesh, render.DrawArgs{})
+		pass.End()
+		list.End()
+	})
+
+	draws := findPassDraws(h, "scene")[0]
+	if len(draws) != 2 {
+		t.Fatalf("the pass drew %d times, want 2", len(draws))
+	}
+	for index, wantDefault := range []bool{false, true} {
+		if object, _ := findParameterIn(draws[index].DrawParameters, "object"); object.Default != wantDefault {
+			t.Errorf("draw %d bound object %+v, want it default %v: 65 draw parameters set, then SetMaterial", index, object, wantDefault)
+		}
 	}
 }
 

@@ -81,7 +81,7 @@ func TestDrawVerticesBindsInstanceBuffersFromTheFirstSlot(t *testing.T) {
 	calls := h.Calls()
 	rowsBinding := []recording.SetVertexBufferArguments{{Slot: 0, Buffer: findGfxBuffer(t, calls, rows)}}
 	want := [][]recording.SetVertexBufferArguments{rowsBinding, rowsBinding}
-	if draws := findDrawVertexBuffers(findPassCommands(h, "scene")); !reflect.DeepEqual(draws, want) {
+	if draws := findDrawVertexBuffers(calls, findPassCommands(h, "scene")); !reflect.DeepEqual(draws, want) {
 		t.Errorf("the draws set vertex buffers %+v, want %+v", draws, want)
 	}
 	var stepModes []gfx.VertexStepMode

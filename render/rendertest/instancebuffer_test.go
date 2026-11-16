@@ -19,17 +19,26 @@ var (
 )
 
 // findDrawVertexBuffers answers, for each draw among commands, the vertex
-// buffers set since the draw before it, in the order set.
-func findDrawVertexBuffers(commands []recording.Command) [][]recording.SetVertexBufferArguments {
+// buffers it binds, set before it at the slots its pipeline, made among
+// calls, reads, in slot order.
+func findDrawVertexBuffers(calls []recording.Call, commands []recording.Command) [][]recording.SetVertexBufferArguments {
+	slotCounts := map[gfx.RenderPipeline]int{}
+	for _, index := range findCallIndices(calls, recording.CallKindCreateRenderPipeline) {
+		arguments := calls[index].Arguments.(recording.CreateRenderPipelineArguments)
+		slotCounts[arguments.Pipeline] = len(arguments.Descriptor.Vertex.Buffers)
+	}
 	var draws [][]recording.SetVertexBufferArguments
-	var set []recording.SetVertexBufferArguments
+	var bound [8]recording.SetVertexBufferArguments
+	slotCount := 0
 	for _, command := range commands {
 		switch command.Kind {
+		case recording.CommandKindSetPipeline:
+			slotCount = slotCounts[command.Arguments.(gfx.RenderPipeline)]
 		case recording.CommandKindSetVertexBuffer:
-			set = append(set, command.Arguments.(recording.SetVertexBufferArguments))
+			arguments := command.Arguments.(recording.SetVertexBufferArguments)
+			bound[arguments.Slot] = arguments
 		case recording.CommandKindDraw, recording.CommandKindDrawIndexed:
-			draws = append(draws, set)
-			set = nil
+			draws = append(draws, slices.Clone(bound[:slotCount]))
 		}
 	}
 	return draws
@@ -74,7 +83,7 @@ func TestInstanceBuffersBindAfterTheMeshsVertexBuffersSteppedPerInstanceInSlotOr
 		{Slot: 2, Buffer: findGfxBuffer(t, calls, weights)},
 	}
 	want := [][]recording.SetVertexBufferArguments{instanced, instanced, {{Slot: 0, Buffer: vertices}}}
-	if draws := findDrawVertexBuffers(findPassCommands(h, "scene")); !reflect.DeepEqual(draws, want) {
+	if draws := findDrawVertexBuffers(calls, findPassCommands(h, "scene")); !reflect.DeepEqual(draws, want) {
 		t.Errorf("the draws set vertex buffers\n%+v\nwant\n%+v: the mesh's, then the instance buffers in slot order, none once the material changed", draws, want)
 	}
 	pipelines := findCreatedPipelines(calls)
@@ -130,7 +139,7 @@ func TestInstanceBuffersLastUntilThePassEndsAndJoinThePipelineKeyByValue(t *test
 	if pipelines := findCreatedPipelines(h.Calls()); len(pipelines) != 3 {
 		t.Errorf("render made %d pipelines, want three: one for the first two instanced draws, one for the third's stride, one for the plain draw", len(pipelines))
 	}
-	if draws := findDrawVertexBuffers(findPassCommands(h, "second")); len(draws) != 1 || len(draws[0]) != 1 {
+	if draws := findDrawVertexBuffers(h.Calls(), findPassCommands(h, "second")); len(draws) != 1 || len(draws[0]) != 1 {
 		t.Errorf("the second pass's draw set vertex buffers %+v, want the mesh's alone", draws)
 	}
 }
@@ -155,7 +164,7 @@ func TestAnInstanceBufferPastTheLastSlotOrMisalignedIsRefusedAndReported(t *test
 	if count := countReports(h, render.ReportKindInstanceBufferRefused); count != 3 {
 		t.Errorf("render reported %d refused instance buffers, want three: one past the last slot, one at an odd offset, one of an odd stride", count)
 	}
-	if draws := findDrawVertexBuffers(findPassCommands(h, "scene")); len(draws) != 1 || len(draws[0]) != 1 {
+	if draws := findDrawVertexBuffers(h.Calls(), findPassCommands(h, "scene")); len(draws) != 1 || len(draws[0]) != 1 {
 		t.Errorf("the draw set vertex buffers %+v, want the mesh's alone", draws)
 	}
 }

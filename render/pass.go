@@ -132,6 +132,23 @@ type Pass struct {
 	material   Material
 	bindGroups bindGroupSet
 	pipeline   gfx.RenderPipeline
+	// drawnMaterials are what the pass's draws found of the materials they
+	// drew lately, nextDrawnMaterial the one a material not among them
+	// replaces, and drawnMesh what they found of the mesh drawn last, so a
+	// draw of what a draw before it drew finds none of it again.
+	drawnMaterials    [drawnMaterialCount]drawnMaterial
+	nextDrawnMaterial int
+	drawnMesh         drawnMesh
+	// boundMaterial is one more than the index among drawnMaterials of the
+	// material whose bind groups bindGroups holds, resolved and checked by a
+	// draw of it, while nothing since changed what it resolved; zero for
+	// none. An index, as a pointer into the pass would move it to the heap.
+	boundMaterial int
+	// boundVertexBuffers are the vertex buffers as last set on encoder, by
+	// slot, at boundVertexOffsets, and boundIndex the index buffer.
+	boundVertexBuffers [maxVertexBufferCount]gfx.Buffer
+	boundVertexOffsets [maxVertexBufferCount]uint64
+	boundIndex         indexBinding
 	// instanceBuffers are the instance buffers set, by slot, a zero Buffer
 	// meaning none; instanceSlots the slots set, in order, the first
 	// instanceCount of them, the order a draw binds them in; and
@@ -141,21 +158,47 @@ type Pass struct {
 	instanceSlots   [maxVertexBufferCount]uint8
 	instanceCount   int
 	instanceLayout  uint32
+	// foundInstanceBuffers are the gfx buffers behind the instance buffers
+	// set, in the order a draw binds them, once a draw found them since they
+	// were set, as instanceBuffersFound says.
+	foundInstanceBuffers [maxVertexBufferCount]gfx.Buffer
+	instanceBuffersFound bool
+	// pendingDrawSettings marks, by index, the draw parameters, and
+	// pendingInstanceSlots, by slot, the instance buffers that SetMaterial
+	// reset and no setter set since. The next draw clears them, so one set
+	// again as it was before SetMaterial leaves what the draws found and
+	// resolved of it standing.
+	pendingDrawSettings  uint64
+	pendingInstanceSlots uint8
 }
 
 // SetMaterial selects material for the draws recorded after it, until it is
 // set again or the pass ends, and resets every draw parameter and instance
 // buffer: the draws after it read their defaults, and no instance buffer,
 // until they are set again.
+//
+// A pass remembers what its draws found of the last four materials it
+// drew. Switching back to one of them costs little, but switching to
+// any other repeats the lookup of its shader, pipeline and bind groups. So
+// a caller drawing many materials sorts its draws by shader, then material,
+// then mesh, as a pass remembers only its last mesh too.
 func (p *Pass) SetMaterial(material Material) {
 	p.material = material
-	if p.listState != nil {
-		p.listState.parameterSettings[drawGroup] = p.listState.parameterSettings[drawGroup][:0]
+	if p.encoder == nil {
+		return
 	}
-	p.bindGroups.resolvedFor[drawGroup] = shaderSelection{}
-	p.instanceBuffers = [maxVertexBufferCount]VertexBuffer{}
-	p.instanceCount = 0
-	p.instanceLayout = 0
+	settings := p.listState.parameterSettings[drawGroup]
+	if len(settings) > 64 {
+		p.listState.parameterSettings[drawGroup] = settings[:0]
+		p.forgetResolution(drawGroup)
+		p.pendingDrawSettings = 0
+	} else {
+		p.pendingDrawSettings = 1<<len(settings) - 1
+	}
+	p.pendingInstanceSlots = 0
+	for _, slot := range p.instanceSlots[:p.instanceCount] {
+		p.pendingInstanceSlots |= 1 << slot
+	}
 }
 
 // SetInstanceBuffer sets instanceBuffer at slot, from 0 to 7, for the draws
@@ -183,23 +226,18 @@ func (p *Pass) SetInstanceBuffer(slot uint32, instanceBuffer InstanceBuffer) {
 		table.report(ReportKindInstanceBufferRefused, fmt.Errorf("render: the instance buffer at slot %d %w", slot, err))
 		return
 	}
+	p.pendingInstanceSlots &^= 1 << slot
 	replacedBuffer := p.instanceBuffers[slot]
 	p.instanceBuffers[slot] = vertexBuffer
+	if replacedBuffer.Range != vertexBuffer.Range {
+		p.instanceBuffersFound = false
+	}
 	if (replacedBuffer.Range.Buffer == (Buffer{})) == (vertexBuffer.Range.Buffer == (Buffer{})) &&
 		replacedBuffer.Layout.Stride == vertexBuffer.Layout.Stride && slices.Equal(replacedBuffer.Layout.Attributes, vertexBuffer.Layout.Attributes) {
 		// The same slots are set, in the same layouts, so the draws' key stands.
 		return
 	}
-	var orderedBuffers [maxVertexBufferCount]VertexBuffer
-	p.instanceCount = 0
-	for index, instanceBuffer := range p.instanceBuffers {
-		if instanceBuffer.Range.Buffer != (Buffer{}) {
-			orderedBuffers[p.instanceCount] = instanceBuffer
-			p.instanceSlots[p.instanceCount] = uint8(index)
-			p.instanceCount++
-		}
-	}
-	p.instanceLayout = table.vertexLayouts.intern(orderedBuffers[:p.instanceCount], gfx.VertexStepModeInstance)
+	p.orderInstanceBuffers(table)
 }
 
 // SetViewport sets viewport for the draws recorded after it, until it is
@@ -254,7 +292,7 @@ func (p *Pass) SetBlendConstant(color Color) {
 // texture or storage texture of @group(0), as SetPassTextureView binds the
 // zero view of it, but that a storage binding sees its first mip level.
 func (p *Pass) SetPassTexture(name string, texture Texture) {
-	p.setParameter(passGroup, parameterSetting{name: name, kind: parameterKindTexture, view: TextureView{Texture: texture}, wholeTexture: true})
+	p.setParameter(passGroup, &parameterSetting{name: name, kind: parameterKindTexture, view: TextureView{Texture: texture}, wholeTexture: true})
 }
 
 // SetPassTextureView binds view, part of a texture or the texture seen
@@ -271,7 +309,7 @@ func (p *Pass) SetPassTexture(name string, texture Texture) {
 // lacks is ignored, so one set of values serves every shader, and one of a
 // binding outside @group(0) is refused and reported once.
 func (p *Pass) SetPassTextureView(name string, view TextureView) {
-	p.setParameter(passGroup, parameterSetting{name: name, kind: parameterKindTexture, view: view})
+	p.setParameter(passGroup, &parameterSetting{name: name, kind: parameterKindTexture, view: view})
 }
 
 // SetPassSampler binds sampler, by value, to the pass parameter named name,
@@ -281,7 +319,7 @@ func (p *Pass) SetPassTextureView(name string, view TextureView) {
 // A pass parameter is read by every draw recorded after it in the pass, as
 // SetPassTextureView says.
 func (p *Pass) SetPassSampler(name string, sampler SamplerDescriptor) {
-	p.setParameter(passGroup, parameterSetting{name: name, kind: parameterKindSampler, sampler: sampler})
+	p.setParameter(passGroup, &parameterSetting{name: name, kind: parameterKindSampler, sampler: sampler})
 }
 
 // SetPassBuffer binds bufferRange, a zero size the rest of its buffer, to
@@ -298,7 +336,7 @@ func (p *Pass) SetPassSampler(name string, sampler SamplerDescriptor) {
 // A pass parameter is read by every draw recorded after it in the pass, as
 // SetPassTextureView says.
 func (p *Pass) SetPassBuffer(name string, bufferRange BufferRange) {
-	p.setParameter(passGroup, parameterSetting{name: name, kind: parameterKindBuffer, bufferRange: bufferRange})
+	p.setParameter(passGroup, &parameterSetting{name: name, kind: parameterKindBuffer, bufferRange: bufferRange})
 }
 
 // SetPassUniform binds value, plain data with no pointers mirroring a WGSL
@@ -315,7 +353,7 @@ func (p *Pass) SetPassUniform[T any](name string, value T) {
 // texture or storage texture of @group(2), as SetTextureView binds the zero
 // view of it, but that a storage binding sees its first mip level.
 func (p *Pass) SetTexture(name string, texture Texture) {
-	p.setParameter(drawGroup, parameterSetting{name: name, kind: parameterKindTexture, view: TextureView{Texture: texture}, wholeTexture: true})
+	p.setParameter(drawGroup, &parameterSetting{name: name, kind: parameterKindTexture, view: TextureView{Texture: texture}, wholeTexture: true})
 }
 
 // SetTextureView binds view to the draw parameter named name, a texture or
@@ -327,7 +365,7 @@ func (p *Pass) SetTexture(name string, texture Texture) {
 // material's shader at the next draw: a name the shader lacks is ignored,
 // and one of a binding outside @group(2) is refused and reported once.
 func (p *Pass) SetTextureView(name string, view TextureView) {
-	p.setParameter(drawGroup, parameterSetting{name: name, kind: parameterKindTexture, view: view})
+	p.setParameter(drawGroup, &parameterSetting{name: name, kind: parameterKindTexture, view: view})
 }
 
 // SetSampler binds sampler, by value, to the draw parameter named name, a
@@ -335,7 +373,7 @@ func (p *Pass) SetTextureView(name string, view TextureView) {
 // A draw parameter is read by the draws recorded after it, as SetTextureView
 // says.
 func (p *Pass) SetSampler(name string, sampler SamplerDescriptor) {
-	p.setParameter(drawGroup, parameterSetting{name: name, kind: parameterKindSampler, sampler: sampler})
+	p.setParameter(drawGroup, &parameterSetting{name: name, kind: parameterKindSampler, sampler: sampler})
 }
 
 // SetBuffer binds bufferRange, a zero size the rest of its buffer, to the
@@ -348,7 +386,7 @@ func (p *Pass) SetSampler(name string, sampler SamplerDescriptor) {
 // A draw parameter is read by the draws recorded after it, as SetTextureView
 // says.
 func (p *Pass) SetBuffer(name string, bufferRange BufferRange) {
-	p.setParameter(drawGroup, parameterSetting{name: name, kind: parameterKindBuffer, bufferRange: bufferRange})
+	p.setParameter(drawGroup, &parameterSetting{name: name, kind: parameterKindBuffer, bufferRange: bufferRange})
 }
 
 // SetUniform binds value, plain data with no pointers mirroring a WGSL
@@ -386,50 +424,45 @@ func (p *Pass) Draw(mesh Mesh, arguments DrawArgs) {
 		return
 	}
 	table := p.frame.table.Get()
-	material, shader, ok := p.findMaterial(table)
+	p.clearPendingResets(table)
+	materialIndex, ok := p.findDrawnMaterial(table)
 	if !ok {
 		return
 	}
-	meshSlot, ok := table.findSlot(&table.meshes, mesh)
-	if !ok {
-		if table.claimMeshReport(mesh) {
-			table.report(ReportKindDrawSkipped, fmt.Errorf("render: a draw of mesh %v, which render does not hold", mesh))
-		}
+	material := &p.drawnMaterials[materialIndex]
+	if (mesh != p.drawnMesh.mesh || mesh == Mesh{}) && !p.findDrawnMesh(table, mesh) {
 		return
 	}
-	var buffers drawBufferSet
-	vertexCount, indexCount, err := meshSlot.findElements(table, &buffers)
-	if err != nil {
-		if table.claimMeshReport(mesh) {
-			table.report(ReportKindDrawSkipped, fmt.Errorf("render: a draw of mesh %q, whose %w", meshSlot.label, err))
-		}
+	drawnMesh := &p.drawnMesh
+	vertexBuffers := &drawnMesh.vertexBuffers
+	if !p.findInstanceBuffers(table, material.label, vertexBuffers.vertexBufferCount) {
 		return
 	}
-	indexed := meshSlot.indices.Range.Buffer != (Buffer{})
-	key := pipelineKey{vertexLayout: meshSlot.vertexLayout, topology: meshSlot.topology}
-	if indexed && (meshSlot.topology == PrimitiveTopologyLineStrip || meshSlot.topology == PrimitiveTopologyTriangleStrip) {
-		key.stripIndexFormat = meshSlot.indices.Format
-	}
-	if !p.findInstanceBuffers(table, material.label, &buffers) {
+	layout := drawnMesh.layout
+	layout.instanceLayout = p.instanceLayout
+	if !p.bindDraw(table, materialIndex, layout) {
 		return
 	}
-	if !p.bindDraw(table, material, shader, &key) {
-		return
+	for slot := range vertexBuffers.vertexBufferCount {
+		p.setVertexBuffer(slot, vertexBuffers.vertexBuffers[slot], vertexBuffers.vertexOffsets[slot])
 	}
-	p.setVertexBuffers(&buffers)
+	p.setInstanceBuffers(vertexBuffers.vertexBufferCount)
 	p.listState.passes[p.noteIndex].drew = true
 	instanceCount := cmp.Or(arguments.InstanceCount, 1)
-	if !indexed {
-		p.encoder.Draw(gfx.DrawArgs{VertexCount: vertexCount, InstanceCount: instanceCount, FirstInstance: arguments.FirstInstance})
+	if drawnMesh.index.buffer == (gfx.Buffer{}) {
+		p.encoder.Draw(gfx.DrawArgs{VertexCount: drawnMesh.vertexCount, InstanceCount: instanceCount, FirstInstance: arguments.FirstInstance})
 		if p.listState.inspectedList != nil {
-			p.addInspectedDraw(&key, &shader, InspectedDraw{VertexCount: vertexCount, InstanceCount: instanceCount, FirstInstance: arguments.FirstInstance})
+			p.addInspectedDraw(material, InspectedDraw{VertexCount: drawnMesh.vertexCount, InstanceCount: instanceCount, FirstInstance: arguments.FirstInstance})
 		}
 		return
 	}
-	p.encoder.SetIndexBuffer(buffers.indexBuffer, gfx.IndexFormat(meshSlot.indices.Format), meshSlot.indices.Range.Offset)
-	p.encoder.DrawIndexed(gfx.DrawIndexedArgs{IndexCount: indexCount, InstanceCount: instanceCount, FirstInstance: arguments.FirstInstance})
+	if drawnMesh.index != p.boundIndex {
+		p.encoder.SetIndexBuffer(drawnMesh.index.buffer, drawnMesh.index.format, drawnMesh.index.offset)
+		p.boundIndex = drawnMesh.index
+	}
+	p.encoder.DrawIndexed(gfx.DrawIndexedArgs{IndexCount: drawnMesh.indexCount, InstanceCount: instanceCount, FirstInstance: arguments.FirstInstance})
 	if p.listState.inspectedList != nil {
-		p.addInspectedDraw(&key, &shader, InspectedDraw{IndexCount: indexCount, InstanceCount: instanceCount, FirstInstance: arguments.FirstInstance})
+		p.addInspectedDraw(material, InspectedDraw{IndexCount: drawnMesh.indexCount, InstanceCount: instanceCount, FirstInstance: arguments.FirstInstance})
 	}
 }
 
@@ -447,24 +480,24 @@ func (p *Pass) DrawVertices(topology PrimitiveTopology, vertexCount uint32, argu
 		return
 	}
 	table := p.frame.table.Get()
-	material, shader, ok := p.findMaterial(table)
+	p.clearPendingResets(table)
+	materialIndex, ok := p.findDrawnMaterial(table)
 	if !ok {
 		return
 	}
-	var buffers drawBufferSet
-	if !p.findInstanceBuffers(table, material.label, &buffers) {
+	material := &p.drawnMaterials[materialIndex]
+	if !p.findInstanceBuffers(table, material.label, 0) {
 		return
 	}
-	key := pipelineKey{topology: topology}
-	if !p.bindDraw(table, material, shader, &key) {
+	if !p.bindDraw(table, materialIndex, drawLayout{instanceLayout: p.instanceLayout, topology: topology}) {
 		return
 	}
-	p.setVertexBuffers(&buffers)
+	p.setInstanceBuffers(0)
 	p.listState.passes[p.noteIndex].drew = true
 	instanceCount := cmp.Or(arguments.InstanceCount, 1)
 	p.encoder.Draw(gfx.DrawArgs{VertexCount: vertexCount, InstanceCount: instanceCount, FirstInstance: arguments.FirstInstance})
 	if p.listState.inspectedList != nil {
-		p.addInspectedDraw(&key, &shader, InspectedDraw{VertexCount: vertexCount, InstanceCount: instanceCount, FirstInstance: arguments.FirstInstance})
+		p.addInspectedDraw(material, InspectedDraw{VertexCount: vertexCount, InstanceCount: instanceCount, FirstInstance: arguments.FirstInstance})
 	}
 }
 
@@ -477,13 +510,33 @@ func (p *Pass) End() {
 }
 
 // setParameter puts setting among the pass or draw parameters, by group,
-// in place of the one of its name, for the draws after it to resolve.
-func (p *Pass) setParameter(group int, setting parameterSetting) {
+// in place of the one of its name, for the draws after it to resolve: a
+// setting the same as the one it replaces changes nothing, and a uniform
+// block set again in the same arena chunk, outside an inspected list, moves
+// only its dynamic offset.
+func (p *Pass) setParameter(group int, setting *parameterSetting) {
 	if p.encoder == nil {
 		return
 	}
-	p.listState.parameterSettings[group] = putSetting(p.listState.parameterSettings[group], setting)
-	p.bindGroups.resolvedFor[group] = shaderSelection{}
+	settings := p.listState.parameterSettings[group]
+	index := findSetting(settings, setting.name)
+	if index < 0 {
+		p.listState.parameterSettings[group] = append(settings, *setting)
+		p.forgetResolution(group)
+		return
+	}
+	if group == drawGroup {
+		p.pendingDrawSettings &^= 1 << index
+	}
+	previous := &settings[index]
+	if p.listState.inspectedList == nil && p.bindGroups.moveDynamicOffset(group, index, previous, setting) {
+		previous.bufferRange.Offset = setting.bufferRange.Offset
+		return
+	}
+	if *previous != *setting {
+		*previous = *setting
+		p.forgetResolution(group)
+	}
 }
 
 // setUniform puts a uniform block of uniformType named name, its bytes data
@@ -492,7 +545,9 @@ func (p *Pass) setParameter(group int, setting parameterSetting) {
 // unbound.
 func (p *Pass) setUniform(group int, name string, uniformType reflect.Type, data []byte) {
 	if p.encoder != nil {
-		p.setParameter(group, makeUniformSetting(p.frame, p.listState, name, uniformType, data))
+		setting := parameterSetting{name: name}
+		fillUniformSetting(&setting, p.frame, p.listState, uniformType, data)
+		p.setParameter(group, &setting)
 	}
 }
 
@@ -521,82 +576,205 @@ func (p *Pass) findMaterial(table *assetTable) (materialSlot, shaderSlot, bool) 
 	return material, shader, true
 }
 
-// findInstanceBuffers adds to buffers, after the draw's per-vertex buffers,
-// the gfx buffers behind p's instance buffers, in the order a draw binds
-// them; false when the draw, of a material labelled label, is skipped,
-// reported once for the material: an instance buffer failed or was freed,
-// or the vertex and instance buffers are more than a draw binds.
-func (p *Pass) findInstanceBuffers(table *assetTable, label string, buffers *drawBufferSet) bool {
-	var err error
-	if buffers.vertexBufferCount+p.instanceCount > maxVertexBufferCount {
-		err = fmt.Errorf("its vertex and instance buffers are more than %d", maxVertexBufferCount)
-	}
-	for _, slot := range p.instanceSlots[:p.instanceCount] {
-		if err != nil {
-			break
+// clearPendingResets clears what SetMaterial reset and no setter set
+// since: the draw parameters pendingDrawSettings marks, leaving the draw
+// parameters to be resolved again, and the instance buffers
+// pendingInstanceSlots marks, their layouts interned in table.
+func (p *Pass) clearPendingResets(table *assetTable) {
+	if p.pendingDrawSettings != 0 {
+		settings := p.listState.parameterSettings[drawGroup]
+		keptSettings := settings[:0]
+		for index := range settings {
+			if p.pendingDrawSettings&(1<<index) == 0 {
+				keptSettings = append(keptSettings, settings[index])
+			}
 		}
-		instanceBuffer := p.instanceBuffers[slot]
-		var gfxBuffer gfx.Buffer
-		if gfxBuffer, _, err = instanceBuffer.Range.findBuffer(table); err != nil {
-			err = fmt.Errorf("its instance buffer at slot %d %w", slot, err)
-		} else {
-			buffers.addVertexBuffer(gfxBuffer, instanceBuffer.Range.Offset)
+		p.listState.parameterSettings[drawGroup] = keptSettings
+		p.forgetResolution(drawGroup)
+		p.pendingDrawSettings = 0
+	}
+	if p.pendingInstanceSlots != 0 {
+		for slot := range p.instanceBuffers {
+			if p.pendingInstanceSlots&(1<<slot) != 0 {
+				p.instanceBuffers[slot] = VertexBuffer{}
+			}
 		}
+		p.pendingInstanceSlots = 0
+		p.instanceBuffersFound = false
+		p.orderInstanceBuffers(table)
 	}
-	if err != nil && table.claimMaterialReport(p.material) {
-		table.report(ReportKindDrawSkipped, fmt.Errorf("render: a draw of material %q, where %w", label, err))
-	}
-	return err == nil
 }
 
-// bindDraw sets on p's encoder the pipeline of key, its mesh's part filled
-// in, the rest filled in from material, of shader, p's instance buffers and
-// its targets, and the bind groups the draw binds, key filled in as it
-// goes; false when the draw is skipped, reported once for the material, or
-// once for its pipeline.
-func (p *Pass) bindDraw(table *assetTable, material materialSlot, shader shaderSlot, key *pipelineKey) bool {
-	key.shader = material.shader
-	key.vertexEntryPoint = material.vertexEntryPoint
-	key.fragmentEntryPoint = material.fragmentEntryPoint
-	key.state = material.state.makeKeyState(p.formats)
-	key.instanceLayout = p.instanceLayout
-	key.formats = p.formats
-	device := p.frame.device.Get()
-	pipeline, ok := table.pipelines.find(table, device, *key, shader)
+// forgetResolution leaves the parameters of group to be resolved again by
+// the next draw.
+func (p *Pass) forgetResolution(group int) {
+	p.bindGroups.resolvedFor[group] = shaderSelection{}
+	p.boundMaterial = 0
+}
+
+// orderInstanceBuffers orders the instance buffers set by slot, the order a
+// draw binds them in, and interns their layouts in table.
+func (p *Pass) orderInstanceBuffers(table *assetTable) {
+	var orderedBuffers [maxVertexBufferCount]VertexBuffer
+	p.instanceCount = 0
+	for index, instanceBuffer := range p.instanceBuffers {
+		if instanceBuffer.Range.Buffer != (Buffer{}) {
+			orderedBuffers[p.instanceCount] = instanceBuffer
+			p.instanceSlots[p.instanceCount] = uint8(index)
+			p.instanceCount++
+		}
+	}
+	p.instanceLayout = table.vertexLayouts.intern(orderedBuffers[:p.instanceCount], gfx.VertexStepModeInstance)
+}
+
+// findDrawnMaterial answers the index among p's drawn materials of what
+// its draws found of the material SetMaterial selected, found again when they found none of it, a material
+// changed since, or the list is inspected, so each inspected draw writes
+// its material's parameters down; false when a draw of it is skipped, as
+// findMaterial says.
+func (p *Pass) findDrawnMaterial(table *assetTable) (int, bool) {
+	changeCount := table.materialChangeCount.Load()
+	index := -1
+	for candidate := range p.drawnMaterials {
+		if p.drawnMaterials[candidate].material == p.material && p.material != (Material{}) {
+			index = candidate
+			break
+		}
+	}
+	if index >= 0 && p.drawnMaterials[index].changeCount == changeCount && p.listState.inspectedList == nil {
+		return index, true
+	}
+	material, shader, ok := p.findMaterial(table)
 	if !ok {
-		return false
+		return 0, false
 	}
-	if err := table.findDrawBindGroups(device, p.material, shader, p.targets[:p.targetCount], p.listState, &p.bindGroups); err != nil {
-		table.logUnlessLost(fmt.Errorf("render: binding material %q: %w", material.label, err))
-		return false
+	if index < 0 {
+		index = p.nextDrawnMaterial
+		p.nextDrawnMaterial = (index + 1) % drawnMaterialCount
 	}
-	groupCount := len(shader.layout.groups)
-	if name := p.bindGroups.findUnboundRead(groupCount); name != "" {
-		if table.claimMaterialReport(p.material) {
-			table.report(ReportKindDrawSkipped, fmt.Errorf("render: a draw of material %q, whose storage binding %q, which a function it runs reads, is unbound", material.label, name))
+	p.drawnMaterials[index] = makeDrawnMaterial(p.material, &material, shader, p.formats, changeCount)
+	p.boundMaterial = 0
+	return index, true
+}
+
+// findDrawnMesh finds mesh, and the gfx buffers behind it, as p's drawn
+// mesh; false when a draw of it is skipped, reported once for the mesh:
+// render does not hold it, or a buffer of it failed, was freed, has no
+// bytes, or ends before its range.
+func (p *Pass) findDrawnMesh(table *assetTable, mesh Mesh) bool {
+	meshSlot, ok := table.findSlot(&table.meshes, mesh)
+	if !ok {
+		if table.claimMeshReport(mesh) {
+			table.report(ReportKindDrawSkipped, fmt.Errorf("render: a draw of mesh %v, which render does not hold", mesh))
 		}
 		return false
 	}
-	if pipeline != p.pipeline {
-		p.encoder.SetPipeline(pipeline)
-		p.pipeline = pipeline
+	drawn := drawnMesh{mesh: mesh, layout: drawLayout{vertexLayout: meshSlot.vertexLayout, topology: meshSlot.topology}}
+	var err error
+	if drawn.vertexCount, drawn.indexCount, err = meshSlot.findElements(table, &drawn.vertexBuffers); err != nil {
+		if table.claimMeshReport(mesh) {
+			table.report(ReportKindDrawSkipped, fmt.Errorf("render: a draw of mesh %q, whose %w", meshSlot.label, err))
+		}
+		return false
+	}
+	if drawn.vertexBuffers.indexBuffer != (gfx.Buffer{}) {
+		drawn.index = indexBinding{buffer: drawn.vertexBuffers.indexBuffer, format: gfx.IndexFormat(meshSlot.indices.Format), offset: meshSlot.indices.Range.Offset}
+		if meshSlot.topology == PrimitiveTopologyLineStrip || meshSlot.topology == PrimitiveTopologyTriangleStrip {
+			drawn.layout.stripIndexFormat = meshSlot.indices.Format
+		}
+	}
+	p.drawnMesh = drawn
+	return true
+}
+
+// findInstanceBuffers finds the gfx buffers behind p's instance buffers,
+// unless a draw found them since they were set; false when a draw of
+// vertexBufferCount per-vertex buffers, of a material labelled label, is
+// skipped, reported once for the material: an instance buffer failed or was
+// freed, or the vertex and instance buffers are more than a draw binds.
+func (p *Pass) findInstanceBuffers(table *assetTable, label string, vertexBufferCount int) bool {
+	var err error
+	if vertexBufferCount+p.instanceCount > maxVertexBufferCount {
+		err = fmt.Errorf("its vertex and instance buffers are more than %d", maxVertexBufferCount)
+	}
+	if err == nil && !p.instanceBuffersFound {
+		for index, slot := range p.instanceSlots[:p.instanceCount] {
+			if p.foundInstanceBuffers[index], _, err = p.instanceBuffers[slot].Range.findBuffer(table); err != nil {
+				err = fmt.Errorf("its instance buffer at slot %d %w", slot, err)
+				break
+			}
+		}
+	}
+	if err != nil {
+		if table.claimMaterialReport(p.material) {
+			table.report(ReportKindDrawSkipped, fmt.Errorf("render: a draw of material %q, where %w", label, err))
+		}
+		return false
+	}
+	p.instanceBuffersFound = true
+	return true
+}
+
+// bindDraw sets on p's encoder the pipeline the material at materialIndex
+// among p's drawn materials draws with for layout, a draw's, made or found the first time a draw of
+// it gives that layout, and the bind groups the draw binds, those p does
+// not hold resolved as resolveDrawBindGroups says; false when the draw is
+// skipped, reported once for the material, or once for its pipeline.
+func (p *Pass) bindDraw(table *assetTable, materialIndex int, layout drawLayout) bool {
+	material := &p.drawnMaterials[materialIndex]
+	if material.pipeline == (gfx.RenderPipeline{}) || material.layout != layout {
+		key := material.key
+		key.drawLayout = layout
+		pipeline, ok := table.pipelines.find(table, p.frame.device.Get(), key, material.shader)
+		if !ok {
+			return false
+		}
+		material.pipeline = pipeline
+		material.layout = layout
+	}
+	groupCount := len(material.shader.layout.groups)
+	if materialIndex+1 != p.boundMaterial {
+		// The material's bind group is found, and each group of parameters
+		// its shader has resolved for its shader and functions.
+		resolved := material.bindingFound &&
+			(groupCount <= passGroup || p.bindGroups.resolvedFor[passGroup] == material.selection) &&
+			(groupCount <= drawGroup || p.bindGroups.resolvedFor[drawGroup] == material.selection)
+		if !resolved {
+			if err := table.resolveDrawBindGroups(p.frame.device.Get(), material, p.targets[:p.targetCount], p.listState, &p.bindGroups); err != nil {
+				table.logUnlessLost(fmt.Errorf("render: binding material %q: %w", material.label, err))
+				return false
+			}
+		}
+		p.bindGroups.putMaterialBinding(material)
+		if name := p.bindGroups.findUnboundRead(groupCount); name != "" {
+			if table.claimMaterialReport(p.material) {
+				table.report(ReportKindDrawSkipped, fmt.Errorf("render: a draw of material %q, whose storage binding %q, which a function it runs reads, is unbound", material.label, name))
+			}
+			return false
+		}
+		p.boundMaterial = materialIndex + 1
+	}
+	if material.pipeline != p.pipeline {
+		p.encoder.SetPipeline(material.pipeline)
+		p.pipeline = material.pipeline
 	}
 	p.bindGroups.setChangedGroups(p.encoder, groupCount, &p.listState.dynamicOffsets)
 	return true
 }
 
-// addInspectedDraw writes draw, recorded with key's pipeline, of shader,
-// its counts filled in, down in the inspection of p's list, with its
-// material, its parameters and its instance buffers; nothing when the list
-// is not inspected, which its callers check first, so a draw of a frame not
-// inspected builds nothing for it.
-func (p *Pass) addInspectedDraw(key *pipelineKey, shader *shaderSlot, draw InspectedDraw) {
+// addInspectedDraw writes draw, recorded with a pipeline of material, found
+// by p's draws, its counts filled in, down in the inspection of p's list,
+// with its material, its parameters and its instance buffers; nothing when
+// the list is not inspected, which its callers check first, so a draw of a
+// frame not inspected builds nothing for it.
+func (p *Pass) addInspectedDraw(material *drawnMaterial, draw InspectedDraw) {
 	inspectedList := p.listState.inspectedList
 	if inspectedList == nil {
 		return
 	}
+	key := &material.key
 	groupParameters := p.bindGroups.inspectedParameters
-	clear(groupParameters[len(shader.layout.groups):])
+	clear(groupParameters[len(material.shader.layout.groups):])
 	draw.Material = InspectedMaterial{
 		Material:           p.material,
 		Shader:             key.shader,
@@ -615,11 +793,22 @@ func (p *Pass) addInspectedDraw(key *pipelineKey, shader *shaderSlot, draw Inspe
 	inspectedPass.Draws = append(inspectedPass.Draws, draw)
 }
 
-// setVertexBuffers sets on p's encoder each vertex buffer of buffers, at its
-// slot and offset.
-func (p *Pass) setVertexBuffers(buffers *drawBufferSet) {
-	for slot := range buffers.vertexBufferCount {
-		p.encoder.SetVertexBuffer(uint32(slot), buffers.vertexBuffers[slot], buffers.vertexOffsets[slot])
+// setInstanceBuffers sets on p's encoder each instance buffer found, from
+// firstSlot on, the slot after a draw's per-vertex buffers, where the slot
+// does not hold it already.
+func (p *Pass) setInstanceBuffers(firstSlot int) {
+	for index, slot := range p.instanceSlots[:p.instanceCount] {
+		p.setVertexBuffer(firstSlot+index, p.foundInstanceBuffers[index], p.instanceBuffers[slot].Range.Offset)
+	}
+}
+
+// setVertexBuffer sets buffer at offset on p's encoder at slot, unless the
+// slot holds it there already.
+func (p *Pass) setVertexBuffer(slot int, buffer gfx.Buffer, offset uint64) {
+	if buffer != p.boundVertexBuffers[slot] || offset != p.boundVertexOffsets[slot] {
+		p.encoder.SetVertexBuffer(uint32(slot), buffer, offset)
+		p.boundVertexBuffers[slot] = buffer
+		p.boundVertexOffsets[slot] = offset
 	}
 }
 
@@ -672,6 +861,27 @@ func makeInspectedPass(label string, descriptor PassDescriptor, gfxDescriptor gf
 		}
 	}
 	return pass
+}
+
+// drawnMesh is what a pass's draws found of the mesh drawn last, kept for
+// its later draws of it: the mesh; the gfx buffers behind its vertex
+// buffers; its index buffer as a pass binds it, none for a mesh without
+// one; how many vertices and indices it draws; and its part of a draw's
+// layout.
+type drawnMesh struct {
+	mesh                    Mesh
+	vertexBuffers           drawBufferSet
+	index                   indexBinding
+	vertexCount, indexCount uint32
+	layout                  drawLayout
+}
+
+// indexBinding is an index buffer as a pass binds it: the gfx buffer, its
+// indices' format and the offset they start at.
+type indexBinding struct {
+	buffer gfx.Buffer
+	format gfx.IndexFormat
+	offset uint64
 }
 
 // drawnTarget is a texture a pass writes, at one mip level and layer; a

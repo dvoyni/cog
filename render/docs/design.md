@@ -573,10 +573,18 @@ render republishes gfx's events as its own, each nested inside gfx's publication
 
   | Draws per frame | render | by hand on gfx |
   |---|---|---|
-  | 256 | 635 ns | 71 ns |
-  | 4096 | 565 ns | 48 ns |
+  | 256 | 129 ns | 68 ns |
+  | 4096 | 81 ns | 46 ns |
 
-  Most of render's time is in `Pass.Draw`: finding the material, its bind groups and the draw's parameter bind group, and binding what changed.
+- **A draw finds again only what changed since the pass's draws found it** ([render: draws within twice gfx's time per draw](https://github.com/dvoyni/cog/issues/859)). A pass keeps:
+  - the four materials it drew most lately, each with its shader, its pipeline's key, its bind group of `@group(1)` and the pipeline its last draw drew with. A material setter's change to any material makes every pass find its materials again, as does each draw of an inspected list, which writes its material's parameters down;
+  - the mesh it drew last, with the gfx buffers behind it, and the gfx buffers behind its instance buffers until they are set again;
+  - the pipeline, vertex buffers and index buffer set on its encoder, so a draw sets only those that differ;
+  - its parameters' bind groups, resolved again only when a parameter changes more than where its uniform block sits: a block set again in the same arena chunk moves its dynamic offset alone, and a value set as it was changes nothing.
+
+  `SetMaterial` resets the draw parameters and instance buffers lazily: the next draw clears those not set again since, so draws switching materials over the same parameters keep their bind groups. A draw repeating what the draw before it drew takes no lock: `SetUniform` copies its block into the arena, and the draw sets the draw parameters' bind group at its new offset and draws.
+
+  **Layers on render sort their draws** by shader, then material, then mesh, as `SetMaterial`'s doc comment says. Drawbridge's batching and scene's draws follow it. Switching back to one of the pass's four most recent materials costs little. Switching to any other repeats the full lookup, about 200 ns on the benchmark's machine, and alternating meshes repeats the mesh's lookup. Parameters resolved for one shader carry over to materials of the same shader and entry points. Four was chosen, not measured. A larger count would move the memo out of `Pass`, which `BeginPass` returns by value, into the list's pooled state, and check the last material found first. A benchmark cycling through more materials than four would then set the count.
 
 ### Delta to gfx
 

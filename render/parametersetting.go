@@ -27,28 +27,35 @@ type parameterSetting struct {
 // putSetting answers settings with setting in place of the one of its name,
 // or after them when none has it.
 func putSetting(settings []parameterSetting, setting parameterSetting) []parameterSetting {
-	for index := range settings {
-		if settings[index].name == setting.name {
-			settings[index] = setting
-			return settings
-		}
+	if index := findSetting(settings, setting.name); index >= 0 {
+		settings[index] = setting
+		return settings
 	}
 	return append(settings, setting)
 }
 
-// makeUniformSetting answers the setting of a uniform block of uniformType
-// named name, its bytes data copied into the arena chunks listState, of a
-// list of frame, takes; one of no kind, leaving its binding unbound, when
-// gfx refuses a chunk, which is logged.
-func makeUniformSetting(frame Frame, listState *commandListState, name string, uniformType reflect.Type, data []byte) parameterSetting {
-	setting := parameterSetting{name: name}
+// findSetting answers the index among settings of the first one named name;
+// -1 for none.
+func findSetting(settings []parameterSetting, name string) int {
+	for index := range settings {
+		if settings[index].name == name {
+			return index
+		}
+	}
+	return -1
+}
+
+// fillUniformSetting fills setting, named and of no kind, as a uniform block
+// of uniformType, its bytes data copied into the arena chunks listState, of
+// a list of frame, takes; it stays of no kind, leaving its binding unbound,
+// when gfx refuses a chunk, which is logged.
+func fillUniformSetting(setting *parameterSetting, frame Frame, listState *commandListState, uniformType reflect.Type, data []byte) {
 	bufferRange, err := frame.table.Get().allocateTemporary(listState, data, frame.device.Get())
 	if err != nil {
-		frame.state.Get().logUnlessLost(fmt.Errorf("render: setting uniform block %q: %w", name, err))
-		return setting
+		frame.state.Get().logUnlessLost(fmt.Errorf("render: setting uniform block %q: %w", setting.name, err))
+		return
 	}
 	setting.kind = parameterKindUniform
 	setting.bufferRange = bufferRange
 	setting.uniformType = uniformType
-	return setting
 }

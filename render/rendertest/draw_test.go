@@ -240,9 +240,12 @@ func TestADrawRecordsItsPipelineBuffersAndCountsAndADrawOfTheSameKeyReusesThePip
 			}
 		}
 	}
-	drawKinds := []recording.CommandKind{recording.CommandKindSetVertexBuffer, recording.CommandKindSetIndexBuffer, recording.CommandKindDrawIndexed}
-	if want := slices.Concat([]recording.CommandKind{recording.CommandKindSetPipeline}, drawKinds, drawKinds, drawKinds); !slices.Equal(kinds, want) {
-		t.Errorf("the pass recorded %v, want %v: the pipeline set once, then each draw's buffers and draw", kinds, want)
+	wantKinds := []recording.CommandKind{
+		recording.CommandKindSetPipeline, recording.CommandKindSetVertexBuffer, recording.CommandKindSetIndexBuffer,
+		recording.CommandKindDrawIndexed, recording.CommandKindDrawIndexed, recording.CommandKindDrawIndexed,
+	}
+	if !slices.Equal(kinds, wantKinds) {
+		t.Errorf("the pass recorded %v, want %v: the pipeline and the mesh's buffers set once, then each draw", kinds, wantKinds)
 	}
 	material := makePlainMaterial(shader)
 	want := []render.InspectedDraw{

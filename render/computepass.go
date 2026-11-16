@@ -103,7 +103,9 @@ func (c *ComputePass) SetBuffer(name string, bufferRange BufferRange) {
 // says.
 func (c *ComputePass) SetUniform[T any](name string, value T) {
 	if c.encoder != nil {
-		c.setParameter(makeUniformSetting(c.frame, c.listState, name, reflect.TypeFor[T](), castToBytes(unsafe.Slice(&value, 1))))
+		setting := parameterSetting{name: name}
+		fillUniformSetting(&setting, c.frame, c.listState, reflect.TypeFor[T](), castToBytes(unsafe.Slice(&value, 1)))
+		c.setParameter(setting)
 	}
 }
 

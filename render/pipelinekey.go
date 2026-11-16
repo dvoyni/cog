@@ -10,19 +10,25 @@ import (
 // pipelineKey is what a render pipeline is shared by: the variant and the
 // vertex and fragment entry points its material names, an empty fragment
 // entry point meaning no fragment stage; the material's render state, in
-// the form makeKeyState gives every state that draws the same; the numbers
-// of its mesh's vertex layouts and of its instance buffers' in the vertex
-// layout interner, zero for none, as a draw with no mesh has; the formats
-// and sample count of the pass drawn into; and the topology, with the
-// format of its indices when it is a strip drawn indexed.
+// the form makeKeyState gives every state that draws the same; the formats
+// and sample count of the pass drawn into; and the draw's layout.
 type pipelineKey struct {
 	shader                               Shader
 	vertexEntryPoint, fragmentEntryPoint string
 	state                                State
-	vertexLayout, instanceLayout         uint32
 	formats                              passFormat
-	topology                             PrimitiveTopology
-	stripIndexFormat                     IndexFormat
+	drawLayout
+}
+
+// drawLayout is the part of a pipeline's key a draw gives: the numbers of
+// its mesh's vertex layouts and of its instance buffers' in the vertex
+// layout interner, zero for none, as a draw with no mesh has; and the
+// topology, with the format of its indices when it is a strip drawn
+// indexed.
+type drawLayout struct {
+	vertexLayout, instanceLayout uint32
+	topology                     PrimitiveTopology
+	stripIndexFormat             IndexFormat
 }
 
 // String names k's pipeline in reports.

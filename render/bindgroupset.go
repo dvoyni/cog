@@ -13,13 +13,16 @@ const maxGroupDynamicOffsetCount = 16
 // left unbound that a function the draw or dispatch runs reads, for which it
 // is skipped, empty for none; the shader and functions the group's
 // parameters set on the pass were resolved for, none since they last
-// changed; the binding last set on the pass's encoder; and, while its
-// list is inspected, the parameters each group binds as the inspection
-// writes them down.
+// changed; for each dynamic offset of a resolved group, the index among
+// the group's settings of the uniform block it binds, -1 for none; the
+// binding last set on the pass's encoder; and, while its list is
+// inspected, the parameters each group binds as the inspection writes them
+// down.
 type bindGroupSet struct {
 	groupBindings       [reservedGroup]groupBinding
 	unboundReads        [reservedGroup]string
 	resolvedFor         [reservedGroup]shaderSelection
+	offsetSettings      [reservedGroup][maxGroupDynamicOffsetCount]int
 	boundGroups         [reservedGroup]groupBinding
 	inspectedParameters [reservedGroup][]InspectedParameter
 }
@@ -34,6 +37,37 @@ func (s *bindGroupSet) findUnboundRead(groupCount int) string {
 		}
 	}
 	return ""
+}
+
+// putMaterialBinding puts the bind group material, found by its pass,
+// binds for its own parameters in s, as @group(1), where its shader has it.
+func (s *bindGroupSet) putMaterialBinding(material *drawnMaterial) {
+	if len(material.shader.layout.groups) > materialGroup {
+		s.groupBindings[materialGroup] = material.binding
+		s.unboundReads[materialGroup] = material.unboundRead
+		s.inspectedParameters[materialGroup] = material.inspectedParameters
+	}
+}
+
+// moveDynamicOffset moves the dynamic offset of group, resolved, that binds
+// the uniform block of the setting at index among the group's settings to
+// that of setting, which replaces previous there; false when the group must
+// be resolved again: it is not resolved, no dynamic offset of it binds that
+// setting, or setting differs from previous by more than its offset in the
+// same arena chunk.
+func (s *bindGroupSet) moveDynamicOffset(group, index int, previous, setting *parameterSetting) bool {
+	if s.resolvedFor[group] == (shaderSelection{}) || previous.kind != parameterKindUniform || setting.kind != parameterKindUniform ||
+		previous.uniformType != setting.uniformType || previous.bufferRange.Buffer != setting.bufferRange.Buffer || previous.bufferRange.Size != setting.bufferRange.Size {
+		return false
+	}
+	binding := &s.groupBindings[group]
+	for offsetIndex, settingIndex := range s.offsetSettings[group][:binding.dynamicOffsetCount] {
+		if settingIndex == index {
+			binding.dynamicOffsets[offsetIndex] = uint32(setting.bufferRange.Offset)
+			return true
+		}
+	}
+	return false
 }
 
 // setChangedGroups sets on encoder each of s's first groupCount groups
