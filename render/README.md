@@ -211,6 +211,12 @@ holds them. A frame's passes after its 2048th are reported untimed.
 Without timestamp queries, which only `rendertest`'s fake GPU has, after
 `Harness.EnableTimestamps`, until the wgpu fork exposes them, turning them
 on is reported once and leaves them off.
+Nothing render does per frame allocates once its pools have grown, a
+material version and a pass given a moved temporary range in `@group(0)`
+excepted, each a fixed count: an allocation gate over whole beats checks
+every per-frame operation at up to 4096 draws in each of 16 lists, and
+`docs/benchmarks-baseline.txt` keeps the time per draw against the same
+frame drawn by hand on gfx.
 What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
 
 ## Shape

@@ -315,7 +315,7 @@ func TestAReleaseOfATextureNoAcquireHoldsIsRefusedAndReported(t *testing.T) {
 }
 
 // putFile puts data into files at name, failing the test when the put fails.
-func putFile(t *testing.T, files *filesystems.MemoryFS, name string, data []byte) {
+func putFile(t testing.TB, files *filesystems.MemoryFS, name string, data []byte) {
 	t.Helper()
 	if err := files.Put(name, data); err != nil {
 		t.Fatal(err)

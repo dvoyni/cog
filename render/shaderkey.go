@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"slices"
 	"strconv"
-	"strings"
 
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/render/internal/handle"
@@ -33,12 +32,11 @@ type shaderKey struct {
 	defines string
 }
 
-// makeShaderKey answers the key of path's variant with defines, and defines
-// sorted by name, each name once with its last value, as gfx preprocesses
-// it: each define is its name, and then = and its value quoted when it has
-// one, joined by spaces.
-func makeShaderKey(path string, defines []ShaderDefine) (shaderKey, []gfx.ShaderDefine) {
-	sortedDefines := make([]gfx.ShaderDefine, 0, len(defines))
+// sortDefines answers defines sorted by name, each name once with its last
+// value, as gfx preprocesses them, in sortedDefines' array, grown when they
+// outnumber its capacity.
+func sortDefines(defines []ShaderDefine, sortedDefines []gfx.ShaderDefine) []gfx.ShaderDefine {
+	sortedDefines = sortedDefines[:0]
 	for _, define := range defines {
 		index := slices.IndexFunc(sortedDefines, func(other gfx.ShaderDefine) bool { return other.Name == define.Name })
 		if index < 0 {
@@ -48,19 +46,24 @@ func makeShaderKey(path string, defines []ShaderDefine) (shaderKey, []gfx.Shader
 		}
 	}
 	slices.SortFunc(sortedDefines, func(a, b gfx.ShaderDefine) int { return cmp.Compare(a.Name, b.Name) })
-	var joinedDefines strings.Builder
+	return sortedDefines
+}
+
+// appendJoinedDefines appends to joinedDefines sortedDefines as a shader's
+// key joins them: each define is its name, and then = and its value quoted
+// when it has one, joined by spaces. It answers the extended slice.
+func appendJoinedDefines(joinedDefines []byte, sortedDefines []gfx.ShaderDefine) []byte {
 	for index, define := range sortedDefines {
-		joinedDefines.Grow(len(define.Name) + len(define.Value) + 4)
 		if index > 0 {
-			joinedDefines.WriteByte(' ')
+			joinedDefines = append(joinedDefines, ' ')
 		}
-		joinedDefines.WriteString(define.Name)
+		joinedDefines = append(joinedDefines, define.Name...)
 		if define.Value != "" {
-			joinedDefines.WriteByte('=')
-			joinedDefines.WriteString(strconv.Quote(define.Value))
+			joinedDefines = append(joinedDefines, '=')
+			joinedDefines = strconv.AppendQuote(joinedDefines, define.Value)
 		}
 	}
-	return shaderKey{path: path, defines: joinedDefines.String()}, sortedDefines
+	return joinedDefines
 }
 
 // compile preprocesses k's file with defines, its own sorted, makes its module,

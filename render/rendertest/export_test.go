@@ -62,4 +62,5 @@ func (h *Harness) RunOnMainThread(run func()) {
 // commands the adapter would keep.
 func (h *Harness) DisableRecording() {
 	h.instance.DisableRecording()
+	h.recordingDisabled = true
 }

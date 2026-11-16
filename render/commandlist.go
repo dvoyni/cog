@@ -68,16 +68,17 @@ func (l *CommandList) BeginPass(descriptor PassDescriptor) Pass {
 	if l.encoder == nil {
 		return Pass{}
 	}
-	passDescriptor, formats, firstTarget, skipped, err := l.makeRenderPassDescriptor(descriptor)
+	label := l.frame.table.Get().labels.intern(descriptor.Label)
+	passDescriptor, formats, firstTarget, skipped, err := l.makeRenderPassDescriptor(label, descriptor)
 	switch {
 	case err != nil:
-		l.frame.state.Get().report(ReportKindPassTargetsRefused, fmt.Errorf("render: pass %q: %w", descriptor.Label, err))
+		l.frame.state.Get().report(ReportKindPassTargetsRefused, fmt.Errorf("render: pass %q: %w", label, err))
 		return Pass{}
 	case skipped:
 		return Pass{}
 	}
 	l.listState.clearParameterSettings()
-	passDescriptor.TimestampWrites = l.frame.state.Get().passTimer.addPass(l.listState.order, descriptor.Label)
+	passDescriptor.TimestampWrites = l.frame.state.Get().passTimer.addPass(l.listState.order, label)
 	pass := Pass{
 		frame:     l.frame,
 		listState: l.listState,
@@ -86,10 +87,10 @@ func (l *CommandList) BeginPass(descriptor PassDescriptor) Pass {
 		width:     firstTarget.width,
 		height:    firstTarget.height,
 	}
-	pass.noteIndex = l.listState.notePass(descriptor)
+	pass.noteIndex = l.listState.notePass(label, descriptor)
 	if inspectedList := l.listState.inspectedList; inspectedList != nil {
 		pass.inspectedPass = len(inspectedList.Passes)
-		inspectedList.Passes = append(inspectedList.Passes, makeInspectedPass(descriptor, passDescriptor, l.listState.nextInspectedPosition()))
+		inspectedList.Passes = append(inspectedList.Passes, makeInspectedPass(label, descriptor, passDescriptor, l.listState.nextInspectedPosition()))
 	}
 	for _, target := range descriptor.ColorTargets {
 		pass.addTarget(drawnTarget{texture: target.Texture, mipLevel: target.MipLevel, layer: target.Layer})
@@ -150,9 +151,10 @@ func (l *CommandList) AcquireTemporaryMesh(descriptor MeshDescriptor) Mesh {
 		return Mesh{}
 	}
 	table := l.frame.table.Get()
-	mesh, err := table.addMesh(l.frame.device.Get(), descriptor)
+	label := table.labels.intern(descriptor.Label)
+	mesh, err := table.addMesh(l.frame.device.Get(), label, descriptor)
 	if err != nil {
-		table.report(ReportKindMeshRefused, fmt.Errorf("render: acquiring temporary mesh %q: %w", descriptor.Label, err))
+		table.report(ReportKindMeshRefused, fmt.Errorf("render: acquiring temporary mesh %q: %w", label, err))
 		return Mesh{}
 	}
 	l.listState.temporaryMeshes = append(l.listState.temporaryMeshes, mesh)
@@ -448,7 +450,7 @@ func (l *CommandList) addInspectedReadback(readback InspectedReadback) {
 // found, whose size every target has, and true when the pass is skipped for
 // a window with no framebuffer this frame; an error saying why it is
 // refused.
-func (l *CommandList) makeRenderPassDescriptor(descriptor PassDescriptor) (gfx.RenderPassDescriptor, passFormat, passTarget, bool, error) {
+func (l *CommandList) makeRenderPassDescriptor(label string, descriptor PassDescriptor) (gfx.RenderPassDescriptor, passFormat, passTarget, bool, error) {
 	colorCount := len(descriptor.ColorTargets)
 	maxColorCount := min(int(l.frame.device.Get().Limits().MaxColorAttachments), maxColorTargetCount)
 	switch {
@@ -458,9 +460,9 @@ func (l *CommandList) makeRenderPassDescriptor(descriptor PassDescriptor) (gfx.R
 		return gfx.RenderPassDescriptor{}, passFormat{}, passTarget{}, false, fmt.Errorf("it has %d colour targets, more than %d", colorCount, maxColorCount)
 	}
 	formats := passFormat{colorCount: colorCount}
-	passDescriptor := gfx.RenderPassDescriptor{Label: descriptor.Label}
+	passDescriptor := gfx.RenderPassDescriptor{Label: label}
 	if colorCount > 0 {
-		passDescriptor.ColorAttachments = make([]gfx.RenderPassColorAttachment, colorCount)
+		passDescriptor.ColorAttachments = l.listState.colorAttachments[:colorCount]
 	}
 	// firstTarget is the first target found, whose size and sample count the
 	// others must have.

@@ -215,6 +215,7 @@ func endFrame(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*frameState], 
 	frameState.listStates.endFrame(table.Get())
 	table.Get().unbindFreed(device.Get())
 	table.Get().layouts.freeIdleBindGroups(device.Get(), frameState.temporaryIdleFrames)
+	table.Get().labels.endFrame(frameState.temporaryIdleFrames)
 	if beat, ok := frameState.inspector.finish(); ok {
 		k.Publish(inspectionDeliveryEvent{beat: beat})
 	}

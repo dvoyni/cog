@@ -114,6 +114,31 @@ func TestEachListTakesChunksOfItsOwnWrittenOnceAtItsEndAndABlockLargerThanAChunk
 	}
 }
 
+func TestAListTakesTheChunksItTookTheFrameBeforeWhicheverListTakesBlocksFirst(t *testing.T) {
+	h := rendertest.NewHarness(t)
+	const frameCount = 4
+	// chunks are the chunks of the two lists' blocks, by frame: each list
+	// takes two, of 1024 bytes, with five blocks of 256.
+	var chunks [frameCount][2][2]render.Buffer
+	block := make([]uint32, 64)
+	spawnDeclaredHarness(t, h, &render.Config{TemporaryChunkSize: 1024}, nil, frameCount, func(frameIndex int, inventory render.Inventory, frame render.Frame) {
+		for _, index := range [2][2]int{{0, 1}, {1, 0}}[frameIndex%2] {
+			list := frame.BeginCommandList("list", drawOrder+render.Order(index))
+			for range 4 {
+				chunks[frameIndex][index][0] = list.AcquireTemporaryBuffer(block).Buffer
+			}
+			chunks[frameIndex][index][1] = list.AcquireTemporaryBuffer(block).Buffer
+			list.End()
+		}
+	})
+
+	for frameIndex := 1; frameIndex < frameCount; frameIndex++ {
+		if chunks[frameIndex] != chunks[0] {
+			t.Errorf("frame %d's lists took chunks %v, want %v, those they took the frame before, whichever list took its blocks first", frameIndex, chunks[frameIndex], chunks[0])
+		}
+	}
+}
+
 func TestATemporaryBufferHoldsVerticesIndicesOrRowsForTheFrame(t *testing.T) {
 	h := rendertest.NewHarness(t)
 	var scene passParameterScene

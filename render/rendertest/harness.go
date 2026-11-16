@@ -50,6 +50,17 @@ type Harness struct {
 	clock      *metronome.ManualClock
 	instance   *recording.Instance
 	windows    *headless.Windows
+	// tickMainThread is the supervisor's TickMainThread, made a func once,
+	// so a tick allocates nothing.
+	tickMainThread func()
+	// advanceRequests is what Step sends on for advanceClock to advance the
+	// clock by FrameInterval, and checkAdvanced takes what advanceClock
+	// sends once it has, so a Step allocates nothing.
+	advanceRequests chan struct{}
+	checkAdvanced   func() bool
+	// recordingDisabled is set when gfx's recording adapter keeps no call,
+	// so Step reads no frames back.
+	recordingDisabled bool
 	// declarations is the catalog of the binding declarations answering the
 	// reflection of the shaders compiled on instance.
 	declarations *declarationCatalog
@@ -107,6 +118,11 @@ func NewHarness(t testing.TB) *Harness {
 	}
 	h.declarations = newDeclarationCatalog(h)
 	h.supervisor = kernel.NewSupervisor(logHandler{harness: h})
+	h.tickMainThread = h.supervisor.TickMainThread
+	h.advanceRequests = make(chan struct{})
+	advances := make(chan struct{}, 1)
+	h.checkAdvanced = makeReceiveCheck(advances)
+	go h.advanceClock(advances)
 	t.Cleanup(h.checkLogged)
 	t.Cleanup(h.quit)
 	return h
@@ -163,17 +179,15 @@ func (h *Harness) Step() {
 	h.mutex.Lock()
 	firstReport := len(h.reports)
 	h.mutex.Unlock()
-	advanced := make(chan struct{})
-	go func() {
-		defer close(advanced)
-		h.clock.Advance(FrameInterval)
-	}()
-	h.tickUntil("the beat", makeReceiveCheck(advanced))
+	h.advanceRequests <- struct{}{}
+	h.tickUntil("the beat", h.checkAdvanced)
 	h.mutex.Lock()
 	note := frameNote{beat: h.beat, reports: slices.Clone(h.reports[firstReport:])}
 	h.mutex.Unlock()
-	for range len(h.instance.Recording().Frames()) - len(h.frameNotes) {
-		h.frameNotes = append(h.frameNotes, note)
+	if !h.recordingDisabled {
+		for range len(h.instance.Recording().Frames()) - len(h.frameNotes) {
+			h.frameNotes = append(h.frameNotes, note)
+		}
 	}
 	h.checkLogged()
 }
@@ -328,6 +342,7 @@ func (h *Harness) quit() {
 	h.t.Helper()
 	h.supervisor.Quit()
 	h.tickUntil("the supervisor's quit", makeReceiveCheck(h.supervisor.Done()))
+	close(h.advanceRequests)
 	if h.softwareAdapter && h.mainThread == nil {
 		runtime.UnlockOSThread()
 	}
@@ -348,7 +363,7 @@ func (h *Harness) tickUntil(what string, done func() bool) {
 	h.t.Helper()
 	deadline := time.Now().Add(timeout)
 	for {
-		h.runOnMainThread(h.supervisor.TickMainThread)
+		h.runOnMainThread(h.tickMainThread)
 		if done() {
 			return
 		}
@@ -356,6 +371,15 @@ func (h *Harness) tickUntil(what string, done func() bool) {
 			h.t.Fatalf("%s did not finish in %v", what, timeout)
 		}
 		runtime.Gosched()
+	}
+}
+
+// advanceClock advances the clock by FrameInterval for each request Step
+// sends, sending on advances once Advance returns, until the harness quits.
+func (h *Harness) advanceClock(advances chan<- struct{}) {
+	for range h.advanceRequests {
+		h.clock.Advance(FrameInterval)
+		advances <- struct{}{}
 	}
 }
 

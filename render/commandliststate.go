@@ -15,7 +15,8 @@ import (
 // draw parameters set in its open pass, by their group, or the parameters
 // set in its open compute pass, of any group; and the draft its
 // draws build bind groups in, and hand the dynamic offsets of each they
-// set; the regions its copies hand gfx; and, for the clear-after-draw
+// set; the regions its copies hand gfx, and the colour attachments its
+// passes do; and, for the clear-after-draw
 // check, its list's order and the passes it began, in order, with the
 // targets they write, passes[i]'s the passTargets from its
 // targetStart to its targetEnd.
@@ -31,6 +32,7 @@ type commandListState struct {
 	dynamicOffsets      [maxGroupDynamicOffsetCount]uint32
 	textureCopies       [1]gfx.TextureCopy
 	bufferTextureCopies [1]gfx.BufferTextureCopy
+	colorAttachments    [maxColorTargetCount]gfx.RenderPassColorAttachment
 	order               Order
 	passes              []notedPass
 	passTargets         []notedTarget
@@ -57,7 +59,7 @@ func (s *commandListState) allocate(data []byte, table *assetTable, device gfx.D
 	}
 	size := uint64(len(data))
 	paddedSize := (size + 3) &^ 3
-	chunk, err := s.arena.acquireChunk((paddedSize+chunkSize-1)/chunkSize*chunkSize, table, device)
+	chunk, err := s.arena.acquireChunk((paddedSize+chunkSize-1)/chunkSize*chunkSize, s.order, len(s.takenChunks), table, device)
 	if err != nil {
 		return BufferRange{}, err
 	}
@@ -100,10 +102,11 @@ func (s *commandListState) writeChunks(table *assetTable, device gfx.Device) {
 	}
 }
 
-// notePass notes a pass of descriptor begun, with its colour targets, their
-// resolve targets and its depth-stencil target unless it is read-only, and
-// answers the index of its note in s's passes.
-func (s *commandListState) notePass(descriptor PassDescriptor) int {
+// notePass notes a pass of descriptor begun, labelled label, descriptor's
+// label kept, with its colour targets, their resolve targets and its
+// depth-stencil target unless it is read-only, and answers the index of its
+// note in s's passes.
+func (s *commandListState) notePass(label string, descriptor PassDescriptor) int {
 	targetStart := len(s.passTargets)
 	for _, target := range descriptor.ColorTargets {
 		s.passTargets = append(s.passTargets, notedTarget{key: passTargetKey{window: target.Window, texture: target.Texture, mipLevel: target.MipLevel, layer: target.Layer}, cleared: target.Clear})
@@ -114,7 +117,7 @@ func (s *commandListState) notePass(descriptor PassDescriptor) int {
 	if target := descriptor.DepthStencil; target.Texture != (Texture{}) && !target.ReadOnly {
 		s.passTargets = append(s.passTargets, notedTarget{key: passTargetKey{texture: target.Texture, mipLevel: target.MipLevel, layer: target.Layer}, cleared: target.Clear})
 	}
-	s.passes = append(s.passes, notedPass{label: descriptor.Label, targetStart: targetStart, targetEnd: len(s.passTargets)})
+	s.passes = append(s.passes, notedPass{label: label, targetStart: targetStart, targetEnd: len(s.passTargets)})
 	return len(s.passes) - 1
 }
 

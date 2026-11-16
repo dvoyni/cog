@@ -35,6 +35,11 @@ type assetTable struct {
 	loadedShaders  shaderLoader
 	// layouts shares the layouts of the shaders' bindings among them.
 	layouts layoutInterner
+	// materialEntries are the entries makeMaterialBindGroup fills, kept for
+	// the next, as gfx copies them.
+	materialEntries []gfx.BindGroupEntry
+	// labels keeps the labels of passes and meshes, copied.
+	labels labelInterner
 	// madeTextures and madeBuffers hold the made textures and buffers, each
 	// by its own handle, once, until its maker releases it.
 	madeTextures assetCounter[Texture, Texture]
@@ -162,7 +167,7 @@ func (t *assetTable) fillShader(shader Shader, slot shaderSlot) {
 // offset no multiple of its format's alignment, an index buffer of no index
 // format or at an offset no multiple of its index's size, or a topology gfx
 // has none of.
-func (t *assetTable) addMesh(device gfx.Device, descriptor MeshDescriptor) (Mesh, error) {
+func (t *assetTable) addMesh(device gfx.Device, label string, descriptor MeshDescriptor) (Mesh, error) {
 	if maxCount := min(device.Limits().MaxVertexBuffers, maxVertexBufferCount); uint64(len(descriptor.VertexBuffers)) > uint64(maxCount) {
 		return Mesh{}, fmt.Errorf("it has %d vertex buffers, more than %d", len(descriptor.VertexBuffers), maxCount)
 	}
@@ -181,7 +186,7 @@ func (t *assetTable) addMesh(device gfx.Device, descriptor MeshDescriptor) (Mesh
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	mesh, slot := t.meshes.Acquire()
-	slot.label = descriptor.Label
+	slot.label = label
 	slot.vertexBuffers = slot.vertexBuffers[:0]
 	for _, vertexBuffer := range descriptor.VertexBuffers {
 		slot.vertexBuffers = append(slot.vertexBuffers, meshVertexBuffer{bufferRange: vertexBuffer.Range, stride: vertexBuffer.Layout.Stride})
@@ -278,7 +283,7 @@ func (t *assetTable) setMaterialParameter(device gfx.Device, material Material, 
 		*parameter = previous
 	case !drawn:
 		block.latestBytes = append(block.latestBytes[:0], uniformBytes...)
-		writeBytes(t, device, Buffer{}, block.buffer, 0, uniformBytes)
+		writeBytes(t, device, Buffer{}, block.buffer, 0, block.latestBytes)
 	default:
 		if !slices.ContainsFunc(slot.uniformBlocks, func(other materialUniformBlock) bool { return other.bufferBehind }) {
 			t.versionedMaterials = append(t.versionedMaterials, material)
@@ -952,7 +957,8 @@ func (t *assetTable) makeMaterialBindGroup(device gfx.Device, slot *materialSlot
 		return bindGroup, nil
 	}
 	layout := shader.layout.groups[materialGroup]
-	entries := make([]gfx.BindGroupEntry, len(bindings))
+	entries := slices.Grow(t.materialEntries[:0], len(bindings))[:len(bindings)]
+	t.materialEntries = entries
 	for index, binding := range bindings {
 		value := slot.parameters[index]
 		if overlapMask&(1<<index) != 0 {

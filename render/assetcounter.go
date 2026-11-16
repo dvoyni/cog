@@ -32,13 +32,18 @@ type assetCounter[K comparable, H comparable] struct {
 func (s *assetCounter[K, H]) hold(key K) (H, bool) {
 	s.requireLocked("hold")
 	h, ok := s.handles[key]
-	if !ok {
-		return h, false
+	if ok {
+		s.holdHandle(h)
 	}
+	return h, ok
+}
+
+// holdHandle counts one more holder of h, an asset s holds. s's mutex is
+// held.
+func (s *assetCounter[K, H]) holdHandle(h H) {
 	entry := s.entries[h]
 	entry.holderCount++
 	s.entries[h] = entry
-	return h, true
 }
 
 // add holds h as key's asset, with one holder. s's mutex is held, and add

@@ -85,11 +85,18 @@ func (i Inventory) AcquireBuffer(path string, usage BufferUsageFlags) Buffer {
 // render reserves, or past the device's limits, such as more than 8 uniform
 // blocks or 4 storage buffers at dynamic offsets, or 8 storage buffers a
 // stage sees, is refused and reported once; either answers a shader whose
-// draws are skipped.
+// draws are skipped. A second acquire of a held variant, of up to 8 defines
+// whose names and values join in up to 128 bytes, allocates nothing.
 func (i Inventory) AcquireShader(path string, defines ...ShaderDefine) Shader {
 	table := i.table.Get()
-	key, sortedDefines := makeShaderKey(path, defines)
-	return table.loadedShaders.acquire(table, i.device.Get(), i.files.Get(), key, sortedDefines)
+	// sortedArray and joinedArray hold the variant's defines, sorted, and
+	// its key's join of them, on the stack, so a second acquire of a held
+	// variant allocates nothing.
+	var sortedArray [8]gfx.ShaderDefine
+	var joinedArray [128]byte
+	sortedDefines := sortDefines(defines, sortedArray[:])
+	joinedDefines := appendJoinedDefines(joinedArray[:0], sortedDefines)
+	return table.loadedShaders.acquire(table, i.device.Get(), i.files.Get(), path, joinedDefines, sortedDefines)
 }
 
 // ReloadChanged reloads every texture, buffer and shader loaded from a file
@@ -225,9 +232,10 @@ func (i Inventory) MakeTexture[T any](descriptor TextureDescriptor, data []T) Te
 // allocates nothing.
 func (i Inventory) MakeMesh(descriptor MeshDescriptor) Mesh {
 	table := i.table.Get()
-	mesh, err := table.addMesh(i.device.Get(), descriptor)
+	label := table.labels.intern(descriptor.Label)
+	mesh, err := table.addMesh(i.device.Get(), label, descriptor)
 	if err != nil {
-		table.report(ReportKindMeshRefused, fmt.Errorf("render: making mesh %q: %w", descriptor.Label, err))
+		table.report(ReportKindMeshRefused, fmt.Errorf("render: making mesh %q: %w", label, err))
 		return Mesh{}
 	}
 	table.madeMeshes.mutex.Lock()

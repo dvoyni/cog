@@ -636,8 +636,8 @@ func (p *Pass) addTarget(target drawnTarget) {
 // gfxDescriptor, at position in its list, as an inspection writes it down:
 // its loads and stores as gfx's attachments have them, a window's target at
 // mip level and layer zero.
-func makeInspectedPass(descriptor PassDescriptor, gfxDescriptor gfx.RenderPassDescriptor, position int) InspectedPass {
-	pass := InspectedPass{Position: position, Label: descriptor.Label}
+func makeInspectedPass(label string, descriptor PassDescriptor, gfxDescriptor gfx.RenderPassDescriptor, position int) InspectedPass {
+	pass := InspectedPass{Position: position, Label: label}
 	for index, target := range descriptor.ColorTargets {
 		attachment := gfxDescriptor.ColorAttachments[index]
 		colorTarget := ColorTarget{

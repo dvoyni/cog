@@ -335,6 +335,7 @@ and a **test author** testing a plugin that draws.
 - **Each command list takes arena chunks of its own,** so concurrent lists contend only when one takes a chunk.
   - A list's chunks go to the GPU in one `WriteBuffer` each when the list ends.
   - A list that outgrows its chunk takes another, and a block larger than a chunk gets a chunk of its own, its size rounded up to a multiple of the chunk size, so a large block whose size varies from frame to frame keeps reusing one.
+  - A list takes first the chunk that the list at its order took at the same place the frame before, so a list recording the same blocks frame after frame binds the bind groups made over its chunks again. Which list takes which chunk would otherwise follow the order concurrent lists reach the arena in, and a chunk serving another list's blocks for `TemporaryIdleFrames` frames would lose the bind groups its own made, to make them again.
 - **Per-instance data comes two ways:**
   - **A storage buffer read at `instance_index`:** a draw's first instance selects a batch's rows, on every backend for direct draws.
   - **Instance buffers:** vertex buffers stepped per instance, each a buffer range with its layout, set with `SetInstanceBuffer(slot, InstanceBuffer{Range, Layout})`. Their layouts join the pipeline key.
@@ -560,14 +561,22 @@ render republishes gfx's events as its own, each nested inside gfx's publication
 
 - **Nothing render does per frame allocates once its pools have grown.** This is a rule in render's `AGENTS.md`, enforced by an allocation gate (see *Testing Decisions*).
 - **Allowed to allocate:**
-  - each material version, a fixed count that the gate checks;
-  - each pass given a temporary range as a `@group(0)` storage parameter, a fixed count that the gate checks;
+  - each material version: 2, gfx's copies of its bind group's entries and of what the group depends on, and 2 more in the next frame, when the material makes its own bind group again;
+  - each pass given a temporary range as a `@group(0)` storage parameter where the range moved since the frames before: 5, its bind group, gfx's two copies, and render's key and entry for it, with the buffers the entry names. A range that stays where it was binds the bind group kept for it, allocating nothing;
   - outside the frame: loads, first pipelines and bind groups, `MakeMaterial`, and the first temporary of a new descriptor.
 - **Gated at zero:**
-  - a second acquire of a held key;
+  - a second acquire of a held key, a shader's with defines among them: its defines are sorted and joined on the stack, and copied only for a variant compiled. Up to 8 defines, joined in up to 128 bytes, fit there, as `AcquireShader` says; more allocate;
   - any release;
   - `MakeMesh` once render's tables have grown.
-- **Time per draw** is recorded in a *Performance* section of this design and in `render/docs/benchmarks-baseline.txt`.
+- **What a user hands render stays on its stack.** Go moves a whole struct to the heap when a callee keeps any part of it, so render keeps the labels of passes and meshes as copies, interned and forgotten once unnamed for `TemporaryIdleFrames` frames: a `PassDescriptor`'s colour targets and a `MeshDescriptor`'s vertex buffers, written as literals at the call, allocate nothing. A material's uniform block is copied before it reaches gfx, so `SetMaterialUniform`'s value stays on the stack too.
+- **Time per draw** is recorded in `render/docs/benchmarks-baseline.txt`, ten runs on gfx's recording adapter recording nothing, of an indexed mesh with an instance buffer and a uniform block draw parameter, the material switched every 16 draws, in one list and one pass, beside the same frame drawn by hand on gfx: the camera bound once, the mesh's buffers bound once, and each draw's block written into one buffer once a frame and bound at its dynamic offset. On an AMD Ryzen 9 7950X3D under Windows, each frame's time spread over its draws, the harness's beat included:
+
+  | Draws per frame | render | by hand on gfx |
+  |---|---|---|
+  | 256 | 635 ns | 71 ns |
+  | 4096 | 565 ns | 48 ns |
+
+  Most of render's time is in `Pass.Draw`: finding the material, its bind groups and the draw's parameter bind group, and binding what changed.
 
 ### Delta to gfx
 
@@ -650,8 +659,8 @@ render republishes gfx's events as its own, each nested inside gfx's publication
   - a material changed while two lists record it;
   - lists filled concurrently.
 
-**The per-frame gate and benchmarks**, the method of ecs's and mux's bars:
-- **The gate:** zero allocations per frame once warm, checked with `testing.AllocsPerRun(...) == 0` over a whole beat in plain `go test`, on the recording adapter in its mode that records nothing. It covers render, gfx, the kernel and metronome, so gfx's "allocation-free once warm" is enforced too.
+**The per-frame gate and benchmarks**, the method of ecs's and mux's bars, in `rendertest/allocationgate_test.go` and `rendertest/benchmark_test.go`:
+- **The gate:** zero allocations per frame once warm, checked with `testing.AllocsPerRun(...) == 0` over a whole beat, the harness's `Step`, in plain `go test`, after four warm frames, on the recording adapter in its mode that records nothing. It covers render, gfx, the kernel and metronome, so gfx's "allocation-free once warm" is enforced too; the harness's `Step` allocates nothing itself. Each list is recorded by a task of its own, and the gate checks, with recording on, that each list's frame reaches gfx with every draw, dispatch, copy and clear it records.
 - **Operations:**
   - list begin, and end with its chunk write;
   - pass begin and end, with pass parameters;
@@ -663,9 +672,10 @@ render republishes gfx's events as its own, each nested inside gfx's publication
 - **Counts:**
   - 16, 256 and 4096 draws per list;
   - 1, 4 and 16 lists per frame;
-  - a material switched every draw, every 16 draws, or once per list;
-  - 1 and 8 passes per list.
+  - each shape at each count of draws and lists drawn three ways: in one pass with its material switched every draw, in 8 passes with it switched every 16 draws, and in one pass with it set once per list.
+- **Under `go test -race`** the gate steps its frames for the detector to watch, those of 4096 draws left out, and checks no count, as the race runtime allocates on its own.
 - **Draw shapes:** an indexed mesh with one uniform draw parameter; `DrawVertices` reading a storage buffer at `instance_index`; a texture draw parameter.
+- **Fixed counts:** a frame of 1 and of 8 material versions, and of 1 and 8 passes given a temporary range of lights, moved and still, each allocate exactly their count; a second acquire of each kind of held key, a release of each, the last release of each kind of asset and `MakeMesh` with its release, each measured over 100 calls in a recording task, allocate nothing.
 - **Time per draw** is benchmarked, not gated, against the same frame written by hand on gfx. Ten runs go in the baseline, compared with `benchstat`.
 
 **Prior art:**

@@ -3,6 +3,7 @@ package render
 import (
 	"fmt"
 	"io/fs"
+	"slices"
 
 	"github.com/dvoyni/cog/gfx"
 )
@@ -20,22 +21,30 @@ type shaderLoader struct {
 	pendingReloads []assetReload[Shader, *shaderSlot]
 }
 
-// acquire hands out the variant of key, defined with defines, counting one
-// more holder, and compiles it when the loader holds none: it preprocesses
-// the file with defines, makes its module, and builds its layout from the
-// module's bindings through table's layout interner. A file that fails to
-// preprocess or compile is reported, and one declaring a binding in
-// @group(3), or past the device's limits, is refused and reported; either
-// gets a shader with no module, whose draws are skipped. Two acquires
-// compiling one key at once each compile it, and the one that finishes
-// second releases what it made and answers the first's.
-func (l *shaderLoader) acquire(table *assetTable, device gfx.Device, files fs.FS, key shaderKey, defines []gfx.ShaderDefine) Shader {
+// acquire hands out the variant of path defined with sortedDefines, whose
+// key joins them as joinedDefines, counting one more holder, and compiles it
+// when the loader holds none: it preprocesses the file with the defines,
+// makes its module, and builds its layout from the module's bindings
+// through table's layout interner. A file that fails to preprocess or
+// compile is reported, and one declaring a binding in @group(3), or past the
+// device's limits, is refused and reported; either gets a shader with no
+// module, whose draws are skipped. Two acquires compiling one key at once
+// each compile it, and the one that finishes second releases what it made
+// and answers the first's. It keeps neither slice: a variant held is found
+// by them, and one compiled keeps copies.
+func (l *shaderLoader) acquire(table *assetTable, device gfx.Device, files fs.FS, path string, joinedDefines []byte, sortedDefines []gfx.ShaderDefine) Shader {
 	l.mutex.Lock()
-	shader, ok := l.hold(key)
+	l.requireLocked("acquire")
+	shader, ok := l.handles[shaderKey{path: path, defines: string(joinedDefines)}]
+	if ok {
+		l.holdHandle(shader)
+	}
 	l.mutex.Unlock()
 	if ok {
 		return shader
 	}
+	key := shaderKey{path: path, defines: string(joinedDefines)}
+	defines := slices.Clone(sortedDefines)
 	shader = table.addEmptyShader()
 	stampingFiles := &stampingFS{files: files}
 	slot, reportKind, err := key.compile(device, &table.layouts, table.inspector, stampingFiles, shader, defines)

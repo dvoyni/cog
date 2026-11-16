@@ -36,39 +36,59 @@ type temporaryArena struct {
 
 // arenaChunk is one chunk of the arena: whether a list holds it this frame;
 // its buffer in the asset table and the gfx buffer behind it; its bytes as
-// its list fills them, which go to gfx at the list's end; and where its last
-// block ends.
+// its list fills them, which go to gfx at the list's end; where its last
+// block ends; and the order of the list that last took it, with how many
+// chunks that list had taken before it.
 type arenaChunk struct {
 	poolHold
-	buffer    Buffer
-	gfxBuffer gfx.Buffer
-	bytes     []byte
-	end       uint64
+	buffer      Buffer
+	gfxBuffer   gfx.Buffer
+	bytes       []byte
+	end         uint64
+	order       Order
+	chunkNumber int
 }
 
 // acquireChunk hands out a chunk of size bytes, a multiple of 4, that no
-// list holds this frame, making one in table when the pool has none. table's
-// mutex is held. The error is gfx's, when it cannot be made.
-func (a *temporaryArena) acquireChunk(size uint64, table *assetTable, device gfx.Device) (*arenaChunk, error) {
+// list holds this frame, for the list at order that has taken chunkNumber
+// chunks before it this frame, making one in table when the pool has none.
+// It hands out first the chunk that list took at that number the frame
+// before, so a list recording the same blocks frame after frame places
+// them in the same chunks, and the bind groups made over those chunks are
+// bound again rather than made anew after going unused. table's mutex is
+// held. The error is gfx's, when it cannot be made.
+func (a *temporaryArena) acquireChunk(size uint64, order Order, chunkNumber int, table *assetTable, device gfx.Device) (*arenaChunk, error) {
 	if size%4 != 0 {
 		panic(fmt.Sprintf("render: acquiring a chunk of %d bytes, no multiple of 4", size))
 	}
 	table.requireLocked("acquireChunk")
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
+	var free *arenaChunk
 	for _, chunk := range a.pooledChunks {
-		if !chunk.held && uint64(len(chunk.bytes)) == size {
-			chunk.held = true
-			return chunk, nil
+		if chunk.held || uint64(len(chunk.bytes)) != size {
+			continue
+		}
+		if chunk.order == order && chunk.chunkNumber == chunkNumber {
+			free = chunk
+			break
+		}
+		if free == nil {
+			free = chunk
 		}
 	}
-	buffer, gfxBuffer, err := table.insertBuffer(device, handle.TemporaryChunkLabel, size, temporaryChunkUsage)
-	if err != nil {
-		return nil, err
+	if free == nil {
+		buffer, gfxBuffer, err := table.insertBuffer(device, handle.TemporaryChunkLabel, size, temporaryChunkUsage)
+		if err != nil {
+			return nil, err
+		}
+		free = &arenaChunk{buffer: buffer, gfxBuffer: gfxBuffer, bytes: make([]byte, size)}
+		a.pooledChunks = append(a.pooledChunks, free)
 	}
-	chunk := &arenaChunk{poolHold: poolHold{held: true}, buffer: buffer, gfxBuffer: gfxBuffer, bytes: make([]byte, size)}
-	a.pooledChunks = append(a.pooledChunks, chunk)
-	return chunk, nil
+	free.held = true
+	free.order = order
+	free.chunkNumber = chunkNumber
+	return free, nil
 }
 
 // findBytes answers a copy of bufferRange's bytes, of a chunk of a's, as its

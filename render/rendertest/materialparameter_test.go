@@ -12,6 +12,7 @@ import (
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/gfx/recording"
 	"github.com/dvoyni/cog/platform"
+	"github.com/dvoyni/cog/platform/filesystems"
 	"github.com/dvoyni/cog/render"
 	"github.com/dvoyni/cog/render/rendertest"
 )
@@ -115,16 +116,23 @@ func spawnParameterHarness(t *testing.T, h *rendertest.Harness, frameCount int, 
 // frames.
 func spawnDeclaredHarness(t *testing.T, h *rendertest.Harness, config *render.Config, declarations map[string]string, frameCount int, duringFrame func(frameIndex int, inventory render.Inventory, frame render.Frame)) {
 	t.Helper()
+	h.Spawn(config, &loaderPlugin{files: makeDeclaredFiles(t, declarations), duringFrame: duringFrame})
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	for range frameCount {
+		h.Step()
+	}
+}
+
+// makeDeclaredFiles answers the draw tests' files with each shader of
+// declarations beside its binding declaration.
+func makeDeclaredFiles(t testing.TB, declarations map[string]string) *filesystems.MemoryFS {
+	t.Helper()
 	files := makeDrawFiles(t)
 	for name, declaration := range declarations {
 		putFile(t, files, name, []byte("// "+name))
 		putFile(t, files, name+".json", []byte(declaration))
 	}
-	h.Spawn(config, &loaderPlugin{files: files, duringFrame: duringFrame})
-	h.OpenWindow(platform.Size{Width: 64, Height: 48})
-	for range frameCount {
-		h.Step()
-	}
+	return files
 }
 
 // findParameter answers the parameter named name of draw's material, and

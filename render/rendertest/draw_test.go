@@ -66,7 +66,7 @@ type drawScene struct {
 
 // makeDrawFiles answers the files of the draw tests' shaders, each beside
 // its declaration.
-func makeDrawFiles(t *testing.T) *filesystems.MemoryFS {
+func makeDrawFiles(t testing.TB) *filesystems.MemoryFS {
 	files := filesystems.NewMemoryFS()
 	for name, declaration := range map[string]string{
 		"plain.wgsl":      plainDeclaration,
