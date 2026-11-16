@@ -19,29 +19,31 @@ type textureKey struct {
 
 // readHeader answers the descriptor of k's texture from its file's header
 // alone: its size, its format by its colour space, and every mip level down
-// to one texel with Mipmaps, else one. When the file is missing, in no format
-// render decodes, or of no texels, it answers the error, with the descriptor
-// of one texel to draw magenta in.
-func (k textureKey) readHeader(files fs.FS) (TextureDescriptor, error) {
+// to one texel with Mipmaps, else one; with the stamp of the file it opened,
+// one of a failed stat when it opened none. When the file is missing, in no
+// format render decodes, or of no texels, it answers the error, with the
+// descriptor of one texel to draw magenta in.
+func (k textureKey) readHeader(files fs.FS) (TextureDescriptor, fileStamp, error) {
 	descriptor := TextureDescriptor{Label: k.path, Width: 1, Height: 1, Format: k.options.ColorSpace.makeTextureFormat()}.fillDefaults()
 	file, err := files.Open(k.path)
 	if err != nil {
-		return descriptor, err
+		return descriptor, fileStamp{statFailed: true}, err
 	}
 	defer file.Close()
+	stamp := makeFileStamp(file.Stat())
 	config, _, err := image.DecodeConfig(file)
 	if err != nil {
-		return descriptor, err
+		return descriptor, stamp, err
 	}
 	if config.Width <= 0 || config.Height <= 0 {
-		return descriptor, fmt.Errorf("an image of %d×%d texels", config.Width, config.Height)
+		return descriptor, stamp, fmt.Errorf("an image of %d×%d texels", config.Width, config.Height)
 	}
 	descriptor.Width = uint32(config.Width)
 	descriptor.Height = uint32(config.Height)
 	if k.options.Mipmaps {
 		descriptor.MipLevelCount = uint32(bits.Len32(max(descriptor.Width, descriptor.Height)))
 	}
-	return descriptor, nil
+	return descriptor, stamp, nil
 }
 
 // decodeBody answers the texels of k's file, of 8 bits per channel, red,

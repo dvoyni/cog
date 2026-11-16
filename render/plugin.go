@@ -69,7 +69,7 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	})
 	configurator.InitResource(&assetTable{reporter: resourceReporter})
 	configurator.BindSocket(platform.ReadMountSocket{FS: makeAssetFS(), Priority: math.MinInt, Prefix: assetPrefix})
-	beginFrameTask := configurator.RegisterTask2(beginFrame)
+	beginFrameTask := configurator.RegisterTask3(beginFrame)
 	writeLoadsTask := configurator.RegisterTask4(writeLoads)
 	generateMipsTask := configurator.RegisterTask4(generateMips)
 	readTimestampsBackTask := configurator.RegisterTask2(readTimestampsBack)

@@ -86,12 +86,15 @@ func publishReadback(ex *kernel.Executor, in kernel.JobHandle, event readbackDel
 
 // beginFrame keeps event's frame as the one being recorded, for Frame's
 // calls, begins its inspection, of event's beat, when one is requested, and
-// its timing while pass timings are on.
-func beginFrame(k *kernel.Kernel, event gfx.DrawEvent, state kernel.Read[*frameState], device kernel.Read[gfx.Device]) kernel.NoResult {
+// its timing while pass timings are on, and swaps in the textures and
+// buffers reloaded since the last frame began, requesting the mips of those
+// with Mipmaps.
+func beginFrame(k *kernel.Kernel, event gfx.DrawEvent, state kernel.Read[*frameState], table kernel.Read[*assetTable], device kernel.Read[gfx.Device]) kernel.NoResult {
 	frameState := state.Get()
 	frameState.setRecordingFrame(event.Frame)
 	frameState.inspector.begin(event.Beat)
 	frameState.passTimer.begin(event.Beat, device.Get(), frameState.reporter)
+	frameState.mips.request(table.Get().swapReloads(device.Get())...)
 	return kernel.NoResult{}
 }
 

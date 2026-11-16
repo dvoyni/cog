@@ -441,7 +441,7 @@ func drawScene(k *kernel.Kernel, e render.FrameEvent, frame render.Frame, scene 
 gfx.RenderEvent ─ gfx's Draw: configure, acquire ─ gfx.DrawEvent
   render's RecordFrame:
     the decode-and-write job for loads pending since the last frame
-    reloads swapped in
+    reloads swapped in, by the job that readies the frame
     publishes render.FrameEvent{Beat, Ready, AcquireWait, GPULatency}
       users' recording tasks, after e.Ready, joined into the out dependency
     after that out dependency:
@@ -538,11 +538,13 @@ render republishes gfx's events as its own, each nested inside gfx's publication
 - **Where changes come from:**
   - embedded files report no modification time and never change, so a game in development mounts its asset directory from disk above them;
   - a memory mount stamps a new modification time at each put, so generated assets reload too.
-- **Handles survive.** Reloaded objects are built in the caller's job, as an acquire's are, and swapped in at the start of the next frame, so a frame draws all old or all new. The old objects are freed after the last frame that used them.
+- **Handles survive.** Reloaded objects are built in the caller's job, as an acquire's are, and swapped in at the start of the next frame, in the job that readies it, so a frame draws all old or all new. gfx acquires a frame only after the last one's present, so the old objects, freed at the swap, have outlived the last frame that used them.
+- **Each change is claimed once.** Each loaded texture and buffer keeps its file's stamp from its acquire; `ReloadChanged` claims a change by keeping the new stamp before it reads the file, so neither a call beside it nor a later one reads it again, and a reload queued behind a newer claim is dropped.
 - **What changes, by kind:**
   - **A shader:** every variant of its path gets a new module. Its pipelines are rebuilt at their next draw, and materials rebind by name under the mismatch rules.
-  - **A texture:** with an unchanged descriptor, it is written in place and its mips regenerated. With a new size or format, a new gfx texture sits behind the same handle, and the bind groups naming the old one are rebuilt on their next use.
-  - **A buffer:** with an unchanged size, it is written in place. With a new size, it is replaced, and a mesh whose range no longer fits skips its draws and is reported once.
+  - **A texture:** with an unchanged descriptor, it is written in place at the swap, not in the caller's job, whose write could land in a frame still drawing it old, and its mips regenerated. With a new size or format, a new gfx texture sits behind the same handle, and the bind groups naming the old one are released at the swap and made again on their next use.
+  - **A buffer:** with an unchanged size, it is written in place at the swap. With a new size, it is replaced, and a mesh whose range no longer fits skips its draws and is reported once.
+  - **A material value naming either, made again,** is filled again at the swap from what its setter was given, through the setter's own checks: a material keeps the setting of each texture and buffer value, as a pass keeps its parameters' settings. A view of every mip level sees every one of the new texture, and a range of the rest of a buffer ends at its new end; a value that no longer fits is unbound and reported, and binds again at a later reload it fits.
 - **Not reloaded:** made assets.
 - **A failed reload** keeps drawing the last good version and is reported once; the next change to the file retries.
 

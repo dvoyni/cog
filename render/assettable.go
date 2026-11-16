@@ -90,15 +90,7 @@ func (t *assetTable) addTexture(device gfx.Device, descriptor TextureDescriptor)
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	texture, slot := t.textures.Acquire()
-	gfxTexture, err := device.CreateTexture(gfx.TextureDescriptor{
-		Label:         handle.MakeLabel(texture, descriptor.Label),
-		Size:          gfx.Extent3D{Width: descriptor.Width, Height: descriptor.Height, DepthOrArrayLayers: descriptor.LayerCount},
-		MipLevelCount: descriptor.MipLevelCount,
-		SampleCount:   descriptor.SampleCount,
-		Dimension:     gfx.TextureDimension2D,
-		Format:        gfx.TextureFormat(descriptor.Format),
-		Usage:         descriptor.Format.makeTextureUsage(descriptor.SampleCount),
-	})
+	gfxTexture, err := createLabelledTexture(device, texture, descriptor)
 	if err != nil {
 		t.textures.Release(texture)
 		return Texture{}, err
@@ -131,7 +123,7 @@ func (t *assetTable) insertBuffer(device gfx.Device, label string, size uint64, 
 	t.requireLocked("insertBuffer")
 	buffer, slot := t.buffers.Acquire()
 	if size = (size + 3) &^ 3; size > 0 {
-		gfxBuffer, err := device.CreateBuffer(gfx.BufferDescriptor{Label: handle.MakeLabel(buffer, label), Size: size, Usage: gfx.BufferUsageFlags(usage) | gfx.BufferUsageFlagCopyDst})
+		gfxBuffer, err := createLabelledBuffer(device, buffer, label, size, usage)
 		if err != nil {
 			t.buffers.Release(buffer)
 			return Buffer{}, gfx.Buffer{}, err
@@ -232,6 +224,7 @@ func (t *assetTable) addMaterial(descriptor MaterialDescriptor) (Material, error
 	slot.vertexEntryPoint = vertexEntryPoint
 	slot.fragmentEntryPoint = fragmentEntryPoint
 	slot.parameters = make([]bindingValue, len(shader.findGroupBindings(materialGroup)))
+	slot.settings = make([]parameterSetting, len(slot.parameters))
 	slot.uniformBlocks = make([]materialUniformBlock, len(slot.parameters))
 	return material, nil
 }
@@ -251,8 +244,11 @@ func (t *assetTable) addMaterial(descriptor MaterialDescriptor) (Material, error
 // bytes are kept for the next draw to copy into the arena, and the bind
 // groups, which the frame's draws may still bind, are released at its end.
 // fill runs with t's mutex held, given the buffer the material keeps for the
-// binding's uniform block, none until one is set.
-func (t *assetTable) setMaterialParameter(device gfx.Device, material Material, name string, uniformBytes []byte, fill func(shader Shader, binding gfx.ShaderBinding, parameter *bindingValue, uniformBuffer *gfx.Buffer) error) {
+// binding's uniform block, none until one is set. A texture or buffer value
+// is set from setting, which the material keeps while the value holds, to
+// fill it from again when a reload replaces its asset's gfx object; any
+// other value's setting has no kind.
+func (t *assetTable) setMaterialParameter(device gfx.Device, material Material, name string, uniformBytes []byte, setting parameterSetting, fill func(shader Shader, binding gfx.ShaderBinding, parameter *bindingValue, uniformBuffer *gfx.Buffer) error) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	slot, ok := t.materials.Find(material)
@@ -284,9 +280,11 @@ func (t *assetTable) setMaterialParameter(device gfx.Device, material Material, 
 	previous := *parameter
 	drawn := slot.drawnFrame == t.endedFrameCount+1
 	changed := false
+	slot.settings[index] = setting
 	switch err := fill(slot.shader, binding, parameter, &block.buffer); {
 	case err != nil:
 		*parameter = bindingValue{}
+		slot.settings[index] = parameterSetting{}
 		if claimReport(&t.reportedParameters, reportKey) {
 			t.report(ReportKindParameterRefused, fmt.Errorf("render: setting %q of material %q: the value %w; its binding draws its default", name, slot.label, err))
 		}
@@ -463,6 +461,7 @@ func (t *assetTable) unbindFreed(device gfx.Device) {
 			}
 			if !held {
 				*parameter = bindingValue{}
+				slot.settings[index] = parameterSetting{}
 				changed = true
 			}
 		}
@@ -530,6 +529,110 @@ func (t *assetTable) refillDefaultTexturesAndUniforms(device gfx.Device) {
 			}
 		}
 	}
+}
+
+// swapReloads swaps in, under their handles, the textures and buffers
+// ReloadChanged reloaded since it last ran, so the frame about to record
+// draws every one of them new: a texture or buffer reloaded at another size
+// gets the gfx object made for it, its predecessor released with its views
+// and every bind group naming it, and its material values filled again, as
+// refillReplaced says; and its new contents are written, for gfx's next
+// submit, into the one behind its handle. A reload of an asset render no
+// longer holds is dropped, its replacement released. It answers the
+// textures reloaded with Mipmaps, whose mips are yet to be generated. It
+// runs at the start of each frame, before the frame records and after the
+// last one's present, so the last frame that drew a predecessor has ended.
+func (t *assetTable) swapReloads(device gfx.Device) []Texture {
+	textureReloads := t.loadedTextures.takeReloads(&t.loadedTextures.pendingReloads)
+	bufferReloads := t.loadedBuffers.takeReloads(&t.loadedBuffers.pendingReloads)
+	if len(textureReloads) == 0 && len(bufferReloads) == 0 {
+		return nil
+	}
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	var unmippedTextures, replacedTextures []Texture
+	var replacedBuffers []Buffer
+	for _, reload := range textureReloads {
+		slot, ok := t.textures.Find(reload.handle)
+		switch {
+		case !ok && reload.replacement != (gfx.Texture{}):
+			device.ReleaseTexture(reload.replacement)
+			continue
+		case !ok:
+			continue
+		case reload.replacement != (gfx.Texture{}):
+			slot.releaseTexture(device)
+			slot.texture = reload.replacement
+			replacedTextures = append(replacedTextures, reload.handle)
+		}
+		writeTexels(t, device, reload.handle, gfx.ImageCopyTexture{Texture: slot.texture, Aspect: gfx.TextureAspectAll}, reload.contents, 4, reload.size)
+		if reload.mipmaps {
+			unmippedTextures = append(unmippedTextures, reload.handle)
+		}
+	}
+	for _, reload := range bufferReloads {
+		slot, ok := t.buffers.Find(reload.handle)
+		switch {
+		case !ok && reload.replacement != (gfx.Buffer{}):
+			device.ReleaseBuffer(reload.replacement)
+			continue
+		case !ok:
+			continue
+		case reload.replacement != (gfx.Buffer{}):
+			if slot.buffer != (gfx.Buffer{}) {
+				device.ReleaseBuffer(slot.buffer)
+			}
+			slot.buffer = reload.replacement
+			slot.size = uint64(len(reload.contents))
+			replacedBuffers = append(replacedBuffers, reload.handle)
+		}
+		writeBytes(t, device, reload.handle, slot.buffer, 0, reload.contents)
+	}
+	t.refillReplaced(device, replacedTextures, replacedBuffers)
+	return unmippedTextures
+}
+
+// refillReplaced fills again, from the setting it was set from, each
+// material value naming one of textures or buffers, whose gfx objects a
+// reload replaced, through the checks its setter ran, so a view of every mip
+// level sees every one of a new texture and a range of the rest of a buffer
+// ends at its new end; a value that no longer fits is unbound, drawing its
+// binding's default, and reported, its setting kept, so a later reload it
+// fits binds it again. It releases the bind groups of each
+// material with such a value, and every bind group of pass or draw
+// parameters naming one of textures or buffers, each made again at its next
+// use. t's mutex is held.
+func (t *assetTable) refillReplaced(device gfx.Device, textures []Texture, buffers []Buffer) {
+	t.requireLocked("refillReplaced")
+	if len(textures) == 0 && len(buffers) == 0 {
+		return
+	}
+	for _, slot := range t.materials.All() {
+		shader, ok := t.shaders.Find(slot.shader)
+		if !ok {
+			continue
+		}
+		bindings := shader.findGroupBindings(materialGroup)
+		replaced := false
+		for index, setting := range slot.settings {
+			if !(setting.kind == parameterKindTexture && slices.Contains(textures, setting.view.Texture)) && !(setting.kind == parameterKindBuffer && slices.Contains(buffers, setting.bufferRange.Buffer)) {
+				continue
+			}
+			replaced = true
+			parameter := &slot.parameters[index]
+			*parameter = bindingValue{}
+			if err := t.fillSettingValue(device, slot.shader, bindings[index], setting, parameter); err != nil {
+				t.report(ReportKindParameterRefused, fmt.Errorf("render: %q of material %q, after a reload: the value %w; its binding draws its default", bindings[index].Name, slot.label, err))
+			}
+		}
+		if replaced {
+			slot.dropBindGroups(device.ReleaseBindGroup)
+		}
+	}
+	t.layouts.releaseBindGroups(device, func(cached *parameterBindGroup) bool {
+		return slices.ContainsFunc(cached.namedTextures, func(texture Texture) bool { return slices.Contains(textures, texture) }) ||
+			slices.ContainsFunc(cached.namedBuffers, func(buffer Buffer) bool { return slices.Contains(buffers, buffer) })
+	})
 }
 
 // claimMeshReport answers whether a skipped draw of mesh is to be reported,
@@ -689,11 +792,7 @@ func (t *assetTable) removeTexture(device gfx.Device, texture Texture) {
 	if !ok {
 		return
 	}
-	for _, view := range slot.textureViews {
-		device.ReleaseTextureView(view.view)
-	}
-	device.ReleaseTexture(slot.texture)
-	slot.textureViews = slot.textureViews[:0]
+	slot.releaseTexture(device)
 	t.textures.Release(texture)
 	t.assetsFreed = true
 }
@@ -1071,6 +1170,28 @@ func writeBytes(table *assetTable, device gfx.Device, buffer Buffer, gfxBuffer g
 			inspection.Writes = append(inspection.Writes, InspectedWrite{Buffer: BufferRange{Buffer: buffer, Offset: offset, Size: uint64(len(data))}})
 		})
 	}
+}
+
+// createLabelledTexture makes on device the gfx texture of texture, of
+// descriptor, whose counts are filled in, with every usage its format
+// allows and a label naming texture.
+func createLabelledTexture(device gfx.Device, texture Texture, descriptor TextureDescriptor) (gfx.Texture, error) {
+	return device.CreateTexture(gfx.TextureDescriptor{
+		Label:         handle.MakeLabel(texture, descriptor.Label),
+		Size:          gfx.Extent3D{Width: descriptor.Width, Height: descriptor.Height, DepthOrArrayLayers: descriptor.LayerCount},
+		MipLevelCount: descriptor.MipLevelCount,
+		SampleCount:   descriptor.SampleCount,
+		Dimension:     gfx.TextureDimension2D,
+		Format:        gfx.TextureFormat(descriptor.Format),
+		Usage:         descriptor.Format.makeTextureUsage(descriptor.SampleCount),
+	})
+}
+
+// createLabelledBuffer makes on device the gfx buffer of buffer, of size
+// bytes, a multiple of 4, with usage and the copy destination render's
+// writes need, and a label naming buffer and label.
+func createLabelledBuffer(device gfx.Device, buffer Buffer, label string, size uint64, usage BufferUsageFlags) (gfx.Buffer, error) {
+	return device.CreateBuffer(gfx.BufferDescriptor{Label: handle.MakeLabel(buffer, label), Size: size, Usage: gfx.BufferUsageFlags(usage) | gfx.BufferUsageFlagCopyDst})
 }
 
 // makeLevelViewDescriptor answers the descriptor of the view of one mip

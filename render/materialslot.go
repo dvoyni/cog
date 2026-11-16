@@ -7,8 +7,9 @@ import "github.com/dvoyni/cog/gfx"
 // meaning unresolved and an empty fragment one none; whether it was refused
 // for them; whether a draw of it was skipped and reported; the values bound
 // to its shader's @group(1) bindings, each at its binding's index among
-// them, made once its entry points are resolved, with what it keeps for
-// each uniform block set as a value; the bind groups its draws bound, until
+// them, made once its entry points are resolved, with the setting each
+// texture or buffer value was set from, which a reload fills it from again,
+// and what it keeps for each uniform block set as a value; the bind groups its draws bound, until
 // a value changes; and the frame a draw of it was last recorded in, as one
 // more than the count of frames ended before it, zero for none.
 type materialSlot struct {
@@ -18,6 +19,7 @@ type materialSlot struct {
 	vertexEntryPoint, fragmentEntryPoint string
 	refused, reported                    bool
 	parameters                           []bindingValue
+	settings                             []parameterSetting
 	uniformBlocks                        []materialUniformBlock
 	bindGroups                           []materialBindGroup
 	drawnFrame                           uint64

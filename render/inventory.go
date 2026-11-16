@@ -92,6 +92,36 @@ func (i Inventory) AcquireShader(path string, defines ...ShaderDefine) Shader {
 	return table.loadedShaders.acquire(table, i.device.Get(), i.files.Get(), key, sortedDefines)
 }
 
+// ReloadChanged reloads every texture and buffer loaded from a file that
+// changed since it was loaded or last reloaded, as fs.Stat answers its
+// modification time and size, reading no file that did not. An embedded
+// file never changes, so a game in development mounts its asset folder from
+// disk above it; a memory mount stamps each put. A file is read, decoded and
+// made into new gfx objects where its size changed in the caller's job, as
+// an acquire's is, and swapped in under the same handles at the start of
+// the next frame, so a frame draws every asset old or every one new; the
+// objects replaced are freed then, the last frame that drew them having
+// ended, with the bind groups naming them, made again at their next use.
+//
+// A texture of an unchanged size has its texels written in place, and its
+// mips drawn again with Mipmaps; one of another size, a texture made at it.
+// A buffer of an unchanged size has its bytes written in place; one of
+// another size, a buffer made at it, a mesh whose range ends past it
+// skipping its draws, reported once. A material value naming a texture or
+// buffer made again is bound again from what its setter was given, so a
+// view of every mip level sees every one of the new texture and a range of
+// the rest of a buffer ends at its new end; one that no longer fits is
+// unbound and reported. A file that fails to load is reported once for each change,
+// and its asset keeps drawing what it drew; the next change tries again.
+// Shaders and made assets are not reloaded. A game binds ReloadChanged to a
+// key, or a plugin of its own calls it every second; it allocates only
+// while it runs.
+func (i Inventory) ReloadChanged() {
+	table := i.table.Get()
+	table.loadedTextures.reloadChanged(table, i.device.Get(), i.files.Get())
+	table.loadedBuffers.reloadChanged(table, i.device.Get(), i.files.Get())
+}
+
 // MakeBuffer makes a buffer filled from data, labelled label, with usage,
 // which exists, filled, when the call returns: the bytes of data's elements
 // as Go lays them out, padding included, so T is plain data with no
@@ -275,7 +305,7 @@ func (i Inventory) SetMaterialTextureView(material Material, name string, view T
 // task the kernel orders before the frame's recording.
 func (i Inventory) SetMaterialSampler(material Material, name string, sampler SamplerDescriptor) {
 	table := i.table.Get()
-	table.setMaterialParameter(i.device.Get(), material, name, nil, func(_ Shader, binding gfx.ShaderBinding, parameter *bindingValue, _ *gfx.Buffer) error {
+	table.setMaterialParameter(i.device.Get(), material, name, nil, parameterSetting{}, func(_ Shader, binding gfx.ShaderBinding, parameter *bindingValue, _ *gfx.Buffer) error {
 		return parameter.fillSampler(sampler, binding)
 	})
 }
@@ -301,8 +331,9 @@ func (i Inventory) SetMaterialSampler(material Material, name string, sampler Sa
 func (i Inventory) SetMaterialBuffer(material Material, name string, bufferRange BufferRange) {
 	table := i.table.Get()
 	device := i.device.Get()
-	table.setMaterialParameter(device, material, name, nil, func(_ Shader, binding gfx.ShaderBinding, parameter *bindingValue, _ *gfx.Buffer) error {
-		return table.fillBufferValue(device, parameter, binding, bufferRange)
+	setting := parameterSetting{name: name, kind: parameterKindBuffer, bufferRange: bufferRange}
+	table.setMaterialParameter(device, material, name, nil, setting, func(shader Shader, binding gfx.ShaderBinding, parameter *bindingValue, _ *gfx.Buffer) error {
+		return table.fillSettingValue(device, shader, binding, setting, parameter)
 	})
 }
 
@@ -332,7 +363,7 @@ func (i Inventory) SetMaterialBuffer(material Material, name string, bufferRange
 func (i Inventory) SetMaterialUniform[T any](material Material, name string, value T) {
 	table := i.table.Get()
 	device := i.device.Get()
-	table.setMaterialParameter(device, material, name, castToBytes(unsafe.Slice(&value, 1)), func(shader Shader, binding gfx.ShaderBinding, parameter *bindingValue, uniformBuffer *gfx.Buffer) error {
+	table.setMaterialParameter(device, material, name, castToBytes(unsafe.Slice(&value, 1)), parameterSetting{}, func(shader Shader, binding gfx.ShaderBinding, parameter *bindingValue, uniformBuffer *gfx.Buffer) error {
 		if err := table.checkUniform(reflect.TypeFor[T](), shader, binding); err != nil {
 			return err
 		}
@@ -433,8 +464,9 @@ func (i Inventory) ReleaseMaterial(material Material) {
 func (i Inventory) setMaterialTextureView(material Material, name string, view TextureView, wholeTexture bool) {
 	table := i.table.Get()
 	device := i.device.Get()
-	table.setMaterialParameter(device, material, name, nil, func(_ Shader, binding gfx.ShaderBinding, parameter *bindingValue, _ *gfx.Buffer) error {
-		return table.fillTextureValue(device, parameter, binding, view, wholeTexture)
+	setting := parameterSetting{name: name, kind: parameterKindTexture, view: view, wholeTexture: wholeTexture}
+	table.setMaterialParameter(device, material, name, nil, setting, func(shader Shader, binding gfx.ShaderBinding, parameter *bindingValue, _ *gfx.Buffer) error {
+		return table.fillSettingValue(device, shader, binding, setting, parameter)
 	})
 }
 

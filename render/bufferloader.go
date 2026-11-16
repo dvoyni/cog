@@ -12,12 +12,14 @@ import (
 // one buffer for each path and usage, counted by the acquires holding it, its bytes
 // written by render's decode-and-write job, and freed at the end of the frame
 // its count reaches zero in. Its counter's mutex also guards its
-// pending loads; it reads no file holding it.
+// pending loads and reloads; it reads no file holding it.
 type bufferLoader struct {
 	assetCounter[bufferKey, Buffer]
 	// pendingLoads are the buffers whose bytes the decode-and-write job has
-	// yet to write.
-	pendingLoads []pendingBufferLoad
+	// yet to write, and pendingReloads those ReloadChanged reloaded, to be
+	// swapped in at the start of the next frame.
+	pendingLoads   []pendingBufferLoad
+	pendingReloads []assetReload[Buffer, gfx.Buffer]
 }
 
 // acquire hands out the buffer of key, counting one more holder, and makes
@@ -55,6 +57,7 @@ func (l *bufferLoader) acquire(table *assetTable, device gfx.Device, files fs.FS
 		return Buffer{}
 	}
 	l.add(key, buffer)
+	l.setStamp(buffer, makeFileStamp(info, statErr))
 	if statErr != nil {
 		table.report(ReportKindLoadFailed, fmt.Errorf("render: buffer %q failed to load: %w", key.path, statErr))
 	} else {
@@ -94,6 +97,36 @@ func (l *bufferLoader) writeHeld(table *assetTable, device gfx.Device, files fs.
 	l.write(table, device, files, loads)
 }
 
+// reloadChanged reloads, in the caller's job, each buffer l holds whose
+// file's stamp changed since it was loaded or last reloaded: it reads the
+// file again, padded with zeros to a multiple of 4 bytes, and, when that
+// size is not the buffer's, makes a gfx buffer of it on device, labelled
+// with the buffer's handle, with the usage the buffer was acquired with and
+// the copy destination, which swapReloads puts behind the handle at the
+// start of the next frame, writing the bytes then. A file that cannot be
+// read, or has no bytes, is reported once for that change, and the buffer
+// keeps what it held.
+func (l *bufferLoader) reloadChanged(table *assetTable, device gfx.Device, files fs.FS) {
+	for _, changed := range l.claimChanged(files, func(key bufferKey) string { return key.path }) {
+		data, err := fs.ReadFile(files, changed.key.path)
+		if err == nil && len(data) == 0 {
+			err = errors.New("a file of no bytes")
+		}
+		if err != nil {
+			table.report(ReportKindLoadFailed, fmt.Errorf("render: buffer %q failed to reload, keeping what it held: %w", changed.key.path, err))
+			continue
+		}
+		reload := assetReload[Buffer, gfx.Buffer]{handle: changed.handle, stamp: changed.stamp, contents: padBytes(data)}
+		if _, size, _ := table.findBuffer(changed.handle); size != uint64(len(reload.contents)) {
+			if reload.replacement, err = createLabelledBuffer(device, changed.handle, changed.key.path, uint64(len(reload.contents)), changed.key.usage); err != nil {
+				table.logUnlessLost(fmt.Errorf("render: reloading buffer %q: %w", changed.key.path, err))
+				continue
+			}
+		}
+		l.queueReload(&l.pendingReloads, reload, device.ReleaseBuffer)
+	}
+}
+
 // write reads and writes the file of each of loads still held in table, as
 // writePending says, holding no mutex but to mark a failed load.
 func (l *bufferLoader) write(table *assetTable, device gfx.Device, files fs.FS, loads []pendingBufferLoad) {
@@ -131,3 +164,4 @@ type pendingBufferLoad struct {
 	buffer Buffer
 	path   string
 }
+

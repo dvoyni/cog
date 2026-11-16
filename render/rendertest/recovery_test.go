@@ -51,14 +51,21 @@ func recordCallCount(h *rendertest.Harness, recoveredCallCounts chan<- int) func
 // or a texture.
 func containsWrite(calls []recording.Call, data []byte) bool {
 	return slices.ContainsFunc(calls, func(call recording.Call) bool {
-		switch arguments := call.Arguments.(type) {
-		case recording.WriteTextureArguments:
-			return bytes.Equal(arguments.Data, data)
-		case recording.WriteBufferArguments:
-			return bytes.Equal(arguments.Data, data)
-		}
-		return false
+		written, ok := readWrittenData(call.Arguments)
+		return ok && bytes.Equal(written, data)
 	})
+}
+
+// readWrittenData answers the data a call of arguments wrote, into a buffer
+// or a texture; false for a call that is no write.
+func readWrittenData(arguments any) ([]byte, bool) {
+	switch arguments := arguments.(type) {
+	case recording.WriteTextureArguments:
+		return arguments.Data, true
+	case recording.WriteBufferArguments:
+		return arguments.Data, true
+	}
+	return nil, false
 }
 
 // containsAssetWriteBetween answers whether one of writes, calls on one asset,

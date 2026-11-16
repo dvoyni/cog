@@ -26,6 +26,16 @@ func (s *textureSlot) findTextureView(device gfx.Device, descriptor gfx.TextureV
 	return view, nil
 }
 
+// releaseTexture releases s's gfx texture and its views, forgetting the
+// views.
+func (s *textureSlot) releaseTexture(device gfx.Device) {
+	for _, view := range s.textureViews {
+		device.ReleaseTextureView(view.view)
+	}
+	device.ReleaseTexture(s.texture)
+	s.textureViews = s.textureViews[:0]
+}
+
 // internedTextureView is a view of a texture a textureSlot holds, and the
 // descriptor it was made of: one mip level and one layer a pass draws into
 // or render's mip shader samples, or the view a parameter binds.

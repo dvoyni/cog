@@ -58,7 +58,16 @@ body. `AcquireBuffer(path, usage)` makes a buffer of the file's size,
 rounded up to a multiple of 4, with the `BufferUsageFlags` its caller
 declares and the copy destination render fills it through, shared and
 counted by path and usage, its bytes written by the same jobs; a file that
-fails to load is reported once. `MakeBuffer[T](label, usage, data)` and
+fails to load is reported once. `ReloadChanged()` reloads each loaded
+texture and buffer whose file `fs.Stat` stamps with another modification
+time or size than at its load, reading no other: it decodes the file, and
+makes the gfx object again where its size changed, in the caller's job, and
+swaps it in under the same handle at the next frame's start, its contents
+written then, so a frame draws every asset old or every one new, and the
+objects replaced are freed with the bind groups naming them; a mesh whose
+range no longer fits its buffer skips its draws, and a file that fails is
+reported once for each change and keeps what its asset drew.
+`MakeBuffer[T](label, usage, data)` and
 `MakeTexture[T](descriptor, data)` make a buffer or texture filled from a
 slice at once, a made texture with every usage its format allows, each given
 back once with `ReleaseBuffer` or `ReleaseTexture` and freed at the end of
@@ -223,8 +232,8 @@ What remains is on the [render map](https://github.com/dvoyni/cog/issues/800).
 - **`Inventory`** is the task parameter a task reaches render's assets
   through: it acquires textures and **`Buffer`**s from files, makes them
   from slices, writes them, a texture by **`TextureRegion`**, and releases
-  them, and acquires and releases **`Shader`**s, each a variant of a file
-  with its **`ShaderDefine`**s.
+  them, reloads those whose files changed, and acquires and releases
+  **`Shader`**s, each a variant of a file with its **`ShaderDefine`**s.
 - **`Surface`** is the task parameter a task changes the windows' surfaces
   through, with a **`SurfaceRequest`** of a `TextureFormat` and a
   **`PresentMode`**.

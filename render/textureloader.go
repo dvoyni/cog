@@ -12,12 +12,14 @@ import (
 // files: one texture for each key, counted by the acquires holding it, its
 // body written by render's decode job, and freed at the end of the frame its
 // count reaches zero in. Its counter's mutex also guards its pending
-// loads; it reads no file holding it.
+// loads and reloads; it reads no file holding it.
 type textureLoader struct {
 	assetCounter[textureKey, Texture]
 	// pendingLoads are the textures whose bodies the decode job has yet to
-	// write.
-	pendingLoads []pendingTextureLoad
+	// write, and pendingReloads those ReloadChanged reloaded, to be swapped
+	// in at the start of the next frame.
+	pendingLoads   []pendingTextureLoad
+	pendingReloads []assetReload[Texture, gfx.Texture]
 }
 
 // acquire hands out the texture of key, counting one more holder, and makes
@@ -32,7 +34,7 @@ func (l *textureLoader) acquire(table *assetTable, device gfx.Device, files fs.F
 	if ok {
 		return texture
 	}
-	descriptor, headerErr := key.readHeader(files)
+	descriptor, stamp, headerErr := key.readHeader(files)
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 	if texture, ok := l.hold(key); ok {
@@ -44,6 +46,7 @@ func (l *textureLoader) acquire(table *assetTable, device gfx.Device, files fs.F
 		return Texture{}
 	}
 	l.add(key, texture)
+	l.setStamp(texture, stamp)
 	if headerErr != nil {
 		table.report(ReportKindLoadFailed, fmt.Errorf("render: texture %q failed to load, drawing magenta: %w", key.path, headerErr))
 		l.markFailed(texture)
@@ -82,6 +85,39 @@ func (l *textureLoader) writeHeld(table *assetTable, device gfx.Device, files fs
 	}
 	l.mutex.Unlock()
 	return l.write(table, device, files, loads)
+}
+
+// reloadChanged reloads, in the caller's job, each texture l holds whose
+// file's stamp changed since it was loaded or last reloaded: it decodes the
+// file again and, when its size or mip level count changed, makes a gfx
+// texture of the new descriptor on device, labelled with the texture's
+// handle, which swapReloads puts behind the handle at the start of the next
+// frame, writing the texels then. A file that fails to decode is reported
+// once for that change, and the texture keeps drawing what it drew.
+func (l *textureLoader) reloadChanged(table *assetTable, device gfx.Device, files fs.FS) {
+	for _, changed := range l.claimChanged(files, func(key textureKey) string { return key.path }) {
+		descriptor, _, err := changed.key.readHeader(files)
+		var texels []byte
+		if err == nil {
+			texels, err = changed.key.decodeBody(files, descriptor.Width, descriptor.Height)
+		}
+		if err != nil {
+			table.report(ReportKindLoadFailed, fmt.Errorf("render: texture %q failed to reload, drawing what it drew: %w", changed.key.path, err))
+			continue
+		}
+		gfxTexture, ok := table.findTexture(changed.handle)
+		if !ok {
+			continue
+		}
+		reload := assetReload[Texture, gfx.Texture]{handle: changed.handle, stamp: changed.stamp, contents: texels, size: gfx.Extent3D{Width: descriptor.Width, Height: descriptor.Height, DepthOrArrayLayers: 1}, mipmaps: changed.key.options.Mipmaps}
+		if current := device.TextureDescriptor(gfxTexture); current.Size != reload.size || current.MipLevelCount != descriptor.MipLevelCount {
+			if reload.replacement, err = createLabelledTexture(device, changed.handle, descriptor); err != nil {
+				table.logUnlessLost(fmt.Errorf("render: reloading texture %q: %w", changed.key.path, err))
+				continue
+			}
+		}
+		l.queueReload(&l.pendingReloads, reload, device.ReleaseTexture)
+	}
 }
 
 // write decodes and writes the body of each of loads still held in table, at
@@ -125,3 +161,4 @@ type pendingTextureLoad struct {
 	key     textureKey
 	failed  bool
 }
+
