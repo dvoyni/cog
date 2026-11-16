@@ -1,14 +1,15 @@
 go 1.27
 
 use (
-	./ecs
-	./gfx
-	./gogpu
 	./kernel
-	./metronome
-	./mux
-	./platform
-	./render
+	./libs/m
+	./plugins/ecs
+	./plugins/gfx
+	./plugins/gogpu
+	./plugins/metronome
+	./plugins/mux
+	./plugins/platform
+	./plugins/render
 	./submodules/gogpu
 	./submodules/wgpu
 )
@@ -18,10 +19,10 @@ use (
 // Go reads the requirement graph, and fetches a used module's v0.0.0
 // otherwise.
 replace (
-	github.com/dvoyni/cog/gfx v0.0.0 => ./gfx
-	github.com/dvoyni/cog/gogpu v0.0.0 => ./gogpu
 	github.com/dvoyni/cog/kernel v0.0.0 => ./kernel
-	github.com/dvoyni/cog/metronome v0.0.0 => ./metronome
-	github.com/dvoyni/cog/platform v0.0.0 => ./platform
+	github.com/dvoyni/cog/plugins/gfx v0.0.0 => ./plugins/gfx
+	github.com/dvoyni/cog/plugins/gogpu v0.0.0 => ./plugins/gogpu
+	github.com/dvoyni/cog/plugins/metronome v0.0.0 => ./plugins/metronome
+	github.com/dvoyni/cog/plugins/platform v0.0.0 => ./plugins/platform
 	github.com/gogpu/gogpu v0.0.0 => ./submodules/gogpu
 )

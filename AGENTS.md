@@ -4,6 +4,12 @@ Before any work, read and follow submodules/rules/AGENTS.md.
 
 Each module has its own `AGENTS.md` for rules that hold only there.
 
+## Layout
+
+- A plugin lives under `plugins/`, each in a module of its own named for its path: render is `plugins/render`, `github.com/dvoyni/cog/plugins/render`.
+- A library, code that is no plugin and that plugins import, lives under `libs/`, each in a module of its own, not among the plugins: the math library is `libs/m`, `github.com/dvoyni/cog/libs/m`.
+- The kernel, which runs the plugins and is neither, stays at the repository's root, in `kernel/`.
+
 ## Plugins
 
 - A plugin's constructor takes no parameters: `NewPlugin()`. What it can be configured with is a plain `Config` struct of values in its package, given as a pointer, its part of the kernel's config, as `kernel/AGENTS.md` says. No functional options. (kernel/docs/design.md, *Plugins*)
@@ -14,7 +20,7 @@ Each module has its own `AGENTS.md` for rules that hold only there.
 - The body of every task a plugin registers is in the plugin package's `tasks.go`, whether its `Tasks` resource holds it or the plugin schedules it alone, not in the file of the type it works on or beside `Init`: mux's `step`, the body of `Tasks.Step`, is in `tasks.go`, not `timeline.go`, and render's `writeLoads` and `endFrame` are in `tasks.go`, not `plugin.go`.
 - A task reaches a resource through `kernel.Read[T]` and `kernel.Write[T]`; one thing is done one way. A custom `kernel.Parameter` type is for the rare case it improves much, as ecs's queries do.
 - A count or size a plugin's behaviour is tuned by is a field of its `Config`, its zero value meaning a stated default, not a constant left for a later measurement to set: render's pools free what goes unused for `Config.TemporaryIdleFrames` frames, zero meaning 10.
-- A package's handle types are collected in one file, `handles.go`, beside the base type they embed, not each in a file named after it; a package naming handles of another by public aliases collects the aliases there too: render's `Texture` alias is in `render/handles.go`, and `handle.Texture` beside `handle` in `render/internal/handle/handles.go`, as gfx's are in `gfx/handles.go`.
+- A package's handle types are collected in one file, `handles.go`, beside the base type they embed, not each in a file named after it; a package naming handles of another by public aliases collects the aliases there too: render's `Texture` alias is in `plugins/render/handles.go`, and `handle.Texture` beside `handle` in `plugins/render/internal/handle/handles.go`, as gfx's are in `plugins/gfx/handles.go`.
 - A plugin's `plugin.go` holds the plugin alone, its type, `Config` and lifecycle methods: the event handlers it subscribes in `Init`, named functions such as render's `recordFrame` and `deliverCapture`, are in `tasks.go` beside the task bodies they schedule, not after `Destroy`.
 
 ## Upstream forks

@@ -3,13 +3,13 @@
 ## Contexts
 
 - [Kernel](./kernel/CONTEXT.md): runs plugins' work as jobs over shared resources, ordering jobs and keeping their locks apart
-- [ECS](./ecs/CONTEXT.md): worlds of entities with pointer-free components, worked on by systems that run as kernel tasks
-- [Metronome](./metronome/CONTEXT.md): paces the tracks an application declares, publishing each beat as a kernel event
-- [Gfx](./gfx/CONTEXT.md): the GPU as a kernel sees it, a thin mirror of wgpu that draws one frame per beat of the render track
-- [Platform](./platform/CONTEXT.md): what the operating system provides, windows, input and filesystems, declared as interfaces an implementing plugin fills
-- [Gogpu](./gogpu/CONTEXT.md): the plugin that implements gfx and platform over our gogpu fork, driven from the kernel's main-thread tick
-- [Mux](./mux/CONTEXT.md): a game's true state as plain data, shown through timed overrides that catch what is drawn up to it
-- [Render](./render/CONTEXT.md): the immediate-mode rendering API over gfx, drawing meshes with materials into passes, and loading and sharing the shaders, textures and buffers they use
+- [ECS](./plugins/ecs/CONTEXT.md): worlds of entities with pointer-free components, worked on by systems that run as kernel tasks
+- [Metronome](./plugins/metronome/CONTEXT.md): paces the tracks an application declares, publishing each beat as a kernel event
+- [Gfx](./plugins/gfx/CONTEXT.md): the GPU as a kernel sees it, a thin mirror of wgpu that draws one frame per beat of the render track
+- [Platform](./plugins/platform/CONTEXT.md): what the operating system provides, windows, input and filesystems, declared as interfaces an implementing plugin fills
+- [Gogpu](./plugins/gogpu/CONTEXT.md): the plugin that implements gfx and platform over our gogpu fork, driven from the kernel's main-thread tick
+- [Mux](./plugins/mux/CONTEXT.md): a game's true state as plain data, shown through timed overrides that catch what is drawn up to it
+- [Render](./plugins/render/CONTEXT.md): the immediate-mode rendering API over gfx, drawing meshes with materials into passes, and loading and sharing the shaders, textures and buffers they use
 
 ## Relationships
 

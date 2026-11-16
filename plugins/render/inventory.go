@@ -1,0 +1,489 @@
+package render
+
+import (
+	"fmt"
+	"reflect"
+	"unsafe"
+
+	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/plugins/gfx"
+	"github.com/dvoyni/cog/plugins/platform"
+)
+
+// Inventory is the task parameter a task reaches render's assets through, to
+// acquire, make, write and release them, declared in its signature as kernel.Read is:
+//
+//	func loadLevel(k *kernel.Kernel, level Level, inventory render.Inventory) kernel.NoResult
+//
+// It locks render's asset table, gfx's Device and platform's FS, all for
+// read, so tasks holding it run together and beside recording tasks, and its
+// user names neither gfx nor its locks. A task that records and acquires
+// declares it beside Frame. It is valid only while the task's job runs.
+type Inventory struct {
+	table  kernel.Read[*assetTable]
+	device kernel.Read[gfx.Device]
+	files  kernel.Read[platform.FS]
+}
+
+// Declare declares Inventory's locks and answers it bound to what they guard.
+func (Inventory) Declare(access *kernel.Access) Inventory {
+	return Inventory{table: access.Read[*assetTable](), device: access.Read[gfx.Device](), files: access.Read[platform.FS]()}
+}
+
+// AcquireTexture hands out the texture of path in platform's FS with
+// options, counting one more holder of it: every acquire of the same path
+// and options shares one texture until the last of them is released. The
+// texture exists when the call returns, made from the file's header alone,
+// with its size, the format of its colour space, 8 bits per channel, and
+// with Mipmaps every mip level; render's jobs write its body before gfx
+// submits the frame, whether it was acquired before the frame or while it
+// records, so a draw recorded after the acquire reads it, and with Mipmaps
+// draws every level below the first from it in render's own command list,
+// which gfx submits before every user's. One acquired by a task the frame
+// does not wait for, after its recording has ended, is written, and its mips
+// drawn, before the next frame's submit instead. A file render
+// cannot read or decode is reported once, and draws magenta: one texel when
+// its header fails, its own size when its body does. A texture gfx refuses
+// to make is logged, and the zero Texture answered. PNG and JPEG files load.
+func (i Inventory) AcquireTexture(path string, options TextureOptions) Texture {
+	table := i.table.Get()
+	return table.loadedTextures.acquire(table, i.device.Get(), i.files.Get(), textureKey{path: path, options: options})
+}
+
+// AcquireBuffer hands out the buffer of path in platform's FS with usage,
+// counting one more holder of it: every acquire of the same path and usage
+// shares one buffer until the last of them is released, and one of another
+// usage gets a buffer of its own. The buffer exists when the call returns,
+// of the file's size as fs.Stat answers it, rounded up to a multiple of 4,
+// with usage and the copy destination render's writes need; gfx refuses any
+// other use of it. render's jobs write the
+// file's bytes into it, zeros after them, before gfx submits the frame, at
+// the points AcquireTexture's bodies are written at, so a draw recorded
+// after the acquire reads them. A file fs.Stat fails on, a folder or a file
+// of no bytes is reported once, and gets a buffer of no bytes; one that
+// cannot be read when its bytes are written, or whose size changed since the
+// acquire, is reported once, and its buffer keeps zeros. A buffer gfx
+// refuses to make is logged, and the zero Buffer answered.
+func (i Inventory) AcquireBuffer(path string, usage BufferUsageFlags) Buffer {
+	table := i.table.Get()
+	return table.loadedBuffers.acquire(table, i.device.Get(), i.files.Get(), bufferKey{path: path, usage: usage})
+}
+
+// AcquireShader hands out the variant of the shader at path in platform's FS
+// with defines, counting one more holder of it: every acquire of the same
+// path and defines, in any order, shares one variant until the last of them
+// is released. It is compiled when the call returns, in the caller's job:
+// read and preprocessed with defines, sorted by name, made a gfx module, and
+// given a layout for each group up to the highest its bindings declare, of
+// every binding it declares, used or not, an unused group's empty. Uniform
+// blocks of @group(0) and @group(2), and storage buffers of @group(2), bind
+// at dynamic offsets, and every binding is seen by each stage that may see
+// it. Identical layouts are shared between shaders, so shaders sharing an
+// include share its group's layout. Compiling is slow: a variant acquired
+// first while a frame records stalls that recording. A file that fails to
+// preprocess or compile is reported once, and one declaring @group(3), which
+// render reserves, or past the device's limits, such as more than 8 uniform
+// blocks or 4 storage buffers at dynamic offsets, or 8 storage buffers a
+// stage sees, is refused and reported once; either answers a shader whose
+// draws are skipped. A second acquire of a held variant, of up to 8 defines
+// whose names and values join in up to 128 bytes, allocates nothing.
+func (i Inventory) AcquireShader(path string, defines ...ShaderDefine) Shader {
+	table := i.table.Get()
+	// sortedArray and joinedArray hold the variant's defines, sorted, and
+	// its key's join of them, on the stack, so a second acquire of a held
+	// variant allocates nothing.
+	var sortedArray [8]gfx.ShaderDefine
+	var joinedArray [128]byte
+	sortedDefines := sortDefines(defines, sortedArray[:])
+	joinedDefines := appendJoinedDefines(joinedArray[:0], sortedDefines)
+	return table.loadedShaders.acquire(table, i.device.Get(), i.files.Get(), path, joinedDefines, sortedDefines)
+}
+
+// ReloadChanged reloads every texture, buffer and shader loaded from a file
+// that changed since it was loaded or last reloaded, as fs.Stat answers its
+// modification time and size, reading no file that did not: a shader's files
+// are its own and every file its preprocessing included, so changing an
+// include reloads every variant that includes it. An embedded file never
+// changes, so a game in development mounts its asset folder from disk above
+// it; a memory mount stamps each put. A file is read, decoded and made into
+// new gfx objects where its size changed in the caller's job, as an
+// acquire's is, a shader compiled there as its acquire compiles it, and
+// swapped in under the same handles at the start of the next frame, so a
+// frame draws every asset old or every one new; the objects replaced are
+// freed then, the last frame that drew them having ended, with the bind
+// groups naming them, made again at their next use.
+//
+// A texture of an unchanged size has its texels written in place, and its
+// mips drawn again with Mipmaps; one of another size, a texture made at it.
+// A buffer of an unchanged size has its bytes written in place; one of
+// another size, a buffer made at it, a mesh whose range ends past it
+// skipping its draws, reported once. A material value naming a texture or
+// buffer made again is bound again from what its setter was given, so a
+// view of every mip level sees every one of the new texture and a range of
+// the rest of a buffer ends at its new end; one that no longer fits is
+// unbound and reported.
+//
+// A reloaded shader's pipelines are made again at their next draw or
+// dispatch, and its materials bind their values again by name: a value
+// whose name the new shader lacks is dropped, and one that no longer fits
+// its binding is refused, reported once for the shader and name, and draws
+// its binding's default until a later reload it fits. A material whose
+// entry points the new shader lacks is refused and reported, its draws
+// skipped, keeping its values for a later reload that resolves them. A
+// material made while its shader had failed binds no value
+// set then, as its setters ignored them.
+//
+// A file that fails to load, or a shader that fails to preprocess or
+// compile, is reported once for each change, and its asset keeps drawing
+// what it drew; the next change tries again, a shader's including an
+// include it looked for appearing. Made assets are not reloaded. A game
+// binds ReloadChanged to a key, or a plugin of its own calls it every
+// second; it allocates only while it runs.
+func (i Inventory) ReloadChanged() {
+	table := i.table.Get()
+	table.loadedTextures.reloadChanged(table, i.device.Get(), i.files.Get())
+	table.loadedBuffers.reloadChanged(table, i.device.Get(), i.files.Get())
+	table.loadedShaders.reloadChanged(table, i.device.Get(), i.files.Get())
+}
+
+// MakeBuffer makes a buffer filled from data, labelled label, with usage,
+// which exists, filled, when the call returns: the bytes of data's elements
+// as Go lays them out, padding included, so T is plain data with no
+// pointers, laid out as the shader reads it, such as a number, or an array
+// or struct of them. Its size is data's, rounded up to a multiple of 4 with
+// zeros, and it carries usage and the copy destination, as AcquireBuffer's
+// does. After a device loss it holds nothing, under the same handle,
+// until its maker fills it again on RecoveredEvent. Its maker gives it
+// back once, with ReleaseBuffer. A buffer of no
+// bytes gets no gfx buffer, so nothing writes or binds it. A buffer gfx
+// refuses to make is logged, and the zero Buffer answered.
+func (i Inventory) MakeBuffer[T any](label string, usage BufferUsageFlags, data []T) Buffer {
+	table := i.table.Get()
+	device := i.device.Get()
+	bytes := castToBytes(data)
+	buffer, gfxBuffer, err := table.addBuffer(device, label, uint64(len(bytes)), usage)
+	if err != nil {
+		table.logUnlessLost(fmt.Errorf("render: making buffer %q: %w", label, err))
+		return Buffer{}
+	}
+	table.madeBuffers.mutex.Lock()
+	table.madeBuffers.add(buffer, buffer)
+	table.madeBuffers.mutex.Unlock()
+	if len(bytes) > 0 {
+		writeBytes(table, device, buffer, gfxBuffer, 0, padBytes(bytes))
+	}
+	return buffer
+}
+
+// MakeTexture makes a texture of descriptor, whose zero counts mean one,
+// which exists when the call returns, with every usage its format allows, as
+// a temporary texture has: a pass target kept across frames, sampled, bound
+// for storage where its format allows, and copied from and to. data fills its
+// mip level 0, layer after layer, each layer's rows of texels packed tight,
+// as WriteTexture lays out a region, T as MakeBuffer's; no data leaves it
+// zero, and data of another length is refused and reported, leaving it zero.
+// Levels below the first stay zero until written. After a device loss it
+// holds nothing, under the same handle, until its maker fills it again on
+// RecoveredEvent. Its maker gives it back
+// once, with ReleaseTexture. A texture gfx refuses to make is logged, and the
+// zero Texture answered.
+func (i Inventory) MakeTexture[T any](descriptor TextureDescriptor, data []T) Texture {
+	table := i.table.Get()
+	device := i.device.Get()
+	descriptor = descriptor.fillDefaults()
+	texture, err := table.addTexture(device, descriptor)
+	if err != nil {
+		table.logUnlessLost(fmt.Errorf("render: making texture %q: %w", descriptor.Label, err))
+		return Texture{}
+	}
+	table.madeTextures.mutex.Lock()
+	table.madeTextures.add(texture, texture)
+	table.madeTextures.mutex.Unlock()
+	texels := castToBytes(data)
+	if len(texels) == 0 {
+		return texture
+	}
+	texelSize := descriptor.Format.info().texelSize
+	levelSize := uint64(descriptor.Width) * uint64(descriptor.Height) * uint64(texelSize) * uint64(descriptor.LayerCount)
+	if levelSize == 0 || descriptor.SampleCount > 1 || uint64(len(texels)) != levelSize {
+		table.report(ReportKindWriteRefused, fmt.Errorf("render: making texture %q of %d samples from %d bytes, where it has one sample and its mip level 0 of %d layers holds %d", descriptor.Label, descriptor.SampleCount, len(texels), descriptor.LayerCount, levelSize))
+		return texture
+	}
+	gfxTexture, _ := table.findTexture(texture)
+	writeTexels(table, device, texture, gfx.ImageCopyTexture{Texture: gfxTexture, Aspect: gfx.TextureAspectAll}, texels, texelSize,
+		gfx.Extent3D{Width: descriptor.Width, Height: descriptor.Height, DepthOrArrayLayers: descriptor.LayerCount})
+	return texture
+}
+
+// MakeMesh makes a mesh of descriptor: its vertex buffers, ranges of buffers
+// render holds with their layouts, its index buffer, and its topology. A
+// draw of it covers all of it: as many vertices as the fewest its vertex
+// ranges hold, by their strides, or, with an index buffer, as many indices
+// as its range holds. The mesh owns none of the buffers it names: a draw of
+// it after one of them is freed, or one that failed, is skipped and
+// reported once. Its maker gives it back once, with ReleaseMesh. A mesh is
+// refused and reported, answering the zero Mesh, for more vertex buffers
+// than the device allows (8 by WebGPU's default limits), a vertex buffer at
+// an offset or of a stride no multiple of 4, an attribute at an offset no
+// multiple of 4, or of 2 for a format of two 8-bit components, an index
+// buffer of no index format or at an offset no multiple of its index's size,
+// or a topology gfx has none of.
+// Once render's tables have grown, a mesh of vertex layouts drawn before
+// allocates nothing.
+func (i Inventory) MakeMesh(descriptor MeshDescriptor) Mesh {
+	table := i.table.Get()
+	label := table.labels.intern(descriptor.Label)
+	mesh, err := table.addMesh(i.device.Get(), label, descriptor)
+	if err != nil {
+		table.report(ReportKindMeshRefused, fmt.Errorf("render: making mesh %q: %w", label, err))
+		return Mesh{}
+	}
+	table.madeMeshes.mutex.Lock()
+	table.madeMeshes.add(mesh, mesh)
+	table.madeMeshes.mutex.Unlock()
+	return mesh
+}
+
+// MakeMaterial makes a material of descriptor: its shader, render state and
+// entry points. A material owns nothing it names: a draw of it after its
+// shader is freed, or of one whose shader failed, is skipped and reported
+// once. An empty entry point names the shader's only function of its stage,
+// and a shader with no @fragment function makes a material with no fragment
+// stage, drawn only into passes with no colour target, such as a shadow map
+// or a depth prepass; a material with a fragment function drawn into such a
+// pass runs it with no targets, so alpha-tested shadows still discard. A
+// material naming a function its shader lacks, or none of a stage where its
+// shader has several, is refused and reported once, and its draws are
+// skipped. Its maker gives it back once, with ReleaseMaterial.
+func (i Inventory) MakeMaterial(descriptor MaterialDescriptor) Material {
+	table := i.table.Get()
+	material, err := table.addMaterial(descriptor)
+	if err != nil {
+		table.report(ReportKindMaterialRefused, fmt.Errorf("render: making material %q of shader %v: %w", descriptor.Label, descriptor.Shader, err))
+	}
+	table.madeMaterials.mutex.Lock()
+	table.madeMaterials.add(material, material)
+	table.madeMaterials.mutex.Unlock()
+	return material
+}
+
+// SetMaterialTexture binds texture whole to material's binding named name, a
+// texture or storage texture of its shader's @group(1), as
+// SetMaterialTextureView binds the zero view of it, but that a storage
+// binding sees its first mip level.
+// A name its shader lacks is ignored, so one set of values serves every
+// variant, and the name of a binding outside @group(1) is refused and
+// reported once.
+// A draw uses the values its material holds when it is recorded: a change
+// after the material's first draw in the frame shows only in the draws
+// recorded after it, the material taking a new bind group, freed at the
+// frame's end. A change made by one task while another records draws of the
+// material may not show in those draws: it shows for certain in the draws
+// the task that made it records after it, and in those recorded after a
+// task the kernel orders before the frame's recording.
+func (i Inventory) SetMaterialTexture(material Material, name string, texture Texture) {
+	i.setMaterialTextureView(material, name, TextureView{Texture: texture}, true)
+}
+
+// SetMaterialTextureView binds view, part of a texture or the texture seen
+// another way, to material's binding named name, a texture or storage
+// texture of its shader's @group(1). render makes the gfx view at its first
+// draw and frees it with its texture; a texture freed while bound unbinds
+// at the end of that frame. A view is refused, reported once for its shader
+// and name, when it does not fit its binding: a texture render does not
+// hold, another view dimension, sample type, aspect or storage format, one
+// sample where the binding is multisampled or several where it is not, mips
+// or layers its texture lacks, or more than one mip level for a storage
+// binding. A texture a draw's pass writes, unless it is the pass's read-only
+// depth-stencil target sampled, is caught at the draw and reported once, so
+// the list's encoder survives. Each draws the binding's default in its
+// place.
+// A name its shader lacks is ignored, so one set of values serves every
+// variant, and the name of a binding outside @group(1) is refused and
+// reported once.
+// A draw uses the values its material holds when it is recorded: a change
+// after the material's first draw in the frame shows only in the draws
+// recorded after it, the material taking a new bind group, freed at the
+// frame's end. A change made by one task while another records draws of the
+// material may not show in those draws: it shows for certain in the draws
+// the task that made it records after it, and in those recorded after a
+// task the kernel orders before the frame's recording.
+func (i Inventory) SetMaterialTextureView(material Material, name string, view TextureView) {
+	i.setMaterialTextureView(material, name, view, false)
+}
+
+// SetMaterialSampler binds sampler, by value, to material's binding named
+// name, a sampler of its shader's @group(1); samplers equal by value share
+// one. A comparison sampler for another binding, another for a comparison
+// binding, or a filtering one for a binding that does not filter is
+// refused, reported once for its shader and name, and the binding draws its
+// default.
+// A name its shader lacks is ignored, so one set of values serves every
+// variant, and the name of a binding outside @group(1) is refused and
+// reported once.
+// A draw uses the values its material holds when it is recorded: a change
+// after the material's first draw in the frame shows only in the draws
+// recorded after it, the material taking a new bind group, freed at the
+// frame's end. A change made by one task while another records draws of the
+// material may not show in those draws: it shows for certain in the draws
+// the task that made it records after it, and in those recorded after a
+// task the kernel orders before the frame's recording.
+func (i Inventory) SetMaterialSampler(material Material, name string, sampler SamplerDescriptor) {
+	setting := parameterSetting{name: name, kind: parameterKindSampler, sampler: sampler}
+	i.table.Get().setMaterialParameter(i.device.Get(), material, name, nil, setting)
+}
+
+// SetMaterialBuffer binds bufferRange, a zero size the rest of its buffer,
+// to material's binding named name, a uniform block or storage buffer of
+// its shader's @group(1). A buffer freed while bound unbinds at the end of
+// that frame. A range is refused, reported once for its shader and name,
+// when it does not fit its binding: a buffer render does not hold or of no
+// bytes, made without the binding's usage, a range past its end, at an
+// offset no multiple of 256 (WebGPU's default alignment), or smaller than
+// the binding's type. The binding then draws its default.
+// A name its shader lacks is ignored, so one set of values serves every
+// variant, and the name of a binding outside @group(1) is refused and
+// reported once.
+// A draw uses the values its material holds when it is recorded: a change
+// after the material's first draw in the frame shows only in the draws
+// recorded after it, the material taking a new bind group, freed at the
+// frame's end. A change made by one task while another records draws of the
+// material may not show in those draws: it shows for certain in the draws
+// the task that made it records after it, and in those recorded after a
+// task the kernel orders before the frame's recording.
+func (i Inventory) SetMaterialBuffer(material Material, name string, bufferRange BufferRange) {
+	setting := parameterSetting{name: name, kind: parameterKindBuffer, bufferRange: bufferRange}
+	i.table.Get().setMaterialParameter(i.device.Get(), material, name, nil, setting)
+}
+
+// SetMaterialUniform binds value, plain data with no pointers mirroring a
+// WGSL struct, to material's uniform block named name, of its shader's
+// @group(1). Before the material's first draw in the frame, its bytes, as
+// Go lays them out, go into a buffer the material holds, landing, as
+// WriteBuffer's do, before gfx's next submit; after it, they are copied
+// into the temporary arena at the material's next draw, and the material's
+// buffer takes them when the frame ends. T is
+// checked once for each shader and binding: its size, and each field's
+// offset against the block's members in order, names ignored and fields
+// named _ left out as padding; a type that is no struct, such as
+// [4]float32, fills a block that is no struct of its size. A value of the
+// wrong layout, or for a binding of another kind, is refused, reported once
+// for its shader and name, and the block draws zeros.
+// A name its shader lacks is ignored, so one set of values serves every
+// variant, and the name of a binding outside @group(1) is refused and
+// reported once.
+// A draw uses the values its material holds when it is recorded: a change
+// after the material's first draw in the frame shows only in the draws
+// recorded after it, the material taking a new bind group, freed at the
+// frame's end. A change made by one task while another records draws of the
+// material may not show in those draws: it shows for certain in the draws
+// the task that made it records after it, and in those recorded after a
+// task the kernel orders before the frame's recording.
+func (i Inventory) SetMaterialUniform[T any](material Material, name string, value T) {
+	setting := parameterSetting{name: name, kind: parameterKindUniform, uniformType: reflect.TypeFor[T]()}
+	i.table.Get().setMaterialParameter(i.device.Get(), material, name, castToBytes(unsafe.Slice(&value, 1)), setting)
+}
+
+// WriteBuffer writes data into buffer at offset, T as MakeBuffer's: a
+// loaded, made or other buffer render holds. The write lands before every
+// command list of gfx's next submit, so it fills the buffer for the whole
+// frame being recorded, or, once that frame is flushed, the next one; two
+// writes to one region in a frame leave the last. To change data between
+// passes, write a temporary buffer and copy it at that point in a command
+// list. A write that does not fit is refused and reported: into a buffer
+// render does not hold or of no bytes, at an offset or of a length that is
+// not a multiple of 4, or ending past the buffer.
+func (i Inventory) WriteBuffer[T any](buffer Buffer, offset uint64, data []T) {
+	i.table.Get().writeBuffer(i.device.Get(), buffer, offset, castToBytes(data))
+}
+
+// WriteTexture writes data into region of texture, one mip level and one
+// layer, so an atlas page lands in a layer of a 2D-array texture: rows of
+// texels packed tight, each texel of its format's size, T as MakeBuffer's.
+// It lands, as WriteBuffer's does, before every command list of gfx's next
+// submit, two writes to one region in a frame leaving the last. A write that
+// does not fit is refused and reported: into a texture render does not
+// hold, of several samples, or of a depth or depth-stencil format beyond
+// Depth16Unorm, which writes cannot fill; at a mip level or layer it lacks;
+// into a region past its level's edges; or of data not as long as the
+// region.
+func (i Inventory) WriteTexture[T any](texture Texture, region TextureRegion, data []T) {
+	i.table.Get().writeTexture(i.device.Get(), texture, region, castToBytes(data))
+}
+
+// ReleaseTexture gives back one acquire of texture, or the make of a made
+// one. When a loaded texture's last acquire is given back, or a made texture
+// is, the texture is freed at the end of that frame, after gfx's present, so
+// the frame's draws still read it; an acquire of a loaded texture's path and
+// options before then holds it again. A texture no acquire or make holds,
+// such as a temporary, one released as often as it was acquired, a made one
+// released already, or the zero Texture, is refused and reported.
+func (i Inventory) ReleaseTexture(texture Texture) {
+	table := i.table.Get()
+	if !table.loadedTextures.release(texture) && !table.madeTextures.release(texture) {
+		table.report(ReportKindReleaseRefused, fmt.Errorf("render: releasing texture %v, which no acquire or make holds", texture))
+	}
+}
+
+// ReleaseBuffer gives back one acquire of buffer, or the make of a made one,
+// freeing the buffer as ReleaseTexture frees a texture: at the end of that
+// frame, after gfx's present. A buffer no acquire or make holds, such as one
+// released as often as it was acquired, a made one released already, or the
+// zero Buffer, is refused and reported.
+func (i Inventory) ReleaseBuffer(buffer Buffer) {
+	table := i.table.Get()
+	if !table.loadedBuffers.release(buffer) && !table.madeBuffers.release(buffer) {
+		table.report(ReportKindReleaseRefused, fmt.Errorf("render: releasing buffer %v, which no acquire or make holds", buffer))
+	}
+}
+
+// ReleaseShader gives back one acquire of shader, freeing the shader as
+// ReleaseTexture frees a texture: at the end of that frame, after gfx's
+// present, with the layouts no other shader shares. A shader no acquire
+// holds, such as one released as often as it was acquired, or the zero
+// Shader, is refused and reported.
+func (i Inventory) ReleaseShader(shader Shader) {
+	table := i.table.Get()
+	if !table.loadedShaders.release(shader) {
+		table.report(ReportKindReleaseRefused, fmt.Errorf("render: releasing shader %v, which no acquire holds", shader))
+	}
+}
+
+// ReleaseMesh gives back the make of mesh, freeing it at the end of that
+// frame, after gfx's present, so the frame's draws still draw it. A mesh no
+// make holds, such as one released already or the zero Mesh, is refused and
+// reported.
+func (i Inventory) ReleaseMesh(mesh Mesh) {
+	table := i.table.Get()
+	if !table.madeMeshes.release(mesh) {
+		table.report(ReportKindReleaseRefused, fmt.Errorf("render: releasing mesh %v, which no make holds", mesh))
+	}
+}
+
+// ReleaseMaterial gives back the make of material, freeing it as ReleaseMesh
+// frees a mesh: at the end of that frame, after gfx's present. A material no
+// make holds, such as one released already or the zero Material, is refused
+// and reported.
+func (i Inventory) ReleaseMaterial(material Material) {
+	table := i.table.Get()
+	if !table.madeMaterials.release(material) {
+		table.report(ReportKindReleaseRefused, fmt.Errorf("render: releasing material %v, which no make holds", material))
+	}
+}
+
+// setMaterialTextureView binds view to material's binding named name, as
+// SetMaterialTextureView does, wholeTexture saying it names its texture
+// alone, which a storage binding sees at its first mip level.
+func (i Inventory) setMaterialTextureView(material Material, name string, view TextureView, wholeTexture bool) {
+	setting := parameterSetting{name: name, kind: parameterKindTexture, view: view, wholeTexture: wholeTexture}
+	i.table.Get().setMaterialParameter(i.device.Get(), material, name, nil, setting)
+}
+
+// castToBytes answers the bytes data's elements are laid out in, in data's
+// own array.
+func castToBytes[T any](data []T) []byte {
+	if len(data) == 0 {
+		return nil
+	}
+	return unsafe.Slice((*byte)(unsafe.Pointer(unsafe.SliceData(data))), len(data)*int(unsafe.Sizeof(data[0])))
+}
