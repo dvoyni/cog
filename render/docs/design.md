@@ -648,7 +648,7 @@ render republishes gfx's events as its own, each nested inside gfx's publication
 - **Setup:** the test calls `UseSoftwareAdapter` before `Spawn`, and the harness lists gogpu's plugin, with gfx's `ForceFallbackAdapter`, in place of the recording instance and the headless windows. gogpu's HostLoop runs on the kernel's main thread, which macOS requires to be the process's: a test package's `TestMain` calls `rendertest.RunMain`, which runs the tests on a goroutine of their own and the harness's `Spawn`, ticks and quit on the main thread. Without it, the test's goroutine is the kernel's main thread, locked to its OS thread, which serves on Windows and Linux, and a pixel test skips on macOS. Pixel tests also skip on Linux with no display.
 - **Method:** each test draws into textures and reads them back through render's readback, so it needs no window. It is a small fixed scene with exact expected texels, skipped under `-short`. Its shaders are in `rendertest/testdata/pixels`, their declarations generated beside them from `pixel_test.go`'s `//go:generate`.
 - **What they cover:**
-  - the mip shader, skipped until the wgpu fork tracks a texture's usage per mip level and layer ([wgpu fork: texture usage tracked per mip level and layer](https://github.com/dvoyni/cog/issues/858)): it refuses a pass sampling one level while drawing into another;
+  - the mip shader, each level averaging the four texels above it;
   - the unbound defaults;
   - the magenta of a failed load;
   - sRGB encoding in the last pass;

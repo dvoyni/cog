@@ -32,7 +32,6 @@ type pixelBlock struct {
 }
 
 func TestEachMipLevelOfALoadedTextureAveragesTheFourTexelsAboveItExactly(t *testing.T) {
-	t.Skip("the wgpu fork refuses a pass sampling one mip level of a texture while drawing into another: https://github.com/dvoyni/cog/issues/858")
 	h := rendertest.NewHarness(t)
 	// Each channel is a multiple of 16, so every level's averages are whole.
 	ramp := func(x, y int) color.NRGBA {
