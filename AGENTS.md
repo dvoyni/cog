@@ -2,7 +2,7 @@
 
 Before any work, read and follow submodules/rules/AGENTS.md.
 
-Each module has its own `AGENTS.md` for rules that hold only there.
+Each module has its own `AGENTS.md` for rules that hold only there: before working in a module, read and follow it too.
 
 ## Layout
 
