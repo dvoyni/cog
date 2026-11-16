@@ -59,14 +59,18 @@ rounded up to a multiple of 4, with the `BufferUsageFlags` its caller
 declares and the copy destination render fills it through, shared and
 counted by path and usage, its bytes written by the same jobs; a file that
 fails to load is reported once. `ReloadChanged()` reloads each loaded
-texture and buffer whose file `fs.Stat` stamps with another modification
-time or size than at its load, reading no other: it decodes the file, and
-makes the gfx object again where its size changed, in the caller's job, and
-swaps it in under the same handle at the next frame's start, its contents
-written then, so a frame draws every asset old or every one new, and the
-objects replaced are freed with the bind groups naming them; a mesh whose
-range no longer fits its buffer skips its draws, and a file that fails is
-reported once for each change and keeps what its asset drew.
+texture, buffer and shader one of whose files `fs.Stat` stamps with another
+modification time or size than at its load, reading no other, a shader's
+files being its own and every file its preprocessing included: it decodes
+the file, and makes the gfx object again where its size changed, or
+compiles the shader again, in the caller's job, and swaps it in under the
+same handle at the next frame's start, its contents written then, so a
+frame draws every asset old or every one new, and the objects replaced are
+freed with the bind groups naming them; a mesh whose range no longer fits
+its buffer skips its draws, a reloaded shader's pipelines are made again at
+their next draw and its materials bind their values again by name, and a
+file that fails is reported once for each change and keeps what its asset
+drew, a shader its last good module.
 `MakeBuffer[T](label, usage, data)` and
 `MakeTexture[T](descriptor, data)` make a buffer or texture filled from a
 slice at once, a made texture with every usage its format allows, each given

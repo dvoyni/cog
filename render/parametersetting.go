@@ -7,12 +7,13 @@ import (
 
 // parameterSetting is a pass or draw parameter as its setter gave it, by its
 // binding's name, resolved against each shader drawn with it, or a
-// material's texture or buffer value as its setter gave it, resolved again
-// when a reload makes its asset's gfx object again: a texture
+// material's value as its setter gave it, resolved again when a reload
+// makes its asset's gfx object or its shader's module again: a texture
 // seen through view, wholeTexture saying it named its texture alone, which
 // a storage binding sees at its first mip level; a sampler; a range of a
 // buffer; or a uniform block of uniformType, its bytes in bufferRange, a
-// block of its list's arena. One of no kind leaves its binding unbound.
+// block of its list's arena, or a material's own buffer when bufferRange
+// names none. One of no kind leaves its binding unbound.
 type parameterSetting struct {
 	name         string
 	kind         parameterKind

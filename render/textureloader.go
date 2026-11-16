@@ -46,7 +46,7 @@ func (l *textureLoader) acquire(table *assetTable, device gfx.Device, files fs.F
 		return Texture{}
 	}
 	l.add(key, texture)
-	l.setStamp(texture, stamp)
+	l.setFiles(texture, []stampedFile{{path: key.path, stamp: stamp}})
 	if headerErr != nil {
 		table.report(ReportKindLoadFailed, fmt.Errorf("render: texture %q failed to load, drawing magenta: %w", key.path, headerErr))
 		l.markFailed(texture)
@@ -95,7 +95,7 @@ func (l *textureLoader) writeHeld(table *assetTable, device gfx.Device, files fs
 // frame, writing the texels then. A file that fails to decode is reported
 // once for that change, and the texture keeps drawing what it drew.
 func (l *textureLoader) reloadChanged(table *assetTable, device gfx.Device, files fs.FS) {
-	for _, changed := range l.claimChanged(files, func(key textureKey) string { return key.path }) {
+	for _, changed := range l.claimChanged(files) {
 		descriptor, _, err := changed.key.readHeader(files)
 		var texels []byte
 		if err == nil {
@@ -109,14 +109,14 @@ func (l *textureLoader) reloadChanged(table *assetTable, device gfx.Device, file
 		if !ok {
 			continue
 		}
-		reload := assetReload[Texture, gfx.Texture]{handle: changed.handle, stamp: changed.stamp, contents: texels, size: gfx.Extent3D{Width: descriptor.Width, Height: descriptor.Height, DepthOrArrayLayers: 1}, mipmaps: changed.key.options.Mipmaps}
+		reload := assetReload[Texture, gfx.Texture]{handle: changed.handle, files: changed.files, contents: texels, size: gfx.Extent3D{Width: descriptor.Width, Height: descriptor.Height, DepthOrArrayLayers: 1}, mipmaps: changed.key.options.Mipmaps}
 		if current := device.TextureDescriptor(gfxTexture); current.Size != reload.size || current.MipLevelCount != descriptor.MipLevelCount {
 			if reload.replacement, err = createLabelledTexture(device, changed.handle, descriptor); err != nil {
 				table.logUnlessLost(fmt.Errorf("render: reloading texture %q: %w", changed.key.path, err))
 				continue
 			}
 		}
-		l.queueReload(&l.pendingReloads, reload, device.ReleaseTexture)
+		l.queueReload(&l.pendingReloads, changed.files, reload, device.ReleaseTexture)
 	}
 }
 

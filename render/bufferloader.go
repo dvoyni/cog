@@ -57,7 +57,7 @@ func (l *bufferLoader) acquire(table *assetTable, device gfx.Device, files fs.FS
 		return Buffer{}
 	}
 	l.add(key, buffer)
-	l.setStamp(buffer, makeFileStamp(info, statErr))
+	l.setFiles(buffer, []stampedFile{{path: key.path, stamp: makeFileStamp(info, statErr)}})
 	if statErr != nil {
 		table.report(ReportKindLoadFailed, fmt.Errorf("render: buffer %q failed to load: %w", key.path, statErr))
 	} else {
@@ -107,7 +107,7 @@ func (l *bufferLoader) writeHeld(table *assetTable, device gfx.Device, files fs.
 // read, or has no bytes, is reported once for that change, and the buffer
 // keeps what it held.
 func (l *bufferLoader) reloadChanged(table *assetTable, device gfx.Device, files fs.FS) {
-	for _, changed := range l.claimChanged(files, func(key bufferKey) string { return key.path }) {
+	for _, changed := range l.claimChanged(files) {
 		data, err := fs.ReadFile(files, changed.key.path)
 		if err == nil && len(data) == 0 {
 			err = errors.New("a file of no bytes")
@@ -116,14 +116,14 @@ func (l *bufferLoader) reloadChanged(table *assetTable, device gfx.Device, files
 			table.report(ReportKindLoadFailed, fmt.Errorf("render: buffer %q failed to reload, keeping what it held: %w", changed.key.path, err))
 			continue
 		}
-		reload := assetReload[Buffer, gfx.Buffer]{handle: changed.handle, stamp: changed.stamp, contents: padBytes(data)}
+		reload := assetReload[Buffer, gfx.Buffer]{handle: changed.handle, files: changed.files, contents: padBytes(data)}
 		if _, size, _ := table.findBuffer(changed.handle); size != uint64(len(reload.contents)) {
 			if reload.replacement, err = createLabelledBuffer(device, changed.handle, changed.key.path, uint64(len(reload.contents)), changed.key.usage); err != nil {
 				table.logUnlessLost(fmt.Errorf("render: reloading buffer %q: %w", changed.key.path, err))
 				continue
 			}
 		}
-		l.queueReload(&l.pendingReloads, reload, device.ReleaseBuffer)
+		l.queueReload(&l.pendingReloads, changed.files, reload, device.ReleaseBuffer)
 	}
 }
 

@@ -117,7 +117,7 @@ What identifies a loaded asset: its path, and the load options that make one fil
 _Avoid_: Descriptor, asset ID, path
 
 **Reload**:
-Building a loaded asset again from its changed file, behind the handles that already name it, so nothing holding them notices but the new look.
+Building a loaded asset again from its changed file, or a shader from a file it includes, behind the handles that already name it, so nothing holding them notices but the new look.
 _Avoid_: Hot swap, refresh, reimport
 
 **Inventory**:

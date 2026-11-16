@@ -53,13 +53,13 @@ func (s *assetCounter[K, H]) add(key K, h H) {
 	s.entries[h] = countedAsset[K]{key: key, holderCount: 1}
 }
 
-// setStamp keeps stamp as the stamp of h's file when it was loaded, which
-// claimChanged compares. s's mutex is held, and setStamp panics when it is
-// not.
-func (s *assetCounter[K, H]) setStamp(h H, stamp fileStamp) {
-	s.requireLocked("setStamp")
+// setFiles keeps files as those h was loaded from, stamped as they were
+// when it was, which claimChanged compares. s's mutex is held, and setFiles
+// panics when it is not.
+func (s *assetCounter[K, H]) setFiles(h H, files []stampedFile) {
+	s.requireLocked("setFiles")
 	if entry, ok := s.entries[h]; ok {
-		entry.stamp = stamp
+		entry.files = files
 		s.entries[h] = entry
 	}
 }
@@ -75,30 +75,45 @@ func (s *assetCounter[K, H]) markFailed(h H) {
 	}
 }
 
-// claimChanged answers the assets s holds whose file, at the path readPath
-// answers of its key, fs.Stat in files answers another stamp of than s
-// keeps, and claims each change: s keeps the new stamp, so neither a later
-// call nor one running beside it claims the change again. It stats no file
-// holding s's mutex.
-func (s *assetCounter[K, H]) claimChanged(files fs.FS, readPath func(K) string) []changedAsset[K, H] {
+// claimChanged answers the assets s holds one of whose files fs.Stat in
+// files answers another stamp of than s keeps, statting each path once, and
+// claims each change: s keeps the new stamps, so neither a later call nor
+// one running beside it claims the change again. It stats no file holding
+// s's mutex.
+func (s *assetCounter[K, H]) claimChanged(files fs.FS) []changedAsset[K, H] {
 	s.mutex.Lock()
 	assets := make([]changedAsset[K, H], 0, len(s.entries))
 	for h, entry := range s.entries {
-		assets = append(assets, changedAsset[K, H]{handle: h, key: entry.key, previousStamp: entry.stamp})
+		assets = append(assets, changedAsset[K, H]{handle: h, key: entry.key, previousFiles: entry.files})
 	}
 	s.mutex.Unlock()
+	stamps := map[string]fileStamp{}
 	changed := assets[:0]
 	for _, asset := range assets {
-		if asset.stamp = makeFileStamp(fs.Stat(files, readPath(asset.key))); !asset.stamp.equal(asset.previousStamp) {
-			changed = append(changed, asset)
+		unchanged := true
+		for _, previous := range asset.previousFiles {
+			stamp, ok := stamps[previous.path]
+			if !ok {
+				stamp = makeFileStamp(fs.Stat(files, previous.path))
+				stamps[previous.path] = stamp
+			}
+			unchanged = unchanged && stamp.equal(previous.stamp)
 		}
+		if unchanged {
+			continue
+		}
+		asset.files = make([]stampedFile, len(asset.previousFiles))
+		for index, previous := range asset.previousFiles {
+			asset.files[index] = stampedFile{path: previous.path, stamp: stamps[previous.path]}
+		}
+		changed = append(changed, asset)
 	}
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	claimed := changed[:0]
 	for _, asset := range changed {
-		if entry, ok := s.entries[asset.handle]; ok && entry.stamp.equal(asset.previousStamp) {
-			entry.stamp = asset.stamp
+		if entry, ok := s.entries[asset.handle]; ok && slices.EqualFunc(entry.files, asset.previousFiles, stampedFile.equal) {
+			entry.files = asset.files
 			s.entries[asset.handle] = entry
 			claimed = append(claimed, asset)
 		}
@@ -108,10 +123,11 @@ func (s *assetCounter[K, H]) claimChanged(files fs.FS, readPath func(K) string) 
 
 // queueReload queues reload in reloads, which s's mutex guards, for the
 // next frame to swap in, in place of one of its asset queued before, whose
-// replacement release releases; it releases reload's own instead, dropping
-// reload, when s no longer holds the asset or a later claim took a newer
-// change of its file.
-func (s *assetCounter[K, H]) queueReload[O comparable](reloads *[]assetReload[H, O], reload assetReload[H, O], release func(O)) {
+// replacement release releases, and keeps the files reload read in place
+// of claimedFiles, as replaceFiles does; it releases reload's own replacement
+// instead, dropping reload, when s no longer holds the asset or a later
+// claim took a newer change of its files.
+func (s *assetCounter[K, H]) queueReload[O comparable](reloads *[]assetReload[H, O], claimedFiles []stampedFile, reload assetReload[H, O], release func(O)) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	releaseReplacement := func(r assetReload[H, O]) {
@@ -120,7 +136,7 @@ func (s *assetCounter[K, H]) queueReload[O comparable](reloads *[]assetReload[H,
 			release(r.replacement)
 		}
 	}
-	if entry, ok := s.entries[reload.handle]; !ok || !entry.stamp.equal(reload.stamp) {
+	if !s.replaceFiles(reload.handle, claimedFiles, reload.files) {
 		releaseReplacement(reload)
 		return
 	}
@@ -133,8 +149,8 @@ func (s *assetCounter[K, H]) queueReload[O comparable](reloads *[]assetReload[H,
 	(*reloads)[index] = reload
 }
 
-// takeReloads takes the reloads queued in reloads, noting each asset's file
-// as reloaded, so writing it again after a device loss reads it even when
+// takeReloads takes the reloads queued in reloads, noting each asset as
+// reloaded, so writing it again after a device loss reads it even when
 // its load had failed.
 func (s *assetCounter[K, H]) takeReloads[O comparable](reloads *[]assetReload[H, O]) []assetReload[H, O] {
 	s.mutex.Lock()
@@ -184,6 +200,23 @@ func (s *assetCounter[K, H]) freeReleased(remove func(H)) {
 	s.releasedHandles = s.releasedHandles[:0]
 }
 
+// replaceFiles keeps files as those h was read from in place of
+// claimedFiles, those a claim of a change to them kept, unless a later claim
+// took a newer change; false when it did, or s no longer holds h. A reload
+// that read other files than its asset was loaded from, as a shader whose
+// includes changed, keeps those it read, and its next change is a change to
+// them. s's mutex is held, and replaceFiles panics when it is not.
+func (s *assetCounter[K, H]) replaceFiles(h H, claimedFiles, files []stampedFile) bool {
+	s.requireLocked("replaceFiles")
+	entry, ok := s.entries[h]
+	if !ok || !slices.EqualFunc(entry.files, claimedFiles, stampedFile.equal) {
+		return false
+	}
+	entry.files = files
+	s.entries[h] = entry
+	return true
+}
+
 // requireLocked panics, naming operation, when s's mutex is free: a call
 // that must hold it does not.
 func (s *assetCounter[K, H]) requireLocked(operation string) {
@@ -195,35 +228,36 @@ func (s *assetCounter[K, H]) requireLocked(operation string) {
 
 // countedAsset is what assetCounter keeps of one asset: its key, how many
 // holders hold it, whether its load failed and was reported, and, for a
-// loaded one, the stamp of its file when it was loaded or a change of it
-// last claimed.
+// loaded one, the files it was read from, stamped as they were when it was
+// or a change of them was last claimed.
 type countedAsset[K comparable] struct {
 	key         K
 	holderCount int
 	failed      bool
-	stamp       fileStamp
+	files       []stampedFile
 }
 
 // assetReload is a loaded asset ReloadChanged reloaded, to be swapped in at
-// the start of the next frame: its handle, the stamp of the file it was
-// read from, the contents read, a texture's texels or a buffer's bytes
-// padded, and the gfx object made to replace the one behind its handle,
-// none when the contents are written into that one; for a texture, its
-// size and whether it was acquired with Mipmaps.
+// the start of the next frame: its handle, the files it was read from,
+// stamped, the contents read, a texture's texels or a buffer's bytes
+// padded, and what replaces the object behind its handle: a gfx texture or
+// buffer, none when the contents are written into the one there, or a
+// shader's slot; for a texture, its size and whether it was acquired with
+// Mipmaps.
 type assetReload[H comparable, O comparable] struct {
 	handle      H
-	stamp       fileStamp
+	files       []stampedFile
 	contents    []byte
 	replacement O
 	size        gfx.Extent3D
 	mipmaps     bool
 }
 
-// changedAsset is a loaded asset whose file changed: its handle and key,
-// and the stamp of its file before and now.
+// changedAsset is a loaded asset one of whose files changed: its handle
+// and key, and its files stamped as they were before and as they are now.
 type changedAsset[K comparable, H comparable] struct {
 	handle        H
 	key           K
-	previousStamp fileStamp
-	stamp         fileStamp
+	previousFiles []stampedFile
+	files         []stampedFile
 }

@@ -203,30 +203,12 @@ func (t *assetTable) addMaterial(descriptor MaterialDescriptor) (Material, error
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	material, slot := t.materials.Acquire()
-	*slot = materialSlot{label: descriptor.Label, shader: descriptor.Shader, state: descriptor.State}
+	*slot = materialSlot{label: descriptor.Label, shader: descriptor.Shader, state: descriptor.State, namedVertexEntryPoint: descriptor.VertexEntryPoint, namedFragmentEntryPoint: descriptor.FragmentEntryPoint}
 	shader, ok := t.shaders.Find(descriptor.Shader)
-	if !ok || shader.module == (gfx.ShaderModule{}) {
+	if !ok {
 		return material, nil
 	}
-	vertexEntryPoint, err := shader.findEntryPoint(gfx.ShaderStageFlagVertex, descriptor.VertexEntryPoint)
-	if err == nil && vertexEntryPoint == "" {
-		err = errors.New("names no function, and its shader has none of the vertex stage")
-	}
-	if err != nil {
-		slot.refused = true
-		return material, fmt.Errorf("its vertex entry point %w", err)
-	}
-	fragmentEntryPoint, err := shader.findEntryPoint(gfx.ShaderStageFlagFragment, descriptor.FragmentEntryPoint)
-	if err != nil {
-		slot.refused = true
-		return material, fmt.Errorf("its fragment entry point %w", err)
-	}
-	slot.vertexEntryPoint = vertexEntryPoint
-	slot.fragmentEntryPoint = fragmentEntryPoint
-	slot.parameters = make([]bindingValue, len(shader.findGroupBindings(materialGroup)))
-	slot.settings = make([]parameterSetting, len(slot.parameters))
-	slot.uniformBlocks = make([]materialUniformBlock, len(slot.parameters))
-	return material, nil
+	return material, slot.resolveEntryPoints(*shader)
 }
 
 // setMaterialParameter binds a value to material's binding named name, which
@@ -243,12 +225,11 @@ func (t *assetTable) addMaterial(descriptor MaterialDescriptor) (Material, error
 // groups. After that draw, the change makes a version: a uniform block's
 // bytes are kept for the next draw to copy into the arena, and the bind
 // groups, which the frame's draws may still bind, are released at its end.
-// fill runs with t's mutex held, given the buffer the material keeps for the
-// binding's uniform block, none until one is set. A texture or buffer value
-// is set from setting, which the material keeps while the value holds, to
-// fill it from again when a reload replaces its asset's gfx object; any
-// other value's setting has no kind.
-func (t *assetTable) setMaterialParameter(device gfx.Device, material Material, name string, uniformBytes []byte, setting parameterSetting, fill func(shader Shader, binding gfx.ShaderBinding, parameter *bindingValue, uniformBuffer *gfx.Buffer) error) {
+// The value is filled from setting through fillSettingValue's checks, a
+// uniform block's buffer made at its first set, and the material keeps
+// setting while the value holds, to fill it from again when a reload
+// replaces its asset's gfx object or its shader's module.
+func (t *assetTable) setMaterialParameter(device gfx.Device, material Material, name string, uniformBytes []byte, setting parameterSetting) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	slot, ok := t.materials.Find(material)
@@ -281,7 +262,11 @@ func (t *assetTable) setMaterialParameter(device gfx.Device, material Material, 
 	drawn := slot.drawnFrame == t.endedFrameCount+1
 	changed := false
 	slot.settings[index] = setting
-	switch err := fill(slot.shader, binding, parameter, &block.buffer); {
+	err := t.fillSettingValue(device, slot.shader, binding, setting, parameter)
+	if err == nil && setting.kind == parameterKindUniform {
+		err = parameter.fillUniform(device, binding, &block.buffer, material, name)
+	}
+	switch {
 	case err != nil:
 		*parameter = bindingValue{}
 		slot.settings[index] = parameterSetting{}
@@ -327,7 +312,7 @@ func (t *assetTable) allocateTemporary(listState *commandListState, data []byte,
 	return listState.allocate(data, t, device)
 }
 
-// findSlot answers a copy of h's slot among slots, a shader's the zero slot
+// findSlot answers a copy of h's slot among slots, a shader's with no module
 // for one that failed; false when render holds no such asset.
 func (t *assetTable) findSlot[H handle.Handle, S any](slots *handle.SlotMap[H, S], h H) (S, bool) {
 	t.mutex.Lock()
@@ -531,25 +516,41 @@ func (t *assetTable) refillDefaultTexturesAndUniforms(device gfx.Device) {
 	}
 }
 
-// swapReloads swaps in, under their handles, the textures and buffers
-// ReloadChanged reloaded since it last ran, so the frame about to record
-// draws every one of them new: a texture or buffer reloaded at another size
-// gets the gfx object made for it, its predecessor released with its views
-// and every bind group naming it, and its material values filled again, as
-// refillReplaced says; and its new contents are written, for gfx's next
-// submit, into the one behind its handle. A reload of an asset render no
-// longer holds is dropped, its replacement released. It answers the
+// swapReloads swaps in, under their handles, the textures, buffers and
+// shaders ReloadChanged reloaded since it last ran, so the frame about to
+// record draws every one of them new: a texture or buffer reloaded at
+// another size gets the gfx object made for it, its predecessor released
+// with its views and every bind group naming it, and its material values
+// filled again, as refillReplaced says; and its new contents are written,
+// for gfx's next submit, into the one behind its handle. A shader gets its
+// new module, its pipelines released, to be made again at their next draw
+// or dispatch, its materials bound again by name, as rebindMaterials says,
+// and its predecessor released with its layout. A reload of an asset render
+// no longer holds is dropped, its replacement released. It answers the
 // textures reloaded with Mipmaps, whose mips are yet to be generated. It
 // runs at the start of each frame, before the frame records and after the
 // last one's present, so the last frame that drew a predecessor has ended.
 func (t *assetTable) swapReloads(device gfx.Device) []Texture {
 	textureReloads := t.loadedTextures.takeReloads(&t.loadedTextures.pendingReloads)
 	bufferReloads := t.loadedBuffers.takeReloads(&t.loadedBuffers.pendingReloads)
-	if len(textureReloads) == 0 && len(bufferReloads) == 0 {
+	shaderReloads := t.loadedShaders.takeReloads(&t.loadedShaders.pendingReloads)
+	if len(textureReloads) == 0 && len(bufferReloads) == 0 && len(shaderReloads) == 0 {
 		return nil
 	}
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
+	for _, reload := range shaderReloads {
+		slot, ok := t.shaders.Find(reload.handle)
+		if !ok {
+			reload.replacement.releaseModule(device, &t.layouts)
+			continue
+		}
+		previous := *slot
+		t.forgetShader(device, reload.handle)
+		*slot = *reload.replacement
+		t.rebindMaterials(device, reload.handle)
+		previous.releaseModule(device, &t.layouts)
+	}
 	var unmippedTextures, replacedTextures []Texture
 	var replacedBuffers []Buffer
 	for _, reload := range textureReloads {
@@ -609,7 +610,7 @@ func (t *assetTable) refillReplaced(device gfx.Device, textures []Texture, buffe
 	}
 	for _, slot := range t.materials.All() {
 		shader, ok := t.shaders.Find(slot.shader)
-		if !ok {
+		if !ok || slot.vertexEntryPoint == "" {
 			continue
 		}
 		bindings := shader.findGroupBindings(materialGroup)
@@ -849,17 +850,71 @@ func (t *assetTable) removeShader(device gfx.Device, shader Shader) {
 	if !ok {
 		return
 	}
+	t.forgetShader(device, shader)
+	slot.releaseModule(device, &t.layouts)
+	*slot = shaderSlot{}
+	t.shaders.Release(shader)
+}
+
+// forgetShader releases shader's pipelines and forgets the checks of Go
+// types against its uniform blocks and the reports made of its bindings and
+// dispatches, for a shader being freed or whose module a reload replaced,
+// whose next draws make them again. t's mutex is held.
+func (t *assetTable) forgetShader(device gfx.Device, shader Shader) {
+	t.requireLocked("forgetShader")
 	t.pipelines.removeShader(shader, device.ReleaseRenderPipeline)
 	t.computePipelines.removeShader(shader, func(pipeline computePipeline) { device.ReleaseComputePipeline(pipeline.pipeline) })
 	maps.DeleteFunc(t.reportedDispatches, func(key shaderSelection, _ struct{}) bool { return key.shader == shader })
 	maps.DeleteFunc(t.uniformLayouts, func(key uniformLayoutKey, _ error) bool { return key.shader == shader })
 	maps.DeleteFunc(t.reportedParameters, func(key parameterReportKey, _ struct{}) bool { return key.shader == shader })
-	if slot.module != (gfx.ShaderModule{}) {
-		device.ReleaseShaderModule(slot.module)
-		t.layouts.release(device, slot.layout)
+}
+
+// rebindMaterials resolves each material of shader, whose module a reload
+// replaced, against its new slot, and fills its values again by name from
+// the settings they were set from, through the checks their setters ran: a
+// value whose name the new shader lacks is dropped, and one that no longer
+// fits its binding is unbound, drawing the binding's default, and reported
+// once for the shader and name, its setting kept, so a later reload it fits
+// binds it again. A uniform block keeps its buffer and bytes, the size its
+// type's, which its check holds the block's to. A material whose entry
+// points the new shader cannot resolve is refused, its draws skipped, and
+// reported, keeping its settings and uniform blocks for a later reload that
+// resolves them. Each material's bind groups are released. t's mutex is
+// held.
+func (t *assetTable) rebindMaterials(device gfx.Device, shader Shader) {
+	t.requireLocked("rebindMaterials")
+	current, _ := t.shaders.Find(shader)
+	bindings := current.findGroupBindings(materialGroup)
+	for _, slot := range t.materials.All() {
+		if slot.shader != shader {
+			continue
+		}
+		slot.dropBindGroups(device.ReleaseBindGroup)
+		settings := slot.settings
+		blocks := slot.uniformBlocks
+		if err := slot.resolveEntryPoints(*current); err != nil {
+			t.report(ReportKindMaterialRefused, fmt.Errorf("render: material %q, after its shader's reload: %w", slot.label, err))
+			continue
+		}
+		for index, binding := range bindings {
+			settingIndex := slices.IndexFunc(settings, func(setting parameterSetting) bool { return setting.name == binding.Name })
+			if settingIndex < 0 {
+				continue
+			}
+			setting := settings[settingIndex]
+			slot.settings[index] = setting
+			slot.uniformBlocks[index] = blocks[settingIndex]
+			blocks[settingIndex] = materialUniformBlock{}
+			if err := t.fillSettingValue(device, shader, binding, setting, &slot.parameters[index]); err != nil && claimReport(&t.reportedParameters, parameterReportKey{shader: shader, name: binding.Name}) {
+				t.report(ReportKindParameterRefused, fmt.Errorf("render: %q of material %q, after its shader's reload: the value %w; its binding draws its default", binding.Name, slot.label, err))
+			}
+		}
+		for _, block := range blocks {
+			if block.buffer != (gfx.Buffer{}) {
+				device.ReleaseBuffer(block.buffer)
+			}
+		}
 	}
-	*slot = shaderSlot{}
-	t.shaders.Release(shader)
 }
 
 // checkUniform answers why a value of goType cannot fill binding, of

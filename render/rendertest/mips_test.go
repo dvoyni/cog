@@ -8,6 +8,7 @@ import (
 
 	"github.com/dvoyni/cog/gfx"
 	"github.com/dvoyni/cog/gfx/recording"
+	"github.com/dvoyni/cog/gogpu/shader"
 	"github.com/dvoyni/cog/render"
 	"github.com/dvoyni/cog/render/internal/handle"
 	"github.com/dvoyni/cog/render/rendertest"
@@ -80,7 +81,7 @@ func TestATextureLoadedWithMipmapsGetsEveryLevelDrawnFromTheOneAboveInRendersOwn
 }
 
 func TestTheMipShaderIsReadFromRendersBuiltInAssetsUnderCogRenderAndAMountHoldingItsNameOverridesIt(t *testing.T) {
-	builtIn, err := os.ReadFile("../assets/mipshader.wgsl")
+	builtIn, err := shader.Preprocess(os.DirFS("../assets"), "mipshader.wgsl", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,8 +91,8 @@ func TestTheMipShaderIsReadFromRendersBuiltInAssetsUnderCogRenderAndAMountHoldin
 		files fstest.MapFS
 		want  string
 	}{
-		{name: "built in", files: fstest.MapFS{"mask.png": {Data: mask}}, want: string(builtIn)},
-		{name: "overridden", files: fstest.MapFS{"mask.png": {Data: mask}, "cog.render/mipshader.wgsl": {Data: []byte("// the game's own")}}, want: "// the game's own"},
+		{name: "built in", files: fstest.MapFS{"mask.png": {Data: mask}}, want: builtIn},
+		{name: "overridden", files: fstest.MapFS{"mask.png": {Data: mask}, "cog.render/mipshader.wgsl": {Data: []byte("fn the_games_own() {}\n")}}, want: "fn the_games_own() {}\n"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := rendertest.NewHarness(t)

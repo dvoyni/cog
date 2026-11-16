@@ -13,13 +13,16 @@ import (
 // the pipeline layout of its bindings, which it holds in the layout
 // interner, the entry points the module declares, and its bindings, sorted
 // by group and number as its layout's entries are, with the index of each
-// group's first, each none for a shader that failed or was refused.
+// group's first, each none for a shader that failed or was refused; and,
+// for a loaded variant, the defines it was compiled with, sorted by name,
+// which a reload compiles it with again.
 type shaderSlot struct {
 	module      gfx.ShaderModule
 	layout      *internedPipelineLayout
 	entryPoints []gfx.ShaderEntryPoint
 	bindings    []gfx.ShaderBinding
 	groupStarts [reservedGroup + 1]int
+	defines     []gfx.ShaderDefine
 }
 
 // makeShaderSlot answers the slot of module, its layout, its entry points
@@ -71,4 +74,13 @@ func (s shaderSlot) findEntryPoint(stage gfx.ShaderStageFlags, name string) (str
 		return names[0], nil
 	}
 	return "", nil
+}
+
+// releaseModule releases s's module and its holding of its layout in
+// layouts; a slot with no module releases nothing.
+func (s shaderSlot) releaseModule(device gfx.Device, layouts *layoutInterner) {
+	if s.module != (gfx.ShaderModule{}) {
+		device.ReleaseShaderModule(s.module)
+		layouts.release(device, s.layout)
+	}
 }

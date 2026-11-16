@@ -90,8 +90,11 @@
 // declaration's whole. Any
 // other define set takes the declaration's own.
 //
-// The harness appends a comment naming the shader and its defines to the text
-// it answers gfx's PreprocessShader with, so it knows each module's shader
+// The harness preprocesses a shader with the gogpu plugin's preprocessor, as
+// a device does, so its #include, #define and #if directives work and the
+// files it includes are read through the filesystem render hands it. It
+// appends a comment naming the shader and its defines to the text it
+// answers gfx's PreprocessShader with, so it knows each module's shader
 // whichever variants share their text; the recording adapter compiles the
 // text without it.
 package rendertest
