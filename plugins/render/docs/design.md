@@ -706,12 +706,12 @@ render republishes gfx's events as its own, each nested inside gfx's publication
 
 ## Further Notes
 
-- **Research behind the design**, on its research branches:
-  - [v1's renderers](https://github.com/dvoyni/cog/blob/research/draw-v1/draw/docs/research/v1-renderers.md);
-  - [asset lifetime](https://github.com/dvoyni/cog/blob/research/draw-asset-lifetime/draw/docs/research/asset-lifetime.md);
-  - [render paths](https://github.com/dvoyni/cog/blob/research/draw-render-paths/draw/docs/research/render-paths.md);
-  - [frame structure](https://github.com/dvoyni/cog/blob/research/draw-frame-structure/draw/docs/research/frame-structure.md).
-- **The call shapes** were judged on a [prototype](https://github.com/dvoyni/cog/tree/prototype/render-frame/render/prototype-frame), whose README holds the verdict.
+- **Research behind the design**, in `docs/research`:
+  - [v1's renderers](research/v1-renderers.md);
+  - [asset lifetime](research/asset-lifetime.md);
+  - [render paths](research/render-paths.md);
+  - [frame structure](research/frame-structure.md).
+- **The call shapes** were judged on a [prototype](prototype-frame), whose README holds the verdict.
 - **Names avoid other contexts' terms:**
   - ecs owns *Shadow* and *Transient*;
   - mux owns *View*, *Depth*, *Sample*, *Weight* and *Model*;

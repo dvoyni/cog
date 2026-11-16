@@ -16,8 +16,8 @@ which.
 Status: being built. The decisions come from the
 [gfx map](https://github.com/dvoyni/cog/issues/608); each section links the
 ticket that holds its detail. Every type, method and descriptor is declared
-in this module, from the listing on
-[`prototype/gfx-listing`](https://github.com/dvoyni/cog/tree/prototype/gfx-listing/gfx).
+in this module, from the listing in
+[`docs/prototype-listing`](prototype-listing).
 The device comes up and is released, every resource is
 created and released, `CreateQuerySet` answering `ErrQuerySetsUnavailable`
 until the wgpu fork exposes query sets, a pipeline with a zero `Layout` getting the layouts

@@ -372,9 +372,9 @@ Measured per element in `benchmark_test.go`, against hand-written equivalents, o
   - a map step costs 8 to 11 ns through a typed lookup, and 9 to 12 ns through the runtime's map access found by reflection, with no allocation; `reflect.Value.MapIndex` costs 47 ns and two allocations, which rules it out;
   - variadic holes do not allocate, and neither does an `iter.Seq2` returned by a one-line wrapper.
 
-  ([findings](https://github.com/dvoyni/cog/blob/research/mux-binding-cost/mux/docs/research/binding-cost.md); the iterator and variadic shapes were measured while resolving the reading and addressing tickets, and the runtime's map access while breaking this spec into tickets.)
-- **Prior art for the timeline**: [findings](https://github.com/dvoyni/cog/blob/research/mux-prior-art/mux/docs/research/prior-art.md) from Godot, DOTween, elm-animator and the Go tween libraries. None measures zero allocation.
+  ([findings](../research/binding-cost.md); the iterator and variadic shapes were measured while resolving the reading and addressing tickets, and the runtime's map access while breaking this spec into tickets.)
+- **Prior art for the timeline**: [findings](../research/prior-art.md) from Godot, DOTween, elm-animator and the Go tween libraries. None measures zero allocation.
 - **The blend is the simplest for now.** While a long override is mid-flight, a short newer one is diluted: a 0.4 s dodge over a 2 s walk shows about halfway. Crossfades and additive offsets were weighed and set aside.
 - **The model's read lock is a convention.** A view holding `kernel.Read[*M]` could write through the pointer, as it could through any slice of a copy. The timeline's read side, by contrast, cannot write.
-- **Writing ecs components from current values** marks every row written as changed, which a world that observes changes pays for ([findings](https://github.com/dvoyni/cog/blob/research/mux-on-ecs/mux/docs/research/view-on-ecs.md)).
+- **Writing ecs components from current values** marks every row written as changed, which a world that observes changes pays for ([findings](../research/view-on-ecs.md)).
 - **A deep depth slows every lookup**, since a Go map hashes the whole address.
