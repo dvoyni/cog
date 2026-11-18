@@ -865,7 +865,7 @@ func (t *assetTable) rebindMaterials(device gfx.Device, shader Shader) {
 }
 
 // checkUniform answers why a value of goType cannot fill binding, of
-// shader: a binding of no uniform block, or a layout checkUniformLayout
+// shader: a binding of no uniform block, or a layout checkTypeLayout
 // refuses, checked once for each type, shader and binding. t's mutex is
 // held.
 func (t *assetTable) checkUniform(goType reflect.Type, shader Shader, binding gfx.ShaderBinding) error {
@@ -876,13 +876,45 @@ func (t *assetTable) checkUniform(goType reflect.Type, shader Shader, binding gf
 	key := uniformLayoutKey{goType: goType, shader: shader, name: binding.Name}
 	err, checked := t.uniformLayouts[key]
 	if !checked {
-		err = checkUniformLayout(goType, binding)
+		err = checkTypeLayout(goType, binding.Type, "its uniform block")
 		if t.uniformLayouts == nil {
 			t.uniformLayouts = map[uniformLayoutKey]error{}
 		}
 		t.uniformLayouts[key] = err
 	}
 	return err
+}
+
+// checkLayout answers why a value of goType cannot be the type at path
+// within shader's binding named name, as Inventory.CheckLayout does. It
+// takes t's mutex to find the shader.
+func (t *assetTable) checkLayout(goType reflect.Type, shader Shader, name, path string) error {
+	refuse := func(reason error) error {
+		return fmt.Errorf("render: checking a %v against binding %q at %q of shader %v: %w", goType, name, path, shader, reason)
+	}
+	slot, ok := t.findSlot(&t.shaders, shader)
+	switch {
+	case !ok:
+		return refuse(errors.New("render does not hold the shader"))
+	case slot.module == (gfx.ShaderModule{}):
+		return refuse(errors.New("the shader failed or was refused, and has no bindings"))
+	}
+	index := slices.IndexFunc(slot.bindings, func(binding gfx.ShaderBinding) bool { return binding.Name == name })
+	if index < 0 {
+		return refuse(errors.New("the shader has no binding of that name"))
+	}
+	binding := slot.bindings[index]
+	if binding.Buffer.Type == gfx.BufferBindingTypeUndefined {
+		return refuse(fmt.Errorf("the binding is a %s, no buffer", describeBindingKind(binding)))
+	}
+	shaderType, err := findPathType(binding.Type, path)
+	if err != nil {
+		return refuse(fmt.Errorf("the path %w", err))
+	}
+	if err := checkTypeLayout(goType, shaderType, "the shader's type"); err != nil {
+		return refuse(fmt.Errorf("it %w", err))
+	}
+	return nil
 }
 
 // makeMaterialBindGroup answers slot's bind group of its shader's

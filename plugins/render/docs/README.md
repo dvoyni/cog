@@ -583,6 +583,33 @@ func writeLightsAndGlyph(k *kernel.Kernel, _ kernel.NoArg, inventory render.Inve
 }
 ```
 
+**Checking a layout.** `CheckLayout[T](shader, binding, path)` answers why
+a Go type cannot be the type at `path` within one of a shader's bindings,
+by the rules a uniform block's value is checked by: its size, and each
+field's offset against the type's members in order, names ignored and `_`
+fields left out as padding. The path walks dotted members, `[]` stepping
+into an array's element: `[]` is an element of a storage buffer of
+`array<Light>`, `lights[]` an element of a uniform block's member `lights`,
+`[].argument` the member `argument` of an element, and an empty path the
+binding's whole type. A `[]` compares the element's type, not its array's
+stride: a slice of a struct fills the array, but one of `[3]float32` does
+not fill an `array<vec3<f32>>`, whose elements lie 16 bytes apart. A shader
+that failed, a binding it lacks or of no buffer, and a path it cannot walk
+answer an error too. Nothing is reported
+or kept, so check each type once for each shader, and report what you are
+answered.
+
+```go
+// checkLights runs once, after the lit shader is acquired.
+func checkLights(k *kernel.Kernel, shader render.Shader, inventory render.Inventory) kernel.NoResult {
+	// The lit shader's storage buffer lights, an array<Light>.
+	if err := inventory.CheckLayout[light](shader, "lights", "[]"); err != nil {
+		k.Logger().LogErr(err)
+	}
+	return kernel.NoResult{}
+}
+```
+
 ## Shaders and variants
 
 Shaders are WGSL, preprocessed by gfx's preprocessor with `#include`,
@@ -1816,7 +1843,8 @@ of a plugin of your own.
 - **Copy a temporary buffer to change data between passes**: writes land
   before the whole frame.
 - **Lay a buffer's rows 256 bytes apart** for a copy to or from a texture.
-- **Mirror WGSL structs exactly**, padding included, with `_` fields.
+- **Mirror WGSL structs exactly**, padding included, with `_` fields, and
+  check those no uniform setter checks with `CheckLayout`.
 - **Leave `@group(3)` alone.**
 - **Encode sRGB in the last pass into a `BGRA8Unorm` window**, as gogpu's
   are.

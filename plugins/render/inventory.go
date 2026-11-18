@@ -384,6 +384,31 @@ func (i Inventory) SetMaterialUniform[T any](material Material, name string, val
 	i.table.Get().setMaterialParameter(i.device.Get(), material, name, castToBytes(unsafe.Slice(&value, 1)), setting)
 }
 
+// CheckLayout answers why a value of T cannot be the type at path within
+// shader's binding named binding, nil when it can, by the rules a uniform
+// block's value is checked by: T is of the type's size, and, for a struct,
+// its fields are the type's members, at their offsets, in order, names
+// ignored and fields named _ left out as padding, so a field's own fields
+// are not compared; a T that is no struct is a type of no members, such as
+// a vec4<f32>, of its size. The path is relative to the binding and walks
+// its dotted members, each [] after one, or at the path's start, stepping
+// into an array's element: "[]" for an element of a storage buffer of
+// array<Object>, "lights[]" for an element of a uniform block's member
+// lights, and "[].argument" for the member argument of an element. An empty
+// path names the binding's whole type. A [] compares T with the element's
+// type, not with its array's stride, so a slice of T fills the array only
+// where the two agree, as they do for a struct and not for a vec3<f32>,
+// of 12 bytes laid 16 apart. A shader render does not hold, or
+// one that failed or was refused, a binding the shader lacks or of no
+// buffer, and a path naming a member its type lacks or stepping into a type
+// that is no array also answer an error. Nothing is reported or kept: a
+// plugin checks each of its types once for each shader, as a 2D material's
+// argument is checked against an element's member of its rows, and reports
+// what it is answered.
+func (i Inventory) CheckLayout[T any](shader Shader, binding, path string) error {
+	return i.table.Get().checkLayout(reflect.TypeFor[T](), shader, binding, path)
+}
+
 // WriteBuffer writes data into buffer at offset, T as MakeBuffer's: a
 // loaded, made or other buffer render holds. The write lands before every
 // command list of gfx's next submit, so it fills the buffer for the whole
