@@ -180,6 +180,16 @@ func assertPanics(t *testing.T, function func()) {
 
 func assertMat4Near(t *testing.T, got, want Mat4) {
 	t.Helper()
+	assertElementsNear(t, got[:], want[:])
+}
+
+func assertMat2x3Near(t *testing.T, got, want Mat2x3) {
+	t.Helper()
+	assertElementsNear(t, got[:], want[:])
+}
+
+func assertElementsNear(t *testing.T, got, want []float32) {
+	t.Helper()
 	for index := range got {
 		if !near(got[index], want[index]) {
 			t.Fatalf("matrix[%d] = %v, want %v; matrix = %v", index, got[index], want[index], got)
