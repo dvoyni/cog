@@ -58,26 +58,26 @@ func TestAFramesShapesAreForgottenOnceItIsDrawn(t *testing.T) {
 	}
 }
 
-func TestAnEntryRecordedOutsideTheFrameIsRefusedAndReportedOncePerTask(t *testing.T) {
+func TestAnEntryRecordedOrACameraSetOutsideTheFrameIsRefusedAndReportedOncePerTask(t *testing.T) {
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, nil, &lateRecorder{})
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
-	h.ExpectReport(canvas.ReportKindEntryOutsideFrame)
+	h.ExpectReport(canvas.ReportKindRecordedOutsideFrame)
 
 	h.Step()
 	h.Step()
 
 	for index, frame := range h.Frames() {
-		if shapes := findDrawnShapes(frame); len(shapes) != 0 {
-			t.Errorf("frame %d drew %+v, shapes recorded after a frame's drawing began", index+1, shapes)
+		if shapes := findDrawnShapes(frame); len(shapes) != 0 || len(frame.Cameras) != 0 {
+			t.Errorf("frame %d drew %+v through %+v, shapes recorded and a camera set after a frame's drawing began", index+1, shapes, frame.Cameras)
 		}
 	}
 	var kinds []canvas.ReportKind
 	for _, report := range h.Reports() {
 		kinds = append(kinds, report.Kind)
 	}
-	if want := []canvas.ReportKind{canvas.ReportKindEntryOutsideFrame, canvas.ReportKindEntryOutsideFrame}; !slices.Equal(kinds, want) {
-		t.Errorf("two tasks each recording twice outside two frames reported %v, want one report for each task", kinds)
+	if want := []canvas.ReportKind{canvas.ReportKindRecordedOutsideFrame, canvas.ReportKindRecordedOutsideFrame}; !slices.Equal(kinds, want) {
+		t.Errorf("a task recording fills and one setting a camera outside two frames reported %v, want one report for each task", kinds)
 	}
 }
 

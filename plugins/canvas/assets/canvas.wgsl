@@ -245,3 +245,23 @@ fn canvas_sprite_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_in
 	out.instance = instance;
 	return out;
 }
+
+// canvas_viewport_vertex is canvas's vertex stage for a quad covering the
+// camera's viewport, six vertices of one instance: clip space's corners,
+// whatever the camera's projection, and never snapped, its coordinates
+// spanning the instance's region from the viewport's top left. Only the
+// instance's tint, region and page are read. canvas draws a camera's clear
+// over its viewport through it.
+@vertex
+fn canvas_viewport_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance: u32) -> CanvasVaryings {
+	// The corners of canvas_sprite_vertex's two triangles.
+	let corner = vec2<f32>(f32((0x32u >> vertex) & 1u), f32((0x2Cu >> vertex) & 1u));
+	let instance_data = canvas_instances[instance];
+	var out: CanvasVaryings;
+	out.position = vec4<f32>(corner.x * 2.0 - 1.0, 1.0 - corner.y * 2.0, 0.0, 1.0);
+	out.uv = instance_data.region.xy + corner * instance_data.region.zw;
+	out.uv_local = corner;
+	out.tint = instance_data.tint;
+	out.instance = instance;
+	return out;
+}

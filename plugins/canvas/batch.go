@@ -16,18 +16,17 @@ type batch struct {
 	instanceCount uint32
 }
 
-// makeBatches answers the batches of entries, the frame's in sort order, of
-// shapes, a batch beginning wherever an entry's batch key differs from the
-// one before it, and the instance data they draw, in the storage of batches
-// and instances. Each batch's entries are part of entries. A fill and a
-// line draw one instance, and a stroke four.
-func makeBatches(batches []batch, instances []instanceData, entries []sortedEntry, shapes []Shape) ([]batch, []instanceData) {
-	batches = batches[:0]
-	instances = instances[:0]
+// appendBatches appends to batches the batches of entries, of shapes, in
+// sort order, a batch beginning at the first entry and wherever an entry's
+// batch key differs from the one before it, and to instances the instance
+// data they draw, and answers both appended to. Each batch's entries are
+// part of entries. A fill and a line draw one instance, and a stroke four.
+func appendBatches(batches []batch, instances []instanceData, entries []sortedEntry, shapes []Shape) ([]batch, []instanceData) {
+	firstBatch := len(batches)
 	for index, entry := range entries {
 		shape := &shapes[entry.shapeIndex]
 		entryBatchKey := shape.batchKey()
-		if len(batches) == 0 || batches[len(batches)-1].key != entryBatchKey {
+		if len(batches) == firstBatch || batches[len(batches)-1].key != entryBatchKey {
 			batches = append(batches, batch{key: entryBatchKey, entries: entries[index:index], firstInstance: uint32(len(instances))})
 		}
 		lastBatch := &batches[len(batches)-1]

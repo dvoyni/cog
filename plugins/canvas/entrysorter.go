@@ -3,8 +3,8 @@ package canvas
 import "slices"
 
 // sortedEntry is one of a frame's entries in its sort: its sort key, and its
-// place among the frame's shapes as merged, lane after lane, which tells its
-// draw list's place and its own in that list once sorted.
+// place among the frame's shapes as merged, draw list after draw list,
+// which tells its draw list's place and its own in that list once sorted.
 type sortedEntry struct {
 	key        sortKey
 	shapeIndex uint32

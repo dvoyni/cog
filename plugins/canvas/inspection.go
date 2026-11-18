@@ -1,6 +1,7 @@
 package canvas
 
 import (
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/metronome"
 	"github.com/dvoyni/cog/plugins/platform"
 	"github.com/dvoyni/cog/plugins/render"
@@ -19,14 +20,18 @@ type Inspection struct {
 	Render render.Inspection
 }
 
-// InspectedCamera is one camera of an inspected frame: the order of the
-// command list it drew in, the window it drew into, and its batches, in the
-// order drawn. A frame that set no camera is seen through the default one,
-// at order 0 into the main window.
+// InspectedCamera is one camera of an inspected frame that drew: the
+// camera as set, or the default camera for a frame setting none; the window
+// it drew into, its own or the main window when it named no target, and
+// zero for a camera into its Texture; its viewport in the target's pixels;
+// and its batches, in the order drawn. A camera skipped, of an empty viewport, a window not open or
+// a target refused, or one with nothing to draw and no clear, is not
+// inspected.
 type InspectedCamera struct {
-	Order   render.Order
-	Window  platform.Window
-	Batches []InspectedBatch
+	Camera   Camera
+	Window   platform.Window
+	Viewport m.Recti
+	Batches  []InspectedBatch
 }
 
 // InspectedBatch is one batch of an inspected camera, a run of entries in

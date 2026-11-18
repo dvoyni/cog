@@ -16,6 +16,10 @@ const (
 	// spriteVertexEntryPoint is the include's vertex stage, for an entry
 	// drawn as a quad.
 	spriteVertexEntryPoint = "canvas_sprite_vertex"
+	// viewportVertexEntryPoint is the include's vertex stage for a quad
+	// covering the camera's viewport, which a camera's clear drawn over its
+	// viewport draws through.
+	viewportVertexEntryPoint = "canvas_viewport_vertex"
 )
 
 // embeddedAssets are canvas's built-in assets: its include and its

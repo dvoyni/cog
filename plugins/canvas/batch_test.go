@@ -22,7 +22,7 @@ func TestBatchesBreakOnlyWhereAnEntrysMaterialDiffersFromTheOneBefore(t *testing
 
 	entries := sorter.sort(shapes)
 
-	got, instances := makeBatches(nil, nil, entries, shapes)
+	got, instances := appendBatches(nil, nil, entries, shapes)
 
 	want := []batch{
 		{key: batchKey{material: firstMaterial}, entries: entries[0:2], firstInstance: 0, instanceCount: 2},
@@ -38,5 +38,22 @@ func TestBatchesBreakOnlyWhereAnEntrysMaterialDiffersFromTheOneBefore(t *testing
 	}
 	if !slices.Equal(instances, wantInstances) {
 		t.Errorf("the batches' instances are %+v, want each shape's, in sort order, %+v", instances, wantInstances)
+	}
+}
+
+func TestBatchesAppendedAfterAnotherCamerasBeginANewBatchEvenOfTheSameMaterial(t *testing.T) {
+	shapes := []Shape{{}, {Kind: Stroke}}
+	sorter := makeEntrySorter(nil)
+	entries := sorter.sort(shapes)
+	firstBatches, firstInstances := appendBatches(nil, nil, entries[:1], shapes)
+
+	got, instances := appendBatches(firstBatches, firstInstances, entries[1:], shapes)
+
+	want := []batch{
+		{entries: entries[0:1], firstInstance: 0, instanceCount: 1},
+		{entries: entries[1:2], firstInstance: 1, instanceCount: 4},
+	}
+	if !reflect.DeepEqual(got, want) || len(instances) != 5 {
+		t.Errorf("a camera's fill, then another's stroke, batched as %+v of %d instances, want a batch each, %+v, of 5", got, len(instances), want)
 	}
 }

@@ -28,14 +28,24 @@
 //
 //	list.DrawShape(canvas.Shape{Kind: canvas.Fill, Rect: r, Tint: c, Layer: layerUnits, Order: canvas.OrderOf(position.Y)})
 //
-// A frame is drawn through the default camera: into the main window, the
-// first window opened of those still open, cleared to opaque black, the
-// world's origin at its centre, one world unit to a point and y down. It is
-// one command list at order 0 of one pass, its entries an instanced draw
-// for each batch, a run of entries in sort order of one 2D material, each
-// tint premultiplied and blended over what the window holds, its colour
-// encoded as sRGB. A frame that recorded no entry, or with no main window
-// open, begins no list.
+// A frame is drawn through the cameras its recording tasks set, each a plain
+// value for that frame alone, which draws the entries of its layers into its
+// target, a window or a texture, over its viewport, in fractions of the
+// target, cleared there alone when it clears, the world's origin at the
+// viewport's centre, one world unit to a point of a window or a pixel of a
+// texture, and y down:
+//
+//	list.SetCamera(canvas.Camera{Layers: canvas.MakeLayers(canvas.LayerRange{From: layerGround, To: layerUnits + 1}), Viewport: m.Rect{Width: 0.5, Height: 1}, Clear: true, ClearColor: sky})
+//
+// canvas begins one command list for each distinct camera order, a camera's
+// pass in it for each camera of that order, those into textures first, its
+// entries an instanced draw for each batch, a run of entries in sort order
+// of one 2D material, each tint premultiplied and blended over what the
+// target holds, its colour encoded as sRGB where the target's format does
+// not encode it. A frame that sets no camera is seen through the default
+// one, which draws only a frame that recorded entries: every layer, into the
+// whole main window, the first window opened of those still open, cleared
+// to opaque black, at order 0.
 //
 // A Shape fills or strokes a rectangle, or draws a line. A stroke lies
 // inside its rectangle as four fills that do not overlap, so a translucent

@@ -78,12 +78,14 @@ const (
 	pictureHeight = 240
 )
 
-// The colours pixel tests draw and expect: green, opaque, which shows as
-// greenShown, and translucentOrange, which shows as translucentOverBlack,
-// 0.6 of the encoded (255, 85, 0) over opaque black.
+// The colours pixel tests draw and expect: green and orange, opaque, which
+// show as greenShown and orangeShown, and translucentOrange, which shows as
+// translucentOverBlack, 0.6 of the encoded (255, 85, 0) over opaque black.
 var (
 	green                = m.NewColorSrgb(50.0/255, 1, 150.0/255, 1)
 	greenShown           = color.NRGBA{R: 50, G: 255, B: 150, A: 255}
+	orange               = m.NewColorSrgb(1, 1.0/3, 0, 1)
+	orangeShown          = color.NRGBA{R: 255, G: 85, A: 255}
 	translucentOrange    = m.NewColorSrgb(1, 1.0/3, 0, 0.6)
 	translucentOverBlack = color.NRGBA{R: 153, G: 51, B: 0, A: 255}
 	opaqueBlack          = color.NRGBA{A: 255}

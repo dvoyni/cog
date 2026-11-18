@@ -8,12 +8,12 @@ importing [kernel](../../kernel), [metronome](../metronome),
 gfx.
 
 It is being built from [docs/design.md](docs/design.md). So far a frame's
-recording tasks record shapes into draw lists of their own, which canvas
-merges in registration order, sorts by their sort key and draws through the
-default camera into the main window, the first window opened of those still
-open, an instanced draw for each batch, a run of entries of one 2D
-material. A frame can be inspected in canvas's terms, beside render's
-inspection of it.
+recording tasks record shapes and set cameras into draw lists of their own,
+which canvas merges in registration order, sorts by their sort key and
+draws through each camera, or the default camera into the main window, the
+first window opened of those still open, an instanced draw for each batch,
+a run of entries of one 2D material. A frame can be inspected in canvas's
+terms, beside render's inspection of it.
 
 ## Shape
 
@@ -24,8 +24,17 @@ inspection of it.
   render's `FrameEvent`s. A plugin that records schedules its recording tasks
   after its `Ready` and joins them into the out dependency it returns.
 - **`DrawList`** is the task parameter a recording task records through,
-  each task's a draw list of its own. An entry recorded outside the frame is
-  refused and reported once for the task.
+  each task's a draw list of its own. An entry recorded or a camera set
+  outside the frame is refused and reported once for the task.
+- **`Camera`**, set for one frame with `SetCamera`, draws the entries of its
+  `Layers` (`MakeLayer(layer)` for one, `MakeLayers(ranges...)` for up to
+  four ranges) into its target, a `Window` or a `Texture`, the main window
+  when it names neither, over its `Viewport`, in fractions of the target,
+  cleared there alone when it sets `Clear`.
+  canvas begins one command list for each distinct `Order`, its cameras
+  into textures first. A frame that sets no camera is seen through the
+  default one, which draws only a frame with entries: every layer, the
+  whole main window, cleared to opaque black, at order 0.
 - **`Shape`** is an entry that fills or strokes a rectangle, or draws a
   line, its `Kind` `Fill`, `Stroke` or `Line`, in its tint, drawn with its
   `Material`, at its sort key, `Layer` then `Order`. A stroke is four fills
@@ -41,8 +50,9 @@ inspection of it.
 - **`Assets`** is the task parameter a tool reaches canvas through:
   `RequestInspection` asks for an inspection of the next frame, and
   `ReadInspection` answers it in a task off **`InspectedEvent`**.
-- **`Inspection`** is one frame in canvas's terms: each camera, its batches
-  with their material and their entries, each entry with its sort key and
+- **`Inspection`** is one frame in canvas's terms: each camera that drew,
+  the window it drew into and its viewport in pixels, its batches with their material
+  and their entries, each entry with its sort key and
   its draw list's place,
   and render's `Inspection` of the frame beside it.
 - **`cog.canvas/canvas.wgsl`** is canvas's include, declaring the camera's
@@ -60,13 +70,15 @@ inspection of it.
 - **Resources it installs:** `Handlers` (`RecordFrame`, `TrackOpenedWindow`,
   `ForgetClosedWindow`, `DeliverInspection`), to order handlers around; a
   private draw state, holding each task's draw list, the frame's entries
-  sorted and the inspection asked for; a private renderer, holding the
-  default material, the white texel, the instance data and the batches; and
-  a private list of the open windows.
+  and cameras sorted and the inspection asked for; a private renderer,
+  holding the default and clear materials, the white texel, the cameras
+  drawn, the instance data and the batches; and a private list of the open
+  windows.
 - **Resources it reads from other plugins:** render's, for read through
   `render.Frame` and `render.Inventory`, `Assets` holding a `render.Frame`, `platform.FS`, for read through
-  `render.Inventory`, as the default material's shader loads, and
-  `platform.WindowManager`, for read, for the main window's size, in the
+  `render.Inventory`, as the default material's shader loads, render's
+  texture descriptors through it, for a texture target's size and format,
+  and `platform.WindowManager`, for read, for a window target's size, in the
   task that draws the frame.
 - **Task parameters it offers:** `DrawList`, and `Assets`.
 - **Events it publishes:** `FrameEvent`, inside its handler of

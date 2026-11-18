@@ -5,11 +5,15 @@ package canvas
 type ReportKind uint8
 
 const (
-	// ReportKindEntryOutsideFrame is an entry recorded while no frame is
-	// recording: by a task on another beat, or by one hung off
-	// render.FrameEvent that runs once canvas's drawing has begun. It is
-	// reported once for each task.
-	ReportKindEntryOutsideFrame ReportKind = iota + 1
+	// ReportKindRecordedOutsideFrame is an entry recorded or a camera set
+	// while no frame is recording: by a task on another beat, or by one
+	// hung off render.FrameEvent that runs once canvas's drawing has begun.
+	// It is reported once for each task.
+	ReportKindRecordedOutsideFrame ReportKind = iota + 1
+	// ReportKindCameraTargetRefused is a camera naming both a window and a
+	// texture, or a texture render does not hold, which is skipped. It is
+	// reported once for each target.
+	ReportKindCameraTargetRefused
 )
 
 // Report is a mistake canvas found at run time and carried past, logged

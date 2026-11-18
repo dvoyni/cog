@@ -5,7 +5,7 @@ import "github.com/dvoyni/cog/plugins/platform"
 // windowList is canvas's private account of the windows platform has
 // opened and not yet closed, in the order they opened, kept by the tasks
 // following platform.WindowOpenedEvent and platform.WindowClosedEvent: the
-// first is the main window, the default camera's target, which is gogpu's
+// first is the main window, the target of a camera naming none, which is gogpu's
 // window opened at start when it has one.
 type windowList struct {
 	windows []platform.Window

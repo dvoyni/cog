@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/canvas"
 	"github.com/dvoyni/cog/plugins/canvas/canvastest"
 	"github.com/dvoyni/cog/plugins/metronome"
@@ -34,8 +35,9 @@ func TestAnInspectedFrameAnswersItsCamerasBatchesInstanceCountsAndEntriesWithThe
 		return canvas.InspectedEntry{Kind: canvas.EntryKindShape, Shape: shape, Layer: shape.Layer, Order: shape.Order, DrawListIndex: drawListIndex, IndexInDrawList: indexInDrawList}
 	}
 	want := []canvas.InspectedCamera{{
-		Order:  0,
-		Window: window,
+		Camera:   canvas.Camera{Clear: true, ClearColor: m.Color{A: 1}},
+		Window:   window,
+		Viewport: m.Recti{Width: 64, Height: 48},
 		Batches: []canvas.InspectedBatch{{
 			InstanceCount: 6,
 			Entries: []canvas.InspectedEntry{

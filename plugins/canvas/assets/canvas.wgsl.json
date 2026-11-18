@@ -104,7 +104,8 @@
         "elementStride": 80
       },
       "entryPoints": [
-        "canvas_sprite_vertex"
+        "canvas_sprite_vertex",
+        "canvas_viewport_vertex"
       ]
     },
     {
@@ -129,9 +130,14 @@
     {
       "name": "canvas_sprite_vertex",
       "stage": "vertex"
+    },
+    {
+      "name": "canvas_viewport_vertex",
+      "stage": "vertex"
     }
   ],
   "vertexInputs": {
-    "canvas_sprite_vertex": []
+    "canvas_sprite_vertex": [],
+    "canvas_viewport_vertex": []
   }
 }

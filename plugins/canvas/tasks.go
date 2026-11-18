@@ -9,10 +9,6 @@ import (
 	"github.com/dvoyni/cog/plugins/render"
 )
 
-// defaultCameraOrder is the order of the default camera's command list, the
-// camera a frame recording entries and setting none is seen through.
-const defaultCameraOrder render.Order = 0
-
 // recordFrame is Handlers.RecordFrame: after render's Ready, it schedules
 // openFrameTask, opening the frame for entries, and publishes FrameEvent
 // inside render.FrameEvent, with render's beat and timing signals and that
@@ -73,18 +69,18 @@ func sortEntries(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*drawState]
 	return kernel.NoResult{}
 }
 
-// draw draws the frame of beat: a frame that recorded entries through the
-// default camera, into the main window, while one is open and sized, and
-// none otherwise. A frame inspected is written down for the pending
-// request, and render is asked again for its inspection, so a request
-// render joined to an inspection of an earlier frame still gets one.
+// draw draws the frame of beat through its cameras, the default one for a
+// frame of entries that set none, each order's cameras in a command list of
+// their own, one after another, the main window the target of a camera
+// naming none. A frame inspected is written down for the pending request,
+// and render is asked again for its inspection, so a request render joined
+// to an inspection of an earlier frame still gets one.
 func draw(k *kernel.Kernel, beat metronome.Beat, frame render.Frame, inventory render.Inventory, manager kernel.Read[*platform.WindowManager], windows kernel.Read[*windowList], state kernel.Read[*drawState], rendering kernel.Write[*renderer]) kernel.NoResult {
 	canvasState := state.Get()
-	window := windows.Get().mainWindow()
 	drawing := rendering.Get()
-	cameraDrawn := drawing.drawDefaultCamera(frame, inventory, manager.Get(), window, canvasState.shapes, canvasState.sorter.entries)
+	drawing.drawCameras(frame, inventory, manager.Get(), windows.Get().mainWindow(), canvasState)
 	if canvasState.frameInspected {
-		canvasState.inspector.record(canvasState.makeInspection(beat, window, cameraDrawn, drawing.batches))
+		canvasState.inspector.record(canvasState.makeInspection(beat, drawing.cameraDraws))
 		frame.RequestInspection()
 	}
 	return kernel.NoResult{}

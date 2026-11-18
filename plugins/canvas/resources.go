@@ -18,7 +18,7 @@ type Handlers struct {
 	// TrackOpenedWindow handles platform.WindowOpenedEvent, and
 	// ForgetClosedWindow platform.WindowClosedEvent: each keeps canvas's
 	// account of the open windows, whose first opened is the main window,
-	// the default camera's target.
+	// the target of a camera naming none.
 	TrackOpenedWindow  kernel.Sub[platform.WindowOpenedEvent]
 	ForgetClosedWindow kernel.Sub[platform.WindowClosedEvent]
 	// DeliverInspection handles render.InspectedEvent: when canvas wrote

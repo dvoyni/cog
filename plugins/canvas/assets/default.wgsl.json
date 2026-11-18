@@ -106,6 +106,7 @@
       },
       "entryPoints": [
         "canvas_sprite_vertex",
+        "canvas_viewport_vertex",
         "canvas_default_fragment"
       ]
     },
@@ -139,11 +140,16 @@
       "stage": "vertex"
     },
     {
+      "name": "canvas_viewport_vertex",
+      "stage": "vertex"
+    },
+    {
       "name": "canvas_default_fragment",
       "stage": "fragment"
     }
   ],
   "vertexInputs": {
-    "canvas_sprite_vertex": []
+    "canvas_sprite_vertex": [],
+    "canvas_viewport_vertex": []
   }
 }

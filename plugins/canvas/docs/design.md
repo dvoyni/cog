@@ -235,14 +235,14 @@ author** testing canvas or a plugin on it.
 - **Resources it installs:**
   - `Fonts` and `Targets`, each an interface of reads alone;
   - `Handlers{RecordFrame, Recover, DeliverInspection}`, its subscriptions to `render.FrameEvent`, `render.RecoveredEvent` and `render.InspectedEvent`, one field each, for others to order their handlers around;
-  - a private state: its atlases, caches, tables and lanes.
+  - a private state: its atlases, caches, tables and draw lists.
 
   There is no `Tasks` resource, since canvas offers no task for others to schedule, and it declares no sockets.
 - **Task parameters it offers,** each declaring render's and platform's locks on its user's behalf, as render's parameters declare gfx's:
 
   | Parameter | Locks | Carries |
   |---|---|---|
-  | `DrawList` | canvas's state, `Fonts`, and through an `Inventory` it holds render's asset table, `gfx.Device` and `platform.FS`, all read | its task's lane: every `Draw…` call and `SetCamera` |
+  | `DrawList` | canvas's state, `Fonts`, and through an `Inventory` it holds render's asset table, `gfx.Device` and `platform.FS`, all read | its task's draw list: every `Draw…` call and `SetCamera` |
   | `Assets` | the same reads, and through a `render.Frame` it holds render's frame state, read | `MakeMaterial` and the material setters, `Preload`, `Unload`, `ImageSize`, `RequestInspection`, `ReadInspection` and `ReloadChanged` |
 
   A draw list takes render's locks because an image's or a mesh file's first draw loads it. A recording task that also needs `Assets`, such as for `ImageSize`, declares both; the two take the same reads.
@@ -265,8 +265,8 @@ render.FrameEvent ─ canvas's RecordFrame:
   publishes canvas.FrameEvent{Beat, Ready, AcquireWait, GPULatency}, that job its Ready
     users' recording tasks, after e.Ready, joined into its out dependency
   after that out dependency:
-    the sort task: the lanes merged and the entries sorted once
-    one job for each camera order: culls, batches and records its command list
+    the sort task: the draw lists merged and the entries sorted once
+    the drawing job: each camera order's command list in turn, culled, batched and recorded
     the Targets task, under Write[canvas.Targets]: each target's size and scale as drawn
   all joined into render's out dependency, so render's second pickup of loads
   and gfx's flush wait for canvas's drawing
@@ -276,9 +276,11 @@ render.FrameEvent ─ canvas's RecordFrame:
   - The event carries render's `Beat`, `AcquireWait` and `GPULatency`. Its `Ready` is canvas's job opening the frame for entries, scheduled after render's `Ready`: an entry is accepted from that job until the sort task closes the frame, which is how one recorded outside the frame is told.
   - Recording tasks hang off it: they run after its `Ready` and are joined into its out dependency.
   - Users subscribing to `render.FrameEvent` with canvas ordered after them was weighed. Every user would have had to order their handler before canvas's, and a task that forgot would record into a frame already drawn.
-- **Drawing is a sort task, then one job for each distinct camera order.**
-  - The sort task merges the lanes and sorts the entries once.
-  - Each order's job culls, batches and records its own command list. The jobs run in parallel and are joined into the out dependency. Cameras of one order share a list, so they stay within one job.
+- **Drawing is a sort task, then one drawing job.**
+  - The sort task merges the draw lists and sorts the entries once, and the frame's cameras into the order they draw.
+  - The drawing job culls, batches and records each distinct camera order's command list in turn, and is joined into the out dependency. Cameras of one order share a list, and one temporary buffer of instance data.
+  - A camera's layers are runs of the sorted entries, since entries sort by layer first, found by binary search, with no pass over the entries for each camera.
+  - A job for each order, run in parallel, was weighed. The kernel schedules work only from event handlers, and canvas's handler runs before the frame's cameras are set, so it cannot know their orders; a task publishing an event starts a batch of its own, which render's frame would not wait for. The benchmarks of several cameras say whether a fixed number of drawing jobs, each claiming the next order, pays.
   - A small task after them takes `Write[canvas.Targets]` and copies each target's size and scale as drawn, so a reader sees one value for its whole run, and a task converting clicks waits only for the copy. Writing `Targets` under a read lock was weighed: a reader could see it change mid-run.
 - **A camera's `Order` is a `render.Order`.** canvas begins one command list for each distinct camera order, placed among every plugin's lists.
   - A 2D world camera at 0 draws under a 3D scene at 100, and a UI camera at 200 over it.
@@ -298,7 +300,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 	g := game.Get()
 	list.SetCamera(canvas.Camera{
 		Position: g.Hero, Size: m.Vec2{Y: 360},
-		Layers: canvas.Layers(layerGround, layerLabels+1), Clear: true, ClearColor: g.Sky,
+		Layers: canvas.MakeLayers(canvas.LayerRange{From: layerGround, To: layerLabels + 1}), Clear: true, ClearColor: g.Sky,
 	})
 	for _, unit := range g.Units {
 		at := m.Translation2x3(unit.Position.X, unit.Position.Y)
@@ -319,9 +321,9 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 ([canvas: the feature list, where 2D ends and its users begin, and its name](https://github.com/dvoyni/cog/issues/864), [canvas: sprites, their transforms, and how they are ordered and batched](https://github.com/dvoyni/cog/issues/867), [canvas on the kernel](https://github.com/dvoyni/cog/issues/873))
 
 - **An entry** is one thing recorded into a draw list for a frame, with its sort key: a `Sprite`, a `Shape`, a run of `Text`, or a mesh, a `Mesh` of a mesh file or triangles given for that frame alone. A frame's entries are forgotten once drawn.
-- **`canvas.DrawList` is a task parameter whose `Declare` gives each registered task a lane of its own,** as ecs's `CommandBuffer` gives each system one.
+- **`canvas.DrawList` is a task parameter whose `Declare` gives each registered task a draw list of its own,** as ecs's `CommandBuffer` gives each system one.
   - The lists are ordered by registration: plugin order, then the order each plugin registers its tasks. That order breaks ties after layer and order, so there is no number to choose.
-  - A task whose jobs run twice in one frame records both into its lane, in the order the jobs run. A game that needs them ordered gives their entries different layers or orders.
+  - A task whose jobs run twice in one frame records both into its draw list, in the order the jobs run. A game that needs them ordered gives their entries different layers or orders.
   - A `Frame` parameter beginning lists at orders the user picks, as render's command lists are, was weighed. It needed a unique number per list for a tie-break that rarely shows.
 - **The sort key is `Layer int32`, then `Order int32`, then the draw list's order, then the recording order.** The order is strictly painter's, with no depth buffer.
   - `Layer` and `Order` make one 64-bit key. The lists are joined in list order and sorted stably by it, so the last two parts cost no bits.
@@ -702,18 +704,25 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 - **A `Camera` is a plain value:**
   - `Position`, `Rotation` and `Zoom`, zero meaning 1.
   - `Pivot`, the point of its viewport that `Position` places and that rotation and zoom turn about, as a fraction of the viewport from its centre, zero meaning the centre. A UI camera takes `{-0.5, -0.5}`, its top left, so world coordinates are UI coordinates.
-  - `Layers [4]LayerRange`, each `LayerRange{From, To}` half-open. An empty range is unused, four empty ones mean every layer, and layer 0 alone is `{0, 1}`. `canvas.Layers(from, to)` answers the four holding one range; several ranges are a literal. One layer may be drawn by several cameras.
+  - `Layers [4]LayerRange`, each `LayerRange{From, To}` half-open. An empty range is unused, four empty ones mean every layer, and layer 0 alone is `{0, 1}`. `canvas.MakeLayer(layer)` answers the four holding one layer, and `canvas.MakeLayers(ranges...)` those holding up to four ranges, the rest empty. One layer may be drawn by several cameras.
   - Its target, `Window` (a `platform.Window`) or `Texture` (a texture the game made with render), both zero meaning the main window.
   - `Viewport`, a rectangle in fractions of the target, zero meaning all of it, so split screen is two cameras with a viewport each.
-  - `Clear` and `ClearColor`.
-  - `Samples`, 1 or 4, zero meaning 1, resolved into the target. It smooths every entry's hard edges at once.
+  - `Clear` and `ClearColor`, a linear colour, as a tint is.
+  - `Samples`, 1 or 4, zero meaning 1. It smooths every entry's hard edges at once.
+    - A camera of 4 draws into a temporary multisampled texture of its viewport's size, cleared to its `ClearColor` or to transparent, resolves it into a temporary texture of that size, and draws that over its viewport, replacing what the viewport holds when the camera clears and blended over it otherwise.
+    - Resolving into the target was weighed. A resolve writes its whole target, which would wipe the other half of a split screen, or a 3D scene under a UI camera that does not clear.
+    - A material blending other than normally, in a 4-sample camera that does not clear, blends against transparent rather than against the target.
   - `Order`, a `render.Order`, the order cameras draw in.
   - `Size`, `Fit` and `PixelPerfect` (see *Logical size, fit and pixel-perfect*).
 - **`DrawList.SetCamera(Camera)` sets a camera for that frame,** forgotten once it is drawn, as entries are. Nothing is made, stored or destroyed, and an ECS system sets the camera it computes.
 - **The main window** is the first window platform opened of those still open, which canvas follows through `platform.WindowOpenedEvent` and `platform.WindowClosedEvent`: gogpu's window opened at start, when it opens one. When it closes, the next opened takes its place.
 - **A frame that sets none is seen through the default camera:** the main window, every layer, the centre pivot and zoom 1, clearing to opaque black, so a frame with no camera never shows a stale framebuffer. It draws only a frame that recorded entries (see *The frame on the kernel*).
 - **Cameras draw in `Order`,** equal ones by their lists' order and then by call order. At equal `Order` texture targets draw before windows, so a minimap's texture is drawn before the window that shows it. Cameras of one order share one command list.
-- **`Clear` clears the camera's viewport,** never the rest of its target: through the pass's load when the viewport covers the target, otherwise by drawing `ClearColor` over the viewport. render's load clears a whole attachment, which would wipe the other half of a split screen.
+- **`Clear` clears the camera's viewport,** never the rest of its target: through the pass's load when the viewport covers the target, otherwise by drawing `ClearColor` over the viewport with canvas's clear material, the default shader replacing what the target holds, through the include's `canvas_viewport_vertex`, which covers clip space whatever the camera's projection and never snaps, as the multisampled camera's composite will. render's load clears a whole attachment, which would wipe the other half of a split screen.
+  - A load clears to `ClearColor` premultiplied and encoded as sRGB where the target's format encodes nothing, as canvas's output is, so the two clears show alike.
+  - A viewport's edges are rounded to the target's pixels, so viewports sharing an edge neither overlap nor leave a gap.
+- **A camera naming both a window and a texture, or a texture render does not hold,** is skipped and reported once. A camera into a window not open or not sized, or of an empty viewport, is skipped silently, as render skips a pass into a minimized window.
+- **A camera with no entries in its layers and no clear** draws nothing, and an order with no camera drawing begins no list.
 - **Following, smoothing, limits and shake are the user's,** since a camera is a value set each frame. Parallax is several cameras into one target, each drawing a layer range from its own position.
 - **An entry is drawn by every camera whose layers hold it.** A tilemap seen by two cameras records the union of their views once, which canvas's guide says: recording per view would draw the shared tiles twice.
 
@@ -850,7 +859,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - sprites, shapes and mesh files, recorded singly and in bulk;
   - text drawn from the layout cache;
   - per-frame triangles copied into the frame's buffers;
-  - several cameras and camera orders, and every recording task's lane.
+  - several cameras and camera orders, and every recording task's draw list.
 - **Outside the gate, by nature,** each allocating its own, timed by a benchmark and not counted:
   - first uses: an image loaded and packed, a mesh file loaded, a glyph made, a font set made;
   - a layout for a string the cache has not seen, since go-text's shaping allocates. A timer whose digits change every second allocates in the frames it changes;
@@ -930,13 +939,13 @@ Each change was checked for a 3D renderer's needs too, drawbridge's forward+ or 
 - **The gate:** zero allocations for a steady frame once warm, checked with `testing.AllocsPerRun(...) == 0` over a whole beat, canvastest's `Step`, after four warm frames, on gfx's recording adapter in its mode that records nothing, turned on with `h.RecordNothing()`. It covers canvas, render, gfx, the kernel and metronome. Its frame holds the steady content *Performance* lists.
 - **Under `go test -race`** the gate steps its frames for the detector and checks no count.
 - **Benchmarks** time each entry against the same frame drawn by hand on render.
-  - **Operations:** recording, single calls and bulk; the lanes' merge and the sort; culling, batching, the instance data written, and the command lists recorded; text drawn from the cache; per-frame triangles copied.
+  - **Operations:** recording, single calls and bulk; the draw lists' merge and the sort; culling, batching, the instance data written, and the command lists recorded; text drawn from the cache; per-frame triangles copied.
   - **Counts:** 1,000, 10,000 and 100,000 sprites; 1, 4 and 16 recording tasks; 1, 2 and 4 cameras; one material against a switch every 16 entries; few layers against many, for the radix sort's passes.
   - **Timed, not gated:** glyph generation at first use, per glyph (Latin at em 48, Han at em 64), and for a frame of 200 new hanzi; an image's first use, its decode, converter and pack; the radix sort's passes as the layers spread.
   - **Ten runs** go in the baseline, compared with `benchstat`.
 
 **Concurrency under `go test -race`:** recording tasks run together, so each piece of shared state is tested by breaking the code that guards it, as render's are:
-- parallel lanes recording in one frame;
+- parallel draw lists recording in one frame;
 - one image's first draw from two tasks;
 - one glyph made from two tasks;
 - one layout cached from two tasks;
