@@ -10,6 +10,7 @@
 - [Gogpu](./plugins/gogpu/CONTEXT.md): the plugin that implements gfx and platform over our gogpu fork, driven from the kernel's main-thread tick
 - [Mux](./plugins/mux/CONTEXT.md): a game's true state as plain data, shown through timed overrides that catch what is drawn up to it
 - [Render](./plugins/render/CONTEXT.md): the immediate-mode rendering API over gfx, drawing meshes with materials into passes, and loading and sharing the shaders, textures and buffers they use
+- [Canvas](./plugins/canvas/CONTEXT.md): 2D on render, the sprites, shapes, text and meshes a frame records as entries, sorted and drawn through 2D materials
 
 ## Relationships
 
@@ -22,3 +23,4 @@
 - **Platform → Gogpu**: gogpu binds platform's window and input seams; platform's pump is gogpu's host loop pumping its events.
 - **Gfx → Render**: render draws through gfx alone, and none of render's users reaches gfx; render's frame event is published inside gfx's draw event, and its recovery, capture and readback events inside gfx's own.
 - **Platform → Render**: render reads every loaded asset through the FileSystem; bytes that are not files reach it through a memory mount.
+- **Render → Canvas**: canvas draws through render alone and reaches no gfx; its frame event is published inside render's, its entries are sorted and drawn as one command list per camera order among render's, and what canvas needs that render lacks is a delta to render.
