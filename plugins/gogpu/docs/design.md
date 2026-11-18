@@ -409,10 +409,16 @@ what `HostLoop` or the OS requires:
 - **A module's bindings are reflected by name with its entry points:** every
   global naga holds a binding for, in the order the module declares it,
   with its name, its kind as the "auto" layout's entry of a sampled one,
-  each member of a struct buffer at the offset naga gives and the size its
-  layouter gives its type, and the entry points naga's analysis finds using
-  it, their callees included. naga keeps a global no entry point uses, so a
+  a buffer's type described to its every member and element, and the entry
+  points naga's analysis finds using it, their callees included. naga keeps a global no entry point uses, so a
   binding only declared is answered with no entry points.
+- **A buffer's type is described recursively from naga's IR**
+  ([gfx and gogpu: recursive reflection of a binding's struct and array types](https://github.com/dvoyni/cog/issues/880)),
+  which holds every struct and array type, so naga's fork is unchanged:
+  each type's size is what naga's layouter gives it, a runtime-sized
+  array's counting one element; a struct's members are at the offsets naga
+  gives; an array's element is described in turn, with naga's stride and
+  its constant count, 0 for a runtime-sized one.
 - **An f32 texture is filterable,** as no entry point's use narrows it,
   unless multisampled, as WebGPU refuses a filterable multisampled one.
 - **`ReflectBindings` answers a copy** of what the module's reflection

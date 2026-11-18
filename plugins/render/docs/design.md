@@ -239,7 +239,7 @@ and a **test author** testing a plugin that draws.
   - A missing name, or several functions of a stage with none named, is refused and reported once: at `MakeMaterial` for a material, with `ReportKindMaterialRefused`, whose draws are then skipped, and at a dispatch's first pipeline for a compute function, the dispatch then skipped.
 - **Named reflection from gfx** (see *Delta to gfx*):
   - each binding's name, group, number and kind;
-  - a buffer struct's size and members;
+  - a buffer's size and its type, to its every member and element;
   - the entry points that use each binding.
 - **A parameter's level is its group:**
 

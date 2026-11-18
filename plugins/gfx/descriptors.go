@@ -153,21 +153,59 @@ type ShaderBinding struct {
 	// StorageTexture is a storage texture's access, format and view
 	// dimension.
 	StorageTexture StorageTextureBindingLayout
-	// Members are the members of a buffer's struct, in order; none for a
-	// buffer of another type.
-	Members []ShaderStructMember
+	// Type is a buffer's type, described to its every member and element:
+	// a struct of members, an array of elements, or a type of a size alone,
+	// its Size the buffer's MinBindingSize; zero for a binding of another
+	// kind.
+	Type ShaderType
 	// EntryPoints are the names of the entry points that use the binding,
 	// directly or through the functions they call; none for a binding only
 	// declared.
 	EntryPoints []string
 }
 
-// ShaderStructMember is one member of a buffer's struct: its name, and its
-// offset and size in bytes as WGSL lays them out.
+// Clone answers a copy of binding that shares no slice or element with it,
+// so a backend answering what it keeps answers the caller's own.
+func (binding ShaderBinding) Clone() ShaderBinding {
+	binding.Type = binding.Type.clone()
+	binding.EntryPoints = slices.Clone(binding.EntryPoints)
+	return binding
+}
+
+// ShaderType is a buffer's type, or the type of a member or element within
+// one, as WGSL lays it out: its size in bytes, a runtime-sized array's
+// counting one element; its members, in order, if it is a struct; and, if it
+// is an array, its element's type, the element count, 0 for a runtime-sized
+// array, and the stride between elements. A scalar, vector, matrix or atomic
+// type gives its size alone.
+type ShaderType struct {
+	Size          uint64
+	Members       []ShaderStructMember
+	Element       *ShaderType
+	ElementCount  uint32
+	ElementStride uint64
+}
+
+// clone answers a copy of shaderType that shares no slice or element with
+// it.
+func (shaderType ShaderType) clone() ShaderType {
+	shaderType.Members = slices.Clone(shaderType.Members)
+	for index := range shaderType.Members {
+		shaderType.Members[index].Type = shaderType.Members[index].Type.clone()
+	}
+	if shaderType.Element != nil {
+		element := shaderType.Element.clone()
+		shaderType.Element = &element
+	}
+	return shaderType
+}
+
+// ShaderStructMember is one member of a struct: its name, its offset in
+// bytes as WGSL lays it out, and its type.
 type ShaderStructMember struct {
 	Name   string
 	Offset uint64
-	Size   uint64
+	Type   ShaderType
 }
 
 // ShaderEntryPoint is one entry point a shader module declares, as the

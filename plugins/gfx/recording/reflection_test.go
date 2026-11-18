@@ -99,13 +99,17 @@ func TestAVertexReflectionAnswersTheInputsQueuedForItCopiedAndNoneByDefault(t *t
 func TestABindingReflectionAnswersTheBindingsQueuedForItCopiedAndNoneByDefault(t *testing.T) {
 	instance, device := requestDevice(t)
 	live := createObjects(t, device, everyBufferUsage, everyTextureUsage)
-	queued := []gfx.ShaderBinding{{Name: "camera", Members: []gfx.ShaderStructMember{{Name: "position", Size: 12}}, EntryPoints: []string{"vs"}}}
-	want := []gfx.ShaderBinding{{Name: "camera", Members: []gfx.ShaderStructMember{{Name: "position", Size: 12}}, EntryPoints: []string{"vs"}}}
+	rows := func() []gfx.ShaderBinding {
+		row := gfx.ShaderType{Size: 16, Members: []gfx.ShaderStructMember{{Name: "position", Type: gfx.ShaderType{Size: 12}}}}
+		return []gfx.ShaderBinding{{Name: "rows", Type: gfx.ShaderType{Size: 16, Element: &row, ElementStride: 16}, EntryPoints: []string{"vs"}}}
+	}
+	queued := rows()
+	want := rows()
 	instance.AnswerNext(recording.CallKindReflectBindings, recording.Answer{Bindings: queued})
 
 	bindings, err := device.ReflectBindings(live.module)
 	mustSucceed(t, err)
-	queued[0].Members[0].Offset = 7
+	queued[0].Type.Element.Members[0].Offset = 7
 	queued[0].EntryPoints[0] = "changed"
 
 	if !reflect.DeepEqual(bindings, want) {

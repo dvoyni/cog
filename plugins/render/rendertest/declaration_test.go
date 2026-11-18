@@ -3,6 +3,7 @@ package rendertest_test
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -14,8 +15,8 @@ import (
 )
 
 // litDeclaration declares a shader of every kind of binding, whose variant
-// with INSTANCED and SKINNED=4 declares a binding of its own and a second
-// vertex input.
+// with INSTANCED and SKINNED=4 declares a binding of its own, a runtime-sized
+// array of joints, and a second vertex input.
 const litDeclaration = `{
 	"bindings": [
 		{"group": 0, "binding": 0, "name": "camera", "buffer": {"type": "uniform", "size": 80, "members": [{"name": "view", "offset": 0, "size": 64}, {"name": "time", "offset": 64, "size": 4}]}, "entryPoints": ["vertex_main", "fragment_main"]},
@@ -28,7 +29,7 @@ const litDeclaration = `{
 	"variants": [
 		{
 			"defines": {"INSTANCED": "", "SKINNED": "4"},
-			"bindings": [{"group": 2, "binding": 1, "name": "joints", "buffer": {"type": "read-only-storage", "size": 64}, "entryPoints": ["vertex_main"]}],
+			"bindings": [{"group": 2, "binding": 1, "name": "joints", "buffer": {"type": "read-only-storage", "size": 64, "element": {"size": 64}, "elementStride": 64}, "entryPoints": ["vertex_main"]}],
 			"entryPoints": [{"name": "vertex_main", "stage": "vertex"}],
 			"vertexInputs": {"vertex_main": [{"location": 0, "type": "vec3<f32>"}, {"location": 1, "type": "vec4<u32>"}]}
 		}
@@ -43,13 +44,27 @@ var (
 	skinnedEntryPoints = []gfx.ShaderEntryPoint{{Name: "vertex_main", Stage: gfx.ShaderStageFlagVertex}}
 
 	litBindings = []gfx.ShaderBinding{
-		{Name: "camera", Group: 0, Binding: 0, Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform, MinBindingSize: 80}, Members: []gfx.ShaderStructMember{{Name: "view", Offset: 0, Size: 64}, {Name: "time", Offset: 64, Size: 4}}, EntryPoints: []string{"vertex_main", "fragment_main"}},
+		{
+			Name:        "camera",
+			Group:       0,
+			Binding:     0,
+			Buffer:      gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform, MinBindingSize: 80},
+			Type:        gfx.ShaderType{Size: 80, Members: []gfx.ShaderStructMember{{Name: "view", Offset: 0, Type: gfx.ShaderType{Size: 64}}, {Name: "time", Offset: 64, Type: gfx.ShaderType{Size: 4}}}},
+			EntryPoints: []string{"vertex_main", "fragment_main"},
+		},
 		{Name: "shadows", Group: 1, Binding: 0, Texture: gfx.TextureBindingLayout{SampleType: gfx.TextureSampleTypeDepth, ViewDimension: gfx.TextureViewDimension2DArray, Multisampled: true}, EntryPoints: []string{"fragment_main"}},
 		{Name: "shadow_sampler", Group: 1, Binding: 1, Sampler: gfx.SamplerBindingLayout{Type: gfx.SamplerBindingTypeComparison}},
 		{Name: "output", Group: 2, Binding: 0, StorageTexture: gfx.StorageTextureBindingLayout{Access: gfx.StorageTextureAccessReadWrite, Format: gfx.TextureFormatR32Float, ViewDimension: gfx.TextureViewDimension3D}, EntryPoints: []string{"fragment_main"}},
 	}
 	skinnedBindings = []gfx.ShaderBinding{
-		{Name: "joints", Group: 2, Binding: 1, Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeReadOnlyStorage, MinBindingSize: 64}, EntryPoints: []string{"vertex_main"}},
+		{
+			Name:        "joints",
+			Group:       2,
+			Binding:     1,
+			Buffer:      gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeReadOnlyStorage, MinBindingSize: 64},
+			Type:        gfx.ShaderType{Size: 64, Element: &gfx.ShaderType{Size: 64}, ElementStride: 64},
+			EntryPoints: []string{"vertex_main"},
+		},
 	}
 )
 
@@ -104,7 +119,7 @@ func TestAShadersReflectionIsAnsweredFromTheDeclarationBesideItForTheVariantOfIt
 	h.Step()
 
 	for index, test := range tests {
-		if fmt.Sprint(bindings[index]) != fmt.Sprint(test.wantBindings) {
+		if !reflect.DeepEqual(bindings[index], test.wantBindings) {
 			t.Errorf("%s: the reflection answered bindings\n%+v\nwant\n%+v", test.name, bindings[index], test.wantBindings)
 		}
 		if fmt.Sprint(entryPoints[index]) != fmt.Sprint(test.wantEntryPoints) {

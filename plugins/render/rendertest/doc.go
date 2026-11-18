@@ -86,10 +86,13 @@
 // directly or through the functions they call, and exactly one kind, as
 // gfx.ShaderBinding holds it, spelt as WebGPU spells its values:
 //
-//   - "buffer": its "type", uniform, storage or read-only-storage, its
-//     "size", that of its type as WGSL lays it out, a runtime-sized array's
-//     counting one element, and its struct's "members", each with its name,
-//     offset and size;
+//   - "buffer": its "type", uniform, storage or read-only-storage, and its
+//     type as WGSL lays it out: its "size", a runtime-sized array's counting
+//     one element; a struct's "members", each with its "name", "offset" and
+//     type; and an array's "element", a type, with its "elementCount", left
+//     out for a runtime-sized array, and its "elementStride". A member's or
+//     an element's type is spelt as the buffer's: a "size", and "members"
+//     or an "element" when it has them;
 //   - "sampler": its "type", filtering, non-filtering or comparison;
 //   - "texture": its "sampleType", float, unfilterable-float, depth, sint or
 //     uint, its "viewDimension", 1d, 2d, 2d-array, cube, cube-array or 3d,

@@ -21,12 +21,13 @@ type uniformLayoutKey struct {
 // and fields named _ left out as padding. A type that is no struct fills a
 // block of no members, such as a vec4<f32>, of its size.
 func checkUniformLayout(goType reflect.Type, binding gfx.ShaderBinding) error {
+	members := binding.Type.Members
 	if size := uint64(goType.Size()); size != binding.Buffer.MinBindingSize {
 		return fmt.Errorf("is a %v of %d bytes, where its uniform block holds %d", goType, size, binding.Buffer.MinBindingSize)
 	}
 	if goType.Kind() != reflect.Struct {
-		if len(binding.Members) > 0 {
-			return fmt.Errorf("is a %v, no struct, where its uniform block is a struct of %d members", goType, len(binding.Members))
+		if len(members) > 0 {
+			return fmt.Errorf("is a %v, no struct, where its uniform block is a struct of %d members", goType, len(members))
 		}
 		return nil
 	}
@@ -35,16 +36,16 @@ func checkUniformLayout(goType reflect.Type, binding gfx.ShaderBinding) error {
 		if field.Name == "_" {
 			continue
 		}
-		if memberIndex >= len(binding.Members) {
-			return fmt.Errorf("is a %v whose field %s is past its uniform block's %d members", goType, field.Name, len(binding.Members))
+		if memberIndex >= len(members) {
+			return fmt.Errorf("is a %v whose field %s is past its uniform block's %d members", goType, field.Name, len(members))
 		}
-		if member := binding.Members[memberIndex]; uint64(field.Offset) != member.Offset {
+		if member := members[memberIndex]; uint64(field.Offset) != member.Offset {
 			return fmt.Errorf("is a %v whose field %s is at offset %d, where its uniform block's member %s is at %d", goType, field.Name, field.Offset, member.Name, member.Offset)
 		}
 		memberIndex++
 	}
-	if memberIndex < len(binding.Members) {
-		return fmt.Errorf("is a %v of %d fields, where its uniform block has %d members", goType, memberIndex, len(binding.Members))
+	if memberIndex < len(members) {
+		return fmt.Errorf("is a %v of %d fields, where its uniform block has %d members", goType, memberIndex, len(members))
 	}
 	return nil
 }

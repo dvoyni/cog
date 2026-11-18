@@ -180,9 +180,9 @@ func layoutEntry(module *ir.Module, layouter *ir.Layouter, global *ir.GlobalVari
 
 // reflectBinding answers global's binding as gfx's named reflection answers
 // it: its kind as layoutEntry's, an f32 texture filterable since the
-// binding holds no entry point's use, a struct buffer's members
-// as naga lays them out, and the entry points info says use it, their
-// callees included.
+// binding holds no entry point's use, a buffer's type as reflectType
+// describes it, and the entry points info says use it, their callees
+// included.
 func reflectBinding(module *ir.Module, layouter *ir.Layouter, info *valid.ModuleInfo, global int) gfx.ShaderBinding {
 	variable := &module.GlobalVariables[global]
 	entry := layoutEntry(module, layouter, variable, true)
@@ -195,15 +195,8 @@ func reflectBinding(module *ir.Module, layouter *ir.Layouter, info *valid.Module
 		Texture:        entry.Texture,
 		StorageTexture: entry.StorageTexture,
 	}
-	if structure, ok := module.Types[variable.Type].Inner.(ir.StructType); ok {
-		binding.Members = make([]gfx.ShaderStructMember, 0, len(structure.Members))
-		for _, member := range structure.Members {
-			binding.Members = append(binding.Members, gfx.ShaderStructMember{
-				Name:   member.Name,
-				Offset: uint64(member.Offset),
-				Size:   uint64(layouter.Layout(member.Type).Size),
-			})
-		}
+	if entry.Buffer.Type != gfx.BufferBindingTypeUndefined {
+		binding.Type = reflectType(module, layouter, variable.Type)
 	}
 	for index := range module.EntryPoints {
 		if info.EntryPoints[index].GlobalUses[global] != 0 {
@@ -211,6 +204,33 @@ func reflectBinding(module *ir.Module, layouter *ir.Layouter, info *valid.Module
 		}
 	}
 	return binding
+}
+
+// reflectType answers the type handle names as gfx describes a buffer's: its
+// size as layouter lays it out, a struct's members at the offsets naga
+// gives, and an array's element, its count, none for a runtime-sized array,
+// and its stride.
+func reflectType(module *ir.Module, layouter *ir.Layouter, handle ir.TypeHandle) gfx.ShaderType {
+	described := gfx.ShaderType{Size: uint64(layouter.Layout(handle).Size)}
+	switch inner := module.Types[handle].Inner.(type) {
+	case ir.StructType:
+		described.Members = make([]gfx.ShaderStructMember, 0, len(inner.Members))
+		for _, member := range inner.Members {
+			described.Members = append(described.Members, gfx.ShaderStructMember{
+				Name:   member.Name,
+				Offset: uint64(member.Offset),
+				Type:   reflectType(module, layouter, member.Type),
+			})
+		}
+	case ir.ArrayType:
+		element := reflectType(module, layouter, inner.Base)
+		described.Element = &element
+		described.ElementStride = uint64(inner.Stride)
+		if inner.Size.Constant != nil {
+			described.ElementCount = *inner.Size.Constant
+		}
+	}
+	return described
 }
 
 // reflectVertexInputs answers the inputs function, a vertex entry point,

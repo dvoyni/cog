@@ -123,11 +123,13 @@ var (
 	jointsBinding2 = gfx.ShaderBinding{
 		Name: "joints", Group: 2,
 		Buffer:      gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform, MinBindingSize: 128},
+		Type:        gfx.ShaderType{Size: 128, Element: &gfx.ShaderType{Size: 64}, ElementCount: 2, ElementStride: 64},
 		EntryPoints: []string{"vertex_main"},
 	}
 	jointsBinding4 = gfx.ShaderBinding{
 		Name: "joints", Group: 2,
 		Buffer:      gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform, MinBindingSize: 256},
+		Type:        gfx.ShaderType{Size: 256, Element: &gfx.ShaderType{Size: 64}, ElementCount: 4, ElementStride: 64},
 		EntryPoints: []string{"vertex_main"},
 	}
 	positionInput = gfx.VertexInput{Location: 0, Type: gfx.ScalarTypeFloat32, Components: 3}
@@ -141,10 +143,10 @@ func makeLitReflection(joints *gfx.ShaderBinding, inputs ...gfx.VertexInput) bin
 		{
 			Name:   "camera",
 			Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform, MinBindingSize: 80},
-			Members: []gfx.ShaderStructMember{
-				{Name: "view_projection", Offset: 0, Size: 64},
-				{Name: "exposure", Offset: 64, Size: 4},
-			},
+			Type: gfx.ShaderType{Size: 80, Members: []gfx.ShaderStructMember{
+				{Name: "view_projection", Offset: 0, Type: gfx.ShaderType{Size: 64}},
+				{Name: "exposure", Offset: 64, Type: gfx.ShaderType{Size: 4}},
+			}},
 			EntryPoints: []string{"vertex_main", "fragment_main"},
 		},
 		{

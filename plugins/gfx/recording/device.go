@@ -715,19 +715,14 @@ func cloneLayouts(layouts []gfx.BindGroupLayoutDescriptor) []gfx.BindGroupLayout
 	return clones
 }
 
-// cloneBindings answers a copy of bindings, their members and entry points
-// copied, so a test changing what it queued changes no answer; nil stays nil.
+// cloneBindings answers a copy of bindings, each binding cloned, so a test
+// changing what it queued changes no answer; nil stays nil.
 func cloneBindings(bindings []gfx.ShaderBinding) []gfx.ShaderBinding {
-	if bindings == nil {
-		return nil
+	bindings = slices.Clone(bindings)
+	for index := range bindings {
+		bindings[index] = bindings[index].Clone()
 	}
-	clones := make([]gfx.ShaderBinding, len(bindings))
-	for index, binding := range bindings {
-		binding.Members = slices.Clone(binding.Members)
-		binding.EntryPoints = slices.Clone(binding.EntryPoints)
-		clones[index] = binding
-	}
-	return clones
+	return bindings
 }
 
 // bufferObject is a buffer as the device keeps it: what it was created with,

@@ -85,13 +85,10 @@ func FindDifference(declared, reflected Reflection) string {
 	return ""
 }
 
-// clipBinding answers binding with its members and entry points nil when it
-// has none, so a binding read from a declaration compares equal to one a
-// device reflects.
+// clipBinding answers binding with its entry points nil when it has none,
+// so a binding read from a declaration compares equal to one a device
+// reflects.
 func clipBinding(binding gfx.ShaderBinding) gfx.ShaderBinding {
-	if len(binding.Members) == 0 {
-		binding.Members = nil
-	}
 	if len(binding.EntryPoints) == 0 {
 		binding.EntryPoints = nil
 	}

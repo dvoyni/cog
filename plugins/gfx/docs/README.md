@@ -775,7 +775,12 @@ struct Camera {
 	viewProjection: mat4x4<f32>,
 	position: vec3<f32>,
 }
+struct Light {
+	position: vec3<f32>,
+	range: f32,
+}
 @group(0) @binding(0) var<uniform> camera: Camera;
+@group(0) @binding(1) var<storage, read> lights: array<Light>;
 @group(1) @binding(0) var albedo: texture_2d<f32>;
 ```
 
@@ -783,9 +788,13 @@ struct Camera {
 bindings, err := device.ShaderModuleBindings(module)
 // bindings[0]: Name "camera", Group 0, Binding 0,
 //   Buffer{Type: BufferBindingTypeUniform, MinBindingSize: 80},
-//   Members viewProjection at 0 of 64 bytes and position at 64 of 12,
+//   Type{Size: 80, Members: viewProjection at 0 of 64 bytes, position at 64 of 12},
 //   EntryPoints ["vertexMain"], the entry points that read it.
-// bindings[1]: Name "albedo", Group 1, Binding 0,
+// bindings[1]: Name "lights", Group 0, Binding 1,
+//   Buffer{Type: BufferBindingTypeReadOnlyStorage, MinBindingSize: 16},
+//   Type{Size: 16, ElementCount: 0, ElementStride: 16,
+//     Element: &{Size: 16, Members: position at 0 of 12 bytes, range at 12 of 4}}.
+// bindings[2]: Name "albedo", Group 1, Binding 0,
 //   Texture{SampleType: TextureSampleTypeFloat, ViewDimension: TextureViewDimension2D},
 //   EntryPoints none when no entry point samples it.
 ```
@@ -800,12 +809,16 @@ bindings, err := device.ShaderModuleBindings(module)
   `TextureSampleTypeFloat`, a multisampled one
   `TextureSampleTypeUnfilterableFloat`, as WebGPU refuses a filterable
   multisampled texture, and a depth one `TextureSampleTypeDepth`.
-- **`Members`** are a buffer struct's members, each with its name, offset
-  and size as WGSL lays them out.
+- **`Type`** is a buffer's type as WGSL lays it out, described to its every
+  member and element: its `Size`; a struct's `Members`, each with its name,
+  offset and type; an array's `Element`, its `ElementCount`, 0 for a
+  runtime-sized array, and its `ElementStride`. A scalar, vector, matrix or
+  atomic gives its size alone, and a binding of another kind has none.
 - **`EntryPoints`** name the entry points that use the binding, directly or
   through the functions they call.
 
-The slices are yours to keep. A released module answers `ErrReleased`.
+The slices and elements are yours to keep; `ShaderBinding.Clone` copies a
+binding whole. A released module answers `ErrReleased`.
 
 ## Pipelines
 
@@ -1456,7 +1469,7 @@ instance.AnswerNext(recording.CallKindReflectRenderPipelineLayout, recording.Ans
 instance.AnswerNext(recording.CallKindReflectBindings, recording.Answer{Bindings: []gfx.ShaderBinding{{
 	Name:        "camera",
 	Buffer:      gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform, MinBindingSize: 64},
-	Members:     []gfx.ShaderStructMember{{Name: "viewProjection", Offset: 0, Size: 64}},
+	Type:        gfx.ShaderType{Size: 64, Members: []gfx.ShaderStructMember{{Name: "viewProjection", Offset: 0, Type: gfx.ShaderType{Size: 64}}}},
 	EntryPoints: []string{"vertexMain"},
 }}})
 ```
@@ -1544,8 +1557,8 @@ What a backend owes gfx:
   `ReflectRenderPipelineLayout`, `ReflectComputePipelineLayout`,
   `ReflectVertexInputs` and `ReflectBindings`. `ReflectBindings` answers
   every binding the module declares, used or not, with its name, its
-  struct's members and the entry points that use it, in slices the backend
-  keeps no part of. `CreateRenderPipeline` and `CreateComputePipeline`
+  buffer's type to its every member and element, and the entry points that
+  use it, in slices the backend keeps no part of. `CreateRenderPipeline` and `CreateComputePipeline`
   always get an explicit layout.
 - **Submissions are counted.** `Submit` answers the submission's index,
   from one on each device; `Poll` resolves finished maps without waiting and

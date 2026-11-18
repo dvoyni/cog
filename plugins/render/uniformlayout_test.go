@@ -9,8 +9,8 @@ import (
 
 func TestAUniformTypeFitsABlockOfItsSizeAndMemberOffsetsInOrderPaddingLeftOut(t *testing.T) {
 	block := gfx.ShaderBinding{
-		Buffer:  gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform, MinBindingSize: 32},
-		Members: []gfx.ShaderStructMember{{Name: "color", Offset: 0, Size: 16}, {Name: "strength", Offset: 16, Size: 4}},
+		Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform, MinBindingSize: 32},
+		Type:   gfx.ShaderType{Size: 32, Members: []gfx.ShaderStructMember{{Name: "color", Offset: 0, Type: gfx.ShaderType{Size: 16}}, {Name: "strength", Offset: 16, Type: gfx.ShaderType{Size: 4}}}},
 	}
 	type fitting struct {
 		Colour [4]float32

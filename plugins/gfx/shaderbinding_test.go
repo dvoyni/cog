@@ -37,10 +37,10 @@ func reflectedBindings() []gfx.ShaderBinding {
 		{
 			Name:   "camera",
 			Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform, MinBindingSize: 80},
-			Members: []gfx.ShaderStructMember{
-				{Name: "viewProjection", Offset: 0, Size: 64},
-				{Name: "position", Offset: 64, Size: 12},
-			},
+			Type: gfx.ShaderType{Size: 80, Members: []gfx.ShaderStructMember{
+				{Name: "viewProjection", Offset: 0, Type: gfx.ShaderType{Size: 64}},
+				{Name: "position", Offset: 64, Type: gfx.ShaderType{Size: 12}},
+			}},
 			EntryPoints: []string{"vs", "fs"},
 		},
 		{

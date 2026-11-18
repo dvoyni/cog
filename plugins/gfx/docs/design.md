@@ -257,13 +257,24 @@ device's release and the recovery among them, for a backend to pin.
     the binding's kind with a visibility; an f32 texture's sample type is
     `Float`, a multisampled one's `UnfilterableFloat`, as WebGPU refuses a
     filterable multisampled texture;
-  - a buffer struct's size, as its buffer layout's `MinBindingSize`, and its
-    members' names, offsets and sizes;
+  - a buffer's size, as its buffer layout's `MinBindingSize`, and its type
+    as a `ShaderType`, described to its every member and element
+    ([gfx and gogpu: recursive reflection of a binding's struct and array types](https://github.com/dvoyni/cog/issues/880)):
+    a struct's `Members`, each with its name, offset and type; an array's
+    `Element`, `ElementCount`, 0 for a runtime-sized one, and
+    `ElementStride`; any other type its size alone. So `array<ObjectData>`,
+    a light list in `array<Light, 16>`, a skin's `array<mat4x4<f32>, 64>`
+    and a member of an element of a runtime array are one case;
   - the entry points that use each binding.
 
   The backend seam's `ReflectBindings` carries the same. gogpu fills it
-  from naga's IR, which holds names and offsets, and the recording
-  adapter answers what a test queues, as for the other reflection calls.
+  from naga's IR, which holds every struct and array type with its names,
+  offsets and strides, and the recording adapter answers what a test
+  queues, as for the other reflection calls; render's rendertest queues it
+  from the binding declarations `cmd/declarebindings` writes, so it
+  answers what the software adapter does. `ShaderBinding.Clone` copies a
+  binding to its every member and element, for an adapter answering a copy
+  of what it keeps.
 
   A caller that describes a module whole, as render's
   `cmd/declarebindings` writes its binding declarations, also reads

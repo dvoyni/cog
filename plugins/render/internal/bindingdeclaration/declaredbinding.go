@@ -78,16 +78,17 @@ type declaredBinding struct {
 
 // makeDeclaredBinding answers shaderBinding as a declaration spells it, its
 // kind the one of its layouts that is set, or the error naming what no name
-// spells, a binding of no kind among them.
+// spells: a binding of no kind among them, or a buffer whose type's size is
+// not its minimum binding size, as a declaration spells both as one.
 func makeDeclaredBinding(shaderBinding gfx.ShaderBinding) (declaredBinding, error) {
 	binding := declaredBinding{Group: shaderBinding.Group, Binding: shaderBinding.Binding, Name: shaderBinding.Name, EntryPoints: shaderBinding.EntryPoints}
 	var err error
 	switch {
 	case shaderBinding.Buffer.Type != gfx.BufferBindingTypeUndefined:
-		binding.Buffer = &declaredBuffer{Size: shaderBinding.Buffer.MinBindingSize}
-		for _, member := range shaderBinding.Members {
-			binding.Buffer.Members = append(binding.Buffer.Members, declaredMember(member))
+		if shaderBinding.Type.Size != shaderBinding.Buffer.MinBindingSize {
+			return declaredBinding{}, fmt.Errorf("is of a type of %d bytes, where its minimum binding size is %d", shaderBinding.Type.Size, shaderBinding.Buffer.MinBindingSize)
 		}
+		binding.Buffer = &declaredBuffer{declaredType: makeDeclaredType(shaderBinding.Type)}
 		binding.Buffer.Type, err = findName(bufferBindingTypes, "buffer type", shaderBinding.Buffer.Type)
 	case shaderBinding.Sampler.Type != gfx.SamplerBindingTypeUndefined:
 		binding.Sampler = &declaredSampler{}
@@ -129,9 +130,7 @@ func (b declaredBinding) makeShaderBinding() (gfx.ShaderBinding, error) {
 	switch {
 	case b.Buffer != nil:
 		binding.Buffer.MinBindingSize = b.Buffer.Size
-		for _, member := range b.Buffer.Members {
-			binding.Members = append(binding.Members, gfx.ShaderStructMember(member))
-		}
+		binding.Type = b.Buffer.makeShaderType()
 		binding.Buffer.Type, err = findNamed(bufferBindingTypes, "buffer type", b.Buffer.Type)
 	case b.Sampler != nil:
 		binding.Sampler.Type, err = findNamed(samplerBindingTypes, "sampler type", b.Sampler.Type)
@@ -153,19 +152,11 @@ func (b declaredBinding) makeShaderBinding() (gfx.ShaderBinding, error) {
 }
 
 // declaredBuffer is a buffer binding: its type, uniform, storage or
-// read-only-storage, its type's size as WGSL lays it out, and its struct's
-// members.
+// read-only-storage, and the type it holds, whose size is its minimum
+// binding size.
 type declaredBuffer struct {
-	Type    string           `json:"type"`
-	Size    uint64           `json:"size"`
-	Members []declaredMember `json:"members,omitempty"`
-}
-
-// declaredMember is one member of a buffer's struct.
-type declaredMember struct {
-	Name   string `json:"name"`
-	Offset uint64 `json:"offset"`
-	Size   uint64 `json:"size"`
+	Type string `json:"type"`
+	declaredType
 }
 
 // declaredSampler is a sampler binding: its type, filtering or comparison.

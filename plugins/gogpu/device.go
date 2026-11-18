@@ -373,8 +373,7 @@ func (d *device) ReflectBindings(module gfx.ShaderModule) ([]gfx.ShaderBinding, 
 	}
 	bindings := slices.Clone(stored.reflection.bindings)
 	for index := range bindings {
-		bindings[index].Members = slices.Clone(bindings[index].Members)
-		bindings[index].EntryPoints = slices.Clone(bindings[index].EntryPoints)
+		bindings[index] = bindings[index].Clone()
 	}
 	return bindings, nil
 }

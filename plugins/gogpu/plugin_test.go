@@ -1784,10 +1784,38 @@ func TestEveryBindingAModuleDeclaresIsAnsweredByNameWithTheEntryPointsThatUseIt(
 		if !reflect.DeepEqual(bindings, namedBindings) {
 			t.Errorf("the bindings are\n%+v\nwant\n%+v", bindings, namedBindings)
 		}
-		bindings[0].Members[0].Name = "changed"
+		bindings[0].Type.Members[0].Name = "changed"
+		bindings[1].Type.Members[1].Type.Element.Size = 7
 		bindings[0].EntryPoints[0] = "changed"
 		if again, _ := device.ShaderModuleBindings(module); !reflect.DeepEqual(again, namedBindings) {
 			t.Errorf("after the first answer's slices changed, the bindings are\n%+v\nwant\n%+v", again, namedBindings)
+		}
+	})
+}
+
+func TestABindingsTypeIsDescribedToItsEveryMemberAndElement(t *testing.T) {
+	h := newHarness(t)
+	h.mustSpawn(&gfx.Config{ForceFallbackAdapter: true}, nil)
+
+	h.readDevice(func(device gfx.Device) {
+		module, err := device.CreateShaderModule(gfx.ShaderModuleDescriptor{WGSL: nestedTypesWGSL})
+		if err != nil {
+			t.Errorf("CreateShaderModule answered %v", err)
+		}
+
+		bindings, err := device.ShaderModuleBindings(module)
+
+		if err != nil {
+			t.Errorf("ShaderModuleBindings answered %v", err)
+		}
+		if len(bindings) != 2 {
+			t.Fatalf("the bindings are %+v, want rows and scene", bindings)
+		}
+		if !reflect.DeepEqual(bindings[0].Type, rowsType) {
+			t.Errorf("rows' type is\n%+v\nwant\n%+v", bindings[0].Type, rowsType)
+		}
+		if !reflect.DeepEqual(bindings[1].Type, sceneType) {
+			t.Errorf("scene's type is\n%+v\nwant\n%+v", bindings[1].Type, sceneType)
 		}
 	})
 }
@@ -2136,34 +2164,94 @@ fn tally() {
 }
 `
 
+// nestedTypesWGSL binds a runtime-sized array of a struct holding a struct,
+// as canvas's rows, and a uniform block of fixed arrays, a light list and a
+// skin's joints.
+const nestedTypesWGSL = `
+struct Argument {
+	tint: vec4f,
+	strength: f32,
+}
+
+struct Row {
+	transform: mat3x2f,
+	layer: u32,
+	argument: Argument,
+}
+
+struct Light {
+	position: vec3f,
+	range: f32,
+}
+
+struct Scene {
+	lights: array<Light, 16>,
+	joints: array<mat4x4f, 64>,
+	count: u32,
+}
+
+@group(0) @binding(0) var<storage, read> rows: array<Row>;
+@group(0) @binding(1) var<uniform> scene: Scene;
+
+@compute @workgroup_size(1)
+fn tally() {
+	_ = rows[0].argument.strength + scene.lights[0].range + scene.joints[0][0].x + f32(scene.count);
+}
+`
+
+// argumentType, rowType, lightType, rowsType and sceneType are
+// nestedTypesWGSL's types as WGSL lays them out.
+var (
+	argumentType = gfx.ShaderType{Size: 32, Members: []gfx.ShaderStructMember{
+		{Name: "tint", Type: gfx.ShaderType{Size: 16}},
+		{Name: "strength", Offset: 16, Type: gfx.ShaderType{Size: 4}},
+	}}
+	rowType = gfx.ShaderType{Size: 64, Members: []gfx.ShaderStructMember{
+		{Name: "transform", Type: gfx.ShaderType{Size: 24}},
+		{Name: "layer", Offset: 24, Type: gfx.ShaderType{Size: 4}},
+		{Name: "argument", Offset: 32, Type: argumentType},
+	}}
+	lightType = gfx.ShaderType{Size: 16, Members: []gfx.ShaderStructMember{
+		{Name: "position", Type: gfx.ShaderType{Size: 12}},
+		{Name: "range", Offset: 12, Type: gfx.ShaderType{Size: 4}},
+	}}
+	rowsType  = gfx.ShaderType{Size: 64, Element: &rowType, ElementStride: 64}
+	sceneType = gfx.ShaderType{Size: 4368, Members: []gfx.ShaderStructMember{
+		{Name: "lights", Type: gfx.ShaderType{Size: 256, Element: &lightType, ElementCount: 16, ElementStride: 16}},
+		{Name: "joints", Offset: 256, Type: gfx.ShaderType{Size: 4096, Element: &gfx.ShaderType{Size: 64}, ElementCount: 64, ElementStride: 64}},
+		{Name: "count", Offset: 4352, Type: gfx.ShaderType{Size: 4}},
+	}}
+)
+
 // namedBindings are namedBindingsWGSL's bindings as named reflection answers
-// them, a struct's members as WGSL lays them out, a runtime-sized array
-// counting one element.
+// them, a buffer's type as WGSL lays it out, a runtime-sized array counting
+// one element.
 var namedBindings = []gfx.ShaderBinding{
 	{
 		Name:   "camera",
 		Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform, MinBindingSize: 80},
-		Members: []gfx.ShaderStructMember{
-			{Name: "viewProjection", Offset: 0, Size: 64},
-			{Name: "position", Offset: 64, Size: 12},
-			{Name: "exposure", Offset: 76, Size: 4},
-		},
+		Type: gfx.ShaderType{Size: 80, Members: []gfx.ShaderStructMember{
+			{Name: "viewProjection", Offset: 0, Type: gfx.ShaderType{Size: 64}},
+			{Name: "position", Offset: 64, Type: gfx.ShaderType{Size: 12}},
+			{Name: "exposure", Offset: 76, Type: gfx.ShaderType{Size: 4}},
+		}},
 		EntryPoints: []string{"vs", "fs"},
 	},
 	{
 		Name:    "lights",
 		Binding: 1,
 		Buffer:  gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeReadOnlyStorage, MinBindingSize: 32},
-		Members: []gfx.ShaderStructMember{
-			{Name: "count", Offset: 0, Size: 4},
-			{Name: "colors", Offset: 16, Size: 16},
-		},
+		Type: gfx.ShaderType{Size: 32, Members: []gfx.ShaderStructMember{
+			{Name: "count", Offset: 0, Type: gfx.ShaderType{Size: 4}},
+			{Name: "colors", Offset: 16, Type: gfx.ShaderType{Size: 16, Element: &gfx.ShaderType{Size: 16}, ElementStride: 16}},
+		}},
 		EntryPoints: []string{"tally"},
 	},
 	{
 		Name:        "counts",
 		Binding:     2,
 		Buffer:      gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeStorage, MinBindingSize: 4},
+		Type:        gfx.ShaderType{Size: 4, Element: &gfx.ShaderType{Size: 4}, ElementStride: 4},
 		EntryPoints: []string{"tally"},
 	},
 	{Name: "line", Group: 1, Texture: gfx.TextureBindingLayout{SampleType: gfx.TextureSampleTypeFloat, ViewDimension: gfx.TextureViewDimension1D}},

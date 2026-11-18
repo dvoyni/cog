@@ -11,15 +11,25 @@ import (
 )
 
 func TestAMarshalledDeclarationReadsBackEachVariantsReflection(t *testing.T) {
+	light := gfx.ShaderType{Size: 32, Members: []gfx.ShaderStructMember{
+		{Name: "position", Type: gfx.ShaderType{Size: 12}},
+		{Name: "falloff", Offset: 16, Type: gfx.ShaderType{Size: 16, Members: []gfx.ShaderStructMember{{Name: "range", Type: gfx.ShaderType{Size: 4}}}}},
+	}}
+	joint := gfx.ShaderType{Size: 64}
 	base := bindingdeclaration.Reflection{
 		Bindings: []gfx.ShaderBinding{
 			{
 				Name:        "camera",
 				Buffer:      gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform, MinBindingSize: 80},
-				Members:     []gfx.ShaderStructMember{{Name: "view", Size: 64}, {Name: "time", Offset: 64, Size: 4}},
+				Type:        gfx.ShaderType{Size: 80, Members: []gfx.ShaderStructMember{{Name: "view", Type: gfx.ShaderType{Size: 64}}, {Name: "time", Offset: 64, Type: gfx.ShaderType{Size: 4}}}},
 				EntryPoints: []string{"vertex_main", "fragment_main"},
 			},
-			{Name: "lights", Binding: 1, Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeReadOnlyStorage, MinBindingSize: 16}},
+			{
+				Name:    "lights",
+				Binding: 1,
+				Buffer:  gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeReadOnlyStorage, MinBindingSize: 32},
+				Type:    gfx.ShaderType{Size: 32, Element: &light, ElementStride: 32},
+			},
 			{Name: "albedo", Group: 1, Texture: gfx.TextureBindingLayout{SampleType: gfx.TextureSampleTypeUnfilterableFloat, ViewDimension: gfx.TextureViewDimension2D, Multisampled: true}, EntryPoints: []string{"fragment_main"}},
 			{Name: "shadow", Group: 1, Binding: 1, Sampler: gfx.SamplerBindingLayout{Type: gfx.SamplerBindingTypeComparison}},
 			{Name: "written", Group: 2, StorageTexture: gfx.StorageTextureBindingLayout{Access: gfx.StorageTextureAccessReadWrite, Format: gfx.TextureFormatR32Float, ViewDimension: gfx.TextureViewDimension2DArray}},
@@ -36,7 +46,12 @@ func TestAMarshalledDeclarationReadsBackEachVariantsReflection(t *testing.T) {
 	skinned := bindingdeclaration.Variant{
 		Defines: []gfx.ShaderDefine{{Name: "SKINNED"}, {Name: "JOINTS", Value: "4"}},
 		Reflection: bindingdeclaration.Reflection{
-			Bindings:     []gfx.ShaderBinding{{Name: "joints", Group: 2, Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeStorage, MinBindingSize: 64}}},
+			Bindings: []gfx.ShaderBinding{{
+				Name:   "joints",
+				Group:  2,
+				Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeStorage, MinBindingSize: 256},
+				Type:   gfx.ShaderType{Size: 256, Element: &joint, ElementCount: 4, ElementStride: 64},
+			}},
 			EntryPoints:  []gfx.ShaderEntryPoint{{Name: "vertex_main", Stage: gfx.ShaderStageFlagVertex}},
 			VertexInputs: map[string][]gfx.VertexInput{"vertex_main": {{Location: 0, Type: gfx.ScalarTypeSint32, Components: 4}}},
 		},
@@ -64,6 +79,10 @@ func TestAValueTheFormatCannotNameFailsMarshalNamingIt(t *testing.T) {
 		"a binding of no kind": {
 			bindingdeclaration.Reflection{Bindings: []gfx.ShaderBinding{{Name: "nothing"}}},
 			`binding "nothing"`,
+		},
+		"a buffer whose type's size is not its minimum binding size": {
+			bindingdeclaration.Reflection{Bindings: []gfx.ShaderBinding{{Name: "camera", Buffer: gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeUniform, MinBindingSize: 80}, Type: gfx.ShaderType{Size: 64}}}},
+			`binding "camera"`,
 		},
 		"a storage format WebGPU refuses a storage texture": {
 			bindingdeclaration.Reflection{Bindings: []gfx.ShaderBinding{{Name: "written", StorageTexture: gfx.StorageTextureBindingLayout{Access: gfx.StorageTextureAccessWriteOnly, Format: gfx.TextureFormatDepth32Float, ViewDimension: gfx.TextureViewDimension2D}}}},

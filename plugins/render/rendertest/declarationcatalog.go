@@ -189,8 +189,7 @@ type preprocessedShader struct {
 func cloneBindings(bindings []gfx.ShaderBinding) []gfx.ShaderBinding {
 	bindings = slices.Clone(bindings)
 	for index := range bindings {
-		bindings[index].Members = slices.Clone(bindings[index].Members)
-		bindings[index].EntryPoints = slices.Clone(bindings[index].EntryPoints)
+		bindings[index] = bindings[index].Clone()
 	}
 	return bindings
 }
