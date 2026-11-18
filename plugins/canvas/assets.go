@@ -1,37 +1,51 @@
 package canvas
 
 import (
-	"embed"
-	"io/fs"
+	"fmt"
+
+	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/plugins/render"
 )
 
-const (
-	// assetPrefix is the folder of platform's FS canvas's built-in assets
-	// appear in, where a 2D material's shader includes canvas's include
-	// from, as "cog.canvas/canvas.wgsl".
-	assetPrefix = "cog.canvas"
-	// defaultShaderPath is the path in platform's FS of the default
-	// material's shader.
-	defaultShaderPath = assetPrefix + "/default.wgsl"
-	// spriteVertexEntryPoint is the include's vertex stage, for an entry
-	// drawn as a quad.
-	spriteVertexEntryPoint = "canvas_sprite_vertex"
-)
-
-// embeddedAssets are canvas's built-in assets: its include and its
-// materials' shaders, in its assets folder, each shader's binding
-// declaration beside it, which render's cmd/declarebindings generates.
+// Assets is the task parameter a task reaches canvas's assets and tools
+// through, declared in its signature as kernel.Read is:
 //
-//go:generate go run github.com/dvoyni/cog/plugins/render/cmd/declarebindings assets/canvas.wgsl assets/default.wgsl
-//go:embed assets
-var embeddedAssets embed.FS
+//	func inspectOnKey(k *kernel.Kernel, event canvas.FrameEvent, assets canvas.Assets) kernel.NoResult
+//
+// It locks canvas's draw state for read, and, through a render.Frame it
+// holds, render's frame state, its asset table, gfx's Device and platform's
+// FS, all for read, so tasks holding it run together, and with recording
+// tasks. It is valid only while the task's job runs.
+type Assets struct {
+	state kernel.Read[*drawState]
+	frame render.Frame
+}
 
-// makeAssetFS answers canvas's built-in assets as an FS of their own, each
-// named for its path in the assets folder, to mount under assetPrefix.
-func makeAssetFS() fs.FS {
-	assets, err := fs.Sub(embeddedAssets, "assets")
-	if err != nil {
-		panic(err) // "assets" is a valid path, which fs.Sub never refuses.
+// Declare declares Assets' locks and answers it bound to what they guard.
+func (Assets) Declare(access *kernel.Access) Assets {
+	return Assets{state: access.Read[*drawState](), frame: render.Frame{}.Declare(access)}
+}
+
+// RequestInspection asks for an inspection of the first frame whose
+// FrameEvent is published after the call, and asks render for its own
+// inspection of that frame, one at a time: a request while one is pending,
+// asked for and not yet delivered, joins it. While a request is pending,
+// canvas writes down each frame it draws, and InspectedEvent delivers the
+// one render inspected, once render has delivered its own; every other
+// frame pays one check, and allocates nothing for it.
+func (a Assets) RequestInspection() {
+	a.state.Get().inspector.requestPending.Store(true)
+	a.frame.RequestInspection()
+}
+
+// ReadInspection answers event's inspection, with render's beside it. It
+// answers it only while the jobs of event's publication run, so a handler
+// of InspectedEvent calls it in a task it joins into the out dependency it
+// returns; later, it answers an error.
+func (a Assets) ReadInspection(event InspectedEvent) (Inspection, error) {
+	inspection, ok := a.state.Get().inspector.read(event.Beat)
+	if !ok {
+		return Inspection{}, fmt.Errorf("canvas: reading the inspection of beat %d, which is read only while InspectedEvent's jobs run", event.Beat.Tick)
 	}
-	return assets
+	return inspection, nil
 }

@@ -11,7 +11,11 @@
 //	})
 //	h.Step()
 //
-// The harness is rendertest's, whose calls it keeps: Frames reads back what
+// Each Step's frame is inspected in canvas's terms: Frames answers each
+// camera, its batches and their entries, with render's inspection of the
+// frame beside it.
+//
+// The harness is rendertest's, whose calls it keeps: its Frames reads back what
 // reached render, and OpenWindow, RecordNothing and UseSoftwareAdapter work
 // as they do there. A test package with pixel tests runs its tests through
 // RunMain, as rendertest's do.

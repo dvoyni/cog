@@ -27,7 +27,7 @@ func TestAFrameOfFillsReachesRenderAsOneListAtOrderZeroOfOnePassAndOneInstancedD
 	h.Step()
 
 	frames := h.Frames()
-	lists := slices.DeleteFunc(frames[len(frames)-1].CommandLists, func(list render.InspectedCommandList) bool {
+	lists := slices.DeleteFunc(frames[len(frames)-1].Render.CommandLists, func(list render.InspectedCommandList) bool {
 		return list.Label != "before" && list.Label != "canvas" && list.Label != "after"
 	})
 	var labels []string

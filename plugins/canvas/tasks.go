@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/plugins/metronome"
 	"github.com/dvoyni/cog/plugins/platform"
 	"github.com/dvoyni/cog/plugins/render"
 )
@@ -17,8 +18,9 @@ const defaultCameraOrder render.Order = 0
 // inside render.FrameEvent, with render's beat and timing signals and that
 // job as its Ready; after the nested publication's out dependency, it
 // schedules mergeLanesTask, closing the frame and merging its draw lists, and
-// after that drawTask. It returns drawTask's job joined with in.
-func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event render.FrameEvent, openFrameTask, mergeLanesTask, drawTask *kernel.Task[kernel.NoArg, kernel.NoResult]) (render.FrameEvent, kernel.JobHandle) {
+// after that drawTask with the frame's beat. It returns drawTask's job joined
+// with in.
+func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event render.FrameEvent, openFrameTask, mergeLanesTask *kernel.Task[kernel.NoArg, kernel.NoResult], drawTask *kernel.Task[metronome.Beat, kernel.NoResult]) (render.FrameEvent, kernel.JobHandle) {
 	opened := ex.Schedule(openFrameTask, kernel.NoArg{}, event.Ready).Handle()
 	_, out := ex.Publish(in, FrameEvent{
 		Beat:        event.Beat,
@@ -27,8 +29,23 @@ func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event render.FrameEve
 		GPULatency:  event.GPULatency,
 	})
 	merged := ex.Schedule(mergeLanesTask, kernel.NoArg{}, out, opened).Handle()
-	drawn := ex.Schedule(drawTask, kernel.NoArg{}, merged).Handle()
+	drawn := ex.Schedule(drawTask, event.Beat, merged).Handle()
 	return event, ex.Join(in, drawn)
+}
+
+// deliverInspection is Handlers.DeliverInspection: after in, it schedules
+// matchInspectionTask with event, and returns its job, which render's
+// inspection waits for before it is dropped.
+func deliverInspection(ex *kernel.Executor, in kernel.JobHandle, event render.InspectedEvent, matchInspectionTask *kernel.Task[render.InspectedEvent, kernel.NoResult]) (render.InspectedEvent, kernel.JobHandle) {
+	return event, ex.Schedule(matchInspectionTask, event, in).Handle()
+}
+
+// publishInspection handles inspectionDeliveryEvent: it publishes
+// InspectedEvent inside it, schedules dropInspectionTask for its beat after
+// the nested publication's out dependency, and returns that job.
+func publishInspection(ex *kernel.Executor, in kernel.JobHandle, event inspectionDeliveryEvent, dropInspectionTask *kernel.Task[metronome.Beat, kernel.NoResult]) (inspectionDeliveryEvent, kernel.JobHandle) {
+	_, out := ex.Publish(in, InspectedEvent{Beat: event.beat})
+	return event, ex.Schedule(dropInspectionTask, event.beat, out).Handle()
 }
 
 // trackOpenedWindow is Handlers.TrackOpenedWindow: after in, it schedules
@@ -56,29 +73,45 @@ func mergeLanes(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*drawState])
 	return kernel.NoResult{}
 }
 
-// draw draws a frame that recorded entries through the default camera, into
-// the main window, while one is open and sized: one command list at the
-// default camera's order, making the default material and the white texel
-// at the first draw. A frame that recorded none, or with no main window,
-// begins no list.
-func draw(k *kernel.Kernel, _ kernel.NoArg, frame render.Frame, inventory render.Inventory, manager kernel.Read[*platform.WindowManager], windows kernel.Read[*windowList], state kernel.Read[*drawState], rendering kernel.Write[*renderer]) kernel.NoResult {
-	shapes := state.Get().shapes
+// draw draws the frame of beat: a frame that recorded entries through the
+// default camera, into the main window, while one is open and sized, and
+// none otherwise. A frame inspected is written down for the pending
+// request, and render is asked again for its inspection, so a request
+// render joined to an inspection of an earlier frame still gets one.
+func draw(k *kernel.Kernel, beat metronome.Beat, frame render.Frame, inventory render.Inventory, manager kernel.Read[*platform.WindowManager], windows kernel.Read[*windowList], state kernel.Read[*drawState], rendering kernel.Write[*renderer]) kernel.NoResult {
+	canvasState := state.Get()
 	window := windows.Get().mainWindow()
-	if len(shapes) == 0 || window == (platform.Window{}) {
+	cameraDrawn := rendering.Get().drawDefaultCamera(frame, inventory, manager.Get(), window, canvasState.shapes)
+	if canvasState.frameInspected {
+		canvasState.inspector.record(canvasState.makeInspection(beat, window, cameraDrawn))
+		frame.RequestInspection()
+	}
+	return kernel.NoResult{}
+}
+
+// matchInspection puts render's inspection of event's frame beside canvas's,
+// when canvas wrote that frame down for its pending request, and then
+// publishes inspectionDeliveryEvent for it, in a batch of its own. With no
+// request pending, canvas wrote no frame down, and reads nothing.
+func matchInspection(k *kernel.Kernel, event render.InspectedEvent, frame render.Frame, state kernel.Read[*drawState]) kernel.NoResult {
+	if !state.Get().inspector.requestPending.Load() {
 		return kernel.NoResult{}
 	}
-	size := manager.Get().Size(window)
-	framebufferSize := manager.Get().FramebufferSize(window)
-	if size.Width <= 0 || size.Height <= 0 || framebufferSize.Width <= 0 || framebufferSize.Height <= 0 {
+	renderInspection, err := frame.ReadInspection(event)
+	if err != nil {
+		state.Get().logger.LogErr(err)
 		return kernel.NoResult{}
 	}
-	canvasRenderer := rendering.Get()
-	if canvasRenderer.defaultMaterial == (render.Material{}) {
-		canvasRenderer.init(inventory)
+	if state.Get().inspector.deliver(event.Beat, renderInspection) {
+		k.Publish(inspectionDeliveryEvent{beat: event.Beat})
 	}
-	list := frame.BeginCommandList("canvas", defaultCameraOrder)
-	canvasRenderer.recordDefaultCamera(&list, window, makeDefaultCameraBlock(size, framebufferSize), shapes)
-	list.End()
+	return kernel.NoResult{}
+}
+
+// dropInspection drops the inspection of the frame of beat, once
+// InspectedEvent's jobs have run.
+func dropInspection(k *kernel.Kernel, beat metronome.Beat, state kernel.Read[*drawState]) kernel.NoResult {
+	state.Get().inspector.drop(beat)
 	return kernel.NoResult{}
 }
 

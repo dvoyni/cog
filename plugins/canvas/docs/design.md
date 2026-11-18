@@ -7,8 +7,9 @@ each section links the ticket that holds its detail. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md).
 
 Status: being built. The plugin, its frame event, draw lists and canvastest
-are built, and a fill is drawn through the default camera with canvas's
-include and its default material.
+are built, a fill is drawn through the default camera with canvas's
+include and its default material, and a frame is inspected in canvas's
+terms: its cameras, batches and entries.
 
 ## Problem Statement
 
@@ -238,7 +239,7 @@ author** testing canvas or a plugin on it.
   | Parameter | Locks | Carries |
   |---|---|---|
   | `DrawList` | canvas's state, `Fonts`, and through an `Inventory` it holds render's asset table, `gfx.Device` and `platform.FS`, all read | its task's lane: every `Draw…` call and `SetCamera` |
-  | `Assets` | the same reads | `MakeMaterial` and the material setters, `Preload`, `Unload`, `ImageSize`, `RequestInspection`, `ReadInspection` and `ReloadChanged` |
+  | `Assets` | the same reads, and through a `render.Frame` it holds render's frame state, read | `MakeMaterial` and the material setters, `Preload`, `Unload`, `ImageSize`, `RequestInspection`, `ReadInspection` and `ReloadChanged` |
 
   A draw list takes render's locks because an image's or a mesh file's first draw loads it. A recording task that also needs `Assets`, such as for `ImageSize`, declares both; the two take the same reads.
 - **Every lock is a read,** so recording tasks run together; canvas's state is synchronized within, as render's is. The exceptions:
@@ -806,8 +807,10 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 
 ([canvas: tooling, a frame inspection in canvas's terms and hot reload of images, fonts and mesh files](https://github.com/dvoyni/cog/issues/876))
 
-- **`Assets.RequestInspection()` asks for the next frame canvas draws,** and asks render to inspect that same frame. A request while one is pending joins it.
-- **`canvas.InspectedEvent{Beat}`** is published after render's `InspectedEvent` for that frame. `Assets.ReadInspection(event)` answers a `canvas.Inspection` while the publication's jobs run, with render's `Inspection` beside it, so a tool reads both accounts of one frame.
+- **`Assets.RequestInspection()` asks for the next frame canvas draws,** the first whose `FrameEvent` is published after the call, as render's request does, and asks render to inspect that same frame. A request while one is pending joins it.
+  - While a request is pending, canvas writes down each frame it draws and asks render again, and delivers the one render's `InspectedEvent` names. Choosing one frame at the request was weighed: render joins a request to an inspection already pending, of a frame canvas may have drawn before it was asked, and a request landing while a frame begins can reach render for the next frame and canvas for this one.
+  - `Assets` holds a `render.Frame` for it, so a request asks render at once and the next frame is inspected.
+- **`canvas.InspectedEvent{Beat}`** is published after render's `InspectedEvent` for that frame, in a batch of its own, as render publishes its own. `Assets.ReadInspection(event)` answers a `canvas.Inspection` while the publication's jobs run, with render's `Inspection` beside it, `Inspection.Render`, so a tool reads both accounts of one frame.
 - **Every other frame pays one check and allocates nothing,** so a tool may stay attached.
 - **A `canvas.Inspection` holds:**
   - each camera, in drawing order: its fields and target, its viewport in pixels, its scale, the world rectangle it sees, and its layer ranges;
@@ -816,7 +819,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - the frame's first uses: images packed, mesh files loaded, glyphs made, and layouts made on a cache miss;
   - its reports, and the time canvas's sort job and per-order jobs took.
 - **`String()`** writes it as the prototype printed its frames, for an agent to log: cameras in order, then their layers, batches, instance counts, culls, first-use loads and reports.
-- **canvastest reads frames through it** (see *Testing Decisions*).
+- **canvastest reads frames through it** (see *Testing Decisions*): its `Step` asks for an inspection before each beat and returns once it is delivered, and `Frames` answers them. After `RecordNothing` it asks for none, so the allocation gate counts only canvas's and render's own.
 - **Not canvas's:** a tool through which an agent reads it, a later MCP plugin's, cog-wide, serving render's inspection too.
 
 ### Hot reload

@@ -35,10 +35,11 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 // Init installs the draw state, with the kernel's logger for reports, the
 // renderer and the window list; binds canvas's built-in assets as a read
 // mount under the prefix cog.canvas, at the lowest priority, so any other
-// mount holding one of their names overrides it; and subscribes to
-// render.FrameEvent, platform.WindowOpenedEvent and
-// platform.WindowClosedEvent, the Subs kept in the Handlers resource. A
-// config of another type than *Config is a composition error, and panics.
+// mount holding one of their names overrides it; subscribes to
+// render.FrameEvent, platform.WindowOpenedEvent, platform.WindowClosedEvent
+// and render.InspectedEvent, the Subs kept in the Handlers resource; and
+// subscribes to its own private event delivering inspections. A config of
+// another type than *Config is a composition error, and panics.
 func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	kernel.PluginConfigOrDefault[Config](config)
 	configurator.InitResource(&drawState{logger: configurator.Logger()})
@@ -50,6 +51,8 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	drawTask := configurator.RegisterTask6(draw)
 	addWindowTask := configurator.RegisterTask1(addWindow)
 	removeWindowTask := configurator.RegisterTask1(removeWindow)
+	matchInspectionTask := configurator.RegisterTask2(matchInspection)
+	dropInspectionTask := configurator.RegisterTask1(dropInspection)
 	configurator.InitResource(Handlers{
 		RecordFrame: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event render.FrameEvent) (render.FrameEvent, kernel.JobHandle) {
 			return recordFrame(ex, in, event, openFrameTask, mergeLanesTask, drawTask)
@@ -60,6 +63,12 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 		ForgetClosedWindow: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event platform.WindowClosedEvent) (platform.WindowClosedEvent, kernel.JobHandle) {
 			return forgetClosedWindow(ex, in, event, removeWindowTask)
 		}),
+		DeliverInspection: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event render.InspectedEvent) (render.InspectedEvent, kernel.JobHandle) {
+			return deliverInspection(ex, in, event, matchInspectionTask)
+		}),
+	})
+	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event inspectionDeliveryEvent) (inspectionDeliveryEvent, kernel.JobHandle) {
+		return publishInspection(ex, in, event, dropInspectionTask)
 	})
 	return nil
 }

@@ -29,6 +29,16 @@
 // its colour encoded as sRGB. A frame that recorded no entry, or with no
 // main window open, begins no list.
 //
+// A tool asks for an inspection of the next frame through its Assets
+// parameter, and reads it in a task off InspectedEvent: each camera the frame
+// was seen through, its batches and their entries, with render's own
+// inspection of the frame beside it. Every other frame pays one check:
+//
+//	func inspect(k *kernel.Kernel, event canvas.InspectedEvent, assets canvas.Assets) kernel.NoResult {
+//		inspection, err := assets.ReadInspection(event)
+//		...
+//	}
+//
 // A mistake canvas finds at run time is a Report, logged once for its
 // subject through the kernel's LogErrOnce and carried past.
 package canvas

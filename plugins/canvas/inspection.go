@@ -1,0 +1,61 @@
+package canvas
+
+import (
+	"github.com/dvoyni/cog/plugins/metronome"
+	"github.com/dvoyni/cog/plugins/platform"
+	"github.com/dvoyni/cog/plugins/render"
+)
+
+// Inspection is one frame written down in canvas's terms: its beat; each
+// camera it was seen through, in drawing order, with the batches it drew
+// and their entries; and, beside it, render's own inspection of the same
+// frame, which shows what reached the GPU. Assets.ReadInspection answers the
+// one Assets.RequestInspection asked for.
+type Inspection struct {
+	Beat    metronome.Beat
+	Cameras []InspectedCamera
+	// Render is render's inspection of the frame, as render's
+	// Frame.ReadInspection answered it.
+	Render render.Inspection
+}
+
+// InspectedCamera is one camera of an inspected frame: the order of the
+// command list it drew in, the window it drew into, and its batches, in the
+// order drawn. A frame that set no camera is seen through the default one,
+// at order 0 into the main window.
+type InspectedCamera struct {
+	Order   render.Order
+	Window  platform.Window
+	Batches []InspectedBatch
+}
+
+// InspectedBatch is one batch of an inspected camera, drawn as one instanced
+// draw: its instance count, and the entries it drew, in sort-key order. A
+// shape is one instance; an entry drawing several, such as a run of text, a
+// glyph each, makes the count larger than the entries.
+type InspectedBatch struct {
+	InstanceCount uint32
+	Entries       []InspectedEntry
+}
+
+// InspectedEntry is one entry of an inspected batch: its kind, the entry as
+// recorded, its sort key, and its place in the frame: the place of the draw
+// list that recorded it, among the frame's lists in registration order, and
+// its own place in that list, in recording order.
+type InspectedEntry struct {
+	Kind EntryKind
+	// Shape is the entry recorded, when Kind is EntryKindShape.
+	Shape           Shape
+	Layer           int32
+	Order           int32
+	DrawListIndex   int
+	IndexInDrawList int
+}
+
+// EntryKind is what kind of entry an inspected entry is.
+type EntryKind uint8
+
+const (
+	// EntryKindShape is a Shape.
+	EntryKindShape EntryKind = iota + 1
+)

@@ -35,11 +35,26 @@ func (r *renderer) init(inventory render.Inventory) {
 	r.whiteTexel = inventory.MakeTexture(render.TextureDescriptor{Label: "canvas white texel", Width: 1, Height: 1, Format: render.TextureFormatRGBA8Unorm}, []byte{255, 255, 255, 255})
 }
 
-// recordDefaultCamera records into list the default camera's pass into
-// window, cleared to opaque black, with camera as its pass parameters, and
-// in it shapes, fills each, as one instanced draw of the default material
-// over the white texel, an instance each.
-func (r *renderer) recordDefaultCamera(list *render.CommandList, window platform.Window, camera cameraBlock, shapes []Shape) {
+// drawDefaultCamera draws shapes through the default camera into window,
+// the main window, while it is open and sized, and answers whether it drew:
+// one command list at the default camera's order, of one pass into window,
+// cleared to opaque black, in it shapes, fills each, as one instanced draw
+// of the default material over the white texel, an instance each. It makes
+// the material and the texel at the first draw. With no shape, or no main
+// window, it begins no list.
+func (r *renderer) drawDefaultCamera(frame render.Frame, inventory render.Inventory, manager *platform.WindowManager, window platform.Window, shapes []Shape) bool {
+	if len(shapes) == 0 || window == (platform.Window{}) {
+		return false
+	}
+	size := manager.Size(window)
+	framebufferSize := manager.FramebufferSize(window)
+	if size.Width <= 0 || size.Height <= 0 || framebufferSize.Width <= 0 || framebufferSize.Height <= 0 {
+		return false
+	}
+	if r.defaultMaterial == (render.Material{}) {
+		r.init(inventory)
+	}
+	list := frame.BeginCommandList("canvas", defaultCameraOrder)
 	r.instances = r.instances[:0]
 	for _, shape := range shapes {
 		r.instances = append(r.instances, makeShapeInstanceData(shape))
@@ -47,11 +62,13 @@ func (r *renderer) recordDefaultCamera(list *render.CommandList, window platform
 	instances := list.AcquireTemporaryBuffer(r.instances)
 	r.colorTargets[0] = render.ColorTarget{Window: window, Clear: true, ClearColor: render.Color{A: 1}}
 	pass := list.BeginPass(render.PassDescriptor{Label: "canvas default camera", ColorTargets: r.colorTargets[:]})
-	pass.SetPassUniform("canvas_camera", camera)
+	pass.SetPassUniform("canvas_camera", makeDefaultCameraBlock(size, framebufferSize))
 	pass.SetMaterial(r.defaultMaterial)
 	pass.SetBuffer("canvas_instances", instances)
 	pass.SetTexture("canvas_atlas", r.whiteTexel)
 	pass.SetSampler("canvas_sampler", render.SamplerDescriptor{})
 	pass.DrawVertices(render.PrimitiveTopologyTriangleList, 6, render.DrawArgs{InstanceCount: uint32(len(r.instances))})
 	pass.End()
+	list.End()
+	return true
 }

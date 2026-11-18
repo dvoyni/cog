@@ -24,3 +24,20 @@ type FrameEvent struct {
 	AcquireWait time.Duration
 	GPULatency  time.Duration
 }
+
+// InspectedEvent delivers the inspection Assets.RequestInspection asked for,
+// published once render has delivered its own inspection of the frame of
+// Beat, the frame inspected. A handler reads it with Assets.ReadInspection
+// in tasks it joins into the out dependency it returns; after that, it is
+// gone, and a request asks for another.
+type InspectedEvent struct {
+	Beat metronome.Beat
+}
+
+// inspectionDeliveryEvent carries the inspection of the frame of beat, once
+// render's inspection of it is beside it, from the job that matched them to
+// canvas's handler, which publishes it as InspectedEvent in its own batch,
+// to drop the inspection after.
+type inspectionDeliveryEvent struct {
+	beat metronome.Beat
+}

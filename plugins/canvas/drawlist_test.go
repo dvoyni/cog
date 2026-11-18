@@ -13,8 +13,8 @@ import (
 
 func TestEachRecordingTaskRecordsIntoItsOwnLaneAndTheLanesMergeInRegistrationOrder(t *testing.T) {
 	h := canvastest.NewHarness(t)
-	reader := &drawStateReader{}
-	h.Spawn(nil, nil, reader, &orderedRecorder{name: "first recorder", lateOrder: 10, earlyOrder: 11}, &orderedRecorder{name: "second recorder", lateOrder: 20, earlyOrder: 21})
+	h.Spawn(nil, nil, &orderedRecorder{name: "first recorder", lateOrder: 10, earlyOrder: 11}, &orderedRecorder{name: "second recorder", lateOrder: 20, earlyOrder: 21})
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	h.Record(func(list canvas.DrawList) {
 		list.DrawShape(canvas.Shape{Order: 1})
 		list.DrawShape(canvas.Shape{Order: 1, Layer: 1})
@@ -22,7 +22,7 @@ func TestEachRecordingTaskRecordsIntoItsOwnLaneAndTheLanesMergeInRegistrationOrd
 
 	h.Step()
 
-	got := reader.mergedShapes()
+	got := findDrawnShapes(h.Frames()[0])
 	// canvastest's lane comes first, its plugin listed right after canvas;
 	// each recorder's late task was registered before its early one, which
 	// runs first.
@@ -34,29 +34,31 @@ func TestEachRecordingTaskRecordsIntoItsOwnLaneAndTheLanesMergeInRegistrationOrd
 
 func TestAFramesShapesAreForgottenOnceItIsDrawn(t *testing.T) {
 	h := canvastest.NewHarness(t)
-	reader := &drawStateReader{}
-	h.Spawn(nil, nil, reader)
+	h.Spawn(nil, nil)
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	h.Record(func(list canvas.DrawList) { list.DrawShape(canvas.Shape{Order: 1}) })
 	h.Step()
 
 	h.Step()
 
-	if shapes := reader.mergedShapes(); len(shapes) != 0 {
-		t.Errorf("a frame recording nothing merged %+v, the frame before's shapes", shapes)
+	if shapes := findDrawnShapes(h.Frames()[1]); len(shapes) != 0 {
+		t.Errorf("a frame recording nothing drew %+v, the frame before's shapes", shapes)
 	}
 }
 
 func TestAnEntryRecordedOutsideTheFrameIsRefusedAndReportedOncePerTask(t *testing.T) {
 	h := canvastest.NewHarness(t)
-	reader := &drawStateReader{}
-	h.Spawn(nil, nil, reader, &lateRecorder{})
+	h.Spawn(nil, nil, &lateRecorder{})
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	h.ExpectReport(canvas.ReportKindEntryOutsideFrame)
 
 	h.Step()
 	h.Step()
 
-	if shapes := reader.mergedShapes(); len(shapes) != 0 {
-		t.Errorf("the frame merged %+v, shapes recorded after its drawing began", shapes)
+	for index, frame := range h.Frames() {
+		if shapes := findDrawnShapes(frame); len(shapes) != 0 {
+			t.Errorf("frame %d drew %+v, shapes recorded after a frame's drawing began", index+1, shapes)
+		}
 	}
 	var kinds []canvas.ReportKind
 	for _, report := range h.Reports() {
@@ -80,24 +82,24 @@ func TestAFrameWithNeitherEntriesNorCamerasBeginsNoCommandList(t *testing.T) {
 	if len(frames) != 2 {
 		t.Fatalf("two beats drew %d frames, want 2", len(frames))
 	}
-	if lists := findCanvasLists(frames[0]); len(lists) != 0 {
-		t.Errorf("a frame with neither entries nor cameras began canvas's command lists %+v, want none", lists)
+	if lists := findCanvasLists(frames[0].Render); len(frames[0].Cameras) != 0 || len(lists) != 0 {
+		t.Errorf("a frame with neither entries nor cameras was seen through cameras %+v and began canvas's command lists %+v, want none", frames[0].Cameras, lists)
 	}
-	if lists := findCanvasLists(frames[1]); len(lists) != 1 {
+	if lists := findCanvasLists(frames[1].Render); len(lists) != 1 {
 		t.Errorf("a frame with an entry and no camera began %d command lists of canvas's, want the default camera's", len(lists))
 	}
 }
 
 func TestTwoJobsOfOneTaskAndOtherTasksRecordTogetherIntoTheFrame(t *testing.T) {
 	h := canvastest.NewHarness(t)
-	reader := &drawStateReader{}
-	h.Spawn(nil, nil, reader, &parallelRecorder{})
+	h.Spawn(nil, nil, &parallelRecorder{})
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 
 	for frame := range 4 {
 		h.Step()
 
-		if got, want := len(reader.mergedShapes()), 3*parallelShapeCount; got != want {
-			t.Errorf("frame %d's three jobs of two tasks recording together merged %d shapes, want %d", frame+1, got, want)
+		if got, want := len(findDrawnShapes(h.Frames()[frame])), 3*parallelShapeCount; got != want {
+			t.Errorf("frame %d's three jobs of two tasks recording together drew %d shapes, want %d", frame+1, got, want)
 		}
 	}
 }
@@ -129,6 +131,20 @@ func TestFrameEventCarriesRendersBeatAndTimingSignals(t *testing.T) {
 	if renderEvents[1].AcquireWait == 0 || renderEvents[2].GPULatency == 0 {
 		t.Errorf("render's FrameEvents carry no AcquireWait or GPULatency to compare: %+v", renderEvents)
 	}
+}
+
+// findDrawnShapes answers the shapes frame drew, camera after camera, in the
+// order each drew them.
+func findDrawnShapes(frame canvas.Inspection) []canvas.Shape {
+	var shapes []canvas.Shape
+	for _, camera := range frame.Cameras {
+		for _, batch := range camera.Batches {
+			for _, entry := range batch.Entries {
+				shapes = append(shapes, entry.Shape)
+			}
+		}
+	}
+	return shapes
 }
 
 // findCanvasLists answers the command lists of frame that canvas began.

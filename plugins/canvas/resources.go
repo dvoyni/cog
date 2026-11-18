@@ -21,4 +21,9 @@ type Handlers struct {
 	// the default camera's target.
 	TrackOpenedWindow  kernel.Sub[platform.WindowOpenedEvent]
 	ForgetClosedWindow kernel.Sub[platform.WindowClosedEvent]
+	// DeliverInspection handles render.InspectedEvent: when canvas wrote
+	// down the frame render inspected, for a request of its own, it puts
+	// render's inspection beside canvas's, and publishes InspectedEvent for
+	// it, in a batch of its own.
+	DeliverInspection kernel.Sub[render.InspectedEvent]
 }
