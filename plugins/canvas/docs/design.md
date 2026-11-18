@@ -674,10 +674,10 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 ([canvas: custom 2D meshes, and how they share the material contract with sprites](https://github.com/dvoyni/cog/issues/870))
 
 - **The mesh file format is a library, `libs/meshfile`, `github.com/dvoyni/cog/libs/meshfile`,** a module of its own that a 3D plugin can share. It imports no render, so an offline exporter writing mesh files needs neither render nor gfx.
-- **A file holds** a version; the layout in the library's own types, a `Layout{Stride, Attributes}` of `Attribute{Format, Offset, Location}`, its `Format`s mirroring WebGPU's vertex formats as render's do; the `Topology`, zero meaning a triangle list; optional indices, 16 bits while the vertices fit and 32 beyond; the bounds as an `m.Box3`, 2D leaving z at zero; then the vertex bytes and the index bytes.
+- **A file holds** a version; the layout in the library's own types, a `Layout{Stride, Attributes}` of `Attribute{Format, Offset, Location}`, its `Format`s mirroring WebGPU's vertex formats as render's do; the `Topology`, zero meaning a triangle list; optional indices, 16 bits while the mesh has at most 65,535 vertices, so no index is 0xFFFF, which a strip reads as a restart, and 32 beyond; the bounds as an `m.Box3`, 2D leaving z at zero; then the vertex bytes and the index bytes.
 - **Its calls:**
-  - `Encode[V VertexType](vertices, indices, topology, bounds)` writes typed slices, taking the layout from `V`. It refuses zero bounds, and a vertex type whose layout's stride is not its size.
-  - `Decode(data) (File, error)` answers the header and slices of the bytes, without copying them.
+  - `Encode[V VertexType](vertices, indices, topology, bounds)` writes typed slices, taking the layout from `V`. It refuses zero bounds, a vertex type whose layout's stride is not its size, and an index past the vertices, which 16 bits could not hold.
+  - `Decode(data) (File, error)` answers the header and slices of the bytes, without copying them. It refuses a file that is not a mesh file, one of a version it does not know, and one cut short or running past the end its header gives.
   - `CalculateBounds[T](vertices []T, position func(T) m.Vec3) m.Box3` works over any layout and dimension. An empty slice answers the zero box, which `Encode` and canvas refuse as missing bounds.
 - **The format is documented and versioned,** so a tool can write it.
 - **glTF and OBJ were weighed:** 3D formats with far more than 2D needs, without a place for a custom layout. Raw vertex and index files would keep the layout apart from the data, where the two could disagree.
