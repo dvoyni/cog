@@ -19,21 +19,21 @@ type batch struct {
 // makeBatches answers the batches of entries, the frame's in sort order, of
 // shapes, a batch beginning wherever an entry's batch key differs from the
 // one before it, and the instance data they draw, in the storage of batches
-// and instances. Each batch's entries are part of entries. A shape draws one
-// instance.
+// and instances. Each batch's entries are part of entries. A fill and a
+// line draw one instance, and a stroke four.
 func makeBatches(batches []batch, instances []instanceData, entries []sortedEntry, shapes []Shape) ([]batch, []instanceData) {
 	batches = batches[:0]
 	instances = instances[:0]
 	for index, entry := range entries {
-		shape := shapes[entry.shapeIndex]
+		shape := &shapes[entry.shapeIndex]
 		entryBatchKey := shape.batchKey()
 		if len(batches) == 0 || batches[len(batches)-1].key != entryBatchKey {
 			batches = append(batches, batch{key: entryBatchKey, entries: entries[index:index], firstInstance: uint32(len(instances))})
 		}
 		lastBatch := &batches[len(batches)-1]
 		lastBatch.entries = lastBatch.entries[:len(lastBatch.entries)+1]
-		instances = append(instances, makeShapeInstanceData(shape))
-		lastBatch.instanceCount++
+		instances = appendShapeInstances(instances, shape)
+		lastBatch.instanceCount = uint32(len(instances)) - lastBatch.firstInstance
 	}
 	return batches, instances
 }

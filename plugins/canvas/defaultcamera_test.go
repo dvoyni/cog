@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/canvas"
@@ -54,56 +53,22 @@ func TestAFrameOfFillsReachesRenderAsOneListAtOrderZeroOfOnePassAndOneInstancedD
 }
 
 func TestAFillShowsItsTintPremultipliedAndEncodedAsSRGBInTheWindowThroughTheDefaultCamera(t *testing.T) {
-	h := canvastest.NewHarness(t)
-	h.UseSoftwareAdapter()
-	capturer := &windowCapturer{}
-	h.Spawn(nil, nil, capturer, eventPump{})
-	window := h.OpenWindow(platform.Size{Width: 320, Height: 240})
 	// The default camera centres the world's origin in the window, a world
 	// unit to a point and y down: the opaque fill covers the centre, the
 	// translucent one, recorded before it but drawn after it, a layer up,
 	// most of the top-left quarter and the opaque fill's top-left corner,
 	// and nothing the bottom half.
-	opaque := m.NewColorSrgb(50.0/255, 1, 150.0/255, 1)
-	translucent := m.NewColorSrgb(1, 1.0/3, 0, 0.6)
-	record := func(list canvas.DrawList) {
-		list.DrawShape(canvas.Shape{Kind: canvas.Fill, Rect: m.Rect{X: -150, Y: -110, Width: 145, Height: 105}, Tint: translucent, Layer: 1})
-		list.DrawShape(canvas.Shape{Kind: canvas.Fill, Rect: m.Rect{X: -20, Y: -20, Width: 40, Height: 40}, Tint: opaque})
-	}
+	picture := captureDrawing(t, func(list canvas.DrawList) {
+		list.DrawShape(canvas.Shape{Kind: canvas.Fill, Rect: m.Rect{X: -150, Y: -110, Width: 145, Height: 105}, Tint: translucentOrange, Layer: 1})
+		list.DrawShape(canvas.Shape{Kind: canvas.Fill, Rect: m.Rect{X: -20, Y: -20, Width: 40, Height: 40}, Tint: green})
+	})
 
-	// A Wayland window gets a framebuffer only once the compositor's frame
-	// callback for its last present is read, a while after it, so the test
-	// steps for a time, not a count of beats.
-	capturer.capture(window)
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
-		h.Record(record)
-		h.Step()
-		picture := capturer.capturedPicture()
-		if picture == nil {
-			continue
-		}
-		width := picture.Bounds().Dx()
-		height := picture.Bounds().Dy()
-		// overlap is 12 points up and left of the centre, in pixels.
-		overlap := 12 * width / 320
-		for _, probe := range []struct {
-			name string
-			x, y int
-			want color.NRGBA
-		}{
-			{"the opaque fill's middle", width / 2, height / 2, color.NRGBA{R: 50, G: 255, B: 150, A: 255}},
-			// 0.6 of the encoded (255, 85, 0), over opaque black.
-			{"the translucent fill's middle", width / 4, height / 4, color.NRGBA{R: 153, G: 51, B: 0, A: 255}},
-			// The same, over 0.4 of the opaque fill.
-			{"the overlap", width/2 - overlap, height/2 - overlap, color.NRGBA{R: 173, G: 153, B: 60, A: 255}},
-			{"the bottom left", width / 4, 3 * height / 4, color.NRGBA{A: 255}},
-			{"the bottom right", 3 * width / 4, 3 * height / 4, color.NRGBA{A: 255}},
-		} {
-			if got := picture.NRGBAAt(probe.x, probe.y); got != probe.want {
-				t.Errorf("%s, at (%d, %d) of %d×%d, is %v, want %v", probe.name, probe.x, probe.y, width, height, got, probe.want)
-			}
-		}
-		return
-	}
-	t.Fatal("no capture of the window arrived within 5s")
+	picture.expect(t, []probe{
+		{"the opaque fill's middle", m.Vec2{}, greenShown},
+		{"the translucent fill's middle", m.Vec2{X: -80, Y: -60}, translucentOverBlack},
+		// 0.6 of the encoded (255, 85, 0) over 0.4 of the opaque fill.
+		{"the overlap", m.Vec2{X: -12, Y: -12}, color.NRGBA{R: 173, G: 153, B: 60, A: 255}},
+		{"the bottom left", m.Vec2{X: -80, Y: 60}, opaqueBlack},
+		{"the bottom right", m.Vec2{X: 80, Y: 60}, opaqueBlack},
+	})
 }

@@ -15,7 +15,7 @@ type renderer struct {
 	defaultMaterial render.Material
 	whiteTexel      render.Texture
 	// instances are the frame's instance data, in sort order, and batches
-	// the frame's batches, the last drawnBatch; both are written over each frame.
+	// the frame's batches, the last drawn; both are written over each frame.
 	instances []instanceData
 	batches   []batch
 	// colorTargets is the default camera's pass's one target.
@@ -38,12 +38,12 @@ func (r *renderer) init(inventory render.Inventory) {
 	r.whiteTexel = inventory.MakeTexture(render.TextureDescriptor{Label: "canvas white texel", Width: 1, Height: 1, Format: render.TextureFormatRGBA8Unorm}, []byte{255, 255, 255, 255})
 }
 
-// drawDefaultCamera draws shapes, fills each, through the default camera
-// into window, the main window, while it is open and sized, and answers
-// whether it drew: one command list at the default camera's order, of one
-// pass into window, cleared to opaque black, in it entries, the shapes' in
-// sort order, an instanced draw of each batch over the white texel, an
-// instance each. It makes the default material and the texel at the first
+// drawDefaultCamera draws shapes through the default camera into window,
+// the main window, while it is open and sized, and answers whether it drew:
+// one command list at the default camera's order, of one pass into window,
+// cleared to opaque black, in it entries, the shapes' in sort order, an
+// instanced draw of each batch over the white texel, a fill's and a line's
+// one instance and a stroke's four. It makes the default material and the texel at the first
 // draw. With no shape, or no main window, it begins no list.
 func (r *renderer) drawDefaultCamera(frame render.Frame, inventory render.Inventory, manager *platform.WindowManager, window platform.Window, shapes []Shape, entries []sortedEntry) bool {
 	if len(shapes) == 0 || window == (platform.Window{}) {

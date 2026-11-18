@@ -37,6 +37,15 @@
 // encoded as sRGB. A frame that recorded no entry, or with no main window
 // open, begins no list.
 //
+// A Shape fills or strokes a rectangle, or draws a line. A stroke lies
+// inside its rectangle as four fills that do not overlap, so a translucent
+// one does not darken its corners, and a line is centred on its segment. A
+// zero Width is a hairline one target pixel wide at any zoom, and Radius
+// rounds a fill's or a stroke's corners:
+//
+//	list.DrawShape(canvas.Shape{Kind: canvas.Stroke, Rect: r, Width: 2, Radius: 6, Tint: c})
+//	list.DrawShape(canvas.Shape{Kind: canvas.Line, From: a, To: b, Tint: c})
+//
 // A tool asks for an inspection of the next frame through its Assets
 // parameter, and reads it in a task off InspectedEvent: each camera the frame
 // was seen through, its batches and their entries, with render's own

@@ -8,7 +8,7 @@ importing [kernel](../../kernel), [metronome](../metronome),
 gfx.
 
 It is being built from [docs/design.md](docs/design.md). So far a frame's
-recording tasks record fills into draw lists of their own, which canvas
+recording tasks record shapes into draw lists of their own, which canvas
 merges in registration order, sorts by their sort key and draws through the
 default camera into the main window, the first window opened of those still
 open, an instanced draw for each batch, a run of entries of one 2D
@@ -26,8 +26,12 @@ inspection of it.
 - **`DrawList`** is the task parameter a recording task records through,
   each task's a draw list of its own. An entry recorded outside the frame is
   refused and reported once for the task.
-- **`Shape`** is an entry filling a rectangle with its tint, drawn with its
-  `Material`, at its sort key, `Layer` then `Order`. Entries are drawn by
+- **`Shape`** is an entry that fills or strokes a rectangle, or draws a
+  line, its `Kind` `Fill`, `Stroke` or `Line`, in its tint, drawn with its
+  `Material`, at its sort key, `Layer` then `Order`. A stroke is four fills
+  that do not overlap, so a translucent one does not darken its corners; a
+  zero `Width` is a hairline one target pixel wide; `Radius` rounds a fill's
+  or a stroke's corners. Entries are drawn by
   sort key, then by their draw list's registration order, then in the order
   recorded.
 - **`OrderOf(y)`** maps a float onto an order of its own, in the same order,

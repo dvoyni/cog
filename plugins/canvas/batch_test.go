@@ -13,7 +13,7 @@ func TestBatchesBreakOnlyWhereAnEntrysMaterialDiffersFromTheOneBefore(t *testing
 	secondMaterial := Material{index: 2, generation: 1}
 	shapes := []Shape{
 		{Order: 1, Material: firstMaterial, Tint: m.Color{R: 1, A: 1}},
-		{Order: 2, Material: secondMaterial, Rect: m.Rect{Width: 4, Height: 4}},
+		{Order: 2, Material: secondMaterial, Kind: Stroke, Rect: m.Rect{Width: 4, Height: 4}},
 		{Order: 3, Material: firstMaterial},
 		{Order: 0, Material: firstMaterial, Layer: -1},
 		{Order: 4, Material: firstMaterial, Transform: m.Translation2x3(1, 2)},
@@ -26,15 +26,15 @@ func TestBatchesBreakOnlyWhereAnEntrysMaterialDiffersFromTheOneBefore(t *testing
 
 	want := []batch{
 		{key: batchKey{material: firstMaterial}, entries: entries[0:2], firstInstance: 0, instanceCount: 2},
-		{key: batchKey{material: secondMaterial}, entries: entries[2:3], firstInstance: 2, instanceCount: 1},
-		{key: batchKey{material: firstMaterial}, entries: entries[3:5], firstInstance: 3, instanceCount: 2},
+		{key: batchKey{material: secondMaterial}, entries: entries[2:3], firstInstance: 2, instanceCount: 4},
+		{key: batchKey{material: firstMaterial}, entries: entries[3:5], firstInstance: 6, instanceCount: 2},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("the shapes batched as %+v, want %+v: a batch broken where the material changes, and nowhere else", got, want)
+		t.Errorf("the shapes batched as %+v, want %+v: a batch broken where the material changes, and nowhere else, a stroke drawing four instances", got, want)
 	}
 	var wantInstances []instanceData
 	for _, entry := range entries {
-		wantInstances = append(wantInstances, makeShapeInstanceData(shapes[entry.shapeIndex]))
+		wantInstances = appendShapeInstances(wantInstances, &shapes[entry.shapeIndex])
 	}
 	if !slices.Equal(instances, wantInstances) {
 		t.Errorf("the batches' instances are %+v, want each shape's, in sort order, %+v", instances, wantInstances)

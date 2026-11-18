@@ -12,7 +12,8 @@ include and its default material, a frame is inspected in canvas's
 terms: its cameras, batches and entries, and entries are sorted by their
 sort key, regrouped where their layer allows, and drawn a batch at a time,
 a batch broken where the material changes, the only part of the batch key
-that entries carry yet.
+that entries carry yet. Shapes fill, stroke and draw lines, hairlines among
+them, their corners rounded by their radius.
 
 ## Problem Statement
 
@@ -464,10 +465,11 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 - **A `Shape`** fills or strokes a rectangle, or draws a line: `Shape{Kind, Rect, From, To, Width, Radius, Transform, Tint, Material, Clip, Layer, Order}`, its `Kind` `Fill`, `Stroke` or `Line`, recorded with `DrawShape` and `DrawShapeWith`. It is a literal, `canvas.Shape{Kind: canvas.Fill, Rect: r, Tint: c, Layer: l}`, like every other entry.
 - **Shapes are sprites over the sprite atlas's white texel,** as v1's were. They take what a sprite takes (a transform, a colour as tint, a material and its argument, the sort key and a clip) and batch with sprites.
 - **A fill is one sprite. A stroke is four fills inside the rectangle that do not overlap,** so a translucent colour does not darken its corners. **A line is one rotated fill** centred on its segment.
-- **`Width` is in world units.** Zero means a hairline one target pixel wide at any zoom, the vertex stage sizing the thin axis from the camera's pixel size. v1 drew nothing at zero.
+- **`Width` is in the shape's own space,** as its rectangle is, which its transform maps into the world: world units under a transform that does not scale. Zero means a hairline one target pixel wide at any zoom and any transform, the vertex stage sizing the thin axis from the camera's pixel size and the transform's columns. v1 drew nothing at zero.
+- **A shape's instances share the sprite's instance data,** read by canvas's one vertex stage: each holds the part of its unit square it draws (the whole, a line's band, or one of a stroke's sides), the square's size in the shape's own space, its width and its radius. A stroke's top and bottom span its rectangle and its left and right the height between them, each as thick as its width, or its radius where that is larger, so a rounded corner's curve lies within them.
 - **Distance effects around shapes:** the SDF material reads a shape's distance analytically from its rectangle, as v1's halo on fills did, so `DrawShapeWith(Shape{…, Material: canvas.SDFMaterial}, canvas.Glow(8, gold))` glows a button.
   - A shape drawn with a profile grows its quad by the profile's outer reach. This is the one place a quad grows, since a sprite's distance field is baked larger.
-  - The same distance gives `Shape.Radius`, in world units: rounded corners for fills and strokes, which neither version had.
+  - The same distance gives `Shape.Radius`, in the shape's own space as `Width` is: rounded corners for fills and strokes, which neither version had. The include's `canvas_shape_distance` answers a fragment's signed distance from its shape's edge in the shape's own space (a fill's rectangle, a stroke's band, a line's band), which the SDF material reads, and `canvas_covers` whether a rounded shape covers it. A material discards the fragments it does not cover, after sampling, as the default material does; one that does not draws rounded shapes square, which the include says. The edge is hard, as every entry's is.
   - A user baking a distance-field image per box was weighed. Every size and radius would have been a new image.
 
 ### 2D materials, material arguments and blending
