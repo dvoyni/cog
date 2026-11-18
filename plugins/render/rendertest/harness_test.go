@@ -52,6 +52,33 @@ func TestAnErrorThatIsNoReportFailsTheTest(t *testing.T) {
 	}
 }
 
+func TestAnErrorTheTestExpectsFailsNothingAndAnotherStillFailsIt(t *testing.T) {
+	fake := &fakeTest{TB: t}
+	h := rendertest.NewHarness(fake)
+	h.ExpectError(func(err error) bool {
+		_, isPluginReport := errors.AsType[pluginReport](err)
+		return isPluginReport
+	})
+	h.Spawn(nil, &firstFramePlugin[kernel.Read[gfx.Device]]{onFirstFrame: logErrors(
+		pluginReport{text: "a plugin's expected mistake"},
+		fmt.Errorf("a wrapped %w", pluginReport{text: "a plugin's expected mistake"}),
+		errors.New("a plugin's failure"),
+	)})
+
+	h.Step()
+
+	if failures := fake.takeFailures(); len(failures) != 1 {
+		t.Errorf("the harness failed the test with %q, want one failure, for the error the test did not expect", failures)
+	}
+}
+
+// pluginReport is a report of a plugin on render, which is no render.Report.
+type pluginReport struct {
+	text string
+}
+
+func (r pluginReport) Error() string { return r.text }
+
 // logErrors answers a first frame's call logging each of errorsToLog.
 func logErrors(errorsToLog ...error) func(k *kernel.Kernel, device kernel.Read[gfx.Device]) {
 	return func(k *kernel.Kernel, _ kernel.Read[gfx.Device]) {

@@ -34,13 +34,13 @@ func BenchmarkDraws(b *testing.B) {
 	for _, drawCount := range []int{256, 4096} {
 		b.Run(fmt.Sprintf("render/draws=%d", drawCount), func(b *testing.B) {
 			h := rendertest.NewHarness(b)
-			h.DisableRecording()
+			h.RecordNothing()
 			spawnGateHarness(b, h, gateScenario{shape: gateShapeMesh, drawCount: drawCount, listCount: 1, passCount: 1, switchPeriod: benchmarkSwitchPeriod, drawsOnly: true})
 			benchmarkFrames(b, h, drawCount)
 		})
 		b.Run(fmt.Sprintf("gfx/draws=%d", drawCount), func(b *testing.B) {
 			h := rendertest.NewHarness(b)
-			h.DisableRecording()
+			h.RecordNothing()
 			h.Spawn(nil, &handDrawnPlugin{files: makeGateFiles(b), drawCount: drawCount})
 			h.OpenWindow(platform.Size{Width: 64, Height: 48})
 			benchmarkFrames(b, h, drawCount)

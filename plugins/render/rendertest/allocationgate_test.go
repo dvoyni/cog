@@ -43,18 +43,22 @@ func makeGateFiles(t testing.TB) *filesystems.MemoryFS {
 
 // measureFrameAllocations spawns a harness as spawnGateHarness does, steps
 // it gateWarmFrameCount frames, and answers how many times a frame
-// allocates after them, on gfx's recording adapter recording nothing.
+// allocates after them, on gfx's recording adapter recording nothing, and
+// checks that the harness then answers no frames.
 // Under the race detector, whose runtime allocates on its own, it steps the
 // frames and answers none.
 func measureFrameAllocations(t *testing.T, scenario gateScenario) float64 {
 	t.Helper()
 	h := rendertest.NewHarness(t)
-	h.DisableRecording()
+	h.RecordNothing()
 	spawnGateHarness(t, h, scenario)
 	for range gateWarmFrameCount {
 		h.Step()
 	}
 	allocations := testing.AllocsPerRun(gateMeasuredFrameCount, h.Step)
+	if frames := h.Frames(); len(frames) != 0 {
+		t.Errorf("the harness recording nothing answered %d frames, want none", len(frames))
+	}
 	if raceEnabled {
 		return 0
 	}

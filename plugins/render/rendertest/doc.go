@@ -16,7 +16,12 @@
 //
 // The harness fails the test on any error the kernel logs, a render.Report
 // among them, unless it is a report of a kind the test named with
-// ExpectReport.
+// ExpectReport, or an error a match given ExpectError answers true of, such
+// as a report of the test's own plugin.
+//
+// A test counting what a frame allocates, such as a plugin's allocation
+// gate, calls RecordNothing before Spawn: gfx's recording adapter then keeps
+// no call, which would allocate, and Frames answers nothing.
 //
 // A pixel test calls UseSoftwareAdapter before Spawn: render then draws on
 // wgpu's software adapter, through gogpu's plugin in place of the recording

@@ -7,6 +7,7 @@ package handle
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -109,17 +110,18 @@ func ParseLabel[H Handle](label string) (H, bool) {
 
 // SplitLabel answers the handle a gfx object's label names and the label its
 // user gave, which MakeLabel joined, and false for a label MakeLabel did not
-// make for an H.
+// make for an H. It allocates nothing.
 func SplitLabel[H Handle](label string) (H, string, bool) {
 	var h H
-	rest, found := strings.CutPrefix(label, "render "+h.labelKind()+" ")
-	if !found {
+	rest, renderFound := strings.CutPrefix(label, "render ")
+	rest, kindFound := strings.CutPrefix(rest, h.labelKind())
+	keyText, userLabel, _ := strings.Cut(rest, ": ")
+	keyText, spaceFound := strings.CutPrefix(keyText, " ")
+	indexText, generationText, dotFound := strings.Cut(keyText, ".")
+	index, indexErr := strconv.ParseUint(indexText, 10, 32)
+	generation, generationErr := strconv.ParseUint(generationText, 10, 32)
+	if !renderFound || !kindFound || !spaceFound || !dotFound || indexErr != nil || generationErr != nil {
 		return h, "", false
 	}
-	var key handle
-	if _, err := fmt.Sscanf(rest, "%d.%d", &key.index, &key.generation); err != nil {
-		return h, "", false
-	}
-	_, userLabel, _ := strings.Cut(rest, ": ")
-	return H{key}, userLabel, true
+	return H{handle{index: uint32(index), generation: uint32(generation)}}, userLabel, true
 }

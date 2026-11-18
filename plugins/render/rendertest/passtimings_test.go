@@ -318,7 +318,7 @@ func TestAnInspectionOfATimedFrameWaitsForItsPassTimingsAndHoldsThemAndOneOfAFra
 func TestATimedFramesPassesAfterItsMostAreReportedAndUntimed(t *testing.T) {
 	h := rendertest.NewHarness(t)
 	h.EnableTimestamps()
-	h.DisableRecording()
+	h.RecordNothing()
 	h.ExpectReport(render.ReportKindPassUntimed)
 	const maxTimedPassCount = 2048
 	run := spawnTimingHarness(t, h, nil, func(frameIndex int, _ render.Inventory, frame render.Frame) {
@@ -346,7 +346,7 @@ func TestATimedFramesPassesAfterItsMostAreReportedAndUntimed(t *testing.T) {
 func TestAPassOfATimedFrameAllocatesNothingOnceWarm(t *testing.T) {
 	h := rendertest.NewHarness(t)
 	h.EnableTimestamps()
-	h.DisableRecording()
+	h.RecordNothing()
 	const passCount = 100
 	const warmFrameCount = 5
 	const frameCount = 8

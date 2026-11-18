@@ -1,6 +1,10 @@
 package rendertest
 
-import "github.com/dvoyni/cog/plugins/gfx/recording"
+import (
+	"errors"
+
+	"github.com/dvoyni/cog/plugins/gfx/recording"
+)
 
 // Calls answers every call gfx's recording adapter has recorded so far, for
 // rendertest's tests to check the order of what render did on gfx.
@@ -25,7 +29,7 @@ func (h *Harness) AnswerNext(kind recording.CallKind, answer recording.Answer) {
 // rendertest's tests to fail a call with an answer of AnswerNext, such as
 // gfx.ErrDeviceLost to lose the device.
 func (h *Harness) ExpectLoggedError(err error) {
-	h.expectedErrors = append(h.expectedErrors, err)
+	h.ExpectError(func(logged error) bool { return errors.Is(logged, err) })
 }
 
 // WaitUntil ticks the main thread until done answers true, failing the test
@@ -55,12 +59,4 @@ func (h *Harness) EnableBackendTimestamps() {
 // is.
 func (h *Harness) RunOnMainThread(run func()) {
 	h.runOnMainThread(run)
-}
-
-// DisableRecording makes gfx's recording adapter keep no call from now on,
-// for rendertest's tests to count what render allocates without the
-// commands the adapter would keep.
-func (h *Harness) DisableRecording() {
-	h.instance.DisableRecording()
-	h.recordingDisabled = true
 }

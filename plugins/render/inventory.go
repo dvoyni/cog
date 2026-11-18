@@ -8,6 +8,7 @@ import (
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/plugins/gfx"
 	"github.com/dvoyni/cog/plugins/platform"
+	"github.com/dvoyni/cog/plugins/render/internal/handle"
 )
 
 // Inventory is the task parameter a task reaches render's assets through, to
@@ -407,6 +408,33 @@ func (i Inventory) SetMaterialUniform[T any](material Material, name string, val
 // what it is answered.
 func (i Inventory) CheckLayout[T any](shader Shader, binding, path string) error {
 	return i.table.Get().checkLayout(reflect.TypeFor[T](), shader, binding, path)
+}
+
+// TextureDescriptor answers the descriptor of texture as render holds it,
+// each count filled in, and false for a texture render does not hold, such
+// as the zero Texture or one freed after its release. A made texture
+// answers what MakeTexture made it of; a loaded one, as soon as
+// AcquireTexture returns, the size and format of its file's header, its body
+// still to be written, and after a reload, its new file's; and a temporary
+// one the descriptor it was acquired of. It allocates nothing, so a
+// plugin reads a texture target's size every frame, as a 2D camera drawing
+// into a render texture places its viewport.
+func (i Inventory) TextureDescriptor(texture Texture) (TextureDescriptor, bool) {
+	gfxTexture, ok := i.table.Get().findTexture(texture)
+	if !ok {
+		return TextureDescriptor{}, false
+	}
+	descriptor := i.device.Get().TextureDescriptor(gfxTexture)
+	_, label, _ := handle.SplitLabel[Texture](descriptor.Label)
+	return TextureDescriptor{
+		Label:         label,
+		Width:         descriptor.Size.Width,
+		Height:        descriptor.Size.Height,
+		LayerCount:    descriptor.Size.DepthOrArrayLayers,
+		MipLevelCount: descriptor.MipLevelCount,
+		SampleCount:   descriptor.SampleCount,
+		Format:        TextureFormat(descriptor.Format),
+	}, true
 }
 
 // WriteBuffer writes data into buffer at offset, T as MakeBuffer's: a

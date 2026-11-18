@@ -384,7 +384,7 @@ func TestAnInspectionIsReadOnlyWhileItsEventsJobsRun(t *testing.T) {
 
 func TestAFrameNotInspectedAllocatesNothingForTheInspection(t *testing.T) {
 	h := rendertest.NewHarness(t)
-	h.DisableRecording()
+	h.RecordNothing()
 	inspections := make(chan render.Inspection, 4)
 	const drawCount = 100
 	const frameCount = 6

@@ -547,6 +547,13 @@ func releaseHeightfield(inventory render.Inventory, field heightfield) {
 }
 ```
 
+**A texture's descriptor.** `TextureDescriptor(texture)` answers a
+texture's `TextureDescriptor`, its counts filled in, and false for one
+render does not hold: a made texture's at once, a loaded texture's as
+soon as its acquire returns, from its file's header, and its new file's
+after a reload. It allocates nothing, so read a render-to-texture
+target's size each frame rather than keeping a copy of it.
+
 **Writes** fill a buffer or a texture region from a slice, landing before
 every command list of gfx's next submit, so a write fills the asset for the
 whole frame being recorded, or the next one once that frame is flushed; two
@@ -1613,7 +1620,18 @@ a frame behind: it finishes the work submitted in one beat when the next
 
 The harness is strict: the test fails on every error the kernel logs,
 checked after each `Step` and at its end, unless it is a report of a kind
-the test named with `ExpectReport`. `Reports` answers every report logged.
+the test named with `ExpectReport`, or an error a match given
+`ExpectError` answers true of, such as the game's own `sceneReport` that
+the test triggers on purpose:
+
+```go
+h.ExpectError(func(err error) bool {
+	_, isSceneReport := errors.AsType[sceneReport](err)
+	return isSceneReport
+})
+```
+
+`Reports` answers every report render logged.
 
 The tests below test the quick start's game: `newScenePlugin(files)`, beside
 it in package `main`, answers `&game{files: files}`. The game opens its own
@@ -1837,10 +1855,27 @@ range as a `@group(0)` storage parameter make. render's own gate,
 `testing.AllocsPerRun(...) == 0` over whole beats, the harness's `Step`, on
 gfx's recording adapter recording nothing; design.md's *Performance* gives
 what it covers and the time per draw against gfx, and render's `AGENTS.md`
-how a change to the per-frame path is checked. The harness's recording
-adapter keeps every call it records, which allocates, and only rendertest's
-own tests can turn that off, so the harness cannot yet gate the allocations
-of a plugin of your own.
+how a change to the per-frame path is checked.
+
+The harness's recording adapter keeps every call it records, which
+allocates. `RecordNothing()`, called before `Spawn`, turns that off, so a
+gate of your own plugin counts what its frames allocate; `Frames` then
+answers nothing. Run it in plain `go test`: the race detector's runtime
+allocates on its own.
+
+```go
+func TestAWarmFrameOfTheSceneAllocatesNothing(t *testing.T) {
+	h := rendertest.NewHarness(t)
+	h.RecordNothing()
+	h.Spawn(nil, newScenePlugin(os.DirFS("assets")))
+	for range 4 {
+		h.Step()
+	}
+	if allocations := testing.AllocsPerRun(10, h.Step); allocations != 0 {
+		t.Errorf("a warm frame allocated %v times, want none", allocations)
+	}
+}
+```
 
 ## Rules
 

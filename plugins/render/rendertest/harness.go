@@ -42,7 +42,8 @@ const timeout = 5 * time.Second
 //
 // It is strict: the test fails on every error the kernel logged, checked after
 // each Step and when the test ends, unless it is a render.Report of a kind the
-// test named with ExpectReport.
+// test named with ExpectReport, or an error a match given ExpectError answers
+// true of.
 type Harness struct {
 	t          testing.TB
 	supervisor *kernel.Supervisor
@@ -58,8 +59,8 @@ type Harness struct {
 	// sends once it has, so a Step allocates nothing.
 	advanceRequests chan struct{}
 	checkAdvanced   func() bool
-	// recordingDisabled is set when gfx's recording adapter keeps no call,
-	// so Step reads no frames back.
+	// recordingDisabled is set by RecordNothing, when gfx's recording
+	// adapter keeps no call, so Step reads no frames back.
 	recordingDisabled bool
 	// declarations is the catalog of the binding declarations answering the
 	// reflection of the shaders compiled on instance.
@@ -79,10 +80,9 @@ type Harness struct {
 	// expectedReports are the kinds ExpectReport named; only the test's
 	// goroutine reads and writes them.
 	expectedReports []render.ReportKind
-	// expectedErrors are the errors whose logging, wrapped or not, fails no
-	// test, for rendertest's own tests; only the test's goroutine reads and
-	// writes them.
-	expectedErrors []error
+	// errorMatches are the matches ExpectError was given; only the test's
+	// goroutine reads and writes them.
+	errorMatches []func(error) bool
 	// opened is the window OpenWindow's open job opened, and surfaceMade the
 	// job making its surface, each set by the jobs OpenWindow waits for.
 	opened      platform.Window
@@ -262,6 +262,20 @@ func (h *Harness) UseSoftwareAdapter() {
 	h.mainThread = mainThreadWork
 }
 
+// RecordNothing has gfx's recording adapter keep no call, each still
+// answered and checked as it would be, for a test counting what a frame
+// allocates, such as a plugin's allocation gate, without the commands the
+// adapter would keep: Frames then answers no frame. It is called before
+// Spawn, and fails the test after.
+func (h *Harness) RecordNothing() {
+	h.t.Helper()
+	if h.kernel != nil {
+		h.t.Fatal("rendertest: recording nothing after Spawn")
+	}
+	h.instance.DisableRecording()
+	h.recordingDisabled = true
+}
+
 // LengthenNextAcquire makes the next acquire of a window's framebuffer take d
 // longer by the clock, as a GPU behind would, so the frame after it carries d
 // in its AcquireWait. Calls queue, one for each acquire to come.
@@ -276,9 +290,19 @@ func (h *Harness) ExpectReport(kind render.ReportKind) {
 	h.expectedReports = append(h.expectedReports, kind)
 }
 
+// ExpectError names errors the test expects, by match: an error that the
+// kernel logs and match answers true of fails no test, such as a report of
+// a plugin drawing on render that the test triggers on purpose. Each call
+// adds a match, an error any of them matches failing nothing. A
+// render.Report is expected by its kind, with ExpectReport.
+func (h *Harness) ExpectError(match func(error) bool) {
+	h.errorMatches = append(h.errorMatches, match)
+}
+
 // Frames answers each frame gfx has drawn so far, read back from its
 // recording adapter in render's terms, as render.Inspection says, with the
 // beat of the Step that drew it and the reports logged during that Step.
+// After RecordNothing, it answers no frame.
 // Its command lists are every encoder gfx submitted, by order, those of
 // plugins drawing on gfx alone included. What render made and wrote between
 // two frames goes into the earlier, as recording.Recording.FrameCalls groups
@@ -315,8 +339,9 @@ func (h *Harness) noteBeat(beat metronome.Beat) {
 	h.beat = beat
 }
 
-// checkLogged fails the test on each error logged since the last check, but a
-// report of an expected kind, and an expected error.
+// checkLogged fails the test on each error logged since the last check, but
+// one an ExpectError match answers true of, and a report of an expected
+// kind.
 func (h *Harness) checkLogged() {
 	h.t.Helper()
 	h.mutex.Lock()
@@ -326,7 +351,7 @@ func (h *Harness) checkLogged() {
 	for _, err := range logged {
 		var report render.Report
 		switch {
-		case slices.ContainsFunc(h.expectedErrors, func(expected error) bool { return errors.Is(err, expected) }):
+		case slices.ContainsFunc(h.errorMatches, func(match func(error) bool) bool { return match(err) }):
 		case !errors.As(err, &report):
 			h.t.Errorf("the kernel logged %v", err)
 		case !slices.Contains(h.expectedReports, report.Kind):
