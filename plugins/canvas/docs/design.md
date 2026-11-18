@@ -7,7 +7,8 @@ each section links the ticket that holds its detail. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md).
 
 Status: being built. The plugin, its frame event, draw lists and canvastest
-are built; a frame's entries are recorded and merged, not yet drawn.
+are built, and a fill is drawn through the default camera with canvas's
+include and its default material.
 
 ## Problem Statement
 
@@ -334,8 +335,8 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 
 - **A `Sprite`** draws an image's region through a transform about its image's pivot: `Sprite{Image, Frame, Transform, Size, Tint, Material, Crop, Clip, DrawMode, TexelScale, Filter, Layer, Order}`, recorded with `DrawSprite`, `DrawSpriteWith`, `DrawSprites` and `DrawSpritesWith`.
 - **An entry's transform is an `m.Mat2x3`,** a new type in libs/m. It has 2 rows and 3 columns, since m indexes elements by (row, column), as mathgl names it, and it is stored column-major like the rest of m.
-  - Its 24 bytes are WGSL's `mat3x2<f32>` byte for byte, so it is copied into the row as it is. WGSL names the columns first, which the type's doc comment says.
-  - `m.Mat3` keeps its one meaning, the linear part of a 3D transform (`Scaling3`, `RotationZ3`, `Quat.Mat3`). A homogeneous `Mat3` would take 48 bytes in a storage row, and would allow a bottom row that canvas would have to honour or drop.
+  - Its 24 bytes are WGSL's `mat3x2<f32>` byte for byte, so it is copied into the instance data as it is. WGSL names the columns first, which the type's doc comment says.
+  - `m.Mat3` keeps its one meaning, the linear part of a 3D transform (`Scaling3`, `RotationZ3`, `Quat.Mat3`). A homogeneous `Mat3` would take 48 bytes in the instance data, and would allow a bottom row that canvas would have to honour or drop.
   - libs/m gains its multiply, inverse and point transform, `Translation2x3`, `Rotation2x3`, `Scaling2x3` and `TRS2x3(translation, rotation, scale)`, and `.Mat3()` for the homogeneous form. `a.Mul(b)` applies `b` first.
   - A zero transform means identity.
   - v1 kept the parts and composed them in the vertex shader. A parts struct is the ECS plugin's, which writes the matrix into the entry.
@@ -407,7 +408,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - Glyphs have an atlas of their own (see *Text: glyphs*).
   - Distance fields share the sprite atlas, since alpha stays linear in an sRGB format.
 - **The white texel** that shapes draw over is reserved in the sprite atlas when it is made, and never released, so shapes batch with sprites. v1 did the same.
-- **An atlas is one 2D-array texture, and each layer is a page.** A region's page travels in the entry's row, so entries on any page of one atlas share one binding and batch. Only a change of atlas breaks a batch.
+- **An atlas is one 2D-array texture, and each layer is a page.** A region's page travels in its instance data, so entries on any page of one atlas share one binding and batch. Only a change of atlas breaks a batch.
 - **Growing:** a full atlas doubles its layer count. canvas makes a new array and copies the old layers into it on the GPU, so an atlas is always one texture. The page side and the ceiling on layers are `Config` fields. Under WebGPU's defaults (8192², 256 layers) memory bounds a page first: one RGBA8 layer at 8192² is 256 MiB.
 - **Overflow:** some images get a texture of their own:
   - one larger than the `Config` limit, zero meaning half the page side;
@@ -474,12 +475,12 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - The zero `Material` is the default material.
 - **Its shader is a whole WGSL file,** a path, that includes canvas's include from the `cog.canvas` mount; nothing is spliced into the code. A material with only a fragment entry point uses canvas's vertex stages: a sprite's, and a `canvas.Vertex` mesh's.
 - **One model for every entry, split only at the vertex stage.** Every kind of entry's vertex stage writes the same varyings, so a fragment-only material serves sprites, glyphs and meshes alike. A glyph is a sprite drawn with the text material, as Godot runs sprites, text and meshes through one `canvas_item` shader.
-- **A sprite has no vertex buffer.** Its corners come from `vertex_index`. Its data is a row of a storage buffer at `@group(2)`, read at `instance_index`: canvas's fixed part, then its material argument.
+- **A sprite has no vertex buffer.** Its corners come from `vertex_index`. Its instance data is an element of a storage buffer at `@group(2)`, read at `instance_index`: canvas's fixed part, then its material argument.
 - **The material argument** is the value each entry gives its material, of the one type the material declares with `ArgumentOf[T]()`: a struct with any number of fields, a plain value such as a `float32`, or none.
-  - **Reading it:** the fragment stage reads it from the row, by the entry's row index the vertex stage passes as the flat varying `row`. Varyings therefore never cap it; only its size does, which every entry of its row stride pays. A material that needs a lot of data per entry keeps an index in its argument into a buffer it holds as a material parameter.
-  - **Its layout** is checked against the shader's WGSL `Argument` struct with render's `Inventory.CheckLayout[T]`, binding `canvas_rows` at the path `[].argument` (see *Delta to render*), by render's rules for uniform blocks: the size, then each field's offset in order, names ignored and `_` fields treated as padding. It is checked once per Go type and shader, and a mismatch is reported once.
+  - **Reading it:** the fragment stage reads it from the instance data, by the instance's index the vertex stage passes as the flat varying `instance`. Varyings therefore never cap it; only its size does, which every instance of its stride pays. A material that needs a lot of data per entry keeps an index in its argument into a buffer it holds as a material parameter.
+  - **Its layout** is checked against the shader's WGSL `Argument` struct with render's `Inventory.CheckLayout[T]`, binding `canvas_instances` at the path `[].argument` (see *Delta to render*), by render's rules for uniform blocks: the size, then each field's offset in order, names ignored and `_` fields treated as padding. It is checked once per Go type and shader, and a mismatch is reported once.
   - **Its type, at the draw:** a draw's argument type is compared with the material's by `DrawSpriteWith[T]` and the other `…With` calls. An argument the material does not declare, or one of another type, is refused and reported once, and the entry is skipped.
-  - **Without one:** a plain draw on a material that takes an argument gives it the zero value, with the row's tail zeroed. Each material documents what its zero draws.
+  - **Without one:** a plain draw on a material that takes an argument gives it the zero value, with the instance data's tail zeroed. Each material documents what its zero draws.
   - **In ECS:** a user's argument type is a component, paired in a query with the `Sprite` component that holds the `Material` handle.
   - **The name:** an entry supplies the argument for what its material declares, as a call's argument fills a parameter. render's *material parameter* is shared by every draw of a material; the glossary keeps the two apart.
   - **Why:** no engine lets a user add a member to its per-sprite record, each offering one small per-instance value instead (Unity's 32-bit user value, Bevy's `MeshTag`, Godot's instance uniforms), and v1's record was frozen at 96 bytes. Bevy 0.20's sprite material, cached by value, breaks batches without bindless, v1's "material keyed by its values". An argument is a struct of the material's own, and is no part of the material, so it breaks no batch.
@@ -537,12 +538,12 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   |---|---|
   | `@group(0)` | the camera's pass parameters, set once per camera pass |
   | `@group(1)` | the 2D material's parameters |
-  | `@group(2)` | canvas's rows, read at `instance_index`, and the atlases a batch samples, an atlas changing from batch to batch |
+  | `@group(2)` | canvas's instance data, read at `instance_index`, and the atlases a batch samples, an atlas changing from batch to batch |
 
   A custom shader declares only `@group(1)`, and the struct of its material argument.
 - **One include, `cog.canvas/canvas.wgsl`, declares every binding of groups 0 and 2,** with the functions over them: world to clip, snapping, a mesh's varyings with the region remap, the sampling helper and the output's encoding. canvas's own materials include it as a custom one does, so nothing of the camera is hard-coded where a custom shader cannot reach it. render interns layouts across shaders sharing an include, so every 2D material's pass parameters are one bind group, set once per camera pass.
-- **The row** is canvas's fixed part (its transform as `mat3x2<f32>`, its premultiplied tint, its region and its page, and what its draw mode, slice insets and crop need), then the argument. Its storage binding is `canvas_rows`.
-- **The include's row type names the shader's `Argument` struct,** since WGSL's declarations may come in any order. A material with no argument declares none, and canvas preprocesses a material's shader that has one with the define `CANVAS_ARGUMENT`, which the include's `#if` reads, since WGSL forbids an empty struct.
+- **The instance data**, `CanvasInstanceData`, is canvas's fixed part (its transform as `mat3x2<f32>`, its premultiplied tint, its region and its page, and what its draw mode, slice insets and crop need), then the argument. Its storage binding is `canvas_instances`.
+- **The include's instance data type names the shader's `Argument` struct,** since WGSL's declarations may come in any order. A material with no argument declares none, and canvas preprocesses a material's shader that has one with the define `CANVAS_ARGUMENT`, which the include's `#if` reads, since WGSL forbids an empty struct.
 - **The pass parameters:**
   - `world_to_clip`, a `mat3x2<f32>` from the world to the viewport's clip space, the fit, zoom, rotation and pivot in it, and `clip_to_world`, its inverse, for an effect that needs a fragment's world position;
   - `pixel_size`, one target pixel in world units, for a hairline's width and distance fields' anti-aliasing at any zoom;
@@ -551,7 +552,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - `encode`, whether the output encodes sRGB.
 
   Nothing of the user's is in the pass.
-- **Every vertex stage writes the same varyings,** sprites' and meshes' alike: the position, the coordinate in the atlas and over the image's region, the premultiplied tint, and the flat `row`, so a fragment-only material serves both.
+- **Every vertex stage writes the same varyings,** sprites' and meshes' alike: the position, the coordinate in the atlas and over the image's region, the premultiplied tint, and the flat `instance`, its instance data's index, so a fragment-only material serves both.
 - **A custom vertex stage that skips the snapping function draws its entries unsnapped,** which the include's docs say.
 
 ### Text: glyphs
@@ -629,7 +630,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - An icon is the cap height times `Scale` tall, its width by its aspect ratio, its bottom on the baseline moved by `Offset`, and a line never breaks inside it.
   - Registering a name again replaces its image everywhere, so prompts switch with the controller with no string edited.
   - An unregistered name draws the default font's missing-glyph box at an icon's size, reported once per name.
-  - The text material binds the sprite atlas beside the glyph atlas, each quad's row naming which it samples, so a run with icons is still one batch. Distance effects skip icons; an icon with an outline is a sprite entry of its own.
+  - The text material binds the sprite atlas beside the glyph atlas, each quad's instance data naming which it samples, so a run with icons is still one batch. Distance effects skip icons; an icon with an outline is a sprite entry of its own.
 - **Markup is read only for a run whose `Markup` is set,** so text a player typed draws as written. ECS components and translation tables hold strings, not spans.
   - `\i:name` is an icon. A name is letters, digits, `_`, `-` and `/`, so "Press \i:a." keeps its full stop.
   - `\c:colour{text}` is a tinted span. Its colour is `#rgb`, `#rrggbb`, `#rrggbbaa`, or a name given to `RegisterColor`, so a translator writes `\c:keyword{fire}` and a theme changes it in one place. Spans nest, and icons sit in them.
@@ -701,6 +702,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - `Order`, a `render.Order`, the order cameras draw in.
   - `Size`, `Fit` and `PixelPerfect` (see *Logical size, fit and pixel-perfect*).
 - **`DrawList.SetCamera(Camera)` sets a camera for that frame,** forgotten once it is drawn, as entries are. Nothing is made, stored or destroyed, and an ECS system sets the camera it computes.
+- **The main window** is the first window platform opened of those still open, which canvas follows through `platform.WindowOpenedEvent` and `platform.WindowClosedEvent`: gogpu's window opened at start, when it opens one. When it closes, the next opened takes its place.
 - **A frame that sets none is seen through the default camera:** the main window, every layer, the centre pivot and zoom 1, clearing to opaque black, so a frame with no camera never shows a stale framebuffer. It draws only a frame that recorded entries (see *The frame on the kernel*).
 - **Cameras draw in `Order`,** equal ones by their lists' order and then by call order. At equal `Order` texture targets draw before windows, so a minimap's texture is drawn before the window that shows it. Cameras of one order share one command list.
 - **`Clear` clears the camera's viewport,** never the rest of its target: through the pass's load when the viewport covers the target, otherwise by drawing `ClearColor` over the viewport. render's load clears a whole attachment, which would wipe the other half of a split screen.
@@ -735,6 +737,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 - **canvas draws straight into the window,** with no intermediate texture and no final pass. Its output function encodes sRGB wherever the target's format does not.
   - A window or a plain Unorm texture blends encoded colour, as Aseprite and Photoshop do, and as Godot without HDR 2D and Unity's gamma colour space do.
   - An sRGB texture target blends in linear space.
+  - A window's framebuffer is taken to be `BGRA8Unorm`, gogpu's only format, and always encoded: neither render nor gfx answers a window's format to canvas yet, so a surface of an sRGB format would be encoded twice.
 - **v1 blended in linear space** in an `RGBA8UnormSrgb` intermediate and encoded it in an implicit final pass, which cost a pass and 8 MB a window at 1080p.
 - **An image made from a camera's texture takes its colour space as any image does.** A Unorm texture holding encoded colour is marked sRGB and decoded as it is sampled, so a minimap drawn as an image looks as the world drawn directly does.
 - **A camera's texture target's size and format come from render's `Inventory.TextureDescriptor`,** for placing its viewport, for `Targets`, and for `encode`. A camera restating its texture's size and format, or canvas making texture targets of its own, would each keep a second account of what render already holds.
@@ -768,10 +771,10 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 
 ([canvas: sprites, their transforms, and how they are ordered and batched](https://github.com/dvoyni/cog/issues/867), [canvas: custom 2D meshes](https://github.com/dvoyni/cog/issues/870))
 
-- **A batch is a run of sorted entries with the same material, atlas, filter and clip.** Sprites, shapes and glyphs are drawn as `DrawVertices(TriangleList, 6, DrawArgs{InstanceCount, FirstInstance})`, with no mesh, each instance reading its row at `instance_index`.
+- **A batch is a run of sorted entries with the same material, atlas, filter and clip.** Sprites, shapes and glyphs are drawn as `DrawVertices(TriangleList, 6, DrawArgs{InstanceCount, FirstInstance})`, with no mesh, each instance reading its instance data at `instance_index`.
 - **Nothing else breaks a batch:** not the image, the frame, the page, the draw mode, the crop, the tint or the argument. A texture change breaks every engine's batch; a 2D-array atlas with its page carried per instance avoids it.
-- **Rows** go into temporary storage buffers, one per row stride, so entries of every material share them. There is no cap beyond the binding's 128 MiB.
-- **Every draw of canvas's is instanced,** a lone sprite or mesh among them: each instance reads its row at `instance_index` from the draw's `FirstInstance`. canvas keeps no other path.
+- **Instance data** goes into temporary storage buffers, one per stride, so entries of every material share them. There is no cap beyond the binding's 128 MiB.
+- **Every draw of canvas's is instanced,** a lone sprite or mesh among them: each instance reads its instance data at `instance_index` from the draw's `FirstInstance`. canvas keeps no other path.
 - **Consecutive entries in sort order of one mesh file,** with one material, atlas, filter and clip, are one instanced draw, `Draw(mesh, DrawArgs{InstanceCount, FirstInstance})`. Different mesh files are different draws, and meshes never batch with sprites. A forest of one tree mesh, recorded in one bulk call, is one draw.
 - **A per-frame mesh is a draw of its own,** never merged. v1 concatenated consecutive triangle lists because its vertices were in world space with nothing per entry; here each entry has its own transform, tint and argument, so merging would need an entry index on every vertex, a second stream every custom vertex stage would read. A user with many small pieces builds them into one mesh: a trail system writes every trail into one per-frame mesh.
 - **Each camera is a pass** in its order's command list, into its target, with its viewport and its pass parameters set once.
@@ -852,9 +855,9 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 Each change was checked for a 3D renderer's needs too, drawbridge's forward+ or deferred path and scene's skinning, and widened where 3D asks more than canvas.
 
 - **The layout check:** `Inventory.CheckLayout[T](shader, binding, path)` checks Go type `T` against the type at `path` within the binding, by the rules render checks uniform blocks by: the size, then each field's offset in order, names ignored, `_` fields as padding.
-  - The path is relative to the binding and walks dotted members, `[]` stepping into an array's element: `[]` for an element of a binding `objects`, `lights[]` within a binding `scene`, `[].argument` within canvas's `canvas_rows`. An empty path names the binding's whole type.
-  - canvas keeps material arguments, its rows and their storage, and calls the check once per material and argument type. A 3D plugin checks its per-object and per-light data with the same call, and canvas reaches no gfx type, as render's rules ask.
-  - render owning material arguments whole was weighed. canvas's row model would have moved into render before a second user showed what it needs.
+  - The path is relative to the binding and walks dotted members, `[]` stepping into an array's element: `[]` for an element of a binding `objects`, `lights[]` within a binding `scene`, `[].argument` within canvas's `canvas_instances`. An empty path names the binding's whole type.
+  - canvas keeps material arguments, its instance data and its storage, and calls the check once per material and argument type. A 3D plugin checks its per-object and per-light data with the same call, and canvas reaches no gfx type, as render's rules ask.
+  - render owning material arguments whole was weighed. canvas's instance data model would have moved into render before a second user showed what it needs.
 - **Mips for a made texture:** `CommandList.GenerateMips(texture, firstLayer, layerCount)` records render's mip shader into the list where it is called, for every level of those layers. render generated mips only for textures it loads, in its own command list.
   - It covers 2D, 2D-array and cube textures, a cube's faces as layers, so probes and baked maps take it too. It filters sRGB in linear, as render's loaded textures' mips are.
   - canvas calls it after the passes that pack into an atlas page that frame, at the start of its lowest camera order's command list. The atlas's gutters and grid at 2^(levels−1) keep the box filter within each image.
@@ -873,7 +876,7 @@ Each change was checked for a 3D renderer's needs too, drawbridge's forward+ or 
 
 - **Every reflected member describes its type recursively.**
   - Each member gives its size, its `Members` if it is a struct, and its `ElementCount` and `ElementStride` if it is an array, with the element's own description. A count of 0 means runtime-sized.
-  - The binding's top-level type uses the same description, so `array<ObjectData>`, a light list in `array<Light, 16>`, a skin's `array<mat4x4<f32>, 64>` and canvas's rows are one case.
+  - The binding's top-level type uses the same description, so `array<ObjectData>`, a light list in `array<Light, 16>`, a skin's `array<mat4x4<f32>, 64>` and canvas's instance data are one case.
   - Today a binding lists only its top-level struct's members, so the material argument's check, a member of an element of a runtime array, could not be answered.
 - **gogpu fills it from naga's IR,** which already holds every struct and array type, so no fork changes.
 - **gfx's recording adapter answers it** from the binding declarations, which carry it (see *Delta to render*).
@@ -892,7 +895,7 @@ Each change was checked for a 3D renderer's needs too, drawbridge's forward+ or 
   - the mesh file format and `CalculateBounds`.
 - **Recording-adapter tests through rendertest,** in a real kernel, asserting what reached render in render's words:
   - the command lists per camera order, the passes per camera, and the draws per batch with their instance counts;
-  - the pass parameters, the viewport and scissor, and the rows' bytes;
+  - the pass parameters, the viewport and scissor, and the instance data's bytes;
   - first-use loads, refusals and their reports, and device recovery's fresh start.
 - **Pixel tests on wgpu's software adapter,** for what only pixels show:
   - slicing, tiling and crop, and sRGB encoding;
@@ -917,7 +920,7 @@ Each change was checked for a 3D renderer's needs too, drawbridge's forward+ or 
 - **The gate:** zero allocations for a steady frame once warm, checked with `testing.AllocsPerRun(...) == 0` over a whole beat, canvastest's `Step`, after four warm frames, on gfx's recording adapter in its mode that records nothing, turned on with `h.RecordNothing()`. It covers canvas, render, gfx, the kernel and metronome. Its frame holds the steady content *Performance* lists.
 - **Under `go test -race`** the gate steps its frames for the detector and checks no count.
 - **Benchmarks** time each entry against the same frame drawn by hand on render.
-  - **Operations:** recording, single calls and bulk; the lanes' merge and the sort; culling, batching, the rows written, and the command lists recorded; text drawn from the cache; per-frame triangles copied.
+  - **Operations:** recording, single calls and bulk; the lanes' merge and the sort; culling, batching, the instance data written, and the command lists recorded; text drawn from the cache; per-frame triangles copied.
   - **Counts:** 1,000, 10,000 and 100,000 sprites; 1, 4 and 16 recording tasks; 1, 2 and 4 cameras; one material against a switch every 16 entries; few layers against many, for the radix sort's passes.
   - **Timed, not gated:** glyph generation at first use, per glyph (Latin at em 48, Han at em 64), and for a frame of 200 new hanzi; an image's first use, its decode, converter and pack; the radix sort's passes as the layers spread.
   - **Ten runs** go in the baseline, compared with `benchstat`.

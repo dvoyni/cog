@@ -20,10 +20,14 @@
 //	}
 //
 // canvas merges the frame's draw lists in registration order once every
-// recording task has run, and forgets the frame's entries once it is drawn.
-// It does not draw them yet: a frame that recorded entries begins the
-// default camera's command list, at order 0, and records nothing into it,
-// and a frame with none begins no list.
+// recording task has run, draws them, and forgets them. A frame is drawn
+// through the default camera: into the main window, the first window opened
+// of those still open, cleared to opaque black, the world's origin at its
+// centre, one world unit to a point and y down. It is one command list at
+// order 0 of one pass, its entries one instanced draw of the default
+// material, each tint premultiplied and blended over what the window holds,
+// its colour encoded as sRGB. A frame that recorded no entry, or with no
+// main window open, begins no list.
 //
 // A mistake canvas finds at run time is a Report, logged once for its
 // subject through the kernel's LogErrOnce and carried past.

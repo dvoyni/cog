@@ -8,8 +8,10 @@ importing [kernel](../../kernel), [metronome](../metronome),
 gfx.
 
 It is being built from [docs/design.md](docs/design.md). So far a frame's
-recording tasks record shapes into draw lists of their own, which canvas
-merges in registration order and forgets; nothing is drawn yet.
+recording tasks record fills into draw lists of their own, which canvas
+merges in registration order and draws through the default camera into the
+main window, the first window opened of those still open, as one instanced
+draw of its default material.
 
 ## Shape
 
@@ -21,7 +23,11 @@ merges in registration order and forgets; nothing is drawn yet.
 - **`DrawList`** is the task parameter a recording task records through,
   each task's a draw list of its own. An entry recorded outside the frame is
   refused and reported once for the task.
-- **`Shape`** is an entry filling a rectangle.
+- **`Shape`** is an entry filling a rectangle with its tint.
+- **`cog.canvas/canvas.wgsl`** is canvas's include, declaring the camera's
+  pass parameters at `@group(0)` and canvas's instance data and atlas at
+  `@group(2)`, with the functions over them, which canvas's own default
+  material, `cog.canvas/default.wgsl`, includes.
 - **`Report`** is a mistake canvas finds at run time, logged once and carried
   past. Its `ReportKind` names it for tests.
 - **`canvastest`** runs canvas in a real kernel on render's fake GPU, with a
@@ -29,16 +35,25 @@ merges in registration order and forgets; nothing is drawn yet.
 
 ## Kernel surface
 
-- **Resources it installs:** `Handlers` (`RecordFrame`), to order handlers
-  around; a private draw state, holding each task's draw list.
+- **Resources it installs:** `Handlers` (`RecordFrame`, `TrackOpenedWindow`,
+  `ForgetClosedWindow`), to order handlers around; a private draw state,
+  holding each task's draw list; a private renderer, holding the default
+  material, the white texel and the instance data; and a private list of
+  the open windows.
 - **Resources it reads from other plugins:** render's, for read through
-  `render.Frame`, in the task that draws the frame.
+  `render.Frame` and `render.Inventory`, `platform.FS`, for read through
+  `render.Inventory`, as the default material's shader loads, and
+  `platform.WindowManager`, for read, for the main window's size, in the
+  task that draws the frame.
 - **Task parameters it offers:** `DrawList`.
 - **Events it publishes:** `FrameEvent`, inside its handler of
   `render.FrameEvent`.
-- **Events it subscribes to:** `render.FrameEvent`.
+- **Events it subscribes to:** `render.FrameEvent`, and
+  `platform.WindowOpenedEvent` and `platform.WindowClosedEvent`, to know the
+  main window.
 - **Sockets it declares:** none.
-- **Sockets it binds:** none.
+- **Sockets it binds:** `platform.ReadMountSocket`, its built-in assets
+  under the prefix `cog.canvas`, at the lowest priority.
 
 canvas is listed after render and platform, and a plugin that records into
 canvas is listed after canvas.

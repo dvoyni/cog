@@ -2,6 +2,7 @@ package canvas
 
 import (
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/plugins/platform"
 	"github.com/dvoyni/cog/plugins/render"
 )
 
@@ -14,4 +15,10 @@ type Handlers struct {
 	// returns that drawing joined with its in dependency, so render's
 	// second pickup of loads and gfx's flush wait for it.
 	RecordFrame kernel.Sub[render.FrameEvent]
+	// TrackOpenedWindow handles platform.WindowOpenedEvent, and
+	// ForgetClosedWindow platform.WindowClosedEvent: each keeps canvas's
+	// account of the open windows, whose first opened is the main window,
+	// the default camera's target.
+	TrackOpenedWindow  kernel.Sub[platform.WindowOpenedEvent]
+	ForgetClosedWindow kernel.Sub[platform.WindowClosedEvent]
 }
