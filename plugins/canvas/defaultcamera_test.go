@@ -61,13 +61,14 @@ func TestAFillShowsItsTintPremultipliedAndEncodedAsSRGBInTheWindowThroughTheDefa
 	window := h.OpenWindow(platform.Size{Width: 320, Height: 240})
 	// The default camera centres the world's origin in the window, a world
 	// unit to a point and y down: the opaque fill covers the centre, the
-	// translucent one, drawn after it, most of the top-left quarter and the
-	// opaque fill's top-left corner, and nothing the bottom half.
+	// translucent one, recorded before it but drawn after it, a layer up,
+	// most of the top-left quarter and the opaque fill's top-left corner,
+	// and nothing the bottom half.
 	opaque := m.NewColorSrgb(50.0/255, 1, 150.0/255, 1)
 	translucent := m.NewColorSrgb(1, 1.0/3, 0, 0.6)
 	record := func(list canvas.DrawList) {
+		list.DrawShape(canvas.Shape{Kind: canvas.Fill, Rect: m.Rect{X: -150, Y: -110, Width: 145, Height: 105}, Tint: translucent, Layer: 1})
 		list.DrawShape(canvas.Shape{Kind: canvas.Fill, Rect: m.Rect{X: -20, Y: -20, Width: 40, Height: 40}, Tint: opaque})
-		list.DrawShape(canvas.Shape{Kind: canvas.Fill, Rect: m.Rect{X: -150, Y: -110, Width: 145, Height: 105}, Tint: translucent})
 	}
 
 	// A Wayland window gets a framebuffer only once the compositor's frame

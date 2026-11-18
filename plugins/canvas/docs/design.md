@@ -8,8 +8,11 @@ each section links the ticket that holds its detail. The vocabulary is in
 
 Status: being built. The plugin, its frame event, draw lists and canvastest
 are built, a fill is drawn through the default camera with canvas's
-include and its default material, and a frame is inspected in canvas's
-terms: its cameras, batches and entries.
+include and its default material, a frame is inspected in canvas's
+terms: its cameras, batches and entries, and entries are sorted by their
+sort key, regrouped where their layer allows, and drawn a batch at a time,
+a batch broken where the material changes, the only part of the batch key
+that entries carry yet.
 
 ## Problem Statement
 
@@ -321,13 +324,15 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - A `Frame` parameter beginning lists at orders the user picks, as render's command lists are, was weighed. It needed a unique number per list for a tie-break that rarely shows.
 - **The sort key is `Layer int32`, then `Order int32`, then the draw list's order, then the recording order.** The order is strictly painter's, with no depth buffer.
   - `Layer` and `Order` make one 64-bit key. The lists are joined in list order and sorted stably by it, so the last two parts cost no bits.
-  - A radix sort skips the passes whose digit is alike for every entry, such as the high bytes of a few layers.
+  - A radix sort, a byte to a pass, skips the passes whose digit is alike for every entry, such as the high bytes of a few layers.
+  - Each entry carries its place among the merged lists through the sort, so the inspection still answers its draw list's place and its own.
   - `int32` rather than `int`, which would widen the key to 96 bits, a third more passes.
   - Prior art agrees: every engine orders by a few integer keys and then painter's order.
 - **`OrderOf(y float32) int32`** maps every float onto its own `int32` in the same order, for y-sorting with no scale to choose: `Order: canvas.OrderOf(position.Y)`. −0 sorts as +0, and NaN after every number.
   - It keeps the order, not the distance, so `OrderOf(y)-1` sorts just under `y`, as a unit's shadow does.
   - Y-sorted entries and hand-stacked ones belong in different layers, since `OrderOf(1)` is 1065353216.
 - **Equal keys keep their call order** by default. A layer named in `Config.RegroupedLayers` may regroup its entries of equal keys by batch, for a UI or particles whose order within a key does not matter. v1 never merged entries that were not adjacent.
+  - A run of equal keys regroups in the order its batches first appear: the entries of its first entry's batch, then those of the first batch left, each batch's in call order. Runs of different keys never mix.
 - **Bulk calls take parallel slices,** `DrawSprites([]Sprite)` and `DrawSpritesWith([]Sprite, []T)`, and the same for meshes, so an ECS chunk's entry and argument columns go in as they are. The slice's order is the recording order. Slices of different lengths are refused and reported once.
 
 ### Sprites, transforms and pivots

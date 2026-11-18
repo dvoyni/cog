@@ -5,30 +5,42 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/canvas"
 	"github.com/dvoyni/cog/plugins/canvas/canvastest"
 	"github.com/dvoyni/cog/plugins/platform"
 	"github.com/dvoyni/cog/plugins/render"
 )
 
-func TestEachRecordingTaskRecordsIntoItsOwnLaneAndTheLanesMergeInRegistrationOrder(t *testing.T) {
+func TestEntriesDrawByLayerThenOrderThenTheirDrawListsRegistrationOrderThenCallOrder(t *testing.T) {
 	h := canvastest.NewHarness(t)
-	h.Spawn(nil, nil, &orderedRecorder{name: "first recorder", lateOrder: 10, earlyOrder: 11}, &orderedRecorder{name: "second recorder", lateOrder: 20, earlyOrder: 21})
+	h.Spawn(nil, nil, &orderedRecorder{name: "first recorder", lateOrder: 5, earlyOrder: 5}, &orderedRecorder{name: "second recorder", lateOrder: 5, earlyOrder: 5})
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	h.Record(func(list canvas.DrawList) {
-		list.DrawShape(canvas.Shape{Order: 1})
-		list.DrawShape(canvas.Shape{Order: 1, Layer: 1})
+		list.DrawShape(canvas.Shape{Order: 9, Layer: -1})
+		list.DrawShape(canvas.Shape{Order: 5, Layer: 1})
+		list.DrawShape(canvas.Shape{Order: 5, Tint: m.Color{R: 1, A: 1}})
+		list.DrawShape(canvas.Shape{Order: 5, Tint: m.Color{G: 1, A: 1}})
+		list.DrawShape(canvas.Shape{Order: 4, Layer: 1})
 	})
 
 	h.Step()
 
-	got := findDrawnShapes(h.Frames()[0])
-	// canvastest's lane comes first, its plugin listed right after canvas;
-	// each recorder's late task was registered before its early one, which
-	// runs first.
-	want := []canvas.Shape{{Order: 1}, {Order: 1, Layer: 1}, {Order: 10}, {Order: 10, Layer: 1}, {Order: 11}, {Order: 11, Layer: 1}, {Order: 20}, {Order: 20, Layer: 1}, {Order: 21}, {Order: 21, Layer: 1}}
+	var got [][2]int
+	for _, entry := range findDrawnEntries(h.Frames()[0]) {
+		got = append(got, [2]int{entry.DrawListIndex, entry.IndexInDrawList})
+	}
+	// canvastest's list, 0, comes first, its plugin listed right after
+	// canvas; each recorder's late task, 1 and 3, was registered before its
+	// early one, 2 and 4, which runs first. Each recorder draws order 5 at
+	// layers 0 and 1.
+	want := [][2]int{
+		{0, 0},
+		{0, 2}, {0, 3}, {1, 0}, {2, 0}, {3, 0}, {4, 0},
+		{0, 4}, {0, 1}, {1, 1}, {2, 1}, {3, 1}, {4, 1},
+	}
 	if !slices.Equal(got, want) {
-		t.Errorf("the frame's shapes merged as %+v, want %+v", got, want)
+		t.Errorf("the frame drew its entries from these draw lists' places, and their own, %v, want %v", got, want)
 	}
 }
 
@@ -133,16 +145,24 @@ func TestFrameEventCarriesRendersBeatAndTimingSignals(t *testing.T) {
 	}
 }
 
+// findDrawnEntries answers the entries frame drew, camera after camera, in
+// the order each drew them.
+func findDrawnEntries(frame canvas.Inspection) []canvas.InspectedEntry {
+	var entries []canvas.InspectedEntry
+	for _, camera := range frame.Cameras {
+		for _, batch := range camera.Batches {
+			entries = append(entries, batch.Entries...)
+		}
+	}
+	return entries
+}
+
 // findDrawnShapes answers the shapes frame drew, camera after camera, in the
 // order each drew them.
 func findDrawnShapes(frame canvas.Inspection) []canvas.Shape {
 	var shapes []canvas.Shape
-	for _, camera := range frame.Cameras {
-		for _, batch := range camera.Batches {
-			for _, entry := range batch.Entries {
-				shapes = append(shapes, entry.Shape)
-			}
-		}
+	for _, entry := range findDrawnEntries(frame) {
+		shapes = append(shapes, entry.Shape)
 	}
 	return shapes
 }

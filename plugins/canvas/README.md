@@ -9,27 +9,37 @@ gfx.
 
 It is being built from [docs/design.md](docs/design.md). So far a frame's
 recording tasks record fills into draw lists of their own, which canvas
-merges in registration order and draws through the default camera into the
-main window, the first window opened of those still open, as one instanced
-draw of its default material. A frame can be inspected in canvas's terms,
-beside render's inspection of it.
+merges in registration order, sorts by their sort key and draws through the
+default camera into the main window, the first window opened of those still
+open, an instanced draw for each batch, a run of entries of one 2D
+material. A frame can be inspected in canvas's terms, beside render's
+inspection of it.
 
 ## Shape
 
 - **`Plugin`**, from `NewPlugin()`, is canvas. **`Config`** is its part of
-  the kernel's config, under `PluginName`; it has no field yet.
+  the kernel's config, under `PluginName`: `RegroupedLayers`, the layers
+  whose entries of equal keys canvas may regroup by batch.
 - **`FrameEvent`** is the frame its users record, published inside each of
   render's `FrameEvent`s. A plugin that records schedules its recording tasks
   after its `Ready` and joins them into the out dependency it returns.
 - **`DrawList`** is the task parameter a recording task records through,
   each task's a draw list of its own. An entry recorded outside the frame is
   refused and reported once for the task.
-- **`Shape`** is an entry filling a rectangle with its tint.
+- **`Shape`** is an entry filling a rectangle with its tint, drawn with its
+  `Material`, at its sort key, `Layer` then `Order`. Entries are drawn by
+  sort key, then by their draw list's registration order, then in the order
+  recorded.
+- **`OrderOf(y)`** maps a float onto an order of its own, in the same order,
+  for y-sorting.
+- **`Material`** names a 2D material; the zero one, the default material,
+  is the only one canvas makes yet.
 - **`Assets`** is the task parameter a tool reaches canvas through:
   `RequestInspection` asks for an inspection of the next frame, and
   `ReadInspection` answers it in a task off **`InspectedEvent`**.
 - **`Inspection`** is one frame in canvas's terms: each camera, its batches
-  and their entries, each entry with its sort key and its draw list's place,
+  with their material and their entries, each entry with its sort key and
+  its draw list's place,
   and render's `Inspection` of the frame beside it.
 - **`cog.canvas/canvas.wgsl`** is canvas's include, declaring the camera's
   pass parameters at `@group(0)` and canvas's instance data and atlas at
@@ -45,10 +55,10 @@ beside render's inspection of it.
 
 - **Resources it installs:** `Handlers` (`RecordFrame`, `TrackOpenedWindow`,
   `ForgetClosedWindow`, `DeliverInspection`), to order handlers around; a
-  private draw state, holding each task's draw list and the inspection
-  asked for; a private renderer, holding the default
-  material, the white texel and the instance data; and a private list of
-  the open windows.
+  private draw state, holding each task's draw list, the frame's entries
+  sorted and the inspection asked for; a private renderer, holding the
+  default material, the white texel, the instance data and the batches; and
+  a private list of the open windows.
 - **Resources it reads from other plugins:** render's, for read through
   `render.Frame` and `render.Inventory`, `Assets` holding a `render.Frame`, `platform.FS`, for read through
   `render.Inventory`, as the default material's shader loads, and

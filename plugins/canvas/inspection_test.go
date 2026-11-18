@@ -28,7 +28,8 @@ func TestAnInspectedFrameAnswersItsCamerasBatchesInstanceCountsAndEntriesWithThe
 
 	frame := h.Frames()[0]
 	// canvastest's list comes first; the recorder's late task, registered
-	// before its early one, runs after it.
+	// before its early one, runs after it. The entries are drawn in sort
+	// order, each keeping its list's place and its own.
 	entry := func(shape canvas.Shape, drawListIndex, indexInDrawList int) canvas.InspectedEntry {
 		return canvas.InspectedEntry{Kind: canvas.EntryKindShape, Shape: shape, Layer: shape.Layer, Order: shape.Order, DrawListIndex: drawListIndex, IndexInDrawList: indexInDrawList}
 	}
@@ -38,17 +39,17 @@ func TestAnInspectedFrameAnswersItsCamerasBatchesInstanceCountsAndEntriesWithThe
 		Batches: []canvas.InspectedBatch{{
 			InstanceCount: 6,
 			Entries: []canvas.InspectedEntry{
-				entry(first, 0, 0),
-				entry(second, 0, 1),
 				entry(canvas.Shape{Order: 10}, 1, 0),
-				entry(canvas.Shape{Order: 10, Layer: 1}, 1, 1),
 				entry(canvas.Shape{Order: 11}, 2, 0),
+				entry(second, 0, 1),
+				entry(canvas.Shape{Order: 10, Layer: 1}, 1, 1),
 				entry(canvas.Shape{Order: 11, Layer: 1}, 2, 1),
+				entry(first, 0, 0),
 			},
 		}},
 	}}
 	if !reflect.DeepEqual(frame.Cameras, want) {
-		t.Errorf("the frame inspected was seen through\n%+v\nwant the default camera's one batch of six entries in their lists' order\n%+v", frame.Cameras, want)
+		t.Errorf("the frame inspected was seen through\n%+v\nwant the default camera's one batch of six entries in sort order\n%+v", frame.Cameras, want)
 	}
 	lists := findCanvasLists(frame.Render)
 	if frame.Render.Beat != frame.Beat || len(lists) != 1 || len(lists[0].Passes) != 1 || len(lists[0].Passes[0].Draws) != 1 || lists[0].Passes[0].Draws[0].InstanceCount != 6 {

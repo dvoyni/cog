@@ -2,6 +2,7 @@ package canvas
 
 import (
 	"fmt"
+	"slices"
 	"sync/atomic"
 
 	"github.com/dvoyni/cog/kernel"
@@ -11,12 +12,13 @@ import (
 
 // drawState is canvas's private state: the lane of each task declaring a
 // DrawList, in registration order, whether a frame is open for entries, the
-// entries of the frame last merged from the lanes, and the inspector.
+// entries of the frame last sorted, merged from the lanes, and the
+// inspector.
 type drawState struct {
 	// logger is the kernel's, where reports go.
 	logger *kernel.Logger
 	// recording is set from the job opening a frame for entries until the
-	// job merging its lanes.
+	// job sorting them.
 	recording atomic.Bool
 	// lanes are added at registration, while the kernel is composed, and
 	// only read after.
@@ -24,6 +26,8 @@ type drawState struct {
 	// shapes are the frame's shapes, merged from the lanes in their order,
 	// and replaced by the next frame's when it merges.
 	shapes []Shape
+	// sorter sorts them, and holds the frame's entries in sort order.
+	sorter entrySorter
 	// inspector keeps the inspection Assets.RequestInspection asks for.
 	inspector inspector
 	// frameInspected is set when the frame merged is written down for a
@@ -43,11 +47,11 @@ func (s *drawState) addLane() *lane {
 	return added
 }
 
-// closeAndMerge closes the frame to entries, and replaces the shapes of the
-// frame merged before with each lane's, lane after lane, emptying the lanes.
-// The frame is inspected when a request is pending as it merges, and then
-// where each lane's shapes end is kept.
-func (s *drawState) closeAndMerge() {
+// closeAndSort closes the frame to entries, replaces the shapes of the
+// frame merged before with each lane's, lane after lane, emptying the lanes,
+// and sorts them. The frame is inspected when a request is pending as it
+// merges, and then where each lane's shapes end is kept.
+func (s *drawState) closeAndSort() {
 	s.recording.Store(false)
 	s.frameInspected = s.inspector.requestPending.Load()
 	s.shapes = s.shapes[:0]
@@ -58,13 +62,15 @@ func (s *drawState) closeAndMerge() {
 			s.laneEnds = append(s.laneEnds, len(s.shapes))
 		}
 	}
+	s.sorter.sort(s.shapes)
 }
 
-// makeInspection answers the frame merged, of beat, in canvas's terms: no
+// makeInspection answers the frame sorted, of beat, in canvas's terms: no
 // camera when nothing was drawn, and otherwise the default camera into
-// window, of one batch of every shape, each with its place among the lanes.
-// It is called only for a frame inspected, whose lane ends were kept.
-func (s *drawState) makeInspection(beat metronome.Beat, window platform.Window, cameraDrawn bool) Inspection {
+// window, of batches, the batches it drew of the frame's entries, each
+// entry with its place among the lanes. It is called only for a frame
+// inspected, whose lane ends were kept.
+func (s *drawState) makeInspection(beat metronome.Beat, window platform.Window, cameraDrawn bool, batches []batch) Inspection {
 	if !s.frameInspected {
 		panic("canvas: making the inspection of a frame not inspected, whose lane ends were not kept")
 	}
@@ -72,25 +78,33 @@ func (s *drawState) makeInspection(beat metronome.Beat, window platform.Window, 
 	if !cameraDrawn {
 		return inspection
 	}
-	entries := make([]InspectedEntry, 0, len(s.shapes))
-	laneStart := 0
-	for laneIndex, laneEnd := range s.laneEnds {
-		for index, shape := range s.shapes[laneStart:laneEnd] {
-			entries = append(entries, InspectedEntry{
+	inspectedBatches := make([]InspectedBatch, 0, len(batches))
+	for _, drawnBatch := range batches {
+		inspectedEntries := make([]InspectedEntry, 0, len(drawnBatch.entries))
+		for _, entry := range drawnBatch.entries {
+			shapeIndex := int(entry.shapeIndex)
+			// The lane holding the shape is the first to end after it.
+			laneIndex, _ := slices.BinarySearch(s.laneEnds, shapeIndex+1)
+			laneStart := 0
+			if laneIndex > 0 {
+				laneStart = s.laneEnds[laneIndex-1]
+			}
+			shape := s.shapes[shapeIndex]
+			inspectedEntries = append(inspectedEntries, InspectedEntry{
 				Kind:            EntryKindShape,
 				Shape:           shape,
 				Layer:           shape.Layer,
 				Order:           shape.Order,
 				DrawListIndex:   laneIndex,
-				IndexInDrawList: index,
+				IndexInDrawList: shapeIndex - laneStart,
 			})
 		}
-		laneStart = laneEnd
+		inspectedBatches = append(inspectedBatches, InspectedBatch{Material: drawnBatch.key.material, InstanceCount: drawnBatch.instanceCount, Entries: inspectedEntries})
 	}
 	inspection.Cameras = []InspectedCamera{{
 		Order:   defaultCameraOrder,
 		Window:  window,
-		Batches: []InspectedBatch{{InstanceCount: uint32(len(entries)), Entries: entries}},
+		Batches: inspectedBatches,
 	}}
 	return inspection
 }

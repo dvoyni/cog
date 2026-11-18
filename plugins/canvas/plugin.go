@@ -11,9 +11,14 @@ import (
 // PluginName is canvas's plugin name.
 const PluginName kernel.PluginName = "canvas"
 
-// Config is canvas's part of the kernel's config, under PluginName. It has no
-// field yet.
-type Config struct{}
+// Config is canvas's part of the kernel's config, under PluginName.
+type Config struct {
+	// RegroupedLayers are the layers whose entries of equal keys canvas may
+	// regroup by batch, for a UI's or particles' entries whose order among
+	// themselves does not matter. Entries of equal keys in any other layer
+	// are drawn in the order they were recorded.
+	RegroupedLayers []int32
+}
 
 // Plugin is canvas: it installs Handlers and its private state, binds its
 // built-in assets, publishes FrameEvent inside each render.FrameEvent, and
@@ -32,8 +37,8 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 	return []kernel.PluginName{render.PluginName, platform.PluginName}
 }
 
-// Init installs the draw state, with the kernel's logger for reports, the
-// renderer and the window list; binds canvas's built-in assets as a read
+// Init installs the draw state, with the kernel's logger for reports and the
+// layers config regroups, the renderer and the window list; binds canvas's built-in assets as a read
 // mount under the prefix cog.canvas, at the lowest priority, so any other
 // mount holding one of their names overrides it; subscribes to
 // render.FrameEvent, platform.WindowOpenedEvent, platform.WindowClosedEvent
@@ -41,13 +46,13 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 // subscribes to its own private event delivering inspections. A config of
 // another type than *Config is a composition error, and panics.
 func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
-	kernel.PluginConfigOrDefault[Config](config)
-	configurator.InitResource(&drawState{logger: configurator.Logger()})
+	canvasConfig := kernel.PluginConfigOrDefault[Config](config)
+	configurator.InitResource(&drawState{logger: configurator.Logger(), sorter: makeEntrySorter(canvasConfig.RegroupedLayers)})
 	configurator.InitResource(&renderer{})
 	configurator.InitResource(&windowList{})
 	configurator.BindSocket(platform.ReadMountSocket{FS: makeAssetFS(), Priority: math.MinInt, Prefix: assetPrefix})
 	openFrameTask := configurator.RegisterTask1(openFrame)
-	mergeLanesTask := configurator.RegisterTask1(mergeLanes)
+	sortEntriesTask := configurator.RegisterTask1(sortEntries)
 	drawTask := configurator.RegisterTask6(draw)
 	addWindowTask := configurator.RegisterTask1(addWindow)
 	removeWindowTask := configurator.RegisterTask1(removeWindow)
@@ -55,7 +60,7 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	dropInspectionTask := configurator.RegisterTask1(dropInspection)
 	configurator.InitResource(Handlers{
 		RecordFrame: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event render.FrameEvent) (render.FrameEvent, kernel.JobHandle) {
-			return recordFrame(ex, in, event, openFrameTask, mergeLanesTask, drawTask)
+			return recordFrame(ex, in, event, openFrameTask, sortEntriesTask, drawTask)
 		}),
 		TrackOpenedWindow: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event platform.WindowOpenedEvent) (platform.WindowOpenedEvent, kernel.JobHandle) {
 			return trackOpenedWindow(ex, in, event, addWindowTask)

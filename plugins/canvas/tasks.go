@@ -17,10 +17,10 @@ const defaultCameraOrder render.Order = 0
 // openFrameTask, opening the frame for entries, and publishes FrameEvent
 // inside render.FrameEvent, with render's beat and timing signals and that
 // job as its Ready; after the nested publication's out dependency, it
-// schedules mergeLanesTask, closing the frame and merging its draw lists, and
-// after that drawTask with the frame's beat. It returns drawTask's job joined
+// schedules sortEntriesTask, closing the frame and sorting the entries of
+// its draw lists, and after that drawTask with the frame's beat. It returns drawTask's job joined
 // with in.
-func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event render.FrameEvent, openFrameTask, mergeLanesTask *kernel.Task[kernel.NoArg, kernel.NoResult], drawTask *kernel.Task[metronome.Beat, kernel.NoResult]) (render.FrameEvent, kernel.JobHandle) {
+func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event render.FrameEvent, openFrameTask, sortEntriesTask *kernel.Task[kernel.NoArg, kernel.NoResult], drawTask *kernel.Task[metronome.Beat, kernel.NoResult]) (render.FrameEvent, kernel.JobHandle) {
 	opened := ex.Schedule(openFrameTask, kernel.NoArg{}, event.Ready).Handle()
 	_, out := ex.Publish(in, FrameEvent{
 		Beat:        event.Beat,
@@ -28,8 +28,8 @@ func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event render.FrameEve
 		AcquireWait: event.AcquireWait,
 		GPULatency:  event.GPULatency,
 	})
-	merged := ex.Schedule(mergeLanesTask, kernel.NoArg{}, out, opened).Handle()
-	drawn := ex.Schedule(drawTask, event.Beat, merged).Handle()
+	sorted := ex.Schedule(sortEntriesTask, kernel.NoArg{}, out, opened).Handle()
+	drawn := ex.Schedule(drawTask, event.Beat, sorted).Handle()
 	return event, ex.Join(in, drawn)
 }
 
@@ -66,10 +66,10 @@ func openFrame(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*drawState]) 
 	return kernel.NoResult{}
 }
 
-// mergeLanes closes the frame to entries, and merges every task's draw list
-// into the frame's entries, in registration order.
-func mergeLanes(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*drawState]) kernel.NoResult {
-	state.Get().closeAndMerge()
+// sortEntries closes the frame to entries, merges every task's draw list
+// into the frame's entries, in registration order, and sorts them.
+func sortEntries(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*drawState]) kernel.NoResult {
+	state.Get().closeAndSort()
 	return kernel.NoResult{}
 }
 
@@ -81,9 +81,10 @@ func mergeLanes(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*drawState])
 func draw(k *kernel.Kernel, beat metronome.Beat, frame render.Frame, inventory render.Inventory, manager kernel.Read[*platform.WindowManager], windows kernel.Read[*windowList], state kernel.Read[*drawState], rendering kernel.Write[*renderer]) kernel.NoResult {
 	canvasState := state.Get()
 	window := windows.Get().mainWindow()
-	cameraDrawn := rendering.Get().drawDefaultCamera(frame, inventory, manager.Get(), window, canvasState.shapes)
+	drawing := rendering.Get()
+	cameraDrawn := drawing.drawDefaultCamera(frame, inventory, manager.Get(), window, canvasState.shapes, canvasState.sorter.entries)
 	if canvasState.frameInspected {
-		canvasState.inspector.record(canvasState.makeInspection(beat, window, cameraDrawn))
+		canvasState.inspector.record(canvasState.makeInspection(beat, window, cameraDrawn, drawing.batches))
 		frame.RequestInspection()
 	}
 	return kernel.NoResult{}

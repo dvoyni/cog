@@ -1,0 +1,97 @@
+package canvas
+
+import (
+	"cmp"
+	"math"
+	"math/rand/v2"
+	"slices"
+	"testing"
+)
+
+func TestEntriesSortByLayerThenOrderKeepingTheirMergedOrderBetweenEqualKeys(t *testing.T) {
+	shapes := []Shape{
+		{Layer: 1, Order: 0},
+		{Layer: -1, Order: 5},
+		{Layer: 0, Order: math.MaxInt32},
+		{Layer: 0, Order: math.MinInt32},
+		{Layer: 1, Order: 0},
+		{Layer: math.MinInt32, Order: 0},
+		{Layer: 0, Order: -1},
+		{Layer: math.MaxInt32, Order: math.MinInt32},
+		{Layer: 1, Order: 0},
+		{Layer: -1, Order: -5},
+	}
+	sorter := makeEntrySorter(nil)
+
+	got := findShapeIndices(sorter.sort(shapes))
+
+	want := []uint32{5, 9, 1, 3, 6, 2, 0, 4, 8, 7}
+	if !slices.Equal(got, want) {
+		t.Errorf("the shapes sorted as %v, want %v: by layer, then order, then as merged", got, want)
+	}
+}
+
+func TestEntriesSortAsAStableSortByLayerThenOrderDoes(t *testing.T) {
+	generator := rand.New(rand.NewPCG(3, 4))
+	sorter := makeEntrySorter(nil)
+	for _, layerCount := range []int32{1, 3, 300, math.MaxInt32} {
+		shapes := make([]Shape, 2000)
+		for index := range shapes {
+			shapes[index] = Shape{Layer: generator.Int32N(layerCount) - layerCount/2, Order: int32(generator.Uint32() >> generator.UintN(32))}
+		}
+		want := make([]uint32, len(shapes))
+		for index := range want {
+			want[index] = uint32(index)
+		}
+		slices.SortStableFunc(want, func(a, b uint32) int {
+			return cmp.Or(cmp.Compare(shapes[a].Layer, shapes[b].Layer), cmp.Compare(shapes[a].Order, shapes[b].Order))
+		})
+
+		got := findShapeIndices(sorter.sort(shapes))
+
+		if !slices.Equal(got, want) {
+			t.Errorf("2000 shapes of %d layers sorted otherwise than a stable sort by layer, then order", layerCount)
+		}
+	}
+}
+
+func TestEntriesOfEqualKeysInARegroupedLayerRegroupByBatchInTheOrderTheirBatchesFirstAppear(t *testing.T) {
+	firstMaterial := Material{index: 1, generation: 1}
+	secondMaterial := Material{index: 2, generation: 1}
+	thirdMaterial := Material{index: 3, generation: 1}
+	shapes := []Shape{
+		{Layer: 3, Material: firstMaterial},
+		{Layer: 3, Material: secondMaterial},
+		{Layer: 2, Material: firstMaterial},
+		{Layer: 3, Material: firstMaterial},
+		{Layer: 3, Order: 1, Material: secondMaterial},
+		{Layer: 3, Material: thirdMaterial},
+		{Layer: 2, Material: secondMaterial},
+		{Layer: 3, Material: secondMaterial},
+		{Layer: 3, Order: 1, Material: firstMaterial},
+		{Layer: 2, Material: firstMaterial},
+		{Layer: 3, Order: 1, Material: secondMaterial},
+	}
+	sorter := makeEntrySorter([]int32{5, 3, 5})
+
+	got := findShapeIndices(sorter.sort(shapes))
+
+	want := []uint32{
+		2, 6, 9, // layer 2 is not regrouped
+		0, 3, 1, 7, 5, // layer 3's order 0: its first material's, then the second's, then the third's
+		4, 10, 8, // its order 1, regrouped apart from order 0, the second material's first
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("the shapes sorted as %v, want %v", got, want)
+	}
+}
+
+// findShapeIndices answers the place of each of entries' shapes among the
+// shapes sorted.
+func findShapeIndices(entries []sortedEntry) []uint32 {
+	indices := make([]uint32, 0, len(entries))
+	for _, entry := range entries {
+		indices = append(indices, entry.shapeIndex)
+	}
+	return indices
+}
