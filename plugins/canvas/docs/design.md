@@ -6,7 +6,8 @@ draws sprites, shapes, text and meshes through 2D materials. It was mapped in
 each section links the ticket that holds its detail. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md).
 
-Status: designed, not yet built.
+Status: being built. The plugin, its frame event, draw lists and canvastest
+are built; a frame's entries are recorded and merged, not yet drawn.
 
 ## Problem Statement
 
@@ -254,7 +255,8 @@ author** testing canvas or a plugin on it.
 
 ```
 render.FrameEvent ─ canvas's RecordFrame:
-  publishes canvas.FrameEvent{Beat, Ready, AcquireWait, GPULatency}
+  after render's Ready, the job opening the frame for entries
+  publishes canvas.FrameEvent{Beat, Ready, AcquireWait, GPULatency}, that job its Ready
     users' recording tasks, after e.Ready, joined into its out dependency
   after that out dependency:
     the sort task: the lanes merged and the entries sorted once
@@ -265,7 +267,7 @@ render.FrameEvent ─ canvas's RecordFrame:
 ```
 
 - **canvas publishes `canvas.FrameEvent` inside its handler of `render.FrameEvent`,** as render publishes its own inside gfx's `DrawEvent`.
-  - The event carries render's `Beat`, `Ready`, `AcquireWait` and `GPULatency`. Its `Ready` is render's, since canvas prepares nothing before recording.
+  - The event carries render's `Beat`, `AcquireWait` and `GPULatency`. Its `Ready` is canvas's job opening the frame for entries, scheduled after render's `Ready`: an entry is accepted from that job until the sort task closes the frame, which is how one recorded outside the frame is told.
   - Recording tasks hang off it: they run after its `Ready` and are joined into its out dependency.
   - Users subscribing to `render.FrameEvent` with canvas ordered after them was weighed. Every user would have had to order their handler before canvas's, and a task that forgot would record into a frame already drawn.
 - **Drawing is a sort task, then one job for each distinct camera order.**

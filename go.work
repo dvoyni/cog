@@ -4,6 +4,7 @@ use (
 	./kernel
 	./libs/m
 	./libs/meshfile
+	./plugins/canvas
 	./plugins/ecs
 	./plugins/gfx
 	./plugins/gogpu
@@ -26,5 +27,6 @@ replace (
 	github.com/dvoyni/cog/plugins/gogpu v0.0.0 => ./plugins/gogpu
 	github.com/dvoyni/cog/plugins/metronome v0.0.0 => ./plugins/metronome
 	github.com/dvoyni/cog/plugins/platform v0.0.0 => ./plugins/platform
+	github.com/dvoyni/cog/plugins/render v0.0.0 => ./plugins/render
 	github.com/gogpu/gogpu v0.0.0 => ./submodules/gogpu
 )
