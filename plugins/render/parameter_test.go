@@ -26,6 +26,7 @@ func TestParametersLockWhatTheyDeclare(t *testing.T) {
 		{name: "Frame beside a writer of render's frame state", registerProbed: frame, registerOther: (*lockProbe).registerHolder[kernel.Write[*render.FrameState]], wantRanTogether: false},
 		{name: "Frame beside a writer of render's asset table", registerProbed: frame, registerOther: (*lockProbe).registerHolder[kernel.Write[*render.AssetTable]], wantRanTogether: false},
 		{name: "Frame beside a writer of gfx's Device", registerProbed: frame, registerOther: (*lockProbe).registerHolder[kernel.Write[gfx.Device]], wantRanTogether: false},
+		{name: "Frame beside a writer of platform's FS", registerProbed: frame, registerOther: (*lockProbe).registerHolder[kernel.Write[platform.FS]], wantRanTogether: false},
 		{name: "Frame beside another Frame task", registerProbed: frame, registerOther: frame, wantRanTogether: true},
 		{name: "Inventory beside a writer of render's asset table", registerProbed: inventory, registerOther: (*lockProbe).registerHolder[kernel.Write[*render.AssetTable]], wantRanTogether: false},
 		{name: "Inventory beside a writer of gfx's Device", registerProbed: inventory, registerOther: (*lockProbe).registerHolder[kernel.Write[gfx.Device]], wantRanTogether: false},

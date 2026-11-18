@@ -15,18 +15,20 @@ import (
 //
 //	func drawScene(k *kernel.Kernel, event render.FrameEvent, frame render.Frame) kernel.NoResult
 //
-// It locks render's frame state, its asset table and gfx's Device, all for
-// read, so tasks holding it run together, and its user names neither gfx nor
-// its locks. It is valid only while the task's job runs.
+// It locks render's frame state, its asset table, gfx's Device and
+// platform's FS, the last for the mip shader CommandList.GenerateMips reads,
+// all for read, so tasks holding it run together, and its user names
+// neither gfx nor its locks. It is valid only while the task's job runs.
 type Frame struct {
 	state  kernel.Read[*frameState]
 	table  kernel.Read[*assetTable]
 	device kernel.Read[gfx.Device]
+	files  kernel.Read[platform.FS]
 }
 
 // Declare declares Frame's locks and answers it bound to what they guard.
 func (Frame) Declare(access *kernel.Access) Frame {
-	return Frame{state: access.Read[*frameState](), table: access.Read[*assetTable](), device: access.Read[gfx.Device]()}
+	return Frame{state: access.Read[*frameState](), table: access.Read[*assetTable](), device: access.Read[gfx.Device](), files: access.Read[platform.FS]()}
 }
 
 // BeginCommandList begins a command list of the frame being recorded, at

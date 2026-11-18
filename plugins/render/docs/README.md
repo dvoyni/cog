@@ -396,7 +396,7 @@ as `kernel.Read` is. Each declares gfx's and platform's locks for its user:
 | Parameter | Locks | Carries |
 |---|---|---|
 | `Inventory` | render's asset table, `gfx.Device` and `platform.FS`, all read | every asset call, and `ReloadChanged` |
-| `Frame` | render's frame state, its asset table and `gfx.Device`, all read | command lists, temporary textures, capture, readback, inspections and pass timings |
+| `Frame` | render's frame state, its asset table, `gfx.Device` and `platform.FS`, all read | command lists, temporary textures, capture, readback, inspections and pass timings |
 | `Surface` | `gfx.Device`, write | `Request(SurfaceRequest)` |
 
 Tasks holding `Inventory` and `Frame` run together; a task that records and
@@ -1229,8 +1229,31 @@ them, and drawn again after a reload or a device recovery.
 The mip shader is one of render's built-in assets, `cog.render/mipshader.wgsl`,
 mounted under `cog.render` at the lowest priority: a mount holding a file of
 that name overrides it. A made texture's levels below the first stay zero
-until written; a plugin draws them itself, as a bloom chain does, each level
-a pass sampling a view of the level above:
+until written. A list's `GenerateMips(texture, firstLayer, layerCount)`
+draws them with the same shader at that point of the list, for every level
+of those layers, a zero `layerCount` meaning the rest of them, so an atlas
+whose page was just packed is sampled with fresh mips by the list's later
+passes:
+
+```go
+func packPage(list *render.CommandList, atlas render.Texture, staging render.BufferRange, page uint32) {
+	list.CopyBufferToTexture(staging, atlas, render.TextureRegion{Layer: page})
+	list.GenerateMips(atlas, page, 1)
+}
+```
+
+It serves a 2D, 2D-array or cube texture, a cube's faces as layers, an sRGB
+one filtered in linear, and leaves the other layers untouched. Each level
+of each layer is a pass that clears it, so what was drawn into the levels
+below the first is lost. A texture of one level records nothing; one render
+does not hold, layers past its last, or a format a pass cannot draw into or
+a sampler cannot filter (depth, integer, snorm or 32-bit float) is refused
+with `ReportKindMipsRefused`. It is not a volume texture's mips nor a depth
+pyramid, which reduces by a min or a max: those are a plugin's own compute
+passes.
+
+A plugin draws a chain with a filter of its own itself, as a bloom chain
+does, each level a pass sampling a view of the level above:
 
 ```go
 func recordDownsample(list *render.CommandList, bloom render.Texture, downsample render.Material, levelCount uint32) {
@@ -1565,6 +1588,7 @@ panics in `Init`.
 | `ReportKindClearAfterDraw` | a pass clearing what an earlier pass of the frame drew |
 | `ReportKindPassTimingsUnavailable` | pass timings turned on without timestamp queries |
 | `ReportKindPassUntimed` | the passes of a timed frame past its 2048th |
+| `ReportKindMipsRefused` | a `GenerateMips` of a texture, layers or format it cannot draw |
 
 Calls answering an error answer render's own: `ErrCaptureBusy`,
 `ErrCaptureUnsupported` and `ErrDeviceLost`, so a user names no gfx error.

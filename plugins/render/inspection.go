@@ -57,6 +57,12 @@ type InspectedCommandList struct {
 	Readbacks     []InspectedReadback
 }
 
+// nextPosition answers the position in l of the pass, compute pass, copy or
+// readback recorded next: how many it holds.
+func (l *InspectedCommandList) nextPosition() int {
+	return len(l.Passes) + len(l.ComputePasses) + len(l.Copies) + len(l.Readbacks)
+}
+
 // InspectedPass is one pass of an inspected command list: its position,
 // its index among the list's passes, compute passes, copies and readbacks,
 // in the order recorded; its label; its colour targets and depth-stencil

@@ -90,7 +90,7 @@ func (l *CommandList) BeginPass(descriptor PassDescriptor) Pass {
 	pass.noteIndex = l.listState.notePass(label, descriptor)
 	if inspectedList := l.listState.inspectedList; inspectedList != nil {
 		pass.inspectedPass = len(inspectedList.Passes)
-		inspectedList.Passes = append(inspectedList.Passes, makeInspectedPass(label, descriptor, passDescriptor, l.listState.nextInspectedPosition()))
+		inspectedList.Passes = append(inspectedList.Passes, makeInspectedPass(label, descriptor, passDescriptor, l.listState.inspectedList.nextPosition()))
 	}
 	for _, target := range descriptor.ColorTargets {
 		pass.addTarget(drawnTarget{texture: target.Texture, mipLevel: target.MipLevel, layer: target.Layer})
@@ -178,7 +178,7 @@ func (l *CommandList) BeginComputePass(label string) ComputePass {
 	})}
 	if inspectedList := l.listState.inspectedList; inspectedList != nil {
 		pass.inspectedPass = len(inspectedList.ComputePasses)
-		inspectedList.ComputePasses = append(inspectedList.ComputePasses, InspectedComputePass{Position: l.listState.nextInspectedPosition(), Label: label})
+		inspectedList.ComputePasses = append(inspectedList.ComputePasses, InspectedComputePass{Position: l.listState.inspectedList.nextPosition(), Label: label})
 	}
 	return pass
 }
@@ -415,6 +415,60 @@ func (l *CommandList) ClearBuffer(bufferRange BufferRange) {
 	l.addInspectedCopy(InspectedCopy{DestinationBuffer: BufferRange{Buffer: bufferRange.Buffer, Offset: bufferRange.Offset, Size: size}})
 }
 
+// GenerateMips draws every mip level below the first of layerCount layers of
+// texture from firstLayer, a zero layerCount meaning the rest of its layers,
+// at this point of the list, as CopyBuffer does: each level of each layer
+// from the level above it, of the same layer, by render's mip shader
+// through a linear filter, as a texture loaded with Mipmaps gets its mips,
+// so the list's later passes sample them. It serves a made or temporary
+// texture of any number of layers; a cube texture's faces are its layers. An
+// sRGB texture is filtered in linear, its sampling decoding it and its
+// drawing encoding it. Each level of each layer is a pass of its own that
+// clears it: what was drawn into the levels below the first is lost, and
+// the other layers are untouched. A texture of one mip level has none to
+// draw, and records nothing. A generation that cannot draw is refused and
+// reported, recording nothing: of a texture render does not hold, of layers
+// past its last, or of a format a pass cannot draw into or a sampler cannot
+// filter, such as a depth, integer, snorm or 32-bit float one. The mip
+// shader and what it draws with are made at render's first generation, from
+// platform's FS, as a load's mips are; a failure to make them is logged.
+//
+// It is not a volume texture's mips, which render has no texture of, nor a
+// depth pyramid for occlusion culling, which reduces by a min or a max
+// rather than an average: those are their plugin's own compute passes.
+func (l *CommandList) GenerateMips(texture Texture, firstLayer, layerCount uint32) {
+	if l.encoder == nil {
+		return
+	}
+	table := l.frame.table.Get()
+	_, descriptor, _, _, err := l.findCopiedTexture(texture, TextureRegion{})
+	layers := descriptor.Size.DepthOrArrayLayers
+	if layerCount == 0 && firstLayer < layers {
+		layerCount = layers - firstLayer
+	}
+	// format is mipped when a pass draws into it and a sampler reads it as
+	// floats it filters, as the mip shader's binding asks.
+	format := TextureFormat(descriptor.Format)
+	switch {
+	case err != nil:
+	case firstLayer >= layers || layerCount > layers-firstLayer:
+		err = fmt.Errorf("of texture %v names layers past its last, of %d", texture, layers)
+	case format.info().flags&textureFormatFlagColor == 0 || format.findSampleType(gfx.TextureAspectAll) != gfx.TextureSampleTypeFloat:
+		err = fmt.Errorf("of texture %v is of format %d, which a pass cannot draw into or a sampler cannot filter", texture, descriptor.Format)
+	}
+	if err != nil {
+		table.report(ReportKindMipsRefused, fmt.Errorf("render: generating the mips of %d layers from layer %d %w", layerCount, firstLayer, err))
+		return
+	}
+	if descriptor.MipLevelCount == 1 {
+		return
+	}
+	state := l.frame.state.Get()
+	if err := state.mips.generateInList(table, l.frame.device.Get(), l.frame.files.Get(), l.encoder, l.listState.inspectedList, &state.passTimer, l.listState.order, texture, descriptor, firstLayer, layerCount); err != nil {
+		state.logUnlessLost(fmt.Errorf("render: generating the mips of texture %q: %w", descriptor.Label, err))
+	}
+}
+
 // End ends the list: nothing more is recorded into it, and the chunks of
 // its temporary buffers, its pass and draw uniform blocks and its material
 // versions' go to gfx, one write each, landing before every command list of
@@ -431,7 +485,7 @@ func (l *CommandList) End() {
 // the list's inspection, at its position, while the list is inspected.
 func (l *CommandList) addInspectedCopy(copied InspectedCopy) {
 	if inspectedList := l.listState.inspectedList; inspectedList != nil {
-		copied.Position = l.listState.nextInspectedPosition()
+		copied.Position = l.listState.inspectedList.nextPosition()
 		inspectedList.Copies = append(inspectedList.Copies, copied)
 	}
 }
@@ -440,7 +494,7 @@ func (l *CommandList) addInspectedCopy(copied InspectedCopy) {
 // inspection, at its position, while the list is inspected.
 func (l *CommandList) addInspectedReadback(readback InspectedReadback) {
 	if inspectedList := l.listState.inspectedList; inspectedList != nil {
-		readback.Position = l.listState.nextInspectedPosition()
+		readback.Position = l.listState.inspectedList.nextPosition()
 		inspectedList.Readbacks = append(inspectedList.Readbacks, readback)
 	}
 }

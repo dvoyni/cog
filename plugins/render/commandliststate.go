@@ -121,13 +121,6 @@ func (s *commandListState) notePass(label string, descriptor PassDescriptor) int
 	return len(s.passes) - 1
 }
 
-// nextInspectedPosition answers the position in s's inspected list of the
-// pass, compute pass, copy or readback recorded next: how many it holds.
-func (s *commandListState) nextInspectedPosition() int {
-	list := s.inspectedList
-	return len(list.Passes) + len(list.ComputePasses) + len(list.Copies) + len(list.Readbacks)
-}
-
 // clearParameterSettings forgets every pass, draw and compute parameter
 // set, for the next pass, keeping their arrays.
 func (s *commandListState) clearParameterSettings() {

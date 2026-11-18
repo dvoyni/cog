@@ -183,10 +183,10 @@ and a **test author** testing a plugin that draws.
   | Parameter | Locks | Carries |
   |---|---|---|
   | `Inventory` | the asset table, `gfx.Device` and `platform.FS`, all read | every asset call, and `ReloadChanged` |
-  | `Frame` | the frame state, the asset table and `gfx.Device`, all read | `BeginCommandList`, `AcquireTemporaryTexture`, capture, readback, inspection and pass timings |
+  | `Frame` | the frame state, the asset table, `gfx.Device` and `platform.FS`, all read | `BeginCommandList`, `AcquireTemporaryTexture`, capture, readback, inspection and pass timings |
   | `Surface` | `gfx.Device`, write | `Request(SurfaceRequest{Format, PresentMode})` |
 
-  A task that records and changes materials declares both `Inventory` and `Frame`; the kernel merges the duplicate read locks.
+  A task that records and changes materials declares both `Inventory` and `Frame`; the kernel merges the duplicate read locks. `Frame` reads `platform.FS` for the mip shader a list's `GenerateMips` makes at render's first generation, so a recording task waits for a writer of platform's files, as an `Inventory` task does.
 - **Locks:** every job takes render's resources for read, render's own jobs included. render's state is synchronized internally, as gfx's `Device` is: a mutex for each table and each material, and frame slots as gfx has. A command list needs no lock, because one task fills it.
 - **No write lock of render's own.** `Surface.Request` is the only exclusive call, and it takes gfx's write lock, so it waits for every job holding `Inventory` or `Frame`, which is fine for a rare toggle.
 - **The surface request at start** stays in gfx's `Config.Surface`, set by the application where it lists gfx. render mirrors the format and present-mode enums for the run-time request.
@@ -424,6 +424,12 @@ func drawScene(k *kernel.Kernel, e render.FrameEvent, frame render.Frame, scene 
   - A buffer range's zero size, and a texture region's zero width or height, mean the rest, as they do for writes. A copy fills its destination from its start: the destination range or region holds at least what is copied.
   - Between a buffer and a texture, the buffer holds the region's rows from its offset, each starting a multiple of 256 bytes after the one before, which WebGPU asks of a copy; render lays them out so, and the caller sizes the range for it.
   - A copy that does not fit is refused and reported with `ReportKindCopyRefused`, recording nothing, so the list's encoder survives it: an asset render does not hold, a buffer made without `BufferUsageFlagCopySrc` copied from, a range or region past its buffer's end or its level's edges, an offset or size misaligned, one buffer copied into itself, one mip level and layer of a texture copied into itself, textures of different formats or sample counts, part of a level of a depth, stencil or multisampled texture, or a buffer copy of a texture of several samples or of a format whose texels have no size gfx's copies know.
+- **Mips for a made texture** ([render: CommandList.GenerateMips for a made texture's layers](https://github.com/dvoyni/cog/issues/882)): `list.GenerateMips(texture, firstLayer, layerCount)` records render's mip shader at that point of the list, for every level below the first of those layers, a zero `layerCount` meaning the rest of them, as render's own list draws a loaded texture's mips.
+  - It serves 2D, 2D-array and cube textures of any texture render holds, a cube's faces as layers, so an atlas page, a probe or a baked map takes it; the other layers are untouched. An sRGB texture filters in linear, as a loaded one's mips do.
+  - Each level of each layer is a pass of its own that clears it, in the list's inspection and pass timings as its other passes are, so what was drawn into the levels below the first is lost.
+  - A texture of one level records nothing. One render does not hold, layers past its last, and a format a pass cannot draw into or a sampler cannot filter (depth, integer, snorm or 32-bit float) are refused and reported with `ReportKindMipsRefused`, recording nothing.
+  - It shares the mip shader, its layouts, sampler and pipelines with render's own list, made at the first generation of either, which is why `Frame` reads `platform.FS`.
+  - It is not a volume texture's mips, which render has no texture of, nor a depth pyramid for occlusion culling, which reduces by a min or a max rather than an average: those are their plugin's own compute passes.
 - **Temporary textures:**
   - `frame.AcquireTemporaryTexture(descriptor)` pools them by descriptor, its label included, with every usage the format allows.
   - Each is held until the frame ends, with no reuse within the frame, and its contents are undefined when taken.

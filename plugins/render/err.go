@@ -103,6 +103,10 @@ const (
 	// ReportKindPassUntimed is the passes of a timed frame that began after
 	// its 2048th, which get no timings, reported once a frame.
 	ReportKindPassUntimed
+	// ReportKindMipsRefused is a CommandList.GenerateMips that cannot draw
+	// what it names: a texture render does not hold, layers past its last,
+	// or a format a pass cannot draw into or a sampler cannot filter.
+	ReportKindMipsRefused
 )
 
 // Report is a mistake render finds at run time, such as a refused shader, a
