@@ -362,7 +362,7 @@ func TestATextureTargetsViewportIsPlacedFromItsDescriptorAndItsOutputEncodedAsIt
 			if pass.ColorTargets[0].Clear {
 				t.Errorf("the pass clears its whole target by its load, want the viewport's clear drawn over it alone")
 			}
-			block := findPassParameter(t, pass.Draws[0], "canvas_camera")
+			block := findParameter(t, pass.Draws[0].PassParameters, "canvas_camera").Uniform
 			// CanvasCamera's pixel_size is at byte 48, viewport_origin at
 			// 56, viewport_size at 64 and encode at 72.
 			readFloat := func(offset int) float32 { return math.Float32frombits(binary.LittleEndian.Uint32(block[offset:])) }
@@ -448,16 +448,133 @@ func TestACameraWhoseTargetIsRefusedIsSkippedAndReportedOnce(t *testing.T) {
 	}
 }
 
+func TestAMultisampledCameraDrawsIntoAFourSampleTextureOfItsViewportResolvedIntoOneOfOneAndDrawnOnceOverIt(t *testing.T) {
+	// The window's halves, each a 4-sample camera's over a fill across the
+	// window: the left clears to white, and the right does not.
+	h := canvastest.NewHarness(t)
+	describer := &textureDescriber{}
+	h.Spawn(nil, nil, describer)
+	window := h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	record := func(list canvas.DrawList) {
+		list.SetCamera(canvas.Camera{Viewport: m.Rect{Width: 0.5, Height: 1}, Clear: true, ClearColor: m.White, Samples: 4})
+		list.SetCamera(canvas.Camera{Viewport: m.Rect{X: 0.5, Width: 0.5, Height: 1}, Samples: 4})
+		list.DrawShape(canvas.Shape{Rect: m.Rect{X: -100, Y: -100, Width: 200, Height: 200}, Tint: green})
+	}
+	h.Record(record)
+
+	h.Step()
+
+	lists := findCanvasLists(h.Frames()[0].Render)
+	if len(lists) != 1 || len(lists[0].Passes) != 4 {
+		t.Fatalf("canvas began %+v, want one list of four passes, each camera's entries and then what they resolved into drawn over its viewport", lists)
+	}
+	// The inspection spells each factor at its default, One as a source,
+	// zero.
+	over := render.BlendComponent{DestinationFactor: render.BlendFactorOneMinusSourceAlpha}
+	var textures []render.Texture
+	for index, half := range []struct {
+		name       string
+		clearColor render.Color
+		blend      render.BlendState
+	}{
+		{"the left camera, which clears", render.Color{R: 1, G: 1, B: 1, A: 1}, render.BlendState{}},
+		{"the right camera, which does not", render.Color{}, render.BlendState{Color: over, Alpha: over}},
+	} {
+		entriesPass := lists[0].Passes[2*index]
+		drawnPass := lists[0].Passes[2*index+1]
+		if len(entriesPass.ColorTargets) != 1 || len(entriesPass.Draws) != 1 || len(drawnPass.Draws) != 1 {
+			t.Fatalf("%s drew its entries in %+v and then %+v, want one target and the fill's batch, then one draw", half.name, entriesPass, drawnPass)
+		}
+		multisampled := entriesPass.ColorTargets[0]
+		resolved := multisampled.Resolve.Texture
+		if multisampled.Texture == (render.Texture{}) || multisampled.Window != (platform.Window{}) || !multisampled.Clear || multisampled.ClearColor != half.clearColor || !multisampled.Discard || resolved == (render.Texture{}) {
+			t.Errorf("%s drew its entries into %+v, want a texture cleared to %v by its load, discarded, and resolved into another", half.name, multisampled, half.clearColor)
+		}
+		block := findParameter(t, entriesPass.Draws[0].PassParameters, "canvas_camera").Uniform
+		readFloat := func(offset int) float32 { return math.Float32frombits(binary.LittleEndian.Uint32(block[offset:])) }
+		if got, want := []float32{readFloat(56), readFloat(60), readFloat(64), readFloat(68)}, []float32{0, 0, 32, 48}; !slices.Equal(got, want) {
+			t.Errorf("%s's viewport origin and size, as its entries drew, are %v, want %v, the whole of a texture of the viewport's size", half.name, got, want)
+		}
+		if want := []render.ColorTarget{{Window: window}}; !slices.Equal(drawnPass.ColorTargets, want) {
+			t.Errorf("%s drew what it resolved into %+v, want %+v, the window as it holds it", half.name, drawnPass.ColorTargets, want)
+		}
+		draw := drawnPass.Draws[0]
+		if draw.Material.VertexEntryPoint != "canvas_viewport_vertex" || draw.VertexCount != 6 || draw.InstanceCount != 1 {
+			t.Errorf("%s drew what it resolved through %q, %d vertices of %d instances, want canvas_viewport_vertex, 6 of 1", half.name, draw.Material.VertexEntryPoint, draw.VertexCount, draw.InstanceCount)
+		}
+		if blend := draw.Material.State.ColorTargets[0].Blend; blend != half.blend {
+			t.Errorf("%s drew what it resolved blended by %+v, want %+v", half.name, blend, half.blend)
+		}
+		if atlas := findParameter(t, draw.DrawParameters, "canvas_atlas"); atlas.TextureView.Texture != resolved {
+			t.Errorf("%s drew %v over its viewport, want %v, what it resolved into", half.name, atlas.TextureView.Texture, resolved)
+		}
+		if encode := binary.LittleEndian.Uint32(findParameter(t, draw.PassParameters, "canvas_camera").Uniform[72:]); encode != 0 {
+			t.Errorf("%s encoded what it resolved, already encoded, again, by %d", half.name, encode)
+		}
+		textures = append(textures, multisampled.Texture, resolved)
+	}
+
+	describer.describe(textures...)
+	h.Record(record)
+	h.Step()
+
+	multisampled := render.TextureDescriptor{Label: "canvas multisampled camera", Width: 32, Height: 48, LayerCount: 1, MipLevelCount: 1, SampleCount: 4, Format: render.TextureFormatBGRA8Unorm}
+	resolved := multisampled
+	resolved.Label = "canvas resolved camera"
+	resolved.SampleCount = 1
+	if got, want := describer.describedTextures(), []render.TextureDescriptor{multisampled, resolved, multisampled, resolved}; !slices.Equal(got, want) {
+		t.Errorf("the cameras' textures are %+v, want %+v, each of its viewport's size in the window's format", got, want)
+	}
+}
+
+func TestAMultisampledCameraClearingTheWholeWindowDrawsWhatItResolvedOverTheWindowClearedByTheLoad(t *testing.T) {
+	h := canvastest.NewHarness(t)
+	h.Spawn(nil, nil)
+	window := h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	h.Record(func(list canvas.DrawList) {
+		list.SetCamera(canvas.Camera{Clear: true, Samples: 4})
+	})
+
+	h.Step()
+
+	lists := findCanvasLists(h.Frames()[0].Render)
+	if len(lists) != 1 || len(lists[0].Passes) != 2 {
+		t.Fatalf("canvas began %+v, want one list of the camera's entries' pass and its composite", lists)
+	}
+	// What the camera resolved replaces the whole window, so the window
+	// need not be read first.
+	if got, want := lists[0].Passes[1].ColorTargets, []render.ColorTarget{{Window: window, Clear: true, ClearColor: render.Color{}}}; !slices.Equal(got, want) {
+		t.Errorf("the composite drew into %+v, want %+v", got, want)
+	}
+}
+
+func TestACameraOfASampleCountOtherThanOneOrFourPanicsAsItIsSet(t *testing.T) {
+	h := canvastest.NewHarness(t)
+	h.Spawn(nil, nil)
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	var recovered any
+	h.Record(func(list canvas.DrawList) {
+		defer func() { recovered = recover() }()
+		list.SetCamera(canvas.Camera{Samples: 2})
+	})
+
+	h.Step()
+
+	if recovered == nil {
+		t.Error("setting a camera of 2 samples did not panic")
+	}
+}
+
 // minimapDescriptor is a small texture a camera draws into.
 var minimapDescriptor = render.TextureDescriptor{Label: "minimap", Width: 16, Height: 16, Format: render.TextureFormatRGBA8Unorm}
 
-// findPassParameter answers the bytes draw bound to its pass parameter name,
-// failing t when it bound none.
-func findPassParameter(t *testing.T, draw render.InspectedDraw, name string) []byte {
+// findParameter answers the parameter of parameters, a draw's pass or draw
+// parameters, named name, failing t when there is none.
+func findParameter(t *testing.T, parameters []render.InspectedParameter, name string) render.InspectedParameter {
 	t.Helper()
-	index := slices.IndexFunc(draw.PassParameters, func(parameter render.InspectedParameter) bool { return parameter.Name == name })
+	index := slices.IndexFunc(parameters, func(parameter render.InspectedParameter) bool { return parameter.Name == name })
 	if index < 0 {
-		t.Fatalf("the draw bound no pass parameter %q: %+v", name, draw.PassParameters)
+		t.Fatalf("the draw bound no parameter %q: %+v", name, parameters)
 	}
-	return draw.PassParameters[index].Uniform
+	return parameters[index]
 }

@@ -43,7 +43,10 @@
 // inscribing with bars, overlapping or stretching it. A PixelPerfect camera,
 // for pixel art, one art pixel a world unit, floors its scale to a whole
 // number of pixels a unit, moves each entry whole onto the world-unit grid
-// and places its view on whole pixels. A game keeps the cameras it set to
+// and places its view on whole pixels. A camera of 4 Samples smooths its
+// entries' hard edges: it draws them into a multisampled texture of its
+// viewport, resolves that, and draws it over the viewport, which leaves the
+// rest of its target as it was. A game keeps the cameras it set to
 // convert a click through, reading the Targets resource, each target as it
 // was last drawn:
 //

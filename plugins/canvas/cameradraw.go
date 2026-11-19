@@ -9,25 +9,35 @@ import (
 	"github.com/dvoyni/cog/plugins/render"
 )
 
+// multisampledCameraSampleCount is the samples of a multisampled camera,
+// the one count above 1 a Camera's Samples takes.
+const multisampledCameraSampleCount = 4
+
 // cameraDraw is one camera of a frame as it draws: the camera as set; its
 // target as it draws into it, its texture or else its window, the main
-// window when it named neither; its pass's colour target, that target,
-// cleared by the pass's load when it clears a viewport covering the target;
-// its view into the target and its pass parameters; the entries it draws,
-// those of the frame's sorted entries its layers hold that it does not
-// cull, in sort order, part of the renderer's; its batches, part of the
-// renderer's; and,
-// for a clear drawn over its viewport, its instance in its command list's
-// instance data.
+// window when it named neither; the colour target of its entries' pass,
+// that target, cleared by the pass's load when it clears a viewport
+// covering the target, or a multisampled camera's texture of
+// multisampledDescriptor, cleared whole by the load, discarded and
+// resolved, the two textures named once acquired; colorTargetOrigin, where
+// that colour target's top left lies in the target, the viewport's for a
+// multisampled camera; its view into the target and its entries' pass parameters; the
+// entries it draws, those of the frame's sorted entries its layers hold
+// that it does not cull, in sort order, part of the renderer's; its
+// batches, part of the renderer's; and, for a quad drawn over its viewport,
+// a clear or what a multisampled camera resolved, its instance in its
+// command list's instance data.
 type cameraDraw struct {
-	camera        Camera
-	target        drawnTarget
-	colorTarget   render.ColorTarget
-	view          cameraView
-	block         cameraBlock
-	entries       []sortedEntry
-	batches       []batch
-	clearInstance uint32
+	camera                 Camera
+	target                 drawnTarget
+	colorTarget            render.ColorTarget
+	multisampledDescriptor render.TextureDescriptor
+	colorTargetOrigin      m.Vec2i
+	view                   cameraView
+	block                  cameraBlock
+	entries                []sortedEntry
+	batches                []batch
+	viewportInstance       uint32
 }
 
 // makeCameraDraw answers how camera draws, its entries and batches still
@@ -39,10 +49,13 @@ type cameraDraw struct {
 // window not open or not sized, or with no view, as of an empty viewport,
 // draws nothing; one naming both a window and a texture, or a texture
 // render does not hold, is reported once to logger too, as is a
-// pixel-perfect camera's FitStretch, drawn as FitInscribe.
+// pixel-perfect camera's FitStretch, drawn as FitInscribe. A multisampled
+// camera's entries draw into a texture of its viewport's size in its
+// target's format, a window's taken as BGRA8Unorm, the viewport at the
+// texture's origin.
 func makeCameraDraw(inventory render.Inventory, manager *platform.WindowManager, mainWindow platform.Window, logger *kernel.Logger, camera *Camera) (cameraDraw, bool) {
 	drawnCamera := cameraDraw{camera: *camera}
-	encode := true
+	format := render.TextureFormatBGRA8Unorm
 	switch {
 	case camera.Texture != (render.Texture{}) && camera.Window != (platform.Window{}):
 		refusal := Report{Kind: ReportKindCameraTargetRefused, Err: fmt.Errorf("canvas: a camera names both window %v and texture %v as its target", camera.Window, camera.Texture)}
@@ -56,7 +69,7 @@ func makeCameraDraw(inventory render.Inventory, manager *platform.WindowManager,
 			return cameraDraw{}, false
 		}
 		drawnCamera.target = drawnTarget{texture: camera.Texture, width: int(descriptor.Width), height: int(descriptor.Height), pixelsPerPoint: 1}
-		encode = descriptor.Format != render.TextureFormatRGBA8UnormSrgb && descriptor.Format != render.TextureFormatBGRA8UnormSrgb
+		format = descriptor.Format
 	default:
 		window := camera.Window
 		if window == (platform.Window{}) {
@@ -80,11 +93,26 @@ func makeCameraDraw(inventory render.Inventory, manager *platform.WindowManager,
 		logger.LogErrOnce(pixelPerfectStretchReport.Error(), pixelPerfectStretchReport)
 	}
 	drawnCamera.view = view
-	drawnCamera.block = makeCameraBlock(&view, encode)
-	clearsByLoad := camera.Clear && view.viewport == (m.Recti{Width: drawnCamera.target.width, Height: drawnCamera.target.height})
-	drawnCamera.colorTarget = render.ColorTarget{Window: drawnCamera.target.window, Texture: drawnCamera.target.texture, Clear: clearsByLoad}
-	if clearsByLoad {
+	encode := format != render.TextureFormatRGBA8UnormSrgb && format != render.TextureFormatBGRA8UnormSrgb
+	multisampled := camera.Samples == multisampledCameraSampleCount
+	if multisampled {
+		drawnCamera.colorTargetOrigin = view.viewport.Min()
+	}
+	drawnCamera.block = makeCameraBlock(&view, encode, drawnCamera.colorTargetOrigin)
+	if !multisampled {
+		drawnCamera.colorTarget = drawnCamera.makeTargetColorTarget()
+		return drawnCamera, true
+	}
+	drawnCamera.colorTarget = render.ColorTarget{Clear: true, Discard: true}
+	if camera.Clear {
 		drawnCamera.colorTarget.ClearColor = makeLoadedClearColor(camera.ClearColor, encode)
+	}
+	drawnCamera.multisampledDescriptor = render.TextureDescriptor{
+		Label:       "canvas multisampled camera",
+		Width:       uint32(view.viewport.Width),
+		Height:      uint32(view.viewport.Height),
+		SampleCount: multisampledCameraSampleCount,
+		Format:      format,
 	}
 	return drawnCamera, true
 }
@@ -100,4 +128,18 @@ func makeLoadedClearColor(color m.Color, encode bool) render.Color {
 		color = m.Color{R: red, G: green, B: blue, A: alpha}
 	}
 	return render.Color{R: float64(color.R * color.A), G: float64(color.G * color.A), B: float64(color.B * color.A), A: float64(color.A)}
+}
+
+// makeTargetColorTarget answers the colour target of the camera's target as
+// a pass draws into it: cleared by the pass's load when the camera clears a
+// viewport covering the target, whose colour does not matter to a
+// multisampled camera's composite, which then replaces all of it, and kept
+// otherwise.
+func (d *cameraDraw) makeTargetColorTarget() render.ColorTarget {
+	colorTarget := render.ColorTarget{Window: d.target.window, Texture: d.target.texture}
+	if d.camera.Clear && d.view.viewport == (m.Recti{Width: d.target.width, Height: d.target.height}) {
+		colorTarget.Clear = true
+		colorTarget.ClearColor = makeLoadedClearColor(d.camera.ClearColor, d.block.encode != 0)
+	}
+	return colorTarget
 }

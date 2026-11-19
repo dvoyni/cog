@@ -1,6 +1,7 @@
 package canvas
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/dvoyni/cog/kernel"
@@ -47,8 +48,11 @@ func (l DrawList) DrawShape(shape Shape) {
 // sets no camera is seen through the default one, which draws only a frame
 // with entries: every layer, into the whole main window, cleared to opaque
 // black, at order 0. Outside the frame, it is refused and reported once for
-// the task.
+// the task. A camera of a sample count other than 0, 1 and 4 panics.
 func (l DrawList) SetCamera(camera Camera) {
+	if camera.Samples > 1 && camera.Samples != multisampledCameraSampleCount {
+		panic(fmt.Sprintf("canvas: a camera's Samples is 0, 1 or %d, not %d", multisampledCameraSampleCount, camera.Samples))
+	}
 	l.list.record(l.state.Get(), &l.list.cameras, camera)
 }
 

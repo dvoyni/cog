@@ -18,12 +18,15 @@ type cameraBlock struct {
 }
 
 // makeCameraBlock answers the pass parameters of a camera drawing through
-// view, its viewport not empty, its output encoded as sRGB when encode is
-// set, for a target whose format encodes nothing: world_to_clip maps the
-// world through the view onto the viewport's clip space, and pixel_size is
-// a pixel in world units along the view's axis of the smaller scale, so a
-// hairline never thins below a pixel; snap is the view's grid.
-func makeCameraBlock(view *cameraView, encode bool) cameraBlock {
+// view, its viewport not empty, into a colour target whose top left lies
+// at colorTargetOrigin in the view's target, its output encoded as sRGB
+// when encode is set, for a target whose format encodes nothing:
+// world_to_clip maps the world through the view onto the viewport's clip space, wherever the
+// viewport lies; viewport_origin is the viewport's in the colour target;
+// pixel_size is a pixel in world units along the view's axis of the
+// smaller scale, so a hairline never thins below a pixel; snap is the
+// view's grid.
+func makeCameraBlock(view *cameraView, encode bool, colorTargetOrigin m.Vec2i) cameraBlock {
 	viewport := view.viewport
 	if viewport.Width <= 0 || viewport.Height <= 0 {
 		panic(fmt.Sprintf("canvas: a camera's viewport is %+v pixels, which may not be empty", viewport))
@@ -39,7 +42,7 @@ func makeCameraBlock(view *cameraView, encode bool) cameraBlock {
 		clipToWorld:    clipToWorld,
 		pixelSize:      float32(1 / min(math.Abs(float64(view.scale.X)), math.Abs(float64(view.scale.Y)))),
 		snap:           view.snap,
-		viewportOrigin: [2]float32{float32(viewport.X), float32(viewport.Y)},
+		viewportOrigin: [2]float32{float32(viewport.X - colorTargetOrigin.X), float32(viewport.Y - colorTargetOrigin.Y)},
 		viewportSize:   [2]float32{width, height},
 	}
 	if encode {

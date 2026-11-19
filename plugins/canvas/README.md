@@ -37,7 +37,10 @@ terms, beside render's inspection of it.
   `FitExpand`, `FitInscribe` (with bars), `FitOverlap` or `FitStretch`.
   A `PixelPerfect` camera, for pixel art, draws a whole number of pixels a
   unit, its entries snapped to the world-unit grid and its view placed on
-  whole pixels. `ScreenToWorld`, `WorldToScreen` and `VisibleRect` convert through the
+  whole pixels. A camera of 4 `Samples` smooths its entries' edges,
+  drawing them into a multisampled texture of its viewport, resolved and
+  drawn over the viewport, so the rest of its target survives.
+  `ScreenToWorld`, `WorldToScreen` and `VisibleRect` convert through the
   camera as its target was last drawn, read from **`Targets`**.
   canvas begins one command list for each distinct `Order`, its cameras
   into textures first. A frame that sets no camera is seen through the
@@ -85,7 +88,7 @@ terms, beside render's inspection of it.
   drawing; a
   private draw state, holding each task's draw list, the frame's entries
   and cameras sorted and the inspection asked for; a private renderer,
-  holding the default and clear materials, the white texel, the cameras
+  holding the default, clear and composite materials, the white texel, the cameras
   drawn, the instance data and the batches; and a private list of the open
   windows.
 - **Resources it reads from other plugins:** render's, for read through
