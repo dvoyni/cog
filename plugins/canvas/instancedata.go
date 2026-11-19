@@ -46,15 +46,16 @@ const (
 var strokeParts = [4]shapePart{shapePartStrokeTop, shapePartStrokeBottom, shapePartStrokeLeft, shapePartStrokeRight}
 
 // appendShapeInstances appends to instances the instance data of shape, over
-// the white texel, and answers them: a fill's and a line's one instance, and
-// a stroke's four. Its tint is premultiplied, and a zero transform read as
-// the identity.
-func appendShapeInstances(instances []instanceData, shape *Shape) []instanceData {
+// white, the white texel as drawn, and answers them: a fill's and a line's
+// one instance, and a stroke's four. Its tint is premultiplied, and a zero
+// transform read as the identity.
+func appendShapeInstances(instances []instanceData, shape *Shape, white *drawnImage) []instanceData {
 	tint := shape.Tint
 	instance := instanceData{
 		tint:   [4]float32{tint.R * tint.A, tint.G * tint.A, tint.B * tint.A, tint.A},
-		region: [4]float32{0, 0, 1, 1},
+		region: white.region,
 		crop:   [4]float32{0, 0, 1, 1},
+		page:   white.page,
 	}
 	instance.transform, instance.size = shape.findSquare()
 	switch shape.Kind {
@@ -78,20 +79,21 @@ func appendShapeInstances(instances []instanceData, shape *Shape) []instanceData
 }
 
 // appendSpriteInstance appends to instances the instance data of sprite, its
-// image naturalSize texels and placed about pivot, and answers them: one
-// instance, over its image's whole texture, its zero tint white and
-// premultiplied, and a zero transform read as the identity.
-func appendSpriteInstance(instances []instanceData, sprite *Sprite, naturalSize m.Vec2, pivot Pivot) []instanceData {
+// image as drawn image, and answers them: one instance, over its image's
+// region, its zero tint white and premultiplied, and a zero transform read
+// as the identity.
+func appendSpriteInstance(instances []instanceData, sprite *Sprite, image *drawnImage) []instanceData {
 	tint := sprite.Tint
 	if tint == (m.Color{}) {
 		tint = m.White
 	}
 	instance := instanceData{
 		tint:   [4]float32{tint.R * tint.A, tint.G * tint.A, tint.B * tint.A, tint.A},
-		region: [4]float32{0, 0, 1, 1},
+		region: image.region,
 		crop:   sprite.Crop.findRect(),
+		page:   image.page,
 	}
-	instance.transform, instance.size = sprite.findSquare(naturalSize, pivot)
+	instance.transform, instance.size = sprite.findSquare(image.size, image.pivot)
 	return append(instances, instance)
 }
 

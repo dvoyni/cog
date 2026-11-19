@@ -208,11 +208,10 @@ fn canvas_covers(in: CanvasVaryings) -> bool {
 }
 
 // canvas_sample answers the entry's image at the fragment, premultiplied:
-// its atlas page sampled at uv, whose texels hold straight alpha, as an
-// image's file does.
+// its atlas page sampled at uv, whose texels canvas packed premultiplied, so
+// filtering never darkens a cut-out edge.
 fn canvas_sample(in: CanvasVaryings) -> vec4<f32> {
-	let texel = textureSample(canvas_atlas, canvas_sampler, in.uv, canvas_instances[in.instance].page);
-	return vec4<f32>(texel.rgb * texel.a, texel.a);
+	return textureSample(canvas_atlas, canvas_sampler, in.uv, canvas_instances[in.instance].page);
 }
 
 // canvas_encode_srgb encodes linear colour as sRGB.
@@ -261,7 +260,8 @@ fn canvas_sprite_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_in
 // whatever the camera's projection, and never snapped, its coordinates
 // spanning the instance's region from the viewport's top left. Only the
 // instance's tint, region and page are read. canvas draws a camera's clear
-// over its viewport through it, and what a multisampled camera resolved.
+// over its viewport through it, what a multisampled camera resolved, and an
+// image filling its cell of an atlas.
 @vertex
 fn canvas_viewport_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance: u32) -> CanvasVaryings {
 	// The corners of canvas_sprite_vertex's two triangles.

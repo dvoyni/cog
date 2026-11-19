@@ -12,18 +12,20 @@ recording tasks record shapes and sprites and set cameras into draw lists
 of their own, which canvas merges in registration order, sorts by their
 sort key and draws through each camera, or the default camera into the main
 window, the first window opened of those still open, an instanced draw for
-each batch, a run of entries of one 2D material, one image, one filter and
+each batch, a run of entries of one 2D material, one atlas, one filter and
 one clip, each camera culling the entries outside its view. A sprite's
-image is drawn from a texture of its own, render's of its file, until the
-atlas packs it. A frame can be inspected in canvas's terms, beside render's
-inspection of it.
+image is packed at its first draw into the sprite atlas of its colour
+space, one 2D-array texture of pages holding its images premultiplied, so
+sprites of different images and the shapes beside them batch. A frame can
+be inspected in canvas's terms, beside render's inspection of it.
 
 ## Shape
 
 - **`Plugin`**, from `NewPlugin()`, is canvas. **`Config`** is its part of
   the kernel's config, under `PluginName`: `RegroupedLayers`, the layers
-  whose entries of equal keys canvas may regroup by batch, and
-  `DefaultFilter`, the filter of sprites naming none.
+  whose entries of equal keys canvas may regroup by batch,
+  `DefaultFilter`, the filter of sprites naming none, and `AtlasPageSize`,
+  the side of a sprite atlas's pages, zero meaning 2048.
 - **`FrameEvent`** is the frame its users record, published inside each of
   render's `FrameEvent`s. A plugin that records schedules its recording tasks
   after its `Ready` and joins them into the out dependency it returns.
@@ -67,19 +69,24 @@ inspection of it.
   read through its `Filter`, `FilterLinear` or `FilterNearest`, zero
   meaning `Config.DefaultFilter`, and drawn with its `Material` and its
   `Clip`, at its sort key, as a shape is. `DrawSprite` records one, and
-  `DrawSprites` a slice, as an ECS chunk's column. Sprites of one image and
-  filter batch together, and the zero `Image`, the white texel, batches
-  with shapes.
+  `DrawSprites` a slice, as an ECS chunk's column. Sprites of any images of
+  one atlas batch together while their filter is one, and the shapes beside
+  them with them, since shapes, and the zero `Image`, draw the white texel
+  of the sRGB sprite atlas, which takes no filter.
 - **`ImageFromFile(path, options…)`** interns a path in platform's FS and its
   **`ImageOptions`** (its `ColorSpace`, `ColorSpaceSrgb` or
   `ColorSpaceLinear`, and its `Pivot`, a `Fraction` of its size from its
   centre plus `Texels`, or one of the named pivots, `PivotCenter`,
   `PivotTopLeft`, `PivotTop`, `PivotBottom`, `PivotBottomLeft` and
   `PivotBottomRight`) into an `Image`, a plain value an ECS component holds.
-  It loads nothing: the first frame drawing it acquires its texture from
-  render, drawn in that frame, and a file render cannot load draws render's
-  magenta, reported once by render. A second set of options is ignored and
-  reported once.
+  It loads nothing: the first frame drawing it acquires its file from
+  render and packs it into the sprite atlas of its colour space, each image
+  a cell of its own whose gutter of 2 texels continues its edges, drawn in
+  that frame, and a file render cannot load draws render's magenta,
+  reported once by render. An image no page holds is packed into an atlas
+  of its own, exactly its size with no gutter, so an image as large as a
+  page takes a texture of a page's size. Images differing only in their pivot share their region. A
+  second set of options is ignored and reported once.
 - **`OrderOf(y)`** maps a float onto an order of its own, in the same order,
   for y-sorting.
 - **`Material`** names a 2D material; the zero one, the default material,
@@ -89,15 +96,17 @@ inspection of it.
   `ReadInspection` answers it in a task off **`InspectedEvent`**.
 - **`Inspection`** is one frame in canvas's terms: each camera that drew,
   the window it drew into and its viewport in pixels, its batches with their
-  material, their image, their filter, their clip and the entries it did not
+  material, their atlas, their filter, their clip and the entries it did not
   cull, each entry a shape or a sprite, with its sort key and its draw
   list's place, and render's `Inspection` of the frame beside it.
 - **`cog.canvas/canvas.wgsl`** is canvas's include, declaring the camera's
   pass parameters at `@group(0)` and canvas's instance data and atlas at
   `@group(2)`, with the functions over them, `canvas_sample` answering an
-  entry's image premultiplied, which canvas's own default material,
-  `cog.canvas/default.wgsl`, includes, as does `cog.canvas/viewport.wgsl`,
-  the shader of the quads canvas draws over a camera's viewport.
+  entry's image premultiplied, as the atlas holds it, which canvas's own
+  default material, `cog.canvas/default.wgsl`, includes, as does
+  `cog.canvas/viewport.wgsl`, the shader of the quads canvas draws over a
+  viewport: a camera's clear, what a multisampled camera resolved, and an
+  image premultiplied into its cell of an atlas.
 - **`Report`** is a mistake canvas finds at run time, logged once and carried
   past. Its `ReportKind` names it for tests.
 - **`canvastest`** runs canvas in a real kernel on render's fake GPU, with a
@@ -113,11 +122,12 @@ inspection of it.
   drawing; a
   private draw state, holding each task's draw list, the frame's entries
   and cameras sorted and the inspection asked for; a private renderer,
-  holding the default, clear and composite materials, the white texel, each
-  image drawn and its texture, the cameras drawn, the instance data and the
+  holding the default, clear, composite and pack materials, the sprite
+  atlases, the white texel in the sRGB one, each image drawn and where it is
+  packed, the cameras drawn, the entries' keys, the instance data and the
   batches; and a private list of the open windows. The images `ImageFromFile`
   interns are a table of the process's, shared by every kernel, each kernel
-  acquiring their textures apart.
+  packing them apart.
 - **Resources it reads from other plugins:** render's, for read through
   `render.Frame` and `render.Inventory`, `Assets` holding a `render.Frame`, `platform.FS`, for read through
   `render.Inventory`, as canvas's shaders and sprites' images load, render's

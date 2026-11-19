@@ -4,6 +4,7 @@ import (
 	"cmp"
 
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/plugins/render"
 )
 
 // Sprite is an entry that draws an image through a transform about its
@@ -45,10 +46,11 @@ type Sprite struct {
 }
 
 // batchKey answers what the sprite shares with the entries it batches with,
-// its filter defaultFilter when it names none, and none for the zero Image,
-// the white texel, which no filter changes, so it batches with shapes.
-func (s *Sprite) batchKey(defaultFilter Filter) batchKey {
-	key := batchKey{material: s.Material, image: s.Image, clip: s.Clip}
+// its image packed into the atlas whose texture is atlas, its filter
+// defaultFilter when it names none, and none for the zero Image, the white
+// texel, which no filter changes, so it batches with shapes.
+func (s *Sprite) batchKey(atlas render.Texture, defaultFilter Filter) batchKey {
+	key := batchKey{material: s.Material, atlas: atlas, clip: s.Clip}
 	if s.Image != (Image{}) {
 		key.filter = cmp.Or(s.Filter, defaultFilter)
 	}

@@ -55,7 +55,7 @@
 // canvas begins one command list for each distinct camera order, a camera's
 // pass in it for each camera of that order, those into textures first, its
 // entries an instanced draw for each batch, a run of entries in sort order
-// of one 2D material, one image, one filter and one clip, each image and
+// of one 2D material, one atlas, one filter and one clip, each image and
 // tint premultiplied and blended over what the
 // target holds, its colour encoded as sRGB where the target's format does
 // not encode it. A frame that sets no camera is seen through the default
@@ -76,13 +76,20 @@
 // pivot, through its transform about that pivot, at its size, its image's
 // in texels when zero, tinted, cropped where it lies and read through its
 // filter. ImageFromFile loads nothing: the first frame drawing the image loads
-// it, drawn in that frame, and a file render cannot load draws magenta:
+// it and packs it into the sprite atlas of its colour space, drawn in that
+// frame, and a file render cannot load draws magenta:
 //
 //	hero := canvas.ImageFromFile("hero.png", canvas.ImageOptions{Pivot: canvas.PivotBottom})
 //	list.DrawSprite(canvas.Sprite{Image: hero, Transform: m.Translation2x3(x, y), Layer: layerUnits, Order: canvas.OrderOf(y)})
 //
-// Sprites of one image and one filter batch together, and the zero Image,
-// the white texel, batches with shapes.
+// An atlas is one 2D-array texture whose layers are pages of
+// Config.AtlasPageSize, each image a cell of its own, premultiplied, its
+// gutter continuing its edges, so linear filtering never reaches a
+// neighbour; an image no page holds is packed into an atlas of its own,
+// exactly its size with no gutter, its sampler clamping at its edge.
+// Sprites of any images of one atlas batch together while their filter is
+// one, and shapes with them: shapes, and the zero Image, draw the sRGB
+// sprite atlas's white texel, which takes no filter.
 //
 // An entry's Clip is a rectangle of the world it draws nothing outside,
 // seen through each camera as the entry is, a scissor of its bounding box

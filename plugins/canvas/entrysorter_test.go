@@ -6,6 +6,8 @@ import (
 	"math/rand/v2"
 	"slices"
 	"testing"
+
+	"github.com/dvoyni/cog/plugins/render"
 )
 
 func TestEntriesSortByLayerThenOrderKeepingTheirMergedOrderBetweenEqualKeys(t *testing.T) {
@@ -97,14 +99,26 @@ func findEntryIndices(entries []sortedEntry) []uint32 {
 }
 
 // newShapeFrame answers the draw state of a frame of shapes alone, merged
-// in their order, each entry's place its shape's, with their keys, sorted
-// by sorter, whose entries are the frame's in sort order.
+// in their order, each entry's place its shape's, sorted by sorter and
+// regrouped by their batch keys, whose entries are the frame's in sort
+// order.
 func newShapeFrame(shapes []Shape, sorter entrySorter) *drawState {
 	state := &drawState{shapes: shapes, sorter: sorter}
 	for index := range shapes {
 		state.entries = append(state.entries, recordedEntry{kind: EntryKindShape, index: uint32(index)})
 	}
-	state.findEntryKeys()
-	state.sorter.sort(state.batchKeys)
+	state.findSortKeys()
+	state.sorter.sortByKey()
+	state.sorter.regroup(findShapeBatchKeys(state))
 	return state
+}
+
+// findShapeBatchKeys answers the batch keys of the shapes of state, a frame
+// of shapes alone, each at its entry's index, over the zero atlas.
+func findShapeBatchKeys(state *drawState) []batchKey {
+	var keys []batchKey
+	for index := range state.shapes {
+		keys = append(keys, state.shapes[index].batchKey(render.Texture{}))
+	}
+	return keys
 }

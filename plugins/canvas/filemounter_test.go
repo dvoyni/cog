@@ -45,9 +45,30 @@ func makeQuadrantsFiles(t testing.TB) fstest.MapFS {
 			picture.SetNRGBA(x, y, quadrant)
 		}
 	}
+	files := fstest.MapFS{}
+	addImageFile(t, files, quadrantsPath, picture)
+	return files
+}
+
+// addSolidFile adds to files a PNG at path of width×height texels, each of
+// colour.
+func addSolidFile(t testing.TB, files fstest.MapFS, path string, width, height int, colour color.NRGBA) {
+	t.Helper()
+	picture := image.NewNRGBA(image.Rect(0, 0, width, height))
+	for y := range height {
+		for x := range width {
+			picture.SetNRGBA(x, y, colour)
+		}
+	}
+	addImageFile(t, files, path, picture)
+}
+
+// addImageFile adds to files picture, encoded as a PNG, at path.
+func addImageFile(t testing.TB, files fstest.MapFS, path string, picture image.Image) {
+	t.Helper()
 	var encoded bytes.Buffer
 	if err := png.Encode(&encoded, picture); err != nil {
-		t.Fatalf("encoding the quadrants: %v", err)
+		t.Fatalf("encoding %s: %v", path, err)
 	}
-	return fstest.MapFS{quadrantsPath: {Data: encoded.Bytes()}}
+	files[path] = &fstest.MapFile{Data: encoded.Bytes()}
 }

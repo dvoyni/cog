@@ -10,6 +10,13 @@ type imageKey struct {
 	ignoredOptions bool
 }
 
+// makePackedKey answers k with only the options that change the image's
+// pixels, its colour space, so images differing only in their pivot share
+// what is packed.
+func (k imageKey) makePackedKey() imageKey {
+	return imageKey{path: k.path, options: ImageOptions{ColorSpace: k.options.ColorSpace}}
+}
+
 // makeTextureOptions answers the options render loads k's file with: its
 // colour space, with no mips.
 func (k imageKey) makeTextureOptions() render.TextureOptions {

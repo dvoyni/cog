@@ -14,8 +14,8 @@ const (
 	// material's shader.
 	defaultShaderPath = assetPrefix + "/default.wgsl"
 	// viewportShaderPath is the path in platform's FS of the shader of the
-	// quads canvas draws over a camera's viewport: a clear, and what a
-	// multisampled camera resolved.
+	// quads canvas draws over a viewport: a camera's clear, what a
+	// multisampled camera resolved, and an image filling its atlas cell.
 	viewportShaderPath = assetPrefix + "/viewport.wgsl"
 	// spriteVertexEntryPoint is the include's vertex stage, for an entry
 	// drawn as a quad.
@@ -24,6 +24,12 @@ const (
 	// covering the camera's viewport, which a camera's clear drawn over its
 	// viewport draws through.
 	viewportVertexEntryPoint = "canvas_viewport_vertex"
+	// viewportFragmentEntryPoint is the viewport shader's fragment stage
+	// for a camera's quads, its clear and what it resolved, and
+	// packFragmentEntryPoint its fragment stage filling an atlas's cell
+	// with an image premultiplied.
+	viewportFragmentEntryPoint = "canvas_viewport_fragment"
+	packFragmentEntryPoint     = "canvas_pack_fragment"
 )
 
 // embeddedAssets are canvas's built-in assets: its include, its materials'

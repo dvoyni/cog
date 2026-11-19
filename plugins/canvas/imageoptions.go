@@ -4,7 +4,7 @@ import "github.com/dvoyni/cog/libs/m"
 
 // ImageOptions are what an image is loaded and placed with. Images of one
 // path that differ only in options that change no pixel, such as the
-// pivot, share their texture.
+// pivot, share their region of the atlas.
 type ImageOptions struct {
 	// ColorSpace is how the file encodes its colours.
 	ColorSpace ColorSpace

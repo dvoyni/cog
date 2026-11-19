@@ -22,6 +22,10 @@ type Config struct {
 	// DefaultFilter is the filter of a sprite whose Filter is zero; zero
 	// means FilterLinear.
 	DefaultFilter Filter
+	// AtlasPageSize is the side of a sprite atlas's pages, in texels; zero
+	// means 2048. An image whose cell, the image and a gutter of 2 texels
+	// around it, no page holds is packed into an atlas of its own.
+	AtlasPageSize uint32
 }
 
 // Plugin is canvas: it installs Handlers, Targets and its private state,
@@ -53,7 +57,7 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	canvasConfig := kernel.PluginConfigOrDefault[Config](config)
 	configurator.InitResource(&drawState{logger: configurator.Logger(), defaultFilter: cmp.Or(canvasConfig.DefaultFilter, FilterLinear), sorter: makeEntrySorter(canvasConfig.RegroupedLayers)})
-	configurator.InitResource(newRenderer())
+	configurator.InitResource(newRenderer(cmp.Or(canvasConfig.AtlasPageSize, 2048)))
 	configurator.InitResource(&windowList{})
 	configurator.InitResource[Targets](&drawnTargets{})
 	configurator.BindSocket(platform.ReadMountSocket{FS: makeAssetFS(), Priority: math.MinInt, Prefix: assetPrefix})

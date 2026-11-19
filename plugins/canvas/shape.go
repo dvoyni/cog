@@ -1,6 +1,9 @@
 package canvas
 
-import "github.com/dvoyni/cog/libs/m"
+import (
+	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/plugins/render"
+)
 
 // Shape is an entry that fills or strokes a rectangle, or draws a line. It
 // is a literal, like every other entry: canvas.Shape{Kind: canvas.Fill,
@@ -45,9 +48,10 @@ type Shape struct {
 }
 
 // batchKey answers what the shape shares with the entries it batches with:
-// it draws over the white texel, the zero Image, which no filter changes.
-func (s *Shape) batchKey() batchKey {
-	return batchKey{material: s.Material, clip: s.Clip}
+// it draws over the white texel, in the sprite atlas whose texture is
+// atlas, and takes no filter, which changes no pixel of it.
+func (s *Shape) batchKey(atlas render.Texture) batchKey {
+	return batchKey{material: s.Material, atlas: atlas, clip: s.Clip}
 }
 
 // findSquare answers the transform from the unit square onto the shape in

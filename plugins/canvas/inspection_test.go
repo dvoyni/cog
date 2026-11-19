@@ -43,11 +43,21 @@ func TestAnInspectedFrameAnswersItsCamerasBatchesInstanceCountsAndEntriesWithThe
 	spriteEntry := func(sprite canvas.Sprite, drawListIndex, indexInDrawList int) canvas.InspectedEntry {
 		return canvas.InspectedEntry{Kind: canvas.EntryKindSprite, Sprite: sprite, Layer: sprite.Layer, Order: sprite.Order, DrawListIndex: drawListIndex, IndexInDrawList: indexInDrawList}
 	}
+	// The shapes and the sprites of the zero image draw the white texel, in
+	// the sRGB sprite atlas.
+	var spriteAtlas render.Texture
+	if len(frame.Cameras) == 1 && len(frame.Cameras[0].Batches) == 1 {
+		spriteAtlas = frame.Cameras[0].Batches[0].Atlas
+	}
+	if label := findTextureLabels(frame.Render)[spriteAtlas]; label != "canvas sprites sRGB" {
+		t.Errorf("the batch drew from %v, labelled %q, want the sRGB sprite atlas", spriteAtlas, label)
+	}
 	want := []canvas.InspectedCamera{{
 		Camera:   canvas.Camera{Clear: true, ClearColor: m.Color{A: 1}},
 		Window:   window,
 		Viewport: m.Recti{Width: 64, Height: 48},
 		Batches: []canvas.InspectedBatch{{
+			Atlas:         spriteAtlas,
 			InstanceCount: 7,
 			Entries: []canvas.InspectedEntry{
 				entry(canvas.Shape{Order: 10}, 1, 0),

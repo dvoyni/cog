@@ -112,7 +112,8 @@
       "entryPoints": [
         "canvas_sprite_vertex",
         "canvas_viewport_vertex",
-        "canvas_viewport_fragment"
+        "canvas_viewport_fragment",
+        "canvas_pack_fragment"
       ]
     },
     {
@@ -124,7 +125,8 @@
         "viewDimension": "2d-array"
       },
       "entryPoints": [
-        "canvas_viewport_fragment"
+        "canvas_viewport_fragment",
+        "canvas_pack_fragment"
       ]
     },
     {
@@ -135,7 +137,8 @@
         "type": "filtering"
       },
       "entryPoints": [
-        "canvas_viewport_fragment"
+        "canvas_viewport_fragment",
+        "canvas_pack_fragment"
       ]
     }
   ],
@@ -150,6 +153,10 @@
     },
     {
       "name": "canvas_viewport_fragment",
+      "stage": "fragment"
+    },
+    {
+      "name": "canvas_pack_fragment",
       "stage": "fragment"
     }
   ],

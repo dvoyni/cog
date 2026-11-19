@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"image/color"
 	"math"
-	"reflect"
 	"slices"
 	"testing"
 
@@ -570,6 +569,22 @@ func TestACameraOfASampleCountOtherThanOneOrFourPanicsAsItIsSet(t *testing.T) {
 // minimapDescriptor is a small texture a camera draws into.
 var minimapDescriptor = render.TextureDescriptor{Label: "minimap", Width: 16, Height: 16, Format: render.TextureFormatRGBA8Unorm}
 
+// findPass answers the pass of list labelled label, failing t when there is
+// not one alone.
+func findPass(t *testing.T, list render.InspectedCommandList, label string) render.InspectedPass {
+	t.Helper()
+	var found []render.InspectedPass
+	for _, pass := range list.Passes {
+		if pass.Label == label {
+			found = append(found, pass)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("the list holds %d passes labelled %q, want one: %+v", len(found), label, list.Passes)
+	}
+	return found[0]
+}
+
 // findParameter answers the parameter of parameters, a draw's pass or draw
 // parameters, named name, failing t when there is none.
 func findParameter(t *testing.T, parameters []render.InspectedParameter, name string) render.InspectedParameter {
@@ -594,7 +609,7 @@ func TestASpriteDrawsItsImageAtItsTransformSizeAndPivotMirroredTurnedTintedAndCr
 	greenOverBlack := color.NRGBA{G: 128, A: 255}
 	blue := color.NRGBA{B: 255, A: 255}
 	magenta := color.NRGBA{R: 255, B: 255, A: 255}
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.DrawList) {
 		list.DrawSprites([]canvas.Sprite{
 			// At its image's 4 texels, scaled by its transform.
 			{Image: quadrants, Transform: m.Translation2x3(-120, -70).Mul(m.Scaling2x3(10, 10)), Filter: canvas.FilterNearest},
@@ -644,7 +659,7 @@ func TestASpriteWhoseImageFailsToLoadDrawsMagentaReportedOnce(t *testing.T) {
 	h.Harness.ExpectReport(render.ReportKindLoadFailed)
 	missing := canvas.ImageFromFile("missing.png")
 
-	picture := captureHarnessDrawing(t, h, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, h, nil, func(list canvas.DrawList) {
 		list.DrawSprite(canvas.Sprite{Image: missing, Size: m.Vec2{X: 40, Y: 40}})
 	})
 
@@ -654,76 +669,6 @@ func TestASpriteWhoseImageFailsToLoadDrawsMagentaReportedOnce(t *testing.T) {
 	})
 	if reports := h.Harness.Reports(); len(reports) != 1 || reports[0].Kind != render.ReportKindLoadFailed {
 		t.Errorf("the frames drawing a missing image reported %v, want render's one report of its load failing", reports)
-	}
-}
-
-func TestASpriteBetweenShapesDrawsInSortOrderItsImageBreakingTheBatchEitherSideAndSpritesOfOneImageAndFilterBatch(t *testing.T) {
-	h := canvastest.NewHarness(t)
-	h.Spawn(nil, nil, &fileMounter{files: makeQuadrantsFiles(t)})
-	h.OpenWindow(platform.Size{Width: 64, Height: 48})
-	quadrants := canvas.ImageFromFile(quadrantsPath)
-	fill := canvas.Shape{Rect: m.Rect{X: -4, Y: -4, Width: 8, Height: 8}, Tint: m.White}
-	h.Record(func(list canvas.DrawList) {
-		list.DrawShape(canvas.Shape{Rect: fill.Rect, Tint: fill.Tint, Order: 1})
-		// A sprite of the zero image draws the white texel, as shapes do,
-		// which no filter changes.
-		list.DrawSprite(canvas.Sprite{Size: m.Vec2{X: 8, Y: 8}, Order: 2, Filter: canvas.FilterNearest})
-		list.DrawSprites([]canvas.Sprite{{Image: quadrants, Order: 3}, {Image: quadrants, Order: 4}})
-		list.DrawShape(canvas.Shape{Rect: fill.Rect, Tint: fill.Tint, Order: 5})
-		list.DrawSprite(canvas.Sprite{Image: quadrants, Order: 6, Filter: canvas.FilterNearest})
-	})
-
-	h.Step()
-
-	camera := h.Frames()[0].Cameras[0]
-	type batchShape struct {
-		image         canvas.Image
-		filter        canvas.Filter
-		orders        []int32
-		instanceCount uint32
-	}
-	var got []batchShape
-	for _, inspectedBatch := range camera.Batches {
-		shape := batchShape{image: inspectedBatch.Image, filter: inspectedBatch.Filter, instanceCount: inspectedBatch.InstanceCount}
-		for _, entry := range inspectedBatch.Entries {
-			shape.orders = append(shape.orders, entry.Order)
-		}
-		got = append(got, shape)
-	}
-	want := []batchShape{
-		{orders: []int32{1, 2}, instanceCount: 2},
-		{image: quadrants, filter: canvas.FilterLinear, orders: []int32{3, 4}, instanceCount: 2},
-		{orders: []int32{5}, instanceCount: 1},
-		{image: quadrants, filter: canvas.FilterNearest, orders: []int32{6}, instanceCount: 1},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("the entries batched as %+v, want %+v: in sort order, broken where the image or the filter changes", got, want)
-	}
-	lists := findCanvasLists(h.Frames()[0].Render)
-	if len(lists) != 1 || len(lists[0].Passes) != 1 || len(lists[0].Passes[0].Draws) != 4 {
-		t.Fatalf("canvas began %+v, want one pass of a draw each batch", lists)
-	}
-	draws := lists[0].Passes[0].Draws
-	var textures []render.Texture
-	var samplers []render.SamplerDescriptor
-	for _, draw := range draws {
-		textures = append(textures, findParameter(t, draw.DrawParameters, "canvas_atlas").TextureView.Texture)
-		samplers = append(samplers, findParameter(t, draw.DrawParameters, "canvas_sampler").Sampler)
-	}
-	if textures[0] != textures[2] || textures[1] != textures[3] || textures[0] == textures[1] {
-		t.Errorf("the batches drew %v, want the white texel, the image's texture, the white texel and the image's texture", textures)
-	}
-	labels := map[render.Texture]string{}
-	for _, asset := range h.Frames()[0].Render.MadeAssets {
-		labels[asset.Texture] = asset.Label
-	}
-	if labels[textures[1]] != quadrantsPath {
-		t.Errorf("the sprites drew %v, labelled %q, want the texture of %q", textures[1], labels[textures[1]], quadrantsPath)
-	}
-	// The inspection spells a nearest filter, its default, zero.
-	linear := render.SamplerDescriptor{MagFilter: render.FilterModeLinear, MinFilter: render.FilterModeLinear}
-	if want := []render.SamplerDescriptor{{}, linear, {}, {}}; !slices.Equal(samplers, want) {
-		t.Errorf("the batches read their textures through %+v, want %+v, each batch's filter, the white texel's nearest", samplers, want)
 	}
 }
 
@@ -744,8 +689,8 @@ func TestADefaultFilterOfTheConfigReadsSpritesNamingNone(t *testing.T) {
 	for _, inspectedBatch := range h.Frames()[0].Cameras[0].Batches {
 		filters = append(filters, inspectedBatch.Filter)
 	}
-	if want := []canvas.Filter{canvas.FilterDefault, canvas.FilterNearest, canvas.FilterLinear}; !slices.Equal(filters, want) {
-		t.Errorf("the shape, the sprite naming no filter and the linear one were read through %v, want %v, the shape's white texel through none", filters, want)
+	if want := []canvas.Filter{canvas.FilterNearest, canvas.FilterLinear}; !slices.Equal(filters, want) {
+		t.Errorf("the shape, the sprite naming no filter and the linear one were read through %v, want %v, the shape's white texel taking the sprite's batch's", filters, want)
 	}
 }
 
@@ -771,7 +716,7 @@ func TestAnImageGivenTwoSetsOfOptionsIsDrawnWithTheFirstAndReportedOnce(t *testi
 	}
 }
 
-func TestAnImagesColourSpaceIsTheFormatItsTextureIsLoadedIn(t *testing.T) {
+func TestAnImagesColourSpaceIsTheFormatOfTheAtlasItIsPackedInto(t *testing.T) {
 	h := canvastest.NewHarness(t)
 	describer := &textureDescriber{}
 	h.Spawn(nil, nil, &fileMounter{files: makeQuadrantsFiles(t)}, describer)
@@ -783,7 +728,7 @@ func TestAnImagesColourSpaceIsTheFormatItsTextureIsLoadedIn(t *testing.T) {
 	h.Record(record)
 	h.Step()
 	var textures []render.Texture
-	for _, draw := range findCanvasLists(h.Frames()[0].Render)[0].Passes[0].Draws {
+	for _, draw := range findPass(t, findCanvasLists(h.Frames()[0].Render)[0], "canvas camera").Draws {
 		textures = append(textures, findParameter(t, draw.DrawParameters, "canvas_atlas").TextureView.Texture)
 	}
 
@@ -796,6 +741,34 @@ func TestAnImagesColourSpaceIsTheFormatItsTextureIsLoadedIn(t *testing.T) {
 		formats = append(formats, descriptor.Format)
 	}
 	if want := []render.TextureFormat{render.TextureFormatRGBA8UnormSrgb, render.TextureFormatRGBA8Unorm}; !slices.Equal(formats, want) {
-		t.Errorf("the sRGB and linear images' textures are of %v, want %v", formats, want)
+		t.Errorf("the sRGB and linear images' atlases are of %v, want %v", formats, want)
+	}
+}
+
+func TestARegroupedLayersEntriesOfEqualKeysDrawGroupedByTheirBatch(t *testing.T) {
+	h := canvastest.NewHarness(t)
+	h.Spawn(nil, &canvas.Config{RegroupedLayers: []int32{1}}, &fileMounter{files: makeQuadrantsFiles(t)})
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	quadrants := canvas.ImageFromFile(quadrantsPath)
+	h.Record(func(list canvas.DrawList) {
+		// Linear and nearest sprites alternate, at equal keys, in a layer
+		// regrouped and in one that is not.
+		for _, layer := range []int32{0, 1} {
+			for _, filter := range []canvas.Filter{canvas.FilterLinear, canvas.FilterNearest, canvas.FilterLinear, canvas.FilterNearest} {
+				list.DrawSprite(canvas.Sprite{Image: quadrants, Filter: filter, Layer: layer})
+			}
+		}
+	})
+
+	h.Step()
+
+	var filters []canvas.Filter
+	for _, inspectedBatch := range h.Frames()[0].Cameras[0].Batches {
+		filters = append(filters, inspectedBatch.Filter)
+	}
+	linear := canvas.FilterLinear
+	nearest := canvas.FilterNearest
+	if want := []canvas.Filter{linear, nearest, linear, nearest, linear, nearest}; !slices.Equal(filters, want) {
+		t.Errorf("the sprites drew as batches of %v, want %v: the first layer's in the order recorded, the regrouped layer's a batch of each filter", filters, want)
 	}
 }

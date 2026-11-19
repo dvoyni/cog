@@ -240,7 +240,7 @@ func TestACamerasVisibleEntriesAreAppendedInOrderAfterThoseBefore(t *testing.T) 
 	view, _ := makeCameraView(&camera, 200, 100, 1)
 	earlier := []sortedEntry{{entryIndex: 99}}
 
-	got := view.appendVisibleEntries(earlier, entries[1:5], state.batchKeys, bounds)
+	got := view.appendVisibleEntries(earlier, entries[1:5], findShapeBatchKeys(state), bounds)
 
 	if want := []sortedEntry{earlier[0], entries[2], entries[4]}; !slices.Equal(got, want) {
 		t.Errorf("the run %v appended %v, want those inside the view after the entries before, in order, %v", entries[1:5], got, want)

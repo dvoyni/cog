@@ -8,6 +8,10 @@ import (
 	"github.com/dvoyni/cog/libs/m"
 )
 
+// shapeImages are the drawn images of a frame of shapes alone: the white
+// texel's, at a region of its own.
+var shapeImages = []drawnImage{{region: [4]float32{0.25, 0.5, 0.125, 0.125}, page: 1, size: m.Vec2{X: 1, Y: 1}}}
+
 func TestBatchesBreakOnlyWhereAnEntrysMaterialDiffersFromTheOneBefore(t *testing.T) {
 	firstMaterial := Material{index: 1, generation: 1}
 	secondMaterial := Material{index: 2, generation: 1}
@@ -21,7 +25,7 @@ func TestBatchesBreakOnlyWhereAnEntrysMaterialDiffersFromTheOneBefore(t *testing
 	state := newShapeFrame(shapes, makeEntrySorter(nil))
 	entries := state.sorter.entries
 
-	got, instances := appendBatches(nil, nil, entries, state, nil)
+	got, instances := appendBatches(nil, nil, entries, state, findShapeBatchKeys(state), shapeImages)
 
 	want := []batch{
 		{key: batchKey{material: firstMaterial}, entries: entries[0:2], firstInstance: 0, instanceCount: 2},
@@ -33,7 +37,7 @@ func TestBatchesBreakOnlyWhereAnEntrysMaterialDiffersFromTheOneBefore(t *testing
 	}
 	var wantInstances []instanceData
 	for _, entry := range entries {
-		wantInstances = appendShapeInstances(wantInstances, &shapes[entry.entryIndex])
+		wantInstances = appendShapeInstances(wantInstances, &shapes[entry.entryIndex], &shapeImages[0])
 	}
 	if !slices.Equal(instances, wantInstances) {
 		t.Errorf("the batches' instances are %+v, want each shape's, in sort order, %+v", instances, wantInstances)
@@ -44,9 +48,9 @@ func TestBatchesAppendedAfterAnotherCamerasBeginANewBatchEvenOfTheSameMaterial(t
 	shapes := []Shape{{}, {Kind: Stroke}}
 	state := newShapeFrame(shapes, makeEntrySorter(nil))
 	entries := state.sorter.entries
-	firstBatches, firstInstances := appendBatches(nil, nil, entries[:1], state, nil)
+	firstBatches, firstInstances := appendBatches(nil, nil, entries[:1], state, findShapeBatchKeys(state), shapeImages)
 
-	got, instances := appendBatches(firstBatches, firstInstances, entries[1:], state, nil)
+	got, instances := appendBatches(firstBatches, firstInstances, entries[1:], state, findShapeBatchKeys(state), shapeImages)
 
 	want := []batch{
 		{entries: entries[0:1], firstInstance: 0, instanceCount: 1},
@@ -63,7 +67,7 @@ func TestBatchesBreakWhereAnEntrysClipDiffersFromTheOneBefore(t *testing.T) {
 	state := newShapeFrame(shapes, makeEntrySorter(nil))
 	entries := state.sorter.entries
 
-	got, _ := appendBatches(nil, nil, entries, state, nil)
+	got, _ := appendBatches(nil, nil, entries, state, findShapeBatchKeys(state), shapeImages)
 
 	want := []batch{
 		{entries: entries[0:1], firstInstance: 0, instanceCount: 1},

@@ -39,18 +39,10 @@ func makeEntrySorter(regroupedLayers []int32) entrySorter {
 	return entrySorter{regroupedLayers: slices.Compact(sortedLayers)}
 }
 
-// sort sorts the sorter's entries, the frame's in the order merged, each
-// entry's batch key of batchKeys at its index, and answers them, valid until
-// the next sort.
-func (s *entrySorter) sort(batchKeys []batchKey) []sortedEntry {
-	s.sortByKey()
-	s.regroup(batchKeys)
-	return s.entries
-}
-
-// sortByKey sorts the entries by key, stably, one pass of a byte each from
-// the lowest, skipping a pass whose byte is alike in every entry, such as
-// the high bytes of a few layers.
+// sortByKey sorts the sorter's entries, the frame's in the order merged, by
+// key, stably, one pass of a byte each from the lowest, skipping a pass
+// whose byte is alike in every entry, such as the high bytes of a few
+// layers.
 func (s *entrySorter) sortByKey() {
 	if len(s.entries) < 2 {
 		return
@@ -92,8 +84,9 @@ func (s *entrySorter) sortByKey() {
 	s.scratch = target
 }
 
-// regroup regroups by batch each run of entries of equal keys in a layer
-// the sorter regroups, each entry's batch key of batchKeys at its index.
+// regroup regroups by batch each run of the sorted entries of equal keys in
+// a layer the sorter regroups, each entry's batch key of batchKeys at its
+// index.
 func (s *entrySorter) regroup(batchKeys []batchKey) {
 	if len(s.regroupedLayers) == 0 {
 		return
