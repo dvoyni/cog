@@ -2,6 +2,7 @@ package canvas
 
 import (
 	"cmp"
+	"fmt"
 	"math"
 
 	"github.com/dvoyni/cog/kernel"
@@ -24,7 +25,9 @@ type Config struct {
 	DefaultFilter Filter
 	// AtlasPageSize is the side of a sprite atlas's pages, in texels; zero
 	// means 2048. An image whose cell, the image and a gutter of 2 texels
-	// around it, no page holds is drawn from a texture of its own.
+	// around it, no page holds is drawn from a texture of its own. The
+	// smallest side is 5, the white texel's cell; a side below it is raised
+	// to it, reported once as ReportKindAtlasPageSizeRaised.
 	AtlasPageSize uint32
 	// AtlasLayerCeiling is the most pages a sprite atlas grows to, doubling
 	// them each time an image fits on none; zero means 256, WebGPU's
@@ -58,7 +61,9 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 }
 
 // Init installs the draw state, with the kernel's logger for reports, the
-// filter of entries naming none and the layers config regroups, the renderer, the window list and Targets; binds canvas's built-in assets as a read
+// filter of entries naming none and the layers config regroups; the
+// renderer, its page side raised to the smallest and reported when config's
+// is below it; the window list and Targets; binds canvas's built-in assets as a read
 // mount under the prefix cog.canvas, at the lowest priority, so any other
 // mount holding one of their names overrides it; subscribes to
 // render.FrameEvent, platform.WindowOpenedEvent, platform.WindowClosedEvent
@@ -69,6 +74,11 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	canvasConfig := kernel.PluginConfigOrDefault[Config](config)
 	configurator.InitResource(&drawState{logger: configurator.Logger(), defaultFilter: cmp.Or(canvasConfig.DefaultFilter, FilterLinear), sorter: makeEntrySorter(canvasConfig.RegroupedLayers)})
 	atlasPageSize := cmp.Or(canvasConfig.AtlasPageSize, 2048)
+	if atlasPageSize < smallestAtlasPageSize {
+		raisedReport := Report{Kind: ReportKindAtlasPageSizeRaised, Err: fmt.Errorf("canvas: Config.AtlasPageSize %d is below %d, the smallest side a page holds the white texel's cell at, so pages are made that side", atlasPageSize, smallestAtlasPageSize)}
+		configurator.Logger().LogErr(raisedReport)
+		atlasPageSize = smallestAtlasPageSize
+	}
 	configurator.InitResource(newRenderer(atlasPageSize, cmp.Or(canvasConfig.AtlasLayerCeiling, 256), cmp.Or(canvasConfig.OwnTextureSize, atlasPageSize/2)))
 	configurator.InitResource(&windowList{})
 	configurator.InitResource[Targets](&drawnTargets{})

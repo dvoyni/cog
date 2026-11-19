@@ -2,10 +2,17 @@ package canvas
 
 import "github.com/dvoyni/cog/plugins/render"
 
-// atlasGutter is how many texels a cell of a sprite atlas reaches past its
-// image on every side, holding the image's edge continued, so linear
-// filtering at its edge never reads a neighbour: a page of one mip level's.
-const atlasGutter = 2
+// A sprite atlas's cells and pages are measured by these.
+const (
+	// atlasGutter is how many texels a cell of a sprite atlas reaches past
+	// its image on every side, holding the image's edge continued, so
+	// linear filtering at its edge never reads a neighbour: a page of one
+	// mip level's.
+	atlasGutter = 2
+	// smallestAtlasPageSize is the smallest side a sprite atlas's page
+	// holds the white texel's cell at: one texel and its gutter.
+	smallestAtlasPageSize = 1 + 2*atlasGutter
+)
 
 // atlas is images of one format packed into pages: one 2D-array texture, a
 // layer for each page, so entries over any of its images can share a

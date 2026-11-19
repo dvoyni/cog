@@ -34,6 +34,11 @@ const (
 	// Assets.ImageSize could not read, which it answered false. It is
 	// reported once for each path, until the path is unloaded.
 	ReportKindImageHeaderUnread
+	// ReportKindAtlasPageSizeRaised is a Config.AtlasPageSize below the
+	// smallest side a page holds the white texel's cell at, one texel and
+	// its gutter, 5 texels, so pages are made that smallest side instead.
+	// It is reported once, as canvas starts.
+	ReportKindAtlasPageSizeRaised
 )
 
 // The keys canvas logs a report once under are one of these, then the

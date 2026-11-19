@@ -1,6 +1,7 @@
 package canvas_test
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"reflect"
@@ -110,6 +111,12 @@ func countReports(h *canvastest.Harness, kind canvas.ReportKind) int {
 		}
 	}
 	return count
+}
+
+// recordWhiteFill records a white fill of 20 units square about the
+// origin into list.
+func recordWhiteFill(list canvas.DrawList) {
+	list.DrawShape(canvas.Shape{Rect: m.Rect{X: -10, Y: -10, Width: 20, Height: 20}, Tint: m.White})
 }
 
 // makeSpriteRecord answers a record of a sprite of each of images, in their
@@ -533,4 +540,52 @@ func TestAnImageWiderOrTallerThanOwnTextureSizeIsDrawnFromATextureOfItsOwn(t *te
 			}
 		})
 	}
+}
+
+func TestAnAtlasPageSizeBelowTheWhiteTexelsCellIsRaisedToItReportedOnce(t *testing.T) {
+	// A page of 1 or 4 texels cannot hold the white texel's cell of 5, so
+	// the sRGB atlas's pages are made 5 texels square, reported once; a
+	// page of 5 holds it, and is neither raised nor reported. The second
+	// frame lets the describer read the atlas.
+	for _, test := range []struct {
+		pageSize    uint32
+		raisedCount int
+	}{
+		{1, 1},
+		{4, 1},
+		{5, 0},
+	} {
+		t.Run(fmt.Sprintf("a page of %d", test.pageSize), func(t *testing.T) {
+			h := canvastest.NewHarness(t)
+			describer := &textureDescriber{}
+			h.Spawn(nil, &canvas.Config{AtlasPageSize: test.pageSize}, describer)
+			h.OpenWindow(platform.Size{Width: 64, Height: 48})
+			h.ExpectReport(canvas.ReportKindAtlasPageSizeRaised)
+			h.Record(recordWhiteFill)
+			h.Step()
+			describer.describe(findLoadedTextures(h.Frames()[0].Render, "canvas sprites sRGB")...)
+			h.Step()
+
+			descriptors := describer.describedTextures()
+			if len(descriptors) != 1 || descriptors[0].Width != 5 || descriptors[0].Height != 5 {
+				t.Errorf("the sRGB atlas is %+v, want one page of 5×5 texels", descriptors)
+			}
+			if raised := countReports(h, canvas.ReportKindAtlasPageSizeRaised); raised != test.raisedCount {
+				t.Errorf("the page side raised was reported %d times, want %d", raised, test.raisedCount)
+			}
+		})
+	}
+}
+
+func TestShapesDrawWhiteThroughAnAtlasPageSizeBelowTheWhiteTexelsCell(t *testing.T) {
+	// The white texel's cell, written into a page raised to its side, is
+	// what a white fill samples.
+	h := canvastest.NewHarness(t)
+	h.ExpectReport(canvas.ReportKindAtlasPageSizeRaised)
+	picture := captureHarnessDrawing(t, h, &canvas.Config{AtlasPageSize: 1}, recordWhiteFill)
+
+	picture.expect(t, []probe{
+		{"the fill's centre", m.Vec2{}, opaqueWhite},
+		{"the fill's top left", m.Vec2{X: -9.5, Y: -9.5}, opaqueWhite},
+	})
 }

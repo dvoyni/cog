@@ -28,7 +28,9 @@ beside render's inspection of it.
   the kernel's config, under `PluginName`: `RegroupedLayers`, the layers
   whose entries of equal keys canvas may regroup by batch,
   `DefaultFilter`, the filter of sprites naming none, `AtlasPageSize`, the
-  side of a sprite atlas's pages, zero meaning 2048, `AtlasLayerCeiling`,
+  side of a sprite atlas's pages, zero meaning 2048, its smallest 5, the
+  white texel's cell, a side below it raised to it and reported once,
+  `AtlasLayerCeiling`,
   the most pages it grows to, zero meaning 256, and `OwnTextureSize`, the
   side past which an image is drawn from a texture of its own, zero meaning
   half a page.

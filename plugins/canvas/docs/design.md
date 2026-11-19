@@ -228,7 +228,7 @@ author** testing canvas or a plugin on it.
   - `DefaultFontSet`, a `FontSetDescriptor` for the zero `FontSet`; its zero is JetBrains Mono alone;
   - `TextSize`, the em of a run whose `Size` is zero, in world units; zero means 16;
   - `LayoutIdleFrames`, how many frames `DrawText` keeps a layout no draw uses; zero means 2;
-  - `AtlasPageSize`, the atlas's page side, zero meaning 2048, and `AtlasLayerCeiling`, a ceiling on its layers, zero meaning 256, WebGPU's default limit on a texture's layers, since render answers no device's limits;
+  - `AtlasPageSize`, the atlas's page side, zero meaning 2048, its smallest 5, the white texel's cell of one texel and its gutter, a side below it raised to it and reported once as `ReportKindAtlasPageSizeRaised`, and `AtlasLayerCeiling`, a ceiling on its layers, zero meaning 256, WebGPU's default limit on a texture's layers, since render answers no device's limits;
   - `OwnTextureSize`, the size past which an image gets a texture of its own, zero meaning half the page side;
   - `DoNotGenerateMipMaps`, and `MipLevels`, zero meaning 3;
   - a distance-field glyph's default em and range, zero meaning 48 px and 16.
