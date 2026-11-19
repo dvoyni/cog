@@ -1,6 +1,7 @@
 package canvas
 
 import (
+	"cmp"
 	"math"
 
 	"github.com/dvoyni/cog/kernel"
@@ -18,6 +19,9 @@ type Config struct {
 	// themselves does not matter. Entries of equal keys in any other layer
 	// are drawn in the order they were recorded.
 	RegroupedLayers []int32
+	// DefaultFilter is the filter of a sprite whose Filter is zero; zero
+	// means FilterLinear.
+	DefaultFilter Filter
 }
 
 // Plugin is canvas: it installs Handlers, Targets and its private state,
@@ -38,8 +42,8 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 	return []kernel.PluginName{render.PluginName, platform.PluginName}
 }
 
-// Init installs the draw state, with the kernel's logger for reports and the
-// layers config regroups, the renderer, the window list and Targets; binds canvas's built-in assets as a read
+// Init installs the draw state, with the kernel's logger for reports, the
+// filter of entries naming none and the layers config regroups, the renderer, the window list and Targets; binds canvas's built-in assets as a read
 // mount under the prefix cog.canvas, at the lowest priority, so any other
 // mount holding one of their names overrides it; subscribes to
 // render.FrameEvent, platform.WindowOpenedEvent, platform.WindowClosedEvent
@@ -48,8 +52,8 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 // another type than *Config is a composition error, and panics.
 func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	canvasConfig := kernel.PluginConfigOrDefault[Config](config)
-	configurator.InitResource(&drawState{logger: configurator.Logger(), sorter: makeEntrySorter(canvasConfig.RegroupedLayers)})
-	configurator.InitResource(&renderer{})
+	configurator.InitResource(&drawState{logger: configurator.Logger(), defaultFilter: cmp.Or(canvasConfig.DefaultFilter, FilterLinear), sorter: makeEntrySorter(canvasConfig.RegroupedLayers)})
+	configurator.InitResource(newRenderer())
 	configurator.InitResource(&windowList{})
 	configurator.InitResource[Targets](&drawnTargets{})
 	configurator.BindSocket(platform.ReadMountSocket{FS: makeAssetFS(), Priority: math.MinInt, Prefix: assetPrefix})

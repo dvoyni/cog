@@ -1,5 +1,6 @@
 // canvas's default material, the zero Material: an entry's image times its
-// tint, on the fragments it covers. Shapes draw with it over a white texel.
+// tint, on the fragments it covers. Shapes draw with it over a white texel,
+// and sprites over their image.
 #include ./canvas.wgsl
 
 @fragment

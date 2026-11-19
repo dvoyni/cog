@@ -133,25 +133,26 @@ func (v *cameraView) findVisibleRect() m.Rect {
 	return v.pixelToWorld.TransformRect(v.drawnRect.Float())
 }
 
-// appendVisibleEntries appends to visible the entries of layerRun, of
-// shapes, each of shapeBounds at its shape's index, in order, that the view
-// does not cull, and answers visible: those whose bounds meet its visible
-// rectangle, or the part of it their clip holds where they have one, grown
-// by half its snap, the most a snapped entry moves.
-func (v *cameraView) appendVisibleEntries(visible, layerRun []sortedEntry, shapes []Shape, shapeBounds []m.Rect) []sortedEntry {
+// appendVisibleEntries appends to visible the entries of layerRun, each of
+// batchKeys, holding its clip, and of entryBounds at its entry's index, in
+// order, that the view does not cull, and answers visible: those whose
+// bounds meet its visible rectangle, or the part of it their clip holds
+// where they have one, grown by half its snap, the most a snapped entry
+// moves.
+func (v *cameraView) appendVisibleEntries(visible, layerRun []sortedEntry, batchKeys []batchKey, entryBounds []m.Rect) []sortedEntry {
 	visibleRect := v.findVisibleRect()
 	margin := m.Vec2{X: -v.snap / 2, Y: -v.snap / 2}
 	grownVisibleRect := visibleRect.Inset(margin)
 	for _, entry := range layerRun {
 		cullRect := grownVisibleRect
-		if clip := shapes[entry.shapeIndex].Clip; clip != (m.Rect{}) {
+		if clip := batchKeys[entry.entryIndex].clip; clip != (m.Rect{}) {
 			clipVisibleRect, clipVisible := visibleRect.Intersection(clip)
 			if !clipVisible {
 				continue
 			}
 			cullRect = clipVisibleRect.Inset(margin)
 		}
-		if shapeBounds[entry.shapeIndex].Intersects(cullRect) {
+		if entryBounds[entry.entryIndex].Intersects(cullRect) {
 			visible = append(visible, entry)
 		}
 	}

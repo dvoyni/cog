@@ -35,14 +35,18 @@ type InspectedCamera struct {
 }
 
 // InspectedBatch is one batch of an inspected camera, a run of entries in
-// sort order sharing a 2D material and a clip, drawn as one instanced draw:
-// its material, its clip, its instance count, and the entries it drew, in
-// sort order, those the camera culled left out. A
-// fill and a line are one instance; an entry drawing several, such as a
+// sort order sharing a 2D material, an image, a filter and a clip, drawn as
+// one instanced draw: its material; its image, the zero one for shapes;
+// its filter, FilterDefault for the white texel's, which no filter changes;
+// its clip; its instance count; and the
+// entries it drew, in sort order, those the camera culled left out. A fill,
+// a line and a sprite are one instance; an entry drawing several, such as a
 // stroke, its four sides, or a run of text, a glyph each, makes the count
 // larger than the entries.
 type InspectedBatch struct {
 	Material      Material
+	Image         Image
+	Filter        Filter
 	Clip          m.Rect
 	InstanceCount uint32
 	Entries       []InspectedEntry
@@ -54,18 +58,22 @@ type InspectedBatch struct {
 // its own place in that list, in recording order.
 type InspectedEntry struct {
 	Kind EntryKind
-	// Shape is the entry recorded, when Kind is EntryKindShape.
+	// Shape is the entry recorded, when Kind is EntryKindShape, and Sprite
+	// when it is EntryKindSprite.
 	Shape           Shape
+	Sprite          Sprite
 	Layer           int32
 	Order           int32
 	DrawListIndex   int
 	IndexInDrawList int
 }
 
-// EntryKind is what kind of entry an inspected entry is.
+// EntryKind is what kind of entry an entry is.
 type EntryKind uint8
 
 const (
 	// EntryKindShape is a Shape.
 	EntryKindShape EntryKind = iota + 1
+	// EntryKindSprite is a Sprite.
+	EntryKindSprite
 )

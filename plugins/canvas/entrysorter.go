@@ -3,11 +3,12 @@ package canvas
 import "slices"
 
 // sortedEntry is one of a frame's entries in its sort: its sort key, and its
-// place among the frame's shapes as merged, draw list after draw list,
-// which tells its draw list's place and its own in that list once sorted.
+// place among the frame's entries as merged, draw list after draw list,
+// which tells its record, its keys, and its draw list's place and its own
+// in that list once sorted.
 type sortedEntry struct {
 	key        sortKey
-	shapeIndex uint32
+	entryIndex uint32
 }
 
 // entrySorter sorts a frame's entries by layer, then order, then the place
@@ -20,7 +21,8 @@ type entrySorter struct {
 	// regroupedLayers are the layers whose entries of equal keys are
 	// regrouped, sorted, each once.
 	regroupedLayers []int32
-	// entries hold the entries of the frame last sorted, in sort order.
+	// entries hold the frame's entries, appended in the order merged, then
+	// in sort order once sorted.
 	entries []sortedEntry
 	// scratch is what the sort and the regrouping move entries through.
 	scratch []sortedEntry
@@ -37,15 +39,12 @@ func makeEntrySorter(regroupedLayers []int32) entrySorter {
 	return entrySorter{regroupedLayers: slices.Compact(sortedLayers)}
 }
 
-// sort sorts the entries of shapes, the frame's as merged, into the
-// sorter's entries, and answers them, valid until the next sort.
-func (s *entrySorter) sort(shapes []Shape) []sortedEntry {
-	s.entries = s.entries[:0]
-	for index, shape := range shapes {
-		s.entries = append(s.entries, sortedEntry{key: makeSortKey(shape.Layer, shape.Order), shapeIndex: uint32(index)})
-	}
+// sort sorts the sorter's entries, the frame's in the order merged, each
+// entry's batch key of batchKeys at its index, and answers them, valid until
+// the next sort.
+func (s *entrySorter) sort(batchKeys []batchKey) []sortedEntry {
 	s.sortByKey()
-	s.regroup(shapes)
+	s.regroup(batchKeys)
 	return s.entries
 }
 
@@ -94,8 +93,8 @@ func (s *entrySorter) sortByKey() {
 }
 
 // regroup regroups by batch each run of entries of equal keys in a layer
-// the sorter regroups.
-func (s *entrySorter) regroup(shapes []Shape) {
+// the sorter regroups, each entry's batch key of batchKeys at its index.
+func (s *entrySorter) regroup(batchKeys []batchKey) {
 	if len(s.regroupedLayers) == 0 {
 		return
 	}
@@ -106,8 +105,11 @@ func (s *entrySorter) regroup(shapes []Shape) {
 			runEnd++
 		}
 		if runEnd-runStart > 1 {
-			if _, regrouped := slices.BinarySearch(s.regroupedLayers, shapes[s.entries[runStart].shapeIndex].Layer); regrouped {
-				s.regroupRun(s.entries[runStart:runEnd], shapes)
+			// The run's layer is its key's high half, its sign bit flipped
+			// back.
+			runLayer := int32(uint32(runKey>>32) ^ signBit)
+			if _, regrouped := slices.BinarySearch(s.regroupedLayers, runLayer); regrouped {
+				s.regroupRun(s.entries[runStart:runEnd], batchKeys)
 			}
 		}
 		runStart = runEnd
@@ -116,14 +118,14 @@ func (s *entrySorter) regroup(shapes []Shape) {
 
 // regroupRun moves run's entries of its first entry's batch to its front,
 // then those of the first batch left after them, and so on, each batch's in
-// the order they were in.
-func (s *entrySorter) regroupRun(run []sortedEntry, shapes []Shape) {
+// the order they were in, each entry's batch key of batchKeys at its index.
+func (s *entrySorter) regroupRun(run []sortedEntry, batchKeys []batchKey) {
 	for batchStart := 0; batchStart < len(run); {
-		firstBatchKey := shapes[run[batchStart].shapeIndex].batchKey()
+		firstBatchKey := batchKeys[run[batchStart].entryIndex]
 		s.scratch = s.scratch[:0]
 		nextBatchEnd := batchStart
 		for _, entry := range run[batchStart:] {
-			if shapes[entry.shapeIndex].batchKey() == firstBatchKey {
+			if batchKeys[entry.entryIndex] == firstBatchKey {
 				run[nextBatchEnd] = entry
 				nextBatchEnd++
 			} else {

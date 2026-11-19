@@ -2,7 +2,9 @@ package canvas_test
 
 import (
 	"encoding/binary"
+	"image/color"
 	"math"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -456,8 +458,8 @@ func TestAMultisampledCameraDrawsIntoAFourSampleTextureOfItsViewportResolvedInto
 	h.Spawn(nil, nil, describer)
 	window := h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	record := func(list canvas.DrawList) {
-		list.SetCamera(canvas.Camera{Viewport: m.Rect{Width: 0.5, Height: 1}, Clear: true, ClearColor: m.White, Samples: 4})
-		list.SetCamera(canvas.Camera{Viewport: m.Rect{X: 0.5, Width: 0.5, Height: 1}, Samples: 4})
+		list.SetCamera(canvas.Camera{Viewport: m.Rect{Width: 0.5, Height: 1}, Clear: true, ClearColor: m.White, SampleCount: 4})
+		list.SetCamera(canvas.Camera{Viewport: m.Rect{X: 0.5, Width: 0.5, Height: 1}, SampleCount: 4})
 		list.DrawShape(canvas.Shape{Rect: m.Rect{X: -100, Y: -100, Width: 200, Height: 200}, Tint: green})
 	}
 	h.Record(record)
@@ -532,7 +534,7 @@ func TestAMultisampledCameraClearingTheWholeWindowDrawsWhatItResolvedOverTheWind
 	h.Spawn(nil, nil)
 	window := h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	h.Record(func(list canvas.DrawList) {
-		list.SetCamera(canvas.Camera{Clear: true, Samples: 4})
+		list.SetCamera(canvas.Camera{Clear: true, SampleCount: 4})
 	})
 
 	h.Step()
@@ -555,7 +557,7 @@ func TestACameraOfASampleCountOtherThanOneOrFourPanicsAsItIsSet(t *testing.T) {
 	var recovered any
 	h.Record(func(list canvas.DrawList) {
 		defer func() { recovered = recover() }()
-		list.SetCamera(canvas.Camera{Samples: 2})
+		list.SetCamera(canvas.Camera{SampleCount: 2})
 	})
 
 	h.Step()
@@ -577,4 +579,223 @@ func findParameter(t *testing.T, parameters []render.InspectedParameter, name st
 		t.Fatalf("the draw bound no parameter %q: %+v", name, parameters)
 	}
 	return parameters[index]
+}
+
+func TestASpriteDrawsItsImageAtItsTransformSizeAndPivotMirroredTurnedTintedAndCropped(t *testing.T) {
+	// Sprites of the quadrants, read at their nearest texel through the
+	// default camera, cleared to black, each 40 units square in the world,
+	// a quadrant 20: its red, translucent green, blue and white quadrants,
+	// probed at their middles, show where each texel landed. The green,
+	// of alpha 128, shows as 128 of green over black only once
+	// premultiplied.
+	quadrants := canvas.ImageFromFile(quadrantsPath)
+	pivoted := canvas.ImageFromFile(quadrantsPath, canvas.ImageOptions{Pivot: canvas.Pivot{Fraction: m.Vec2{X: -0.5, Y: -0.5}, Texels: m.Vec2{X: 2}}})
+	red := color.NRGBA{R: 255, A: 255}
+	greenOverBlack := color.NRGBA{G: 128, A: 255}
+	blue := color.NRGBA{B: 255, A: 255}
+	magenta := color.NRGBA{R: 255, B: 255, A: 255}
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), func(list canvas.DrawList) {
+		list.DrawSprites([]canvas.Sprite{
+			// At its image's 4 texels, scaled by its transform.
+			{Image: quadrants, Transform: m.Translation2x3(-120, -70).Mul(m.Scaling2x3(10, 10)), Filter: canvas.FilterNearest},
+			// 40 wide, its height keeping the aspect, its pivot 2 texels right
+			// of the top left corner, 20 units at this size.
+			{Image: pivoted, Transform: m.Translation2x3(-40, -90), Size: m.Vec2{X: 40}, Filter: canvas.FilterNearest},
+			{Image: quadrants, Transform: m.Translation2x3(0, -70).Mul(m.Scaling2x3(-1, 1)), Size: m.Vec2{X: 40, Y: 40}, Filter: canvas.FilterNearest},
+			{Image: quadrants, Transform: m.Translation2x3(60, -70).Mul(m.Rotation2x3(math.Pi / 2)), Size: m.Vec2{X: 40, Y: 40}, Filter: canvas.FilterNearest},
+			{Image: quadrants, Transform: m.Translation2x3(120, -70), Size: m.Vec2{X: 40, Y: 40}, Tint: m.Color{R: 1, B: 1, A: 1}, Filter: canvas.FilterNearest},
+		})
+		list.DrawSprite(canvas.Sprite{Image: quadrants, Transform: m.Translation2x3(-120, 50), Size: m.Vec2{X: 40, Y: 40}, Crop: canvas.Crop{Top: 0.25, Right: 0.5}, Filter: canvas.FilterNearest})
+		list.DrawSprite(canvas.Sprite{Image: quadrants, Transform: m.Translation2x3(-60, 50).Mul(m.Scaling2x3(-1, 1)), Size: m.Vec2{X: 40, Y: 40}, Crop: canvas.Crop{Right: 0.5}, Filter: canvas.FilterNearest})
+	}, &fileMounter{files: makeQuadrantsFiles(t)})
+
+	picture.expect(t, []probe{
+		{"the scaled sprite's top left", m.Vec2{X: -130, Y: -80}, red},
+		{"the scaled sprite's top right", m.Vec2{X: -110, Y: -80}, greenOverBlack},
+		{"the scaled sprite's bottom left", m.Vec2{X: -130, Y: -60}, blue},
+		{"the scaled sprite's bottom right", m.Vec2{X: -110, Y: -60}, opaqueWhite},
+		{"left of the pivoted sprite", m.Vec2{X: -62, Y: -70}, opaqueBlack},
+		{"the pivoted sprite's top left", m.Vec2{X: -50, Y: -80}, red},
+		{"the pivoted sprite's bottom right", m.Vec2{X: -30, Y: -60}, opaqueWhite},
+		{"below the pivoted sprite", m.Vec2{X: -50, Y: -48}, opaqueBlack},
+		{"the mirrored sprite's top left", m.Vec2{X: -10, Y: -80}, greenOverBlack},
+		{"the mirrored sprite's top right", m.Vec2{X: 10, Y: -80}, red},
+		{"the mirrored sprite's bottom left", m.Vec2{X: -10, Y: -60}, opaqueWhite},
+		{"the mirrored sprite's bottom right", m.Vec2{X: 10, Y: -60}, blue},
+		{"the turned sprite's top left", m.Vec2{X: 50, Y: -80}, blue},
+		{"the turned sprite's top right", m.Vec2{X: 70, Y: -80}, red},
+		{"the turned sprite's bottom left", m.Vec2{X: 50, Y: -60}, opaqueWhite},
+		{"the turned sprite's bottom right", m.Vec2{X: 70, Y: -60}, greenOverBlack},
+		{"the tinted sprite's top left", m.Vec2{X: 110, Y: -80}, red},
+		{"the tinted sprite's top right", m.Vec2{X: 130, Y: -80}, opaqueBlack},
+		{"the tinted sprite's bottom left", m.Vec2{X: 110, Y: -60}, blue},
+		{"the tinted sprite's bottom right", m.Vec2{X: 130, Y: -60}, magenta},
+		{"the cropped sprite's top, cropped", m.Vec2{X: -130, Y: 35}, opaqueBlack},
+		{"the cropped sprite's top left, below its crop", m.Vec2{X: -130, Y: 45}, red},
+		{"the cropped sprite's bottom left", m.Vec2{X: -130, Y: 60}, blue},
+		{"the cropped sprite's right, cropped", m.Vec2{X: -110, Y: 60}, opaqueBlack},
+		{"the mirrored cropped sprite's left, cropped", m.Vec2{X: -70, Y: 40}, opaqueBlack},
+		{"the mirrored cropped sprite's right, its image's left", m.Vec2{X: -50, Y: 40}, red},
+	})
+}
+
+func TestASpriteWhoseImageFailsToLoadDrawsMagentaReportedOnce(t *testing.T) {
+	h := canvastest.NewHarness(t)
+	h.Harness.ExpectReport(render.ReportKindLoadFailed)
+	missing := canvas.ImageFromFile("missing.png")
+
+	picture := captureHarnessDrawing(t, h, func(list canvas.DrawList) {
+		list.DrawSprite(canvas.Sprite{Image: missing, Size: m.Vec2{X: 40, Y: 40}})
+	})
+
+	picture.expect(t, []probe{
+		{"the sprite's middle", m.Vec2{}, color.NRGBA{R: 255, B: 255, A: 255}},
+		{"beside the sprite", m.Vec2{X: 30}, opaqueBlack},
+	})
+	if reports := h.Harness.Reports(); len(reports) != 1 || reports[0].Kind != render.ReportKindLoadFailed {
+		t.Errorf("the frames drawing a missing image reported %v, want render's one report of its load failing", reports)
+	}
+}
+
+func TestASpriteBetweenShapesDrawsInSortOrderItsImageBreakingTheBatchEitherSideAndSpritesOfOneImageAndFilterBatch(t *testing.T) {
+	h := canvastest.NewHarness(t)
+	h.Spawn(nil, nil, &fileMounter{files: makeQuadrantsFiles(t)})
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	quadrants := canvas.ImageFromFile(quadrantsPath)
+	fill := canvas.Shape{Rect: m.Rect{X: -4, Y: -4, Width: 8, Height: 8}, Tint: m.White}
+	h.Record(func(list canvas.DrawList) {
+		list.DrawShape(canvas.Shape{Rect: fill.Rect, Tint: fill.Tint, Order: 1})
+		// A sprite of the zero image draws the white texel, as shapes do,
+		// which no filter changes.
+		list.DrawSprite(canvas.Sprite{Size: m.Vec2{X: 8, Y: 8}, Order: 2, Filter: canvas.FilterNearest})
+		list.DrawSprites([]canvas.Sprite{{Image: quadrants, Order: 3}, {Image: quadrants, Order: 4}})
+		list.DrawShape(canvas.Shape{Rect: fill.Rect, Tint: fill.Tint, Order: 5})
+		list.DrawSprite(canvas.Sprite{Image: quadrants, Order: 6, Filter: canvas.FilterNearest})
+	})
+
+	h.Step()
+
+	camera := h.Frames()[0].Cameras[0]
+	type batchShape struct {
+		image         canvas.Image
+		filter        canvas.Filter
+		orders        []int32
+		instanceCount uint32
+	}
+	var got []batchShape
+	for _, inspectedBatch := range camera.Batches {
+		shape := batchShape{image: inspectedBatch.Image, filter: inspectedBatch.Filter, instanceCount: inspectedBatch.InstanceCount}
+		for _, entry := range inspectedBatch.Entries {
+			shape.orders = append(shape.orders, entry.Order)
+		}
+		got = append(got, shape)
+	}
+	want := []batchShape{
+		{orders: []int32{1, 2}, instanceCount: 2},
+		{image: quadrants, filter: canvas.FilterLinear, orders: []int32{3, 4}, instanceCount: 2},
+		{orders: []int32{5}, instanceCount: 1},
+		{image: quadrants, filter: canvas.FilterNearest, orders: []int32{6}, instanceCount: 1},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("the entries batched as %+v, want %+v: in sort order, broken where the image or the filter changes", got, want)
+	}
+	lists := findCanvasLists(h.Frames()[0].Render)
+	if len(lists) != 1 || len(lists[0].Passes) != 1 || len(lists[0].Passes[0].Draws) != 4 {
+		t.Fatalf("canvas began %+v, want one pass of a draw each batch", lists)
+	}
+	draws := lists[0].Passes[0].Draws
+	var textures []render.Texture
+	var samplers []render.SamplerDescriptor
+	for _, draw := range draws {
+		textures = append(textures, findParameter(t, draw.DrawParameters, "canvas_atlas").TextureView.Texture)
+		samplers = append(samplers, findParameter(t, draw.DrawParameters, "canvas_sampler").Sampler)
+	}
+	if textures[0] != textures[2] || textures[1] != textures[3] || textures[0] == textures[1] {
+		t.Errorf("the batches drew %v, want the white texel, the image's texture, the white texel and the image's texture", textures)
+	}
+	labels := map[render.Texture]string{}
+	for _, asset := range h.Frames()[0].Render.MadeAssets {
+		labels[asset.Texture] = asset.Label
+	}
+	if labels[textures[1]] != quadrantsPath {
+		t.Errorf("the sprites drew %v, labelled %q, want the texture of %q", textures[1], labels[textures[1]], quadrantsPath)
+	}
+	// The inspection spells a nearest filter, its default, zero.
+	linear := render.SamplerDescriptor{MagFilter: render.FilterModeLinear, MinFilter: render.FilterModeLinear}
+	if want := []render.SamplerDescriptor{{}, linear, {}, {}}; !slices.Equal(samplers, want) {
+		t.Errorf("the batches read their textures through %+v, want %+v, each batch's filter, the white texel's nearest", samplers, want)
+	}
+}
+
+func TestADefaultFilterOfTheConfigReadsSpritesNamingNone(t *testing.T) {
+	h := canvastest.NewHarness(t)
+	h.Spawn(nil, &canvas.Config{DefaultFilter: canvas.FilterNearest}, &fileMounter{files: makeQuadrantsFiles(t)})
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	quadrants := canvas.ImageFromFile(quadrantsPath)
+	h.Record(func(list canvas.DrawList) {
+		list.DrawShape(canvas.Shape{Rect: m.Rect{Width: 4, Height: 4}, Tint: m.White})
+		list.DrawSprite(canvas.Sprite{Image: quadrants, Order: 1})
+		list.DrawSprite(canvas.Sprite{Image: quadrants, Order: 2, Filter: canvas.FilterLinear})
+	})
+
+	h.Step()
+
+	var filters []canvas.Filter
+	for _, inspectedBatch := range h.Frames()[0].Cameras[0].Batches {
+		filters = append(filters, inspectedBatch.Filter)
+	}
+	if want := []canvas.Filter{canvas.FilterDefault, canvas.FilterNearest, canvas.FilterLinear}; !slices.Equal(filters, want) {
+		t.Errorf("the shape, the sprite naming no filter and the linear one were read through %v, want %v, the shape's white texel through none", filters, want)
+	}
+}
+
+func TestAnImageGivenTwoSetsOfOptionsIsDrawnWithTheFirstAndReportedOnce(t *testing.T) {
+	h := canvastest.NewHarness(t)
+	h.Spawn(nil, nil, &fileMounter{files: makeQuadrantsFiles(t)})
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	h.ExpectReport(canvas.ReportKindImageOptionsIgnored)
+	twice := canvas.ImageFromFile(quadrantsPath, canvas.ImageOptions{Pivot: canvas.PivotTopLeft}, canvas.ImageOptions{Pivot: canvas.PivotBottomRight})
+
+	for range 3 {
+		h.Record(func(list canvas.DrawList) {
+			list.DrawSprite(canvas.Sprite{Image: twice})
+		})
+		h.Step()
+	}
+
+	if reports := h.Reports(); len(reports) != 1 || reports[0].Kind != canvas.ReportKindImageOptionsIgnored {
+		t.Errorf("three frames drawing an image given two sets of options reported %v, want one report of it", reports)
+	}
+	if twice == canvas.ImageFromFile(quadrantsPath, canvas.ImageOptions{Pivot: canvas.PivotTopLeft}) {
+		t.Errorf("the image given two sets of options is the one given its first alone, which reports nothing")
+	}
+}
+
+func TestAnImagesColourSpaceIsTheFormatItsTextureIsLoadedIn(t *testing.T) {
+	h := canvastest.NewHarness(t)
+	describer := &textureDescriber{}
+	h.Spawn(nil, nil, &fileMounter{files: makeQuadrantsFiles(t)}, describer)
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	record := func(list canvas.DrawList) {
+		list.DrawSprite(canvas.Sprite{Image: canvas.ImageFromFile(quadrantsPath)})
+		list.DrawSprite(canvas.Sprite{Image: canvas.ImageFromFile(quadrantsPath, canvas.ImageOptions{ColorSpace: canvas.ColorSpaceLinear}), Order: 1})
+	}
+	h.Record(record)
+	h.Step()
+	var textures []render.Texture
+	for _, draw := range findCanvasLists(h.Frames()[0].Render)[0].Passes[0].Draws {
+		textures = append(textures, findParameter(t, draw.DrawParameters, "canvas_atlas").TextureView.Texture)
+	}
+
+	describer.describe(textures...)
+	h.Record(record)
+	h.Step()
+
+	var formats []render.TextureFormat
+	for _, descriptor := range describer.describedTextures() {
+		formats = append(formats, descriptor.Format)
+	}
+	if want := []render.TextureFormat{render.TextureFormatRGBA8UnormSrgb, render.TextureFormatRGBA8Unorm}; !slices.Equal(formats, want) {
+		t.Errorf("the sRGB and linear images' textures are of %v, want %v", formats, want)
+	}
 }

@@ -4,11 +4,14 @@ import "github.com/dvoyni/cog/libs/m"
 
 // instanceData mirrors canvas.wgsl's CanvasInstanceData without a material
 // argument: the data of one instance canvas draws, read at its
-// instance_index, 80 bytes, WGSL's size of the struct, the vec4<f32>
+// instance_index, 96 bytes, WGSL's size of the struct, the vec4<f32>
 // fields first, where they align to 16 with no padding.
 type instanceData struct {
-	tint      [4]float32
-	region    [4]float32
+	tint   [4]float32
+	region [4]float32
+	// crop is the part of the unit square an instance drawing all of it
+	// draws: its left, top, right and bottom edges.
+	crop      [4]float32
 	transform m.Mat2x3
 	page      uint32
 	part      shapePart
@@ -51,6 +54,7 @@ func appendShapeInstances(instances []instanceData, shape *Shape) []instanceData
 	instance := instanceData{
 		tint:   [4]float32{tint.R * tint.A, tint.G * tint.A, tint.B * tint.A, tint.A},
 		region: [4]float32{0, 0, 1, 1},
+		crop:   [4]float32{0, 0, 1, 1},
 	}
 	instance.transform, instance.size = shape.findSquare()
 	switch shape.Kind {
@@ -71,6 +75,24 @@ func appendShapeInstances(instances []instanceData, shape *Shape) []instanceData
 		instances = append(instances, instance)
 	}
 	return instances
+}
+
+// appendSpriteInstance appends to instances the instance data of sprite, its
+// image naturalSize texels and placed about pivot, and answers them: one
+// instance, over its image's whole texture, its zero tint white and
+// premultiplied, and a zero transform read as the identity.
+func appendSpriteInstance(instances []instanceData, sprite *Sprite, naturalSize m.Vec2, pivot Pivot) []instanceData {
+	tint := sprite.Tint
+	if tint == (m.Color{}) {
+		tint = m.White
+	}
+	instance := instanceData{
+		tint:   [4]float32{tint.R * tint.A, tint.G * tint.A, tint.B * tint.A, tint.A},
+		region: [4]float32{0, 0, 1, 1},
+		crop:   sprite.Crop.findRect(),
+	}
+	instance.transform, instance.size = sprite.findSquare(naturalSize, pivot)
+	return append(instances, instance)
 }
 
 // makeLineSquare answers the transform from the unit square onto the

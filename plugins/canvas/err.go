@@ -20,6 +20,10 @@ const (
 	// whose pixels would not be square, which is drawn as FitInscribe. It
 	// is reported once.
 	ReportKindPixelPerfectStretch
+	// ReportKindImageOptionsIgnored is an image ImageFromFile was given more than
+	// one set of options for, drawn with the first. It is reported once for
+	// each path, at the image's first draw.
+	ReportKindImageOptionsIgnored
 )
 
 // pixelPerfectStretchReport is the report of a pixel-perfect camera's

@@ -23,7 +23,7 @@ func TestEntriesSortByLayerThenOrderKeepingTheirMergedOrderBetweenEqualKeys(t *t
 	}
 	sorter := makeEntrySorter(nil)
 
-	got := findShapeIndices(sorter.sort(shapes))
+	got := findEntryIndices(newShapeFrame(shapes, sorter).sorter.entries)
 
 	want := []uint32{5, 9, 1, 3, 6, 2, 0, 4, 8, 7}
 	if !slices.Equal(got, want) {
@@ -47,7 +47,7 @@ func TestEntriesSortAsAStableSortByLayerThenOrderDoes(t *testing.T) {
 			return cmp.Or(cmp.Compare(shapes[a].Layer, shapes[b].Layer), cmp.Compare(shapes[a].Order, shapes[b].Order))
 		})
 
-		got := findShapeIndices(sorter.sort(shapes))
+		got := findEntryIndices(newShapeFrame(shapes, sorter).sorter.entries)
 
 		if !slices.Equal(got, want) {
 			t.Errorf("2000 shapes of %d layers sorted otherwise than a stable sort by layer, then order", layerCount)
@@ -74,7 +74,7 @@ func TestEntriesOfEqualKeysInARegroupedLayerRegroupByBatchInTheOrderTheirBatches
 	}
 	sorter := makeEntrySorter([]int32{5, 3, 5})
 
-	got := findShapeIndices(sorter.sort(shapes))
+	got := findEntryIndices(newShapeFrame(shapes, sorter).sorter.entries)
 
 	want := []uint32{
 		2, 6, 9, // layer 2 is not regrouped
@@ -86,12 +86,25 @@ func TestEntriesOfEqualKeysInARegroupedLayerRegroupByBatchInTheOrderTheirBatches
 	}
 }
 
-// findShapeIndices answers the place of each of entries' shapes among the
-// shapes sorted.
-func findShapeIndices(entries []sortedEntry) []uint32 {
+// findEntryIndices answers the place of each of entries among the entries
+// sorted.
+func findEntryIndices(entries []sortedEntry) []uint32 {
 	indices := make([]uint32, 0, len(entries))
 	for _, entry := range entries {
-		indices = append(indices, entry.shapeIndex)
+		indices = append(indices, entry.entryIndex)
 	}
 	return indices
+}
+
+// newShapeFrame answers the draw state of a frame of shapes alone, merged
+// in their order, each entry's place its shape's, with their keys, sorted
+// by sorter, whose entries are the frame's in sort order.
+func newShapeFrame(shapes []Shape, sorter entrySorter) *drawState {
+	state := &drawState{shapes: shapes, sorter: sorter}
+	for index := range shapes {
+		state.entries = append(state.entries, recordedEntry{kind: EntryKindShape, index: uint32(index)})
+	}
+	state.findEntryKeys()
+	state.sorter.sort(state.batchKeys)
+	return state
 }

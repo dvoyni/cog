@@ -43,8 +43,8 @@
 // inscribing with bars, overlapping or stretching it. A PixelPerfect camera,
 // for pixel art, one art pixel a world unit, floors its scale to a whole
 // number of pixels a unit, moves each entry whole onto the world-unit grid
-// and places its view on whole pixels. A camera of 4 Samples smooths its
-// entries' hard edges: it draws them into a multisampled texture of its
+// and places its view on whole pixels. A camera of a SampleCount of 4
+// smooths its entries' hard edges: it draws them into a multisampled texture of its
 // viewport, resolves that, and draws it over the viewport, which leaves the
 // rest of its target as it was. A game keeps the cameras it set to
 // convert a click through, reading the Targets resource, each target as it
@@ -55,7 +55,8 @@
 // canvas begins one command list for each distinct camera order, a camera's
 // pass in it for each camera of that order, those into textures first, its
 // entries an instanced draw for each batch, a run of entries in sort order
-// of one 2D material and one clip, each tint premultiplied and blended over what the
+// of one 2D material, one image, one filter and one clip, each image and
+// tint premultiplied and blended over what the
 // target holds, its colour encoded as sRGB where the target's format does
 // not encode it. A frame that sets no camera is seen through the default
 // one, which draws only a frame that recorded entries: every layer, into the
@@ -70,6 +71,18 @@
 //
 //	list.DrawShape(canvas.Shape{Kind: canvas.Stroke, Rect: r, Width: 2, Radius: 6, Tint: c})
 //	list.DrawShape(canvas.Shape{Kind: canvas.Line, From: a, To: b, Tint: c})
+//
+// A Sprite draws an Image, named by ImageFromFile with its options, such as its
+// pivot, through its transform about that pivot, at its size, its image's
+// in texels when zero, tinted, cropped where it lies and read through its
+// filter. ImageFromFile loads nothing: the first frame drawing the image loads
+// it, drawn in that frame, and a file render cannot load draws magenta:
+//
+//	hero := canvas.ImageFromFile("hero.png", canvas.ImageOptions{Pivot: canvas.PivotBottom})
+//	list.DrawSprite(canvas.Sprite{Image: hero, Transform: m.Translation2x3(x, y), Layer: layerUnits, Order: canvas.OrderOf(y)})
+//
+// Sprites of one image and one filter batch together, and the zero Image,
+// the white texel, batches with shapes.
 //
 // An entry's Clip is a rectangle of the world it draws nothing outside,
 // seen through each camera as the entry is, a scissor of its bounding box

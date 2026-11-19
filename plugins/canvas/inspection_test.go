@@ -20,10 +20,14 @@ func TestAnInspectedFrameAnswersItsCamerasBatchesInstanceCountsAndEntriesWithThe
 	h.Spawn(nil, nil, &orderedRecorder{name: "recorder", lateOrder: 10, earlyOrder: 11})
 	window := h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	first := canvas.Shape{Kind: canvas.Fill, Layer: 2, Order: -3}
-	second := canvas.Shape{Kind: canvas.Fill, Layer: 1, Order: 4}
+	second := canvas.Sprite{Layer: 1, Order: 4}
+	// third, a second shape of the list, moves the next lists' shapes past
+	// further than their sprites.
+	third := canvas.Shape{Kind: canvas.Fill, Layer: 3}
 	h.Record(func(list canvas.DrawList) {
 		list.DrawShape(first)
-		list.DrawShape(second)
+		list.DrawSprite(second)
+		list.DrawShape(third)
 	})
 
 	h.Step()
@@ -31,32 +35,37 @@ func TestAnInspectedFrameAnswersItsCamerasBatchesInstanceCountsAndEntriesWithThe
 	frame := h.Frames()[0]
 	// canvastest's list comes first; the recorder's late task, registered
 	// before its early one, runs after it. The entries are drawn in sort
-	// order, each keeping its list's place and its own.
+	// order, each keeping its list's place and its own, the sprites of the
+	// white texel in the shapes' batch.
 	entry := func(shape canvas.Shape, drawListIndex, indexInDrawList int) canvas.InspectedEntry {
 		return canvas.InspectedEntry{Kind: canvas.EntryKindShape, Shape: shape, Layer: shape.Layer, Order: shape.Order, DrawListIndex: drawListIndex, IndexInDrawList: indexInDrawList}
+	}
+	spriteEntry := func(sprite canvas.Sprite, drawListIndex, indexInDrawList int) canvas.InspectedEntry {
+		return canvas.InspectedEntry{Kind: canvas.EntryKindSprite, Sprite: sprite, Layer: sprite.Layer, Order: sprite.Order, DrawListIndex: drawListIndex, IndexInDrawList: indexInDrawList}
 	}
 	want := []canvas.InspectedCamera{{
 		Camera:   canvas.Camera{Clear: true, ClearColor: m.Color{A: 1}},
 		Window:   window,
 		Viewport: m.Recti{Width: 64, Height: 48},
 		Batches: []canvas.InspectedBatch{{
-			InstanceCount: 6,
+			InstanceCount: 7,
 			Entries: []canvas.InspectedEntry{
 				entry(canvas.Shape{Order: 10}, 1, 0),
 				entry(canvas.Shape{Order: 11}, 2, 0),
-				entry(second, 0, 1),
-				entry(canvas.Shape{Order: 10, Layer: 1}, 1, 1),
-				entry(canvas.Shape{Order: 11, Layer: 1}, 2, 1),
+				spriteEntry(second, 0, 1),
+				spriteEntry(canvas.Sprite{Order: 10, Layer: 1}, 1, 1),
+				spriteEntry(canvas.Sprite{Order: 11, Layer: 1}, 2, 1),
 				entry(first, 0, 0),
+				entry(third, 0, 2),
 			},
 		}},
 	}}
 	if !reflect.DeepEqual(frame.Cameras, want) {
-		t.Errorf("the frame inspected was seen through\n%+v\nwant the default camera's one batch of six entries in sort order\n%+v", frame.Cameras, want)
+		t.Errorf("the frame inspected was seen through\n%+v\nwant the default camera's one batch of seven entries in sort order\n%+v", frame.Cameras, want)
 	}
 	lists := findCanvasLists(frame.Render)
-	if frame.Render.Beat != frame.Beat || len(lists) != 1 || len(lists[0].Passes) != 1 || len(lists[0].Passes[0].Draws) != 1 || lists[0].Passes[0].Draws[0].InstanceCount != 6 {
-		t.Errorf("render's inspection beside it, of beat %d, holds canvas's lists %+v, want render's of the same beat, %d, with one draw of 6 instances", frame.Render.Beat.Tick, lists, frame.Beat.Tick)
+	if frame.Render.Beat != frame.Beat || len(lists) != 1 || len(lists[0].Passes) != 1 || len(lists[0].Passes[0].Draws) != 1 || lists[0].Passes[0].Draws[0].InstanceCount != 7 {
+		t.Errorf("render's inspection beside it, of beat %d, holds canvas's lists %+v, want render's of the same beat, %d, with one draw of 7 instances", frame.Render.Beat.Tick, lists, frame.Beat.Tick)
 	}
 }
 

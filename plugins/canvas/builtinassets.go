@@ -13,6 +13,10 @@ const (
 	// defaultShaderPath is the path in platform's FS of the default
 	// material's shader.
 	defaultShaderPath = assetPrefix + "/default.wgsl"
+	// viewportShaderPath is the path in platform's FS of the shader of the
+	// quads canvas draws over a camera's viewport: a clear, and what a
+	// multisampled camera resolved.
+	viewportShaderPath = assetPrefix + "/viewport.wgsl"
 	// spriteVertexEntryPoint is the include's vertex stage, for an entry
 	// drawn as a quad.
 	spriteVertexEntryPoint = "canvas_sprite_vertex"
@@ -22,11 +26,11 @@ const (
 	viewportVertexEntryPoint = "canvas_viewport_vertex"
 )
 
-// embeddedAssets are canvas's built-in assets: its include and its
-// materials' shaders, in its assets folder, each shader's binding
+// embeddedAssets are canvas's built-in assets: its include, its materials'
+// shaders and its viewport quads', in its assets folder, each shader's binding
 // declaration beside it, which render's cmd/declarebindings generates.
 //
-//go:generate go run github.com/dvoyni/cog/plugins/render/cmd/declarebindings assets/canvas.wgsl assets/default.wgsl
+//go:generate go run github.com/dvoyni/cog/plugins/render/cmd/declarebindings assets/canvas.wgsl assets/default.wgsl assets/viewport.wgsl
 //go:embed assets
 var embeddedAssets embed.FS
 

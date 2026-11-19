@@ -360,7 +360,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 - **No entry has an origin of its own.** An entry turning about another point composes a translation into its transform.
 - **A converter's output bounds place it.** Size and pivot are measured on the converter's input. The region drawn is its output, at its bounds within the input, as Go's `image.Image` carries them: a `SubImage` keeps its coordinates, and a grown image's `Bounds().Min` is negative.
   - A trimmed sprite stays where it was.
-  - A halo entry over `FromFile(path, ImageOptions{Convert: DistanceField{Spread: 8}})`, given the sprite entry's transform and size, lines up at any pivot and size, its field reaching 8 texels beyond the art. Without the rule it would line up only with a centred pivot at the natural size.
+  - A halo entry over `ImageFromFile(path, ImageOptions{Convert: DistanceField{Spread: 8}})`, given the sprite entry's transform and size, lines up at any pivot and size, its field reaching 8 texels beyond the art. Without the rule it would line up only with a centred pivot at the natural size.
   - A sheet's converter runs on each frame apart, measured on it, so a distance field never reads a neighbour's edges.
 - **`Tint`** is a straight-alpha `m.Color`, premultiplied by canvas, zero meaning white. It only multiplies. v1's tint ramp, neutral at `#6D6D6D` so that it could lighten, is gone: a flash to white is a material that takes its amount as an argument.
 - **`Material`:** zero means the default material.
@@ -378,18 +378,18 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 
 ### Images, the atlas, regions, gutters and mips
 
-([canvas: auto-atlasing, what is packed and when, and how a sprite names its region](https://github.com/dvoyni/cog/issues/866), with `SourceRect` and `ImageSize` from [canvas: what v1 offered that v2's design lacks](https://github.com/dvoyni/cog/issues/878), and `FromTexture` from [canvas prototype](https://github.com/dvoyni/cog/issues/871))
+([canvas: auto-atlasing, what is packed and when, and how a sprite names its region](https://github.com/dvoyni/cog/issues/866), with `SourceRect` and `ImageSize` from [canvas: what v1 offered that v2's design lacks](https://github.com/dvoyni/cog/issues/878), and `ImageFromTexture` from [canvas prototype](https://github.com/dvoyni/cog/issues/871))
 
 **Naming and residency**
 
-- **An `Image`** is a path in the FileSystem and its `ImageOptions`, interned into a plain, pointer-free, comparable value by `FromFile(path, options…)`.
-  - Making one loads nothing.
-  - `FromFile` takes at most one set of options, so the common case reads `FromFile("water.png")`. A second set is reported once and ignored.
+- **An `Image`** is a path in the FileSystem and its `ImageOptions`, interned into a plain, pointer-free, comparable value by `ImageFromFile(path, options…)`.
+  - Making one loads nothing. Each `ImageFromFile` takes the table's lock and hashes its path, so a game makes an `Image` once, as it names its art, and keeps it, rather than calling `ImageFromFile` for each entry it draws.
+  - `ImageFromFile` takes at most one set of options, so the common case reads `ImageFromFile("water.png")`. A second set is reported once and ignored.
   - Its options are its colour space (`ColorSpaceSrgb`, the zero, or `ColorSpaceLinear`), `Wrap` for the axes it tiles along, a sheet's `Grid{Columns, Rows}`, its `Pivot`, `SourceRect`, `Slice` and `SliceHollow`, and a converter.
   - Images are never released; a game's paths are a bounded set.
   - Every resource is a path: bytes that are not files go into a memory mount, and a user's generated pixels are loaded that way too.
 - **A sprite names its `Image`, and a `Frame` for a sheet,** counted along its rows, as v1 named sprites by path.
-  - **Its first draw loads it.** render picks up a load requested during recording at its second pickup point, so the image is decoded, packed and drawn in that frame.
+  - **Its first draw loads it.** render picks up a load requested during recording at its second pickup point, so the image is decoded, packed and drawn in that frame. The first frame recording it loads it even when every camera culls it, since its bounds need its size.
   - **The decode lands on that frame.** `Assets.Preload(image)` from any task moves it, for a loading screen.
   - **A failed load** draws render's magenta and is reported once.
 - **canvas owns residency.** There is no acquire, no release and no count.
@@ -408,7 +408,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - It reads only the file's header, with `image.DecodeConfig` through platform's FS, cached per path.
   - It answers the size in texels of a sheet's frame; of a converted image's input, since size and pivot are measured on the input; and of a render-texture image's texture, through render's `Inventory.TextureDescriptor`.
   - A missing file answers false and is reported once.
-- **A render texture is not packed.** `FromTexture(texture, options…)` interns one into an `Image`, drawn through a 2D-array view of its own, at layer 0. It takes its colour space from its options as any image does, so a Unorm texture holding encoded colour is marked `ColorSpaceSrgb` (see *Cameras*).
+- **A render texture is not packed.** `ImageFromTexture(texture, options…)` interns one into an `Image`, drawn through a 2D-array view of its own, at layer 0. It takes its colour space from its options as any image does, so a Unorm texture holding encoded colour is marked `ColorSpaceSrgb` (see *Cameras*).
 
 **Atlases and pages**
 
@@ -435,7 +435,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - The source is released afterwards.
 - **Converters:** `ImageOptions.Convert` is a `Converter`, an interface with `Convert(image.Image) image.Image`, implemented by comparable values.
   - `canvas.DistanceField{Spread}` bakes a distance field (see *Distance fields and profiles*), so the SDF pipeline runs through the general one.
-  - Equal converters share an image. One that is not comparable is refused at `FromFile` and reported.
+  - Equal converters share an image. One that is not comparable is refused at `ImageFromFile` and reported.
   - A converted image is read, decoded and converted on the CPU in the job that first asks for it, as render compiles a shader in its caller's job. It is then made into a texture with `MakeTexture` and packed like any other.
   - A user's own converters are plain structs: trimming, palette swaps, outline extraction.
 
@@ -551,7 +551,8 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   | `@group(2)` | canvas's instance data, read at `instance_index`, and the atlases a batch samples, an atlas changing from batch to batch |
 
   A custom shader declares only `@group(1)`, and the struct of its material argument.
-- **One include, `cog.canvas/canvas.wgsl`, declares every binding of groups 0 and 2,** with the functions over them: world to clip, snapping, a mesh's varyings with the region remap, the sampling helper and the output's encoding. canvas's own materials include it as a custom one does, so nothing of the camera is hard-coded where a custom shader cannot reach it. render interns layouts across shaders sharing an include, so every 2D material's pass parameters are one bind group, set once per camera pass.
+- **One include, `cog.canvas/canvas.wgsl`, declares every binding of groups 0 and 2,** with the functions over them: world to clip, snapping, a mesh's varyings with the region remap, the sampling helper and the output's encoding.
+  - **The sampling helper answers the image premultiplied,** premultiplying the texel it reads, since a texture holds straight alpha as render loads it from its file. The quads canvas draws over a camera's viewport, its clear and what a multisampled camera resolved, which is premultiplied already, read through a shader of their own, `cog.canvas/viewport.wgsl`, that does not. canvas's own materials include it as a custom one does, so nothing of the camera is hard-coded where a custom shader cannot reach it. render interns layouts across shaders sharing an include, so every 2D material's pass parameters are one bind group, set once per camera pass.
 - **The instance data**, `CanvasInstanceData`, is canvas's fixed part (its transform as `mat3x2<f32>`, its premultiplied tint, its region and its page, and what its draw mode, slice insets and crop need), then the argument. Its storage binding is `canvas_instances`.
 - **The include's instance data type names the shader's `Argument` struct,** since WGSL's declarations may come in any order. A material with no argument declares none, and canvas preprocesses a material's shader that has one with the define `CANVAS_ARGUMENT`, which the include's `#if` reads, since WGSL forbids an empty struct.
 - **The pass parameters:**
@@ -660,7 +661,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - The `meshfile.VertexType` constraint makes a type without it a compile error, and its stride is checked against the type's size. The one method serves mesh files and per-frame meshes alike, and canvas translates it into render's layout.
   - Its material brings a vertex stage that includes canvas's include and calls its functions: world to clip, snapping, and the region remap.
   - A fragment-only material on a mesh of another layout has no vertex stage to read it: the draw is refused, reported once, and skipped.
-- **A mesh file is named by a path,** interned by `MeshFromFile(path)` into a plain, pointer-free `MeshFile` handle, as `FromFile` interns an image, so an ECS component holds it. Nothing is made or released.
+- **A mesh file is named by a path,** interned by `MeshFileFromFile(path)` into a plain, pointer-free `MeshFile` handle, as `ImageFromFile` interns an image, so an ECS component holds it. Nothing is made or released.
   - A game puts mesh files into a memory mount of its own, `filesystems.NewMemoryFS`, bound as a read mount, or ships them in any read mount, so meshes a tool exported into an `embed.FS` load alike.
   - **It loads at its first draw,** in the recording job, through platform's FS and libs/meshfile, made into render buffers and a mesh, and draws that frame, as an image does.
   - It stays until it is unloaded by path or prefix with `Assets.Unload`, as images are. A mesh fills no atlas, so there is no ceiling and no eviction.
@@ -708,7 +709,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - Its target, `Window` (a `platform.Window`) or `Texture` (a texture the game made with render), both zero meaning the main window.
   - `Viewport`, a rectangle in fractions of the target, zero meaning all of it, so split screen is two cameras with a viewport each.
   - `Clear` and `ClearColor`, a linear colour, as a tint is.
-  - `Samples`, 1 or 4, zero meaning 1. It smooths every entry's hard edges at once.
+  - `SampleCount`, 1 or 4, zero meaning 1. It smooths every entry's hard edges at once.
     - A camera of 4 draws into a temporary multisampled texture of its viewport's size, cleared to its `ClearColor` or to transparent, resolves it into a temporary texture of that size, and draws that over its viewport, replacing what the viewport holds when the camera clears and blended over it otherwise.
     - Both textures take the target's format, a window's as `BGRA8Unorm`, and the camera's entries encode their output as the target would. Its composite, through the include's `canvas_viewport_vertex` with the clear material or a composite material blending normally, then draws what was resolved as it is, encoding nothing again. The multisampled texture is discarded once resolved.
     - Any other count panics in `SetCamera`.
@@ -800,7 +801,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 ([canvas: sprites, their transforms, and how they are ordered and batched](https://github.com/dvoyni/cog/issues/867), [canvas: custom 2D meshes](https://github.com/dvoyni/cog/issues/870))
 
 - **A batch is a run of sorted entries with the same material, atlas, filter and clip.** Sprites, shapes and glyphs are drawn as `DrawVertices(TriangleList, 6, DrawArgs{InstanceCount, FirstInstance})`, with no mesh, each instance reading its instance data at `instance_index`.
-- **Nothing else breaks a batch:** not the image, the frame, the page, the draw mode, the crop, the tint or the argument. A texture change breaks every engine's batch; a 2D-array atlas with its page carried per instance avoids it.
+- **Nothing else breaks a batch:** not the image, the frame, the page, the draw mode, the crop, the tint or the argument. The white texel's entries, shapes and sprites of the zero `Image`, take no filter, which changes no pixel of it, so a zero-image sprite batches with shapes whatever its `Filter`. A texture change breaks every engine's batch; a 2D-array atlas with its page carried per instance avoids it.
 - **Instance data** goes into temporary storage buffers, one per stride, so entries of every material share them. There is no cap beyond the binding's 128 MiB.
 - **Every draw of canvas's is instanced,** a lone sprite or mesh among them: each instance reads its instance data at `instance_index` from the draw's `FirstInstance`. canvas keeps no other path.
 - **Consecutive entries in sort order of one mesh file,** with one material, atlas, filter and clip, are one instanced draw, `Draw(mesh, DrawArgs{InstanceCount, FirstInstance})`. Different mesh files are different draws, and meshes never batch with sprites. A forest of one tree mesh, recorded in one bulk call, is one draw.

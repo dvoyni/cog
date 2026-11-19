@@ -107,10 +107,16 @@ type windowPicture struct {
 // when no capture arrives within 5s.
 func captureDrawing(t *testing.T, record func(list canvas.DrawList)) windowPicture {
 	t.Helper()
-	h := canvastest.NewHarness(t)
+	return captureHarnessDrawing(t, canvastest.NewHarness(t), record)
+}
+
+// captureHarnessDrawing is captureDrawing on h, a harness not yet spawned,
+// with plugins listed after the capture's own.
+func captureHarnessDrawing(t *testing.T, h *canvastest.Harness, record func(list canvas.DrawList), plugins ...kernel.Plugin) windowPicture {
+	t.Helper()
 	h.UseSoftwareAdapter()
 	capturer := &windowCapturer{}
-	h.Spawn(nil, nil, capturer, eventPump{})
+	h.Spawn(nil, nil, append([]kernel.Plugin{capturer, eventPump{}}, plugins...)...)
 	window := h.OpenWindow(platform.Size{Width: pictureWidth, Height: pictureHeight})
 	// A Wayland window gets a framebuffer only once the compositor's frame
 	// callback for its last present is read, a while after it, so the test

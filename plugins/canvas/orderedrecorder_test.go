@@ -7,8 +7,8 @@ import (
 
 // orderedRecorder is a test plugin registering two recording tasks off
 // canvas.FrameEvent: late, registered first, and early, registered second,
-// which runs first, since late is scheduled after it. Each draws two fills
-// of its order, at layers 0 and 1.
+// which runs first, since late is scheduled after it. Each draws a fill and
+// a sprite of the white texel of its order, at layers 0 and 1.
 type orderedRecorder struct {
 	testPlugin
 	name       kernel.PluginName
@@ -19,8 +19,8 @@ type orderedRecorder struct {
 func (r *orderedRecorder) Name() kernel.PluginName { return r.name }
 
 func (r *orderedRecorder) Init(configurator *kernel.Configurator, _ any) error {
-	late := configurator.RegisterTask1(drawTwoFills)
-	early := configurator.RegisterTask1(drawTwoFills)
+	late := configurator.RegisterTask1(drawFillAndSprite)
+	early := configurator.RegisterTask1(drawFillAndSprite)
 	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event canvas.FrameEvent) (canvas.FrameEvent, kernel.JobHandle) {
 		earlyJob := ex.Schedule(early, r.earlyOrder, event.Ready).Handle()
 		lateJob := ex.Schedule(late, r.lateOrder, earlyJob).Handle()
@@ -29,9 +29,10 @@ func (r *orderedRecorder) Init(configurator *kernel.Configurator, _ any) error {
 	return nil
 }
 
-// drawTwoFills draws two fills of order, at layers 0 and 1.
-func drawTwoFills(k *kernel.Kernel, order int32, list canvas.DrawList) kernel.NoResult {
+// drawFillAndSprite draws a fill and a sprite of the white texel of order,
+// at layers 0 and 1.
+func drawFillAndSprite(k *kernel.Kernel, order int32, list canvas.DrawList) kernel.NoResult {
 	list.DrawShape(canvas.Shape{Order: order})
-	list.DrawShape(canvas.Shape{Order: order, Layer: 1})
+	list.DrawSprite(canvas.Sprite{Order: order, Layer: 1})
 	return kernel.NoResult{}
 }

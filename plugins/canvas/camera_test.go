@@ -35,8 +35,7 @@ func TestACamerasLayerRunsAreItsRangesEntriesMergedWhereTheyOverlapOrMeet(t *tes
 	for layer := int32(3); layer >= -1; layer-- {
 		shapes = append(shapes, Shape{Layer: layer}, Shape{Layer: layer, Order: 1})
 	}
-	sorter := makeEntrySorter(nil)
-	entries := sorter.sort(shapes)
+	entries := newShapeFrame(shapes, makeEntrySorter(nil)).sorter.entries
 	for _, layers := range []struct {
 		name   string
 		ranges [4]LayerRange
@@ -59,7 +58,7 @@ func TestACamerasLayerRunsAreItsRangesEntriesMergedWhereTheyOverlapOrMeet(t *tes
 			}
 			var runLayers []int32
 			for _, entry := range run {
-				runLayers = append(runLayers, shapes[entry.shapeIndex].Layer)
+				runLayers = append(runLayers, shapes[entry.entryIndex].Layer)
 			}
 			runs = append(runs, runLayers)
 		}

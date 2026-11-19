@@ -8,19 +8,22 @@ importing [kernel](../../kernel), [metronome](../metronome),
 gfx.
 
 It is being built from [docs/design.md](docs/design.md). So far a frame's
-recording tasks record shapes and set cameras into draw lists of their own,
-which canvas merges in registration order, sorts by their sort key and
-draws through each camera, or the default camera into the main window, the
-first window opened of those still open, an instanced draw for each batch,
-a run of entries of one 2D material and one clip, each camera culling the
-entries outside its view. A frame can be inspected in canvas's
-terms, beside render's inspection of it.
+recording tasks record shapes and sprites and set cameras into draw lists
+of their own, which canvas merges in registration order, sorts by their
+sort key and draws through each camera, or the default camera into the main
+window, the first window opened of those still open, an instanced draw for
+each batch, a run of entries of one 2D material, one image, one filter and
+one clip, each camera culling the entries outside its view. A sprite's
+image is drawn from a texture of its own, render's of its file, until the
+atlas packs it. A frame can be inspected in canvas's terms, beside render's
+inspection of it.
 
 ## Shape
 
 - **`Plugin`**, from `NewPlugin()`, is canvas. **`Config`** is its part of
   the kernel's config, under `PluginName`: `RegroupedLayers`, the layers
-  whose entries of equal keys canvas may regroup by batch.
+  whose entries of equal keys canvas may regroup by batch, and
+  `DefaultFilter`, the filter of sprites naming none.
 - **`FrameEvent`** is the frame its users record, published inside each of
   render's `FrameEvent`s. A plugin that records schedules its recording tasks
   after its `Ready` and joins them into the out dependency it returns.
@@ -37,7 +40,7 @@ terms, beside render's inspection of it.
   `FitExpand`, `FitInscribe` (with bars), `FitOverlap` or `FitStretch`.
   A `PixelPerfect` camera, for pixel art, draws a whole number of pixels a
   unit, its entries snapped to the world-unit grid and its view placed on
-  whole pixels. A camera of 4 `Samples` smooths its entries' edges,
+  whole pixels. A camera of a `SampleCount` of 4 smooths its entries' edges,
   drawing them into a multisampled texture of its viewport, resolved and
   drawn over the viewport, so the rest of its target survives.
   `ScreenToWorld`, `WorldToScreen` and `VisibleRect` convert through the
@@ -57,6 +60,26 @@ terms, beside render's inspection of it.
   part of it. Entries are drawn by
   sort key, then by their draw list's registration order, then in the order
   recorded.
+- **`Sprite`** is an entry that draws an `Image` through its `m.Mat2x3`
+  `Transform` about its image's pivot, mirrored by a negative scale, at its
+  `Size`, zero its image's in texels and one zero axis keeping the aspect,
+  times its `Tint`, white when zero, with its `Crop` left out where it lies,
+  read through its `Filter`, `FilterLinear` or `FilterNearest`, zero
+  meaning `Config.DefaultFilter`, and drawn with its `Material` and its
+  `Clip`, at its sort key, as a shape is. `DrawSprite` records one, and
+  `DrawSprites` a slice, as an ECS chunk's column. Sprites of one image and
+  filter batch together, and the zero `Image`, the white texel, batches
+  with shapes.
+- **`ImageFromFile(path, options…)`** interns a path in platform's FS and its
+  **`ImageOptions`** (its `ColorSpace`, `ColorSpaceSrgb` or
+  `ColorSpaceLinear`, and its `Pivot`, a `Fraction` of its size from its
+  centre plus `Texels`, or one of the named pivots, `PivotCenter`,
+  `PivotTopLeft`, `PivotTop`, `PivotBottom`, `PivotBottomLeft` and
+  `PivotBottomRight`) into an `Image`, a plain value an ECS component holds.
+  It loads nothing: the first frame drawing it acquires its texture from
+  render, drawn in that frame, and a file render cannot load draws render's
+  magenta, reported once by render. A second set of options is ignored and
+  reported once.
 - **`OrderOf(y)`** maps a float onto an order of its own, in the same order,
   for y-sorting.
 - **`Material`** names a 2D material; the zero one, the default material,
@@ -66,13 +89,15 @@ terms, beside render's inspection of it.
   `ReadInspection` answers it in a task off **`InspectedEvent`**.
 - **`Inspection`** is one frame in canvas's terms: each camera that drew,
   the window it drew into and its viewport in pixels, its batches with their
-  material, their clip and the entries it did not cull, each entry with its sort key and
-  its draw list's place,
-  and render's `Inspection` of the frame beside it.
+  material, their image, their filter, their clip and the entries it did not
+  cull, each entry a shape or a sprite, with its sort key and its draw
+  list's place, and render's `Inspection` of the frame beside it.
 - **`cog.canvas/canvas.wgsl`** is canvas's include, declaring the camera's
   pass parameters at `@group(0)` and canvas's instance data and atlas at
-  `@group(2)`, with the functions over them, which canvas's own default
-  material, `cog.canvas/default.wgsl`, includes.
+  `@group(2)`, with the functions over them, `canvas_sample` answering an
+  entry's image premultiplied, which canvas's own default material,
+  `cog.canvas/default.wgsl`, includes, as does `cog.canvas/viewport.wgsl`,
+  the shader of the quads canvas draws over a camera's viewport.
 - **`Report`** is a mistake canvas finds at run time, logged once and carried
   past. Its `ReportKind` names it for tests.
 - **`canvastest`** runs canvas in a real kernel on render's fake GPU, with a
@@ -88,13 +113,16 @@ terms, beside render's inspection of it.
   drawing; a
   private draw state, holding each task's draw list, the frame's entries
   and cameras sorted and the inspection asked for; a private renderer,
-  holding the default, clear and composite materials, the white texel, the cameras
-  drawn, the instance data and the batches; and a private list of the open
-  windows.
+  holding the default, clear and composite materials, the white texel, each
+  image drawn and its texture, the cameras drawn, the instance data and the
+  batches; and a private list of the open windows. The images `ImageFromFile`
+  interns are a table of the process's, shared by every kernel, each kernel
+  acquiring their textures apart.
 - **Resources it reads from other plugins:** render's, for read through
   `render.Frame` and `render.Inventory`, `Assets` holding a `render.Frame`, `platform.FS`, for read through
-  `render.Inventory`, as the default material's shader loads, render's
-  texture descriptors through it, for a texture target's size and format,
+  `render.Inventory`, as canvas's shaders and sprites' images load, render's
+  texture descriptors through it, for a texture target's size and format
+  and an image's size,
   and `platform.WindowManager`, for read, for a window target's size, in the
   task that draws the frame.
 - **Task parameters it offers:** `DrawList`, and `Assets`.

@@ -18,11 +18,10 @@ func TestBatchesBreakOnlyWhereAnEntrysMaterialDiffersFromTheOneBefore(t *testing
 		{Order: 0, Material: firstMaterial, Layer: -1},
 		{Order: 4, Material: firstMaterial, Transform: m.Translation2x3(1, 2)},
 	}
-	sorter := makeEntrySorter(nil)
+	state := newShapeFrame(shapes, makeEntrySorter(nil))
+	entries := state.sorter.entries
 
-	entries := sorter.sort(shapes)
-
-	got, instances := appendBatches(nil, nil, entries, shapes)
+	got, instances := appendBatches(nil, nil, entries, state, nil)
 
 	want := []batch{
 		{key: batchKey{material: firstMaterial}, entries: entries[0:2], firstInstance: 0, instanceCount: 2},
@@ -34,7 +33,7 @@ func TestBatchesBreakOnlyWhereAnEntrysMaterialDiffersFromTheOneBefore(t *testing
 	}
 	var wantInstances []instanceData
 	for _, entry := range entries {
-		wantInstances = appendShapeInstances(wantInstances, &shapes[entry.shapeIndex])
+		wantInstances = appendShapeInstances(wantInstances, &shapes[entry.entryIndex])
 	}
 	if !slices.Equal(instances, wantInstances) {
 		t.Errorf("the batches' instances are %+v, want each shape's, in sort order, %+v", instances, wantInstances)
@@ -43,11 +42,11 @@ func TestBatchesBreakOnlyWhereAnEntrysMaterialDiffersFromTheOneBefore(t *testing
 
 func TestBatchesAppendedAfterAnotherCamerasBeginANewBatchEvenOfTheSameMaterial(t *testing.T) {
 	shapes := []Shape{{}, {Kind: Stroke}}
-	sorter := makeEntrySorter(nil)
-	entries := sorter.sort(shapes)
-	firstBatches, firstInstances := appendBatches(nil, nil, entries[:1], shapes)
+	state := newShapeFrame(shapes, makeEntrySorter(nil))
+	entries := state.sorter.entries
+	firstBatches, firstInstances := appendBatches(nil, nil, entries[:1], state, nil)
 
-	got, instances := appendBatches(firstBatches, firstInstances, entries[1:], shapes)
+	got, instances := appendBatches(firstBatches, firstInstances, entries[1:], state, nil)
 
 	want := []batch{
 		{entries: entries[0:1], firstInstance: 0, instanceCount: 1},
@@ -61,10 +60,10 @@ func TestBatchesAppendedAfterAnotherCamerasBeginANewBatchEvenOfTheSameMaterial(t
 func TestBatchesBreakWhereAnEntrysClipDiffersFromTheOneBefore(t *testing.T) {
 	clip := m.Rect{Width: 10, Height: 10}
 	shapes := []Shape{{Order: 1}, {Order: 2, Clip: clip}, {Order: 3, Clip: clip}, {Order: 4}}
-	sorter := makeEntrySorter(nil)
-	entries := sorter.sort(shapes)
+	state := newShapeFrame(shapes, makeEntrySorter(nil))
+	entries := state.sorter.entries
 
-	got, _ := appendBatches(nil, nil, entries, shapes)
+	got, _ := appendBatches(nil, nil, entries, state, nil)
 
 	want := []batch{
 		{entries: entries[0:1], firstInstance: 0, instanceCount: 1},

@@ -44,8 +44,9 @@ type Shape struct {
 	Order int32
 }
 
-// batchKey answers what the shape shares with the entries it batches with.
-func (s Shape) batchKey() batchKey {
+// batchKey answers what the shape shares with the entries it batches with:
+// it draws over the white texel, the zero Image, which no filter changes.
+func (s *Shape) batchKey() batchKey {
 	return batchKey{material: s.Material, clip: s.Clip}
 }
 

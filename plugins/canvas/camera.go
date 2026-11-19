@@ -89,7 +89,7 @@ type Camera struct {
 	// frame with no entries.
 	Clear      bool
 	ClearColor m.Color
-	// Samples is how many samples a pixel of the camera's entries takes, 1
+	// SampleCount is how many samples a pixel of the camera's entries takes, 1
 	// or 4, zero meaning 1, DrawList.SetCamera panicking at any other. A
 	// camera of 4 smooths every entry's hard edges at once: it draws into a
 	// temporary multisampled texture of its viewport's size, cleared to
@@ -101,7 +101,7 @@ type Camera struct {
 	// entries blend against what it drew alone: in a camera of 4 that does
 	// not clear, a material blending other than normally blends against
 	// transparent, not against what the target holds.
-	Samples uint32
+	SampleCount uint32
 	// Order is the order the camera draws in among every plugin's command
 	// lists: canvas begins one list for each distinct order of the frame's
 	// cameras, which render refuses and reports at an order another list

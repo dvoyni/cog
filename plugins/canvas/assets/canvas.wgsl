@@ -37,6 +37,10 @@ struct CanvasInstanceData {
 	// region is the entry's rectangle in its atlas page, its origin in xy
 	// and its size in zw, in texture coordinates.
 	region: vec4<f32>,
+	// crop is the part of the unit square an instance drawing all of it
+	// draws, its top left in xy and its bottom right in zw: all of it,
+	// (0, 0, 1, 1), but for a cropped sprite, which keeps its place.
+	crop: vec4<f32>,
 	// transform maps the unit square, the entry's quad, into the world.
 	transform: mat3x2<f32>,
 	page: u32,
@@ -132,11 +136,12 @@ fn canvas_width(instance_data: CanvasInstanceData) -> vec2<f32> {
 }
 
 // canvas_place_corner answers corner, a corner of the unit square, moved onto
-// the corner of the part of the square instance_data draws.
+// the corner of the part of the square instance_data draws: its crop of the
+// whole square, or its part of it.
 fn canvas_place_corner(instance_data: CanvasInstanceData, corner: vec2<f32>) -> vec2<f32> {
 	let part = instance_data.part;
 	if part == CANVAS_PART_WHOLE {
-		return corner;
+		return mix(instance_data.crop.xy, instance_data.crop.zw, corner);
 	}
 	let width = canvas_width(instance_data);
 	let size = max(instance_data.size, vec2<f32>(1e-30));
@@ -202,10 +207,12 @@ fn canvas_covers(in: CanvasVaryings) -> bool {
 	return canvas_instances[in.instance].radius <= 0.0 || canvas_shape_distance(in) <= 0.0;
 }
 
-// canvas_sample answers the entry's image at the fragment: its atlas page
-// sampled at uv.
+// canvas_sample answers the entry's image at the fragment, premultiplied:
+// its atlas page sampled at uv, whose texels hold straight alpha, as an
+// image's file does.
 fn canvas_sample(in: CanvasVaryings) -> vec4<f32> {
-	return textureSample(canvas_atlas, canvas_sampler, in.uv, canvas_instances[in.instance].page);
+	let texel = textureSample(canvas_atlas, canvas_sampler, in.uv, canvas_instances[in.instance].page);
+	return vec4<f32>(texel.rgb * texel.a, texel.a);
 }
 
 // canvas_encode_srgb encodes linear colour as sRGB.
@@ -254,7 +261,7 @@ fn canvas_sprite_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_in
 // whatever the camera's projection, and never snapped, its coordinates
 // spanning the instance's region from the viewport's top left. Only the
 // instance's tint, region and page are read. canvas draws a camera's clear
-// over its viewport through it.
+// over its viewport through it, and what a multisampled camera resolved.
 @vertex
 fn canvas_viewport_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance: u32) -> CanvasVaryings {
 	// The corners of canvas_sprite_vertex's two triangles.

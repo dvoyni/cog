@@ -12,19 +12,27 @@ import (
 // drawState is canvas's private state: the draw list of each task
 // declaring a DrawList, in registration order, whether a frame is open for
 // entries, the entries and cameras of the frame last sorted, merged from the
-// draw lists, and the inspector.
+// draw lists, with each entry's keys, and the inspector.
 type drawState struct {
 	// logger is the kernel's, where reports go.
 	logger *kernel.Logger
+	// defaultFilter is the filter of an entry naming none,
+	// Config.DefaultFilter's, never FilterDefault.
+	defaultFilter Filter
 	// recording is set from the job opening a frame for entries until the
 	// job sorting them.
 	recording atomic.Bool
 	// drawLists are added at registration, while the kernel is composed,
 	// and only read after.
 	drawLists []*drawList
-	// shapes are the frame's shapes, merged from the draw lists in their order,
-	// and replaced by the next frame's when it merges.
-	shapes []Shape
+	// entries are the frame's entries, merged from the draw lists in their
+	// order, each a shape of shapes or a sprite of sprites, merged alike;
+	// batchKeys are each entry's, at its index in entries. All are replaced
+	// by the next frame's when it merges.
+	entries   []recordedEntry
+	shapes    []Shape
+	sprites   []Sprite
+	batchKeys []batchKey
 	// cameras are the frame's cameras, merged from the draw lists in their
 	// order, in the order they draw, or the default camera for a frame of
 	// entries that set none, replaced by the next frame's when it merges.
@@ -35,7 +43,7 @@ type drawState struct {
 	inspector inspector
 	// frameInspected is set when the frame merged is written down for a
 	// pending request, and then drawListEnds holds, for each draw list, the
-	// index in shapes after its last shape.
+	// index in entries after its last entry.
 	frameInspected bool
 	drawListEnds   []int
 }
@@ -51,30 +59,54 @@ func (s *drawState) addDrawList() *drawList {
 	return added
 }
 
-// closeAndSort closes the frame to entries, replaces the shapes and the
+// closeAndSort closes the frame to entries, replaces the entries and the
 // cameras of the frame merged before with each draw list's, list after
-// list, emptying them, and sorts both: the shapes by sort key, and the
+// list, emptying them, and sorts both: the entries by sort key, and the
 // cameras in the order they draw, the default camera standing in when the
-// frame recorded shapes and set no camera. The frame is inspected when a
-// request is pending as it merges, and then where each draw list's shapes end is
-// kept.
+// frame recorded entries and set no camera. The frame is inspected when a
+// request is pending as it merges, and then where each draw list's entries
+// end is kept.
 func (s *drawState) closeAndSort() {
 	s.recording.Store(false)
 	s.frameInspected = s.inspector.requestPending.Load()
+	s.entries = s.entries[:0]
 	s.shapes = s.shapes[:0]
+	s.sprites = s.sprites[:0]
 	s.cameras = s.cameras[:0]
 	s.drawListEnds = s.drawListEnds[:0]
 	for _, taskDrawList := range s.drawLists {
-		s.shapes, s.cameras = taskDrawList.moveEntries(s.shapes, s.cameras)
+		taskDrawList.moveEntries(s)
 		if s.frameInspected {
-			s.drawListEnds = append(s.drawListEnds, len(s.shapes))
+			s.drawListEnds = append(s.drawListEnds, len(s.entries))
 		}
 	}
-	if len(s.cameras) == 0 && len(s.shapes) > 0 {
+	if len(s.cameras) == 0 && len(s.entries) > 0 {
 		s.cameras = append(s.cameras, defaultCamera)
 	}
 	slices.SortStableFunc(s.cameras, compareCameras)
-	s.sorter.sort(s.shapes)
+	s.findEntryKeys()
+	s.sorter.sort(s.batchKeys)
+}
+
+// findEntryKeys writes over batchKeys each entry's batch key, at its index
+// in entries, and over the sorter's entries each entry with its sort key,
+// in the order merged, for the sorter to sort.
+func (s *drawState) findEntryKeys() {
+	s.batchKeys = s.batchKeys[:0]
+	s.sorter.entries = s.sorter.entries[:0]
+	for index, entry := range s.entries {
+		var key sortKey
+		if entry.kind == EntryKindShape {
+			shape := &s.shapes[entry.index]
+			key = makeSortKey(shape.Layer, shape.Order)
+			s.batchKeys = append(s.batchKeys, shape.batchKey())
+		} else {
+			sprite := &s.sprites[entry.index]
+			key = makeSortKey(sprite.Layer, sprite.Order)
+			s.batchKeys = append(s.batchKeys, sprite.batchKey(s.defaultFilter))
+		}
+		s.sorter.entries = append(s.sorter.entries, sortedEntry{key: key, entryIndex: uint32(index)})
+	}
 }
 
 // makeInspection answers the frame sorted, of beat, in canvas's terms: each
@@ -91,25 +123,29 @@ func (s *drawState) makeInspection(beat metronome.Beat, cameraDraws []cameraDraw
 		for _, drawnBatch := range drawnCamera.batches {
 			inspectedEntries := make([]InspectedEntry, 0, len(drawnBatch.entries))
 			for _, entry := range drawnBatch.entries {
-				shapeIndex := int(entry.shapeIndex)
-				// The draw list holding the shape is the first to end after
+				entryIndex := int(entry.entryIndex)
+				// The draw list holding the entry is the first to end after
 				// it.
-				drawListIndex, _ := slices.BinarySearch(s.drawListEnds, shapeIndex+1)
+				drawListIndex, _ := slices.BinarySearch(s.drawListEnds, entryIndex+1)
 				drawListStart := 0
 				if drawListIndex > 0 {
 					drawListStart = s.drawListEnds[drawListIndex-1]
 				}
-				shape := s.shapes[shapeIndex]
-				inspectedEntries = append(inspectedEntries, InspectedEntry{
-					Kind:            EntryKindShape,
-					Shape:           shape,
-					Layer:           shape.Layer,
-					Order:           shape.Order,
-					DrawListIndex:   drawListIndex,
-					IndexInDrawList: shapeIndex - drawListStart,
-				})
+				recorded := s.entries[entryIndex]
+				inspectedEntry := InspectedEntry{Kind: recorded.kind, DrawListIndex: drawListIndex, IndexInDrawList: entryIndex - drawListStart}
+				if recorded.kind == EntryKindShape {
+					inspectedEntry.Shape = s.shapes[recorded.index]
+					inspectedEntry.Layer = inspectedEntry.Shape.Layer
+					inspectedEntry.Order = inspectedEntry.Shape.Order
+				} else {
+					inspectedEntry.Sprite = s.sprites[recorded.index]
+					inspectedEntry.Layer = inspectedEntry.Sprite.Layer
+					inspectedEntry.Order = inspectedEntry.Sprite.Order
+				}
+				inspectedEntries = append(inspectedEntries, inspectedEntry)
 			}
-			inspectedBatches = append(inspectedBatches, InspectedBatch{Material: drawnBatch.key.material, Clip: drawnBatch.key.clip, InstanceCount: drawnBatch.instanceCount, Entries: inspectedEntries})
+			key := drawnBatch.key
+			inspectedBatches = append(inspectedBatches, InspectedBatch{Material: key.material, Image: key.image, Filter: key.filter, Clip: key.clip, InstanceCount: drawnBatch.instanceCount, Entries: inspectedEntries})
 		}
 		inspection.Cameras = append(inspection.Cameras, InspectedCamera{
 			Camera:   drawnCamera.camera,

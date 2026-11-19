@@ -10,7 +10,7 @@ import (
 )
 
 // multisampledCameraSampleCount is the samples of a multisampled camera,
-// the one count above 1 a Camera's Samples takes.
+// the one count above 1 a Camera's SampleCount takes.
 const multisampledCameraSampleCount = 4
 
 // cameraDraw is one camera of a frame as it draws: the camera as set; its
@@ -94,7 +94,7 @@ func makeCameraDraw(inventory render.Inventory, manager *platform.WindowManager,
 	}
 	drawnCamera.view = view
 	encode := format != render.TextureFormatRGBA8UnormSrgb && format != render.TextureFormatBGRA8UnormSrgb
-	multisampled := camera.Samples == multisampledCameraSampleCount
+	multisampled := camera.SampleCount == multisampledCameraSampleCount
 	if multisampled {
 		drawnCamera.colorTargetOrigin = view.viewport.Min()
 	}
