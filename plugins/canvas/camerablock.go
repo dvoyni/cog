@@ -2,6 +2,7 @@ package canvas
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/dvoyni/cog/libs/m"
 )
@@ -16,23 +17,29 @@ type cameraBlock struct {
 	_                            uint32
 }
 
-// makeCameraBlock answers the pass parameters of a camera drawing into
-// viewport, in its target's pixels and not empty, each pixel pixelSize
-// world units across, its output encoded as sRGB when encode is set, for a
-// target whose format encodes nothing: the world's origin at the viewport's
-// centre, y down.
-func makeCameraBlock(viewport m.Recti, pixelSize float32, encode bool) cameraBlock {
-	if viewport.Width <= 0 || viewport.Height <= 0 || !(pixelSize > 0) {
-		panic(fmt.Sprintf("canvas: a camera's viewport is %+v pixels, each %v world units across, neither of which may be zero", viewport, pixelSize))
+// makeCameraBlock answers the pass parameters of a camera drawing through
+// view, its viewport not empty, its output encoded as sRGB when encode is
+// set, for a target whose format encodes nothing: world_to_clip maps the
+// world through the view onto the viewport's clip space, and pixel_size is
+// a pixel in world units along the view's axis of the smaller scale, so a
+// hairline never thins below a pixel.
+func makeCameraBlock(view *cameraView, encode bool) cameraBlock {
+	viewport := view.viewport
+	if viewport.Width <= 0 || viewport.Height <= 0 {
+		panic(fmt.Sprintf("canvas: a camera's viewport is %+v pixels, which may not be empty", viewport))
 	}
-	worldToClip := m.Scaling2x3(2/(float32(viewport.Width)*pixelSize), -2/(float32(viewport.Height)*pixelSize))
+	width := float32(viewport.Width)
+	height := float32(viewport.Height)
+	// pixelToClip maps the viewport's pixels onto clip space, y up.
+	pixelToClip := m.Translation2x3(-1-2*float32(viewport.X)/width, 1+2*float32(viewport.Y)/height).Mul(m.Scaling2x3(2/width, -2/height))
+	worldToClip := pixelToClip.Mul(view.worldToPixel)
 	clipToWorld, _ := worldToClip.Inverse()
 	block := cameraBlock{
 		worldToClip:    worldToClip,
 		clipToWorld:    clipToWorld,
-		pixelSize:      pixelSize,
+		pixelSize:      float32(1 / min(math.Abs(float64(view.scale.X)), math.Abs(float64(view.scale.Y)))),
 		viewportOrigin: [2]float32{float32(viewport.X), float32(viewport.Y)},
-		viewportSize:   [2]float32{float32(viewport.Width), float32(viewport.Height)},
+		viewportSize:   [2]float32{width, height},
 	}
 	if encode {
 		block.encode = 1

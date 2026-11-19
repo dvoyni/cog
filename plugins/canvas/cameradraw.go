@@ -10,16 +10,18 @@ import (
 )
 
 // cameraDraw is one camera of a frame as it draws: the camera as set; its
-// pass's colour target, its texture or else its window, the main window when
-// it named neither, cleared by the pass's load when it clears a viewport
-// covering the target; its viewport in the target's pixels and its pass
-// parameters; the runs of the frame's sorted entries its layers hold; its
-// batches, part of the renderer's; and, for a clear drawn over its
-// viewport, its instance in its command list's instance data.
+// target as it draws into it, its texture or else its window, the main
+// window when it named neither; its pass's colour target, that target,
+// cleared by the pass's load when it clears a viewport covering the target;
+// its view into the target and its pass parameters; the runs of the frame's
+// sorted entries its layers hold; its batches, part of the renderer's; and,
+// for a clear drawn over its viewport, its instance in its command list's
+// instance data.
 type cameraDraw struct {
 	camera        Camera
+	target        drawnTarget
 	colorTarget   render.ColorTarget
-	viewport      m.Recti
+	view          cameraView
 	block         cameraBlock
 	layerRuns     [4][]sortedEntry
 	batches       []batch
@@ -28,18 +30,15 @@ type cameraDraw struct {
 
 // makeCameraDraw answers how camera draws, its layer runs and batches still
 // to find, and whether it draws at all: its target, the texture it names or
-// else its window or mainWindow, sized from render's descriptor of the
-// texture or from manager's sizes of the window, a texture's pixel one world
-// unit and a window's point one, encoded wherever the target's format
-// encodes nothing, as a window's BGRA8Unorm framebuffer does not; and its
-// viewport placed in the target. A camera into a window not open or not
-// sized, or of an empty viewport, draws nothing; one naming both a window
-// and a texture, or a texture render does not hold, is reported once to
-// logger too.
+// else its window or mainWindow, measured from render's descriptor of the
+// texture or from manager's sizes of the window, its output encoded
+// wherever the target's format encodes nothing, as a window's BGRA8Unorm
+// framebuffer does not; and its view into the target. A camera into a
+// window not open or not sized, or with no view, as of an empty viewport,
+// draws nothing; one naming both a window and a texture, or a texture
+// render does not hold, is reported once to logger too.
 func makeCameraDraw(inventory render.Inventory, manager *platform.WindowManager, mainWindow platform.Window, logger *kernel.Logger, camera *Camera) (cameraDraw, bool) {
 	drawnCamera := cameraDraw{camera: *camera}
-	var width, height int
-	var pixelSize float32
 	encode := true
 	switch {
 	case camera.Texture != (render.Texture{}) && camera.Window != (platform.Window{}):
@@ -53,10 +52,7 @@ func makeCameraDraw(inventory render.Inventory, manager *platform.WindowManager,
 			logger.LogErrOnce(refusal.Error(), refusal)
 			return cameraDraw{}, false
 		}
-		drawnCamera.colorTarget.Texture = camera.Texture
-		width = int(descriptor.Width)
-		height = int(descriptor.Height)
-		pixelSize = 1
+		drawnCamera.target = drawnTarget{texture: camera.Texture, width: int(descriptor.Width), height: int(descriptor.Height), pixelsPerPoint: 1}
 		encode = descriptor.Format != render.TextureFormatRGBA8UnormSrgb && descriptor.Format != render.TextureFormatBGRA8UnormSrgb
 	default:
 		window := camera.Window
@@ -66,23 +62,22 @@ func makeCameraDraw(inventory render.Inventory, manager *platform.WindowManager,
 		if window == (platform.Window{}) {
 			return cameraDraw{}, false
 		}
-		size := manager.Size(window)
 		framebufferSize := manager.FramebufferSize(window)
-		if size.Width <= 0 || size.Height <= 0 || framebufferSize.Width <= 0 || framebufferSize.Height <= 0 {
+		scale := manager.Scale(window)
+		if framebufferSize.Width <= 0 || framebufferSize.Height <= 0 || !(scale > 0) {
 			return cameraDraw{}, false
 		}
-		drawnCamera.colorTarget.Window = window
-		width = framebufferSize.Width
-		height = framebufferSize.Height
-		pixelSize = float32(size.Width) / float32(framebufferSize.Width)
+		drawnCamera.target = drawnTarget{window: window, width: framebufferSize.Width, height: framebufferSize.Height, pixelsPerPoint: scale}
 	}
-	drawnCamera.viewport = camera.placeViewport(width, height)
-	if drawnCamera.viewport.Width == 0 || drawnCamera.viewport.Height == 0 {
+	view, ok := makeCameraView(camera, drawnCamera.target.width, drawnCamera.target.height, drawnCamera.target.pixelsPerPoint)
+	if !ok {
 		return cameraDraw{}, false
 	}
-	drawnCamera.block = makeCameraBlock(drawnCamera.viewport, pixelSize, encode)
-	if camera.Clear && drawnCamera.viewport == (m.Recti{Width: width, Height: height}) {
-		drawnCamera.colorTarget.Clear = true
+	drawnCamera.view = view
+	drawnCamera.block = makeCameraBlock(&view, encode)
+	clearsByLoad := camera.Clear && view.viewport == (m.Recti{Width: drawnCamera.target.width, Height: drawnCamera.target.height})
+	drawnCamera.colorTarget = render.ColorTarget{Window: drawnCamera.target.window, Texture: drawnCamera.target.texture, Clear: clearsByLoad}
+	if clearsByLoad {
 		drawnCamera.colorTarget.ClearColor = makeLoadedClearColor(camera.ClearColor, encode)
 	}
 	return drawnCamera, true

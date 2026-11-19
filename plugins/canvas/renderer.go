@@ -16,8 +16,10 @@ type renderer struct {
 	clearMaterial   render.Material
 	whiteTexel      render.Texture
 	// cameraDraws are the frame's cameras that draw, in the order they
-	// draw.
+	// draw, and mainWindow the main window they were drawn against, the
+	// target of those naming none.
 	cameraDraws []cameraDraw
+	mainWindow  platform.Window
 	// instances are the instance data of the command list being drawn, and
 	// batches the frame's batches, each camera's in turn; both are written
 	// over each frame.
@@ -61,6 +63,7 @@ func (r *renderer) init(inventory render.Inventory) {
 // and the texel at the first draw.
 func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, manager *platform.WindowManager, mainWindow platform.Window, state *drawState) {
 	r.cameraDraws = r.cameraDraws[:0]
+	r.mainWindow = mainWindow
 	r.batches = r.batches[:0]
 	for index := range state.cameras {
 		camera := &state.cameras[index]
@@ -93,7 +96,8 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, m
 // drawOrder draws cameraDraws, the cameras of one order in the order they
 // draw, of shapes, as one command list at that order: first each camera's
 // clear drawn over its viewport and its batches as instance data, in one
-// temporary buffer, then each camera's pass.
+// temporary buffer, then each camera's pass, its entries scissored to the
+// part of its viewport they draw into.
 func (r *renderer) drawOrder(frame render.Frame, cameraDraws []cameraDraw, shapes []Shape) {
 	r.instances = r.instances[:0]
 	for index := range cameraDraws {
@@ -117,11 +121,16 @@ func (r *renderer) drawOrder(frame render.Frame, cameraDraws []cameraDraw, shape
 		drawnCamera := &cameraDraws[index]
 		r.colorTargets[0] = drawnCamera.colorTarget
 		pass := list.BeginPass(render.PassDescriptor{Label: "canvas camera", ColorTargets: r.colorTargets[:]})
-		pass.SetViewport(render.Viewport{X: float32(drawnCamera.viewport.X), Y: float32(drawnCamera.viewport.Y), Width: float32(drawnCamera.viewport.Width), Height: float32(drawnCamera.viewport.Height), MaxDepth: 1})
+		viewport := drawnCamera.view.viewport
+		pass.SetViewport(render.Viewport{X: float32(viewport.X), Y: float32(viewport.Y), Width: float32(viewport.Width), Height: float32(viewport.Height), MaxDepth: 1})
 		pass.SetPassUniform("canvas_camera", drawnCamera.block)
 		if drawnCamera.camera.Clear && !drawnCamera.colorTarget.Clear {
 			r.drawInstances(&pass, r.clearMaterial, instances, drawnCamera.clearInstance, 1)
 		}
+		// The entries draw between FitInscribe's bars, which the clear
+		// covered.
+		drawnRect := drawnCamera.view.drawnRect
+		pass.SetScissorRectangle(render.ScissorRectangle{X: uint32(drawnRect.X), Y: uint32(drawnRect.Y), Width: uint32(drawnRect.Width), Height: uint32(drawnRect.Height)})
 		for _, drawnBatch := range drawnCamera.batches {
 			// The default material is the only one canvas makes yet.
 			r.drawInstances(&pass, r.defaultMaterial, instances, drawnBatch.firstInstance, drawnBatch.instanceCount)

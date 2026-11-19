@@ -54,6 +54,94 @@ func TestTwoCamerasOfHalfViewportsEachClearOnlyTheirHalf(t *testing.T) {
 	}
 }
 
+func TestAnInscribedCamerasBarsShowItsClearColourAndItsEntriesDrawOnlyBetweenThem(t *testing.T) {
+	// A logical size 100 units square inscribed, its white fill reaching far
+	// past it: into the whole window of 320×240 points, 240 points square
+	// between bars 40 wide left and right, the viewport cleared by the
+	// pass's load; and into the left half, 160 points square between bars
+	// 40 tall above and below, the clear drawn over it. The probes are in
+	// the window's points from its centre.
+	white := color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+	for _, inscribed := range []struct {
+		name     string
+		viewport m.Rect
+		probes   []probe
+	}{
+		{"into the whole window", m.Rect{}, []probe{
+			{"the left bar", m.Vec2{X: -150}, greenShown},
+			{"the left bar by the logical size", m.Vec2{X: -122, Y: 100}, greenShown},
+			{"the logical size by the left bar", m.Vec2{X: -118, Y: 100}, white},
+			{"the middle", m.Vec2{}, white},
+			{"the logical size by the right bar", m.Vec2{X: 118, Y: -100}, white},
+			{"the right bar by the logical size", m.Vec2{X: 122, Y: -100}, greenShown},
+			{"the right bar", m.Vec2{X: 150}, greenShown},
+		}},
+		{"into the left half", m.Rect{Width: 0.5, Height: 1}, []probe{
+			{"the top bar", m.Vec2{X: -80, Y: -110}, greenShown},
+			{"the top bar by the logical size", m.Vec2{X: -150, Y: -82}, greenShown},
+			{"the logical size by the top bar", m.Vec2{X: -150, Y: -78}, white},
+			{"the middle", m.Vec2{X: -80}, white},
+			{"the logical size by the bottom bar", m.Vec2{X: -10, Y: 78}, white},
+			{"the bottom bar by the logical size", m.Vec2{X: -10, Y: 82}, greenShown},
+			{"the bottom bar", m.Vec2{X: -80, Y: 110}, greenShown},
+		}},
+	} {
+		t.Run(inscribed.name, func(t *testing.T) {
+			picture := captureDrawing(t, func(list canvas.DrawList) {
+				list.SetCamera(canvas.Camera{Viewport: inscribed.viewport, Size: m.Vec2{X: 100, Y: 100}, Fit: canvas.FitInscribe, Clear: true, ClearColor: green})
+				list.DrawShape(canvas.Shape{Rect: m.Rect{X: -1000, Y: -1000, Width: 2000, Height: 2000}, Tint: m.White})
+			})
+
+			picture.expect(t, inscribed.probes)
+		})
+	}
+}
+
+func TestAHairlineIsOneTargetPixelWideAtTwoCameraZooms(t *testing.T) {
+	// Each half of the window is a camera's, at zoom 1 or 3, cleared to
+	// black, drawing a hairline stroke 120 points square about its
+	// viewport's centre and two hairlines 70.5 points from it, on a
+	// pixel's middle, each the same in the window's points whatever the
+	// zoom: world units are points over the zoom.
+	halves := []struct {
+		name   string
+		camera canvas.Camera
+		centre m.Vec2
+	}{
+		{"at zoom 1", canvas.Camera{Layers: canvas.MakeLayer(0), Viewport: m.Rect{Width: 0.5, Height: 1}, Zoom: 1, Clear: true, ClearColor: m.Color{A: 1}}, m.Vec2{X: -80}},
+		{"at zoom 3", canvas.Camera{Layers: canvas.MakeLayer(1), Viewport: m.Rect{X: 0.5, Width: 0.5, Height: 1}, Zoom: 3, Clear: true, ClearColor: m.Color{A: 1}}, m.Vec2{X: 80}},
+	}
+	picture := captureDrawing(t, func(list canvas.DrawList) {
+		for _, half := range halves {
+			list.SetCamera(half.camera)
+			unit := 1 / half.camera.Zoom
+			layer := half.camera.Layers[0].From
+			list.DrawShape(canvas.Shape{Kind: canvas.Stroke, Rect: m.Rect{X: -60 * unit, Y: -60 * unit, Width: 120 * unit, Height: 120 * unit}, Tint: m.White, Layer: layer})
+			list.DrawShape(canvas.Shape{Kind: canvas.Line, From: m.Vec2{X: -60 * unit, Y: 70.5 * unit}, To: m.Vec2{X: 60 * unit, Y: 70.5 * unit}, Tint: m.White, Layer: layer})
+			list.DrawShape(canvas.Shape{Kind: canvas.Line, From: m.Vec2{X: 70.5 * unit, Y: -60 * unit}, To: m.Vec2{X: 70.5 * unit, Y: 60 * unit}, Tint: m.White, Layer: layer})
+		}
+	})
+
+	for _, half := range halves {
+		at := func(x, y float32) m.Vec2 { return half.centre.Add(m.Vec2{X: x, Y: y}) }
+		for _, crossing := range []struct {
+			name     string
+			from, to m.Vec2
+		}{
+			{"the stroke's top side", at(0, -65), at(0, -55)},
+			{"the stroke's bottom side", at(0, 55), at(0, 65)},
+			{"the stroke's left side", at(-65, 0), at(-55, 0)},
+			{"the stroke's right side", at(55, 0), at(65, 0)},
+			{"the horizontal line", at(0, 66), at(0, 75)},
+			{"the vertical line", at(66, 0), at(75, 0)},
+		} {
+			if lit := picture.countLit(crossing.from, crossing.to); lit != 1 {
+				t.Errorf("%s, %s, is %d pixels wide from %v to %v, want 1", half.name, crossing.name, lit, crossing.from, crossing.to)
+			}
+		}
+	}
+}
+
 func TestCamerasAtTwoOrdersBeginAListAtEachAmongAnotherPluginsAndACameraAtATakenOrderIsReported(t *testing.T) {
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, nil, &orderTaker{order: 3})

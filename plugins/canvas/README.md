@@ -30,7 +30,12 @@ terms, beside render's inspection of it.
   `Layers` (`MakeLayer(layer)` for one, `MakeLayers(ranges...)` for up to
   four ranges) into its target, a `Window` or a `Texture`, the main window
   when it names neither, over its `Viewport`, in fractions of the target,
-  cleared there alone when it sets `Clear`.
+  cleared there alone when it sets `Clear`. Its `Pivot` of the viewport
+  shows its `Position`, turned by its `Rotation` and scaled by its `Zoom`;
+  its logical `Size` is fitted into the viewport by its `Fit`,
+  `FitExpand`, `FitInscribe` (with bars), `FitOverlap` or `FitStretch`.
+  `ScreenToWorld`, `WorldToScreen` and `VisibleRect` convert through the
+  camera as its target was last drawn, read from **`Targets`**.
   canvas begins one command list for each distinct `Order`, its cameras
   into textures first. A frame that sets no camera is seen through the
   default one, which draws only a frame with entries: every layer, the
@@ -68,7 +73,10 @@ terms, beside render's inspection of it.
 ## Kernel surface
 
 - **Resources it installs:** `Handlers` (`RecordFrame`, `TrackOpenedWindow`,
-  `ForgetClosedWindow`, `DeliverInspection`), to order handlers around; a
+  `ForgetClosedWindow`, `DeliverInspection`), to order handlers around;
+  `Targets`, each target's size and scale as it was last drawn, read by a
+  camera's conversions and written by canvas's own task after each frame's
+  drawing; a
   private draw state, holding each task's draw list, the frame's entries
   and cameras sorted and the inspection asked for; a private renderer,
   holding the default and clear materials, the white texel, the cameras

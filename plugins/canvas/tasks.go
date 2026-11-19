@@ -14,9 +14,9 @@ import (
 // inside render.FrameEvent, with render's beat and timing signals and that
 // job as its Ready; after the nested publication's out dependency, it
 // schedules sortEntriesTask, closing the frame and sorting the entries of
-// its draw lists, and after that drawTask with the frame's beat. It returns drawTask's job joined
-// with in.
-func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event render.FrameEvent, openFrameTask, sortEntriesTask *kernel.Task[kernel.NoArg, kernel.NoResult], drawTask *kernel.Task[metronome.Beat, kernel.NoResult]) (render.FrameEvent, kernel.JobHandle) {
+// its draw lists, after that drawTask with the frame's beat, and after that
+// copyTargetsTask. It returns copyTargetsTask's job joined with in.
+func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event render.FrameEvent, openFrameTask, sortEntriesTask, copyTargetsTask *kernel.Task[kernel.NoArg, kernel.NoResult], drawTask *kernel.Task[metronome.Beat, kernel.NoResult]) (render.FrameEvent, kernel.JobHandle) {
 	opened := ex.Schedule(openFrameTask, kernel.NoArg{}, event.Ready).Handle()
 	_, out := ex.Publish(in, FrameEvent{
 		Beat:        event.Beat,
@@ -26,7 +26,8 @@ func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event render.FrameEve
 	})
 	sorted := ex.Schedule(sortEntriesTask, kernel.NoArg{}, out, opened).Handle()
 	drawn := ex.Schedule(drawTask, event.Beat, sorted).Handle()
-	return event, ex.Join(in, drawn)
+	copied := ex.Schedule(copyTargetsTask, kernel.NoArg{}, drawn).Handle()
+	return event, ex.Join(in, copied)
 }
 
 // deliverInspection is Handlers.DeliverInspection: after in, it schedules
@@ -83,6 +84,15 @@ func draw(k *kernel.Kernel, beat metronome.Beat, frame render.Frame, inventory r
 		canvasState.inspector.record(canvasState.makeInspection(beat, drawing.cameraDraws))
 		frame.RequestInspection()
 	}
+	return kernel.NoResult{}
+}
+
+// copyTargets copies into Targets each target the frame's cameras drew
+// into, as they drew into it, under its write lock, so a reader sees one
+// account for its whole run.
+func copyTargets(k *kernel.Kernel, _ kernel.NoArg, targets kernel.Write[Targets], rendering kernel.Read[*renderer]) kernel.NoResult {
+	drawing := rendering.Get()
+	targets.Get().(*drawnTargets).record(drawing.mainWindow, drawing.cameraDraws)
 	return kernel.NoResult{}
 }
 

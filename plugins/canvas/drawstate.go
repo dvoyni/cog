@@ -113,8 +113,8 @@ func (s *drawState) makeInspection(beat metronome.Beat, cameraDraws []cameraDraw
 		}
 		inspection.Cameras = append(inspection.Cameras, InspectedCamera{
 			Camera:   drawnCamera.camera,
-			Window:   drawnCamera.colorTarget.Window,
-			Viewport: drawnCamera.viewport,
+			Window:   drawnCamera.target.window,
+			Viewport: drawnCamera.view.viewport,
 			Batches:  inspectedBatches,
 		})
 	}

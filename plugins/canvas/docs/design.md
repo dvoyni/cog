@@ -735,10 +735,13 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - A zero on one axis follows the viewport's aspect ratio. `Size{0, 1080}` is 1080 units tall at any width, which replaces v1's fixed-width and fixed-height modes.
 - **`Fit` fits it into a viewport of another shape:**
   - `FitExpand`, zero: the smaller scale, the longer axis showing more of the world, Godot's default for projects created from 4.7.
-  - `FitInscribe`: the smaller scale, the rest bars, scissored and filled with `ClearColor`, which v1 could do neither of.
+  - `FitInscribe`: the smaller scale, the rest bars, which v1 could do neither of. The entries are scissored to the logical size between the bars, each bar rounded to pixels alike. The bars are the camera's viewport, so a camera that clears fills them with `ClearColor` as it clears the rest, and one that does not leaves them as the target holds them, so a UI inscribed over a 3D scene shows the scene in its bars.
   - `FitOverlap`: the larger scale, the edges cut off.
   - `FitStretch`: each axis its own scale.
-- **`Zoom` applies on top of the fit.**
+- **`Zoom` applies on top of the fit,** and leaves `FitInscribe`'s bars where they are.
+- **The projection is built from the camera and its measured target alone,** the target's size in pixels and its pixels to a point, by the drawing and the conversions alike, so a click converts through the projection drawn. The world turns against the camera's `Rotation` about `Position`, which is scaled along the view's axes and lands on the pivot.
+  - `Rotation` is in radians from +X towards +Y, as `m.Rotation2x3` turns an entry, so the world shows turned the other way.
+  - The pass parameters' `pixel_size` is a pixel in world units along the view's axis of the smaller scale: under `FitStretch` a hairline is one pixel along that axis and wider along the other, never thinner than a pixel.
 - **`PixelPerfect` is a setting of any camera,** zero meaning off, for pixel art.
   - **The scale, fit and zoom together, is floored to a whole number of framebuffer pixels per world unit,** at least 1, so DPI counts: a 320×180 logical size draws 6 px a unit in a 1080p window, and 12 on a display of scale 2.
   - `FitExpand` and `FitInscribe` floor it, so the rest shows more of the world or becomes bars. `FitOverlap` rounds it up, so it still covers. `FitStretch`, whose pixels would not be square, draws as `FitInscribe`, reported once.
@@ -781,7 +784,9 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - `ScreenToWorld(point, targets)` and `WorldToScreen(point, targets)`, in target points, as platform's pointer events give them;
   - `VisibleRect(targets)`, the world rectangle the camera sees, its bounding box when it rotates, which canvas culls against and a game spawns just outside of.
 - **Each takes `canvas.Targets`,** a resource of reads alone holding each target's size and scale as it was last drawn: `Window(window) (size, scale, drawn)` in points, and `Texture(texture) (size, drawn)` in pixels. canvas's Targets task writes it once a frame, after the drawing, so a click converts through what the player saw.
-- **Each answers whether the point lies in the viewport of a target drawn.** A target not yet drawn has no entry, and a conversion through it answers false.
+- **Each answers whether the point lies in the viewport of a target drawn,** but `FitInscribe`'s bars. A target not yet drawn has no entry, and a conversion through it answers false; a point outside the viewport converts all the same, for a drag that leaves it.
+  - The zero window answers the main window of the frame last drawn, the target of a camera naming none.
+  - A window's account keeps its framebuffer's pixels, and answers its size as those over its scale, so a conversion rebuilds the very pixels drawn.
 - **A game keeps its own cameras to convert a click,** since canvas forgets them, which canvas's guide says. A conversion reads this frame's camera against its target as it was last drawn. A click is routed by trying a frame's cameras from the highest `Order` down.
 
 ### Batching and drawing

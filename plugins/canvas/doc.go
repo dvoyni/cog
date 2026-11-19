@@ -37,6 +37,15 @@
 //
 //	list.SetCamera(canvas.Camera{Layers: canvas.MakeLayers(canvas.LayerRange{From: layerGround, To: layerUnits + 1}), Viewport: m.Rect{Width: 0.5, Height: 1}, Clear: true, ClearColor: sky})
 //
+// A camera's Pivot of its viewport shows its Position, turned by its
+// Rotation and scaled by its Zoom; its logical Size, the area of the world it
+// is meant to show, is fitted into the viewport by its Fit, expanding,
+// inscribing with bars, overlapping or stretching it. A game keeps the
+// cameras it set to convert a click through, reading the Targets resource,
+// each target as it was last drawn:
+//
+//	world, inside := camera.ScreenToWorld(click, targets.Get())
+//
 // canvas begins one command list for each distinct camera order, a camera's
 // pass in it for each camera of that order, those into textures first, its
 // entries an instanced draw for each batch, a run of entries in sort order

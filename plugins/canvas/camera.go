@@ -43,11 +43,26 @@ func MakeLayers(ranges ...LayerRange) [4]LayerRange {
 
 // Camera is a view of the frame's entries into a target, a plain value set
 // for one frame with DrawList.SetCamera and forgotten once drawn, as entries
-// are: a game computes the camera it wants each frame. Its zero value sees
-// every layer, into the whole of the main window, clearing nothing, at order
-// 0. The world's origin lies at its viewport's centre, y down, one world
-// unit to a point of a window or to a pixel of a texture.
+// are: a game computes the camera it wants each frame, and keeps it to
+// convert a click through. Its zero value sees every layer, into the whole
+// of the main window, clearing nothing, at order 0, the world's origin at
+// its viewport's centre, y down, one world unit to a point of a window or
+// to a pixel of a texture.
 type Camera struct {
+	// Position is the world point the camera's Pivot shows. Rotation turns
+	// the camera about it, in radians from +X towards +Y, as Rotation2x3
+	// turns an entry, so the world shows turned the other way. Zoom scales
+	// the view about it on top of the fit, zero meaning 1: at 2 the world
+	// shows twice as large.
+	Position m.Vec2
+	Rotation float32
+	Zoom     float32
+	// Pivot is the point of the viewport that shows Position, and that
+	// Rotation and Zoom turn and scale about, as a fraction of the viewport
+	// from its centre, zero meaning the centre; under FitInscribe, of the
+	// part between the bars. {-0.5, -0.5}, its top left, makes a UI camera
+	// whose world coordinates are its viewport's points.
+	Pivot m.Vec2
 	// Layers are the layers the camera draws, each range half-open: an
 	// empty range is unused, and four empty ones mean every layer.
 	// MakeLayer answers the four holding one layer, and MakeLayers those
@@ -68,9 +83,10 @@ type Camera struct {
 	// screen is two cameras, a viewport each.
 	Viewport m.Rect
 	// Clear clears the camera's viewport to ClearColor, a linear colour
-	// encoded as the camera's output is, before it draws, and never the
-	// rest of its target, so the other half of a split screen survives. A
-	// camera that clears draws even in a frame with no entries.
+	// encoded as the camera's output is, before it draws, FitInscribe's
+	// bars included, and never the rest of its target, so the other half
+	// of a split screen survives. A camera that clears draws even in a
+	// frame with no entries.
 	Clear      bool
 	ClearColor m.Color
 	// Order is the order the camera draws in among every plugin's command
@@ -81,12 +97,93 @@ type Camera struct {
 	// then in the order they were set, by their draw lists' order and then
 	// their calls'.
 	Order render.Order
+	// Size is the camera's logical size, the area of the world it is meant
+	// to show, which Fit fits into its viewport. Zero on both axes is the
+	// viewport's own size, one unit to a point of a window or a pixel of a
+	// texture, so each half of a split screen shows half the window's
+	// world; zero on one axis follows the viewport's aspect ratio, so
+	// Size{Y: 1080} is 1080 units tall at any width.
+	Size m.Vec2
+	Fit  Fit
 }
 
 // defaultCamera is the camera a frame that records entries and sets no
 // camera is seen through: every layer, into the whole main window, cleared
 // to opaque black, so it never shows a stale framebuffer, at order 0.
 var defaultCamera = Camera{Clear: true, ClearColor: m.Color{A: 1}}
+
+// ScreenToWorld answers the world point point shows, a point of the
+// camera's target in a window's points or a texture's pixels, as platform's
+// pointer events give a window's, through the camera's projection into the
+// target as targets last saw it drawn, and whether the camera's entries
+// draw there: in its viewport, but FitInscribe's bars. A target canvas has
+// not drawn into, or a camera whose target is refused, answers false and the
+// zero point. A click is routed by trying a frame's cameras from the
+// highest Order down.
+func (c *Camera) ScreenToWorld(point m.Vec2, targets Targets) (m.Vec2, bool) {
+	view, pixelsPerPoint, ok := c.findView(targets)
+	if !ok {
+		return m.Vec2{}, false
+	}
+	pixel := point.MulS(pixelsPerPoint)
+	// The camera's entries draw in its viewport, but its bars, their far
+	// edges outside, so an edge two viewports share is one camera's.
+	drawnRect := view.drawnRect.Float()
+	inside := pixel.X >= drawnRect.X && pixel.X < drawnRect.X+drawnRect.Width && pixel.Y >= drawnRect.Y && pixel.Y < drawnRect.Y+drawnRect.Height
+	return view.pixelToWorld.TransformPoint(pixel), inside
+}
+
+// WorldToScreen answers where point, a point of the world, shows in the
+// camera's target, in a window's points or a texture's pixels, through the
+// camera's projection into the target as targets last saw it drawn, and
+// whether the camera's entries draw there, as ScreenToWorld does.
+func (c *Camera) WorldToScreen(point m.Vec2, targets Targets) (m.Vec2, bool) {
+	view, pixelsPerPoint, ok := c.findView(targets)
+	if !ok {
+		return m.Vec2{}, false
+	}
+	pixel := view.worldToPixel.TransformPoint(point)
+	drawnRect := view.drawnRect.Float()
+	inside := pixel.X >= drawnRect.X && pixel.X < drawnRect.X+drawnRect.Width && pixel.Y >= drawnRect.Y && pixel.Y < drawnRect.Y+drawnRect.Height
+	return pixel.DivS(pixelsPerPoint), inside
+}
+
+// VisibleRect answers the world rectangle the camera's entries draw into,
+// its bounding box when the camera turns, through the camera's projection
+// into its target as targets last saw it drawn, and whether that target was
+// drawn, as ScreenToWorld does: what a game spawns just outside of.
+func (c *Camera) VisibleRect(targets Targets) (m.Rect, bool) {
+	view, _, ok := c.findView(targets)
+	if !ok {
+		return m.Rect{}, false
+	}
+	return view.findVisibleRect(), true
+}
+
+// findView answers the camera's view into its target as targets last saw
+// it drawn, that target's pixels to a point, and whether it has one: none
+// for a target not drawn, a camera naming both a window and a texture, or
+// one with no view there.
+func (c *Camera) findView(targets Targets) (cameraView, float32, bool) {
+	var size m.Vec2
+	pixelsPerPoint := float32(1)
+	var drawn bool
+	switch {
+	case c.Texture != (render.Texture{}) && c.Window != (platform.Window{}):
+		return cameraView{}, 0, false
+	case c.Texture != (render.Texture{}):
+		size, drawn = targets.Texture(c.Texture)
+	default:
+		size, pixelsPerPoint, drawn = targets.Window(c.Window)
+	}
+	if !drawn {
+		return cameraView{}, 0, false
+	}
+	// Targets holds a window's size in points, its pixels a whole number.
+	pixels := size.MulS(pixelsPerPoint).Round().Int()
+	view, ok := makeCameraView(c, pixels.X, pixels.Y, pixelsPerPoint)
+	return view, pixelsPerPoint, ok
+}
 
 // findLayerRuns answers the runs of entries, the frame's in sort order,
 // whose layers the camera draws, in sort order: each range's entries, one
@@ -160,3 +257,24 @@ func compareCameras(a, b Camera) int {
 	}
 	return cmp.Or(cmp.Compare(a.Order, b.Order), cmp.Compare(drawsIntoWindow(a), drawsIntoWindow(b)))
 }
+
+// Fit is how a camera fits its logical size into a viewport of another
+// shape.
+type Fit uint8
+
+const (
+	// FitExpand, the zero Fit, scales the logical size to fit inside the
+	// viewport, the viewport's longer axis showing more of the world.
+	FitExpand Fit = iota
+	// FitInscribe scales it as FitExpand does and draws the logical size
+	// alone, centred, the rest of the viewport bars, cleared to ClearColor
+	// by a camera that clears and left as the target holds them by one that
+	// does not.
+	FitInscribe
+	// FitOverlap scales it to cover the viewport, its edges cut off.
+	FitOverlap
+	// FitStretch scales each axis on its own to fill the viewport, so a
+	// world unit is no longer square, and a hairline is one pixel wide
+	// along the axis of the smaller scale and wider along the other.
+	FitStretch
+)
