@@ -85,8 +85,11 @@
 // An atlas is one 2D-array texture whose layers are pages of
 // Config.AtlasPageSize, each image a cell of its own, premultiplied, its
 // gutter continuing its edges, so linear filtering never reaches a
-// neighbour; an image no page holds is packed into an atlas of its own,
-// exactly its size with no gutter, its sampler clamping at its edge.
+// neighbour. A full atlas doubles its pages, to Config.AtlasLayerCeiling,
+// where it evicts the images drawn least lately, never one drawn this
+// frame; an image wider or taller than Config.OwnTextureSize, or one no page
+// holds, is drawn from a texture of its own, exactly its size with no
+// gutter, its sampler clamping at its edge. Nothing is refused for good.
 // Sprites of any images of one atlas batch together while their filter is
 // one, and shapes with them: shapes, and the zero Image, draw the sRGB
 // sprite atlas's white texel, which takes no filter.
@@ -99,6 +102,13 @@
 // of it, so an entry no camera sees costs only its recording:
 //
 //	list.DrawShape(canvas.Shape{Kind: canvas.Fill, Rect: line, Tint: c, Clip: logBox})
+//
+// A task loads an image ahead of its first draw, unloads a level's images
+// and sizes an image before it is drawn through its Assets parameter:
+//
+//	assets.Preload(hero)
+//	assets.Unload("level1/")
+//	size, ok := assets.ImageSize(hero)
 //
 // A tool asks for an inspection of the next frame through its Assets
 // parameter, and reads it in a task off InspectedEvent: each camera the frame

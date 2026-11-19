@@ -1,6 +1,17 @@
 package canvas
 
-import "github.com/dvoyni/cog/plugins/render"
+import (
+	"strings"
+
+	"github.com/dvoyni/cog/plugins/render"
+)
+
+// isUnder answers whether path is one Unload(unloaded) unloads: unloaded
+// itself, or, when unloaded ends in a slash, a path in the folder it names,
+// so Unload("level1/") unloads "level1/hero.png" and not "level10/hero.png".
+func isUnder(path, unloaded string) bool {
+	return path == unloaded || strings.HasSuffix(unloaded, "/") && strings.HasPrefix(path, unloaded)
+}
 
 // imageKey is what ImageFromFile interns: the image's path, its options, and
 // whether ImageFromFile was given more sets of options, which it ignored.

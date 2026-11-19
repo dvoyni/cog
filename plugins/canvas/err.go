@@ -22,8 +22,26 @@ const (
 	ReportKindPixelPerfectStretch
 	// ReportKindImageOptionsIgnored is an image ImageFromFile was given more than
 	// one set of options for, drawn with the first. It is reported once for
-	// each path, at the image's first draw.
+	// each path, at the image's first draw, and again after the path is
+	// unloaded.
 	ReportKindImageOptionsIgnored
+	// ReportKindAtlasFull is a sprite atlas at its ceiling of pages, every
+	// image it holds drawn this frame, so an image that fits on none of its
+	// pages is drawn from a texture of its own. It is reported once for
+	// each atlas.
+	ReportKindAtlasFull
+	// ReportKindImageHeaderUnread is an image whose file's header
+	// Assets.ImageSize could not read, which it answered false. It is
+	// reported once for each path, until the path is unloaded.
+	ReportKindImageHeaderUnread
+)
+
+// The keys canvas logs a report once under are one of these, then the
+// report's subject: an image's path, or a sprite atlas's label.
+const (
+	imageOptionsIgnoredLogKey = "canvas: image options ignored: "
+	imageHeaderUnreadLogKey   = "canvas: image header unread: "
+	atlasFullLogKey           = "canvas: sprite atlas full: "
 )
 
 // pixelPerfectStretchReport is the report of a pixel-perfect camera's

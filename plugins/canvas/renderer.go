@@ -1,8 +1,10 @@
 package canvas
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
@@ -14,14 +16,19 @@ import (
 // render, and records them: the default material, the clear, composite and
 // pack materials and the sRGB sprite atlas, holding the white texel shapes
 // sample, made at canvas's first draw; the linear sprite atlas, made at the
-// first image needing it; each image drawn so far, and those packed whose
-// cells are still to fill; and what each draw reuses from the frame
+// first image needing it; each image drawn so far, the images packed whose cells are still to fill, and the atlases grown
+// whose pages are still to copy; and what each draw reuses from the frame
 // before, so a steady frame allocates nothing: the cameras drawn, the
 // entries' keys, the instance data and the batches.
 type renderer struct {
 	// atlasPageSize is the side of a sprite atlas's pages,
-	// Config.AtlasPageSize's, never zero.
-	atlasPageSize uint32
+	// Config.AtlasPageSize's, atlasLayerCeiling the most pages it grows to,
+	// Config.AtlasLayerCeiling's, and ownTextureSize the side past which an
+	// image is drawn from a texture of its own, Config.OwnTextureSize's,
+	// none of them zero.
+	atlasPageSize     uint32
+	atlasLayerCeiling uint32
+	ownTextureSize    uint32
 	// defaultMaterial, clearMaterial, compositeMaterial, packMaterial and
 	// srgbAtlas are zero until made, and linearAtlas until an image needs
 	// it.
@@ -32,15 +39,26 @@ type renderer struct {
 	srgbAtlas         *atlas
 	linearAtlas       *atlas
 	// drawnImages are the images drawn, each at its Image's index, the
-	// zero Image's the white texel's, and one not yet drawn of no size;
-	// packedImages are those packed, of no pivot, by their key of the
-	// options that change their pixels alone, which images differing only
-	// in their pivot share.
+	// zero Image's the white texel's, and one not packed of no size;
+	// packedImages are those packed, by their key of the options that
+	// change their pixels alone, which images differing only in their
+	// pivot share; the white texel is none of them, so nothing evicts it.
 	drawnImages  []drawnImage
-	packedImages map[imageKey]drawnImage
+	packedImages map[imageKey]*packedImage
+	// drawnFrameCount counts the frames drawCameras drew, the frame being drawn
+	// included, so a packed image last drawn in it is not evicted.
+	drawnFrameCount uint64
 	// packings are the images packed whose cells a command list is still
-	// to fill, kept from the frame that packed them until one does.
+	// to fill, and growths the atlases grown whose pages it is still to
+	// copy, first, both kept from the frame that made them until one does.
 	packings []atlasPacking
+	growths  []atlasGrowth
+	// unpackedSprites are the indexes of the frame's sprites whose images
+	// were not packed as the frame began, and evictionCandidates the
+	// images a full atlas may evict, in the order it evicts them, both
+	// written over as they are needed.
+	unpackedSprites    []uint32
+	evictionCandidates []evictionCandidate
 	// cameraDraws are the frame's cameras that draw, in the order they
 	// draw, and mainWindow the main window they were drawn against, the
 	// target of those naming none.
@@ -62,10 +80,18 @@ type renderer struct {
 }
 
 // newRenderer answers a renderer that has drawn nothing, its sprite atlases'
-// pages atlasPageSize texels square, holding the zero Image's drawn image,
-// placed in the white texel once made.
-func newRenderer(atlasPageSize uint32) *renderer {
-	return &renderer{atlasPageSize: atlasPageSize, drawnImages: []drawnImage{{}}, packedImages: map[imageKey]drawnImage{}}
+// pages atlasPageSize texels square, growing to atlasLayerCeiling pages, an
+// image wider or taller than ownTextureSize drawn from a texture of its
+// own, holding the zero Image's drawn image, placed in the white texel once
+// made.
+func newRenderer(atlasPageSize, atlasLayerCeiling, ownTextureSize uint32) *renderer {
+	return &renderer{
+		atlasPageSize:     atlasPageSize,
+		atlasLayerCeiling: atlasLayerCeiling,
+		ownTextureSize:    ownTextureSize,
+		drawnImages:       []drawnImage{{}},
+		packedImages:      map[imageKey]*packedImage{},
+	}
 }
 
 // init makes the default material, over the default shader, which it keeps
@@ -114,7 +140,7 @@ func (r *renderer) init(inventory render.Inventory) {
 	cellSide := whiteRegion.Width + 2*atlasGutter
 	cell := render.TextureRegion{Layer: whiteRegion.Layer, X: whiteRegion.X - atlasGutter, Y: whiteRegion.Y - atlasGutter, Width: cellSide, Height: cellSide}
 	inventory.WriteTexture(r.srgbAtlas.texture, cell, slices.Repeat([]byte{255}, int(4*cellSide*cellSide)))
-	r.drawnImages[0] = makeDrawnImage(r.srgbAtlas, whiteRegion)
+	r.drawnImages[0] = makeDrawnImage(&packedImage{atlas: r.srgbAtlas, region: whiteRegion})
 }
 
 // drawCameras draws the entries state sorted through each of its cameras,
@@ -131,7 +157,8 @@ func (r *renderer) init(inventory render.Inventory) {
 // camera, and packs a sprite's image at the first frame recording it,
 // whose lowest order's command list fills its cell before any camera's
 // pass. Once each entry's batch key is found, it regroups state's sorted
-// entries by them.
+// entries by them. First, whether a camera is set or not, it unloads and
+// preloads what state's residency requests ask.
 func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, manager *platform.WindowManager, mainWindow platform.Window, state *drawState) {
 	r.cameraDraws = r.cameraDraws[:0]
 	r.mainWindow = mainWindow
@@ -139,6 +166,8 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, m
 	r.visibleEntries = r.visibleEntries[:0]
 	r.entryBounds = r.entryBounds[:0]
 	r.batchKeys = r.batchKeys[:0]
+	r.drawnFrameCount++
+	r.applyResidencyRequests(inventory, &state.residency)
 	// A frame of entries always sets a camera, the default one standing in.
 	if len(state.cameras) == 0 {
 		return
@@ -146,16 +175,40 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, m
 	if r.defaultMaterial == (render.Material{}) {
 		r.init(inventory)
 	}
+	// Every image packed is marked drawn this frame before any is packed,
+	// so packing the frame's new images evicts none the frame draws.
+	r.unpackedSprites = r.unpackedSprites[:0]
 	for _, entry := range state.entries {
-		if entry.kind == EntryKindShape {
-			shape := &state.shapes[entry.index]
-			r.entryBounds = append(r.entryBounds, shape.findBounds())
-			r.batchKeys = append(r.batchKeys, shape.batchKey(r.drawnImages[0].atlas))
-		} else {
-			sprite := &state.sprites[entry.index]
-			image := r.findDrawnImage(inventory, state.logger, sprite.Image)
-			r.entryBounds = append(r.entryBounds, sprite.findBounds(image.size, image.pivot))
-			r.batchKeys = append(r.batchKeys, sprite.batchKey(image.atlas, state.defaultFilter))
+		if entry.kind == EntryKindSprite {
+			if _, packed := r.findPackedImage(state.logger, state.sprites[entry.index].Image); !packed {
+				r.unpackedSprites = append(r.unpackedSprites, entry.index)
+				continue
+			}
+		}
+		r.appendEntryKeys(state, entry)
+	}
+	if len(r.unpackedSprites) > 0 {
+		for _, spriteIndex := range r.unpackedSprites {
+			image := state.sprites[spriteIndex].Image
+			drawn := &r.drawnImages[image.index]
+			// An earlier sprite of the same image may have packed it.
+			if drawn.packed != nil {
+				continue
+			}
+			key := imageNames.findKey(image)
+			packedKey := key.makePackedKey()
+			packed, shared := r.packedImages[packedKey]
+			if !shared {
+				packed = r.packImage(inventory, state.logger, packedKey)
+			}
+			r.placeDrawnImage(state.logger, drawn, key, packed)
+		}
+		// Every key is found again once every image is packed, since
+		// growing an atlas replaces its texture.
+		r.entryBounds = r.entryBounds[:0]
+		r.batchKeys = r.batchKeys[:0]
+		for _, entry := range state.entries {
+			r.appendEntryKeys(state, entry)
 		}
 	}
 	state.sorter.regroup(r.batchKeys)
@@ -186,8 +239,9 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, m
 
 // drawOrder draws cameraDraws, the cameras of one order in the order they
 // draw, of state's entries, as one command list at that order: first the
-// cells of the images packed, which the lowest order's list fills, leaving
-// none for the others, then each camera's clear drawn over its viewport,
+// pages of the atlases grown and the cells of the images packed, which the
+// lowest order's list copies and fills, leaving none for the others, then
+// each camera's clear drawn over its viewport,
 // or a multisampled
 // camera's quad drawing what it resolved there, and its batches as
 // instance data, in one temporary buffer, then each camera's entries'
@@ -199,9 +253,9 @@ func (r *renderer) drawOrder(frame render.Frame, inventory render.Inventory, cam
 	for _, packing := range r.packings {
 		// Each packing's quad, at its index, samples the image from its top
 		// left gutter, clamped, so the gutter continues its edge.
-		width := float32(packing.region.Width)
-		height := float32(packing.region.Height)
-		gutter := float32(packing.gutter)
+		width := float32(packing.packed.region.Width)
+		height := float32(packing.packed.region.Height)
+		gutter := float32(packing.packed.atlas.gutter)
 		r.instances = append(r.instances, instanceData{region: [4]float32{-gutter / width, -gutter / height, 1 + 2*gutter/width, 1 + 2*gutter/height}})
 	}
 	for index := range cameraDraws {
@@ -224,6 +278,7 @@ func (r *renderer) drawOrder(frame render.Frame, inventory render.Inventory, cam
 	}
 	list := frame.BeginCommandList("canvas", cameraDraws[0].camera.Order)
 	instances := list.AcquireTemporaryBuffer(r.instances)
+	r.copyGrowths(&list, inventory)
 	r.fillPackings(&list, inventory, instances)
 	for index := range cameraDraws {
 		drawnCamera := &cameraDraws[index]
@@ -299,31 +354,49 @@ func (r *renderer) drawComposite(list *render.CommandList, drawnCamera *cameraDr
 	pass.End()
 }
 
+// copyGrowths copies the pages of each atlas grown into the texture that
+// replaced its own, then releases the texture it had, which the frame's
+// copies still read, and forgets the growths. An atlas render could not
+// make a texture of copies nothing.
+func (r *renderer) copyGrowths(list *render.CommandList, inventory render.Inventory) {
+	for _, growth := range r.growths {
+		if growth.source != (render.Texture{}) && growth.destination != (render.Texture{}) {
+			for layer := range growth.layerCount {
+				list.CopyTexture(growth.source, render.TextureRegion{Layer: layer}, growth.destination, render.TextureRegion{Layer: layer})
+			}
+		}
+		if growth.source != (render.Texture{}) {
+			inventory.ReleaseTexture(growth.source)
+		}
+	}
+	r.growths = r.growths[:0]
+}
+
 // fillPackings fills the cells of the images packed, of instances, each
 // packing's quad at its index, each image's source drawn premultiplied into
 // its cell, its edge continued into the gutter: a pass into each page
-// packed into, a draw for each cell. It
-// then releases the sources, which the frame's draws still read, and
-// forgets the packings. A cell of an atlas render could not make is not
-// drawn.
+// packed into, a draw for each cell. It then releases the sources, which
+// the frame's draws still read, and forgets the packings. A cell of an
+// atlas render could not make is not drawn.
 func (r *renderer) fillPackings(list *render.CommandList, inventory render.Inventory, instances render.BufferRange) {
 	for runStart := 0; runStart < len(r.packings); {
-		firstPacking := &r.packings[runStart]
+		firstPacked := r.packings[runStart].packed
 		runEnd := runStart + 1
-		for runEnd < len(r.packings) && r.packings[runEnd].atlas == firstPacking.atlas && r.packings[runEnd].region.Layer == firstPacking.region.Layer {
+		for runEnd < len(r.packings) && r.packings[runEnd].packed.atlas == firstPacked.atlas && r.packings[runEnd].packed.region.Layer == firstPacked.region.Layer {
 			runEnd++
 		}
-		if firstPacking.atlas != (render.Texture{}) {
-			r.colorTargets[0] = render.ColorTarget{Texture: firstPacking.atlas, Layer: firstPacking.region.Layer}
+		if firstPacked.atlas.texture != (render.Texture{}) {
+			r.colorTargets[0] = render.ColorTarget{Texture: firstPacked.atlas.texture, Layer: firstPacked.region.Layer}
 			pass := list.BeginPass(render.PassDescriptor{Label: "canvas pack", ColorTargets: r.colorTargets[:]})
 			for index := runStart; index < runEnd; index++ {
 				packing := &r.packings[index]
-				region := packing.region
+				region := packing.packed.region
+				gutter := packing.packed.atlas.gutter
 				pass.SetViewport(render.Viewport{
-					X:        float32(region.X - packing.gutter),
-					Y:        float32(region.Y - packing.gutter),
-					Width:    float32(region.Width + 2*packing.gutter),
-					Height:   float32(region.Height + 2*packing.gutter),
+					X:        float32(region.X - gutter),
+					Y:        float32(region.Y - gutter),
+					Width:    float32(region.Width + 2*gutter),
+					Height:   float32(region.Height + 2*gutter),
 					MaxDepth: 1,
 				})
 				r.drawInstances(&pass, r.packMaterial, instances, uint32(index), 1, packing.source, FilterNearest)
@@ -352,45 +425,65 @@ func (r *renderer) drawInstances(pass *render.Pass, material render.Material, in
 	pass.DrawVertices(render.PrimitiveTopologyTriangleList, 6, render.DrawArgs{InstanceCount: instanceCount, FirstInstance: firstInstance})
 }
 
-// findDrawnImage answers image as canvas draws it, packing it at its first
-// draw unless an image differing only in options that change no pixel was
-// packed: its source acquired from render with its colour space, of the
-// size render's descriptor of it gives, its file's header's, a texture
-// render could not make one texel, packed into the sprite atlas of its
-// colour space, or into an atlas of its own when no page holds it, its cell
-// kept for the next command list to fill. It reports to logger, once for
-// its path, options ImageFromFile was given for it and ignored.
-func (r *renderer) findDrawnImage(inventory render.Inventory, logger *kernel.Logger, image Image) *drawnImage {
+// appendEntryKeys appends entry's bounds and batch key, of state's, to the
+// frame's, its image packed.
+func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
+	if entry.kind == EntryKindShape {
+		shape := &state.shapes[entry.index]
+		r.entryBounds = append(r.entryBounds, shape.findBounds())
+		r.batchKeys = append(r.batchKeys, shape.batchKey(r.srgbAtlas.texture))
+		return
+	}
+	sprite := &state.sprites[entry.index]
+	image := &r.drawnImages[sprite.Image.index]
+	r.entryBounds = append(r.entryBounds, sprite.findBounds(image.size, image.pivot))
+	r.batchKeys = append(r.batchKeys, sprite.batchKey(image.packed.atlas.texture, state.defaultFilter))
+}
+
+// findPackedImage answers image as drawn, and whether it is packed: when it
+// was drawn before, or an image differing from it only in options that
+// change no pixel is packed, which it then shares. A packed image is marked
+// drawn this frame, so no atlas evicts it in it.
+func (r *renderer) findPackedImage(logger *kernel.Logger, image Image) (*drawnImage, bool) {
 	for int(image.index) >= len(r.drawnImages) {
 		r.drawnImages = append(r.drawnImages, drawnImage{})
 	}
 	drawn := &r.drawnImages[image.index]
-	if drawn.size != (m.Vec2{}) {
-		return drawn
+	if drawn.packed == nil {
+		key := imageNames.findKey(image)
+		packed, shared := r.packedImages[key.makePackedKey()]
+		if !shared {
+			return drawn, false
+		}
+		r.placeDrawnImage(logger, drawn, key, packed)
 	}
-	key := imageNames.findKey(image)
-	packedKey := key.makePackedKey()
-	packedImage, packed := r.packedImages[packedKey]
-	if !packed {
-		packedImage = r.packImage(inventory, packedKey)
-		r.packedImages[packedKey] = packedImage
-	}
-	*drawn = packedImage
+	drawn.packed.lastDrawnFrame = r.drawnFrameCount
+	return drawn, true
+}
+
+// placeDrawnImage writes into drawn the image of key as drawn, packed as
+// packed, with key's pivot. It reports to logger, once for key's path,
+// options ImageFromFile was given for it and ignored.
+func (r *renderer) placeDrawnImage(logger *kernel.Logger, drawn *drawnImage, key imageKey, packed *packedImage) {
+	*drawn = makeDrawnImage(packed)
 	drawn.pivot = key.options.Pivot
 	if key.ignoredOptions {
 		ignored := Report{Kind: ReportKindImageOptionsIgnored, Err: fmt.Errorf("canvas: image %q was given more than one set of options by ImageFromFile, and is drawn with the first", key.path)}
-		logger.LogErrOnce(ignored.Error(), ignored)
+		logger.LogErrOnce(imageOptionsIgnoredLogKey+key.path, ignored)
 	}
-	return drawn
 }
 
-// packImage packs the image of key, its source acquired from render with
-// its colour space, of the size render's descriptor of it gives, its file's
-// header's, a texture render could not make one texel, into the sprite
-// atlas of its colour space, or into an atlas of its own when no page holds
-// it, and answers it as drawn, of no pivot, its cell kept for the next
-// command list to fill.
-func (r *renderer) packImage(inventory render.Inventory, key imageKey) drawnImage {
+// packImage packs the image of key, the key of the options that change its
+// pixels, marked drawn this frame, and answers where: its source acquired
+// from render, sharing the texture Assets.Preload acquired, with its colour
+// space, of the size render's descriptor of it gives, its file's header's,
+// a texture render could not make one texel. It is packed into the sprite
+// atlas of its colour space, grown or evicting images when full, or into an
+// atlas of its own, exactly its size with no gutter, when it is wider or
+// taller than ownTextureSize, when no page holds its cell, or when the
+// atlas is at its ceiling with nothing to evict, reported to logger. Its
+// cell is kept for the next command list to fill.
+func (r *renderer) packImage(inventory render.Inventory, logger *kernel.Logger, key imageKey) *packedImage {
 	source := inventory.AcquireTexture(key.path, key.makeTextureOptions())
 	width := uint32(1)
 	height := uint32(1)
@@ -398,31 +491,132 @@ func (r *renderer) packImage(inventory render.Inventory, key imageKey) drawnImag
 		width = descriptor.Width
 		height = descriptor.Height
 	}
-	imageAtlas := r.srgbAtlas
+	spriteAtlas := r.srgbAtlas
 	if key.options.ColorSpace == ColorSpaceLinear {
 		if r.linearAtlas == nil {
 			r.linearAtlas = newAtlas(inventory, "canvas sprites linear", render.TextureFormatRGBA8Unorm, r.atlasPageSize, r.atlasPageSize, atlasGutter)
 		}
-		imageAtlas = r.linearAtlas
+		spriteAtlas = r.linearAtlas
 	}
-	region, fits := imageAtlas.pack(width, height)
+	packed := &packedImage{atlas: spriteAtlas, lastDrawnFrame: r.drawnFrameCount}
+	fits := false
+	holdsCell := width+2*atlasGutter <= r.atlasPageSize && height+2*atlasGutter <= r.atlasPageSize
+	if width <= r.ownTextureSize && height <= r.ownTextureSize && holdsCell {
+		packed.region, fits = r.packIntoSpriteAtlas(inventory, logger, spriteAtlas, key.path, width, height)
+	}
 	if !fits {
 		// An atlas of its own is exactly its size, of no gutter, so an image
 		// as large as a page fills a texture of a page's size.
-		imageAtlas = newAtlas(inventory, key.path, imageAtlas.format, width, height, 0)
-		region, _ = imageAtlas.pack(width, height)
+		packed.atlas, packed.region = newOwnAtlas(inventory, key.path, spriteAtlas.format, width, height)
 	}
-	r.packings = append(r.packings, atlasPacking{atlas: imageAtlas.texture, region: region, gutter: imageAtlas.gutter, source: source})
-	return makeDrawnImage(imageAtlas, region)
+	r.packedImages[key] = packed
+	r.packings = append(r.packings, atlasPacking{packed: packed, source: source})
+	return packed
 }
 
-// atlasPacking is an image packed whose cell is still to fill: the texture
-// of the atlas it is packed into, its region there, its page as the
-// region's layer, the atlas's gutter its cell reaches past the region, and
-// the source it is filled from.
+// packIntoSpriteAtlas packs an image of width by height texels, at path,
+// whose cell a page of spriteAtlas holds, into spriteAtlas, and answers
+// where, or false when it does not fit: on the first page holding it; else
+// on a new page, the atlas doubling its pages while under its ceiling, a
+// growth not yet copied merged into one copy of the pages it had; else
+// where the images it evicts leave room, the least lately drawn first,
+// never one drawn this frame. An atlas at its ceiling with nothing to evict
+// is reported to logger, once for the atlas.
+func (r *renderer) packIntoSpriteAtlas(inventory render.Inventory, logger *kernel.Logger, spriteAtlas *atlas, path string, width, height uint32) (render.TextureRegion, bool) {
+	if region, fits := spriteAtlas.pack(width, height); fits {
+		return region, true
+	}
+	if uint32(len(spriteAtlas.pages)) < r.atlasLayerCeiling {
+		growth := spriteAtlas.grow(inventory, r.atlasLayerCeiling)
+		// A texture grown into whose copy is still to record holds nothing
+		// that copy would not write, so it is copied past and released.
+		pendingGrowth := slices.IndexFunc(r.growths, func(pending atlasGrowth) bool { return pending.destination == growth.source })
+		if pendingGrowth >= 0 && growth.source != (render.Texture{}) {
+			inventory.ReleaseTexture(growth.source)
+			r.growths[pendingGrowth].destination = growth.destination
+		} else {
+			r.growths = append(r.growths, growth)
+		}
+		return spriteAtlas.pack(width, height)
+	}
+	r.evictionCandidates = r.evictionCandidates[:0]
+	for key, packed := range r.packedImages {
+		if packed.atlas == spriteAtlas && packed.lastDrawnFrame != r.drawnFrameCount {
+			r.evictionCandidates = append(r.evictionCandidates, evictionCandidate{key: key, packed: packed})
+		}
+	}
+	// Images of one atlas differ in their paths, which order those last
+	// drawn in one frame.
+	slices.SortFunc(r.evictionCandidates, func(a, b evictionCandidate) int {
+		return cmp.Or(cmp.Compare(a.packed.lastDrawnFrame, b.packed.lastDrawnFrame), strings.Compare(a.key.path, b.key.path))
+	})
+	for _, candidate := range r.evictionCandidates {
+		r.dropPackedImage(inventory, candidate.key, candidate.packed)
+		if region, fits := spriteAtlas.pack(width, height); fits {
+			return region, true
+		}
+	}
+	fullReport := Report{Kind: ReportKindAtlasFull, Err: fmt.Errorf("canvas: the sprite atlas %q is full at its ceiling of %d pages, with nothing to evict that was not drawn this frame, so image %q is drawn from a texture of its own", spriteAtlas.label, len(spriteAtlas.pages), path)}
+	logger.LogErrOnce(atlasFullLogKey+spriteAtlas.label, fullReport)
+	return render.TextureRegion{}, false
+}
+
+// applyResidencyRequests drops each image packed of the paths requests asks
+// to unload, in the order asked, so its next draw loads it again, and then
+// releases through inventory the sources preloaded of images packed, which
+// their packing's acquire shared.
+func (r *renderer) applyResidencyRequests(inventory render.Inventory, requests *residencyRequestQueue) {
+	requests.mutex.Lock()
+	defer requests.mutex.Unlock()
+	for _, unloaded := range requests.unloadedPaths {
+		for key, packed := range r.packedImages {
+			if isUnder(key.path, unloaded) {
+				r.dropPackedImage(inventory, key, packed)
+			}
+		}
+	}
+	requests.unloadedPaths = requests.unloadedPaths[:0]
+	for key, source := range requests.preloadedSources {
+		if _, packed := r.packedImages[key]; packed {
+			inventory.ReleaseTexture(source)
+			delete(requests.preloadedSources, key)
+		}
+	}
+}
+
+// dropPackedImage forgets packed, the image of key packed: freed from its
+// atlas, its own atlas's texture released through inventory; a cell still
+// to fill forgotten, its source released; and each image drawn of it left
+// unpacked, so its next draw packs it again.
+func (r *renderer) dropPackedImage(inventory render.Inventory, key imageKey, packed *packedImage) {
+	delete(r.packedImages, key)
+	packed.atlas.free(inventory, packed.region)
+	for index, packing := range r.packings {
+		if packing.packed == packed {
+			if packing.source != (render.Texture{}) {
+				inventory.ReleaseTexture(packing.source)
+			}
+			r.packings = slices.Delete(r.packings, index, index+1)
+			break
+		}
+	}
+	for index := range r.drawnImages {
+		if r.drawnImages[index].packed == packed {
+			r.drawnImages[index] = drawnImage{}
+		}
+	}
+}
+
+// atlasPacking is an image packed whose cell is still to fill: where it is
+// packed, and the source it is filled from.
 type atlasPacking struct {
-	atlas  render.Texture
-	region render.TextureRegion
-	gutter uint32
+	packed *packedImage
 	source render.Texture
+}
+
+// evictionCandidate is an image packed that a full atlas may evict: its
+// key of the options that change its pixels, and where it is packed.
+type evictionCandidate struct {
+	key    imageKey
+	packed *packedImage
 }

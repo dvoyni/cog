@@ -16,16 +16,22 @@ each batch, a run of entries of one 2D material, one atlas, one filter and
 one clip, each camera culling the entries outside its view. A sprite's
 image is packed at its first draw into the sprite atlas of its colour
 space, one 2D-array texture of pages holding its images premultiplied, so
-sprites of different images and the shapes beside them batch. A frame can
-be inspected in canvas's terms, beside render's inspection of it.
+sprites of different images and the shapes beside them batch; a full atlas
+grows its pages, and at its ceiling evicts the images drawn least lately.
+Images are preloaded, unloaded by path or prefix and sized from their
+headers through `Assets`. A frame can be inspected in canvas's terms,
+beside render's inspection of it.
 
 ## Shape
 
 - **`Plugin`**, from `NewPlugin()`, is canvas. **`Config`** is its part of
   the kernel's config, under `PluginName`: `RegroupedLayers`, the layers
   whose entries of equal keys canvas may regroup by batch,
-  `DefaultFilter`, the filter of sprites naming none, and `AtlasPageSize`,
-  the side of a sprite atlas's pages, zero meaning 2048.
+  `DefaultFilter`, the filter of sprites naming none, `AtlasPageSize`, the
+  side of a sprite atlas's pages, zero meaning 2048, `AtlasLayerCeiling`,
+  the most pages it grows to, zero meaning 256, and `OwnTextureSize`, the
+  side past which an image is drawn from a texture of its own, zero meaning
+  half a page.
 - **`FrameEvent`** is the frame its users record, published inside each of
   render's `FrameEvent`s. A plugin that records schedules its recording tasks
   after its `Ready` and joins them into the out dependency it returns.
@@ -83,16 +89,27 @@ be inspected in canvas's terms, beside render's inspection of it.
   render and packs it into the sprite atlas of its colour space, each image
   a cell of its own whose gutter of 2 texels continues its edges, drawn in
   that frame, and a file render cannot load draws render's magenta,
-  reported once by render. An image no page holds is packed into an atlas
-  of its own, exactly its size with no gutter, so an image as large as a
-  page takes a texture of a page's size. Images differing only in their pivot share their region. A
-  second set of options is ignored and reported once.
+  reported once by render. A full atlas doubles its pages, copied on the
+  GPU into a new texture, growths not yet copied merged into one copy; at
+  `AtlasLayerCeiling` it evicts the images drawn
+  least lately to make room, never one drawn this frame, and an evicted
+  image drawn again is loaded again. An image wider or taller than
+  `OwnTextureSize`, whose cell no page holds, or that a full atlas cannot
+  make room for, reported once, is drawn from a texture of its own,
+  exactly its size with no gutter, so an image as large as a page takes a
+  texture of a page's size. Images differing only in their pivot share
+  their region. A second set of options is ignored and reported once.
 - **`OrderOf(y)`** maps a float onto an order of its own, in the same order,
   for y-sorting.
 - **`Material`** names a 2D material; the zero one, the default material,
   is the only one canvas makes yet.
-- **`Assets`** is the task parameter a tool reaches canvas through:
-  `RequestInspection` asks for an inspection of the next frame, and
+- **`Assets`** is the task parameter a task reaches canvas's assets and
+  tools through: `Preload(image)` loads an image ahead of its first draw,
+  for a loading screen; `Unload(path)` unloads the images of a path, or of
+  a folder for a path ending in a slash, `Unload("level1/")`, as canvas next
+  draws, a later draw loading them again; `ImageSize(image)` answers an image's size from its file's
+  header alone, before it is drawn, and false for a missing file, reported
+  once; `RequestInspection` asks for an inspection of the next frame, and
   `ReadInspection` answers it in a task off **`InspectedEvent`**.
 - **`Inspection`** is one frame in canvas's terms: each camera that drew,
   the window it drew into and its viewport in pixels, its batches with their
@@ -121,16 +138,19 @@ be inspected in canvas's terms, beside render's inspection of it.
   camera's conversions and written by canvas's own task after each frame's
   drawing; a
   private draw state, holding each task's draw list, the frame's entries
-  and cameras sorted and the inspection asked for; a private renderer,
-  holding the default, clear, composite and pack materials, the sprite
-  atlases, the white texel in the sRGB one, each image drawn and where it is
-  packed, the cameras drawn, the entries' keys, the instance data and the
-  batches; and a private list of the open windows. The images `ImageFromFile`
+  and cameras sorted, the inspection asked for, the unloads and preloads
+  asked for and the image sizes read; a private renderer, holding the
+  default, clear, composite and pack materials, the sprite atlases, the
+  white texel in the sRGB one, each image drawn, where it is packed and
+  when it was last drawn, the sources preloaded, the cameras drawn, the
+  entries' keys, the instance data and the batches; and a private list of
+  the open windows. The images `ImageFromFile`
   interns are a table of the process's, shared by every kernel, each kernel
   packing them apart.
 - **Resources it reads from other plugins:** render's, for read through
-  `render.Frame` and `render.Inventory`, `Assets` holding a `render.Frame`, `platform.FS`, for read through
-  `render.Inventory`, as canvas's shaders and sprites' images load, render's
+  `render.Frame` and `render.Inventory`, `Assets` holding both; `platform.FS`,
+  for read, through `render.Inventory`, as canvas's shaders and sprites'
+  images load, and in `Assets`, for an image's header; render's
   texture descriptors through it, for a texture target's size and format
   and an image's size,
   and `platform.WindowManager`, for read, for a window target's size, in the

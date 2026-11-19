@@ -24,8 +24,19 @@ type Config struct {
 	DefaultFilter Filter
 	// AtlasPageSize is the side of a sprite atlas's pages, in texels; zero
 	// means 2048. An image whose cell, the image and a gutter of 2 texels
-	// around it, no page holds is packed into an atlas of its own.
+	// around it, no page holds is drawn from a texture of its own.
 	AtlasPageSize uint32
+	// AtlasLayerCeiling is the most pages a sprite atlas grows to, doubling
+	// them each time an image fits on none; zero means 256, WebGPU's
+	// default limit on a texture's layers. At its ceiling, the images drawn
+	// least lately are evicted to make room, never one drawn this frame,
+	// and an image they cannot make room for is drawn from a texture of its
+	// own, reported once as ReportKindAtlasFull.
+	AtlasLayerCeiling uint32
+	// OwnTextureSize is the side, in texels, past which an image is drawn
+	// from a texture of its own, exactly its size, rather than packed into
+	// a sprite atlas, on either axis; zero means half of AtlasPageSize.
+	OwnTextureSize uint32
 }
 
 // Plugin is canvas: it installs Handlers, Targets and its private state,
@@ -57,7 +68,8 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	canvasConfig := kernel.PluginConfigOrDefault[Config](config)
 	configurator.InitResource(&drawState{logger: configurator.Logger(), defaultFilter: cmp.Or(canvasConfig.DefaultFilter, FilterLinear), sorter: makeEntrySorter(canvasConfig.RegroupedLayers)})
-	configurator.InitResource(newRenderer(cmp.Or(canvasConfig.AtlasPageSize, 2048)))
+	atlasPageSize := cmp.Or(canvasConfig.AtlasPageSize, 2048)
+	configurator.InitResource(newRenderer(atlasPageSize, cmp.Or(canvasConfig.AtlasLayerCeiling, 256), cmp.Or(canvasConfig.OwnTextureSize, atlasPageSize/2)))
 	configurator.InitResource(&windowList{})
 	configurator.InitResource[Targets](&drawnTargets{})
 	configurator.BindSocket(platform.ReadMountSocket{FS: makeAssetFS(), Priority: math.MinInt, Prefix: assetPrefix})

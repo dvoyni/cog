@@ -37,6 +37,20 @@ func (t *imageTable) intern(key imageKey) Image {
 	return Image{index: index}
 }
 
+// findPaths answers the path of each key interned that Unload(unloaded)
+// unloads, a path interned with several options once for each.
+func (t *imageTable) findPaths(unloaded string) []string {
+	t.mutex.RLock()
+	defer t.mutex.RUnlock()
+	var paths []string
+	for _, key := range t.keys {
+		if isUnder(key.path, unloaded) {
+			paths = append(paths, key.path)
+		}
+	}
+	return paths
+}
+
 // findKey answers the key image was interned from, image not the zero one.
 func (t *imageTable) findKey(image Image) imageKey {
 	if image == (Image{}) {

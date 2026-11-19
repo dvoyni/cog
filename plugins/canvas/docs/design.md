@@ -228,7 +228,7 @@ author** testing canvas or a plugin on it.
   - `DefaultFontSet`, a `FontSetDescriptor` for the zero `FontSet`; its zero is JetBrains Mono alone;
   - `TextSize`, the em of a run whose `Size` is zero, in world units; zero means 16;
   - `LayoutIdleFrames`, how many frames `DrawText` keeps a layout no draw uses; zero means 2;
-  - `AtlasPageSize`, the atlas's page side, zero meaning 2048, and `AtlasLayerCeiling`, a ceiling on its layers, zero meaning the device's limit;
+  - `AtlasPageSize`, the atlas's page side, zero meaning 2048, and `AtlasLayerCeiling`, a ceiling on its layers, zero meaning 256, WebGPU's default limit on a texture's layers, since render answers no device's limits;
   - `OwnTextureSize`, the size past which an image gets a texture of its own, zero meaning half the page side;
   - `DoNotGenerateMipMaps`, and `MipLevels`, zero meaning 3;
   - a distance-field glyph's default em and range, zero meaning 48 px and 16.
@@ -393,8 +393,9 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - **The decode lands on that frame.** `Assets.Preload(image)` from any task moves it, for a loading screen.
   - **A failed load** draws render's magenta and is reported once.
 - **canvas owns residency.** There is no acquire, no release and no count.
-  - An image stays from its first draw until it is unloaded by path or prefix, `Assets.Unload("level1/")`, as v1's `UnloadSprite` did. A later draw loads it again.
-  - Otherwise, when its atlas is at its ceiling, images are evicted by last use, never one drawn this frame.
+  - An image stays from its first draw until it is unloaded by path or prefix, `Assets.Unload("level1/")`, as v1's `UnloadSprite` did. A later draw loads it again. A prefix is a folder, ending in a slash, so `"level1/"` leaves `"level10/"` as it is.
+  - Otherwise, when its atlas is at its ceiling, images are evicted by last use, never one drawn this frame. Those last drawn in one frame go in their paths' order.
+  - `Assets` holds read locks alone, so `Preload` acquires the file from render at once, and `Unload` is queued: the next drawing job, the one task writing canvas's renderer, frees the regions and takes the preloaded sources before it packs that frame's images. An image unloaded in a frame that draws it is loaded again in that frame.
   - Glyphs are cached and evicted the same way.
 - **Options that change no pixel are not packed.** The pivot, the slice insets and `SliceHollow` are not part of what is packed, so images that differ only in them share their regions.
 - **Sheets:** each frame is packed as a region of its own, with its own gutter, so frames never bleed into one another under filtering, and each tiles and takes mips cleanly. v1 named frames as pixel insets into one packed image. Sidecar formats such as Aseprite's or TexturePacker's are a user's, or later work.
@@ -418,7 +419,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - Distance fields share the sprite atlas, since alpha stays linear in an sRGB format.
 - **The white texel** that shapes draw over is reserved in the sprite atlas when it is made, and never released, so shapes batch with sprites. v1 did the same.
 - **An atlas is one 2D-array texture, and each layer is a page.** A region's page travels in its instance data, so entries on any page of one atlas share one binding and batch. Only a change of atlas breaks a batch.
-- **Growing:** a full atlas doubles its layer count. canvas makes a new array and copies the old layers into it on the GPU, so an atlas is always one texture. The page side and the ceiling on layers are `Config` fields. Under WebGPU's defaults (8192², 256 layers) memory bounds a page first: one RGBA8 layer at 8192² is 256 MiB.
+- **Growing:** a full atlas doubles its layer count. canvas makes a new array and copies the old layers into it on the GPU, so an atlas is always one texture. An atlas growing again before its copy is recorded copies its old layers once, into its last array. The page side and the ceiling on layers are `Config` fields. Under WebGPU's defaults (8192², 256 layers) memory bounds a page first: one RGBA8 layer at 8192² is 256 MiB.
 - **Overflow:** some images get a texture of their own:
   - one larger than the `Config` limit, zero meaning half the page side;
   - one that does not fit once the atlas is at its ceiling and nothing can be evicted.

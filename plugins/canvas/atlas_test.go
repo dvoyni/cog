@@ -15,22 +15,24 @@ import (
 	"github.com/dvoyni/cog/plugins/render"
 )
 
-// redPath, bluePath and stripesPath are the paths makeAtlasFiles puts its
-// images at.
+// redPath, greenPath, bluePath and stripesPath are the paths makeAtlasFiles
+// puts its images at.
 const (
 	redPath     = "red.png"
+	greenPath   = "green.png"
 	bluePath    = "blue.png"
 	stripesPath = "stripes.png"
 )
 
-// makeAtlasFiles answers the quadrants' files, with three images of opaque
-// texels beside them: red and blue, each solid, of 4×4 and 32×32 texels, at
-// redPath and bluePath, and a row of 4 texels, red, green, blue and white,
-// at stripesPath.
+// makeAtlasFiles answers the quadrants' files, with four images of opaque
+// texels beside them: red, green and blue, each solid, of 4×4, 4×4 and
+// 32×32 texels, at redPath, greenPath and bluePath, and a row of 4 texels,
+// red, green, blue and white, at stripesPath.
 func makeAtlasFiles(t testing.TB) fstest.MapFS {
 	t.Helper()
 	files := makeQuadrantsFiles(t)
 	addSolidFile(t, files, redPath, 4, 4, color.NRGBA{R: 255, A: 255})
+	addSolidFile(t, files, greenPath, 4, 4, color.NRGBA{G: 255, A: 255})
 	addSolidFile(t, files, bluePath, 32, 32, color.NRGBA{B: 255, A: 255})
 	stripes := image.NewNRGBA(image.Rect(0, 0, 4, 1))
 	for x, stripe := range []color.NRGBA{{R: 255, A: 255}, {G: 255, A: 255}, {B: 255, A: 255}, {R: 255, G: 255, B: 255, A: 255}} {
@@ -40,13 +42,84 @@ func makeAtlasFiles(t testing.TB) fstest.MapFS {
 	return files
 }
 
-// findTextureLabels answers the label of each texture frame made or loaded.
-func findTextureLabels(frame render.Inspection) map[render.Texture]string {
+// findTextureLabels answers the label of each texture frames made or loaded.
+func findTextureLabels(frames ...render.Inspection) map[render.Texture]string {
 	labels := map[render.Texture]string{}
-	for _, asset := range frame.MadeAssets {
-		labels[asset.Texture] = asset.Label
+	for _, frame := range frames {
+		for _, asset := range frame.MadeAssets {
+			labels[asset.Texture] = asset.Label
+		}
 	}
 	return labels
+}
+
+// atlasPacking is a cell a packing pass filled: the atlas it filled, its
+// page, and the label of the source it drew from.
+type atlasPacking struct {
+	atlas  render.Texture
+	layer  uint32
+	source string
+}
+
+// findPackings answers the cells the packing passes of frame's canvas lists
+// filled, pass after pass, each source labelled as labels has it.
+func findPackings(t *testing.T, frame render.Inspection, labels map[render.Texture]string) []atlasPacking {
+	t.Helper()
+	var packings []atlasPacking
+	for _, list := range findCanvasLists(frame) {
+		for _, pass := range list.Passes {
+			if pass.Label != "canvas pack" {
+				continue
+			}
+			target := pass.ColorTargets[0]
+			for _, draw := range pass.Draws {
+				source := findParameter(t, draw.DrawParameters, "canvas_atlas").TextureView.Texture
+				packings = append(packings, atlasPacking{atlas: target.Texture, layer: target.Layer, source: labels[source]})
+			}
+		}
+	}
+	return packings
+}
+
+// findBatchAtlases answers the label, as labels has it, of the atlas of each
+// batch of frame's first camera.
+func findBatchAtlases(frame canvas.Inspection, labels map[render.Texture]string) []string {
+	var atlases []string
+	for _, inspectedBatch := range frame.Cameras[0].Batches {
+		atlases = append(atlases, labels[inspectedBatch.Atlas])
+	}
+	return atlases
+}
+
+// findRenderFrames answers render's inspection of each of frames.
+func findRenderFrames(frames []canvas.Inspection) []render.Inspection {
+	var renderFrames []render.Inspection
+	for _, frame := range frames {
+		renderFrames = append(renderFrames, frame.Render)
+	}
+	return renderFrames
+}
+
+// countReports answers how many of the reports h has checked so far are of
+// kind.
+func countReports(h *canvastest.Harness, kind canvas.ReportKind) int {
+	count := 0
+	for _, report := range h.Reports() {
+		if report.Kind == kind {
+			count++
+		}
+	}
+	return count
+}
+
+// makeSpriteRecord answers a record of a sprite of each of images, in their
+// order.
+func makeSpriteRecord(images ...canvas.Image) func(list canvas.DrawList) {
+	return func(list canvas.DrawList) {
+		for order, image := range images {
+			list.DrawSprite(canvas.Sprite{Image: image, Order: int32(order)})
+		}
+	}
 }
 
 func TestSpritesOfDifferentImagesAndTheShapesBesideThemDrawFromTheSpriteAtlasAsOneBatch(t *testing.T) {
@@ -174,9 +247,9 @@ func TestAnImageIsPackedAtItsFirstDrawBeforeTheCamerasPassItsSourceReleasedAfter
 }
 
 func TestAnImageAsLargeAsAPageTakesAnAtlasOfItsOwnExactlyItsSize(t *testing.T) {
-	// The blue image of 32 texels is a page's side, its cell with a gutter
-	// larger, so it takes an atlas of its own, of no gutter, no larger than
-	// a page.
+	// The blue image of 32 texels is a page's side, larger than the default
+	// OwnTextureSize of half a page, so it takes an atlas of its own, of no
+	// gutter, no larger than a page.
 	h := canvastest.NewHarness(t)
 	describer := &textureDescriber{}
 	h.Spawn(nil, &canvas.Config{AtlasPageSize: 32}, &fileMounter{files: makeAtlasFiles(t)}, describer)
@@ -249,21 +322,215 @@ func TestAPackedImageDrawsItsOwnTexelsAndLinearFilteringNeverReachesItsNeighbour
 	})
 }
 
-func TestAnImageNoPageHoldsIsDrawnFromAnAtlasOfItsOwn(t *testing.T) {
+func TestAnImageNoPageHoldsIsDrawnFromANewPageOrATextureOfItsOwn(t *testing.T) {
 	// A page of 8 texels holds the white texel's cell of 5 and the rows
-	// below it, too few for the quadrants' cell of 8, so the quadrants are
-	// packed into an atlas of their own, read at their nearest texel.
-	quadrants := canvas.ImageFromFile(quadrantsPath)
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), &canvas.Config{AtlasPageSize: 8}, func(list canvas.DrawList) {
-		list.DrawSprite(canvas.Sprite{Image: quadrants, Size: m.Vec2{X: 40, Y: 40}, Filter: canvas.FilterNearest})
-		list.DrawShape(canvas.Shape{Rect: m.Rect{X: 40, Y: -10, Width: 20, Height: 20}, Tint: m.White})
-	}, &fileMounter{files: makeQuadrantsFiles(t)})
+	// below it, too few for the quadrants' cell of 8, so the atlas grows a
+	// second page holding them, which their instance names; past an
+	// OwnTextureSize of 2, they are drawn from a texture of their own
+	// instead. Either way they are read at their nearest texel beside a
+	// white fill of the first page.
+	for _, test := range []struct {
+		name   string
+		config canvas.Config
+	}{
+		{"from a new page", canvas.Config{AtlasPageSize: 8}},
+		{"from a texture of its own", canvas.Config{AtlasPageSize: 8, OwnTextureSize: 2}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			quadrants := canvas.ImageFromFile(quadrantsPath)
+			picture := captureHarnessDrawing(t, canvastest.NewHarness(t), &test.config, func(list canvas.DrawList) {
+				list.DrawSprite(canvas.Sprite{Image: quadrants, Size: m.Vec2{X: 40, Y: 40}, Filter: canvas.FilterNearest})
+				list.DrawShape(canvas.Shape{Rect: m.Rect{X: 40, Y: -10, Width: 20, Height: 20}, Tint: m.White})
+			}, &fileMounter{files: makeQuadrantsFiles(t)})
 
-	picture.expect(t, []probe{
-		{"the sprite's top left", m.Vec2{X: -10, Y: -10}, color.NRGBA{R: 255, A: 255}},
-		{"the sprite's top right", m.Vec2{X: 10, Y: -10}, color.NRGBA{G: 128, A: 255}},
-		{"the sprite's bottom left", m.Vec2{X: -10, Y: 10}, color.NRGBA{B: 255, A: 255}},
-		{"the sprite's bottom right", m.Vec2{X: 10, Y: 10}, opaqueWhite},
-		{"the white fill beside it", m.Vec2{X: 50}, opaqueWhite},
-	})
+			picture.expect(t, []probe{
+				{"the sprite's top left", m.Vec2{X: -10, Y: -10}, color.NRGBA{R: 255, A: 255}},
+				{"the sprite's top right", m.Vec2{X: 10, Y: -10}, color.NRGBA{G: 128, A: 255}},
+				{"the sprite's bottom left", m.Vec2{X: -10, Y: 10}, color.NRGBA{B: 255, A: 255}},
+				{"the sprite's bottom right", m.Vec2{X: 10, Y: 10}, opaqueWhite},
+				{"the white fill beside it", m.Vec2{X: 50}, opaqueWhite},
+			})
+		})
+	}
+}
+
+func TestAFullAtlasDoublesItsPagesCopiedIntoATextureOfTwiceAsMany(t *testing.T) {
+	// A page of 8 texels holds the white texel's cell of 5 and no cell of 8
+	// beside it, so red's cell grows the atlas to 2 pages and the
+	// quadrants' to 4 in one frame, its one page copied once into the
+	// last texture, the one between released uncopied. In the next frame
+	// green fills the fourth page and the stripes grow it to 8, its 4
+	// pages copied. Each image is packed onto the first page holding it,
+	// in a pass of its own.
+	h := canvastest.NewHarness(t)
+	describer := &textureDescriber{}
+	h.Spawn(nil, &canvas.Config{AtlasPageSize: 8}, &fileMounter{files: makeAtlasFiles(t)}, describer)
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	h.Record(makeSpriteRecord(canvas.ImageFromFile(redPath), canvas.ImageFromFile(quadrantsPath)))
+	h.Step()
+	h.Record(makeSpriteRecord(canvas.ImageFromFile(greenPath), canvas.ImageFromFile(stripesPath)))
+	h.Step()
+
+	frames := h.Frames()
+	labels := findTextureLabels(findRenderFrames(frames)...)
+	var atlasTextures []render.Texture
+	for texture, label := range labels {
+		if label == "canvas sprites sRGB" {
+			atlasTextures = append(atlasTextures, texture)
+		}
+	}
+	fourPages := frames[0].Cameras[0].Batches[0].Atlas
+	eightPages := frames[1].Cameras[0].Batches[0].Atlas
+	type pageCopy struct {
+		source, destination           render.Texture
+		sourceLayer, destinationLayer uint32
+	}
+	for index, test := range []struct {
+		copies   []pageCopy
+		packings []atlasPacking
+	}{
+		{nil, []atlasPacking{{fourPages, 1, redPath}, {fourPages, 2, quadrantsPath}}},
+		{
+			[]pageCopy{{fourPages, eightPages, 0, 0}, {fourPages, eightPages, 1, 1}, {fourPages, eightPages, 2, 2}, {fourPages, eightPages, 3, 3}},
+			[]atlasPacking{{eightPages, 3, greenPath}, {eightPages, 4, stripesPath}},
+		},
+	} {
+		lists := findCanvasLists(frames[index].Render)
+		if len(lists) != 1 {
+			t.Fatalf("frame %d began %d canvas lists, want one", index, len(lists))
+		}
+		var copies []pageCopy
+		for _, copied := range lists[0].Copies {
+			copies = append(copies, pageCopy{copied.SourceTexture, copied.DestinationTexture, copied.SourceRegion.Layer, copied.DestinationRegion.Layer})
+			for _, pass := range lists[0].Passes {
+				if pass.Position < copied.Position {
+					t.Errorf("frame %d's pass %q is at %d, before a copy, want every pass after the copies", index, pass.Label, pass.Position)
+				}
+			}
+		}
+		if index == 0 {
+			// The first frame's one copy is from the texture of one page,
+			// which no frame drew from.
+			if len(copies) != 1 || copies[0].destination != fourPages || copies[0].sourceLayer != 0 || copies[0].destinationLayer != 0 {
+				t.Errorf("frame 0 copied %+v, want the one page once into the texture of 4", copies)
+			}
+		} else if !slices.Equal(copies, test.copies) {
+			t.Errorf("frame %d copied %+v, want each page into the same page of the texture replacing its own: %+v", index, copies, test.copies)
+		}
+		if packings := findPackings(t, frames[index].Render, labels); !slices.Equal(packings, test.packings) {
+			t.Errorf("frame %d packed %+v, want %+v", index, packings, test.packings)
+		}
+		if batches := frames[index].Cameras[0].Batches; len(batches) != 1 {
+			t.Errorf("frame %d drew %d batches, want its sprites as one", index, len(batches))
+		}
+	}
+	describer.describe(atlasTextures...)
+	h.Step()
+	h.Step()
+	held := 0
+	for index, descriptor := range describer.describedTextures() {
+		switch {
+		case atlasTextures[index] == eightPages && descriptor.LayerCount != 8:
+			t.Errorf("the atlas's last texture is %+v, want 8 pages", descriptor)
+		case atlasTextures[index] != eightPages && descriptor != (render.TextureDescriptor{}):
+			t.Errorf("a texture the atlas grew out of is still held, as %+v", descriptor)
+		}
+		if descriptor != (render.TextureDescriptor{}) {
+			held++
+		}
+	}
+	if len(atlasTextures) != 4 || held != 1 {
+		t.Errorf("the atlas made %d textures, %d still held, want 4 of 1, 2, 4 and 8 pages, the last alone held", len(atlasTextures), held)
+	}
+}
+
+func TestAnAtlasAtItsCeilingEvictsTheImageDrawnLeastLatelyToPackANewOne(t *testing.T) {
+	// A page of 16 texels holds the white texel's cell and two cells of 8,
+	// so at a ceiling of one page, green evicts red, drawn before quadrants,
+	// and red, drawn again with quadrants, evicts green, never quadrants,
+	// drawn less lately but drawn in that frame, after red.
+	h := canvastest.NewHarness(t)
+	h.Spawn(nil, &canvas.Config{AtlasPageSize: 16, AtlasLayerCeiling: 1}, &fileMounter{files: makeAtlasFiles(t)})
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	red := canvas.ImageFromFile(redPath)
+	quadrants := canvas.ImageFromFile(quadrantsPath)
+	green := canvas.ImageFromFile(greenPath)
+	for _, record := range []func(list canvas.DrawList){makeSpriteRecord(red), makeSpriteRecord(quadrants), makeSpriteRecord(green), makeSpriteRecord(red, quadrants)} {
+		h.Record(record)
+		h.Step()
+	}
+
+	frames := h.Frames()
+	labels := findTextureLabels(findRenderFrames(frames)...)
+	spriteAtlas := frames[0].Cameras[0].Batches[0].Atlas
+	for index, want := range [][]string{{redPath}, {quadrantsPath}, {greenPath}, {redPath}} {
+		var packed []string
+		for _, packing := range findPackings(t, frames[index].Render, labels) {
+			packed = append(packed, packing.source)
+			if packing.atlas != spriteAtlas || packing.layer != 0 {
+				t.Errorf("frame %d packed %s into %v, page %d, want the sprite atlas's one page", index, packing.source, packing.atlas, packing.layer)
+			}
+		}
+		if !slices.Equal(packed, want) {
+			t.Errorf("frame %d packed %v, want %v", index, packed, want)
+		}
+		if atlases := findBatchAtlases(frames[index], labels); !slices.Equal(atlases, []string{"canvas sprites sRGB"}) {
+			t.Errorf("frame %d drew from %v, want the sprite atlas alone", index, atlases)
+		}
+	}
+}
+
+func TestAnAtlasAtItsCeilingWithNothingToEvictDrawsAnImageFromATextureOfItsOwnReportedOnce(t *testing.T) {
+	// A page of 16 texels holds the white texel's cell and two cells of 8,
+	// so at a ceiling of one page, a frame drawing three images of 4 draws
+	// the third from a texture of its own, the atlas full of what it
+	// draws.
+	h := canvastest.NewHarness(t)
+	h.Spawn(nil, &canvas.Config{AtlasPageSize: 16, AtlasLayerCeiling: 1}, &fileMounter{files: makeAtlasFiles(t)})
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	h.ExpectReport(canvas.ReportKindAtlasFull)
+	record := makeSpriteRecord(canvas.ImageFromFile(redPath), canvas.ImageFromFile(quadrantsPath), canvas.ImageFromFile(greenPath))
+	for range 2 {
+		h.Record(record)
+		h.Step()
+	}
+
+	frame := h.Frames()[0]
+	labels := findTextureLabels(frame.Render)
+	if atlases, want := findBatchAtlases(frame, labels), []string{"canvas sprites sRGB", greenPath}; !slices.Equal(atlases, want) {
+		t.Errorf("the frame drew from %v, want the first two images from the sprite atlas and the third from its own, %v", atlases, want)
+	}
+	if packings := findPackings(t, h.Frames()[1].Render, labels); len(packings) != 0 {
+		t.Errorf("the second frame packed %+v, want nothing, each image kept where it was packed", packings)
+	}
+	if fullCount := countReports(h, canvas.ReportKindAtlasFull); fullCount != 1 {
+		t.Errorf("the fullCount atlas was reported %d times, want once", fullCount)
+	}
+}
+
+func TestAnImageWiderOrTallerThanOwnTextureSizeIsDrawnFromATextureOfItsOwn(t *testing.T) {
+	// The blue image of 32 texels is half a page of 64, packed at the
+	// default OwnTextureSize, and past an OwnTextureSize of 16.
+	for _, test := range []struct {
+		name           string
+		ownTextureSize uint32
+		atlas          string
+	}{
+		{"at the default of half a page", 0, "canvas sprites sRGB"},
+		{"past an OwnTextureSize of 16", 16, bluePath},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := canvastest.NewHarness(t)
+			h.Spawn(nil, &canvas.Config{AtlasPageSize: 64, OwnTextureSize: test.ownTextureSize}, &fileMounter{files: makeAtlasFiles(t)})
+			h.OpenWindow(platform.Size{Width: 64, Height: 48})
+			h.Record(makeSpriteRecord(canvas.ImageFromFile(bluePath)))
+
+			h.Step()
+
+			frame := h.Frames()[0]
+			if atlases := findBatchAtlases(frame, findTextureLabels(frame.Render)); !slices.Equal(atlases, []string{test.atlas}) {
+				t.Errorf("the image was drawn from %v, want %q", atlases, test.atlas)
+			}
+		})
+	}
 }

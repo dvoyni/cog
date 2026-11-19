@@ -12,7 +12,8 @@ import (
 // drawState is canvas's private state: the draw list of each task
 // declaring a DrawList, in registration order, whether a frame is open for
 // entries, the entries and cameras of the frame last sorted, merged from the
-// draw lists, with each entry's keys, and the inspector.
+// draw lists, with each entry's keys, the inspector, the residency requests
+// Assets queued and the image sizes it read.
 type drawState struct {
 	// logger is the kernel's, where reports go.
 	logger *kernel.Logger
@@ -40,6 +41,10 @@ type drawState struct {
 	sorter entrySorter
 	// inspector keeps the inspection Assets.RequestInspection asks for.
 	inspector inspector
+	// residency queues Assets.Preload's and Assets.Unload's requests for
+	// the renderer, and imageSizes keeps Assets.ImageSize's answers.
+	residency  residencyRequestQueue
+	imageSizes imageSizeTable
 	// frameInspected is set when the frame merged is written down for a
 	// pending request, and then drawListEnds holds, for each draw list, the
 	// index in entries after its last entry.

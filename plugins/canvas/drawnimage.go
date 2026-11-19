@@ -6,26 +6,37 @@ import (
 )
 
 // drawnImage is an image as canvas draws it, once packed at its first draw,
-// and of no size until then: the texture of the atlas it is packed into,
-// its region there in texture coordinates, its origin then its size, and
-// its page; its size in texels; and its pivot.
+// and of no size until then: where it is packed, its region there in
+// texture coordinates, its origin then its size, and its page; its size in
+// texels; and its pivot.
 type drawnImage struct {
-	atlas  render.Texture
+	packed *packedImage
 	region [4]float32
 	page   uint32
 	size   m.Vec2
 	pivot  Pivot
 }
 
-// makeDrawnImage answers the image packed into imageAtlas at region, of
-// no pivot.
-func makeDrawnImage(imageAtlas *atlas, region render.TextureRegion) drawnImage {
-	pageWidth := float32(imageAtlas.width)
-	pageHeight := float32(imageAtlas.height)
+// makeDrawnImage answers packed as drawn, of no pivot.
+func makeDrawnImage(packed *packedImage) drawnImage {
+	pageWidth := float32(packed.atlas.width)
+	pageHeight := float32(packed.atlas.height)
+	region := packed.region
 	return drawnImage{
-		atlas:  imageAtlas.texture,
+		packed: packed,
 		region: [4]float32{float32(region.X) / pageWidth, float32(region.Y) / pageHeight, float32(region.Width) / pageWidth, float32(region.Height) / pageHeight},
 		page:   region.Layer,
 		size:   m.Vec2{X: float32(region.Width), Y: float32(region.Height)},
 	}
+}
+
+// packedImage is an image packed into an atlas, which the images differing
+// from it only in options that change no pixel share: the atlas, a sprite
+// atlas or one of the image's own, its region there, its page as the
+// region's layer, and the number of the frame that last drew it, which no
+// atlas evicts it in.
+type packedImage struct {
+	atlas          *atlas
+	region         render.TextureRegion
+	lastDrawnFrame uint64
 }
