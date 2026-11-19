@@ -102,14 +102,17 @@ fn canvas_world_to_clip(world: vec2<f32>) -> vec4<f32> {
 }
 
 // canvas_snap answers translation, an entry's first corner in the world,
-// moved onto the camera's grid, and as it is when the camera has none. A
-// vertex stage moves its whole entry by it, so a custom vertex stage that
-// skips it draws its entries unsnapped.
+// moved onto the camera's grid, rounded half up, and as it is when the
+// camera has none. Halves round alike, so an odd-sized entry centred on a
+// whole unit moves a unit as its centre does, where WGSL's round, half to
+// even, would hold it still every other unit. A vertex stage moves its
+// whole entry by it, so a custom vertex stage that skips it draws its
+// entries unsnapped.
 fn canvas_snap(translation: vec2<f32>) -> vec2<f32> {
 	if canvas_camera.snap <= 0.0 {
 		return translation;
 	}
-	return round(translation / canvas_camera.snap) * canvas_camera.snap;
+	return floor(translation / canvas_camera.snap + 0.5) * canvas_camera.snap;
 }
 
 // canvas_width answers a stroke's or a line's width in its own space, across

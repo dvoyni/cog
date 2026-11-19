@@ -105,6 +105,19 @@ type Camera struct {
 	// Size{Y: 1080} is 1080 units tall at any width.
 	Size m.Vec2
 	Fit  Fit
+	// PixelPerfect, for pixel art, one art pixel a world unit, floors the
+	// scale, fit and zoom together, to a whole number of the target's
+	// pixels a unit, at least 1, so a 320×180 logical size draws 6 pixels a
+	// unit in a 1080p window and 12 on a display of scale 2: FitExpand and
+	// FitInscribe show more of the world or bars, and FitOverlap rounds it
+	// up, so it still covers. FitStretch, whose pixels would not be square,
+	// is drawn as FitInscribe and reported once, as
+	// ReportKindPixelPerfectStretch. Each entry is moved whole so that its
+	// first corner lies on the world-unit grid, rounded half up, by
+	// canvas's vertex stage, and the view is placed on whole pixels, so the
+	// world keeps its grid as the view scrolls a pixel at a time. A rotated
+	// or scaled entry still draws at the target's resolution.
+	PixelPerfect bool
 }
 
 // defaultCamera is the camera a frame that records entries and sets no

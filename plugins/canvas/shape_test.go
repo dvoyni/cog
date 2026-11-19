@@ -1,7 +1,6 @@
 package canvas_test
 
 import (
-	"image/color"
 	"testing"
 
 	"github.com/dvoyni/cog/libs/m"
@@ -71,7 +70,7 @@ func TestAHairlineIsOneTargetPixelWideAtAnyScale(t *testing.T) {
 				t.Errorf("%s, %s, is %d pixels wide from %v to %v, want 1", region.name, crossing.name, lit, crossing.from, crossing.to)
 			}
 		}
-		if got, want := picture.at(at(60, 100.5)), (color.NRGBA{R: 255, G: 255, B: 255, A: 255}); got != want {
+		if got, want := picture.at(at(60, 100.5)), opaqueWhite; got != want {
 			t.Errorf("%s, the horizontal line's pixel is %v, want its tint, %v", region.name, got, want)
 		}
 	}

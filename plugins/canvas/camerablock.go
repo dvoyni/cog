@@ -22,7 +22,7 @@ type cameraBlock struct {
 // set, for a target whose format encodes nothing: world_to_clip maps the
 // world through the view onto the viewport's clip space, and pixel_size is
 // a pixel in world units along the view's axis of the smaller scale, so a
-// hairline never thins below a pixel.
+// hairline never thins below a pixel; snap is the view's grid.
 func makeCameraBlock(view *cameraView, encode bool) cameraBlock {
 	viewport := view.viewport
 	if viewport.Width <= 0 || viewport.Height <= 0 {
@@ -38,6 +38,7 @@ func makeCameraBlock(view *cameraView, encode bool) cameraBlock {
 		worldToClip:    worldToClip,
 		clipToWorld:    clipToWorld,
 		pixelSize:      float32(1 / min(math.Abs(float64(view.scale.X)), math.Abs(float64(view.scale.Y)))),
+		snap:           view.snap,
 		viewportOrigin: [2]float32{float32(viewport.X), float32(viewport.Y)},
 		viewportSize:   [2]float32{width, height},
 	}

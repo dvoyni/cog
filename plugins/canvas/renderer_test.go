@@ -2,7 +2,6 @@ package canvas_test
 
 import (
 	"encoding/binary"
-	"image/color"
 	"math"
 	"slices"
 	"testing"
@@ -39,13 +38,12 @@ func TestTwoCamerasOfHalfViewportsEachClearOnlyTheirHalf(t *testing.T) {
 			})
 
 			// The probes are in the window's points from its centre.
-			white := color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 			picture.expect(t, []probe{
-				{"the left half's fill", m.Vec2{X: -110}, white},
+				{"the left half's fill", m.Vec2{X: -110}, opaqueWhite},
 				{"the left half where the right's layer would show", m.Vec2{X: -50}, greenShown},
 				{"the left half's corner", m.Vec2{X: -155, Y: -115}, greenShown},
 				{"the left half by the middle", m.Vec2{X: -2, Y: 100}, greenShown},
-				{"the right half's fill", m.Vec2{X: 110}, white},
+				{"the right half's fill", m.Vec2{X: 110}, opaqueWhite},
 				{"the right half where the left's layer would show", m.Vec2{X: 50}, orangeShown},
 				{"the right half's corner", m.Vec2{X: 155, Y: 115}, orangeShown},
 				{"the right half by the middle", m.Vec2{X: 2, Y: -100}, orangeShown},
@@ -61,7 +59,6 @@ func TestAnInscribedCamerasBarsShowItsClearColourAndItsEntriesDrawOnlyBetweenThe
 	// pass's load; and into the left half, 160 points square between bars
 	// 40 tall above and below, the clear drawn over it. The probes are in
 	// the window's points from its centre.
-	white := color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 	for _, inscribed := range []struct {
 		name     string
 		viewport m.Rect
@@ -70,18 +67,18 @@ func TestAnInscribedCamerasBarsShowItsClearColourAndItsEntriesDrawOnlyBetweenThe
 		{"into the whole window", m.Rect{}, []probe{
 			{"the left bar", m.Vec2{X: -150}, greenShown},
 			{"the left bar by the logical size", m.Vec2{X: -122, Y: 100}, greenShown},
-			{"the logical size by the left bar", m.Vec2{X: -118, Y: 100}, white},
-			{"the middle", m.Vec2{}, white},
-			{"the logical size by the right bar", m.Vec2{X: 118, Y: -100}, white},
+			{"the logical size by the left bar", m.Vec2{X: -118, Y: 100}, opaqueWhite},
+			{"the middle", m.Vec2{}, opaqueWhite},
+			{"the logical size by the right bar", m.Vec2{X: 118, Y: -100}, opaqueWhite},
 			{"the right bar by the logical size", m.Vec2{X: 122, Y: -100}, greenShown},
 			{"the right bar", m.Vec2{X: 150}, greenShown},
 		}},
 		{"into the left half", m.Rect{Width: 0.5, Height: 1}, []probe{
 			{"the top bar", m.Vec2{X: -80, Y: -110}, greenShown},
 			{"the top bar by the logical size", m.Vec2{X: -150, Y: -82}, greenShown},
-			{"the logical size by the top bar", m.Vec2{X: -150, Y: -78}, white},
-			{"the middle", m.Vec2{X: -80}, white},
-			{"the logical size by the bottom bar", m.Vec2{X: -10, Y: 78}, white},
+			{"the logical size by the top bar", m.Vec2{X: -150, Y: -78}, opaqueWhite},
+			{"the middle", m.Vec2{X: -80}, opaqueWhite},
+			{"the logical size by the bottom bar", m.Vec2{X: -10, Y: 78}, opaqueWhite},
 			{"the bottom bar by the logical size", m.Vec2{X: -10, Y: 82}, greenShown},
 			{"the bottom bar", m.Vec2{X: -80, Y: 110}, greenShown},
 		}},
@@ -139,6 +136,69 @@ func TestAHairlineIsOneTargetPixelWideAtTwoCameraZooms(t *testing.T) {
 				t.Errorf("%s, %s, is %d pixels wide from %v to %v, want 1", half.name, crossing.name, lit, crossing.from, crossing.to)
 			}
 		}
+	}
+}
+
+func TestAPixelPerfectCamerasEntriesLandOnTheWorldUnitGridWholePixelsApart(t *testing.T) {
+	// 80×60 art pixels expanded into the window of 320×240 points, four
+	// points a unit, cleared to black: a fill at a fractional position, an
+	// odd-sized one centred on a fractional position, and two odd-sized
+	// ones centred on whole units one apart, each drawn where its first
+	// corner rounds to, half up, on the world-unit grid.
+	fills := []struct {
+		name          string
+		drawn, landed m.Rect
+	}{
+		{"a fill at a fractional position", m.Rect{X: 10.3, Y: -5.6, Width: 3, Height: 3}, m.Rect{X: 10, Y: -6, Width: 3, Height: 3}},
+		{"an odd-sized fill centred on (-20.2, 10.3)", m.Rect{X: -20.2 - 2.5, Y: 10.3 - 2.5, Width: 5, Height: 5}, m.Rect{X: -23, Y: 8, Width: 5, Height: 5}},
+		{"an odd-sized fill centred on x 20", m.Rect{X: 20 - 2.5, Y: -12, Width: 5, Height: 3}, m.Rect{X: 18, Y: -12, Width: 5, Height: 3}},
+		{"an odd-sized fill centred on x 21", m.Rect{X: 21 - 2.5, Y: -7, Width: 5, Height: 3}, m.Rect{X: 19, Y: -7, Width: 5, Height: 3}},
+	}
+	picture := captureDrawing(t, func(list canvas.DrawList) {
+		list.SetCamera(canvas.Camera{Size: m.Vec2{X: 80, Y: 60}, PixelPerfect: true, Clear: true, ClearColor: m.Color{A: 1}})
+		for _, fill := range fills {
+			list.DrawShape(canvas.Shape{Rect: fill.drawn, Tint: m.White})
+		}
+	})
+
+	// Each edge is probed half a point either side, in the window's points
+	// from its centre, four a unit.
+	for _, fill := range fills {
+		landed := fill.landed
+		left, top := landed.X*4, landed.Y*4
+		right, bottom := (landed.X+landed.Width)*4, (landed.Y+landed.Height)*4
+		middle := m.Vec2{X: (left + right) / 2, Y: (top + bottom) / 2}
+		picture.expect(t, []probe{
+			{fill.name + ", inside its left edge", m.Vec2{X: left + 0.5, Y: middle.Y}, opaqueWhite},
+			{fill.name + ", outside its left edge", m.Vec2{X: left - 0.5, Y: middle.Y}, opaqueBlack},
+			{fill.name + ", inside its right edge", m.Vec2{X: right - 0.5, Y: middle.Y}, opaqueWhite},
+			{fill.name + ", outside its right edge", m.Vec2{X: right + 0.5, Y: middle.Y}, opaqueBlack},
+			{fill.name + ", inside its top edge", m.Vec2{X: middle.X, Y: top + 0.5}, opaqueWhite},
+			{fill.name + ", outside its top edge", m.Vec2{X: middle.X, Y: top - 0.5}, opaqueBlack},
+			{fill.name + ", inside its bottom edge", m.Vec2{X: middle.X, Y: bottom - 0.5}, opaqueWhite},
+			{fill.name + ", outside its bottom edge", m.Vec2{X: middle.X, Y: bottom + 0.5}, opaqueBlack},
+		})
+	}
+}
+
+func TestAPixelPerfectCamerasStretchIsReportedOnce(t *testing.T) {
+	h := canvastest.NewHarness(t)
+	h.Spawn(nil, nil)
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	h.ExpectReport(canvas.ReportKindPixelPerfectStretch)
+
+	for range 3 {
+		h.Record(func(list canvas.DrawList) {
+			list.SetCamera(canvas.Camera{Size: m.Vec2{X: 16, Y: 16}, Fit: canvas.FitStretch, PixelPerfect: true, Clear: true})
+		})
+		h.Step()
+	}
+
+	if reports := h.Reports(); len(reports) != 1 || reports[0].Kind != canvas.ReportKindPixelPerfectStretch {
+		t.Errorf("three frames of a pixel-perfect camera stretching reported %v, want one report of it", reports)
+	}
+	if frames := h.Frames(); len(frames[len(frames)-1].Cameras) != 1 {
+		t.Errorf("the last frame was seen through %+v, want the camera drawn", frames[len(frames)-1].Cameras)
 	}
 }
 

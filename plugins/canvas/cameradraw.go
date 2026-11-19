@@ -36,7 +36,8 @@ type cameraDraw struct {
 // framebuffer does not; and its view into the target. A camera into a
 // window not open or not sized, or with no view, as of an empty viewport,
 // draws nothing; one naming both a window and a texture, or a texture
-// render does not hold, is reported once to logger too.
+// render does not hold, is reported once to logger too, as is a
+// pixel-perfect camera's FitStretch, drawn as FitInscribe.
 func makeCameraDraw(inventory render.Inventory, manager *platform.WindowManager, mainWindow platform.Window, logger *kernel.Logger, camera *Camera) (cameraDraw, bool) {
 	drawnCamera := cameraDraw{camera: *camera}
 	encode := true
@@ -72,6 +73,9 @@ func makeCameraDraw(inventory render.Inventory, manager *platform.WindowManager,
 	view, ok := makeCameraView(camera, drawnCamera.target.width, drawnCamera.target.height, drawnCamera.target.pixelsPerPoint)
 	if !ok {
 		return cameraDraw{}, false
+	}
+	if camera.PixelPerfect && camera.Fit == FitStretch {
+		logger.LogErrOnce(pixelPerfectStretchReport.Error(), pixelPerfectStretchReport)
 	}
 	drawnCamera.view = view
 	drawnCamera.block = makeCameraBlock(&view, encode)

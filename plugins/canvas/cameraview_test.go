@@ -102,6 +102,82 @@ func TestAnInscribedCamerasBarsAreTheViewportOutsideItsLogicalSizeRoundedToPixel
 	}
 }
 
+func TestAPixelPerfectCamerasScaleIsAWholeNumberOfPixelsAUnitTheBarsOfItsFitAlone(t *testing.T) {
+	// A logical size of 320×180 art pixels, centred on the world's origin.
+	art := m.Vec2{X: 320, Y: 180}
+	for _, view := range []struct {
+		name          string
+		width, height int
+		scale         float32
+		camera        Camera
+		// drawnRect is where the camera's entries draw, the zero rectangle
+		// meaning its whole viewport.
+		drawnRect m.Recti
+		scaled    float32
+	}{
+		{"into a 1280×720 window at scale 2", 2560, 1440, 2, Camera{Size: art}, m.Recti{}, 8},
+		{"into a 1080p window", 1920, 1080, 1, Camera{Size: art}, m.Recti{}, 6},
+		{"expanded into 1000×720, floored", 1000, 720, 1, Camera{Size: art}, m.Recti{}, 3},
+		{"inscribed into 1000×720, floored, the rest bars", 1000, 720, 1, Camera{Size: art, Fit: FitInscribe}, m.Recti{X: 20, Y: 90, Width: 960, Height: 540}, 3},
+		{"inscribed into 1000×720 at zoom 1.5, floored, its bars kept", 1000, 720, 1, Camera{Size: art, Fit: FitInscribe, Zoom: 1.5}, m.Recti{X: 20, Y: 90, Width: 960, Height: 540}, 4},
+		{"stretched into 1000×720, drawn as inscribed", 1000, 720, 1, Camera{Size: art, Fit: FitStretch}, m.Recti{X: 20, Y: 90, Width: 960, Height: 540}, 3},
+		{"overlapping 1000×700, rounded up", 1000, 700, 1, Camera{Size: art, Fit: FitOverlap}, m.Recti{}, 4},
+		{"overlapping a 1080p window at zoom 0.3, rounded up", 1920, 1080, 1, Camera{Size: art, Fit: FitOverlap, Zoom: 0.3}, m.Recti{}, 2},
+		{"into a 1280×720 window at scale 2 at zoom 0.5", 2560, 1440, 2, Camera{Size: art, Zoom: 0.5}, m.Recti{}, 4},
+		{"into a viewport smaller than its logical size, at least 1", 200, 100, 1, Camera{Size: art}, m.Recti{}, 1},
+		{"of a zero width following the viewport's shape", 2560, 1440, 2, Camera{Size: m.Vec2{Y: 180}}, m.Recti{}, 8},
+	} {
+		view.camera.PixelPerfect = true
+		drawnView, ok := makeCameraView(&view.camera, view.width, view.height, view.scale)
+		if !ok {
+			t.Errorf("a pixel-perfect camera %s has no view", view.name)
+			continue
+		}
+		if want := (m.Vec2{X: view.scaled, Y: view.scaled}); drawnView.scale != want {
+			t.Errorf("a pixel-perfect camera %s draws %v pixels a unit, want %v", view.name, drawnView.scale, want)
+		}
+		wantDrawnRect := view.drawnRect
+		if wantDrawnRect == (m.Recti{}) {
+			wantDrawnRect = m.Recti{Width: view.width, Height: view.height}
+		}
+		if drawnView.drawnRect != wantDrawnRect {
+			t.Errorf("a pixel-perfect camera %s draws its entries into %+v, want %+v", view.name, drawnView.drawnRect, wantDrawnRect)
+		}
+		if drawnView.snap != 1 {
+			t.Errorf("a pixel-perfect camera %s snaps its entries to a grid of %v units, want 1", view.name, drawnView.snap)
+		}
+	}
+}
+
+func TestAPixelPerfectCameraPlacesTheWorldOnWholePixelsAndScrollsAPixelAtATime(t *testing.T) {
+	// 320×180 art pixels expanded into 1001×721, three pixels a unit, the
+	// viewport's centre at (500.5, 360.5): the world's origin lands half a
+	// pixel up from where its position puts it, and a third of a unit
+	// across moves it a pixel.
+	targets := windowTargets{size: m.Vec2{X: 1001, Y: 721}, scale: 1}
+	for _, placement := range []struct {
+		name     string
+		position m.Vec2
+		origin   m.Vec2
+	}{
+		{"at the origin", m.Vec2{}, m.Vec2{X: 501, Y: 361}},
+		{"at (0.3, -0.45)", m.Vec2{X: 0.3, Y: -0.45}, m.Vec2{X: 500, Y: 362}},
+		{"at (0.3, -0.45) and a third across", m.Vec2{X: 0.3 + 1.0/3, Y: -0.45}, m.Vec2{X: 499, Y: 362}},
+	} {
+		camera := Camera{Size: m.Vec2{X: 320, Y: 180}, PixelPerfect: true, Position: placement.position}
+
+		origin, _ := camera.WorldToScreen(m.Vec2{}, targets)
+		corner, _ := camera.WorldToScreen(m.Vec2{X: 2, Y: -3}, targets)
+
+		if !nearVec2(origin, placement.origin) {
+			t.Errorf("a pixel-perfect camera %s shows the world's origin at %v, want %v", placement.name, origin, placement.origin)
+		}
+		if want := placement.origin.Add(m.Vec2{X: 6, Y: -9}); !nearVec2(corner, want) {
+			t.Errorf("a pixel-perfect camera %s shows the world's (2, -3) at %v, want %v, whole pixels from its origin", placement.name, corner, want)
+		}
+	}
+}
+
 func TestAConversionMapsAPointOfTheWindowToTheWorldAndBackAndAnswersWhetherTheCameraDrawsThere(t *testing.T) {
 	// A UI camera, its world the window's points, and an inscribed one 100
 	// units square turned a quarter, in a window of 400×200 points at scale

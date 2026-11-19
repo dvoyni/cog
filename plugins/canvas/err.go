@@ -1,5 +1,7 @@
 package canvas
 
+import "errors"
+
 // ReportKind names what kind of mistake a Report is, for a test to name the
 // reports it expects.
 type ReportKind uint8
@@ -14,7 +16,16 @@ const (
 	// texture, or a texture render does not hold, which is skipped. It is
 	// reported once for each target.
 	ReportKindCameraTargetRefused
+	// ReportKindPixelPerfectStretch is a pixel-perfect camera's FitStretch,
+	// whose pixels would not be square, which is drawn as FitInscribe. It
+	// is reported once.
+	ReportKindPixelPerfectStretch
 )
+
+// pixelPerfectStretchReport is the report of a pixel-perfect camera's
+// FitStretch, made once, so that a camera drawing it each frame allocates
+// nothing.
+var pixelPerfectStretchReport error = Report{Kind: ReportKindPixelPerfectStretch, Err: errors.New("canvas: a pixel-perfect camera's FitStretch, whose pixels would not be square, is drawn as FitInscribe")}
 
 // Report is a mistake canvas found at run time and carried past, logged
 // through the kernel's LogErrOnce, so each is logged once for its subject,

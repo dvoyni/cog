@@ -34,7 +34,9 @@ terms, beside render's inspection of it.
   shows its `Position`, turned by its `Rotation` and scaled by its `Zoom`;
   its logical `Size` is fitted into the viewport by its `Fit`,
   `FitExpand`, `FitInscribe` (with bars), `FitOverlap` or `FitStretch`.
-  `ScreenToWorld`, `WorldToScreen` and `VisibleRect` convert through the
+  A `PixelPerfect` camera, for pixel art, draws a whole number of pixels a
+  unit, its entries snapped to the world-unit grid and its view placed on
+  whole pixels. `ScreenToWorld`, `WorldToScreen` and `VisibleRect` convert through the
   camera as its target was last drawn, read from **`Targets`**.
   canvas begins one command list for each distinct `Order`, its cameras
   into textures first. A frame that sets no camera is seen through the

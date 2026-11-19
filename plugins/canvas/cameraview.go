@@ -12,17 +12,22 @@ import (
 // viewport its entries draw into, all of it but under FitInscribe, whose
 // bars are the rest; its scale, the target's pixels to a world unit along
 // each of the view's axes, fit and zoom together; and its transforms
-// between the world and the target's pixels.
+// between the world and the target's pixels; and snap, the grid in world
+// units its entries snap to, one unit for a pixel-perfect camera and zero
+// for any other.
 type cameraView struct {
 	viewport, drawnRect        m.Recti
 	scale                      m.Vec2
 	worldToPixel, pixelToWorld m.Mat2x3
+	snap                       float32
 }
 
 // makeCameraView answers camera's view into a target width by height
 // pixels, pixelsPerPoint of them to a point of a window, 1 for a texture,
 // and whether it has one: none for an empty viewport, or a projection that
-// collapses, as a logical size of an infinite axis does.
+// collapses, as a logical size of an infinite axis does. A pixel-perfect
+// camera's FitStretch is drawn as FitInscribe, its scale a whole number of
+// pixels a unit, and its placement on whole pixels.
 func makeCameraView(camera *Camera, width, height int, pixelsPerPoint float32) (cameraView, bool) {
 	view := cameraView{viewport: camera.placeViewport(width, height)}
 	if view.viewport.Width == 0 || view.viewport.Height == 0 {
@@ -43,16 +48,23 @@ func makeCameraView(camera *Camera, width, height int, pixelsPerPoint float32) (
 	// viewport, along each axis.
 	across := viewportWidth / logicalSize.X
 	down := viewportHeight / logicalSize.Y
+	fit := camera.Fit
+	if camera.PixelPerfect && fit == FitStretch {
+		fit = FitInscribe
+	}
 	uniformScale := min(across, down)
-	if camera.Fit == FitOverlap {
+	if fit == FitOverlap {
 		uniformScale = max(across, down)
 	}
+	if camera.PixelPerfect {
+		uniformScale = makeWholeScale(uniformScale, fit == FitOverlap)
+	}
 	fitScale := m.Vec2{X: uniformScale, Y: uniformScale}
-	if camera.Fit == FitStretch {
+	if fit == FitStretch {
 		fitScale = m.Vec2{X: across, Y: down}
 	}
 	view.drawnRect = view.viewport
-	if camera.Fit == FitInscribe {
+	if fit == FitInscribe {
 		// The logical size at the fit's scale, centred, each bar rounded
 		// to pixels alike.
 		barWidth := max(int(math.Round(float64(viewportWidth-logicalSize.X*fitScale.X)/2)), 0)
@@ -68,7 +80,15 @@ func makeCameraView(camera *Camera, width, height int, pixelsPerPoint float32) (
 	if zoom == 0 {
 		zoom = 1
 	}
-	view.scale = fitScale.MulS(zoom)
+	if camera.PixelPerfect {
+		// The scale, fit and zoom together, is whole; the bars stay those
+		// of the fit alone, as zoom leaves them.
+		whole := makeWholeScale(uniformScale*zoom, fit == FitOverlap)
+		view.scale = m.Vec2{X: whole, Y: whole}
+		view.snap = 1
+	} else {
+		view.scale = fitScale.MulS(zoom)
+	}
 	pivot := m.Vec2{
 		X: float32(view.drawnRect.X) + (0.5+camera.Pivot.X)*float32(view.drawnRect.Width),
 		Y: float32(view.drawnRect.Y) + (0.5+camera.Pivot.Y)*float32(view.drawnRect.Height),
@@ -79,12 +99,31 @@ func makeCameraView(camera *Camera, width, height int, pixelsPerPoint float32) (
 		Mul(m.Scaling2x3(view.scale.X, view.scale.Y)).
 		Mul(m.Rotation2x3(-camera.Rotation)).
 		Mul(m.Translation2x3(-camera.Position.X, -camera.Position.Y))
+	if camera.PixelPerfect {
+		// The world's origin lands on a whole pixel, rounded half up, so
+		// the world keeps its grid on the target's pixels as the view
+		// scrolls a pixel at a time.
+		origin := m.Vec2{X: view.worldToPixel[4], Y: view.worldToPixel[5]}.AddS(0.5).Floor()
+		view.worldToPixel[4] = origin.X
+		view.worldToPixel[5] = origin.Y
+	}
 	pixelToWorld, invertible := view.worldToPixel.Inverse()
 	if !invertible {
 		return cameraView{}, false
 	}
 	view.pixelToWorld = pixelToWorld
 	return view, true
+}
+
+// makeWholeScale answers scale, pixels a unit, as a pixel-perfect camera
+// draws it: a whole number, at least 1, rounded up when up is set, as
+// FitOverlap's is so that it still covers the viewport, and down otherwise.
+// A scale a float32's rounding short of a whole number is that number.
+func makeWholeScale(scale float32, up bool) float32 {
+	if up {
+		return max(float32(math.Ceil(float64(scale)-1e-3)), 1)
+	}
+	return max(float32(math.Floor(float64(scale)+1e-3)), 1)
 }
 
 // findVisibleRect answers the world rectangle the camera's entries draw

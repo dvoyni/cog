@@ -40,9 +40,12 @@
 // A camera's Pivot of its viewport shows its Position, turned by its
 // Rotation and scaled by its Zoom; its logical Size, the area of the world it
 // is meant to show, is fitted into the viewport by its Fit, expanding,
-// inscribing with bars, overlapping or stretching it. A game keeps the
-// cameras it set to convert a click through, reading the Targets resource,
-// each target as it was last drawn:
+// inscribing with bars, overlapping or stretching it. A PixelPerfect camera,
+// for pixel art, one art pixel a world unit, floors its scale to a whole
+// number of pixels a unit, moves each entry whole onto the world-unit grid
+// and places its view on whole pixels. A game keeps the cameras it set to
+// convert a click through, reading the Targets resource, each target as it
+// was last drawn:
 //
 //	world, inside := camera.ScreenToWorld(click, targets.Get())
 //
