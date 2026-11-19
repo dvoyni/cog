@@ -47,31 +47,22 @@ var strokeParts = [4]shapePart{shapePartStrokeTop, shapePartStrokeBottom, shapeP
 // a stroke's four. Its tint is premultiplied, and a zero transform read as
 // the identity.
 func appendShapeInstances(instances []instanceData, shape *Shape) []instanceData {
-	transform := shape.Transform
-	if transform == (m.Mat2x3{}) {
-		transform = m.Translation2x3(0, 0)
-	}
 	tint := shape.Tint
 	instance := instanceData{
 		tint:   [4]float32{tint.R * tint.A, tint.G * tint.A, tint.B * tint.A, tint.A},
 		region: [4]float32{0, 0, 1, 1},
 	}
-	// The rectangle's own transform, column by column: the unit square
-	// scaled to its size, then moved to its origin.
-	squareTransform := m.Mat2x3{shape.Rect.Width, 0, 0, shape.Rect.Height, shape.Rect.X, shape.Rect.Y}
-	instance.size = shape.Rect.Size()
+	instance.transform, instance.size = shape.findSquare()
 	switch shape.Kind {
 	case Line:
 		instance.part = shapePartLine
 		instance.width = max(shape.Width, 0)
-		squareTransform, instance.size = makeLineSquare(shape.From, shape.To, instance.width)
 	case Stroke:
 		instance.width = max(shape.Width, 0)
 		instance.radius = max(shape.Radius, 0)
 	default:
 		instance.radius = max(shape.Radius, 0)
 	}
-	instance.transform = transform.Mul(squareTransform)
 	if shape.Kind != Stroke {
 		return append(instances, instance)
 	}

@@ -2,6 +2,7 @@ package canvas_test
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -56,6 +57,27 @@ func TestAnInspectedFrameAnswersItsCamerasBatchesInstanceCountsAndEntriesWithThe
 	lists := findCanvasLists(frame.Render)
 	if frame.Render.Beat != frame.Beat || len(lists) != 1 || len(lists[0].Passes) != 1 || len(lists[0].Passes[0].Draws) != 1 || lists[0].Passes[0].Draws[0].InstanceCount != 6 {
 		t.Errorf("render's inspection beside it, of beat %d, holds canvas's lists %+v, want render's of the same beat, %d, with one draw of 6 instances", frame.Render.Beat.Tick, lists, frame.Beat.Tick)
+	}
+}
+
+func TestAnInspectedBatchAnswersTheClipItsEntriesShare(t *testing.T) {
+	h := canvastest.NewHarness(t)
+	h.Spawn(nil, nil)
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	clip := m.Rect{X: -4, Y: -4, Width: 8, Height: 8}
+	h.Record(func(list canvas.DrawList) {
+		list.DrawShape(canvas.Shape{Rect: m.Rect{Width: 10, Height: 10}, Order: 1})
+		list.DrawShape(canvas.Shape{Rect: m.Rect{Width: 10, Height: 10}, Order: 2, Clip: clip})
+	})
+
+	h.Step()
+
+	var clips []m.Rect
+	for _, batch := range h.Frames()[0].Cameras[0].Batches {
+		clips = append(clips, batch.Clip)
+	}
+	if want := []m.Rect{{}, clip}; !slices.Equal(clips, want) {
+		t.Errorf("an unclipped fill then a clipped one drew batches clipped to %v, want a batch each, %v", clips, want)
 	}
 }
 

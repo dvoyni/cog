@@ -202,6 +202,77 @@ func TestAPixelPerfectCamerasStretchIsReportedOnce(t *testing.T) {
 	}
 }
 
+func TestAClippedEntryDrawsNothingOutsideItsClipInEachOfTwoViewports(t *testing.T) {
+	// A white fill far larger than the window, clipped to 40×20 units about
+	// the world's origin, seen by two cameras cleared to green: the left
+	// half's, at the origin and zoom 1, a unit a point, its viewport's
+	// centre 80 points left of the window's; and the right half's, at
+	// (10, 5) and zoom 2, its centre 80 points right. The clip lies from
+	// (-100, -10) to (-60, 10) in the window's points from its centre
+	// through the left camera, and from (20, -30) to (100, 10) through the
+	// right.
+	clip := m.Rect{X: -20, Y: -10, Width: 40, Height: 20}
+	picture := captureDrawing(t, func(list canvas.DrawList) {
+		list.SetCamera(canvas.Camera{Viewport: m.Rect{Width: 0.5, Height: 1}, Clear: true, ClearColor: green})
+		list.SetCamera(canvas.Camera{Viewport: m.Rect{X: 0.5, Width: 0.5, Height: 1}, Position: m.Vec2{X: 10, Y: 5}, Zoom: 2, Clear: true, ClearColor: green})
+		list.DrawShape(canvas.Shape{Rect: m.Rect{X: -1000, Y: -1000, Width: 2000, Height: 2000}, Tint: m.White, Clip: clip})
+	})
+
+	picture.expect(t, []probe{
+		{"the left clip's middle", m.Vec2{X: -80}, opaqueWhite},
+		{"the left clip's top left corner", m.Vec2{X: -98, Y: -8}, opaqueWhite},
+		{"the left clip's bottom right corner", m.Vec2{X: -62, Y: 8}, opaqueWhite},
+		{"left of the left clip", m.Vec2{X: -102}, greenShown},
+		{"right of the left clip", m.Vec2{X: -58}, greenShown},
+		{"above the left clip", m.Vec2{X: -80, Y: -12}, greenShown},
+		{"below the left clip", m.Vec2{X: -80, Y: 12}, greenShown},
+		{"the right clip's middle", m.Vec2{X: 60, Y: -10}, opaqueWhite},
+		{"the right clip's top left corner", m.Vec2{X: 22, Y: -28}, opaqueWhite},
+		{"the right clip's bottom right corner", m.Vec2{X: 98, Y: 8}, opaqueWhite},
+		{"left of the right clip", m.Vec2{X: 18, Y: -10}, greenShown},
+		{"right of the right clip", m.Vec2{X: 102, Y: -10}, greenShown},
+		{"above the right clip", m.Vec2{X: 60, Y: -32}, greenShown},
+		{"below the right clip", m.Vec2{X: 60, Y: 12}, greenShown},
+	})
+}
+
+func TestAnEntryOutsideOneCamerasViewIsCulledByItAndDrawnByAnother(t *testing.T) {
+	// The window's halves, each a camera's that clears, the left at the
+	// world's origin and the right at x 1000, and a camera of the whole
+	// window at x -1000, at order 1, that does not clear: a fill at x 1000
+	// only the right one sees.
+	h := canvastest.NewHarness(t)
+	h.Spawn(nil, nil)
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	fill := canvas.Shape{Rect: m.Rect{X: 995, Y: -5, Width: 10, Height: 10}, Tint: m.White}
+	h.Record(func(list canvas.DrawList) {
+		list.SetCamera(canvas.Camera{Viewport: m.Rect{Width: 0.5, Height: 1}, Clear: true})
+		list.SetCamera(canvas.Camera{Viewport: m.Rect{X: 0.5, Width: 0.5, Height: 1}, Position: m.Vec2{X: 1000}, Clear: true})
+		list.SetCamera(canvas.Camera{Position: m.Vec2{X: -1000}, Order: 1})
+		list.DrawShape(fill)
+	})
+
+	h.Step()
+
+	frame := h.Frames()[0]
+	if len(frame.Cameras) != 2 {
+		t.Fatalf("the frame was seen through %+v, want the two halves' cameras alone, the one culling the fill and not clearing drawing nothing", frame.Cameras)
+	}
+	if batches := frame.Cameras[0].Batches; len(batches) != 0 {
+		t.Errorf("the left camera, at the origin, drew %+v, want the fill culled", batches)
+	}
+	if batches := frame.Cameras[1].Batches; len(batches) != 1 || len(batches[0].Entries) != 1 || batches[0].Entries[0].Shape != fill {
+		t.Errorf("the right camera, at x 1000, drew %+v, want one batch of the fill", batches)
+	}
+	lists := findCanvasLists(frame.Render)
+	if len(lists) != 1 || len(lists[0].Passes) != 2 {
+		t.Fatalf("canvas began %+v, want one list at order 0 of the halves' two passes", lists)
+	}
+	if left, right := len(lists[0].Passes[0].Draws), len(lists[0].Passes[1].Draws); left != 1 || right != 2 {
+		t.Errorf("the left pass made %d draws and the right %d, want the left's clear alone, and the right's clear and its fill", left, right)
+	}
+}
+
 func TestCamerasAtTwoOrdersBeginAListAtEachAmongAnotherPluginsAndACameraAtATakenOrderIsReported(t *testing.T) {
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, nil, &orderTaker{order: 3})

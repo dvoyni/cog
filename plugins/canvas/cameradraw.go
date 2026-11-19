@@ -13,8 +13,10 @@ import (
 // target as it draws into it, its texture or else its window, the main
 // window when it named neither; its pass's colour target, that target,
 // cleared by the pass's load when it clears a viewport covering the target;
-// its view into the target and its pass parameters; the runs of the frame's
-// sorted entries its layers hold; its batches, part of the renderer's; and,
+// its view into the target and its pass parameters; the entries it draws,
+// those of the frame's sorted entries its layers hold that it does not
+// cull, in sort order, part of the renderer's; its batches, part of the
+// renderer's; and,
 // for a clear drawn over its viewport, its instance in its command list's
 // instance data.
 type cameraDraw struct {
@@ -23,12 +25,12 @@ type cameraDraw struct {
 	colorTarget   render.ColorTarget
 	view          cameraView
 	block         cameraBlock
-	layerRuns     [4][]sortedEntry
+	entries       []sortedEntry
 	batches       []batch
 	clearInstance uint32
 }
 
-// makeCameraDraw answers how camera draws, its layer runs and batches still
+// makeCameraDraw answers how camera draws, its entries and batches still
 // to find, and whether it draws at all: its target, the texture it names or
 // else its window or mainWindow, measured from render's descriptor of the
 // texture or from manager's sizes of the window, its output encoded

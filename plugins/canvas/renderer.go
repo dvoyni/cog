@@ -1,6 +1,7 @@
 package canvas
 
 import (
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/platform"
 	"github.com/dvoyni/cog/plugins/render"
 )
@@ -20,6 +21,11 @@ type renderer struct {
 	// target of those naming none.
 	cameraDraws []cameraDraw
 	mainWindow  platform.Window
+	// shapeBounds are the bounds of the frame's shapes, each at its shape's
+	// index, and visibleEntries the entries each camera draws, in turn,
+	// both written over each frame.
+	shapeBounds    []m.Rect
+	visibleEntries []sortedEntry
 	// instances are the instance data of the command list being drawn, and
 	// batches the frame's batches, each camera's in turn; both are written
 	// over each frame.
@@ -58,22 +64,32 @@ func (r *renderer) init(inventory render.Inventory) {
 // distinct order, its cameras' passes in the order they draw, each a pass
 // into its target over its viewport, cleared there when it clears, then an
 // instanced draw of each batch of the entries its layers hold over the white
-// texel. A camera with no entries in its layers and no clear draws nothing,
-// nor does one makeCameraDraw finds draws nothing. It makes the materials
+// texel, each batch scissored to its clip. A camera culls the entries
+// whose bounds miss its view, or their clip's part of it; one drawing no
+// entry that does not clear draws nothing, nor does one makeCameraDraw finds
+// draws nothing. It makes the materials
 // and the texel at the first draw.
 func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, manager *platform.WindowManager, mainWindow platform.Window, state *drawState) {
 	r.cameraDraws = r.cameraDraws[:0]
 	r.mainWindow = mainWindow
 	r.batches = r.batches[:0]
+	r.visibleEntries = r.visibleEntries[:0]
+	r.shapeBounds = r.shapeBounds[:0]
+	for index := range state.shapes {
+		r.shapeBounds = append(r.shapeBounds, state.shapes[index].findBounds())
+	}
 	for index := range state.cameras {
 		camera := &state.cameras[index]
 		drawnCamera, ok := makeCameraDraw(inventory, manager, mainWindow, state.logger, camera)
 		if !ok {
 			continue
 		}
-		drawnCamera.layerRuns = camera.findLayerRuns(state.sorter.entries)
-		// The runs fill from the first.
-		if camera.Clear || len(drawnCamera.layerRuns[0]) > 0 {
+		entriesStart := len(r.visibleEntries)
+		for _, layerRun := range camera.findLayerRuns(state.sorter.entries) {
+			r.visibleEntries = drawnCamera.view.appendVisibleEntries(r.visibleEntries, layerRun, state.shapes, r.shapeBounds)
+		}
+		drawnCamera.entries = r.visibleEntries[entriesStart:]
+		if camera.Clear || len(drawnCamera.entries) > 0 {
 			r.cameraDraws = append(r.cameraDraws, drawnCamera)
 		}
 	}
@@ -97,7 +113,8 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, m
 // draw, of shapes, as one command list at that order: first each camera's
 // clear drawn over its viewport and its batches as instance data, in one
 // temporary buffer, then each camera's pass, its entries scissored to the
-// part of its viewport they draw into.
+// part of its viewport they draw into, and a clipped batch's to its clip's
+// part of that, a batch whose clip holds no pixel of it not drawn.
 func (r *renderer) drawOrder(frame render.Frame, cameraDraws []cameraDraw, shapes []Shape) {
 	r.instances = r.instances[:0]
 	for index := range cameraDraws {
@@ -110,9 +127,7 @@ func (r *renderer) drawOrder(frame render.Frame, cameraDraws []cameraDraw, shape
 			r.instances = appendShapeInstances(r.instances, &Shape{Tint: drawnCamera.camera.ClearColor})
 		}
 		batchesStart := len(r.batches)
-		for _, layerRun := range drawnCamera.layerRuns {
-			r.batches, r.instances = appendBatches(r.batches, r.instances, layerRun, shapes)
-		}
+		r.batches, r.instances = appendBatches(r.batches, r.instances, drawnCamera.entries, shapes)
 		drawnCamera.batches = r.batches[batchesStart:]
 	}
 	list := frame.BeginCommandList("canvas", cameraDraws[0].camera.Order)
@@ -127,11 +142,14 @@ func (r *renderer) drawOrder(frame render.Frame, cameraDraws []cameraDraw, shape
 		if drawnCamera.camera.Clear && !drawnCamera.colorTarget.Clear {
 			r.drawInstances(&pass, r.clearMaterial, instances, drawnCamera.clearInstance, 1)
 		}
-		// The entries draw between FitInscribe's bars, which the clear
-		// covered.
-		drawnRect := drawnCamera.view.drawnRect
-		pass.SetScissorRectangle(render.ScissorRectangle{X: uint32(drawnRect.X), Y: uint32(drawnRect.Y), Width: uint32(drawnRect.Width), Height: uint32(drawnRect.Height)})
 		for _, drawnBatch := range drawnCamera.batches {
+			// The entries draw between FitInscribe's bars, which the clear
+			// covered, and within their clip.
+			scissor, clipDrawn := drawnCamera.view.placeClip(drawnBatch.key.clip)
+			if !clipDrawn {
+				continue
+			}
+			pass.SetScissorRectangle(render.ScissorRectangle{X: uint32(scissor.X), Y: uint32(scissor.Y), Width: uint32(scissor.Width), Height: uint32(scissor.Height)})
 			// The default material is the only one canvas makes yet.
 			r.drawInstances(&pass, r.defaultMaterial, instances, drawnBatch.firstInstance, drawnBatch.instanceCount)
 		}

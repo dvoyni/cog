@@ -770,12 +770,14 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 
 - **A clip is a rectangle of the world,** an entry's `Clip`, zero meaning none, seen through each camera as its entry is, so it holds for split screen, minimaps, zoom and DPI alike. Under a UI camera at one unit to a point, world units are UI coordinates.
   - It becomes render's scissor rectangle, so a change of clip breaks a batch. Under a rotated camera the scissor is the clip's bounding box.
+  - The scissor is the clip's bounding box in the target's pixels within the camera's drawn rectangle, `FitInscribe`'s bars left out, each edge rounded half up to a pixel's, so a pixel is drawn where its centre lies in the clip. A batch whose clip holds no pixel of the view is not drawn.
   - v1 clipped with a discard in the fragment shader, so a custom fragment stage that skipped the test drew outside its clip, with no error.
 - **Culling is per camera, on the CPU:** each entry's bounds against the camera's visible world rectangle, its bounding box when the camera rotates.
   - A sprite's bounds are its transform, size and pivot, grown to a converter's output; a run of text's are its layout box; a shape's are its rectangle.
   - A mesh's bounds, a mesh file's or its triangles', are transformed by its transform into a bounding box.
-  - Each grows by its material's `CullMargin`.
-  - An entry no camera sees costs only its recording, and an entry whose clip lies outside the view is culled too.
+  - Each grows by its material's `CullMargin`, and by half a pixel-perfect camera's grid, the most a snapped entry moves.
+  - An entry no camera sees costs only its recording, and an entry whose bounds miss its clip's part of the view is culled too, as is one whose clip lies outside it.
+  - A camera whose entries are all culled and that does not clear draws nothing, as one with no entries in its layers.
   - v1 culled nothing.
 
 ### Conversions and Targets

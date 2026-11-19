@@ -30,6 +30,12 @@ type Shape struct {
 	// Material is the 2D material the shape is drawn with, the zero one
 	// the default material.
 	Material Material
+	// Clip is a rectangle of the world outside which the shape draws
+	// nothing, zero meaning none, seen through each camera as the shape is:
+	// its bounding box in the target's pixels, a pixel drawn where its
+	// centre lies inside, under a turned camera. A change of clip from one
+	// entry to the next in sort order breaks a batch.
+	Clip m.Rect
 	// Layer and Order are the shape's sort key: every entry of a lower
 	// layer is drawn under every entry of a higher one, and within a layer
 	// by order. Entries of equal keys are drawn in the order they were
@@ -40,7 +46,32 @@ type Shape struct {
 
 // batchKey answers what the shape shares with the entries it batches with.
 func (s Shape) batchKey() batchKey {
-	return batchKey{material: s.Material}
+	return batchKey{material: s.Material, clip: s.Clip}
+}
+
+// findSquare answers the transform from the unit square onto the shape in
+// the world, its own transform, a zero one read as the identity, after its
+// rectangle's or its line's band's, and the square's size in the shape's own
+// space: its rectangle's, or its line's, a hairline's one unit across.
+func (s *Shape) findSquare() (m.Mat2x3, m.Vec2) {
+	// The rectangle's own transform, column by column: the unit square
+	// scaled to its size, then moved to its origin.
+	square := m.Mat2x3{s.Rect.Width, 0, 0, s.Rect.Height, s.Rect.X, s.Rect.Y}
+	size := s.Rect.Size()
+	if s.Kind == Line {
+		square, size = makeLineSquare(s.From, s.To, max(s.Width, 0))
+	}
+	if s.Transform == (m.Mat2x3{}) {
+		return square, size
+	}
+	return s.Transform.Mul(square), size
+}
+
+// findBounds answers the world rectangle the shape draws within: the
+// bounding box of its unit square in the world.
+func (s *Shape) findBounds() m.Rect {
+	square, _ := s.findSquare()
+	return square.TransformRect(m.Rect{Width: 1, Height: 1})
 }
 
 // ShapeKind is what a shape draws.

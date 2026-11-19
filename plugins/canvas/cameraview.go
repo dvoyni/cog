@@ -127,18 +127,53 @@ func makeWholeScale(scale float32, up bool) float32 {
 }
 
 // findVisibleRect answers the world rectangle the camera's entries draw
-// into: drawnRect's corners in the world, their bounding box when the
-// camera turns.
+// into: the bounding box of drawnRect's corners in the world, drawnRect's
+// own when the camera does not turn.
 func (v *cameraView) findVisibleRect() m.Rect {
-	drawnRect := v.drawnRect.Float()
-	topLeft := drawnRect.Min()
-	bottomRight := drawnRect.Max()
-	low := v.pixelToWorld.TransformPoint(topLeft)
-	high := low
-	for _, corner := range [3]m.Vec2{{X: bottomRight.X, Y: topLeft.Y}, {X: topLeft.X, Y: bottomRight.Y}, bottomRight} {
-		world := v.pixelToWorld.TransformPoint(corner)
-		low = m.Vec2{X: min(low.X, world.X), Y: min(low.Y, world.Y)}
-		high = m.Vec2{X: max(high.X, world.X), Y: max(high.Y, world.Y)}
+	return v.pixelToWorld.TransformRect(v.drawnRect.Float())
+}
+
+// appendVisibleEntries appends to visible the entries of layerRun, of
+// shapes, each of shapeBounds at its shape's index, in order, that the view
+// does not cull, and answers visible: those whose bounds meet its visible
+// rectangle, or the part of it their clip holds where they have one, grown
+// by half its snap, the most a snapped entry moves.
+func (v *cameraView) appendVisibleEntries(visible, layerRun []sortedEntry, shapes []Shape, shapeBounds []m.Rect) []sortedEntry {
+	visibleRect := v.findVisibleRect()
+	margin := m.Vec2{X: -v.snap / 2, Y: -v.snap / 2}
+	grownVisibleRect := visibleRect.Inset(margin)
+	for _, entry := range layerRun {
+		cullRect := grownVisibleRect
+		if clip := shapes[entry.shapeIndex].Clip; clip != (m.Rect{}) {
+			clipVisibleRect, clipVisible := visibleRect.Intersection(clip)
+			if !clipVisible {
+				continue
+			}
+			cullRect = clipVisibleRect.Inset(margin)
+		}
+		if shapeBounds[entry.shapeIndex].Intersects(cullRect) {
+			visible = append(visible, entry)
+		}
 	}
-	return m.Rect{X: low.X, Y: low.Y, Width: high.X - low.X, Height: high.Y - low.Y}
+	return visible
+}
+
+// placeClip answers clip, a rectangle of the world, as the scissor of the
+// entries it clips: the bounding box of its corners in the target's pixels
+// within drawnRect, each edge rounded half up to a pixel's, so a pixel is
+// drawn where its centre lies inside, drawnRect itself for no clip; and
+// whether it holds a pixel.
+func (v *cameraView) placeClip(clip m.Rect) (m.Recti, bool) {
+	if clip == (m.Rect{}) {
+		return v.drawnRect, true
+	}
+	// Rectangles that miss intersect in the zero one, which holds no pixel.
+	pixels, _ := v.worldToPixel.TransformRect(clip).Intersection(v.drawnRect.Float())
+	low := pixels.Min().AddS(0.5).Floor()
+	high := pixels.Max().AddS(0.5).Floor()
+	scissor := m.Recti{X: int(low.X), Y: int(low.Y), Width: int(high.X - low.X), Height: int(high.Y - low.Y)}
+	if scissor.Width <= 0 || scissor.Height <= 0 {
+		return m.Recti{}, false
+	}
+	return scissor, true
 }

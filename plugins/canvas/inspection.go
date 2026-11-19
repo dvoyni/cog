@@ -35,13 +35,15 @@ type InspectedCamera struct {
 }
 
 // InspectedBatch is one batch of an inspected camera, a run of entries in
-// sort order sharing a 2D material, drawn as one instanced draw: its
-// material, its instance count, and the entries it drew, in sort order. A
+// sort order sharing a 2D material and a clip, drawn as one instanced draw:
+// its material, its clip, its instance count, and the entries it drew, in
+// sort order, those the camera culled left out. A
 // fill and a line are one instance; an entry drawing several, such as a
 // stroke, its four sides, or a run of text, a glyph each, makes the count
 // larger than the entries.
 type InspectedBatch struct {
 	Material      Material
+	Clip          m.Rect
 	InstanceCount uint32
 	Entries       []InspectedEntry
 }

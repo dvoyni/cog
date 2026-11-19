@@ -12,7 +12,8 @@ recording tasks record shapes and set cameras into draw lists of their own,
 which canvas merges in registration order, sorts by their sort key and
 draws through each camera, or the default camera into the main window, the
 first window opened of those still open, an instanced draw for each batch,
-a run of entries of one 2D material. A frame can be inspected in canvas's
+a run of entries of one 2D material and one clip, each camera culling the
+entries outside its view. A frame can be inspected in canvas's
 terms, beside render's inspection of it.
 
 ## Shape
@@ -47,7 +48,10 @@ terms, beside render's inspection of it.
   `Material`, at its sort key, `Layer` then `Order`. A stroke is four fills
   that do not overlap, so a translucent one does not darken its corners; a
   zero `Width` is a hairline one target pixel wide; `Radius` rounds a fill's
-  or a stroke's corners. Entries are drawn by
+  or a stroke's corners; `Clip`, a rectangle of the world, is a scissor
+  through each camera, its bounding box under a turned one. Each camera
+  culls the entries whose bounds miss its `VisibleRect`, or their clip's
+  part of it. Entries are drawn by
   sort key, then by their draw list's registration order, then in the order
   recorded.
 - **`OrderOf(y)`** maps a float onto an order of its own, in the same order,
@@ -58,8 +62,8 @@ terms, beside render's inspection of it.
   `RequestInspection` asks for an inspection of the next frame, and
   `ReadInspection` answers it in a task off **`InspectedEvent`**.
 - **`Inspection`** is one frame in canvas's terms: each camera that drew,
-  the window it drew into and its viewport in pixels, its batches with their material
-  and their entries, each entry with its sort key and
+  the window it drew into and its viewport in pixels, its batches with their
+  material, their clip and the entries it did not cull, each entry with its sort key and
   its draw list's place,
   and render's `Inspection` of the frame beside it.
 - **`cog.canvas/canvas.wgsl`** is canvas's include, declaring the camera's

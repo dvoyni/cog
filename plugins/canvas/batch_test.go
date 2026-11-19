@@ -57,3 +57,21 @@ func TestBatchesAppendedAfterAnotherCamerasBeginANewBatchEvenOfTheSameMaterial(t
 		t.Errorf("a camera's fill, then another's stroke, batched as %+v of %d instances, want a batch each, %+v, of 5", got, len(instances), want)
 	}
 }
+
+func TestBatchesBreakWhereAnEntrysClipDiffersFromTheOneBefore(t *testing.T) {
+	clip := m.Rect{Width: 10, Height: 10}
+	shapes := []Shape{{Order: 1}, {Order: 2, Clip: clip}, {Order: 3, Clip: clip}, {Order: 4}}
+	sorter := makeEntrySorter(nil)
+	entries := sorter.sort(shapes)
+
+	got, _ := appendBatches(nil, nil, entries, shapes)
+
+	want := []batch{
+		{entries: entries[0:1], firstInstance: 0, instanceCount: 1},
+		{key: batchKey{clip: clip}, entries: entries[1:3], firstInstance: 1, instanceCount: 2},
+		{entries: entries[3:4], firstInstance: 3, instanceCount: 1},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("an unclipped fill, two clipped alike and another unclipped batched as %+v, want %+v", got, want)
+	}
+}

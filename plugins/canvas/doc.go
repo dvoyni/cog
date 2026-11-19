@@ -52,7 +52,7 @@
 // canvas begins one command list for each distinct camera order, a camera's
 // pass in it for each camera of that order, those into textures first, its
 // entries an instanced draw for each batch, a run of entries in sort order
-// of one 2D material, each tint premultiplied and blended over what the
+// of one 2D material and one clip, each tint premultiplied and blended over what the
 // target holds, its colour encoded as sRGB where the target's format does
 // not encode it. A frame that sets no camera is seen through the default
 // one, which draws only a frame that recorded entries: every layer, into the
@@ -67,6 +67,15 @@
 //
 //	list.DrawShape(canvas.Shape{Kind: canvas.Stroke, Rect: r, Width: 2, Radius: 6, Tint: c})
 //	list.DrawShape(canvas.Shape{Kind: canvas.Line, From: a, To: b, Tint: c})
+//
+// An entry's Clip is a rectangle of the world it draws nothing outside,
+// seen through each camera as the entry is, a scissor of its bounding box
+// in the target's pixels, so a scrolled log stays clipped under every
+// camera, zoom and DPI; a change of clip breaks a batch. Each camera culls
+// the entries whose bounds miss its visible rectangle, or their clip's part
+// of it, so an entry no camera sees costs only its recording:
+//
+//	list.DrawShape(canvas.Shape{Kind: canvas.Fill, Rect: line, Tint: c, Clip: logBox})
 //
 // A tool asks for an inspection of the next frame through its Assets
 // parameter, and reads it in a task off InspectedEvent: each camera the frame

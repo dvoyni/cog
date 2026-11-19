@@ -47,6 +47,29 @@ func TestMat2x3InverseRefusesACollapsedAxis(t *testing.T) {
 	}
 }
 
+func TestMat2x3TransformRectAnswersTheBoundingBoxOfTheRectsCornersMoved(t *testing.T) {
+	rect := Rect{X: 1, Y: 2, Width: 4, Height: 2}
+	for _, transform := range []struct {
+		name   string
+		matrix Mat2x3
+		want   Rect
+	}{
+		{"moved", Translation2x3(10, -5), Rect{X: 11, Y: -3, Width: 4, Height: 2}},
+		{"mirrored", Scaling2x3(-2, 1), Rect{X: -10, Y: 2, Width: 8, Height: 2}},
+		// A quarter turn takes (x, y) to (-y, x): the corners (1, 2) and
+		// (5, 4) to (-2, 1) and (-4, 5).
+		{"turned a quarter", Rotation2x3(math.Pi / 2), Rect{X: -4, Y: 1, Width: 2, Height: 4}},
+		// An eighth turn of a 4×2 rectangle centred on (3, 3) spans
+		// (4 + 2)/√2 along each axis about the centre turned, (0, 3√2).
+		{"turned an eighth", Rotation2x3(math.Pi / 4), Rect{X: -3 / math.Sqrt2, Y: 3*math.Sqrt2 - 3/math.Sqrt2, Width: 6 / math.Sqrt2, Height: 6 / math.Sqrt2}},
+	} {
+		got := transform.matrix.TransformRect(rect)
+		if !near(got.X, transform.want.X) || !near(got.Y, transform.want.Y) || !near(got.Width, transform.want.Width) || !near(got.Height, transform.want.Height) {
+			t.Errorf("%s, %v is bounded by %v, want %v", transform.name, rect, got, transform.want)
+		}
+	}
+}
+
 func TestMat2x3NegativeScaleMirrorsAboutTheTranslation(t *testing.T) {
 	matrix := TRS2x3(Vec2{X: 100, Y: 50}, 0, Vec2{X: -1, Y: 1})
 

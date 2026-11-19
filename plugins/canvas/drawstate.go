@@ -109,7 +109,7 @@ func (s *drawState) makeInspection(beat metronome.Beat, cameraDraws []cameraDraw
 					IndexInDrawList: shapeIndex - drawListStart,
 				})
 			}
-			inspectedBatches = append(inspectedBatches, InspectedBatch{Material: drawnBatch.key.material, InstanceCount: drawnBatch.instanceCount, Entries: inspectedEntries})
+			inspectedBatches = append(inspectedBatches, InspectedBatch{Material: drawnBatch.key.material, Clip: drawnBatch.key.clip, InstanceCount: drawnBatch.instanceCount, Entries: inspectedEntries})
 		}
 		inspection.Cameras = append(inspection.Cameras, InspectedCamera{
 			Camera:   drawnCamera.camera,

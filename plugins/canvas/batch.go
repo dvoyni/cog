@@ -1,10 +1,13 @@
 package canvas
 
+import "github.com/dvoyni/cog/libs/m"
+
 // batchKey is what a batch's entries share, a change of which from one
-// entry to the next in sort order breaks a batch: their 2D material. Their
-// atlas, filter and clip join it as entries gain them.
+// entry to the next in sort order breaks a batch: their 2D material and
+// their clip. Their atlas and filter join it as entries gain them.
 type batchKey struct {
 	material Material
+	clip     m.Rect
 }
 
 // batch is a run of a frame's entries in sort order that share a batch key,

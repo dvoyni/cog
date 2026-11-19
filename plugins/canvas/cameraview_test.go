@@ -2,6 +2,7 @@ package canvas
 
 import (
 	"math"
+	"slices"
 	"testing"
 
 	"github.com/dvoyni/cog/libs/m"
@@ -174,6 +175,106 @@ func TestAPixelPerfectCameraPlacesTheWorldOnWholePixelsAndScrollsAPixelAtATime(t
 		}
 		if want := placement.origin.Add(m.Vec2{X: 6, Y: -9}); !nearVec2(corner, want) {
 			t.Errorf("a pixel-perfect camera %s shows the world's (2, -3) at %v, want %v, whole pixels from its origin", placement.name, corner, want)
+		}
+	}
+}
+
+func TestACameraCullsTheEntriesWhoseBoundsMissItsViewOrTheirClipsPartOfIt(t *testing.T) {
+	// A camera into 200×100 pixels at a unit a pixel sees x from -100 to
+	// 100 and y from -50 to 50; turned an eighth, the bounding box of its
+	// view reaches 75√2, about 106, from the origin along each axis. At
+	// zoom 3 it sees x to 33⅓, and a pixel-perfect camera snaps an entry's
+	// first corner to a whole unit, half up.
+	plain := Camera{}
+	turned := Camera{Rotation: math.Pi / 4}
+	zoomed := Camera{Zoom: 3}
+	pixelPerfect := Camera{PixelPerfect: true, Zoom: 3}
+	inside := m.Rect{X: -10, Y: -10, Width: 20, Height: 20}
+	for _, seen := range []struct {
+		name   string
+		camera Camera
+		shape  Shape
+		want   bool
+	}{
+		{"a fill inside", plain, Shape{Rect: inside}, true},
+		{"a fill right of the view", plain, Shape{Rect: m.Rect{X: 101, Y: -10, Width: 20, Height: 20}}, false},
+		{"a fill across the view's left edge", plain, Shape{Rect: m.Rect{X: -110, Y: -10, Width: 20, Height: 20}}, true},
+		{"a fill below the view moved into it", plain, Shape{Rect: m.Rect{Y: 60, Width: 10, Height: 10}, Transform: m.Translation2x3(0, -30)}, true},
+		{"a fill moved out of the view", plain, Shape{Rect: m.Rect{Width: 10, Height: 10}, Transform: m.Translation2x3(0, 60)}, false},
+		// Centred 112 right, its corner reaches 112 - 10√2, about 98.
+		{"a fill turned an eighth right of the view, its corner reaching into it", plain, Shape{Rect: inside, Transform: m.Translation2x3(112, 0).Mul(m.Rotation2x3(math.Pi / 4))}, true},
+		{"a stroke above the view", plain, Shape{Kind: Stroke, Rect: m.Rect{X: -10, Y: -80, Width: 20, Height: 20}, Width: 2}, false},
+		{"a line below the view, its width reaching into it", plain, Shape{Kind: Line, From: m.Vec2{X: -10, Y: 55}, To: m.Vec2{X: 10, Y: 55}, Width: 12}, true},
+		{"a hairline below the view", plain, Shape{Kind: Line, From: m.Vec2{X: -10, Y: 52}, To: m.Vec2{X: 10, Y: 52}}, false},
+		{"a fill inside, its clip outside the view", plain, Shape{Rect: inside, Clip: m.Rect{X: 150, Width: 10, Height: 10}}, false},
+		{"a fill inside, its clip in the view beside it", plain, Shape{Rect: inside, Clip: m.Rect{X: 50, Width: 10, Height: 10}}, false},
+		{"a fill inside, across its clip", plain, Shape{Rect: inside, Clip: m.Rect{Width: 50, Height: 50}}, true},
+		{"a fill below a turned camera's view, in its bounding box", turned, Shape{Rect: m.Rect{X: -5, Y: 80, Width: 10, Height: 10}}, true},
+		{"a fill below a turned camera's bounding box", turned, Shape{Rect: m.Rect{X: -5, Y: 110, Width: 10, Height: 10}}, false},
+		{"a fill a fifteenth of a unit right of a zoomed view", zoomed, Shape{Rect: m.Rect{X: 33.4, Width: 2, Height: 2}}, false},
+		{"a fill a fifteenth of a unit right of a pixel-perfect view, snapped into it", pixelPerfect, Shape{Rect: m.Rect{X: 33.4, Width: 2, Height: 2}}, true},
+		{"a fill two thirds of a unit right of a pixel-perfect view, snapped further right", pixelPerfect, Shape{Rect: m.Rect{X: 34, Width: 2, Height: 2}}, false},
+	} {
+		view, ok := makeCameraView(&seen.camera, 200, 100, 1)
+		if !ok {
+			t.Fatalf("%s: the camera has no view", seen.name)
+		}
+		visible := view.appendVisibleEntries(nil, []sortedEntry{{shapeIndex: 0}}, []Shape{seen.shape}, []m.Rect{seen.shape.findBounds()})
+		if got := len(visible) == 1; got != seen.want {
+			t.Errorf("%s, %+v, is seen: %v, want %v", seen.name, seen.shape, got, seen.want)
+		}
+	}
+}
+
+func TestACamerasVisibleEntriesAreAppendedInOrderAfterThoseBefore(t *testing.T) {
+	inside := Shape{Rect: m.Rect{Width: 10, Height: 10}}
+	outside := Shape{Rect: m.Rect{X: 500, Width: 10, Height: 10}}
+	shapes := []Shape{inside, outside, inside, outside, inside}
+	var bounds []m.Rect
+	for index := range shapes {
+		bounds = append(bounds, shapes[index].findBounds())
+	}
+	sorter := makeEntrySorter(nil)
+	entries := sorter.sort(shapes)
+	camera := Camera{}
+	view, _ := makeCameraView(&camera, 200, 100, 1)
+	earlier := []sortedEntry{{shapeIndex: 99}}
+
+	got := view.appendVisibleEntries(earlier, entries[1:5], shapes, bounds)
+
+	if want := []sortedEntry{earlier[0], entries[2], entries[4]}; !slices.Equal(got, want) {
+		t.Errorf("the run %v appended %v, want those inside the view after the entries before, in order, %v", entries[1:5], got, want)
+	}
+}
+
+func TestAClipsScissorIsItsBoundingBoxInTheTargetsPixelsRoundedHalfUpWithinTheDrawnRect(t *testing.T) {
+	// A camera into 200×100 pixels at zoom 2 draws the world's origin at
+	// (100, 50), 2 pixels a unit.
+	zoomed := Camera{Zoom: 2}
+	for _, clip := range []struct {
+		name   string
+		camera Camera
+		clip   m.Rect
+		want   m.Recti
+		drawn  bool
+	}{
+		{"inside the view", zoomed, m.Rect{X: -10, Y: -5, Width: 20, Height: 10}, m.Recti{X: 80, Y: 40, Width: 40, Height: 20}, true},
+		{"its edges between pixels", zoomed, m.Rect{X: 0.2, Y: 0.3, Width: 10, Height: 10}, m.Recti{X: 100, Y: 51, Width: 20, Height: 20}, true},
+		{"reaching past the view", zoomed, m.Rect{X: 40, Y: -100, Width: 100, Height: 200}, m.Recti{X: 180, Width: 20, Height: 100}, true},
+		{"outside the view", zoomed, m.Rect{X: 60, Width: 10, Height: 10}, m.Recti{}, false},
+		{"too thin to hold a pixel's centre", zoomed, m.Rect{X: 0.1, Width: 0.1, Height: 10}, m.Recti{}, false},
+		// A quarter turn against the camera takes (x, y) to (y, -x).
+		{"under a camera turned a quarter", Camera{Zoom: 2, Rotation: math.Pi / 2}, m.Rect{X: -10, Y: -5, Width: 20, Height: 10}, m.Recti{X: 90, Y: 30, Width: 20, Height: 40}, true},
+		// 100 units square inscribed between bars 50 pixels wide.
+		{"past an inscribed camera's bars", Camera{Size: m.Vec2{X: 100, Y: 100}, Fit: FitInscribe}, m.Rect{X: -100, Y: -10, Width: 200, Height: 20}, m.Recti{X: 50, Y: 40, Width: 100, Height: 20}, true},
+	} {
+		view, ok := makeCameraView(&clip.camera, 200, 100, 1)
+		if !ok {
+			t.Fatalf("%s: the camera has no view", clip.name)
+		}
+		got, drawn := view.placeClip(clip.clip)
+		if got != clip.want || drawn != clip.drawn {
+			t.Errorf("a clip %s, %+v, is scissored to %+v, drawn: %v, want %+v, %v", clip.name, clip.clip, got, drawn, clip.want, clip.drawn)
 		}
 	}
 }

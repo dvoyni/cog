@@ -51,6 +51,21 @@ func (matrix Mat2x3) TransformPoint(point Vec2) Vec2 {
 	return matrix.linear().MulVec2(point).Add(matrix.translation())
 }
 
+// TransformRect answers the bounding box of rect's corners moved by matrix,
+// rect itself under a transform that only moves and scales it.
+func (matrix Mat2x3) TransformRect(rect Rect) Rect {
+	rect = rect.Normalize()
+	halfSize := rect.Size().MulS(0.5)
+	centre := matrix.TransformPoint(rect.Center())
+	// Each axis of the box spans the rectangle's half sizes along the
+	// columns, whichever way they point.
+	halfExtent := Vec2{
+		X: abs32(matrix[0])*halfSize.X + abs32(matrix[2])*halfSize.Y,
+		Y: abs32(matrix[1])*halfSize.X + abs32(matrix[3])*halfSize.Y,
+	}
+	return Rect{X: centre.X - halfExtent.X, Y: centre.Y - halfExtent.Y, Width: 2 * halfExtent.X, Height: 2 * halfExtent.Y}
+}
+
 // Mat3 answers the homogeneous form, matrix with a bottom row of (0, 0, 1),
 // which transforms (x, y, 1) as TransformPoint transforms (x, y).
 func (matrix Mat2x3) Mat3() Mat3 {
