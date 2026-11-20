@@ -25,10 +25,13 @@ type renderer struct {
 	// Config.AtlasPageSize's, atlasLayerCeiling the most pages it grows to,
 	// Config.AtlasLayerCeiling's, and ownTextureSize the side past which an
 	// image is drawn from a texture of its own, Config.OwnTextureSize's,
-	// none of them zero.
+	// none of them zero; mipLevelCount is how many mip levels an atlas's
+	// pages have, one when Config.DoNotGenerateMipMaps is set and
+	// Config.MipLevels otherwise.
 	atlasPageSize     uint32
 	atlasLayerCeiling uint32
 	ownTextureSize    uint32
+	mipLevelCount     uint32
 	// defaultMaterial, clearMaterial, compositeMaterial, packMaterial and
 	// srgbAtlas are zero until made, and linearAtlas until an image needs
 	// it.
@@ -53,6 +56,9 @@ type renderer struct {
 	// copy, first, both kept from the frame that made them until one does.
 	packings []atlasPacking
 	growths  []atlasGrowth
+	// filledPages are a packing of each page a command list filled, whose
+	// mips it is to generate, written over as it fills them.
+	filledPages []*packedImage
 	// unpackedSprites are the indexes of the frame's sprites whose images
 	// were not packed as the frame began, and evictionCandidates the
 	// images a full atlas may evict, in the order it evicts them, both
@@ -82,13 +88,14 @@ type renderer struct {
 // newRenderer answers a renderer that has drawn nothing, its sprite atlases'
 // pages atlasPageSize texels square, growing to atlasLayerCeiling pages, an
 // image wider or taller than ownTextureSize drawn from a texture of its
-// own, holding the zero Image's drawn image, placed in the white texel once
-// made.
-func newRenderer(atlasPageSize, atlasLayerCeiling, ownTextureSize uint32) *renderer {
+// own, every atlas's pages of mipLevelCount levels, holding the zero
+// Image's drawn image, placed in the white texel once made.
+func newRenderer(atlasPageSize, atlasLayerCeiling, ownTextureSize, mipLevelCount uint32) *renderer {
 	return &renderer{
 		atlasPageSize:     atlasPageSize,
 		atlasLayerCeiling: atlasLayerCeiling,
 		ownTextureSize:    ownTextureSize,
+		mipLevelCount:     mipLevelCount,
 		drawnImages:       []drawnImage{{}},
 		packedImages:      map[imageKey]*packedImage{},
 	}
@@ -104,7 +111,7 @@ func newRenderer(atlasPageSize, atlasLayerCeiling, ownTextureSize uint32) *rende
 // resolved; the pack material, over the viewport shader, replacing what an
 // atlas's cell holds with an image premultiplied; and the sRGB sprite
 // atlas, the white texel, the zero Image, packed into it first, its cell
-// written opaque white.
+// written opaque white at every mip level, as its mips would be.
 func (r *renderer) init(inventory render.Inventory) {
 	over := render.BlendComponent{SourceFactor: render.BlendFactorOne, DestinationFactor: render.BlendFactorOneMinusSourceAlpha}
 	var state render.State
@@ -135,11 +142,16 @@ func (r *renderer) init(inventory render.Inventory) {
 		VertexEntryPoint:   viewportVertexEntryPoint,
 		FragmentEntryPoint: packFragmentEntryPoint,
 	})
-	r.srgbAtlas = newAtlas(inventory, "canvas sprites sRGB", render.TextureFormatRGBA8UnormSrgb, r.atlasPageSize, r.atlasPageSize, atlasGutter)
+	r.srgbAtlas = newAtlas(inventory, "canvas sprites sRGB", render.TextureFormatRGBA8UnormSrgb, r.atlasPageSize, r.atlasPageSize, r.mipLevelCount)
 	whiteRegion, _ := r.srgbAtlas.pack(1, 1)
-	cellSide := whiteRegion.Width + 2*atlasGutter
-	cell := render.TextureRegion{Layer: whiteRegion.Layer, X: whiteRegion.X - atlasGutter, Y: whiteRegion.Y - atlasGutter, Width: cellSide, Height: cellSide}
-	inventory.WriteTexture(r.srgbAtlas.texture, cell, slices.Repeat([]byte{255}, int(4*cellSide*cellSide)))
+	// The cell sits on the grid, so each level below halves it exactly, and
+	// writes a part of the first level's texels.
+	cell := r.srgbAtlas.findCell(whiteRegion)
+	whiteTexels := slices.Repeat([]byte{255}, int(4*cell.Width*cell.Height))
+	for mipLevel := range r.srgbAtlas.mipLevelCount {
+		levelCell := render.TextureRegion{MipLevel: mipLevel, Layer: cell.Layer, X: cell.X >> mipLevel, Y: cell.Y >> mipLevel, Width: cell.Width >> mipLevel, Height: cell.Height >> mipLevel}
+		inventory.WriteTexture(r.srgbAtlas.texture, levelCell, whiteTexels[:4*levelCell.Width*levelCell.Height])
+	}
 	r.drawnImages[0] = makeDrawnImage(&packedImage{atlas: r.srgbAtlas, region: whiteRegion})
 }
 
@@ -251,12 +263,14 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, m
 func (r *renderer) drawOrder(frame render.Frame, inventory render.Inventory, cameraDraws []cameraDraw, state *drawState) {
 	r.instances = r.instances[:0]
 	for _, packing := range r.packings {
-		// Each packing's quad, at its index, samples the image from its top
-		// left gutter, clamped, so the gutter continues its edge.
-		width := float32(packing.packed.region.Width)
-		height := float32(packing.packed.region.Height)
-		gutter := float32(packing.packed.atlas.gutter)
-		r.instances = append(r.instances, instanceData{region: [4]float32{-gutter / width, -gutter / height, 1 + 2*gutter/width, 1 + 2*gutter/height}})
+		// Each packing's quad, at its index, samples the image over its
+		// whole cell from its top left gutter, clamped, so the gutter and
+		// the rounding up to the grid continue its edge.
+		region := packing.packed.region
+		cell := packing.packed.atlas.findCell(region)
+		width := float32(region.Width)
+		height := float32(region.Height)
+		r.instances = append(r.instances, instanceData{region: [4]float32{-float32(region.X-cell.X) / width, -float32(region.Y-cell.Y) / height, float32(cell.Width) / width, float32(cell.Height) / height}})
 	}
 	for index := range cameraDraws {
 		drawnCamera := &cameraDraws[index]
@@ -354,15 +368,18 @@ func (r *renderer) drawComposite(list *render.CommandList, drawnCamera *cameraDr
 	pass.End()
 }
 
-// copyGrowths copies the pages of each atlas grown into the texture that
-// replaced its own, then releases the texture it had, which the frame's
-// copies still read, and forgets the growths. An atlas render could not
-// make a texture of copies nothing.
+// copyGrowths copies the pages of each atlas grown, every mip level, into
+// the texture that replaced its own, then releases the texture it had,
+// which the frame's copies still read, and forgets the growths. An atlas
+// render could not make a texture of copies nothing.
 func (r *renderer) copyGrowths(list *render.CommandList, inventory render.Inventory) {
 	for _, growth := range r.growths {
 		if growth.source != (render.Texture{}) && growth.destination != (render.Texture{}) {
 			for layer := range growth.layerCount {
-				list.CopyTexture(growth.source, render.TextureRegion{Layer: layer}, growth.destination, render.TextureRegion{Layer: layer})
+				for mipLevel := range growth.mipLevelCount {
+					region := render.TextureRegion{MipLevel: mipLevel, Layer: layer}
+					list.CopyTexture(growth.source, region, growth.destination, region)
+				}
 			}
 		}
 		if growth.source != (render.Texture{}) {
@@ -374,11 +391,14 @@ func (r *renderer) copyGrowths(list *render.CommandList, inventory render.Invent
 
 // fillPackings fills the cells of the images packed, of instances, each
 // packing's quad at its index, each image's source drawn premultiplied into
-// its cell, its edge continued into the gutter: a pass into each page
-// packed into, a draw for each cell. It then releases the sources, which
-// the frame's draws still read, and forgets the packings. A cell of an
-// atlas render could not make is not drawn.
+// its cell, its edge continued into the gutter: a pass for each run of
+// cells on one page, a draw for each cell, then, once every cell is
+// filled, the mips of each page filled, generated once from its first
+// level. It then releases the sources, which the frame's draws still read,
+// and forgets the packings. A cell of an atlas render could not make is
+// not drawn.
 func (r *renderer) fillPackings(list *render.CommandList, inventory render.Inventory, instances render.BufferRange) {
+	r.filledPages = r.filledPages[:0]
 	for runStart := 0; runStart < len(r.packings); {
 		firstPacked := r.packings[runStart].packed
 		runEnd := runStart + 1
@@ -390,20 +410,22 @@ func (r *renderer) fillPackings(list *render.CommandList, inventory render.Inven
 			pass := list.BeginPass(render.PassDescriptor{Label: "canvas pack", ColorTargets: r.colorTargets[:]})
 			for index := runStart; index < runEnd; index++ {
 				packing := &r.packings[index]
-				region := packing.packed.region
-				gutter := packing.packed.atlas.gutter
-				pass.SetViewport(render.Viewport{
-					X:        float32(region.X - gutter),
-					Y:        float32(region.Y - gutter),
-					Width:    float32(region.Width + 2*gutter),
-					Height:   float32(region.Height + 2*gutter),
-					MaxDepth: 1,
-				})
+				cell := packing.packed.atlas.findCell(packing.packed.region)
+				pass.SetViewport(render.Viewport{X: float32(cell.X), Y: float32(cell.Y), Width: float32(cell.Width), Height: float32(cell.Height), MaxDepth: 1})
 				r.drawInstances(&pass, r.packMaterial, instances, uint32(index), 1, packing.source, FilterNearest)
 			}
 			pass.End()
+			filledBefore := slices.ContainsFunc(r.filledPages, func(filledPage *packedImage) bool {
+				return filledPage.atlas == firstPacked.atlas && filledPage.region.Layer == firstPacked.region.Layer
+			})
+			if !filledBefore {
+				r.filledPages = append(r.filledPages, firstPacked)
+			}
 		}
 		runStart = runEnd
+	}
+	for _, filledPage := range r.filledPages {
+		list.GenerateMips(filledPage.atlas.texture, filledPage.region.Layer, 1)
 	}
 	for _, packing := range r.packings {
 		if packing.source != (render.Texture{}) {
@@ -494,20 +516,21 @@ func (r *renderer) packImage(inventory render.Inventory, logger *kernel.Logger, 
 	spriteAtlas := r.srgbAtlas
 	if key.options.ColorSpace == ColorSpaceLinear {
 		if r.linearAtlas == nil {
-			r.linearAtlas = newAtlas(inventory, "canvas sprites linear", render.TextureFormatRGBA8Unorm, r.atlasPageSize, r.atlasPageSize, atlasGutter)
+			r.linearAtlas = newAtlas(inventory, "canvas sprites linear", render.TextureFormatRGBA8Unorm, r.atlasPageSize, r.atlasPageSize, r.mipLevelCount)
 		}
 		spriteAtlas = r.linearAtlas
 	}
 	packed := &packedImage{atlas: spriteAtlas, lastDrawnFrame: r.drawnFrameCount}
 	fits := false
-	holdsCell := width+2*atlasGutter <= r.atlasPageSize && height+2*atlasGutter <= r.atlasPageSize
+	cellWidth, cellHeight := spriteAtlas.findCellSize(width, height)
+	holdsCell := cellWidth <= r.atlasPageSize && cellHeight <= r.atlasPageSize
 	if width <= r.ownTextureSize && height <= r.ownTextureSize && holdsCell {
 		packed.region, fits = r.packIntoSpriteAtlas(inventory, logger, spriteAtlas, key.path, width, height)
 	}
 	if !fits {
 		// An atlas of its own is exactly its size, of no gutter, so an image
 		// as large as a page fills a texture of a page's size.
-		packed.atlas, packed.region = newOwnAtlas(inventory, key.path, spriteAtlas.format, width, height)
+		packed.atlas, packed.region = newOwnAtlas(inventory, key.path, spriteAtlas.format, width, height, spriteAtlas.mipLevelCount)
 	}
 	r.packedImages[key] = packed
 	r.packings = append(r.packings, atlasPacking{packed: packed, source: source})

@@ -84,12 +84,15 @@
 //
 // An atlas is one 2D-array texture whose layers are pages of
 // Config.AtlasPageSize, each image a cell of its own, premultiplied, its
-// gutter continuing its edges, so linear filtering never reaches a
-// neighbour. A full atlas doubles its pages, to Config.AtlasLayerCeiling,
-// where it evicts the images drawn least lately, never one drawn this
-// frame; an image wider or taller than Config.OwnTextureSize, or one no page
-// holds, is drawn from a texture of its own, exactly its size with no
-// gutter, its sampler clamping at its edge. Nothing is refused for good.
+// gutter continuing its edges, on a grid Config.MipLevels sets, so linear
+// filtering never reaches a neighbour at any mip level, a page's mips made
+// again each frame an image is packed into it, unless
+// Config.DoNotGenerateMipMaps is set. A full atlas doubles its pages, to
+// Config.AtlasLayerCeiling, where it evicts the images drawn least lately,
+// never one drawn this frame; an image wider or taller than
+// Config.OwnTextureSize, or one no page holds, is drawn from a texture of
+// its own, exactly its size with no gutter, its sampler clamping at its
+// edge. Nothing is refused for good.
 // Sprites of any images of one atlas batch together while their filter is
 // one, and shapes with them: shapes, and the zero Image, draw the sRGB
 // sprite atlas's white texel, which takes no filter.

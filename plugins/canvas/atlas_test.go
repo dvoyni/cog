@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -80,6 +81,45 @@ func findPackings(t *testing.T, frame render.Inspection, labels map[render.Textu
 		}
 	}
 	return packings
+}
+
+// spriteAtlasLabel is the sRGB sprite atlas's texture's label, and
+// mipsLabel the label findPassSummaries gives the passes render draws a
+// texture's mips in.
+const (
+	spriteAtlasLabel = "canvas sprites sRGB"
+	mipsLabel        = "mips"
+)
+
+// passSummary is a pass of a canvas list as the atlas tests read it: its
+// label, the label of the texture it draws into, none for a window, its
+// mip level and layer there, and how many draws it records.
+type passSummary struct {
+	label           string
+	target          string
+	mipLevel, layer uint32
+	draws           int
+}
+
+// findPassSummaries answers each pass of list, its target labelled as labels
+// has it, and a pass render draws mips in labelled mipsLabel, since render
+// names it by its level, layer and texture.
+func findPassSummaries(list render.InspectedCommandList, labels map[render.Texture]string) []passSummary {
+	var summaries []passSummary
+	for _, pass := range list.Passes {
+		target := pass.ColorTargets[0]
+		label := pass.Label
+		if strings.HasPrefix(label, "render: mip level ") {
+			label = mipsLabel
+		}
+		// A window's target is the zero Texture, which labels may name.
+		targetLabel := ""
+		if target.Texture != (render.Texture{}) {
+			targetLabel = labels[target.Texture]
+		}
+		summaries = append(summaries, passSummary{label: label, target: targetLabel, mipLevel: target.MipLevel, layer: target.Layer, draws: len(pass.Draws)})
+	}
+	return summaries
 }
 
 // findBatchAtlases answers the label, as labels has it, of the atlas of each
@@ -185,13 +225,15 @@ func TestSpritesOfDifferentImagesAndTheShapesBesideThemDrawFromTheSpriteAtlasAsO
 		t.Errorf("the batches drew %v, want each batch's atlas", textures)
 	}
 	// The inspection spells a nearest filter, its default, zero.
-	linear := render.SamplerDescriptor{MagFilter: render.FilterModeLinear, MinFilter: render.FilterModeLinear}
+	linear := render.SamplerDescriptor{MagFilter: render.FilterModeLinear, MinFilter: render.FilterModeLinear, MipmapFilter: render.FilterModeLinear}
 	if want := []render.SamplerDescriptor{linear, {}, linear}; !slices.Equal(samplers, want) {
 		t.Errorf("the batches read their atlases through %+v, want %+v, each batch's filter", samplers, want)
 	}
 }
 
-func TestAnImageIsPackedAtItsFirstDrawBeforeTheCamerasPassItsSourceReleasedAfter(t *testing.T) {
+func TestAnImageIsPackedAndItsPagesMipsMadeAtItsFirstDrawBeforeTheCamerasPassItsSourceReleasedAfter(t *testing.T) {
+	// At the default 3 mip levels, the page packed into has its levels 1
+	// and 2 drawn after the packing pass and before the camera's.
 	h := canvastest.NewHarness(t)
 	describer := &textureDescriber{}
 	h.Spawn(nil, nil, &fileMounter{files: makeAtlasFiles(t)}, describer)
@@ -211,19 +253,20 @@ func TestAnImageIsPackedAtItsFirstDrawBeforeTheCamerasPassItsSourceReleasedAfter
 
 	frame := h.Frames()[0].Render
 	lists := findCanvasLists(frame)
-	if len(lists) != 1 || len(lists[0].Passes) != 2 || lists[0].Passes[0].Label != "canvas pack" || lists[0].Passes[1].Label != "canvas camera" {
-		t.Fatalf("the first frame drawing two images began %+v, want one list of a pass packing them, then the camera's pass", lists)
+	labels := findTextureLabels(frame)
+	if len(lists) != 1 {
+		t.Fatalf("the first frame drawing two images began %d canvas lists, want one", len(lists))
+	}
+	want := []passSummary{{"canvas pack", spriteAtlasLabel, 0, 0, 2}, {mipsLabel, spriteAtlasLabel, 1, 0, 1}, {mipsLabel, spriteAtlasLabel, 2, 0, 1}, {"canvas camera", "", 0, 0, 1}}
+	if got := findPassSummaries(lists[0], labels); !slices.Equal(got, want) {
+		t.Fatalf("the first frame drawing two images drew %+v, want a pass packing both into the first page, two drawing its mips, then the camera's pass of one batch: %+v", got, want)
 	}
 	pack := lists[0].Passes[0]
-	camera := lists[0].Passes[1]
-	if len(camera.Draws) != 1 {
-		t.Fatalf("the camera's pass drew %d batches, want the sprites as one", len(camera.Draws))
-	}
+	camera := lists[0].Passes[3]
 	atlas := findParameter(t, camera.Draws[0].DrawParameters, "canvas_atlas").TextureView.Texture
-	if target := pack.ColorTargets[0]; len(pack.ColorTargets) != 1 || target.Texture != atlas || target.Layer != 0 || target.Clear {
-		t.Errorf("the packing pass drew into %+v, want the atlas the camera draws from, its first page, kept", pack.ColorTargets)
+	if target := pack.ColorTargets[0]; len(pack.ColorTargets) != 1 || target.Texture != atlas || target.Clear {
+		t.Errorf("the packing pass drew into %+v, want the atlas the camera draws from, kept", pack.ColorTargets)
 	}
-	labels := findTextureLabels(frame)
 	var sources []render.Texture
 	var sourceLabels []string
 	for _, draw := range pack.Draws {
@@ -238,7 +281,7 @@ func TestAnImageIsPackedAtItsFirstDrawBeforeTheCamerasPassItsSourceReleasedAfter
 	h.Record(record)
 	h.Step()
 	if lists := findCanvasLists(h.Frames()[1].Render); len(lists) != 1 || len(lists[0].Passes) != 1 {
-		t.Errorf("the second frame drawing the images began %+v, want the camera's pass alone, packing nothing again", lists)
+		t.Errorf("the second frame drawing the images began %+v, want the camera's pass alone, packing nothing and making no mips again", lists)
 	}
 	h.Record(record)
 	h.Step()
@@ -253,10 +296,124 @@ func TestAnImageIsPackedAtItsFirstDrawBeforeTheCamerasPassItsSourceReleasedAfter
 	}
 }
 
+func TestAFramesPackingAndMipsOpenItsLowestCameraOrdersListBeforeAnyCamerasPass(t *testing.T) {
+	// Of two cameras, set at orders 2 and 1, the one of order 2 drawing
+	// over the other's clear, the list of order 1, drawn first, packs red
+	// and draws its page's levels 1 and 2 before its camera's pass, and the
+	// list of order 2 draws its camera's pass alone.
+	h := canvastest.NewHarness(t)
+	h.Spawn(nil, nil, &fileMounter{files: makeAtlasFiles(t)})
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	red := canvas.ImageFromFile(redPath)
+	h.Record(func(list canvas.DrawList) {
+		list.SetCamera(canvas.Camera{Order: 2})
+		list.SetCamera(canvas.Camera{Clear: true, Order: 1})
+		list.DrawSprite(canvas.Sprite{Image: red})
+	})
+
+	h.Step()
+
+	frame := h.Frames()[0].Render
+	labels := findTextureLabels(frame)
+	var got [][]passSummary
+	for _, list := range findCanvasLists(frame) {
+		got = append(got, findPassSummaries(list, labels))
+	}
+	want := [][]passSummary{
+		{{"canvas pack", spriteAtlasLabel, 0, 0, 1}, {mipsLabel, spriteAtlasLabel, 1, 0, 1}, {mipsLabel, spriteAtlasLabel, 2, 0, 1}, {"canvas camera", "", 0, 0, 1}},
+		{{"canvas camera", "", 0, 0, 1}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("the canvas lists drew %+v, want %+v", got, want)
+	}
+}
+
+func TestAPagesMipsAreMadeOnceAfterEveryCellIsFilledThoughPackedBetweenAnotherAtlass(t *testing.T) {
+	// Red and blue are packed into the sRGB atlas's first page with the
+	// linear red between them, so a pass fills each in turn, and only then
+	// are the sRGB page's levels 1 and 2 drawn, once, then the linear
+	// page's.
+	h := canvastest.NewHarness(t)
+	h.Spawn(nil, nil, &fileMounter{files: makeAtlasFiles(t)})
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	h.Record(makeSpriteRecord(canvas.ImageFromFile(redPath), canvas.ImageFromFile(redPath, canvas.ImageOptions{ColorSpace: canvas.ColorSpaceLinear}), canvas.ImageFromFile(bluePath)))
+
+	h.Step()
+
+	frame := h.Frames()[0].Render
+	labels := findTextureLabels(frame)
+	lists := findCanvasLists(frame)
+	if len(lists) != 1 {
+		t.Fatalf("the frame began %d canvas lists, want one", len(lists))
+	}
+	const linearAtlasLabel = "canvas sprites linear"
+	want := []passSummary{
+		{"canvas pack", spriteAtlasLabel, 0, 0, 1}, {"canvas pack", linearAtlasLabel, 0, 0, 1}, {"canvas pack", spriteAtlasLabel, 0, 0, 1},
+		{mipsLabel, spriteAtlasLabel, 1, 0, 1}, {mipsLabel, spriteAtlasLabel, 2, 0, 1},
+		{mipsLabel, linearAtlasLabel, 1, 0, 1}, {mipsLabel, linearAtlasLabel, 2, 0, 1},
+		{"canvas camera", "", 0, 0, 3},
+	}
+	if got := findPassSummaries(lists[0], labels); !slices.Equal(got, want) {
+		t.Errorf("the frame drew %+v, want %+v", got, want)
+	}
+}
+
+func TestATinyShapeDrawsTheWhiteTexelWrittenAtEveryMipLevel(t *testing.T) {
+	// Fills of a quarter unit, a white texel to a quarter of a pixel or
+	// half of one at 1 to 2 pixels a point, read the white texel's cell at
+	// a level below the first, which is white as the first is; laid a
+	// fifth of a unit apart, they cover every pixel of their square.
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.DrawList) {
+		for row := range 10 {
+			for column := range 10 {
+				list.DrawShape(canvas.Shape{Rect: m.Rect{X: -1 + 0.2*float32(column), Y: -1 + 0.2*float32(row), Width: 0.25, Height: 0.25}, Tint: m.White})
+			}
+		}
+	})
+
+	picture.expect(t, []probe{{"the tiny fills' square", m.Vec2{}, opaqueWhite}})
+}
+
+func TestAGrownAtlasCopiesEveryMipLevelOfItsPagesAndMakesTheMipsOfThePagePackedInto(t *testing.T) {
+	// A page of 12 texels at the default 3 levels holds the white texel's
+	// cell alone, so red's cell of 12 grows the atlas to 2 pages: the
+	// first is copied at each of its levels, the white texel written into
+	// each, and the second has its levels 1 and 2 drawn once red is packed
+	// into it.
+	h := canvastest.NewHarness(t)
+	h.Spawn(nil, &canvas.Config{AtlasPageSize: 12}, &fileMounter{files: makeAtlasFiles(t)})
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	h.Record(makeSpriteRecord(canvas.ImageFromFile(redPath)))
+
+	h.Step()
+
+	frame := h.Frames()[0]
+	atlas := frame.Cameras[0].Batches[0].Atlas
+	lists := findCanvasLists(frame.Render)
+	if len(lists) != 1 {
+		t.Fatalf("the frame began %d canvas lists, want one", len(lists))
+	}
+	var copied []render.TextureRegion
+	for _, copy := range lists[0].Copies {
+		if copy.DestinationTexture != atlas || copy.SourceRegion != copy.DestinationRegion {
+			t.Errorf("the frame copied %+v, want each page's level into the same of the grown atlas", copy)
+		}
+		copied = append(copied, render.TextureRegion{MipLevel: copy.DestinationRegion.MipLevel, Layer: copy.DestinationRegion.Layer})
+	}
+	if want := []render.TextureRegion{{MipLevel: 0}, {MipLevel: 1}, {MipLevel: 2}}; !slices.Equal(copied, want) {
+		t.Errorf("the frame copied %+v, want the first page at each of its 3 levels", copied)
+	}
+	want := []passSummary{{"canvas pack", spriteAtlasLabel, 0, 1, 1}, {mipsLabel, spriteAtlasLabel, 1, 1, 1}, {mipsLabel, spriteAtlasLabel, 2, 1, 1}, {"canvas camera", "", 0, 0, 1}}
+	if got := findPassSummaries(lists[0], findTextureLabels(frame.Render)); !slices.Equal(got, want) {
+		t.Errorf("the frame drew %+v, want red packed into the second page, its levels 1 and 2 drawn, then the camera's pass: %+v", got, want)
+	}
+}
+
 func TestAnImageAsLargeAsAPageTakesAnAtlasOfItsOwnExactlyItsSize(t *testing.T) {
 	// The blue image of 32 texels is a page's side, larger than the default
 	// OwnTextureSize of half a page, so it takes an atlas of its own, of no
-	// gutter, no larger than a page.
+	// gutter, no larger than a page, with the 3 mip levels a page has, made
+	// after its packing pass.
 	h := canvastest.NewHarness(t)
 	describer := &textureDescriber{}
 	h.Spawn(nil, &canvas.Config{AtlasPageSize: 32}, &fileMounter{files: makeAtlasFiles(t)}, describer)
@@ -269,26 +426,23 @@ func TestAnImageAsLargeAsAPageTakesAnAtlasOfItsOwnExactlyItsSize(t *testing.T) {
 
 	frame := h.Frames()[0].Render
 	lists := findCanvasLists(frame)
-	if len(lists) != 1 || len(lists[0].Passes) != 2 || lists[0].Passes[0].Label != "canvas pack" {
-		t.Fatalf("the first frame drawing the image began %+v, want one list of a pass packing it, then the camera's pass", lists)
+	if len(lists) != 1 {
+		t.Fatalf("the first frame drawing the image began %d canvas lists, want one", len(lists))
 	}
-	camera := lists[0].Passes[1]
-	if len(camera.Draws) != 1 {
-		t.Fatalf("the camera's pass drew %d batches, want the sprite's", len(camera.Draws))
+	want := []passSummary{{"canvas pack", bluePath, 0, 0, 1}, {mipsLabel, bluePath, 1, 0, 1}, {mipsLabel, bluePath, 2, 0, 1}, {"canvas camera", "", 0, 0, 1}}
+	if got := findPassSummaries(lists[0], findTextureLabels(frame)); !slices.Equal(got, want) {
+		t.Fatalf("the first frame drawing the image drew %+v, want it packed into an atlas of its own, labelled %q, its mips drawn, then the camera's pass: %+v", got, bluePath, want)
 	}
-	atlas := findParameter(t, camera.Draws[0].DrawParameters, "canvas_atlas").TextureView.Texture
+	atlas := findParameter(t, lists[0].Passes[3].Draws[0].DrawParameters, "canvas_atlas").TextureView.Texture
 	if label := findTextureLabels(frame)[atlas]; label != bluePath {
-		t.Errorf("the sprite drew from %q, want an atlas of its own, labelled %q", label, bluePath)
-	}
-	if target := lists[0].Passes[0].ColorTargets[0]; target.Texture != atlas {
-		t.Errorf("the packing pass drew into %+v, want the image's own atlas", target)
+		t.Errorf("the sprite drew from %q, want its own atlas, labelled %q", label, bluePath)
 	}
 	describer.describe(atlas)
 	h.Record(record)
 	h.Step()
 	described := describer.describedTextures()
-	if len(described) != 1 || described[0].Width != 32 || described[0].Height != 32 || described[0].LayerCount > 1 {
-		t.Errorf("the image's own atlas is %+v, want one page of 32 by 32 texels, its size", described)
+	if len(described) != 1 || described[0].Width != 32 || described[0].Height != 32 || described[0].LayerCount > 1 || described[0].MipLevelCount != 3 {
+		t.Errorf("the image's own atlas is %+v, want one page of 32 by 32 texels, its size, of 3 mip levels", described)
 	}
 }
 
@@ -300,19 +454,42 @@ func TestAPackedImageDrawsItsOwnTexelsAndLinearFilteringNeverReachesItsNeighbour
 	// texel, the stripes show each of their own texels where it lies.
 	// Linearly filtered, probed half a unit inside its edges, each image
 	// reads only its own texels and its gutter, continuing them, never its
-	// neighbour or the empty page.
+	// neighbour or the empty page. The corner image of 6 texels, green but
+	// for its last column, yellow, and the rest of its last row, blue, is
+	// rounded up to the grid of 4, and read at its nearest texel shows its
+	// last column and row where they lie, its cell filled over the rounding.
+	files := makeAtlasFiles(t)
+	corner := image.NewNRGBA(image.Rect(0, 0, 6, 6))
+	for y := range 6 {
+		for x := range 6 {
+			switch {
+			case x == 5:
+				corner.SetNRGBA(x, y, color.NRGBA{R: 255, G: 255, A: 255})
+			case y == 5:
+				corner.SetNRGBA(x, y, color.NRGBA{B: 255, A: 255})
+			default:
+				corner.SetNRGBA(x, y, color.NRGBA{G: 255, A: 255})
+			}
+		}
+	}
+	addImageFile(t, files, "corner.png", corner)
 	stripes := canvas.ImageFromFile(stripesPath)
 	blue := canvas.ImageFromFile(bluePath)
+	cornerImage := canvas.ImageFromFile("corner.png")
 	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.DrawList) {
 		list.DrawSprite(canvas.Sprite{Image: blue, Transform: m.Translation2x3(40, 0), Size: m.Vec2{X: 40, Y: 40}})
 		list.DrawSprite(canvas.Sprite{Image: stripes, Transform: m.Translation2x3(-40, -30), Size: m.Vec2{X: 40, Y: 10}})
 		list.DrawSprite(canvas.Sprite{Image: stripes, Transform: m.Translation2x3(-40, 30), Size: m.Vec2{X: 40, Y: 10}, Filter: canvas.FilterNearest})
-	}, &fileMounter{files: makeAtlasFiles(t)})
+		list.DrawSprite(canvas.Sprite{Image: cornerImage, Transform: m.Translation2x3(110, 60), Size: m.Vec2{X: 36, Y: 36}, Filter: canvas.FilterNearest})
+	}, &fileMounter{files: files})
 
 	opaqueRed := color.NRGBA{R: 255, A: 255}
 	opaqueGreen := color.NRGBA{G: 255, A: 255}
 	opaqueBlue := color.NRGBA{B: 255, A: 255}
 	picture.expect(t, []probe{
+		{"the corner image's first texel", m.Vec2{X: 95, Y: 45}, opaqueGreen},
+		{"the corner image's last column", m.Vec2{X: 125, Y: 45}, color.NRGBA{R: 255, G: 255, A: 255}},
+		{"the corner image's last row", m.Vec2{X: 95, Y: 75}, opaqueBlue},
 		{"the nearest stripes' first texel", m.Vec2{X: -55, Y: 30}, opaqueRed},
 		{"the nearest stripes' second texel", m.Vec2{X: -45, Y: 30}, opaqueGreen},
 		{"the nearest stripes' third texel", m.Vec2{X: -35, Y: 30}, opaqueBlue},
@@ -329,9 +506,73 @@ func TestAPackedImageDrawsItsOwnTexelsAndLinearFilteringNeverReachesItsNeighbour
 	})
 }
 
+func TestAMinifiedSpriteNeverMixesANeighboursColourAtAnyMipLevel(t *testing.T) {
+	// The checker of 16 texels alternates red and blue each texel, so each
+	// mip level below the first averages it to purple, as its gutter is;
+	// it is packed below the white texel's cell, and the green of 6 below
+	// it, rounded up to the grid of 4. The checkers are drawn at a quarter,
+	// an eighth and a sixteenth of their size, which at 1 to 2 pixels a
+	// point reach no level above the second, so they show purple, and the
+	// green at a half and a quarter. Each reads only its own texels and its
+	// gutter, purple or green throughout, probed half a unit inside its
+	// edges, never white, the other image's colour or the empty page's.
+	files := makeAtlasFiles(t)
+	checkers := image.NewNRGBA(image.Rect(0, 0, 16, 16))
+	for y := range 16 {
+		for x := range 16 {
+			checkers.SetNRGBA(x, y, color.NRGBA{R: 255, A: 255})
+			if (x+y)%2 == 1 {
+				checkers.SetNRGBA(x, y, color.NRGBA{B: 255, A: 255})
+			}
+		}
+	}
+	addImageFile(t, files, "checkers.png", checkers)
+	addSolidFile(t, files, "green6.png", 6, 6, color.NRGBA{G: 255, A: 255})
+	checker := canvas.ImageFromFile("checkers.png")
+	green := canvas.ImageFromFile("green6.png")
+	// Each sprite's edges lie on whole units, or one smaller than 2 units
+	// lies about a pixel's centre, where alone it is probed.
+	purple := color.NRGBA{R: 188, B: 188, A: 255}
+	opaqueGreen := color.NRGBA{G: 255, A: 255}
+	sprites := []struct {
+		name   string
+		image  canvas.Image
+		centre m.Vec2
+		size   float32
+		want   color.NRGBA
+	}{
+		{"checker", checker, m.Vec2{X: -100}, 4, purple},
+		{"checker", checker, m.Vec2{X: -80}, 2, purple},
+		{"checker", checker, m.Vec2{X: -59.5, Y: 0.5}, 1, purple},
+		{"green", green, m.Vec2{X: 20.5, Y: 0.5}, 3, opaqueGreen},
+		{"green", green, m.Vec2{X: 40.5, Y: 0.5}, 1.5, opaqueGreen},
+	}
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.DrawList) {
+		for _, sprite := range sprites {
+			list.DrawSprite(canvas.Sprite{Image: sprite.image, Transform: m.Translation2x3(sprite.centre.X, sprite.centre.Y), Size: m.Vec2{X: sprite.size, Y: sprite.size}})
+		}
+	}, &fileMounter{files: files})
+
+	var probes []probe
+	for _, sprite := range sprites {
+		probes = append(probes, probe{fmt.Sprintf("the %s of %v units' centre", sprite.name, sprite.size), sprite.centre, sprite.want})
+		if sprite.size < 2 {
+			continue
+		}
+		inside := sprite.size/2 - 0.5
+		for _, edge := range []struct {
+			name   string
+			offset m.Vec2
+		}{{"left edge", m.Vec2{X: -inside}}, {"right edge", m.Vec2{X: inside}}, {"top edge", m.Vec2{Y: -inside}}, {"bottom edge", m.Vec2{Y: inside}}} {
+			probes = append(probes, probe{fmt.Sprintf("the %s of %v units' %s", sprite.name, sprite.size, edge.name), sprite.centre.Add(edge.offset), sprite.want})
+		}
+	}
+	picture.expect(t, probes)
+}
+
 func TestAnImageNoPageHoldsIsDrawnFromANewPageOrATextureOfItsOwn(t *testing.T) {
-	// A page of 8 texels holds the white texel's cell of 5 and the rows
-	// below it, too few for the quadrants' cell of 8, so the atlas grows a
+	// A page of 8 texels of one mip level holds the white texel's cell of 5
+	// and the rows below it, too few for the quadrants' cell of 8, so the atlas grows a
 	// second page holding them, which their instance names; past an
 	// OwnTextureSize of 2, they are drawn from a texture of their own
 	// instead. Either way they are read at their nearest texel beside a
@@ -340,8 +581,8 @@ func TestAnImageNoPageHoldsIsDrawnFromANewPageOrATextureOfItsOwn(t *testing.T) {
 		name   string
 		config canvas.Config
 	}{
-		{"from a new page", canvas.Config{AtlasPageSize: 8}},
-		{"from a texture of its own", canvas.Config{AtlasPageSize: 8, OwnTextureSize: 2}},
+		{"from a new page", canvas.Config{AtlasPageSize: 8, DoNotGenerateMipMaps: true}},
+		{"from a texture of its own", canvas.Config{AtlasPageSize: 8, OwnTextureSize: 2, DoNotGenerateMipMaps: true}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			quadrants := canvas.ImageFromFile(quadrantsPath)
@@ -362,8 +603,8 @@ func TestAnImageNoPageHoldsIsDrawnFromANewPageOrATextureOfItsOwn(t *testing.T) {
 }
 
 func TestAFullAtlasDoublesItsPagesCopiedIntoATextureOfTwiceAsMany(t *testing.T) {
-	// A page of 8 texels holds the white texel's cell of 5 and no cell of 8
-	// beside it, so red's cell grows the atlas to 2 pages and the
+	// A page of 8 texels of one mip level holds the white texel's cell of 5
+	// and no cell of 8 beside it, so red's cell grows the atlas to 2 pages and the
 	// quadrants' to 4 in one frame, its one page copied once into the
 	// last texture, the one between released uncopied. In the next frame
 	// green fills the fourth page and the stripes grow it to 8, its 4
@@ -371,7 +612,7 @@ func TestAFullAtlasDoublesItsPagesCopiedIntoATextureOfTwiceAsMany(t *testing.T) 
 	// in a pass of its own.
 	h := canvastest.NewHarness(t)
 	describer := &textureDescriber{}
-	h.Spawn(nil, &canvas.Config{AtlasPageSize: 8}, &fileMounter{files: makeAtlasFiles(t)}, describer)
+	h.Spawn(nil, &canvas.Config{AtlasPageSize: 8, DoNotGenerateMipMaps: true}, &fileMounter{files: makeAtlasFiles(t)}, describer)
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	h.Record(makeSpriteRecord(canvas.ImageFromFile(redPath), canvas.ImageFromFile(quadrantsPath)))
 	h.Step()
@@ -452,12 +693,12 @@ func TestAFullAtlasDoublesItsPagesCopiedIntoATextureOfTwiceAsMany(t *testing.T) 
 }
 
 func TestAnAtlasAtItsCeilingEvictsTheImageDrawnLeastLatelyToPackANewOne(t *testing.T) {
-	// A page of 16 texels holds the white texel's cell and two cells of 8,
-	// so at a ceiling of one page, green evicts red, drawn before quadrants,
+	// A page of 16 texels of one mip level holds the white texel's cell and
+	// two cells of 8, so at a ceiling of one page, green evicts red, drawn before quadrants,
 	// and red, drawn again with quadrants, evicts green, never quadrants,
 	// drawn less lately but drawn in that frame, after red.
 	h := canvastest.NewHarness(t)
-	h.Spawn(nil, &canvas.Config{AtlasPageSize: 16, AtlasLayerCeiling: 1}, &fileMounter{files: makeAtlasFiles(t)})
+	h.Spawn(nil, &canvas.Config{AtlasPageSize: 16, AtlasLayerCeiling: 1, DoNotGenerateMipMaps: true}, &fileMounter{files: makeAtlasFiles(t)})
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	red := canvas.ImageFromFile(redPath)
 	quadrants := canvas.ImageFromFile(quadrantsPath)
@@ -488,12 +729,12 @@ func TestAnAtlasAtItsCeilingEvictsTheImageDrawnLeastLatelyToPackANewOne(t *testi
 }
 
 func TestAnAtlasAtItsCeilingWithNothingToEvictDrawsAnImageFromATextureOfItsOwnReportedOnce(t *testing.T) {
-	// A page of 16 texels holds the white texel's cell and two cells of 8,
-	// so at a ceiling of one page, a frame drawing three images of 4 draws
-	// the third from a texture of its own, the atlas full of what it
-	// draws.
+	// A page of 16 texels of one mip level holds the white texel's cell and
+	// two cells of 8, so at a ceiling of one page, a frame drawing three
+	// images of 4 draws the third from a texture of its own, the atlas full
+	// of what it draws.
 	h := canvastest.NewHarness(t)
-	h.Spawn(nil, &canvas.Config{AtlasPageSize: 16, AtlasLayerCeiling: 1}, &fileMounter{files: makeAtlasFiles(t)})
+	h.Spawn(nil, &canvas.Config{AtlasPageSize: 16, AtlasLayerCeiling: 1, DoNotGenerateMipMaps: true}, &fileMounter{files: makeAtlasFiles(t)})
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	h.ExpectReport(canvas.ReportKindAtlasFull)
 	record := makeSpriteRecord(canvas.ImageFromFile(redPath), canvas.ImageFromFile(quadrantsPath), canvas.ImageFromFile(greenPath))
@@ -542,23 +783,54 @@ func TestAnImageWiderOrTallerThanOwnTextureSizeIsDrawnFromATextureOfItsOwn(t *te
 	}
 }
 
-func TestAnAtlasPageSizeBelowTheWhiteTexelsCellIsRaisedToItReportedOnce(t *testing.T) {
-	// A page of 1 or 4 texels cannot hold the white texel's cell of 5, so
-	// the sRGB atlas's pages are made 5 texels square, reported once; a
-	// page of 5 holds it, and is neither raised nor reported. The second
-	// frame lets the describer read the atlas.
+func TestAnImagesOwnTextureHasNoMoreMipLevelsThanItsSizeHas(t *testing.T) {
+	// An image of 2 texels, past an OwnTextureSize of 1, is drawn from a
+	// texture of its own, of the 2 levels its size has, not the page's 3.
+	h := canvastest.NewHarness(t)
+	describer := &textureDescriber{}
+	files := makeAtlasFiles(t)
+	addSolidFile(t, files, "red2.png", 2, 2, color.NRGBA{R: 255, A: 255})
+	h.Spawn(nil, &canvas.Config{OwnTextureSize: 1}, &fileMounter{files: files}, describer)
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	record := makeSpriteRecord(canvas.ImageFromFile("red2.png"))
+	h.Record(record)
+	h.Step()
+	describer.describe(h.Frames()[0].Cameras[0].Batches[0].Atlas)
+	h.Record(record)
+	h.Step()
+
+	if described := describer.describedTextures(); len(described) != 1 || described[0].Width != 2 || described[0].MipLevelCount != 2 {
+		t.Errorf("the image's own texture is %+v, want 2 texels a side of 2 mip levels", described)
+	}
+}
+
+func TestAnAtlasPageSizeOffTheGridOrBelowTheWhiteTexelsCellIsRaisedReportedOnce(t *testing.T) {
+	// At the default 3 mip levels, cells sit on a grid of 4 with a gutter
+	// of 4, so the white texel's cell is 12: a page of 1 or 11 is raised to
+	// 12, and one of 13 to 16, the next multiple of the grid, each reported
+	// once, while one of 12 is neither. At 4 levels, the grid and gutter
+	// are 8, so the cell is 24. At one level, the gutter is 2 on no grid,
+	// so the cell is 5 and a page of 6 stands. The second frame lets the
+	// describer read the atlas.
 	for _, test := range []struct {
-		pageSize    uint32
-		raisedCount int
+		name          string
+		config        canvas.Config
+		side          uint32
+		mipLevelCount uint32
+		raisedCount   int
 	}{
-		{1, 1},
-		{4, 1},
-		{5, 0},
+		{"a page of 1", canvas.Config{AtlasPageSize: 1}, 12, 3, 1},
+		{"a page of 11", canvas.Config{AtlasPageSize: 11}, 12, 3, 1},
+		{"a page of 13", canvas.Config{AtlasPageSize: 13}, 16, 3, 1},
+		{"a page of 12", canvas.Config{AtlasPageSize: 12}, 12, 3, 0},
+		{"a page of 16 at 4 levels", canvas.Config{AtlasPageSize: 16, MipLevels: 4}, 24, 4, 1},
+		{"a page of 4 of one level", canvas.Config{AtlasPageSize: 4, DoNotGenerateMipMaps: true}, 5, 1, 1},
+		{"a page of 6 of one level", canvas.Config{AtlasPageSize: 6, DoNotGenerateMipMaps: true}, 6, 1, 0},
 	} {
-		t.Run(fmt.Sprintf("a page of %d", test.pageSize), func(t *testing.T) {
+		t.Run(test.name, func(t *testing.T) {
 			h := canvastest.NewHarness(t)
 			describer := &textureDescriber{}
-			h.Spawn(nil, &canvas.Config{AtlasPageSize: test.pageSize}, describer)
+			h.Spawn(nil, &test.config, describer)
 			h.OpenWindow(platform.Size{Width: 64, Height: 48})
 			h.ExpectReport(canvas.ReportKindAtlasPageSizeRaised)
 			h.Record(recordWhiteFill)
@@ -567,13 +839,37 @@ func TestAnAtlasPageSizeBelowTheWhiteTexelsCellIsRaisedToItReportedOnce(t *testi
 			h.Step()
 
 			descriptors := describer.describedTextures()
-			if len(descriptors) != 1 || descriptors[0].Width != 5 || descriptors[0].Height != 5 {
-				t.Errorf("the sRGB atlas is %+v, want one page of 5×5 texels", descriptors)
+			if len(descriptors) != 1 || descriptors[0].Width != test.side || descriptors[0].Height != test.side || descriptors[0].MipLevelCount != test.mipLevelCount {
+				t.Errorf("the sRGB atlas is %+v, want one page of %d×%d texels of %d mip levels", descriptors, test.side, test.side, test.mipLevelCount)
 			}
 			if raised := countReports(h, canvas.ReportKindAtlasPageSizeRaised); raised != test.raisedCount {
 				t.Errorf("the page side raised was reported %d times, want %d", raised, test.raisedCount)
 			}
 		})
+	}
+}
+
+func TestMipLevelsPastTheMostAPageFitsAreLoweredToItReportedOnce(t *testing.T) {
+	// 13 levels' smallest page would be 12,288 texels a side, past WebGPU's
+	// default limit of 8192, so pages are made of 12 levels, reported once,
+	// their side raised to the white texel's cell of 6144 at that grid.
+	h := canvastest.NewHarness(t)
+	describer := &textureDescriber{}
+	h.Spawn(nil, &canvas.Config{MipLevels: 13}, describer)
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	h.ExpectReport(canvas.ReportKindMipLevelsLowered)
+	h.ExpectReport(canvas.ReportKindAtlasPageSizeRaised)
+	h.Record(recordWhiteFill)
+	h.Step()
+	describer.describe(findLoadedTextures(h.Frames()[0].Render, "canvas sprites sRGB")...)
+	h.Step()
+
+	descriptors := describer.describedTextures()
+	if len(descriptors) != 1 || descriptors[0].Width != 6144 || descriptors[0].MipLevelCount != 12 {
+		t.Errorf("the sRGB atlas is %+v, want one page of 6144 texels a side of 12 mip levels", descriptors)
+	}
+	if lowered := countReports(h, canvas.ReportKindMipLevelsLowered); lowered != 1 {
+		t.Errorf("the mip levels lowered were reported %d times, want once", lowered)
 	}
 }
 

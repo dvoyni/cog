@@ -228,9 +228,9 @@ author** testing canvas or a plugin on it.
   - `DefaultFontSet`, a `FontSetDescriptor` for the zero `FontSet`; its zero is JetBrains Mono alone;
   - `TextSize`, the em of a run whose `Size` is zero, in world units; zero means 16;
   - `LayoutIdleFrames`, how many frames `DrawText` keeps a layout no draw uses; zero means 2;
-  - `AtlasPageSize`, the atlas's page side, zero meaning 2048, its smallest 5, the white texel's cell of one texel and its gutter, a side below it raised to it and reported once as `ReportKindAtlasPageSizeRaised`, and `AtlasLayerCeiling`, a ceiling on its layers, zero meaning 256, WebGPU's default limit on a texture's layers, since render answers no device's limits;
+  - `AtlasPageSize`, the atlas's page side, zero meaning 2048, a multiple of the grid holding the white texel's cell of one texel rounded up to the grid and its gutter, 12 at the default 3 mip levels and 5 at one, a side that is not raised to the next that is and reported once as `ReportKindAtlasPageSizeRaised`, and `AtlasLayerCeiling`, a ceiling on its layers, zero meaning 256, WebGPU's default limit on a texture's layers, since render answers no device's limits;
   - `OwnTextureSize`, the size past which an image gets a texture of its own, zero meaning half the page side;
-  - `DoNotGenerateMipMaps`, and `MipLevels`, zero meaning 3;
+  - `DoNotGenerateMipMaps`, and `MipLevels`, zero meaning 3, more than 12 lowered to 12 and reported once as `ReportKindMipLevelsLowered`, since 13 levels' smallest page would pass WebGPU's default limit of 8192 texels on a texture's side;
   - a distance-field glyph's default em and range, zero meaning 48 px and 16.
 - **Resources it installs:**
   - `Fonts` and `Targets`, each an interface of reads alone;
@@ -419,7 +419,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - Distance fields share the sprite atlas, since alpha stays linear in an sRGB format.
 - **The white texel** that shapes draw over is reserved in the sprite atlas when it is made, and never released, so shapes batch with sprites. v1 did the same.
 - **An atlas is one 2D-array texture, and each layer is a page.** A region's page travels in its instance data, so entries on any page of one atlas share one binding and batch. Only a change of atlas breaks a batch.
-- **Growing:** a full atlas doubles its layer count. canvas makes a new array and copies the old layers into it on the GPU, so an atlas is always one texture. An atlas growing again before its copy is recorded copies its old layers once, into its last array. The page side and the ceiling on layers are `Config` fields. Under WebGPU's defaults (8192², 256 layers) memory bounds a page first: one RGBA8 layer at 8192² is 256 MiB.
+- **Growing:** a full atlas doubles its layer count. canvas makes a new array and copies the old layers into it on the GPU, so an atlas is always one texture. The copy is of every mip level of each old layer, so pages packed before the growth keep their mips. An atlas growing again before its copy is recorded copies its old layers once, into its last array. The page side and the ceiling on layers are `Config` fields. Under WebGPU's defaults (8192², 256 layers) memory bounds a page first: one RGBA8 layer at 8192² is 256 MiB.
 - **Overflow:** some images get a texture of their own:
   - one larger than the `Config` limit, zero meaning half the page side;
   - one that does not fit once the atlas is at its ceiling and nothing can be evicted.
@@ -450,7 +450,11 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - Its right and bottom gutters reach the next grid line plus the gutter.
   - Bilinear sampling at the deepest level then reads only the image's own texels and gutter.
   - Each page is made with exactly that many levels, so nothing samples a level that mixes cells.
-  - The page side must be a multiple of the grid.
+  - The page side must be a multiple of the grid holding the white texel's cell; `Config.AtlasPageSize` is raised to the next side that is, and reported once.
+  - At one level the grid is 1 and the gutter 2, as with `DoNotGenerateMipMaps`: the gutter is the grid, but never less than the 2 texels linear filtering needs.
+  - The white texel's cell is written opaque white at every level as the atlas is made, since no mip pass runs before the first frame's.
+  - An image's own texture has the page's levels, or as many as its size has, its mips the whole texture's.
+  - A linear filter reads between levels linearly too; a nearest one takes the nearest level.
 
   | Levels | Smallest clean scale | Gutter = grid | 16×16 cell | 64×64 cell | 256×256 cell |
   |---|---|---|---|---|---|

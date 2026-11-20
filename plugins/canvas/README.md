@@ -28,12 +28,16 @@ beside render's inspection of it.
   the kernel's config, under `PluginName`: `RegroupedLayers`, the layers
   whose entries of equal keys canvas may regroup by batch,
   `DefaultFilter`, the filter of sprites naming none, `AtlasPageSize`, the
-  side of a sprite atlas's pages, zero meaning 2048, its smallest 5, the
-  white texel's cell, a side below it raised to it and reported once,
-  `AtlasLayerCeiling`,
-  the most pages it grows to, zero meaning 256, and `OwnTextureSize`, the
-  side past which an image is drawn from a texture of its own, zero meaning
-  half a page.
+  side of a sprite atlas's pages, zero meaning 2048, a multiple of the grid
+  holding the white texel's cell, 12 at the default 3 mip levels and 5 at
+  one, a side that is not raised to the next that is and reported once,
+  `AtlasLayerCeiling`, the most pages it grows to, zero meaning 256,
+  `OwnTextureSize`, the side past which an image is drawn from a texture
+  of its own, zero meaning half a page, `MipLevels`, how many mip levels a
+  page has, zero meaning 3, fixing the grid and the gutter at
+  2^(levels−1) texels, more than 12 lowered to 12 and reported once, and
+  `DoNotGenerateMipMaps`, which makes pages of one level, for pixel-perfect
+  games.
 - **`FrameEvent`** is the frame its users record, published inside each of
   render's `FrameEvent`s. A plugin that records schedules its recording tasks
   after its `Ready` and joins them into the out dependency it returns.
@@ -89,17 +93,21 @@ beside render's inspection of it.
   `PivotBottomRight`) into an `Image`, a plain value an ECS component holds.
   It loads nothing: the first frame drawing it acquires its file from
   render and packs it into the sprite atlas of its colour space, each image
-  a cell of its own whose gutter of 2 texels continues its edges, drawn in
+  a cell of its own, the image rounded up to the grid and a gutter past it
+  continuing its edges, the page's mips then made again before any
+  camera's pass, so a minified sprite never mixes a neighbour, drawn in
   that frame, and a file render cannot load draws render's magenta,
   reported once by render. A full atlas doubles its pages, copied on the
-  GPU into a new texture, growths not yet copied merged into one copy; at
+  GPU into a new texture at every mip level, growths not yet copied
+  merged into one copy; at
   `AtlasLayerCeiling` it evicts the images drawn
   least lately to make room, never one drawn this frame, and an evicted
   image drawn again is loaded again. An image wider or taller than
   `OwnTextureSize`, whose cell no page holds, or that a full atlas cannot
   make room for, reported once, is drawn from a texture of its own,
   exactly its size with no gutter, so an image as large as a page takes a
-  texture of a page's size. Images differing only in their pivot share
+  texture of a page's size, of the page's mip levels or as many as its size
+  has. Images differing only in their pivot share
   their region. A second set of options is ignored and reported once.
 - **`OrderOf(y)`** maps a float onto an order of its own, in the same order,
   for y-sorting.

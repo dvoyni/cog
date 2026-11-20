@@ -15,11 +15,11 @@ const (
 )
 
 // makeSamplerDescriptor answers the sampler f reads through, for magnifying
-// and minifying alike: linear for FilterLinear, and nearest otherwise, as
-// for the white texel's batches, of FilterDefault.
+// and minifying alike and between mip levels: linear for FilterLinear, and
+// nearest otherwise, as for the white texel's batches, of FilterDefault.
 func (f Filter) makeSamplerDescriptor() render.SamplerDescriptor {
 	if f == FilterLinear {
-		return render.SamplerDescriptor{MagFilter: render.FilterModeLinear, MinFilter: render.FilterModeLinear}
+		return render.SamplerDescriptor{MagFilter: render.FilterModeLinear, MinFilter: render.FilterModeLinear, MipmapFilter: render.FilterModeLinear}
 	}
 	return render.SamplerDescriptor{MagFilter: render.FilterModeNearest, MinFilter: render.FilterModeNearest}
 }

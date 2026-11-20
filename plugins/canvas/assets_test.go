@@ -75,8 +75,8 @@ func TestAPreloadedImageIsLoadedBeforeItsFirstDrawWhichPacksItsSource(t *testing
 }
 
 func TestUnloadingAPrefixFreesItsImagesRegionsAndALaterDrawLoadsThemAgain(t *testing.T) {
-	// A page of 16 texels holds the white texel's cell and two cells of 8,
-	// so at a ceiling of one page, the level's red, unloaded by its prefix
+	// A page of 16 texels of one mip level holds the white texel's cell and
+	// two cells of 8, so at a ceiling of one page, the level's red, unloaded by its prefix
 	// in a frame drawing it beside red, is loaded again and packed back
 	// into the region it freed, red left packed; neither is evicted, as the
 	// frame draws both.
@@ -88,7 +88,7 @@ func TestUnloadingAPrefixFreesItsImagesRegionsAndALaterDrawLoadsThemAgain(t *tes
 			assets.Unload(levelPrefix)
 		}
 	}}
-	h.Spawn(nil, &canvas.Config{AtlasPageSize: 16, AtlasLayerCeiling: 1}, &fileMounter{files: files}, tool)
+	h.Spawn(nil, &canvas.Config{AtlasPageSize: 16, AtlasLayerCeiling: 1, DoNotGenerateMipMaps: true}, &fileMounter{files: files}, tool)
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	record := makeSpriteRecord(canvas.ImageFromFile(levelRedPath), canvas.ImageFromFile(redPath))
 	for range 3 {

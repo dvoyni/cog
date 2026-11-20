@@ -24,10 +24,12 @@ type Config struct {
 	// means FilterLinear.
 	DefaultFilter Filter
 	// AtlasPageSize is the side of a sprite atlas's pages, in texels; zero
-	// means 2048. An image whose cell, the image and a gutter of 2 texels
-	// around it, no page holds is drawn from a texture of its own. The
-	// smallest side is 5, the white texel's cell; a side below it is raised
-	// to it, reported once as ReportKindAtlasPageSizeRaised.
+	// means 2048. An image whose cell, the image rounded up to the grid
+	// MipLevels sets and its gutter around it, no page holds is drawn from
+	// a texture of its own. The side is a multiple of the grid holding the
+	// white texel's cell, 12 at the default 3 levels and 5 at one; a side
+	// that is not is raised to the next that is, reported once as
+	// ReportKindAtlasPageSizeRaised.
 	AtlasPageSize uint32
 	// AtlasLayerCeiling is the most pages a sprite atlas grows to, doubling
 	// them each time an image fits on none; zero means 256, WebGPU's
@@ -40,6 +42,22 @@ type Config struct {
 	// from a texture of its own, exactly its size, rather than packed into
 	// a sprite atlas, on either axis; zero means half of AtlasPageSize.
 	OwnTextureSize uint32
+	// DoNotGenerateMipMaps makes a sprite atlas's pages, and an image's own
+	// texture, of one mip level, for a pixel-perfect game, whose sprites
+	// are never minified: their cells then reach a gutter of 2 texels past
+	// their images, on no grid.
+	DoNotGenerateMipMaps bool
+	// MipLevels is how many mip levels a sprite atlas's pages have unless
+	// DoNotGenerateMipMaps is set, each page's regenerated where an image
+	// was packed into it; zero means 3. It fixes the grid each cell's
+	// image is rounded up to and the gutter its cell reaches past that,
+	// both 2^(MipLevels−1) texels, 4 at the default, so a sprite
+	// minified to 1/2^(MipLevels−1) of its size still reads only its own
+	// texels. An image's own texture has as many levels, or as many as its
+	// size has. More than 12, whose smallest page would pass WebGPU's
+	// default limit of 8192 texels on a texture's side, are lowered to 12,
+	// reported once as ReportKindMipLevelsLowered.
+	MipLevels uint32
 }
 
 // Plugin is canvas: it installs Handlers, Targets and its private state,
@@ -62,8 +80,10 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 
 // Init installs the draw state, with the kernel's logger for reports, the
 // filter of entries naming none and the layers config regroups; the
-// renderer, its page side raised to the smallest and reported when config's
-// is below it; the window list and Targets; binds canvas's built-in assets as a read
+// renderer, its mip levels lowered to the most and reported when config's
+// are more, and its page side raised to the smallest on its grid and
+// reported when config's is not; the window list and Targets; binds
+// canvas's built-in assets as a read
 // mount under the prefix cog.canvas, at the lowest priority, so any other
 // mount holding one of their names overrides it; subscribes to
 // render.FrameEvent, platform.WindowOpenedEvent, platform.WindowClosedEvent
@@ -73,13 +93,25 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	canvasConfig := kernel.PluginConfigOrDefault[Config](config)
 	configurator.InitResource(&drawState{logger: configurator.Logger(), defaultFilter: cmp.Or(canvasConfig.DefaultFilter, FilterLinear), sorter: makeEntrySorter(canvasConfig.RegroupedLayers)})
-	atlasPageSize := cmp.Or(canvasConfig.AtlasPageSize, 2048)
-	if atlasPageSize < smallestAtlasPageSize {
-		raisedReport := Report{Kind: ReportKindAtlasPageSizeRaised, Err: fmt.Errorf("canvas: Config.AtlasPageSize %d is below %d, the smallest side a page holds the white texel's cell at, so pages are made that side", atlasPageSize, smallestAtlasPageSize)}
-		configurator.Logger().LogErr(raisedReport)
-		atlasPageSize = smallestAtlasPageSize
+	mipLevelCount := cmp.Or(canvasConfig.MipLevels, 3)
+	if canvasConfig.DoNotGenerateMipMaps {
+		mipLevelCount = 1
 	}
-	configurator.InitResource(newRenderer(atlasPageSize, cmp.Or(canvasConfig.AtlasLayerCeiling, 256), cmp.Or(canvasConfig.OwnTextureSize, atlasPageSize/2)))
+	if mipLevelCount > largestAtlasMipLevelCount {
+		loweredReport := Report{Kind: ReportKindMipLevelsLowered, Err: fmt.Errorf("canvas: Config.MipLevels %d is more than %d, the most whose smallest page fits WebGPU's default limit on a texture's side, so pages are made of %d", mipLevelCount, largestAtlasMipLevelCount, largestAtlasMipLevelCount)}
+		configurator.Logger().LogErr(loweredReport)
+		mipLevelCount = largestAtlasMipLevelCount
+	}
+	// A page is a multiple of the grid holding the white texel's cell.
+	atlasPageSize := cmp.Or(canvasConfig.AtlasPageSize, 2048)
+	grid, gutter := findAtlasGrid(mipLevelCount)
+	whiteCellSide := grid + 2*gutter
+	if fitted := max(roundUpToMultiple(atlasPageSize, grid), whiteCellSide); fitted != atlasPageSize {
+		raisedReport := Report{Kind: ReportKindAtlasPageSizeRaised, Err: fmt.Errorf("canvas: Config.AtlasPageSize %d is below %d, the white texel's cell, or no multiple of %d, the grid its cells sit on, so pages are made %d texels a side", atlasPageSize, whiteCellSide, grid, fitted)}
+		configurator.Logger().LogErr(raisedReport)
+		atlasPageSize = fitted
+	}
+	configurator.InitResource(newRenderer(atlasPageSize, cmp.Or(canvasConfig.AtlasLayerCeiling, 256), cmp.Or(canvasConfig.OwnTextureSize, atlasPageSize/2), mipLevelCount))
 	configurator.InitResource(&windowList{})
 	configurator.InitResource[Targets](&drawnTargets{})
 	configurator.BindSocket(platform.ReadMountSocket{FS: makeAssetFS(), Priority: math.MinInt, Prefix: assetPrefix})
