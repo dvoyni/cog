@@ -24,9 +24,9 @@ type Config struct {
 	// means FilterLinear.
 	DefaultFilter Filter
 	// AtlasPageSize is the side of a sprite atlas's pages, in texels; zero
-	// means 2048. An image whose cell, the image rounded up to the grid
+	// means 2048. An image whose cell, the image rounded up to the atlas grid
 	// MipLevels sets and its gutter around it, no page holds is drawn from
-	// a texture of its own. The side is a multiple of the grid holding the
+	// a texture of its own. The side is a multiple of the atlas grid holding the
 	// white texel's cell, 12 at the default 3 levels and 5 at one; a side
 	// that is not is raised to the next that is, reported once as
 	// ReportKindAtlasPageSizeRaised.
@@ -45,11 +45,11 @@ type Config struct {
 	// DoNotGenerateMipMaps makes a sprite atlas's pages, and an image's own
 	// texture, of one mip level, for a pixel-perfect game, whose sprites
 	// are never minified: their cells then reach a gutter of 2 texels past
-	// their images, on no grid.
+	// their images, on no atlas grid.
 	DoNotGenerateMipMaps bool
 	// MipLevels is how many mip levels a sprite atlas's pages have unless
 	// DoNotGenerateMipMaps is set, each page's regenerated where an image
-	// was packed into it; zero means 3. It fixes the grid each cell's
+	// was packed into it; zero means 3. It fixes the atlas grid each cell's
 	// image is rounded up to and the gutter its cell reaches past that,
 	// both 2^(MipLevels−1) texels, 4 at the default, so a sprite
 	// minified to 1/2^(MipLevels−1) of its size still reads only its own
@@ -81,7 +81,7 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 // Init installs the draw state, with the kernel's logger for reports, the
 // filter of entries naming none and the layers config regroups; the
 // renderer, its mip levels lowered to the most and reported when config's
-// are more, and its page side raised to the smallest on its grid and
+// are more, and its page side raised to the smallest on its atlas grid and
 // reported when config's is not; the window list and Targets; binds
 // canvas's built-in assets as a read
 // mount under the prefix cog.canvas, at the lowest priority, so any other
@@ -102,12 +102,12 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 		configurator.Logger().LogErr(loweredReport)
 		mipLevelCount = largestAtlasMipLevelCount
 	}
-	// A page is a multiple of the grid holding the white texel's cell.
+	// A page is a multiple of the atlas grid holding the white texel's cell.
 	atlasPageSize := cmp.Or(canvasConfig.AtlasPageSize, 2048)
-	grid, gutter := findAtlasGrid(mipLevelCount)
-	whiteCellSide := grid + 2*gutter
-	if fitted := max(roundUpToMultiple(atlasPageSize, grid), whiteCellSide); fitted != atlasPageSize {
-		raisedReport := Report{Kind: ReportKindAtlasPageSizeRaised, Err: fmt.Errorf("canvas: Config.AtlasPageSize %d is below %d, the white texel's cell, or no multiple of %d, the grid its cells sit on, so pages are made %d texels a side", atlasPageSize, whiteCellSide, grid, fitted)}
+	atlasGrid, gutter := findSpriteAtlasGrid(mipLevelCount)
+	whiteCellSide := atlasGrid + 2*gutter
+	if fitted := max(roundUpToMultiple(atlasPageSize, atlasGrid), whiteCellSide); fitted != atlasPageSize {
+		raisedReport := Report{Kind: ReportKindAtlasPageSizeRaised, Err: fmt.Errorf("canvas: Config.AtlasPageSize %d is below %d, the white texel's cell, or no multiple of %d, the atlas grid its cells sit on, so pages are made %d texels a side", atlasPageSize, whiteCellSide, atlasGrid, fitted)}
 		configurator.Logger().LogErr(raisedReport)
 		atlasPageSize = fitted
 	}

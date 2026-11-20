@@ -73,7 +73,7 @@
 //	list.DrawShape(canvas.Shape{Kind: canvas.Line, From: a, To: b, Tint: c})
 //
 // A Sprite draws an Image, named by ImageFromFile with its options, such as its
-// pivot, through its transform about that pivot, at its size, its image's
+// pivot, or a Frame of its sheet, through its transform about that pivot, at its size, its image's
 // in texels when zero, tinted, cropped where it lies and read through its
 // filter. ImageFromFile loads nothing: the first frame drawing the image loads
 // it and packs it into the sprite atlas of its colour space, drawn in that
@@ -82,9 +82,19 @@
 //	hero := canvas.ImageFromFile("hero.png", canvas.ImageOptions{Pivot: canvas.PivotBottom})
 //	list.DrawSprite(canvas.Sprite{Image: hero, Transform: m.Translation2x3(x, y), Layer: layerUnits, Order: canvas.OrderOf(y)})
 //
+// A sheet's frames, and any rectangle of a file, are packed as cells of
+// their own, so filtering and mips never mix two of them, and a file is
+// decoded once for all its rectangles; an image that tiles along an axis
+// has its gutter wrapped from its opposite edge along it:
+//
+//	terrain := canvas.ImageFromFile("tiles.png", canvas.ImageOptions{Sheet: canvas.Grid{Columns: 4, Rows: 4}, SourceRect: m.Recti{Width: 64, Height: 64}})
+//	list.DrawSprite(canvas.Sprite{Image: terrain, Frame: tile, Transform: m.Translation2x3(x, y)})
+//	water := canvas.ImageFromFile("water.png", canvas.ImageOptions{Wrap: canvas.WrapBoth})
+//
 // An atlas is one 2D-array texture whose layers are pages of
 // Config.AtlasPageSize, each image a cell of its own, premultiplied, its
-// gutter continuing its edges, on a grid Config.MipLevels sets, so linear
+// gutter continuing its edges, or wrapped along the axes it tiles, on a
+// atlas grid Config.MipLevels sets, so linear
 // filtering never reaches a neighbour at any mip level, a page's mips made
 // again each frame an image is packed into it, unless
 // Config.DoNotGenerateMipMaps is set. A full atlas doubles its pages, to

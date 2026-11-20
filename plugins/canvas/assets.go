@@ -46,7 +46,8 @@ func (a Assets) Preload(image Image) {
 	if image == (Image{}) {
 		return
 	}
-	a.state.Get().residency.requestPreload(a.inventory, imageNames.findKey(image).makePackedKey())
+	key := imageNames.findKey(image)
+	a.state.Get().residency.requestPreload(a.inventory, sourceKey{path: key.path, colorSpace: key.options.ColorSpace})
 }
 
 // Unload unloads the images of path, or, when path ends in a slash, of
@@ -61,21 +62,30 @@ func (a Assets) Unload(path string) {
 	state.imageSizes.forget(state.logger, path)
 	for _, unloaded := range imageNames.findPaths(path) {
 		state.logger.ForgetLogOnce(imageOptionsIgnoredLogKey + unloaded)
+		state.logger.ForgetLogOnce(frameOutOfBoundsLogKey + unloaded)
 	}
 }
 
-// ImageSize answers image's size in texels before it is drawn, read from
-// its file's header alone, through platform's FS, and kept for its path
-// until it is unloaded, and whether the header was read: false for a file
-// that is missing or no image render loads, reported once for its path as
-// ReportKindImageHeaderUnread. The zero Image, the white texel, is one
-// texel.
+// ImageSize answers image's size in texels before it is drawn, its
+// SourceRect's, or its sheet's frames', read from its file's header alone,
+// through platform's FS, and kept for its path until it is unloaded, and
+// whether the header was read: false for a file that is missing or no
+// image render loads, reported once for its path as
+// ReportKindImageHeaderUnread, and for an image whose first frame does not
+// lie within its file, which draws nothing. The zero Image, the white
+// texel, is one texel.
 func (a Assets) ImageSize(image Image) (m.Vec2, bool) {
 	if image == (Image{}) {
 		return m.Vec2{X: 1, Y: 1}, true
 	}
 	state := a.state.Get()
-	return state.imageSizes.find(a.files.Get(), state.logger, imageNames.findKey(image).path)
+	key := imageNames.findKey(image)
+	fileSize, read := state.imageSizes.find(a.files.Get(), state.logger, key.path)
+	if !read {
+		return m.Vec2{}, false
+	}
+	frameRect, withinFile := key.options.findFrameRect(int(fileSize.X), int(fileSize.Y), 0)
+	return frameRect.Size().Float(), withinFile
 }
 
 // RequestInspection asks for an inspection of the first frame whose

@@ -15,6 +15,10 @@ type Sprite struct {
 	// first draw loads it, drawn that frame; one render cannot load draws
 	// render's magenta, reported once by render.
 	Image Image
+	// Frame is the frame of Image's sheet the sprite draws, counted along
+	// its rows, zero for an image of one frame. One past the sheet's last
+	// draws nothing, reported once as ReportKindFrameOutOfBounds.
+	Frame uint32
 	// Transform maps the sprite's own space into the world, a zero one
 	// read as the identity; a negative scale mirrors the sprite about its
 	// image's pivot.

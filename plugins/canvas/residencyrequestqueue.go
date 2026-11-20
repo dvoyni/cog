@@ -8,21 +8,21 @@ import (
 
 // residencyRequestQueue is what Assets asked of the images' residency: the
 // paths to unload, in the order asked, which the renderer applies as it
-// next draws, and the sources preloaded, each by the key of the options
-// that change its image's pixels, held until the image is packed, so its
-// packing's acquire shares what render decoded. Any task
-// holding Assets adds to it, so its mutex guards both.
+// next draws, and the sources preloaded, each by the key of its file,
+// held until an image of it is packed, so its packing's acquire shares
+// what render decoded. Any task holding Assets adds to it, so its mutex
+// guards both.
 type residencyRequestQueue struct {
 	mutex            sync.Mutex
 	unloadedPaths    []string
-	preloadedSources map[imageKey]render.Texture
+	preloadedSources map[sourceKey]render.Texture
 }
 
-// requestPreload acquires the source of the image of key, the key of the
-// options that change its pixels, through inventory, held until the image
-// is packed, unless one is preloaded already. The acquire reads the file's
+// requestPreload acquires the source of key, an image's file, through
+// inventory, held until an image of it is packed, unless one is preloaded
+// already. The acquire reads the file's
 // header outside the mutex, so other requests do not wait for it.
-func (q *residencyRequestQueue) requestPreload(inventory render.Inventory, key imageKey) {
+func (q *residencyRequestQueue) requestPreload(inventory render.Inventory, key sourceKey) {
 	q.mutex.Lock()
 	_, preloaded := q.preloadedSources[key]
 	q.mutex.Unlock()
@@ -37,9 +37,21 @@ func (q *residencyRequestQueue) requestPreload(inventory render.Inventory, key i
 		return
 	}
 	if q.preloadedSources == nil {
-		q.preloadedSources = map[imageKey]render.Texture{}
+		q.preloadedSources = map[sourceKey]render.Texture{}
 	}
 	q.preloadedSources[key] = source
+}
+
+// releasePreload releases through inventory the source preloaded of key, a
+// file an image of which was packed, its packing's acquire sharing it, if
+// one was preloaded.
+func (q *residencyRequestQueue) releasePreload(inventory render.Inventory, key sourceKey) {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	if source, preloaded := q.preloadedSources[key]; preloaded {
+		inventory.ReleaseTexture(source)
+		delete(q.preloadedSources, key)
+	}
 }
 
 // requestUnload queues the unload of the paths Unload(unloaded) unloads,

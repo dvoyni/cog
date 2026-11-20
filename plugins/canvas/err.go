@@ -35,8 +35,8 @@ const (
 	// reported once for each path, until the path is unloaded.
 	ReportKindImageHeaderUnread
 	// ReportKindAtlasPageSizeRaised is a Config.AtlasPageSize that is no
-	// multiple of the grid Config.MipLevels sets holding the white texel's
-	// cell, one texel rounded up to the grid and its gutter, so pages are
+	// multiple of the atlas grid Config.MipLevels sets holding the white texel's
+	// cell, one texel rounded up to the atlas grid and its gutter, so pages are
 	// made the next side that is instead. It is reported once, as canvas
 	// starts.
 	ReportKindAtlasPageSizeRaised
@@ -45,6 +45,11 @@ const (
 	// on a texture's side, so pages are made of 12 levels instead. It is
 	// reported once, as canvas starts.
 	ReportKindMipLevelsLowered
+	// ReportKindFrameOutOfBounds is an image whose ImageOptions.SourceRect
+	// reaches past its file, or holds no texel of a frame, or a sprite's
+	// Frame past its image's sheet's last, which draws nothing. It is
+	// reported once for each path, and again after the path is unloaded.
+	ReportKindFrameOutOfBounds
 )
 
 // The keys canvas logs a report once under are one of these, then the
@@ -53,6 +58,7 @@ const (
 	imageOptionsIgnoredLogKey = "canvas: image options ignored: "
 	imageHeaderUnreadLogKey   = "canvas: image header unread: "
 	atlasFullLogKey           = "canvas: sprite atlas full: "
+	frameOutOfBoundsLogKey    = "canvas: frame out of bounds: "
 )
 
 // pixelPerfectStretchReport is the report of a pixel-perfect camera's

@@ -35,8 +35,8 @@ type batch struct {
 // FilterDefault, and to instances the instance data they draw, and answers
 // both appended to. Each batch's entries are part of entries. A fill, a
 // line and a sprite draw one instance, and a stroke four. A sprite's image
-// is drawnImages' at its index, and a shape's the zero Image's.
-func appendBatches(batches []batch, instances []instanceData, entries []sortedEntry, state *drawState, batchKeys []batchKey, drawnImages []drawnImage) ([]batch, []instanceData) {
+// is its frame of drawnImages, a renderer's, and a shape's the zero Image's.
+func appendBatches(batches []batch, instances []instanceData, entries []sortedEntry, state *drawState, batchKeys []batchKey, drawnImages [][]drawnImage) ([]batch, []instanceData) {
 	firstBatch := len(batches)
 	for index, entry := range entries {
 		entryKey := batchKeys[entry.entryIndex]
@@ -55,10 +55,10 @@ func appendBatches(batches []batch, instances []instanceData, entries []sortedEn
 		}
 		lastBatch.entries = lastBatch.entries[:len(lastBatch.entries)+1]
 		if recorded := state.entries[entry.entryIndex]; recorded.kind == EntryKindShape {
-			instances = appendShapeInstances(instances, &state.shapes[recorded.index], &drawnImages[0])
+			instances = appendShapeInstances(instances, &state.shapes[recorded.index], &drawnImages[0][0])
 		} else {
 			sprite := &state.sprites[recorded.index]
-			instances = appendSpriteInstance(instances, sprite, &drawnImages[sprite.Image.index])
+			instances = appendSpriteInstance(instances, sprite, findDrawnFrame(drawnImages, sprite))
 		}
 		lastBatch.instanceCount = uint32(len(instances)) - lastBatch.firstInstance
 	}

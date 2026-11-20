@@ -7,13 +7,13 @@ import (
 	"github.com/dvoyni/cog/plugins/render"
 )
 
-func TestAnAtlasPacksEachImageOnTheGridItsMipLevelsSetItsCellReachingTheGutterPastItsRounding(t *testing.T) {
-	// At 3 levels the grid and the gutter are 4: the white texel's cell is
+func TestAnAtlasPacksEachImageOnTheAtlasGridItsMipLevelsSetItsCellReachingTheGutterPastItsRounding(t *testing.T) {
+	// At 3 levels the atlas grid and the gutter are 4: the white texel's cell is
 	// 12, the green of 6 rounds up to 8 for a cell of 16, cut as a shelf of
 	// its own below, the row of 4 by 1 rounds up to 4 by 4, beside the white
 	// texel on its shelf, and an image of 16 takes a cell of 24. Each image
-	// lies a gutter in from its cell, on the grid. At one level the gutter
-	// is 2 on no grid, so the cells are the images and their gutter.
+	// lies a gutter in from its cell, on the atlas grid. At one level the gutter
+	// is 2 on no atlas grid, so the cells are the images and their gutter.
 	for _, test := range []struct {
 		name          string
 		mipLevelCount uint32

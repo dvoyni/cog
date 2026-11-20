@@ -48,6 +48,10 @@ _Avoid_: Frame (render's and gfx's), sub-texture, UV rect
 The border packed around a region, filled from its own edges, so filtering and mips never reach a neighbour: its edge continued, or its opposite edge where the image tiles.
 _Avoid_: Padding, margin, bleed, extrusion
 
+**Atlas grid**:
+The spacing an atlas's regions are aligned to, set by how many mip levels its pages have, so each mip level halves every region's place exactly and never mixes two regions. A sheet's grid is its columns and rows of frames, not this.
+_Avoid_: Grid alone, alignment, block size
+
 **Sprite**:
 An entry that draws a region through a transform about its image's pivot, with a tint and a 2D material.
 _Avoid_: Quad, image, sprite renderer

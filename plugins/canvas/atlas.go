@@ -13,24 +13,24 @@ const (
 	// reaches past its image on every side at least, holding the image's
 	// edge continued, so linear filtering at its edge never reads a
 	// neighbour: the whole gutter of a page of one mip level, packed with
-	// no grid.
+	// no atlas grid.
 	smallestAtlasGutter = 2
 	// largestAtlasMipLevelCount is the most mip levels a sprite atlas's
 	// pages are made with: the most whose smallest page, the white texel's
-	// cell of three times the grid, fits WebGPU's default limit of 8192
+	// cell of three times the atlas grid, fits WebGPU's default limit of 8192
 	// texels on a texture's side.
 	largestAtlasMipLevelCount = 12
 )
 
-// findAtlasGrid answers the grid the cells of a sprite atlas whose pages
+// findSpriteAtlasGrid answers the atlas grid the cells of a sprite atlas whose pages
 // have mipLevelCount levels sit on, 2^(mipLevelCount−1) texels, and the
-// gutter each cell reaches past its image, the grid but no fewer than
+// gutter each cell reaches past its image, the atlas grid but no fewer than
 // smallestAtlasGutter texels: every texel of every level then lies within
 // one cell, so a page's mips mix no images, and linear filtering at its
 // deepest level reads only an image's own texels and its gutter.
-func findAtlasGrid(mipLevelCount uint32) (grid, gutter uint32) {
-	grid = 1 << (mipLevelCount - 1)
-	return grid, max(grid, smallestAtlasGutter)
+func findSpriteAtlasGrid(mipLevelCount uint32) (atlasGrid, gutter uint32) {
+	atlasGrid = 1 << (mipLevelCount - 1)
+	return atlasGrid, max(atlasGrid, smallestAtlasGutter)
 }
 
 // roundUpToMultiple answers the smallest multiple of step no smaller than
@@ -59,13 +59,13 @@ type atlas struct {
 }
 
 // newAtlas answers a sprite atlas of format, of one page width by height
-// texels, each a multiple of its grid, of mipLevelCount levels, its cells
-// on the grid and reaching the gutter findAtlasGrid answers, labelled
+// texels, each a multiple of its atlas grid, of mipLevelCount levels, its cells
+// on the atlas grid and reaching the gutter findSpriteAtlasGrid answers, labelled
 // label, its texture made through inventory, transparent black. A page side
-// that is no multiple of the grid panics.
+// that is no multiple of the atlas grid panics.
 func newAtlas(inventory render.Inventory, label string, format render.TextureFormat, width, height, mipLevelCount uint32) *atlas {
-	if grid, _ := findAtlasGrid(mipLevelCount); width%grid != 0 || height%grid != 0 {
-		panic(fmt.Sprintf("canvas: an atlas's page of %d by %d texels is no multiple of its grid of %d", width, height, grid))
+	if atlasGrid, _ := findSpriteAtlasGrid(mipLevelCount); width%atlasGrid != 0 || height%atlasGrid != 0 {
+		panic(fmt.Sprintf("canvas: an atlas's page of %d by %d texels is no multiple of its atlas grid of %d", width, height, atlasGrid))
 	}
 	created := &atlas{label: label, format: format, width: width, height: height, mipLevelCount: mipLevelCount}
 	created.texture = created.makeTexture(inventory, 1)
@@ -85,31 +85,31 @@ func newOwnAtlas(inventory render.Inventory, label string, format render.Texture
 	return own, render.TextureRegion{Width: width, Height: height}
 }
 
-// findGrid answers what each cell's image is rounded up to, so every cell
+// findAtlasGrid answers what each cell's image is rounded up to, so every cell
 // sits on it, and how many texels each cell reaches past that: a sprite
-// atlas's, as findAtlasGrid answers them, and a grid of 1 and no gutter
+// atlas's, as findSpriteAtlasGrid answers them, and an atlas grid of 1 and no gutter
 // for an atlas of one image's own, whose sampler clamps at the texture's
 // edge as a gutter would continue it, and whose mips are the whole
 // texture's.
-func (a *atlas) findGrid() (grid, gutter uint32) {
+func (a *atlas) findAtlasGrid() (atlasGrid, gutter uint32) {
 	if a.holdsOneImage {
 		return 1, 0
 	}
-	return findAtlasGrid(a.mipLevelCount)
+	return findSpriteAtlasGrid(a.mipLevelCount)
 }
 
 // findCellSize answers the size of the cell an image of width by height
-// texels is packed as: the image rounded up to the grid, then the gutter on
+// texels is packed as: the image rounded up to the atlas grid, then the gutter on
 // every side.
 func (a *atlas) findCellSize(width, height uint32) (uint32, uint32) {
-	grid, gutter := a.findGrid()
-	return roundUpToMultiple(width, grid) + 2*gutter, roundUpToMultiple(height, grid) + 2*gutter
+	atlasGrid, gutter := a.findAtlasGrid()
+	return roundUpToMultiple(width, atlasGrid) + 2*gutter, roundUpToMultiple(height, atlasGrid) + 2*gutter
 }
 
 // findCell answers the cell of the image that lies at region, which pack
 // answered region for: on its page, from the gutter above and left of it.
 func (a *atlas) findCell(region render.TextureRegion) render.TextureRegion {
-	_, gutter := a.findGrid()
+	_, gutter := a.findAtlasGrid()
 	width, height := a.findCellSize(region.Width, region.Height)
 	return render.TextureRegion{Layer: region.Layer, X: region.X - gutter, Y: region.Y - gutter, Width: width, Height: height}
 }
@@ -117,9 +117,9 @@ func (a *atlas) findCell(region render.TextureRegion) render.TextureRegion {
 // pack answers where an image of width by height texels lies once packed
 // as a cell of its own, on the first page holding one, or false when none
 // does: its page as the region's layer, and its rectangle there in texels,
-// the gutter in from its cell's top left, on the grid.
+// the gutter in from its cell's top left, on the atlas grid.
 func (a *atlas) pack(width, height uint32) (render.TextureRegion, bool) {
-	_, gutter := a.findGrid()
+	_, gutter := a.findAtlasGrid()
 	cellWidth, cellHeight := a.findCellSize(width, height)
 	for page := range a.pages {
 		x, y, ok := a.pages[page].allocate(int32(cellWidth), int32(cellHeight))

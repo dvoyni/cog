@@ -228,7 +228,7 @@ author** testing canvas or a plugin on it.
   - `DefaultFontSet`, a `FontSetDescriptor` for the zero `FontSet`; its zero is JetBrains Mono alone;
   - `TextSize`, the em of a run whose `Size` is zero, in world units; zero means 16;
   - `LayoutIdleFrames`, how many frames `DrawText` keeps a layout no draw uses; zero means 2;
-  - `AtlasPageSize`, the atlas's page side, zero meaning 2048, a multiple of the grid holding the white texel's cell of one texel rounded up to the grid and its gutter, 12 at the default 3 mip levels and 5 at one, a side that is not raised to the next that is and reported once as `ReportKindAtlasPageSizeRaised`, and `AtlasLayerCeiling`, a ceiling on its layers, zero meaning 256, WebGPU's default limit on a texture's layers, since render answers no device's limits;
+  - `AtlasPageSize`, the atlas's page side, zero meaning 2048, a multiple of the atlas grid holding the white texel's cell of one texel rounded up to the atlas grid and its gutter, 12 at the default 3 mip levels and 5 at one, a side that is not raised to the next that is and reported once as `ReportKindAtlasPageSizeRaised`, and `AtlasLayerCeiling`, a ceiling on its layers, zero meaning 256, WebGPU's default limit on a texture's layers, since render answers no device's limits;
   - `OwnTextureSize`, the size past which an image gets a texture of its own, zero meaning half the page side;
   - `DoNotGenerateMipMaps`, and `MipLevels`, zero meaning 3, more than 12 lowered to 12 and reported once as `ReportKindMipLevelsLowered`, since 13 levels' smallest page would pass WebGPU's default limit of 8192 texels on a texture's side;
   - a distance-field glyph's default em and range, zero meaning 48 px and 16.
@@ -403,6 +403,8 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - The image is that rectangle, packed as a region of its own with its own gutter, as a sheet's frames are. Its natural size is the rectangle's, and its pivot is measured within it.
   - A `Sheet` grid may cut a source rectangle, for a file holding several sheets. Several rectangles of one file decode it once.
   - An irregular sheet is one image per rectangle, and a tiled nine-slice is nine.
+  - A sheet's zero `Columns` or `Rows` is one, so `Grid{Columns: 8}` is a strip. Each frame is the rectangle's size divided by the grid, texels left over unused.
+  - A `SourceRect` reaching past its file, or one whose frames hold no texel, and a sprite's `Frame` past its sheet's last draw nothing, culled as an entry no camera sees, reported once for its path as `ReportKindFrameOutOfBounds`; `Assets.ImageSize` answers false for them. Drawing the whole file instead was weighed: a sheet is often large enough to need a texture of its own, and a bad frame is an addressing mistake, not a missing asset, which draws render's magenta. Unloading the path looks again at its next draw. A cell is keyed by the rectangle of the file it holds and its wrap, so images of equal rectangles written two ways share it.
   - v1's per-draw insets were weighed. A rectangle cut at the draw can't be packed apart, so it would bleed under filtering and couldn't tile.
   - The option is not called *region*: a region is a rectangle of an atlas, where an image is packed.
 - **An image's size before it is drawn:** `Assets.ImageSize(image) (m.Vec2, bool)`, as v1's `SpriteSize` was.
@@ -444,19 +446,19 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 **Gutters and mips**
 
 - **The gutter** is extruded, its edge continued, by default. It is wrapped from the opposite edge on an axis an image marks as tiling, so tiling wraps in the shader without seams. A tiled and a plain load of one file are different images.
-- **Mips are generated unless `Config.DoNotGenerateMipMaps` is set,** which suits pixel-perfect games. With it set, a page has one level and a 2-texel gutter, packed with no grid.
-- **`Config.MipLevels`, zero meaning 3, fixes the gutter and the grid,** both 2^(levels−1) texels: 4 at the default.
-  - An image's left and top edges sit on a grid line.
-  - Its right and bottom gutters reach the next grid line plus the gutter.
+- **Mips are generated unless `Config.DoNotGenerateMipMaps` is set,** which suits pixel-perfect games. With it set, a page has one level and a 2-texel gutter, packed with no atlas grid.
+- **`Config.MipLevels`, zero meaning 3, fixes the gutter and the atlas grid,** both 2^(levels−1) texels: 4 at the default.
+  - An image's left and top edges sit on an atlas grid line.
+  - Its right and bottom gutters reach the next atlas grid line plus the gutter.
   - Bilinear sampling at the deepest level then reads only the image's own texels and gutter.
   - Each page is made with exactly that many levels, so nothing samples a level that mixes cells.
-  - The page side must be a multiple of the grid holding the white texel's cell; `Config.AtlasPageSize` is raised to the next side that is, and reported once.
-  - At one level the grid is 1 and the gutter 2, as with `DoNotGenerateMipMaps`: the gutter is the grid, but never less than the 2 texels linear filtering needs.
+  - The page side must be a multiple of the atlas grid holding the white texel's cell; `Config.AtlasPageSize` is raised to the next side that is, and reported once.
+  - At one level the atlas grid is 1 and the gutter 2, as with `DoNotGenerateMipMaps`: the gutter is the atlas grid, but never less than the 2 texels linear filtering needs.
   - The white texel's cell is written opaque white at every level as the atlas is made, since no mip pass runs before the first frame's.
   - An image's own texture has the page's levels, or as many as its size has, its mips the whole texture's.
   - A linear filter reads between levels linearly too; a nearest one takes the nearest level.
 
-  | Levels | Smallest clean scale | Gutter = grid | 16×16 cell | 64×64 cell | 256×256 cell |
+  | Levels | Smallest clean scale | Gutter = atlas grid | 16×16 cell | 64×64 cell | 256×256 cell |
   |---|---|---|---|---|---|
   | 2 | ½ | 2 | 20² | 68² | 260² |
   | 3 | ¼ | 4 | 24² | 72² | 264² |
@@ -897,7 +899,7 @@ Each change was checked for a 3D renderer's needs too, drawbridge's forward+ or 
   - render owning material arguments whole was weighed. canvas's instance data model would have moved into render before a second user showed what it needs.
 - **Mips for a made texture:** `CommandList.GenerateMips(texture, firstLayer, layerCount)` records render's mip shader into the list where it is called, for every level of those layers. render generated mips only for textures it loads, in its own command list.
   - It covers 2D, 2D-array and cube textures, a cube's faces as layers, so probes and baked maps take it too. It filters sRGB in linear, as render's loaded textures' mips are.
-  - canvas calls it after the passes that pack into an atlas page that frame, at the start of its lowest camera order's command list. The atlas's gutters and grid at 2^(levels−1) keep the box filter within each image.
+  - canvas calls it after the passes that pack into an atlas page that frame, at the start of its lowest camera order's command list. The atlas's gutters and atlas grid at 2^(levels−1) keep the box filter within each image.
   - Its doc says what it is not: a volume texture's mips, and a depth pyramid for occlusion culling, which takes a min or max reduction rather than an average. Those are their plugin's own compute passes.
 - **A texture's descriptor:** `Inventory.TextureDescriptor(texture) (TextureDescriptor, bool)`, built on gfx's `Device.TextureDescriptor`. A made texture answers at once, and a loaded one as soon as its acquire returns, its file's header fixing its descriptor; a texture render does not hold answers false. render answered no made texture's descriptor. canvas's drawing declares `Inventory` beside `Frame`, both reads, for a camera's viewport and sRGB encoding in a texture target, for `Targets`, and for `Assets.ImageSize` of a render-texture image.
 - **rendertest's harness:**

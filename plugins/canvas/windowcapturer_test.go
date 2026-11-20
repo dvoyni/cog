@@ -81,7 +81,8 @@ const (
 // The colours pixel tests draw and expect: green and orange, opaque, which
 // show as greenShown and orangeShown, and translucentOrange, which shows as
 // translucentOverBlack, 0.6 of the encoded (255, 85, 0) over opaque black;
-// and opaqueBlack and opaqueWhite as they show.
+// and opaqueBlack, opaqueWhite, opaqueRed, opaqueGreen, opaqueBlue,
+// opaqueYellow and opaqueCyan as they show.
 var (
 	green                = m.NewColorSrgb(50.0/255, 1, 150.0/255, 1)
 	greenShown           = color.NRGBA{R: 50, G: 255, B: 150, A: 255}
@@ -91,6 +92,11 @@ var (
 	translucentOverBlack = color.NRGBA{R: 153, G: 51, B: 0, A: 255}
 	opaqueBlack          = color.NRGBA{A: 255}
 	opaqueWhite          = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+	opaqueRed            = color.NRGBA{R: 255, A: 255}
+	opaqueGreen          = color.NRGBA{G: 255, A: 255}
+	opaqueBlue           = color.NRGBA{B: 255, A: 255}
+	opaqueYellow         = color.NRGBA{R: 255, G: 255, A: 255}
+	opaqueCyan           = color.NRGBA{G: 255, B: 255, A: 255}
 )
 
 // windowPicture is a capture of a window that the default camera drew into,

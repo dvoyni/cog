@@ -30,7 +30,9 @@ struct CanvasCamera {
 @group(0) @binding(0) var<uniform> canvas_camera: CanvasCamera;
 
 // CanvasInstanceData is the data of one instance canvas draws, read at its
-// instance_index: canvas's fixed part, then its material argument.
+// instance_index: canvas's fixed part, then its material argument. The
+// quad that fills an atlas's cell is no entry's, and canvas_pack_fragment
+// reads its region, crop and part as it says.
 struct CanvasInstanceData {
 	// tint is premultiplied.
 	tint: vec4<f32>,

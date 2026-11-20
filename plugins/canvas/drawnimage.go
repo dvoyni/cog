@@ -8,13 +8,16 @@ import (
 // drawnImage is an image as canvas draws it, once packed at its first draw,
 // and of no size until then: where it is packed, its region there in
 // texture coordinates, its origin then its size, and its page; its size in
-// texels; and its pivot.
+// texels; its pivot; and whether its rectangle of its file was found at its
+// first draw to lie outside the file, so it is never packed and its
+// entries draw nothing.
 type drawnImage struct {
-	packed *packedImage
-	region [4]float32
-	page   uint32
-	size   m.Vec2
-	pivot  Pivot
+	packed      *packedImage
+	region      [4]float32
+	page        uint32
+	size        m.Vec2
+	pivot       Pivot
+	outsideFile bool
 }
 
 // makeDrawnImage answers packed as drawn, of no pivot.

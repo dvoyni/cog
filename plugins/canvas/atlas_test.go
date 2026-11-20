@@ -456,7 +456,7 @@ func TestAPackedImageDrawsItsOwnTexelsAndLinearFilteringNeverReachesItsNeighbour
 	// reads only its own texels and its gutter, continuing them, never its
 	// neighbour or the empty page. The corner image of 6 texels, green but
 	// for its last column, yellow, and the rest of its last row, blue, is
-	// rounded up to the grid of 4, and read at its nearest texel shows its
+	// rounded up to the atlas grid of 4, and read at its nearest texel shows its
 	// last column and row where they lie, its cell filled over the rounding.
 	files := makeAtlasFiles(t)
 	corner := image.NewNRGBA(image.Rect(0, 0, 6, 6))
@@ -483,9 +483,6 @@ func TestAPackedImageDrawsItsOwnTexelsAndLinearFilteringNeverReachesItsNeighbour
 		list.DrawSprite(canvas.Sprite{Image: cornerImage, Transform: m.Translation2x3(110, 60), Size: m.Vec2{X: 36, Y: 36}, Filter: canvas.FilterNearest})
 	}, &fileMounter{files: files})
 
-	opaqueRed := color.NRGBA{R: 255, A: 255}
-	opaqueGreen := color.NRGBA{G: 255, A: 255}
-	opaqueBlue := color.NRGBA{B: 255, A: 255}
 	picture.expect(t, []probe{
 		{"the corner image's first texel", m.Vec2{X: 95, Y: 45}, opaqueGreen},
 		{"the corner image's last column", m.Vec2{X: 125, Y: 45}, color.NRGBA{R: 255, G: 255, A: 255}},
@@ -510,7 +507,7 @@ func TestAMinifiedSpriteNeverMixesANeighboursColourAtAnyMipLevel(t *testing.T) {
 	// The checker of 16 texels alternates red and blue each texel, so each
 	// mip level below the first averages it to purple, as its gutter is;
 	// it is packed below the white texel's cell, and the green of 6 below
-	// it, rounded up to the grid of 4. The checkers are drawn at a quarter,
+	// it, rounded up to the atlas grid of 4. The checkers are drawn at a quarter,
 	// an eighth and a sixteenth of their size, which at 1 to 2 pixels a
 	// point reach no level above the second, so they show purple, and the
 	// green at a half and a quarter. Each reads only its own texels and its
@@ -533,7 +530,6 @@ func TestAMinifiedSpriteNeverMixesANeighboursColourAtAnyMipLevel(t *testing.T) {
 	// Each sprite's edges lie on whole units, or one smaller than 2 units
 	// lies about a pixel's centre, where alone it is probed.
 	purple := color.NRGBA{R: 188, B: 188, A: 255}
-	opaqueGreen := color.NRGBA{G: 255, A: 255}
 	sprites := []struct {
 		name   string
 		image  canvas.Image
@@ -804,12 +800,12 @@ func TestAnImagesOwnTextureHasNoMoreMipLevelsThanItsSizeHas(t *testing.T) {
 	}
 }
 
-func TestAnAtlasPageSizeOffTheGridOrBelowTheWhiteTexelsCellIsRaisedReportedOnce(t *testing.T) {
-	// At the default 3 mip levels, cells sit on a grid of 4 with a gutter
+func TestAnAtlasPageSizeOffTheAtlasGridOrBelowTheWhiteTexelsCellIsRaisedReportedOnce(t *testing.T) {
+	// At the default 3 mip levels, cells sit on an atlas grid of 4 with a gutter
 	// of 4, so the white texel's cell is 12: a page of 1 or 11 is raised to
-	// 12, and one of 13 to 16, the next multiple of the grid, each reported
-	// once, while one of 12 is neither. At 4 levels, the grid and gutter
-	// are 8, so the cell is 24. At one level, the gutter is 2 on no grid,
+	// 12, and one of 13 to 16, the next multiple of the atlas grid, each reported
+	// once, while one of 12 is neither. At 4 levels, the atlas grid and gutter
+	// are 8, so the cell is 24. At one level, the gutter is 2 on no atlas grid,
 	// so the cell is 5 and a page of 6 stands. The second frame lets the
 	// describer read the atlas.
 	for _, test := range []struct {
@@ -852,7 +848,7 @@ func TestAnAtlasPageSizeOffTheGridOrBelowTheWhiteTexelsCellIsRaisedReportedOnce(
 func TestMipLevelsPastTheMostAPageFitsAreLoweredToItReportedOnce(t *testing.T) {
 	// 13 levels' smallest page would be 12,288 texels a side, past WebGPU's
 	// default limit of 8192, so pages are made of 12 levels, reported once,
-	// their side raised to the white texel's cell of 6144 at that grid.
+	// their side raised to the white texel's cell of 6144 at that atlas grid.
 	h := canvastest.NewHarness(t)
 	describer := &textureDescriber{}
 	h.Spawn(nil, &canvas.Config{MipLevels: 13}, describer)

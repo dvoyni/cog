@@ -12,11 +12,23 @@ fn canvas_viewport_fragment(in: CanvasVaryings) -> @location(0) vec4<f32> {
 	return canvas_output(texel * in.tint);
 }
 
-// canvas_pack_fragment draws an image's texel, of straight alpha as its file
-// holds it, premultiplied, into its cell of an atlas, whose format encodes
-// it as its colour space asks.
+// canvas_pack_fragment draws a frame's texel, read from its rectangle of its
+// source, the atlas binding's one layer, of straight alpha as its file holds
+// it, premultiplied, into its cell of an atlas, whose format encodes it as
+// its colour space asks. Its instance is no entry's: its region spans the
+// cell in the frame's texels from the frame's top left, its crop is the
+// frame's rectangle of the source in texels, its origin in xy and its size
+// in zw, and its part is the axes the gutter wraps along, bit 0 x and bit 1
+// y. Along an axis it wraps, the gutter holds the frame's opposite edge;
+// along any other, its edge continued.
 @fragment
 fn canvas_pack_fragment(in: CanvasVaryings) -> @location(0) vec4<f32> {
-	let texel = textureSample(canvas_atlas, canvas_sampler, in.uv, canvas_instances[in.instance].page);
-	return vec4<f32>(texel.rgb * texel.a, texel.a);
+	let instance_data = canvas_instances[in.instance];
+	let size = vec2<i32>(instance_data.crop.zw);
+	let texel = vec2<i32>(floor(in.uv));
+	let wrapped = ((texel % size) + size) % size;
+	let clamped = clamp(texel, vec2<i32>(0), size - vec2<i32>(1));
+	let wraps = vec2<bool>((instance_data.part & 1u) != 0u, (instance_data.part & 2u) != 0u);
+	let color = textureLoad(canvas_atlas, vec2<i32>(instance_data.crop.xy) + select(clamped, wrapped, wraps), 0, 0);
+	return vec4<f32>(color.rgb * color.a, color.a);
 }

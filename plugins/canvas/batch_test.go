@@ -10,7 +10,7 @@ import (
 
 // shapeImages are the drawn images of a frame of shapes alone: the white
 // texel's, at a region of its own.
-var shapeImages = []drawnImage{{region: [4]float32{0.25, 0.5, 0.125, 0.125}, page: 1, size: m.Vec2{X: 1, Y: 1}}}
+var shapeImages = [][]drawnImage{{{region: [4]float32{0.25, 0.5, 0.125, 0.125}, page: 1, size: m.Vec2{X: 1, Y: 1}}}}
 
 func TestBatchesBreakOnlyWhereAnEntrysMaterialDiffersFromTheOneBefore(t *testing.T) {
 	firstMaterial := Material{index: 1, generation: 1}
@@ -37,7 +37,7 @@ func TestBatchesBreakOnlyWhereAnEntrysMaterialDiffersFromTheOneBefore(t *testing
 	}
 	var wantInstances []instanceData
 	for _, entry := range entries {
-		wantInstances = appendShapeInstances(wantInstances, &shapes[entry.entryIndex], &shapeImages[0])
+		wantInstances = appendShapeInstances(wantInstances, &shapes[entry.entryIndex], &shapeImages[0][0])
 	}
 	if !slices.Equal(instances, wantInstances) {
 		t.Errorf("the batches' instances are %+v, want each shape's, in sort order, %+v", instances, wantInstances)

@@ -10,7 +10,7 @@ import (
 func TestALinesInstanceMapsTheUnitSquareOntoABandItsWidthWideCentredOnItsSegment(t *testing.T) {
 	line := Shape{Kind: Line, From: m.Vec2{X: 10, Y: 20}, To: m.Vec2{X: 10, Y: 60}, Width: 4, Radius: 3, Transform: m.Translation2x3(100, 0)}
 
-	instances := appendShapeInstances(nil, &line, &shapeImages[0])
+	instances := appendShapeInstances(nil, &line, &shapeImages[0][0])
 
 	if len(instances) != 1 {
 		t.Fatalf("a line drew %d instances, want 1", len(instances))
@@ -32,7 +32,7 @@ func TestALinesInstanceMapsTheUnitSquareOntoABandItsWidthWideCentredOnItsSegment
 }
 
 func TestAHairlinesSquareIsOneUnitAcrossForTheVertexStageToNarrow(t *testing.T) {
-	instances := appendShapeInstances(nil, &Shape{Kind: Line, From: m.Vec2{X: 1, Y: 2}, To: m.Vec2{X: 4, Y: 6}, Width: -2}, &shapeImages[0])
+	instances := appendShapeInstances(nil, &Shape{Kind: Line, From: m.Vec2{X: 1, Y: 2}, To: m.Vec2{X: 4, Y: 6}, Width: -2}, &shapeImages[0][0])
 
 	instance := instances[0]
 	if instance.width != 0 || instance.size != (m.Vec2{X: 5, Y: 1}) {
@@ -47,7 +47,7 @@ func TestAStrokeDrawsItsFourSidesAndAFillIgnoresItsWidth(t *testing.T) {
 	rect := m.Rect{X: 5, Y: 6, Width: -20, Height: 10}
 	stroke := Shape{Kind: Stroke, Rect: rect, Width: 2, Radius: 3, Tint: m.Color{R: 1, A: 0.5}}
 
-	instances := appendShapeInstances(nil, &stroke, &shapeImages[0])
+	instances := appendShapeInstances(nil, &stroke, &shapeImages[0][0])
 
 	var parts []shapePart
 	for _, instance := range instances {
@@ -60,7 +60,7 @@ func TestAStrokeDrawsItsFourSidesAndAFillIgnoresItsWidth(t *testing.T) {
 		t.Errorf("a stroke drew the parts %v, want its four sides, %v", parts, want)
 	}
 
-	fill := appendShapeInstances(nil, &Shape{Kind: Fill, Rect: rect, Width: 2, Radius: -3}, &shapeImages[0])
+	fill := appendShapeInstances(nil, &Shape{Kind: Fill, Rect: rect, Width: 2, Radius: -3}, &shapeImages[0][0])
 
 	if len(fill) != 1 || fill[0].part != shapePartWhole || fill[0].width != 0 || fill[0].radius != 0 {
 		t.Errorf("a fill drew %+v, want one instance of the whole square, its width ignored and its negative radius none", fill)

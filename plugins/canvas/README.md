@@ -28,13 +28,13 @@ beside render's inspection of it.
   the kernel's config, under `PluginName`: `RegroupedLayers`, the layers
   whose entries of equal keys canvas may regroup by batch,
   `DefaultFilter`, the filter of sprites naming none, `AtlasPageSize`, the
-  side of a sprite atlas's pages, zero meaning 2048, a multiple of the grid
+  side of a sprite atlas's pages, zero meaning 2048, a multiple of the atlas grid
   holding the white texel's cell, 12 at the default 3 mip levels and 5 at
   one, a side that is not raised to the next that is and reported once,
   `AtlasLayerCeiling`, the most pages it grows to, zero meaning 256,
   `OwnTextureSize`, the side past which an image is drawn from a texture
   of its own, zero meaning half a page, `MipLevels`, how many mip levels a
-  page has, zero meaning 3, fixing the grid and the gutter at
+  page has, zero meaning 3, fixing the atlas grid and the gutter at
   2^(levels−1) texels, more than 12 lowered to 12 and reported once, and
   `DoNotGenerateMipMaps`, which makes pages of one level, for pixel-perfect
   games.
@@ -74,7 +74,8 @@ beside render's inspection of it.
   part of it. Entries are drawn by
   sort key, then by their draw list's registration order, then in the order
   recorded.
-- **`Sprite`** is an entry that draws an `Image` through its `m.Mat2x3`
+- **`Sprite`** is an entry that draws an `Image`, or the `Frame` of its
+  sheet, counted along its rows, through its `m.Mat2x3`
   `Transform` about its image's pivot, mirrored by a negative scale, at its
   `Size`, zero its image's in texels and one zero axis keeping the aspect,
   times its `Tint`, white when zero, with its `Crop` left out where it lies,
@@ -87,13 +88,20 @@ beside render's inspection of it.
   of the sRGB sprite atlas, which takes no filter.
 - **`ImageFromFile(path, options…)`** interns a path in platform's FS and its
   **`ImageOptions`** (its `ColorSpace`, `ColorSpaceSrgb` or
-  `ColorSpaceLinear`, and its `Pivot`, a `Fraction` of its size from its
+  `ColorSpaceLinear`; its `Wrap`, the axes it tiles along, `WrapNone`,
+  `WrapX`, `WrapY` or `WrapBoth`, whose gutters hold its opposite edge; its
+  `Sheet`, a `Grid{Columns, Rows}` of frames, zero one frame and a zero
+  column or row count one; its `SourceRect`, the `m.Recti` of the file it
+  is, in texels, zero the whole file, a sheet cutting it into frames; and
+  its `Pivot`, a `Fraction` of its size from its
   centre plus `Texels`, or one of the named pivots, `PivotCenter`,
   `PivotTopLeft`, `PivotTop`, `PivotBottom`, `PivotBottomLeft` and
-  `PivotBottomRight`) into an `Image`, a plain value an ECS component holds.
+  `PivotBottomRight`, measured within its frame) into an `Image`, a plain
+  value an ECS component holds.
   It loads nothing: the first frame drawing it acquires its file from
-  render and packs it into the sprite atlas of its colour space, each image
-  a cell of its own, the image rounded up to the grid and a gutter past it
+  render and packs it into the sprite atlas of its colour space, each image,
+  and each frame of a sheet, a cell of its own, the rectangles and frames
+  of one file decoded once, the image rounded up to the atlas grid and a gutter past it
   continuing its edges, the page's mips then made again before any
   camera's pass, so a minified sprite never mixes a neighbour, drawn in
   that frame, and a file render cannot load draws render's magenta,
@@ -108,7 +116,9 @@ beside render's inspection of it.
   exactly its size with no gutter, so an image as large as a page takes a
   texture of a page's size, of the page's mip levels or as many as its size
   has. Images differing only in their pivot share
-  their region. A second set of options is ignored and reported once.
+  their region. A second set of options is ignored and reported once, and
+  a `SourceRect` reaching past its file, or a `Frame` past its sheet's
+  last, draws nothing, reported once.
 - **`OrderOf(y)`** maps a float onto an order of its own, in the same order,
   for y-sorting.
 - **`Material`** names a 2D material; the zero one, the default material,
@@ -117,8 +127,8 @@ beside render's inspection of it.
   tools through: `Preload(image)` loads an image ahead of its first draw,
   for a loading screen; `Unload(path)` unloads the images of a path, or of
   a folder for a path ending in a slash, `Unload("level1/")`, as canvas next
-  draws, a later draw loading them again; `ImageSize(image)` answers an image's size from its file's
-  header alone, before it is drawn, and false for a missing file, reported
+  draws, a later draw loading them again; `ImageSize(image)` answers an image's size, its
+  rectangle's or its frames', from its file's header alone, before it is drawn, and false for a missing file, reported
   once; `RequestInspection` asks for an inspection of the next frame, and
   `ReadInspection` answers it in a task off **`InspectedEvent`**.
 - **`Inspection`** is one frame in canvas's terms: each camera that drew,
