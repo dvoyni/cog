@@ -25,7 +25,9 @@ type Sprite struct {
 	Transform m.Mat2x3
 	// Size is the sprite's size in its own space, zero meaning its image's
 	// in texels; a zero on one axis keeps the image's aspect ratio. The
-	// image's pivot lies at the origin of the sprite's own space.
+	// image's pivot lies at the origin of the sprite's own space. A
+	// converted image's size is its frame's, before it is converted, so
+	// its output, placed within the frame, spans more or less.
 	Size m.Vec2
 	// Tint multiplies the image's colour: straight alpha, premultiplied by
 	// canvas, zero meaning white.
@@ -34,7 +36,8 @@ type Sprite struct {
 	// the default material.
 	Material Material
 	// Crop leaves part of the sprite out where it lies, so it keeps its
-	// pivot, as a fill bar empties from one side; zero draws all of it.
+	// pivot, as a fill bar empties from one side; zero draws all of it. A
+	// converted image's is of its output.
 	Crop Crop
 	// Clip is a rectangle of the world outside which the sprite draws
 	// nothing, zero meaning none, as a Shape's Clip is.
@@ -76,12 +79,19 @@ func (s *Sprite) batchKey(image *drawnImage, defaultFilter Filter) batchKey {
 	return key
 }
 
-// findSquare answers the transform from the unit square onto the sprite in
-// the world, its image naturalSize texels and placed about pivot, its own
-// transform, a zero one read as the identity, after its size's, and the
-// square's size in the sprite's own space: its Size, an axis of zero
-// keeping naturalSize's aspect, naturalSize itself for no Size.
-func (s *Sprite) findSquare(naturalSize m.Vec2, pivot Pivot) (m.Mat2x3, m.Vec2) {
+// findSquare answers the transform from the unit square onto the sprite's
+// image, as drawn image, in the world, and the square's size in the
+// sprite's own space. The image's frame spans its Size, an axis of zero
+// keeping the frame's aspect, the frame's size in texels for no Size, its
+// image's pivot at the origin, then its own transform, a zero one read as
+// the identity; the square spans the image's region, which holds the frame
+// but for a converted image's, placed by the frame's bounds.
+func (s *Sprite) findSquare(image *drawnImage) (m.Mat2x3, m.Vec2) {
+	frame := image.frameBounds
+	if frame == (m.Rect{}) {
+		frame = m.Rect{Width: image.size.X, Height: image.size.Y}
+	}
+	naturalSize := frame.Size()
 	size := s.Size
 	switch {
 	case size.X == 0 && size.Y == 0:
@@ -91,21 +101,25 @@ func (s *Sprite) findSquare(naturalSize m.Vec2, pivot Pivot) (m.Mat2x3, m.Vec2) 
 	case size.Y == 0:
 		size.Y = size.X * naturalSize.Y / naturalSize.X
 	}
-	// The pivot, from the square's top left in the sprite's own space,
+	scale := size.Div(naturalSize)
+	// The pivot, from the frame's top left in the sprite's own space,
 	// lands on the origin.
-	pivotPoint := pivot.Fraction.AddS(0.5).Mul(size).Add(pivot.Texels.Mul(size).Div(naturalSize))
-	square := m.Mat2x3{size.X, 0, 0, size.Y, -pivotPoint.X, -pivotPoint.Y}
+	pivot := image.options.Pivot
+	pivotPoint := pivot.Fraction.AddS(0.5).Mul(size).Add(pivot.Texels.Mul(scale))
+	squareOrigin := frame.Min().Negate().Mul(scale).Sub(pivotPoint)
+	squareSize := image.size.Mul(scale)
+	square := m.Mat2x3{squareSize.X, 0, 0, squareSize.Y, squareOrigin.X, squareOrigin.Y}
 	if s.Transform == (m.Mat2x3{}) {
-		return square, size
+		return square, squareSize
 	}
-	return s.Transform.Mul(square), size
+	return s.Transform.Mul(square), squareSize
 }
 
 // findBounds answers the world rectangle the sprite draws within, its image
-// naturalSize texels and placed about pivot: the bounding box of the part
-// of its unit square its crop leaves, in the world.
-func (s *Sprite) findBounds(naturalSize m.Vec2, pivot Pivot) m.Rect {
-	square, _ := s.findSquare(naturalSize, pivot)
+// as drawn image: the bounding box of the part of its unit square its crop
+// leaves, in the world.
+func (s *Sprite) findBounds(image *drawnImage) m.Rect {
+	square, _ := s.findSquare(image)
 	cropRect := s.Crop.findRect()
 	return square.TransformRect(m.Rect{X: cropRect[0], Y: cropRect[1], Width: cropRect[2] - cropRect[0], Height: cropRect[3] - cropRect[1]})
 }

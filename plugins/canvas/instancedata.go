@@ -111,9 +111,9 @@ func appendShapeInstances(instances []instanceData, shape *Shape, white *drawnIm
 
 // appendSpriteInstance appends to instances the instance data of sprite, its
 // image as drawn image, and answers them: one instance, over its image's
-// region, decoding it where it is to be, sliced or tiled as its draw mode
-// says, its zero tint white and premultiplied, and a zero transform read
-// as the identity.
+// region, a converted image's output placed within its frame, decoding it
+// where it is to be, sliced or tiled as its draw mode says, its zero tint
+// white and premultiplied, and a zero transform read as the identity.
 func appendSpriteInstance(instances []instanceData, sprite *Sprite, image *drawnImage) []instanceData {
 	tint := sprite.Tint
 	if tint == (m.Color{}) {
@@ -128,7 +128,7 @@ func appendSpriteInstance(instances []instanceData, sprite *Sprite, image *drawn
 	if image.decode {
 		instance.decode = 1
 	}
-	instance.transform, instance.size = sprite.findSquare(image.size, image.options.Pivot)
+	instance.transform, instance.size = sprite.findSquare(image)
 	texelScale := sprite.TexelScale
 	if texelScale <= 0 {
 		texelScale = 1

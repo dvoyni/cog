@@ -100,6 +100,18 @@
 //	list.DrawSprite(canvas.Sprite{Image: panel, Size: m.Vec2{X: 320, Y: 150}, DrawMode: canvas.Sliced, TexelScale: 2})
 //	list.DrawSprite(canvas.Sprite{Image: water, Size: m.Vec2{X: 800, Y: 200}, DrawMode: canvas.Tiled})
 //
+// An image's Convert converts each of its frames on the CPU before it is
+// packed, canvas reading and decoding its file itself in the job that first
+// draws it. The output's bounds place it within the frame, while the
+// image's size and pivot measure the frame, so a trimmed sprite stays where
+// it was, and a DistanceField of a sprite, drawn with the sprite's
+// transform and size, lines up with it, its field reaching Spread texels
+// beyond the art:
+//
+//	halo := canvas.ImageFromFile("hero.png", canvas.ImageOptions{Pivot: canvas.PivotBottom, Convert: canvas.DistanceField{Spread: 8}})
+//	list.DrawSprite(canvas.Sprite{Image: halo, Transform: m.Translation2x3(x, y)})
+//	list.DrawSprite(canvas.Sprite{Image: hero, Transform: m.Translation2x3(x, y)})
+//
 // ImageFromTexture makes an Image of a texture made with render, never
 // packed, drawn from its mip level 0 and layer 0, so a minimap camera's
 // texture drawn as a sprite shows the world it drew. A texture of a format

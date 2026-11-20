@@ -39,10 +39,12 @@ func (Assets) Declare(access *kernel.Access) Assets {
 // Preload loads image ahead of its first draw, so the frame drawing it
 // first does not decode it: its file is acquired from render now, which
 // decodes it before the frame's submit, or the next frame's once this
-// frame's recording has ended, and canvas packs it as it is first drawn. An
-// image packed already, or preloaded and not yet drawn, is not loaded
-// again, nor is the zero Image, the white texel, nor an image of a render
-// texture, ImageFromTexture's, which loads nothing.
+// frame's recording has ended, and canvas packs it as it is first drawn. A
+// converted image's file is read through platform's FS and decoded in the
+// caller's job, and converted as it is first drawn. An image packed
+// already, or preloaded and not yet drawn, is not loaded again, nor is the
+// zero Image, the white texel, nor an image of a render texture,
+// ImageFromTexture's, which loads nothing.
 func (a Assets) Preload(image Image) {
 	if image == (Image{}) {
 		return
@@ -51,7 +53,13 @@ func (a Assets) Preload(image Image) {
 	if key.ofTexture {
 		return
 	}
-	a.state.Get().residency.requestPreload(a.inventory, sourceKey{path: key.path, colorSpace: key.options.ColorSpace})
+	state := a.state.Get()
+	source := sourceKey{path: key.path, colorSpace: key.options.ColorSpace}
+	if key.options.Convert != nil {
+		state.residency.requestFilePreload(a.files.Get(), source)
+		return
+	}
+	state.residency.requestPreload(a.inventory, source)
 }
 
 // Unload unloads the images of path, or, when path ends in a slash, of
@@ -67,11 +75,13 @@ func (a Assets) Unload(path string) {
 	for _, unloaded := range imageNames.findPaths(path) {
 		state.logger.ForgetLogOnce(imageOptionsIgnoredLogKey + unloaded)
 		state.logger.ForgetLogOnce(frameOutOfBoundsLogKey + unloaded)
+		state.logger.ForgetLogOnce(converterRefusedLogKey + unloaded)
 	}
 }
 
 // ImageSize answers image's size in texels before it is drawn, its
-// SourceRect's, or its sheet's frames', read from its file's header alone,
+// SourceRect's, or its sheet's frames', a converted image's before it is
+// converted, read from its file's header alone,
 // through platform's FS, and kept for its path until it is unloaded, and
 // whether the header was read: false for a file that is missing or no
 // image render loads, reported once for its path as

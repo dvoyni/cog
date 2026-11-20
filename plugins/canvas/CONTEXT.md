@@ -120,6 +120,10 @@ _Avoid_: Material (render's), shader, effect, look
 The value one entry gives its 2D material, of the one type the material declares, such as an outline's colour and width. A render *material parameter* is shared by every draw of a material; a material argument belongs to one entry.
 _Avoid_: Material parameter (render's), tail, style, instance data, instance property
 
+**Converter**:
+A comparable value that turns each frame of an image into other texels on the CPU before it is packed, such as a trim or a distance field's bake. Its output's bounds place it within the frame; the image's size and pivot are measured on the frame.
+_Avoid_: Filter, processor, image effect
+
 **Distance field**:
 An image whose alpha holds each texel's distance to an edge, baked from a sprite's alpha or kept by distance-field glyphs. The SDF material draws outlines, halos, glows and drop shadows from it.
 _Avoid_: SDF image, signed distance texture

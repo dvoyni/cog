@@ -449,8 +449,12 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - **Packing waits for the drawing job.** A batch key names its atlas, known only once its image is packed, so the drawing job finds each entry's batch key as it packs the frame's new images, and regroups the sorted entries by them; the sort task sorts by key alone.
 - **Converters:** `ImageOptions.Convert` is a `Converter`, an interface with `Convert(image.Image) image.Image`, implemented by comparable values.
   - `canvas.DistanceField{Spread}` bakes a distance field (see *Distance fields and profiles*), so the SDF pipeline runs through the general one.
-  - Equal converters share an image. One that is not comparable is refused at `ImageFromFile` and reported.
-  - A converted image is read, decoded and converted on the CPU in the job that first asks for it, as render compiles a shader in its caller's job. It is then made into a texture with `MakeTexture` and packed like any other.
+  - Equal converters share an image: a converted cell is keyed by its file's rectangle, its converter and its wrap. One that is not comparable is refused at `ImageFromFile`, which drops it, since interning compares it, and is reported once at the image's first draw, as a second set of options is. Its image is drawn unconverted. So is a render texture's image given a converter, whose texels are never on the CPU, dropped by `ImageFromTexture` the same way.
+  - A converted image is read through platform's FS, decoded and converted on the CPU in the job that first asks for it, as render compiles a shader in its caller's job: the drawing job, or `Assets.Preload`'s, which holds the decoded file until the image is packed. The drawing job decodes a file once for the frames and rectangles it packs of it. The output is then made into a texture with `MakeTexture` and packed like any other.
+  - Each frame is converted apart, its bounds beginning at 0, 0, as its own image, so a converter never reads a neighbour.
+  - A file canvas cannot read or decode loads through render instead, unconverted, so render draws its magenta and reports it, as for any image. A report of canvas's own was weighed: it would copy render's failure handling, its magenta and its forgetting at unload. An output of no texel draws nothing.
+  - A converted cell's frame is placed by its bounds within the cell, zero for a cell holding its frame, so only a converted image carries them.
+  - A sprite's `Crop` is of the output, the square it draws. A crop of the frame was weighed: a side not cropped would have to reach the output's edge and a side cropped the frame's, a jump at the smallest crop.
   - A user's own converters are plain structs: trimming, palette swaps, outline extraction.
 
 **Gutters and mips**
@@ -554,6 +558,9 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - Keeping halos behind overlapping images is the user's choice of layer and order.
   - The baked field holds its spread in its own pixels, so it is simply a larger sprite, and nothing has to grow a quad.
 - **`DistanceField{Spread}` bakes a single-channel distance field** from an image's alpha, on the CPU, writing the distance into alpha. It runs as a converter at the image's first use. A small command bakes fields at build time, optionally, for shipping them pre-baked.
+  - Its texels are white, their alpha ½ on the art's edge, where the alpha crosses ½, falling to 0 `Spread` texels outside and rising to 1 `Spread` texels inside, `Spread` zero meaning 8. Its output is the frame grown by `Spread` on each side.
+  - **The distance transform is Gustavson and Strand's anti-aliased one, seeded by dead reckoning.** Each texel wholly outside the art measures to the part of the edge its nearest seed holds, a seed being a texel the art covers at all, and inside the same towards the texels not wholly covered. A seed's edge is its square when wholly covered, or the straight edge its coverage places across its coverage's gradient, clipped to the texel. A texel the edge crosses measures along its own gradient.
+  - Seeds spread by sweeps down and up the grid, each texel taking a neighbour's seed where its edge lies nearer, until none does. Starting from the seeds nearest by their centres was tried: a nearly covered texel can be nearer by its centre than one barely covered whose edge lies closer, and the error spread outwards, 0.9 of a texel at an anti-aliased disc's edge. Measured to the edge's segment, a hard-edged rectangle's field is exact, and an anti-aliased disc's within one 255th of its alpha.
 - **A field made from pixels can only be single-channel;** MSDF needs vector outlines. MTSDF glyphs, should they come, keep their true distance in alpha too, so one SDF material reads `.a` from both.
 
 ### canvas's include and its groups

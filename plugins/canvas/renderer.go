@@ -3,6 +3,8 @@ package canvas
 import (
 	"cmp"
 	"fmt"
+	"image"
+	"io/fs"
 	"slices"
 	"strings"
 
@@ -52,6 +54,11 @@ type renderer struct {
 	// it.
 	drawnImages  [][]drawnImage
 	packedImages map[packedKey]*packedImage
+	// decodedFiles are the files of converted images the drawing job read
+	// and decoded as it packed the frame's images, each by its key, nil for
+	// one that could not be, so the frames and rectangles of one file
+	// decode it once, forgotten once they are packed.
+	decodedFiles map[sourceKey]image.Image
 	// drawnFrameCount counts the frames drawCameras drew, the frame being drawn
 	// included, so a packed image last drawn in it is not evicted.
 	drawnFrameCount uint64
@@ -105,6 +112,7 @@ func newRenderer(atlasPageSize, atlasLayerCeiling, ownTextureSize, mipLevelCount
 		mipLevelCount:     mipLevelCount,
 		drawnImages:       [][]drawnImage{{{}}},
 		packedImages:      map[packedKey]*packedImage{},
+		decodedFiles:      map[sourceKey]image.Image{},
 	}
 }
 
@@ -177,8 +185,9 @@ func (r *renderer) init(inventory render.Inventory) {
 // whose lowest order's command list fills its cell before any camera's
 // pass. Once each entry's batch key is found, it regroups state's sorted
 // entries by them. First, whether a camera is set or not, it unloads and
-// preloads what state's residency requests ask.
-func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, manager *platform.WindowManager, mainWindow platform.Window, state *drawState) {
+// preloads what state's residency requests ask. A converted image is read
+// from files, decoded and converted in it.
+func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, files fs.FS, manager *platform.WindowManager, mainWindow platform.Window, state *drawState) {
 	r.cameraDraws = r.cameraDraws[:0]
 	r.mainWindow = mainWindow
 	r.batches = r.batches[:0]
@@ -218,17 +227,19 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, m
 			}
 			key := imageNames.findKey(sprite.Image)
 			reportIgnoredOptions(state.logger, key)
+			reportRefusedConverter(state.logger, key)
 			if key.ofTexture {
 				placeTextureImage(inventory, state.logger, drawn, key, sprite.Frame)
 				continue
 			}
-			packed, withinFile := r.packImage(inventory, state.logger, &state.residency, key, sprite.Frame)
-			if !withinFile {
+			packed, drawsTexels := r.packImage(inventory, files, state.logger, &state.residency, key, sprite.Frame)
+			if !drawsTexels {
 				drawn.drawsNothing = true
 				continue
 			}
 			*drawn = makeDrawnImage(packed, key.options)
 		}
+		clear(r.decodedFiles)
 		// Every key is found again once every image is packed, since
 		// growing an atlas replaces its texture.
 		r.entryBounds = r.entryBounds[:0]
@@ -482,7 +493,7 @@ func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 		r.drawsNothingEntryCount++
 		return
 	}
-	r.entryBounds = append(r.entryBounds, sprite.findBounds(image.size, image.options.Pivot))
+	r.entryBounds = append(r.entryBounds, sprite.findBounds(image))
 	r.batchKeys = append(r.batchKeys, sprite.batchKey(image, state.defaultFilter))
 }
 
@@ -507,36 +518,53 @@ func (r *renderer) findPlacedImage(sprite *Sprite) (*drawnImage, bool) {
 }
 
 // packImage packs frame of the image of key, marked drawn this frame, and
-// answers where, and whether its rectangle of its file lies within it. Its
-// source, its file, is acquired from render with its colour space, sharing
-// the texture Assets.Preload acquired, which it then releases from
-// requests, and the frames and rectangles of the file packed before; it is
-// of the size render's descriptor of it gives, its file's header's, a
-// texture render could not make one texel. A frame whose rectangle does not
-// lie within the file is not packed, its source released, and is reported
-// to logger once for its path. A frame of the texels of one packed already, of the same rectangle of the file and wrap, shares its
-// cell, its source released. Any other is packed into the sprite atlas of
-// its colour space, grown or evicting images when full, or into an atlas
+// answers where, and whether it draws texels: false for a frame whose
+// rectangle does not lie within its file, which is not packed and is
+// reported to logger once for its path, and for a converted frame whose
+// converter answered no texel. A converted image's file is read from files
+// and decoded, as decodeConvertedFile does; any other's, or one that could
+// not be decoded, which render draws magenta, is acquired from render with
+// its colour space, sharing the texture Assets.Preload acquired, which it
+// then releases from requests, of the size render's descriptor of it
+// gives, its file's header's, a texture render could not make one texel.
+// A frame of the texels of one packed already, of the same rectangle of
+// the file, converter and wrap, shares its cell, its source released. Any
+// other is packed into the sprite atlas of its colour space, a converted
+// one as a texture made of its converter's output, placed by its bounds
+// within the frame, grown or evicting images when full, or into an atlas
 // of its own, exactly its size with no gutter, when it is wider or taller
-// than ownTextureSize, when no page holds its cell, or when the atlas is at
-// its ceiling with nothing to evict, reported to logger, its cell kept for
-// the next command list to fill.
-func (r *renderer) packImage(inventory render.Inventory, logger *kernel.Logger, requests *residencyRequestQueue, key imageKey, frame uint32) (*packedImage, bool) {
+// than ownTextureSize, when no page holds its cell, or when the atlas is
+// at its ceiling with nothing to evict, reported to logger, its cell kept
+// for the next command list to fill.
+func (r *renderer) packImage(inventory render.Inventory, files fs.FS, logger *kernel.Logger, requests *residencyRequestQueue, key imageKey, frame uint32) (*packedImage, bool) {
 	sourceKey := sourceKey{path: key.path, colorSpace: key.options.ColorSpace}
-	source := inventory.AcquireTexture(sourceKey.path, sourceKey.makeTextureOptions())
-	requests.releasePreload(inventory, sourceKey)
+	converter := key.options.Convert
+	var picture image.Image
+	if converter != nil {
+		picture = r.decodeConvertedFile(files, requests, sourceKey)
+		if picture == nil {
+			converter = nil
+		}
+	}
+	var source render.Texture
 	fileWidth := 1
 	fileHeight := 1
-	if descriptor, held := inventory.TextureDescriptor(source); held {
-		fileWidth = int(descriptor.Width)
-		fileHeight = int(descriptor.Height)
+	if picture != nil {
+		fileWidth = picture.Bounds().Dx()
+		fileHeight = picture.Bounds().Dy()
+	} else {
+		source = inventory.AcquireTexture(sourceKey.path, sourceKey.makeTextureOptions())
+		requests.releasePreload(inventory, sourceKey)
+		if descriptor, held := inventory.TextureDescriptor(source); held {
+			fileWidth = int(descriptor.Width)
+			fileHeight = int(descriptor.Height)
+		}
 	}
 	frameRect, withinFile := key.options.findFrameRect(fileWidth, fileHeight, frame)
 	if !withinFile {
-		outOfBoundsReport := Report{Kind: ReportKindFrameOutOfBounds, Err: fmt.Errorf("canvas: frame %d of image %s, of its SourceRect %v cut by its sheet of %d by %d, does not lie within its file of %d by %d texels, so it draws nothing", frame, key.describe(), key.options.SourceRect, key.options.Sheet.Columns, key.options.Sheet.Rows, fileWidth, fileHeight)}
-		logger.LogErrOnce(frameOutOfBoundsLogKey+key.findSubject(), outOfBoundsReport)
+		reportFrameOutOfBounds(logger, key, frame, "file", fileWidth, fileHeight)
 	}
-	packedKey := packedKey{source: sourceKey, rect: frameRect, wrap: key.options.Wrap}
+	packedKey := packedKey{source: sourceKey, rect: frameRect, converter: converter, wrap: key.options.Wrap}
 	packed, shared := r.packedImages[packedKey]
 	if shared || !withinFile {
 		if source != (render.Texture{}) {
@@ -547,8 +575,6 @@ func (r *renderer) packImage(inventory render.Inventory, logger *kernel.Logger, 
 		}
 		return packed, withinFile
 	}
-	width := uint32(frameRect.Width)
-	height := uint32(frameRect.Height)
 	spriteAtlas := r.srgbAtlas
 	if key.options.ColorSpace == ColorSpaceLinear {
 		if r.linearAtlas == nil {
@@ -557,6 +583,18 @@ func (r *renderer) packImage(inventory render.Inventory, logger *kernel.Logger, 
 		spriteAtlas = r.linearAtlas
 	}
 	packed = &packedImage{atlas: spriteAtlas, lastDrawnFrame: r.drawnFrameCount}
+	sourceRect := frameRect
+	if converter != nil {
+		output := convertFrame(picture, frameRect, converter)
+		if output.Rect.Empty() {
+			return nil, false
+		}
+		sourceRect = m.Recti{Width: output.Rect.Dx(), Height: output.Rect.Dy()}
+		source = inventory.MakeTexture(render.TextureDescriptor{Label: key.path, Width: uint32(sourceRect.Width), Height: uint32(sourceRect.Height), Format: spriteAtlas.format}, output.Pix)
+		packed.frameBounds = m.Recti{X: -output.Rect.Min.X, Y: -output.Rect.Min.Y, Width: frameRect.Width, Height: frameRect.Height}.Float()
+	}
+	width := uint32(sourceRect.Width)
+	height := uint32(sourceRect.Height)
 	fits := false
 	cellWidth, cellHeight := spriteAtlas.findCellSize(width, height)
 	holdsCell := cellWidth <= r.atlasPageSize && cellHeight <= r.atlasPageSize
@@ -569,8 +607,24 @@ func (r *renderer) packImage(inventory render.Inventory, logger *kernel.Logger, 
 		packed.atlas, packed.region = newOwnAtlas(inventory, key.path, spriteAtlas.format, width, height, spriteAtlas.mipLevelCount)
 	}
 	r.packedImages[packedKey] = packed
-	r.packings = append(r.packings, atlasPacking{packed: packed, source: source, frameRect: frameRect, wrap: key.options.Wrap})
+	r.packings = append(r.packings, atlasPacking{packed: packed, source: source, frameRect: sourceRect, wrap: key.options.Wrap})
 	return packed, true
+}
+
+// decodeConvertedFile answers the file of key, a converted image's, read
+// from files and decoded, once for each drawing job, taking the picture
+// Assets.Preload decoded from requests, or nil when it cannot be decoded,
+// as decodeImageFile answers it.
+func (r *renderer) decodeConvertedFile(files fs.FS, requests *residencyRequestQueue, key sourceKey) image.Image {
+	if picture, decoded := r.decodedFiles[key]; decoded {
+		return picture
+	}
+	picture := requests.takePreloadedFile(key)
+	if picture == nil {
+		picture = decodeImageFile(files, key.path)
+	}
+	r.decodedFiles[key] = picture
+	return picture
 }
 
 // packIntoSpriteAtlas packs an image of width by height texels, at path,

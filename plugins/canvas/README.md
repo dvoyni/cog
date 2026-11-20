@@ -102,12 +102,12 @@ beside render's inspection of it.
   is, in texels, zero the whole file, a sheet cutting it into frames; its
   `Slice`, the `Insets` a sliced sprite cuts each frame into nine by, in
   texels, insets meeting past the frame shrinking until they meet, and
-  `SliceHollow`, which leaves a sliced sprite's centre empty; and
+  `SliceHollow`, which leaves a sliced sprite's centre empty;
   its `Pivot`, a `Fraction` of its size from its
   centre plus `Texels`, or one of the named pivots, `PivotCenter`,
   `PivotTopLeft`, `PivotTop`, `PivotBottom`, `PivotBottomLeft` and
-  `PivotBottomRight`, measured within its frame) into an `Image`, a plain
-  value an ECS component holds.
+  `PivotBottomRight`, measured within its frame; and its `Convert`, a
+  `Converter`) into an `Image`, a plain value an ECS component holds.
   It loads nothing: the first frame drawing it acquires its file from
   render and packs it into the sprite atlas of its colour space, each image,
   and each frame of a sheet, a cell of its own, the rectangles and frames
@@ -130,6 +130,26 @@ beside render's inspection of it.
   their region. A second set of options is ignored and reported once, and
   a `SourceRect` reaching past its file, or a `Frame` past its sheet's
   last, draws nothing, reported once.
+- **`Converter`** converts each frame of an image on the CPU before it is
+  packed, `Convert(frame image.Image) image.Image`, through
+  `ImageOptions.Convert`: canvas reads and decodes the file itself, in
+  the job that first draws the frame, or `Preload`'s, converts the frame,
+  its bounds beginning at 0, 0, and packs a texture made of the output.
+  The output's bounds place it within the frame, while the image's size
+  and pivot, a sprite's `Size` and `ImageSize` measure the frame, so a
+  trimmed sprite, a `SubImage`, stays where it was; a sprite's `Crop` is
+  of the output. A converter is a comparable value, so images of equal
+  converters share their texels; one that is not comparable, or one of an
+  image of a render texture, is refused, the image drawn unconverted and
+  reported once, and a file canvas cannot decode loads through render,
+  unconverted, which draws its magenta and reports it.
+- **`DistanceField{Spread}`** is a `Converter` baking an image's alpha into
+  a distance field, white, its alpha ½ on the art's edge, falling to 0
+  `Spread` texels outside it and rising to 1 `Spread` texels inside it,
+  zero meaning 8. Its output is the frame grown by `Spread` on each side,
+  so given a sprite's transform and size it lines up with the sprite at
+  any pivot. An anti-aliased edge is found to within a fraction of a
+  texel from its coverage.
 - **`ImageFromTexture(texture, options…)`** interns a texture made with
   render and its `ImageOptions` into an `Image`, never packed: its entries
   draw the texture's mip level 0 and layer 0, where a camera into it
@@ -150,10 +170,11 @@ beside render's inspection of it.
   is the only one canvas makes yet.
 - **`Assets`** is the task parameter a task reaches canvas's assets and
   tools through: `Preload(image)` loads an image ahead of its first draw,
-  for a loading screen; `Unload(path)` unloads the images of a path, or of
+  for a loading screen, a converted one's file decoded in the caller's
+  job; `Unload(path)` unloads the images of a path, or of
   a folder for a path ending in a slash, `Unload("level1/")`, as canvas next
   draws, a later draw loading them again; `ImageSize(image)` answers an image's size, its
-  rectangle's or its frames', from its file's header alone, before it is drawn, and false for a missing file, reported
+  rectangle's or its frames', a converted image's before it is converted, from its file's header alone, before it is drawn, and false for a missing file, reported
   once, an image of a texture measured on render's descriptor of it; `RequestInspection` asks for an inspection of the next frame, and
   `ReadInspection` answers it in a task off **`InspectedEvent`**.
 - **`Inspection`** is one frame in canvas's terms: each camera that drew,

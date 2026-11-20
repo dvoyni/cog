@@ -56,6 +56,11 @@ const (
 	// Texture among them, which draws nothing. It is reported once for each
 	// texture.
 	ReportKindImageTextureRefused
+	// ReportKindConverterRefused is an image given a Converter that is not
+	// comparable, or an image of a render texture given one, which is
+	// drawn unconverted. It is reported once for each path or texture, at
+	// the image's first draw, and again after the path is unloaded.
+	ReportKindConverterRefused
 )
 
 // The keys canvas logs a report once under are one of these, then the
@@ -66,6 +71,7 @@ const (
 	atlasFullLogKey           = "canvas: sprite atlas full: "
 	frameOutOfBoundsLogKey    = "canvas: frame out of bounds: "
 	imageTextureRefusedLogKey = "canvas: image texture refused: "
+	converterRefusedLogKey    = "canvas: converter refused: "
 )
 
 // pixelPerfectStretchReport is the report of a pixel-perfect camera's

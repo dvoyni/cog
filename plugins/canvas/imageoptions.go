@@ -2,6 +2,8 @@ package canvas
 
 import (
 	"cmp"
+	"fmt"
+	"reflect"
 
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/render"
@@ -11,6 +13,9 @@ import (
 // of a render texture, measured in its texels. Images of one path that
 // differ only in options that change no pixel, the pivot, the slice insets
 // and SliceHollow, share their region of the atlas.
+//
+// They are compared as an image is interned, so a Converter they hold is
+// comparable.
 type ImageOptions struct {
 	// ColorSpace is how the file encodes its colours.
 	ColorSpace ColorSpace
@@ -44,6 +49,9 @@ type ImageOptions struct {
 	Slice Insets
 	// SliceHollow leaves a Sliced sprite's centre empty, for a frame.
 	SliceHollow bool
+	// Convert converts each frame of the image on the CPU before it is
+	// packed, as Converter says; zero converts nothing.
+	Convert Converter
 }
 
 // ColorSpace is how an image's file, or its render texture, encodes its
@@ -99,7 +107,8 @@ var (
 )
 
 // ImageFromFile interns the image at path in platform's FS, with options, into
-// an Image: every call of the same path and options answers the same one.
+// an Image: every call of the same path and options answers the same one, a
+// Converter compared by value.
 // It loads nothing: a sprite's first draw of it loads it. Each call takes
 // the table's lock and hashes path, so a game makes an Image once, as it
 // names its art, and keeps it, rather than calling ImageFromFile for each entry
@@ -135,12 +144,25 @@ func ImageFromTexture(texture render.Texture, options ...ImageOptions) Image {
 }
 
 // internImage interns key, its options the first of options, marked as
-// having ignored the rest.
+// having ignored the rest, and as having refused their converter, which it
+// drops, when it is not comparable, since interning compares it, or is of
+// an image of a render texture, whose texels are never on the CPU.
 func internImage(key imageKey, options []ImageOptions) Image {
 	if len(options) > 0 {
 		key.options = options[0]
 	}
 	key.ignoredOptions = len(options) > 1
+	if converter := key.options.Convert; converter != nil {
+		switch {
+		case key.ofTexture:
+			key.converterRefusal = fmt.Sprintf("a converter of %T, which an image of a render texture cannot run", converter)
+		case !reflect.ValueOf(converter).Comparable():
+			key.converterRefusal = fmt.Sprintf("a converter of %T, which is not comparable", converter)
+		}
+		if key.converterRefusal != "" {
+			key.options.Convert = nil
+		}
+	}
 	return imageNames.intern(key)
 }
 

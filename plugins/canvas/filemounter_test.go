@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io/fs"
 	"testing"
 	"testing/fstest"
 
@@ -12,11 +13,11 @@ import (
 	"github.com/dvoyni/cog/plugins/platform"
 )
 
-// fileMounter is a test plugin binding a read mount of files held in memory,
-// so a test's images load through platform's FS.
+// fileMounter is a test plugin binding a read mount of files, held in
+// memory, so a test's images load through platform's FS.
 type fileMounter struct {
 	testPlugin
-	files fstest.MapFS
+	files fs.FS
 }
 
 func (*fileMounter) Name() kernel.PluginName { return "file mounter" }

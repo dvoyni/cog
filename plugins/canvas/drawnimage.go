@@ -12,7 +12,10 @@ import (
 // and of no size until then: where it is packed, or, for an image of a
 // render texture, the view of it its entries draw, packed nowhere; its
 // region there in texture coordinates, its origin then its size, and its
-// page; its size in texels; the options of the image drawing it, which
+// page; its size in texels; the bounds of the frame its region was
+// converted from, in texels from the region's top left, which place it,
+// zero when the region holds the frame itself; the options of the image
+// drawing it, which
 // place it, slice it and wrap it; whether its entries decode its colour
 // from sRGB as they sample it, as an image of a texture whose format
 // encodes nothing decodes it; and whether it was found at its first draw
@@ -25,6 +28,7 @@ type drawnImage struct {
 	region       [4]float32
 	page         uint32
 	size         m.Vec2
+	frameBounds  m.Rect
 	options      ImageOptions
 	decode       bool
 	drawsNothing bool
@@ -36,11 +40,12 @@ func makeDrawnImage(packed *packedImage, options ImageOptions) drawnImage {
 	pageHeight := float32(packed.atlas.height)
 	region := packed.region
 	return drawnImage{
-		packed:  packed,
-		region:  [4]float32{float32(region.X) / pageWidth, float32(region.Y) / pageHeight, float32(region.Width) / pageWidth, float32(region.Height) / pageHeight},
-		page:    region.Layer,
-		size:    m.Vec2{X: float32(region.Width), Y: float32(region.Height)},
-		options: options,
+		packed:      packed,
+		region:      [4]float32{float32(region.X) / pageWidth, float32(region.Y) / pageHeight, float32(region.Width) / pageWidth, float32(region.Height) / pageHeight},
+		page:        region.Layer,
+		size:        m.Vec2{X: float32(region.Width), Y: float32(region.Height)},
+		frameBounds: packed.frameBounds,
+		options:     options,
 	}
 }
 
@@ -72,8 +77,7 @@ func placeTextureImage(inventory render.Inventory, logger *kernel.Logger, drawn 
 	}
 	frameRect, withinTexture := key.options.findFrameRect(int(descriptor.Width), int(descriptor.Height), frame)
 	if !withinTexture {
-		outOfBoundsReport := Report{Kind: ReportKindFrameOutOfBounds, Err: fmt.Errorf("canvas: frame %d of image %s, of its SourceRect %v cut by its sheet of %d by %d, does not lie within its texture of %d by %d texels, so it draws nothing", frame, key.describe(), key.options.SourceRect, key.options.Sheet.Columns, key.options.Sheet.Rows, descriptor.Width, descriptor.Height)}
-		logger.LogErrOnce(frameOutOfBoundsLogKey+key.findSubject(), outOfBoundsReport)
+		reportFrameOutOfBounds(logger, key, frame, "texture", int(descriptor.Width), int(descriptor.Height))
 		drawn.drawsNothing = true
 		return
 	}
@@ -92,10 +96,13 @@ func placeTextureImage(inventory render.Inventory, logger *kernel.Logger, drawn 
 // packedImage is an image packed into an atlas, which the images differing
 // from it only in options that change no pixel share: the atlas, a sprite
 // atlas or one of the image's own, its region there, its page as the
-// region's layer, and the number of the frame that last drew it, which no
-// atlas evicts it in.
+// region's layer; the bounds of the frame a converter's output there was
+// converted from, in texels from the region's top left, zero for a region
+// holding its frame; and the number of the frame that last drew it, which
+// no atlas evicts it in.
 type packedImage struct {
 	atlas          *atlas
 	region         render.TextureRegion
+	frameBounds    m.Rect
 	lastDrawnFrame uint64
 }

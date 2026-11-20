@@ -117,7 +117,7 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	configurator.BindSocket(platform.ReadMountSocket{FS: makeAssetFS(), Priority: math.MinInt, Prefix: assetPrefix})
 	openFrameTask := configurator.RegisterTask1(openFrame)
 	sortEntriesTask := configurator.RegisterTask1(sortEntries)
-	drawTask := configurator.RegisterTask6(draw)
+	drawTask := configurator.RegisterTask7(draw)
 	copyTargetsTask := configurator.RegisterTask2(copyTargets)
 	addWindowTask := configurator.RegisterTask1(addWindow)
 	removeWindowTask := configurator.RegisterTask1(removeWindow)

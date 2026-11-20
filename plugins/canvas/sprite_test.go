@@ -8,8 +8,7 @@ import (
 
 func TestASpritesSquareIsItsSizeAnAxisOfZeroKeepingItsImagesAspectAboutItsPivotInTexels(t *testing.T) {
 	// An image of 8×4 texels, its pivot at its bottom right, 2 texels left.
-	naturalSize := m.Vec2{X: 8, Y: 4}
-	pivot := Pivot{Fraction: m.Vec2{X: 0.5, Y: 0.5}, Texels: m.Vec2{X: -2}}
+	image := drawnImage{size: m.Vec2{X: 8, Y: 4}, options: ImageOptions{Pivot: Pivot{Fraction: m.Vec2{X: 0.5, Y: 0.5}, Texels: m.Vec2{X: -2}}}}
 	for _, sized := range []struct {
 		name   string
 		sprite Sprite
@@ -23,7 +22,7 @@ func TestASpritesSquareIsItsSizeAnAxisOfZeroKeepingItsImagesAspectAboutItsPivotI
 		{"stretched 4 by 4", Sprite{Size: m.Vec2{X: 4, Y: 4}}, m.Mat2x3{4, 0, 0, 4, -3, -4}},
 		{"10 tall, moved", Sprite{Size: m.Vec2{Y: 10}, Transform: m.Translation2x3(100, 0)}, m.Mat2x3{20, 0, 0, 10, 85, -10}},
 	} {
-		square, size := sized.sprite.findSquare(naturalSize, pivot)
+		square, size := sized.sprite.findSquare(&image)
 		if square != sized.want || size != (m.Vec2{X: sized.want[0], Y: sized.want[3]}) {
 			t.Errorf("a sprite %s maps the unit square by %v, %v in its own space, want %v", sized.name, square, size, sized.want)
 		}
@@ -33,10 +32,36 @@ func TestASpritesSquareIsItsSizeAnAxisOfZeroKeepingItsImagesAspectAboutItsPivotI
 func TestASpritesBoundsAreThePartOfItsSquareItsCropLeaves(t *testing.T) {
 	sprite := Sprite{Size: m.Vec2{X: 20, Y: 10}, Crop: Crop{Left: 0.25, Bottom: 0.5}, Transform: m.Translation2x3(100, 0)}
 
-	got := sprite.findBounds(m.Vec2{X: 8, Y: 4}, Pivot{})
+	got := sprite.findBounds(&drawnImage{size: m.Vec2{X: 8, Y: 4}})
 
 	if want := (m.Rect{X: 95, Y: -5, Width: 15, Height: 5}); got != want {
 		t.Errorf("the cropped sprite's bounds are %v, want %v", got, want)
+	}
+}
+
+func TestAConvertedSpritesSquareSpansItsOutputPlacedWithinItsFrame(t *testing.T) {
+	// A frame of 8×4 texels about its centre, drawn 16 by 8, 2 units a
+	// texel: its output grown by 2 texels on each side, 12 by 8, the frame
+	// at 2, 2 within it, spans 24 by 16 from -12, -8, and one trimmed to 3
+	// by 2 texels from 2, 1, the frame at -2, -1 within it, spans 6 by 4
+	// from -4, -2.
+	sprite := Sprite{Size: m.Vec2{X: 16, Y: 8}}
+	for _, converted := range []struct {
+		name       string
+		outputSize m.Vec2
+		frame      m.Rect
+		want       m.Mat2x3
+	}{
+		{"grown", m.Vec2{X: 12, Y: 8}, m.Rect{X: 2, Y: 2, Width: 8, Height: 4}, m.Mat2x3{24, 0, 0, 16, -12, -8}},
+		{"trimmed", m.Vec2{X: 3, Y: 2}, m.Rect{X: -2, Y: -1, Width: 8, Height: 4}, m.Mat2x3{6, 0, 0, 4, -4, -2}},
+	} {
+		image := drawnImage{size: converted.outputSize, frameBounds: converted.frame}
+
+		square, size := sprite.findSquare(&image)
+
+		if square != converted.want || size != (m.Vec2{X: converted.want[0], Y: converted.want[3]}) {
+			t.Errorf("a sprite of a %s output maps the unit square by %v, %v in its own space, want %v", converted.name, square, size, converted.want)
+		}
 	}
 }
 
