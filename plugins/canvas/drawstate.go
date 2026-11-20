@@ -13,7 +13,7 @@ import (
 // declaring a DrawList, in registration order, whether a frame is open for
 // entries, the entries and cameras of the frame last sorted, merged from the
 // draw lists, with each entry's keys, the inspector, the residency requests
-// Assets queued and the image sizes it read.
+// Assets queued, the image sizes it read and the 2D materials it made.
 type drawState struct {
 	// logger is the kernel's, where reports go.
 	logger *kernel.Logger
@@ -45,6 +45,8 @@ type drawState struct {
 	// the renderer, and imageSizes keeps Assets.ImageSize's answers.
 	residency  residencyRequestQueue
 	imageSizes imageSizeTable
+	// materials are the 2D materials Assets made.
+	materials materialTable
 	// frameInspected is set when the frame merged is written down for a
 	// pending request, and then drawListEnds holds, for each draw list, the
 	// index in entries after its last entry.
@@ -108,6 +110,15 @@ func (s *drawState) findSortKeys() {
 		}
 		s.sorter.entries = append(s.sorter.entries, sortedEntry{key: key, entryIndex: uint32(index)})
 	}
+}
+
+// findEntryMaterial answers the 2D material entry, of the frame's, is drawn
+// with.
+func (s *drawState) findEntryMaterial(entry recordedEntry) Material {
+	if entry.kind == EntryKindShape {
+		return s.shapes[entry.index].Material
+	}
+	return s.sprites[entry.index].Material
 }
 
 // makeInspection answers the frame sorted, of beat, in canvas's terms: each

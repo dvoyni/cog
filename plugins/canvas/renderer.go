@@ -81,15 +81,18 @@ type renderer struct {
 	// target of those naming none.
 	cameraDraws []cameraDraw
 	mainWindow  platform.Window
-	// entryBounds and batchKeys are the bounds and the batch keys of the
-	// frame's entries, each at its entry's index, drawsNothingEntryCount
-	// how many of them draw an image's frame that draws nothing, and
-	// visibleEntries the entries each camera draws, in turn, all written
-	// over each frame.
-	entryBounds            []m.Rect
-	batchKeys              []batchKey
-	drawsNothingEntryCount int
-	visibleEntries         []sortedEntry
+	// materialSlots are the slots of the 2D materials Assets made, by index,
+	// as they stood as the frame began drawing, written over each frame.
+	materialSlots []materialSlot
+	// entryBounds, batchKeys and skippedEntries are the bounds, the batch
+	// keys and whether they are skipped, drawing an image's frame that draws
+	// nothing or with a material canvas does not hold, of the frame's
+	// entries, each at its entry's index, and visibleEntries the entries
+	// each camera draws, in turn, all written over each frame.
+	entryBounds    []m.Rect
+	batchKeys      []batchKey
+	skippedEntries []bool
+	visibleEntries []sortedEntry
 	// instances are the instance data of the command list being drawn, and
 	// batches the frame's batches, each camera's in turn; both are written
 	// over each frame.
@@ -128,15 +131,7 @@ func newRenderer(atlasPageSize, atlasLayerCeiling, ownTextureSize, mipLevelCount
 // atlas, the white texel, the zero Image, packed into it first, its cell
 // written opaque white at every mip level, as its mips would be.
 func (r *renderer) init(inventory render.Inventory) {
-	over := render.BlendComponent{SourceFactor: render.BlendFactorOne, DestinationFactor: render.BlendFactorOneMinusSourceAlpha}
-	var state render.State
-	state.ColorTargets[0].Blend = render.BlendState{Color: over, Alpha: over}
-	r.defaultMaterial = inventory.MakeMaterial(render.MaterialDescriptor{
-		Label:            "canvas default",
-		Shader:           inventory.AcquireShader(defaultShaderPath),
-		VertexEntryPoint: spriteVertexEntryPoint,
-		State:            state,
-	})
+	r.defaultMaterial, _ = MaterialDescriptor{Label: "canvas default", Shader: defaultShaderPath}.makeRenderMaterial(inventory)
 	viewportShader := inventory.AcquireShader(viewportShaderPath)
 	r.clearMaterial = inventory.MakeMaterial(render.MaterialDescriptor{
 		Label:              "canvas clear",
@@ -144,12 +139,14 @@ func (r *renderer) init(inventory render.Inventory) {
 		VertexEntryPoint:   viewportVertexEntryPoint,
 		FragmentEntryPoint: viewportFragmentEntryPoint,
 	})
+	var compositeState render.State
+	compositeState.ColorTargets[0].Blend = BlendNormal()
 	r.compositeMaterial = inventory.MakeMaterial(render.MaterialDescriptor{
 		Label:              "canvas composite",
 		Shader:             viewportShader,
 		VertexEntryPoint:   viewportVertexEntryPoint,
 		FragmentEntryPoint: viewportFragmentEntryPoint,
-		State:              state,
+		State:              compositeState,
 	})
 	r.packMaterial = inventory.MakeMaterial(render.MaterialDescriptor{
 		Label:              "canvas pack",
@@ -194,7 +191,7 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 	r.visibleEntries = r.visibleEntries[:0]
 	r.entryBounds = r.entryBounds[:0]
 	r.batchKeys = r.batchKeys[:0]
-	r.drawsNothingEntryCount = 0
+	r.skippedEntries = r.skippedEntries[:0]
 	r.drawnFrameCount++
 	r.applyResidencyRequests(inventory, &state.residency)
 	// A frame of entries always sets a camera, the default one standing in.
@@ -204,6 +201,7 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 	if r.defaultMaterial == (render.Material{}) {
 		r.init(inventory)
 	}
+	r.materialSlots = state.materials.appendSlots(r.materialSlots[:0])
 	// Every image packed is marked drawn this frame before any is packed,
 	// so packing the frame's new images evicts none the frame draws.
 	r.unpackedSprites = r.unpackedSprites[:0]
@@ -244,16 +242,15 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 		// growing an atlas replaces its texture.
 		r.entryBounds = r.entryBounds[:0]
 		r.batchKeys = r.batchKeys[:0]
-		r.drawsNothingEntryCount = 0
+		r.skippedEntries = r.skippedEntries[:0]
 		for _, entry := range state.entries {
 			r.appendEntryKeys(state, entry)
 		}
 	}
 	state.sorter.regroup(r.batchKeys)
-	if r.drawsNothingEntryCount > 0 {
+	if slices.Contains(r.skippedEntries, true) {
 		state.sorter.entries = slices.DeleteFunc(state.sorter.entries, func(entry sortedEntry) bool {
-			recorded := state.entries[entry.entryIndex]
-			return recorded.kind == EntryKindSprite && findDrawnFrame(r.drawnImages, &state.sprites[recorded.index]).drawsNothing
+			return r.skippedEntries[entry.entryIndex]
 		})
 	}
 	for index := range state.cameras {
@@ -366,8 +363,8 @@ func (r *renderer) drawEntries(list *render.CommandList, drawnCamera *cameraDraw
 		}
 		scissor = scissor.Translate(toColorTarget)
 		pass.SetScissorRectangle(render.ScissorRectangle{X: uint32(scissor.X), Y: uint32(scissor.Y), Width: uint32(scissor.Width), Height: uint32(scissor.Height)})
-		// The default material is the only one canvas makes yet.
-		r.drawInstances(&pass, r.defaultMaterial, instances, drawnBatch.firstInstance, drawnBatch.instanceCount, drawnBatch.key.texture, drawnBatch.key.filter, drawnBatch.key.wrap)
+		material, _ := r.findMaterial(drawnBatch.key.material)
+		r.drawInstances(&pass, material.material, instances, drawnBatch.firstInstance, drawnBatch.instanceCount, drawnBatch.key.texture, drawnBatch.key.filter, drawnBatch.key.wrap)
 	}
 	pass.End()
 }
@@ -474,27 +471,61 @@ func (r *renderer) drawInstances(pass *render.Pass, material render.Material, in
 	pass.DrawVertices(render.PrimitiveTopologyTriangleList, 6, render.DrawArgs{InstanceCount: instanceCount, FirstInstance: firstInstance})
 }
 
-// appendEntryKeys appends entry's bounds and batch key, of state's, to the
+// appendEntryKeys appends entry's bounds, grown by its material's
+// CullMargin, its batch key, and that it is not skipped, of state's, to the
 // frame's, its image placed: packed, given a view of its texture, or found
-// to draw nothing, its bounds and batch key then zero, counted in
-// drawsNothingEntryCount.
+// to draw nothing. An entry skipped, its image's frame drawing nothing or
+// its material one canvas does not hold, reported once to state's logger,
+// has zero bounds and batch key.
 func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
+	material := state.findEntryMaterial(entry)
+	slot, held := r.findMaterial(material)
+	if !held {
+		reportMaterialNotHeld(state.logger, material, "drawing an entry with")
+		r.appendSkippedEntryKeys()
+		return
+	}
+	margin := m.Vec2{X: -slot.cullMargin, Y: -slot.cullMargin}
 	if entry.kind == EntryKindShape {
 		shape := &state.shapes[entry.index]
-		r.entryBounds = append(r.entryBounds, shape.findBounds())
+		r.entryBounds = append(r.entryBounds, shape.findBounds().Inset(margin))
 		r.batchKeys = append(r.batchKeys, shape.batchKey(render.TextureView{Texture: r.srgbAtlas.texture}))
+		r.skippedEntries = append(r.skippedEntries, false)
 		return
 	}
 	sprite := &state.sprites[entry.index]
 	image := findDrawnFrame(r.drawnImages, sprite)
 	if image.drawsNothing {
-		r.entryBounds = append(r.entryBounds, m.Rect{})
-		r.batchKeys = append(r.batchKeys, batchKey{})
-		r.drawsNothingEntryCount++
+		r.appendSkippedEntryKeys()
 		return
 	}
-	r.entryBounds = append(r.entryBounds, sprite.findBounds(image))
+	r.entryBounds = append(r.entryBounds, sprite.findBounds(image).Inset(margin))
 	r.batchKeys = append(r.batchKeys, sprite.batchKey(image, state.defaultFilter))
+	r.skippedEntries = append(r.skippedEntries, false)
+}
+
+// appendSkippedEntryKeys appends a skipped entry's zero bounds and batch key
+// to the frame's, and that it is skipped.
+func (r *renderer) appendSkippedEntryKeys() {
+	r.entryBounds = append(r.entryBounds, m.Rect{})
+	r.batchKeys = append(r.batchKeys, batchKey{})
+	r.skippedEntries = append(r.skippedEntries, true)
+}
+
+// findMaterial answers the slot of material as the frame began drawing, and
+// whether canvas holds it: the default material's for the zero Material,
+// its render material made at canvas's first draw, and a released
+// material's until its slot is freed, once the frame of its release is
+// drawn.
+func (r *renderer) findMaterial(material Material) (materialSlot, bool) {
+	if material == (Material{}) {
+		return materialSlot{material: r.defaultMaterial}, true
+	}
+	slot, found := findSlot(r.materialSlots, material)
+	if !found {
+		return materialSlot{}, false
+	}
+	return *slot, true
 }
 
 // findPlacedImage answers sprite's image's frame as drawn, and whether it

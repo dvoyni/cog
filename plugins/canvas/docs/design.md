@@ -501,7 +501,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 ([canvas: what a 2D material is, and how a distance-field outline is one](https://github.com/dvoyni/cog/issues/865), [canvas: the 2D camera, its projection, viewport modes and several cameras](https://github.com/dvoyni/cog/issues/869), spelt in [canvas prototype](https://github.com/dvoyni/cog/issues/871))
 
 - **A 2D material is canvas's `Material`, a plain handle,** pointer-free and comparable, so an ECS component can hold it.
-  - It is made from a descriptor: `Assets.MakeMaterial(MaterialDescriptor{Label, Shader, VertexEntryPoint, FragmentEntryPoint, Blend, Argument, CullMargin})`, and given back with `ReleaseMaterial`.
+  - It is made from a descriptor: `Assets.MakeMaterial(MaterialDescriptor{Label, Shader, VertexEntryPoint, FragmentEntryPoint, Blend, Argument, CullMargin})`, and given back with `ReleaseMaterial`. The frame recording as it is released still draws it: canvas gives back its render material and its shader once it has drawn that frame, and the handle then names nothing, so a later entry of it is skipped, reported once as `ReportKindMaterialNotHeld`, as is a release of a material canvas does not hold, or of the default one, and a parameter set on either.
   - canvas makes the render material underneath, which its users never hold.
   - Its material parameters at `@group(1)` are set with canvas's own setters on `Assets`, `SetMaterialTexture`, `SetMaterialUniform[T]` and the rest, as render's. A draw uses them as they stand when canvas draws at the frame's end, which the setters' doc comments and this design say.
   - The zero `Material` is the default material.

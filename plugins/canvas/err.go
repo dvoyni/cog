@@ -61,10 +61,17 @@ const (
 	// drawn unconverted. It is reported once for each path or texture, at
 	// the image's first draw, and again after the path is unloaded.
 	ReportKindConverterRefused
+	// ReportKindMaterialNotHeld is a Material canvas does not hold, never
+	// made by Assets.MakeMaterial or released, that an entry is drawn with,
+	// whose entry is skipped, or that is released or has a parameter set;
+	// or the default material, the zero Material, released or given a
+	// parameter, which are canvas's. It is reported once for each material.
+	ReportKindMaterialNotHeld
 )
 
 // The keys canvas logs a report once under are one of these, then the
-// report's subject: an image's path or texture, or a sprite atlas's label.
+// report's subject: an image's path or texture, a sprite atlas's label, or a
+// material.
 const (
 	imageOptionsIgnoredLogKey = "canvas: image options ignored: "
 	imageHeaderUnreadLogKey   = "canvas: image header unread: "
@@ -72,6 +79,7 @@ const (
 	frameOutOfBoundsLogKey    = "canvas: frame out of bounds: "
 	imageTextureRefusedLogKey = "canvas: image texture refused: "
 	converterRefusedLogKey    = "canvas: converter refused: "
+	materialNotHeldLogKey     = "canvas: material not held: "
 )
 
 // pixelPerfectStretchReport is the report of a pixel-perfect camera's

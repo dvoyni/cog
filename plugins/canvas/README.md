@@ -19,8 +19,10 @@ space, one 2D-array texture of pages holding its images premultiplied, so
 sprites of different images and the shapes beside them batch; a full atlas
 grows its pages, and at its ceiling evicts the images drawn least lately.
 Images are preloaded, unloaded by path or prefix and sized from their
-headers through `Assets`. A frame can be inspected in canvas's terms,
-beside render's inspection of it.
+headers through `Assets`, and 2D materials made from whole WGSL files that
+include canvas's include, a fragment-only one drawing through canvas's
+vertex stage, with their parameters set by name. A frame can be inspected
+in canvas's terms, beside render's inspection of it.
 
 ## Shape
 
@@ -166,8 +168,18 @@ beside render's inspection of it.
   draws nothing, reported once.
 - **`OrderOf(y)`** maps a float onto an order of its own, in the same order,
   for y-sorting.
-- **`Material`** names a 2D material; the zero one, the default material,
-  is the only one canvas makes yet.
+- **`Material`** names a 2D material, made by `Assets.MakeMaterial`; the
+  zero one is the default material, an entry's image times its tint.
+  **`MaterialDescriptor`** is what one is made of: its `Label`, its
+  `Shader`, the path of a whole WGSL file that includes
+  `cog.canvas/canvas.wgsl` and declares only `@group(1)`, its
+  `VertexEntryPoint`, empty meaning canvas's own, so a fragment-only
+  material draws sprites and shapes alike, its `FragmentEntryPoint`, its
+  `Blend`, premultiplied, zero meaning `BlendNormal()`, and its
+  `CullMargin`, in world units, growing its entries' bounds for a vertex
+  stage that moves vertices. **`BlendNormal()`**, **`BlendAdditive()`**,
+  **`BlendMultiply()`**, **`BlendScreen()`** and **`BlendOpaque()`** are
+  the usual modes, premultiplied.
 - **`Assets`** is the task parameter a task reaches canvas's assets and
   tools through: `Preload(image)` loads an image ahead of its first draw,
   for a loading screen, a converted one's file decoded in the caller's
@@ -175,7 +187,14 @@ beside render's inspection of it.
   a folder for a path ending in a slash, `Unload("level1/")`, as canvas next
   draws, a later draw loading them again; `ImageSize(image)` answers an image's size, its
   rectangle's or its frames', a converted image's before it is converted, from its file's header alone, before it is drawn, and false for a missing file, reported
-  once, an image of a texture measured on render's descriptor of it; `RequestInspection` asks for an inspection of the next frame, and
+  once, an image of a texture measured on render's descriptor of it;
+  `MakeMaterial(descriptor)` makes a 2D material, and `ReleaseMaterial`
+  gives it back, the frame recording as it is released still drawing it;
+  `SetMaterialTexture` and `SetMaterialUniform[T]` set its parameters by
+  name, as render's setters do, a draw using them as they stand when canvas
+  draws the frame, after every task hung off `FrameEvent`; a material canvas
+  does not hold, or the default one's parameters, refused and reported
+  once; `RequestInspection` asks for an inspection of the next frame, and
   `ReadInspection` answers it in a task off **`InspectedEvent`**.
 - **`Inspection`** is one frame in canvas's terms: each camera that drew,
   the window it drew into and its viewport in pixels, its batches with their
@@ -214,7 +233,8 @@ beside render's inspection of it.
   drawing; a
   private draw state, holding each task's draw list, the frame's entries
   and cameras sorted, the inspection asked for, the unloads and preloads
-  asked for and the image sizes read; a private renderer, holding the
+  asked for, the image sizes read and the 2D materials made, under a lock
+  of their own; a private renderer, holding the
   default, clear, composite and pack materials, the sprite atlases, the
   white texel in the sRGB one, each image drawn, where it is packed and
   when it was last drawn, the sources preloaded, the cameras drawn, the

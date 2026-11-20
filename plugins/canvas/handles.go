@@ -1,8 +1,8 @@
 package canvas
 
-// Material names one of canvas's 2D materials: a pointer-free, comparable
-// handle an ECS component can hold. The zero Material is the default
-// material, which draws texture × tint, and the only one canvas makes yet.
+// Material names one of canvas's 2D materials, made by Assets.MakeMaterial:
+// a pointer-free, comparable handle an ECS component can hold. The zero
+// Material is the default material, which draws an entry's image × its tint.
 type Material struct{ index, generation uint32 }
 
 // Image names an image, a path in platform's FS and its ImageOptions,

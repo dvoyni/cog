@@ -146,6 +146,21 @@
 //
 //	list.DrawShape(canvas.Shape{Kind: canvas.Fill, Rect: line, Tint: c, Clip: logBox})
 //
+// An entry is drawn with its Material, the zero one the default material,
+// its image times its tint. A task makes a 2D material through its Assets
+// parameter from a whole WGSL file that includes canvas's include,
+// "cog.canvas/canvas.wgsl", and declares only @group(1), its parameters: a
+// shader of a fragment stage alone draws through canvas's vertex stage, so
+// it serves sprites and shapes alike. Its Blend is premultiplied, zero
+// meaning BlendNormal(), with BlendAdditive(), BlendMultiply(),
+// BlendScreen() and BlendOpaque() ready. Its parameters are set by name, and
+// a draw uses them as they stand when canvas draws the frame, so time is a
+// parameter set from the clock that owns it:
+//
+//	glow := assets.MakeMaterial(canvas.MaterialDescriptor{Label: "glow", Shader: "shaders/glow.wgsl", Blend: canvas.BlendAdditive()})
+//	assets.SetMaterialUniform(glow, "time", gameTime)
+//	list.DrawSprite(canvas.Sprite{Image: spark, Material: glow})
+//
 // A task loads an image ahead of its first draw, unloads a level's images
 // and sizes an image before it is drawn through its Assets parameter:
 //

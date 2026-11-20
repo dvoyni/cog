@@ -112,6 +112,74 @@ func (a Assets) ImageSize(image Image) (m.Vec2, bool) {
 	return frameRect.Size().Float(), withinFile
 }
 
+// MakeMaterial makes a 2D material of descriptor and answers it: canvas
+// acquires its shader and makes the render material underneath, which its
+// user never holds, blending as descriptor's Blend says, with no depth test,
+// since the sort key orders entries, and no culling. A shader render cannot
+// load or compile, or entry points it lacks, are reported by render, and
+// the material's entries are skipped. Its maker gives it back once, with
+// ReleaseMaterial.
+func (a Assets) MakeMaterial(descriptor MaterialDescriptor) Material {
+	return a.state.Get().materials.make(a.inventory, descriptor)
+}
+
+// ReleaseMaterial gives back material, made by MakeMaterial: the frame
+// recording as it is released still draws its entries, and once canvas has
+// drawn that frame, it releases the render material and the shader, and
+// material names nothing, its later entries skipped. A material canvas does
+// not hold, released already, or the default material, the zero Material,
+// is refused, reported once as ReportKindMaterialNotHeld.
+func (a Assets) ReleaseMaterial(material Material) {
+	state := a.state.Get()
+	if !state.materials.release(material) {
+		reportMaterialNotHeld(state.logger, material, "releasing")
+	}
+}
+
+// SetMaterialTexture binds texture whole to material's binding named name, a
+// texture of its shader's @group(1), as render's Inventory.SetMaterialTexture
+// does, refusing and reporting what it refuses.
+// A draw uses material's parameters as they stand when canvas draws the
+// frame, after every task hung off FrameEvent, so a change made by one of
+// them shows in that frame's entries, whether made before or after it
+// records them; a change made by a task the kernel does not order before
+// canvas's drawing may show in this frame or only in the next.
+// A material canvas does not hold, or the default material, the zero
+// Material, whose parameters are canvas's, is refused, reported once as
+// ReportKindMaterialNotHeld.
+func (a Assets) SetMaterialTexture(material Material, name string, texture render.Texture) {
+	state := a.state.Get()
+	renderMaterial, held := state.materials.findHeld(material)
+	if !held {
+		reportMaterialNotHeld(state.logger, material, "setting a texture of")
+		return
+	}
+	a.inventory.SetMaterialTexture(renderMaterial, name, texture)
+}
+
+// SetMaterialUniform binds value, plain data with no pointers mirroring a
+// WGSL struct, to material's uniform block named name, of its shader's
+// @group(1), such as the time a swaying material animates by, set from
+// whichever clock owns it, as render's Inventory.SetMaterialUniform does,
+// checking value's layout and refusing and reporting what it refuses.
+// A draw uses material's parameters as they stand when canvas draws the
+// frame, after every task hung off FrameEvent, so a change made by one of
+// them shows in that frame's entries, whether made before or after it
+// records them; a change made by a task the kernel does not order before
+// canvas's drawing may show in this frame or only in the next.
+// A material canvas does not hold, or the default material, the zero
+// Material, whose parameters are canvas's, is refused, reported once as
+// ReportKindMaterialNotHeld.
+func (a Assets) SetMaterialUniform[T any](material Material, name string, value T) {
+	state := a.state.Get()
+	renderMaterial, held := state.materials.findHeld(material)
+	if !held {
+		reportMaterialNotHeld(state.logger, material, "setting a uniform of")
+		return
+	}
+	a.inventory.SetMaterialUniform(renderMaterial, name, value)
+}
+
 // RequestInspection asks for an inspection of the first frame whose
 // FrameEvent is published after the call, and asks render for its own
 // inspection of that frame, one at a time: a request while one is pending,

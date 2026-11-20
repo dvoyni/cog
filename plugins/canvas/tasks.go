@@ -73,7 +73,9 @@ func sortEntries(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*drawState]
 // draw draws the frame of beat through its cameras, the default one for a
 // frame of entries that set none, each order's cameras in a command list of
 // their own, one after another, the main window the target of a camera
-// naming none, a converted image read from platform's FS. A frame
+// naming none, a converted image read from platform's FS, then gives back
+// the 2D materials released since the frame before was drawn, so the frame
+// recorded as one was released still drew it. A frame
 // inspected is written down for the pending request, and render is asked
 // again for its inspection, so a request render joined to an inspection of
 // an earlier frame still gets one.
@@ -81,6 +83,7 @@ func draw(k *kernel.Kernel, beat metronome.Beat, frame render.Frame, inventory r
 	canvasState := state.Get()
 	drawing := rendering.Get()
 	drawing.drawCameras(frame, inventory, files.Get(), manager.Get(), windows.Get().mainWindow(), canvasState)
+	canvasState.materials.freeReleased(inventory)
 	if canvasState.frameInspected {
 		canvasState.inspector.record(canvasState.makeInspection(beat, drawing.cameraDraws))
 		frame.RequestInspection()
