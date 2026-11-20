@@ -471,6 +471,37 @@ func TestProcessGridSizesEachTrackFromItsLargestElement(t *testing.T) {
 	assertRect(t, visuals[3].states[0].Rect, Rect{X: 32, Y: 9, Width: 20, Height: 13})
 }
 
+func TestProcessGridUniformColumnsWidensEveryColumnToTheWidest(t *testing.T) {
+	visuals := []*recordingVisual{
+		{defaultSize: m.Vec2{X: 10, Y: 5}},
+		{defaultSize: m.Vec2{X: 20, Y: 7}},
+		{defaultSize: m.Vec2{X: 30, Y: 11}},
+		{defaultSize: m.Vec2{X: 15, Y: 13}},
+	}
+	children := make([]Element, len(visuals))
+	for index := range visuals {
+		children[index] = NewElement().Visual(visuals[index], nil)
+	}
+	rootVisual := &recordingVisual{}
+	root := Grid().
+		Columns(2).
+		Rows(2).
+		Gap(2).
+		UniformColumns().
+		ChildrenAlignment(AlignStretch).
+		Visual(rootVisual, nil).
+		Children(children...)
+
+	var context Processor
+	context.Process(canvas.LookupAccess{}, []Element{root}, nil, GlobalState{Screen: Rect{Width: 100, Height: 100}}, nil)
+
+	assertRect(t, rootVisual.states[0].Rect, Rect{Width: 62, Height: 22})
+	assertRect(t, visuals[0].states[0].Rect, Rect{Width: 30, Height: 7})
+	assertRect(t, visuals[1].states[0].Rect, Rect{X: 32, Width: 30, Height: 7})
+	assertRect(t, visuals[2].states[0].Rect, Rect{Y: 9, Width: 30, Height: 13})
+	assertRect(t, visuals[3].states[0].Rect, Rect{X: 32, Y: 9, Width: 30, Height: 13})
+}
+
 func TestProcessGridExpandsTracksToDefiniteSize(t *testing.T) {
 	visuals := []*recordingVisual{
 		{defaultSize: m.Vec2{X: 10, Y: 5}},

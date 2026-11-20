@@ -374,6 +374,15 @@ func (element Element) Rows(rows int) Element {
 	return element
 }
 
+// UniformColumns makes every column of a grid as wide as its widest one, so
+// a row of cells with different contents - buttons with names of different
+// lengths, say - reads as a row of equals instead of each column hugging its
+// own cell.
+func (element Element) UniformColumns() Element {
+	element.uniformColumns = true
+	return element
+}
+
 // Visual binds a stateless ParamVisual to this element's params. The params keep
 // their type all the way to DefaultSize and Draw.
 func (element Element) Visual[T any](visual ParamVisual[T], params T) Element {

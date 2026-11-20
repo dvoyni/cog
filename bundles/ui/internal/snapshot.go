@@ -272,13 +272,14 @@ type DeclaredView struct {
 	// and Layer the offset it asked for from its root's base layer.
 	Align string       `json:"align,omitempty"`
 	Layer m.Maybe[int] `json:"layer,omitzero"`
-	// Layout, Gap, Wrap, Columns, Rows, ChildrenArrangement and
+	// Layout, Gap, Wrap, Columns, Rows, UniformColumns, ChildrenArrangement and
 	// ChildrenAlignment are what the element declared about its children
 	// rather than about itself - the other half of why a child ended up where
 	// it did.
 	Layout              string            `json:"layout,omitempty"`
 	Gap                 m.Maybe[SizeView] `json:"gap,omitzero"`
 	Wrap                bool              `json:"wrap,omitempty"`
+	UniformColumns      bool              `json:"uniformColumns,omitempty"`
 	Columns             m.Maybe[int]      `json:"columns,omitzero"`
 	Rows                m.Maybe[int]      `json:"rows,omitzero"`
 	ChildrenArrangement string            `json:"childrenArrangement,omitempty"`
@@ -494,6 +495,7 @@ func declaredViewOf(element *Element) (DeclaredView, bool) {
 		alignmentName(element.childrenAlignment.Or(AlignStart)))
 
 	flag(&view.Wrap, element.wrap)
+	flag(&view.UniformColumns, element.uniformColumns)
 	flag(&view.IgnoreLayout, element.ignoreLayout)
 	flag(&view.IgnoreClip, element.ignoreClip)
 	flag(&view.IgnoreHitTest, element.ignoreHitTest)

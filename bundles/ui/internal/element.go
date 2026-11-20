@@ -161,6 +161,7 @@ type Element struct {
 	gap                 m.Maybe[size]
 	wrap                bool
 	columns, rows       m.Maybe[int]
+	uniformColumns      bool
 
 	visual Visual
 

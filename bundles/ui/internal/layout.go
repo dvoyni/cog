@@ -445,6 +445,9 @@ func (context *Processor) measureContent(nodeIndex int) m.Vec2 {
 			context.gridRows[row] = max(context.gridRows[row], size.Y)
 			itemIndex++
 		}
+		if element.uniformColumns {
+			uniformTracks(context.gridColumns)
+		}
 		gap := intrinsicSignedSize(element.gap)
 		return m.Vec2{
 			X: sumTracks(context.gridColumns) + gap*float32(max(columns-1, 0)),
@@ -841,6 +844,9 @@ func (context *Processor) arrangeGrid(nodeIndex int) {
 		context.gridColumns[column] = max(context.gridColumns[column], size.X)
 		context.gridRows[row] = max(context.gridRows[row], size.Y)
 	}
+	if element.uniformColumns {
+		uniformTracks(context.gridColumns)
+	}
 	gapBasis := content.Width
 	if columnMajor {
 		gapBasis = content.Height
@@ -917,6 +923,17 @@ func expandTracks(tracks []float32, available float32) {
 	share := extra / float32(len(tracks))
 	for index := range tracks {
 		tracks[index] += share
+	}
+}
+
+// uniformTracks widens every track to the widest of them.
+func uniformTracks(tracks []float32) {
+	widest := float32(0)
+	for _, track := range tracks {
+		widest = max(widest, track)
+	}
+	for index := range tracks {
+		tracks[index] = widest
 	}
 }
 
