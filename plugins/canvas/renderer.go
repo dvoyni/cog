@@ -159,7 +159,7 @@ func (r *renderer) init(inventory render.Inventory) {
 		levelCell := render.TextureRegion{MipLevel: mipLevel, Layer: cell.Layer, X: cell.X >> mipLevel, Y: cell.Y >> mipLevel, Width: cell.Width >> mipLevel, Height: cell.Height >> mipLevel}
 		inventory.WriteTexture(r.srgbAtlas.texture, levelCell, whiteTexels[:4*levelCell.Width*levelCell.Height])
 	}
-	r.drawnImages[0][0] = makeDrawnImage(&packedImage{atlas: r.srgbAtlas, region: whiteRegion})
+	r.drawnImages[0][0] = makeDrawnImage(&packedImage{atlas: r.srgbAtlas, region: whiteRegion}, ImageOptions{})
 }
 
 // drawCameras draws the entries state sorted through each of its cameras,
@@ -227,8 +227,7 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, m
 				drawn.drawsNothing = true
 				continue
 			}
-			*drawn = makeDrawnImage(packed)
-			drawn.pivot = key.options.Pivot
+			*drawn = makeDrawnImage(packed, key.options)
 		}
 		// Every key is found again once every image is packed, since
 		// growing an atlas replaces its texture.
@@ -345,7 +344,7 @@ func (r *renderer) drawEntries(list *render.CommandList, drawnCamera *cameraDraw
 	pass.SetViewport(render.Viewport{X: float32(viewport.X), Y: float32(viewport.Y), Width: float32(viewport.Width), Height: float32(viewport.Height), MaxDepth: 1})
 	pass.SetPassUniform("canvas_camera", drawnCamera.block)
 	if drawnCamera.camera.Clear && !drawnCamera.colorTarget.Clear {
-		r.drawInstances(&pass, r.clearMaterial, instances, drawnCamera.viewportInstance, 1, render.TextureView{Texture: r.srgbAtlas.texture}, FilterNearest)
+		r.drawInstances(&pass, r.clearMaterial, instances, drawnCamera.viewportInstance, 1, render.TextureView{Texture: r.srgbAtlas.texture}, FilterNearest, WrapNone)
 	}
 	for _, drawnBatch := range drawnCamera.batches {
 		// The entries draw between FitInscribe's bars, which the clear
@@ -357,7 +356,7 @@ func (r *renderer) drawEntries(list *render.CommandList, drawnCamera *cameraDraw
 		scissor = scissor.Translate(toColorTarget)
 		pass.SetScissorRectangle(render.ScissorRectangle{X: uint32(scissor.X), Y: uint32(scissor.Y), Width: uint32(scissor.Width), Height: uint32(scissor.Height)})
 		// The default material is the only one canvas makes yet.
-		r.drawInstances(&pass, r.defaultMaterial, instances, drawnBatch.firstInstance, drawnBatch.instanceCount, drawnBatch.key.texture, drawnBatch.key.filter)
+		r.drawInstances(&pass, r.defaultMaterial, instances, drawnBatch.firstInstance, drawnBatch.instanceCount, drawnBatch.key.texture, drawnBatch.key.filter, drawnBatch.key.wrap)
 	}
 	pass.End()
 }
@@ -380,7 +379,7 @@ func (r *renderer) drawComposite(list *render.CommandList, drawnCamera *cameraDr
 	if drawnCamera.camera.Clear {
 		material = r.clearMaterial
 	}
-	r.drawInstances(&pass, material, instances, drawnCamera.viewportInstance, 1, render.TextureView{Texture: drawnCamera.colorTarget.Resolve.Texture}, FilterNearest)
+	r.drawInstances(&pass, material, instances, drawnCamera.viewportInstance, 1, render.TextureView{Texture: drawnCamera.colorTarget.Resolve.Texture}, FilterNearest, WrapNone)
 	pass.End()
 }
 
@@ -428,7 +427,7 @@ func (r *renderer) fillPackings(list *render.CommandList, inventory render.Inven
 				packing := &r.packings[index]
 				cell := packing.packed.atlas.findCell(packing.packed.region)
 				pass.SetViewport(render.Viewport{X: float32(cell.X), Y: float32(cell.Y), Width: float32(cell.Width), Height: float32(cell.Height), MaxDepth: 1})
-				r.drawInstances(&pass, r.packMaterial, instances, uint32(index), 1, render.TextureView{Texture: packing.source}, FilterNearest)
+				r.drawInstances(&pass, r.packMaterial, instances, uint32(index), 1, render.TextureView{Texture: packing.source}, FilterNearest, WrapNone)
 			}
 			pass.End()
 			filledBefore := slices.ContainsFunc(r.filledPages, func(filledPage *packedImage) bool {
@@ -452,14 +451,15 @@ func (r *renderer) fillPackings(list *render.CommandList, inventory render.Inven
 }
 
 // drawInstances draws instanceCount instances of instances from
-// firstInstance into pass with material, over texture, read through filter.
+// firstInstance into pass with material, over texture, read through filter,
+// repeating along the axes of wrap.
 // Setting a material resets the draw parameters, so each
 // draw sets its own.
-func (r *renderer) drawInstances(pass *render.Pass, material render.Material, instances render.BufferRange, firstInstance, instanceCount uint32, texture render.TextureView, filter Filter) {
+func (r *renderer) drawInstances(pass *render.Pass, material render.Material, instances render.BufferRange, firstInstance, instanceCount uint32, texture render.TextureView, filter Filter, wrap Wrap) {
 	pass.SetMaterial(material)
 	pass.SetBuffer("canvas_instances", instances)
 	pass.SetTextureView("canvas_atlas", texture)
-	pass.SetSampler("canvas_sampler", filter.makeSamplerDescriptor())
+	pass.SetSampler("canvas_sampler", filter.makeSamplerDescriptor(wrap))
 	pass.DrawVertices(render.PrimitiveTopologyTriangleList, 6, render.DrawArgs{InstanceCount: instanceCount, FirstInstance: firstInstance})
 }
 
@@ -482,8 +482,8 @@ func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 		r.drawsNothingEntryCount++
 		return
 	}
-	r.entryBounds = append(r.entryBounds, sprite.findBounds(image.size, image.pivot))
-	r.batchKeys = append(r.batchKeys, sprite.batchKey(image.findView(), state.defaultFilter))
+	r.entryBounds = append(r.entryBounds, sprite.findBounds(image.size, image.options.Pivot))
+	r.batchKeys = append(r.batchKeys, sprite.batchKey(image, state.defaultFilter))
 }
 
 // findPlacedImage answers sprite's image's frame as drawn, and whether it

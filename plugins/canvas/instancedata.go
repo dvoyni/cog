@@ -4,18 +4,23 @@ import "github.com/dvoyni/cog/libs/m"
 
 // instanceData mirrors canvas.wgsl's CanvasInstanceData without a material
 // argument: the data of one instance canvas draws, read at its
-// instance_index, 112 bytes, WGSL's size of the struct, the vec4<f32>
-// fields first, where they align to 16 with no padding, and padded at its
-// end to a multiple of their alignment.
+// instance_index, 144 bytes, WGSL's size of the struct, the vec4<f32>
+// fields first, where they align to 16 with no padding, its size a
+// multiple of their alignment.
 type instanceData struct {
 	tint   [4]float32
 	region [4]float32
 	// crop is the part of the unit square an instance drawing all of it
 	// draws: its left, top, right and bottom edges.
-	crop      [4]float32
-	transform m.Mat2x3
-	page      uint32
-	part      shapePart
+	crop [4]float32
+	// sliceFrame and sliceSquare are a sliced sprite's centre cell, within
+	// its frame and within the unit square, each its left, top, right and
+	// bottom edges as fractions.
+	sliceFrame  [4]float32
+	sliceSquare [4]float32
+	transform   m.Mat2x3
+	page        uint32
+	part        shapePart
 	// size, width and radius are in the entry's own space, the unit square
 	// scaled by size, which transform maps into the world.
 	size   m.Vec2
@@ -25,8 +30,28 @@ type instanceData struct {
 	// as it samples it, as an image of a texture whose format encodes
 	// nothing marked sRGB is, and 0 otherwise.
 	decode uint32
-	_      [3]uint32
+	mode   instanceMode
+	// tiles is how many of a tiled sprite's tiles span the unit square
+	// along each axis.
+	tiles m.Vec2
 }
+
+// instanceMode mirrors canvas.wgsl's CANVAS_MODE constants: how
+// canvas_sample maps a point of its instance's unit square into its frame.
+type instanceMode uint32
+
+const (
+	// instanceModeStretched maps the square onto the frame: a shape, and
+	// a Stretched sprite.
+	instanceModeStretched instanceMode = iota
+	// instanceModeSliced maps it piecewise, by sliceSquare onto sliceFrame.
+	instanceModeSliced
+	// instanceModeSlicedHollow maps it as instanceModeSliced does, its
+	// centre cell drawing nothing.
+	instanceModeSlicedHollow
+	// instanceModeTiled maps it onto tiles of the frame, wrapped.
+	instanceModeTiled
+)
 
 // shapePart mirrors canvas.wgsl's CANVAS_PART constants: which part of its
 // entry's unit square an instance draws.
@@ -86,8 +111,9 @@ func appendShapeInstances(instances []instanceData, shape *Shape, white *drawnIm
 
 // appendSpriteInstance appends to instances the instance data of sprite, its
 // image as drawn image, and answers them: one instance, over its image's
-// region, decoding it where it is to be, its zero tint white and
-// premultiplied, and a zero transform read as the identity.
+// region, decoding it where it is to be, sliced or tiled as its draw mode
+// says, its zero tint white and premultiplied, and a zero transform read
+// as the identity.
 func appendSpriteInstance(instances []instanceData, sprite *Sprite, image *drawnImage) []instanceData {
 	tint := sprite.Tint
 	if tint == (m.Color{}) {
@@ -102,7 +128,24 @@ func appendSpriteInstance(instances []instanceData, sprite *Sprite, image *drawn
 	if image.decode {
 		instance.decode = 1
 	}
-	instance.transform, instance.size = sprite.findSquare(image.size, image.pivot)
+	instance.transform, instance.size = sprite.findSquare(image.size, image.options.Pivot)
+	texelScale := sprite.TexelScale
+	if texelScale <= 0 {
+		texelScale = 1
+	}
+	// A negative size mirrors the square, its corners and tiles the same.
+	squareSize := instance.size.Abs()
+	switch sprite.DrawMode {
+	case Sliced:
+		instance.mode = instanceModeSliced
+		if image.options.SliceHollow {
+			instance.mode = instanceModeSlicedHollow
+		}
+		instance.sliceFrame, instance.sliceSquare = image.options.Slice.findSliceEdges(image.size, squareSize, texelScale)
+	case Tiled:
+		instance.mode = instanceModeTiled
+		instance.tiles = squareSize.Div(image.size.MulS(texelScale))
+	}
 	return append(instances, instance)
 }
 

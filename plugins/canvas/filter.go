@@ -16,10 +16,19 @@ const (
 
 // makeSamplerDescriptor answers the sampler f reads through, for magnifying
 // and minifying alike and between mip levels: linear for FilterLinear, and
-// nearest otherwise, as for the white texel's batches, of FilterDefault.
-func (f Filter) makeSamplerDescriptor() render.SamplerDescriptor {
+// nearest otherwise, as for the white texel's batches, of FilterDefault;
+// repeating along the axes of wrap, and clamping at the texture's edge
+// along the others.
+func (f Filter) makeSamplerDescriptor(wrap Wrap) render.SamplerDescriptor {
+	descriptor := render.SamplerDescriptor{MagFilter: render.FilterModeNearest, MinFilter: render.FilterModeNearest}
 	if f == FilterLinear {
-		return render.SamplerDescriptor{MagFilter: render.FilterModeLinear, MinFilter: render.FilterModeLinear, MipmapFilter: render.FilterModeLinear}
+		descriptor = render.SamplerDescriptor{MagFilter: render.FilterModeLinear, MinFilter: render.FilterModeLinear, MipmapFilter: render.FilterModeLinear}
 	}
-	return render.SamplerDescriptor{MagFilter: render.FilterModeNearest, MinFilter: render.FilterModeNearest}
+	if wrap == WrapX || wrap == WrapBoth {
+		descriptor.AddressModeU = render.AddressModeRepeat
+	}
+	if wrap == WrapY || wrap == WrapBoth {
+		descriptor.AddressModeV = render.AddressModeRepeat
+	}
+	return descriptor
 }

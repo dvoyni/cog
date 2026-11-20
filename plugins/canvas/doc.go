@@ -91,6 +91,15 @@
 //	list.DrawSprite(canvas.Sprite{Image: terrain, Frame: tile, Transform: m.Translation2x3(x, y)})
 //	water := canvas.ImageFromFile("water.png", canvas.ImageOptions{Wrap: canvas.WrapBoth})
 //
+// A sprite's DrawMode stretches its image over its Size, slices it into
+// nine by its image's Slice insets, keeping its corners at their texels'
+// size at any size, turned or mirrored, or tiles it, without seams along
+// the axes it wraps, each at the sprite's TexelScale:
+//
+//	panel := canvas.ImageFromFile("ui/panel.png", canvas.ImageOptions{Slice: canvas.Insets{Left: 12, Top: 12, Right: 12, Bottom: 12}})
+//	list.DrawSprite(canvas.Sprite{Image: panel, Size: m.Vec2{X: 320, Y: 150}, DrawMode: canvas.Sliced, TexelScale: 2})
+//	list.DrawSprite(canvas.Sprite{Image: water, Size: m.Vec2{X: 800, Y: 200}, DrawMode: canvas.Tiled})
+//
 // ImageFromTexture makes an Image of a texture made with render, never
 // packed, drawn from its mip level 0 and layer 0, so a minimap camera's
 // texture drawn as a sprite shows the world it drew. A texture of a format

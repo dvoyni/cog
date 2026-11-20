@@ -9,13 +9,15 @@ import (
 // entry to the next in sort order breaks a batch: their 2D material, the
 // view of the texture their images are drawn from, the whole texture of
 // the atlas they are packed into, or a render texture's view, their
-// filter, and their clip. The white texel's entries take no filter,
+// filter, the axes their sampler repeats along, and their clip. The white
+// texel's entries take no filter,
 // FilterDefault, which no filter changes, so they join a batch of any
 // filter.
 type batchKey struct {
 	material Material
 	texture  render.TextureView
 	filter   Filter
+	wrap     Wrap
 	clip     m.Rect
 }
 
@@ -46,7 +48,7 @@ func appendBatches(batches []batch, instances []instanceData, entries []sortedEn
 		if len(batches) > firstBatch {
 			lastKey := batches[len(batches)-1].key
 			sharedFilter := lastKey.filter == entryKey.filter || lastKey.filter == FilterDefault || entryKey.filter == FilterDefault
-			joins = lastKey.material == entryKey.material && lastKey.texture == entryKey.texture && lastKey.clip == entryKey.clip && sharedFilter
+			joins = lastKey.material == entryKey.material && lastKey.texture == entryKey.texture && lastKey.wrap == entryKey.wrap && lastKey.clip == entryKey.clip && sharedFilter
 		}
 		if !joins {
 			batches = append(batches, batch{key: entryKey, entries: entries[index:index], firstInstance: uint32(len(instances))})

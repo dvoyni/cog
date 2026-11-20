@@ -4,7 +4,6 @@ import (
 	"cmp"
 
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/dvoyni/cog/plugins/render"
 )
 
 // Sprite is an entry that draws an image through a transform about its
@@ -40,6 +39,14 @@ type Sprite struct {
 	// Clip is a rectangle of the world outside which the sprite draws
 	// nothing, zero meaning none, as a Shape's Clip is.
 	Clip m.Rect
+	// DrawMode is how the sprite fills its Size with its image: stretched
+	// over it, the zero, sliced by its image's Slice insets, or tiled.
+	DrawMode DrawMode
+	// TexelScale is the size in the sprite's own space a sliced sprite's
+	// corners and a tiled sprite's tiles take each texel at, zero or less
+	// meaning 1, for art drawn at 2x or a UI's own scale; a stretched
+	// sprite ignores it.
+	TexelScale float32
 	// Filter is how the image's texels are read between their centres,
 	// zero meaning Config.DefaultFilter. A change of filter from one entry
 	// to the next in sort order breaks a batch, but for the zero Image,
@@ -51,11 +58,18 @@ type Sprite struct {
 }
 
 // batchKey answers what the sprite shares with the entries it batches with,
-// its image drawn from texture, its filter defaultFilter when it names
-// none, and none for the zero Image, the white texel, which no filter
-// changes, so it batches with shapes.
-func (s *Sprite) batchKey(texture render.TextureView, defaultFilter Filter) batchKey {
-	key := batchKey{material: s.Material, texture: texture, clip: s.Clip}
+// its image as drawn image, its sampler repeating along the axes the image
+// wraps along where no gutter does, its filter defaultFilter when it names none,
+// and none for the zero Image, the white texel, which no filter changes,
+// so it batches with shapes.
+func (s *Sprite) batchKey(image *drawnImage, defaultFilter Filter) batchKey {
+	key := batchKey{material: s.Material, texture: image.findView(), clip: s.Clip}
+	// An image drawn from a texture of its own, its own atlas's or a render
+	// texture's, has no gutter, so its sampler repeats along the axes it
+	// wraps along; a sprite atlas's gutter wraps its images.
+	if image.packed == nil || image.packed.atlas.holdsOneImage {
+		key.wrap = image.options.Wrap
+	}
 	if s.Image != (Image{}) {
 		key.filter = cmp.Or(s.Filter, defaultFilter)
 	}

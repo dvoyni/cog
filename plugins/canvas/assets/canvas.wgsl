@@ -43,6 +43,12 @@ struct CanvasInstanceData {
 	// draws, its top left in xy and its bottom right in zw: all of it,
 	// (0, 0, 1, 1), but for a cropped sprite, which keeps its place.
 	crop: vec4<f32>,
+	// slice_frame and slice_square are a sliced sprite's centre cell,
+	// within its frame and within the unit square, each its left, top,
+	// right and bottom edges as fractions, which canvas_sample maps the
+	// square's cells onto the frame's by.
+	slice_frame: vec4<f32>,
+	slice_square: vec4<f32>,
 	// transform maps the unit square, the entry's quad, into the world.
 	transform: mat3x2<f32>,
 	page: u32,
@@ -63,6 +69,12 @@ struct CanvasInstanceData {
 	// format encodes nothing. An atlas's format, or an sRGB texture's,
 	// decodes it itself.
 	decode: u32,
+	// mode is how canvas_sample maps the unit square into the entry's
+	// frame, one of the CANVAS_MODE constants.
+	mode: u32,
+	// tiles is how many of a tiled sprite's tiles span the unit square
+	// along each axis.
+	tiles: vec2<f32>,
 #if CANVAS_ARGUMENT
 	argument: Argument,
 #endif
@@ -80,6 +92,17 @@ const CANVAS_PART_STROKE_TOP = 2u;
 const CANVAS_PART_STROKE_BOTTOM = 3u;
 const CANVAS_PART_STROKE_LEFT = 4u;
 const CANVAS_PART_STROKE_RIGHT = 5u;
+
+// The ways canvas_sample maps a point of the unit square into the entry's
+// frame. CANVAS_MODE_STRETCHED maps the square onto the frame.
+// CANVAS_MODE_SLICED maps it piecewise, slice_square's cells onto
+// slice_frame's, so a sliced sprite's corners keep their size, and
+// CANVAS_MODE_SLICED_HOLLOW leaves its centre cell empty.
+// CANVAS_MODE_TILED maps it onto tiles of the frame, wrapped.
+const CANVAS_MODE_STRETCHED = 0u;
+const CANVAS_MODE_SLICED = 1u;
+const CANVAS_MODE_SLICED_HOLLOW = 2u;
+const CANVAS_MODE_TILED = 3u;
 
 @group(2) @binding(0) var<storage, read> canvas_instances: array<CanvasInstanceData>;
 @group(2) @binding(1) var canvas_atlas: texture_2d_array<f32>;
@@ -206,27 +229,75 @@ fn canvas_shape_distance(in: CanvasVaryings) -> f32 {
 }
 
 // canvas_covers answers whether in's fragment lies on its entry: always,
-// but outside a rounded fill's or stroke's corners, and inside a rounded
+// but outside a rounded fill's or stroke's corners, inside a rounded
 // stroke's inner edge, which its sides reach, as canvas_shape_distance
-// answers. A material discards the fragments it does not cover, after
-// sampling; one that does not draws rounded shapes square.
+// answers, and within a hollow sliced sprite's centre. A material discards
+// the fragments it does not cover, after sampling; one that does not draws
+// rounded shapes square and fills a hollow centre with its own colour.
 fn canvas_covers(in: CanvasVaryings) -> bool {
-	return canvas_instances[in.instance].radius <= 0.0 || canvas_shape_distance(in) <= 0.0;
+	let instance_data = canvas_instances[in.instance];
+	if instance_data.mode == CANVAS_MODE_SLICED_HOLLOW && all(in.uv_local > instance_data.slice_square.xy) && all(in.uv_local < instance_data.slice_square.zw) {
+		return false;
+	}
+	return instance_data.radius <= 0.0 || canvas_shape_distance(in) <= 0.0;
 }
 
 // canvas_sample answers the entry's image at the fragment, premultiplied
-// and linear: its atlas page sampled at uv, whose texels canvas packed
-// premultiplied, so filtering never darkens a cut-out edge, or its render
-// texture's, premultiplied as a camera draws it, its colour decoded from
-// sRGB where its instance says, after filtering.
+// and linear: a stretched entry's sampled at uv, a sliced one's at
+// uv_local remapped piecewise, its centre transparent where it is hollow,
+// and a tiled one's at uv_local counted in tiles and wrapped within its
+// region, whose gutter wraps along the axes its image tiles along, a
+// hollow centre, which canvas_covers does not cover, sampling nothing. It
+// is the one way a material samples an entry's image, since a material
+// sampling uv itself stretches a sliced or tiled sprite. Its atlas page's
+// texels canvas packed premultiplied, so filtering never darkens a cut-out
+// edge, and a render texture's are premultiplied as a camera draws them,
+// its colour decoded from sRGB where its instance says, after filtering.
+// It samples with the gradients of the coordinate before wrapping, so a
+// tile's seam reads the mip level its neighbours do, which a material
+// calls it for in uniform control flow, before any discard.
 fn canvas_sample(in: CanvasVaryings) -> vec4<f32> {
 	let instance_data = canvas_instances[in.instance];
-	let texel = textureSample(canvas_atlas, canvas_sampler, in.uv, instance_data.page);
+	let mode = instance_data.mode;
+	let region = instance_data.region;
+	// frame_point is the fragment's point of the frame, a tiled entry's
+	// counted in tiles, and unwrapped its coordinate in the page before
+	// wrapping, each worked out for the entry's mode alone.
+	var frame_point = in.uv_local;
+	var unwrapped = in.uv;
+	if mode == CANVAS_MODE_TILED {
+		frame_point = in.uv_local * instance_data.tiles;
+		unwrapped = region.xy + frame_point * region.zw;
+	} else if mode != CANVAS_MODE_STRETCHED {
+		unwrapped = region.xy + canvas_slice(in.uv_local, instance_data.slice_frame, instance_data.slice_square) * region.zw;
+	}
+	let uv_gradient_x = dpdx(unwrapped);
+	let uv_gradient_y = dpdy(unwrapped);
+	if mode == CANVAS_MODE_SLICED_HOLLOW && all(in.uv_local > instance_data.slice_square.xy) && all(in.uv_local < instance_data.slice_square.zw) {
+		return vec4<f32>(0.0);
+	}
+	var uv = unwrapped;
+	if mode == CANVAS_MODE_TILED {
+		uv = region.xy + fract(frame_point) * region.zw;
+	}
+	let texel = textureSampleGrad(canvas_atlas, canvas_sampler, uv, instance_data.page, uv_gradient_x, uv_gradient_y);
 	if instance_data.decode == 0u {
 		return texel;
 	}
 	let coverage = select(texel.a, 1.0, texel.a <= 0.0);
 	return vec4<f32>(canvas_decode_srgb(texel.rgb / coverage) * coverage, texel.a);
+}
+
+// canvas_slice answers point, a point of the unit square, mapped piecewise
+// into the frame, both from 0 to 1: the square's cells, cut at
+// square_edges, onto the frame's, cut at frame_edges, each the centre
+// cell's left, top, right and bottom edges, so a corner keeps its size.
+fn canvas_slice(point: vec2<f32>, frame_edges: vec4<f32>, square_edges: vec4<f32>) -> vec2<f32> {
+	let tiny = vec2<f32>(1e-30);
+	let leading = mix(vec2<f32>(0.0), frame_edges.xy, point / max(square_edges.xy, tiny));
+	let middle = mix(frame_edges.xy, frame_edges.zw, (point - square_edges.xy) / max(square_edges.zw - square_edges.xy, tiny));
+	let trailing = mix(frame_edges.zw, vec2<f32>(1.0), (point - square_edges.zw) / max(1.0 - square_edges.zw, tiny));
+	return select(select(middle, trailing, point > square_edges.zw), leading, point < square_edges.xy);
 }
 
 // canvas_decode_srgb decodes colour encoded as sRGB into linear colour.

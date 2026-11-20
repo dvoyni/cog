@@ -118,6 +118,7 @@ func (v Vec2) Add(other Vec2) Vec2 { return Vec2{v.X + other.X, v.Y + other.Y} }
 func (v Vec2) Sub(other Vec2) Vec2 { return Vec2{v.X - other.X, v.Y - other.Y} }
 func (v Vec2) Mul(other Vec2) Vec2 { return Vec2{v.X * other.X, v.Y * other.Y} }
 func (v Vec2) Div(other Vec2) Vec2 { return Vec2{v.X / other.X, v.Y / other.Y} }
+func (v Vec2) Abs() Vec2           { return Vec2{abs32(v.X), abs32(v.Y)} }
 func (v Vec2) AddS(values ...float32) Vec2 {
 	x, y := scalar2f("Vec2.AddS", values)
 	return Vec2{v.X + x, v.Y + y}

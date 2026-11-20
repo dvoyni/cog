@@ -9,15 +9,17 @@ import (
 
 // ImageOptions are what an image is loaded and placed with, of a file, or
 // of a render texture, measured in its texels. Images of one path that
-// differ only in options that change no pixel, such as the pivot, share
-// their region of the atlas.
+// differ only in options that change no pixel, the pivot, the slice insets
+// and SliceHollow, share their region of the atlas.
 type ImageOptions struct {
 	// ColorSpace is how the file encodes its colours.
 	ColorSpace ColorSpace
 	// Wrap is the axes the image tiles along, whose gutters hold its
-	// opposite edge, so it tiles without seams; along any other, its
-	// gutter continues its edge. A tiled and a plain image of one file are
-	// different images.
+	// opposite edge, so a Tiled sprite of it tiles without seams; along any
+	// other, its gutter continues its edge. An image drawn from a texture
+	// of its own, or of a render texture, has no gutter, and its sampler
+	// repeats along them instead, a change of which breaks a batch. A
+	// tiled and a plain image of one file are different images.
 	Wrap Wrap
 	// Sheet is the grid of frames the image is cut into, each packed as a
 	// region of its own with its own gutter, so filtering and mips never
@@ -35,6 +37,13 @@ type ImageOptions struct {
 	// Pivot is the point of the image its entries are placed, turned and
 	// scaled about; zero is its centre.
 	Pivot Pivot
+	// Slice is the insets, in texels of each frame, a Sliced sprite cuts
+	// the image into nine by: its corners, kept at their size, its edges
+	// and its centre. Insets meeting past the frame are shrunk, keeping
+	// their ratio, until they meet, and a negative one is zero.
+	Slice Insets
+	// SliceHollow leaves a Sliced sprite's centre empty, for a frame.
+	SliceHollow bool
 }
 
 // ColorSpace is how an image's file, or its render texture, encodes its

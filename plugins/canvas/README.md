@@ -81,7 +81,14 @@ beside render's inspection of it.
   times its `Tint`, white when zero, with its `Crop` left out where it lies,
   read through its `Filter`, `FilterLinear` or `FilterNearest`, zero
   meaning `Config.DefaultFilter`, and drawn with its `Material` and its
-  `Clip`, at its sort key, as a shape is. `DrawSprite` records one, and
+  `Clip`, at its sort key, as a shape is. Its `DrawMode` is `Stretched`,
+  the zero, `Sliced`, cut into nine by its image's `Slice` insets, its
+  corners kept at their texels' size, one instance that turns and mirrors
+  whole, corners larger than the sprite shrinking until they meet and a
+  `SliceHollow` image's centre left empty, or `Tiled`, repeating its image
+  from its top left corner, without seams along the axes its image wraps;
+  its `TexelScale`, zero meaning 1, is the size a sliced sprite's corners
+  and a tiled sprite's tiles take each texel at. `DrawSprite` records one, and
   `DrawSprites` a slice, as an ECS chunk's column. Sprites of any images of
   one atlas batch together while their filter is one, and the shapes beside
   them with them, since shapes, and the zero `Image`, draw the white texel
@@ -92,7 +99,10 @@ beside render's inspection of it.
   `WrapX`, `WrapY` or `WrapBoth`, whose gutters hold its opposite edge; its
   `Sheet`, a `Grid{Columns, Rows}` of frames, zero one frame and a zero
   column or row count one; its `SourceRect`, the `m.Recti` of the file it
-  is, in texels, zero the whole file, a sheet cutting it into frames; and
+  is, in texels, zero the whole file, a sheet cutting it into frames; its
+  `Slice`, the `Insets` a sliced sprite cuts each frame into nine by, in
+  texels, insets meeting past the frame shrinking until they meet, and
+  `SliceHollow`, which leaves a sliced sprite's centre empty; and
   its `Pivot`, a `Fraction` of its size from its
   centre plus `Texels`, or one of the named pivots, `PivotCenter`,
   `PivotTopLeft`, `PivotTop`, `PivotBottom`, `PivotBottomLeft` and
@@ -115,7 +125,8 @@ beside render's inspection of it.
   make room for, reported once, is drawn from a texture of its own,
   exactly its size with no gutter, so an image as large as a page takes a
   texture of a page's size, of the page's mip levels or as many as its size
-  has. Images differing only in their pivot share
+  has, whose sampler repeats along the axes the image wraps along. Images
+  differing only in their pivot, their slice insets or `SliceHollow` share
   their region. A second set of options is ignored and reported once, and
   a `SourceRect` reaching past its file, or a `Frame` past its sheet's
   last, draws nothing, reported once.
@@ -129,8 +140,10 @@ beside render's inspection of it.
   them: a texture of a format encoding nothing that holds encoded colour,
   as a camera's into it does, is marked `ColorSpaceSrgb`, the zero, and
   decoded as it is sampled, so it looks as the world drawn directly, and
-  an sRGB texture is decoded by its format, however it is marked. A
-  texture render does not hold draws nothing, reported once.
+  an sRGB texture is decoded by its format, however it is marked. Its
+  sampler repeats along the axes its `Wrap` names, so a tiled sprite of
+  the whole texture tiles without seams. A texture render does not hold
+  draws nothing, reported once.
 - **`OrderOf(y)`** maps a float onto an order of its own, in the same order,
   for y-sorting.
 - **`Material`** names a 2D material; the zero one, the default material,
@@ -154,7 +167,13 @@ beside render's inspection of it.
   `@group(2)`, with the functions over them, `canvas_sample` answering an
   entry's image premultiplied, as the atlas holds it, and linear, an image
   of a texture of a format encoding nothing decoded from sRGB where it is
-  marked so, which canvas's own
+  marked so, sliced or tiled as its draw mode says: the one way a material
+  samples an entry's image, since one sampling its `uv` itself stretches a
+  sliced or tiled sprite. It samples with the gradients of the coordinate
+  before wrapping, so a tile's seam reads the mip level its neighbours do,
+  and is called in uniform control flow, before any discard;
+  `canvas_covers` leaves out a hollow centre, as it leaves out a rounded
+  shape's corners. canvas's own
   default material, `cog.canvas/default.wgsl`, includes, as does
   `cog.canvas/viewport.wgsl`, the shader of the quads canvas draws over a
   viewport: a camera's clear, what a multisampled camera resolved, and an

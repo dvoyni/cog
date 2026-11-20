@@ -55,9 +55,9 @@
       "name": "canvas_instances",
       "buffer": {
         "type": "read-only-storage",
-        "size": 112,
+        "size": 144,
         "element": {
-          "size": 112,
+          "size": 144,
           "members": [
             {
               "name": "tint",
@@ -75,43 +75,63 @@
               "size": 16
             },
             {
-              "name": "transform",
+              "name": "slice_frame",
               "offset": 48,
+              "size": 16
+            },
+            {
+              "name": "slice_square",
+              "offset": 64,
+              "size": 16
+            },
+            {
+              "name": "transform",
+              "offset": 80,
               "size": 24
             },
             {
               "name": "page",
-              "offset": 72,
+              "offset": 104,
               "size": 4
             },
             {
               "name": "part",
-              "offset": 76,
+              "offset": 108,
               "size": 4
             },
             {
               "name": "size",
-              "offset": 80,
+              "offset": 112,
               "size": 8
             },
             {
               "name": "width",
-              "offset": 88,
+              "offset": 120,
               "size": 4
             },
             {
               "name": "radius",
-              "offset": 92,
+              "offset": 124,
               "size": 4
             },
             {
               "name": "decode",
-              "offset": 96,
+              "offset": 128,
               "size": 4
+            },
+            {
+              "name": "mode",
+              "offset": 132,
+              "size": 4
+            },
+            {
+              "name": "tiles",
+              "offset": 136,
+              "size": 8
             }
           ]
         },
-        "elementStride": 112
+        "elementStride": 144
       },
       "entryPoints": [
         "canvas_sprite_vertex",

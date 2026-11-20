@@ -12,8 +12,9 @@ import (
 // and of no size until then: where it is packed, or, for an image of a
 // render texture, the view of it its entries draw, packed nowhere; its
 // region there in texture coordinates, its origin then its size, and its
-// page; its size in texels; its pivot; whether its entries decode its
-// colour from sRGB as they sample it, as an image of a texture whose format
+// page; its size in texels; the options of the image drawing it, which
+// place it, slice it and wrap it; whether its entries decode its colour
+// from sRGB as they sample it, as an image of a texture whose format
 // encodes nothing decodes it; and whether it was found at its first draw
 // to draw nothing, its rectangle outside its file or texture, or its
 // texture one render does not hold, so it is never packed and its entries
@@ -24,21 +25,22 @@ type drawnImage struct {
 	region       [4]float32
 	page         uint32
 	size         m.Vec2
-	pivot        Pivot
+	options      ImageOptions
 	decode       bool
 	drawsNothing bool
 }
 
-// makeDrawnImage answers packed as drawn, of no pivot.
-func makeDrawnImage(packed *packedImage) drawnImage {
+// makeDrawnImage answers packed as drawn by an image of options.
+func makeDrawnImage(packed *packedImage, options ImageOptions) drawnImage {
 	pageWidth := float32(packed.atlas.width)
 	pageHeight := float32(packed.atlas.height)
 	region := packed.region
 	return drawnImage{
-		packed: packed,
-		region: [4]float32{float32(region.X) / pageWidth, float32(region.Y) / pageHeight, float32(region.Width) / pageWidth, float32(region.Height) / pageHeight},
-		page:   region.Layer,
-		size:   m.Vec2{X: float32(region.Width), Y: float32(region.Height)},
+		packed:  packed,
+		region:  [4]float32{float32(region.X) / pageWidth, float32(region.Y) / pageHeight, float32(region.Width) / pageWidth, float32(region.Height) / pageHeight},
+		page:    region.Layer,
+		size:    m.Vec2{X: float32(region.Width), Y: float32(region.Height)},
+		options: options,
 	}
 }
 
@@ -55,7 +57,7 @@ func (d *drawnImage) findView() render.TextureView {
 // placeTextureImage writes into drawn frame of the image of key, of a
 // render texture, as drawn: its rectangle of the texture, as render's
 // descriptor of it measures it, drawn through a 2D-array view of its mip
-// level 0 and layer 0 alone, page 0 of it, with key's pivot, its colour
+// level 0 and layer 0 alone, page 0 of it, with key's options, its colour
 // decoded from sRGB where key marks it so and the texture's format does not
 // decode it. A texture render does not hold, and a frame whose rectangle
 // does not lie within the texture, draw nothing, each reported to logger
@@ -79,11 +81,11 @@ func placeTextureImage(inventory render.Inventory, logger *kernel.Logger, drawn 
 	width := float32(descriptor.Width)
 	height := float32(descriptor.Height)
 	*drawn = drawnImage{
-		view:   render.TextureView{Texture: key.texture, MipLevelCount: 1, LayerCount: 1, Dimension: render.TextureViewDimension2DArray},
-		region: [4]float32{texels.X / width, texels.Y / height, texels.Width / width, texels.Height / height},
-		size:   frameRect.Size().Float(),
-		pivot:  key.options.Pivot,
-		decode: key.options.ColorSpace == ColorSpaceSrgb && descriptor.Format != render.TextureFormatRGBA8UnormSrgb && descriptor.Format != render.TextureFormatBGRA8UnormSrgb,
+		view:    render.TextureView{Texture: key.texture, MipLevelCount: 1, LayerCount: 1, Dimension: render.TextureViewDimension2DArray},
+		region:  [4]float32{texels.X / width, texels.Y / height, texels.Width / width, texels.Height / height},
+		size:    frameRect.Size().Float(),
+		options: key.options,
+		decode:  key.options.ColorSpace == ColorSpaceSrgb && descriptor.Format != render.TextureFormatRGBA8UnormSrgb && descriptor.Format != render.TextureFormatBGRA8UnormSrgb,
 	}
 }
 

@@ -195,6 +195,12 @@ func TestIntersectBox3(t *testing.T) {
 	}
 }
 
+func TestVec2AbsAnswersEachComponentsMagnitude(t *testing.T) {
+	if got, want := (Vec2{-2, 3}).Abs(), (Vec2{2, 3}); got != want {
+		t.Fatalf("Abs = %v, want %v", got, want)
+	}
+}
+
 func TestVec3MinMaxAbsAndVec4Conversions(t *testing.T) {
 	first, second := Vec3{1, -5, 3}, Vec3{-2, 4, 3}
 	if got, want := first.Min(second), (Vec3{-2, -5, 3}); got != want {
