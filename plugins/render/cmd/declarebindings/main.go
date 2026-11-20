@@ -10,9 +10,15 @@
 //
 //	//go:generate go run github.com/dvoyni/cog/plugins/render/cmd/declarebindings -variant SKINNED,JOINTS=4 lit.wgsl
 //
+// With -variantsonly it declares the -variants alone, leaving out the
+// variant with no defines, for a shader that compiles only with defines, as
+// a 2D material's reading its argument does:
+//
+//	//go:generate go run github.com/dvoyni/cog/plugins/render/cmd/declarebindings -variantsonly -variant CANVAS_ARGUMENT dissolve.wgsl
+//
 // Usage:
 //
-//	declarebindings [-variant NAME[=VALUE][,NAME[=VALUE]]...]... SHADER...
+//	declarebindings [-variantsonly] [-variant NAME[=VALUE][,NAME[=VALUE]]...]... SHADER...
 //
 // A shader render fails to compile or refuses, and any other error render or
 // gfx logs, fails the run, writing no declaration.
@@ -42,16 +48,17 @@ func init() { runtime.LockOSThread() }
 func main() {
 	var defineSets variantFlag
 	flag.Var(&defineSets, "variant", "a define set to declare a variant of each shader for, its defines separated by commas, each NAME or NAME=VALUE; repeat it for more variants")
+	variantsOnly := flag.Bool("variantsonly", false, "declare the -variant define sets alone, leaving out the variant with no defines, for a shader that compiles only with defines")
 	flag.Usage = func() {
-		fmt.Fprintln(flag.CommandLine.Output(), "usage: declarebindings [-variant NAME[=VALUE][,NAME[=VALUE]]...]... SHADER...")
+		fmt.Fprintln(flag.CommandLine.Output(), "usage: declarebindings [-variantsonly] [-variant NAME[=VALUE][,NAME[=VALUE]]...]... SHADER...")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
-	if flag.NArg() == 0 {
+	if flag.NArg() == 0 || *variantsOnly && len(defineSets) == 0 {
 		flag.Usage()
 		os.Exit(2)
 	}
-	if err := declareBindings(".", flag.Args(), defineSets); err != nil {
+	if err := declareBindings(".", flag.Args(), defineSets, *variantsOnly); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -59,10 +66,11 @@ func main() {
 
 // declareBindings writes the declaration of each shader at shaderPaths,
 // relative to directory, beside it, with a variant for each of defineSets,
+// and with none of its own when variantsOnly is set,
 // from a kernel it spawns and quits on the calling goroutine, which must be
 // the main thread. It answers every error logged meanwhile, and then writes
 // nothing.
-func declareBindings(directory string, shaderPaths []string, defineSets [][]render.ShaderDefine) error {
+func declareBindings(directory string, shaderPaths []string, defineSets [][]render.ShaderDefine, variantsOnly bool) error {
 	logHandler := &errorCollector{}
 	supervisor := kernel.NewSupervisor(logHandler)
 	declarations := map[string][]byte{}
@@ -72,6 +80,7 @@ func declareBindings(directory string, shaderPaths []string, defineSets [][]rend
 			Directory:       directory,
 			ShaderPaths:     shaderPaths,
 			DefineSets:      defineSets,
+			VariantsOnly:    variantsOnly,
 			TakeDeclaration: func(shaderPath string, declaration []byte) { declarations[shaderPath] = declaration },
 		},
 	}

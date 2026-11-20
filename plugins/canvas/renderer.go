@@ -96,7 +96,7 @@ type renderer struct {
 	// instances are the instance data of the command list being drawn, and
 	// batches the frame's batches, each camera's in turn; both are written
 	// over each frame.
-	instances []instanceData
+	instances listInstanceData
 	batches   []batch
 	// colorTargets is a camera's pass's one target.
 	colorTargets [1]render.ColorTarget
@@ -287,13 +287,14 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 // camera's quad drawing what it resolved there, and its batches as
 // instance data, in one temporary buffer, then each camera's entries'
 // pass, a multisampled camera's textures acquired before it and its
-// composite after it. A multisampled camera whose textures render could
-// not make, which it logged, draws nothing.
+// composite after it. The instance data is in temporary buffers, one per
+// stride. A multisampled camera whose textures render could not make, which
+// it logged, draws nothing.
 func (r *renderer) drawOrder(frame render.Frame, inventory render.Inventory, cameraDraws []cameraDraw, state *drawState) {
-	r.instances = r.instances[:0]
+	r.instances.reset()
 	for index := range r.packings {
 		// Each packing's quad is at its index.
-		r.instances = append(r.instances, r.packings[index].makeInstance())
+		r.instances.fixed = append(r.instances.fixed, r.packings[index].makeInstance())
 	}
 	for index := range cameraDraws {
 		drawnCamera := &cameraDraws[index]
@@ -301,26 +302,26 @@ func (r *renderer) drawOrder(frame render.Frame, inventory render.Inventory, cam
 		case drawnCamera.camera.SampleCount == multisampledCameraSampleCount:
 			// What it resolved into is drawn whole, untinted.
 			resolved := drawnImage{region: [4]float32{0, 0, 1, 1}}
-			drawnCamera.viewportInstance = uint32(len(r.instances))
-			r.instances = appendShapeInstances(r.instances, &Shape{Tint: m.White}, &resolved)
+			drawnCamera.viewportInstance = uint32(len(r.instances.fixed))
+			r.instances.fixed = appendShapeInstances(r.instances.fixed, &Shape{Tint: m.White}, &resolved)
 		case drawnCamera.camera.Clear && !drawnCamera.colorTarget.Clear:
 			// A clear not by the pass's load is drawn over the viewport, whose
 			// vertex stage reads only the instance's tint, region and page.
-			drawnCamera.viewportInstance = uint32(len(r.instances))
-			r.instances = appendShapeInstances(r.instances, &Shape{Tint: drawnCamera.camera.ClearColor}, &r.drawnImages[0][0])
+			drawnCamera.viewportInstance = uint32(len(r.instances.fixed))
+			r.instances.fixed = appendShapeInstances(r.instances.fixed, &Shape{Tint: drawnCamera.camera.ClearColor}, &r.drawnImages[0][0])
 		}
 		batchesStart := len(r.batches)
-		r.batches, r.instances = appendBatches(r.batches, r.instances, drawnCamera.entries, state, r.batchKeys, r.drawnImages)
+		r.batches = appendBatches(r.batches, &r.instances, drawnCamera.entries, state, r.batchKeys, r.drawnImages)
 		drawnCamera.batches = r.batches[batchesStart:]
 	}
 	list := frame.BeginCommandList("canvas", cameraDraws[0].camera.Order)
-	instances := list.AcquireTemporaryBuffer(r.instances)
+	r.instances.acquireBuffers(&list)
 	r.copyGrowths(&list, inventory)
-	r.fillPackings(&list, inventory, instances)
+	r.fillPackings(&list, inventory)
 	for index := range cameraDraws {
 		drawnCamera := &cameraDraws[index]
 		if drawnCamera.camera.SampleCount != multisampledCameraSampleCount {
-			r.drawEntries(&list, drawnCamera, instances)
+			r.drawEntries(&list, drawnCamera)
 			continue
 		}
 		descriptor := drawnCamera.multisampledDescriptor
@@ -331,20 +332,20 @@ func (r *renderer) drawOrder(frame render.Frame, inventory render.Inventory, cam
 		if drawnCamera.colorTarget.Texture == (render.Texture{}) || drawnCamera.colorTarget.Resolve.Texture == (render.Texture{}) {
 			continue
 		}
-		r.drawEntries(&list, drawnCamera, instances)
-		r.drawComposite(&list, drawnCamera, instances)
+		r.drawEntries(&list, drawnCamera)
+		r.drawComposite(&list, drawnCamera)
 	}
 	list.End()
 }
 
-// drawEntries draws drawnCamera's entries, of instances, in a pass into its
-// colour target, the viewport and the scissors moved from the target's
-// pixels to the colour target's by its colorTargetOrigin. Its clear, when not by the
-// pass's load, is drawn over the viewport first, then each batch, scissored
-// to the part of the viewport the entries draw into, and a clipped batch to
-// its clip's part of that, a batch whose clip holds no pixel of it not
-// drawn.
-func (r *renderer) drawEntries(list *render.CommandList, drawnCamera *cameraDraw, instances render.BufferRange) {
+// drawEntries draws drawnCamera's entries in a pass into its colour
+// target, the viewport and the scissors moved from the target's pixels to
+// the colour target's by its colorTargetOrigin. Its clear, when not by the
+// pass's load, is drawn over the viewport first, then each batch, from the
+// instance data of its material's stride, scissored to the part of the
+// viewport the entries draw into, and a clipped batch to its clip's part of
+// that, a batch whose clip holds no pixel of it not drawn.
+func (r *renderer) drawEntries(list *render.CommandList, drawnCamera *cameraDraw) {
 	r.colorTargets[0] = drawnCamera.colorTarget
 	pass := list.BeginPass(render.PassDescriptor{Label: "canvas camera", ColorTargets: r.colorTargets[:]})
 	toColorTarget := drawnCamera.colorTargetOrigin.Negate()
@@ -352,7 +353,7 @@ func (r *renderer) drawEntries(list *render.CommandList, drawnCamera *cameraDraw
 	pass.SetViewport(render.Viewport{X: float32(viewport.X), Y: float32(viewport.Y), Width: float32(viewport.Width), Height: float32(viewport.Height), MaxDepth: 1})
 	pass.SetPassUniform("canvas_camera", drawnCamera.block)
 	if drawnCamera.camera.Clear && !drawnCamera.colorTarget.Clear {
-		r.drawInstances(&pass, r.clearMaterial, instances, drawnCamera.viewportInstance, 1, render.TextureView{Texture: r.srgbAtlas.texture}, FilterNearest, WrapNone)
+		r.drawInstances(&pass, r.clearMaterial, r.instances.fixedRange, drawnCamera.viewportInstance, 1, render.TextureView{Texture: r.srgbAtlas.texture}, FilterNearest, WrapNone)
 	}
 	for _, drawnBatch := range drawnCamera.batches {
 		// The entries draw between FitInscribe's bars, which the clear
@@ -364,18 +365,18 @@ func (r *renderer) drawEntries(list *render.CommandList, drawnCamera *cameraDraw
 		scissor = scissor.Translate(toColorTarget)
 		pass.SetScissorRectangle(render.ScissorRectangle{X: uint32(scissor.X), Y: uint32(scissor.Y), Width: uint32(scissor.Width), Height: uint32(scissor.Height)})
 		material, _ := r.findMaterial(drawnBatch.key.material)
-		r.drawInstances(&pass, material.material, instances, drawnBatch.firstInstance, drawnBatch.instanceCount, drawnBatch.key.texture, drawnBatch.key.filter, drawnBatch.key.wrap)
+		r.drawInstances(&pass, material.material, r.instances.findRange(drawnBatch.key.stride), drawnBatch.firstInstance, drawnBatch.instanceCount, drawnBatch.key.texture, drawnBatch.key.filter, drawnBatch.key.wrap)
 	}
 	pass.End()
 }
 
 // drawComposite draws what drawnCamera, a multisampled camera, resolved its
-// entries into over its viewport, of instances, in a pass into its target:
+// entries into over its viewport, in a pass into its target:
 // replacing what the viewport holds when the camera clears, the pass's load
 // clearing the target when the viewport covers it, and blended over it
 // otherwise. Its colour was encoded as the target's as its entries drew, so
 // it is drawn as it is.
-func (r *renderer) drawComposite(list *render.CommandList, drawnCamera *cameraDraw, instances render.BufferRange) {
+func (r *renderer) drawComposite(list *render.CommandList, drawnCamera *cameraDraw) {
 	r.colorTargets[0] = drawnCamera.makeTargetColorTarget()
 	pass := list.BeginPass(render.PassDescriptor{Label: "canvas camera composite", ColorTargets: r.colorTargets[:]})
 	viewport := drawnCamera.view.viewport
@@ -387,7 +388,7 @@ func (r *renderer) drawComposite(list *render.CommandList, drawnCamera *cameraDr
 	if drawnCamera.camera.Clear {
 		material = r.clearMaterial
 	}
-	r.drawInstances(&pass, material, instances, drawnCamera.viewportInstance, 1, render.TextureView{Texture: drawnCamera.colorTarget.Resolve.Texture}, FilterNearest, WrapNone)
+	r.drawInstances(&pass, material, r.instances.fixedRange, drawnCamera.viewportInstance, 1, render.TextureView{Texture: drawnCamera.colorTarget.Resolve.Texture}, FilterNearest, WrapNone)
 	pass.End()
 }
 
@@ -412,7 +413,7 @@ func (r *renderer) copyGrowths(list *render.CommandList, inventory render.Invent
 	r.growths = r.growths[:0]
 }
 
-// fillPackings fills the cells of the images packed, of instances, each
+// fillPackings fills the cells of the images packed, each
 // packing's quad at its index, each image's source drawn premultiplied into
 // its cell, its edge continued into the gutter: a pass for each run of
 // cells on one page, a draw for each cell, then, once every cell is
@@ -420,7 +421,7 @@ func (r *renderer) copyGrowths(list *render.CommandList, inventory render.Invent
 // level. It then releases the sources, which the frame's draws still read,
 // and forgets the packings. A cell of an atlas render could not make is
 // not drawn.
-func (r *renderer) fillPackings(list *render.CommandList, inventory render.Inventory, instances render.BufferRange) {
+func (r *renderer) fillPackings(list *render.CommandList, inventory render.Inventory) {
 	r.filledPages = r.filledPages[:0]
 	for runStart := 0; runStart < len(r.packings); {
 		firstPacked := r.packings[runStart].packed
@@ -435,7 +436,7 @@ func (r *renderer) fillPackings(list *render.CommandList, inventory render.Inven
 				packing := &r.packings[index]
 				cell := packing.packed.atlas.findCell(packing.packed.region)
 				pass.SetViewport(render.Viewport{X: float32(cell.X), Y: float32(cell.Y), Width: float32(cell.Width), Height: float32(cell.Height), MaxDepth: 1})
-				r.drawInstances(&pass, r.packMaterial, instances, uint32(index), 1, render.TextureView{Texture: packing.source}, FilterNearest, WrapNone)
+				r.drawInstances(&pass, r.packMaterial, r.instances.fixedRange, uint32(index), 1, render.TextureView{Texture: packing.source}, FilterNearest, WrapNone)
 			}
 			pass.End()
 			filledBefore := slices.ContainsFunc(r.filledPages, func(filledPage *packedImage) bool {
@@ -465,7 +466,7 @@ func (r *renderer) fillPackings(list *render.CommandList, inventory render.Inven
 // draw sets its own.
 func (r *renderer) drawInstances(pass *render.Pass, material render.Material, instances render.BufferRange, firstInstance, instanceCount uint32, texture render.TextureView, filter Filter, wrap Wrap) {
 	pass.SetMaterial(material)
-	pass.SetBuffer("canvas_instances", instances)
+	pass.SetBuffer(instancesBindingName, instances)
 	pass.SetTextureView("canvas_atlas", texture)
 	pass.SetSampler("canvas_sampler", filter.makeSamplerDescriptor(wrap))
 	pass.DrawVertices(render.PrimitiveTopologyTriangleList, 6, render.DrawArgs{InstanceCount: instanceCount, FirstInstance: firstInstance})
@@ -474,9 +475,10 @@ func (r *renderer) drawInstances(pass *render.Pass, material render.Material, in
 // appendEntryKeys appends entry's bounds, grown by its material's
 // CullMargin, its batch key, and that it is not skipped, of state's, to the
 // frame's, its image placed: packed, given a view of its texture, or found
-// to draw nothing. An entry skipped, its image's frame drawing nothing or
-// its material one canvas does not hold, reported once to state's logger,
-// has zero bounds and batch key.
+// to draw nothing. An entry skipped, its image's frame drawing nothing, its
+// material one canvas does not hold, or its argument one its material does
+// not take, reported once to state's logger, or of a material whose
+// argument's layout mismatched its shader's, has zero bounds and batch key.
 func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 	material := state.findEntryMaterial(entry)
 	slot, held := r.findMaterial(material)
@@ -485,22 +487,32 @@ func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 		r.appendSkippedEntryKeys()
 		return
 	}
-	margin := m.Vec2{X: -slot.cullMargin, Y: -slot.cullMargin}
-	if entry.kind == EntryKindShape {
-		shape := &state.shapes[entry.index]
-		r.entryBounds = append(r.entryBounds, shape.findBounds().Inset(margin))
-		r.batchKeys = append(r.batchKeys, shape.batchKey(render.TextureView{Texture: r.srgbAtlas.texture}))
-		r.skippedEntries = append(r.skippedEntries, false)
-		return
-	}
-	sprite := &state.sprites[entry.index]
-	image := findDrawnFrame(r.drawnImages, sprite)
-	if image.drawsNothing {
+	// A material whose argument's layout mismatched its shader's, reported
+	// as it was made, draws nothing.
+	if slot.argumentLayoutMismatch || !slot.takesArgument(state.logger, material, entry.argument) {
 		r.appendSkippedEntryKeys()
 		return
 	}
-	r.entryBounds = append(r.entryBounds, sprite.findBounds(image).Inset(margin))
-	r.batchKeys = append(r.batchKeys, sprite.batchKey(image, state.defaultFilter))
+	margin := m.Vec2{X: -slot.cullMargin, Y: -slot.cullMargin}
+	var bounds m.Rect
+	var key batchKey
+	if entry.kind == EntryKindShape {
+		shape := &state.shapes[entry.index]
+		bounds = shape.findBounds()
+		key = shape.batchKey(render.TextureView{Texture: r.srgbAtlas.texture})
+	} else {
+		sprite := &state.sprites[entry.index]
+		image := findDrawnFrame(r.drawnImages, sprite)
+		if image.drawsNothing {
+			r.appendSkippedEntryKeys()
+			return
+		}
+		bounds = sprite.findBounds(image)
+		key = sprite.batchKey(image, state.defaultFilter)
+	}
+	key.stride = slot.stride
+	r.entryBounds = append(r.entryBounds, bounds.Inset(margin))
+	r.batchKeys = append(r.batchKeys, key)
 	r.skippedEntries = append(r.skippedEntries, false)
 }
 

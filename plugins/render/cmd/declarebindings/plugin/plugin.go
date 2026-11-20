@@ -1,7 +1,8 @@
 // Package plugin is cmd/declarebindings' own plugin, listed after render: on
 // DeclareEvent it acquires each shader its Config names through render, with
-// no defines and with each define set, and hands the binding declaration
-// of each, what gfx reflects of its variants, to Config.TakeDeclaration.
+// no defines, unless Config.VariantsOnly is set, and with each define set,
+// and hands the binding declaration of each, what gfx reflects of its
+// variants, to Config.TakeDeclaration.
 package plugin
 
 import (
@@ -28,6 +29,11 @@ type Config struct {
 	// DefineSets are the define sets each shader has a variant declared for,
 	// beside its variant with no defines.
 	DefineSets [][]render.ShaderDefine
+	// VariantsOnly declares each shader's DefineSets alone, leaving out its
+	// variant with no defines, for a shader that compiles only with defines,
+	// as a 2D material's reading its argument does: a test preprocessing it
+	// with a define set none of them is fails on its declaration.
+	VariantsOnly bool
 	// TakeDeclaration is handed each shader's declaration, the JSON of its
 	// binding declaration, by its path, from DeclareEvent's job. It must not
 	// be nil.
@@ -57,14 +63,18 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 
 // Init mounts Config.Directory, or the folder the process runs in when it
 // is empty, in platform's FS; installs the declaration request, Config's
-// shaders, define sets and TakeDeclaration; and subscribes to DeclareEvent
+// shaders, define sets, VariantsOnly and TakeDeclaration; and subscribes to DeclareEvent
 // the job declaring the shaders' bindings, its Sub kept in the Handlers
 // resource. A config of another type than *Config, or a nil TakeDeclaration,
-// is a composition error, and panics.
+// is a composition error, and panics, as is VariantsOnly with no
+// DefineSets, which would declare nothing.
 func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	pluginConfig := kernel.PluginConfigOrDefault[Config](config)
 	if pluginConfig.TakeDeclaration == nil {
 		panic("declarebindings: Config.TakeDeclaration is nil")
+	}
+	if pluginConfig.VariantsOnly && len(pluginConfig.DefineSets) == 0 {
+		panic("declarebindings: Config.VariantsOnly with no DefineSets declares nothing")
 	}
 	directory := pluginConfig.Directory
 	if directory == "" {
@@ -74,6 +84,7 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	configurator.InitResource(declarationRequest{
 		shaderPaths:     pluginConfig.ShaderPaths,
 		defineSets:      pluginConfig.DefineSets,
+		variantsOnly:    pluginConfig.VariantsOnly,
 		takeDeclaration: pluginConfig.TakeDeclaration,
 	})
 	declareShadersTask := configurator.RegisterTask4(declareShaders)

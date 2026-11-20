@@ -2,8 +2,9 @@
 
 `cmd/declarebindings`' own plugin, listed after render. On `DeclareEvent` it
 acquires each shader its `Config` names through render's `Inventory`, with no
-defines and with each of `Config.DefineSets`, so render reports a shader it
-fails to compile or refuses. It then compiles the same variants through gfx's
+defines, unless `Config.VariantsOnly` is set for a shader that compiles only
+with defines, and with each of `Config.DefineSets`, so render reports a shader
+it fails to compile or refuses. It then compiles the same variants through gfx's
 `Device` and hands each shader's binding declaration, what gfx reflects of its
 variants, to `Config.TakeDeclaration`. The command writes the declarations
 once the kernel has quit with no error logged.
@@ -22,8 +23,8 @@ configs := map[kernel.PluginName]any{
 
 - **Resources it installs:**
   - `Handlers`: `DeclareBindings`, to order handlers around.
-  - a private declaration request, `Config`'s shaders, define sets and
-    `TakeDeclaration`.
+  - a private declaration request, `Config`'s shaders, define sets,
+    `VariantsOnly` and `TakeDeclaration`.
 - **Resources it reads from other plugins:** `gfx.Device` and
   `platform.FS`, for read, and render's `Inventory` parameter.
 - **Events it publishes:** none.

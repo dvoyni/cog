@@ -3,6 +3,7 @@ package canvas
 import (
 	"cmp"
 	"fmt"
+	"reflect"
 	"sync"
 
 	"github.com/dvoyni/cog/kernel"
@@ -27,10 +28,19 @@ type materialTable struct {
 	releasedIndexes []uint32
 }
 
-// make makes a 2D material of descriptor through inventory, and answers it.
-func (t *materialTable) make(inventory render.Inventory, descriptor MaterialDescriptor) Material {
+// make makes a 2D material of descriptor through inventory, and answers it,
+// its argument's layout checked against its shader's, a mismatch reported
+// once to logger for the shader and the type.
+func (t *materialTable) make(inventory render.Inventory, logger *kernel.Logger, descriptor MaterialDescriptor) Material {
 	material, shader := descriptor.makeRenderMaterial(inventory)
-	slot := materialSlot{material: material, shader: shader, cullMargin: descriptor.CullMargin}
+	slot := materialSlot{material: material, shader: shader, cullMargin: descriptor.CullMargin, argumentType: descriptor.Argument.goType, stride: findInstanceStride(descriptor.Argument.goType)}
+	if slot.argumentType != nil {
+		if err := descriptor.Argument.checkLayout(inventory, shader); err != nil {
+			slot.argumentLayoutMismatch = true
+			mismatch := Report{Kind: ReportKindArgumentLayoutMismatch, Err: fmt.Errorf("canvas: the argument %v of a material of shader %q does not match the shader's struct Argument, so its entries are skipped: %w", slot.argumentType, descriptor.Shader, err)}
+			logger.LogErrOnce(argumentLayoutMismatchLogKey+descriptor.Shader+" "+slot.argumentType.String(), mismatch)
+		}
+	}
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	if len(t.freeIndexes) == 0 {
@@ -92,6 +102,18 @@ func (t *materialTable) appendSlots(slots []materialSlot) []materialSlot {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	return append(slots, t.slots...)
+}
+
+// reportArgumentRefused reports to logger once for material and given, the
+// type of an entry's argument, that material, taking an argument of type
+// taken, nil for none, refused it.
+func reportArgumentRefused(logger *kernel.Logger, material Material, given, taken reflect.Type) {
+	takes := "takes none"
+	if taken != nil {
+		takes = "takes a " + taken.String()
+	}
+	refusal := Report{Kind: ReportKindArgumentRefused, Err: fmt.Errorf("canvas: an entry gave material %v an argument of %v, which it refuses, as it %s, so the entry is skipped", material, given, takes)}
+	logger.LogErrOnce(argumentRefusedLogKey+fmt.Sprint(material)+" "+given.String(), refusal)
 }
 
 // reportMaterialNotHeld reports material to logger once, refused as use,

@@ -117,10 +117,15 @@ func (a Assets) ImageSize(image Image) (m.Vec2, bool) {
 // user never holds, blending as descriptor's Blend says, with no depth test,
 // since the sort key orders entries, and no culling. A shader render cannot
 // load or compile, or entry points it lacks, are reported by render, and
-// the material's entries are skipped. Its maker gives it back once, with
-// ReleaseMaterial.
+// the material's entries are skipped. A material taking an argument has its
+// shader preprocessed with the define CANVAS_ARGUMENT, and the argument's
+// layout checked against the shader's struct Argument: a mismatch is
+// reported once for the shader and the type as
+// ReportKindArgumentLayoutMismatch, and the material's entries are skipped.
+// Its maker gives it back once, with ReleaseMaterial.
 func (a Assets) MakeMaterial(descriptor MaterialDescriptor) Material {
-	return a.state.Get().materials.make(a.inventory, descriptor)
+	state := a.state.Get()
+	return state.materials.make(a.inventory, state.logger, descriptor)
 }
 
 // ReleaseMaterial gives back material, made by MakeMaterial: the frame

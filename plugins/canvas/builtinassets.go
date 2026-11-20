@@ -30,6 +30,14 @@ const (
 	// with an image premultiplied.
 	viewportFragmentEntryPoint = "canvas_viewport_fragment"
 	packFragmentEntryPoint     = "canvas_pack_fragment"
+	// instancesBindingName is the include's storage binding of the instance
+	// data, each element canvas's fixed part then, where the material takes
+	// one, its argument.
+	instancesBindingName = "canvas_instances"
+	// argumentDefine is the define canvas preprocesses the shader of a
+	// material taking an argument with, which the include's #if reads to
+	// add the argument to the instance data and declare canvas_argument.
+	argumentDefine = "CANVAS_ARGUMENT"
 )
 
 // embeddedAssets are canvas's built-in assets: its include, its materials'

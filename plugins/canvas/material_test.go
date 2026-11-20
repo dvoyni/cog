@@ -1,6 +1,7 @@
 package canvas_test
 
 //go:generate go run github.com/dvoyni/cog/plugins/render/cmd/declarebindings testdata/tint.wgsl testdata/rawcolour.wgsl
+//go:generate go run github.com/dvoyni/cog/plugins/render/cmd/declarebindings -variantsonly -variant CANVAS_ARGUMENT testdata/dissolve.wgsl
 
 import (
 	"image/color"
@@ -32,13 +33,19 @@ func newMaterialMounter(t testing.TB) *fileMounter {
 	t.Helper()
 	files := fstest.MapFS{}
 	for _, path := range []string{tintShaderPath, tintShaderPath + ".json", rawColourShaderPath, rawColourShaderPath + ".json", "assets/canvas.wgsl"} {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		files[path] = &fstest.MapFile{Data: data}
+		addModuleFile(t, files, path)
 	}
 	return &fileMounter{files: files}
+}
+
+// addModuleFile adds to files the file at path in the module, at that path.
+func addModuleFile(t testing.TB, files fstest.MapFS, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files[path] = &fstest.MapFile{Data: data}
 }
 
 // findBatchMaterials answers the material of each batch camera drew, in the

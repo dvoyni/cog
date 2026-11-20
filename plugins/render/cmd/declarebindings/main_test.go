@@ -39,7 +39,7 @@ func TestAShaderWithIncludesIsDeclaredWithASectionForEachDefineSet(t *testing.T)
 		{{Name: "JOINT_COUNT", Value: "4"}, {Name: "SKINNED"}},
 	}
 
-	if err := runDeclareBindings(directory, []string{"lit.wgsl"}, defineSets); err != nil {
+	if err := runDeclareBindings(directory, []string{"lit.wgsl"}, defineSets, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -80,7 +80,7 @@ func TestAShaderRenderRefusesOrADeclarationCannotSpellFailsTheRunWritingNoDeclar
 				t.Fatal(err)
 			}
 
-			err := runDeclareBindings(directory, []string{"bad.wgsl"}, nil)
+			err := runDeclareBindings(directory, []string{"bad.wgsl"}, nil, false)
 
 			if err == nil || !strings.Contains(err.Error(), "bad.wgsl") {
 				t.Errorf("the run answered %v, want an error naming bad.wgsl", err)
@@ -92,14 +92,36 @@ func TestAShaderRenderRefusesOrADeclarationCannotSpellFailsTheRunWritingNoDeclar
 	}
 }
 
+func TestAShaderCompilingOnlyWithADefineIsDeclaredForItsVariantsAlone(t *testing.T) {
+	directory := t.TempDir()
+	source := "#if ARGUMENT\n@group(1) @binding(0) var<uniform> tint: vec4f;\n#endif\n@fragment fn fragment_main() -> @location(0) vec4f { return tint; }\n"
+	if err := os.WriteFile(filepath.Join(directory, "argument.wgsl"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defines := []render.ShaderDefine{{Name: "ARGUMENT"}}
+
+	if err := runDeclareBindings(directory, []string{"argument.wgsl"}, [][]render.ShaderDefine{defines}, true); err != nil {
+		t.Fatal(err)
+	}
+
+	files := os.DirFS(directory)
+	reflection, err := bindingdeclaration.Read(files, "argument.wgsl", []gfx.ShaderDefine{{Name: "ARGUMENT"}})
+	if err != nil || len(reflection.Bindings) != 1 || reflection.Bindings[0].Name != "tint" {
+		t.Errorf("with ARGUMENT the declaration says %+v, %v, want the binding tint", reflection, err)
+	}
+	if _, err := bindingdeclaration.Read(files, "argument.wgsl", nil); err == nil {
+		t.Error("with no defines the declaration answered a reflection, want an error, as it declares ARGUMENT's variant alone")
+	}
+}
+
 // runDeclareBindings runs declareBindings on the main thread, and answers its
 // error.
-func runDeclareBindings(directory string, shaderPaths []string, defineSets [][]render.ShaderDefine) error {
+func runDeclareBindings(directory string, shaderPaths []string, defineSets [][]render.ShaderDefine, variantsOnly bool) error {
 	var err error
 	finished := make(chan struct{})
 	mainThread <- func() {
 		defer close(finished)
-		err = declareBindings(directory, shaderPaths, defineSets)
+		err = declareBindings(directory, shaderPaths, defineSets, variantsOnly)
 	}
 	<-finished
 	return err

@@ -16,9 +16,10 @@ type Handlers struct {
 
 // declarationRequest is the private resource holding what Config asks the
 // plugin to declare: the shaders, the define sets each has a variant for,
-// and where each declaration is handed.
+// whether those alone are declared, and where each declaration is handed.
 type declarationRequest struct {
 	shaderPaths     []string
 	defineSets      [][]render.ShaderDefine
+	variantsOnly    bool
 	takeDeclaration func(shaderPath string, declaration []byte)
 }

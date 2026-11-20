@@ -23,10 +23,20 @@ type Variant struct {
 }
 
 // declaration is the JSON of a binding declaration: what the shader declares
-// with no defines, and a variant for each define set declared on its own.
+// with no defines, and a variant for each define set declared on its own;
+// or, when VariantsOnly is set, its variants alone, its own bindings, entry
+// points and inputs left out, for a shader that compiles only with defines.
 type declaration struct {
+	VariantsOnly bool `json:"variantsOnly,omitempty"`
 	declaredShader
 	Variants []declaredVariant `json:"variants,omitempty"`
+}
+
+// variantsOnlyDeclaration is the JSON of a declaration of variants alone,
+// as declaration reads it.
+type variantsOnlyDeclaration struct {
+	VariantsOnly bool              `json:"variantsOnly"`
+	Variants     []declaredVariant `json:"variants"`
 }
 
 // declaredVariant is the declaration of the variant preprocessed with
@@ -40,7 +50,8 @@ type declaredVariant struct {
 // Read answers what the declaration beside the shader at path in files,
 // path with .json appended, says of its variant with defines: the variant
 // whose defines are the same names with the same values, in any order, or
-// the base declaration when none is. A missing declaration answers
+// the base declaration when none is, and an error when a declaration of
+// variants alone has none of defines. A missing declaration answers
 // fs.ErrNotExist; one that fails to parse, an unknown field or value among
 // its errors, answers its error.
 func Read(files fs.FS, path string, defines []gfx.ShaderDefine) (Reflection, error) {
@@ -55,35 +66,41 @@ func Read(files fs.FS, path string, defines []gfx.ShaderDefine) (Reflection, err
 		return Reflection{}, err
 	}
 	definedValues := makeDefinedValues(defines)
-	chosenShader := declaration.declaredShader
 	for _, variant := range declaration.Variants {
 		if maps.Equal(variant.Defines, definedValues) {
-			chosenShader = variant.declaredShader
-			break
+			return variant.declaredShader.makeReflection()
 		}
 	}
-	return chosenShader.makeReflection()
+	if declaration.VariantsOnly {
+		return Reflection{}, fmt.Errorf("it declares variants alone, none of them of the defines %q", definedValues)
+	}
+	return declaration.declaredShader.makeReflection()
 }
 
 // Marshal answers the declaration of a shader whose reflection with no
 // defines is base, with a section for each of variants, in their order, as
-// indented JSON ending in a newline. A value the format cannot name, such as
-// a binding of no kind or a storage format WebGPU refuses a storage texture,
-// answers an error naming it.
-func Marshal(base Reflection, variants []Variant) ([]byte, error) {
-	baseShader, err := makeDeclaredShader(base)
-	if err != nil {
-		return nil, err
-	}
-	declaration := declaration{declaredShader: baseShader}
+// indented JSON ending in a newline; a nil base answers a declaration of
+// variants alone, for a shader that compiles only with defines. A value the
+// format cannot name, such as a binding of no kind or a storage format
+// WebGPU refuses a storage texture, answers an error naming it.
+func Marshal(base *Reflection, variants []Variant) ([]byte, error) {
+	var declaredVariants []declaredVariant
 	for _, variant := range variants {
 		variantShader, err := makeDeclaredShader(variant.Reflection)
 		if err != nil {
 			return nil, fmt.Errorf("the variant with defines %q: %w", variant.Defines, err)
 		}
-		declaration.Variants = append(declaration.Variants, declaredVariant{Defines: makeDefinedValues(variant.Defines), declaredShader: variantShader})
+		declaredVariants = append(declaredVariants, declaredVariant{Defines: makeDefinedValues(variant.Defines), declaredShader: variantShader})
 	}
-	declarationJSON, err := json.MarshalIndent(declaration, "", "  ")
+	var marshalled any = variantsOnlyDeclaration{VariantsOnly: true, Variants: declaredVariants}
+	if base != nil {
+		baseShader, err := makeDeclaredShader(*base)
+		if err != nil {
+			return nil, err
+		}
+		marshalled = declaration{declaredShader: baseShader, Variants: declaredVariants}
+	}
+	declarationJSON, err := json.MarshalIndent(marshalled, "", "  ")
 	if err != nil {
 		return nil, err
 	}

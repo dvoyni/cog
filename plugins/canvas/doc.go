@@ -161,6 +161,15 @@
 //	assets.SetMaterialUniform(glow, "time", gameTime)
 //	list.DrawSprite(canvas.Sprite{Image: spark, Material: glow})
 //
+// A material may take an argument, a value of its own type each entry gives
+// it, read by its fragment stage with the include's canvas_argument from the
+// shader's struct Argument, which it mirrors; entries of one material batch
+// whatever their arguments, and one giving none gives the zero value:
+//
+//	dissolve := assets.MakeMaterial(canvas.MaterialDescriptor{Label: "dissolve", Shader: "shaders/dissolve.wgsl", Argument: canvas.ArgumentOf[Dissolve]()})
+//	list.DrawSpriteWith(canvas.Sprite{Image: unit, Material: dissolve}, Dissolve{Amount: 0.4})
+//	list.DrawSpritesWith(sprites, dissolves)
+//
 // A task loads an image ahead of its first draw, unloads a level's images
 // and sizes an image before it is drawn through its Assets parameter:
 //

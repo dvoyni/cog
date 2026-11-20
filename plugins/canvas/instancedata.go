@@ -1,6 +1,10 @@
 package canvas
 
-import "github.com/dvoyni/cog/libs/m"
+import (
+	"unsafe"
+
+	"github.com/dvoyni/cog/libs/m"
+)
 
 // instanceData mirrors canvas.wgsl's CanvasInstanceData without a material
 // argument: the data of one instance canvas draws, read at its
@@ -35,6 +39,10 @@ type instanceData struct {
 	// along each axis.
 	tiles m.Vec2
 }
+
+// instanceDataSize is the size of canvas's fixed part of an instance's data,
+// instanceData's, which is WGSL's of CanvasInstanceData with no argument.
+const instanceDataSize = uint32(unsafe.Sizeof(instanceData{}))
 
 // instanceMode mirrors canvas.wgsl's CANVAS_MODE constants: how
 // canvas_sample maps a point of its instance's unit square into its frame.

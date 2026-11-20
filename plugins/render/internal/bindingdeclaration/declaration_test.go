@@ -57,7 +57,7 @@ func TestAMarshalledDeclarationReadsBackEachVariantsReflection(t *testing.T) {
 		},
 	}
 
-	declarationJSON, err := bindingdeclaration.Marshal(base, []bindingdeclaration.Variant{skinned})
+	declarationJSON, err := bindingdeclaration.Marshal(&base, []bindingdeclaration.Variant{skinned})
 
 	if err != nil {
 		t.Fatal(err)
@@ -97,9 +97,39 @@ func TestAValueTheFormatCannotNameFailsMarshalNamingIt(t *testing.T) {
 			"location 2",
 		},
 	} {
-		_, err := bindingdeclaration.Marshal(test.reflection, nil)
+		_, err := bindingdeclaration.Marshal(&test.reflection, nil)
 		if err == nil || !strings.Contains(err.Error(), test.named) {
 			t.Errorf("%s: Marshal answered %v, want an error naming %s", name, err, test.named)
 		}
+	}
+}
+
+func TestADeclarationOfVariantsAloneReadsBackItsVariantsAndRefusesAnyOtherDefines(t *testing.T) {
+	argument := bindingdeclaration.Variant{
+		Defines: []gfx.ShaderDefine{{Name: "ARGUMENT"}},
+		Reflection: bindingdeclaration.Reflection{
+			Bindings: []gfx.ShaderBinding{{
+				Name:        "rows",
+				Buffer:      gfx.BufferBindingLayout{Type: gfx.BufferBindingTypeReadOnlyStorage, MinBindingSize: 16},
+				Type:        gfx.ShaderType{Size: 16, Element: &gfx.ShaderType{Size: 16}, ElementStride: 16},
+				EntryPoints: []string{"fragment_main"},
+			}},
+			EntryPoints:  []gfx.ShaderEntryPoint{{Name: "fragment_main", Stage: gfx.ShaderStageFlagFragment}},
+			VertexInputs: map[string][]gfx.VertexInput{},
+		},
+	}
+
+	declarationJSON, err := bindingdeclaration.Marshal(nil, []bindingdeclaration.Variant{argument})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := fstest.MapFS{"argument.wgsl.json": {Data: declarationJSON}}
+	reflection, err := bindingdeclaration.Read(files, "argument.wgsl", argument.Defines)
+	if err != nil || !reflect.DeepEqual(reflection, argument.Reflection) {
+		t.Errorf("with defines %q the declaration read back\n%+v, %v\nwant\n%+v\nfrom\n%s", argument.Defines, reflection, err, argument.Reflection, declarationJSON)
+	}
+	if _, err := bindingdeclaration.Read(files, "argument.wgsl", nil); err == nil {
+		t.Errorf("with no defines the declaration of variants alone read back a reflection, want an error, from\n%s", declarationJSON)
 	}
 }

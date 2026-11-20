@@ -91,7 +91,10 @@ in canvas's terms, beside render's inspection of it.
   from its top left corner, without seams along the axes its image wraps;
   its `TexelScale`, zero meaning 1, is the size a sliced sprite's corners
   and a tiled sprite's tiles take each texel at. `DrawSprite` records one, and
-  `DrawSprites` a slice, as an ECS chunk's column. Sprites of any images of
+  `DrawSprites` a slice, as an ECS chunk's column; `DrawSpriteWith`,
+  `DrawSpritesWith` and `DrawShapeWith` give each entry its material's
+  argument, `DrawSpritesWith` as a parallel slice, refused and reported once
+  when the lengths differ. Sprites of any images of
   one atlas batch together while their filter is one, and the shapes beside
   them with them, since shapes, and the zero `Image`, draw the white texel
   of the sRGB sprite atlas, which takes no filter.
@@ -175,11 +178,24 @@ in canvas's terms, beside render's inspection of it.
   `cog.canvas/canvas.wgsl` and declares only `@group(1)`, its
   `VertexEntryPoint`, empty meaning canvas's own, so a fragment-only
   material draws sprites and shapes alike, its `FragmentEntryPoint`, its
-  `Blend`, premultiplied, zero meaning `BlendNormal()`, and its
-  `CullMargin`, in world units, growing its entries' bounds for a vertex
+  `Blend`, premultiplied, zero meaning `BlendNormal()`, its `Argument`, and
+  its `CullMargin`, in world units, growing its entries' bounds for a vertex
   stage that moves vertices. **`BlendNormal()`**, **`BlendAdditive()`**,
   **`BlendMultiply()`**, **`BlendScreen()`** and **`BlendOpaque()`** are
   the usual modes, premultiplied.
+- **`ArgumentOf[T]()`** is a material's `Argument`, the type of the value each
+  entry gives it, its *material argument*: a struct of any number of fields,
+  or a plain value, holding no pointer (`ArgumentOf` panics on one), mirroring
+  the shader's WGSL struct `Argument`, which canvas preprocesses the shader
+  with the define `CANVAS_ARGUMENT` for and a fragment stage reads with the
+  include's `canvas_argument`. Its layout is checked as the material is made,
+  a mismatch reported once and the material's entries skipped; an argument of
+  another type, or one given a material that takes none, is refused, reported
+  once, and its entry skipped; an entry giving none gives the zero value.
+  Arguments break no batch: each entry's follows canvas's own instance data,
+  in temporary storage buffers, one per stride. A shader that reads its
+  argument compiles only with the define, so its binding declaration for tests
+  is generated with `declarebindings -variantsonly -variant CANVAS_ARGUMENT`.
 - **`Assets`** is the task parameter a task reaches canvas's assets and
   tools through: `Preload(image)` loads an image ahead of its first draw,
   for a loading screen, a converted one's file decoded in the caller's
@@ -188,7 +204,8 @@ in canvas's terms, beside render's inspection of it.
   draws, a later draw loading them again; `ImageSize(image)` answers an image's size, its
   rectangle's or its frames', a converted image's before it is converted, from its file's header alone, before it is drawn, and false for a missing file, reported
   once, an image of a texture measured on render's descriptor of it;
-  `MakeMaterial(descriptor)` makes a 2D material, and `ReleaseMaterial`
+  `MakeMaterial(descriptor)` makes a 2D material, its argument's layout
+  checked against its shader's, and `ReleaseMaterial`
   gives it back, the frame recording as it is released still drawing it;
   `SetMaterialTexture` and `SetMaterialUniform[T]` set its parameters by
   name, as render's setters do, a draw using them as they stand when canvas

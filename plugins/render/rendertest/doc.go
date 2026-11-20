@@ -116,7 +116,12 @@
 // empty for none, are exactly those the shader is preprocessed with, in any
 // order; its bindings, entry points and inputs then replace the
 // declaration's whole. Any
-// other define set takes the declaration's own.
+// other define set takes the declaration's own. A declaration of variants
+// alone, written with declarebindings' -variantsonly for a shader that
+// compiles only with defines, such as a 2D material's reading its argument,
+// holds "variantsOnly": true and its "variants", with no bindings, entry
+// points or inputs of its own, and a define set none of them is fails the
+// test.
 //
 // The harness preprocesses a shader with the gogpu plugin's preprocessor, as
 // a device does, so its #include, #define and #if directives work and the

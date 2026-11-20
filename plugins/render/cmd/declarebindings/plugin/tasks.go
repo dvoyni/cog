@@ -16,7 +16,7 @@ import (
 // is logged.
 func declareShaders(k *kernel.Kernel, _ kernel.NoArg, request kernel.Read[declarationRequest], inventory render.Inventory, device kernel.Read[gfx.Device], files kernel.Read[platform.FS]) kernel.NoResult {
 	for _, path := range request.Get().shaderPaths {
-		declaration, err := declareShader(inventory, device.Get(), files.Get(), path, request.Get().defineSets)
+		declaration, err := declareShader(inventory, device.Get(), files.Get(), path, request.Get().defineSets, request.Get().variantsOnly)
 		if err != nil {
 			k.Logger().LogErr(fmt.Errorf("declarebindings: %s: %w", path, err))
 			continue
@@ -27,12 +27,17 @@ func declareShaders(k *kernel.Kernel, _ kernel.NoArg, request kernel.Read[declar
 }
 
 // declareShader answers the declaration of the shader at path in files: what
-// device reflects of it with no defines, and of a variant for each of
-// defineSets.
-func declareShader(inventory render.Inventory, device gfx.Device, files fs.FS, path string, defineSets [][]render.ShaderDefine) ([]byte, error) {
-	baseVariant, err := reflectVariant(inventory, device, files, path, nil)
-	if err != nil {
-		return nil, err
+// device reflects of it with no defines, unless variantsOnly is set, and of a
+// variant for each of defineSets.
+func declareShader(inventory render.Inventory, device gfx.Device, files fs.FS, path string, defineSets [][]render.ShaderDefine, variantsOnly bool) ([]byte, error) {
+	var base *bindingdeclaration.Reflection
+	var err error
+	if !variantsOnly {
+		var baseVariant bindingdeclaration.Variant
+		if baseVariant, err = reflectVariant(inventory, device, files, path, nil); err != nil {
+			return nil, err
+		}
+		base = &baseVariant.Reflection
 	}
 	variants := make([]bindingdeclaration.Variant, len(defineSets))
 	for index, defines := range defineSets {
@@ -40,7 +45,7 @@ func declareShader(inventory render.Inventory, device gfx.Device, files fs.FS, p
 			return nil, err
 		}
 	}
-	return bindingdeclaration.Marshal(baseVariant.Reflection, variants)
+	return bindingdeclaration.Marshal(base, variants)
 }
 
 // reflectVariant acquires the variant of the shader at path in files with

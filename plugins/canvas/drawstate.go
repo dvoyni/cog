@@ -27,11 +27,13 @@ type drawState struct {
 	// and only read after.
 	drawLists []*drawList
 	// entries are the frame's entries, merged from the draw lists in their
-	// order, each a shape of shapes or a sprite of sprites, merged alike.
-	// All are replaced by the next frame's when it merges.
-	entries []recordedEntry
-	shapes  []Shape
-	sprites []Sprite
+	// order, each a shape of shapes or a sprite of sprites, merged alike,
+	// and the bytes of the arguments they give, end to end. All are replaced
+	// by the next frame's when it merges.
+	entries   []recordedEntry
+	shapes    []Shape
+	sprites   []Sprite
+	arguments []byte
 	// cameras are the frame's cameras, merged from the draw lists in their
 	// order, in the order they draw, or the default camera for a frame of
 	// entries that set none, replaced by the next frame's when it merges.
@@ -57,10 +59,16 @@ type drawState struct {
 // addDrawList adds a draw list after every one added before it, and
 // answers it.
 func (s *drawState) addDrawList() *drawList {
-	added := &drawList{outsideFrame: Report{
-		Kind: ReportKindRecordedOutsideFrame,
-		Err:  fmt.Errorf("canvas: draw list %d recorded an entry or set a camera while no frame is recording", len(s.drawLists)),
-	}}
+	added := &drawList{
+		outsideFrame: Report{
+			Kind: ReportKindRecordedOutsideFrame,
+			Err:  fmt.Errorf("canvas: draw list %d recorded an entry or set a camera while no frame is recording", len(s.drawLists)),
+		},
+		slicesDiffer: Report{
+			Kind: ReportKindSliceLengthsDiffer,
+			Err:  fmt.Errorf("canvas: draw list %d was given parallel slices of different lengths, of entries and their arguments, and recorded none of them", len(s.drawLists)),
+		},
+	}
 	s.drawLists = append(s.drawLists, added)
 	return added
 }
@@ -79,6 +87,7 @@ func (s *drawState) closeAndSort() {
 	s.entries = s.entries[:0]
 	s.shapes = s.shapes[:0]
 	s.sprites = s.sprites[:0]
+	s.arguments = s.arguments[:0]
 	s.cameras = s.cameras[:0]
 	s.drawListEnds = s.drawListEnds[:0]
 	for _, taskDrawList := range s.drawLists {
@@ -119,6 +128,12 @@ func (s *drawState) findEntryMaterial(entry recordedEntry) Material {
 		return s.shapes[entry.index].Material
 	}
 	return s.sprites[entry.index].Material
+}
+
+// findEntryArgument answers the bytes of the argument entry, of the frame's,
+// gives its material, none for an entry giving none.
+func (s *drawState) findEntryArgument(entry recordedEntry) []byte {
+	return s.arguments[entry.argument.offset : entry.argument.offset+findArgumentSize(entry.argument.goType)]
 }
 
 // makeInspection answers the frame sorted, of beat, in canvas's terms: each

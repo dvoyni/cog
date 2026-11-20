@@ -12,7 +12,9 @@ type MaterialDescriptor struct {
 	// Shader is the path in platform's FS of a whole WGSL file that
 	// includes canvas's include, "cog.canvas/canvas.wgsl", which declares
 	// every binding of @group(0) and @group(2) and the functions over them,
-	// and declares only @group(1), the material's parameters.
+	// and declares only @group(1), the material's parameters, and, for a
+	// material taking an argument, its struct Argument, which canvas
+	// preprocesses it with the define CANVAS_ARGUMENT for.
 	Shader string
 	// VertexEntryPoint is the shader's vertex stage, empty meaning canvas's
 	// own, canvas_sprite_vertex, so a material of a fragment stage alone
@@ -25,6 +27,12 @@ type MaterialDescriptor struct {
 	// zero, which blends none, so an opaque material is BlendOpaque(). Any
 	// other state is taken as it is.
 	Blend render.BlendState
+	// Argument is the type of the value each entry gives the material,
+	// ArgumentOf's, its zero value none. Its layout is checked against the
+	// shader's struct Argument as the material is made, and a mismatch is
+	// reported once for the shader and the type as
+	// ReportKindArgumentLayoutMismatch, the material's entries skipped.
+	Argument ArgumentType
 	// CullMargin grows the bounds of the material's entries, in world units,
 	// zero meaning none, so a vertex stage that moves vertices, as wind
 	// sways grass, draws entries whose own bounds lie outside a camera's
@@ -65,10 +73,11 @@ func BlendOpaque() render.BlendState {
 }
 
 // makeRenderMaterial makes the render material of d through inventory, its
-// shader acquired, which the material holds until it is released, and
-// answers both: canvas's own vertex stage where d names none, and its
-// blending premultiplied, BlendNormal() where d's is zero, with no depth
-// test, since the sort key orders entries, and no culling.
+// shader acquired, with the define CANVAS_ARGUMENT where d takes an
+// argument, which the material holds until it is released, and answers
+// both: canvas's own vertex stage where d names none, and its blending
+// premultiplied, BlendNormal() where d's is zero, with no depth test, since
+// the sort key orders entries, and no culling.
 func (d MaterialDescriptor) makeRenderMaterial(inventory render.Inventory) (render.Material, render.Shader) {
 	blend := d.Blend
 	if blend == (render.BlendState{}) {
@@ -76,7 +85,11 @@ func (d MaterialDescriptor) makeRenderMaterial(inventory render.Inventory) (rend
 	}
 	var state render.State
 	state.ColorTargets[0].Blend = blend
-	shader := inventory.AcquireShader(d.Shader)
+	var defines []render.ShaderDefine
+	if d.Argument.goType != nil {
+		defines = []render.ShaderDefine{{Name: argumentDefine}}
+	}
+	shader := inventory.AcquireShader(d.Shader, defines...)
 	material := inventory.MakeMaterial(render.MaterialDescriptor{
 		Label:              d.Label,
 		Shader:             shader,

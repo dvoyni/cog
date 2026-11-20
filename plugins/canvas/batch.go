@@ -9,12 +9,15 @@ import (
 // entry to the next in sort order breaks a batch: their 2D material, the
 // view of the texture their images are drawn from, the whole texture of
 // the atlas they are packed into, or a render texture's view, their
-// filter, the axes their sampler repeats along, and their clip. The white
-// texel's entries take no filter,
-// FilterDefault, which no filter changes, so they join a batch of any
-// filter.
+// filter, the axes their sampler repeats along, and their clip. With them
+// goes their material's stride, which the material decides, so it breaks
+// no batch of its own: the stream their instance data goes into, zero for
+// the fixed instances of a material taking no argument. The white texel's
+// entries take no filter, FilterDefault, which no filter changes, so they
+// join a batch of any filter.
 type batchKey struct {
 	material Material
+	stride   uint32
 	texture  render.TextureView
 	filter   Filter
 	wrap     Wrap
@@ -24,7 +27,7 @@ type batchKey struct {
 // batch is a run of a frame's entries in sort order that share a batch key,
 // drawn as one instanced draw: its key, its filter the first of its
 // entries' that is not FilterDefault, its entries, and the instances they
-// draw.
+// draw, of the instance data of its material's stride.
 type batch struct {
 	key           batchKey
 	entries       []sortedEntry
@@ -37,10 +40,12 @@ type batch struct {
 // batch key, of batchKeys at its index, does not join the batch before it,
 // of another material, texture or clip, or of a filter neither is
 // FilterDefault, and to instances the instance data they draw, and answers
-// both appended to. Each batch's entries are part of entries. A fill, a
-// line and a sprite draw one instance, and a stroke four. A sprite's image
-// is its frame of drawnImages, a renderer's, and a shape's the zero Image's.
-func appendBatches(batches []batch, instances []instanceData, entries []sortedEntry, state *drawState, batchKeys []batchKey, drawnImages [][]drawnImage) ([]batch, []instanceData) {
+// batches appended to. Each batch's entries are part of entries. A fill, a
+// line and a sprite draw one instance, and a stroke four, each followed,
+// for a material taking an argument, by the argument its entry gives, or
+// the zero value. A sprite's image is its frame of drawnImages, a
+// renderer's, and a shape's the zero Image's.
+func appendBatches(batches []batch, instances *listInstanceData, entries []sortedEntry, state *drawState, batchKeys []batchKey, drawnImages [][]drawnImage) []batch {
 	firstBatch := len(batches)
 	for index, entry := range entries {
 		entryKey := batchKeys[entry.entryIndex]
@@ -51,20 +56,25 @@ func appendBatches(batches []batch, instances []instanceData, entries []sortedEn
 			joins = lastKey.material == entryKey.material && lastKey.texture == entryKey.texture && lastKey.wrap == entryKey.wrap && lastKey.clip == entryKey.clip && sharedFilter
 		}
 		if !joins {
-			batches = append(batches, batch{key: entryKey, entries: entries[index:index], firstInstance: uint32(len(instances))})
+			batches = append(batches, batch{key: entryKey, entries: entries[index:index], firstInstance: instances.count(entryKey.stride)})
 		}
 		lastBatch := &batches[len(batches)-1]
 		if lastBatch.key.filter == FilterDefault {
 			lastBatch.key.filter = entryKey.filter
 		}
 		lastBatch.entries = lastBatch.entries[:len(lastBatch.entries)+1]
-		if recorded := state.entries[entry.entryIndex]; recorded.kind == EntryKindShape {
-			instances = appendShapeInstances(instances, &state.shapes[recorded.index], &drawnImages[0][0])
+		recorded := state.entries[entry.entryIndex]
+		entryStart := len(instances.fixed)
+		if recorded.kind == EntryKindShape {
+			instances.fixed = appendShapeInstances(instances.fixed, &state.shapes[recorded.index], &drawnImages[0][0])
 		} else {
 			sprite := &state.sprites[recorded.index]
-			instances = appendSpriteInstance(instances, sprite, findDrawnFrame(drawnImages, sprite))
+			instances.fixed = appendSpriteInstance(instances.fixed, sprite, findDrawnFrame(drawnImages, sprite))
 		}
-		lastBatch.instanceCount = uint32(len(instances)) - lastBatch.firstInstance
+		lastBatch.instanceCount += uint32(len(instances.fixed) - entryStart)
+		if entryKey.stride != 0 {
+			instances.moveToStream(entryStart, entryKey.stride, state.findEntryArgument(recorded))
+		}
 	}
-	return batches, instances
+	return batches
 }

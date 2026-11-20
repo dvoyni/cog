@@ -67,19 +67,35 @@ const (
 	// or the default material, the zero Material, released or given a
 	// parameter, which are canvas's. It is reported once for each material.
 	ReportKindMaterialNotHeld
+	// ReportKindArgumentRefused is an entry's material argument of another
+	// type than its material's, or given a material that takes none, the
+	// default material among them, whose entry is skipped. It is reported
+	// once for each material and type.
+	ReportKindArgumentRefused
+	// ReportKindArgumentLayoutMismatch is a material's argument type whose
+	// layout does not match its shader's struct Argument, as render's
+	// Inventory.CheckLayout checks it, whose entries are skipped. It is
+	// reported once for each shader and type, as the material is made.
+	ReportKindArgumentLayoutMismatch
+	// ReportKindSliceLengthsDiffer is a bulk call given parallel slices of
+	// different lengths, such as DrawSpritesWith's sprites and arguments,
+	// which records none of them. It is reported once for each draw list.
+	ReportKindSliceLengthsDiffer
 )
 
 // The keys canvas logs a report once under are one of these, then the
-// report's subject: an image's path or texture, a sprite atlas's label, or a
-// material.
+// report's subject: an image's path or texture, a sprite atlas's label, a
+// material, or a shader or material and an argument's type.
 const (
-	imageOptionsIgnoredLogKey = "canvas: image options ignored: "
-	imageHeaderUnreadLogKey   = "canvas: image header unread: "
-	atlasFullLogKey           = "canvas: sprite atlas full: "
-	frameOutOfBoundsLogKey    = "canvas: frame out of bounds: "
-	imageTextureRefusedLogKey = "canvas: image texture refused: "
-	converterRefusedLogKey    = "canvas: converter refused: "
-	materialNotHeldLogKey     = "canvas: material not held: "
+	imageOptionsIgnoredLogKey    = "canvas: image options ignored: "
+	imageHeaderUnreadLogKey      = "canvas: image header unread: "
+	atlasFullLogKey              = "canvas: sprite atlas full: "
+	frameOutOfBoundsLogKey       = "canvas: frame out of bounds: "
+	imageTextureRefusedLogKey    = "canvas: image texture refused: "
+	converterRefusedLogKey       = "canvas: converter refused: "
+	materialNotHeldLogKey        = "canvas: material not held: "
+	argumentRefusedLogKey        = "canvas: argument refused: "
+	argumentLayoutMismatchLogKey = "canvas: argument layout mismatch: "
 )
 
 // pixelPerfectStretchReport is the report of a pixel-perfect camera's
