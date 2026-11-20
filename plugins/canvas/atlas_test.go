@@ -127,7 +127,7 @@ func findPassSummaries(list render.InspectedCommandList, labels map[render.Textu
 func findBatchAtlases(frame canvas.Inspection, labels map[render.Texture]string) []string {
 	var atlases []string
 	for _, inspectedBatch := range frame.Cameras[0].Batches {
-		atlases = append(atlases, labels[inspectedBatch.Atlas])
+		atlases = append(atlases, labels[inspectedBatch.Texture])
 	}
 	return atlases
 }
@@ -200,7 +200,7 @@ func TestSpritesOfDifferentImagesAndTheShapesBesideThemDrawFromTheSpriteAtlasAsO
 	}
 	var got []batchShape
 	for _, inspectedBatch := range frame.Cameras[0].Batches {
-		shape := batchShape{atlas: labels[inspectedBatch.Atlas], filter: inspectedBatch.Filter, instanceCount: inspectedBatch.InstanceCount}
+		shape := batchShape{atlas: labels[inspectedBatch.Texture], filter: inspectedBatch.Filter, instanceCount: inspectedBatch.InstanceCount}
 		for _, entry := range inspectedBatch.Entries {
 			shape.orders = append(shape.orders, entry.Order)
 		}
@@ -221,7 +221,7 @@ func TestSpritesOfDifferentImagesAndTheShapesBesideThemDrawFromTheSpriteAtlasAsO
 		samplers = append(samplers, findParameter(t, draw.DrawParameters, "canvas_sampler").Sampler)
 	}
 	batches := frame.Cameras[0].Batches
-	if len(batches) != 3 || !slices.Equal(textures, []render.Texture{batches[0].Atlas, batches[1].Atlas, batches[2].Atlas}) {
+	if len(batches) != 3 || !slices.Equal(textures, []render.Texture{batches[0].Texture, batches[1].Texture, batches[2].Texture}) {
 		t.Errorf("the batches drew %v, want each batch's atlas", textures)
 	}
 	// The inspection spells a nearest filter, its default, zero.
@@ -388,7 +388,7 @@ func TestAGrownAtlasCopiesEveryMipLevelOfItsPagesAndMakesTheMipsOfThePagePackedI
 	h.Step()
 
 	frame := h.Frames()[0]
-	atlas := frame.Cameras[0].Batches[0].Atlas
+	atlas := frame.Cameras[0].Batches[0].Texture
 	lists := findCanvasLists(frame.Render)
 	if len(lists) != 1 {
 		t.Fatalf("the frame began %d canvas lists, want one", len(lists))
@@ -623,8 +623,8 @@ func TestAFullAtlasDoublesItsPagesCopiedIntoATextureOfTwiceAsMany(t *testing.T) 
 			atlasTextures = append(atlasTextures, texture)
 		}
 	}
-	fourPages := frames[0].Cameras[0].Batches[0].Atlas
-	eightPages := frames[1].Cameras[0].Batches[0].Atlas
+	fourPages := frames[0].Cameras[0].Batches[0].Texture
+	eightPages := frames[1].Cameras[0].Batches[0].Texture
 	type pageCopy struct {
 		source, destination           render.Texture
 		sourceLayer, destinationLayer uint32
@@ -706,7 +706,7 @@ func TestAnAtlasAtItsCeilingEvictsTheImageDrawnLeastLatelyToPackANewOne(t *testi
 
 	frames := h.Frames()
 	labels := findTextureLabels(findRenderFrames(frames)...)
-	spriteAtlas := frames[0].Cameras[0].Batches[0].Atlas
+	spriteAtlas := frames[0].Cameras[0].Batches[0].Texture
 	for index, want := range [][]string{{redPath}, {quadrantsPath}, {greenPath}, {redPath}} {
 		var packed []string
 		for _, packing := range findPackings(t, frames[index].Render, labels) {
@@ -791,7 +791,7 @@ func TestAnImagesOwnTextureHasNoMoreMipLevelsThanItsSizeHas(t *testing.T) {
 	record := makeSpriteRecord(canvas.ImageFromFile("red2.png"))
 	h.Record(record)
 	h.Step()
-	describer.describe(h.Frames()[0].Cameras[0].Batches[0].Atlas)
+	describer.describe(h.Frames()[0].Cameras[0].Batches[0].Texture)
 	h.Record(record)
 	h.Step()
 

@@ -75,13 +75,14 @@ type renderer struct {
 	cameraDraws []cameraDraw
 	mainWindow  platform.Window
 	// entryBounds and batchKeys are the bounds and the batch keys of the
-	// frame's entries, each at its entry's index, outsideFileEntryCount
-	// how many of them draw a frame outside its file, and visibleEntries
-	// the entries each camera draws, in turn, all written over each frame.
-	entryBounds           []m.Rect
-	batchKeys             []batchKey
-	outsideFileEntryCount int
-	visibleEntries        []sortedEntry
+	// frame's entries, each at its entry's index, drawsNothingEntryCount
+	// how many of them draw an image's frame that draws nothing, and
+	// visibleEntries the entries each camera draws, in turn, all written
+	// over each frame.
+	entryBounds            []m.Rect
+	batchKeys              []batchKey
+	drawsNothingEntryCount int
+	visibleEntries         []sortedEntry
 	// instances are the instance data of the command list being drawn, and
 	// batches the frame's batches, each camera's in turn; both are written
 	// over each frame.
@@ -184,7 +185,7 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, m
 	r.visibleEntries = r.visibleEntries[:0]
 	r.entryBounds = r.entryBounds[:0]
 	r.batchKeys = r.batchKeys[:0]
-	r.outsideFileEntryCount = 0
+	r.drawsNothingEntryCount = 0
 	r.drawnFrameCount++
 	r.applyResidencyRequests(inventory, &state.residency)
 	// A frame of entries always sets a camera, the default one standing in.
@@ -210,32 +211,39 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, m
 		for _, spriteIndex := range r.unpackedSprites {
 			sprite := &state.sprites[spriteIndex]
 			drawn := findDrawnFrame(r.drawnImages, sprite)
-			// An earlier sprite of the same frame may have placed it.
-			if drawn.packed != nil || drawn.outsideFile {
+			// An earlier sprite of the same frame may have placed it: packed
+			// it, given it a view of its texture, or found it draws nothing.
+			if drawn.packed != nil || drawn.view.Texture != (render.Texture{}) || drawn.drawsNothing {
 				continue
 			}
 			key := imageNames.findKey(sprite.Image)
-			packed, withinFile := r.packImage(inventory, state.logger, &state.residency, key, sprite.Frame)
-			if !withinFile {
-				drawn.outsideFile = true
+			reportIgnoredOptions(state.logger, key)
+			if key.ofTexture {
+				placeTextureImage(inventory, state.logger, drawn, key, sprite.Frame)
 				continue
 			}
-			r.placeDrawnImage(state.logger, drawn, key, packed)
+			packed, withinFile := r.packImage(inventory, state.logger, &state.residency, key, sprite.Frame)
+			if !withinFile {
+				drawn.drawsNothing = true
+				continue
+			}
+			*drawn = makeDrawnImage(packed)
+			drawn.pivot = key.options.Pivot
 		}
 		// Every key is found again once every image is packed, since
 		// growing an atlas replaces its texture.
 		r.entryBounds = r.entryBounds[:0]
 		r.batchKeys = r.batchKeys[:0]
-		r.outsideFileEntryCount = 0
+		r.drawsNothingEntryCount = 0
 		for _, entry := range state.entries {
 			r.appendEntryKeys(state, entry)
 		}
 	}
 	state.sorter.regroup(r.batchKeys)
-	if r.outsideFileEntryCount > 0 {
+	if r.drawsNothingEntryCount > 0 {
 		state.sorter.entries = slices.DeleteFunc(state.sorter.entries, func(entry sortedEntry) bool {
 			recorded := state.entries[entry.entryIndex]
-			return recorded.kind == EntryKindSprite && findDrawnFrame(r.drawnImages, &state.sprites[recorded.index]).outsideFile
+			return recorded.kind == EntryKindSprite && findDrawnFrame(r.drawnImages, &state.sprites[recorded.index]).drawsNothing
 		})
 	}
 	for index := range state.cameras {
@@ -337,7 +345,7 @@ func (r *renderer) drawEntries(list *render.CommandList, drawnCamera *cameraDraw
 	pass.SetViewport(render.Viewport{X: float32(viewport.X), Y: float32(viewport.Y), Width: float32(viewport.Width), Height: float32(viewport.Height), MaxDepth: 1})
 	pass.SetPassUniform("canvas_camera", drawnCamera.block)
 	if drawnCamera.camera.Clear && !drawnCamera.colorTarget.Clear {
-		r.drawInstances(&pass, r.clearMaterial, instances, drawnCamera.viewportInstance, 1, r.srgbAtlas.texture, FilterNearest)
+		r.drawInstances(&pass, r.clearMaterial, instances, drawnCamera.viewportInstance, 1, render.TextureView{Texture: r.srgbAtlas.texture}, FilterNearest)
 	}
 	for _, drawnBatch := range drawnCamera.batches {
 		// The entries draw between FitInscribe's bars, which the clear
@@ -349,7 +357,7 @@ func (r *renderer) drawEntries(list *render.CommandList, drawnCamera *cameraDraw
 		scissor = scissor.Translate(toColorTarget)
 		pass.SetScissorRectangle(render.ScissorRectangle{X: uint32(scissor.X), Y: uint32(scissor.Y), Width: uint32(scissor.Width), Height: uint32(scissor.Height)})
 		// The default material is the only one canvas makes yet.
-		r.drawInstances(&pass, r.defaultMaterial, instances, drawnBatch.firstInstance, drawnBatch.instanceCount, drawnBatch.key.atlas, drawnBatch.key.filter)
+		r.drawInstances(&pass, r.defaultMaterial, instances, drawnBatch.firstInstance, drawnBatch.instanceCount, drawnBatch.key.texture, drawnBatch.key.filter)
 	}
 	pass.End()
 }
@@ -372,7 +380,7 @@ func (r *renderer) drawComposite(list *render.CommandList, drawnCamera *cameraDr
 	if drawnCamera.camera.Clear {
 		material = r.clearMaterial
 	}
-	r.drawInstances(&pass, material, instances, drawnCamera.viewportInstance, 1, drawnCamera.colorTarget.Resolve.Texture, FilterNearest)
+	r.drawInstances(&pass, material, instances, drawnCamera.viewportInstance, 1, render.TextureView{Texture: drawnCamera.colorTarget.Resolve.Texture}, FilterNearest)
 	pass.End()
 }
 
@@ -420,7 +428,7 @@ func (r *renderer) fillPackings(list *render.CommandList, inventory render.Inven
 				packing := &r.packings[index]
 				cell := packing.packed.atlas.findCell(packing.packed.region)
 				pass.SetViewport(render.Viewport{X: float32(cell.X), Y: float32(cell.Y), Width: float32(cell.Width), Height: float32(cell.Height), MaxDepth: 1})
-				r.drawInstances(&pass, r.packMaterial, instances, uint32(index), 1, packing.source, FilterNearest)
+				r.drawInstances(&pass, r.packMaterial, instances, uint32(index), 1, render.TextureView{Texture: packing.source}, FilterNearest)
 			}
 			pass.End()
 			filledBefore := slices.ContainsFunc(r.filledPages, func(filledPage *packedImage) bool {
@@ -447,40 +455,40 @@ func (r *renderer) fillPackings(list *render.CommandList, inventory render.Inven
 // firstInstance into pass with material, over texture, read through filter.
 // Setting a material resets the draw parameters, so each
 // draw sets its own.
-func (r *renderer) drawInstances(pass *render.Pass, material render.Material, instances render.BufferRange, firstInstance, instanceCount uint32, texture render.Texture, filter Filter) {
+func (r *renderer) drawInstances(pass *render.Pass, material render.Material, instances render.BufferRange, firstInstance, instanceCount uint32, texture render.TextureView, filter Filter) {
 	pass.SetMaterial(material)
 	pass.SetBuffer("canvas_instances", instances)
-	pass.SetTexture("canvas_atlas", texture)
+	pass.SetTextureView("canvas_atlas", texture)
 	pass.SetSampler("canvas_sampler", filter.makeSamplerDescriptor())
 	pass.DrawVertices(render.PrimitiveTopologyTriangleList, 6, render.DrawArgs{InstanceCount: instanceCount, FirstInstance: firstInstance})
 }
 
 // appendEntryKeys appends entry's bounds and batch key, of state's, to the
-// frame's, its image placed: packed, or outside its file, which draws
-// nothing, its bounds and batch key zero, counted in
-// outsideFileEntryCount.
+// frame's, its image placed: packed, given a view of its texture, or found
+// to draw nothing, its bounds and batch key then zero, counted in
+// drawsNothingEntryCount.
 func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 	if entry.kind == EntryKindShape {
 		shape := &state.shapes[entry.index]
 		r.entryBounds = append(r.entryBounds, shape.findBounds())
-		r.batchKeys = append(r.batchKeys, shape.batchKey(r.srgbAtlas.texture))
+		r.batchKeys = append(r.batchKeys, shape.batchKey(render.TextureView{Texture: r.srgbAtlas.texture}))
 		return
 	}
 	sprite := &state.sprites[entry.index]
 	image := findDrawnFrame(r.drawnImages, sprite)
-	if image.outsideFile {
+	if image.drawsNothing {
 		r.entryBounds = append(r.entryBounds, m.Rect{})
 		r.batchKeys = append(r.batchKeys, batchKey{})
-		r.outsideFileEntryCount++
+		r.drawsNothingEntryCount++
 		return
 	}
 	r.entryBounds = append(r.entryBounds, sprite.findBounds(image.size, image.pivot))
-	r.batchKeys = append(r.batchKeys, sprite.batchKey(image.packed.atlas.texture, state.defaultFilter))
+	r.batchKeys = append(r.batchKeys, sprite.batchKey(image.findView(), state.defaultFilter))
 }
 
 // findPlacedImage answers sprite's image's frame as drawn, and whether it
-// was placed when drawn before: packed, or found outside its file, its
-// image's drawn frames made at its first draw. A packed frame is marked
+// was placed when drawn before: packed, given a view of its texture, or
+// found to draw nothing, its image's drawn frames made at its first draw. A packed frame is marked
 // drawn this frame, so no atlas evicts it in it.
 func (r *renderer) findPlacedImage(sprite *Sprite) (*drawnImage, bool) {
 	image := sprite.Image
@@ -492,23 +500,10 @@ func (r *renderer) findPlacedImage(sprite *Sprite) (*drawnImage, bool) {
 		r.drawnImages[image.index] = make([]drawnImage, cmp.Or(sheet.Columns, 1)*cmp.Or(sheet.Rows, 1)+1)
 	}
 	drawn := findDrawnFrame(r.drawnImages, sprite)
-	if drawn.packed == nil {
-		return drawn, drawn.outsideFile
+	if drawn.packed != nil {
+		drawn.packed.lastDrawnFrame = r.drawnFrameCount
 	}
-	drawn.packed.lastDrawnFrame = r.drawnFrameCount
-	return drawn, true
-}
-
-// placeDrawnImage writes into drawn the image of key as drawn, packed as
-// packed, with key's pivot. It reports to logger, once for key's path,
-// options ImageFromFile was given for it and ignored.
-func (r *renderer) placeDrawnImage(logger *kernel.Logger, drawn *drawnImage, key imageKey, packed *packedImage) {
-	*drawn = makeDrawnImage(packed)
-	drawn.pivot = key.options.Pivot
-	if key.ignoredOptions {
-		ignored := Report{Kind: ReportKindImageOptionsIgnored, Err: fmt.Errorf("canvas: image %q was given more than one set of options by ImageFromFile, and is drawn with the first", key.path)}
-		logger.LogErrOnce(imageOptionsIgnoredLogKey+key.path, ignored)
-	}
+	return drawn, drawn.packed != nil || drawn.view.Texture != (render.Texture{}) || drawn.drawsNothing
 }
 
 // packImage packs frame of the image of key, marked drawn this frame, and
@@ -538,8 +533,8 @@ func (r *renderer) packImage(inventory render.Inventory, logger *kernel.Logger, 
 	}
 	frameRect, withinFile := key.options.findFrameRect(fileWidth, fileHeight, frame)
 	if !withinFile {
-		outOfBoundsReport := Report{Kind: ReportKindFrameOutOfBounds, Err: fmt.Errorf("canvas: frame %d of image %q, of its SourceRect %v cut by its sheet of %d by %d, does not lie within its file of %d by %d texels, so it draws nothing", frame, key.path, key.options.SourceRect, key.options.Sheet.Columns, key.options.Sheet.Rows, fileWidth, fileHeight)}
-		logger.LogErrOnce(frameOutOfBoundsLogKey+key.path, outOfBoundsReport)
+		outOfBoundsReport := Report{Kind: ReportKindFrameOutOfBounds, Err: fmt.Errorf("canvas: frame %d of image %s, of its SourceRect %v cut by its sheet of %d by %d, does not lie within its file of %d by %d texels, so it draws nothing", frame, key.describe(), key.options.SourceRect, key.options.Sheet.Columns, key.options.Sheet.Rows, fileWidth, fileHeight)}
+		logger.LogErrOnce(frameOutOfBoundsLogKey+key.findSubject(), outOfBoundsReport)
 	}
 	packedKey := packedKey{source: sourceKey, rect: frameRect, wrap: key.options.Wrap}
 	packed, shared := r.packedImages[packedKey]
@@ -628,7 +623,7 @@ func (r *renderer) packIntoSpriteAtlas(inventory render.Inventory, logger *kerne
 // applyResidencyRequests drops each frame packed of the paths requests asks
 // to unload, in the order asked, so its next draw loads it again, and
 // forgets each frame of theirs found outside its file, so its next draw
-// looks again.
+// looks again; an image of a render texture has no path.
 func (r *renderer) applyResidencyRequests(inventory render.Inventory, requests *residencyRequestQueue) {
 	requests.mutex.Lock()
 	defer requests.mutex.Unlock()
@@ -639,12 +634,12 @@ func (r *renderer) applyResidencyRequests(inventory render.Inventory, requests *
 			}
 		}
 		for index, frames := range r.drawnImages {
-			if !slices.ContainsFunc(frames, func(drawn drawnImage) bool { return drawn.outsideFile }) {
+			if !slices.ContainsFunc(frames, func(drawn drawnImage) bool { return drawn.drawsNothing }) {
 				continue
 			}
-			if isUnder(imageNames.findKey(Image{index: uint32(index)}).path, unloaded) {
+			if key := imageNames.findKey(Image{index: uint32(index)}); !key.ofTexture && isUnder(key.path, unloaded) {
 				for frame := range frames {
-					frames[frame].outsideFile = false
+					frames[frame].drawsNothing = false
 				}
 			}
 		}

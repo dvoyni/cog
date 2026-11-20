@@ -4,8 +4,9 @@ import "github.com/dvoyni/cog/libs/m"
 
 // instanceData mirrors canvas.wgsl's CanvasInstanceData without a material
 // argument: the data of one instance canvas draws, read at its
-// instance_index, 96 bytes, WGSL's size of the struct, the vec4<f32>
-// fields first, where they align to 16 with no padding.
+// instance_index, 112 bytes, WGSL's size of the struct, the vec4<f32>
+// fields first, where they align to 16 with no padding, and padded at its
+// end to a multiple of their alignment.
 type instanceData struct {
 	tint   [4]float32
 	region [4]float32
@@ -20,6 +21,11 @@ type instanceData struct {
 	size   m.Vec2
 	width  float32
 	radius float32
+	// decode is 1 where canvas_sample decodes the image's colour from sRGB
+	// as it samples it, as an image of a texture whose format encodes
+	// nothing marked sRGB is, and 0 otherwise.
+	decode uint32
+	_      [3]uint32
 }
 
 // shapePart mirrors canvas.wgsl's CANVAS_PART constants: which part of its
@@ -80,8 +86,8 @@ func appendShapeInstances(instances []instanceData, shape *Shape, white *drawnIm
 
 // appendSpriteInstance appends to instances the instance data of sprite, its
 // image as drawn image, and answers them: one instance, over its image's
-// region, its zero tint white and premultiplied, and a zero transform read
-// as the identity.
+// region, decoding it where it is to be, its zero tint white and
+// premultiplied, and a zero transform read as the identity.
 func appendSpriteInstance(instances []instanceData, sprite *Sprite, image *drawnImage) []instanceData {
 	tint := sprite.Tint
 	if tint == (m.Color{}) {
@@ -92,6 +98,9 @@ func appendSpriteInstance(instances []instanceData, sprite *Sprite, image *drawn
 		region: image.region,
 		crop:   sprite.Crop.findRect(),
 		page:   image.page,
+	}
+	if image.decode {
+		instance.decode = 1
 	}
 	instance.transform, instance.size = sprite.findSquare(image.size, image.pivot)
 	return append(instances, instance)

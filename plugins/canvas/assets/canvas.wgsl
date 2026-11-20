@@ -58,6 +58,11 @@ struct CanvasInstanceData {
 	size: vec2<f32>,
 	width: f32,
 	radius: f32,
+	// decode is 1 where canvas_sample decodes the image's colour from sRGB
+	// as it samples it: an image of a render texture marked sRGB whose
+	// format encodes nothing. An atlas's format, or an sRGB texture's,
+	// decodes it itself.
+	decode: u32,
 #if CANVAS_ARGUMENT
 	argument: Argument,
 #endif
@@ -209,11 +214,26 @@ fn canvas_covers(in: CanvasVaryings) -> bool {
 	return canvas_instances[in.instance].radius <= 0.0 || canvas_shape_distance(in) <= 0.0;
 }
 
-// canvas_sample answers the entry's image at the fragment, premultiplied:
-// its atlas page sampled at uv, whose texels canvas packed premultiplied, so
-// filtering never darkens a cut-out edge.
+// canvas_sample answers the entry's image at the fragment, premultiplied
+// and linear: its atlas page sampled at uv, whose texels canvas packed
+// premultiplied, so filtering never darkens a cut-out edge, or its render
+// texture's, premultiplied as a camera draws it, its colour decoded from
+// sRGB where its instance says, after filtering.
 fn canvas_sample(in: CanvasVaryings) -> vec4<f32> {
-	return textureSample(canvas_atlas, canvas_sampler, in.uv, canvas_instances[in.instance].page);
+	let instance_data = canvas_instances[in.instance];
+	let texel = textureSample(canvas_atlas, canvas_sampler, in.uv, instance_data.page);
+	if instance_data.decode == 0u {
+		return texel;
+	}
+	let coverage = select(texel.a, 1.0, texel.a <= 0.0);
+	return vec4<f32>(canvas_decode_srgb(texel.rgb / coverage) * coverage, texel.a);
+}
+
+// canvas_decode_srgb decodes colour encoded as sRGB into linear colour.
+fn canvas_decode_srgb(encoded: vec3<f32>) -> vec3<f32> {
+	let low = encoded / 12.92;
+	let high = pow((encoded + 0.055) / 1.055, vec3<f32>(2.4));
+	return select(high, low, encoded <= vec3<f32>(0.04045));
 }
 
 // canvas_encode_srgb encodes linear colour as sRGB.

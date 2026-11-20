@@ -55,9 +55,9 @@
       "name": "canvas_instances",
       "buffer": {
         "type": "read-only-storage",
-        "size": 96,
+        "size": 112,
         "element": {
-          "size": 96,
+          "size": 112,
           "members": [
             {
               "name": "tint",
@@ -103,10 +103,15 @@
               "name": "radius",
               "offset": 92,
               "size": 4
+            },
+            {
+              "name": "decode",
+              "offset": 96,
+              "size": 4
             }
           ]
         },
-        "elementStride": 96
+        "elementStride": 112
       },
       "entryPoints": [
         "canvas_sprite_vertex",

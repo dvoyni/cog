@@ -1,11 +1,59 @@
 package canvas
 
 import (
+	"encoding/json"
+	"os"
+	"reflect"
 	"slices"
 	"testing"
 
 	"github.com/dvoyni/cog/libs/m"
 )
+
+func TestInstanceDataIsLaidOutAsTheIncludesCanvasInstanceData(t *testing.T) {
+	// The declaration cmd/declarebindings generated from the include.
+	contents, err := os.ReadFile("assets/canvas.wgsl.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type member struct {
+		Offset uintptr
+		Size   uintptr
+	}
+	type binding struct {
+		Name   string
+		Buffer struct {
+			Element struct {
+				Size    uintptr
+				Members []member
+			}
+		}
+	}
+	var declaration struct{ Bindings []binding }
+	if err := json.Unmarshal(contents, &declaration); err != nil {
+		t.Fatal(err)
+	}
+	index := slices.IndexFunc(declaration.Bindings, func(declared binding) bool { return declared.Name == "canvas_instances" })
+	if index < 0 {
+		t.Fatal("the include declares no binding canvas_instances")
+	}
+	element := declaration.Bindings[index].Buffer.Element
+
+	instanceType := reflect.TypeFor[instanceData]()
+	var fields []member
+	for field := range instanceType.Fields() {
+		if field.Name != "_" {
+			fields = append(fields, member{Offset: field.Offset, Size: field.Type.Size()})
+		}
+	}
+	var members []member
+	for _, declared := range element.Members {
+		members = append(members, member{Offset: declared.Offset, Size: declared.Size})
+	}
+	if instanceType.Size() != element.Size || !slices.Equal(fields, members) {
+		t.Errorf("instanceData is %d bytes of the fields at their offsets and sizes %v, want CanvasInstanceData's %d bytes of %v", instanceType.Size(), fields, element.Size, members)
+	}
+}
 
 func TestALinesInstanceMapsTheUnitSquareOntoABandItsWidthWideCentredOnItsSegment(t *testing.T) {
 	line := Shape{Kind: Line, From: m.Vec2{X: 10, Y: 20}, To: m.Vec2{X: 10, Y: 60}, Width: 4, Radius: 3, Transform: m.Translation2x3(100, 0)}

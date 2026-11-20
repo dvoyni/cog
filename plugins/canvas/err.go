@@ -20,10 +20,10 @@ const (
 	// whose pixels would not be square, which is drawn as FitInscribe. It
 	// is reported once.
 	ReportKindPixelPerfectStretch
-	// ReportKindImageOptionsIgnored is an image ImageFromFile was given more than
-	// one set of options for, drawn with the first. It is reported once for
-	// each path, at the image's first draw, and again after the path is
-	// unloaded.
+	// ReportKindImageOptionsIgnored is an image ImageFromFile or
+	// ImageFromTexture was given more than one set of options for, drawn
+	// with the first. It is reported once for each path or texture, at the
+	// image's first draw, and again after the path is unloaded.
 	ReportKindImageOptionsIgnored
 	// ReportKindAtlasFull is a sprite atlas at its ceiling of pages, every
 	// image it holds drawn this frame, so an image that fits on none of its
@@ -46,19 +46,26 @@ const (
 	// reported once, as canvas starts.
 	ReportKindMipLevelsLowered
 	// ReportKindFrameOutOfBounds is an image whose ImageOptions.SourceRect
-	// reaches past its file, or holds no texel of a frame, or a sprite's
-	// Frame past its image's sheet's last, which draws nothing. It is
-	// reported once for each path, and again after the path is unloaded.
+	// reaches past its file or texture, or holds no texel of a frame, or a
+	// sprite's Frame past its image's sheet's last, which draws nothing. It
+	// is reported once for each path or texture, and again after the path
+	// is unloaded.
 	ReportKindFrameOutOfBounds
+	// ReportKindImageTextureRefused is an image ImageFromTexture made of a
+	// texture render does not hold at the image's first draw, the zero
+	// Texture among them, which draws nothing. It is reported once for each
+	// texture.
+	ReportKindImageTextureRefused
 )
 
 // The keys canvas logs a report once under are one of these, then the
-// report's subject: an image's path, or a sprite atlas's label.
+// report's subject: an image's path or texture, or a sprite atlas's label.
 const (
 	imageOptionsIgnoredLogKey = "canvas: image options ignored: "
 	imageHeaderUnreadLogKey   = "canvas: image header unread: "
 	atlasFullLogKey           = "canvas: sprite atlas full: "
 	frameOutOfBoundsLogKey    = "canvas: frame out of bounds: "
+	imageTextureRefusedLogKey = "canvas: image texture refused: "
 )
 
 // pixelPerfectStretchReport is the report of a pixel-perfect camera's

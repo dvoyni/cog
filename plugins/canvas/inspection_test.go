@@ -47,7 +47,7 @@ func TestAnInspectedFrameAnswersItsCamerasBatchesInstanceCountsAndEntriesWithThe
 	// the sRGB sprite atlas.
 	var spriteAtlas render.Texture
 	if len(frame.Cameras) == 1 && len(frame.Cameras[0].Batches) == 1 {
-		spriteAtlas = frame.Cameras[0].Batches[0].Atlas
+		spriteAtlas = frame.Cameras[0].Batches[0].Texture
 	}
 	if label := findTextureLabels(frame.Render)[spriteAtlas]; label != "canvas sprites sRGB" {
 		t.Errorf("the batch drew from %v, labelled %q, want the sRGB sprite atlas", spriteAtlas, label)
@@ -57,7 +57,7 @@ func TestAnInspectedFrameAnswersItsCamerasBatchesInstanceCountsAndEntriesWithThe
 		Window:   window,
 		Viewport: m.Recti{Width: 64, Height: 48},
 		Batches: []canvas.InspectedBatch{{
-			Atlas:         spriteAtlas,
+			Texture:       spriteAtlas,
 			InstanceCount: 7,
 			Entries: []canvas.InspectedEntry{
 				entry(canvas.Shape{Order: 10}, 1, 0),

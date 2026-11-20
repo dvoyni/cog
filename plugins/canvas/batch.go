@@ -7,12 +7,14 @@ import (
 
 // batchKey is what a batch's entries share, a change of which from one
 // entry to the next in sort order breaks a batch: their 2D material, the
-// texture of the atlas their images are packed into, their filter, and
-// their clip. The white texel's entries take no filter, FilterDefault,
-// which no filter changes, so they join a batch of any filter.
+// view of the texture their images are drawn from, the whole texture of
+// the atlas they are packed into, or a render texture's view, their
+// filter, and their clip. The white texel's entries take no filter,
+// FilterDefault, which no filter changes, so they join a batch of any
+// filter.
 type batchKey struct {
 	material Material
-	atlas    render.Texture
+	texture  render.TextureView
 	filter   Filter
 	clip     m.Rect
 }
@@ -31,7 +33,7 @@ type batch struct {
 // appendBatches appends to batches the batches of entries, of state's, in
 // sort order, a batch beginning at the first entry and wherever an entry's
 // batch key, of batchKeys at its index, does not join the batch before it,
-// of another material, atlas or clip, or of a filter neither is
+// of another material, texture or clip, or of a filter neither is
 // FilterDefault, and to instances the instance data they draw, and answers
 // both appended to. Each batch's entries are part of entries. A fill, a
 // line and a sprite draw one instance, and a stroke four. A sprite's image
@@ -44,7 +46,7 @@ func appendBatches(batches []batch, instances []instanceData, entries []sortedEn
 		if len(batches) > firstBatch {
 			lastKey := batches[len(batches)-1].key
 			sharedFilter := lastKey.filter == entryKey.filter || lastKey.filter == FilterDefault || entryKey.filter == FilterDefault
-			joins = lastKey.material == entryKey.material && lastKey.atlas == entryKey.atlas && lastKey.clip == entryKey.clip && sharedFilter
+			joins = lastKey.material == entryKey.material && lastKey.texture == entryKey.texture && lastKey.clip == entryKey.clip && sharedFilter
 		}
 		if !joins {
 			batches = append(batches, batch{key: entryKey, entries: entries[index:index], firstInstance: uint32(len(instances))})

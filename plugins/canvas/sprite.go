@@ -13,7 +13,8 @@ import (
 type Sprite struct {
 	// Image is what the sprite draws, the zero Image the white texel. Its
 	// first draw loads it, drawn that frame; one render cannot load draws
-	// render's magenta, reported once by render.
+	// render's magenta, reported once by render. An image of a render
+	// texture, ImageFromTexture's, loads nothing.
 	Image Image
 	// Frame is the frame of Image's sheet the sprite draws, counted along
 	// its rows, zero for an image of one frame. One past the sheet's last
@@ -50,11 +51,11 @@ type Sprite struct {
 }
 
 // batchKey answers what the sprite shares with the entries it batches with,
-// its image packed into the atlas whose texture is atlas, its filter
-// defaultFilter when it names none, and none for the zero Image, the white
-// texel, which no filter changes, so it batches with shapes.
-func (s *Sprite) batchKey(atlas render.Texture, defaultFilter Filter) batchKey {
-	key := batchKey{material: s.Material, atlas: atlas, clip: s.Clip}
+// its image drawn from texture, its filter defaultFilter when it names
+// none, and none for the zero Image, the white texel, which no filter
+// changes, so it batches with shapes.
+func (s *Sprite) batchKey(texture render.TextureView, defaultFilter Filter) batchKey {
+	key := batchKey{material: s.Material, texture: texture, clip: s.Clip}
 	if s.Image != (Image{}) {
 		key.filter = cmp.Or(s.Filter, defaultFilter)
 	}

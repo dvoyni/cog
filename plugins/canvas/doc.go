@@ -91,6 +91,15 @@
 //	list.DrawSprite(canvas.Sprite{Image: terrain, Frame: tile, Transform: m.Translation2x3(x, y)})
 //	water := canvas.ImageFromFile("water.png", canvas.ImageOptions{Wrap: canvas.WrapBoth})
 //
+// ImageFromTexture makes an Image of a texture made with render, never
+// packed, drawn from its mip level 0 and layer 0, so a minimap camera's
+// texture drawn as a sprite shows the world it drew. A texture of a format
+// encoding nothing that holds encoded colour, as a camera's does, is marked
+// ColorSpaceSrgb, the zero, and decoded as it is sampled:
+//
+//	minimap := canvas.ImageFromTexture(minimapTexture)
+//	list.DrawSprite(canvas.Sprite{Image: minimap, Transform: m.Translation2x3(x, y), Layer: layerUI})
+//
 // An atlas is one 2D-array texture whose layers are pages of
 // Config.AtlasPageSize, each image a cell of its own, premultiplied, its
 // gutter continuing its edges, or wrapped along the axes it tiles, on a

@@ -29,7 +29,7 @@ One layer of an atlas. Entries over any page of one atlas can still be drawn tog
 _Avoid_: Texture page, sheet, layer (canvas's own term, for sorting)
 
 **Image**:
-A picture canvas can draw: a file and the options it is drawn with, such as how its edges fill and whether it is a sheet. Naming an image loads nothing; it is packed into an atlas when it is first drawn, and stays until it is unloaded or evicted.
+A picture canvas can draw: a file, or a render texture, and the options it is drawn with, such as how its edges fill and whether it is a sheet. Naming an image loads nothing; an image of a file is packed into an atlas when it is first drawn, and stays until it is unloaded or evicted, and an image of a render texture is drawn from the texture itself.
 _Avoid_: Sprite, texture, asset, handle
 
 **Sheet**:

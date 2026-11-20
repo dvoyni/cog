@@ -382,7 +382,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 
 **Naming and residency**
 
-- **An `Image`** is a path in the FileSystem and its `ImageOptions`, interned into a plain, pointer-free, comparable value by `ImageFromFile(path, options…)`.
+- **An `Image`** is a path in the FileSystem and its `ImageOptions`, interned into a plain, pointer-free, comparable value by `ImageFromFile(path, options…)`, or a render texture and its options, by `ImageFromTexture` (see *A render texture is not packed*).
   - Making one loads nothing. Each `ImageFromFile` takes the table's lock and hashes its path, so a game makes an `Image` once, as it names its art, and keeps it, rather than calling `ImageFromFile` for each entry it draws.
   - `ImageFromFile` takes at most one set of options, so the common case reads `ImageFromFile("water.png")`. A second set is reported once and ignored.
   - Its options are its colour space (`ColorSpaceSrgb`, the zero, or `ColorSpaceLinear`), `Wrap` for the axes it tiles along, a sheet's `Grid{Columns, Rows}`, its `Pivot`, `SourceRect`, `Slice` and `SliceHollow`, and a converter.
@@ -411,7 +411,11 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - It reads only the file's header, with `image.DecodeConfig` through platform's FS, cached per path.
   - It answers the size in texels of a sheet's frame; of a converted image's input, since size and pivot are measured on the input; and of a render-texture image's texture, through render's `Inventory.TextureDescriptor`.
   - A missing file answers false and is reported once.
-- **A render texture is not packed.** `ImageFromTexture(texture, options…)` interns one into an `Image`, drawn through a 2D-array view of its own, at layer 0. It takes its colour space from its options as any image does, so a Unorm texture holding encoded colour is marked `ColorSpaceSrgb` (see *Cameras*).
+- **A render texture is not packed.** `ImageFromTexture(texture, options…)` interns one into an `Image`, drawn through a 2D-array view of its own, of its mip level 0 and layer 0 alone, where a camera into it draws. It takes its colour space from its options as any image does, so a Unorm texture holding encoded colour is marked `ColorSpaceSrgb` (see *Blending in the target's space*).
+  - Its size, and the rectangle a `SourceRect` or a sheet's frame cuts from it, come from render's `Inventory.TextureDescriptor` at its first draw, its texels taken as premultiplied, as a camera draws them.
+  - Its view is the batch's texture, so it breaks a batch as a change of atlas does.
+  - A texture render does not hold at its first draw draws nothing, reported once for the texture as `ReportKindImageTextureRefused`, and `Preload` loads nothing for it.
+  - A view of every level was weighed: a camera draws level 0 alone, so a sprite drawn smaller than its texture would read levels no camera wrote.
 
 **Atlases and pages**
 
@@ -561,7 +565,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   A custom shader declares only `@group(1)`, and the struct of its material argument.
 - **One include, `cog.canvas/canvas.wgsl`, declares every binding of groups 0 and 2,** with the functions over them: world to clip, snapping, a mesh's varyings with the region remap, the sampling helper and the output's encoding.
   - **The sampling helper answers the image premultiplied,** reading the atlas's texels as they are, since canvas packs an image premultiplied (see *From pixels to pages*). Premultiplying after sampling was built first, while each image drew from render's texture of its file, of straight alpha: linear filtering then mixed a cut-out edge's colour with the black of its transparent neighbours before premultiplying, fringing the edge dark. The quads canvas draws over a viewport read through a shader of their own, `cog.canvas/viewport.wgsl`: a camera's clear and what a multisampled camera resolved, premultiplied already and drawn as they are, and the packing of an image into its cell, which premultiplies it. canvas's own materials include it as a custom one does, so nothing of the camera is hard-coded where a custom shader cannot reach it. render interns layouts across shaders sharing an include, so every 2D material's pass parameters are one bind group, set once per camera pass.
-- **The instance data**, `CanvasInstanceData`, is canvas's fixed part (its transform as `mat3x2<f32>`, its premultiplied tint, its region and its page, and what its draw mode, slice insets and crop need), then the argument. Its storage binding is `canvas_instances`.
+- **The instance data**, `CanvasInstanceData`, is canvas's fixed part (its transform as `mat3x2<f32>`, its premultiplied tint, its region and its page, whether `canvas_sample` decodes its image from sRGB, and what its draw mode, slice insets and crop need), then the argument. Its storage binding is `canvas_instances`.
 - **The include's instance data type names the shader's `Argument` struct,** since WGSL's declarations may come in any order. A material with no argument declares none, and canvas preprocesses a material's shader that has one with the define `CANVAS_ARGUMENT`, which the include's `#if` reads, since WGSL forbids an empty struct.
 - **The pass parameters:**
   - `world_to_clip`, a `mat3x2<f32>` from the world to the viewport's clip space, the fit, zoom, rotation and pivot in it, and `clip_to_world`, its inverse, for an effect that needs a fragment's world position;
@@ -773,6 +777,8 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - A window's framebuffer is taken to be `BGRA8Unorm`, gogpu's only format, and always encoded: neither render nor gfx answers a window's format to canvas yet, so a surface of an sRGB format would be encoded twice.
 - **v1 blended in linear space** in an `RGBA8UnormSrgb` intermediate and encoded it in an implicit final pass, which cost a pass and 8 MB a window at 1080p.
 - **An image made from a camera's texture takes its colour space as any image does.** A Unorm texture holding encoded colour is marked sRGB and decoded as it is sampled, so a minimap drawn as an image looks as the world drawn directly does.
+  - `canvas_sample` decodes it after filtering, where the instance data's `decode` says, the inverse of `canvas_output`'s encoding of premultiplied colour. An sRGB texture is decoded by its format, however it is marked, and an atlas's format always decodes its own.
+  - A view of an sRGB format over the Unorm texture was weighed: it needs the texture made with that view format, which render's descriptor does not carry, and a game making its own texture would have to know to ask.
 - **A camera's texture target's size and format come from render's `Inventory.TextureDescriptor`,** for placing its viewport, for `Targets`, and for `encode`. A camera restating its texture's size and format, or canvas making texture targets of its own, would each keep a second account of what render already holds.
 
 ### Clips and culling
@@ -808,7 +814,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 
 ([canvas: sprites, their transforms, and how they are ordered and batched](https://github.com/dvoyni/cog/issues/867), [canvas: custom 2D meshes](https://github.com/dvoyni/cog/issues/870))
 
-- **A batch is a run of sorted entries with the same material, atlas, filter and clip.** Sprites, shapes and glyphs are drawn as `DrawVertices(TriangleList, 6, DrawArgs{InstanceCount, FirstInstance})`, with no mesh, each instance reading its instance data at `instance_index`.
+- **A batch is a run of sorted entries with the same material, atlas or render texture, filter and clip.** Sprites, shapes and glyphs are drawn as `DrawVertices(TriangleList, 6, DrawArgs{InstanceCount, FirstInstance})`, with no mesh, each instance reading its instance data at `instance_index`.
 - **Nothing else breaks a batch:** not the image, the frame, the page, the draw mode, the crop, the tint or the argument. The white texel's entries, shapes and sprites of the zero `Image`, take no filter, which changes no pixel of it, so a zero-image sprite batches with shapes whatever its `Filter`, and they join a batch of any filter, which takes the filter of the first of its entries that names one. A texture change breaks every engine's batch; a 2D-array atlas with its page carried per instance avoids it.
 - **Instance data** goes into temporary storage buffers, one per stride, so entries of every material share them. There is no cap beyond the binding's 128 MiB.
 - **Every draw of canvas's is instanced,** a lone sprite or mesh among them: each instance reads its instance data at `instance_index` from the draw's `FirstInstance`. canvas keeps no other path.

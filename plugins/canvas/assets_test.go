@@ -129,7 +129,7 @@ func TestUnloadingAnImageDrawnFromATextureOfItsOwnReleasesTheTexture(t *testing.
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	h.Record(makeSpriteRecord(canvas.ImageFromFile(bluePath)))
 	h.Step()
-	own := h.Frames()[0].Cameras[0].Batches[0].Atlas
+	own := h.Frames()[0].Cameras[0].Batches[0].Texture
 	describer.describe(own)
 
 	h.Step()

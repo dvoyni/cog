@@ -4,11 +4,13 @@ import (
 	"cmp"
 
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/plugins/render"
 )
 
-// ImageOptions are what an image is loaded and placed with. Images of one
-// path that differ only in options that change no pixel, such as the
-// pivot, share their region of the atlas.
+// ImageOptions are what an image is loaded and placed with, of a file, or
+// of a render texture, measured in its texels. Images of one path that
+// differ only in options that change no pixel, such as the pivot, share
+// their region of the atlas.
 type ImageOptions struct {
 	// ColorSpace is how the file encodes its colours.
 	ColorSpace ColorSpace
@@ -35,11 +37,13 @@ type ImageOptions struct {
 	Pivot Pivot
 }
 
-// ColorSpace is how an image's file encodes its colours.
+// ColorSpace is how an image's file, or its render texture, encodes its
+// colours.
 type ColorSpace uint8
 
 const (
-	// ColorSpaceSrgb is colour encoded in sRGB, as most pictures are: it is
+	// ColorSpaceSrgb is colour encoded in sRGB, as most pictures are, and
+	// as a camera draws into a texture of a format encoding nothing: it is
 	// decoded to linear colour as it is sampled.
 	ColorSpaceSrgb ColorSpace = iota
 	// ColorSpaceLinear is data or linear colour, sampled as it is.
@@ -95,7 +99,35 @@ var (
 // second set is ignored, and reported once, as
 // ReportKindImageOptionsIgnored, when the Image answered is first drawn.
 func ImageFromFile(path string, options ...ImageOptions) Image {
-	key := imageKey{path: path}
+	return internImage(imageKey{path: path}, options)
+}
+
+// ImageFromTexture interns texture, a texture made with render, with
+// options, into an Image: every call of the same texture and options
+// answers the same one, so a game makes it once, as it makes the texture.
+// The image is not packed: its entries draw the texture's mip level 0 and
+// layer 0, where a camera into it draws, through a 2D-array view of them
+// alone, so a change to or from it breaks a batch, and a minimap camera's
+// texture drawn as a sprite shows what the camera drew, when it draws
+// first, at a lower order, or at the same order into a texture. Its texels
+// are taken as premultiplied, as a camera draws them. Its options are an
+// ImageFromFile's, measured in the texture's texels: its ColorSpace is how
+// the texels encode colour, so a texture of a format encoding nothing that
+// holds encoded colour, as a camera's into it does, is marked
+// ColorSpaceSrgb, the zero, and decoded as it is sampled, after filtering,
+// so linear filtering blends its encoded colour, looking as the world drawn
+// directly; a texture of an sRGB format is decoded by its
+// format, however it is marked. A texture render does not hold at the
+// image's first draw draws nothing, reported once as
+// ReportKindImageTextureRefused. It takes at most one set of options, a
+// second ignored and reported once, as ImageFromFile's is.
+func ImageFromTexture(texture render.Texture, options ...ImageOptions) Image {
+	return internImage(imageKey{texture: texture, ofTexture: true}, options)
+}
+
+// internImage interns key, its options the first of options, marked as
+// having ignored the rest.
+func internImage(key imageKey, options []ImageOptions) Image {
 	if len(options) > 0 {
 		key.options = options[0]
 	}

@@ -48,10 +48,10 @@ type Shape struct {
 }
 
 // batchKey answers what the shape shares with the entries it batches with:
-// it draws over the white texel, in the sprite atlas whose texture is
-// atlas, and takes no filter, which changes no pixel of it.
-func (s *Shape) batchKey(atlas render.Texture) batchKey {
-	return batchKey{material: s.Material, atlas: atlas, clip: s.Clip}
+// it draws over the white texel, in the sprite atlas seen through texture,
+// and takes no filter, which changes no pixel of it.
+func (s *Shape) batchKey(texture render.TextureView) batchKey {
+	return batchKey{material: s.Material, texture: texture, clip: s.Clip}
 }
 
 // findSquare answers the transform from the unit square onto the shape in

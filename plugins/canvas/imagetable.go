@@ -38,13 +38,14 @@ func (t *imageTable) intern(key imageKey) Image {
 }
 
 // findPaths answers the path of each key interned that Unload(unloaded)
-// unloads, a path interned with several options once for each.
+// unloads, a path interned with several options once for each, and no
+// image of a render texture, which has none.
 func (t *imageTable) findPaths(unloaded string) []string {
 	t.mutex.RLock()
 	defer t.mutex.RUnlock()
 	var paths []string
 	for _, key := range t.keys {
-		if isUnder(key.path, unloaded) {
+		if !key.ofTexture && isUnder(key.path, unloaded) {
 			paths = append(paths, key.path)
 		}
 	}

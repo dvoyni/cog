@@ -41,12 +41,16 @@ func (Assets) Declare(access *kernel.Access) Assets {
 // decodes it before the frame's submit, or the next frame's once this
 // frame's recording has ended, and canvas packs it as it is first drawn. An
 // image packed already, or preloaded and not yet drawn, is not loaded
-// again, nor is the zero Image, the white texel.
+// again, nor is the zero Image, the white texel, nor an image of a render
+// texture, ImageFromTexture's, which loads nothing.
 func (a Assets) Preload(image Image) {
 	if image == (Image{}) {
 		return
 	}
 	key := imageNames.findKey(image)
+	if key.ofTexture {
+		return
+	}
 	a.state.Get().residency.requestPreload(a.inventory, sourceKey{path: key.path, colorSpace: key.options.ColorSpace})
 }
 
@@ -72,19 +76,29 @@ func (a Assets) Unload(path string) {
 // whether the header was read: false for a file that is missing or no
 // image render loads, reported once for its path as
 // ReportKindImageHeaderUnread, and for an image whose first frame does not
-// lie within its file, which draws nothing. The zero Image, the white
-// texel, is one texel.
+// lie within its file, which draws nothing. An image of a render texture,
+// ImageFromTexture's, is measured on render's descriptor of the texture,
+// false for one render does not hold. The zero Image, the white texel, is
+// one texel.
 func (a Assets) ImageSize(image Image) (m.Vec2, bool) {
 	if image == (Image{}) {
 		return m.Vec2{X: 1, Y: 1}, true
 	}
 	state := a.state.Get()
 	key := imageNames.findKey(image)
-	fileSize, read := state.imageSizes.find(a.files.Get(), state.logger, key.path)
+	var size m.Vec2
+	var read bool
+	if key.ofTexture {
+		var descriptor render.TextureDescriptor
+		descriptor, read = a.inventory.TextureDescriptor(key.texture)
+		size = m.Vec2{X: float32(descriptor.Width), Y: float32(descriptor.Height)}
+	} else {
+		size, read = state.imageSizes.find(a.files.Get(), state.logger, key.path)
+	}
 	if !read {
 		return m.Vec2{}, false
 	}
-	frameRect, withinFile := key.options.findFrameRect(int(fileSize.X), int(fileSize.Y), 0)
+	frameRect, withinFile := key.options.findFrameRect(int(size.X), int(size.Y), 0)
 	return frameRect.Size().Float(), withinFile
 }
 

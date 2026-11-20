@@ -119,6 +119,18 @@ beside render's inspection of it.
   their region. A second set of options is ignored and reported once, and
   a `SourceRect` reaching past its file, or a `Frame` past its sheet's
   last, draws nothing, reported once.
+- **`ImageFromTexture(texture, options…)`** interns a texture made with
+  render and its `ImageOptions` into an `Image`, never packed: its entries
+  draw the texture's mip level 0 and layer 0, where a camera into it
+  draws, through a 2D-array view of them alone, so it batches only with
+  entries of the same texture, and a minimap camera's texture drawn as a
+  sprite shows what the camera drew that frame. Its texels are taken as
+  premultiplied, as a camera draws them, and its options are measured in
+  them: a texture of a format encoding nothing that holds encoded colour,
+  as a camera's into it does, is marked `ColorSpaceSrgb`, the zero, and
+  decoded as it is sampled, so it looks as the world drawn directly, and
+  an sRGB texture is decoded by its format, however it is marked. A
+  texture render does not hold draws nothing, reported once.
 - **`OrderOf(y)`** maps a float onto an order of its own, in the same order,
   for y-sorting.
 - **`Material`** names a 2D material; the zero one, the default material,
@@ -129,17 +141,20 @@ beside render's inspection of it.
   a folder for a path ending in a slash, `Unload("level1/")`, as canvas next
   draws, a later draw loading them again; `ImageSize(image)` answers an image's size, its
   rectangle's or its frames', from its file's header alone, before it is drawn, and false for a missing file, reported
-  once; `RequestInspection` asks for an inspection of the next frame, and
+  once, an image of a texture measured on render's descriptor of it; `RequestInspection` asks for an inspection of the next frame, and
   `ReadInspection` answers it in a task off **`InspectedEvent`**.
 - **`Inspection`** is one frame in canvas's terms: each camera that drew,
   the window it drew into and its viewport in pixels, its batches with their
-  material, their atlas, their filter, their clip and the entries it did not
+  material, the texture they drew from, an atlas's or a render texture's,
+  their filter, their clip and the entries it did not
   cull, each entry a shape or a sprite, with its sort key and its draw
   list's place, and render's `Inspection` of the frame beside it.
 - **`cog.canvas/canvas.wgsl`** is canvas's include, declaring the camera's
   pass parameters at `@group(0)` and canvas's instance data and atlas at
   `@group(2)`, with the functions over them, `canvas_sample` answering an
-  entry's image premultiplied, as the atlas holds it, which canvas's own
+  entry's image premultiplied, as the atlas holds it, and linear, an image
+  of a texture of a format encoding nothing decoded from sRGB where it is
+  marked so, which canvas's own
   default material, `cog.canvas/default.wgsl`, includes, as does
   `cog.canvas/viewport.wgsl`, the shader of the quads canvas draws over a
   viewport: a camera's clear, what a multisampled camera resolved, and an
@@ -164,8 +179,8 @@ beside render's inspection of it.
   white texel in the sRGB one, each image drawn, where it is packed and
   when it was last drawn, the sources preloaded, the cameras drawn, the
   entries' keys, the instance data and the batches; and a private list of
-  the open windows. The images `ImageFromFile`
-  interns are a table of the process's, shared by every kernel, each kernel
+  the open windows. The images `ImageFromFile` and `ImageFromTexture`
+  intern are a table of the process's, shared by every kernel, each kernel
   packing them apart.
 - **Resources it reads from other plugins:** render's, for read through
   `render.Frame` and `render.Inventory`, `Assets` holding both; `platform.FS`,

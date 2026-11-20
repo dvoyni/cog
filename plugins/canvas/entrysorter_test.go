@@ -118,7 +118,7 @@ func newShapeFrame(shapes []Shape, sorter entrySorter) *drawState {
 func findShapeBatchKeys(state *drawState) []batchKey {
 	var keys []batchKey
 	for index := range state.shapes {
-		keys = append(keys, state.shapes[index].batchKey(render.Texture{}))
+		keys = append(keys, state.shapes[index].batchKey(render.TextureView{}))
 	}
 	return keys
 }

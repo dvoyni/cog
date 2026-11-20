@@ -35,10 +35,10 @@ type InspectedCamera struct {
 }
 
 // InspectedBatch is one batch of an inspected camera, a run of entries in
-// sort order sharing a 2D material, an atlas, a filter and a clip, drawn as
-// one instanced draw: its material; the texture of the atlas its entries'
-// images are packed into, shapes' the sRGB sprite atlas, holding the white
-// texel; its filter, the first of its entries' that names one, the white
+// sort order sharing a 2D material, a texture, a filter and a clip, drawn
+// as one instanced draw: its material; the texture its entries' images are
+// drawn from, the atlas's they are packed into, shapes' the sRGB sprite
+// atlas's, holding the white texel, or a render texture's; its filter, the first of its entries' that names one, the white
 // texel's taking none, and FilterDefault for a batch of the white texel
 // alone; its clip; its instance count; and the
 // entries it drew, in sort order, those the camera culled left out. A fill,
@@ -47,7 +47,7 @@ type InspectedCamera struct {
 // larger than the entries.
 type InspectedBatch struct {
 	Material      Material
-	Atlas         render.Texture
+	Texture       render.Texture
 	Filter        Filter
 	Clip          m.Rect
 	InstanceCount uint32
