@@ -109,6 +109,15 @@ func (sphere Sphere) Union(other Sphere) Sphere {
 	}
 }
 
+// Box2 is an axis-aligned box in the plane, its corners Min and Max: its
+// left and top edges, then its right and bottom ones, in a space whose y
+// points down. It is the edges-first twin of Rect, which holds an origin and
+// a size.
+type Box2 struct {
+	Min Vec2 `json:"min"`
+	Max Vec2 `json:"max"`
+}
+
 // Box3 is an axis-aligned bounding box, the shape a glTF POSITION accessor
 // reports as min and max. The zero Box3 is a point at the origin, not an empty
 // box, so Union over a set starts from the set's first member.

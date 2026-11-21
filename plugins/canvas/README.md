@@ -155,6 +155,27 @@ in canvas's terms, beside render's inspection of it.
   so given a sprite's transform and size it lines up with the sprite at
   any pivot. An anti-aliased edge is found to within a fraction of a
   texel from its coverage.
+- **`SDFMaterial`** is canvas's SDF material, drawing the distance from an
+  entry's edge through a **`Profile`**, its argument, as a colour: a
+  sprite's read from its image, a distance field of the profile's `Spread`,
+  zero meaning 8 as `DistanceField`'s does, and a shape's from its rectangle
+  and radius, its quad and its bounds grown by the profile's reach. It draws
+  the band alone, so a halo is two entries, the field drawn with it and the
+  sprite over it, its colour the profile's times the entry's tint, so a
+  shape, whose zero tint is transparent, gives one, and its zero `Profile`
+  draws nothing. A `Profile{Inner,
+  Outer, Plateau, Falloff, Color, Offset, Spread}` is a band from `Inner`
+  inside the edge to `Outer` outside it, solid to `Plateau`, then falling
+  off along (1 − t) to the power `Falloff`, zero a hard edge, in field
+  texels, a shape's own space for a shape; its `Color` is premultiplied,
+  adding when its alpha is zero, and its `Offset` is in world space, so
+  every shadow falls the same way, mirrored or not. **`Outline(width,
+  color)`**, **`Halo(plateau, reach, color)`**, **`Glow(reach, color)`**,
+  which adds, and **`DropShadow(offset, softness, color)`** make the usual
+  ones, each lying under the whole entry, so the entry drawn over it leaves
+  no seam. Every outline and glow of a frame batches, each with its own
+  colour. canvas holds it, so it is never released and its parameters are
+  canvas's.
 - **`ImageFromTexture(texture, options…)`** interns a texture made with
   render and its `ImageOptions` into an `Image`, never packed: its entries
   draw the texture's mip level 0 and layer 0, where a camera into it
@@ -210,8 +231,9 @@ in canvas's terms, beside render's inspection of it.
   `SetMaterialTexture` and `SetMaterialUniform[T]` set its parameters by
   name, as render's setters do, a draw using them as they stand when canvas
   draws the frame, after every task hung off `FrameEvent`; a material canvas
-  does not hold, or the default one's parameters, refused and reported
-  once; `RequestInspection` asks for an inspection of the next frame, and
+  does not hold, or the default one's or `SDFMaterial`'s parameters,
+  refused and reported once; `RequestInspection` asks for an inspection of
+  the next frame, and
   `ReadInspection` answers it in a task off **`InspectedEvent`**.
 - **`Inspection`** is one frame in canvas's terms: each camera that drew,
   the window it drew into and its viewport in pixels, its batches with their
@@ -231,7 +253,8 @@ in canvas's terms, beside render's inspection of it.
   and is called in uniform control flow, before any discard;
   `canvas_covers` leaves out a hollow centre, as it leaves out a rounded
   shape's corners. canvas's own
-  default material, `cog.canvas/default.wgsl`, includes, as does
+  default material, `cog.canvas/default.wgsl`, includes, as do its SDF
+  material, `cog.canvas/sdf.wgsl`, and
   `cog.canvas/viewport.wgsl`, the shader of the quads canvas draws over a
   viewport: a camera's clear, what a multisampled camera resolved, and an
   image premultiplied into its cell of an atlas.

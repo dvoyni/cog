@@ -106,11 +106,16 @@
 // image's size and pivot measure the frame, so a trimmed sprite stays where
 // it was, and a DistanceField of a sprite, drawn with the sprite's
 // transform and size, lines up with it, its field reaching Spread texels
-// beyond the art:
+// beyond the art. SDFMaterial draws a field through a Profile, its
+// argument: an Outline, a Halo, a Glow or a DropShadow, its offset in world
+// space, lying under the sprite drawn over it. Drawn with it, a shape reads
+// its distance from its rectangle and radius instead, its quad grown to
+// hold the band:
 //
-//	halo := canvas.ImageFromFile("hero.png", canvas.ImageOptions{Pivot: canvas.PivotBottom, Convert: canvas.DistanceField{Spread: 8}})
-//	list.DrawSprite(canvas.Sprite{Image: halo, Transform: m.Translation2x3(x, y)})
+//	field := canvas.ImageFromFile("hero.png", canvas.ImageOptions{Pivot: canvas.PivotBottom, Convert: canvas.DistanceField{Spread: 8}})
+//	list.DrawSpriteWith(canvas.Sprite{Image: field, Material: canvas.SDFMaterial, Transform: m.Translation2x3(x, y)}, canvas.Halo(2, 8, gold))
 //	list.DrawSprite(canvas.Sprite{Image: hero, Transform: m.Translation2x3(x, y)})
+//	list.DrawShapeWith(canvas.Shape{Kind: canvas.Fill, Rect: button, Radius: 6, Tint: m.White, Material: canvas.SDFMaterial}, canvas.Glow(8, gold))
 //
 // ImageFromTexture makes an Image of a texture made with render, never
 // packed, drawn from its mip level 0 and layer 0, so a minimap camera's

@@ -81,17 +81,32 @@ struct CanvasInstanceData {
 }
 
 // The parts of the unit square an instance draws. CANVAS_PART_WHOLE draws
-// all of it. CANVAS_PART_LINE draws a band across its middle, the line's
+// all of it for an entry that is no shape, and CANVAS_PART_FILL all of it
+// for a fill. CANVAS_PART_LINE draws a band across its middle, the line's
 // width tall. A stroke's sides do not overlap: the top and the bottom span
 // the square, the left and the right the height between them, each as
 // thick as the stroke's width, or its radius where that is larger, so a
 // rounded corner's curve lies within them.
 const CANVAS_PART_WHOLE = 0u;
-const CANVAS_PART_LINE = 1u;
-const CANVAS_PART_STROKE_TOP = 2u;
-const CANVAS_PART_STROKE_BOTTOM = 3u;
-const CANVAS_PART_STROKE_LEFT = 4u;
-const CANVAS_PART_STROKE_RIGHT = 5u;
+const CANVAS_PART_FILL = 1u;
+const CANVAS_PART_LINE = 2u;
+const CANVAS_PART_STROKE_TOP = 3u;
+const CANVAS_PART_STROKE_BOTTOM = 4u;
+const CANVAS_PART_STROKE_LEFT = 5u;
+const CANVAS_PART_STROKE_RIGHT = 6u;
+
+// canvas_is_shape answers whether instance_data draws a part of a shape: a
+// fill, a stroke's side or a line, whose distance canvas_shape_distance
+// answers from its rectangle, not from an image.
+fn canvas_is_shape(instance_data: CanvasInstanceData) -> bool {
+	return instance_data.part != CANVAS_PART_WHOLE;
+}
+
+// canvas_draws_whole answers whether instance_data draws its whole unit
+// square: an entry that is no shape, or a fill.
+fn canvas_draws_whole(instance_data: CanvasInstanceData) -> bool {
+	return instance_data.part <= CANVAS_PART_FILL;
+}
 
 // The ways canvas_sample maps a point of the unit square into the entry's
 // frame. CANVAS_MODE_STRETCHED maps the square onto the frame.
@@ -157,6 +172,14 @@ fn canvas_width(instance_data: CanvasInstanceData) -> vec2<f32> {
 	if instance_data.width > 0.0 {
 		return vec2<f32>(instance_data.width);
 	}
+	return canvas_pixel_width(instance_data);
+}
+
+// canvas_pixel_width answers one target pixel in instance_data's own space,
+// across the sides x runs between and across those y runs between, at any
+// zoom, measured where transform maps the unit square into the world: a
+// hairline's width, and how far a distance must reach to be anti-aliased.
+fn canvas_pixel_width(instance_data: CanvasInstanceData) -> vec2<f32> {
 	let x_axis = instance_data.transform[0];
 	let y_axis = instance_data.transform[1];
 	// The distance between the square's opposite sides along one axis is
@@ -169,28 +192,50 @@ fn canvas_width(instance_data: CanvasInstanceData) -> vec2<f32> {
 // the corner of the part of the square instance_data draws: its crop of the
 // whole square, or its part of it.
 fn canvas_place_corner(instance_data: CanvasInstanceData, corner: vec2<f32>) -> vec2<f32> {
-	let part = instance_data.part;
-	if part == CANVAS_PART_WHOLE {
+	if canvas_draws_whole(instance_data) {
 		return mix(instance_data.crop.xy, instance_data.crop.zw, corner);
+	}
+	return canvas_place_grown_corner(instance_data, corner, vec2<f32>(0.0));
+}
+
+// canvas_place_grown_corner answers corner, a corner of the unit square,
+// moved onto the corner of the part of the square a shape's instance_data
+// draws, grown by grown, a fraction of the square along each axis: a fill's
+// whole square, a line's band, or a stroke's side, each side's band grown
+// both ways and the sides never overlapping, so what reaches inside a stroke
+// draws once. canvas_place_corner places a shape's parts through it
+// ungrown, and a vertex stage drawing past a shape, as the SDF material's
+// does, grows them.
+fn canvas_place_grown_corner(instance_data: CanvasInstanceData, corner: vec2<f32>, grown: vec2<f32>) -> vec2<f32> {
+	let part = instance_data.part;
+	let low = -grown;
+	let high = vec2<f32>(1.0) + grown;
+	if canvas_draws_whole(instance_data) {
+		return mix(low, high, corner);
 	}
 	let width = canvas_width(instance_data);
 	let size = max(instance_data.size, vec2<f32>(1e-30));
 	if part == CANVAS_PART_LINE {
-		let half_band = 0.5 * width.y / size.y;
-		return mix(vec2<f32>(0.0, 0.5 - half_band), vec2<f32>(1.0, 0.5 + half_band), corner);
+		let half_band = 0.5 * width.y / size.y + grown.y;
+		return mix(vec2<f32>(low.x, 0.5 - half_band), vec2<f32>(high.x, 0.5 + half_band), corner);
 	}
-	// side_thickness is each side's thickness as a fraction of the square.
+	// side_thickness is each side's thickness as a fraction of the square,
+	// and near and far are where each side's band ends inside the square,
+	// from its near edge and from its far one, meeting at its middle at
+	// most.
 	let side_thickness = min(max(width, vec2<f32>(instance_data.radius)) / size, vec2<f32>(0.5));
+	let near = min(side_thickness + grown, vec2<f32>(0.5));
+	let far = max(vec2<f32>(1.0) - side_thickness - grown, vec2<f32>(0.5));
 	if part == CANVAS_PART_STROKE_TOP {
-		return mix(vec2<f32>(0.0, 0.0), vec2<f32>(1.0, side_thickness.y), corner);
+		return mix(low, vec2<f32>(high.x, near.y), corner);
 	}
 	if part == CANVAS_PART_STROKE_BOTTOM {
-		return mix(vec2<f32>(0.0, 1.0 - side_thickness.y), vec2<f32>(1.0, 1.0), corner);
+		return mix(vec2<f32>(low.x, far.y), high, corner);
 	}
 	if part == CANVAS_PART_STROKE_LEFT {
-		return mix(vec2<f32>(0.0, side_thickness.y), vec2<f32>(side_thickness.x, 1.0 - side_thickness.y), corner);
+		return mix(vec2<f32>(low.x, near.y), vec2<f32>(near.x, far.y), corner);
 	}
-	return mix(vec2<f32>(1.0 - side_thickness.x, side_thickness.y), vec2<f32>(1.0, 1.0 - side_thickness.y), corner);
+	return mix(vec2<f32>(far.x, near.y), vec2<f32>(high.x, far.y), corner);
 }
 
 // canvas_rounded_distance answers point's signed distance from a rectangle
@@ -217,7 +262,7 @@ fn canvas_shape_distance(in: CanvasVaryings) -> f32 {
 	}
 	let radius = min(instance_data.radius, min(half_size.x, half_size.y));
 	let outer = canvas_rounded_distance(point, half_size, radius);
-	if part == CANVAS_PART_WHOLE {
+	if canvas_draws_whole(instance_data) {
 		return outer;
 	}
 	let width = canvas_width(instance_data);
@@ -327,25 +372,38 @@ fn canvas_output(color: vec4<f32>) -> vec4<f32> {
 	return vec4<f32>(canvas_encode_srgb(color.rgb / coverage) * coverage, color.a);
 }
 
+// canvas_quad_corner answers the corner of the unit square that vertex, one
+// of a quad's six, lies on: the two triangles' corners, (0, 0), (1, 0),
+// (0, 1), then (0, 1), (1, 0), (1, 1), bit vertex of 0b110010 its x and of
+// 0b101100 its y.
+fn canvas_quad_corner(vertex: u32) -> vec2<f32> {
+	return vec2<f32>(f32((0x32u >> vertex) & 1u), f32((0x2Cu >> vertex) & 1u));
+}
+
+// canvas_make_quad_varyings answers the varyings of a vertex of instance, its
+// data instance_data, at placed_corner, a point of its unit square, mapped
+// by its transform and moved whole by canvas_snap, its coordinates those of
+// sampled_corner, the point of the square it samples, over its region.
+fn canvas_make_quad_varyings(instance: u32, instance_data: CanvasInstanceData, placed_corner: vec2<f32>, sampled_corner: vec2<f32>) -> CanvasVaryings {
+	let linear = mat2x2<f32>(instance_data.transform[0], instance_data.transform[1]);
+	var out: CanvasVaryings;
+	out.position = canvas_world_to_clip(linear * placed_corner + canvas_snap(instance_data.transform[2]));
+	out.uv = instance_data.region.xy + sampled_corner * instance_data.region.zw;
+	out.uv_local = sampled_corner;
+	out.tint = instance_data.tint;
+	out.instance = instance;
+	return out;
+}
+
 // canvas_sprite_vertex is canvas's vertex stage for an entry drawn as a
 // quad, six vertices per instance: the part of the unit square the instance
 // draws, mapped by its transform and moved whole by canvas_snap, its
 // coordinates spanning the instance's region over the whole square.
 @vertex
 fn canvas_sprite_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance: u32) -> CanvasVaryings {
-	// The two triangles' corners, (0, 0), (1, 0), (0, 1), then (0, 1),
-	// (1, 0), (1, 1): bit vertex of 0b110010 is x, of 0b101100 y.
-	let corner = vec2<f32>(f32((0x32u >> vertex) & 1u), f32((0x2Cu >> vertex) & 1u));
 	let instance_data = canvas_instances[instance];
-	let placed_corner = canvas_place_corner(instance_data, corner);
-	let linear = mat2x2<f32>(instance_data.transform[0], instance_data.transform[1]);
-	var out: CanvasVaryings;
-	out.position = canvas_world_to_clip(linear * placed_corner + canvas_snap(instance_data.transform[2]));
-	out.uv = instance_data.region.xy + placed_corner * instance_data.region.zw;
-	out.uv_local = placed_corner;
-	out.tint = instance_data.tint;
-	out.instance = instance;
-	return out;
+	let placed_corner = canvas_place_corner(instance_data, canvas_quad_corner(vertex));
+	return canvas_make_quad_varyings(instance, instance_data, placed_corner, placed_corner);
 }
 
 // canvas_viewport_vertex is canvas's vertex stage for a quad covering the
@@ -357,8 +415,7 @@ fn canvas_sprite_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_in
 // image filling its cell of an atlas.
 @vertex
 fn canvas_viewport_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance: u32) -> CanvasVaryings {
-	// The corners of canvas_sprite_vertex's two triangles.
-	let corner = vec2<f32>(f32((0x32u >> vertex) & 1u), f32((0x2Cu >> vertex) & 1u));
+	let corner = canvas_quad_corner(vertex);
 	let instance_data = canvas_instances[instance];
 	var out: CanvasVaryings;
 	out.position = vec4<f32>(corner.x * 2.0 - 1.0, 1.0 - corner.y * 2.0, 0.0, 1.0);

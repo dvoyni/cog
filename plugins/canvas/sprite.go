@@ -120,6 +120,6 @@ func (s *Sprite) findSquare(image *drawnImage) (m.Mat2x3, m.Vec2) {
 // leaves, in the world.
 func (s *Sprite) findBounds(image *drawnImage) m.Rect {
 	square, _ := s.findSquare(image)
-	cropRect := s.Crop.findRect()
-	return square.TransformRect(m.Rect{X: cropRect[0], Y: cropRect[1], Width: cropRect[2] - cropRect[0], Height: cropRect[3] - cropRect[1]})
+	cropBox := s.Crop.findBox()
+	return square.TransformRect(m.Rect{X: cropBox.Min.X, Y: cropBox.Min.Y, Width: cropBox.Max.X - cropBox.Min.X, Height: cropBox.Max.Y - cropBox.Min.Y})
 }

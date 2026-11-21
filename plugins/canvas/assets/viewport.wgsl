@@ -17,14 +17,14 @@ fn canvas_viewport_fragment(in: CanvasVaryings) -> @location(0) vec4<f32> {
 // it, premultiplied, into its cell of an atlas, whose format encodes it as
 // its colour space asks. Its instance is no entry's: its region spans the
 // cell in the frame's texels from the frame's top left, its crop is the
-// frame's rectangle of the source in texels, its origin in xy and its size
-// in zw, and its part is the axes the gutter wraps along, bit 0 x and bit 1
+// frame's rectangle of the source in texels, its top left in xy and its
+// bottom right in zw, and its part is the axes the gutter wraps along, bit 0 x and bit 1
 // y. Along an axis it wraps, the gutter holds the frame's opposite edge;
 // along any other, its edge continued.
 @fragment
 fn canvas_pack_fragment(in: CanvasVaryings) -> @location(0) vec4<f32> {
 	let instance_data = canvas_instances[in.instance];
-	let size = vec2<i32>(instance_data.crop.zw);
+	let size = vec2<i32>(instance_data.crop.zw - instance_data.crop.xy);
 	let texel = vec2<i32>(floor(in.uv));
 	let wrapped = ((texel % size) + size) % size;
 	let clamped = clamp(texel, vec2<i32>(0), size - vec2<i32>(1));

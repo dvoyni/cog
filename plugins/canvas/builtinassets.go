@@ -13,6 +13,13 @@ const (
 	// defaultShaderPath is the path in platform's FS of the default
 	// material's shader.
 	defaultShaderPath = assetPrefix + "/default.wgsl"
+	// sdfShaderPath is the path in platform's FS of SDFMaterial's shader,
+	// and sdfVertexEntryPoint and sdfFragmentEntryPoint its stages: a
+	// vertex stage growing a shape's quad by its profile's reach, and the
+	// band drawn.
+	sdfShaderPath         = assetPrefix + "/sdf.wgsl"
+	sdfVertexEntryPoint   = "canvas_sdf_vertex"
+	sdfFragmentEntryPoint = "canvas_sdf_fragment"
 	// viewportShaderPath is the path in platform's FS of the shader of the
 	// quads canvas draws over a viewport: a camera's clear, what a
 	// multisampled camera resolved, and an image filling its atlas cell.
@@ -42,9 +49,12 @@ const (
 
 // embeddedAssets are canvas's built-in assets: its include, its materials'
 // shaders and its viewport quads', in its assets folder, each shader's binding
-// declaration beside it, which render's cmd/declarebindings generates.
+// declaration beside it, which render's cmd/declarebindings generates, the
+// SDF material's of its define sets alone, as it compiles only with
+// CANVAS_ARGUMENT.
 //
 //go:generate go run github.com/dvoyni/cog/plugins/render/cmd/declarebindings assets/canvas.wgsl assets/default.wgsl assets/viewport.wgsl
+//go:generate go run github.com/dvoyni/cog/plugins/render/cmd/declarebindings -variantsonly -variant CANVAS_ARGUMENT assets/sdf.wgsl
 //go:embed assets
 var embeddedAssets embed.FS
 

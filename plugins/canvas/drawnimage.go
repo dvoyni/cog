@@ -25,7 +25,7 @@ import (
 type drawnImage struct {
 	packed       *packedImage
 	view         render.TextureView
-	region       [4]float32
+	region       m.Rect
 	page         uint32
 	size         m.Vec2
 	frameBounds  m.Rect
@@ -41,7 +41,7 @@ func makeDrawnImage(packed *packedImage, options ImageOptions) drawnImage {
 	region := packed.region
 	return drawnImage{
 		packed:      packed,
-		region:      [4]float32{float32(region.X) / pageWidth, float32(region.Y) / pageHeight, float32(region.Width) / pageWidth, float32(region.Height) / pageHeight},
+		region:      m.Rect{X: float32(region.X) / pageWidth, Y: float32(region.Y) / pageHeight, Width: float32(region.Width) / pageWidth, Height: float32(region.Height) / pageHeight},
 		page:        region.Layer,
 		size:        m.Vec2{X: float32(region.Width), Y: float32(region.Height)},
 		frameBounds: packed.frameBounds,
@@ -86,7 +86,7 @@ func placeTextureImage(inventory render.Inventory, logger *kernel.Logger, drawn 
 	height := float32(descriptor.Height)
 	*drawn = drawnImage{
 		view:    render.TextureView{Texture: key.texture, MipLevelCount: 1, LayerCount: 1, Dimension: render.TextureViewDimension2DArray},
-		region:  [4]float32{texels.X / width, texels.Y / height, texels.Width / width, texels.Height / height},
+		region:  m.Rect{X: texels.X / width, Y: texels.Y / height, Width: texels.Width / width, Height: texels.Height / height},
 		size:    frameRect.Size().Float(),
 		options: key.options,
 		decode:  key.options.ColorSpace == ColorSpaceSrgb && descriptor.Format != render.TextureFormatRGBA8UnormSrgb && descriptor.Format != render.TextureFormatBGRA8UnormSrgb,

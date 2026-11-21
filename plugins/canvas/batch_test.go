@@ -10,7 +10,7 @@ import (
 
 // shapeImages are the drawn images of a frame of shapes alone: the white
 // texel's, at a region of its own.
-var shapeImages = [][]drawnImage{{{region: [4]float32{0.25, 0.5, 0.125, 0.125}, page: 1, size: m.Vec2{X: 1, Y: 1}}}}
+var shapeImages = [][]drawnImage{{{region: m.Rect{X: 0.25, Y: 0.5, Width: 0.125, Height: 0.125}, page: 1, size: m.Vec2{X: 1, Y: 1}}}}
 
 func TestBatchesBreakOnlyWhereAnEntrysMaterialDiffersFromTheOneBefore(t *testing.T) {
 	firstMaterial := Material{index: 1, generation: 1}

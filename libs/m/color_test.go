@@ -8,6 +8,12 @@ func TestNewColorLinearIsVerbatim(t *testing.T) {
 	}
 }
 
+func TestPremultiplyScalesTheComponentsByAlphaAndKeepsIt(t *testing.T) {
+	if got, want := NewColorLinear(0.5, 1, 0.25, 0.5).Premultiply(), (Color{R: 0.25, G: 0.5, B: 0.125, A: 0.5}); got != want {
+		t.Fatalf("Premultiply = %v, want %v", got, want)
+	}
+}
+
 func TestSrgbTransferPinsItsFixedPointsAndMidpoint(t *testing.T) {
 	cases := []struct {
 		srgb, linear float32

@@ -34,10 +34,11 @@ type renderer struct {
 	atlasLayerCeiling uint32
 	ownTextureSize    uint32
 	mipLevelCount     uint32
-	// defaultMaterial, clearMaterial, compositeMaterial, packMaterial and
-	// srgbAtlas are zero until made, and linearAtlas until an image needs
-	// it.
-	defaultMaterial   render.Material
+	// defaultSlot and sdfSlot, the default material's and SDFMaterial's,
+	// clearMaterial, compositeMaterial, packMaterial and srgbAtlas are zero
+	// until made, and linearAtlas until an image needs it.
+	defaultSlot       materialSlot
+	sdfSlot           materialSlot
 	clearMaterial     render.Material
 	compositeMaterial render.Material
 	packMaterial      render.Material
@@ -120,7 +121,9 @@ func newRenderer(atlasPageSize, atlasLayerCeiling, ownTextureSize, mipLevelCount
 }
 
 // init makes the default material, over the default shader, which it keeps
-// acquired, blending premultiplied colour over what the target holds; the
+// acquired, blending premultiplied colour over what the target holds;
+// SDFMaterial's slot, its argument's layout checked, a mismatch reported
+// once to logger; the
 // clear material, over the viewport shader, which it keeps acquired too,
 // replacing what the target holds, which draws a camera's clear over its
 // viewport, and what a multisampled camera that clears resolved; the
@@ -130,8 +133,9 @@ func newRenderer(atlasPageSize, atlasLayerCeiling, ownTextureSize, mipLevelCount
 // atlas's cell holds with an image premultiplied; and the sRGB sprite
 // atlas, the white texel, the zero Image, packed into it first, its cell
 // written opaque white at every mip level, as its mips would be.
-func (r *renderer) init(inventory render.Inventory) {
-	r.defaultMaterial, _ = MaterialDescriptor{Label: "canvas default", Shader: defaultShaderPath}.makeRenderMaterial(inventory)
+func (r *renderer) init(inventory render.Inventory, logger *kernel.Logger) {
+	r.defaultSlot = makeMaterialSlot(inventory, logger, MaterialDescriptor{Label: "canvas default", Shader: defaultShaderPath})
+	r.sdfSlot = makeMaterialSlot(inventory, logger, sdfMaterialDescriptor)
 	viewportShader := inventory.AcquireShader(viewportShaderPath)
 	r.clearMaterial = inventory.MakeMaterial(render.MaterialDescriptor{
 		Label:              "canvas clear",
@@ -198,8 +202,8 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 	if len(state.cameras) == 0 {
 		return
 	}
-	if r.defaultMaterial == (render.Material{}) {
-		r.init(inventory)
+	if r.defaultSlot.material == (render.Material{}) {
+		r.init(inventory, state.logger)
 	}
 	r.materialSlots = state.materials.appendSlots(r.materialSlots[:0])
 	// Every image packed is marked drawn this frame before any is packed,
@@ -301,7 +305,7 @@ func (r *renderer) drawOrder(frame render.Frame, inventory render.Inventory, cam
 		switch {
 		case drawnCamera.camera.SampleCount == multisampledCameraSampleCount:
 			// What it resolved into is drawn whole, untinted.
-			resolved := drawnImage{region: [4]float32{0, 0, 1, 1}}
+			resolved := drawnImage{region: m.Rect{Width: 1, Height: 1}}
 			drawnCamera.viewportInstance = uint32(len(r.instances.fixed))
 			r.instances.fixed = appendShapeInstances(r.instances.fixed, &Shape{Tint: m.White}, &resolved)
 		case drawnCamera.camera.Clear && !drawnCamera.colorTarget.Clear:
@@ -498,7 +502,11 @@ func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 	var key batchKey
 	if entry.kind == EntryKindShape {
 		shape := &state.shapes[entry.index]
-		bounds = shape.findBounds()
+		if material == SDFMaterial {
+			bounds = shape.findProfileBounds(profileFromBytes(state.findEntryArgument(entry)))
+		} else {
+			bounds = shape.findBounds()
+		}
 		key = shape.batchKey(render.TextureView{Texture: r.srgbAtlas.texture})
 	} else {
 		sprite := &state.sprites[entry.index]
@@ -525,13 +533,16 @@ func (r *renderer) appendSkippedEntryKeys() {
 }
 
 // findMaterial answers the slot of material as the frame began drawing, and
-// whether canvas holds it: the default material's for the zero Material,
-// its render material made at canvas's first draw, and a released
+// whether canvas holds it: the default material's for the zero Material
+// and SDFMaterial's, made at canvas's first draw, and a released
 // material's until its slot is freed, once the frame of its release is
 // drawn.
 func (r *renderer) findMaterial(material Material) (materialSlot, bool) {
-	if material == (Material{}) {
-		return materialSlot{material: r.defaultMaterial}, true
+	switch material {
+	case Material{}:
+		return r.defaultSlot, true
+	case SDFMaterial:
+		return r.sdfSlot, true
 	}
 	slot, found := findSlot(r.materialSlots, material)
 	if !found {

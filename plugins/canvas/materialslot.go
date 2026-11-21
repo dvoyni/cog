@@ -1,6 +1,7 @@
 package canvas
 
 import (
+	"fmt"
 	"reflect"
 
 	"github.com/dvoyni/cog/kernel"
@@ -21,6 +22,24 @@ type materialSlot struct {
 	stride                 uint32
 	argumentLayoutMismatch bool
 	released               bool
+}
+
+// makeMaterialSlot makes the slot of a 2D material of descriptor through
+// inventory, its render material and its shader acquired, its argument's
+// layout checked against its shader's, a mismatch reported once to logger
+// for the shader and the type.
+func makeMaterialSlot(inventory render.Inventory, logger *kernel.Logger, descriptor MaterialDescriptor) materialSlot {
+	material, shader := descriptor.makeRenderMaterial(inventory)
+	slot := materialSlot{material: material, shader: shader, cullMargin: descriptor.CullMargin, argumentType: descriptor.Argument.goType, stride: findInstanceStride(descriptor.Argument.goType)}
+	if slot.argumentType == nil {
+		return slot
+	}
+	if err := descriptor.Argument.checkLayout(inventory, shader); err != nil {
+		slot.argumentLayoutMismatch = true
+		mismatch := Report{Kind: ReportKindArgumentLayoutMismatch, Err: fmt.Errorf("canvas: the argument %v of a material of shader %q does not match the shader's struct Argument, so its entries are skipped: %w", slot.argumentType, descriptor.Shader, err)}
+		logger.LogErrOnce(argumentLayoutMismatchLogKey+descriptor.Shader+" "+slot.argumentType.String(), mismatch)
+	}
+	return slot
 }
 
 // takesArgument answers whether the material, material's slot, draws an

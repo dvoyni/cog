@@ -1,0 +1,242 @@
+{
+  "variantsOnly": true,
+  "variants": [
+    {
+      "defines": {
+        "CANVAS_ARGUMENT": ""
+      },
+      "bindings": [
+        {
+          "group": 0,
+          "binding": 0,
+          "name": "canvas_camera",
+          "buffer": {
+            "type": "uniform",
+            "size": 80,
+            "members": [
+              {
+                "name": "world_to_clip",
+                "offset": 0,
+                "size": 24
+              },
+              {
+                "name": "clip_to_world",
+                "offset": 24,
+                "size": 24
+              },
+              {
+                "name": "pixel_size",
+                "offset": 48,
+                "size": 4
+              },
+              {
+                "name": "snap",
+                "offset": 52,
+                "size": 4
+              },
+              {
+                "name": "viewport_origin",
+                "offset": 56,
+                "size": 8
+              },
+              {
+                "name": "viewport_size",
+                "offset": 64,
+                "size": 8
+              },
+              {
+                "name": "encode",
+                "offset": 72,
+                "size": 4
+              }
+            ]
+          },
+          "entryPoints": [
+            "canvas_sprite_vertex",
+            "canvas_sdf_vertex",
+            "canvas_sdf_fragment"
+          ]
+        },
+        {
+          "group": 2,
+          "binding": 0,
+          "name": "canvas_instances",
+          "buffer": {
+            "type": "read-only-storage",
+            "size": 192,
+            "element": {
+              "size": 192,
+              "members": [
+                {
+                  "name": "tint",
+                  "offset": 0,
+                  "size": 16
+                },
+                {
+                  "name": "region",
+                  "offset": 16,
+                  "size": 16
+                },
+                {
+                  "name": "crop",
+                  "offset": 32,
+                  "size": 16
+                },
+                {
+                  "name": "slice_frame",
+                  "offset": 48,
+                  "size": 16
+                },
+                {
+                  "name": "slice_square",
+                  "offset": 64,
+                  "size": 16
+                },
+                {
+                  "name": "transform",
+                  "offset": 80,
+                  "size": 24
+                },
+                {
+                  "name": "page",
+                  "offset": 104,
+                  "size": 4
+                },
+                {
+                  "name": "part",
+                  "offset": 108,
+                  "size": 4
+                },
+                {
+                  "name": "size",
+                  "offset": 112,
+                  "size": 8
+                },
+                {
+                  "name": "width",
+                  "offset": 120,
+                  "size": 4
+                },
+                {
+                  "name": "radius",
+                  "offset": 124,
+                  "size": 4
+                },
+                {
+                  "name": "decode",
+                  "offset": 128,
+                  "size": 4
+                },
+                {
+                  "name": "mode",
+                  "offset": 132,
+                  "size": 4
+                },
+                {
+                  "name": "tiles",
+                  "offset": 136,
+                  "size": 8
+                },
+                {
+                  "name": "argument",
+                  "offset": 144,
+                  "size": 48,
+                  "members": [
+                    {
+                      "name": "inner",
+                      "offset": 0,
+                      "size": 4
+                    },
+                    {
+                      "name": "outer",
+                      "offset": 4,
+                      "size": 4
+                    },
+                    {
+                      "name": "plateau",
+                      "offset": 8,
+                      "size": 4
+                    },
+                    {
+                      "name": "falloff",
+                      "offset": 12,
+                      "size": 4
+                    },
+                    {
+                      "name": "color",
+                      "offset": 16,
+                      "size": 16
+                    },
+                    {
+                      "name": "offset",
+                      "offset": 32,
+                      "size": 8
+                    },
+                    {
+                      "name": "spread",
+                      "offset": 40,
+                      "size": 4
+                    }
+                  ]
+                }
+              ]
+            },
+            "elementStride": 192
+          },
+          "entryPoints": [
+            "canvas_sprite_vertex",
+            "canvas_viewport_vertex",
+            "canvas_sdf_vertex",
+            "canvas_sdf_fragment"
+          ]
+        },
+        {
+          "group": 2,
+          "binding": 1,
+          "name": "canvas_atlas",
+          "texture": {
+            "sampleType": "float",
+            "viewDimension": "2d-array"
+          },
+          "entryPoints": [
+            "canvas_sdf_fragment"
+          ]
+        },
+        {
+          "group": 2,
+          "binding": 2,
+          "name": "canvas_sampler",
+          "sampler": {
+            "type": "filtering"
+          },
+          "entryPoints": [
+            "canvas_sdf_fragment"
+          ]
+        }
+      ],
+      "entryPoints": [
+        {
+          "name": "canvas_sprite_vertex",
+          "stage": "vertex"
+        },
+        {
+          "name": "canvas_viewport_vertex",
+          "stage": "vertex"
+        },
+        {
+          "name": "canvas_sdf_vertex",
+          "stage": "vertex"
+        },
+        {
+          "name": "canvas_sdf_fragment",
+          "stage": "fragment"
+        }
+      ],
+      "vertexInputs": {
+        "canvas_sdf_vertex": [],
+        "canvas_sprite_vertex": [],
+        "canvas_viewport_vertex": []
+      }
+    }
+  ]
+}

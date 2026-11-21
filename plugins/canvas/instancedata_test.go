@@ -100,7 +100,7 @@ func TestAStrokeDrawsItsFourSidesAndAFillIgnoresItsWidth(t *testing.T) {
 	var parts []shapePart
 	for _, instance := range instances {
 		parts = append(parts, instance.part)
-		if instance.width != 2 || instance.radius != 3 || instance.size != (m.Vec2{X: 20, Y: 10}) || instance.tint != [4]float32{0.5, 0, 0, 0.5} {
+		if instance.width != 2 || instance.radius != 3 || instance.size != (m.Vec2{X: 20, Y: 10}) || instance.tint != (m.Color{R: 0.5, A: 0.5}) {
 			t.Errorf("a stroke's side is width %v, radius %v, size %v and tint %v, want 2, 3, 20×10 and its tint premultiplied", instance.width, instance.radius, instance.size, instance.tint)
 		}
 	}
@@ -110,7 +110,7 @@ func TestAStrokeDrawsItsFourSidesAndAFillIgnoresItsWidth(t *testing.T) {
 
 	fill := appendShapeInstances(nil, &Shape{Kind: Fill, Rect: rect, Width: 2, Radius: -3}, &shapeImages[0][0])
 
-	if len(fill) != 1 || fill[0].part != shapePartWhole || fill[0].width != 0 || fill[0].radius != 0 {
+	if len(fill) != 1 || fill[0].part != shapePartFill || fill[0].width != 0 || fill[0].radius != 0 {
 		t.Errorf("a fill drew %+v, want one instance of the whole square, its width ignored and its negative radius none", fill)
 	}
 }

@@ -115,13 +115,7 @@ func TestADistanceFieldOfASpriteLinesUpWithItAtAnyPivotAndSize(t *testing.T) {
 	// deep inside, too far outside to show, and 2 texels left of the
 	// frame, where the field grown past it reaches.
 	files := fstest.MapFS{}
-	art := image.NewNRGBA(image.Rect(0, 0, 16, 16))
-	for y := fieldArt.Min.Y; y < fieldArt.Max.Y; y++ {
-		for x := fieldArt.Min.X; x < fieldArt.Max.X; x++ {
-			art.SetNRGBA(x, y, opaqueWhite)
-		}
-	}
-	addImageFile(t, files, fieldArtPath, art)
+	addImageFile(t, files, fieldArtPath, newRectArt(fieldArt))
 	field := canvas.DistanceField{Spread: 4}
 	makeField := func(pivot canvas.Pivot) canvas.Image {
 		return canvas.ImageFromFile(fieldArtPath, canvas.ImageOptions{Pivot: pivot, Convert: field})

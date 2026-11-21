@@ -79,6 +79,26 @@ func (s *Shape) findBounds() m.Rect {
 	return square.TransformRect(m.Rect{Width: 1, Height: 1})
 }
 
+// findProfileBounds answers the world rectangle the shape draws within when
+// drawn with SDFMaterial through profile: its unit square grown by the
+// profile's outer reach, in the shape's own space, then spanning both the
+// square and the square moved by its offset, which the band falls by.
+func (s *Shape) findProfileBounds(profile Profile) m.Rect {
+	square, size := s.findSquare()
+	var grown m.Vec2
+	reach := max(profile.Outer, 0)
+	if size.X > 0 {
+		grown.X = reach / size.X
+	}
+	if size.Y > 0 {
+		grown.Y = reach / size.Y
+	}
+	bounds := square.TransformRect(m.Rect{Width: 1, Height: 1}.Inset(grown.MulS(-1)))
+	offset := profile.Offset
+	extent := offset.Abs()
+	return m.Rect{X: bounds.X + min(offset.X, 0), Y: bounds.Y + min(offset.Y, 0), Width: bounds.Width + extent.X, Height: bounds.Height + extent.Y}
+}
+
 // ShapeKind is what a shape draws.
 type ShapeKind uint8
 

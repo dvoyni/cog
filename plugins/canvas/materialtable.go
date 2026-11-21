@@ -32,15 +32,7 @@ type materialTable struct {
 // its argument's layout checked against its shader's, a mismatch reported
 // once to logger for the shader and the type.
 func (t *materialTable) make(inventory render.Inventory, logger *kernel.Logger, descriptor MaterialDescriptor) Material {
-	material, shader := descriptor.makeRenderMaterial(inventory)
-	slot := materialSlot{material: material, shader: shader, cullMargin: descriptor.CullMargin, argumentType: descriptor.Argument.goType, stride: findInstanceStride(descriptor.Argument.goType)}
-	if slot.argumentType != nil {
-		if err := descriptor.Argument.checkLayout(inventory, shader); err != nil {
-			slot.argumentLayoutMismatch = true
-			mismatch := Report{Kind: ReportKindArgumentLayoutMismatch, Err: fmt.Errorf("canvas: the argument %v of a material of shader %q does not match the shader's struct Argument, so its entries are skipped: %w", slot.argumentType, descriptor.Shader, err)}
-			logger.LogErrOnce(argumentLayoutMismatchLogKey+descriptor.Shader+" "+slot.argumentType.String(), mismatch)
-		}
-	}
+	slot := makeMaterialSlot(inventory, logger, descriptor)
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	if len(t.freeIndexes) == 0 {
@@ -118,9 +110,9 @@ func reportArgumentRefused(logger *kernel.Logger, material Material, given, take
 
 // reportMaterialNotHeld reports material to logger once, refused as use,
 // what was done with it, such as drawing an entry with it, says: a material
-// canvas does not hold, or the default material, whose parameters are
-// canvas's.
+// canvas does not hold, or one canvas ships, the default material or
+// SDFMaterial, whose parameters are canvas's.
 func reportMaterialNotHeld(logger *kernel.Logger, material Material, use string) {
-	refusal := Report{Kind: ReportKindMaterialNotHeld, Err: fmt.Errorf("canvas: %s material %v, which canvas does not hold: never made by Assets.MakeMaterial, released, or the default material, whose parameters are canvas's", use, material)}
+	refusal := Report{Kind: ReportKindMaterialNotHeld, Err: fmt.Errorf("canvas: %s material %v, which canvas does not hold: never made by Assets.MakeMaterial, released, or one canvas ships, whose parameters are canvas's", use, material)}
 	logger.LogErrOnce(materialNotHeldLogKey+fmt.Sprint(material), refusal)
 }

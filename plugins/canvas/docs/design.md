@@ -492,7 +492,9 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 - **`Width` is in the shape's own space,** as its rectangle is, which its transform maps into the world: world units under a transform that does not scale. Zero means a hairline one target pixel wide at any zoom and any transform, the vertex stage sizing the thin axis from the camera's pixel size and the transform's columns. v1 drew nothing at zero.
 - **A shape's instances share the sprite's instance data,** read by canvas's one vertex stage: each holds the part of its unit square it draws (the whole, a line's band, or one of a stroke's sides), the square's size in the shape's own space, its width and its radius. A stroke's top and bottom span its rectangle and its left and right the height between them, each as thick as its width, or its radius where that is larger, so a rounded corner's curve lies within them.
 - **Distance effects around shapes:** the SDF material reads a shape's distance analytically from its rectangle, as v1's halo on fills did, so `DrawShapeWith(Shape{…, Material: canvas.SDFMaterial}, canvas.Glow(8, gold))` glows a button.
-  - A shape drawn with a profile grows its quad by the profile's outer reach. This is the one place a quad grows, since a sprite's distance field is baked larger.
+  - A shape drawn with a profile grows its quad by the profile's outer reach, the offset's length and a pixel, through the SDF material's own vertex stage, `canvas_sdf_vertex`. Its bounds grow the same way, so a glow is drawn while its shape lies outside the view by less than its reach. This is the one place a quad grows, since a sprite's distance field is baked larger.
+    - A stroke's four sides grow without overlapping, each side's band reaching inwards as far as outwards, so a band inside the stroke draws once.
+    - The include tells a shape from a sprite by its instance's part: a fill draws `CANVAS_PART_FILL`, and an entry that is no shape `CANVAS_PART_WHOLE`, which `canvas_is_shape` reads, so the SDF material reads a shape's distance from `canvas_shape_distance` and a sprite's from its image.
   - The same distance gives `Shape.Radius`, in the shape's own space as `Width` is: rounded corners for fills and strokes, which neither version had. The include's `canvas_shape_distance` answers a fragment's signed distance from its shape's edge in the shape's own space (a fill's rectangle, a stroke's band, a line's band), which the SDF material reads, and `canvas_covers` whether a rounded shape covers it. A material discards the fragments it does not cover, after sampling, as the default material does; one that does not draws rounded shapes square, which the include says. The edge is hard, as every entry's is.
   - A user baking a distance-field image per box was weighed. Every size and radius would have been a new image.
 
@@ -535,7 +537,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 - **No time.** render's frame carries none, and game time stops when the game pauses while real time does not, so a material that animates takes its time as a material parameter, set by whichever task owns its clock. A value every draw of a material shares is a material parameter, and a value per entry is its material argument.
 - **canvas ships three embedded materials:**
   - **default,** the zero `Material`: texture × tint; shapes draw with it over the white texel;
-  - **`SDFMaterial`,** a distance field drawn through a `Profile`, its argument;
+  - **`SDFMaterial`,** a distance field drawn through a `Profile`, its argument, its shader `cog.canvas/sdf.wgsl`. It is a `Material` of a slot no `MakeMaterial` makes, of generation zero, so canvas holds it: releasing it or setting its parameters is reported once, as for the default material;
   - **`TextMaterial`,** a run's when its `Material` is zero, built on the same include, its argument the `Profile` drawn under the fill.
 
 ### Distance fields and profiles
@@ -551,7 +553,14 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   | glow | `Glow(reach, color)` | falling off from the edge | added |
   | drop shadow | `DropShadow(offset, softness, color)` | a soft band, offset | normal |
 
-  A `Profile{Inner, Outer, Plateau, Falloff, Color, Offset}`, in field texels, is the SDF material's argument. Every outline and glow in a frame therefore batches, each entry with its own colour.
+  A `Profile{Inner, Outer, Plateau, Falloff, Color, Offset, Spread}`, in field texels, is the SDF material's argument. Every outline and glow in a frame therefore batches, each entry with its own colour.
+  - **The band** runs from `Inner` inside the edge to `Outer` outside it, solid out to `Plateau`, then falling off along (1 − t) to the power `Falloff`, t running from 0 at `Plateau` to 1 at `Outer`. A `Falloff` of zero is a hard edge at `Outer`. Each edge is anti-aliased over the distance's change across a pixel, and a fall always spans at least one pixel.
+  - **The constructors' bands lie under the whole entry,** `Inner` the largest float32, so the entry drawn over the band leaves no light seam where its own anti-aliased edge meets the band's inner one. A translucent entry shows the band through it. A ring alone sets its own `Inner`.
+  - **`Color` is premultiplied.** `Glow` gives its colour an alpha of zero, which adds under the material's normal blending, so a glow needs no material of its own.
+  - **The band's colour is the profile's times the entry's tint,** as every entry is tinted: a sprite's zero tint is white, and a shape's transparent, so a shape drawn with the SDF material gives a tint, `m.White` to draw the profile's colour as it is. `SDFMaterial`'s doc says so.
+  - **`Spread` is the field's,** zero meaning 8 as `DistanceField`'s does, since the material turns a field's alpha into texels by it. It is the argument's, not the instance data's: the SDF material reads everything it needs from its argument, as a user's material does, and the fixed part, which every material's entries carry, holds nothing for one material alone. A user baking a field with another spread sets it on the profile too. A shape ignores it. A `_ float32` after it pads the struct to WGSL's size of 48.
+  - **An image no `DistanceField` baked** is read as a field all the same, so its alpha's anti-aliased edge makes a band less than a texel wide.
+  - **A sprite's band stops at its region,** since its field holds only its spread beyond the art: an offset or a reach past it is cut off at the sprite's quad.
 - **The drop shadow's offset is in world space,** the space the transform maps into. The vertex stage turns it into the image's space through the inverse of the transform's linear part, so every entry's shadow falls the same way, mirrored or not, and zooms with the world.
 - **No underlay and no declared reach.** v1 collected halos on one layer under the images, and its two-layer idiom clashed with painter's order. canvas has no such concept.
   - A halo is two entries: the SDF material over the sprite's baked distance field, then the default material over the sprite.

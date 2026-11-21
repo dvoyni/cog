@@ -68,14 +68,14 @@ func TestAConvertedSpritesSquareSpansItsOutputPlacedWithinItsFrame(t *testing.T)
 func TestACropOfASidePastTheOneFacingItLeavesNothing(t *testing.T) {
 	for _, cropped := range []struct {
 		crop Crop
-		want [4]float32
+		want m.Box2
 	}{
-		{Crop{}, [4]float32{0, 0, 1, 1}},
-		{Crop{Left: 0.25, Top: 0.5, Right: 0.25}, [4]float32{0.25, 0.5, 0.75, 1}},
-		{Crop{Left: 0.75, Right: 0.5}, [4]float32{0.75, 0, 0.75, 1}},
-		{Crop{Top: 0.5, Bottom: 0.75}, [4]float32{0, 0.5, 1, 0.5}},
+		{Crop{}, m.Box2{Max: m.Vec2{X: 1, Y: 1}}},
+		{Crop{Left: 0.25, Top: 0.5, Right: 0.25}, m.Box2{Min: m.Vec2{X: 0.25, Y: 0.5}, Max: m.Vec2{X: 0.75, Y: 1}}},
+		{Crop{Left: 0.75, Right: 0.5}, m.Box2{Min: m.Vec2{X: 0.75}, Max: m.Vec2{X: 0.75, Y: 1}}},
+		{Crop{Top: 0.5, Bottom: 0.75}, m.Box2{Min: m.Vec2{Y: 0.5}, Max: m.Vec2{X: 1, Y: 0.5}}},
 	} {
-		if got := cropped.crop.findRect(); got != cropped.want {
+		if got := cropped.crop.findBox(); got != cropped.want {
 			t.Errorf("%+v leaves %v, want %v", cropped.crop, got, cropped.want)
 		}
 	}

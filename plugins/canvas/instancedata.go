@@ -12,16 +12,18 @@ import (
 // fields first, where they align to 16 with no padding, its size a
 // multiple of their alignment.
 type instanceData struct {
-	tint   [4]float32
-	region [4]float32
+	// tint is premultiplied.
+	tint m.Color
+	// region is the entry's rectangle in its atlas page, in texture
+	// coordinates.
+	region m.Rect
 	// crop is the part of the unit square an instance drawing all of it
-	// draws: its left, top, right and bottom edges.
-	crop [4]float32
+	// draws.
+	crop m.Box2
 	// sliceFrame and sliceSquare are a sliced sprite's centre cell, within
-	// its frame and within the unit square, each its left, top, right and
-	// bottom edges as fractions.
-	sliceFrame  [4]float32
-	sliceSquare [4]float32
+	// its frame and within the unit square, as fractions.
+	sliceFrame  m.Box2
+	sliceSquare m.Box2
 	transform   m.Mat2x3
 	page        uint32
 	part        shapePart
@@ -66,8 +68,12 @@ const (
 type shapePart uint32
 
 const (
-	// shapePartWhole draws the whole unit square: a fill, and every other entry.
+	// shapePartWhole draws the whole unit square of an entry that is no
+	// shape, such as a sprite.
 	shapePartWhole shapePart = iota
+	// shapePartFill draws the whole unit square of a fill, which the
+	// include's canvas_is_shape tells from an entry that is no shape.
+	shapePartFill
 	// shapePartLine draws a band across the unit square's middle, its width's
 	// fraction of the square tall, so a hairline is one target pixel.
 	shapePartLine
@@ -91,9 +97,9 @@ var strokeParts = [4]shapePart{shapePartStrokeTop, shapePartStrokeBottom, shapeP
 func appendShapeInstances(instances []instanceData, shape *Shape, white *drawnImage) []instanceData {
 	tint := shape.Tint
 	instance := instanceData{
-		tint:   [4]float32{tint.R * tint.A, tint.G * tint.A, tint.B * tint.A, tint.A},
+		tint:   tint.Premultiply(),
 		region: white.region,
-		crop:   [4]float32{0, 0, 1, 1},
+		crop:   m.Box2{Max: m.Vec2{X: 1, Y: 1}},
 		page:   white.page,
 	}
 	instance.transform, instance.size = shape.findSquare()
@@ -105,6 +111,7 @@ func appendShapeInstances(instances []instanceData, shape *Shape, white *drawnIm
 		instance.width = max(shape.Width, 0)
 		instance.radius = max(shape.Radius, 0)
 	default:
+		instance.part = shapePartFill
 		instance.radius = max(shape.Radius, 0)
 	}
 	if shape.Kind != Stroke {
@@ -128,9 +135,9 @@ func appendSpriteInstance(instances []instanceData, sprite *Sprite, image *drawn
 		tint = m.White
 	}
 	instance := instanceData{
-		tint:   [4]float32{tint.R * tint.A, tint.G * tint.A, tint.B * tint.A, tint.A},
+		tint:   tint.Premultiply(),
 		region: image.region,
-		crop:   sprite.Crop.findRect(),
+		crop:   sprite.Crop.findBox(),
 		page:   image.page,
 	}
 	if image.decode {

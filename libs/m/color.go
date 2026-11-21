@@ -157,6 +157,12 @@ func (color Color) Opacity(factor float32) Color {
 	return color
 }
 
+// Premultiply returns color with its components multiplied by its alpha, the
+// form blending over premultiplied colour takes, its alpha kept.
+func (color Color) Premultiply() Color {
+	return Color{R: color.R * color.A, G: color.G * color.A, B: color.B * color.A, A: color.A}
+}
+
 // srgbToLinear applies the sRGB electro-optical transfer function. Every input
 // at or below the linear segment, negatives included, takes the linear branch,
 // so extrapolated components never become NaN.
