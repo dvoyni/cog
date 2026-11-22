@@ -3,6 +3,7 @@ package canvas
 import (
 	"cmp"
 	"fmt"
+	"sync"
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
@@ -18,6 +19,9 @@ type fontLibrary struct {
 	logger *kernel.Logger
 	// language is the current language.
 	language string
+	// textSize is the em, in world units, of a run of text whose Size is
+	// zero.
+	textSize float32
 	// sets are the font sets, by index, the default set at 0. A destroyed
 	// set's slot is reused, its generation counted up, so a FontSet naming
 	// it before names nothing.
@@ -29,19 +33,26 @@ type fontLibrary struct {
 	defaultDescriptor FontSetDescriptor
 	icons             map[string]IconDescriptor
 	colors            map[string]m.Color
+	// shapers are the text shapers layouts are made by, each a
+	// *textShaper, one a layout, since a shaper is not safe for concurrent
+	// use and layouts are made under the read lock.
+	shapers sync.Pool
 }
 
 // newFontLibrary answers the FontLibrary resource, its reports logged to logger, its
-// current language language, and its default set JetBrains Mono alone until
-// canvas starts and makes it of defaultDescriptor.
-func newFontLibrary(logger *kernel.Logger, language string, defaultDescriptor FontSetDescriptor) *fontLibrary {
+// current language language, a run of text of no size laid out at
+// textSize, and its default set JetBrains Mono alone until canvas starts
+// and makes it of defaultDescriptor.
+func newFontLibrary(logger *kernel.Logger, language string, textSize float32, defaultDescriptor FontSetDescriptor) *fontLibrary {
 	return &fontLibrary{
 		logger:            logger,
 		language:          language,
+		textSize:          textSize,
 		sets:              []fontSetSlot{makeFontSetSlot(nil, logger, FontSetDescriptor{})},
 		defaultDescriptor: defaultDescriptor,
 		icons:             map[string]IconDescriptor{},
 		colors:            map[string]m.Color{},
+		shapers:           sync.Pool{New: func() any { return new(textShaper) }},
 	}
 }
 
@@ -61,6 +72,21 @@ func (l *fontLibrary) Metrics(set FontSet, size float32, language string) FontMe
 	return slot.findLanguageFont(cmp.Or(language, l.language)).findMetrics(size)
 }
 
+// Layout answers text shaped, broken into lines and measured, in the font
+// of its set measuring the current language, at its size, zero meaning
+// Config.TextSize. A set canvas does not hold is laid out as the default
+// set, reported once.
+func (l *fontLibrary) Layout(text Text) TextLayout {
+	slot := l.findSlot(text.Font)
+	if slot == nil {
+		l.reportSetNotHeld(text.Font, "laying out text in")
+		slot = &l.sets[0]
+	}
+	shaper := l.shapers.Get().(*textShaper)
+	defer l.shapers.Put(shaper)
+	return shaper.layOut(slot.findLanguageFont(l.language), text, cmp.Or(text.Size, l.textSize), l.language)
+}
+
 // findSlot answers set's slot, nil when canvas does not hold set.
 func (l *fontLibrary) findSlot(set FontSet) *fontSetSlot {
 	if int(set.index) >= len(l.sets) || l.sets[set.index].generation != set.generation {
@@ -72,6 +98,6 @@ func (l *fontLibrary) findSlot(set FontSet) *fontSetSlot {
 // reportSetNotHeld reports set once, refused as use, what was done with it,
 // says.
 func (l *fontLibrary) reportSetNotHeld(set FontSet, use string) {
-	refusal := Report{Kind: ReportKindFontSetNotHeld, Err: fmt.Errorf("canvas: %s font set %v, which canvas does not hold: never made by WriteFontLibrary.MakeFontSet, destroyed, or the default set, which is never destroyed; a set canvas does not hold is measured as the default set", use, set)}
+	refusal := Report{Kind: ReportKindFontSetNotHeld, Err: fmt.Errorf("canvas: %s font set %v, which canvas does not hold: never made by WriteFontLibrary.MakeFontSet, destroyed, or the default set, which is never destroyed; a set canvas does not hold is laid out and measured as the default set", use, set)}
 	l.logger.LogErrOnce(fontSetNotHeldLogKey+fmt.Sprint(set), refusal)
 }

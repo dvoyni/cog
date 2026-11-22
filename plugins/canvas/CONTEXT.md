@@ -148,7 +148,7 @@ _Avoid_: Locale, culture, script
 One shape a font draws, packed into the glyph atlas the first time it is drawn: a distance field, or a bitmap for a bitmap font.
 _Avoid_: Character, rune, letter (a glyph can draw several characters, and a character can take several glyphs)
 
-**Layout**:
+**Text layout**:
 Text shaped into glyphs, broken into lines and measured. Drawing and measuring read the same layout, so they never disagree.
 _Avoid_: Text block, paragraph, label
 

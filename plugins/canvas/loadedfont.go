@@ -43,7 +43,11 @@ type loadedFont struct {
 // Variations. A file that fails to read or parse, or whose collection has
 // no font at descriptor's Index, is an error.
 func loadFont(files fs.FS, descriptor Font) (loadedFont, error) {
-	parsed := findBuiltInFont()
+	// go-text's shaper keeps its state of a font by the font, so each
+	// loaded font is a font of its own, the built-in font copied, sharing
+	// its read-only tables, lest two variations of it shape alike.
+	builtIn := *findBuiltInFont()
+	parsed := &builtIn
 	if descriptor.Path != "" {
 		data, err := fs.ReadFile(files, descriptor.Path)
 		if err != nil {

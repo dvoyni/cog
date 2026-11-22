@@ -188,7 +188,8 @@
 // every font file the set names loads then, each language served by its
 // own fonts and the rest by the default font. The zero FontSet is the
 // default set, Config.DefaultFontSet, JetBrains Mono alone unless it names
-// others. A font's FontMetrics at a size are read through FontLibrary:
+// others. A font's FontMetrics at a size are read through FontLibrary, and
+// text laid out, shaped, broken into lines and measured, with no frame:
 //
 //	func loadFonts(k *kernel.Kernel, _ kernel.NoArg, libraryHandle kernel.Write[canvas.FontLibrary], files kernel.Read[platform.FS]) kernel.NoResult {
 //		library := canvas.ElevateFontLibrary(libraryHandle, files)
@@ -202,6 +203,8 @@
 //	}
 //
 //	metrics := libraryHandle.Get().Metrics(title, 24, "")
+//	layout := libraryHandle.Get().Layout(canvas.Text{String: "Continue", Font: title, Size: 24, WrapWidth: 200, Align: canvas.TextAlignCenter})
+//	buttonSize := layout.Size()
 //
 // A tool asks for an inspection of the next frame through its Assets
 // parameter, and reads it in a task off InspectedEvent: each camera the frame

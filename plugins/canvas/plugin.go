@@ -61,6 +61,9 @@ type Config struct {
 	// Language is the current language at start, a tag such as "en", which
 	// picks each font set's fonts; WriteFontLibrary.SetLanguage changes it.
 	Language string
+	// TextSize is the em, in world units, of a run of text whose Size is
+	// zero; zero means 16.
+	TextSize float32
 	// DefaultFontSet describes the default font set, the zero FontSet's,
 	// made as canvas starts, its fonts read through platform's FS. Its zero
 	// is canvas's built-in JetBrains Mono alone, which the default set is
@@ -124,7 +127,7 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	configurator.InitResource(newRenderer(atlasPageSize, cmp.Or(canvasConfig.AtlasLayerCeiling, 256), cmp.Or(canvasConfig.OwnTextureSize, atlasPageSize/2), mipLevelCount))
 	configurator.InitResource(&windowList{})
 	configurator.InitResource[Targets](&drawnTargets{})
-	configurator.InitResource[FontLibrary](newFontLibrary(configurator.Logger(), canvasConfig.Language, canvasConfig.DefaultFontSet))
+	configurator.InitResource[FontLibrary](newFontLibrary(configurator.Logger(), canvasConfig.Language, cmp.Or(canvasConfig.TextSize, 16), canvasConfig.DefaultFontSet))
 	configurator.BindSocket(platform.ReadMountSocket{FS: makeAssetFS(), Priority: math.MinInt, Prefix: assetPrefix})
 	openFrameTask := configurator.RegisterTask1(openFrame)
 	sortEntriesTask := configurator.RegisterTask1(sortEntries)

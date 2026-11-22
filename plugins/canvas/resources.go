@@ -57,6 +57,13 @@ type FontLibrary interface {
 	// Language answers the current language, a tag such as "en", starting
 	// from Config.Language.
 	Language() string
+	// Layout answers text shaped, broken into lines and measured, with no
+	// frame, for a UI's sizes, carets and baselines: shaped with HarfBuzz's
+	// rules, ordered by Unicode's bidi algorithm, in the font of text's set
+	// measuring the current language, at text's Size, zero meaning
+	// Config.TextSize. A set canvas does not hold is laid out as the default
+	// set, reported once for it as ReportKindFontSetNotHeld.
+	Layout(text Text) TextLayout
 	// Metrics answers the measures at size, its em in world units, of the
 	// font of set measuring language, an empty language meaning the current
 	// one: the language's first font in set, or set's default font. A set

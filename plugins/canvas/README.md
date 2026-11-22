@@ -22,8 +22,8 @@ Images are preloaded, unloaded by path or prefix and sized from their
 headers through `Assets`, and 2D materials made from whole WGSL files that
 include canvas's include, a fragment-only one drawing through canvas's
 vertex stage, with their parameters set by name. Font sets are made and
-destroyed through `FontLibrary`'s writing side and their fonts measured, with no
-text drawn yet. A frame can be inspected in canvas's terms, beside render's
+destroyed through `FontLibrary`'s writing side, their fonts measured and text
+laid out, shaped with bidi and broken into lines, with no text drawn yet. A frame can be inspected in canvas's terms, beside render's
 inspection of it.
 
 ## Shape
@@ -41,9 +41,9 @@ inspection of it.
   page has, zero meaning 3, fixing the atlas grid and the gutter at
   2^(levels−1) texels, more than 12 lowered to 12 and reported once, and
   `DoNotGenerateMipMaps`, which makes pages of one level, for pixel-perfect
-  games, `Language`, the current language at start, and `DefaultFontSet`,
-  the default font set, made as canvas starts, its zero JetBrains Mono
-  alone.
+  games, `Language`, the current language at start, `TextSize`, the em
+  of a run of text of no size, zero meaning 16, and `DefaultFontSet`, the
+  default font set, made as canvas starts, its zero JetBrains Mono alone.
 - **`FrameEvent`** is the frame its users record, published inside each of
   render's `FrameEvent`s. A plugin that records schedules its recording tasks
   after its `Ready` and joins them into the out dependency it returns.
@@ -266,12 +266,13 @@ inspection of it.
   SIL Open Font License in `cog.canvas/jetbrainsmono-OFL.txt`.
 - **`FontLibrary`** is the resource of font sets, read under
   `kernel.Read[canvas.FontLibrary]`: `Language()` answers the current language,
-  and `Metrics(set, size, language)` the `FontMetrics` of the font measuring
+  `Layout(text)` a **`Text`** laid out with no frame, and
+  `Metrics(set, size, language)` the `FontMetrics` of the font measuring
   `language` in `set`, its first font for that language or else its
   default, at `size`, its em in world units: `Ascent`, `Descent`,
   `LineGap`, `LineHeight`, `XHeight` and `CapHeight`, an empty language
   meaning the current one. A set canvas does not hold, never made or
-  destroyed, is measured as the default set, reported once.
+  destroyed, is laid out and measured as the default set, reported once.
   **`ElevateFontLibrary(kernel.Write[FontLibrary], kernel.Read[platform.FS])`** answers
   its writing side, **`WriteFontLibrary`**, so a task holding the read lock cannot
   make a set: `MakeFontSet(descriptor)` loads every font file a
@@ -288,6 +289,22 @@ inspection of it.
   variation is ignored and reported once. A font file that fails to load is
   reported once and left out of its set, a failed default font replaced by
   JetBrains Mono.
+- **`Text`** is a run of text: its `String`, a newline, or another of
+  Unicode's mandatory breaks, a hard break, its
+  `Font` set and `Size`, its em in world units, zero meaning
+  `Config.TextSize`, its `WrapWidth`, zero meaning no wrapping, its
+  `Align`, a **`TextAlign`**, `TextAlignStart`, `TextAlignCenter` or
+  `TextAlignEnd`, a right-to-left paragraph starting at the right, `LineHeight`, multiplying the font's,
+  zero meaning 1, and `Tracking`, letter spacing in em. go-text shapes it
+  in the font of its set measuring the current language, ordered by
+  Unicode's bidi algorithm, its lines broken on UAX #14 opportunities, so
+  Japanese breaks between ideographs and never starts a line with closing
+  punctuation, and a word too long for a line between grapheme clusters.
+  The **`TextLayout`** answers `Size()`, its box, the wrap width or its widest
+  line by its lines' height, `LineCount()`, `Baseline()`, its first line's
+  from the box's top, `LineWidth(line)`, and `ClusterPosition(cluster)`,
+  where a grapheme cluster starts on its line's baseline, one past the last
+  where the text ends, for carets and selections.
 - **`Report`** is a mistake canvas finds at run time, logged once and carried
   past. Its `ReportKind` names it for tests.
 - **`canvastest`** runs canvas in a real kernel on render's fake GPU, with a
