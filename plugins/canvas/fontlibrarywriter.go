@@ -2,6 +2,7 @@ package canvas
 
 import (
 	"cmp"
+	"fmt"
 
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/platform"
@@ -46,8 +47,25 @@ func (w fontLibraryWriter) DestroyFontSet(set FontSet) {
 func (w fontLibraryWriter) SetLanguage(tag string) { w.language = tag }
 
 // RegisterIcon registers icon under name, replacing an icon registered under
-// it before.
-func (w fontLibraryWriter) RegisterIcon(name string, icon IconDescriptor) { w.icons[name] = icon }
+// it before, under a serial of its own, which the layout cache's key holds,
+// so the layouts holding the name are laid out again and those before go
+// idle: its image's frame's size read from its file's header through
+// platform's FS. An icon whose image the text material cannot draw, or
+// whose header cannot be read, is refused, reported once for the name, and
+// the name left unregistered.
+func (w fontLibraryWriter) RegisterIcon(name string, icon IconDescriptor) {
+	frameSize, err := findIconFrameSize(w.files, icon)
+	if err != nil {
+		delete(w.icons, name)
+		refusal := Report{Kind: ReportKindIconRefused, Err: fmt.Errorf("canvas: registering icon %q: %w, so the name is left unregistered", name, err)}
+		w.logger.LogErrOnce(iconRefusedLogKey+name, refusal)
+		return
+	}
+	w.iconRegistrationCount++
+	w.icons[name] = registeredIcon{descriptor: icon, frameSize: frameSize, serial: w.iconRegistrationCount}
+	w.logger.ForgetLogOnce(iconRefusedLogKey + name)
+	w.logger.ForgetLogOnce(iconNotRegisteredLogKey + name)
+}
 
 // RegisterColor registers color under name, replacing a colour registered
 // under it before.

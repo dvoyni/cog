@@ -106,8 +106,11 @@ func (s *Sprite) findSquare(image *drawnImage) (m.Mat2x3, m.Vec2) {
 	// lands on the origin.
 	pivot := image.options.Pivot
 	pivotPoint := pivot.Fraction.AddS(0.5).Mul(size).Add(pivot.Texels.Mul(scale))
-	squareOrigin := frame.Min().Negate().Mul(scale).Sub(pivotPoint)
-	squareSize := image.size.Mul(scale)
+	// A negative size mirrors the region, so its origin and size are read
+	// as they are, never ordered.
+	region := image.placeRegion(size)
+	squareOrigin := m.Vec2{X: region.X, Y: region.Y}.Sub(pivotPoint)
+	squareSize := m.Vec2{X: region.Width, Y: region.Height}
 	square := m.Mat2x3{squareSize.X, 0, 0, squareSize.Y, squareOrigin.X, squareOrigin.Y}
 	if s.Transform == (m.Mat2x3{}) {
 		return square, squareSize

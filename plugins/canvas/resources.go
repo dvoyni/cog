@@ -115,8 +115,17 @@ type WriteFontLibrary interface {
 	// SetLanguage sets the current language to tag, such as "ja", which
 	// picks each set's fonts, its tags matched exactly.
 	SetLanguage(tag string)
-	// RegisterIcon registers icon under name, for text to place like a
-	// glyph, replacing an icon registered under it before.
+	// RegisterIcon registers icon under name, for a span of text to place
+	// like a glyph, replacing an icon registered under it before everywhere:
+	// the layouts holding the name are laid out again. Its image's size is
+	// read now from its file's header, through platform's FS, so a layout
+	// knows its width before any draw; its image is packed into the sRGB
+	// sprite atlas at its first draw, as a sprite's is. An image of a render
+	// texture or of linear colour, which the text material cannot draw, or
+	// one whose header cannot be read or whose frame does not lie within its
+	// file, is refused, reported once for the name as ReportKindIconRefused,
+	// and the name left unregistered. An icon whose image is drawn from a
+	// texture of its own, too large for an atlas page, draws nothing.
 	RegisterIcon(name string, icon IconDescriptor)
 	// RegisterColor registers color under name, for text's markup to tint
 	// with, replacing a colour registered under it before.

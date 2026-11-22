@@ -49,6 +49,20 @@ func makeDrawnImage(packed *packedImage, options ImageOptions) drawnImage {
 	}
 }
 
+// placeRegion answers the rectangle d's region spans when its frame spans
+// size from the origin: the frame itself, or a converted image's region,
+// placed within the frame by the frame's bounds.
+func (d *drawnImage) placeRegion(size m.Vec2) m.Rect {
+	frame := d.frameBounds
+	if frame == (m.Rect{}) {
+		frame = m.Rect{Width: d.size.X, Height: d.size.Y}
+	}
+	scale := size.Div(frame.Size())
+	origin := frame.Min().Negate().Mul(scale)
+	regionSize := d.size.Mul(scale)
+	return m.Rect{X: origin.X, Y: origin.Y, Width: regionSize.X, Height: regionSize.Y}
+}
+
 // findView answers the view of the texture d's entries draw, placed: its
 // own texture's, or the whole texture of the atlas it is packed into, as
 // that texture is now, since growing an atlas replaces it.

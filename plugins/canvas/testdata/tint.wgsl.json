@@ -164,6 +164,15 @@
       ]
     },
     {
+      "group": 2,
+      "binding": 3,
+      "name": "canvas_sprite_atlas",
+      "texture": {
+        "sampleType": "float",
+        "viewDimension": "2d-array"
+      }
+    },
+    {
       "group": 1,
       "binding": 0,
       "name": "material_tint",

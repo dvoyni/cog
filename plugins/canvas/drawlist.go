@@ -3,6 +3,7 @@ package canvas
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"sync"
 	"unsafe"
 
@@ -108,7 +109,7 @@ func (l DrawList) DrawSpritesWith[T any](sprites []Sprite, arguments []T) {
 // once for the task.
 func (l DrawList) DrawText(text Text) {
 	layout := l.fonts.Get().(*fontLibrary).layOutText(text, true)
-	l.list.record(l.state.Get(), EntryKindText, &l.list.texts, nil, nil, laidOutText{text: text, layout: layout})
+	l.list.recordText(l.state.Get(), nil, nil, laidOutText{text: text, layout: layout})
 }
 
 // DrawTextWith records text into the task's draw list for the frame being
@@ -118,7 +119,7 @@ func (l DrawList) DrawText(text Text) {
 // field texels.
 func (l DrawList) DrawTextWith[T any](text Text, argument T) {
 	layout := l.fonts.Get().(*fontLibrary).layOutText(text, true)
-	l.list.record(l.state.Get(), EntryKindText, &l.list.texts, reflect.TypeFor[T](), castToBytes(unsafe.Slice(&argument, 1)), laidOutText{text: text, layout: layout})
+	l.list.recordText(l.state.Get(), reflect.TypeFor[T](), castToBytes(unsafe.Slice(&argument, 1)), laidOutText{text: text, layout: layout})
 }
 
 // SetCamera sets camera for the frame being recorded, forgotten once the
@@ -138,8 +139,9 @@ func (l DrawList) SetCamera(camera Camera) {
 // DrawList records into: the entries its jobs record, in the order
 // recorded, each of them a shape, a sprite or a run of text of its records
 // of that kind,
-// with the bytes of the material arguments they give, end to end, and the
-// cameras they set, in the order set. Two jobs of one task running together
+// with the bytes of the material arguments they give, end to end, the spans
+// of its runs of text, copied end to end, and the cameras they set, in the
+// order set. Two jobs of one task running together
 // share it, their calls interleaving.
 type drawList struct {
 	// outsideFrame is the draw list's report of an entry recorded or a camera
@@ -148,13 +150,15 @@ type drawList struct {
 	// it is logged once under.
 	outsideFrame error
 	slicesDiffer error
-	// mutex guards entries, shapes, sprites, texts, arguments and cameras.
+	// mutex guards entries, shapes, sprites, texts, arguments, spans and
+	// cameras.
 	mutex     sync.Mutex
 	entries   []recordedEntry
 	shapes    []Shape
 	sprites   []Sprite
 	texts     []laidOutText
 	arguments []byte
+	spans     []Span
 	cameras   []Camera
 }
 
@@ -166,28 +170,62 @@ type drawList struct {
 // list, outside the lock.
 func (l *drawList) record[T any](state *drawState, kind EntryKind, records *[]T, argumentType reflect.Type, argumentBytes []byte, recorded ...T) {
 	l.mutex.Lock()
-	recording := state.recording.Load()
-	if recording {
-		if kind != 0 {
-			argumentSize := findArgumentSize(argumentType)
-			for index := range recorded {
-				argument := recordedArgument{goType: argumentType, offset: uint32(len(l.arguments)) + uint32(index)*argumentSize}
-				l.entries = append(l.entries, recordedEntry{kind: kind, index: uint32(len(*records) + index), argument: argument})
-			}
-			l.arguments = append(l.arguments, argumentBytes...)
-		}
-		*records = append(*records, recorded...)
-	}
+	recording := l.appendRecords(state, kind, records, argumentType, argumentBytes, recorded)
 	l.mutex.Unlock()
 	if !recording {
 		state.logger.LogErrOnce(l.outsideFrame.Error(), l.outsideFrame)
 	}
 }
 
+// recordText records text, a run of text laid out, as record does, giving
+// the material argument of argumentType in argumentBytes, its spans copied
+// into the draw list's, so its caller may reuse them once it returns.
+func (l *drawList) recordText(state *drawState, argumentType reflect.Type, argumentBytes []byte, text laidOutText) {
+	l.mutex.Lock()
+	text.text.Spans = appendSpans(&l.spans, text.text.Spans)
+	recording := l.appendRecords(state, EntryKindText, &l.texts, argumentType, argumentBytes, []laidOutText{text})
+	l.mutex.Unlock()
+	if !recording {
+		state.logger.LogErrOnce(l.outsideFrame.Error(), l.outsideFrame)
+	}
+}
+
+// appendRecords is record's work under the draw list's lock: it appends
+// recorded to records, and their entries and arguments to the draw list's,
+// and answers whether state has a frame open for entries, appending
+// nothing when it has not.
+func (l *drawList) appendRecords[T any](state *drawState, kind EntryKind, records *[]T, argumentType reflect.Type, argumentBytes []byte, recorded []T) bool {
+	if !state.recording.Load() {
+		return false
+	}
+	if kind != 0 {
+		argumentSize := findArgumentSize(argumentType)
+		for index := range recorded {
+			argument := recordedArgument{goType: argumentType, offset: uint32(len(l.arguments)) + uint32(index)*argumentSize}
+			l.entries = append(l.entries, recordedEntry{kind: kind, index: uint32(len(*records) + index), argument: argument})
+		}
+		l.arguments = append(l.arguments, argumentBytes...)
+	}
+	*records = append(*records, recorded...)
+	return true
+}
+
+// appendSpans appends spans to arena and answers them as appended there, of
+// no room past their end, so nothing appended to arena after reaches them;
+// none answers nil.
+func appendSpans(arena *[]Span, spans []Span) []Span {
+	if len(spans) == 0 {
+		return nil
+	}
+	start := len(*arena)
+	*arena = append(*arena, spans...)
+	return slices.Clip((*arena)[start:])
+}
+
 // moveEntries appends the draw list's entries, shapes, sprites, texts,
 // arguments and cameras to state's, each entry's index moved past state's records of
-// its kind, and its argument's offset past state's arguments, and empties
-// it.
+// its kind, its argument's offset past state's arguments, and each run's
+// spans copied into state's, and empties it.
 func (l *drawList) moveEntries(state *drawState) {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
@@ -201,7 +239,10 @@ func (l *drawList) moveEntries(state *drawState) {
 	}
 	state.shapes = append(state.shapes, l.shapes...)
 	state.sprites = append(state.sprites, l.sprites...)
-	state.texts = append(state.texts, l.texts...)
+	for _, text := range l.texts {
+		text.text.Spans = appendSpans(&state.spans, text.text.Spans)
+		state.texts = append(state.texts, text)
+	}
 	state.arguments = append(state.arguments, l.arguments...)
 	state.cameras = append(state.cameras, l.cameras...)
 	l.entries = l.entries[:0]
@@ -210,6 +251,8 @@ func (l *drawList) moveEntries(state *drawState) {
 	clear(l.texts)
 	l.texts = l.texts[:0]
 	l.arguments = l.arguments[:0]
+	clear(l.spans)
+	l.spans = l.spans[:0]
 	l.cameras = l.cameras[:0]
 }
 

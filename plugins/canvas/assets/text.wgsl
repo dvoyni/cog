@@ -2,7 +2,8 @@
 // of its distance field in the glyph atlas, filled with the entry's tint,
 // over a profile, its argument, drawn under the fill in the same fragment:
 // an outline, a halo, a glow or a drop shadow, its distances in the font's
-// field texels. Its zero profile draws the fill alone.
+// field texels. Its zero profile draws the fill alone. A run's icons are
+// quads of the sprite atlas, multiplied by their tint, with no profile.
 #include ./canvas.wgsl
 
 // Argument is the profile, canvas's Profile: a band of the distance from a
@@ -34,7 +35,8 @@ const text_minified_texels = 2.0;
 // canvas_text_vertex is canvas_sprite_vertex for the text material: a glyph's
 // quad, and for small text, unturned, that quad moved so its pen lands on a
 // whole pixel, as a bitmap glyph's is, so each glyph of a kind falls on the
-// pixel grid alike, a whole number of pixels from its neighbours.
+// pixel grid alike, a whole number of pixels from its neighbours. An icon's
+// quad is never moved, its region not one of the glyph atlas.
 @vertex
 fn canvas_text_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance: u32) -> CanvasVaryings {
 	let instance_data = canvas_instances[instance];
@@ -45,7 +47,7 @@ fn canvas_text_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_inde
 	let unturned = abs(transform[0].y) + abs(transform[1].x) <= 1e-6 * (abs(transform[0].x) + abs(transform[1].y));
 	let field_texels = instance_data.region.z * f32(textureDimensions(canvas_atlas).x);
 	let pixels = length(transform[0]) / canvas_camera.pixel_size;
-	if unturned && field_texels > text_minified_texels * pixels {
+	if unturned && field_texels > text_minified_texels * pixels && !canvas_glyph_is_icon(instance_data) {
 		let pen = canvas_world_to_clip(linear * canvas_glyph_pen(instance_data) + canvas_snap(transform[2])).xy;
 		let pen_pixel = vec2<f32>(pen.x * 0.5 + 0.5, 0.5 - pen.y * 0.5) * canvas_camera.viewport_size;
 		let shift = floor(pen_pixel + 0.5) - pen_pixel;
@@ -85,7 +87,8 @@ fn text_find_fill_coverage(in: CanvasVaryings, uv_gradient_x: vec2<f32>, uv_grad
 // field's value turned into texels by its spread, and the band read from
 // the field moved back by the profile's offset, sampled again only when it
 // has one, nothing past the glyph's quad. The glyph atlas has one mip
-// level, so it is sampled at it.
+// level, so it is sampled at it. An icon is its region of the sprite atlas,
+// sampled across its mips, multiplied by its tint.
 @fragment
 fn canvas_text_fragment(in: CanvasVaryings) -> @location(0) vec4<f32> {
 	let instance_data = canvas_instances[in.instance];
@@ -93,6 +96,9 @@ fn canvas_text_fragment(in: CanvasVaryings) -> @location(0) vec4<f32> {
 	let spread = canvas_glyph_spread(instance_data);
 	let uv_gradient_x = dpdx(in.uv);
 	let uv_gradient_y = dpdy(in.uv);
+	if canvas_glyph_is_icon(instance_data) {
+		return canvas_output(in.tint * textureSampleGrad(canvas_sprite_atlas, canvas_sampler, in.uv, instance_data.page, uv_gradient_x, uv_gradient_y));
+	}
 	let dimensions = vec2<f32>(textureDimensions(canvas_atlas).xy);
 	let pixel = max(0.5 * (length(uv_gradient_x * dimensions) + length(uv_gradient_y * dimensions)), 1e-6);
 	let fill_coverage = text_find_fill_coverage(in, uv_gradient_x, uv_gradient_y, spread, pixel);

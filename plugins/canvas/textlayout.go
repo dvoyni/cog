@@ -23,6 +23,10 @@ type TextLayout struct {
 	// glyphs are the run's glyphs, line by line, each line's left to right,
 	// but for those of no field once laid out for drawing.
 	glyphs []placedGlyph
+	// spanIcons are the icon each of the run's spans is, nil for a span of
+	// text and for a name no icon is registered under, and none for a run
+	// of no spans.
+	spanIcons []*placedIcon
 }
 
 // Size answers the layout's box.
@@ -47,13 +51,36 @@ func (l TextLayout) LineWidth(line int) float32 { return l.lineWidths[line] }
 // by the clusters it draws.
 func (l TextLayout) ClusterPosition(cluster int) m.Vec2 { return l.clusterPositions[cluster] }
 
+// findIcon answers the icon glyph is, nil for a glyph of a font.
+func (l TextLayout) findIcon(glyph placedGlyph) *placedIcon {
+	if glyph.font != nil {
+		return nil
+	}
+	return l.spanIcons[glyph.span]
+}
+
 // placedGlyph is one glyph a layout draws: the font of the run's set that
 // draws it and its id in that font, the index of its field in the
-// FontLibrary's glyph table once laid out for drawing, and its pen on its
-// line's baseline, in world units from the box's top left.
+// FontLibrary's glyph table once laid out for drawing, the index of the
+// span of the run's Spans it is of, zero for a run of no spans, and its pen
+// on its line's baseline, in world units from the box's top left. An icon
+// is a glyph of no font, its span's icon, its pen its bottom left.
 type placedGlyph struct {
 	font  *loadedFont
 	id    font.GID
 	field uint32
+	span  uint32
 	pen   m.Vec2
+}
+
+// placedIcon is an icon a layout places, as it was registered when the
+// layout was made: its image and frame, its size in world units, its
+// bottom raised above the baseline by offset, in em, and whether it takes
+// its span's tint.
+type placedIcon struct {
+	image  Image
+	frame  uint32
+	size   m.Vec2
+	offset float32
+	tinted bool
 }

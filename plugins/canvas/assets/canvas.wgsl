@@ -62,7 +62,9 @@ struct CanvasInstanceData {
 	// wide, and the radius of a fill's or a stroke's corners, zero leaving
 	// them square. A glyph's width is its distance field's spread instead,
 	// in field texels, half its font's field range, which a text material
-	// turns the field's value into texels by: (0.5 - value) * 2 * width.
+	// turns the field's value into texels by: (0.5 - value) * 2 * width;
+	// an icon's, a picture placed in text, is zero, its region one of
+	// canvas_sprite_atlas.
 	size: vec2<f32>,
 	width: f32,
 	radius: f32,
@@ -125,6 +127,10 @@ const CANVAS_MODE_TILED = 3u;
 @group(2) @binding(0) var<storage, read> canvas_instances: array<CanvasInstanceData>;
 @group(2) @binding(1) var canvas_atlas: texture_2d_array<f32>;
 @group(2) @binding(2) var canvas_sampler: sampler;
+// canvas_sprite_atlas is the sRGB sprite atlas, which a text material draws
+// a run's icons from beside the glyph atlas, its canvas_atlas, so a run
+// with icons is one batch.
+@group(2) @binding(3) var canvas_sprite_atlas: texture_2d_array<f32>;
 
 // CanvasVaryings is what every vertex stage writes, so a fragment-only
 // material serves every entry.
@@ -394,6 +400,13 @@ fn canvas_find_unit_offset(linear: mat2x2<f32>, offset: vec2<f32>) -> vec2<f32> 
 // tiles carry, as only a tiled sprite's otherwise do.
 fn canvas_glyph_pen(instance_data: CanvasInstanceData) -> vec2<f32> {
 	return instance_data.tiles;
+}
+
+// canvas_glyph_is_icon answers whether instance_data, of a run of text, is
+// an icon rather than a glyph: its width, a glyph's spread, is zero, and
+// its region is in canvas_sprite_atlas.
+fn canvas_glyph_is_icon(instance_data: CanvasInstanceData) -> bool {
+	return instance_data.width == 0.0;
 }
 
 // canvas_glyph_spread answers a glyph's field's spread, in field texels, half

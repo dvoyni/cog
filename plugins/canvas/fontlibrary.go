@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"unsafe"
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
@@ -32,8 +33,12 @@ type fontLibrary struct {
 	// made of as canvas starts: it is kept here, since a task's argument
 	// holds no pointer.
 	defaultDescriptor FontSetDescriptor
-	icons             map[string]IconDescriptor
-	colors            map[string]m.Color
+	icons             map[string]registeredIcon
+	// iconSerial counts the icons registered, each registered under the
+	// count it makes, so a name registered again names another icon to
+	// the layout cache's key.
+	iconRegistrationCount uint64
+	colors                map[string]m.Color
 	// shapers are the text shapers layouts are made by, each a
 	// *textShaper, one a layout, since a shaper is not safe for concurrent
 	// use and layouts are made under the read lock.
@@ -59,7 +64,7 @@ func newFontLibrary(logger *kernel.Logger, config *Config) *fontLibrary {
 		textSize:          cmp.Or(config.TextSize, 16),
 		sets:              []*fontSetSlot{makeFontSetSlot(nil, logger, FontSetDescriptor{})},
 		defaultDescriptor: config.DefaultFontSet,
-		icons:             map[string]IconDescriptor{},
+		icons:             map[string]registeredIcon{},
 		colors:            map[string]m.Color{},
 		shapers:           sync.Pool{New: func() any { return new(textShaper) }},
 		glyphs:            glyphTable{indexes: map[glyphKey]uint32{}, fieldEm: cmp.Or(config.GlyphFieldEm, 48), fieldRange: cmp.Or(config.GlyphFieldRange, 16)},
@@ -94,7 +99,7 @@ func (l *fontLibrary) Preload(set FontSet, text string) {
 	slot := l.findHeldSlot(set, "preloading glyphs of")
 	shaper := l.shapers.Get().(*textShaper)
 	defer l.shapers.Put(shaper)
-	layout := shaper.layOut(layoutInput{text: text, set: slot, em: l.textSize, language: l.language})
+	layout := shaper.layOut(layoutInput{text: text, set: slot, em: l.textSize, language: l.language}, l.icons)
 	l.glyphs.assignFields(layout.glyphs, shaper)
 }
 
@@ -105,13 +110,24 @@ func (l *fontLibrary) Preload(set FontSet, text string) {
 // is drawn and kept beside it. Two jobs drawing it first at once each find
 // them, and the first kept is answered to both.
 func (l *fontLibrary) layOutText(text Text, drawn bool) TextLayout {
-	input := l.makeLayoutInput(text)
+	// A shaper is taken for a run of spans, whose key it encodes, or to
+	// shape, not for a run of a string found cached.
+	var shaper *textShaper
+	var spanKey *[]byte
+	if len(text.Spans) > 0 {
+		shaper = l.shapers.Get().(*textShaper)
+		defer l.shapers.Put(shaper)
+		spanKey = &shaper.spanKey
+	}
+	input := l.makeLayoutInput(text, spanKey)
 	cached := l.layouts.find(input)
 	if cached == nil || drawn && cached.drawnGlyphs.Load() == nil {
-		shaper := l.shapers.Get().(*textShaper)
-		defer l.shapers.Put(shaper)
+		if shaper == nil {
+			shaper = l.shapers.Get().(*textShaper)
+			defer l.shapers.Put(shaper)
+		}
 		if cached == nil {
-			cached = l.layouts.add(input, shaper.layOut(input))
+			cached = l.layouts.add(input, shaper.layOut(input, l.icons))
 		}
 		if drawn {
 			drawnGlyphs := l.glyphs.assignFields(slices.Clone(cached.layout.glyphs), shaper)
@@ -127,9 +143,12 @@ func (l *fontLibrary) layOutText(text Text, drawn bool) TextLayout {
 
 // makeLayoutInput answers what text's layout is made of, in its language,
 // the current one unless it names its own: a set canvas does not hold lays
-// it out in the default set, reported once.
-func (l *fontLibrary) makeLayoutInput(text Text) layoutInput {
-	return layoutInput{
+// it out in the default set, reported once. Its Spans, when given, are
+// encoded into scratch, with the serial each icon was registered under,
+// which the input's text then reads, until scratch is written again, so a
+// lookup of a spanned run makes no string.
+func (l *fontLibrary) makeLayoutInput(text Text, scratch *[]byte) layoutInput {
+	input := layoutInput{
 		text:       text.String,
 		set:        l.findHeldSlot(text.Font, "laying out text in"),
 		em:         cmp.Or(text.Size, l.textSize),
@@ -139,6 +158,12 @@ func (l *fontLibrary) makeLayoutInput(text Text) layoutInput {
 		tracking:   text.Tracking,
 		language:   cmp.Or(text.Language, l.language),
 	}
+	if len(text.Spans) > 0 {
+		*scratch = appendEncodedSpans((*scratch)[:0], text.Spans, l.icons)
+		input.text = unsafe.String(unsafe.SliceData(*scratch), len(*scratch))
+		input.spanned = true
+	}
+	return input
 }
 
 // findHeldSlot answers set's slot, or the default set's when canvas does

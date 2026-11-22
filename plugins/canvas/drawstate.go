@@ -29,13 +29,15 @@ type drawState struct {
 	drawLists []*drawList
 	// entries are the frame's entries, merged from the draw lists in their
 	// order, each a shape of shapes, a sprite of sprites or a run of text of
-	// texts, merged alike, and the bytes of the arguments they give, end to
-	// end. All are replaced by the next frame's when it merges.
+	// texts, merged alike, the bytes of the arguments they give, end to
+	// end, and the spans of the runs of text, copied end to end. All are
+	// replaced by the next frame's when it merges.
 	entries   []recordedEntry
 	shapes    []Shape
 	sprites   []Sprite
 	texts     []laidOutText
 	arguments []byte
+	spans     []Span
 	// cameras are the frame's cameras, merged from the draw lists in their
 	// order, in the order they draw, or the default camera for a frame of
 	// entries that set none, replaced by the next frame's when it merges.
@@ -92,6 +94,8 @@ func (s *drawState) closeAndSort() {
 	clear(s.texts)
 	s.texts = s.texts[:0]
 	s.arguments = s.arguments[:0]
+	clear(s.spans)
+	s.spans = s.spans[:0]
 	s.cameras = s.cameras[:0]
 	s.drawListEnds = s.drawListEnds[:0]
 	for _, taskDrawList := range s.drawLists {
@@ -182,6 +186,8 @@ func (s *drawState) makeInspection(beat metronome.Beat, cameraDraws []cameraDraw
 					inspectedEntry.Order = inspectedEntry.Sprite.Order
 				case EntryKindText:
 					inspectedEntry.Text = s.texts[recorded.index].text
+					// The next frame's spans are written over these.
+					inspectedEntry.Text.Spans = slices.Clone(inspectedEntry.Text.Spans)
 					inspectedEntry.Layer = inspectedEntry.Text.Layer
 					inspectedEntry.Order = inspectedEntry.Text.Order
 				}

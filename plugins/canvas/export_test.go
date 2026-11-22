@@ -9,7 +9,7 @@ type CachedLayout = cachedLayout
 // for canvas's tests to see a layout kept or freed.
 func FindCachedLayout(fonts FontLibrary, text Text) *CachedLayout {
 	library := fonts.(*fontLibrary)
-	input := library.makeLayoutInput(text)
+	input := library.makeLayoutInput(text, new([]byte))
 	library.layouts.mutex.RLock()
 	defer library.layouts.mutex.RUnlock()
 	return library.layouts.layouts[input]

@@ -102,12 +102,22 @@ const (
 	// which is drawn as the default font's missing-glyph box. It is
 	// reported once for the set.
 	ReportKindCharacterMissing
+	// ReportKindIconNotRegistered is an icon a run of text names under a
+	// name no icon is registered under, which is drawn as the default
+	// font's missing-glyph box. It is reported once for the name.
+	ReportKindIconNotRegistered
+	// ReportKindIconRefused is an icon WriteFontLibrary.RegisterIcon
+	// refused, its name left unregistered: an image of a render texture or
+	// of linear colour, which the text material cannot draw from the sRGB
+	// sprite atlas, or one whose file's header cannot be read or whose frame
+	// does not lie within its file. It is reported once for the name.
+	ReportKindIconRefused
 )
 
 // The keys canvas logs a report once under are one of these, then the
 // report's subject: an image's path or texture, a sprite atlas's label, a
-// material, a shader or material and an argument's type, a font's path, or
-// a font set.
+// material, a shader or material and an argument's type, a font's path, a
+// font set, or an icon's name.
 const (
 	imageOptionsIgnoredLogKey    = "canvas: image options ignored: "
 	imageHeaderUnreadLogKey      = "canvas: image header unread: "
@@ -122,6 +132,8 @@ const (
 	fontSetNotHeldLogKey         = "canvas: font set not held: "
 	variationIgnoredLogKey       = "canvas: variation ignored: "
 	characterMissingLogKey       = "canvas: character missing: "
+	iconNotRegisteredLogKey      = "canvas: icon not registered: "
+	iconRefusedLogKey            = "canvas: icon refused: "
 )
 
 // pixelPerfectStretchReport is the report of a pixel-perfect camera's

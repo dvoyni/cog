@@ -291,7 +291,11 @@ can be inspected in canvas's terms, beside render's inspection of it.
   **`FontSetDescriptor`** names, now, and answers a **`FontSet`**, a plain
   handle whose zero is the default set; `DestroyFontSet(set)`;
   `SetLanguage(tag)`, tags matched exactly; `RegisterIcon(name, icon)`,
-  an **`IconDescriptor`**; and `RegisterColor(name, color)`. A descriptor
+  an **`IconDescriptor`** of an `Image`, its `Frame`, its `Scale` of the cap
+  height, its `Offset` above the baseline in em and whether it is
+  `Tinted`, its frame's size read from its file's header then and the
+  layouts naming it laid out anew, an image of a render texture or of
+  linear colour refused, reported once; and `RegisterColor(name, color)`. A descriptor
   holds a `Default` **`Font`** and **`LanguageFonts`**, the fonts serving
   some languages. A `Font` is a `Path` in platform's FS, a TrueType or
   OpenType font or a collection, empty meaning canvas's JetBrains Mono, its
@@ -328,11 +332,15 @@ can be inspected in canvas's terms, beside render's inspection of it.
   where the text ends, for carets and selections. As an entry, a `Text`
   also carries its `Transform`, an `m.Mat2x3` about its `Pivot`, a point of
   its layout's box, its `Texels` in em, its `Tint`, the fill's colour, white
-  when zero, its `Material`, zero meaning **`TextMaterial`**, its `Clip`, its
+  when zero, its `Spans`, when given, the run instead of its `String`: each
+  a **`Span`** of `Text` in its own `Tint`, zero meaning the run's, or an
+  `Icon` registered by name, the cap height tall and placed on the
+  baseline like a glyph, a line breaking around it as around a letter, a
+  name not registered drawing the missing-glyph box, reported once, its `Material`, zero meaning **`TextMaterial`**, its `Clip`, its
   `Filter`, zero meaning linear, as a field is read, and its sort key.
   `DrawText` records a run, laid out then, as `Layout` lays it out, one
   entry whose glyphs draw in order. Both lay out through the **layout
-  cache**, keyed by the run's `String`, its `Font` set, its `Size`,
+  cache**, keyed by the run's `String` or its spans' texts and icons, its `Font` set, its `Size`,
   `WrapWidth`, `Align`, `LineHeight` and `Tracking`, and its language, so a
   label measured or drawn frame after frame is shaped once, and a layout
   neither for `Config.LayoutIdleFrames` frames is freed; `DrawTextWith` gives its material's
@@ -348,9 +356,11 @@ can be inspected in canvas's terms, beside render's inspection of it.
   a pixel, is read at four points a pixel and its glyphs' pens placed on
   whole pixels, unturned, as a bitmap glyph's are. The include's
   `canvas_glyph_spread` and `canvas_glyph_pen` answer a glyph's field's
-  spread and its pen, for a custom material of runs. Every run of a frame drawn
-  with `TextMaterial` batches with the next, whatever its size, tint or
-  profile.
+  spread and its pen, and `canvas_glyph_is_icon` whether an instance is an
+  icon, drawn from `canvas_sprite_atlas`, the sRGB sprite atlas, for a
+  custom material of runs. Every run of a frame drawn
+  with `TextMaterial` batches with the next, whatever its size, tint,
+  profile or icons.
 - **`Report`** is a mistake canvas finds at run time, logged once and carried
   past. Its `ReportKind` names it for tests.
 - **`canvastest`** runs canvas in a real kernel on render's fake GPU, with a

@@ -46,7 +46,8 @@ type batch struct {
 // the zero value. A sprite's image is its frame of drawnImages, a
 // renderer's, and a shape's the zero Image's; a run of text draws an
 // instance for each of its glyphs packed, each its field as drawn of
-// drawnGlyphs, a renderer's.
+// drawnGlyphs, a renderer's, and for each of its icons packed, each its
+// image's frame of drawnImages.
 func appendBatches(batches []batch, instances *listInstanceData, entries []sortedEntry, state *drawState, batchKeys []batchKey, drawnImages [][]drawnImage, drawnGlyphs []drawnGlyph) []batch {
 	firstBatch := len(batches)
 	for index, entry := range entries {
@@ -72,9 +73,9 @@ func appendBatches(batches []batch, instances *listInstanceData, entries []sorte
 			instances.fixed = appendShapeInstances(instances.fixed, &state.shapes[recorded.index], &drawnImages[0][0])
 		case EntryKindSprite:
 			sprite := &state.sprites[recorded.index]
-			instances.fixed = appendSpriteInstance(instances.fixed, sprite, findDrawnFrame(drawnImages, sprite))
+			instances.fixed = appendSpriteInstance(instances.fixed, sprite, findDrawnFrame(drawnImages, sprite.Image, sprite.Frame))
 		case EntryKindText:
-			instances.fixed = state.texts[recorded.index].appendInstances(instances.fixed, drawnGlyphs)
+			instances.fixed = state.texts[recorded.index].appendInstances(instances.fixed, drawnGlyphs, drawnImages)
 		}
 		lastBatch.instanceCount += uint32(len(instances.fixed) - entryStart)
 		if entryKey.stride != 0 {

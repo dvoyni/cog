@@ -2,6 +2,7 @@ package canvas
 
 import (
 	"cmp"
+	"fmt"
 	"math"
 	"slices"
 
@@ -20,6 +21,18 @@ import (
 // own em in world units, however small, would round coarsely.
 const shapingEm = 1024
 
+// iconCharacter is the character an icon is shaped as, the object
+// replacement character, drawn by no font of the run's set: the shaper
+// gives it the icon's advance, and a name no icon is registered under the
+// default font's missing glyph.
+const iconCharacter = '\uFFFC'
+
+// iconBreakCharacter is the character an icon is to the line wrapper: a
+// letter, so a line breaks around an icon as around a letter, never between
+// it and a letter beside it, where Unicode's line breaking (UAX #14) breaks
+// around the object replacement character.
+const iconBreakCharacter = 'A'
+
 // textShaper lays runs of text out: it holds go-text's shaper, segmenters
 // and line wrapper, and a face of each font it shaped, which keep what they
 // read and are not safe for concurrent use, and the scratch of the run it
@@ -35,23 +48,32 @@ type textShaper struct {
 	// parsed font, which go-text's shaper keeps its own state of by as well,
 	// and which each loaded font has of its own.
 	faces map[*font.Font]fontFace
+	// spanKey is the scratch a spanned run's layout's key is encoded into
+	// as it is looked up.
+	spanKey []byte
 	// The run being laid out: its set and its language's tag, which pick
-	// the font of each character, its em in world units over its shaping
-	// em, its lines' height, the width they wrap at and its tracking, both
-	// in shaping units, and its language as the shaper takes it, with the
+	// the font of each character, the cap height of the font measuring its
+	// language at its em, its em in world units over its shaping em, its
+	// lines' height, the width they wrap at and its tracking, both in
+	// shaping units, and its language as the shaper takes it, with the
 	// layout so far.
 	set         *fontSetSlot
 	languageTag string
+	capHeight   float32
 	scale       float32
 	lineHeight  float32
 	maxWidth    fixed.Int26_6
 	tracking    fixed.Int26_6
 	language    language.Language
 	layout      TextLayout
-	// runes are the run's text, outputs a paragraph's runs shaped, and
-	// graphemeStarts the rune each of the text's grapheme clusters starts
-	// at.
+	// runes are the run's text, its spans' end to end, each icon's
+	// iconCharacter; breakRunes the same, each icon's iconBreakCharacter,
+	// which the line wrapper reads; runeSpans the span each rune is of;
+	// outputs a paragraph's runs shaped; and graphemeStarts the rune each
+	// of the text's grapheme clusters starts at.
 	runes          []rune
+	breakRunes     []rune
+	runeSpans      []uint32
 	outputs        []shaping.Output
 	graphemeStarts []int
 	// runOfVisualIndex is a line's runs in their visual order, left to
@@ -70,6 +92,9 @@ type textShaper struct {
 // ResolveFace answers, as go-text's shaping.Fontmap, the shaper's face of
 // the font drawing character in the run's set and language.
 func (s *textShaper) ResolveFace(character rune) *font.Face {
+	if character == iconCharacter {
+		return s.findFace(&s.set.defaultFont)
+	}
 	return s.findFace(s.set.findCharacterFont(s.languageTag, character))
 }
 
@@ -77,12 +102,15 @@ func (s *textShaper) ResolveFace(character rune) *font.Face {
 // em, in world units, shaped in its language: each character drawn by the
 // first of the language's fonts that has it, else by the default font,
 // and its lines measured by the font measuring the language, as
-// FontLibrary.Metrics reads.
-func (s *textShaper) layOut(input layoutInput) TextLayout {
+// FontLibrary.Metrics reads. A spanned input's icons are those registered
+// in icons under their names; a name none is registered under is reported
+// once.
+func (s *textShaper) layOut(input layoutInput, icons map[string]registeredIcon) TextLayout {
 	em := input.em
 	s.set = input.set
 	s.languageTag = input.language
 	metrics := input.set.findLanguageFont(input.language).findMetrics(em)
+	s.capHeight = metrics.CapHeight
 	s.scale = em / (shapingEm * 64)
 	s.lineHeight = metrics.LineHeight * cmp.Or(input.lineHeight, 1)
 	s.maxWidth = math.MaxInt32
@@ -93,8 +121,26 @@ func (s *textShaper) layOut(input layoutInput) TextLayout {
 	s.language = language.NewLanguage(input.language)
 	s.layout = TextLayout{baseline: (s.lineHeight-metrics.Ascent-metrics.Descent)/2 + metrics.Ascent, em: em, glyphs: make([]placedGlyph, 0, len(input.text))}
 	s.runes = s.runes[:0]
-	for _, character := range input.text {
-		s.runes = append(s.runes, character)
+	s.breakRunes = s.breakRunes[:0]
+	s.runeSpans = s.runeSpans[:0]
+	if input.spanned {
+		for span := range decodeSpans(input.text) {
+			spanIndex := uint32(len(s.layout.spanIcons))
+			var icon *placedIcon
+			if span.icon {
+				icon = s.placeIcon(span.content, icons)
+				s.appendRune(iconCharacter, iconBreakCharacter, spanIndex)
+			} else {
+				for _, character := range span.content {
+					s.appendRune(character, character, spanIndex)
+				}
+			}
+			s.layout.spanIcons = append(s.layout.spanIcons, icon)
+		}
+	} else {
+		for _, character := range input.text {
+			s.appendRune(character, character, 0)
+		}
 	}
 	s.segmenter.Init(s.runes)
 	s.graphemeStarts = s.graphemeStarts[:0]
@@ -129,6 +175,41 @@ func (s *textShaper) layOut(input layoutInput) TextLayout {
 	s.layout = TextLayout{}
 	s.set = nil
 	return layout
+}
+
+// appendRune appends character to the run's runes, and breakCharacter to
+// the runes the line wrapper reads, of the span at spanIndex.
+func (s *textShaper) appendRune(character, breakCharacter rune, spanIndex uint32) {
+	s.runes = append(s.runes, character)
+	s.breakRunes = append(s.breakRunes, breakCharacter)
+	s.runeSpans = append(s.runeSpans, spanIndex)
+}
+
+// findRuneIcon answers the icon the run's rune character is, nil for a
+// rune of text and for a name no icon is registered under.
+func (s *textShaper) findRuneIcon(character int) *placedIcon {
+	if s.layout.spanIcons == nil {
+		return nil
+	}
+	return s.layout.spanIcons[s.runeSpans[character]]
+}
+
+// placeIcon answers the icon registered in icons under name, placed at the
+// run's em: the cap height of the font measuring its language times its
+// Scale, zero meaning 1, tall, its width by its frame's aspect, raised by
+// its Offset, in em. A name none is registered under answers nil,
+// reported once for the name.
+func (s *textShaper) placeIcon(name string, icons map[string]registeredIcon) *placedIcon {
+	registered, found := icons[name]
+	if !found {
+		missing := Report{Kind: ReportKindIconNotRegistered, Err: fmt.Errorf("canvas: a run of text names icon %q, which no icon is registered under, so it is drawn as the default font's missing-glyph box", name)}
+		s.set.logger.LogErrOnce(iconNotRegisteredLogKey+name, missing)
+		return nil
+	}
+	icon := registered.descriptor
+	height := s.capHeight * cmp.Or(icon.Scale, 1)
+	size := m.Vec2{X: height * registered.frameSize.X / registered.frameSize.Y, Y: height}
+	return &placedIcon{image: icon.Image, frame: icon.Frame, size: size, offset: icon.Offset, tinted: icon.Tinted}
 }
 
 // findFace answers the shaper's face of textFont, made at its variations
@@ -187,12 +268,14 @@ func (s *textShaper) layOutContent(start, end int) {
 	input := shaping.Input{Text: runes, RunEnd: len(runes), Direction: direction, Size: fixed.I(shapingEm), Language: s.language}
 	s.outputs = s.outputs[:0]
 	for _, run := range s.splitter.Split(input, s) {
-		s.outputs = append(s.outputs, s.shaper.Shape(run))
+		output := s.shaper.Shape(run)
+		s.sizeIcons(&output, start)
+		s.outputs = append(s.outputs, output)
 	}
 	if s.tracking != 0 {
 		shaping.AddSpacing(s.outputs, runes, 0, s.tracking)
 	}
-	s.wrapper.Prepare(shaping.WrapConfig{Direction: direction}, runes, shaping.NewSliceIterator(s.outputs))
+	s.wrapper.Prepare(shaping.WrapConfig{Direction: direction}, s.breakRunes[start:end], shaping.NewSliceIterator(s.outputs))
 	for done := false; !done; {
 		var line shaping.WrappedLine
 		line, done = s.wrapper.WrapNextLineF(s.maxWidth)
@@ -200,6 +283,40 @@ func (s *textShaper) layOutContent(start, end int) {
 			s.placeLine(line.Line, start)
 			s.lineRightToLeft = append(s.lineRightToLeft, direction == di.DirectionRTL)
 		}
+	}
+}
+
+// sizeIcons gives each glyph of output, shaped of a paragraph whose runes
+// start at the run's rune start, that is an icon its icon's width as its
+// advance and content and its offset as its own, which point up, and each
+// that is an icon of a name no icon is registered under the default font's
+// missing glyph, whose face shaped it.
+func (s *textShaper) sizeIcons(output *shaping.Output, start int) {
+	sized := false
+	for index := range output.Glyphs {
+		glyph := &output.Glyphs[index]
+		character := start + glyph.ClusterIndex
+		if s.runes[character] != iconCharacter {
+			continue
+		}
+		var advance, raise fixed.Int26_6
+		if icon := s.findRuneIcon(character); icon != nil {
+			advance = fixed.Int26_6(icon.size.X / s.scale)
+			raise = fixed.Int26_6(icon.offset * shapingEm * 64)
+		} else {
+			glyph.GlyphID = 0
+			advance = output.FromFontUnit(output.Face.HorizontalAdvance(0))
+		}
+		// A glyph of no width ending a run is taken for a space.
+		glyph.Advance = advance
+		glyph.XAdvance = advance
+		glyph.Width = advance
+		glyph.XOffset = 0
+		glyph.YOffset = raise
+		sized = true
+	}
+	if sized {
+		output.RecalculateAll()
 	}
 }
 
@@ -221,7 +338,7 @@ func (s *textShaper) placeLine(line shaping.Line, start int) {
 			glyphCount := max(cluster.GlyphCount, 1)
 			var advance fixed.Int26_6
 			for _, clusterGlyph := range run.Glyphs[glyph : glyph+glyphCount] {
-				s.placeGlyph(runFont, clusterGlyph, x+advance)
+				s.placeGlyph(runFont, clusterGlyph, x+advance, start+clusterGlyph.ClusterIndex)
 				advance += clusterGlyph.Advance
 			}
 			s.placeClusters(cluster, start, x, advance, rightToLeft)
@@ -232,13 +349,19 @@ func (s *textShaper) placeLine(line shaping.Line, start int) {
 	s.layout.lineWidths = append(s.layout.lineWidths, float32(x)*s.scale)
 }
 
-// placeGlyph places glyph, of glyphFont, on the line being placed, its pen
-// at x, in shaping units, moved by its offsets, which point up as go-text's
-// do.
-func (s *textShaper) placeGlyph(glyphFont *loadedFont, glyph shaping.Glyph, x fixed.Int26_6) {
+// placeGlyph places glyph, of glyphFont, shaped of the run's rune
+// character, on the line being placed, its pen at x, in shaping units,
+// moved by its offsets, which point up as go-text's do: an icon of no
+// font.
+func (s *textShaper) placeGlyph(glyphFont *loadedFont, glyph shaping.Glyph, x fixed.Int26_6, character int) {
 	line := len(s.layout.lineWidths)
 	pen := m.Vec2{X: float32(x+glyph.XOffset) * s.scale, Y: s.layout.baseline + float32(line)*s.lineHeight - float32(glyph.YOffset)*s.scale}
-	s.layout.glyphs = append(s.layout.glyphs, placedGlyph{font: glyphFont, id: glyph.GlyphID, pen: pen})
+	placed := placedGlyph{font: glyphFont, id: glyph.GlyphID, span: s.runeSpans[character], pen: pen}
+	if s.findRuneIcon(character) != nil {
+		placed.font = nil
+		placed.id = 0
+	}
+	s.layout.glyphs = append(s.layout.glyphs, placed)
 	s.lineOfGlyph = append(s.lineOfGlyph, line)
 }
 

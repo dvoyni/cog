@@ -82,11 +82,11 @@ type renderer struct {
 	// filledPages are a packing of each page a command list filled, whose
 	// mips it is to generate, written over as it fills them.
 	filledPages []*packedImage
-	// unpackedSprites are the indexes of the frame's sprites whose images
-	// were not packed as the frame began, and evictionCandidates the
-	// images a full atlas may evict, in the order it evicts them, both
+	// unplacedFrames are the frames of images the frame's sprites and icons
+	// draw that were not placed as the frame began, and evictionCandidates
+	// the images a full atlas may evict, in the order it evicts them, both
 	// written over as they are needed.
-	unpackedSprites    []uint32
+	unplacedFrames     []imageFrame
 	evictionCandidates []evictionCandidate
 	// cameraDraws are the frame's cameras that draw, in the order they
 	// draw, and mainWindow the main window they were drawn against, the
@@ -222,33 +222,44 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 	r.packGlyphs(inventory, library, state)
 	// Every image packed is marked drawn this frame before any is packed,
 	// so packing the frame's new images evicts none the frame draws.
-	r.unpackedSprites = r.unpackedSprites[:0]
+	r.unplacedFrames = r.unplacedFrames[:0]
 	for _, entry := range state.entries {
-		if entry.kind == EntryKindSprite {
-			if _, placed := r.findPlacedImage(&state.sprites[entry.index]); !placed {
-				r.unpackedSprites = append(r.unpackedSprites, entry.index)
+		switch entry.kind {
+		case EntryKindSprite:
+			sprite := &state.sprites[entry.index]
+			if _, placed := r.findPlacedImage(sprite.Image, sprite.Frame); !placed {
+				r.unplacedFrames = append(r.unplacedFrames, imageFrame{image: sprite.Image, frame: sprite.Frame})
 				continue
+			}
+		case EntryKindText:
+			for _, icon := range state.texts[entry.index].layout.spanIcons {
+				if icon == nil {
+					continue
+				}
+				if _, placed := r.findPlacedImage(icon.image, icon.frame); !placed {
+					r.unplacedFrames = append(r.unplacedFrames, imageFrame{image: icon.image, frame: icon.frame})
+				}
 			}
 		}
 		r.appendEntryKeys(state, entry)
 	}
-	if len(r.unpackedSprites) > 0 {
-		for _, spriteIndex := range r.unpackedSprites {
-			sprite := &state.sprites[spriteIndex]
-			drawn := findDrawnFrame(r.drawnImages, sprite)
-			// An earlier sprite of the same frame may have placed it: packed
-			// it, given it a view of its texture, or found it draws nothing.
+	if len(r.unplacedFrames) > 0 {
+		for _, unplaced := range r.unplacedFrames {
+			drawn := findDrawnFrame(r.drawnImages, unplaced.image, unplaced.frame)
+			// An earlier sprite or icon of the same frame may have placed it:
+			// packed it, given it a view of its texture, or found it draws
+			// nothing.
 			if drawn.packed != nil || drawn.view.Texture != (render.Texture{}) || drawn.drawsNothing {
 				continue
 			}
-			key := imageNames.findKey(sprite.Image)
+			key := imageNames.findKey(unplaced.image)
 			reportIgnoredOptions(state.logger, key)
 			reportRefusedConverter(state.logger, key)
 			if key.ofTexture {
-				placeTextureImage(inventory, state.logger, drawn, key, sprite.Frame)
+				placeTextureImage(inventory, state.logger, drawn, key, unplaced.frame)
 				continue
 			}
-			packed, drawsTexels := r.packImage(inventory, files, state.logger, &state.residency, key, sprite.Frame)
+			packed, drawsTexels := r.packImage(inventory, files, state.logger, &state.residency, key, unplaced.frame)
 			if !drawsTexels {
 				drawn.drawsNothing = true
 				continue
@@ -373,8 +384,11 @@ func (r *renderer) drawEntries(list *render.CommandList, drawnCamera *cameraDraw
 	pass.SetViewport(render.Viewport{X: float32(viewport.X), Y: float32(viewport.Y), Width: float32(viewport.Width), Height: float32(viewport.Height), MaxDepth: 1})
 	pass.SetPassUniform("canvas_camera", drawnCamera.block)
 	if drawnCamera.camera.Clear && !drawnCamera.colorTarget.Clear {
-		r.drawInstances(&pass, r.clearMaterial, r.instances.fixedRange, drawnCamera.viewportInstance, 1, render.TextureView{Texture: r.srgbAtlas.texture}, FilterNearest, WrapNone)
+		r.drawInstances(&pass, r.clearMaterial, r.instances.fixedRange, drawnCamera.viewportInstance, 1, render.TextureView{Texture: r.srgbAtlas.texture}, render.TextureView{}, FilterNearest, WrapNone)
 	}
+	// A run of text draws its icons from the sRGB sprite atlas, beside the
+	// glyph atlas.
+	spriteAtlas := render.TextureView{Texture: r.srgbAtlas.texture}
 	for _, drawnBatch := range drawnCamera.batches {
 		// The entries draw between FitInscribe's bars, which the clear
 		// covered, and within their clip.
@@ -385,7 +399,7 @@ func (r *renderer) drawEntries(list *render.CommandList, drawnCamera *cameraDraw
 		scissor = scissor.Translate(toColorTarget)
 		pass.SetScissorRectangle(render.ScissorRectangle{X: uint32(scissor.X), Y: uint32(scissor.Y), Width: uint32(scissor.Width), Height: uint32(scissor.Height)})
 		material, _ := r.findMaterial(drawnBatch.key.material)
-		r.drawInstances(&pass, material.material, r.instances.findRange(drawnBatch.key.stride), drawnBatch.firstInstance, drawnBatch.instanceCount, drawnBatch.key.texture, drawnBatch.key.filter, drawnBatch.key.wrap)
+		r.drawInstances(&pass, material.material, r.instances.findRange(drawnBatch.key.stride), drawnBatch.firstInstance, drawnBatch.instanceCount, drawnBatch.key.texture, spriteAtlas, drawnBatch.key.filter, drawnBatch.key.wrap)
 	}
 	pass.End()
 }
@@ -408,7 +422,7 @@ func (r *renderer) drawComposite(list *render.CommandList, drawnCamera *cameraDr
 	if drawnCamera.camera.Clear {
 		material = r.clearMaterial
 	}
-	r.drawInstances(&pass, material, r.instances.fixedRange, drawnCamera.viewportInstance, 1, render.TextureView{Texture: drawnCamera.colorTarget.Resolve.Texture}, FilterNearest, WrapNone)
+	r.drawInstances(&pass, material, r.instances.fixedRange, drawnCamera.viewportInstance, 1, render.TextureView{Texture: drawnCamera.colorTarget.Resolve.Texture}, render.TextureView{}, FilterNearest, WrapNone)
 	pass.End()
 }
 
@@ -456,7 +470,7 @@ func (r *renderer) fillPackings(list *render.CommandList, inventory render.Inven
 				packing := &r.packings[index]
 				cell := packing.packed.atlas.findCell(packing.packed.region)
 				pass.SetViewport(render.Viewport{X: float32(cell.X), Y: float32(cell.Y), Width: float32(cell.Width), Height: float32(cell.Height), MaxDepth: 1})
-				r.drawInstances(&pass, r.packMaterial, r.instances.fixedRange, uint32(index), 1, render.TextureView{Texture: packing.source}, FilterNearest, WrapNone)
+				r.drawInstances(&pass, r.packMaterial, r.instances.fixedRange, uint32(index), 1, render.TextureView{Texture: packing.source}, render.TextureView{}, FilterNearest, WrapNone)
 			}
 			pass.End()
 			filledBefore := slices.ContainsFunc(r.filledPages, func(filledPage *packedImage) bool {
@@ -480,14 +494,18 @@ func (r *renderer) fillPackings(list *render.CommandList, inventory render.Inven
 }
 
 // drawInstances draws instanceCount instances of instances from
-// firstInstance into pass with material, over texture, read through filter,
-// repeating along the axes of wrap.
+// firstInstance into pass with material, over texture, and spriteAtlas
+// beside it unless it is zero, read through filter, repeating along the
+// axes of wrap.
 // Setting a material resets the draw parameters, so each
 // draw sets its own.
-func (r *renderer) drawInstances(pass *render.Pass, material render.Material, instances render.BufferRange, firstInstance, instanceCount uint32, texture render.TextureView, filter Filter, wrap Wrap) {
+func (r *renderer) drawInstances(pass *render.Pass, material render.Material, instances render.BufferRange, firstInstance, instanceCount uint32, texture, spriteAtlas render.TextureView, filter Filter, wrap Wrap) {
 	pass.SetMaterial(material)
 	pass.SetBuffer(instancesBindingName, instances)
 	pass.SetTextureView("canvas_atlas", texture)
+	if spriteAtlas != (render.TextureView{}) {
+		pass.SetTextureView("canvas_sprite_atlas", spriteAtlas)
+	}
 	pass.SetSampler("canvas_sampler", filter.makeSamplerDescriptor(wrap))
 	pass.DrawVertices(render.PrimitiveTopologyTriangleList, 6, render.DrawArgs{InstanceCount: instanceCount, FirstInstance: firstInstance})
 }
@@ -527,7 +545,7 @@ func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 		key = shape.batchKey(render.TextureView{Texture: r.srgbAtlas.texture})
 	case EntryKindSprite:
 		sprite := &state.sprites[entry.index]
-		image := findDrawnFrame(r.drawnImages, sprite)
+		image := findDrawnFrame(r.drawnImages, sprite.Image, sprite.Frame)
 		if image.drawsNothing {
 			r.appendSkippedEntryKeys()
 			return
@@ -537,7 +555,7 @@ func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 	case EntryKindText:
 		run := &state.texts[entry.index]
 		var drawsGlyphs bool
-		if bounds, drawsGlyphs = run.findBounds(r.drawnGlyphs); !drawsGlyphs {
+		if bounds, drawsGlyphs = run.findBounds(r.drawnGlyphs, r.drawnImages); !drawsGlyphs {
 			r.appendSkippedEntryKeys()
 			return
 		}
@@ -551,10 +569,17 @@ func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 
 // packGlyphs packs each glyph the frame's runs of text draw that is not
 // packed yet, its field read from library's glyph table, unless this frame
-// tried it already.
+// tried it already, the glyph atlas made at the first frame drawing text,
+// which its batches are keyed by even when they draw icons alone.
 func (r *renderer) packGlyphs(inventory render.Inventory, library *fontLibrary, state *drawState) {
+	if len(state.texts) > 0 && r.glyphAtlas == nil {
+		r.glyphAtlas = newGlyphAtlas(inventory, r.atlasPageSize, r.atlasPageSize)
+	}
 	for index := range state.texts {
 		for _, glyph := range state.texts[index].layout.glyphs {
+			if glyph.font == nil {
+				continue
+			}
 			if int(glyph.field) >= len(r.drawnGlyphs) {
 				r.drawnGlyphs = slices.Grow(r.drawnGlyphs, int(glyph.field)+1-len(r.drawnGlyphs))[:glyph.field+1]
 			}
@@ -565,16 +590,12 @@ func (r *renderer) packGlyphs(inventory render.Inventory, library *fontLibrary, 
 	}
 }
 
-// packGlyph packs drawn, a glyph of field, into the glyph atlas, made the
-// first time, its field queued to copy into its region: on its first page
+// packGlyph packs drawn, a glyph of field, into the glyph atlas, its field queued to copy into its region: on its first page
 // holding it, else on a new one, the atlas doubling its pages while under
 // its ceiling. A glyph whose cell no page holds, or one the atlas at its
 // ceiling has no room for, draws nothing, reported once to logger, and is
 // tried again at the next frame drawing it.
 func (r *renderer) packGlyph(inventory render.Inventory, logger *kernel.Logger, drawn *drawnGlyph, field glyphField) {
-	if r.glyphAtlas == nil {
-		r.glyphAtlas = newGlyphAtlas(inventory, r.atlasPageSize, r.atlasPageSize)
-	}
 	width := uint32(field.width)
 	height := uint32(field.height)
 	var region render.TextureRegion
@@ -659,12 +680,11 @@ func (r *renderer) findMaterial(material Material) (materialSlot, bool) {
 	return *slot, true
 }
 
-// findPlacedImage answers sprite's image's frame as drawn, and whether it
-// was placed when drawn before: packed, given a view of its texture, or
-// found to draw nothing, its image's drawn frames made at its first draw. A packed frame is marked
-// drawn this frame, so no atlas evicts it in it.
-func (r *renderer) findPlacedImage(sprite *Sprite) (*drawnImage, bool) {
-	image := sprite.Image
+// findPlacedImage answers frame of image as drawn, and whether it was
+// placed when drawn before: packed, given a view of its texture, or found
+// to draw nothing, its image's drawn frames made at its first draw. A
+// packed frame is marked drawn this frame, so no atlas evicts it in it.
+func (r *renderer) findPlacedImage(image Image, frame uint32) (*drawnImage, bool) {
 	for int(image.index) >= len(r.drawnImages) {
 		r.drawnImages = append(r.drawnImages, nil)
 	}
@@ -672,7 +692,7 @@ func (r *renderer) findPlacedImage(sprite *Sprite) (*drawnImage, bool) {
 		sheet := imageNames.findKey(image).options.Sheet
 		r.drawnImages[image.index] = make([]drawnImage, cmp.Or(sheet.Columns, 1)*cmp.Or(sheet.Rows, 1)+1)
 	}
-	drawn := findDrawnFrame(r.drawnImages, sprite)
+	drawn := findDrawnFrame(r.drawnImages, image, frame)
 	if drawn.packed != nil {
 		drawn.packed.lastDrawnFrame = r.drawnFrameCount
 	}
@@ -895,16 +915,22 @@ func (r *renderer) dropPackedImage(inventory render.Inventory, key packedKey, pa
 	}
 }
 
-// findDrawnFrame answers sprite's image's frame as drawn, of drawnImages, a
-// renderer's, which hold its image's frames: its Frame's, or, past its
-// sheet's last, the one after the last, and the zero Image's one frame,
-// the white texel, whatever its Frame.
-func findDrawnFrame(drawnImages [][]drawnImage, sprite *Sprite) *drawnImage {
-	frames := drawnImages[sprite.Image.index]
+// findDrawnFrame answers frame of image as drawn, of drawnImages, a
+// renderer's, which hold its image's frames: its own, or, past its sheet's
+// last, the one after the last, and the zero Image's one frame, the white
+// texel, whatever frame.
+func findDrawnFrame(drawnImages [][]drawnImage, image Image, frame uint32) *drawnImage {
+	frames := drawnImages[image.index]
 	if len(frames) == 0 {
-		panic("canvas: finding a sprite's frame of an image whose drawn frames were never made")
+		panic("canvas: finding a frame of an image whose drawn frames were never made")
 	}
-	return &frames[min(sprite.Frame, uint32(len(frames)-1))]
+	return &frames[min(frame, uint32(len(frames)-1))]
+}
+
+// imageFrame is a frame of an image, which a sprite or an icon draws.
+type imageFrame struct {
+	image Image
+	frame uint32
 }
 
 // evictionCandidate is a frame packed that a full atlas may evict: its key,

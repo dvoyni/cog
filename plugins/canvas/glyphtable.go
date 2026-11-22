@@ -35,13 +35,17 @@ type glyphKey struct {
 // made the first time it is drawn through shaper's face of the glyph's
 // font, at its variations, at its font's field em and range, zero meaning
 // the table's, and answers glyphs without those of no field, such as
-// spaces, which draw nothing. A field is made outside the lock, so jobs make
+// spaces, which draw nothing, its icons kept, which have none. A field is made outside the lock, so jobs make
 // theirs together; one made by two jobs at once is kept once.
 func (t *glyphTable) assignFields(glyphs []placedGlyph, shaper *textShaper) []placedGlyph {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	drawnGlyphs := glyphs[:0]
 	for _, glyph := range glyphs {
+		if glyph.font == nil {
+			drawnGlyphs = append(drawnGlyphs, glyph)
+			continue
+		}
 		key := glyphKey{font: glyph.font.font, id: glyph.id}
 		field, made := t.indexes[key]
 		if !made {

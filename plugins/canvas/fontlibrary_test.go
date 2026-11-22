@@ -20,11 +20,13 @@ import (
 
 // fontLibraryUser is a test plugin whose task, hung off canvas.FrameEvent, calls
 // write with FontLibrary's writing side in each frame, the first frame's 0, then,
-// in a task of its own after it, read with FontLibrary's reading side.
+// in tasks of their own after it, read with FontLibrary's reading side and,
+// when set, draw with a draw list of its own.
 type fontLibraryUser struct {
 	testPlugin
 	write func(fonts canvas.WriteFontLibrary, frame int)
 	read  func(fonts canvas.FontLibrary, frame int)
+	draw  func(list canvas.DrawList, frame int)
 	// frameCount is the frames written so far.
 	frameCount atomic.Int32
 }
@@ -45,9 +47,20 @@ func (w *fontLibraryUser) Init(configurator *kernel.Configurator, _ any) error {
 		}
 		return kernel.NoResult{}
 	})
+	var draw *kernel.Task[int, kernel.NoResult]
+	if w.draw != nil {
+		draw = configurator.RegisterTask1(func(k *kernel.Kernel, frame int, list canvas.DrawList) kernel.NoResult {
+			w.draw(list, frame)
+			return kernel.NoResult{}
+		})
+	}
 	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event canvas.FrameEvent) (canvas.FrameEvent, kernel.JobHandle) {
 		written := ex.Schedule(write, kernel.NoArg{}, event.Ready)
-		return event, ex.Join(in, ex.ScheduleAfter(read, written).Handle())
+		done := ex.Join(in, ex.ScheduleAfter(read, written).Handle())
+		if w.draw != nil {
+			done = ex.Join(done, ex.ScheduleAfter(draw, written).Handle())
+		}
+		return event, done
 	})
 	return nil
 }

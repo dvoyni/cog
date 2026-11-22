@@ -154,6 +154,15 @@
       "sampler": {
         "type": "filtering"
       }
+    },
+    {
+      "group": 2,
+      "binding": 3,
+      "name": "canvas_sprite_atlas",
+      "texture": {
+        "sampleType": "float",
+        "viewDimension": "2d-array"
+      }
     }
   ],
   "entryPoints": [

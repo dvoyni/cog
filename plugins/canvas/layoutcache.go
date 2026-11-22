@@ -1,6 +1,7 @@
 package canvas
 
 import (
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -23,7 +24,9 @@ type layoutCache struct {
 }
 
 // layoutInput is what a run's layout is made of, which the shaper reads
-// and the cache keys by: its text; the slot of the set it is laid out in,
+// and the cache keys by: its text, its String, or its Spans encoded by
+// appendEncodedSpans when spanned, their icons' names and serials among
+// them; the slot of the set it is laid out in,
 // the default set's when canvas does not hold its own, so a set destroyed
 // lays out anew and the layouts of the slot before go idle; its em in world
 // units, Config.TextSize when its Size is zero; how it wraps, aligns and
@@ -31,6 +34,7 @@ type layoutCache struct {
 // it is shaped and its fonts picked in, its own or the current one.
 type layoutInput struct {
 	text       string
+	spanned    bool
 	set        *fontSetSlot
 	em         float32
 	wrapWidth  float32
@@ -70,6 +74,11 @@ func (c *layoutCache) add(input layoutInput, layout TextLayout) *cachedLayout {
 	defer c.mutex.Unlock()
 	cached := c.layouts[input]
 	if cached == nil {
+		// A spanned input's text may be its maker's scratch, so the key
+		// keeps a copy.
+		if input.spanned {
+			input.text = strings.Clone(input.text)
+		}
 		cached = &cachedLayout{layout: layout}
 		c.layouts[input] = cached
 	}
