@@ -110,6 +110,14 @@ type renderer struct {
 	// over each frame.
 	instances listInstanceData
 	batches   []batch
+	// listMeshes are the temporary meshes of the frame's per-frame
+	// triangles, each at its triangles' index, acquired from the command
+	// list being drawn at the first of its cameras drawing them, zero until
+	// then, and vertexAttributes and vertexBuffers the layout of the one
+	// acquired last, all written over for each command list.
+	listMeshes       []render.Mesh
+	vertexAttributes []render.VertexAttribute
+	vertexBuffers    [1]render.VertexBuffer
 	// colorTargets is a camera's pass's one target.
 	colorTargets [1]render.ColorTarget
 }
@@ -225,10 +233,10 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 	r.unplacedFrames = r.unplacedFrames[:0]
 	for _, entry := range state.entries {
 		switch entry.kind {
-		case EntryKindSprite:
-			sprite := &state.sprites[entry.index]
-			if _, placed := r.findPlacedImage(sprite.Image, sprite.Frame); !placed {
-				r.unplacedFrames = append(r.unplacedFrames, imageFrame{image: sprite.Image, frame: sprite.Frame})
+		case EntryKindSprite, EntryKindTriangles:
+			image, frame := state.findEntryImage(entry)
+			if _, placed := r.findPlacedImage(image, frame); !placed {
+				r.unplacedFrames = append(r.unplacedFrames, imageFrame{image: image, frame: frame})
 				continue
 			}
 		case EntryKindText:
@@ -346,13 +354,14 @@ func (r *renderer) drawOrder(frame render.Frame, inventory render.Inventory, cam
 	}
 	list := frame.BeginCommandList("canvas", cameraDraws[0].camera.Order)
 	r.instances.acquireBuffers(&list)
+	r.acquireListMeshes(&list, cameraDraws, state)
 	r.copyGrowths(&list, inventory)
 	r.copyGlyphs(&list)
 	r.fillPackings(&list, inventory)
 	for index := range cameraDraws {
 		drawnCamera := &cameraDraws[index]
 		if drawnCamera.camera.SampleCount != multisampledCameraSampleCount {
-			r.drawEntries(&list, drawnCamera)
+			r.drawEntries(&list, drawnCamera, state)
 			continue
 		}
 		descriptor := drawnCamera.multisampledDescriptor
@@ -363,20 +372,23 @@ func (r *renderer) drawOrder(frame render.Frame, inventory render.Inventory, cam
 		if drawnCamera.colorTarget.Texture == (render.Texture{}) || drawnCamera.colorTarget.Resolve.Texture == (render.Texture{}) {
 			continue
 		}
-		r.drawEntries(&list, drawnCamera)
+		r.drawEntries(&list, drawnCamera, state)
 		r.drawComposite(&list, drawnCamera)
 	}
 	list.End()
 }
 
-// drawEntries draws drawnCamera's entries in a pass into its colour
-// target, the viewport and the scissors moved from the target's pixels to
-// the colour target's by its colorTargetOrigin. Its clear, when not by the
-// pass's load, is drawn over the viewport first, then each batch, from the
-// instance data of its material's stride, scissored to the part of the
-// viewport the entries draw into, and a clipped batch to its clip's part of
-// that, a batch whose clip holds no pixel of it not drawn.
-func (r *renderer) drawEntries(list *render.CommandList, drawnCamera *cameraDraw) {
+// drawEntries draws drawnCamera's entries, of state's, in a pass into its
+// colour target, the viewport and the scissors moved from the target's
+// pixels to the colour target's by its colorTargetOrigin. Its clear, when
+// not by the pass's load, is drawn over the viewport first, then each
+// batch, from the instance data of its material's stride, scissored to the
+// part of the viewport the entries draw into, and a clipped batch to its
+// clip's part of that, a batch whose clip holds no pixel of it not drawn.
+// A batch of per-frame triangles draws their temporary mesh, through the
+// material's mesh vertex stage for canvas.Vertex's layout, and its own
+// vertex stage for any other; one whose mesh render refused draws nothing.
+func (r *renderer) drawEntries(list *render.CommandList, drawnCamera *cameraDraw, state *drawState) {
 	r.colorTargets[0] = drawnCamera.colorTarget
 	pass := list.BeginPass(render.PassDescriptor{Label: "canvas camera", ColorTargets: r.colorTargets[:]})
 	toColorTarget := drawnCamera.colorTargetOrigin.Negate()
@@ -399,9 +411,55 @@ func (r *renderer) drawEntries(list *render.CommandList, drawnCamera *cameraDraw
 		scissor = scissor.Translate(toColorTarget)
 		pass.SetScissorRectangle(render.ScissorRectangle{X: uint32(scissor.X), Y: uint32(scissor.Y), Width: uint32(scissor.Width), Height: uint32(scissor.Height)})
 		material, _ := r.findMaterial(drawnBatch.key.material)
-		r.drawInstances(&pass, material.material, r.instances.findRange(drawnBatch.key.stride), drawnBatch.firstInstance, drawnBatch.instanceCount, drawnBatch.key.texture, spriteAtlas, drawnBatch.key.filter, drawnBatch.key.wrap)
+		instances := r.instances.findRange(drawnBatch.key.stride)
+		key := drawnBatch.key
+		if key.triangles == 0 {
+			r.drawInstances(&pass, material.material, instances, drawnBatch.firstInstance, drawnBatch.instanceCount, key.texture, spriteAtlas, key.filter, key.wrap)
+			continue
+		}
+		mesh := r.listMeshes[key.triangles-1]
+		if mesh == (render.Mesh{}) {
+			continue
+		}
+		renderMaterial := material.material
+		if state.triangles[key.triangles-1].standardLayout {
+			renderMaterial = material.meshMaterial
+		}
+		r.bindInstances(&pass, renderMaterial, instances, key.texture, spriteAtlas, key.filter, key.wrap)
+		pass.Draw(mesh, render.DrawArgs{InstanceCount: drawnBatch.instanceCount, FirstInstance: drawnBatch.firstInstance})
 	}
 	pass.End()
+}
+
+// acquireListMeshes acquires from list the temporary mesh of each of
+// state's per-frame triangles that a batch of cameraDraws draws, once each,
+// over temporary buffers of their vertex and index bytes, their layout
+// translated into render's, forgetting those of the list before.
+func (r *renderer) acquireListMeshes(list *render.CommandList, cameraDraws []cameraDraw, state *drawState) {
+	r.listMeshes = slices.Grow(r.listMeshes[:0], len(state.triangles))[:len(state.triangles)]
+	clear(r.listMeshes)
+	for index := range cameraDraws {
+		for _, drawnBatch := range cameraDraws[index].batches {
+			trianglesIndex := drawnBatch.key.triangles
+			if trianglesIndex == 0 || r.listMeshes[trianglesIndex-1] != (render.Mesh{}) {
+				continue
+			}
+			triangles := &state.triangles[trianglesIndex-1]
+			r.vertexAttributes = r.vertexAttributes[:0]
+			for _, attribute := range triangles.layout.Attributes {
+				r.vertexAttributes = append(r.vertexAttributes, render.VertexAttribute{Format: render.VertexFormat(attribute.Format), Offset: uint64(attribute.Offset), Location: attribute.Location})
+			}
+			r.vertexBuffers[0] = render.VertexBuffer{
+				Range:  list.AcquireTemporaryBuffer(triangles.vertices),
+				Layout: render.VertexLayout{Stride: uint64(triangles.layout.Stride), Attributes: r.vertexAttributes},
+			}
+			descriptor := render.MeshDescriptor{Label: "canvas triangles", VertexBuffers: r.vertexBuffers[:], Topology: triangles.topology}
+			if len(triangles.indices) > 0 {
+				descriptor.Indices = render.IndexBuffer{Range: list.AcquireTemporaryBuffer(triangles.indices), Format: triangles.indexFormat}
+			}
+			r.listMeshes[trianglesIndex-1] = list.AcquireTemporaryMesh(descriptor)
+		}
+	}
 }
 
 // drawComposite draws what drawnCamera, a multisampled camera, resolved its
@@ -494,12 +552,18 @@ func (r *renderer) fillPackings(list *render.CommandList, inventory render.Inven
 }
 
 // drawInstances draws instanceCount instances of instances from
-// firstInstance into pass with material, over texture, and spriteAtlas
-// beside it unless it is zero, read through filter, repeating along the
-// axes of wrap.
-// Setting a material resets the draw parameters, so each
-// draw sets its own.
+// firstInstance into pass with material, each a quad's six vertices, as
+// bindInstances binds them.
 func (r *renderer) drawInstances(pass *render.Pass, material render.Material, instances render.BufferRange, firstInstance, instanceCount uint32, texture, spriteAtlas render.TextureView, filter Filter, wrap Wrap) {
+	r.bindInstances(pass, material, instances, texture, spriteAtlas, filter, wrap)
+	pass.DrawVertices(render.PrimitiveTopologyTriangleList, 6, render.DrawArgs{InstanceCount: instanceCount, FirstInstance: firstInstance})
+}
+
+// bindInstances selects material in pass, and binds instances, texture, and
+// spriteAtlas beside it unless it is zero, read through filter, repeating
+// along the axes of wrap, for the draw after it. Setting a material resets
+// the draw parameters, so each draw sets its own.
+func (r *renderer) bindInstances(pass *render.Pass, material render.Material, instances render.BufferRange, texture, spriteAtlas render.TextureView, filter Filter, wrap Wrap) {
 	pass.SetMaterial(material)
 	pass.SetBuffer(instancesBindingName, instances)
 	pass.SetTextureView("canvas_atlas", texture)
@@ -507,7 +571,6 @@ func (r *renderer) drawInstances(pass *render.Pass, material render.Material, in
 		pass.SetTextureView("canvas_sprite_atlas", spriteAtlas)
 	}
 	pass.SetSampler("canvas_sampler", filter.makeSamplerDescriptor(wrap))
-	pass.DrawVertices(render.PrimitiveTopologyTriangleList, 6, render.DrawArgs{InstanceCount: instanceCount, FirstInstance: firstInstance})
 }
 
 // appendEntryKeys appends entry's bounds, grown by its material's
@@ -560,6 +623,15 @@ func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 			return
 		}
 		key = run.batchKey(render.TextureView{Texture: r.glyphAtlas.texture})
+	case EntryKindTriangles:
+		triangles := &state.triangles[entry.index]
+		image := findDrawnFrame(r.drawnImages, triangles.options.Image, triangles.options.Frame)
+		if image.drawsNothing {
+			r.appendSkippedEntryKeys()
+			return
+		}
+		bounds = triangles.findBounds()
+		key = triangles.batchKey(image, state.defaultFilter, entry.index)
 	}
 	key.stride = slot.stride
 	r.entryBounds = append(r.entryBounds, bounds.Inset(margin))

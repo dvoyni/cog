@@ -1,6 +1,7 @@
 package canvas
 
 import (
+	"encoding/binary"
 	"fmt"
 	"reflect"
 	"slices"
@@ -8,6 +9,9 @@ import (
 	"unsafe"
 
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/libs/meshfile"
+	"github.com/dvoyni/cog/plugins/render"
 )
 
 // DrawList is the task parameter a recording task records its entries
@@ -120,6 +124,28 @@ func (l DrawList) DrawTextWith[T any](text Text, argument T) {
 	l.drawText(text, reflect.TypeFor[T](), castToBytes(unsafe.Slice(&argument, 1)))
 }
 
+// DrawTriangles records triangles, a mesh given for this frame alone, into
+// the task's draw list for the frame being recorded, drawn as options say:
+// copied now, its vertices and indices into the draw list, so the caller
+// may reuse its slices, then into the frame's temporary buffers as canvas
+// draws the frame, one draw of their own, never merged with another
+// entry's. Vertices of canvas.Vertex are drawn by canvas's own mesh vertex
+// stage and the material's fragment stage; those of another layout by the
+// material's own vertex stage. Triangles of no vertices record nothing, and
+// those of zero bounds are refused, reported once for the task as
+// ReportKindBoundsMissing. Outside the frame, they are refused and reported
+// once for the task.
+func (l DrawList) DrawTriangles[V meshfile.VertexType](options DrawTrianglesOptions, triangles Triangles[V]) {
+	l.drawTriangles(options, triangles, nil, nil)
+}
+
+// DrawTrianglesWith records triangles into the task's draw list for the
+// frame being recorded, as DrawTriangles does, giving its material
+// argument, of the type the material declares with ArgumentOf.
+func (l DrawList) DrawTrianglesWith[V meshfile.VertexType, T any](options DrawTrianglesOptions, triangles Triangles[V], argument T) {
+	l.drawTriangles(options, triangles, reflect.TypeFor[T](), castToBytes(unsafe.Slice(&argument, 1)))
+}
+
 // SetCamera sets camera for the frame being recorded, forgotten once the
 // frame is drawn, as its entries are: nothing is made or kept. A frame that
 // sets no camera is seen through the default one, which draws only a frame
@@ -145,31 +171,53 @@ func (l DrawList) drawText(text Text, argumentType reflect.Type, argumentBytes [
 	l.list.recordText(l.state.Get(), argumentType, argumentBytes, laidOutText{text: text, layout: layout})
 }
 
+// drawTriangles records triangles drawn with options, as DrawTriangles
+// does, giving the material argument of argumentType in argumentBytes, nil
+// for none.
+func (l DrawList) drawTriangles[V meshfile.VertexType](options DrawTrianglesOptions, triangles Triangles[V], argumentType reflect.Type, argumentBytes []byte) {
+	var vertex V
+	_, isVertex := any(vertex).(Vertex)
+	recorded := recordedTriangles{
+		options:        options,
+		layout:         vertex.VertexLayout(),
+		standardLayout: isVertex,
+		topology:       render.PrimitiveTopology(triangles.Topology),
+		bounds:         triangles.Bounds,
+	}
+	l.list.recordTriangles(l.state.Get(), argumentType, argumentBytes, recorded, castToBytes(triangles.Vertices), len(triangles.Vertices), triangles.Indices)
+}
+
 // drawList is one task's draw list for the frame being recorded, which its
 // DrawList records into: the entries its jobs record, in the order
-// recorded, each of them a shape, a sprite or a run of text of its records
-// of that kind,
+// recorded, each of them a shape, a sprite, a run of text or per-frame
+// triangles of its records of that kind,
 // with the bytes of the material arguments they give, end to end, the spans
-// of its runs of text, copied end to end, and the cameras they set, in the
-// order set. Two jobs of one task running together
-// share it, their calls interleaving.
+// of its runs of text, copied end to end, the vertex and index bytes of its
+// triangles, each end to end, and the cameras they set, in the order set.
+// Two jobs of one task running together share it, their calls
+// interleaving.
 type drawList struct {
 	// outsideFrame is the draw list's report of an entry recorded or a camera
-	// set outside the frame, and slicesDiffer of a bulk call given parallel
-	// slices of different lengths, each made once; its message is the key
-	// it is logged once under.
-	outsideFrame error
-	slicesDiffer error
-	// mutex guards entries, shapes, sprites, texts, arguments, spans and
-	// cameras.
-	mutex     sync.Mutex
-	entries   []recordedEntry
-	shapes    []Shape
-	sprites   []Sprite
-	texts     []laidOutText
-	arguments []byte
-	spans     []Span
-	cameras   []Camera
+	// set outside the frame, slicesDiffer of a bulk call given parallel
+	// slices of different lengths, and boundsMissing of triangles given zero
+	// bounds, each made once; its message is the key it is logged once
+	// under.
+	outsideFrame  error
+	slicesDiffer  error
+	boundsMissing error
+	// mutex guards entries, shapes, sprites, texts, triangles, arguments,
+	// spans, vertexBytes, indexBytes and cameras.
+	mutex       sync.Mutex
+	entries     []recordedEntry
+	shapes      []Shape
+	sprites     []Sprite
+	texts       []laidOutText
+	triangles   []recordedTriangles
+	arguments   []byte
+	spans       []Span
+	vertexBytes []byte
+	indexBytes  []byte
+	cameras     []Camera
 }
 
 // record appends recorded to records, one of the draw list's slices, under
@@ -192,8 +240,45 @@ func (l *drawList) record[T any](state *drawState, kind EntryKind, records *[]T,
 // into the draw list's, so its caller may reuse them once it returns.
 func (l *drawList) recordText(state *drawState, argumentType reflect.Type, argumentBytes []byte, text laidOutText) {
 	l.mutex.Lock()
-	text.text.Spans = appendSpans(&l.spans, text.text.Spans)
+	text.text.Spans = appendToArena(&l.spans, text.text.Spans)
 	recording := l.appendRecords(state, EntryKindText, &l.texts, argumentType, argumentBytes, []laidOutText{text})
+	l.mutex.Unlock()
+	if !recording {
+		state.logger.LogErrOnce(l.outsideFrame.Error(), l.outsideFrame)
+	}
+}
+
+// recordTriangles records triangles, per-frame triangles of vertexCount
+// vertices in vertexBytes and of indices, nil for none, as record does,
+// giving the material argument of argumentType in argumentBytes, its
+// vertices and indices copied into the draw list's, the indices as 16 bits
+// while the vertices number at most 65,535, so its caller may reuse them
+// once it returns. Triangles of no vertices record nothing, and those of
+// zero bounds are refused, reported once for the draw list.
+func (l *drawList) recordTriangles(state *drawState, argumentType reflect.Type, argumentBytes []byte, triangles recordedTriangles, vertexBytes []byte, vertexCount int, indices []uint32) {
+	if vertexCount == 0 {
+		return
+	}
+	if triangles.bounds == (m.Box3{}) {
+		state.logger.LogErrOnce(l.boundsMissing.Error(), l.boundsMissing)
+		return
+	}
+	l.mutex.Lock()
+	triangles.vertices = appendToArena(&l.vertexBytes, vertexBytes)
+	indicesStart := len(l.indexBytes)
+	switch {
+	case len(indices) == 0:
+	case vertexCount < 1<<16:
+		triangles.indexFormat = render.IndexFormatUint16
+		for _, index := range indices {
+			l.indexBytes = binary.LittleEndian.AppendUint16(l.indexBytes, uint16(index))
+		}
+	default:
+		triangles.indexFormat = render.IndexFormatUint32
+		l.indexBytes = append(l.indexBytes, castToBytes(indices)...)
+	}
+	triangles.indices = slices.Clip(l.indexBytes[indicesStart:])
+	recording := l.appendRecords(state, EntryKindTriangles, &l.triangles, argumentType, argumentBytes, []recordedTriangles{triangles})
 	l.mutex.Unlock()
 	if !recording {
 		state.logger.LogErrOnce(l.outsideFrame.Error(), l.outsideFrame)
@@ -220,27 +305,33 @@ func (l *drawList) appendRecords[T any](state *drawState, kind EntryKind, record
 	return true
 }
 
-// appendSpans appends spans to arena and answers them as appended there, of
-// no room past their end, so nothing appended to arena after reaches them;
-// none answers nil.
-func appendSpans(arena *[]Span, spans []Span) []Span {
-	if len(spans) == 0 {
+// appendToArena appends values, such as a run's spans or a mesh's vertex
+// bytes, to arena and answers them as appended there, of no room past their
+// end, so nothing appended to arena after reaches them; none answers nil.
+func appendToArena[T any](arena *[]T, values []T) []T {
+	if len(values) == 0 {
 		return nil
 	}
 	start := len(*arena)
-	*arena = append(*arena, spans...)
+	*arena = append(*arena, values...)
 	return slices.Clip((*arena)[start:])
 }
 
 // moveEntries appends the draw list's entries, shapes, sprites, texts,
-// arguments and cameras to state's, each entry's index moved past state's records of
-// its kind, its argument's offset past state's arguments, and each run's
-// spans copied into state's, and empties it.
+// triangles, arguments and cameras to state's, each entry's index moved
+// past state's records of its kind, its argument's offset past state's
+// arguments, each run's spans and each triangles' vertex and index bytes
+// copied into state's arenas, and empties it.
 func (l *drawList) moveEntries(state *drawState) {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 	// recordsBefore are state's records of each kind, at the kind.
-	recordsBefore := [...]uint32{EntryKindShape: uint32(len(state.shapes)), EntryKindSprite: uint32(len(state.sprites)), EntryKindText: uint32(len(state.texts))}
+	recordsBefore := [...]uint32{
+		EntryKindShape:     uint32(len(state.shapes)),
+		EntryKindSprite:    uint32(len(state.sprites)),
+		EntryKindText:      uint32(len(state.texts)),
+		EntryKindTriangles: uint32(len(state.triangles)),
+	}
 	argumentsBefore := uint32(len(state.arguments))
 	for _, entry := range l.entries {
 		entry.index += recordsBefore[entry.kind]
@@ -250,8 +341,13 @@ func (l *drawList) moveEntries(state *drawState) {
 	state.shapes = append(state.shapes, l.shapes...)
 	state.sprites = append(state.sprites, l.sprites...)
 	for _, text := range l.texts {
-		text.text.Spans = appendSpans(&state.spans, text.text.Spans)
+		text.text.Spans = appendToArena(&state.spans, text.text.Spans)
 		state.texts = append(state.texts, text)
+	}
+	for _, triangles := range l.triangles {
+		triangles.vertices = appendToArena(&state.vertexBytes, triangles.vertices)
+		triangles.indices = appendToArena(&state.indexBytes, triangles.indices)
+		state.triangles = append(state.triangles, triangles)
 	}
 	state.arguments = append(state.arguments, l.arguments...)
 	state.cameras = append(state.cameras, l.cameras...)
@@ -260,9 +356,13 @@ func (l *drawList) moveEntries(state *drawState) {
 	l.sprites = l.sprites[:0]
 	clear(l.texts)
 	l.texts = l.texts[:0]
+	clear(l.triangles)
+	l.triangles = l.triangles[:0]
 	l.arguments = l.arguments[:0]
 	clear(l.spans)
 	l.spans = l.spans[:0]
+	l.vertexBytes = l.vertexBytes[:0]
+	l.indexBytes = l.indexBytes[:0]
 	l.cameras = l.cameras[:0]
 }
 

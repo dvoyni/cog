@@ -113,8 +113,9 @@ func (a Assets) ImageSize(image Image) (m.Vec2, bool) {
 }
 
 // MakeMaterial makes a 2D material of descriptor and answers it: canvas
-// acquires its shader and makes the render material underneath, which its
-// user never holds, blending as descriptor's Blend says, with no depth test,
+// acquires its shader and makes the render materials underneath, which its
+// user never holds, one of its vertex stage and one of canvas's mesh vertex
+// stage, for meshes of canvas.Vertex, its parameters set on both, blending as descriptor's Blend says, with no depth test,
 // since the sort key orders entries, and no culling. A shader render cannot
 // load or compile, or entry points it lacks, are reported by render, and
 // the material's entries are skipped. A material taking an argument has its
@@ -130,7 +131,7 @@ func (a Assets) MakeMaterial(descriptor MaterialDescriptor) Material {
 
 // ReleaseMaterial gives back material, made by MakeMaterial: the frame
 // recording as it is released still draws its entries, and once canvas has
-// drawn that frame, it releases the render material and the shader, and
+// drawn that frame, it releases the render materials and the shader, and
 // material names nothing, its later entries skipped. A material canvas does
 // not hold, released already, or the default material, the zero Material,
 // is refused, reported once as ReportKindMaterialNotHeld.
@@ -154,12 +155,14 @@ func (a Assets) ReleaseMaterial(material Material) {
 // ReportKindMaterialNotHeld.
 func (a Assets) SetMaterialTexture(material Material, name string, texture render.Texture) {
 	state := a.state.Get()
-	renderMaterial, held := state.materials.findHeld(material)
+	renderMaterials, held := state.materials.findHeld(material)
 	if !held {
 		reportMaterialNotHeld(state.logger, material, "setting a texture of")
 		return
 	}
-	a.inventory.SetMaterialTexture(renderMaterial, name, texture)
+	for _, renderMaterial := range renderMaterials {
+		a.inventory.SetMaterialTexture(renderMaterial, name, texture)
+	}
 }
 
 // SetMaterialUniform binds value, plain data with no pointers mirroring a
@@ -177,12 +180,14 @@ func (a Assets) SetMaterialTexture(material Material, name string, texture rende
 // ReportKindMaterialNotHeld.
 func (a Assets) SetMaterialUniform[T any](material Material, name string, value T) {
 	state := a.state.Get()
-	renderMaterial, held := state.materials.findHeld(material)
+	renderMaterials, held := state.materials.findHeld(material)
 	if !held {
 		reportMaterialNotHeld(state.logger, material, "setting a uniform of")
 		return
 	}
-	a.inventory.SetMaterialUniform(renderMaterial, name, value)
+	for _, renderMaterial := range renderMaterials {
+		a.inventory.SetMaterialUniform(renderMaterial, name, value)
+	}
 }
 
 // RequestInspection asks for an inspection of the first frame whose

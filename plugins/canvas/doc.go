@@ -126,6 +126,17 @@
 //	minimap := canvas.ImageFromTexture(minimapTexture)
 //	list.DrawSprite(canvas.Sprite{Image: minimap, Transform: m.Translation2x3(x, y), Layer: layerUI})
 //
+// DrawTriangles draws a mesh given for one frame, a trail, a rope or a
+// skin, copied as it is recorded, so its slices may be reused: Vertex's
+// position, its UV over the image's region, repeating along the axes the
+// image wraps along, and its colour, zero meaning white, through canvas's
+// mesh vertex stage and the material's fragment stage. Its bounds are
+// required, so it is culled without vanishing when its origin leaves the
+// view:
+//
+//	trail := canvas.Triangles[canvas.Vertex]{Vertices: vertices, Topology: meshfile.TopologyTriangleStrip, Bounds: meshfile.CalculateBounds(vertices, canvas.Vertex.Position3)}
+//	list.DrawTriangles(canvas.DrawTrianglesOptions{Tint: spark, Layer: layerEffects}, trail)
+//
 // An atlas is one 2D-array texture whose layers are pages of
 // Config.AtlasPageSize, each image a cell of its own, premultiplied, its
 // gutter continuing its edges, or wrapped along the axes it tiles, on a

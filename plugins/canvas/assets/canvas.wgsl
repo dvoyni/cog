@@ -4,7 +4,8 @@
 // material argument, its struct Argument, which canvas preprocesses it with
 // the define CANVAS_ARGUMENT for. A material with only a fragment entry
 // point draws through the include's vertex stage, canvas_sprite_vertex,
-// which a custom vertex stage replaces by naming its own.
+// which a custom vertex stage replaces by naming its own, and every
+// material draws a mesh of canvas.Vertex through canvas_mesh_vertex.
 
 // CanvasCamera is the pass parameters, set once per camera pass.
 struct CanvasCamera {
@@ -78,8 +79,9 @@ struct CanvasInstanceData {
 	// frame, one of the CANVAS_MODE constants.
 	mode: u32,
 	// tiles is how many of a tiled sprite's tiles span the unit square
-	// along each axis, and a glyph's pen as a point of its unit square
-	// instead.
+	// along each axis, a glyph's pen as a point of its unit square
+	// instead, and a mesh's axes its UVs repeat along, 1 along each its
+	// image wraps along and 0 along the others.
 	tiles: vec2<f32>,
 #if CANVAS_ARGUMENT
 	argument: Argument,
@@ -120,10 +122,13 @@ fn canvas_draws_whole(instance_data: CanvasInstanceData) -> bool {
 // slice_frame's, so a sliced sprite's corners keep their size, and
 // CANVAS_MODE_SLICED_HOLLOW leaves its centre cell empty.
 // CANVAS_MODE_TILED maps it onto tiles of the frame, wrapped.
+// CANVAS_MODE_MESH maps a mesh's UVs onto the frame, repeating along the
+// axes its image wraps along and continuing its edge along the others.
 const CANVAS_MODE_STRETCHED = 0u;
 const CANVAS_MODE_SLICED = 1u;
 const CANVAS_MODE_SLICED_HOLLOW = 2u;
 const CANVAS_MODE_TILED = 3u;
+const CANVAS_MODE_MESH = 4u;
 
 @group(2) @binding(0) var<storage, read> canvas_instances: array<CanvasInstanceData>;
 @group(2) @binding(1) var canvas_atlas: texture_2d_array<f32>;
@@ -300,9 +305,11 @@ fn canvas_covers(in: CanvasVaryings) -> bool {
 // canvas_sample answers the entry's image at the fragment, premultiplied
 // and linear: a stretched entry's sampled at uv, a sliced one's at
 // uv_local remapped piecewise, its centre transparent where it is hollow,
-// and a tiled one's at uv_local counted in tiles and wrapped within its
+// a tiled one's at uv_local counted in tiles and wrapped within its
 // region, whose gutter wraps along the axes its image tiles along, a
-// hollow centre, which canvas_covers does not cover, sampling nothing. It
+// hollow centre, which canvas_covers does not cover, sampling nothing, and
+// a mesh's at uv_local wrapped within its region along the axes its image
+// tiles along and held within it along the others. It
 // is the one way a material samples an entry's image, since a material
 // sampling uv itself stretches a sliced or tiled sprite. Its atlas page's
 // texels canvas packed premultiplied, so filtering never darkens a cut-out
@@ -323,7 +330,7 @@ fn canvas_sample(in: CanvasVaryings) -> vec4<f32> {
 	if mode == CANVAS_MODE_TILED {
 		frame_point = in.uv_local * instance_data.tiles;
 		unwrapped = region.xy + frame_point * region.zw;
-	} else if mode != CANVAS_MODE_STRETCHED {
+	} else if mode == CANVAS_MODE_SLICED || mode == CANVAS_MODE_SLICED_HOLLOW {
 		unwrapped = region.xy + canvas_slice(in.uv_local, instance_data.slice_frame, instance_data.slice_square) * region.zw;
 	}
 	let uv_gradient_x = dpdx(unwrapped);
@@ -334,6 +341,9 @@ fn canvas_sample(in: CanvasVaryings) -> vec4<f32> {
 	var uv = unwrapped;
 	if mode == CANVAS_MODE_TILED {
 		uv = region.xy + fract(frame_point) * region.zw;
+	} else if mode == CANVAS_MODE_MESH {
+		let held_point = clamp(frame_point, vec2<f32>(0.0), vec2<f32>(1.0));
+		uv = region.xy + select(held_point, fract(frame_point), canvas_mesh_wraps(instance_data)) * region.zw;
 	}
 	let texel = textureSampleGrad(canvas_atlas, canvas_sampler, uv, instance_data.page, uv_gradient_x, uv_gradient_y);
 	if instance_data.decode == 0u {
@@ -426,6 +436,13 @@ fn canvas_glyph_spread(instance_data: CanvasInstanceData) -> f32 {
 	return instance_data.width;
 }
 
+// canvas_mesh_wraps answers the axes a mesh's UVs repeat along, those its
+// image wraps along, which instance_data's tiles carry, as only a tiled
+// sprite's otherwise do.
+fn canvas_mesh_wraps(instance_data: CanvasInstanceData) -> vec2<bool> {
+	return instance_data.tiles > vec2<f32>(0.0);
+}
+
 // canvas_decode_srgb decodes colour encoded as sRGB into linear colour.
 fn canvas_decode_srgb(encoded: vec3<f32>) -> vec3<f32> {
 	let low = encoded / 12.92;
@@ -462,9 +479,10 @@ fn canvas_quad_corner(vertex: u32) -> vec2<f32> {
 }
 
 // canvas_make_quad_varyings answers the varyings of a vertex of instance, its
-// data instance_data, at placed_corner, a point of its unit square, mapped
-// by its transform and moved whole by canvas_snap, its coordinates those of
-// sampled_corner, the point of the square it samples, over its region.
+// data instance_data, at placed_corner, a point of its unit square or of a
+// mesh's own space, mapped by its transform and moved whole by canvas_snap,
+// its coordinates those of sampled_corner, the point of the square it
+// samples or the mesh vertex's UV, over its region.
 fn canvas_make_quad_varyings(instance: u32, instance_data: CanvasInstanceData, placed_corner: vec2<f32>, sampled_corner: vec2<f32>) -> CanvasVaryings {
 	let linear = mat2x2<f32>(instance_data.transform[0], instance_data.transform[1]);
 	var out: CanvasVaryings;
@@ -485,6 +503,29 @@ fn canvas_sprite_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_in
 	let instance_data = canvas_instances[instance];
 	let placed_corner = canvas_place_corner(instance_data, canvas_quad_corner(vertex));
 	return canvas_make_quad_varyings(instance, instance_data, placed_corner, placed_corner);
+}
+
+// CanvasVertex is canvas.Vertex, canvas's standard vertex layout: its
+// position in the mesh's own space, its UV from 0 to 1 over its image's
+// region, and its colour, straight alpha, zero meaning white.
+struct CanvasVertex {
+	@location(0) position: vec2<f32>,
+	@location(1) uv: vec2<f32>,
+	@location(2) color: vec4<f32>,
+}
+
+// canvas_mesh_vertex is canvas's vertex stage for a mesh of canvas.Vertex,
+// one instance of it per entry: each vertex's position mapped by its
+// instance's transform, the translation moved by canvas_snap, the vertex
+// itself unsnapped, so a mesh authored on the grid stays on it and a turned
+// one moves whole; its UV mapped over the instance's region; and its
+// colour, white for zero, premultiplied, times the instance's tint.
+@vertex
+fn canvas_mesh_vertex(vertex: CanvasVertex, @builtin(instance_index) instance: u32) -> CanvasVaryings {
+	let color = select(vertex.color, vec4<f32>(1.0), all(vertex.color == vec4<f32>(0.0)));
+	var out = canvas_make_quad_varyings(instance, canvas_instances[instance], vertex.position, vertex.uv);
+	out.tint *= vec4<f32>(color.rgb * color.a, color.a);
+	return out;
 }
 
 // canvas_viewport_vertex is canvas's vertex stage for a quad covering the

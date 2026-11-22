@@ -1,10 +1,6 @@
 package canvas
 
-import (
-	"cmp"
-
-	"github.com/dvoyni/cog/libs/m"
-)
+import "github.com/dvoyni/cog/libs/m"
 
 // Sprite is an entry that draws an image through a transform about its
 // image's pivot. It is a literal, like every other entry:
@@ -61,22 +57,9 @@ type Sprite struct {
 }
 
 // batchKey answers what the sprite shares with the entries it batches with,
-// its image as drawn image, its sampler repeating along the axes the image
-// wraps along where no gutter does, its filter defaultFilter when it names none,
-// and none for the zero Image, the white texel, which no filter changes,
-// so it batches with shapes.
+// its image as drawn image, as makeImageBatchKey answers it.
 func (s *Sprite) batchKey(image *drawnImage, defaultFilter Filter) batchKey {
-	key := batchKey{material: s.Material, texture: image.findView(), clip: s.Clip}
-	// An image drawn from a texture of its own, its own atlas's or a render
-	// texture's, has no gutter, so its sampler repeats along the axes it
-	// wraps along; a sprite atlas's gutter wraps its images.
-	if image.packed == nil || image.packed.atlas.holdsOneImage {
-		key.wrap = image.options.Wrap
-	}
-	if s.Image != (Image{}) {
-		key.filter = cmp.Or(s.Filter, defaultFilter)
-	}
-	return key
+	return makeImageBatchKey(s.Material, s.Image, image, s.Clip, s.Filter, defaultFilter)
 }
 
 // findSquare answers the transform from the unit square onto the sprite's

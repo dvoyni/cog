@@ -1,6 +1,7 @@
 package canvas
 
 import (
+	"cmp"
 	"unsafe"
 
 	"github.com/dvoyni/cog/libs/m"
@@ -39,8 +40,10 @@ type instanceData struct {
 	decode uint32
 	mode   instanceMode
 	// tiles is how many of a tiled sprite's tiles span the unit square
-	// along each axis, and a glyph's pen as a point of its unit square
-	// instead, where a text material places it on a whole pixel.
+	// along each axis, a glyph's pen as a point of its unit square
+	// instead, where a text material places it on a whole pixel, and a
+	// mesh's axes its UVs repeat along, 1 along each its image wraps along
+	// and 0 along the others.
 	tiles m.Vec2
 }
 
@@ -63,6 +66,9 @@ const (
 	instanceModeSlicedHollow
 	// instanceModeTiled maps it onto tiles of the frame, wrapped.
 	instanceModeTiled
+	// instanceModeMesh maps a mesh's UVs onto the frame, repeating along
+	// the axes tiles marks and continuing its edge along the others.
+	instanceModeMesh
 )
 
 // shapePart mirrors canvas.wgsl's CANVAS_PART constants: which part of its
@@ -162,6 +168,31 @@ func appendSpriteInstance(instances []instanceData, sprite *Sprite, image *drawn
 	case Tiled:
 		instance.mode = instanceModeTiled
 		instance.tiles = squareSize.Div(image.size.MulS(texelScale))
+	}
+	return append(instances, instance)
+}
+
+// appendTrianglesInstance appends to instances the instance data of
+// triangles, per-frame triangles, their image as drawn image, and answers
+// them: one instance, over its image's region, decoding it where it is to
+// be, its UVs repeating along the axes the image wraps along, its zero tint
+// white and premultiplied, through the triangles' transform.
+func appendTrianglesInstance(instances []instanceData, triangles *recordedTriangles, image *drawnImage) []instanceData {
+	instance := instanceData{
+		tint:      cmp.Or(triangles.options.Tint, m.White).Premultiply(),
+		region:    image.region,
+		transform: triangles.findTransform(),
+		page:      image.page,
+		mode:      instanceModeMesh,
+	}
+	if image.decode {
+		instance.decode = 1
+	}
+	if wrap := image.options.Wrap; wrap == WrapX || wrap == WrapBoth {
+		instance.tiles.X = 1
+	}
+	if wrap := image.options.Wrap; wrap == WrapY || wrap == WrapBoth {
+		instance.tiles.Y = 1
 	}
 	return append(instances, instance)
 }

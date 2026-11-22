@@ -18,8 +18,10 @@ type MaterialDescriptor struct {
 	Shader string
 	// VertexEntryPoint is the shader's vertex stage, empty meaning canvas's
 	// own, canvas_sprite_vertex, so a material of a fragment stage alone
-	// draws sprites and shapes alike. FragmentEntryPoint is its fragment
-	// stage, empty meaning the shader's only one.
+	// draws sprites and shapes alike. A mesh of canvas.Vertex draws through
+	// canvas's mesh vertex stage, canvas_mesh_vertex, whatever it names, and
+	// a mesh of another layout through it. FragmentEntryPoint is its
+	// fragment stage, empty meaning the shader's only one.
 	VertexEntryPoint   string
 	FragmentEntryPoint string
 	// Blend is how the material's entries blend into what the target holds,
@@ -72,13 +74,15 @@ func BlendOpaque() render.BlendState {
 	return makeBlendState(render.BlendFactorOne, render.BlendFactorZero)
 }
 
-// makeRenderMaterial makes the render material of d through inventory, its
-// shader acquired, with the define CANVAS_ARGUMENT where d takes an
-// argument, which the material holds until it is released, and answers
-// both: canvas's own vertex stage where d names none, and its blending
-// premultiplied, BlendNormal() where d's is zero, with no depth test, since
-// the sort key orders entries, and no culling.
-func (d MaterialDescriptor) makeRenderMaterial(inventory render.Inventory) (render.Material, render.Shader) {
+// makeRenderMaterials makes the render materials of d through inventory,
+// its shader acquired, with the define CANVAS_ARGUMENT where d takes an
+// argument, which the materials hold until they are released, and answers
+// them and the shader: one of its own vertex stage, canvas's own for an
+// entry drawn as a quad where d names none, and one of canvas's mesh vertex
+// stage, for a mesh of canvas.Vertex, both of d's fragment stage and of
+// its blending premultiplied, BlendNormal() where d's is zero, with no
+// depth test, since the sort key orders entries, and no culling.
+func (d MaterialDescriptor) makeRenderMaterials(inventory render.Inventory) (render.Material, render.Material, render.Shader) {
 	blend := d.Blend
 	if blend == (render.BlendState{}) {
 		blend = BlendNormal()
@@ -90,14 +94,17 @@ func (d MaterialDescriptor) makeRenderMaterial(inventory render.Inventory) (rend
 		defines = []render.ShaderDefine{{Name: argumentDefine}}
 	}
 	shader := inventory.AcquireShader(d.Shader, defines...)
-	material := inventory.MakeMaterial(render.MaterialDescriptor{
+	descriptor := render.MaterialDescriptor{
 		Label:              d.Label,
 		Shader:             shader,
 		State:              state,
 		VertexEntryPoint:   cmp.Or(d.VertexEntryPoint, spriteVertexEntryPoint),
 		FragmentEntryPoint: d.FragmentEntryPoint,
-	})
-	return material, shader
+	}
+	material := inventory.MakeMaterial(descriptor)
+	descriptor.VertexEntryPoint = meshVertexEntryPoint
+	meshMaterial := inventory.MakeMaterial(descriptor)
+	return material, meshMaterial, shader
 }
 
 // makeBlendState answers the state blending colour and alpha alike, by

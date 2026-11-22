@@ -8,14 +8,16 @@ import (
 	"github.com/dvoyni/cog/plugins/render"
 )
 
-// materialSlot is one 2D material made: the render material and the shader
-// canvas made it of, its CullMargin, the Go type of its argument, nil for
-// none, the stride of its instance data, zero for none, and whether that
-// type's layout mismatched its shader's, and whether it was released, its
-// render material still to give back.
+// materialSlot is one 2D material made: the render materials and the
+// shader canvas made it of, material of its own vertex stage and
+// meshMaterial of canvas's mesh vertex stage, its CullMargin, the Go type of
+// its argument, nil for none, the stride of its instance data, zero for
+// none, and whether that type's layout mismatched its shader's, and whether
+// it was released, its render materials still to give back.
 type materialSlot struct {
 	generation             uint32
 	material               render.Material
+	meshMaterial           render.Material
 	shader                 render.Shader
 	cullMargin             float32
 	argumentType           reflect.Type
@@ -25,12 +27,12 @@ type materialSlot struct {
 }
 
 // makeMaterialSlot makes the slot of a 2D material of descriptor through
-// inventory, its render material and its shader acquired, its argument's
+// inventory, its render materials and its shader acquired, its argument's
 // layout checked against its shader's, a mismatch reported once to logger
 // for the shader and the type.
 func makeMaterialSlot(inventory render.Inventory, logger *kernel.Logger, descriptor MaterialDescriptor) materialSlot {
-	material, shader := descriptor.makeRenderMaterial(inventory)
-	slot := materialSlot{material: material, shader: shader, cullMargin: descriptor.CullMargin, argumentType: descriptor.Argument.goType, stride: findInstanceStride(descriptor.Argument.goType)}
+	material, meshMaterial, shader := descriptor.makeRenderMaterials(inventory)
+	slot := materialSlot{material: material, meshMaterial: meshMaterial, shader: shader, cullMargin: descriptor.CullMargin, argumentType: descriptor.Argument.goType, stride: findInstanceStride(descriptor.Argument.goType)}
 	if slot.argumentType == nil {
 		return slot
 	}

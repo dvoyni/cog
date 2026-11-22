@@ -116,6 +116,11 @@ const (
 	// whose String does not parse as markup, drawn as written, reported
 	// once for the string.
 	ReportKindMarkupMalformed
+	// ReportKindBoundsMissing is a per-frame mesh given to DrawTriangles
+	// with zero bounds, which records nothing, so forgetting them shows at
+	// once rather than as a mesh vanishing when its origin leaves the view.
+	// It is reported once for each draw list.
+	ReportKindBoundsMissing
 )
 
 // The keys canvas logs a report once under are one of these, then the

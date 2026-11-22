@@ -28,16 +28,20 @@ type drawState struct {
 	// and only read after.
 	drawLists []*drawList
 	// entries are the frame's entries, merged from the draw lists in their
-	// order, each a shape of shapes, a sprite of sprites or a run of text of
-	// texts, merged alike, the bytes of the arguments they give, end to
-	// end, and the spans of the runs of text, copied end to end. All are
-	// replaced by the next frame's when it merges.
-	entries   []recordedEntry
-	shapes    []Shape
-	sprites   []Sprite
-	texts     []laidOutText
-	arguments []byte
-	spans     []Span
+	// order, each a shape of shapes, a sprite of sprites, a run of text of
+	// texts or per-frame triangles of triangles, merged alike, the bytes of
+	// the arguments they give, end to end, the spans of the runs of text,
+	// copied end to end, and the triangles' vertex and index bytes, each end
+	// to end. All are replaced by the next frame's when it merges.
+	entries     []recordedEntry
+	shapes      []Shape
+	sprites     []Sprite
+	texts       []laidOutText
+	triangles   []recordedTriangles
+	arguments   []byte
+	spans       []Span
+	vertexBytes []byte
+	indexBytes  []byte
 	// cameras are the frame's cameras, merged from the draw lists in their
 	// order, in the order they draw, or the default camera for a frame of
 	// entries that set none, replaced by the next frame's when it merges.
@@ -72,6 +76,10 @@ func (s *drawState) addDrawList() *drawList {
 			Kind: ReportKindSliceLengthsDiffer,
 			Err:  fmt.Errorf("canvas: draw list %d was given parallel slices of different lengths, of entries and their arguments, and recorded none of them", len(s.drawLists)),
 		},
+		boundsMissing: Report{
+			Kind: ReportKindBoundsMissing,
+			Err:  fmt.Errorf("canvas: draw list %d was given triangles of zero bounds, and recorded none of them: a mesh needs its bounds given, or it would vanish as its origin left a view", len(s.drawLists)),
+		},
 	}
 	s.drawLists = append(s.drawLists, added)
 	return added
@@ -93,9 +101,13 @@ func (s *drawState) closeAndSort() {
 	s.sprites = s.sprites[:0]
 	clear(s.texts)
 	s.texts = s.texts[:0]
+	clear(s.triangles)
+	s.triangles = s.triangles[:0]
 	s.arguments = s.arguments[:0]
 	clear(s.spans)
 	s.spans = s.spans[:0]
+	s.vertexBytes = s.vertexBytes[:0]
+	s.indexBytes = s.indexBytes[:0]
 	s.cameras = s.cameras[:0]
 	s.drawListEnds = s.drawListEnds[:0]
 	for _, taskDrawList := range s.drawLists {
@@ -128,6 +140,9 @@ func (s *drawState) findSortKeys() {
 		case EntryKindText:
 			text := &s.texts[entry.index].text
 			key = makeSortKey(text.Layer, text.Order)
+		case EntryKindTriangles:
+			options := &s.triangles[entry.index].options
+			key = makeSortKey(options.Layer, options.Order)
 		}
 		s.sorter.entries = append(s.sorter.entries, sortedEntry{key: key, entryIndex: uint32(index)})
 	}
@@ -141,8 +156,25 @@ func (s *drawState) findEntryMaterial(entry recordedEntry) Material {
 		return s.shapes[entry.index].Material
 	case EntryKindSprite:
 		return s.sprites[entry.index].Material
+	case EntryKindTriangles:
+		return s.triangles[entry.index].options.Material
 	}
 	return cmp.Or(s.texts[entry.index].text.Material, TextMaterial)
+}
+
+// findEntryImage answers the image entry, of the frame's, draws and the
+// frame of it, the zero Image for a shape, which draws the white texel, and
+// for a run of text, whose icons each draw their own.
+func (s *drawState) findEntryImage(entry recordedEntry) (Image, uint32) {
+	switch entry.kind {
+	case EntryKindSprite:
+		sprite := &s.sprites[entry.index]
+		return sprite.Image, sprite.Frame
+	case EntryKindTriangles:
+		options := &s.triangles[entry.index].options
+		return options.Image, options.Frame
+	}
+	return Image{}, 0
 }
 
 // findEntryArgument answers the bytes of the argument entry, of the frame's,
@@ -190,6 +222,10 @@ func (s *drawState) makeInspection(beat metronome.Beat, cameraDraws []cameraDraw
 					inspectedEntry.Text.Spans = slices.Clone(inspectedEntry.Text.Spans)
 					inspectedEntry.Layer = inspectedEntry.Text.Layer
 					inspectedEntry.Order = inspectedEntry.Text.Order
+				case EntryKindTriangles:
+					inspectedEntry.TrianglesOptions = s.triangles[recorded.index].options
+					inspectedEntry.Layer = inspectedEntry.TrianglesOptions.Layer
+					inspectedEntry.Order = inspectedEntry.TrianglesOptions.Order
 				}
 				inspectedEntries = append(inspectedEntries, inspectedEntry)
 			}

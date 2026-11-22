@@ -4,11 +4,13 @@
 that draws 2D: sprites, shapes, text and meshes, recorded as entries every
 frame and drawn through 2D materials. It is its own Go module (Go 1.27),
 importing [kernel](../../kernel), [metronome](../metronome),
-[platform](../platform), render, [libs/m](../../libs/m) and go-text's
+[platform](../platform), render, [libs/m](../../libs/m),
+[libs/meshfile](../../libs/meshfile) and go-text's
 [typesetting](https://github.com/go-text/typesetting), and reaches no gfx.
 
 It is being built from [docs/design.md](docs/design.md). So far a frame's
-recording tasks record shapes, sprites and runs of text and set cameras into draw lists
+recording tasks record shapes, sprites, runs of text and per-frame meshes
+and set cameras into draw lists
 of their own, which canvas merges in registration order, sorts by their
 sort key and draws through each camera, or the default camera into the main
 window, the first window opened of those still open, an instanced draw for
@@ -202,6 +204,33 @@ can be inspected in canvas's terms, beside render's inspection of it.
   sampler repeats along the axes its `Wrap` names, so a tiled sprite of
   the whole texture tiles without seams. A texture render does not hold
   draws nothing, reported once.
+- **`DrawTriangles(options, triangles)`** records a mesh given for one
+  frame, a trail, a rope or a skin: a **`Triangles[V]{Vertices, Indices,
+  Topology, Bounds}`**, of vertices of a `meshfile.VertexType`, optional
+  `[]uint32` indices, kept as 16 bits while the vertices number at most
+  65,535, a `meshfile.Topology`, zero a triangle list, and its bounds, an
+  `m.Box3` in its own space, `meshfile.CalculateBounds`'s, required: zero
+  bounds are refused, reported once for the task as
+  `ReportKindBoundsMissing`, and triangles of no vertices record nothing.
+  **`DrawTrianglesOptions`** holds a sprite's fields but its size, pivot,
+  draw mode and crop: its `Image` and `Frame`, the zero `Image` the white
+  texel, its `Transform`, `Tint`, `Material`, `Clip`, `Filter` and sort
+  key. Its vertices and indices are copied as it is recorded, so the
+  caller may reuse its slices, then into the frame's temporary buffers,
+  drawn through render's `AcquireTemporaryMesh`, a draw of its own never
+  merged with another entry's, culled by its bounds through its transform.
+  **`Vertex{Position, UV, Color}`**, 32 bytes, is canvas's standard
+  layout, drawn by the include's `canvas_mesh_vertex` and the material's
+  fragment stage, so a fragment-only material draws meshes as sprites: its
+  UV runs 0 to 1 over its image's region, repeating past it along the axes
+  the image wraps along and continuing its edge along the others, so a
+  terrain polygon whose UVs are its positions over the image's size fills
+  with a tiling image, and its `Color` multiplies the image as a tint does,
+  straight alpha, zero meaning white, so a vertex faded out takes
+  `{1, 1, 1, 0}`. `Position3()` answers its position for
+  `meshfile.CalculateBounds(vertices, canvas.Vertex.Position3)`. Vertices of
+  another layout draw through the material's own vertex stage.
+  `DrawTrianglesWith` gives the entry its material's argument.
 - **`OrderOf(y)`** maps a float onto an order of its own, in the same order,
   for y-sorting.
 - **`Material`** names a 2D material, made by `Assets.MakeMaterial`; the
@@ -210,7 +239,8 @@ can be inspected in canvas's terms, beside render's inspection of it.
   `Shader`, the path of a whole WGSL file that includes
   `cog.canvas/canvas.wgsl` and declares only `@group(1)`, its
   `VertexEntryPoint`, empty meaning canvas's own, so a fragment-only
-  material draws sprites and shapes alike, its `FragmentEntryPoint`, its
+  material draws sprites and shapes alike, and meshes of `Vertex` through
+  canvas's mesh vertex stage whatever it names, its `FragmentEntryPoint`, its
   `Blend`, premultiplied, zero meaning `BlendNormal()`, its `Argument`, and
   its `CullMargin`, in world units, growing its entries' bounds for a vertex
   stage that moves vertices. **`BlendNormal()`**, **`BlendAdditive()`**,
@@ -403,7 +433,8 @@ can be inspected in canvas's terms, beside render's inspection of it.
   atlases, the white texel in the sRGB one, the glyph atlas and where each
   glyph is packed, each image drawn, where it is packed and
   when it was last drawn, the sources preloaded, the cameras drawn, the
-  entries' keys, the instance data and the batches; and a private list of
+  entries' keys, the instance data, the batches and the per-frame meshes'
+  temporary meshes; and a private list of
   the open windows. The images `ImageFromFile` and `ImageFromTexture`
   intern are a table of the process's, shared by every kernel, each kernel
   packing them apart.

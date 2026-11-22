@@ -22,7 +22,7 @@ type materialTable struct {
 	slots       []materialSlot
 	freeIndexes []uint32
 	// releasedIndexes are the slots of the materials released whose render
-	// material and shader are still to give back, which the drawing job does
+	// materials and shader are still to give back, which the drawing job does
 	// once it has drawn the frame, so the frame recorded as a material is
 	// released still draws it.
 	releasedIndexes []uint32
@@ -46,19 +46,20 @@ func (t *materialTable) make(inventory render.Inventory, logger *kernel.Logger, 
 	return Material{index: index, generation: slot.generation}
 }
 
-// findHeld answers material's render material, and whether it is held: made
-// and not released.
-func (t *materialTable) findHeld(material Material) (render.Material, bool) {
+// findHeld answers material's render materials, of its own vertex stage and
+// of canvas's mesh vertex stage, and whether it is held: made and not
+// released.
+func (t *materialTable) findHeld(material Material) ([2]render.Material, bool) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	slot, found := findSlot(t.slots, material)
 	if !found || slot.released {
-		return render.Material{}, false
+		return [2]render.Material{}, false
 	}
-	return slot.material, true
+	return [2]render.Material{slot.material, slot.meshMaterial}, true
 }
 
-// release marks material released, its render material and shader given
+// release marks material released, its render materials and shader given
 // back by freeReleased, and answers whether it was held.
 func (t *materialTable) release(material Material) bool {
 	t.mutex.Lock()
@@ -72,7 +73,7 @@ func (t *materialTable) release(material Material) bool {
 	return true
 }
 
-// freeReleased gives back through inventory the render material and the
+// freeReleased gives back through inventory the render materials and the
 // shader of each material released, and frees its slot, so a Material
 // naming it names nothing.
 func (t *materialTable) freeReleased(inventory render.Inventory) {
@@ -81,6 +82,7 @@ func (t *materialTable) freeReleased(inventory render.Inventory) {
 	for _, index := range t.releasedIndexes {
 		slot := &t.slots[index]
 		inventory.ReleaseMaterial(slot.material)
+		inventory.ReleaseMaterial(slot.meshMaterial)
 		inventory.ReleaseShader(slot.shader)
 		// A generation counted past the last wraps to 1, never zero.
 		*slot = materialSlot{generation: cmp.Or(slot.generation+1, 1)}

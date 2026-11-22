@@ -53,6 +53,7 @@
           },
           "entryPoints": [
             "canvas_sprite_vertex",
+            "canvas_mesh_vertex",
             "canvas_text_vertex",
             "canvas_text_fragment"
           ]
@@ -185,6 +186,7 @@
           },
           "entryPoints": [
             "canvas_sprite_vertex",
+            "canvas_mesh_vertex",
             "canvas_viewport_vertex",
             "canvas_text_vertex",
             "canvas_text_fragment"
@@ -233,6 +235,10 @@
           "stage": "vertex"
         },
         {
+          "name": "canvas_mesh_vertex",
+          "stage": "vertex"
+        },
+        {
           "name": "canvas_viewport_vertex",
           "stage": "vertex"
         },
@@ -246,6 +252,20 @@
         }
       ],
       "vertexInputs": {
+        "canvas_mesh_vertex": [
+          {
+            "location": 0,
+            "type": "vec2\u003cf32\u003e"
+          },
+          {
+            "location": 1,
+            "type": "vec2\u003cf32\u003e"
+          },
+          {
+            "location": 2,
+            "type": "vec4\u003cf32\u003e"
+          }
+        ],
         "canvas_sprite_vertex": [],
         "canvas_text_vertex": [],
         "canvas_viewport_vertex": []

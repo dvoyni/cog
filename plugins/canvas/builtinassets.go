@@ -34,6 +34,9 @@ const (
 	// spriteVertexEntryPoint is the include's vertex stage, for an entry
 	// drawn as a quad.
 	spriteVertexEntryPoint = "canvas_sprite_vertex"
+	// meshVertexEntryPoint is the include's vertex stage for a mesh of
+	// canvas.Vertex.
+	meshVertexEntryPoint = "canvas_mesh_vertex"
 	// viewportVertexEntryPoint is the include's vertex stage for a quad
 	// covering the camera's viewport, which a camera's clear drawn over its
 	// viewport draws through.
