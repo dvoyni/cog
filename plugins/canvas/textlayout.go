@@ -47,11 +47,12 @@ func (l TextLayout) LineWidth(line int) float32 { return l.lineWidths[line] }
 // by the clusters it draws.
 func (l TextLayout) ClusterPosition(cluster int) m.Vec2 { return l.clusterPositions[cluster] }
 
-// placedGlyph is one glyph a layout draws: its id in the run's font, the
-// index of its field in the FontLibrary's glyph table once laid out for
-// drawing, and its pen on its line's baseline, in world units from the
-// box's top left.
+// placedGlyph is one glyph a layout draws: the font of the run's set that
+// draws it and its id in that font, the index of its field in the
+// FontLibrary's glyph table once laid out for drawing, and its pen on its
+// line's baseline, in world units from the box's top left.
 type placedGlyph struct {
+	font  *loadedFont
 	id    font.GID
 	field uint32
 	pen   m.Vec2

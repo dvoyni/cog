@@ -20,14 +20,14 @@ type fontLibraryWriter struct {
 func (w fontLibraryWriter) MakeFontSet(descriptor FontSetDescriptor) FontSet {
 	slot := makeFontSetSlot(w.files, w.logger, descriptor)
 	if len(w.freeIndexes) == 0 {
-		w.sets = append(w.sets, fontSetSlot{generation: 1})
+		w.sets = append(w.sets, &fontSetSlot{set: FontSet{index: uint32(len(w.sets)), generation: 1}})
 		w.freeIndexes = append(w.freeIndexes, uint32(len(w.sets)-1))
 	}
 	index := w.freeIndexes[len(w.freeIndexes)-1]
 	w.freeIndexes = w.freeIndexes[:len(w.freeIndexes)-1]
-	slot.generation = w.sets[index].generation
+	slot.set = w.sets[index].set
 	w.sets[index] = slot
-	return FontSet{index: index, generation: slot.generation}
+	return slot.set
 }
 
 // DestroyFontSet destroys set, freeing its slot; a set canvas does not hold,
@@ -38,7 +38,7 @@ func (w fontLibraryWriter) DestroyFontSet(set FontSet) {
 		return
 	}
 	// A generation counted past the last wraps to 1, never zero.
-	w.sets[set.index] = fontSetSlot{generation: cmp.Or(set.generation+1, 1)}
+	w.sets[set.index] = &fontSetSlot{set: FontSet{index: set.index, generation: cmp.Or(set.generation+1, 1)}}
 	w.freeIndexes = append(w.freeIndexes, set.index)
 }
 

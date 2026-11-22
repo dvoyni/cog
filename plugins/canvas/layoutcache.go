@@ -3,8 +3,6 @@ package canvas
 import (
 	"sync"
 	"sync/atomic"
-
-	"github.com/go-text/typesetting/font"
 )
 
 // layoutCache is the layouts of the runs laid out lately, by what shapes
@@ -25,14 +23,15 @@ type layoutCache struct {
 }
 
 // layoutInput is what a run's layout is made of, which the shaper reads
-// and the cache keys by: its text; the font its set picks for the current
-// language, so a set destroyed or a language changed lays out anew and the
-// layouts of the font before go idle; its em in world units, Config.TextSize
-// when its Size is zero; how it wraps, aligns and spaces its lines and
-// letters, each as its Text gives it; and the language it is shaped in.
+// and the cache keys by: its text; the slot of the set it is laid out in,
+// the default set's when canvas does not hold its own, so a set destroyed
+// lays out anew and the layouts of the slot before go idle; its em in world
+// units, Config.TextSize when its Size is zero; how it wraps, aligns and
+// spaces its lines and letters, each as its Text gives it; and the language
+// it is shaped and its fonts picked in, its own or the current one.
 type layoutInput struct {
 	text       string
-	font       *font.Font
+	set        *fontSetSlot
 	em         float32
 	wrapWidth  float32
 	align      TextAlign

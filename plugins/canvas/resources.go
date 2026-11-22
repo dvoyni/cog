@@ -59,20 +59,23 @@ type FontLibrary interface {
 	Language() string
 	// Layout answers text shaped, broken into lines and measured, with no
 	// frame, for a UI's sizes, carets and baselines: shaped with HarfBuzz's
-	// rules, ordered by Unicode's bidi algorithm, in the font of text's set
-	// measuring the current language, at text's Size, zero meaning
-	// Config.TextSize. It answers from the layout cache DrawText lays out
-	// through, so what is measured is what is drawn, and a run measured or
-	// drawn frame after frame is shaped once: keyed by text's String, the
-	// font its Font set picks for the current language, its Size,
-	// WrapWidth, Align, LineHeight and Tracking, and the current language,
-	// a layout neither measured nor drawn for
-	// Config.LayoutIdleFrames frames freed. A set canvas does not hold is
-	// laid out as the default set, reported once for it as
+	// rules, ordered by Unicode's bidi algorithm, in text's set and
+	// language, its own or the current one: each character in the first of
+	// the language's fonts that has it, else in the set's default font,
+	// its lines measured by the font measuring the language, at text's
+	// Size, zero meaning Config.TextSize. A character no font of the set
+	// has is drawn as the default font's missing-glyph box, reported once
+	// for the set as ReportKindCharacterMissing. It answers from the layout
+	// cache DrawText lays out through, so what is measured is what is
+	// drawn, and a run measured or drawn frame after frame is shaped once:
+	// keyed by text's String, its Font set, its Size, WrapWidth, Align,
+	// LineHeight and Tracking, and its language, a layout neither measured
+	// nor drawn for Config.LayoutIdleFrames frames freed. A set canvas does
+	// not hold is laid out as the default set, reported once for it as
 	// ReportKindFontSetNotHeld.
 	Layout(text Text) TextLayout
 	// Preload makes the distance fields of the glyphs of text, shaped on
-	// one line in the font of set measuring the current language, ahead of
+	// one line in set's fonts for the current language, ahead of
 	// their first draw, behind a loading screen, so the first frame drawing
 	// a run of text at any size makes none; it lays nothing out for the
 	// cache. A set canvas does not hold preloads the default set's,

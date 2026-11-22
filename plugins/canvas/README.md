@@ -306,11 +306,18 @@ can be inspected in canvas's terms, beside render's inspection of it.
 - **`Text`** is a run of text: its `String`, a newline, or another of
   Unicode's mandatory breaks, a hard break, its
   `Font` set and `Size`, its em in world units, zero meaning
-  `Config.TextSize`, its `WrapWidth`, zero meaning no wrapping, its
+  `Config.TextSize`, its `Language`, a tag matched exactly, zero meaning
+  the current language, its `WrapWidth`, zero meaning no wrapping, its
   `Align`, a **`TextAlign`**, `TextAlignStart`, `TextAlignCenter` or
   `TextAlignEnd`, a right-to-left paragraph starting at the right, `LineHeight`, multiplying the font's,
   zero meaning 1, and `Tracking`, letter spacing in em. go-text shapes it
-  in the font of its set measuring the current language, ordered by
+  in its language, each character in the first of the language's fonts in
+  its set that has it, else in the set's default font, or, when no font of
+  the set has it, as the default font's missing-glyph box, reported once
+  for the set; its lines are measured by the font measuring its language,
+  as `Metrics` reads. The font drawing each character is kept per set,
+  language and character, so a change of language clears nothing. It is
+  ordered by
   Unicode's bidi algorithm, its lines broken on UAX #14 opportunities, so
   Japanese breaks between ideographs and never starts a line with closing
   punctuation, and a word too long for a line between grapheme clusters.
@@ -325,9 +332,8 @@ can be inspected in canvas's terms, beside render's inspection of it.
   `Filter`, zero meaning linear, as a field is read, and its sort key.
   `DrawText` records a run, laid out then, as `Layout` lays it out, one
   entry whose glyphs draw in order. Both lay out through the **layout
-  cache**, keyed by the run's `String`, the font its `Font` set picks for
-  the current language, its `Size`, `WrapWidth`, `Align`, `LineHeight` and
-  `Tracking`, and the current language, so a
+  cache**, keyed by the run's `String`, its `Font` set, its `Size`,
+  `WrapWidth`, `Align`, `LineHeight` and `Tracking`, and its language, so a
   label measured or drawn frame after frame is shaped once, and a layout
   neither for `Config.LayoutIdleFrames` frames is freed; `DrawTextWith` gives its material's
   argument, `TextMaterial`'s a `Profile` drawn under the fill, such as

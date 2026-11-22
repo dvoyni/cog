@@ -144,7 +144,10 @@ func TestCarriageReturnAndNewlineIsOneHardBreakAsALineSeparatorIs(t *testing.T) 
 // Mono, which share one parsed font, and of a font of its own; run under
 // -race, it breaks a face or shaper shared between layouts.
 func TestLayoutsMadeAtOnceAreEachAsOneMadeAlone(t *testing.T) {
+	// JetBrains Mono, the default set's and the bold set's font, has no
+	// ideographs, so each of those sets draws them as missing-glyph boxes.
 	h := canvastest.NewHarness(t)
+	h.ExpectReport(canvas.ReportKindCharacterMissing)
 	sets := make([]canvas.FontSet, 3)
 	var mismatchCount int
 	h.Spawn(nil, nil, &fileMounter{files: os.DirFS("testdata/fonts")}, &fontLibraryUser{
@@ -299,8 +302,11 @@ func TestJapaneseLineNeverStartsWithClosingPunctuation(t *testing.T) {
 }
 
 func TestDestroyedFontSetIsLaidOutAsTheDefaultSetReportedOnce(t *testing.T) {
+	// The default set's JetBrains Mono has no ideographs, so it draws the
+	// destroyed set's as its missing-glyph box.
 	h := canvastest.NewHarness(t)
 	h.ExpectReport(canvas.ReportKindFontSetNotHeld)
+	h.ExpectReport(canvas.ReportKindCharacterMissing)
 	var set canvas.FontSet
 	var widths []float32
 	h.Spawn(nil, nil, &fileMounter{files: os.DirFS("testdata/fonts")}, &fontLibraryUser{

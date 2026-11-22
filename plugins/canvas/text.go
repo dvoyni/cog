@@ -20,6 +20,13 @@ type Text struct {
 	Font FontSet
 	// Size is the run's em in world units, zero meaning Config.TextSize.
 	Size float32
+	// Language is the tag of the language the run is written in, matched
+	// exactly, zero meaning the current language: a character is drawn by
+	// the first of its set's fonts for the language that has it, else by
+	// the set's default font, and the language goes to the shaper, so a
+	// font draws its own forms of it. A name in another language takes its
+	// own.
+	Language string
 	// WrapWidth is the width, in world units, its lines break at, on
 	// Unicode's line-break opportunities (UAX #14), so text in Chinese or
 	// Japanese breaks between ideographs and never starts a line with

@@ -31,20 +31,23 @@ type textShaper struct {
 	wrapper   shaping.LineWrapper
 	paragraph bidi.Paragraph
 	segmenter segmenter.Segmenter
-	// faces are a face of each font the shaper shaped, by the font, which
-	// go-text's shaper keeps its own state of by the font as well.
-	faces map[*font.Font]*font.Face
-	// The run being laid out: its face, its em in world units over its
-	// shaping em, its lines' height, the width they wrap at and its
-	// tracking, both in shaping units, and its language, with the layout
-	// so far.
-	face       *font.Face
-	scale      float32
-	lineHeight float32
-	maxWidth   fixed.Int26_6
-	tracking   fixed.Int26_6
-	language   language.Language
-	layout     TextLayout
+	// faces are a face of each font the shaper shaped, and the font, by its
+	// parsed font, which go-text's shaper keeps its own state of by as well,
+	// and which each loaded font has of its own.
+	faces map[*font.Font]fontFace
+	// The run being laid out: its set and its language's tag, which pick
+	// the font of each character, its em in world units over its shaping
+	// em, its lines' height, the width they wrap at and its tracking, both
+	// in shaping units, and its language as the shaper takes it, with the
+	// layout so far.
+	set         *fontSetSlot
+	languageTag string
+	scale       float32
+	lineHeight  float32
+	maxWidth    fixed.Int26_6
+	tracking    fixed.Int26_6
+	language    language.Language
+	layout      TextLayout
 	// runes are the run's text, outputs a paragraph's runs shaped, and
 	// graphemeStarts the rune each of the text's grapheme clusters starts
 	// at.
@@ -64,12 +67,22 @@ type textShaper struct {
 	lineOffsets     []float32
 }
 
-// layOut answers the layout of input, its text laid out in textFont, its
-// font's, at its em, in world units, shaped in its language.
-func (s *textShaper) layOut(textFont loadedFont, input layoutInput) TextLayout {
+// ResolveFace answers, as go-text's shaping.Fontmap, the shaper's face of
+// the font drawing character in the run's set and language.
+func (s *textShaper) ResolveFace(character rune) *font.Face {
+	return s.findFace(s.set.findCharacterFont(s.languageTag, character))
+}
+
+// layOut answers the layout of input, its text laid out in its set at its
+// em, in world units, shaped in its language: each character drawn by the
+// first of the language's fonts that has it, else by the default font,
+// and its lines measured by the font measuring the language, as
+// FontLibrary.Metrics reads.
+func (s *textShaper) layOut(input layoutInput) TextLayout {
 	em := input.em
-	s.face = s.findFace(textFont)
-	metrics := textFont.findMetrics(em)
+	s.set = input.set
+	s.languageTag = input.language
+	metrics := input.set.findLanguageFont(input.language).findMetrics(em)
 	s.scale = em / (shapingEm * 64)
 	s.lineHeight = metrics.LineHeight * cmp.Or(input.lineHeight, 1)
 	s.maxWidth = math.MaxInt32
@@ -114,23 +127,23 @@ func (s *textShaper) layOut(textFont loadedFont, input layoutInput) TextLayout {
 	s.alignLines(input)
 	layout := s.layout
 	s.layout = TextLayout{}
-	s.face = nil
+	s.set = nil
 	return layout
 }
 
 // findFace answers the shaper's face of textFont, made at its variations
 // the first time.
-func (s *textShaper) findFace(textFont loadedFont) *font.Face {
-	face := s.faces[textFont.font]
-	if face == nil {
-		face = font.NewFace(textFont.font)
-		face.SetCoords(textFont.coordinates)
+func (s *textShaper) findFace(textFont *loadedFont) *font.Face {
+	shapedFace, cached := s.faces[textFont.font]
+	if !cached {
+		shapedFace = fontFace{face: font.NewFace(textFont.font), font: textFont}
+		shapedFace.face.SetCoords(textFont.coordinates)
 		if s.faces == nil {
-			s.faces = map[*font.Font]*font.Face{}
+			s.faces = map[*font.Font]fontFace{}
 		}
-		s.faces[textFont.font] = face
+		s.faces[textFont.font] = shapedFace
 	}
-	return face
+	return shapedFace.face
 }
 
 // layOutParagraph lays out the paragraph of the run's runes from start to
@@ -169,9 +182,11 @@ func (s *textShaper) layOutContent(start, end int) {
 	if level%2 == 1 {
 		direction = di.DirectionRTL
 	}
-	input := shaping.Input{Text: runes, RunEnd: len(runes), Direction: direction, Face: s.face, Size: fixed.I(shapingEm), Language: s.language}
+	// The segmenter splits the paragraph into runs of one face, each the
+	// face of the font drawing its characters, as ResolveFace answers.
+	input := shaping.Input{Text: runes, RunEnd: len(runes), Direction: direction, Size: fixed.I(shapingEm), Language: s.language}
 	s.outputs = s.outputs[:0]
-	for _, run := range s.splitter.Split(input, singleFaceFontmap{face: s.face}) {
+	for _, run := range s.splitter.Split(input, s) {
 		s.outputs = append(s.outputs, s.shaper.Shape(run))
 	}
 	if s.tracking != 0 {
@@ -200,12 +215,13 @@ func (s *textShaper) placeLine(line shaping.Line, start int) {
 	for _, runIndex := range s.runOfVisualIndex {
 		run := line[runIndex]
 		rightToLeft := run.Direction.Progression() == di.TowardTopLeft
+		runFont := s.faces[run.Face.Font].font
 		for glyph := 0; glyph < len(run.Glyphs); {
 			cluster := run.Glyphs[glyph]
 			glyphCount := max(cluster.GlyphCount, 1)
 			var advance fixed.Int26_6
 			for _, clusterGlyph := range run.Glyphs[glyph : glyph+glyphCount] {
-				s.placeGlyph(clusterGlyph, x+advance)
+				s.placeGlyph(runFont, clusterGlyph, x+advance)
 				advance += clusterGlyph.Advance
 			}
 			s.placeClusters(cluster, start, x, advance, rightToLeft)
@@ -216,12 +232,13 @@ func (s *textShaper) placeLine(line shaping.Line, start int) {
 	s.layout.lineWidths = append(s.layout.lineWidths, float32(x)*s.scale)
 }
 
-// placeGlyph places glyph on the line being placed, its pen at x, in
-// shaping units, moved by its offsets, which point up as go-text's do.
-func (s *textShaper) placeGlyph(glyph shaping.Glyph, x fixed.Int26_6) {
+// placeGlyph places glyph, of glyphFont, on the line being placed, its pen
+// at x, in shaping units, moved by its offsets, which point up as go-text's
+// do.
+func (s *textShaper) placeGlyph(glyphFont *loadedFont, glyph shaping.Glyph, x fixed.Int26_6) {
 	line := len(s.layout.lineWidths)
 	pen := m.Vec2{X: float32(x+glyph.XOffset) * s.scale, Y: s.layout.baseline + float32(line)*s.lineHeight - float32(glyph.YOffset)*s.scale}
-	s.layout.glyphs = append(s.layout.glyphs, placedGlyph{id: glyph.GlyphID, pen: pen})
+	s.layout.glyphs = append(s.layout.glyphs, placedGlyph{font: glyphFont, id: glyph.GlyphID, pen: pen})
 	s.lineOfGlyph = append(s.lineOfGlyph, line)
 }
 
@@ -284,6 +301,12 @@ func (s *textShaper) alignLines(input layoutInput) {
 	for glyph, line := range s.lineOfGlyph {
 		s.layout.glyphs[glyph].pen.X += s.lineOffsets[line]
 	}
+}
+
+// fontFace is a face the shaper made of a font, and the font.
+type fontFace struct {
+	face *font.Face
+	font *loadedFont
 }
 
 // isHardBreak answers whether character forces a line break by Unicode's

@@ -31,25 +31,22 @@ type glyphKey struct {
 	id   font.GID
 }
 
-// assignFields sets the field of each of glyphs, laid out in textFont, to
-// the index of its field, each made through face, a face of textFont at its
-// variations, at textFont's field em and range, zero meaning the table's,
-// the first time it is drawn, and answers glyphs without
-// those of no field, such as spaces, which draw nothing. A field is made
-// outside the lock, so jobs make theirs together; one made by two jobs at
-// once is kept once.
-func (t *glyphTable) assignFields(glyphs []placedGlyph, face *font.Face, textFont loadedFont) []placedGlyph {
-	fieldEm := cmp.Or(textFont.fieldEm, t.fieldEm)
-	fieldRange := cmp.Or(textFont.fieldRange, t.fieldRange)
+// assignFields sets the field of each of glyphs to the index of its field,
+// made the first time it is drawn through shaper's face of the glyph's
+// font, at its variations, at its font's field em and range, zero meaning
+// the table's, and answers glyphs without those of no field, such as
+// spaces, which draw nothing. A field is made outside the lock, so jobs make
+// theirs together; one made by two jobs at once is kept once.
+func (t *glyphTable) assignFields(glyphs []placedGlyph, shaper *textShaper) []placedGlyph {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	drawnGlyphs := glyphs[:0]
 	for _, glyph := range glyphs {
-		key := glyphKey{font: textFont.font, id: glyph.id}
+		key := glyphKey{font: glyph.font.font, id: glyph.id}
 		field, made := t.indexes[key]
 		if !made {
 			t.mutex.Unlock()
-			madeField := makeGlyphField(face, key.id, fieldEm, fieldRange)
+			madeField := makeGlyphField(shaper.findFace(glyph.font), key.id, cmp.Or(glyph.font.fieldEm, t.fieldEm), cmp.Or(glyph.font.fieldRange, t.fieldRange))
 			t.mutex.Lock()
 			if field, made = t.indexes[key]; !made {
 				field = uint32(len(t.fields))

@@ -97,6 +97,11 @@ const (
 	// than four bytes, which names no axis and is ignored. It is reported
 	// once for the font's path as its set is made.
 	ReportKindVariationIgnored
+	// ReportKindCharacterMissing is a character laid out in a font set none
+	// of whose fonts has it, neither its language's nor its default font,
+	// which is drawn as the default font's missing-glyph box. It is
+	// reported once for the set.
+	ReportKindCharacterMissing
 )
 
 // The keys canvas logs a report once under are one of these, then the
@@ -116,6 +121,7 @@ const (
 	fontNotLoadedLogKey          = "canvas: font not loaded: "
 	fontSetNotHeldLogKey         = "canvas: font set not held: "
 	variationIgnoredLogKey       = "canvas: variation ignored: "
+	characterMissingLogKey       = "canvas: character missing: "
 )
 
 // pixelPerfectStretchReport is the report of a pixel-perfect camera's

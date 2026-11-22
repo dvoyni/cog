@@ -26,7 +26,7 @@ type fontLibrary struct {
 	// sets are the font sets, by index, the default set at 0. A destroyed
 	// set's slot is reused, its generation counted up, so a FontSet naming
 	// it before names nothing.
-	sets        []fontSetSlot
+	sets        []*fontSetSlot
 	freeIndexes []uint32
 	// defaultDescriptor is Config.DefaultFontSet, which the default set is
 	// made of as canvas starts: it is kept here, since a task's argument
@@ -57,7 +57,7 @@ func newFontLibrary(logger *kernel.Logger, config *Config) *fontLibrary {
 		logger:            logger,
 		language:          config.Language,
 		textSize:          cmp.Or(config.TextSize, 16),
-		sets:              []fontSetSlot{makeFontSetSlot(nil, logger, FontSetDescriptor{})},
+		sets:              []*fontSetSlot{makeFontSetSlot(nil, logger, FontSetDescriptor{})},
 		defaultDescriptor: config.DefaultFontSet,
 		icons:             map[string]IconDescriptor{},
 		colors:            map[string]m.Color{},
@@ -87,15 +87,15 @@ func (l *fontLibrary) Layout(text Text) TextLayout {
 }
 
 // Preload makes the distance fields of the glyphs of text, shaped on one
-// line in the font of set measuring the current language, which a run of
-// any size draws, so the first draw of a run of it makes none. A set canvas
-// does not hold preloads the default set's, reported once.
+// line in set's fonts for the current language, which a run of any size
+// draws, so the first draw of a run of it makes none. A set canvas does not
+// hold preloads the default set's, reported once.
 func (l *fontLibrary) Preload(set FontSet, text string) {
-	textFont := l.findHeldSlot(set, "preloading glyphs of").findLanguageFont(l.language)
+	slot := l.findHeldSlot(set, "preloading glyphs of")
 	shaper := l.shapers.Get().(*textShaper)
 	defer l.shapers.Put(shaper)
-	layout := shaper.layOut(textFont, layoutInput{text: text, font: textFont.font, em: l.textSize, language: l.language})
-	l.glyphs.assignFields(layout.glyphs, shaper.findFace(textFont), textFont)
+	layout := shaper.layOut(layoutInput{text: text, set: slot, em: l.textSize, language: l.language})
+	l.glyphs.assignFields(layout.glyphs, shaper)
 }
 
 // layOutText answers text laid out as Layout lays it out, through the
@@ -105,16 +105,16 @@ func (l *fontLibrary) Preload(set FontSet, text string) {
 // is drawn and kept beside it. Two jobs drawing it first at once each find
 // them, and the first kept is answered to both.
 func (l *fontLibrary) layOutText(text Text, drawn bool) TextLayout {
-	input, textFont := l.makeLayoutInput(text)
+	input := l.makeLayoutInput(text)
 	cached := l.layouts.find(input)
 	if cached == nil || drawn && cached.drawnGlyphs.Load() == nil {
 		shaper := l.shapers.Get().(*textShaper)
 		defer l.shapers.Put(shaper)
 		if cached == nil {
-			cached = l.layouts.add(input, shaper.layOut(textFont, input))
+			cached = l.layouts.add(input, shaper.layOut(input))
 		}
 		if drawn {
-			drawnGlyphs := l.glyphs.assignFields(slices.Clone(cached.layout.glyphs), shaper.findFace(textFont), textFont)
+			drawnGlyphs := l.glyphs.assignFields(slices.Clone(cached.layout.glyphs), shaper)
 			cached.drawnGlyphs.CompareAndSwap(nil, &drawnGlyphs)
 		}
 	}
@@ -125,21 +125,20 @@ func (l *fontLibrary) layOutText(text Text, drawn bool) TextLayout {
 	return layout
 }
 
-// makeLayoutInput answers what text's layout is made of, at the current
-// language, and the font its set picks for that language: a set canvas does
-// not hold picks the default set's, reported once.
-func (l *fontLibrary) makeLayoutInput(text Text) (layoutInput, loadedFont) {
-	textFont := l.findHeldSlot(text.Font, "laying out text in").findLanguageFont(l.language)
+// makeLayoutInput answers what text's layout is made of, in its language,
+// the current one unless it names its own: a set canvas does not hold lays
+// it out in the default set, reported once.
+func (l *fontLibrary) makeLayoutInput(text Text) layoutInput {
 	return layoutInput{
 		text:       text.String,
-		font:       textFont.font,
+		set:        l.findHeldSlot(text.Font, "laying out text in"),
 		em:         cmp.Or(text.Size, l.textSize),
 		wrapWidth:  text.WrapWidth,
 		align:      text.Align,
 		lineHeight: text.LineHeight,
 		tracking:   text.Tracking,
-		language:   l.language,
-	}, textFont
+		language:   cmp.Or(text.Language, l.language),
+	}
 }
 
 // findHeldSlot answers set's slot, or the default set's when canvas does
@@ -149,17 +148,17 @@ func (l *fontLibrary) findHeldSlot(set FontSet, use string) *fontSetSlot {
 	slot := l.findSlot(set)
 	if slot == nil {
 		l.reportSetNotHeld(set, use)
-		slot = &l.sets[0]
+		slot = l.sets[0]
 	}
 	return slot
 }
 
 // findSlot answers set's slot, nil when canvas does not hold set.
 func (l *fontLibrary) findSlot(set FontSet) *fontSetSlot {
-	if int(set.index) >= len(l.sets) || l.sets[set.index].generation != set.generation {
+	if int(set.index) >= len(l.sets) || l.sets[set.index].set != set {
 		return nil
 	}
-	return &l.sets[set.index]
+	return l.sets[set.index]
 }
 
 // reportSetNotHeld reports set once, refused as use, what was done with it,
