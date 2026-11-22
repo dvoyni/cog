@@ -233,7 +233,7 @@ author** testing canvas or a plugin on it.
   - `DoNotGenerateMipMaps`, and `MipLevels`, zero meaning 3, more than 12 lowered to 12 and reported once as `ReportKindMipLevelsLowered`, since 13 levels' smallest page would pass WebGPU's default limit of 8192 texels on a texture's side;
   - a distance-field glyph's default em and range, zero meaning 48 px and 16.
 - **Resources it installs:**
-  - `Fonts` and `Targets`, each an interface of reads alone;
+  - `FontLibrary` and `Targets`, each an interface of reads alone;
   - `Handlers{RecordFrame, Recover, DeliverInspection}`, its subscriptions to `render.FrameEvent`, `render.RecoveredEvent` and `render.InspectedEvent`, one field each, for others to order their handlers around;
   - a private state: its atlases, caches, tables and draw lists.
 
@@ -242,12 +242,12 @@ author** testing canvas or a plugin on it.
 
   | Parameter | Locks | Carries |
   |---|---|---|
-  | `DrawList` | canvas's state, `Fonts`, and through an `Inventory` it holds render's asset table, `gfx.Device` and `platform.FS`, all read | its task's draw list: every `Draw…` call and `SetCamera` |
+  | `DrawList` | canvas's state, `FontLibrary`, and through an `Inventory` it holds render's asset table, `gfx.Device` and `platform.FS`, all read | its task's draw list: every `Draw…` call and `SetCamera` |
   | `Assets` | the same reads, and through a `render.Frame` it holds render's frame state, read | `MakeMaterial` and the material setters, `Preload`, `Unload`, `ImageSize`, `RequestInspection`, `ReadInspection` and `ReloadChanged` |
 
   A draw list takes render's locks because an image's or a mesh file's first draw loads it. A recording task that also needs `Assets`, such as for `ImageSize`, declares both; the two take the same reads.
 - **Every lock is a read,** so recording tasks run together; canvas's state is synchronized within, as render's is. The exceptions:
-  - `Fonts`' writing side takes `Write[canvas.Fonts]`, with platform's FS read through `ElevateFonts`, so a task making a font set runs apart from every recording task;
+  - `FontLibrary`'s writing side takes `Write[canvas.FontLibrary]`, with platform's FS read through `ElevateFontLibrary`, so a task making a font set runs apart from every recording task;
   - canvas's own task copying `Targets` takes `Write[canvas.Targets]`.
 
   canvas's drawing declares render's `Frame` and `Inventory`, both reads, and reads canvas's state.
@@ -611,7 +611,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 - **Glyphs are made at run time, at their first use,** in the job recording the text, ready that frame as an image is.
   - The outline is rasterized anti-aliased at the field's em with x/image's vector rasterizer, then the distance transform behind `DistanceField` runs over the coverage, as TinySDF does. canvas has one distance generator.
   - By x/image's measured 3.9 µs a Han glyph at 32 px and an estimated tens of microseconds for the transform, 200 new hanzi cost a few milliseconds, with no worker thread. The benchmarks measure it.
-  - `Fonts.Preload(set, text)` makes the glyphs of known strings ahead of time. Nothing is baked at build time.
+  - `FontLibrary.Preload(set, text)` makes the glyphs of known strings ahead of time. Nothing is baked at build time.
   - Glyphs are cached and evicted as images are, and leave the cache with their set.
 - **Small text stays on distance fields.** v1 hinted glyphs at their size on screen, and distance fields lose hinting, so stems can read soft below about 14 px on a 1× display. Whether they do needs eyes: the first build's pixel tests include a 12 px label for the owner to judge. Building hinted bitmaps beside fields now was weighed: two glyph paths and caches per frame, and a label that changes look as it zooms across the threshold.
 
@@ -629,22 +629,24 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 - **Language tags match exactly.** A game shipping both Chinese scripts lists `zh-Hans` and `zh-Hant`.
 - **A character is drawn by the language's fonts that have it, then by the default font, then as the default font's missing-glyph box,** reported once per set. Languages are not mixed. This is how games localise: switching the language switches the typeface.
 - **The language also goes to the shaper,** so a Pan-CJK font picks its regional forms by OpenType's `locl`.
-- **The current language is the `Fonts` resource's,** starting from `Config.Language` and changed by `SetLanguage` on its writing side. A run's optional `Language` overrides it, for a name in another language.
+- **The current language is the `FontLibrary` resource's,** starting from `Config.Language` and changed by `SetLanguage` on its writing side. A run's optional `Language` overrides it, for a name in another language.
 - **The font that draws a character is cached per set, language and character,** so a change of language clears nothing. v1 cached it without the language, and a change needed `ClearGlyphsCmd`.
 - **A set is made on purpose,** never loaded by drawing. Making it loads every font file it names, in the task that makes it, at a start or a loading screen. It lives until it is destroyed, and its glyphs then leave the cache.
   - A set is a plain, pointer-free `FontSet` handle, which an ECS component holds.
-  - The zero `FontSet` is the default set, made at init from `Config.DefaultFontSet`, whose zero is JetBrains Mono alone, embedded as v1's default font was.
+  - The zero `FontSet` is the default set, made from `Config.DefaultFontSet`, whose zero is JetBrains Mono alone, embedded as v1's default font was, at `cog.canvas/jetbrainsmono.ttf` beside its licence. Until canvas starts, no mount is bound, so the default set is JetBrains Mono, parsed from the embedded file once for the process and shared by every kernel's sets, since a parsed go-text font is read-only; canvas's `Start` publishes a private event whose handler makes the set of `Config.DefaultFontSet` in a task under FontLibrary's write lock and platform's FS read, so a task reading FontLibrary that is ready after it waits for it.
+  - A font of an empty `Path` is the built-in JetBrains Mono, so a set's zero `Default` is too, and a variation of it sets JetBrains Mono's weight.
+  - A font's measures are read as it loads, under the write lock, through a face kept no longer, since a go-text face caches as it is read and is not safe for concurrent use; a loaded font keeps its parsed font and its variations' coordinates.
   - go-text keeps a font's file in memory, so four CJK fonts in one set hold about 60 MB; a Pan-CJK font serving them all is one file.
-- **The `Fonts` resource** holds the font sets, the current language, the icons and the registered colours.
+- **The `FontLibrary` resource** holds the font sets, the current language, the icons and the registered colours.
   - **Its reading side** is an interface of reads alone: `Language()`, `Layout(text)`, `Preload(set, text)` and `Metrics(set, size, language)`.
-  - **Its writing side,** `WriteFonts`, is answered only from a write handle, `ElevateFonts(kernel.Write[Fonts], kernel.Read[platform.FS]) WriteFonts`, as `platform.ElevateFileAccess` answers `WriteFS`, so a task holding the read lock cannot make a set. It holds `MakeFontSet(descriptor)`, `DestroyFontSet(set)`, `SetLanguage(tag)`, `RegisterIcon(name, icon)` and `RegisterColor(name, color)`, and it is no resource. Making a set reads platform's FS, so `ElevateFonts` takes FS's read handle as well.
+  - **Its writing side,** `WriteFontLibrary`, is answered only from a write handle, `ElevateFontLibrary(kernel.Write[FontLibrary], kernel.Read[platform.FS]) WriteFontLibrary`, as `platform.ElevateFileAccess` answers `WriteFS`, so a task holding the read lock cannot make a set. It holds `MakeFontSet(descriptor)`, `DestroyFontSet(set)`, `SetLanguage(tag)`, `RegisterIcon(name, icon)` and `RegisterColor(name, color)`, and it is no resource. Making a set reads platform's FS, so `ElevateFontLibrary` takes FS's read handle as well.
 - **Failures:**
-  - A font file that fails when its set is made is reported once, and the set is made without it. A failed default font is replaced by the embedded JetBrains Mono.
-  - A destroyed or never-made set is drawn with the default set and reported once, since an ECS component may outlive its set.
+  - A font file that fails when its set is made is reported once for its path as `ReportKindFontNotLoaded`, and the set is made without it: a file that fails to read or parse, or a collection with no font at the `Index`. A failed default font is replaced by the embedded JetBrains Mono, and a language whose fonts all failed is drawn by the default font.
+  - A destroyed or never-made set is drawn and measured with the default set and reported once for the set as `ReportKindFontSetNotHeld`, since an ECS component may outlive its set. Destroying it, or the default set, which is never destroyed, is reported the same way, as releasing the default material is.
   - v1 drew nothing for a failed font and measured it zero.
-- **Font files:** TTF and OTF; collections (`.ttc`, `.otc`) by a font's `Index`, zero meaning the first face; variable fonts through its `Variations`, a small fixed array of `Variation{Tag, Value}` so the value stays comparable, zero meaning the default instance. `canvas.Tag("wght")` answers an axis's four bytes; a name of other than four bytes is reported once and answers the zero tag.
+- **Font files:** TTF and OTF; collections (`.ttc`, `.otc`) by a font's `Index`, zero meaning the first face; variable fonts through its `Variations`, a small fixed array of `Variation{Axis, Value}` so the value stays comparable, zero meaning the default instance. `AxisTagFromName("wght")` answers an `AxisTag`, an axis's four bytes; a name of other than four bytes answers the zero tag. It has no logger to report through, so a `Variation` of the zero axis and a non-zero value is reported once for its font's path when its set is made, as `ReportKindVariationIgnored`, and ignored; a zero `Variation` is an unused one. The sketch's `canvas.Tag` and `Variation.Tag` became `AxisTag` and `Variation.Axis` as they were built: a constructor of one value from another kind is `<Type>From<Source>`, and a language's tag already uses the word.
 - **Colour glyphs** (emoji) are not drawn as colour: a colour glyph draws its plain outline if its font has one, and otherwise falls to the default font.
-- **Font metrics:** `Fonts.Metrics(set, size, language)` answers `Metrics{Ascent, Descent, LineGap, LineHeight, XHeight, CapHeight}` in world units, as v1's `FontMetrics` did. It reads the font serving that language in the set, an empty language meaning the current one.
+- **Font metrics:** `FontLibrary.Metrics(set, size, language)` answers `FontMetrics{Ascent, Descent, LineGap, LineHeight, XHeight, CapHeight}` in world units, as v1's `FontMetrics` did; the sketch's `Metrics` became `FontMetrics` as it was built, since a type's name says what it is without its package. It reads the font serving that language in the set, an empty language meaning the current one.
 
 ### Text: runs and layouts
 
@@ -657,7 +659,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - **`Tint`** is the fill's colour, zero meaning white. A zero `Material` means `TextMaterial`.
   - **`Filter`:** a run's zero filter is its font's, linear for a distance field and nearest for a bitmap font, never `Config.DefaultFilter`, since nearest filtering breaks a field. The prototype's pixel-perfect run first sampled every label's field with nearest filtering.
 - **An outline is one entry.** The text material's argument holds one profile (outline, halo, glow or drop shadow), drawn under the fill in the same fragment, as TextMesh Pro draws its face, outline and underlay, and as Godot's `Label` draws a line's outlines within its own slot. All labels batch, and each outline sits under its own fill. A zero profile draws none, and a second effect is a second entry.
-- **`Layout` is public:** text shaped, wrapped and measured, answered by `Fonts.Layout(text)` from the reading side with no frame. It answers `Size()`, `LineCount()`, `Baseline()` (its first line's, from the box's top), `LineWidth(line)` and `ClusterPosition(cluster)`, for a UI's carets, selections and baseline alignment. Measuring and drawing read the same layout, so they never disagree, as v1's drifted.
+- **`Layout` is public:** text shaped, wrapped and measured, answered by `FontLibrary.Layout(text)` from the reading side with no frame. It answers `Size()`, `LineCount()`, `Baseline()` (its first line's, from the box's top), `LineWidth(line)` and `ClusterPosition(cluster)`, for a UI's carets, selections and baseline alignment. Measuring and drawing read the same layout, so they never disagree, as v1's drifted.
 - **`DrawText` lays text out through a cache** keyed by its inputs, so a label drawn every frame is shaped once. A layout unused for `Config.LayoutIdleFrames` frames is freed. Registering an icon again lays out again the cached layouts holding it. v1 cached no layout, and its UI measured each label three times a tick.
 - **An ECS component holds the text** and its system calls `DrawText`, since a `Layout` is not pointer-free.
 - **Breaks** fall on UAX #14 boundaries, so CJK breaks between ideographs and closing punctuation never starts a line. A word too long for its line breaks between grapheme clusters, and `\n` is a hard break. `WrapWidth` zero means no wrapping.
@@ -863,7 +865,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 - **`ForgetLogOnce` re-arms a key once its subject is repaired,** so a later failure reports again:
   - unloading a path forgets its files' keys;
   - registering a missing icon forgets that icon's key;
-  - making a font set again forgets a failed font's key.
+  - a font that loads as a set is made forgets its path's key, so a file repaired and broken again reports again.
 - **The logged error is typed,** `canvas.Report{Kind canvas.ReportKind, Err error}`, as render's are, so a test can tell which report it is. `render.ReportKind` is render's enum, so canvas cannot log `render.Report`s.
 - **It goes into the inspection** of the frame that raised it.
 
@@ -913,7 +915,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - a layout for a string the cache has not seen, since go-text's shaping allocates. A timer whose digits change every second allocates in the frames it changes;
   - a frame with refusals, whose once-key may allocate. A steady frame has none.
 - **Time per entry** is benchmarked against the same frame drawn by hand on render, which gives canvas's overhead, as render's benchmarks give render's over gfx. Ten runs go into `plugins/canvas/docs/benchmarks-baseline.txt`, compared with `benchstat`.
-- **A frame's new glyphs** are made in the frame, with no worker thread. If they measure too slow, the remedy is `Fonts.Preload`; spreading their generation across frames is an improvement, not built now.
+- **A frame's new glyphs** are made in the frame, with no worker thread. If they measure too slow, the remedy is `FontLibrary.Preload`; spreading their generation across frames is an improvement, not built now.
 
 ### Delta to render
 
@@ -998,7 +1000,7 @@ Each change was checked for a 3D renderer's needs too, drawbridge's forward+ or 
 - one image's first draw from two tasks;
 - one glyph made from two tasks;
 - one layout cached from two tasks;
-- an icon registered while text is laid out, which `Fonts`' write lock orders.
+- an icon registered while text is laid out, which `FontLibrary`'s write lock orders.
 
 **Prior art:**
 - render's tests on rendertest's harness and the recording adapter, and its pixel tests on the software adapter;

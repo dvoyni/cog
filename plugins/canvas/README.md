@@ -4,8 +4,8 @@
 that draws 2D: sprites, shapes, text and meshes, recorded as entries every
 frame and drawn through 2D materials. It is its own Go module (Go 1.27),
 importing [kernel](../../kernel), [metronome](../metronome),
-[platform](../platform), render and [libs/m](../../libs/m), and reaches no
-gfx.
+[platform](../platform), render, [libs/m](../../libs/m) and go-text's
+[typesetting](https://github.com/go-text/typesetting), and reaches no gfx.
 
 It is being built from [docs/design.md](docs/design.md). So far a frame's
 recording tasks record shapes and sprites and set cameras into draw lists
@@ -21,8 +21,10 @@ grows its pages, and at its ceiling evicts the images drawn least lately.
 Images are preloaded, unloaded by path or prefix and sized from their
 headers through `Assets`, and 2D materials made from whole WGSL files that
 include canvas's include, a fragment-only one drawing through canvas's
-vertex stage, with their parameters set by name. A frame can be inspected
-in canvas's terms, beside render's inspection of it.
+vertex stage, with their parameters set by name. Font sets are made and
+destroyed through `FontLibrary`'s writing side and their fonts measured, with no
+text drawn yet. A frame can be inspected in canvas's terms, beside render's
+inspection of it.
 
 ## Shape
 
@@ -39,7 +41,9 @@ in canvas's terms, beside render's inspection of it.
   page has, zero meaning 3, fixing the atlas grid and the gutter at
   2^(levels−1) texels, more than 12 lowered to 12 and reported once, and
   `DoNotGenerateMipMaps`, which makes pages of one level, for pixel-perfect
-  games.
+  games, `Language`, the current language at start, and `DefaultFontSet`,
+  the default font set, made as canvas starts, its zero JetBrains Mono
+  alone.
 - **`FrameEvent`** is the frame its users record, published inside each of
   render's `FrameEvent`s. A plugin that records schedules its recording tasks
   after its `Ready` and joins them into the out dependency it returns.
@@ -257,7 +261,33 @@ in canvas's terms, beside render's inspection of it.
   material, `cog.canvas/sdf.wgsl`, and
   `cog.canvas/viewport.wgsl`, the shader of the quads canvas draws over a
   viewport: a camera's clear, what a multisampled camera resolved, and an
-  image premultiplied into its cell of an atlas.
+  image premultiplied into its cell of an atlas. Beside them is canvas's
+  built-in font, JetBrains Mono, `cog.canvas/jetbrainsmono.ttf`, under the
+  SIL Open Font License in `cog.canvas/jetbrainsmono-OFL.txt`.
+- **`FontLibrary`** is the resource of font sets, read under
+  `kernel.Read[canvas.FontLibrary]`: `Language()` answers the current language,
+  and `Metrics(set, size, language)` the `FontMetrics` of the font measuring
+  `language` in `set`, its first font for that language or else its
+  default, at `size`, its em in world units: `Ascent`, `Descent`,
+  `LineGap`, `LineHeight`, `XHeight` and `CapHeight`, an empty language
+  meaning the current one. A set canvas does not hold, never made or
+  destroyed, is measured as the default set, reported once.
+  **`ElevateFontLibrary(kernel.Write[FontLibrary], kernel.Read[platform.FS])`** answers
+  its writing side, **`WriteFontLibrary`**, so a task holding the read lock cannot
+  make a set: `MakeFontSet(descriptor)` loads every font file a
+  **`FontSetDescriptor`** names, now, and answers a **`FontSet`**, a plain
+  handle whose zero is the default set; `DestroyFontSet(set)`;
+  `SetLanguage(tag)`, tags matched exactly; `RegisterIcon(name, icon)`,
+  an **`IconDescriptor`**; and `RegisterColor(name, color)`. A descriptor
+  holds a `Default` **`Font`** and **`LanguageFonts`**, the fonts serving
+  some languages. A `Font` is a `Path` in platform's FS, a TrueType or
+  OpenType font or a collection, empty meaning canvas's JetBrains Mono, its
+  collection's `Index`, and a variable font's `Variations`, each a
+  **`Variation{Axis, Value}`** whose axis **`AxisTagFromName("wght")`**
+  answers, a name of other than four bytes answering the zero tag, whose
+  variation is ignored and reported once. A font file that fails to load is
+  reported once and left out of its set, a failed default font replaced by
+  JetBrains Mono.
 - **`Report`** is a mistake canvas finds at run time, logged once and carried
   past. Its `ReportKind` names it for tests.
 - **`canvastest`** runs canvas in a real kernel on render's fake GPU, with a
@@ -270,7 +300,9 @@ in canvas's terms, beside render's inspection of it.
   `ForgetClosedWindow`, `DeliverInspection`), to order handlers around;
   `Targets`, each target's size and scale as it was last drawn, read by a
   camera's conversions and written by canvas's own task after each frame's
-  drawing; a
+  drawing; `FontLibrary`, its font sets, its current language and the icons and
+  colours registered, written only through `ElevateFontLibrary`, and by canvas's
+  own task making the default set as it starts; a
   private draw state, holding each task's draw list, the frame's entries
   and cameras sorted, the inspection asked for, the unloads and preloads
   asked for, the image sizes read and the 2D materials made, under a lock
@@ -289,7 +321,9 @@ in canvas's terms, beside render's inspection of it.
   texture descriptors through it, for a texture target's size and format
   and an image's size,
   and `platform.WindowManager`, for read, for a window target's size, in the
-  task that draws the frame.
+  task that draws the frame; and `platform.FS`, for read, through
+  `ElevateFontLibrary` and in its task making the default font set, as fonts
+  load.
 - **Task parameters it offers:** `DrawList`, and `Assets`.
 - **Events it publishes:** `FrameEvent`, inside its handler of
   `render.FrameEvent`; and `InspectedEvent`, once render has delivered its

@@ -81,11 +81,27 @@ const (
 	// different lengths, such as DrawSpritesWith's sprites and arguments,
 	// which records none of them. It is reported once for each draw list.
 	ReportKindSliceLengthsDiffer
+	// ReportKindFontNotLoaded is a font file a font set names that fails
+	// to read or parse as it is made, or whose collection has no font at its
+	// Index: the set is made without it, and a failed default font replaced
+	// by canvas's JetBrains Mono. It is reported once for the font's path.
+	ReportKindFontNotLoaded
+	// ReportKindFontSetNotHeld is a FontSet canvas does not hold, never made
+	// or destroyed, which is measured with the default set, or the default
+	// set given to WriteFontLibrary.DestroyFontSet, which is never destroyed. It
+	// is reported once for the set.
+	ReportKindFontSetNotHeld
+	// ReportKindVariationIgnored is a font's Variation of the zero Axis and
+	// a non-zero Value, such as AxisTagFromName answers for a name of other
+	// than four bytes, which names no axis and is ignored. It is reported
+	// once for the font's path as its set is made.
+	ReportKindVariationIgnored
 )
 
 // The keys canvas logs a report once under are one of these, then the
 // report's subject: an image's path or texture, a sprite atlas's label, a
-// material, or a shader or material and an argument's type.
+// material, a shader or material and an argument's type, a font's path, or
+// a font set.
 const (
 	imageOptionsIgnoredLogKey    = "canvas: image options ignored: "
 	imageHeaderUnreadLogKey      = "canvas: image header unread: "
@@ -96,6 +112,9 @@ const (
 	materialNotHeldLogKey        = "canvas: material not held: "
 	argumentRefusedLogKey        = "canvas: argument refused: "
 	argumentLayoutMismatchLogKey = "canvas: argument layout mismatch: "
+	fontNotLoadedLogKey          = "canvas: font not loaded: "
+	fontSetNotHeldLogKey         = "canvas: font set not held: "
+	variationIgnoredLogKey       = "canvas: variation ignored: "
 )
 
 // pixelPerfectStretchReport is the report of a pixel-perfect camera's

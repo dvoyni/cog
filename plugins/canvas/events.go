@@ -34,6 +34,11 @@ type InspectedEvent struct {
 	Beat metronome.Beat
 }
 
+// startEvent is canvas's own event, published once as it starts, whose
+// handler makes the default font set of Config.DefaultFontSet, once every
+// mount its fonts are read through is bound.
+type startEvent struct{}
+
 // inspectionDeliveryEvent carries the inspection of the frame of beat, once
 // render's inspection of it is beside it, from the job that matched them to
 // canvas's handler, which publishes it as InspectedEvent in its own batch,

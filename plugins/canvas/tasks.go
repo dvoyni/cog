@@ -57,6 +57,21 @@ func forgetClosedWindow(ex *kernel.Executor, in kernel.JobHandle, event platform
 	return event, ex.Schedule(removeWindowTask, event.Window, in).Handle()
 }
 
+// makeDefaultFontSetOnStart handles startEvent: after in, it schedules
+// makeDefaultFontSetTask, and returns its job.
+func makeDefaultFontSetOnStart(ex *kernel.Executor, in kernel.JobHandle, event startEvent, makeDefaultFontSetTask *kernel.Task[kernel.NoArg, kernel.NoResult]) (startEvent, kernel.JobHandle) {
+	return event, ex.Schedule(makeDefaultFontSetTask, kernel.NoArg{}, in).Handle()
+}
+
+// makeDefaultFontSet makes the default font set of Config.DefaultFontSet,
+// its fonts read through files, under FontLibrary's write lock, so no task reads
+// the default set while it is made.
+func makeDefaultFontSet(k *kernel.Kernel, _ kernel.NoArg, library kernel.Write[FontLibrary], files kernel.Read[platform.FS]) kernel.NoResult {
+	libraryValue := library.Get().(*fontLibrary)
+	libraryValue.sets[0] = makeFontSetSlot(files.Get(), libraryValue.logger, libraryValue.defaultDescriptor)
+	return kernel.NoResult{}
+}
+
 // openFrame opens the frame for entries.
 func openFrame(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*drawState]) kernel.NoResult {
 	state.Get().recording.Store(true)

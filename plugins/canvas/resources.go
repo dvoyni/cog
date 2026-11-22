@@ -47,3 +47,54 @@ type Targets interface {
 	// whether canvas has drawn into it.
 	Texture(texture render.Texture) (size m.Vec2, drawn bool)
 }
+
+// FontLibrary is the resource of canvas's font sets, the current language, and the
+// icons and colours registered for text: read it under
+// kernel.Read[canvas.FontLibrary]. It holds its reads alone, so a task holding its
+// read lock cannot make a set; ElevateFontLibrary answers its writing side from a
+// write handle.
+type FontLibrary interface {
+	// Language answers the current language, a tag such as "en", starting
+	// from Config.Language.
+	Language() string
+	// Metrics answers the measures at size, its em in world units, of the
+	// font of set measuring language, an empty language meaning the current
+	// one: the language's first font in set, or set's default font. A set
+	// canvas does not hold, never made or destroyed, is measured as the
+	// default set, reported once for it as ReportKindFontSetNotHeld.
+	Metrics(set FontSet, size float32, language string) FontMetrics
+}
+
+// ElevateFontLibrary answers the FontLibrary resource a job holds the write lock on as
+// WriteFontLibrary, making its sets through platform's FS, which the job holds the
+// read lock on. Only the write handle gives it, so a job holding the read
+// lock cannot make a set.
+func ElevateFontLibrary(library kernel.Write[FontLibrary], files kernel.Read[platform.FS]) WriteFontLibrary {
+	return fontLibraryWriter{fontLibrary: library.Get().(*fontLibrary), files: files.Get()}
+}
+
+// WriteFontLibrary is FontLibrary's writing side, which ElevateFontLibrary answers; it is no
+// resource. It is valid only while the job that elevated it runs.
+type WriteFontLibrary interface {
+	FontLibrary
+	// MakeFontSet makes a font set of descriptor, loading every font file
+	// it names through platform's FS now, in the calling task, at a start or
+	// behind a loading screen, and answers it. A font file that fails to
+	// load is reported once for its path as ReportKindFontNotLoaded and left
+	// out of the set, a failed default font replaced by canvas's JetBrains
+	// Mono.
+	MakeFontSet(descriptor FontSetDescriptor) FontSet
+	// DestroyFontSet destroys set, which is then measured as the default
+	// set. Destroying a set canvas does not hold, or the default set, is
+	// reported once for it as ReportKindFontSetNotHeld.
+	DestroyFontSet(set FontSet)
+	// SetLanguage sets the current language to tag, such as "ja", which
+	// picks each set's fonts, its tags matched exactly.
+	SetLanguage(tag string)
+	// RegisterIcon registers icon under name, for text to place like a
+	// glyph, replacing an icon registered under it before.
+	RegisterIcon(name string, icon IconDescriptor)
+	// RegisterColor registers color under name, for text's markup to tint
+	// with, replacing a colour registered under it before.
+	RegisterColor(name string, color m.Color)
+}

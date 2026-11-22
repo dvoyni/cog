@@ -182,6 +182,27 @@
 //	assets.Unload("level1/")
 //	size, ok := assets.ImageSize(hero)
 //
+// Text names a font set and a size, never a font. A task makes a set on
+// purpose, at a start or behind a loading screen, through FontLibrary's writing
+// side, which only a write handle gives, so a task reading FontLibrary cannot:
+// every font file the set names loads then, each language served by its
+// own fonts and the rest by the default font. The zero FontSet is the
+// default set, Config.DefaultFontSet, JetBrains Mono alone unless it names
+// others. A font's FontMetrics at a size are read through FontLibrary:
+//
+//	func loadFonts(k *kernel.Kernel, _ kernel.NoArg, libraryHandle kernel.Write[canvas.FontLibrary], files kernel.Read[platform.FS]) kernel.NoResult {
+//		library := canvas.ElevateFontLibrary(libraryHandle, files)
+//		title = library.MakeFontSet(canvas.FontSetDescriptor{
+//			Label:     "title",
+//			Default:   canvas.Font{Path: "fonts/inter-variable.ttf", Variations: [4]canvas.Variation{{Axis: canvas.AxisTagFromName("wght"), Value: 800}}},
+//			Languages: []canvas.LanguageFonts{{Languages: []string{"ja", "zh-Hans"}, Fonts: []canvas.Font{{Path: "fonts/noto-sans-cjk.ttc"}}}},
+//		})
+//		library.SetLanguage("ja")
+//		return kernel.NoResult{}
+//	}
+//
+//	metrics := libraryHandle.Get().Metrics(title, 24, "")
+//
 // A tool asks for an inspection of the next frame through its Assets
 // parameter, and reads it in a task off InspectedEvent: each camera the frame
 // was seen through, its batches and their entries, with render's own

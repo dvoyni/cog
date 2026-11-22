@@ -1,4 +1,8 @@
+github.com/go-text/typesetting v0.3.5 h1:XZPUooClHY0Vf/rFyUyuPRNEkawARaFzLMQcXLSEyPk=
+github.com/go-text/typesetting v0.3.5/go.mod h1:XZO1hD+nQVyvVa5IicQk7FsCa4PFQaJ2soWAP1f//68=
 github.com/gogpu/gpucontext v0.31.3/go.mod h1:pnyWQA9lpvESPAKoqzKlsg3pDMFSkxdjonu4gWvnNtA=
 github.com/gogpu/gputypes v0.8.0/go.mod h1:cnXrDMwTpWTvJLW1Vreop3PcT6a2YP/i3s91rPaOavw=
 github.com/gogpu/naga v0.21.5/go.mod h1:15sQaHKkbqXcwTN+hHYGLsA0WBBnkmYzne/eF5p5WEg=
 github.com/gogpu/wgpu v0.34.2/go.mod h1:erhaIjD9psJKjHqAhn5MWdJETcACR1NGoqLhkTAHkFM=
+golang.org/x/image v0.23.0 h1:HseQ7c2OpPKTPVzNjG5fwJsOTCiiwS4QdsYi5XU6H68=
+golang.org/x/image v0.23.0/go.mod h1:wJJBTdLfCCf3tiHa1fNxpZmUI4mmoZvwMCPP0ddoNKY=

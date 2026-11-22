@@ -5,6 +5,11 @@ package canvas
 // Material is the default material, which draws an entry's image × its tint.
 type Material struct{ index, generation uint32 }
 
+// FontSet names one of canvas's font sets, made by WriteFontLibrary.MakeFontSet:
+// a pointer-free, comparable handle an ECS component can hold. The zero
+// FontSet is the default set, made from Config.DefaultFontSet.
+type FontSet struct{ index, generation uint32 }
+
 // Image names an image, a path in platform's FS and its ImageOptions,
 // interned by ImageFromFile into a pointer-free, comparable value an ECS
 // component can hold. The zero Image is canvas's white texel, which shapes

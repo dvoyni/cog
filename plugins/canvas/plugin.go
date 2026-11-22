@@ -58,9 +58,17 @@ type Config struct {
 	// default limit of 8192 texels on a texture's side, are lowered to 12,
 	// reported once as ReportKindMipLevelsLowered.
 	MipLevels uint32
+	// Language is the current language at start, a tag such as "en", which
+	// picks each font set's fonts; WriteFontLibrary.SetLanguage changes it.
+	Language string
+	// DefaultFontSet describes the default font set, the zero FontSet's,
+	// made as canvas starts, its fonts read through platform's FS. Its zero
+	// is canvas's built-in JetBrains Mono alone, which the default set is
+	// until then.
+	DefaultFontSet FontSetDescriptor
 }
 
-// Plugin is canvas: it installs Handlers, Targets and its private state,
+// Plugin is canvas: it installs Handlers, Targets, FontLibrary and its private state,
 // binds its built-in assets, publishes FrameEvent inside each
 // render.FrameEvent, draws the frame's entries once they are recorded, and
 // then copies the targets drawn into Targets.
@@ -82,13 +90,15 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 // filter of entries naming none and the layers config regroups; the
 // renderer, its mip levels lowered to the most and reported when config's
 // are more, and its page side raised to the smallest on its atlas grid and
-// reported when config's is not; the window list and Targets; binds
+// reported when config's is not; the window list, Targets, and FontLibrary, its
+// current language config's and its default set JetBrains Mono until Start
+// makes it of config's; binds
 // canvas's built-in assets as a read
 // mount under the prefix cog.canvas, at the lowest priority, so any other
 // mount holding one of their names overrides it; subscribes to
 // render.FrameEvent, platform.WindowOpenedEvent, platform.WindowClosedEvent
 // and render.InspectedEvent, the Subs kept in the Handlers resource; and
-// subscribes to its own private event delivering inspections. A config of
+// subscribes to its own private events delivering inspections and starting. A config of
 // another type than *Config is a composition error, and panics.
 func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	canvasConfig := kernel.PluginConfigOrDefault[Config](config)
@@ -114,6 +124,7 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	configurator.InitResource(newRenderer(atlasPageSize, cmp.Or(canvasConfig.AtlasLayerCeiling, 256), cmp.Or(canvasConfig.OwnTextureSize, atlasPageSize/2), mipLevelCount))
 	configurator.InitResource(&windowList{})
 	configurator.InitResource[Targets](&drawnTargets{})
+	configurator.InitResource[FontLibrary](newFontLibrary(configurator.Logger(), canvasConfig.Language, canvasConfig.DefaultFontSet))
 	configurator.BindSocket(platform.ReadMountSocket{FS: makeAssetFS(), Priority: math.MinInt, Prefix: assetPrefix})
 	openFrameTask := configurator.RegisterTask1(openFrame)
 	sortEntriesTask := configurator.RegisterTask1(sortEntries)
@@ -123,6 +134,7 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	removeWindowTask := configurator.RegisterTask1(removeWindow)
 	matchInspectionTask := configurator.RegisterTask2(matchInspection)
 	dropInspectionTask := configurator.RegisterTask1(dropInspection)
+	makeDefaultFontSetTask := configurator.RegisterTask2(makeDefaultFontSet)
 	configurator.InitResource(Handlers{
 		RecordFrame: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event render.FrameEvent) (render.FrameEvent, kernel.JobHandle) {
 			return recordFrame(ex, in, event, openFrameTask, sortEntriesTask, copyTargetsTask, drawTask)
@@ -140,11 +152,19 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event inspectionDeliveryEvent) (inspectionDeliveryEvent, kernel.JobHandle) {
 		return publishInspection(ex, in, event, dropInspectionTask)
 	})
+	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event startEvent) (startEvent, kernel.JobHandle) {
+		return makeDefaultFontSetOnStart(ex, in, event, makeDefaultFontSetTask)
+	})
 	return nil
 }
 
-// Start does nothing.
-func (*Plugin) Start(*kernel.Kernel) error { return nil }
+// Start makes the default font set of Config.DefaultFontSet, in a job
+// under FontLibrary's write lock, once every mount is bound, so a task reading
+// FontLibrary that is ready after it waits for it.
+func (*Plugin) Start(k *kernel.Kernel) error {
+	k.Publish(startEvent{})
+	return nil
+}
 
 // Stop does nothing.
 func (*Plugin) Stop(*kernel.Kernel) error { return nil }
