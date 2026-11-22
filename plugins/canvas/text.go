@@ -14,6 +14,19 @@ type Text struct {
 	// mandatory breaks (UAX #14), and each paragraph between them takes its
 	// own direction.
 	String string
+	// Markup is whether String is read as markup, the string form of
+	// spans: `\i:name` is an icon registered under name, of letters,
+	// digits, _, - and /, so "Press \i:a." keeps its full stop;
+	// `\c:colour{text}` is text in colour, `#rgb`, `#rrggbb` or `#rrggbbaa`
+	// in sRGB, or a name given to WriteFontLibrary.RegisterColor, read as
+	// the run is drawn, so a theme changes it in one place; spans nest, and
+	// icons sit in them; `\\` is a backslash, braces are counted within a
+	// span, so balanced ones pass, and `\{` and `\}` are lone ones. Markup
+	// that does not parse is drawn as written, reported once for the string
+	// as ReportKindMarkupMalformed; a run without it, such as a name a
+	// player typed, is drawn as written. Spans, when given, are read
+	// instead.
+	Markup bool
 	// Spans, when given, are the run instead of its String: their texts and
 	// icons end to end, shaped and wrapped as one paragraph or more, so a
 	// coloured word wraps with its sentence. Each is drawn in its own tint,

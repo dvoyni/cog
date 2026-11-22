@@ -49,8 +49,10 @@ type textShaper struct {
 	// and which each loaded font has of its own.
 	faces map[*font.Font]fontFace
 	// spanKey is the scratch a spanned run's layout's key is encoded into
-	// as it is looked up.
-	spanKey []byte
+	// as it is looked up, and markupSpans the scratch a run's markup is
+	// read into.
+	spanKey     []byte
+	markupSpans []Span
 	// The run being laid out: its set and its language's tag, which pick
 	// the font of each character, the cap height of the font measuring its
 	// language at its em, its em in world units over its shaping em, its

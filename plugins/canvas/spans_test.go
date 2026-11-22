@@ -215,18 +215,22 @@ func (p windowPicture) countSpanPixels(rect m.Rect) (white, red int) {
 }
 
 func TestAColouredWordWrapsWithItsParagraphInItsOwnTint(t *testing.T) {
-	// "ab " in the run's white and "cd" in red, at an em of 40 units,
-	// wrapped at 100: the red word goes to the second line, 52.8 units
-	// below the first, alone in red.
-	picture := captureDrawing(t, func(list canvas.DrawList) {
-		list.DrawText(canvas.Text{
-			Spans:     []canvas.Span{{Text: "ab "}, {Text: "cd", Tint: m.Color{R: 1, A: 1}}},
-			Size:      40,
-			WrapWidth: 100,
-			Pivot:     canvas.PivotTopLeft,
-			Transform: m.Translation2x3(-100, -60),
-		})
-	})
+	// "ab " in the run's white and "cd" in red: the red word goes to the
+	// second line alone in red.
+	expectRedWordOnSecondLine(t, canvas.Text{Spans: []canvas.Span{{Text: "ab "}, {Text: "cd", Tint: m.Color{R: 1, A: 1}}}})
+}
+
+// expectRedWordOnSecondLine draws text, "ab " in the run's white and "cd"
+// in red, at an em of 40 units, wrapped at 100, its box's top left at
+// (-100, -60), and fails t unless the first line lights white alone and the
+// second, 52.8 units below it, red alone.
+func expectRedWordOnSecondLine(t *testing.T, text canvas.Text) {
+	t.Helper()
+	text.Size = 40
+	text.WrapWidth = 100
+	text.Pivot = canvas.PivotTopLeft
+	text.Transform = m.Translation2x3(-100, -60)
+	picture := captureDrawing(t, func(list canvas.DrawList) { list.DrawText(text) })
 
 	lineHeight := builtInFontUnits.atSize(40).LineHeight
 	firstWhite, firstRed := picture.countSpanPixels(m.Rect{X: -100, Y: -60, Width: 100, Height: lineHeight})

@@ -47,7 +47,7 @@ func TestGlyphsLaidOutForDrawingSitOnTheirClustersOnAlignedLinesAndShareFields(t
 	// one cluster's.
 	library := newFontLibrary(&kernel.Logger{}, &Config{})
 
-	layout := library.layOutText(Text{String: "a\nbbb", Align: TextAlignCenter}, true)
+	_, layout := library.layOutText(Text{String: "a\nbbb", Align: TextAlignCenter}, true, nil)
 
 	// The newline is cluster 1, and draws no glyph.
 	clusters := []int{0, 2, 3, 4}
@@ -74,7 +74,7 @@ func TestAGlyphsPenFollowsTheAdvancesBeforeItInItsCluster(t *testing.T) {
 	// the x's advance, where the cluster ends.
 	library := newFontLibrary(&kernel.Logger{}, &Config{})
 
-	layout := library.layOutText(Text{String: "x́"}, true)
+	_, layout := library.layOutText(Text{String: "x́"}, true, nil)
 
 	if len(layout.glyphs) != 2 {
 		t.Fatalf("the run laid out %d glyphs, want the x and the accent", len(layout.glyphs))

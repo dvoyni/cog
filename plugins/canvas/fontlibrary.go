@@ -39,6 +39,12 @@ type fontLibrary struct {
 	// the layout cache's key.
 	iconRegistrationCount uint64
 	colors                map[string]m.Color
+	// malformedMarkup are the strings of the runs whose markup did not
+	// parse, each reported as it was first read: read each time a run is
+	// drawn, under the read lock, so guarded by malformedMutex, and keyed
+	// by the string itself, so a run read again makes no key.
+	malformedMutex  sync.Mutex
+	malformedMarkup map[string]struct{}
 	// shapers are the text shapers layouts are made by, each a
 	// *textShaper, one a layout, since a shaper is not safe for concurrent
 	// use and layouts are made under the read lock.
@@ -66,6 +72,7 @@ func newFontLibrary(logger *kernel.Logger, config *Config) *fontLibrary {
 		defaultDescriptor: config.DefaultFontSet,
 		icons:             map[string]registeredIcon{},
 		colors:            map[string]m.Color{},
+		malformedMarkup:   map[string]struct{}{},
 		shapers:           sync.Pool{New: func() any { return new(textShaper) }},
 		glyphs:            glyphTable{indexes: map[glyphKey]uint32{}, fieldEm: cmp.Or(config.GlyphFieldEm, 48), fieldRange: cmp.Or(config.GlyphFieldRange, 16)},
 		layouts:           layoutCache{layouts: map[layoutInput]*cachedLayout{}, idleFrames: uint64(cmp.Or(config.LayoutIdleFrames, 2))},
@@ -88,7 +95,10 @@ func (l *fontLibrary) Metrics(set FontSet, size float32, language string) FontMe
 // Config.TextSize, from the layout cache, which DrawText lays out through.
 // A set canvas does not hold is laid out as the default set, reported once.
 func (l *fontLibrary) Layout(text Text) TextLayout {
-	return l.layOutText(text, false)
+	shaper := l.acquireShaper(text)
+	defer l.releaseShaper(shaper)
+	_, layout := l.layOutText(text, false, shaper)
+	return layout
 }
 
 // Preload makes the distance fields of the glyphs of text, shaped on one
@@ -103,23 +113,34 @@ func (l *fontLibrary) Preload(set FontSet, text string) {
 	l.glyphs.assignFields(layout.glyphs, shaper)
 }
 
-// layOutText answers text laid out as Layout lays it out, through the
+// acquireShaper answers a shaper from the pool for text, a run of spans,
+// whose key it encodes, or of markup, which it reads, and nil for a run of
+// a string, which acquires one only to be shaped.
+func (l *fontLibrary) acquireShaper(text Text) *textShaper {
+	if len(text.Spans) == 0 && !text.Markup {
+		return nil
+	}
+	return l.shapers.Get().(*textShaper)
+}
+
+// releaseShaper gives shaper, nil for none, back to the pool.
+func (l *fontLibrary) releaseShaper(shaper *textShaper) {
+	if shaper != nil {
+		l.shapers.Put(shaper)
+	}
+}
+
+// layOutText answers text as drawn, its markup read into spans in
+// shaper's scratch, and laid out as Layout lays it out, through the
 // layout cache, shaped the first time, and, when drawn, its glyphs those
 // it draws: a copy of the layout's, each assigned its field in the glyph
 // table, without those of no field, found the first time the cached layout
 // is drawn and kept beside it. Two jobs drawing it first at once each find
-// them, and the first kept is answered to both.
-func (l *fontLibrary) layOutText(text Text, drawn bool) TextLayout {
-	// A shaper is taken for a run of spans, whose key it encodes, or to
-	// shape, not for a run of a string found cached.
-	var shaper *textShaper
-	var spanKey *[]byte
-	if len(text.Spans) > 0 {
-		shaper = l.shapers.Get().(*textShaper)
-		defer l.shapers.Put(shaper)
-		spanKey = &shaper.spanKey
-	}
-	input := l.makeLayoutInput(text, spanKey)
+// them, and the first kept is answered to both. shaper is acquireShaper's for
+// text, and the text answered reads its scratch until it goes back to the
+// pool.
+func (l *fontLibrary) layOutText(text Text, drawn bool, shaper *textShaper) (Text, TextLayout) {
+	text, input := l.makeLayoutInput(text, shaper)
 	cached := l.layouts.find(input)
 	if cached == nil || drawn && cached.drawnGlyphs.Load() == nil {
 		if shaper == nil {
@@ -138,16 +159,53 @@ func (l *fontLibrary) layOutText(text Text, drawn bool) TextLayout {
 	if drawn {
 		layout.glyphs = *cached.drawnGlyphs.Load()
 	}
-	return layout
+	return text, layout
 }
 
-// makeLayoutInput answers what text's layout is made of, in its language,
-// the current one unless it names its own: a set canvas does not hold lays
-// it out in the default set, reported once. Its Spans, when given, are
-// encoded into scratch, with the serial each icon was registered under,
-// which the input's text then reads, until scratch is written again, so a
-// lookup of a spanned run makes no string.
-func (l *fontLibrary) makeLayoutInput(text Text, scratch *[]byte) layoutInput {
+// readMarkup answers text, its Spans those its String reads as, read into
+// scratch, when its Markup is set and it gives none; markup that does not
+// parse is reported once for its string, and its String drawn as written.
+func (l *fontLibrary) readMarkup(text Text, scratch *[]Span) Text {
+	if !text.Markup || len(text.Spans) > 0 {
+		return text
+	}
+	var fault markupFault
+	*scratch, fault = appendMarkupSpans((*scratch)[:0], text.String, l.colors)
+	if fault.problem != "" {
+		l.reportMarkupMalformed(text.String, fault)
+		return text
+	}
+	text.Spans = *scratch
+	return text
+}
+
+// reportMarkupMalformed reports markup, a run's String, not parsing as
+// fault says, the first time it is read alone.
+func (l *fontLibrary) reportMarkupMalformed(markup string, fault markupFault) {
+	l.malformedMutex.Lock()
+	_, reported := l.malformedMarkup[markup]
+	if !reported {
+		l.malformedMarkup[markup] = struct{}{}
+	}
+	l.malformedMutex.Unlock()
+	if !reported {
+		malformed := Report{Kind: ReportKindMarkupMalformed, Err: fmt.Errorf("canvas: the markup %q does not parse at byte %d: %s; it is drawn as written", markup, fault.offset, fault.problem)}
+		l.logger.LogErrOnce(markupMalformedLogKey+markup, malformed)
+	}
+}
+
+// makeLayoutInput answers text as drawn and what its layout is made of, in
+// its language, the current one unless it names its own: a set canvas does
+// not hold lays it out in the default set, reported once. shaper is
+// acquireShaper's for text, nil for a run of a string: its markup is read into
+// spans in shaper's scratch, and its Spans encoded into shaper's spanKey,
+// with the serial each icon was registered under, which the input's text
+// then reads, until the scratch is written again, so a lookup of a spanned
+// run makes no string.
+func (l *fontLibrary) makeLayoutInput(text Text, shaper *textShaper) (Text, layoutInput) {
+	if shaper != nil {
+		text = l.readMarkup(text, &shaper.markupSpans)
+	}
 	input := layoutInput{
 		text:       text.String,
 		set:        l.findHeldSlot(text.Font, "laying out text in"),
@@ -159,11 +217,11 @@ func (l *fontLibrary) makeLayoutInput(text Text, scratch *[]byte) layoutInput {
 		language:   cmp.Or(text.Language, l.language),
 	}
 	if len(text.Spans) > 0 {
-		*scratch = appendEncodedSpans((*scratch)[:0], text.Spans, l.icons)
-		input.text = unsafe.String(unsafe.SliceData(*scratch), len(*scratch))
+		shaper.spanKey = appendEncodedSpans(shaper.spanKey[:0], text.Spans, l.icons)
+		input.text = unsafe.String(unsafe.SliceData(shaper.spanKey), len(shaper.spanKey))
 		input.spanned = true
 	}
-	return input
+	return text, input
 }
 
 // findHeldSlot answers set's slot, or the default set's when canvas does

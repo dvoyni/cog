@@ -108,8 +108,7 @@ func (l DrawList) DrawSpritesWith[T any](sprites []Sprite, arguments []T) {
 // as canvas draws the frame. Outside the frame, it is refused and reported
 // once for the task.
 func (l DrawList) DrawText(text Text) {
-	layout := l.fonts.Get().(*fontLibrary).layOutText(text, true)
-	l.list.recordText(l.state.Get(), nil, nil, laidOutText{text: text, layout: layout})
+	l.drawText(text, nil, nil)
 }
 
 // DrawTextWith records text into the task's draw list for the frame being
@@ -118,8 +117,7 @@ func (l DrawList) DrawText(text Text) {
 // the fill, such as canvas.Outline(2, black), its distances in the font's
 // field texels.
 func (l DrawList) DrawTextWith[T any](text Text, argument T) {
-	layout := l.fonts.Get().(*fontLibrary).layOutText(text, true)
-	l.list.recordText(l.state.Get(), reflect.TypeFor[T](), castToBytes(unsafe.Slice(&argument, 1)), laidOutText{text: text, layout: layout})
+	l.drawText(text, reflect.TypeFor[T](), castToBytes(unsafe.Slice(&argument, 1)))
 }
 
 // SetCamera sets camera for the frame being recorded, forgotten once the
@@ -133,6 +131,18 @@ func (l DrawList) SetCamera(camera Camera) {
 		panic(fmt.Sprintf("canvas: a camera's SampleCount is 0, 1 or %d, not %d", multisampledCameraSampleCount, camera.SampleCount))
 	}
 	l.list.record(l.state.Get(), 0, &l.list.cameras, nil, nil, camera)
+}
+
+// drawText lays text out and records it, as DrawText does, giving the
+// material argument of argumentType in argumentBytes, nil for none: its
+// markup read into spans, which recording copies before the shaper whose
+// scratch holds them goes back to the pool.
+func (l DrawList) drawText(text Text, argumentType reflect.Type, argumentBytes []byte) {
+	library := l.fonts.Get().(*fontLibrary)
+	shaper := library.acquireShaper(text)
+	defer library.releaseShaper(shaper)
+	text, layout := library.layOutText(text, true, shaper)
+	l.list.recordText(l.state.Get(), argumentType, argumentBytes, laidOutText{text: text, layout: layout})
 }
 
 // drawList is one task's draw list for the frame being recorded, which its

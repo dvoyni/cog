@@ -713,8 +713,10 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 - **Markup is read only for a run whose `Markup` is set,** so text a player typed draws as written. ECS components and translation tables hold strings, not spans.
   - `\i:name` is an icon. A name is letters, digits, `_`, `-` and `/`, so "Press \i:a." keeps its full stop.
   - `\c:colour{text}` is a tinted span. Its colour is `#rgb`, `#rrggbb`, `#rrggbbaa`, or a name given to `RegisterColor`, so a translator writes `\c:keyword{fire}` and a theme changes it in one place. Spans nest, and icons sit in them.
-  - `\\` is a backslash. Braces are counted within a span, so balanced ones pass, and `\}` is a lone closing brace within one.
-  - Markup that does not parse draws as written and is reported once per string.
+  - `\\` is a backslash. Braces are counted within a span, so balanced ones pass, and `\}` is a lone closing brace within one, `\{` a lone opening one, which a span could not hold otherwise. Outside a span a brace is text.
+  - Markup is read each time its run is drawn or laid out, into spans of its string's own substrings in the shaper's scratch, which `DrawText` copies as it copies a run's spans, so a steady label of markup allocates nothing, and a run takes the colour registered as it is drawn: a theme registering a name again recolours it with no layout made anew, since tints are no part of the layout's key.
+  - Markup that does not parse draws as written and is reported once per string, as `ReportKindMarkupMalformed`, saying at which byte and why: a backslash before anything but `\`, `{`, `}`, `i:` and `c:`, or ending the string; a name that is empty; a colour of other than 3, 6 or 8 hexadecimal digits, or a name not registered, so a theme that never registered it shows the markup as written rather than a span silently in the run's tint; no `{` after a colour; or a span left open.
+    - A run of markup that does not parse lays out as its string written does, through the one layout, and its string is kept in a set of canvas's own, looked up by the string itself as the run is read, so a run read each frame makes no key and is reported the first time alone. Keying it apart in the layout cache was built first, and missed the report when a run of one span of the same string was laid out before it.
   - Backslashes rather than BBCode's brackets or TextMesh Pro's angle brackets, which ordinary game text uses.
 
 ### Meshes and mesh files

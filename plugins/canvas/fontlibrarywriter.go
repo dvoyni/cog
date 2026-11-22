@@ -68,5 +68,5 @@ func (w fontLibraryWriter) RegisterIcon(name string, icon IconDescriptor) {
 }
 
 // RegisterColor registers color under name, replacing a colour registered
-// under it before.
+// under it before, which the markup read after takes.
 func (w fontLibraryWriter) RegisterColor(name string, color m.Color) { w.colors[name] = color }

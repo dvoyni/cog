@@ -295,7 +295,9 @@ can be inspected in canvas's terms, beside render's inspection of it.
   height, its `Offset` above the baseline in em and whether it is
   `Tinted`, its frame's size read from its file's header then and the
   layouts naming it laid out anew, an image of a render texture or of
-  linear colour refused, reported once; and `RegisterColor(name, color)`. A descriptor
+  linear colour refused, reported once; and `RegisterColor(name, color)`,
+  which markup's `\c:name{text}` tints with, read as the run is drawn, so
+  a theme changes it in one place. A descriptor
   holds a `Default` **`Font`** and **`LanguageFonts`**, the fonts serving
   some languages. A `Font` is a `Path` in platform's FS, a TrueType or
   OpenType font or a collection, empty meaning canvas's JetBrains Mono, its
@@ -336,7 +338,15 @@ can be inspected in canvas's terms, beside render's inspection of it.
   a **`Span`** of `Text` in its own `Tint`, zero meaning the run's, or an
   `Icon` registered by name, the cap height tall and placed on the
   baseline like a glyph, a line breaking around it as around a letter, a
-  name not registered drawing the missing-glyph box, reported once, its `Material`, zero meaning **`TextMaterial`**, its `Clip`, its
+  name not registered drawing the missing-glyph box, reported once, and
+  its `Markup`, whether its `String` is read as **markup**, the string form
+  of spans: `\i:name` an icon, its name of letters, digits, `_`, `-` and
+  `/`; `\c:colour{text}` text in `#rgb`, `#rrggbb`, `#rrggbbaa` or a
+  registered colour, spans nesting and icons sitting in them; `\\` a
+  backslash, braces counted within a span, and `\{` and `\}` lone ones.
+  Markup that does not parse is drawn as written, reported once for its
+  string as `ReportKindMarkupMalformed`, and a run without `Markup`, such
+  as a name a player typed, is drawn as written. It carries its `Material`, zero meaning **`TextMaterial`**, its `Clip`, its
   `Filter`, zero meaning linear, as a field is read, and its sort key.
   `DrawText` records a run, laid out then, as `Layout` lays it out, one
   entry whose glyphs draw in order. Both lay out through the **layout

@@ -112,6 +112,10 @@ const (
 	// sprite atlas, or one whose file's header cannot be read or whose frame
 	// does not lie within its file. It is reported once for the name.
 	ReportKindIconRefused
+	// ReportKindMarkupMalformed is a run of text whose Markup is set and
+	// whose String does not parse as markup, drawn as written, reported
+	// once for the string.
+	ReportKindMarkupMalformed
 )
 
 // The keys canvas logs a report once under are one of these, then the
@@ -134,6 +138,7 @@ const (
 	characterMissingLogKey       = "canvas: character missing: "
 	iconNotRegisteredLogKey      = "canvas: icon not registered: "
 	iconRefusedLogKey            = "canvas: icon refused: "
+	markupMalformedLogKey        = "canvas: markup malformed: "
 )
 
 // pixelPerfectStretchReport is the report of a pixel-perfect camera's

@@ -128,6 +128,10 @@ type WriteFontLibrary interface {
 	// texture of its own, too large for an atlas page, draws nothing.
 	RegisterIcon(name string, icon IconDescriptor)
 	// RegisterColor registers color under name, for text's markup to tint
-	// with, replacing a colour registered under it before.
+	// with, `\c:name{text}`, replacing a colour registered under it before.
+	// Markup is read each time its run is drawn or laid out, so a run
+	// takes the colour registered then, a theme changing it in one place,
+	// with no layout made anew; a run naming a colour not registered does
+	// not parse, and is drawn as written, reported once for its string.
 	RegisterColor(name string, color m.Color)
 }
