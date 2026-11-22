@@ -303,7 +303,11 @@ can be inspected in canvas's terms, beside render's inspection of it.
   OpenType font or a collection, empty meaning canvas's JetBrains Mono, its
   collection's `Index`, its `FieldEm` and `FieldRange`, the em its glyphs'
   distance fields are made at and how far they reach across an edge, in
-  field texels, zero meaning the `Config`'s, and a variable font's `Variations`, each a
+  field texels, zero meaning the `Config`'s, its `BitmapEm`, a pixel font's
+  pixel size, zero for distance fields, whose glyphs are its coverage at
+  that em, read with nearest filtering and drawn at a whole multiple of
+  it, a run's size rounded to one, with no distance effects, and a
+  variable font's `Variations`, each a
   **`Variation{Axis, Value}`** whose axis **`AxisTagFromName("wght")`**
   answers, a name of other than four bytes answering the zero tag, whose
   variation is ignored and reported once. A font file that fails to load is
@@ -347,7 +351,8 @@ can be inspected in canvas's terms, beside render's inspection of it.
   Markup that does not parse is drawn as written, reported once for its
   string as `ReportKindMarkupMalformed`, and a run without `Markup`, such
   as a name a player typed, is drawn as written. It carries its `Material`, zero meaning **`TextMaterial`**, its `Clip`, its
-  `Filter`, zero meaning linear, as a field is read, and its sort key.
+  `Filter`, zero meaning its font's, linear as a field is read and nearest
+  for a bitmap font, and its sort key.
   `DrawText` records a run, laid out then, as `Layout` lays it out, one
   entry whose glyphs draw in order. Both lay out through the **layout
   cache**, keyed by the run's `String` or its spans' texts and icons, its `Font` set, its `Size`,
@@ -364,9 +369,12 @@ can be inspected in canvas's terms, beside render's inspection of it.
   in by the frame's first command list; a glyph no page holds draws
   nothing, reported once. Small text, whose field spans more than 2 texels
   a pixel, is read at four points a pixel and its glyphs' pens placed on
-  whole pixels, unturned, as a bitmap glyph's are. The include's
+  whole pixels, unturned, as a bitmap glyph's are. A bitmap font's glyphs
+  share the atlas, rasterized at its pixel size, and the text material
+  reads their coverage, ignoring the profile. The include's
   `canvas_glyph_spread` and `canvas_glyph_pen` answer a glyph's field's
-  spread and its pen, and `canvas_glyph_is_icon` whether an instance is an
+  spread and its pen, `canvas_glyph_is_bitmap` whether it is a bitmap
+  glyph, and `canvas_glyph_is_icon` whether an instance is an
   icon, drawn from `canvas_sprite_atlas`, the sRGB sprite atlas, for a
   custom material of runs. Every run of a frame drawn
   with `TextMaterial` batches with the next, whatever its size, tint,

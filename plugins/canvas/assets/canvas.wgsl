@@ -63,6 +63,7 @@ struct CanvasInstanceData {
 	// them square. A glyph's width is its distance field's spread instead,
 	// in field texels, half its font's field range, which a text material
 	// turns the field's value into texels by: (0.5 - value) * 2 * width;
+	// a bitmap font's glyph's is -1, its region its coverage, not a field;
 	// an icon's, a picture placed in text, is zero, its region one of
 	// canvas_sprite_atlas.
 	size: vec2<f32>,
@@ -409,9 +410,18 @@ fn canvas_glyph_is_icon(instance_data: CanvasInstanceData) -> bool {
 	return instance_data.width == 0.0;
 }
 
+// canvas_glyph_is_bitmap answers whether instance_data, of a run of text, is
+// a bitmap font's glyph, its region in canvas_atlas how much of each texel
+// the glyph covers rather than a distance field: its width, a field's
+// spread, is -1.
+fn canvas_glyph_is_bitmap(instance_data: CanvasInstanceData) -> bool {
+	return instance_data.width < 0.0;
+}
+
 // canvas_glyph_spread answers a glyph's field's spread, in field texels, half
 // its font's field range, which instance_data's width carries: a field's
-// value v lies (0.5 - v) * 2 * spread texels outside its glyph's edge.
+// value v lies (0.5 - v) * 2 * spread texels outside its glyph's edge. A
+// bitmap glyph has no field, and answers -1.
 fn canvas_glyph_spread(instance_data: CanvasInstanceData) -> f32 {
 	return instance_data.width;
 }

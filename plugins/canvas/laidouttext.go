@@ -17,10 +17,10 @@ type laidOutText struct {
 
 // batchKey answers what the run shares with the entries it batches with:
 // its material, TextMaterial when it names none, the glyph atlas seen
-// through texture, its filter, linear when it names none, as a distance
-// field is read, and its clip.
+// through texture, its filter, its layout's font's when it names none, and
+// its clip.
 func (t *laidOutText) batchKey(texture render.TextureView) batchKey {
-	return batchKey{material: cmp.Or(t.text.Material, TextMaterial), texture: texture, filter: cmp.Or(t.text.Filter, FilterLinear), clip: t.text.Clip}
+	return batchKey{material: cmp.Or(t.text.Material, TextMaterial), texture: texture, filter: cmp.Or(t.text.Filter, t.layout.fontFilter), clip: t.text.Clip}
 }
 
 // findTransform answers the transform from the run's own space, its

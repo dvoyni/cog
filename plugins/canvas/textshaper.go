@@ -111,7 +111,8 @@ func (s *textShaper) layOut(input layoutInput, icons map[string]registeredIcon) 
 	em := input.em
 	s.set = input.set
 	s.languageTag = input.language
-	metrics := input.set.findLanguageFont(input.language).findMetrics(em)
+	measuringFont := input.set.findLanguageFont(input.language)
+	metrics := measuringFont.findMetrics(em)
 	s.capHeight = metrics.CapHeight
 	s.scale = em / (shapingEm * 64)
 	s.lineHeight = metrics.LineHeight * cmp.Or(input.lineHeight, 1)
@@ -121,7 +122,10 @@ func (s *textShaper) layOut(input layoutInput, icons map[string]registeredIcon) 
 	}
 	s.tracking = fixed.Int26_6(input.tracking * shapingEm * 64)
 	s.language = language.NewLanguage(input.language)
-	s.layout = TextLayout{baseline: (s.lineHeight-metrics.Ascent-metrics.Descent)/2 + metrics.Ascent, em: em, glyphs: make([]placedGlyph, 0, len(input.text))}
+	s.layout = TextLayout{baseline: (s.lineHeight-metrics.Ascent-metrics.Descent)/2 + metrics.Ascent, em: em, fontFilter: FilterLinear, glyphs: make([]placedGlyph, 0, len(input.text))}
+	if measuringFont.bitmapEm > 0 {
+		s.layout.fontFilter = FilterNearest
+	}
 	s.runes = s.runes[:0]
 	s.breakRunes = s.breakRunes[:0]
 	s.runeSpans = s.runeSpans[:0]

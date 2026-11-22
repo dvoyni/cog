@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io/fs"
+	"math"
 	"sync"
 
 	"github.com/go-text/typesetting/font"
@@ -32,13 +33,15 @@ var findBuiltInFont = sync.OnceValue(func() *font.Font {
 // loadedFont is a font loaded from its file: the font parsed, read-only, the
 // coordinates of its variations, which a face of it is made at, its
 // vertical measures at an em of one world unit, read once as it is loaded,
-// and its Font's FieldEm and FieldRange, zero meaning the FontLibrary's.
+// its Font's FieldEm and FieldRange, zero meaning the FontLibrary's, and its
+// BitmapEm, zero for a font of distance fields.
 type loadedFont struct {
 	font        *font.Font
 	coordinates []font.VarCoord
 	perEm       FontMetrics
 	fieldEm     int
 	fieldRange  int
+	bitmapEm    int
 }
 
 // loadFont answers the font descriptor names, its file read through files,
@@ -83,6 +86,7 @@ func loadFont(files fs.FS, descriptor Font) (loadedFont, error) {
 		coordinates: face.Coords(),
 		fieldEm:     descriptor.FieldEm,
 		fieldRange:  descriptor.FieldRange,
+		bitmapEm:    descriptor.BitmapEm,
 		perEm: FontMetrics{
 			Ascent:     extents.Ascender / unitsPerEm,
 			Descent:    -extents.Descender / unitsPerEm,
@@ -92,6 +96,17 @@ func loadFont(files fs.FS, descriptor Font) (loadedFont, error) {
 			CapHeight:  face.LineMetric(font.CapHeight) / unitsPerEm,
 		},
 	}, nil
+}
+
+// findDrawnEm answers the em, in world units, a run of size is laid out at
+// in the font: size, or for a bitmap font size rounded to the nearest whole
+// multiple of its pixel size, one at least.
+func (f loadedFont) findDrawnEm(size float32) float32 {
+	if f.bitmapEm <= 0 {
+		return size
+	}
+	pixelSize := float32(f.bitmapEm)
+	return max(float32(math.Round(float64(size/pixelSize))), 1) * pixelSize
 }
 
 // findMetrics answers the font's measures at size, its em in world units.

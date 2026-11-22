@@ -37,7 +37,9 @@ type Text struct {
 	// set. A set canvas does not hold is laid out as the default set,
 	// reported once as ReportKindFontSetNotHeld.
 	Font FontSet
-	// Size is the run's em in world units, zero meaning Config.TextSize.
+	// Size is the run's em in world units, zero meaning Config.TextSize,
+	// rounded to a whole multiple of its pixel size, one at least, where a
+	// bitmap font measures its language.
 	Size float32
 	// Language is the tag of the language the run is written in, matched
 	// exactly, zero meaning the current language: a character is drawn by
@@ -76,16 +78,19 @@ type Text struct {
 	// Material is the 2D material the run's glyphs are drawn with, zero
 	// meaning TextMaterial, sampling the glyph atlas: each glyph is a quad
 	// of its distance field, its instance data's width the field's spread
-	// in field texels, half its font's field range, and an icon a quad of
-	// its region of the sRGB sprite atlas, canvas_sprite_atlas, its width
-	// zero.
+	// in field texels, half its font's field range, a bitmap font's glyph a
+	// quad of its coverage, its width -1, and an icon a quad of its region
+	// of the sRGB sprite atlas, canvas_sprite_atlas, its width zero.
 	Material Material
 	// Clip is a rectangle of the world outside which the run draws nothing,
 	// zero meaning none, as a Shape's Clip is.
 	Clip m.Rect
 	// Filter is how the glyphs' fields are read between their texels, zero
-	// meaning their font's, linear for a distance field, never
-	// Config.DefaultFilter, since nearest filtering breaks a field.
+	// meaning their font's, linear for a distance field and nearest for a
+	// bitmap font measuring the run's language, never Config.DefaultFilter,
+	// since nearest filtering breaks a field. A run's glyphs are read with
+	// one filter, so a fallback font's fields in a run of a bitmap font are
+	// read nearest too.
 	Filter Filter
 	// Layer and Order are the run's sort key, as a Shape's are: its glyphs
 	// draw together, in order, at its place among the frame's entries.

@@ -49,7 +49,8 @@ type fontLibrary struct {
 	// *textShaper, one a layout, since a shaper is not safe for concurrent
 	// use and layouts are made under the read lock.
 	shapers sync.Pool
-	// glyphs are the glyphs made distance fields for drawing.
+	// glyphs are the glyphs made for drawing, distance fields or a bitmap
+	// font's coverage.
 	glyphs glyphTable
 	// layouts are the runs laid out lately, which Layout and DrawText
 	// answer from.
@@ -84,10 +85,12 @@ func (l *fontLibrary) Language() string { return l.language }
 
 // Metrics answers the measures at size, its em in world units, of the font
 // of set measuring language, an empty language meaning the current one: the
-// language's first font in set, or set's default font. A set canvas does
-// not hold is measured as the default set, reported once.
+// language's first font in set, or set's default font, a bitmap font's size
+// rounded to a whole multiple of its pixel size as a run's is. A set canvas
+// does not hold is measured as the default set, reported once.
 func (l *fontLibrary) Metrics(set FontSet, size float32, language string) FontMetrics {
-	return l.findHeldSlot(set, "measuring").findLanguageFont(cmp.Or(language, l.language)).findMetrics(size)
+	measuringFont := l.findHeldSlot(set, "measuring").findLanguageFont(cmp.Or(language, l.language))
+	return measuringFont.findMetrics(measuringFont.findDrawnEm(size))
 }
 
 // Layout answers text shaped, broken into lines and measured, in the font
@@ -101,9 +104,9 @@ func (l *fontLibrary) Layout(text Text) TextLayout {
 	return layout
 }
 
-// Preload makes the distance fields of the glyphs of text, shaped on one
-// line in set's fonts for the current language, which a run of any size
-// draws, so the first draw of a run of it makes none. A set canvas does not
+// Preload makes the distance fields of the glyphs of text, or a bitmap
+// font's coverage, shaped on one line in set's fonts for the current
+// language, which a run of any size draws, so the first draw of a run of it makes none. A set canvas does not
 // hold preloads the default set's, reported once.
 func (l *fontLibrary) Preload(set FontSet, text string) {
 	slot := l.findHeldSlot(set, "preloading glyphs of")
@@ -195,8 +198,10 @@ func (l *fontLibrary) reportMarkupMalformed(markup string, fault markupFault) {
 }
 
 // makeLayoutInput answers text as drawn and what its layout is made of, in
-// its language, the current one unless it names its own: a set canvas does
-// not hold lays it out in the default set, reported once. shaper is
+// its language, the current one unless it names its own, at its size, a
+// bitmap font measuring the language rounding it to a whole multiple of its
+// pixel size: a set canvas does not hold lays it out in the default set,
+// reported once. shaper is
 // acquireShaper's for text, nil for a run of a string: its markup is read into
 // spans in shaper's scratch, and its Spans encoded into shaper's spanKey,
 // with the serial each icon was registered under, which the input's text
@@ -206,15 +211,17 @@ func (l *fontLibrary) makeLayoutInput(text Text, shaper *textShaper) (Text, layo
 	if shaper != nil {
 		text = l.readMarkup(text, &shaper.markupSpans)
 	}
+	slot := l.findHeldSlot(text.Font, "laying out text in")
+	language := cmp.Or(text.Language, l.language)
 	input := layoutInput{
 		text:       text.String,
-		set:        l.findHeldSlot(text.Font, "laying out text in"),
-		em:         cmp.Or(text.Size, l.textSize),
+		set:        slot,
+		em:         slot.findLanguageFont(language).findDrawnEm(cmp.Or(text.Size, l.textSize)),
 		wrapWidth:  text.WrapWidth,
 		align:      text.Align,
 		lineHeight: text.LineHeight,
 		tracking:   text.Tracking,
-		language:   cmp.Or(text.Language, l.language),
+		language:   language,
 	}
 	if len(text.Spans) > 0 {
 		shaper.spanKey = appendEncodedSpans(shaper.spanKey[:0], text.Spans, l.icons)

@@ -187,6 +187,23 @@ func (p windowPicture) countLit(from, to m.Vec2) int {
 	}
 }
 
+// findUnitColour answers the colour of the unit whose top left is unit, of
+// a pixel-perfect camera of four points a unit centred on the window, and
+// whether each of its pixels is that colour.
+func (p windowPicture) findUnitColour(unit m.Vec2) (color.NRGBA, bool) {
+	from := p.pixel(unit.MulS(4))
+	to := p.pixel(unit.AddS(1).MulS(4))
+	unitColour := p.picture.NRGBAAt(from.X, from.Y)
+	for y := from.Y; y < to.Y; y++ {
+		for x := from.X; x < to.X; x++ {
+			if p.picture.NRGBAAt(x, y) != unitColour {
+				return unitColour, false
+			}
+		}
+	}
+	return unitColour, true
+}
+
 // sign answers -1, 0 or 1 as x is negative, zero or positive.
 func sign(x int) int {
 	return min(max(x, -1), 1)

@@ -74,8 +74,9 @@ type FontLibrary interface {
 	// not hold is laid out as the default set, reported once for it as
 	// ReportKindFontSetNotHeld.
 	Layout(text Text) TextLayout
-	// Preload makes the distance fields of the glyphs of text, shaped on
-	// one line in set's fonts for the current language, ahead of
+	// Preload makes the distance fields of the glyphs of text, or a bitmap
+	// font's coverage, shaped on one line in set's fonts for the current
+	// language, ahead of
 	// their first draw, behind a loading screen, so the first frame drawing
 	// a run of text at any size makes none; it lays nothing out for the
 	// cache. A set canvas does not hold preloads the default set's,
@@ -83,7 +84,9 @@ type FontLibrary interface {
 	Preload(set FontSet, text string)
 	// Metrics answers the measures at size, its em in world units, of the
 	// font of set measuring language, an empty language meaning the current
-	// one: the language's first font in set, or set's default font. A set
+	// one: the language's first font in set, or set's default font, a
+	// bitmap font's size rounded to the nearest whole multiple of its pixel
+	// size, one at least, as a run's is. A set
 	// canvas does not hold, never made or destroyed, is measured as the
 	// default set, reported once for it as ReportKindFontSetNotHeld.
 	Metrics(set FontSet, size float32, language string) FontMetrics

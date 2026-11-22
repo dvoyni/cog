@@ -2,8 +2,10 @@
 // of its distance field in the glyph atlas, filled with the entry's tint,
 // over a profile, its argument, drawn under the fill in the same fragment:
 // an outline, a halo, a glow or a drop shadow, its distances in the font's
-// field texels. Its zero profile draws the fill alone. A run's icons are
-// quads of the sprite atlas, multiplied by their tint, with no profile.
+// field texels. Its zero profile draws the fill alone. A bitmap font's
+// glyphs are quads of their coverage, multiplied by the tint, with no
+// profile. A run's icons are quads of the sprite atlas, multiplied by their
+// tint, with no profile.
 #include ./canvas.wgsl
 
 // Argument is the profile, canvas's Profile: a band of the distance from a
@@ -87,8 +89,10 @@ fn text_find_fill_coverage(in: CanvasVaryings, uv_gradient_x: vec2<f32>, uv_grad
 // field's value turned into texels by its spread, and the band read from
 // the field moved back by the profile's offset, sampled again only when it
 // has one, nothing past the glyph's quad. The glyph atlas has one mip
-// level, so it is sampled at it. An icon is its region of the sprite atlas,
-// sampled across its mips, multiplied by its tint.
+// level, so it is sampled at it. A bitmap font's glyph is its coverage,
+// multiplied by its tint, with no profile, a distance effect. An icon is
+// its region of the sprite atlas, sampled across its mips, multiplied by
+// its tint.
 @fragment
 fn canvas_text_fragment(in: CanvasVaryings) -> @location(0) vec4<f32> {
 	let instance_data = canvas_instances[in.instance];
@@ -98,6 +102,9 @@ fn canvas_text_fragment(in: CanvasVaryings) -> @location(0) vec4<f32> {
 	let uv_gradient_y = dpdy(in.uv);
 	if canvas_glyph_is_icon(instance_data) {
 		return canvas_output(in.tint * textureSampleGrad(canvas_sprite_atlas, canvas_sampler, in.uv, instance_data.page, uv_gradient_x, uv_gradient_y));
+	}
+	if canvas_glyph_is_bitmap(instance_data) {
+		return canvas_output(in.tint * textureSampleLevel(canvas_atlas, canvas_sampler, in.uv, instance_data.page, 0.0).r);
 	}
 	let dimensions = vec2<f32>(textureDimensions(canvas_atlas).xy);
 	let pixel = max(0.5 * (length(uv_gradient_x * dimensions) + length(uv_gradient_y * dimensions)), 1e-6);

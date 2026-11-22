@@ -15,6 +15,10 @@ type TextLayout struct {
 	// em is the run's em, in world units, which its glyphs' fields are
 	// scaled by.
 	em float32
+	// fontFilter is the filter a run of it reads its glyphs with when it
+	// names none, its font's: nearest where a bitmap font measures its
+	// language, else linear, as a distance field is read.
+	fontFilter Filter
 	// lineWidths are each line's width, in order.
 	lineWidths []float32
 	// clusterPositions are where each grapheme cluster of the run's text
