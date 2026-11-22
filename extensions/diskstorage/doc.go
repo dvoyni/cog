@@ -3,7 +3,7 @@
 // directory, named by the application id.
 //
 // diskstorage is an Extension. Its root offers only Name, Config, its one
-// Adapter, StoragePermanentFS, and its errors, each an alias of what its
+// Adapter, StoragePermanentFS, Dir, and its errors, each an alias of what its
 // internal/ declares; the plugin, built by diskstorageplugin.New, is in its
 // internal/ too. The plugin is built only for
 // desktop platforms (!js); a browser composes jsstorage instead. Its Config is

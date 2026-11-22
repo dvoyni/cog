@@ -92,6 +92,24 @@ func TestAConfigThatIsNotAConfigIsRejected(t *testing.T) {
 	}
 }
 
+// Dir names the directory the plugin, configured the same, writes into.
+func TestDirIsWhereThePluginWrites(t *testing.T) {
+	isolateDataDir(t)
+	config := Config{AppId: "cog-diskstorage-dir-test"}
+	dir, err := Dir(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := start(t, config)
+	if answer := engine.kernel.ExecuteCommand[storage.AccessValuesCmd](storage.SetValue("volume", 0.5)); answer.Err != nil {
+		t.Fatal(answer.Err)
+	}
+	engine.stop()
+	if _, err := os.Stat(filepath.Join(dir, storage.DefaultValuesPath)); err != nil {
+		t.Fatalf("values file not written under Dir %s: %v", dir, err)
+	}
+}
+
 // An empty AppId falls back to the executable's name.
 func TestAnEmptyAppIdIsTheExecutableName(t *testing.T) {
 	appId, err := resolveAppId("")

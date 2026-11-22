@@ -32,11 +32,7 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 			return ErrInvalidConfig{Got: config}
 		}
 	}
-	appId, err := resolveAppId(cfg.AppId)
-	if err != nil {
-		return err
-	}
-	dir, err := permanentDir(appId)
+	dir, err := Dir(cfg)
 	if err != nil {
 		return err
 	}
@@ -46,6 +42,17 @@ func (p *plugin) Register(registrar *kernel.Registrar, config any) error {
 	}
 	registrar.ProvideAdapter[StoragePermanentFS](permanent)
 	return nil
+}
+
+// Dir is the directory the plugin keeps its permanent filesystem in when
+// configured with config, for what a program writes there before, or outside,
+// an engine: a log opened ahead of composition. It does not create it.
+func Dir(config Config) (string, error) {
+	appId, err := resolveAppId(config.AppId)
+	if err != nil {
+		return "", err
+	}
+	return permanentDir(appId)
 }
 
 // resolveAppId falls back to the executable's name and checks that the result
