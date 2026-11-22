@@ -20,6 +20,13 @@ const (
 	sdfShaderPath         = assetPrefix + "/sdf.wgsl"
 	sdfVertexEntryPoint   = "canvas_sdf_vertex"
 	sdfFragmentEntryPoint = "canvas_sdf_fragment"
+	// textShaderPath is the path in platform's FS of TextMaterial's shader,
+	// textVertexEntryPoint its vertex stage, placing small text on whole
+	// pixels, and textFragmentEntryPoint its fragment stage, drawing a
+	// glyph's fill over its profile's band.
+	textShaderPath         = assetPrefix + "/text.wgsl"
+	textVertexEntryPoint   = "canvas_text_vertex"
+	textFragmentEntryPoint = "canvas_text_fragment"
 	// viewportShaderPath is the path in platform's FS of the shader of the
 	// quads canvas draws over a viewport: a camera's clear, what a
 	// multisampled camera resolved, and an image filling its atlas cell.
@@ -50,11 +57,11 @@ const (
 // embeddedAssets are canvas's built-in assets: its include, its materials'
 // shaders and its viewport quads', in its assets folder, each shader's binding
 // declaration beside it, which render's cmd/declarebindings generates, the
-// SDF material's of its define sets alone, as it compiles only with
-// CANVAS_ARGUMENT.
+// SDF and text materials' of their define sets alone, as they compile only
+// with CANVAS_ARGUMENT.
 //
 //go:generate go run github.com/dvoyni/cog/plugins/render/cmd/declarebindings assets/canvas.wgsl assets/default.wgsl assets/viewport.wgsl
-//go:generate go run github.com/dvoyni/cog/plugins/render/cmd/declarebindings -variantsonly -variant CANVAS_ARGUMENT assets/sdf.wgsl
+//go:generate go run github.com/dvoyni/cog/plugins/render/cmd/declarebindings -variantsonly -variant CANVAS_ARGUMENT assets/sdf.wgsl assets/text.wgsl
 //go:embed assets
 var embeddedAssets embed.FS
 

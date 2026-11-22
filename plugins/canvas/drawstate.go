@@ -1,6 +1,7 @@
 package canvas
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"sync/atomic"
@@ -27,12 +28,13 @@ type drawState struct {
 	// and only read after.
 	drawLists []*drawList
 	// entries are the frame's entries, merged from the draw lists in their
-	// order, each a shape of shapes or a sprite of sprites, merged alike,
-	// and the bytes of the arguments they give, end to end. All are replaced
-	// by the next frame's when it merges.
+	// order, each a shape of shapes, a sprite of sprites or a run of text of
+	// texts, merged alike, and the bytes of the arguments they give, end to
+	// end. All are replaced by the next frame's when it merges.
 	entries   []recordedEntry
 	shapes    []Shape
 	sprites   []Sprite
+	texts     []laidOutText
 	arguments []byte
 	// cameras are the frame's cameras, merged from the draw lists in their
 	// order, in the order they draw, or the default camera for a frame of
@@ -87,6 +89,8 @@ func (s *drawState) closeAndSort() {
 	s.entries = s.entries[:0]
 	s.shapes = s.shapes[:0]
 	s.sprites = s.sprites[:0]
+	clear(s.texts)
+	s.texts = s.texts[:0]
 	s.arguments = s.arguments[:0]
 	s.cameras = s.cameras[:0]
 	s.drawListEnds = s.drawListEnds[:0]
@@ -110,24 +114,31 @@ func (s *drawState) findSortKeys() {
 	s.sorter.entries = s.sorter.entries[:0]
 	for index, entry := range s.entries {
 		var key sortKey
-		if entry.kind == EntryKindShape {
+		switch entry.kind {
+		case EntryKindShape:
 			shape := &s.shapes[entry.index]
 			key = makeSortKey(shape.Layer, shape.Order)
-		} else {
+		case EntryKindSprite:
 			sprite := &s.sprites[entry.index]
 			key = makeSortKey(sprite.Layer, sprite.Order)
+		case EntryKindText:
+			text := &s.texts[entry.index].text
+			key = makeSortKey(text.Layer, text.Order)
 		}
 		s.sorter.entries = append(s.sorter.entries, sortedEntry{key: key, entryIndex: uint32(index)})
 	}
 }
 
 // findEntryMaterial answers the 2D material entry, of the frame's, is drawn
-// with.
+// with: a run of text's TextMaterial when it names none.
 func (s *drawState) findEntryMaterial(entry recordedEntry) Material {
-	if entry.kind == EntryKindShape {
+	switch entry.kind {
+	case EntryKindShape:
 		return s.shapes[entry.index].Material
+	case EntryKindSprite:
+		return s.sprites[entry.index].Material
 	}
-	return s.sprites[entry.index].Material
+	return cmp.Or(s.texts[entry.index].text.Material, TextMaterial)
 }
 
 // findEntryArgument answers the bytes of the argument entry, of the frame's,
@@ -160,14 +171,19 @@ func (s *drawState) makeInspection(beat metronome.Beat, cameraDraws []cameraDraw
 				}
 				recorded := s.entries[entryIndex]
 				inspectedEntry := InspectedEntry{Kind: recorded.kind, DrawListIndex: drawListIndex, IndexInDrawList: entryIndex - drawListStart}
-				if recorded.kind == EntryKindShape {
+				switch recorded.kind {
+				case EntryKindShape:
 					inspectedEntry.Shape = s.shapes[recorded.index]
 					inspectedEntry.Layer = inspectedEntry.Shape.Layer
 					inspectedEntry.Order = inspectedEntry.Shape.Order
-				} else {
+				case EntryKindSprite:
 					inspectedEntry.Sprite = s.sprites[recorded.index]
 					inspectedEntry.Layer = inspectedEntry.Sprite.Layer
 					inspectedEntry.Order = inspectedEntry.Sprite.Order
+				case EntryKindText:
+					inspectedEntry.Text = s.texts[recorded.index].text
+					inspectedEntry.Layer = inspectedEntry.Text.Layer
+					inspectedEntry.Order = inspectedEntry.Text.Order
 				}
 				inspectedEntries = append(inspectedEntries, inspectedEntry)
 			}

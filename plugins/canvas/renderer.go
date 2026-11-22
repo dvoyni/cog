@@ -34,16 +34,19 @@ type renderer struct {
 	atlasLayerCeiling uint32
 	ownTextureSize    uint32
 	mipLevelCount     uint32
-	// defaultSlot and sdfSlot, the default material's and SDFMaterial's,
-	// clearMaterial, compositeMaterial, packMaterial and srgbAtlas are zero
-	// until made, and linearAtlas until an image needs it.
+	// defaultSlot, sdfSlot and textSlot, the default material's,
+	// SDFMaterial's and TextMaterial's, clearMaterial, compositeMaterial,
+	// packMaterial and srgbAtlas are zero until made, linearAtlas until an
+	// image needs it, and glyphAtlas until a glyph does.
 	defaultSlot       materialSlot
 	sdfSlot           materialSlot
+	textSlot          materialSlot
 	clearMaterial     render.Material
 	compositeMaterial render.Material
 	packMaterial      render.Material
 	srgbAtlas         *atlas
 	linearAtlas       *atlas
+	glyphAtlas        *atlas
 	// drawnImages are the frames of the images drawn, each image's at its
 	// Image's index, made at its first draw, then each frame at its
 	// number, and one more after its sheet's last, for the frames past it;
@@ -55,6 +58,14 @@ type renderer struct {
 	// it.
 	drawnImages  [][]drawnImage
 	packedImages map[packedKey]*packedImage
+	// drawnGlyphs are the glyphs drawn, each glyph's field as drawn at its
+	// index in the FontLibrary's glyph table, of no size until packed at its
+	// first draw; glyphCopies the fields packed whose regions a command list
+	// is still to fill, kept until one does, as packings are; and
+	// glyphStaging the bytes it copies them from, written over each time.
+	drawnGlyphs  []drawnGlyph
+	glyphCopies  []glyphCopy
+	glyphStaging []byte
 	// decodedFiles are the files of converted images the drawing job read
 	// and decoded as it packed the frame's images, each by its key, nil for
 	// one that could not be, so the frames and rectangles of one file
@@ -122,8 +133,8 @@ func newRenderer(atlasPageSize, atlasLayerCeiling, ownTextureSize, mipLevelCount
 
 // init makes the default material, over the default shader, which it keeps
 // acquired, blending premultiplied colour over what the target holds;
-// SDFMaterial's slot, its argument's layout checked, a mismatch reported
-// once to logger; the
+// SDFMaterial's and TextMaterial's slots, their arguments' layouts checked,
+// a mismatch reported once to logger; the
 // clear material, over the viewport shader, which it keeps acquired too,
 // replacing what the target holds, which draws a camera's clear over its
 // viewport, and what a multisampled camera that clears resolved; the
@@ -136,6 +147,7 @@ func newRenderer(atlasPageSize, atlasLayerCeiling, ownTextureSize, mipLevelCount
 func (r *renderer) init(inventory render.Inventory, logger *kernel.Logger) {
 	r.defaultSlot = makeMaterialSlot(inventory, logger, MaterialDescriptor{Label: "canvas default", Shader: defaultShaderPath})
 	r.sdfSlot = makeMaterialSlot(inventory, logger, sdfMaterialDescriptor)
+	r.textSlot = makeMaterialSlot(inventory, logger, textMaterialDescriptor)
 	viewportShader := inventory.AcquireShader(viewportShaderPath)
 	r.clearMaterial = inventory.MakeMaterial(render.MaterialDescriptor{
 		Label:              "canvas clear",
@@ -184,11 +196,12 @@ func (r *renderer) init(inventory render.Inventory, logger *kernel.Logger) {
 // makes the materials and the sRGB atlas at the first frame setting a
 // camera, and packs a sprite's image at the first frame recording it,
 // whose lowest order's command list fills its cell before any camera's
-// pass. Once each entry's batch key is found, it regroups state's sorted
-// entries by them. First, whether a camera is set or not, it unloads and
-// preloads what state's residency requests ask. A converted image is read
-// from files, decoded and converted in it.
-func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, files fs.FS, manager *platform.WindowManager, mainWindow platform.Window, state *drawState) {
+// pass, and a glyph at the first frame drawing it, its field read from
+// library's glyph table and copied into the glyph atlas in that list too. Once each entry's batch key is found, it regroups state's
+// sorted entries by them. First, whether a camera is set or not, it unloads
+// and preloads what state's residency requests ask. A converted image is
+// read from files, decoded and converted in it.
+func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, files fs.FS, manager *platform.WindowManager, mainWindow platform.Window, library *fontLibrary, state *drawState) {
 	r.cameraDraws = r.cameraDraws[:0]
 	r.mainWindow = mainWindow
 	r.batches = r.batches[:0]
@@ -206,6 +219,7 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 		r.init(inventory, state.logger)
 	}
 	r.materialSlots = state.materials.appendSlots(r.materialSlots[:0])
+	r.packGlyphs(inventory, library, state)
 	// Every image packed is marked drawn this frame before any is packed,
 	// so packing the frame's new images evicts none the frame draws.
 	r.unpackedSprites = r.unpackedSprites[:0]
@@ -284,8 +298,9 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 
 // drawOrder draws cameraDraws, the cameras of one order in the order they
 // draw, of state's entries, as one command list at that order: first the
-// pages of the atlases grown and the cells of the images packed, which the
-// lowest order's list copies and fills, leaving none for the others, then
+// pages of the atlases grown, the fields of the glyphs packed and the cells
+// of the images packed, which the lowest order's list copies and fills,
+// leaving none for the others, then
 // each camera's clear drawn over its viewport,
 // or a multisampled
 // camera's quad drawing what it resolved there, and its batches as
@@ -315,12 +330,13 @@ func (r *renderer) drawOrder(frame render.Frame, inventory render.Inventory, cam
 			r.instances.fixed = appendShapeInstances(r.instances.fixed, &Shape{Tint: drawnCamera.camera.ClearColor}, &r.drawnImages[0][0])
 		}
 		batchesStart := len(r.batches)
-		r.batches = appendBatches(r.batches, &r.instances, drawnCamera.entries, state, r.batchKeys, r.drawnImages)
+		r.batches = appendBatches(r.batches, &r.instances, drawnCamera.entries, state, r.batchKeys, r.drawnImages, r.drawnGlyphs)
 		drawnCamera.batches = r.batches[batchesStart:]
 	}
 	list := frame.BeginCommandList("canvas", cameraDraws[0].camera.Order)
 	r.instances.acquireBuffers(&list)
 	r.copyGrowths(&list, inventory)
+	r.copyGlyphs(&list)
 	r.fillPackings(&list, inventory)
 	for index := range cameraDraws {
 		drawnCamera := &cameraDraws[index]
@@ -500,7 +516,8 @@ func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 	margin := m.Vec2{X: -slot.cullMargin, Y: -slot.cullMargin}
 	var bounds m.Rect
 	var key batchKey
-	if entry.kind == EntryKindShape {
+	switch entry.kind {
+	case EntryKindShape:
 		shape := &state.shapes[entry.index]
 		if material == SDFMaterial {
 			bounds = shape.findProfileBounds(profileFromBytes(state.findEntryArgument(entry)))
@@ -508,7 +525,7 @@ func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 			bounds = shape.findBounds()
 		}
 		key = shape.batchKey(render.TextureView{Texture: r.srgbAtlas.texture})
-	} else {
+	case EntryKindSprite:
 		sprite := &state.sprites[entry.index]
 		image := findDrawnFrame(r.drawnImages, sprite)
 		if image.drawsNothing {
@@ -517,11 +534,100 @@ func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 		}
 		bounds = sprite.findBounds(image)
 		key = sprite.batchKey(image, state.defaultFilter)
+	case EntryKindText:
+		run := &state.texts[entry.index]
+		var drawsGlyphs bool
+		if bounds, drawsGlyphs = run.findBounds(r.drawnGlyphs); !drawsGlyphs {
+			r.appendSkippedEntryKeys()
+			return
+		}
+		key = run.batchKey(render.TextureView{Texture: r.glyphAtlas.texture})
 	}
 	key.stride = slot.stride
 	r.entryBounds = append(r.entryBounds, bounds.Inset(margin))
 	r.batchKeys = append(r.batchKeys, key)
 	r.skippedEntries = append(r.skippedEntries, false)
+}
+
+// packGlyphs packs each glyph the frame's runs of text draw that is not
+// packed yet, its field read from library's glyph table, unless this frame
+// tried it already.
+func (r *renderer) packGlyphs(inventory render.Inventory, library *fontLibrary, state *drawState) {
+	for index := range state.texts {
+		for _, glyph := range state.texts[index].layout.glyphs {
+			if int(glyph.field) >= len(r.drawnGlyphs) {
+				r.drawnGlyphs = slices.Grow(r.drawnGlyphs, int(glyph.field)+1-len(r.drawnGlyphs))[:glyph.field+1]
+			}
+			if drawn := &r.drawnGlyphs[glyph.field]; !drawn.packed && drawn.refusedFrame != r.drawnFrameCount {
+				r.packGlyph(inventory, state.logger, drawn, library.glyphs.findField(glyph.field))
+			}
+		}
+	}
+}
+
+// packGlyph packs drawn, a glyph of field, into the glyph atlas, made the
+// first time, its field queued to copy into its region: on its first page
+// holding it, else on a new one, the atlas doubling its pages while under
+// its ceiling. A glyph whose cell no page holds, or one the atlas at its
+// ceiling has no room for, draws nothing, reported once to logger, and is
+// tried again at the next frame drawing it.
+func (r *renderer) packGlyph(inventory render.Inventory, logger *kernel.Logger, drawn *drawnGlyph, field glyphField) {
+	if r.glyphAtlas == nil {
+		r.glyphAtlas = newGlyphAtlas(inventory, r.atlasPageSize, r.atlasPageSize)
+	}
+	width := uint32(field.width)
+	height := uint32(field.height)
+	var region render.TextureRegion
+	fits := false
+	if cellWidth, cellHeight := r.glyphAtlas.findCellSize(width, height); cellWidth <= r.glyphAtlas.width && cellHeight <= r.glyphAtlas.height {
+		region, fits = r.glyphAtlas.pack(width, height)
+		if !fits && uint32(len(r.glyphAtlas.pages)) < r.atlasLayerCeiling {
+			r.growAtlas(inventory, r.glyphAtlas)
+			region, fits = r.glyphAtlas.pack(width, height)
+		}
+	}
+	if !fits {
+		fullReport := Report{Kind: ReportKindAtlasFull, Err: fmt.Errorf("canvas: the glyph atlas, of %d pages of %d texels a side, has no room for a glyph's field of %d by %d texels, so it draws nothing", len(r.glyphAtlas.pages), r.glyphAtlas.width, width, height)}
+		logger.LogErrOnce(atlasFullLogKey+r.glyphAtlas.label, fullReport)
+		drawn.refusedFrame = r.drawnFrameCount
+		return
+	}
+	r.glyphCopies = append(r.glyphCopies, glyphCopy{region: region, texels: field.texels})
+	*drawn = makeDrawnGlyph(r.glyphAtlas, region, field)
+}
+
+// copyGlyphs copies into list each field of a glyph packed into its region
+// of the glyph atlas, from one temporary buffer of their texels, each row
+// starting a multiple of 256 bytes after the one before, as a copy needs,
+// and forgets them. list copies the atlas's growths first, so each lands in
+// the texture the atlas has now. A cell's gutter needs no copy: a cell is
+// never freed, and a page is made transparent.
+func (r *renderer) copyGlyphs(list *render.CommandList) {
+	if len(r.glyphCopies) == 0 {
+		return
+	}
+	r.glyphStaging = r.glyphStaging[:0]
+	for index := range r.glyphCopies {
+		fieldCopy := &r.glyphCopies[index]
+		width := int(fieldCopy.region.Width)
+		rowPitch := int(roundUpToMultiple(fieldCopy.region.Width, copyRowAlignment))
+		fieldCopy.offset = uint64(roundUpToMultiple(uint32(len(r.glyphStaging)), copyRowAlignment))
+		stagingEnd := int(fieldCopy.offset) + (int(fieldCopy.region.Height)-1)*rowPitch + width
+		r.glyphStaging = slices.Grow(r.glyphStaging, stagingEnd-len(r.glyphStaging))[:stagingEnd]
+		for row := range int(fieldCopy.region.Height) {
+			copy(r.glyphStaging[int(fieldCopy.offset)+row*rowPitch:], fieldCopy.texels[row*width:][:width])
+		}
+	}
+	staged := list.AcquireTemporaryBuffer(r.glyphStaging)
+	for index, fieldCopy := range r.glyphCopies {
+		stagedSize := uint64(len(r.glyphStaging)) - fieldCopy.offset
+		if index+1 < len(r.glyphCopies) {
+			stagedSize = r.glyphCopies[index+1].offset - fieldCopy.offset
+		}
+		list.CopyBufferToTexture(render.BufferRange{Buffer: staged.Buffer, Offset: staged.Offset + fieldCopy.offset, Size: stagedSize}, r.glyphAtlas.texture, fieldCopy.region)
+	}
+	clear(r.glyphCopies)
+	r.glyphCopies = r.glyphCopies[:0]
 }
 
 // appendSkippedEntryKeys appends a skipped entry's zero bounds and batch key
@@ -533,8 +639,8 @@ func (r *renderer) appendSkippedEntryKeys() {
 }
 
 // findMaterial answers the slot of material as the frame began drawing, and
-// whether canvas holds it: the default material's for the zero Material
-// and SDFMaterial's, made at canvas's first draw, and a released
+// whether canvas holds it: the default material's for the zero Material,
+// SDFMaterial's and TextMaterial's, made at canvas's first draw, and a released
 // material's until its slot is freed, once the frame of its release is
 // drawn.
 func (r *renderer) findMaterial(material Material) (materialSlot, bool) {
@@ -543,6 +649,8 @@ func (r *renderer) findMaterial(material Material) (materialSlot, bool) {
 		return r.defaultSlot, true
 	case SDFMaterial:
 		return r.sdfSlot, true
+	case TextMaterial:
+		return r.textSlot, true
 	}
 	slot, found := findSlot(r.materialSlots, material)
 	if !found {
@@ -694,16 +802,7 @@ func (r *renderer) packIntoSpriteAtlas(inventory render.Inventory, logger *kerne
 		return region, true
 	}
 	if uint32(len(spriteAtlas.pages)) < r.atlasLayerCeiling {
-		growth := spriteAtlas.grow(inventory, r.atlasLayerCeiling)
-		// A texture grown into whose copy is still to record holds nothing
-		// that copy would not write, so it is copied past and released.
-		pendingGrowth := slices.IndexFunc(r.growths, func(pending atlasGrowth) bool { return pending.destination == growth.source })
-		if pendingGrowth >= 0 && growth.source != (render.Texture{}) {
-			inventory.ReleaseTexture(growth.source)
-			r.growths[pendingGrowth].destination = growth.destination
-		} else {
-			r.growths = append(r.growths, growth)
-		}
+		r.growAtlas(inventory, spriteAtlas)
 		return spriteAtlas.pack(width, height)
 	}
 	r.evictionCandidates = r.evictionCandidates[:0]
@@ -726,6 +825,22 @@ func (r *renderer) packIntoSpriteAtlas(inventory render.Inventory, logger *kerne
 	fullReport := Report{Kind: ReportKindAtlasFull, Err: fmt.Errorf("canvas: the sprite atlas %q is full at its ceiling of %d pages, with nothing to evict that was not drawn this frame, so image %q is drawn from a texture of its own", spriteAtlas.label, len(spriteAtlas.pages), path)}
 	logger.LogErrOnce(atlasFullLogKey+spriteAtlas.label, fullReport)
 	return render.TextureRegion{}, false
+}
+
+// growAtlas doubles grown's pages, under the atlas layer ceiling, into a new
+// texture, and queues the copy of its pages, merged into one copy of the
+// pages it had where a growth of it is not yet copied.
+func (r *renderer) growAtlas(inventory render.Inventory, grown *atlas) {
+	growth := grown.grow(inventory, r.atlasLayerCeiling)
+	// A texture grown into whose copy is still to record holds nothing that
+	// copy would not write, so it is copied past and released.
+	pendingGrowth := slices.IndexFunc(r.growths, func(pending atlasGrowth) bool { return pending.destination == growth.source })
+	if pendingGrowth >= 0 && growth.source != (render.Texture{}) {
+		inventory.ReleaseTexture(growth.source)
+		r.growths[pendingGrowth].destination = growth.destination
+	} else {
+		r.growths = append(r.growths, growth)
+	}
 }
 
 // applyResidencyRequests drops each frame packed of the paths requests asks
@@ -798,3 +913,16 @@ type evictionCandidate struct {
 	key    packedKey
 	packed *packedImage
 }
+
+// glyphCopy is a glyph's field packed into the glyph atlas, still to copy
+// there: its region, its texels, row by row, and, as copyGlyphs copies it,
+// where its rows begin in the bytes it is copied from.
+type glyphCopy struct {
+	region render.TextureRegion
+	texels []byte
+	offset uint64
+}
+
+// copyRowAlignment is how many bytes apart a copy from a buffer into a
+// texture needs its rows to start, at most: a multiple of it.
+const copyRowAlignment = 256

@@ -60,10 +60,11 @@ type InspectedBatch struct {
 // its own place in that list, in recording order.
 type InspectedEntry struct {
 	Kind EntryKind
-	// Shape is the entry recorded, when Kind is EntryKindShape, and Sprite
-	// when it is EntryKindSprite.
+	// Shape is the entry recorded, when Kind is EntryKindShape, Sprite when
+	// it is EntryKindSprite, and Text when it is EntryKindText.
 	Shape           Shape
 	Sprite          Sprite
+	Text            Text
 	Layer           int32
 	Order           int32
 	DrawListIndex   int
@@ -78,4 +79,6 @@ const (
 	EntryKindShape EntryKind = iota + 1
 	// EntryKindSprite is a Sprite.
 	EntryKindSprite
+	// EntryKindText is a run of Text.
+	EntryKindText
 )

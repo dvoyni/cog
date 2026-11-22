@@ -19,8 +19,9 @@ import (
 // frame is drawn, in registration order: plugin order, then the order each
 // plugin registers its tasks. Two jobs of one task in a frame record into
 // its list both, in the order their calls run. It locks canvas's draw state
-// for read, so recording tasks run together. It is valid only while the
-// task's job runs.
+// for read, so recording tasks run together, and the FontLibrary resource
+// for read, which lays its text out. It is valid only while the task's job
+// runs.
 //
 // An entry is recorded, and a camera set, only from FrameEvent's Ready until
 // canvas's drawing begins; one recorded or set at any other time is
@@ -35,15 +36,16 @@ import (
 // without one gives a material that takes one the zero value of its type.
 type DrawList struct {
 	state kernel.Read[*drawState]
+	fonts kernel.Read[FontLibrary]
 	list  *drawList
 }
 
-// Declare declares DrawList's lock, gives the task being registered a draw
+// Declare declares DrawList's locks, gives the task being registered a draw
 // list of its own, after every list given before, and answers DrawList
 // bound to it.
 func (DrawList) Declare(access *kernel.Access) DrawList {
 	state := access.Read[*drawState]()
-	return DrawList{state: state, list: state.Get().addDrawList()}
+	return DrawList{state: state, fonts: access.Read[FontLibrary](), list: state.Get().addDrawList()}
 }
 
 // DrawShape records shape into the task's draw list for the frame being
@@ -95,6 +97,28 @@ func (l DrawList) DrawSpritesWith[T any](sprites []Sprite, arguments []T) {
 	l.list.record(state, EntryKindSprite, &l.list.sprites, reflect.TypeFor[T](), castToBytes(arguments), sprites...)
 }
 
+// DrawText records text, a run of text, into the task's draw list for the
+// frame being recorded: laid out now, as FontLibrary.Layout lays it out,
+// then drawn as one entry, its glyphs in order, through TextMaterial when
+// its Material is zero, which draws its fill alone. Each glyph is made a
+// distance field the first time it is drawn, in the calling task, and
+// packed into the glyph atlas as canvas draws the frame. Outside the frame,
+// it is refused and reported once for the task.
+func (l DrawList) DrawText(text Text) {
+	layout := l.fonts.Get().(*fontLibrary).layOutText(text, true)
+	l.list.record(l.state.Get(), EntryKindText, &l.list.texts, nil, nil, laidOutText{text: text, layout: layout})
+}
+
+// DrawTextWith records text into the task's draw list for the frame being
+// recorded, as DrawText does, giving its material argument, of the type the
+// material declares with ArgumentOf: TextMaterial's a Profile, drawn under
+// the fill, such as canvas.Outline(2, black), its distances in the font's
+// field texels.
+func (l DrawList) DrawTextWith[T any](text Text, argument T) {
+	layout := l.fonts.Get().(*fontLibrary).layOutText(text, true)
+	l.list.record(l.state.Get(), EntryKindText, &l.list.texts, reflect.TypeFor[T](), castToBytes(unsafe.Slice(&argument, 1)), laidOutText{text: text, layout: layout})
+}
+
 // SetCamera sets camera for the frame being recorded, forgotten once the
 // frame is drawn, as its entries are: nothing is made or kept. A frame that
 // sets no camera is seen through the default one, which draws only a frame
@@ -110,7 +134,8 @@ func (l DrawList) SetCamera(camera Camera) {
 
 // drawList is one task's draw list for the frame being recorded, which its
 // DrawList records into: the entries its jobs record, in the order
-// recorded, each of them a shape or a sprite of its records of that kind,
+// recorded, each of them a shape, a sprite or a run of text of its records
+// of that kind,
 // with the bytes of the material arguments they give, end to end, and the
 // cameras they set, in the order set. Two jobs of one task running together
 // share it, their calls interleaving.
@@ -121,11 +146,12 @@ type drawList struct {
 	// it is logged once under.
 	outsideFrame error
 	slicesDiffer error
-	// mutex guards entries, shapes, sprites, arguments and cameras.
+	// mutex guards entries, shapes, sprites, texts, arguments and cameras.
 	mutex     sync.Mutex
 	entries   []recordedEntry
 	shapes    []Shape
 	sprites   []Sprite
+	texts     []laidOutText
 	arguments []byte
 	cameras   []Camera
 }
@@ -156,15 +182,15 @@ func (l *drawList) record[T any](state *drawState, kind EntryKind, records *[]T,
 	}
 }
 
-// moveEntries appends the draw list's entries, shapes, sprites, arguments
-// and cameras to state's, each entry's index moved past state's records of
+// moveEntries appends the draw list's entries, shapes, sprites, texts,
+// arguments and cameras to state's, each entry's index moved past state's records of
 // its kind, and its argument's offset past state's arguments, and empties
 // it.
 func (l *drawList) moveEntries(state *drawState) {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 	// recordsBefore are state's records of each kind, at the kind.
-	recordsBefore := [...]uint32{EntryKindShape: uint32(len(state.shapes)), EntryKindSprite: uint32(len(state.sprites))}
+	recordsBefore := [...]uint32{EntryKindShape: uint32(len(state.shapes)), EntryKindSprite: uint32(len(state.sprites)), EntryKindText: uint32(len(state.texts))}
 	argumentsBefore := uint32(len(state.arguments))
 	for _, entry := range l.entries {
 		entry.index += recordsBefore[entry.kind]
@@ -173,11 +199,14 @@ func (l *drawList) moveEntries(state *drawState) {
 	}
 	state.shapes = append(state.shapes, l.shapes...)
 	state.sprites = append(state.sprites, l.sprites...)
+	state.texts = append(state.texts, l.texts...)
 	state.arguments = append(state.arguments, l.arguments...)
 	state.cameras = append(state.cameras, l.cameras...)
 	l.entries = l.entries[:0]
 	l.shapes = l.shapes[:0]
 	l.sprites = l.sprites[:0]
+	clear(l.texts)
+	l.texts = l.texts[:0]
 	l.arguments = l.arguments[:0]
 	l.cameras = l.cameras[:0]
 }

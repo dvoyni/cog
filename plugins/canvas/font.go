@@ -14,6 +14,14 @@ type Font struct {
 	// default instance: a zero Variation sets no axis, and an axis no
 	// Variation sets keeps its default.
 	Variations [4]Variation
+	// FieldEm is the em, in field texels, the font's glyphs are made
+	// distance fields at, zero meaning Config.GlyphFieldEm: a font of thin
+	// strokes, such as CJK's, takes a larger one, so a stroke spans two
+	// texels. FieldRange is how far a field reaches across a glyph's edge,
+	// half outside it and half inside, in field texels, zero meaning
+	// Config.GlyphFieldRange: half of it bounds an outline's width.
+	FieldEm    int
+	FieldRange int
 }
 
 // Variation is one axis setting of a variable font, its Value in the axis's

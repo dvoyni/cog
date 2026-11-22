@@ -23,8 +23,8 @@ type Config struct {
 	// DefaultFilter is the filter of a sprite whose Filter is zero; zero
 	// means FilterLinear.
 	DefaultFilter Filter
-	// AtlasPageSize is the side of a sprite atlas's pages, in texels; zero
-	// means 2048. An image whose cell, the image rounded up to the atlas grid
+	// AtlasPageSize is the side of a sprite atlas's pages, and the glyph
+	// atlas's, in texels; zero means 2048. An image whose cell, the image rounded up to the atlas grid
 	// MipLevels sets and its gutter around it, no page holds is drawn from
 	// a texture of its own. The side is a multiple of the atlas grid holding the
 	// white texel's cell, 12 at the default 3 levels and 5 at one; a side
@@ -32,8 +32,9 @@ type Config struct {
 	// ReportKindAtlasPageSizeRaised.
 	AtlasPageSize uint32
 	// AtlasLayerCeiling is the most pages a sprite atlas grows to, doubling
-	// them each time an image fits on none; zero means 256, WebGPU's
-	// default limit on a texture's layers. At its ceiling, the images drawn
+	// them each time an image fits on none, and the glyph atlas each time a
+	// glyph does; zero means 256, WebGPU's default limit on a texture's
+	// layers. At its ceiling, the images drawn
 	// least lately are evicted to make room, never one drawn this frame,
 	// and an image they cannot make room for is drawn from a texture of its
 	// own, reported once as ReportKindAtlasFull.
@@ -64,6 +65,14 @@ type Config struct {
 	// TextSize is the em, in world units, of a run of text whose Size is
 	// zero; zero means 16.
 	TextSize float32
+	// GlyphFieldEm is the em, in field texels, a font's glyphs are made
+	// distance fields at when its Font.FieldEm is zero; zero means 48.
+	// GlyphFieldRange is how far a field reaches across a glyph's edge, half
+	// outside it and half inside, in field texels, when its font's
+	// Font.FieldRange is zero; zero means 16, so an outline reaches 8 field
+	// texels at most.
+	GlyphFieldEm    int
+	GlyphFieldRange int
 	// DefaultFontSet describes the default font set, the zero FontSet's,
 	// made as canvas starts, its fonts read through platform's FS. Its zero
 	// is canvas's built-in JetBrains Mono alone, which the default set is
@@ -127,11 +136,11 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	configurator.InitResource(newRenderer(atlasPageSize, cmp.Or(canvasConfig.AtlasLayerCeiling, 256), cmp.Or(canvasConfig.OwnTextureSize, atlasPageSize/2), mipLevelCount))
 	configurator.InitResource(&windowList{})
 	configurator.InitResource[Targets](&drawnTargets{})
-	configurator.InitResource[FontLibrary](newFontLibrary(configurator.Logger(), canvasConfig.Language, cmp.Or(canvasConfig.TextSize, 16), canvasConfig.DefaultFontSet))
+	configurator.InitResource[FontLibrary](newFontLibrary(configurator.Logger(), canvasConfig.Language, cmp.Or(canvasConfig.TextSize, 16), cmp.Or(canvasConfig.GlyphFieldEm, 48), cmp.Or(canvasConfig.GlyphFieldRange, 16), canvasConfig.DefaultFontSet))
 	configurator.BindSocket(platform.ReadMountSocket{FS: makeAssetFS(), Priority: math.MinInt, Prefix: assetPrefix})
 	openFrameTask := configurator.RegisterTask1(openFrame)
 	sortEntriesTask := configurator.RegisterTask1(sortEntries)
-	drawTask := configurator.RegisterTask7(draw)
+	drawTask := configurator.RegisterTask8(draw)
 	copyTargetsTask := configurator.RegisterTask2(copyTargets)
 	addWindowTask := configurator.RegisterTask1(addWindow)
 	removeWindowTask := configurator.RegisterTask1(removeWindow)

@@ -1,6 +1,9 @@
 package canvas
 
-import "github.com/dvoyni/cog/libs/m"
+import (
+	"github.com/dvoyni/cog/libs/m"
+	"github.com/go-text/typesetting/font"
+)
 
 // TextLayout is a run of text shaped, broken into lines and measured, which
 // FontLibrary.Layout answers, in world units from its box's top left, y
@@ -9,11 +12,17 @@ import "github.com/dvoyni/cog/libs/m"
 type TextLayout struct {
 	size     m.Vec2
 	baseline float32
+	// em is the run's em, in world units, which its glyphs' fields are
+	// scaled by.
+	em float32
 	// lineWidths are each line's width, in order.
 	lineWidths []float32
 	// clusterPositions are where each grapheme cluster of the run's text
 	// starts, then where the text ends.
 	clusterPositions []m.Vec2
+	// glyphs are the run's glyphs, line by line, each line's left to right,
+	// but for those of no field once laid out for drawing.
+	glyphs []placedGlyph
 }
 
 // Size answers the layout's box.
@@ -37,3 +46,13 @@ func (l TextLayout) LineWidth(line int) float32 { return l.lineWidths[line] }
 // a newline's, is where its line ends. A ligature's width is shared evenly
 // by the clusters it draws.
 func (l TextLayout) ClusterPosition(cluster int) m.Vec2 { return l.clusterPositions[cluster] }
+
+// placedGlyph is one glyph a layout draws: its id in the run's font, the
+// index of its field in the FontLibrary's glyph table once laid out for
+// drawing, and its pen on its line's baseline, in world units from the
+// box's top left.
+type placedGlyph struct {
+	id    font.GID
+	field uint32
+	pen   m.Vec2
+}

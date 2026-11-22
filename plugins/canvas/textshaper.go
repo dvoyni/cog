@@ -55,24 +55,19 @@ type textShaper struct {
 	// right, by their index in the line.
 	runOfVisualIndex []int
 	// lineRightToLeft is whether each line's paragraph runs right to left,
-	// and lineOfCluster the line each cluster position lies on, which
-	// align the positions once the box's width is known.
+	// lineOfCluster the line each cluster position lies on, and lineOfGlyph
+	// the line each glyph lies on, which align the positions and the glyphs
+	// once the box's width is known, by each line's lineOffsets.
 	lineRightToLeft []bool
 	lineOfCluster   []int
+	lineOfGlyph     []int
+	lineOffsets     []float32
 }
 
 // layOut answers text laid out in textFont at em, in world units, shaped
 // in languageTag.
 func (s *textShaper) layOut(textFont loadedFont, text Text, em float32, languageTag string) TextLayout {
-	s.face = s.faces[textFont.font]
-	if s.face == nil {
-		s.face = font.NewFace(textFont.font)
-		s.face.SetCoords(textFont.coordinates)
-		if s.faces == nil {
-			s.faces = map[*font.Font]*font.Face{}
-		}
-		s.faces[textFont.font] = s.face
-	}
+	s.face = s.findFace(textFont)
 	metrics := textFont.findMetrics(em)
 	s.scale = em / (shapingEm * 64)
 	s.lineHeight = metrics.LineHeight * cmp.Or(text.LineHeight, 1)
@@ -82,7 +77,7 @@ func (s *textShaper) layOut(textFont loadedFont, text Text, em float32, language
 	}
 	s.tracking = fixed.Int26_6(text.Tracking * shapingEm * 64)
 	s.language = language.NewLanguage(languageTag)
-	s.layout = TextLayout{baseline: (s.lineHeight-metrics.Ascent-metrics.Descent)/2 + metrics.Ascent}
+	s.layout = TextLayout{baseline: (s.lineHeight-metrics.Ascent-metrics.Descent)/2 + metrics.Ascent, em: em, glyphs: make([]placedGlyph, 0, len(text.String))}
 	s.runes = s.runes[:0]
 	for _, character := range text.String {
 		s.runes = append(s.runes, character)
@@ -96,6 +91,7 @@ func (s *textShaper) layOut(textFont loadedFont, text Text, em float32, language
 	s.layout.clusterPositions = make([]m.Vec2, len(s.graphemeStarts)+1)
 	s.lineOfCluster = slices.Grow(s.lineOfCluster[:0], len(s.graphemeStarts)+1)[:len(s.graphemeStarts)+1]
 	s.lineRightToLeft = s.lineRightToLeft[:0]
+	s.lineOfGlyph = s.lineOfGlyph[:0]
 	// A paragraph ends at each mandatory break of Unicode's line breaking
 	// (UAX #14), a newline among them, and is laid out on lines of its own,
 	// in a direction of its own; an empty text, or one ending in a break,
@@ -119,6 +115,21 @@ func (s *textShaper) layOut(textFont loadedFont, text Text, em float32, language
 	s.layout = TextLayout{}
 	s.face = nil
 	return layout
+}
+
+// findFace answers the shaper's face of textFont, made at its variations
+// the first time.
+func (s *textShaper) findFace(textFont loadedFont) *font.Face {
+	face := s.faces[textFont.font]
+	if face == nil {
+		face = font.NewFace(textFont.font)
+		face.SetCoords(textFont.coordinates)
+		if s.faces == nil {
+			s.faces = map[*font.Font]*font.Face{}
+		}
+		s.faces[textFont.font] = face
+	}
+	return face
 }
 
 // layOutParagraph lays out the paragraph of the run's runes from start to
@@ -178,7 +189,7 @@ func (s *textShaper) layOutContent(start, end int) {
 
 // placeLine places line, the next line of the paragraph whose runes start
 // at the run's rune start, its runs left to right in their visual order,
-// and measures it.
+// with each of its glyphs, and measures it.
 func (s *textShaper) placeLine(line shaping.Line, start int) {
 	s.runOfVisualIndex = slices.Grow(s.runOfVisualIndex[:0], len(line))[:len(line)]
 	for index, run := range line {
@@ -193,6 +204,7 @@ func (s *textShaper) placeLine(line shaping.Line, start int) {
 			glyphCount := max(cluster.GlyphCount, 1)
 			var advance fixed.Int26_6
 			for _, clusterGlyph := range run.Glyphs[glyph : glyph+glyphCount] {
+				s.placeGlyph(clusterGlyph, x+advance)
 				advance += clusterGlyph.Advance
 			}
 			s.placeClusters(cluster, start, x, advance, rightToLeft)
@@ -201,6 +213,15 @@ func (s *textShaper) placeLine(line shaping.Line, start int) {
 		}
 	}
 	s.layout.lineWidths = append(s.layout.lineWidths, float32(x)*s.scale)
+}
+
+// placeGlyph places glyph on the line being placed, its pen at x, in
+// shaping units, moved by its offsets, which point up as go-text's do.
+func (s *textShaper) placeGlyph(glyph shaping.Glyph, x fixed.Int26_6) {
+	line := len(s.layout.lineWidths)
+	pen := m.Vec2{X: float32(x+glyph.XOffset) * s.scale, Y: s.layout.baseline + float32(line)*s.lineHeight - float32(glyph.YOffset)*s.scale}
+	s.layout.glyphs = append(s.layout.glyphs, placedGlyph{id: glyph.GlyphID, pen: pen})
+	s.lineOfGlyph = append(s.lineOfGlyph, line)
 }
 
 // placeClusters places, on the line being placed, the grapheme clusters
@@ -236,16 +257,17 @@ func (s *textShaper) placeLineEnd(cluster int) {
 }
 
 // alignLines sizes the layout's box, text's wrap width or its widest line,
-// by its lines' height, and moves each cluster position by its line's
-// alignment in it.
+// by its lines' height, and moves each cluster position and each glyph by
+// its line's alignment in it.
 func (s *textShaper) alignLines(text Text) {
 	width := text.WrapWidth
 	if width <= 0 {
 		width = slices.Max(s.layout.lineWidths)
 	}
 	s.layout.size = m.Vec2{X: width, Y: float32(len(s.layout.lineWidths)) * s.lineHeight}
-	for cluster, line := range s.lineOfCluster {
-		room := width - s.layout.lineWidths[line]
+	s.lineOffsets = s.lineOffsets[:0]
+	for line, lineWidth := range s.layout.lineWidths {
+		room := width - lineWidth
 		var offset float32
 		switch {
 		case text.Align == TextAlignCenter:
@@ -253,7 +275,13 @@ func (s *textShaper) alignLines(text Text) {
 		case (text.Align == TextAlignEnd) != s.lineRightToLeft[line]:
 			offset = room
 		}
-		s.layout.clusterPositions[cluster].X += offset
+		s.lineOffsets = append(s.lineOffsets, offset)
+	}
+	for cluster, line := range s.lineOfCluster {
+		s.layout.clusterPositions[cluster].X += s.lineOffsets[line]
+	}
+	for glyph, line := range s.lineOfGlyph {
+		s.layout.glyphs[glyph].pen.X += s.lineOffsets[line]
 	}
 }
 

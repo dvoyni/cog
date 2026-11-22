@@ -60,7 +60,9 @@ struct CanvasInstanceData {
 	// transform maps into the world, and width and radius are in that
 	// space: a stroke's or a line's width, zero a hairline one target pixel
 	// wide, and the radius of a fill's or a stroke's corners, zero leaving
-	// them square.
+	// them square. A glyph's width is its distance field's spread instead,
+	// in field texels, half its font's field range, which a text material
+	// turns the field's value into texels by: (0.5 - value) * 2 * width.
 	size: vec2<f32>,
 	width: f32,
 	radius: f32,
@@ -73,7 +75,8 @@ struct CanvasInstanceData {
 	// frame, one of the CANVAS_MODE constants.
 	mode: u32,
 	// tiles is how many of a tiled sprite's tiles span the unit square
-	// along each axis.
+	// along each axis, and a glyph's pen as a point of its unit square
+	// instead.
 	tiles: vec2<f32>,
 #if CANVAS_ARGUMENT
 	argument: Argument,
@@ -343,6 +346,61 @@ fn canvas_slice(point: vec2<f32>, frame_edges: vec4<f32>, square_edges: vec4<f32
 	let middle = mix(frame_edges.xy, frame_edges.zw, (point - square_edges.xy) / max(square_edges.zw - square_edges.xy, tiny));
 	let trailing = mix(frame_edges.zw, vec2<f32>(1.0), (point - square_edges.zw) / max(1.0 - square_edges.zw, tiny));
 	return select(select(middle, trailing, point > square_edges.zw), leading, point < square_edges.xy);
+}
+
+// CANVAS_LARGEST_INNER bounds a band's inner, which Outline and the other
+// constructors of a profile make the largest float32, so the ramp at its
+// edge stays finite.
+const CANVAS_LARGEST_INNER = 1e9;
+
+// canvas_ramp answers 0 where amount is half a pixel below zero and 1 half a
+// pixel above it, rising across it, pixel being how much amount changes
+// over a pixel: an edge anti-aliased.
+fn canvas_ramp(amount: f32, pixel: f32) -> f32 {
+	return clamp(amount / pixel + 0.5, 0.0, 1.0);
+}
+
+// canvas_band_coverage answers how much of a fragment a band of a distance
+// from an edge covers, as a profile describes it, distance positive outside
+// the edge and changing by pixel over a pixel: from inner inside the edge
+// to outer outside it, solid out to plateau, then falling off along
+// (1 - t) to the power falloff, t running from 0 at plateau to 1 at outer,
+// a falloff of zero a hard edge at outer, each edge anti-aliased.
+fn canvas_band_coverage(inner: f32, outer: f32, plateau: f32, falloff: f32, distance: f32, pixel: f32) -> f32 {
+	let inside = canvas_ramp(distance + min(inner, CANVAS_LARGEST_INNER), pixel);
+	if falloff <= 0.0 {
+		return inside * canvas_ramp(outer - distance, pixel);
+	}
+	// The fall spans at least a pixel, so even a band of no softness is
+	// anti-aliased.
+	let fall = clamp((distance - plateau) / max(outer - plateau, pixel), 0.0, 1.0);
+	return inside * pow(max(1.0 - fall, 1e-30), falloff);
+}
+
+// canvas_find_unit_offset answers offset, a vector in the world, in the unit
+// square, through the inverse of linear, which maps the unit square into
+// the world, so a profile's offset falls the same way under any rotation or
+// mirroring.
+fn canvas_find_unit_offset(linear: mat2x2<f32>, offset: vec2<f32>) -> vec2<f32> {
+	let area = determinant(linear);
+	if abs(area) < 1e-30 {
+		return vec2<f32>(0.0);
+	}
+	return vec2<f32>(linear[1].y * offset.x - linear[1].x * offset.y, linear[0].x * offset.y - linear[0].y * offset.x) / area;
+}
+
+// canvas_glyph_pen answers a glyph's pen, where its line's baseline meets its
+// advance's start, as a point of its unit square, which instance_data's
+// tiles carry, as only a tiled sprite's otherwise do.
+fn canvas_glyph_pen(instance_data: CanvasInstanceData) -> vec2<f32> {
+	return instance_data.tiles;
+}
+
+// canvas_glyph_spread answers a glyph's field's spread, in field texels, half
+// its font's field range, which instance_data's width carries: a field's
+// value v lies (0.5 - v) * 2 * spread texels outside its glyph's edge.
+fn canvas_glyph_spread(instance_data: CanvasInstanceData) -> f32 {
+	return instance_data.width;
 }
 
 // canvas_decode_srgb decodes colour encoded as sRGB into linear colour.

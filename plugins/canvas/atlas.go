@@ -20,6 +20,11 @@ const (
 	// cell of three times the atlas grid, fits WebGPU's default limit of 8192
 	// texels on a texture's side.
 	largestAtlasMipLevelCount = 12
+	// glyphAtlasGutter is how many texels a cell of the glyph atlas
+	// reaches past its glyph on every side, left transparent: a distance
+	// field fades to nothing at its own edge, so linear filtering there
+	// reads nothing of a neighbour.
+	glyphAtlasGutter = 1
 )
 
 // findSpriteAtlasGrid answers the atlas grid the cells of a sprite atlas whose pages
@@ -42,7 +47,8 @@ func roundUpToMultiple(value, step uint32) uint32 {
 // atlas is images of one format packed into pages: one 2D-array texture, a
 // layer for each page, so entries over any of its images can share a
 // batch. Each image is packed as a cell of its own, its gutter around it,
-// taken from its page by the page's shelf allocator.
+// taken from its page by the page's shelf allocator. The glyph atlas packs
+// glyphs' distance fields the same way.
 type atlas struct {
 	// texture holds the pages, the zero Texture when render could not make
 	// it, which it logged. Growing replaces it.
@@ -52,10 +58,12 @@ type atlas struct {
 	width, height uint32
 	// mipLevelCount is how many mip levels its pages have.
 	mipLevelCount uint32
-	// pages are a sprite atlas's, none for an atlas of one image's own,
-	// which holdsOneImage marks.
+	// pages are a sprite atlas's or the glyph atlas's, none for an atlas of
+	// one image's own, which holdsOneImage marks; holdsGlyphs marks the
+	// glyph atlas.
 	pages         []shelfAllocator
 	holdsOneImage bool
+	holdsGlyphs   bool
 }
 
 // newAtlas answers a sprite atlas of format, of one page width by height
@@ -85,15 +93,30 @@ func newOwnAtlas(inventory render.Inventory, label string, format render.Texture
 	return own, render.TextureRegion{Width: width, Height: height}
 }
 
+// newGlyphAtlas answers the glyph atlas, of glyphs' distance fields: R8Unorm,
+// of one page width by height texels of one mip level, its cells on no
+// atlas grid and reaching glyphAtlasGutter past their glyphs, its texture
+// made through inventory, transparent.
+func newGlyphAtlas(inventory render.Inventory, width, height uint32) *atlas {
+	created := &atlas{label: "canvas glyphs", format: render.TextureFormatR8Unorm, width: width, height: height, mipLevelCount: 1, holdsGlyphs: true}
+	created.texture = created.makeTexture(inventory, 1)
+	created.pages = []shelfAllocator{makeShelfAllocator(int32(width), int32(height))}
+	return created
+}
+
 // findAtlasGrid answers what each cell's image is rounded up to, so every cell
 // sits on it, and how many texels each cell reaches past that: a sprite
-// atlas's, as findSpriteAtlasGrid answers them, and an atlas grid of 1 and no gutter
+// atlas's, as findSpriteAtlasGrid answers them; an atlas grid of 1 and no gutter
 // for an atlas of one image's own, whose sampler clamps at the texture's
 // edge as a gutter would continue it, and whose mips are the whole
-// texture's.
+// texture's; and an atlas grid of 1 and glyphAtlasGutter for the glyph
+// atlas, of one mip level.
 func (a *atlas) findAtlasGrid() (atlasGrid, gutter uint32) {
-	if a.holdsOneImage {
+	switch {
+	case a.holdsOneImage:
 		return 1, 0
+	case a.holdsGlyphs:
+		return 1, glyphAtlasGutter
 	}
 	return findSpriteAtlasGrid(a.mipLevelCount)
 }

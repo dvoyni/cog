@@ -30,12 +30,15 @@ var findBuiltInFont = sync.OnceValue(func() *font.Font {
 })
 
 // loadedFont is a font loaded from its file: the font parsed, read-only, the
-// coordinates of its variations, which a face of it is made at, and its
-// vertical measures at an em of one world unit, read once as it is loaded.
+// coordinates of its variations, which a face of it is made at, its
+// vertical measures at an em of one world unit, read once as it is loaded,
+// and its Font's FieldEm and FieldRange, zero meaning the FontLibrary's.
 type loadedFont struct {
 	font        *font.Font
 	coordinates []font.VarCoord
 	perEm       FontMetrics
+	fieldEm     int
+	fieldRange  int
 }
 
 // loadFont answers the font descriptor names, its file read through files,
@@ -78,6 +81,8 @@ func loadFont(files fs.FS, descriptor Font) (loadedFont, error) {
 	return loadedFont{
 		font:        parsed,
 		coordinates: face.Coords(),
+		fieldEm:     descriptor.FieldEm,
+		fieldRange:  descriptor.FieldRange,
 		perEm: FontMetrics{
 			Ascent:     extents.Ascender / unitsPerEm,
 			Descent:    -extents.Descender / unitsPerEm,

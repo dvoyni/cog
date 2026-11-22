@@ -28,7 +28,8 @@ type instanceData struct {
 	page        uint32
 	part        shapePart
 	// size, width and radius are in the entry's own space, the unit square
-	// scaled by size, which transform maps into the world.
+	// scaled by size, which transform maps into the world; a glyph's width
+	// is its field's spread instead, in field texels.
 	size   m.Vec2
 	width  float32
 	radius float32
@@ -38,7 +39,8 @@ type instanceData struct {
 	decode uint32
 	mode   instanceMode
 	// tiles is how many of a tiled sprite's tiles span the unit square
-	// along each axis.
+	// along each axis, and a glyph's pen as a point of its unit square
+	// instead, where a text material places it on a whole pixel.
 	tiles m.Vec2
 }
 

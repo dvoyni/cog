@@ -26,7 +26,7 @@ func TestBatchesBreakOnlyWhereAnEntrysMaterialDiffersFromTheOneBefore(t *testing
 	entries := state.sorter.entries
 
 	var instances listInstanceData
-	got := appendBatches(nil, &instances, entries, state, findShapeBatchKeys(state), shapeImages)
+	got := appendBatches(nil, &instances, entries, state, findShapeBatchKeys(state), shapeImages, nil)
 
 	want := []batch{
 		{key: batchKey{material: firstMaterial}, entries: entries[0:2], firstInstance: 0, instanceCount: 2},
@@ -50,9 +50,9 @@ func TestBatchesAppendedAfterAnotherCamerasBeginANewBatchEvenOfTheSameMaterial(t
 	state := newShapeFrame(shapes, makeEntrySorter(nil))
 	entries := state.sorter.entries
 	var instances listInstanceData
-	firstBatches := appendBatches(nil, &instances, entries[:1], state, findShapeBatchKeys(state), shapeImages)
+	firstBatches := appendBatches(nil, &instances, entries[:1], state, findShapeBatchKeys(state), shapeImages, nil)
 
-	got := appendBatches(firstBatches, &instances, entries[1:], state, findShapeBatchKeys(state), shapeImages)
+	got := appendBatches(firstBatches, &instances, entries[1:], state, findShapeBatchKeys(state), shapeImages, nil)
 
 	want := []batch{
 		{entries: entries[0:1], firstInstance: 0, instanceCount: 1},
@@ -69,7 +69,7 @@ func TestBatchesBreakWhereAnEntrysClipDiffersFromTheOneBefore(t *testing.T) {
 	state := newShapeFrame(shapes, makeEntrySorter(nil))
 	entries := state.sorter.entries
 
-	got := appendBatches(nil, &listInstanceData{}, entries, state, findShapeBatchKeys(state), shapeImages)
+	got := appendBatches(nil, &listInstanceData{}, entries, state, findShapeBatchKeys(state), shapeImages, nil)
 
 	want := []batch{
 		{entries: entries[0:1], firstInstance: 0, instanceCount: 1},
@@ -106,7 +106,7 @@ func TestInstancesOfAMaterialTakingAnArgumentGoIntoItsStridesStreamEachFollowedB
 	instances := listInstanceData{streams: []instanceStream{{stride: 160, data: slices.Repeat([]byte{0xff}, 6*160)}}}
 	instances.reset()
 
-	got := appendBatches(nil, &instances, state.sorter.entries, state, keys, shapeImages)
+	got := appendBatches(nil, &instances, state.sorter.entries, state, keys, shapeImages, nil)
 
 	entries := state.sorter.entries
 	want := []batch{

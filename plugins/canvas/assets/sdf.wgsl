@@ -31,22 +31,6 @@ struct Argument {
 // DistanceField's Spread of zero is.
 const sdf_default_spread = 8.0;
 
-// sdf_largest_inner bounds a profile's inner, which Outline and the other
-// constructors make the largest float32, so the ramp at its edge stays
-// finite.
-const sdf_largest_inner = 1e9;
-
-// sdf_find_unit_offset answers offset, a vector in the world, in the unit
-// square, through the inverse of linear, which maps the unit square into the
-// world, so it falls the same way under any rotation or mirroring.
-fn sdf_find_unit_offset(linear: mat2x2<f32>, offset: vec2<f32>) -> vec2<f32> {
-	let area = determinant(linear);
-	if abs(area) < 1e-30 {
-		return vec2<f32>(0.0);
-	}
-	return vec2<f32>(linear[1].y * offset.x - linear[1].x * offset.y, linear[0].x * offset.y - linear[0].y * offset.x) / area;
-}
-
 // canvas_sdf_vertex is canvas_sprite_vertex for the SDF material: a sprite's
 // quad as it is, its field baked larger, and a shape's grown by its
 // profile's outer reach, the offset's length and a target pixel, its
@@ -57,7 +41,7 @@ fn canvas_sdf_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_index
 	let corner = canvas_quad_corner(vertex);
 	let instance_data = canvas_instances[instance];
 	let profile = instance_data.argument;
-	let offset = sdf_find_unit_offset(mat2x2<f32>(instance_data.transform[0], instance_data.transform[1]), profile.offset);
+	let offset = canvas_find_unit_offset(mat2x2<f32>(instance_data.transform[0], instance_data.transform[1]), profile.offset);
 	var placed_corner: vec2<f32>;
 	if canvas_is_shape(instance_data) {
 		let shape_offset = abs(offset * instance_data.size);
@@ -68,25 +52,6 @@ fn canvas_sdf_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_index
 		placed_corner = canvas_place_corner(instance_data, corner);
 	}
 	return canvas_make_quad_varyings(instance, instance_data, placed_corner, placed_corner - offset);
-}
-
-// sdf_ramp answers 0 where amount is a pixel below zero, 1 a pixel above,
-// rising across it, pixel being how much amount changes over a pixel.
-fn sdf_ramp(amount: f32, pixel: f32) -> f32 {
-	return clamp(amount / pixel + 0.5, 0.0, 1.0);
-}
-
-// sdf_coverage answers how much of a fragment profile's band covers, distance
-// from the edge, positive outside it, changing by pixel over a pixel.
-fn sdf_coverage(profile: Argument, distance: f32, pixel: f32) -> f32 {
-	let inside = sdf_ramp(distance + min(profile.inner, sdf_largest_inner), pixel);
-	if profile.falloff <= 0.0 {
-		return inside * sdf_ramp(profile.outer - distance, pixel);
-	}
-	// The fall spans at least a pixel, so even a band of no softness is
-	// anti-aliased.
-	let fall = clamp((distance - profile.plateau) / max(profile.outer - profile.plateau, pixel), 0.0, 1.0);
-	return inside * pow(max(1.0 - fall, 1e-30), profile.falloff);
 }
 
 // canvas_sdf_fragment draws the profile's band as its colour times the
@@ -103,5 +68,5 @@ fn canvas_sdf_fragment(in: CanvasVaryings) -> @location(0) vec4<f32> {
 	let field_distance = (0.5 - select(0.0, texel.a, within)) * 2.0 * spread;
 	let distance = select(field_distance, canvas_shape_distance(in), canvas_is_shape(instance_data));
 	let pixel = max(fwidth(distance), 1e-6);
-	return canvas_output(profile.color * in.tint * sdf_coverage(profile, distance, pixel));
+	return canvas_output(profile.color * in.tint * canvas_band_coverage(profile.inner, profile.outer, profile.plateau, profile.falloff, distance, pixel));
 }

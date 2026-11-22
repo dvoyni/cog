@@ -206,6 +206,13 @@
 //	layout := libraryHandle.Get().Layout(canvas.Text{String: "Continue", Font: title, Size: 24, WrapWidth: 200, Align: canvas.TextAlignCenter})
 //	buttonSize := layout.Size()
 //
+// A run of text is drawn as one entry, through a transform about a pivot of
+// its layout's box, each glyph made a distance field at its first draw and
+// packed into the glyph atlas. TextMaterial draws its fill, and a Profile,
+// its argument, under it, so every label of a frame batches:
+//
+//	list.DrawTextWith(canvas.Text{String: unit.Name, Size: 12, Pivot: canvas.PivotBottom, Transform: m.Translation2x3(x, y-36)}, canvas.Outline(2, m.Black))
+//
 // A tool asks for an inspection of the next frame through its Assets
 // parameter, and reads it in a task off InspectedEvent: each camera the frame
 // was seen through, its batches and their entries, with render's own

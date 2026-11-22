@@ -8,7 +8,7 @@ importing [kernel](../../kernel), [metronome](../metronome),
 [typesetting](https://github.com/go-text/typesetting), and reaches no gfx.
 
 It is being built from [docs/design.md](docs/design.md). So far a frame's
-recording tasks record shapes and sprites and set cameras into draw lists
+recording tasks record shapes, sprites and runs of text and set cameras into draw lists
 of their own, which canvas merges in registration order, sorts by their
 sort key and draws through each camera, or the default camera into the main
 window, the first window opened of those still open, an instanced draw for
@@ -23,8 +23,10 @@ headers through `Assets`, and 2D materials made from whole WGSL files that
 include canvas's include, a fragment-only one drawing through canvas's
 vertex stage, with their parameters set by name. Font sets are made and
 destroyed through `FontLibrary`'s writing side, their fonts measured and text
-laid out, shaped with bidi and broken into lines, with no text drawn yet. A frame can be inspected in canvas's terms, beside render's
-inspection of it.
+laid out, shaped with bidi and broken into lines, and drawn in one font a
+run, each glyph made a distance field at its first draw and packed into
+the glyph atlas, its outline or other profile drawn under its fill. A frame
+can be inspected in canvas's terms, beside render's inspection of it.
 
 ## Shape
 
@@ -32,24 +34,28 @@ inspection of it.
   the kernel's config, under `PluginName`: `RegroupedLayers`, the layers
   whose entries of equal keys canvas may regroup by batch,
   `DefaultFilter`, the filter of sprites naming none, `AtlasPageSize`, the
-  side of a sprite atlas's pages, zero meaning 2048, a multiple of the atlas grid
+  side of a sprite atlas's pages and the glyph atlas's, zero meaning 2048, a multiple of the atlas grid
   holding the white texel's cell, 12 at the default 3 mip levels and 5 at
   one, a side that is not raised to the next that is and reported once,
-  `AtlasLayerCeiling`, the most pages it grows to, zero meaning 256,
+  `AtlasLayerCeiling`, the most pages each grows to, zero meaning 256,
   `OwnTextureSize`, the side past which an image is drawn from a texture
   of its own, zero meaning half a page, `MipLevels`, how many mip levels a
   page has, zero meaning 3, fixing the atlas grid and the gutter at
   2^(levels−1) texels, more than 12 lowered to 12 and reported once, and
   `DoNotGenerateMipMaps`, which makes pages of one level, for pixel-perfect
   games, `Language`, the current language at start, `TextSize`, the em
-  of a run of text of no size, zero meaning 16, and `DefaultFontSet`, the
-  default font set, made as canvas starts, its zero JetBrains Mono alone.
+  of a run of text of no size, zero meaning 16, `GlyphFieldEm` and
+  `GlyphFieldRange`, the field em and range of a font giving none, zero
+  meaning 48 texels to the em and 16 texels across a glyph's edge, and
+  `DefaultFontSet`, the default font set, made as canvas starts, its zero
+  JetBrains Mono alone.
 - **`FrameEvent`** is the frame its users record, published inside each of
   render's `FrameEvent`s. A plugin that records schedules its recording tasks
   after its `Ready` and joins them into the out dependency it returns.
 - **`DrawList`** is the task parameter a recording task records through,
-  each task's a draw list of its own. An entry recorded or a camera set
-  outside the frame is refused and reported once for the task.
+  each task's a draw list of its own, reading `FontLibrary` for its text.
+  An entry recorded or a camera set outside the frame is refused and
+  reported once for the task.
 - **`Camera`**, set for one frame with `SetCamera`, draws the entries of its
   `Layers` (`MakeLayer(layer)` for one, `MakeLayers(ranges...)` for up to
   four ranges) into its target, a `Window` or a `Texture`, the main window
@@ -243,7 +249,7 @@ inspection of it.
   the window it drew into and its viewport in pixels, its batches with their
   material, the texture they drew from, an atlas's or a render texture's,
   their filter, their clip and the entries it did not
-  cull, each entry a shape or a sprite, with its sort key and its draw
+  cull, each entry a shape, a sprite or a run of text, with its sort key and its draw
   list's place, and render's `Inspection` of the frame beside it.
 - **`cog.canvas/canvas.wgsl`** is canvas's include, declaring the camera's
   pass parameters at `@group(0)` and canvas's instance data and atlas at
@@ -258,7 +264,9 @@ inspection of it.
   `canvas_covers` leaves out a hollow centre, as it leaves out a rounded
   shape's corners. canvas's own
   default material, `cog.canvas/default.wgsl`, includes, as do its SDF
-  material, `cog.canvas/sdf.wgsl`, and
+  material, `cog.canvas/sdf.wgsl`, its text material, `cog.canvas/text.wgsl`,
+  both drawing a profile's band through the include's
+  `canvas_band_coverage`, and
   `cog.canvas/viewport.wgsl`, the shader of the quads canvas draws over a
   viewport: a camera's clear, what a multisampled camera resolved, and an
   image premultiplied into its cell of an atlas. Beside them is canvas's
@@ -283,7 +291,9 @@ inspection of it.
   holds a `Default` **`Font`** and **`LanguageFonts`**, the fonts serving
   some languages. A `Font` is a `Path` in platform's FS, a TrueType or
   OpenType font or a collection, empty meaning canvas's JetBrains Mono, its
-  collection's `Index`, and a variable font's `Variations`, each a
+  collection's `Index`, its `FieldEm` and `FieldRange`, the em its glyphs'
+  distance fields are made at and how far they reach across an edge, in
+  field texels, zero meaning the `Config`'s, and a variable font's `Variations`, each a
   **`Variation{Axis, Value}`** whose axis **`AxisTagFromName("wght")`**
   answers, a name of other than four bytes answering the zero tag, whose
   variation is ignored and reported once. A font file that fails to load is
@@ -304,7 +314,27 @@ inspection of it.
   line by its lines' height, `LineCount()`, `Baseline()`, its first line's
   from the box's top, `LineWidth(line)`, and `ClusterPosition(cluster)`,
   where a grapheme cluster starts on its line's baseline, one past the last
-  where the text ends, for carets and selections.
+  where the text ends, for carets and selections. As an entry, a `Text`
+  also carries its `Transform`, an `m.Mat2x3` about its `Pivot`, a point of
+  its layout's box, its `Texels` in em, its `Tint`, the fill's colour, white
+  when zero, its `Material`, zero meaning **`TextMaterial`**, its `Clip`, its
+  `Filter`, zero meaning linear, as a field is read, and its sort key.
+  `DrawText` records a run, laid out then, as `Layout` lays it out, one
+  entry whose glyphs draw in order; `DrawTextWith` gives its material's
+  argument, `TextMaterial`'s a `Profile` drawn under the fill, such as
+  `Outline(2, black)`, in the font's field texels, its colour faded by the
+  tint's alpha alone. Each glyph is made a single-channel distance field
+  the first time it is drawn, in the recording task, and packed into the
+  **glyph atlas**, an R8 2D-array texture whose pages grow as the sprite
+  atlases' do, each field with a transparent gutter of one texel, copied
+  in by the frame's first command list; a glyph no page holds draws
+  nothing, reported once. Small text, whose field spans more than 2 texels
+  a pixel, is read at four points a pixel and its glyphs' pens placed on
+  whole pixels, unturned, as a bitmap glyph's are. The include's
+  `canvas_glyph_spread` and `canvas_glyph_pen` answer a glyph's field's
+  spread and its pen, for a custom material of runs. Every run of a frame drawn
+  with `TextMaterial` batches with the next, whatever its size, tint or
+  profile.
 - **`Report`** is a mistake canvas finds at run time, logged once and carried
   past. Its `ReportKind` names it for tests.
 - **`canvastest`** runs canvas in a real kernel on render's fake GPU, with a
@@ -318,14 +348,16 @@ inspection of it.
   `Targets`, each target's size and scale as it was last drawn, read by a
   camera's conversions and written by canvas's own task after each frame's
   drawing; `FontLibrary`, its font sets, its current language and the icons and
-  colours registered, written only through `ElevateFontLibrary`, and by canvas's
+  colours registered, and the glyphs made distance fields for drawing,
+  under a lock of their own, written only through `ElevateFontLibrary`, and by canvas's
   own task making the default set as it starts; a
   private draw state, holding each task's draw list, the frame's entries
   and cameras sorted, the inspection asked for, the unloads and preloads
   asked for, the image sizes read and the 2D materials made, under a lock
   of their own; a private renderer, holding the
-  default, clear, composite and pack materials, the sprite atlases, the
-  white texel in the sRGB one, each image drawn, where it is packed and
+  default, SDF, text, clear, composite and pack materials, the sprite
+  atlases, the white texel in the sRGB one, the glyph atlas and where each
+  glyph is packed, each image drawn, where it is packed and
   when it was last drawn, the sources preloaded, the cameras drawn, the
   entries' keys, the instance data and the batches; and a private list of
   the open windows. The images `ImageFromFile` and `ImageFromTexture`
@@ -337,7 +369,8 @@ inspection of it.
   images load, and in `Assets`, for an image's header; render's
   texture descriptors through it, for a texture target's size and format
   and an image's size,
-  and `platform.WindowManager`, for read, for a window target's size, in the
+  and `platform.WindowManager`, for read, for a window target's size, and its
+  own `FontLibrary`, for read, for the glyphs' fields, in the
   task that draws the frame; and `platform.FS`, for read, through
   `ElevateFontLibrary` and in its task making the default font set, as fonts
   load.

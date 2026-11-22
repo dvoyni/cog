@@ -37,22 +37,34 @@ type fontLibrary struct {
 	// *textShaper, one a layout, since a shaper is not safe for concurrent
 	// use and layouts are made under the read lock.
 	shapers sync.Pool
+	// glyphs are the glyphs made distance fields for drawing, each at
+	// glyphFieldEm texels to the em and reaching glyphFieldRange texels
+	// across its edge when its font gives none, Config.GlyphFieldEm's and
+	// Config.GlyphFieldRange's.
+	glyphs          glyphTable
+	glyphFieldEm    int
+	glyphFieldRange int
 }
 
 // newFontLibrary answers the FontLibrary resource, its reports logged to logger, its
 // current language language, a run of text of no size laid out at
-// textSize, and its default set JetBrains Mono alone until canvas starts
-// and makes it of defaultDescriptor.
-func newFontLibrary(logger *kernel.Logger, language string, textSize float32, defaultDescriptor FontSetDescriptor) *fontLibrary {
+// textSize, a glyph of a font giving no field em or range made a distance
+// field of glyphFieldEm texels to the em reaching glyphFieldRange texels
+// across its edge, and its default set JetBrains Mono alone until canvas
+// starts and makes it of defaultDescriptor.
+func newFontLibrary(logger *kernel.Logger, language string, textSize float32, glyphFieldEm, glyphFieldRange int, defaultDescriptor FontSetDescriptor) *fontLibrary {
 	return &fontLibrary{
 		logger:            logger,
 		language:          language,
 		textSize:          textSize,
+		glyphFieldEm:      glyphFieldEm,
+		glyphFieldRange:   glyphFieldRange,
 		sets:              []fontSetSlot{makeFontSetSlot(nil, logger, FontSetDescriptor{})},
 		defaultDescriptor: defaultDescriptor,
 		icons:             map[string]IconDescriptor{},
 		colors:            map[string]m.Color{},
 		shapers:           sync.Pool{New: func() any { return new(textShaper) }},
+		glyphs:            glyphTable{indexes: map[glyphKey]uint32{}},
 	}
 }
 
@@ -77,14 +89,27 @@ func (l *fontLibrary) Metrics(set FontSet, size float32, language string) FontMe
 // Config.TextSize. A set canvas does not hold is laid out as the default
 // set, reported once.
 func (l *fontLibrary) Layout(text Text) TextLayout {
+	return l.layOutText(text, false)
+}
+
+// layOutText answers text laid out as Layout lays it out, and, when
+// drawn, each of its glyphs' fields found in the glyph table, made the
+// first time through the shaper's face of its font, at its font's field em
+// and range, zero meaning the library's, its glyphs of no field left out.
+func (l *fontLibrary) layOutText(text Text, drawn bool) TextLayout {
 	slot := l.findSlot(text.Font)
 	if slot == nil {
 		l.reportSetNotHeld(text.Font, "laying out text in")
 		slot = &l.sets[0]
 	}
+	textFont := slot.findLanguageFont(l.language)
 	shaper := l.shapers.Get().(*textShaper)
 	defer l.shapers.Put(shaper)
-	return shaper.layOut(slot.findLanguageFont(l.language), text, cmp.Or(text.Size, l.textSize), l.language)
+	layout := shaper.layOut(textFont, text, cmp.Or(text.Size, l.textSize), l.language)
+	if drawn {
+		layout.glyphs = l.glyphs.assignFields(layout.glyphs, shaper.findFace(textFont), textFont.font, cmp.Or(textFont.fieldEm, l.glyphFieldEm), cmp.Or(textFont.fieldRange, l.glyphFieldRange))
+	}
+	return layout
 }
 
 // findSlot answers set's slot, nil when canvas does not hold set.
