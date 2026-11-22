@@ -98,12 +98,14 @@ func (l DrawList) DrawSpritesWith[T any](sprites []Sprite, arguments []T) {
 }
 
 // DrawText records text, a run of text, into the task's draw list for the
-// frame being recorded: laid out now, as FontLibrary.Layout lays it out,
-// then drawn as one entry, its glyphs in order, through TextMaterial when
-// its Material is zero, which draws its fill alone. Each glyph is made a
-// distance field the first time it is drawn, in the calling task, and
-// packed into the glyph atlas as canvas draws the frame. Outside the frame,
-// it is refused and reported once for the task.
+// frame being recorded: laid out now through the layout cache, as
+// FontLibrary.Layout lays it out, so a label drawn frame after frame is
+// shaped once, then drawn as one entry, its glyphs in order, through
+// TextMaterial when its Material is zero, which draws its fill alone. Each
+// glyph is made a distance field the first time it is drawn, in the calling
+// task, unless FontLibrary.Preload made it, and packed into the glyph atlas
+// as canvas draws the frame. Outside the frame, it is refused and reported
+// once for the task.
 func (l DrawList) DrawText(text Text) {
 	layout := l.fonts.Get().(*fontLibrary).layOutText(text, true)
 	l.list.record(l.state.Get(), EntryKindText, &l.list.texts, nil, nil, laidOutText{text: text, layout: layout})

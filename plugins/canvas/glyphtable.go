@@ -1,6 +1,7 @@
 package canvas
 
 import (
+	"cmp"
 	"sync"
 
 	"github.com/go-text/typesetting/font"
@@ -16,6 +17,11 @@ type glyphTable struct {
 	// indexes are each glyph's index among fields.
 	indexes map[glyphKey]uint32
 	fields  []glyphField
+	// fieldEm and fieldRange are the em, in field texels, a glyph is made
+	// at and how far its field reaches across its edge when its font gives
+	// none, Config.GlyphFieldEm's and Config.GlyphFieldRange's.
+	fieldEm    int
+	fieldRange int
 }
 
 // glyphKey is a glyph of one loaded font: its parsed font, which each
@@ -27,17 +33,19 @@ type glyphKey struct {
 
 // assignFields sets the field of each of glyphs, laid out in textFont, to
 // the index of its field, each made through face, a face of textFont at its
-// variations, at fieldEm texels to the em, reaching fieldRange texels
-// across its edge, the first time it is drawn, and answers glyphs without
+// variations, at textFont's field em and range, zero meaning the table's,
+// the first time it is drawn, and answers glyphs without
 // those of no field, such as spaces, which draw nothing. A field is made
 // outside the lock, so jobs make theirs together; one made by two jobs at
 // once is kept once.
-func (t *glyphTable) assignFields(glyphs []placedGlyph, face *font.Face, textFont *font.Font, fieldEm, fieldRange int) []placedGlyph {
+func (t *glyphTable) assignFields(glyphs []placedGlyph, face *font.Face, textFont loadedFont) []placedGlyph {
+	fieldEm := cmp.Or(textFont.fieldEm, t.fieldEm)
+	fieldRange := cmp.Or(textFont.fieldRange, t.fieldRange)
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	drawnGlyphs := glyphs[:0]
 	for _, glyph := range glyphs {
-		key := glyphKey{font: textFont, id: glyph.id}
+		key := glyphKey{font: textFont.font, id: glyph.id}
 		field, made := t.indexes[key]
 		if !made {
 			t.mutex.Unlock()

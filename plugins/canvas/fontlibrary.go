@@ -3,6 +3,7 @@ package canvas
 import (
 	"cmp"
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/dvoyni/cog/kernel"
@@ -37,34 +38,32 @@ type fontLibrary struct {
 	// *textShaper, one a layout, since a shaper is not safe for concurrent
 	// use and layouts are made under the read lock.
 	shapers sync.Pool
-	// glyphs are the glyphs made distance fields for drawing, each at
-	// glyphFieldEm texels to the em and reaching glyphFieldRange texels
-	// across its edge when its font gives none, Config.GlyphFieldEm's and
-	// Config.GlyphFieldRange's.
-	glyphs          glyphTable
-	glyphFieldEm    int
-	glyphFieldRange int
+	// glyphs are the glyphs made distance fields for drawing.
+	glyphs glyphTable
+	// layouts are the runs laid out lately, which Layout and DrawText
+	// answer from.
+	layouts layoutCache
 }
 
-// newFontLibrary answers the FontLibrary resource, its reports logged to logger, its
-// current language language, a run of text of no size laid out at
-// textSize, a glyph of a font giving no field em or range made a distance
-// field of glyphFieldEm texels to the em reaching glyphFieldRange texels
-// across its edge, and its default set JetBrains Mono alone until canvas
-// starts and makes it of defaultDescriptor.
-func newFontLibrary(logger *kernel.Logger, language string, textSize float32, glyphFieldEm, glyphFieldRange int, defaultDescriptor FontSetDescriptor) *fontLibrary {
+// newFontLibrary answers the FontLibrary resource of config, its reports
+// logged to logger: its current language config's Language, a run of text
+// of no size laid out at its TextSize, a glyph of a font giving no field em
+// or range made a distance field of its GlyphFieldEm and GlyphFieldRange, a
+// layout unused for its LayoutIdleFrames frames freed, each zero meaning
+// its stated default, and its default set JetBrains Mono alone until canvas
+// starts and makes it of its DefaultFontSet.
+func newFontLibrary(logger *kernel.Logger, config *Config) *fontLibrary {
 	return &fontLibrary{
 		logger:            logger,
-		language:          language,
-		textSize:          textSize,
-		glyphFieldEm:      glyphFieldEm,
-		glyphFieldRange:   glyphFieldRange,
+		language:          config.Language,
+		textSize:          cmp.Or(config.TextSize, 16),
 		sets:              []fontSetSlot{makeFontSetSlot(nil, logger, FontSetDescriptor{})},
-		defaultDescriptor: defaultDescriptor,
+		defaultDescriptor: config.DefaultFontSet,
 		icons:             map[string]IconDescriptor{},
 		colors:            map[string]m.Color{},
 		shapers:           sync.Pool{New: func() any { return new(textShaper) }},
-		glyphs:            glyphTable{indexes: map[glyphKey]uint32{}},
+		glyphs:            glyphTable{indexes: map[glyphKey]uint32{}, fieldEm: cmp.Or(config.GlyphFieldEm, 48), fieldRange: cmp.Or(config.GlyphFieldRange, 16)},
+		layouts:           layoutCache{layouts: map[layoutInput]*cachedLayout{}, idleFrames: uint64(cmp.Or(config.LayoutIdleFrames, 2))},
 	}
 }
 
@@ -76,40 +75,83 @@ func (l *fontLibrary) Language() string { return l.language }
 // language's first font in set, or set's default font. A set canvas does
 // not hold is measured as the default set, reported once.
 func (l *fontLibrary) Metrics(set FontSet, size float32, language string) FontMetrics {
-	slot := l.findSlot(set)
-	if slot == nil {
-		l.reportSetNotHeld(set, "measuring")
-		slot = &l.sets[0]
-	}
-	return slot.findLanguageFont(cmp.Or(language, l.language)).findMetrics(size)
+	return l.findHeldSlot(set, "measuring").findLanguageFont(cmp.Or(language, l.language)).findMetrics(size)
 }
 
 // Layout answers text shaped, broken into lines and measured, in the font
 // of its set measuring the current language, at its size, zero meaning
-// Config.TextSize. A set canvas does not hold is laid out as the default
-// set, reported once.
+// Config.TextSize, from the layout cache, which DrawText lays out through.
+// A set canvas does not hold is laid out as the default set, reported once.
 func (l *fontLibrary) Layout(text Text) TextLayout {
 	return l.layOutText(text, false)
 }
 
-// layOutText answers text laid out as Layout lays it out, and, when
-// drawn, each of its glyphs' fields found in the glyph table, made the
-// first time through the shaper's face of its font, at its font's field em
-// and range, zero meaning the library's, its glyphs of no field left out.
-func (l *fontLibrary) layOutText(text Text, drawn bool) TextLayout {
-	slot := l.findSlot(text.Font)
-	if slot == nil {
-		l.reportSetNotHeld(text.Font, "laying out text in")
-		slot = &l.sets[0]
-	}
-	textFont := slot.findLanguageFont(l.language)
+// Preload makes the distance fields of the glyphs of text, shaped on one
+// line in the font of set measuring the current language, which a run of
+// any size draws, so the first draw of a run of it makes none. A set canvas
+// does not hold preloads the default set's, reported once.
+func (l *fontLibrary) Preload(set FontSet, text string) {
+	textFont := l.findHeldSlot(set, "preloading glyphs of").findLanguageFont(l.language)
 	shaper := l.shapers.Get().(*textShaper)
 	defer l.shapers.Put(shaper)
-	layout := shaper.layOut(textFont, text, cmp.Or(text.Size, l.textSize), l.language)
+	layout := shaper.layOut(textFont, layoutInput{text: text, font: textFont.font, em: l.textSize, language: l.language})
+	l.glyphs.assignFields(layout.glyphs, shaper.findFace(textFont), textFont)
+}
+
+// layOutText answers text laid out as Layout lays it out, through the
+// layout cache, shaped the first time, and, when drawn, its glyphs those
+// it draws: a copy of the layout's, each assigned its field in the glyph
+// table, without those of no field, found the first time the cached layout
+// is drawn and kept beside it. Two jobs drawing it first at once each find
+// them, and the first kept is answered to both.
+func (l *fontLibrary) layOutText(text Text, drawn bool) TextLayout {
+	input, textFont := l.makeLayoutInput(text)
+	cached := l.layouts.find(input)
+	if cached == nil || drawn && cached.drawnGlyphs.Load() == nil {
+		shaper := l.shapers.Get().(*textShaper)
+		defer l.shapers.Put(shaper)
+		if cached == nil {
+			cached = l.layouts.add(input, shaper.layOut(textFont, input))
+		}
+		if drawn {
+			drawnGlyphs := l.glyphs.assignFields(slices.Clone(cached.layout.glyphs), shaper.findFace(textFont), textFont)
+			cached.drawnGlyphs.CompareAndSwap(nil, &drawnGlyphs)
+		}
+	}
+	layout := cached.layout
 	if drawn {
-		layout.glyphs = l.glyphs.assignFields(layout.glyphs, shaper.findFace(textFont), textFont.font, cmp.Or(textFont.fieldEm, l.glyphFieldEm), cmp.Or(textFont.fieldRange, l.glyphFieldRange))
+		layout.glyphs = *cached.drawnGlyphs.Load()
 	}
 	return layout
+}
+
+// makeLayoutInput answers what text's layout is made of, at the current
+// language, and the font its set picks for that language: a set canvas does
+// not hold picks the default set's, reported once.
+func (l *fontLibrary) makeLayoutInput(text Text) (layoutInput, loadedFont) {
+	textFont := l.findHeldSlot(text.Font, "laying out text in").findLanguageFont(l.language)
+	return layoutInput{
+		text:       text.String,
+		font:       textFont.font,
+		em:         cmp.Or(text.Size, l.textSize),
+		wrapWidth:  text.WrapWidth,
+		align:      text.Align,
+		lineHeight: text.LineHeight,
+		tracking:   text.Tracking,
+		language:   l.language,
+	}, textFont
+}
+
+// findHeldSlot answers set's slot, or the default set's when canvas does
+// not hold set, reported once, refused as use, what was being done with
+// it, says.
+func (l *fontLibrary) findHeldSlot(set FontSet, use string) *fontSetSlot {
+	slot := l.findSlot(set)
+	if slot == nil {
+		l.reportSetNotHeld(set, use)
+		slot = &l.sets[0]
+	}
+	return slot
 }
 
 // findSlot answers set's slot, nil when canvas does not hold set.

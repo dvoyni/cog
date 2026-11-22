@@ -207,8 +207,10 @@
 //	buttonSize := layout.Size()
 //
 // A run of text is drawn as one entry, through a transform about a pivot of
-// its layout's box, each glyph made a distance field at its first draw and
-// packed into the glyph atlas. TextMaterial draws its fill, and a Profile,
+// its layout's box, laid out through the layout cache Layout answers from,
+// so a label drawn every frame is shaped once, each glyph made a distance
+// field at its first draw, or ahead of it by FontLibrary.Preload, and packed
+// into the glyph atlas. TextMaterial draws its fill, and a Profile,
 // its argument, under it, so every label of a frame batches:
 //
 //	list.DrawTextWith(canvas.Text{String: unit.Name, Size: 12, Pivot: canvas.PivotBottom, Transform: m.Translation2x3(x, y-36)}, canvas.Outline(2, m.Black))

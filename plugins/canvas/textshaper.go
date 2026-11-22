@@ -64,22 +64,23 @@ type textShaper struct {
 	lineOffsets     []float32
 }
 
-// layOut answers text laid out in textFont at em, in world units, shaped
-// in languageTag.
-func (s *textShaper) layOut(textFont loadedFont, text Text, em float32, languageTag string) TextLayout {
+// layOut answers the layout of input, its text laid out in textFont, its
+// font's, at its em, in world units, shaped in its language.
+func (s *textShaper) layOut(textFont loadedFont, input layoutInput) TextLayout {
+	em := input.em
 	s.face = s.findFace(textFont)
 	metrics := textFont.findMetrics(em)
 	s.scale = em / (shapingEm * 64)
-	s.lineHeight = metrics.LineHeight * cmp.Or(text.LineHeight, 1)
+	s.lineHeight = metrics.LineHeight * cmp.Or(input.lineHeight, 1)
 	s.maxWidth = math.MaxInt32
-	if text.WrapWidth > 0 {
-		s.maxWidth = fixed.Int26_6(text.WrapWidth / s.scale)
+	if input.wrapWidth > 0 {
+		s.maxWidth = fixed.Int26_6(input.wrapWidth / s.scale)
 	}
-	s.tracking = fixed.Int26_6(text.Tracking * shapingEm * 64)
-	s.language = language.NewLanguage(languageTag)
-	s.layout = TextLayout{baseline: (s.lineHeight-metrics.Ascent-metrics.Descent)/2 + metrics.Ascent, em: em, glyphs: make([]placedGlyph, 0, len(text.String))}
+	s.tracking = fixed.Int26_6(input.tracking * shapingEm * 64)
+	s.language = language.NewLanguage(input.language)
+	s.layout = TextLayout{baseline: (s.lineHeight-metrics.Ascent-metrics.Descent)/2 + metrics.Ascent, em: em, glyphs: make([]placedGlyph, 0, len(input.text))}
 	s.runes = s.runes[:0]
-	for _, character := range text.String {
+	for _, character := range input.text {
 		s.runes = append(s.runes, character)
 	}
 	s.segmenter.Init(s.runes)
@@ -110,7 +111,7 @@ func (s *textShaper) layOut(textFont loadedFont, text Text, em float32, language
 		s.layOutParagraph(len(s.runes), len(s.runes))
 	}
 	s.placeLineEnd(len(s.graphemeStarts))
-	s.alignLines(text)
+	s.alignLines(input)
 	layout := s.layout
 	s.layout = TextLayout{}
 	s.face = nil
@@ -256,11 +257,11 @@ func (s *textShaper) placeLineEnd(cluster int) {
 	s.lineOfCluster[cluster] = line
 }
 
-// alignLines sizes the layout's box, text's wrap width or its widest line,
-// by its lines' height, and moves each cluster position and each glyph by
-// its line's alignment in it.
-func (s *textShaper) alignLines(text Text) {
-	width := text.WrapWidth
+// alignLines sizes the layout's box, input's wrap width or its widest
+// line, by its lines' height, and moves each cluster position and each
+// glyph by its line's alignment in it.
+func (s *textShaper) alignLines(input layoutInput) {
+	width := input.wrapWidth
 	if width <= 0 {
 		width = slices.Max(s.layout.lineWidths)
 	}
@@ -270,9 +271,9 @@ func (s *textShaper) alignLines(text Text) {
 		room := width - lineWidth
 		var offset float32
 		switch {
-		case text.Align == TextAlignCenter:
+		case input.align == TextAlignCenter:
 			offset = room / 2
-		case (text.Align == TextAlignEnd) != s.lineRightToLeft[line]:
+		case (input.align == TextAlignEnd) != s.lineRightToLeft[line]:
 			offset = room
 		}
 		s.lineOffsets = append(s.lineOffsets, offset)

@@ -65,6 +65,10 @@ type Config struct {
 	// TextSize is the em, in world units, of a run of text whose Size is
 	// zero; zero means 16.
 	TextSize float32
+	// LayoutIdleFrames is how many frames a run's layout may go unused,
+	// neither drawn nor measured, before the layout cache frees it; zero
+	// means 2.
+	LayoutIdleFrames int
 	// GlyphFieldEm is the em, in field texels, a font's glyphs are made
 	// distance fields at when its Font.FieldEm is zero; zero means 48.
 	// GlyphFieldRange is how far a field reaches across a glyph's edge, half
@@ -136,7 +140,7 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	configurator.InitResource(newRenderer(atlasPageSize, cmp.Or(canvasConfig.AtlasLayerCeiling, 256), cmp.Or(canvasConfig.OwnTextureSize, atlasPageSize/2), mipLevelCount))
 	configurator.InitResource(&windowList{})
 	configurator.InitResource[Targets](&drawnTargets{})
-	configurator.InitResource[FontLibrary](newFontLibrary(configurator.Logger(), canvasConfig.Language, cmp.Or(canvasConfig.TextSize, 16), cmp.Or(canvasConfig.GlyphFieldEm, 48), cmp.Or(canvasConfig.GlyphFieldRange, 16), canvasConfig.DefaultFontSet))
+	configurator.InitResource[FontLibrary](newFontLibrary(configurator.Logger(), canvasConfig))
 	configurator.BindSocket(platform.ReadMountSocket{FS: makeAssetFS(), Priority: math.MinInt, Prefix: assetPrefix})
 	openFrameTask := configurator.RegisterTask1(openFrame)
 	sortEntriesTask := configurator.RegisterTask1(sortEntries)

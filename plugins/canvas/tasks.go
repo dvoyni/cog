@@ -91,15 +91,18 @@ func sortEntries(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*drawState]
 // naming none, a converted image read from platform's FS and a glyph's
 // field from the FontLibrary resource, then gives back
 // the 2D materials released since the frame before was drawn, so the frame
-// recorded as one was released still drew it. A frame
+// recorded as one was released still drew it, and frees the layouts now
+// unused for Config.LayoutIdleFrames frames. A frame
 // inspected is written down for the pending request, and render is asked
 // again for its inspection, so a request render joined to an inspection of
 // an earlier frame still gets one.
 func draw(k *kernel.Kernel, beat metronome.Beat, frame render.Frame, inventory render.Inventory, files kernel.Read[platform.FS], manager kernel.Read[*platform.WindowManager], windows kernel.Read[*windowList], fonts kernel.Read[FontLibrary], state kernel.Read[*drawState], rendering kernel.Write[*renderer]) kernel.NoResult {
 	canvasState := state.Get()
 	drawing := rendering.Get()
-	drawing.drawCameras(frame, inventory, files.Get(), manager.Get(), windows.Get().mainWindow(), fonts.Get().(*fontLibrary), canvasState)
+	library := fonts.Get().(*fontLibrary)
+	drawing.drawCameras(frame, inventory, files.Get(), manager.Get(), windows.Get().mainWindow(), library, canvasState)
 	canvasState.materials.freeReleased(inventory)
+	library.layouts.endFrame()
 	if canvasState.frameInspected {
 		canvasState.inspector.record(canvasState.makeInspection(beat, drawing.cameraDraws))
 		frame.RequestInspection()

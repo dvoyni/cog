@@ -44,7 +44,9 @@ can be inspected in canvas's terms, beside render's inspection of it.
   2^(levels−1) texels, more than 12 lowered to 12 and reported once, and
   `DoNotGenerateMipMaps`, which makes pages of one level, for pixel-perfect
   games, `Language`, the current language at start, `TextSize`, the em
-  of a run of text of no size, zero meaning 16, `GlyphFieldEm` and
+  of a run of text of no size, zero meaning 16, `LayoutIdleFrames`, how
+  many frames a layout goes unused before the layout cache frees it, zero
+  meaning 2, `GlyphFieldEm` and
   `GlyphFieldRange`, the field em and range of a font giving none, zero
   meaning 48 texels to the em and 16 texels across a glyph's edge, and
   `DefaultFontSet`, the default font set, made as canvas starts, its zero
@@ -274,7 +276,9 @@ can be inspected in canvas's terms, beside render's inspection of it.
   SIL Open Font License in `cog.canvas/jetbrainsmono-OFL.txt`.
 - **`FontLibrary`** is the resource of font sets, read under
   `kernel.Read[canvas.FontLibrary]`: `Language()` answers the current language,
-  `Layout(text)` a **`Text`** laid out with no frame, and
+  `Layout(text)` a **`Text`** laid out with no frame, from the layout
+  cache `DrawText` lays out through, `Preload(set, text)` makes the glyphs
+  of a string ahead of its first draw, and
   `Metrics(set, size, language)` the `FontMetrics` of the font measuring
   `language` in `set`, its first font for that language or else its
   default, at `size`, its em in world units: `Ascent`, `Descent`,
@@ -320,11 +324,17 @@ can be inspected in canvas's terms, beside render's inspection of it.
   when zero, its `Material`, zero meaning **`TextMaterial`**, its `Clip`, its
   `Filter`, zero meaning linear, as a field is read, and its sort key.
   `DrawText` records a run, laid out then, as `Layout` lays it out, one
-  entry whose glyphs draw in order; `DrawTextWith` gives its material's
+  entry whose glyphs draw in order. Both lay out through the **layout
+  cache**, keyed by the run's `String`, the font its `Font` set picks for
+  the current language, its `Size`, `WrapWidth`, `Align`, `LineHeight` and
+  `Tracking`, and the current language, so a
+  label measured or drawn frame after frame is shaped once, and a layout
+  neither for `Config.LayoutIdleFrames` frames is freed; `DrawTextWith` gives its material's
   argument, `TextMaterial`'s a `Profile` drawn under the fill, such as
   `Outline(2, black)`, in the font's field texels, its colour faded by the
   tint's alpha alone. Each glyph is made a single-channel distance field
-  the first time it is drawn, in the recording task, and packed into the
+  the first time it is drawn, in the recording task, unless `Preload` made
+  it, and packed into the
   **glyph atlas**, an R8 2D-array texture whose pages grow as the sprite
   atlases' do, each field with a transparent gutter of one texel, copied
   in by the frame's first command list; a glyph no page holds draws
