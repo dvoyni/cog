@@ -9,26 +9,30 @@ import (
 	"github.com/dvoyni/cog/plugins/metronome"
 )
 
-// inspector keeps the inspection Frame.RequestInspection asks for, one at a
-// time, from its request to its delivery: requested until the next frame
-// begins, recording while that frame records, render's calls appending to
-// it, waiting for the frame's pass timings when the frame was timed, and
-// delivered from the frame's end, or from its timings, until
-// InspectedEvent's jobs have run. The frame state and the asset table share
-// it, through their reporters.
+// inspector keeps the inspection Frame.RequestInspection asks for, one
+// recording at a time, from its request to its delivery: requested until
+// the next frame begins, and recording while that frame records, render's
+// calls appending to it. At the frame's end it leaves the recording, so a
+// request then asks for the next frame to begin: it waits for the frame's
+// pass timings when the frame was timed, and is then delivered, until
+// InspectedEvent's jobs have run, each kept by its frame's beat. Those jobs
+// are published in a batch of their own, which holds back no request. The
+// frame state and the asset table share it, through their reporters.
 type inspector struct {
-	// phase is where the inspection stands, read without the mutex, so
-	// every call of render's checks it, the one cost a frame not inspected
-	// pays, and changed under it.
+	// phase is where the inspection recording stands, read without the
+	// mutex, so every call of render's checks it, the one cost a frame not
+	// inspected pays, and changed under it.
 	phase atomic.Uint32
-	// mutex guards the rest: the inspection, and its command lists with
-	// their orders, sorted by them at the frame's end.
-	mutex      sync.Mutex
-	inspection Inspection
-	lists      []orderedInspectedList
-	// passTimingsAwaited is set while the frame recording is timed, its
-	// pass timings read back after its end.
-	passTimingsAwaited bool
+	// mutex guards the rest: the inspection recording, its command lists
+	// with their orders, sorted by them at the frame's end, and whether its
+	// frame is timed; the inspections of frames ended that wait for their
+	// pass timings; and those delivered, whose InspectedEvent's jobs run.
+	mutex                sync.Mutex
+	inspection           Inspection
+	lists                []orderedInspectedList
+	passTimingsAwaited   bool
+	timedInspections     []Inspection
+	deliveredInspections []Inspection
 }
 
 // isRecording answers whether a frame being inspected is recording, so a
@@ -38,7 +42,7 @@ func (i *inspector) isRecording() bool {
 }
 
 // request asks for an inspection of the next frame to begin; a request
-// while one is pending joins it.
+// while one is requested or recording joins it.
 func (i *inspector) request() {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
@@ -66,40 +70,47 @@ func (i *inspector) awaitPassTimings() {
 }
 
 // finish ends the inspection of the frame recording, its command lists
-// sorted by order, and answers its beat, to deliver; false when none is
-// recording, and when it awaits the frame's pass timings, when
-// addPassTimings delivers it.
+// sorted by order, and delivers it, answering its beat; false when none is
+// recording, and when it waits for the frame's pass timings, when
+// addPassTimings delivers it. Either way no inspection is recording after
+// it, so the next request asks for another.
 func (i *inspector) finish() (metronome.Beat, bool) {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
 	if !i.isRecording() {
 		return metronome.Beat{}, false
 	}
-	if i.passTimingsAwaited {
-		i.phase.Store(uint32(inspectionPhaseTiming))
-	} else {
-		i.phase.Store(uint32(inspectionPhaseDelivered))
-	}
 	slices.SortStableFunc(i.lists, func(a, b orderedInspectedList) int { return cmp.Compare(a.order, b.order) })
 	for _, list := range i.lists {
 		i.inspection.CommandLists = append(i.inspection.CommandLists, *list.list)
 	}
 	i.lists = nil
-	return i.inspection.Beat, !i.passTimingsAwaited
+	ended := i.inspection
+	i.inspection = Inspection{}
+	i.phase.Store(uint32(inspectionPhaseIdle))
+	if i.passTimingsAwaited {
+		i.timedInspections = append(i.timedInspections, ended)
+		return metronome.Beat{}, false
+	}
+	i.deliveredInspections = append(i.deliveredInspections, ended)
+	return ended.Beat, true
 }
 
 // addPassTimings writes timings down in the inspection waiting for the pass
-// timings of the frame of beat, and answers true, for it to be delivered;
-// nil timings, of a frame whose timings were not read back, deliver it
-// without. False when no inspection waits for them.
+// timings of the frame of beat, and delivers it, answering true; nil
+// timings, of a frame whose timings were not read back, deliver it without.
+// False when no inspection waits for them.
 func (i *inspector) addPassTimings(beat metronome.Beat, timings []PassTiming) bool {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
-	if inspectionPhase(i.phase.Load()) != inspectionPhaseTiming || i.inspection.Beat != beat {
+	index := slices.IndexFunc(i.timedInspections, func(timed Inspection) bool { return timed.Beat == beat })
+	if index < 0 {
 		return false
 	}
-	i.inspection.PassTimings = slices.Clone(timings)
-	i.phase.Store(uint32(inspectionPhaseDelivered))
+	timed := i.timedInspections[index]
+	i.timedInspections = slices.Delete(i.timedInspections, index, index+1)
+	timed.PassTimings = slices.Clone(timings)
+	i.deliveredInspections = append(i.deliveredInspections, timed)
 	return true
 }
 
@@ -107,19 +118,19 @@ func (i *inspector) addPassTimings(beat metronome.Beat, timings []PassTiming) bo
 func (i *inspector) read(beat metronome.Beat) (Inspection, bool) {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
-	if inspectionPhase(i.phase.Load()) != inspectionPhaseDelivered || i.inspection.Beat != beat {
+	index := slices.IndexFunc(i.deliveredInspections, func(delivered Inspection) bool { return delivered.Beat == beat })
+	if index < 0 {
 		return Inspection{}, false
 	}
-	return i.inspection, true
+	return i.deliveredInspections[index], true
 }
 
-// drop drops the delivered inspection, once InspectedEvent's jobs have
-// run, so the next request asks for another.
-func (i *inspector) drop() {
+// drop drops the inspection of the frame of beat, once InspectedEvent's
+// jobs have run.
+func (i *inspector) drop(beat metronome.Beat) {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
-	i.inspection = Inspection{}
-	i.phase.Store(uint32(inspectionPhaseIdle))
+	i.deliveredInspections = slices.DeleteFunc(i.deliveredInspections, func(delivered Inspection) bool { return delivered.Beat == beat })
 }
 
 // addList answers the inspected list of a command list labelled label,
@@ -158,7 +169,7 @@ func (i *inspector) addLocked(change func(inspection *Inspection)) {
 	}
 }
 
-// inspectionPhase is where an inspector's inspection stands.
+// inspectionPhase is where an inspector's inspection recording stands.
 type inspectionPhase uint32
 
 const (
@@ -168,12 +179,6 @@ const (
 	inspectionPhaseRequested
 	// inspectionPhaseRecording is its frame recording.
 	inspectionPhaseRecording
-	// inspectionPhaseTiming is its frame ended, its pass timings being
-	// read back.
-	inspectionPhaseTiming
-	// inspectionPhaseDelivered is its frame ended, until InspectedEvent's
-	// jobs have run.
-	inspectionPhaseDelivered
 )
 
 // orderedInspectedList is an inspected command list with the order its list

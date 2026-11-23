@@ -13,10 +13,6 @@ import (
 	"github.com/dvoyni/cog/plugins/render/rendertest"
 )
 
-// timeout is how long Step waits for canvas to answer a request for an
-// inspection, and to deliver it.
-const timeout = 5 * time.Second
-
 // Harness runs canvas in a real kernel on render's fake GPU, for canvas's
 // tests and those of the plugins that record into it. It is rendertest's
 // harness, whose calls it keeps, with canvas spawned after render, a
@@ -85,15 +81,15 @@ func (h *Harness) Step() {
 	h.kernel.Notify(signal, requestJob)
 	select {
 	case <-signal.C():
-	case <-time.After(timeout):
-		h.t.Fatalf("canvastest: the request for an inspection did not finish in %v", timeout)
+	case <-time.After(rendertest.Timeout):
+		h.t.Fatalf("canvastest: the request for an inspection did not finish in %v", rendertest.Timeout)
 	}
 	h.Harness.Step()
 	select {
 	case inspection := <-h.deliveredInspections:
 		h.inspections = append(h.inspections, inspection)
-	case <-time.After(timeout):
-		h.t.Fatalf("canvastest: the inspection of the frame stepped was not delivered in %v", timeout)
+	case <-time.After(rendertest.Timeout):
+		h.t.Fatalf("canvastest: the inspection of the frame stepped was not delivered in %v", rendertest.Timeout)
 	}
 }
 

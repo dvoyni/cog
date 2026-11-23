@@ -348,6 +348,42 @@ func TestOneInspectionIsRecordedAtATimeAndARequestWhileOneIsPendingJoinsIt(t *te
 	}
 }
 
+func TestARequestWhileAnInspectionIsDeliveredAsksForTheNextFrameToBegin(t *testing.T) {
+	// The first inspection's own job asks for another while that one is
+	// delivered, of a frame already ended, which it cannot join, as a tool
+	// asks for the next frame's as soon as it has read the last: the next
+	// frame to begin is inspected.
+	h := rendertest.NewHarness(t)
+	inspections := make(chan render.Inspection, 4)
+	h.Spawn(nil, &loaderPlugin{
+		files: makeDrawFiles(t),
+		duringFrame: func(frameIndex int, inventory render.Inventory, frame render.Frame) {
+			if frameIndex == 0 {
+				frame.RequestInspection()
+			}
+		},
+		onInspected: func(event render.InspectedEvent, frame render.Frame) {
+			inspection, _ := frame.ReadInspection(event)
+			if len(inspections) == 0 {
+				frame.RequestInspection()
+			}
+			inspections <- inspection
+		},
+	})
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+
+	for range 4 {
+		h.Step()
+	}
+
+	frames := h.Frames()
+	for _, frameIndex := range []int{1, 2} {
+		if got := receiveInspection(t, inspections); got.Beat != frames[frameIndex].Beat {
+			t.Errorf("an inspection of beat %d was delivered, want one of beat %d, frame %d's", got.Beat.Tick, frames[frameIndex].Beat.Tick, frameIndex)
+		}
+	}
+}
+
 func TestAnInspectionIsReadOnlyWhileItsEventsJobsRun(t *testing.T) {
 	h := rendertest.NewHarness(t)
 	inspections := make(chan render.Inspection, 4)

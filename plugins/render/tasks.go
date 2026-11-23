@@ -63,9 +63,9 @@ func deliverCapture(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, 
 // publishInspection handles inspectionDeliveryEvent: it publishes
 // InspectedEvent inside it, schedules dropInspectionTask after the nested
 // publication's out dependency, and returns that job.
-func publishInspection(ex *kernel.Executor, in kernel.JobHandle, event inspectionDeliveryEvent, dropInspectionTask *kernel.Task[kernel.NoArg, kernel.NoResult]) (inspectionDeliveryEvent, kernel.JobHandle) {
+func publishInspection(ex *kernel.Executor, in kernel.JobHandle, event inspectionDeliveryEvent, dropInspectionTask *kernel.Task[metronome.Beat, kernel.NoResult]) (inspectionDeliveryEvent, kernel.JobHandle) {
 	_, out := ex.Publish(in, InspectedEvent{Beat: event.beat})
-	return event, ex.Schedule(dropInspectionTask, kernel.NoArg{}, out).Handle()
+	return event, ex.Schedule(dropInspectionTask, event.beat, out).Handle()
 }
 
 // publishPassTimings handles passTimingsDeliveryEvent: it publishes
@@ -160,10 +160,10 @@ func findReadback(k *kernel.Kernel, event gfx.BufferMappedEvent, state kernel.Re
 	return kernel.NoResult{}
 }
 
-// dropInspection drops the inspection delivered, once InspectedEvent's
-// jobs have run.
-func dropInspection(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*frameState]) kernel.NoResult {
-	state.Get().inspector.drop()
+// dropInspection drops the inspection of the frame of beat, once
+// InspectedEvent's jobs have run.
+func dropInspection(k *kernel.Kernel, beat metronome.Beat, state kernel.Read[*frameState]) kernel.NoResult {
+	state.Get().inspector.drop(beat)
 	return kernel.NoResult{}
 }
 

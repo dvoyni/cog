@@ -27,9 +27,11 @@ const FrameInterval = time.Second / 60
 // workerCount is how many workers the harness's kernel runs.
 const workerCount = 2
 
-// timeout is how long the harness waits for the kernel before failing the
-// test.
-const timeout = 5 * time.Second
+// Timeout is how long the harness waits for the kernel before failing the
+// test, and how long a test built on it waits for what its frames deliver:
+// 5 seconds, ten times as long under the race detector, which slows the
+// kernel's jobs and the software adapter's rasterizing as much.
+const Timeout = 5 * time.Second * raceSlowdown
 
 // Harness runs render in a real kernel on a fake GPU, for render's tests and
 // those of the plugins that draw with it. Spawn spawns, through a
@@ -287,7 +289,7 @@ func (h *Harness) RecordNothing() {
 // the device, and returns once every handler of render.RecoveredEvent has
 // run, each plugin's assets filled again. A window is open, or nothing is
 // acquired and LoseDevice fails the test once it has waited the harness's
-// timeout. It serves the recording adapter alone, and fails the test on the
+// Timeout. It serves the recording adapter alone, and fails the test on the
 // software adapter or before Spawn.
 func (h *Harness) LoseDevice() {
 	h.t.Helper()
@@ -419,17 +421,17 @@ func (h *Harness) wait(what string, out kernel.JobHandle) {
 
 // tickUntil ticks the main thread, for the pinned jobs to run, until done
 // answers true, and fails the test naming what when that takes longer than
-// timeout.
+// Timeout.
 func (h *Harness) tickUntil(what string, done func() bool) {
 	h.t.Helper()
-	deadline := time.Now().Add(timeout)
+	deadline := time.Now().Add(Timeout)
 	for {
 		h.runOnMainThread(h.tickMainThread)
 		if done() {
 			return
 		}
 		if time.Now().After(deadline) {
-			h.t.Fatalf("%s did not finish in %v", what, timeout)
+			h.t.Fatalf("%s did not finish in %v", what, Timeout)
 		}
 		runtime.Gosched()
 	}

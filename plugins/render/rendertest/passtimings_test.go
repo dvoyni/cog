@@ -315,6 +315,31 @@ func TestAnInspectionOfATimedFrameWaitsForItsPassTimingsAndHoldsThemAndOneOfAFra
 	}
 }
 
+func TestARequestWhileAnInspectionAwaitsItsPassTimingsInspectsTheNextFrame(t *testing.T) {
+	// Frame 1's inspection waits for its pass timings through frame 2,
+	// whose request, of a frame after the one it inspects, is held back by
+	// none: frame 3, the next to begin, is inspected too, each delivered
+	// once its timings are read back.
+	h := rendertest.NewHarness(t)
+	h.EnableTimestamps()
+	run := spawnTimingHarness(t, h, nil, func(frameIndex int, _ render.Inventory, frame render.Frame) {
+		if frameIndex == 0 || frameIndex == 2 {
+			frame.RequestInspection()
+		}
+	})
+
+	for range 7 {
+		h.Step()
+	}
+
+	frames := h.Frames()
+	for _, frameIndex := range []int{1, 3} {
+		if got := receiveInspection(t, run.inspections); got.Beat != frames[frameIndex].Beat {
+			t.Errorf("an inspection of beat %d was delivered, want one of beat %d, frame %d's", got.Beat.Tick, frames[frameIndex].Beat.Tick, frameIndex)
+		}
+	}
+}
+
 func TestATimedFramesPassesAfterItsMostAreReportedAndUntimed(t *testing.T) {
 	h := rendertest.NewHarness(t)
 	h.EnableTimestamps()

@@ -13,6 +13,7 @@ import (
 	"github.com/dvoyni/cog/plugins/canvas/canvastest"
 	"github.com/dvoyni/cog/plugins/platform"
 	"github.com/dvoyni/cog/plugins/render"
+	"github.com/dvoyni/cog/plugins/render/rendertest"
 )
 
 // windowCapturer is a test plugin that asks for a capture of the window it
@@ -110,7 +111,7 @@ type windowPicture struct {
 // captureDrawing draws the entries record records into a window of
 // pictureWidth×pictureHeight points through the default camera, on the software adapter, each frame
 // until a capture of the window holds a picture, and answers it. It fails t
-// when no capture arrives within 5s.
+// when no capture arrives within rendertest.Timeout.
 func captureDrawing(t *testing.T, record func(list canvas.DrawList)) windowPicture {
 	t.Helper()
 	return captureHarnessDrawing(t, canvastest.NewHarness(t), nil, record)
@@ -128,14 +129,14 @@ func captureHarnessDrawing(t *testing.T, h *canvastest.Harness, config *canvas.C
 	// callback for its last present is read, a while after it, so the test
 	// steps for a time, not a count of beats.
 	capturer.capture(window)
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+	for deadline := time.Now().Add(rendertest.Timeout); time.Now().Before(deadline); {
 		h.Record(record)
 		h.Step()
 		if picture := capturer.capturedPicture(); picture != nil {
 			return windowPicture{picture: picture, pixelsPerPoint: float32(picture.Bounds().Dx()) / pictureWidth}
 		}
 	}
-	t.Fatal("no capture of the window arrived within 5s")
+	t.Fatalf("no capture of the window arrived within %v", rendertest.Timeout)
 	return windowPicture{}
 }
 

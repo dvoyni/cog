@@ -130,8 +130,11 @@ func (f Frame) ReadCapture(event CapturedEvent) (*image.NRGBA, error) {
 }
 
 // RequestInspection asks for an inspection of the first frame whose
-// FrameEvent is published after the call, one at a time: a request while
-// one is pending, asked for and not yet delivered, joins it. While that
+// FrameEvent is published after the call, one recording at a time: a
+// request while one is pending, asked for and its frame not yet ended,
+// joins it. An inspection whose frame has ended, waiting for its pass
+// timings or delivered, holds back no request, so the next frame may be
+// inspected meanwhile. While that
 // frame records, render's calls also write it down, and InspectedEvent
 // delivers it once the frame is presented, or, while pass timings are on,
 // once its pass timings are read back; every other frame pays one

@@ -1047,12 +1047,18 @@ Each change was checked for a 3D renderer's needs too, drawbridge's forward+ or 
   - **Timed, not gated:** glyph generation at first use, per glyph (Latin at em 48, Han at em 64), and for a frame of 200 new hanzi; an image's first use, its decode, converter and pack; the radix sort's passes as the layers spread.
   - **Ten runs** go in the baseline, compared with `benchstat`.
 
-**Concurrency under `go test -race`:** recording tasks run together, so each piece of shared state is tested by breaking the code that guards it, as render's are:
-- parallel draw lists recording in one frame;
-- one image's first draw from two tasks;
-- one glyph made from two tasks;
-- one layout cached from two tasks;
-- an icon registered while text is laid out, which `FontLibrary`'s write lock orders.
+**Concurrency under `go test -race`:** recording tasks run together, and `Assets` is called while canvas draws, so each piece of shared state is tested by breaking the code that guards it, as render's are, most in `concurrency_test.go` through a test plugin whose tasks record, read and write `FontLibrary`, and call `Assets` off render's frame event while canvas opens, sorts and draws:
+- parallel draw lists recording in one frame, two jobs of one task sharing its list under the list's mutex;
+- one image's first draw from two tasks, its path interned once under the image table's mutex and packed once;
+- one glyph made from two tasks, under the glyph table's mutex, each character's font found under its set's character mutex, and the jobs' first uses noted under the inspector's mutex;
+- one layout cached from two tasks, under the layout cache's mutex, its drawn glyphs kept by compare-and-swap of a copy each job assigns, its last use an atomic;
+- an icon registered while text is laid out, which `FontLibrary`'s write lock orders;
+- `ImageSize`, `Preload` and `Unload`, `ReloadChanged`, and `MakeMaterial` and `ReleaseMaterial` called from tasks while canvas draws, under the image size table's, the file stamp table's, the residency request queue's and the material table's mutexes, the font reload request an atomic;
+- malformed markup drawn from two tasks, each string noted once under its mutex;
+- an entry recorded as canvas opens or sorts the frame, refused or recorded by the recording flag, an atomic;
+- `RequestInspection` called while canvas draws, the pending request an atomic.
+
+The whole suite runs under the detector, pixel tests included, canvastest waiting render's `rendertest.Timeout`, ten times as long under it.
 
 **Prior art:**
 - render's tests on rendertest's harness and the recording adapter, and its pixel tests on the software adapter;
