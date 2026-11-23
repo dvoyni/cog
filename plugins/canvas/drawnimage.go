@@ -3,7 +3,6 @@ package canvas
 import (
 	"fmt"
 
-	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/render"
 )
@@ -79,19 +78,19 @@ func (d *drawnImage) findView() render.TextureView {
 // level 0 and layer 0 alone, page 0 of it, with key's options, its colour
 // decoded from sRGB where key marks it so and the texture's format does not
 // decode it. A texture render does not hold, and a frame whose rectangle
-// does not lie within the texture, draw nothing, each reported to logger
+// does not lie within the texture, draw nothing, each reported
 // once for the texture.
-func placeTextureImage(inventory render.Inventory, logger *kernel.Logger, drawn *drawnImage, key imageKey, frame uint32) {
+func placeTextureImage(inventory render.Inventory, reporter *reporter, drawn *drawnImage, key imageKey, frame uint32) {
 	descriptor, held := inventory.TextureDescriptor(key.texture)
 	if !held {
 		refusal := Report{Kind: ReportKindImageTextureRefused, Err: fmt.Errorf("canvas: an image of texture %v, which render does not hold, draws nothing", key.texture)}
-		logger.LogErrOnce(imageTextureRefusedLogKey+key.findSubject(), refusal)
+		reporter.reportOnce(imageTextureRefusedLogKey+key.findSubject(), refusal)
 		drawn.drawsNothing = true
 		return
 	}
 	frameRect, withinTexture := key.options.findFrameRect(int(descriptor.Width), int(descriptor.Height), frame)
 	if !withinTexture {
-		reportFrameOutOfBounds(logger, key, frame, "texture", int(descriptor.Width), int(descriptor.Height))
+		reportFrameOutOfBounds(reporter, key, frame, "texture", int(descriptor.Width), int(descriptor.Height))
 		drawn.drawsNothing = true
 		return
 	}

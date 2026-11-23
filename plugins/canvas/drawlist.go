@@ -267,7 +267,7 @@ func (l *drawList) record[T any](state *drawState, kind EntryKind, records *[]T,
 	recording := l.appendRecords(state, kind, records, argumentType, argumentBytes, recorded)
 	l.mutex.Unlock()
 	if !recording {
-		state.logger.LogErrOnce(l.outsideFrame.Error(), l.outsideFrame)
+		state.reporter.reportOnce(l.outsideFrame.Error(), l.outsideFrame)
 	}
 }
 
@@ -277,7 +277,7 @@ func (l *drawList) record[T any](state *drawState, kind EntryKind, records *[]T,
 // is reported once for the draw list.
 func (l *drawList) recordWithArguments[T, A any](state *drawState, kind EntryKind, records *[]T, recorded []T, arguments []A) {
 	if len(recorded) != len(arguments) {
-		state.logger.LogErrOnce(l.slicesDiffer.Error(), l.slicesDiffer)
+		state.reporter.reportOnce(l.slicesDiffer.Error(), l.slicesDiffer)
 		return
 	}
 	l.record(state, kind, records, reflect.TypeFor[A](), castToBytes(arguments), recorded...)
@@ -292,7 +292,7 @@ func (l *drawList) recordText(state *drawState, argumentType reflect.Type, argum
 	recording := l.appendRecords(state, EntryKindText, &l.texts, argumentType, argumentBytes, []laidOutText{text})
 	l.mutex.Unlock()
 	if !recording {
-		state.logger.LogErrOnce(l.outsideFrame.Error(), l.outsideFrame)
+		state.reporter.reportOnce(l.outsideFrame.Error(), l.outsideFrame)
 	}
 }
 
@@ -308,7 +308,7 @@ func (l *drawList) recordTriangles(state *drawState, argumentType reflect.Type, 
 		return
 	}
 	if triangles.bounds == (m.Box3{}) {
-		state.logger.LogErrOnce(l.boundsMissing.Error(), l.boundsMissing)
+		state.reporter.reportOnce(l.boundsMissing.Error(), l.boundsMissing)
 		return
 	}
 	l.mutex.Lock()
@@ -329,7 +329,7 @@ func (l *drawList) recordTriangles(state *drawState, argumentType reflect.Type, 
 	recording := l.appendRecords(state, EntryKindTriangles, &l.triangles, argumentType, argumentBytes, []recordedTriangles{triangles})
 	l.mutex.Unlock()
 	if !recording {
-		state.logger.LogErrOnce(l.outsideFrame.Error(), l.outsideFrame)
+		state.reporter.reportOnce(l.outsideFrame.Error(), l.outsideFrame)
 	}
 }
 

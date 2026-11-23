@@ -45,7 +45,7 @@ func TestASpaceHasNoField(t *testing.T) {
 func TestGlyphsLaidOutForDrawingSitOnTheirClustersOnAlignedLinesAndShareFields(t *testing.T) {
 	// Two centred lines of a monospaced font, the second wider, each glyph
 	// one cluster's.
-	library := newFontLibrary(&kernel.Logger{}, &Config{})
+	library := newFontLibrary(&reporter{logger: &kernel.Logger{}, inspector: &inspector{}}, &Config{})
 
 	_, layout := library.layOutText(Text{String: "a\nbbb", Align: TextAlignCenter}, true, nil)
 
@@ -72,7 +72,7 @@ func TestAGlyphsPenFollowsTheAdvancesBeforeItInItsCluster(t *testing.T) {
 	// A combining acute accent after an x is one cluster of two glyphs,
 	// which JetBrains Mono shapes with no offset: the accent's pen lies past
 	// the x's advance, where the cluster ends.
-	library := newFontLibrary(&kernel.Logger{}, &Config{})
+	library := newFontLibrary(&reporter{logger: &kernel.Logger{}, inspector: &inspector{}}, &Config{})
 
 	_, layout := library.layOutText(Text{String: "x́"}, true, nil)
 

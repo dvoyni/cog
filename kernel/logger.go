@@ -28,11 +28,14 @@ func (l *Logger) LogErr(err error) {
 }
 
 // LogErrOnce is LogErr the first time it is called under key, and does nothing
-// after, until ForgetLogOnce clears key.
-func (l *Logger) LogErrOnce(key string, err error) {
-	if l.first(key) {
-		l.LogErr(err)
+// after, until ForgetLogOnce clears key. It answers whether it logged, so a
+// caller can keep what it logged.
+func (l *Logger) LogErrOnce(key string, err error) bool {
+	if !l.first(key) {
+		return false
 	}
+	l.LogErr(err)
+	return true
 }
 
 // LogWarn logs msg with args as alternating keys and values, as log/slog does.
@@ -41,11 +44,14 @@ func (l *Logger) LogWarn(msg string, args ...any) {
 }
 
 // LogWarnOnce is LogWarn the first time it is called under key, and does
-// nothing after, until ForgetLogOnce clears key.
-func (l *Logger) LogWarnOnce(key string, msg string, args ...any) {
-	if l.first(key) {
-		l.LogWarn(msg, args...)
+// nothing after, until ForgetLogOnce clears key. It answers whether it
+// logged.
+func (l *Logger) LogWarnOnce(key string, msg string, args ...any) bool {
+	if !l.first(key) {
+		return false
 	}
+	l.LogWarn(msg, args...)
+	return true
 }
 
 // LogDebug logs msg with args as alternating keys and values, as log/slog
@@ -55,11 +61,14 @@ func (l *Logger) LogDebug(msg string, args ...any) {
 }
 
 // LogDebugOnce is LogDebug the first time it is called under key, and does
-// nothing after, until ForgetLogOnce clears key.
-func (l *Logger) LogDebugOnce(key string, msg string, args ...any) {
-	if l.first(key) {
-		l.LogDebug(msg, args...)
+// nothing after, until ForgetLogOnce clears key. It answers whether it
+// logged.
+func (l *Logger) LogDebugOnce(key string, msg string, args ...any) bool {
+	if !l.first(key) {
+		return false
 	}
+	l.LogDebug(msg, args...)
+	return true
 }
 
 // ForgetLogOnce clears key, so the next Once call under it logs again. A

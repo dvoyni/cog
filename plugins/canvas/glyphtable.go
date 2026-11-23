@@ -36,12 +36,14 @@ type glyphKey struct {
 // made the first time it is drawn through shaper's face of the glyph's
 // font, at its variations, by makeField, and answers glyphs without those
 // of no field, such as spaces, which draw nothing, its icons kept, which
-// have none. A field is made outside the lock, so jobs make theirs
-// together; one made by two jobs at once is kept once.
-func (t *glyphTable) assignFields(glyphs []placedGlyph, shaper *textShaper) []placedGlyph {
+// have none, and how many fields it made. A field is made outside the
+// lock, so jobs make theirs together; one made by two jobs at once is kept
+// once, and counted by the job keeping it.
+func (t *glyphTable) assignFields(glyphs []placedGlyph, shaper *textShaper) ([]placedGlyph, int) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	drawnGlyphs := glyphs[:0]
+	madeCount := 0
 	for _, glyph := range glyphs {
 		if glyph.font == nil {
 			drawnGlyphs = append(drawnGlyphs, glyph)
@@ -57,6 +59,7 @@ func (t *glyphTable) assignFields(glyphs []placedGlyph, shaper *textShaper) []pl
 				field = uint32(len(t.fields))
 				t.fields = append(t.fields, madeField)
 				t.indexes[key] = field
+				madeCount++
 			}
 		}
 		if t.fields[field].texels != nil {
@@ -64,7 +67,7 @@ func (t *glyphTable) assignFields(glyphs []placedGlyph, shaper *textShaper) []pl
 			drawnGlyphs = append(drawnGlyphs, glyph)
 		}
 	}
-	return drawnGlyphs
+	return drawnGlyphs, madeCount
 }
 
 // makeField answers glyph id of glyphFont, drawn through face: its

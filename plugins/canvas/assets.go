@@ -75,14 +75,14 @@ func (a Assets) Preload(image Image) {
 func (a Assets) Unload(path string) {
 	state := a.state.Get()
 	state.residency.requestUnload(a.inventory, path)
-	state.imageSizes.forget(state.logger, path)
+	state.imageSizes.forget(state.reporter, path)
 	for _, unloaded := range imageNames.findPaths(path, func(key imageKey) (string, bool) { return key.path, !key.ofTexture }) {
-		state.logger.ForgetLogOnce(imageOptionsIgnoredLogKey + unloaded)
-		state.logger.ForgetLogOnce(frameOutOfBoundsLogKey + unloaded)
-		state.logger.ForgetLogOnce(converterRefusedLogKey + unloaded)
+		state.reporter.forget(imageOptionsIgnoredLogKey + unloaded)
+		state.reporter.forget(frameOutOfBoundsLogKey + unloaded)
+		state.reporter.forget(converterRefusedLogKey + unloaded)
 	}
 	for _, unloaded := range meshFileNames.findPaths(path, func(path string) (string, bool) { return path, true }) {
-		state.logger.ForgetLogOnce(meshFileNotLoadedLogKey + unloaded)
+		state.reporter.forget(meshFileNotLoadedLogKey + unloaded)
 	}
 }
 
@@ -110,7 +110,7 @@ func (a Assets) ImageSize(image Image) (m.Vec2, bool) {
 		descriptor, read = a.inventory.TextureDescriptor(key.texture)
 		size = m.Vec2{X: float32(descriptor.Width), Y: float32(descriptor.Height)}
 	} else {
-		size, read = state.imageSizes.find(a.files.Get(), state.logger, key.path)
+		size, read = state.imageSizes.find(a.files.Get(), state.reporter, key.path)
 	}
 	if !read {
 		return m.Vec2{}, false
@@ -133,7 +133,7 @@ func (a Assets) ImageSize(image Image) (m.Vec2, bool) {
 // Its maker gives it back once, with ReleaseMaterial.
 func (a Assets) MakeMaterial(descriptor MaterialDescriptor) Material {
 	state := a.state.Get()
-	return state.materials.make(a.inventory, state.logger, descriptor)
+	return state.materials.make(a.inventory, state.reporter, descriptor)
 }
 
 // ReleaseMaterial gives back material, made by MakeMaterial: the frame
@@ -145,7 +145,7 @@ func (a Assets) MakeMaterial(descriptor MaterialDescriptor) Material {
 func (a Assets) ReleaseMaterial(material Material) {
 	state := a.state.Get()
 	if !state.materials.release(material) {
-		reportMaterialNotHeld(state.logger, material, "releasing")
+		reportMaterialNotHeld(state.reporter, material, "releasing")
 	}
 }
 
@@ -164,7 +164,7 @@ func (a Assets) SetMaterialTexture(material Material, name string, texture rende
 	state := a.state.Get()
 	renderMaterials, held := state.materials.findHeld(material)
 	if !held {
-		reportMaterialNotHeld(state.logger, material, "setting a texture of")
+		reportMaterialNotHeld(state.reporter, material, "setting a texture of")
 		return
 	}
 	for _, renderMaterial := range renderMaterials {
@@ -189,7 +189,7 @@ func (a Assets) SetMaterialUniform[T any](material Material, name string, value 
 	state := a.state.Get()
 	renderMaterials, held := state.materials.findHeld(material)
 	if !held {
-		reportMaterialNotHeld(state.logger, material, "setting a uniform of")
+		reportMaterialNotHeld(state.reporter, material, "setting a uniform of")
 		return
 	}
 	for _, renderMaterial := range renderMaterials {

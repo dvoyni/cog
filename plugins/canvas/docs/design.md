@@ -211,9 +211,9 @@ author** testing canvas or a plugin on it.
 
 ([canvas: the feature list, where 2D ends and its users begin, and its name](https://github.com/dvoyni/cog/issues/864), [canvas on the kernel: its resources, tasks and parameters, and how its frame hangs off render's](https://github.com/dvoyni/cog/issues/873), with the naming rule from [canvas prototype: the calls a user makes to draw one 2D frame](https://github.com/dvoyni/cog/issues/871))
 
-- **A module of its own,** `canvas`, importing kernel, platform, render, libs/m and libs/meshfile, and `go-text/typesetting`, pinned in its `go.mod`. It imports no ECS, and reaches no gfx: what canvas needs that render lacks is a delta to render.
+- **A module of its own,** `canvas`, importing kernel, metronome, platform, render, libs/m and libs/meshfile, and `go-text/typesetting`, pinned in its `go.mod`. It imports no ECS, and reaches no gfx: what canvas needs that render lacks is a delta to render.
 - **The name** is `canvas`. "2D" was its codename while charting, and "2d" cannot be a Go package name. gfx's glossary avoids "canvas" for the Surface, which now points at the plugin; v1's canvas stays under `_legacy`.
-- **`canvas.PluginName`** is `"canvas"`, listed after render and platform. A plugin that records into canvas is listed after canvas.
+- **`canvas.PluginName`** is `"canvas"`, listed after render, platform and metronome, whose `Clock` times its jobs for the inspection. A plugin that records into canvas is listed after canvas.
 - **An immediate-mode API.** A user records entries every frame, and no sprite object persists. canvas buffers the frame's entries, sorts and batches them, records them into render, and forgets them. It cannot draw each call straight into render, because sorting and batching need the whole frame. Only its atlases, its glyphs and layouts, and the assets it loaded outlive a frame.
 - **Shaped for an ECS plugin it does not import:**
   - an entry is a plain value, so a component can be exactly it: `Sprite`, `Shape` and `Mesh` are pointer-free, and their handles (`Image`, `MeshFile`, `Material`, `FontSet`) are plain, pointer-free, comparable values;
@@ -918,7 +918,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - registering a missing icon forgets that icon's key;
   - a font that loads as a set is made forgets its path's key, so a file repaired and broken again reports again.
 - **The logged error is typed,** `canvas.Report{Kind canvas.ReportKind, Err error}`, as render's are, so a test can tell which report it is. `render.ReportKind` is render's enum, so canvas cannot log `render.Report`s.
-- **It goes into the inspection** of the frame that raised it.
+- **It goes into the inspection** of the frame that raised it. canvas logs through a reporter of its own over the kernel's logger, and the kernel's once forms answer whether they logged, so a report goes into the inspection exactly when it is logged, with no deduplication of canvas's own.
 
 ### Inspection
 
@@ -930,12 +930,13 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 - **`canvas.InspectedEvent{Beat}`** is published after render's `InspectedEvent` for that frame, in a batch of its own, as render publishes its own. `Assets.ReadInspection(event)` answers a `canvas.Inspection` while the publication's jobs run, with render's `Inspection` beside it, `Inspection.Render`, so a tool reads both accounts of one frame.
 - **Every other frame pays one check and allocates nothing,** so a tool may stay attached.
 - **A `canvas.Inspection` holds:**
-  - each camera, in drawing order: its fields and target, its viewport in pixels, its scale, the world rectangle it sees, and its layer ranges;
-  - each camera's batches, in order: the material, atlas, filter and clip, the instance count, and its entries. Each entry gives its kind, what it draws (an image's path and frame, a run's text, or a mesh file), its sort key, and its draw list's place;
-  - what each camera culled, as entries;
-  - the frame's first uses: images packed, mesh files loaded, glyphs made, and layouts made on a cache miss;
-  - its reports, and the time canvas's sort job and per-order jobs took.
-- **`String()`** writes it as the prototype printed its frames, for an agent to log: cameras in order, then their layers, batches, instance counts, culls, first-use loads and reports.
+  - each camera, in drawing order: its fields and target, a texture target's label, the target's size, its viewport in pixels, its scale, the world rectangle it sees, and its layer ranges. A camera that culled every entry of its layers, or had none, and does not clear draws nothing, and is inspected all the same, with no batches, since why nothing is on screen is what an agent asks first;
+  - each camera's batches, in order: the material and its label, the texture and the label render holds it under, the filter and clip, the instance count, and its entries. Each entry gives its kind, the entry as recorded, its sort key, and its draw list's place;
+  - what each camera culled, as entries in sort order: those of its layers that it does not draw, found after the drawing by walking its layer runs beside the entries it drew, so the cull itself pays nothing;
+  - the frame's first uses, each in the order made: `PackedImages`, the frames of images packed into an atlas or a texture of their own, a frame sharing a cell packed before not among them; `LoadedMeshFiles`; `MadeLayouts`, the runs laid out on a miss of the layout cache, drawn or measured; and `MadeGlyphs`, each run whose glyphs' fields were made, drawn or preloaded, and how many;
+  - its reports, and how long canvas's sort job and its drawing job took, `SortTime` and `DrawTime`, measured by stopwatches made from metronome's `Clock`, named `SortStopwatchName` and `DrawStopwatchName`, which a test's `ManualClock` lengthens.
+- **First uses and reports are noted wherever they happen,** in the jobs recording text, in the drawing job, or in a job between, but only while a request is pending, at the one check a report or a first use then pays. Each frame written down takes what was noted since the frame before it was, and a delivery forgets the rest, so a frame drawn while the request is pending, and not written down, leaves its own to the next.
+- **`String()`** writes it as the prototype printed its frames, for an agent to log: the beat, the first uses and reports one a line, the two jobs' times, then each camera in order with its target, viewport, scale and the world it sees, its clear, its batches under their layers, each with its material's and texture's labels, filter, clip, instance count and entries, equal entries in a row written once and counted, then what it drew and culled, the culled named.
 - **canvastest reads frames through it** (see *Testing Decisions*): its `Step` asks for an inspection before each beat and returns once it is delivered, and `Frames` answers them. After `RecordNothing` it asks for none, so the allocation gate counts only canvas's and render's own.
 - **Not canvas's:** a tool through which an agent reads it, a later MCP plugin's, cog-wide, serving render's inspection too.
 

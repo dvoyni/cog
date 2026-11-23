@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"sync"
 
-	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -22,8 +21,8 @@ type imageSizeTable struct {
 // whether its header was read: from the table, or else read from the
 // header, outside the mutex, so other calls do not wait for the read, and
 // kept, the first kept when two calls read it. A header that cannot be
-// read is kept as unread, and reported to logger, once for path.
-func (t *imageSizeTable) find(files fs.FS, logger *kernel.Logger, path string) (m.Vec2, bool) {
+// read is kept as unread, and reported, once for path.
+func (t *imageSizeTable) find(files fs.FS, reporter *reporter, path string) (m.Vec2, bool) {
 	t.mutex.RLock()
 	size, found := t.sizes[path]
 	t.mutex.RUnlock()
@@ -41,7 +40,7 @@ func (t *imageSizeTable) find(files fs.FS, logger *kernel.Logger, path string) (
 	}
 	if err != nil {
 		unreadReport := Report{Kind: ReportKindImageHeaderUnread, Err: fmt.Errorf("canvas: reading the header of image %q: %w", path, err)}
-		logger.LogErrOnce(imageHeaderUnreadLogKey+path, unreadReport)
+		reporter.reportOnce(imageHeaderUnreadLogKey+path, unreadReport)
 	}
 	if t.sizes == nil {
 		t.sizes = map[string]headerSize{}
@@ -51,15 +50,15 @@ func (t *imageSizeTable) find(files fs.FS, logger *kernel.Logger, path string) (
 }
 
 // forget forgets the size of each path Unload(unloaded) unloads, so the
-// next find reads its header again, and the report logged to logger of its
+// next find reads its header again, and the report logged of its
 // header unread, so it may be reported again.
-func (t *imageSizeTable) forget(logger *kernel.Logger, unloaded string) {
+func (t *imageSizeTable) forget(reporter *reporter, unloaded string) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	for path := range t.sizes {
 		if isUnder(path, unloaded) {
 			delete(t.sizes, path)
-			logger.ForgetLogOnce(imageHeaderUnreadLogKey + path)
+			reporter.forget(imageHeaderUnreadLogKey + path)
 		}
 	}
 }

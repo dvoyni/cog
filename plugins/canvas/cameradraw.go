@@ -3,7 +3,6 @@ package canvas
 import (
 	"fmt"
 
-	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/platform"
 	"github.com/dvoyni/cog/plugins/render"
@@ -48,24 +47,24 @@ type cameraDraw struct {
 // framebuffer does not; and its view into the target. A camera into a
 // window not open or not sized, or with no view, as of an empty viewport,
 // draws nothing; one naming both a window and a texture, or a texture
-// render does not hold, is reported once to logger too, as is a
+// render does not hold, is reported once too, as is a
 // pixel-perfect camera's FitStretch, drawn as FitInscribe. A multisampled
 // camera's entries draw into a texture of its viewport's size in its
 // target's format, a window's taken as BGRA8Unorm, the viewport at the
 // texture's origin.
-func makeCameraDraw(inventory render.Inventory, manager *platform.WindowManager, mainWindow platform.Window, logger *kernel.Logger, camera *Camera) (cameraDraw, bool) {
+func makeCameraDraw(inventory render.Inventory, manager *platform.WindowManager, mainWindow platform.Window, reporter *reporter, camera *Camera) (cameraDraw, bool) {
 	drawnCamera := cameraDraw{camera: *camera}
 	format := render.TextureFormatBGRA8Unorm
 	switch {
 	case camera.Texture != (render.Texture{}) && camera.Window != (platform.Window{}):
 		refusal := Report{Kind: ReportKindCameraTargetRefused, Err: fmt.Errorf("canvas: a camera names both window %v and texture %v as its target", camera.Window, camera.Texture)}
-		logger.LogErrOnce(refusal.Error(), refusal)
+		reporter.reportOnce(refusal.Error(), refusal)
 		return cameraDraw{}, false
 	case camera.Texture != (render.Texture{}):
 		descriptor, held := inventory.TextureDescriptor(camera.Texture)
 		if !held {
 			refusal := Report{Kind: ReportKindCameraTargetRefused, Err: fmt.Errorf("canvas: a camera's target, texture %v, is one render does not hold", camera.Texture)}
-			logger.LogErrOnce(refusal.Error(), refusal)
+			reporter.reportOnce(refusal.Error(), refusal)
 			return cameraDraw{}, false
 		}
 		drawnCamera.target = drawnTarget{texture: camera.Texture, width: int(descriptor.Width), height: int(descriptor.Height), pixelsPerPoint: 1}
@@ -90,7 +89,7 @@ func makeCameraDraw(inventory render.Inventory, manager *platform.WindowManager,
 		return cameraDraw{}, false
 	}
 	if camera.PixelPerfect && camera.Fit == FitStretch {
-		logger.LogErrOnce(pixelPerfectStretchReport.Error(), pixelPerfectStretchReport)
+		reporter.reportOnce(pixelPerfectStretchReport.Error(), pixelPerfectStretchReport)
 	}
 	drawnCamera.view = view
 	encode := format != render.TextureFormatRGBA8UnormSrgb && format != render.TextureFormatBGRA8UnormSrgb

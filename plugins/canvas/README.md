@@ -307,12 +307,19 @@ can be inspected in canvas's terms, beside render's inspection of it.
   refused and reported once; `RequestInspection` asks for an inspection of
   the next frame, and
   `ReadInspection` answers it in a task off **`InspectedEvent`**.
-- **`Inspection`** is one frame in canvas's terms: each camera that drew,
-  the window it drew into and its viewport in pixels, its batches with their
-  material, the texture they drew from, an atlas's or a render texture's,
-  their filter, their clip and the entries it did not
-  cull, each entry a shape, a sprite or a run of text, with its sort key and its draw
-  list's place, and render's `Inspection` of the frame beside it.
+- **`Inspection`** is one frame in canvas's terms: each camera, one that
+  culled everything among them, the window or texture it drew into, the
+  target's size and its viewport in pixels, its scale and the world it
+  sees, its batches with their material, the texture they drew from, an
+  atlas's or a render texture's, each with its label, their filter, their
+  clip and the entries it did not cull, and the entries it culled, each
+  entry a shape, a sprite, a run of text or a mesh, with its sort key and
+  its draw list's place; the frame's first uses, the images packed, mesh
+  files loaded, layouts and glyphs made; the reports logged for it; how long
+  canvas took to sort and to draw it, timed by metronome's `Clock` through
+  the stopwatches `SortStopwatchName` and `DrawStopwatchName`; and render's
+  `Inspection` of the frame beside it. Its `String` writes it as text for an
+  agent to log, a line for each first use, report, layer, batch and cull.
 - **`cog.canvas/canvas.wgsl`** is canvas's include, declaring the camera's
   pass parameters at `@group(0)` and canvas's instance data and atlas at
   `@group(2)`, with the functions over them, `canvas_sample` answering an
@@ -457,9 +464,10 @@ can be inspected in canvas's terms, beside render's inspection of it.
   under a lock of their own, written only through `ElevateFontLibrary`, and by canvas's
   own task making the default set as it starts; a
   private draw state, holding each task's draw list, the frame's entries
-  and cameras sorted, the inspection asked for, the unloads and preloads
-  asked for, the image sizes read and the 2D materials made, under a lock
-  of their own; a private renderer, holding the
+  and cameras sorted, the inspection asked for and the first uses and
+  reports noted for it, the unloads and preloads asked for, the image sizes
+  read, the 2D materials made and the stopwatches timing its jobs, under a
+  lock of their own; a private renderer, holding the
   default, SDF, text, clear, composite and pack materials, the sprite
   atlases, the white texel in the sRGB one, the glyph atlas and where each
   glyph is packed, each image drawn, where it is packed and
@@ -481,7 +489,8 @@ can be inspected in canvas's terms, beside render's inspection of it.
   own `FontLibrary`, for read, for the glyphs' fields, in the
   task that draws the frame; and `platform.FS`, for read, through
   `ElevateFontLibrary` and in its task making the default font set, as fonts
-  load.
+  load; and metronome's `Clock`, in `Init`, to make the stopwatches timing
+  its sorting and drawing jobs.
 - **Task parameters it offers:** `DrawList`, and `Assets`.
 - **Events it publishes:** `FrameEvent`, inside its handler of
   `render.FrameEvent`; and `InspectedEvent`, once render has delivered its
@@ -495,8 +504,8 @@ can be inspected in canvas's terms, beside render's inspection of it.
 - **Sockets it binds:** `platform.ReadMountSocket`, its built-in assets
   under the prefix `cog.canvas`, at the lowest priority.
 
-canvas is listed after render and platform, and a plugin that records into
-canvas is listed after canvas.
+canvas is listed after render, platform and metronome, and a plugin that
+records into canvas is listed after canvas.
 
 See [docs/design.md](docs/design.md) for the design and why it is this way,
 and [CONTEXT.md](CONTEXT.md) for its words.

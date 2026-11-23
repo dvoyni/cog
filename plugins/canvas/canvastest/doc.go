@@ -12,7 +12,8 @@
 //	h.Step()
 //
 // Each Step's frame is inspected in canvas's terms: Frames answers each
-// camera, its batches and their entries, with render's inspection of the
+// camera, its batches and their entries, and what it culled, the frame's
+// first uses, reports and job times, with render's inspection of the
 // frame beside it.
 //
 // The harness is rendertest's, whose calls it keeps: its Frames reads back what

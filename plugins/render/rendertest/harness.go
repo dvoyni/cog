@@ -308,7 +308,15 @@ func (h *Harness) LoseDevice() {
 // longer by the clock, as a GPU behind would, so the frame after it carries d
 // in its AcquireWait. Calls queue, one for each acquire to come.
 func (h *Harness) LengthenNextAcquire(d time.Duration) {
-	h.clock.LengthenNext(gfx.AcquireStopwatchName, d)
+	h.LengthenNext(gfx.AcquireStopwatchName, d)
+}
+
+// LengthenNext makes the next measurement of a stopwatch named stopwatch,
+// one a plugin made from metronome's Clock, take d longer by the clock, as
+// canvas's sort and draw jobs are timed. Calls queue, one for each
+// measurement to come.
+func (h *Harness) LengthenNext(stopwatch string, d time.Duration) {
+	h.clock.LengthenNext(stopwatch, d)
 }
 
 // ExpectReport names a kind of report the test expects: a render.Report of it

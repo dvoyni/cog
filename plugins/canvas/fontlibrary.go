@@ -7,7 +7,6 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 )
 
@@ -18,7 +17,9 @@ import (
 // lock of its own. It has no method that writes, so a FontLibrary held under the
 // read lock cannot be asserted into writing.
 type fontLibrary struct {
-	logger *kernel.Logger
+	// reporter is where reports go, and its inspector notes the layouts
+	// and glyphs made for the inspection pending.
+	reporter *reporter
 	// language is the current language.
 	language string
 	// textSize is the em, in world units, of a run of text whose Size is
@@ -58,18 +59,18 @@ type fontLibrary struct {
 }
 
 // newFontLibrary answers the FontLibrary resource of config, its reports
-// logged to logger: its current language config's Language, a run of text
+// logged: its current language config's Language, a run of text
 // of no size laid out at its TextSize, a glyph of a font giving no field em
 // or range made a distance field of its GlyphFieldEm and GlyphFieldRange, a
 // layout unused for its LayoutIdleFrames frames freed, each zero meaning
 // its stated default, and its default set JetBrains Mono alone until canvas
 // starts and makes it of its DefaultFontSet.
-func newFontLibrary(logger *kernel.Logger, config *Config) *fontLibrary {
+func newFontLibrary(reporter *reporter, config *Config) *fontLibrary {
 	return &fontLibrary{
-		logger:            logger,
+		reporter:          reporter,
 		language:          config.Language,
 		textSize:          cmp.Or(config.TextSize, 16),
-		sets:              []*fontSetSlot{makeFontSetSlot(nil, logger, FontSetDescriptor{})},
+		sets:              []*fontSetSlot{makeFontSetSlot(nil, reporter, FontSetDescriptor{})},
 		defaultDescriptor: config.DefaultFontSet,
 		icons:             map[string]registeredIcon{},
 		colors:            map[string]m.Color{},
@@ -113,7 +114,8 @@ func (l *fontLibrary) Preload(set FontSet, text string) {
 	shaper := l.shapers.Get().(*textShaper)
 	defer l.shapers.Put(shaper)
 	layout := shaper.layOut(layoutInput{text: text, set: slot, em: l.textSize, language: l.language}, l.icons)
-	l.glyphs.assignFields(layout.glyphs, shaper)
+	_, madeCount := l.glyphs.assignFields(layout.glyphs, shaper)
+	l.reporter.inspector.addMadeGlyphs(Text{String: text, Font: set, Language: l.language}, madeCount)
 }
 
 // acquireShaper answers a shaper from the pool for text, a run of spans,
@@ -135,10 +137,12 @@ func (l *fontLibrary) releaseShaper(shaper *textShaper) {
 
 // layOutText answers text as drawn, its markup read into spans in
 // shaper's scratch, and laid out as Layout lays it out, through the
-// layout cache, shaped the first time, and, when drawn, its glyphs those
+// layout cache, shaped the first time, the layout it caches noted for the
+// inspection pending, and, when drawn, its glyphs those
 // it draws: a copy of the layout's, each assigned its field in the glyph
 // table, without those of no field, found the first time the cached layout
-// is drawn and kept beside it. Two jobs drawing it first at once each find
+// is drawn and kept beside it, the fields made noted for the inspection
+// pending. Two jobs drawing it first at once each find
 // them, and the first kept is answered to both. shaper is acquireShaper's for
 // text, and the text answered reads its scratch until it goes back to the
 // pool.
@@ -150,11 +154,17 @@ func (l *fontLibrary) layOutText(text Text, drawn bool, shaper *textShaper) (Tex
 			shaper = l.shapers.Get().(*textShaper)
 			defer l.shapers.Put(shaper)
 		}
+		madeText := text
+		madeText.Language = input.language
 		if cached == nil {
-			cached = l.layouts.add(input, shaper.layOut(input, l.icons))
+			var added bool
+			if cached, added = l.layouts.add(input, shaper.layOut(input, l.icons)); added {
+				l.reporter.inspector.addMadeLayout(madeText)
+			}
 		}
 		if drawn {
-			drawnGlyphs := l.glyphs.assignFields(slices.Clone(cached.layout.glyphs), shaper)
+			drawnGlyphs, madeCount := l.glyphs.assignFields(slices.Clone(cached.layout.glyphs), shaper)
+			l.reporter.inspector.addMadeGlyphs(madeText, madeCount)
 			cached.drawnGlyphs.CompareAndSwap(nil, &drawnGlyphs)
 		}
 	}
@@ -193,7 +203,7 @@ func (l *fontLibrary) reportMarkupMalformed(markup string, fault markupFault) {
 	l.malformedMutex.Unlock()
 	if !reported {
 		malformed := Report{Kind: ReportKindMarkupMalformed, Err: fmt.Errorf("canvas: the markup %q does not parse at byte %d: %s; it is drawn as written", markup, fault.offset, fault.problem)}
-		l.logger.LogErrOnce(markupMalformedLogKey+markup, malformed)
+		l.reporter.reportOnce(markupMalformedLogKey+markup, malformed)
 	}
 }
 
@@ -255,5 +265,5 @@ func (l *fontLibrary) findSlot(set FontSet) *fontSetSlot {
 // says.
 func (l *fontLibrary) reportSetNotHeld(set FontSet, use string) {
 	refusal := Report{Kind: ReportKindFontSetNotHeld, Err: fmt.Errorf("canvas: %s font set %v, which canvas does not hold: never made by WriteFontLibrary.MakeFontSet, destroyed, or the default set, which is never destroyed; a set canvas does not hold is laid out and measured as the default set", use, set)}
-	l.logger.LogErrOnce(fontSetNotHeldLogKey+fmt.Sprint(set), refusal)
+	l.reporter.reportOnce(fontSetNotHeldLogKey+fmt.Sprint(set), refusal)
 }

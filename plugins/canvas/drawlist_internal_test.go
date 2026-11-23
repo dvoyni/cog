@@ -5,13 +5,15 @@ import (
 	"slices"
 	"testing"
 	"unsafe"
+
+	"github.com/dvoyni/cog/plugins/metronome"
 )
 
 func TestArgumentsRecordedIntoTwoDrawListsMergeEachBesideItsEntry(t *testing.T) {
 	// The first list records two sprites given 1 and 2 by one call, and a
 	// sprite given none; the second a shape given 3: merged, each entry
 	// answers its own argument's bytes, and the one given none, none.
-	state := &drawState{}
+	state := &drawState{inspector: &inspector{}, sortStopwatch: metronome.NewManualClock().NewStopwatch(SortStopwatchName)}
 	first := state.addDrawList()
 	second := state.addDrawList()
 	state.recording.Store(true)

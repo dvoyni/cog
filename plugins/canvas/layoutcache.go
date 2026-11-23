@@ -68,12 +68,13 @@ func (c *layoutCache) find(input layoutInput) *cachedLayout {
 
 // add caches layout, made of input, unless a job laying it out at once
 // cached one first, and answers the layout cached, stamped as used this
-// frame.
-func (c *layoutCache) add(input layoutInput, layout TextLayout) *cachedLayout {
+// frame, and whether it was layout.
+func (c *layoutCache) add(input layoutInput, layout TextLayout) (*cachedLayout, bool) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	cached := c.layouts[input]
-	if cached == nil {
+	added := cached == nil
+	if added {
 		// A spanned input's text may be its maker's scratch, so the key
 		// keeps a copy.
 		if input.spanned {
@@ -83,7 +84,7 @@ func (c *layoutCache) add(input layoutInput, layout TextLayout) *cachedLayout {
 		c.layouts[input] = cached
 	}
 	cached.lastUsedFrame.Store(c.currentFrame)
-	return cached
+	return cached, added
 }
 
 // endFrame frees the layouts that have now gone unused for the cache's

@@ -483,7 +483,9 @@ itself is not recovered again, so it ends the process. That is what
 
 **Once forms.** `LogErrOnce`, `LogWarnOnce` and `LogDebugOnce` take a
 string key and log only the first call under it, until `ForgetLogOnce(key)`
-clears it. They are for a condition true every frame: worth saying once,
+clears it, and answer whether they logged, so a caller can keep what it
+said. They are for a
+condition true every frame: worth saying once,
 noise at the frame rate. The key names the condition, such as
 `"sprite:missing:" + path`, and keys of different kernels never collide. A
 constant key costs nothing to pass; one built at run time allocates, which

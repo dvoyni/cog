@@ -255,9 +255,14 @@ func TestAnEntryOutsideOneCamerasViewIsCulledByItAndDrawnByAnother(t *testing.T)
 
 	h.Step()
 
+	// The camera culling the fill and not clearing draws nothing, and is
+	// inspected with no batches, the fill among what it culled.
 	frame := h.Frames()[0]
-	if len(frame.Cameras) != 2 {
-		t.Fatalf("the frame was seen through %+v, want the two halves' cameras alone, the one culling the fill and not clearing drawing nothing", frame.Cameras)
+	if len(frame.Cameras) != 3 {
+		t.Fatalf("the frame was seen through %+v, want the two halves' cameras and the one culling the fill", frame.Cameras)
+	}
+	if culling := frame.Cameras[2]; len(culling.Batches) != 0 || len(culling.Culled) != 1 || culling.Culled[0].Shape != fill {
+		t.Errorf("the camera at x -1000 drew %+v and culled %+v, want nothing drawn and the fill culled", culling.Batches, culling.Culled)
 	}
 	if batches := frame.Cameras[0].Batches; len(batches) != 0 {
 		t.Errorf("the left camera, at the origin, drew %+v, want the fill culled", batches)
@@ -405,8 +410,12 @@ func TestACameraThatClearsDrawsInAFrameWithNoEntriesItsClearEncodedAndOneThatDoe
 	if target.Window != window || !target.Clear {
 		t.Errorf("the pass targets %+v, want the main window, %v, cleared by its load", target, window)
 	}
-	if lists := findCanvasLists(frames[1].Render); len(lists) != 0 || len(frames[1].Cameras) != 0 {
-		t.Errorf("a frame of a camera that does not clear, with no entries, began %+v and was seen through %+v, want nothing", lists, frames[1].Cameras)
+	// It is inspected all the same, with no batch and no cull.
+	if lists := findCanvasLists(frames[1].Render); len(lists) != 0 {
+		t.Errorf("a frame of a camera that does not clear, with no entries, began %+v, want nothing", lists)
+	}
+	if cameras := frames[1].Cameras; len(cameras) != 1 || len(cameras[0].Batches)+len(cameras[0].Culled) != 0 {
+		t.Errorf("a frame of a camera that does not clear, with no entries, was seen through %+v, want the camera, drawing and culling nothing", cameras)
 	}
 }
 

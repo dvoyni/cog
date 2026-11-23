@@ -1688,7 +1688,9 @@ func TestAMissingTextureIsReportedOnceAndTheQuadStillDraws(t *testing.T) {
 `OpenWindow(size)` opens a headless window for a plugin that draws into one
 it is given, and returns once gfx has made its surface.
 `LengthenNextAcquire(d)` makes the next acquire take `d` longer by the
-clock, for a test of `AcquireWait`.
+clock, for a test of `AcquireWait`, and `LengthenNext(stopwatch, d)` does
+so for the next measurement of any stopwatch a plugin made from metronome's
+`Clock`, such as canvas's of its sorting and drawing.
 
 ### Binding declarations and cmd/declarebindings
 

@@ -37,16 +37,18 @@ func TestLoggerForwardsUnderItsKernel(t *testing.T) {
 func TestLoggerOnceLogsUntilForgotten(t *testing.T) {
 	handler := &lineLogHandler{}
 	logger := &Logger{kernel: 1, handler: handler}
+	var answers []bool
 	for range 3 {
-		logger.LogWarnOnce("missing", "warn")
-		logger.LogDebugOnce("slow", "debug")
-		logger.LogErrOnce("broken", errors.New("err"))
+		answers = append(answers, logger.LogWarnOnce("missing", "warn"), logger.LogDebugOnce("slow", "debug"), logger.LogErrOnce("broken", errors.New("err")))
 	}
 	logger.ForgetLogOnce("missing")
-	logger.LogWarnOnce("missing", "warn again")
+	answers = append(answers, logger.LogWarnOnce("missing", "warn again"))
 	want := []string{"1:warn", "1:debug", "1:err", "1:warn again"}
 	if !slices.Equal(handler.lines, want) {
 		t.Fatalf("handler got %v, want %v", handler.lines, want)
+	}
+	if want := []bool{true, true, true, false, false, false, false, false, false, true}; !slices.Equal(answers, want) {
+		t.Fatalf("the once forms answered %v, want true only where they logged, %v", answers, want)
 	}
 }
 

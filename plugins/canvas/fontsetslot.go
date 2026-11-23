@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"io/fs"
 	"sync"
-
-	"github.com/dvoyni/cog/kernel"
 )
 
 // fontSetSlot is a font set as the FontLibrary resource holds it, at its
@@ -18,10 +16,10 @@ type fontSetSlot struct {
 	// set's generation never zero. Destroying a set counts its generation
 	// up, so a FontSet naming the set destroyed names nothing.
 	set FontSet
-	// label is its descriptor's Label, and logger what it reports a
-	// character no font of it has to.
+	// label is its descriptor's Label, and reporter where it reports a
+	// character no font of it has.
 	label       string
-	logger      *kernel.Logger
+	reporter    *reporter
 	defaultFont loadedFont
 	// languageFonts are the fonts serving each language that has any, in
 	// the order its descriptor lists them.
@@ -37,20 +35,20 @@ type fontSetSlot struct {
 
 // makeFontSetSlot answers the set descriptor describes, every font file it
 // names loaded through files, an empty path canvas's JetBrains Mono. A font
-// that fails to load is reported once to logger for its path and left out
+// that fails to load is reported once for its path and left out
 // of the set, a failed default font replaced by JetBrains Mono; a variation
 // naming no axis is reported once for its font's path and ignored. Its set
 // is the default set until its maker names it.
-func makeFontSetSlot(files fs.FS, logger *kernel.Logger, descriptor FontSetDescriptor) *fontSetSlot {
-	slot := &fontSetSlot{label: descriptor.Label, logger: logger, languageFonts: map[string][]loadedFont{}, characterFonts: map[languageCharacter]*loadedFont{}}
-	defaultFont, loaded := loadSetFont(files, logger, descriptor.Label, descriptor.Default)
+func makeFontSetSlot(files fs.FS, reporter *reporter, descriptor FontSetDescriptor) *fontSetSlot {
+	slot := &fontSetSlot{label: descriptor.Label, reporter: reporter, languageFonts: map[string][]loadedFont{}, characterFonts: map[languageCharacter]*loadedFont{}}
+	defaultFont, loaded := loadSetFont(files, reporter, descriptor.Label, descriptor.Default)
 	if !loaded {
 		defaultFont, _ = loadFont(files, Font{})
 	}
 	slot.defaultFont = defaultFont
 	for _, entry := range descriptor.Languages {
 		for _, fontDescriptor := range entry.Fonts {
-			loadedFont, loaded := loadSetFont(files, logger, descriptor.Label, fontDescriptor)
+			loadedFont, loaded := loadSetFont(files, reporter, descriptor.Label, fontDescriptor)
 			if !loaded {
 				continue
 			}
@@ -93,7 +91,7 @@ func (s *fontSetSlot) findCharacterFont(language string, character rune) *loaded
 	}
 	if _, has := drawingFont.font.NominalGlyph(character); !has {
 		missing := Report{Kind: ReportKindCharacterMissing, Err: fmt.Errorf("canvas: font set %q, %v, has no font drawing %q in language %q, neither the language's fonts nor its default font, so it is drawn as the default font's missing-glyph box", s.label, s.set, character, language)}
-		s.logger.LogErrOnce(characterMissingLogKey+fmt.Sprint(s.set), missing)
+		s.reporter.reportOnce(characterMissingLogKey+fmt.Sprint(s.set), missing)
 	}
 	s.characterMutex.Lock()
 	s.characterFonts[key] = drawingFont
@@ -103,22 +101,22 @@ func (s *fontSetSlot) findCharacterFont(language string, character rune) *loaded
 
 // loadSetFont loads fontDescriptor, a font of the set labelled setLabel,
 // through files, as makeFontSetSlot does, and answers whether it loaded. A
-// failure is reported once to logger for its path; one that loads re-arms
+// failure is reported once for its path; one that loads re-arms
 // that report, so a later failure of its file reports again.
-func loadSetFont(files fs.FS, logger *kernel.Logger, setLabel string, fontDescriptor Font) (loadedFont, bool) {
+func loadSetFont(files fs.FS, reporter *reporter, setLabel string, fontDescriptor Font) (loadedFont, bool) {
 	for _, variation := range fontDescriptor.Variations {
 		if variation.Axis == (AxisTag{}) && variation.Value != 0 {
 			ignored := Report{Kind: ReportKindVariationIgnored, Err: fmt.Errorf("canvas: font %q of font set %q has a variation of value %v naming no axis, such as AxisTagFromName answers for a name of other than four bytes, which is ignored", fontDescriptor.Path, setLabel, variation.Value)}
-			logger.LogErrOnce(variationIgnoredLogKey+fontDescriptor.Path, ignored)
+			reporter.reportOnce(variationIgnoredLogKey+fontDescriptor.Path, ignored)
 		}
 	}
 	loaded, err := loadFont(files, fontDescriptor)
 	if err != nil {
 		failure := Report{Kind: ReportKindFontNotLoaded, Err: fmt.Errorf("canvas: font %q of font set %q did not load, so the set is made without it, a default font replaced by JetBrains Mono: %w", fontDescriptor.Path, setLabel, err)}
-		logger.LogErrOnce(fontNotLoadedLogKey+fontDescriptor.Path, failure)
+		reporter.reportOnce(fontNotLoadedLogKey+fontDescriptor.Path, failure)
 		return loadedFont{}, false
 	}
-	logger.ForgetLogOnce(fontNotLoadedLogKey + fontDescriptor.Path)
+	reporter.forget(fontNotLoadedLogKey + fontDescriptor.Path)
 	return loaded, true
 }
 

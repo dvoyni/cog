@@ -6,6 +6,7 @@ import (
 	"math"
 
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/plugins/metronome"
 	"github.com/dvoyni/cog/plugins/platform"
 	"github.com/dvoyni/cog/plugins/render"
 )
@@ -97,13 +98,16 @@ func NewPlugin() *Plugin { return &Plugin{} }
 // Name returns PluginName.
 func (*Plugin) Name() kernel.PluginName { return PluginName }
 
-// Dependencies names render, which canvas draws through, and platform; canvas
-// is listed after both, and a plugin that records into canvas after canvas.
+// Dependencies names render, which canvas draws through, platform, and
+// metronome, whose Clock times canvas's jobs; canvas is listed after them,
+// and a plugin that records into canvas after canvas.
 func (*Plugin) Dependencies() []kernel.PluginName {
-	return []kernel.PluginName{render.PluginName, platform.PluginName}
+	return []kernel.PluginName{render.PluginName, platform.PluginName, metronome.PluginName}
 }
 
-// Init installs the draw state, with the kernel's logger for reports, the
+// Init installs the draw state, with the kernel's logger for reports, which
+// also go into the inspection pending, stopwatches of metronome's Clock
+// timing its jobs, the
 // filter of entries naming none and the layers config regroups; the
 // renderer, its mip levels lowered to the most and reported when config's
 // are more, and its page side raised to the smallest on its atlas grid and
@@ -120,7 +124,17 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 // another type than *Config is a composition error, and panics.
 func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	canvasConfig := kernel.PluginConfigOrDefault[Config](config)
-	configurator.InitResource(&drawState{logger: configurator.Logger(), defaultFilter: cmp.Or(canvasConfig.DefaultFilter, FilterLinear), sorter: makeEntrySorter(canvasConfig.RegroupedLayers)})
+	canvasInspector := &inspector{}
+	canvasReporter := &reporter{logger: configurator.Logger(), inspector: canvasInspector}
+	clock, _ := configurator.Resource[metronome.Clock]()
+	configurator.InitResource(&drawState{
+		reporter:      canvasReporter,
+		inspector:     canvasInspector,
+		defaultFilter: cmp.Or(canvasConfig.DefaultFilter, FilterLinear),
+		sorter:        makeEntrySorter(canvasConfig.RegroupedLayers),
+		sortStopwatch: clock.NewStopwatch(SortStopwatchName),
+		drawStopwatch: clock.NewStopwatch(DrawStopwatchName),
+	})
 	mipLevelCount := cmp.Or(canvasConfig.MipLevels, 3)
 	if canvasConfig.DoNotGenerateMipMaps {
 		mipLevelCount = 1
@@ -142,7 +156,7 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	configurator.InitResource(newRenderer(atlasPageSize, cmp.Or(canvasConfig.AtlasLayerCeiling, 256), cmp.Or(canvasConfig.OwnTextureSize, atlasPageSize/2), mipLevelCount))
 	configurator.InitResource(&windowList{})
 	configurator.InitResource[Targets](&drawnTargets{})
-	configurator.InitResource[FontLibrary](newFontLibrary(configurator.Logger(), canvasConfig))
+	configurator.InitResource[FontLibrary](newFontLibrary(canvasReporter, canvasConfig))
 	configurator.BindSocket(platform.ReadMountSocket{FS: makeAssetFS(), Priority: math.MinInt, Prefix: assetPrefix})
 	openFrameTask := configurator.RegisterTask1(openFrame)
 	sortEntriesTask := configurator.RegisterTask1(sortEntries)

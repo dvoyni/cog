@@ -163,3 +163,11 @@ _Avoid_: Inline image, sprite, emoji, glyph
 **Markup**:
 The string form of a run's spans, which canvas reads only when the run asks it to, so that text a player typed draws as it was written.
 _Avoid_: Rich text, tags, BBCode
+
+**Cull**:
+A camera leaving out a whole entry of its layers whose bounds miss the part of the world it sees, so the entry costs it no draw. A clip cuts what an entry draws; a cull leaves the entry out.
+_Avoid_: Hide, skip, clip
+
+**First use**:
+The first time canvas needs an image, a mesh file, a run's layout or a glyph, and so packs, loads or makes it; a frame without first uses loads nothing.
+_Avoid_: Cache miss, load

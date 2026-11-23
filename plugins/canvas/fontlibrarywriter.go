@@ -19,7 +19,7 @@ type fontLibraryWriter struct {
 // MakeFontSet makes a font set of descriptor, loading every font file it
 // names through platform's FS now, in the calling task, and answers it.
 func (w fontLibraryWriter) MakeFontSet(descriptor FontSetDescriptor) FontSet {
-	slot := makeFontSetSlot(w.files, w.logger, descriptor)
+	slot := makeFontSetSlot(w.files, w.reporter, descriptor)
 	if len(w.freeIndexes) == 0 {
 		w.sets = append(w.sets, &fontSetSlot{set: FontSet{index: uint32(len(w.sets)), generation: 1}})
 		w.freeIndexes = append(w.freeIndexes, uint32(len(w.sets)-1))
@@ -58,13 +58,13 @@ func (w fontLibraryWriter) RegisterIcon(name string, icon IconDescriptor) {
 	if err != nil {
 		delete(w.icons, name)
 		refusal := Report{Kind: ReportKindIconRefused, Err: fmt.Errorf("canvas: registering icon %q: %w, so the name is left unregistered", name, err)}
-		w.logger.LogErrOnce(iconRefusedLogKey+name, refusal)
+		w.reporter.reportOnce(iconRefusedLogKey+name, refusal)
 		return
 	}
 	w.iconRegistrationCount++
 	w.icons[name] = registeredIcon{descriptor: icon, frameSize: frameSize, serial: w.iconRegistrationCount}
-	w.logger.ForgetLogOnce(iconRefusedLogKey + name)
-	w.logger.ForgetLogOnce(iconNotRegisteredLogKey + name)
+	w.reporter.forget(iconRefusedLogKey + name)
+	w.reporter.forget(iconNotRegisteredLogKey + name)
 }
 
 // RegisterColor registers color under name, replacing a colour registered

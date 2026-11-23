@@ -237,11 +237,16 @@
 //
 // A tool asks for an inspection of the next frame through its Assets
 // parameter, and reads it in a task off InspectedEvent: each camera the frame
-// was seen through, its batches and their entries, with render's own
-// inspection of the frame beside it. Every other frame pays one check:
+// was seen through, its batches and their entries, and what it culled; the
+// frame's first uses and reports; how long canvas took to sort and draw it;
+// with render's own inspection of the frame beside it. Its String writes it
+// as text for an agent to log. Every other frame pays one check:
 //
 //	func inspect(k *kernel.Kernel, event canvas.InspectedEvent, assets canvas.Assets) kernel.NoResult {
 //		inspection, err := assets.ReadInspection(event)
+//		if err == nil {
+//			log.Print(inspection)
+//		}
 //		...
 //	}
 //

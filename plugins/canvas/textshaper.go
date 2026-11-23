@@ -209,7 +209,7 @@ func (s *textShaper) placeIcon(name string, icons map[string]registeredIcon) *pl
 	registered, found := icons[name]
 	if !found {
 		missing := Report{Kind: ReportKindIconNotRegistered, Err: fmt.Errorf("canvas: a run of text names icon %q, which no icon is registered under, so it is drawn as the default font's missing-glyph box", name)}
-		s.set.logger.LogErrOnce(iconNotRegisteredLogKey+name, missing)
+		s.set.reporter.reportOnce(iconNotRegisteredLogKey+name, missing)
 		return nil
 	}
 	icon := registered.descriptor

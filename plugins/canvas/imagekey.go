@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/render"
 )
@@ -49,33 +48,33 @@ func (k imageKey) describe() string {
 	return fmt.Sprintf("%q", k.path)
 }
 
-// reportIgnoredOptions reports to logger, once for the subject of key, an
+// reportIgnoredOptions reports, once for the subject of key, an
 // image's, the options ImageFromFile or ImageFromTexture was given for it
 // and ignored.
-func reportIgnoredOptions(logger *kernel.Logger, key imageKey) {
+func reportIgnoredOptions(reporter *reporter, key imageKey) {
 	if !key.ignoredOptions {
 		return
 	}
 	ignored := Report{Kind: ReportKindImageOptionsIgnored, Err: fmt.Errorf("canvas: image %s was given more than one set of options, and is drawn with the first", key.describe())}
-	logger.LogErrOnce(imageOptionsIgnoredLogKey+key.findSubject(), ignored)
+	reporter.reportOnce(imageOptionsIgnoredLogKey+key.findSubject(), ignored)
 }
 
-// reportRefusedConverter reports to logger, once for the subject of key,
+// reportRefusedConverter reports, once for the subject of key,
 // an image's, the converter it was given and internImage refused.
-func reportRefusedConverter(logger *kernel.Logger, key imageKey) {
+func reportRefusedConverter(reporter *reporter, key imageKey) {
 	if key.converterRefusal == "" {
 		return
 	}
 	refusal := Report{Kind: ReportKindConverterRefused, Err: fmt.Errorf("canvas: image %s was given %s, and is drawn unconverted", key.describe(), key.converterRefusal)}
-	logger.LogErrOnce(converterRefusedLogKey+key.findSubject(), refusal)
+	reporter.reportOnce(converterRefusedLogKey+key.findSubject(), refusal)
 }
 
-// reportFrameOutOfBounds reports to logger, once for the subject of key, an
+// reportFrameOutOfBounds reports, once for the subject of key, an
 // image's, that its frame does not lie within what it is cut from, a file
 // or a texture as holder names it, of width by height texels.
-func reportFrameOutOfBounds(logger *kernel.Logger, key imageKey, frame uint32, holder string, width, height int) {
+func reportFrameOutOfBounds(reporter *reporter, key imageKey, frame uint32, holder string, width, height int) {
 	outOfBoundsReport := Report{Kind: ReportKindFrameOutOfBounds, Err: fmt.Errorf("canvas: frame %d of image %s, of its SourceRect %v cut by its sheet of %d by %d, does not lie within its %s of %d by %d texels, so it draws nothing", frame, key.describe(), key.options.SourceRect, key.options.Sheet.Columns, key.options.Sheet.Rows, holder, width, height)}
-	logger.LogErrOnce(frameOutOfBoundsLogKey+key.findSubject(), outOfBoundsReport)
+	reporter.reportOnce(frameOutOfBoundsLogKey+key.findSubject(), outOfBoundsReport)
 }
 
 // packedKey is what canvas packs as a region of its own: the texels of a

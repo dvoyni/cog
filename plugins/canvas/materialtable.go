@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/plugins/render"
 )
 
@@ -30,9 +29,9 @@ type materialTable struct {
 
 // make makes a 2D material of descriptor through inventory, and answers it,
 // its argument's layout checked against its shader's, a mismatch reported
-// once to logger for the shader and the type.
-func (t *materialTable) make(inventory render.Inventory, logger *kernel.Logger, descriptor MaterialDescriptor) Material {
-	slot := makeMaterialSlot(inventory, logger, descriptor)
+// once for the shader and the type.
+func (t *materialTable) make(inventory render.Inventory, reporter *reporter, descriptor MaterialDescriptor) Material {
+	slot := makeMaterialSlot(inventory, reporter, descriptor)
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	if len(t.freeIndexes) == 0 {
@@ -98,23 +97,23 @@ func (t *materialTable) appendSlots(slots []materialSlot) []materialSlot {
 	return append(slots, t.slots...)
 }
 
-// reportArgumentRefused reports to logger once for material and given, the
+// reportArgumentRefused reports once for material and given, the
 // type of an entry's argument, that material, taking an argument of type
 // taken, nil for none, refused it.
-func reportArgumentRefused(logger *kernel.Logger, material Material, given, taken reflect.Type) {
+func reportArgumentRefused(reporter *reporter, material Material, given, taken reflect.Type) {
 	takes := "takes none"
 	if taken != nil {
 		takes = "takes a " + taken.String()
 	}
 	refusal := Report{Kind: ReportKindArgumentRefused, Err: fmt.Errorf("canvas: an entry gave material %v an argument of %v, which it refuses, as it %s, so the entry is skipped", material, given, takes)}
-	logger.LogErrOnce(argumentRefusedLogKey+fmt.Sprint(material)+" "+given.String(), refusal)
+	reporter.reportOnce(argumentRefusedLogKey+fmt.Sprint(material)+" "+given.String(), refusal)
 }
 
-// reportMaterialNotHeld reports material to logger once, refused as use,
+// reportMaterialNotHeld reports material once, refused as use,
 // what was done with it, such as drawing an entry with it, says: a material
 // canvas does not hold, or one canvas ships, the default material or
 // SDFMaterial, whose parameters are canvas's.
-func reportMaterialNotHeld(logger *kernel.Logger, material Material, use string) {
+func reportMaterialNotHeld(reporter *reporter, material Material, use string) {
 	refusal := Report{Kind: ReportKindMaterialNotHeld, Err: fmt.Errorf("canvas: %s material %v, which canvas does not hold: never made by Assets.MakeMaterial, released, or one canvas ships, whose parameters are canvas's", use, material)}
-	logger.LogErrOnce(materialNotHeldLogKey+fmt.Sprint(material), refusal)
+	reporter.reportOnce(materialNotHeldLogKey+fmt.Sprint(material), refusal)
 }

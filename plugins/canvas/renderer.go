@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/libs/meshfile"
 	"github.com/dvoyni/cog/plugins/platform"
@@ -95,6 +94,10 @@ type renderer struct {
 	// target of those naming none.
 	cameraDraws []cameraDraw
 	mainWindow  platform.Window
+	// culledCameras are the frame's cameras that draw nothing, culling every
+	// entry of their layers, or having none, and not clearing, kept only
+	// for a frame inspected, which inspects them too.
+	culledCameras []culledCamera
 	// materialSlots are the slots of the 2D materials Assets made, by index,
 	// as they stood as the frame began drawing, written over each frame.
 	materialSlots []materialSlot
@@ -149,7 +152,7 @@ func newRenderer(atlasPageSize, atlasLayerCeiling, ownTextureSize, mipLevelCount
 // init makes the default material, over the default shader, which it keeps
 // acquired, blending premultiplied colour over what the target holds;
 // SDFMaterial's and TextMaterial's slots, their arguments' layouts checked,
-// a mismatch reported once to logger; the
+// a mismatch reported once; the
 // clear material, over the viewport shader, which it keeps acquired too,
 // replacing what the target holds, which draws a camera's clear over its
 // viewport, and what a multisampled camera that clears resolved; the
@@ -158,10 +161,10 @@ func newRenderer(atlasPageSize, atlasLayerCeiling, ownTextureSize, mipLevelCount
 // resolved; the pack material, over the viewport shader, replacing what an
 // atlas's cell holds with an image premultiplied; and the sRGB sprite
 // atlas, the white texel packed into it first.
-func (r *renderer) init(inventory render.Inventory, logger *kernel.Logger) {
-	r.defaultSlot = makeMaterialSlot(inventory, logger, MaterialDescriptor{Label: "canvas default", Shader: defaultShaderPath})
-	r.sdfSlot = makeMaterialSlot(inventory, logger, sdfMaterialDescriptor)
-	r.textSlot = makeMaterialSlot(inventory, logger, textMaterialDescriptor)
+func (r *renderer) init(inventory render.Inventory, reporter *reporter) {
+	r.defaultSlot = makeMaterialSlot(inventory, reporter, MaterialDescriptor{Label: "canvas default", Shader: defaultShaderPath})
+	r.sdfSlot = makeMaterialSlot(inventory, reporter, sdfMaterialDescriptor)
+	r.textSlot = makeMaterialSlot(inventory, reporter, textMaterialDescriptor)
 	viewportShader := inventory.AcquireShader(viewportShaderPath)
 	r.clearMaterial = inventory.MakeMaterial(render.MaterialDescriptor{
 		Label:              "canvas clear",
@@ -226,6 +229,8 @@ func (r *renderer) packWhiteTexel(inventory render.Inventory) {
 // decoded and converted in it.
 func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, files fs.FS, manager *platform.WindowManager, mainWindow platform.Window, library *fontLibrary, state *drawState) {
 	r.cameraDraws = r.cameraDraws[:0]
+	clear(r.culledCameras)
+	r.culledCameras = r.culledCameras[:0]
 	r.mainWindow = mainWindow
 	r.batches = r.batches[:0]
 	r.visibleEntries = r.visibleEntries[:0]
@@ -239,7 +244,7 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 		return
 	}
 	if r.defaultSlot.material == (render.Material{}) {
-		r.init(inventory, state.logger)
+		r.init(inventory, state.reporter)
 	}
 	r.materialSlots = state.materials.appendSlots(r.materialSlots[:0])
 	r.packGlyphs(inventory, library, state)
@@ -251,7 +256,10 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 		case EntryKindMesh:
 			// A mesh whose file draws nothing places no image.
 			file := state.meshes[entry.index].File
-			if r.loadMesh(inventory, files, state.logger, file); r.loadedMeshes[file.index].mesh == (render.Mesh{}) {
+			if r.loadMesh(inventory, files, state.reporter, file) {
+				state.inspector.addLoadedMeshFile(file)
+			}
+			if r.loadedMeshes[file.index].mesh == (render.Mesh{}) {
 				break
 			}
 			fallthrough
@@ -283,16 +291,19 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 				continue
 			}
 			key := imageNames.findKey(unplaced.image)
-			reportIgnoredOptions(state.logger, key)
-			reportRefusedConverter(state.logger, key)
+			reportIgnoredOptions(state.reporter, key)
+			reportRefusedConverter(state.reporter, key)
 			if key.ofTexture {
-				placeTextureImage(inventory, state.logger, drawn, key, unplaced.frame)
+				placeTextureImage(inventory, state.reporter, drawn, key, unplaced.frame)
 				continue
 			}
-			packed, drawsTexels := r.packImage(inventory, files, state.logger, &state.residency, key, unplaced.frame)
+			packed, drawsTexels, packedNow := r.packImage(inventory, files, state.reporter, &state.residency, key, unplaced.frame)
 			if !drawsTexels {
 				drawn.drawsNothing = true
 				continue
+			}
+			if packedNow {
+				state.inspector.addPackedImage(unplaced.image, unplaced.frame)
 			}
 			*drawn = makeDrawnImage(packed, key.options)
 		}
@@ -314,7 +325,7 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 	}
 	for index := range state.cameras {
 		camera := &state.cameras[index]
-		drawnCamera, ok := makeCameraDraw(inventory, manager, mainWindow, state.logger, camera)
+		drawnCamera, ok := makeCameraDraw(inventory, manager, mainWindow, state.reporter, camera)
 		if !ok {
 			continue
 		}
@@ -323,8 +334,11 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 			r.visibleEntries = drawnCamera.view.appendVisibleEntries(r.visibleEntries, layerRun, r.batchKeys, r.entryBounds)
 		}
 		drawnCamera.entries = r.visibleEntries[entriesStart:]
-		if camera.Clear || len(drawnCamera.entries) > 0 {
+		switch {
+		case camera.Clear || len(drawnCamera.entries) > 0:
 			r.cameraDraws = append(r.cameraDraws, drawnCamera)
+		case state.frameInspected:
+			r.culledCameras = append(r.culledCameras, culledCamera{drawingBefore: len(r.cameraDraws), draw: drawnCamera})
 		}
 	}
 	for orderStart := 0; orderStart < len(r.cameraDraws); {
@@ -620,22 +634,22 @@ func (r *renderer) bindInstances(pass *render.Pass, material render.Material, in
 // frame's, its image placed: packed, given a view of its texture, or found
 // to draw nothing. An entry skipped, its image's frame drawing nothing, its
 // material one canvas does not hold, or its argument one its material does
-// not take, reported once to state's logger, or of a material whose
+// not take, reported once, or of a material whose
 // argument's layout mismatched its shader's, or a mesh whose file draws
 // nothing, or per-frame triangles or a mesh of another layout than
 // canvas.Vertex's whose material has no vertex stage of its own, reported
-// once to state's logger, has zero bounds and batch key.
+// once, has zero bounds and batch key.
 func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 	material := state.findEntryMaterial(entry)
 	slot, held := r.findMaterial(material)
 	if !held {
-		reportMaterialNotHeld(state.logger, material, "drawing an entry with")
+		reportMaterialNotHeld(state.reporter, material, "drawing an entry with")
 		r.appendSkippedEntryKeys()
 		return
 	}
 	// A material whose argument's layout mismatched its shader's, reported
 	// as it was made, draws nothing.
-	if slot.argumentLayoutMismatch || !slot.takesArgument(state.logger, material, entry.argument) {
+	if slot.argumentLayoutMismatch || !slot.takesArgument(state.reporter, material, entry.argument) {
 		r.appendSkippedEntryKeys()
 		return
 	}
@@ -671,7 +685,7 @@ func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 	case EntryKindTriangles:
 		triangles := &state.triangles[entry.index]
 		image := findDrawnFrame(r.drawnImages, triangles.options.Image, triangles.options.Frame)
-		if image.drawsNothing || !slot.drawsLayout(state.logger, material, triangles.standardLayout) {
+		if image.drawsNothing || !slot.drawsLayout(state.reporter, material, triangles.standardLayout) {
 			r.appendSkippedEntryKeys()
 			return
 		}
@@ -686,7 +700,7 @@ func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 			return
 		}
 		image := findDrawnFrame(r.drawnImages, mesh.Image, mesh.Frame)
-		if image.drawsNothing || !slot.drawsLayout(state.logger, material, loaded.standardLayout) {
+		if image.drawsNothing || !slot.drawsLayout(state.reporter, material, loaded.standardLayout) {
 			r.appendSkippedEntryKeys()
 			return
 		}
@@ -718,7 +732,7 @@ func (r *renderer) packGlyphs(inventory render.Inventory, library *fontLibrary, 
 				r.drawnGlyphs = slices.Grow(r.drawnGlyphs, int(glyph.field)+1-len(r.drawnGlyphs))[:glyph.field+1]
 			}
 			if drawn := &r.drawnGlyphs[glyph.field]; !drawn.packed && drawn.refusedFrame != r.drawnFrameCount {
-				r.packGlyph(inventory, state.logger, drawn, library.glyphs.findField(glyph.field))
+				r.packGlyph(inventory, state.reporter, drawn, library.glyphs.findField(glyph.field))
 			}
 		}
 	}
@@ -727,9 +741,9 @@ func (r *renderer) packGlyphs(inventory render.Inventory, library *fontLibrary, 
 // packGlyph packs drawn, a glyph of field, into the glyph atlas, its field queued to copy into its region: on its first page
 // holding it, else on a new one, the atlas doubling its pages while under
 // its ceiling. A glyph whose cell no page holds, or one the atlas at its
-// ceiling has no room for, draws nothing, reported once to logger, and is
+// ceiling has no room for, draws nothing, reported once, and is
 // tried again at the next frame drawing it.
-func (r *renderer) packGlyph(inventory render.Inventory, logger *kernel.Logger, drawn *drawnGlyph, field glyphField) {
+func (r *renderer) packGlyph(inventory render.Inventory, reporter *reporter, drawn *drawnGlyph, field glyphField) {
 	width := uint32(field.width)
 	height := uint32(field.height)
 	var region render.TextureRegion
@@ -743,7 +757,7 @@ func (r *renderer) packGlyph(inventory render.Inventory, logger *kernel.Logger, 
 	}
 	if !fits {
 		fullReport := Report{Kind: ReportKindAtlasFull, Err: fmt.Errorf("canvas: the glyph atlas, of %d pages of %d texels a side, has no room for a glyph's field of %d by %d texels, so it draws nothing", len(r.glyphAtlas.pages), r.glyphAtlas.width, width, height)}
-		logger.LogErrOnce(atlasFullLogKey+r.glyphAtlas.label, fullReport)
+		reporter.reportOnce(atlasFullLogKey+r.glyphAtlas.label, fullReport)
 		drawn.refusedFrame = r.drawnFrameCount
 		return
 	}
@@ -837,15 +851,16 @@ func (r *renderer) findPlacedImage(image Image, frame uint32) (*drawnImage, bool
 // vertices and indices made into buffers and a mesh over them through
 // inventory, kept at its index among the loaded meshes. A file that is missing, is no mesh file,
 // is of a version canvas does not know, is cut short or has zero bounds
-// draws nothing, reported to logger once for its path, as does one whose
-// mesh render refused, which render reports.
-func (r *renderer) loadMesh(inventory render.Inventory, files fs.FS, logger *kernel.Logger, file MeshFile) {
+// draws nothing, reported once for its path, as does one whose
+// mesh render refused, which render reports. It answers whether it loaded
+// file now.
+func (r *renderer) loadMesh(inventory render.Inventory, files fs.FS, reporter *reporter, file MeshFile) bool {
 	if int(file.index) >= len(r.loadedMeshes) {
 		r.loadedMeshes = slices.Grow(r.loadedMeshes, int(file.index)+1-len(r.loadedMeshes))[:file.index+1]
 	}
 	loaded := &r.loadedMeshes[file.index]
 	if loaded.tried {
-		return
+		return false
 	}
 	loaded.tried = true
 	path := meshFileNames.findKeyAt(file.index)
@@ -859,8 +874,8 @@ func (r *renderer) loadMesh(inventory render.Inventory, files fs.FS, logger *ker
 	}
 	if err != nil {
 		notLoaded := Report{Kind: ReportKindMeshFileNotLoaded, Err: fmt.Errorf("canvas: loading mesh file %q, which draws nothing: %w", path, err)}
-		logger.LogErrOnce(meshFileNotLoadedLogKey+path, notLoaded)
-		return
+		reporter.reportOnce(meshFileNotLoadedLogKey+path, notLoaded)
+		return false
 	}
 	loaded.bounds = decoded.Bounds
 	loaded.standardLayout = decoded.Layout.Stride == vertexLayout.Stride && slices.Equal(decoded.Layout.Attributes, vertexLayout.Attributes)
@@ -872,14 +887,16 @@ func (r *renderer) loadMesh(inventory render.Inventory, files fs.FS, logger *ker
 		descriptor.Indices = render.IndexBuffer{Range: render.BufferRange{Buffer: loaded.indexBuffer}, Format: render.IndexFormat(decoded.IndexFormat)}
 	}
 	loaded.mesh = inventory.MakeMesh(descriptor)
+	return true
 }
 
 // packImage packs frame of the image of key, marked drawn this frame, and
 // answers where, and whether it draws texels: false for a frame whose
 // rectangle does not lie within its file, which is not packed and is
-// reported to logger once for its path, and for a converted frame whose
-// converter answered no texel. A converted image's file is read from files
-// and decoded, as decodeConvertedFile does; any other's, or one that could
+// reported once for its path, and for a converted frame whose
+// converter answered no texel; and whether it packed the frame now, not one
+// sharing the cell of one packed before. A converted image's file is read
+// from files and decoded, as decodeConvertedFile does; any other's, or one that could
 // not be decoded, which render draws magenta, is acquired from render with
 // its colour space, sharing the texture Assets.Preload acquired, which it
 // then releases from requests, of the size render's descriptor of it
@@ -891,9 +908,9 @@ func (r *renderer) loadMesh(inventory render.Inventory, files fs.FS, logger *ker
 // within the frame, grown or evicting images when full, or into an atlas
 // of its own, exactly its size with no gutter, when it is wider or taller
 // than ownTextureSize, when no page holds its cell, or when the atlas is
-// at its ceiling with nothing to evict, reported to logger, its cell kept
+// at its ceiling with nothing to evict, reported, its cell kept
 // for the next command list to fill.
-func (r *renderer) packImage(inventory render.Inventory, files fs.FS, logger *kernel.Logger, requests *residencyRequestQueue, key imageKey, frame uint32) (*packedImage, bool) {
+func (r *renderer) packImage(inventory render.Inventory, files fs.FS, reporter *reporter, requests *residencyRequestQueue, key imageKey, frame uint32) (packed *packedImage, drawsTexels, packedNow bool) {
 	sourceKey := sourceKey{path: key.path, colorSpace: key.options.ColorSpace}
 	converter := key.options.Convert
 	var picture image.Image
@@ -919,7 +936,7 @@ func (r *renderer) packImage(inventory render.Inventory, files fs.FS, logger *ke
 	}
 	frameRect, withinFile := key.options.findFrameRect(fileWidth, fileHeight, frame)
 	if !withinFile {
-		reportFrameOutOfBounds(logger, key, frame, "file", fileWidth, fileHeight)
+		reportFrameOutOfBounds(reporter, key, frame, "file", fileWidth, fileHeight)
 	}
 	packedKey := packedKey{source: sourceKey, rect: frameRect, converter: converter, wrap: key.options.Wrap}
 	packed, shared := r.packedImages[packedKey]
@@ -930,7 +947,7 @@ func (r *renderer) packImage(inventory render.Inventory, files fs.FS, logger *ke
 		if shared {
 			packed.lastDrawnFrame = r.drawnFrameCount
 		}
-		return packed, withinFile
+		return packed, withinFile, false
 	}
 	spriteAtlas := r.srgbAtlas
 	if key.options.ColorSpace == ColorSpaceLinear {
@@ -944,7 +961,7 @@ func (r *renderer) packImage(inventory render.Inventory, files fs.FS, logger *ke
 	if converter != nil {
 		output := convertFrame(picture, frameRect, converter)
 		if output.Rect.Empty() {
-			return nil, false
+			return nil, false, false
 		}
 		sourceRect = m.Recti{Width: output.Rect.Dx(), Height: output.Rect.Dy()}
 		source = inventory.MakeTexture(render.TextureDescriptor{Label: key.path, Width: uint32(sourceRect.Width), Height: uint32(sourceRect.Height), Format: spriteAtlas.format}, output.Pix)
@@ -956,7 +973,7 @@ func (r *renderer) packImage(inventory render.Inventory, files fs.FS, logger *ke
 	cellWidth, cellHeight := spriteAtlas.findCellSize(width, height)
 	holdsCell := cellWidth <= r.atlasPageSize && cellHeight <= r.atlasPageSize
 	if width <= r.ownTextureSize && height <= r.ownTextureSize && holdsCell {
-		packed.region, fits = r.packIntoSpriteAtlas(inventory, logger, spriteAtlas, key.path, width, height)
+		packed.region, fits = r.packIntoSpriteAtlas(inventory, reporter, spriteAtlas, key.path, width, height)
 	}
 	if !fits {
 		// An atlas of its own is exactly its size, of no gutter, so an image
@@ -965,7 +982,7 @@ func (r *renderer) packImage(inventory render.Inventory, files fs.FS, logger *ke
 	}
 	r.packedImages[packedKey] = packed
 	r.packings = append(r.packings, atlasPacking{packed: packed, source: source, frameRect: sourceRect, wrap: key.options.Wrap})
-	return packed, true
+	return packed, true, true
 }
 
 // decodeConvertedFile answers the file of key, a converted image's, read
@@ -991,8 +1008,8 @@ func (r *renderer) decodeConvertedFile(files fs.FS, requests *residencyRequestQu
 // growth not yet copied merged into one copy of the pages it had; else
 // where the images it evicts leave room, the least lately drawn first,
 // never one drawn this frame. An atlas at its ceiling with nothing to evict
-// is reported to logger, once for the atlas.
-func (r *renderer) packIntoSpriteAtlas(inventory render.Inventory, logger *kernel.Logger, spriteAtlas *atlas, path string, width, height uint32) (render.TextureRegion, bool) {
+// is reported, once for the atlas.
+func (r *renderer) packIntoSpriteAtlas(inventory render.Inventory, reporter *reporter, spriteAtlas *atlas, path string, width, height uint32) (render.TextureRegion, bool) {
 	if region, fits := spriteAtlas.pack(width, height); fits {
 		return region, true
 	}
@@ -1018,7 +1035,7 @@ func (r *renderer) packIntoSpriteAtlas(inventory render.Inventory, logger *kerne
 		}
 	}
 	fullReport := Report{Kind: ReportKindAtlasFull, Err: fmt.Errorf("canvas: the sprite atlas %q is full at its ceiling of %d pages, with nothing to evict that was not drawn this frame, so image %q is drawn from a texture of its own", spriteAtlas.label, len(spriteAtlas.pages), path)}
-	logger.LogErrOnce(atlasFullLogKey+spriteAtlas.label, fullReport)
+	reporter.reportOnce(atlasFullLogKey+spriteAtlas.label, fullReport)
 	return render.TextureRegion{}, false
 }
 
@@ -1157,6 +1174,13 @@ func findDrawnFrame(drawnImages [][]drawnImage, image Image, frame uint32) *draw
 		panic("canvas: finding a frame of an image whose drawn frames were never made")
 	}
 	return &frames[min(frame, uint32(len(frames)-1))]
+}
+
+// culledCamera is a camera of a frame inspected that draws nothing, as it
+// would draw, after drawingBefore of the cameras that draw.
+type culledCamera struct {
+	drawingBefore int
+	draw          cameraDraw
 }
 
 // imageFrame is a frame of an image, which a sprite or an icon draws.

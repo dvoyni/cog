@@ -82,7 +82,7 @@ func makeDefaultFontSetOnStart(ex *kernel.Executor, in kernel.JobHandle, event s
 // the default set while it is made.
 func makeDefaultFontSet(k *kernel.Kernel, _ kernel.NoArg, library kernel.Write[FontLibrary], files kernel.Read[platform.FS]) kernel.NoResult {
 	libraryValue := library.Get().(*fontLibrary)
-	libraryValue.sets[0] = makeFontSetSlot(files.Get(), libraryValue.logger, libraryValue.defaultDescriptor)
+	libraryValue.sets[0] = makeFontSetSlot(files.Get(), libraryValue.reporter, libraryValue.defaultDescriptor)
 	return kernel.NoResult{}
 }
 
@@ -107,18 +107,25 @@ func sortEntries(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*drawState]
 // the 2D materials released since the frame before was drawn, so the frame
 // recorded as one was released still drew it, and frees the layouts now
 // unused for Config.LayoutIdleFrames frames. A frame
-// inspected is written down for the pending request, and render is asked
+// inspected is written down for the pending request, with how long its
+// sorting and its drawing took, and render is asked
 // again for its inspection, so a request render joined to an inspection of
 // an earlier frame still gets one.
 func draw(k *kernel.Kernel, beat metronome.Beat, frame render.Frame, inventory render.Inventory, files kernel.Read[platform.FS], manager kernel.Read[*platform.WindowManager], windows kernel.Read[*windowList], fonts kernel.Read[FontLibrary], state kernel.Read[*drawState], rendering kernel.Write[*renderer]) kernel.NoResult {
 	canvasState := state.Get()
+	if canvasState.frameInspected {
+		canvasState.drawStopwatch.Start()
+	}
 	drawing := rendering.Get()
 	library := fonts.Get().(*fontLibrary)
 	drawing.drawCameras(frame, inventory, files.Get(), manager.Get(), windows.Get().mainWindow(), library, canvasState)
 	canvasState.materials.freeReleased(inventory)
 	library.layouts.endFrame()
 	if canvasState.frameInspected {
-		canvasState.inspector.record(canvasState.makeInspection(beat, drawing.cameraDraws))
+		inspection := canvasState.makeInspection(beat, inventory, drawing)
+		inspection.SortTime = canvasState.sortTime
+		inspection.DrawTime = canvasState.drawStopwatch.Elapsed()
+		canvasState.inspector.record(inspection)
 		frame.RequestInspection()
 	}
 	return kernel.NoResult{}
@@ -143,7 +150,7 @@ func matchInspection(k *kernel.Kernel, event render.InspectedEvent, frame render
 	}
 	renderInspection, err := frame.ReadInspection(event)
 	if err != nil {
-		state.Get().logger.LogErr(err)
+		state.Get().reporter.logger.LogErr(err)
 		return kernel.NoResult{}
 	}
 	if state.Get().inspector.deliver(event.Beat, renderInspection) {

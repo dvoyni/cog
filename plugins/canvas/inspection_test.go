@@ -53,11 +53,18 @@ func TestAnInspectedFrameAnswersItsCamerasBatchesInstanceCountsAndEntriesWithThe
 		t.Errorf("the batch drew from %v, labelled %q, want the sRGB sprite atlas", spriteAtlas, label)
 	}
 	want := []canvas.InspectedCamera{{
-		Camera:   canvas.Camera{Clear: true, ClearColor: m.Color{A: 1}},
-		Window:   window,
-		Viewport: m.Recti{Width: 64, Height: 48},
+		Camera:     canvas.Camera{Clear: true, ClearColor: m.Color{A: 1}},
+		Window:     window,
+		TargetSize: m.Vec2i{X: 64, Y: 48},
+		Viewport:   m.Recti{Width: 64, Height: 48},
+		// The default camera sees the window's points about the origin,
+		// a pixel to a unit.
+		Scale:       m.Vec2{X: 1, Y: 1},
+		VisibleRect: m.Rect{X: -32, Y: -24, Width: 64, Height: 48},
 		Batches: []canvas.InspectedBatch{{
+			MaterialLabel: "canvas default",
 			Texture:       spriteAtlas,
+			TextureLabel:  "canvas sprites sRGB",
 			InstanceCount: 7,
 			Entries: []canvas.InspectedEntry{
 				entry(canvas.Shape{Order: 10}, 1, 0),
