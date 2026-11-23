@@ -83,11 +83,12 @@ func findPackings(t *testing.T, frame render.Inspection, labels map[render.Textu
 	return packings
 }
 
-// spriteAtlasLabel is the sRGB sprite atlas's texture's label, and
-// mipsLabel the label findPassSummaries gives the passes render draws a
-// texture's mips in.
+// spriteAtlasLabel is the sRGB sprite atlas's texture's label,
+// glyphAtlasLabel the glyph atlas's, and mipsLabel the label
+// findPassSummaries gives the passes render draws a texture's mips in.
 const (
 	spriteAtlasLabel = "canvas sprites sRGB"
+	glyphAtlasLabel  = "canvas glyphs"
 	mipsLabel        = "mips"
 )
 

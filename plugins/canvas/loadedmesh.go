@@ -21,7 +21,7 @@ type loadedMesh struct {
 }
 
 // unload gives back through inventory what l made, which the frame's draws
-// still draw.
+// still draw, and forgets it was tried, so its next draw loads it again.
 func (l *loadedMesh) unload(inventory render.Inventory) {
 	if l.mesh != (render.Mesh{}) {
 		inventory.ReleaseMesh(l.mesh)
@@ -32,4 +32,5 @@ func (l *loadedMesh) unload(inventory render.Inventory) {
 	if l.indexBuffer != (render.Buffer{}) {
 		inventory.ReleaseBuffer(l.indexBuffer)
 	}
+	*l = loadedMesh{}
 }

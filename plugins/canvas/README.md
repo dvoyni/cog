@@ -447,8 +447,9 @@ can be inspected in canvas's terms, beside render's inspection of it.
 
 ## Kernel surface
 
-- **Resources it installs:** `Handlers` (`RecordFrame`, `TrackOpenedWindow`,
-  `ForgetClosedWindow`, `DeliverInspection`), to order handlers around;
+- **Resources it installs:** `Handlers` (`RecordFrame`, `Recover`,
+  `TrackOpenedWindow`, `ForgetClosedWindow`, `DeliverInspection`), to order
+  handlers around, `Recover` starting afresh on `render.RecoveredEvent`;
   `Targets`, each target's size and scale as it was last drawn, read by a
   camera's conversions and written by canvas's own task after each frame's
   drawing; `FontLibrary`, its font sets, its current language and the icons and
@@ -486,6 +487,7 @@ can be inspected in canvas's terms, beside render's inspection of it.
   `render.FrameEvent`; and `InspectedEvent`, once render has delivered its
   inspection of a frame canvas was asked to inspect.
 - **Events it subscribes to:** `render.FrameEvent`;
+  `render.RecoveredEvent`, to start afresh once a lost device is recovered;
   `platform.WindowOpenedEvent` and `platform.WindowClosedEvent`, to know the
   main window; and `render.InspectedEvent`, to put render's inspection
   beside canvas's.

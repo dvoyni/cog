@@ -87,7 +87,8 @@ type Config struct {
 // Plugin is canvas: it installs Handlers, Targets, FontLibrary and its private state,
 // binds its built-in assets, publishes FrameEvent inside each
 // render.FrameEvent, draws the frame's entries once they are recorded, and
-// then copies the targets drawn into Targets.
+// then copies the targets drawn into Targets; and starts afresh on
+// render.RecoveredEvent.
 type Plugin struct{}
 
 // NewPlugin returns canvas.
@@ -112,8 +113,9 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 // canvas's built-in assets as a read
 // mount under the prefix cog.canvas, at the lowest priority, so any other
 // mount holding one of their names overrides it; subscribes to
-// render.FrameEvent, platform.WindowOpenedEvent, platform.WindowClosedEvent
-// and render.InspectedEvent, the Subs kept in the Handlers resource; and
+// render.FrameEvent, render.RecoveredEvent, platform.WindowOpenedEvent,
+// platform.WindowClosedEvent and render.InspectedEvent, the Subs kept in the
+// Handlers resource; and
 // subscribes to its own private events delivering inspections and starting. A config of
 // another type than *Config is a composition error, and panics.
 func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
@@ -146,6 +148,7 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	sortEntriesTask := configurator.RegisterTask1(sortEntries)
 	drawTask := configurator.RegisterTask8(draw)
 	copyTargetsTask := configurator.RegisterTask2(copyTargets)
+	startAfreshTask := configurator.RegisterTask2(startAfresh)
 	addWindowTask := configurator.RegisterTask1(addWindow)
 	removeWindowTask := configurator.RegisterTask1(removeWindow)
 	matchInspectionTask := configurator.RegisterTask2(matchInspection)
@@ -154,6 +157,9 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	configurator.InitResource(Handlers{
 		RecordFrame: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event render.FrameEvent) (render.FrameEvent, kernel.JobHandle) {
 			return recordFrame(ex, in, event, openFrameTask, sortEntriesTask, copyTargetsTask, drawTask)
+		}),
+		Recover: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event render.RecoveredEvent) (render.RecoveredEvent, kernel.JobHandle) {
+			return startAfreshOnRecovery(ex, in, event, startAfreshTask)
 		}),
 		TrackOpenedWindow: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event platform.WindowOpenedEvent) (platform.WindowOpenedEvent, kernel.JobHandle) {
 			return trackOpenedWindow(ex, in, event, addWindowTask)

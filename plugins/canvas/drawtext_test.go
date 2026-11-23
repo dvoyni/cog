@@ -183,7 +183,7 @@ func TestEveryLabelOfAFrameIsOneBatchOfTextMaterialOverTheGlyphAtlas(t *testing.
 			t.Errorf("entry %d is of kind %v and order %d, want a run of text of order %d", index, entry.Kind, entry.Order, index)
 		}
 	}
-	if label := findTextureLabels(frame.Render)[batch.Texture]; label != "canvas glyphs" {
+	if label := findTextureLabels(frame.Render)[batch.Texture]; label != glyphAtlasLabel {
 		t.Errorf("the labels drew from texture %q, want the glyph atlas", label)
 	}
 }
@@ -270,7 +270,7 @@ func TestAGlyphNoPageHoldsDrawsNothingReportedOnceAndTheAtlasDoesNotGrow(t *test
 		t.Errorf("the glyph no page holds was reported %d times, want once", count)
 	}
 	// A growth makes the atlas a texture of its own.
-	if glyphAtlasCount := len(findLoadedTextures(frame.Render, "canvas glyphs")); glyphAtlasCount != 1 {
+	if glyphAtlasCount := len(findLoadedTextures(frame.Render, glyphAtlasLabel)); glyphAtlasCount != 1 {
 		t.Errorf("the frame made %d glyph atlas textures, want one, never grown", glyphAtlasCount)
 	}
 }

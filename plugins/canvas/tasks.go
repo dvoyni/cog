@@ -30,6 +30,20 @@ func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event render.FrameEve
 	return event, ex.Join(in, copied)
 }
 
+// startAfreshOnRecovery is Handlers.Recover: after in, it schedules
+// startAfreshTask, and returns its job.
+func startAfreshOnRecovery(ex *kernel.Executor, in kernel.JobHandle, event render.RecoveredEvent, startAfreshTask *kernel.Task[kernel.NoArg, kernel.NoResult]) (render.RecoveredEvent, kernel.JobHandle) {
+	return event, ex.Schedule(startAfreshTask, kernel.NoArg{}, in).Handle()
+}
+
+// startAfresh drops what a lost device left empty, the atlases' cells, the
+// glyphs packed and the mesh files loaded, under the renderer's write lock,
+// so each image, glyph and mesh file loads again at its next draw.
+func startAfresh(k *kernel.Kernel, _ kernel.NoArg, inventory render.Inventory, rendering kernel.Write[*renderer]) kernel.NoResult {
+	rendering.Get().startAfresh(inventory)
+	return kernel.NoResult{}
+}
+
 // deliverInspection is Handlers.DeliverInspection: after in, it schedules
 // matchInspectionTask with event, and returns its job, which render's
 // inspection waits for before it is dropped.

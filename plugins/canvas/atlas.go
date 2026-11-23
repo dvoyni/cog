@@ -166,6 +166,14 @@ func (a *atlas) free(inventory render.Inventory, region render.TextureRegion) {
 	}
 }
 
+// empty frees every cell of the atlas's pages, as a lost device empties
+// its texture, keeping as many pages.
+func (a *atlas) empty() {
+	for page := range a.pages {
+		a.pages[page] = makeShelfAllocator(int32(a.width), int32(a.height))
+	}
+}
+
 // grow doubles the atlas's pages, to no more than layerCeiling, the new
 // ones empty, into a new texture made through inventory, and answers the
 // copy of the old texture's pages into it, every mip level, which a

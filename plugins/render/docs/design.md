@@ -645,6 +645,7 @@ render republishes gfx's events as its own, each nested inside gfx's publication
   - a copy into a staging buffer as a readback;
   - what render made and wrote between a frame's first acquire and the next frame's: its textures, buffers and shaders by the handles their labels name, the writes into them, its pipelines, and its bind groups by the kind their labels name.
 - **Strict reports.** A test fails on any report it didn't name with `ExpectReport(kind)`, and on any other error logged but one a match given `ExpectError(match)` answers true of, so a plugin on render expects reports of its own, as canvastest's `ExpectReport` expects a `canvas.Report` ([render: Inventory.TextureDescriptor, and rendertest's ExpectError and RecordNothing](https://github.com/dvoyni/cog/issues/883)).
+- **A device lost on purpose.** `LoseDevice()`, with a window open, answers the next acquire of its framebuffer `gfx.ErrDeviceLost`, which it expects logged, steps the beat losing the device and the beat recovering it, and returns once every handler of `RecoveredEvent` has run, which the harness's plugin, listed after render, sees as the in dependency of its handler of `gfx.DeviceRecoveredEvent`. A plugin's test of its refill then steps the frame after ([canvas: device recovery](https://github.com/dvoyni/cog/issues/916)).
 
 **Binding declarations.** The recording adapter parses no WGSL, and gfx gains no WGSL parsing.
 - **Where:** each test shader has a JSON file beside it, `<shader>.wgsl.json`.

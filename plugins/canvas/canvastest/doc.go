@@ -18,7 +18,9 @@
 // The harness is rendertest's, whose calls it keeps: its Frames reads back what
 // reached render, and OpenWindow, RecordNothing and UseSoftwareAdapter work
 // as they do there. A test package with pixel tests runs its tests through
-// RunMain, as rendertest's do.
+// RunMain, as rendertest's do. LoseDevice loses the device and recovers it
+// as it does there, stepping its beats as the embedded harness does, each
+// uninspected, so Frames holds none of them.
 //
 // The harness fails the test on any error the kernel logs, unless it is a
 // canvas.Report of a kind the test named with ExpectReport, a render.Report

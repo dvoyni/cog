@@ -901,9 +901,10 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 
 ([canvas: auto-atlasing](https://github.com/dvoyni/cog/issues/866), [canvas on the kernel](https://github.com/dvoyni/cog/issues/873))
 
-- **`render.RecoveredEvent` is a fresh start.** The atlases, the glyphs and the mesh files' buffers are dropped, and loaded again at their next draw.
-- **canvas's table of images is on the CPU and survives.** Every page is cleared, and each image packs again at its next draw, converted ones derived from their files again.
-- **Glyphs rebuild as cache misses.**
+- **`render.RecoveredEvent` is a fresh start.** The atlases, the glyphs and the mesh files' buffers are dropped, and loaded again at their next draw. `Handlers.Recover` schedules it in a task of its own under the renderer's write lock, so no frame draws while it runs; a frame drawn between the recovery and it draws what render left empty, once.
+- **canvas's table of images is on the CPU and survives.** Every page is emptied, the atlases keeping as many pages, and each image packs again at its next draw, converted ones derived from their files again. The white texel is written again at once. An image's own texture is released, and made again at its next draw. A frame found to draw nothing, and an image of a render texture, which its maker fills again, are kept.
+- **Glyphs rebuild as cache misses,** their fields kept on the CPU and copied again into the emptied glyph atlas.
+- **Mesh files load again,** those that failed among them, their buffers and meshes released.
 - **Bytes removed from a memory mount** since their load cannot come back, which render reports.
 
 ### Reports

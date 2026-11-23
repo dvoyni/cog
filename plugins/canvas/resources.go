@@ -16,6 +16,13 @@ type Handlers struct {
 	// returns that drawing joined with its in dependency, so render's
 	// second pickup of loads and gfx's flush wait for it.
 	RecordFrame kernel.Sub[render.FrameEvent]
+	// Recover handles render.RecoveredEvent, a fresh start: the atlases,
+	// the glyphs packed and the mesh files' buffers, which a lost device
+	// left empty, are dropped, and each image, glyph and mesh file is
+	// loaded again at its next draw. It runs in a task of its own, in no
+	// order with the frames, so a frame drawn after the recovery and before
+	// it draws what the lost device left empty, once.
+	Recover kernel.Sub[render.RecoveredEvent]
 	// TrackOpenedWindow handles platform.WindowOpenedEvent, and
 	// ForgetClosedWindow platform.WindowClosedEvent: each keeps canvas's
 	// account of the open windows, whose first opened is the main window,

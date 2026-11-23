@@ -3,42 +3,30 @@ package rendertest_test
 import (
 	"bytes"
 	"slices"
+	"sync/atomic"
 	"testing"
+	"time"
 	"unsafe"
 
-	"github.com/dvoyni/cog/plugins/gfx"
 	"github.com/dvoyni/cog/plugins/gfx/recording"
 	"github.com/dvoyni/cog/plugins/platform"
 	"github.com/dvoyni/cog/plugins/render"
 	"github.com/dvoyni/cog/plugins/render/rendertest"
 )
 
-// loseAndRecover loses the device at the next submit, steps the beat that
-// loses it and the beat that recovers it, and waits for a loaderPlugin's
-// onRecovered to send on recoveredCallCounts how many calls were recorded when it ran.
-// It answers the index of the recovery's first call, its request of a new
-// device, and that count.
+// loseAndRecover loses the device and recovers it with LoseDevice, after
+// which a loaderPlugin's onRecovered has sent on recoveredCallCounts how
+// many calls were recorded when it ran. It answers the index of the
+// recovery's first call, its request of a new device, and that count.
 func loseAndRecover(t *testing.T, h *rendertest.Harness, recoveredCallCounts <-chan int) (int, int) {
 	t.Helper()
-	h.ExpectLoggedError(gfx.ErrDeviceLost)
-	h.AnswerNext(recording.CallKindSubmit, recording.Answer{Error: gfx.ErrDeviceLost})
-	h.Step()
-	callCountAfterLoss := len(h.Calls())
-	h.Step()
-	var callCountAtRecovered int
-	h.WaitUntil("the RecoveredEvent", func() bool {
-		select {
-		case callCountAtRecovered = <-recoveredCallCounts:
-			return true
-		default:
-			return false
-		}
-	})
-	requests := findCallIndices(h.Calls()[callCountAfterLoss:], recording.CallKindRequestDevice)
+	callCountBeforeLoss := len(h.Calls())
+	h.LoseDevice()
+	requests := findCallIndices(h.Calls()[callCountBeforeLoss:], recording.CallKindRequestDevice)
 	if len(requests) != 1 {
-		t.Fatalf("the beat after the loss requested %d devices, want one", len(requests))
+		t.Fatalf("the loss and recovery requested %d devices, want one", len(requests))
 	}
-	return callCountAfterLoss + requests[0], callCountAtRecovered
+	return callCountBeforeLoss + requests[0], <-recoveredCallCounts
 }
 
 // recordCallCount answers an onRecovered sending on recoveredCallCounts how many calls
@@ -205,5 +193,34 @@ func TestALoadedAssetWhoseMemoryMountBytesWereRemovedIsReportedOnceAfterADeviceL
 		}) {
 			t.Errorf("the texture %s was not written magenta after the recovery", want.what)
 		}
+	}
+}
+
+func TestLoseDeviceReturnsOnceEveryHandlerOfRecoveredEventHasRun(t *testing.T) {
+	// A handler slow to run, as a plugin refilling its assets is, has run
+	// when LoseDevice returns, and the frame after draws.
+	h := rendertest.NewHarness(t)
+	var recovered atomic.Bool
+	h.Spawn(nil, &loaderPlugin{
+		files: makeDrawFiles(t),
+		onRecovered: func() {
+			time.Sleep(50 * time.Millisecond)
+			recovered.Store(true)
+		},
+	})
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	h.Step()
+
+	h.LoseDevice()
+
+	if !recovered.Load() {
+		t.Fatal("LoseDevice returned before render.RecoveredEvent's handler had run")
+	}
+	// The frame lost acquired the window and presented nothing, so the
+	// recording groups the frame after the recovery with it.
+	h.Step()
+	frames := h.RecordedFrames()
+	if last := frames[len(frames)-1]; len(last.Submissions) == 0 || len(last.Presented) != 1 {
+		t.Errorf("the Step after LoseDevice ended a frame of %d submissions and %d presents, want a frame submitted and presented", len(last.Submissions), len(last.Presented))
 	}
 }

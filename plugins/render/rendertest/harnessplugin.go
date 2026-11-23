@@ -15,7 +15,8 @@ type openWindowEvent struct {
 // harnessPlugin is the harness's own plugin, listed after render: it binds
 // the harness's recording instance and its headless windows, unless gogpu's
 // plugin binds its own on the software adapter, wraps gfx's instance, opens
-// windows for it, and keeps the job making each opened window's surface.
+// windows for it, keeps the job making each opened window's surface, and
+// signals each device recovery once render's handlers of it have run.
 type harnessPlugin struct {
 	harness *Harness
 }
@@ -35,7 +36,10 @@ func (harnessPlugin) Dependencies() []kernel.PluginName {
 // declarations, or check them against the adapter's; and subscribes to
 // openWindowEvent; to platform.WindowOpenedEvent, whose in, the plugin
 // being listed after gfx, is the job making the window's surface; and to
-// render.FrameEvent, to note each frame's beat for Frames.
+// render.FrameEvent, to note each frame's beat for Frames; and to
+// gfx.DeviceRecoveredEvent, whose in, the plugin being listed after render,
+// is render's publication of render.RecoveredEvent, every handler of it
+// run, which LoseDevice waits for.
 func (p harnessPlugin) Init(configurator *kernel.Configurator, _ any) error {
 	if !p.harness.softwareAdapter {
 		configurator.BindSocket[gfx.InstanceSocket](p.harness.instance)
@@ -60,6 +64,10 @@ func (p harnessPlugin) Init(configurator *kernel.Configurator, _ any) error {
 	})
 	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event render.FrameEvent) (render.FrameEvent, kernel.JobHandle) {
 		p.harness.noteBeat(event.Beat)
+		return event, in
+	})
+	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event gfx.DeviceRecoveredEvent) (gfx.DeviceRecoveredEvent, kernel.JobHandle) {
+		k.Notify(p.harness.recovered, in)
 		return event, in
 	})
 	return nil

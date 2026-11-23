@@ -62,6 +62,9 @@ type Harness struct {
 	// recordingDisabled is set by RecordNothing, when gfx's recording
 	// adapter keeps no call, so Step reads no frames back.
 	recordingDisabled bool
+	// recovered is signalled once each device recovery's
+	// render.RecoveredEvent handlers have run, which LoseDevice waits for.
+	recovered *kernel.Signal
 	// declarations is the catalog of the binding declarations answering the
 	// reflection of the shaders compiled on instance.
 	declarations *declarationCatalog
@@ -111,10 +114,11 @@ type Harness struct {
 func NewHarness(t testing.TB) *Harness {
 	t.Helper()
 	h := &Harness{
-		t:        t,
-		clock:    metronome.NewManualClock(),
-		instance: recording.NewInstance(),
-		windows:  headless.NewWindows(),
+		t:         t,
+		clock:     metronome.NewManualClock(),
+		instance:  recording.NewInstance(),
+		windows:   headless.NewWindows(),
+		recovered: kernel.NewSignal(),
 	}
 	h.declarations = newDeclarationCatalog(h)
 	h.supervisor = kernel.NewSupervisor(logHandler{harness: h})
@@ -274,6 +278,30 @@ func (h *Harness) RecordNothing() {
 	}
 	h.instance.DisableRecording()
 	h.recordingDisabled = true
+}
+
+// LoseDevice loses gfx's device and recovers it, as a GPU reset would, for a
+// test of what a plugin does on render.RecoveredEvent: it steps the next
+// beat, whose acquire of a window's framebuffer answers gfx.ErrDeviceLost,
+// which the test then expects logged, and the beat after, which recovers
+// the device, and returns once every handler of render.RecoveredEvent has
+// run, each plugin's assets filled again. A window is open, or nothing is
+// acquired and LoseDevice fails the test once it has waited the harness's
+// timeout. It serves the recording adapter alone, and fails the test on the
+// software adapter or before Spawn.
+func (h *Harness) LoseDevice() {
+	h.t.Helper()
+	switch {
+	case h.kernel == nil:
+		h.t.Fatal("rendertest: losing the device before Spawn")
+	case h.softwareAdapter:
+		h.t.Fatal("rendertest: losing the device on the software adapter")
+	}
+	h.ExpectError(func(logged error) bool { return errors.Is(logged, gfx.ErrDeviceLost) })
+	h.declarations.queueAnswer(recording.CallKindAcquireFramebuffer, recording.Answer{Error: gfx.ErrDeviceLost})
+	h.Step()
+	h.Step()
+	h.tickUntil("the device's recovery", makeReceiveCheck(h.recovered.C()))
 }
 
 // LengthenNextAcquire makes the next acquire of a window's framebuffer take d

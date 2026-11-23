@@ -23,6 +23,13 @@
 // gate, calls RecordNothing before Spawn: gfx's recording adapter then keeps
 // no call, which would allocate, and Frames answers nothing.
 //
+// A test of what a plugin does on render.RecoveredEvent calls LoseDevice
+// with a window open: it loses gfx's device at the next beat's acquire,
+// steps the beats losing and recovering it, and returns once every handler
+// of render.RecoveredEvent has run, so the next Step draws the frame after
+// the recovery. gfx's recording groups the frame lost, which presented
+// nothing, with that one.
+//
 // A pixel test calls UseSoftwareAdapter before Spawn: render then draws on
 // wgpu's software adapter, through gogpu's plugin in place of the recording
 // adapter, real rendering on the CPU with no window and no GPU. The test

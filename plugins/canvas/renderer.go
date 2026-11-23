@@ -157,8 +157,7 @@ func newRenderer(atlasPageSize, atlasLayerCeiling, ownTextureSize, mipLevelCount
 // material does, which draws what a multisampled camera that does not clear
 // resolved; the pack material, over the viewport shader, replacing what an
 // atlas's cell holds with an image premultiplied; and the sRGB sprite
-// atlas, the white texel, the zero Image, packed into it first, its cell
-// written opaque white at every mip level, as its mips would be.
+// atlas, the white texel packed into it first.
 func (r *renderer) init(inventory render.Inventory, logger *kernel.Logger) {
 	r.defaultSlot = makeMaterialSlot(inventory, logger, MaterialDescriptor{Label: "canvas default", Shader: defaultShaderPath})
 	r.sdfSlot = makeMaterialSlot(inventory, logger, sdfMaterialDescriptor)
@@ -186,6 +185,13 @@ func (r *renderer) init(inventory render.Inventory, logger *kernel.Logger) {
 		FragmentEntryPoint: packFragmentEntryPoint,
 	})
 	r.srgbAtlas = newAtlas(inventory, "canvas sprites sRGB", render.TextureFormatRGBA8UnormSrgb, r.atlasPageSize, r.atlasPageSize, r.mipLevelCount)
+	r.packWhiteTexel(inventory)
+}
+
+// packWhiteTexel packs the white texel, the zero Image, into the sRGB
+// sprite atlas, empty, its cell written opaque white at every mip level,
+// as its mips would be.
+func (r *renderer) packWhiteTexel(inventory render.Inventory) {
 	whiteRegion, _ := r.srgbAtlas.pack(1, 1)
 	// The cell sits on the atlas grid, so each level below halves it exactly, and
 	// writes a part of the first level's texels.
@@ -573,6 +579,12 @@ func (r *renderer) fillPackings(list *render.CommandList, inventory render.Inven
 	for _, filledPage := range r.filledPages {
 		list.GenerateMips(filledPage.atlas.texture, filledPage.region.Layer, 1)
 	}
+	r.releasePackings(inventory)
+}
+
+// releasePackings releases the source of each image packed whose cell is
+// still to fill, and forgets them.
+func (r *renderer) releasePackings(inventory render.Inventory) {
 	for _, packing := range r.packings {
 		if packing.source != (render.Texture{}) {
 			inventory.ReleaseTexture(packing.source)
@@ -1055,11 +1067,59 @@ func (r *renderer) applyResidencyRequests(inventory render.Inventory, requests *
 			loaded := &r.loadedMeshes[index]
 			if loaded.tried && isUnder(meshFileNames.findKeyAt(uint32(index)), unloaded) {
 				loaded.unload(inventory)
-				*loaded = loadedMesh{}
 			}
 		}
 	}
 	requests.unloadedPaths = requests.unloadedPaths[:0]
+}
+
+// startAfresh starts the renderer afresh once render has recovered a lost
+// device, which left every texture and buffer canvas made empty under its
+// handle: each atlas's pages are emptied, the sRGB atlas's white texel
+// written again, and each frame and glyph packed left unpacked, a cell
+// still to fill, a growth still to copy and a field still to copy
+// forgotten, so each packs again at its next draw; an image's own texture
+// is released, as is each pending packing's source; and each mesh file
+// loaded, or failed, is released and forgotten, so its next draw loads it
+// again. A frame drawing nothing, outside its file or converted to no
+// texel, and an image of a render texture, whose maker fills it again, are
+// kept.
+func (r *renderer) startAfresh(inventory render.Inventory) {
+	r.releasePackings(inventory)
+	for _, growth := range r.growths {
+		if growth.source != (render.Texture{}) {
+			inventory.ReleaseTexture(growth.source)
+		}
+	}
+	r.growths = r.growths[:0]
+	clear(r.glyphCopies)
+	r.glyphCopies = r.glyphCopies[:0]
+	for _, packed := range r.packedImages {
+		if packed.atlas.holdsOneImage {
+			packed.atlas.free(inventory, packed.region)
+		}
+	}
+	clear(r.packedImages)
+	for _, frames := range r.drawnImages {
+		for index := range frames {
+			if frames[index].packed != nil {
+				frames[index] = drawnImage{}
+			}
+		}
+	}
+	clear(r.drawnGlyphs)
+	if r.srgbAtlas != nil {
+		r.srgbAtlas.empty()
+		r.packWhiteTexel(inventory)
+	}
+	for _, emptied := range []*atlas{r.linearAtlas, r.glyphAtlas} {
+		if emptied != nil {
+			emptied.empty()
+		}
+	}
+	for index := 1; index < len(r.loadedMeshes); index++ {
+		r.loadedMeshes[index].unload(inventory)
+	}
 }
 
 // dropPackedImage forgets packed, the frame of key packed: freed from its
