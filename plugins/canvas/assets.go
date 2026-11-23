@@ -67,15 +67,22 @@ func (a Assets) Preload(image Image) {
 // level's art and not level10's: their regions of the sprite atlases are
 // freed and their own textures released as canvas next draws, and a later
 // draw loads them again. Their sizes ImageSize read are forgotten, and the
-// reports canvas made of them once may be made again.
+// reports canvas made of them once may be made again. Its mesh files are
+// unloaded too, their buffers and meshes released as canvas next draws, so
+// a game changing one puts its file again and unloads its path, and the next
+// draw loads the new one; one that failed to load is loaded again at its
+// next draw, and reported again if it fails.
 func (a Assets) Unload(path string) {
 	state := a.state.Get()
 	state.residency.requestUnload(a.inventory, path)
 	state.imageSizes.forget(state.logger, path)
-	for _, unloaded := range imageNames.findPaths(path) {
+	for _, unloaded := range imageNames.findPaths(path, func(key imageKey) (string, bool) { return key.path, !key.ofTexture }) {
 		state.logger.ForgetLogOnce(imageOptionsIgnoredLogKey + unloaded)
 		state.logger.ForgetLogOnce(frameOutOfBoundsLogKey + unloaded)
 		state.logger.ForgetLogOnce(converterRefusedLogKey + unloaded)
+	}
+	for _, unloaded := range meshFileNames.findPaths(path, func(path string) (string, bool) { return path, true }) {
+		state.logger.ForgetLogOnce(meshFileNotLoadedLogKey + unloaded)
 	}
 }
 

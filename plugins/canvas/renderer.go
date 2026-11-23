@@ -2,6 +2,7 @@ package canvas
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"image"
 	"io/fs"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/libs/meshfile"
 	"github.com/dvoyni/cog/plugins/platform"
 	"github.com/dvoyni/cog/plugins/render"
 )
@@ -110,11 +112,15 @@ type renderer struct {
 	// over each frame.
 	instances listInstanceData
 	batches   []batch
+	// loadedMeshes are the mesh files drawn, each at its MeshFile's index,
+	// loaded at its first draw and kept until its path is unloaded; the zero
+	// MeshFile's, at 0, draws nothing.
+	loadedMeshes []loadedMesh
 	// listMeshes are the temporary meshes of the frame's per-frame
 	// triangles, each at its triangles' index, acquired from the command
 	// list being drawn at the first of its cameras drawing them, zero until
-	// then, and vertexAttributes and vertexBuffers the layout of the one
-	// acquired last, all written over for each command list.
+	// then, written over for each command list, and vertexAttributes and
+	// vertexBuffers the layout of the mesh made or acquired last.
 	listMeshes       []render.Mesh
 	vertexAttributes []render.VertexAttribute
 	vertexBuffers    [1]render.VertexBuffer
@@ -134,6 +140,7 @@ func newRenderer(atlasPageSize, atlasLayerCeiling, ownTextureSize, mipLevelCount
 		ownTextureSize:    ownTextureSize,
 		mipLevelCount:     mipLevelCount,
 		drawnImages:       [][]drawnImage{{{}}},
+		loadedMeshes:      []loadedMesh{{tried: true}},
 		packedImages:      map[packedKey]*packedImage{},
 		decodedFiles:      map[sourceKey]image.Image{},
 	}
@@ -202,13 +209,15 @@ func (r *renderer) init(inventory render.Inventory, logger *kernel.Logger) {
 // view, or their clip's part of it; one drawing no entry that does not
 // clear draws nothing, nor does one makeCameraDraw finds draws nothing. It
 // makes the materials and the sRGB atlas at the first frame setting a
-// camera, and packs a sprite's image at the first frame recording it,
+// camera, loads a mesh's file from files at the first frame recording it,
+// and packs a sprite's or a mesh's image at the first frame recording it,
 // whose lowest order's command list fills its cell before any camera's
 // pass, and a glyph at the first frame drawing it, its field read from
 // library's glyph table and copied into the glyph atlas in that list too. Once each entry's batch key is found, it regroups state's
 // sorted entries by them. First, whether a camera is set or not, it unloads
-// and preloads what state's residency requests ask. A converted image is
-// read from files, decoded and converted in it.
+// and preloads what state's residency requests ask, the mesh files of the
+// paths it unloads among them. A converted image is read from files,
+// decoded and converted in it.
 func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, files fs.FS, manager *platform.WindowManager, mainWindow platform.Window, library *fontLibrary, state *drawState) {
 	r.cameraDraws = r.cameraDraws[:0]
 	r.mainWindow = mainWindow
@@ -233,6 +242,13 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 	r.unplacedFrames = r.unplacedFrames[:0]
 	for _, entry := range state.entries {
 		switch entry.kind {
+		case EntryKindMesh:
+			// A mesh whose file draws nothing places no image.
+			file := state.meshes[entry.index].File
+			if r.loadMesh(inventory, files, state.logger, file); r.loadedMeshes[file.index].mesh == (render.Mesh{}) {
+				break
+			}
+			fallthrough
 		case EntryKindSprite, EntryKindTriangles:
 			image, frame := state.findEntryImage(entry)
 			if _, placed := r.findPlacedImage(image, frame); !placed {
@@ -385,9 +401,11 @@ func (r *renderer) drawOrder(frame render.Frame, inventory render.Inventory, cam
 // batch, from the instance data of its material's stride, scissored to the
 // part of the viewport the entries draw into, and a clipped batch to its
 // clip's part of that, a batch whose clip holds no pixel of it not drawn.
-// A batch of per-frame triangles draws their temporary mesh, through the
-// material's mesh vertex stage for canvas.Vertex's layout, and its own
-// vertex stage for any other; one whose mesh render refused draws nothing.
+// A batch of per-frame triangles draws their temporary mesh, and a batch of
+// meshes of one file the mesh loaded of it, an instance for each, both
+// through the material's mesh vertex stage for canvas.Vertex's layout, and
+// its own vertex stage for any other; one whose mesh render refused draws
+// nothing.
 func (r *renderer) drawEntries(list *render.CommandList, drawnCamera *cameraDraw, state *drawState) {
 	r.colorTargets[0] = drawnCamera.colorTarget
 	pass := list.BeginPass(render.PassDescriptor{Label: "canvas camera", ColorTargets: r.colorTargets[:]})
@@ -413,16 +431,25 @@ func (r *renderer) drawEntries(list *render.CommandList, drawnCamera *cameraDraw
 		material, _ := r.findMaterial(drawnBatch.key.material)
 		instances := r.instances.findRange(drawnBatch.key.stride)
 		key := drawnBatch.key
-		if key.triangles == 0 {
+		var mesh render.Mesh
+		var standardLayout bool
+		switch {
+		case key.triangles != 0:
+			mesh = r.listMeshes[key.triangles-1]
+			standardLayout = state.triangles[key.triangles-1].standardLayout
+		case key.meshFile != (MeshFile{}):
+			loaded := &r.loadedMeshes[key.meshFile.index]
+			mesh = loaded.mesh
+			standardLayout = loaded.standardLayout
+		default:
 			r.drawInstances(&pass, material.material, instances, drawnBatch.firstInstance, drawnBatch.instanceCount, key.texture, spriteAtlas, key.filter, key.wrap)
 			continue
 		}
-		mesh := r.listMeshes[key.triangles-1]
 		if mesh == (render.Mesh{}) {
 			continue
 		}
 		renderMaterial := material.material
-		if state.triangles[key.triangles-1].standardLayout {
+		if standardLayout {
 			renderMaterial = material.meshMaterial
 		}
 		r.bindInstances(&pass, renderMaterial, instances, key.texture, spriteAtlas, key.filter, key.wrap)
@@ -445,14 +472,7 @@ func (r *renderer) acquireListMeshes(list *render.CommandList, cameraDraws []cam
 				continue
 			}
 			triangles := &state.triangles[trianglesIndex-1]
-			r.vertexAttributes = r.vertexAttributes[:0]
-			for _, attribute := range triangles.layout.Attributes {
-				r.vertexAttributes = append(r.vertexAttributes, render.VertexAttribute{Format: render.VertexFormat(attribute.Format), Offset: uint64(attribute.Offset), Location: attribute.Location})
-			}
-			r.vertexBuffers[0] = render.VertexBuffer{
-				Range:  list.AcquireTemporaryBuffer(triangles.vertices),
-				Layout: render.VertexLayout{Stride: uint64(triangles.layout.Stride), Attributes: r.vertexAttributes},
-			}
+			r.setVertexBuffer(list.AcquireTemporaryBuffer(triangles.vertices), triangles.layout)
 			descriptor := render.MeshDescriptor{Label: "canvas triangles", VertexBuffers: r.vertexBuffers[:], Topology: triangles.topology}
 			if len(triangles.indices) > 0 {
 				descriptor.Indices = render.IndexBuffer{Range: list.AcquireTemporaryBuffer(triangles.indices), Format: triangles.indexFormat}
@@ -460,6 +480,16 @@ func (r *renderer) acquireListMeshes(list *render.CommandList, cameraDraws []cam
 			r.listMeshes[trianglesIndex-1] = list.AcquireTemporaryMesh(descriptor)
 		}
 	}
+}
+
+// setVertexBuffer sets the renderer's one vertex buffer to vertices, laid
+// out as layout says, translated into render's layout.
+func (r *renderer) setVertexBuffer(vertices render.BufferRange, layout meshfile.Layout) {
+	r.vertexAttributes = r.vertexAttributes[:0]
+	for _, attribute := range layout.Attributes {
+		r.vertexAttributes = append(r.vertexAttributes, render.VertexAttribute{Format: render.VertexFormat(attribute.Format), Offset: uint64(attribute.Offset), Location: attribute.Location})
+	}
+	r.vertexBuffers[0] = render.VertexBuffer{Range: vertices, Layout: render.VertexLayout{Stride: uint64(layout.Stride), Attributes: r.vertexAttributes}}
 }
 
 // drawComposite draws what drawnCamera, a multisampled camera, resolved its
@@ -579,7 +609,8 @@ func (r *renderer) bindInstances(pass *render.Pass, material render.Material, in
 // to draw nothing. An entry skipped, its image's frame drawing nothing, its
 // material one canvas does not hold, or its argument one its material does
 // not take, reported once to state's logger, or of a material whose
-// argument's layout mismatched its shader's, has zero bounds and batch key.
+// argument's layout mismatched its shader's, or a mesh whose file draws
+// nothing, has zero bounds and batch key.
 func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 	material := state.findEntryMaterial(entry)
 	slot, held := r.findMaterial(material)
@@ -630,8 +661,25 @@ func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 			r.appendSkippedEntryKeys()
 			return
 		}
-		bounds = triangles.findBounds()
+		box := triangles.bounds
+		bounds = cmp.Or(triangles.options.Transform, m.Translation2x3(0, 0)).TransformRect(m.Rect{X: box.Min.X, Y: box.Min.Y, Width: box.Max.X - box.Min.X, Height: box.Max.Y - box.Min.Y})
 		key = triangles.batchKey(image, state.defaultFilter, entry.index)
+	case EntryKindMesh:
+		mesh := &state.meshes[entry.index]
+		loaded := &r.loadedMeshes[mesh.File.index]
+		if loaded.mesh == (render.Mesh{}) {
+			r.appendSkippedEntryKeys()
+			return
+		}
+		image := findDrawnFrame(r.drawnImages, mesh.Image, mesh.Frame)
+		if image.drawsNothing {
+			r.appendSkippedEntryKeys()
+			return
+		}
+		box := loaded.bounds
+		bounds = cmp.Or(mesh.Transform, m.Translation2x3(0, 0)).TransformRect(m.Rect{X: box.Min.X, Y: box.Min.Y, Width: box.Max.X - box.Min.X, Height: box.Max.Y - box.Min.Y})
+		key = makeImageBatchKey(mesh.Material, mesh.Image, image, mesh.Clip, mesh.Filter, state.defaultFilter)
+		key.meshFile = mesh.File
 	}
 	key.stride = slot.stride
 	r.entryBounds = append(r.entryBounds, bounds.Inset(margin))
@@ -769,6 +817,47 @@ func (r *renderer) findPlacedImage(image Image, frame uint32) (*drawnImage, bool
 		drawn.packed.lastDrawnFrame = r.drawnFrameCount
 	}
 	return drawn, drawn.packed != nil || drawn.view.Texture != (render.Texture{}) || drawn.drawsNothing
+}
+
+// loadMesh loads file at its first draw: read from files and decoded, its
+// vertices and indices made into buffers and a mesh over them through
+// inventory, kept at its index among the loaded meshes. A file that is missing, is no mesh file,
+// is of a version canvas does not know, is cut short or has zero bounds
+// draws nothing, reported to logger once for its path, as does one whose
+// mesh render refused, which render reports.
+func (r *renderer) loadMesh(inventory render.Inventory, files fs.FS, logger *kernel.Logger, file MeshFile) {
+	if int(file.index) >= len(r.loadedMeshes) {
+		r.loadedMeshes = slices.Grow(r.loadedMeshes, int(file.index)+1-len(r.loadedMeshes))[:file.index+1]
+	}
+	loaded := &r.loadedMeshes[file.index]
+	if loaded.tried {
+		return
+	}
+	loaded.tried = true
+	path := meshFileNames.findKeyAt(file.index)
+	data, err := fs.ReadFile(files, path)
+	var decoded meshfile.File
+	if err == nil {
+		decoded, err = meshfile.Decode(data)
+	}
+	if err == nil && decoded.Bounds == (m.Box3{}) {
+		err = errors.New("its bounds are zero, and a mesh needs them given, or it would vanish as its origin left a view")
+	}
+	if err != nil {
+		notLoaded := Report{Kind: ReportKindMeshFileNotLoaded, Err: fmt.Errorf("canvas: loading mesh file %q, which draws nothing: %w", path, err)}
+		logger.LogErrOnce(meshFileNotLoadedLogKey+path, notLoaded)
+		return
+	}
+	loaded.bounds = decoded.Bounds
+	loaded.standardLayout = decoded.Layout.Stride == vertexLayout.Stride && slices.Equal(decoded.Layout.Attributes, vertexLayout.Attributes)
+	loaded.vertexBuffer = inventory.MakeBuffer(path, render.BufferUsageFlagVertex, decoded.Vertices)
+	r.setVertexBuffer(render.BufferRange{Buffer: loaded.vertexBuffer}, decoded.Layout)
+	descriptor := render.MeshDescriptor{Label: path, VertexBuffers: r.vertexBuffers[:], Topology: render.PrimitiveTopology(decoded.Topology)}
+	if decoded.IndexCount > 0 {
+		loaded.indexBuffer = inventory.MakeBuffer(path, render.BufferUsageFlagIndex, decoded.Indices)
+		descriptor.Indices = render.IndexBuffer{Range: render.BufferRange{Buffer: loaded.indexBuffer}, Format: render.IndexFormat(decoded.IndexFormat)}
+	}
+	loaded.mesh = inventory.MakeMesh(descriptor)
 }
 
 // packImage packs frame of the image of key, marked drawn this frame, and
@@ -938,7 +1027,9 @@ func (r *renderer) growAtlas(inventory render.Inventory, grown *atlas) {
 // applyResidencyRequests drops each frame packed of the paths requests asks
 // to unload, in the order asked, so its next draw loads it again, and
 // forgets each frame of theirs found outside its file, so its next draw
-// looks again; an image of a render texture has no path.
+// looks again; an image of a render texture has no path. It releases each
+// mesh file of those paths loaded, or forgets that it failed, so its next
+// draw loads it again.
 func (r *renderer) applyResidencyRequests(inventory render.Inventory, requests *residencyRequestQueue) {
 	requests.mutex.Lock()
 	defer requests.mutex.Unlock()
@@ -956,6 +1047,13 @@ func (r *renderer) applyResidencyRequests(inventory render.Inventory, requests *
 				for frame := range frames {
 					frames[frame].drawsNothing = false
 				}
+			}
+		}
+		for index := 1; index < len(r.loadedMeshes); index++ {
+			loaded := &r.loadedMeshes[index]
+			if loaded.tried && isUnder(meshFileNames.findKeyAt(uint32(index)), unloaded) {
+				loaded.unload(inventory)
+				*loaded = loadedMesh{}
 			}
 		}
 	}

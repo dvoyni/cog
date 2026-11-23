@@ -11,9 +11,11 @@ import (
 // entry to the next in sort order breaks a batch: their 2D material, the
 // view of the texture their images are drawn from, the whole texture of
 // the atlas they are packed into, or a render texture's view, their
-// filter, the axes their sampler repeats along, their clip, and the
-// per-frame mesh they are, one more than its index among the frame's
-// triangles, zero for any other entry, so each draws alone. With them
+// filter, the axes their sampler repeats along, their clip, the per-frame
+// mesh they are, one more than its index among the frame's triangles, zero
+// for any other entry, so each draws alone, and the mesh file they draw,
+// the zero MeshFile for an entry of no file, so meshes of one file batch
+// together and with nothing else. With them
 // goes their material's stride, which the material decides, so it breaks
 // no batch of its own: the stream their instance data goes into, zero for
 // the fixed instances of a material taking no argument. The white texel's
@@ -27,6 +29,7 @@ type batchKey struct {
 	wrap      Wrap
 	clip      m.Rect
 	triangles uint32
+	meshFile  MeshFile
 }
 
 // makeImageBatchKey answers what an entry drawing image, as drawn image
@@ -63,7 +66,7 @@ type batch struct {
 // appendBatches appends to batches the batches of entries, of state's, in
 // sort order, a batch beginning at the first entry and wherever an entry's
 // batch key, of batchKeys at its index, does not join the batch before it,
-// of another material, texture or clip, of a filter neither is
+// of another material, texture, clip or mesh file, of a filter neither is
 // FilterDefault, or either a per-frame mesh, and to instances the instance data they draw, and answers
 // batches appended to. Each batch's entries are part of entries. A fill, a
 // line and a sprite draw one instance, and a stroke four, each followed,
@@ -73,7 +76,7 @@ type batch struct {
 // instance for each of its glyphs packed, each its field as drawn of
 // drawnGlyphs, a renderer's, and for each of its icons packed, each its
 // image's frame of drawnImages; per-frame triangles draw one instance,
-// their image's frame of drawnImages.
+// their image's frame of drawnImages, as does a mesh.
 func appendBatches(batches []batch, instances *listInstanceData, entries []sortedEntry, state *drawState, batchKeys []batchKey, drawnImages [][]drawnImage, drawnGlyphs []drawnGlyph) []batch {
 	firstBatch := len(batches)
 	for index, entry := range entries {
@@ -107,7 +110,10 @@ func appendBatches(batches []batch, instances *listInstanceData, entries []sorte
 			instances.fixed = state.texts[recorded.index].appendInstances(instances.fixed, drawnGlyphs, drawnImages)
 		case EntryKindTriangles:
 			triangles := &state.triangles[recorded.index]
-			instances.fixed = appendTrianglesInstance(instances.fixed, triangles, findDrawnFrame(drawnImages, triangles.options.Image, triangles.options.Frame))
+			instances.fixed = appendMeshInstance(instances.fixed, triangles.options.Tint, triangles.options.Transform, findDrawnFrame(drawnImages, triangles.options.Image, triangles.options.Frame))
+		case EntryKindMesh:
+			mesh := &state.meshes[recorded.index]
+			instances.fixed = appendMeshInstance(instances.fixed, mesh.Tint, mesh.Transform, findDrawnFrame(drawnImages, mesh.Image, mesh.Frame))
 		}
 		lastBatch.instanceCount += uint32(len(instances.fixed) - entryStart)
 		if entryKey.stride != 0 {

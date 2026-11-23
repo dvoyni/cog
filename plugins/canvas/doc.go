@@ -137,6 +137,15 @@
 //	trail := canvas.Triangles[canvas.Vertex]{Vertices: vertices, Topology: meshfile.TopologyTriangleStrip, Bounds: meshfile.CalculateBounds(vertices, canvas.Vertex.Position3)}
 //	list.DrawTriangles(canvas.DrawTrianglesOptions{Tint: spark, Layer: layerEffects}, trail)
 //
+// DrawMesh draws a mesh file named by a path, loaded at its first draw
+// through platform's FS and kept until its path is unloaded, sampling its
+// image as DrawTriangles does. A game puts the files it builds with
+// meshfile.Encode into a memory mount of its own, or ships them; meshes of
+// one file recorded in one DrawMeshes are one instanced draw:
+//
+//	tree := canvas.MeshFileFromFile("meshes/tree.mesh")
+//	list.DrawMeshes(forest) // each canvas.Mesh{File: tree, Image: bark, Transform: m.Translation2x3(x, y), Layer: layerWorld}
+//
 // An atlas is one 2D-array texture whose layers are pages of
 // Config.AtlasPageSize, each image a cell of its own, premultiplied, its
 // gutter continuing its edges, or wrapped along the axes it tiles, on a

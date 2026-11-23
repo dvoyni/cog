@@ -121,12 +121,18 @@ const (
 	// once rather than as a mesh vanishing when its origin leaves the view.
 	// It is reported once for each draw list.
 	ReportKindBoundsMissing
+	// ReportKindMeshFileNotLoaded is a mesh file a Mesh draws that is
+	// missing, is no mesh file, is of a version canvas does not know, is cut
+	// short, or has zero bounds, which draws nothing. It is reported once
+	// for each path, at its first draw, and again after the path is
+	// unloaded.
+	ReportKindMeshFileNotLoaded
 )
 
 // The keys canvas logs a report once under are one of these, then the
-// report's subject: an image's path or texture, a sprite atlas's label, a
-// material, a shader or material and an argument's type, a font's path, a
-// font set, or an icon's name.
+// report's subject: an image's path or texture, a mesh file's path, a
+// sprite atlas's label, a material, a shader or material and an argument's
+// type, a font's path, a font set, or an icon's name.
 const (
 	imageOptionsIgnoredLogKey    = "canvas: image options ignored: "
 	imageHeaderUnreadLogKey      = "canvas: image header unread: "
@@ -144,6 +150,7 @@ const (
 	iconNotRegisteredLogKey      = "canvas: icon not registered: "
 	iconRefusedLogKey            = "canvas: icon refused: "
 	markupMalformedLogKey        = "canvas: markup malformed: "
+	meshFileNotLoadedLogKey      = "canvas: mesh file not loaded: "
 )
 
 // pixelPerfectStretchReport is the report of a pixel-perfect camera's

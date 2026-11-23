@@ -29,15 +29,17 @@ type drawState struct {
 	drawLists []*drawList
 	// entries are the frame's entries, merged from the draw lists in their
 	// order, each a shape of shapes, a sprite of sprites, a run of text of
-	// texts or per-frame triangles of triangles, merged alike, the bytes of
-	// the arguments they give, end to end, the spans of the runs of text,
-	// copied end to end, and the triangles' vertex and index bytes, each end
-	// to end. All are replaced by the next frame's when it merges.
+	// texts, per-frame triangles of triangles or a mesh of meshes, merged
+	// alike, the bytes of the arguments they give, end to end, the spans of
+	// the runs of text, copied end to end, and the triangles' vertex and
+	// index bytes, each end to end. All are replaced by the next frame's
+	// when it merges.
 	entries     []recordedEntry
 	shapes      []Shape
 	sprites     []Sprite
 	texts       []laidOutText
 	triangles   []recordedTriangles
+	meshes      []Mesh
 	arguments   []byte
 	spans       []Span
 	vertexBytes []byte
@@ -103,6 +105,7 @@ func (s *drawState) closeAndSort() {
 	s.texts = s.texts[:0]
 	clear(s.triangles)
 	s.triangles = s.triangles[:0]
+	s.meshes = s.meshes[:0]
 	s.arguments = s.arguments[:0]
 	clear(s.spans)
 	s.spans = s.spans[:0]
@@ -143,6 +146,9 @@ func (s *drawState) findSortKeys() {
 		case EntryKindTriangles:
 			options := &s.triangles[entry.index].options
 			key = makeSortKey(options.Layer, options.Order)
+		case EntryKindMesh:
+			mesh := &s.meshes[entry.index]
+			key = makeSortKey(mesh.Layer, mesh.Order)
 		}
 		s.sorter.entries = append(s.sorter.entries, sortedEntry{key: key, entryIndex: uint32(index)})
 	}
@@ -158,6 +164,8 @@ func (s *drawState) findEntryMaterial(entry recordedEntry) Material {
 		return s.sprites[entry.index].Material
 	case EntryKindTriangles:
 		return s.triangles[entry.index].options.Material
+	case EntryKindMesh:
+		return s.meshes[entry.index].Material
 	}
 	return cmp.Or(s.texts[entry.index].text.Material, TextMaterial)
 }
@@ -173,6 +181,9 @@ func (s *drawState) findEntryImage(entry recordedEntry) (Image, uint32) {
 	case EntryKindTriangles:
 		options := &s.triangles[entry.index].options
 		return options.Image, options.Frame
+	case EntryKindMesh:
+		mesh := &s.meshes[entry.index]
+		return mesh.Image, mesh.Frame
 	}
 	return Image{}, 0
 }
@@ -226,6 +237,10 @@ func (s *drawState) makeInspection(beat metronome.Beat, cameraDraws []cameraDraw
 					inspectedEntry.TrianglesOptions = s.triangles[recorded.index].options
 					inspectedEntry.Layer = inspectedEntry.TrianglesOptions.Layer
 					inspectedEntry.Order = inspectedEntry.TrianglesOptions.Order
+				case EntryKindMesh:
+					inspectedEntry.Mesh = s.meshes[recorded.index]
+					inspectedEntry.Layer = inspectedEntry.Mesh.Layer
+					inspectedEntry.Order = inspectedEntry.Mesh.Order
 				}
 				inspectedEntries = append(inspectedEntries, inspectedEntry)
 			}

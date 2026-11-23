@@ -61,13 +61,14 @@ type InspectedBatch struct {
 type InspectedEntry struct {
 	Kind EntryKind
 	// Shape is the entry recorded, when Kind is EntryKindShape, Sprite when
-	// it is EntryKindSprite, Text when it is EntryKindText, and
+	// it is EntryKindSprite, Text when it is EntryKindText,
 	// TrianglesOptions, the options per-frame triangles were drawn with,
-	// when it is EntryKindTriangles.
+	// when it is EntryKindTriangles, and Mesh when it is EntryKindMesh.
 	Shape            Shape
 	Sprite           Sprite
 	Text             Text
 	TrianglesOptions DrawTrianglesOptions
+	Mesh             Mesh
 	Layer            int32
 	Order            int32
 	DrawListIndex    int
@@ -86,4 +87,6 @@ const (
 	EntryKindText
 	// EntryKindTriangles is a per-frame mesh, DrawTriangles's.
 	EntryKindTriangles
+	// EntryKindMesh is a Mesh, of a mesh file.
+	EntryKindMesh
 )

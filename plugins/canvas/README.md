@@ -231,6 +231,29 @@ can be inspected in canvas's terms, beside render's inspection of it.
   `meshfile.CalculateBounds(vertices, canvas.Vertex.Position3)`. Vertices of
   another layout draw through the material's own vertex stage.
   `DrawTrianglesWith` gives the entry its material's argument.
+- **`MeshFileFromFile(path)`** interns a mesh file's path in platform's FS
+  into a pointer-free **`MeshFile`**, the zero one naming none, as
+  `ImageFromFile` interns an image. A game puts the files it builds into a
+  memory mount of its own, `filesystems.NewMemoryFS`, bound as a read
+  mount, or ships them in any read mount, written by `meshfile.Encode`.
+  **`DrawMesh(mesh)`** records a **`Mesh{File, Image, Frame, Transform,
+  Tint, Material, Clip, Filter, Layer, Order}`**, what `DrawTrianglesOptions`
+  holds and its file; `DrawMeshes(meshes)` records a slice, and
+  `DrawMeshWith` and `DrawMeshesWith` give arguments, as the sprites' calls
+  do. A file loads at its first draw, through platform's FS and
+  `meshfile.Decode`, into buffers and a mesh of render's, draws that frame,
+  and stays until its path is unloaded; a file that is missing, is no mesh
+  file, is of a version canvas does not know or has zero bounds draws
+  nothing, reported once for its path as `ReportKindMeshFileNotLoaded`. A
+  game changes one by putting its file again and unloading its path, and
+  the next draw loads the new one. Consecutive meshes in sort order of one
+  file, material, atlas, filter and clip are one instanced draw, so a forest
+  of one tree, recorded in one `DrawMeshes`, is one draw; a camera culls
+  each by its file's bounds through its transform. A file of `Vertex`'s
+  layout draws through `canvas_mesh_vertex`, and one of another layout
+  through the material's own vertex stage. Under a pixel-perfect camera, a
+  mesh's translation snaps to the world-unit grid, its vertices moving with
+  it unsnapped, as a per-frame mesh's do.
 - **`OrderOf(y)`** maps a float onto an order of its own, in the same order,
   for y-sorting.
 - **`Material`** names a 2D material, made by `Assets.MakeMaterial`; the
@@ -262,7 +285,7 @@ can be inspected in canvas's terms, beside render's inspection of it.
 - **`Assets`** is the task parameter a task reaches canvas's assets and
   tools through: `Preload(image)` loads an image ahead of its first draw,
   for a loading screen, a converted one's file decoded in the caller's
-  job; `Unload(path)` unloads the images of a path, or of
+  job; `Unload(path)` unloads the images and mesh files of a path, or of
   a folder for a path ending in a slash, `Unload("level1/")`, as canvas next
   draws, a later draw loading them again; `ImageSize(image)` answers an image's size, its
   rectangle's or its frames', a converted image's before it is converted, from its file's header alone, before it is drawn, and false for a missing file, reported
@@ -434,10 +457,12 @@ can be inspected in canvas's terms, beside render's inspection of it.
   glyph is packed, each image drawn, where it is packed and
   when it was last drawn, the sources preloaded, the cameras drawn, the
   entries' keys, the instance data, the batches and the per-frame meshes'
-  temporary meshes; and a private list of
+  temporary meshes, and each mesh file loaded, its buffers and mesh; and a
+  private list of
   the open windows. The images `ImageFromFile` and `ImageFromTexture`
   intern are a table of the process's, shared by every kernel, each kernel
-  packing them apart.
+  packing them apart, as are the mesh files `MeshFileFromFile` interns,
+  each kernel loading them apart.
 - **Resources it reads from other plugins:** render's, for read through
   `render.Frame` and `render.Inventory`, `Assets` holding both; `platform.FS`,
   for read, through `render.Inventory`, as canvas's shaders and sprites'

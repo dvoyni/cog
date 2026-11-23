@@ -163,7 +163,7 @@ func internImage(key imageKey, options []ImageOptions) Image {
 			key.options.Convert = nil
 		}
 	}
-	return imageNames.intern(key)
+	return Image{index: imageNames.internKey(key)}
 }
 
 // findFrameRect answers the rectangle of a file fileWidth by fileHeight

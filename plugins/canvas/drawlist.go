@@ -94,12 +94,7 @@ func (l DrawList) DrawSprites(sprites []Sprite) {
 // lengths are refused, none of them recorded, and reported once for the
 // task as ReportKindSliceLengthsDiffer.
 func (l DrawList) DrawSpritesWith[T any](sprites []Sprite, arguments []T) {
-	state := l.state.Get()
-	if len(sprites) != len(arguments) {
-		state.logger.LogErrOnce(l.list.slicesDiffer.Error(), l.list.slicesDiffer)
-		return
-	}
-	l.list.record(state, EntryKindSprite, &l.list.sprites, reflect.TypeFor[T](), castToBytes(arguments), sprites...)
+	l.list.recordWithArguments(l.state.Get(), EntryKindSprite, &l.list.sprites, sprites, arguments)
 }
 
 // DrawText records text, a run of text, into the task's draw list for the
@@ -146,6 +141,40 @@ func (l DrawList) DrawTrianglesWith[V meshfile.VertexType, T any](options DrawTr
 	l.drawTriangles(options, triangles, reflect.TypeFor[T](), castToBytes(unsafe.Slice(&argument, 1)))
 }
 
+// DrawMesh records mesh, a mesh file's triangles, into the task's draw list
+// for the frame being recorded. Its file loads at its first draw, through
+// platform's FS, and draws that frame. Consecutive meshes in sort order of
+// one file, material, atlas, filter and clip are one instanced draw. Outside
+// the frame, it is refused and reported once for the task.
+func (l DrawList) DrawMesh(mesh Mesh) {
+	l.list.record(l.state.Get(), EntryKindMesh, &l.list.meshes, nil, nil, mesh)
+}
+
+// DrawMeshWith records mesh into the task's draw list for the frame being
+// recorded, as DrawMesh does, giving its material argument, of the type the
+// material declares with ArgumentOf.
+func (l DrawList) DrawMeshWith[T any](mesh Mesh, argument T) {
+	l.list.record(l.state.Get(), EntryKindMesh, &l.list.meshes, reflect.TypeFor[T](), castToBytes(unsafe.Slice(&argument, 1)), mesh)
+}
+
+// DrawMeshes records meshes into the task's draw list for the frame being
+// recorded, in their order, as DrawMesh would one after another, so an ECS
+// chunk's column goes in as it is, and a forest of one tree, recorded in one
+// call, is one draw. Outside the frame, they are refused and reported once
+// for the task.
+func (l DrawList) DrawMeshes(meshes []Mesh) {
+	l.list.record(l.state.Get(), EntryKindMesh, &l.list.meshes, nil, nil, meshes...)
+}
+
+// DrawMeshesWith records meshes into the task's draw list for the frame
+// being recorded, as DrawMeshes does, each giving its material the argument
+// at its index in arguments, a parallel slice. Slices of different lengths
+// are refused, none of them recorded, and reported once for the task as
+// ReportKindSliceLengthsDiffer.
+func (l DrawList) DrawMeshesWith[T any](meshes []Mesh, arguments []T) {
+	l.list.recordWithArguments(l.state.Get(), EntryKindMesh, &l.list.meshes, meshes, arguments)
+}
+
 // SetCamera sets camera for the frame being recorded, forgotten once the
 // frame is drawn, as its entries are: nothing is made or kept. A frame that
 // sets no camera is seen through the default one, which draws only a frame
@@ -189,8 +218,8 @@ func (l DrawList) drawTriangles[V meshfile.VertexType](options DrawTrianglesOpti
 
 // drawList is one task's draw list for the frame being recorded, which its
 // DrawList records into: the entries its jobs record, in the order
-// recorded, each of them a shape, a sprite, a run of text or per-frame
-// triangles of its records of that kind,
+// recorded, each of them a shape, a sprite, a run of text, per-frame
+// triangles or a mesh of its records of that kind,
 // with the bytes of the material arguments they give, end to end, the spans
 // of its runs of text, copied end to end, the vertex and index bytes of its
 // triangles, each end to end, and the cameras they set, in the order set.
@@ -205,14 +234,15 @@ type drawList struct {
 	outsideFrame  error
 	slicesDiffer  error
 	boundsMissing error
-	// mutex guards entries, shapes, sprites, texts, triangles, arguments,
-	// spans, vertexBytes, indexBytes and cameras.
+	// mutex guards entries, shapes, sprites, texts, triangles, meshes,
+	// arguments, spans, vertexBytes, indexBytes and cameras.
 	mutex       sync.Mutex
 	entries     []recordedEntry
 	shapes      []Shape
 	sprites     []Sprite
 	texts       []laidOutText
 	triangles   []recordedTriangles
+	meshes      []Mesh
 	arguments   []byte
 	spans       []Span
 	vertexBytes []byte
@@ -233,6 +263,18 @@ func (l *drawList) record[T any](state *drawState, kind EntryKind, records *[]T,
 	if !recording {
 		state.logger.LogErrOnce(l.outsideFrame.Error(), l.outsideFrame)
 	}
+}
+
+// recordWithArguments records recorded, of kind, as record does, each
+// giving its material the argument at its index in arguments, a parallel
+// slice, unless the slices' lengths differ, which records none of them and
+// is reported once for the draw list.
+func (l *drawList) recordWithArguments[T, A any](state *drawState, kind EntryKind, records *[]T, recorded []T, arguments []A) {
+	if len(recorded) != len(arguments) {
+		state.logger.LogErrOnce(l.slicesDiffer.Error(), l.slicesDiffer)
+		return
+	}
+	l.record(state, kind, records, reflect.TypeFor[A](), castToBytes(arguments), recorded...)
 }
 
 // recordText records text, a run of text laid out, as record does, giving
@@ -318,7 +360,7 @@ func appendToArena[T any](arena *[]T, values []T) []T {
 }
 
 // moveEntries appends the draw list's entries, shapes, sprites, texts,
-// triangles, arguments and cameras to state's, each entry's index moved
+// triangles, meshes, arguments and cameras to state's, each entry's index moved
 // past state's records of its kind, its argument's offset past state's
 // arguments, each run's spans and each triangles' vertex and index bytes
 // copied into state's arenas, and empties it.
@@ -331,6 +373,7 @@ func (l *drawList) moveEntries(state *drawState) {
 		EntryKindSprite:    uint32(len(state.sprites)),
 		EntryKindText:      uint32(len(state.texts)),
 		EntryKindTriangles: uint32(len(state.triangles)),
+		EntryKindMesh:      uint32(len(state.meshes)),
 	}
 	argumentsBefore := uint32(len(state.arguments))
 	for _, entry := range l.entries {
@@ -349,6 +392,7 @@ func (l *drawList) moveEntries(state *drawState) {
 		triangles.indices = appendToArena(&state.indexBytes, triangles.indices)
 		state.triangles = append(state.triangles, triangles)
 	}
+	state.meshes = append(state.meshes, l.meshes...)
 	state.arguments = append(state.arguments, l.arguments...)
 	state.cameras = append(state.cameras, l.cameras...)
 	l.entries = l.entries[:0]
@@ -358,6 +402,7 @@ func (l *drawList) moveEntries(state *drawState) {
 	l.texts = l.texts[:0]
 	clear(l.triangles)
 	l.triangles = l.triangles[:0]
+	l.meshes = l.meshes[:0]
 	l.arguments = l.arguments[:0]
 	clear(l.spans)
 	l.spans = l.spans[:0]

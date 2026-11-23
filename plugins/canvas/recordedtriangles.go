@@ -30,19 +30,3 @@ func (t *recordedTriangles) batchKey(image *drawnImage, defaultFilter Filter, in
 	key.triangles = index + 1
 	return key
 }
-
-// findTransform answers the transform the triangles are drawn through, a
-// zero one read as the identity.
-func (t *recordedTriangles) findTransform() m.Mat2x3 {
-	if t.options.Transform == (m.Mat2x3{}) {
-		return m.Translation2x3(0, 0)
-	}
-	return t.options.Transform
-}
-
-// findBounds answers the world rectangle the triangles draw within: the
-// bounding box of their bounds' x and y moved by their transform.
-func (t *recordedTriangles) findBounds() m.Rect {
-	bounds := m.Rect{X: t.bounds.Min.X, Y: t.bounds.Min.Y, Width: t.bounds.Max.X - t.bounds.Min.X, Height: t.bounds.Max.Y - t.bounds.Min.Y}
-	return t.findTransform().TransformRect(bounds)
-}

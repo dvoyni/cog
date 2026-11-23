@@ -172,16 +172,17 @@ func appendSpriteInstance(instances []instanceData, sprite *Sprite, image *drawn
 	return append(instances, instance)
 }
 
-// appendTrianglesInstance appends to instances the instance data of
-// triangles, per-frame triangles, their image as drawn image, and answers
-// them: one instance, over its image's region, decoding it where it is to
-// be, its UVs repeating along the axes the image wraps along, its zero tint
-// white and premultiplied, through the triangles' transform.
-func appendTrianglesInstance(instances []instanceData, triangles *recordedTriangles, image *drawnImage) []instanceData {
+// appendMeshInstance appends to instances the instance data of a mesh,
+// of a file or per-frame triangles, tinted tint, through transform, its
+// image as drawn image, and answers them: one instance, over its image's
+// region, decoding it where it is to be, its UVs repeating along the axes
+// the image wraps along, its zero tint white and premultiplied, its
+// zero transform read as the identity.
+func appendMeshInstance(instances []instanceData, tint m.Color, transform m.Mat2x3, image *drawnImage) []instanceData {
 	instance := instanceData{
-		tint:      cmp.Or(triangles.options.Tint, m.White).Premultiply(),
+		tint:      cmp.Or(tint, m.White).Premultiply(),
 		region:    image.region,
-		transform: triangles.findTransform(),
+		transform: cmp.Or(transform, m.Translation2x3(0, 0)),
 		page:      image.page,
 		mode:      instanceModeMesh,
 	}
