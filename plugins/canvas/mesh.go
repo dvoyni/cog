@@ -16,7 +16,10 @@ type Mesh struct {
 	// unloaded, even once a good file is put there. A file of canvas.Vertex's
 	// layout is drawn by canvas's own mesh vertex stage and the material's
 	// fragment stage; one of another layout by the material's own vertex
-	// stage. The zero MeshFile draws nothing.
+	// stage, and one drawn with a material whose vertex stage is canvas's,
+	// as a fragment-only material's is, is skipped, reported once for the
+	// material as ReportKindVertexStageMissing. The zero MeshFile draws
+	// nothing.
 	File MeshFile
 	// Image is what the mesh samples, as a sprite does, the zero Image the
 	// white texel, so an untextured polygon draws its vertices' colours

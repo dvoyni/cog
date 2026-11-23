@@ -3,6 +3,7 @@ package canvas_test
 import (
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/libs/meshfile"
@@ -239,6 +240,123 @@ func TestAMeshFileSamplesItsImageAndItsTranslationSnapsUnderAPixelPerfectCamera(
 	})
 }
 
+func TestASwayingGrassMeshInItsOwnLayoutDrawsThroughItsMaterialsVertexStage(t *testing.T) {
+	// A blade 10 units wide and 40 tall about the origin, its root at the
+	// bottom swaying 0 and its tip at the top 1, drawn green by the grass
+	// material with a wind of 30: its tip leans 30 units right, so near
+	// the tip it covers x from 23.5 to 33.5 and leaves where the upright
+	// blade stood, and near the root it has barely moved.
+	mounter := newMaterialMounter(t)
+	mounter.files.(fstest.MapFS)["meshes/grass.mesh"] = &fstest.MapFile{Data: encodeMeshFile(t, "meshes/grass.mesh", grassBlade)}
+	grass := canvas.MeshFileFromFile("meshes/grass.mesh")
+	recorder := &materialRecorder{
+		descriptors: []canvas.MaterialDescriptor{grassMaterialDescriptor},
+		record: func(list canvas.DrawList, assets canvas.Assets, materials []canvas.Material, frame int) {
+			if frame == 0 {
+				assets.SetMaterialUniform(materials[0], "grass_wind", [4]float32{30, 0, 0, 0})
+			}
+			list.DrawMesh(canvas.Mesh{File: grass, Material: materials[0], Tint: m.Color{G: 1, A: 1}})
+		},
+	}
+
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(canvas.DrawList) {}, recorder, mounter)
+
+	picture.expect(t, []probe{
+		{"near the swayed tip", m.Vec2{X: 28.5, Y: -18}, opaqueGreen},
+		{"where the upright tip stood", m.Vec2{X: 0, Y: -18}, opaqueBlack},
+		{"near the root", m.Vec2{X: 1.5, Y: 18}, opaqueGreen},
+		{"right of the root", m.Vec2{X: 10, Y: 18}, opaqueBlack},
+	})
+}
+
+func TestAMeshOfItsOwnLayoutDrawnWithAFragmentOnlyMaterialIsRefusedReportedOnce(t *testing.T) {
+	// The grass blade's file and per-frame triangles of its vertices, each
+	// drawn over two frames with the default material, which has no vertex
+	// stage to read them, then with the grass material, which has: the
+	// first two are skipped and reported once for the material, and the
+	// grass material's draw through its own vertex stage.
+	mounter := newMaterialMounter(t)
+	mounter.files.(fstest.MapFS)["meshes/grass.mesh"] = &fstest.MapFile{Data: encodeMeshFile(t, "meshes/grass.mesh", grassBlade)}
+	grass := canvas.MeshFileFromFile("meshes/grass.mesh")
+	recorder := &materialRecorder{
+		descriptors: []canvas.MaterialDescriptor{grassMaterialDescriptor},
+		record: func(list canvas.DrawList, assets canvas.Assets, materials []canvas.Material, frame int) {
+			list.DrawMesh(canvas.Mesh{File: grass})
+			list.DrawTriangles(canvas.DrawTrianglesOptions{}, grassBlade)
+			list.DrawMesh(canvas.Mesh{File: grass, Material: materials[0]})
+			list.DrawTriangles(canvas.DrawTrianglesOptions{Material: materials[0]}, grassBlade)
+		},
+	}
+	h := canvastest.NewHarness(t)
+	h.ExpectReport(canvas.ReportKindVertexStageMissing)
+	h.Spawn(nil, nil, recorder, mounter)
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+
+	for range 2 {
+		h.Step()
+	}
+
+	for index, frame := range h.Frames() {
+		batches := frame.Cameras[0].Batches
+		if len(batches) != 2 || batches[0].Material != recorder.madeMaterials()[0] || batches[0].Entries[0].Kind != canvas.EntryKindMesh || batches[1].Entries[0].Kind != canvas.EntryKindTriangles {
+			t.Errorf("frame %d drew batches %+v, want the grass material's mesh and triangles alone", index, batches)
+			continue
+		}
+		lists := findCanvasLists(frame.Render)
+		if len(lists) != 1 || len(lists[0].Passes) != 1 || len(lists[0].Passes[0].Draws) != 2 {
+			t.Errorf("frame %d's canvas lists are %+v, want one pass of two draws", index, lists)
+			continue
+		}
+		for drawIndex, draw := range lists[0].Passes[0].Draws {
+			if draw.Material.VertexEntryPoint != "grass_vertex" {
+				t.Errorf("frame %d's draw %d drew through %q, want grass_vertex", index, drawIndex, draw.Material.VertexEntryPoint)
+			}
+		}
+	}
+	if count := countReports(h, canvas.ReportKindVertexStageMissing); count != 1 {
+		t.Errorf("two frames of the default material's mesh and triangles of the grass's layout reported %d times, want once", count)
+	}
+}
+
+// grassMaterialDescriptor is the grass material's, drawing through its
+// shader's own vertex stage, grass_vertex.
+var grassMaterialDescriptor = canvas.MaterialDescriptor{Label: "grass", Shader: grassShaderPath, VertexEntryPoint: "grass_vertex"}
+
+// grassVertex is the vertex of the grass test's own layout: its position,
+// then how far it sways, 0 at the root and 1 at the tip.
+type grassVertex struct {
+	Position m.Vec2
+	Sway     float32
+}
+
+// VertexLayout answers grassVertex's layout: its position at location 0
+// and its sway at 1, as the grass shader's GrassVertex reads them.
+func (grassVertex) VertexLayout() meshfile.Layout {
+	return meshfile.Layout{Stride: 12, Attributes: []meshfile.Attribute{
+		{Format: meshfile.FormatFloat32x2, Offset: 0, Location: 0},
+		{Format: meshfile.FormatFloat32, Offset: 8, Location: 1},
+	}}
+}
+
+// position3 answers the vertex's position with a zero z.
+func (v grassVertex) position3() m.Vec3 {
+	return m.Vec3{X: v.Position.X, Y: v.Position.Y}
+}
+
+// grassBladeVertices are a blade 10 units wide and 40 tall about the
+// origin, its tip's corners, at the top, swaying 1 and its root's 0, in
+// makeSquareVertices's order, and grassBlade their triangles, drawn by
+// squareIndices within their bounds.
+var (
+	grassBladeVertices = []grassVertex{
+		{Position: m.Vec2{X: -5, Y: -20}, Sway: 1},
+		{Position: m.Vec2{X: 5, Y: -20}, Sway: 1},
+		{Position: m.Vec2{X: -5, Y: 20}},
+		{Position: m.Vec2{X: 5, Y: 20}},
+	}
+	grassBlade = canvas.Triangles[grassVertex]{Vertices: grassBladeVertices, Indices: squareIndices, Topology: meshfile.TopologyTriangleList, Bounds: meshfile.CalculateBounds(grassBladeVertices, grassVertex.position3)}
+)
+
 // triangleVertices are a triangle's, of legs 10 units along x and y from
 // the origin.
 var triangleVertices = []canvas.Vertex{{}, {Position: m.Vec2{X: 10}}, {Position: m.Vec2{Y: 10}}}
@@ -261,11 +379,18 @@ func makeSquareVertices(side float32) []canvas.Vertex {
 // by indices, nil for none, within their bounds.
 func putMeshFile(t testing.TB, memory *filesystems.MemoryFS, path string, vertices []canvas.Vertex, indices []uint32, topology meshfile.Topology) {
 	t.Helper()
-	data, err := meshfile.Encode(vertices, indices, topology, meshfile.CalculateBounds(vertices, canvas.Vertex.Position3))
+	triangles := canvas.Triangles[canvas.Vertex]{Vertices: vertices, Indices: indices, Topology: topology, Bounds: meshfile.CalculateBounds(vertices, canvas.Vertex.Position3)}
+	putFile(t, memory, path, encodeMeshFile(t, path, triangles))
+}
+
+// encodeMeshFile answers the mesh file of triangles, for path.
+func encodeMeshFile[V meshfile.VertexType](t testing.TB, path string, triangles canvas.Triangles[V]) []byte {
+	t.Helper()
+	data, err := meshfile.Encode(triangles.Vertices, triangles.Indices, triangles.Topology, triangles.Bounds)
 	if err != nil {
 		t.Fatalf("encoding %s: %v", path, err)
 	}
-	putFile(t, memory, path, data)
+	return data
 }
 
 // putFile puts data into memory at path.

@@ -127,6 +127,12 @@ const (
 	// for each path, at its first draw, and again after the path is
 	// unloaded.
 	ReportKindMeshFileNotLoaded
+	// ReportKindVertexStageMissing is a mesh file or per-frame triangles of
+	// a layout other than canvas.Vertex's drawn with a material whose
+	// vertex stage is canvas's own, as a fragment-only material's is, which
+	// reads no vertex of theirs, so the entry is skipped. It is reported
+	// once for each material.
+	ReportKindVertexStageMissing
 )
 
 // The keys canvas logs a report once under are one of these, then the
@@ -151,6 +157,7 @@ const (
 	iconRefusedLogKey            = "canvas: icon refused: "
 	markupMalformedLogKey        = "canvas: markup malformed: "
 	meshFileNotLoadedLogKey      = "canvas: mesh file not loaded: "
+	vertexStageMissingLogKey     = "canvas: vertex stage missing: "
 )
 
 // pixelPerfectStretchReport is the report of a pixel-perfect camera's

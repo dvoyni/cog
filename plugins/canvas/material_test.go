@@ -1,6 +1,6 @@
 package canvas_test
 
-//go:generate go run github.com/dvoyni/cog/plugins/render/cmd/declarebindings testdata/tint.wgsl testdata/rawcolour.wgsl
+//go:generate go run github.com/dvoyni/cog/plugins/render/cmd/declarebindings testdata/tint.wgsl testdata/rawcolour.wgsl testdata/grass.wgsl
 //go:generate go run github.com/dvoyni/cog/plugins/render/cmd/declarebindings -variantsonly -variant CANVAS_ARGUMENT testdata/dissolve.wgsl
 
 import (
@@ -20,10 +20,13 @@ import (
 // The test materials' shaders, in testdata, each including canvas's
 // include from the assets folder beside it: tintShaderPath's draws an
 // entry's image times its tint times its material_tint, and
-// rawColourShaderPath's writes its raw_colour as it is, unencoded.
+// rawColourShaderPath's writes its raw_colour as it is, unencoded, and
+// grassShaderPath's vertex stage, grass_vertex, sways a mesh of grassVertex
+// by its grass_wind.
 const (
 	tintShaderPath      = "testdata/tint.wgsl"
 	rawColourShaderPath = "testdata/rawcolour.wgsl"
+	grassShaderPath     = "testdata/grass.wgsl"
 )
 
 // newMaterialMounter answers a file mounter of the test materials' shaders,
@@ -32,7 +35,7 @@ const (
 func newMaterialMounter(t testing.TB) *fileMounter {
 	t.Helper()
 	files := fstest.MapFS{}
-	for _, path := range []string{tintShaderPath, tintShaderPath + ".json", rawColourShaderPath, rawColourShaderPath + ".json", "assets/canvas.wgsl"} {
+	for _, path := range []string{tintShaderPath, tintShaderPath + ".json", rawColourShaderPath, rawColourShaderPath + ".json", grassShaderPath, grassShaderPath + ".json", "assets/canvas.wgsl"} {
 		addModuleFile(t, files, path)
 	}
 	return &fileMounter{files: files}

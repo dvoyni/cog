@@ -229,7 +229,13 @@ can be inspected in canvas's terms, beside render's inspection of it.
   straight alpha, zero meaning white, so a vertex faded out takes
   `{1, 1, 1, 0}`. `Position3()` answers its position for
   `meshfile.CalculateBounds(vertices, canvas.Vertex.Position3)`. Vertices of
-  another layout draw through the material's own vertex stage.
+  another layout, a type whose `VertexLayout()` answers its
+  `meshfile.Layout`, draw through the material's own vertex stage, which
+  includes canvas's include and places each vertex through
+  `canvas_make_quad_varyings`, so swaying grass carries its sway per
+  vertex; drawn with a material whose vertex stage is canvas's, as a
+  fragment-only material's is, they are skipped, reported once for the
+  material as `ReportKindVertexStageMissing`.
   `DrawTrianglesWith` gives the entry its material's argument.
 - **`MeshFileFromFile(path)`** interns a mesh file's path in platform's FS
   into a pointer-free **`MeshFile`**, the zero one naming none, as
@@ -251,7 +257,8 @@ can be inspected in canvas's terms, beside render's inspection of it.
   of one tree, recorded in one `DrawMeshes`, is one draw; a camera culls
   each by its file's bounds through its transform. A file of `Vertex`'s
   layout draws through `canvas_mesh_vertex`, and one of another layout
-  through the material's own vertex stage. Under a pixel-perfect camera, a
+  through the material's own vertex stage, refused with a fragment-only
+  material as per-frame triangles are. Under a pixel-perfect camera, a
   mesh's translation snaps to the world-unit grid, its vertices moving with
   it unsnapped, as a per-frame mesh's do.
 - **`OrderOf(y)`** maps a float onto an order of its own, in the same order,

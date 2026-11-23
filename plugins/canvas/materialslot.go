@@ -3,6 +3,7 @@ package canvas
 import (
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/plugins/render"
@@ -10,15 +11,18 @@ import (
 
 // materialSlot is one 2D material made: the render materials and the
 // shader canvas made it of, material of its own vertex stage and
-// meshMaterial of canvas's mesh vertex stage, its CullMargin, the Go type of
-// its argument, nil for none, the stride of its instance data, zero for
-// none, and whether that type's layout mismatched its shader's, and whether
-// it was released, its render materials still to give back.
+// meshMaterial of canvas's mesh vertex stage, whether material's vertex
+// stage is its shader's own, which a mesh of another layout than
+// canvas.Vertex's draws through, its CullMargin, the Go type of its
+// argument, nil for none, the stride of its instance data, zero for none,
+// and whether that type's layout mismatched its shader's, and whether it was
+// released, its render materials still to give back.
 type materialSlot struct {
 	generation             uint32
 	material               render.Material
 	meshMaterial           render.Material
 	shader                 render.Shader
+	ownVertexStage         bool
 	cullMargin             float32
 	argumentType           reflect.Type
 	stride                 uint32
@@ -29,10 +33,13 @@ type materialSlot struct {
 // makeMaterialSlot makes the slot of a 2D material of descriptor through
 // inventory, its render materials and its shader acquired, its argument's
 // layout checked against its shader's, a mismatch reported once to logger
-// for the shader and the type.
+// for the shader and the type. Its vertex stage is its shader's own when it
+// names one, not canvas's, the include's and its materials' names beginning
+// canvas_, whose quads and canvas.Vertex meshes read no vertex of another
+// layout.
 func makeMaterialSlot(inventory render.Inventory, logger *kernel.Logger, descriptor MaterialDescriptor) materialSlot {
 	material, meshMaterial, shader := descriptor.makeRenderMaterials(inventory)
-	slot := materialSlot{material: material, meshMaterial: meshMaterial, shader: shader, cullMargin: descriptor.CullMargin, argumentType: descriptor.Argument.goType, stride: findInstanceStride(descriptor.Argument.goType)}
+	slot := materialSlot{material: material, meshMaterial: meshMaterial, shader: shader, ownVertexStage: descriptor.VertexEntryPoint != "" && !strings.HasPrefix(descriptor.VertexEntryPoint, canvasNamePrefix), cullMargin: descriptor.CullMargin, argumentType: descriptor.Argument.goType, stride: findInstanceStride(descriptor.Argument.goType)}
 	if slot.argumentType == nil {
 		return slot
 	}
@@ -54,6 +61,20 @@ func (s *materialSlot) takesArgument(logger *kernel.Logger, material Material, a
 		return true
 	}
 	reportArgumentRefused(logger, material, argument.goType, s.argumentType)
+	return false
+}
+
+// drawsLayout answers whether the material, material's slot, draws a mesh
+// of canvas.Vertex's layout, standard, or of another: always the first,
+// and the second when its vertex stage is its shader's own. One whose
+// vertex stage is canvas's, refused another layout, is reported once to
+// logger for the material.
+func (s *materialSlot) drawsLayout(logger *kernel.Logger, material Material, standard bool) bool {
+	if standard || s.ownVertexStage {
+		return true
+	}
+	missing := Report{Kind: ReportKindVertexStageMissing, Err: fmt.Errorf("canvas: material %v has no vertex stage of its own, so a mesh of another layout than canvas.Vertex's drawn with it is skipped", material)}
+	logger.LogErrOnce(vertexStageMissingLogKey+fmt.Sprint(material), missing)
 	return false
 }
 

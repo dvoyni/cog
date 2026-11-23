@@ -20,8 +20,12 @@ type MaterialDescriptor struct {
 	// own, canvas_sprite_vertex, so a material of a fragment stage alone
 	// draws sprites and shapes alike. A mesh of canvas.Vertex draws through
 	// canvas's mesh vertex stage, canvas_mesh_vertex, whatever it names, and
-	// a mesh of another layout through it. FragmentEntryPoint is its
-	// fragment stage, empty meaning the shader's only one.
+	// a mesh of another layout through it, which must then be the shader's
+	// own: a mesh of another layout drawn with a material naming none or
+	// one of canvas's, any name beginning canvas_, which read no vertex of
+	// its, is skipped, reported once for the material as
+	// ReportKindVertexStageMissing. FragmentEntryPoint is its fragment stage,
+	// empty meaning the shader's only one.
 	VertexEntryPoint   string
 	FragmentEntryPoint string
 	// Blend is how the material's entries blend into what the target holds,

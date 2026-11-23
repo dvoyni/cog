@@ -126,7 +126,10 @@ func (l DrawList) DrawTextWith[T any](text Text, argument T) {
 // draws the frame, one draw of their own, never merged with another
 // entry's. Vertices of canvas.Vertex are drawn by canvas's own mesh vertex
 // stage and the material's fragment stage; those of another layout by the
-// material's own vertex stage. Triangles of no vertices record nothing, and
+// material's own vertex stage, and are skipped as they are drawn with a
+// material whose vertex stage is canvas's, as a fragment-only material's
+// is, reported once for the material as ReportKindVertexStageMissing.
+// Triangles of no vertices record nothing, and
 // those of zero bounds are refused, reported once for the task as
 // ReportKindBoundsMissing. Outside the frame, they are refused and reported
 // once for the task.
@@ -144,8 +147,11 @@ func (l DrawList) DrawTrianglesWith[V meshfile.VertexType, T any](options DrawTr
 // DrawMesh records mesh, a mesh file's triangles, into the task's draw list
 // for the frame being recorded. Its file loads at its first draw, through
 // platform's FS, and draws that frame. Consecutive meshes in sort order of
-// one file, material, atlas, filter and clip are one instanced draw. Outside
-// the frame, it is refused and reported once for the task.
+// one file, material, atlas, filter and clip are one instanced draw. A file
+// of another layout than canvas.Vertex's drawn with a material whose vertex
+// stage is canvas's is skipped, reported once for the material, as
+// Mesh.File says. Outside the frame, it is refused and reported once for
+// the task.
 func (l DrawList) DrawMesh(mesh Mesh) {
 	l.list.record(l.state.Get(), EntryKindMesh, &l.list.meshes, nil, nil, mesh)
 }

@@ -610,7 +610,9 @@ func (r *renderer) bindInstances(pass *render.Pass, material render.Material, in
 // material one canvas does not hold, or its argument one its material does
 // not take, reported once to state's logger, or of a material whose
 // argument's layout mismatched its shader's, or a mesh whose file draws
-// nothing, has zero bounds and batch key.
+// nothing, or per-frame triangles or a mesh of another layout than
+// canvas.Vertex's whose material has no vertex stage of its own, reported
+// once to state's logger, has zero bounds and batch key.
 func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 	material := state.findEntryMaterial(entry)
 	slot, held := r.findMaterial(material)
@@ -657,7 +659,7 @@ func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 	case EntryKindTriangles:
 		triangles := &state.triangles[entry.index]
 		image := findDrawnFrame(r.drawnImages, triangles.options.Image, triangles.options.Frame)
-		if image.drawsNothing {
+		if image.drawsNothing || !slot.drawsLayout(state.logger, material, triangles.standardLayout) {
 			r.appendSkippedEntryKeys()
 			return
 		}
@@ -672,7 +674,7 @@ func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 			return
 		}
 		image := findDrawnFrame(r.drawnImages, mesh.Image, mesh.Frame)
-		if image.drawsNothing {
+		if image.drawsNothing || !slot.drawsLayout(state.logger, material, loaded.standardLayout) {
 			r.appendSkippedEntryKeys()
 			return
 		}

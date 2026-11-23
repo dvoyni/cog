@@ -5,7 +5,10 @@
 // the define CANVAS_ARGUMENT for. A material with only a fragment entry
 // point draws through the include's vertex stage, canvas_sprite_vertex,
 // which a custom vertex stage replaces by naming its own, and every
-// material draws a mesh of canvas.Vertex through canvas_mesh_vertex.
+// material draws a mesh of canvas.Vertex through canvas_mesh_vertex. Every
+// name it declares begins canvas_, which a material's shader keeps for
+// canvas's: a vertex stage of such a name is taken as canvas's, which reads
+// no vertex of a layout of the user's own.
 
 // CanvasCamera is the pass parameters, set once per camera pass.
 struct CanvasCamera {

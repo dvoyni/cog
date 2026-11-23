@@ -31,6 +31,10 @@ const (
 	// quads canvas draws over a viewport: a camera's clear, what a
 	// multisampled camera resolved, and an image filling its atlas cell.
 	viewportShaderPath = assetPrefix + "/viewport.wgsl"
+	// canvasNamePrefix begins every name canvas's include and its
+	// materials' shaders declare, their vertex stages among them, so a
+	// material's shader names none of its own with it.
+	canvasNamePrefix = "canvas_"
 	// spriteVertexEntryPoint is the include's vertex stage, for an entry
 	// drawn as a quad.
 	spriteVertexEntryPoint = "canvas_sprite_vertex"
