@@ -1034,6 +1034,12 @@ Each change was checked for a 3D renderer's needs too, drawbridge's forward+ or 
 
 **Pixel tests compare probes:** exact texels at chosen points where no filtering reaches, such as a cell's centre or a fill's middle, as render's pixel tests compare exact texels.
 - A tolerance of ±2 per channel applies only where a probe must sit in a gradient, such as a distance-field band.
+- **Probes hold at any display scale from 1.** A window's pixels per point come from the display it opens on: 1.5 on a Windows display at 150 %, 1 under Linux's X11 and Wayland. So a probe is never placed where one scale's pixel centres happen to fall. Each probe takes one of three forms:
+  - a value expected at its pixel's actual centre;
+  - a pixel compared with another of the same picture, such as a filtered edge with the middle of its column;
+  - a sprite's distance field modelled as `DistanceField` stores it, rounded to a byte at each texel centre.
+
+  A label read as large text stays under `text_minified_texels` field texels a pixel at scale 1.
 - There are no golden image files. They would break whenever the software adapter's filtering or an antialiased edge moved by one, and each would need upkeep.
 
 **Binding declarations:** canvas's shaders get theirs from render's `cmd/declarebindings` through `//go:generate`, with `-variant CANVAS_ARGUMENT` for the define set canvas compiles a material with an argument under. canvas's guide gives the line a user's 2D material needs to be tested on the recording adapter. A missing or stale declaration fails the test, as render's harness already does.

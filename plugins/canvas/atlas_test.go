@@ -455,7 +455,8 @@ func TestAPackedImageDrawsItsOwnTexelsAndLinearFilteringNeverReachesItsNeighbour
 	// texel, the stripes show each of their own texels where it lies.
 	// Linearly filtered, probed half a unit inside its edges, each image
 	// reads only its own texels and its gutter, continuing them, never its
-	// neighbour or the empty page. The corner image of 6 texels, green but
+	// neighbour or the empty page: the stripes' top and bottom edges read as
+	// the middle row of their column does. The corner image of 6 texels, green but
 	// for its last column, yellow, and the rest of its last row, blue, is
 	// rounded up to the atlas grid of 4, and read at its nearest texel shows its
 	// last column and row where they lie, its cell filled over the rounding.
@@ -494,8 +495,8 @@ func TestAPackedImageDrawsItsOwnTexelsAndLinearFilteringNeverReachesItsNeighbour
 		{"the nearest stripes' last texel", m.Vec2{X: -25, Y: 30}, opaqueWhite},
 		{"the linear stripes' left edge", m.Vec2{X: -59.5, Y: -30}, opaqueRed},
 		{"the linear stripes' right edge", m.Vec2{X: -20.5, Y: -30}, opaqueWhite},
-		{"the linear stripes' top edge", m.Vec2{X: -45, Y: -34.5}, opaqueGreen},
-		{"the linear stripes' bottom edge", m.Vec2{X: -35, Y: -25.5}, opaqueBlue},
+		{"the linear stripes' top edge", m.Vec2{X: -45, Y: -34.5}, picture.at(m.Vec2{X: -45, Y: -30})},
+		{"the linear stripes' bottom edge", m.Vec2{X: -35, Y: -25.5}, picture.at(m.Vec2{X: -35, Y: -30})},
 		{"the linear stripes' top left corner", m.Vec2{X: -59.5, Y: -34.5}, opaqueRed},
 		{"the blue sprite's left edge", m.Vec2{X: 20.5}, opaqueBlue},
 		{"the blue sprite's right edge", m.Vec2{X: 59.5}, opaqueBlue},

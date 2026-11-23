@@ -73,9 +73,12 @@ func blockProbes(name string, centre m.Vec2, angle, size float32, fill canvas.Pr
 var whiteFill = canvas.Outline(0, m.White)
 
 func TestALabelDrawsItsGlyphsAtTwoSizesAndTurned(t *testing.T) {
-	// A full block is drawn at 100 units, at 50, and at 50 turned a
+	// A full block is drawn at 100 units, at 60, and at 60 turned a
 	// quarter, its fill read across the middle of each side, within a few
-	// pixels of it, where the field holds the distance exactly.
+	// pixels of it, where the field holds the distance exactly. At 60, of
+	// exactFieldConfig's 100 field texels an em, a pixel spans 1.67 texels
+	// at scale 1, under text_minified_texels, so at any scale from 1 the
+	// fill is read at one point a pixel, never as small text.
 	labels := []struct {
 		name   string
 		centre m.Vec2
@@ -83,8 +86,8 @@ func TestALabelDrawsItsGlyphsAtTwoSizesAndTurned(t *testing.T) {
 		size   float32
 	}{
 		{"a block at 100", m.Vec2{X: -90}, 0, 100},
-		{"a block at 50", m.Vec2{X: 10, Y: -60}, 0, 50},
-		{"a block at 50 turned a quarter", m.Vec2{X: 90, Y: 50}, math.Pi / 2, 50},
+		{"a block at 60", m.Vec2{X: 10, Y: -60}, 0, 60},
+		{"a block at 60 turned a quarter", m.Vec2{X: 90, Y: 50}, math.Pi / 2, 60},
 	}
 
 	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), exactFieldConfig, func(list canvas.DrawList) {
@@ -322,8 +325,11 @@ func TestAThinStrokeOfSmallTextDrawsItsWholeInkAtAnyPhaseOfThePixelGrid(t *testi
 	for index := range phases {
 		centre := findCentre(index)
 		// The bar lies 0.37 em above the baseline, 0.01 em above the box's
-		// middle.
-		inks := picture.findColumnInk(centre.Add(m.Vec2{X: -3}), centre.Add(m.Vec2{X: 3}), centre.Y-4, centre.Y+4)
+		// middle. The columns read lie within the middle glyph's 6.6 units
+		// at any scale from 1, its pen moved by half a pixel at most, short
+		// of its neighbours' bars, which overlap its own where their pens
+		// round towards it.
+		inks := picture.findColumnInk(centre.Add(m.Vec2{X: -1.5}), centre.Add(m.Vec2{X: 1.5}), centre.Y-4, centre.Y+4)
 		for column, ink := range inks {
 			if got := float32(ink) / 255; got < thickness-0.25 || got > thickness+0.25 {
 				t.Errorf("the bar at phase %v draws %.2f pixels of ink in column %d of its middle, want its thickness, %.2f, within 0.25", phases[index], got, column, thickness)

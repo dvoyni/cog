@@ -100,6 +100,24 @@ func findRoundedRectDistance(point m.Vec2, rect m.Rect, radius float64) float64 
 	return math.Hypot(max(cornerX, 0), max(cornerY, 0)) + min(max(cornerX, cornerY), 0) - radius
 }
 
+// findStoredFieldDistance answers the distance the field DistanceField bakes
+// of rect, art of full alpha, with spread holds at texel, a point of the
+// field in its texels, as a sampler filtering it linearly reads it: rect's
+// own distance at the four texel centres around texel, each rounded to the
+// byte of alpha the texel stores, blended by texel's place between them.
+func findStoredFieldDistance(texel m.Vec2, rect image.Rectangle, spread int) float64 {
+	findStoredDistance := func(x, y float64) float64 {
+		return (0.5 - float64(findFieldAlpha(findRectDistance(x, y, rect), spread))/255) * 2 * float64(spread)
+	}
+	left := math.Floor(float64(texel.X) - 0.5)
+	top := math.Floor(float64(texel.Y) - 0.5)
+	across := float64(texel.X) - 0.5 - left
+	down := float64(texel.Y) - 0.5 - top
+	upper := (1-across)*findStoredDistance(left+0.5, top+0.5) + across*findStoredDistance(left+1.5, top+0.5)
+	lower := (1-across)*findStoredDistance(left+0.5, top+1.5) + across*findStoredDistance(left+1.5, top+1.5)
+	return (1-down)*upper + down*lower
+}
+
 // namedProfile is a profile a pixel test draws, named for its messages.
 type namedProfile struct {
 	name    string
@@ -120,7 +138,8 @@ func TestEachProfileDrawsItsBandAroundASpritesDistanceField(t *testing.T) {
 	// texel centres, out of its right edge: deep inside, inside, on the
 	// edge, through each band and past it. Its texels are filtered
 	// linearly, so the field's distance between texel centres is its
-	// straight edge's, its alpha clamping it within the spread.
+	// straight edge's, as each texel stores it, rounded to a byte, its alpha
+	// clamping it within the spread.
 	files := fstest.MapFS{}
 	addImageFile(t, files, fieldArtPath, newRectArt(fieldArt))
 	field := canvas.ImageFromFile(fieldArtPath, canvas.ImageOptions{Convert: canvas.DistanceField{Spread: sdfSpread}})
@@ -149,8 +168,7 @@ func TestEachProfileDrawsItsBandAroundASpritesDistanceField(t *testing.T) {
 		edge := m.Vec2{X: frameOrigin.X + float32(fieldArt.Max.X)*sdfScale, Y: frameOrigin.Y + 7.5*sdfScale}
 		offset := profile.profile.Offset
 		distanceAt := func(point m.Vec2) float64 {
-			texel := point.Sub(offset).Sub(frameOrigin).DivS(sdfScale)
-			return min(max(findRectDistance(float64(texel.X), float64(texel.Y), fieldArt), -sdfSpread), sdfSpread)
+			return findStoredFieldDistance(point.Sub(offset).Sub(frameOrigin).DivS(sdfScale), fieldArt, sdfSpread)
 		}
 		for _, distance := range []float32{-3, -1.4, 0.1, 0.6, 1.1, 1.6, 2.1, 2.6, 3.3, 3.6} {
 			probes = append(probes, profileProbe{name: profile.name, point: edge.Add(m.Vec2{X: distance * sdfScale}), profile: profile.profile, distanceAt: distanceAt})
