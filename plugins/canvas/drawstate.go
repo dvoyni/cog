@@ -17,7 +17,8 @@ import (
 // declaring a DrawList, in registration order, whether a frame is open for
 // entries, the entries and cameras of the frame last sorted, merged from the
 // draw lists, with each entry's keys, the inspector, the residency requests
-// Assets queued, the image sizes it read, the 2D materials it made, and the
+// Assets queued, the image sizes it read, the stamps of the files read, a
+// reload of the font files asked for, the 2D materials it made, and the
 // stopwatches timing its jobs.
 type drawState struct {
 	// reporter is where reports go.
@@ -63,6 +64,12 @@ type drawState struct {
 	// the renderer, and imageSizes keeps Assets.ImageSize's answers.
 	residency  residencyRequestQueue
 	imageSizes imageSizeTable
+	// fileStamps are the stamps of the image files and mesh files read,
+	// which Assets.ReloadChanged compares, and fontReloadRequested is set
+	// by it until the drawing job hands the font files' reload to a task
+	// under FontLibrary's write lock.
+	fileStamps          fileStampTable
+	fontReloadRequested atomic.Bool
 	// materials are the 2D materials Assets made.
 	materials materialTable
 	// frameInspected is set when the frame merged is written down for a

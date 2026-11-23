@@ -86,6 +86,21 @@ func makeDefaultFontSet(k *kernel.Kernel, _ kernel.NoArg, library kernel.Write[F
 	return kernel.NoResult{}
 }
 
+// reloadChangedFontsOnRequest handles fontReloadEvent: after in, it
+// schedules reloadChangedFontsTask, and returns its job.
+func reloadChangedFontsOnRequest(ex *kernel.Executor, in kernel.JobHandle, event fontReloadEvent, reloadChangedFontsTask *kernel.Task[kernel.NoArg, kernel.NoResult]) (fontReloadEvent, kernel.JobHandle) {
+	return event, ex.Schedule(reloadChangedFontsTask, kernel.NoArg{}, in).Handle()
+}
+
+// reloadChangedFonts makes again each font set naming a font file that
+// changed since it was made, its fonts read through files, under
+// FontLibrary's write lock, so no task lays text out in a set as it is
+// made again.
+func reloadChangedFonts(k *kernel.Kernel, _ kernel.NoArg, library kernel.Write[FontLibrary], files kernel.Read[platform.FS]) kernel.NoResult {
+	fontLibraryWriter{fontLibrary: library.Get().(*fontLibrary), files: files.Get()}.reloadChanged()
+	return kernel.NoResult{}
+}
+
 // openFrame opens the frame for entries.
 func openFrame(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*drawState]) kernel.NoResult {
 	state.Get().recording.Store(true)
@@ -106,7 +121,9 @@ func sortEntries(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*drawState]
 // field from the FontLibrary resource, then gives back
 // the 2D materials released since the frame before was drawn, so the frame
 // recorded as one was released still drew it, and frees the layouts now
-// unused for Config.LayoutIdleFrames frames. A frame
+// unused for Config.LayoutIdleFrames frames. A reload of the font files
+// Assets.ReloadChanged asked for is handed to canvas's own task, under
+// FontLibrary's write lock, by publishing fontReloadEvent. A frame
 // inspected is written down for the pending request, with how long its
 // sorting and its drawing took, and render is asked
 // again for its inspection, so a request render joined to an inspection of
@@ -121,6 +138,9 @@ func draw(k *kernel.Kernel, beat metronome.Beat, frame render.Frame, inventory r
 	drawing.drawCameras(frame, inventory, files.Get(), manager.Get(), windows.Get().mainWindow(), library, canvasState)
 	canvasState.materials.freeReleased(inventory)
 	library.layouts.endFrame()
+	if canvasState.fontReloadRequested.Load() && canvasState.fontReloadRequested.Swap(false) {
+		k.Publish(fontReloadEvent{})
+	}
 	if canvasState.frameInspected {
 		inspection := canvasState.makeInspection(beat, inventory, drawing)
 		inspection.SortTime = canvasState.sortTime

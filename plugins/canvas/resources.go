@@ -116,7 +116,9 @@ type WriteFontLibrary interface {
 	// behind a loading screen, and answers it. A font file that fails to
 	// load is reported once for its path as ReportKindFontNotLoaded and left
 	// out of the set, a failed default font replaced by canvas's JetBrains
-	// Mono.
+	// Mono. The set keeps descriptor as given, which Assets.ReloadChanged
+	// makes it again of once a font file it names changes, so its slices
+	// are not changed after.
 	MakeFontSet(descriptor FontSetDescriptor) FontSet
 	// DestroyFontSet destroys set, which is then measured as the default
 	// set. Destroying a set canvas does not hold, or the default set, is

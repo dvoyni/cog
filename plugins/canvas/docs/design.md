@@ -946,11 +946,11 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 
 - **`Assets.ReloadChanged()`** works as render's `Inventory.ReloadChanged()` does: it compares each file's modification time and size, and reads no file that did not change. A 2D game binds one key to it, or a dev plugin calls it every second.
 - **What changes, by kind:**
-  - **Images:** render gives an image's source back once it is packed, so canvas stats the files itself. A changed one is read, converted and repacked in place, keeping its handle.
-  - **Fonts:** a changed font file is loaded again, and its glyphs and the layouts that used it are dropped.
-  - **Mesh files:** reloaded the same way. The memory mount stamps every put strictly later, so a re-put is seen.
+  - **Images:** render gives an image's source back once it is packed, so canvas stats the files itself. Each image file is stamped before canvas first reads it, measures its header or packs its texture, and the stamps are compared in the caller's job. A changed one's path is unloaded as `Unload` unloads it, so the next draw reads, converts and packs it again, each `Image` of it kept, and `ImageSize` reads its header again. A converted file preloaded and not yet drawn is dropped with it.
+  - **Fonts:** a set's fonts are written under `FontLibrary`'s write lock, and `Assets` holds read locks alone, so the drawing job hands the reload to a task of canvas's own under that lock, through a private event, once the frame is drawn. Each set stamped its font files as it was made, and keeps its descriptor as given, so a caller changes none of its slices after; one naming a changed file is made again of that descriptor, as `MakeFontSet` makes it, under the same `FontSet`. Its runs are laid out anew, the layouts of the set before going idle, and the glyphs made of its old fonts are dropped, their fields freed, their cells in the glyph atlas, which frees none, kept. An icon's size, read as it was registered, is not read again.
+  - **Mesh files:** stamped before their first load, and unloaded as images are when changed, so the next draw loads the new file under the same `MeshFile`. The memory mount stamps every put strictly later, so a re-put is seen.
 - **It also calls render's `ReloadChanged`** through the `Inventory` it holds, so the 2D materials' shaders and their includes reload in the same call.
-- **It allocates only while it runs.** Nothing reloads by itself each frame, since that would cost a stat per file every frame. At run time, a game still changes a mesh file by putting it again and unloading its path.
+- **It allocates only while it runs,** and the font task it asks for only while that runs; a steady frame pays one atomic load for it. Nothing reloads by itself each frame, since that would cost a stat per file every frame. At run time, a game still changes a mesh file by putting it again and unloading its path.
 
 ### Performance
 

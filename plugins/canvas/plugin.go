@@ -120,7 +120,8 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 // render.FrameEvent, render.RecoveredEvent, platform.WindowOpenedEvent,
 // platform.WindowClosedEvent and render.InspectedEvent, the Subs kept in the
 // Handlers resource; and
-// subscribes to its own private events delivering inspections and starting. A config of
+// subscribes to its own private events delivering inspections, starting and
+// reloading font files. A config of
 // another type than *Config is a composition error, and panics.
 func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	canvasConfig := kernel.PluginConfigOrDefault[Config](config)
@@ -168,6 +169,7 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	matchInspectionTask := configurator.RegisterTask2(matchInspection)
 	dropInspectionTask := configurator.RegisterTask1(dropInspection)
 	makeDefaultFontSetTask := configurator.RegisterTask2(makeDefaultFontSet)
+	reloadChangedFontsTask := configurator.RegisterTask2(reloadChangedFonts)
 	configurator.InitResource(Handlers{
 		RecordFrame: configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event render.FrameEvent) (render.FrameEvent, kernel.JobHandle) {
 			return recordFrame(ex, in, event, openFrameTask, sortEntriesTask, copyTargetsTask, drawTask)
@@ -190,6 +192,9 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	})
 	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event startEvent) (startEvent, kernel.JobHandle) {
 		return makeDefaultFontSetOnStart(ex, in, event, makeDefaultFontSetTask)
+	})
+	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event fontReloadEvent) (fontReloadEvent, kernel.JobHandle) {
+		return reloadChangedFontsOnRequest(ex, in, event, reloadChangedFontsTask)
 	})
 	return nil
 }

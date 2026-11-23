@@ -5,7 +5,8 @@ import (
 	"sync"
 )
 
-// countingFS is files, counting the opens of each path.
+// countingFS is files, counting the opens of each path, a read among them,
+// and statting its files without opening them.
 type countingFS struct {
 	files      fs.FS
 	mutex      sync.Mutex
@@ -17,6 +18,10 @@ func (c *countingFS) Open(path string) (fs.File, error) {
 	c.openCounts[path]++
 	c.mutex.Unlock()
 	return c.files.Open(path)
+}
+
+func (c *countingFS) Stat(path string) (fs.FileInfo, error) {
+	return fs.Stat(c.files, path)
 }
 
 // countOpens answers how many times path was opened.

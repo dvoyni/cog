@@ -19,16 +19,18 @@ type imageSizeTable struct {
 
 // find answers the size of the image file at path in files, in texels, and
 // whether its header was read: from the table, or else read from the
-// header, outside the mutex, so other calls do not wait for the read, and
-// kept, the first kept when two calls read it. A header that cannot be
+// header, outside the mutex, so other calls do not wait for the read, the
+// file stamped in stamps first, and kept, the first kept when two calls
+// read it. A header that cannot be
 // read is kept as unread, and reported, once for path.
-func (t *imageSizeTable) find(files fs.FS, reporter *reporter, path string) (m.Vec2, bool) {
+func (t *imageSizeTable) find(files fs.FS, reporter *reporter, stamps *fileStampTable, path string) (m.Vec2, bool) {
 	t.mutex.RLock()
 	size, found := t.sizes[path]
 	t.mutex.RUnlock()
 	if found {
 		return size.size, size.read
 	}
+	stamps.add(files, path)
 	config, err := readImageConfig(files, path)
 	if err == nil {
 		size = headerSize{size: m.Vec2{X: float32(config.Width), Y: float32(config.Height)}, read: true}

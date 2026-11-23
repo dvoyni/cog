@@ -56,6 +56,7 @@ func (a Assets) Preload(image Image) {
 	state := a.state.Get()
 	source := sourceKey{path: key.path, colorSpace: key.options.ColorSpace}
 	if key.options.Convert != nil {
+		state.fileStamps.add(a.files.Get(), key.path)
 		state.residency.requestFilePreload(a.files.Get(), source)
 		return
 	}
@@ -76,6 +77,7 @@ func (a Assets) Unload(path string) {
 	state := a.state.Get()
 	state.residency.requestUnload(a.inventory, path)
 	state.imageSizes.forget(state.reporter, path)
+	state.fileStamps.forget(path)
 	for _, unloaded := range imageNames.findPaths(path, func(key imageKey) (string, bool) { return key.path, !key.ofTexture }) {
 		state.reporter.forget(imageOptionsIgnoredLogKey + unloaded)
 		state.reporter.forget(frameOutOfBoundsLogKey + unloaded)
@@ -84,6 +86,38 @@ func (a Assets) Unload(path string) {
 	for _, unloaded := range meshFileNames.findPaths(path, func(path string) (string, bool) { return path, true }) {
 		state.reporter.forget(meshFileNotLoadedLogKey + unloaded)
 	}
+}
+
+// ReloadChanged reloads every image file, font file and mesh file canvas
+// read that changed since it read it, as fs.Stat answers its modification
+// time and size, reading no file that did not, and calls render's
+// Inventory.ReloadChanged, so the 2D materials' shaders and their includes
+// reload in the same call. An embedded file never changes, so a game in
+// development mounts its asset folder from disk above it; a memory mount
+// stamps each put.
+//
+// The image files and mesh files are compared in the caller's job, and the
+// path of each changed one unloaded as Unload unloads it, so the next draw
+// reads it again, converts it and packs it, each Image of it kept, or loads
+// it again, its MeshFile kept, and ImageSize reads its header again; one
+// that fails is reported again. The font files are compared once the next
+// frame is drawn, in a task of canvas's own under FontLibrary's write lock,
+// under which a set's fonts are written: a set naming a changed file is
+// made again of its descriptor, as WriteFontLibrary.MakeFontSet makes it,
+// under the same FontSet, so its runs are laid out and their glyphs made
+// anew, those of its fonts before dropped. An icon's size, read as it was
+// registered, is not read again.
+//
+// Nothing reloads by itself, which would stat every file every frame: a
+// game binds ReloadChanged to a key, or a plugin of its own calls it every
+// second. It and the task it asks for allocate only while they run.
+func (a Assets) ReloadChanged() {
+	a.inventory.ReloadChanged()
+	state := a.state.Get()
+	for _, changed := range state.fileStamps.findChangedPaths(a.files.Get()) {
+		a.Unload(changed)
+	}
+	state.fontReloadRequested.Store(true)
 }
 
 // ImageSize answers image's size in texels before it is drawn, its
@@ -110,7 +144,7 @@ func (a Assets) ImageSize(image Image) (m.Vec2, bool) {
 		descriptor, read = a.inventory.TextureDescriptor(key.texture)
 		size = m.Vec2{X: float32(descriptor.Width), Y: float32(descriptor.Height)}
 	} else {
-		size, read = state.imageSizes.find(a.files.Get(), state.reporter, key.path)
+		size, read = state.imageSizes.find(a.files.Get(), state.reporter, &state.fileStamps, key.path)
 	}
 	if !read {
 		return m.Vec2{}, false

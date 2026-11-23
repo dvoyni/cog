@@ -21,7 +21,8 @@ space, one 2D-array texture of pages holding its images premultiplied, so
 sprites of different images and the shapes beside them batch; a full atlas
 grows its pages, and at its ceiling evicts the images drawn least lately.
 Images are preloaded, unloaded by path or prefix and sized from their
-headers through `Assets`, and 2D materials made from whole WGSL files that
+headers through `Assets`, which also reloads every changed image, font file,
+mesh file and 2D material's shader in one call, and 2D materials made from whole WGSL files that
 include canvas's include, a fragment-only one drawing through canvas's
 vertex stage, with their parameters set by name. Font sets are made and
 destroyed through `FontLibrary`'s writing side, their fonts measured and text
@@ -297,6 +298,13 @@ can be inspected in canvas's terms, beside render's inspection of it.
   draws, a later draw loading them again; `ImageSize(image)` answers an image's size, its
   rectangle's or its frames', a converted image's before it is converted, from its file's header alone, before it is drawn, and false for a missing file, reported
   once, an image of a texture measured on render's descriptor of it;
+  `ReloadChanged()` reloads every image file, font file and mesh file
+  canvas read that changed since, as its modification time and size say,
+  reading no file that did not, and calls render's `ReloadChanged` for the
+  2D materials' shaders: a changed image or mesh file's path is unloaded,
+  so the next draw reads it again, each handle kept, and a set naming a
+  changed font file is made again under the same `FontSet` once the next
+  frame is drawn, its runs laid out anew;
   `MakeMaterial(descriptor)` makes a 2D material, its argument's layout
   checked against its shader's, and `ReleaseMaterial`
   gives it back, the frame recording as it is released still drawing it;
@@ -462,11 +470,13 @@ can be inspected in canvas's terms, beside render's inspection of it.
   drawing; `FontLibrary`, its font sets, its current language and the icons and
   colours registered, and the glyphs made distance fields for drawing,
   under a lock of their own, written only through `ElevateFontLibrary`, and by canvas's
-  own task making the default set as it starts; a
+  own tasks making the default set as it starts and making again the sets
+  whose font files `ReloadChanged` found changed; a
   private draw state, holding each task's draw list, the frame's entries
   and cameras sorted, the inspection asked for and the first uses and
   reports noted for it, the unloads and preloads asked for, the image sizes
-  read, the 2D materials made and the stopwatches timing its jobs, under a
+  read, the stamps of the image and mesh files read and a font reload asked
+  for, the 2D materials made and the stopwatches timing its jobs, under a
   lock of their own; a private renderer, holding the
   default, SDF, text, clear, composite and pack materials, the sprite
   atlases, the white texel in the sRGB one, the glyph atlas and where each
@@ -482,14 +492,15 @@ can be inspected in canvas's terms, beside render's inspection of it.
 - **Resources it reads from other plugins:** render's, for read through
   `render.Frame` and `render.Inventory`, `Assets` holding both; `platform.FS`,
   for read, through `render.Inventory`, as canvas's shaders and sprites'
-  images load, and in `Assets`, for an image's header; render's
+  images load, and in `Assets`, for an image's header and the stamps
+  `ReloadChanged` compares; render's
   texture descriptors through it, for a texture target's size and format
   and an image's size,
   and `platform.WindowManager`, for read, for a window target's size, and its
   own `FontLibrary`, for read, for the glyphs' fields, in the
   task that draws the frame; and `platform.FS`, for read, through
-  `ElevateFontLibrary` and in its task making the default font set, as fonts
-  load; and metronome's `Clock`, in `Init`, to make the stopwatches timing
+  `ElevateFontLibrary` and in its tasks making the default font set and
+  reloading font files, as fonts load; and metronome's `Clock`, in `Init`, to make the stopwatches timing
   its sorting and drawing jobs.
 - **Task parameters it offers:** `DrawList`, and `Assets`.
 - **Events it publishes:** `FrameEvent`, inside its handler of

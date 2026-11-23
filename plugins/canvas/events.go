@@ -39,6 +39,11 @@ type InspectedEvent struct {
 // mount its fonts are read through is bound.
 type startEvent struct{}
 
+// fontReloadEvent is canvas's own event, published by the drawing job
+// once Assets.ReloadChanged has asked for the font files' reload, whose
+// handler reloads them under FontLibrary's write lock.
+type fontReloadEvent struct{}
+
 // inspectionDeliveryEvent carries the inspection of the frame of beat, once
 // render's inspection of it is beside it, from the job that matched them to
 // canvas's handler, which publishes it as InspectedEvent in its own batch,

@@ -195,12 +195,14 @@
 //	list.DrawSpriteWith(canvas.Sprite{Image: unit, Material: dissolve}, Dissolve{Amount: 0.4})
 //	list.DrawSpritesWith(sprites, dissolves)
 //
-// A task loads an image ahead of its first draw, unloads a level's images
-// and sizes an image before it is drawn through its Assets parameter:
+// A task loads an image ahead of its first draw, unloads a level's images,
+// sizes an image before it is drawn, and reloads every changed image, font
+// file, mesh file and 2D material's shader through its Assets parameter:
 //
 //	assets.Preload(hero)
 //	assets.Unload("level1/")
 //	size, ok := assets.ImageSize(hero)
+//	assets.ReloadChanged()
 //
 // Text names a font set and a size, never a font. A task makes a set on
 // purpose, at a start or behind a loading screen, through FontLibrary's writing

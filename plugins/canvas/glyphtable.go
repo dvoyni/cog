@@ -2,6 +2,7 @@ package canvas
 
 import (
 	"cmp"
+	"slices"
 	"sync"
 
 	"github.com/go-text/typesetting/font"
@@ -68,6 +69,20 @@ func (t *glyphTable) assignFields(glyphs []placedGlyph, shaper *textShaper) ([]p
 		}
 	}
 	return drawnGlyphs, madeCount
+}
+
+// dropFonts forgets the glyphs made of fonts, each a loaded font's parsed
+// font, and frees their fields, which no layout drawn after names; their
+// cells in the glyph atlas, which frees none, stay.
+func (t *glyphTable) dropFonts(fonts []*font.Font) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	for key, field := range t.indexes {
+		if slices.Contains(fonts, key.font) {
+			delete(t.indexes, key)
+			t.fields[field] = glyphField{}
+		}
+	}
 }
 
 // makeField answers glyph id of glyphFont, drawn through face: its

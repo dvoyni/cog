@@ -6,6 +6,7 @@ import (
 
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/platform"
+	"github.com/go-text/typesetting/font"
 )
 
 // fontLibraryWriter is the FontLibrary resource's writing side, which ElevateFontLibrary
@@ -70,3 +71,24 @@ func (w fontLibraryWriter) RegisterIcon(name string, icon IconDescriptor) {
 // RegisterColor registers color under name, replacing a colour registered
 // under it before, which the markup read after takes.
 func (w fontLibraryWriter) RegisterColor(name string, color m.Color) { w.colors[name] = color }
+
+// reloadChanged makes again each set naming a font file that changed since
+// the set was made, of its descriptor, as MakeFontSet makes it, under the
+// same FontSet, so its runs are laid out anew, the layouts of the slot
+// before going idle, and drops the glyphs made of its fonts, whose fields
+// no layout drawn after names. A set destroyed names no file.
+func (w fontLibraryWriter) reloadChanged() {
+	var droppedFonts []*font.Font
+	for index, slot := range w.sets {
+		if !slot.namesChangedFile(w.files) {
+			continue
+		}
+		remade := makeFontSetSlot(w.files, w.reporter, slot.descriptor)
+		remade.set = slot.set
+		w.sets[index] = remade
+		droppedFonts = slot.appendFonts(droppedFonts)
+	}
+	if len(droppedFonts) > 0 {
+		w.glyphs.dropFonts(droppedFonts)
+	}
+}

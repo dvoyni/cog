@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io/fs"
 	"sync"
+
+	"github.com/go-text/typesetting/font"
 )
 
 // fontSetSlot is a font set as the FontLibrary resource holds it, at its
@@ -16,11 +18,14 @@ type fontSetSlot struct {
 	// set's generation never zero. Destroying a set counts its generation
 	// up, so a FontSet naming the set destroyed names nothing.
 	set FontSet
-	// label is its descriptor's Label, and reporter where it reports a
-	// character no font of it has.
-	label       string
+	// reporter is where it reports a character no font of it has.
 	reporter    *reporter
 	defaultFont loadedFont
+	// descriptor is what it was made of, as given, its Label the set's,
+	// which a reload makes it again of, and fileStamps the stamps of the
+	// font files it names, by path, each taken before the file was read.
+	descriptor FontSetDescriptor
+	fileStamps map[string]fileStamp
 	// languageFonts are the fonts serving each language that has any, in
 	// the order its descriptor lists them.
 	languageFonts map[string][]loadedFont
@@ -37,10 +42,12 @@ type fontSetSlot struct {
 // names loaded through files, an empty path canvas's JetBrains Mono. A font
 // that fails to load is reported once for its path and left out
 // of the set, a failed default font replaced by JetBrains Mono; a variation
-// naming no axis is reported once for its font's path and ignored. Its set
-// is the default set until its maker names it.
+// naming no axis is reported once for its font's path and ignored. Each
+// file is stamped before it is read. Its set is the default set until its
+// maker names it.
 func makeFontSetSlot(files fs.FS, reporter *reporter, descriptor FontSetDescriptor) *fontSetSlot {
-	slot := &fontSetSlot{label: descriptor.Label, reporter: reporter, languageFonts: map[string][]loadedFont{}, characterFonts: map[languageCharacter]*loadedFont{}}
+	slot := &fontSetSlot{reporter: reporter, descriptor: descriptor, fileStamps: map[string]fileStamp{}, languageFonts: map[string][]loadedFont{}, characterFonts: map[languageCharacter]*loadedFont{}}
+	slot.stampFile(files, descriptor.Default.Path)
 	defaultFont, loaded := loadSetFont(files, reporter, descriptor.Label, descriptor.Default)
 	if !loaded {
 		defaultFont, _ = loadFont(files, Font{})
@@ -48,6 +55,7 @@ func makeFontSetSlot(files fs.FS, reporter *reporter, descriptor FontSetDescript
 	slot.defaultFont = defaultFont
 	for _, entry := range descriptor.Languages {
 		for _, fontDescriptor := range entry.Fonts {
+			slot.stampFile(files, fontDescriptor.Path)
 			loadedFont, loaded := loadSetFont(files, reporter, descriptor.Label, fontDescriptor)
 			if !loaded {
 				continue
@@ -58,6 +66,37 @@ func makeFontSetSlot(files fs.FS, reporter *reporter, descriptor FontSetDescript
 		}
 	}
 	return slot
+}
+
+// stampFile stamps the font file at path in files, unless path is empty,
+// canvas's built-in font, which never changes, or stamped already.
+func (s *fontSetSlot) stampFile(files fs.FS, path string) {
+	if _, stamped := s.fileStamps[path]; path == "" || stamped {
+		return
+	}
+	s.fileStamps[path] = readFileStamp(files, path)
+}
+
+// namesChangedFile answers whether a font file the slot names changed in
+// files since it was stamped.
+func (s *fontSetSlot) namesChangedFile(files fs.FS) bool {
+	for path, stamp := range s.fileStamps {
+		if !readFileStamp(files, path).equal(stamp) {
+			return true
+		}
+	}
+	return false
+}
+
+// appendFonts appends the parsed font of each of the slot's fonts to fonts.
+func (s *fontSetSlot) appendFonts(fonts []*font.Font) []*font.Font {
+	fonts = append(fonts, s.defaultFont.font)
+	for _, languageFonts := range s.languageFonts {
+		for _, languageFont := range languageFonts {
+			fonts = append(fonts, languageFont.font)
+		}
+	}
+	return fonts
 }
 
 // findLanguageFont answers the font measuring language: its first font, or
@@ -90,7 +129,7 @@ func (s *fontSetSlot) findCharacterFont(language string, character rune) *loaded
 		}
 	}
 	if _, has := drawingFont.font.NominalGlyph(character); !has {
-		missing := Report{Kind: ReportKindCharacterMissing, Err: fmt.Errorf("canvas: font set %q, %v, has no font drawing %q in language %q, neither the language's fonts nor its default font, so it is drawn as the default font's missing-glyph box", s.label, s.set, character, language)}
+		missing := Report{Kind: ReportKindCharacterMissing, Err: fmt.Errorf("canvas: font set %q, %v, has no font drawing %q in language %q, neither the language's fonts nor its default font, so it is drawn as the default font's missing-glyph box", s.descriptor.Label, s.set, character, language)}
 		s.reporter.reportOnce(characterMissingLogKey+fmt.Sprint(s.set), missing)
 	}
 	s.characterMutex.Lock()

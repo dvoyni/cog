@@ -256,7 +256,7 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 		case EntryKindMesh:
 			// A mesh whose file draws nothing places no image.
 			file := state.meshes[entry.index].File
-			if r.loadMesh(inventory, files, state.reporter, file) {
+			if r.loadMesh(inventory, files, state.reporter, &state.fileStamps, file) {
 				state.inspector.addLoadedMeshFile(file)
 			}
 			if r.loadedMeshes[file.index].mesh == (render.Mesh{}) {
@@ -297,6 +297,7 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 				placeTextureImage(inventory, state.reporter, drawn, key, unplaced.frame)
 				continue
 			}
+			state.fileStamps.add(files, key.path)
 			packed, drawsTexels, packedNow := r.packImage(inventory, files, state.reporter, &state.residency, key, unplaced.frame)
 			if !drawsTexels {
 				drawn.drawsNothing = true
@@ -847,14 +848,14 @@ func (r *renderer) findPlacedImage(image Image, frame uint32) (*drawnImage, bool
 	return drawn, drawn.packed != nil || drawn.view.Texture != (render.Texture{}) || drawn.drawsNothing
 }
 
-// loadMesh loads file at its first draw: read from files and decoded, its
+// loadMesh loads file at its first draw: stamped in stamps, read from files and decoded, its
 // vertices and indices made into buffers and a mesh over them through
 // inventory, kept at its index among the loaded meshes. A file that is missing, is no mesh file,
 // is of a version canvas does not know, is cut short or has zero bounds
 // draws nothing, reported once for its path, as does one whose
 // mesh render refused, which render reports. It answers whether it loaded
 // file now.
-func (r *renderer) loadMesh(inventory render.Inventory, files fs.FS, reporter *reporter, file MeshFile) bool {
+func (r *renderer) loadMesh(inventory render.Inventory, files fs.FS, reporter *reporter, stamps *fileStampTable, file MeshFile) bool {
 	if int(file.index) >= len(r.loadedMeshes) {
 		r.loadedMeshes = slices.Grow(r.loadedMeshes, int(file.index)+1-len(r.loadedMeshes))[:file.index+1]
 	}
@@ -864,6 +865,7 @@ func (r *renderer) loadMesh(inventory render.Inventory, files fs.FS, reporter *r
 	}
 	loaded.tried = true
 	path := meshFileNames.findKeyAt(file.index)
+	stamps.add(files, path)
 	data, err := fs.ReadFile(files, path)
 	var decoded meshfile.File
 	if err == nil {
