@@ -1,0 +1,446 @@
+goos: windows
+goarch: amd64
+pkg: github.com/dvoyni/cog/plugins/canvas
+cpu: AMD Ryzen 9 7950X3D 16-Core Processor          
+BenchmarkSortByKey/passes=0-32 	    2170	    562575 ns/op	         5.626 ns/entry
+BenchmarkSortByKey/passes=0-32 	    2124	    557136 ns/op	         5.571 ns/entry
+BenchmarkSortByKey/passes=0-32 	    2193	    641940 ns/op	         6.419 ns/entry
+BenchmarkSortByKey/passes=0-32 	    2210	    554767 ns/op	         5.548 ns/entry
+BenchmarkSortByKey/passes=0-32 	    2186	    559978 ns/op	         5.600 ns/entry
+BenchmarkSortByKey/passes=0-32 	    2174	    552813 ns/op	         5.528 ns/entry
+BenchmarkSortByKey/passes=0-32 	    2191	    555738 ns/op	         5.557 ns/entry
+BenchmarkSortByKey/passes=0-32 	    2108	    568513 ns/op	         5.685 ns/entry
+BenchmarkSortByKey/passes=0-32 	    2139	    565138 ns/op	         5.651 ns/entry
+BenchmarkSortByKey/passes=0-32 	    2115	    561946 ns/op	         5.619 ns/entry
+BenchmarkSortByKey/passes=1-32 	    1740	    697279 ns/op	         6.973 ns/entry
+BenchmarkSortByKey/passes=1-32 	    1756	    689867 ns/op	         6.899 ns/entry
+BenchmarkSortByKey/passes=1-32 	    1755	    696341 ns/op	         6.963 ns/entry
+BenchmarkSortByKey/passes=1-32 	    1741	    692313 ns/op	         6.923 ns/entry
+BenchmarkSortByKey/passes=1-32 	    1660	    688663 ns/op	         6.887 ns/entry
+BenchmarkSortByKey/passes=1-32 	    1734	    698890 ns/op	         6.989 ns/entry
+BenchmarkSortByKey/passes=1-32 	    1726	    700351 ns/op	         7.004 ns/entry
+BenchmarkSortByKey/passes=1-32 	    1749	    695282 ns/op	         6.953 ns/entry
+BenchmarkSortByKey/passes=1-32 	    1699	    687437 ns/op	         6.874 ns/entry
+BenchmarkSortByKey/passes=1-32 	    1749	    697234 ns/op	         6.972 ns/entry
+BenchmarkSortByKey/passes=5-32 	     975	   1234590 ns/op	        12.35 ns/entry
+BenchmarkSortByKey/passes=5-32 	     910	   1244427 ns/op	        12.44 ns/entry
+BenchmarkSortByKey/passes=5-32 	     994	   1235447 ns/op	        12.35 ns/entry
+BenchmarkSortByKey/passes=5-32 	     997	   1226084 ns/op	        12.26 ns/entry
+BenchmarkSortByKey/passes=5-32 	     969	   1245035 ns/op	        12.45 ns/entry
+BenchmarkSortByKey/passes=5-32 	     841	   1293326 ns/op	        12.93 ns/entry
+BenchmarkSortByKey/passes=5-32 	     985	   1254997 ns/op	        12.55 ns/entry
+BenchmarkSortByKey/passes=5-32 	     942	   1257799 ns/op	        12.58 ns/entry
+BenchmarkSortByKey/passes=5-32 	     972	   1319491 ns/op	        13.19 ns/entry
+BenchmarkSortByKey/passes=5-32 	     973	   1342252 ns/op	        13.42 ns/entry
+BenchmarkSortByKey/passes=8-32 	     736	   1669148 ns/op	        16.69 ns/entry
+BenchmarkSortByKey/passes=8-32 	     764	   1660426 ns/op	        16.60 ns/entry
+BenchmarkSortByKey/passes=8-32 	     752	   1629538 ns/op	        16.30 ns/entry
+BenchmarkSortByKey/passes=8-32 	     750	   1703503 ns/op	        17.04 ns/entry
+BenchmarkSortByKey/passes=8-32 	     618	   1669073 ns/op	        16.69 ns/entry
+BenchmarkSortByKey/passes=8-32 	     771	   1621091 ns/op	        16.21 ns/entry
+BenchmarkSortByKey/passes=8-32 	     768	   1603013 ns/op	        16.03 ns/entry
+BenchmarkSortByKey/passes=8-32 	     769	   1598180 ns/op	        15.98 ns/entry
+BenchmarkSortByKey/passes=8-32 	     769	   1571753 ns/op	        15.72 ns/entry
+BenchmarkSortByKey/passes=8-32 	     724	   1578951 ns/op	        15.79 ns/entry
+BenchmarkMakeGlyphField/latin/em=48-32         	    2104	    604423 ns/op	    604423 ns/glyph
+BenchmarkMakeGlyphField/latin/em=48-32         	    2036	    591065 ns/op	    591065 ns/glyph
+BenchmarkMakeGlyphField/latin/em=48-32         	    2098	    587675 ns/op	    587675 ns/glyph
+BenchmarkMakeGlyphField/latin/em=48-32         	    2116	    580332 ns/op	    580332 ns/glyph
+BenchmarkMakeGlyphField/latin/em=48-32         	    1828	    580702 ns/op	    580702 ns/glyph
+BenchmarkMakeGlyphField/latin/em=48-32         	    1868	    584618 ns/op	    584618 ns/glyph
+BenchmarkMakeGlyphField/latin/em=48-32         	    2061	    588302 ns/op	    588302 ns/glyph
+BenchmarkMakeGlyphField/latin/em=48-32         	    2077	    591939 ns/op	    591939 ns/glyph
+BenchmarkMakeGlyphField/latin/em=48-32         	    2062	    580743 ns/op	    580743 ns/glyph
+BenchmarkMakeGlyphField/latin/em=48-32         	    2030	    582644 ns/op	    582644 ns/glyph
+BenchmarkMakeGlyphField/han/em=64-32           	     766	   1720943 ns/op	   1720943 ns/glyph
+BenchmarkMakeGlyphField/han/em=64-32           	     760	   1726585 ns/op	   1726585 ns/glyph
+BenchmarkMakeGlyphField/han/em=64-32           	     770	   1728740 ns/op	   1728740 ns/glyph
+BenchmarkMakeGlyphField/han/em=64-32           	     757	   1722141 ns/op	   1722141 ns/glyph
+BenchmarkMakeGlyphField/han/em=64-32           	     768	   1728488 ns/op	   1728488 ns/glyph
+BenchmarkMakeGlyphField/han/em=64-32           	     769	   1726946 ns/op	   1726946 ns/glyph
+BenchmarkMakeGlyphField/han/em=64-32           	     776	   1726035 ns/op	   1726035 ns/glyph
+BenchmarkMakeGlyphField/han/em=64-32           	     759	   1727809 ns/op	   1727809 ns/glyph
+BenchmarkMakeGlyphField/han/em=64-32           	     753	   1735418 ns/op	   1735418 ns/glyph
+BenchmarkMakeGlyphField/han/em=64-32           	     730	   1720437 ns/op	   1720437 ns/glyph
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=1/switch=0/layers=0-32         	    5133	    258123 ns/op	       258.1 ns/sprite	       2 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=1/switch=0/layers=0-32         	    4999	    248200 ns/op	       248.2 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=1/switch=0/layers=0-32         	    5044	    240866 ns/op	       240.9 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=1/switch=0/layers=0-32         	    5108	    240397 ns/op	       240.4 ns/sprite	       1 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=1/switch=0/layers=0-32         	    5082	    237598 ns/op	       237.6 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=1/switch=0/layers=0-32         	    5102	    237883 ns/op	       237.9 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=1/switch=0/layers=0-32         	    4868	    239470 ns/op	       239.5 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=1/switch=0/layers=0-32         	    5131	    238961 ns/op	       239.0 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=1/switch=0/layers=0-32         	    5119	    236275 ns/op	       236.3 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=1/switch=0/layers=0-32         	    4867	    238878 ns/op	       238.9 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=1/switch=0/layers=0-32         	   15345	     77816 ns/op	        77.82 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=1/switch=0/layers=0-32         	   15190	     78041 ns/op	        78.04 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=1/switch=0/layers=0-32         	   15597	     76222 ns/op	        76.22 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=1/switch=0/layers=0-32         	   15668	     76539 ns/op	        76.54 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=1/switch=0/layers=0-32         	   15573	     77110 ns/op	        77.11 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=1/switch=0/layers=0-32         	   14761	     80015 ns/op	        80.02 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=1/switch=0/layers=0-32         	   15448	     77480 ns/op	        77.48 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=1/switch=0/layers=0-32         	   14742	     82694 ns/op	        82.69 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=1/switch=0/layers=0-32         	   10000	    147788 ns/op	       147.8 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=1/switch=0/layers=0-32         	    8268	    138708 ns/op	       138.7 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=4/cameras=1/switch=0/layers=0-32         	    4840	    254681 ns/op	       254.7 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=4/cameras=1/switch=0/layers=0-32         	    4232	    282128 ns/op	       282.1 ns/sprite	       2 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=4/cameras=1/switch=0/layers=0-32         	    5055	    240108 ns/op	       240.1 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=4/cameras=1/switch=0/layers=0-32         	    4953	    260124 ns/op	       260.1 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=4/cameras=1/switch=0/layers=0-32         	    4850	    263280 ns/op	       263.3 ns/sprite	       1 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=4/cameras=1/switch=0/layers=0-32         	    4986	    238907 ns/op	       238.9 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=4/cameras=1/switch=0/layers=0-32         	    5000	    242991 ns/op	       243.0 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=4/cameras=1/switch=0/layers=0-32         	    5024	    235532 ns/op	       235.5 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=4/cameras=1/switch=0/layers=0-32         	    4999	    238847 ns/op	       238.8 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=4/cameras=1/switch=0/layers=0-32         	    5060	    239399 ns/op	       239.4 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=16/cameras=1/switch=0/layers=0-32        	    4827	    247124 ns/op	       247.1 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=16/cameras=1/switch=0/layers=0-32        	    4968	    244687 ns/op	       244.7 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=16/cameras=1/switch=0/layers=0-32        	    5055	    239640 ns/op	       239.6 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=16/cameras=1/switch=0/layers=0-32        	    4765	    247026 ns/op	       247.0 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=16/cameras=1/switch=0/layers=0-32        	    5074	    240077 ns/op	       240.1 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=16/cameras=1/switch=0/layers=0-32        	    4941	    242251 ns/op	       242.3 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=16/cameras=1/switch=0/layers=0-32        	    4998	    241142 ns/op	       241.1 ns/sprite	       1 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=16/cameras=1/switch=0/layers=0-32        	    5023	    246768 ns/op	       246.8 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=16/cameras=1/switch=0/layers=0-32        	    4761	    241816 ns/op	       241.8 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=16/cameras=1/switch=0/layers=0-32        	    5066	    241599 ns/op	       241.6 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=2/switch=0/layers=0-32         	    3572	    341222 ns/op	       341.2 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=2/switch=0/layers=0-32         	    3471	    344888 ns/op	       344.9 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=2/switch=0/layers=0-32         	    3356	    359179 ns/op	       359.2 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=2/switch=0/layers=0-32         	    3394	    344141 ns/op	       344.1 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=2/switch=0/layers=0-32         	    3505	    339079 ns/op	       339.1 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=2/switch=0/layers=0-32         	    3532	    340042 ns/op	       340.0 ns/sprite	       1 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=2/switch=0/layers=0-32         	    3500	    343221 ns/op	       343.2 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=2/switch=0/layers=0-32         	    3598	    337199 ns/op	       337.2 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=2/switch=0/layers=0-32         	    3511	    345309 ns/op	       345.3 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=2/switch=0/layers=0-32         	    3568	    339192 ns/op	       339.2 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=2/switch=0/layers=0-32         	   13674	     87817 ns/op	        87.82 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=2/switch=0/layers=0-32         	   12811	     92557 ns/op	        92.56 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=2/switch=0/layers=0-32         	   13515	     88869 ns/op	        88.87 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=2/switch=0/layers=0-32         	   12556	     94444 ns/op	        94.44 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=2/switch=0/layers=0-32         	   13509	     88858 ns/op	        88.86 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=2/switch=0/layers=0-32         	   13551	     88473 ns/op	        88.47 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=2/switch=0/layers=0-32         	   13039	     92900 ns/op	        92.90 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=2/switch=0/layers=0-32         	   12973	     95550 ns/op	        95.55 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=2/switch=0/layers=0-32         	   13508	     88731 ns/op	        88.73 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=2/switch=0/layers=0-32         	   13572	     88351 ns/op	        88.35 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=4/switch=0/layers=0-32         	    2407	    501442 ns/op	       501.4 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=4/switch=0/layers=0-32         	    2343	    512849 ns/op	       512.8 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=4/switch=0/layers=0-32         	    2371	    509923 ns/op	       509.9 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=4/switch=0/layers=0-32         	    2366	    515684 ns/op	       515.7 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=4/switch=0/layers=0-32         	    2329	    511679 ns/op	       511.7 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=4/switch=0/layers=0-32         	    2354	    511008 ns/op	       511.0 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=4/switch=0/layers=0-32         	    2324	    514242 ns/op	       514.2 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=4/switch=0/layers=0-32         	    2247	    531629 ns/op	       531.6 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=4/switch=0/layers=0-32         	    2350	    512344 ns/op	       512.3 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=4/switch=0/layers=0-32         	    2332	    513207 ns/op	       513.2 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=4/switch=0/layers=0-32         	   13002	     92278 ns/op	        92.28 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=4/switch=0/layers=0-32         	   13117	     91616 ns/op	        91.62 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=4/switch=0/layers=0-32         	   13156	     91232 ns/op	        91.23 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=4/switch=0/layers=0-32         	   13135	     91336 ns/op	        91.34 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=4/switch=0/layers=0-32         	   12706	     93844 ns/op	        93.84 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=4/switch=0/layers=0-32         	   13178	     90995 ns/op	        90.99 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=4/switch=0/layers=0-32         	   13060	     91838 ns/op	        91.84 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=4/switch=0/layers=0-32         	   13146	     91410 ns/op	        91.41 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=4/switch=0/layers=0-32         	   13243	     90366 ns/op	        90.37 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=4/switch=0/layers=0-32         	   13078	     91916 ns/op	        91.92 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=1/switch=16/layers=0-32        	    4627	    260795 ns/op	       260.8 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=1/switch=16/layers=0-32        	    4346	    273757 ns/op	       273.8 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=1/switch=16/layers=0-32        	    4638	    260889 ns/op	       260.9 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=1/switch=16/layers=0-32        	    4641	    264076 ns/op	       264.1 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=1/switch=16/layers=0-32        	    4671	    261012 ns/op	       261.0 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=1/switch=16/layers=0-32        	    4591	    259582 ns/op	       259.6 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=1/switch=16/layers=0-32        	    4688	    260557 ns/op	       260.6 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=1/switch=16/layers=0-32        	    4647	    259480 ns/op	       259.5 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=1/switch=16/layers=0-32        	    4561	    260513 ns/op	       260.5 ns/sprite	       1 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=1000/tasks=1/cameras=1/switch=16/layers=0-32        	    4666	    259560 ns/op	       259.6 ns/sprite	       1 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=1/switch=16/layers=0-32        	   14664	     81673 ns/op	        81.67 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=1/switch=16/layers=0-32        	   14721	     81481 ns/op	        81.48 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=1/switch=16/layers=0-32        	   14785	     81052 ns/op	        81.05 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=1/switch=16/layers=0-32        	   14875	     80952 ns/op	        80.95 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=1/switch=16/layers=0-32        	   14805	     81226 ns/op	        81.23 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=1/switch=16/layers=0-32        	   14852	     80657 ns/op	        80.66 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=1/switch=16/layers=0-32        	   14766	     81156 ns/op	        81.16 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=1/switch=16/layers=0-32        	   14718	     81694 ns/op	        81.69 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=1/switch=16/layers=0-32        	   14751	     81341 ns/op	        81.34 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=1000/tasks=1/cameras=1/switch=16/layers=0-32        	   14820	     81207 ns/op	        81.21 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=1/switch=0/layers=0-32        	     512	   2320235 ns/op	       232.0 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=1/switch=0/layers=0-32        	     512	   2332089 ns/op	       233.2 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=1/switch=0/layers=0-32        	     506	   2368992 ns/op	       236.9 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=1/switch=0/layers=0-32        	     504	   2369961 ns/op	       237.0 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=1/switch=0/layers=0-32        	     512	   2342178 ns/op	       234.2 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=1/switch=0/layers=0-32        	     510	   2358208 ns/op	       235.8 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=1/switch=0/layers=0-32        	     513	   2328048 ns/op	       232.8 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=1/switch=0/layers=0-32        	     510	   2359281 ns/op	       235.9 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=1/switch=0/layers=0-32        	     511	   2358599 ns/op	       235.9 ns/sprite	       1 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=1/switch=0/layers=0-32        	     507	   2367666 ns/op	       236.8 ns/sprite	       2 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=1/switch=0/layers=0-32        	    1510	    793562 ns/op	        79.36 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=1/switch=0/layers=0-32        	    1501	    791899 ns/op	        79.19 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=1/switch=0/layers=0-32        	    1503	    783002 ns/op	        78.30 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=1/switch=0/layers=0-32        	    1588	    739276 ns/op	        73.93 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=1/switch=0/layers=0-32        	    1660	    736189 ns/op	        73.62 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=1/switch=0/layers=0-32        	    1610	    733460 ns/op	        73.35 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=1/switch=0/layers=0-32        	    1624	    786954 ns/op	        78.70 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=1/switch=0/layers=0-32        	    1507	    793054 ns/op	        79.31 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=1/switch=0/layers=0-32        	    1585	    738450 ns/op	        73.84 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=1/switch=0/layers=0-32        	    1568	    764558 ns/op	        76.46 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=4/cameras=1/switch=0/layers=0-32        	     532	   2256702 ns/op	       225.7 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=4/cameras=1/switch=0/layers=0-32        	     520	   2272767 ns/op	       227.3 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=4/cameras=1/switch=0/layers=0-32        	     535	   2230425 ns/op	       223.0 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=4/cameras=1/switch=0/layers=0-32        	     540	   2232889 ns/op	       223.3 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=4/cameras=1/switch=0/layers=0-32        	     530	   2258581 ns/op	       225.9 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=4/cameras=1/switch=0/layers=0-32        	     526	   2250097 ns/op	       225.0 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=4/cameras=1/switch=0/layers=0-32        	     532	   2256519 ns/op	       225.7 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=4/cameras=1/switch=0/layers=0-32        	     536	   2236307 ns/op	       223.6 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=4/cameras=1/switch=0/layers=0-32        	     522	   2259391 ns/op	       225.9 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=4/cameras=1/switch=0/layers=0-32        	     536	   2241890 ns/op	       224.2 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=16/cameras=1/switch=0/layers=0-32       	     523	   2253685 ns/op	       225.4 ns/sprite	       1 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=16/cameras=1/switch=0/layers=0-32       	     536	   2266940 ns/op	       226.7 ns/sprite	       4 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=16/cameras=1/switch=0/layers=0-32       	     529	   2250128 ns/op	       225.0 ns/sprite	       1 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=16/cameras=1/switch=0/layers=0-32       	     520	   2268740 ns/op	       226.9 ns/sprite	       1 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=16/cameras=1/switch=0/layers=0-32       	     534	   2249612 ns/op	       225.0 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=16/cameras=1/switch=0/layers=0-32       	     526	   2249424 ns/op	       224.9 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=16/cameras=1/switch=0/layers=0-32       	     530	   2269665 ns/op	       227.0 ns/sprite	       1 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=16/cameras=1/switch=0/layers=0-32       	     526	   2269210 ns/op	       226.9 ns/sprite	       1 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=16/cameras=1/switch=0/layers=0-32       	     537	   2238218 ns/op	       223.8 ns/sprite	       1 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=16/cameras=1/switch=0/layers=0-32       	     528	   2266355 ns/op	       226.6 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=2/switch=0/layers=0-32        	     332	   3598248 ns/op	       359.8 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=2/switch=0/layers=0-32        	     340	   3503094 ns/op	       350.3 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=2/switch=0/layers=0-32        	     340	   3487684 ns/op	       348.8 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=2/switch=0/layers=0-32        	     342	   3495311 ns/op	       349.5 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=2/switch=0/layers=0-32        	     343	   3488986 ns/op	       348.9 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=2/switch=0/layers=0-32        	     345	   3434083 ns/op	       343.4 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=2/switch=0/layers=0-32        	     345	   3478697 ns/op	       347.9 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=2/switch=0/layers=0-32        	     340	   3489009 ns/op	       348.9 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=2/switch=0/layers=0-32        	     346	   3466051 ns/op	       346.6 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=2/switch=0/layers=0-32        	     340	   3492266 ns/op	       349.2 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=2/switch=0/layers=0-32        	    1315	    905590 ns/op	        90.56 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=2/switch=0/layers=0-32        	    1334	    935354 ns/op	        93.54 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=2/switch=0/layers=0-32        	    1294	    934270 ns/op	        93.43 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=2/switch=0/layers=0-32        	    1233	    969940 ns/op	        96.99 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=2/switch=0/layers=0-32        	    1269	    919193 ns/op	        91.92 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=2/switch=0/layers=0-32        	    1328	    904914 ns/op	        90.49 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=2/switch=0/layers=0-32        	    1303	    914613 ns/op	        91.46 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=2/switch=0/layers=0-32        	    1267	    917779 ns/op	        91.78 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=2/switch=0/layers=0-32        	    1303	    947255 ns/op	        94.73 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=2/switch=0/layers=0-32        	    1293	    927484 ns/op	        92.75 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=4/switch=0/layers=0-32        	     231	   5164882 ns/op	       516.5 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=4/switch=0/layers=0-32        	     228	   5234896 ns/op	       523.5 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=4/switch=0/layers=0-32        	     226	   5251249 ns/op	       525.1 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=4/switch=0/layers=0-32        	     231	   5175426 ns/op	       517.5 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=4/switch=0/layers=0-32        	     229	   5195623 ns/op	       519.6 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=4/switch=0/layers=0-32        	     229	   5270031 ns/op	       527.0 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=4/switch=0/layers=0-32        	     230	   5209590 ns/op	       521.0 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=4/switch=0/layers=0-32        	     231	   5155892 ns/op	       515.6 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=4/switch=0/layers=0-32        	     231	   5153795 ns/op	       515.4 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=4/switch=0/layers=0-32        	     229	   5245596 ns/op	       524.6 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=4/switch=0/layers=0-32        	    1284	    919137 ns/op	        91.91 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=4/switch=0/layers=0-32        	    1288	    950322 ns/op	        95.03 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=4/switch=0/layers=0-32        	    1290	    915317 ns/op	        91.53 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=4/switch=0/layers=0-32        	    1341	    894340 ns/op	        89.43 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=4/switch=0/layers=0-32        	    1334	    912119 ns/op	        91.21 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=4/switch=0/layers=0-32        	    1321	    897816 ns/op	        89.78 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=4/switch=0/layers=0-32        	    1340	    896928 ns/op	        89.69 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=4/switch=0/layers=0-32        	    1336	    897856 ns/op	        89.79 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=4/switch=0/layers=0-32        	    1320	    898860 ns/op	        89.89 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=4/switch=0/layers=0-32        	    1326	    903530 ns/op	        90.35 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=1/switch=16/layers=0-32       	     459	   2613682 ns/op	       261.4 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=1/switch=16/layers=0-32       	     440	   2627758 ns/op	       262.8 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=1/switch=16/layers=0-32       	     459	   2631496 ns/op	       263.1 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=1/switch=16/layers=0-32       	     448	   2647568 ns/op	       264.8 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=1/switch=16/layers=0-32       	     458	   2607790 ns/op	       260.8 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=1/switch=16/layers=0-32       	     454	   2646503 ns/op	       264.7 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=1/switch=16/layers=0-32       	     454	   2618187 ns/op	       261.8 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=1/switch=16/layers=0-32       	     458	   2615728 ns/op	       261.6 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=1/switch=16/layers=0-32       	     462	   2602948 ns/op	       260.3 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=10000/tasks=1/cameras=1/switch=16/layers=0-32       	     458	   2609209 ns/op	       260.9 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=1/switch=16/layers=0-32       	    1483	    836600 ns/op	        83.66 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=1/switch=16/layers=0-32       	    1506	    785530 ns/op	        78.55 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=1/switch=16/layers=0-32       	    1442	    838969 ns/op	        83.90 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=1/switch=16/layers=0-32       	    1435	    839376 ns/op	        83.94 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=1/switch=16/layers=0-32       	    1417	    842855 ns/op	        84.29 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=1/switch=16/layers=0-32       	    1503	    784051 ns/op	        78.41 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=1/switch=16/layers=0-32       	    1569	    769871 ns/op	        76.99 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=1/switch=16/layers=0-32       	    1472	    839106 ns/op	        83.91 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=1/switch=16/layers=0-32       	    1431	    838169 ns/op	        83.82 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=10000/tasks=1/cameras=1/switch=16/layers=0-32       	    1440	    833973 ns/op	        83.40 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=1/switch=0/layers=0-32       	      44	  26894655 ns/op	       268.9 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=1/switch=0/layers=0-32       	      43	  26832442 ns/op	       268.3 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=1/switch=0/layers=0-32       	      44	  26859480 ns/op	       268.6 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=1/switch=0/layers=0-32       	      43	  26810323 ns/op	       268.1 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=1/switch=0/layers=0-32       	      44	  26766655 ns/op	       267.7 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=1/switch=0/layers=0-32       	      44	  26961027 ns/op	       269.6 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=1/switch=0/layers=0-32       	      42	  26812705 ns/op	       268.1 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=1/switch=0/layers=0-32       	      44	  26874098 ns/op	       268.7 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=1/switch=0/layers=0-32       	      44	  26860014 ns/op	       268.6 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=1/switch=0/layers=0-32       	      43	  26811298 ns/op	       268.1 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=1/switch=0/layers=0-32       	     162	   7366122 ns/op	        73.66 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=1/switch=0/layers=0-32       	     168	   7169092 ns/op	        71.69 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=1/switch=0/layers=0-32       	     163	   7322712 ns/op	        73.23 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=1/switch=0/layers=0-32       	     165	   7208617 ns/op	        72.09 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=1/switch=0/layers=0-32       	     163	   7318472 ns/op	        73.18 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=1/switch=0/layers=0-32       	     164	   7273902 ns/op	        72.74 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=1/switch=0/layers=0-32       	     164	   7256256 ns/op	        72.56 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=1/switch=0/layers=0-32       	     164	   7212634 ns/op	        72.13 ns/sprite	       9 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=1/switch=0/layers=0-32       	     165	   7189039 ns/op	        71.89 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=1/switch=0/layers=0-32       	     163	   7293840 ns/op	        72.94 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=4/cameras=1/switch=0/layers=0-32       	      43	  26794484 ns/op	       267.9 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=4/cameras=1/switch=0/layers=0-32       	      43	  26660133 ns/op	       266.6 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=4/cameras=1/switch=0/layers=0-32       	      43	  26949179 ns/op	       269.5 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=4/cameras=1/switch=0/layers=0-32       	      45	  26736867 ns/op	       267.4 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=4/cameras=1/switch=0/layers=0-32       	      44	  26877482 ns/op	       268.8 ns/sprite	       5 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=4/cameras=1/switch=0/layers=0-32       	      44	  26946050 ns/op	       269.5 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=4/cameras=1/switch=0/layers=0-32       	      45	  26662129 ns/op	       266.6 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=4/cameras=1/switch=0/layers=0-32       	      45	  26516573 ns/op	       265.2 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=4/cameras=1/switch=0/layers=0-32       	      45	  26765300 ns/op	       267.7 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=4/cameras=1/switch=0/layers=0-32       	      44	  26548380 ns/op	       265.5 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=16/cameras=1/switch=0/layers=0-32      	      44	  27482950 ns/op	       274.8 ns/sprite	       5 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=16/cameras=1/switch=0/layers=0-32      	      43	  27045874 ns/op	       270.5 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=16/cameras=1/switch=0/layers=0-32      	      43	  28598016 ns/op	       286.0 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=16/cameras=1/switch=0/layers=0-32      	      38	  27518982 ns/op	       275.2 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=16/cameras=1/switch=0/layers=0-32      	      42	  29442940 ns/op	       294.4 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=16/cameras=1/switch=0/layers=0-32      	      38	  28598232 ns/op	       286.0 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=16/cameras=1/switch=0/layers=0-32      	      38	  28245439 ns/op	       282.5 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=16/cameras=1/switch=0/layers=0-32      	      44	  28462848 ns/op	       284.6 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=16/cameras=1/switch=0/layers=0-32      	      43	  27355005 ns/op	       273.6 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=16/cameras=1/switch=0/layers=0-32      	      44	  26981600 ns/op	       269.8 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=2/switch=0/layers=0-32       	      28	  41328389 ns/op	       413.3 ns/sprite	       8 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=2/switch=0/layers=0-32       	      30	  41129270 ns/op	       411.3 ns/sprite	      11 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=2/switch=0/layers=0-32       	      28	  41335129 ns/op	       413.4 ns/sprite	      28 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=2/switch=0/layers=0-32       	      27	  41663996 ns/op	       416.6 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=2/switch=0/layers=0-32       	      28	  40943786 ns/op	       409.4 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=2/switch=0/layers=0-32       	      28	  41335282 ns/op	       413.4 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=2/switch=0/layers=0-32       	      28	  41260818 ns/op	       412.6 ns/sprite	      36 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=2/switch=0/layers=0-32       	      28	  41252882 ns/op	       412.5 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=2/switch=0/layers=0-32       	      28	  41242518 ns/op	       412.4 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=2/switch=0/layers=0-32       	      28	  41080768 ns/op	       410.8 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=2/switch=0/layers=0-32       	     132	   9044622 ns/op	        90.45 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=2/switch=0/layers=0-32       	     134	   8884699 ns/op	        88.85 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=2/switch=0/layers=0-32       	     133	   8970653 ns/op	        89.71 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=2/switch=0/layers=0-32       	     134	   8862466 ns/op	        88.62 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=2/switch=0/layers=0-32       	     132	   9037775 ns/op	        90.38 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=2/switch=0/layers=0-32       	     130	   9136671 ns/op	        91.37 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=2/switch=0/layers=0-32       	     129	   9209486 ns/op	        92.09 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=2/switch=0/layers=0-32       	     130	   9112698 ns/op	        91.13 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=2/switch=0/layers=0-32       	     129	   9194409 ns/op	        91.94 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=2/switch=0/layers=0-32       	     129	   9235760 ns/op	        92.36 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=4/switch=0/layers=0-32       	      18	  66112200 ns/op	       661.1 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=4/switch=0/layers=0-32       	      18	  65741967 ns/op	       657.4 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=4/switch=0/layers=0-32       	      16	  66315200 ns/op	       663.2 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=4/switch=0/layers=0-32       	      18	  68013056 ns/op	       680.1 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=4/switch=0/layers=0-32       	      18	  65983800 ns/op	       659.8 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=4/switch=0/layers=0-32       	      18	  65762672 ns/op	       657.6 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=4/switch=0/layers=0-32       	      18	  65141761 ns/op	       651.4 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=4/switch=0/layers=0-32       	      18	  64312883 ns/op	       643.1 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=4/switch=0/layers=0-32       	      16	  65452831 ns/op	       654.5 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=4/switch=0/layers=0-32       	      18	  64971206 ns/op	       649.7 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=4/switch=0/layers=0-32       	     134	   8954715 ns/op	        89.55 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=4/switch=0/layers=0-32       	     132	   9072691 ns/op	        90.73 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=4/switch=0/layers=0-32       	     133	   8961900 ns/op	        89.62 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=4/switch=0/layers=0-32       	     134	   8921542 ns/op	        89.22 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=4/switch=0/layers=0-32       	     134	   8894400 ns/op	        88.94 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=4/switch=0/layers=0-32       	     132	   9007752 ns/op	        90.08 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=4/switch=0/layers=0-32       	     134	   8926543 ns/op	        89.27 ns/sprite	       3 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=4/switch=0/layers=0-32       	     133	   8928948 ns/op	        89.29 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=4/switch=0/layers=0-32       	     133	   8972786 ns/op	        89.73 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=4/switch=0/layers=0-32       	     134	   8913050 ns/op	        89.13 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=1/switch=16/layers=0-32      	      38	  30192018 ns/op	       301.9 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=1/switch=16/layers=0-32      	      39	  29922041 ns/op	       299.2 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=1/switch=16/layers=0-32      	      39	  30045131 ns/op	       300.5 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=1/switch=16/layers=0-32      	      40	  29895802 ns/op	       299.0 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=1/switch=16/layers=0-32      	      38	  30187395 ns/op	       301.9 ns/sprite	       2 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=1/switch=16/layers=0-32      	      38	  30529389 ns/op	       305.3 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=1/switch=16/layers=0-32      	      38	  30190547 ns/op	       301.9 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=1/switch=16/layers=0-32      	      39	  29970562 ns/op	       299.7 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=1/switch=16/layers=0-32      	      40	  30116690 ns/op	       301.2 ns/sprite	      11 B/op	       0 allocs/op
+BenchmarkSprites/canvas/sprites=100000/tasks=1/cameras=1/switch=16/layers=0-32      	      39	  29945574 ns/op	       299.5 ns/sprite	       2 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=1/switch=16/layers=0-32      	     152	   7830584 ns/op	        78.31 ns/sprite	       1 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=1/switch=16/layers=0-32      	     156	   7665763 ns/op	        76.66 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=1/switch=16/layers=0-32      	     154	   7753579 ns/op	        77.54 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=1/switch=16/layers=0-32      	     156	   7648323 ns/op	        76.48 ns/sprite	       4 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=1/switch=16/layers=0-32      	     153	   7738640 ns/op	        77.39 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=1/switch=16/layers=0-32      	     154	   7740075 ns/op	        77.40 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=1/switch=16/layers=0-32      	     153	   7732678 ns/op	        77.33 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=1/switch=16/layers=0-32      	     157	   7651649 ns/op	        76.52 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=1/switch=16/layers=0-32      	     156	   7655240 ns/op	        76.55 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkSprites/render/sprites=100000/tasks=1/cameras=1/switch=16/layers=0-32      	     156	   7661185 ns/op	        76.61 ns/sprite	       0 B/op	       0 allocs/op
+BenchmarkEntries/fills-32                                                           	     825	   1473357 ns/op	       147.3 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/fills-32                                                           	     842	   1405180 ns/op	       140.5 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/fills-32                                                           	     806	   1502470 ns/op	       150.2 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/fills-32                                                           	     835	   1386481 ns/op	       138.6 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/fills-32                                                           	     847	   1408980 ns/op	       140.9 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/fills-32                                                           	     848	   1389580 ns/op	       139.0 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/fills-32                                                           	     853	   1412971 ns/op	       141.3 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/fills-32                                                           	     874	   1366965 ns/op	       136.7 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/fills-32                                                           	     794	   1486286 ns/op	       148.6 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/fills-32                                                           	     856	   1408755 ns/op	       140.9 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/sprites-32                                                         	     470	   2535443 ns/op	       253.5 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/sprites-32                                                         	     462	   2608548 ns/op	       260.9 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/sprites-32                                                         	     480	   2495038 ns/op	       249.5 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/sprites-32                                                         	     456	   2614120 ns/op	       261.4 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/sprites-32                                                         	     446	   2616690 ns/op	       261.7 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/sprites-32                                                         	     460	   2634539 ns/op	       263.5 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/sprites-32                                                         	     477	   2513112 ns/op	       251.3 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/sprites-32                                                         	     471	   2516875 ns/op	       251.7 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/sprites-32                                                         	     462	   2604199 ns/op	       260.4 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/sprites-32                                                         	     456	   2626855 ns/op	       262.7 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/texts-32                                                           	     100	  11828125 ns/op	      1183 ns/entry	       2 B/op	       0 allocs/op
+BenchmarkEntries/texts-32                                                           	     100	  11807895 ns/op	      1181 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/texts-32                                                           	     100	  11830478 ns/op	      1183 ns/entry	       3 B/op	       0 allocs/op
+BenchmarkEntries/texts-32                                                           	     100	  11832143 ns/op	      1183 ns/entry	       3 B/op	       0 allocs/op
+BenchmarkEntries/texts-32                                                           	     100	  11799299 ns/op	      1180 ns/entry	       2 B/op	       0 allocs/op
+BenchmarkEntries/texts-32                                                           	      99	  11777540 ns/op	      1178 ns/entry	       2 B/op	       0 allocs/op
+BenchmarkEntries/texts-32                                                           	     100	  11807525 ns/op	      1181 ns/entry	       2 B/op	       0 allocs/op
+BenchmarkEntries/texts-32                                                           	     100	  11826759 ns/op	      1183 ns/entry	       6 B/op	       0 allocs/op
+BenchmarkEntries/texts-32                                                           	     100	  11807996 ns/op	      1181 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/texts-32                                                           	     100	  11735670 ns/op	      1174 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/meshes-32                                                          	     883	   1362587 ns/op	       136.3 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/meshes-32                                                          	     868	   1382748 ns/op	       138.3 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/meshes-32                                                          	     877	   1350062 ns/op	       135.0 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/meshes-32                                                          	     878	   1377302 ns/op	       137.7 ns/entry	       1 B/op	       0 allocs/op
+BenchmarkEntries/meshes-32                                                          	     874	   1374044 ns/op	       137.4 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/meshes-32                                                          	     891	   1350752 ns/op	       135.1 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/meshes-32                                                          	     859	   1383528 ns/op	       138.4 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/meshes-32                                                          	     873	   1389673 ns/op	       139.0 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/meshes-32                                                          	     876	   1374631 ns/op	       137.5 ns/entry	       1 B/op	       0 allocs/op
+BenchmarkEntries/meshes-32                                                          	     871	   1392435 ns/op	       139.2 ns/entry	       2 B/op	       0 allocs/op
+BenchmarkEntries/triangles-32                                                       	     238	   5019634 ns/op	       502.0 ns/entry	       3 B/op	       0 allocs/op
+BenchmarkEntries/triangles-32                                                       	     238	   5023722 ns/op	       502.4 ns/entry	       2 B/op	       0 allocs/op
+BenchmarkEntries/triangles-32                                                       	     240	   5005804 ns/op	       500.6 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/triangles-32                                                       	     232	   5117193 ns/op	       511.7 ns/entry	       1 B/op	       0 allocs/op
+BenchmarkEntries/triangles-32                                                       	     238	   5029877 ns/op	       503.0 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/triangles-32                                                       	     238	   5037429 ns/op	       503.7 ns/entry	       2 B/op	       0 allocs/op
+BenchmarkEntries/triangles-32                                                       	     238	   5012518 ns/op	       501.3 ns/entry	       3 B/op	       0 allocs/op
+BenchmarkEntries/triangles-32                                                       	     234	   5140743 ns/op	       514.1 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkEntries/triangles-32                                                       	     238	   5027805 ns/op	       502.8 ns/entry	       4 B/op	       0 allocs/op
+BenchmarkEntries/triangles-32                                                       	     237	   5017625 ns/op	       501.8 ns/entry	       0 B/op	       0 allocs/op
+BenchmarkImageFirstUse/plain-32                                                     	    3098	    381201 ns/op	    381201 ns/image	  323241 B/op	     100 allocs/op
+BenchmarkImageFirstUse/plain-32                                                     	    3057	    380218 ns/op	    380218 ns/image	  323183 B/op	     100 allocs/op
+BenchmarkImageFirstUse/plain-32                                                     	    3140	    381193 ns/op	    381193 ns/image	  323176 B/op	     100 allocs/op
+BenchmarkImageFirstUse/plain-32                                                     	    3145	    380421 ns/op	    380421 ns/image	  323178 B/op	     100 allocs/op
+BenchmarkImageFirstUse/plain-32                                                     	    3192	    379422 ns/op	    379422 ns/image	  323190 B/op	     100 allocs/op
+BenchmarkImageFirstUse/plain-32                                                     	    3157	    382240 ns/op	    382240 ns/image	  323179 B/op	     100 allocs/op
+BenchmarkImageFirstUse/plain-32                                                     	    3063	    381774 ns/op	    381774 ns/image	  323176 B/op	     100 allocs/op
+BenchmarkImageFirstUse/plain-32                                                     	    3195	    379401 ns/op	    379401 ns/image	  323180 B/op	     100 allocs/op
+BenchmarkImageFirstUse/plain-32                                                     	    3112	    381368 ns/op	    381368 ns/image	  323175 B/op	     100 allocs/op
+BenchmarkImageFirstUse/plain-32                                                     	    3207	    382127 ns/op	    382127 ns/image	  323176 B/op	     100 allocs/op
+BenchmarkImageFirstUse/distance_field-32                                            	     238	   4998363 ns/op	   4998363 ns/image	 3302249 B/op	     109 allocs/op
+BenchmarkImageFirstUse/distance_field-32                                            	     240	   4956490 ns/op	   4956490 ns/image	 3301727 B/op	     108 allocs/op
+BenchmarkImageFirstUse/distance_field-32                                            	     240	   4983728 ns/op	   4983728 ns/image	 3301696 B/op	     108 allocs/op
+BenchmarkImageFirstUse/distance_field-32                                            	     241	   4962183 ns/op	   4962183 ns/image	 3301712 B/op	     108 allocs/op
+BenchmarkImageFirstUse/distance_field-32                                            	     240	   4982104 ns/op	   4982104 ns/image	 3301709 B/op	     108 allocs/op
+BenchmarkImageFirstUse/distance_field-32                                            	     241	   4959650 ns/op	   4959650 ns/image	 3301664 B/op	     107 allocs/op
+BenchmarkImageFirstUse/distance_field-32                                            	     240	   4982614 ns/op	   4982614 ns/image	 3301652 B/op	     107 allocs/op
+BenchmarkImageFirstUse/distance_field-32                                            	     241	   4969762 ns/op	   4969762 ns/image	 3301630 B/op	     107 allocs/op
+BenchmarkImageFirstUse/distance_field-32                                            	     241	   4974288 ns/op	   4974288 ns/image	 3301663 B/op	     108 allocs/op
+BenchmarkImageFirstUse/distance_field-32                                            	     241	   4961208 ns/op	   4961208 ns/image	 3301673 B/op	     107 allocs/op
+BenchmarkFrameOfNewHanzi-32                                                         	       4	 321361225 ns/op	   1606806 ns/glyph	44124752 B/op	    3210 allocs/op
+BenchmarkFrameOfNewHanzi-32                                                         	       4	 320964850 ns/op	   1604824 ns/glyph	44146350 B/op	    3237 allocs/op
+BenchmarkFrameOfNewHanzi-32                                                         	       4	 327337800 ns/op	   1636689 ns/glyph	44099642 B/op	    3182 allocs/op
+BenchmarkFrameOfNewHanzi-32                                                         	       3	 333552200 ns/op	   1667761 ns/glyph	44082381 B/op	    3205 allocs/op
+BenchmarkFrameOfNewHanzi-32                                                         	       3	 333777433 ns/op	   1668887 ns/glyph	44111216 B/op	    3240 allocs/op
+BenchmarkFrameOfNewHanzi-32                                                         	       4	 332228800 ns/op	   1661144 ns/glyph	44142898 B/op	    3236 allocs/op
+BenchmarkFrameOfNewHanzi-32                                                         	       4	 332976725 ns/op	   1664884 ns/glyph	44146294 B/op	    3236 allocs/op
+BenchmarkFrameOfNewHanzi-32                                                         	       4	 332654325 ns/op	   1663272 ns/glyph	44146294 B/op	    3236 allocs/op
+BenchmarkFrameOfNewHanzi-32                                                         	       4	 332263175 ns/op	   1661316 ns/glyph	44121324 B/op	    3210 allocs/op
+BenchmarkFrameOfNewHanzi-32                                                         	       4	 329313725 ns/op	   1646569 ns/glyph	44124704 B/op	    3209 allocs/op
+PASS
+ok  	github.com/dvoyni/cog/plugins/canvas	552.490s

@@ -375,6 +375,14 @@ func makeSquareVertices(side float32) []canvas.Vertex {
 	return vertices
 }
 
+// makeSquareTriangles answers a list of the triangles of
+// makeSquareVertices' square of side units, indexed by squareIndices,
+// within their bounds.
+func makeSquareTriangles(side float32) canvas.Triangles[canvas.Vertex] {
+	vertices := makeSquareVertices(side)
+	return canvas.Triangles[canvas.Vertex]{Vertices: vertices, Indices: squareIndices, Topology: meshfile.TopologyTriangleList, Bounds: meshfile.CalculateBounds(vertices, canvas.Vertex.Position3)}
+}
+
 // putMeshFile puts into memory, at path, the mesh file of vertices, indexed
 // by indices, nil for none, within their bounds.
 func putMeshFile(t testing.TB, memory *filesystems.MemoryFS, path string, vertices []canvas.Vertex, indices []uint32, topology meshfile.Topology) {

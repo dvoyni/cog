@@ -122,3 +122,39 @@ func findShapeBatchKeys(state *drawState) []batchKey {
 	}
 	return keys
 }
+
+// sortedEntryCount is how many entries BenchmarkSortByKey sorts.
+const sortedEntryCount = 100000
+
+// BenchmarkSortByKey benchmarks the radix sort of sortedEntryCount entries,
+// reporting the time per entry, as their keys spread over more of their
+// bytes, each a pass: entries of one layer and order, sorted in no pass; of
+// 4 layers, one pass; of 4 layers y-sorted, five; and of layers and orders
+// spread over all 32 bits each, eight.
+func BenchmarkSortByKey(b *testing.B) {
+	random := rand.New(rand.NewPCG(1, 2))
+	for _, spread := range []struct {
+		name string
+		key  func(index int) sortKey
+	}{
+		{"passes=0", func(int) sortKey { return makeSortKey(0, 0) }},
+		{"passes=1", func(index int) sortKey { return makeSortKey(int32(index%4), 0) }},
+		{"passes=5", func(index int) sortKey { return makeSortKey(int32(index%4), OrderOf(random.Float32()*1000)) }},
+		{"passes=8", func(int) sortKey { return makeSortKey(random.Int32()-math.MaxInt32/2, random.Int32()-math.MaxInt32/2) }},
+	} {
+		b.Run(spread.name, func(b *testing.B) {
+			var merged []sortedEntry
+			for index := range sortedEntryCount {
+				merged = append(merged, sortedEntry{key: spread.key(index), entryIndex: uint32(index)})
+			}
+			sorter := entrySorter{entries: make([]sortedEntry, sortedEntryCount)}
+			for b.Loop() {
+				// Each frame's entries come to the sort in the order merged.
+				sorter.entries = sorter.entries[:sortedEntryCount]
+				copy(sorter.entries, merged)
+				sorter.sortByKey()
+			}
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*sortedEntryCount), "ns/entry")
+		})
+	}
+}

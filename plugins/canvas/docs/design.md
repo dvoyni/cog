@@ -968,6 +968,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - a frame with refusals, whose once-key may allocate. A steady frame has none.
 - **Time per entry** is benchmarked against the same frame drawn by hand on render, which gives canvas's overhead, as render's benchmarks give render's over gfx. Ten runs go into `plugins/canvas/docs/benchmarks-baseline.txt`, compared with `benchstat`.
 - **A frame's new glyphs** are made in the frame, with no worker thread. If they measure too slow, the remedy is `FontLibrary.Preload`; spreading their generation across frames is an improvement, not built now.
+  - **As the baseline measures,** in `BenchmarkMakeGlyphField` and `BenchmarkFrameOfNewHanzi`, a Han glyph at em 64 takes about three times a Latin one at em 48, and a frame of 200 new hanzi takes far past a frame's budget: a game showing new CJK text preloads it.
 
 ### Delta to render
 
@@ -1046,11 +1047,14 @@ Each change was checked for a 3D renderer's needs too, drawbridge's forward+ or 
 
 **The per-frame gate and benchmarks,** the method of render's, ecs's and mux's bars:
 - **The gate:** zero allocations for a steady frame once warm, checked with `testing.AllocsPerRun(...) == 0` over a whole beat, canvastest's `Step`, after four warm frames, on gfx's recording adapter in its mode that records nothing, turned on with `h.RecordNothing()`. It covers canvas, render, gfx, the kernel and metronome. Its frame holds the steady content *Performance* lists.
-- **Under `go test -race`** the gate steps its frames for the detector and checks no count.
-- **Benchmarks** time each entry against the same frame drawn by hand on render.
+  - **Its frame,** drawn by a test plugin's recording tasks, each a draw list: sprites in bulk, half of them culled, a sliced one and a tiled one, some switching to a second material every 16 and spread over 16 layers; a sprite and a fill given a material argument; a mesh file's meshes in bulk and one alone; fills, strokes and lines, hairlines, a rounded corner and a clip; a plain and a marked-up run of text; per-frame triangles. One camera draws it, or strips of a split window under a UI camera of another order.
+  - **Its scenarios:** 16, 1,024 and 16,384 sprites, split among 1, 4 and 16 tasks, through 1, 2 and 4 cameras, with one material in one layer and with the switch over 16 layers.
+- **Under `go test -race`** the gate steps its frames for the detector and checks no count, and leaves out its scenarios of 16,384 sprites.
+- **Benchmarks** time each entry against the same frame drawn by hand on render: sprites alone, which a test plugin on render writes as canvas's instance data into one temporary buffer and draws through each camera with canvas's default shader, a draw for each run of one material, skipping what canvas does besides.
   - **Operations:** recording, single calls and bulk; the draw lists' merge and the sort; culling, batching, the instance data written, and the command lists recorded; text drawn from the cache; per-frame triangles copied.
   - **Counts:** 1,000, 10,000 and 100,000 sprites; 1, 4 and 16 recording tasks; 1, 2 and 4 cameras; one material against a switch every 16 entries; few layers against many, for the radix sort's passes.
   - **Timed, not gated:** glyph generation at first use, per glyph (Latin at em 48, Han at em 64), and for a frame of 200 new hanzi; an image's first use, its decode, converter and pack; the radix sort's passes as the layers spread.
+  - **A first use is timed in a frame of its own,** after an untimed frame that undoes it: an image unloaded, or a font put again and reloaded, which drops its glyphs and layouts. The hanzi are the first 200 of Noto Sans SC's CJK block, from a subset of the font in `testdata/fonts`.
   - **Ten runs** go in the baseline, compared with `benchstat`.
 
 **Concurrency under `go test -race`:** recording tasks run together, and `Assets` is called while canvas draws, so each piece of shared state is tested by breaking the code that guards it, as render's are, most in `concurrency_test.go` through a test plugin whose tasks record, read and write `FontLibrary`, and call `Assets` off render's frame event while canvas opens, sorts and draws:

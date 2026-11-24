@@ -1,6 +1,7 @@
 package canvas
 
 import (
+	"os"
 	"testing"
 
 	"github.com/dvoyni/cog/kernel"
@@ -81,5 +82,45 @@ func TestAGlyphsPenFollowsTheAdvancesBeforeItInItsCluster(t *testing.T) {
 	}
 	if accent, clusterEnd := layout.glyphs[1].pen.X, layout.ClusterPosition(1).X; accent != clusterEnd || clusterEnd <= layout.glyphs[0].pen.X {
 		t.Errorf("the accent's pen is at %v, want past the x's advance, at %v", accent, clusterEnd)
+	}
+}
+
+// BenchmarkMakeGlyphField benchmarks making a glyph's distance field at its
+// first use, reporting the time per glyph: JetBrains Mono's Latin letters
+// at an em of 48 texels, canvas's default, and Noto Sans SC's ideographs
+// at 64, as a CJK font takes, each of a range of 16.
+func BenchmarkMakeGlyphField(b *testing.B) {
+	hanziFont, err := loadFont(os.DirFS("testdata/fonts"), Font{Path: "notosanssc-hanzi.ttf"})
+	if err != nil {
+		b.Fatal(err)
+	}
+	hanziFace := font.NewFace(hanziFont.font)
+	latinFace := font.NewFace(findBuiltInFont())
+	var latin, hanzi []font.GID
+	for letter := 'a'; letter <= 'z'; letter++ {
+		id, _ := latinFace.NominalGlyph(letter)
+		latin = append(latin, id)
+	}
+	for ideograph := rune(0x4E00); ideograph < 0x4F00; ideograph++ {
+		id, _ := hanziFace.NominalGlyph(ideograph)
+		hanzi = append(hanzi, id)
+	}
+	for _, glyphs := range []struct {
+		name string
+		face *font.Face
+		ids  []font.GID
+		em   int
+	}{
+		{"latin/em=48", latinFace, latin, 48},
+		{"han/em=64", hanziFace, hanzi, 64},
+	} {
+		b.Run(glyphs.name, func(b *testing.B) {
+			index := 0
+			for b.Loop() {
+				makeGlyphField(glyphs.face, glyphs.ids[index%len(glyphs.ids)], glyphs.em, 16)
+				index++
+			}
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N), "ns/glyph")
+		})
 	}
 }
