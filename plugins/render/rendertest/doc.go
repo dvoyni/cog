@@ -68,6 +68,10 @@
 //
 //	//go:generate go run github.com/dvoyni/cog/plugins/render/cmd/declarebindings -variant SKINNED,JOINTS=4 lit.wgsl
 //
+// A shader including a file another plugin mounts is declared with that
+// plugin's folder mounted by -mount, as canvas's guide shows for a 2D
+// material.
+//
 // A shader compiled with no declaration, or with one that fails to parse,
 // fails the test, naming its path. An answer a test of
 // rendertest's own queues on the recording adapter wins over the

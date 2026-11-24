@@ -12,6 +12,7 @@ import (
 
 	"github.com/dvoyni/cog/plugins/gfx"
 	"github.com/dvoyni/cog/plugins/render"
+	"github.com/dvoyni/cog/plugins/render/cmd/declarebindings/plugin"
 	"github.com/dvoyni/cog/plugins/render/internal/bindingdeclaration"
 )
 
@@ -39,7 +40,7 @@ func TestAShaderWithIncludesIsDeclaredWithASectionForEachDefineSet(t *testing.T)
 		{{Name: "JOINT_COUNT", Value: "4"}, {Name: "SKINNED"}},
 	}
 
-	if err := runDeclareBindings(directory, []string{"lit.wgsl"}, defineSets, false); err != nil {
+	if err := runDeclareBindings(plugin.Config{Directory: directory, ShaderPaths: []string{"lit.wgsl"}, DefineSets: defineSets}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -80,7 +81,7 @@ func TestAShaderRenderRefusesOrADeclarationCannotSpellFailsTheRunWritingNoDeclar
 				t.Fatal(err)
 			}
 
-			err := runDeclareBindings(directory, []string{"bad.wgsl"}, nil, false)
+			err := runDeclareBindings(plugin.Config{Directory: directory, ShaderPaths: []string{"bad.wgsl"}})
 
 			if err == nil || !strings.Contains(err.Error(), "bad.wgsl") {
 				t.Errorf("the run answered %v, want an error naming bad.wgsl", err)
@@ -100,7 +101,7 @@ func TestAShaderCompilingOnlyWithADefineIsDeclaredForItsVariantsAlone(t *testing
 	}
 	defines := []render.ShaderDefine{{Name: "ARGUMENT"}}
 
-	if err := runDeclareBindings(directory, []string{"argument.wgsl"}, [][]render.ShaderDefine{defines}, true); err != nil {
+	if err := runDeclareBindings(plugin.Config{Directory: directory, ShaderPaths: []string{"argument.wgsl"}, DefineSets: [][]render.ShaderDefine{defines}, VariantsOnly: true}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -114,14 +115,63 @@ func TestAShaderCompilingOnlyWithADefineIsDeclaredForItsVariantsAlone(t *testing
 	}
 }
 
+func TestAShaderIncludingAFileOfAMountedFolderIsDeclaredWithItsBindings(t *testing.T) {
+	// shaders/glow.wgsl, in the folder a game mounts at its root, includes a
+	// file of another folder by a path relative to its own, mounted under a
+	// prefix beside it, as a 2D material's shader includes canvas's include,
+	// mounted under cog.canvas.
+	directory := t.TempDir()
+	shared := t.TempDir()
+	if err := os.WriteFile(filepath.Join(shared, "camera.wgsl"), []byte("@group(0) @binding(0) var<uniform> camera: vec4f;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(directory, "shaders"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := "#include ../shared.lib/camera.wgsl\n@fragment fn fragment_main() -> @location(0) vec4f { return camera; }\n"
+	if err := os.WriteFile(filepath.Join(directory, "shaders", "glow.wgsl"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runDeclareBindings(plugin.Config{Directory: directory, Mounts: []plugin.Mount{{Prefix: "shared.lib", Directory: shared}}, ShaderPaths: []string{"shaders/glow.wgsl"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	reflection, err := bindingdeclaration.Read(os.DirFS(directory), "shaders/glow.wgsl", nil)
+	if err != nil || len(reflection.Bindings) != 1 || reflection.Bindings[0].Name != "camera" {
+		t.Errorf("the declaration says %+v, %v, want the included binding camera", reflection, err)
+	}
+	if _, err := os.Stat(filepath.Join(shared, "camera.wgsl.json")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("a declaration was written into the mounted folder: %v", err)
+	}
+}
+
+func TestAMountFlagIsAPrefixAndAFolderAndAnythingElseIsRefused(t *testing.T) {
+	var mounts mountFlag
+	if err := mounts.Set("cog.canvas=../canvas/assets"); err != nil {
+		t.Fatal(err)
+	}
+	if want := (mountFlag{{Prefix: "cog.canvas", Directory: "../canvas/assets"}}); !reflect.DeepEqual(mounts, want) {
+		t.Errorf("the flag holds %+v, want %+v", mounts, want)
+	}
+	if spelt := mounts.String(); spelt != "cog.canvas=../canvas/assets" {
+		t.Errorf("the flag is spelt %q, want cog.canvas=../canvas/assets", spelt)
+	}
+	for _, text := range []string{"cog.canvas", "=assets", "cog.canvas=", ".=assets", "/cog.canvas=assets", "cog.canvas/=assets"} {
+		if err := mounts.Set(text); err == nil {
+			t.Errorf("-mount %s was taken, want an error", text)
+		}
+	}
+}
+
 // runDeclareBindings runs declareBindings on the main thread, and answers its
 // error.
-func runDeclareBindings(directory string, shaderPaths []string, defineSets [][]render.ShaderDefine, variantsOnly bool) error {
+func runDeclareBindings(config plugin.Config) error {
 	var err error
 	finished := make(chan struct{})
 	mainThread <- func() {
 		defer close(finished)
-		err = declareBindings(directory, shaderPaths, defineSets, variantsOnly)
+		err = declareBindings(config)
 	}
 	<-finished
 	return err

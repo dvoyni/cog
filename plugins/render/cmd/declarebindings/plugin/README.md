@@ -33,4 +33,6 @@ configs := map[kernel.PluginName]any{
 - **Task parameters it offers:** none.
 - **Sockets it declares:** none.
 - **Sockets it binds:** `platform.ReadMountSocket`, `Config.Directory` on
-  disk, or the folder the process runs in when it is empty.
+  disk, or the folder the process runs in when it is empty, and each of
+  `Config.Mounts`, a folder on disk under its prefix, for includes kept
+  elsewhere, such as canvas's include under `cog.canvas`.

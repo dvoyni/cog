@@ -1707,6 +1707,10 @@ set:
 //go:generate go run github.com/dvoyni/cog/plugins/render/cmd/declarebindings -variant SKINNED,JOINTS=4u lit.wgsl unlit.wgsl
 ```
 
+A shader including a file another plugin mounts is declared with that
+plugin's folder mounted by `-mount PREFIX=DIRECTORY`, as canvas's guide shows
+for a 2D material.
+
 Run `go generate` again whenever a shader's bindings, entry points or inputs
 change; a pixel test catches a declaration gone stale.
 

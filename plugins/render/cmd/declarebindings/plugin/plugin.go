@@ -24,6 +24,9 @@ type Config struct {
 	// the shaders' includes are read from; empty means the folder the
 	// process runs in.
 	Directory string
+	// Mounts are folders mounted under a prefix beside Directory, which the
+	// shaders' includes may read from.
+	Mounts []Mount
 	// ShaderPaths are the shaders declared, relative to Directory.
 	ShaderPaths []string
 	// DefineSets are the define sets each shader has a variant declared for,
@@ -44,9 +47,9 @@ type Config struct {
 // process runs in.
 const defaultDirectory = "."
 
-// Plugin is the tool's plugin: it mounts Config.Directory in platform's FS,
-// installs Handlers and the declaration request, and declares the shaders'
-// bindings on DeclareEvent.
+// Plugin is the tool's plugin: it mounts Config.Directory and Config.Mounts
+// in platform's FS, installs Handlers and the declaration request, and
+// declares the shaders' bindings on DeclareEvent.
 type Plugin struct{}
 
 // NewPlugin returns the plugin.
@@ -62,7 +65,8 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 }
 
 // Init mounts Config.Directory, or the folder the process runs in when it
-// is empty, in platform's FS; installs the declaration request, Config's
+// is empty, in platform's FS, and each of Config.Mounts under its prefix;
+// installs the declaration request, Config's
 // shaders, define sets, VariantsOnly and TakeDeclaration; and subscribes to DeclareEvent
 // the job declaring the shaders' bindings, its Sub kept in the Handlers
 // resource. A config of another type than *Config, or a nil TakeDeclaration,
@@ -81,6 +85,9 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 		directory = defaultDirectory
 	}
 	configurator.BindSocket(platform.ReadMountSocket{FS: os.DirFS(directory)})
+	for _, mount := range pluginConfig.Mounts {
+		configurator.BindSocket(platform.ReadMountSocket{FS: os.DirFS(mount.Directory), Prefix: mount.Prefix})
+	}
 	configurator.InitResource(declarationRequest{
 		shaderPaths:     pluginConfig.ShaderPaths,
 		defineSets:      pluginConfig.DefineSets,
