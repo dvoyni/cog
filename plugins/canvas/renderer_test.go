@@ -575,6 +575,71 @@ func TestACameraOfASampleCountOtherThanOneOrFourPanicsAsItIsSet(t *testing.T) {
 	}
 }
 
+func TestAFourSampleCameraOfHalfTheWindowSmoothsADiagonalEdgeAndLeavesTheOtherHalfAsAnotherCameraDrewIt(t *testing.T) {
+	// The left half is a camera of one sample's, cleared to green under its
+	// layer's white fill; the right half a 4-sample camera's, set after it,
+	// cleared to orange under its layer's white square turned 45° about its
+	// viewport's centre, 80 points right of the window's. A row across a
+	// 45° edge holds one pixel the edge crosses, whatever the display's
+	// scale, which 4 samples blend between the square and the clear, and
+	// one sample draws as one or the other. The probes are in the window's
+	// points from its centre.
+	picture := captureDrawing(t, func(list canvas.DrawList) {
+		list.SetCamera(canvas.Camera{Layers: canvas.MakeLayer(0), Viewport: m.Rect{Width: 0.5, Height: 1}, Clear: true, ClearColor: green})
+		list.SetCamera(canvas.Camera{Layers: canvas.MakeLayer(1), Viewport: m.Rect{X: 0.5, Width: 0.5, Height: 1}, Clear: true, ClearColor: orange, SampleCount: 4})
+		list.DrawShape(canvas.Shape{Rect: m.Rect{X: -40, Y: -10, Width: 20, Height: 20}, Tint: m.White})
+		list.DrawShape(canvas.Shape{Rect: m.Rect{X: -40, Y: -40, Width: 80, Height: 80}, Transform: m.Rotation2x3(math.Pi / 4), Tint: m.White, Layer: 1})
+	})
+
+	picture.expect(t, []probe{
+		{"the left half's fill", m.Vec2{X: -110}, opaqueWhite},
+		{"the left half's clear", m.Vec2{X: -50}, greenShown},
+		{"the left half's corner", m.Vec2{X: -155, Y: -115}, greenShown},
+		{"the left half by the middle", m.Vec2{X: -2, Y: 100}, greenShown},
+		{"the right half's square", m.Vec2{X: 80}, opaqueWhite},
+		{"the right half's corner", m.Vec2{X: 155, Y: 115}, orangeShown},
+		{"the right half by the middle", m.Vec2{X: 2, Y: -100}, orangeShown},
+	})
+	// 20 points above the square's centre, its edges cross the row 36.6
+	// points either side of it.
+	blends := picture.collectOtherColours(m.Vec2{X: 10, Y: -20}, m.Vec2{X: 150, Y: -20}, opaqueWhite, orangeShown)
+	if len(blends) != 2 {
+		t.Fatalf("the row across the square holds %v between the square and the clear, want one pixel at each edge", blends)
+	}
+	for _, blend := range blends {
+		betweenWhiteAndOrange := orangeShown.G < blend.G && blend.G < 255 && 0 < blend.B && blend.B < 255
+		if blend.R != 255 || !betweenWhiteAndOrange || blend.A != 255 {
+			t.Errorf("a pixel the square's edge crosses is %v, want the square's white blended with the orange clear", blend)
+		}
+	}
+}
+
+func TestAFourSampleCameraThatDoesNotClearDrawsOverWhatTheWindowAlreadyHolds(t *testing.T) {
+	// A camera of one sample clears the window to green under its layer's
+	// white fill left of the middle; a 4-sample camera of the whole window,
+	// set after it, clears nothing and draws its layer's orange fill right
+	// of the middle, and below both a translucent orange band across the
+	// white fill and the green. The probes are in the window's points from
+	// its centre.
+	picture := captureDrawing(t, func(list canvas.DrawList) {
+		list.SetCamera(canvas.Camera{Layers: canvas.MakeLayer(0), Clear: true, ClearColor: green})
+		list.SetCamera(canvas.Camera{Layers: canvas.MakeLayer(1), SampleCount: 4})
+		list.DrawShape(canvas.Shape{Rect: m.Rect{X: -120, Y: -40, Width: 80, Height: 120}, Tint: m.White})
+		list.DrawShape(canvas.Shape{Rect: m.Rect{X: 40, Y: -40, Width: 80, Height: 80}, Tint: orange, Layer: 1})
+		list.DrawShape(canvas.Shape{Rect: m.Rect{X: -100, Y: 50, Width: 200, Height: 40}, Tint: translucentOrange, Layer: 1})
+	})
+
+	picture.expect(t, []probe{
+		{"the green", m.Vec2{Y: -100}, greenShown},
+		{"the white fill", m.Vec2{X: -80}, opaqueWhite},
+		{"the orange fill", m.Vec2{X: 80}, orangeShown},
+		{"the green beside the band", m.Vec2{X: 140, Y: 70}, greenShown},
+		// 0.6 of the encoded (255, 85, 0) over 0.4 of what lies under it.
+		{"the band over the white fill", m.Vec2{X: -70, Y: 70}, color.NRGBA{R: 255, G: 153, B: 102, A: 255}},
+		{"the band over the green", m.Vec2{X: 40, Y: 70}, translucentOverGreen},
+	})
+}
+
 // minimapDescriptor is a small texture a camera draws into.
 var minimapDescriptor = render.TextureDescriptor{Label: "minimap", Width: 16, Height: 16, Format: render.TextureFormatRGBA8Unorm}
 

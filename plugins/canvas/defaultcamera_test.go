@@ -1,7 +1,6 @@
 package canvas_test
 
 import (
-	"image/color"
 	"reflect"
 	"slices"
 	"testing"
@@ -67,7 +66,7 @@ func TestAFillShowsItsTintPremultipliedAndEncodedAsSRGBInTheWindowThroughTheDefa
 		{"the opaque fill's middle", m.Vec2{}, greenShown},
 		{"the translucent fill's middle", m.Vec2{X: -80, Y: -60}, translucentOverBlack},
 		// 0.6 of the encoded (255, 85, 0) over 0.4 of the opaque fill.
-		{"the overlap", m.Vec2{X: -12, Y: -12}, color.NRGBA{R: 173, G: 153, B: 60, A: 255}},
+		{"the overlap", m.Vec2{X: -12, Y: -12}, translucentOverGreen},
 		{"the bottom left", m.Vec2{X: -80, Y: 60}, opaqueBlack},
 		{"the bottom right", m.Vec2{X: 80, Y: 60}, opaqueBlack},
 	})

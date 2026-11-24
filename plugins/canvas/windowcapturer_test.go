@@ -3,6 +3,7 @@ package canvas_test
 import (
 	"image"
 	"image/color"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -80,8 +81,9 @@ const (
 )
 
 // The colours pixel tests draw and expect: green and orange, opaque, which
-// show as greenShown and orangeShown, and translucentOrange, which shows as
-// translucentOverBlack, 0.6 of the encoded (255, 85, 0) over opaque black;
+// show as greenShown and orangeShown, and translucentOrange, 0.6 of the
+// encoded (255, 85, 0) over 0.4 of what lies under it, which shows as
+// translucentOverBlack over opaque black and translucentOverGreen over green;
 // and opaqueBlack, opaqueWhite, opaqueRed, opaqueGreen, opaqueBlue,
 // opaqueYellow and opaqueCyan as they show.
 var (
@@ -91,6 +93,7 @@ var (
 	orangeShown          = color.NRGBA{R: 255, G: 85, A: 255}
 	translucentOrange    = m.NewColorSrgb(1, 1.0/3, 0, 0.6)
 	translucentOverBlack = color.NRGBA{R: 153, G: 51, B: 0, A: 255}
+	translucentOverGreen = color.NRGBA{R: 173, G: 153, B: 60, A: 255}
 	opaqueBlack          = color.NRGBA{A: 255}
 	opaqueWhite          = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 	opaqueRed            = color.NRGBA{R: 255, A: 255}
@@ -174,16 +177,23 @@ func (p windowPicture) at(point m.Vec2) color.NRGBA {
 // holding from to the one holding to, both included, along a row or a
 // column.
 func (p windowPicture) countLit(from, to m.Vec2) int {
+	return len(p.collectOtherColours(from, to, opaqueBlack))
+}
+
+// collectOtherColours answers the colours of the pixels none of excluded
+// from the pixel holding from to the one holding to, both included, along a
+// row or a column, in order.
+func (p windowPicture) collectOtherColours(from, to m.Vec2, excluded ...color.NRGBA) []color.NRGBA {
 	start := p.pixel(from)
 	end := p.pixel(to)
 	step := image.Point{X: sign(end.X - start.X), Y: sign(end.Y - start.Y)}
-	lit := 0
+	var others []color.NRGBA
 	for pixel := start; ; pixel = pixel.Add(step) {
-		if p.picture.NRGBAAt(pixel.X, pixel.Y) != opaqueBlack {
-			lit++
+		if colour := p.picture.NRGBAAt(pixel.X, pixel.Y); !slices.Contains(excluded, colour) {
+			others = append(others, colour)
 		}
 		if pixel == end {
-			return lit
+			return others
 		}
 	}
 }
