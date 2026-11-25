@@ -40,10 +40,7 @@ type batchKey struct {
 // with shapes.
 func makeImageBatchKey(material Material, image Image, drawn *drawnImage, clip m.Rect, filter, defaultFilter Filter) batchKey {
 	key := batchKey{material: material, texture: drawn.findView(), clip: clip}
-	// An image drawn from a texture of its own, or a render texture's, has
-	// no gutter, so its sampler repeats along the axes it wraps along; a
-	// sprite atlas's gutter wraps its images.
-	if drawn.packed == nil || drawn.packed.atlas == nil {
+	if drawn.wrapsBySampler() {
 		key.wrap = drawn.options.Wrap
 	}
 	if image != (Image{}) {
@@ -71,13 +68,12 @@ type batch struct {
 // batches appended to. Each batch's entries are part of entries. A fill, a
 // line and a sprite draw one instance, and a stroke four, each followed,
 // for a material taking an argument, by the argument its entry gives, or
-// the zero value. A sprite's image is its frame of drawnImages, a
-// renderer's, and a shape's the zero Image's; a run of text draws an
-// instance for each of its glyphs packed, each its field as drawn of
-// drawnGlyphs, a renderer's, and for each of its icons packed, each its
-// image's frame of drawnImages; per-frame triangles draw one instance,
-// their image's frame of drawnImages, as does a mesh.
-func appendBatches(batches []batch, instances *listInstanceData, entries []sortedEntry, state *drawState, batchKeys []batchKey, drawnImages [][]drawnImage, drawnGlyphs []drawnGlyph) []batch {
+// the zero value. A sprite's image is its frame as atlases placed it, and a
+// shape's the zero Image's; a run of text draws an instance for each of its
+// glyphs packed and each of its icons in the sprite atlas, as atlases
+// placed them; per-frame triangles draw one instance, their image's frame
+// as atlases placed it, as does a mesh.
+func appendBatches(batches []batch, instances *listInstanceData, entries []sortedEntry, state *drawState, batchKeys []batchKey, atlases *atlasSet) []batch {
 	firstBatch := len(batches)
 	for index, entry := range entries {
 		entryKey := batchKeys[entry.entryIndex]
@@ -102,18 +98,18 @@ func appendBatches(batches []batch, instances *listInstanceData, entries []sorte
 		entryStart := len(instances.fixed)
 		switch recorded.kind {
 		case EntryKindShape:
-			instances.fixed = appendShapeInstances(instances.fixed, &state.shapes[recorded.index], &drawnImages[0][0])
+			instances.fixed = appendShapeInstances(instances.fixed, &state.shapes[recorded.index], atlases.placed(Image{}, 0))
 		case EntryKindSprite:
 			sprite := &state.sprites[recorded.index]
-			instances.fixed = appendSpriteInstance(instances.fixed, sprite, findDrawnFrame(drawnImages, sprite.Image, sprite.Frame))
+			instances.fixed = appendSpriteInstance(instances.fixed, sprite, atlases.placed(sprite.Image, sprite.Frame))
 		case EntryKindText:
-			instances.fixed = state.texts[recorded.index].appendInstances(instances.fixed, drawnGlyphs, drawnImages)
+			instances.fixed = state.texts[recorded.index].appendInstances(instances.fixed, atlases)
 		case EntryKindTriangles:
 			triangles := &state.triangles[recorded.index]
-			instances.fixed = appendMeshInstance(instances.fixed, triangles.options.Tint, triangles.options.Transform, findDrawnFrame(drawnImages, triangles.options.Image, triangles.options.Frame))
+			instances.fixed = appendMeshInstance(instances.fixed, triangles.options.Tint, triangles.options.Transform, atlases.placed(triangles.options.Image, triangles.options.Frame))
 		case EntryKindMesh:
 			mesh := &state.meshes[recorded.index]
-			instances.fixed = appendMeshInstance(instances.fixed, mesh.Tint, mesh.Transform, findDrawnFrame(drawnImages, mesh.Image, mesh.Frame))
+			instances.fixed = appendMeshInstance(instances.fixed, mesh.Tint, mesh.Transform, atlases.placed(mesh.Image, mesh.Frame))
 		}
 		lastBatch.instanceCount += uint32(len(instances.fixed) - entryStart)
 		if entryKey.stride != 0 {

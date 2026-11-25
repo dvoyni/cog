@@ -95,6 +95,17 @@ func (q *residencyRequestQueue) releasePreload(inventory render.Inventory, key s
 	}
 }
 
+// takeUnloadedPaths appends to paths the paths queued to unload, in the
+// order asked, which it forgets, and answers paths appended to.
+func (q *residencyRequestQueue) takeUnloadedPaths(paths []string) []string {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	paths = append(paths, q.unloadedPaths...)
+	clear(q.unloadedPaths)
+	q.unloadedPaths = q.unloadedPaths[:0]
+	return paths
+}
+
 // requestUnload queues the unload of the paths Unload(unloaded) unloads,
 // releasing through inventory the sources preloaded of their images, and
 // forgetting the files of their converted images preloaded.

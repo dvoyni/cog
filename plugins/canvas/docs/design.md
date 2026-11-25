@@ -496,9 +496,22 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - **Recording takes two calls,** in one list before anything samples the atlas. `RecordCopies` records a growth's copy of every mip level, releasing the texture it replaced, then the puts, from one temporary buffer. A caller filling cells on the GPU, as canvas does for plain images, records its passes next. `RecordMips` then records the mips of each page packed into since its last call, once a page. Neither records or allocates anything with nothing pending. One `Record` taking a fill callback was weighed: a method value passed every frame risks allocating, which the allocation gate would catch.
   - `Empty` frees every region, as a lost device leaves the texture empty, keeping its pages and forgetting what was still to record. `Release` releases its texture.
   - An atlas is not safe for concurrent use: one task at a time packs, puts and records it, as canvas's drawing job does its own.
-- **What it leaves to its users:** what each region holds and how it is found again; what to evict when `Pack` answers `ErrFull`, and when to free a cell; filling a cell on the GPU; binding its texture as it is now; and starting afresh after a lost device. canvas keeps each of these for its own atlases: its table of images, eviction by last use, its pack pass and `startAfresh`.
+- **What it leaves to its users:** what each region holds and how it is found again; what to evict when `Pack` answers `ErrFull`, and when to free a cell; filling a cell on the GPU; binding its texture as it is now; and starting afresh after a lost device. canvas's atlas set keeps each of these for its own atlases: its table of images, eviction by last use, its pack pass and `startAfresh`.
 - **An image's own texture is not an atlas.** An image too large for a page, or one packed when its atlas is full, has no pages, no gutter and no growth, so it stays a texture of canvas's own.
 - **The package has a `Wrap` of its own,** and `canvas.Wrap` stays canvas's. `Put` is named so because "write" did not say which way the bytes go.
+
+### canvas's atlas set
+
+([canvas: the atlas set, owning where every image frame and glyph lies](https://github.com/dvoyni/cog/issues/934))
+
+- **`atlasSet` is where canvas keeps what its entries draw from,** private and the drawing job's alone: the plain atlas of each colour space and the glyph atlas, each image's drawn frames (packed, of a render texture drawn through a view, or found to draw nothing), images' own textures, the glyphs packed, and the frame count eviction reads. Mesh files stay the renderer's.
+- **The renderer's frame is five steps:**
+  1. `beginFrame`;
+  2. `unload` for each path the residency requests give up, which the request queue hands over through a method of its own, beside the mesh files' unload;
+  3. `find` for each entry's frames and `findGlyphs` for a run of text's glyphs, marking each drawn and noting what they miss, the entry keyed while nothing has missed;
+  4. `placeMissed`, which packs only what was missed, so packing evicts nothing the frame draws, and answers whether growing an atlas replaced its texture, every entry then keyed again, and the rest keyed once placed;
+  5. `recordUploads`, in the lowest order's command list before any pass: each atlas's `RecordCopies`, then the GPU fills of plain images from a temporary buffer of their own, then each atlas's `RecordMips`.
+- **Batching and text read what the set placed,** never its tables: a drawn frame answers `inPlainAtlas()`, which a run of text's icons need, and `wrapsBySampler()`, which the batch key needs.
 - **Its tests run in rendertest's harness,** a test plugin's task making and calling atlases on the recording adapter, as a user's plugin would. What a put copies is read through the test's export of the bytes it staged, since the recording adapter's textures hold no texels.
 
 ### Shapes

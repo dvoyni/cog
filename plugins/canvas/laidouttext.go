@@ -37,27 +37,26 @@ func (t *laidOutText) findTransform() m.Mat2x3 {
 	return t.text.Transform.Mul(toPivot)
 }
 
-// findBounds answers the world rectangle the run draws within, each glyph's
-// field as drawn of drawnGlyphs at its field's index, and each icon's
-// image's frame as drawn of drawnImages, and whether it draws any glyph or
-// icon: the bounding box, in the world, of the rectangles its glyphs draw
-// their fields over and its icons their regions.
-func (t *laidOutText) findBounds(drawnGlyphs []drawnGlyph, drawnImages [][]drawnImage) (m.Rect, bool) {
+// findBounds answers the world rectangle the run draws within, each glyph
+// and icon as atlases placed it, and whether it draws any glyph or icon:
+// the bounding box, in the world, of the rectangles its glyphs draw their
+// fields over and its icons their regions.
+func (t *laidOutText) findBounds(atlases *atlasSet) (m.Rect, bool) {
 	inkMinimum := m.Vec2{X: math.MaxFloat32, Y: math.MaxFloat32}
 	inkMaximum := m.Vec2{X: -math.MaxFloat32, Y: -math.MaxFloat32}
 	drawsGlyphs := false
 	for _, glyph := range t.layout.glyphs {
 		var glyphRect m.Rect
 		if icon := t.layout.findIcon(glyph); icon != nil {
-			image := findDrawnFrame(drawnImages, icon.image, icon.frame)
+			image := atlases.placed(icon.image, icon.frame)
 			// An icon drawn from a texture of its own, not the sprite atlas
 			// the text material samples, draws nothing.
-			if image.packed == nil || image.packed.atlas == nil {
+			if !image.inPlainAtlas() {
 				continue
 			}
 			glyphRect = image.placeRegion(icon.size).Translate(m.Vec2{X: glyph.pen.X, Y: glyph.pen.Y - icon.size.Y})
 		} else {
-			drawn := &drawnGlyphs[glyph.field]
+			drawn := atlases.placedGlyph(glyph.field)
 			if !drawn.packed {
 				continue
 			}
@@ -74,16 +73,15 @@ func (t *laidOutText) findBounds(drawnGlyphs []drawnGlyph, drawnImages [][]drawn
 }
 
 // appendInstances appends to instances the instance data of the run's
-// glyphs packed, each its field as drawn of drawnGlyphs at its field's
-// index, and of its icons packed into the sRGB sprite atlas, each its
-// image's frame as drawn of drawnImages, and answers them. A glyph is a
+// glyphs packed and of its icons packed into the sRGB sprite atlas, each as
+// atlases placed it, and answers them. A glyph is a
 // quad over the rectangle its field spans, mapped by the run's transform,
 // over its region of the glyph atlas, its width its field's spread, its
 // tiles its pen as a point of the quad, and its span's tint, else the
 // run's, its zero white, premultiplied. An icon is a quad over its region
 // of the sprite atlas, its width zero, in its span's tint where it is
 // tinted, and otherwise in white of the run's alpha.
-func (t *laidOutText) appendInstances(instances []instanceData, drawnGlyphs []drawnGlyph, drawnImages [][]drawnImage) []instanceData {
+func (t *laidOutText) appendInstances(instances []instanceData, atlases *atlasSet) []instanceData {
 	runTint := cmp.Or(t.text.Tint, m.White)
 	transform := t.findTransform()
 	for _, glyph := range t.layout.glyphs {
@@ -92,8 +90,8 @@ func (t *laidOutText) appendInstances(instances []instanceData, drawnGlyphs []dr
 			tint = cmp.Or(t.text.Spans[glyph.span].Tint, runTint)
 		}
 		if icon := t.layout.findIcon(glyph); icon != nil {
-			image := findDrawnFrame(drawnImages, icon.image, icon.frame)
-			if image.packed == nil || image.packed.atlas == nil {
+			image := atlases.placed(icon.image, icon.frame)
+			if !image.inPlainAtlas() {
 				continue
 			}
 			if !icon.tinted {
@@ -111,7 +109,7 @@ func (t *laidOutText) appendInstances(instances []instanceData, drawnGlyphs []dr
 			})
 			continue
 		}
-		drawn := &drawnGlyphs[glyph.field]
+		drawn := atlases.placedGlyph(glyph.field)
 		if !drawn.packed {
 			continue
 		}

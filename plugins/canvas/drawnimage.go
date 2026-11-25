@@ -52,6 +52,21 @@ func makeDrawnImage(packed *packedImage, options ImageOptions) drawnImage {
 	}
 }
 
+// inPlainAtlas answers whether d is packed into a plain sprite atlas, not
+// a texture of its own nor a render texture: what a run of text draws its
+// icons from, beside the glyph atlas.
+func (d *drawnImage) inPlainAtlas() bool {
+	return d.packed != nil && d.packed.atlas != nil
+}
+
+// wrapsBySampler answers whether d's entries wrap it by their sampler,
+// repeating along the axes it wraps along: an image drawn from a texture
+// of its own, or a render texture's, has no gutter, while a sprite atlas's
+// gutter wraps its images.
+func (d *drawnImage) wrapsBySampler() bool {
+	return !d.inPlainAtlas()
+}
+
 // placeRegion answers the rectangle d's region spans when its frame spans
 // size from the origin: the frame itself, or a converted image's region,
 // placed within the frame by the frame's bounds.

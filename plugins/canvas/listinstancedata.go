@@ -52,6 +52,12 @@ func findArgumentSize(argumentType reflect.Type) uint32 {
 	return uint32(argumentType.Size())
 }
 
+// roundUpToMultiple answers the smallest multiple of step no smaller than
+// value.
+func roundUpToMultiple(value, step uint32) uint32 {
+	return (value + step - 1) / step * step
+}
+
 // castToBytes answers the bytes of values, as Go lays them out, sharing their
 // memory.
 func castToBytes[T any](values []T) []byte {
