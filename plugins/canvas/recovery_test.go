@@ -18,9 +18,10 @@ func TestAfterADeviceLossTheNextFrameDrawsItsSpritesTextAndMeshesAgain(t *testin
 	// drawn before a loss and again after render's recovery, whose textures
 	// and buffers render made again empty: the frame after packs the
 	// sprites' images, the large one into a new texture of its own, the old
-	// one released, copies the label's glyphs where they were, writes the
-	// white texel and loads the mesh's file again, then draws the four as
-	// before; the frame after that loads nothing.
+	// one released, copies the label's glyphs where they were, copies the
+	// white texel, put again as canvas started afresh, where it was, and
+	// loads the mesh's file again, then draws the four as before; the frame
+	// after that loads nothing.
 	const meshPath = "meshes/tree.mesh"
 	files := makeAtlasFiles(t)
 	square := makeSquareVertices(10)
@@ -67,20 +68,12 @@ func TestAfterADeviceLossTheNextFrameDrawsItsSpritesTextAndMeshesAgain(t *testin
 			t.Errorf("the frame %s made buffers %v, want the mesh file's vertices and indices", name, got)
 		}
 	}
-	// canvas writes the white texel as it starts afresh, between frames, so
-	// render's inspection of the frame after holds no write of it; gfx's
-	// recording groups the frame lost, which presented nothing, with the
-	// frame after, and the writes between them.
-	recorded := h.Harness.Frames()
-	if len(recorded) != 3 {
-		t.Fatalf("gfx's recording grouped %d frames, want the one before the loss, the one lost with the one after, and the one after that", len(recorded))
-	}
-	// The sRGB atlas emptied, the white texel is written where it was.
-	if got, want := findAtlasWriteRegions(recorded[1], labels), findAtlasWriteRegions(recorded[0], labels); len(want) != 3 || !slices.Equal(got, want) {
-		t.Errorf("the frames lost and after the recovery wrote the sprite atlas at %+v, want the white texel at each of its 3 mip levels where it was first written, %+v", got, want)
+	// The sRGB atlas emptied, the white texel is copied where it was.
+	if got, want := findCopyRegions(after.Render, labels, spriteAtlasLabel), findCopyRegions(before.Render, labels, spriteAtlasLabel); len(want) != 1 || !slices.Equal(got, want) {
+		t.Errorf("the frame after the recovery copied into %+v of the sprite atlas, want the white texel's cell where the frame before the loss copied it, %+v", got, want)
 	}
 	// The glyph atlas emptied, the label's glyphs are packed where they were.
-	if got, want := findGlyphCopyRegions(after.Render, labels), findGlyphCopyRegions(before.Render, labels); len(want) != 2 || !slices.Equal(got, want) {
+	if got, want := findCopyRegions(after.Render, labels, glyphAtlasLabel), findCopyRegions(before.Render, labels, glyphAtlasLabel); len(want) != 2 || !slices.Equal(got, want) {
 		t.Errorf("the frame after the recovery copied glyphs into %+v of the glyph atlas, want the label's 2 copied where the frame before the loss copied them, %+v", got, want)
 	}
 	if packedAfter := findPackings(t, after.Render, labels); len(packedAfter) == 2 && packedAfter[1].atlas == packedBefore[1].atlas {
@@ -92,18 +85,18 @@ func TestAfterADeviceLossTheNextFrameDrawsItsSpritesTextAndMeshesAgain(t *testin
 	if got := findBatchKinds(after); !slices.Equal(got, findBatchKinds(before)) || len(got) != 4 {
 		t.Errorf("the frame after the recovery drew batches of %v, want each sprite's, the label's and the mesh's, as before the loss: %v", got, findBatchKinds(before))
 	}
-	if packings, copies, buffers := findPackings(t, steady.Render, labels), findGlyphCopyRegions(steady.Render, labels), findMadeBufferLabels(steady.Render); len(packings) != 0 || len(copies) != 0 || len(buffers) != 0 {
+	if packings, copies, buffers := findPackings(t, steady.Render, labels), findCopyRegions(steady.Render, labels, glyphAtlasLabel), findMadeBufferLabels(steady.Render); len(packings) != 0 || len(copies) != 0 || len(buffers) != 0 {
 		t.Errorf("the frame after that packed %+v, copied glyphs into %+v and made buffers %v, want nothing loaded again", packings, copies, buffers)
 	}
 }
 
-// findGlyphCopyRegions answers the region of each copy frame's canvas lists
-// made into the glyph atlas, its texture labelled as labels has it.
-func findGlyphCopyRegions(frame render.Inspection, labels map[render.Texture]string) []render.TextureRegion {
+// findCopyRegions answers the region of each copy frame's canvas lists made
+// into the atlas labelled atlasLabel, its texture labelled as labels has it.
+func findCopyRegions(frame render.Inspection, labels map[render.Texture]string, atlasLabel string) []render.TextureRegion {
 	var regions []render.TextureRegion
 	for _, list := range findCanvasLists(frame) {
 		for _, inspectedCopy := range list.Copies {
-			if labels[inspectedCopy.DestinationTexture] == glyphAtlasLabel {
+			if labels[inspectedCopy.DestinationTexture] == atlasLabel {
 				regions = append(regions, inspectedCopy.DestinationRegion)
 			}
 		}
@@ -120,18 +113,6 @@ func findMadeBufferLabels(frame render.Inspection) []string {
 		}
 	}
 	return made
-}
-
-// findAtlasWriteRegions answers the region of each of frame's writes into
-// the sprite atlas, its texture labelled as labels has it.
-func findAtlasWriteRegions(frame render.Inspection, labels map[render.Texture]string) []render.TextureRegion {
-	var regions []render.TextureRegion
-	for _, write := range frame.Writes {
-		if labels[write.Texture] == spriteAtlasLabel {
-			regions = append(regions, write.Region)
-		}
-	}
-	return regions
 }
 
 // findBatchKinds answers the kind of the first entry of each batch of

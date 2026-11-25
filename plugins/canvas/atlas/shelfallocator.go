@@ -1,4 +1,4 @@
-package canvas
+package atlas
 
 import "slices"
 
@@ -92,7 +92,7 @@ func (a *shelfAllocator) free(x, y int32) {
 		itemIndex = slices.IndexFunc(a.shelves[shelfIndex].items, func(item shelfItem) bool { return item.x == x && item.allocated })
 	}
 	if itemIndex < 0 {
-		panic("canvas: freeing a rectangle the shelf allocator did not allocate")
+		panic("atlas: freeing a rectangle the shelf allocator did not allocate")
 	}
 	freedShelf := &a.shelves[shelfIndex]
 	freedShelf.items[itemIndex].allocated = false

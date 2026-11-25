@@ -58,7 +58,7 @@ func TestEachPerFrameMeshIsADrawOfItsOwnThroughTheMeshVertexStageCulledByItsBoun
 	if origin := batches[3].Entries[0].TrianglesOptions.Transform; origin != m.Translation2x3(-500, 0) {
 		t.Errorf("the last batch drew the triangles moved by %v, want those whose bounds reach into the view from 500 units left, the far ones culled", origin)
 	}
-	lists := findCanvasLists(frame.Render)
+	lists := findCameraLists(frame.Render)
 	if len(lists) != 1 || len(lists[0].Passes) != 1 || len(lists[0].Passes[0].Draws) != len(wantKinds) {
 		t.Fatalf("canvas's lists are %+v, want one pass of %d draws", lists, len(wantKinds))
 	}

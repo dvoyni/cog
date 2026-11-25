@@ -85,6 +85,7 @@ texture a camera draws into.
 | `Span`, `IconDescriptor` | A part of a run in its own tint, or an icon placed like a glyph. |
 | `Inspection` | One frame written down in canvas's terms. |
 | `Report`, `ReportKind` | A mistake canvas finds at run time, and its kind. |
+| `atlas.Atlas`, `atlas.Descriptor` | One atlas of one format, as canvas packs its sprites and glyphs into, for a plugin's own caches. |
 | `canvastest.Harness` | canvas in a real kernel on render's fake GPU, or on wgpu's software adapter, for tests. |
 
 Words used throughout: an **entry** is one thing recorded into a draw list
@@ -547,6 +548,53 @@ func measureTile(assets canvas.Assets) (m.Vec2, bool) {
 `Preload` acquires the file now, so the frame drawing it first decodes
 nothing. An unloaded path's regions are freed as canvas next draws, and a
 later draw loads it again.
+
+### An atlas of your own
+
+canvas's atlases are values of the public `atlas` package, which a plugin
+uses for a cache of its own, such as a UI's rasterised text, drawn through a
+2D material of its own that binds the atlas's texture. An `atlas.Atlas` packs
+images of one format into its pages and knows nothing of what they are: the
+plugin keeps what lies where, what to evict when `Pack` answers
+`atlas.ErrFull`, and when to `Free` a region. One task packs into it, then
+records its copies and its mips in a command list before any draw sampling
+it:
+
+```go
+// labelCache is a UI's cache of rasterised labels, each kept where it was
+// packed, drawn by the drawing task that owns it.
+type labelCache struct {
+	coverage *atlas.Atlas
+	regions  map[string]render.TextureRegion
+}
+
+// recordLabel packs a label's coverage, one byte a texel, the first time it
+// is drawn, and records what the atlas has still to copy into list.
+func (c *labelCache) recordLabel(inventory render.Inventory, list *render.CommandList, label string, width, height uint32, coverage []byte) (render.TextureRegion, bool) {
+	if c.coverage == nil {
+		c.coverage = atlas.New(inventory, atlas.Descriptor{Label: "ui labels", Format: render.TextureFormatR8Unorm, PageSize: 1024, Gutter: 1, ClearGutter: true, LayerCeiling: 4})
+	}
+	region, packed := c.regions[label]
+	if !packed {
+		var err error
+		if region, err = c.coverage.Pack(inventory, width, height); err != nil {
+			return render.TextureRegion{}, false // too large, or full: evict a label and pack again
+		}
+		c.coverage.Put(region, coverage, atlas.WrapNone)
+		c.regions[label] = region
+	}
+	c.coverage.RecordCopies(list, inventory)
+	c.coverage.RecordMips(list)
+	return region, true
+}
+```
+
+Its draws bind `c.coverage.Texture()` as they record, since a growth
+replaces it, and place a region with `TextureRect` and its page,
+`region.Layer`. A cell filled on the GPU instead is drawn into
+`Cell(region)` between `RecordCopies` and `RecordMips`, as canvas fills its
+plain images. After a lost device, `Empty` frees every region, and the cache
+packs its labels again.
 
 ## Sliced and tiled sprites
 

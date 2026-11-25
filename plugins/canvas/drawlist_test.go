@@ -2,6 +2,7 @@ package canvas_test
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -176,4 +177,28 @@ func findCanvasLists(frame render.Inspection) []render.InspectedCommandList {
 		}
 	}
 	return lists
+}
+
+// mipPassLabelPrefix begins the label of each pass render draws a texture's
+// mips in, which names its level, layer and texture after it.
+const mipPassLabelPrefix = "render: mip level "
+
+// findCameraLists answers the command lists of frame that canvas began as a
+// test of cameras reads them, each without the passes render draws an
+// atlas's mips in: the first frame drawing anything draws those of the
+// white texel's page, put as the sRGB atlas is made.
+func findCameraLists(frame render.Inspection) []render.InspectedCommandList {
+	lists := findCanvasLists(frame)
+	for index := range lists {
+		lists[index] = dropMipPasses(lists[index])
+	}
+	return lists
+}
+
+// dropMipPasses answers list without the passes render draws mips in.
+func dropMipPasses(list render.InspectedCommandList) render.InspectedCommandList {
+	list.Passes = slices.DeleteFunc(slices.Clone(list.Passes), func(pass render.InspectedPass) bool {
+		return strings.HasPrefix(pass.Label, mipPassLabelPrefix)
+	})
+	return list
 }

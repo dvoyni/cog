@@ -22,6 +22,9 @@ importing [kernel](../../kernel), [metronome](../metronome),
   atlas grows, then evicts the images drawn least lately. Sheets, source
   rectangles, wrapped, sliced and tiled sprites, converters and distance
   fields, and render textures drawn as sprites.
+- **A public atlas.** The `atlas` package packs images of one format into the
+  pages of one 2D-array texture, as canvas packs its sprites and glyphs, for
+  a plugin's own caches, such as a UI's rasterised text.
 - **Every look a 2D material.** A material is a whole WGSL file over canvas's
   include, a fragment stage alone drawing sprites, shapes, text and meshes
   alike, with parameters by name and an argument of its own type for each
@@ -68,6 +71,10 @@ importing [kernel](../../kernel), [metronome](../metronome),
 - **`Inspection`** is one frame in canvas's words. **`Report`** is a mistake
   canvas finds at run time, logged once and carried past, its `ReportKind`
   naming it for tests.
+- **`atlas.Atlas`**, in the `atlas` subpackage, is one atlas of one format,
+  made with `atlas.New` over render's `Inventory`: it packs, grows and
+  records its copies and mips, and leaves what each region holds to its
+  user.
 
 ## Kernel surface
 

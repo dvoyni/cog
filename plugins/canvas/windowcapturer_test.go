@@ -1,6 +1,7 @@
 package canvas_test
 
 import (
+	"cmp"
 	"image"
 	"image/color"
 	"slices"
@@ -120,13 +121,25 @@ func captureDrawing(t *testing.T, record func(list canvas.DrawList)) windowPictu
 	return captureHarnessDrawing(t, canvastest.NewHarness(t), nil, record)
 }
 
+// pixelTestAtlasPageSize is the side of the atlases' pages a pixel test
+// draws with unless its config names one: small, since the software adapter
+// draws a page's mips on the CPU, and every first frame draws those of the
+// white texel's page.
+const pixelTestAtlasPageSize = 256
+
 // captureHarnessDrawing is captureDrawing on h, a harness not yet spawned,
-// canvas configured by config, with plugins listed after the capture's own.
+// canvas configured by config, its pages pixelTestAtlasPageSize texels a side
+// unless it names a side, with plugins listed after the capture's own.
 func captureHarnessDrawing(t *testing.T, h *canvastest.Harness, config *canvas.Config, record func(list canvas.DrawList), plugins ...kernel.Plugin) windowPicture {
 	t.Helper()
 	h.UseSoftwareAdapter()
+	var spawnedConfig canvas.Config
+	if config != nil {
+		spawnedConfig = *config
+	}
+	spawnedConfig.AtlasPageSize = cmp.Or(spawnedConfig.AtlasPageSize, pixelTestAtlasPageSize)
 	capturer := &windowCapturer{}
-	h.Spawn(nil, config, append([]kernel.Plugin{capturer, eventPump{}}, plugins...)...)
+	h.Spawn(nil, &spawnedConfig, append([]kernel.Plugin{capturer, eventPump{}}, plugins...)...)
 	window := h.OpenWindow(platform.Size{Width: pictureWidth, Height: pictureHeight})
 	// A Wayland window gets a framebuffer only once the compositor's frame
 	// callback for its last present is read, a while after it, so the test

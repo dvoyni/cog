@@ -123,7 +123,7 @@ func TestAFillAStrokeAndALineOfOneMaterialAreOneBatchOfEachOfTheirInstances(t *t
 	if len(batches) != 1 || len(batches[0].Entries) != 3 || batches[0].InstanceCount != 6 {
 		t.Fatalf("the shapes drew as %+v, want one batch of their three entries and six instances: a stroke's four sides and the others' one", batches)
 	}
-	draws := findCanvasLists(frame.Render)[0].Passes[0].Draws
+	draws := findCameraLists(frame.Render)[0].Passes[0].Draws
 	if len(draws) != 1 || draws[0].InstanceCount != 6 || draws[0].FirstInstance != 0 {
 		t.Errorf("canvas's pass drew %+v, want one draw of 6 instances from instance 0", draws)
 	}

@@ -374,7 +374,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
     - A hollow centre is a question of coverage, as a rounded shape's corners are: `canvas_covers` answers false there, so a material discarding what it does not cover draws nothing in it, whatever its blend, and `canvas_sample` answers it transparent without sampling.
   - **A tiled sprite** wraps within its region, whose gutter wraps on the axes its image tiles along, so it tiles without seams, as v1's did. The shader samples with gradients of the unwrapped coordinate, so the seam does not drop to the smallest mip.
     - It repeats along both axes, from its top left corner. `Wrap` decides only whether a seam blends: along an axis the image does not wrap, each tile's edge meets the next unblended.
-    - An image drawn from a texture of its own, its own atlas's or a render texture's, has no gutter, so its sampler repeats along the axes it wraps, a change of which breaks a batch. A render texture's image of part of it then reads the texture's opposite edge at its seam, and one of a format encoding nothing, decoded after filtering, blends its seams in encoded colour, darker than an sRGB texture's.
+    - An image drawn from a texture of its own, or a render texture's, has no gutter, so its sampler repeats along the axes it wraps, a change of which breaks a batch. A render texture's image of part of it then reads the texture's opposite edge at its seam, and one of a format encoding nothing, decoded after filtering, blends its seams in encoded colour, darker than an sRGB texture's.
     - The software adapter's linear filter wrapped the coordinate and clamped its footprint, so it never blended across a repeating texture's edge; the wgpu fork's software backend now wraps each texel of the footprint on its own, as its gather and compare samples did.
   - **`TexelScale`,** zero meaning 1, is the scale a sliced sprite's corners and a tiled sprite's tiles take their texels at, for art drawn at 2× or a UI's own scale; a stretched sprite ignores it. A sprite has one draw mode, so it is never sliced and tiled at once, and one field serves both. v1's separate flags allowed both, an exclusion it documented without enforcing.
   - **canvas's sampling helper is the one documented way** for a material to sample an entry's image, written in canvas's material guide. It takes its own derivatives, so a material calls it in uniform control flow, before any discard, as canvas's default material does. The remapping cannot move to the vertex stage, since tiling wraps per pixel, and v1's [canvas: wrap a tiled sprite's uv inside its atlas sub-rect in the shader, so tiling no longer leaves the atlas](https://github.com/dvoyni/cog/issues/440) showed that a custom fragment stage sampling on its own silently stretches tiled and sliced sprites.
@@ -438,7 +438,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 
   Their texture is a one-layer array, so the same shaders draw them, exactly their size with no gutter, so an image as large as a page takes a texture of a page's size, not a larger one: the sampler's clamping at the texture's edge continues its edge as a gutter would, and its mips are the whole texture's. A tiled one wraps through its sampler's address mode instead. Nothing is refused for good: a full atlas costs batches, not pixels, and it is reported once. v1 cached its refusals.
 - **The allocator** is a shelf allocator that frees each region and merges free neighbours, as etagere does under WebRender and glyphon. No MaxRects or skyline implementation frees one rectangle, and v1 reused a slot only for an image of the same padded size. Compaction is not built now; regions are found through canvas's table, so they can move later.
-- **The atlas type is public,** for users building caches of their own, such as a UI's rasterised text. canvas's sprites and glyphs are built on it.
+- **The atlas type is public,** for users building caches of their own, such as a UI's rasterised text. canvas's sprites and glyphs are built on it (see *The atlas package*).
 
 **From pixels to pages**
 
@@ -468,7 +468,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - Each page is made with exactly that many levels, so nothing samples a level that mixes cells.
   - The page side must be a multiple of the atlas grid holding the white texel's cell; `Config.AtlasPageSize` is raised to the next side that is, and reported once.
   - At one level the atlas grid is 1 and the gutter 2, as with `DoNotGenerateMipMaps`: the gutter is the atlas grid, but never less than the 2 texels linear filtering needs.
-  - The white texel's cell is written opaque white at every level as the atlas is made, since no mip pass runs before the first frame's.
+  - The white texel is packed and put as the sRGB atlas is made, as any image's texels are put, its cell continuing it. Its cell lies on the atlas grid, so every level of its page's mips, which the first frame's list makes, is white throughout: the first frame drawing anything records its copy and those mips. Writing its cell at every level as the atlas was made, so no mips were needed, was the first build's; it was a workflow of its own beside every other image's.
   - An image's own texture has the page's levels, or as many as its size has, its mips the whole texture's.
   - A linear filter reads between levels linearly too; a nearest one takes the nearest level.
 
@@ -481,6 +481,25 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 
 - **Each image's chain comes from its own texels.** Every 2×2 block the mip filter averages lies inside one cell, so render's mip pass over a whole page is as clean as a chain per image. Box-filtering a whole atlas would otherwise mix images. canvas regenerates the mips of the layers it packed into, once per frame, with render's `CommandList.GenerateMips` after the passes that packed them (see *Delta to render*). A frame's packing passes and their mips are recorded at the start of its lowest camera order's command list, before any camera's passes, so every camera sampling the atlas draws after them.
 - **A gutter is for linear filtering;** an entry's filter is its own.
+
+### The atlas package
+
+([canvas: atlas residency as one module, owning where every image frame and glyph lies](https://github.com/dvoyni/cog/issues/927))
+
+- **`plugins/canvas/atlas` is public,** a subpackage of canvas's module as `canvastest` is, not under `libs/`, since it is built on render's `Inventory` and `CommandList`. canvas's sprite atlases and glyph atlas are values of it, so a plugin's own cache, such as a UI's rasterised text drawn through a 2D material of its own that binds the atlas's texture, packs as canvas does.
+- **What it holds:** an `Atlas` is one atlas, one 2D-array texture whose layers are its pages, of one format: `R8Unorm`, `RG8Unorm`, `RGBA8Unorm`, `BGRA8Unorm` or their sRGB forms. Each image is a cell of its own on the atlas grid its mip levels set, its gutter around it, packed by its page's shelf allocator. What the texels mean is the shader's business.
+- **Its interface:**
+  - `New(inventory, Descriptor)` makes an atlas of one page. The descriptor names its label, format and page side, its mip levels, its gutter, whether `Put` clears the gutter, and its ceiling of pages. A format it holds no texels of, or a page side off the atlas grid, panics. At more than one mip level the gutter is raised to a multiple of the atlas grid, and the atlas grid at least, as canvas's sprite atlases have always had it.
+  - `Pack(inventory, width, height)` answers where an image lies, or `ErrTooLarge` for a cell no page holds, or `ErrFull` at its ceiling with no room. It grows the atlas itself, doubling its pages, and a growth not yet copied merges into one copy, so growing and reporting an atlas full are written once for glyphs and sprites.
+  - `Put(region, texels, wrap)` copies an image's texels at once, the caller free to reuse them, and fills the whole cell, its rounding and gutter included: from the opposite edge along an axis it wraps, its edge continued along any other, or transparent black under `ClearGutter`. A cell packed again so keeps nothing of the image before it.
+  - `Free(region)` gives a cell back, forgetting a put of it still to record. `Cell` and `TextureRect` place a region, and `Texture` and `PageCount` answer the texture as it is now and how many pages it has; a growth replaces the texture, so it is read as a draw binds it.
+  - **Recording takes two calls,** in one list before anything samples the atlas. `RecordCopies` records a growth's copy of every mip level, releasing the texture it replaced, then the puts, from one temporary buffer. A caller filling cells on the GPU, as canvas does for plain images, records its passes next. `RecordMips` then records the mips of each page packed into since its last call, once a page. Neither records or allocates anything with nothing pending. One `Record` taking a fill callback was weighed: a method value passed every frame risks allocating, which the allocation gate would catch.
+  - `Empty` frees every region, as a lost device leaves the texture empty, keeping its pages and forgetting what was still to record. `Release` releases its texture.
+  - An atlas is not safe for concurrent use: one task at a time packs, puts and records it, as canvas's drawing job does its own.
+- **What it leaves to its users:** what each region holds and how it is found again; what to evict when `Pack` answers `ErrFull`, and when to free a cell; filling a cell on the GPU; binding its texture as it is now; and starting afresh after a lost device. canvas keeps each of these for its own atlases: its table of images, eviction by last use, its pack pass and `startAfresh`.
+- **An image's own texture is not an atlas.** An image too large for a page, or one packed when its atlas is full, has no pages, no gutter and no growth, so it stays a texture of canvas's own.
+- **The package has a `Wrap` of its own,** and `canvas.Wrap` stays canvas's. `Put` is named so because "write" did not say which way the bytes go.
+- **Its tests run in rendertest's harness,** a test plugin's task making and calling atlases on the recording adapter, as a user's plugin would. What a put copies is read through the test's export of the bytes it staged, since the recording adapter's textures hold no texels.
 
 ### Shapes
 
@@ -614,7 +633,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 - **The glyph atlas is R8Unorm, linear,** with a 1-texel transparent gutter, since a field's range already fades to zero at its cell's edge, and no mips. Bitmap glyphs share it, and the text material reads their coverage rather than a distance.
   - It is one 2D-array texture of pages of `Config.AtlasPageSize`, made at the first glyph drawn, each glyph's field a cell on no atlas grid, packed by the pages' shelf allocators. It grows as a sprite atlas does, doubling its pages up to `Config.AtlasLayerCeiling`.
   - A glyph whose cell no page holds, or one the atlas at its ceiling has no room for, draws nothing, reported once as `ReportKindAtlasFull`, and is tried once in each later frame drawing it; the atlas grows only for a cell a page holds.
-  - Each field packed is copied into its region by the lowest order's command list, from a temporary buffer, after the atlases' growths are copied, as an image's cell is filled, so it lands in the texture the atlas has then. `Inventory.WriteTexture` was tried first: its writes land before every command list, so a field on a page a growth was still to copy had to be written into the texture copied from, and one written into a texture grown into was lost when a later frame's growth merged past it. The gutter takes no copy, since a cell is never freed and a page is made transparent.
+  - Each field packed is put into its cell, and copied by the lowest order's command list from one temporary buffer with the atlas's other puts, after its growth's copy, as an image's cell is filled, so it lands in the texture the atlas has then. `Inventory.WriteTexture` was tried first: its writes land before every command list, so a field on a page a growth was still to copy had to be written into the texture copied from, and one written into a texture grown into was lost when a later frame's growth merged past it. The whole cell is copied, its gutter transparent black, so a cell freed and packed again keeps nothing of the glyph before it.
   - A glyph's field lives in the `FontLibrary` resource's glyph table, each at an index its laid-out glyphs name, made under the read lock and guarded by a lock of its own; where it is packed is the drawing job's, at the same index.
 - **Glyphs are made at run time, at their first use,** in the job recording the text, ready that frame as an image is.
   - The outline is rasterized anti-aliased at the field's em with x/image's vector rasterizer, then the distance transform behind `DistanceField` runs over the coverage, as TinySDF does. canvas has one distance generator.
@@ -902,7 +921,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 ([canvas: auto-atlasing](https://github.com/dvoyni/cog/issues/866), [canvas on the kernel](https://github.com/dvoyni/cog/issues/873))
 
 - **`render.RecoveredEvent` is a fresh start.** The atlases, the glyphs and the mesh files' buffers are dropped, and loaded again at their next draw. `Handlers.Recover` schedules it in a task of its own under the renderer's write lock, so no frame draws while it runs; a frame drawn between the recovery and it draws what render left empty, once.
-- **canvas's table of images is on the CPU and survives.** Every page is emptied, the atlases keeping as many pages, and each image packs again at its next draw, converted ones derived from their files again. The white texel is written again at once. An image's own texture is released, and made again at its next draw. A frame found to draw nothing, and an image of a render texture, which its maker fills again, are kept.
+- **canvas's table of images is on the CPU and survives.** Every page is emptied, the atlases keeping as many pages, and each image packs again at its next draw, converted ones derived from their files again. The white texel is put again at once, and copied by the next frame's list. An image's own texture is released, and made again at its next draw. A frame found to draw nothing, and an image of a render texture, which its maker fills again, are kept.
 - **Glyphs rebuild as cache misses,** their fields kept on the CPU and copied again into the emptied glyph atlas.
 - **Mesh files load again,** those that failed among them, their buffers and meshes released.
 - **Bytes removed from a memory mount** since their load cannot come back, which render reports.
@@ -1026,6 +1045,8 @@ Each change was checked for a 3D renderer's needs too, drawbridge's forward+ or 
   - premultiplied blending, distance-field profiles and hairlines;
   - pixel-perfect snapping, viewport clears and `FitInscribe`'s bars;
   - a 12 px label, for the owner to judge small text on distance fields.
+
+  A pixel test draws with pages of 256 texels unless its config names a side, since the software adapter draws a page's mips on the CPU, and every first frame draws those of the white texel's page: at the default 2048 they added about a second to each pixel test.
 
 **`plugins/canvas/canvastest`,** exported beside rendertest, serves canvas's own tests and those of the plugins built on canvas, such as the ECS plugin and a UI:
 - **A harness.** It wraps rendertest's harness, and spawns canvas after render with render's config and canvas's passed through, the test's plugins after canvas. It forwards `UseSoftwareAdapter` and `RunMain`.

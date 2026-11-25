@@ -270,7 +270,7 @@ func TestAnEntryOutsideOneCamerasViewIsCulledByItAndDrawnByAnother(t *testing.T)
 	if batches := frame.Cameras[1].Batches; len(batches) != 1 || len(batches[0].Entries) != 1 || batches[0].Entries[0].Shape != fill {
 		t.Errorf("the right camera, at x 1000, drew %+v, want one batch of the fill", batches)
 	}
-	lists := findCanvasLists(frame.Render)
+	lists := findCameraLists(frame.Render)
 	if len(lists) != 1 || len(lists[0].Passes) != 2 {
 		t.Fatalf("canvas began %+v, want one list at order 0 of the halves' two passes", lists)
 	}
@@ -325,7 +325,7 @@ func TestAtEqualOrdersACameraIntoATextureDrawsBeforeOneIntoAWindowSetBeforeIt(t 
 
 	h.Step()
 
-	lists := findCanvasLists(h.Frames()[0].Render)
+	lists := findCameraLists(h.Frames()[0].Render)
 	if len(lists) != 1 || len(lists[0].Passes) != 2 {
 		t.Fatalf("canvas began %+v, want one list of two passes for the two cameras at order 0", lists)
 	}
@@ -360,7 +360,7 @@ func TestATextureTargetsViewportIsPlacedFromItsDescriptorAndItsOutputEncodedAsIt
 			if len(frame.Cameras) != 1 || frame.Cameras[0].Camera.Texture != target.madeTexture() || frame.Cameras[0].Viewport != wantViewport {
 				t.Fatalf("the frame was seen through %+v, want the texture camera's alone, into %v over %v", frame.Cameras, target.madeTexture(), wantViewport)
 			}
-			lists := findCanvasLists(frame.Render)
+			lists := findCameraLists(frame.Render)
 			if len(lists) != 1 || len(lists[0].Passes) != 1 || len(lists[0].Passes[0].Draws) != 1 {
 				t.Fatalf("canvas began %+v, want one list of one pass with one draw, the viewport's clear", lists)
 			}
@@ -395,7 +395,7 @@ func TestACameraThatClearsDrawsInAFrameWithNoEntriesItsClearEncodedAndOneThatDoe
 	h.Step()
 
 	frames := h.Frames()
-	lists := findCanvasLists(frames[0].Render)
+	lists := findCameraLists(frames[0].Render)
 	if len(lists) != 1 || len(lists[0].Passes) != 1 || len(lists[0].Passes[0].Draws) != 0 {
 		t.Fatalf("a frame of a clearing camera alone began %+v, want one list of one pass drawing nothing", lists)
 	}
@@ -474,7 +474,7 @@ func TestAMultisampledCameraDrawsIntoAFourSampleTextureOfItsViewportResolvedInto
 
 	h.Step()
 
-	lists := findCanvasLists(h.Frames()[0].Render)
+	lists := findCameraLists(h.Frames()[0].Render)
 	if len(lists) != 1 || len(lists[0].Passes) != 4 {
 		t.Fatalf("canvas began %+v, want one list of four passes, each camera's entries and then what they resolved into drawn over its viewport", lists)
 	}
@@ -547,7 +547,7 @@ func TestAMultisampledCameraClearingTheWholeWindowDrawsWhatItResolvedOverTheWind
 
 	h.Step()
 
-	lists := findCanvasLists(h.Frames()[0].Render)
+	lists := findCameraLists(h.Frames()[0].Render)
 	if len(lists) != 1 || len(lists[0].Passes) != 2 {
 		t.Fatalf("canvas began %+v, want one list of the camera's entries' pass and its composite", lists)
 	}

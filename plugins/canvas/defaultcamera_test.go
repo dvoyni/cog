@@ -35,7 +35,7 @@ func TestAFrameOfFillsReachesRenderAsOneListAtOrderZeroOfOnePassAndOneInstancedD
 	if want := []string{"before", "canvas", "after"}; !slices.Equal(labels, want) {
 		t.Fatalf("the frame's lists are %v, want canvas's one between orders -1 and 1: %v", labels, want)
 	}
-	passes := lists[1].Passes
+	passes := dropMipPasses(lists[1]).Passes
 	if len(passes) != 1 {
 		t.Fatalf("canvas's list holds %d passes, want the default camera's one", len(passes))
 	}

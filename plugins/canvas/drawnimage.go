@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/plugins/canvas/atlas"
 	"github.com/dvoyni/cog/plugins/render"
 )
 
@@ -33,14 +34,17 @@ type drawnImage struct {
 	drawsNothing bool
 }
 
-// makeDrawnImage answers packed as drawn by an image of options.
+// makeDrawnImage answers packed as drawn by an image of options: its region
+// of its atlas's page, or the whole of its own texture.
 func makeDrawnImage(packed *packedImage, options ImageOptions) drawnImage {
-	pageWidth := float32(packed.atlas.width)
-	pageHeight := float32(packed.atlas.height)
 	region := packed.region
+	textureRect := m.Rect{Width: 1, Height: 1}
+	if packed.atlas != nil {
+		textureRect = packed.atlas.TextureRect(region)
+	}
 	return drawnImage{
 		packed:      packed,
-		region:      m.Rect{X: float32(region.X) / pageWidth, Y: float32(region.Y) / pageHeight, Width: float32(region.Width) / pageWidth, Height: float32(region.Height) / pageHeight},
+		region:      textureRect,
 		page:        region.Layer,
 		size:        m.Vec2{X: float32(region.Width), Y: float32(region.Height)},
 		frameBounds: packed.frameBounds,
@@ -62,14 +66,14 @@ func (d *drawnImage) placeRegion(size m.Vec2) m.Rect {
 	return m.Rect{X: origin.X, Y: origin.Y, Width: regionSize.X, Height: regionSize.Y}
 }
 
-// findView answers the view of the texture d's entries draw, placed: its
-// own texture's, or the whole texture of the atlas it is packed into, as
+// findView answers the view of the texture d's entries draw, placed: a
+// render texture's view, or the whole of the texture it is packed into, as
 // that texture is now, since growing an atlas replaces it.
 func (d *drawnImage) findView() render.TextureView {
 	if d.packed == nil {
 		return d.view
 	}
-	return render.TextureView{Texture: d.packed.atlas.texture}
+	return render.TextureView{Texture: d.packed.findTexture()}
 }
 
 // placeTextureImage writes into drawn frame of the image of key, of a
@@ -106,16 +110,48 @@ func placeTextureImage(inventory render.Inventory, reporter *reporter, drawn *dr
 	}
 }
 
-// packedImage is an image packed into an atlas, which the images differing
-// from it only in options that change no pixel share: the atlas, a sprite
-// atlas or one of the image's own, its region there, its page as the
-// region's layer; the bounds of the frame a converter's output there was
-// converted from, in texels from the region's top left, zero for a region
-// holding its frame; and the number of the frame that last drew it, which
-// no atlas evicts it in.
+// packedImage is an image packed, which the images differing from it only
+// in options that change no pixel share: the sprite atlas it is packed
+// into, or, nil, its own texture instead, exactly its size, of one layer
+// and no gutter, the zero Texture when render could not make it; its region
+// there, its page as the region's layer, the whole texture for its own; the
+// bounds of the frame a converter's output there was converted from, in
+// texels from the region's top left, zero for a region holding its frame;
+// and the number of the frame that last drew it, which no atlas evicts it
+// in.
 type packedImage struct {
-	atlas          *atlas
+	atlas          *atlas.Atlas
+	ownTexture     render.Texture
 	region         render.TextureRegion
 	frameBounds    m.Rect
 	lastDrawnFrame uint64
+}
+
+// findTexture answers the texture p is packed into: its atlas's, as it is
+// now, or its own.
+func (p *packedImage) findTexture() render.Texture {
+	if p.atlas == nil {
+		return p.ownTexture
+	}
+	return p.atlas.Texture()
+}
+
+// findCell answers the cell p's frame fills: its region and its gutter in
+// its atlas, or the whole of its own texture, which has no gutter.
+func (p *packedImage) findCell() render.TextureRegion {
+	if p.atlas == nil {
+		return p.region
+	}
+	return p.atlas.Cell(p.region)
+}
+
+// free gives p's cell back to its atlas, or releases its own texture
+// through inventory.
+func (p *packedImage) free(inventory render.Inventory) {
+	switch {
+	case p.atlas != nil:
+		p.atlas.Free(p.region)
+	case p.ownTexture != (render.Texture{}):
+		inventory.ReleaseTexture(p.ownTexture)
+	}
 }

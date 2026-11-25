@@ -110,7 +110,7 @@ func findPassSummaries(list render.InspectedCommandList, labels map[render.Textu
 	for _, pass := range list.Passes {
 		target := pass.ColorTargets[0]
 		label := pass.Label
-		if strings.HasPrefix(label, "render: mip level ") {
+		if strings.HasPrefix(label, mipPassLabelPrefix) {
 			label = mipsLabel
 		}
 		// A window's target is the zero Texture, which labels may name.
@@ -375,12 +375,45 @@ func TestATinyShapeDrawsTheWhiteTexelWrittenAtEveryMipLevel(t *testing.T) {
 	picture.expect(t, []probe{{"the tiny fills' square", m.Vec2{}, opaqueWhite}})
 }
 
+func TestTheWhiteTexelIsPutAsTheSRGBAtlasIsMadeItsCellCopiedAndItsPagesMipsMadeByTheFirstFrame(t *testing.T) {
+	// At the default 3 levels the white texel's cell is 12 texels, on the
+	// atlas grid of 4: the first frame, drawing a fill alone, copies it into
+	// the first page before drawing that page's levels 1 and 2, then the
+	// camera's pass; the frame after draws the camera's pass alone.
+	h := canvastest.NewHarness(t)
+	h.Spawn(nil, nil)
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	for range 2 {
+		h.Record(recordWhiteFill)
+		h.Step()
+	}
+
+	frames := h.Frames()
+	labels := findTextureLabels(frames[0].Render)
+	first := findCanvasLists(frames[0].Render)
+	if len(first) != 1 {
+		t.Fatalf("the first frame began %d canvas lists, want one", len(first))
+	}
+	atlas := frames[0].Cameras[0].Batches[0].Texture
+	if copies := first[0].Copies; len(copies) != 1 || copies[0].DestinationTexture != atlas || copies[0].DestinationRegion != (render.TextureRegion{Width: 12, Height: 12}) {
+		t.Errorf("the first frame copied %+v, want the white texel's cell of 12 texels into the sRGB atlas %v", copies, atlas)
+	}
+	want := []passSummary{{mipsLabel, spriteAtlasLabel, 1, 0, 1}, {mipsLabel, spriteAtlasLabel, 2, 0, 1}, {"canvas camera", "", 0, 0, 1}}
+	if got := findPassSummaries(first[0], labels); !slices.Equal(got, want) {
+		t.Errorf("the first frame drew %+v, want the white texel's page's levels 1 and 2, then the camera's pass: %+v", got, want)
+	}
+	if second := findCanvasLists(frames[1].Render); len(second) != 1 || len(second[0].Copies) != 0 || len(second[0].Passes) != 1 {
+		t.Errorf("the frame after began %+v, want the camera's pass alone, copying nothing", second)
+	}
+}
+
 func TestAGrownAtlasCopiesEveryMipLevelOfItsPagesAndMakesTheMipsOfThePagePackedInto(t *testing.T) {
 	// A page of 12 texels at the default 3 levels holds the white texel's
 	// cell alone, so red's cell of 12 grows the atlas to 2 pages: the
-	// first is copied at each of its levels, the white texel written into
-	// each, and the second has its levels 1 and 2 drawn once red is packed
-	// into it.
+	// first is copied at each of its levels, then the white texel, put as
+	// the atlas was made, is copied into its cell there, and both pages
+	// have their levels 1 and 2 drawn, the first holding the white texel and
+	// the second once red is packed into it.
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, &canvas.Config{AtlasPageSize: 12}, &fileMounter{files: makeAtlasFiles(t)})
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
@@ -395,7 +428,12 @@ func TestAGrownAtlasCopiesEveryMipLevelOfItsPagesAndMakesTheMipsOfThePagePackedI
 		t.Fatalf("the frame began %d canvas lists, want one", len(lists))
 	}
 	var copied []render.TextureRegion
+	var whiteCopies []render.InspectedCopy
 	for _, copy := range lists[0].Copies {
+		if copy.SourceTexture == (render.Texture{}) {
+			whiteCopies = append(whiteCopies, copy)
+			continue
+		}
 		if copy.DestinationTexture != atlas || copy.SourceRegion != copy.DestinationRegion {
 			t.Errorf("the frame copied %+v, want each page's level into the same of the grown atlas", copy)
 		}
@@ -404,17 +442,21 @@ func TestAGrownAtlasCopiesEveryMipLevelOfItsPagesAndMakesTheMipsOfThePagePackedI
 	if want := []render.TextureRegion{{MipLevel: 0}, {MipLevel: 1}, {MipLevel: 2}}; !slices.Equal(copied, want) {
 		t.Errorf("the frame copied %+v, want the first page at each of its 3 levels", copied)
 	}
-	want := []passSummary{{"canvas pack", spriteAtlasLabel, 0, 1, 1}, {mipsLabel, spriteAtlasLabel, 1, 1, 1}, {mipsLabel, spriteAtlasLabel, 2, 1, 1}, {"canvas camera", "", 0, 0, 1}}
+	// The white texel's cell is 12 texels, its texel on the atlas grid of 4.
+	if whiteCell := (render.TextureRegion{Width: 12, Height: 12}); len(whiteCopies) != 1 || whiteCopies[0].DestinationTexture != atlas || whiteCopies[0].DestinationRegion != whiteCell || whiteCopies[0].Position < len(copied) {
+		t.Errorf("the frame copied texels put %+v, want the white texel's cell %+v of the grown atlas, after its pages", whiteCopies, whiteCell)
+	}
+	want := []passSummary{{"canvas pack", spriteAtlasLabel, 0, 1, 1}, {mipsLabel, spriteAtlasLabel, 1, 0, 1}, {mipsLabel, spriteAtlasLabel, 2, 0, 1}, {mipsLabel, spriteAtlasLabel, 1, 1, 1}, {mipsLabel, spriteAtlasLabel, 2, 1, 1}, {"canvas camera", "", 0, 0, 1}}
 	if got := findPassSummaries(lists[0], findTextureLabels(frame.Render)); !slices.Equal(got, want) {
-		t.Errorf("the frame drew %+v, want red packed into the second page, its levels 1 and 2 drawn, then the camera's pass: %+v", got, want)
+		t.Errorf("the frame drew %+v, want red packed into the second page, both pages' levels 1 and 2 drawn, then the camera's pass: %+v", got, want)
 	}
 }
 
-func TestAnImageAsLargeAsAPageTakesAnAtlasOfItsOwnExactlyItsSize(t *testing.T) {
+func TestAnImageAsLargeAsAPageTakesATextureOfItsOwnExactlyItsSize(t *testing.T) {
 	// The blue image of 32 texels is a page's side, larger than the default
-	// OwnTextureSize of half a page, so it takes an atlas of its own, of no
+	// OwnTextureSize of half a page, so it takes a texture of its own, of no
 	// gutter, no larger than a page, with the 3 mip levels a page has, made
-	// after its packing pass.
+	// after its packing pass, and before those of the white texel's page.
 	h := canvastest.NewHarness(t)
 	describer := &textureDescriber{}
 	h.Spawn(nil, &canvas.Config{AtlasPageSize: 32}, &fileMounter{files: makeAtlasFiles(t)}, describer)
@@ -430,20 +472,20 @@ func TestAnImageAsLargeAsAPageTakesAnAtlasOfItsOwnExactlyItsSize(t *testing.T) {
 	if len(lists) != 1 {
 		t.Fatalf("the first frame drawing the image began %d canvas lists, want one", len(lists))
 	}
-	want := []passSummary{{"canvas pack", bluePath, 0, 0, 1}, {mipsLabel, bluePath, 1, 0, 1}, {mipsLabel, bluePath, 2, 0, 1}, {"canvas camera", "", 0, 0, 1}}
+	want := []passSummary{{"canvas pack", bluePath, 0, 0, 1}, {mipsLabel, bluePath, 1, 0, 1}, {mipsLabel, bluePath, 2, 0, 1}, {mipsLabel, spriteAtlasLabel, 1, 0, 1}, {mipsLabel, spriteAtlasLabel, 2, 0, 1}, {"canvas camera", "", 0, 0, 1}}
 	if got := findPassSummaries(lists[0], findTextureLabels(frame)); !slices.Equal(got, want) {
-		t.Fatalf("the first frame drawing the image drew %+v, want it packed into an atlas of its own, labelled %q, its mips drawn, then the camera's pass: %+v", got, bluePath, want)
+		t.Fatalf("the first frame drawing the image drew %+v, want it packed into a texture of its own, labelled %q, its mips drawn, then the white texel's page's, then the camera's pass: %+v", got, bluePath, want)
 	}
-	atlas := findParameter(t, lists[0].Passes[3].Draws[0].DrawParameters, "canvas_atlas").TextureView.Texture
+	atlas := findParameter(t, findPass(t, lists[0], "canvas camera").Draws[0].DrawParameters, "canvas_atlas").TextureView.Texture
 	if label := findTextureLabels(frame)[atlas]; label != bluePath {
-		t.Errorf("the sprite drew from %q, want its own atlas, labelled %q", label, bluePath)
+		t.Errorf("the sprite drew from %q, want its own texture, labelled %q", label, bluePath)
 	}
 	describer.describe(atlas)
 	h.Record(record)
 	h.Step()
 	described := describer.describedTextures()
 	if len(described) != 1 || described[0].Width != 32 || described[0].Height != 32 || described[0].LayerCount > 1 || described[0].MipLevelCount != 3 {
-		t.Errorf("the image's own atlas is %+v, want one page of 32 by 32 texels, its size, of 3 mip levels", described)
+		t.Errorf("the image's own texture is %+v, want one layer of 32 by 32 texels, its size, of 3 mip levels", described)
 	}
 }
 
@@ -604,7 +646,8 @@ func TestAFullAtlasDoublesItsPagesCopiedIntoATextureOfTwiceAsMany(t *testing.T) 
 	// A page of 8 texels of one mip level holds the white texel's cell of 5
 	// and no cell of 8 beside it, so red's cell grows the atlas to 2 pages and the
 	// quadrants' to 4 in one frame, its one page copied once into the
-	// last texture, the one between released uncopied. In the next frame
+	// last texture, the one between released uncopied, before the white
+	// texel put as the atlas was made is copied into it. In the next frame
 	// green fills the fourth page and the stripes grow it to 8, its 4
 	// pages copied. Each image is packed onto the first page holding it,
 	// in a pass of its own.
@@ -647,7 +690,9 @@ func TestAFullAtlasDoublesItsPagesCopiedIntoATextureOfTwiceAsMany(t *testing.T) 
 		}
 		var copies []pageCopy
 		for _, copied := range lists[0].Copies {
-			copies = append(copies, pageCopy{copied.SourceTexture, copied.DestinationTexture, copied.SourceRegion.Layer, copied.DestinationRegion.Layer})
+			if copied.SourceTexture != (render.Texture{}) {
+				copies = append(copies, pageCopy{copied.SourceTexture, copied.DestinationTexture, copied.SourceRegion.Layer, copied.DestinationRegion.Layer})
+			}
 			for _, pass := range lists[0].Passes {
 				if pass.Position < copied.Position {
 					t.Errorf("frame %d's pass %q is at %d, before a copy, want every pass after the copies", index, pass.Label, pass.Position)

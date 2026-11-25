@@ -22,7 +22,7 @@ type atlasPacking struct {
 // wraps along, as Wrap's values are: bit 0 x, bit 1 y.
 func (p *atlasPacking) makeInstance() instanceData {
 	region := p.packed.region
-	cell := p.packed.atlas.findCell(region)
+	cell := p.packed.findCell()
 	frameRect := p.frameRect.Float()
 	return instanceData{
 		region: m.Rect{X: -float32(region.X - cell.X), Y: -float32(region.Y - cell.Y), Width: float32(cell.Width), Height: float32(cell.Height)},

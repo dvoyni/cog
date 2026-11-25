@@ -1,4 +1,4 @@
-package canvas
+package atlas
 
 import "testing"
 

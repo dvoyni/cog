@@ -107,7 +107,7 @@ func TestAnImageOfATextureDrawsItsFirstLevelAndLayerThroughAViewInABatchOfItsOwn
 	if len(batches) != 2 || batches[1].Texture != texture || batches[1].InstanceCount != 2 {
 		t.Fatalf("the camera drew the batches %+v, want the shape's, then one of both sprites over texture %v", batches, texture)
 	}
-	list := findCanvasLists(frame.Render)[0]
+	list := findCameraLists(frame.Render)[0]
 	if passes := findPassSummaries(list, nil); !slices.Equal(passes, []passSummary{{label: "canvas camera", draws: 2}}) {
 		t.Errorf("canvas drew the passes %+v, want the camera's alone into the window, of two draws, packing nothing", passes)
 	}

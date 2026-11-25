@@ -52,7 +52,7 @@ func (t *laidOutText) findBounds(drawnGlyphs []drawnGlyph, drawnImages [][]drawn
 			image := findDrawnFrame(drawnImages, icon.image, icon.frame)
 			// An icon drawn from a texture of its own, not the sprite atlas
 			// the text material samples, draws nothing.
-			if image.packed == nil || image.packed.atlas.holdsOneImage {
+			if image.packed == nil || image.packed.atlas == nil {
 				continue
 			}
 			glyphRect = image.placeRegion(icon.size).Translate(m.Vec2{X: glyph.pen.X, Y: glyph.pen.Y - icon.size.Y})
@@ -93,7 +93,7 @@ func (t *laidOutText) appendInstances(instances []instanceData, drawnGlyphs []dr
 		}
 		if icon := t.layout.findIcon(glyph); icon != nil {
 			image := findDrawnFrame(drawnImages, icon.image, icon.frame)
-			if image.packed == nil || image.packed.atlas.holdsOneImage {
+			if image.packed == nil || image.packed.atlas == nil {
 				continue
 			}
 			if !icon.tinted {

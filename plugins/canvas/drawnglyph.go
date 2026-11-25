@@ -2,6 +2,7 @@ package canvas
 
 import (
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/plugins/canvas/atlas"
 	"github.com/dvoyni/cog/plugins/render"
 )
 
@@ -22,11 +23,9 @@ type drawnGlyph struct {
 }
 
 // makeDrawnGlyph answers field, packed at region of glyphAtlas, as drawn.
-func makeDrawnGlyph(glyphAtlas *atlas, region render.TextureRegion, field glyphField) drawnGlyph {
-	pageWidth := float32(glyphAtlas.width)
-	pageHeight := float32(glyphAtlas.height)
+func makeDrawnGlyph(glyphAtlas *atlas.Atlas, region render.TextureRegion, field glyphField) drawnGlyph {
 	return drawnGlyph{
-		region: m.Rect{X: float32(region.X) / pageWidth, Y: float32(region.Y) / pageHeight, Width: float32(region.Width) / pageWidth, Height: float32(region.Height) / pageHeight},
+		region: glyphAtlas.TextureRect(region),
 		page:   region.Layer,
 		bounds: field.bounds,
 		spread: field.spread,

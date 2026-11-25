@@ -80,7 +80,7 @@ func TestAnInspectedFrameAnswersItsCamerasBatchesInstanceCountsAndEntriesWithThe
 	if !reflect.DeepEqual(frame.Cameras, want) {
 		t.Errorf("the frame inspected was seen through\n%+v\nwant the default camera's one batch of seven entries in sort order\n%+v", frame.Cameras, want)
 	}
-	lists := findCanvasLists(frame.Render)
+	lists := findCameraLists(frame.Render)
 	if frame.Render.Beat != frame.Beat || len(lists) != 1 || len(lists[0].Passes) != 1 || len(lists[0].Passes[0].Draws) != 1 || lists[0].Passes[0].Draws[0].InstanceCount != 7 {
 		t.Errorf("render's inspection beside it, of beat %d, holds canvas's lists %+v, want render's of the same beat, %d, with one draw of 7 instances", frame.Render.Beat.Tick, lists, frame.Beat.Tick)
 	}

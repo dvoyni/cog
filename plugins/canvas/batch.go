@@ -40,10 +40,10 @@ type batchKey struct {
 // with shapes.
 func makeImageBatchKey(material Material, image Image, drawn *drawnImage, clip m.Rect, filter, defaultFilter Filter) batchKey {
 	key := batchKey{material: material, texture: drawn.findView(), clip: clip}
-	// An image drawn from a texture of its own, its own atlas's or a render
-	// texture's, has no gutter, so its sampler repeats along the axes it
-	// wraps along; a sprite atlas's gutter wraps its images.
-	if drawn.packed == nil || drawn.packed.atlas.holdsOneImage {
+	// An image drawn from a texture of its own, or a render texture's, has
+	// no gutter, so its sampler repeats along the axes it wraps along; a
+	// sprite atlas's gutter wraps its images.
+	if drawn.packed == nil || drawn.packed.atlas == nil {
 		key.wrap = drawn.options.Wrap
 	}
 	if image != (Image{}) {

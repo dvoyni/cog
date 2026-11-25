@@ -160,7 +160,9 @@
 // edge. Nothing is refused for good.
 // Sprites of any images of one atlas batch together while their filter is
 // one, and shapes with them: shapes, and the zero Image, draw the sRGB
-// sprite atlas's white texel, which takes no filter.
+// sprite atlas's white texel, which takes no filter. canvas's atlases are
+// values of the public package atlas, which a plugin uses for a cache of
+// its own, such as a UI's rasterised text.
 //
 // An entry's Clip is a rectangle of the world it draws nothing outside,
 // seen through each camera as the entry is, a scissor of its bounding box

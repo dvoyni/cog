@@ -53,7 +53,7 @@ func TestAMeshFilePutIntoAMemoryMountDrawsAtItsFirstDrawAndAForestOfItIsOneDraw(
 	if entry := batches[1].Entries[0]; entry.Kind != canvas.EntryKindMesh || entry.Mesh.File != rock {
 		t.Errorf("the last batch holds %+v, want the rock", entry)
 	}
-	lists := findCanvasLists(frame.Render)
+	lists := findCameraLists(frame.Render)
 	if len(lists) != 1 || len(lists[0].Passes) != 1 || len(lists[0].Passes[0].Draws) != 2 {
 		t.Fatalf("canvas's lists are %+v, want one pass of two draws", lists)
 	}
@@ -193,7 +193,7 @@ func TestPuttingAMeshFileAgainAndUnloadingItsPathDrawsTheNewOne(t *testing.T) {
 	}
 
 	for index, want := range []struct{ vertexCount, indexCount uint32 }{{3, 0}, {0, 6}} {
-		lists := findCanvasLists(h.Frames()[index].Render)
+		lists := findCameraLists(h.Frames()[index].Render)
 		if len(lists) != 1 || len(lists[0].Passes) != 1 || len(lists[0].Passes[0].Draws) != 1 {
 			t.Fatalf("frame %d's canvas lists are %+v, want one pass of one draw", index, lists)
 		}
@@ -302,7 +302,7 @@ func TestAMeshOfItsOwnLayoutDrawnWithAFragmentOnlyMaterialIsRefusedReportedOnce(
 			t.Errorf("frame %d drew batches %+v, want the grass material's mesh and triangles alone", index, batches)
 			continue
 		}
-		lists := findCanvasLists(frame.Render)
+		lists := findCameraLists(frame.Render)
 		if len(lists) != 1 || len(lists[0].Passes) != 1 || len(lists[0].Passes[0].Draws) != 2 {
 			t.Errorf("frame %d's canvas lists are %+v, want one pass of two draws", index, lists)
 			continue
