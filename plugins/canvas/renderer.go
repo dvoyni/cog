@@ -199,11 +199,11 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 		}
 		entriesStart := len(r.visibleEntries)
 		for _, layerRun := range camera.findLayerRuns(state.sorter.entries) {
-			r.visibleEntries = drawnCamera.view.appendVisibleEntries(r.visibleEntries, layerRun, r.drawnEntries)
+			r.visibleEntries = drawnCamera.plan.view.appendVisibleEntries(r.visibleEntries, layerRun, r.drawnEntries)
 		}
 		drawnCamera.entries = r.visibleEntries[entriesStart:]
 		switch {
-		case camera.Clear || len(drawnCamera.entries) > 0:
+		case drawnCamera.plan.clear != clearNone || len(drawnCamera.entries) > 0:
 			r.cameraDraws = append(r.cameraDraws, drawnCamera)
 		case state.frameInspected:
 			r.culledCameras = append(r.culledCameras, culledCamera{drawingBefore: len(r.cameraDraws), draw: drawnCamera})
@@ -220,29 +220,27 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 }
 
 // drawOrder draws cameraDraws, the cameras of one order in the order they
-// draw, of state's entries, as one command list at that order: first the
-// atlas set's uploads, which the lowest order's list records, leaving none
-// for the others, then each camera's clear drawn over its viewport,
-// or a multisampled
-// camera's quad drawing what it resolved there, and its batches as
-// instance data, in one temporary buffer, then each camera's entries'
-// pass, a multisampled camera's textures acquired before it and its
-// composite after it. The instance data is in temporary buffers, one per
-// stride. A multisampled camera whose textures render could not make, which
-// it logged, draws nothing.
+// draw, of state's entries, as one command list at that order, each as its
+// plan says: first the atlas set's uploads, which the lowest order's list
+// records, leaving none for the others, then each camera's viewport quad,
+// its ClearColor or what a multisampled camera resolved, and its batches as
+// instance data, then each camera's entries' pass, a multisampled camera's
+// textures acquired before it and its composite after it. The instance
+// data is in temporary buffers, one per stride. A multisampled camera whose
+// textures render could not make, which it logged, draws nothing.
 func (r *renderer) drawOrder(frame render.Frame, inventory render.Inventory, cameraDraws []cameraDraw, state *drawState) {
 	r.instances.reset()
 	for index := range cameraDraws {
 		drawnCamera := &cameraDraws[index]
-		switch {
-		case drawnCamera.camera.SampleCount == multisampledCameraSampleCount:
+		switch drawnCamera.plan.viewportQuad {
+		case quadResolved:
 			// What it resolved into is drawn whole, untinted.
 			resolved := drawnImage{region: m.Rect{Width: 1, Height: 1}}
 			drawnCamera.viewportInstance = uint32(len(r.instances.fixed))
 			r.instances.fixed = appendShapeInstances(r.instances.fixed, &Shape{Tint: m.White}, &resolved)
-		case drawnCamera.camera.Clear && !drawnCamera.colorTarget.Clear:
-			// A clear not by the pass's load is drawn over the viewport, whose
-			// vertex stage reads only the instance's tint, region and page.
+		case quadClear:
+			// The viewport's vertex stage reads only the instance's tint,
+			// region and page.
 			drawnCamera.viewportInstance = uint32(len(r.instances.fixed))
 			r.instances.fixed = appendShapeInstances(r.instances.fixed, &Shape{Tint: drawnCamera.camera.ClearColor}, r.atlases.placed(Image{}, 0))
 		}
@@ -256,53 +254,55 @@ func (r *renderer) drawOrder(frame render.Frame, inventory render.Inventory, cam
 	r.atlases.recordUploads(&list, inventory)
 	for index := range cameraDraws {
 		drawnCamera := &cameraDraws[index]
-		if drawnCamera.camera.SampleCount != multisampledCameraSampleCount {
-			r.drawEntries(&list, drawnCamera, state)
+		entriesTarget := drawnCamera.plan.entriesTarget
+		if drawnCamera.plan.composite == compositeNone {
+			r.drawEntries(&list, drawnCamera, entriesTarget, state)
 			continue
 		}
-		descriptor := drawnCamera.multisampledDescriptor
-		drawnCamera.colorTarget.Texture = frame.AcquireTemporaryTexture(descriptor)
+		descriptor := drawnCamera.plan.multisampledDescriptor
+		entriesTarget.Texture = frame.AcquireTemporaryTexture(descriptor)
 		descriptor.Label = "canvas resolved camera"
 		descriptor.SampleCount = 1
-		drawnCamera.colorTarget.Resolve.Texture = frame.AcquireTemporaryTexture(descriptor)
-		if drawnCamera.colorTarget.Texture == (render.Texture{}) || drawnCamera.colorTarget.Resolve.Texture == (render.Texture{}) {
+		entriesTarget.Resolve.Texture = frame.AcquireTemporaryTexture(descriptor)
+		if entriesTarget.Texture == (render.Texture{}) || entriesTarget.Resolve.Texture == (render.Texture{}) {
 			continue
 		}
-		r.drawEntries(&list, drawnCamera, state)
-		r.drawComposite(&list, drawnCamera)
+		r.drawEntries(&list, drawnCamera, entriesTarget, state)
+		r.drawComposite(&list, drawnCamera, entriesTarget.Resolve.Texture)
 	}
 	list.End()
 }
 
-// drawEntries draws drawnCamera's entries, of state's, in a pass into its
-// colour target, the viewport and the scissors moved from the target's
-// pixels to the colour target's by its colorTargetOrigin. Its clear, when
-// not by the pass's load, is drawn over the viewport first, then each
-// batch, from the instance data of its material's stride, scissored to the
-// part of the viewport the entries draw into, and a clipped batch to its
-// clip's part of that, a batch whose clip holds no pixel of it not drawn.
-// A batch of per-frame triangles draws their temporary mesh, and a batch of
-// meshes of one file the mesh loaded of it, an instance for each, both
-// through the material's mesh vertex stage for canvas.Vertex's layout, and
-// its own vertex stage for any other; one whose mesh render refused draws
-// nothing.
-func (r *renderer) drawEntries(list *render.CommandList, drawnCamera *cameraDraw, state *drawState) {
-	r.colorTargets[0] = drawnCamera.colorTarget
+// drawEntries draws drawnCamera's entries, of state's, in a pass into
+// entriesTarget, its plan's with the textures acquired for it, the viewport
+// and the scissors moved from the target's pixels to the colour target's by
+// its plan's colorTargetOrigin. Its clear, when by a quad, is drawn over the
+// viewport first, then each batch, from the instance data of its material's
+// stride, scissored to the part of the viewport the entries draw into, and
+// a clipped batch to its clip's part of that, a batch whose clip holds no
+// pixel of it not drawn. A batch of per-frame triangles draws their
+// temporary mesh, and a batch of meshes of one file the mesh loaded of it,
+// an instance for each, both through the material's mesh vertex stage for
+// canvas.Vertex's layout, and its own vertex stage for any other; one whose
+// mesh render refused draws nothing.
+func (r *renderer) drawEntries(list *render.CommandList, drawnCamera *cameraDraw, entriesTarget render.ColorTarget, state *drawState) {
+	plan := &drawnCamera.plan
+	r.colorTargets[0] = entriesTarget
 	pass := list.BeginPass(render.PassDescriptor{Label: "canvas camera", ColorTargets: r.colorTargets[:]})
-	toColorTarget := drawnCamera.colorTargetOrigin.Negate()
-	viewport := drawnCamera.view.viewport.Translate(toColorTarget)
+	toColorTarget := plan.colorTargetOrigin.Negate()
+	viewport := plan.view.viewport.Translate(toColorTarget)
 	pass.SetViewport(render.Viewport{X: float32(viewport.X), Y: float32(viewport.Y), Width: float32(viewport.Width), Height: float32(viewport.Height), MaxDepth: 1})
-	pass.SetPassUniform("canvas_camera", drawnCamera.block)
+	pass.SetPassUniform("canvas_camera", plan.block)
 	// A run of text draws its icons from the sRGB sprite atlas, beside the
 	// glyph atlas.
 	spriteAtlas := r.atlases.findSpriteAtlas()
-	if drawnCamera.camera.Clear && !drawnCamera.colorTarget.Clear {
+	if plan.clear == clearByQuad {
 		drawInstances(&pass, r.clearMaterial, r.instances.fixedRange, drawnCamera.viewportInstance, 1, spriteAtlas, render.TextureView{}, FilterNearest, WrapNone)
 	}
 	for _, drawnBatch := range drawnCamera.batches {
 		// The entries draw between FitInscribe's bars, which the clear
 		// covered, and within their clip.
-		scissor, clipDrawn := drawnCamera.view.placeClip(drawnBatch.key.clip)
+		scissor, clipDrawn := plan.view.placeClip(drawnBatch.key.clip)
 		if !clipDrawn {
 			continue
 		}
@@ -372,25 +372,25 @@ func (r *renderer) setVertexBuffer(vertices render.BufferRange, layout meshfile.
 	r.vertexBuffers[0] = render.VertexBuffer{Range: vertices, Layout: render.VertexLayout{Stride: uint64(layout.Stride), Attributes: r.vertexAttributes}}
 }
 
-// drawComposite draws what drawnCamera, a multisampled camera, resolved its
-// entries into over its viewport, in a pass into its target:
-// replacing what the viewport holds when the camera clears, the pass's load
-// clearing the target when the viewport covers it, and blended over it
-// otherwise. Its colour was encoded as the target's as its entries drew, so
-// it is drawn as it is.
-func (r *renderer) drawComposite(list *render.CommandList, drawnCamera *cameraDraw) {
-	r.colorTargets[0] = drawnCamera.makeTargetColorTarget()
+// drawComposite draws resolved, what drawnCamera, a multisampled camera,
+// resolved its entries into, over its viewport, in a pass into its plan's
+// composite target with its load: replacing what the viewport holds or
+// blended over it, as its plan's composite says. Its colour was encoded as
+// the target's as its entries drew, so it is drawn as it is.
+func (r *renderer) drawComposite(list *render.CommandList, drawnCamera *cameraDraw, resolved render.Texture) {
+	plan := &drawnCamera.plan
+	r.colorTargets[0] = plan.compositeTarget
 	pass := list.BeginPass(render.PassDescriptor{Label: "canvas camera composite", ColorTargets: r.colorTargets[:]})
-	viewport := drawnCamera.view.viewport
+	viewport := plan.view.viewport
 	pass.SetViewport(render.Viewport{X: float32(viewport.X), Y: float32(viewport.Y), Width: float32(viewport.Width), Height: float32(viewport.Height), MaxDepth: 1})
 	// The viewport vertex stage reads no projection, and the zero camera
 	// encodes nothing.
 	pass.SetPassUniform("canvas_camera", cameraBlock{})
 	material := r.compositeMaterial
-	if drawnCamera.camera.Clear {
+	if plan.composite == compositeReplace {
 		material = r.clearMaterial
 	}
-	drawInstances(&pass, material, r.instances.fixedRange, drawnCamera.viewportInstance, 1, render.TextureView{Texture: drawnCamera.colorTarget.Resolve.Texture}, render.TextureView{}, FilterNearest, WrapNone)
+	drawInstances(&pass, material, r.instances.fixedRange, drawnCamera.viewportInstance, 1, render.TextureView{Texture: resolved}, render.TextureView{}, FilterNearest, WrapNone)
 	pass.End()
 }
 

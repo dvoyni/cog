@@ -1,7 +1,6 @@
 package canvas_test
 
 import (
-	"encoding/binary"
 	"image/color"
 	"math"
 	"slices"
@@ -336,13 +335,17 @@ func TestAtEqualOrdersACameraIntoATextureDrawsBeforeOneIntoAWindowSetBeforeIt(t 
 }
 
 func TestATextureTargetsViewportIsPlacedFromItsDescriptorAndItsOutputEncodedAsItsFormatAsks(t *testing.T) {
+	clearColor := m.NewColorSrgb(0.5, 0.25, 1, 1)
 	for _, format := range []struct {
 		name   string
 		format render.TextureFormat
-		encode uint32
+		// loaded is the clear colour as the pass's load clears the texture to
+		// it: encoded as sRGB for a format encoding nothing, and linear for
+		// one that encodes.
+		loaded render.Color
 	}{
-		{"of a format encoding nothing", render.TextureFormatRGBA8Unorm, 1},
-		{"of an sRGB format", render.TextureFormatRGBA8UnormSrgb, 0},
+		{"of a format encoding nothing", render.TextureFormatRGBA8Unorm, render.Color{R: 0.5, G: 0.25, B: 1, A: 1}},
+		{"of an sRGB format", render.TextureFormatRGBA8UnormSrgb, render.Color{R: float64(clearColor.R), G: float64(clearColor.G), B: float64(clearColor.B), A: 1}},
 	} {
 		t.Run(format.name, func(t *testing.T) {
 			h := canvastest.NewHarness(t)
@@ -368,16 +371,25 @@ func TestATextureTargetsViewportIsPlacedFromItsDescriptorAndItsOutputEncodedAsIt
 			if pass.ColorTargets[0].Clear {
 				t.Errorf("the pass clears its whole target by its load, want the viewport's clear drawn over it alone")
 			}
-			block := findParameter(t, pass.Draws[0].PassParameters, "canvas_camera").Uniform
-			// CanvasCamera's pixel_size is at byte 48, viewport_origin at
-			// 56, viewport_size at 64 and encode at 72.
-			readFloat := func(offset int) float32 { return math.Float32frombits(binary.LittleEndian.Uint32(block[offset:])) }
-			got := []float32{readFloat(48), readFloat(56), readFloat(60), readFloat(64), readFloat(68)}
-			if want := []float32{1, 16, 16, 32, 16}; !slices.Equal(got, want) {
-				t.Errorf("the camera's pixel size, viewport origin and size are %v, want %v: a texel a world unit, the viewport in the texture's pixels", got, want)
+
+			// Clearing the whole texture, the pass's load clears it.
+			target.mutex.Lock()
+			target.camera = canvas.Camera{Clear: true, ClearColor: clearColor}
+			target.mutex.Unlock()
+			h.Step()
+
+			lists = findCameraLists(h.Frames()[1].Render)
+			if len(lists) != 1 || len(lists[0].Passes) != 1 {
+				t.Fatalf("canvas began %+v, want one list of one pass", lists)
 			}
-			if encode := binary.LittleEndian.Uint32(block[72:]); encode != format.encode {
-				t.Errorf("the camera's encode is %d, want %d", encode, format.encode)
+			loaded := lists[0].Passes[0].ColorTargets[0]
+			got := []float64{loaded.ClearColor.R, loaded.ClearColor.G, loaded.ClearColor.B, loaded.ClearColor.A}
+			want := []float64{format.loaded.R, format.loaded.G, format.loaded.B, format.loaded.A}
+			for index := range want {
+				if !loaded.Clear || math.Abs(got[index]-want[index]) > 1e-5 {
+					t.Errorf("the pass's load is %+v, want the texture cleared to %v", loaded, format.loaded)
+					break
+				}
 			}
 		})
 	}
@@ -500,11 +512,6 @@ func TestAMultisampledCameraDrawsIntoAFourSampleTextureOfItsViewportResolvedInto
 		if multisampled.Texture == (render.Texture{}) || multisampled.Window != (platform.Window{}) || !multisampled.Clear || multisampled.ClearColor != half.clearColor || !multisampled.Discard || resolved == (render.Texture{}) {
 			t.Errorf("%s drew its entries into %+v, want a texture cleared to %v by its load, discarded, and resolved into another", half.name, multisampled, half.clearColor)
 		}
-		block := findParameter(t, entriesPass.Draws[0].PassParameters, "canvas_camera").Uniform
-		readFloat := func(offset int) float32 { return math.Float32frombits(binary.LittleEndian.Uint32(block[offset:])) }
-		if got, want := []float32{readFloat(56), readFloat(60), readFloat(64), readFloat(68)}, []float32{0, 0, 32, 48}; !slices.Equal(got, want) {
-			t.Errorf("%s's viewport origin and size, as its entries drew, are %v, want %v, the whole of a texture of the viewport's size", half.name, got, want)
-		}
 		if want := []render.ColorTarget{{Window: window}}; !slices.Equal(drawnPass.ColorTargets, want) {
 			t.Errorf("%s drew what it resolved into %+v, want %+v, the window as it holds it", half.name, drawnPass.ColorTargets, want)
 		}
@@ -517,9 +524,6 @@ func TestAMultisampledCameraDrawsIntoAFourSampleTextureOfItsViewportResolvedInto
 		}
 		if atlas := findParameter(t, draw.DrawParameters, "canvas_atlas"); atlas.TextureView.Texture != resolved {
 			t.Errorf("%s drew %v over its viewport, want %v, what it resolved into", half.name, atlas.TextureView.Texture, resolved)
-		}
-		if encode := binary.LittleEndian.Uint32(findParameter(t, draw.PassParameters, "canvas_camera").Uniform[72:]); encode != 0 {
-			t.Errorf("%s encoded what it resolved, already encoded, again, by %d", half.name, encode)
 		}
 		textures = append(textures, multisampled.Texture, resolved)
 	}
@@ -534,27 +538,6 @@ func TestAMultisampledCameraDrawsIntoAFourSampleTextureOfItsViewportResolvedInto
 	resolved.SampleCount = 1
 	if got, want := describer.describedTextures(), []render.TextureDescriptor{multisampled, resolved, multisampled, resolved}; !slices.Equal(got, want) {
 		t.Errorf("the cameras' textures are %+v, want %+v, each of its viewport's size in the window's format", got, want)
-	}
-}
-
-func TestAMultisampledCameraClearingTheWholeWindowDrawsWhatItResolvedOverTheWindowClearedByTheLoad(t *testing.T) {
-	h := canvastest.NewHarness(t)
-	h.Spawn(nil, nil)
-	window := h.OpenWindow(platform.Size{Width: 64, Height: 48})
-	h.Record(func(list canvas.CommandList) {
-		list.SetCamera(canvas.Camera{Clear: true, SampleCount: 4})
-	})
-
-	h.Step()
-
-	lists := findCameraLists(h.Frames()[0].Render)
-	if len(lists) != 1 || len(lists[0].Passes) != 2 {
-		t.Fatalf("canvas began %+v, want one list of the camera's entries' pass and its composite", lists)
-	}
-	// What the camera resolved replaces the whole window, so the window
-	// need not be read first.
-	if got, want := lists[0].Passes[1].ColorTargets, []render.ColorTarget{{Window: window, Clear: true, ClearColor: render.Color{}}}; !slices.Equal(got, want) {
-		t.Errorf("the composite drew into %+v, want %+v", got, want)
 	}
 }
 

@@ -51,7 +51,7 @@ func (t *drawnTargets) Texture(texture render.Texture) (m.Vec2, bool) {
 func (t *drawnTargets) record(mainWindow platform.Window, cameraDraws []cameraDraw) {
 	t.mainWindow = mainWindow
 	for index := range cameraDraws {
-		drawn := &cameraDraws[index].target
+		drawn := &cameraDraws[index].plan.target
 		if target := t.find(drawn.window, drawn.texture); target != nil {
 			*target = *drawn
 		} else {
@@ -69,14 +69,4 @@ func (t *drawnTargets) find(window platform.Window, texture render.Texture) *dra
 		}
 	}
 	return nil
-}
-
-// drawnTarget is one target as a camera drew into it: its window or its
-// texture, the other zero; its size in pixels; and its pixels to a point, 1
-// for a texture.
-type drawnTarget struct {
-	window         platform.Window
-	texture        render.Texture
-	width, height  int
-	pixelsPerPoint float32
 }

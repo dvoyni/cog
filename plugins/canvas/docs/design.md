@@ -896,6 +896,34 @@ type Converter interface {
 - **Following, smoothing, limits and shake are the user's,** since a camera is a value set each frame. Parallax is several cameras into one target, each drawing a layer range from its own position.
 - **An entry is drawn by every camera whose layers hold it.** A tilemap seen by two cameras records the union of their views once, which canvas's guide says: recording per view would draw the shared tiles twice.
 
+### A camera's plan
+
+([canvas: whether a camera's passes become a plan decided once, then recorded](https://github.com/dvoyni/cog/issues/929), [canvas: the camera plan, decided once then recorded](https://github.com/dvoyni/cog/issues/939))
+
+- **How a camera draws is decided once, before any entry is found,** in three steps:
+  1. `makeDrawnTarget` reads render's descriptor of a texture target, or the window manager's sizes of a window, a window's format taken as `BGRA8Unorm`. It reports a target refused.
+  2. `makeCameraPlan`, which is pure, answers a `cameraPlan` from the camera and its measured target, or nothing for a camera of an empty viewport.
+  3. A pixel-perfect camera's `FitStretch` is reported, since that is about the camera's settings, not its target.
+- **The plan holds:**
+  - the target, the camera's view and its camera block;
+  - the entries' colour target with its load, and the multisampled texture's descriptor;
+  - where that colour target's top left lies in the target;
+  - how the camera clears: by the load, by a quad over the viewport, or not;
+  - the quad drawn over the viewport: none, the clear, or what was resolved;
+  - the composite, none, replacing or blending, and its target's load.
+- **It is the row of this table:**
+
+  | samples | clears | viewport | entries' pass loads | clear quad | composite | composite's target loads |
+  |---|---|---|---|---|---|---|
+  | 1 | yes | whole target | cleared to `ClearColor` | none | none | n/a |
+  | 1 | yes | part | kept | over the viewport | none | n/a |
+  | 1 | no | any | kept | none | none | n/a |
+  | 4 | yes | whole target | a 4-sample texture, cleared to `ClearColor` | none | replace | cleared, colour unused |
+  | 4 | yes | part | the same | none | replace | kept |
+  | 4 | no | any | a 4-sample texture, cleared transparent | none | blend | kept |
+- **The recorders only play the plan.** Drawing an order appends the viewport quad's instance as the plan says, the entries' pass draws the clear quad when the camera clears by one and moves the viewport and scissors by the colour target's origin, and the composite draws when there is one. None reads the camera's `Clear` or `SampleCount`, or a colour target's load. The rule was first spread over five functions, which multisampling had to edit in step, and two of its mistakes were caught only by pixel tests.
+- **`makeCameraPlan` is tested as a table,** its six rows and a texture target of each kind of format, without a kernel. The kernel tests check what reaches render: the passes, their targets and loads, and the draws.
+
 ### Logical size, fit and pixel-perfect
 
 ([canvas: the 2D camera, its projection, viewport modes and several cameras](https://github.com/dvoyni/cog/issues/869))

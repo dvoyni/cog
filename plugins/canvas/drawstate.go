@@ -160,15 +160,15 @@ func (s *drawState) makeInspection(beat metronome.Beat, inventory render.Invento
 // label and its texture's, and the entries of its layers it culled, those
 // not among the entries it draws.
 func (s *drawState) makeInspectedCamera(inventory render.Inventory, drawing *renderer, drawnCamera *cameraDraw) InspectedCamera {
-	targetDescriptor, _ := inventory.TextureDescriptor(drawnCamera.target.texture)
+	targetDescriptor, _ := inventory.TextureDescriptor(drawnCamera.plan.target.texture)
 	inspected := InspectedCamera{
 		Camera:       drawnCamera.camera,
-		Window:       drawnCamera.target.window,
+		Window:       drawnCamera.plan.target.window,
 		TextureLabel: targetDescriptor.Label,
-		TargetSize:   m.Vec2i{X: drawnCamera.target.width, Y: drawnCamera.target.height},
-		Viewport:     drawnCamera.view.viewport,
-		Scale:        drawnCamera.view.scale,
-		VisibleRect:  drawnCamera.view.findVisibleRect(),
+		TargetSize:   m.Vec2i{X: drawnCamera.plan.target.width, Y: drawnCamera.plan.target.height},
+		Viewport:     drawnCamera.plan.view.viewport,
+		Scale:        drawnCamera.plan.view.scale,
+		VisibleRect:  drawnCamera.plan.view.findVisibleRect(),
 	}
 	for _, drawnBatch := range drawnCamera.batches {
 		inspectedEntries := make([]InspectedEntry, 0, len(drawnBatch.entries))
