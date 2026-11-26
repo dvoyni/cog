@@ -50,31 +50,46 @@ func (k imageKey) describe() string {
 
 // reportIgnoredOptions reports, once for the subject of key, an
 // image's, the options ImageFromFile or ImageFromTexture was given for it
-// and ignored.
-func reportIgnoredOptions(reporter *reporter, key imageKey) {
+// and ignored, as reportOnce raises it through table.
+func reportIgnoredOptions(reporter *reporter, table *fileTable, key imageKey) {
 	if !key.ignoredOptions {
 		return
 	}
 	ignored := Report{Kind: ReportKindImageOptionsIgnored, Err: fmt.Errorf("canvas: image %s was given more than one set of options, and is drawn with the first", key.describe())}
-	reporter.reportOnce(imageOptionsIgnoredLogKey+key.findSubject(), ignored)
+	key.reportOnce(reporter, table, imageOptionsIgnoredLogKey, ignored)
 }
 
 // reportRefusedConverter reports, once for the subject of key,
-// an image's, the converter it was given and internImage refused.
-func reportRefusedConverter(reporter *reporter, key imageKey) {
+// an image's, the converter it was given and internImage refused, as
+// reportOnce raises it through table.
+func reportRefusedConverter(reporter *reporter, table *fileTable, key imageKey) {
 	if key.converterRefusal == "" {
 		return
 	}
 	refusal := Report{Kind: ReportKindConverterRefused, Err: fmt.Errorf("canvas: image %s was given %s, and is drawn unconverted", key.describe(), key.converterRefusal)}
-	reporter.reportOnce(converterRefusedLogKey+key.findSubject(), refusal)
+	key.reportOnce(reporter, table, converterRefusedLogKey, refusal)
 }
 
 // reportFrameOutOfBounds reports, once for the subject of key, an
 // image's, that its frame does not lie within what it is cut from, a file
-// or a texture as holder names it, of width by height texels.
-func reportFrameOutOfBounds(reporter *reporter, key imageKey, frame uint32, holder string, width, height int) {
+// or a texture as holder names it, of width by height texels, as
+// reportOnce raises it through table.
+func reportFrameOutOfBounds(reporter *reporter, table *fileTable, key imageKey, frame uint32, holder string, width, height int) {
 	outOfBoundsReport := Report{Kind: ReportKindFrameOutOfBounds, Err: fmt.Errorf("canvas: frame %d of image %s, of its SourceRect %v cut by its sheet of %d by %d, does not lie within its %s of %d by %d texels, so it draws nothing", frame, key.describe(), key.options.SourceRect, key.options.Sheet.Columns, key.options.Sheet.Rows, holder, width, height)}
-	reporter.reportOnce(frameOutOfBoundsLogKey+key.findSubject(), outOfBoundsReport)
+	key.reportOnce(reporter, table, frameOutOfBoundsLogKey, outOfBoundsReport)
+}
+
+// reportOnce raises report once for k's subject, under logKey followed by
+// it: through table for an image of a file, so unloading its path lets it
+// be raised again, and through reporter alone for one of a render texture,
+// which has no path, table unused and nil where only such images are
+// placed.
+func (k imageKey) reportOnce(reporter *reporter, table *fileTable, logKey string, report Report) {
+	if k.ofTexture {
+		reporter.reportOnce(logKey+k.findSubject(), report)
+		return
+	}
+	table.reportOnce(reporter, k.path, logKey, report)
 }
 
 // packedKey is what canvas packs as a region of its own: the texels of a

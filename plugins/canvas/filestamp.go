@@ -8,7 +8,8 @@ import (
 // fileStamp is what fs.Stat answered of a file canvas read, which
 // Assets.ReloadChanged compares to tell the file changed since: its
 // modification time and size, or that fs.Stat failed. An embedded file's
-// modification time is zero, and its stamp never changes.
+// modification time is zero, and its stamp never changes. The table and a
+// font set's slot stamp their files with it.
 type fileStamp struct {
 	modTime    time.Time
 	size       int64
@@ -25,7 +26,9 @@ func readFileStamp(files fs.FS, path string) fileStamp {
 	return fileStamp{modTime: info.ModTime(), size: info.Size()}
 }
 
-// equal answers whether s and other stamp the file as unchanged.
-func (s fileStamp) equal(other fileStamp) bool {
-	return s.modTime.Equal(other.modTime) && s.size == other.size && s.statFailed == other.statFailed
+// matches answers whether the file at path in files, which s stamped, is
+// unchanged since, as fs.Stat answers it now, reading none of it.
+func (s fileStamp) matches(files fs.FS, path string) bool {
+	now := readFileStamp(files, path)
+	return s.modTime.Equal(now.modTime) && s.size == now.size && s.statFailed == now.statFailed
 }

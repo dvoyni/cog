@@ -29,7 +29,7 @@ type renderer struct {
 	// atlases keeps the atlases and where each image frame and glyph drawn
 	// lies in them.
 	atlases atlasSet
-	// unloadedPaths are the paths the frame's residency requests unload, in
+	// unloadedPaths are the paths Assets.Unload queued for the frame, in
 	// the order asked, written over each frame.
 	unloadedPaths []string
 	// cameraDraws are the frame's cameras that draw, in the order they
@@ -134,7 +134,7 @@ func (r *renderer) init(inventory render.Inventory, reporter *reporter) {
 // keyed, it drops the skipped ones from state's sorted entries, reporting
 // each once, and regroups the rest by their batch keys. First, whether a
 // camera is set or not, it begins the atlas set's frame and unloads the
-// paths state's residency requests ask, the mesh files of those paths among
+// paths state's file table queued, the mesh files of those paths among
 // them.
 func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, files fs.FS, manager *platform.WindowManager, mainWindow platform.Window, library *fontLibrary, state *drawState) {
 	r.cameraDraws = r.cameraDraws[:0]
@@ -144,7 +144,7 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 	r.batches = r.batches[:0]
 	r.visibleEntries = r.visibleEntries[:0]
 	r.atlases.beginFrame()
-	r.unloadedPaths = state.residency.takeUnloadedPaths(r.unloadedPaths[:0])
+	r.unloadedPaths = state.fileTable.takeUnloadedPaths(r.unloadedPaths[:0])
 	for _, unloaded := range r.unloadedPaths {
 		r.atlases.unload(inventory, unloaded)
 		r.unloadMeshFiles(inventory, unloaded)
@@ -165,7 +165,7 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 	// packed, so packing the frame's new ones evicts none the frame draws.
 	var keyedCount uint32
 	for entry := range entryCount {
-		if file := list.meshFile(entry); file != (MeshFile{}) && r.loadMesh(inventory, files, state.reporter, &state.fileStamps, file) {
+		if file := list.meshFile(entry); file != (MeshFile{}) && r.loadMesh(inventory, files, state.reporter, &state.fileTable, file) {
 			state.inspector.addLoadedMeshFile(file)
 		}
 		list.findPlaced(entry, inventory, &r.atlases, r.loadedMeshes)
@@ -175,7 +175,7 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 		}
 	}
 	// Growing an atlas replaces its texture, so every entry is keyed again.
-	if r.atlases.placeMissed(inventory, files, &library.glyphs, state.reporter, &state.residency, &state.fileStamps, state.inspector) {
+	if r.atlases.placeMissed(inventory, files, &library.glyphs, state.reporter, &state.fileTable, state.inspector) {
 		keyedCount = 0
 		r.skippedCount = 0
 	}
@@ -428,14 +428,14 @@ func (r *renderer) findDrawnEntry(list *commandList, entry uint32, defaultFilter
 	}
 }
 
-// loadMesh loads file at its first draw: stamped in stamps, read from files and decoded, its
+// loadMesh loads file at its first draw: stamped in table, read from files and decoded, its
 // vertices and indices made into buffers and a mesh over them through
 // inventory, kept at its index among the loaded meshes. A file that is missing, is no mesh file,
 // is of a version canvas does not know, is cut short or has zero bounds
-// draws nothing, reported once for its path, as does one whose
+// draws nothing, reported once for its path through table, as does one whose
 // mesh render refused, which render reports. It answers whether it loaded
 // file now.
-func (r *renderer) loadMesh(inventory render.Inventory, files fs.FS, reporter *reporter, stamps *fileStampTable, file MeshFile) bool {
+func (r *renderer) loadMesh(inventory render.Inventory, files fs.FS, reporter *reporter, table *fileTable, file MeshFile) bool {
 	if int(file.index) >= len(r.loadedMeshes) {
 		r.loadedMeshes = slices.Grow(r.loadedMeshes, int(file.index)+1-len(r.loadedMeshes))[:file.index+1]
 	}
@@ -445,7 +445,7 @@ func (r *renderer) loadMesh(inventory render.Inventory, files fs.FS, reporter *r
 	}
 	loaded.tried = true
 	path := meshFileNames.findKeyAt(file.index)
-	stamps.add(files, path)
+	table.stamp(files, path)
 	data, err := fs.ReadFile(files, path)
 	var decoded meshfile.File
 	if err == nil {
@@ -456,7 +456,7 @@ func (r *renderer) loadMesh(inventory render.Inventory, files fs.FS, reporter *r
 	}
 	if err != nil {
 		notLoaded := Report{Kind: ReportKindMeshFileNotLoaded, Err: fmt.Errorf("canvas: loading mesh file %q, which draws nothing: %w", path, err)}
-		reporter.reportOnce(meshFileNotLoadedLogKey+path, notLoaded)
+		table.reportOnce(reporter, path, meshFileNotLoadedLogKey, notLoaded)
 		return false
 	}
 	loaded.bounds = decoded.Bounds

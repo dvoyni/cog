@@ -36,21 +36,6 @@ func (t *internTable[K]) internKey(key K) uint32 {
 	return index
 }
 
-// findPaths answers the path of each key interned that Unload(unloaded)
-// unloads, pathOf answering a key's path, and false for a key of none, a
-// path interned in several keys once for each.
-func (t *internTable[K]) findPaths(unloaded string, pathOf func(K) (string, bool)) []string {
-	t.mutex.RLock()
-	defer t.mutex.RUnlock()
-	var paths []string
-	for _, key := range t.keys {
-		if path, hasPath := pathOf(key); hasPath && isUnder(path, unloaded) {
-			paths = append(paths, path)
-		}
-	}
-	return paths
-}
-
 // findKeyAt answers the key interned at index, which is not zero.
 func (t *internTable[K]) findKeyAt(index uint32) K {
 	if index == 0 {

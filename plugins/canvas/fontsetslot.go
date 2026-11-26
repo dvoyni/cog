@@ -79,7 +79,7 @@ func (s *fontSetSlot) stampFile(files fs.FS, path string) {
 // files since it was stamped.
 func (s *fontSetSlot) namesChangedFile(files fs.FS) bool {
 	for path, stamp := range s.fileStamps {
-		if !readFileStamp(files, path).equal(stamp) {
+		if !stamp.matches(files, path) {
 			return true
 		}
 	}

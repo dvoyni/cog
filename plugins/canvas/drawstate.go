@@ -15,10 +15,9 @@ import (
 // drawState is canvas's private state: the command list of each task
 // declaring a CommandList, in registration order, whether a frame is open for
 // entries, the entries and cameras of the frame last sorted, merged from the
-// command lists, with each entry's keys, the inspector, the residency
-// requests Assets queued, the image sizes it read, the stamps of the files
-// read, a reload of the font files asked for, the 2D materials it made, and
-// the stopwatches timing its jobs.
+// command lists, with each entry's keys, the inspector, what Assets and the
+// drawing job keep of each file they used, a reload of the font files asked
+// for, the 2D materials it made, and the stopwatches timing its jobs.
 type drawState struct {
 	// reporter is where reports go.
 	reporter *reporter
@@ -43,15 +42,14 @@ type drawState struct {
 	// shared with reporter and the FontLibrary, which note what goes into
 	// it.
 	inspector *inspector
-	// residency queues Assets.Preload's and Assets.Unload's requests for
-	// the renderer, and imageSizes keeps Assets.ImageSize's answers.
-	residency  residencyRequestQueue
-	imageSizes imageSizeTable
-	// fileStamps are the stamps of the image files and mesh files read,
-	// which Assets.ReloadChanged compares, and fontReloadRequested is set
-	// by it until the drawing job hands the font files' reload to a task
-	// under FontLibrary's write lock.
-	fileStamps          fileStampTable
+	// fileTable keeps what canvas used of each image file and mesh file
+	// until it is unloaded: its stamp, which Assets.ReloadChanged compares,
+	// its header's size Assets.ImageSize read, Assets.Preload's preloads and
+	// the reports raised for it, and it queues Assets.Unload's paths for the
+	// renderer. fontReloadRequested is set by Assets.ReloadChanged until
+	// the drawing job hands the font files' reload to a task under
+	// FontLibrary's write lock.
+	fileTable           fileTable
 	fontReloadRequested atomic.Bool
 	// materials are the 2D materials Assets made.
 	materials materialTable

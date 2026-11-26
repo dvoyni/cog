@@ -211,9 +211,8 @@ func TestAnIconRegisteredWhileTasksLayOutRunsHoldingItIsOrderedByFontLibrarysLoc
 
 func TestImageSizeAskedFromTwoTasksWhileAFrameDrawsAnswersEachImagesSize(t *testing.T) {
 	// Two tasks ask the size of each image while canvas packs them, first
-	// drawn by a third: the image size table's mutex keeps their headers
-	// read apart, and the file stamp table's both tasks' and the drawing
-	// job's stamps.
+	// drawn by a third: the file table's mutex keeps their headers read
+	// apart, and both tasks' and the drawing job's stamps.
 	files := fstest.MapFS{}
 	paths := addConcurrentImages(t, files, "concurrent/sized")
 	askSizes := func(assets canvas.Assets, _ int) {
@@ -238,10 +237,9 @@ func TestImageSizeAskedFromTwoTasksWhileAFrameDrawsAnswersEachImagesSize(t *test
 
 func TestPreloadAndUnloadFromTwoTasksWhileAFrameDrawsLeaveEveryImageDrawn(t *testing.T) {
 	// One task preloads every image and another unloads each, while canvas
-	// applies the requests queued before and draws them: the residency
-	// request queue's mutex keeps the requests and the drawing job's
-	// taking of them apart, and every sprite is drawn, packed again where
-	// it was unloaded.
+	// applies the requests queued before and draws them: the file table's
+	// mutex keeps the requests and the drawing job's taking of them apart,
+	// and every sprite is drawn, packed again where it was unloaded.
 	files := fstest.MapFS{}
 	paths := addConcurrentImages(t, files, "concurrent/resident")
 	h := canvastest.NewHarness(t)
@@ -276,7 +274,7 @@ func TestPreloadAndUnloadFromTwoTasksWhileAFrameDrawsLeaveEveryImageDrawn(t *tes
 func TestReloadChangedWhileAFrameDrawsNewImagesPacksEachNewImage(t *testing.T) {
 	// A task calls ReloadChanged again and again in each frame while
 	// canvas packs the frame's new images and a second task asks their
-	// sizes: the file stamp table's mutex keeps its snapshots apart from
+	// sizes: the file table's mutex keeps its snapshots apart from
 	// their stamps, and the font reload request, an atomic, apart from the
 	// drawing job's taking of it. No file changes, so each frame packs its
 	// new images alone.

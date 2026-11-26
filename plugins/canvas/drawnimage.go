@@ -109,7 +109,7 @@ func placeTextureImage(inventory render.Inventory, reporter *reporter, drawn *dr
 	}
 	frameRect, withinTexture := key.options.findFrameRect(int(descriptor.Width), int(descriptor.Height), frame)
 	if !withinTexture {
-		reportFrameOutOfBounds(reporter, key, frame, "texture", int(descriptor.Width), int(descriptor.Height))
+		reportFrameOutOfBounds(reporter, nil, key, frame, "texture", int(descriptor.Width), int(descriptor.Height))
 		drawn.drawsNothing = true
 		return
 	}

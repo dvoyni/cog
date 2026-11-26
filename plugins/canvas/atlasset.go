@@ -368,9 +368,9 @@ func (a *atlasSet) placedGlyph(field uint32) *drawnGlyph {
 // grew, replacing its texture, so every key found before it is found
 // again. It packs each glyph missed, its field read from glyphs. Each frame missed is placed: an image of a render
 // texture given a view of it, any other packed as packImage packs it, its
-// file stamped in stamps, and noted in inspector when packed now, or found
-// to draw nothing.
-func (a *atlasSet) placeMissed(inventory render.Inventory, files fs.FS, glyphs *glyphTable, reporter *reporter, requests *residencyRequestQueue, stamps *fileStampTable, inspector *inspector) (moved bool) {
+// file stamped in table, its reports raised through it, and noted in
+// inspector when packed now, or found to draw nothing.
+func (a *atlasSet) placeMissed(inventory render.Inventory, files fs.FS, glyphs *glyphTable, reporter *reporter, table *fileTable, inspector *inspector) (moved bool) {
 	a.atlasMoved = false
 	for _, field := range a.missedGlyphs {
 		a.packGlyph(inventory, reporter, &a.drawnGlyphs[field], glyphs.findField(field))
@@ -384,14 +384,14 @@ func (a *atlasSet) placeMissed(inventory render.Inventory, files fs.FS, glyphs *
 			continue
 		}
 		key := imageNames.findKey(missed.image)
-		reportIgnoredOptions(reporter, key)
-		reportRefusedConverter(reporter, key)
+		reportIgnoredOptions(reporter, table, key)
+		reportRefusedConverter(reporter, table, key)
 		if key.ofTexture {
 			placeTextureImage(inventory, reporter, drawn, key, missed.frame)
 			continue
 		}
-		stamps.add(files, key.path)
-		packed, drawsTexels, packedNow := a.packImage(inventory, files, reporter, requests, key, missed.frame)
+		table.stamp(files, key.path)
+		packed, drawsTexels, packedNow := a.packImage(inventory, files, reporter, table, key, missed.frame)
 		if !drawsTexels {
 			drawn.drawsNothing = true
 			continue
@@ -512,17 +512,17 @@ func (a *atlasSet) orderGlyphEvictions() {
 // as packConverted packs it; any other's, or one that could not be decoded,
 // which render draws magenta, is acquired from render with its colour
 // space, sharing the texture Assets.Preload acquired, which it then
-// releases from requests, of the size render's descriptor of it gives, its
+// releases through table, of the size render's descriptor of it gives, its
 // file's header's, a texture render could not make one texel, and its
 // frame packed as packPlain packs it. A frame of the texels of one packed
 // already, of the same rectangle of the file, converter and wrap, shares
 // its cell, its source released.
-func (a *atlasSet) packImage(inventory render.Inventory, files fs.FS, reporter *reporter, requests *residencyRequestQueue, key imageKey, frame uint32) (packed *packedImage, drawsTexels, packedNow bool) {
+func (a *atlasSet) packImage(inventory render.Inventory, files fs.FS, reporter *reporter, table *fileTable, key imageKey, frame uint32) (packed *packedImage, drawsTexels, packedNow bool) {
 	sourceKey := sourceKey{path: key.path, colorSpace: key.options.ColorSpace}
 	converter := key.options.Convert
 	var picture image.Image
 	if converter != nil {
-		picture = a.decodeConvertedFile(files, requests, sourceKey)
+		picture = a.decodeConvertedFile(inventory, files, table, sourceKey)
 		if picture == nil {
 			converter = nil
 		}
@@ -535,7 +535,7 @@ func (a *atlasSet) packImage(inventory render.Inventory, files fs.FS, reporter *
 		fileHeight = picture.Bounds().Dy()
 	} else {
 		source = inventory.AcquireTexture(sourceKey.path, sourceKey.makeTextureOptions())
-		requests.releasePreload(inventory, sourceKey)
+		table.takePreload(inventory, sourceKey, false)
 		if descriptor, held := inventory.TextureDescriptor(source); held {
 			fileWidth = int(descriptor.Width)
 			fileHeight = int(descriptor.Height)
@@ -543,7 +543,7 @@ func (a *atlasSet) packImage(inventory render.Inventory, files fs.FS, reporter *
 	}
 	frameRect, withinFile := key.options.findFrameRect(fileWidth, fileHeight, frame)
 	if !withinFile {
-		reportFrameOutOfBounds(reporter, key, frame, "file", fileWidth, fileHeight)
+		reportFrameOutOfBounds(reporter, table, key, frame, "file", fileWidth, fileHeight)
 	}
 	packedKey := packedKey{source: sourceKey, rect: frameRect, converter: converter, wrap: key.options.Wrap}
 	packed, shared := a.packedImages[packedKey]
@@ -645,13 +645,13 @@ func (a *atlasSet) makeOwnTexture(inventory render.Inventory, packed *packedImag
 
 // decodeConvertedFile answers the file of key, a converted image's, read
 // from files and decoded, once for each frame, taking the picture
-// Assets.Preload decoded from requests, or nil when it cannot be decoded,
+// Assets.Preload decoded from table, or nil when it cannot be decoded,
 // as decodeImageFile answers it.
-func (a *atlasSet) decodeConvertedFile(files fs.FS, requests *residencyRequestQueue, key sourceKey) image.Image {
+func (a *atlasSet) decodeConvertedFile(inventory render.Inventory, files fs.FS, table *fileTable, key sourceKey) image.Image {
 	if picture, decoded := a.decodedFiles[key]; decoded {
 		return picture
 	}
-	picture := requests.takePreloadedFile(key)
+	picture := table.takePreload(inventory, key, true)
 	if picture == nil {
 		picture = decodeImageFile(files, key.path)
 	}

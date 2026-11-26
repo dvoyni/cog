@@ -53,14 +53,8 @@ func (a Assets) Preload(image Image) {
 	if key.ofTexture {
 		return
 	}
-	state := a.state.Get()
 	source := sourceKey{path: key.path, colorSpace: key.options.ColorSpace}
-	if key.options.Convert != nil {
-		state.fileStamps.add(a.files.Get(), key.path)
-		state.residency.requestFilePreload(a.files.Get(), source)
-		return
-	}
-	state.residency.requestPreload(a.inventory, source)
+	a.state.Get().fileTable.preload(a.inventory, a.files.Get(), source, key.options.Convert != nil)
 }
 
 // Unload unloads the images of path, or, when path ends in a slash, of
@@ -75,17 +69,7 @@ func (a Assets) Preload(image Image) {
 // next draw, and reported again if it fails.
 func (a Assets) Unload(path string) {
 	state := a.state.Get()
-	state.residency.requestUnload(a.inventory, path)
-	state.imageSizes.forget(state.reporter, path)
-	state.fileStamps.forget(path)
-	for _, unloaded := range imageNames.findPaths(path, func(key imageKey) (string, bool) { return key.path, !key.ofTexture }) {
-		state.reporter.forget(imageOptionsIgnoredLogKey + unloaded)
-		state.reporter.forget(frameOutOfBoundsLogKey + unloaded)
-		state.reporter.forget(converterRefusedLogKey + unloaded)
-	}
-	for _, unloaded := range meshFileNames.findPaths(path, func(path string) (string, bool) { return path, true }) {
-		state.reporter.forget(meshFileNotLoadedLogKey + unloaded)
-	}
+	state.fileTable.unload(a.inventory, state.reporter, path)
 }
 
 // ReloadChanged reloads every image file, font file and mesh file canvas
@@ -116,7 +100,7 @@ func (a Assets) Unload(path string) {
 func (a Assets) ReloadChanged() {
 	a.inventory.ReloadChanged()
 	state := a.state.Get()
-	for _, changed := range state.fileStamps.findChangedPaths(a.files.Get()) {
+	for _, changed := range state.fileTable.findChangedPaths(a.files.Get()) {
 		a.Unload(changed)
 	}
 	state.fontReloadRequested.Store(true)
@@ -146,7 +130,7 @@ func (a Assets) ImageSize(image Image) (m.Vec2, bool) {
 		descriptor, read = a.inventory.TextureDescriptor(key.texture)
 		size = m.Vec2{X: float32(descriptor.Width), Y: float32(descriptor.Height)}
 	} else {
-		size, read = state.imageSizes.find(a.files.Get(), state.reporter, &state.fileStamps, key.path)
+		size, read = state.fileTable.findSize(a.files.Get(), state.reporter, key.path)
 	}
 	if !read {
 		return m.Vec2{}, false
