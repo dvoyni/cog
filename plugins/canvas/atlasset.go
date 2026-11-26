@@ -421,8 +421,8 @@ func (a *atlasSet) pack(inventory render.Inventory, packedAtlas *atlas.Atlas, wi
 // nothing to evict, draws nothing, reported once, and is tried again at the
 // next frame drawing it, findGlyphs noting it once a frame.
 func (a *atlasSet) packGlyph(inventory render.Inventory, reporter *reporter, drawn *drawnGlyph, field glyphField) {
-	width := uint32(field.width)
-	height := uint32(field.height)
+	width := uint32(field.Width)
+	height := uint32(field.Height)
 	region, err := a.pack(inventory, a.glyphAtlas, width, height)
 	if errors.Is(err, atlas.ErrFull) {
 		region, err = a.evictGlyphsFor(inventory, width, height)
@@ -436,7 +436,7 @@ func (a *atlasSet) packGlyph(inventory render.Inventory, reporter *reporter, dra
 		reporter.reportOnce(atlasFullLogKey+glyphAtlasLabel, fullReport)
 		return
 	}
-	a.glyphAtlas.Put(region, field.texels, atlas.WrapNone)
+	a.glyphAtlas.Put(region, field.Texels, atlas.WrapNone)
 	*drawn = makeDrawnGlyph(a.glyphAtlas, region, field, a.drawnFrameCount)
 }
 

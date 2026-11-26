@@ -86,15 +86,13 @@ func (s *fontSetSlot) namesChangedFile(files fs.FS) bool {
 	return false
 }
 
-// findCharacterFont answers the font drawing character in language, as
-// font.Set.CharacterFont answers it: a character no font of the set has is
-// drawn as the default font's missing-glyph box, reported once for the set,
-// the first time one is laid out.
-func (s *fontSetSlot) findCharacterFont(language string, character rune) *font.Loaded {
-	drawingFont, hasCharacter := s.fonts.CharacterFont(language, character)
-	if !hasCharacter && !s.characterMissingReported.Swap(true) {
+// reportCharacterMissing reports character, laid out in language, which no
+// font of the set has, as a layout's MissingRunes answer, so it is drawn as
+// the default font's missing-glyph box: once for the set, the first time
+// one is laid out.
+func (s *fontSetSlot) reportCharacterMissing(language string, character rune) {
+	if !s.characterMissingReported.Swap(true) {
 		missing := Report{Kind: ReportKindCharacterMissing, Err: fmt.Errorf("canvas: font set %q, %v, has no font drawing %q in language %q, neither the language's fonts nor its default font, so it is drawn as the default font's missing-glyph box", s.fonts.Descriptor().Label, s.set, character, language)}
 		s.reporter.reportOnce(characterMissingLogKey+fmt.Sprint(s.set), missing)
 	}
-	return drawingFont
 }

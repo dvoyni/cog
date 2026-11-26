@@ -86,6 +86,7 @@ texture a camera draws into.
 | `Inspection` | One frame written down in canvas's terms. |
 | `Report`, `ReportKind` | A mistake canvas finds at run time, and its kind. |
 | `font.SetDescriptor`, `font.Font`, `font.Metrics` | What a font set is made of, each font file in it and its options, and a font's vertical measures, in the font package. |
+| `font.Shaper`, `font.Layout` | Runes laid out in a loaded `font.Set` and its glyphs' coverage, as canvas lays text out, for a plugin's own text. |
 | `atlas.Atlas`, `atlas.Descriptor` | One atlas of one format, as canvas packs its sprites and glyphs into, for a plugin's own caches. |
 | `canvastest.Harness` | canvas in a real kernel on render's fake GPU, or on wgpu's software adapter, for tests. |
 
@@ -1109,6 +1110,13 @@ func measureButton(library kernel.Read[canvas.FontLibrary], fontSets kernel.Read
 	return m.Vec2{X: layout.Size().X + 2*padding, Y: layout.Size().Y + padding}
 }
 ```
+
+A plugin laying out text of its own, outside canvas's entries, loads a set
+with `font.Load` and lays runes out with a `font.Shaper`, one per job, since
+it is not safe for concurrent use: `LayOut` answers a `font.Layout` of
+lines, cluster positions and glyphs, each naming the `font.Loaded` drawing it
+and the rune it leads back to, and `Rasterize` a glyph's coverage. An icon
+crosses as a `font.Object`, a rune laid out as a box of its width.
 
 `FontLibrary.Preload(set, text)` makes the glyphs of a string ahead of their
 first draw, behind a loading screen. A glyph made in the frame costs a

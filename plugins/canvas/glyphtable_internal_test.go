@@ -26,12 +26,12 @@ func TestDroppingAFontsGlyphsForgetsThemAndFreesTheirFieldsKeepingAnotherFonts(t
 		t.Errorf("the table holds %d glyphs once the default set's are dropped, want the other set's %d", len(library.glyphs.indexes), len(kept.glyphs))
 	}
 	for _, glyph := range dropped.glyphs {
-		if field := library.glyphs.findField(glyph.field); field.texels != nil {
-			t.Errorf("the dropped glyph %d's field still holds %d texels, want it freed", glyph.id, len(field.texels))
+		if field := library.glyphs.findField(glyph.field); field.Texels != nil {
+			t.Errorf("the dropped glyph %d's field still holds %d texels, want it freed", glyph.id, len(field.Texels))
 		}
 	}
 	for _, glyph := range kept.glyphs {
-		if field := library.glyphs.findField(glyph.field); field.texels == nil {
+		if field := library.glyphs.findField(glyph.field); field.Texels == nil {
 			t.Errorf("the other set's glyph %d's field holds no texels, want it kept", glyph.id)
 		}
 	}

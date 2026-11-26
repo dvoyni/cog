@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	"github.com/dvoyni/cog/plugins/canvas/font"
-	gotext "github.com/go-text/typesetting/font"
 )
 
 // glyphTable is the glyphs made for drawing, distance fields or a bitmap
@@ -31,17 +30,16 @@ type glyphTable struct {
 // its id in it.
 type glyphKey struct {
 	font *font.Loaded
-	id   gotext.GID
+	id   font.GlyphID
 }
 
 // assignFields sets the field of each of glyphs to the index of its field,
-// made the first time it is drawn through shaper's face of the glyph's
-// font, at its variations, by makeField, and answers glyphs without those
-// of no field, such as spaces, which draw nothing, its icons kept, which
-// have none, and how many fields it made. A field is made outside the
+// made the first time it is drawn by makeField, filled by shaper, and
+// answers glyphs without those of no field, such as spaces, which draw
+// nothing, its icons kept, which have none, and how many fields it made. A field is made outside the
 // lock, so jobs make theirs together; one made by two jobs at once is kept
 // once, and counted by the job keeping it.
-func (t *glyphTable) assignFields(glyphs []placedGlyph, shaper *textShaper) ([]placedGlyph, int) {
+func (t *glyphTable) assignFields(glyphs []placedGlyph, shaper *font.Shaper) ([]placedGlyph, int) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	drawnGlyphs := glyphs[:0]
@@ -55,7 +53,7 @@ func (t *glyphTable) assignFields(glyphs []placedGlyph, shaper *textShaper) ([]p
 		field, made := t.indexes[key]
 		if !made {
 			t.mutex.Unlock()
-			madeField := t.makeField(shaper.findFace(glyph.font), glyph.font, key.id)
+			madeField := t.makeField(shaper, glyph.font, key.id)
 			t.mutex.Lock()
 			if field, made = t.indexes[key]; !made {
 				field = uint32(len(t.fields))
@@ -64,7 +62,7 @@ func (t *glyphTable) assignFields(glyphs []placedGlyph, shaper *textShaper) ([]p
 				madeCount++
 			}
 		}
-		if t.fields[field].texels != nil {
+		if t.fields[field].Texels != nil {
 			glyph.field = field
 			drawnGlyphs = append(drawnGlyphs, glyph)
 		}
@@ -86,15 +84,15 @@ func (t *glyphTable) dropFonts(fonts []*font.Loaded) {
 	}
 }
 
-// makeField answers glyph id of glyphFont, drawn through face: its
-// coverage for a bitmap font, else its distance field at its font's field
-// em and range, zero meaning the table's.
-func (t *glyphTable) makeField(face *gotext.Face, glyphFont *font.Loaded, id gotext.GID) glyphField {
+// makeField answers glyph id of glyphFont, filled by shaper: its coverage
+// for a bitmap font, else its distance field at its font's field em and
+// range, zero meaning the table's.
+func (t *glyphTable) makeField(shaper *font.Shaper, glyphFont *font.Loaded, id font.GlyphID) glyphField {
 	descriptor := glyphFont.Font()
 	if descriptor.BitmapEm > 0 {
-		return makeGlyphBitmap(face, id, descriptor.BitmapEm)
+		return makeGlyphBitmap(shaper, glyphFont, id, descriptor.BitmapEm)
 	}
-	return makeGlyphField(face, id, cmp.Or(descriptor.FieldEm, t.fieldEm), cmp.Or(descriptor.FieldRange, t.fieldRange))
+	return makeGlyphField(shaper, glyphFont, id, cmp.Or(descriptor.FieldEm, t.fieldEm), cmp.Or(descriptor.FieldRange, t.fieldRange))
 }
 
 // findField answers the field at index, one assignFields assigned.

@@ -211,7 +211,7 @@ author** testing canvas or a plugin on it.
 
 ([canvas: the feature list, where 2D ends and its users begin, and its name](https://github.com/dvoyni/cog/issues/864), [canvas on the kernel: its resources, tasks and parameters, and how its frame hangs off render's](https://github.com/dvoyni/cog/issues/873), with the naming rule from [canvas prototype: the calls a user makes to draw one 2D frame](https://github.com/dvoyni/cog/issues/871))
 
-- **A module of its own,** `canvas`, importing kernel, metronome, platform, render, libs/m and libs/meshfile, and `go-text/typesetting`, pinned in its `go.mod`. It imports no ECS, and reaches no gfx: what canvas needs that render lacks is a delta to render.
+- **A module of its own,** `canvas`, importing kernel, metronome, platform, render, libs/m and libs/meshfile, and `go-text/typesetting`, pinned in its `go.mod` and imported by its font package alone. It imports no ECS, and reaches no gfx: what canvas needs that render lacks is a delta to render.
 - **The name** is `canvas`. "2D" was its codename while charting, and "2d" cannot be a Go package name. gfx's glossary avoids "canvas" for the Surface, which now points at the plugin; v1's canvas stays under `_legacy`.
 - **`canvas.PluginName`** is `"canvas"`, listed after render, platform and metronome, whose `Clock` times its jobs for the inspection. A plugin that records into canvas is listed after canvas.
 - **An immediate-mode API.** A user records entries every frame, and no sprite object persists. canvas buffers the frame's entries, sorts and batches them, records them into render, and forgets them. It cannot draw each call straight into render, because sorting and batching need the whole frame. Only its atlases, its glyphs and layouts, and the assets it loaded outlive a frame.
@@ -718,15 +718,16 @@ type Converter interface {
 ([canvas: fonts and text, from glyph representation to layout](https://github.com/dvoyni/cog/issues/868), spelt in [canvas prototype](https://github.com/dvoyni/cog/issues/871), with `Metrics` from [canvas: what v1 offered that v2's design lacks](https://github.com/dvoyni/cog/issues/878))
 
 - **Shaping is `go-text/typesetting`'s,** pinned in canvas's `go.mod`: HarfBuzz shaping, UAX #9 bidi, and UAX #14 and #29 boundaries. It is the only full pure-Go shaper, used by Gio, Fyne and Ebitengine.
-  - No go-text type is in canvas's API, so a breaking minor version touches canvas's internals only.
-  - canvas skips `fontscan`'s system scan, since fonts come from the FileSystem alone, and implements `shaping.Fontmap` over its font sets.
+  - No go-text type is in canvas's API or the font package's, and only the font package imports go-text, so a breaking minor version touches its internals only.
+  - The font package skips `fontscan`'s system scan, since fonts come from the FileSystem alone, and implements `shaping.Fontmap` over its sets.
   - v1 laid text out rune by rune with x/image, kerning only.
 - **Text names a font set and a size, never a font.** A `font.SetDescriptor{Label, Default, Languages}` has a default `font.Font` and `font.LanguageFonts{Languages, Fonts}` entries, so one font may serve several languages.
   - A `font.Font{Path, BitmapEm, FieldEm, FieldRange, Index, Variations}` carries its options: bitmap or field, the field's em and range, a collection's `Index`, and a variable font's `Variations`.
   - Fallbacks belong to a set, so a title set falls back to a bold CJK font and a body set to a regular one.
 - **Language tags match exactly.** A game shipping both Chinese scripts lists `zh-Hans` and `zh-Hant`.
 - **A character is drawn by the language's fonts that have it, then by the default font, then as the default font's missing-glyph box,** reported once per set as `ReportKindCharacterMissing`. Languages are not mixed. This is how games localise: switching the language switches the typeface.
-  - The shaper splits each paragraph into runs of one font through go-text's `shaping.Fontmap`, which canvas's shaper implements over the run's set and language, and each glyph laid out keeps the font that drew it, which its field is made of and keyed by.
+  - The font package's shaper splits each paragraph into runs of one font through go-text's `shaping.Fontmap`, which it implements over the run's set and language, and each glyph laid out keeps the font that drew it, which its field is made of and keyed by.
+  - A layout's `MissingRunes` are the runes no font of the set has, as the shaper found while choosing each rune's font, objects and the runes go-text gives the font beside them, such as a tab or a space, never among them. canvas reports the first, until the set has reported one.
 - **The language also goes to the shaper,** so a Pan-CJK font picks its regional forms by OpenType's `locl`.
 - **The current language is the `FontLibrary` resource's,** starting from `Config.Language` and changed by `SetLanguage` on its writing side. A run's optional `Language` overrides it, for a name in another language.
 - **The font that draws a character is cached per set, language and character,** so a change of language clears nothing. v1 cached it without the language, and a change needed `ClearGlyphsCmd`. The cache is the `font.Set`'s, safe for concurrent use, and it leaves with its set.
@@ -734,7 +735,7 @@ type Converter interface {
   - A set is a plain, pointer-free `FontSet` handle, which an ECS component holds.
   - The zero `FontSet` is the default set, made from `Config.DefaultFontSet`, whose zero is JetBrains Mono alone, embedded in the font package as v1's default font was, and mounted at `cog.canvas/jetbrainsmono.ttf` beside its licence. Until canvas starts, no mount is bound, so the default set is JetBrains Mono, parsed from the embedded file once for the process and shared by every kernel's sets, since a parsed go-text font is read-only; canvas's `Start` publishes a private event whose handler makes the set of `Config.DefaultFontSet` in a task under FontLibrary's write lock and platform's FS read, so a task reading FontLibrary that is ready after it waits for it.
   - A font of an empty `Path` is the built-in JetBrains Mono, so a set's zero `Default` is too, and a variation of it sets JetBrains Mono's weight.
-  - A font's measures are read as it loads, under the write lock, through a face kept no longer, since a go-text face caches as it is read and is not safe for concurrent use; a loaded font keeps its parsed font and its variations' coordinates. Each layout takes a shaper, segmenters, a line wrapper and a face of each font it shaped from a pool the `FontLibrary` resource keeps, since layouts are made under its read lock. go-text's shaper keeps its state of a font by its parsed font, so each loaded font has a parsed font of its own, the built-in font's copied, sharing its read-only tables.
+  - A font's measures are read as it loads, under the write lock, through a face kept no longer, since a go-text face caches as it is read and is not safe for concurrent use; a loaded font keeps its parsed font and its variations' coordinates. Each layout takes a `font.Shaper`, holding go-text's shaper, segmenters, line wrapper and a face of each font it shaped, from a pool the `FontLibrary` resource keeps with canvas's scratch, since layouts are made under its read lock. go-text's shaper keeps its state of a font by its parsed font, so each loaded font has a parsed font of its own, the built-in font's copied, sharing its read-only tables.
   - go-text keeps a font's file in memory, so four CJK fonts in one set hold about 60 MB; a Pan-CJK font serving them all is one file.
 - **The `FontLibrary` resource** holds the font sets, the current language, the icons and the registered colours.
   - **Its reading side** is an interface of reads alone: `Language()`, `Layout(text)`, `Preload(set, text)` and `Metrics(set, size, language)`.
@@ -756,8 +757,17 @@ type Converter interface {
 - **A `LoadError{Font, Err}`** is a font that did not load, or one whose variation names no axis, `ErrVariationIgnored`. The spec's `FontError` became `LoadError` as it was built: a type's name does not repeat its package's, and says what it is on its own.
 - **`CharacterFont` is safe for concurrent use,** keeping its cache under its own lock, since jobs lay text out together under `FontLibrary`'s read lock.
 - **JetBrains Mono is embedded in the package,** which `BuiltInFiles` answers with its licence, so canvas's mount of `cog.canvas/jetbrainsmono.ttf` reads that copy.
-- **What stays canvas's:** the reports, each of `Load`'s and `CharacterFont`'s answers reported once per path or per set, and the file stamps, taken over a descriptor's paths before `Load`, since the package reads none.
-- **Until shaping moves into the package,** canvas's text shaper and glyph table make go-text faces of a `Loaded` through the module's internal `gotextfont`, which the package fills as it is initialised.
+- **A `Shaper` lays runs out and fills glyphs' outlines,** and is not safe for concurrent use, since a go-text face caches as it is read: each job laying text out takes one of canvas's pool.
+  - `LayOut(Input{Set, Runes, Objects, Language, Em, WrapWidth, LineHeight, Tracking, Align})` answers a `Layout{Size, Baseline, LineWidths, ClusterPositions, Glyphs, MissingRunes}`, each `Glyph{Font, ID, Rune, Pen}` naming the font that draws it, its `GlyphID` there, and the index of the first rune of the cluster it was shaped of. Graphemes, line breaks, each paragraph's direction, runs of one font, shaping, tracking, wrapping, placing and aligning are the package's.
+  - **An icon crosses as an `Object{Rune, Width, Raise}`,** a rune laid out as a box of its width in world units, raised by its raise, which a line breaks around as around a letter; it is a glyph of a nil `Font`. canvas sizes an icon from the cap height of the font measuring the run's language before laying out, and an object of no width, an icon of a name none is registered under, is the default font's missing glyph.
+  - `Rasterize(font, id, em, padding)` answers a glyph's `Coverage{Bounds, Width, Height, Texels}`, filled at the font's variations, which canvas makes a field of through its distance transform, or keeps as a bitmap font's glyph.
+  - `ClearFaces` lets go of the shaper's faces, so a retired set's parsed fonts can go.
+  - `canvas.TextAlign` is converted to `font.Align` at the call, as `canvas.Wrap` is to `atlas.Wrap`.
+- **What stays canvas's:**
+  - the reports, each of `Load`'s and `CharacterFont`'s answers reported once per path or per set;
+  - the file stamps, taken over a descriptor's paths before `Load`, since the package reads none;
+  - the language, the icons, the colours and the markup, the pool of shapers and its scratch, the glyph table and its fields, and the layout cache;
+  - `TextLayout`, which holds a `font.Layout` with its spans' icons, its em and its font filter, each glyph kept with the span its `Rune` leads back to.
 
 ### Text: runs and layouts
 

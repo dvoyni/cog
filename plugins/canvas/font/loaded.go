@@ -6,19 +6,19 @@ import (
 	"io/fs"
 	"math"
 
-	"github.com/dvoyni/cog/plugins/canvas/internal/gotextfont"
 	gotext "github.com/go-text/typesetting/font"
 	"github.com/go-text/typesetting/font/opentype"
 )
 
 // Loaded is a font loaded from its file, read-only, so safe for concurrent
 // use: what it was loaded of, the font parsed with the coordinates of its
-// variations, which a face of it is made at, and its vertical measures at
-// an em of one world unit, read once as it is loaded.
+// variations, which a shaper's face of it is made at, and its vertical
+// measures at an em of one world unit, read once as it is loaded.
 type Loaded struct {
-	font   Font
-	parsed gotextfont.Parsed
-	perEm  Metrics
+	font        Font
+	parsed      *gotext.Font
+	coordinates []gotext.VarCoord
+	perEm       Metrics
 }
 
 // loadFont answers the font descriptor names, its file read through files,
@@ -67,8 +67,9 @@ func loadFont(files fs.FS, descriptor Font) (*Loaded, bool, error) {
 	extents, _ := face.FontHExtents()
 	unitsPerEm := float32(face.Upem())
 	return &Loaded{
-		font:   descriptor,
-		parsed: gotextfont.Parsed{Font: parsed, Coordinates: face.Coords()},
+		font:        descriptor,
+		parsed:      parsed,
+		coordinates: face.Coords(),
 		perEm: Metrics{
 			Ascent:     extents.Ascender / unitsPerEm,
 			Descent:    -extents.Descender / unitsPerEm,
@@ -106,9 +107,4 @@ func (f *Loaded) Metrics(size float32) Metrics {
 		XHeight:    f.perEm.XHeight * size,
 		CapHeight:  f.perEm.CapHeight * size,
 	}
-}
-
-// init hands canvas each loaded font's parsed font through gotextfont.
-func init() {
-	gotextfont.FindParsed = func(loaded any) gotextfont.Parsed { return loaded.(*Loaded).parsed }
 }

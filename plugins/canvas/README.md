@@ -79,6 +79,10 @@ importing [kernel](../../kernel), [metronome](../metronome),
 - **`font.SetDescriptor`**, in the `font` subpackage, is what a font set is
   made of: a default `font.Font` and the fonts serving each language, each a
   font file and its options. A font's measures are `font.Metrics`.
+- **`font.Shaper`**, in the `font` subpackage, lays runes out in a loaded
+  `font.Set`, icons among them as objects, and rasterizes its glyphs'
+  coverage, for a plugin laying out text of its own; one a job, since it is
+  not safe for concurrent use.
 
 ## Kernel surface
 

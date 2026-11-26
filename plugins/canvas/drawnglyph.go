@@ -31,7 +31,7 @@ func makeDrawnGlyph(glyphAtlas *atlas.Atlas, region render.TextureRegion, field 
 	return drawnGlyph{
 		packedRegion:   region,
 		region:         glyphAtlas.TextureRect(region),
-		bounds:         field.bounds,
+		bounds:         field.Bounds,
 		spread:         field.spread,
 		packed:         true,
 		lastDrawnFrame: frame,

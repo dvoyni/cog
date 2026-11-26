@@ -7,17 +7,17 @@ func TestALoadedFontIsAtItsVariations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plain.parsed.Coordinates) != 0 {
-		t.Errorf("JetBrains Mono at no variation has coordinates %v, want its default instance", plain.parsed.Coordinates)
+	if len(plain.coordinates) != 0 {
+		t.Errorf("JetBrains Mono at no variation has coordinates %v, want its default instance", plain.coordinates)
 	}
 	bold, _, err := loadFont(nil, Font{Variations: [4]Variation{{}, {Axis: AxisTagFromName("wght"), Value: 800}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bold.parsed.Coordinates) != 1 || bold.parsed.Coordinates[0] <= 0 {
-		t.Errorf("JetBrains Mono at a weight of 800 has coordinates %v, want its one axis past its default", bold.parsed.Coordinates)
+	if len(bold.coordinates) != 1 || bold.coordinates[0] <= 0 {
+		t.Errorf("JetBrains Mono at a weight of 800 has coordinates %v, want its one axis past its default", bold.coordinates)
 	}
-	if bold.parsed.Font == plain.parsed.Font {
+	if bold.parsed == plain.parsed {
 		t.Errorf("the two loads of JetBrains Mono share their parsed font, want each its own")
 	}
 }

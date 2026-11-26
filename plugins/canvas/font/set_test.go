@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io/fs"
-	"math"
 	"os"
 	"slices"
 	"sync"
@@ -226,7 +225,7 @@ func nearMetrics(got, want font.Metrics) bool {
 	gotMeasures := [...]float32{got.Ascent, got.Descent, got.LineGap, got.LineHeight, got.XHeight, got.CapHeight}
 	wantMeasures := [...]float32{want.Ascent, want.Descent, want.LineGap, want.LineHeight, want.XHeight, want.CapHeight}
 	for index := range gotMeasures {
-		if !(math.Abs(float64(gotMeasures[index]-wantMeasures[index])) <= 1e-3) {
+		if !isNear(gotMeasures[index], wantMeasures[index]) {
 			return false
 		}
 	}

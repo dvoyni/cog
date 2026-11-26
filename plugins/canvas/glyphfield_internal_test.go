@@ -8,8 +8,6 @@ import (
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/canvas/font"
-	"github.com/dvoyni/cog/plugins/canvas/internal/gotextfont"
-	gotext "github.com/go-text/typesetting/font"
 )
 
 func TestAGlyphsFieldHoldsItsDistanceAcrossItsEdgeAndReachesHalfItsRangePastIt(t *testing.T) {
@@ -17,20 +15,20 @@ func TestAGlyphsFieldHoldsItsDistanceAcrossItsEdgeAndReachesHalfItsRangePastIt(t
 	// em across, -300 to 1020 up: at 100 texels to the em, -1 to 61 and
 	// -102 to 30 down, each on a whole texel, and its field reaches 9
 	// texels past them, half its range of 17 rounded up.
-	builtIn := loadParsedFont(t, nil, font.Font{})
-	face := gotext.NewFace(builtIn)
-	block, _ := face.NominalGlyph('█')
+	builtIn := loadDefaultFont(t, nil, font.Font{})
+	var shaper font.Shaper
+	block := findGlyph(&shaper, builtIn, '█')
 
-	field := makeGlyphField(face, block, 100, 17)
+	field := makeGlyphField(&shaper, builtIn.Default(), block, 100, 17)
 
 	wantBounds := m.Rect{X: -0.10, Y: -1.11, Width: 0.80, Height: 1.50}
-	if field.width != 80 || field.height != 150 || field.spread != 8.5 || !nearRect(field.bounds, wantBounds) {
-		t.Errorf("the block's field is %d by %d texels, of spread %v, over %+v em, want 80 by 150, 8.5, over %+v", field.width, field.height, field.spread, field.bounds, wantBounds)
+	if field.Width != 80 || field.Height != 150 || field.spread != 8.5 || !nearRect(field.Bounds, wantBounds) {
+		t.Errorf("the block's field is %d by %d texels, of spread %v, over %+v em, want 80 by 150, 8.5, over %+v", field.Width, field.Height, field.spread, field.Bounds, wantBounds)
 	}
 	// Along the middle row, each texel centre lies a whole and a half
 	// texels from the left edge, at texel 9: 0.5 + d/17 of the way up, in a
 	// byte, exactly.
-	row := field.texels[75*field.width:][:field.width]
+	row := field.Texels[75*field.Width:][:field.Width]
 	for texel, want := range map[int]byte{0: 0, 7: 105, 8: 120, 9: 135, 10: 150, 17: 255, 40: 255} {
 		if row[texel] != want {
 			t.Errorf("texel %d of the middle row is %d, want %d", texel, row[texel], want)
@@ -39,10 +37,11 @@ func TestAGlyphsFieldHoldsItsDistanceAcrossItsEdgeAndReachesHalfItsRangePastIt(t
 }
 
 func TestASpaceHasNoField(t *testing.T) {
-	face := gotext.NewFace(loadParsedFont(t, nil, font.Font{}))
-	space, _ := face.NominalGlyph(' ')
-	if field := makeGlyphField(face, space, 48, 16); field.texels != nil {
-		t.Errorf("a space's field has %d texels, want none", len(field.texels))
+	builtIn := loadDefaultFont(t, nil, font.Font{})
+	var shaper font.Shaper
+	space := findGlyph(&shaper, builtIn, ' ')
+	if field := makeGlyphField(&shaper, builtIn.Default(), space, 48, 16); field.Texels != nil {
+		t.Errorf("a space's field has %d texels, want none", len(field.Texels))
 	}
 }
 
@@ -93,30 +92,29 @@ func TestAGlyphsPenFollowsTheAdvancesBeforeItInItsCluster(t *testing.T) {
 // at an em of 48 texels, canvas's default, and Noto Sans SC's ideographs
 // at 64, as a CJK font takes, each of a range of 16.
 func BenchmarkMakeGlyphField(b *testing.B) {
-	hanziFace := gotext.NewFace(loadParsedFont(b, os.DirFS("testdata/fonts"), font.Font{Path: "notosanssc-hanzi.ttf"}))
-	latinFace := gotext.NewFace(loadParsedFont(b, nil, font.Font{}))
-	var latin, hanzi []gotext.GID
+	hanziSet := loadDefaultFont(b, os.DirFS("testdata/fonts"), font.Font{Path: "notosanssc-hanzi.ttf"})
+	latinSet := loadDefaultFont(b, nil, font.Font{})
+	var shaper font.Shaper
+	var latin, hanzi []font.GlyphID
 	for letter := 'a'; letter <= 'z'; letter++ {
-		id, _ := latinFace.NominalGlyph(letter)
-		latin = append(latin, id)
+		latin = append(latin, findGlyph(&shaper, latinSet, letter))
 	}
 	for ideograph := rune(0x4E00); ideograph < 0x4F00; ideograph++ {
-		id, _ := hanziFace.NominalGlyph(ideograph)
-		hanzi = append(hanzi, id)
+		hanzi = append(hanzi, findGlyph(&shaper, hanziSet, ideograph))
 	}
 	for _, glyphs := range []struct {
 		name string
-		face *gotext.Face
-		ids  []gotext.GID
+		set  *font.Set
+		ids  []font.GlyphID
 		em   int
 	}{
-		{"latin/em=48", latinFace, latin, 48},
-		{"han/em=64", hanziFace, hanzi, 64},
+		{"latin/em=48", latinSet, latin, 48},
+		{"han/em=64", hanziSet, hanzi, 64},
 	} {
 		b.Run(glyphs.name, func(b *testing.B) {
 			index := 0
 			for b.Loop() {
-				makeGlyphField(glyphs.face, glyphs.ids[index%len(glyphs.ids)], glyphs.em, 16)
+				makeGlyphField(&shaper, glyphs.set.Default(), glyphs.ids[index%len(glyphs.ids)], glyphs.em, 16)
 				index++
 			}
 			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N), "ns/glyph")
@@ -124,12 +122,18 @@ func BenchmarkMakeGlyphField(b *testing.B) {
 	}
 }
 
-// loadParsedFont answers go-text's font of descriptor, loaded alone through
-// files as a set's default, failing tb when it does not load.
-func loadParsedFont(tb testing.TB, files fs.FS, descriptor font.Font) *gotext.Font {
+// loadDefaultFont answers a set of descriptor alone, loaded through files
+// as its default, failing tb when it does not load.
+func loadDefaultFont(tb testing.TB, files fs.FS, descriptor font.Font) *font.Set {
 	set, failures := font.Load(files, font.SetDescriptor{Default: descriptor})
 	if len(failures) != 0 {
 		tb.Fatal(failures)
 	}
-	return gotextfont.FindParsed(set.Default()).Font
+	return set
+}
+
+// findGlyph answers the glyph of set's default font character is shaped
+// as alone, laid out by shaper.
+func findGlyph(shaper *font.Shaper, set *font.Set, character rune) font.GlyphID {
+	return shaper.LayOut(font.Input{Set: set, Runes: []rune{character}, Em: 1}).Glyphs[0].ID
 }

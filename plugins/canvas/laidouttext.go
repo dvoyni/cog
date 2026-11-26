@@ -41,7 +41,7 @@ func (t *laidOutText) findPlaced(inventory render.Inventory, atlases *atlasSet) 
 // its Transform, a zero one read as the identity.
 func (t *laidOutText) findTransform() m.Mat2x3 {
 	pivot := t.text.Pivot
-	pivotPoint := pivot.Fraction.AddS(0.5).Mul(t.layout.size).Add(pivot.Texels.MulS(t.layout.em))
+	pivotPoint := pivot.Fraction.AddS(0.5).Mul(t.layout.Size()).Add(pivot.Texels.MulS(t.layout.em))
 	toPivot := m.Translation2x3(-pivotPoint.X, -pivotPoint.Y)
 	if t.text.Transform == (m.Mat2x3{}) {
 		return toPivot

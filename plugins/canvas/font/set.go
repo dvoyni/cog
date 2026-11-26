@@ -104,14 +104,14 @@ func (s *Set) CharacterFont(language string, character rune) (*Loaded, bool) {
 		return drawingFont.font, drawingFont.hasCharacter
 	}
 	for _, languageFont := range s.languageFonts[language] {
-		if _, has := languageFont.parsed.Font.NominalGlyph(character); has {
+		if _, has := languageFont.parsed.NominalGlyph(character); has {
 			drawingFont = characterFont{font: languageFont, hasCharacter: true}
 			break
 		}
 	}
 	if drawingFont.font == nil {
 		drawingFont.font = s.defaultFont
-		_, drawingFont.hasCharacter = s.defaultFont.parsed.Font.NominalGlyph(character)
+		_, drawingFont.hasCharacter = s.defaultFont.parsed.NominalGlyph(character)
 	}
 	s.characterMutex.Lock()
 	s.characterFonts[key] = drawingFont

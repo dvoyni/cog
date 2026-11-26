@@ -3,7 +3,6 @@ package canvas
 import (
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/canvas/font"
-	gotext "github.com/go-text/typesetting/font"
 )
 
 // TextLayout is a run of text shaped, broken into lines and measured, which
@@ -11,8 +10,9 @@ import (
 // pointing down. Its box is the run's wrap width, or its widest line
 // without wrapping, by its lines' height.
 type TextLayout struct {
-	size     m.Vec2
-	baseline float32
+	// layout is the run laid out by the font package, its box, baseline,
+	// lines' widths and clusters' positions, its glyphs moved into glyphs.
+	layout font.Layout
 	// em is the run's em, in world units, which its glyphs' fields are
 	// scaled by.
 	em float32
@@ -20,13 +20,9 @@ type TextLayout struct {
 	// names none, its font's: nearest where a bitmap font measures its
 	// language, else linear, as a distance field is read.
 	fontFilter Filter
-	// lineWidths are each line's width, in order.
-	lineWidths []float32
-	// clusterPositions are where each grapheme cluster of the run's text
-	// starts, then where the text ends.
-	clusterPositions []m.Vec2
-	// glyphs are the run's glyphs, line by line, each line's left to right,
-	// but for those of no field once laid out for drawing.
+	// glyphs are the layout's glyphs, each with the span its rune is of,
+	// line by line, each line's left to right, but for those of no field
+	// once laid out for drawing.
 	glyphs []placedGlyph
 	// spanIcons are the icon each of the run's spans is, nil for a span of
 	// text and for a name no icon is registered under, and none for a run
@@ -35,18 +31,18 @@ type TextLayout struct {
 }
 
 // Size answers the layout's box.
-func (l TextLayout) Size() m.Vec2 { return l.size }
+func (l TextLayout) Size() m.Vec2 { return l.layout.Size }
 
 // LineCount answers how many lines the layout has: one at least, an empty
 // paragraph's line holding nothing.
-func (l TextLayout) LineCount() int { return len(l.lineWidths) }
+func (l TextLayout) LineCount() int { return len(l.layout.LineWidths) }
 
 // Baseline answers the first line's baseline, from the box's top.
-func (l TextLayout) Baseline() float32 { return l.baseline }
+func (l TextLayout) Baseline() float32 { return l.layout.Baseline }
 
 // LineWidth answers the width of line, counted from zero, its trailing
 // spaces left out.
-func (l TextLayout) LineWidth(line int) float32 { return l.lineWidths[line] }
+func (l TextLayout) LineWidth(line int) float32 { return l.layout.LineWidths[line] }
 
 // ClusterPosition answers where the grapheme cluster cluster of the run's
 // text starts, counted from zero, on its line's baseline: its left edge in
@@ -54,7 +50,7 @@ func (l TextLayout) LineWidth(line int) float32 { return l.lineWidths[line] }
 // last cluster answers where the text ends; a hard break's cluster, such as
 // a newline's, is where its line ends. A ligature's width is shared evenly
 // by the clusters it draws.
-func (l TextLayout) ClusterPosition(cluster int) m.Vec2 { return l.clusterPositions[cluster] }
+func (l TextLayout) ClusterPosition(cluster int) m.Vec2 { return l.layout.ClusterPositions[cluster] }
 
 // findIcon answers the icon glyph is, nil for a glyph of a font.
 func (l TextLayout) findIcon(glyph placedGlyph) *placedIcon {
@@ -72,7 +68,7 @@ func (l TextLayout) findIcon(glyph placedGlyph) *placedIcon {
 // is a glyph of no font, its span's icon, its pen its bottom left.
 type placedGlyph struct {
 	font  *font.Loaded
-	id    gotext.GID
+	id    font.GlyphID
 	field uint32
 	span  uint32
 	pen   m.Vec2

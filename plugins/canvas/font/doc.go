@@ -1,6 +1,7 @@
-// Package font loads the fonts of a font set: TrueType and OpenType files,
-// and collections of them, at their variations, read through an fs.FS,
-// with go-text, none of which reaches its interface.
+// Package font loads the fonts of a font set, lays text out in them and
+// fills their glyphs' outlines: TrueType and OpenType files, and
+// collections of them, at their variations, read through an fs.FS, with
+// go-text, none of which reaches its interface.
 //
 // A SetDescriptor names a default font and the fonts serving each
 // language; Load loads every font it names once, a font serving several
@@ -17,4 +18,16 @@
 // and each failure is a LoadError among failures. A Set then answers the
 // font measuring a language and the font drawing each of its characters,
 // each Loaded measuring itself at a size.
+//
+// A Shaper, one per job since it is not safe for concurrent use, lays a
+// run of runes out in a set, and rasterizes the glyphs of its layout:
+//
+//	var shaper font.Shaper
+//	layout := shaper.LayOut(font.Input{Set: set, Runes: []rune("hello world"), Language: "en", Em: 16, WrapWidth: 200})
+//	for _, glyph := range layout.Glyphs {
+//		if glyph.Font != nil {
+//			coverage := shaper.Rasterize(glyph.Font, glyph.ID, 48, 8)
+//			_ = coverage
+//		}
+//	}
 package font

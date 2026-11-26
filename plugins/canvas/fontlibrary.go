@@ -115,7 +115,7 @@ func (l *fontLibrary) Preload(set FontSet, text string) {
 	shaper := l.shapers.Get().(*textShaper)
 	defer l.shapers.Put(shaper)
 	layout := shaper.layOut(layoutInput{text: text, set: slot, em: l.textSize, language: l.language}, l.icons)
-	_, madeCount := l.glyphs.assignFields(layout.glyphs, shaper)
+	_, madeCount := l.glyphs.assignFields(layout.glyphs, &shaper.shaper)
 	l.reporter.inspector.addMadeGlyphs(Text{String: text, Font: set, Language: l.language}, madeCount)
 }
 
@@ -164,7 +164,7 @@ func (l *fontLibrary) layOutText(text Text, drawn bool, shaper *textShaper) (Tex
 			}
 		}
 		if drawn {
-			drawnGlyphs, madeCount := l.glyphs.assignFields(slices.Clone(cached.layout.glyphs), shaper)
+			drawnGlyphs, madeCount := l.glyphs.assignFields(slices.Clone(cached.layout.glyphs), &shaper.shaper)
 			l.reporter.inspector.addMadeGlyphs(madeText, madeCount)
 			cached.drawnGlyphs.CompareAndSwap(nil, &drawnGlyphs)
 		}
