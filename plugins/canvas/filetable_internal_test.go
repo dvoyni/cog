@@ -193,3 +193,18 @@ func (r *errorRecorder) count() int {
 	defer r.mutex.Unlock()
 	return len(r.errors)
 }
+
+// countKind answers how many of the errors r was told of are reports of
+// kind.
+func (r *errorRecorder) countKind(kind ReportKind) int {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	count := 0
+	for _, err := range r.errors {
+		var report Report
+		if errors.As(err, &report) && report.Kind == kind {
+			count++
+		}
+	}
+	return count
+}

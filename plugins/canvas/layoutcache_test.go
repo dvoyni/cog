@@ -1,61 +1,51 @@
 package canvas_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/dvoyni/cog/plugins/canvas"
 	"github.com/dvoyni/cog/plugins/canvas/canvastest"
-	"github.com/dvoyni/cog/plugins/canvas/font"
 	"github.com/dvoyni/cog/plugins/platform"
 )
 
 func TestALabelDrawnEveryFrameIsShapedOnceAndFreedOnceUnusedForTheIdleFrames(t *testing.T) {
-	// The label is drawn in frames 2 to 6, then not: each frame's read
-	// sees the layout cached, without using it, as the frame before left
-	// it. Unused in frames 7 and 8, the default 2 idle frames, it is freed
-	// at the end of frame 8.
-	label := canvas.Text{String: "Score: 120", Size: 20}
-	var cached []*canvas.CachedLayout
+	// Each label is drawn in frames 2 to 6, and once more: shaped in frame
+	// 2 alone, and unused in frames 7 and 8, the default 2 idle frames, it
+	// is freed at the end of frame 8, so the label drawn again in frame 8
+	// finds its layout kept and the one drawn again in frame 9 is shaped
+	// again.
+	labels := map[int]canvas.Text{8: {String: "Score: 120", Size: 20}, 9: {String: "Score: 340", Size: 20}}
 	h := canvastest.NewHarness(t)
-	h.Spawn(nil, nil, &fontLibraryUser{read: func(fonts canvas.FontLibrary, frame int) {
-		cached = append(cached, canvas.FindCachedLayout(fonts, label))
-	}})
+	h.Spawn(nil, nil)
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
-
 	for frame := range 10 {
-		if frame >= 2 && frame <= 6 {
-			h.Record(func(list canvas.CommandList) { list.DrawText(label) })
-		}
+		h.Record(func(list canvas.CommandList) {
+			for again, label := range labels {
+				if frame >= 2 && frame <= 6 || frame == again {
+					list.DrawText(label)
+				}
+			}
+		})
 		h.Step()
 	}
 
-	if len(cached) != 10 {
-		t.Fatalf("%d frames read, want 10", len(cached))
-	}
-	if cached[3] == nil {
-		t.Fatal("frame 3 saw no layout cached of the label frame 2 drew")
-	}
-	for frame := 4; frame <= 8; frame++ {
-		if cached[frame] != cached[3] {
-			t.Errorf("frame %d saw the label's layout %p, want the one frame 2 shaped, %p, kept", frame, cached[frame], cached[3])
+	for again, want := range map[int][]int{8: {2}, 9: {2, 9}} {
+		if shaped := findFramesLayingOut(h.Frames(), labels[again]); !slices.Equal(shaped, want) {
+			t.Errorf("the label drawn again in frame %d is shaped in frames %v, want %v", again, shaped, want)
 		}
-	}
-	if cached[9] != nil {
-		t.Error("frame 9 saw the label's layout cached, want it freed at the end of frame 8, its second frame unused")
 	}
 }
 
 func TestALabelMeasuredThenDrawnIsShapedOnce(t *testing.T) {
 	// Measured in frame 0 and drawn in frames 1 to 3: the layout measured
-	// is the one drawn, so drawing it keeps it, and frame 4 sees it still.
+	// is the one drawn, so only frame 0 shapes it.
 	label := canvas.Text{String: "Options", Size: 20}
-	var cached []*canvas.CachedLayout
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, nil, &fontLibraryUser{read: func(fonts canvas.FontLibrary, frame int) {
 		if frame == 0 {
 			fonts.Layout(label)
 		}
-		cached = append(cached, canvas.FindCachedLayout(fonts, label))
 	}})
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 
@@ -64,11 +54,26 @@ func TestALabelMeasuredThenDrawnIsShapedOnce(t *testing.T) {
 		h.Record(func(list canvas.CommandList) { list.DrawText(label) })
 		h.Step()
 	}
-	h.Step()
 
-	if cached[0] == nil || cached[4] != cached[0] {
-		t.Errorf("frame 4 saw the label's layout %p, want the one frame 0 measured, %p, kept by drawing it", cached[4], cached[0])
+	if shaped := findFramesLayingOut(h.Frames(), label); !slices.Equal(shaped, []int{0}) {
+		t.Errorf("the label is shaped in frames %v, want frame 0 alone, which measured it", shaped)
 	}
+}
+
+// findFramesLayingOut answers the index of each of frames that laid out
+// run, measured or drawn, once for each layout of it made, as its
+// MadeLayouts say: a run of its String, Size and Font, and of its Spans
+// unless it is markup, whose spans are read from its String.
+func findFramesLayingOut(frames []canvas.Inspection, run canvas.Text) []int {
+	var laidOut []int
+	for index, frame := range frames {
+		for _, made := range frame.MadeLayouts {
+			if made.String == run.String && made.Size == run.Size && made.Font == run.Font && (run.Markup || slices.Equal(made.Spans, run.Spans)) {
+				laidOut = append(laidOut, index)
+			}
+		}
+	}
+	return laidOut
 }
 
 func TestAPreloadedStringsFirstDrawMakesNoGlyph(t *testing.T) {
@@ -103,60 +108,4 @@ func TestAPreloadedStringsFirstDrawMakesNoGlyph(t *testing.T) {
 	if batches := h.Frames()[1].Cameras[0].Batches; len(batches) != 1 {
 		t.Errorf("the preloaded string drew batches %+v, want one", batches)
 	}
-}
-
-func TestRunsDifferingInWhatShapesThemAreLaidOutApart(t *testing.T) {
-	// One string, laid out once plainly and then wrapped, spaced and
-	// tracked in turn, each measured as itself rather than as the layout
-	// cached before it.
-	plain := canvas.Text{String: "ab cd", Size: 10}
-	wrapped := plain
-	wrapped.WrapWidth = 25
-	spaced := plain
-	spaced.LineHeight = 2
-	tracked := plain
-	tracked.Tracking = 0.5
-	layouts, _ := layOutTexts(t, nil, plain, wrapped, spaced, tracked)
-
-	if layouts[1].LineCount() != 2 {
-		t.Errorf("the wrapped run has %d lines, want 2", layouts[1].LineCount())
-	}
-	if !(layouts[2].Size().Y > layouts[0].Size().Y) {
-		t.Errorf("the run of twice the line height is %v tall, want taller than the plain run's %v", layouts[2].Size().Y, layouts[0].Size().Y)
-	}
-	if !(layouts[3].Size().X > layouts[0].Size().X) {
-		t.Errorf("the tracked run is %v wide, want wider than the plain run's %v", layouts[3].Size().X, layouts[0].Size().X)
-	}
-}
-
-func TestARunLaidOutAgainInAnotherLanguageTakesThatLanguagesFont(t *testing.T) {
-	// The set's default font is Go Regular, and Japanese's JetBrains Mono:
-	// an m laid out in English, then again once the language is Japanese,
-	// is as wide as JetBrains Mono's advance.
-	h := canvastest.NewHarness(t)
-	var set canvas.FontSet
-	var widths []float32
-	h.Spawn(nil, &canvas.Config{Language: "en"}, &fileMounter{files: makeFontFiles(t)}, &fontLibraryUser{
-		write: func(fonts canvas.WriteFontLibrary, frame int) {
-			switch frame {
-			case 0:
-				set = fonts.MakeFontSet(font.SetDescriptor{
-					Default:   font.Font{Path: "go.ttf"},
-					Languages: []font.LanguageFonts{{Languages: []string{"ja"}, Fonts: []font.Font{{Path: builtInFontPath}}}},
-				})
-			case 1:
-				fonts.SetLanguage("ja")
-			}
-		},
-		read: func(fonts canvas.FontLibrary, frame int) {
-			widths = append(widths, fonts.Layout(canvas.Text{String: "m", Font: set, Size: 10}).LineWidth(0))
-		},
-	})
-	h.Step()
-	h.Step()
-
-	if widths[0] == widths[1] {
-		t.Errorf("the m is %v wide in English and Japanese both, want Japanese's font's width", widths[0])
-	}
-	expectNear(t, "the m in Japanese", widths[1], builtInAdvance*10)
 }

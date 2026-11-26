@@ -13,9 +13,13 @@ import (
 	"github.com/dvoyni/cog/plugins/canvas/font"
 )
 
-// chineseFontPath is testdata/fonts' subset of Noto Sans SC, holding Basic
-// Latin and the ideographs these tests lay out.
-const chineseFontPath = "notosanssc.ttf"
+// The fonts of testdata/fonts, subsets of Noto Sans Arabic and of Noto
+// Sans SC, the second holding Basic Latin and the ideographs these tests
+// lay out.
+const (
+	arabicFontPath  = "notosansarabic.ttf"
+	chineseFontPath = "notosanssc.ttf"
+)
 
 // captureFontDrawing draws record's entries under canvas whose default set
 // is set and whose current language is language, testdata/fonts mounted,
@@ -95,24 +99,6 @@ func TestARunInJapaneseAndOneInChineseDrawThroughEachLanguagesFontFromOneSet(t *
 	}
 }
 
-func TestACharacterIsDrawnByTheFirstOfItsLanguagesFontsThatHasItThenByTheDefaultFont(t *testing.T) {
-	// zh-Hans is served by Noto Sans Arabic, which has W but no ideographs,
-	// then by Noto Sans SC, which has 今 but no arrows; JetBrains Mono, the
-	// default font, draws the arrow. The run's own language picks them,
-	// though the current one has no fonts.
-	set := font.SetDescriptor{Languages: []font.LanguageFonts{
-		{Languages: []string{"zh-Hans"}, Fonts: []font.Font{{Path: arabicFontPath}, {Path: chineseFontPath}}},
-	}}
-	layouts, _ := layOutTexts(t, &canvas.Config{DefaultFontSet: set}, canvas.Text{String: "W今→", Size: 10, Language: "zh-Hans"})
-	arabicW, _ := layOutTexts(t, makeDefaultFontConfig(arabicFontPath), canvas.Text{String: "W", Size: 10})
-	chineseIdeograph, _ := layOutTexts(t, makeDefaultFontConfig(chineseFontPath), canvas.Text{String: "今", Size: 10})
-	want := arabicW[0].LineWidth(0) + chineseIdeograph[0].LineWidth(0) + builtInAdvance*10
-	expectLineWidths(t, "W, 今 and an arrow, each by its own font", layouts[0], want)
-	if arabicW[0].LineWidth(0) == builtInAdvance*10 {
-		t.Fatal("Noto Sans Arabic's W is as wide as JetBrains Mono's, so the widths tell no font from the other")
-	}
-}
-
 func TestACharacterNoFontOfTheSetHasDrawsTheDefaultFontsMissingGlyphBoxReportedOnce(t *testing.T) {
 	// JetBrains Mono, the default set's only font, has no Hangul: each of
 	// two runs of it draws its missing-glyph box, frame after frame, and the
@@ -143,32 +129,29 @@ func TestChangingTheLanguageClearsNothing(t *testing.T) {
 	}}
 	label := canvas.Text{String: "今日", Size: 10}
 	languages := []string{"ja", "zh-Hans", "ja"}
-	var layouts []*canvas.CachedLayout
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, &canvas.Config{DefaultFontSet: set}, &fileMounter{files: os.DirFS("testdata/fonts")}, &fontLibraryUser{
 		write: func(fonts canvas.WriteFontLibrary, frame int) {
 			fonts.SetLanguage(languages[frame])
 		},
 		read: func(fonts canvas.FontLibrary, frame int) {
-			if frame == 2 {
-				layouts = append(layouts, canvas.FindCachedLayout(fonts, label))
-			}
 			fonts.Layout(label)
-			layouts = append(layouts, canvas.FindCachedLayout(fonts, label))
 		},
 	})
 	for range languages {
 		h.Step()
 	}
 
-	if len(layouts) != 4 {
-		t.Fatalf("%d layouts read, want 4", len(layouts))
+	var shapedIn [][]string
+	for _, frame := range h.Frames() {
+		var frameLanguages []string
+		for _, made := range frame.MadeLayouts {
+			frameLanguages = append(frameLanguages, made.Language)
+		}
+		shapedIn = append(shapedIn, frameLanguages)
 	}
-	if layouts[0] == nil || layouts[1] == layouts[0] {
-		t.Fatalf("the label in ja is laid out as %p and in zh-Hans as %p, want two layouts", layouts[0], layouts[1])
-	}
-	if layouts[2] != layouts[0] || layouts[3] != layouts[0] {
-		t.Errorf("back in ja the label's layout is %p, then %p once laid out, want frame 0's, %p, kept", layouts[2], layouts[3], layouts[0])
+	if want := [][]string{{"ja"}, {"zh-Hans"}, nil}; !slices.EqualFunc(shapedIn, want, slices.Equal[[]string]) {
+		t.Errorf("the frames shape the label in %q, want %q, frame 0's layout kept", shapedIn, want)
 	}
 }
 

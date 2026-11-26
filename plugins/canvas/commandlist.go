@@ -195,16 +195,15 @@ func (l CommandList) SetCamera(camera Camera) {
 	l.list.record(l.state.Get(), 0, &l.list.cameras, nil, nil, camera)
 }
 
-// drawText lays text out and records it, as DrawText does, giving the
-// material argument of argumentType in argumentBytes, nil for none: its
-// markup read into spans, which recording copies before the shaper whose
-// scratch holds them goes back to the pool.
+// drawText lays text out for drawing and records it, as DrawText does,
+// giving the material argument of argumentType in argumentBytes, nil for
+// none, while the font library holds its spans.
 func (l CommandList) drawText(text Text, argumentType reflect.Type, argumentBytes []byte) {
-	library := l.fonts.Get().(*fontLibrary)
-	shaper := library.acquireShaper(text)
-	defer library.releaseShaper(shaper)
-	text, layout := library.layOutText(text, true, shaper)
-	l.list.recordText(l.state.Get(), argumentType, argumentBytes, laidOutText{text: text, layout: layout})
+	list := l.list
+	state := l.state.Get()
+	l.fonts.Get().(*fontLibrary).layOutText(text, true, func(text Text, layout TextLayout) {
+		list.recordText(state, argumentType, argumentBytes, laidOutText{text: text, layout: layout})
+	})
 }
 
 // drawTriangles records triangles drawn with options, as DrawTriangles

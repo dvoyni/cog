@@ -19,7 +19,8 @@ func TestRetiringAFontsGlyphsForgetsThemAndEmptiesTheirFieldsOnceTakenKeepingAno
 	other.set = FontSet{index: 1, generation: 1}
 	library.sets = append(library.sets, other)
 	retired := drawGlyphFields(library, FontSet{})
-	_, kept := library.layOutText(Text{String: "ab", Font: other.set}, true, nil)
+	var kept TextLayout
+	library.layOutText(Text{String: "ab", Font: other.set}, true, func(_ Text, laidOut TextLayout) { kept = laidOut })
 
 	library.glyphs.retireFonts(slices.Collect(library.sets[0].fonts.Fonts()))
 

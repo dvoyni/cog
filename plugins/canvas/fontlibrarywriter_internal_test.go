@@ -81,7 +81,7 @@ func TestADestroyedSetsFontsAreCollectedOnceItsLayoutsHaveGoneIdle(t *testing.T)
 	retiredFont := weak.Make(library.sets[set.index].fonts.Default())
 	// The shaper laying the set out goes back to the pool holding a face of
 	// its font, which one collection would only move to the pool's victims.
-	library.layOutText(Text{String: "ab", Font: set}, true, nil)
+	library.layOutText(Text{String: "ab", Font: set}, true, func(Text, TextLayout) {})
 
 	writer.DestroyFontSet(set)
 	for range library.layouts.idleFrames + 1 {
@@ -115,7 +115,8 @@ func makeWriterOverFiles(t *testing.T) (*fontLibrary, fontLibraryWriter) {
 // drawGlyphFields answers the fields of the glyphs of "ab" laid out for
 // drawing in set.
 func drawGlyphFields(library *fontLibrary, set FontSet) []uint32 {
-	_, layout := library.layOutText(Text{String: "ab", Font: set}, true, nil)
+	var layout TextLayout
+	library.layOutText(Text{String: "ab", Font: set}, true, func(_ Text, laidOut TextLayout) { layout = laidOut })
 	var fields []uint32
 	for _, glyph := range layout.glyphs {
 		fields = append(fields, glyph.field)

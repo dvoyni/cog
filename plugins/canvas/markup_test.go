@@ -165,14 +165,12 @@ func TestARegisteredColoursSpanTakesTheColourRegisteredWhenDrawnItsLayoutKept(t 
 	// keyword is registered again in frame 1, through the one layout.
 	h := canvastest.NewHarness(t)
 	text := canvas.Text{String: `cast \c:keyword{fire}`, Markup: true, Size: 10}
-	var cached []*canvas.CachedLayout
 	h.Spawn(nil, nil, &fontLibraryUser{
 		write: func(fonts canvas.WriteFontLibrary, frame int) {
 			fonts.RegisterColor("keyword", []m.Color{orange, {B: 1, A: 1}}[min(frame, 1)])
 		},
 		read: func(fonts canvas.FontLibrary, frame int) {
 			fonts.Layout(text)
-			cached = append(cached, canvas.FindCachedLayout(fonts, text))
 		},
 		draw: func(list canvas.CommandList, frame int) {
 			list.DrawText(text)
@@ -189,8 +187,8 @@ func TestARegisteredColoursSpanTakesTheColourRegisteredWhenDrawnItsLayoutKept(t 
 			t.Errorf("frame %d drew spans %+v, want %+v", frame, spans, wantSpans)
 		}
 	}
-	if cached[0] == nil || cached[1] != cached[0] {
-		t.Errorf("the run's layout is %p, then %p, want the first kept", cached[0], cached[1])
+	if shaped := findFramesLayingOut(frames, text); !slices.Equal(shaped, []int{0}) {
+		t.Errorf("the run is shaped in frames %v, want frame 0 alone, its layout kept", shaped)
 	}
 }
 
