@@ -25,7 +25,7 @@ Each module has its own `AGENTS.md` for rules that hold only there: before worki
 
 ## Upstream forks
 
-- A change in a forked upstream repository (gogpu, naga, wgpu and the rest under `submodules/`) that changes its public API adds an entry to its `CHANGELOG.md`, under `[Unreleased]`, in the form the file already uses. A bug fix or an improvement that leaves the public API as it is adds none; its PR describes it.
+- A change in a forked upstream repository (gogpu, naga, wgpu and the rest under `submodules/`) follows that upstream's own `CONTRIBUTING.md`, read on the upstream's `main` before each PR is opened or pushed to, since each upstream sets its own rules and changes them, whether the PR edits `CHANGELOG.md` included: wgpu's maintainer writes the `[Unreleased]` entry when merging, so a wgpu PR leaves `CHANGELOG.md` as it is and gives the user-visible summary in its description. Where the file says nothing of the changelog, a change to the public API adds an entry under `[Unreleased]`, in the form the file already uses, and a bug fix or an improvement that leaves the public API as it is adds none; its PR describes it.
 - A fork change built on its own branch elsewhere, such as a scratchpad worktree, is also brought onto the local `submodules/<fork>` checkout, uncommitted, before it is handed over: the owner reads its diffs there before /complete. /complete stashes that copy before merging the branch into the fork's main.
 - Under an umbrella, the next child taken is the first open, unblocked ticket of cog's own (gfx, platform, a plugin) before any upstream fork's: a fork ticket is taken only when none of ours is unblocked, so a fork change that unblocks one of ours is followed by ours.
 

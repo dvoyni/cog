@@ -5,7 +5,7 @@ Canvas draws 2D on render: the sprites, shapes, text and meshes a frame records,
 ## Language
 
 **Entry**:
-One thing recorded into a draw list for a frame: a sprite, a shape, a run of text or a mesh, with its sort key. A frame's entries are forgotten once drawn.
+One thing recorded into a command list for a frame: a sprite, a shape, a run of text or a mesh, with its sort key. A frame's entries are forgotten once drawn.
 _Avoid_: Mark, draw (render's), item, op, command, sprite object
 
 **Sort key**:
@@ -16,12 +16,12 @@ _Avoid_: Order (render's), z, depth
 The first part of a sort key: every entry of a lower layer is drawn under every entry of a higher one. A layer may regroup its entries of equal keys so that they batch, where their order among themselves does not matter. A camera draws the layers in its ranges, so one layer may be drawn by several cameras.
 _Avoid_: Sorting layer, canvas layer, pass, z index
 
-**Draw list**:
-One recording task's entries for a frame. Each task records into its own, and the lists are merged by sort key when the frame is drawn, the order the tasks were registered in breaking ties.
-_Avoid_: Canvas list, command list (render's), queue, op queue
+**Command list**:
+One recording task's entries for a frame. Each task records into its own, and the lists are merged by sort key when the frame is drawn, the order the tasks were registered in breaking ties. Not render's *command list*, which canvas records each camera order into.
+_Avoid_: Draw list, canvas list, queue, op queue
 
 **Atlas**:
-Where canvas packs the images its sprites and glyphs draw, so that entries over different images can be drawn together. An atlas holds images of one format, on as many pages as it needs.
+Where canvas packs the images its sprites and glyphs draw, so that entries over different images can be drawn together. An atlas holds texels of one format, on as many pages as it needs, and what they mean is the shader's business. canvas keeps one for the plain images of each colour space, one for the images of each converter, and one for glyphs.
 _Avoid_: Sprite sheet, texture page
 
 **Page**:
@@ -121,7 +121,7 @@ The value one entry gives its 2D material, of the one type the material declares
 _Avoid_: Material parameter (render's), tail, style, instance data, instance property
 
 **Converter**:
-A comparable value that turns each frame of an image into other texels on the CPU before it is packed, such as a trim or a distance field's bake. Its output's bounds place it within the frame; the image's size and pivot are measured on the frame.
+A comparable value that turns each frame of an image into texels of the format it names, on the CPU, before they are packed into the atlas canvas keeps for it, such as a trim or a distance field's bake. Images converted by equal converters share that atlas. Its output's bounds place it within the frame; the image's size and pivot are measured on the frame.
 _Avoid_: Filter, processor, image effect
 
 **Distance field**:
@@ -137,7 +137,7 @@ A font file in a font set and the options it is drawn with, such as whether its 
 _Avoid_: Face, typeface, font asset
 
 **Font set**:
-The fonts text draws with: a default font, and the fonts serving each language. A character is drawn by the language's fonts that have it, or else by the default font. Text names a font set and a size, never a font. A set is made and destroyed on purpose, never loaded by drawing.
+The fonts text draws with: a default font, and the fonts serving each language. A character is drawn by the language's fonts that have it, or else by the default font. Text names a font set and a size, never a font. A set is made and destroyed on purpose, never loaded by drawing; destroying it, or making it again when its files change, lets go of the glyphs drawn in its fonts.
 _Avoid_: Font family, font stack, fallback chain, font asset
 
 **Language**:
