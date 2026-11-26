@@ -7,9 +7,11 @@ import (
 	"slices"
 
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/plugins/canvas/font"
+	"github.com/dvoyni/cog/plugins/canvas/internal/gotextfont"
 	"github.com/go-text/typesetting/bidi"
 	"github.com/go-text/typesetting/di"
-	"github.com/go-text/typesetting/font"
+	gotext "github.com/go-text/typesetting/font"
 	"github.com/go-text/typesetting/language"
 	"github.com/go-text/typesetting/segmenter"
 	"github.com/go-text/typesetting/shaping"
@@ -47,7 +49,7 @@ type textShaper struct {
 	// faces are a face of each font the shaper shaped, and the font, by its
 	// parsed font, which go-text's shaper keeps its own state of by as well,
 	// and which each loaded font has of its own.
-	faces map[*font.Font]fontFace
+	faces map[*gotext.Font]fontFace
 	// spanKey is the scratch a spanned run's layout's key is encoded into
 	// as it is looked up, and markupSpans the scratch a run's markup is
 	// read into.
@@ -93,9 +95,9 @@ type textShaper struct {
 
 // ResolveFace answers, as go-text's shaping.Fontmap, the shaper's face of
 // the font drawing character in the run's set and language.
-func (s *textShaper) ResolveFace(character rune) *font.Face {
+func (s *textShaper) ResolveFace(character rune) *gotext.Face {
 	if character == iconCharacter {
-		return s.findFace(&s.set.defaultFont)
+		return s.findFace(s.set.fonts.Default())
 	}
 	return s.findFace(s.set.findCharacterFont(s.languageTag, character))
 }
@@ -111,8 +113,8 @@ func (s *textShaper) layOut(input layoutInput, icons map[string]registeredIcon) 
 	em := input.em
 	s.set = input.set
 	s.languageTag = input.language
-	measuringFont := input.set.findLanguageFont(input.language)
-	metrics := measuringFont.findMetrics(em)
+	measuringFont := input.set.fonts.LanguageFont(input.language)
+	metrics := measuringFont.Metrics(em)
 	s.capHeight = metrics.CapHeight
 	s.scale = em / (shapingEm * 64)
 	s.lineHeight = metrics.LineHeight * cmp.Or(input.lineHeight, 1)
@@ -123,7 +125,7 @@ func (s *textShaper) layOut(input layoutInput, icons map[string]registeredIcon) 
 	s.tracking = fixed.Int26_6(input.tracking * shapingEm * 64)
 	s.language = language.NewLanguage(input.language)
 	s.layout = TextLayout{baseline: (s.lineHeight-metrics.Ascent-metrics.Descent)/2 + metrics.Ascent, em: em, fontFilter: FilterLinear, glyphs: make([]placedGlyph, 0, len(input.text))}
-	if measuringFont.bitmapEm > 0 {
+	if measuringFont.Font().BitmapEm > 0 {
 		s.layout.fontFilter = FilterNearest
 	}
 	s.runes = s.runes[:0]
@@ -220,15 +222,16 @@ func (s *textShaper) placeIcon(name string, icons map[string]registeredIcon) *pl
 
 // findFace answers the shaper's face of textFont, made at its variations
 // the first time.
-func (s *textShaper) findFace(textFont *loadedFont) *font.Face {
-	shapedFace, cached := s.faces[textFont.font]
+func (s *textShaper) findFace(textFont *font.Loaded) *gotext.Face {
+	parsed := gotextfont.FindParsed(textFont)
+	shapedFace, cached := s.faces[parsed.Font]
 	if !cached {
-		shapedFace = fontFace{face: font.NewFace(textFont.font), font: textFont}
-		shapedFace.face.SetCoords(textFont.coordinates)
+		shapedFace = fontFace{face: gotext.NewFace(parsed.Font), font: textFont}
+		shapedFace.face.SetCoords(parsed.Coordinates)
 		if s.faces == nil {
-			s.faces = map[*font.Font]fontFace{}
+			s.faces = map[*gotext.Font]fontFace{}
 		}
-		s.faces[textFont.font] = shapedFace
+		s.faces[parsed.Font] = shapedFace
 	}
 	return shapedFace.face
 }
@@ -359,7 +362,7 @@ func (s *textShaper) placeLine(line shaping.Line, start int) {
 // character, on the line being placed, its pen at x, in shaping units,
 // moved by its offsets, which point up as go-text's do: an icon of no
 // font.
-func (s *textShaper) placeGlyph(glyphFont *loadedFont, glyph shaping.Glyph, x fixed.Int26_6, character int) {
+func (s *textShaper) placeGlyph(glyphFont *font.Loaded, glyph shaping.Glyph, x fixed.Int26_6, character int) {
 	line := len(s.layout.lineWidths)
 	pen := m.Vec2{X: float32(x+glyph.XOffset) * s.scale, Y: s.layout.baseline + float32(line)*s.lineHeight - float32(glyph.YOffset)*s.scale}
 	placed := placedGlyph{font: glyphFont, id: glyph.GlyphID, span: s.runeSpans[character], pen: pen}
@@ -434,8 +437,8 @@ func (s *textShaper) alignLines(input layoutInput) {
 
 // fontFace is a face the shaper made of a font, and the font.
 type fontFace struct {
-	face *font.Face
-	font *loadedFont
+	face *gotext.Face
+	font *font.Loaded
 }
 
 // isHardBreak answers whether character forces a line break by Unicode's

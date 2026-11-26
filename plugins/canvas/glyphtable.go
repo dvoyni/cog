@@ -5,7 +5,8 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/go-text/typesetting/font"
+	"github.com/dvoyni/cog/plugins/canvas/font"
+	gotext "github.com/go-text/typesetting/font"
 )
 
 // glyphTable is the glyphs made for drawing, distance fields or a bitmap
@@ -26,11 +27,11 @@ type glyphTable struct {
 	fieldRange int
 }
 
-// glyphKey is a glyph of one loaded font: its parsed font, which each
-// loaded font has of its own, and its id in it.
+// glyphKey is a glyph of one loaded font, which its set holds once, and
+// its id in it.
 type glyphKey struct {
-	font *font.Font
-	id   font.GID
+	font *font.Loaded
+	id   gotext.GID
 }
 
 // assignFields sets the field of each of glyphs to the index of its field,
@@ -50,7 +51,7 @@ func (t *glyphTable) assignFields(glyphs []placedGlyph, shaper *textShaper) ([]p
 			drawnGlyphs = append(drawnGlyphs, glyph)
 			continue
 		}
-		key := glyphKey{font: glyph.font.font, id: glyph.id}
+		key := glyphKey{font: glyph.font, id: glyph.id}
 		field, made := t.indexes[key]
 		if !made {
 			t.mutex.Unlock()
@@ -71,10 +72,10 @@ func (t *glyphTable) assignFields(glyphs []placedGlyph, shaper *textShaper) ([]p
 	return drawnGlyphs, madeCount
 }
 
-// dropFonts forgets the glyphs made of fonts, each a loaded font's parsed
-// font, and frees their fields, which no layout drawn after names; their
-// cells in the glyph atlas, which frees none, stay.
-func (t *glyphTable) dropFonts(fonts []*font.Font) {
+// dropFonts forgets the glyphs made of fonts and frees their fields, which
+// no layout drawn after names; their cells in the glyph atlas, which frees
+// none, stay.
+func (t *glyphTable) dropFonts(fonts []*font.Loaded) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	for key, field := range t.indexes {
@@ -88,11 +89,12 @@ func (t *glyphTable) dropFonts(fonts []*font.Font) {
 // makeField answers glyph id of glyphFont, drawn through face: its
 // coverage for a bitmap font, else its distance field at its font's field
 // em and range, zero meaning the table's.
-func (t *glyphTable) makeField(face *font.Face, glyphFont *loadedFont, id font.GID) glyphField {
-	if glyphFont.bitmapEm > 0 {
-		return makeGlyphBitmap(face, id, glyphFont.bitmapEm)
+func (t *glyphTable) makeField(face *gotext.Face, glyphFont *font.Loaded, id gotext.GID) glyphField {
+	descriptor := glyphFont.Font()
+	if descriptor.BitmapEm > 0 {
+		return makeGlyphBitmap(face, id, descriptor.BitmapEm)
 	}
-	return makeGlyphField(face, id, cmp.Or(glyphFont.fieldEm, t.fieldEm), cmp.Or(glyphFont.fieldRange, t.fieldRange))
+	return makeGlyphField(face, id, cmp.Or(descriptor.FieldEm, t.fieldEm), cmp.Or(descriptor.FieldRange, t.fieldRange))
 }
 
 // findField answers the field at index, one assignFields assigned.

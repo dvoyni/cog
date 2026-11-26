@@ -9,13 +9,14 @@ import (
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/canvas"
 	"github.com/dvoyni/cog/plugins/canvas/canvastest"
+	"github.com/dvoyni/cog/plugins/canvas/font"
 	"github.com/dvoyni/cog/plugins/platform"
 )
 
 // bitmapFontConfig is canvas's config whose default font, JetBrains Mono,
 // is a bitmap font of 10 pixels to the em: its 1000 units to the em are
 // then 100 a pixel, so its advance of 600 is 6 whole pixels.
-var bitmapFontConfig = &canvas.Config{DefaultFontSet: canvas.FontSetDescriptor{Default: canvas.Font{BitmapEm: 10}}}
+var bitmapFontConfig = &canvas.Config{DefaultFontSet: font.SetDescriptor{Default: font.Font{BitmapEm: 10}}}
 
 func TestABitmapFontsRunIsLaidOutAndMeasuredAtAWholeMultipleOfItsPixelSize(t *testing.T) {
 	// Each size rounds to the nearest whole multiple of the font's 10
@@ -33,7 +34,7 @@ func TestABitmapFontsRunIsLaidOutAndMeasuredAtAWholeMultipleOfItsPixelSize(t *te
 	}
 	h := canvastest.NewHarness(t)
 	layouts := make([]canvas.TextLayout, len(sizes))
-	metrics := make([]canvas.FontMetrics, len(sizes))
+	metrics := make([]font.Metrics, len(sizes))
 	h.Spawn(nil, bitmapFontConfig, &fontLibraryUser{read: func(fonts canvas.FontLibrary, frame int) {
 		for index, size := range sizes {
 			layouts[index] = fonts.Layout(canvas.Text{String: "Hi", Size: size.size})

@@ -76,6 +76,9 @@ importing [kernel](../../kernel), [metronome](../metronome),
   made with `atlas.New` over render's `Inventory`: it packs, grows and
   records its copies and mips, and leaves what each region holds to its
   user.
+- **`font.SetDescriptor`**, in the `font` subpackage, is what a font set is
+  made of: a default `font.Font` and the fonts serving each language, each a
+  font file and its options. A font's measures are `font.Metrics`.
 
 ## Kernel surface
 
@@ -99,9 +102,10 @@ importing [kernel](../../kernel), [metronome](../metronome),
   `render.InspectedEvent`, `platform.WindowOpenedEvent` and
   `platform.WindowClosedEvent`.
 - **Sockets it declares:** none.
-- **Sockets it binds:** `platform.ReadMountSocket`, its built-in assets under
-  the prefix `cog.canvas`, at the lowest priority: its include, its
-  materials' shaders and JetBrains Mono.
+- **Sockets it binds:** `platform.ReadMountSocket`, twice, its built-in
+  assets under the prefix `cog.canvas`, at the lowest priority: its include
+  and its materials' shaders, then the font package's JetBrains Mono and its
+  licence.
 
 canvas is listed after render, platform and metronome, and a plugin that
 records into canvas is listed after canvas.

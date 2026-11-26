@@ -93,10 +93,10 @@ const (
 	// set given to WriteFontLibrary.DestroyFontSet, which is never destroyed. It
 	// is reported once for the set.
 	ReportKindFontSetNotHeld
-	// ReportKindVariationIgnored is a font's Variation of the zero Axis and
-	// a non-zero Value, such as AxisTagFromName answers for a name of other
-	// than four bytes, which names no axis and is ignored. It is reported
-	// once for the font's path as its set is made.
+	// ReportKindVariationIgnored is a font's font.Variation of the zero Axis
+	// and a non-zero Value, such as font.AxisTagFromName answers for a name
+	// of other than four bytes, which names no axis and is ignored. It is
+	// reported once for the font's path as its set is made.
 	ReportKindVariationIgnored
 	// ReportKindCharacterMissing is a character laid out in a font set none
 	// of whose fonts has it, neither its language's nor its default font,

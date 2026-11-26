@@ -2,7 +2,8 @@ package canvas
 
 import (
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/go-text/typesetting/font"
+	"github.com/dvoyni/cog/plugins/canvas/font"
+	gotext "github.com/go-text/typesetting/font"
 )
 
 // TextLayout is a run of text shaped, broken into lines and measured, which
@@ -70,8 +71,8 @@ func (l TextLayout) findIcon(glyph placedGlyph) *placedIcon {
 // on its line's baseline, in world units from the box's top left. An icon
 // is a glyph of no font, its span's icon, its pen its bottom left.
 type placedGlyph struct {
-	font  *loadedFont
-	id    font.GID
+	font  *font.Loaded
+	id    gotext.GID
 	field uint32
 	span  uint32
 	pen   m.Vec2

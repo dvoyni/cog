@@ -9,6 +9,7 @@ import (
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/canvas"
 	"github.com/dvoyni/cog/plugins/canvas/canvastest"
+	"github.com/dvoyni/cog/plugins/canvas/font"
 )
 
 // The fonts of testdata/fonts, subsets of Noto Sans Arabic and Noto Sans
@@ -25,11 +26,11 @@ const builtInAdvance = 0.6
 // layOutTexts answers each of texts laid out by FontLibrary's reading side,
 // with no frame, under canvas configured by config, the fonts of
 // testdata/fonts mounted, and the default set's measures at size 10.
-func layOutTexts(t *testing.T, config *canvas.Config, texts ...canvas.Text) ([]canvas.TextLayout, canvas.FontMetrics) {
+func layOutTexts(t *testing.T, config *canvas.Config, texts ...canvas.Text) ([]canvas.TextLayout, font.Metrics) {
 	t.Helper()
 	h := canvastest.NewHarness(t)
 	var layouts []canvas.TextLayout
-	var metrics canvas.FontMetrics
+	var metrics font.Metrics
 	h.Spawn(nil, config, &fileMounter{files: os.DirFS("testdata/fonts")}, &fontLibraryUser{read: func(fonts canvas.FontLibrary, frame int) {
 		for _, text := range texts {
 			layouts = append(layouts, fonts.Layout(text))
@@ -43,12 +44,12 @@ func layOutTexts(t *testing.T, config *canvas.Config, texts ...canvas.Text) ([]c
 // makeDefaultFontConfig answers canvas's configuration of a default set of the
 // font at path alone.
 func makeDefaultFontConfig(path string) *canvas.Config {
-	return &canvas.Config{DefaultFontSet: canvas.FontSetDescriptor{Default: canvas.Font{Path: path}}}
+	return &canvas.Config{DefaultFontSet: font.SetDescriptor{Default: font.Font{Path: path}}}
 }
 
 // findBaseline answers the first baseline of a line height lineHeight times
 // metrics' line height, its leading split above and below.
-func findBaseline(metrics canvas.FontMetrics, lineHeight float32) float32 {
+func findBaseline(metrics font.Metrics, lineHeight float32) float32 {
 	return (metrics.LineHeight*lineHeight-metrics.Ascent-metrics.Descent)/2 + metrics.Ascent
 }
 
@@ -152,8 +153,8 @@ func TestLayoutsMadeAtOnceAreEachAsOneMadeAlone(t *testing.T) {
 	var mismatchCount int
 	h.Spawn(nil, nil, &fileMounter{files: os.DirFS("testdata/fonts")}, &fontLibraryUser{
 		write: func(fonts canvas.WriteFontLibrary, frame int) {
-			sets[1] = fonts.MakeFontSet(canvas.FontSetDescriptor{Default: canvas.Font{Variations: [4]canvas.Variation{{Axis: canvas.AxisTagFromName("wght"), Value: 800}}}})
-			sets[2] = fonts.MakeFontSet(canvas.FontSetDescriptor{Default: canvas.Font{Path: japaneseFontPath}})
+			sets[1] = fonts.MakeFontSet(font.SetDescriptor{Default: font.Font{Variations: [4]font.Variation{{Axis: font.AxisTagFromName("wght"), Value: 800}}}})
+			sets[2] = fonts.MakeFontSet(font.SetDescriptor{Default: font.Font{Path: japaneseFontPath}})
 		},
 		read: func(fonts canvas.FontLibrary, frame int) {
 			text := canvas.Text{String: "日本 ffi words, wrapped", Size: 10, WrapWidth: 60}
@@ -313,7 +314,7 @@ func TestDestroyedFontSetIsLaidOutAsTheDefaultSetReportedOnce(t *testing.T) {
 		write: func(fonts canvas.WriteFontLibrary, frame int) {
 			switch frame {
 			case 0:
-				set = fonts.MakeFontSet(canvas.FontSetDescriptor{Default: canvas.Font{Path: japaneseFontPath}})
+				set = fonts.MakeFontSet(font.SetDescriptor{Default: font.Font{Path: japaneseFontPath}})
 			case 1:
 				fonts.DestroyFontSet(set)
 			}

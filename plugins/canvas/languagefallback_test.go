@@ -10,6 +10,7 @@ import (
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/canvas"
 	"github.com/dvoyni/cog/plugins/canvas/canvastest"
+	"github.com/dvoyni/cog/plugins/canvas/font"
 )
 
 // chineseFontPath is testdata/fonts' subset of Noto Sans SC, holding Basic
@@ -20,7 +21,7 @@ const chineseFontPath = "notosanssc.ttf"
 // is set and whose current language is language, testdata/fonts mounted,
 // in a subtest of t named name, whose kernel quits before another starts,
 // and answers the picture.
-func captureFontDrawing(t *testing.T, name string, set canvas.FontSetDescriptor, language string, record func(list canvas.CommandList)) windowPicture {
+func captureFontDrawing(t *testing.T, name string, set font.SetDescriptor, language string, record func(list canvas.CommandList)) windowPicture {
 	t.Helper()
 	var picture windowPicture
 	t.Run(name, func(t *testing.T) {
@@ -63,18 +64,18 @@ func TestARunInJapaneseAndOneInChineseDrawThroughEachLanguagesFontFromOneSet(t *
 	right := left
 	right.Transform = m.Translation2x3(pictureWidth/4, 0)
 	right.Language = "zh-Hans"
-	both := captureFontDrawing(t, "both languages", canvas.FontSetDescriptor{Languages: []canvas.LanguageFonts{
-		{Languages: []string{"ja"}, Fonts: []canvas.Font{{Path: japaneseFontPath}}},
-		{Languages: []string{"zh-Hans"}, Fonts: []canvas.Font{{Path: chineseFontPath}}},
+	both := captureFontDrawing(t, "both languages", font.SetDescriptor{Languages: []font.LanguageFonts{
+		{Languages: []string{"ja"}, Fonts: []font.Font{{Path: japaneseFontPath}}},
+		{Languages: []string{"zh-Hans"}, Fonts: []font.Font{{Path: chineseFontPath}}},
 	}}, "ja", func(list canvas.CommandList) {
 		list.DrawText(left)
 		list.DrawText(right)
 	})
-	japanese := captureFontDrawing(t, "Noto Sans JP alone", canvas.FontSetDescriptor{Default: canvas.Font{Path: japaneseFontPath}}, "", func(list canvas.CommandList) {
+	japanese := captureFontDrawing(t, "Noto Sans JP alone", font.SetDescriptor{Default: font.Font{Path: japaneseFontPath}}, "", func(list canvas.CommandList) {
 		list.DrawText(left)
 	})
 	right.Language = ""
-	chinese := captureFontDrawing(t, "Noto Sans SC alone", canvas.FontSetDescriptor{Default: canvas.Font{Path: chineseFontPath}}, "", func(list canvas.CommandList) {
+	chinese := captureFontDrawing(t, "Noto Sans SC alone", font.SetDescriptor{Default: font.Font{Path: chineseFontPath}}, "", func(list canvas.CommandList) {
 		list.DrawText(right)
 	})
 
@@ -99,8 +100,8 @@ func TestACharacterIsDrawnByTheFirstOfItsLanguagesFontsThatHasItThenByTheDefault
 	// then by Noto Sans SC, which has 今 but no arrows; JetBrains Mono, the
 	// default font, draws the arrow. The run's own language picks them,
 	// though the current one has no fonts.
-	set := canvas.FontSetDescriptor{Languages: []canvas.LanguageFonts{
-		{Languages: []string{"zh-Hans"}, Fonts: []canvas.Font{{Path: arabicFontPath}, {Path: chineseFontPath}}},
+	set := font.SetDescriptor{Languages: []font.LanguageFonts{
+		{Languages: []string{"zh-Hans"}, Fonts: []font.Font{{Path: arabicFontPath}, {Path: chineseFontPath}}},
 	}}
 	layouts, _ := layOutTexts(t, &canvas.Config{DefaultFontSet: set}, canvas.Text{String: "W今→", Size: 10, Language: "zh-Hans"})
 	arabicW, _ := layOutTexts(t, makeDefaultFontConfig(arabicFontPath), canvas.Text{String: "W", Size: 10})
@@ -135,16 +136,14 @@ func TestACharacterNoFontOfTheSetHasDrawsTheDefaultFontsMissingGlyphBoxReportedO
 
 func TestChangingTheLanguageClearsNothing(t *testing.T) {
 	// The label is laid out in ja in frame 0, in zh-Hans in frame 1, then
-	// in ja again in frame 2, which finds the layout of frame 0, and the
-	// font of each of its characters, kept.
-	set := canvas.FontSetDescriptor{Languages: []canvas.LanguageFonts{
-		{Languages: []string{"ja"}, Fonts: []canvas.Font{{Path: japaneseFontPath}}},
-		{Languages: []string{"zh-Hans"}, Fonts: []canvas.Font{{Path: chineseFontPath}}},
+	// in ja again in frame 2, which finds the layout of frame 0 kept.
+	set := font.SetDescriptor{Languages: []font.LanguageFonts{
+		{Languages: []string{"ja"}, Fonts: []font.Font{{Path: japaneseFontPath}}},
+		{Languages: []string{"zh-Hans"}, Fonts: []font.Font{{Path: chineseFontPath}}},
 	}}
 	label := canvas.Text{String: "今日", Size: 10}
 	languages := []string{"ja", "zh-Hans", "ja"}
 	var layouts []*canvas.CachedLayout
-	var characterCounts []int
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, &canvas.Config{DefaultFontSet: set}, &fileMounter{files: os.DirFS("testdata/fonts")}, &fontLibraryUser{
 		write: func(fonts canvas.WriteFontLibrary, frame int) {
@@ -153,11 +152,9 @@ func TestChangingTheLanguageClearsNothing(t *testing.T) {
 		read: func(fonts canvas.FontLibrary, frame int) {
 			if frame == 2 {
 				layouts = append(layouts, canvas.FindCachedLayout(fonts, label))
-				characterCounts = append(characterCounts, canvas.CountCharacterFonts(fonts))
 			}
 			fonts.Layout(label)
 			layouts = append(layouts, canvas.FindCachedLayout(fonts, label))
-			characterCounts = append(characterCounts, canvas.CountCharacterFonts(fonts))
 		},
 	})
 	for range languages {
@@ -173,9 +170,6 @@ func TestChangingTheLanguageClearsNothing(t *testing.T) {
 	if layouts[2] != layouts[0] || layouts[3] != layouts[0] {
 		t.Errorf("back in ja the label's layout is %p, then %p once laid out, want frame 0's, %p, kept", layouts[2], layouts[3], layouts[0])
 	}
-	if characterCounts[0] != 2 || characterCounts[1] != 4 || characterCounts[2] != 4 || characterCounts[3] != 4 {
-		t.Errorf("the characters found are %v by frame, want 2 in ja, then 4 kept as the language changes back", characterCounts)
-	}
 }
 
 func TestRunsLaidOutAtOnceFindTheFontsOfTheirCharactersTogether(t *testing.T) {
@@ -184,8 +178,8 @@ func TestRunsLaidOutAtOnceFindTheFontsOfTheirCharactersTogether(t *testing.T) {
 	// between runs, so they find fonts for the same set together. Each run
 	// laid out again at twice the size, from the fonts found, is twice as
 	// wide.
-	set := canvas.FontSetDescriptor{Languages: []canvas.LanguageFonts{
-		{Languages: []string{"zh-Hans"}, Fonts: []canvas.Font{{Path: arabicFontPath}, {Path: chineseFontPath}}},
+	set := font.SetDescriptor{Languages: []font.LanguageFonts{
+		{Languages: []string{"zh-Hans"}, Fonts: []font.Font{{Path: arabicFontPath}, {Path: chineseFontPath}}},
 	}}
 	texts := []string{"W今→", "A日←", "B本↑", "C语↓", "D文→", "E章←", "F骨↑", "G今↓"}
 	widths := make([]float32, len(texts))

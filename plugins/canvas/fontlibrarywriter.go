@@ -3,10 +3,11 @@ package canvas
 import (
 	"cmp"
 	"fmt"
+	"slices"
 
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/plugins/canvas/font"
 	"github.com/dvoyni/cog/plugins/platform"
-	"github.com/go-text/typesetting/font"
 )
 
 // fontLibraryWriter is the FontLibrary resource's writing side, which ElevateFontLibrary
@@ -19,7 +20,7 @@ type fontLibraryWriter struct {
 
 // MakeFontSet makes a font set of descriptor, loading every font file it
 // names through platform's FS now, in the calling task, and answers it.
-func (w fontLibraryWriter) MakeFontSet(descriptor FontSetDescriptor) FontSet {
+func (w fontLibraryWriter) MakeFontSet(descriptor font.SetDescriptor) FontSet {
 	slot := makeFontSetSlot(w.files, w.reporter, descriptor)
 	if len(w.freeIndexes) == 0 {
 		w.sets = append(w.sets, &fontSetSlot{set: FontSet{index: uint32(len(w.sets)), generation: 1}})
@@ -78,15 +79,15 @@ func (w fontLibraryWriter) RegisterColor(name string, color m.Color) { w.colors[
 // before going idle, and drops the glyphs made of its fonts, whose fields
 // no layout drawn after names. A set destroyed names no file.
 func (w fontLibraryWriter) reloadChanged() {
-	var droppedFonts []*font.Font
+	var droppedFonts []*font.Loaded
 	for index, slot := range w.sets {
 		if !slot.namesChangedFile(w.files) {
 			continue
 		}
-		remade := makeFontSetSlot(w.files, w.reporter, slot.descriptor)
+		remade := makeFontSetSlot(w.files, w.reporter, slot.fonts.Descriptor())
 		remade.set = slot.set
 		w.sets[index] = remade
-		droppedFonts = slot.appendFonts(droppedFonts)
+		droppedFonts = slices.AppendSeq(droppedFonts, slot.fonts.Fonts())
 	}
 	if len(droppedFonts) > 0 {
 		w.glyphs.dropFonts(droppedFonts)

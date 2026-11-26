@@ -1,12 +1,15 @@
 package canvas
 
 import (
+	"io/fs"
 	"os"
 	"testing"
 
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
-	"github.com/go-text/typesetting/font"
+	"github.com/dvoyni/cog/plugins/canvas/font"
+	"github.com/dvoyni/cog/plugins/canvas/internal/gotextfont"
+	gotext "github.com/go-text/typesetting/font"
 )
 
 func TestAGlyphsFieldHoldsItsDistanceAcrossItsEdgeAndReachesHalfItsRangePastIt(t *testing.T) {
@@ -14,8 +17,8 @@ func TestAGlyphsFieldHoldsItsDistanceAcrossItsEdgeAndReachesHalfItsRangePastIt(t
 	// em across, -300 to 1020 up: at 100 texels to the em, -1 to 61 and
 	// -102 to 30 down, each on a whole texel, and its field reaches 9
 	// texels past them, half its range of 17 rounded up.
-	builtIn := findBuiltInFont()
-	face := font.NewFace(builtIn)
+	builtIn := loadParsedFont(t, nil, font.Font{})
+	face := gotext.NewFace(builtIn)
 	block, _ := face.NominalGlyph('█')
 
 	field := makeGlyphField(face, block, 100, 17)
@@ -36,7 +39,7 @@ func TestAGlyphsFieldHoldsItsDistanceAcrossItsEdgeAndReachesHalfItsRangePastIt(t
 }
 
 func TestASpaceHasNoField(t *testing.T) {
-	face := font.NewFace(findBuiltInFont())
+	face := gotext.NewFace(loadParsedFont(t, nil, font.Font{}))
 	space, _ := face.NominalGlyph(' ')
 	if field := makeGlyphField(face, space, 48, 16); field.texels != nil {
 		t.Errorf("a space's field has %d texels, want none", len(field.texels))
@@ -90,13 +93,9 @@ func TestAGlyphsPenFollowsTheAdvancesBeforeItInItsCluster(t *testing.T) {
 // at an em of 48 texels, canvas's default, and Noto Sans SC's ideographs
 // at 64, as a CJK font takes, each of a range of 16.
 func BenchmarkMakeGlyphField(b *testing.B) {
-	hanziFont, err := loadFont(os.DirFS("testdata/fonts"), Font{Path: "notosanssc-hanzi.ttf"})
-	if err != nil {
-		b.Fatal(err)
-	}
-	hanziFace := font.NewFace(hanziFont.font)
-	latinFace := font.NewFace(findBuiltInFont())
-	var latin, hanzi []font.GID
+	hanziFace := gotext.NewFace(loadParsedFont(b, os.DirFS("testdata/fonts"), font.Font{Path: "notosanssc-hanzi.ttf"}))
+	latinFace := gotext.NewFace(loadParsedFont(b, nil, font.Font{}))
+	var latin, hanzi []gotext.GID
 	for letter := 'a'; letter <= 'z'; letter++ {
 		id, _ := latinFace.NominalGlyph(letter)
 		latin = append(latin, id)
@@ -107,8 +106,8 @@ func BenchmarkMakeGlyphField(b *testing.B) {
 	}
 	for _, glyphs := range []struct {
 		name string
-		face *font.Face
-		ids  []font.GID
+		face *gotext.Face
+		ids  []gotext.GID
 		em   int
 	}{
 		{"latin/em=48", latinFace, latin, 48},
@@ -123,4 +122,14 @@ func BenchmarkMakeGlyphField(b *testing.B) {
 			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N), "ns/glyph")
 		})
 	}
+}
+
+// loadParsedFont answers go-text's font of descriptor, loaded alone through
+// files as a set's default, failing tb when it does not load.
+func loadParsedFont(tb testing.TB, files fs.FS, descriptor font.Font) *gotext.Font {
+	set, failures := font.Load(files, font.SetDescriptor{Default: descriptor})
+	if len(failures) != 0 {
+		tb.Fatal(failures)
+	}
+	return gotextfont.FindParsed(set.Default()).Font
 }

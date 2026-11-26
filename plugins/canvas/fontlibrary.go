@@ -8,6 +8,7 @@ import (
 	"unsafe"
 
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/plugins/canvas/font"
 )
 
 // fontLibrary is the FontLibrary resource: the font sets made, the current
@@ -33,7 +34,7 @@ type fontLibrary struct {
 	// defaultDescriptor is Config.DefaultFontSet, which the default set is
 	// made of as canvas starts: it is kept here, since a task's argument
 	// holds no pointer.
-	defaultDescriptor FontSetDescriptor
+	defaultDescriptor font.SetDescriptor
 	icons             map[string]registeredIcon
 	// iconSerial counts the icons registered, each registered under the
 	// count it makes, so a name registered again names another icon to
@@ -70,7 +71,7 @@ func newFontLibrary(reporter *reporter, config *Config) *fontLibrary {
 		reporter:          reporter,
 		language:          config.Language,
 		textSize:          cmp.Or(config.TextSize, 16),
-		sets:              []*fontSetSlot{makeFontSetSlot(nil, reporter, FontSetDescriptor{})},
+		sets:              []*fontSetSlot{makeFontSetSlot(nil, reporter, font.SetDescriptor{})},
 		defaultDescriptor: config.DefaultFontSet,
 		icons:             map[string]registeredIcon{},
 		colors:            map[string]m.Color{},
@@ -89,9 +90,9 @@ func (l *fontLibrary) Language() string { return l.language }
 // language's first font in set, or set's default font, a bitmap font's size
 // rounded to a whole multiple of its pixel size as a run's is. A set canvas
 // does not hold is measured as the default set, reported once.
-func (l *fontLibrary) Metrics(set FontSet, size float32, language string) FontMetrics {
-	measuringFont := l.findHeldSlot(set, "measuring").findLanguageFont(cmp.Or(language, l.language))
-	return measuringFont.findMetrics(measuringFont.findDrawnEm(size))
+func (l *fontLibrary) Metrics(set FontSet, size float32, language string) font.Metrics {
+	measuringFont := l.findHeldSlot(set, "measuring").fonts.LanguageFont(cmp.Or(language, l.language))
+	return measuringFont.Metrics(measuringFont.DrawnEm(size))
 }
 
 // Layout answers text shaped, broken into lines and measured, in the font
@@ -226,7 +227,7 @@ func (l *fontLibrary) makeLayoutInput(text Text, shaper *textShaper) (Text, layo
 	input := layoutInput{
 		text:       text.String,
 		set:        slot,
-		em:         slot.findLanguageFont(language).findDrawnEm(cmp.Or(text.Size, l.textSize)),
+		em:         slot.fonts.LanguageFont(language).DrawnEm(cmp.Or(text.Size, l.textSize)),
 		wrapWidth:  text.WrapWidth,
 		align:      text.Align,
 		lineHeight: text.LineHeight,

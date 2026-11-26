@@ -5,6 +5,7 @@ import (
 
 	"github.com/dvoyni/cog/plugins/canvas"
 	"github.com/dvoyni/cog/plugins/canvas/canvastest"
+	"github.com/dvoyni/cog/plugins/canvas/font"
 	"github.com/dvoyni/cog/plugins/platform"
 )
 
@@ -139,9 +140,9 @@ func TestARunLaidOutAgainInAnotherLanguageTakesThatLanguagesFont(t *testing.T) {
 		write: func(fonts canvas.WriteFontLibrary, frame int) {
 			switch frame {
 			case 0:
-				set = fonts.MakeFontSet(canvas.FontSetDescriptor{
-					Default:   canvas.Font{Path: "go.ttf"},
-					Languages: []canvas.LanguageFonts{{Languages: []string{"ja"}, Fonts: []canvas.Font{{Path: builtInFontPath}}}},
+				set = fonts.MakeFontSet(font.SetDescriptor{
+					Default:   font.Font{Path: "go.ttf"},
+					Languages: []font.LanguageFonts{{Languages: []string{"ja"}, Fonts: []font.Font{{Path: builtInFontPath}}}},
 				})
 			case 1:
 				fonts.SetLanguage("ja")

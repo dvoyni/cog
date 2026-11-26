@@ -6,6 +6,7 @@ import (
 	"math"
 
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/plugins/canvas/font"
 	"github.com/dvoyni/cog/plugins/metronome"
 	"github.com/dvoyni/cog/plugins/platform"
 	"github.com/dvoyni/cog/plugins/render"
@@ -73,18 +74,18 @@ type Config struct {
 	// means 2.
 	LayoutIdleFrames int
 	// GlyphFieldEm is the em, in field texels, a font's glyphs are made
-	// distance fields at when its Font.FieldEm is zero; zero means 48.
+	// distance fields at when its font.Font.FieldEm is zero; zero means 48.
 	// GlyphFieldRange is how far a field reaches across a glyph's edge, half
 	// outside it and half inside, in field texels, when its font's
-	// Font.FieldRange is zero; zero means 16, so an outline reaches 8 field
-	// texels at most.
+	// font.Font.FieldRange is zero; zero means 16, so an outline reaches 8
+	// field texels at most.
 	GlyphFieldEm    int
 	GlyphFieldRange int
 	// DefaultFontSet describes the default font set, the zero FontSet's,
 	// made as canvas starts, its fonts read through platform's FS. Its zero
 	// is canvas's built-in JetBrains Mono alone, which the default set is
 	// until then.
-	DefaultFontSet FontSetDescriptor
+	DefaultFontSet font.SetDescriptor
 }
 
 // Plugin is canvas: it installs Handlers, Targets, FontLibrary and its private state,
@@ -161,6 +162,7 @@ func (*Plugin) Init(configurator *kernel.Configurator, config any) error {
 	configurator.InitResource[Targets](&drawnTargets{})
 	configurator.InitResource[FontLibrary](newFontLibrary(canvasReporter, canvasConfig))
 	configurator.BindSocket(platform.ReadMountSocket{FS: makeAssetFS(), Priority: math.MinInt, Prefix: assetPrefix})
+	configurator.BindSocket(platform.ReadMountSocket{FS: font.BuiltInFiles(), Priority: math.MinInt, Prefix: assetPrefix})
 	openFrameTask := configurator.RegisterTask1(openFrame)
 	sortEntriesTask := configurator.RegisterTask1(sortEntries)
 	drawTask := configurator.RegisterTask8(draw)

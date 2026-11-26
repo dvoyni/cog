@@ -80,11 +80,12 @@ texture a camera draws into.
 | `Converter`, `DistanceField` | A conversion of an image's texels on the CPU before it is packed, into the format it names, the atlas canvas keeps for it shared by equal converters' images; and the one baking a distance field. |
 | `Material`, `MaterialDescriptor`, `ArgumentType` | A 2D material, what it is made of, and the type of the argument each entry gives it. |
 | `Profile` | A band of the distance from an entry's edge: an outline, a halo, a glow or a drop shadow. |
-| `FontSet`, `FontSetDescriptor`, `Font` | A set of fonts serving languages, named by text, never a font. |
-| `TextLayout`, `FontMetrics` | A run of text laid out and measured, and a font's vertical measures. |
+| `FontSet` | A set of fonts serving languages, named by text, never a font. |
+| `TextLayout` | A run of text laid out and measured. |
 | `Span`, `IconDescriptor` | A part of a run in its own tint, or an icon placed like a glyph. |
 | `Inspection` | One frame written down in canvas's terms. |
 | `Report`, `ReportKind` | A mistake canvas finds at run time, and its kind. |
+| `font.SetDescriptor`, `font.Font`, `font.Metrics` | What a font set is made of, each font file in it and its options, and a font's vertical measures, in the font package. |
 | `atlas.Atlas`, `atlas.Descriptor` | One atlas of one format, as canvas packs its sprites and glyphs into, for a plugin's own caches. |
 | `canvastest.Harness` | canvas in a real kernel on render's fake GPU, or on wgpu's software adapter, for tests. |
 
@@ -310,7 +311,7 @@ var canvasConfig = map[kernel.PluginName]any{
 		GlyphFieldEm:    64,
 		GlyphFieldRange: 16,
 		// The default font set, the zero FontSet's; zero is JetBrains Mono.
-		DefaultFontSet: canvas.FontSetDescriptor{Label: "body", Default: canvas.Font{Path: "fonts/inter.ttf"}},
+		DefaultFontSet: font.SetDescriptor{Label: "body", Default: font.Font{Path: "fonts/inter.ttf"}},
 	},
 }
 ```
@@ -1071,18 +1072,18 @@ type FontChoice struct {
 
 func loadFonts(k *kernel.Kernel, _ kernel.NoArg, libraryHandle kernel.Write[canvas.FontLibrary], files kernel.Read[platform.FS], fontSets kernel.Write[FontChoice]) kernel.NoResult {
 	library := canvas.ElevateFontLibrary(libraryHandle, files)
-	title := library.MakeFontSet(canvas.FontSetDescriptor{
+	title := library.MakeFontSet(font.SetDescriptor{
 		Label:   "title",
-		Default: canvas.Font{Path: "fonts/inter-variable.ttf", Variations: [4]canvas.Variation{{Axis: canvas.AxisTagFromName("wght"), Value: 800}}},
-		Languages: []canvas.LanguageFonts{
+		Default: font.Font{Path: "fonts/inter-variable.ttf", Variations: [4]font.Variation{{Axis: font.AxisTagFromName("wght"), Value: 800}}},
+		Languages: []font.LanguageFonts{
 			// Thin strokes take a larger field em, so each spans two texels.
-			{Languages: []string{"ja", "zh-Hans"}, Fonts: []canvas.Font{{Path: "fonts/noto-sans-cjk.ttc", Index: 0, FieldEm: 64}}},
-			{Languages: []string{"ar"}, Fonts: []canvas.Font{{Path: "fonts/noto-sans-arabic.ttf"}}},
+			{Languages: []string{"ja", "zh-Hans"}, Fonts: []font.Font{{Path: "fonts/noto-sans-cjk.ttc", Index: 0, FieldEm: 64}}},
+			{Languages: []string{"ar"}, Fonts: []font.Font{{Path: "fonts/noto-sans-arabic.ttf"}}},
 		},
 	})
 	// A pixel font, 8 pixels to the em, drawn as coverage at whole
 	// multiples of its size.
-	pixel := library.MakeFontSet(canvas.FontSetDescriptor{Label: "pixel", Default: canvas.Font{Path: "fonts/pixel.ttf", BitmapEm: 8}})
+	pixel := library.MakeFontSet(font.SetDescriptor{Label: "pixel", Default: font.Font{Path: "fonts/pixel.ttf", BitmapEm: 8}})
 	library.SetLanguage("ja")
 	fontSets.Set(FontChoice{Title: title, Pixel: pixel})
 	return kernel.NoResult{}
@@ -1092,11 +1093,11 @@ func loadFonts(k *kernel.Kernel, _ kernel.NoArg, libraryHandle kernel.Write[canv
 Languages are tags matched exactly, a language's first font measuring it. A
 font file that fails to load is reported once and left out of its set, a
 failed default font replaced by JetBrains Mono. `DestroyFontSet` destroys a
-set, which is then laid out as the default one. A `Variation` sets a variable
-font's axis, `AxisTagFromName("wght")` its tag.
+set, which is then laid out as the default one. A `font.Variation` sets a
+variable font's axis, `font.AxisTagFromName("wght")` its tag.
 
 `FontLibrary`, read under `kernel.Read`, answers the current language, a
-font's `FontMetrics` at a size, and text laid out with no frame, from the
+font's `font.Metrics` at a size, and text laid out with no frame, from the
 layout cache `DrawText` lays out through, so what is measured is what is
 drawn:
 

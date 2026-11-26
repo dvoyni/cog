@@ -12,6 +12,7 @@ import (
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/canvas"
 	"github.com/dvoyni/cog/plugins/canvas/canvastest"
+	"github.com/dvoyni/cog/plugins/canvas/font"
 	"github.com/dvoyni/cog/plugins/platform"
 )
 
@@ -21,7 +22,7 @@ import (
 // units to the em, then lie on whole texels, so each texel centre lies a
 // whole and a half texels from an edge, which a spread of 8.5 holds exactly
 // in a byte, and linear filtering between them answers the true distance.
-var exactFieldConfig = &canvas.Config{DefaultFontSet: canvas.FontSetDescriptor{Default: canvas.Font{FieldEm: 100, FieldRange: 17}}}
+var exactFieldConfig = &canvas.Config{DefaultFontSet: font.SetDescriptor{Default: font.Font{FieldEm: 100, FieldRange: 17}}}
 
 // fullBlock is the full block, which JetBrains Mono draws over its whole
 // line: 0.62 em wide about its advance's middle, and its ascent and descent
@@ -253,7 +254,7 @@ func TestAGlyphPackedOntoAnOldPageAsTheGlyphAtlasGrowsStillDraws(t *testing.T) {
 func TestAGlyphNoPageHoldsDrawsNothingReportedOnceAndTheAtlasDoesNotGrow(t *testing.T) {
 	// A full block of a font of 100 texels to the em is a cell 152 texels
 	// tall, taller than a page of 120 texels, which holds the small letter.
-	config := &canvas.Config{AtlasPageSize: 120, DefaultFontSet: canvas.FontSetDescriptor{Default: canvas.Font{FieldEm: 100}}}
+	config := &canvas.Config{AtlasPageSize: 120, DefaultFontSet: font.SetDescriptor{Default: font.Font{FieldEm: 100}}}
 	h := canvastest.NewHarness(t)
 	h.ExpectReport(canvas.ReportKindAtlasFull)
 	h.Spawn(nil, config)

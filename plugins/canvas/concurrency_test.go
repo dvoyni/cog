@@ -392,6 +392,27 @@ func TestRunsOfMalformedMarkupDrawnFromTwoTasksAreEachReportedOnce(t *testing.T)
 	}
 }
 
+func TestRunsOfCharactersNoFontHasDrawnFromTwoTasksAreReportedOnceForTheSet(t *testing.T) {
+	// Two tasks draw runs of Hangul, which JetBrains Mono, the default
+	// set's only font, has none of, together: the set's slot notes in its
+	// atomic flag that a missing character was reported, so the set is
+	// reported once.
+	h := canvastest.NewHarness(t)
+	h.ExpectReport(canvas.ReportKindCharacterMissing)
+	runs := make([]canvas.Text, concurrentCount)
+	for index := range runs {
+		runs[index] = canvas.Text{String: string(rune('가' + index)), Size: 12}
+	}
+	h.Spawn(nil, nil, &concurrentUser{records: []recordFunc{drawTextsOf(runs), drawTextsOf(runs)}})
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+
+	h.Step()
+
+	if count := countReports(h, canvas.ReportKindCharacterMissing); count != 1 {
+		t.Errorf("the default set was reported %d times for its missing characters, want once", count)
+	}
+}
+
 func TestATaskRecordingWhileCanvasOpensAndDrawsTheFrameLeavesTheFramesOwnEntriesDrawn(t *testing.T) {
 	// A task records fills off render's frame event, while canvas opens,
 	// sorts and draws the frame, so each is refused or recorded as the

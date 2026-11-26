@@ -1,13 +1,13 @@
-package canvas
+package font
 
-// FontSetDescriptor describes a font set: a default font, and the fonts
-// serving each language. Text names a set and a size, never a font, so
-// switching the language switches the typeface.
-type FontSetDescriptor struct {
+// SetDescriptor describes a font set: a default font, and the fonts serving
+// each language. Text names a set and a size, never a font, so switching
+// the language switches the typeface.
+type SetDescriptor struct {
 	// Label names the set in reports.
 	Label string
 	// Default is the font a language with no fonts of its own is measured
-	// and drawn with. Its zero is canvas's built-in JetBrains Mono, which also
+	// and drawn with. Its zero is the built-in JetBrains Mono, which also
 	// replaces a default font whose file fails to load.
 	Default Font
 	// Languages are the fonts serving each language, a language's first

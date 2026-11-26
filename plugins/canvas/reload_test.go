@@ -12,6 +12,7 @@ import (
 	"github.com/dvoyni/cog/libs/meshfile"
 	"github.com/dvoyni/cog/plugins/canvas"
 	"github.com/dvoyni/cog/plugins/canvas/canvastest"
+	"github.com/dvoyni/cog/plugins/canvas/font"
 	"github.com/dvoyni/cog/plugins/metronome"
 	"github.com/dvoyni/cog/plugins/platform"
 	"github.com/dvoyni/cog/plugins/platform/filesystems"
@@ -146,8 +147,8 @@ func TestReloadChangedLoadsAChangedFontFileAgainLayingItsSetsRunsOutAnewAndReads
 	h.Spawn(nil, nil, &fileMounter{files: files}, tool, &fontLibraryUser{
 		write: func(fonts canvas.WriteFontLibrary, frame int) {
 			if frame == 0 {
-				changed = fonts.MakeFontSet(canvas.FontSetDescriptor{Label: "changed", Default: canvas.Font{Path: "go.ttf"}})
-				still = fonts.MakeFontSet(canvas.FontSetDescriptor{Label: "still", Default: canvas.Font{Path: "still.ttf"}})
+				changed = fonts.MakeFontSet(font.SetDescriptor{Label: "changed", Default: font.Font{Path: "go.ttf"}})
+				still = fonts.MakeFontSet(font.SetDescriptor{Label: "still", Default: font.Font{Path: "still.ttf"}})
 			}
 		},
 		read: func(fonts canvas.FontLibrary, frame int) {

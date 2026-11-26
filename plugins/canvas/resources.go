@@ -3,6 +3,7 @@ package canvas
 import (
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/plugins/canvas/font"
 	"github.com/dvoyni/cog/plugins/platform"
 	"github.com/dvoyni/cog/plugins/render"
 )
@@ -96,7 +97,7 @@ type FontLibrary interface {
 	// size, one at least, as a run's is. A set
 	// canvas does not hold, never made or destroyed, is measured as the
 	// default set, reported once for it as ReportKindFontSetNotHeld.
-	Metrics(set FontSet, size float32, language string) FontMetrics
+	Metrics(set FontSet, size float32, language string) font.Metrics
 }
 
 // ElevateFontLibrary answers the FontLibrary resource a job holds the write lock on as
@@ -119,7 +120,7 @@ type WriteFontLibrary interface {
 	// Mono. The set keeps descriptor as given, which Assets.ReloadChanged
 	// makes it again of once a font file it names changes, so its slices
 	// are not changed after.
-	MakeFontSet(descriptor FontSetDescriptor) FontSet
+	MakeFontSet(descriptor font.SetDescriptor) FontSet
 	// DestroyFontSet destroys set, which is then measured as the default
 	// set. Destroying a set canvas does not hold, or the default set, is
 	// reported once for it as ReportKindFontSetNotHeld.

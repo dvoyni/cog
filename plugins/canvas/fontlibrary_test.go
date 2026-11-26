@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/fs"
 	"math"
-	"os"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -14,6 +13,7 @@ import (
 	"github.com/dvoyni/cog/kernel"
 	"github.com/dvoyni/cog/plugins/canvas"
 	"github.com/dvoyni/cog/plugins/canvas/canvastest"
+	"github.com/dvoyni/cog/plugins/canvas/font"
 	"github.com/dvoyni/cog/plugins/platform"
 	"golang.org/x/image/font/gofont/goregular"
 )
@@ -82,9 +82,9 @@ type fontUnits struct {
 }
 
 // atSize answers the measures at size, its em in world units.
-func (u fontUnits) atSize(size float32) canvas.FontMetrics {
+func (u fontUnits) atSize(size float32) font.Metrics {
 	scale := size / u.unitsPerEm
-	return canvas.FontMetrics{
+	return font.Metrics{
 		Ascent:     u.ascent * scale,
 		Descent:    u.descent * scale,
 		LineGap:    u.lineGap * scale,
@@ -96,7 +96,7 @@ func (u fontUnits) atSize(size float32) canvas.FontMetrics {
 
 // expectMetrics fails t unless got is the measures of units at size, each
 // within a millionth of an em, a measure that is not a number never.
-func expectMetrics(t *testing.T, label string, got canvas.FontMetrics, units fontUnits, size float32) {
+func expectMetrics(t *testing.T, label string, got font.Metrics, units fontUnits, size float32) {
 	t.Helper()
 	want := units.atSize(size)
 	gotMeasures := [...]float32{got.Ascent, got.Descent, got.LineGap, got.LineHeight, got.XHeight, got.CapHeight}
@@ -115,7 +115,7 @@ func expectMetrics(t *testing.T, label string, got canvas.FontMetrics, units fon
 // Regular, at pair.ttc.
 func makeFontFiles(t *testing.T) fstest.MapFS {
 	t.Helper()
-	builtIn, err := os.ReadFile("assets/jetbrainsmono.ttf")
+	builtIn, err := fs.ReadFile(font.BuiltInFiles(), "jetbrainsmono.ttf")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,11 +131,11 @@ func makeFontFiles(t *testing.T) fstest.MapFS {
 // from its hhea table, in its font units.
 const goGappedLineGap = 200
 
-// makeGappedFont answers a copy of font, a TrueType font file, its hhea
+// makeGappedFont answers a copy of fontFile, a TrueType font file, its hhea
 // table's line gap lineGap font units.
-func makeGappedFont(font []byte, lineGap int16) []byte {
-	gapped := slices.Clone(font)
-	for table := range int(binary.BigEndian.Uint16(font[4:])) {
+func makeGappedFont(fontFile []byte, lineGap int16) []byte {
+	gapped := slices.Clone(fontFile)
+	for table := range int(binary.BigEndian.Uint16(fontFile[4:])) {
 		record := gapped[12+16*table:]
 		if string(record[:4]) == "hhea" {
 			binary.BigEndian.PutUint16(gapped[binary.BigEndian.Uint32(record[8:])+8:], uint16(lineGap))
@@ -153,14 +153,14 @@ func makeCollection(fonts ...[]byte) []byte {
 	copy(collection, "ttcf")
 	binary.BigEndian.PutUint32(collection[4:], 0x00010000)
 	binary.BigEndian.PutUint32(collection[8:], uint32(len(fonts)))
-	for index, font := range fonts {
+	for index, fontFile := range fonts {
 		for len(collection)%4 != 0 {
 			collection = append(collection, 0)
 		}
 		start := len(collection)
 		binary.BigEndian.PutUint32(collection[12+4*index:], uint32(start))
-		collection = append(collection, font...)
-		tableCount := int(binary.BigEndian.Uint16(font[4:]))
+		collection = append(collection, fontFile...)
+		tableCount := int(binary.BigEndian.Uint16(fontFile[4:]))
 		for table := range tableCount {
 			offset := collection[start+12+16*table+8:]
 			binary.BigEndian.PutUint32(offset, binary.BigEndian.Uint32(offset)+uint32(start))
@@ -171,7 +171,7 @@ func makeCollection(fonts ...[]byte) []byte {
 
 func TestDefaultFontSetIsJetBrainsMonoMeasuredAtItsSize(t *testing.T) {
 	h := canvastest.NewHarness(t)
-	var got canvas.FontMetrics
+	var got font.Metrics
 	h.Spawn(nil, nil, &fontLibraryUser{read: func(fonts canvas.FontLibrary, frame int) {
 		got = fonts.Metrics(canvas.FontSet{}, 10, "")
 	}})
@@ -182,10 +182,10 @@ func TestDefaultFontSetIsJetBrainsMonoMeasuredAtItsSize(t *testing.T) {
 func TestLineHeightIsAscentDescentAndLineGap(t *testing.T) {
 	h := canvastest.NewHarness(t)
 	var set canvas.FontSet
-	var got canvas.FontMetrics
+	var got font.Metrics
 	h.Spawn(nil, nil, &fileMounter{files: makeFontFiles(t)}, &fontLibraryUser{
 		write: func(fonts canvas.WriteFontLibrary, frame int) {
-			set = fonts.MakeFontSet(canvas.FontSetDescriptor{Default: canvas.Font{Path: "gapped.ttf"}})
+			set = fonts.MakeFontSet(font.SetDescriptor{Default: font.Font{Path: "gapped.ttf"}})
 		},
 		read: func(fonts canvas.FontLibrary, frame int) { got = fonts.Metrics(set, 32, "") },
 	})
@@ -216,16 +216,16 @@ func TestCurrentLanguageIsConfigsUntilSetLanguage(t *testing.T) {
 func TestFontSetMeasuresEachLanguageByItsFirstFontAndTheRestByItsDefault(t *testing.T) {
 	h := canvastest.NewHarness(t)
 	var set canvas.FontSet
-	got := map[string]canvas.FontMetrics{}
+	got := map[string]font.Metrics{}
 	h.Spawn(nil, &canvas.Config{Language: "en"}, &fileMounter{files: makeFontFiles(t)}, &fontLibraryUser{
 		write: func(fonts canvas.WriteFontLibrary, frame int) {
 			switch frame {
 			case 0:
-				set = fonts.MakeFontSet(canvas.FontSetDescriptor{
+				set = fonts.MakeFontSet(font.SetDescriptor{
 					Label:   "body",
-					Default: canvas.Font{Path: "go.ttf"},
-					Languages: []canvas.LanguageFonts{
-						{Languages: []string{"ja", "zh-Hans"}, Fonts: []canvas.Font{{Path: builtInFontPath}, {Path: "go.ttf"}}},
+					Default: font.Font{Path: "go.ttf"},
+					Languages: []font.LanguageFonts{
+						{Languages: []string{"ja", "zh-Hans"}, Fonts: []font.Font{{Path: builtInFontPath}, {Path: "go.ttf"}}},
 					},
 				})
 			case 1:
@@ -261,15 +261,15 @@ func TestFontSetMeasuresEachLanguageByItsFirstFontAndTheRestByItsDefault(t *test
 func TestFontThatFailsToLoadIsReportedOnceAndLeftOut(t *testing.T) {
 	h := canvastest.NewHarness(t)
 	h.ExpectReport(canvas.ReportKindFontNotLoaded)
-	descriptor := canvas.FontSetDescriptor{
+	descriptor := font.SetDescriptor{
 		Label:   "broken",
-		Default: canvas.Font{Path: "missing.ttf"},
-		Languages: []canvas.LanguageFonts{
-			{Languages: []string{"ja"}, Fonts: []canvas.Font{{Path: "broken.ttf"}}},
+		Default: font.Font{Path: "missing.ttf"},
+		Languages: []font.LanguageFonts{
+			{Languages: []string{"ja"}, Fonts: []font.Font{{Path: "broken.ttf"}}},
 		},
 	}
 	var set canvas.FontSet
-	got := map[string]canvas.FontMetrics{}
+	got := map[string]font.Metrics{}
 	h.Spawn(nil, nil, &fileMounter{files: makeFontFiles(t)}, &fontLibraryUser{
 		write: func(fonts canvas.WriteFontLibrary, frame int) { set = fonts.MakeFontSet(descriptor) },
 		read: func(fonts canvas.FontLibrary, frame int) {
@@ -290,11 +290,11 @@ func TestCollectionsFontIsTheOneAtItsIndex(t *testing.T) {
 	h := canvastest.NewHarness(t)
 	h.ExpectReport(canvas.ReportKindFontNotLoaded)
 	var sets [3]canvas.FontSet
-	var got [3]canvas.FontMetrics
+	var got [3]font.Metrics
 	h.Spawn(nil, nil, &fileMounter{files: makeFontFiles(t)}, &fontLibraryUser{
 		write: func(fonts canvas.WriteFontLibrary, frame int) {
 			for index := range sets {
-				sets[index] = fonts.MakeFontSet(canvas.FontSetDescriptor{Default: canvas.Font{Path: "pair.ttc", Index: uint32(index)}})
+				sets[index] = fonts.MakeFontSet(font.SetDescriptor{Default: font.Font{Path: "pair.ttc", Index: uint32(index)}})
 			}
 		},
 		read: func(fonts canvas.FontLibrary, frame int) {
@@ -314,8 +314,8 @@ func TestCollectionsFontIsTheOneAtItsIndex(t *testing.T) {
 
 func TestConfigsDefaultFontSetIsMadeAsCanvasStarts(t *testing.T) {
 	h := canvastest.NewHarness(t)
-	var got canvas.FontMetrics
-	h.Spawn(nil, &canvas.Config{DefaultFontSet: canvas.FontSetDescriptor{Default: canvas.Font{Path: "go.ttf"}}}, &fileMounter{files: makeFontFiles(t)}, &fontLibraryUser{
+	var got font.Metrics
+	h.Spawn(nil, &canvas.Config{DefaultFontSet: font.SetDescriptor{Default: font.Font{Path: "go.ttf"}}}, &fileMounter{files: makeFontFiles(t)}, &fontLibraryUser{
 		read: func(fonts canvas.FontLibrary, frame int) { got = fonts.Metrics(canvas.FontSet{}, 32, "") },
 	})
 	h.Step()
@@ -325,8 +325,8 @@ func TestConfigsDefaultFontSetIsMadeAsCanvasStarts(t *testing.T) {
 func TestConfigsFailedDefaultFontIsJetBrainsMonoReportedOnce(t *testing.T) {
 	h := canvastest.NewHarness(t)
 	h.ExpectReport(canvas.ReportKindFontNotLoaded)
-	var got canvas.FontMetrics
-	h.Spawn(nil, &canvas.Config{DefaultFontSet: canvas.FontSetDescriptor{Default: canvas.Font{Path: "missing.ttf"}}}, &fontLibraryUser{
+	var got font.Metrics
+	h.Spawn(nil, &canvas.Config{DefaultFontSet: font.SetDescriptor{Default: font.Font{Path: "missing.ttf"}}}, &fontLibraryUser{
 		read: func(fonts canvas.FontLibrary, frame int) { got = fonts.Metrics(canvas.FontSet{}, 10, "") },
 	})
 	h.Step()
@@ -340,12 +340,12 @@ func TestDestroyedFontSetIsMeasuredAsTheDefaultSetReportedOnce(t *testing.T) {
 	h := canvastest.NewHarness(t)
 	h.ExpectReport(canvas.ReportKindFontSetNotHeld)
 	var set canvas.FontSet
-	var got []canvas.FontMetrics
-	h.Spawn(nil, &canvas.Config{DefaultFontSet: canvas.FontSetDescriptor{Default: canvas.Font{Path: "go.ttf"}}}, &fileMounter{files: makeFontFiles(t)}, &fontLibraryUser{
+	var got []font.Metrics
+	h.Spawn(nil, &canvas.Config{DefaultFontSet: font.SetDescriptor{Default: font.Font{Path: "go.ttf"}}}, &fileMounter{files: makeFontFiles(t)}, &fontLibraryUser{
 		write: func(fonts canvas.WriteFontLibrary, frame int) {
 			switch frame {
 			case 0:
-				set = fonts.MakeFontSet(canvas.FontSetDescriptor{Default: canvas.Font{Path: builtInFontPath}})
+				set = fonts.MakeFontSet(font.SetDescriptor{Default: font.Font{Path: builtInFontPath}})
 			case 1:
 				fonts.DestroyFontSet(set)
 			}
@@ -373,10 +373,10 @@ func TestDestroyedFontSetIsMeasuredAsTheDefaultSetReportedOnce(t *testing.T) {
 func TestDestroyingTheDefaultOrADestroyedFontSetIsReportedOnceEach(t *testing.T) {
 	h := canvastest.NewHarness(t)
 	h.ExpectReport(canvas.ReportKindFontSetNotHeld)
-	var got canvas.FontMetrics
+	var got font.Metrics
 	h.Spawn(nil, nil, &fontLibraryUser{
 		write: func(fonts canvas.WriteFontLibrary, frame int) {
-			set := fonts.MakeFontSet(canvas.FontSetDescriptor{})
+			set := fonts.MakeFontSet(font.SetDescriptor{})
 			fonts.DestroyFontSet(set)
 			fonts.DestroyFontSet(set)
 			fonts.DestroyFontSet(canvas.FontSet{})
@@ -392,11 +392,11 @@ func TestDestroyingTheDefaultOrADestroyedFontSetIsReportedOnceEach(t *testing.T)
 }
 
 func TestAxisTagFromNameAnswersFourBytesOrTheZeroTag(t *testing.T) {
-	if tag := canvas.AxisTagFromName("wght"); tag != (canvas.AxisTag{'w', 'g', 'h', 't'}) {
+	if tag := font.AxisTagFromName("wght"); tag != (font.AxisTag{'w', 'g', 'h', 't'}) {
 		t.Errorf("wght's tag %q", tag)
 	}
 	for _, name := range []string{"", "wgh", "weight"} {
-		if tag := canvas.AxisTagFromName(name); tag != (canvas.AxisTag{}) {
+		if tag := font.AxisTagFromName(name); tag != (font.AxisTag{}) {
 			t.Errorf("%q's tag %q, want the zero tag", name, tag)
 		}
 	}
@@ -405,13 +405,13 @@ func TestAxisTagFromNameAnswersFourBytesOrTheZeroTag(t *testing.T) {
 func TestVariationNamingNoAxisIsReportedOnceAndIgnored(t *testing.T) {
 	h := canvastest.NewHarness(t)
 	h.ExpectReport(canvas.ReportKindVariationIgnored)
-	var got canvas.FontMetrics
+	var got font.Metrics
 	var set canvas.FontSet
 	h.Spawn(nil, nil, &fontLibraryUser{
 		write: func(fonts canvas.WriteFontLibrary, frame int) {
-			set = fonts.MakeFontSet(canvas.FontSetDescriptor{Default: canvas.Font{Variations: [4]canvas.Variation{
-				{Axis: canvas.AxisTagFromName("weight"), Value: 700},
-				{Axis: canvas.AxisTagFromName("wght"), Value: 800},
+			set = fonts.MakeFontSet(font.SetDescriptor{Default: font.Font{Variations: [4]font.Variation{
+				{Axis: font.AxisTagFromName("weight"), Value: 700},
+				{Axis: font.AxisTagFromName("wght"), Value: 800},
 			}}})
 		},
 		read: func(fonts canvas.FontLibrary, frame int) { got = fonts.Metrics(set, 10, "") },
@@ -442,7 +442,7 @@ func TestFontThatLoadsAgainIsReportedAgainOnceItFails(t *testing.T) {
 	h := canvastest.NewHarness(t)
 	h.ExpectReport(canvas.ReportKindFontNotLoaded)
 	files := &switchedFS{files: makeFontFiles(t)}
-	descriptor := canvas.FontSetDescriptor{Default: canvas.Font{Path: "go.ttf"}}
+	descriptor := font.SetDescriptor{Default: font.Font{Path: "go.ttf"}}
 	h.Spawn(nil, nil, &fileMounter{files: files}, &fontLibraryUser{
 		write: func(fonts canvas.WriteFontLibrary, frame int) {
 			files.on.Store(frame == 2)

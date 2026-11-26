@@ -215,15 +215,17 @@
 // every font file the set names loads then, each language served by its
 // own fonts and the rest by the default font. The zero FontSet is the
 // default set, Config.DefaultFontSet, JetBrains Mono alone unless it names
-// others. A font's FontMetrics at a size are read through FontLibrary, and
-// text laid out, shaped, broken into lines and measured, with no frame:
+// others. A set is described in the public package font, its default font
+// and the fonts serving each language each a font.Font, and a font's
+// font.Metrics at a size are read through FontLibrary, and text laid out,
+// shaped, broken into lines and measured, with no frame:
 //
 //	func loadFonts(k *kernel.Kernel, _ kernel.NoArg, libraryHandle kernel.Write[canvas.FontLibrary], files kernel.Read[platform.FS]) kernel.NoResult {
 //		library := canvas.ElevateFontLibrary(libraryHandle, files)
-//		title = library.MakeFontSet(canvas.FontSetDescriptor{
+//		title = library.MakeFontSet(font.SetDescriptor{
 //			Label:     "title",
-//			Default:   canvas.Font{Path: "fonts/inter-variable.ttf", Variations: [4]canvas.Variation{{Axis: canvas.AxisTagFromName("wght"), Value: 800}}},
-//			Languages: []canvas.LanguageFonts{{Languages: []string{"ja", "zh-Hans"}, Fonts: []canvas.Font{{Path: "fonts/noto-sans-cjk.ttc"}}}},
+//			Default:   font.Font{Path: "fonts/inter-variable.ttf", Variations: [4]font.Variation{{Axis: font.AxisTagFromName("wght"), Value: 800}}},
+//			Languages: []font.LanguageFonts{{Languages: []string{"ja", "zh-Hans"}, Fonts: []font.Font{{Path: "fonts/noto-sans-cjk.ttc"}}}},
 //		})
 //		library.SetLanguage("ja")
 //		return kernel.NoResult{}

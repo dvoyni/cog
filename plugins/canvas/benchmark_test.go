@@ -10,6 +10,7 @@ import (
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/canvas"
 	"github.com/dvoyni/cog/plugins/canvas/canvastest"
+	"github.com/dvoyni/cog/plugins/canvas/font"
 	"github.com/dvoyni/cog/plugins/platform/filesystems"
 	"github.com/dvoyni/cog/plugins/render/rendertest"
 )
@@ -199,7 +200,7 @@ const newHanziCount = 200
 // of its own, its frame to finish in.
 func BenchmarkFrameOfNewHanzi(b *testing.B) {
 	const fontPath = "hanzi.ttf"
-	font, err := os.ReadFile("testdata/fonts/notosanssc-hanzi.ttf")
+	fontFile, err := os.ReadFile("testdata/fonts/notosanssc-hanzi.ttf")
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -209,8 +210,8 @@ func BenchmarkFrameOfNewHanzi(b *testing.B) {
 	}
 	hanzi := hanziBuilder.String()
 	memory := filesystems.NewMemoryFS()
-	putFile(b, memory, fontPath, font)
-	config := &canvas.Config{DefaultFontSet: canvas.FontSetDescriptor{Default: canvas.Font{Path: fontPath, FieldEm: 64}}}
+	putFile(b, memory, fontPath, fontFile)
+	config := &canvas.Config{DefaultFontSet: font.SetDescriptor{Default: font.Font{Path: fontPath, FieldEm: 64}}}
 	h := canvastest.NewHarness(b)
 	h.RecordNothing()
 	h.Spawn(nil, config, &fileMounter{files: memory}, &concurrentUser{records: []recordFunc{func(list canvas.CommandList, assets canvas.Assets, frame int) {
@@ -218,7 +219,7 @@ func BenchmarkFrameOfNewHanzi(b *testing.B) {
 		// timed one.
 		switch frame % 3 {
 		case 1:
-			putFile(b, memory, fontPath, font)
+			putFile(b, memory, fontPath, fontFile)
 			assets.ReloadChanged()
 		case 0:
 			list.DrawText(canvas.Text{String: hanzi, Size: 12, WrapWidth: 300})
