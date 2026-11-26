@@ -53,18 +53,18 @@ func makeDrawnImage(packed *packedImage, options ImageOptions) drawnImage {
 }
 
 // inPlainAtlas answers whether d is packed into a plain sprite atlas, not
-// a texture of its own nor a render texture: what a run of text draws its
-// icons from, beside the glyph atlas.
+// a converter's, a texture of its own nor a render texture: what a run of
+// text draws its icons from, beside the glyph atlas.
 func (d *drawnImage) inPlainAtlas() bool {
-	return d.packed != nil && d.packed.atlas != nil
+	return d.packed != nil && d.packed.atlas != nil && !d.packed.converted
 }
 
 // wrapsBySampler answers whether d's entries wrap it by their sampler,
 // repeating along the axes it wraps along: an image drawn from a texture
-// of its own, or a render texture's, has no gutter, while a sprite atlas's
-// gutter wraps its images.
+// of its own, or a render texture's, has no gutter, while an atlas's
+// gutter, a plain one's or a converter's, wraps its images.
 func (d *drawnImage) wrapsBySampler() bool {
-	return !d.inPlainAtlas()
+	return d.packed == nil || d.packed.atlas == nil
 }
 
 // placeRegion answers the rectangle d's region spans when its frame spans
@@ -126,19 +126,20 @@ func placeTextureImage(inventory render.Inventory, reporter *reporter, drawn *dr
 }
 
 // packedImage is an image packed, which the images differing from it only
-// in options that change no pixel share: the sprite atlas it is packed
-// into, or, nil, its own texture instead, exactly its size, of one layer
-// and no gutter, the zero Texture when render could not make it; its region
-// there, its page as the region's layer, the whole texture for its own; the
-// bounds of the frame a converter's output there was converted from, in
-// texels from the region's top left, zero for a region holding its frame;
-// and the number of the frame that last drew it, which no atlas evicts it
-// in.
+// in options that change no pixel share: the atlas it is packed into, a
+// plain sprite atlas or, where converted is set, its converter's, or, nil,
+// its own texture instead, exactly its size, of one layer and no gutter,
+// the zero Texture when render could not make it; its region there, its
+// page as the region's layer, the whole texture for its own; the bounds of
+// the frame a converter's output there was converted from, in texels from
+// the region's top left, zero for a region holding its frame; and the
+// number of the frame that last drew it, which no atlas evicts it in.
 type packedImage struct {
 	atlas          *atlas.Atlas
 	ownTexture     render.Texture
 	region         render.TextureRegion
 	frameBounds    m.Rect
+	converted      bool
 	lastDrawnFrame uint64
 }
 

@@ -116,8 +116,8 @@ func TestReloadChangedPacksChangedImagesAgainAndLoadsAChangedMeshFileAgainReadin
 		for _, draw := range passes[len(passes)-1].Draws {
 			indexCounts = append(indexCounts, draw.IndexCount)
 		}
-		if want := []uint32{0, wantIndexCount, 0}; !slices.Equal(indexCounts, want) {
-			t.Errorf("frame %d drew draws of %v indices, want the sprites, then the chunk's mesh, then the still mesh, %v", index, indexCounts, want)
+		if want := []uint32{0, 0, wantIndexCount, 0}; !slices.Equal(indexCounts, want) {
+			t.Errorf("frame %d drew draws of %v indices, want the plain sprites, the converted one from its trimmer's atlas, then the chunk's mesh, then the still mesh, %v", index, indexCounts, want)
 		}
 	}
 }
@@ -271,12 +271,10 @@ func TestReloadChangedDropsAConvertedFilePreloadedBeforeItsFirstDrawOnceItChange
 	h.Record(makeSpriteRecord(preloaded))
 	h.Step()
 
-	made := findLoadedTextures(h.Frames()[2].Render, preloadedPath)
-	if len(made) != 1 {
-		t.Fatalf("the frame first drawing the preloaded image made %v of it, want one texture of its output", made)
-	}
-	if writes := findTextureWrites(h.Frames()[2].Render, made[0]); len(writes) == 0 || writes[0].Region.Width != 8 || writes[0].Region.Height != 8 {
-		t.Errorf("its output was written %+v, want the new file's 8×8 texels", writes)
+	// The trimmer's atlas's cells reach 4 texels past an image, at the
+	// default 3 mip levels, so the new file's 8×8 texels fill a cell of 16.
+	if puts := findConvertedPuts(h.Frames()[2].Render); len(puts) != 1 || puts[0].DestinationRegion.Width != 16 || puts[0].DestinationRegion.Height != 16 {
+		t.Errorf("the frame first drawing the preloaded image put %+v into its trimmer's atlas, want the new file's 8×8 texels in a cell of 16", puts)
 	}
 }
 

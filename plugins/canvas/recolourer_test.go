@@ -3,6 +3,9 @@ package canvas_test
 import (
 	"image"
 	"image/color"
+
+	"github.com/dvoyni/cog/plugins/canvas"
+	"github.com/dvoyni/cog/plugins/render"
 )
 
 // recolourer is a converter painting each texel of a frame its colour, keeping
@@ -11,15 +14,18 @@ type recolourer struct {
 	colours []color.NRGBA
 }
 
-func (c recolourer) Convert(frame image.Image) image.Image {
-	recoloured := image.NewNRGBA(frame.Bounds())
-	for y := frame.Bounds().Min.Y; y < frame.Bounds().Max.Y; y++ {
-		for x := frame.Bounds().Min.X; x < frame.Bounds().Max.X; x++ {
-			_, _, _, alpha := frame.At(x, y).RGBA()
+func (c recolourer) Format(space canvas.ColorSpace) render.TextureFormat {
+	return findRGBA8Format(space)
+}
+
+func (c recolourer) Convert(frame *image.NRGBA, space canvas.ColorSpace) ([]byte, image.Rectangle) {
+	recoloured := image.NewNRGBA(frame.Rect)
+	for y := frame.Rect.Min.Y; y < frame.Rect.Max.Y; y++ {
+		for x := frame.Rect.Min.X; x < frame.Rect.Max.X; x++ {
 			colour := c.colours[0]
-			colour.A = uint8(alpha >> 8)
+			colour.A = frame.NRGBAAt(x, y).A
 			recoloured.SetNRGBA(x, y, colour)
 		}
 	}
-	return recoloured
+	return premultiplyTexels(recoloured, recoloured.Rect, space), recoloured.Rect
 }

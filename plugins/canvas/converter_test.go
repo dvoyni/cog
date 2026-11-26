@@ -1,9 +1,13 @@
 package canvas_test
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"math"
+	"reflect"
+	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/fstest"
@@ -152,6 +156,98 @@ func TestADistanceFieldOfASpriteLinesUpWithItAtAnyPivotAndSize(t *testing.T) {
 	}
 }
 
+func TestImagesOfEqualDistanceFieldsDrawFromOneAtlasInOneBatchAndThoseOfAnotherSpreadFromOneOfTheirOwn(t *testing.T) {
+	// Two files baked by equal converters, of a spread of 8, are drawn
+	// first, then one of a spread of 16: the first two share their
+	// converter's atlas and batch, and the third draws from an atlas of its
+	// own, none of them the plain sprite atlas.
+	files := fstest.MapFS{}
+	addArtFiles(t, files)
+	addImageFile(t, files, fieldArtPath, newRectArt(fieldArt))
+	h := canvastest.NewHarness(t)
+	h.Spawn(nil, nil, &fileMounter{files: files})
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	art := canvas.ImageFromFile(artPath, canvas.ImageOptions{Convert: canvas.DistanceField{Spread: 8}})
+	rectangle := canvas.ImageFromFile(fieldArtPath, canvas.ImageOptions{Convert: canvas.DistanceField{Spread: 8}})
+	widerArt := canvas.ImageFromFile(artPath, canvas.ImageOptions{Convert: canvas.DistanceField{Spread: 16}})
+	h.Record(makeSpriteRecord(art, rectangle, widerArt))
+
+	h.Step()
+
+	want := []convertedBatch{
+		{atlas: fmt.Sprintf("canvas sprites converted by canvas.DistanceField{Spread:8}, of format %d", render.TextureFormatRGBA8UnormSrgb), orders: []int32{0, 1}},
+		{atlas: fmt.Sprintf("canvas sprites converted by canvas.DistanceField{Spread:16}, of format %d", render.TextureFormatRGBA8UnormSrgb), orders: []int32{2}},
+	}
+	if got := readConvertedBatches(h); !reflect.DeepEqual(got, want) {
+		t.Errorf("the fields batched as %+v, want %+v: those of equal converters from one atlas in one batch, the other spread's from its own", got, want)
+	}
+}
+
+func TestATrimmedSpriteBatchesApartFromPlainSpritesAndShapes(t *testing.T) {
+	// A shape, the plain art, its trimmed image and the plain art again:
+	// the trimmed sprite draws from its trimmer's atlas, breaking the batch
+	// the shape and the plain sprites would make of the plain sprite atlas.
+	files := fstest.MapFS{}
+	addArtFiles(t, files)
+	h := canvastest.NewHarness(t)
+	h.Spawn(nil, nil, &fileMounter{files: files})
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	plain := canvas.ImageFromFile(artPath)
+	trimmed := canvas.ImageFromFile(artPath, canvas.ImageOptions{Convert: trimmer{convertedCount: &atomic.Int32{}}})
+	h.Record(func(list canvas.DrawList) {
+		list.DrawShape(canvas.Shape{Rect: m.Rect{X: -4, Y: -4, Width: 8, Height: 8}, Tint: m.White, Order: 0})
+		list.DrawSprite(canvas.Sprite{Image: plain, Order: 1})
+		list.DrawSprite(canvas.Sprite{Image: trimmed, Order: 2})
+		list.DrawSprite(canvas.Sprite{Image: plain, Order: 3})
+	})
+
+	h.Step()
+
+	batches := readConvertedBatches(h)
+	if len(batches) != 3 || !slices.Equal(batches[0].orders, []int32{0, 1}) || !slices.Equal(batches[1].orders, []int32{2}) || !slices.Equal(batches[2].orders, []int32{3}) {
+		t.Fatalf("the entries batched as %+v, want the shape and the plain sprite, the trimmed sprite, then the plain sprite", batches)
+	}
+	if batches[0].atlas != "canvas sprites sRGB" || batches[2].atlas != "canvas sprites sRGB" || !strings.HasPrefix(batches[1].atlas, "canvas sprites converted by canvas_test.trimmer{") {
+		t.Errorf("the batches drew from %q, %q and %q, want the plain sRGB atlas, the trimmer's and the plain one", batches[0].atlas, batches[1].atlas, batches[2].atlas)
+	}
+}
+
+func TestAConvertedImageTooLargeForAPageIsDrawnFromATextureOfItsOwnMadeOfItsTexelsItsMipsMadeBeforeTheCamerasPass(t *testing.T) {
+	// The art's field of a spread of 16 is 48 texels square, past a page
+	// of 32: it is made a texture of its own, written its 48×48 texels as
+	// it is made, its levels 1 and 2 drawn before the camera's pass, beside
+	// the white texel's page's.
+	files := fstest.MapFS{}
+	addArtFiles(t, files)
+	h := canvastest.NewHarness(t)
+	h.Spawn(nil, &canvas.Config{AtlasPageSize: 32}, &fileMounter{files: files})
+	h.OpenWindow(platform.Size{Width: 64, Height: 48})
+	field := canvas.ImageFromFile(artPath, canvas.ImageOptions{Convert: canvas.DistanceField{Spread: 16}})
+	h.Record(makeSpriteRecord(field))
+
+	h.Step()
+
+	frame := h.Frames()[0]
+	own := findLoadedTextures(frame.Render, artPath)
+	if len(own) != 1 {
+		t.Fatalf("the frame first drawing the field made %v labelled with its path, want its texture", own)
+	}
+	if writes := findTextureWrites(frame.Render, own[0]); len(writes) != 1 || writes[0].Region.Width != 48 || writes[0].Region.Height != 48 {
+		t.Errorf("the field's texture was written %+v, want its 48×48 texels", writes)
+	}
+	if batches := frame.Cameras[0].Batches; len(batches) != 1 || batches[0].Texture != own[0] {
+		t.Errorf("the camera batched %+v, want the field drawn from its texture", batches)
+	}
+	want := []passSummary{
+		{mipsLabel, artPath, 1, 0, 1}, {mipsLabel, artPath, 2, 0, 1},
+		{mipsLabel, spriteAtlasLabel, 1, 0, 1}, {mipsLabel, spriteAtlasLabel, 2, 0, 1},
+		{"canvas camera", "", 0, 0, 1},
+	}
+	if got := findPassSummaries(findCanvasLists(frame.Render)[0], findTextureLabels(frame.Render)); !slices.Equal(got, want) {
+		t.Errorf("the frame drew %+v, want %+v: the field's mips, then the white texel's page's, then the camera's pass", got, want)
+	}
+}
+
 func TestAConverterNotComparableAndOneOfARenderTexturesImageAreRefusedTheirImagesDrawnUnconverted(t *testing.T) {
 	// The art, given a recolourer, which is not comparable, and an image of
 	// a render texture given a trimmer, are drawn as they are, each
@@ -200,10 +296,26 @@ func TestAConvertedImageWhoseFileFailsToDecodeLoadsThroughRenderWhichDrawsItMage
 	}
 }
 
+// findConvertedPuts answers the copies frame's command lists recorded from
+// a buffer into the atlases of converters: each converted image's texels
+// put into its cell.
+func findConvertedPuts(frame render.Inspection) []render.InspectedCopy {
+	labels := findTextureLabels(frame)
+	var puts []render.InspectedCopy
+	for _, list := range findCanvasLists(frame) {
+		for _, copied := range list.Copies {
+			if copied.SourceBuffer.Buffer != (render.Buffer{}) && strings.HasPrefix(labels[copied.DestinationTexture], "canvas sprites converted by ") {
+				puts = append(puts, copied)
+			}
+		}
+	}
+	return puts
+}
+
 func TestAPreloadedConvertedImageIsDecodedInThePreloadingJob(t *testing.T) {
 	// The art's trimmed image is preloaded, its file then taken from the
-	// FS, and drawn: it is packed from what the preload decoded, as one
-	// texture made of its output, reporting no failure to load.
+	// FS, and drawn: it is packed from what the preload decoded, its output
+	// put into its trimmer's atlas, reporting no failure to load.
 	files := fstest.MapFS{}
 	addArtFiles(t, files)
 	convertedCount := &atomic.Int32{}
@@ -225,8 +337,11 @@ func TestAPreloadedConvertedImageIsDecodedInThePreloadingJob(t *testing.T) {
 	if converted := convertedCount.Load(); converted != 1 {
 		t.Errorf("the trimmer converted %d frames, want the preloaded art's", converted)
 	}
-	if made := findLoadedTextures(h.Frames()[1].Render, artPath); len(made) != 1 {
-		t.Errorf("the frame first drawing the art made %v of it, want one texture of its output", made)
+	if made := findLoadedTextures(h.Frames()[1].Render, artPath); len(made) != 0 {
+		t.Errorf("the frame first drawing the art loaded %v of it, want none, its output put into its trimmer's atlas", made)
+	}
+	if puts := findConvertedPuts(h.Frames()[1].Render); len(puts) != 1 {
+		t.Errorf("the frame first drawing the art put %+v into converters' atlases, want its output's cell", puts)
 	}
 }
 

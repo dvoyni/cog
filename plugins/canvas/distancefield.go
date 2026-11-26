@@ -5,6 +5,7 @@ import (
 	"math"
 
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/plugins/render"
 )
 
 // defaultDistanceFieldSpread is the spread of a DistanceField whose Spread
@@ -13,7 +14,9 @@ const defaultDistanceFieldSpread = 8
 
 // DistanceField is a Converter baking an image's alpha into a distance
 // field, as an SDF material reads one: each texel's alpha holds its distance to
-// the edge of the image's art, where its alpha crosses ½, its colour white.
+// the edge of the image's art, where its alpha crosses ½, its colour white,
+// premultiplied, in its colour space's RGBA8 format, so the fields of one
+// Spread share an atlas, and those of another draw from one of their own.
 // The alpha is ½ on the edge, falling to 0 Spread texels outside it and
 // rising to 1 Spread texels inside it. Its output is the image grown by
 // Spread on each side, its bounds' Min Spread texels above and left of the
@@ -26,39 +29,53 @@ type DistanceField struct {
 	Spread int
 }
 
-// Convert answers d's distance field of picture's alpha.
-func (d DistanceField) Convert(picture image.Image) image.Image {
+// Format answers space's RGBA8 format: RGBA8UnormSrgb for ColorSpaceSrgb
+// and RGBA8Unorm for ColorSpaceLinear.
+func (d DistanceField) Format(space ColorSpace) render.TextureFormat {
+	return findRGBA8Format(space)
+}
+
+// Convert answers d's distance field of picture's alpha, white premultiplied
+// in space's RGBA8 format, and its bounds.
+func (d DistanceField) Convert(picture *image.NRGBA, space ColorSpace) (texels []byte, bounds image.Rectangle) {
 	spread := d.Spread
 	if spread <= 0 {
 		spread = defaultDistanceFieldSpread
 	}
-	bounds := picture.Bounds()
-	grownBounds := bounds.Inset(-spread)
-	width := grownBounds.Dx()
-	coverage := make([]float32, width*grownBounds.Dy())
-	nrgba, isNRGBA := picture.(*image.NRGBA)
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			var alpha float32
-			if isNRGBA {
-				alpha = float32(nrgba.Pix[nrgba.PixOffset(x, y)+3]) / 255
-			} else {
-				_, _, _, alpha16 := picture.At(x, y).RGBA()
-				alpha = float32(alpha16) / 0xffff
-			}
-			coverage[(y-grownBounds.Min.Y)*width+x-grownBounds.Min.X] = alpha
+	pictureBounds := picture.Bounds()
+	bounds = pictureBounds.Inset(-spread)
+	width := bounds.Dx()
+	coverage := make([]float32, width*bounds.Dy())
+	for y := pictureBounds.Min.Y; y < pictureBounds.Max.Y; y++ {
+		for x := pictureBounds.Min.X; x < pictureBounds.Max.X; x++ {
+			coverage[(y-bounds.Min.Y)*width+x-bounds.Min.X] = float32(picture.Pix[picture.PixOffset(x, y)+3]) / 255
 		}
 	}
-	distances := measureEdgeDistances(coverage, width, grownBounds.Dy(), float32(spread))
-	field := image.NewNRGBA(grownBounds)
+	distances := measureEdgeDistances(coverage, width, bounds.Dy(), float32(spread))
+	texels = make([]byte, 4*len(distances))
 	for index, distance := range distances {
-		field.Pix[4*index] = 255
-		field.Pix[4*index+1] = 255
-		field.Pix[4*index+2] = 255
-		field.Pix[4*index+3] = uint8(255*m.Clamp01(0.5-distance/float32(2*spread)) + 0.5)
+		alpha := uint8(255*m.Clamp01(0.5-distance/float32(2*spread)) + 0.5)
+		// White premultiplied is the alpha itself in linear.
+		white := alpha
+		if space != ColorSpaceLinear {
+			white = srgbWhiteOfAlpha[alpha]
+		}
+		texels[4*index] = white
+		texels[4*index+1] = white
+		texels[4*index+2] = white
+		texels[4*index+3] = alpha
 	}
-	return field
+	return texels, bounds
 }
+
+// srgbWhiteOfAlpha is white premultiplied by each alpha, encoded in sRGB.
+var srgbWhiteOfAlpha = func() (whites [256]uint8) {
+	for alpha := range whites {
+		value := float32(alpha) / 255
+		whites[alpha], _, _, _ = m.NewColorLinear(value, value, value, value).Srgb8()
+	}
+	return whites
+}()
 
 // measureEdgeDistances answers the signed distance, in texels, from the
 // centre of each texel of a grid width by height, coverage holding each

@@ -20,8 +20,9 @@ importing [kernel](../../kernel), [metronome](../metronome),
 - **Auto-atlasing.** An image named by path loads at its first draw and is
   packed into an atlas with gutters and mips that never mix neighbours; a full
   atlas grows, then evicts the images drawn least lately. Sheets, source
-  rectangles, wrapped, sliced and tiled sprites, converters and distance
-  fields, and render textures drawn as sprites.
+  rectangles, wrapped, sliced and tiled sprites, render textures drawn as
+  sprites, and converters and distance fields, each converter naming the
+  format of its own atlas, which equal converters' images share.
 - **A public atlas.** The `atlas` package packs images of one format into the
   pages of one 2D-array texture, as canvas packs its sprites and glyphs, for
   a plugin's own caches, such as a UI's rasterised text.

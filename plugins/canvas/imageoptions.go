@@ -67,6 +67,16 @@ const (
 	ColorSpaceLinear
 )
 
+// findRGBA8Format answers the RGBA8 format that encodes colour as space
+// does: RGBA8UnormSrgb for ColorSpaceSrgb and RGBA8Unorm for
+// ColorSpaceLinear, a plain sprite atlas's.
+func findRGBA8Format(space ColorSpace) render.TextureFormat {
+	if space == ColorSpaceLinear {
+		return render.TextureFormatRGBA8Unorm
+	}
+	return render.TextureFormatRGBA8UnormSrgb
+}
+
 // Wrap is the axes an image tiles along.
 type Wrap uint8
 

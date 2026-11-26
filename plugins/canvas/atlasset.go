@@ -59,7 +59,8 @@ func findSpriteAtlasGrid(mipLevelCount uint32) (atlasGrid, gutter uint32) {
 // job's alone: the plain sprite atlas of each colour space, the sRGB one
 // holding the white texel shapes sample, made with the pack material that
 // fills a plain image's cell at canvas's first draw, the linear one at the
-// first image needing it; the glyph atlas, made at the first frame drawing
+// first image needing it; the atlas of each converter and the format it
+// answers, made at the first image it converts; the glyph atlas, made at the first frame drawing
 // text; each image's drawn frames, packed, of a render texture drawn
 // through a view, or found to draw nothing; the frames packed, into an
 // atlas or a texture of their own; the glyphs packed; and the frame count
@@ -82,11 +83,15 @@ type atlasSet struct {
 	ownTextureSize    uint32
 	mipLevelCount     uint32
 	// packMaterial and srgbAtlas are zero until init makes them, linearAtlas
-	// until an image needs it, and glyphAtlas until a run of text does.
-	packMaterial render.Material
-	srgbAtlas    *atlas.Atlas
-	linearAtlas  *atlas.Atlas
-	glyphAtlas   *atlas.Atlas
+	// until an image needs it, and glyphAtlas until a run of text does;
+	// convertedAtlases are the atlas of each converter and format, in the
+	// order made; madeAtlases is every atlas made, in the order made.
+	packMaterial     render.Material
+	srgbAtlas        *atlas.Atlas
+	linearAtlas      *atlas.Atlas
+	glyphAtlas       *atlas.Atlas
+	convertedAtlases []convertedAtlas
+	madeAtlases      []*atlas.Atlas
 	// drawnImages are the frames of the images drawn, each image's at its
 	// Image's index, made at its first draw, then each frame at its
 	// number, and one more after its sheet's last, for the frames past it;
@@ -112,9 +117,12 @@ type atlasSet struct {
 	drawnFrameCount uint64
 	// packings are the images packed whose cells a command list is still
 	// to fill, kept from the frame that made them until one does, and
-	// packInstances their quads, written over as recordUploads fills them.
-	packings      []atlasPacking
-	packInstances []instanceData
+	// packInstances their quads, written over as recordUploads fills them;
+	// unmippedTextures are the textures of their own render made for images
+	// packed, whose mips a command list is still to generate.
+	packings         []atlasPacking
+	packInstances    []instanceData
+	unmippedTextures []render.Texture
 	// missedFrames are the frames of images find found not placed this
 	// frame, and missedGlyphs the glyphs findGlyphs found not packed, each
 	// once, both forgotten as the frame begins; atlasMoved is whether
@@ -156,7 +164,7 @@ func (a *atlasSet) init(inventory render.Inventory, viewportShader render.Shader
 		VertexEntryPoint:   viewportVertexEntryPoint,
 		FragmentEntryPoint: packFragmentEntryPoint,
 	})
-	a.srgbAtlas = atlas.New(inventory, a.makeSpriteAtlasDescriptor(ColorSpaceSrgb))
+	a.srgbAtlas = a.makeAtlas(inventory, a.makeSpriteAtlasDescriptor(ColorSpaceSrgb))
 	a.packWhiteTexel(inventory)
 }
 
@@ -171,32 +179,54 @@ func (a *atlasSet) packWhiteTexel(inventory render.Inventory) {
 	a.drawnImages[0][0] = makeDrawnImage(&packedImage{atlas: a.srgbAtlas, region: whiteRegion}, ImageOptions{})
 }
 
-// makeSpriteAtlasDescriptor answers what the sprite atlas of colorSpace is
-// made of: pages of atlasPageSize texels, growing to atlasLayerCeiling, of
-// mipLevelCount levels, holding RGBA8 texels encoded as colorSpace says,
-// each cell's gutter the one findSpriteAtlasGrid answers, as the plugin
-// fitted the page side to.
+// makeSpriteAtlasDescriptor answers what the plain sprite atlas of
+// colorSpace is made of: an atlas of images, as makeImageAtlasDescriptor
+// answers, of RGBA8 texels encoded as colorSpace says.
 func (a *atlasSet) makeSpriteAtlasDescriptor(colorSpace ColorSpace) atlas.Descriptor {
+	if colorSpace == ColorSpaceLinear {
+		return a.makeImageAtlasDescriptor(linearAtlasLabel, findRGBA8Format(colorSpace))
+	}
+	return a.makeImageAtlasDescriptor(srgbAtlasLabel, findRGBA8Format(colorSpace))
+}
+
+// makeImageAtlasDescriptor answers what an atlas of images, a plain sprite
+// atlas or a converter's, labelled label, is made of: pages of
+// atlasPageSize texels, growing to atlasLayerCeiling, of mipLevelCount
+// levels, holding texels of format, each cell's gutter the one
+// findSpriteAtlasGrid answers, as the plugin fitted the page side to.
+func (a *atlasSet) makeImageAtlasDescriptor(label string, format render.TextureFormat) atlas.Descriptor {
 	_, gutter := findSpriteAtlasGrid(a.mipLevelCount)
-	descriptor := atlas.Descriptor{
-		Label:         srgbAtlasLabel,
-		Format:        render.TextureFormatRGBA8UnormSrgb,
+	return atlas.Descriptor{
+		Label:         label,
+		Format:        format,
 		PageSize:      a.atlasPageSize,
 		MipLevelCount: a.mipLevelCount,
 		Gutter:        gutter,
 		LayerCeiling:  a.atlasLayerCeiling,
 	}
-	if colorSpace == ColorSpaceLinear {
-		descriptor.Label = linearAtlasLabel
-		descriptor.Format = render.TextureFormatRGBA8Unorm
-	}
-	return descriptor
 }
 
-// atlases answers the set's atlases, each nil until made: the sRGB and
-// linear sprite atlases and the glyph atlas.
-func (a *atlasSet) atlases() [3]*atlas.Atlas {
-	return [3]*atlas.Atlas{a.srgbAtlas, a.linearAtlas, a.glyphAtlas}
+// makeAtlas answers an atlas of descriptor made through inventory, kept
+// among the atlases made.
+func (a *atlasSet) makeAtlas(inventory render.Inventory, descriptor atlas.Descriptor) *atlas.Atlas {
+	made := atlas.New(inventory, descriptor)
+	a.madeAtlases = append(a.madeAtlases, made)
+	return made
+}
+
+// findConvertedAtlas answers the atlas of the images converter converts
+// into texels of format, made through inventory at the first of them, and
+// its label.
+func (a *atlasSet) findConvertedAtlas(inventory render.Inventory, converter Converter, format render.TextureFormat) (*atlas.Atlas, string) {
+	for _, converted := range a.convertedAtlases {
+		if converted.converter == converter && converted.format == format {
+			return converted.atlas, converted.label
+		}
+	}
+	label := fmt.Sprintf("canvas sprites converted by %#v, of format %d", converter, format)
+	made := a.makeAtlas(inventory, a.makeImageAtlasDescriptor(label, format))
+	a.convertedAtlases = append(a.convertedAtlases, convertedAtlas{converter: converter, format: format, atlas: made, label: label})
+	return made, label
 }
 
 // beginFrame begins a frame: it counts it, so what it draws is marked
@@ -256,7 +286,7 @@ func (a *atlasSet) find(image Image, frame uint32) {
 // alone, is made at the first run found.
 func (a *atlasSet) findGlyphs(inventory render.Inventory, glyphs []placedGlyph) {
 	if a.glyphAtlas == nil {
-		a.glyphAtlas = atlas.New(inventory, atlas.Descriptor{
+		a.glyphAtlas = a.makeAtlas(inventory, atlas.Descriptor{
 			Label:        glyphAtlasLabel,
 			Format:       render.TextureFormatR8Unorm,
 			PageSize:     a.atlasPageSize,
@@ -394,20 +424,15 @@ func (a *atlasSet) packGlyph(inventory render.Inventory, reporter *reporter, dra
 // reported once for its path, and for a converted frame whose
 // converter answered no texel; and whether it packed the frame now, not one
 // sharing the cell of one packed before. A converted image's file is read
-// from files and decoded, as decodeConvertedFile does; any other's, or one that could
-// not be decoded, which render draws magenta, is acquired from render with
-// its colour space, sharing the texture Assets.Preload acquired, which it
-// then releases from requests, of the size render's descriptor of it
-// gives, its file's header's, a texture render could not make one texel.
-// A frame of the texels of one packed already, of the same rectangle of
-// the file, converter and wrap, shares its cell, its source released. Any
-// other is packed into the sprite atlas of its colour space, a converted
-// one as a texture made of its converter's output, placed by its bounds
-// within the frame, grown or evicting images when full, or into a texture
-// of its own, exactly its size with no gutter, when it is wider or taller
-// than ownTextureSize, when no page holds its cell, or when the atlas is
-// at its ceiling with nothing to evict, reported, its cell kept
-// for the next command list to fill.
+// from files and decoded, as decodeConvertedFile does, and its frame packed
+// as packConverted packs it; any other's, or one that could not be decoded,
+// which render draws magenta, is acquired from render with its colour
+// space, sharing the texture Assets.Preload acquired, which it then
+// releases from requests, of the size render's descriptor of it gives, its
+// file's header's, a texture render could not make one texel, and its
+// frame packed as packPlain packs it. A frame of the texels of one packed
+// already, of the same rectangle of the file, converter and wrap, shares
+// its cell, its source released.
 func (a *atlasSet) packImage(inventory render.Inventory, files fs.FS, reporter *reporter, requests *residencyRequestQueue, key imageKey, frame uint32) (packed *packedImage, drawsTexels, packedNow bool) {
 	sourceKey := sourceKey{path: key.path, colorSpace: key.options.ColorSpace}
 	converter := key.options.Convert
@@ -447,50 +472,91 @@ func (a *atlasSet) packImage(inventory render.Inventory, files fs.FS, reporter *
 		}
 		return packed, withinFile, false
 	}
+	packed = &packedImage{lastDrawnFrame: a.drawnFrameCount}
+	if converter == nil {
+		a.packPlain(inventory, reporter, key, packed, source, frameRect)
+	} else if !a.packConverted(inventory, reporter, key, packed, picture, frameRect) {
+		return nil, false, false
+	}
+	a.packedImages[packedKey] = packed
+	return packed, true, true
+}
+
+// packPlain packs into packed the frame at frameRect of source, the
+// texture of key's file: into the plain sprite atlas of its colour space,
+// as packIntoImageAtlas packs it, or into a texture of its own, as
+// makeOwnTexture makes it; its cell kept for the next command list to fill.
+func (a *atlasSet) packPlain(inventory render.Inventory, reporter *reporter, key imageKey, packed *packedImage, source render.Texture, frameRect m.Recti) {
 	descriptor := a.makeSpriteAtlasDescriptor(key.options.ColorSpace)
 	spriteAtlas := a.srgbAtlas
 	if key.options.ColorSpace == ColorSpaceLinear {
 		if a.linearAtlas == nil {
-			a.linearAtlas = atlas.New(inventory, descriptor)
+			a.linearAtlas = a.makeAtlas(inventory, descriptor)
 		}
 		spriteAtlas = a.linearAtlas
 	}
-	packed = &packedImage{lastDrawnFrame: a.drawnFrameCount}
-	sourceRect := frameRect
-	if converter != nil {
-		output := convertFrame(picture, frameRect, converter)
-		if output.Rect.Empty() {
-			return nil, false, false
-		}
-		sourceRect = m.Recti{Width: output.Rect.Dx(), Height: output.Rect.Dy()}
-		source = inventory.MakeTexture(render.TextureDescriptor{Label: key.path, Width: uint32(sourceRect.Width), Height: uint32(sourceRect.Height), Format: descriptor.Format}, output.Pix)
-		packed.frameBounds = m.Recti{X: -output.Rect.Min.X, Y: -output.Rect.Min.Y, Width: frameRect.Width, Height: frameRect.Height}.Float()
-	}
-	width := uint32(sourceRect.Width)
-	height := uint32(sourceRect.Height)
-	fits := false
-	if width <= a.ownTextureSize && height <= a.ownTextureSize {
-		packed.region, fits = a.packIntoSpriteAtlas(inventory, reporter, spriteAtlas, descriptor.Label, key.path, width, height)
-	}
-	if fits {
+	width := uint32(frameRect.Width)
+	height := uint32(frameRect.Height)
+	if region, fits := a.packIntoImageAtlas(inventory, reporter, spriteAtlas, descriptor.Label, key.path, width, height); fits {
 		packed.atlas = spriteAtlas
+		packed.region = region
 	} else {
-		// A texture of its own is exactly its size, of no gutter, so an image
-		// as large as a page fills a texture of a page's size, of the page's
-		// mip levels or as many as its size has.
-		packed.region = render.TextureRegion{Width: width, Height: height}
-		packed.ownTexture = inventory.MakeTexture[byte](render.TextureDescriptor{
-			Label:         key.path,
-			Width:         width,
-			Height:        height,
-			LayerCount:    1,
-			MipLevelCount: min(a.mipLevelCount, uint32(bits.Len32(max(width, height)))),
-			Format:        descriptor.Format,
-		}, nil)
+		a.makeOwnTexture(inventory, packed, key.path, width, height, descriptor.Format, nil)
 	}
-	a.packedImages[packedKey] = packed
-	a.packings = append(a.packings, atlasPacking{packed: packed, source: source, frameRect: sourceRect, wrap: key.options.Wrap})
-	return packed, true, true
+	a.packings = append(a.packings, atlasPacking{packed: packed, source: source, frameRect: frameRect, wrap: key.options.Wrap})
+}
+
+// packConverted packs into packed the frame at frameRect of picture, the
+// file of key decoded, converted by key's converter, and answers whether
+// its output holds any texel: into the atlas of its converter and the
+// format it answers for key's colour space, as packIntoImageAtlas packs
+// it, its texels put there with the image's wrap, or into a texture of its
+// own made of them, as makeOwnTexture makes it. Its frame's bounds within
+// the output place it.
+func (a *atlasSet) packConverted(inventory render.Inventory, reporter *reporter, key imageKey, packed *packedImage, picture image.Image, frameRect m.Recti) bool {
+	converter := key.options.Convert
+	format := converter.Format(key.options.ColorSpace)
+	texels, bounds := convertFrame(picture, frameRect, converter, key.options.ColorSpace)
+	if bounds.Empty() {
+		return false
+	}
+	packed.converted = true
+	packed.frameBounds = m.Recti{X: -bounds.Min.X, Y: -bounds.Min.Y, Width: frameRect.Width, Height: frameRect.Height}.Float()
+	width := uint32(bounds.Dx())
+	height := uint32(bounds.Dy())
+	// An image a texture of its own holds makes no atlas.
+	if width <= a.ownTextureSize && height <= a.ownTextureSize {
+		convertedAtlas, label := a.findConvertedAtlas(inventory, converter, format)
+		if region, fits := a.packIntoImageAtlas(inventory, reporter, convertedAtlas, label, key.path, width, height); fits {
+			packed.atlas = convertedAtlas
+			packed.region = region
+			convertedAtlas.Put(region, texels, atlas.Wrap(key.options.Wrap))
+			return true
+		}
+	}
+	a.makeOwnTexture(inventory, packed, key.path, width, height, format, texels)
+	return true
+}
+
+// makeOwnTexture makes packed's texture of its own, of an image at path of
+// width by height texels of format, filled with texels, none leaving it
+// for a pack pass to fill: exactly its size, of no gutter, so an image as
+// large as a page fills a texture of a page's size, of the pages' mip
+// levels or as many as its size has, left for the next command list to
+// generate once filled.
+func (a *atlasSet) makeOwnTexture(inventory render.Inventory, packed *packedImage, path string, width, height uint32, format render.TextureFormat, texels []byte) {
+	packed.region = render.TextureRegion{Width: width, Height: height}
+	packed.ownTexture = inventory.MakeTexture(render.TextureDescriptor{
+		Label:         path,
+		Width:         width,
+		Height:        height,
+		LayerCount:    1,
+		MipLevelCount: min(a.mipLevelCount, uint32(bits.Len32(max(width, height)))),
+		Format:        format,
+	}, texels)
+	if packed.ownTexture != (render.Texture{}) {
+		a.unmippedTextures = append(a.unmippedTextures, packed.ownTexture)
+	}
 }
 
 // decodeConvertedFile answers the file of key, a converted image's, read
@@ -509,22 +575,27 @@ func (a *atlasSet) decodeConvertedFile(files fs.FS, requests *residencyRequestQu
 	return picture
 }
 
-// packIntoSpriteAtlas packs an image of width by height texels, at path,
-// into spriteAtlas, labelled label, and answers where, or false when it
-// does not fit: on the first page holding it; else on a new page, the
-// atlas doubling its pages while under its ceiling; else where the images
-// it evicts leave room, the least lately drawn first, never one drawn this
-// frame. An image whose cell no page holds is not packed, and an atlas at
-// its ceiling with nothing to evict is reported, once for the atlas.
-func (a *atlasSet) packIntoSpriteAtlas(inventory render.Inventory, reporter *reporter, spriteAtlas *atlas.Atlas, label, path string, width, height uint32) (render.TextureRegion, bool) {
-	region, err := a.pack(inventory, spriteAtlas, width, height)
+// packIntoImageAtlas packs an image of width by height texels, at path,
+// into imageAtlas, labelled label, and answers where, or false when it
+// belongs in a texture of its own: on the first page holding it; else on a
+// new page, the atlas doubling its pages while under its ceiling; else
+// where the images it evicts leave room, the least lately drawn first,
+// never one drawn this frame. An image wider or taller than
+// ownTextureSize, and one whose cell no page holds, are not packed, and an
+// atlas at its ceiling with nothing to evict is reported, once for the
+// atlas.
+func (a *atlasSet) packIntoImageAtlas(inventory render.Inventory, reporter *reporter, imageAtlas *atlas.Atlas, label, path string, width, height uint32) (render.TextureRegion, bool) {
+	if width > a.ownTextureSize || height > a.ownTextureSize {
+		return render.TextureRegion{}, false
+	}
+	region, err := a.pack(inventory, imageAtlas, width, height)
 	if !errors.Is(err, atlas.ErrFull) {
 		return region, err == nil
 	}
 	a.evictionCandidates = a.evictionCandidates[:0]
-	for key, packed := range a.packedImages {
-		if packed.atlas == spriteAtlas && packed.lastDrawnFrame != a.drawnFrameCount {
-			a.evictionCandidates = append(a.evictionCandidates, evictionCandidate{key: key, packed: packed})
+	for key, candidate := range a.packedImages {
+		if candidate.atlas == imageAtlas && candidate.lastDrawnFrame != a.drawnFrameCount {
+			a.evictionCandidates = append(a.evictionCandidates, evictionCandidate{key: key, packed: candidate})
 		}
 	}
 	// Those last drawn in one frame go in their paths' order, then their
@@ -534,11 +605,11 @@ func (a *atlasSet) packIntoSpriteAtlas(inventory render.Inventory, reporter *rep
 	})
 	for _, candidate := range a.evictionCandidates {
 		a.dropPackedImage(inventory, candidate.key, candidate.packed)
-		if region, err := a.pack(inventory, spriteAtlas, width, height); err == nil {
+		if region, err := a.pack(inventory, imageAtlas, width, height); err == nil {
 			return region, true
 		}
 	}
-	fullReport := Report{Kind: ReportKindAtlasFull, Err: fmt.Errorf("canvas: the sprite atlas %q is full at its ceiling of %d pages, with nothing to evict that was not drawn this frame, so image %q is drawn from a texture of its own", label, spriteAtlas.PageCount(), path)}
+	fullReport := Report{Kind: ReportKindAtlasFull, Err: fmt.Errorf("canvas: the sprite atlas %q is full at its ceiling of %d pages, with nothing to evict that was not drawn this frame, so image %q is drawn from a texture of its own", label, imageAtlas.PageCount(), path)}
 	reporter.reportOnce(atlasFullLogKey+label, fullReport)
 	return render.TextureRegion{}, false
 }
@@ -546,25 +617,25 @@ func (a *atlasSet) packIntoSpriteAtlas(inventory render.Inventory, reporter *rep
 // recordUploads records into list what puts the frame's images and glyphs
 // where they are placed, before any pass reads them: first each atlas's
 // copies, the pages of a growth and the texels put; then the cells of the
-// images packed, each image's source drawn premultiplied into its cell
-// from its quad in a temporary buffer of their own, its edge continued
-// into the gutter, a pass for each run of cells on one page, a draw for
-// each cell, an image's own texture's mips generated after its pass; then
-// each atlas's mips of the pages packed into. It then releases the
+// plain images packed, each image's source drawn premultiplied into its
+// cell from its quad in a temporary buffer of their own, its edge
+// continued into the gutter, a pass for each run of cells on one page, a
+// draw for each cell; then the mips of each image's own texture, filled;
+// then each atlas's mips of the pages packed into. It then releases the
 // sources, which the frame's draws still read, and forgets the packings. A
 // cell of a texture render could not make is not drawn. With nothing to
 // upload, it records nothing.
 func (a *atlasSet) recordUploads(list *render.CommandList, inventory render.Inventory) {
-	for _, madeAtlas := range a.atlases() {
-		if madeAtlas != nil {
-			madeAtlas.RecordCopies(list, inventory)
-		}
+	for _, madeAtlas := range a.madeAtlases {
+		madeAtlas.RecordCopies(list, inventory)
 	}
 	a.fillPackings(list)
-	for _, madeAtlas := range a.atlases() {
-		if madeAtlas != nil {
-			madeAtlas.RecordMips(list)
-		}
+	for _, texture := range a.unmippedTextures {
+		list.GenerateMips(texture, 0, 1)
+	}
+	a.unmippedTextures = a.unmippedTextures[:0]
+	for _, madeAtlas := range a.madeAtlases {
+		madeAtlas.RecordMips(list)
 	}
 	a.releasePackings(inventory)
 }
@@ -597,9 +668,6 @@ func (a *atlasSet) fillPackings(list *render.CommandList) {
 				drawInstances(&pass, a.packMaterial, instances, uint32(index), 1, render.TextureView{Texture: packing.source}, render.TextureView{}, FilterNearest, WrapNone)
 			}
 			pass.End()
-			if firstPacked.atlas == nil {
-				list.GenerateMips(target, 0, 1)
-			}
 		}
 		runStart = runEnd
 	}
@@ -622,11 +690,12 @@ func (a *atlasSet) releasePackings(inventory render.Inventory) {
 // atlas's white texel put again, and each frame and glyph packed left
 // unpacked, a cell still to fill forgotten, so each packs again at its next
 // draw; an image's own texture is released, as is each pending packing's
-// source. A frame drawing nothing, outside its file or converted to no
-// texel, and an image of a render texture, whose maker fills it again, are
-// kept.
+// source, its mips still to generate forgotten. A frame drawing nothing,
+// outside its file or converted to no texel, and an image of a render
+// texture, whose maker fills it again, are kept.
 func (a *atlasSet) startAfresh(inventory render.Inventory) {
 	a.releasePackings(inventory)
+	a.unmippedTextures = a.unmippedTextures[:0]
 	for _, packed := range a.packedImages {
 		packed.free(inventory)
 	}
@@ -639,10 +708,8 @@ func (a *atlasSet) startAfresh(inventory render.Inventory) {
 		}
 	}
 	clear(a.drawnGlyphs)
-	for _, madeAtlas := range a.atlases() {
-		if madeAtlas != nil {
-			madeAtlas.Empty(inventory)
-		}
+	for _, madeAtlas := range a.madeAtlases {
+		madeAtlas.Empty(inventory)
 	}
 	if a.srgbAtlas != nil {
 		a.packWhiteTexel(inventory)
@@ -650,11 +717,13 @@ func (a *atlasSet) startAfresh(inventory render.Inventory) {
 }
 
 // dropPackedImage forgets packed, the frame of key packed: freed from its
-// atlas, or its own texture released through inventory; a cell still to
-// fill forgotten, its source released; and each frame drawn of it left
-// unpacked, so its next draw packs it again.
+// atlas, or its own texture released through inventory, its mips still to
+// generate forgotten; a cell still to fill forgotten, its source released;
+// and each frame drawn of it left unpacked, so its next draw packs it
+// again.
 func (a *atlasSet) dropPackedImage(inventory render.Inventory, key packedKey, packed *packedImage) {
 	delete(a.packedImages, key)
+	a.unmippedTextures = slices.DeleteFunc(a.unmippedTextures, func(texture render.Texture) bool { return texture == packed.ownTexture })
 	packed.free(inventory)
 	for index, packing := range a.packings {
 		if packing.packed == packed {
@@ -678,6 +747,15 @@ func (a *atlasSet) dropPackedImage(inventory render.Inventory, key packedKey, pa
 type imageFrame struct {
 	image Image
 	frame uint32
+}
+
+// convertedAtlas is the atlas of the images a converter converts into
+// texels of a format, and its label.
+type convertedAtlas struct {
+	converter Converter
+	format    render.TextureFormat
+	atlas     *atlas.Atlas
+	label     string
 }
 
 // evictionCandidate is a frame packed that a full atlas may evict: its key,

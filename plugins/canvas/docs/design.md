@@ -358,7 +358,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - It is measured in the image's own space, x right and y down as its rows run, so it does not wait on the camera's axis.
   - A sheet has one, measured within each frame. Per-frame pivots come with sidecar formats, later.
 - **No entry has an origin of its own.** An entry turning about another point composes a translation into its transform.
-- **A converter's output bounds place it.** Size and pivot are measured on the converter's input. The region drawn is its output, at its bounds within the input, as Go's `image.Image` carries them: a `SubImage` keeps its coordinates, and a grown image's `Bounds().Min` is negative.
+- **A converter's output bounds place it.** Size and pivot are measured on the converter's input. The region drawn is its output, at the bounds `Convert` answers within the input: a trim's keep the frame's coordinates, and a grown image's begin above and left of 0, 0.
   - A trimmed sprite stays where it was.
   - A halo entry over `ImageFromFile(path, ImageOptions{Convert: DistanceField{Spread: 8}})`, given the sprite entry's transform and size, lines up at any pivot and size, its field reaching 8 texels beyond the art. Without the rule it would line up only with a centred pivot at the natural size.
   - A sheet's converter runs on each frame apart, measured on it, so a distance field never reads a neighbour's edges.
@@ -426,9 +426,9 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 **Atlases and pages**
 
 - **An atlas holds one format.**
-  - canvas keeps a sprite atlas for each colour space a load asks for, sRGB by default, each made the first time it is needed.
+  - canvas keeps a plain sprite atlas for each colour space a load asks for, sRGB by default, each made the first time it is needed.
+  - It keeps an atlas for each converter and the format it answers, so equal converters' images share one (see *Converters*).
   - Glyphs have an atlas of their own (see *Text: glyphs*).
-  - Distance fields share the sprite atlas, since alpha stays linear in an sRGB format.
 - **The white texel** that shapes draw over is reserved in the sprite atlas when it is made, and never released, so shapes batch with sprites. v1 did the same.
 - **An atlas is one 2D-array texture, and each layer is a page.** A region's page travels in its instance data, so entries on any page of one atlas share one binding and batch. Only a change of atlas breaks a batch.
 - **Growing:** a full atlas doubles its layer count. canvas makes a new array and copies the old layers into it on the GPU, so an atlas is always one texture. The copy is of every mip level of each old layer, so pages packed before the growth keep their mips. An atlas growing again before its copy is recorded copies its old layers once, into its last array. The page side and the ceiling on layers are `Config` fields. Under WebGPU's defaults (8192², 256 layers) memory bounds a page first: one RGBA8 layer at 8192² is 256 MiB.
@@ -447,10 +447,25 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - canvas fills its padded cell with one draw, premultiplying it, so filtering a cut-out edge never darkens it. The fill clamps or wraps the coordinate per axis, so the same draw writes the gutter. Each page packed into that frame is one pass, a draw for each cell, recorded at the start of the frame's lowest camera order's command list, before any camera's pass, so every camera sampling the atlas draws after it. A frame drawing nothing keeps its packings for the next that draws.
   - The source is released afterwards.
   - **Packing waits for the drawing job.** A batch key names its atlas, known only once its image is packed, so the drawing job finds each entry's batch key as it packs the frame's new images, and regroups the sorted entries by them; the sort task sorts by key alone.
-- **Converters:** `ImageOptions.Convert` is a `Converter`, an interface with `Convert(image.Image) image.Image`, implemented by comparable values.
+- **Converters:** `ImageOptions.Convert` is a `Converter`, implemented by comparable values. ([canvas: an atlas per converter and the format it answers](https://github.com/dvoyni/cog/issues/935))
+
+```go
+type Converter interface {
+	// Format answers the format of the atlas its output is packed into, for an image of space.
+	Format(space ColorSpace) render.TextureFormat
+	// Convert answers frame converted: texels in that format, row by row with no padding,
+	// colour premultiplied, and their bounds within the frame.
+	Convert(frame *image.NRGBA, space ColorSpace) (texels []byte, bounds image.Rectangle)
+}
+```
+
+  - **canvas keeps an atlas for each converter,** by value, with the format it answers, made at the first image it converts. So images converted by equal converters share one atlas and batch together, and `DistanceField{Spread: 8}` and `{Spread: 16}` draw from two. One atlas per converter type, with per-image parameters, and an atlas an image names, through an `ImageOptions.Atlas` and a `MakeAtlas`, were weighed.
+  - **A trim answers its image's colour space's RGBA8 format,** the plain atlas's, so its sprites batch apart from plain sprites and from shapes, whose white texel is in the plain sRGB atlas.
+  - **`Convert` is given the colour space,** since premultiplying an sRGB texel takes decoding it, multiplying it by its alpha and encoding it again, as canvas's fill of a plain image does on the GPU. `libs/m` does it: `m.NewColorSrgb8(r, g, b, a).Premultiply().Srgb8()`. The decision first gave only `Format` the space, which left a converter of an sRGB atlas premultiplying in the encoded bytes, darkening a translucent edge.
+  - **It answers bytes, not Go's image types,** so the atlas package takes them as they are and stays self-contained, and a format such as R8 needs no image type of its own.
   - `canvas.DistanceField{Spread}` bakes a distance field (see *Distance fields and profiles*), so the SDF pipeline runs through the general one.
   - Equal converters share an image: a converted cell is keyed by its file's rectangle, its converter and its wrap. One that is not comparable is refused at `ImageFromFile`, which drops it, since interning compares it, and is reported once at the image's first draw, as a second set of options is. Its image is drawn unconverted. So is a render texture's image given a converter, whose texels are never on the CPU, dropped by `ImageFromTexture` the same way.
-  - A converted image is read through platform's FS, decoded and converted on the CPU in the job that first asks for it, as render compiles a shader in its caller's job: the drawing job, or `Assets.Preload`'s, which holds the decoded file until the image is packed. The drawing job decodes a file once for the frames and rectangles it packs of it. The output is then made into a texture with `MakeTexture` and packed like any other.
+  - A converted image is read through platform's FS, decoded and converted on the CPU in the job that first asks for it, as render compiles a shader in its caller's job: the drawing job, or `Assets.Preload`'s, which holds the decoded file until the image is packed. The drawing job decodes a file once for the frames and rectangles it packs of it. The output is then put into its cell of its converter's atlas with the atlas package's `Put`, its gutter wrapped or its edge continued as a plain image's is, and copied by the atlas's next `RecordCopies`, with no GPU fill. An output too large for a page, or one its atlas at its ceiling has nothing to evict for, is made a texture of its own with `MakeTexture` from its texels, its mips generated before any camera's pass.
   - Each frame is converted apart, its bounds beginning at 0, 0, as its own image, so a converter never reads a neighbour.
   - A file canvas cannot read or decode loads through render instead, unconverted, so render draws its magenta and reports it, as for any image. A report of canvas's own was weighed: it would copy render's failure handling, its magenta and its forgetting at unload. An output of no texel draws nothing.
   - A converted cell's frame is placed by its bounds within the cell, zero for a cell holding its frame, so only a converted image carries them.
@@ -504,14 +519,14 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 
 ([canvas: the atlas set, owning where every image frame and glyph lies](https://github.com/dvoyni/cog/issues/934))
 
-- **`atlasSet` is where canvas keeps what its entries draw from,** private and the drawing job's alone: the plain atlas of each colour space and the glyph atlas, each image's drawn frames (packed, of a render texture drawn through a view, or found to draw nothing), images' own textures, the glyphs packed, and the frame count eviction reads. Mesh files stay the renderer's.
+- **`atlasSet` is where canvas keeps what its entries draw from,** private and the drawing job's alone: the plain atlas of each colour space, the atlas of each converter and the format it answers, and the glyph atlas, each image's drawn frames (packed, of a render texture drawn through a view, or found to draw nothing), images' own textures, the glyphs packed, and the frame count eviction reads. Mesh files stay the renderer's.
 - **The renderer's frame is five steps:**
   1. `beginFrame`;
   2. `unload` for each path the residency requests give up, which the request queue hands over through a method of its own, beside the mesh files' unload;
   3. `find` for each entry's frames and `findGlyphs` for a run of text's glyphs, marking each drawn and noting what they miss, the entry keyed while nothing has missed;
   4. `placeMissed`, which packs only what was missed, so packing evicts nothing the frame draws, and answers whether growing an atlas replaced its texture, every entry then keyed again, and the rest keyed once placed;
-  5. `recordUploads`, in the lowest order's command list before any pass: each atlas's `RecordCopies`, then the GPU fills of plain images from a temporary buffer of their own, then each atlas's `RecordMips`.
-- **Batching and text read what the set placed,** never its tables: a drawn frame answers `inPlainAtlas()`, which a run of text's icons need, and `wrapsBySampler()`, which the batch key needs.
+  5. `recordUploads`, in the lowest order's command list before any pass: each atlas's `RecordCopies`, then the GPU fills of plain images from a temporary buffer of their own, then the mips of images' own textures, plain or converted, then each atlas's `RecordMips`.
+- **Batching and text read what the set placed,** never its tables: a drawn frame answers `inPlainAtlas()`, which a run of text's icons need, a converter's atlas not among them, and `wrapsBySampler()`, which the batch key needs, false for an image in any atlas, whose gutter wraps it.
 - **Its tests run in rendertest's harness,** a test plugin's task making and calling atlases on the recording adapter, as a user's plugin would. What a put copies is read through the test's export of the bytes it staged, since the recording adapter's textures hold no texels.
 
 ### Shapes
@@ -598,8 +613,9 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - A halo is two entries: the SDF material over the sprite's baked distance field, then the default material over the sprite.
   - Keeping halos behind overlapping images is the user's choice of layer and order.
   - The baked field holds its spread in its own pixels, so it is simply a larger sprite, and nothing has to grow a quad.
-- **`DistanceField{Spread}` bakes a single-channel distance field** from an image's alpha, on the CPU, writing the distance into alpha. It runs as a converter at the image's first use. A small command bakes fields at build time, optionally, for shipping them pre-baked.
-  - Its texels are white, their alpha ½ on the art's edge, where the alpha crosses ½, falling to 0 `Spread` texels outside and rising to 1 `Spread` texels inside, `Spread` zero meaning 8. Its output is the frame grown by `Spread` on each side.
+- **`DistanceField{Spread}` bakes a single-channel distance field** from an image's alpha, on the CPU, writing the distance into alpha. It runs as a converter at the image's first use, answering its colour space's RGBA8 format, so the fields of one spread share an atlas. A small command bakes fields at build time, optionally, for shipping them pre-baked.
+  - Its texels are white, premultiplied as its format encodes them, their alpha ½ on the art's edge, where the alpha crosses ½, falling to 0 `Spread` texels outside and rising to 1 `Spread` texels inside, `Spread` zero meaning 8. Its output is the frame grown by `Spread` on each side.
+  - An R8 field would hold a quarter of the bytes, kept in [Improvement plans, by plugin](https://github.com/dvoyni/cog/issues/872): the SDF material would then have to tell a converted image's field, in red, from a plain image's or a pre-baked one's, in alpha.
   - **The distance transform is Gustavson and Strand's anti-aliased one, seeded by dead reckoning.** Each texel wholly outside the art measures to the part of the edge its nearest seed holds, a seed being a texel the art covers at all, and inside the same towards the texels not wholly covered. A seed's edge is its square when wholly covered, or the straight edge its coverage places across its coverage's gradient, clipped to the texel. A texel the edge crosses measures along its own gradient.
   - Seeds spread by sweeps down and up the grid, each texel taking a neighbour's seed where its edge lies nearer, until none does. Starting from the seeds nearest by their centres was tried: a nearly covered texel can be nearer by its centre than one barely covered whose edge lies closer, and the error spread outwards, 0.9 of a texel at an anti-aliased disc's edge. Measured to the edge's segment, a hard-edged rectangle's field is exact, and an anti-aliased disc's within one 255th of its alpha.
 - **A field made from pixels can only be single-channel;** MSDF needs vector outlines. MTSDF glyphs, should they come, keep their true distance in alpha too, so one SDF material reads `.a` from both.

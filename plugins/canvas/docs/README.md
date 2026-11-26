@@ -77,7 +77,7 @@ texture a camera draws into.
 | `Triangles[V]`, `DrawTrianglesOptions`, `Vertex` | A mesh given for one frame, how it is drawn, and canvas's standard vertex. |
 | `Camera`, `LayerRange`, `Fit` | A view of the frame's entries into a window or a texture, set for one frame. |
 | `Image`, `ImageOptions`, `MeshFile` | Pointer-free names of an image and a mesh file, from `ImageFromFile`, `ImageFromTexture` and `MeshFileFromFile`. |
-| `Converter`, `DistanceField` | A conversion of an image's texels on the CPU before it is packed, and the one baking a distance field. |
+| `Converter`, `DistanceField` | A conversion of an image's texels on the CPU before it is packed, into the format it names, the atlas canvas keeps for it shared by equal converters' images; and the one baking a distance field. |
 | `Material`, `MaterialDescriptor`, `ArgumentType` | A 2D material, what it is made of, and the type of the argument each entry gives it. |
 | `Profile` | A band of the distance from an entry's edge: an outline, a halo, a glow or a drop shadow. |
 | `FontSet`, `FontSetDescriptor`, `Font` | A set of fonts serving languages, named by text, never a font. |
@@ -629,42 +629,74 @@ apart, since their gutters differ.
 An image's `Convert`, a `Converter`, converts each of its frames on the CPU
 before it is packed: a trim, a palette swap, or `DistanceField`'s bake.
 canvas reads and decodes the file itself in the job that first draws the
-frame, or in `Preload`'s. A converter is a comparable value, a plain struct,
-so images of equal converters share their texels:
+frame, or in `Preload`'s. A converter names the format its output is in,
+for the image's colour space, and canvas keeps an atlas for each converter
+and format. A converter is a comparable value, a plain struct, so images of
+equal converters share their atlas and their texels, and batch together,
+while those of a converter of other values draw from an atlas of their own.
+
+`Convert` is given the frame's texels, straight alpha as its file holds
+them, and answers its output's texels in that format, row by row with no
+padding, premultiplied in linear: an sRGB texel is decoded, multiplied by
+its alpha and encoded again, as `libs/m` does.
 
 ```go
 // swapPalette is a Converter recolouring a unit's team colour, pure
-// magenta in its art, into its team's.
+// magenta in its art, into its team's. Its output is RGBA8, as a plain
+// sprite's, so its atlas holds it as the plain atlas would.
 type swapPalette struct {
 	team color.NRGBA
 }
 
-func (s swapPalette) Convert(frame image.Image) image.Image {
-	bounds := frame.Bounds()
-	swapped := image.NewNRGBA(bounds)
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			texel := color.NRGBAModel.Convert(frame.At(x, y)).(color.NRGBA)
+func (s swapPalette) Format(space canvas.ColorSpace) render.TextureFormat {
+	if space == canvas.ColorSpaceLinear {
+		return render.TextureFormatRGBA8Unorm
+	}
+	return render.TextureFormatRGBA8UnormSrgb
+}
+
+func (s swapPalette) Convert(frame *image.NRGBA, space canvas.ColorSpace) ([]byte, image.Rectangle) {
+	texels := make([]byte, 0, len(frame.Pix))
+	for y := frame.Rect.Min.Y; y < frame.Rect.Max.Y; y++ {
+		for x := frame.Rect.Min.X; x < frame.Rect.Max.X; x++ {
+			texel := frame.NRGBAAt(x, y)
 			if texel.R == 255 && texel.G == 0 && texel.B == 255 {
 				texel.R = s.team.R
 				texel.G = s.team.G
 				texel.B = s.team.B
 			}
-			swapped.SetNRGBA(x, y, texel)
+			var red, green, blue, alpha uint8
+			if space == canvas.ColorSpaceLinear {
+				red = premultiply(texel.R, texel.A)
+				green = premultiply(texel.G, texel.A)
+				blue = premultiply(texel.B, texel.A)
+				alpha = texel.A
+			} else {
+				red, green, blue, alpha = m.NewColorSrgb8(texel.R, texel.G, texel.B, texel.A).Premultiply().Srgb8()
+			}
+			texels = append(texels, red, green, blue, alpha)
 		}
 	}
-	return swapped
+	return texels, frame.Rect
+}
+
+// premultiply answers a linear channel multiplied by alpha, rounded.
+func premultiply(channel, alpha uint8) uint8 {
+	return uint8((uint16(channel)*uint16(alpha) + 127) / 255)
 }
 
 var redKnight = canvas.ImageFromFile("units/knight.png", canvas.ImageOptions{Pivot: canvas.PivotBottom, Convert: swapPalette{team: color.NRGBA{R: 200, A: 255}}})
 ```
 
 The output's bounds place it within the frame, while the image's size and
-pivot measure the frame, so a trimmed sprite, a `SubImage`, stays where it
-was.
+pivot measure the frame, so a trimmed sprite, whose bounds are those of its
+art within the frame, stays where it was. A trim answers its colour space's
+RGBA8 format, so its sprites batch apart from plain sprites and shapes.
 
-`DistanceField{Spread}` bakes an image's alpha into a distance field, its
-output the frame grown by `Spread` on each side, so drawn with the sprite's
+`DistanceField{Spread}` bakes an image's alpha into a distance field, white
+premultiplied in its colour space's RGBA8 format, so the fields of one
+`Spread` share an atlas and those of another draw from their own. Its
+output is the frame grown by `Spread` on each side, so drawn with the sprite's
 transform and size it lines up with the sprite. `SDFMaterial` draws a field
 through a `Profile`, its argument: `Outline(width, color)`, `Halo(plateau,
 reach, color)`, `Glow(reach, color)`, which adds, or `DropShadow(offset,

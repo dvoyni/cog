@@ -102,7 +102,10 @@
 //
 // An image's Convert converts each of its frames on the CPU before it is
 // packed, canvas reading and decoding its file itself in the job that first
-// draws it. The output's bounds place it within the frame, while the
+// draws it, into texels of the format the Converter names, packed into the
+// atlas canvas keeps for that converter and format, so the images of equal
+// converters share an atlas and batch together. The output's bounds place
+// it within the frame, while the
 // image's size and pivot measure the frame, so a trimmed sprite stays where
 // it was, and a DistanceField of a sprite, drawn with the sprite's
 // transform and size, lines up with it, its field reaching Spread texels
