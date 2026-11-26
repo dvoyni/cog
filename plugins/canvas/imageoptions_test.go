@@ -87,7 +87,7 @@ func TestASheetsFramesAndAFilesRectanglesDrawTheirOwnTexelsAndNeverBleed(t *test
 	// left, show each is its rectangle's size, 4 texels, not the file's.
 	files := makeQuadrantsFiles(t)
 	addSheetsFiles(t, files)
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.CommandList) {
 		for index, sprite := range sheetsSprites {
 			x := float32(-130 + 30*index)
 			list.DrawSprite(canvas.Sprite{Image: sprite.image, Frame: sprite.frame, Transform: m.Translation2x3(x, -80), Size: m.Vec2{X: 20, Y: 20}})
@@ -131,7 +131,7 @@ func TestAFilesFramesAndRectanglesArePackedApartFromOneDecodeOfIt(t *testing.T) 
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, nil, &fileMounter{files: files})
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		for order, sprite := range sheetsSprites {
 			list.DrawSprite(canvas.Sprite{Image: sprite.image, Frame: sprite.frame, Order: int32(order)})
 		}
@@ -193,7 +193,7 @@ func TestAWrappingImagesGutterHoldsItsOppositeEdgeAlongTheAxesItWraps(t *testing
 		{"the tile wrapping along both", canvas.WrapBoth, true, true},
 	}
 	wrappedFrame := canvas.ImageFromFile(sheetsPath, canvas.ImageOptions{Sheet: canvas.Grid{Columns: 2, Rows: 2}, SourceRect: m.Recti{Width: 8, Height: 8}, Wrap: canvas.WrapBoth})
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.CommandList) {
 		for index, tile := range tiles {
 			image := canvas.ImageFromFile(tilePath, canvas.ImageOptions{Wrap: tile.wrap})
 			list.DrawSprite(canvas.Sprite{Image: image, Transform: m.Translation2x3(float32(-120+50*index), 0), Size: m.Vec2{X: 40, Y: 40}})
@@ -247,7 +247,7 @@ func TestAFramePastItsSheetsLastOrARectanglePastItsFileDrawsNothingReportedOnceA
 	h.Spawn(nil, nil, &fileMounter{files: files}, tool)
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	h.ExpectReport(canvas.ReportKindFrameOutOfBounds)
-	record := func(list canvas.DrawList) {
+	record := func(list canvas.CommandList) {
 		list.DrawSprite(canvas.Sprite{Image: sheetsSheet, Frame: 4})
 		list.DrawSprite(canvas.Sprite{Image: sheetsSheet, Frame: 0, Order: 1})
 		list.DrawSprite(canvas.Sprite{Image: sheetsSheet, Frame: 9, Order: 2})

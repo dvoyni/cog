@@ -94,21 +94,21 @@ func appendBatches(batches []batch, instances *listInstanceData, entries []sorte
 			lastBatch.key.filter = entryKey.filter
 		}
 		lastBatch.entries = lastBatch.entries[:len(lastBatch.entries)+1]
-		recorded := state.entries[entry.entryIndex]
+		recorded := state.frameCommandList.entries[entry.entryIndex]
 		entryStart := len(instances.fixed)
 		switch recorded.kind {
 		case EntryKindShape:
-			instances.fixed = appendShapeInstances(instances.fixed, &state.shapes[recorded.index], atlases.placed(Image{}, 0))
+			instances.fixed = appendShapeInstances(instances.fixed, &state.frameCommandList.shapes[recorded.index], atlases.placed(Image{}, 0))
 		case EntryKindSprite:
-			sprite := &state.sprites[recorded.index]
+			sprite := &state.frameCommandList.sprites[recorded.index]
 			instances.fixed = appendSpriteInstance(instances.fixed, sprite, atlases.placed(sprite.Image, sprite.Frame))
 		case EntryKindText:
-			instances.fixed = state.texts[recorded.index].appendInstances(instances.fixed, atlases)
+			instances.fixed = state.frameCommandList.texts[recorded.index].appendInstances(instances.fixed, atlases)
 		case EntryKindTriangles:
-			triangles := &state.triangles[recorded.index]
+			triangles := &state.frameCommandList.triangles[recorded.index]
 			instances.fixed = appendMeshInstance(instances.fixed, triangles.options.Tint, triangles.options.Transform, atlases.placed(triangles.options.Image, triangles.options.Frame))
 		case EntryKindMesh:
-			mesh := &state.meshes[recorded.index]
+			mesh := &state.frameCommandList.meshes[recorded.index]
 			instances.fixed = appendMeshInstance(instances.fixed, mesh.Tint, mesh.Transform, atlases.placed(mesh.Image, mesh.Frame))
 		}
 		lastBatch.instanceCount += uint32(len(instances.fixed) - entryStart)

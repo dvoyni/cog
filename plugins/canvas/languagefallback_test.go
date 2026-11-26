@@ -20,7 +20,7 @@ const chineseFontPath = "notosanssc.ttf"
 // is set and whose current language is language, testdata/fonts mounted,
 // in a subtest of t named name, whose kernel quits before another starts,
 // and answers the picture.
-func captureFontDrawing(t *testing.T, name string, set canvas.FontSetDescriptor, language string, record func(list canvas.DrawList)) windowPicture {
+func captureFontDrawing(t *testing.T, name string, set canvas.FontSetDescriptor, language string, record func(list canvas.CommandList)) windowPicture {
 	t.Helper()
 	var picture windowPicture
 	t.Run(name, func(t *testing.T) {
@@ -66,15 +66,15 @@ func TestARunInJapaneseAndOneInChineseDrawThroughEachLanguagesFontFromOneSet(t *
 	both := captureFontDrawing(t, "both languages", canvas.FontSetDescriptor{Languages: []canvas.LanguageFonts{
 		{Languages: []string{"ja"}, Fonts: []canvas.Font{{Path: japaneseFontPath}}},
 		{Languages: []string{"zh-Hans"}, Fonts: []canvas.Font{{Path: chineseFontPath}}},
-	}}, "ja", func(list canvas.DrawList) {
+	}}, "ja", func(list canvas.CommandList) {
 		list.DrawText(left)
 		list.DrawText(right)
 	})
-	japanese := captureFontDrawing(t, "Noto Sans JP alone", canvas.FontSetDescriptor{Default: canvas.Font{Path: japaneseFontPath}}, "", func(list canvas.DrawList) {
+	japanese := captureFontDrawing(t, "Noto Sans JP alone", canvas.FontSetDescriptor{Default: canvas.Font{Path: japaneseFontPath}}, "", func(list canvas.CommandList) {
 		list.DrawText(left)
 	})
 	right.Language = ""
-	chinese := captureFontDrawing(t, "Noto Sans SC alone", canvas.FontSetDescriptor{Default: canvas.Font{Path: chineseFontPath}}, "", func(list canvas.DrawList) {
+	chinese := captureFontDrawing(t, "Noto Sans SC alone", canvas.FontSetDescriptor{Default: canvas.Font{Path: chineseFontPath}}, "", func(list canvas.CommandList) {
 		list.DrawText(right)
 	})
 
@@ -118,7 +118,7 @@ func TestACharacterNoFontOfTheSetHasDrawsTheDefaultFontsMissingGlyphBoxReportedO
 	// set is reported once.
 	h := canvastest.NewHarness(t)
 	h.ExpectReport(canvas.ReportKindCharacterMissing)
-	picture := captureHarnessDrawing(t, h, nil, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, h, nil, func(list canvas.CommandList) {
 		list.DrawText(canvas.Text{String: "한", Size: 40, Transform: m.Translation2x3(-40, 0)})
 		list.DrawText(canvas.Text{String: "글", Size: 40, Transform: m.Translation2x3(40, 0)})
 	})

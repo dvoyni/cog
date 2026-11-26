@@ -25,7 +25,7 @@ func TestAMinimapCamerasTextureDrawnAsASpriteShowsTheWorldAsDrawnDirectly(t *tes
 	// it does drawn directly only once decoded as it is sampled.
 	recorder := &textureRecorder{
 		made: []madeTexture{{descriptor: minimapDescriptor}},
-		record: func(list canvas.DrawList, _ canvas.Assets, textures []render.Texture) {
+		record: func(list canvas.CommandList, _ canvas.Assets, textures []render.Texture) {
 			minimap := textures[0]
 			list.SetCamera(canvas.Camera{Texture: minimap, Layers: canvas.MakeLayer(0), Clear: true})
 			list.SetCamera(canvas.Camera{Clear: true, ClearColor: m.Color{A: 1}})
@@ -37,7 +37,7 @@ func TestAMinimapCamerasTextureDrawnAsASpriteShowsTheWorldAsDrawnDirectly(t *tes
 		},
 	}
 
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(canvas.DrawList) {}, recorder)
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(canvas.CommandList) {}, recorder)
 
 	picture.expect(t, []probe{
 		{"the world's green, drawn directly", m.Vec2{X: -4}, greenShown},
@@ -65,7 +65,7 @@ func TestAnImageOfATextureMarkedSrgbIsDecodedAsSampledWhereItsFormatEncodesNothi
 			{descriptor: render.TextureDescriptor{Label: "unorm", Width: 1, Height: 1, Format: render.TextureFormatRGBA8Unorm}, texels: greenTexel},
 			{descriptor: render.TextureDescriptor{Label: "srgb", Width: 1, Height: 1, Format: render.TextureFormatRGBA8UnormSrgb}, texels: greenTexel},
 		},
-		record: func(list canvas.DrawList, _ canvas.Assets, textures []render.Texture) {
+		record: func(list canvas.CommandList, _ canvas.Assets, textures []render.Texture) {
 			for index, texture := range textures {
 				for column, colorSpace := range []canvas.ColorSpace{canvas.ColorSpaceSrgb, canvas.ColorSpaceLinear} {
 					x := float32(-60 + 40*(2*index+column))
@@ -75,7 +75,7 @@ func TestAnImageOfATextureMarkedSrgbIsDecodedAsSampledWhereItsFormatEncodesNothi
 		},
 	}
 
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(canvas.DrawList) {}, recorder)
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(canvas.CommandList) {}, recorder)
 
 	picture.expect(t, []probe{
 		{"the Unorm texture marked sRGB", m.Vec2{X: -60}, greenShown},
@@ -89,7 +89,7 @@ func TestAnImageOfATextureDrawsItsFirstLevelAndLayerThroughAViewInABatchOfItsOwn
 	h := canvastest.NewHarness(t)
 	recorder := &textureRecorder{
 		made: []madeTexture{{descriptor: render.TextureDescriptor{Label: "layered", Width: 8, Height: 4, LayerCount: 2, MipLevelCount: 3, Format: render.TextureFormatRGBA8Unorm}}},
-		record: func(list canvas.DrawList, _ canvas.Assets, textures []render.Texture) {
+		record: func(list canvas.CommandList, _ canvas.Assets, textures []render.Texture) {
 			image := canvas.ImageFromTexture(textures[0])
 			list.DrawShape(canvas.Shape{Rect: m.Rect{Width: 4, Height: 4}})
 			list.DrawSprite(canvas.Sprite{Image: image, Order: 1})
@@ -122,7 +122,7 @@ func TestAnImageOfATextureRenderDoesNotHoldOrOfAFramePastItDrawsNothingReportedO
 	h := canvastest.NewHarness(t)
 	recorder := &textureRecorder{
 		made: []madeTexture{{descriptor: minimapDescriptor}},
-		record: func(list canvas.DrawList, _ canvas.Assets, textures []render.Texture) {
+		record: func(list canvas.CommandList, _ canvas.Assets, textures []render.Texture) {
 			list.DrawSprite(canvas.Sprite{Image: canvas.ImageFromTexture(render.Texture{})})
 			list.DrawSprite(canvas.Sprite{Image: canvas.ImageFromTexture(textures[0], canvas.ImageOptions{Sheet: canvas.Grid{Columns: 2}}), Frame: 2})
 		},
@@ -158,7 +158,7 @@ func TestImageSizeAnswersATexturesSizeOrItsFramesAndFalseForOneRenderDoesNotHold
 	var answers []sizeAnswer
 	recorder := &textureRecorder{
 		made: []madeTexture{{descriptor: render.TextureDescriptor{Label: "minimap", Width: 16, Height: 8, Format: render.TextureFormatRGBA8Unorm}}},
-		record: func(_ canvas.DrawList, assets canvas.Assets, textures []render.Texture) {
+		record: func(_ canvas.CommandList, assets canvas.Assets, textures []render.Texture) {
 			mutex.Lock()
 			defer mutex.Unlock()
 			for _, image := range []canvas.Image{
@@ -189,7 +189,7 @@ func TestPreloadingAnImageOfATextureLoadsNothing(t *testing.T) {
 	h := canvastest.NewHarness(t)
 	recorder := &textureRecorder{
 		made: []madeTexture{{descriptor: minimapDescriptor}},
-		record: func(_ canvas.DrawList, assets canvas.Assets, textures []render.Texture) {
+		record: func(_ canvas.CommandList, assets canvas.Assets, textures []render.Texture) {
 			assets.Preload(canvas.ImageFromTexture(textures[0]))
 		},
 	}

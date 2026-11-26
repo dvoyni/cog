@@ -36,6 +36,6 @@ func (s placedSprite) findFramePoint(frameSize m.Vec2, x, y int) m.Vec2 {
 }
 
 // draw records s into list, its frame's texels read at their nearest.
-func (s placedSprite) draw(list canvas.DrawList) {
+func (s placedSprite) draw(list canvas.CommandList) {
 	list.DrawSprite(canvas.Sprite{Image: s.image, Frame: s.frame, Transform: s.transform, Size: s.size, Filter: canvas.FilterNearest})
 }

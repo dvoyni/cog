@@ -30,7 +30,7 @@ func drawGlyphFrames(t *testing.T, config *canvas.Config, expectedReports []canv
 	h.Spawn(nil, config)
 	h.OpenWindow(platform.Size{Width: 320, Height: 240})
 	for _, drawnString := range drawnStrings {
-		h.Record(func(list canvas.DrawList) {
+		h.Record(func(list canvas.CommandList) {
 			list.DrawText(canvas.Text{String: drawnString})
 		})
 		h.Step()
@@ -138,7 +138,7 @@ func TestABitmapGlyphPackedIntoAnEvictedGlyphsCellDrawsAsInAnEmptyAtlas(t *testi
 	// Each harness's window closes as its test ends.
 	var reference windowPicture
 	t.Run("in an empty atlas", func(t *testing.T) {
-		reference = captureHarnessDrawing(t, canvastest.NewHarness(t), &config, func(list canvas.DrawList) {
+		reference = captureHarnessDrawing(t, canvastest.NewHarness(t), &config, func(list canvas.CommandList) {
 			list.DrawText(fullStop)
 		})
 	})
@@ -147,7 +147,7 @@ func TestABitmapGlyphPackedIntoAnEvictedGlyphsCellDrawsAsInAnEmptyAtlas(t *testi
 	}
 	h := canvastest.NewHarness(t)
 	frameCount := 0
-	evictedCellPicture := captureHarnessDrawing(t, h, &config, func(list canvas.DrawList) {
+	evictedCellPicture := captureHarnessDrawing(t, h, &config, func(list canvas.CommandList) {
 		frameCount++
 		if frameCount == 1 {
 			list.DrawText(canvas.Text{String: "▀", Size: 100, Filter: canvas.FilterLinear})

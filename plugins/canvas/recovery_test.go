@@ -29,7 +29,7 @@ func TestAfterADeviceLossTheNextFrameDrawsItsSpritesTextAndMeshesAgain(t *testin
 	files[meshPath] = &fstest.MapFile{Data: encodeMeshFile(t, meshPath, tree)}
 	red := canvas.ImageFromFile(redPath)
 	blue := canvas.ImageFromFile(bluePath)
-	record := func(list canvas.DrawList) {
+	record := func(list canvas.CommandList) {
 		list.DrawSprite(canvas.Sprite{Image: red, Transform: m.Translation2x3(-60, 0)})
 		list.DrawSprite(canvas.Sprite{Image: blue, Transform: m.Translation2x3(-100, 0), Order: 1})
 		list.DrawText(canvas.Text{String: "ab", Order: 2})

@@ -6,7 +6,7 @@
 //
 //	h := canvastest.NewHarness(t)
 //	h.Spawn(nil, nil, myplugin.NewPlugin())
-//	h.Record(func(list canvas.DrawList) {
+//	h.Record(func(list canvas.CommandList) {
 //		list.DrawShape(canvas.Shape{Rect: m.Rect{Width: 10, Height: 10}, Tint: m.Color{R: 1, A: 1}})
 //	})
 //	h.Step()

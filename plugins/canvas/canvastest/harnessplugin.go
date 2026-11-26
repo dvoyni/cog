@@ -11,8 +11,8 @@ type inspectionRequestEvent struct{}
 
 // harnessPlugin is the harness's own plugin, listed right after canvas: its
 // recording task, hung off canvas.FrameEvent after Ready, calls the records
-// Harness.Record queued for the frame with its draw list; it asks canvas for
-// the inspection Step asks for; and it keeps each inspection canvas
+// Harness.Record queued for the frame with its command list; it asks canvas
+// for the inspection Step asks for; and it keeps each inspection canvas
 // delivers, for Frames.
 type harnessPlugin struct {
 	harness *Harness
@@ -30,10 +30,10 @@ func (harnessPlugin) Dependencies() []kernel.PluginName {
 // the task reading one; and subscribes to canvas.FrameEvent, to schedule the
 // recording task after Ready, joined into the out dependency, to
 // inspectionRequestEvent, and to canvas.InspectedEvent. The tasks' bodies
-// stay closures, since they hand the test's records the draw list and the
+// stay closures, since they hand the test's records the command list and the
 // test the inspections.
 func (p harnessPlugin) Init(configurator *kernel.Configurator, _ any) error {
-	record := configurator.RegisterTask1(func(k *kernel.Kernel, _ kernel.NoArg, list canvas.DrawList) kernel.NoResult {
+	record := configurator.RegisterTask1(func(k *kernel.Kernel, _ kernel.NoArg, list canvas.CommandList) kernel.NoResult {
 		for _, queued := range p.harness.takeRecords() {
 			queued(list)
 		}

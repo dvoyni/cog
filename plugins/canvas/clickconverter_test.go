@@ -35,7 +35,7 @@ type frameConversion struct {
 func (*clickConverter) Name() kernel.PluginName { return "click converter" }
 
 func (c *clickConverter) Init(configurator *kernel.Configurator, _ any) error {
-	convert := configurator.RegisterTask2(func(k *kernel.Kernel, _ kernel.NoArg, targets kernel.Read[canvas.Targets], list canvas.DrawList) kernel.NoResult {
+	convert := configurator.RegisterTask2(func(k *kernel.Kernel, _ kernel.NoArg, targets kernel.Read[canvas.Targets], list canvas.CommandList) kernel.NoResult {
 		list.SetCamera(c.windowCamera)
 		textureCamera := c.textures.camera
 		textureCamera.Texture = c.textures.madeTexture()

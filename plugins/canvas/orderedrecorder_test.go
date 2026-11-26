@@ -31,7 +31,7 @@ func (r *orderedRecorder) Init(configurator *kernel.Configurator, _ any) error {
 
 // drawFillAndSprite draws a fill and a sprite of the white texel of order,
 // at layers 0 and 1.
-func drawFillAndSprite(k *kernel.Kernel, order int32, list canvas.DrawList) kernel.NoResult {
+func drawFillAndSprite(k *kernel.Kernel, order int32, list canvas.CommandList) kernel.NoResult {
 	list.DrawShape(canvas.Shape{Order: order})
 	list.DrawSprite(canvas.Sprite{Order: order, Layer: 1})
 	return kernel.NoResult{}

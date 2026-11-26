@@ -52,7 +52,7 @@ func newDissolveMounter(t testing.TB) *fileMounter {
 // given a blue one dissolving its left half by DrawSpritesWith, at -10; a
 // sprite given a yellow one dissolving all of it by DrawSpriteWith, at 50;
 // and a fill given none, the zero value, of no colour, at 110.
-func recordDissolvedEntries(list canvas.DrawList, material canvas.Material, white canvas.Image) {
+func recordDissolvedEntries(list canvas.CommandList, material canvas.Material, white canvas.Image) {
 	list.DrawShapeWith(canvas.Shape{Rect: m.Rect{X: -150, Y: -20, Width: 40, Height: 40}, Tint: m.White, Material: material}, dissolve{Colour: [4]float32{1, 0, 0, 1}})
 	list.DrawShapeWith(canvas.Shape{Rect: m.Rect{X: -90, Y: -20, Width: 40, Height: 40}, Tint: m.White, Material: material}, dissolve{Amount: 0.5, Colour: [4]float32{0, 1, 0, 1}})
 	list.DrawSpritesWith([]canvas.Sprite{{Image: white, Transform: m.Translation2x3(-10, 0), Size: m.Vec2{X: 40, Y: 40}, Material: material}}, []dissolve{{Amount: 0.5, Colour: [4]float32{0, 0, 1, 1}}})
@@ -64,12 +64,12 @@ func TestADissolveMaterialReadsEachEntrysOwnArgument(t *testing.T) {
 	white := canvas.ImageFromFile("white.png")
 	recorder := &materialRecorder{
 		descriptors: []canvas.MaterialDescriptor{{Label: "dissolve", Shader: dissolveShaderPath, Argument: canvas.ArgumentOf[dissolve]()}},
-		record: func(list canvas.DrawList, assets canvas.Assets, materials []canvas.Material, frame int) {
+		record: func(list canvas.CommandList, assets canvas.Assets, materials []canvas.Material, frame int) {
 			recordDissolvedEntries(list, materials[0], white)
 		},
 	}
 
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(canvas.DrawList) {}, recorder, newDissolveMounter(t))
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(canvas.CommandList) {}, recorder, newDissolveMounter(t))
 
 	picture.expect(t, []probe{
 		{"the red fill's left", m.Vec2{X: -140}, opaqueRed},
@@ -90,7 +90,7 @@ func TestEntriesOfAMaterialTakingAnArgumentDrawAsOneBatchOfItsStride(t *testing.
 	white := canvas.ImageFromFile("white.png")
 	recorder := &materialRecorder{
 		descriptors: []canvas.MaterialDescriptor{{Label: "dissolve", Shader: dissolveShaderPath, Argument: canvas.ArgumentOf[dissolve]()}},
-		record: func(list canvas.DrawList, assets canvas.Assets, materials []canvas.Material, frame int) {
+		record: func(list canvas.CommandList, assets canvas.Assets, materials []canvas.Material, frame int) {
 			recordDissolvedEntries(list, materials[0], white)
 		},
 	}
@@ -120,7 +120,7 @@ func TestAnArgumentItsMaterialDoesNotTakeIsRefusedReportedOnceForTheMaterialAndT
 	// the dissolve material given a dissolve, drawn.
 	recorder := &materialRecorder{
 		descriptors: []canvas.MaterialDescriptor{{Label: "dissolve", Shader: dissolveShaderPath, Argument: canvas.ArgumentOf[dissolve]()}},
-		record: func(list canvas.DrawList, assets canvas.Assets, materials []canvas.Material, frame int) {
+		record: func(list canvas.CommandList, assets canvas.Assets, materials []canvas.Material, frame int) {
 			list.DrawShapeWith(canvas.Shape{Rect: m.Rect{Width: 4, Height: 4}, Material: materials[0]}, uint32(1))
 			list.DrawShapeWith(canvas.Shape{Rect: m.Rect{Width: 4, Height: 4}}, dissolve{})
 			list.DrawShapeWith(canvas.Shape{Rect: m.Rect{Width: 4, Height: 4}, Material: materials[0]}, dissolve{})
@@ -152,7 +152,7 @@ func TestAnArgumentTypeWhoseLayoutMismatchesItsShadersIsReportedOnceAndItsMateri
 	descriptor := canvas.MaterialDescriptor{Label: "unpadded", Shader: dissolveShaderPath, Argument: canvas.ArgumentOf[unpaddedDissolve]()}
 	recorder := &materialRecorder{
 		descriptors: []canvas.MaterialDescriptor{descriptor, descriptor},
-		record: func(list canvas.DrawList, assets canvas.Assets, materials []canvas.Material, frame int) {
+		record: func(list canvas.CommandList, assets canvas.Assets, materials []canvas.Material, frame int) {
 			list.DrawShapeWith(canvas.Shape{Rect: m.Rect{Width: 4, Height: 4}, Material: materials[0]}, unpaddedDissolve{})
 			list.DrawShape(canvas.Shape{Rect: m.Rect{Width: 4, Height: 4}, Material: materials[1]})
 			list.DrawShape(canvas.Shape{Rect: m.Rect{Width: 4, Height: 4}})
@@ -174,13 +174,13 @@ func TestAnArgumentTypeWhoseLayoutMismatchesItsShadersIsReportedOnceAndItsMateri
 	}
 }
 
-func TestParallelSlicesOfDifferentLengthsAreRefusedRecordingNoneReportedOnceForTheDrawList(t *testing.T) {
+func TestParallelSlicesOfDifferentLengthsAreRefusedRecordingNoneReportedOnceForTheCommandList(t *testing.T) {
 	// Each frame gives DrawSpritesWith two sprites and one argument, then
 	// draws a fill of the default material.
 	white := canvas.ImageFromFile("white.png")
 	recorder := &materialRecorder{
 		descriptors: []canvas.MaterialDescriptor{{Label: "dissolve", Shader: dissolveShaderPath, Argument: canvas.ArgumentOf[dissolve]()}},
-		record: func(list canvas.DrawList, assets canvas.Assets, materials []canvas.Material, frame int) {
+		record: func(list canvas.CommandList, assets canvas.Assets, materials []canvas.Material, frame int) {
 			sprite := canvas.Sprite{Image: white, Material: materials[0]}
 			list.DrawSpritesWith([]canvas.Sprite{sprite, sprite}, []dissolve{{}})
 			list.DrawShape(canvas.Shape{Rect: m.Rect{Width: 4, Height: 4}})
@@ -201,7 +201,7 @@ func TestParallelSlicesOfDifferentLengthsAreRefusedRecordingNoneReportedOnceForT
 		}
 	}
 	if count := countReports(h, canvas.ReportKindSliceLengthsDiffer); count != 1 {
-		t.Errorf("two frames of uneven slices reported %d refusals, want one, for the draw list", count)
+		t.Errorf("two frames of uneven slices reported %d refusals, want one, for the command list", count)
 	}
 }
 

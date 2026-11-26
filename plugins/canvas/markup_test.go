@@ -106,7 +106,7 @@ func TestAPlayerTypedStringWithABackslashDrawsAsWritten(t *testing.T) {
 		read: func(fonts canvas.FontLibrary, frame int) {
 			layouts = append(layouts, fonts.Layout(canvas.Text{String: name, Size: 10}), fonts.Layout(canvas.Text{String: `C:\\new\\i:a`, Markup: true, Size: 10}))
 		},
-		draw: func(list canvas.DrawList, frame int) {
+		draw: func(list canvas.CommandList, frame int) {
 			list.DrawText(canvas.Text{String: name, Size: 10})
 		},
 	})
@@ -133,7 +133,7 @@ func TestMarkupThatDoesNotParseDrawsAsWrittenReportedOncePerString(t *testing.T)
 	h := canvastest.NewHarness(t)
 	h.ExpectReport(canvas.ReportKindMarkupMalformed)
 	h.Spawn(nil, nil, &fontLibraryUser{
-		draw: func(list canvas.DrawList, frame int) {
+		draw: func(list canvas.CommandList, frame int) {
 			list.DrawText(canvas.Text{Spans: []canvas.Span{{Text: `a\xb`}}, Size: 10})
 			list.DrawText(canvas.Text{String: `a\xb`, Size: 10})
 			list.DrawText(canvas.Text{String: `a\xb`, Markup: true, Size: 10})
@@ -174,7 +174,7 @@ func TestARegisteredColoursSpanTakesTheColourRegisteredWhenDrawnItsLayoutKept(t 
 			fonts.Layout(text)
 			cached = append(cached, canvas.FindCachedLayout(fonts, text))
 		},
-		draw: func(list canvas.DrawList, frame int) {
+		draw: func(list canvas.CommandList, frame int) {
 			list.DrawText(text)
 		},
 	})

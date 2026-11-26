@@ -7,16 +7,16 @@ import (
 )
 
 // recordFunc is what a task of concurrentUser's records calls in each
-// frame: with its draw list, Assets and the frame's index, from 0.
-type recordFunc = func(list canvas.DrawList, assets canvas.Assets, frame int)
+// frame: with its command list, Assets and the frame's index, from 0.
+type recordFunc = func(list canvas.CommandList, assets canvas.Assets, frame int)
 
 // concurrentUser is a test plugin whose tasks use canvas together in each
 // frame, each called with the frame's index, from 0, and none ordered
 // after another:
-//   - each of records in a task of its own, so with a draw list of its own,
-//     with Assets, and each of reads in a task of its own with FontLibrary's
-//     reading side, off canvas.FrameEvent after its Ready;
-//   - each of lateRecords in a task of its own with a draw list, and each
+//   - each of records in a task of its own, so with a command list of its
+//     own, with Assets, and each of reads in a task of its own with
+//     FontLibrary's reading side, off canvas.FrameEvent after its Ready;
+//   - each of lateRecords in a task of its own with a command list, and each
 //     of whileDrawing in a task of its own with Assets, off render.FrameEvent
 //     after its Ready, so they run while canvas opens, sorts and draws the
 //     frame.
@@ -24,7 +24,7 @@ type concurrentUser struct {
 	testPlugin
 	records      []recordFunc
 	reads        []func(fonts canvas.FontLibrary, frame int)
-	lateRecords  []func(list canvas.DrawList, frame int)
+	lateRecords  []func(list canvas.CommandList, frame int)
 	whileDrawing []func(assets canvas.Assets, frame int)
 	// recordedFrameCount and drawnFrameCount are the frames whose
 	// canvas.FrameEvent and render.FrameEvent it has handled, each handled
@@ -38,7 +38,7 @@ func (*concurrentUser) Name() kernel.PluginName { return "concurrent user" }
 func (u *concurrentUser) Init(configurator *kernel.Configurator, _ any) error {
 	var atFrame, whileFrameDraws []*kernel.Task[int, kernel.NoResult]
 	for _, record := range u.records {
-		atFrame = append(atFrame, configurator.RegisterTask2(func(k *kernel.Kernel, frame int, list canvas.DrawList, assets canvas.Assets) kernel.NoResult {
+		atFrame = append(atFrame, configurator.RegisterTask2(func(k *kernel.Kernel, frame int, list canvas.CommandList, assets canvas.Assets) kernel.NoResult {
 			record(list, assets, frame)
 			return kernel.NoResult{}
 		}))
@@ -50,7 +50,7 @@ func (u *concurrentUser) Init(configurator *kernel.Configurator, _ any) error {
 		}))
 	}
 	for _, record := range u.lateRecords {
-		whileFrameDraws = append(whileFrameDraws, configurator.RegisterTask1(func(k *kernel.Kernel, frame int, list canvas.DrawList) kernel.NoResult {
+		whileFrameDraws = append(whileFrameDraws, configurator.RegisterTask1(func(k *kernel.Kernel, frame int, list canvas.CommandList) kernel.NoResult {
 			record(list, frame)
 			return kernel.NoResult{}
 		}))

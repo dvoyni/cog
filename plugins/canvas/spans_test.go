@@ -230,7 +230,7 @@ func expectRedWordOnSecondLine(t *testing.T, text canvas.Text) {
 	text.WrapWidth = 100
 	text.Pivot = canvas.PivotTopLeft
 	text.Transform = m.Translation2x3(-100, -60)
-	picture := captureDrawing(t, func(list canvas.DrawList) { list.DrawText(text) })
+	picture := captureDrawing(t, func(list canvas.CommandList) { list.DrawText(text) })
 
 	lineHeight := builtInFontUnits.atSize(40).LineHeight
 	firstWhite, firstRed := picture.countSpanPixels(m.Rect{X: -100, Y: -60, Width: 100, Height: lineHeight})
@@ -259,14 +259,14 @@ func TestAnIconSitsOnTheBaselineAtTheCapHeightInOneBatchWithItsGlyphs(t *testing
 		Pivot:     canvas.PivotTopLeft,
 		Transform: m.Translation2x3(-100, -60),
 	}
-	picture := captureHarnessDrawing(t, h, nil, func(canvas.DrawList) {}, &fileMounter{files: makeIconFiles(t)}, &fontLibraryUser{
+	picture := captureHarnessDrawing(t, h, nil, func(canvas.CommandList) {}, &fileMounter{files: makeIconFiles(t)}, &fontLibraryUser{
 		write: func(fonts canvas.WriteFontLibrary, frame int) {
 			if frame == 0 {
 				fonts.RegisterIcon("green", canvas.IconDescriptor{Image: canvas.ImageFromFile(greenIconPath)})
 				fonts.RegisterIcon("white", canvas.IconDescriptor{Image: canvas.ImageFromFile(squareIconPath), Tinted: true, Offset: 0.25})
 			}
 		},
-		draw: func(list canvas.DrawList, frame int) {
+		draw: func(list canvas.CommandList, frame int) {
 			list.DrawText(text)
 		},
 	})
@@ -294,7 +294,7 @@ func TestAnIconOfANameNotRegisteredDrawsTheMissingGlyphBoxReportedOnce(t *testin
 	// reported once.
 	h := canvastest.NewHarness(t)
 	h.ExpectReport(canvas.ReportKindIconNotRegistered)
-	picture := captureHarnessDrawing(t, h, nil, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, h, nil, func(list canvas.CommandList) {
 		list.DrawText(canvas.Text{Spans: []canvas.Span{{Icon: "button-a"}}, Size: 40, Transform: m.Translation2x3(-40, 0)})
 		list.DrawText(canvas.Text{Spans: []canvas.Span{{Icon: "button-a"}}, Size: 40, Transform: m.Translation2x3(40, 0)})
 	})

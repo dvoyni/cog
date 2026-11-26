@@ -72,7 +72,7 @@ func TestReloadChangedPacksChangedImagesAgainAndLoadsAChangedMeshFileAgainReadin
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 
 	for range 3 {
-		h.Record(func(list canvas.DrawList) {
+		h.Record(func(list canvas.CommandList) {
 			list.DrawSprite(canvas.Sprite{Image: red})
 			list.DrawSprite(canvas.Sprite{Image: still, Order: 1})
 			list.DrawSprite(canvas.Sprite{Image: converted, Order: 2})
@@ -155,7 +155,7 @@ func TestReloadChangedLoadsAChangedFontFileAgainLayingItsSetsRunsOutAnewAndReads
 				lineGaps[frame] = fonts.Metrics(changed, goFontUnits.unitsPerEm, "").LineGap
 			}
 		},
-		draw: func(list canvas.DrawList, _ int) {
+		draw: func(list canvas.CommandList, _ int) {
 			list.DrawText(canvas.Text{String: "ab", Font: changed})
 			list.DrawText(canvas.Text{String: "cd", Font: still, Order: 1})
 		},
@@ -225,7 +225,7 @@ func TestReloadChangedReloadsAChanged2DMaterialsShaderThroughRender(t *testing.T
 	}}
 	recorder := &materialRecorder{
 		descriptors: []canvas.MaterialDescriptor{{Label: "tint", Shader: tintShaderPath}},
-		record: func(list canvas.DrawList, _ canvas.Assets, materials []canvas.Material, _ int) {
+		record: func(list canvas.CommandList, _ canvas.Assets, materials []canvas.Material, _ int) {
 			list.DrawShape(canvas.Shape{Rect: m.Rect{Width: 10, Height: 10}, Material: materials[0]})
 		},
 	}

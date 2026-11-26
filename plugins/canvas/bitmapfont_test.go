@@ -57,7 +57,7 @@ func TestABitmapFontsRunReadsItsGlyphsWithNearestFilteringUnlessItNamesAFilter(t
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, bitmapFontConfig)
 	h.OpenWindow(platform.Size{Width: 320, Height: 240})
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.DrawText(canvas.Text{String: "a"})
 		list.DrawText(canvas.Text{String: "b", Filter: canvas.FilterLinear, Order: 1})
 	})
@@ -81,7 +81,7 @@ func TestABitmapFontsGlyphsLandOnWholePixelsUnderAPixelPerfectCamera(t *testing.
 	const size = 23
 	leftOrigin := m.Vec2{X: -30.3, Y: -20.6}
 	rightOrigin := leftOrigin.Add(m.Vec2{X: 36})
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), bitmapFontConfig, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), bitmapFontConfig, func(list canvas.CommandList) {
 		list.SetCamera(canvas.Camera{Size: m.Vec2{X: 80, Y: 60}, PixelPerfect: true, Clear: true, ClearColor: m.Color{A: 1}})
 		list.DrawText(canvas.Text{String: "Hi", Size: size, Pivot: canvas.PivotTopLeft, Transform: m.Translation2x3(leftOrigin.X, leftOrigin.Y)})
 		list.DrawTextWith(canvas.Text{String: "Hi", Size: size, Pivot: canvas.PivotTopLeft, Transform: m.Translation2x3(rightOrigin.X, rightOrigin.Y)}, canvas.Outline(2, orange))

@@ -3,20 +3,19 @@ package canvas
 import "slices"
 
 // sortedEntry is one of a frame's entries in its sort: its sort key, and its
-// place among the frame's entries as merged, draw list after draw list,
-// which tells its record, its keys, and its draw list's place and its own
+// place among the frame's entries as merged, command list after command list,
+// which tells its record, its keys, and its command list's place and its own
 // in that list once sorted.
 type sortedEntry struct {
 	key        sortKey
 	entryIndex uint32
 }
 
-// entrySorter sorts a frame's entries by layer, then order, then the place
-// of their draw list, then the order they were recorded in: a radix sort by
+// entrySorter sorts a frame's entries by layer, then order, then the place of
+// their command list, then the order they were recorded in: a radix sort by
 // sort key, stable, so the merge's order gives the last two. In a layer it
 // regroups, each run of entries of equal keys is then regrouped by batch. It
-// keeps its buffers from frame to frame, so a steady frame allocates
-// nothing.
+// keeps its buffers from frame to frame, so a steady frame allocates nothing.
 type entrySorter struct {
 	// regroupedLayers are the layers whose entries of equal keys are
 	// regrouped, sorted, each once.

@@ -10,7 +10,7 @@ import (
 )
 
 func TestATranslucentStrokeShowsOneColourAlongItsSidesAndCornersAndNothingInside(t *testing.T) {
-	picture := captureDrawing(t, func(list canvas.DrawList) {
+	picture := captureDrawing(t, func(list canvas.CommandList) {
 		list.DrawShape(canvas.Shape{Kind: canvas.Stroke, Rect: m.Rect{X: -100, Y: -80, Width: 200, Height: 160}, Width: 10, Tint: translucentOrange})
 	})
 
@@ -43,7 +43,7 @@ func TestAHairlineIsOneTargetPixelWideAtAnyScale(t *testing.T) {
 		{"unscaled", m.Vec2{X: -150, Y: -110}, 1},
 		{"scaled by 3", m.Vec2{X: 10, Y: -110}, 3},
 	}
-	picture := captureDrawing(t, func(list canvas.DrawList) {
+	picture := captureDrawing(t, func(list canvas.CommandList) {
 		for _, region := range regions {
 			transform := m.TRS2x3(region.origin, 0, m.Vec2{X: region.scale, Y: region.scale})
 			unit := 1 / region.scale
@@ -80,7 +80,7 @@ func TestARoundedFillAndStrokeLeaveTheirCornersEmpty(t *testing.T) {
 	// Both are 100 units square, their corners' curves of radius 25 about
 	// points 25 in from each side, the stroke 6 wide and translucent, so
 	// its sides overlapping would show darker.
-	picture := captureDrawing(t, func(list canvas.DrawList) {
+	picture := captureDrawing(t, func(list canvas.CommandList) {
 		list.DrawShape(canvas.Shape{Kind: canvas.Fill, Rect: m.Rect{X: -140, Y: -60, Width: 100, Height: 100}, Radius: 25, Tint: green})
 		list.DrawShape(canvas.Shape{Kind: canvas.Stroke, Rect: m.Rect{X: 20, Y: -60, Width: 100, Height: 100}, Width: 6, Radius: 25, Tint: translucentOrange})
 	})
@@ -110,7 +110,7 @@ func TestAFillAStrokeAndALineOfOneMaterialAreOneBatchOfEachOfTheirInstances(t *t
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, nil)
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.DrawShape(canvas.Shape{Kind: canvas.Fill, Rect: m.Rect{Width: 4, Height: 4}, Tint: m.White})
 		list.DrawShape(canvas.Shape{Kind: canvas.Stroke, Rect: m.Rect{Width: 8, Height: 8}, Width: 1, Radius: 2, Tint: m.White})
 		list.DrawShape(canvas.Shape{Kind: canvas.Line, To: m.Vec2{X: 10, Y: 10}, Tint: m.White})

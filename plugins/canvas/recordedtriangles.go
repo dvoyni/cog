@@ -10,7 +10,7 @@ import (
 // options, its vertices' layout, whether that is canvas.Vertex's, which
 // canvas's own mesh vertex stage draws, its topology and bounds, and its
 // vertex bytes and its index bytes, of indexFormat, none for no indices,
-// each copied into the arena beside it, its draw list's or the frame's.
+// each copied into the arena beside it, its command list's or the frame's.
 type recordedTriangles struct {
 	options        DrawTrianglesOptions
 	layout         meshfile.Layout

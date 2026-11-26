@@ -10,7 +10,7 @@ const parallelShapeCount = 20000
 
 // parallelRecorder is a test plugin whose two recording tasks run together
 // off canvas.FrameEvent, the first scheduled twice, so two of its jobs record
-// into its draw list together: each job draws parallelShapeCount fills.
+// into its command list together: each job draws parallelShapeCount fills.
 type parallelRecorder struct {
 	testPlugin
 }
@@ -30,7 +30,7 @@ func (*parallelRecorder) Init(configurator *kernel.Configurator, _ any) error {
 }
 
 // drawManyFills draws parallelShapeCount fills of order.
-func drawManyFills(k *kernel.Kernel, order int32, list canvas.DrawList) kernel.NoResult {
+func drawManyFills(k *kernel.Kernel, order int32, list canvas.CommandList) kernel.NoResult {
 	for range parallelShapeCount {
 		list.DrawShape(canvas.Shape{Order: order})
 	}

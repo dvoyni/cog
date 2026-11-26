@@ -70,7 +70,7 @@ func TestAFragmentOnlyMaterialTintsSpritesAndShapesAlike(t *testing.T) {
 	white := canvas.ImageFromFile("white.png")
 	recorder := &materialRecorder{
 		descriptors: []canvas.MaterialDescriptor{{Label: "tint", Shader: tintShaderPath}},
-		record: func(list canvas.DrawList, assets canvas.Assets, materials []canvas.Material, frame int) {
+		record: func(list canvas.CommandList, assets canvas.Assets, materials []canvas.Material, frame int) {
 			if frame == 0 {
 				assets.SetMaterialUniform(materials[0], "material_tint", [4]float32{0, 1, 1, 1})
 			}
@@ -80,7 +80,7 @@ func TestAFragmentOnlyMaterialTintsSpritesAndShapesAlike(t *testing.T) {
 		},
 	}
 
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(canvas.DrawList) {}, recorder, mounter)
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(canvas.CommandList) {}, recorder, mounter)
 
 	picture.expect(t, []probe{
 		{"the shape of the material", m.Vec2{X: -80}, opaqueCyan},
@@ -119,7 +119,7 @@ func TestEachBlendConstructorBlendsAsItsNameSaysOverAKnownColour(t *testing.T) {
 	mounter := newMaterialMounter(t)
 	recorder := &materialRecorder{
 		descriptors: descriptors,
-		record: func(list canvas.DrawList, assets canvas.Assets, materials []canvas.Material, frame int) {
+		record: func(list canvas.CommandList, assets canvas.Assets, materials []canvas.Material, frame int) {
 			if frame == 0 {
 				assets.SetMaterialUniform(materials[0], "raw_colour", [4]float32{0.8, 0.2, 1, 1})
 				for _, material := range materials[1:] {
@@ -133,7 +133,7 @@ func TestEachBlendConstructorBlendsAsItsNameSaysOverAKnownColour(t *testing.T) {
 		},
 	}
 
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(canvas.DrawList) {}, recorder, mounter)
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(canvas.CommandList) {}, recorder, mounter)
 
 	probes := []probe{{"the destination between the columns", m.Vec2{X: columnX(0) + 45}, color.NRGBA{R: 204, G: 51, B: 255, A: 255}}}
 	for index, blend := range blends {
@@ -151,7 +151,7 @@ func TestAMaterialParameterSetByATaskShowsInTheFrameCanvasDrawsAfterIt(t *testin
 	mounter := newMaterialMounter(t)
 	recorder := &materialRecorder{
 		descriptors: []canvas.MaterialDescriptor{{Label: "tint", Shader: tintShaderPath, FragmentEntryPoint: "tint_fragment"}},
-		record: func(list canvas.DrawList, assets canvas.Assets, materials []canvas.Material, frame int) {
+		record: func(list canvas.CommandList, assets canvas.Assets, materials []canvas.Material, frame int) {
 			colour := m.Color{G: 1, B: 1, A: 1}
 			if frame%2 == 1 {
 				colour = m.Color{R: 1, G: 1, A: 1}
@@ -162,7 +162,7 @@ func TestAMaterialParameterSetByATaskShowsInTheFrameCanvasDrawsAfterIt(t *testin
 		},
 	}
 
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(canvas.DrawList) {}, recorder, mounter)
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(canvas.CommandList) {}, recorder, mounter)
 
 	material := picture.at(m.Vec2{X: -40})
 	tinted := picture.at(m.Vec2{X: 40})
@@ -181,7 +181,7 @@ func TestFillsOfTwoMaterialsInterleavedDrawAsTheirSortOrderSaysBreakingBatchesOn
 	mounter := newMaterialMounter(t)
 	recorder := &materialRecorder{
 		descriptors: []canvas.MaterialDescriptor{{Label: "first", Shader: tintShaderPath}, {Label: "second", Shader: tintShaderPath}},
-		record: func(list canvas.DrawList, assets canvas.Assets, materials []canvas.Material, frame int) {
+		record: func(list canvas.CommandList, assets canvas.Assets, materials []canvas.Material, frame int) {
 			for order, material := range []canvas.Material{materials[0], materials[1], materials[0]} {
 				list.DrawShape(canvas.Shape{Rect: m.Rect{Width: 4, Height: 4}, Material: material, Order: int32(order)})
 			}
@@ -240,7 +240,7 @@ func TestAReleasedMaterialDrawsTheFrameOfItsReleaseAndItsLaterEntriesAreSkippedR
 	mounter := newMaterialMounter(t)
 	recorder := &materialRecorder{
 		descriptors: []canvas.MaterialDescriptor{{Label: "tint", Shader: tintShaderPath}},
-		record: func(list canvas.DrawList, assets canvas.Assets, materials []canvas.Material, frame int) {
+		record: func(list canvas.CommandList, assets canvas.Assets, materials []canvas.Material, frame int) {
 			list.DrawShape(canvas.Shape{Rect: m.Rect{Width: 4, Height: 4}, Material: materials[0]})
 			if frame == 1 {
 				assets.ReleaseMaterial(materials[0])
@@ -283,7 +283,7 @@ func TestAMaterialsCullMarginKeepsItsEntriesOutsideTheViewByLessThanIt(t *testin
 	mounter := newMaterialMounter(t)
 	recorder := &materialRecorder{
 		descriptors: []canvas.MaterialDescriptor{{Label: "swaying", Shader: tintShaderPath, CullMargin: 6}},
-		record: func(list canvas.DrawList, assets canvas.Assets, materials []canvas.Material, frame int) {
+		record: func(list canvas.CommandList, assets canvas.Assets, materials []canvas.Material, frame int) {
 			list.DrawShape(canvas.Shape{Rect: m.Rect{X: 37, Width: 4, Height: 4}, Material: materials[0]})
 			list.DrawShape(canvas.Shape{Rect: m.Rect{X: 37, Width: 4, Height: 4}, Order: 1})
 		},

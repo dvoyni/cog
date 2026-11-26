@@ -34,7 +34,7 @@ type Harness struct {
 	// mutex guards records, the bodies Record queued for the next frame,
 	// which its recording task takes.
 	mutex   sync.Mutex
-	records []func(list canvas.DrawList)
+	records []func(list canvas.CommandList)
 	// deliveredInspections carries each inspection canvas delivers to Step,
 	// which keeps it in inspections, for Frames; only the test's goroutine
 	// reads and writes inspections.
@@ -58,7 +58,7 @@ func NewHarness(t testing.TB) *Harness {
 
 // Spawn spawns rendertest's plugins with renderConfig, canvas with
 // canvasConfig, the harness's own plugin, and plugins, in that order, so
-// the test's plugins are listed after canvas, and their draw lists merge
+// the test's plugins are listed after canvas, and their command lists merge
 // after the harness's. It fails the test when the spawn fails.
 func (h *Harness) Spawn(renderConfig *render.Config, canvasConfig *canvas.Config, plugins ...kernel.Plugin) {
 	h.t.Helper()
@@ -113,9 +113,9 @@ func (h *Harness) RecordNothing() {
 }
 
 // Record has the harness's recording task, hung off canvas.FrameEvent, call
-// record with its draw list in the next frame, after every record queued
+// record with its command list in the next frame, after every record queued
 // before it, so a test records a frame without writing a plugin.
-func (h *Harness) Record(record func(list canvas.DrawList)) {
+func (h *Harness) Record(record func(list canvas.CommandList)) {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 	h.records = append(h.records, record)
@@ -137,7 +137,7 @@ func (h *Harness) Reports() []canvas.Report {
 
 // takeRecords answers the records queued for this frame, and queues none
 // for the next.
-func (h *Harness) takeRecords() []func(list canvas.DrawList) {
+func (h *Harness) takeRecords() []func(list canvas.CommandList) {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 	records := h.records

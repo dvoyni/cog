@@ -52,10 +52,10 @@ texture a camera draws into.
       canvas ── FrameEvent{Ready, AcquireWait, GPULatency}
         │          │
         │          └─ your recording tasks, after Ready, joined into the out dependency
-        │                 DrawList: SetCamera, DrawShape, DrawSprite(s), DrawText,
-        │                           DrawTriangles, DrawMesh(es), and each …With
+        │                 CommandList: SetCamera, DrawShape, DrawSprite(s), DrawText,
+        │                              DrawTriangles, DrawMesh(es), and each …With
         │
-        ├─ merges the draw lists, sorts the entries by layer and order,
+        ├─ merges the command lists, sorts the entries by layer and order,
         │  culls and batches them through each camera, and draws them
         ├─ Assets: materials, preloads, unloads, image sizes, ReloadChanged, inspections
         ├─ FontLibrary: font sets, the language, layouts and metrics
@@ -69,7 +69,7 @@ texture a camera draws into.
 | `Config` | canvas's part of the kernel's config: the atlases, mips, filters, text and the default font set. |
 | `Handlers` | canvas's handlers, for others to order theirs around. |
 | `FrameEvent` | The frame canvas's users record, published inside each of render's `FrameEvent`s. |
-| `DrawList` | The task parameter a recording task records its entries and sets its cameras through. |
+| `CommandList` | The task parameter a recording task records its entries and sets its cameras through. |
 | `Assets` | The task parameter a task reaches canvas's assets and tools through. |
 | `FontLibrary`, `WriteFontLibrary` | The resource of font sets, read under `kernel.Read`, and its writing side, from `ElevateFontLibrary`. |
 | `Targets` | The resource of each target canvas drew into, as it was last drawn. |
@@ -88,7 +88,7 @@ texture a camera draws into.
 | `atlas.Atlas`, `atlas.Descriptor` | One atlas of one format, as canvas packs its sprites and glyphs into, for a plugin's own caches. |
 | `canvastest.Harness` | canvas in a real kernel on render's fake GPU, or on wgpu's software adapter, for tests. |
 
-Words used throughout: an **entry** is one thing recorded into a draw list
+Words used throughout: an **entry** is one thing recorded into a command list
 for a frame, a shape, a sprite, a run of text or a mesh; its **sort key** is
 its layer, then its order; a **batch** is a run of entries in sort order
 drawn as one instanced draw; a **2D material** is canvas's, not render's,
@@ -211,7 +211,7 @@ func openWindow(k *kernel.Kernel, _ kernel.NoArg, manager kernel.Write[*platform
 
 // drawScene records the ground, the hero standing on it, and the hero's
 // name above it.
-func drawScene(k *kernel.Kernel, event canvas.FrameEvent, list canvas.DrawList) kernel.NoResult {
+func drawScene(k *kernel.Kernel, event canvas.FrameEvent, list canvas.CommandList) kernel.NoResult {
 	list.DrawShape(canvas.Shape{
 		Kind:  canvas.Fill,
 		Rect:  m.Rect{X: -640, Y: 100, Width: 1280, Height: 260},
@@ -337,7 +337,7 @@ canvas publishes `FrameEvent` inside render's `FrameEvent` every render beat.
 A handler schedules its recording tasks after `Ready`, the job opening the
 frame for entries, and joins them into the out dependency it returns, as the
 quick start's does, with no ordering among the handlers: canvas merges the
-draw lists, sorts and draws the frame after the last of them, and forgets
+command lists, sorts and draws the frame after the last of them, and forgets
 its entries and cameras. An entry recorded by a task not joined so, which
 runs once canvas's drawing has begun, is refused and reported once for the
 task. `FrameEvent` embeds the render track's `metronome.Beat`, and carries
@@ -348,12 +348,12 @@ A task reaches canvas through two parameters, declared in its signature as
 
 | Parameter or resource | Locks | Carries |
 |---|---|---|
-| `DrawList` | canvas's draw state and `FontLibrary`, read | entries, cameras |
+| `CommandList` | canvas's draw state and `FontLibrary`, read | entries, cameras |
 | `Assets` | canvas's draw state, `platform.FS`, and render's `Frame` and `Inventory`, read | materials, preloads, unloads, image sizes, `ReloadChanged`, inspections |
 | `kernel.Read[canvas.FontLibrary]` | `FontLibrary`, read | the language, layouts, preloaded glyphs, metrics |
 | `kernel.Read[canvas.Targets]` | `Targets`, read | each target as it was last drawn |
 
-Each task declaring a `DrawList` gets a draw list of its own as it is
+Each task declaring a `CommandList` gets a command list of its own as it is
 registered, so recording tasks run together and never contend: an ECS
 system recording units and another recording their labels run at once.
 The lists merge in registration order, plugin order and then the order each
@@ -362,7 +362,7 @@ job runs: a task never keeps one.
 
 ```go
 // recordUnits schedules the units' and their labels' recording, each into
-// a draw list of its own, after the frame opens.
+// a command list of its own, after the frame opens.
 func recordUnits(ex *kernel.Executor, in kernel.JobHandle, event canvas.FrameEvent, drawUnits, drawLabels *kernel.Task[canvas.FrameEvent, kernel.NoResult]) (canvas.FrameEvent, kernel.JobHandle) {
 	units := ex.Schedule(drawUnits, event, event.Ready)
 	labels := ex.Schedule(drawLabels, event, event.Ready)
@@ -375,7 +375,7 @@ func recordUnits(ex *kernel.Executor, in kernel.JobHandle, event canvas.FrameEve
 Every entry is a literal, a plain value an ECS component holds, recorded for
 one frame. Its sort key is its `Layer`, then its `Order`: every entry of a
 lower layer draws under every entry of a higher one, and within a layer by
-order. Entries of equal keys draw by their draw list's registration order,
+order. Entries of equal keys draw by their command list's registration order,
 then in the order recorded. A game names its layers in one place, with gaps:
 
 ```go
@@ -393,7 +393,7 @@ const (
 units y-sort with no scale to choose, and `OrderOf(y)-1` sorts just under:
 
 ```go
-func drawUnit(list canvas.DrawList, body, shadow canvas.Image, position m.Vec2) {
+func drawUnit(list canvas.CommandList, body, shadow canvas.Image, position m.Vec2) {
 	transform := m.Translation2x3(position.X, position.Y)
 	order := canvas.OrderOf(position.Y)
 	list.DrawSprite(canvas.Sprite{Image: shadow, Transform: transform, Layer: layerUnits, Order: order - 1})
@@ -426,7 +426,7 @@ var (
 	healthFill       = m.NewColorSrgb(0.2, 0.8, 0.3, 1)
 )
 
-func drawHealthBar(list canvas.DrawList, position m.Vec2, health float32) {
+func drawHealthBar(list canvas.CommandList, position m.Vec2, health float32) {
 	frame := m.Rect{X: position.X - 20, Y: position.Y - 48, Width: 40, Height: 6}
 	list.DrawShape(canvas.Shape{Kind: canvas.Fill, Rect: frame, Radius: 3, Tint: healthBackground, Layer: layerLabels})
 	filled := frame
@@ -435,7 +435,7 @@ func drawHealthBar(list canvas.DrawList, position m.Vec2, health float32) {
 	list.DrawShape(canvas.Shape{Kind: canvas.Stroke, Rect: frame, Radius: 3, Tint: m.Black, Layer: layerLabels, Order: 2})
 }
 
-func drawSelection(list canvas.DrawList, from, to m.Vec2) {
+func drawSelection(list canvas.CommandList, from, to m.Vec2) {
 	// A hairline: one pixel wide at any zoom.
 	list.DrawShape(canvas.Shape{Kind: canvas.Line, From: from, To: to, Tint: m.White, Layer: layerUI})
 }
@@ -464,7 +464,7 @@ var (
 
 // drawKnight draws the knight facing right at a facing of 1, and mirrored,
 // facing left, at -1.
-func drawKnight(list canvas.DrawList, position m.Vec2, facing float32) {
+func drawKnight(list canvas.CommandList, position m.Vec2, facing float32) {
 	list.DrawSprite(canvas.Sprite{
 		Image:     knight,
 		Transform: m.TRS2x3(position, 0, m.Vec2{X: facing, Y: 1}),
@@ -474,7 +474,7 @@ func drawKnight(list canvas.DrawList, position m.Vec2, facing float32) {
 }
 
 // drawManaBar draws the bar emptying from its right as mana falls from 1.
-func drawManaBar(list canvas.DrawList, mana float32) {
+func drawManaBar(list canvas.CommandList, mana float32) {
 	list.DrawSprite(canvas.Sprite{
 		Image:     manaBar,
 		Size:      m.Vec2{X: 200},
@@ -512,7 +512,7 @@ var (
 	torch = canvas.ImageFromFile("torch.png", canvas.ImageOptions{Pivot: canvas.Pivot{Fraction: m.Vec2{Y: 0.5}, Texels: m.Vec2{Y: -3}}})
 )
 
-func drawWalker(list canvas.DrawList, position m.Vec2, step uint32) {
+func drawWalker(list canvas.CommandList, position m.Vec2, step uint32) {
 	list.DrawSprite(canvas.Sprite{Image: walk, Frame: step % 16, Transform: m.Translation2x3(position.X, position.Y), Layer: layerUnits})
 }
 ```
@@ -557,8 +557,8 @@ uses for a cache of its own, such as a UI's rasterised text, drawn through a
 images of one format into its pages and knows nothing of what they are: the
 plugin keeps what lies where, what to evict when `Pack` answers
 `atlas.ErrFull`, and when to `Free` a region. One task packs into it, then
-records its copies and its mips in a command list before any draw sampling
-it:
+records its copies and its mips in a render command list before any draw
+sampling it:
 
 ```go
 // labelCache is a UI's cache of rasterised labels, each kept where it was
@@ -612,11 +612,11 @@ var (
 	water  = canvas.ImageFromFile("water.png", canvas.ImageOptions{Wrap: canvas.WrapBoth, Pivot: canvas.PivotTopLeft})
 )
 
-func drawDialog(list canvas.DrawList, box m.Rect) {
+func drawDialog(list canvas.CommandList, box m.Rect) {
 	list.DrawSprite(canvas.Sprite{Image: panel, Size: m.Vec2{X: box.Width, Y: box.Height}, DrawMode: canvas.Sliced, TexelScale: 2, Transform: m.Translation2x3(box.X, box.Y), Layer: layerUI})
 }
 
-func drawLake(list canvas.DrawList, area m.Rect) {
+func drawLake(list canvas.CommandList, area m.Rect) {
 	list.DrawSprite(canvas.Sprite{Image: water, Size: m.Vec2{X: area.Width, Y: area.Height}, DrawMode: canvas.Tiled, Transform: m.Translation2x3(area.X, area.Y), Layer: layerGround})
 }
 ```
@@ -708,14 +708,14 @@ radius instead, its quad grown to hold the band:
 ```go
 var knightField = canvas.ImageFromFile("units/knight.png", canvas.ImageOptions{Pivot: canvas.PivotBottom, Convert: canvas.DistanceField{Spread: 8}})
 
-func drawSelectedKnight(list canvas.DrawList, position m.Vec2, gold m.Color) {
+func drawSelectedKnight(list canvas.CommandList, position m.Vec2, gold m.Color) {
 	transform := m.Translation2x3(position.X, position.Y)
 	order := canvas.OrderOf(position.Y)
 	list.DrawSpriteWith(canvas.Sprite{Image: knightField, Material: canvas.SDFMaterial, Transform: transform, Layer: layerUnits, Order: order}, canvas.Halo(2, 8, gold))
 	list.DrawSprite(canvas.Sprite{Image: knight, Transform: transform, Layer: layerUnits, Order: order})
 }
 
-func drawGlowingButton(list canvas.DrawList, button m.Rect, gold m.Color) {
+func drawGlowingButton(list canvas.CommandList, button m.Rect, gold m.Color) {
 	list.DrawShapeWith(canvas.Shape{Kind: canvas.Fill, Rect: button, Radius: 6, Tint: m.White, Material: canvas.SDFMaterial, Layer: layerUI}, canvas.Glow(8, gold))
 	list.DrawShape(canvas.Shape{Kind: canvas.Fill, Rect: button, Radius: 6, Tint: gold, Layer: layerUI, Order: 1})
 }
@@ -780,7 +780,7 @@ type CameraSet struct {
 	Left, Right, Minimap, UI canvas.Camera
 }
 
-func setCameras(k *kernel.Kernel, event canvas.FrameEvent, list canvas.DrawList, minimap kernel.Read[Minimap], party kernel.Read[Party], cameraSet kernel.Write[CameraSet]) kernel.NoResult {
+func setCameras(k *kernel.Kernel, event canvas.FrameEvent, list canvas.CommandList, minimap kernel.Read[Minimap], party kernel.Read[Party], cameraSet kernel.Write[CameraSet]) kernel.NoResult {
 	world := canvas.MakeLayers(canvas.LayerRange{From: layerGround, To: layerLabels + 1})
 	sky := m.NewColorSrgb8(90, 140, 200, 255)
 	cameras := CameraSet{
@@ -805,9 +805,9 @@ type Party struct {
 }
 ```
 
-canvas begins one command list for each distinct `Order` of the frame's
-cameras, at that order among every plugin's, which render refuses at an order
-another list of the frame holds. Cameras of one order draw in one list,
+canvas begins one of render's command lists for each distinct `Order` of the
+frame's cameras, at that order among every plugin's, which render refuses at
+an order another list of the frame holds. Cameras of one order draw in one list,
 those into a texture first, so the minimap is drawn before the window showing
 it, then in the order they were set. The UI camera, at order 1, draws over
 both halves, which it does not clear. A tilemap seen by two cameras records
@@ -820,7 +820,7 @@ clear, a material blending other than normally blends against transparent,
 not against what the target holds.
 
 ```go
-func setSmoothUICamera(list canvas.DrawList) {
+func setSmoothUICamera(list canvas.CommandList) {
 	list.SetCamera(canvas.Camera{Layers: canvas.MakeLayer(layerUI), Pivot: m.Vec2{X: -0.5, Y: -0.5}, SampleCount: 4, Order: 1})
 }
 ```
@@ -842,7 +842,7 @@ grid as the view scrolls a pixel at a time. `FitStretch`, whose pixels would
 not be square, is drawn as `FitInscribe` and reported once.
 
 ```go
-func setPixelCamera(list canvas.DrawList, focus m.Vec2) {
+func setPixelCamera(list canvas.CommandList, focus m.Vec2) {
 	list.SetCamera(canvas.Camera{
 		Position:     focus,
 		Size:         m.Vec2{X: 320, Y: 180},
@@ -865,7 +865,7 @@ through each camera as the entry is, so a scrolled log stays clipped under
 every camera, zoom and display scale. A change of clip breaks a batch.
 
 ```go
-func drawLog(list canvas.DrawList, box m.Rect, lines []string, scroll float32) {
+func drawLog(list canvas.CommandList, box m.Rect, lines []string, scroll float32) {
 	for index, line := range lines {
 		list.DrawText(canvas.Text{
 			String:    line,
@@ -943,7 +943,7 @@ func makeEffects(k *kernel.Kernel, _ kernel.NoArg, assets canvas.Assets, materia
 
 // drawPulsing sets the pulse's time, from the clock that owns it, and draws
 // a spark with it.
-func drawPulsing(k *kernel.Kernel, event canvas.FrameEvent, list canvas.DrawList, assets canvas.Assets, materials kernel.Read[MaterialSet]) kernel.NoResult {
+func drawPulsing(k *kernel.Kernel, event canvas.FrameEvent, list canvas.CommandList, assets canvas.Assets, materials kernel.Read[MaterialSet]) kernel.NoResult {
 	pulse := materials.Get().Pulse
 	assets.SetMaterialUniform(pulse, "pulse_time", [4]float32{float32(event.TimeFromStart.Seconds())})
 	list.DrawSprite(canvas.Sprite{Image: spark, Material: pulse, Layer: layerEffects})
@@ -1019,7 +1019,7 @@ func makeDissolve(assets canvas.Assets) canvas.Material {
 
 // drawDying draws the dying units, whose sprites took the dissolve material
 // as they began to die, each at its own amount.
-func drawDying(list canvas.DrawList, dissolve canvas.Material, sprites []canvas.Sprite, dissolves []Dissolve) {
+func drawDying(list canvas.CommandList, dissolve canvas.Material, sprites []canvas.Sprite, dissolves []Dissolve) {
 	list.DrawSpritesWith(sprites, dissolves)
 	list.DrawShapeWith(canvas.Shape{Kind: canvas.Fill, Rect: m.Rect{Width: 64, Height: 64}, Tint: m.White, Material: dissolve, Layer: layerEffects}, Dissolve{Amount: 0.5, Colour: m.White})
 }
@@ -1137,7 +1137,7 @@ field texels, so each label's outline lies under its own fill and every run
 of a frame batches, whatever its size, tint, profile or icons:
 
 ```go
-func drawNameplate(list canvas.DrawList, fontSets FontChoice, name string, position m.Vec2) {
+func drawNameplate(list canvas.CommandList, fontSets FontChoice, name string, position m.Vec2) {
 	list.DrawTextWith(canvas.Text{
 		String:    name,
 		Font:      fontSets.Title,
@@ -1148,7 +1148,7 @@ func drawNameplate(list canvas.DrawList, fontSets FontChoice, name string, posit
 	}, canvas.Outline(2, m.Black))
 }
 
-func drawStory(list canvas.DrawList, story string, box m.Rect) {
+func drawStory(list canvas.CommandList, story string, box m.Rect) {
 	list.DrawText(canvas.Text{
 		String:     story,
 		Size:       18,
@@ -1217,7 +1217,7 @@ func makeDamageHint() DamageHint {
 	return DamageHint{Spans: []canvas.Span{{Text: "Deals "}, {Tint: fire}, {Text: " "}, {Icon: "fire", Tint: fire}}}
 }
 
-func drawHints(list canvas.DrawList, hint *DamageHint, damage string) {
+func drawHints(list canvas.CommandList, hint *DamageHint, damage string) {
 	list.DrawText(canvas.Text{String: `Press \i:button-a to \c:gold{jump}`, Markup: true, Layer: layerUI})
 	hint.Spans[1].Text = damage
 	list.DrawText(canvas.Text{Spans: hint.Spans, Transform: m.Translation2x3(0, 30), Layer: layerUI})
@@ -1248,7 +1248,7 @@ type Trail struct {
 	Vertices []canvas.Vertex
 }
 
-func drawTrail(list canvas.DrawList, trail *Trail, points []m.Vec2, spark m.Color) {
+func drawTrail(list canvas.CommandList, trail *Trail, points []m.Vec2, spark m.Color) {
 	trail.Vertices = trail.Vertices[:0]
 	for index, point := range points {
 		fade := float32(index) / float32(len(points))
@@ -1495,7 +1495,7 @@ render and a recording task of its own after canvas. `Spawn(renderConfig,
 canvasConfig, plugins…)` spawns the test's plugins after canvas, and `Step`
 draws one beat, its frame inspected in canvas's terms: `Frames` answers each
 camera, its batches and their entries, and what it culled, with render's
-inspection of the frame beside it. `Record(func(list canvas.DrawList))`
+inspection of the frame beside it. `Record(func(list canvas.CommandList))`
 records a frame from the test without writing a plugin, and `OpenWindow`
 opens a headless window to draw into.
 
@@ -1550,7 +1550,7 @@ func TestATextRecordedFromTheTestIsCulledOutsideTheView(t *testing.T) {
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, nil)
 	h.OpenWindow(platform.Size{Width: 320, Height: 240})
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.DrawText(canvas.Text{String: "far away", Transform: m.Translation2x3(5000, 0)})
 	})
 	h.Step()
@@ -1611,7 +1611,7 @@ func TestARedFillCoversTheWindowsLeftHalf(t *testing.T) {
 	capturer.arm(h.OpenWindow(platform.Size{Width: 320, Height: 240}))
 	// The picture arrives a frame or more after the frame drawing it.
 	for range 10 {
-		h.Record(func(list canvas.DrawList) {
+		h.Record(func(list canvas.CommandList) {
 			list.DrawShape(canvas.Shape{Kind: canvas.Fill, Rect: m.Rect{X: -160, Y: -120, Width: 160, Height: 240}, Tint: m.Color{R: 1, A: 1}})
 		})
 		h.Step()
@@ -1729,7 +1729,7 @@ func TestAWarmFrameOfTheSceneAllocatesNothing(t *testing.T) {
 ## Rules
 
 - **Never reach gfx from a plugin that records into canvas**: go through
-  `DrawList`, `Assets`, `FontLibrary` and `Targets`, and render's parameters
+  `CommandList`, `Assets`, `FontLibrary` and `Targets`, and render's parameters
   only for a texture of your own.
 - **Record from tasks scheduled after `FrameEvent.Ready`**, joined into the
   handler's out dependency.

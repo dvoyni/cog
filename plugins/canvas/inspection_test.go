@@ -15,7 +15,7 @@ import (
 	"github.com/dvoyni/cog/plugins/render/rendertest"
 )
 
-func TestAnInspectedFrameAnswersItsCamerasBatchesInstanceCountsAndEntriesWithTheirSortKeysAndDrawListsPlaces(t *testing.T) {
+func TestAnInspectedFrameAnswersItsCamerasBatchesInstanceCountsAndEntriesWithTheirSortKeysAndCommandListsPlaces(t *testing.T) {
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, nil, &orderedRecorder{name: "recorder", lateOrder: 10, earlyOrder: 11})
 	window := h.OpenWindow(platform.Size{Width: 64, Height: 48})
@@ -24,7 +24,7 @@ func TestAnInspectedFrameAnswersItsCamerasBatchesInstanceCountsAndEntriesWithThe
 	// third, a second shape of the list, moves the next lists' shapes past
 	// further than their sprites.
 	third := canvas.Shape{Kind: canvas.Fill, Layer: 3}
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.DrawShape(first)
 		list.DrawSprite(second)
 		list.DrawShape(third)
@@ -37,11 +37,11 @@ func TestAnInspectedFrameAnswersItsCamerasBatchesInstanceCountsAndEntriesWithThe
 	// before its early one, runs after it. The entries are drawn in sort
 	// order, each keeping its list's place and its own, the sprites of the
 	// white texel in the shapes' batch.
-	entry := func(shape canvas.Shape, drawListIndex, indexInDrawList int) canvas.InspectedEntry {
-		return canvas.InspectedEntry{Kind: canvas.EntryKindShape, Shape: shape, Layer: shape.Layer, Order: shape.Order, DrawListIndex: drawListIndex, IndexInDrawList: indexInDrawList}
+	entry := func(shape canvas.Shape, commandListIndex, indexInCommandList int) canvas.InspectedEntry {
+		return canvas.InspectedEntry{Kind: canvas.EntryKindShape, Shape: shape, Layer: shape.Layer, Order: shape.Order, CommandListIndex: commandListIndex, IndexInCommandList: indexInCommandList}
 	}
-	spriteEntry := func(sprite canvas.Sprite, drawListIndex, indexInDrawList int) canvas.InspectedEntry {
-		return canvas.InspectedEntry{Kind: canvas.EntryKindSprite, Sprite: sprite, Layer: sprite.Layer, Order: sprite.Order, DrawListIndex: drawListIndex, IndexInDrawList: indexInDrawList}
+	spriteEntry := func(sprite canvas.Sprite, commandListIndex, indexInCommandList int) canvas.InspectedEntry {
+		return canvas.InspectedEntry{Kind: canvas.EntryKindSprite, Sprite: sprite, Layer: sprite.Layer, Order: sprite.Order, CommandListIndex: commandListIndex, IndexInCommandList: indexInCommandList}
 	}
 	// The shapes and the sprites of the zero image draw the white texel, in
 	// the sRGB sprite atlas.
@@ -91,7 +91,7 @@ func TestAnInspectedBatchAnswersTheClipItsEntriesShare(t *testing.T) {
 	h.Spawn(nil, nil)
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	clip := m.Rect{X: -4, Y: -4, Width: 8, Height: 8}
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.DrawShape(canvas.Shape{Rect: m.Rect{Width: 10, Height: 10}, Order: 1})
 		list.DrawShape(canvas.Shape{Rect: m.Rect{Width: 10, Height: 10}, Order: 2, Clip: clip})
 	})
@@ -113,7 +113,7 @@ func TestEachFrameCanvastestStepsIsInspectedBesideRendersInspectionOfIt(t *testi
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 
 	for range 3 {
-		h.Record(func(list canvas.DrawList) { list.DrawShape(canvas.Shape{}) })
+		h.Record(func(list canvas.CommandList) { list.DrawShape(canvas.Shape{}) })
 		h.Step()
 	}
 

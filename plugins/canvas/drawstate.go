@@ -13,13 +13,13 @@ import (
 	"github.com/dvoyni/cog/plugins/render"
 )
 
-// drawState is canvas's private state: the draw list of each task
-// declaring a DrawList, in registration order, whether a frame is open for
+// drawState is canvas's private state: the command list of each task
+// declaring a CommandList, in registration order, whether a frame is open for
 // entries, the entries and cameras of the frame last sorted, merged from the
-// draw lists, with each entry's keys, the inspector, the residency requests
-// Assets queued, the image sizes it read, the stamps of the files read, a
-// reload of the font files asked for, the 2D materials it made, and the
-// stopwatches timing its jobs.
+// command lists, with each entry's keys, the inspector, the residency
+// requests Assets queued, the image sizes it read, the stamps of the files
+// read, a reload of the font files asked for, the 2D materials it made, and
+// the stopwatches timing its jobs.
 type drawState struct {
 	// reporter is where reports go.
 	reporter *reporter
@@ -29,30 +29,14 @@ type drawState struct {
 	// recording is set from the job opening a frame for entries until the
 	// job sorting them.
 	recording atomic.Bool
-	// drawLists are added at registration, while the kernel is composed,
-	// and only read after.
-	drawLists []*drawList
-	// entries are the frame's entries, merged from the draw lists in their
-	// order, each a shape of shapes, a sprite of sprites, a run of text of
-	// texts, per-frame triangles of triangles or a mesh of meshes, merged
-	// alike, the bytes of the arguments they give, end to end, the spans of
-	// the runs of text, copied end to end, and the triangles' vertex and
-	// index bytes, each end to end. All are replaced by the next frame's
-	// when it merges.
-	entries     []recordedEntry
-	shapes      []Shape
-	sprites     []Sprite
-	texts       []laidOutText
-	triangles   []recordedTriangles
-	meshes      []Mesh
-	arguments   []byte
-	spans       []Span
-	vertexBytes []byte
-	indexBytes  []byte
-	// cameras are the frame's cameras, merged from the draw lists in their
-	// order, in the order they draw, or the default camera for a frame of
-	// entries that set none, replaced by the next frame's when it merges.
-	cameras []Camera
+	// commandLists are the tasks', added at registration, while the kernel
+	// is composed, and only read after.
+	commandLists []*commandList
+	// frameCommandList is the frame's command list, every task's appended
+	// to it in their order, its cameras then sorted in the order they draw, or the
+	// default camera for a frame of entries that set none, replaced by the
+	// next frame's when it merges.
+	frameCommandList commandList
 	// sorter sorts them, and holds the frame's entries in sort order, which
 	// the renderer regroups once it has found their batch keys.
 	sorter entrySorter
@@ -73,10 +57,10 @@ type drawState struct {
 	// materials are the 2D materials Assets made.
 	materials materialTable
 	// frameInspected is set when the frame merged is written down for a
-	// pending request, and then drawListEnds holds, for each draw list, the
-	// index in entries after its last entry.
-	frameInspected bool
-	drawListEnds   []int
+	// pending request, and then commandListEnds holds, for each command list,
+	// the index in entries after its last entry.
+	frameInspected  bool
+	commandListEnds []int
 	// sortStopwatch and drawStopwatch time the jobs sorting and drawing a
 	// frame inspected, and sortTime is how long it took to sort.
 	sortStopwatch metronome.Stopwatch
@@ -84,34 +68,34 @@ type drawState struct {
 	sortTime      time.Duration
 }
 
-// addDrawList adds a draw list after every one added before it, and
+// addCommandList adds a command list after every one added before it, and
 // answers it.
-func (s *drawState) addDrawList() *drawList {
-	added := &drawList{
+func (s *drawState) addCommandList() *commandList {
+	added := &commandList{
 		outsideFrame: Report{
 			Kind: ReportKindRecordedOutsideFrame,
-			Err:  fmt.Errorf("canvas: draw list %d recorded an entry or set a camera while no frame is recording", len(s.drawLists)),
+			Err:  fmt.Errorf("canvas: command list %d recorded an entry or set a camera while no frame is recording", len(s.commandLists)),
 		},
 		slicesDiffer: Report{
 			Kind: ReportKindSliceLengthsDiffer,
-			Err:  fmt.Errorf("canvas: draw list %d was given parallel slices of different lengths, of entries and their arguments, and recorded none of them", len(s.drawLists)),
+			Err:  fmt.Errorf("canvas: command list %d was given parallel slices of different lengths, of entries and their arguments, and recorded none of them", len(s.commandLists)),
 		},
 		boundsMissing: Report{
 			Kind: ReportKindBoundsMissing,
-			Err:  fmt.Errorf("canvas: draw list %d was given triangles of zero bounds, and recorded none of them: a mesh needs its bounds given, or it would vanish as its origin left a view", len(s.drawLists)),
+			Err:  fmt.Errorf("canvas: command list %d was given triangles of zero bounds, and recorded none of them: a mesh needs its bounds given, or it would vanish as its origin left a view", len(s.commandLists)),
 		},
 	}
-	s.drawLists = append(s.drawLists, added)
+	s.commandLists = append(s.commandLists, added)
 	return added
 }
 
 // closeAndSort closes the frame to entries, replaces the entries and the
-// cameras of the frame merged before with each draw list's, list after
+// cameras of the frame merged before with each command list's, list after
 // list, emptying them, and sorts both: the entries by sort key, to be
 // regrouped by batch where their layer asks, and the
 // cameras in the order they draw, the default camera standing in when the
 // frame recorded entries and set no camera. The frame is inspected when a
-// request is pending as it merges, and then where each draw list's entries
+// request is pending as it merges, and then where each command list's entries
 // end is kept.
 func (s *drawState) closeAndSort() {
 	s.recording.Store(false)
@@ -119,31 +103,18 @@ func (s *drawState) closeAndSort() {
 	if s.frameInspected {
 		s.sortStopwatch.Start()
 	}
-	s.entries = s.entries[:0]
-	s.shapes = s.shapes[:0]
-	s.sprites = s.sprites[:0]
-	clear(s.texts)
-	s.texts = s.texts[:0]
-	clear(s.triangles)
-	s.triangles = s.triangles[:0]
-	s.meshes = s.meshes[:0]
-	s.arguments = s.arguments[:0]
-	clear(s.spans)
-	s.spans = s.spans[:0]
-	s.vertexBytes = s.vertexBytes[:0]
-	s.indexBytes = s.indexBytes[:0]
-	s.cameras = s.cameras[:0]
-	s.drawListEnds = s.drawListEnds[:0]
-	for _, taskDrawList := range s.drawLists {
-		taskDrawList.moveEntries(s)
+	s.frameCommandList.reset()
+	s.commandListEnds = s.commandListEnds[:0]
+	for _, taskCommandList := range s.commandLists {
+		taskCommandList.appendTo(&s.frameCommandList)
 		if s.frameInspected {
-			s.drawListEnds = append(s.drawListEnds, len(s.entries))
+			s.commandListEnds = append(s.commandListEnds, len(s.frameCommandList.entries))
 		}
 	}
-	if len(s.cameras) == 0 && len(s.entries) > 0 {
-		s.cameras = append(s.cameras, defaultCamera)
+	if len(s.frameCommandList.cameras) == 0 && len(s.frameCommandList.entries) > 0 {
+		s.frameCommandList.cameras = append(s.frameCommandList.cameras, defaultCamera)
 	}
-	slices.SortStableFunc(s.cameras, compareCameras)
+	slices.SortStableFunc(s.frameCommandList.cameras, compareCameras)
 	s.findSortKeys()
 	s.sorter.sortByKey()
 	if s.frameInspected {
@@ -155,23 +126,23 @@ func (s *drawState) closeAndSort() {
 // key, in the order merged, for the sorter to sort.
 func (s *drawState) findSortKeys() {
 	s.sorter.entries = s.sorter.entries[:0]
-	for index, entry := range s.entries {
+	for index, entry := range s.frameCommandList.entries {
 		var key sortKey
 		switch entry.kind {
 		case EntryKindShape:
-			shape := &s.shapes[entry.index]
+			shape := &s.frameCommandList.shapes[entry.index]
 			key = makeSortKey(shape.Layer, shape.Order)
 		case EntryKindSprite:
-			sprite := &s.sprites[entry.index]
+			sprite := &s.frameCommandList.sprites[entry.index]
 			key = makeSortKey(sprite.Layer, sprite.Order)
 		case EntryKindText:
-			text := &s.texts[entry.index].text
+			text := &s.frameCommandList.texts[entry.index].text
 			key = makeSortKey(text.Layer, text.Order)
 		case EntryKindTriangles:
-			options := &s.triangles[entry.index].options
+			options := &s.frameCommandList.triangles[entry.index].options
 			key = makeSortKey(options.Layer, options.Order)
 		case EntryKindMesh:
-			mesh := &s.meshes[entry.index]
+			mesh := &s.frameCommandList.meshes[entry.index]
 			key = makeSortKey(mesh.Layer, mesh.Order)
 		}
 		s.sorter.entries = append(s.sorter.entries, sortedEntry{key: key, entryIndex: uint32(index)})
@@ -183,15 +154,15 @@ func (s *drawState) findSortKeys() {
 func (s *drawState) findEntryMaterial(entry recordedEntry) Material {
 	switch entry.kind {
 	case EntryKindShape:
-		return s.shapes[entry.index].Material
+		return s.frameCommandList.shapes[entry.index].Material
 	case EntryKindSprite:
-		return s.sprites[entry.index].Material
+		return s.frameCommandList.sprites[entry.index].Material
 	case EntryKindTriangles:
-		return s.triangles[entry.index].options.Material
+		return s.frameCommandList.triangles[entry.index].options.Material
 	case EntryKindMesh:
-		return s.meshes[entry.index].Material
+		return s.frameCommandList.meshes[entry.index].Material
 	}
-	return cmp.Or(s.texts[entry.index].text.Material, TextMaterial)
+	return cmp.Or(s.frameCommandList.texts[entry.index].text.Material, TextMaterial)
 }
 
 // findEntryImage answers the image entry, of the frame's, draws and the
@@ -200,13 +171,13 @@ func (s *drawState) findEntryMaterial(entry recordedEntry) Material {
 func (s *drawState) findEntryImage(entry recordedEntry) (Image, uint32) {
 	switch entry.kind {
 	case EntryKindSprite:
-		sprite := &s.sprites[entry.index]
+		sprite := &s.frameCommandList.sprites[entry.index]
 		return sprite.Image, sprite.Frame
 	case EntryKindTriangles:
-		options := &s.triangles[entry.index].options
+		options := &s.frameCommandList.triangles[entry.index].options
 		return options.Image, options.Frame
 	case EntryKindMesh:
-		mesh := &s.meshes[entry.index]
+		mesh := &s.frameCommandList.meshes[entry.index]
 		return mesh.Image, mesh.Frame
 	}
 	return Image{}, 0
@@ -215,18 +186,18 @@ func (s *drawState) findEntryImage(entry recordedEntry) (Image, uint32) {
 // findEntryArgument answers the bytes of the argument entry, of the frame's,
 // gives its material, none for an entry giving none.
 func (s *drawState) findEntryArgument(entry recordedEntry) []byte {
-	return s.arguments[entry.argument.offset : entry.argument.offset+findArgumentSize(entry.argument.goType)]
+	return s.frameCommandList.arguments[entry.argument.offset : entry.argument.offset+findArgumentSize(entry.argument.goType)]
 }
 
 // makeInspection answers the frame sorted, of beat, in canvas's terms, as
 // drawing drew it through inventory: each camera that drew, and each that
 // culled every entry of its layers, in the order the cameras draw, with
 // the batches it drew and the entries it culled, each entry with its place
-// among the draw lists. It is called
-// only for a frame inspected, whose draw lists' ends were kept.
+// among the command lists. It is called
+// only for a frame inspected, whose command lists' ends were kept.
 func (s *drawState) makeInspection(beat metronome.Beat, inventory render.Inventory, drawing *renderer) Inspection {
 	if !s.frameInspected {
-		panic("canvas: making the inspection of a frame not inspected, whose draw lists' ends were not kept")
+		panic("canvas: making the inspection of a frame not inspected, whose command lists' ends were not kept")
 	}
 	inspection := Inspection{Beat: beat}
 	culledCameras := drawing.culledCameras
@@ -294,37 +265,37 @@ func (s *drawState) makeInspectedCamera(inventory render.Inventory, drawing *ren
 
 // makeInspectedEntry answers the entry at entryIndex of the frame's as
 // inspected: its kind, the entry as recorded, its sort key, and its place
-// among the draw lists.
+// among the command lists.
 func (s *drawState) makeInspectedEntry(entryIndex uint32) InspectedEntry {
-	// The draw list holding the entry is the first to end after it.
-	drawListIndex, _ := slices.BinarySearch(s.drawListEnds, int(entryIndex)+1)
-	drawListStart := 0
-	if drawListIndex > 0 {
-		drawListStart = s.drawListEnds[drawListIndex-1]
+	// The command list holding the entry is the first to end after it.
+	commandListIndex, _ := slices.BinarySearch(s.commandListEnds, int(entryIndex)+1)
+	commandListStart := 0
+	if commandListIndex > 0 {
+		commandListStart = s.commandListEnds[commandListIndex-1]
 	}
-	recorded := s.entries[entryIndex]
-	inspected := InspectedEntry{Kind: recorded.kind, DrawListIndex: drawListIndex, IndexInDrawList: int(entryIndex) - drawListStart}
+	recorded := s.frameCommandList.entries[entryIndex]
+	inspected := InspectedEntry{Kind: recorded.kind, CommandListIndex: commandListIndex, IndexInCommandList: int(entryIndex) - commandListStart}
 	switch recorded.kind {
 	case EntryKindShape:
-		inspected.Shape = s.shapes[recorded.index]
+		inspected.Shape = s.frameCommandList.shapes[recorded.index]
 		inspected.Layer = inspected.Shape.Layer
 		inspected.Order = inspected.Shape.Order
 	case EntryKindSprite:
-		inspected.Sprite = s.sprites[recorded.index]
+		inspected.Sprite = s.frameCommandList.sprites[recorded.index]
 		inspected.Layer = inspected.Sprite.Layer
 		inspected.Order = inspected.Sprite.Order
 	case EntryKindText:
-		inspected.Text = s.texts[recorded.index].text
+		inspected.Text = s.frameCommandList.texts[recorded.index].text
 		// The next frame's spans are written over these.
 		inspected.Text.Spans = slices.Clone(inspected.Text.Spans)
 		inspected.Layer = inspected.Text.Layer
 		inspected.Order = inspected.Text.Order
 	case EntryKindTriangles:
-		inspected.TrianglesOptions = s.triangles[recorded.index].options
+		inspected.TrianglesOptions = s.frameCommandList.triangles[recorded.index].options
 		inspected.Layer = inspected.TrianglesOptions.Layer
 		inspected.Order = inspected.TrianglesOptions.Order
 	case EntryKindMesh:
-		inspected.Mesh = s.meshes[recorded.index]
+		inspected.Mesh = s.frameCommandList.meshes[recorded.index]
 		inspected.Layer = inspected.Mesh.Layer
 		inspected.Order = inspected.Mesh.Order
 	}

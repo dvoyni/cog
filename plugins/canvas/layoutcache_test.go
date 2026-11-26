@@ -23,7 +23,7 @@ func TestALabelDrawnEveryFrameIsShapedOnceAndFreedOnceUnusedForTheIdleFrames(t *
 
 	for frame := range 10 {
 		if frame >= 2 && frame <= 6 {
-			h.Record(func(list canvas.DrawList) { list.DrawText(label) })
+			h.Record(func(list canvas.CommandList) { list.DrawText(label) })
 		}
 		h.Step()
 	}
@@ -60,7 +60,7 @@ func TestALabelMeasuredThenDrawnIsShapedOnce(t *testing.T) {
 
 	h.Step()
 	for range 3 {
-		h.Record(func(list canvas.DrawList) { list.DrawText(label) })
+		h.Record(func(list canvas.CommandList) { list.DrawText(label) })
 		h.Step()
 	}
 	h.Step()
@@ -89,7 +89,7 @@ func TestAPreloadedStringsFirstDrawMakesNoGlyph(t *testing.T) {
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 
 	h.Step()
-	h.Record(func(list canvas.DrawList) { list.DrawText(canvas.Text{String: preloaded, Size: 30}) })
+	h.Record(func(list canvas.CommandList) { list.DrawText(canvas.Text{String: preloaded, Size: 30}) })
 	h.Step()
 	h.Step()
 

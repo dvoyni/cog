@@ -103,9 +103,9 @@ func findEntryIndices(entries []sortedEntry) []uint32 {
 // regrouped by their batch keys, whose entries are the frame's in sort
 // order.
 func newShapeFrame(shapes []Shape, sorter entrySorter) *drawState {
-	state := &drawState{shapes: shapes, sorter: sorter}
+	state := &drawState{frameCommandList: commandList{shapes: shapes}, sorter: sorter}
 	for index := range shapes {
-		state.entries = append(state.entries, recordedEntry{kind: EntryKindShape, index: uint32(index)})
+		state.frameCommandList.entries = append(state.frameCommandList.entries, recordedEntry{kind: EntryKindShape, index: uint32(index)})
 	}
 	state.findSortKeys()
 	state.sorter.sortByKey()
@@ -117,8 +117,8 @@ func newShapeFrame(shapes []Shape, sorter entrySorter) *drawState {
 // of shapes alone, each at its entry's index, over the zero atlas.
 func findShapeBatchKeys(state *drawState) []batchKey {
 	var keys []batchKey
-	for index := range state.shapes {
-		keys = append(keys, state.shapes[index].batchKey(render.TextureView{}))
+	for index := range state.frameCommandList.shapes {
+		keys = append(keys, state.frameCommandList.shapes[index].batchKey(render.TextureView{}))
 	}
 	return keys
 }

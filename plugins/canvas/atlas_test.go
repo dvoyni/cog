@@ -156,14 +156,14 @@ func countReports(h *canvastest.Harness, kind canvas.ReportKind) int {
 
 // recordWhiteFill records a white fill of 20 units square about the
 // origin into list.
-func recordWhiteFill(list canvas.DrawList) {
+func recordWhiteFill(list canvas.CommandList) {
 	list.DrawShape(canvas.Shape{Rect: m.Rect{X: -10, Y: -10, Width: 20, Height: 20}, Tint: m.White})
 }
 
 // makeSpriteRecord answers a record of a sprite of each of images, in their
 // order.
-func makeSpriteRecord(images ...canvas.Image) func(list canvas.DrawList) {
-	return func(list canvas.DrawList) {
+func makeSpriteRecord(images ...canvas.Image) func(list canvas.CommandList) {
+	return func(list canvas.CommandList) {
 		for order, image := range images {
 			list.DrawSprite(canvas.Sprite{Image: image, Order: int32(order)})
 		}
@@ -178,7 +178,7 @@ func TestSpritesOfDifferentImagesAndTheShapesBesideThemDrawFromTheSpriteAtlasAsO
 	blue := canvas.ImageFromFile(bluePath)
 	linearRed := canvas.ImageFromFile(redPath, canvas.ImageOptions{ColorSpace: canvas.ColorSpaceLinear})
 	fill := m.Rect{X: -4, Y: -4, Width: 8, Height: 8}
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.DrawShape(canvas.Shape{Rect: fill, Tint: m.White, Order: 1})
 		// A sprite of the zero image draws the white texel, as shapes do,
 		// which no filter changes.
@@ -243,7 +243,7 @@ func TestAnImageIsPackedAndItsPagesMipsMadeAtItsFirstDrawBeforeTheCamerasPassIts
 	blue := canvas.ImageFromFile(bluePath)
 	// An image differing from red in its pivot alone shares its region.
 	pivotedRed := canvas.ImageFromFile(redPath, canvas.ImageOptions{Pivot: canvas.PivotTopLeft})
-	record := func(list canvas.DrawList) {
+	record := func(list canvas.CommandList) {
 		list.DrawSprite(canvas.Sprite{Image: red})
 		list.DrawSprite(canvas.Sprite{Image: blue, Order: 1})
 		list.DrawSprite(canvas.Sprite{Image: pivotedRed, Order: 2})
@@ -306,7 +306,7 @@ func TestAFramesPackingAndMipsOpenItsLowestCameraOrdersListBeforeAnyCamerasPass(
 	h.Spawn(nil, nil, &fileMounter{files: makeAtlasFiles(t)})
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	red := canvas.ImageFromFile(redPath)
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.SetCamera(canvas.Camera{Order: 2})
 		list.SetCamera(canvas.Camera{Clear: true, Order: 1})
 		list.DrawSprite(canvas.Sprite{Image: red})
@@ -364,7 +364,7 @@ func TestATinyShapeDrawsTheWhiteTexelWrittenAtEveryMipLevel(t *testing.T) {
 	// half of one at 1 to 2 pixels a point, read the white texel's cell at
 	// a level below the first, which is white as the first is; laid a
 	// fifth of a unit apart, they cover every pixel of their square.
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.CommandList) {
 		for row := range 10 {
 			for column := range 10 {
 				list.DrawShape(canvas.Shape{Rect: m.Rect{X: -1 + 0.2*float32(column), Y: -1 + 0.2*float32(row), Width: 0.25, Height: 0.25}, Tint: m.White})
@@ -462,7 +462,7 @@ func TestAnImageAsLargeAsAPageTakesATextureOfItsOwnExactlyItsSize(t *testing.T) 
 	h.Spawn(nil, &canvas.Config{AtlasPageSize: 32}, &fileMounter{files: makeAtlasFiles(t)}, describer)
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	blue := canvas.ImageFromFile(bluePath)
-	record := func(list canvas.DrawList) { list.DrawSprite(canvas.Sprite{Image: blue}) }
+	record := func(list canvas.CommandList) { list.DrawSprite(canvas.Sprite{Image: blue}) }
 	h.Record(record)
 
 	h.Step()
@@ -520,7 +520,7 @@ func TestAPackedImageDrawsItsOwnTexelsAndLinearFilteringNeverReachesItsNeighbour
 	stripes := canvas.ImageFromFile(stripesPath)
 	blue := canvas.ImageFromFile(bluePath)
 	cornerImage := canvas.ImageFromFile("corner.png")
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.CommandList) {
 		list.DrawSprite(canvas.Sprite{Image: blue, Transform: m.Translation2x3(40, 0), Size: m.Vec2{X: 40, Y: 40}})
 		list.DrawSprite(canvas.Sprite{Image: stripes, Transform: m.Translation2x3(-40, -30), Size: m.Vec2{X: 40, Y: 10}})
 		list.DrawSprite(canvas.Sprite{Image: stripes, Transform: m.Translation2x3(-40, 30), Size: m.Vec2{X: 40, Y: 10}, Filter: canvas.FilterNearest})
@@ -587,7 +587,7 @@ func TestAMinifiedSpriteNeverMixesANeighboursColourAtAnyMipLevel(t *testing.T) {
 		{"green", green, m.Vec2{X: 20.5, Y: 0.5}, 3, opaqueGreen},
 		{"green", green, m.Vec2{X: 40.5, Y: 0.5}, 1.5, opaqueGreen},
 	}
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.CommandList) {
 		for _, sprite := range sprites {
 			list.DrawSprite(canvas.Sprite{Image: sprite.image, Transform: m.Translation2x3(sprite.centre.X, sprite.centre.Y), Size: m.Vec2{X: sprite.size, Y: sprite.size}})
 		}
@@ -626,7 +626,7 @@ func TestAnImageNoPageHoldsIsDrawnFromANewPageOrATextureOfItsOwn(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			quadrants := canvas.ImageFromFile(quadrantsPath)
-			picture := captureHarnessDrawing(t, canvastest.NewHarness(t), &test.config, func(list canvas.DrawList) {
+			picture := captureHarnessDrawing(t, canvastest.NewHarness(t), &test.config, func(list canvas.CommandList) {
 				list.DrawSprite(canvas.Sprite{Image: quadrants, Size: m.Vec2{X: 40, Y: 40}, Filter: canvas.FilterNearest})
 				list.DrawShape(canvas.Shape{Rect: m.Rect{X: 40, Y: -10, Width: 20, Height: 20}, Tint: m.White})
 			}, &fileMounter{files: makeQuadrantsFiles(t)})
@@ -746,7 +746,7 @@ func TestAnAtlasAtItsCeilingEvictsTheImageDrawnLeastLatelyToPackANewOne(t *testi
 	red := canvas.ImageFromFile(redPath)
 	quadrants := canvas.ImageFromFile(quadrantsPath)
 	green := canvas.ImageFromFile(greenPath)
-	for _, record := range []func(list canvas.DrawList){makeSpriteRecord(red), makeSpriteRecord(quadrants), makeSpriteRecord(green), makeSpriteRecord(red, quadrants)} {
+	for _, record := range []func(list canvas.CommandList){makeSpriteRecord(red), makeSpriteRecord(quadrants), makeSpriteRecord(green), makeSpriteRecord(red, quadrants)} {
 		h.Record(record)
 		h.Step()
 	}

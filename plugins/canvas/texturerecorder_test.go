@@ -10,12 +10,12 @@ import (
 
 // textureRecorder is a test plugin whose recording task, hung off
 // canvas.FrameEvent, makes each of made at its first run, then calls record
-// in each frame with the task's draw list and Assets and the textures made,
-// in made's order.
+// in each frame with the task's command list and Assets and the textures
+// made, in made's order.
 type textureRecorder struct {
 	testPlugin
 	made   []madeTexture
-	record func(list canvas.DrawList, assets canvas.Assets, textures []render.Texture)
+	record func(list canvas.CommandList, assets canvas.Assets, textures []render.Texture)
 	// mutex guards textures, none until made.
 	mutex    sync.Mutex
 	textures []render.Texture
@@ -31,7 +31,7 @@ type madeTexture struct {
 func (*textureRecorder) Name() kernel.PluginName { return "texture recorder" }
 
 func (r *textureRecorder) Init(configurator *kernel.Configurator, _ any) error {
-	record := configurator.RegisterTask3(func(k *kernel.Kernel, _ kernel.NoArg, inventory render.Inventory, list canvas.DrawList, assets canvas.Assets) kernel.NoResult {
+	record := configurator.RegisterTask3(func(k *kernel.Kernel, _ kernel.NoArg, inventory render.Inventory, list canvas.CommandList, assets canvas.Assets) kernel.NoResult {
 		r.mutex.Lock()
 		if r.textures == nil {
 			for _, made := range r.made {

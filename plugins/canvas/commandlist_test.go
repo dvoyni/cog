@@ -13,11 +13,11 @@ import (
 	"github.com/dvoyni/cog/plugins/render"
 )
 
-func TestEntriesDrawByLayerThenOrderThenTheirDrawListsRegistrationOrderThenCallOrder(t *testing.T) {
+func TestEntriesDrawByLayerThenOrderThenTheirCommandListsRegistrationOrderThenCallOrder(t *testing.T) {
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, nil, &orderedRecorder{name: "first recorder", lateOrder: 5, earlyOrder: 5}, &orderedRecorder{name: "second recorder", lateOrder: 5, earlyOrder: 5})
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.DrawShape(canvas.Shape{Order: 9, Layer: -1})
 		list.DrawShape(canvas.Shape{Order: 5, Layer: 1})
 		list.DrawShape(canvas.Shape{Order: 5, Tint: m.Color{R: 1, A: 1}})
@@ -29,7 +29,7 @@ func TestEntriesDrawByLayerThenOrderThenTheirDrawListsRegistrationOrderThenCallO
 
 	var got [][2]int
 	for _, entry := range findDrawnEntries(h.Frames()[0]) {
-		got = append(got, [2]int{entry.DrawListIndex, entry.IndexInDrawList})
+		got = append(got, [2]int{entry.CommandListIndex, entry.IndexInCommandList})
 	}
 	// canvastest's list, 0, comes first, its plugin listed right after
 	// canvas; each recorder's late task, 1 and 3, was registered before its
@@ -41,7 +41,7 @@ func TestEntriesDrawByLayerThenOrderThenTheirDrawListsRegistrationOrderThenCallO
 		{0, 4}, {0, 1}, {1, 1}, {2, 1}, {3, 1}, {4, 1},
 	}
 	if !slices.Equal(got, want) {
-		t.Errorf("the frame drew its entries from these draw lists' places, and their own, %v, want %v", got, want)
+		t.Errorf("the frame drew its entries from these command lists' places, and their own, %v, want %v", got, want)
 	}
 }
 
@@ -49,7 +49,7 @@ func TestAFramesShapesAreForgottenOnceItIsDrawn(t *testing.T) {
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, nil)
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
-	h.Record(func(list canvas.DrawList) { list.DrawShape(canvas.Shape{Order: 1}) })
+	h.Record(func(list canvas.CommandList) { list.DrawShape(canvas.Shape{Order: 1}) })
 	h.Step()
 
 	h.Step()
@@ -87,7 +87,7 @@ func TestAFrameWithNeitherEntriesNorCamerasBeginsNoCommandList(t *testing.T) {
 	h.Spawn(nil, nil)
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	h.Step()
-	h.Record(func(list canvas.DrawList) { list.DrawShape(canvas.Shape{}) })
+	h.Record(func(list canvas.CommandList) { list.DrawShape(canvas.Shape{}) })
 
 	h.Step()
 
@@ -127,7 +127,7 @@ func TestFrameEventCarriesRendersBeatAndTimingSignals(t *testing.T) {
 	for range 3 {
 		// A fill has canvas begin a command list, so each frame submits work
 		// the GPU's latency is measured on.
-		h.Record(func(list canvas.DrawList) { list.DrawShape(canvas.Shape{}) })
+		h.Record(func(list canvas.CommandList) { list.DrawShape(canvas.Shape{}) })
 		h.Step()
 	}
 

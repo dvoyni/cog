@@ -90,7 +90,7 @@ func makeGateRecordings(scenario gateScenario) []*gateRecording {
 // bulk and one alone, its shapes, its texts and its triangles. In its first
 // frame it makes its materials, and sets the second on the sprites of
 // every other switch period.
-func (recording *gateRecording) record(list canvas.DrawList, assets canvas.Assets, _ int) {
+func (recording *gateRecording) record(list canvas.CommandList, assets canvas.Assets, _ int) {
 	if recording.second == (canvas.Material{}) {
 		recording.makeMaterials(assets)
 	}

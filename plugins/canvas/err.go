@@ -81,7 +81,7 @@ const (
 	ReportKindArgumentLayoutMismatch
 	// ReportKindSliceLengthsDiffer is a bulk call given parallel slices of
 	// different lengths, such as DrawSpritesWith's sprites and arguments,
-	// which records none of them. It is reported once for each draw list.
+	// which records none of them. It is reported once for each command list.
 	ReportKindSliceLengthsDiffer
 	// ReportKindFontNotLoaded is a font file a font set names that fails
 	// to read or parse as it is made, or whose collection has no font at its
@@ -120,7 +120,7 @@ const (
 	// ReportKindBoundsMissing is a per-frame mesh given to DrawTriangles
 	// with zero bounds, which records nothing, so forgetting them shows at
 	// once rather than as a mesh vanishing when its origin leaves the view.
-	// It is reported once for each draw list.
+	// It is reported once for each command list.
 	ReportKindBoundsMissing
 	// ReportKindMeshFileNotLoaded is a mesh file a Mesh draws that is
 	// missing, is no mesh file, is of a version canvas does not know, is cut

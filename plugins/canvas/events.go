@@ -8,11 +8,11 @@ import (
 )
 
 // FrameEvent is the frame canvas's users record, published inside
-// render.FrameEvent every beat. A handler schedules its recording tasks,
-// each declaring a DrawList, after Ready and returns ex.Join(in, own), with
-// no ordering among the handlers; canvas draws the frame after the last of
-// them. An entry recorded by a task not joined so, which runs once canvas's
-// drawing has begun, is refused.
+// render.FrameEvent every beat. A handler schedules its recording tasks, each
+// declaring a CommandList, after Ready and returns ex.Join(in, own), with no
+// ordering among the handlers; canvas draws the frame after the last of them.
+// An entry recorded by a task not joined so, which runs once canvas's drawing
+// has begun, is refused.
 type FrameEvent struct {
 	metronome.Beat
 	// Ready is the job opening the frame for entries, after render's Ready;

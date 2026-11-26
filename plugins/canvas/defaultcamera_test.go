@@ -16,7 +16,7 @@ func TestAFrameOfFillsReachesRenderAsOneListAtOrderZeroOfOnePassAndOneInstancedD
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, nil, listBracketer{})
 	window := h.OpenWindow(platform.Size{Width: 64, Height: 48})
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		for index := range 3 {
 			list.DrawShape(canvas.Shape{Kind: canvas.Fill, Rect: m.Rect{X: float32(index) * 8, Width: 4, Height: 4}, Tint: m.White})
 		}
@@ -57,7 +57,7 @@ func TestAFillShowsItsTintPremultipliedAndEncodedAsSRGBInTheWindowThroughTheDefa
 	// translucent one, recorded before it but drawn after it, a layer up,
 	// most of the top-left quarter and the opaque fill's top-left corner,
 	// and nothing the bottom half.
-	picture := captureDrawing(t, func(list canvas.DrawList) {
+	picture := captureDrawing(t, func(list canvas.CommandList) {
 		list.DrawShape(canvas.Shape{Kind: canvas.Fill, Rect: m.Rect{X: -150, Y: -110, Width: 145, Height: 105}, Tint: translucentOrange, Layer: 1})
 		list.DrawShape(canvas.Shape{Kind: canvas.Fill, Rect: m.Rect{X: -20, Y: -20, Width: 40, Height: 40}, Tint: green})
 	})

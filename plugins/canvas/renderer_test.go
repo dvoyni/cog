@@ -30,7 +30,7 @@ func TestTwoCamerasOfHalfViewportsEachClearOnlyTheirHalf(t *testing.T) {
 		{"the right set first", []canvas.Camera{right, left}},
 	} {
 		t.Run(setting.name, func(t *testing.T) {
-			picture := captureDrawing(t, func(list canvas.DrawList) {
+			picture := captureDrawing(t, func(list canvas.CommandList) {
 				for _, camera := range setting.cameras {
 					list.SetCamera(camera)
 				}
@@ -85,7 +85,7 @@ func TestAnInscribedCamerasBarsShowItsClearColourAndItsEntriesDrawOnlyBetweenThe
 		}},
 	} {
 		t.Run(inscribed.name, func(t *testing.T) {
-			picture := captureDrawing(t, func(list canvas.DrawList) {
+			picture := captureDrawing(t, func(list canvas.CommandList) {
 				list.SetCamera(canvas.Camera{Viewport: inscribed.viewport, Size: m.Vec2{X: 100, Y: 100}, Fit: canvas.FitInscribe, Clear: true, ClearColor: green})
 				list.DrawShape(canvas.Shape{Rect: m.Rect{X: -1000, Y: -1000, Width: 2000, Height: 2000}, Tint: m.White})
 			})
@@ -109,7 +109,7 @@ func TestAHairlineIsOneTargetPixelWideAtTwoCameraZooms(t *testing.T) {
 		{"at zoom 1", canvas.Camera{Layers: canvas.MakeLayer(0), Viewport: m.Rect{Width: 0.5, Height: 1}, Zoom: 1, Clear: true, ClearColor: m.Color{A: 1}}, m.Vec2{X: -80}},
 		{"at zoom 3", canvas.Camera{Layers: canvas.MakeLayer(1), Viewport: m.Rect{X: 0.5, Width: 0.5, Height: 1}, Zoom: 3, Clear: true, ClearColor: m.Color{A: 1}}, m.Vec2{X: 80}},
 	}
-	picture := captureDrawing(t, func(list canvas.DrawList) {
+	picture := captureDrawing(t, func(list canvas.CommandList) {
 		for _, half := range halves {
 			list.SetCamera(half.camera)
 			unit := 1 / half.camera.Zoom
@@ -155,7 +155,7 @@ func TestAPixelPerfectCamerasEntriesLandOnTheWorldUnitGridWholePixelsApart(t *te
 		{"an odd-sized fill centred on x 20", m.Rect{X: 20 - 2.5, Y: -12, Width: 5, Height: 3}, m.Rect{X: 18, Y: -12, Width: 5, Height: 3}},
 		{"an odd-sized fill centred on x 21", m.Rect{X: 21 - 2.5, Y: -7, Width: 5, Height: 3}, m.Rect{X: 19, Y: -7, Width: 5, Height: 3}},
 	}
-	picture := captureDrawing(t, func(list canvas.DrawList) {
+	picture := captureDrawing(t, func(list canvas.CommandList) {
 		list.SetCamera(canvas.Camera{Size: m.Vec2{X: 80, Y: 60}, PixelPerfect: true, Clear: true, ClearColor: m.Color{A: 1}})
 		for _, fill := range fills {
 			list.DrawShape(canvas.Shape{Rect: fill.drawn, Tint: m.White})
@@ -189,7 +189,7 @@ func TestAPixelPerfectCamerasStretchIsReportedOnce(t *testing.T) {
 	h.ExpectReport(canvas.ReportKindPixelPerfectStretch)
 
 	for range 3 {
-		h.Record(func(list canvas.DrawList) {
+		h.Record(func(list canvas.CommandList) {
 			list.SetCamera(canvas.Camera{Size: m.Vec2{X: 16, Y: 16}, Fit: canvas.FitStretch, PixelPerfect: true, Clear: true})
 		})
 		h.Step()
@@ -213,7 +213,7 @@ func TestAClippedEntryDrawsNothingOutsideItsClipInEachOfTwoViewports(t *testing.
 	// through the left camera, and from (20, -30) to (100, 10) through the
 	// right.
 	clip := m.Rect{X: -20, Y: -10, Width: 40, Height: 20}
-	picture := captureDrawing(t, func(list canvas.DrawList) {
+	picture := captureDrawing(t, func(list canvas.CommandList) {
 		list.SetCamera(canvas.Camera{Viewport: m.Rect{Width: 0.5, Height: 1}, Clear: true, ClearColor: green})
 		list.SetCamera(canvas.Camera{Viewport: m.Rect{X: 0.5, Width: 0.5, Height: 1}, Position: m.Vec2{X: 10, Y: 5}, Zoom: 2, Clear: true, ClearColor: green})
 		list.DrawShape(canvas.Shape{Rect: m.Rect{X: -1000, Y: -1000, Width: 2000, Height: 2000}, Tint: m.White, Clip: clip})
@@ -246,7 +246,7 @@ func TestAnEntryOutsideOneCamerasViewIsCulledByItAndDrawnByAnother(t *testing.T)
 	h.Spawn(nil, nil)
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	fill := canvas.Shape{Rect: m.Rect{X: 995, Y: -5, Width: 10, Height: 10}, Tint: m.White}
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.SetCamera(canvas.Camera{Viewport: m.Rect{Width: 0.5, Height: 1}, Clear: true})
 		list.SetCamera(canvas.Camera{Viewport: m.Rect{X: 0.5, Width: 0.5, Height: 1}, Position: m.Vec2{X: 1000}, Clear: true})
 		list.SetCamera(canvas.Camera{Position: m.Vec2{X: -1000}, Order: 1})
@@ -284,7 +284,7 @@ func TestCamerasAtTwoOrdersBeginAListAtEachAmongAnotherPluginsAndACameraAtATaken
 	h.Spawn(nil, nil, &orderTaker{order: 3})
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	h.Harness.ExpectReport(render.ReportKindOrderTaken)
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.SetCamera(canvas.Camera{Order: 10, Clear: true})
 		list.SetCamera(canvas.Camera{Order: 3, Clear: true})
 		list.SetCamera(canvas.Camera{Order: -5, Clear: true})
@@ -320,8 +320,8 @@ func TestAtEqualOrdersACameraIntoATextureDrawsBeforeOneIntoAWindowSetBeforeIt(t 
 	target := &textureCamera{descriptor: minimapDescriptor, camera: canvas.Camera{Clear: true}}
 	h.Spawn(nil, nil, target)
 	window := h.OpenWindow(platform.Size{Width: 64, Height: 48})
-	// canvastest's draw list comes before the texture camera's.
-	h.Record(func(list canvas.DrawList) { list.SetCamera(canvas.Camera{Clear: true}) })
+	// canvastest's command list comes before the texture camera's.
+	h.Record(func(list canvas.CommandList) { list.SetCamera(canvas.Camera{Clear: true}) })
 
 	h.Step()
 
@@ -387,11 +387,11 @@ func TestACameraThatClearsDrawsInAFrameWithNoEntriesItsClearEncodedAndOneThatDoe
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, nil)
 	window := h.OpenWindow(platform.Size{Width: 64, Height: 48})
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.SetCamera(canvas.Camera{Clear: true, ClearColor: m.NewColorSrgb(0.5, 0.25, 1, 1)})
 	})
 	h.Step()
-	h.Record(func(list canvas.DrawList) { list.SetCamera(canvas.Camera{}) })
+	h.Record(func(list canvas.CommandList) { list.SetCamera(canvas.Camera{}) })
 	h.Step()
 
 	frames := h.Frames()
@@ -465,7 +465,7 @@ func TestAMultisampledCameraDrawsIntoAFourSampleTextureOfItsViewportResolvedInto
 	describer := &textureDescriber{}
 	h.Spawn(nil, nil, describer)
 	window := h.OpenWindow(platform.Size{Width: 64, Height: 48})
-	record := func(list canvas.DrawList) {
+	record := func(list canvas.CommandList) {
 		list.SetCamera(canvas.Camera{Viewport: m.Rect{Width: 0.5, Height: 1}, Clear: true, ClearColor: m.White, SampleCount: 4})
 		list.SetCamera(canvas.Camera{Viewport: m.Rect{X: 0.5, Width: 0.5, Height: 1}, SampleCount: 4})
 		list.DrawShape(canvas.Shape{Rect: m.Rect{X: -100, Y: -100, Width: 200, Height: 200}, Tint: green})
@@ -541,7 +541,7 @@ func TestAMultisampledCameraClearingTheWholeWindowDrawsWhatItResolvedOverTheWind
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, nil)
 	window := h.OpenWindow(platform.Size{Width: 64, Height: 48})
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.SetCamera(canvas.Camera{Clear: true, SampleCount: 4})
 	})
 
@@ -563,7 +563,7 @@ func TestACameraOfASampleCountOtherThanOneOrFourPanicsAsItIsSet(t *testing.T) {
 	h.Spawn(nil, nil)
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	var recovered any
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		defer func() { recovered = recover() }()
 		list.SetCamera(canvas.Camera{SampleCount: 2})
 	})
@@ -584,7 +584,7 @@ func TestAFourSampleCameraOfHalfTheWindowSmoothsADiagonalEdgeAndLeavesTheOtherHa
 	// scale, which 4 samples blend between the square and the clear, and
 	// one sample draws as one or the other. The probes are in the window's
 	// points from its centre.
-	picture := captureDrawing(t, func(list canvas.DrawList) {
+	picture := captureDrawing(t, func(list canvas.CommandList) {
 		list.SetCamera(canvas.Camera{Layers: canvas.MakeLayer(0), Viewport: m.Rect{Width: 0.5, Height: 1}, Clear: true, ClearColor: green})
 		list.SetCamera(canvas.Camera{Layers: canvas.MakeLayer(1), Viewport: m.Rect{X: 0.5, Width: 0.5, Height: 1}, Clear: true, ClearColor: orange, SampleCount: 4})
 		list.DrawShape(canvas.Shape{Rect: m.Rect{X: -40, Y: -10, Width: 20, Height: 20}, Tint: m.White})
@@ -621,7 +621,7 @@ func TestAFourSampleCameraThatDoesNotClearDrawsOverWhatTheWindowAlreadyHolds(t *
 	// of the middle, and below both a translucent orange band across the
 	// white fill and the green. The probes are in the window's points from
 	// its centre.
-	picture := captureDrawing(t, func(list canvas.DrawList) {
+	picture := captureDrawing(t, func(list canvas.CommandList) {
 		list.SetCamera(canvas.Camera{Layers: canvas.MakeLayer(0), Clear: true, ClearColor: green})
 		list.SetCamera(canvas.Camera{Layers: canvas.MakeLayer(1), SampleCount: 4})
 		list.DrawShape(canvas.Shape{Rect: m.Rect{X: -120, Y: -40, Width: 80, Height: 120}, Tint: m.White})
@@ -683,7 +683,7 @@ func TestASpriteDrawsItsImageAtItsTransformSizeAndPivotMirroredTurnedTintedAndCr
 	greenOverBlack := color.NRGBA{G: 128, A: 255}
 	blue := color.NRGBA{B: 255, A: 255}
 	magenta := color.NRGBA{R: 255, B: 255, A: 255}
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.CommandList) {
 		list.DrawSprites([]canvas.Sprite{
 			// At its image's 4 texels, scaled by its transform.
 			{Image: quadrants, Transform: m.Translation2x3(-120, -70).Mul(m.Scaling2x3(10, 10)), Filter: canvas.FilterNearest},
@@ -733,7 +733,7 @@ func TestASpriteWhoseImageFailsToLoadDrawsMagentaReportedOnce(t *testing.T) {
 	h.Harness.ExpectReport(render.ReportKindLoadFailed)
 	missing := canvas.ImageFromFile("missing.png")
 
-	picture := captureHarnessDrawing(t, h, nil, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, h, nil, func(list canvas.CommandList) {
 		list.DrawSprite(canvas.Sprite{Image: missing, Size: m.Vec2{X: 40, Y: 40}})
 	})
 
@@ -751,7 +751,7 @@ func TestADefaultFilterOfTheConfigReadsSpritesNamingNone(t *testing.T) {
 	h.Spawn(nil, &canvas.Config{DefaultFilter: canvas.FilterNearest}, &fileMounter{files: makeQuadrantsFiles(t)})
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	quadrants := canvas.ImageFromFile(quadrantsPath)
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.DrawShape(canvas.Shape{Rect: m.Rect{Width: 4, Height: 4}, Tint: m.White})
 		list.DrawSprite(canvas.Sprite{Image: quadrants, Order: 1})
 		list.DrawSprite(canvas.Sprite{Image: quadrants, Order: 2, Filter: canvas.FilterLinear})
@@ -776,7 +776,7 @@ func TestAnImageGivenTwoSetsOfOptionsIsDrawnWithTheFirstAndReportedOnce(t *testi
 	twice := canvas.ImageFromFile(quadrantsPath, canvas.ImageOptions{Pivot: canvas.PivotTopLeft}, canvas.ImageOptions{Pivot: canvas.PivotBottomRight})
 
 	for range 3 {
-		h.Record(func(list canvas.DrawList) {
+		h.Record(func(list canvas.CommandList) {
 			list.DrawSprite(canvas.Sprite{Image: twice})
 		})
 		h.Step()
@@ -795,7 +795,7 @@ func TestAnImagesColourSpaceIsTheFormatOfTheAtlasItIsPackedInto(t *testing.T) {
 	describer := &textureDescriber{}
 	h.Spawn(nil, nil, &fileMounter{files: makeQuadrantsFiles(t)}, describer)
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
-	record := func(list canvas.DrawList) {
+	record := func(list canvas.CommandList) {
 		list.DrawSprite(canvas.Sprite{Image: canvas.ImageFromFile(quadrantsPath)})
 		list.DrawSprite(canvas.Sprite{Image: canvas.ImageFromFile(quadrantsPath, canvas.ImageOptions{ColorSpace: canvas.ColorSpaceLinear}), Order: 1})
 	}
@@ -824,7 +824,7 @@ func TestARegroupedLayersEntriesOfEqualKeysDrawGroupedByTheirBatch(t *testing.T)
 	h.Spawn(nil, &canvas.Config{RegroupedLayers: []int32{1}}, &fileMounter{files: makeQuadrantsFiles(t)})
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	quadrants := canvas.ImageFromFile(quadrantsPath)
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		// Linear and nearest sprites alternate, at equal keys, in a layer
 		// regrouped and in one that is not.
 		for _, layer := range []int32{0, 1} {

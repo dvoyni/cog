@@ -33,7 +33,7 @@ func TestAMeshFilePutIntoAMemoryMountDrawsAtItsFirstDrawAndAForestOfItIsOneDraw(
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, nil, &fileMounter{files: memory})
 	h.OpenWindow(platform.Size{Width: 320, Height: 240})
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.DrawMeshes(forest)
 		list.DrawMesh(canvas.Mesh{File: rock, Transform: m.Translation2x3(0, 50)})
 	})
@@ -101,7 +101,7 @@ func TestAMissingOrMalformedMeshFileDrawsNothingReportedOnceUntilPutAgainAndUnlo
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 
 	for range 4 {
-		h.Record(func(list canvas.DrawList) {
+		h.Record(func(list canvas.CommandList) {
 			list.DrawMesh(canvas.Mesh{File: broken})
 			list.DrawMesh(canvas.Mesh{File: later})
 			list.DrawMesh(canvas.Mesh{})
@@ -151,7 +151,7 @@ func TestAMeshFileOfZeroBoundsDrawsNothingReportedOnce(t *testing.T) {
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 
 	for range 2 {
-		h.Record(func(list canvas.DrawList) {
+		h.Record(func(list canvas.CommandList) {
 			list.DrawMesh(canvas.Mesh{File: unbounded})
 			list.DrawShape(canvas.Shape{Rect: m.Rect{Width: 4, Height: 4}})
 		})
@@ -186,7 +186,7 @@ func TestPuttingAMeshFileAgainAndUnloadingItsPathDrawsTheNewOne(t *testing.T) {
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 
 	for range 2 {
-		h.Record(func(list canvas.DrawList) {
+		h.Record(func(list canvas.CommandList) {
 			list.DrawMesh(canvas.Mesh{File: chunk})
 		})
 		h.Step()
@@ -217,7 +217,7 @@ func TestAMeshFileSamplesItsImageAndItsTranslationSnapsUnderAPixelPerfectCamera(
 	putFile(t, memory, quadrantsPath, makeQuadrantsFiles(t)[quadrantsPath].Data)
 	square := canvas.MeshFileFromFile("meshes/square.mesh")
 	framed := canvas.MeshFileFromFile("meshes/picture.mesh")
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.CommandList) {
 		list.SetCamera(canvas.Camera{Size: m.Vec2{X: 80, Y: 60}, PixelPerfect: true, Clear: true, ClearColor: m.Color{A: 1}})
 		list.DrawMesh(canvas.Mesh{File: square, Transform: m.Translation2x3(10.3, -5.6)})
 		list.DrawMesh(canvas.Mesh{File: framed, Image: canvas.ImageFromFile(quadrantsPath), Filter: canvas.FilterNearest, Transform: m.Translation2x3(-36, -10)})
@@ -251,7 +251,7 @@ func TestASwayingGrassMeshInItsOwnLayoutDrawsThroughItsMaterialsVertexStage(t *t
 	grass := canvas.MeshFileFromFile("meshes/grass.mesh")
 	recorder := &materialRecorder{
 		descriptors: []canvas.MaterialDescriptor{grassMaterialDescriptor},
-		record: func(list canvas.DrawList, assets canvas.Assets, materials []canvas.Material, frame int) {
+		record: func(list canvas.CommandList, assets canvas.Assets, materials []canvas.Material, frame int) {
 			if frame == 0 {
 				assets.SetMaterialUniform(materials[0], "grass_wind", [4]float32{30, 0, 0, 0})
 			}
@@ -259,7 +259,7 @@ func TestASwayingGrassMeshInItsOwnLayoutDrawsThroughItsMaterialsVertexStage(t *t
 		},
 	}
 
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(canvas.DrawList) {}, recorder, mounter)
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(canvas.CommandList) {}, recorder, mounter)
 
 	picture.expect(t, []probe{
 		{"near the swayed tip", m.Vec2{X: 28.5, Y: -18}, opaqueGreen},
@@ -280,7 +280,7 @@ func TestAMeshOfItsOwnLayoutDrawnWithAFragmentOnlyMaterialIsRefusedReportedOnce(
 	grass := canvas.MeshFileFromFile("meshes/grass.mesh")
 	recorder := &materialRecorder{
 		descriptors: []canvas.MaterialDescriptor{grassMaterialDescriptor},
-		record: func(list canvas.DrawList, assets canvas.Assets, materials []canvas.Material, frame int) {
+		record: func(list canvas.CommandList, assets canvas.Assets, materials []canvas.Material, frame int) {
 			list.DrawMesh(canvas.Mesh{File: grass})
 			list.DrawTriangles(canvas.DrawTrianglesOptions{}, grassBlade)
 			list.DrawMesh(canvas.Mesh{File: grass, Material: materials[0]})

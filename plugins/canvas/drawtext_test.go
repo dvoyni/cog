@@ -90,7 +90,7 @@ func TestALabelDrawsItsGlyphsAtTwoSizesAndTurned(t *testing.T) {
 		{"a block at 60 turned a quarter", m.Vec2{X: 90, Y: 50}, math.Pi / 2, 60},
 	}
 
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), exactFieldConfig, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), exactFieldConfig, func(list canvas.CommandList) {
 		for _, label := range labels {
 			list.DrawText(canvas.Text{String: fullBlock, Size: label.size, Transform: m.TRS2x3(label.centre, label.angle, m.Vec2{X: 1, Y: 1})})
 		}
@@ -116,7 +116,7 @@ func TestAnOutlinedLabelShowsItsBandOutsideItsFillFadedByItsTintsAlpha(t *testin
 	opaqueCentre := m.Vec2{X: -60}
 	translucentCentre := m.Vec2{X: 60}
 
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), exactFieldConfig, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), exactFieldConfig, func(list canvas.CommandList) {
 		list.DrawTextWith(canvas.Text{String: fullBlock, Size: size, Transform: m.Translation2x3(opaqueCentre.X, opaqueCentre.Y)}, outline)
 		list.DrawTextWith(canvas.Text{String: fullBlock, Size: size, Tint: m.Color{R: 1, G: 1, B: 1, A: 0.5}, Transform: m.Translation2x3(translucentCentre.X, translucentCentre.Y)}, outline)
 	})
@@ -139,7 +139,7 @@ func TestALabelsDropShadowFallsByItsOffsetWithinItsGlyphsQuads(t *testing.T) {
 	const size = 100
 	shadow := canvas.DropShadow(m.Vec2{X: 3}, 1, orange)
 
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), exactFieldConfig, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), exactFieldConfig, func(list canvas.CommandList) {
 		list.DrawTextWith(canvas.Text{String: fullBlock, Size: size}, shadow)
 	})
 
@@ -164,7 +164,7 @@ func TestEveryLabelOfAFrameIsOneBatchOfTextMaterialOverTheGlyphAtlas(t *testing.
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, nil)
 	h.OpenWindow(platform.Size{Width: 320, Height: 240})
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.DrawTextWith(canvas.Text{String: "e f", Size: 12, Transform: m.TRS2x3(m.Vec2{X: 60}, 1, m.Vec2{X: 1, Y: 1}), Order: 2}, canvas.Glow(4, orange))
 		list.DrawText(canvas.Text{String: "ab", Transform: m.Translation2x3(-60, 0)})
 		list.DrawTextWith(canvas.Text{String: "cd", Size: 24, Tint: orange, Order: 1}, canvas.Outline(2, m.Black))
@@ -198,7 +198,7 @@ func TestARunIsCulledByItsGlyphsBounds(t *testing.T) {
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, nil)
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.DrawText(canvas.Text{String: "ab", Pivot: canvas.PivotTopLeft, Transform: m.Translation2x3(-40, -10)})
 		list.DrawText(canvas.Text{String: "cd", Pivot: canvas.PivotTopLeft, Transform: m.Translation2x3(-100, -10)})
 	})
@@ -215,7 +215,7 @@ func TestARunOfSpacesAloneDrawsNothing(t *testing.T) {
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, nil)
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.DrawText(canvas.Text{String: "   "})
 	})
 
@@ -235,7 +235,7 @@ func TestAGlyphPackedOntoAnOldPageAsTheGlyphAtlasGrowsStillDraws(t *testing.T) {
 	// from, so it is not lost when the copy lands.
 	config := &canvas.Config{AtlasPageSize: 84}
 
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), config, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), config, func(list canvas.CommandList) {
 		list.DrawText(canvas.Text{String: "█▀.", Size: 48})
 	})
 
@@ -258,7 +258,7 @@ func TestAGlyphNoPageHoldsDrawsNothingReportedOnceAndTheAtlasDoesNotGrow(t *test
 	h.ExpectReport(canvas.ReportKindAtlasFull)
 	h.Spawn(nil, config)
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.DrawText(canvas.Text{String: fullBlock + "a"})
 	})
 
@@ -311,7 +311,7 @@ func TestAThinStrokeOfSmallTextDrawsItsWholeInkAtAnyPhaseOfThePixelGrid(t *testi
 	phases := []float32{0, 0.13, 0.37, 0.61, 0.89}
 	findCentre := func(index int) m.Vec2 { return m.Vec2{X: -90 + 45*float32(index), Y: phases[index]} }
 
-	picture := captureDrawing(t, func(list canvas.DrawList) {
+	picture := captureDrawing(t, func(list canvas.CommandList) {
 		for index := range phases {
 			angle := float32(0)
 			if index > 0 {
@@ -344,7 +344,7 @@ func TestSmallTextsGlyphsLandOnWholePixelsSoEachDrawsAlike(t *testing.T) {
 	// pen lands on a whole pixel, so each stem draws the same columns of
 	// ink, a whole number of pixels from the last.
 	const stemCount = 6
-	picture := captureDrawing(t, func(list canvas.DrawList) {
+	picture := captureDrawing(t, func(list canvas.CommandList) {
 		list.DrawText(canvas.Text{String: strings.Repeat("│", stemCount), Size: smallTextSize})
 	})
 
@@ -385,7 +385,7 @@ func TestSmallTextsGlyphsOfDifferentWidthsCentredOnOnePenStayCentredAlike(t *tes
 	findLeft := func(index int) float32 { return -120 + 50*float32(index) + shifts[index] }
 	findTop := func(row int) float32 { return -100 + 40*float32(row) }
 
-	picture := captureDrawing(t, func(list canvas.DrawList) {
+	picture := captureDrawing(t, func(list canvas.CommandList) {
 		for index := range shifts {
 			for row, glyph := range glyphs {
 				list.DrawText(canvas.Text{String: glyph, Size: smallTextSize, Pivot: canvas.PivotTopLeft, Transform: m.Translation2x3(findLeft(index), findTop(row))})
@@ -428,10 +428,10 @@ func TestATwelvePixelLabelIsCapturedForTheOwnerToJudge(t *testing.T) {
 	// point.
 	var pixelsPerPoint float32
 	t.Run("pixels per point", func(t *testing.T) {
-		pixelsPerPoint = captureDrawing(t, func(canvas.DrawList) {}).pixelsPerPoint
+		pixelsPerPoint = captureDrawing(t, func(canvas.CommandList) {}).pixelsPerPoint
 	})
 	size := 12 / pixelsPerPoint
-	picture := captureDrawing(t, func(list canvas.DrawList) {
+	picture := captureDrawing(t, func(list canvas.CommandList) {
 		list.DrawShape(canvas.Shape{Rect: m.Rect{X: -160, Width: 320, Height: 120}, Tint: m.White})
 		for index, tint := range []m.Color{m.White, m.Black} {
 			list.DrawText(canvas.Text{

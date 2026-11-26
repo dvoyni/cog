@@ -34,7 +34,7 @@ func TestEachPerFrameMeshIsADrawOfItsOwnThroughTheMeshVertexStageCulledByItsBoun
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, nil)
 	h.OpenWindow(platform.Size{Width: 320, Height: 240})
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.DrawShape(canvas.Shape{Rect: m.Rect{Width: 4, Height: 4}})
 		list.DrawTriangles(canvas.DrawTrianglesOptions{}, triangle)
 		list.DrawTriangles(canvas.DrawTrianglesOptions{}, quad)
@@ -82,7 +82,7 @@ func TestTrianglesOfZeroBoundsAreRefusedAndReportedOnce(t *testing.T) {
 	h.ExpectReport(canvas.ReportKindBoundsMissing)
 	h.Spawn(nil, nil)
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
-	record := func(list canvas.DrawList) {
+	record := func(list canvas.CommandList) {
 		list.DrawTriangles(canvas.DrawTrianglesOptions{}, unbounded)
 		list.DrawShape(canvas.Shape{Rect: m.Rect{Width: 4, Height: 4}})
 	}
@@ -99,7 +99,7 @@ func TestTrianglesOfZeroBoundsAreRefusedAndReportedOnce(t *testing.T) {
 		}
 	}
 	if count := countReports(h, canvas.ReportKindBoundsMissing); count != 1 {
-		t.Errorf("two frames of triangles of zero bounds reported %d refusals, want one, for the draw list", count)
+		t.Errorf("two frames of triangles of zero bounds reported %d refusals, want one, for the command list", count)
 	}
 }
 
@@ -110,7 +110,7 @@ func TestTrianglesOfNoVerticesRecordNothingAndReportNothingWhateverTheirBounds(t
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, nil)
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.DrawTriangles(canvas.DrawTrianglesOptions{}, canvas.Triangles[canvas.Vertex]{})
 		list.DrawTriangles(canvas.DrawTrianglesOptions{}, canvas.Triangles[canvas.Vertex]{Bounds: m.Box3{Max: m.Vec3{X: 10, Y: 10}}})
 		list.DrawShape(canvas.Shape{Rect: m.Rect{Width: 4, Height: 4}})
@@ -138,7 +138,7 @@ func TestAPerFrameTrailFadesToTransparentAlongItsVerticesColours(t *testing.T) {
 		{Position: m.Vec2{X: 60, Y: -10}, Color: faded}, {Position: m.Vec2{X: 60, Y: 10}, Color: faded},
 	}
 	options := canvas.DrawTrianglesOptions{Tint: orange}
-	picture := captureDrawing(t, func(list canvas.DrawList) {
+	picture := captureDrawing(t, func(list canvas.CommandList) {
 		trail := append([]canvas.Vertex(nil), vertices...)
 		list.DrawTriangles(options, canvas.Triangles[canvas.Vertex]{Vertices: trail, Topology: meshfile.TopologyTriangleStrip, Bounds: meshfile.CalculateBounds(trail, canvas.Vertex.Position3)})
 		for index := range trail {
@@ -185,7 +185,7 @@ func TestATerrainPolygonFillsWithATilingImageAndOneThatDoesNotTileContinuesItsEd
 	for _, corner := range []m.Vec2{{}, {X: 1}, {Y: 1}, {X: 1, Y: 1}} {
 		plain = append(plain, canvas.Vertex{Position: m.Vec2{X: 40, Y: -40}.Add(corner.MulS(96)), UV: corner.MulS(3)})
 	}
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.CommandList) {
 		list.DrawTriangles(canvas.DrawTrianglesOptions{Image: canvas.ImageFromFile(tilePath, canvas.ImageOptions{Wrap: canvas.WrapBoth}), Filter: canvas.FilterNearest},
 			canvas.Triangles[canvas.Vertex]{Vertices: terrain, Indices: []uint32{0, 1, 2, 0, 2, 3, 0, 3, 4}, Bounds: meshfile.CalculateBounds(terrain, canvas.Vertex.Position3)})
 		list.DrawTriangles(canvas.DrawTrianglesOptions{Image: canvas.ImageFromFile(tilePath), Filter: canvas.FilterNearest},

@@ -124,7 +124,7 @@ func TestASlicedPanelKeepsItsCornersAtAnySizeTurnedAndSqueezedAndAHollowOneLeave
 			{"top right corner", m.Vec2{X: -11, Y: -11}, opaqueYellow},
 		}},
 	}
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.CommandList) {
 		for _, drawnPanel := range panels {
 			list.DrawSprite(canvas.Sprite{Image: drawnPanel.image, Transform: drawnPanel.transform, Size: drawnPanel.size, DrawMode: canvas.Sliced, TexelScale: drawnPanel.texelScale, Filter: canvas.FilterNearest})
 		}
@@ -172,26 +172,26 @@ func TestATiledSpriteRepeatsItsImageWithoutSeams(t *testing.T) {
 	wrapping := canvas.ImageOptions{Wrap: canvas.WrapBoth}
 	const left, top, tileSize, tileCount = float32(-35), float32(-10.5), float32(7), 10
 	const mirroredY, mirroredRight, unscaledY = float32(60), 2 * tileSize, float32(90)
-	drawTile := func(list canvas.DrawList, image canvas.Image) {
+	drawTile := func(list canvas.CommandList, image canvas.Image) {
 		list.DrawSprite(canvas.Sprite{Image: image, Size: m.Vec2{X: tileSize * tileCount, Y: 21}, DrawMode: canvas.Tiled, TexelScale: tileSize / 4, Filter: canvas.FilterLinear})
 		list.DrawSprite(canvas.Sprite{Image: image, Transform: m.Translation2x3(0, mirroredY), Size: m.Vec2{X: -4 * tileSize, Y: tileSize}, DrawMode: canvas.Tiled, TexelScale: tileSize / 4, Filter: canvas.FilterLinear})
 		list.DrawSprite(canvas.Sprite{Image: image, Transform: m.Translation2x3(0, unscaledY), Size: m.Vec2{X: 16, Y: 4}, DrawMode: canvas.Tiled, Filter: canvas.FilterLinear})
 	}
 	tileTexture := &textureRecorder{
 		made: []madeTexture{makeTileTexture()},
-		record: func(list canvas.DrawList, _ canvas.Assets, textures []render.Texture) {
+		record: func(list canvas.CommandList, _ canvas.Assets, textures []render.Texture) {
 			drawTile(list, canvas.ImageFromTexture(textures[0], wrapping))
 		},
 	}
 	for _, test := range []struct {
 		name   string
 		config *canvas.Config
-		record func(list canvas.DrawList)
+		record func(list canvas.CommandList)
 		plugin kernel.Plugin
 	}{
-		{"packed into the atlas", nil, func(list canvas.DrawList) { drawTile(list, canvas.ImageFromFile(tilePath, wrapping)) }, &fileMounter{files: files}},
-		{"drawn from a texture of its own", &canvas.Config{OwnTextureSize: 2}, func(list canvas.DrawList) { drawTile(list, canvas.ImageFromFile(tilePath, wrapping)) }, &fileMounter{files: files}},
-		{"of a render texture", nil, func(canvas.DrawList) {}, tileTexture},
+		{"packed into the atlas", nil, func(list canvas.CommandList) { drawTile(list, canvas.ImageFromFile(tilePath, wrapping)) }, &fileMounter{files: files}},
+		{"drawn from a texture of its own", &canvas.Config{OwnTextureSize: 2}, func(list canvas.CommandList) { drawTile(list, canvas.ImageFromFile(tilePath, wrapping)) }, &fileMounter{files: files}},
+		{"of a render texture", nil, func(canvas.CommandList) {}, tileTexture},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			picture := captureHarnessDrawing(t, canvastest.NewHarness(t), test.config, test.record, test.plugin)
@@ -239,7 +239,7 @@ func TestImagesOfOneRenderTextureWrappingApartAreBatchedApartTheirSamplersRepeat
 	h := canvastest.NewHarness(t)
 	recorder := &textureRecorder{
 		made: []madeTexture{makeTileTexture()},
-		record: func(list canvas.DrawList, _ canvas.Assets, textures []render.Texture) {
+		record: func(list canvas.CommandList, _ canvas.Assets, textures []render.Texture) {
 			for order, wrap := range []canvas.Wrap{canvas.WrapNone, canvas.WrapX, canvas.WrapY} {
 				list.DrawSprite(canvas.Sprite{Image: canvas.ImageFromTexture(textures[0], canvas.ImageOptions{Wrap: wrap}), DrawMode: canvas.Tiled, Filter: canvas.FilterLinear, Order: int32(order)})
 			}

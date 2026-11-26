@@ -158,7 +158,7 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 		r.unloadMeshFiles(inventory, unloaded)
 	}
 	// A frame of entries always sets a camera, the default one standing in.
-	if len(state.cameras) == 0 {
+	if len(state.frameCommandList.cameras) == 0 {
 		return
 	}
 	if r.defaultSlot.material == (render.Material{}) {
@@ -167,7 +167,7 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 	r.materialSlots = state.materials.appendSlots(r.materialSlots[:0])
 	// Every image and glyph the frame draws is marked drawn before any is
 	// packed, so packing the frame's new ones evicts none the frame draws.
-	for _, entry := range state.entries {
+	for _, entry := range state.frameCommandList.entries {
 		r.findEntryFramesAndGlyphs(inventory, files, state, entry)
 		if !r.atlases.missed() {
 			r.appendEntryKeys(state, entry)
@@ -179,7 +179,7 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 		r.batchKeys = r.batchKeys[:0]
 		r.skippedEntries = r.skippedEntries[:0]
 	}
-	for _, entry := range state.entries[len(r.batchKeys):] {
+	for _, entry := range state.frameCommandList.entries[len(r.batchKeys):] {
 		r.appendEntryKeys(state, entry)
 	}
 	state.sorter.regroup(r.batchKeys)
@@ -188,8 +188,8 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 			return r.skippedEntries[entry.entryIndex]
 		})
 	}
-	for index := range state.cameras {
-		camera := &state.cameras[index]
+	for index := range state.frameCommandList.cameras {
+		camera := &state.frameCommandList.cameras[index]
 		drawnCamera, ok := makeCameraDraw(inventory, manager, mainWindow, state.reporter, camera)
 		if !ok {
 			continue
@@ -224,7 +224,7 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 func (r *renderer) findEntryFramesAndGlyphs(inventory render.Inventory, files fs.FS, state *drawState, entry recordedEntry) {
 	switch entry.kind {
 	case EntryKindMesh:
-		file := state.meshes[entry.index].File
+		file := state.frameCommandList.meshes[entry.index].File
 		if r.loadMesh(inventory, files, state.reporter, &state.fileStamps, file) {
 			state.inspector.addLoadedMeshFile(file)
 		}
@@ -235,7 +235,7 @@ func (r *renderer) findEntryFramesAndGlyphs(inventory render.Inventory, files fs
 	case EntryKindSprite, EntryKindTriangles:
 		r.atlases.find(state.findEntryImage(entry))
 	case EntryKindText:
-		layout := &state.texts[entry.index].layout
+		layout := &state.frameCommandList.texts[entry.index].layout
 		r.atlases.findGlyphs(inventory, layout.glyphs)
 		for _, icon := range layout.spanIcons {
 			if icon != nil {
@@ -342,7 +342,7 @@ func (r *renderer) drawEntries(list *render.CommandList, drawnCamera *cameraDraw
 		switch {
 		case key.triangles != 0:
 			mesh = r.listMeshes[key.triangles-1]
-			standardLayout = state.triangles[key.triangles-1].standardLayout
+			standardLayout = state.frameCommandList.triangles[key.triangles-1].standardLayout
 		case key.meshFile != (MeshFile{}):
 			loaded := &r.loadedMeshes[key.meshFile.index]
 			mesh = loaded.mesh
@@ -369,7 +369,7 @@ func (r *renderer) drawEntries(list *render.CommandList, drawnCamera *cameraDraw
 // over temporary buffers of their vertex and index bytes, their layout
 // translated into render's, forgetting those of the list before.
 func (r *renderer) acquireListMeshes(list *render.CommandList, cameraDraws []cameraDraw, state *drawState) {
-	r.listMeshes = slices.Grow(r.listMeshes[:0], len(state.triangles))[:len(state.triangles)]
+	r.listMeshes = slices.Grow(r.listMeshes[:0], len(state.frameCommandList.triangles))[:len(state.frameCommandList.triangles)]
 	clear(r.listMeshes)
 	for index := range cameraDraws {
 		for _, drawnBatch := range cameraDraws[index].batches {
@@ -377,7 +377,7 @@ func (r *renderer) acquireListMeshes(list *render.CommandList, cameraDraws []cam
 			if trianglesIndex == 0 || r.listMeshes[trianglesIndex-1] != (render.Mesh{}) {
 				continue
 			}
-			triangles := &state.triangles[trianglesIndex-1]
+			triangles := &state.frameCommandList.triangles[trianglesIndex-1]
 			r.setVertexBuffer(list.AcquireTemporaryBuffer(triangles.vertices), triangles.layout)
 			descriptor := render.MeshDescriptor{Label: "canvas triangles", VertexBuffers: r.vertexBuffers[:], Topology: triangles.topology}
 			if len(triangles.indices) > 0 {
@@ -471,7 +471,7 @@ func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 	var key batchKey
 	switch entry.kind {
 	case EntryKindShape:
-		shape := &state.shapes[entry.index]
+		shape := &state.frameCommandList.shapes[entry.index]
 		if material == SDFMaterial {
 			bounds = shape.findProfileBounds(profileFromBytes(state.findEntryArgument(entry)))
 		} else {
@@ -479,7 +479,7 @@ func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 		}
 		key = shape.batchKey(r.atlases.findSpriteAtlas())
 	case EntryKindSprite:
-		sprite := &state.sprites[entry.index]
+		sprite := &state.frameCommandList.sprites[entry.index]
 		image := r.atlases.placed(sprite.Image, sprite.Frame)
 		if image.drawsNothing {
 			r.appendSkippedEntryKeys()
@@ -488,7 +488,7 @@ func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 		bounds = sprite.findBounds(image)
 		key = sprite.batchKey(image, state.defaultFilter)
 	case EntryKindText:
-		run := &state.texts[entry.index]
+		run := &state.frameCommandList.texts[entry.index]
 		var drawsGlyphs bool
 		if bounds, drawsGlyphs = run.findBounds(&r.atlases); !drawsGlyphs {
 			r.appendSkippedEntryKeys()
@@ -496,7 +496,7 @@ func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 		}
 		key = run.batchKey(r.atlases.findGlyphAtlas())
 	case EntryKindTriangles:
-		triangles := &state.triangles[entry.index]
+		triangles := &state.frameCommandList.triangles[entry.index]
 		image := r.atlases.placed(triangles.options.Image, triangles.options.Frame)
 		if image.drawsNothing || !slot.drawsLayout(state.reporter, material, triangles.standardLayout) {
 			r.appendSkippedEntryKeys()
@@ -506,7 +506,7 @@ func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
 		bounds = cmp.Or(triangles.options.Transform, m.Translation2x3(0, 0)).TransformRect(m.Rect{X: box.Min.X, Y: box.Min.Y, Width: box.Max.X - box.Min.X, Height: box.Max.Y - box.Min.Y})
 		key = triangles.batchKey(image, state.defaultFilter, entry.index)
 	case EntryKindMesh:
-		mesh := &state.meshes[entry.index]
+		mesh := &state.frameCommandList.meshes[entry.index]
 		loaded := &r.loadedMeshes[mesh.File.index]
 		if loaded.mesh == (render.Mesh{}) {
 			r.appendSkippedEntryKeys()

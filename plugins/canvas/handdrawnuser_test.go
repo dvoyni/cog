@@ -53,7 +53,7 @@ func makeHandDrawnFiles(t testing.TB) fstest.MapFS {
 // six vertices an instance, switching between two materials of it every
 // switchPeriod sprites, zero meaning never, the cameras of each order in a
 // command list of their own. It skips what canvas does besides: merging
-// the draw lists, sorting, culling, batching and placing images, every
+// the command lists, sorting, culling, batching and placing images, every
 // sprite a white texel's. It mounts files, makeHandDrawnFiles', itself.
 // Its task's body closes over the plugin, which keeps the frame's
 // instances from one frame to the next.

@@ -102,21 +102,21 @@ func BenchmarkEntries(b *testing.B) {
 		makeRecord func() recordFunc
 	}{
 		{"fills", func() recordFunc {
-			return func(list canvas.DrawList, _ canvas.Assets, _ int) {
+			return func(list canvas.CommandList, _ canvas.Assets, _ int) {
 				for _, position := range positions {
 					list.DrawShape(canvas.Shape{Rect: m.Rect{X: position.X, Y: position.Y, Width: 4, Height: 4}, Tint: m.White})
 				}
 			}
 		}},
 		{"sprites", func() recordFunc {
-			return func(list canvas.DrawList, _ canvas.Assets, _ int) {
+			return func(list canvas.CommandList, _ canvas.Assets, _ int) {
 				for _, transform := range transforms {
 					list.DrawSprite(canvas.Sprite{Image: solid, Transform: transform})
 				}
 			}
 		}},
 		{"texts", func() recordFunc {
-			return func(list canvas.DrawList, _ canvas.Assets, _ int) {
+			return func(list canvas.CommandList, _ canvas.Assets, _ int) {
 				for _, transform := range transforms {
 					list.DrawText(canvas.Text{String: "Score 1200", Size: 8, Transform: transform})
 				}
@@ -127,12 +127,12 @@ func BenchmarkEntries(b *testing.B) {
 			for _, transform := range transforms {
 				meshes = append(meshes, canvas.Mesh{File: tree, Transform: transform})
 			}
-			return func(list canvas.DrawList, _ canvas.Assets, _ int) {
+			return func(list canvas.CommandList, _ canvas.Assets, _ int) {
 				list.DrawMeshes(meshes)
 			}
 		}},
 		{"triangles", func() recordFunc {
-			return func(list canvas.DrawList, _ canvas.Assets, _ int) {
+			return func(list canvas.CommandList, _ canvas.Assets, _ int) {
 				for _, transform := range transforms {
 					list.DrawTriangles(canvas.DrawTrianglesOptions{Transform: transform}, triangles)
 				}
@@ -174,7 +174,7 @@ func BenchmarkImageFirstUse(b *testing.B) {
 			disc := canvas.ImageFromFile("disc.png", options.options)
 			h := canvastest.NewHarness(b)
 			h.RecordNothing()
-			h.Spawn(nil, nil, &fileMounter{files: files}, &concurrentUser{records: []recordFunc{func(list canvas.DrawList, assets canvas.Assets, frame int) {
+			h.Spawn(nil, nil, &fileMounter{files: files}, &concurrentUser{records: []recordFunc{func(list canvas.CommandList, assets canvas.Assets, frame int) {
 				if frame%2 == 0 {
 					assets.Unload("disc.png")
 					return
@@ -213,7 +213,7 @@ func BenchmarkFrameOfNewHanzi(b *testing.B) {
 	config := &canvas.Config{DefaultFontSet: canvas.FontSetDescriptor{Default: canvas.Font{Path: fontPath, FieldEm: 64}}}
 	h := canvastest.NewHarness(b)
 	h.RecordNothing()
-	h.Spawn(nil, config, &fileMounter{files: memory}, &concurrentUser{records: []recordFunc{func(list canvas.DrawList, assets canvas.Assets, frame int) {
+	h.Spawn(nil, config, &fileMounter{files: memory}, &concurrentUser{records: []recordFunc{func(list canvas.CommandList, assets canvas.Assets, frame int) {
 		// After gateWarmFrameCount frames, each frame divisible by 3 is the
 		// timed one.
 		switch frame % 3 {

@@ -12,7 +12,7 @@ importing [kernel](../../kernel), [metronome](../metronome),
 
 - **Entries, recorded every frame.** Shapes, sprites, runs of text and meshes
   are plain values an ECS component holds, recorded singly or in bulk by
-  tasks running together, each into a draw list of its own, then merged,
+  tasks running together, each into a command list of its own, then merged,
   sorted by layer and order, and forgotten.
 - **Batched for you.** Entries of one 2D material, atlas, filter and clip in
   sort order are one instanced draw, shapes with the sprites beside them, and
@@ -58,7 +58,7 @@ importing [kernel](../../kernel), [metronome](../metronome),
 - **`FrameEvent`** is the frame its users record, published inside each of
   render's `FrameEvent`s. A plugin that records schedules its recording tasks
   after its `Ready` and joins them into the out dependency it returns.
-- Two **task parameters**: **`DrawList`**, each task's own, records entries
+- Two **task parameters**: **`CommandList`**, each task's own, records entries
   and sets cameras, and **`Assets`** reaches materials, preloads, unloads,
   image sizes, hot reload and inspections. Two **resources**:
   **`FontLibrary`**, whose writing side `ElevateFontLibrary` answers, holds
@@ -91,7 +91,7 @@ importing [kernel](../../kernel), [metronome](../metronome),
   fonts and mesh files load; `platform.WindowManager`, for read, for a
   window's size; and metronome's `Clock`, in `Init`, to time its sorting and
   drawing.
-- **Task parameters it offers:** `DrawList` and `Assets`.
+- **Task parameters it offers:** `CommandList` and `Assets`.
 - **Events it publishes:** `FrameEvent`, inside its handler of
   `render.FrameEvent`; and `InspectedEvent`, once render has delivered its
   inspection of a frame canvas was asked to inspect.

@@ -6,7 +6,7 @@ draws sprites, shapes, text and meshes through 2D materials. It was mapped in
 each section links the ticket that holds its detail. The vocabulary is in
 [`CONTEXT.md`](../CONTEXT.md).
 
-Status: being built. The plugin, its frame event, draw lists and canvastest
+Status: being built. The plugin, its frame event, command lists and canvastest
 are built, a fill is drawn through the default camera with canvas's
 include and its default material, a frame is inspected in canvas's
 terms: its cameras, batches and entries, and entries are sorted by their
@@ -44,7 +44,7 @@ through which sprites, text and meshes are drawn, every look a 2D material. A
 plugin that draws in 2D uses canvas, and render for what canvas does not
 cover, and never reaches gfx:
 
-- it **records entries** every frame into its **draw list**: sprites, shapes,
+- it **records entries** every frame into its **command list**: sprites, shapes,
   runs of text and meshes, each a plain value with a **sort key**, singly or in
   bulk, and keeps no sprite object;
 - it names **images** and **mesh files** by path, loaded at their first draw
@@ -59,7 +59,7 @@ cover, and never reaches gfx:
   **icons** and **markup**, and measures it through the same **layout** it
   draws;
 - canvas sorts the frame's entries, culls them per camera, batches them,
-  records one command list for each camera order among every plugin's, and
+  records one of render's command lists for each camera order among every plugin's, and
   forgets the frame;
 - an **inspection** of a frame in canvas's terms, and **reloads** of changed
   images, fonts and mesh files, come with it.
@@ -81,7 +81,7 @@ author** testing canvas or a plugin on it.
 1. As a game developer, I want to record sprites, shapes, text and meshes every frame with calls such as `DrawSprite`, and keep no sprite object, so that what is drawn is what my game's state says this frame.
 2. As a plugin author, I want each entry to be a plain value, so that an ECS component can be exactly that value.
 3. As a plugin author, I want bulk calls taking parallel slices of entries and of their arguments, so that an ECS chunk's columns go in as they are.
-4. As a plugin author, I want each recording task to record into a draw list of its own, so that parallel systems never contend.
+4. As a plugin author, I want each recording task to record into a command list of its own, so that parallel systems never contend.
 5. As a game developer, I want an entry recorded outside the frame refused and reported, so that a task on the wrong beat is named, not silently lost.
 6. As a plugin author, I want the atlas, text layout, the 2D material contract and the camera's matrices to be public pieces that canvas's own entries use, so that my tilemap or UI has the power of the built-ins.
 
@@ -90,7 +90,7 @@ author** testing canvas or a plugin on it.
 7. As a game developer, I want entries sorted by a layer, then an order within the layer, so that I place the ground, the units and the UI with no depth buffer.
 8. As a game developer, I want entries of equal keys drawn in the order I recorded them, so that a game that sets no keys gets call order.
 9. As a game developer, I want a function that maps a y position onto an order, so that I y-sort units with no scale to choose.
-10. As a game developer, I want ties between draw lists broken by the order their tasks were registered in, so that I choose no number for them.
+10. As a game developer, I want ties between command lists broken by the order their tasks were registered in, so that I choose no number for them.
 11. As a game developer, I want a layer that may regroup its entries of equal keys, so that a UI's or particles' entries batch where their order among themselves does not matter.
 
 ### Sprites
@@ -181,7 +181,7 @@ author** testing canvas or a plugin on it.
 77. As a game developer, I want a camera drawing into a render texture before the window that shows it, so that a minimap is up to date in the same frame.
 78. As a game developer, I want a logical size fitted to the viewport by expanding, inscribing with bars, overlapping or stretching, so that my game shows the area it was designed for on any window.
 79. As a game developer, I want a pixel-perfect camera, so that pixel art keeps square, still pixels at any window size and DPI.
-80. As a game developer, I want a camera's order among every plugin's command lists, so that 2D draws under a 3D scene and a UI over it.
+80. As a game developer, I want a camera's order among every plugin's render command lists, so that 2D draws under a 3D scene and a UI over it.
 81. As a game developer, I want a UI camera whose top left is the world's origin, one unit to a point, so that world coordinates are UI coordinates.
 82. As a game developer, I want multisampling per camera, so that hard edges smooth at once.
 83. As a game developer, I want to convert a click between the screen and the world through what the player saw, so that picking matches the picture.
@@ -218,7 +218,7 @@ author** testing canvas or a plugin on it.
 - **Shaped for an ECS plugin it does not import:**
   - an entry is a plain value, so a component can be exactly it: `Sprite`, `Shape` and `Mesh` are pointer-free, and their handles (`Image`, `MeshFile`, `Material`, `FontSet`) are plain, pointer-free, comparable values;
   - a bulk call sits beside each single one, so a query's chunk is recorded at once, its arguments included;
-  - each recording task records into its own draw list, so parallel systems never contend.
+  - each recording task records into its own command list, so parallel systems never contend.
 - **Naming:** a struct that is only a call's parameter is named `…Options` (`ImageOptions`, `DrawTrianglesOptions`). A value an ECS component holds is named for what it draws: `Sprite`, `Text`, `Shape`, `Mesh`. Shapes and every other entry are literals, with no constructors: a constructor answering a shape left its sort key to be set afterwards.
 - **Built to be built on.** The atlas, the batcher, text layout (shaping, wrapping and measuring without drawing), the 2D material contract and the camera's matrices are public pieces. canvas's own sprites, shapes and text use only those, so a user's tilemap or UI has the same power as the built-ins.
 - **`Config`,** under `PluginName`:
@@ -235,17 +235,17 @@ author** testing canvas or a plugin on it.
 - **Resources it installs:**
   - `FontLibrary` and `Targets`, each an interface of reads alone;
   - `Handlers{RecordFrame, Recover, DeliverInspection}`, its subscriptions to `render.FrameEvent`, `render.RecoveredEvent` and `render.InspectedEvent`, one field each, for others to order their handlers around;
-  - a private state: its atlases, caches, tables and draw lists.
+  - a private state: its atlases, caches, tables and command lists.
 
   There is no `Tasks` resource, since canvas offers no task for others to schedule, and it declares no sockets.
 - **Task parameters it offers,** each declaring render's and platform's locks on its user's behalf, as render's parameters declare gfx's:
 
   | Parameter | Locks | Carries |
   |---|---|---|
-  | `DrawList` | canvas's state, `FontLibrary`, and through an `Inventory` it holds render's asset table, `gfx.Device` and `platform.FS`, all read | its task's draw list: every `Draw…` call and `SetCamera` |
+  | `CommandList` | canvas's state, `FontLibrary`, and through an `Inventory` it holds render's asset table, `gfx.Device` and `platform.FS`, all read | its task's command list: every `Draw…` call and `SetCamera` |
   | `Assets` | the same reads, and through a `render.Frame` it holds render's frame state, read | `MakeMaterial` and the material setters, `Preload`, `Unload`, `ImageSize`, `RequestInspection`, `ReadInspection` and `ReloadChanged` |
 
-  A draw list takes render's locks because an image's or a mesh file's first draw loads it. A recording task that also needs `Assets`, such as for `ImageSize`, declares both; the two take the same reads.
+  A command list takes render's locks because an image's or a mesh file's first draw loads it. A recording task that also needs `Assets`, such as for `ImageSize`, declares both; the two take the same reads.
 - **Every lock is a read,** so recording tasks run together; canvas's state is synchronized within, as render's is. The exceptions:
   - `FontLibrary`'s writing side takes `Write[canvas.FontLibrary]`, with platform's FS read through `ElevateFontLibrary`, so a task making a font set runs apart from every recording task;
   - canvas's own task copying `Targets` takes `Write[canvas.Targets]`.
@@ -265,8 +265,8 @@ render.FrameEvent ─ canvas's RecordFrame:
   publishes canvas.FrameEvent{Beat, Ready, AcquireWait, GPULatency}, that job its Ready
     users' recording tasks, after e.Ready, joined into its out dependency
   after that out dependency:
-    the sort task: the draw lists merged and the entries sorted once
-    the drawing job: each camera order's command list in turn, culled, batched and recorded
+    the sort task: the command lists merged and the entries sorted once
+    the drawing job: each camera order's render command list in turn, culled, batched and recorded
     the Targets task, under Write[canvas.Targets]: each target's size and scale as drawn
   all joined into render's out dependency, so render's second pickup of loads
   and gfx's flush wait for canvas's drawing
@@ -277,12 +277,12 @@ render.FrameEvent ─ canvas's RecordFrame:
   - Recording tasks hang off it: they run after its `Ready` and are joined into its out dependency.
   - Users subscribing to `render.FrameEvent` with canvas ordered after them was weighed. Every user would have had to order their handler before canvas's, and a task that forgot would record into a frame already drawn.
 - **Drawing is a sort task, then one drawing job.**
-  - The sort task merges the draw lists and sorts the entries once, and the frame's cameras into the order they draw.
-  - The drawing job culls, batches and records each distinct camera order's command list in turn, and is joined into the out dependency. Cameras of one order share a list, and one temporary buffer of instance data.
+  - The sort task merges the command lists and sorts the entries once, and the frame's cameras into the order they draw.
+  - The drawing job culls, batches and records each distinct camera order's render command list in turn, and is joined into the out dependency. Cameras of one order share a list, and one temporary buffer of instance data.
   - A camera's layers are runs of the sorted entries, since entries sort by layer first, found by binary search, with no pass over the entries for each camera.
   - A job for each order, run in parallel, was weighed. The kernel schedules work only from event handlers, and canvas's handler runs before the frame's cameras are set, so it cannot know their orders; a task publishing an event starts a batch of its own, which render's frame would not wait for. The benchmarks of several cameras say whether a fixed number of drawing jobs, each claiming the next order, pays.
   - A small task after them takes `Write[canvas.Targets]` and copies each target's size and scale as drawn, so a reader sees one value for its whole run, and a task converting clicks waits only for the copy. Writing `Targets` under a read lock was weighed: a reader could see it change mid-run.
-- **A camera's `Order` is a `render.Order`.** canvas begins one command list for each distinct camera order, placed among every plugin's lists.
+- **A camera's `Order` is a `render.Order`.** canvas begins one of render's command lists for each distinct camera order, placed among every plugin's lists.
   - A 2D world camera at 0 draws under a 3D scene at 100, and a UI camera at 200 over it.
   - An order another plugin's list holds, or one of render's own (`math.MinInt32` and `math.MaxInt32`), is refused by render and reported once.
   - One list at a `Config.Order` was weighed. It could not put 2D both under and over a 3D scene.
@@ -291,12 +291,12 @@ render.FrameEvent ─ canvas's RecordFrame:
   - A camera set with `Clear` clears its viewport even when the frame has no entries.
   - A frame with neither entries nor cameras draws nothing, so a game that lists canvas but draws a frame in 3D alone keeps it.
   - An entry or a camera recorded outside the frame is refused and reported once per task, as render refuses a command list begun while no frame is recording. That covers a task on the update beat, and a task hung off `render.FrameEvent` that runs after canvas's drawing has begun.
-- **Only one frame records at a time,** as render's `Frame` reaches the frame being recorded, so a draw list holds the current frame's entries, with no keying by frame.
+- **Only one frame records at a time,** as render's `Frame` reaches the frame being recorded, so a command list holds the current frame's entries, with no keying by frame.
 
 How a plugin's recording task reads, from the prototype with its verdicts applied:
 
 ```go
-func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game kernel.Read[Game]) kernel.NoResult {
+func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.CommandList, game kernel.Read[Game]) kernel.NoResult {
 	g := game.Get()
 	list.SetCamera(canvas.Camera{
 		Position: g.Hero, Size: m.Vec2{Y: 360},
@@ -316,19 +316,19 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 }
 ```
 
-### Draw lists, entries and the sort key
+### Command lists, entries and the sort key
 
 ([canvas: the feature list, where 2D ends and its users begin, and its name](https://github.com/dvoyni/cog/issues/864), [canvas: sprites, their transforms, and how they are ordered and batched](https://github.com/dvoyni/cog/issues/867), [canvas on the kernel](https://github.com/dvoyni/cog/issues/873))
 
-- **An entry** is one thing recorded into a draw list for a frame, with its sort key: a `Sprite`, a `Shape`, a run of `Text`, or a mesh, a `Mesh` of a mesh file or triangles given for that frame alone. A frame's entries are forgotten once drawn.
-- **`canvas.DrawList` is a task parameter whose `Declare` gives each registered task a draw list of its own,** as ecs's `CommandBuffer` gives each system one.
+- **An entry** is one thing recorded into a command list for a frame, with its sort key: a `Sprite`, a `Shape`, a run of `Text`, or a mesh, a `Mesh` of a mesh file or triangles given for that frame alone. A frame's entries are forgotten once drawn.
+- **`canvas.CommandList` is a task parameter whose `Declare` gives each registered task a command list of its own,** as ecs's `CommandBuffer` gives each system one.
   - The lists are ordered by registration: plugin order, then the order each plugin registers its tasks. That order breaks ties after layer and order, so there is no number to choose.
-  - A task whose jobs run twice in one frame records both into its draw list, in the order the jobs run. A game that needs them ordered gives their entries different layers or orders.
+  - A task whose jobs run twice in one frame records both into its command list, in the order the jobs run. A game that needs them ordered gives their entries different layers or orders.
   - A `Frame` parameter beginning lists at orders the user picks, as render's command lists are, was weighed. It needed a unique number per list for a tie-break that rarely shows.
-- **The sort key is `Layer int32`, then `Order int32`, then the draw list's order, then the recording order.** The order is strictly painter's, with no depth buffer.
+- **The sort key is `Layer int32`, then `Order int32`, then the command list's order, then the recording order.** The order is strictly painter's, with no depth buffer.
   - `Layer` and `Order` make one 64-bit key. The lists are joined in list order and sorted stably by it, so the last two parts cost no bits.
   - A radix sort, a byte to a pass, skips the passes whose digit is alike for every entry, such as the high bytes of a few layers.
-  - Each entry carries its place among the merged lists through the sort, so the inspection still answers its draw list's place and its own.
+  - Each entry carries its place among the merged lists through the sort, so the inspection still answers its command list's place and its own.
   - `int32` rather than `int`, which would widen the key to 96 bits, a third more passes.
   - Prior art agrees: every engine orders by a few integer keys and then painter's order.
 - **`OrderOf(y float32) int32`** maps every float onto its own `int32` in the same order, for y-sorting with no scale to choose: `Order: canvas.OrderOf(position.Y)`. −0 sorts as +0, and NaN after every number.
@@ -336,7 +336,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
   - Y-sorted entries and hand-stacked ones belong in different layers, since `OrderOf(1)` is 1065353216.
 - **Equal keys keep their call order** by default. A layer named in `Config.RegroupedLayers` may regroup its entries of equal keys by batch, for a UI or particles whose order within a key does not matter. v1 never merged entries that were not adjacent.
   - A run of equal keys regroups in the order its batches first appear: the entries of its first entry's batch, then those of the first batch left, each batch's in call order. Runs of different keys never mix.
-- **Bulk calls take parallel slices,** `DrawSprites([]Sprite)` and `DrawSpritesWith([]Sprite, []T)`, and the same for meshes, so an ECS chunk's entry and argument columns go in as they are. The slice's order is the recording order. Slices of different lengths are refused, none of them recorded, and reported once for the draw list as `ReportKindSliceLengthsDiffer`.
+- **Bulk calls take parallel slices,** `DrawSprites([]Sprite)` and `DrawSpritesWith([]Sprite, []T)`, and the same for meshes, so an ECS chunk's entry and argument columns go in as they are. The slice's order is the recording order. Slices of different lengths are refused, none of them recorded, and reported once for the command list as `ReportKindSliceLengthsDiffer`.
 
 ### Sprites, transforms and pivots
 
@@ -444,7 +444,7 @@ func drawUnits(k *kernel.Kernel, e canvas.FrameEvent, list canvas.DrawList, game
 
 - **A plain image takes the GPU path.**
   - Its source is loaded through render's `AcquireTexture`, so render's loader, sharing and failures serve it unchanged.
-  - canvas fills its padded cell with one draw, premultiplying it, so filtering a cut-out edge never darkens it. The fill clamps or wraps the coordinate per axis, so the same draw writes the gutter. Each page packed into that frame is one pass, a draw for each cell, recorded at the start of the frame's lowest camera order's command list, before any camera's pass, so every camera sampling the atlas draws after it. A frame drawing nothing keeps its packings for the next that draws.
+  - canvas fills its padded cell with one draw, premultiplying it, so filtering a cut-out edge never darkens it. The fill clamps or wraps the coordinate per axis, so the same draw writes the gutter. Each page packed into that frame is one pass, a draw for each cell, recorded at the start of the frame's lowest camera order's render command list, before any camera's pass, so every camera sampling the atlas draws after it. A frame drawing nothing keeps its packings for the next that draws.
   - The source is released afterwards.
   - **Packing waits for the drawing job.** A batch key names its atlas, known only once its image is packed, so the drawing job finds each entry's batch key as it packs the frame's new images, and regroups the sorted entries by them; the sort task sorts by key alone.
 - **Converters:** `ImageOptions.Convert` is a `Converter`, implemented by comparable values. ([canvas: an atlas per converter and the format it answers](https://github.com/dvoyni/cog/issues/935))
@@ -494,7 +494,7 @@ type Converter interface {
   | 4 | ⅛ | 8 | 32² | 80² | 272² |
   | 5 | ¹⁄₁₆ | 16 | 48² | 96² | 288² |
 
-- **Each image's chain comes from its own texels.** Every 2×2 block the mip filter averages lies inside one cell, so render's mip pass over a whole page is as clean as a chain per image. Box-filtering a whole atlas would otherwise mix images. canvas regenerates the mips of the layers it packed into, once per frame, with render's `CommandList.GenerateMips` after the passes that packed them (see *Delta to render*). A frame's packing passes and their mips are recorded at the start of its lowest camera order's command list, before any camera's passes, so every camera sampling the atlas draws after them.
+- **Each image's chain comes from its own texels.** Every 2×2 block the mip filter averages lies inside one cell, so render's mip pass over a whole page is as clean as a chain per image. Box-filtering a whole atlas would otherwise mix images. canvas regenerates the mips of the layers it packed into, once per frame, with render's `CommandList.GenerateMips` after the passes that packed them (see *Delta to render*). A frame's packing passes and their mips are recorded at the start of its lowest camera order's render command list, before any camera's passes, so every camera sampling the atlas draws after them.
 - **A gutter is for linear filtering;** an entry's filter is its own.
 
 ### The atlas package
@@ -525,7 +525,7 @@ type Converter interface {
   2. `unload` for each path the residency requests give up, which the request queue hands over through a method of its own, beside the mesh files' unload;
   3. `find` for each entry's frames and `findGlyphs` for a run of text's glyphs, marking each drawn and noting what they miss, the entry keyed while nothing has missed;
   4. `placeMissed`, which packs only what was missed, so packing evicts nothing the frame draws, and answers whether growing an atlas replaced its texture, every entry then keyed again, and the rest keyed once placed;
-  5. `recordUploads`, in the lowest order's command list before any pass: each atlas's `RecordCopies`, then the GPU fills of plain images from a temporary buffer of their own, then the mips of images' own textures, plain or converted, then each atlas's `RecordMips`.
+  5. `recordUploads`, in the lowest order's render command list before any pass: each atlas's `RecordCopies`, then the GPU fills of plain images from a temporary buffer of their own, then the mips of images' own textures, plain or converted, then each atlas's `RecordMips`.
 - **Batching and text read what the set placed,** never its tables: a drawn frame answers `inPlainAtlas()`, which a run of text's icons need, a converter's atlas not among them, and `wrapsBySampler()`, which the batch key needs, false for an image in any atlas, whose gutter wraps it.
 - **Its tests run in rendertest's harness,** a test plugin's task making and calling atlases on the recording adapter, as a user's plugin would. What a put copies is read through the test's export of the bytes it staged, since the recording adapter's textures hold no texels.
 
@@ -663,7 +663,7 @@ type Converter interface {
   - It is one 2D-array texture of pages of `Config.AtlasPageSize`, made at the first glyph drawn, each glyph's field a cell on no atlas grid, packed by the pages' shelf allocators. It grows as a sprite atlas does, doubling its pages up to `Config.AtlasLayerCeiling`.
   - At its ceiling, the glyph drawn least lately is evicted and the new glyph takes its cell, never one drawn this frame. Of glyphs last drawn in one frame, the one made first, at the lower index in the glyph table, goes first, so eviction can be tested exactly; images go in their paths' order instead, as glyphs have none. The order is made once a frame, at the first glyph that needs it, so a frame of many new glyphs sorts the atlas once. An evicted glyph's field stays in the glyph table, so its next draw packs it again without making it.
   - A glyph whose cell no page holds, or one the atlas at its ceiling has no room for with nothing to evict, draws nothing, reported once as `ReportKindAtlasFull`, and is tried once in each later frame drawing it; the atlas grows only for a cell a page holds.
-  - Each field packed is put into its cell, and copied by the lowest order's command list from one temporary buffer with the atlas's other puts, after its growth's copy, as an image's cell is filled, so it lands in the texture the atlas has then. `Inventory.WriteTexture` was tried first: its writes land before every command list, so a field on a page a growth was still to copy had to be written into the texture copied from, and one written into a texture grown into was lost when a later frame's growth merged past it. The whole cell is copied, its gutter transparent black, so a cell freed and packed again keeps nothing of the glyph before it.
+  - Each field packed is put into its cell, and copied by the lowest order's render command list from one temporary buffer with the atlas's other puts, after its growth's copy, as an image's cell is filled, so it lands in the texture the atlas has then. `Inventory.WriteTexture` was tried first: its writes land before every render command list, so a field on a page a growth was still to copy had to be written into the texture copied from, and one written into a texture grown into was lost when a later frame's growth merged past it. The whole cell is copied, its gutter transparent black, so a cell freed and packed again keeps nothing of the glyph before it.
   - A glyph's field lives in the `FontLibrary` resource's glyph table, each at an index its laid-out glyphs name, made under the read lock and guarded by a lock of its own; where it is packed is the drawing job's, at the same index.
 - **Glyphs are made at run time, at their first use,** in the job recording the text, ready that frame as an image is.
   - The outline is rasterized anti-aliased at the field's em with x/image's vector rasterizer, then the distance transform behind `DistanceField` runs over the coverage, as TinySDF does. canvas has one distance generator.
@@ -753,7 +753,7 @@ type Converter interface {
 ([canvas: fonts and text, from glyph representation to layout](https://github.com/dvoyni/cog/issues/868))
 
 - **A `Span{Text, Tint, Icon}` carries a tint of its own,** zero meaning the run's, **or an icon,** its `Text` then unread. A run's `Spans`, when given, are the run instead of its `String`. They are shaped and wrapped together, so a coloured word wraps with its paragraph, and a run's clusters are its spans' end to end, an icon one.
-  - `DrawText` copies a run's spans into its draw list, and the frame's merge into its own, so a caller may build them in a buffer it reuses for each label.
+  - `DrawText` copies a run's spans into its command list, and the frame's merge into its own, so a caller may build them in a buffer it reuses for each label.
 - **An icon is registered under a name** on the writing side: `RegisterIcon(name, IconDescriptor{Image, Frame, Scale, Offset, Tinted})`.
   - Registering reads its image's frame's size then, from its file's header through platform's FS, so a layout knows its width before any draw; its image is packed into the sRGB sprite atlas at its first draw, as a sprite's is, ready that frame. Packing it as it is registered was weighed: the writing side reaches no atlas, which is the drawing job's.
   - `Scale` multiplies the cap height, zero meaning 1; `Offset` raises its bottom above the baseline, in em, a negative one lowering it; `Tinted` takes the span's tint, where it otherwise takes only the run's alpha, as v1's did; `Frame` picks a sheet's cell, so a game's button prompts are one image.
@@ -804,12 +804,12 @@ type Converter interface {
   - They are copied into the frame's temporary buffers when recorded, so the caller may reuse its slices, and drawn through render's `AcquireTemporaryMesh`.
   - v1's `DrawTriangles` was this alone, non-indexed. The prototype's first version passed a mesh value whose file it ignored, so the options hold no file.
   - **As built** ([canvas: canvas.Vertex and per-frame triangles](https://github.com/dvoyni/cog/issues/913)):
-    - A draw list copies the vertex and index bytes into arenas of its own as they are recorded, merged into the frame's as its entries are. Each command list drawing them takes temporary buffers of their bytes and a temporary mesh over them, once per list, so a mesh two cameras of one order see is copied once.
+    - A command list copies the vertex and index bytes into arenas of its own as they are recorded, merged into the frame's as its entries are. Each of render's command lists drawing them takes temporary buffers of their bytes and a temporary mesh over them, once per list, so a mesh two cameras of one order see is copied once.
     - The entry is `EntryKindTriangles`, its inspected entry holding its `TrianglesOptions`. Its batch key holds its own index among the frame's triangles, so it never joins a batch.
     - It is one instance of canvas's instance data, as a sprite's, its mode `CANVAS_MODE_MESH`. Its `tiles`, which only a tiled sprite and a glyph otherwise use, hold the axes its image wraps along, read through the include's `canvas_mesh_wraps`. `canvas_sample` wraps a mesh's UV within its region along those and clamps it along the others, where the gutter continues the edge, and takes its gradients before wrapping, as a tiled sprite's.
     - **Every 2D material makes two render materials,** one of its own vertex stage and one of `canvas_mesh_vertex`, both of its fragment stage, its parameters set on both. A mesh of `canvas.Vertex` always draws through the second, so a material naming a quad vertex stage, as `SDFMaterial` and `TextMaterial` do, still draws a mesh through canvas's. A mesh of another layout draws through the first, refused where that is canvas's own (see *canvas publishes a standard layout*). Making the mesh material at the first mesh's draw was weighed: the drawing job holds the material table only for reading, and a render material costs nothing until a draw makes its pipeline.
     - `canvas_mesh_vertex` premultiplies each vertex's colour, white for zero, and multiplies it by the instance's tint, since a mesh file's bytes are drawn as they are loaded, with no pass over them on the CPU.
-    - Triangles of no vertices record nothing and report nothing, since an empty trail's `CalculateBounds` is zero and is no mistake. Zero bounds are reported once for each draw list, as `ReportKindBoundsMissing`.
+    - Triangles of no vertices record nothing and report nothing, since an empty trail's `CalculateBounds` is zero and is no mistake. Zero bounds are reported once for each command list, as `ReportKindBoundsMissing`.
 - **As built** ([canvas: mesh files and instanced draws](https://github.com/dvoyni/cog/issues/914)):
   - `MeshFile` names its path in a table of the process's, as `Image` does, its index one past its place, the zero one naming none. Images and mesh files intern through one table of keys, each kind with its own unloading.
   - The drawing job loads a file at the first frame drawing it, as it packs an image, reading it with `fs.ReadFile` and `meshfile.Decode`, and makes a vertex buffer, an index buffer when it has indices, and a mesh over them with render's `MakeBuffer` and `MakeMesh`. A file of zero bounds is refused as a malformed one is. A file whose layout is `canvas.Vertex`'s, stride and attributes alike, draws through `canvas_mesh_vertex`; one of any other through the material's own vertex stage. A failure is kept until its path is unloaded, so a file put again draws only once it is, and `Assets.Unload` forgets its report.
@@ -852,10 +852,10 @@ type Converter interface {
     - A material blending other than normally, in a 4-sample camera that does not clear, blends against transparent rather than against the target.
   - `Order`, a `render.Order`, the order cameras draw in.
   - `Size`, `Fit` and `PixelPerfect` (see *Logical size, fit and pixel-perfect*).
-- **`DrawList.SetCamera(Camera)` sets a camera for that frame,** forgotten once it is drawn, as entries are. Nothing is made, stored or destroyed, and an ECS system sets the camera it computes.
+- **`CommandList.SetCamera(Camera)` sets a camera for that frame,** forgotten once it is drawn, as entries are. Nothing is made, stored or destroyed, and an ECS system sets the camera it computes.
 - **The main window** is the first window platform opened of those still open, which canvas follows through `platform.WindowOpenedEvent` and `platform.WindowClosedEvent`: gogpu's window opened at start, when it opens one. When it closes, the next opened takes its place.
 - **A frame that sets none is seen through the default camera:** the main window, every layer, the centre pivot and zoom 1, clearing to opaque black, so a frame with no camera never shows a stale framebuffer. It draws only a frame that recorded entries (see *The frame on the kernel*).
-- **Cameras draw in `Order`,** equal ones by their lists' order and then by call order. At equal `Order` texture targets draw before windows, so a minimap's texture is drawn before the window that shows it. Cameras of one order share one command list.
+- **Cameras draw in `Order`,** equal ones by their command lists' order and then by call order. At equal `Order` texture targets draw before windows, so a minimap's texture is drawn before the window that shows it. Cameras of one order share one of render's command lists.
 - **`Clear` clears the camera's viewport,** never the rest of its target: through the pass's load when the viewport covers the target, otherwise by drawing `ClearColor` over the viewport with canvas's clear material, the default shader replacing what the target holds, through the include's `canvas_viewport_vertex`, which covers clip space whatever the camera's projection and never snaps, as the multisampled camera's composite does. render's load clears a whole attachment, which would wipe the other half of a split screen.
   - A load clears to `ClearColor` premultiplied and encoded as sRGB where the target's format encodes nothing, as canvas's output is, so the two clears show alike.
   - A viewport's edges are rounded to the target's pixels, so viewports sharing an edge neither overlap nor leave a gap.
@@ -943,7 +943,7 @@ type Converter interface {
 - **Every draw of canvas's is instanced,** a lone sprite or mesh among them: each instance reads its instance data at `instance_index` from the draw's `FirstInstance`. canvas keeps no other path.
 - **Consecutive entries in sort order of one mesh file,** with one material, atlas, filter and clip, are one instanced draw, `Draw(mesh, DrawArgs{InstanceCount, FirstInstance})`. Different mesh files are different draws, and meshes never batch with sprites. A forest of one tree mesh, recorded in one bulk call, is one draw.
 - **A per-frame mesh is a draw of its own,** never merged. v1 concatenated consecutive triangle lists because its vertices were in world space with nothing per entry; here each entry has its own transform, tint and argument, so merging would need an entry index on every vertex, a second stream every custom vertex stage would read. A user with many small pieces builds them into one mesh: a trail system writes every trail into one per-frame mesh.
-- **Each camera is a pass** in its order's command list, into its target, with its viewport and its pass parameters set once.
+- **Each camera is a pass** in its order's render command list, into its target, with its viewport and its pass parameters set once.
 - v1's sorting, culling and layering together cost under 0.4% of a frame.
 
 ### Device loss
@@ -980,7 +980,7 @@ type Converter interface {
 - **Every other frame pays one check and allocates nothing,** so a tool may stay attached.
 - **A `canvas.Inspection` holds:**
   - each camera, in drawing order: its fields and target, a texture target's label, the target's size, its viewport in pixels, its scale, the world rectangle it sees, and its layer ranges. A camera that culled every entry of its layers, or had none, and does not clear draws nothing, and is inspected all the same, with no batches, since why nothing is on screen is what an agent asks first;
-  - each camera's batches, in order: the material and its label, the texture and the label render holds it under, the filter and clip, the instance count, and its entries. Each entry gives its kind, the entry as recorded, its sort key, and its draw list's place;
+  - each camera's batches, in order: the material and its label, the texture and the label render holds it under, the filter and clip, the instance count, and its entries. Each entry gives its kind, the entry as recorded, its sort key, and its command list's place;
   - what each camera culled, as entries in sort order: those of its layers that it does not draw, found after the drawing by walking its layer runs beside the entries it drew, so the cull itself pays nothing;
   - the frame's first uses, each in the order made: `PackedImages`, the frames of images packed into an atlas or a texture of their own, a frame sharing a cell packed before not among them; `LoadedMeshFiles`; `MadeLayouts`, the runs laid out on a miss of the layout cache, drawn or measured; and `MadeGlyphs`, each run whose glyphs' fields were made, drawn or preloaded, and how many;
   - its reports, and how long canvas's sort job and its drawing job took, `SortTime` and `DrawTime`, measured by stopwatches made from metronome's `Clock`, named `SortStopwatchName` and `DrawStopwatchName`, which a test's `ManualClock` lengthens.
@@ -1010,7 +1010,7 @@ type Converter interface {
   - sprites, shapes and mesh files, recorded singly and in bulk;
   - text drawn from the layout cache;
   - per-frame triangles copied into the frame's buffers;
-  - several cameras and camera orders, and every recording task's draw list.
+  - several cameras and camera orders, and every recording task's command list.
 - **Outside the gate, by nature,** each allocating its own, timed by a benchmark and not counted:
   - first uses: an image loaded and packed, a mesh file loaded, a glyph made, a font set made;
   - a layout for a string the cache has not seen, since go-text's shaping allocates. A timer whose digits change every second allocates in the frames it changes;
@@ -1031,7 +1031,7 @@ Each change was checked for a 3D renderer's needs too, drawbridge's forward+ or 
   - render owning material arguments whole was weighed. canvas's instance data model would have moved into render before a second user showed what it needs.
 - **Mips for a made texture:** `CommandList.GenerateMips(texture, firstLayer, layerCount)` records render's mip shader into the list where it is called, for every level of those layers. render generated mips only for textures it loads, in its own command list.
   - It covers 2D, 2D-array and cube textures, a cube's faces as layers, so probes and baked maps take it too. It filters sRGB in linear, as render's loaded textures' mips are.
-  - canvas calls it after the passes that pack into an atlas page that frame, at the start of its lowest camera order's command list. The atlas's gutters and atlas grid at 2^(levels−1) keep the box filter within each image.
+  - canvas calls it after the passes that pack into an atlas page that frame, at the start of its lowest camera order's render command list. The atlas's gutters and atlas grid at 2^(levels−1) keep the box filter within each image.
   - Its doc says what it is not: a volume texture's mips, and a depth pyramid for occlusion culling, which takes a min or max reduction rather than an average. Those are their plugin's own compute passes.
 - **A texture's descriptor:** `Inventory.TextureDescriptor(texture) (TextureDescriptor, bool)`, built on gfx's `Device.TextureDescriptor`. A made texture answers at once, and a loaded one as soon as its acquire returns, its file's header fixing its descriptor; a texture render does not hold answers false. render answered no made texture's descriptor. canvas's drawing declares `Inventory` beside `Frame`, both reads, for a camera's viewport and sRGB encoding in a texture target, for `Targets`, and for `Assets.ImageSize` of a render-texture image.
 - **rendertest's harness:**
@@ -1067,7 +1067,7 @@ Each change was checked for a 3D renderer's needs too, drawbridge's forward+ or 
   - layout, line breaking and markup;
   - the mesh file format and `CalculateBounds`.
 - **Recording-adapter tests through rendertest,** in a real kernel, asserting what reached render in render's words:
-  - the command lists per camera order, the passes per camera, and the draws per batch with their instance counts;
+  - render's command lists per camera order, the passes per camera, and the draws per batch with their instance counts;
   - the pass parameters, the viewport and scissor, and the instance data's bytes;
   - first-use loads, refusals and their reports, and device recovery's fresh start.
 - **Pixel tests on wgpu's software adapter,** for what only pixels show:
@@ -1080,7 +1080,7 @@ Each change was checked for a 3D renderer's needs too, drawbridge's forward+ or 
 
 **`plugins/canvas/canvastest`,** exported beside rendertest, serves canvas's own tests and those of the plugins built on canvas, such as the ECS plugin and a UI:
 - **A harness.** It wraps rendertest's harness, and spawns canvas after render with render's config and canvas's passed through, the test's plugins after canvas. It forwards `UseSoftwareAdapter` and `RunMain`.
-- **Recording from the test.** `h.Record(func(list canvas.DrawList))` registers a recording task off `canvas.FrameEvent` for the next `Step`, so a test records a frame without writing a plugin. A body that hands entries to the test stays a closure, as rendertest's harness hands its test the window its open task opened.
+- **Recording from the test.** `h.Record(func(list canvas.CommandList))` registers a recording task off `canvas.FrameEvent` for the next `Step`, so a test records a frame without writing a plugin. A body that hands entries to the test stays a closure, as rendertest's harness hands its test the window its open task opened.
 - **A reader in canvas's terms.** It reads each camera, its batches and entries, and what it culled, through canvas's frame inspection, beside render's `Inspection`, which shows what reached the GPU. A UI test then asserts its button's sprite and label entries without reading draws.
 - **Strict reports.** `canvastest.ExpectReport(kind)` is built on rendertest's `ExpectError`, so a test fails on any report it did not name.
 - **One font everywhere.** Text in tests uses the embedded default font set, so shaping is the same on every machine.
@@ -1099,18 +1099,18 @@ Each change was checked for a 3D renderer's needs too, drawbridge's forward+ or 
 
 **The per-frame gate and benchmarks,** the method of render's, ecs's and mux's bars:
 - **The gate:** zero allocations for a steady frame once warm, checked with `testing.AllocsPerRun(...) == 0` over a whole beat, canvastest's `Step`, after four warm frames, on gfx's recording adapter in its mode that records nothing, turned on with `h.RecordNothing()`. It covers canvas, render, gfx, the kernel and metronome. Its frame holds the steady content *Performance* lists.
-  - **Its frame,** drawn by a test plugin's recording tasks, each a draw list: sprites in bulk, half of them culled, a sliced one and a tiled one, some switching to a second material every 16 and spread over 16 layers; a sprite and a fill given a material argument; a mesh file's meshes in bulk and one alone; fills, strokes and lines, hairlines, a rounded corner and a clip; a plain and a marked-up run of text; per-frame triangles. One camera draws it, or strips of a split window under a UI camera of another order.
+  - **Its frame,** drawn by a test plugin's recording tasks, each a command list: sprites in bulk, half of them culled, a sliced one and a tiled one, some switching to a second material every 16 and spread over 16 layers; a sprite and a fill given a material argument; a mesh file's meshes in bulk and one alone; fills, strokes and lines, hairlines, a rounded corner and a clip; a plain and a marked-up run of text; per-frame triangles. One camera draws it, or strips of a split window under a UI camera of another order.
   - **Its scenarios:** 16, 1,024 and 16,384 sprites, split among 1, 4 and 16 tasks, through 1, 2 and 4 cameras, with one material in one layer and with the switch over 16 layers.
 - **Under `go test -race`** the gate steps its frames for the detector and checks no count, and leaves out its scenarios of 16,384 sprites.
 - **Benchmarks** time each entry against the same frame drawn by hand on render: sprites alone, which a test plugin on render writes as canvas's instance data into one temporary buffer and draws through each camera with canvas's default shader, a draw for each run of one material, skipping what canvas does besides.
-  - **Operations:** recording, single calls and bulk; the draw lists' merge and the sort; culling, batching, the instance data written, and the command lists recorded; text drawn from the cache; per-frame triangles copied.
+  - **Operations:** recording, single calls and bulk; the command lists' merge and the sort; culling, batching, the instance data written, and render's command lists recorded; text drawn from the cache; per-frame triangles copied.
   - **Counts:** 1,000, 10,000 and 100,000 sprites; 1, 4 and 16 recording tasks; 1, 2 and 4 cameras; one material against a switch every 16 entries; few layers against many, for the radix sort's passes.
   - **Timed, not gated:** glyph generation at first use, per glyph (Latin at em 48, Han at em 64), and for a frame of 200 new hanzi; an image's first use, its decode, converter and pack; the radix sort's passes as the layers spread.
   - **A first use is timed in a frame of its own,** after an untimed frame that undoes it: an image unloaded, or a font put again and reloaded, which drops its glyphs and layouts. The hanzi are the first 200 of Noto Sans SC's CJK block, from a subset of the font in `testdata/fonts`.
   - **Ten runs** go in the baseline, compared with `benchstat`.
 
 **Concurrency under `go test -race`:** recording tasks run together, and `Assets` is called while canvas draws, so each piece of shared state is tested by breaking the code that guards it, as render's are, most in `concurrency_test.go` through a test plugin whose tasks record, read and write `FontLibrary`, and call `Assets` off render's frame event while canvas opens, sorts and draws:
-- parallel draw lists recording in one frame, two jobs of one task sharing its list under the list's mutex;
+- parallel command lists recording in one frame, two jobs of one task sharing its list under the list's mutex;
 - one image's first draw from two tasks, its path interned once under the image table's mutex and packed once;
 - one glyph made from two tasks, under the glyph table's mutex, each character's font found under its set's character mutex, and the jobs' first uses noted under the inspector's mutex;
 - one layout cached from two tasks, under the layout cache's mutex, its drawn glyphs kept by compare-and-swap of a copy each job assigns, its last use an atomic;
@@ -1165,4 +1165,4 @@ The whole suite runs under the detector, pixel tests included, canvastest waitin
   - mux owns *View*, *Depth*, *Sample*, *Weight* and *Model*;
   - drawbridge will own a 3D *Camera*.
 
-  canvas's glossary qualifies its terms where they would collide: what a frame records is an *entry*, not a draw; a *2D material* is not a render material; a *mesh* is canvas's entry, which draws a *mesh file*. Its *mark* was renamed *entry*, and its *canvas list* *draw list*; the closed tickets keep the words they were written in.
+  canvas's glossary qualifies its terms where they would collide: what a frame records is an *entry*, not a draw; a *2D material* is not a render material; a *mesh* is canvas's entry, which draws a *mesh file*. Its *mark* was renamed *entry*, and its *canvas list* *draw list*, then *command list*; the closed tickets keep the words they were written in.

@@ -25,7 +25,7 @@ type textureCamera struct {
 func (*textureCamera) Name() kernel.PluginName { return "texture camera" }
 
 func (c *textureCamera) Init(configurator *kernel.Configurator, _ any) error {
-	setCamera := configurator.RegisterTask2(func(k *kernel.Kernel, _ kernel.NoArg, inventory render.Inventory, list canvas.DrawList) kernel.NoResult {
+	setCamera := configurator.RegisterTask2(func(k *kernel.Kernel, _ kernel.NoArg, inventory render.Inventory, list canvas.CommandList) kernel.NoResult {
 		c.mutex.Lock()
 		if c.texture == (render.Texture{}) {
 			c.texture = inventory.MakeTexture(c.descriptor, []byte(nil))

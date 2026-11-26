@@ -13,7 +13,7 @@ type reporter struct {
 
 // reportOnce logs report, a Report, the first time it is called under key,
 // until forget clears key, and writes it down for the inspection pending. It
-// takes the report as an error, so a report kept as one, as a draw list
+// takes the report as an error, so a report kept as one, as a command list
 // keeps its own, is not boxed again at each call.
 func (r *reporter) reportOnce(key string, report error) {
 	canvasReport, isReport := report.(Report)

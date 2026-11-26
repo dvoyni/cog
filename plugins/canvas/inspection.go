@@ -208,24 +208,24 @@ type InspectedBatch struct {
 }
 
 // InspectedEntry is one entry of an inspected batch: its kind, the entry as
-// recorded, its sort key, and its place in the frame: the place of the draw
-// list that recorded it, among the frame's lists in registration order, and
-// its own place in that list, in recording order.
+// recorded, its sort key, and its place in the frame: the place of the
+// command list that recorded it, among the frame's lists in registration
+// order, and its own place in that list, in recording order.
 type InspectedEntry struct {
 	Kind EntryKind
 	// Shape is the entry recorded, when Kind is EntryKindShape, Sprite when
 	// it is EntryKindSprite, Text when it is EntryKindText,
 	// TrianglesOptions, the options per-frame triangles were drawn with,
 	// when it is EntryKindTriangles, and Mesh when it is EntryKindMesh.
-	Shape            Shape
-	Sprite           Sprite
-	Text             Text
-	TrianglesOptions DrawTrianglesOptions
-	Mesh             Mesh
-	Layer            int32
-	Order            int32
-	DrawListIndex    int
-	IndexInDrawList  int
+	Shape              Shape
+	Sprite             Sprite
+	Text               Text
+	TrianglesOptions   DrawTrianglesOptions
+	Mesh               Mesh
+	Layer              int32
+	Order              int32
+	CommandListIndex   int
+	IndexInCommandList int
 }
 
 // EntryKind is what kind of entry an entry is.

@@ -154,7 +154,7 @@ func TestEachProfileDrawsItsBandAroundASpritesDistanceField(t *testing.T) {
 	}
 	centreX := func(index int) float32 { return -120 + 80*float32(index) }
 
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.CommandList) {
 		for index, profile := range profiles {
 			sprite := canvas.Sprite{Image: field, Material: canvas.SDFMaterial, Transform: m.Translation2x3(centreX(index), 0), Size: m.Vec2{X: 16 * sdfScale}}
 			list.DrawSpriteWith(sprite, profile.profile)
@@ -191,7 +191,7 @@ func TestEachProfileDrawsItsBandAroundARoundedFillItsQuadGrownToHoldIt(t *testin
 	const radius = 10
 	findRect := func(index int) m.Rect { return m.Rect{X: -140 + 80*float32(index), Y: -20, Width: 40, Height: 40} }
 
-	picture := captureDrawing(t, func(list canvas.DrawList) {
+	picture := captureDrawing(t, func(list canvas.CommandList) {
 		for index, profile := range profiles {
 			list.DrawShapeWith(canvas.Shape{Kind: canvas.Fill, Rect: findRect(index), Radius: radius, Tint: m.White, Material: canvas.SDFMaterial}, profile.profile)
 		}
@@ -239,7 +239,7 @@ func TestADropShadowFallsTheSameWayInTheWorldUnderARotatedOrMirroredTransform(t 
 	findCentre := func(index int, row float32) m.Vec2 { return m.Vec2{X: -100 + 100*float32(index), Y: row} }
 	const spriteRow, fillRow = -60, 60
 
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.CommandList) {
 		for index, transform := range transforms {
 			sprite := canvas.Sprite{Image: field, Material: canvas.SDFMaterial, Transform: m.TRS2x3(findCentre(index, spriteRow), transform.angle, transform.scale), Size: m.Vec2{X: 16 * sdfScale}}
 			list.DrawSpriteWith(sprite, shadow)
@@ -268,7 +268,7 @@ func TestAShapesBandKeepsItDrawnWhileItLiesOutsideTheViewByLessThanItsReach(t *t
 	// Two fills lie 5 units past the right of the view, 32 units from the
 	// centre: the one glowing 8 units around is drawn, and the one of the
 	// default material culled.
-	recorder := &materialRecorder{record: func(list canvas.DrawList, _ canvas.Assets, _ []canvas.Material, _ int) {
+	recorder := &materialRecorder{record: func(list canvas.CommandList, _ canvas.Assets, _ []canvas.Material, _ int) {
 		list.DrawShapeWith(canvas.Shape{Rect: m.Rect{X: 37, Width: 4, Height: 4}, Tint: m.White, Material: canvas.SDFMaterial}, canvas.Glow(8, orange))
 		list.DrawShape(canvas.Shape{Rect: m.Rect{X: 37, Width: 4, Height: 4}, Order: 1})
 	}}
@@ -287,7 +287,7 @@ func TestAShapesBandKeepsItDrawnWhileItLiesOutsideTheViewByLessThanItsReach(t *t
 func TestReleasingSDFMaterialOrSettingItsParametersIsRefusedReportedOnceAndItStillDraws(t *testing.T) {
 	// The first frame releases SDFMaterial and sets a uniform on it, and
 	// both frames draw a fill of it.
-	recorder := &materialRecorder{record: func(list canvas.DrawList, assets canvas.Assets, _ []canvas.Material, frame int) {
+	recorder := &materialRecorder{record: func(list canvas.CommandList, assets canvas.Assets, _ []canvas.Material, frame int) {
 		if frame == 0 {
 			assets.ReleaseMaterial(canvas.SDFMaterial)
 			assets.SetMaterialUniform[float32](canvas.SDFMaterial, "anything", 1)

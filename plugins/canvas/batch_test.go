@@ -95,9 +95,9 @@ func TestInstancesOfAMaterialTakingAnArgumentGoIntoItsStridesStreamEachFollowedB
 	}
 	state := newShapeFrame(shapes, makeEntrySorter(nil))
 	argumentType := reflect.TypeFor[float32]()
-	state.arguments = castToBytes([]float32{2, 3})
+	state.frameCommandList.arguments = castToBytes([]float32{2, 3})
 	for index := range 2 {
-		state.entries[index].argument = recordedArgument{goType: argumentType, offset: uint32(4 * index)}
+		state.frameCommandList.entries[index].argument = recordedArgument{goType: argumentType, offset: uint32(4 * index)}
 	}
 	keys := findShapeBatchKeys(state)
 	for index := range 3 {

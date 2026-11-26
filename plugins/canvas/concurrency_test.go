@@ -17,9 +17,9 @@ import (
 
 // The tests in this file are canvas's concurrency tests: run under
 // go test -race, each fails once the guard of shared state its comment
-// names is taken away. Two jobs of one task recording into its draw list
+// names is taken away. Two jobs of one task recording into its command list
 // together are TestTwoJobsOfOneTaskAndOtherTasksRecordTogetherIntoTheFrame,
-// which drawList's mutex keeps apart.
+// which commandList's mutex keeps apart.
 
 // concurrentCount is how many images, runs or files each test's tasks use
 // together in a frame: enough that tasks starting together overlap.
@@ -45,7 +45,7 @@ func addConcurrentImages(t testing.TB, files fstest.MapFS, directory string) []s
 // drawImagesOf answers a record drawing a sprite of each of paths,
 // interning the path as it draws it.
 func drawImagesOf(paths []string) recordFunc {
-	return func(list canvas.DrawList, _ canvas.Assets, _ int) {
+	return func(list canvas.CommandList, _ canvas.Assets, _ int) {
 		for _, path := range paths {
 			list.DrawSprite(canvas.Sprite{Image: canvas.ImageFromFile(path)})
 		}
@@ -54,7 +54,7 @@ func drawImagesOf(paths []string) recordFunc {
 
 // drawTextsOf answers a record drawing each of runs.
 func drawTextsOf(runs []canvas.Text) recordFunc {
-	return func(list canvas.DrawList, _ canvas.Assets, _ int) {
+	return func(list canvas.CommandList, _ canvas.Assets, _ int) {
 		for _, run := range runs {
 			list.DrawText(run)
 		}
@@ -292,7 +292,7 @@ func TestReloadChangedWhileAFrameDrawsNewImagesPacksEachNewImage(t *testing.T) {
 	}
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, nil, &fileMounter{files: memory}, &concurrentUser{
-		records: []recordFunc{func(list canvas.DrawList, assets canvas.Assets, frame int) {
+		records: []recordFunc{func(list canvas.CommandList, assets canvas.Assets, frame int) {
 			drawImagesOf(paths[frame])(list, assets, frame)
 			list.DrawText(canvas.Text{String: "reloaded", Size: 12})
 		}},
@@ -345,7 +345,7 @@ func TestMaterialsMadeAndReleasedFromTwoTasksWhileAFrameDrawsLeaveTheDrawnMateri
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, nil, newMaterialMounter(t), &materialRecorder{
 		descriptors: []canvas.MaterialDescriptor{{Label: "tint", Shader: tintShaderPath}},
-		record: func(list canvas.DrawList, _ canvas.Assets, materials []canvas.Material, _ int) {
+		record: func(list canvas.CommandList, _ canvas.Assets, materials []canvas.Material, _ int) {
 			for range concurrentCount {
 				list.DrawShape(canvas.Shape{Rect: m.Rect{Width: 4, Height: 4}, Material: materials[0]})
 			}
@@ -400,12 +400,12 @@ func TestATaskRecordingWhileCanvasOpensAndDrawsTheFrameLeavesTheFramesOwnEntries
 	h := canvastest.NewHarness(t)
 	h.ExpectReport(canvas.ReportKindRecordedOutsideFrame)
 	h.Spawn(nil, nil, &concurrentUser{
-		records: []recordFunc{func(list canvas.DrawList, _ canvas.Assets, _ int) {
+		records: []recordFunc{func(list canvas.CommandList, _ canvas.Assets, _ int) {
 			for range concurrentCount {
 				list.DrawShape(canvas.Shape{Order: 1})
 			}
 		}},
-		lateRecords: []func(canvas.DrawList, int){func(list canvas.DrawList, _ int) {
+		lateRecords: []func(canvas.CommandList, int){func(list canvas.CommandList, _ int) {
 			for range 1000 * concurrentCount {
 				list.DrawShape(canvas.Shape{Order: 2})
 			}
@@ -438,7 +438,7 @@ func TestAnInspectionRequestedWhileAFrameDrawsLeavesEachStepInspected(t *testing
 	request := func(assets canvas.Assets, _ int) { assets.RequestInspection() }
 	h := canvastest.NewHarness(t)
 	h.Spawn(nil, nil, &concurrentUser{
-		records:      []recordFunc{func(list canvas.DrawList, _ canvas.Assets, _ int) { list.DrawShape(canvas.Shape{}) }},
+		records:      []recordFunc{func(list canvas.CommandList, _ canvas.Assets, _ int) { list.DrawShape(canvas.Shape{}) }},
 		whileDrawing: []func(canvas.Assets, int){request, request},
 	})
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})

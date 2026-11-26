@@ -26,7 +26,7 @@ func TestAnInspectedCameraListsTheEntriesOfItsLayersItCulledAndOneCullingThemAll
 	seen := canvas.Shape{Kind: canvas.Fill, Rect: m.Rect{Width: 4, Height: 4}}
 	away := canvas.Shape{Kind: canvas.Fill, Rect: m.Rect{X: 100, Width: 4, Height: 4}, Order: 1}
 	awayAbove := canvas.Shape{Kind: canvas.Fill, Rect: m.Rect{X: 100, Width: 4, Height: 4}, Layer: 5}
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.SetCamera(canvas.Camera{Clear: true, Layers: canvas.MakeLayer(0)})
 		list.SetCamera(canvas.Camera{Layers: canvas.MakeLayer(5), Order: 1})
 		list.DrawShape(seen)
@@ -40,8 +40,8 @@ func TestAnInspectedCameraListsTheEntriesOfItsLayersItCulledAndOneCullingThemAll
 	if len(cameras) != 2 {
 		t.Fatalf("the frame inspected %d cameras, want both, the second though it drew nothing", len(cameras))
 	}
-	entry := func(shape canvas.Shape, indexInDrawList int) canvas.InspectedEntry {
-		return canvas.InspectedEntry{Kind: canvas.EntryKindShape, Shape: shape, Layer: shape.Layer, Order: shape.Order, IndexInDrawList: indexInDrawList}
+	entry := func(shape canvas.Shape, indexInCommandList int) canvas.InspectedEntry {
+		return canvas.InspectedEntry{Kind: canvas.EntryKindShape, Shape: shape, Layer: shape.Layer, Order: shape.Order, IndexInCommandList: indexInCommandList}
 	}
 	drawing := cameras[0]
 	if len(drawing.Batches) != 1 || !reflect.DeepEqual(drawing.Batches[0].Entries, []canvas.InspectedEntry{entry(seen, 0)}) {
@@ -72,7 +72,7 @@ func TestAnInspectedFrameListsTheFirstUsesMadeAndReportsLoggedForItAndNoneOfTheF
 	red := canvas.ImageFromFile(redPath)
 	pivotedRed := canvas.ImageFromFile(redPath, canvas.ImageOptions{Pivot: canvas.PivotTopLeft})
 	tree := canvas.MeshFileFromFile(treePath)
-	record := func(list canvas.DrawList) {
+	record := func(list canvas.CommandList) {
 		list.DrawSprite(canvas.Sprite{Image: red})
 		list.DrawSprite(canvas.Sprite{Image: pivotedRed})
 		list.DrawText(canvas.Text{String: "ab", Order: 1})
@@ -117,7 +117,7 @@ func TestAnInspectedFrameHoldsHowLongItsSortingAndDrawingTookByTheClock(t *testi
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	h.LengthenNext(canvas.SortStopwatchName, 3*time.Millisecond)
 	h.LengthenNext(canvas.DrawStopwatchName, 5*time.Millisecond)
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.DrawShape(canvas.Shape{Kind: canvas.Fill, Rect: m.Rect{Width: 4, Height: 4}})
 	})
 
@@ -137,7 +137,7 @@ func TestAnInspectionsStringWritesTheFramesFirstUsesReportsAndTimesThenEachCamer
 	h.LengthenNext(canvas.SortStopwatchName, 3*time.Millisecond)
 	h.LengthenNext(canvas.DrawStopwatchName, 5*time.Millisecond)
 	red := canvas.ImageFromFile(redPath)
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.DrawSprite(canvas.Sprite{Image: red, Transform: m.Translation2x3(-8, 0)})
 		list.DrawSprite(canvas.Sprite{Image: red, Transform: m.Translation2x3(8, 0)})
 		list.DrawText(canvas.Text{String: "ab", Order: 1})

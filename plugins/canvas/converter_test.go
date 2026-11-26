@@ -76,7 +76,7 @@ func TestATrimmedSpriteStaysWhereItWasEachFrameOfASheetTrimmedApartAndEqualConve
 		{"the trimmed sheet's second frame, turned a quarter", canvas.ImageFromFile(artSheetPath, trimmedSheet), 1, m.Translation2x3(120, 60).Mul(m.Rotation2x3(math.Pi / 2)), size, offCentre},
 	}
 
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.CommandList) {
 		for _, sprite := range sprites {
 			sprite.draw(list)
 		}
@@ -132,7 +132,7 @@ func TestADistanceFieldOfASpriteLinesUpWithItAtAnyPivotAndSize(t *testing.T) {
 		{"the field mirrored about its bottom", makeField(canvas.PivotBottom), 0, m.TRS2x3(m.Vec2{X: -60, Y: 90}, 0, m.Vec2{X: -1, Y: 1}), m.Vec2{X: 32, Y: 32}, canvas.PivotBottom},
 	}
 
-	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, canvastest.NewHarness(t), nil, func(list canvas.CommandList) {
 		for _, sprite := range sprites {
 			sprite.draw(list)
 		}
@@ -194,7 +194,7 @@ func TestATrimmedSpriteBatchesApartFromPlainSpritesAndShapes(t *testing.T) {
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 	plain := canvas.ImageFromFile(artPath)
 	trimmed := canvas.ImageFromFile(artPath, canvas.ImageOptions{Convert: trimmer{convertedCount: &atomic.Int32{}}})
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.DrawShape(canvas.Shape{Rect: m.Rect{X: -4, Y: -4, Width: 8, Height: 8}, Tint: m.White, Order: 0})
 		list.DrawSprite(canvas.Sprite{Image: plain, Order: 1})
 		list.DrawSprite(canvas.Sprite{Image: trimmed, Order: 2})
@@ -259,14 +259,14 @@ func TestAConverterNotComparableAndOneOfARenderTexturesImageAreRefusedTheirImage
 	h.ExpectReport(canvas.ReportKindConverterRefused)
 	ofTexture := &textureRecorder{
 		made: []madeTexture{makeTileTexture()},
-		record: func(list canvas.DrawList, _ canvas.Assets, textures []render.Texture) {
+		record: func(list canvas.CommandList, _ canvas.Assets, textures []render.Texture) {
 			list.DrawSprite(canvas.Sprite{Image: recoloured, Transform: m.Translation2x3(-40, 0), Size: m.Vec2{X: 32, Y: 32}, Filter: canvas.FilterNearest})
 			trimmed := canvas.ImageFromTexture(textures[0], canvas.ImageOptions{Convert: trimmer{convertedCount: &atomic.Int32{}}})
 			list.DrawSprite(canvas.Sprite{Image: trimmed, Transform: m.Translation2x3(40, 0), Size: m.Vec2{X: 8, Y: 8}, Filter: canvas.FilterNearest})
 		},
 	}
 
-	picture := captureHarnessDrawing(t, h, nil, func(canvas.DrawList) {}, &fileMounter{files: files}, ofTexture)
+	picture := captureHarnessDrawing(t, h, nil, func(canvas.CommandList) {}, &fileMounter{files: files}, ofTexture)
 
 	unconverted := placedSprite{transform: m.Translation2x3(-40, 0), size: m.Vec2{X: 32, Y: 32}}
 	if shown := picture.at(unconverted.findFramePoint(m.Vec2{X: 16, Y: 16}, artBlock.Min.X, artBlock.Min.Y)); shown != opaqueRed {
@@ -286,7 +286,7 @@ func TestAConvertedImageWhoseFileFailsToDecodeLoadsThroughRenderWhichDrawsItMage
 	h.Harness.ExpectReport(render.ReportKindLoadFailed)
 	missing := canvas.ImageFromFile("missing.png", canvas.ImageOptions{Convert: canvas.DistanceField{}})
 
-	picture := captureHarnessDrawing(t, h, nil, func(list canvas.DrawList) {
+	picture := captureHarnessDrawing(t, h, nil, func(list canvas.CommandList) {
 		list.DrawSprite(canvas.Sprite{Image: missing, Size: m.Vec2{X: 10, Y: 10}})
 	}, &fileMounter{files: fstest.MapFS{}})
 
@@ -354,7 +354,7 @@ func TestTheConvertedFramesOfOneFileFirstDrawnInOneFrameDecodeItOnce(t *testing.
 	h.Spawn(nil, nil, &fileMounter{files: counting})
 	h.OpenWindow(platform.Size{Width: 64, Height: 48})
 
-	h.Record(func(list canvas.DrawList) {
+	h.Record(func(list canvas.CommandList) {
 		list.DrawSprite(canvas.Sprite{Image: sheet})
 		list.DrawSprite(canvas.Sprite{Image: sheet, Frame: 1})
 	})

@@ -116,7 +116,7 @@ type windowPicture struct {
 // pictureWidth×pictureHeight points through the default camera, on the software adapter, each frame
 // until a capture of the window holds a picture, and answers it. It fails t
 // when no capture arrives within rendertest.Timeout.
-func captureDrawing(t *testing.T, record func(list canvas.DrawList)) windowPicture {
+func captureDrawing(t *testing.T, record func(list canvas.CommandList)) windowPicture {
 	t.Helper()
 	return captureHarnessDrawing(t, canvastest.NewHarness(t), nil, record)
 }
@@ -130,7 +130,7 @@ const pixelTestAtlasPageSize = 256
 // captureHarnessDrawing is captureDrawing on h, a harness not yet spawned,
 // canvas configured by config, its pages pixelTestAtlasPageSize texels a side
 // unless it names a side, with plugins listed after the capture's own.
-func captureHarnessDrawing(t *testing.T, h *canvastest.Harness, config *canvas.Config, record func(list canvas.DrawList), plugins ...kernel.Plugin) windowPicture {
+func captureHarnessDrawing(t *testing.T, h *canvastest.Harness, config *canvas.Config, record func(list canvas.CommandList), plugins ...kernel.Plugin) windowPicture {
 	t.Helper()
 	h.UseSoftwareAdapter()
 	var spawnedConfig canvas.Config

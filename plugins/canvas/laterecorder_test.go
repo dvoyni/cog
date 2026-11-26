@@ -28,7 +28,7 @@ func (*lateRecorder) Init(configurator *kernel.Configurator, _ any) error {
 }
 
 // setClearingCamera sets a camera clearing the main window, at order.
-func setClearingCamera(k *kernel.Kernel, order int32, list canvas.DrawList) kernel.NoResult {
+func setClearingCamera(k *kernel.Kernel, order int32, list canvas.CommandList) kernel.NoResult {
 	list.SetCamera(canvas.Camera{Clear: true, Order: render.Order(order)})
 	return kernel.NoResult{}
 }

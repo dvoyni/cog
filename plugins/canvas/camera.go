@@ -42,12 +42,12 @@ func MakeLayers(ranges ...LayerRange) [4]LayerRange {
 }
 
 // Camera is a view of the frame's entries into a target, a plain value set
-// for one frame with DrawList.SetCamera and forgotten once drawn, as entries
-// are: a game computes the camera it wants each frame, and keeps it to
-// convert a click through. Its zero value sees every layer, into the whole
-// of the main window, clearing nothing, at order 0, the world's origin at
-// its viewport's centre, y down, one world unit to a point of a window or
-// to a pixel of a texture.
+// for one frame with CommandList.SetCamera and forgotten once drawn, as
+// entries are: a game computes the camera it wants each frame, and keeps it
+// to convert a click through. Its zero value sees every layer, into the whole
+// of the main window, clearing nothing, at order 0, the world's origin at its
+// viewport's centre, y down, one world unit to a point of a window or to a
+// pixel of a texture.
 type Camera struct {
 	// Position is the world point the camera's Pivot shows. Rotation turns
 	// the camera about it, in radians from +X towards +Y, as Rotation2x3
@@ -89,25 +89,25 @@ type Camera struct {
 	// frame with no entries.
 	Clear      bool
 	ClearColor m.Color
-	// SampleCount is how many samples a pixel of the camera's entries takes, 1
-	// or 4, zero meaning 1, DrawList.SetCamera panicking at any other. A
+	// SampleCount is how many samples a pixel of the camera's entries takes,
+	// 1 or 4, zero meaning 1, CommandList.SetCamera panicking at any other. A
 	// camera of 4 smooths every entry's hard edges at once: it draws into a
 	// temporary multisampled texture of its viewport's size, cleared to
 	// ClearColor when it clears and to transparent otherwise, resolves that
-	// into a temporary texture of one sample, and draws it over its
-	// viewport, replacing what the viewport holds when it clears and
-	// blended over it otherwise, so the rest of its target survives, as a
-	// resolve into the target, which writes all of it, would not. Its
-	// entries blend against what it drew alone: in a camera of 4 that does
-	// not clear, a material blending other than normally blends against
-	// transparent, not against what the target holds.
+	// into a temporary texture of one sample, and draws it over its viewport,
+	// replacing what the viewport holds when it clears and blended over it
+	// otherwise, so the rest of its target survives, as a resolve into the
+	// target, which writes all of it, would not. Its entries blend against
+	// what it drew alone: in a camera of 4 that does not clear, a material
+	// blending other than normally blends against transparent, not against
+	// what the target holds.
 	SampleCount uint32
 	// Order is the order the camera draws in among every plugin's command
 	// lists: canvas begins one list for each distinct order of the frame's
 	// cameras, which render refuses and reports at an order another list
 	// of the frame holds. Cameras of one order draw in one list, those into
 	// a texture first, so a minimap is drawn before the window showing it,
-	// then in the order they were set, by their draw lists' order and then
+	// then in the order they were set, by their command lists' order and then
 	// their calls'.
 	Order render.Order
 	// Size is the camera's logical size, the area of the world it is meant

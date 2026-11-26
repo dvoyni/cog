@@ -18,15 +18,15 @@ import (
 	"golang.org/x/image/font/gofont/goregular"
 )
 
-// fontLibraryUser is a test plugin whose task, hung off canvas.FrameEvent, calls
-// write with FontLibrary's writing side in each frame, the first frame's 0, then,
-// in tasks of their own after it, read with FontLibrary's reading side and,
-// when set, draw with a draw list of its own.
+// fontLibraryUser is a test plugin whose task, hung off canvas.FrameEvent,
+// calls write with FontLibrary's writing side in each frame, the first
+// frame's 0, then, in tasks of their own after it, read with FontLibrary's
+// reading side and, when set, draw with a command list of its own.
 type fontLibraryUser struct {
 	testPlugin
 	write func(fonts canvas.WriteFontLibrary, frame int)
 	read  func(fonts canvas.FontLibrary, frame int)
-	draw  func(list canvas.DrawList, frame int)
+	draw  func(list canvas.CommandList, frame int)
 	// frameCount is the frames written so far.
 	frameCount atomic.Int32
 }
@@ -49,7 +49,7 @@ func (w *fontLibraryUser) Init(configurator *kernel.Configurator, _ any) error {
 	})
 	var draw *kernel.Task[int, kernel.NoResult]
 	if w.draw != nil {
-		draw = configurator.RegisterTask1(func(k *kernel.Kernel, frame int, list canvas.DrawList) kernel.NoResult {
+		draw = configurator.RegisterTask1(func(k *kernel.Kernel, frame int, list canvas.CommandList) kernel.NoResult {
 			w.draw(list, frame)
 			return kernel.NoResult{}
 		})

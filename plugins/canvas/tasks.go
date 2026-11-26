@@ -13,8 +13,8 @@ import (
 // openFrameTask, opening the frame for entries, and publishes FrameEvent
 // inside render.FrameEvent, with render's beat and timing signals and that
 // job as its Ready; after the nested publication's out dependency, it
-// schedules sortEntriesTask, closing the frame and sorting the entries of
-// its draw lists, after that drawTask with the frame's beat, and after that
+// schedules sortEntriesTask, closing the frame and sorting the entries of its
+// command lists, after that drawTask with the frame's beat, and after that
 // copyTargetsTask. It returns copyTargetsTask's job joined with in.
 func recordFrame(ex *kernel.Executor, in kernel.JobHandle, event render.FrameEvent, openFrameTask, sortEntriesTask, copyTargetsTask *kernel.Task[kernel.NoArg, kernel.NoResult], drawTask *kernel.Task[metronome.Beat, kernel.NoResult]) (render.FrameEvent, kernel.JobHandle) {
 	opened := ex.Schedule(openFrameTask, kernel.NoArg{}, event.Ready).Handle()
@@ -107,7 +107,7 @@ func openFrame(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*drawState]) 
 	return kernel.NoResult{}
 }
 
-// sortEntries closes the frame to entries, merges every task's draw list
+// sortEntries closes the frame to entries, merges every task's command list
 // into the frame's entries, in registration order, and sorts them.
 func sortEntries(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*drawState]) kernel.NoResult {
 	state.Get().closeAndSort()

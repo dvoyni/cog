@@ -11,17 +11,17 @@
 //		return event, ex.Join(in, ex.Schedule(drawUnits, event, event.Ready).Handle())
 //	}
 //
-// The recording task records its entries through its DrawList parameter, a
-// draw list of its own, so recording tasks run together:
+// The recording task records its entries through its CommandList parameter, a
+// command list of its own, so recording tasks run together:
 //
-//	func drawUnits(k *kernel.Kernel, event canvas.FrameEvent, list canvas.DrawList) kernel.NoResult {
+//	func drawUnits(k *kernel.Kernel, event canvas.FrameEvent, list canvas.CommandList) kernel.NoResult {
 //		list.DrawShape(canvas.Shape{Kind: canvas.Fill, Rect: m.Rect{Width: 32, Height: 32}, Tint: m.Color{R: 1, A: 1}})
 //		return kernel.NoResult{}
 //	}
 //
-// canvas merges the frame's draw lists in registration order once every
+// canvas merges the frame's command lists in registration order once every
 // recording task has run, sorts their entries, draws them, and forgets them.
-// Entries are drawn by layer, then by order, then by their draw list's
+// Entries are drawn by layer, then by order, then by their command list's
 // registration order, then in the order recorded, unless their layer is in
 // Config.RegroupedLayers, which may regroup entries of equal keys by batch.
 // OrderOf maps a y position onto an order, for y-sorting:
@@ -52,12 +52,12 @@
 //
 //	world, inside := camera.ScreenToWorld(click, targets.Get())
 //
-// canvas begins one command list for each distinct camera order, a camera's
-// pass in it for each camera of that order, those into textures first, its
-// entries an instanced draw for each batch, a run of entries in sort order
-// of one 2D material, one atlas, one filter and one clip, each image and
-// tint premultiplied and blended over what the
-// target holds, its colour encoded as sRGB where the target's format does
+// canvas begins one of render's command lists for each distinct camera
+// order, a camera's pass in it for each camera of that order, those into
+// textures first, its entries an instanced draw for each batch, a run of
+// entries in sort order of one 2D material, one atlas, one filter and one
+// clip, each image and tint premultiplied and blended over what the target
+// holds, its colour encoded as sRGB where the target's format does
 // not encode it. A frame that sets no camera is seen through the default
 // one, which draws only a frame that recorded entries: every layer, into the
 // whole main window, the first window opened of those still open, cleared
