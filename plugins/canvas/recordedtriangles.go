@@ -30,3 +30,16 @@ func (t *recordedTriangles) batchKey(image *drawnImage, defaultFilter Filter, in
 	key.triangles = index + 1
 	return key
 }
+
+// findBounds answers the world rectangle the triangles draw within: their
+// bounds through their options' transform.
+func (t *recordedTriangles) findBounds() m.Rect {
+	return findBoxBounds(t.options.Transform, t.bounds)
+}
+
+// appendInstances appends to instances the triangles' instance data, their
+// image's frame as atlases placed it, as appendMeshInstance writes it, and
+// answers them.
+func (t *recordedTriangles) appendInstances(instances []instanceData, atlases *atlasSet) []instanceData {
+	return appendMeshInstance(instances, t.options.Tint, t.options.Transform, atlases.placed(t.options.Image, t.options.Frame))
+}

@@ -529,6 +529,38 @@ type Converter interface {
 - **Batching and text read what the set placed,** never its tables: a drawn frame answers `inPlainAtlas()`, which a run of text's icons need, a converter's atlas not among them, and `wrapsBySampler()`, which the batch key needs, false for an image in any atlas, whose gutter wraps it.
 - **Its tests run in rendertest's harness,** a test plugin's task making and calling atlases on the recording adapter, as a user's plugin would. What a put copies is read through the test's export of the bytes it staged, since the recording adapter's textures hold no texels.
 
+### Entry kinds and drawn entries
+
+([canvas: entry kinds as one module, answering every per-kind question of a frame's entries](https://github.com/dvoyni/cog/issues/928), [canvas: each entry kind's questions in one place, and the frame's drawn entries](https://github.com/dvoyni/cog/issues/938))
+
+- **The private `commandList` answers every per-kind question of a frame's entries,** each one switch in `commandlist.go` that only dispatches:
+  - `sortKey`, `material` and `argument`;
+  - `meshFile`, the file a mesh draws, which the renderer loads before the entry's frames are found;
+  - `findPlaced`, which finds each image frame and glyph the entry draws through the atlas set, marking them drawn;
+  - `findDrawnEntry`, its bounds, batch key or skip;
+  - `appendInstances`, into the stream of its material's stride;
+  - `inspect`, its part of the `InspectedEntry`, its place among the command lists added by `drawState`.
+- **Each kind's record answers `findBounds`, `batchKey` and `appendInstances`.** A mesh's and per-frame triangles' bounds are their box through their transform, written once. Batching, the sorter and the renderer name no kind, so a new kind touches its record, `commandlist.go` and the public `InspectedEntry`.
+- **The material slots are one `frameMaterials` value:** the default material's, `SDFMaterial`'s and `TextMaterial`'s, and those `Assets` made as the frame began drawing. Its `find(material)` is the one lookup, and the command list takes it as one input.
+- **A frame's answers are one `[]drawnEntry`,** each written at its entry's index, never appended: the entry's bounds grown by its material's `CullMargin`, its batch key, and why it is skipped, zero for none. The sorter's regroup, each camera's cull and batching read it. Three slices appended in step were misaligned by an unplaced sprite.
+- **A skip is one of seven reasons:**
+  - a material canvas does not hold;
+  - an argument layout mismatch;
+  - an argument refused;
+  - a frame that draws nothing;
+  - a mesh file that draws nothing;
+  - a vertex stage missing;
+  - a run that draws no glyph.
+
+  `findDrawnEntry` reports nothing. Once every entry is keyed, the renderer drops the skipped entries from the sorter with `dropSkipped`, and reports each once through `reportSkip`. A frame skipping nothing does neither.
+- **The renderer's frame runs in four steps:**
+  1. `atlases.beginFrame`, and the unloads;
+  2. for each entry, its mesh file loaded, `findPlaced`, then `findDrawnEntry` while nothing has missed;
+  3. `atlases.placeMissed`, then `findDrawnEntry` for every entry from the first miss on, or for every entry when an atlas moved;
+  4. `dropSkipped` and the skips reported, the regroup, the cull for each camera, then the batches, each entry's instances from `appendInstances`.
+- **Mesh files' loaded state stays the renderer's,** read by the command list as an input.
+- **What the command list answers from a record and a material slot is tested plainly:** the sort keys, materials and arguments, and the material skip reasons. Bounds, image skips and batch keys' textures depend on the atlas set's placements, so they stay tested through the kernel. The sorter's and batching's tests take their keys from the command list.
+
 ### Shapes
 
 ([canvas: sprites, their transforms, and how they are ordered and batched](https://github.com/dvoyni/cog/issues/867), [canvas prototype](https://github.com/dvoyni/cog/issues/871), [canvas: what v1 offered that v2's design lacks](https://github.com/dvoyni/cog/issues/878))

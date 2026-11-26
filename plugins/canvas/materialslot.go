@@ -54,31 +54,19 @@ func makeMaterialSlot(inventory render.Inventory, reporter *reporter, descriptor
 	return slot
 }
 
-// takesArgument answers whether the material, material's slot, draws an
-// entry giving it argument: none, which draws the zero value of the type it
-// declares, or one of that type. An argument of another type, or one given
-// a material that takes none, is reported once for the material
-// and the type.
-func (s *materialSlot) takesArgument(reporter *reporter, material Material, argument recordedArgument) bool {
-	if argument.goType == nil || argument.goType == s.argumentType {
-		return true
-	}
-	reportArgumentRefused(reporter, material, argument.goType, s.argumentType)
-	return false
+// takesArgument answers whether the slot's material draws an entry giving
+// it argument: none, which draws the zero value of the type it declares, or
+// one of that type, not one of another type, nor one given a material that
+// takes none.
+func (s *materialSlot) takesArgument(argument recordedArgument) bool {
+	return argument.goType == nil || argument.goType == s.argumentType
 }
 
-// drawsLayout answers whether the material, material's slot, draws a mesh
-// of canvas.Vertex's layout, standard, or of another: always the first,
-// and the second when its vertex stage is its shader's own. One whose
-// vertex stage is canvas's, refused another layout, is reported once for
-// the material.
-func (s *materialSlot) drawsLayout(reporter *reporter, material Material, standard bool) bool {
-	if standard || s.ownVertexStage {
-		return true
-	}
-	missing := Report{Kind: ReportKindVertexStageMissing, Err: fmt.Errorf("canvas: material %v has no vertex stage of its own, so a mesh of another layout than canvas.Vertex's drawn with it is skipped", material)}
-	reporter.reportOnce(vertexStageMissingLogKey+fmt.Sprint(material), missing)
-	return false
+// drawsLayout answers whether the slot's material draws a mesh of
+// canvas.Vertex's layout, standard, or of another: always the first, and
+// the second when its vertex stage is its shader's own.
+func (s *materialSlot) drawsLayout(standard bool) bool {
+	return standard || s.ownVertexStage
 }
 
 // findSlot answers the slot of slots, a table's or a copy of them, that

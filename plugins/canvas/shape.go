@@ -72,11 +72,23 @@ func (s *Shape) findSquare() (m.Mat2x3, m.Vec2) {
 	return s.Transform.Mul(square), size
 }
 
-// findBounds answers the world rectangle the shape draws within: the
-// bounding box of its unit square in the world.
-func (s *Shape) findBounds() m.Rect {
+// findBounds answers the world rectangle the shape draws within, giving its
+// material argument: the bounding box of its unit square in the world, or,
+// drawn with SDFMaterial, its profile's bounds, the argument read as its
+// Profile.
+func (s *Shape) findBounds(argument []byte) m.Rect {
+	if s.Material == SDFMaterial {
+		return s.findProfileBounds(profileFromBytes(argument))
+	}
 	square, _ := s.findSquare()
 	return square.TransformRect(m.Rect{Width: 1, Height: 1})
+}
+
+// appendInstances appends to instances the shape's instance data, over the
+// white texel as atlases placed it, as appendShapeInstances writes it, and
+// answers them.
+func (s *Shape) appendInstances(instances []instanceData, atlases *atlasSet) []instanceData {
+	return appendShapeInstances(instances, s, atlases.placed(Image{}, 0))
 }
 
 // findProfileBounds answers the world rectangle the shape draws within when

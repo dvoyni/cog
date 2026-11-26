@@ -1,7 +1,6 @@
 package canvas
 
 import (
-	"cmp"
 	"fmt"
 	"slices"
 	"sync/atomic"
@@ -126,67 +125,9 @@ func (s *drawState) closeAndSort() {
 // key, in the order merged, for the sorter to sort.
 func (s *drawState) findSortKeys() {
 	s.sorter.entries = s.sorter.entries[:0]
-	for index, entry := range s.frameCommandList.entries {
-		var key sortKey
-		switch entry.kind {
-		case EntryKindShape:
-			shape := &s.frameCommandList.shapes[entry.index]
-			key = makeSortKey(shape.Layer, shape.Order)
-		case EntryKindSprite:
-			sprite := &s.frameCommandList.sprites[entry.index]
-			key = makeSortKey(sprite.Layer, sprite.Order)
-		case EntryKindText:
-			text := &s.frameCommandList.texts[entry.index].text
-			key = makeSortKey(text.Layer, text.Order)
-		case EntryKindTriangles:
-			options := &s.frameCommandList.triangles[entry.index].options
-			key = makeSortKey(options.Layer, options.Order)
-		case EntryKindMesh:
-			mesh := &s.frameCommandList.meshes[entry.index]
-			key = makeSortKey(mesh.Layer, mesh.Order)
-		}
-		s.sorter.entries = append(s.sorter.entries, sortedEntry{key: key, entryIndex: uint32(index)})
+	for entry := range uint32(len(s.frameCommandList.entries)) {
+		s.sorter.entries = append(s.sorter.entries, sortedEntry{key: s.frameCommandList.sortKey(entry), entryIndex: entry})
 	}
-}
-
-// findEntryMaterial answers the 2D material entry, of the frame's, is drawn
-// with: a run of text's TextMaterial when it names none.
-func (s *drawState) findEntryMaterial(entry recordedEntry) Material {
-	switch entry.kind {
-	case EntryKindShape:
-		return s.frameCommandList.shapes[entry.index].Material
-	case EntryKindSprite:
-		return s.frameCommandList.sprites[entry.index].Material
-	case EntryKindTriangles:
-		return s.frameCommandList.triangles[entry.index].options.Material
-	case EntryKindMesh:
-		return s.frameCommandList.meshes[entry.index].Material
-	}
-	return cmp.Or(s.frameCommandList.texts[entry.index].text.Material, TextMaterial)
-}
-
-// findEntryImage answers the image entry, of the frame's, draws and the
-// frame of it, the zero Image for a shape, which draws the white texel, and
-// for a run of text, whose icons each draw their own.
-func (s *drawState) findEntryImage(entry recordedEntry) (Image, uint32) {
-	switch entry.kind {
-	case EntryKindSprite:
-		sprite := &s.frameCommandList.sprites[entry.index]
-		return sprite.Image, sprite.Frame
-	case EntryKindTriangles:
-		options := &s.frameCommandList.triangles[entry.index].options
-		return options.Image, options.Frame
-	case EntryKindMesh:
-		mesh := &s.frameCommandList.meshes[entry.index]
-		return mesh.Image, mesh.Frame
-	}
-	return Image{}, 0
-}
-
-// findEntryArgument answers the bytes of the argument entry, of the frame's,
-// gives its material, none for an entry giving none.
-func (s *drawState) findEntryArgument(entry recordedEntry) []byte {
-	return s.frameCommandList.arguments[entry.argument.offset : entry.argument.offset+findArgumentSize(entry.argument.goType)]
 }
 
 // makeInspection answers the frame sorted, of beat, in canvas's terms, as
@@ -235,7 +176,7 @@ func (s *drawState) makeInspectedCamera(inventory render.Inventory, drawing *ren
 			inspectedEntries = append(inspectedEntries, s.makeInspectedEntry(entry.entryIndex))
 		}
 		key := drawnBatch.key
-		slot, _ := drawing.findMaterial(key.material)
+		slot, _ := drawing.materials.find(key.material)
 		descriptor, _ := inventory.TextureDescriptor(key.texture.Texture)
 		inspected.Batches = append(inspected.Batches, InspectedBatch{
 			Material:      key.material,
@@ -264,8 +205,8 @@ func (s *drawState) makeInspectedCamera(inventory render.Inventory, drawing *ren
 }
 
 // makeInspectedEntry answers the entry at entryIndex of the frame's as
-// inspected: its kind, the entry as recorded, its sort key, and its place
-// among the command lists.
+// inspected: as the frame's command list inspects it, and its place among
+// the command lists.
 func (s *drawState) makeInspectedEntry(entryIndex uint32) InspectedEntry {
 	// The command list holding the entry is the first to end after it.
 	commandListIndex, _ := slices.BinarySearch(s.commandListEnds, int(entryIndex)+1)
@@ -273,31 +214,8 @@ func (s *drawState) makeInspectedEntry(entryIndex uint32) InspectedEntry {
 	if commandListIndex > 0 {
 		commandListStart = s.commandListEnds[commandListIndex-1]
 	}
-	recorded := s.frameCommandList.entries[entryIndex]
-	inspected := InspectedEntry{Kind: recorded.kind, CommandListIndex: commandListIndex, IndexInCommandList: int(entryIndex) - commandListStart}
-	switch recorded.kind {
-	case EntryKindShape:
-		inspected.Shape = s.frameCommandList.shapes[recorded.index]
-		inspected.Layer = inspected.Shape.Layer
-		inspected.Order = inspected.Shape.Order
-	case EntryKindSprite:
-		inspected.Sprite = s.frameCommandList.sprites[recorded.index]
-		inspected.Layer = inspected.Sprite.Layer
-		inspected.Order = inspected.Sprite.Order
-	case EntryKindText:
-		inspected.Text = s.frameCommandList.texts[recorded.index].text
-		// The next frame's spans are written over these.
-		inspected.Text.Spans = slices.Clone(inspected.Text.Spans)
-		inspected.Layer = inspected.Text.Layer
-		inspected.Order = inspected.Text.Order
-	case EntryKindTriangles:
-		inspected.TrianglesOptions = s.frameCommandList.triangles[recorded.index].options
-		inspected.Layer = inspected.TrianglesOptions.Layer
-		inspected.Order = inspected.TrianglesOptions.Order
-	case EntryKindMesh:
-		inspected.Mesh = s.frameCommandList.meshes[recorded.index]
-		inspected.Layer = inspected.Mesh.Layer
-		inspected.Order = inspected.Mesh.Order
-	}
+	inspected := s.frameCommandList.inspect(entryIndex)
+	inspected.CommandListIndex = commandListIndex
+	inspected.IndexInCommandList = int(entryIndex) - commandListStart
 	return inspected
 }

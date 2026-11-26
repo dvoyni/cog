@@ -23,6 +23,18 @@ func (t *laidOutText) batchKey(texture render.TextureView) batchKey {
 	return batchKey{material: cmp.Or(t.text.Material, TextMaterial), texture: texture, filter: cmp.Or(t.text.Filter, t.layout.fontFilter), clip: t.text.Clip}
 }
 
+// findPlaced finds through atlases the run's glyphs and icons, marking
+// them drawn and noting those missed, the glyph atlas made through
+// inventory at the first run.
+func (t *laidOutText) findPlaced(inventory render.Inventory, atlases *atlasSet) {
+	atlases.findGlyphs(inventory, t.layout.glyphs)
+	for _, icon := range t.layout.spanIcons {
+		if icon != nil {
+			atlases.find(icon.image, icon.frame)
+		}
+	}
+}
+
 // findTransform answers the transform from the run's own space, its
 // layout's box from its top left, y pointing down, into the world: its
 // pivot, a point of the box, its Texels in em, moved onto the origin, then

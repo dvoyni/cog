@@ -1,6 +1,10 @@
 package canvas
 
-import "github.com/dvoyni/cog/libs/m"
+import (
+	"cmp"
+
+	"github.com/dvoyni/cog/libs/m"
+)
 
 // Mesh is an entry that draws a mesh file's triangles through a transform,
 // sampling an image as a sprite does. It is a literal, like every other
@@ -49,4 +53,33 @@ type Mesh struct {
 	// Layer and Order are the mesh's sort key, as a Shape's are.
 	Layer int32
 	Order int32
+}
+
+// findBounds answers the world rectangle the mesh draws within, its file
+// as loaded: its file's bounds through its transform.
+func (mesh *Mesh) findBounds(loaded *loadedMesh) m.Rect {
+	return findBoxBounds(mesh.Transform, loaded.bounds)
+}
+
+// batchKey answers what the mesh shares with the entries it batches with,
+// its image as drawn image, as a sprite's batchKey answers it, and its
+// file, so meshes of one file batch together and with nothing else.
+func (mesh *Mesh) batchKey(image *drawnImage, defaultFilter Filter) batchKey {
+	key := makeImageBatchKey(mesh.Material, mesh.Image, image, mesh.Clip, mesh.Filter, defaultFilter)
+	key.meshFile = mesh.File
+	return key
+}
+
+// appendInstances appends to instances the mesh's instance data, its
+// image's frame as atlases placed it, as appendMeshInstance writes it, and
+// answers them.
+func (mesh *Mesh) appendInstances(instances []instanceData, atlases *atlasSet) []instanceData {
+	return appendMeshInstance(instances, mesh.Tint, mesh.Transform, atlases.placed(mesh.Image, mesh.Frame))
+}
+
+// findBoxBounds answers the world rectangle a mesh of bounds draws within
+// through transform, a zero one read as the identity: the bounding box, in
+// the world, of the rectangle box spans in x and y.
+func findBoxBounds(transform m.Mat2x3, box m.Box3) m.Rect {
+	return cmp.Or(transform, m.Translation2x3(0, 0)).TransformRect(m.Rect{X: box.Min.X, Y: box.Min.Y, Width: box.Max.X - box.Min.X, Height: box.Max.Y - box.Min.Y})
 }

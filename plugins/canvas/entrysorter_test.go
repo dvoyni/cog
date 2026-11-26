@@ -6,8 +6,6 @@ import (
 	"math/rand/v2"
 	"slices"
 	"testing"
-
-	"github.com/dvoyni/cog/plugins/render"
 )
 
 func TestEntriesSortByLayerThenOrderKeepingTheirMergedOrderBetweenEqualKeys(t *testing.T) {
@@ -100,8 +98,8 @@ func findEntryIndices(entries []sortedEntry) []uint32 {
 
 // newShapeFrame answers the draw state of a frame of shapes alone, merged
 // in their order, each entry's place its shape's, sorted by sorter and
-// regrouped by their batch keys, whose entries are the frame's in sort
-// order.
+// regrouped by their batch keys, found through newShapeMaterials' slots,
+// whose entries are the frame's in sort order.
 func newShapeFrame(shapes []Shape, sorter entrySorter) *drawState {
 	state := &drawState{frameCommandList: commandList{shapes: shapes}, sorter: sorter}
 	for index := range shapes {
@@ -109,18 +107,27 @@ func newShapeFrame(shapes []Shape, sorter entrySorter) *drawState {
 	}
 	state.findSortKeys()
 	state.sorter.sortByKey()
-	state.sorter.regroup(findShapeBatchKeys(state))
+	state.sorter.regroup(findShapeDrawnEntries(state, newShapeMaterials()))
 	return state
 }
 
-// findShapeBatchKeys answers the batch keys of the shapes of state, a frame
-// of shapes alone, each at its entry's index, over the zero atlas.
-func findShapeBatchKeys(state *drawState) []batchKey {
-	var keys []batchKey
-	for index := range state.frameCommandList.shapes {
-		keys = append(keys, state.frameCommandList.shapes[index].batchKey(render.TextureView{}))
+// newShapeMaterials answers the slots of a frame's materials whose shapes
+// draw with the default material or Material{index: 1, 2 or 3,
+// generation: 1}, none of them taking an argument.
+func newShapeMaterials() *frameMaterials {
+	return &frameMaterials{slots: []materialSlot{{}, {generation: 1}, {generation: 1}, {generation: 1}}}
+}
+
+// findShapeDrawnEntries answers the drawn entries of state, a frame of
+// shapes alone, each at its entry's index, as its command list finds them
+// through materials, over newShapeAtlases' white texel.
+func findShapeDrawnEntries(state *drawState, materials *frameMaterials) []drawnEntry {
+	atlases := newShapeAtlases()
+	drawn := make([]drawnEntry, len(state.frameCommandList.entries))
+	for entry := range drawn {
+		state.frameCommandList.findDrawnEntry(&drawn[entry], uint32(entry), materials, atlases, nil, FilterDefault)
 	}
-	return keys
+	return drawn
 }
 
 // sortedEntryCount is how many entries BenchmarkSortByKey sorts.

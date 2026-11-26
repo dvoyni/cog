@@ -60,23 +60,18 @@ type batch struct {
 	instanceCount uint32
 }
 
-// appendBatches appends to batches the batches of entries, of state's, in
+// appendBatches appends to batches the batches of entries, of list's, in
 // sort order, a batch beginning at the first entry and wherever an entry's
-// batch key, of batchKeys at its index, does not join the batch before it,
-// of another material, texture, clip or mesh file, of a filter neither is
-// FilterDefault, or either a per-frame mesh, and to instances the instance data they draw, and answers
-// batches appended to. Each batch's entries are part of entries. A fill, a
-// line and a sprite draw one instance, and a stroke four, each followed,
-// for a material taking an argument, by the argument its entry gives, or
-// the zero value. A sprite's image is its frame as atlases placed it, and a
-// shape's the zero Image's; a run of text draws an instance for each of its
-// glyphs packed and each of its icons in the sprite atlas, as atlases
-// placed them; per-frame triangles draw one instance, their image's frame
-// as atlases placed it, as does a mesh.
-func appendBatches(batches []batch, instances *listInstanceData, entries []sortedEntry, state *drawState, batchKeys []batchKey, atlases *atlasSet) []batch {
+// batch key, its drawn entry's of drawn at its index, does not join the
+// batch before it, of another material, texture, clip or mesh file, of a
+// filter neither is FilterDefault, or either a per-frame mesh, and to
+// instances the instance data they draw, as list appends each entry's, its
+// images and glyphs as atlases placed them, and answers batches appended
+// to. Each batch's entries are part of entries.
+func appendBatches(batches []batch, instances *listInstanceData, entries []sortedEntry, list *commandList, drawn []drawnEntry, atlases *atlasSet) []batch {
 	firstBatch := len(batches)
 	for index, entry := range entries {
-		entryKey := batchKeys[entry.entryIndex]
+		entryKey := drawn[entry.entryIndex].key
 		joins := false
 		if len(batches) > firstBatch {
 			lastKey := batches[len(batches)-1].key
@@ -94,27 +89,7 @@ func appendBatches(batches []batch, instances *listInstanceData, entries []sorte
 			lastBatch.key.filter = entryKey.filter
 		}
 		lastBatch.entries = lastBatch.entries[:len(lastBatch.entries)+1]
-		recorded := state.frameCommandList.entries[entry.entryIndex]
-		entryStart := len(instances.fixed)
-		switch recorded.kind {
-		case EntryKindShape:
-			instances.fixed = appendShapeInstances(instances.fixed, &state.frameCommandList.shapes[recorded.index], atlases.placed(Image{}, 0))
-		case EntryKindSprite:
-			sprite := &state.frameCommandList.sprites[recorded.index]
-			instances.fixed = appendSpriteInstance(instances.fixed, sprite, atlases.placed(sprite.Image, sprite.Frame))
-		case EntryKindText:
-			instances.fixed = state.frameCommandList.texts[recorded.index].appendInstances(instances.fixed, atlases)
-		case EntryKindTriangles:
-			triangles := &state.frameCommandList.triangles[recorded.index]
-			instances.fixed = appendMeshInstance(instances.fixed, triangles.options.Tint, triangles.options.Transform, atlases.placed(triangles.options.Image, triangles.options.Frame))
-		case EntryKindMesh:
-			mesh := &state.frameCommandList.meshes[recorded.index]
-			instances.fixed = appendMeshInstance(instances.fixed, mesh.Tint, mesh.Transform, atlases.placed(mesh.Image, mesh.Frame))
-		}
-		lastBatch.instanceCount += uint32(len(instances.fixed) - entryStart)
-		if entryKey.stride != 0 {
-			instances.moveToStream(entryStart, entryKey.stride, state.findEntryArgument(recorded))
-		}
+		lastBatch.instanceCount += list.appendInstances(instances, entry.entryIndex, entryKey.stride, atlases)
 	}
 	return batches
 }

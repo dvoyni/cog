@@ -1,7 +1,6 @@
 package canvas
 
 import (
-	"cmp"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -20,12 +19,11 @@ import (
 // draw reuses from the frame before, so a steady frame allocates nothing:
 // the cameras drawn, the entries' keys, the instance data and the batches.
 type renderer struct {
-	// defaultSlot, sdfSlot and textSlot, the default material's,
-	// SDFMaterial's and TextMaterial's, clearMaterial and compositeMaterial
-	// are zero until made.
-	defaultSlot       materialSlot
-	sdfSlot           materialSlot
-	textSlot          materialSlot
+	// materials are the slots of the 2D materials the frame draws with, the
+	// default material's, SDFMaterial's and TextMaterial's zero until made,
+	// the others written over each frame; clearMaterial and
+	// compositeMaterial are zero until made.
+	materials         frameMaterials
 	clearMaterial     render.Material
 	compositeMaterial render.Material
 	// atlases keeps the atlases and where each image frame and glyph drawn
@@ -43,17 +41,12 @@ type renderer struct {
 	// entry of their layers, or having none, and not clearing, kept only
 	// for a frame inspected, which inspects them too.
 	culledCameras []culledCamera
-	// materialSlots are the slots of the 2D materials Assets made, by index,
-	// as they stood as the frame began drawing, written over each frame.
-	materialSlots []materialSlot
-	// entryBounds, batchKeys and skippedEntries are the bounds, the batch
-	// keys and whether they are skipped, drawing an image's frame that draws
-	// nothing or with a material canvas does not hold, of the frame's
-	// entries, each at its entry's index, and visibleEntries the entries
-	// each camera draws, in turn, all written over each frame.
-	entryBounds    []m.Rect
-	batchKeys      []batchKey
-	skippedEntries []bool
+	// drawnEntries are the frame's entries as drawn, each written at its
+	// entry's index, skippedCount how many of them are skipped, and
+	// visibleEntries the entries each camera draws, in turn, all written
+	// over each frame.
+	drawnEntries   []drawnEntry
+	skippedCount   int
 	visibleEntries []sortedEntry
 	// instances are the instance data of the command list being drawn, and
 	// batches the frame's batches, each camera's in turn; both are written
@@ -97,9 +90,9 @@ func newRenderer(atlasPageSize, atlasLayerCeiling, ownTextureSize, mipLevelCount
 // resolved; and the atlas set's pack material, over the viewport shader,
 // and its sRGB sprite atlas, the white texel packed into it first.
 func (r *renderer) init(inventory render.Inventory, reporter *reporter) {
-	r.defaultSlot = makeMaterialSlot(inventory, reporter, MaterialDescriptor{Label: "canvas default", Shader: defaultShaderPath})
-	r.sdfSlot = makeMaterialSlot(inventory, reporter, sdfMaterialDescriptor)
-	r.textSlot = makeMaterialSlot(inventory, reporter, textMaterialDescriptor)
+	r.materials.defaultSlot = makeMaterialSlot(inventory, reporter, MaterialDescriptor{Label: "canvas default", Shader: defaultShaderPath})
+	r.materials.sdfSlot = makeMaterialSlot(inventory, reporter, sdfMaterialDescriptor)
+	r.materials.textSlot = makeMaterialSlot(inventory, reporter, textMaterialDescriptor)
 	viewportShader := inventory.AcquireShader(viewportShaderPath)
 	r.clearMaterial = inventory.MakeMaterial(render.MaterialDescriptor{
 		Label:              "canvas clear",
@@ -131,16 +124,18 @@ func (r *renderer) init(inventory render.Inventory, reporter *reporter) {
 // clear draws nothing, nor does one makeCameraDraw finds draws nothing. It
 // makes the materials and the sRGB atlas at the first frame setting a
 // camera, and loads a mesh's file from files at the first frame recording
-// it. The atlas set finds each entry's images and glyphs, the glyph atlas
-// made at the first run of text, keying the entry while nothing has
-// missed, then places what missed, a glyph's field read
-// from library's glyph table, a converted image's file read from files,
-// decoded and converted, keying every entry again if an atlas moved, and
-// the rest once placed; the lowest order's command list records the
-// uploads before any camera's pass. Once each entry's batch key is found,
-// it regroups state's sorted entries by them. First, whether a camera is
-// set or not, it begins the atlas set's frame and unloads the paths state's
-// residency requests ask, the mesh files of those paths among them.
+// it. The frame's command list finds each entry's images and glyphs through
+// the atlas set, the glyph atlas made at the first run of text, and keys
+// the entry while nothing has missed, then the set places what missed, a
+// glyph's field read from library's glyph table, a converted image's file
+// read from files, decoded and converted, every entry keyed again if an
+// atlas moved, and the rest once placed; the lowest order's render command
+// list records the uploads before any camera's pass. Once every entry is
+// keyed, it drops the skipped ones from state's sorted entries, reporting
+// each once, and regroups the rest by their batch keys. First, whether a
+// camera is set or not, it begins the atlas set's frame and unloads the
+// paths state's residency requests ask, the mesh files of those paths among
+// them.
 func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, files fs.FS, manager *platform.WindowManager, mainWindow platform.Window, library *fontLibrary, state *drawState) {
 	r.cameraDraws = r.cameraDraws[:0]
 	clear(r.culledCameras)
@@ -148,9 +143,6 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 	r.mainWindow = mainWindow
 	r.batches = r.batches[:0]
 	r.visibleEntries = r.visibleEntries[:0]
-	r.entryBounds = r.entryBounds[:0]
-	r.batchKeys = r.batchKeys[:0]
-	r.skippedEntries = r.skippedEntries[:0]
 	r.atlases.beginFrame()
 	r.unloadedPaths = state.residency.takeUnloadedPaths(r.unloadedPaths[:0])
 	for _, unloaded := range r.unloadedPaths {
@@ -161,42 +153,53 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 	if len(state.frameCommandList.cameras) == 0 {
 		return
 	}
-	if r.defaultSlot.material == (render.Material{}) {
+	if r.materials.defaultSlot.material == (render.Material{}) {
 		r.init(inventory, state.reporter)
 	}
-	r.materialSlots = state.materials.appendSlots(r.materialSlots[:0])
+	r.materials.slots = state.materials.appendSlots(r.materials.slots[:0])
+	list := &state.frameCommandList
+	entryCount := uint32(len(list.entries))
+	r.drawnEntries = slices.Grow(r.drawnEntries[:0], int(entryCount))[:entryCount]
+	r.skippedCount = 0
 	// Every image and glyph the frame draws is marked drawn before any is
 	// packed, so packing the frame's new ones evicts none the frame draws.
-	for _, entry := range state.frameCommandList.entries {
-		r.findEntryFramesAndGlyphs(inventory, files, state, entry)
+	var keyedCount uint32
+	for entry := range entryCount {
+		if file := list.meshFile(entry); file != (MeshFile{}) && r.loadMesh(inventory, files, state.reporter, &state.fileStamps, file) {
+			state.inspector.addLoadedMeshFile(file)
+		}
+		list.findPlaced(entry, inventory, &r.atlases, r.loadedMeshes)
 		if !r.atlases.missed() {
-			r.appendEntryKeys(state, entry)
+			r.findDrawnEntry(list, entry, state.defaultFilter)
+			keyedCount++
 		}
 	}
-	// Growing an atlas replaces its texture, so every key is found again.
+	// Growing an atlas replaces its texture, so every entry is keyed again.
 	if r.atlases.placeMissed(inventory, files, &library.glyphs, state.reporter, &state.residency, &state.fileStamps, state.inspector) {
-		r.entryBounds = r.entryBounds[:0]
-		r.batchKeys = r.batchKeys[:0]
-		r.skippedEntries = r.skippedEntries[:0]
+		keyedCount = 0
+		r.skippedCount = 0
 	}
-	for _, entry := range state.frameCommandList.entries[len(r.batchKeys):] {
-		r.appendEntryKeys(state, entry)
+	for entry := keyedCount; entry < entryCount; entry++ {
+		r.findDrawnEntry(list, entry, state.defaultFilter)
 	}
-	state.sorter.regroup(r.batchKeys)
-	if slices.Contains(r.skippedEntries, true) {
-		state.sorter.entries = slices.DeleteFunc(state.sorter.entries, func(entry sortedEntry) bool {
-			return r.skippedEntries[entry.entryIndex]
-		})
+	if r.skippedCount > 0 {
+		state.sorter.dropSkipped(r.drawnEntries)
+		for entry := range entryCount {
+			if reason := r.drawnEntries[entry].skip; reason != skipReasonNone {
+				reportSkip(state.reporter, reason, list, entry, &r.materials)
+			}
+		}
 	}
-	for index := range state.frameCommandList.cameras {
-		camera := &state.frameCommandList.cameras[index]
+	state.sorter.regroup(r.drawnEntries)
+	for index := range list.cameras {
+		camera := &list.cameras[index]
 		drawnCamera, ok := makeCameraDraw(inventory, manager, mainWindow, state.reporter, camera)
 		if !ok {
 			continue
 		}
 		entriesStart := len(r.visibleEntries)
 		for _, layerRun := range camera.findLayerRuns(state.sorter.entries) {
-			r.visibleEntries = drawnCamera.view.appendVisibleEntries(r.visibleEntries, layerRun, r.batchKeys, r.entryBounds)
+			r.visibleEntries = drawnCamera.view.appendVisibleEntries(r.visibleEntries, layerRun, r.drawnEntries)
 		}
 		drawnCamera.entries = r.visibleEntries[entriesStart:]
 		switch {
@@ -213,35 +216,6 @@ func (r *renderer) drawCameras(frame render.Frame, inventory render.Inventory, f
 		}
 		r.drawOrder(frame, inventory, r.cameraDraws[orderStart:orderEnd], state)
 		orderStart = orderEnd
-	}
-}
-
-// findEntryFramesAndGlyphs finds, through the atlas set, the image frames
-// and glyphs entry, of state's, draws, marking them drawn: a sprite's
-// image's frame, per-frame triangles' and a mesh's, loading the mesh's file
-// from files at its first draw, a mesh whose file draws nothing finding
-// none; and a run of text's glyphs and icons.
-func (r *renderer) findEntryFramesAndGlyphs(inventory render.Inventory, files fs.FS, state *drawState, entry recordedEntry) {
-	switch entry.kind {
-	case EntryKindMesh:
-		file := state.frameCommandList.meshes[entry.index].File
-		if r.loadMesh(inventory, files, state.reporter, &state.fileStamps, file) {
-			state.inspector.addLoadedMeshFile(file)
-		}
-		if r.loadedMeshes[file.index].mesh == (render.Mesh{}) {
-			return
-		}
-		fallthrough
-	case EntryKindSprite, EntryKindTriangles:
-		r.atlases.find(state.findEntryImage(entry))
-	case EntryKindText:
-		layout := &state.frameCommandList.texts[entry.index].layout
-		r.atlases.findGlyphs(inventory, layout.glyphs)
-		for _, icon := range layout.spanIcons {
-			if icon != nil {
-				r.atlases.find(icon.image, icon.frame)
-			}
-		}
 	}
 }
 
@@ -273,7 +247,7 @@ func (r *renderer) drawOrder(frame render.Frame, inventory render.Inventory, cam
 			r.instances.fixed = appendShapeInstances(r.instances.fixed, &Shape{Tint: drawnCamera.camera.ClearColor}, r.atlases.placed(Image{}, 0))
 		}
 		batchesStart := len(r.batches)
-		r.batches = appendBatches(r.batches, &r.instances, drawnCamera.entries, state, r.batchKeys, &r.atlases)
+		r.batches = appendBatches(r.batches, &r.instances, drawnCamera.entries, &state.frameCommandList, r.drawnEntries, &r.atlases)
 		drawnCamera.batches = r.batches[batchesStart:]
 	}
 	list := frame.BeginCommandList("canvas", cameraDraws[0].camera.Order)
@@ -334,7 +308,7 @@ func (r *renderer) drawEntries(list *render.CommandList, drawnCamera *cameraDraw
 		}
 		scissor = scissor.Translate(toColorTarget)
 		pass.SetScissorRectangle(render.ScissorRectangle{X: uint32(scissor.X), Y: uint32(scissor.Y), Width: uint32(scissor.Width), Height: uint32(scissor.Height)})
-		material, _ := r.findMaterial(drawnBatch.key.material)
+		material, _ := r.materials.find(drawnBatch.key.material)
 		instances := r.instances.findRange(drawnBatch.key.stride)
 		key := drawnBatch.key
 		var mesh render.Mesh
@@ -442,119 +416,16 @@ func bindInstances(pass *render.Pass, material render.Material, instances render
 	pass.SetSampler("canvas_sampler", filter.makeSamplerDescriptor(wrap))
 }
 
-// appendEntryKeys appends entry's bounds, grown by its material's
-// CullMargin, its batch key, and that it is not skipped, of state's, to the
-// frame's, its image placed: packed, given a view of its texture, or found
-// to draw nothing. An entry skipped, its image's frame drawing nothing, its
-// material one canvas does not hold, or its argument one its material does
-// not take, reported once, or of a material whose
-// argument's layout mismatched its shader's, or a mesh whose file draws
-// nothing, or per-frame triangles or a mesh of another layout than
-// canvas.Vertex's whose material has no vertex stage of its own, reported
-// once, has zero bounds and batch key.
-func (r *renderer) appendEntryKeys(state *drawState, entry recordedEntry) {
-	material := state.findEntryMaterial(entry)
-	slot, held := r.findMaterial(material)
-	if !held {
-		reportMaterialNotHeld(state.reporter, material, "drawing an entry with")
-		r.appendSkippedEntryKeys()
-		return
+// findDrawnEntry writes entry, of list, the frame's, as drawn among the
+// frame's drawn entries, at its index, as list finds it through the
+// frame's materials, the atlas set and the mesh files loaded, an image
+// naming no filter of defaultFilter, counting it when it is skipped.
+func (r *renderer) findDrawnEntry(list *commandList, entry uint32, defaultFilter Filter) {
+	drawn := &r.drawnEntries[entry]
+	list.findDrawnEntry(drawn, entry, &r.materials, &r.atlases, r.loadedMeshes, defaultFilter)
+	if drawn.skip != skipReasonNone {
+		r.skippedCount++
 	}
-	// A material whose argument's layout mismatched its shader's, reported
-	// as it was made, draws nothing.
-	if slot.argumentLayoutMismatch || !slot.takesArgument(state.reporter, material, entry.argument) {
-		r.appendSkippedEntryKeys()
-		return
-	}
-	margin := m.Vec2{X: -slot.cullMargin, Y: -slot.cullMargin}
-	var bounds m.Rect
-	var key batchKey
-	switch entry.kind {
-	case EntryKindShape:
-		shape := &state.frameCommandList.shapes[entry.index]
-		if material == SDFMaterial {
-			bounds = shape.findProfileBounds(profileFromBytes(state.findEntryArgument(entry)))
-		} else {
-			bounds = shape.findBounds()
-		}
-		key = shape.batchKey(r.atlases.findSpriteAtlas())
-	case EntryKindSprite:
-		sprite := &state.frameCommandList.sprites[entry.index]
-		image := r.atlases.placed(sprite.Image, sprite.Frame)
-		if image.drawsNothing {
-			r.appendSkippedEntryKeys()
-			return
-		}
-		bounds = sprite.findBounds(image)
-		key = sprite.batchKey(image, state.defaultFilter)
-	case EntryKindText:
-		run := &state.frameCommandList.texts[entry.index]
-		var drawsGlyphs bool
-		if bounds, drawsGlyphs = run.findBounds(&r.atlases); !drawsGlyphs {
-			r.appendSkippedEntryKeys()
-			return
-		}
-		key = run.batchKey(r.atlases.findGlyphAtlas())
-	case EntryKindTriangles:
-		triangles := &state.frameCommandList.triangles[entry.index]
-		image := r.atlases.placed(triangles.options.Image, triangles.options.Frame)
-		if image.drawsNothing || !slot.drawsLayout(state.reporter, material, triangles.standardLayout) {
-			r.appendSkippedEntryKeys()
-			return
-		}
-		box := triangles.bounds
-		bounds = cmp.Or(triangles.options.Transform, m.Translation2x3(0, 0)).TransformRect(m.Rect{X: box.Min.X, Y: box.Min.Y, Width: box.Max.X - box.Min.X, Height: box.Max.Y - box.Min.Y})
-		key = triangles.batchKey(image, state.defaultFilter, entry.index)
-	case EntryKindMesh:
-		mesh := &state.frameCommandList.meshes[entry.index]
-		loaded := &r.loadedMeshes[mesh.File.index]
-		if loaded.mesh == (render.Mesh{}) {
-			r.appendSkippedEntryKeys()
-			return
-		}
-		image := r.atlases.placed(mesh.Image, mesh.Frame)
-		if image.drawsNothing || !slot.drawsLayout(state.reporter, material, loaded.standardLayout) {
-			r.appendSkippedEntryKeys()
-			return
-		}
-		box := loaded.bounds
-		bounds = cmp.Or(mesh.Transform, m.Translation2x3(0, 0)).TransformRect(m.Rect{X: box.Min.X, Y: box.Min.Y, Width: box.Max.X - box.Min.X, Height: box.Max.Y - box.Min.Y})
-		key = makeImageBatchKey(mesh.Material, mesh.Image, image, mesh.Clip, mesh.Filter, state.defaultFilter)
-		key.meshFile = mesh.File
-	}
-	key.stride = slot.stride
-	r.entryBounds = append(r.entryBounds, bounds.Inset(margin))
-	r.batchKeys = append(r.batchKeys, key)
-	r.skippedEntries = append(r.skippedEntries, false)
-}
-
-// appendSkippedEntryKeys appends a skipped entry's zero bounds and batch key
-// to the frame's, and that it is skipped.
-func (r *renderer) appendSkippedEntryKeys() {
-	r.entryBounds = append(r.entryBounds, m.Rect{})
-	r.batchKeys = append(r.batchKeys, batchKey{})
-	r.skippedEntries = append(r.skippedEntries, true)
-}
-
-// findMaterial answers the slot of material as the frame began drawing, and
-// whether canvas holds it: the default material's for the zero Material,
-// SDFMaterial's and TextMaterial's, made at canvas's first draw, and a released
-// material's until its slot is freed, once the frame of its release is
-// drawn.
-func (r *renderer) findMaterial(material Material) (materialSlot, bool) {
-	switch material {
-	case Material{}:
-		return r.defaultSlot, true
-	case SDFMaterial:
-		return r.sdfSlot, true
-	case TextMaterial:
-		return r.textSlot, true
-	}
-	slot, found := findSlot(r.materialSlots, material)
-	if !found {
-		return materialSlot{}, false
-	}
-	return *slot, true
 }
 
 // loadMesh loads file at its first draw: stamped in stamps, read from files and decoded, its

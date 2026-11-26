@@ -6,11 +6,18 @@ import (
 	"testing"
 
 	"github.com/dvoyni/cog/libs/m"
+	"github.com/dvoyni/cog/plugins/canvas/atlas"
 )
 
 // shapeImages are the drawn images of a frame of shapes alone: the white
 // texel's, at a region of its own.
 var shapeImages = [][]drawnImage{{{region: m.Rect{X: 0.25, Y: 0.5, Width: 0.125, Height: 0.125}, page: 1, size: m.Vec2{X: 1, Y: 1}}}}
+
+// newShapeAtlases answers the atlas set of a frame of shapes alone: the
+// white texel of shapeImages, in a sprite atlas of no texture.
+func newShapeAtlases() *atlasSet {
+	return &atlasSet{drawnImages: shapeImages, srgbAtlas: &atlas.Atlas{}}
+}
 
 func TestBatchesBreakOnlyWhereAnEntrysMaterialDiffersFromTheOneBefore(t *testing.T) {
 	firstMaterial := Material{index: 1, generation: 1}
@@ -26,7 +33,7 @@ func TestBatchesBreakOnlyWhereAnEntrysMaterialDiffersFromTheOneBefore(t *testing
 	entries := state.sorter.entries
 
 	var instances listInstanceData
-	got := appendBatches(nil, &instances, entries, state, findShapeBatchKeys(state), &atlasSet{drawnImages: shapeImages})
+	got := appendBatches(nil, &instances, entries, &state.frameCommandList, findShapeDrawnEntries(state, newShapeMaterials()), newShapeAtlases())
 
 	want := []batch{
 		{key: batchKey{material: firstMaterial}, entries: entries[0:2], firstInstance: 0, instanceCount: 2},
@@ -50,9 +57,9 @@ func TestBatchesAppendedAfterAnotherCamerasBeginANewBatchEvenOfTheSameMaterial(t
 	state := newShapeFrame(shapes, makeEntrySorter(nil))
 	entries := state.sorter.entries
 	var instances listInstanceData
-	firstBatches := appendBatches(nil, &instances, entries[:1], state, findShapeBatchKeys(state), &atlasSet{drawnImages: shapeImages})
+	firstBatches := appendBatches(nil, &instances, entries[:1], &state.frameCommandList, findShapeDrawnEntries(state, newShapeMaterials()), newShapeAtlases())
 
-	got := appendBatches(firstBatches, &instances, entries[1:], state, findShapeBatchKeys(state), &atlasSet{drawnImages: shapeImages})
+	got := appendBatches(firstBatches, &instances, entries[1:], &state.frameCommandList, findShapeDrawnEntries(state, newShapeMaterials()), newShapeAtlases())
 
 	want := []batch{
 		{entries: entries[0:1], firstInstance: 0, instanceCount: 1},
@@ -69,7 +76,7 @@ func TestBatchesBreakWhereAnEntrysClipDiffersFromTheOneBefore(t *testing.T) {
 	state := newShapeFrame(shapes, makeEntrySorter(nil))
 	entries := state.sorter.entries
 
-	got := appendBatches(nil, &listInstanceData{}, entries, state, findShapeBatchKeys(state), &atlasSet{drawnImages: shapeImages})
+	got := appendBatches(nil, &listInstanceData{}, entries, &state.frameCommandList, findShapeDrawnEntries(state, newShapeMaterials()), newShapeAtlases())
 
 	want := []batch{
 		{entries: entries[0:1], firstInstance: 0, instanceCount: 1},
@@ -99,19 +106,19 @@ func TestInstancesOfAMaterialTakingAnArgumentGoIntoItsStridesStreamEachFollowedB
 	for index := range 2 {
 		state.frameCommandList.entries[index].argument = recordedArgument{goType: argumentType, offset: uint32(4 * index)}
 	}
-	keys := findShapeBatchKeys(state)
-	for index := range 3 {
-		keys[index].stride = 160
-	}
+	materials := newShapeMaterials()
+	materials.slots[1].argumentType = argumentType
+	materials.slots[1].stride = findInstanceStride(argumentType)
+	drawn := findShapeDrawnEntries(state, materials)
 	instances := listInstanceData{streams: []instanceStream{{stride: 160, data: slices.Repeat([]byte{0xff}, 6*160)}}}
 	instances.reset()
 
-	got := appendBatches(nil, &instances, state.sorter.entries, state, keys, &atlasSet{drawnImages: shapeImages})
+	got := appendBatches(nil, &instances, state.sorter.entries, &state.frameCommandList, drawn, newShapeAtlases())
 
 	entries := state.sorter.entries
 	want := []batch{
-		{key: keys[0], entries: entries[0:3], firstInstance: 0, instanceCount: 6},
-		{key: keys[3], entries: entries[3:4], firstInstance: 0, instanceCount: 1},
+		{key: batchKey{material: material, stride: 160}, entries: entries[0:3], firstInstance: 0, instanceCount: 6},
+		{key: batchKey{}, entries: entries[3:4], firstInstance: 0, instanceCount: 1},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("the shapes batched as %+v, want %+v: the material's six rows from its stream's first, the default material's one fixed instance from the first", got, want)

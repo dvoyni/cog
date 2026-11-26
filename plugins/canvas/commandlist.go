@@ -1,6 +1,7 @@
 package canvas
 
 import (
+	"cmp"
 	"encoding/binary"
 	"fmt"
 	"reflect"
@@ -421,6 +422,226 @@ func (l *commandList) reset() {
 	l.vertexBytes = l.vertexBytes[:0]
 	l.indexBytes = l.indexBytes[:0]
 	l.cameras = l.cameras[:0]
+}
+
+// sortKey answers the sort key of entry, of the command list's: its
+// record's layer, then its order.
+func (l *commandList) sortKey(entry uint32) sortKey {
+	recorded := l.entries[entry]
+	switch recorded.kind {
+	case EntryKindShape:
+		shape := &l.shapes[recorded.index]
+		return makeSortKey(shape.Layer, shape.Order)
+	case EntryKindSprite:
+		sprite := &l.sprites[recorded.index]
+		return makeSortKey(sprite.Layer, sprite.Order)
+	case EntryKindText:
+		text := &l.texts[recorded.index].text
+		return makeSortKey(text.Layer, text.Order)
+	case EntryKindTriangles:
+		options := &l.triangles[recorded.index].options
+		return makeSortKey(options.Layer, options.Order)
+	}
+	mesh := &l.meshes[recorded.index]
+	return makeSortKey(mesh.Layer, mesh.Order)
+}
+
+// material answers the 2D material entry, of the command list's, is drawn
+// with: a run of text's TextMaterial when it names none.
+func (l *commandList) material(entry uint32) Material {
+	recorded := l.entries[entry]
+	switch recorded.kind {
+	case EntryKindShape:
+		return l.shapes[recorded.index].Material
+	case EntryKindSprite:
+		return l.sprites[recorded.index].Material
+	case EntryKindText:
+		return cmp.Or(l.texts[recorded.index].text.Material, TextMaterial)
+	case EntryKindTriangles:
+		return l.triangles[recorded.index].options.Material
+	}
+	return l.meshes[recorded.index].Material
+}
+
+// argument answers the bytes of the argument entry, of the command list's,
+// gives its material, none for an entry giving none.
+func (l *commandList) argument(entry uint32) []byte {
+	argument := l.entries[entry].argument
+	return l.arguments[argument.offset : argument.offset+findArgumentSize(argument.goType)]
+}
+
+// meshFile answers the mesh file entry, of the command list's, draws, the
+// zero MeshFile for an entry of no file.
+func (l *commandList) meshFile(entry uint32) MeshFile {
+	recorded := l.entries[entry]
+	if recorded.kind != EntryKindMesh {
+		return MeshFile{}
+	}
+	return l.meshes[recorded.index].File
+}
+
+// findPlaced finds through atlases each image frame and glyph entry, of the
+// command list's, draws, marking them drawn, so packing the frame's new
+// ones evicts none of them, and noting those missed: a sprite's image's
+// frame, per-frame triangles' and a mesh's, a mesh whose file, as meshes
+// loaded it, draws nothing finding none, and a run of text's glyphs and
+// icons, the glyph atlas made through inventory at the first run.
+func (l *commandList) findPlaced(entry uint32, inventory render.Inventory, atlases *atlasSet, meshes []loadedMesh) {
+	recorded := l.entries[entry]
+	switch recorded.kind {
+	case EntryKindSprite:
+		sprite := &l.sprites[recorded.index]
+		atlases.find(sprite.Image, sprite.Frame)
+	case EntryKindText:
+		l.texts[recorded.index].findPlaced(inventory, atlases)
+	case EntryKindTriangles:
+		options := &l.triangles[recorded.index].options
+		atlases.find(options.Image, options.Frame)
+	case EntryKindMesh:
+		mesh := &l.meshes[recorded.index]
+		if meshes[mesh.File.index].mesh != (render.Mesh{}) {
+			atlases.find(mesh.Image, mesh.Frame)
+		}
+	}
+}
+
+// findDrawnEntry writes into drawn entry, of the command list's, as drawn,
+// every field written over: its bounds,
+// grown by its material's CullMargin, and its batch key, its material's slot
+// of materials, its images and glyphs as atlases placed them, a mesh's file
+// as meshes loaded it, and an image naming no filter of defaultFilter; or
+// why it is skipped, its bounds and batch key zero. Its material comes
+// first, one canvas does not hold, one whose argument's layout mismatched
+// its shader's, or one refusing the entry's argument skipping it, then its
+// record's: an image's frame or a mesh file drawing nothing, per-frame
+// triangles or a mesh of another layout than canvas.Vertex's drawn with a
+// material whose vertex stage is canvas's, or a run of text drawing no
+// glyph. It reports nothing. It writes through drawn, rather than
+// answering it: copying the drawn entry out and into the frame's slice
+// made a frame of fills about a tenth slower in canvas's benchmarks.
+func (l *commandList) findDrawnEntry(drawn *drawnEntry, entry uint32, materials *frameMaterials, atlases *atlasSet, meshes []loadedMesh, defaultFilter Filter) {
+	recorded := l.entries[entry]
+	slot, held := materials.find(l.material(entry))
+	switch {
+	case !held:
+		*drawn = drawnEntry{skip: skipReasonMaterialNotHeld}
+		return
+	case slot.argumentLayoutMismatch:
+		*drawn = drawnEntry{skip: skipReasonArgumentLayoutMismatch}
+		return
+	case !slot.takesArgument(recorded.argument):
+		*drawn = drawnEntry{skip: skipReasonArgumentRefused}
+		return
+	}
+	switch recorded.kind {
+	case EntryKindShape:
+		shape := &l.shapes[recorded.index]
+		drawn.bounds = shape.findBounds(l.argument(entry))
+		drawn.key = shape.batchKey(atlases.findSpriteAtlas())
+	case EntryKindSprite:
+		sprite := &l.sprites[recorded.index]
+		image := atlases.placed(sprite.Image, sprite.Frame)
+		if image.drawsNothing {
+			*drawn = drawnEntry{skip: skipReasonFrameDrawsNothing}
+			return
+		}
+		drawn.bounds = sprite.findBounds(image)
+		drawn.key = sprite.batchKey(image, defaultFilter)
+	case EntryKindText:
+		run := &l.texts[recorded.index]
+		var drawsGlyphs bool
+		if drawn.bounds, drawsGlyphs = run.findBounds(atlases); !drawsGlyphs {
+			*drawn = drawnEntry{skip: skipReasonNoGlyphDrawn}
+			return
+		}
+		drawn.key = run.batchKey(atlases.findGlyphAtlas())
+	case EntryKindTriangles:
+		triangles := &l.triangles[recorded.index]
+		image := atlases.placed(triangles.options.Image, triangles.options.Frame)
+		if skip := findMeshSkip(image, triangles.standardLayout, slot); skip != skipReasonNone {
+			*drawn = drawnEntry{skip: skip}
+			return
+		}
+		drawn.bounds = triangles.findBounds()
+		drawn.key = triangles.batchKey(image, defaultFilter, recorded.index)
+	case EntryKindMesh:
+		mesh := &l.meshes[recorded.index]
+		loaded := &meshes[mesh.File.index]
+		if loaded.mesh == (render.Mesh{}) {
+			*drawn = drawnEntry{skip: skipReasonMeshFileDrawsNothing}
+			return
+		}
+		image := atlases.placed(mesh.Image, mesh.Frame)
+		if skip := findMeshSkip(image, loaded.standardLayout, slot); skip != skipReasonNone {
+			*drawn = drawnEntry{skip: skip}
+			return
+		}
+		drawn.bounds = mesh.findBounds(loaded)
+		drawn.key = mesh.batchKey(image, defaultFilter)
+	}
+	drawn.bounds = drawn.bounds.Inset(m.Vec2{X: -slot.cullMargin, Y: -slot.cullMargin})
+	drawn.key.stride = slot.stride
+	drawn.skip = skipReasonNone
+}
+
+// appendInstances appends to instances the instance data entry, of the
+// command list's, draws, each image frame and glyph as atlases placed it:
+// into the stream of stride, its material's, each instance followed by the
+// argument it gives, or the zero value, or into the fixed instances for a
+// stride of zero. It answers how many instances it appended.
+func (l *commandList) appendInstances(instances *listInstanceData, entry uint32, stride uint32, atlases *atlasSet) uint32 {
+	recorded := l.entries[entry]
+	start := len(instances.fixed)
+	switch recorded.kind {
+	case EntryKindShape:
+		instances.fixed = l.shapes[recorded.index].appendInstances(instances.fixed, atlases)
+	case EntryKindSprite:
+		instances.fixed = l.sprites[recorded.index].appendInstances(instances.fixed, atlases)
+	case EntryKindText:
+		instances.fixed = l.texts[recorded.index].appendInstances(instances.fixed, atlases)
+	case EntryKindTriangles:
+		instances.fixed = l.triangles[recorded.index].appendInstances(instances.fixed, atlases)
+	case EntryKindMesh:
+		instances.fixed = l.meshes[recorded.index].appendInstances(instances.fixed, atlases)
+	}
+	count := uint32(len(instances.fixed) - start)
+	if stride != 0 {
+		instances.moveToStream(start, stride, l.argument(entry))
+	}
+	return count
+}
+
+// inspect answers entry, of the command list's, as inspected: its kind, its
+// record as recorded, and its sort key's layer and order, its place among
+// the command lists left to its caller.
+func (l *commandList) inspect(entry uint32) InspectedEntry {
+	recorded := l.entries[entry]
+	inspected := InspectedEntry{Kind: recorded.kind}
+	switch recorded.kind {
+	case EntryKindShape:
+		inspected.Shape = l.shapes[recorded.index]
+		inspected.Layer = inspected.Shape.Layer
+		inspected.Order = inspected.Shape.Order
+	case EntryKindSprite:
+		inspected.Sprite = l.sprites[recorded.index]
+		inspected.Layer = inspected.Sprite.Layer
+		inspected.Order = inspected.Sprite.Order
+	case EntryKindText:
+		inspected.Text = l.texts[recorded.index].text
+		// The next frame's spans are written over these.
+		inspected.Text.Spans = slices.Clone(inspected.Text.Spans)
+		inspected.Layer = inspected.Text.Layer
+		inspected.Order = inspected.Text.Order
+	case EntryKindTriangles:
+		inspected.TrianglesOptions = l.triangles[recorded.index].options
+		inspected.Layer = inspected.TrianglesOptions.Layer
+		inspected.Order = inspected.TrianglesOptions.Order
+	case EntryKindMesh:
+		inspected.Mesh = l.meshes[recorded.index]
+		inspected.Layer = inspected.Mesh.Layer
+		inspected.Order = inspected.Mesh.Order
+	}
+	return inspected
 }
 
 // recordedEntry is one entry of a command list, a task's or the frame's:

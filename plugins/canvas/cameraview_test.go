@@ -219,7 +219,7 @@ func TestACameraCullsTheEntriesWhoseBoundsMissItsViewOrTheirClipsPartOfIt(t *tes
 		if !ok {
 			t.Fatalf("%s: the camera has no view", seen.name)
 		}
-		visible := view.appendVisibleEntries(nil, []sortedEntry{{entryIndex: 0}}, []batchKey{{clip: seen.shape.Clip}}, []m.Rect{seen.shape.findBounds()})
+		visible := view.appendVisibleEntries(nil, []sortedEntry{{entryIndex: 0}}, []drawnEntry{{bounds: seen.shape.findBounds(nil), key: batchKey{clip: seen.shape.Clip}}})
 		if got := len(visible) == 1; got != seen.want {
 			t.Errorf("%s, %+v, is seen: %v, want %v", seen.name, seen.shape, got, seen.want)
 		}
@@ -230,17 +230,13 @@ func TestACamerasVisibleEntriesAreAppendedInOrderAfterThoseBefore(t *testing.T) 
 	inside := Shape{Rect: m.Rect{Width: 10, Height: 10}}
 	outside := Shape{Rect: m.Rect{X: 500, Width: 10, Height: 10}}
 	shapes := []Shape{inside, outside, inside, outside, inside}
-	var bounds []m.Rect
-	for index := range shapes {
-		bounds = append(bounds, shapes[index].findBounds())
-	}
 	state := newShapeFrame(shapes, makeEntrySorter(nil))
 	entries := state.sorter.entries
 	camera := Camera{}
 	view, _ := makeCameraView(&camera, 200, 100, 1)
 	earlier := []sortedEntry{{entryIndex: 99}}
 
-	got := view.appendVisibleEntries(earlier, entries[1:5], findShapeBatchKeys(state), bounds)
+	got := view.appendVisibleEntries(earlier, entries[1:5], findShapeDrawnEntries(state, newShapeMaterials()))
 
 	if want := []sortedEntry{earlier[0], entries[2], entries[4]}; !slices.Equal(got, want) {
 		t.Errorf("the run %v appended %v, want those inside the view after the entries before, in order, %v", entries[1:5], got, want)

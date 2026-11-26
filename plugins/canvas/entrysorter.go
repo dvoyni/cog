@@ -83,10 +83,18 @@ func (s *entrySorter) sortByKey() {
 	s.scratch = target
 }
 
+// dropSkipped drops from the sorted entries those drawn skips, each
+// entry's drawn entry at its index.
+func (s *entrySorter) dropSkipped(drawn []drawnEntry) {
+	s.entries = slices.DeleteFunc(s.entries, func(entry sortedEntry) bool {
+		return drawn[entry.entryIndex].skip != skipReasonNone
+	})
+}
+
 // regroup regroups by batch each run of the sorted entries of equal keys in
-// a layer the sorter regroups, each entry's batch key of batchKeys at its
-// index.
-func (s *entrySorter) regroup(batchKeys []batchKey) {
+// a layer the sorter regroups, each entry's batch key its drawn entry's, of
+// drawn at its index.
+func (s *entrySorter) regroup(drawn []drawnEntry) {
 	if len(s.regroupedLayers) == 0 {
 		return
 	}
@@ -101,7 +109,7 @@ func (s *entrySorter) regroup(batchKeys []batchKey) {
 			// back.
 			runLayer := int32(uint32(runKey>>32) ^ signBit)
 			if _, regrouped := slices.BinarySearch(s.regroupedLayers, runLayer); regrouped {
-				s.regroupRun(s.entries[runStart:runEnd], batchKeys)
+				s.regroupRun(s.entries[runStart:runEnd], drawn)
 			}
 		}
 		runStart = runEnd
@@ -110,14 +118,15 @@ func (s *entrySorter) regroup(batchKeys []batchKey) {
 
 // regroupRun moves run's entries of its first entry's batch to its front,
 // then those of the first batch left after them, and so on, each batch's in
-// the order they were in, each entry's batch key of batchKeys at its index.
-func (s *entrySorter) regroupRun(run []sortedEntry, batchKeys []batchKey) {
+// the order they were in, each entry's batch key its drawn entry's, of
+// drawn at its index.
+func (s *entrySorter) regroupRun(run []sortedEntry, drawn []drawnEntry) {
 	for batchStart := 0; batchStart < len(run); {
-		firstBatchKey := batchKeys[run[batchStart].entryIndex]
+		firstBatchKey := drawn[run[batchStart].entryIndex].key
 		s.scratch = s.scratch[:0]
 		nextBatchEnd := batchStart
 		for _, entry := range run[batchStart:] {
-			if batchKeys[entry.entryIndex] == firstBatchKey {
+			if drawn[entry.entryIndex].key == firstBatchKey {
 				run[nextBatchEnd] = entry
 				nextBatchEnd++
 			} else {

@@ -62,6 +62,13 @@ func (s *Sprite) batchKey(image *drawnImage, defaultFilter Filter) batchKey {
 	return makeImageBatchKey(s.Material, s.Image, image, s.Clip, s.Filter, defaultFilter)
 }
 
+// appendInstances appends to instances the sprite's instance data, its
+// image's frame as atlases placed it, as appendSpriteInstance writes it,
+// and answers them.
+func (s *Sprite) appendInstances(instances []instanceData, atlases *atlasSet) []instanceData {
+	return appendSpriteInstance(instances, s, atlases.placed(s.Image, s.Frame))
+}
+
 // findSquare answers the transform from the unit square onto the sprite's
 // image, as drawn image, in the world, and the square's size in the
 // sprite's own space. The image's frame spans its Size, an axis of zero
