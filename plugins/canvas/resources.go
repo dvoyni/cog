@@ -105,7 +105,7 @@ type FontLibrary interface {
 // read lock on. Only the write handle gives it, so a job holding the read
 // lock cannot make a set.
 func ElevateFontLibrary(library kernel.Write[FontLibrary], files kernel.Read[platform.FS]) WriteFontLibrary {
-	return fontLibraryWriter{fontLibrary: library.Get().(*fontLibrary), files: files.Get()}
+	return makeFontLibraryWriter(library.Get().(*fontLibrary), files.Get())
 }
 
 // WriteFontLibrary is FontLibrary's writing side, which ElevateFontLibrary answers; it is no
@@ -122,8 +122,11 @@ type WriteFontLibrary interface {
 	// are not changed after.
 	MakeFontSet(descriptor font.SetDescriptor) FontSet
 	// DestroyFontSet destroys set, which is then measured as the default
-	// set. Destroying a set canvas does not hold, or the default set, is
-	// reported once for it as ReportKindFontSetNotHeld.
+	// set, and lets go of its glyphs, their fields and their cells in the
+	// glyph atlas, once the frame is drawn, so an entry recorded in this
+	// frame still draws them, and of its fonts once its layouts go idle. Destroying a
+	// set canvas does not hold, or the default set, is reported once for it
+	// as ReportKindFontSetNotHeld.
 	DestroyFontSet(set FontSet)
 	// SetLanguage sets the current language to tag, such as "ja", which
 	// picks each set's fonts, its tags matched exactly.

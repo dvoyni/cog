@@ -81,8 +81,7 @@ func makeDefaultFontSetOnStart(ex *kernel.Executor, in kernel.JobHandle, event s
 // its fonts read through files, under FontLibrary's write lock, so no task reads
 // the default set while it is made.
 func makeDefaultFontSet(k *kernel.Kernel, _ kernel.NoArg, library kernel.Write[FontLibrary], files kernel.Read[platform.FS]) kernel.NoResult {
-	libraryValue := library.Get().(*fontLibrary)
-	libraryValue.sets[0] = makeFontSetSlot(files.Get(), libraryValue.reporter, libraryValue.defaultDescriptor)
+	makeFontLibraryWriter(library.Get().(*fontLibrary), files.Get()).loadDefaultSet()
 	return kernel.NoResult{}
 }
 
@@ -97,7 +96,7 @@ func reloadChangedFontsOnRequest(ex *kernel.Executor, in kernel.JobHandle, event
 // FontLibrary's write lock, so no task lays text out in a set as it is
 // made again.
 func reloadChangedFonts(k *kernel.Kernel, _ kernel.NoArg, library kernel.Write[FontLibrary], files kernel.Read[platform.FS]) kernel.NoResult {
-	fontLibraryWriter{fontLibrary: library.Get().(*fontLibrary), files: files.Get()}.reloadChanged()
+	makeFontLibraryWriter(library.Get().(*fontLibrary), files.Get()).reloadChanged()
 	return kernel.NoResult{}
 }
 
@@ -118,16 +117,16 @@ func sortEntries(k *kernel.Kernel, _ kernel.NoArg, state kernel.Read[*drawState]
 // frame of entries that set none, each order's cameras in a command list of
 // their own, one after another, the main window the target of a camera
 // naming none, a converted image read from platform's FS and a glyph's
-// field from the FontLibrary resource, then gives back
-// the 2D materials released since the frame before was drawn, so the frame
-// recorded as one was released still drew it, and frees the layouts now
-// unused for Config.LayoutIdleFrames frames. A reload of the font files
-// Assets.ReloadChanged asked for is handed to canvas's own task, under
-// FontLibrary's write lock, by publishing fontReloadEvent. A frame
-// inspected is written down for the pending request, with how long its
-// sorting and its drawing took, and render is asked
-// again for its inspection, so a request render joined to an inspection of
-// an earlier frame still gets one.
+// field from the FontLibrary resource, then gives back the 2D materials
+// released since the frame before was drawn, so the frame recorded as one
+// was released still drew it, lets go alike of the glyphs of the font sets
+// replaced, and frees the layouts now unused for Config.LayoutIdleFrames
+// frames. A reload of the font files Assets.ReloadChanged asked for is
+// handed to canvas's own task, under FontLibrary's write lock, by
+// publishing fontReloadEvent. A frame inspected is written down for the
+// pending request, with how long its sorting and its drawing took, and
+// render is asked again for its inspection, so a request render joined to
+// an inspection of an earlier frame still gets one.
 func draw(k *kernel.Kernel, beat metronome.Beat, frame render.Frame, inventory render.Inventory, files kernel.Read[platform.FS], manager kernel.Read[*platform.WindowManager], windows kernel.Read[*windowList], fonts kernel.Read[FontLibrary], state kernel.Read[*drawState], rendering kernel.Write[*renderer]) kernel.NoResult {
 	canvasState := state.Get()
 	if canvasState.frameInspected {
@@ -137,6 +136,7 @@ func draw(k *kernel.Kernel, beat metronome.Beat, frame render.Frame, inventory r
 	library := fonts.Get().(*fontLibrary)
 	drawing.drawCameras(frame, inventory, files.Get(), manager.Get(), windows.Get().mainWindow(), library, canvasState)
 	canvasState.materials.freeReleased(inventory)
+	drawing.atlases.freeRetiredGlyphs(&library.glyphs)
 	library.layouts.endFrame()
 	if canvasState.fontReloadRequested.Load() && canvasState.fontReloadRequested.Swap(false) {
 		k.Publish(fontReloadEvent{})

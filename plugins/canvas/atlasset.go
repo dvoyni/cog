@@ -133,8 +133,11 @@ type atlasSet struct {
 	// atlas may evict, each its field's index, the last evicted first,
 	// ordered once a frame, when packing a glyph first needs them, which
 	// glyphEvictionsOrdered says, and taken as it evicts them.
-	missedFrames          []imageFrame
-	missedGlyphs          []uint32
+	missedFrames []imageFrame
+	missedGlyphs []uint32
+	// retiredGlyphs are the glyphs of retired fonts freeRetiredGlyphs lets
+	// go of, scratch it reuses.
+	retiredGlyphs         []uint32
 	atlasMoved            bool
 	evictionCandidates    []evictionCandidate
 	glyphEvictions        []uint32
@@ -453,13 +456,34 @@ func (a *atlasSet) evictGlyphsFor(inventory render.Inventory, width, height uint
 		last := len(a.glyphEvictions) - 1
 		evicted := &a.drawnGlyphs[a.glyphEvictions[last]]
 		a.glyphEvictions = a.glyphEvictions[:last]
-		a.glyphAtlas.Free(evicted.packedRegion)
-		*evicted = drawnGlyph{}
+		a.freeGlyph(evicted)
 		if region, err := a.pack(inventory, a.glyphAtlas, width, height); err == nil {
 			return region, nil
 		}
 	}
 	return render.TextureRegion{}, atlas.ErrFull
+}
+
+// freeRetiredGlyphs lets go of the glyphs of the fonts glyphs retired,
+// once the frame is drawn, so the entries recorded before the retirement
+// drew them: each glyph's cell is freed and its drawn glyph forgotten, so a
+// glyph made after packs into its room.
+func (a *atlasSet) freeRetiredGlyphs(glyphs *glyphTable) {
+	a.retiredGlyphs = glyphs.takeRetiredFields(a.retiredGlyphs[:0])
+	for _, field := range a.retiredGlyphs {
+		if int(field) < len(a.drawnGlyphs) {
+			a.freeGlyph(&a.drawnGlyphs[field])
+		}
+	}
+}
+
+// freeGlyph lets go of drawn, its cell freed when it was packed, so it is
+// unpacked, and a draw of it after packs it again.
+func (a *atlasSet) freeGlyph(drawn *drawnGlyph) {
+	if drawn.packed {
+		a.glyphAtlas.Free(drawn.packedRegion)
+	}
+	*drawn = drawnGlyph{}
 }
 
 // orderGlyphEvictions orders the glyphs packed and not drawn this frame

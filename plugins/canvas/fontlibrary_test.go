@@ -21,12 +21,14 @@ import (
 // fontLibraryUser is a test plugin whose task, hung off canvas.FrameEvent,
 // calls write with FontLibrary's writing side in each frame, the first
 // frame's 0, then, in tasks of their own after it, read with FontLibrary's
-// reading side and, when set, draw with a command list of its own.
+// reading side and, when set, draw with a command list of its own, and,
+// when set with draw, lateWrite with the writing side again after draw.
 type fontLibraryUser struct {
 	testPlugin
-	write func(fonts canvas.WriteFontLibrary, frame int)
-	read  func(fonts canvas.FontLibrary, frame int)
-	draw  func(list canvas.CommandList, frame int)
+	write     func(fonts canvas.WriteFontLibrary, frame int)
+	read      func(fonts canvas.FontLibrary, frame int)
+	draw      func(list canvas.CommandList, frame int)
+	lateWrite func(fonts canvas.WriteFontLibrary, frame int)
 	// frameCount is the frames written so far.
 	frameCount atomic.Int32
 }
@@ -47,10 +49,17 @@ func (w *fontLibraryUser) Init(configurator *kernel.Configurator, _ any) error {
 		}
 		return kernel.NoResult{}
 	})
-	var draw *kernel.Task[int, kernel.NoResult]
+	var draw *kernel.Task[int, int]
 	if w.draw != nil {
-		draw = configurator.RegisterTask1(func(k *kernel.Kernel, frame int, list canvas.CommandList) kernel.NoResult {
+		draw = configurator.RegisterTask1(func(k *kernel.Kernel, frame int, list canvas.CommandList) int {
 			w.draw(list, frame)
+			return frame
+		})
+	}
+	var lateWrite *kernel.Task[int, kernel.NoResult]
+	if w.lateWrite != nil {
+		lateWrite = configurator.RegisterTask2(func(k *kernel.Kernel, frame int, fonts kernel.Write[canvas.FontLibrary], files kernel.Read[platform.FS]) kernel.NoResult {
+			w.lateWrite(canvas.ElevateFontLibrary(fonts, files), frame)
 			return kernel.NoResult{}
 		})
 	}
@@ -58,7 +67,11 @@ func (w *fontLibraryUser) Init(configurator *kernel.Configurator, _ any) error {
 		written := ex.Schedule(write, kernel.NoArg{}, event.Ready)
 		done := ex.Join(in, ex.ScheduleAfter(read, written).Handle())
 		if w.draw != nil {
-			done = ex.Join(done, ex.ScheduleAfter(draw, written).Handle())
+			drawn := ex.ScheduleAfter(draw, written)
+			done = ex.Join(done, drawn.Handle())
+			if w.lateWrite != nil {
+				done = ex.Join(done, ex.ScheduleAfter(lateWrite, drawn).Handle())
+			}
 		}
 		return event, done
 	})

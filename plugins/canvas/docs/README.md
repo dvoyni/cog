@@ -1094,7 +1094,11 @@ func loadFonts(k *kernel.Kernel, _ kernel.NoArg, libraryHandle kernel.Write[canv
 Languages are tags matched exactly, a language's first font measuring it. A
 font file that fails to load is reported once and left out of its set, a
 failed default font replaced by JetBrains Mono. `DestroyFontSet` destroys a
-set, which is then laid out as the default one. A `font.Variation` sets a
+set, which is then laid out as the default one, and lets go of its glyphs
+once the frame is drawn, their cells in the glyph atlas freed for the glyphs
+made after,
+and of its fonts once its layouts go idle; a set reloaded lets go of its old
+fonts' glyphs alike. A `font.Variation` sets a
 variable font's axis, `font.AxisTagFromName("wght")` its tag.
 
 `FontLibrary`, read under `kernel.Read`, answers the current language, a

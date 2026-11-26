@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
+	"sync"
 
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/canvas/font"
@@ -12,14 +13,22 @@ import (
 
 // fontLibraryWriter is the FontLibrary resource's writing side, which ElevateFontLibrary
 // answers from the write handle on it: the table's reads, and its writes,
-// with platform's FS, which making a set reads.
+// with platform's FS, which making a set reads. Every way a set is replaced
+// goes through its replace.
 type fontLibraryWriter struct {
 	*fontLibrary
 	files platform.FS
 }
 
+// makeFontLibraryWriter answers library's writing side, its sets made
+// through files: ElevateFontLibrary's, the default set's and a reload's.
+func makeFontLibraryWriter(library *fontLibrary, files platform.FS) fontLibraryWriter {
+	return fontLibraryWriter{fontLibrary: library, files: files}
+}
+
 // MakeFontSet makes a font set of descriptor, loading every font file it
-// names through platform's FS now, in the calling task, and answers it.
+// names through platform's FS now, in the calling task, at a free index,
+// and answers it.
 func (w fontLibraryWriter) MakeFontSet(descriptor font.SetDescriptor) FontSet {
 	slot := makeFontSetSlot(w.files, w.reporter, descriptor)
 	if len(w.freeIndexes) == 0 {
@@ -28,20 +37,21 @@ func (w fontLibraryWriter) MakeFontSet(descriptor font.SetDescriptor) FontSet {
 	}
 	index := w.freeIndexes[len(w.freeIndexes)-1]
 	w.freeIndexes = w.freeIndexes[:len(w.freeIndexes)-1]
-	slot.set = w.sets[index].set
-	w.sets[index] = slot
+	w.replace(w.sets[index].set, slot)
 	return slot.set
 }
 
-// DestroyFontSet destroys set, freeing its slot; a set canvas does not hold,
-// or the default set, is reported once instead.
+// DestroyFontSet destroys set, replacing its slot with an empty one under
+// the next generation, so a FontSet naming it names nothing, and frees its
+// index; its glyphs are let go once the frame is drawn. A set canvas does
+// not hold, or the default set, is reported once instead.
 func (w fontLibraryWriter) DestroyFontSet(set FontSet) {
 	if set == (FontSet{}) || w.findSlot(set) == nil {
 		w.reportSetNotHeld(set, "destroying")
 		return
 	}
 	// A generation counted past the last wraps to 1, never zero.
-	w.sets[set.index] = &fontSetSlot{set: FontSet{index: set.index, generation: cmp.Or(set.generation+1, 1)}}
+	w.replace(FontSet{index: set.index, generation: cmp.Or(set.generation+1, 1)}, &fontSetSlot{})
 	w.freeIndexes = append(w.freeIndexes, set.index)
 }
 
@@ -73,23 +83,40 @@ func (w fontLibraryWriter) RegisterIcon(name string, icon IconDescriptor) {
 // under it before, which the markup read after takes.
 func (w fontLibraryWriter) RegisterColor(name string, color m.Color) { w.colors[name] = color }
 
+// loadDefaultSet loads the default set of Config.DefaultFontSet, under the
+// zero FontSet, replacing the JetBrains Mono it held until canvas started.
+func (w fontLibraryWriter) loadDefaultSet() {
+	w.replace(FontSet{}, makeFontSetSlot(w.files, w.reporter, w.defaultDescriptor))
+}
+
 // reloadChanged makes again each set naming a font file that changed since
 // the set was made, of its descriptor, as MakeFontSet makes it, under the
 // same FontSet, so its runs are laid out anew, the layouts of the slot
-// before going idle, and drops the glyphs made of its fonts, whose fields
-// no layout drawn after names. A set destroyed names no file.
+// before going idle, and its old fonts' glyphs are let go once the frame
+// is drawn. A set destroyed names no file.
 func (w fontLibraryWriter) reloadChanged() {
-	var droppedFonts []*font.Loaded
-	for index, slot := range w.sets {
-		if !slot.namesChangedFile(w.files) {
-			continue
+	for _, slot := range w.sets {
+		if slot.namesChangedFile(w.files) {
+			w.replace(slot.set, makeFontSetSlot(w.files, w.reporter, slot.fonts.Descriptor()))
 		}
-		remade := makeFontSetSlot(w.files, w.reporter, slot.fonts.Descriptor())
-		remade.set = slot.set
-		w.sets[index] = remade
-		droppedFonts = slices.AppendSeq(droppedFonts, slot.fonts.Fonts())
 	}
-	if len(droppedFonts) > 0 {
-		w.glyphs.dropFonts(droppedFonts)
+}
+
+// replace names slot with set, swaps it in at set's index and retires the
+// slot it replaces: the glyph table forgets the glyphs of its fonts, whose
+// fields and cells the drawing job lets go of once it has drawn the frame,
+// since an entry recorded before the replace may still draw them, and the
+// pool of shapers is made anew, since its shapers hold faces of the fonts
+// and the pool cannot be walked; every shaper is back in it under the
+// write lock. Its layouts are found no more and go idle, so nothing then
+// holds its fonts.
+func (w fontLibraryWriter) replace(set FontSet, slot *fontSetSlot) {
+	slot.set = set
+	retired := w.sets[set.index]
+	w.sets[set.index] = slot
+	if retired.fonts == nil {
+		return
 	}
+	w.glyphs.retireFonts(slices.Collect(retired.fonts.Fonts()))
+	w.shapers = sync.Pool{New: func() any { return new(textShaper) }}
 }

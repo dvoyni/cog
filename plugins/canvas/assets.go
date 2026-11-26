@@ -105,8 +105,10 @@ func (a Assets) Unload(path string) {
 // under which a set's fonts are written: a set naming a changed file is
 // made again of its descriptor, as WriteFontLibrary.MakeFontSet makes it,
 // under the same FontSet, so its runs are laid out and their glyphs made
-// anew, those of its fonts before dropped. An icon's size, read as it was
-// registered, is not read again.
+// anew, and the glyphs of its fonts before, their fields and their cells in
+// the glyph atlas, are let go once the frame is drawn, and those fonts once
+// its old layouts go idle. An icon's size, read as it was registered, is not read
+// again.
 //
 // Nothing reloads by itself, which would stat every file every frame: a
 // game binds ReloadChanged to a key, or a plugin of its own calls it every

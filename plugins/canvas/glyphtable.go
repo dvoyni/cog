@@ -12,13 +12,19 @@ import (
 // font's coverage, each at an index of its own, which a glyph laid out for
 // drawing names: made in the jobs recording text, under the FontLibrary
 // resource's read lock, and read by the drawing job, so it is guarded by a
-// lock of its own. A field is never changed once made, so a copy of it is
-// read outside the lock.
+// lock of its own. A field is changed once made only when its font is
+// retired, emptied, so a copy of it is read outside the lock. An index is
+// never given to another glyph, so no entry draws one glyph's texels at
+// another's.
 type glyphTable struct {
 	mutex sync.Mutex
 	// indexes are each glyph's index among fields.
 	indexes map[glyphKey]uint32
 	fields  []glyphField
+	// retiredFields are the fields of the glyphs whose fonts were retired,
+	// which entries recorded before the retirement may still draw, so the
+	// drawing job lets go of them once it has drawn its frame.
+	retiredFields []uint32
 	// fieldEm and fieldRange are the em, in field texels, a glyph is made
 	// at and how far its field reaches across its edge when its font gives
 	// none, Config.GlyphFieldEm's and Config.GlyphFieldRange's.
@@ -70,18 +76,33 @@ func (t *glyphTable) assignFields(glyphs []placedGlyph, shaper *font.Shaper) ([]
 	return drawnGlyphs, madeCount
 }
 
-// dropFonts forgets the glyphs made of fonts and frees their fields, which
-// no layout drawn after names; their cells in the glyph atlas, which frees
-// none, stay.
-func (t *glyphTable) dropFonts(fonts []*font.Loaded) {
+// retireFonts forgets the glyphs made of fonts, those of a set replaced, so
+// a glyph of theirs laid out again is made anew at an index of its own,
+// and queues their fields to be let go once the frame is drawn, since an
+// entry recorded before the retirement may still draw them.
+func (t *glyphTable) retireFonts(fonts []*font.Loaded) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	for key, field := range t.indexes {
 		if slices.Contains(fonts, key.font) {
 			delete(t.indexes, key)
-			t.fields[field] = glyphField{}
+			t.retiredFields = append(t.retiredFields, field)
 		}
 	}
+}
+
+// takeRetiredFields empties the fields of the glyphs retired, and answers
+// their indexes appended to fields, for the drawing job to free their cells
+// once it has drawn its frame.
+func (t *glyphTable) takeRetiredFields(fields []uint32) []uint32 {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	for _, field := range t.retiredFields {
+		t.fields[field] = glyphField{}
+	}
+	fields = append(fields, t.retiredFields...)
+	t.retiredFields = t.retiredFields[:0]
+	return fields
 }
 
 // makeField answers glyph id of glyphFont, filled by shaper: its coverage

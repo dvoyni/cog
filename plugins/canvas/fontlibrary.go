@@ -49,7 +49,8 @@ type fontLibrary struct {
 	malformedMarkup map[string]struct{}
 	// shapers are the text shapers layouts are made by, each a
 	// *textShaper, one a layout, since a shaper is not safe for concurrent
-	// use and layouts are made under the read lock.
+	// use and layouts are made under the read lock, each taken and given
+	// back within one read; a set replaced makes the pool anew.
 	shapers sync.Pool
 	// glyphs are the glyphs made for drawing, distance fields or a bitmap
 	// font's coverage.
