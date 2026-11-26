@@ -237,7 +237,8 @@
 // its layout's box, laid out through the layout cache Layout answers from,
 // so a label drawn every frame is shaped once, each glyph made a distance
 // field at its first draw, or ahead of it by FontLibrary.Preload, and packed
-// into the glyph atlas. TextMaterial draws its fill, and a Profile,
+// into the glyph atlas, which at its ceiling evicts the glyphs drawn least
+// lately, never one drawn this frame. TextMaterial draws its fill, and a Profile,
 // its argument, under it, so every label of a frame batches:
 //
 //	list.DrawTextWith(canvas.Text{String: unit.Name, Size: 12, Pivot: canvas.PivotBottom, Transform: m.Translation2x3(x, y-36)}, canvas.Outline(2, m.Black))

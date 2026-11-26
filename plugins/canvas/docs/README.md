@@ -1114,6 +1114,12 @@ first draw, behind a loading screen. A glyph made in the frame costs a
 fraction of a millisecond for Latin and nearly two for a Han character, so a
 game showing new CJK text preloads it.
 
+The glyph atlas grows as a sprite atlas does, up to `Config.AtlasLayerCeiling`,
+where it evicts the glyphs drawn least lately, never one drawn this frame; an
+evicted glyph drawn again is packed again from its field, which is kept. A
+glyph it has no room for draws nothing that frame, reported once as
+`ReportKindAtlasFull`, and is drawn in a later frame with room.
+
 ## Text
 
 A `Text` is a run of text: its `String`, a newline a hard break; its `Font`

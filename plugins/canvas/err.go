@@ -28,8 +28,9 @@ const (
 	// ReportKindAtlasFull is a sprite atlas at its ceiling of pages, every
 	// image it holds drawn this frame, so an image that fits on none of its
 	// pages is drawn from a texture of its own; or the glyph atlas at its
-	// ceiling, or of pages too small for a glyph's field, which then draws
-	// nothing. It is reported once for each atlas.
+	// ceiling, every glyph it holds drawn this frame, or of pages too small
+	// for a glyph's field, which then draws nothing. It is reported once for
+	// each atlas.
 	ReportKindAtlasFull
 	// ReportKindImageHeaderUnread is an image whose file's header
 	// Assets.ImageSize could not read, which it answered false. It is

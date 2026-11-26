@@ -119,7 +119,7 @@ func (t *laidOutText) appendInstances(instances []instanceData, atlases *atlasSe
 			region:    drawn.region,
 			crop:      m.Box2{Max: m.Vec2{X: 1, Y: 1}},
 			transform: transform.Mul(m.Mat2x3{glyphRect.Width, 0, 0, glyphRect.Height, glyphRect.X, glyphRect.Y}),
-			page:      drawn.page,
+			page:      drawn.packedRegion.Layer,
 			size:      glyphRect.Size(),
 			width:     drawn.spread,
 			tiles:     m.Vec2{X: -drawn.bounds.X / drawn.bounds.Width, Y: -drawn.bounds.Y / drawn.bounds.Height},

@@ -105,7 +105,8 @@ type atlasSet struct {
 	packedImages map[packedKey]*packedImage
 	// drawnGlyphs are the glyphs drawn, each glyph's field as drawn at its
 	// index in the FontLibrary's glyph table, of no size until packed at its
-	// first draw, its field put into the glyph atlas then.
+	// first draw, its field put into the glyph atlas then, and again after
+	// a full glyph atlas evicted it.
 	drawnGlyphs []drawnGlyph
 	// decodedFiles are the files of converted images placeMissed read and
 	// decoded as it packed the frame's images, each by its key, nil for one
@@ -128,11 +129,16 @@ type atlasSet struct {
 	// once, both forgotten as the frame begins; atlasMoved is whether
 	// placeMissed grew an atlas, replacing its texture; evictionCandidates are the
 	// images a full atlas may evict, in the order it evicts them, written
-	// over as they are needed.
-	missedFrames       []imageFrame
-	missedGlyphs       []uint32
-	atlasMoved         bool
-	evictionCandidates []evictionCandidate
+	// over as they are needed; glyphEvictions are the glyphs the full glyph
+	// atlas may evict, each its field's index, the last evicted first,
+	// ordered once a frame, when packing a glyph first needs them, which
+	// glyphEvictionsOrdered says, and taken as it evicts them.
+	missedFrames          []imageFrame
+	missedGlyphs          []uint32
+	atlasMoved            bool
+	evictionCandidates    []evictionCandidate
+	glyphEvictions        []uint32
+	glyphEvictionsOrdered bool
 	// colorTargets is a pack pass's one target.
 	colorTargets [1]render.ColorTarget
 }
@@ -235,6 +241,7 @@ func (a *atlasSet) beginFrame() {
 	a.drawnFrameCount++
 	a.missedFrames = a.missedFrames[:0]
 	a.missedGlyphs = a.missedGlyphs[:0]
+	a.glyphEvictionsOrdered = false
 }
 
 // unload drops each frame packed of the paths Unload(prefix) unloads, so
@@ -280,9 +287,10 @@ func (a *atlasSet) find(image Image, frame uint32) {
 }
 
 // findGlyphs finds the glyphs of a run of text, those of a font, each its
-// field at its field's index in the FontLibrary's glyph table: it notes one
-// missed when it is not packed, once a frame, so placeMissed tries it once.
-// The glyph atlas, which the run is keyed by even when it draws icons
+// field at its field's index in the FontLibrary's glyph table: it marks each
+// drawn this frame, so the glyph atlas evicts none of them in it, and notes
+// one missed when it is not packed, once a frame, so placeMissed tries it
+// once. The glyph atlas, which the run is keyed by even when it draws icons
 // alone, is made at the first run found.
 func (a *atlasSet) findGlyphs(inventory render.Inventory, glyphs []placedGlyph) {
 	if a.glyphAtlas == nil {
@@ -302,8 +310,12 @@ func (a *atlasSet) findGlyphs(inventory render.Inventory, glyphs []placedGlyph) 
 		if int(glyph.field) >= len(a.drawnGlyphs) {
 			a.drawnGlyphs = slices.Grow(a.drawnGlyphs, int(glyph.field)+1-len(a.drawnGlyphs))[:glyph.field+1]
 		}
-		if drawn := &a.drawnGlyphs[glyph.field]; !drawn.packed && drawn.triedFrame != a.drawnFrameCount {
-			drawn.triedFrame = a.drawnFrameCount
+		drawn := &a.drawnGlyphs[glyph.field]
+		if drawn.lastDrawnFrame == a.drawnFrameCount {
+			continue
+		}
+		drawn.lastDrawnFrame = a.drawnFrameCount
+		if !drawn.packed {
 			a.missedGlyphs = append(a.missedGlyphs, glyph.field)
 		}
 	}
@@ -401,21 +413,69 @@ func (a *atlasSet) pack(inventory render.Inventory, packedAtlas *atlas.Atlas, wi
 
 // packGlyph packs drawn, a glyph of field, into the glyph atlas, its field
 // put into its cell, the gutter left transparent: on its first page holding
-// it, else on a new one, the atlas doubling its pages while under its
-// ceiling. A glyph whose cell no page holds, or one the atlas at its
-// ceiling has no room for, draws nothing, reported once, and is tried again
-// at the next frame drawing it, findGlyphs noting it once a frame.
+// it; else on a new one, the atlas doubling its pages while under its
+// ceiling; else where the glyphs it evicts leave room, the least lately
+// drawn first, those last drawn in one frame in their fields' order, the
+// one made first going first, never one drawn this frame. A glyph whose
+// cell no page holds, or one the atlas at its ceiling has no room for with
+// nothing to evict, draws nothing, reported once, and is tried again at the
+// next frame drawing it, findGlyphs noting it once a frame.
 func (a *atlasSet) packGlyph(inventory render.Inventory, reporter *reporter, drawn *drawnGlyph, field glyphField) {
 	width := uint32(field.width)
 	height := uint32(field.height)
 	region, err := a.pack(inventory, a.glyphAtlas, width, height)
+	if errors.Is(err, atlas.ErrFull) {
+		region, err = a.evictGlyphsFor(inventory, width, height)
+	}
 	if err != nil {
-		fullReport := Report{Kind: ReportKindAtlasFull, Err: fmt.Errorf("canvas: the glyph atlas, of %d pages of %d texels a side, has no room for a glyph's field of %d by %d texels, so it draws nothing", a.glyphAtlas.PageCount(), a.atlasPageSize, width, height)}
+		reason := "is full at its ceiling, with nothing to evict that was not drawn this frame"
+		if errors.Is(err, atlas.ErrTooLarge) {
+			reason = "holds no page its cell fits on"
+		}
+		fullReport := Report{Kind: ReportKindAtlasFull, Err: fmt.Errorf("canvas: the glyph atlas, of %d pages of %d texels a side, %s, so a glyph's field of %d by %d texels draws nothing", a.glyphAtlas.PageCount(), a.atlasPageSize, reason, width, height)}
 		reporter.reportOnce(atlasFullLogKey+glyphAtlasLabel, fullReport)
 		return
 	}
 	a.glyphAtlas.Put(region, field.texels, atlas.WrapNone)
-	*drawn = makeDrawnGlyph(a.glyphAtlas, region, field)
+	*drawn = makeDrawnGlyph(a.glyphAtlas, region, field, a.drawnFrameCount)
+}
+
+// evictGlyphsFor evicts glyphs from the full glyph atlas, in the order
+// packGlyph says, until a cell of width by height texels is packed, and
+// answers where, or ErrFull when evicting every glyph not drawn this frame
+// leaves no room. Each glyph evicted is left unpacked, its cell freed, so
+// its next draw packs it again.
+func (a *atlasSet) evictGlyphsFor(inventory render.Inventory, width, height uint32) (render.TextureRegion, error) {
+	if !a.glyphEvictionsOrdered {
+		a.orderGlyphEvictions()
+	}
+	for len(a.glyphEvictions) > 0 {
+		last := len(a.glyphEvictions) - 1
+		evicted := &a.drawnGlyphs[a.glyphEvictions[last]]
+		a.glyphEvictions = a.glyphEvictions[:last]
+		a.glyphAtlas.Free(evicted.packedRegion)
+		*evicted = drawnGlyph{}
+		if region, err := a.pack(inventory, a.glyphAtlas, width, height); err == nil {
+			return region, nil
+		}
+	}
+	return render.TextureRegion{}, atlas.ErrFull
+}
+
+// orderGlyphEvictions orders the glyphs packed and not drawn this frame
+// into glyphEvictions, the last to evict first: the most lately drawn, then
+// of those last drawn in one frame the one made last.
+func (a *atlasSet) orderGlyphEvictions() {
+	a.glyphEvictions = a.glyphEvictions[:0]
+	for field := range a.drawnGlyphs {
+		if drawn := &a.drawnGlyphs[field]; drawn.packed && drawn.lastDrawnFrame != a.drawnFrameCount {
+			a.glyphEvictions = append(a.glyphEvictions, uint32(field))
+		}
+	}
+	slices.SortFunc(a.glyphEvictions, func(first, second uint32) int {
+		return cmp.Or(cmp.Compare(a.drawnGlyphs[second].lastDrawnFrame, a.drawnGlyphs[first].lastDrawnFrame), cmp.Compare(second, first))
+	})
+	a.glyphEvictionsOrdered = true
 }
 
 // packImage packs frame of the image of key, marked drawn this frame, and

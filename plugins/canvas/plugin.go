@@ -38,7 +38,9 @@ type Config struct {
 	// layers. At its ceiling, the images drawn
 	// least lately are evicted to make room, never one drawn this frame,
 	// and an image they cannot make room for is drawn from a texture of its
-	// own, reported once as ReportKindAtlasFull.
+	// own, reported once as ReportKindAtlasFull; the glyph atlas evicts its
+	// glyphs alike, and a glyph they cannot make room for draws nothing that
+	// frame.
 	AtlasLayerCeiling uint32
 	// OwnTextureSize is the side, in texels, past which an image is drawn
 	// from a texture of its own, exactly its size, rather than packed into
