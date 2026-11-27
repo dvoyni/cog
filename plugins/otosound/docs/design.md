@@ -590,7 +590,7 @@ Beside the list, otosound keeps three properties of its own that the seam relies
 ([sfx research: oto v3 and our Vorbis forks today](https://github.com/dvoyni/cog/issues/947), [sfx on the kernel](https://github.com/dvoyni/cog/issues/948), item 12)
 
 - **otosound requires oto v3.5.1,** the current release: v3.5.0, which v1 required, plus one fix, to the unsigned 8-bit conversion, which otosound's float32 output never reaches. The API is v3.5.0's. It requires purego v0.11.0, `jfreymuth/pulse` v0.1.3 and `golang.org/x/sys` v0.47.0.
-- **Ogg Vorbis is decoded through our forks,** `dvoyni/vorbis` and `dvoyni/oggvorbis`, required the way v1 required them: otosound's `go.mod` requires `jfreymuth/oggvorbis` and replaces both `jfreymuth` paths with the forks, at v1's pins on their `cog` branches:
+- **Ogg Vorbis is decoded through our forks,** `dvoyni/vorbis` and `dvoyni/oggvorbis`, as v1 decoded: otosound's `go.mod` requires `jfreymuth/oggvorbis`, and the repository's `go.work` replaces both `jfreymuth` paths with the forks, once for every module in the workspace, at v1's pins on their `cog` branches, as the headless backend's ticket set it up:
 
   ```
   replace github.com/jfreymuth/vorbis => github.com/dvoyni/vorbis v1.0.3-0.20260921150454-ab3e6ce988a8
@@ -602,7 +602,7 @@ Beside the list, otosound keeps three properties of its own that the seam relies
   - **The forks are permanent.** Upstream declined to review AI-generated code, archived `jfreymuth/vorbis`, moved the decoder into `jfreymuth/oggvorbis/vorbis` in v1.0.6, and its README refuses LLM-generated contributions; our pull requests are closed.
   - **The pair works only while the oggvorbis fork stays on its pre-1.0.6 base.** Rebased onto v1.0.6, the fork would decode with its own `vorbis/` subpackage, the vorbis `replace` would then do nothing, with no error, and the decoder work would have to move into that subpackage. A consumer that requires upstream v1.0.6 without our oggvorbis `replace` gets none of the work. The `replace` lines name no version on the left, so they also cover a build where something else requires oggvorbis v1.0.6.
   - **Upstream's one decoding change since the fork** is a floor 0 fix, an odd order starting at `1 / 4`, an integer zero, now `1. / 4`. Our fork still has the old line. No encoder since Xiph's own beta 4 emits floor 0.
-  - **Two modules in one workspace with differing `replace` lines for the forks fail to build,** with `conflicting replacements for github.com/jfreymuth/oggvorbis`, so otosound's and the headless backend's lines carry the same pins. A module outside the repository repeats them, because Go ignores `replace` in a dependency ([Fork vorbis and oggvorbis to dvoyni and replace them in cog and its three consumers](https://github.com/dvoyni/cog/issues/512)).
+  - **Two modules in one workspace with differing `replace` lines for the forks fail to build,** with `conflicting replacements for github.com/jfreymuth/oggvorbis`, which is why the pair is held once, in `go.work`, and in no module's `go.mod`. A module outside the repository repeats it, because Go ignores `replace` in a dependency ([Fork vorbis and oggvorbis to dvoyni and replace them in cog and its three consumers](https://github.com/dvoyni/cog/issues/512)).
 
 ### oto's open issues and known risks
 
