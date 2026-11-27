@@ -435,15 +435,20 @@ func TestAStreamedClipReleasedWhileItPlaysStopsItsReadAheadsBeforeItsDestroy(t *
 
 // A read-ahead ends with its voice, and a kernel being destroyed ends every
 // voice there is, whether or not sfx got as far as emitting the stops, so
-// Destroy halts every read-ahead and waits for them.
+// Destroy halts every read-ahead and waits for them. Each read here takes a
+// while, as a decode does, so Destroy finds the read-aheads mid-read, and
+// fails the test when it returns without waiting for them.
 func TestDestroyHaltsEveryReadAhead(t *testing.T) {
-	stream := &generatedStream{frames: 4 * testBlock}
+	stream := &generatedStream{frames: 4 * testBlock, readDelay: 20 * time.Millisecond}
 	var runningReadAheads []*readAhead
 	t.Run("the kernel, destroyed as it ends", func(t *testing.T) {
 		b := makeTestStreamingBackend(t, Config{})
 		clipID := installStreamed(t, b, stream.clip())
 		b.Emit(&sfx.FlushChanges{Starts: []sfx.VoiceStart{{Slot: 0, Clip: clipID, Loop: true}, {Slot: 1, Clip: clipID, Loop: true}}})
 		runningReadAheads = []*readAhead{b.plugin.readAheads[0], b.plugin.readAheads[1]}
+		waitFor(t, "both read-aheads to be reading", func() bool {
+			return stream.openCount() == 2 && stream.decoder(t, 0).reads.Load() > 0 && stream.decoder(t, 1).reads.Load() > 0
+		})
 	})
 	for slot, voiceReadAhead := range runningReadAheads {
 		select {
@@ -653,4 +658,44 @@ func TestTheReadAheadFillsItsRingWhileTheMixerReadsIt(t *testing.T) {
 	}
 	b.Emit(&sfx.FlushChanges{Stops: []sfx.VoiceSlot{0}})
 	waitReturned(t, "the stopped voice's read-ahead to return", voiceReadAhead)
+}
+
+// A streamed one-shot plays through a ring far shorter than its clip while
+// its read-ahead fills it, and ends on the frame its clip runs out on, which
+// the read-ahead publishes as the stream's length while the mixer reads the
+// ring. Run under -race, it fails with the ring's length, its produced count
+// or the frame the mixer passed stored by a plain write.
+func TestAStreamedOneShotEndsOnItsLastFrameWhileItsReadAheadFillsItsRing(t *testing.T) {
+	const frames = 40*testBlock + testBlock/2
+	stream := &generatedStream{frames: frames, guarded: true}
+	b := makeTestStreamingBackend(t, Config{ReadAhead: time.Millisecond})
+	clipID := installStreamed(t, b, stream.clip())
+
+	b.Emit(makeStartChanges(0, clipID, false))
+	voiceReadAhead := b.plugin.readAheads[0]
+	ring := voiceReadAhead.ring
+	if ring.capacity*4 > frames {
+		t.Fatalf("the ring holds %d frames, too many for a clip of %d to wrap it", ring.capacity, frames)
+	}
+	for block := uint64(0); block*testBlock < frames; block++ {
+		// Each block waits for its frames, and the last for the length, so
+		// what is asserted is the handoff and not an underrun.
+		waitFor(t, "the read-ahead to fill the next block", func() bool {
+			return ring.producedFrames() > (block+1)*testBlock || ring.streamLength() == frames
+		})
+		for index, sample := range pickLeft(pullBlocks(t, &b.plugin.mixer, 1)) {
+			frame := int64(block)*testBlock + int64(index)
+			want := float32(0)
+			if frame < frames {
+				want = generatedSample(frame, 0)
+			}
+			if sample != want {
+				t.Fatalf("frame %d of the stream is %v, want %v", frame, sample, want)
+			}
+		}
+	}
+	if b.plugin.mixer.voices[0].clip != nil {
+		t.Fatal("the slot still plays after its stream ran out")
+	}
+	waitReturned(t, "the finished voice's read-ahead to return", voiceReadAhead)
 }

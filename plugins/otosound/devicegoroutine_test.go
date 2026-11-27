@@ -379,3 +379,87 @@ func TestEmitAndALossRunningTogetherShareTheRingSafely(t *testing.T) {
 	close(done)
 	<-flushed
 }
+
+// The device goroutine stores the Device, records its first failure and logs
+// it through the kernel's Logger while the flush reads the Device and logs
+// reports of its own through the same Logger: a machine with no output
+// device, asked again every millisecond under a game whose clip fails and is
+// released every step, gains a device, and then loses it and gets it back,
+// again and again. The absence is reported once, and the losses never. Run
+// under -race, it fails with the Device stored by a plain write, or with the
+// mutex taken out of the Logger's record of what it logged once.
+func TestTheDeviceGoroutineLogsAndStoresTheDeviceWhileTheFlushReadsIt(t *testing.T) {
+	const brokenPath = "sounds/broken.ogg"
+	device := &fakeDevice{missing: errNoOutputDevice}
+	h, plugin := spawnConfiguredOverFake(t, device, quickRetry)
+	h.ExpectError(func(err error) bool {
+		_, failed := errors.AsType[sfx.ErrClipFailed](err)
+		return failed
+	})
+	h.Mount(brokenPath, []byte("not an Ogg Vorbis stream"))
+	// Each step releases the clip that failed, which forgets its report, and
+	// plays it again, so the next step's flush reports it again.
+	step := func() {
+		h.Record(func(queue sfx.Queue) {
+			queue.Release(brokenPath)
+			queue.Play(brokenPath, 0, sfx.VoiceOptions{})
+		})
+		h.Step()
+	}
+	stepUntil := func(what string, condition func() bool) {
+		t.Helper()
+		waitFor(t, what, func() bool {
+			if condition() {
+				return true
+			}
+			step()
+			return false
+		})
+	}
+
+	for range 41 {
+		step()
+		time.Sleep(time.Millisecond)
+	}
+	device.installDevice()
+	stepUntil("the Device turning ready", func() bool { return isReady(plugin) })
+	for range 10 {
+		device.unplug(errors.New("the headphones came out"))
+		stepUntil("the Device going not ready", func() bool { return !isReady(plugin) })
+		device.plugBackIn()
+		stepUntil("the Device turning ready again", func() bool { return isReady(plugin) })
+	}
+
+	wantOneUnavailableWarning(t, h, errNoOutputDevice)
+	// Every report is the clip's failure: the harness fails the test on any
+	// other.
+	if failures := len(h.Reports()); failures < 40 {
+		t.Fatalf("the flush reported the clip's failure %d times, want one each step it was played again", failures)
+	}
+}
+
+// Destroy stops the device goroutine and waits for it before it closes the
+// player, so nothing of the goroutine's reaches the device, or the kernel's
+// Logger, once the kernel is gone: the fake device's log of its calls is
+// unguarded, as oto's player is, and the close is the last call it holds
+// however long after Destroy it is read. Run under -race, it fails with the
+// wait taken out of the goroutine's stop.
+func TestDestroyStopsTheDeviceGoroutineBeforeItClosesThePlayer(t *testing.T) {
+	device := &fakeDevice{}
+	t.Run("the kernel, destroyed as it ends", func(t *testing.T) {
+		_, plugin := spawnConfiguredOverFake(t, device, quickRetry)
+		waitForReady(t, plugin)
+		// The goroutine polls the playing device every DeviceRetry until
+		// Destroy stops it.
+		time.Sleep(10 * quickRetry.DeviceRetry)
+	})
+
+	calls := device.calls
+	if len(calls) == 0 || calls[len(calls)-1] != "close" {
+		t.Fatalf("the device's calls are %v, want them to end with Destroy's close", calls)
+	}
+	time.Sleep(10 * quickRetry.DeviceRetry)
+	if later := device.calls[len(calls):]; len(later) != 0 {
+		t.Fatalf("the device was called %v after Destroy closed it", later)
+	}
+}

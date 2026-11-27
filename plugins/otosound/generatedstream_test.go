@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // generatedSample is one sample of a generated clip, which says exactly which
@@ -23,8 +24,10 @@ type generatedDecoder struct {
 	position int64
 	// guarded makes a read on the device thread a panic.
 	guarded bool
-	reads   atomic.Int64
-	seeks   atomic.Int64
+	// readDelay is how long each read takes, as a decode does.
+	readDelay time.Duration
+	reads     atomic.Int64
+	seeks     atomic.Int64
 	// wraps counts the seeks that came after the stream ran out, which a
 	// read-ahead looping the whole clip makes.
 	wraps atomic.Int64
@@ -35,6 +38,7 @@ func (d *generatedDecoder) read(samples []float32) (int, error) {
 		panic("a decoder was called on the thread that fills the device buffer")
 	}
 	d.reads.Add(1)
+	time.Sleep(d.readDelay)
 	if d.position >= d.frames {
 		return 0, io.EOF
 	}
@@ -64,6 +68,8 @@ type generatedStream struct {
 	frames   int64
 	channels int
 	guarded  bool
+	// readDelay is how long each read of a decoder it opens takes.
+	readDelay time.Duration
 	// openErr, when set, is what every open fails with.
 	openErr        error
 	mutex          sync.Mutex
@@ -76,7 +82,7 @@ func (g *generatedStream) open([]byte) (streamDecoder, error) {
 	if g.openErr != nil {
 		return nil, g.openErr
 	}
-	openedDecoder := &generatedDecoder{frames: g.frames, channels: max(g.channels, 1), guarded: g.guarded}
+	openedDecoder := &generatedDecoder{frames: g.frames, channels: max(g.channels, 1), guarded: g.guarded, readDelay: g.readDelay}
 	g.openedDecoders = append(g.openedDecoders, openedDecoder)
 	return openedDecoder, nil
 }
