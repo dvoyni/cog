@@ -16,26 +16,38 @@ import (
 // under the 512 KiB default, and over a limit set below it.
 const fixtureDecodedSize = clipFrames * clipChannels * decodedSampleSize
 
-// A clip under the limit is decoded once and holds its samples, answering
-// its source's facts; one over it is left for streaming, which is not built
-// yet, so its prepare fails with errStreamingNotBuilt. The device runs at the
-// clip's own rate, so nothing is converted.
-func TestAClipUnderTheLimitIsResidentAndOneOverItIsLeftForStreaming(t *testing.T) {
+// A clip under the limit is decoded once and holds its samples; one over it
+// streams, holding its bytes and no samples, and the two answer the same
+// facts, the source's. The device runs at the clip's own rate, so nothing is
+// converted, and the streamed clip carries no filter.
+func TestAClipUnderTheLimitIsResidentAndOneOverItStreams(t *testing.T) {
 	resident, err := prepareClip(readFixture(t), defaultDecodedClipLimit, clipRate)
 	if err != nil {
 		t.Fatalf("preparing the fixture under the default limit: %v", err)
 	}
+	if resident.streams() || resident.encoded != nil {
+		t.Fatal("a clip under the limit streams, or still holds the bytes it was decoded from")
+	}
 	if got := len(resident.samples); got != clipFrames*clipChannels {
 		t.Fatalf("the resident clip holds %d samples, want %d frames of %d channels", got, clipFrames, clipChannels)
 	}
-	if resident.Duration() != clipDuration || resident.Channels() != clipChannels || resident.SampleRate() != clipRate {
-		t.Fatalf("the resident clip reports %v s, %d channels and %d Hz, want the file's %v, %d and %d",
-			resident.Duration(), resident.Channels(), resident.SampleRate(), clipDuration, clipChannels, clipRate)
-	}
 
-	streamed, err := prepareClip(readFixture(t), 64<<10, clipRate)
-	if !errors.Is(err, errStreamingNotBuilt) || streamed != nil {
-		t.Fatalf("a %d byte clip under a 64 KiB limit answered %v and %v, want errStreamingNotBuilt", fixtureDecodedSize, streamed, err)
+	encoded := readFixture(t)
+	streamed, err := prepareClip(encoded, 64<<10, clipRate)
+	if err != nil {
+		t.Fatalf("preparing the %d byte fixture under a 64 KiB limit: %v", fixtureDecodedSize, err)
+	}
+	if !streamed.streams() || len(streamed.samples) != 0 || streamed.filter != nil {
+		t.Fatalf("a clip over the limit is resident, holds %d samples or a filter it has no use for", len(streamed.samples))
+	}
+	if &streamed.encoded[0] != &encoded[0] {
+		t.Fatal("the streamed clip holds a copy of its bytes rather than the ones Prepare was handed")
+	}
+	for name, clip := range map[string]*preparedClip{"resident": resident, "streamed": streamed} {
+		if clip.Duration() != clipDuration || clip.Channels() != clipChannels || clip.SampleRate() != clipRate {
+			t.Fatalf("the %s clip reports %v s, %d channels and %d Hz, want the file's %v, %d and %d",
+				name, clip.Duration(), clip.Channels(), clip.SampleRate(), clipDuration, clipChannels, clipRate)
+		}
 	}
 }
 
@@ -54,12 +66,12 @@ func TestTheResidencyLimitsSentinelsChooseTheTierOutright(t *testing.T) {
 		"a byte over a limit": {fixtureDecodedSize - 1, false},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := prepareClip(readFixture(t), test.limit, clipRate)
-			if test.decoded && err != nil {
-				t.Fatalf("the fixture under a limit of %d answered %v, want it decoded", test.limit, err)
+			clip, err := prepareClip(readFixture(t), test.limit, clipRate)
+			if err != nil {
+				t.Fatalf("preparing the fixture under a limit of %d: %v", test.limit, err)
 			}
-			if !test.decoded && !errors.Is(err, errStreamingNotBuilt) {
-				t.Fatalf("the fixture under a limit of %d answered %v, want errStreamingNotBuilt", test.limit, err)
+			if clip.streams() == test.decoded {
+				t.Fatalf("the fixture under a limit of %d streams: %v, want %v", test.limit, clip.streams(), !test.decoded)
 			}
 		})
 	}
@@ -216,5 +228,21 @@ func TestAResidentClipIsTrimmedToItsGranuleEnd(t *testing.T) {
 	var ignored sfx.ErrLoopRegionIgnored
 	if !errors.As(short.LoopRegionErr(), &ignored) || ignored.Frames != granuleEnd {
 		t.Fatalf("a LOOPEND past the granule end answered %v, want an ErrLoopRegionIgnored against %d frames", short.LoopRegionErr(), granuleEnd)
+	}
+}
+
+// A streamed clip whose source's rate is not the device's carries the filter
+// its voices share, built once for the pair of rates, and still answers its
+// source's rate.
+func TestAStreamedClipKeepsTheFilterItsVoicesShare(t *testing.T) {
+	clip, err := prepareClip(readFixture(t), decodedClipLimitAlwaysStream, defaultSampleRate)
+	if err != nil {
+		t.Fatalf("preparing the fixture to stream: %v", err)
+	}
+	if clip.filter == nil || clip.filter.sourceRate != clipRate || clip.filter.outputRate != defaultSampleRate {
+		t.Fatalf("the streamed clip's filter is %+v, want one from %d Hz to %d Hz", clip.filter, clipRate, defaultSampleRate)
+	}
+	if clip.SampleRate() != clipRate {
+		t.Fatalf("the streamed clip reports %d Hz, want its file's %d", clip.SampleRate(), clipRate)
 	}
 }

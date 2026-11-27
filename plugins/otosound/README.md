@@ -16,15 +16,18 @@ converted there to the device's rate with a windowed sinc while still
 answering its own, and installed; the mixer, mixing every resident voice
 through its gain matrix at its rate, each change and each stop declicked
 over a block, a paused voice holding its playhead, and a looping voice
-wrapping gaplessly at its loop region; and the device's probe, retry and
+wrapping gaplessly at its loop region; the device's probe, retry and
 reports: on Windows a machine with no output device is asked about before
 the open, a device that could not be taken is logged once as a warning and
 retried every `DeviceRetry`, an open device is polled for loss as often, a
 lost one is reported never and its ring emptied, nothing is published to a
 ring no player pulls, and a later kernel's ignored `SampleRate` or
-`BufferSize` is logged once as an error. A clip over the limit fails its
-prepare until streaming is built. Streaming is designed, not yet built. The
-design is in
+`BufferSize` is logged once as an error; and streaming, a clip over the
+limit keeping its bytes, each voice on it decoding and converting ahead into
+a read-ahead ring of its own on a goroutine, playing from its offset once
+its ring primes, looping gaplessly, and halted with its voice, while no
+player pulls the ring, and in `Destroy`. A clip whose length reads zero
+still fails its prepare with `ErrNoStreamLength`. The design is in
 [`docs/design.md`](docs/design.md), and the build on the
 [sfx map](https://github.com/dvoyni/cog/issues/945).
 
@@ -52,5 +55,6 @@ design is in
   its device goroutine; its `Emit` publishes each flush's changes to the
   mixer, never waiting on it; its `Device` answers the device as it is now,
   with one atomic load; its `Prepare` decodes a clip on a goroutine of its
-  own and converts it to the device's rate there, its completion drained by
-  `TakePrepared` and its ID minted by `Install`.
+  own and converts it to the device's rate there, or keeps a long one's
+  bytes to stream, its completion drained by `TakePrepared` and its ID
+  minted by `Install`.

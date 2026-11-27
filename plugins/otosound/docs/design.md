@@ -29,15 +29,22 @@ a clip within `DecodedClipLimit` is decoded on a prepare goroutine and
 installed in the clip table; the decoded tier's half of *Resampling*, from
 [otosound: resampling in Prepare](https://github.com/dvoyni/cog/issues/970):
 the prepare goroutine converts a decoded clip to the rate in force with the
-windowed sinc, the clip still answering its source's rate; and the Windows
+windowed sinc, the clip still answering its source's rate; the Windows
 probe, the retry, the poll for loss and the device reports, from
-[otosound: the Windows probe, the retry, loss and device reports](https://github.com/dvoyni/cog/issues/966).
-Until streaming is built, a clip over the limit, or any clip under the
-always-stream sentinel, fails its prepare with a private error saying it
-would stream, and a clip whose length reads zero fails with
-`ErrNoStreamLength`, as under the headless backend, rather than being
-counted. The rest is designed, not yet built. v1's otosound, which this
-ports, was built and tested on v1's kernel.
+[otosound: the Windows probe, the retry, loss and device reports](https://github.com/dvoyni/cog/issues/966),
+nothing published to a ring no player pulls; and *Streaming*, with the
+streamed tier of *Preparing a clip* and its half of *Resampling*, from
+[otosound: streamed clips and read-ahead rings](https://github.com/dvoyni/cog/issues/971):
+a clip over the limit, or any clip under the always-stream sentinel, keeps
+its bytes and the filter its voices share, and each voice on it decodes and
+converts into a read-ahead ring of its own on a goroutine, halted with its
+voice, by an `Emit` while no player pulls the ring, and by `Destroy`. A clip
+whose length reads zero still fails with `ErrNoStreamLength`, as under the
+headless backend, rather than streaming and being counted: such a stream's
+last page carries a granule position of zero, and the oggvorbis fork's
+`Reader.Read` panics on the last packet of one, its discard of the padding
+past the granule going negative. The rest is designed, not yet built. v1's
+otosound, which this ports, was built and tested on v1's kernel.
 
 ## Problem Statement
 
@@ -248,7 +255,7 @@ type Config struct {
 - **`Init`** reads the config, keeps the kernel's Logger from `Configurator.Logger()`, makes the backend's state, its `Device` not ready and named `"otosound"`, and binds `sfx.BackendSocket` to `backend{plugin: p}`. It opens nothing, so it never fails on a device.
 - **`Voices(n)`**, which sfx calls once from its `Start`, before any `Emit`, sizes everything the mixer and the handoff need, once: the handoff ring's `RingDepth` slots and its staging changes, the voice table of `n` slots, and the table of each slot's read-ahead. Only then does it open the device (see *The device*). Sizing first is deliberate: the mixer must exist complete before anything can pull a block out of it. An `n` of zero or less is taken as one, as v1 took it.
 - **`Start` and `Stop` do nothing.**
-- **`Destroy`** waits for the prepares in flight, halts every read-ahead, stops the device goroutine and waits for it, and closes this kernel's player with oto's `PauseAndStopReading`, so a destroyed kernel leaves nothing of otosound's running.
+- **`Destroy`** waits for the prepares in flight, halts every read-ahead and waits for them, stops the device goroutine and waits for it, and closes this kernel's player with oto's `PauseAndStopReading`, so a destroyed kernel leaves nothing of otosound's running.
   - It is `Destroy` and not `Stop` because v2 finishes every job of the kernel between the two. A flush still in flight after `Stop` would emit into a closed player; none runs once `Destroy` begins.
   - A read-ahead ends with its voice, and a kernel being destroyed ends every voice there is, whether or not sfx got as far as emitting the stops.
   - The device goroutine logs through the kernel's Logger, and `Destroy` waits for it, so nothing logs after the kernel is gone.
@@ -409,7 +416,7 @@ block start -> atomic load -> apply every pending slot's changes, in order, each
 
 - A full ring means the device thread has not run for `RingDepth` flushes: a stalled or dying device, whose `Ready` is very likely already false.
 - The flush side owns the staging changes, which are not published. When the ring is full, the publish publishes nothing, and the next `Emit` merges into staging instead: starts and stops append, and an update folds into the last start or update standing for its slot. That is the same coalescing sfx performs within a flush, widened over the flushes the merge covers, so it adds no new semantics. Since staging is unpublished, the merge touches nothing the mixer can be reading.
-- **A ring nobody drains holds nothing.** While no player pulls the ring, before this kernel's player first plays or after a lost device's ring is detached, `Emit` publishes nothing at all, neither into the ring's slots nor into the staging changes, which it empties, and lets every destroyed clip go at once. A detach on loss, once the player has stopped, empties the ring in the mixer's place: every published list the mixer never applied is cleared and the applied counter stored past it. The device goroutine empties it again right before each play, in case an `Emit` that read the ring pulled just before the detach published after it. sfx restates every live voice as a start when the device turns ready, so nothing is lost, no stale start reaches the first block after an attach, and nothing in the ring keeps a clip alive through a loss.
+- **A ring nobody drains holds nothing.** While no player pulls the ring, before this kernel's player first plays or after a lost device's ring is detached, `Emit` publishes nothing at all, neither into the ring's slots nor into the staging changes, which it empties, lets every destroyed clip go at once, and halts every slot's read-ahead and opens none, since no voice is audible while nothing pulls. A detach on loss, once the player has stopped, empties the ring in the mixer's place: every published list the mixer never applied is cleared and the applied counter stored past it. The device goroutine empties it again right before each play, in case an `Emit` that read the ring pulled just before the detach published after it. sfx restates every live voice as a start when the device turns ready, so nothing is lost, no stale start reaches the first block after an attach, and nothing in the ring keeps a clip alive through a loss.
 - **The ring is pulled before the device is ready.** The device goroutine marks the ring pulled once the player plays and before it stores the `Device` as ready, so a flush that sees the device ready, and restates its voices, always finds the ring pulled and publishes them.
 - **Rejected:** dropping the oldest flush's changes, which loses exactly the starts the contract promises to keep; blocking until the mixer drains, which makes a dead device stall the game; a seqlock, since the reader retries, and a retry in a device callback is a spin whose bound is the writer's schedule.
 
@@ -467,7 +474,7 @@ Each output frame is clamped to [-1, 1] and written as two little-endian float32
 
 **How it treats each operation:**
 
-- **A start begins at its target gain,** not ramping up from silence: a one-shot that faded in over a block would lose the transient that is the reason it was played. Its playhead starts at the start's offset in converted frames, an offset past the clip's end starting at its last frame; a streamed voice's starts at zero, since its read-ahead was opened at the offset. Its loop bounds are resolved once, here, so no block touches a conversion from seconds.
+- **A start begins at its target gain,** not ramping up from silence: a one-shot that faded in over a block would lose the transient that is the reason it was played. Its playhead starts at the start's offset in converted frames, the offset's seconds times the rate the mixer produces, an offset past the clip's end starting at its last frame; a streamed voice's starts at zero, since its read-ahead was opened at the offset, its seconds times the source's rate. Its loop bounds are resolved once, here, so no block touches a conversion from seconds: the region's seconds times the rate the mixer produces, rounded and capped at the frames held, and for a streamed voice its seconds times the source's rate, rounded, in its read-ahead. Neither scales the clip's frame count.
 - **An update** restates the slot's target, rate and pause, which the next block ramps to. An update that reaches a slot a stop has already claimed is ignored, so a voice sfx has ended is never brought back mid-ramp.
 - **A stop** ramps the voice to silence over the block, then frees the slot. A stop that reaches a voice no block has played yet takes it to silence outright, so a play and a stop in one flush are audible for zero samples.
 - **A negative rate is taken as zero,** which is a legitimate freeze; sfx sends none, and a negative rate would run a voice backwards off the front of its buffer.
@@ -542,7 +549,7 @@ A streamed voice gets a read-ahead goroutine and a read-ahead ring. The device t
 - **The goroutine** opens a decoder over the clip's bytes and seeks to the voice's offset in source frames, then decodes 4,096 source frames at a time, converts them, and pushes them into the ring. When the ring has no room for a chunk, it sleeps `RefillWait`: a sleep rather than a wait on a signal, since what would signal is the device thread, which may not take a lock or touch a channel. The decoder open and the seek happen here, so neither the flush nor the device thread ever pays for them.
 - **A wrap at a loop region seeks while filling,** ahead of the wrap, not at it, so the page decode never lands on the wrap's own block. `oggvorbis.Reader.SetPosition` seeks the page before the target and skips the rest, so it is sample-exact; it errors only on a source that cannot seek, and the streamed tier reads bytes in memory. The read-ahead keeps feeding the same conversion across the wrap, so the filter's window reaches across it and the loop is gapless in the resampler as well as in the mixer. How the seek is placed is guidance; what is contract is that the loop is gapless.
 - **A one-shot's read-ahead,** at the clip's end, drains what the resampler's window still holds and publishes the length, which ends the voice in the mixer at the sample its clip runs out on. A looping voice never publishes one, which is why it never ends by itself.
-- **Read-ahead stops with its voice,** however the voice ended: finished, stolen, released or cut, all of which reach otosound as the same stop. The flush side halts it on the slot's stop, and again on a start that replaces the slot; `Destroy` halts every read-ahead there is. A halt never blocks, and halting twice is halting once. It does not free the ring: the mixer may still be ramping the voice to silence out of frames the ring holds, and the ring goes when the voice table drops it, which is the collector's business and never the device thread's.
+- **Read-ahead stops with its voice,** however the voice ended: finished, stolen, released or cut, all of which reach otosound as the same stop. The flush side halts it on the slot's stop, and again on a start that replaces the slot; an `Emit` while no player pulls the ring halts every read-ahead there is, and opens none (see *The handoff ring*); `Destroy` halts every read-ahead there is. A halt never blocks, and halting twice is halting once. It does not free the ring: the mixer may still be ramping the voice to silence out of frames the ring holds, and the ring goes when the voice table drops it, which is the collector's business and never the device thread's.
 - **An underrun plays silence for that slot,** not for the block: one voice that could not keep up must never take the rest of the mix with it. The frame just past the last one held is the edge of the read-ahead, not an underrun, and holds its sample for that frame, which is inaudible where dropping to silence would click.
 - **An underrun advances the playhead; the head of a stream does not.** A voice whose ring has not yet had a frame holds its playhead rather than advancing through silence, because the first fill is a clip load, and a clip load starts from its offset with no catch-up. Once the voice has sounded, an underrun advances it: then it is the device's rule, a playhead advances whether or not anyone can hear it, and a stall that held would put the voice behind the world it is scored to for good. Holding the head is also what keeps a streamed one-shot from the backstop: a playhead a few milliseconds behind sfx's reaches the clip's end after the stop that declicks it, never before.
 - **A decoder that will not open, or fails mid-clip, ends the voice and reports nothing.** A clip failure is terminal and reported once, at the prepare, where a clip that cannot be read is refused outright. A decoder that fails after that belongs to a clip that parsed, installed and has been playing, and the game has been told everything it is owed. It gets silence and an ending, which is what any voice that ran out gets.

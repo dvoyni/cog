@@ -25,10 +25,11 @@ var silentGains [2][2]float32
 // target, and sums them. It never blocks, since reads are sequential across a
 // context's players, and a blocking read would hold up every other kernel's.
 //
-// It may touch its own voice table, the handoff ring through its atomics, and
-// the prepared clip data it was given. It may not allocate, take any lock,
-// free anything, call into sfx or the kernel, or decode: everything it needs
-// is made once, at Voices and in Prepare. It never decides anything either: it
+// It may touch its own voice table, the handoff ring through its atomics, the
+// prepared clip data it was given, and its read-ahead rings through their
+// atomics. It may not allocate, take any lock, free anything, call into sfx
+// or the kernel, or decode: everything it needs is made once, at Voices, in
+// Prepare, or at a voice's start on the flush side. It never decides anything either: it
 // holds no notion of a bus, a priority, a position, the cap or a handle, and a
 // stolen voice reaches it as an ordinary stop.
 type mixer struct {
@@ -43,15 +44,22 @@ type mixer struct {
 	// so the loop over frames carries no decisions. Its capacity is the slot
 	// count, and it never grows.
 	soundingSlots []int
+	// outputSampleRate is the rate the mixer produces and a resident clip's
+	// samples are held at, which a start's offset and loop region, in
+	// seconds, become frames at: the rate in force once Voices has taken the
+	// device, and Config's until then, or when the take failed. Voices sets
+	// it before the player can pull a block.
+	outputSampleRate int
 }
 
 // makeMixer returns a mixer draining ring, with a voice table of voiceCount
-// silent slots.
-func makeMixer(ring *handoffRing, voiceCount int) mixer {
+// silent slots, producing outputSampleRate.
+func makeMixer(ring *handoffRing, voiceCount, outputSampleRate int) mixer {
 	return mixer{
-		ring:          ring,
-		voices:        make([]voice, voiceCount),
-		soundingSlots: make([]int, 0, voiceCount),
+		ring:             ring,
+		voices:           make([]voice, voiceCount),
+		soundingSlots:    make([]int, 0, voiceCount),
+		outputSampleRate: outputSampleRate,
 	}
 }
 
@@ -119,7 +127,7 @@ func (m *mixer) apply(applied *operation) {
 	slotVoice := &m.voices[applied.slot]
 	switch applied.kind {
 	case operationKindStart:
-		slotVoice.start(applied)
+		slotVoice.start(applied, m.outputSampleRate)
 	case operationKindUpdate:
 		slotVoice.update(applied.params)
 	case operationKindStop:
@@ -138,6 +146,7 @@ func (m *mixer) gatherSoundingSlots() {
 		if slotVoice.clip == nil {
 			continue
 		}
+		slotVoice.beginBlock()
 		slotVoice.endGains = slotVoice.targetGains
 		if slotVoice.stopping || slotVoice.paused {
 			slotVoice.endGains = silentGains

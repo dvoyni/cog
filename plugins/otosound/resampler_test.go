@@ -152,11 +152,12 @@ func TestAChunkedConversionIsSampleForSampleTheWholeOne(t *testing.T) {
 }
 
 // The expensive resampler runs only off the device thread: outside its own
-// file, nothing names any of resampler.go's declarations but prepareClip,
-// which runs on a prepare goroutine. A streamed voice's read-ahead is the one
-// other path the design allows it.
-func TestTheResamplerIsReachableOnlyFromPrepare(t *testing.T) {
-	allowed := []string{"prepareClip"}
+// file, nothing names any of resampler.go's declarations but prepareClip and
+// retainClip, which run on a prepare goroutine, the prepared clip, which
+// holds the filter a streamed clip's voices share, and a streamed voice's
+// read-ahead, which runs on a goroutine of its own.
+func TestTheResamplerIsReachableOnlyFromPrepareAndTheReadAhead(t *testing.T) {
+	allowed := []string{"prepareClip", "retainClip", "preparedClip", "readAhead.stream"}
 	names, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
@@ -205,8 +206,12 @@ func TestTheResamplerIsReachableOnlyFromPrepare(t *testing.T) {
 		}
 		for _, declaration := range file.Decls {
 			// A method is named as its receiver's type and its own name,
-			// such as readAhead.fill, so one can be allowed too.
+			// such as readAhead.stream, so one can be allowed too, and a type
+			// as its own name, each being declared on its own.
 			function := "a declaration"
+			if typeDeclaration, isGeneral := declaration.(*ast.GenDecl); isGeneral && typeDeclaration.Tok == token.TYPE {
+				function = typeDeclaration.Specs[0].(*ast.TypeSpec).Name.Name
+			}
 			if functionDeclaration, isFunction := declaration.(*ast.FuncDecl); isFunction {
 				function = functionDeclaration.Name.Name
 				if functionDeclaration.Recv != nil {
