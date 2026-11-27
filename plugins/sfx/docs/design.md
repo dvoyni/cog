@@ -202,6 +202,7 @@ backend or a game's sound.
 
 - **A module of its own,** `github.com/dvoyni/cog/plugins/sfx`, importing kernel, platform and libs/m.
   - Its `headless` package also requires the Vorbis decoder, `jfreymuth/oggvorbis`, through cog's forks `dvoyni/vorbis` and `dvoyni/oggvorbis`, by the same `replace` pair otosound carries. The two modules keep identical pins, or `go.work` settles them: two differing replacements in one workspace fail to build. The forks are permanent, since upstream archived `jfreymuth/vorbis` and takes none of cog's changes ([sfx research: oto v3 and our Vorbis forks today](https://github.com/dvoyni/cog/issues/947)).
+  - Its `loopregion` package reads a clip's `LOOPSTART`, `LOOPLENGTH` and `LOOPEND` comments into a `LoopRegion`, or the `ErrLoopRegionIgnored` of a region dropped whole (see *The loop region*), working on the plain comments and the clip's length in frames. The headless backend and otosound both import it, so they run one arithmetic.
   - Its `sfxtest` package also imports metronome.
   - It imports no ECS, no renderer and no camera.
 - **An interface plugin,** as gfx is. sfx holds the queue, the voice table, the clip table, the buses, the listener and every equation, and declares the socket a backend binds.
@@ -1139,7 +1140,7 @@ outcome rather than an exemption.
   - `ErrNoStreamFormat{SampleRate, Channels}`: an identification header naming no sample rate or no channels;
   - `ErrNoStreamLength`: a stream whose length reads zero, a truncated file or one whose last page carries no granule position. It is an error rather than a clip of no duration on purpose: a zero duration makes the playhead and the duration fiction, and silently removes `ReasonFinished` from every test that names that clip.
 - **A malformed loop region** is answered by its prepared clip's `LoopRegionErr()`, sfx's `ErrLoopRegionIgnored` with its `Start`, `End`, `Frames` and `Err` and no `Path`, which sfx fills in when it reports it: the span the tags asked for and the clip's true length in frames, or the parse failure. A comment header that would not read costs the clip only its tags, and the clip still plays.
-- **Its loop region and duration are the same arithmetic otosound runs,** over the same bytes, reaching the same answer: a clip reports one duration and one loop region whichever backend a game composed, or a test that passes under the headless backend says nothing about the game under otosound.
+- **Its loop region and duration are the same arithmetic otosound runs,** over the same bytes, reaching the same answer, the loop region read by `loopregion.Read`, which both backends import: a clip reports one duration and one loop region whichever backend a game composed, or a test that passes under the headless backend says nothing about the game under otosound.
 - **Its `Device` is constant:** `Ready` true, `Name` `"headless"`, the sample rate it was made with, 2 channels and a `Latency` of zero, built once since nothing is opened and nothing can be lost.
 - **It reports nothing,** and needs no Logger.
 - **Rejected:**

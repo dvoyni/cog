@@ -1,4 +1,11 @@
-package headless
+// Package loopregion reads the loop region a clip's Vorbis comments declare,
+// for every sfx backend: the headless backend and otosound both read a
+// clip's region through it, so a clip reports one loop region whichever
+// backend a game composed. It works on plain values, the comments and the
+// clip's length in frames, and reads no Ogg itself.
+//
+// See ../docs/design.md, The loop region.
+package loopregion
 
 import (
 	"cmp"
@@ -18,16 +25,17 @@ const (
 	loopEndTag    = "LOOPEND"
 )
 
-// readLoopRegion answers the loop region a clip's comments declare, in
-// seconds, against the clip's frames at sampleRate: absent when they declare
-// none, which means the whole clip. It is the arithmetic otosound runs over
-// the same bytes, so a clip reports one loop region whichever backend a game
-// composed.
+// Read answers the loop region comments declare, in seconds, against a clip
+// of frames at sampleRate: absent when they declare none, which means the
+// whole clip. frames is the clip's true length, the granule end where a
+// decoder handed back more, so a region is checked against the length the
+// clip has.
 //
 // LOOPSTART alone ends the region at the clip's end, and LOOPLENGTH wins over
-// LOOPEND. A malformed region is dropped whole, never clamped, and answered as
-// an sfx.ErrLoopRegionIgnored with no Path.
-func readLoopRegion(comments []string, sampleRate int, frames int64) (m.Maybe[sfx.LoopRegion], error) {
+// LOOPEND. A malformed region, a start below zero, an end at or before the
+// start or past frames, or a value that is not an integer, is dropped whole,
+// never clamped, and answered as an sfx.ErrLoopRegionIgnored with no Path.
+func Read(comments []string, sampleRate int, frames int64) (m.Maybe[sfx.LoopRegion], error) {
 	var none m.Maybe[sfx.LoopRegion]
 	start, hasStart, startErr := readLoopTag(comments, loopStartTag)
 	length, hasLength, lengthErr := readLoopTag(comments, loopLengthTag)

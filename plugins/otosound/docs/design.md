@@ -19,8 +19,15 @@ observes, and no test above the seam can see any of them.
 
 Status: being built. The plugin, its `Config`, and an open device playing
 silence are built, from [otosound: the plugin and an open device playing silence](https://github.com/dvoyni/cog/issues/965);
-the rest is designed, not yet built. v1's otosound, which this ports, was
-built and tested on v1's kernel.
+so is the decoded tier of *Preparing a clip*, with *Loop regions*, from
+[otosound: resident clips decoded in Prepare](https://github.com/dvoyni/cog/issues/968):
+a clip within `DecodedClipLimit` is decoded on a prepare goroutine, held at its
+source's rate, and installed in the clip table. Until streaming is built, a
+clip over the limit, or any clip under the always-stream sentinel, fails its
+prepare with a private error saying it would stream, and a clip whose length
+reads zero fails with `ErrNoStreamLength`, as under the headless backend,
+rather than being counted. The rest is designed, not yet built. v1's otosound,
+which this ports, was built and tested on v1's kernel.
 
 ## Problem Statement
 
@@ -231,7 +238,7 @@ type Config struct {
 - **`Init`** reads the config, keeps the kernel's Logger from `Configurator.Logger()`, makes the backend's state, its `Device` not ready and named `"otosound"`, and binds `sfx.BackendSocket` to `backend{plugin: p}`. It opens nothing, so it never fails on a device.
 - **`Voices(n)`**, which sfx calls once from its `Start`, before any `Emit`, sizes everything the mixer and the handoff need, once: the handoff ring's `RingDepth` slots and its staging changes, the voice table of `n` slots, and the table of each slot's read-ahead. Only then does it open the device (see *The device*). Sizing first is deliberate: the mixer must exist complete before anything can pull a block out of it. An `n` of zero or less is taken as one, as v1 took it.
 - **`Start` and `Stop` do nothing.**
-- **`Destroy`** halts every read-ahead, stops the device goroutine and waits for it, and closes this kernel's player with oto's `PauseAndStopReading`, so a destroyed kernel leaves nothing of otosound's running.
+- **`Destroy`** waits for the prepares in flight, halts every read-ahead, stops the device goroutine and waits for it, and closes this kernel's player with oto's `PauseAndStopReading`, so a destroyed kernel leaves nothing of otosound's running.
   - It is `Destroy` and not `Stop` because v2 finishes every job of the kernel between the two. A flush still in flight after `Stop` would emit into a closed player; none runs once `Destroy` begins.
   - A read-ahead ends with its voice, and a kernel being destroyed ends every voice there is, whether or not sfx got as far as emitting the stops.
   - The device goroutine logs through the kernel's Logger, and `Destroy` waits for it, so nothing logs after the kernel is gone.
@@ -494,7 +501,7 @@ Each output frame is clamped to [-1, 1] and written as two little-endian float32
 
 ([Where a music track's loop repeats from](https://github.com/dvoyni/cog/issues/471), [sfx: how its reports reach the kernel's logger](https://github.com/dvoyni/cog/issues/952))
 
-A loop region is a fact about a clip, declared in its Ogg file's Vorbis comment header. otosound reads it in the same pass over the headers that gives the duration, channels and rate, and answers it on the prepared clip in seconds, absent meaning the whole clip.
+A loop region is a fact about a clip, declared in its Ogg file's Vorbis comment header. otosound reads it in the same pass over the headers that gives the duration, channels and rate, and answers it on the prepared clip in seconds, absent meaning the whole clip. The tags' arithmetic below is sfx's `plugins/sfx/loopregion`, `loopregion.Read` over the comments, the source's rate and the clip's true length in frames, which the headless backend imports too, so the two backends run one arithmetic and reach one answer.
 
 | Tag | Meaning |
 |---|---|
