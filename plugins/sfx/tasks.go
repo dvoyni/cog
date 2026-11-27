@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/platform"
 )
 
@@ -11,7 +12,8 @@ import (
 // which is what applying a flush atomically means in lock terms: no recorder
 // is mid-append while the queue is drained, and no reader sees half a flush's
 // voices. In order, it applies the operations recorded, a clip named for the
-// first time read and prepared there; advances every playhead by delta; hands
+// first time read and prepared there, and then the pause recorded last;
+// advances every playhead by delta; hands
 // the backend the flush's changes; frees the slots whose voices ended, only
 // now that their stops are handed over, for the next flush's plays; and
 // publishes each ending.
@@ -32,6 +34,10 @@ func flush(k *kernel.Kernel, delta time.Duration, queueHandle kernel.Write[Queue
 		}
 	}
 	queue.state.operations = queue.state.operations[:0]
+	if paused, recorded := queue.state.paused.Get(); recorded {
+		voices.setPaused(paused)
+		queue.state.paused = m.Maybe[bool]{}
+	}
 	voices.advance(delta, &state.endings)
 	voices.collect(&state.changes)
 	backend.Emit(&state.changes)

@@ -15,4 +15,9 @@ type VoiceEntry struct {
 	Playhead time.Duration
 	// Duration is the clip's length, zero while the voice waits on its clip.
 	Duration time.Duration
+	// Paused is whether the voice's playhead is stopped, by its own
+	// VoiceOptions.Paused or by Queue.SetPaused's pause of every voice, so a
+	// reader asking whether the playhead moves is answered about the playhead
+	// and not about who stopped it.
+	Paused bool
 }

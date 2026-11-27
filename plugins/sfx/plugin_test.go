@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/platform"
 	"github.com/dvoyni/cog/plugins/sfx"
 	"github.com/dvoyni/cog/plugins/sfx/sfxtest"
@@ -77,7 +78,8 @@ func wantEndings(t *testing.T, h *sfxtest.Harness, want ...sfx.VoiceEndedEvent) 
 }
 
 // seamPlugin wraps sfx's BackendSocket, whichever binds it, to keep what
-// crosses the seam: the slot count and a copy of each flush's changes.
+// crosses the seam: the slot count and a copy of each flush's changes, and
+// to answer seam's device in place of the bound backend's when it holds one.
 type seamPlugin struct{ seam *seam }
 
 func (seamPlugin) Name() kernel.PluginName { return "seam" }
@@ -102,6 +104,8 @@ type seam struct {
 	mutex      sync.Mutex
 	slotCounts []int
 	changes    []sfx.FlushChanges
+	// device is what the backend answers for its device, when present.
+	device m.Maybe[sfx.Device]
 }
 
 // emitted answers a copy of each flush's changes so far.
@@ -134,6 +138,13 @@ func (b seamBackend) Emit(changes *sfx.FlushChanges) {
 	})
 	b.seam.mutex.Unlock()
 	b.BackendSocket.Emit(changes)
+}
+
+func (b seamBackend) Device() sfx.Device {
+	if device, present := b.seam.device.Get(); present {
+		return device
+	}
+	return b.BackendSocket.Device()
 }
 
 // The whole vertical path in one test: a game records a play, gets a voice,

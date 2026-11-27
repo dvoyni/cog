@@ -24,14 +24,14 @@ func (v liveVoices) Info(voice Voice) (VoiceEntry, bool) {
 	if slot == nil {
 		return VoiceEntry{}, false
 	}
-	return VoiceEntry{Voice: slot.voice, Path: slot.path, Playhead: slot.playhead, Duration: slot.duration}, true
+	return VoiceEntry{Voice: slot.voice, Path: slot.path, Playhead: slot.playhead, Duration: slot.duration, Paused: slot.suspended(v.table.paused)}, true
 }
 
 // All yields every live voice, in slot order.
 func (v liveVoices) All() iter.Seq[VoiceEntry] {
 	return func(yield func(VoiceEntry) bool) {
 		for index := range v.table.slots {
-			if slot := &v.table.slots[index]; slot.state.live() && !yield(VoiceEntry{Voice: slot.voice, Path: slot.path, Playhead: slot.playhead, Duration: slot.duration}) {
+			if slot := &v.table.slots[index]; slot.state.live() && !yield(VoiceEntry{Voice: slot.voice, Path: slot.path, Playhead: slot.playhead, Duration: slot.duration, Paused: slot.suspended(v.table.paused)}) {
 				return
 			}
 		}
@@ -80,6 +80,7 @@ func (v liveVoices) start(play operation, clip clipEntry, endings *[]VoiceEndedE
 		voice:    play.voice,
 		path:     play.path,
 		offset:   play.offset,
+		options:  play.options,
 		playhead: play.offset,
 		clipID:   clip.id,
 		duration: clip.duration,
@@ -97,14 +98,31 @@ func (v liveVoices) stop(voice Voice, endings *[]VoiceEndedEvent) {
 	}
 }
 
+// setPaused applies the pause of every voice, or its end. A change owes
+// every voice the backend holds an update, since that is all the pause is at
+// the seam: at most MaxVoices updates, with no verb of its own. A voice
+// started in this flush is owed none, its start carrying the pause.
+func (v liveVoices) setPaused(paused bool) {
+	if v.table.paused == paused {
+		return
+	}
+	v.table.paused = paused
+	for index := range v.table.slots {
+		if slot := &v.table.slots[index]; slot.state == slotSounding {
+			slot.owesUpdate = true
+		}
+	}
+}
+
 // advance moves every playhead by delta, whether or not anyone can hear it,
 // so a test's timeline is world time, and ends with ReasonFinished each voice
 // that ran out. A voice waiting on its clip does not advance: it starts from
-// its offset once the clip is ready, with no catch-up.
+// its offset once the clip is ready, with no catch-up. A suspended voice does
+// not advance either, so it resumes on the same sample.
 func (v liveVoices) advance(delta time.Duration, endings *[]VoiceEndedEvent) {
 	for index := range v.table.slots {
 		slot := &v.table.slots[index]
-		if slot.state != slotStarting && slot.state != slotSounding {
+		if slot.state != slotStarting && slot.state != slotSounding || slot.suspended(v.table.paused) {
 			continue
 		}
 		slot.playhead += delta
@@ -116,8 +134,9 @@ func (v liveVoices) advance(delta time.Duration, endings *[]VoiceEndedEvent) {
 }
 
 // collect fills changes from the table, a start for every voice started in
-// this flush and a stop for every voice that ended while the backend held
-// it, and empties the slots of the stopped. A voice played and ended inside
+// this flush, an update for every voice the backend holds whose params
+// moved, and a stop for every voice that ended while the backend held it,
+// and empties the slots of the stopped. A voice played and ended inside
 // one flush appears in neither: it was never audible, so there is nothing to
 // start and nothing to stop.
 func (v liveVoices) collect(changes *FlushChanges) {
@@ -128,13 +147,22 @@ func (v liveVoices) collect(changes *FlushChanges) {
 			changes.Stops = append(changes.Stops, VoiceSlot(index))
 			*slot = tableSlot{}
 		case slotStarting:
+			params := makeCentredVoiceParams(slot.channels)
+			params.Paused = slot.suspended(v.table.paused)
 			changes.Starts = append(changes.Starts, VoiceStart{
 				Slot:   VoiceSlot(index),
 				Clip:   slot.clipID,
 				Offset: slot.offset,
-				Params: makeCentredVoiceParams(slot.channels),
+				Params: params,
 			})
 			slot.state = slotSounding
+		case slotSounding:
+			if slot.owesUpdate {
+				params := makeCentredVoiceParams(slot.channels)
+				params.Paused = slot.suspended(v.table.paused)
+				changes.Updates = append(changes.Updates, VoiceUpdate{Slot: VoiceSlot(index), Params: params})
+				slot.owesUpdate = false
+			}
 		}
 	}
 }
@@ -170,6 +198,10 @@ type voiceTable struct {
 	slots []tableSlot
 	// liveCount is how many slots hold a live voice.
 	liveCount int
+	// paused is the pause of every voice Queue.SetPaused recorded, one flag
+	// over the table rather than a voice's own, which each slot's options
+	// keep apart from it.
+	paused bool
 }
 
 // slotState is where the voice in one slot of the table is in its life.
@@ -205,9 +237,20 @@ type tableSlot struct {
 	// offset is where in the clip the voice begins, and playhead where it is.
 	offset   time.Duration
 	playhead time.Duration
+	// options is how the voice was played.
+	options VoiceOptions
+	// owesUpdate is whether the backend holds the voice and its params moved
+	// in the flush running, so it is owed a VoiceUpdate.
+	owesUpdate bool
 	// clipID, duration and channels are the clip's, zero while the voice
 	// waits on it.
 	clipID   ClipID
 	duration time.Duration
 	channels int
+}
+
+// suspended answers whether the voice's playhead is stopped: by its own
+// VoiceOptions.Paused, or by the pause of every voice, paused.
+func (s *tableSlot) suspended(paused bool) bool {
+	return paused || s.options.Paused.Or(false)
 }

@@ -1,6 +1,10 @@
 package sfx
 
-import "time"
+import (
+	"time"
+
+	"github.com/dvoyni/cog/libs/m"
+)
 
 // queue is what Queue names: the operations recorded since the last flush,
 // in order, and the handles minted for them. It holds one private pointer,
@@ -28,7 +32,7 @@ func makeQueue(maxVoices int) queue {
 // in the flush that applies it, never having been live.
 func (q queue) Play(path string, offset time.Duration, options VoiceOptions) Voice {
 	voice := q.mintVoice()
-	q.state.operations = append(q.state.operations, operation{kind: operationPlay, voice: voice, path: path, offset: offset})
+	q.state.operations = append(q.state.operations, operation{kind: operationPlay, voice: voice, path: path, offset: offset, options: options})
 	return voice
 }
 
@@ -42,6 +46,19 @@ func (q queue) Stop(voice Voice) {
 	}
 	q.state.operations = append(q.state.operations, operation{kind: operationStop, voice: voice})
 }
+
+// SetPaused records a pause of every voice at once, as when a menu is shown
+// over the game, or its end, with false. A pause suspends every live voice,
+// each resuming on the same sample it stopped on; a voice played during it
+// starts suspended; Stop still applies. The device stays open and is fed
+// silence. A voice paused by its own VoiceOptions.Paused stays paused when
+// the pause ends: a voice is silent while either is set.
+//
+// It is coalesced, not ordered: set twice before one flush, the last value
+// wins, applied where the flush's ordered operations end, so the flush that
+// applies a pause advances no playhead. It reaches the backend as a
+// VoiceParams.Paused update of every live voice.
+func (q queue) SetPaused(paused bool) { q.state.paused = m.Some(paused) }
 
 // mintVoice answers the next handle: a free slot's next generation, or, at a
 // full table, a handle of the index past the last slot, which addresses
@@ -62,6 +79,9 @@ func (q queue) mintVoice() Voice {
 type queueState struct {
 	// operations are the operations recorded since the last flush, in order.
 	operations []operation
+	// paused is the pause SetPaused recorded last since the last flush,
+	// absent when it recorded none.
+	paused m.Maybe[bool]
 	// generations is each slot's current generation, starting at 0 so the
 	// first handle a slot hands out is generation 1.
 	generations []uint32
@@ -89,7 +109,9 @@ const (
 type operation struct {
 	kind  operationKind
 	voice Voice
-	// path and offset are a play's clip and where in it the voice begins.
-	path   string
-	offset time.Duration
+	// path, offset and options are a play's clip, where in it the voice
+	// begins and how it starts.
+	path    string
+	offset  time.Duration
+	options VoiceOptions
 }
