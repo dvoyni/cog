@@ -13,7 +13,8 @@ import (
 // is mid-append while the queue is drained, and no reader sees half a flush's
 // voices. In order, it installs the prepares the backend finished since the
 // last flush; applies the operations recorded, a clip named for the first
-// time read and prepared there, and then the bus volumes they coalesced to
+// time read and prepared there, and a release ending the voices on its clip
+// before destroying it, and then the bus volumes they coalesced to
 // and the pause recorded last; binds the voices waiting on a clip that is now
 // ready and ends those whose clip failed; advances every playhead by delta;
 // folds each voice's bus volume into its gains; hands the backend the flush's
@@ -37,6 +38,14 @@ func flush(k *kernel.Kernel, delta time.Duration, queueHandle kernel.Write[Queue
 			voices.stop(recorded.voice, &state.endings)
 		case operationStopBus:
 			voices.stopBus(recorded.bus, &state.endings)
+		case operationPreload:
+			clips.load(k, filesHandle.Get(), backend, recorded.path)
+		case operationRelease:
+			voices.release(recorded.path, &state.endings)
+			clips.release(k, recorded.path, &state.changes.Destroys)
+		case operationReleaseAll:
+			voices.releaseAll(&state.endings)
+			clips.releaseAll(k, &state.changes.Destroys)
 		}
 	}
 	queue.state.operations = queue.state.operations[:0]

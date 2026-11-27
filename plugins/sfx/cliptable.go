@@ -16,6 +16,18 @@ func makeClipTable() clipTable {
 	return clipTable{state: &clipTableState{entries: map[string]clipEntry{}}}
 }
 
+// Info answers what sfx knows of the clip at path, its facts and how far it
+// has come, every fact zero until the clip is ready. A path nothing has named
+// answers zero facts and ClipLoading, as one whose prepare is in flight does,
+// and so does a path released since: nothing failed and nothing is resident.
+// Asking never starts a load, since it reads the table alone: a game that
+// only asks is told ClipLoading forever, and Preload is the verb that changes
+// the answer.
+func (t clipTable) Info(path string) (ClipInfo, ClipState) {
+	entry := t.state.entries[path]
+	return entry.info, entry.state
+}
+
 // load answers the entry of the clip at path. A path the table does not hold
 // is read through files and handed to backend's Prepare first, and its entry
 // kept whatever came of it: ready once installed, loading while the prepare
@@ -27,7 +39,7 @@ func (t clipTable) load(k *kernel.Kernel, files fs.FS, backend BackendSocket, pa
 		return entry
 	}
 	t.state.lastEpoch++
-	entry := clipEntry{state: clipLoading, epoch: t.state.lastEpoch}
+	entry := clipEntry{state: ClipLoading, epoch: t.state.lastEpoch}
 	encoded, err := fs.ReadFile(files, path)
 	if err != nil {
 		entry = failClip(k, path, ErrClipUnreadable{Path: path, Err: err})
@@ -57,7 +69,7 @@ func (t clipTable) drain(k *kernel.Kernel, backend BackendSocket) {
 			continue
 		}
 		entry, held := t.state.entries[token.path]
-		if !held || entry.epoch != token.epoch || entry.state != clipLoading {
+		if !held || entry.epoch != token.epoch || entry.state != ClipLoading {
 			continue
 		}
 		if completion.Err != nil {
@@ -65,6 +77,34 @@ func (t clipTable) drain(k *kernel.Kernel, backend BackendSocket) {
 			continue
 		}
 		t.state.entries[token.path] = installClip(k, backend, token.path, completion.Clip)
+	}
+}
+
+// release takes the clip at path out of the table, after the flush has ended
+// the voices playing it: its ID, when it was installed, is appended to
+// destroys, the flush's changes, which a backend applies after their stops,
+// and its failure is forgotten, so a path that failed and is named again is
+// read again and reported again if it fails again. A clip whose prepare is in
+// flight leaves nothing to destroy: its completion finds no entry at its
+// epoch and is dropped. A path the table does not hold is left as it is.
+func (t clipTable) release(k *kernel.Kernel, path string, destroys *[]ClipID) {
+	entry, held := t.state.entries[path]
+	if !held {
+		return
+	}
+	delete(t.state.entries, path)
+	switch entry.state {
+	case ClipReady:
+		*destroys = append(*destroys, entry.id)
+	case ClipFailed:
+		k.Logger().ForgetLogOnce(clipFailedLogKey + path)
+	}
+}
+
+// releaseAll releases every clip the table holds, as release does each.
+func (t clipTable) releaseAll(k *kernel.Kernel, destroys *[]ClipID) {
+	for path := range t.state.entries {
+		t.release(k, path, destroys)
 	}
 }
 
@@ -76,7 +116,7 @@ func (t clipTable) drain(k *kernel.Kernel, backend BackendSocket) {
 func installClip(k *kernel.Kernel, backend BackendSocket, path string, prepared PreparedClip) clipEntry {
 	if prepared == nil {
 		k.Logger().LogErr(ErrClipNotPrepared{Path: path})
-		return clipEntry{state: clipFailed}
+		return clipEntry{state: ClipFailed}
 	}
 	id, err := backend.Install(prepared)
 	if err != nil {
@@ -84,13 +124,16 @@ func installClip(k *kernel.Kernel, backend BackendSocket, path string, prepared 
 	}
 	if id == 0 {
 		k.Logger().LogErr(ErrClipNotPrepared{Path: path})
-		return clipEntry{state: clipFailed}
+		return clipEntry{state: ClipFailed}
 	}
 	return clipEntry{
-		state:    clipReady,
-		id:       id,
-		duration: time.Duration(float64(prepared.Duration()) * float64(time.Second)),
-		channels: prepared.Channels(),
+		state: ClipReady,
+		id:    id,
+		info: ClipInfo{
+			Duration:   time.Duration(float64(prepared.Duration()) * float64(time.Second)),
+			Channels:   prepared.Channels(),
+			SampleRate: prepared.SampleRate(),
+		},
 	}
 }
 
@@ -99,7 +142,7 @@ func installClip(k *kernel.Kernel, backend BackendSocket, path string, prepared 
 // release clears it.
 func failClip(k *kernel.Kernel, path string, err error) clipEntry {
 	k.Logger().LogErrOnce(clipFailedLogKey+path, err)
-	return clipEntry{state: clipFailed}
+	return clipEntry{state: ClipFailed}
 }
 
 // clipTableState is the table clipTable points to.
@@ -119,28 +162,15 @@ type prepareToken struct {
 	epoch uint64
 }
 
-// clipState is how far a clip has come.
-type clipState uint8
-
-const (
-	// clipLoading is a clip whose prepare is in flight.
-	clipLoading clipState = iota
-	// clipReady is a clip installed, its voices started from it.
-	clipReady
-	// clipFailed is a clip that could not be read, prepared or installed.
-	clipFailed
-)
-
 // clipEntry is what the table keeps of one clip.
 type clipEntry struct {
-	state clipState
+	state ClipState
 	// epoch is the epoch the entry was made at, which its prepare's token
 	// carries; zero once the clip has failed or is ready, since no completion
 	// is matched against it then.
 	epoch uint64
-	// id is the ID the backend's Install minted, and duration and channels
-	// the prepared clip's facts, each zero until the clip is ready.
-	id       ClipID
-	duration time.Duration
-	channels int
+	// id is the ID the backend's Install minted, and info the prepared
+	// clip's facts, each zero until the clip is ready.
+	id   ClipID
+	info ClipInfo
 }

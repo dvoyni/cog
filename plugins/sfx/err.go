@@ -3,7 +3,8 @@ package sfx
 import "fmt"
 
 // clipFailedLogKey is the prefix of a clip's key, the key its failure is
-// logged once under: the prefix, then the clip's path.
+// logged once under, and forgotten under when the clip is released: the
+// prefix, then the clip's path.
 const clipFailedLogKey = "sfx: clip failed: "
 
 // ErrClipUnreadable reports a clip whose bytes could not be read: the failed

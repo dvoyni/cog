@@ -36,14 +36,21 @@ const endsOnStep = 71
 // clip mounted at clipPath.
 func newHarness(t *testing.T, config *sfx.Config, plugins ...kernel.Plugin) *sfxtest.Harness {
 	t.Helper()
+	h := sfxtest.NewHarness(t)
+	h.Spawn(config, plugins...)
+	h.Mount(clipPath, readFixtureClip(t))
+	return h
+}
+
+// readFixtureClip answers the fixture clip's bytes, the headless backend's
+// own.
+func readFixtureClip(t *testing.T) []byte {
+	t.Helper()
 	clip, err := os.ReadFile("headless/testdata/pianoroll.ogg")
 	if err != nil {
 		t.Fatalf("reading the fixture clip: %v", err)
 	}
-	h := sfxtest.NewHarness(t)
-	h.Spawn(config, plugins...)
-	h.Mount(clipPath, clip)
-	return h
+	return clip
 }
 
 // play records a play of the fixture clip and answers its handle.

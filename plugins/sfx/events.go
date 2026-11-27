@@ -37,6 +37,12 @@ const (
 	// one or more flushes after the play, never in the flush that applied it,
 	// since preparing is asynchronous.
 	ReasonFailed
+	// ReasonReleased is the clip the voice was playing, or waiting on, being
+	// released by Release or ReleaseAll. It arrives in the flush that applies
+	// the release. It is not ReasonStopped: a release is not a stop, the
+	// stopping is its side effect, and it is typically recorded far from the
+	// play it cuts.
+	ReasonReleased
 )
 
 // String renders a reason for a log and a failure message.
@@ -50,6 +56,8 @@ func (r Reason) String() string {
 		return "stolen"
 	case ReasonFailed:
 		return "failed"
+	case ReasonReleased:
+		return "released"
 	}
 	return "unknown"
 }

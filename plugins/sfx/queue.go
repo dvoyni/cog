@@ -87,6 +87,46 @@ func (q queue) StopBus(bus Bus) {
 	q.state.operations = append(q.state.operations, operation{kind: operationStopBus, bus: bus.resolve(len(q.state.busVolumeSets))})
 }
 
+// Preload records a read and a prepare of the clip at path without playing
+// it, so a loading screen pays the read rather than the first shot fired.
+// The read happens inside the flush that applies it, as a Play's does.
+//
+// It promises residency, not a free Play: a short clip's next Play is free,
+// while a long one streams, and its first Play still opens a decoder of its
+// own and is silent until it primes, which a game cannot tell from the
+// other. Preloading a clip already loaded, loading or playing changes
+// nothing: a Play and a Preload of one path name one clip and cost one
+// prepare. ClipTable.Info answers once the clip is ready.
+func (q queue) Preload(path string) {
+	q.state.operations = append(q.state.operations, operation{kind: operationPreload, path: path})
+}
+
+// Release records the release of the clip at path, for a game that wants its
+// memory back. At the flush that applies it, every voice playing the clip
+// ends with ReasonReleased, a voice still waiting on it included, and the
+// backend is told to destroy the clip after their stops, in that flush's
+// changes: after that flush no voice plays the clip, on any backend. It also
+// forgets the clip's failure, which only a release clears: a path that
+// failed and is named again is read again, and reported again if it fails
+// again.
+//
+// It is ordered: a Play of path recorded before it is cut by it, and one
+// recorded after it reads the clip again. Releasing a path nothing has named
+// does nothing. Releasing is optional, so a game that wants a sound to
+// finish simply does not release its clip.
+func (q queue) Release(path string) {
+	q.state.operations = append(q.state.operations, operation{kind: operationRelease, path: path})
+}
+
+// ReleaseAll records the release of every clip, as Release records each: at
+// the flush that applies it every voice ends with ReasonReleased, which is
+// what a teardown means. A game that wants one track to bridge a transition
+// releases clip by clip and keeps that one, or starts the bridge after
+// ReleaseAll; naming a clip again reads it again.
+func (q queue) ReleaseAll() {
+	q.state.operations = append(q.state.operations, operation{kind: operationReleaseAll})
+}
+
 // mintVoice answers the next handle: a free slot's next generation, or, at a
 // full table, a handle of the index past the last slot, which addresses
 // nothing.
@@ -134,6 +174,12 @@ const (
 	operationStop
 	// operationStopBus ends every voice on a bus.
 	operationStopBus
+	// operationPreload reads and prepares a clip nothing plays yet.
+	operationPreload
+	// operationRelease ends every voice on a clip and destroys it.
+	operationRelease
+	// operationReleaseAll releases every clip.
+	operationReleaseAll
 )
 
 // operation is one recorded operation. An operation is a delta and may not be
@@ -142,8 +188,8 @@ const (
 type operation struct {
 	kind  operationKind
 	voice Voice
-	// path, offset and options are a play's clip, where in it the voice
-	// begins and how it starts.
+	// path is the clip a play, a preload or a release names, and offset and
+	// options are where in it a play's voice begins and how it starts.
 	path    string
 	offset  time.Duration
 	options VoiceOptions
