@@ -339,8 +339,8 @@ holds the bound value and delegates to it:
 
 ```go
 // rendertest's harness, which checks every shader gfx compiles:
-c.WrapSocket[gfx.InstanceSocket](func(bound gfx.InstanceSocket) gfx.InstanceSocket {
-	return checkingInstance{InstanceSocket: bound}
+c.WrapSocket[gfx.BackendSocket](func(bound gfx.BackendSocket) gfx.BackendSocket {
+	return checkingInstance{BackendSocket: bound}
 })
 ```
 

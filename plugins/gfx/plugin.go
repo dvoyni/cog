@@ -8,12 +8,12 @@ import (
 	"github.com/dvoyni/cog/plugins/platform"
 )
 
-// Plugin is gfx: it declares the InstanceSocket a backend binds, installs
+// Plugin is gfx: it declares the BackendSocket a backend binds, installs
 // the Device and Handlers, and draws one frame per RenderEvent.
 type Plugin struct {
 	// config is a copy of the Config Init was given.
-	config         Config
-	instanceSocket kernel.ExclusiveSocket[InstanceSocket]
+	config        Config
+	backendSocket kernel.ExclusiveSocket[BackendSocket]
 	// device holds the instance, the adapter and the backend device Start
 	// requested, for Destroy to release; nil where Start got no further.
 	device *device
@@ -53,7 +53,7 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 	return []kernel.PluginName{platform.PluginName, metronome.PluginName}
 }
 
-// Init declares the required InstanceSocket, installs the Device, empty
+// Init declares the required BackendSocket, installs the Device, empty
 // until Start, with its stopwatches made from metronome's Clock, installs
 // Tasks, and subscribes to RenderEvent and platform's
 // window events, the Subs kept in the Handlers resource, and to its own
@@ -61,7 +61,7 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 // type than *Config is a composition error, and panics.
 func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	p.config = *kernel.PluginConfigOrDefault[Config](config)
-	p.instanceSocket = configurator.DeclareExclusiveSocket[InstanceSocket](false)
+	p.backendSocket = configurator.DeclareExclusiveSocket[BackendSocket](false)
 	clock, _ := configurator.Resource[metronome.Clock]()
 	p.device = &device{
 		surfaceRequest:      p.config.Surface,
@@ -103,13 +103,13 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	return nil
 }
 
-// Start requests the adapter and the device from the bound InstanceSocket,
+// Start requests the adapter and the device from the bound BackendSocket,
 // with Config's limits or, when they are zero, DefaultLimits(), and keeps
 // both requests for a recovery to make again. Finding no adapter, or no
 // device, is an error.
 func (p *Plugin) Start(k *kernel.Kernel) error {
 	p.device.kernel = k
-	p.device.instance = p.instanceSocket.Get()
+	p.device.instance = p.backendSocket.Get()
 	p.device.adapterOptions = RequestAdapterOptions{
 		PowerPreference:      p.config.PowerPreference,
 		ForceFallbackAdapter: p.config.ForceFallbackAdapter,

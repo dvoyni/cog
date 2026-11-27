@@ -36,7 +36,7 @@ the fork's `main`. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md).
 
 ## Constraints
 
-- **One plugin, both halves.** It binds `gfx.InstanceSocket`,
+- **One plugin, both halves.** It binds `gfx.BackendSocket`,
   `platform.WindowsSocket` and `platform.InputSourceSocket`, because the
   windows it opens are the ones whose surfaces gfx draws to.
 - **gfx is not reworked for it.** gfx stays a mirror of wgpu with its own
@@ -61,7 +61,7 @@ the fork's `main`. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md).
 | Type | Kind | What it is |
 |---|---|---|
 | `Plugin` | plugin, `gogpu.NewPlugin()` | Listed after gfx and platform. Implements `kernel.Plugin` alone, and holds what its sockets share: the `HostLoop`, the windows open, and what the next `Pump` and `AppendChanges` report. Its `Init` binds the three sockets to the types below, each over the plugin, and pins gfx's surface tasks. |
-| `instance` | `gfx.InstanceSocket` | Starts the `HostLoop` at gfx's adapter request and stops it at its release. |
+| `instance` | `gfx.BackendSocket` | Starts the `HostLoop` at gfx's adapter request and stops it at its release. |
 | `windowSystem` | `platform.WindowsSocket` | Opens, changes and closes the `HostLoop`'s windows, and pumps their events. |
 | `inputSource` | `platform.InputSourceSocket` | Reports the input the window system's windows report to it. |
 | `Config` | config, `*gogpu.Config` | `Backend`, overriding gogpu's choice per OS; `MainWindow`, the window platform opens at start. |
@@ -431,7 +431,7 @@ what `HostLoop` or the OS requires:
 
 ([gfx: move shader preprocessor to implementation](https://github.com/dvoyni/cog/issues/709))
 
-- **Preprocessing is the backend's.** `InstanceSocket.PreprocessShader(files,
+- **Preprocessing is the backend's.** `BackendSocket.PreprocessShader(files,
   path, defines)` runs `plugins/gogpu/shader`'s engine over the `fs.FS` it is handed;
   gfx exposes it as `Device.PreprocessShader`. The seam types,
   `ShaderDefine`, `ShaderSourceLocation` and `ErrShaderSource`, stay in gfx. A

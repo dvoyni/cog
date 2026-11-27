@@ -23,7 +23,7 @@ const recoveryLogKey = "gfx: recovering the lost device"
 // in Start, before any job reads it. It has no exclusive operation, so a job
 // holding the read lock cannot assert it into an ExclusiveDevice.
 type device struct {
-	instance InstanceSocket
+	instance BackendSocket
 	// adapter and backend are what Start or the last recovery requested, nil
 	// where a request failed; adapterOptions and deviceDescriptor are what
 	// Start requested them with, and a recovery requests them with again.

@@ -50,7 +50,7 @@ type harness struct {
 	// joined into each CapturedEvent's out dependency. It is set before
 	// spawning.
 	readCapture func(event gfx.CapturedEvent, device gfx.Device)
-	// unbound leaves InstanceSocket without a binding.
+	// unbound leaves BackendSocket without a binding.
 	unbound bool
 	// wrapDevice, when set, wraps each device the recording adapter answers,
 	// for a test to change how calls behave around it. It is set before
@@ -115,12 +115,12 @@ type recordingTask struct {
 // wrappingInstance is the recording instance with each device it answers
 // wrapped by wrapDevice, through the adapter it answers.
 type wrappingInstance struct {
-	gfx.InstanceSocket
+	gfx.BackendSocket
 	wrapDevice func(device gfx.BackendDevice) gfx.BackendDevice
 }
 
 func (instance wrappingInstance) RequestAdapter(options gfx.RequestAdapterOptions) (gfx.BackendAdapter, error) {
-	adapter, err := instance.InstanceSocket.RequestAdapter(options)
+	adapter, err := instance.BackendSocket.RequestAdapter(options)
 	if err != nil {
 		return nil, err
 	}
@@ -174,9 +174,9 @@ func (h *harness) Init(c *kernel.Configurator, config any) error {
 	switch {
 	case h.unbound:
 	case h.wrapDevice != nil:
-		c.BindSocket[gfx.InstanceSocket](wrappingInstance{InstanceSocket: h.instance, wrapDevice: h.wrapDevice})
+		c.BindSocket[gfx.BackendSocket](wrappingInstance{BackendSocket: h.instance, wrapDevice: h.wrapDevice})
 	default:
-		c.BindSocket[gfx.InstanceSocket](h.instance)
+		c.BindSocket[gfx.BackendSocket](h.instance)
 	}
 	c.BindSocket[platform.WindowsSocket](h.windows)
 	h.handlers, h.handlersFound = c.Resource[gfx.Handlers]()

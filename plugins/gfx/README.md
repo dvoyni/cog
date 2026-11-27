@@ -58,7 +58,7 @@ What remains is on the [gfx map](https://github.com/dvoyni/cog/issues/608).
 
 ## Shape
 
-- **`InstanceSocket`** is the backend seam, wgpu's instance mirrored, taking
+- **`BackendSocket`** is the backend seam, wgpu's instance mirrored, taking
   exactly one binding; a kernel with none panics in `Spawn`.
 - **`Device`** is the GPU as every job shares it, read with
   `kernel.Read[gfx.Device]`: creating and releasing resources, writing and
@@ -119,14 +119,14 @@ What remains is on the [gfx map](https://github.com/dvoyni/cog/issues/608).
   the frame; `platform.WindowOpenedEvent` (`CreateSurface`),
   `platform.ResizeEvent` (`ResizeSurface`) and `platform.WindowClosedEvent`
   (`ReleaseSurface`), which keep a surface per window.
-- **Sockets it declares:** `InstanceSocket`, required and exclusive, for the
+- **Sockets it declares:** `BackendSocket`, required and exclusive, for the
   backend.
 - **Sockets it binds:** none.
 
 gfx requires platform and metronome, listed before it, and checks them
 with `Dependencies`: it makes its stopwatches from metronome's `Clock`. A plugin that reads `Handlers` or
 `Tasks` in its `Init` is listed after gfx: the backend's plugin, which binds
-`InstanceSocket` and pins the tasks its platform needs on the main thread,
+`BackendSocket` and pins the tasks its platform needs on the main thread,
 goes after gfx for that.
 
 ## Wiring
@@ -140,7 +140,7 @@ supervisor.Spawn(map[kernel.PluginName]any{
 	platform.NewPlugin(),
 	metronome.NewPlugin(),
 	gfx.NewPlugin(),
-	gogpu.NewPlugin(), // binds gfx.InstanceSocket and platform's seams, pins gfx.Tasks
+	gogpu.NewPlugin(), // binds gfx.BackendSocket and platform's seams, pins gfx.Tasks
 	game.NewPlugin(), // subscribes to gfx.DrawEvent
 )
 ```

@@ -22,7 +22,7 @@ const TimestampPeriod float32 = 1
 type CallKind uint16
 
 const (
-	// CallKindRequestAdapter is InstanceSocket.RequestAdapter, its Arguments
+	// CallKindRequestAdapter is BackendSocket.RequestAdapter, its Arguments
 	// the gfx.RequestAdapterOptions.
 	CallKindRequestAdapter CallKind = iota
 	// CallKindRequestDevice is BackendAdapter.RequestDevice, its Arguments
@@ -34,12 +34,12 @@ const (
 	CallKindReleaseDevice
 	// CallKindReleaseAdapter is BackendAdapter.Release, with no Arguments.
 	CallKindReleaseAdapter
-	// CallKindReleaseInstance is InstanceSocket.Release, with no Arguments.
+	// CallKindReleaseInstance is BackendSocket.Release, with no Arguments.
 	CallKindReleaseInstance
-	// CallKindCreateSurface is InstanceSocket.CreateSurface, its Arguments a
+	// CallKindCreateSurface is BackendSocket.CreateSurface, its Arguments a
 	// CreateSurfaceArguments.
 	CallKindCreateSurface
-	// CallKindReleaseSurface is InstanceSocket.ReleaseSurface, its Arguments
+	// CallKindReleaseSurface is BackendSocket.ReleaseSurface, its Arguments
 	// the platform.Window.
 	CallKindReleaseSurface
 	// CallKindSurfaceCapabilities is BackendDevice.SurfaceCapabilities, its
@@ -93,7 +93,7 @@ const (
 	// CallKindReleaseQuerySet is BackendDevice.ReleaseQuerySet, its Arguments
 	// the gfx.QuerySet.
 	CallKindReleaseQuerySet
-	// CallKindPreprocessShader is InstanceSocket.PreprocessShader, its
+	// CallKindPreprocessShader is BackendSocket.PreprocessShader, its
 	// Arguments a PreprocessShaderArguments.
 	CallKindPreprocessShader
 	// CallKindCreateShaderModule is BackendDevice.CreateShaderModule, its

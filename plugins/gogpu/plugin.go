@@ -16,7 +16,7 @@ import (
 // PluginName is the gogpu plugin's name.
 const PluginName kernel.PluginName = "gogpu"
 
-// Plugin is the gogpu plugin. Its Init binds gfx.InstanceSocket,
+// Plugin is the gogpu plugin. Its Init binds gfx.BackendSocket,
 // platform.WindowsSocket and platform.InputSourceSocket to an instance, a
 // window system and an input source of its own, each over the plugin, which
 // holds what they share: the instance starts the fork's HostLoop at gfx's
@@ -72,7 +72,7 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 	return []kernel.PluginName{gfx.PluginName, platform.PluginName}
 }
 
-// Init binds an instance to gfx.InstanceSocket, a window system to
+// Init binds an instance to gfx.BackendSocket, a window system to
 // platform.WindowsSocket and its input source to
 // platform.InputSourceSocket, and pins to the main thread gfx's tasks the
 // HostLoop or the OS requires there: acquire and present, which begin and end
@@ -83,7 +83,7 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 // composition error, and panics.
 func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	gogpuConfig := kernel.PluginConfigOrDefault[Config](config)
-	configurator.BindSocket[gfx.InstanceSocket](instance{plugin: p, backend: gogpuConfig.Backend})
+	configurator.BindSocket[gfx.BackendSocket](instance{plugin: p, backend: gogpuConfig.Backend})
 	configurator.BindSocket[platform.WindowsSocket](windowSystem{plugin: p})
 	configurator.BindSocket[platform.InputSourceSocket](inputSource{plugin: p})
 	tasks, _ := configurator.Resource[gfx.Tasks]()

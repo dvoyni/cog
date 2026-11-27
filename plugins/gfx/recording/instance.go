@@ -1,6 +1,6 @@
 // Package recording is the recording adapter: a gfx backend that records
 // every call gfx makes instead of drawing, for tests to assert on. A test's
-// own plugin binds it with configurator.BindSocket[gfx.InstanceSocket].
+// own plugin binds it with configurator.BindSocket[gfx.BackendSocket].
 //
 // It checks a fixed subset of what wgpu rejects (a handle missing at its
 // index, usage flags, write and copy alignment, pass state) and answers what
@@ -23,7 +23,7 @@ import (
 	"github.com/dvoyni/cog/plugins/platform"
 )
 
-// Instance is the adapter's gfx.InstanceSocket. It records under a mutex,
+// Instance is the adapter's gfx.BackendSocket. It records under a mutex,
 // since gfx calls it from many goroutines.
 type Instance struct {
 	mutex     sync.Mutex

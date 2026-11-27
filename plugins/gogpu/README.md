@@ -32,7 +32,7 @@ other device call or command answering an error naming it, and
 ## Shape
 
 - **`gogpu.NewPlugin()`**, listed after gfx and platform. It binds
-  `gfx.InstanceSocket`, `platform.WindowsSocket` and
+  `gfx.BackendSocket`, `platform.WindowsSocket` and
   `platform.InputSourceSocket`, and pins the gfx tasks its OS needs on the
   main thread.
 - **`gogpu.Config`:** `Backend`, overriding gogpu's choice on each OS, and
@@ -52,7 +52,7 @@ other device call or command answering an error naming it, and
 - **Events it subscribes to:** none.
 - **Sockets it declares:** none.
 - **Sockets it binds:** each with a private type of its own over the plugin,
-  never the plugin itself. `gfx.InstanceSocket`, with its instance: its
+  never the plugin itself. `gfx.BackendSocket`, with its instance: its
   `RequestAdapter` starts the `HostLoop`, and its `Release` stops it; its
   device's acquire and present begin and end each window's frame through
   the `HostLoop`.

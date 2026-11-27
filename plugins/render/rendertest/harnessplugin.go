@@ -29,9 +29,9 @@ func (harnessPlugin) Dependencies() []kernel.PluginName {
 	return []kernel.PluginName{render.PluginName}
 }
 
-// Init binds gfx's InstanceSocket to the recording instance and platform's
+// Init binds gfx's BackendSocket to the recording instance and platform's
 // WindowsSocket to the headless windows, but on the software adapter, where
-// gogpu's plugin binds its own; wraps gfx's InstanceSocket, whichever binds
+// gogpu's plugin binds its own; wraps gfx's BackendSocket, whichever binds
 // it, so its devices are a frame behind and answer reflection from binding
 // declarations, or check them against the adapter's; and subscribes to
 // openWindowEvent; to platform.WindowOpenedEvent, whose in, the plugin
@@ -42,11 +42,11 @@ func (harnessPlugin) Dependencies() []kernel.PluginName {
 // run, which LoseDevice waits for.
 func (p harnessPlugin) Init(configurator *kernel.Configurator, _ any) error {
 	if !p.harness.softwareAdapter {
-		configurator.BindSocket[gfx.InstanceSocket](p.harness.instance)
+		configurator.BindSocket[gfx.BackendSocket](p.harness.instance)
 		configurator.BindSocket[platform.WindowsSocket](p.harness.windows)
 	}
-	configurator.WrapSocket[gfx.InstanceSocket](func(bound gfx.InstanceSocket) gfx.InstanceSocket {
-		return harnessInstance{InstanceSocket: bound, harness: p.harness}
+	configurator.WrapSocket[gfx.BackendSocket](func(bound gfx.BackendSocket) gfx.BackendSocket {
+		return harnessInstance{BackendSocket: bound, harness: p.harness}
 	})
 	openWindow := configurator.RegisterTask1(func(k *kernel.Kernel, size platform.Size, manager kernel.Write[*platform.WindowManager]) kernel.NoResult {
 		p.harness.opened = manager.Get().Open(platform.WindowEntry{Size: size})

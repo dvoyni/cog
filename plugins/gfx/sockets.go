@@ -6,8 +6,8 @@ import (
 	"github.com/dvoyni/cog/plugins/platform"
 )
 
-// InstanceSocket is the backend seam, wgpu's instance mirrored: exactly one
-// plugin binds it in its Init with configurator.BindSocket[gfx.InstanceSocket],
+// BackendSocket is the backend seam, wgpu's instance mirrored: exactly one
+// plugin binds it in its Init with configurator.BindSocket[gfx.BackendSocket],
 // gogpu or the headless recording adapter, and a kernel with none panics in
 // Spawn. gfx calls it from Start on, from whichever worker runs the job: it
 // pins nothing, and a backend whose platform wants the surface calls, or the
@@ -18,7 +18,7 @@ import (
 // backend the handle to store its object at Index. Descriptors and recording
 // calls reach the backend as gfx's own, handles included, so nothing is
 // translated.
-type InstanceSocket interface {
+type BackendSocket interface {
 	// RequestAdapter answers the adapter options select.
 	RequestAdapter(options RequestAdapterOptions) (BackendAdapter, error)
 	// CreateSurface creates window's surface from its native handle, from a

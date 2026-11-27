@@ -13,7 +13,7 @@ import (
 	"github.com/gogpu/wgpu"
 )
 
-// instance is the plugin's gfx.InstanceSocket: it starts the fork's HostLoop
+// instance is the plugin's gfx.BackendSocket: it starts the fork's HostLoop
 // at gfx's adapter request, and stops it at gfx's release of the instance.
 type instance struct {
 	// plugin holds the HostLoop and the windows the instance shares with the

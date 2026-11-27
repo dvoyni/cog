@@ -12,13 +12,13 @@ import (
 // harnessAdapter, and each shader it preprocesses is noted with the binding
 // declaration beside it.
 type harnessInstance struct {
-	gfx.InstanceSocket
+	gfx.BackendSocket
 	harness *Harness
 }
 
 // RequestAdapter answers the wrapped instance's adapter, wrapped.
 func (i harnessInstance) RequestAdapter(options gfx.RequestAdapterOptions) (gfx.BackendAdapter, error) {
-	adapter, err := i.InstanceSocket.RequestAdapter(options)
+	adapter, err := i.BackendSocket.RequestAdapter(options)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +33,7 @@ func (i harnessInstance) RequestAdapter(options gfx.RequestAdapterOptions) (gfx.
 // its defines, so the module made from it answers its reflection from the
 // declaration beside it.
 func (i harnessInstance) PreprocessShader(files fs.FS, path string, defines []gfx.ShaderDefine) (string, error) {
-	if _, err := i.InstanceSocket.PreprocessShader(files, path, defines); err != nil {
+	if _, err := i.BackendSocket.PreprocessShader(files, path, defines); err != nil {
 		return "", err
 	}
 	text, err := shader.Preprocess(files, path, defines)

@@ -94,7 +94,7 @@ records nothing, for benchmarks and allocation gates. The vocabulary is in [`CON
 
 | Type | Kind | What it is |
 |---|---|---|
-| `InstanceSocket` | required exclusive socket | The backend seam, wgpu's instance mirrored: `RequestAdapter`, `CreateSurface`, `ReleaseSurface`. A kernel with none panics in `Spawn`. `BackendAdapter` and `BackendDevice` are what it answers. |
+| `BackendSocket` | required exclusive socket | The backend seam, wgpu's instance mirrored: `RequestAdapter`, `CreateSurface`, `ReleaseSurface`. A kernel with none panics in `Spawn`. `BackendAdapter` and `BackendDevice` are what it answers. |
 | `Device` | interface resource, `kernel.Read[gfx.Device]` | The GPU as every job shares it: creating, releasing, writing, mapping, recording and submitting. |
 | `ExclusiveDevice` | no resource | `Device` plus what no job may overlap: `WaitIdle`, `RequestSurface`. `ElevateDeviceAccess(kernel.Write[Device])` answers it. |
 | `Handlers` | resource | The `kernel.Sub` of each handler: `Draw` on `RenderEvent`, `CreateSurface`, `ResizeSurface` and `ReleaseSurface` on platform's window events. |
@@ -117,7 +117,7 @@ device's release and the recovery among them, for a backend to pin.
 ([gfx's shape in today's kernel](https://github.com/dvoyni/cog/issues/659),
 [The interface listing](https://github.com/dvoyni/cog/issues/662))
 
-- **One socket.** `InstanceSocket` is exclusive and required. gogpu binds
+- **One socket.** `BackendSocket` is exclusive and required. gogpu binds
   it; so does the recording adapter, in a test's plugin.
 - **gfx owns the handle tables.** It allocates each handle, checks its
   generation, and keeps each object's descriptor, slices deep-copied. It hands
@@ -210,7 +210,7 @@ device's release and the recovery among them, for a backend to pin.
   takes final WGSL. Hot reload is deferred.
 - **Preprocessing is the backend's,** since the backend owns the WGSL it
   accepts. `Device.PreprocessShader(files, path, defines)` passes the call to
-  `InstanceSocket.PreprocessShader`; the gogpu plugin runs v1's preprocessor,
+  `BackendSocket.PreprocessShader`; the gogpu plugin runs v1's preprocessor,
   `plugins/gogpu/shader` (`#include`, `#define`, `#const`, `#if`), and the recording
   adapter answers the file's text as it is. A task calls it holding
   `kernel.Read[Device]` and `kernel.Read[platform.FS]`, then
@@ -527,7 +527,7 @@ device's release and the recovery among them, for a backend to pin.
 ([The headless recording adapter](https://github.com/dvoyni/cog/issues/670))
 
 - **An adapter, not a plugin:** `recording.NewInstance()` answers an
-  `InstanceSocket` the test's own plugin binds. The test reads
+  `BackendSocket` the test's own plugin binds. The test reads
   `instance.Recording()` once the kernel has settled.
 - **It records what reaches the socket,** as typed values: every create and
   release with its handle and descriptor, writes and maps, surface calls with
@@ -593,7 +593,7 @@ was rendered, which the backend records
 What the backend must do, and what the fork must fix first, are carried by
 the [gogpu map](https://github.com/dvoyni/cog/issues/611):
 
-- binding `InstanceSocket`; mapping its errors onto `ErrDeviceLost` and
+- binding `BackendSocket`; mapping its errors onto `ErrDeviceLost` and
   `AcquireStatus`; a device `Release` that releases every object it still
   holds and drops a framebuffer acquired and not presented; a captured
   acquire's framebuffer a copy source, drawn offscreen where the surface's

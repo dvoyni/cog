@@ -39,7 +39,7 @@ parallel jobs.
 ## Concepts
 
 ```
- gogpu.NewPlugin(), or recording.NewInstance() ──► InstanceSocket
+ gogpu.NewPlugin(), or recording.NewInstance() ──► BackendSocket
                                                         │
  metronome: RenderEvent, each render beat ───────►     gfx     ◄─── platform: windows,
                                                         │            native handles, sizes
@@ -54,7 +54,7 @@ parallel jobs.
 |---|---|
 | `Plugin` | The kernel plugin, from `NewPlugin()`. |
 | `Config` | gfx's part of the kernel's config: the adapter, features and limits to request, and the surface request. |
-| `InstanceSocket` | The backend seam, wgpu's instance mirrored. Required and exclusive: exactly one plugin binds it. |
+| `BackendSocket` | The backend seam, wgpu's instance mirrored. Required and exclusive: exactly one plugin binds it. |
 | `Device` | The resource of the GPU every job shares, read with `kernel.Read[gfx.Device]`. Every GPU operation is one of its methods. |
 | `ExclusiveDevice` | The `Device` one job holds alone, from `ElevateDeviceAccess(kernel.Write[gfx.Device])`: `WaitIdle` and `RequestSurface`. No resource. |
 | `Buffer`, `Texture`, `TextureView`, `Sampler`, `ShaderModule`, `BindGroupLayout`, `BindGroup`, `PipelineLayout`, `RenderPipeline`, `ComputePipeline`, `QuerySet` | Handles: pointer-free, comparable, generational names of GPU resources. Zero is none. |
@@ -355,7 +355,7 @@ is what matters, not its `Dependencies`, which only check it.
 
 **The lifecycle:**
 
-- **`Init`** declares `InstanceSocket`, installs the `Device`, empty until
+- **`Init`** declares `BackendSocket`, installs the `Device`, empty until
   `Start`, the `Tasks` and the `Handlers`, and subscribes to `RenderEvent` and
   platform's window events. It makes `DrawEvent`'s stopwatches from
   metronome's `Clock` resource, so gfx times frames by whatever clock
@@ -712,7 +712,7 @@ module, err := device.Get().CreateShaderModule(gfx.ShaderModuleDescriptor{Label:
 ```
 
 The backend handles the directives: gfx passes the call to
-`InstanceSocket.PreprocessShader`. On gogpu they are those of
+`BackendSocket.PreprocessShader`. On gogpu they are those of
 [`plugins/gogpu/shader`](../../gogpu/shader):
 
 ```wgsl
@@ -1305,7 +1305,7 @@ of these ends the process, which suits development. A shipped game gives the
 supervisor a `LogHandler` of its own; see the kernel guide's
 [Errors and logging](../../../kernel/docs/README.md#errors-and-logging).
 
-**Composition errors panic** at `Spawn`: no `InstanceSocket` bound, or two;
+**Composition errors panic** at `Spawn`: no `BackendSocket` bound, or two;
 gfx listed before platform or metronome; a config of another type than
 `*gfx.Config`.
 
@@ -1329,7 +1329,7 @@ func (*testBackend) Name() kernel.PluginName          { return "test backend" }
 func (*testBackend) Dependencies() []kernel.PluginName { return nil }
 
 func (b *testBackend) Init(c *kernel.Configurator, _ any) error {
-	c.BindSocket[gfx.InstanceSocket](b.instance)
+	c.BindSocket[gfx.BackendSocket](b.instance)
 	c.BindSocket[platform.WindowsSocket](b.windows)
 	return nil
 }
@@ -1515,13 +1515,13 @@ Test what records in parallel under `go test -race`.
 
 ## Implementing a backend
 
-A backend is a plugin that binds `InstanceSocket` in its `Init`, listed after
+A backend is a plugin that binds `BackendSocket` in its `Init`, listed after
 gfx, as gogpu does. Exactly one binding is allowed. gfx calls it from `Start`
 on, from whichever worker runs the job.
 
 ```go
 func (p *Plugin) Init(c *kernel.Configurator, _ any) error {
-	c.BindSocket[gfx.InstanceSocket](instance{plugin: p})
+	c.BindSocket[gfx.BackendSocket](instance{plugin: p})
 	// Pin the tasks whose backend calls this platform runs on the main thread.
 	tasks, _ := c.Resource[gfx.Tasks]()
 	c.PinToMainThread(tasks.AcquireFramebuffers)
@@ -1532,7 +1532,7 @@ func (p *Plugin) Init(c *kernel.Configurator, _ any) error {
 
 The seam is wgpu's, in gfx's types:
 
-- **`InstanceSocket`**: `RequestAdapter`, `CreateSurface` and
+- **`BackendSocket`**: `RequestAdapter`, `CreateSurface` and
   `ReleaseSurface` from a window's native handle, `PreprocessShader`, and
   `Release`. A window whose native handle is zero is a headless one: its
   surface takes no window.

@@ -14,14 +14,14 @@ import (
 	"github.com/dvoyni/cog/plugins/platform"
 )
 
-func TestSpawnWithoutInstanceSocketPanics(t *testing.T) {
+func TestSpawnWithoutBackendSocketPanics(t *testing.T) {
 	h := newHarness(t)
 	h.unbound = true
 	defer func() {
 		recovered := recover()
 		message, _ := recovered.(string)
-		if !strings.Contains(message, "gfx.InstanceSocket") || !strings.Contains(message, "has no binding") {
-			t.Fatalf("Spawn panicked with %v, want the kernel's panic for an unbound gfx.InstanceSocket", recovered)
+		if !strings.Contains(message, "gfx.BackendSocket") || !strings.Contains(message, "has no binding") {
+			t.Fatalf("Spawn panicked with %v, want the kernel's panic for an unbound gfx.BackendSocket", recovered)
 		}
 	}()
 	h.spawn(nil)
