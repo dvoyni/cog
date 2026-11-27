@@ -79,6 +79,13 @@ type Plugin struct {
 	config Config
 	// mixer is what the device's player pulls.
 	mixer mixer
+	// clips is the clip table, the flush side's alone: a start's ClipID is
+	// resolved through it when Emit stages the start, so the device thread
+	// never reads it.
+	clips map[sfx.ClipID]sfx.PreparedClip
+	// releases are the destroyed clips held until the mixer has passed the
+	// changes that destroyed them.
+	releases []clipRelease
 	// status is the Device as it is now: the device goroutine writes it, and
 	// the flush reads it with no notice when it changes.
 	status atomic.Pointer[sfx.Device]
@@ -98,10 +105,10 @@ func (*Plugin) Name() kernel.PluginName { return PluginName }
 // resource.
 func (*Plugin) Dependencies() []kernel.PluginName { return nil }
 
-// Init reads the config, fills in its defaults, sets the Device not ready
-// and named "otosound", and binds sfx.BackendSocket to the backend. It opens
-// nothing, so it never fails on a device: sfx's Start opens it, through the
-// backend's Voices. A config of another type than *Config is a composition
+// Init reads the config, fills in its defaults, makes the clip table, sets
+// the Device not ready and named "otosound", and binds sfx.BackendSocket to
+// the backend. It opens nothing, so it never fails on a device: sfx's Start
+// opens it, through the backend's Voices. A config of another type than *Config is a composition
 // error, and panics, as does a field out of its range: a negative
 // SampleRate, BufferSize, RingDepth, ReadAhead, RefillWait or DeviceRetry,
 // or a DecodedClipLimit below -2, which names no tier.
@@ -125,6 +132,7 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 		RefillWait:       cmp.Or(givenConfig.RefillWait, defaultRefillWait),
 		DeviceRetry:      cmp.Or(givenConfig.DeviceRetry, defaultDeviceRetry),
 	}
+	p.clips = make(map[sfx.ClipID]sfx.PreparedClip)
 	p.status.Store(&sfx.Device{Name: string(PluginName)})
 	configurator.BindSocket[sfx.BackendSocket](backend{plugin: p})
 	return nil
