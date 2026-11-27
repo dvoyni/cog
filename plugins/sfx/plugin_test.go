@@ -58,14 +58,14 @@ func play(h *sfxtest.Harness) sfx.Voice {
 func readLiveVoice(h *sfxtest.Harness, voice sfx.Voice) (sfx.VoiceEntry, bool) {
 	var entry sfx.VoiceEntry
 	var live bool
-	h.Read(func(voices sfx.LiveVoices, _ sfx.ClipTable) { entry, live = voices.Info(voice) })
+	h.Read(func(voices sfx.LiveVoices, _ sfx.ClipTable, _ sfx.BusVolumes) { entry, live = voices.Info(voice) })
 	return entry, live
 }
 
 // readLiveCount answers how many voices the view holds.
 func readLiveCount(h *sfxtest.Harness) int {
 	var count int
-	h.Read(func(voices sfx.LiveVoices, _ sfx.ClipTable) { count = voices.Len() })
+	h.Read(func(voices sfx.LiveVoices, _ sfx.ClipTable, _ sfx.BusVolumes) { count = voices.Len() })
 	return count
 }
 
@@ -186,7 +186,7 @@ func TestAOneShotUnderHeadlessEndsOnTheFlushItsDurationSaysItShould(t *testing.T
 		if !live {
 			t.Fatalf("%v was gone after flush %d, and the clip is %v long", voice, step, clipDuration)
 		}
-		want := sfx.VoiceEntry{Voice: voice, Path: clipPath, Playhead: time.Duration(step) * sfxtest.StepInterval, Duration: clipDuration}
+		want := sfx.VoiceEntry{Voice: voice, Path: clipPath, Bus: sfx.Master, Playhead: time.Duration(step) * sfxtest.StepInterval, Duration: clipDuration, Audibility: 1}
 		if entry != want {
 			t.Fatalf("after flush %d the view holds %+v, want %+v", step, entry, want)
 		}
@@ -335,7 +335,7 @@ func TestTheViewHoldsEveryLiveVoiceWithItsPath(t *testing.T) {
 	})
 	h.Step()
 
-	h.Read(func(voices sfx.LiveVoices, _ sfx.ClipTable) {
+	h.Read(func(voices sfx.LiveVoices, _ sfx.ClipTable, _ sfx.BusVolumes) {
 		var held []sfx.Voice
 		for entry := range voices.All() {
 			if entry.Path != clipPath {

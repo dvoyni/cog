@@ -48,3 +48,11 @@ type LiveVoices = liveVoices
 // mutators, and the flush alone writes it. A path is read once, at the flush
 // that first names it, and the clip shared by every voice that plays it.
 type ClipTable = clipTable
+
+// BusVolumes is the resource of each bus's volume, as of the last flush: read
+// it under kernel.Read[sfx.BusVolumes], as a settings screen draws its
+// sliders. It has no mutators, and the flush alone writes it, from the
+// volumes SetBus recorded, every bus at unity before any. sfx folds each
+// voice's bus volume into its gains before the flush's changes leave, so a
+// backend never learns a bus exists.
+type BusVolumes = busVolumes

@@ -8,7 +8,9 @@
 // and hands back the voice's handle at once. It schedules Tasks.Flush on each
 // update beat, after its recorders, which applies what was recorded, advances
 // every playhead and publishes a VoiceEndedEvent for each voice that ended.
-// It reads the live voices from LiveVoices. Package sfxtest runs sfx in a
+// It groups voices on buses it declares, under Master, moving each bus's
+// volume with SetBus and reading it back from BusVolumes. It reads the live
+// voices from LiveVoices. Package sfxtest runs sfx in a
 // real kernel over the headless backend, for tests.
 //
 // BackendSocket is the seam. A backend is told how many slots exist once,

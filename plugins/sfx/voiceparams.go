@@ -18,13 +18,15 @@ type VoiceParams struct {
 	Paused bool
 }
 
-// makeCentredVoiceParams answers the params of a voice heard centred, at
-// unity and at its clip's own rate: W3C's equal-power panning at azimuth 0,
+// makeCentredVoiceParams answers the params of a voice heard centred at
+// audibility, at its clip's own rate: W3C's equal-power panning at azimuth 0,
 // which leaves a stereo clip on its own diagonal and puts a mono clip at
-// cos(π/4) in each ear rather than unity in both.
-func makeCentredVoiceParams(channels int) VoiceParams {
+// cos(π/4) in each ear rather than unity in both, the matrix then scaled by
+// audibility.
+func makeCentredVoiceParams(channels int, audibility float32) VoiceParams {
 	if channels >= 2 {
-		return VoiceParams{Gains: [2][2]float32{{1, 0}, {0, 1}}, Rate: 1}
+		return VoiceParams{Gains: [2][2]float32{{audibility, 0}, {0, audibility}}, Rate: 1}
 	}
-	return VoiceParams{Gains: [2][2]float32{{math.Sqrt2 / 2, math.Sqrt2 / 2}}, Rate: 1}
+	side := math.Sqrt2 / 2 * audibility
+	return VoiceParams{Gains: [2][2]float32{{side, side}}, Rate: 1}
 }

@@ -12,13 +12,17 @@ import (
 type queue struct{ state *queueState }
 
 // makeQueue answers an empty queue over a table of maxVoices slots, every one
-// free.
-func makeQueue(maxVoices int) queue {
+// free, and maxBuses buses.
+func makeQueue(maxVoices, maxBuses int) queue {
 	freeSlots := make([]uint32, maxVoices)
 	for i := range freeSlots {
 		freeSlots[i] = uint32(maxVoices - 1 - i)
 	}
-	return queue{state: &queueState{generations: make([]uint32, maxVoices), freeSlots: freeSlots}}
+	return queue{state: &queueState{
+		generations:   make([]uint32, maxVoices),
+		freeSlots:     freeSlots,
+		busVolumeSets: make([]m.Maybe[float32], maxBuses),
+	}}
 }
 
 // Play records a play of the clip at path, from offset into it, and answers
@@ -32,7 +36,8 @@ func makeQueue(maxVoices int) queue {
 // in the flush that applies it, never having been live.
 func (q queue) Play(path string, offset time.Duration, options VoiceOptions) Voice {
 	voice := q.mintVoice()
-	q.state.operations = append(q.state.operations, operation{kind: operationPlay, voice: voice, path: path, offset: offset, options: options})
+	bus := options.Bus.Or(Master).resolve(len(q.state.busVolumeSets))
+	q.state.operations = append(q.state.operations, operation{kind: operationPlay, voice: voice, path: path, offset: offset, options: options, bus: bus})
 	return voice
 }
 
@@ -59,6 +64,24 @@ func (q queue) Stop(voice Voice) {
 // applies a pause advances no playhead. It reaches the backend as a
 // VoiceParams.Paused update of every live voice.
 func (q queue) SetPaused(paused bool) { q.state.paused = m.Some(paused) }
+
+// SetBus records bus's linear volume, 1 being unity, which the flush folds
+// into the gains of every voice on it. It is coalesced, the last value
+// recorded before a flush winning, since every voice on the bus reads it at
+// the one moment the flush computes: a slider dragged through a hundred
+// values before one flush costs one. A bus outside Config.MaxBuses is
+// Master.
+func (q queue) SetBus(bus Bus, volume float32) {
+	q.state.busVolumeSets[bus.resolve(len(q.state.busVolumeSets))] = m.Some(volume)
+}
+
+// StopBus records the end of every voice on bus, each ending with
+// ReasonStopped, as a Stop naming it would; Master stops every voice. It is
+// ordered rather than coalesced: a play recorded before it is stopped, and
+// one recorded after it is not. A bus outside Config.MaxBuses is Master.
+func (q queue) StopBus(bus Bus) {
+	q.state.operations = append(q.state.operations, operation{kind: operationStopBus, bus: bus.resolve(len(q.state.busVolumeSets))})
+}
 
 // mintVoice answers the next handle: a free slot's next generation, or, at a
 // full table, a handle of the index past the last slot, which addresses
@@ -91,6 +114,10 @@ type queueState struct {
 	// unslottedCount counts the handles minted at a full table, each the
 	// generation of the next, so no two compare equal.
 	unslottedCount uint32
+	// busVolumeSets is each bus's volume SetBus recorded since the last
+	// flush, the last value winning, indexed by a resolved bus, and absent
+	// for a bus no SetBus named.
+	busVolumeSets []m.Maybe[float32]
 }
 
 // operationKind is what one recorded operation does.
@@ -101,6 +128,8 @@ const (
 	operationPlay operationKind = iota
 	// operationStop ends one.
 	operationStop
+	// operationStopBus ends every voice on a bus.
+	operationStopBus
 )
 
 // operation is one recorded operation. An operation is a delta and may not be
@@ -114,4 +143,6 @@ type operation struct {
 	path    string
 	offset  time.Duration
 	options VoiceOptions
+	// bus is the resolved bus a play's voice plays on, or a StopBus stops.
+	bus Bus
 }

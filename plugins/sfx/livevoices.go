@@ -24,14 +24,14 @@ func (v liveVoices) Info(voice Voice) (VoiceEntry, bool) {
 	if slot == nil {
 		return VoiceEntry{}, false
 	}
-	return VoiceEntry{Voice: slot.voice, Path: slot.path, Playhead: slot.playhead, Duration: slot.duration, Paused: slot.suspended(v.table.paused)}, true
+	return VoiceEntry{Voice: slot.voice, Path: slot.path, Bus: slot.bus, Playhead: slot.playhead, Duration: slot.duration, Audibility: slot.busGain, Paused: slot.suspended(v.table.paused)}, true
 }
 
 // All yields every live voice, in slot order.
 func (v liveVoices) All() iter.Seq[VoiceEntry] {
 	return func(yield func(VoiceEntry) bool) {
 		for index := range v.table.slots {
-			if slot := &v.table.slots[index]; slot.state.live() && !yield(VoiceEntry{Voice: slot.voice, Path: slot.path, Playhead: slot.playhead, Duration: slot.duration, Paused: slot.suspended(v.table.paused)}) {
+			if slot := &v.table.slots[index]; slot.state.live() && !yield(VoiceEntry{Voice: slot.voice, Path: slot.path, Bus: slot.bus, Playhead: slot.playhead, Duration: slot.duration, Audibility: slot.busGain, Paused: slot.suspended(v.table.paused)}) {
 				return
 			}
 		}
@@ -79,6 +79,7 @@ func (v liveVoices) start(play operation, clip clipEntry, endings *[]VoiceEndedE
 		state:    state,
 		voice:    play.voice,
 		path:     play.path,
+		bus:      play.bus,
 		offset:   play.offset,
 		options:  play.options,
 		playhead: play.offset,
@@ -95,6 +96,17 @@ func (v liveVoices) start(play operation, clip clipEntry, endings *[]VoiceEndedE
 func (v liveVoices) stop(voice Voice, endings *[]VoiceEndedEvent) {
 	if slot := v.findSlot(voice); slot != nil {
 		v.end(slot, ReasonStopped, endings)
+	}
+}
+
+// stopBus ends every live voice on bus with ReasonStopped, as a Stop naming
+// each would, and every live voice when bus is Master, since every bus sits
+// directly under it.
+func (v liveVoices) stopBus(bus Bus, endings *[]VoiceEndedEvent) {
+	for index := range v.table.slots {
+		if slot := &v.table.slots[index]; slot.state.live() && (bus == Master || slot.bus == bus) {
+			v.end(slot, ReasonStopped, endings)
+		}
 	}
 }
 
@@ -133,21 +145,31 @@ func (v liveVoices) advance(delta time.Duration, endings *[]VoiceEndedEvent) {
 	}
 }
 
-// collect fills changes from the table, a start for every voice started in
-// this flush, an update for every voice the backend holds whose params
-// moved, and a stop for every voice that ended while the backend held it,
-// and empties the slots of the stopped. A voice played and ended inside
-// one flush appears in neither: it was never audible, so there is nothing to
-// start and nothing to stop.
-func (v liveVoices) collect(changes *FlushChanges) {
+// collect folds each live voice's bus volume from buses into its gain, and
+// fills changes from the table: a start for every voice started in this
+// flush, an update for every voice the backend holds whose fold moved or
+// whose pause changed, and a stop for every voice that ended while the
+// backend held it, emptying the slots of the stopped. The fold is the whole
+// of what a bus is: sfx decides the volume here, above the seam, and no bus
+// reaches the backend. A SetBus costs at most MaxVoices updates, and a fold
+// that did not move is no change, so it costs none. A voice played and ended
+// inside one flush appears in neither the starts nor the stops: it was never
+// audible, so there is nothing to start and nothing to stop.
+func (v liveVoices) collect(changes *FlushChanges, buses busVolumes) {
 	for index := range v.table.slots {
 		slot := &v.table.slots[index]
+		moved := false
+		if slot.state.live() {
+			gain := buses.volumes[slot.bus]
+			moved = gain != slot.busGain
+			slot.busGain = gain
+		}
 		switch slot.state {
 		case slotStopping:
 			changes.Stops = append(changes.Stops, VoiceSlot(index))
 			*slot = tableSlot{}
 		case slotStarting:
-			params := makeCentredVoiceParams(slot.channels)
+			params := makeCentredVoiceParams(slot.channels, slot.busGain)
 			params.Paused = slot.suspended(v.table.paused)
 			changes.Starts = append(changes.Starts, VoiceStart{
 				Slot:   VoiceSlot(index),
@@ -157,8 +179,8 @@ func (v liveVoices) collect(changes *FlushChanges) {
 			})
 			slot.state = slotSounding
 		case slotSounding:
-			if slot.owesUpdate {
-				params := makeCentredVoiceParams(slot.channels)
+			if moved || slot.owesUpdate {
+				params := makeCentredVoiceParams(slot.channels, slot.busGain)
 				params.Paused = slot.suspended(v.table.paused)
 				changes.Updates = append(changes.Updates, VoiceUpdate{Slot: VoiceSlot(index), Params: params})
 				slot.owesUpdate = false
@@ -234,6 +256,10 @@ type tableSlot struct {
 	state slotState
 	voice Voice
 	path  string
+	bus   Bus
+	// busGain is the volume of the voice's bus as of the last fold, zero on a
+	// slot the fold has not reached yet.
+	busGain float32
 	// offset is where in the clip the voice begins, and playhead where it is.
 	offset   time.Duration
 	playhead time.Duration
