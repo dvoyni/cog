@@ -18,7 +18,7 @@ the v1 tickets it came from as provenance, and the map's tickets that changed
 it. *Further Notes* ends with every change from v1 and the ticket that decided
 it. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md).
 
-Status: designed. Nothing is built.
+Status: being built. The seam and the headless backend are built, from [sfx: the seam and the headless backend](https://github.com/dvoyni/cog/issues/953); the rest is designed, not yet built.
 
 ## Problem Statement
 
